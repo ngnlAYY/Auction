@@ -7,6 +7,8 @@ use super::{ApplicationFuture, RequestHash};
 
 /// Admin 交付列表允许的最大单页大小。
 pub const MAX_DELIVERY_ADMIN_PAGE_SIZE: i64 = 100;
+/// Admin 交付列表允许的最大偏移，与管理拍卖、标的列表保持相同深分页上限。
+pub const MAX_DELIVERY_ADMIN_OFFSET: i64 = 100_000;
 /// Admin 交付投影允许显示的最大 COD 整数；与旧版 JSON 安全整数边界一致。
 pub const MAX_DELIVERY_COD: i64 = 9_007_199_254_740_991;
 
@@ -41,6 +43,7 @@ impl DeliveryAdminListRequest {
         self.limit > 0
             && self.limit <= MAX_DELIVERY_ADMIN_PAGE_SIZE
             && self.offset >= 0
+            && self.offset <= MAX_DELIVERY_ADMIN_OFFSET
             && self.status.as_ref().is_none_or(|status| valid_delivery_status(status))
     }
 }

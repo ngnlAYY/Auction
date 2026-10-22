@@ -41,6 +41,8 @@ token 摘要绑定当前 actor/secret，Public 会话不受影响；多实例轮
 PostgreSQL runtime 服务组合应用端口、TOML 原子替换和 durable 命令账本，保留 fingerprint fence 与 `restart_required`。
 就绪前恢复 pending/unknown 命令：任何恢复错误（含未知结果和需人工核对）都阻断启动，不得带旧安全快照监听；
 恢复后文件指纹若不同于已加载配置，必须重新部署重启，不能用旧监听/策略快照报告新配置生效，保存不热改当前进程。
+装配 TOML 存储时只传入 OTLP headers 是否配置的布尔上下文；不持有头内容，仍有 `admin_otlp_headers` 时拒绝保存关闭 tracing，
+避免当前部署快照下保存后重启失败。先移除敏感字段并重启 Admin，再保存关闭配置。
 共享业务区块、六组 `operations`、重启范围及默认值见[配置说明](ops/config/README.md#runtime-共享与重启)；
 新经济模板只影响后续拍卖，人工提前开放/结算由启动快照和事务内策略共同约束。
 装备来源适配器使用启动时唯一 active `mail_cookie`，无数据库记录时才兼容敏感文件单 Cookie，远端登录失效后标记失效、不自动切换。

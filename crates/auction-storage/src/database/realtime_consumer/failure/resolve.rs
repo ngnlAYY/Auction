@@ -1,4 +1,4 @@
-//! Realtime consumer failure 的 replay 收口事务。
+//! Realtime consumer failure 的 replay 收口；连接入口保留 owner 原物理会话，事务入口供 Admin 原子追加复用。
 
 use auction_application::ApplicationError;
 use chrono::{DateTime, Utc};
@@ -20,7 +20,7 @@ pub(crate) async fn resolve_failure_postgres(
 ) -> Result<(), ApplicationError> {
     let mut transaction =
         connection.begin().await.map_err(|_| storage_error("打开 PostgreSQL 实时重放事务失败"))?;
-    let result = resolve_failure_postgres_inner(
+    let result = resolve_failure_postgres_tx(
         &mut transaction,
         consumer_key,
         stream_key,
@@ -41,8 +41,10 @@ pub(crate) async fn resolve_failure_postgres(
     }
 }
 
+/// 复用调用方事务，先锁 failure 再锁对应 consumer 游标；只越过原事件，不跳到替代事件。
+/// 重复绑定同一 replay 仍复核游标边界，可收口旧版仅标记 resolved、未推进游标的窗口。
 #[cfg(feature = "postgres")]
-async fn resolve_failure_postgres_inner(
+pub(crate) async fn resolve_failure_postgres_tx(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     consumer_key: &str,
     stream_key: &str,
@@ -81,13 +83,10 @@ async fn resolve_failure_postgres_inner(
     let already_resolved: Option<DateTime<Utc>> = failure
         .try_get("resolved_at")
         .map_err(|_| storage_error("读取 PostgreSQL 失败解决时间失败"))?;
-    if let Some(existing_replay) = existing_replay {
-        if existing_replay != replay_event_id {
-            return Err(storage_error("PostgreSQL 实时失败记录已有其他重放事件"));
-        }
-        return Ok(());
+    if existing_replay.is_some_and(|existing_replay| existing_replay != replay_event_id) {
+        return Err(storage_error("PostgreSQL 实时失败记录已有其他重放事件"));
     }
-    if already_resolved.is_some() {
+    if existing_replay.is_none() && already_resolved.is_some() {
         return Err(storage_error("PostgreSQL 实时失败记录已经通过正常确认解决"));
     }
     let replay = sqlx::query(
@@ -114,6 +113,19 @@ async fn resolve_failure_postgres_inner(
     {
         return Err(storage_error("PostgreSQL 重放事件必须位于同一 stream 的后续序号"));
     }
+    // Admin 不持有 consumer 的 session advisory lock。先物化游标再锁行，避免不存在的
+    // 游标与正在首次确认的 owner 并发插入时，以陈旧的零值覆盖已提交的消费进度。
+    sqlx::query(
+        "INSERT INTO public.realtime_consumer_offsets
+            (consumer_key, stream_key, last_sequence, updated_at)
+         VALUES ($1, $2, 0, CURRENT_TIMESTAMP)
+         ON CONFLICT (consumer_key, stream_key) DO NOTHING",
+    )
+    .bind(consumer_key)
+    .bind(stream_key)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|_| storage_error("初始化 PostgreSQL 重放消费游标失败"))?;
     let current = sqlx::query_scalar::<_, i64>(
         "SELECT last_sequence
          FROM public.realtime_consumer_offsets
@@ -122,10 +134,9 @@ async fn resolve_failure_postgres_inner(
     )
     .bind(consumer_key)
     .bind(stream_key)
-    .fetch_optional(&mut **transaction)
+    .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| storage_error("锁定 PostgreSQL 重放消费游标失败"))?
-    .unwrap_or(0);
+    .map_err(|_| storage_error("锁定 PostgreSQL 重放消费游标失败"))?;
     let predecessor = original_sequence
         .checked_sub(1)
         .ok_or_else(|| storage_error("PostgreSQL 原实时序号无效"))?;
@@ -134,11 +145,9 @@ async fn resolve_failure_postgres_inner(
     }
     if current == predecessor {
         sqlx::query(
-            "INSERT INTO public.realtime_consumer_offsets
-                (consumer_key, stream_key, last_sequence, updated_at)
-             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-             ON CONFLICT (consumer_key, stream_key) DO UPDATE
-             SET last_sequence = EXCLUDED.last_sequence, updated_at = CURRENT_TIMESTAMP",
+            "UPDATE public.realtime_consumer_offsets
+             SET last_sequence = $3, updated_at = CURRENT_TIMESTAMP
+             WHERE consumer_key = $1 AND stream_key = $2",
         )
         .bind(consumer_key)
         .bind(stream_key)
@@ -149,7 +158,7 @@ async fn resolve_failure_postgres_inner(
     }
     sqlx::query(
         "UPDATE public.realtime_failures
-         SET resolved_at = COALESCE(resolved_at, $3), replay_event_id = $4
+         SET resolved_at = COALESCE(resolved_at, GREATEST(failed_at, $3)), replay_event_id = $4
          WHERE consumer_key = $1 AND event_id = $2",
     )
     .bind(consumer_key)

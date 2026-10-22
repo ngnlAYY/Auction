@@ -60,6 +60,13 @@ pub(super) fn page() -> Element {
                         QueryWriteMode::Push,
                     );
                 },
+                on_page_clamp: move |next_page| {
+                    update_public_query_state(
+                        query_state_signal,
+                        |query| query.page = next_page,
+                        QueryWriteMode::Replace,
+                    );
+                },
             }
         },
     }
@@ -69,6 +76,7 @@ pub(super) fn page() -> Element {
 fn BlacklistTable(
     page: BlacklistPage,
     on_page_change: EventHandler<i64>,
+    on_page_clamp: EventHandler<i64>,
     on_page_size_change: EventHandler<i64>,
 ) -> Element {
     rsx! {
@@ -103,6 +111,7 @@ fn BlacklistTable(
                 label: t!("page-blacklist-title"),
                 max_offset: i64::from(i32::MAX),
                 on_page_change,
+                on_page_clamp,
                 on_page_size_change,
             }
         }

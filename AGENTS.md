@@ -145,7 +145,7 @@
   及邮件预算；`managed` 默认关闭。启用接管时另校验有效模板/排期一致。
 - runtime 保存后重启相应进程生效，不回写拍卖快照、任务游标或租约。MoogleMail transport、凭据、mailbox identity
   和全局启用仍由部署配置拥有；省略 `operations.mail` 保持旧指纹，cron 校验/保存/启动复用配置解析器。
-- `[database]`、`database_url`、`redis_url`、Cookie、`session_signing_key`、`admin_actor/admin_secret` 只进敏感 TOML。
+- `[database]`、`database_url`、`redis_url`、Cookie、`admin_actor/admin_secret` 只进敏感 TOML。
   Admin 凭据成对配置，secret 至少 16 字节。敏感文件不提交，只允许运行账号读取；错误不得回显 TOML 原文或敏感值。
 - PostgreSQL 优先用 `[database]` 必填 `host/port/username/password/name`；端口非零，账号、密码和库名按原文生成 URL。
   旧 `database_url` 仅接受 `postgres://`、`postgresql://`，不能与 `[database]` 同时提供。

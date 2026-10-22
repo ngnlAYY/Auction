@@ -45,6 +45,7 @@ loader 先固定角色文件的绝对位置，再以其目录解析相对引用�
 
 生成器在私有临时目录复用模板，固定敏感文件 0600、非敏感文件 0640（不依赖 umask），经三角色 loader 校验后原子发布；
 生成配置信任本机代理，启用 Worker control 并绑定服务 UID，不含 `.keyenv`、部署码、首次确认值或临时代理策略。
+首次生成的 `worker.forum.public_base_url` 使用已校验的 Public origin，论坛链接不会沿用模板域名。
 [合并服务](apps/auction-server/README.md#首次启动)复用此格式，以当前账号组/UID 管理配置目录同级的私有 control 目录；仅网页明确
 确认后初始化专用空库，`--config-dir` 与 `AUCTION_CONFIG_FILE` 互斥。
 
@@ -110,6 +111,12 @@ Admin 新种类候选只显示武器/法杖/盾牌种类及 `Phase` 等护甲种
 有效 UID、权限 0640，父目录受信且禁止 group/other 写入。A26/A27 提交完整候选，以 fingerprint fence、命令账本和原子替换
 落盘，不热加载。Admin 启动恢复失败（含结果未知/需人工核对）即阻断启动，不沿用旧安全配置；恢复改变已加载指纹须重新部署
 重启。
+runtime 保存与启动共用 listener、精确规范 HTTP(S) Origin、tracing endpoint、metrics 和 session 的部署校验；
+非规范 URL 不会先保存、再在重启时失败。严格部署预检要求 runtime 精确 `0640` 和不可被 group/other 写入的真实父目录。
+分体 `deployment start/restart` 还在迁移前按 Admin unit 的实际 `User` 核对文件和可写父目录属主，不以 root 运维账号替代；
+使用 runtime 的 Admin unit 不支持 `DynamicUser=yes`，须先迁移为固定服务账号。
+候选校验针对当前进程环境与部署快照；Admin 只向文件存储传递 OTLP headers 是否配置的布尔值，不传递头内容。
+若仍有 `admin_otlp_headers`，关闭 tracing 的保存请求会被拒绝，须先移除敏感字段并重启 Admin 后再保存关闭配置。
 
 升级已使用 runtime 的部署时，在 `public.toml` 顶层补充与 Admin/Worker 相同的 `runtime_config_file` 引用；Public 完整校验文件，
 只保留装备规则窄投影，不接管 Admin listener、安全、会话或 Worker `operations`。分体及合并预检要求三角色引用同一文件且规则
@@ -168,7 +175,6 @@ Worker 执行。`equipment_source.require_tradeable` 默认关闭，仅影响 Ad
 | --- | --- |
 | `[database]` / `database_url` | 数据库连接，二选一 |
 | `redis_url` | 可选 Redis |
-| `session_signing_key` | 会话签名 |
 | `ehentai_cookie`、`mooglemail_cookie` | 外部服务单 Cookie 入口 |
 | `public_otlp_headers`、`admin_otlp_headers`、`worker_otlp_headers` | 角色专属 OTLP 头 |
 | `admin_actor`、`admin_secret` | 成对配置；actor 1–256 字节，禁冒号、首尾空白及控制字符；secret 16–4096 字节且禁 ASCII 控制字符；首次表单另限 actor 128、secret 512 字节 |
@@ -178,6 +184,10 @@ Worker 执行。`equipment_source.require_tradeable` 默认关闭，仅影响 Ad
 
 三组数据密钥分别为独立轮换标识与 32 字节 Base64 key，成对配置且不能混用。旧单文件敏感格式不兼容；放入角色主配置会因
 未知字段失败。日志、错误和 DTO 不得包含敏感原文。
+
+`session_signing_key` 从未参与会话认证，现已废弃；升级前请从各角色敏感 TOML 删除此字段。
+仍提供时 loader 返回明确的迁移错误，不静默忽略，也不读取或记录材料。正式会话继续使用数据库支持的不透明令牌，
+不引入新的签名协议或替代密钥。
 
 ## 后端和拓扑
 

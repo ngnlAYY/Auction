@@ -147,11 +147,11 @@ flowchart TD
   M1[Sent 全量摘要] --> M2{本地 manual_reconcile 候选}
   M2 -- settlement --> M3[reference 前缀匹配<br/>详情确认完整 reference]
   M2 -- mail_intake send --> M4[模板重渲染主题+正文摘要]
-  M2 -- mail_intake take --> M5[扫描收件箱是否仍有目标附件]
+  M2 -- mail_intake take --> M5[按精确 MID 读取详情与资产]
   M3 --> B{唯一且矩阵一致}
   M4 --> B
   B -- 是 --> B1[绑定 MID<br/>sent_recovered_reference_v1 / sent_recovered_notice_v1]
-  B -- 否 --> B2[保留或按规则重排队]
+  B -- 否 --> B2[保留人工核对，不自动重发 Send]
   M5 --> T1{邮件已不存在/资产已取完}
   T1 -- 是 --> T2[action_recovered_inbox_v1 收口成功]
   T1 -- 否 --> T3[重排队重试, 上限 2 次]
@@ -161,7 +161,7 @@ flowchart TD
 ```
 
 - 维护每轮最多核对固定条数的通知类候选，避免逐封详情读取占满周期。
-- 绑定不会重发邮件；只有明确“Sent 无对应邮件”的通知才会退回收发队列重发，最多 2 次。
+- 绑定不会重发邮件；Sent 零命中不证明未发送，通知仍保留人工核对，不自动重发。Take 仅按独立动作证明进行有界恢复。
 - `operations_alert` 与 `lot_watch` 正文来自冻结载荷，不从模板重建。
 
 ## 7. COD 支付与货款轮询

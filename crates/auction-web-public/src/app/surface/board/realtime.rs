@@ -181,10 +181,13 @@ pub(crate) fn PublicRealtimeOwner(
                     } else if let Some(auction_id) = callback_auction_id.as_ref() {
                         callback_auction_after.set(Some((auction_id.clone(), next_after)));
                     }
-                    if degraded {
-                        callback_state.set(LiveConnectionState::Degraded);
-                    } else if *callback_state.peek() != LiveConnectionState::Degraded {
-                        callback_state.set(LiveConnectionState::Live);
+                    // Manual 只由永久错误/重试耗尽进入；普通缺口恢复不应永久粘在 Degraded。
+                    if *callback_state.peek() != LiveConnectionState::Manual {
+                        callback_state.set(if degraded {
+                            LiveConnectionState::Degraded
+                        } else {
+                            LiveConnectionState::Live
+                        });
                     }
                     if refresh_required {
                         let next_refresh = callback_refresh.peek().saturating_add(1);

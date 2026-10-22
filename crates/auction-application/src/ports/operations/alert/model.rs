@@ -4,7 +4,7 @@ use super::digest::valid_age_threshold;
 use super::signals::{OperationsAlertKind, OperationsAlertSignal, OperationsAlertSource};
 use super::*;
 
-/// 一次来源的完整观察集合；不可用时只保留固定 `source_unavailable` signal。
+/// 一次来源观察；不可用时保留固定 `source_unavailable`，并可携带已确认的局部异常。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationsAlertSourceObservation {
     pub source: OperationsAlertSource,
@@ -39,10 +39,12 @@ impl OperationsAlertSourceObservation {
         if self.signals.len() > MAX_OPERATIONS_ALERT_SIGNALS {
             return Err(OperationsAlertError::Invalid);
         }
-        if !self.available
-            && (self.signals.len() != 1
-                || self.signals[0].kind != OperationsAlertKind::SourceUnavailable)
-        {
+        let unavailable_count = self
+            .signals
+            .iter()
+            .filter(|signal| signal.kind == OperationsAlertKind::SourceUnavailable)
+            .count();
+        if unavailable_count != usize::from(!self.available) {
             return Err(OperationsAlertError::Invalid);
         }
         if self

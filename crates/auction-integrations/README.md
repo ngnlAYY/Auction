@@ -28,9 +28,13 @@ selectors 0.38，关闭默认 CLI feature 但保留 `errors`，仅使用库 API�
 - MoogleMail 读取：列表/详情身份与资产一致，完整定位 cursor 后按旧到新返回连续详情前缀。持久轮询经 `fetch_claimed`
   先提交整窗 MID/列表身份，再发详情 GET；已有待读队列时优先直接读取 MID，恢复已读但尚未提交的无附件命令。
   journal 不可用时返回 `persistence_unavailable` 并停止详情读取，摘要或 world 无效时失败关闭；allowlist 不再允许的待读项保留待核对。
+  多附件的独立领取按钮不按数量拒绝；装备 key 只采信附件 ID 对应的严格证据，正文其它装备链接即使畸形也不参与校验，
+  Unicode 正文不得触发字节切片 panic。
 - ComposeSend：首次 POST 前取得 Sent baseline，之后独立扫描，只接受新增、唯一且 world、收件人、正文摘要、
   Credits/COD、装备精确匹配的 MID。
-- Return / Take：写前核对 sender 与预期资产；Return 证明精确 MID 消失，Take 证明身份不变、资产归零及唯一回执。
+- Return / Take：写前核对 sender 与预期资产；Return 只接受身份、正文及全部资产精确匹配的 `[RTS]` 回执，
+  不再把未读 Inbox 中目标 MID 缺席当作成功（详情 GET 本身会标记已读）；缺少回执保持 `outcome_unknown`，不自动重寄。
+  Take 证明身份不变、资产归零及唯一回执。
 - 论坛读取/写入：同 thread 规范分页与真实帖子/作者身份、完整页数；写入同源表单与精确 board/thread/post，
   回执始终核对，原始正文额外确认由 Worker 的 `verify_post_body` 开关控制。
 - 论坛 PM：新鲜 MID 表单绑定当前姓名与 sender，单次 POST 保存 Sent、不 tracking；完整有界遍历自己的同标题 Sent
@@ -45,6 +49,8 @@ Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；资
 与 Main cash 读取，只读 Arc 租约不取得第二个 guard；准备绝对期限覆盖排队与全部读取，取消即同步撤销 owner。
 旧 `prepare/send` 拒绝非零 Credits Send，新授权入口缺 gateway 时只返回 legacy 候选。回执、诊断与人工核对要求见
 [邮件诊断](ops/mail/diagnostics.md)与[领域不变量](docs/contracts/invariants.md)。
+未知 Send 的维护核对只使用正文实际保留入站 MID 的通知模板；同主题/正文的普通重复通知不能作为某次发送的独立证明。
+登录 key 读取或解密失败仍返回错误，不降级为发送未发生，也不授权重寄。
 
 [transport/outcomes/rejection.rs](crates/auction-integrations/src/clients/mooglemail/transport/outcomes/rejection.rs)
 负责将闭集拒收码映射为安全英文原因和处理建议；`auction_equipment_rejected` 新增 `{reason_text}`、`{next_steps}` 与
@@ -62,8 +68,9 @@ Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；资
 Worker 配置数据库凭据能力后读取唯一 active Cookie 并解密，暂缺时保持 degraded，不退回另一来源；未配置该能力才
 使用敏感 TOML 或 `.keyenv` key1（key2 仅供显式隔离验证）。每种 Cookie 全局最多一条 active，world 专属 scope 只服务
 本世界、shared 可跨世界，失效后不自动换号。MoogleMail gateway 的列表、限速、正文与失效处理共用绝对 deadline，
-详情预算耗尽可返回完整验证的最旧前缀，尚未定位 cursor/末尾时不得推进；发送全程持有凭据级 guard，
-transport 并发上限为 1，读取不占用写 guard。
+详情预算耗尽可返回完整验证的最旧前缀，尚未定位 cursor/末尾时不得推进；列表、详情、Sent、余额和共享 Cookie 的
+装备来源读取与发送、维护全程共用同一个凭据级逻辑操作 guard，transport 并发上限为 1。同 session 的内部证据读取
+复用原 guard，不重复加锁；已有绝对读取预算包含排队等待。
 
 论坛完整主题额外最多四路分页读取，共享请求间隔与 32 MiB 聚合上限，作者身份只采信系统作者链接；目录续页增加顺序
 POST、布局回读及可选正文校验成本，配置预算校验只是单目录页下界。大场次需提高既有 `item_timeout_seconds`/
@@ -74,6 +81,8 @@ POST、布局回读及可选正文校验成本，配置预算校验只是单目�
 截断装备；续页重复分类标题，旧主题按持久化 `legacy_single` 保持一页。解析器只合并紧邻首帖、同作者且拍卖/页码
 标记匹配的目录续页，随后按完整目录解析用户命令，不按正文跳过帖子；Worker 的 HTML 路径要求相同数字作者 ID，
 只读纯文本预览仅比较可选作者标签。系统更新楼紧接最后一页，用户回帖从再下一楼开始。
+分类编号保持持久化原值，格式为三字母前缀加至少两位十进制正 `i32` 编号：`One01`、`One100` 均可渲染和解析，
+大编号按数值顺序排列；不限制每分类 99 件，也不重排或复用已发出的编号。
 装备名称标色消费 Worker 启动时冻结的应用窄规则：类型、种类、品质各自多选任一匹配，维度间同时满足，
 按原规则顺序取首个前缀或后缀命中；空多选兼容旧单值，前后缀及 Peerless 彩虹规则保持原义。
 渲染器不拆分多选规则，也不把 Admin 候选词表变成装备采集或品质接收政策。

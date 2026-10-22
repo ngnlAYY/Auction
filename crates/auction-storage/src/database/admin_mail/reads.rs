@@ -77,11 +77,12 @@ pub(super) async fn list_intakes_postgres(
         .await
         .map_err(|_| storage_error("设置邮件入站读取隔离级别失败"))?;
 
-    let mailbox_key = request.mailbox_key.as_deref();
-    let world_id = request.world_id.as_deref();
-    let kind = request.kind.as_deref();
-    let status = request.status.as_deref();
-    let decision = request.decision.as_deref();
+    // 可选空串与省略具有相同筛选语义，不能绑定为 column = ''。
+    let mailbox_key = request.mailbox_key.as_deref().filter(|value| !value.is_empty());
+    let world_id = request.world_id.as_deref().filter(|value| !value.is_empty());
+    let kind = request.kind.as_deref().filter(|value| !value.is_empty());
+    let status = request.status.as_deref().filter(|value| !value.is_empty());
+    let decision = request.decision.as_deref().filter(|value| !value.is_empty());
     let received_from = request.received_from;
     let received_to = request.received_to;
     let total: i64 = sqlx::query_scalar(

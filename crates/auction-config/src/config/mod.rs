@@ -2,5 +2,6 @@
 //! runtime TOML 原子读写由 `src/runtime/` 负责。
 
 mod settings;
+pub(crate) use settings::validate_runtime_startup;
 
 pub use settings::*;

@@ -22,8 +22,20 @@ impl SettlementFulfillmentService {
         let Some((store, reader)) = &self.internal else {
             return self.defer_internal(claim, retry_delay, "internal_unsupported").await;
         };
-        let command = SettlementInternalCommand::external_refund(claim.clone(), recipient_version)?;
-        if store.replay_internal(command.clone()).await? {
+        let command =
+            match SettlementInternalCommand::external_refund(claim.clone(), recipient_version) {
+                Ok(command) => command,
+                Err(_) => return self.manual_internal(claim, "invalid_fulfillment_fact").await,
+            };
+        let replayed = match store.replay_internal(command.clone()).await {
+            Ok(replayed) => replayed,
+            Err(ApplicationError::FulfillmentDependencyMismatch) => {
+                // 原负载无法精确重建时隔离；不能把冲突当未执行，再次预留退款用途。
+                return self.manual_internal(claim, "delivery_conflict").await;
+            }
+            Err(error) => return Err(error),
+        };
+        if replayed {
             return self
                 .prepare_external(claim, prepared_at, retry_delay)
                 .await
@@ -32,7 +44,14 @@ impl SettlementFulfillmentService {
         }
         let policy = self.funding_policy().await?;
         let mut request =
-            evidence_request(&command, self.clock.now(), true, policy.observes_cash())?;
+            match evidence_request(&command, self.clock.now(), true, policy.observes_cash()) {
+                Ok(request) => request,
+                Err(_) => {
+                    return self
+                        .defer_internal(claim, retry_delay, "refund_funding_evidence_wait")
+                        .await;
+                }
+            };
         request.deadline = request.deadline.min(deadline);
         let mut prepared = match reader.prepare_internal_evidence(request).await {
             Ok(prepared) => prepared,
@@ -47,7 +66,14 @@ impl SettlementFulfillmentService {
         {
             return self.defer_internal(claim, retry_delay, "refund_funding_evidence_wait").await;
         }
-        let guard = prepared.begin_commit().map_err(|_| repository_error("退款证据预算失效"))?;
+        let guard = match prepared.begin_commit() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return self
+                    .defer_internal(claim, retry_delay, "refund_funding_evidence_wait")
+                    .await;
+            }
+        };
         let committed = match store.prepare_external_refund(&command, guard.snapshot()).await {
             Ok(SettlementInternalCommitOutcome::Committed) => {
                 guard.confirm_committed();

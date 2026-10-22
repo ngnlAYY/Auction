@@ -56,7 +56,7 @@ AUCTION_CONFIG_FILE=/etc/auction/public.toml /opt/auction/bin/auctionctl check-c
 ```
 
 `check-config` 接受 `public`、`admin`、`worker`，输出 JSON 安全投影：后端、监听/非敏感路径、缓存、tracing/metrics、
-安全计数和有效 Worker/runtime 策略；不连接数据库，也不输出连接串、Cookie、签名密钥、OTLP headers 或 `.keyenv` 正文。
+安全计数和有效 Worker/runtime 策略；不连接数据库，也不输出连接串、Cookie、数据密钥、OTLP headers 或 `.keyenv` 正文。
 
 ## 邮件证据命令
 
@@ -69,6 +69,8 @@ AUCTION_CONFIG_FILE=/etc/auction/public.toml /opt/auction/bin/auctionctl check-c
 父密钥来源省略时优先 credential、缺失才用 equipment，历史导出须保留对应旧密钥备份。Sent 查询要求唯一精确匹配
 并标记 `time_unverified`，`collected` 不是已送达证明，它是联网只读诊断而非离线校验或自动 reconcile；
 回填仅接受 `parsed_message`、不覆盖已有展示。示例见[邮件诊断](ops/mail/diagnostics.md)。
+`inspect-sent` 报告复用私有证据写入器：输出必须位于规范私有目录，采用 `create_new`/0600，完成文件和父目录 fsync
+后才报告成功；不覆盖既有证据，不导出凭据。
 
 ## Bot资金对账
 
@@ -145,6 +147,9 @@ Admin/Worker control socket、三组数据密钥和有效拍卖/结算模板与�
 符号链接；命令不连接数据库、迁移、启动服务或访问外部服务。目标比较复用 SQLx 解析并允许不同数据库账号，
 PostgreSQL 显式提供 host、非零 port 和库名，允许受支持的 host/hostaddr/port/dbname 覆盖及 Unix socket，
 拒绝未知参数和 `options`，DNS 别名不解析，IPv6 URI 方括号在实际 TCP/libpq host 中去除（见[配置手册](ops/config/README.md)）。
+严格模式同时要求 runtime 文件精确 `0640`，父目录为非符号链接且禁止 group/other 写入。分体启动/重启在迁移前读取
+实际 Admin unit 的 `User`（空值按 systemd root 语义），要求 runtime 文件和可写父目录归该固定 UID；
+不能用运维调用者 UID 代替服务身份，使用 runtime 时拒绝 `DynamicUser=yes` 并要求先调整部署。
 
 ## Systemd 总控
 

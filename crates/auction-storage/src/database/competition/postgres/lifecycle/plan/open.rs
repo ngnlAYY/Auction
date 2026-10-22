@@ -147,21 +147,12 @@ pub(super) async fn apply_open_plan_postgres(
         }
     }
 
-    if command.actor.actor_type == auction_application::AuctionLifecycleActorType::Admin {
-        let transaction = transaction.transaction_mut()?;
-        sqlx::query(
-            "UPDATE public.scheduled_rounds
-             SET open_command_id = $1, open_completed_at = $2,
-                 state_version = state_version + 1, updated_at = $2
-             WHERE auction_id = $3 AND status = 'active'
-               AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL",
-        )
-        .bind(command.command_id.as_uuid())
-        .bind(auction.updated_at)
-        .bind(auction.id.as_uuid())
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?;
-    }
+    super::complete_schedule_phase_postgres(
+        transaction,
+        command,
+        auction,
+        auction_application::ScheduledRoundPhase::Open,
+    )
+    .await?;
     Ok(())
 }

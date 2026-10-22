@@ -34,6 +34,10 @@
 
 开拍事务允许保留同场 `withdrawn` 拍品，但只激活有投稿来源的 `pending` 拍品；至少存在一件待拍品，且实际激活行数必须与锁内校验的待拍数量一致；已撤回拍品的状态、版本和返还记录不因开拍改变，其他非法状态仍必须使整个事务失败。PostgreSQL 结算领取、锁内截止复核和完成数量校验同样排除撤回拍品，禁止空集合结算；活动代理检查仍覆盖全部拍品，不能借撤回状态绕过未清理代理的阻断。
 
+登记了 scheduled round 的 Preview、Open、Final 均在生命周期事务内原子写入对应完成 fence；人工操作不抢占有效
+Worker 租约。后续 Worker complete 只能确认原轮次/拍卖/命令的已提交结果，不再用另一事务补写缺失生命周期事实。
+手工场次要求 `preview < open < end`，两小时只属于自动邮箱暂停提前量，不是手工排期最小预览间隔。
+
 规则发布在 PostgreSQL Serializable 事务中按 locale 做 revision CAS，原子写文档、`rules_admin_commands` 和审计；同命令重放原文档，摘要/locale 不同冲突。世界启停先锁 `worlds` 并校验 `policy_revision`，仅从启用变为关闭时检查非 `settled`/`cancelled` 拍卖与活动未完成轮次 blocker；状态变更通过 CAS 与 `auction_commands`、审计同事务提交，不能省略审计提供写入。
 
 ### I-04 PostgreSQL 并发机制
@@ -54,7 +58,7 @@
 
 Admin 装备录入读取外部 URL 或 canonical JSON 时，raw 装备 key 只能存在于短生命周期的应用对象中，不得进入日志、HTTP DTO、命令账本、审计 metadata、事件 payload 或普通装备字段；提交数据库前必须用配置中的数据密钥封装为带 nonce、key id 和 fingerprint 的密文信封，数据库只保存信封。
 
-唯一允许离开该密文边界的公开数据路径是 P09/P11 lot JSON 中既有的 `game_equipment_url` 字段：服务端必须先核对当前公开 lot、装备 owner、world、无 key 投影和密文信封，再在短生命周期内解密并构造固定 HentaVerse origin 的完整 URL。该产品边界允许 10 位 key 出现在 P09/P11 响应体和浏览器 `href` 中，但不得进入日志、审计、事件、命令账本或持久化缓存；两条响应必须使用 `no-store` 与全局 `no-referrer`，不能返回看似可点击的 keyless URL。浏览器向 HentaVerse 发起的用户主动导航会按外部装备协议携带 key，这是显式交付边界。
+允许离开装备密文边界的公开数据路径是 P09/P11 lot JSON 及 P14 补偿流水中既有的 `game_equipment_url` 字段：服务端必须先核对当前可公开的 lot、装备 owner、world、无 key 投影和密文信封，再在短生命周期内解密并构造固定 HentaVerse origin 的完整 URL。该产品边界允许 10 位 key 出现在这三类响应体和浏览器 `href` 中，但不得进入日志、审计、事件、命令账本或持久化缓存；响应必须使用 `no-store` 与全局 `no-referrer`，不能返回看似可点击的 keyless URL。浏览器向 HentaVerse 发起的用户主动导航会按外部装备协议携带 key，这是显式交付边界。
 
 PostgreSQL 完整档的录入必须在同一 Serializable 事务中完成命令账本占位、世界级目标锁、玩家资格检查、装备与密文、submission、pending lot、拍卖版本、审计记录和实时事件，任一项失败都必须回滚；外部来源读取发生在写事务之前，来源失败不能留下半个 lot；相同 command_id 只重放脱敏结果，不得再次抓取来源或重复写入事实，能力缺失必须明确报告，不能伪装成成功。唯一录入目标可以指向 Draft 或 Preview，但必须与拍卖的真实状态精确匹配；Preview 不是冻结目录：此阶段新增的 Admin/MM 装备仍属于本期，并必须在同一事务把新 lot 追加到 `auction_preview_items`、推进 `preview_revision` 后再发布目录重读事件。正常生命周期中只有 Preview 正式进入 Live 的事务才能创建下一期 Draft 并移动录入目标，唯一例外是 Preview 被取消时取消事务必须建立后继 Draft，避免该世界失去可用录入目标；与开拍或取消并发的录入要么完整进入原场次，要么在目标切换后完整进入下一期，不能跨两期拆分。
 
@@ -104,7 +108,7 @@ PostgreSQL 完整档还必须在数据库边界保护拍卖聚合身份不可变
 - 默认起始金额为 1,000；
 - 默认使用 50,000 PPM 的经济增量，按信用网格向上取整且最低增加 1,000；
 - PPM 明确设为 0 时使用冻结的最低增量（默认 30,000）；
-- 代理竞价的反超增量为 1000；
+- Fast、SlowDue、Final 及代理上限对抗的自动反超增量为 1000；普通用户的下一口仍使用冻结的 PPM/固定增量，不因上一笔来自代理而改为 1000；
 - 新场次默认软截止窗口和延长时长均为 15 分钟（900 秒）；
 - 取消截止边界为开始前 24 小时。
 
@@ -160,7 +164,7 @@ delivery 的外部失败与人工复核只投影为稳定的 `delivery_failed` /
 
 return/take 只能在已重新读取的详情页上执行，动作前必须证明 sender 与当前 delivery 收件人一致；take 还必须精确比对装备 ID 集合、Credits、COD、附件条目数和 claimable 动作，只检查按钮存在不构成资产证明；前置证明失败时不得发起 POST，也不得将未知远端状态当作可自动重试的确定失败。
 
-POST 后，return 必须满足两种冻结证明之一：当前协议的唯一只读 `[RTS]` 回执需要与动作前 To/From/Subject、正文、装备 ID、Credits、COD 和附件数逐项绑定，精确证明收发件人反转、固定 MoogleMail 发件人、标题前缀、正文退回后缀、资产不变且 return/take 动作都已消失；兼容协议则必须从结构合法的收件箱中证明目标 `mid` 在所有 `href`/`onclick`/`action` 引用和结果行中均已消失。take 必须证明 To/From/Subject 不变、资产与 COD 归零、claimable 消失，且动作前正文是动作后正文的前缀，预期的 `CoD Paid` 和 `Removed attachment` 回执数量与金额精确一致。仅出现“成功”文字、`[RTS]` 标题或动作按钮消失都不足以证明完成；后置证明失败必须进入 `manual_reconcile`，不得盲目重发。
+POST 后，return 必须取得唯一只读 `[RTS]` 回执，并与动作前 To/From/Subject、正文、装备 ID、Credits、COD 和附件数逐项绑定，精确证明收发件人反转、固定 MoogleMail 发件人、标题前缀、正文退回后缀、资产不变且 return/take 动作都已消失。详情 GET 会使邮件转为已读，目标 `mid` 不在未读 Inbox（包括完整末页）不能证明已退回，不再作为兼容成功证明。take 必须证明 To/From/Subject 不变、资产与 COD 归零、claimable 消失，且动作前正文是动作后正文的前缀，预期的 `CoD Paid` 和 `Removed attachment` 回执数量与金额精确一致。仅出现“成功”文字、`[RTS]` 标题或动作按钮消失都不足以证明完成；后置证明失败必须进入 `manual_reconcile`，不得盲目重发。
 
 PostgreSQL 流拍的 `unsold_return` 与撤拍的 `withdrawn_return` 默认必须逐件 compose Send：使用原 lot/equipment 身份、原世界和冻结卖家，Credits/COD 均为零，暂存与 Sent 证据只能包含这一件原装备。收件人显示名命中 Admin runtime 的 `bot_players` 时，两者都直接内部留存并确认完成，不生成寄回投递。拍卖收件已 Take 的装备不能通过原邮件 Return 找回，也不能因一个 lot 撤拍而退整封多附件邮件。本地事务仅原子记录义务，外部寄送在提交后执行；稳定 delivery/prepare/activate 身份、租约和未知结果门禁保持不变，历史已冻结的 Return 请求不得自动改写为 Send 或重寄。
 
@@ -184,9 +188,15 @@ MoogleMail Send 额外在 sending fence 前实际 GET compose，持有同一 Coo
 
 Delivery 的创建/准备/激活、claim、进入发送、释放、成功、失败、结果未知、过期发送隔离和 Admin 人工动作必须在同一 PostgreSQL 事务追加安全审计，审计失败时状态变化必须回滚。两阶段激活必须同时持久化独立的 activation command ID、请求摘要和激活时间，所有后续状态上的幂等重放都必须匹配该身份，幂等重放本身不得重复追加审计。续租不改变业务状态，不逐次生成审计噪声；续租只接受同 token/fencing 的有效 claimed/sending，先取得 delivery 行锁，再以数据库 clock_timestamp 及调用时刻核对旧截止仍有效、新截止仍在未来，且不得缩短原租约；过期、旧 unknown 或更换 owner 的 claim 不得复活。start_sending 保持 lot → delivery 锁序，续租/释放不倒取 lot 锁。
 
+三页维护依据精确证明绑定恢复结果，也必须在同一事务追加 Delivery 审计；有持久资金分配的已证明 Send 同事务把
+`unknown/in_flight` 收口为 `spent`，不能只修改 delivery。未影响任何行的幂等观察不追加重复审计，也不计作恢复成功。
+
 ### I-09e Fulfillment 与 Recovery 不得共享易失调度边界
 
 PostgreSQL fulfillment 和 recovery 必须使用各自的持久化领取循环、批次、并发、lease、单项总时限、重试和 `poll + [0, jitter]` cadence；一个 owner 的领取、依赖或持久化失败只能影响自身下一轮，不能阻塞其它 owner 或终止整个 Worker，循环任务 panic 或意外退出仍必须失败关闭。Fulfillment 只能按并发波次领取，避免尚未开始的工作提前耗尽 lease；Recovery 必须按 `case → return → action → relist → refund` 依次尝试全部 phase，单个 phase 失败不能跳过后续 phase，action 仍由 fencing 和持久化重试保护。默认 60 秒轮询、5 秒抖动、100 条批次、8 并发、60 秒 lease/重试和 30 秒单项时限属于当前运行契约；等待买家支付 COD 或卖家领取货款时使用按绝对时间对齐的共享窗口（`worker.fulfillment.evidence_poll_seconds`，默认 300 秒）：同一窗口内到期的所有 COD/货款履约一起领取读取，窗口内新增的履约会等到下一个窗口，不各自建立五分钟计时；普通失败重试节奏不变。
+
+已进入 `enqueued` 的投递以 prepare 时冻结的收件人及原 delivery/Sent 身份继续核对；账号之后改名不能重定向已发邮件，
+也不能把已付款事实降为冲突。身份存在性使用稳定 user UUID，pending 新投递才可按当前名称解析实际收件人。
 
 退件消费必须以入站邮件唯一身份追加持久事实，与退回计数、恢复阶段及后续 action 同事务提交；重寄清空当前
 `return_mail_id` 不解除原邮件的消费。迁移只回填可证明已消费的来源，不自动修正既有计数。每次真实退件的 take

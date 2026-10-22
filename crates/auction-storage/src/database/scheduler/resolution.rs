@@ -22,7 +22,7 @@ pub(super) async fn complete_postgres(
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
              WHERE id = $1 AND status = 'active' AND lease_owner = $2
-               AND lease_until = $5 AND state_version = $6
+               AND lease_until = $5 AND state_version = $6 AND auction_id = $7
                AND preview_completed_at IS NULL AND final_completed_at IS NULL",
             "preview",
         ),
@@ -32,7 +32,7 @@ pub(super) async fn complete_postgres(
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
              WHERE id = $1 AND status = 'active' AND lease_owner = $2
-                   AND lease_until = $5 AND state_version = $6
+                   AND lease_until = $5 AND state_version = $6 AND auction_id = $7
                    AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
                    AND final_completed_at IS NULL",
             "open",
@@ -43,7 +43,7 @@ pub(super) async fn complete_postgres(
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
              WHERE id = $1 AND status = 'active' AND lease_owner = $2
-                   AND lease_until = $5 AND state_version = $6
+                   AND lease_until = $5 AND state_version = $6 AND auction_id = $7
                    AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
                    AND final_completed_at IS NULL",
             "final",
@@ -56,23 +56,29 @@ pub(super) async fn complete_postgres(
         .bind(completed_at)
         .bind(claim.lease_until)
         .bind(claim.state_version)
+        .bind(claim.auction_id.as_uuid())
         .execute(pool)
         .await
         .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
-        // Final 已由生命周期事务完成，后续 complete 只确认同一轮次和同一命令的持久化结果。
-        let completed = claim.phase == ScheduledRoundPhase::Final
-            && sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(SELECT 1 FROM public.scheduled_rounds
-                 WHERE id = $1 AND auction_id = $2 AND final_command_id = $3
-                   AND final_completed_at IS NOT NULL)",
-            )
-            .bind(claim.round_id)
-            .bind(claim.auction_id.as_uuid())
-            .bind(claim.command_id.as_uuid())
-            .fetch_one(pool)
-            .await
-            .map_err(map_storage_error)?;
+        // 生命周期事务已原子完成任一阶段；只能确认同一轮次、拍卖和命令的持久化证明。
+        let completed = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM public.scheduled_rounds
+             WHERE id = $1 AND auction_id = $2
+               AND CASE $4
+                 WHEN 'preview' THEN preview_command_id = $3 AND preview_completed_at IS NOT NULL
+                 WHEN 'open' THEN open_command_id = $3 AND open_completed_at IS NOT NULL
+                 WHEN 'final' THEN final_command_id = $3 AND final_completed_at IS NOT NULL
+                 ELSE false
+               END)",
+        )
+        .bind(claim.round_id)
+        .bind(claim.auction_id.as_uuid())
+        .bind(claim.command_id.as_uuid())
+        .bind(phase)
+        .fetch_one(pool)
+        .await
+        .map_err(map_storage_error)?;
         if !completed {
             return Err(repository_error_owned(&format!("Worker {phase} 阶段完成租约已失效")));
         }

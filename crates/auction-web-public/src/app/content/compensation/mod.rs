@@ -115,6 +115,17 @@ pub(super) fn pool_page() -> Element {
                             QueryWriteMode::Push,
                         );
                     },
+                    on_page_clamp: move |next_page: i64| {
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| {
+                                query.page = next_page.max(1);
+                                query.auction_id = None;
+                                query.movement_page = 1;
+                            },
+                            QueryWriteMode::Replace,
+                        );
+                    },
                     on_page_size_change: move |size| {
                         update_public_query_state(
                             query_state_signal,
@@ -143,6 +154,13 @@ pub(super) fn pool_page() -> Element {
                             query_state_signal,
                             |query| query.movement_page = next_page.max(1),
                             QueryWriteMode::Push,
+                        );
+                    },
+                    on_movement_page_clamp: move |next_page: i64| {
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| query.movement_page = next_page.max(1),
+                            QueryWriteMode::Replace,
                         );
                     },
                     on_movement_page_size_change: move |size| {

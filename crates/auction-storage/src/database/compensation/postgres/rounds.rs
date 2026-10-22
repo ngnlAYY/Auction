@@ -148,21 +148,10 @@ pub(crate) async fn list(
     };
 
     let state = sqlx::query(
-        "SELECT
-            coalesce(latest.closing_balance, 0)::bigint AS balance,
-            latest.settled_at AS updated_at
-         FROM (SELECT true AS singleton) AS one
-         LEFT JOIN LATERAL (
-             SELECT
-                 settlement.closing_pool_balance AS closing_balance,
-                 settlement.settled_at
-             FROM public.auction_settlements AS settlement
-             JOIN public.auctions AS a
-               ON a.id = settlement.auction_id AND a.status = 'settled'
-             JOIN public.worlds AS world ON world.id = a.world_id
-             ORDER BY settlement.settled_at DESC, a.id DESC
-             LIMIT 1
-         ) AS latest ON one.singleton",
+        "SELECT COALESCE(SUM(pool.balance), 0)::bigint AS balance,
+                MAX(pool.updated_at) AS updated_at
+         FROM public.settlement_pools AS pool
+         JOIN public.worlds AS world ON world.id = pool.world_id",
     )
     .fetch_one(&mut *transaction)
     .await

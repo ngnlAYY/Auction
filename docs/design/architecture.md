@@ -93,6 +93,7 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 | 旧自寄履约核对 | `000053` 由 application 结算修复端口与 storage legacy repair owner 保存只追加的身份、库存和旧投递关联证明；单笔显式命令处理已核实的 Bot 自持装备，保留原发送证据与命令身份 |
 | 旧实收责任接管 | `000054` 由 application funding 端口与 storage settlement funding owner 保存逐笔接管事实；同账号精确 Sent-collected 证明将已隔离责任转入对应标的用途，卖家留存不重复发行旧收款或增加自有额度 |
 | Bot 仅记账策略 | `000055` 由 funding owner 持久化 UID 账户策略；显式初始化 `record_only`，按单笔冻结经济记录有限会计来源和用途，不采集或比较账号现金；默认 `strict_cash` 维持原现金门 |
+| 账户读取索引 | `000057` 由 storage/account 增加用户维度的 bids 与代理授权历史索引；不新增表、业务状态、HTTP 字段或权限 |
 
 以上为源码能力，运行与独立复审状态见[状态页](docs/status.md)，输入、成功与缺失状态由
 [HTTP 契约](docs/contracts/routes.md)拥有；新增持久化能力先登记范围与 owner，再更新

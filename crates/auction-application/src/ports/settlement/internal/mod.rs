@@ -98,6 +98,8 @@ pub trait SettlementInternalFulfillmentStore: Send + Sync {
     ) -> ApplicationFuture<'_, Option<String>> {
         Box::pin(async { Ok(None) })
     }
+    /// 只确认原完整负载；已存在但无法精确重建的摘要返回 FulfillmentDependencyMismatch，
+    /// 调用方必须持久隔离，不得当作未执行再次资金化。数据库不可用不能伪装成负载冲突。
     fn replay_internal(&self, command: SettlementInternalCommand) -> ApplicationFuture<'_, bool>;
 
     fn satisfy_internal<'a>(

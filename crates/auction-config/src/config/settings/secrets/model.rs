@@ -16,8 +16,9 @@ pub(crate) struct SecretFileConfig {
     /// 兼容旧 PostgreSQL 连接串；数据库进程按需读取，不能写入主配置。
     pub(crate) database_url: Option<String>,
     pub(crate) redis_url: Option<String>,
-    /// 会话签名密钥；启用会话写入能力的角色需要。
-    pub(crate) session_signing_key: Option<String>,
+    /// 仅用于明确拒绝已废弃字段，不保留或使用其密钥材料。
+    #[serde(rename = "session_signing_key")]
+    pub(crate) obsolete_session_signing_key: Option<serde::de::IgnoredAny>,
     pub(crate) ehentai_cookie: Option<String>,
     pub(crate) mooglemail_cookie: Option<String>,
     /// Public OTLP headers；只允许放在敏感 TOML，关闭 tracing 时不得提供。
@@ -131,7 +132,6 @@ impl fmt::Debug for MoogleMailKeyEnv {
 pub(crate) struct AppSecrets {
     pub(crate) database_url: Option<SecretString>,
     pub(crate) redis_url: Option<SecretString>,
-    pub(crate) session_signing_key: Option<SecretString>,
     pub(crate) ehentai_cookie: Option<SecretString>,
     pub(crate) mooglemail_cookie: Option<SecretString>,
     pub(crate) public_otlp_headers: Option<SecretString>,
@@ -149,6 +149,11 @@ pub(crate) struct AppSecrets {
 
 impl AppSecrets {
     pub(crate) fn from_file(secret: SecretFileConfig) -> Result<Self, ConfigError> {
+        if secret.obsolete_session_signing_key.is_some() {
+            return Err(ConfigError::InvalidSessionConfig(
+                "session_signing_key 从未用于会话认证，现已废弃；请从敏感 TOML 删除此字段，会话继续使用数据库中的不透明令牌",
+            ));
+        }
         // 与正式会话共用校验，拒绝启动前无法表达或含控制字符的凭据；不回显原值。
         if let Some(actor) = &secret.admin_actor {
             auction_application::validate_admin_actor(actor)
@@ -166,10 +171,6 @@ impl AppSecrets {
             redis_url: secret
                 .redis_url
                 .map(|value| SecretString::new("redis_url", value))
-                .transpose()?,
-            session_signing_key: secret
-                .session_signing_key
-                .map(|value| SecretString::new("session_signing_key", value))
                 .transpose()?,
             ehentai_cookie: secret
                 .ehentai_cookie

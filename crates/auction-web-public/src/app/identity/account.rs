@@ -113,6 +113,9 @@ fn AuthenticatedAccountData() -> Element {
                 }
             }
         },
+        Some(Ok(page)) if page.bid_page != bid_page() || page.proxy_page != proxy_page() => rsx! {
+            p { class: "public-page-status", role: "status", {t!("data-loading")} }
+        },
         Some(Ok(page)) => rsx! {
             AccountPage {
                 page: page.clone(),
@@ -125,11 +128,25 @@ fn AuthenticatedAccountData() -> Element {
                         QueryWriteMode::Push,
                     );
                 },
+                on_bid_page_clamp: move |next_page| {
+                    update_public_query_state(
+                        query_state_signal,
+                        |query| query.bid_page = next_page,
+                        QueryWriteMode::Replace,
+                    );
+                },
                 on_proxy_page_change: move |next_page| {
                     update_public_query_state(
                         query_state_signal,
                         |query| query.proxy_page = next_page,
                         QueryWriteMode::Push,
+                    );
+                },
+                on_proxy_page_clamp: move |next_page| {
+                    update_public_query_state(
+                        query_state_signal,
+                        |query| query.proxy_page = next_page,
+                        QueryWriteMode::Replace,
                     );
                 },
             }
@@ -143,7 +160,9 @@ fn AccountPage(
     bid_page: i64,
     proxy_page: i64,
     on_bid_page_change: EventHandler<i64>,
+    on_bid_page_clamp: EventHandler<i64>,
     on_proxy_page_change: EventHandler<i64>,
+    on_proxy_page_clamp: EventHandler<i64>,
 ) -> Element {
     let page_size = if page.page_size > 0 { page.page_size } else { DEFAULT_ACCOUNT_PAGE_SIZE };
     rsx! {
@@ -154,6 +173,7 @@ fn AccountPage(
                 total: page.bid_total,
                 page_size,
                 on_page_change: on_bid_page_change,
+                on_page_clamp: on_bid_page_clamp,
             }
             ProxySection {
                 proxies: page.proxies.clone(),
@@ -161,6 +181,7 @@ fn AccountPage(
                 total: page.proxy_total,
                 page_size,
                 on_page_change: on_proxy_page_change,
+                on_page_clamp: on_proxy_page_clamp,
             }
         }
     }
@@ -173,6 +194,7 @@ fn AccountPager(
     total: i64,
     page_size: i64,
     on_page_change: EventHandler<i64>,
+    on_page_clamp: EventHandler<i64>,
 ) -> Element {
     rsx! {
         Pager {
@@ -187,6 +209,7 @@ fn AccountPager(
             jump_label: t!("catalog-page-input"),
             jump_button_label: t!("catalog-page-go"),
             on_page_change,
+            on_page_clamp,
         }
     }
 }
@@ -198,6 +221,7 @@ fn BidSection(
     total: i64,
     page_size: i64,
     on_page_change: EventHandler<i64>,
+    on_page_clamp: EventHandler<i64>,
 ) -> Element {
     rsx! {
         section { class: "public-account-section",
@@ -230,6 +254,7 @@ fn BidSection(
                 total,
                 page_size,
                 on_page_change,
+                on_page_clamp,
             }
         }
     }
@@ -269,6 +294,7 @@ fn ProxySection(
     total: i64,
     page_size: i64,
     on_page_change: EventHandler<i64>,
+    on_page_clamp: EventHandler<i64>,
 ) -> Element {
     rsx! {
         section { class: "public-account-section",
@@ -304,6 +330,7 @@ fn ProxySection(
                 total,
                 page_size,
                 on_page_change,
+                on_page_clamp,
             }
         }
     }

@@ -25,7 +25,7 @@ pub(crate) fn parse_detail_actions(
 ) -> Result<(bool, bool), MoogleMailError> {
     let selector = selector("[onclick]", MoogleMailOperation::Detail, world)?;
     let mut returns = 0_usize;
-    let mut claims = std::collections::BTreeSet::<String>::new();
+    let mut claimable = false;
     for action in envelope.select(&selector) {
         let value = action.value().attr("onclick").unwrap_or_default();
         // 页面可能带 `javascript:`、`; return false` 或不同空白；只按函数调用 token 识别。
@@ -54,41 +54,17 @@ pub(crate) fn parse_detail_actions(
             if argument.is_empty() || !argument.bytes().all(|byte| byte.is_ascii_digit()) {
                 return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
             }
-            // 多附件时服务端会给出不同下标；只统计按钮，不推断具体资产。
-            claims.insert(argument.to_owned());
+            // 多附件时服务端会给出不同下标；存在有效按钮即可，不推断具体资产。
+            claimable = true;
         } else if normalized.contains("remove_attachment") {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
     }
-    if returns > 1 || claims.len() > 1 {
+    // 多附件邮件每个附件都有独立下标；只要存在可领取按钮即可，不按数量拒绝。
+    if returns > 1 {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    Ok((returns == 1, !claims.is_empty()))
-}
-
-pub(crate) fn attribute_references_mail_id(value: &str, external_mail_id: &str) -> bool {
-    let bytes = value.as_bytes();
-    for (index, _) in value.match_indices("mid=") {
-        if index != 0 && !matches!(bytes[index - 1], b'?' | b'&') {
-            continue;
-        }
-        let start = index + 4;
-        let end = value[start..]
-            .find(|character: char| {
-                matches!(character, '&' | '#' | '\'' | '"') || character.is_whitespace()
-            })
-            .map_or(value.len(), |offset| start + offset);
-        if start == end {
-            return true;
-        }
-        let Some(decoded) = decode_form_component(&value[start..end]) else {
-            return true;
-        };
-        if !valid_opaque_id(&decoded) || decoded == external_mail_id {
-            return true;
-        }
-    }
-    false
+    Ok((returns == 1, claimable))
 }
 
 pub(crate) fn extract_mid(value: &str) -> Option<String> {

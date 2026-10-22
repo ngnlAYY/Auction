@@ -12,6 +12,8 @@ pub use keyenv::load_mooglemail_keyenv;
 pub use maintenance::load_postgres_maintenance_secrets;
 pub(super) use model::{AppSecrets, SecretString};
 pub use model::{MoogleMailKeyEnv, PostgresMaintenanceSecrets};
+pub(crate) use runtime::validate_runtime_startup;
 pub(super) use runtime::{
-    load_admin_runtime_file, load_secret_file, runtime_http_security, runtime_session,
+    admin_runtime_listener, load_admin_runtime_file, load_secret_file, runtime_http_security,
+    runtime_session, runtime_tracing,
 };

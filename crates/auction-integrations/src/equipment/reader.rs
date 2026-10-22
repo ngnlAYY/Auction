@@ -29,7 +29,8 @@ use url::Url;
 use crate::{
     EquipmentKeySealer, EquipmentKeySealerError,
     mooglemail::{
-        MoogleMailCookie, MoogleMailCredentialSet, MoogleMailWorld, is_hentaiverse_login_response,
+        MoogleMailCookie, MoogleMailCredentialSet, MoogleMailOperation, MoogleMailWorld,
+        is_hentaiverse_login_response,
     },
 };
 
@@ -189,8 +190,10 @@ impl EquipmentSourceAdapter {
                 }
             };
         };
-        let mut session =
-            credentials.begin(world).map_err(|_| AdminIntakeError::SourceUnavailable)?;
+        let mut session = credentials
+            .begin_exclusive(world, MoogleMailOperation::Detail)
+            .await
+            .map_err(|_| AdminIntakeError::SourceUnavailable)?;
         for _ in 0..64 {
             match self.fetch_document_attempt(target.clone(), Some(session.cookie())).await {
                 Ok(body) => return Ok(body),
@@ -200,7 +203,7 @@ impl EquipmentSourceAdapter {
                         .invalidate_current()
                         .await
                         .map_err(|_| AdminIntakeError::SourceUnavailable)?;
-                    if session.advance().is_err() {
+                    if session.advance_exclusive().await.is_err() {
                         return Err(AdminIntakeError::SourceUnavailable);
                     }
                 }
@@ -289,12 +292,15 @@ impl EquipmentSourceAdapter {
                 },
             });
         };
-        let mut session = credentials.begin(world).map_err(|_| fetch::EquipmentFetchFailure {
-            category: MailEquipmentDiagnosticCategory::CredentialUnavailable,
-            status: None,
-            elapsed_millis: None,
-            body: None,
-        })?;
+        let mut session = credentials
+            .begin_exclusive(world, MoogleMailOperation::Detail)
+            .await
+            .map_err(|_| fetch::EquipmentFetchFailure {
+                category: MailEquipmentDiagnosticCategory::CredentialUnavailable,
+                status: None,
+                elapsed_millis: None,
+                body: None,
+            })?;
         for attempt in 0..64 {
             self.await_request_slot().await;
             let status_slot = Arc::new(AtomicU16::new(0));
@@ -321,7 +327,7 @@ impl EquipmentSourceAdapter {
                 {
                     // 已看到的登录页和状态码属于这次失败证据，不能在凭据耗尽后丢弃。
                     if session.invalidate_current().await.is_err()
-                        || session.advance().is_err()
+                        || session.advance_exclusive().await.is_err()
                         || attempt == 63
                     {
                         return Err(failure);

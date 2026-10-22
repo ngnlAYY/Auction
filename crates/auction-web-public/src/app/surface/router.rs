@@ -105,8 +105,7 @@ pub(crate) fn PublicShell() -> Element {
     let auction_page_owns_initial_boot =
         matches!(&current_route, Route::AuctionIndex {} | Route::AuctionPage {});
     use_route_focus(format!("{current_route:?}"), "public-content");
-    // world 键的浏览器前进/后退恢复由共享 query hook 承担；signal 仍是页头选择器与
-    // 外壳资源的写入点，hook 状态经下面的 effect 单向同步进来。
+    // world 同步覆盖 Router Link push、同路径 query 导航和浏览器前进/后退。
     let world_query_state = use_public_query_state();
     let world_query_signal = world_query_state.state;
     let mut selected_world = use_signal(|| selected_world_from_query(read_public_query().world));
@@ -308,14 +307,11 @@ pub(crate) fn PublicShell() -> Element {
         },
         target => target,
     };
-    use_effect({
-        let remembered = realtime_target.clone();
-        move || {
-            if stable_realtime_target.peek().clone() != remembered {
-                stable_realtime_target.set(remembered.clone());
-            }
+    use_effect(use_reactive((&realtime_target,), move |(remembered,)| {
+        if *stable_realtime_target.peek() != remembered {
+            stable_realtime_target.set(remembered);
         }
-    });
+    }));
     let realtime_key = realtime_target.key();
     // Dioxus 的 key 特殊属性会消费该值，但 WASM release 展开后仍会产生误报。
     let _ = realtime_key.as_str();

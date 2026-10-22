@@ -278,6 +278,13 @@ pub(crate) fn AuctionData(
                             QueryWriteMode::Push,
                         );
                     },
+                    on_page_clamp: move |page| {
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| query.page = page,
+                            QueryWriteMode::Replace,
+                        );
+                    },
                     on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
                     page_total: page.total,
                     page_size,

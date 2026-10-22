@@ -57,6 +57,7 @@ pub(crate) fn PublicPager(
     max_offset: i64,
     label: String,
     on_page_change: EventHandler<i64>,
+    #[props(default)] on_page_clamp: Option<EventHandler<i64>>,
     on_page_size_change: EventHandler<i64>,
 ) -> Element {
     rsx! {
@@ -82,6 +83,7 @@ pub(crate) fn PublicPager(
             page_size_apply_label: t!("pagination-apply"),
             page_size_invalid_label: t!("pagination-positive-integer"),
             on_page_change,
+            on_page_clamp,
             on_page_size_change: move |size| {
                 if size <= 0 {
                     return;

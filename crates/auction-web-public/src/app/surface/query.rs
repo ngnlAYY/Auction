@@ -419,18 +419,21 @@ const PUBLIC_QUERY_KEYS: &[&str] = &[
 ];
 
 /// 挂载与地址栏双向同步的公开端查询状态。
-/// 初值与浏览器前进/后退（popstate）恢复共用 `read_public_query` 的既有解析（含 Router
-/// 规范化前保存的首次 query 恢复）；写回只替换本 crate 管理的键，未声明的外部入口参数
-/// 原样保留。每个页面挂载自己的实例，同时订阅外壳程序化导航的位置版本；外壳另有独立
-/// 实例承担 world 键的 popstate 恢复。
+/// 初值与浏览器前进/后退共用 `read_public_query` 的既有解析（含 Router 规范化前保存的
+/// 首次 query 恢复）；Router 完整位置订阅同时覆盖 Link push 和同路径 query 导航。
+/// 写回只替换本 crate 管理的键，未声明的外部入口参数原样保留。
 pub(crate) fn use_public_query_state() -> QueryState<PublicBoardQuery> {
     let query =
         use_query_state(PUBLIC_QUERY_KEYS, |_| read_public_query(), managed_public_query_pairs);
     let location_revision = try_consume_context::<PublicLocationRevision>();
+    let router = dioxus::prelude::router();
     let mut state = query.state;
     use_effect(move || {
-        let Some(PublicLocationRevision(revision)) = location_revision else { return };
-        let _ = revision();
+        // 完整位置读取会订阅 Router，不能仅依赖不含 query 的 Routable 或 popstate。
+        let _ = router.full_route_string();
+        if let Some(PublicLocationRevision(revision)) = location_revision {
+            let _ = revision();
+        }
         // pushState 不触发 popstate；首页清理查询后，已挂载目录仍须同步到新的地址栏状态。
         let current = read_public_query();
         if *state.peek() != current {

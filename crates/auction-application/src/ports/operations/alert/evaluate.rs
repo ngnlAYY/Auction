@@ -249,6 +249,7 @@ fn evaluate_recovery(
         )?);
     }
     let mut worlds = Vec::new();
+    let mut available = true;
     for world in &snapshot.worlds {
         if !matches!(world.world.as_str(), "main" | "isekai")
             || worlds.iter().any(|value: &String| value == &world.world)
@@ -276,11 +277,7 @@ fn evaluate_recovery(
                 world.balance_credits,
                 0,
             )?),
-            "unknown" | "stale" | "busy" | "unavailable" => {
-                return OperationsAlertSourceObservation::unavailable(
-                    OperationsAlertSource::Recovery,
-                );
-            }
+            "unknown" | "stale" | "busy" | "unavailable" => available = false,
             _ => return Err(OperationsAlertError::Invalid),
         }
         match world.evidence_status.as_str() {
@@ -292,13 +289,18 @@ fn evaluate_recovery(
                 1,
                 world.evidence_age_seconds,
             )?),
-            "unknown" | "unavailable" => {
-                return OperationsAlertSourceObservation::unavailable(
-                    OperationsAlertSource::Recovery,
-                );
-            }
+            "unknown" | "unavailable" => available = false,
             _ => return Err(OperationsAlertError::Invalid),
         }
     }
-    OperationsAlertSourceObservation::available(OperationsAlertSource::Recovery, signals)
+    if available {
+        OperationsAlertSourceObservation::available(OperationsAlertSource::Recovery, signals)
+    } else {
+        // 外部余额不可用不抹除数据库积压与 EvidenceStale，但保留来源不完整状态。
+        let mut observation =
+            OperationsAlertSourceObservation::unavailable(OperationsAlertSource::Recovery)?;
+        observation.signals.extend(signals);
+        observation.validate()?;
+        Ok(observation)
+    }
 }

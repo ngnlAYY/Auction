@@ -36,7 +36,7 @@ HV UID 读取论坛目标资料，预期名称为 `None` 仍自动远端核验�
 [ports/core](crates/auction-application/src/ports/core) 定义事务、账本、仓储、竞价与时钟端口；
 [services/auction/competition.rs](crates/auction-application/src/services/auction/competition.rs) 统一 Public 竞价和
 Worker 慢速代理，[services/auction/lifecycle](crates/auction-application/src/services/auction/lifecycle) 统一
-Admin/Worker 生命周期；取得权威锁后才读取命令时刻，同一计划共用该时间，Final 与调度完成标记原子提交。
+Admin/Worker 生命周期；取得权威锁后才读取命令时刻，同一计划共用该时间，Preview/Open/Final 与调度完成标记原子提交。
 基础 `AuctionService::create` 位于 [services/auction/commands.rs](crates/auction-application/src/services/auction/commands.rs)，
 正式 Admin 创建由 [services/admin/auction.rs](crates/auction-application/src/services/admin/auction.rs) 的
 `AdminAuctionCreateService` 拥有（稳定命令、冻结策略、幂等重放），二者不能混作同一入口。竞价成功响应在事务内冻结
@@ -46,6 +46,8 @@ Admin/Worker 生命周期；取得权威锁后才读取命令时刻，同一计�
 规则计算，无来源的历史轮次保持 UTC 周期；Admin/Worker 向生命周期服务注入启动时有效的 `AuctionPolicyTemplate`，
 新后继冻结该模板，旧快照和已接受命令不重写。`draft_soft_close` 只对显式指定、从未发布的合格草稿修正 60/60 为
 900/900，默认检查只读，执行需稳定命令、版本及精确确认（门禁见[CLI](apps/auctionctl/README.md#草稿软截止显式修正)）。
+Admin 创建与改期统一要求 `preview < open < end`；两小时只是邮箱暂停提前量，不作为已登记轮次的最小预览窗口。
+
 
 装备标记由 [ports/public/watch.rs](crates/auction-application/src/ports/public/watch.rs) 与
 [services/public/watch.rs](crates/auction-application/src/services/public/watch.rs) 拥有：稳定命令摘要包含会话用户，
@@ -83,6 +85,8 @@ payload、稳定身份及摘要不得包含装备 secret，派发世界与装备
 `with_internal_fulfillment` 注入数据库窄端口和同一 opaque evidence reader，缺装配/证据/资金明确持久延期；
 `prepare_next` 返回独立 `InternallySatisfied`（无 delivery ID），原 prepare/activate/reconcile 与旧 claim 字段保留。
 只处理未准备且无旧资产冲突的新 pending；原稳定命令先重放，guard 跨完整事务及有界重试，未知提交撤销 owner、不换 ID。
+非法 claim、命令构造或 canonical intent 在新 pending 路径持久化为 `manual_reconcile`，不依赖租约过期反复重领。
+enqueued 对账只复核收件用户 UUID；原地址取 delivery 快照，改名不重定向已发送邮件，也不推翻精确实收证明。
 退款仅原 `equipment_recovered` 门激活的新 pending；外部 COD 使用同 session with_sent 完整快照，在原外部满足后、
 直接依赖解锁前调用资金 owner。B 及实际 C 转原 seller S/受限 T，retained 不自动再投资；Isekai 付款前及 handoff 各自
 重核同 UID 真实库存，现金仍在 Main。[存储原子事务](crates/auction-storage/README.md#内部履约原子事务设计)独立保存
@@ -177,6 +181,13 @@ owner、版本和锁后数据库实时租约；详情读取前先提交整窗摘
 只有 parse/protocol_drift 组合可投影到原有 sidecar 的 `detail_code`；不接受原始来源错误文本，
 不参与业务决定、命令摘要或历史记录重写。
 
+`MailboxMaintenanceService` 不把零条 Sent 匹配当作未发送证明，未知 Send 始终保留人工核对；
+只有已正向确认原附件仍在的 take 可有界重排队。恢复计数只统计已确认提交的实际状态迁移，
+并核对冻结 Credits、COD 和精确装备集合；已领取邮件不再暴露原金额/资产，不凭清空后的剩余值恢复。
+通知还要求正文保留唯一原入站关联，Sent 时间落在原 `sending_at` 与未知结果记录时间之间；
+分钟精度不能向下放宽围栏，通用重复模板、关联缺失及精度歧义均保持未知，单条模板重建失败不阻断其他候选。
+compose 的未知 COD 不视为零；Admin delivery offset 上限为 `100_000`，Admin 邮件可选空筛选等同省略。
+
 可配置 MM 正文仍为 14 项，默认使用分段英文；模板只展示已决定的拒收、结算与账户事实，不重新决定退回或金额。
 买家装备 COD 的 `{price_breakdown}` 只消费冻结结算明细，`{amount}` 保持实际 COD；已冻结正文与幂等摘要不因默认文案升级
 重写。模板占位符与保存生效范围见[配置手册](ops/config/README.md#邮件正文模板)。
@@ -184,6 +195,8 @@ owner、版本和锁后数据库实时租约；详情读取前先提交整窗摘
 [ports/scheduling](crates/auction-application/src/ports/scheduling) 只表达冻结轮次与下一 UTC 触发时刻（cron 解析在配置层），
 定时器不能替代持久化 due、游标和租约；[ports/operations](crates/auction-application/src/ports/operations) 定义安全水位、
 告警评估与批次状态，告警不改变拍卖或外部投递事实；[errors](crates/auction-application/src/errors) 保留领域分类和可重试性。
+Recovery 外部余额失效时仍保留数据库积压与 `EvidenceStale` 告警，并同时报告 `source_unavailable`；
+不伪造来源健康，也不在不完整观察中关闭旧告警。
 
 ## 读取、实时与会话
 

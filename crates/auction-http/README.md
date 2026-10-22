@@ -62,7 +62,7 @@ Admin 结算报告读取或不变量校验失败时记录 `admin_settlement_repo
 
 - 写命令使用稳定 `command_id`、摘要与版本门禁；成功竞价/代理响应直接使用事务内冻结结果，不在提交后重读权限。
 - 按已登记能力返回安全结果或明确不支持，不以空列表和默认值伪造成功。
-- Public 装备链接只在受限 DTO 边界短暂包含完整 URL，P09/P11 固定 `no-store`。
+- Public 装备链接只在受限 DTO 边界短暂包含完整 URL，P09/P11/P14 固定 `no-store`；缓存分组不能放宽 handler 已声明的 `no-store`，敏感分组仍强制禁止存储。
 - Admin 凭据、用户 key、邮件诊断和 dashboard 严格投影安全字段，登录 key 只出现在创建/重签成功响应。
 - Runtime 保存与 Worker 唤醒接受结果不表示配置已热加载或远端任务完成。
 

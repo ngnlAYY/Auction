@@ -83,6 +83,13 @@ pub(crate) fn AuctionList() -> Element {
                         QueryWriteMode::Push,
                     );
                 },
+                on_page_clamp: move |page| {
+                    update_public_query_state(
+                        query_state_signal,
+                        |query| query.page = page,
+                        QueryWriteMode::Replace,
+                    );
+                },
             }
         },
     }
@@ -96,6 +103,7 @@ pub(crate) fn AuctionHistoryPage(
     world_options: Vec<String>,
     on_world_change: EventHandler<String>,
     on_page_change: EventHandler<i64>,
+    on_page_clamp: EventHandler<i64>,
     on_page_size_change: EventHandler<i64>,
 ) -> Element {
     let page_size = page.page_size.max(1);
@@ -131,6 +139,7 @@ pub(crate) fn AuctionHistoryPage(
                 has_more: page.has_more.unwrap_or(false),
                 label: t!("page-auctions-title"),
                 on_page_change,
+                on_page_clamp,
                 on_page_size_change,
             }
         }

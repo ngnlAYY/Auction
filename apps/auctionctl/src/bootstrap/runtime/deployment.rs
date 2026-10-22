@@ -65,7 +65,7 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
         }
         if let Some(runtime_path) = config.runtime_config_path.as_deref() {
             require_regular_file(runtime_path, "runtime 配置")?;
-            validate_non_secret_permissions(runtime_path, "runtime 配置", strict_permissions)?;
+            validate_runtime_permissions(runtime_path, strict_permissions)?;
         }
         if role == Role::Worker && config.worker.control.enabled {
             validate_absolute_path(&config.worker.control.socket_path, "Worker control socket")?;
@@ -293,6 +293,24 @@ fn validate_non_secret_permissions(path: &Path, kind: &str, strict: bool) -> any
     #[cfg(not(unix))]
     {
         let _ = (path, kind, strict);
+    }
+    Ok(())
+}
+
+/// runtime 存储要求精确 0640；部署者可能是 root，owner 必须另以实际 Admin unit 身份核对。
+fn validate_runtime_permissions(path: &Path, strict: bool) -> anyhow::Result<()> {
+    let parent = path.parent().context("runtime 配置父目录缺失")?;
+    let parent_metadata = fs::symlink_metadata(parent).context("读取 runtime 配置父目录失败")?;
+    if !parent_metadata.is_dir() || parent_metadata.file_type().is_symlink() {
+        anyhow::bail!("runtime 配置父目录必须是非符号链接目录：{}", parent.display());
+    }
+    validate_non_secret_permissions(parent, "runtime 配置父目录", strict)?;
+    #[cfg(unix)]
+    if fs::symlink_metadata(path)?.permissions().mode() & 0o777 != 0o640 {
+        if strict {
+            anyhow::bail!("runtime 配置必须使用 0640 权限：{}", path.display());
+        }
+        println!("warning runtime 配置须使用 0640 权限：{}", path.display());
     }
     Ok(())
 }

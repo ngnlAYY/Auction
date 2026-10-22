@@ -24,6 +24,8 @@ pub use ownership::{RealtimeConsumerOwnership, RealtimeConsumerOwnershipError};
 use acknowledgement::acknowledge_postgres;
 use common::{storage_error, validate_cursor_keys, validate_event_position, validate_failure_text};
 #[cfg(feature = "postgres")]
+pub(super) use failure::resolve_failure_postgres_tx;
+#[cfg(feature = "postgres")]
 use failure::{record_failure_postgres, resolve_failure_postgres};
 #[cfg(feature = "postgres")]
 use read::read_postgres;

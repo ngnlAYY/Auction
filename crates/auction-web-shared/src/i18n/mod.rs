@@ -52,10 +52,25 @@ pub fn without_fluent_isolation(value: String) -> String {
     result
 }
 
-/// 按旧版 `formatTime` 约定把 RFC3339 时间显示为当前语言的 Asia/Shanghai 时间。
-/// 浏览器端用 `Intl.DateTimeFormat`，月份/数字/标点随 `<html lang>` 变化；非 WASM
-/// 构建使用相同目标时区的兜底格式。
+/// 兼容不显式传入语言的既有调用：按当前 `<html lang>` 格式化 Asia/Shanghai 时间。
+/// 响应式组件应直接订阅 I18n 并调用 [`format_localized_time_for_language`]，避免 DOM effect 时序滞后。
 pub fn format_localized_time(value: &str) -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let locale = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.document_element())
+            .and_then(|root| root.get_attribute("lang"))
+            .unwrap_or_else(|| "en".to_owned());
+        format_localized_time_for_language(value, &locale)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    format_localized_time_for_language(value, "en")
+}
+
+/// 按显式语言把 RFC3339 时间显示为 Asia/Shanghai 时间，不读取 DOM 或依赖语言同步 effect。
+/// 浏览器使用 `Intl.DateTimeFormat`；非 WASM 构建保留同一目标时区的兜底格式。
+pub fn format_localized_time_for_language(value: &str, _language: &str) -> String {
     if value.is_empty() {
         return "—".to_owned();
     }
@@ -63,12 +78,8 @@ pub fn format_localized_time(value: &str) -> String {
     #[cfg(target_arch = "wasm32")]
     {
         let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
-        if date.get_time().is_finite()
-            && let Some(document) = web_sys::window().and_then(|window| window.document())
-            && let Some(root) = document.document_element()
-        {
-            let locale = root.get_attribute("lang").unwrap_or_else(|| "en".to_owned());
-            let locales = js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(&locale));
+        if date.get_time().is_finite() {
+            let locales = js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(_language));
             let options = js_sys::Object::new();
             for (name, option) in [
                 ("day", "numeric"),

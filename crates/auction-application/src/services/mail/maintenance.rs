@@ -1,8 +1,8 @@
 //! MoogleMail 三页定期维护：Sent 观察留证，以及仅针对精确匹配投递的草稿 discard。
 //!
-//! Sent 证据只有唯一、精确匹配时才把历史 `write_unknown` 投递绑定回真实 MID，并重新排队
-//! 等待收取证据；证明标记为恢复证明，不冒充实时发送证明。compose 草稿只有在收件人、
-//! 业务 reference 和 COD 同时匹配唯一一条未证明投递时才丢弃。
+//! Sent 只有唯一身份与完整资产矩阵可证明时才恢复，并把履约重新排队等待收取证据；
+//! 未找到 Sent 不证明未发送，未知 Send 永不自动重试。通知必须保留原入站关联并通过有界时间窗；
+//! compose 草稿只在收件人、业务 reference、明确 COD 和 Credits/附件数量全部匹配时丢弃。
 
 use std::sync::Arc;
 
@@ -236,7 +236,8 @@ impl MailboxMaintenanceService {
             return Ok(step);
         }
         // 恢复证明只覆盖身份与金额/资产矩阵；实时发送仍必须走 exact payload 证明。
-        self.store
+        step.recovered = self
+            .store
             .bind_recovered_send(
                 candidate.delivery_id,
                 state.external_mail_id.clone(),
@@ -254,25 +255,40 @@ impl MailboxMaintenanceService {
                 }),
             )
             .await?;
-        step.recovered = true;
         Ok(step)
     }
 
-    /// 通知类：主题与正文必须与部署模板重渲染结果逐字一致；无资产可领取。
+    /// 通知需有原入站关联、精确正文及发送围栏后的有界时间证明；重复通用模板失败关闭。
     async fn recover_notice(
         &self,
         world_id: &str,
         candidate: &MoogleMailboxUnprovenSend,
         entries: &[MoogleMailboxSentEntry],
     ) -> Result<RecoveryStep, ApplicationError> {
-        let Some(expectation) = self.maintenance.notice_expectation(candidate).await? else {
+        if candidate.credits != 0 || candidate.cod != 0 || !candidate.attachment_ids.is_empty() {
             return Ok(RecoveryStep::default());
+        }
+        let expectation = match self.maintenance.notice_expectation(candidate).await {
+            Ok(Some(expectation)) => expectation,
+            Ok(None) => return Ok(RecoveryStep::default()),
+            Err(error) => {
+                return Ok(RecoveryStep {
+                    failed: true,
+                    error: Some(error.to_string()),
+                    ..RecoveryStep::default()
+                });
+            }
         };
         let hits = entries
             .iter()
             .filter(|entry| {
                 candidate.recipient.eq_ignore_ascii_case(&entry.recipient)
                     && notice_subject_matches(&expectation.subject, &entry.subject)
+                    // 页面时间仅精确到分钟；不向下取整 fence，不把更早同分钟邮件当作本次发送。
+                    // 模板原入站关联由 expectation owner 保证，时间窗本身不是发送身份。
+                    && entry.sent_at >= candidate.sending_at
+                    && entry.sent_at <= candidate.outcome_recorded_at
+                    && entry.sent_at <= self.clock.now()
             })
             .collect::<Vec<_>>();
         if hits.len() != 1 {
@@ -304,7 +320,8 @@ impl MailboxMaintenanceService {
             )
             .await?;
         step.observed = true;
-        self.store
+        step.recovered = self
+            .store
             .bind_recovered_notice(
                 candidate.delivery_id,
                 state.external_mail_id.clone(),
@@ -320,7 +337,6 @@ impl MailboxMaintenanceService {
                 }),
             )
             .await?;
-        step.recovered = true;
         Ok(step)
     }
 
@@ -361,7 +377,8 @@ impl MailboxMaintenanceService {
         candidate: &MoogleMailboxUnprovenSend,
         reason: &str,
     ) -> Result<RecoveryStep, ApplicationError> {
-        self.store
+        let recovered = self
+            .store
             .bind_recovered_action(
                 candidate.delivery_id,
                 candidate.inbound_mail_id.clone(),
@@ -376,7 +393,7 @@ impl MailboxMaintenanceService {
                 }),
             )
             .await?;
-        Ok(RecoveryStep { recovered: true, ..RecoveryStep::default() })
+        Ok(RecoveryStep { recovered, ..RecoveryStep::default() })
     }
 
     async fn requeue(
@@ -388,11 +405,12 @@ impl MailboxMaintenanceService {
         if candidate.sweep_retries >= MAX_SWEEP_RETRIES {
             return Ok(RecoveryStep::default());
         }
-        self.store
+        let requeued = self
+            .store
             .requeue_unproven(candidate.delivery_id, candidate.sweep_retries + 1, reason)
             .await?;
         let _ = world_id;
-        Ok(RecoveryStep { requeued: true, ..RecoveryStep::default() })
+        Ok(RecoveryStep { requeued, ..RecoveryStep::default() })
     }
 
     async fn sent_state(
@@ -423,21 +441,29 @@ struct RecoveryStep {
     error: Option<String>,
 }
 
-/// 收集状态必须与投递载荷一致：carrier 允许 1C，其余发送必须仍带那件装备。
+/// 恢复仅接受尚未领取的完整冻结资产矩阵；领取后原 Credits/COD 已不可从剩余值证明。
 fn recovered_state_matches(
     candidate: &MoogleMailboxUnprovenSend,
     state: &MoogleMailboxSentState,
 ) -> bool {
-    if state.collected {
-        return candidate.cod == 0 || state.cod_pending == 0;
-    }
-    if state.cod_pending != candidate.cod {
+    if state.collected
+        || state.cod_pending != candidate.cod
+        || state.remaining_credits != candidate.credits
+        || state.remaining_equipment_ids != candidate.attachment_ids
+    {
         return false;
     }
-    if candidate.template == "settlement_payment_carrier" {
-        state.remaining_credits == 1 && state.remaining_equipment_ids.is_empty()
-    } else {
-        state.remaining_credits == 0 && state.remaining_equipment_ids.len() == 1
+    match candidate.template.as_str() {
+        "settlement_payment_carrier" => {
+            candidate.credits == 1 && candidate.attachment_ids.is_empty()
+        }
+        "settlement_seller_payout" | "settlement_buyer_refund" => {
+            candidate.credits > 0 && candidate.cod == 0 && candidate.attachment_ids.is_empty()
+        }
+        "settlement_winner_equipment_cod" | "settlement_equipment_handoff" => {
+            candidate.credits == 0 && candidate.attachment_ids.len() == 1
+        }
+        _ => false,
     }
 }
 
@@ -477,9 +503,12 @@ fn compose_matches(
     compose: &MoogleMailboxComposeState,
 ) -> bool {
     // 通知类没有业务 reference；空串会匹配任意草稿，必须显式排除。
-    !candidate.reference.is_empty()
+    candidate.operation == "send"
+        && !candidate.reference.is_empty()
         && candidate.recipient.eq_ignore_ascii_case(&compose.recipient)
-        && candidate.cod == compose.cod.unwrap_or(0)
+        && compose.cod == Some(candidate.cod)
+        && compose.credits == candidate.credits
+        && compose.attachment_count == candidate.attachment_ids.len()
         && (compose.subject.contains(&candidate.reference)
             || compose.body.contains(&candidate.reference))
 }

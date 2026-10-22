@@ -41,7 +41,8 @@ pub(super) fn normalize_lot_code(raw: &str) -> Option<String> {
     if !raw.is_ascii() {
         return None;
     }
-    let mut bytes = [0_u8; 5];
+    // 三字母分类前缀加正 i32 编号；两位是最小显示宽度，不是分类数量上限。
+    let mut bytes = [0_u8; 13];
     let mut length = 0;
     for byte in raw.bytes().filter(|byte| *byte != b'-') {
         if length == bytes.len() {
@@ -50,13 +51,18 @@ pub(super) fn normalize_lot_code(raw: &str) -> Option<String> {
         bytes[length] = byte.to_ascii_uppercase();
         length += 1;
     }
-    if length != bytes.len()
+    if length < 5
         || !bytes[..3].iter().all(u8::is_ascii_uppercase)
-        || !bytes[3..].iter().all(u8::is_ascii_digit)
+        || !bytes[3..length].iter().all(u8::is_ascii_digit)
     {
+        return None;
+    }
+    let number = std::str::from_utf8(&bytes[3..length]).ok()?.parse::<i32>().ok()?;
+    if number <= 0 {
         return None;
     }
     bytes[1] = bytes[1].to_ascii_lowercase();
     bytes[2] = bytes[2].to_ascii_lowercase();
-    String::from_utf8(bytes.to_vec()).ok()
+    let prefix = std::str::from_utf8(&bytes[..3]).ok()?;
+    Some(format!("{prefix}{number:02}"))
 }

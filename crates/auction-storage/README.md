@@ -29,9 +29,14 @@ PostgreSQL 连接入口独立校验 URI：拒绝缩略形式、fragment、控制
 [users](crates/auction-storage/src/database/users) 在写锁内复核注册信封绑定的 UUID；论坛数字账号是稳定身份，
 `username` 只是可变显示名和 MM 收件人，二者不能互换。[sessions](crates/auction-storage/src/database/sessions) 保存会话
 摘要：Admin 启动撤销旧 Admin 会话，Public key 撤销/重签与旧会话永久撤销同事务提交，只读 inspect 不刷新过期时间。
+Admin 启动、轮换及注销和 Public 注销的撤销时间至少为该会话创建时间，时钟回拨不妨碍永久撤销。
+Recovery 拉黑仍按历史 claim 时间保存稳定命令、证明与审计；当前用户/黑名单、代理及转换、lot 与会话副作用分别以下辖行
+已有创建/更新时间及最后转换时间为下界，不因 claim 之后新建的会话或代理使整笔拉黑回滚。
 用户、论坛身份及登录 key 信封的快照更新时间以已存创建/更新时间为下界；`000044` 只修复 MM 注册账本与论坛身份历史
 共同证明的时间倒退，推进版本并追加更正审计，保留创建时间与所有凭据，未知来源异常阻断整次迁移
 （见[用户快照时间修复升级](ops/README.md#用户快照时间修复升级)）。
+MM 注册对已有用户名的大小写修正与换绑一样，在同一事务追加 `user_game_identity_history`；
+仅重签 key 而名称不变不生成虚假改名历史，已接受命令重放也不重复追加。
 
 凭据与 realtime 消费 owner 持有专用物理 session：操作复用原持锁连接，失效后不能从池补连接继续，guard 退出关闭物理
 连接、不带锁归池；凭据网络调用不跨越数据库事务，部署身份不含连接原文、账号或密码。`credentials` 由 `000045` 持久化
@@ -45,14 +50,22 @@ PostgreSQL 连接入口独立校验 URI：拒绝缩略形式、fragment、控制
 （`probe_failed`、`session_unavailable`、`check_cancelled`、`internal_use_revoked`）；不记录连接错误原文、凭据或账号。
 后续成功探测不能恢复已撤销 owner，重建必须由新进程重新取得 advisory lock 并推进邮件 generation。
 
+Admin realtime replay 在追加替代事件的同一事务复用 consumer 恢复入口：先锁 failure，再锁绑定的 consumer/stream 游标；
+只有游标恰为原事件前一序号才推进到原事件，较早的未处理序号使整笔 replay 回滚，已超过边界不倒退。
+替代事件及其间其他事件仍按正常连续顺序消费；同一原事件的其他 consumer failure 和游标保持独立，重复命令只返回原账本结果。
+连接入口仍复用 owner 原物理会话；同一 failure/replay 的显式恢复可补齐旧版只写 resolved 而未推进游标的窗口。
+
 ## 竞价事务和后端入口
 
 竞价按 world → auction → lot 加锁：只读 world/auction 使用共享行锁，lot、活动代理、参与者资格和账本保留排他锁，
 生命周期使用对应排他锁；取得锁后读取数据库时间，同一计划的代理、领先时间、截止、审计及接受事实共用该时刻。
-命令账本、状态、审计和 realtime/outbox 同事务提交，Final 与轮次完成标记也原子写入。`competition/postgres/` 按
+命令账本、状态、审计和 realtime/outbox 同事务提交，Preview/Open/Final 与轮次完成标记也原子写入。`competition/postgres/` 按
 bidding、lifecycle、admin 拆分；旧竞价账本重放仍在一致快照中取得冻结策略、授权版本和转换历史，不重新执行当前状态
 门禁。竞价及关键生命周期使用 Serializable、明确行锁，最多三次尝试（含首次）；队列领取才使用 Read Committed 加锁，
 只重试已分类的序列化冲突/死锁，未知提交结果不能盲目重放。
+人工生命周期动作不得抢占仍有效的轮次 Worker 租约；有轮次时必须按顺序精确更新一行，未登记轮次的合法历史场次
+保持可操作。阶段提交后的 Worker complete 只确认同轮次/拍卖/命令完成证据，提交与进程崩溃之间不留下永久重试窗口。
+
 
 ## 装备标记与超价提醒
 
@@ -92,10 +105,14 @@ generation、due、授权与资格；调度字段与确定性命令持久化，�
 | 论坛、凭据与告警 | `forum/`、`credentials/`、`operations_alert/` |
 | 规则、审计与 readiness 水位 | `rules/`、`admin_audit/`、`health/`、`audit_health/` |
 
+公开补偿池的 `balance` 是全部世界 `settlement_pools.balance` 的当前合计，`updated_at` 是资金池最近更新时间；
+批次列表继续展示不可变结算摘要，不能用“最后结算的某一世界余额”冒充全局余额，不改写任何历史结算或账本。
+
 [fulfillment_scheduler/claims/pricing.rs](crates/auction-storage/src/database/fulfillment_scheduler/claims/pricing.rs)
 在履约领取中投影并验证不可变 `lot_settlements`，向应用层传递可选 `SettlementLine`；买家 COD 正文据此冻结明细，
 不从当前策略或可变竞价状态补算。此投影不新增表或迁移，持久载荷兼容范围见
 [交付载荷契约](docs/contracts/schema.md#结算恢复与交付)。
+领取先选择至多请求批量的到期候选，再按 UUID 锁义务和 execution；不锁全部 ready 义务，锁竞争的候选留待后续批次。
 
 编号页 total 与当前页来自一致快照，禁用 world 的活动投影不能公开，已 settled 历史按契约读取。
 Public 的 `DatabaseStore::public_lot_reader` 接受启动时冻结的装备标色规则，由应用共用判定生成稀有/融合分组。
@@ -134,6 +151,13 @@ scope 及持久 allocation 关联；完整 payload、recipient、command/hash �
 未开始写入的有效 claim 释放回 pending 时撤销本次领取 attempt_count 并在同事务追加 release 审计。续租仅允许当前有效
 claimed/sending，先取 delivery 行锁再复核 token/fencing 及 `clock_timestamp()`，新截止不得缩短已有租约。
 
+`mailbox_sweep` 的受证明恢复以 Serializable 事务先锁资金 scope/account，再锁 delivery；
+真实 Sent 将原分配从 unknown/in_flight 原子收口为 spent，并同时恢复原 fulfillment 的对账排队与追加投递审计。
+通知、take 成功与 take 重排队也同事务追加审计，仅实际迁移才返回 true；重放、引用已占用和并发输家不重复计数或审计。
+所有恢复绑定统一核对外部引用未被其他投递占用；明确序列化冲突/死锁最多尝试三次，
+未知/失败提交不宣告成功，不据此重发。Send 不进入维护重排队入口，观察元数据本身不迁移状态。
+Recovery 来源不完整时仍持久化已证明的积压/证据过期异常及不可用信号，但不关闭未出现的历史异常。
+
 `forum/catalog.rs` 拥有 `auction_forum_catalog_pages` 续页身份/正文（`000040` 增加主记录目录页数），发布和刷新在主
 记录 claim/revision CAS 的同一事务内更新所有续页；`catalog_layout` 冻结历史单页/新分页方案，仅从未尝试、无远端身份
 的队列项及新主题启用分页。`000043` 为 forum owner 增加纳入标记和 nullable 终态确认版本，历史 settled 仅豁免；
@@ -153,7 +177,9 @@ lease/fencing/revision CAS 收口；`forum/reply/queries.rs` 从既有命令账�
   确认 ROLLBACK 才返回 RolledBack，未知提交/取消由应用 opaque guard 撤销原 owner。
 - 锁序为 generation→排序 worlds→资金 scope/account→auction→recovery→lot/equipment→credentials→users→排序 obligations
   →actions→deliveries→fulfillments→proof/ledger/audit；旧 prepare/activate/satisfy 同步此业务前缀。同 EID 可能关联多个
-  本地 equipment UUID，均核对；当前按 UUID 锁全部 deliveries 的成本须在集成评审关注。
+  本地 equipment UUID，均核对。delivery 行锁仅覆盖当前投递及同 EID/world 未闭合的显式引用或 owner 关联，最多 256 条；
+  额外探测行表示溢出并拒绝整事务，不静默忽略冲突。未知 schema、孤儿及其它历史仍经过完整冲突谓词读取，
+  Serializable SIREAD 保留幻行保护，既有 world/资产业务锁及三次冲突重试不变。
 - 复核当前用户版本、有效 claim token/fencing/state_version 及数据库实时时效；新 pending 必须从未准备、激活或关联
   delivery。`conflicts.rs` 按真实 origin/payload 闭集 schema 排除已验证无装备通知：论坛 `forum_auction_notice` 仍属
   mail_intake，仅同 command/world 的 `auction_forum_bid_commands` notify 账本、零命令金额及完整 producer origin 重建
@@ -162,6 +188,10 @@ lease/fencing/revision CAS 收口；`forum/reply/queries.rs` 从既有命令账�
 - 库存只消费完整正向 Armory 快照，所有资金 SQL 由 settlement_funding 拥有。满足、清 claim/版本、独立 proof、资金动作、
   直接 blocked 依赖和追加审计同事务；外部 COD 在任何满足/资金化/解依赖前以已锁账户和同一有效 Main cash 检查既有占用，
   缺口确定提交冻结并返回 FundingDeferred，通过后才保存原 Sent collected 满足并释放原依赖。
+- COD 实收与 enqueued 旧满足只按不可变用户 UUID 复核身份；地址必须匹配原 delivery/Sent，不受之后改名影响。
+  外部退款资金化保留原 v1 命令 ID、完整 payload 和摘要格式，新证明附存原收件地址；
+  改名重放只从该冻结地址或同 UUID 的既有改名历史重建完整原 v1 payload，逐字节匹配旧摘要才返回已提交，
+  不再次执行资金动作。历史地址无法重建时持久化 `manual_reconcile`，不改写旧账本、释放原资金或猜测补发。
 
 Recovery action 终态先锁父 case 再锁 action，确认路径按 UUID 预锁全部 fulfillment。Admin 旧重试由 recovery owner 提供
 `lock_recovery_delivery_retry_scope` / `lock_recovery_delivery_retry_actions` 两阶段锁，只用于无 allocation 的
@@ -239,6 +269,8 @@ cargo check --locked -p auction-storage --no-default-features --features postgre
 [PostgreSQL 迁移](migrations/postgres/README.md)只追加；普通启动不隐式迁移，执行门禁见[执行边界](migrations/postgres/README.md#执行边界)。
 `000056` 仅扩展入站装备诊断的 parse/protocol_drift 原因闭集，保留历史诊断及原子入站/游标语义；
 新版 Worker 启动前必须完成迁移，字段和值域见[数据库契约](docs/contracts/schema.md)。
+`000057` 仅增加账户按用户筛选的竞价 `(created_at DESC, id DESC)` 和代理 `(updated_at DESC, lot_id ASC)` 索引，
+覆盖相同用户谓词的列表/计数访问，不修改分页可见性、授权状态或历史记录。
 `initialization/` 只供确认后的合并首次空库初始化：同一专用连接持 SQLx 迁移锁，拒绝已有用户对象与其他客户端，
 不建库、不删对象、不升级已有库。普通迁移与初始化共用受限执行视图：`000005`/`000015` 修正历史别名，`000044` 在
 ALTER 前执行已排队的 `user_forum_identity_account_id_check` 延迟约束，`000047` 为保留字列 `authorization` 加双引号。

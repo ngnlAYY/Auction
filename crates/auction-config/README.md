@@ -27,6 +27,7 @@ common、runtime 候选与首次设置内嵌模板同步；升级不覆盖文件
 复用三角色 loader 与正式 runtime 校验后同步目录，以 Linux `RENAME_NOREPLACE` 发布并同步父目录。发布前只清理
 本次临时目录；发布后确认失败返回 `OutcomeUnknown` 并保留目标，不回滚，父目录必须受信。
 `write_managed_to` 只额外推导配置目录同级的私有 control 目录，不合并敏感配置。
+首次生成的论坛 `public_base_url` 与已校验 Public origin 一致，不继承示例主机。
 
 ## 文件职责与敏感边界
 
@@ -69,6 +70,11 @@ Delivery 有效并发取配置与 transport 上限的较小值，MoogleMail tran
 Admin runtime 更新/恢复使用非阻塞 `File::try_lock()`，从恢复检查持续持有至文件与账本收口；竞争返回不可用，
 guard 取消后由 RAII 释放，锁文件不逐次删除。Unix runtime 文件须由有效 UID 拥有且为 0640；首次设置与敏感配置复用
 application 会话凭据校验，拒绝生成不可登录的配置。
+runtime 的保存验证和启动使用同一 listener、HTTP 安全/规范 Origin、metrics、session、tracing 投影及部署校验。
+Admin 装配传入 OTLP headers 是否存在的非敏感上下文；仍有 headers 时不能保存关闭 tracing 的候选，须先移除敏感字段并重启。
+验证只覆盖当前部署/环境快照，不承诺未来外部配置变更仍可启动。
+`session_signing_key` 从未生效，已移除 accessor 和内部密钥容器；旧字段仅用于返回明确迁移错误，须从敏感 TOML 删除，
+既有不透明会话令牌协议不变。
 
 共享 runtime 只含非敏感候选，保存后须重启受影响进程。Admin 的 listener、metrics/tracing 等按 runtime 覆盖；
 Public/Worker 的 metrics 来自公共文件，tracing 来自各自角色文件，OTLP headers 始终只在角色敏感 TOML 中。

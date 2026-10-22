@@ -4,7 +4,7 @@ use std::{fs, path::Path};
 
 use auction_application::AdminRuntimeDocument;
 
-use super::super::{ConfigError, HttpSecurityConfig, SessionConfig};
+use super::super::*;
 use super::model::SecretFileConfig;
 
 /// 读取独立敏感 TOML；解析器拒绝未声明字段并固定脱敏错误。
@@ -48,5 +48,75 @@ pub(crate) fn runtime_session(document: &AdminRuntimeDocument) -> SessionConfig 
         idle_ttl_seconds: document.session.idle_ttl_seconds,
         absolute_ttl_seconds: document.session.absolute_ttl_seconds,
         max_public_sessions: document.session.max_public_sessions,
+    }
+}
+
+/// 将 runtime listener 投影为启动配置并复用统一校验。
+pub(crate) fn admin_runtime_listener(
+    runtime: &AdminRuntimeDocument,
+) -> Result<HttpListenerConfig, ConfigError> {
+    let listener = &runtime.listener;
+    let effective = match listener.mode {
+        auction_application::AdminRuntimeListenMode::Tcp => HttpListenerConfig {
+            address: listener.address.clone(),
+            group: String::new(),
+            mode: HttpListenMode::Tcp,
+            runtime_directory: String::new(),
+            socket_path: String::new(),
+        },
+        auction_application::AdminRuntimeListenMode::Unix => HttpListenerConfig {
+            address: String::new(),
+            group: listener.group.clone(),
+            mode: HttpListenMode::Unix,
+            runtime_directory: listener.runtime_directory.clone(),
+            socket_path: listener.socket_path.clone(),
+        },
+    };
+    validate_http_listener(&effective)?;
+    Ok(effective)
+}
+
+/// 保存和启动共用部署投影校验，避免应用层引入 URL 解析依赖。
+pub(crate) fn validate_runtime_startup(document: &AdminRuntimeDocument) -> Result<(), ConfigError> {
+    let listener = admin_runtime_listener(document)?;
+    let uses_unix = listener.mode == HttpListenMode::Unix;
+    let listen_addr = if uses_unix {
+        None
+    } else {
+        Some(listener.address.parse().map_err(|source| ConfigError::InvalidAddress {
+            field: "listener.address",
+            value: listener.address.clone(),
+            source,
+        })?)
+    };
+    let mut security = runtime_http_security(document);
+    resolve_http_security_origins(&mut security, listen_addr)?;
+    validate_http_security(&security)?;
+    if security.trusted_unix_proxy && !uses_unix {
+        return Err(ConfigError::InvalidHttpSecurity(
+            "trusted_unix_proxy 只能由 Public 或 Admin Unix listener 启用",
+        ));
+    }
+    validate_metrics_listener(
+        Role::Admin,
+        MetricsConfig { enabled: document.metrics.enabled },
+        uses_unix,
+        listen_addr,
+    )?;
+    validate_session(&runtime_session(document))?;
+    validate_tracing(&runtime_tracing(document), None)
+}
+
+/// Admin 启动与保存验证使用同一 tracing 投影。
+pub(crate) fn runtime_tracing(document: &AdminRuntimeDocument) -> TracingSettings {
+    TracingSettings {
+        batch_timeout_seconds: document.tracing.batch_timeout_seconds,
+        enabled: document.tracing.enabled,
+        endpoint: document.tracing.endpoint.clone(),
+        export_timeout_seconds: document.tracing.export_timeout_seconds,
+        max_export_batch_size: document.tracing.max_export_batch_size,
+        queue_capacity: document.tracing.queue_capacity,
+        sample_ratio_ppm: document.tracing.sample_ratio_ppm,
+        shutdown_timeout_seconds: document.tracing.shutdown_timeout_seconds,
     }
 }

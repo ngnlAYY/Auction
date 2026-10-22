@@ -10,7 +10,8 @@ use render::MarkdownBlockView;
 
 /// 将规则正文渲染为不执行原始 HTML 的 DOM。
 /// 只支持旧版规则页实际使用的 Markdown/GFM 子集；文本节点由 Dioxus 自动转义，链接只允许
-/// HTTP(S)、站内相对路径、锚点和 mailto 目标。
+/// HTTP(S)、站内相对路径、锚点和 mailto 目标，拒绝反斜杠与控制字符。
+/// 单个链接标签/目标限 1/4 KiB，超限按文本处理；正文不因链接窗口限制而截断。
 #[component]
 pub fn MarkdownDocument(markdown: String) -> Element {
     rsx! {

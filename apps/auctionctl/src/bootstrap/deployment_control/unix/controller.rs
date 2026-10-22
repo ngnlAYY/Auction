@@ -135,6 +135,11 @@ impl Controller {
                 anyhow::bail!("{} unit 未装载：{}", role.name(), self.unit(role))
             }
             ensure_unit_config(role, self.unit(role), path, &snapshot)?;
+            if role == ManagedRole::Admin
+                && let Some(runtime_path) = admin.runtime_config_path.as_deref()
+            {
+                validate_runtime_service_owner(runtime_path, &snapshot)?;
+            }
         }
 
         Ok(PreparedDeployment {
@@ -349,5 +354,64 @@ impl Controller {
         &self,
     ) -> anyhow::Result<()> {
         receipt::remove(&self.state_dir)
+    }
+}
+
+/// 原子替换要求固定的 Admin UID 同时拥有文件和可写父目录，不能拿运维调用者 UID 代替。
+fn validate_runtime_service_owner(path: &Path, snapshot: &UnitSnapshot) -> anyhow::Result<()> {
+    if snapshot.dynamic_user {
+        anyhow::bail!(
+            "Admin runtime 需要固定 owner；请将 Admin unit 改为固定 User 并关闭 DynamicUser，再配置 runtime 文件及父目录属主"
+        );
+    }
+    let uid = service_uid(&snapshot.user)?;
+    let metadata = fs::symlink_metadata(path).context("读取 Admin runtime 属主失败")?;
+    let parent = path.parent().context("Admin runtime 父目录缺失")?;
+    let parent_metadata =
+        fs::symlink_metadata(parent).context("读取 Admin runtime 父目录属主失败")?;
+    if metadata.uid() != uid
+        || parent_metadata.uid() != uid
+        || parent_metadata.permissions().mode() & 0o300 != 0o300
+    {
+        anyhow::bail!(
+            "Admin runtime 文件和父目录必须归 Admin unit UID {uid} 拥有，且父目录须有 owner 写入/遍历权限：{}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn service_uid(user: &str) -> anyhow::Result<u32> {
+    // systemd 的空 User 按 root 运行，不按 auctionctl 的有效 UID 推断。
+    if user.is_empty() {
+        return Ok(0);
+    }
+    if let Ok(uid) = user.parse::<u32>() {
+        return Ok(uid);
+    }
+    let user = std::ffi::CString::new(user).context("Admin unit User 包含非法字符")?;
+    let mut buffer = vec![0_u8; 1024];
+    loop {
+        let mut record = std::mem::MaybeUninit::<libc::passwd>::uninit();
+        let mut result = std::ptr::null_mut();
+        // SAFETY: 输入为 NUL 结尾；record、buffer 和 result 在调用期间均有效且互不重叠。
+        let status = unsafe {
+            libc::getpwnam_r(
+                user.as_ptr(),
+                record.as_mut_ptr(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                &mut result,
+            )
+        };
+        if status == libc::ERANGE && buffer.len() < 1024 * 1024 {
+            buffer.resize(buffer.len() * 2, 0);
+            continue;
+        }
+        if status != 0 || result.is_null() {
+            anyhow::bail!("无法解析 Admin unit User；请配置可解析的固定服务账号");
+        }
+        // SAFETY: getpwnam_r 成功并返回非空 result，已完整初始化 record。
+        return Ok(unsafe { record.assume_init().pw_uid });
     }
 }

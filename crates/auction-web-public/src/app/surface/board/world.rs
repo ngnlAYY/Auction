@@ -11,12 +11,18 @@ pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
     let history_owns_world_filter =
         matches!(&route, Route::AuctionList {} | Route::BidLog {} | Route::History {});
     let shell_query_state = use_context::<Signal<PublicBoardQuery>>();
+    let historical_url = history_owns_world_filter || shell_query_state().auction_id.is_some();
     let worlds = use_resource(fetch_worlds);
-    let (options, worlds_loaded) = match &*worlds.read_unchecked() {
+    let (mut options, worlds_loaded) = match &*worlds.read_unchecked() {
         Some(Ok(worlds)) => (header_worlds(worlds), true),
         _ => (vec!["main".to_owned(), "isekai".to_owned()], false),
     };
     let current = selected_world();
+    // 关闭世界的 settled 深链仍显示其真实世界，但不提供新的当前世界入口。
+    let historical_disabled_world = historical_url && !options.contains(&current);
+    if historical_disabled_world {
+        options.push(current.clone());
+    }
     let active = options.iter().find(|world| **world == current).cloned().unwrap_or_else(|| {
         // 旧版顶部选项沿用接口键顺序，但没有 URL 状态时仍以 Main 作为默认世界。
         options
@@ -26,26 +32,27 @@ pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
             .or_else(|| options.first().cloned())
             .unwrap_or_else(|| "main".to_owned())
     });
-    let can_canonicalize = worlds_loaded && !options.is_empty();
-    let active_for_effect = active.clone();
-    use_effect(move || {
-        if selected_world() != active_for_effect {
-            selected_world.set(active_for_effect.clone());
-            if !can_canonicalize || history_owns_world_filter {
+    let can_canonicalize = worlds_loaded && !options.is_empty() && !historical_url;
+    use_effect(use_reactive(
+        (&worlds_loaded, &active, &can_canonicalize, &historical_url),
+        move |(worlds_loaded, active, can_canonicalize, historical_url)| {
+            if !worlds_loaded || historical_url || selected_world() == active {
                 return;
             }
-            // 旧版只有服务端目录使当前世界失效时才 replace URL；缺失或非法 world 只在内存回退 Main。
-            let canonical_world = active_for_effect.clone();
+            selected_world.set(active.clone());
+            if !can_canonicalize {
+                return;
+            }
+            // 仅当前世界失效时纠偏；历史筛选与指定场次深链不得被目录开关抹除。
             update_public_query_state(
                 shell_query_state,
                 move |query| {
-                    query.world = (canonical_world != "main").then_some(canonical_world);
-                    query.auction_id = None;
+                    query.world = (active != "main").then_some(active);
                 },
                 QueryWriteMode::Replace,
             );
-        }
-    });
+        },
+    ));
     let options_empty = options.is_empty();
 
     rsx! {
@@ -75,6 +82,7 @@ pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
                     option {
                         value: world.clone(),
                         selected: active == world,
+                        disabled: historical_disabled_world && world == current,
                         {world_label(&world)}
                     }
                 }

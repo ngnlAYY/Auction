@@ -16,7 +16,7 @@
 
 ## 基线与 owner 规则
 
-当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000056`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
+当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000057`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
 
 ### 追加迁移与历史事实
 
@@ -30,6 +30,7 @@
 | 排期来源：PostgreSQL `000039` | nullable `scheduled_rounds.schedule_snapshot`，类型为 JSONB，冻结 IANA 时区和三个本地时间 | 有来源按下一本地周转换 UTC；历史/无时区手工轮次保持 NULL 与原 UTC 周期，不从当前配置反推 |
 | 用户时间：PostgreSQL `000044` | MM 注册账本时间等于创建时间、论坛身份历史时间等于倒退更新时间的用户；提升更新时间、推进版本并追加更正审计 | 不猜远端时区、不改创建时间/凭据/命令账本；剩余未知来源异常由新约束阻断迁移 |
 | 邮件预期名称：PostgreSQL `000045` | credential_keys 增加 nullable player_name，仅 mail_cookie 可设置，受长度/空白/控制字符约束 | 旧记录保持 NULL，无 verified 列、不回填或授权内部履约；保留旧凭据与未知发送证据 |
+| 账户读取索引：PostgreSQL `000057` | 为 `bids` 的用户/时间/UUID 列表及代理授权的用户/更新时间/lot 列表增加完整历史索引，SQL owner 为 storage/account | 不改表、用户归属、命令账本、竞价与结算事实；索引创建仍须走停机迁移门禁 |
 
 ### Bot 内部履约对象
 
@@ -60,6 +61,7 @@
 - 分类编号覆盖 One-Handed、Two-Handed、Staff、Shield、Cloth、Light、Heavy，每类从 1 递增；内部 `lot_number` 保持全局顺序，已开始发布的旧论坛主题冻结原全局编号方案（PostgreSQL `000024`）。
 - 论坛 `showuser` 数字 ID 为规范十进制，同步到 `users.forum_account_id` 与 `forum_bidder_identities.external_account_id`；一个 Users 主体跨 world/provider 只能沿用同一账号键，延迟约束保证提交时一致。`users.username` 是 MM 收件人/显示名称的唯一权威，`display_name` 只是论坛快照，`game_player_id` 只是名称兼容镜像；首次论坛竞价可建立 revoked-key `forum_only` 主体，后续 MM 注册按当前名称激活为 `mm_bound`，不创建影子名称或提前签发 active Key。
 - `users_timestamp_order`（`000044`）保证 `updated_at >= created_at`；所有身份写入显式保证快照更新时间不倒退，旧创建时间的高水位保留，不将其解释为准确的远端时区；只对上述双重证据成立的倒退行追加审计更正。
+- MM 注册对已有名称的大小写修正与换绑一样，在同一事务追加身份历史；旧外部退款保留原 v1 command ID 和完整摘要格式，仅由冻结地址或同 UUID 历史精确重建原摘要。缺少历史证明时持久化人工核对，不释放资金、不重复资金化或补发。
 - 所有固定目录页及系统日志的远端 post ID 必须真实对账，历史 published 行没有身份时保留空值。`000040` 增加冻结的 `catalog_layout`、`catalog_page_count`（历史默认 1）及 `auction_forum_catalog_pages` 续页镜像：历史已尝试/发布/未知写入使用 `legacy_single`，保留楼层并继续导入，仅从未尝试且无远端身份的队列项及新主题用 `paged_v1`，每页最多 150 件；发布/刷新与主记录 claim/revision CAS 同事务写入，领取复核页数、连续楼层和互异身份，历史主题不自动改楼。`auction_forum_bid_commands` 的未知楼层保持 NULL，连续处理水位从系统日志楼层（目录页数加一）起步，只由完整主题扫描推进，不由 thread/post ID 或内容版本推算；账号与名称变化追加到 `forum_identity_history`（PostgreSQL `000025`—`000031`）。
 - `mail_cookie`/`forum_cookie` 各自全局最多一条 active；`000030` 遇重复行拒绝迁移，必须先通过 Admin 幂等停用并保留审计，不静默删除或选择凭据。告警状态与重试形状见[实时事件与运维告警](#实时事件与运维告警)。
 

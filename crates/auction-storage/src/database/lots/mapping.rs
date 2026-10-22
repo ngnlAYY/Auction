@@ -136,8 +136,7 @@ pub(super) fn map_live_fields(
     let next_bid = if has_leader {
         let current = BidAmount::from_persisted_positive(current_value)
             .map_err(|_| storage_error("公开 lot 领先价不是正数"))?;
-        // Public 的普通出价入口必须与竞价事务使用同一完整加价阶梯。`proxy_last + 1K`
-        // 只属于旧论坛帖投影，不能把它暴露成浏览器可提交的下一口最低价。
+        // Public 普通出价与事务共用完整经济增量；代理自动反超的 +1000 不能成为浏览器普通出价最低价。
         rules
             .next_minimum_bid(None, Some(current), material, false)
             .map_err(|_| storage_error("公开 lot 下一口金额超出可表示范围"))?

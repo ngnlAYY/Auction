@@ -8,9 +8,11 @@ pub(super) fn CompensationPoolTable(
     selected_auction_id: String,
     movements: Option<Result<Option<CompensationMovementPage>, String>>,
     on_page_change: EventHandler<i64>,
+    on_page_clamp: EventHandler<i64>,
     on_page_size_change: EventHandler<i64>,
     on_select_round: EventHandler<String>,
     on_movement_page_change: EventHandler<i64>,
+    on_movement_page_clamp: EventHandler<i64>,
     on_movement_page_size_change: EventHandler<i64>,
     on_retry_movements: EventHandler<()>,
 ) -> Element {
@@ -62,6 +64,7 @@ pub(super) fn CompensationPoolTable(
                                     movements: movements.clone(),
                                     on_select_round,
                                     on_movement_page_change,
+                                    on_movement_page_clamp,
                                     on_movement_page_size_change,
                                     on_retry_movements,
                                 }
@@ -77,6 +80,7 @@ pub(super) fn CompensationPoolTable(
                 has_more: page.has_more.unwrap_or(false),
                 label: t!("page-compensation-pool-title"),
                 on_page_change,
+                on_page_clamp,
                 on_page_size_change,
             }
         }
@@ -90,6 +94,7 @@ fn CompensationRoundRow(
     movements: Option<Result<Option<CompensationMovementPage>, String>>,
     on_select_round: EventHandler<String>,
     on_movement_page_change: EventHandler<i64>,
+    on_movement_page_clamp: EventHandler<i64>,
     on_movement_page_size_change: EventHandler<i64>,
     on_retry_movements: EventHandler<()>,
 ) -> Element {
@@ -130,6 +135,7 @@ fn CompensationRoundRow(
                         round: round.clone(),
                         movements,
                         on_movement_page_change,
+                        on_movement_page_clamp,
                         on_movement_page_size_change,
                         on_retry_movements,
                     }

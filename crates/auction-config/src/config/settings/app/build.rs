@@ -77,19 +77,7 @@ impl AppConfig {
             .as_ref()
             .map(|runtime| MetricsConfig { enabled: runtime.metrics.enabled })
             .unwrap_or(metrics);
-        let tracing = admin_runtime
-            .as_ref()
-            .map(|runtime| TracingSettings {
-                batch_timeout_seconds: runtime.tracing.batch_timeout_seconds,
-                enabled: runtime.tracing.enabled,
-                endpoint: runtime.tracing.endpoint.clone(),
-                export_timeout_seconds: runtime.tracing.export_timeout_seconds,
-                max_export_batch_size: runtime.tracing.max_export_batch_size,
-                queue_capacity: runtime.tracing.queue_capacity,
-                sample_ratio_ppm: runtime.tracing.sample_ratio_ppm,
-                shutdown_timeout_seconds: runtime.tracing.shutdown_timeout_seconds,
-            })
-            .unwrap_or(tracing);
+        let tracing = admin_runtime.as_ref().map(runtime_tracing).unwrap_or(tracing);
 
         if secrets.equipment_data_key_id.is_some() != secrets.equipment_data_key.is_some() {
             return Err(ConfigError::InvalidEquipmentDataKeyConfiguration);
@@ -225,28 +213,4 @@ impl AppConfig {
             secrets,
         })
     }
-}
-
-fn admin_runtime_listener(
-    runtime: &AdminRuntimeDocument,
-) -> Result<HttpListenerConfig, ConfigError> {
-    let listener = &runtime.listener;
-    let effective = match listener.mode {
-        auction_application::AdminRuntimeListenMode::Tcp => HttpListenerConfig {
-            address: listener.address.clone(),
-            group: String::new(),
-            mode: HttpListenMode::Tcp,
-            runtime_directory: String::new(),
-            socket_path: String::new(),
-        },
-        auction_application::AdminRuntimeListenMode::Unix => HttpListenerConfig {
-            address: String::new(),
-            group: listener.group.clone(),
-            mode: HttpListenMode::Unix,
-            runtime_directory: listener.runtime_directory.clone(),
-            socket_path: listener.socket_path.clone(),
-        },
-    };
-    validate_http_listener(&effective)?;
-    Ok(effective)
 }

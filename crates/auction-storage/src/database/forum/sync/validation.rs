@@ -119,8 +119,8 @@ pub(super) fn lot_code(category: &str, lot_number: i32) -> Result<String, Applic
         "Heavy" => "Hea",
         _ => return Err(storage_error("论坛快照装备分类不在闭集内")),
     };
-    if !(1..=99).contains(&lot_number) {
-        return Err(storage_error("论坛快照 lot 序号超出论坛编码范围"));
+    if lot_number <= 0 {
+        return Err(storage_error("论坛快照分类序号必须为正数"));
     }
     Ok(format!("{prefix}{lot_number:02}"))
 }

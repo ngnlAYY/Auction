@@ -8,6 +8,7 @@ pub(super) fn CompensationMovementDetails(
     round: CompensationRound,
     movements: Option<Result<Option<CompensationMovementPage>, String>>,
     on_movement_page_change: EventHandler<i64>,
+    on_movement_page_clamp: EventHandler<i64>,
     on_movement_page_size_change: EventHandler<i64>,
     on_retry_movements: EventHandler<()>,
 ) -> Element {
@@ -76,6 +77,7 @@ pub(super) fn CompensationMovementDetails(
                         label: t!("compensation-movements"),
                         movement: true,
                         on_page_change: on_movement_page_change,
+                        on_page_clamp: on_movement_page_clamp,
                         on_page_size_change: on_movement_page_size_change,
                     }
                 },

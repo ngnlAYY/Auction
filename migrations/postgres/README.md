@@ -74,10 +74,11 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 | [000054_legacy_bot_seller_claims.up.sql](migrations/postgres/000054_legacy_bot_seller_claims.up.sql) | 只追加旧实收的 Bot 卖家责任认领证明，从已隔离用途逐笔留存，不重复发行收款 |
 | [000055_funding_record_only_policy.up.sql](migrations/postgres/000055_funding_record_only_policy.up.sql) | UID 账户持久策略及有限记账来源，默认真实现金模式；不自动开户或转换旧账户 |
 | [000056_equipment_source_diagnostic_codes.up.sql](migrations/postgres/000056_equipment_source_diagnostic_codes.up.sql) | 为 parse/protocol_drift 诊断允许九个来源解析原因，保留历史空原因和原证据约束 |
+| [000057_account_read_indexes.up.sql](migrations/postgres/000057_account_read_indexes.up.sql) | Public 账户按用户读取/统计的竞价时间倒序、代理更新时间倒序与 lot 升序索引，覆盖历史终态 |
 
 ## 原则与基线
 
-当前 `000001`–`000056` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
+当前 `000001`–`000057` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
 是只读兼容视图，权威写入进入授权与转换历史表。执行门禁见[执行边界](migrations/postgres/README.md#执行边界)，对象归属见[数据库契约](docs/contracts/schema.md)。
 
 ## 追加迁移语义
@@ -103,6 +104,10 @@ pending，缺收件人 suppressed 不补发。`000043` 不改经济事实、旧�
 generation，配置 Cookie owner 也须遵守换主 fence。`000047` 只初始化资金 scope，未对账账户不开放自有额度；`000048` 不把旧
 prepared/enqueued/unknown 改成内部成功。迁移前可验证备份并停止全部旧 writer，相关程序必须同版，见[Bot 升级门禁](ops/README.md#bot-内部履约与资金保护升级)。
 
+`000057` 只增加账户读取索引：竞价为 `(bidder_user_id, created_at DESC, id DESC) INCLUDE (lot_id)`，
+代理为 `(user_id, updated_at DESC, lot_id ASC)`，与 `account/postgres.rs` 的列表排序和用户计数筛选一致；
+不改变公开可见性联接、分页、授权状态或历史事实，不使用仅涵盖 active 的部分索引。
+
 ## 历史 checksum 兼容
 
 `000005`/`000015` 历史文件与原始 checksum 保持不可变。[auction-storage 执行视图](crates/auction-storage/src/database/migrations)
@@ -125,7 +130,7 @@ canonical PostgreSQL v28 使用[专用接管手册](ops/deploy/LEGACY_V28_ADOPTI
 
 ## 执行边界
 
-当前执行器注册 `000001`–`000056`；新增迁移必须用内嵌最新迁移的 auctionctl 走受控停机升级，普通重启不执行迁移。
+当前执行器注册 `000001`–`000057`；新增迁移必须用内嵌最新迁移的 auctionctl 走受控停机升级，普通重启不执行迁移。
 `000050` 为每个 recovery 冻结 `cod_return_limit`（默认 3，范围 1–10），并把退回上限从固定三次改为该列，同时给
 `buyer_blacklist` action 增加冻结的公开理由。
 `000051` 只从当前退件指针、回收动作及既有 take 来源回填消费身份，保留历史退回计数；`000052` 初始队列为空，

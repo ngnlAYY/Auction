@@ -204,7 +204,7 @@ pub(in crate::database::account) fn derive_capabilities(
     if base.maximum_amount < current.value() {
         return Err(storage_error("账户代理上限低于当前合法绑定金额"));
     }
-    // 等待中的代理可用剩余上限反超（降额仍受完整下一口约束）；不能继续降额不是授权损坏，不得拒绝。
+    // 等待中的代理降额仍须保留自动反超的 +1000 绑定；不能继续降额不代表授权损坏。
     let binding = if waiting {
         let rules = AuctionRules {
             bid_increment_ppm: base.policy_bid_increment_ppm,
@@ -213,7 +213,7 @@ pub(in crate::database::account) fn derive_capabilities(
         };
         rules.validate().map_err(|_| storage_error("账户代理冻结规则快照无效"))?;
         rules
-            .next_minimum_bid(Some(start), Some(current), base.material, false)
+            .next_minimum_bid(Some(start), Some(current), base.material, true)
             .map_err(|_| storage_error("账户代理绑定金额超出可表示范围"))?
     } else {
         current

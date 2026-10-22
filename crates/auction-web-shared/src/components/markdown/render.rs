@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 
+use super::inline::is_internal_target;
 use super::model::{Inline, MarkdownBlock};
 
 #[component]
@@ -137,16 +138,6 @@ fn collect_text(nodes: &[Inline], output: &mut String) {
             Inline::Image { alt, .. } => output.push_str(alt),
         }
     }
-}
-
-/// 站内链接（`/`、`./`、`../`、`#`、`?` 开头）留在当前页跳转；其余视为外链。
-/// 与 inline.rs 的 `safe_link_target` 同一口径：开头的协议相对 URL 也按外链处理。
-fn is_internal_target(target: &str) -> bool {
-    (target.starts_with('/') && !target[1..].starts_with('/'))
-        || target.starts_with("./")
-        || target.starts_with("../")
-        || target.starts_with('#')
-        || target.starts_with('?')
 }
 
 #[component]

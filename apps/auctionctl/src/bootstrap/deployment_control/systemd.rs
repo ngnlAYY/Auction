@@ -64,6 +64,8 @@ pub(super) struct UnitSnapshot {
     pub(super) unset_environment: String,
     pub(super) pass_environment: String,
     pub(super) pam_name: String,
+    pub(super) user: String,
+    pub(super) dynamic_user: bool,
 }
 
 impl UnitSnapshot {
@@ -141,6 +143,8 @@ impl SystemdClient {
                 OsStr::new("--property=UnsetEnvironment"),
                 OsStr::new("--property=PassEnvironment"),
                 OsStr::new("--property=PAMName"),
+                OsStr::new("--property=User"),
+                OsStr::new("--property=DynamicUser"),
                 OsStr::new(unit),
             ],
         )?;
@@ -280,6 +284,12 @@ fn parse_snapshot(bytes: &[u8]) -> anyhow::Result<UnitSnapshot> {
         unset_environment: required("UnsetEnvironment")?.to_owned(),
         pass_environment: required("PassEnvironment")?.to_owned(),
         pam_name: required("PAMName")?.to_owned(),
+        user: required("User")?.to_owned(),
+        dynamic_user: match required("DynamicUser")? {
+            "yes" => true,
+            "no" => false,
+            _ => anyhow::bail!("DynamicUser 无效"),
+        },
     })
 }
 

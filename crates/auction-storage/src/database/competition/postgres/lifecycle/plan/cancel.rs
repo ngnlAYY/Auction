@@ -140,7 +140,7 @@ pub(super) async fn apply_cancel_plan_postgres(
 
     {
         let transaction = transaction.transaction_mut()?;
-        sqlx::query(
+        let round_updated = sqlx::query(
             "UPDATE public.scheduled_rounds
              SET status = 'missed', auction_id = NULL,
                  lease_owner = NULL, lease_until = NULL,
@@ -152,6 +152,18 @@ pub(super) async fn apply_cancel_plan_postgres(
         .execute(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
+        if round_updated.rows_affected() != 1 {
+            let has_round = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM public.scheduled_rounds WHERE auction_id = $1)",
+            )
+            .bind(auction.id.as_uuid())
+            .fetch_one(&mut **transaction)
+            .await
+            .map_err(map_sql_error)?;
+            if round_updated.rows_affected() != 0 || has_round {
+                return Err(CompetitionTransactionError::InvalidState);
+            }
+        }
         let updated = sqlx::query(
             "UPDATE public.auctions
              SET status = 'cancelled', state_version = $1, updated_at = $2,

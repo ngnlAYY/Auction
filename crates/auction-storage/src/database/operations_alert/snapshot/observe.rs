@@ -64,6 +64,11 @@ pub(crate) async fn observe_postgres(
             }
         }
 
+        // 不完整来源仍可追加已知异常，但未出现不等于已恢复，不能关闭历史告警。
+        if !observation.available {
+            continue;
+        }
+
         let active_rows = sqlx::query(
             "SELECT fingerprint
              FROM public.operations_alert_signals
