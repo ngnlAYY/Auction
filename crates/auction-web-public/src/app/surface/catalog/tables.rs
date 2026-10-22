@@ -27,11 +27,21 @@ pub(crate) fn CatalogTable(
     authenticated: bool,
     viewer_player_id: Option<String>,
 ) -> Element {
+    let columns_open = use_signal(|| false);
+    let visibility = use_signal(CatalogVisibility::load);
     let active = active_category.clone();
     let groups = grouped_catalog_rows(&rows, &active);
     let is_live = projection_kind == "live";
     // 历史成交目录仍使用 live 价格投影；是否保留操作列单独按拍卖阶段决定。
     let show_actions = auction_status != "settled";
+    let layout = if !is_live {
+        CatalogLayout::Preview
+    } else if show_actions {
+        CatalogLayout::Live
+    } else {
+        CatalogLayout::Settled
+    };
+    let effective_visibility = visibility().for_layout(layout);
     let all_count = catalog_count(&category_counts, "all", &rows);
 
     rsx! {
@@ -51,28 +61,32 @@ pub(crate) fn CatalogTable(
                 }
             }
         }
-        nav { class: "public-auction-filter", aria_label: t!("filter-label"),
-            span { class: "public-auction-filter__label", {t!("filter-equipment-type")} }
-            button {
-                class: "public-auction-filter__tab",
-                r#type: "button",
-                // 筛选 tab 表达的是“当前视图”而非开关态，语义上用 aria-current 而非 aria-pressed。
-                aria_current: if active == "all" { "true" } else { "false" },
-                onclick: move |_| on_category_change.call("all".to_owned()),
-                {t!("filter-all")}
-                span { class: "public-auction-filter__count", "{all_count}" }
-            }
-            for (category, _) in CATALOG_CATEGORIES {
+        div { class: "public-auction-type-toolbar",
+            nav { class: "public-auction-filter", aria_label: t!("filter-label"),
+                span { class: "public-auction-filter__label", {t!("filter-equipment-type")} }
                 button {
                     class: "public-auction-filter__tab",
                     r#type: "button",
-                    aria_current: if active == category { "true" } else { "false" },
-                    onclick: move |_| on_category_change.call(category.to_owned()),
-                    {catalog_category_label(category)}
-                    span { class: "public-auction-filter__count", "{catalog_count(&category_counts, category, &rows)}" }
+                    // 筛选 tab 表达的是“当前视图”而非开关态，语义上用 aria-current 而非 aria-pressed。
+                    aria_current: if active == "all" { "true" } else { "false" },
+                    onclick: move |_| on_category_change.call("all".to_owned()),
+                    {t!("filter-all")}
+                    span { class: "public-auction-filter__count", "{all_count}" }
+                }
+                for (category, _) in CATALOG_CATEGORIES {
+                    button {
+                        class: "public-auction-filter__tab",
+                        r#type: "button",
+                        aria_current: if active == category { "true" } else { "false" },
+                        onclick: move |_| on_category_change.call(category.to_owned()),
+                        {catalog_category_label(category)}
+                        span { class: "public-auction-filter__count", "{catalog_count(&category_counts, category, &rows)}" }
+                    }
                 }
             }
+            CatalogColumnsButton { open: columns_open }
         }
+        CatalogColumnsPanel { open: columns_open, visibility, layout }
         if groups.is_empty() {
             div { class: "ui-empty-state", role: "status",
                 p { class: "ui-empty-state__title",
@@ -96,6 +110,7 @@ pub(crate) fn CatalogTable(
                     LiveCatalogTable {
                         rows: Rc::clone(&rows),
                         indices,
+                        visibility: effective_visibility,
                         show_actions,
                         can_bid,
                         allow_slow,
@@ -104,7 +119,11 @@ pub(crate) fn CatalogTable(
                         viewer_player_id: viewer_player_id.clone(),
                     }
                 } else {
-                    PreviewCatalogTable { rows: Rc::clone(&rows), indices }
+                    PreviewCatalogTable {
+                        rows: Rc::clone(&rows),
+                        indices,
+                        visibility: effective_visibility,
+                    }
                 }
             }
         }
@@ -124,6 +143,7 @@ pub(crate) fn CatalogTable(
 pub(crate) fn LiveCatalogTable(
     rows: Rc<Vec<CatalogRow>>,
     indices: Vec<usize>,
+    visibility: CatalogVisibility,
     show_actions: bool,
     can_bid: bool,
     allow_slow: bool,
@@ -132,11 +152,12 @@ pub(crate) fn LiveCatalogTable(
     viewer_player_id: Option<String>,
 ) -> Element {
     // 语义化 colgroup 分配完整百分比宽度；窄屏仍保留表头与行列，不切换为卡片。
-    let (layout, widths) = if show_actions {
-        ("public-catalog-live", vec![6, 18, 4, 5, 4, 4, 6, 8, 8, 6, 7, 6, 18])
+    let (layout, column_layout) = if show_actions {
+        ("public-catalog-live", CatalogLayout::Live)
     } else {
-        ("public-catalog-settled", vec![7, 25, 5, 6, 5, 5, 8, 10, 9, 8, 6, 6])
+        ("public-catalog-settled", CatalogLayout::Settled)
     };
+    let widths = visibility.widths(column_layout);
     rsx! {
         div { class: "public-auction-catalog",
             table { class: "public-auction-catalog__table public-auction-catalog__table--live ui-table--responsive",
@@ -144,20 +165,20 @@ pub(crate) fn LiveCatalogTable(
                 auction_web_shared::TableColumns { layout, widths }
                 thead {
                     tr {
-                        th { scope: "col", {t!("catalog-code")} }
-                        th { scope: "col", {t!("catalog-item")} }
-                        th { scope: "col", {t!("catalog-group")} }
-                        th { scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
-                        th { scope: "col", {t!("catalog-level")} }
-                        th { scope: "col", {t!("catalog-primary-attributes")} }
-                        th { scope: "col", {t!("catalog-seller")} }
-                        th { scope: "col", class: "public-auction-catalog__number", {t!("catalog-current")} }
-                        th { scope: "col", class: "public-auction-catalog__number", {t!("catalog-next-bid")} }
-                        th { scope: "col", {t!("catalog-leader")} }
-                        th { scope: "col", {t!("catalog-remaining")} }
-                        th { scope: "col", {t!("catalog-status")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Code), scope: "col", {t!("catalog-code")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Item), scope: "col", {t!("catalog-item")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Group), scope: "col", {t!("catalog-group")} }
+                        th { hidden: !visibility.contains(CatalogColumn::AverageRoll), scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Level), scope: "col", {t!("catalog-level")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Attributes), scope: "col", {t!("catalog-primary-attributes")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Seller), scope: "col", {t!("catalog-seller")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Price), scope: "col", class: "public-auction-catalog__number", {t!("catalog-current")} }
+                        th { hidden: !visibility.contains(CatalogColumn::NextBid), scope: "col", class: "public-auction-catalog__number", {t!("catalog-next-bid")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Leader), scope: "col", {t!("catalog-leader")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Remaining), scope: "col", {t!("catalog-remaining")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Status), scope: "col", {t!("catalog-status")} }
                         if show_actions {
-                            th { scope: "col", {t!("catalog-actions")} }
+                            th { hidden: !visibility.contains(CatalogColumn::Actions), scope: "col", {t!("catalog-actions")} }
                         }
                     }
                 }
@@ -167,6 +188,7 @@ pub(crate) fn LiveCatalogTable(
                             // 以 lot_id 作为稳定 key，避免刷新后行状态错位绑定到别的 lot。
                             key: "{rows[index].lot_id}",
                             row: rows[index].clone(),
+                            visibility,
                             show_actions,
                             can_bid,
                             allow_slow,
@@ -182,32 +204,40 @@ pub(crate) fn LiveCatalogTable(
 }
 
 #[component]
-pub(crate) fn PreviewCatalogTable(rows: Rc<Vec<CatalogRow>>, indices: Vec<usize>) -> Element {
+pub(crate) fn PreviewCatalogTable(
+    rows: Rc<Vec<CatalogRow>>,
+    indices: Vec<usize>,
+    visibility: CatalogVisibility,
+) -> Element {
     rsx! {
         div { class: "public-auction-catalog",
             table { class: "public-auction-catalog__table public-auction-catalog__table--preview ui-table--responsive",
                 caption { class: "public-visually-hidden", {t!("auction-preview-lots")} }
-                // 预览目录不提供行内操作；装备名称后独立显示分组，表头、行和列宽保持十一列。
-                auction_web_shared::TableColumns { layout: "public-catalog-preview", widths: vec![6, 30, 6, 7, 5, 7, 13, 12, 4, 4, 6] }
+                // 预览目录不提供行内操作；默认十一列，隐藏列后按相同权重重新归一化。
+                auction_web_shared::TableColumns { layout: "public-catalog-preview", widths: visibility.widths(CatalogLayout::Preview) }
                 thead {
                     tr {
-                        th { scope: "col", {t!("catalog-code")} }
-                        th { scope: "col", {t!("catalog-item")} }
-                        th { scope: "col", {t!("catalog-group")} }
-                        th { scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
-                        th { scope: "col", {t!("catalog-level")} }
-                        th { scope: "col", {t!("catalog-primary-attributes")} }
-                        th { scope: "col", {t!("catalog-seller")} }
-                        th { scope: "col", class: "public-auction-catalog__number", {t!("catalog-start-price")} }
-                        th { scope: "col", {t!("catalog-leader")} }
-                        th { scope: "col", {t!("catalog-remaining")} }
-                        th { scope: "col", {t!("catalog-status")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Code), scope: "col", {t!("catalog-code")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Item), scope: "col", {t!("catalog-item")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Group), scope: "col", {t!("catalog-group")} }
+                        th { hidden: !visibility.contains(CatalogColumn::AverageRoll), scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Level), scope: "col", {t!("catalog-level")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Attributes), scope: "col", {t!("catalog-primary-attributes")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Seller), scope: "col", {t!("catalog-seller")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Price), scope: "col", class: "public-auction-catalog__number", {t!("catalog-start-price")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Leader), scope: "col", {t!("catalog-leader")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Remaining), scope: "col", {t!("catalog-remaining")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Status), scope: "col", {t!("catalog-status")} }
                     }
                 }
                 tbody {
                     for index in indices {
                         // 以 lot_id 作为稳定 key，避免刷新后行状态错位绑定到别的 lot。
-                        PreviewCatalogRow { key: "{rows[index].lot_id}", row: rows[index].clone() }
+                        PreviewCatalogRow {
+                            key: "{rows[index].lot_id}",
+                            row: rows[index].clone(),
+                            visibility,
+                        }
                     }
                 }
             }
@@ -230,6 +260,7 @@ fn LiveRowCountdown(remaining: String) -> Element {
 #[component]
 pub(crate) fn LiveCatalogRow(
     row: CatalogRow,
+    visibility: CatalogVisibility,
     show_actions: bool,
     can_bid: bool,
     allow_slow: bool,
@@ -245,8 +276,9 @@ pub(crate) fn LiveCatalogRow(
         .is_some_and(|(viewer, leader)| viewer == leader);
     let leading = if is_leading { "public-auction-catalog__leading" } else { "" };
     let leading_status_id = format!("public-auction-leading-status-{}", row.lot_id);
+    let show_remaining = visibility.contains(CatalogColumn::Remaining);
     // 非 live 行保持原占位倒计时文案与样式；live 行的倒计时下沉到 LiveRowCountdown 叶子组件。
-    let inactive_countdown = (row.status != "live").then(|| CountdownDisplay {
+    let inactive_countdown = (show_remaining && row.status != "live").then(|| CountdownDisplay {
         label: t!("value-empty"),
         urgent: false,
         expired: false,
@@ -274,18 +306,19 @@ pub(crate) fn LiveCatalogRow(
         tr {
             class: "{leading}",
             aria_describedby: if is_leading { leading_status_id.clone() } else { String::new() },
-            td { "data-label": t!("catalog-code"),
+            td { hidden: !visibility.contains(CatalogColumn::Code), "data-label": t!("catalog-code"),
                 Link {
                     class: "public-auction-catalog__code",
                     to: lot_detail_href(&row.lot_id),
                     "{row.code}"
                 }
             }
-            td { class: "public-auction-catalog__name", "data-label": t!("catalog-item"),
+            td { hidden: !visibility.contains(CatalogColumn::Item), class: "public-auction-catalog__name", "data-label": t!("catalog-item"),
                 CatalogEquipmentName {
                     name: row.name.clone(),
                     game_equipment_url: row.game_equipment_url.clone(),
                 }
+                // 显式描述引用保留在 DOM；装备列隐藏时，领先状态仍可由行的 aria-describedby 读取。
                 if is_leading {
                     span {
                         id: leading_status_id.clone(),
@@ -294,7 +327,7 @@ pub(crate) fn LiveCatalogRow(
                     }
                 }
             }
-            td { "data-label": t!("catalog-group"),
+            td { hidden: !visibility.contains(CatalogColumn::Group), "data-label": t!("catalog-group"),
                 TruncatedText {
                     value: equipment_group_label(&row.equipment_group),
                     portal: true,
@@ -302,6 +335,7 @@ pub(crate) fn LiveCatalogRow(
                 }
             }
             td {
+                hidden: !visibility.contains(CatalogColumn::AverageRoll),
                 class: "public-auction-catalog__avg-roll public-auction-catalog__number",
                 "data-label": t!("equipment-avg-roll"),
                 if let Some(avg_roll) = avg_roll {
@@ -310,13 +344,14 @@ pub(crate) fn LiveCatalogRow(
                     span { class: "public-auction-catalog__none", {t!("value-empty")} }
                 }
             }
-            td { "data-label": t!("catalog-level"), "{level}" }
+            td { hidden: !visibility.contains(CatalogColumn::Level), "data-label": t!("catalog-level"), "{level}" }
             td {
+                hidden: !visibility.contains(CatalogColumn::Attributes),
                 class: "public-auction-catalog__primary-attributes",
                 "data-label": t!("catalog-primary-attributes"),
                 "{primary_attribute_initials}"
             }
-            td { "data-label": t!("catalog-seller"),
+            td { hidden: !visibility.contains(CatalogColumn::Seller), "data-label": t!("catalog-seller"),
                 TruncatedText {
                     value: seller,
                     portal: true,
@@ -324,6 +359,7 @@ pub(crate) fn LiveCatalogRow(
                 }
             }
             td {
+                hidden: !visibility.contains(CatalogColumn::Price),
                 class: "public-auction-catalog__amount public-auction-catalog__number",
                 "data-label": t!("catalog-current"),
                 title: current_price_full.clone(),
@@ -331,13 +367,14 @@ pub(crate) fn LiveCatalogRow(
                 "{current_price}"
             }
             td {
+                hidden: !visibility.contains(CatalogColumn::NextBid),
                 class: "public-auction-catalog__amount public-auction-catalog__number",
                 "data-label": t!("catalog-next-bid"),
                 title: next_bid_full.clone(),
                 aria_label: next_bid_full,
                 "{next_bid}"
             }
-            td { class: "public-auction-catalog__participant-cell", "data-label": t!("catalog-leader"),
+            td { hidden: !visibility.contains(CatalogColumn::Leader), class: "public-auction-catalog__participant-cell", "data-label": t!("catalog-leader"),
                 if row.leader_name.is_some() {
                     CatalogParticipant {
                         name: leader,
@@ -349,18 +386,21 @@ pub(crate) fn LiveCatalogRow(
                 }
             }
             td {
+                hidden: !show_remaining,
                 "data-label": t!("catalog-remaining"),
-                if row.status == "live" {
+                // 隐藏时卸载倒计时叶子组件，其订阅守卫随之释放；整行和命令宿主不受影响。
+                if show_remaining && row.status == "live" {
                     LiveRowCountdown { remaining: row.remaining.clone() }
                 } else if let Some(countdown) = inactive_countdown {
                     span { class: countdown_class(&countdown), "{countdown.label}" }
                 }
             }
-            td { "data-label": t!("catalog-status"),
+            td { hidden: !visibility.contains(CatalogColumn::Status), "data-label": t!("catalog-status"),
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
             }
             if show_actions {
-                td { class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
+                td { hidden: !visibility.contains(CatalogColumn::Actions), class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
+                    // 列偏好只隐藏单元格，不卸载命令宿主，保留冻结的 command_id 与 unknown 状态。
                     // 竞价期内已结束的拍品保留空单元格，与仍可竞价的同表拍品对齐。
                     if row.status == "live" {
                         div { class: "public-auction-catalog__action-controls",

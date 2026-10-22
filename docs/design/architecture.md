@@ -189,6 +189,8 @@ Public/Admin 是分离的 Dioxus CSR SPA，各有路由、译文、产物和 HTT
 [Public](crates/auction-web-public/DESIGN.md) 和 [Admin](crates/auction-web-admin/DESIGN.md)；五语言与 `hv.lang` 保持
 稳定，列宽/截断/窄屏结构见[表格契约](docs/design/table-layouts.md)。Public `surface/pagination/` 拥有列表数量、译文、
 URL 更新与 `preferences.rs` 本地偏好，shared `Pager`/`components/pager/size.rs` 只提供可选数字分页与页码限制。
+Public `surface/catalog/columns/` 独占装备目录列身份、默认权重、显隐控件和浏览器偏好；仅改变展示，
+不增加 HTTP 字段选择或服务端配置。保留命令宿主与表格结构，共享 `TableColumns` 仍只负责可见权重归一化。
 shared `media/viewport.rs` 拥有 VisualViewport 监听及 CSS 变量生命周期，`style/base.css` 拥有安全区、
 弹窗可见高度与触控字段基础样式；两端 assets 分别拥有手机导航、筛选和原表格列内的操作布局。
 装备标记只允许登录用户修改，Public 按 user UUID 与 auction UUID 隔离本地缓存，服务器为唯一权威，不增加业务表列，

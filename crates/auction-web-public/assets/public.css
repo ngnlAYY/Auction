@@ -960,7 +960,10 @@
 }
 
 .public-history-filter-toolbar button,
-.public-history-settings-close {
+.public-history-settings-close,
+.public-catalog-columns__toggle,
+.public-catalog-columns__close,
+.public-catalog-columns__reset {
   min-block-size: var(--size-target);
   padding: var(--space-2) var(--space-3);
   border: var(--border-width) solid var(--color-border);
@@ -971,13 +974,19 @@
 }
 
 .public-history-filter-toolbar button:not(:disabled):focus-visible,
-.public-history-settings-close:focus-visible {
+.public-history-settings-close:focus-visible,
+.public-catalog-columns__toggle:focus-visible,
+.public-catalog-columns__close:focus-visible,
+.public-catalog-columns__reset:focus-visible {
   border-color: var(--color-accent);
 }
 
 @media (hover: hover) {
   .public-history-filter-toolbar button:not(:disabled):hover,
-  .public-history-settings-close:hover {
+  .public-history-settings-close:hover,
+  .public-catalog-columns__toggle:hover,
+  .public-catalog-columns__close:hover,
+  .public-catalog-columns__reset:hover {
     border-color: var(--color-accent);
   }
 }
@@ -1003,7 +1012,8 @@
   font-variant-numeric: tabular-nums;
 }
 
-.public-history-settings-panel {
+.public-history-settings-panel,
+.public-catalog-columns {
   padding: var(--space-4);
   margin-block-start: var(--space-3);
   border: var(--border-width) solid var(--color-border);
@@ -1011,7 +1021,8 @@
   background: var(--color-surface);
 }
 
-.public-history-settings-header {
+.public-history-settings-header,
+.public-catalog-columns__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1374,6 +1385,107 @@
 .public-auction-filter__tab[aria-current="true"] .public-auction-filter__count {
   color: var(--color-accent);
   background: var(--color-accent-contrast);
+}
+
+/* 装备类型与列设置共用一行；窄屏让筛选项折行，不挤出视口。 */
+.public-auction-type-toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-inline-size: 0;
+  margin-block-end: var(--space-3);
+}
+
+.public-auction-type-toolbar > .public-auction-filter {
+  flex: 1 1 0;
+  min-inline-size: 0;
+  margin: 0;
+}
+
+.public-catalog-columns__toggle {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 0;
+  max-inline-size: 40%;
+  margin-inline-start: auto;
+  border-radius: var(--radius-md);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.public-catalog-columns__toggle[aria-expanded="true"] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.public-catalog-columns {
+  min-inline-size: 0;
+  margin-block: 0 var(--space-5);
+}
+
+.public-catalog-columns__header {
+  flex-wrap: wrap;
+}
+
+.public-catalog-columns__close,
+.public-catalog-columns__reset {
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.public-catalog-columns__hint {
+  margin-block: 0 var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.public-catalog-columns__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-2) var(--space-4);
+}
+
+.public-catalog-columns__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  min-block-size: var(--size-target);
+  cursor: pointer;
+}
+
+.public-catalog-columns__option input {
+  flex: none;
+  inline-size: 1.125em;
+  block-size: 1.125em;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.public-catalog-columns__option span {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.public-catalog-columns__option input:disabled {
+  cursor: not-allowed;
+}
+
+.public-catalog-columns__option input:disabled + span {
+  color: var(--color-text-muted);
+}
+
+.public-catalog-columns__reset {
+  margin-block-start: var(--space-3);
+}
+
+/* 稳定 DOM 保留隐藏列的命令宿主；同时压过基础打印样式的 td display。 */
+.public-auction-catalog__table th[hidden],
+.public-auction-catalog__table td[hidden] {
+  display: none !important;
 }
 
 /* ===== 账户区（登录引导 / 账户表格） ===== */
@@ -2810,7 +2922,8 @@
     justify-content: center;
   }
 
-  .public-history-settings-panel {
+  .public-history-settings-panel,
+  .public-catalog-columns {
     padding: var(--space-3);
   }
 
@@ -3114,11 +3227,6 @@
 }
 
 @media (width > 64rem) {
-  .public-shell__content:has(> .public-auction-page) {
-    inline-size: 100%;
-    padding-inline: 0;
-  }
-
   .public-auction-page {
     gap: var(--space-2);
   }
@@ -3297,10 +3405,11 @@
   }
 }
 
-/* 宽桌面继续沿用紧凑居中版式，中屏保留完整可用宽度。 */
-@media (width > 75rem) {
-  .public-shell__content:has(> .public-auction-page) {
-    inline-size: 80%;
+/* 目录可能包在标记状态宿主内；按后代页面限定全宽与安全边距，不影响其他页面或打印。 */
+@media screen {
+  .public-shell__content:has(.public-auction-page) {
+    inline-size: 100%;
+    padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
   }
 }
 
@@ -3317,7 +3426,9 @@
   .public-shell__nav-toggle,
   .public-shell__controls,
   .public-state-retry,
-  .public-compensation-expand {
+  .public-compensation-expand,
+  .public-catalog-columns__toggle,
+  .public-catalog-columns {
     display: none;
   }
 

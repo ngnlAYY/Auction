@@ -35,6 +35,30 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-22 公开装备列显隐与目录留白（本地页面验证）
+
+owner 为 `auction-web-public::surface::catalog::columns`、目录表格及 Public 样式/五语资源。
+装备类型行右侧新增“显示列”，实时/已结算/预览目录默认显示 13/12/11 列；原生复选框立即生效，
+支持显示全部、Escape/关闭后的焦点恢复，以及 `hv.public.catalog-columns.v1` 本地偏好。
+至少保留一列，布局切换无可用已选列时临时显示装备列；损坏或受限存储退回默认，写入失败不撤销本次选择。
+表头、单元格和可见权重同步，打印保持隐藏；操作列宿主不因偏好隐藏销毁，剩余时间隐藏时卸载秒级订阅。
+宽屏目录释放左右空白，保留小边距及 safe-area；其他 Public 页面沿用原容器宽度。
+无 HTTP/JSON、权限、金额、命令身份或数据库变更；只补齐本包实际使用的 web-sys features，没有新增运行依赖。
+
+完整 `just verify`、MSRV 1.94.1 的 workspace/all-targets/all-features check 和 Public Web bundle 通过。
+首轮修正 Dioxus `key` 必须使用格式化字面量的编译错误。实际页面发现目录在 `.public-lot-watches` 包装内，
+旧直接子代 `:has(> .public-auction-page)` 未命中；改为限定目录后代后重建，最终六文件 payload 已用于浏览器验证。
+临时纯 Rust 诊断覆盖 8191 个合法位集、三布局及 638898 次 setter 尝试；VirtualDom 覆盖五语、开关/重置/关闭/Escape、
+末列保护和模式兜底，均通过。
+
+Chromium 在本地合成响应下验证三布局、所有五种语言、偏好重载、读写失败、损坏恢复、筛选 URL 不变、
+可见表头/行/col 数量及 100% 归一化、打印隐藏和 1920/2560/375/320 宽度无横向溢出。
+宽度按 `documentElement.clientWidth` 计算，排除桌面滚动条；规则页保持原宽度。
+操作列隐藏/恢复保留同一动作 DOM；两个故意断连的本地模拟出价使用相同 command_id 和金额，
+确认未知命令宿主未重建，没有真实出价。剩余时间叶子由两个变为零、恢复后回到两个。
+证据与截图在 `target/audits/catalog-columns-20261022/`。临时浏览器、服务、源码及诊断二进制已清理；
+未新增永久测试、运行完整业务测试套件、访问生产数据库或部署线上。LSP 启动失败，未计为通过。
+
 ### 2026-10-22 论坛倒计时数字与主题状态（本地隔离验证，schema 57）
 
 针对[问题帖 302292](https://forums.e-hentai.org/index.php?showtopic=302292)及用户提供的
