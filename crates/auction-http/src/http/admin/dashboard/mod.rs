@@ -89,8 +89,7 @@ pub(crate) async fn get(
         .and_then(|snapshot| snapshot.delivery.map(sections::map_delivery))
         .unwrap_or_else(sections::unknown_section);
     let recovery = owner_snapshot
-        .as_ref()
-        .and_then(|snapshot| snapshot.recovery.clone().map(sections::map_recovery))
+        .and_then(|snapshot| snapshot.recovery.map(sections::map_recovery))
         .unwrap_or_else(sections::unknown_section);
     let alerting = match state.operations_alert() {
         Some(port) => match port.health().await {

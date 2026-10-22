@@ -328,7 +328,13 @@ pub(super) fn origin_of(url: &Url) -> Option<String> {
 }
 
 pub(super) fn is_loopback_host(url: &Url) -> bool {
-    matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
+    // host_str 的 IPv6 文本含方括号；使用解析后的地址且保留论坛原有 IPv4 单地址边界。
+    match url.host() {
+        Some(url::Host::Domain("localhost")) => true,
+        Some(url::Host::Ipv4(address)) => address == std::net::Ipv4Addr::LOCALHOST,
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        _ => false,
+    }
 }
 
 pub(super) fn build_forum_http_client() -> Result<Client, reqwest::Error> {

@@ -15,7 +15,8 @@ pub type MailboxFuture<'a, T> =
 use crate::ApplicationError;
 
 /// compose 页当前草稿的只读投影。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 未发送草稿可能包含登录 key；主题和正文不得进入日志或调试输出。
+#[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailboxComposeState {
     pub clean: bool,
     pub recipient: String,
@@ -25,6 +26,21 @@ pub struct MoogleMailboxComposeState {
     /// 页面未提供可证明的 CoD 时为空。
     pub cod: Option<i64>,
     pub attachment_count: usize,
+}
+
+impl std::fmt::Debug for MoogleMailboxComposeState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("MoogleMailboxComposeState")
+            .field("clean", &self.clean)
+            .field("recipient", &self.recipient)
+            .field("subject", &"[REDACTED]")
+            .field("body", &"[REDACTED]")
+            .field("credits", &self.credits)
+            .field("cod", &self.cod)
+            .field("attachment_count", &self.attachment_count)
+            .finish()
+    }
 }
 
 /// 受控 discard 结果；已干净时没有发生远端写入。

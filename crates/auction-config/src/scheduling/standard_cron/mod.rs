@@ -127,10 +127,7 @@ fn calendar_kind(
     expression: &str,
     timezone: ScheduleTimezone,
 ) -> Result<StandardCronKind, StandardCronScheduleError> {
-    let fields = expression.split_whitespace().collect::<Vec<_>>();
-    if fields.len() != 5 {
-        return Err(StandardCronScheduleError::InvalidExpression);
-    }
+    let mut fields = expression.split_whitespace();
     let bounds = [
         FieldBounds::new(0, 59, &[]),
         FieldBounds::new(0, 23, &[]),
@@ -139,11 +136,15 @@ fn calendar_kind(
         FieldBounds::new(0, 6, WEEKDAY_NAMES),
     ];
     let mut canonical = String::new();
-    for (index, (field, field_bounds)) in fields.iter().zip(bounds).enumerate() {
+    for (index, field_bounds) in bounds.into_iter().enumerate() {
+        let field = fields.next().ok_or(StandardCronScheduleError::InvalidExpression)?;
         if index > 0 {
             canonical.push(' ');
         }
         canonical.push_str(&parse_field(field, field_bounds)?.canonical(field_bounds));
+    }
+    if fields.next().is_some() {
+        return Err(StandardCronScheduleError::InvalidExpression);
     }
     // croner 4 默认拒绝单值步长；这里仅传入既有解析器展开后的数字列表或 *，
     // 保留旧版 5/5、星期/月份别名及 wildcard 的接受边界，不放宽底层解析器。

@@ -326,7 +326,7 @@ history-filter-month-11 = 11월
 history-filter-month-12 = 12월
 
 login-key-label = 입찰 Key
-login-key-placeholder = 32자리 Key
+login-key-placeholder = 입찰 Key
 login-submit = 로그인
 login-working = 로그인 중…
 login-hint = 아직 Key가 없나요? 게임 내에서 경매 봇에게 제목이 "register"인 MoogleMail을 보내면 Key를 답장으로 받을 수 있어요.

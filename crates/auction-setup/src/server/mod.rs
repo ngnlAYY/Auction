@@ -42,8 +42,13 @@ struct FirstRunState {
     options: FirstRunServerOptions,
     token: String,
     policy: FirstRunPolicy,
-    operation: Mutex<SetupStatus>,
-    shutdown: Mutex<Option<oneshot::Sender<()>>>,
+    operation: Mutex<SetupOperation>,
+}
+
+/// 终态与完成通知由同一操作锁拥有，避免发布后为发送通知再次异步取锁。
+struct SetupOperation {
+    status: SetupStatus,
+    shutdown: Option<oneshot::Sender<()>>,
 }
 
 /// 终态只能在同一操作锁下写入；结果不确定也禁止本进程继续校验或写入。
@@ -88,8 +93,10 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
         options,
         token,
         policy: policy.clone(),
-        operation: Mutex::new(SetupStatus::Pending),
-        shutdown: Mutex::new(Some(shutdown_sender)),
+        operation: Mutex::new(SetupOperation {
+            status: SetupStatus::Pending,
+            shutdown: Some(shutdown_sender),
+        }),
     });
     let app = Router::new()
         .route("/api/v1/setup/verify", post(verify))
@@ -114,7 +121,7 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
     let Ok(operation) = state.operation.try_lock() else {
         return Ok(FirstRunOutcome::OutcomeUnknown);
     };
-    match &*operation {
+    match operation.status {
         SetupStatus::Completed if matches!(reason, lifecycle::ShutdownReason::Completed) => {
             Ok(FirstRunOutcome::Completed)
         }
@@ -166,15 +173,15 @@ async fn complete(State(state): State<Arc<FirstRunState>>, request: Request) -> 
         options.write_to(&state.options.output_dir)
     };
     match written {
-        Ok(()) => *operation = SetupStatus::Completed,
+        Ok(()) => operation.status = SetupStatus::Completed,
         Err(FirstRunError::OutcomeUnknown) => {
             // 目录可能已经发布，保留终态直到人工检查并停止此进程，不能恢复为可重试状态。
-            *operation = SetupStatus::OutcomeUnknown;
+            operation.status = SetupStatus::OutcomeUnknown;
             return Err(config_error(FirstRunError::OutcomeUnknown));
         }
         Err(error) => return Err(config_error(error)),
     }
-    if let Some(sender) = state.shutdown.lock().await.take() {
+    if let Some(sender) = operation.shutdown.take() {
         let _ = sender.send(());
     }
     Ok(Json(SetupResponse {
@@ -183,11 +190,11 @@ async fn complete(State(state): State<Arc<FirstRunState>>, request: Request) -> 
     }))
 }
 
-/// 三个接口先独立鉴权再获取同一非阻塞门禁；锁覆盖数据库等待、目录发布和终态写入。
-fn begin_operation(state: &FirstRunState) -> Result<MutexGuard<'_, SetupStatus>, SetupFailure> {
+/// 三个接口先独立鉴权再获取同一非阻塞门禁；锁覆盖数据库等待、目录发布、终态与完成通知。
+fn begin_operation(state: &FirstRunState) -> Result<MutexGuard<'_, SetupOperation>, SetupFailure> {
     let operation =
         state.operation.try_lock().map_err(|_| error(StatusCode::CONFLICT, "setup_busy"))?;
-    match *operation {
+    match operation.status {
         SetupStatus::Pending => Ok(operation),
         SetupStatus::Completed => Err(error(StatusCode::CONFLICT, "setup_completed")),
         SetupStatus::OutcomeUnknown => {

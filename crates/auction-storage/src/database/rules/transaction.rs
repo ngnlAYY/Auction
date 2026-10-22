@@ -162,26 +162,31 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
                 .expected_revision
                 .checked_add(1)
                 .ok_or_else(|| AdminRulesTransactionError::Failed("规则版本溢出".to_owned()))?;
-            let row = sqlx::query(
+            // 新建只能从 revision 0 开始；更新不得在目标缺失时借 UPSERT 跳过版本 CAS。
+            let statement = if command.expected_revision == 0 {
                 "INSERT INTO public.rules_documents
                     (locale, revision, title, markdown, published_by, published_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)
-                 ON CONFLICT (locale) DO UPDATE
+                 SELECT $1, $2, $3, $4, $5, $6 WHERE $7::bigint = 0
+                 ON CONFLICT (locale) DO NOTHING
+                 RETURNING locale, revision, title, markdown, published_by, published_at"
+            } else {
+                "UPDATE public.rules_documents
                  SET revision = $2, title = $3, markdown = $4,
                      published_by = $5, published_at = $6
-                 WHERE public.rules_documents.revision = $7
-                 RETURNING locale, revision, title, markdown, published_by, published_at",
-            )
-            .bind(&command.locale)
-            .bind(next_revision)
-            .bind(&command.title)
-            .bind(&command.markdown)
-            .bind(&command.actor_id)
-            .bind(published_at)
-            .bind(command.expected_revision)
-            .fetch_optional(&mut **self.transaction_mut()?)
-            .await
-            .map_err(map_sql_error)?;
+                 WHERE locale = $1 AND revision = $7
+                 RETURNING locale, revision, title, markdown, published_by, published_at"
+            };
+            let row = sqlx::query(statement)
+                .bind(&command.locale)
+                .bind(next_revision)
+                .bind(&command.title)
+                .bind(&command.markdown)
+                .bind(&command.actor_id)
+                .bind(published_at)
+                .bind(command.expected_revision)
+                .fetch_optional(&mut **self.transaction_mut()?)
+                .await
+                .map_err(map_sql_error)?;
             let Some(row) = row else {
                 let current_revision = sqlx::query_scalar::<_, i64>(
                     "SELECT revision FROM public.rules_documents WHERE locale = $1",
@@ -256,7 +261,7 @@ async fn set_isolation(
 fn map_sql_error(error: sqlx::Error) -> AdminRulesTransactionError {
     match &error {
         sqlx::Error::Database(database_error)
-            if database_error.code().as_deref() == Some("40001") =>
+            if matches!(database_error.code().as_deref(), Some("40001" | "40P01")) =>
         {
             AdminRulesTransactionError::SerializationConflict
         }

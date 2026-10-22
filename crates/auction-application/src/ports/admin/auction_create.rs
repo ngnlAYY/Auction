@@ -57,6 +57,14 @@ pub trait AdminAuctionCreatePort: Send + Sync {
 
 /// Admin 创建拍卖事务的 PostgreSQL 完整档窄适配器能力。
 pub trait AdminAuctionCreateTransaction: Send {
+    /// 按 world → intake target 顺序锁定创建资格；同一事务随后才读取当前时间并执行创建。
+    /// 已接受命令先重放，不得为旧结果重新检查世界状态或计划时间。
+    fn lock_admin_auction_creation(
+        &mut self,
+        world_id: &str,
+    ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
+
+    /// 使用本事务已经锁定的创建上下文写入聚合，不再次等待业务锁。
     fn create_admin_auction(
         &mut self,
         command: AdminCreateAuctionCommand,

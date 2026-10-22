@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-/// 两种数据库适配器写入同一冻结审计闭集所需的后端无关记录。
+/// PostgreSQL 生命周期事务写入冻结审计闭集所需的记录。
 pub(crate) struct LifecycleAuditRecord {
     pub occurred_at: DateTime<Utc>,
     pub actor_type: &'static str,

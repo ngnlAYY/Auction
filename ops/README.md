@@ -495,10 +495,10 @@ UnsetEnvironment、PassEnvironment、PAMName，不回显环境值。systemctl sh
 | 边界 | 当前预算 | 安装时核对 |
 | --- | --- | --- |
 | 单角色 | drain 10 秒 + exporter 最多 30 秒；unit 45 秒 | 二次信号强制结束 drain，exporter 仍受自身超时保护 |
-| 分体总控 | TimeoutStartSec=180、TimeoutStopSec=120 秒 | 启动须覆盖迁移和三个 readiness；若经总控 unit 停止且三角色各用满 45 秒，合计 135 秒超过外层预算，安装时须重算 |
+| 分体总控 | TimeoutStartSec=180、TimeoutStopSec=155 秒 | 停止覆盖三角色各 45 秒及 20 秒总控余量；启动仍须覆盖迁移和三个 readiness |
 | 合并 supervisor | drain 135 秒，强杀后每角色回收最多 5 秒；unit 155 秒 | KillMode=mixed，超时回收整个 cgroup；不得套用分体 45 秒 |
 
-这里只核对模板和源码预算，不代表最长关闭路径已经运行验证；改变任何阶段上限时须同步重算外层超时。
+这里只核对模板和源码预算，不代表最长关闭路径已经运行验证；改变任何阶段上限时须同步重算外层超时。既有安装须在维护窗口同步 unit 并重新加载，源码模板变化不会自动修改线上配置。
 
 ### 权限与回执
 

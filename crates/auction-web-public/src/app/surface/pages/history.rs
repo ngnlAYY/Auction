@@ -7,16 +7,17 @@ pub(crate) fn AuctionList() -> Element {
     // 世界/状态/页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
-    let world_filter =
-        use_memo(move || query_state_signal().world.clone().unwrap_or_else(|| "all".to_owned()));
+    let world_filter = use_memo(move || {
+        query_state_signal.read().world.clone().unwrap_or_else(|| "all".to_owned())
+    });
     let status_filter = use_memo(move || {
-        let status = query_state_signal().status.clone();
+        let status = query_state_signal.read().status.clone();
         status
             .filter(|status| matches!(status.as_str(), "live" | "final" | "settled"))
             .unwrap_or_else(|| "settled".to_owned())
     });
-    let page_number = use_memo(move || query_state_signal().page.max(1));
-    let page_size = use_memo(move || query_state_signal().page_size);
+    let page_number = use_memo(move || query_state_signal.read().page.max(1));
+    let page_size = use_memo(move || query_state_signal.read().page_size);
     let mut refresh_generation = use_signal(|| 0_u64);
     let worlds = use_resource(fetch_worlds);
     let world_options = match &*worlds.read_unchecked() {
@@ -28,10 +29,26 @@ pub(crate) fn AuctionList() -> Element {
         let world = world_filter();
         let status = status_filter();
         let page = page_number();
+        let size = page_size();
+        let requested = (world.clone(), status.clone(), page, size);
         let world = (world != "all").then_some(world);
-        fetch_auction_page(world, status, page, page_size())
+        async move {
+            let result = fetch_auction_page(world, status, page, size).await;
+            (requested, result)
+        }
     });
-    match &*auctions.read_unchecked() {
+    let auction_state = auctions.read_unchecked();
+    // 查询变化时旧快照不能参与列表展示或页码纠偏，同查询后台刷新仍保留旧值。
+    let current_result = auction_state
+        .as_ref()
+        .filter(|((world, status, page, size), _)| {
+            world == &world_filter()
+                && status == &status_filter()
+                && *page == page_number()
+                && *size == page_size()
+        })
+        .map(|(_, result)| result);
+    match current_result {
         None => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Loading,
@@ -130,7 +147,7 @@ pub(crate) fn AuctionHistoryPage(
                     p { class: "public-auction-empty__hint", {t!("auction-history-empty-hint")} }
                 }
             } else {
-                AuctionHistoryTable { rows: page.auctions.clone() }
+                AuctionHistoryTable { rows: page.auctions }
             }
             PublicPager {
                 page: page_number,

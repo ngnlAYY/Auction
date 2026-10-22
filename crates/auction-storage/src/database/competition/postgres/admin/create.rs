@@ -4,6 +4,40 @@ use super::*;
 
 #[allow(clippy::manual_async_fn)]
 impl AdminAuctionCreateTransaction for PostgresCompetitionTransaction {
+    fn lock_admin_auction_creation(
+        &mut self,
+        world_id: &str,
+    ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
+        async move {
+            // 先完成原 world → intake target 锁前缀，应用层再读取数据库时间校验预览窗口。
+            let transaction = self.transaction_mut()?;
+            let world_enabled = sqlx::query_scalar::<_, bool>(
+                "SELECT enabled FROM public.worlds WHERE id = $1 FOR UPDATE",
+            )
+            .bind(world_id)
+            .fetch_optional(&mut **transaction)
+            .await
+            .map_err(map_sql_error)?;
+            let Some(world_enabled) = world_enabled else {
+                return Err(CompetitionTransactionError::NotFound);
+            };
+            if !world_enabled {
+                return Err(CompetitionTransactionError::Conflict);
+            }
+            let existing_target = sqlx::query_scalar::<_, Uuid>(
+                "SELECT auction_id FROM public.auction_intake_targets WHERE world_id = $1 FOR UPDATE",
+            )
+            .bind(world_id)
+            .fetch_optional(&mut **transaction)
+            .await
+            .map_err(map_sql_error)?;
+            if existing_target.is_some() {
+                return Err(CompetitionTransactionError::Conflict);
+            }
+            Ok(())
+        }
+    }
+
     fn create_admin_auction(
         &mut self,
         command: AdminCreateAuctionCommand,
@@ -34,35 +68,6 @@ async fn create_admin_auction_inner(
         .auction_rules()
         .map_err(|error| invalid_state(&format!("拍卖策略规则无效：{error}")))?;
     let policy_snapshot = policy.snapshot(command.scheduled_end_at);
-    let world_enabled = {
-        let transaction = transaction.transaction_mut()?;
-        sqlx::query_scalar::<_, bool>("SELECT enabled FROM public.worlds WHERE id = $1 FOR UPDATE")
-            .bind(&command.world_id)
-            .fetch_optional(&mut **transaction)
-            .await
-            .map_err(map_sql_error)?
-    };
-    let Some(world_enabled) = world_enabled else {
-        return Err(CompetitionTransactionError::NotFound);
-    };
-    if !world_enabled {
-        return Err(CompetitionTransactionError::Conflict);
-    }
-
-    let existing_target = {
-        let transaction = transaction.transaction_mut()?;
-        sqlx::query_scalar::<_, Uuid>(
-            "SELECT auction_id FROM public.auction_intake_targets WHERE world_id = $1 FOR UPDATE",
-        )
-        .bind(&command.world_id)
-        .fetch_optional(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?
-    };
-    if existing_target.is_some() {
-        return Err(CompetitionTransactionError::Conflict);
-    }
-
     let row = {
         let transaction = transaction.transaction_mut()?;
         sqlx::query(

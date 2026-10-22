@@ -103,9 +103,12 @@ pub(crate) fn map_owned_bid(bid: PublicMyBid) -> PublicOwnedBidResponse {
 }
 
 pub(crate) fn map_owned_proxy(proxy: PublicOwnedProxy) -> PublicOwnedProxyResponse {
+    // wire 在嵌套 bid 中重复装备摘要；只复制该副本，顶层摘要直接接管原字符串。
+    let bid =
+        proxy.bid.map(|bid| map_proxy_bid(bid, &proxy.equipment_name, &proxy.equipment_category));
     let equipment = PublicOwnedEquipmentResponse {
-        name: proxy.equipment_name.clone(),
-        category: proxy.equipment_category.clone(),
+        name: proxy.equipment_name,
+        category: proxy.equipment_category,
     };
     PublicOwnedProxyResponse {
         authorization_id: proxy.authorization_id.to_string(),
@@ -124,9 +127,7 @@ pub(crate) fn map_owned_proxy(proxy: PublicOwnedProxy) -> PublicOwnedProxyRespon
         created_at: public_timestamp(proxy.created_at),
         updated_at: public_timestamp(proxy.updated_at),
         equipment,
-        bid: proxy
-            .bid
-            .map(|bid| map_proxy_bid(bid, &proxy.equipment_name, &proxy.equipment_category)),
+        bid,
         invalid_reason: proxy.invalid_reason,
         capabilities: PublicOwnedProxyCapabilitiesResponse {
             can_lower: proxy.capabilities.can_lower,

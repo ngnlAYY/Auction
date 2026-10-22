@@ -15,8 +15,8 @@ struct StoredSettlementPolicy {
 }
 
 pub(super) fn decode(snapshot: &Value) -> Result<SettlementPolicy, &'static str> {
-    let stored: StoredSettlementPolicy = serde_json::from_value(
-        snapshot.get("settlement").cloned().ok_or("拍卖策略快照缺少 settlement")?,
+    let stored = StoredSettlementPolicy::deserialize(
+        snapshot.get("settlement").ok_or("拍卖策略快照缺少 settlement")?,
     )
     .map_err(|_| "结算策略快照字段无效")?;
     let mode = match stored.mode.as_str() {

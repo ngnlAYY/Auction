@@ -85,6 +85,8 @@ where
 pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));
+        // 心跳只描述当前状态；数据库恢复后跳过漏掉的 tick，避免集中重复发布。
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         ticker.tick().await;
         loop {
             ticker.tick().await;

@@ -73,11 +73,21 @@ pub struct PublicSessionRecord {
     pub absolute_expires_at: DateTime<Utc>,
 }
 
-/// 登录成功后只向 HTTP 边界暴露一次的原始 token 和安全投影。
-#[derive(Debug, Clone)]
+/// 登录成功后只向 HTTP 边界暴露一次的原始 token 和安全投影；调试输出不包含 token。
+#[derive(Clone)]
 pub struct PublicLoginResult {
     pub token: String,
     pub identity: PublicSessionIdentity,
+}
+
+impl std::fmt::Debug for PublicLoginResult {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PublicLoginResult")
+            .field("token", &"[REDACTED]")
+            .field("identity", &self.identity)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -98,12 +108,23 @@ pub struct AdminSessionRecord {
     pub absolute_expires_at: DateTime<Utc>,
 }
 
-/// Admin 登录成功后只向 HTTP 边界暴露一次的原始 token 对。
-#[derive(Debug, Clone)]
+/// Admin 登录成功后只向 HTTP 边界暴露一次的原始 token 对；调试输出同时隐藏 session 与 CSRF。
+#[derive(Clone)]
 pub struct AdminLoginResult {
     pub token: String,
     pub csrf_token: String,
     pub identity: AdminSessionIdentity,
+}
+
+impl std::fmt::Debug for AdminLoginResult {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminLoginResult")
+            .field("token", &"[REDACTED]")
+            .field("csrf_token", &"[REDACTED]")
+            .field("identity", &self.identity)
+            .finish()
+    }
 }
 
 /// users owner 的登录认证窄端口。

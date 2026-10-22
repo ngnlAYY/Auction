@@ -184,6 +184,13 @@ printf '%s\n' \
 install -m 0644 "$payload_next" "$payload_manifest"
 
 # 复用标记最后写入：中断后留下的半成品 payload 没有匹配标记，下次仍会重建。
+# 独立 web-build 也必须复核输入，不能把构建期间的源码或工具变化标记成可复用的旧快照。
+if [[ $(web_inputs_fingerprint "$surface") != "$source_identity" ||
+  $(build_env_fingerprint) != "$build_environment" ]]; then
+  printf '%s Web 构建期间输入发生变化，请重新构建\n' "$surface" >&2
+  exit 1
+fi
+
 printf '%s\n' \
   'schema=auction-web-build/1' \
   "surface=$surface" \

@@ -13,7 +13,8 @@ StateDirectoryMode=0700
 ExecStart=/opt/auction/bin/auctionctl deployment --systemctl /usr/bin/systemctl --state-dir /var/lib/auction/deployment start --config-dir /etc/auction --startup-timeout-seconds 30
 ExecStop=/opt/auction/bin/auctionctl deployment --systemctl /usr/bin/systemctl --state-dir /var/lib/auction/deployment stop
 TimeoutStartSec=180
-TimeoutStopSec=120
+# 三角色依次停止最多 3 × 45 秒，另留 20 秒给总控核对和回执收口。
+TimeoutStopSec=155
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

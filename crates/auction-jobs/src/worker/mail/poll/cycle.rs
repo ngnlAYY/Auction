@@ -108,11 +108,19 @@ where
         return Ok(WorkerResult::Success);
     }
     run_maintenance(worker, runtime).await;
+    // 维护包含远端等待；完成后必须重新确认 drain，不能在停机期间再领取邮箱。
+    if worker.control.is_draining() {
+        return Ok(WorkerResult::Success);
+    }
+    let claim_started = tokio::time::Instant::now();
     let now = worker.clock.now();
     let lease_duration = ChronoDuration::from_std(runtime.config.lease_duration)
         .map_err(|_| WorkerError::InvalidMailPollConfiguration)?;
     let lease_until =
         now.checked_add_signed(lease_duration).ok_or(WorkerError::InvalidMailPollConfiguration)?;
+    let lease_deadline = claim_started
+        .checked_add(runtime.config.lease_duration)
+        .ok_or(WorkerError::InvalidMailPollConfiguration)?;
     // 一个 runtime 只拥有一个 mailbox 状态；领取上限固定为一，避免让未来异常数据形成预领取队列。
     let claims = runtime
         .store
@@ -144,7 +152,7 @@ where
     };
     let mut iteration_result = WorkerResult::Success;
     for claim in claims {
-        let item_result = process_claim(context.clone(), claim).await;
+        let item_result = process_claim(context.clone(), claim, lease_deadline).await;
         super::super::merge_worker_result(&mut iteration_result, item_result);
     }
     Ok(iteration_result)

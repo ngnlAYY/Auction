@@ -1,9 +1,13 @@
 //! 本地 `.keyenv` 的 MoogleMail 双身份解析。
 
-use std::{fs, io, path::Path};
+use std::{
+    fs,
+    io::{self, Read},
+    path::Path,
+};
 
 #[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 use super::super::ConfigError;
 use super::model::{MoogleMailKeyEnv, SecretString};
@@ -13,8 +17,18 @@ use super::model::{MoogleMailKeyEnv, SecretString};
 /// `hv-ck-key1` 和 `hv-ck-key2`，拒绝未知键、重复键、空值和不安全文件权限；错误不会回显
 /// 任何值。
 pub fn load_mooglemail_keyenv(path: impl AsRef<Path>) -> Result<MoogleMailKeyEnv, ConfigError> {
+    const MAX_KEYENV_BYTES: u64 = 64 * 1024;
     let path = path.as_ref().to_owned();
-    let metadata = fs::metadata(&path)
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NONBLOCK);
+    let file = options
+        .open(&path)
+        .map_err(|source| ConfigError::MoogleMailKeyEnvRead { path: path.clone(), source })?;
+    // 权限与内容必须来自同一描述符；路径替换不能绕过已完成的安全检查。
+    let metadata = file
+        .metadata()
         .map_err(|source| ConfigError::MoogleMailKeyEnvRead { path: path.clone(), source })?;
     if !metadata.is_file() {
         return Err(ConfigError::MoogleMailKeyEnvRead {
@@ -27,8 +41,16 @@ pub fn load_mooglemail_keyenv(path: impl AsRef<Path>) -> Result<MoogleMailKeyEnv
         return Err(ConfigError::MoogleMailKeyEnvInsecurePermissions { path });
     }
 
-    let contents = fs::read_to_string(&path)
+    if metadata.len() > MAX_KEYENV_BYTES {
+        return Err(ConfigError::MoogleMailKeyEnvParse { path });
+    }
+    let mut contents = String::with_capacity(metadata.len() as usize);
+    file.take(MAX_KEYENV_BYTES + 1)
+        .read_to_string(&mut contents)
         .map_err(|source| ConfigError::MoogleMailKeyEnvRead { path: path.clone(), source })?;
+    if contents.len() as u64 > MAX_KEYENV_BYTES {
+        return Err(ConfigError::MoogleMailKeyEnvParse { path });
+    }
     let mut bot_cookie = None;
     let mut test_cookie = None;
     for line in contents.lines() {

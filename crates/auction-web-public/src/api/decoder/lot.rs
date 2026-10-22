@@ -113,7 +113,7 @@ fn valid_lot_list(
             valid_preview_lot(lot, auction_id, None, false)
         } else {
             valid_live_lot(lot, auction_id, None)
-                && (value.get("auction_status") != Some(&Value::String("settled".to_owned()))
+                && (string(value.get("auction_status")) != Some("settled")
                     || object(lot).and_then(|lot| string(lot.get("status"))) != Some("live"))
         };
         // 请求分组和每行服务端判定必须一致，防止响应串用或分页遗漏条件。
@@ -152,7 +152,7 @@ fn valid_lot_detail(value: &Value, auction_id: Option<&str>, lot_id: &str) -> bo
     {
         return false;
     }
-    if value.get("projection_kind") == Some(&Value::String("preview".to_owned())) {
+    if string(value.get("projection_kind")) == Some("preview") {
         valid_preview_lot(
             value.get("lot").unwrap_or(&Value::Null),
             response_auction_id,
@@ -161,7 +161,7 @@ fn valid_lot_detail(value: &Value, auction_id: Option<&str>, lot_id: &str) -> bo
         )
     } else {
         valid_live_lot(value.get("lot").unwrap_or(&Value::Null), response_auction_id, Some(lot_id))
-            && (value.get("auction_status") != Some(&Value::String("settled".to_owned()))
+            && (string(value.get("auction_status")) != Some("settled")
                 || object(value.get("lot").unwrap_or(&Value::Null))
                     .and_then(|lot| string(lot.get("status")))
                     != Some("live"))

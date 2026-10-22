@@ -33,13 +33,31 @@ impl Drop for SocketCleanupGuard {
 pub(super) fn resolve_group_id(group: &str) -> Result<u32, WorkerControlServerError> {
     let encoded = CString::new(group)
         .map_err(|_| WorkerControlServerError::InvalidSecurityConfig("group 包含 NUL"))?;
-    // SAFETY: encoded 是 NUL 结尾的不可变 group 名称；返回记录只在本次同步调用内读取。
-    let record = unsafe { libc::getgrnam(encoded.as_ptr()) };
-    if record.is_null() {
-        return Err(WorkerControlServerError::UnknownGroup);
+    let mut buffer = vec![0_u8; 1024];
+    loop {
+        let mut record = std::mem::MaybeUninit::<libc::group>::uninit();
+        let mut result = std::ptr::null_mut();
+        // SAFETY: 输入以 NUL 结尾；记录、缓冲和结果指针均由本次调用独占，
+        // 不使用会被其他线程的 group 查询覆盖的 libc 静态记录。
+        let status = unsafe {
+            libc::getgrnam_r(
+                encoded.as_ptr(),
+                record.as_mut_ptr(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                &mut result,
+            )
+        };
+        if status == libc::ERANGE && buffer.len() < 1024 * 1024 {
+            buffer.resize(buffer.len() * 2, 0);
+            continue;
+        }
+        if status != 0 || result.is_null() {
+            return Err(WorkerControlServerError::UnknownGroup);
+        }
+        // SAFETY: getgrnam_r 成功且 result 非空，record 已初始化；只复制不借用缓冲的 GID。
+        return Ok(unsafe { record.assume_init().gr_gid });
     }
-    // SAFETY: 上一步已排除空指针，gr_gid 是 libc group 记录中的值字段。
-    Ok(unsafe { (*record).gr_gid })
 }
 
 #[cfg(unix)]

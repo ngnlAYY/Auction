@@ -60,7 +60,7 @@ impl WorkerControlClient {
         request = request
             .header(HEADER_REQUEST_ID, &request_id)
             .header(HEADER_PROTOCOL_VERSION, WORKER_CONTROL_PROTOCOL_VERSION);
-        let response = request.send().await.map_err(classify_request_error)?;
+        let mut response = request.send().await.map_err(classify_request_error)?;
         let status = response.status();
         if status == StatusCode::GATEWAY_TIMEOUT {
             return Err(WorkerControlClientError::Timeout);
@@ -88,9 +88,13 @@ impl WorkerControlClient {
         if response.content_length().is_some_and(|length| length > MAX_RESPONSE_BYTES as u64) {
             return Err(WorkerControlClientError::Incompatible);
         }
-        let body = response.bytes().await.map_err(classify_request_error)?;
-        if body.len() > MAX_RESPONSE_BYTES {
-            return Err(WorkerControlClientError::Incompatible);
+        // Content-Length 可以缺失；逐块检查，不能先无界收集正文再拒绝超限响应。
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(classify_request_error)? {
+            if chunk.len() > MAX_RESPONSE_BYTES - body.len() {
+                return Err(WorkerControlClientError::Incompatible);
+            }
+            body.extend_from_slice(&chunk);
         }
         let envelope: ControlEnvelope<T> =
             serde_json::from_slice(&body).map_err(|_| WorkerControlClientError::Incompatible)?;

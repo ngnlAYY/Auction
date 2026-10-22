@@ -326,7 +326,7 @@ history-filter-month-11 = 11月
 history-filter-month-12 = 12月
 
 login-key-label = 入札用 Key
-login-key-placeholder = 32 文字の Key
+login-key-placeholder = 入札用 Key
 login-submit = ログイン
 login-working = ログイン中…
 login-hint = Key をお持ちでない場合は、ゲーム内でオークションボットに件名 "register" の MoogleMail を送ってください。折り返し Key が届きます。

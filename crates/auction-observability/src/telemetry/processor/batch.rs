@@ -88,8 +88,18 @@ where
     }
 
     fn abort_worker(&self) {
-        if let Ok(mut worker) = self.worker.lock()
-            && let Some(worker) = worker.take()
+        let mut worker = self.worker.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(worker) = worker.take() {
+            worker.abort();
+        }
+    }
+}
+
+impl<E> Drop for DropAwareBatchSpanProcessor<E> {
+    fn drop(&mut self) {
+        // 初始化失败或未显式 shutdown 时，不能让定时器和 exporter 脱离 processor 存活。
+        if let Some(worker) =
+            self.worker.get_mut().unwrap_or_else(|error| error.into_inner()).take()
         {
             worker.abort();
         }
@@ -139,9 +149,13 @@ where
             return Err(Self::processor_error("OTLP span processor queue is closed"));
         }
 
-        let result = receiver.recv_timeout(timeout).map_err(|error| {
-            Self::processor_error(format!("OTLP span processor shutdown timed out: {error}"))
-        })?;
+        // 等待超时同样必须走下面的终态与 abort；提前返回会留下仍在导出的后台任务。
+        let result = match receiver.recv_timeout(timeout) {
+            Ok(result) => result,
+            Err(error) => Err(Self::processor_error(format!(
+                "OTLP span processor shutdown timed out: {error}"
+            ))),
+        };
         self.state.store(2, Ordering::Release);
         if result.is_err() {
             self.abort_worker();

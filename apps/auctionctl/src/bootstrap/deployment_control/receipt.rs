@@ -3,7 +3,7 @@
 
 use std::{
     fs::{self, File, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     os::unix::{fs::OpenOptionsExt, fs::PermissionsExt},
     path::Path,
 };
@@ -107,12 +107,17 @@ pub(super) fn publish(
 
 pub(super) fn read(state_dir: &Path) -> anyhow::Result<Option<StartupReceipt>> {
     let path = state_dir.join(RECEIPT_FILE);
-    let metadata = match fs::symlink_metadata(&path) {
-        Ok(metadata) => metadata,
+    let file = match OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .open(&path)
+    {
+        Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error).context("读取启动回执元数据失败"),
+        Err(error) => return Err(error).context("打开启动回执失败"),
     };
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
+    let metadata = file.metadata().context("读取启动回执元数据失败")?;
+    if !metadata.is_file() {
         anyhow::bail!("启动回执不是安全普通文件")
     }
     if metadata.permissions().mode() & 0o077 != 0 {
@@ -121,7 +126,12 @@ pub(super) fn read(state_dir: &Path) -> anyhow::Result<Option<StartupReceipt>> {
     if metadata.len() > 64 * 1024 {
         anyhow::bail!("启动回执超过 64 KiB 上限")
     }
-    let contents = fs::read(&path).context("读取启动回执失败")?;
+    // 在已校验的描述符上限量读取，不能依赖读取前的长度阻止文件并发增长。
+    let mut contents = Vec::new();
+    file.take(64 * 1024 + 1).read_to_end(&mut contents).context("读取启动回执失败")?;
+    if contents.len() > 64 * 1024 {
+        anyhow::bail!("启动回执超过 64 KiB 上限")
+    }
     let receipt: StartupReceipt = serde_json::from_slice(&contents).context("解析启动回执失败")?;
     validate(&receipt)?;
     Ok(Some(receipt))

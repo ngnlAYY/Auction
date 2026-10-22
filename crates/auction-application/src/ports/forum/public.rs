@@ -11,7 +11,8 @@ use super::ApplicationFuture;
 pub const PUBLIC_FORUM_STATUSES: [&str; 4] = ["pending", "publishing", "published", "failed"];
 
 /// Public 论坛镜像安全投影。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 已发布正文仍可能包含完整装备 URL，不能因进入只读镜像而恢复明文调试输出。
+#[derive(Clone, PartialEq, Eq)]
 pub struct PublicForumThread {
     pub auction_id: Uuid,
     pub status: String,
@@ -30,6 +31,27 @@ pub struct PublicForumThread {
     /// 当前未恢复扫描错误的有界稳定码，不包含远端正文。
     pub content_last_error_code: Option<String>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl std::fmt::Debug for PublicForumThread {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PublicForumThread")
+            .field("auction_id", &self.auction_id)
+            .field("status", &self.status)
+            .field("source_revision", &self.source_revision)
+            .field("thread_url", &self.thread_url)
+            .field("title", &self.title)
+            .field("body", &self.body.as_ref().map(|_| "[REDACTED]"))
+            .field("content_revision", &self.content_revision)
+            .field("processed_through_post_number", &self.processed_through_post_number)
+            .field("content_synced_at", &self.content_synced_at)
+            .field("content_last_success_at", &self.content_last_success_at)
+            .field("content_last_error_at", &self.content_last_error_at)
+            .field("content_last_error_code", &self.content_last_error_code)
+            .field("updated_at", &self.updated_at)
+            .finish()
+    }
 }
 
 impl PublicForumThread {

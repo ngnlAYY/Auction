@@ -1,16 +1,10 @@
 //! PostgreSQL 备份 manifest 与文件摘要校验。
 
 use super::super::*;
-use super::verify_private_regular_file;
+use super::read_private_artifact;
 
 pub(crate) fn read_backup_manifest(path: &Path) -> anyhow::Result<PostgresBackupManifest> {
-    verify_private_regular_file(path, "backup manifest")?;
-    let metadata = fs::metadata(path)?;
-    if metadata.len() > MAX_BACKUP_MANIFEST_BYTES {
-        anyhow::bail!("backup manifest exceeds the bounded evidence size");
-    }
-    let bytes =
-        fs::read(path).with_context(|| format!("read backup manifest: {}", path.display()))?;
+    let bytes = read_private_artifact(path, "backup manifest", MAX_BACKUP_MANIFEST_BYTES)?;
     serde_json::from_slice(&bytes).context("decode PostgreSQL backup manifest")
 }
 

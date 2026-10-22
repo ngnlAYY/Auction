@@ -1,5 +1,9 @@
 //! PostgreSQL Public account 读取与代理历史查询；结果映射和公共不变量校验由 mapping 维护。
 
+use std::collections::HashMap;
+
+use futures_util::TryStreamExt;
+
 use super::*;
 
 #[cfg(feature = "postgres")]
@@ -115,13 +119,17 @@ pub(super) async fn list_postgres(
     .await
     .map_err(|_| storage_error("读取 PostgreSQL 用户代理历史失败"))?;
 
-    let mut proxies = Vec::with_capacity(proxy_rows.len());
-    for row in proxy_rows {
-        let base = map_postgres_proxy_base(row)?;
-        let transitions =
-            load_postgres_transitions(&mut transaction, base.authorization_id).await?;
-        let bid = load_postgres_proxy_bid(&mut transaction, &base).await?;
-        proxies.push(build_proxy(base, transitions, bid)?);
+    let bases =
+        proxy_rows.into_iter().map(map_postgres_proxy_base).collect::<Result<Vec<_>, _>>()?;
+    let authorization_ids = bases.iter().map(|base| base.authorization_id).collect::<Vec<_>>();
+    // 仅补齐当前页授权，避免每条授权分别往返读取转换历史与最近竞价。
+    let mut transitions = load_postgres_transitions(&mut transaction, &authorization_ids).await?;
+    let mut proxy_bids = load_postgres_proxy_bids(&mut transaction, &authorization_ids).await?;
+    let mut proxies = Vec::with_capacity(bases.len());
+    for base in bases {
+        let history = transitions.remove(&base.authorization_id).unwrap_or_default();
+        let bid = proxy_bids.remove(&base.authorization_id);
+        proxies.push(build_proxy(base, history, bid)?);
     }
 
     let proxy_total = sqlx::query_scalar::<_, i64>(
@@ -141,7 +149,7 @@ pub(super) async fn list_postgres(
 
     transaction.commit().await.map_err(|_| storage_error("提交 PostgreSQL 账户读取事务失败"))?;
     let page = PublicMyBidsPage { bids, proxies, bid_total, proxy_total };
-    validate_page(&page, request)
+    validate_page(page, request)
 }
 
 #[cfg(feature = "postgres")]
@@ -260,8 +268,14 @@ pub(super) async fn proxy_postgres(
         return Ok(None);
     };
     let base = map_postgres_proxy_base(row)?;
-    let transitions = load_postgres_transitions(&mut transaction, base.authorization_id).await?;
-    let bid = load_postgres_proxy_bid(&mut transaction, &base).await?;
+    let authorization_ids = [base.authorization_id];
+    let transitions = load_postgres_transitions(&mut transaction, &authorization_ids)
+        .await?
+        .remove(&base.authorization_id)
+        .unwrap_or_default();
+    let bid = load_postgres_proxy_bids(&mut transaction, &authorization_ids)
+        .await?
+        .remove(&base.authorization_id);
     let proxy = build_proxy(base, transitions, bid)?;
     transaction.commit().await.map_err(|_| storage_error("提交 PostgreSQL 用户代理事务失败"))?;
     Ok(Some(proxy))
@@ -270,10 +284,15 @@ pub(super) async fn proxy_postgres(
 #[cfg(feature = "postgres")]
 async fn load_postgres_transitions(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    authorization_id: Uuid,
-) -> Result<Vec<PublicProxyTransition>, ApplicationError> {
-    let rows = sqlx::query(
+    authorization_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<PublicProxyTransition>>, ApplicationError> {
+    let mut histories = HashMap::<Uuid, Vec<PublicProxyTransition>>::new();
+    if authorization_ids.is_empty() {
+        return Ok(histories);
+    }
+    let mut rows = sqlx::query(
         "SELECT
+            authorization_id,
             transition_number,
             transition_kind AS kind,
             old_maximum_amount,
@@ -286,30 +305,34 @@ async fn load_postgres_transitions(
             resulting_state_version,
             created_at
          FROM public.bid_proxy_authorization_transitions
-         WHERE authorization_id = $1
-         ORDER BY transition_number",
+         WHERE authorization_id = ANY($1)
+         ORDER BY authorization_id, transition_number",
     )
-    .bind(authorization_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|_| storage_error("读取 PostgreSQL 代理转换历史失败"))?;
-    rows.into_iter().map(map_postgres_transition).collect()
+    .bind(authorization_ids)
+    .fetch(&mut **transaction);
+    while let Some(row) =
+        rows.try_next().await.map_err(|_| storage_error("读取 PostgreSQL 代理转换历史失败"))?
+    {
+        let authorization_id =
+            get_pg(&row, "authorization_id", "读取 PostgreSQL 代理授权标识失败")?;
+        histories.entry(authorization_id).or_default().push(map_postgres_transition(row)?);
+    }
+    Ok(histories)
 }
 
 #[cfg(feature = "postgres")]
-async fn load_postgres_proxy_bid(
+async fn load_postgres_proxy_bids(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    base: &ProxyBase,
-) -> Result<Option<PublicProxyBid>, ApplicationError> {
-    let row = sqlx::query(
-        "WITH next_authorization AS (
-            SELECT min(next_authorization.created_at) AS created_at
-            FROM public.bid_proxy_authorizations AS next_authorization
-            WHERE next_authorization.lot_id = $1
-              AND next_authorization.user_id = $2
-              AND next_authorization.usage_number = $4 + 1
-         )
-         SELECT
+    authorization_ids: &[Uuid],
+) -> Result<HashMap<Uuid, PublicProxyBid>, ApplicationError> {
+    let mut bids = HashMap::new();
+    if authorization_ids.is_empty() {
+        return Ok(bids);
+    }
+    // 每个授权仍按下一次 usage 的创建时间截断；分页及完整历史读取使用同一归属规则。
+    let mut rows = sqlx::query(
+        "SELECT
+            p.authorization_id,
             b.id,
             l.auction_id,
             b.lot_id,
@@ -320,23 +343,37 @@ async fn load_postgres_proxy_bid(
             b.mechanism,
             b.created_at,
             COALESCE(l.leader_user_id = b.bidder_user_id AND l.current_price = b.amount, false)::boolean AS leading
-         FROM public.bids AS b
-         JOIN public.lots AS l ON l.id = b.lot_id
-         CROSS JOIN next_authorization
-         WHERE b.lot_id = $1
-           AND b.bidder_user_id = $2
-           AND b.mechanism = 'proxy'
-           AND b.created_at >= $3
-           AND (next_authorization.created_at IS NULL OR b.created_at < next_authorization.created_at)
-         ORDER BY b.accepted_state_version DESC, b.fact_index DESC, b.id DESC
-         LIMIT 1",
+         FROM public.bid_proxy_authorizations AS p
+         JOIN public.lots AS l ON l.id = p.lot_id
+         CROSS JOIN LATERAL (
+            SELECT min(next_authorization.created_at) AS created_at
+            FROM public.bid_proxy_authorizations AS next_authorization
+            WHERE next_authorization.lot_id = p.lot_id
+              AND next_authorization.user_id = p.user_id
+              AND next_authorization.usage_number = p.usage_number + 1
+         ) AS next_authorization
+         CROSS JOIN LATERAL (
+            SELECT b.id, b.lot_id, b.bidder_user_id, b.amount, b.accepted_state_version,
+                   b.fact_index, b.mechanism, b.created_at
+            FROM public.bids AS b
+            WHERE b.lot_id = p.lot_id
+              AND b.bidder_user_id = p.user_id
+              AND b.mechanism = 'proxy'
+              AND b.created_at >= p.created_at
+              AND (next_authorization.created_at IS NULL OR b.created_at < next_authorization.created_at)
+            ORDER BY b.accepted_state_version DESC, b.fact_index DESC, b.id DESC
+            LIMIT 1
+         ) AS b
+         WHERE p.authorization_id = ANY($1)",
     )
-    .bind(base.lot_id)
-    .bind(base.user_id)
-    .bind(base.created_at)
-    .bind(base.usage_number)
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(|_| storage_error("读取 PostgreSQL 代理最近竞价失败"))?;
-    row.map(map_postgres_proxy_bid).transpose()
+    .bind(authorization_ids)
+    .fetch(&mut **transaction);
+    while let Some(row) =
+        rows.try_next().await.map_err(|_| storage_error("读取 PostgreSQL 代理最近竞价失败"))?
+    {
+        let authorization_id =
+            get_pg(&row, "authorization_id", "读取 PostgreSQL 代理授权标识失败")?;
+        bids.insert(authorization_id, map_postgres_proxy_bid(row)?);
+    }
+    Ok(bids)
 }

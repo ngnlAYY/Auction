@@ -234,7 +234,7 @@ fn RenameTable(
     busy_rename: Signal<Option<String>>,
 ) -> Element {
     // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
-    let mut renames = page.renames.clone();
+    let mut renames = page.renames;
     sort_renames(&mut renames, &sort, direction);
     rsx! {
         div { class: "admin-shell__table-wrap",

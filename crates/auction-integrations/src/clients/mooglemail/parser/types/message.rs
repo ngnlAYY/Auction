@@ -184,19 +184,12 @@ impl MoogleMailMessage {
         digest.update(self.credits.to_be_bytes());
         digest.update(self.cod.to_be_bytes());
         digest.update([u8::from(self.returnable), u8::from(self.claimable)]);
-        let mut equipment_ids = self
-            .attachments
-            .iter()
-            .map(|attachment| attachment.equipment_id.as_str())
-            .collect::<Vec<_>>();
-        equipment_ids.sort_unstable();
-        for equipment_id in equipment_ids {
-            write_digest_string(&mut digest, equipment_id);
-            if let Some(attachment) =
-                self.attachments.iter().find(|item| item.equipment_id == equipment_id)
-            {
-                digest.update(attachment.key.expose().as_bytes());
-            }
+        // 附件身份已由 envelope 校验保证唯一；直接排序借用，避免每个 ID 再扫描整组附件。
+        let mut attachments = self.attachments.iter().collect::<Vec<_>>();
+        attachments.sort_unstable_by(|left, right| left.equipment_id.cmp(&right.equipment_id));
+        for attachment in attachments {
+            write_digest_string(&mut digest, &attachment.equipment_id);
+            digest.update(attachment.key.expose().as_bytes());
         }
         let bytes = digest.finalize();
         let mut result = [0_u8; 32];

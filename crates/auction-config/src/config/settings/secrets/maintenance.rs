@@ -42,7 +42,7 @@ pub fn load_postgres_maintenance_secrets(
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
-    options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
     let mut file = options
         .open(&path)
         .map_err(|source| ConfigError::SecretRead { path: path.clone(), source })?;

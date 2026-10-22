@@ -112,14 +112,13 @@ pub(crate) fn parse_detail_assets(
 ) -> Result<DetailAssets, MoogleMailError> {
     let manifest = parse_detail_asset_manifest(document, world)?;
     let wanted = manifest.equipment_ids.iter().cloned().collect::<HashSet<_>>();
-    let keys = equipment_keys(document, body, &wanted, world)?;
+    let mut keys = equipment_keys(document, body, &wanted, world)?;
     let attachments = manifest
         .equipment_ids
         .into_iter()
         .map(|equipment_id| {
             let key = keys
-                .get(&equipment_id)
-                .cloned()
+                .remove(&equipment_id)
                 .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
             Ok(MoogleMailAttachment { equipment_id, key })
         })

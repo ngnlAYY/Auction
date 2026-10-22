@@ -1,13 +1,13 @@
 //! Admin 运维页面的可选自动轮询：开关与间隔状态由页面持有（入 URL query），本模块提供
 //! 页面可见性感知、分片睡眠、轮询调度 hook 与开关控件。
-//! 每个页面拥有独立的可见性监听，卸载时释放回调；开关和轮询代数不改变其它页面的状态。
+//! 每个页面拥有独立的可见性监听，卸载时释放回调；开关和任务替换不改变其它页面的状态。
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::task::{Poll, Waker};
 
 use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
+use dioxus::{core::Task, prelude::*};
 use gloo_timers::future::TimeoutFuture;
 
 #[cfg(target_arch = "wasm32")]
@@ -21,7 +21,7 @@ pub(crate) const POLL_INTERVAL_VALUES: &[u64] = &[10, 30, 60];
 #[derive(Clone)]
 pub(crate) struct PageVisibility {
     hidden: Rc<Cell<bool>>,
-    wakers: Rc<RefCell<Vec<Waker>>>,
+    wakers: Rc<RefCell<Vec<Weak<VisibilityWaiter>>>>,
     #[cfg(target_arch = "wasm32")]
     listener: Rc<RefCell<Option<PageVisibilityListener>>>,
 }
@@ -84,8 +84,11 @@ impl PageVisibility {
     fn wake_waiters(&self) {
         // 先释放列表借用，再调用可能重新注册等待者的运行时回调。
         let wakers = std::mem::take(&mut *self.wakers.borrow_mut());
-        for waker in wakers {
-            waker.wake();
+        for waiter in wakers.into_iter().filter_map(|waiter| waiter.upgrade()) {
+            let waker = waiter.waker.borrow_mut().take();
+            if let Some(waker) = waker {
+                waker.wake();
+            }
         }
     }
 
@@ -94,15 +97,47 @@ impl PageVisibility {
         if !self.hidden.get() {
             return;
         }
+        let registration = VisibilityWaitRegistration {
+            waiters: &self.wakers,
+            waiter: Rc::new(VisibilityWaiter { waker: RefCell::new(None) }),
+        };
         std::future::poll_fn(|context| {
             if self.hidden.get() {
-                self.wakers.borrow_mut().push(context.waker().clone());
+                let mut waker = registration.waiter.waker.borrow_mut();
+                match waker.as_mut() {
+                    Some(waker) => waker.clone_from(context.waker()),
+                    None => *waker = Some(context.waker().clone()),
+                }
+                drop(waker);
+                let weak = Rc::downgrade(&registration.waiter);
+                let mut waiters = registration.waiters.borrow_mut();
+                // 唤醒已取走登记后可能再次隐藏；仅在缺失时恢复同一等待者。
+                if !waiters.iter().any(|waiter| waiter.ptr_eq(&weak)) {
+                    waiters.push(weak);
+                }
                 Poll::Pending
             } else {
                 Poll::Ready(())
             }
         })
         .await;
+    }
+}
+
+struct VisibilityWaiter {
+    waker: RefCell<Option<Waker>>,
+}
+
+/// 每个 Future 只登记一次；取消时立即移除，不能依赖下一次 visibilitychange 清理。
+struct VisibilityWaitRegistration<'a> {
+    waiters: &'a RefCell<Vec<Weak<VisibilityWaiter>>>,
+    waiter: Rc<VisibilityWaiter>,
+}
+
+impl Drop for VisibilityWaitRegistration<'_> {
+    fn drop(&mut self) {
+        let weak = Rc::downgrade(&self.waiter);
+        self.waiters.borrow_mut().retain(|waiter| !waiter.ptr_eq(&weak));
     }
 }
 
@@ -128,8 +163,8 @@ pub(crate) async fn sleep_while_visible(visibility: &PageVisibility, delay_milli
 
 /// 可选自动轮询 hook：间隔为 0 时关闭；开启后每隔 `interval_seconds` 秒执行一次
 /// `on_poll`。页面隐藏期间计时挂起而非继续打请求，恢复可见后走完剩余分片继续轮询。
-/// 间隔变化（含关闭）时旧循环在下个分片结束（≤1 秒）经代数检查后自行退出，
-/// 不会与新一轮循环叠加计时器，也不会补发一次过期轮询。
+/// 间隔变化（含关闭）时先取消旧任务，再按新间隔从头计时；卸载仍由页面 Scope 取消任务。
+/// 取消只释放失效循环的等待与捕获，不补发轮询，也不改变当前请求或页面可见性策略。
 pub(crate) fn use_auto_poll(interval_seconds: Memo<u64>, on_poll: impl FnMut() + Clone + 'static) {
     let visibility = use_hook(PageVisibility::new);
     // 只安装一次可见性监听；effect 不读取任何信号，挂载后不会重跑。
@@ -142,28 +177,25 @@ pub(crate) fn use_auto_poll(interval_seconds: Memo<u64>, on_poll: impl FnMut() +
         let cleanup_visibility = visibility.clone();
         use_drop(move || cleanup_visibility.cleanup());
     }
-    // 轮询代数：每次间隔变化自增，旧循环检测到代数过期即退出。
-    let mut generation = use_signal(|| 0_u64);
+    // Task 不放入响应式信号；替换任务不应触发组件重渲染或再次执行本 effect。
+    let poll_task = use_hook(|| Rc::new(Cell::new(None::<Task>)));
     use_effect(move || {
         let seconds = interval_seconds();
-        let current = generation.peek().saturating_add(1);
-        generation.set(current);
+        if let Some(task) = poll_task.take() {
+            task.cancel();
+        }
         if seconds == 0 {
             return;
         }
         let delay_millis = u32::try_from(seconds.saturating_mul(1_000)).unwrap_or(u32::MAX);
         let visibility = visibility.clone();
         let mut on_poll = on_poll.clone();
-        spawn(async move {
+        poll_task.set(Some(spawn(async move {
             loop {
                 sleep_while_visible(&visibility, delay_millis).await;
-                // 开关关闭或间隔调整后，旧循环不再补发轮询。
-                if *generation.peek() != current {
-                    break;
-                }
                 on_poll();
             }
-        });
+        })));
     });
 }
 

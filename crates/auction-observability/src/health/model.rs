@@ -208,5 +208,20 @@ pub(super) fn valid_text(value: &str, maximum: usize) -> bool {
 }
 
 pub(super) fn valid_details(value: &Value) -> bool {
-    value.is_object() && value.to_string().len() <= MAX_HEARTBEAT_DETAILS_BYTES
+    // 按同一紧凑 JSON 编码计算字节数，超限即停止，不为校验复制整份 details。
+    struct RemainingBytes(usize);
+
+    impl std::io::Write for RemainingBytes {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.checked_sub(bytes.len()).ok_or(std::io::ErrorKind::WriteZero)?;
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    value.is_object()
+        && serde_json::to_writer(RemainingBytes(MAX_HEARTBEAT_DETAILS_BYTES), value).is_ok()
 }

@@ -106,8 +106,14 @@ pub(super) fn is_session_expired(
 /// HV 会在角色处于战斗时用战斗页替代 Item Shop/MoogleMail 页面。
 /// 该状态不表示 Cookie 失效或页面协议漂移；调用方应保留当前凭据并在战斗结束后重试。
 pub(super) fn is_hentaiverse_battle_response(body: &[u8]) -> bool {
-    let body = String::from_utf8_lossy(body).to_ascii_lowercase();
-    body.contains("id=\"battle_main\"") || body.contains("id='battle_main'")
+    // 正常响应不复制整页；仅命中候选标记时才解析 DOM，正文或脚本里的文字不算战斗页。
+    if !body.windows(b"battle_main".len()).any(|value| value.eq_ignore_ascii_case(b"battle_main")) {
+        return false;
+    }
+    let document = Html::parse_document(&String::from_utf8_lossy(body));
+    document.root_element().descendants().filter_map(ElementRef::wrap).any(|element| {
+        element.attr("id").is_some_and(|value| value.eq_ignore_ascii_case("battle_main"))
+    })
 }
 
 pub(super) fn post_allowed(
@@ -140,16 +146,13 @@ impl IntervalGate {
     }
 
     pub(super) async fn wait(&self) -> Result<(), ()> {
-        let delay = {
-            let mut next = self.next.lock().map_err(|_| ())?;
-            let now = Instant::now();
-            let reserved = (*next).max(now);
-            *next = reserved.checked_add(self.interval).ok_or(())?;
-            reserved.saturating_duration_since(now)
-        };
+        // 只有实际获准的请求推进时间槽；预算取消不会留下未发送请求的限速债务。
+        let mut next = self.next.lock().await;
+        let delay = next.saturating_duration_since(Instant::now());
         if !delay.is_zero() {
             time::sleep(delay).await;
         }
+        *next = Instant::now().checked_add(self.interval).ok_or(())?;
         Ok(())
     }
 }

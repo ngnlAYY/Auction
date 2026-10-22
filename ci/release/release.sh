@@ -148,7 +148,7 @@ artifacts_reusable() {
 	return 0
 }
 
-build_variant() {
+build_variant() (
 	local variant=$1 build_root=$2 artifact_directory=$3 features=$4
 	local selected_binaries=("${@:5}")
 	if [[ ${#selected_binaries[@]} -eq 0 ]]; then selected_binaries=("${binaries[@]}"); fi
@@ -164,6 +164,8 @@ build_variant() {
 		printf '%s 构建输入未变，复用：%s\n' "$variant" "$artifact_directory"
 		return 0
 	fi
+	# 每次构建只拥有自己的候选目录；正常或错误退出时回收，保留旧制品和 Cargo 缓存。
+	trap 'rm -rf -- "$next"' EXIT
 	mkdir -p "$artifact_root"
 	rm -rf "$next"
 	mkdir -p "$next/bin"
@@ -219,7 +221,7 @@ build_variant() {
 	verify_build_info "$next" "$variant"
 	replace_generated_directory "$next" "$artifact_directory"
 	printf '%s 发布二进制已生成：%s\n' "$variant" "$artifact_directory"
-}
+)
 
 verify_web_root() {
 	local surface=$1 package other expected_title other_title
@@ -558,8 +560,8 @@ verify_staged_package() {
 
 create_archive() {
 	local parent=$1 package_name=$2 destination=$3 epoch=$4
-	local tar_path=${destination%.gz}
-	rm -f "$tar_path" "$destination"
+	rm -f "$destination"
+	# tar 直接交给 gzip，避免为两次确定性核对各落盘一份未压缩归档。
 	LANG=C LC_ALL=C TZ=UTC tar \
 		--sort=name \
 		--mtime="@$epoch" \
@@ -568,10 +570,9 @@ create_archive() {
 		--numeric-owner \
 		--format=ustar \
 		--create \
-		--file "$tar_path" \
+		--file - \
 		--directory "$parent" \
-		"$package_name"
-	gzip -n -9 "$tar_path"
+		"$package_name" | gzip -n -9 >"$destination"
 }
 
 verify_archive() {
@@ -617,7 +618,7 @@ verify_archive() {
 	)
 }
 
-package_release() {
+package_release() (
 	local allow_dirty=false single_binary=false argument
 	for argument in "$@"; do
 		case "$argument" in
@@ -661,6 +662,8 @@ package_release() {
 	package_name="auction-rust-${version}-${commit:0:12}${variant_suffix}${suffix}"
 	mkdir -p "$repository_root/target/dist/tmp"
 	temporary_root=$(mktemp -d "$repository_root/target/dist/tmp/auction-release.XXXXXX")
+	# 子 shell 限定 EXIT trap 的生命周期；任一步骤失败也回收本次装包目录，不触碰旧发布包。
+	trap 'rm -rf -- "$temporary_root"; if [[ -n ${publish_next:-} ]]; then rm -rf -- "$publish_next"; fi' EXIT
 	package_root="$temporary_root/$package_name"
 	mkdir -p "$package_root"
 
@@ -676,14 +679,14 @@ package_release() {
 	done
 
 	install_release_file ops/README.md docs/DEPLOYMENT.md 644 "$package_root"
-	# 手册从 ops 根移动到包内 docs，内附模板与恢复文件链接须指向归档布局。
+	# 源文档使用仓库根相对链接；装包时只把已有模板与恢复文件映射到归档布局，保留标题锚点。
 	sed -i \
-		-e 's|](deploy/systemd/|](../systemd/|g' \
-		-e 's|](deploy/caddy/|](../caddy/|g' \
-		-e 's|](config/|](../config/|g' \
-		-e 's|](deploy/RECOVERY.md)|](RECOVERY.md)|g' \
-		-e 's|](deploy/LEGACY_V28_ADOPTION.md)|](LEGACY_V28_ADOPTION.md)|g' \
-		-e 's|](deploy/retention-policy.v1.json)|](../retention-policy.v1.json)|g' \
+		-e 's|](ops/deploy/systemd/|](../systemd/|g' \
+		-e 's|](ops/deploy/caddy/|](../caddy/|g' \
+		-e 's|](ops/config/|](../config/|g' \
+		-e 's|](ops/deploy/RECOVERY\.md|](RECOVERY.md|g' \
+		-e 's|](ops/deploy/LEGACY_V28_ADOPTION\.md|](LEGACY_V28_ADOPTION.md|g' \
+		-e 's|](ops/deploy/retention-policy\.v1\.json|](../retention-policy.v1.json|g' \
 		"$package_root/docs/DEPLOYMENT.md"
 	install_release_file ops/deploy/RECOVERY.md docs/RECOVERY.md 644 "$package_root"
 	install_release_file ops/deploy/LEGACY_V28_ADOPTION.md docs/LEGACY_V28_ADOPTION.md 644 "$package_root"
@@ -758,7 +761,6 @@ package_release() {
 	create_archive "$temporary_root" "$package_name" "$first_archive" "$epoch"
 	create_archive "$temporary_root" "$package_name" "$archive" "$epoch"
 	if [[ $(sha256_file "$first_archive") != $(sha256_file "$archive") ]]; then
-		rm -rf "$temporary_root"
 		printf '同一白名单的两次 release archive 不一致\n' >&2
 		return 1
 	fi
@@ -778,7 +780,6 @@ package_release() {
 	# 文档与配置也属于源码身份；装包期间发生变化时保留上一份发布目录，拒绝发布混合快照。
 	if [[ $(git rev-parse --verify 'HEAD^{commit}') != "$commit" ||
 	$(source_fingerprint) != "$fingerprint" ]]; then
-		rm -rf "$temporary_root" "$publish_next"
 		printf '装包期间源码发生变化，请重新构建并装包\n' >&2
 		return 1
 	fi
@@ -790,8 +791,7 @@ package_release() {
 		"$package_output_root/$package_name.tar.gz" \
 		"$(sha256_file "$package_output_root/$package_name.tar.gz")"
 	printf 'publication_sha256=%s\n' "$(sha256_file "$package_output_root/SHA256SUMS")"
-	rm -rf "$temporary_root"
-}
+)
 
 case "${1:-}" in
 release-check)

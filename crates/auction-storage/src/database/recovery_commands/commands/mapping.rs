@@ -49,7 +49,7 @@ pub(super) fn map_insert_error(error: sqlx::Error) -> RecoveryCommandError {
 
 #[cfg(feature = "postgres")]
 pub(super) fn map_sql_error(error: sqlx::Error) -> RecoveryCommandError {
-    if matches!(&error, sqlx::Error::Database(database) if database.code().as_deref() == Some("40001"))
+    if matches!(&error, sqlx::Error::Database(database) if matches!(database.code().as_deref(), Some("40001" | "40P01")))
     {
         RecoveryCommandError::SerializationConflict
     } else {

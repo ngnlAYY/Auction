@@ -134,11 +134,10 @@ fn parse_range(
 }
 
 fn parse_field_value(value: &str, bounds: FieldBounds) -> Result<u32, StandardCronScheduleError> {
-    if !bounds.names.is_empty() {
-        let normalized = value.to_ascii_lowercase();
-        if let Some((_, number)) = bounds.names.iter().find(|(name, _)| *name == normalized) {
-            return Ok(*number);
-        }
+    if let Some((_, number)) =
+        bounds.names.iter().find(|(name, _)| name.eq_ignore_ascii_case(value))
+    {
+        return Ok(*number);
     }
     parse_unsigned(value)
 }

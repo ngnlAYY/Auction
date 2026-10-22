@@ -1,7 +1,7 @@
 use super::*;
 
 pub(in crate::database::account) fn validate_page(
-    page: &PublicMyBidsPage,
+    page: PublicMyBidsPage,
     request: PublicMyBidsRequest,
 ) -> Result<PublicMyBidsPage, ApplicationError> {
     let bid_count =
@@ -18,7 +18,7 @@ pub(in crate::database::account) fn validate_page(
     {
         return Err(storage_error("账户竞价页结果不满足边界约束"));
     }
-    Ok(page.clone())
+    Ok(page)
 }
 
 pub(in crate::database::account) fn validate_account_request(

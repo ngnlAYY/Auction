@@ -1,6 +1,6 @@
 //! 竞价规划结果的状态推进、软截止和代理调度辅助。
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 
 use crate::{
     AcceptedBid, AuctionRules, BidAmount, BidMechanism, CommandId, DomainError, LotBidState,
@@ -41,7 +41,8 @@ pub(super) fn finalize_plan(
             .effective_end_at
             .checked_sub_signed(rules.soft_close_window)
             .ok_or(DomainError::InvalidSchedule("软截止窗口超出时间范围"))?;
-        if now >= soft_close_start {
+        // 零窗口关闭软截止；截止等值仍可接受出价，但不能因此重新开启延期。
+        if rules.soft_close_window > Duration::zero() && now >= soft_close_start {
             let candidate = now
                 .checked_add_signed(rules.soft_close_extension)
                 .ok_or(DomainError::InvalidSchedule("软截止延长超出时间范围"))?;

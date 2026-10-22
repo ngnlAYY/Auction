@@ -30,11 +30,13 @@ token 摘要绑定当前 actor/secret，Public 会话不受影响；多实例轮
 ## 查询、命令与可观测性
 
 装配生命周期、业务 world、规则、审计、凭据、结算/恢复报告等窄端口；精确路由与错误码见 HTTP 契约。
+创建拍卖与更新排期共用同一无可变状态的存储适配器和启动策略快照，不重复建立策略副本。
 业务 world 状态来自数据库，装配注入论坛本地安全投影读取端口以承接手动状态刷新，不注入论坛写入授权；
 论坛预览只在本地解析不超过 2 MiB 的输入，不远程发布或写库。生命周期和 recovery 确认沿用应用/存储 owner 的锁、
 幂等、追加审计与持久化事件边界。`HealthService` 聚合三角色心跳，Admin 另经内核 peer 认证的 Worker control Unix socket
 读取 live/ready/status；mail、realtime、credential、delivery、fulfillment、recovery 与 alerting 各提供安全摘要，
 缺失 owner 才显示 `unknown`，socket 不可用只产生有限 condition，心跳每轮读数据库/schema readiness、审计失败计数与 tracing 状态。
+周期心跳跳过错过的 tick，依赖恢复后只发布当前状态，不集中补发过期观测。
 
 ## Runtime 恢复与启动快照
 

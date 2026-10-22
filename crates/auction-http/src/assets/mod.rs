@@ -88,8 +88,9 @@ fn serve<A: rust_embed::RustEmbed>(
         return json_not_found(request_headers);
     }
 
-    let relative_path = path.trim_start_matches('/');
-    if let Some(file) = A::get(relative_path) {
+    if let Some(relative_path) = exact_asset_path(path)
+        && let Some(file) = A::get(relative_path)
+    {
         if !static_method(method) {
             return method_not_allowed(request_headers);
         }
@@ -107,6 +108,20 @@ fn serve<A: rust_embed::RustEmbed>(
     }
 
     not_found(surface, method, request_headers)
+}
+
+/// 精确静态分派不能依赖后端规范化路径。RustEmbed 的开发态读取允许符号链接，若先传入
+/// `..` 或反斜线，既可能越出资源目录，也可能让路径前缀与实际文件的缓存策略不一致。
+fn exact_asset_path(path: &str) -> Option<&str> {
+    let relative_path = path.strip_prefix('/')?;
+    if relative_path.contains('\\')
+        || relative_path
+            .split('/')
+            .any(|segment| segment.is_empty() || matches!(segment, "." | ".."))
+    {
+        return None;
+    }
+    Some(relative_path)
 }
 
 fn static_method(method: &Method) -> bool {

@@ -14,9 +14,16 @@ pub(super) fn page() -> Element {
     let rules = use_resource(move || {
         let _ = refresh_generation();
         let locale = i18n.language().to_string();
-        async move { fetch_rules(&locale).await }
+        async move {
+            let result = fetch_rules(&locale).await;
+            (locale, result)
+        }
     });
-    match &*rules.read_unchecked() {
+    let loaded = rules.read_unchecked();
+    // 重读保留的旧正文与错误只属于原语言，不能随新语言的页头一起展示。
+    let locale = i18n.language().to_string();
+    let current = loaded.as_ref().filter(|(requested, _)| requested == &locale);
+    match current.map(|(_, result)| result) {
         None => rsx! {
             article { class: "public-rules-page", aria_labelledby: "rules-title",
                 h1 { id: "rules-title", class: "public-visually-hidden",

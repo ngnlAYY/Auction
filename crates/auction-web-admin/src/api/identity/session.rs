@@ -32,12 +32,25 @@ pub(super) fn request_admin_session_check() {
 }
 
 /// 已认证 Admin 会话的浏览器状态；`authenticated = false` 不会构造该类型。
-#[derive(Debug, Clone, PartialEq)]
+/// 调试格式保留会话元数据，但不能输出 CSRF token。
+#[derive(Clone, PartialEq)]
 pub(crate) struct AdminSession {
     pub actor: String,
     pub csrf_token: String,
     pub expires_at: String,
     pub absolute_expires_at: String,
+}
+
+impl std::fmt::Debug for AdminSession {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminSession")
+            .field("actor", &self.actor)
+            .field("csrf_token", &"[REDACTED]")
+            .field("expires_at", &self.expires_at)
+            .field("absolute_expires_at", &self.absolute_expires_at)
+            .finish()
+    }
 }
 
 /// 按旧版会话协议验证认证成功投影；匿名成功正文必须失败关闭，不能进入登录态分支。

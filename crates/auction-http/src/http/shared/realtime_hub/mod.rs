@@ -9,7 +9,7 @@ use std::{
 };
 
 use auction_application::{PublicRealtimeEvent, RealtimeEventSink, RealtimeSinkError};
-use tokio::sync::mpsc::{self, Receiver, Sender, error::TrySendError};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use uuid::Uuid;
 
 mod connections;
@@ -92,16 +92,14 @@ impl RealtimeHub {
         let Some(clients) = state.streams.get_mut(&event.stream_key) else {
             return;
         };
-        let mut stale = Vec::new();
-        for (&id, sender) in clients.iter() {
-            match sender.try_send(event.clone()) {
-                Ok(()) => {}
-                Err(TrySendError::Full(_) | TrySendError::Closed(_)) => stale.push(id),
-            }
-        }
-        for id in stale {
-            clients.remove(&id);
-        }
+        // 满/闭队列无需复制事件；原位淘汰也不另建 stale 列表或再次查找订阅。
+        clients.retain(|_, sender| {
+            let Ok(permit) = sender.try_reserve() else {
+                return false;
+            };
+            permit.send(event.clone());
+            true
+        });
         if clients.is_empty() {
             state.streams.remove(&event.stream_key);
         }

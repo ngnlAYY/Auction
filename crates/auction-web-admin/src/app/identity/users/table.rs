@@ -38,7 +38,8 @@ pub(super) fn AdminUserTable(
     on_generated_key: EventHandler<AdminUserGeneratedKey>,
 ) -> Element {
     // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
-    let mut users = page.users.clone();
+    let is_empty = page.users.is_empty();
+    let mut users = page.users;
     sort_users(&mut users, &sort, direction);
     rsx! {
         form {
@@ -125,7 +126,7 @@ pub(super) fn AdminUserTable(
                 }
             }
         }
-        if page.users.is_empty() {
+        if is_empty {
             AsyncState {
                 kind: AsyncStateKind::Empty,
                 title: t!("admin-users-no-results"),

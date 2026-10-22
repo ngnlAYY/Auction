@@ -82,16 +82,25 @@ fn AuthenticatedAccountData() -> Element {
     // 竞价与代理页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
-    let bid_page = use_memo(move || query_state_signal().bid_page);
-    let proxy_page = use_memo(move || query_state_signal().proxy_page);
+    let bid_page = use_memo(move || query_state_signal.read().bid_page);
+    let proxy_page = use_memo(move || query_state_signal.read().proxy_page);
     let account = use_resource(move || {
         let _ = refresh_generation();
         let _ = account_reload_generation();
-        fetch_my_bids(bid_page(), proxy_page())
+        let requested = (bid_page(), proxy_page());
+        async move {
+            let result = fetch_my_bids(requested.0, requested.1).await;
+            (requested, result)
+        }
     });
     use_bid_refresh(account, true);
 
-    match &*account.read_unchecked() {
+    let loaded = account.read_unchecked();
+    let current = loaded
+        .as_ref()
+        .filter(|(requested, _)| *requested == (bid_page(), proxy_page()))
+        .map(|(_, result)| result);
+    match current {
         None => rsx! {
             div {
                 p { class: "public-page-status", role: "status", {t!("data-loading")} }
@@ -168,7 +177,7 @@ fn AccountPage(
     rsx! {
         div {
             BidSection {
-                bids: page.bids.clone(),
+                bids: page.bids,
                 page: bid_page,
                 total: page.bid_total,
                 page_size,
@@ -176,7 +185,7 @@ fn AccountPage(
                 on_page_clamp: on_bid_page_clamp,
             }
             ProxySection {
-                proxies: page.proxies.clone(),
+                proxies: page.proxies,
                 page: proxy_page,
                 total: page.proxy_total,
                 page_size,

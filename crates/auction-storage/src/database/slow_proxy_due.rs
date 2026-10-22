@@ -1,6 +1,6 @@
 //! 慢速代理持久化到期扫描适配器；只读 lot 上的 due generation 并用数据库时钟筛选，不领取内存
 //! 任务、不提前持锁，已过竞价截止的候选在 LIMIT 前排除，避免 Final 失败时反复占满批次。
-//! 真正执行必须回到竞价 Serializable/`BEGIN IMMEDIATE` 事务重新核对全部 fence。
+//! 真正执行必须回到 PostgreSQL 竞价 Serializable 事务重新核对全部 fence。
 
 use auction_application::{
     ApplicationError, ApplicationFuture, RepositoryError, SlowProxyDue, SlowProxyDueReader,

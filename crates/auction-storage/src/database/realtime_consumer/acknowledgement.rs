@@ -45,6 +45,18 @@ async fn acknowledge_postgres_inner(
     event_id: Uuid,
     stream_sequence: i64,
 ) -> Result<(), ApplicationError> {
+    // 与 replay 保持 failure → consumer offset 锁序，不能先锁游标再反向等待同一 failure。
+    // 身份或连续性检查失败时由唯一调用方回滚整事务，提前收口不会独立提交。
+    sqlx::query(
+        "UPDATE public.realtime_failures
+         SET resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP)
+         WHERE consumer_key = $1 AND event_id = $2 AND replay_event_id IS NULL",
+    )
+    .bind(consumer_key)
+    .bind(event_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|_| storage_error("解决 PostgreSQL 实时消费失败记录失败"))?;
     let current = sqlx::query_scalar::<_, i64>(
         "SELECT last_sequence
          FROM public.realtime_consumer_offsets
@@ -90,15 +102,5 @@ async fn acknowledge_postgres_inner(
         .await
         .map_err(|_| storage_error("写入 PostgreSQL 实时消费游标失败"))?;
     }
-    sqlx::query(
-        "UPDATE public.realtime_failures
-         SET resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP)
-         WHERE consumer_key = $1 AND event_id = $2 AND replay_event_id IS NULL",
-    )
-    .bind(consumer_key)
-    .bind(event_id)
-    .execute(&mut **transaction)
-    .await
-    .map_err(|_| storage_error("解决 PostgreSQL 实时消费失败记录失败"))?;
     Ok(())
 }

@@ -50,7 +50,8 @@ pub(super) async fn run_worker_skeleton(
         .await
         .context("run worker skeleton without database");
     control.mark_draining();
-    control_shutdown.notify_waiters();
+    // 启动后立即停机时，控制任务可能尚未开始等待；单接收者通知须保留许可。
+    control_shutdown.notify_one();
     let control_result =
         join_worker_control_task(&mut control_task, "skeleton worker control").await;
     worker_result?;

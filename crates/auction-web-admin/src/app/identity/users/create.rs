@@ -60,9 +60,16 @@ fn user_field_issue_message(issue: UserFieldIssue) -> String {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// 一次性展示的登录 Key；嵌套派生 Debug 也必须保持脱敏。
+#[derive(Clone, PartialEq)]
 pub(super) struct AdminUserGeneratedKey {
     pub(super) key: String,
+}
+
+impl std::fmt::Debug for AdminUserGeneratedKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("AdminUserGeneratedKey").field("key", &"[REDACTED]").finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

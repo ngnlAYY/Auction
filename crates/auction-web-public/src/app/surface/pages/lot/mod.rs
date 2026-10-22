@@ -15,7 +15,8 @@ pub(crate) fn LotDetail(lot_code: String) -> Element {
     if !is_public_lot_id(&lot_code) {
         return rsx! { LotMissing {} };
     }
-    rsx! { ValidLotDetail { lot_id: lot_code } }
+    // Router 会复用详情路由组件；目标 UUID 改变时销毁旧读取与命令宿主。
+    rsx! { ValidLotDetail { key: "{lot_code}", lot_id: lot_code } }
 }
 
 /// 旧版浏览器只接受小写、带连字符、RFC 4122 variant 且版本为 1 至 5 的 UUID。

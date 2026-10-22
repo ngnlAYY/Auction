@@ -40,6 +40,10 @@ drain 与任务退出，`runtime/delivery/lease.rs` 统一准备、交接与发�
 | Lot-watch PM | 独立 runtime，每轮至多 1 新发送 + 1 只读核对；delivery cadence、forum 总预算/lease，串行共享网关 |
 | Operations alert | scan、dispatch、reconcile 各自 cadence、预算与失败边界 |
 
+主题发布与回帖导入的单项截止在领取前冻结，领取和外呼共用预算，慢领取不能延长处理时间越过 lease。
+生命周期、结算、履约与 recovery action 的并发任务也沿用领取前绝对截止，任务排队不重置剩余预算；
+首次 poll 已到期时不开始应用命令或外呼，保留原持久 claim 交由租约恢复。
+
 `run_persistent_until_shutdown` 消费持久化轮次；领取后冻结 owner、精确租约与 state_version。周拍卖只在配置
 allowlist、runtime 开关和数据库 enabled world 的交集中新建，已有轮次按冻结事实执行，配置变更不以旧命令 ID 重发
 新负载；结算使用持久化 claim 的 due_at，不以实际领取延迟改变业务时间。慢速代理扫描候选后交竞价事务重新校验，
@@ -52,6 +56,7 @@ allowlist、runtime 开关和数据库 enabled world 的交集中新建，已有
 Fulfillment pending 通过 `prepare_next` 区分 External 与 `InternallySatisfied`：内部成功立即结束 claim，不 activate、
 不生成 delivery ID。pending 身份准备与 enqueued 收款核对采用不超过有效 lease/30 秒的单一超时，覆盖 guard 排队、
 只读请求及数据库提交，不 detach future；提交阶段取消由 opaque guard 撤销 owner，普通证据/资金等待由应用持久延期。
+阶段收口只保留日志所需的 obligation ID 与重试次数，不为指标复制整份装备/交付快照。
 自动恢复健康与履约复用数据库资金策略：仅记账账户跳过 Balance 请求，现金状态标为不适用，仍更新恢复积压及真实投递状态。
 
 Recovery take 的新 prepare 命令绑定 action 与来源 MID，activate 从该 prepare 派生；同轮领取/重试不改变身份，
@@ -63,6 +68,8 @@ Delivery 有效并发取配置与 transport 的较小值（MoogleMail 当前上�
 只释放 claim/在本轮排除该 world 的 Send，下轮重新读取真实 compose；Take/Return 独立运行，`batch_limit=1` 也能继续
 取其他合格任务。claimed 准备阶段在原 request_timeout 预算内续租，prepare 完成后先续租再提交 fence，明确成功后再次
 确认续租；等待受已知租约单调截止和 finalize_timeout 限制，续租耗时超过间隔时操作仍可在有效截止内先被 poll。
+续租回执还须早于本次 `min(旧租约截止, finalize_timeout)`；即使 Tokio 内层 future 在一次 poll 中
+迟到返回成功，也不延长本地 owner 或继续 poll 外部写入。
 `prepare_authorized` 的现金证据与未 poll 的 future 持同一原 session，同一 commit guard 覆盖完整授权 fence；
 通过 `start_sending_authorized_until` 把 prepared 原单调绝对截止与有效租约、finalize 截止的最小值传至存储，
 不从交接时刻重建 30 秒预算。只有截止前收到确定回执才确认 guard/fence，过晚回执、提交未知或取消撤销同一 mail owner
@@ -72,6 +79,9 @@ Delivery 有效并发取配置与 transport 的较小值（MoogleMail 当前上�
 Mail 仅对可重试错误与超时做有界 inline retry，处理前先查持久化完成证明。批次预算独立于 lease，耗尽只提交已完成
 连续前缀及 cursor；处理中途确定失败时同一 fenced 提交保存成功前缀与失败退避，不采用失败页整体 next_cursor。
 完成证明和已接受决定允许恢复提交前已完成的步骤，不能按取件后的资产变化重新解释旧邮件。
+邮箱租约的单调截止在领取请求前建立，回执只会按剩余 TTL 收紧；续租等待不得跨越已知旧租约，
+新截止锚定续租发起时刻。租约失效或回执过晚只取消原处理 future，不额外释放或重排已开始的副作用。
+主世界维护结束后重新检查 drain，停止时不再领取新的邮箱 claim。
 轮询将当前 claim 传给 `fetch_claimed`；生产 MoogleMail gateway 在首个详情 GET 前持久登记整窗列表身份，优先恢复同邮箱、
 同 world 的待读前缀。完成 cursor 与队列前缀在同一 fenced 事务提交，读取取消或业务失败保留未完成后缀，不能靠未读列表恢复。
 
@@ -86,7 +96,8 @@ exact post ID、拍卖/页码标记与本地持久化身份齐备后才导入普
 无法证明原目标时等待 CLI 持久人工再授权；已发布主题的回帖刷新按持久 post ID 对账，关闭正文校验时保留内容未知门禁。
 论坛终态刷新仅纳入升级时未结算及新场次，已 settled 不再导入新竞价，部分进度、租约丢失及 write_unknown 不提前完成。
 
-实时 runner 持久化连续 offsets/failures；当前广播边界是 Public 本地 Hub，未冻结外部 sink 不得伪装为已发送。
+实时 runner 持久化连续 offsets/failures；校验后把事件所有权交给 sink，确认与失败收口只保留 event ID/序号，
+不深复制事件 payload。当前广播边界是 Public 本地 Hub，未冻结外部 sink 不得伪装为已发送。
 PM 的 prepare 只能 GET，持久 sending fence 明确提交才消费 prepared.send，任何 sending 不能安全延期；单项总预算覆盖
 claim/prepare/fence/send/finish 且严格小于 lease，drain 停止新领取、主进程 drain 结束后 abort 剩余任务。
 各循环默认值、预算及有效并发见[配置手册](ops/config/README.md#worker-循环预算)。
@@ -95,9 +106,13 @@ claim/prepare/fence/send/finish 且严格小于 lease，drain 停止新领取、
 
 只经 UDS 提供 live、ready、status、`/metrics` 和全局邮件唤醒，不启动第二个指标监听器。socket 位于受信 runtime 目录，
 持 `0600` 实例锁，只清理已证明失效且 inode 未变的旧 socket；新 socket 固定配置 group 与 `0660`，连接须通过显式
-UID/GID allowlist，并受请求/响应大小与处理预算限制。唤醒使用有界内存 replay window，只表示已接受，让已装配 poller
-执行一轮，不能代替 `mail_poll_state` 的持久化游标、租约或业务完成证明。协议与部署参数见
-[Worker 入口](apps/auction-worker/README.md)。
+UID/GID allowlist，并受请求/响应大小与处理预算限制。Admin client 逐块限制 JSON 响应为 64 KiB，
+缺少 Content-Length 的响应也不能先完整缓冲再验限。唤醒使用有界内存 replay window，只表示已接受，
+让已装配 poller 执行一轮，不能代替 `mail_poll_state` 的持久化游标、租约或业务完成证明。
+进程启动、降级原因与 drain 使用同一原子状态；论坛健康恢复只清除自身原因，不能覆盖其他任务故障，
+`status.ready` 和 `status.state` 来自同一快照。group 名称使用调用独占缓冲的可重入 NSS 查询，避免并发查询覆盖 GID；
+缓冲从 1 KiB 倍增且不超过 1 MiB，查询失败或仍超限时拒绝绑定。
+协议与部署参数见[Worker 入口](apps/auction-worker/README.md)。
 
 ## 边界约束
 

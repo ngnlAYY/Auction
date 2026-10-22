@@ -60,12 +60,17 @@ impl CredentialSealer {
         self.random.fill(&mut nonce).map_err(|_| crypto_error())?;
         let key = self.data_key.aead_key().map_err(|_| crypto_error())?;
         let mut ciphertext = secret.to_vec();
-        key.seal_in_place_append_tag(
-            aead::Nonce::assume_unique_for_key(nonce),
-            aead::Aad::from(aad.as_bytes()),
-            &mut ciphertext,
-        )
-        .map_err(|_| crypto_error())?;
+        if key
+            .seal_in_place_append_tag(
+                aead::Nonce::assume_unique_for_key(nonce),
+                aead::Aad::from(aad.as_bytes()),
+                &mut ciphertext,
+            )
+            .is_err()
+        {
+            ciphertext.fill(0);
+            return Err(crypto_error());
+        }
         let fingerprint = fingerprint(&self.data_key, kind, secret);
         AdminCredentialEnvelope::new(
             ciphertext,
@@ -95,23 +100,26 @@ impl CredentialSealer {
         }
         let aad = credential_aad(kind, credential_id, scope);
         let key = self.data_key.aead_key().map_err(|_| crypto_error())?;
-        let mut ciphertext = envelope.ciphertext().to_vec();
-        let plaintext = key
-            .open_in_place(
-                aead::Nonce::try_assume_unique_for_key(envelope.nonce())
-                    .map_err(|_| crypto_error())?,
-                aead::Aad::from(aad.as_bytes()),
-                &mut ciphertext,
-            )
-            .map_err(|_| crypto_error())?;
-        let secret = plaintext.to_vec();
+        let nonce =
+            aead::Nonce::try_assume_unique_for_key(envelope.nonce()).map_err(|_| crypto_error())?;
+        let mut secret = envelope.ciphertext().to_vec();
+        let length = match key
+            .open_in_place(nonce, aead::Aad::from(aad.as_bytes()), &mut secret)
+            .map(|plaintext| plaintext.len())
+        {
+            Ok(length) => length,
+            Err(_) => {
+                secret.fill(0);
+                return Err(crypto_error());
+            }
+        };
+        // 直接移交已认证缓冲，避免复制 Cookie；截短前清理认证标签所在的尾部。
+        secret[length..].fill(0);
+        secret.truncate(length);
         let actual_fingerprint = fingerprint(&self.data_key, kind, &secret);
         if actual_fingerprint.as_bytes().ct_eq(envelope.fingerprint().as_bytes()).into() {
-            ciphertext.fill(0);
             Ok(secret)
         } else {
-            ciphertext.fill(0);
-            let mut secret = secret;
             secret.fill(0);
             Err(crypto_error())
         }
@@ -166,10 +174,10 @@ fn fingerprint(data_key: &DataKey, kind: AdminCredentialKind, secret: &[u8]) -> 
         AdminCredentialKind::ForumCookie => FORUM_FINGERPRINT_DOMAIN,
     };
     let key = hmac::Key::new(hmac::HMAC_SHA256, data_key.material());
-    let mut input = Vec::with_capacity(domain.len() + secret.len());
-    input.extend_from_slice(domain);
-    input.extend_from_slice(secret);
-    hex_encode(hmac::sign(&key, &input).as_ref())
+    let mut context = hmac::Context::with_key(&key);
+    context.update(domain);
+    context.update(secret);
+    hex_encode(context.sign().as_ref())
 }
 
 fn crypto_error() -> ApplicationError {

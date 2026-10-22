@@ -8,7 +8,7 @@ use auction_web_shared::{TruncatedText, legacy_t as t};
 use dioxus::{core::Runtime, prelude::*};
 use uuid::Uuid;
 
-use super::{admin_api_error_message, run_admin_owned_action};
+use super::admin_api_error_message;
 
 type Attempt = Pin<Box<dyn Future<Output = Result<(), String>>>>;
 type CommandFactory = Rc<dyn Fn(Uuid) -> Attempt>;
@@ -18,7 +18,7 @@ struct PendingCommand {
     entity: String,
     action: String,
     command_id: Uuid,
-    busy: Signal<bool>,
+    busy: bool,
     unknown: bool,
     error: Option<String>,
     factory: CommandFactory,
@@ -117,12 +117,12 @@ impl PendingCommands {
 
     /// 区分正在发送与已停止但未决；浏览筛选可在请求结束后恢复，实体的新意图仍被封锁。
     pub(crate) fn is_busy(self, entity: &str) -> bool {
-        self.entries.read().iter().any(|entry| entry.entity == entity && (entry.busy)())
+        self.entries.read().iter().any(|entry| entry.entity == entity && entry.busy)
     }
 
     /// 页面级原有 busy 守卫可据此聚合，不能被行卸载的 use_drop 提前释放。
     pub(crate) fn any_busy(self) -> bool {
-        self.entries.read().iter().any(|entry| (entry.busy)())
+        self.entries.read().iter().any(|entry| entry.busy)
     }
 
     /// 只登记已经确认的命令。成功结果直接交给回调，不进入未决集合；回调中的行 Signal
@@ -162,12 +162,11 @@ impl PendingCommands {
                 }
             })
         });
-        let busy = Runtime::current().in_scope(self.entries.origin_scope(), || Signal::new(false));
         self.entries.write().push(PendingCommand {
             entity,
             action,
             command_id,
-            busy,
+            busy: false,
             unknown: false,
             error: None,
             factory,
@@ -177,16 +176,13 @@ impl PendingCommands {
     }
 
     fn retry(mut self, command_id: Uuid) {
-        let (factory, busy) = {
-            let entries = self.entries.read();
-            let Some(entry) = entries.iter().find(|entry| entry.command_id == command_id) else {
-                return;
-            };
-            if (entry.busy)() {
-                return;
-            }
-            (entry.factory.clone(), entry.busy)
+        let mut entries = self.entries.write();
+        let Some(entry) = entries.iter_mut().find(|entry| entry.command_id == command_id) else {
+            return;
         };
+        if entry.busy {
+            return;
+        }
         let guard = if let Some(gate) = self.gate {
             let Some(guard) = gate.try_acquire() else {
                 return;
@@ -195,44 +191,47 @@ impl PendingCommands {
         } else {
             None
         };
-        // 复用 Admin 既有页宿主执行器；busy 在页 Scope 创建，不在当前行/面板创建。
-        run_admin_owned_action(
-            busy,
-            async move {
+        // busy 属于稀疏条目；逐次创建页级 Signal 会一直保留到离开页面，即使命令早已完成。
+        entry.busy = true;
+        let factory = entry.factory.clone();
+        drop(entries);
+        // 任务归稳定的集合宿主，不随行卸载取消；页面销毁同时释放条目与请求。
+        Runtime::current().in_scope(self.entries.origin_scope(), || {
+            spawn(async move {
                 // 工厂内先向页面交付结果，再释放占用；尚未 poll 就取消也会释放。
                 let _guard = guard;
-                factory(command_id).await
-            },
-            move |()| {
-                let Ok(mut entries) = self.entries.try_write() else {
-                    return;
-                };
-                entries.retain(|entry| entry.command_id != command_id);
-                drop(entries);
-                if let Ok(mut reload) = self.reload.try_write() {
-                    *reload = reload.saturating_add(1);
+                match factory(command_id).await {
+                    Ok(()) => {
+                        let Ok(mut entries) = self.entries.try_write() else {
+                            return;
+                        };
+                        entries.retain(|entry| entry.command_id != command_id);
+                        drop(entries);
+                        if let Ok(mut reload) = self.reload.try_write() {
+                            *reload = reload.saturating_add(1);
+                        }
+                    }
+                    Err(code) => {
+                        let Ok(mut entries) = self.entries.try_write() else {
+                            return;
+                        };
+                        if let Some(entry) =
+                            entries.iter_mut().find(|entry| entry.command_id == command_id)
+                        {
+                            entry.busy = false;
+                            // 未知是累计事实：后续401/429或其他拒绝不能证明先前请求未提交。
+                            entry.unknown |= !definite_rejection(&code);
+                            entry.error = Some(code);
+                        }
+                    }
                 }
-            },
-            move |code| {
-                let Ok(mut entries) = self.entries.try_write() else {
-                    return;
-                };
-                if let Some(entry) = entries.iter_mut().find(|entry| entry.command_id == command_id)
-                {
-                    // 未知是累计事实：后续401/429或其他拒绝不能证明先前请求未提交。
-                    entry.unknown |= !definite_rejection(&code);
-                    entry.error = Some(code);
-                }
-            },
-        );
+            });
+        });
     }
 
     fn dismiss(mut self, command_id: Uuid) {
         self.entries.write().retain(|entry| {
-            entry.command_id != command_id
-                || (entry.busy)()
-                || entry.unknown
-                || entry.error.is_none()
+            entry.command_id != command_id || entry.busy || entry.unknown || entry.error.is_none()
         });
     }
 }
@@ -283,19 +282,19 @@ pub(crate) fn PendingCommandPanel(owner: PendingCommands) -> Element {
                             TruncatedText { value: entry.entity }
                             TruncatedText { value: entry.command_id.to_string() }
                             p { role: "status",
-                                if (entry.busy)() { {t!("admin-pending-busy")} }
+                                if entry.busy { {t!("admin-pending-busy")} }
                                 if entry.unknown { {t!("admin-pending-unknown")} }
-                                else if !(entry.busy)() { {t!("admin-pending-rejected")} }
+                                else if !entry.busy { {t!("admin-pending-rejected")} }
                             }
                             if let Some(code) = entry.error {
                                 p { class: "action-feedback action-feedback--error", {admin_api_error_message(&code)} }
                             }
                             button { r#type: "button",
-                                disabled: (entry.busy)() || owner.gate.is_some_and(PendingCommandGate::blocked),
+                                disabled: entry.busy || owner.gate.is_some_and(PendingCommandGate::blocked),
                                 onclick: move |_| owner.retry(entry.command_id),
                                 {t!("admin-pending-retry")}
                             }
-                            if !(entry.busy)() && !entry.unknown {
+                            if !entry.busy && !entry.unknown {
                                 button { r#type: "button",
                                     onclick: move |_| owner.dismiss(entry.command_id),
                                     {t!("admin-pending-dismiss")}

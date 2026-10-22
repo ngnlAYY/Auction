@@ -5,6 +5,7 @@
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     panic::AssertUnwindSafe,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -31,7 +32,8 @@ const WEBSOCKET_PATH: &str = "/api/v1/ws";
 #[derive(Clone)]
 pub struct HttpBoundary {
     request_timeout: Duration,
-    trusted_proxy_cidrs: Vec<IpNet>,
+    // 策略在启动后只读；middleware 和 surface state 克隆时只共享这一份已校验网段。
+    trusted_proxy_cidrs: Arc<[IpNet]>,
     trusted_unix_proxy: bool,
 }
 
@@ -39,7 +41,7 @@ impl Default for HttpBoundary {
     fn default() -> Self {
         Self {
             request_timeout: Duration::from_secs(15),
-            trusted_proxy_cidrs: Vec::new(),
+            trusted_proxy_cidrs: Arc::default(),
             trusted_unix_proxy: false,
         }
     }
@@ -66,7 +68,7 @@ impl HttpBoundary {
             }
             networks.push(network);
         }
-        Ok(Self { request_timeout, trusted_proxy_cidrs: networks, trusted_unix_proxy })
+        Ok(Self { request_timeout, trusted_proxy_cidrs: networks.into(), trusted_unix_proxy })
     }
 }
 
@@ -96,12 +98,12 @@ pub(crate) async fn enforce(
         .extensions_mut()
         .insert(ConnectInfo(SocketAddr::new(client_address, peer.map_or(0, |value| value.port()))));
 
-    let method = request.method().clone();
-    let path = request.uri().path().to_owned();
+    let method = request.method();
+    let is_websocket = request.uri().path() == WEBSOCKET_PATH;
     let route_pattern =
-        request.extensions().get::<MatchedPath>().map(MatchedPath::as_str).unwrap_or("").to_owned();
-    let traceparent = single_header(request.headers(), "traceparent").map(str::to_owned);
-    let tracestate = single_header(request.headers(), "tracestate").map(str::to_owned);
+        request.extensions().get::<MatchedPath>().map(MatchedPath::as_str).unwrap_or("");
+    let traceparent = single_header(request.headers(), "traceparent");
+    let tracestate = single_header(request.headers(), "tracestate");
     let started = Instant::now();
     let span = tracing::info_span!(
         "http.request",
@@ -111,16 +113,12 @@ pub(crate) async fn enforce(
         client_address = %client_address,
         status = tracing::field::Empty,
     );
-    auction_observability::attach_remote_trace_context(
-        &span,
-        traceparent.as_deref(),
-        tracestate.as_deref(),
-    );
+    auction_observability::attach_remote_trace_context(&span, traceparent, tracestate);
 
-    let response_request_id = request_id.clone();
+    let response_request_id = request_id.as_str();
     let response = async move {
         let run = AssertUnwindSafe(next.run(request)).catch_unwind();
-        if path == WEBSOCKET_PATH {
+        if is_websocket {
             return match run.await {
                 Ok(response) => response,
                 Err(_) => {
@@ -129,7 +127,7 @@ pub(crate) async fn enforce(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "internal_error",
                         "服务暂时不可用",
-                        &response_request_id,
+                        response_request_id,
                     )
                 }
             };
@@ -142,7 +140,7 @@ pub(crate) async fn enforce(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal_error",
                     "服务暂时不可用",
-                    &response_request_id,
+                    response_request_id,
                 )
             }
             Err(_) => {
@@ -154,7 +152,7 @@ pub(crate) async fn enforce(
                     StatusCode::GATEWAY_TIMEOUT,
                     "timeout",
                     "请求处理超时",
-                    &response_request_id,
+                    response_request_id,
                 )
             }
         }

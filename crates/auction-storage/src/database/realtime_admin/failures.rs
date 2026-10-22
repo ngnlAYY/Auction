@@ -15,6 +15,13 @@ pub(super) async fn list_failures_postgres(
     store: &super::super::PostgresStore,
     request: RealtimeFailureListRequest,
 ) -> Result<RealtimeFailurePage, ApplicationError> {
+    // failure 可在读取期间被追加或解决；计数与页面必须来自同一快照。
+    let mut transaction =
+        store.pool().begin().await.map_err(|_| storage_error("开启 realtime failure 快照失败"))?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| storage_error("设置 realtime failure 快照失败"))?;
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*)
          FROM public.realtime_failures AS failure
@@ -28,7 +35,7 @@ pub(super) async fn list_failures_postgres(
     .bind(request.consumer_key.as_deref())
     .bind(request.code.as_deref())
     .bind(request.resolved)
-    .fetch_one(store.pool())
+    .fetch_one(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取 PostgreSQL realtime failure 总数失败"))?;
     let rows = sqlx::query(
@@ -50,9 +57,10 @@ pub(super) async fn list_failures_postgres(
     .bind(request.resolved)
     .bind(request.limit)
     .bind(request.offset)
-    .fetch_all(store.pool())
+    .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取 PostgreSQL realtime failures 失败"))?;
+    transaction.commit().await.map_err(|_| storage_error("提交 realtime failure 快照失败"))?;
     let entries = rows.into_iter().map(failure_from_postgres_row).collect::<Result<Vec<_>, _>>()?;
     validate_failure_page(&entries, total, &request)?;
     Ok(RealtimeFailurePage { entries, total, limit: request.limit, offset: request.offset })

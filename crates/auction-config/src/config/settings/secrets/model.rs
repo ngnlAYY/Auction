@@ -154,6 +154,11 @@ impl AppSecrets {
                 "session_signing_key 从未用于会话认证，现已废弃；请从敏感 TOML 删除此字段，会话继续使用数据库中的不透明令牌",
             ));
         }
+        if secret.admin_actor.is_some() != secret.admin_secret.is_some() {
+            return Err(ConfigError::InvalidSessionConfig(
+                "admin_actor 与 admin_secret 必须成对配置",
+            ));
+        }
         // 与正式会话共用校验，拒绝启动前无法表达或含控制字符的凭据；不回显原值。
         if let Some(actor) = &secret.admin_actor {
             auction_application::validate_admin_actor(actor)

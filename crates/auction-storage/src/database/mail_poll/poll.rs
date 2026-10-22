@@ -155,6 +155,7 @@ pub(crate) async fn commit(
     .await?;
 
     let cursor = batch.next_cursor.as_deref().or(claim.cursor_value.as_deref());
+    // 入站写入及锁等待可能跨越租约截止；最后的 cursor CAS 必须使用实时数据库时间。
     let updated = sqlx::query(
         "UPDATE public.mail_poll_state
          SET cursor_value = $2,
@@ -166,7 +167,7 @@ pub(crate) async fn commit(
              last_failure_at = CASE WHEN $8::text IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
              state_version = state_version + 1, updated_at = $3
          WHERE mailbox_key = $1 AND claim_token = $5 AND claim_owner = $6
-               AND state_version = $7 AND claim_expires_at > CURRENT_TIMESTAMP
+               AND state_version = $7 AND claim_expires_at > clock_timestamp()
          RETURNING mailbox_key, cursor_value, last_poll_at, next_poll_at,
                    consecutive_failures, paused, state_version, updated_at",
     )
@@ -197,6 +198,9 @@ pub(crate) async fn fail(
     failure_code: &str,
     safe_detail: &str,
 ) -> Result<AdminMailPollState, ApplicationError> {
+    let mut transaction =
+        pool.begin().await.map_err(|_| storage_error("开启 MoogleMail 失败退避事务失败"))?;
+    super::state::lock_mailbox(&mut transaction, &claim.mailbox_key).await?;
     let row = sqlx::query(
         "UPDATE public.mail_poll_state
          SET last_poll_at = GREATEST(last_poll_at, CURRENT_TIMESTAMP),
@@ -206,7 +210,7 @@ pub(crate) async fn fail(
              last_failure_code = $4, last_failure_detail = $5, last_failure_at = CURRENT_TIMESTAMP,
              state_version = state_version + 1, updated_at = CURRENT_TIMESTAMP
          WHERE mailbox_key = $1 AND claim_token = $2 AND claim_owner = $6
-               AND state_version = $7 AND claim_expires_at > CURRENT_TIMESTAMP
+               AND state_version = $7 AND claim_expires_at > clock_timestamp()
          RETURNING mailbox_key, cursor_value, last_poll_at, next_poll_at,
                    consecutive_failures, paused, state_version, updated_at",
     )
@@ -217,13 +221,15 @@ pub(crate) async fn fail(
     .bind(safe_detail)
     .bind(&claim.worker_id)
     .bind(claim.state_version)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *transaction)
     .await
     .map_err(|_| storage_error("写入 MoogleMail 失败退避状态失败"))?;
     let Some(row) = row else {
         return Err(storage_error("MoogleMail 失败记录租约已失效"));
     };
-    map(&row)
+    let result = map(&row)?;
+    transaction.commit().await.map_err(|_| storage_error("提交 MoogleMail 失败退避事务失败"))?;
+    Ok(result)
 }
 
 async fn rollback_error(

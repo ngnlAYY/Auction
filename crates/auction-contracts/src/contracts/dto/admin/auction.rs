@@ -101,6 +101,7 @@ pub struct AdminUpdateAuctionScheduleResponse {
 
 /// `source_kind` 缺省时沿用旧契约的 URL 来源；URL 与 canonical JSON 必须二选一。装备 key
 /// 只在 HTTPS 请求和应用适配器的短生命周期内使用，绝不进入成功响应。
+/// 完整来源 URL 同样包含装备 key；调试输出不能只遮蔽 canonical JSON 中的独立 key 字段。
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminIntakeRequest {
@@ -166,7 +167,7 @@ impl std::fmt::Debug for AdminIntakeRequest {
             .debug_struct("AdminIntakeRequest")
             .field("command_id", &self.command_id)
             .field("source_kind", &self.source_kind)
-            .field("equipment_url", &self.equipment_url)
+            .field("equipment_url", &self.equipment_url.as_ref().map(|_| "[REDACTED]"))
             .field("equipment", &self.equipment.as_ref().map(|_| "[REDACTED]"))
             .field("start_price", &self.start_price)
             .field("player_id", &self.player_id)

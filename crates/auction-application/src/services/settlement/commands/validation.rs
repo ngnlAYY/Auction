@@ -1,6 +1,6 @@
 //! 结算到期世代与活动代理关闭计划的校验。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use auction_domain::{
     CommandId, CompetitionPlan, CompetitionTrigger, SettlementAmount, SettlementPlan,
@@ -9,7 +9,7 @@ use auction_domain::{
 use crate::SettlementSnapshot;
 
 use super::SettleAuctionCommand;
-use super::obligations::append_obligations;
+use super::obligations::build_obligations;
 
 /// 从锁内 lot、冻结策略和首次结算资金池重建当前命令结果，拒绝只满足内部守恒但不符合
 /// 当前版本算法的账本 payload。结算后 `snapshot.opening_pool` 已是最新池余额，不能拿它代替
@@ -30,7 +30,7 @@ pub(super) fn validate_replayed_settlement_plan(
         persisted.opening_pool,
         &snapshot.facts,
     )?;
-    append_obligations(command_id, snapshot, &mut expected)?;
+    expected.obligations = build_obligations(command_id, snapshot, &expected)?;
     validate_settlement_plan(command_id, snapshot, &expected)?;
     if persisted.command_id != command_id
         || persisted.policy_version != expected.policy_version
@@ -66,9 +66,13 @@ pub(super) fn validate_settlement_plan(
         ));
     }
 
-    let mut fact_ids = HashSet::with_capacity(snapshot.facts.len());
-    if snapshot.facts.iter().any(|fact| !fact_ids.insert(fact.lot_id)) {
-        return Err(auction_domain::DomainError::InvalidSettlementFacts("结算事实包含重复 lot"));
+    let mut facts_by_id = HashMap::with_capacity(snapshot.facts.len());
+    for fact in &snapshot.facts {
+        if facts_by_id.insert(fact.lot_id, fact).is_some() {
+            return Err(auction_domain::DomainError::InvalidSettlementFacts(
+                "结算事实包含重复 lot",
+            ));
+        }
     }
 
     let mut line_ids = HashSet::with_capacity(plan.lines.len());
@@ -81,10 +85,9 @@ pub(super) fn validate_settlement_plan(
                 "结算明细包含重复 lot",
             ));
         }
-        let fact =
-            snapshot.facts.iter().find(|fact| fact.lot_id == line.lot_id).ok_or(
-                auction_domain::DomainError::InvalidSettlementFacts("结算明细包含未知 lot"),
-            )?;
+        let fact = facts_by_id
+            .get(&line.lot_id)
+            .ok_or(auction_domain::DomainError::InvalidSettlementFacts("结算明细包含未知 lot"))?;
         if line.end_price != fact.end_price.unwrap_or_else(SettlementAmount::zero) {
             return Err(auction_domain::DomainError::InvalidSettlementFacts(
                 "结算明细成交价与锁内事实不一致",
@@ -104,10 +107,8 @@ pub(super) fn validate_settlement_plan(
         ));
     }
 
-    let mut expected = plan.clone();
-    expected.obligations.clear();
-    append_obligations(command_id, snapshot, &mut expected)?;
-    if expected.obligations != plan.obligations {
+    let expected = build_obligations(command_id, snapshot, plan)?;
+    if expected != plan.obligations {
         return Err(auction_domain::DomainError::InvalidSettlementFacts(
             "结算义务与锁内事实或自然键不一致",
         ));
@@ -144,15 +145,12 @@ pub(super) fn plan_proxy_closures(
     command: SettleAuctionCommand,
     snapshot: &SettlementSnapshot,
 ) -> Result<Vec<CompetitionPlan>, auction_domain::DomainError> {
+    let mut competition_counts = HashMap::with_capacity(snapshot.lot_competitions.len());
+    for competition in &snapshot.lot_competitions {
+        *competition_counts.entry(competition.state.lot_id).or_insert(0_usize) += 1;
+    }
     if snapshot.lot_competitions.len() != snapshot.facts.len()
-        || snapshot.facts.iter().any(|fact| {
-            snapshot
-                .lot_competitions
-                .iter()
-                .filter(|competition| competition.state.lot_id == fact.lot_id)
-                .count()
-                != 1
-        })
+        || snapshot.facts.iter().any(|fact| competition_counts.get(&fact.lot_id) != Some(&1))
     {
         return Err(auction_domain::DomainError::InvalidSettlementFacts(
             "结算 lot 与竞价关闭快照不一致",

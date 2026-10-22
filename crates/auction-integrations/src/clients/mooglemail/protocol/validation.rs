@@ -1,7 +1,5 @@
 //! MoogleMail 协议输入、endpoint 和敏感值校验。
 
-use std::net::IpAddr;
-
 use url::Url;
 
 use super::{MAX_OPAQUE_ID_BYTES, PRODUCTION_HOST};
@@ -56,13 +54,13 @@ pub(super) fn valid_endpoint(endpoint: &Url) -> bool {
     {
         return false;
     }
-    let Some(hostname) = endpoint.host_str() else {
-        return false;
-    };
-    if hostname.eq_ignore_ascii_case("localhost") {
-        return true;
+    // host_str 的 IPv6 表示含方括号，不能再交给 IpAddr 文本解析器。
+    match endpoint.host() {
+        Some(url::Host::Domain(hostname)) => hostname.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
     }
-    hostname.parse::<IpAddr>().is_ok_and(|address| address.is_loopback())
 }
 
 pub(super) fn endpoint_origin(endpoint: &Url) -> String {

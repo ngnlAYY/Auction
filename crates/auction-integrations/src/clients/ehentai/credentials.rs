@@ -26,6 +26,13 @@ impl EhentaiCookie {
     }
 }
 
+impl Drop for EhentaiCookie {
+    fn drop(&mut self) {
+        let mut bytes = std::mem::take(&mut self.0).into_bytes();
+        bytes.fill(0);
+    }
+}
+
 impl fmt::Debug for EhentaiCookie {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("EhentaiCookie(REDACTED)")
@@ -172,8 +179,8 @@ impl EhentaiCredentialSet {
             .ok_or_else(|| EhentaiError::credential(EhentaiOperation::FetchTopic))?;
         Ok(EhentaiCredentialSession {
             set: self.clone(),
-            current: candidate.clone(),
             tried: HashSet::from([candidate.key]),
+            current: candidate,
         })
     }
 }
@@ -203,7 +210,7 @@ impl EhentaiCredentialSession {
     }
 
     pub(super) async fn invalidate_current(&mut self) -> Result<(), EhentaiError> {
-        let current = self.current.clone();
+        let current = &self.current;
         {
             let mut candidates = self
                 .set

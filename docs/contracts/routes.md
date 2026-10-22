@@ -17,7 +17,7 @@
 
 ## 基线与统计口径
 
-`auction-http` 拥有路径注册，`auction-contracts` 拥有稳定 DTO。feature API 现为 Public **24** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，不计健康、静态资源或代理路径。仅支持 PostgreSQL；已发布路径、字段、错误码和未装配能力的错误处理必须保留，运行证据见[验证状态](docs/status.md)。
+`auction-http` 拥有路径注册，`auction-contracts` 拥有稳定 DTO。feature API 现为 Public **25** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，P25/P26 共用账号偏好路径，不计健康、静态资源或代理路径。仅支持 PostgreSQL；已发布路径、字段、错误码和未装配能力的错误处理必须保留，运行证据见[验证状态](docs/status.md)。
 
 首次部署另有独立进程的 `/setup`、部署码验证接口和两个配置接口，不计入 feature API；正式 Admin 不注册它们，`/setup` 在正式静态入口返回 404。
 
@@ -83,6 +83,8 @@ Public 浏览器的已认证写请求（P06 DELETE、P18–P20、P24、P26）携
 ### 静态入口与缓存
 
 未注册的 `/api`、`/health` 保留路径固定返回 `404 not_found` JSON；其他未知请求在 `Accept` 明确允许 HTML 时返回最小页面 404，否则返回同一 JSON 404。静态文件和批准的浏览器路径只接受 GET/HEAD，其他方法返回带 `Allow: GET, HEAD` 的 JSON 405。Public 15 条（含独立 `/forum` 页面）、Admin 21 条浏览器路由由两个 Dioxus `Route` 枚举与 `auction-http/src/assets/routes.rs` 同步维护，只有这些路径可读 `index.html`；批准路径缺构建产物时返回 503。
+精确静态文件查找拒绝空段、`.`、`..`、反斜线及重复斜线，不将路径规范化后再选文件或授予 immutable。
+百分号编码仍按原始路径查找；开发态资源必须来自受信目录，正式 payload 的符号链接禁令保持不变。
 
 缓存：Public 普通公开读取（含 P15 forum）为 `no-cache`；P14 补偿流水、P21 `/forum/sync-status`、events/session/lot 列表与详情/账户/竞价/代理/标记及全部 Admin 业务接口为 `no-store`，错误响应沿用相同策略；浏览器路由入口、直接 `index.html` 和 HTML 资源为 `no-store`；直接静态文件中只有 `assets/` 非 HTML 指纹资源使用一年 `immutable`，`wasm/*.js`、`*.wasm`、稳定别名 `/favicon.ico` 和其他稳定文件名使用 `no-cache`、`Last-Modified` 与 `If-Modified-Since`；未知 404/静态 405/产物缺失 503 均为 `no-store`。
 
@@ -151,6 +153,7 @@ Public 浏览器目录、往期拍卖、出价记录（含装备详情）、成�
 缺 total 的投影不得显示伪造总数。P05、P07、P09、P10、P12–P14 的 HTTP `page_size` 取消 200 条上限，接受 `1..=i64::MAX`，默认值、offset 上限、cursor 与筛选边界不变；游标查询仅对额外探测一行的内部 limit 使用饱和加法，请求及响应数量不截断；Admin、账户与实时事件分页保留各自原上限。不新增或改变 DTO 字段、事件或数据库结构。
 
 P07 拍卖编号页的 `total` 表示完整筛选集总数，与当前页来自同一读取快照；越界空页不改为 0；cursor 页不执行或返回总数统计。业务世界关闭后，Public 当前目录、preview/live/final/settling 投影、写入入口和 discovery 增量都必须隐藏该世界；只允许已 `settled` 的拍卖、lot、竞价/账户历史、价格历史与补偿事实继续经历史读取边界访问，不能把 `cancelled` 或禁用世界中的活动拍卖顺带公开。P09 的 lot 投影允许读取仍属公开安全边界的 settled 拍卖；响应上下文固定包含 `auction_id`、`world`、`number`、状态、展示模式、开标时间、可选有效结束时间和 `preview_revision`。
+公开黑名单的 `total` 与当前页也在同一只读快照中读取，保留原筛选、排序和越界空页的完整总数。
 
 P18-P20 新提交的普通出价、代理创建/降低金额最高为 1B（1,000,000,000 Credits），仍要求 1000 网格；新命令由领域层校验并沿用 `invalid_amount`/`invalid_maximum_amount`，既有 command_id 的成功重放不被重新解释。P09/P11 的 `next_bid` 保留数学最低价和严格抬价关系；超过 1B 时表示没有可提交的新出价，浏览器显示“已达上限”，不能压低到 1B 后提交。普通输入使用整数 K；代理输入扩展为 K/M/B，M/B 最多三/六位小数，均须精确落在 1K 网格且不超过 1B。P16/P17 的活动代理能力投影不把“上限不足完整下一口”当作损坏：合法慢速等待仍返回 `waiting=true`，上限不高于降额绑定下限时返回 `can_lower=false`；例如默认 5% 加价、当前价 99,000、慢速上限 100,000 时允许等待并反超，不因下一口 104,000 返回 503；P19 的降额约束不放宽。
 
@@ -261,6 +264,7 @@ PostgreSQL + `web-embed` 的 `auction-admin-api`/`auction-server` 初始化模�
 成功响应新增布尔 `initialize_and_start`，默认分体 false、合并 true，旧客户端可忽略。配置 DTO 新增可省略的 `confirm_initialize`（默认 false）；合并 `complete` 要求 true，否则 400 `setup_confirmation_required`，网页只在用户主动勾选专用空库及启动授权后发送 true；`completed` 只表示配置已落盘，不声称数据库初始化或三个角色已就绪。
 
 `verify` 无请求体，只校验令牌和完成状态，不连接数据库、写文件、消费令牌或建立免鉴权会话。三个 API 鉴权后共用操作锁，覆盖校验、数据库等待与目录发布；竞争为 409 `setup_busy`，完成后 409 `setup_completed`。目录已发布但持久化无法确认时进入终态 500 `setup_outcome_unknown`，不再读库/写配置，须停止进程并核对目录；输入、连接及发布前明确失败仍可重试。
+完成状态及一次性退出通知由同一操作锁持有；目录发布后在释放锁前同步设置终态并发送通知，不再经过额外异步锁等待。
 
 页面先验证部署码，返回 `verified` 才展示配置；部署码/验证状态仅保存在内存，刷新重新验证，`setup_auth` 清空部署码及密码并退回第一步，完成后清空并隐藏表单，密码确认仅在浏览器比较。数字按原始输入校验，错误用五语言定位摘要展示并展开进阶字段；修改输入清除旧成功提示，浏览器校验不替代配置 owner，`validated` 不表示落盘。每个浏览器请求独立限时 10 秒且不自动重试；保存超时、断连或不可识别响应按 `setup_outcome_unknown` 处理，该码使页面清空秘密、锁定输入及提交回调且不提供解锁/重试。客户端中止请求不能证明服务端未写入，也不新增服务端状态码。
 
@@ -342,6 +346,8 @@ Return/Take 使用独立 action proof。baseline/scan、精确匹配和结果未
 A14 为 PostgreSQL 完整档的版本 fence、证据复核、账本、退款激活、guarded relist、审计及预览目录事件事务；结算为获胜 lot 同事务建立 recovery case，Worker 按 `case → return → action → relist → refund` 持久化处理；已付款退货的退款确认要求 handoff 义务为 `ready` 且未满足，仍须完整取回证据，不能以付款前 `blocked` 替代；Delivery 人工 retry/reconcile-retry 在原命令事务恢复匹配的 Recovery action 与父任务阻断，不改变外部成功证明门禁。真实 MoogleMail 回执与部署证据见[验证状态](docs/status.md)。
 
 A21–A24、A43 提供事件元数据、lag/failure 与 replay 安全边界，未装配端口返回 501；A24 命令重放、兼容 ID 派生与追加事件/审计见[事件契约](docs/contracts/events.md#worker-消费游标与重放边界)，不代表外部广播成功。A25 的 GET、POST 候选校验和 PUT 发布由规则 owner 拥有；PUT 以 `command_id`、`expected_revision`、请求摘要在 Serializable 事务做 revision CAS、账本与审计。
+Admin delivery、realtime failure/lag 的数字分页在同一 `REPEATABLE READ READ ONLY` 快照中取得计数与记录，
+避免并发更新使两者矛盾；筛选、顺序、数量上限及响应字段不变。这增加事务控制开销，不表示查询已测得加速。
 
 ### 论坛预览与审计读取
 
@@ -360,6 +366,7 @@ A13 已接入 Admin session、CSRF、空查询校验和稳定 `command_id`；`ac
 A02 已接入 Admin session、严格空查询校验和 PostgreSQL 的 `service_heartbeats` 安全读取，health/process section 返回真实心跳聚合；Worker control 通过配置的 Unix socket 读取 live/ready/status，并将 unavailable/timeout/incompatible/rejected 映射为有限 condition，不暴露 transport 错误正文。mail、realtime、delivery section 分别读取全量轮询器、consumer lag/failure water、delivery pending/failed/manual-reconcile 水位及年龄字段；
 fulfillment、recovery 复用 operations-alert source 的履约/恢复安全水位；credential aggregation 和 alerting section 也已接入安全投影。已登记 dashboard section 都有 owner；owner 未装配或读取失败返回 `unknown`，不伪造状态。三个进程装配根已有启动和周期心跳路径，SIGINT/SIGTERM 下停止周期任务并发布停止心跳；每轮周期心跳重新检查数据库和全部内嵌 migration，读取进程内饱和的审计写入失败计数，并由各自 tracing owner 提供安全状态；Public 同时检查 relay 新鲜度，Worker control 同时投影论坛循环的终止故障和可恢复降级。
 数据库、schema、审计完整性或必须运行的 relay 异常令 readiness 为 false，tracing degraded 令 heartbeat status 降级但不单独改变应用 readiness。外部广播不属于当前 dashboard 契约。
+Worker control 的 `ready/state` 来自同一原子快照；论坛恢复只清除论坛降级原因，不能覆盖其他故障或不可逆的 drain。
 
 fulfillment 的 `pending` 只统计业务状态为 `ready` 且执行阶段为 `pending/prepared/enqueued` 的义务，与 Worker
 可领取的业务状态一致；`oldest_backlog_age_seconds` 由这些义务及独立的未终结 `blocked` 义务计算。
@@ -375,7 +382,11 @@ A17 列表不增加该字段，不返回 payload、装备 key 或正文。上限
 
 ### Runtime 配置与文件事务
 
-A26/A27 已接入 PostgreSQL 完整档：GET 返回非敏感 TOML 文档的 JSON 投影和稳定 `sha256:` fingerprint，POST `:validate` 只执行严格候选校验，PUT 使用 `command_id` 与 fingerprint fence 写入 durable pending/applied/unknown 命令账本，并通过同目录临时文件、权限校验、fsync、rename 和目录同步原子替换。文件替换成功后若账本应用出错，保留新文件并返回 `503 reconciliation_required`；同一命令重试或启动恢复按数据库实际 pending/applied 状态向前收口，不能把提交确认丢失当成可回滚旧文件。
+A26/A27 已接入 PostgreSQL 完整档：GET 返回非敏感 TOML 文档的 JSON 投影和稳定 `sha256:` fingerprint，
+POST `:validate` 只执行严格候选校验；PUT 以 `command_id` 与 fingerprint fence 写入 durable pending/applied/unknown 账本，
+并通过同目录临时文件、权限校验、fsync、rename 和目录同步原子替换。文件替换后回读或账本确认失败，保留新文件并返回
+`503 reconciliation_required`；写前读取和校验失败仍用原分类。同一命令重试或启动恢复按实际 pending/applied 状态向前收口，
+不能把提交确认丢失当成可回滚旧文件。文件读取预算和锁身份由[配置手册](ops/config/README.md#runtime-共享与重启)定义。
 候选写入复用当前部署启动侧 listener、规范 Origin、metrics、session 和 tracing 校验；已配置 Admin OTLP headers
 时不能通过 runtime 关闭 tracing，须先同步敏感部署配置。该门禁只传递 headers 是否存在，不把秘密材料带入候选或文件。
 启动恢复任何失败（含结果未知或需人工核对）都阻断 Admin 监听，仅恢复成功且文件指纹匹配启动快照才继续装配。成功更新返回 `restart_required`，不伪造热加载。运行时文件路径由三角色主 TOML 的 `runtime_config_file` 选择；Public 仅消费装备标色规则用于公开分组，Admin/Worker 继续按各自边界应用其余字段；文档还含兼容 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 对 MoogleMail 只把这些业务字段投影为启动快照；transport、凭据、mailbox identity 和全局启用开关仍由 Worker 主配置拥有，敏感 TOML、Cookie、密钥和连接串不进入该文档。

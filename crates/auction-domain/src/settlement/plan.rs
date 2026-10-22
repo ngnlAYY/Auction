@@ -42,7 +42,6 @@ impl SettlementPlan {
         }
 
         let mut lines = Vec::with_capacity(facts.len());
-        let mut discounts = Vec::with_capacity(facts.len());
         let mut tax_total = SettlementAmount::zero();
         let mut discount_demand = SettlementAmount::zero();
 
@@ -60,7 +59,6 @@ impl SettlementPlan {
                     hold_ppm: 0,
                     adjustment_ppm: 0,
                 });
-                discounts.push(SettlementAmount::zero());
                 continue;
             };
 
@@ -86,24 +84,19 @@ impl SettlementPlan {
                 hold_ppm,
                 adjustment_ppm,
             };
-            let discount = if adjustment_ppm > 0 {
+            if adjustment_ppm > 0 {
                 let tax = floor_ppm(end_price, adjustment_ppm)?;
                 line.tax_amount = tax;
                 line.buyer_amount = end_price.checked_add(tax)?;
                 tax_total = tax_total.checked_add(tax)?;
-                SettlementAmount::zero()
             } else if adjustment_ppm < 0 {
                 let discount = floor_ppm(end_price, -adjustment_ppm)?;
                 line.listed_price = end_price.checked_sub(discount)?;
                 line.buyer_amount = line.listed_price;
                 line.seller_amount = line.listed_price;
                 discount_demand = discount_demand.checked_add(discount)?;
-                discount
-            } else {
-                SettlementAmount::zero()
-            };
+            }
             lines.push(line);
-            discounts.push(discount);
         }
 
         let available_pool = if policy.compensation_pool_enabled {
@@ -116,7 +109,9 @@ impl SettlementPlan {
             && discount_demand.value() > 0
             && available_pool.value() > 0
         {
-            for (line, discount) in lines.iter_mut().zip(discounts.iter().copied()) {
+            // 折扣已由明细中的成交价和挂牌价完整表达，不再保留逐 lot 的平行临时数组。
+            for line in &mut lines {
+                let discount = line.end_price.checked_sub(line.listed_price)?;
                 if discount.value() == 0 {
                     continue;
                 }
@@ -135,9 +130,6 @@ impl SettlementPlan {
         } else {
             opening_pool
         };
-        for line in &lines {
-            line.validate()?;
-        }
 
         let plan = Self {
             policy_version: policy.version,

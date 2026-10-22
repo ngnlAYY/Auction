@@ -93,15 +93,13 @@ pub(super) fn content_digest(message: &MailMessage) -> Result<[u8; 32], MailDiag
     digest.update(message.credits.to_be_bytes());
     digest.update(message.cod.to_be_bytes());
     digest.update([u8::from(message.returnable), u8::from(message.claimable)]);
-    let mut equipment_ids = message.sorted_attachment_ids();
-    equipment_ids.sort_unstable();
-    for equipment_id in equipment_ids {
-        write_digest_string(&mut digest, &equipment_id);
-        let attachment = message
-            .attachments
-            .iter()
-            .find(|attachment| attachment.external_equipment_id == equipment_id)
-            .ok_or(MailDiagnosticError::InvalidMessage)?;
+    // 校验入口已保证附件 ID 唯一；排序借用后直接散列，避免复制 ID 后逐件线性查找。
+    let mut attachments = message.attachments.iter().collect::<Vec<_>>();
+    attachments.sort_unstable_by(|left, right| {
+        left.external_equipment_id.cmp(&right.external_equipment_id)
+    });
+    for attachment in attachments {
+        write_digest_string(&mut digest, &attachment.external_equipment_id);
         attachment
             .key
             .with_bytes(|raw| digest.update(raw))

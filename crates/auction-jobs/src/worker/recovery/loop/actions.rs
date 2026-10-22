@@ -44,7 +44,8 @@ pub(super) async fn process_actions<C>(
             if worker.control.is_draining() {
                 break;
             }
-            let item_started = std::time::Instant::now();
+            // 领取、任务排队与处理共用绝对截止，不在异步任务首次 poll 时重建预算。
+            let item_deadline = tokio::time::Instant::now() + worker.recovery.item_timeout;
             let now = worker.clock.now();
             let Some(lease_until) = now.checked_add_signed(lease_duration) else {
                 tracing::error!("recovery action lease deadline overflowed");
@@ -52,8 +53,8 @@ pub(super) async fn process_actions<C>(
                 exhausted = true;
                 break;
             };
-            let claim = match tokio::time::timeout(
-                worker.recovery.item_timeout,
+            let claim = match tokio::time::timeout_at(
+                item_deadline,
                 store.claim_due_action(worker.worker_id.clone(), now, lease_until),
             )
             .await
@@ -87,11 +88,14 @@ pub(super) async fn process_actions<C>(
             let delivery = worker.recovery_delivery.clone();
             let blacklister = worker.recovery_blacklister.clone();
             let clock = Arc::clone(&worker.clock);
-            let item_timeout = worker.recovery.item_timeout.saturating_sub(item_started.elapsed());
             tasks.spawn(async move {
                 let action_id = claim.action_id;
-                match tokio::time::timeout(
-                    item_timeout,
+                if tokio::time::Instant::now() >= item_deadline {
+                    tracing::warn!(%action_id, "recovery action expired before execution");
+                    return WorkerResult::Error;
+                }
+                match tokio::time::timeout_at(
+                    item_deadline,
                     process_recovery_action(
                         store,
                         delivery,

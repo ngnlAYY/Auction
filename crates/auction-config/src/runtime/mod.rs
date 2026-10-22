@@ -4,7 +4,7 @@
 
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Component, Path, PathBuf},
 };
 
@@ -97,8 +97,22 @@ impl TomlRuntimeFileStore {
             .read(true)
             .write(true)
             .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(&self.lock_path)
             .map_err(io_message)?;
+        let metadata = lock.metadata().map_err(io_message)?;
+        // 锁必须固定在私有普通 inode 上；不能沿 symlink 或 hard link 锁住无关文件。
+        // SAFETY：geteuid 不接收指针，仅返回当前进程有效 UID。
+        let effective_uid = unsafe { libc::geteuid() };
+        if !metadata.is_file()
+            || metadata.uid() != effective_uid
+            || metadata.mode() & 0o077 != 0
+            || metadata.nlink() != 1
+        {
+            return Err(RuntimeFileStoreError::Io(
+                "runtime 锁必须是运行账号拥有的私有单链接普通文件".to_owned(),
+            ));
+        }
         lock.try_lock().map_err(|error| match error {
             std::fs::TryLockError::WouldBlock => {
                 RuntimeFileStoreError::Io("runtime 配置正由另一个进程更新".to_owned())
@@ -123,13 +137,9 @@ impl TomlRuntimeFileStore {
     }
 
     fn read_snapshot(&self) -> Result<AdminRuntimeSnapshot, RuntimeFileStoreError> {
-        let metadata = fs::symlink_metadata(&self.path).map_err(io_message)?;
-        validate_runtime_file(&metadata)?;
-        let bytes = fs::read(&self.path).map_err(io_message)?;
-        if bytes.is_empty() || bytes.len() > MAX_ADMIN_RUNTIME_DOCUMENT_BYTES {
-            return Err(RuntimeFileStoreError::Io("runtime 配置文件大小无效".to_owned()));
-        }
-        let contents = String::from_utf8(bytes).map_err(|_| RuntimeFileStoreError::Parse)?;
+        // SAFETY：geteuid 不接收指针，仅返回当前进程有效 UID。
+        let owner_uid = unsafe { libc::geteuid() };
+        let contents = read_runtime_file(&self.path, Some(owner_uid))?;
         let document: AdminRuntimeDocument =
             toml::from_str(&contents).map_err(|_| RuntimeFileStoreError::Parse)?;
         self.validate_document(&document, chrono::Utc::now())
@@ -159,8 +169,10 @@ impl TomlRuntimeFileStore {
     fn encode(&self, document: &AdminRuntimeDocument) -> Result<Vec<u8>, RuntimeFileStoreError> {
         self.validate_document(document, chrono::Utc::now())
             .map_err(|error| RuntimeFileStoreError::InvalidDocument(error.to_string()))?;
-        let encoded = toml::to_string_pretty(document).map_err(|_| RuntimeFileStoreError::Parse)?;
-        let bytes = format!("{encoded}\n").into_bytes();
+        let mut encoded =
+            toml::to_string_pretty(document).map_err(|_| RuntimeFileStoreError::Parse)?;
+        encoded.push('\n');
+        let bytes = encoded.into_bytes();
         if bytes.len() > MAX_ADMIN_RUNTIME_DOCUMENT_BYTES {
             return Err(RuntimeFileStoreError::Io("runtime 配置候选过大".to_owned()));
         }
@@ -170,7 +182,9 @@ impl TomlRuntimeFileStore {
     fn atomic_write(&self, document: &AdminRuntimeDocument) -> Result<(), RuntimeFileStoreError> {
         let bytes = self.encode(document)?;
         let current = fs::symlink_metadata(&self.path).map_err(io_message)?;
-        validate_runtime_file(&current)?;
+        // SAFETY：geteuid 不接收指针，仅返回当前进程有效 UID。
+        let owner_uid = unsafe { libc::geteuid() };
+        validate_runtime_file(&current, Some(owner_uid))?;
         let directory = self.path.parent().ok_or(RuntimeFileStoreError::InvalidPath)?;
         let temporary_path = directory.join(format!(
             ".admin-runtime-config.{}.{}.tmp",
@@ -188,8 +202,8 @@ impl TomlRuntimeFileStore {
             .map_err(io_message)?;
         let result = (|| {
             temporary.write_all(&bytes).map_err(io_message)?;
-            temporary.sync_all().map_err(io_message)?;
             set_private_mode(&temporary)?;
+            // 一次 fsync 同时持久化内容与最终权限，完成后才允许 rename。
             temporary.sync_all().map_err(io_message)?;
             drop(temporary);
             fs::rename(&temporary_path, &self.path).map_err(|error| {
@@ -219,7 +233,10 @@ impl TomlRuntimeFileStore {
             return Err(RuntimeFileStoreError::Conflict);
         }
         self.atomic_write(&document)?;
-        let updated = self.read_snapshot()?;
+        // 原子替换已完成；回读失败不能伪装成文件尚未变更的普通读取错误。
+        let updated = self
+            .read_snapshot()
+            .map_err(|error| RuntimeFileStoreError::OutcomeUnknown(error.to_string()))?;
         if updated.fingerprint != document.fingerprint() {
             return Err(RuntimeFileStoreError::OutcomeUnknown(
                 "替换后 fingerprint 不匹配".to_owned(),
@@ -310,7 +327,9 @@ impl AdminRuntimeFileStore for TomlRuntimeFileStore {
                     return Err(RuntimeFileStoreError::Conflict);
                 }
                 self.atomic_write(&replacement.old_document)?;
-                let restored = self.read_snapshot()?;
+                let restored = self
+                    .read_snapshot()
+                    .map_err(|error| RuntimeFileStoreError::OutcomeUnknown(error.to_string()))?;
                 if restored.fingerprint != replacement.old_fingerprint {
                     return Err(RuntimeFileStoreError::OutcomeUnknown(
                         "恢复后 fingerprint 不匹配".to_owned(),
@@ -332,6 +351,36 @@ fn map_file_error(error: RuntimeFileStoreError) -> ApplicationError {
     ApplicationError::from(mapped)
 }
 
+/// 启动与管理读取共用文件边界；只有管理读写要求当前进程 UID。
+/// 角色配置也由 root 运维读取，目标服务 owner 仍由部署门禁按实际 unit User 校验。
+pub(crate) fn read_runtime_file(
+    path: &Path,
+    expected_uid: Option<u32>,
+) -> Result<String, RuntimeFileStoreError> {
+    validate_directory(path.parent().ok_or(RuntimeFileStoreError::InvalidPath)?)?;
+    // 在同一描述符上校验和读取，避免路径在 metadata 与 open 之间被替换；
+    // O_NONBLOCK 让误放的 FIFO 也能在文件类型检查时立即失败。
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .map_err(io_message)?;
+    let metadata = file.metadata().map_err(io_message)?;
+    validate_runtime_file(&metadata, expected_uid)?;
+    if metadata.len() == 0 || metadata.len() > MAX_ADMIN_RUNTIME_DOCUMENT_BYTES as u64 {
+        return Err(RuntimeFileStoreError::Io("runtime 配置文件大小无效".to_owned()));
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    // 限制实际读取量，而非读完才检查；并发追加不能突破既有 4 MiB 文档预算。
+    file.take(MAX_ADMIN_RUNTIME_DOCUMENT_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(io_message)?;
+    if bytes.is_empty() || bytes.len() > MAX_ADMIN_RUNTIME_DOCUMENT_BYTES {
+        return Err(RuntimeFileStoreError::Io("runtime 配置文件大小无效".to_owned()));
+    }
+    String::from_utf8(bytes).map_err(|_| RuntimeFileStoreError::Parse)
+}
+
 fn validate_directory(path: &Path) -> Result<(), RuntimeFileStoreError> {
     let metadata = fs::symlink_metadata(path).map_err(io_message)?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
@@ -344,17 +393,21 @@ fn validate_directory(path: &Path) -> Result<(), RuntimeFileStoreError> {
     Ok(())
 }
 
-fn validate_runtime_file(metadata: &fs::Metadata) -> Result<(), RuntimeFileStoreError> {
+fn validate_runtime_file(
+    metadata: &fs::Metadata,
+    expected_uid: Option<u32>,
+) -> Result<(), RuntimeFileStoreError> {
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return Err(RuntimeFileStoreError::Io("runtime 配置必须是 regular 文件".to_owned()));
     }
     #[cfg(unix)]
     {
-        // SAFETY: geteuid 不接收指针，仅返回当前进程有效 UID。
-        let effective_uid = unsafe { libc::geteuid() };
-        if metadata.mode() & 0o777 != 0o640 || metadata.uid() != effective_uid {
+        if metadata.mode() & 0o777 != 0o640 {
+            return Err(RuntimeFileStoreError::Io("runtime 配置必须使用 0640 权限".to_owned()));
+        }
+        if expected_uid.is_some_and(|uid| metadata.uid() != uid) {
             return Err(RuntimeFileStoreError::Io(
-                "runtime 配置必须由运行账号拥有且使用 0640 权限".to_owned(),
+                "runtime 配置必须由管理进程运行账号拥有".to_owned(),
             ));
         }
     }

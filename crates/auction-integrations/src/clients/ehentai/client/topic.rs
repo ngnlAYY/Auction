@@ -339,25 +339,7 @@ impl EhentaiClient {
     ) -> Option<ForumPublishedPost> {
         let html = std::str::from_utf8(body).ok()?;
         let document = Html::parse_document(html);
-        let title_selector = LazyLock::force(&ACKNOWLEDGEMENT_TITLE_SELECTOR).as_ref().ok()?;
-        let mut titles = document.select(title_selector);
-        let title = clean_line(&titles.next()?.text().collect::<String>());
-        if title != "Please stand by..." || titles.next().is_some() {
-            return None;
-        }
-
-        let refresh_selector = LazyLock::force(&ACKNOWLEDGEMENT_REFRESH_SELECTOR).as_ref().ok()?;
-        let mut refreshes = document.select(refresh_selector).filter(|element| {
-            element
-                .value()
-                .attr("http-equiv")
-                .is_some_and(|value| value.eq_ignore_ascii_case("refresh"))
-        });
-        let refresh = refreshes.next()?;
-        if refreshes.next().is_some() {
-            return None;
-        }
-        let refresh_reference = refresh_reference(refresh.value().attr("content")?)?;
+        let refresh_reference = acknowledgement_reference(&document)?;
         let refresh_proof =
             self.post_from_reference(base, refresh_reference, board_id, thread_id, operation)?;
 
@@ -411,17 +393,21 @@ impl EhentaiClient {
     ) -> Option<auction_application::ForumPublishedThread> {
         let html = std::str::from_utf8(body).ok()?;
         let document = Html::parse_document(html);
-        let selector = link_selector().ok()?;
-        for element in document.select(selector) {
-            let Some(reference) = element.value().attr("href") else {
-                continue;
-            };
-            if let Some(published) = self.topic_from_reference(base, reference, board_id, operation)
-            {
-                return Some(published);
-            }
-        }
-        None
+        // HTTP 200 的普通页面可能链接到旧主题；只有现有确认页协议才能授予 Created。
+        let refresh_proof = self.topic_from_reference(
+            base,
+            acknowledgement_reference(&document)?,
+            board_id,
+            operation,
+        )?;
+        let links = link_selector().ok()?;
+        let mut proofs =
+            document.select(links).filter_map(|link| link.value().attr("href")).filter_map(
+                |reference| self.topic_from_reference(base, reference, board_id, operation),
+            );
+        let first = proofs.next()?;
+        (first == refresh_proof && proofs.all(|candidate| candidate == refresh_proof))
+            .then_some(refresh_proof)
     }
 
     pub(super) fn topic_from_reference(
@@ -480,6 +466,29 @@ impl EhentaiClient {
         }
         Some(ForumPublishedPost { thread_id: observed_thread, post_id: observed_post })
     }
+}
+
+/// 创建与固定帖写入共用已有 IPB 确认页结构；错误页中的普通主题链接不构成写入证明。
+fn acknowledgement_reference(document: &Html) -> Option<&str> {
+    let title_selector = LazyLock::force(&ACKNOWLEDGEMENT_TITLE_SELECTOR).as_ref().ok()?;
+    let mut titles = document.select(title_selector);
+    let title = clean_line(&titles.next()?.text().collect::<String>());
+    if title != "Please stand by..." || titles.next().is_some() {
+        return None;
+    }
+
+    let refresh_selector = LazyLock::force(&ACKNOWLEDGEMENT_REFRESH_SELECTOR).as_ref().ok()?;
+    let mut refreshes = document.select(refresh_selector).filter(|element| {
+        element
+            .value()
+            .attr("http-equiv")
+            .is_some_and(|value| value.eq_ignore_ascii_case("refresh"))
+    });
+    let refresh = refreshes.next()?;
+    if refreshes.next().is_some() {
+        return None;
+    }
+    refresh_reference(refresh.value().attr("content")?)
 }
 
 fn refresh_reference(content: &str) -> Option<&str> {

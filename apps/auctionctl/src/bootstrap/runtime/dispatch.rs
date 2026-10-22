@@ -70,11 +70,21 @@ impl Command {
 }
 
 pub async fn run() -> Result<(), AuctionCtlError> {
-    let command = Cli::try_parse()
-        .map_err(|error| {
-            AuctionCtlError::new(EXIT_USAGE_OR_CONFIG, anyhow::anyhow!(error.to_string()))
-        })?
-        .command;
+    let command = match Cli::try_parse() {
+        Ok(cli) => cli.command,
+        // clap 把显式帮助也表示为解析结果；成功展示不属于参数错误，也不进入命令装配。
+        Err(error) if error.exit_code() == 0 => {
+            return error
+                .print()
+                .map_err(|error| AuctionCtlError::new(EXIT_USAGE_OR_CONFIG, error.into()));
+        }
+        Err(error) => {
+            return Err(AuctionCtlError::new(
+                EXIT_USAGE_OR_CONFIG,
+                anyhow::anyhow!(error.to_string()),
+            ));
+        }
+    };
     let failure_code = command.failure_code();
     run_command(command).await.map_err(|error| AuctionCtlError::new(failure_code, error))
 }

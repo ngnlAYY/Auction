@@ -2,6 +2,8 @@
 
 use std::collections::HashSet;
 
+use futures_util::TryStreamExt;
+
 use super::*;
 
 /// 仅同UID、完整原投递身份匹配的追加修复证明解除旧结果未知门。
@@ -28,13 +30,17 @@ pub(super) async fn repaired_deliveries(
 pub(super) async fn assetless_notifications(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<Vec<Uuid>, FundingError> {
-    let rows=sqlx::query("SELECT id,origin_id,command_id,payload FROM public.deliveries WHERE origin_kind='mail_intake' ORDER BY id")
-        .fetch_all(&mut **tx).await.map_err(storage)?;
+    // 完整分类仍逐条校验闭集载荷，只保留匹配 UUID，不把历史正文整批加载到内存。
+    let mut rows = sqlx::query(
+        "SELECT id,origin_id,command_id,payload FROM public.deliveries
+         WHERE origin_kind='mail_intake' ORDER BY id",
+    )
+    .fetch(&mut **tx);
     let mut ids = Vec::new();
-    for row in rows {
+    while let Some(row) = rows.try_next().await.map_err(storage)? {
         if crate::database::fulfillment_scheduler::assetless_mail_notification(
             &row.try_get::<serde_json::Value, _>("payload").map_err(storage)?,
-            &row.try_get::<String, _>("origin_id").map_err(storage)?,
+            row.try_get::<&str, _>("origin_id").map_err(storage)?,
             row.try_get("command_id").map_err(storage)?,
         ) {
             ids.push(row.try_get("id").map_err(storage)?);

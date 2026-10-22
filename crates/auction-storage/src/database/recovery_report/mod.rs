@@ -36,6 +36,9 @@ async fn postgres_report(
     store: &super::PostgresStore,
     auction_id: AuctionId,
 ) -> Result<Option<RecoveryReport>, ApplicationError> {
+    use std::collections::HashMap;
+
+    use futures_util::TryStreamExt;
     use sqlx::Row;
     use uuid::Uuid;
 
@@ -89,6 +92,61 @@ async fn postgres_report(
     .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取 recovery case 失败"))?;
+    let recovery_ids = recovery_rows
+        .iter()
+        .map(|row| row.try_get::<Uuid, _>("id"))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| storage_error("读取 recovery 标识失败"))?;
+    let mut actions_by_recovery = HashMap::<Uuid, Vec<RecoveryActionReport>>::new();
+    if !recovery_ids.is_empty() {
+        // 只读取报告中 case 的动作；流式分组保留各 case 原有 kind/id 顺序，避免逐 case 查询。
+        let mut action_rows = sqlx::query(
+            r#"SELECT recovery_id, id, kind, execution_state, delivery_id, last_error_code,
+                      proof_kind, proof_observed_at, updated_at
+               FROM public.settlement_recovery_actions
+               WHERE recovery_id = ANY($1)
+               ORDER BY recovery_id, kind, id"#,
+        )
+        .bind(&recovery_ids)
+        .fetch(&mut *transaction);
+        while let Some(action_row) =
+            action_rows.try_next().await.map_err(|_| storage_error("读取 recovery action 失败"))?
+        {
+            let recovery_id = action_row
+                .try_get("recovery_id")
+                .map_err(|_| storage_error("读取 recovery action 所属 case 失败"))?;
+            let action = RecoveryActionReport {
+                id: SettlementId::from_uuid(
+                    action_row
+                        .try_get("id")
+                        .map_err(|_| storage_error("读取 recovery action 标识失败"))?,
+                ),
+                kind: action_row
+                    .try_get("kind")
+                    .map_err(|_| storage_error("读取 recovery action 类型失败"))?,
+                state: action_row
+                    .try_get("execution_state")
+                    .map_err(|_| storage_error("读取 recovery action 状态失败"))?,
+                delivery_id: action_row
+                    .try_get::<Option<Uuid>, _>("delivery_id")
+                    .map_err(|_| storage_error("读取 recovery action 投递标识失败"))?
+                    .map(SettlementId::from_uuid),
+                failure_code: action_row
+                    .try_get("last_error_code")
+                    .map_err(|_| storage_error("读取 recovery action 错误码失败"))?,
+                proof_kind: action_row
+                    .try_get("proof_kind")
+                    .map_err(|_| storage_error("读取 recovery action 证明类型失败"))?,
+                proof_observed_at: action_row
+                    .try_get("proof_observed_at")
+                    .map_err(|_| storage_error("读取 recovery action 证明时间失败"))?,
+                updated_at: action_row
+                    .try_get("updated_at")
+                    .map_err(|_| storage_error("读取 recovery action 更新时间失败"))?,
+            };
+            actions_by_recovery.entry(recovery_id).or_default().push(action);
+        }
+    }
 
     let mut recoveries = Vec::with_capacity(recovery_rows.len());
     for row in recovery_rows {
@@ -102,59 +160,7 @@ async fn postgres_report(
             return Err(storage_error("recovery 拍卖标识与报告不一致"));
         }
 
-        let action_rows = sqlx::query(
-            r#"SELECT
-                   id,
-                   kind,
-                   execution_state,
-                   delivery_id,
-                   last_error_code,
-                   proof_kind,
-                   proof_observed_at,
-                   updated_at
-               FROM public.settlement_recovery_actions
-               WHERE recovery_id = $1
-               ORDER BY kind, id"#,
-        )
-        .bind(recovery_id)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|_| storage_error("读取 recovery action 失败"))?;
-
-        let actions = action_rows
-            .into_iter()
-            .map(|action_row| {
-                Ok(RecoveryActionReport {
-                    id: SettlementId::from_uuid(
-                        action_row
-                            .try_get("id")
-                            .map_err(|_| storage_error("读取 recovery action 标识失败"))?,
-                    ),
-                    kind: action_row
-                        .try_get("kind")
-                        .map_err(|_| storage_error("读取 recovery action 类型失败"))?,
-                    state: action_row
-                        .try_get("execution_state")
-                        .map_err(|_| storage_error("读取 recovery action 状态失败"))?,
-                    delivery_id: action_row
-                        .try_get::<Option<Uuid>, _>("delivery_id")
-                        .map_err(|_| storage_error("读取 recovery action 投递标识失败"))?
-                        .map(SettlementId::from_uuid),
-                    failure_code: action_row
-                        .try_get("last_error_code")
-                        .map_err(|_| storage_error("读取 recovery action 错误码失败"))?,
-                    proof_kind: action_row
-                        .try_get("proof_kind")
-                        .map_err(|_| storage_error("读取 recovery action 证明类型失败"))?,
-                    proof_observed_at: action_row
-                        .try_get("proof_observed_at")
-                        .map_err(|_| storage_error("读取 recovery action 证明时间失败"))?,
-                    updated_at: action_row
-                        .try_get("updated_at")
-                        .map_err(|_| storage_error("读取 recovery action 更新时间失败"))?,
-                })
-            })
-            .collect::<Result<Vec<_>, ApplicationError>>()?;
+        let actions = actions_by_recovery.remove(&recovery_id).unwrap_or_default();
 
         let mut entry = RecoveryReportEntry {
             id: SettlementId::from_uuid(recovery_id),

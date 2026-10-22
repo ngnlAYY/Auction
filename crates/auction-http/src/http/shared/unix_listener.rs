@@ -122,13 +122,32 @@ fn resolve_group_id(group: &str) -> io::Result<u32> {
         return Ok(group_id);
     }
     let name = CString::new(group).map_err(|_| invalid("Unix socket group 名称包含非法字符"))?;
-    // SAFETY: name 是 NUL 结尾且只在本次启动同步读取 libc 返回的静态 group 记录。
-    let record = unsafe { libc::getgrnam(name.as_ptr()) };
-    if record.is_null() {
-        return Err(invalid("无法解析 Unix socket group"));
+    // NSS 非重入接口返回进程共享记录；并发绑定不同 listener 时不能借用该静态内存。
+    // 与 deployment control 的账号解析保持同一有界缓冲策略，超限或未知组均失败关闭。
+    let mut buffer = vec![0_u8; 1024];
+    loop {
+        let mut record = std::mem::MaybeUninit::<libc::group>::uninit();
+        let mut result = std::ptr::null_mut();
+        // SAFETY: name 为 NUL 结尾，record、buffer 和 result 在调用期间有效且互不重叠。
+        let status = unsafe {
+            libc::getgrnam_r(
+                name.as_ptr(),
+                record.as_mut_ptr(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                &mut result,
+            )
+        };
+        if status == libc::ERANGE && buffer.len() < 1024 * 1024 {
+            buffer.resize(buffer.len() * 2, 0);
+            continue;
+        }
+        if status != 0 || result.is_null() {
+            return Err(invalid("无法解析 Unix socket group"));
+        }
+        // SAFETY: 成功且 result 非空时，getgrnam_r 已完整初始化当前调用独占的 record。
+        return Ok(unsafe { record.assume_init().gr_gid });
     }
-    // SAFETY: getgrnam 返回的非空指针指向 libc 保证有效的 group 记录。
-    Ok(unsafe { (*record).gr_gid })
 }
 
 fn validate_runtime_directory(path: &Path) -> io::Result<()> {

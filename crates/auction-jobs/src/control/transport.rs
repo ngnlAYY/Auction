@@ -180,10 +180,8 @@ pub struct WorkerControlHandle {
 }
 
 struct WorkerControlInner {
+    // 就绪、降级原因和 drain 共用一个原子快照，避免并发刷新用旧投影覆盖新故障。
     state: std::sync::atomic::AtomicU8,
-    draining: std::sync::atomic::AtomicBool,
-    ready: std::sync::atomic::AtomicBool,
-    degraded_causes: std::sync::atomic::AtomicU8,
     mail_poll_requested: std::sync::atomic::AtomicBool,
     version: String,
     mail_pollers: usize,
@@ -191,21 +189,29 @@ struct WorkerControlInner {
     trigger_history: Mutex<TriggerHistory>,
 }
 
+const CONTROL_STARTED: u8 = 1;
+const CONTROL_DEGRADED: u8 = 2;
+const CONTROL_FORUM_DEGRADED: u8 = 4;
+const CONTROL_DRAINING: u8 = 8;
+
 #[derive(Clone, Copy)]
 enum WorkerControlState {
-    Starting = 0,
-    Serving = 1,
-    Degraded = 2,
-    Draining = 3,
+    Starting,
+    Serving,
+    Degraded,
+    Draining,
 }
 
 impl WorkerControlState {
-    fn from_byte(value: u8) -> Self {
-        match value {
-            1 => Self::Serving,
-            2 => Self::Degraded,
-            3 => Self::Draining,
-            _ => Self::Starting,
+    fn from_flags(value: u8) -> Self {
+        if value & CONTROL_DRAINING != 0 {
+            Self::Draining
+        } else if value & (CONTROL_DEGRADED | CONTROL_FORUM_DEGRADED) != 0 {
+            Self::Degraded
+        } else if value & CONTROL_STARTED != 0 {
+            Self::Serving
+        } else {
+            Self::Starting
         }
     }
 
@@ -228,10 +234,7 @@ impl WorkerControlHandle {
     pub fn new(version: impl Into<String>, mail_pollers: usize) -> Self {
         Self {
             inner: Arc::new(WorkerControlInner {
-                state: std::sync::atomic::AtomicU8::new(WorkerControlState::Starting as u8),
-                draining: std::sync::atomic::AtomicBool::new(false),
-                ready: std::sync::atomic::AtomicBool::new(false),
-                degraded_causes: std::sync::atomic::AtomicU8::new(0),
+                state: std::sync::atomic::AtomicU8::new(0),
                 mail_poll_requested: std::sync::atomic::AtomicBool::new(false),
                 version: version.into(),
                 mail_pollers,
@@ -248,55 +251,51 @@ impl WorkerControlHandle {
 
     /// 标记 Worker 已经可以接受控制请求。
     pub fn mark_serving(&self) {
-        self.inner.degraded_causes.store(0, std::sync::atomic::Ordering::Release);
-        self.refresh_operational_state();
+        // Rust 1.99 的新名 try_update 在 MSRV 1.94.1 尚未稳定；保留单次原子状态迁移。
+        #[allow(deprecated)]
+        let _ = self.inner.state.fetch_update(
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+            |state| Some((state & CONTROL_DRAINING) | CONTROL_STARTED),
+        );
     }
 
     pub fn mark_degraded(&self) {
-        self.inner.degraded_causes.fetch_or(1, std::sync::atomic::Ordering::AcqRel);
-        self.refresh_operational_state();
+        self.inner
+            .state
+            .fetch_or(CONTROL_STARTED | CONTROL_DEGRADED, std::sync::atomic::Ordering::AcqRel);
     }
 
     /// 记录论坛循环最近一轮健康状态；成功轮次可以恢复该依赖造成的降级。
     pub fn mark_forum_cycle(&self, healthy: bool) {
-        if healthy {
-            self.inner.degraded_causes.fetch_and(!2, std::sync::atomic::Ordering::AcqRel);
-        } else {
-            self.inner.degraded_causes.fetch_or(2, std::sync::atomic::Ordering::AcqRel);
-        }
-        self.refresh_operational_state();
+        // 与其他原子更新点一致，MSRV 1.94.1 仍须使用 fetch_update。
+        #[allow(deprecated)]
+        let _ = self.inner.state.fetch_update(
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+            |state| {
+                Some(if healthy {
+                    (state | CONTROL_STARTED) & !CONTROL_FORUM_DEGRADED
+                } else {
+                    state | CONTROL_STARTED | CONTROL_FORUM_DEGRADED
+                })
+            },
+        );
     }
 
     /// 返回 control 与 heartbeat 共用的进程就绪事实。
     pub fn is_ready(&self) -> bool {
-        !self.is_draining() && self.inner.ready.load(std::sync::atomic::Ordering::Acquire)
+        matches!(self.operational_state(), WorkerControlState::Serving)
     }
 
     /// 返回不可逆的排空门禁；循环在每次领取新工作前检查，在途 claim 仍由原 owner 收口。
     pub fn is_draining(&self) -> bool {
-        self.inner.draining.load(std::sync::atomic::Ordering::Acquire)
+        self.inner.state.load(std::sync::atomic::Ordering::Acquire) & CONTROL_DRAINING != 0
     }
 
     /// 标记 Worker 正在收口；之后的手动唤醒会被拒绝。
     pub fn mark_draining(&self) {
-        self.inner.draining.store(true, std::sync::atomic::Ordering::Release);
-        self.inner.ready.store(false, std::sync::atomic::Ordering::Release);
-        self.inner
-            .state
-            .store(WorkerControlState::Draining as u8, std::sync::atomic::Ordering::Release);
-    }
-
-    fn refresh_operational_state(&self) {
-        if self.is_draining() {
-            return;
-        }
-        let degraded = self.inner.degraded_causes.load(std::sync::atomic::Ordering::Acquire) != 0;
-        self.inner.ready.store(!degraded, std::sync::atomic::Ordering::Release);
-        self.inner.state.store(
-            (if degraded { WorkerControlState::Degraded } else { WorkerControlState::Serving })
-                as u8,
-            std::sync::atomic::Ordering::Release,
-        );
+        self.inner.state.fetch_or(CONTROL_DRAINING, std::sync::atomic::Ordering::AcqRel);
     }
 
     pub fn poll_wakeup(&self) -> Arc<Notify> {
@@ -309,7 +308,7 @@ impl WorkerControlHandle {
     }
 
     fn live(&self) -> LiveResult {
-        LiveResult { state: self.state_name().to_owned() }
+        LiveResult { state: self.operational_state().as_str().to_owned() }
     }
 
     fn ready(&self) -> ReadyResult {
@@ -317,20 +316,17 @@ impl WorkerControlHandle {
     }
 
     fn status(&self) -> StatusResult {
+        let state = self.operational_state();
         StatusResult {
             mail_pollers: self.inner.mail_pollers,
-            ready: self.is_ready(),
-            state: self.state_name().to_owned(),
+            ready: matches!(state, WorkerControlState::Serving),
+            state: state.as_str().to_owned(),
             version: self.inner.version.clone(),
         }
     }
 
-    fn state_name(&self) -> &'static str {
-        if self.is_draining() {
-            return WorkerControlState::Draining.as_str();
-        }
-        WorkerControlState::from_byte(self.inner.state.load(std::sync::atomic::Ordering::Acquire))
-            .as_str()
+    fn operational_state(&self) -> WorkerControlState {
+        WorkerControlState::from_flags(self.inner.state.load(std::sync::atomic::Ordering::Acquire))
     }
 
     fn trigger_poll(&self, command: TriggerPollCommand) -> Result<TriggerPollResult, TriggerError> {
@@ -347,14 +343,7 @@ impl WorkerControlHandle {
         if let Some(result) = history.results.get(&command.command_id).cloned() {
             return Ok(result);
         }
-        if !self.is_ready()
-            || !matches!(
-                WorkerControlState::from_byte(
-                    self.inner.state.load(std::sync::atomic::Ordering::Acquire),
-                ),
-                WorkerControlState::Serving
-            )
-        {
+        if !self.is_ready() {
             return Err(TriggerError::NotReady);
         }
         if self.inner.mail_pollers == 0 {

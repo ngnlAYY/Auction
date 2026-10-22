@@ -28,6 +28,13 @@ async fn list_postgres(
     store: &super::PostgresStore,
     request: PublicBlacklistRequest,
 ) -> Result<PublicBlacklistPage, ApplicationError> {
+    // 页数据与总数共享只读快照，避免并发封禁/解封使同一响应自相矛盾。
+    let mut transaction =
+        store.pool().begin().await.map_err(|_| storage_error("开启公开黑名单快照失败"))?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| storage_error("设置公开黑名单快照失败"))?;
     let rows = sqlx::query(
         "SELECT u.username, b.public_reason, b.created_at AS blacklisted_at
          FROM public.user_blacklist AS b
@@ -38,7 +45,7 @@ async fn list_postgres(
     )
     .bind(request.limit)
     .bind(request.offset)
-    .fetch_all(store.pool())
+    .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取 PostgreSQL 公开黑名单失败"))?;
     let total: i64 = sqlx::query_scalar(
@@ -47,9 +54,10 @@ async fn list_postgres(
          JOIN public.users AS u ON u.id = b.user_id
          WHERE b.revoked_at IS NULL",
     )
-    .fetch_one(store.pool())
+    .fetch_one(&mut *transaction)
     .await
     .map_err(|_| storage_error("统计 PostgreSQL 公开黑名单失败"))?;
+    transaction.commit().await.map_err(|_| storage_error("提交公开黑名单快照失败"))?;
 
     let entries = rows
         .into_iter()

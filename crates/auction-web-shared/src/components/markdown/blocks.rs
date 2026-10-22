@@ -48,8 +48,7 @@ pub(super) fn parse_blocks(markdown: &str) -> Vec<MarkdownBlock> {
             && trimmed.contains('|')
             && is_table_separator(lines[index + 1].trim())
         {
-            let headers =
-                split_table_row(trimmed).into_iter().map(|value| parse_inline(&value)).collect();
+            let headers = split_table_row(trimmed).into_iter().map(parse_inline).collect();
             index += 2;
             let mut rows = Vec::new();
             while index < lines.len() {
@@ -57,9 +56,7 @@ pub(super) fn parse_blocks(markdown: &str) -> Vec<MarkdownBlock> {
                 if row.is_empty() || !row.contains('|') {
                     break;
                 }
-                rows.push(
-                    split_table_row(row).into_iter().map(|value| parse_inline(&value)).collect(),
-                );
+                rows.push(split_table_row(row).into_iter().map(parse_inline).collect());
                 index += 1;
             }
             blocks.push(MarkdownBlock::Table { headers, rows });
@@ -160,11 +157,19 @@ fn heading(value: &str) -> Option<(u8, &str)> {
 }
 
 fn is_rule(value: &str) -> bool {
-    let compact = value.replace(' ', "");
-    compact.len() >= 3
-        && (compact.chars().all(|character| character == '-')
-            || compact.chars().all(|character| character == '*')
-            || compact.chars().all(|character| character == '_'))
+    // 沿用只忽略 ASCII 空格的语法，不为每条候选行创建去空格副本。
+    let mut bytes = value.bytes().filter(|byte| *byte != b' ');
+    let Some(marker @ (b'-' | b'*' | b'_')) = bytes.next() else {
+        return false;
+    };
+    let mut count = 1_usize;
+    for byte in bytes {
+        if byte != marker {
+            return false;
+        }
+        count += 1;
+    }
+    count >= 3
 }
 
 fn is_table_separator(value: &str) -> bool {
@@ -176,11 +181,11 @@ fn is_table_separator(value: &str) -> bool {
         })
 }
 
-fn split_table_row(value: &str) -> Vec<String> {
+fn split_table_row(value: &str) -> Vec<&str> {
     let value = value.trim();
     let value = value.strip_prefix('|').unwrap_or(value);
     let value = value.strip_suffix('|').unwrap_or(value);
-    value.split('|').map(|cell| cell.trim().to_owned()).collect()
+    value.split('|').map(str::trim).collect()
 }
 
 fn unordered_item(value: &str) -> Option<&str> {

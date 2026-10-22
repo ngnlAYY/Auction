@@ -1,5 +1,7 @@
 //! 应用配置文件定位、读取和输入模型装配。
 
+use crate::config::reader::read_toml_file;
+
 use super::super::*;
 use super::model::{AppConfig, BuildInput, CommonFileConfig, FileConfig};
 
@@ -10,8 +12,10 @@ impl AppConfig {
         }
 
         let default_path = PathBuf::from("ops/config").join(format!("{}.toml", role.name()));
-        if default_path.is_file() {
-            return Self::load_from_path(role, default_path);
+        match fs::symlink_metadata(&default_path) {
+            Ok(_) => return Self::load_from_path(role, default_path),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => return Err(ConfigError::Read { path: default_path, source }),
         }
 
         Self::build(
@@ -42,7 +46,7 @@ impl AppConfig {
         let requested_path = path.as_ref();
         let path = std::path::absolute(requested_path)
             .map_err(|source| ConfigError::Read { path: requested_path.to_owned(), source })?;
-        let contents = fs::read_to_string(&path)
+        let contents = read_toml_file(&path)
             .map_err(|source| ConfigError::Read { path: path.clone(), source })?;
         let file: FileConfig =
             toml::from_str(&contents).map_err(|_| ConfigError::Parse { path: path.clone() })?;
@@ -100,7 +104,7 @@ impl AppConfig {
 
 /// 公共文件使用独立闭集模型；解析错误只报告路径，避免旧文件中的误放敏感值被回显。
 fn load_common_file(path: &Path) -> Result<CommonFileConfig, ConfigError> {
-    let contents = fs::read_to_string(path)
+    let contents = read_toml_file(path)
         .map_err(|source| ConfigError::Read { path: path.to_owned(), source })?;
     toml::from_str(&contents).map_err(|_| ConfigError::Parse { path: path.to_owned() })
 }

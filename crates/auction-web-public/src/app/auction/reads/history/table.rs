@@ -14,10 +14,11 @@ pub(crate) fn PriceHistoryTable(
 ) -> Element {
     let page_size = page.page_size.max(1);
     let empty = page.rows.is_empty();
-    let groups = history_groups(page.rows.clone(), &grouping);
+    // 当前组件拥有本页快照，分组直接接管行，不为派生展示复制整页 DTO。
+    let groups = history_groups(page.rows, &grouping);
     rsx! {
         div { class: "public-history-results",
-            if let Some(stats) = page.stats.clone().filter(|stats| stats.count > 0) {
+            if let Some(stats) = page.stats.filter(|stats| stats.count > 0) {
                 PriceHistoryStatsView { stats }
             }
             if empty {

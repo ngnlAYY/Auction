@@ -1,15 +1,18 @@
 //! Admin runtime TOML 的读取与非敏感投影。
 
-use std::{fs, path::Path};
+use std::path::Path;
 
 use auction_application::AdminRuntimeDocument;
+
+use crate::config::reader::read_toml_file;
+use crate::runtime::{RuntimeFileStoreError, read_runtime_file};
 
 use super::super::*;
 use super::model::SecretFileConfig;
 
 /// 读取独立敏感 TOML；解析器拒绝未声明字段并固定脱敏错误。
 pub(crate) fn load_secret_file(path: &Path) -> Result<SecretFileConfig, ConfigError> {
-    let contents = fs::read_to_string(path)
+    let contents = read_toml_file(path)
         .map_err(|source| ConfigError::SecretRead { path: path.to_owned(), source })?;
 
     toml::from_str(&contents).map_err(|_| ConfigError::SecretParse { path: path.to_owned() })
@@ -17,8 +20,16 @@ pub(crate) fn load_secret_file(path: &Path) -> Result<SecretFileConfig, ConfigEr
 
 /// 读取 Admin runtime TOML 并在进入进程配置前完成完整校验。
 pub(crate) fn load_admin_runtime_file(path: &Path) -> Result<AdminRuntimeDocument, ConfigError> {
-    let contents = fs::read_to_string(path)
-        .map_err(|source| ConfigError::RuntimeRead { path: path.to_owned(), source })?;
+    let contents = read_runtime_file(path, None).map_err(|error| match error {
+        RuntimeFileStoreError::Parse => ConfigError::RuntimeParse { path: path.to_owned() },
+        RuntimeFileStoreError::Io(message) => ConfigError::RuntimeRead {
+            path: path.to_owned(),
+            source: std::io::Error::other(message),
+        },
+        error => {
+            ConfigError::InvalidRuntimeConfig { path: path.to_owned(), reason: error.to_string() }
+        }
+    })?;
     let document: AdminRuntimeDocument = toml::from_str(&contents)
         .map_err(|_| ConfigError::RuntimeParse { path: path.to_owned() })?;
     crate::runtime::validate_runtime_document(&document, chrono::Utc::now()).map_err(|error| {

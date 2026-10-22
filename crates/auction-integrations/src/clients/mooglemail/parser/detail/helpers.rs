@@ -153,7 +153,10 @@ pub(crate) fn prove_take_identity_and_receipts(
 }
 
 pub(crate) fn canonical_mail_body(body: &str) -> String {
-    body.replace("\r\n", "\n").trim_end_matches([' ', '\t', '\n']).to_owned()
+    let mut canonical = body.replace("\r\n", "\n");
+    // 只截短尾部空白，复用换行规范化的原分配，不留下第二份未清理的正文副本。
+    canonical.truncate(canonical.trim_end_matches([' ', '\t', '\n']).len());
+    canonical
 }
 
 /// 计算 Sent/发送证明共用的正文 canonical digest；临时 canonical 文本在返回前清零。

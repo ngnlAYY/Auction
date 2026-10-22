@@ -27,8 +27,13 @@
 
 Redis 使用可克隆的 `ConnectionManager`。每次 get/set/invalidate 总预算 750 毫秒、最多 32 个在途操作，满额立即
 返回不可用；响应/连接内部超时分别为 500 毫秒/1 秒，总预算先到即结束调用，错误与 `Debug` 不含 URL 或凭据。
+并发配额以 `try_acquire` 非阻塞取得：适配器不为满额请求建立等待队列。许可由操作 future 持有，成功、失败、
+总预算到期或调用方取消都会释放；超时只说明调用未得到确认，不能推断已经发送的 Redis 命令没有执行。
+不增加后台补写或重试任务，SET/DEL 的结果不确定仍不能影响数据库命令结果。
+适配器只暴露闭集错误，不持有原始 Redis 错误；`Display`、`Debug` 及 `Error::source` 都不会传播
+服务器错误正文或连接细节。应用端口仍统一映射为 `ReadModelCacheError::BackendUnavailable`。
 当前消费者是 Public 规则快照（键 `auction:read-model:public-rules:v1:<locale>`）：只缓存有效非空文档，
-Admin 发布后按语言失效，已确认不可用的请求回源后跳过回填。
+Admin 发布后按语言失效，GET 或损坏命中后的删除已确认不可用时，权威回源成功后跳过回填。
 
 ## 维护与验证
 

@@ -28,7 +28,7 @@ pub(super) fn MailIntakeTable(
 ) -> Element {
     let is_empty = page.intakes.is_empty();
     // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
-    let mut intakes = page.intakes.clone();
+    let mut intakes = page.intakes;
     sort_mail_intakes(&mut intakes, &sort, direction);
     rsx! {
         div { class: "admin-shell__table-wrap",

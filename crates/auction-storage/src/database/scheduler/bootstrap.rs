@@ -56,7 +56,7 @@ impl From<auction_application::RepositoryError> for PostgresBootstrapError {
 
 #[cfg(feature = "postgres")]
 fn is_serialization_error(error: &sqlx::Error) -> bool {
-    matches!(error, sqlx::Error::Database(database) if database.code().as_deref() == Some("40001"))
+    matches!(error, sqlx::Error::Database(database) if matches!(database.code().as_deref(), Some("40001" | "40P01")))
 }
 
 #[cfg(feature = "postgres")]
@@ -80,7 +80,8 @@ async fn ensure_postgres_once(
         Some(false) => return Err(repository_error_owned("周计划 world 已禁用").into()),
         Some(true) => {}
     }
-    let db_now: DateTime<Utc> = sqlx::query_scalar("SELECT CURRENT_TIMESTAMP")
+    // world 行锁等待可能跨过整周窗口；事务起始时间不能据此创建已经过期的 Draft。
+    let db_now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
         .fetch_one(&mut *transaction)
         .await
         .map_err(PostgresBootstrapError::Storage)?;

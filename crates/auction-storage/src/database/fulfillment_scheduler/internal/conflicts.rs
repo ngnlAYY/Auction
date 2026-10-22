@@ -2,6 +2,7 @@
 
 use super::{sql_error, validation::world};
 use auction_application::{FundingError, SettlementFulfillmentClaim};
+use futures_util::TryStreamExt;
 use serde::Deserialize;
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
@@ -99,8 +100,9 @@ async fn exclude_conflicts(
     // 普通通知与入站处置用attachment_ids，而非settlement的装备secret引用；只排除已验证schema
     // 且不涉及目标EID/world的普通载荷，来源关联仍由后续SQL独立核对。论坛通知复用mail_intake，
     // 但owner是同command/world的notify账本，按producer重建origin；此处只读快照，不反取论坛锁。
+    // 必须完整扫描历史候选，但正文与附件逐行释放；内存只保留闭集验证通过的 UUID。
     let mut unrelated_attachments = Vec::new();
-    let deliveries = sqlx::query(
+    let mut deliveries = sqlx::query(
         "SELECT d.id, d.command_id, d.origin_kind, d.origin_id, d.payload,
            EXISTS(SELECT 1 FROM public.auction_forum_bid_commands forum_command
              WHERE forum_command.command_id=d.command_id
@@ -113,19 +115,17 @@ async fn exclude_conflicts(
          FROM public.deliveries d
          WHERE d.origin_kind IN ('mail_intake','settlement_recovery_action','operations_alert','lot_watch')",
     )
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(sql_error)?;
-    for delivery in deliveries {
+    .fetch(&mut **tx);
+    while let Some(delivery) = deliveries.try_next().await.map_err(sql_error)? {
         let payload: serde_json::Value = delivery.try_get("payload").map_err(sql_error)?;
-        let origin: String = delivery.try_get("origin_kind").map_err(sql_error)?;
-        let origin_id: String = delivery.try_get("origin_id").map_err(sql_error)?;
+        let origin: &str = delivery.try_get("origin_kind").map_err(sql_error)?;
+        let origin_id: &str = delivery.try_get("origin_id").map_err(sql_error)?;
         let command_id: Uuid = delivery.try_get("command_id").map_err(sql_error)?;
         let forum_notice_owner: bool = delivery.try_get("forum_notice_owner").map_err(sql_error)?;
         if unrelated_attachment_payload(
             &payload,
-            &origin,
-            &origin_id,
+            origin,
+            origin_id,
             command_id,
             forum_notice_owner,
             c,
@@ -133,6 +133,7 @@ async fn exclude_conflicts(
             unrelated_attachments.push(delivery.try_get::<Uuid, _>("id").map_err(sql_error)?);
         }
     }
+    drop(deliveries);
     // 当前标的的最终入库证明只闭合精确绑定的 take 及更早已完成 return；
     // 未知、后续动作或其他标的历史仍进入原有冲突门，不能仅凭 succeeded 放行。
     unrelated_attachments.extend(intake::closed_source_history(tx, c).await?);
@@ -258,7 +259,7 @@ pub(crate) fn assetless_mail_notification(
     origin_id: &str,
     command_id: Uuid,
 ) -> bool {
-    let Ok(payload) = serde_json::from_value::<AttachmentPayload>(value.clone()) else {
+    let Ok(payload) = AttachmentPayload::deserialize(value) else {
         return false;
     };
     payload.schema_version == 1
@@ -280,7 +281,7 @@ fn unrelated_attachment_payload(
     forum_notice_owner: bool,
     claim: &AssetConflictTarget<'_>,
 ) -> bool {
-    let Ok(payload) = serde_json::from_value::<AttachmentPayload>(value.clone()) else {
+    let Ok(payload) = AttachmentPayload::deserialize(value) else {
         return false;
     };
     if payload.schema_version != 1

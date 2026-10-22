@@ -73,9 +73,10 @@ where
             batch_result = WorkerResult::Error;
             break;
         };
-        let item_started = std::time::Instant::now();
-        let claims = match tokio::time::timeout(
-            worker.fulfillment.item_timeout,
+        // 不把领取后剩余时长交给尚未运行的任务，否则首次 poll 会重置实际截止。
+        let item_deadline = tokio::time::Instant::now() + worker.fulfillment.item_timeout;
+        let claims = match tokio::time::timeout_at(
+            item_deadline,
             store.claim_due(worker.worker_id.clone(), now, lease_until, wave_limit),
         )
         .await
@@ -104,12 +105,14 @@ where
             let commands = Arc::clone(commands);
             let clock = Arc::clone(&worker.clock);
             let metrics = Arc::clone(&worker.metrics);
-            let item_timeout =
-                worker.fulfillment.item_timeout.saturating_sub(item_started.elapsed());
             tasks.spawn(async move {
                 let obligation_id = claim.obligation_id;
-                match tokio::time::timeout(
-                    item_timeout,
+                if tokio::time::Instant::now() >= item_deadline {
+                    tracing::warn!(%obligation_id, "fulfillment item expired before execution");
+                    return WorkerResult::Error;
+                }
+                match tokio::time::timeout_at(
+                    item_deadline,
                     process_fulfillment_claim(store, commands, clock, metrics, retry_delay, claim),
                 )
                 .await

@@ -47,9 +47,10 @@ impl DeliveryLease {
             renewed_at.checked_add_signed(self.span).ok_or("lease_deadline_overflow")?;
         let deadline =
             started.checked_add(config.lease_duration).ok_or("lease_deadline_overflow")?;
+        let renewal_deadline = self.operation_deadline(config.finalize_timeout);
         // 等待数据库不能跨越已知旧租约；超时即停，不凭可能提交的续租结果继续执行。
         match tokio::time::timeout_at(
-            self.operation_deadline(config.finalize_timeout),
+            renewal_deadline,
             store.renew(claim.clone(), renewed_at, lease_until),
         )
         .await
@@ -60,6 +61,11 @@ impl DeliveryLease {
                 return Err("lease_renewal");
             }
             Err(_) => return Err("lease_renewal_timeout"),
+        }
+        // timeout_at 先 poll 内层 future；单次 poll 或调度延迟可能让成功回执晚于旧截止。
+        // 迟到回执不能重建本地 owner 的有效期，也不能授权继续 poll 外部发送。
+        if Instant::now() >= renewal_deadline {
+            return Err("lease_renewal_timeout");
         }
         // 回执本身可能已耗尽新 TTL，不能先 poll prepared 再等待首轮 tick。
         if Instant::now() >= deadline || clock.now() >= lease_until {

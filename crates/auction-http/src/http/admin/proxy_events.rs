@@ -189,8 +189,13 @@ fn decode_cursor(value: &str) -> Result<AdminProxyEventCursor, ()> {
     if value == "start" {
         return Ok(AdminProxyEventCursor::Start);
     }
-    let bytes = URL_SAFE_NO_PAD.decode(value.as_bytes()).map_err(|_| ())?;
-    if bytes.len() != CURSOR_BYTES || bytes[0] != CURSOR_VERSION || bytes[1] != CURSOR_KIND {
+    // 固定 26 字节的旧游标只可能编码为 35 个无填充字符；先拒绝超长输入，再解码到栈。
+    if value.len() != (CURSOR_BYTES * 4).div_ceil(3) {
+        return Err(());
+    }
+    let mut bytes = [0_u8; CURSOR_BYTES];
+    let decoded_len = URL_SAFE_NO_PAD.decode_slice(value.as_bytes(), &mut bytes).map_err(|_| ())?;
+    if decoded_len != CURSOR_BYTES || bytes[0] != CURSOR_VERSION || bytes[1] != CURSOR_KIND {
         return Err(());
     }
     let mut timestamp = [0_u8; 8];

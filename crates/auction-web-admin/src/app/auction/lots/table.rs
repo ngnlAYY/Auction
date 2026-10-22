@@ -34,7 +34,8 @@ pub(super) fn AdminLotTable(
     let notice = use_signal(|| None::<LotUpdateNotice>);
     let allow_lot_update = page.auction.status == "draft";
     // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
-    let mut lots = page.lots.clone();
+    let is_empty = page.lots.is_empty();
+    let mut lots = page.lots;
     sort_lots(&mut lots, &sort, direction);
 
     rsx! {
@@ -116,7 +117,7 @@ pub(super) fn AdminLotTable(
                         }
                     }
                 }
-                if page.lots.is_empty() {
+                if is_empty {
                     AsyncState {
                         kind: AsyncStateKind::Empty,
                         title: t!("admin-lots-empty"),

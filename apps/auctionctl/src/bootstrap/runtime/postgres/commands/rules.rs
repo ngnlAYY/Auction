@@ -5,7 +5,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
-use std::{fmt::Write as _, fs, sync::Arc};
+use std::{fmt::Write as _, fs, io::Read as _, os::unix::fs::OpenOptionsExt as _, sync::Arc};
 
 #[cfg(feature = "postgres")]
 use anyhow::Context;
@@ -138,8 +138,8 @@ pub(crate) async fn import_rules_directory(
             command_id: child_command_id,
             expected_revision: 0,
             locale: source.locale.clone(),
-            title: source.title.clone(),
-            markdown: source.markdown.clone(),
+            title: source.title,
+            markdown: source.markdown,
         };
         let request_hash =
             RequestHash::from_request(IMPORT_REQUEST_KIND, child_command_id, &request)
@@ -206,19 +206,32 @@ fn validate_import_identity(command_id: Uuid, actor: &str) -> anyhow::Result<()>
 #[cfg(feature = "postgres")]
 fn load_rules_source(directory: &Path, locale: &str) -> anyhow::Result<RulesSource> {
     let path = directory.join(format!("{locale}.md"));
-    let metadata =
-        fs::symlink_metadata(&path).with_context(|| format!("inspect rules file {locale}.md"))?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .open(&path)
+        .with_context(|| format!("open rules file {locale}.md"))?;
+    let metadata = file.metadata().with_context(|| format!("inspect rules file {locale}.md"))?;
+    if !metadata.is_file() {
         anyhow::bail!("规则文件 {locale}.md 必须是普通文件且不能是符号链接");
     }
     if metadata.len() > MAX_RULE_MARKDOWN_BYTES as u64 + 3 {
         anyhow::bail!("规则文件 {locale}.md 超过允许大小");
     }
-    let bytes = fs::read(&path).with_context(|| format!("read rules file {locale}.md"))?;
-    let markdown =
+    // 额外读取一个字节识别并发增长；预算仍允许原有正文上限加单个 UTF-8 BOM。
+    let mut bytes = Vec::new();
+    file.take(MAX_RULE_MARKDOWN_BYTES as u64 + 4)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("read rules file {locale}.md"))?;
+    if bytes.len() > MAX_RULE_MARKDOWN_BYTES + 3 {
+        anyhow::bail!("规则文件 {locale}.md 超过允许大小");
+    }
+    let mut markdown =
         String::from_utf8(bytes).with_context(|| format!("规则文件 {locale}.md 不是 UTF-8"))?;
     // Auction-BF 会移除文件开头的单个 UTF-8 BOM，并保持其余 Markdown 字节语义不变。
-    let markdown = markdown.strip_prefix('\u{feff}').unwrap_or(&markdown).to_owned();
+    if markdown.starts_with('\u{feff}') {
+        drop(markdown.drain(..'\u{feff}'.len_utf8()));
+    }
     let first_nonblank = markdown
         .split('\n')
         .map(str::trim)
@@ -228,9 +241,7 @@ fn load_rules_source(directory: &Path, locale: &str) -> anyhow::Result<RulesSour
     if title.is_empty() {
         anyhow::bail!("规则文件 {locale}.md 的首个非空行不能解析为标题");
     }
-    let candidate =
-        AdminRulesCandidate { locale: locale.to_owned(), title: title.clone(), markdown }
-            .normalize();
+    let candidate = AdminRulesCandidate { locale: locale.to_owned(), title, markdown }.normalize();
     candidate.validate().with_context(|| format!("validate rules file {locale}.md"))?;
     let mut sha256 = String::with_capacity(64);
     // 保持导入回执原有的 64 位小写摘要；只适配 digest 0.11 的输出数组类型。

@@ -24,9 +24,21 @@ struct WatchCommand {
 #[derive(Clone, Copy)]
 struct WatchSubmit(EventHandler<(String, PublicSetLotWatchRequest)>);
 
+/// 完整集合只索引一次，所有目录行按 lot UUID 查状态；false 墓碑保留其真实版本。
+type WatchSnapshot = BTreeMap<String, (bool, i64)>;
+
+fn watch_snapshot(page: PublicLotWatchesResponse) -> Rc<WatchSnapshot> {
+    Rc::new(
+        page.watches
+            .into_iter()
+            .map(|watch| (watch.lot_id, (watch.watched, watch.version)))
+            .collect(),
+    )
+}
+
 struct LoadedWatches {
     revision: (u64, u64),
-    result: Result<Option<PublicLotWatchesResponse>, CommandError>,
+    result: Result<Option<Rc<WatchSnapshot>>, CommandError>,
 }
 
 #[derive(Clone)]
@@ -37,7 +49,7 @@ struct WatchContext {
     refresh: Signal<u64>,
     revision: Signal<u64>,
     resource: Resource<LoadedWatches>,
-    cached: Signal<Option<Rc<PublicLotWatchesResponse>>>,
+    cached: Signal<Option<Rc<WatchSnapshot>>>,
     commands: Signal<BTreeMap<String, WatchCommand>>,
 }
 
@@ -58,7 +70,7 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
     let refresh = use_context::<Signal<u64>>();
     let revision = use_signal(|| 0_u64);
     let mut cached = use_signal(|| {
-        user_id.as_deref().and_then(|user| cache::load(user, &auction_id)).map(Rc::new)
+        user_id.as_deref().and_then(|user| cache::load(user, &auction_id)).map(watch_snapshot)
     });
     let commands = use_signal(BTreeMap::new);
     let resource = use_resource({
@@ -77,11 +89,12 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
                     if current_user(session).as_deref() != Some(&user_id) {
                         return LoadedWatches { revision: requested_revision, result: Ok(None) };
                     }
-                    if let Ok(page) = &result {
-                        cache::save(page);
-                        cached.set(Some(Rc::new(page.clone())));
-                    }
-                    result.map(Some)
+                    result.map(|page| {
+                        cache::save(&page);
+                        let snapshot = watch_snapshot(page);
+                        cached.set(Some(Rc::clone(&snapshot)));
+                        Some(snapshot)
+                    })
                 } else {
                     Ok(None)
                 };
@@ -161,12 +174,7 @@ impl WatchContext {
         }
         let snapshot = self.resource.read();
         let page = snapshot.as_ref()?.result.as_ref().ok()?.as_ref()?;
-        Some(
-            page.watches
-                .iter()
-                .find(|watch| watch.lot_id == lot_id)
-                .map_or((false, 0), |watch| (watch.watched, watch.version)),
-        )
+        Some(page.get(lot_id).copied().unwrap_or((false, 0)))
     }
 
     fn invalidate(&mut self) {

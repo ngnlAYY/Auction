@@ -139,7 +139,7 @@ impl fmt::Debug for CacheStore {
 #[derive(Clone)]
 pub struct RedisCache {
     connection: ConnectionManager,
-    /// 在进入 Redis 命令前限制并发，令排队时间也受操作总预算约束。
+    /// 命令前非阻塞取得配额；满额立即返回不可用，由调用方回源，不累积等待任务。
     limiter: Arc<Semaphore>,
 }
 
@@ -168,7 +168,7 @@ impl RedisCache {
                 .arg(key)
                 .query_async(&mut connection)
                 .await
-                .map_err(CacheError::RedisCommand)
+                .map_err(|_| CacheError::RedisCommand)
         })
         .await
         .map_err(|_| CacheError::OperationTimeout)?
@@ -187,7 +187,7 @@ impl RedisCache {
                 .arg(ttl_millis)
                 .exec_async(&mut connection)
                 .await
-                .map_err(CacheError::RedisCommand)
+                .map_err(|_| CacheError::RedisCommand)
         })
         .await
         .map_err(|_| CacheError::OperationTimeout)?
@@ -201,7 +201,7 @@ impl RedisCache {
                 .arg(key)
                 .exec_async(&mut connection)
                 .await
-                .map_err(CacheError::RedisCommand)
+                .map_err(|_| CacheError::RedisCommand)
         })
         .await
         .map_err(|_| CacheError::OperationTimeout)?
@@ -216,6 +216,7 @@ impl fmt::Debug for RedisCache {
 }
 
 /// 缓存适配器错误。错误文本不得包含 Redis URL 或凭据。
+/// 后端错误可能携带服务器原文或连接细节，不能保留为 Debug 字段或 source 错误链。
 #[derive(Debug, Error)]
 pub enum CacheError {
     #[error("Redis cache support is not compiled; enable the cache-redis feature")]
@@ -238,5 +239,5 @@ pub enum CacheError {
 
     #[cfg(feature = "redis")]
     #[error("Redis cache command failed")]
-    RedisCommand(#[source] redis::RedisError),
+    RedisCommand,
 }

@@ -84,7 +84,7 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
             .map_err(|_| ConfigError::InvalidForumConfig("endpoint 不是有效 URL"))?;
         let path_is_root = parsed.path().is_empty() || parsed.path() == "/";
         let loopback_http = parsed.scheme() == "http"
-            && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
+            && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
         if !(parsed.scheme() == "https" || loopback_http)
             || parsed.host_str().is_none()
             || !parsed.username().is_empty()
@@ -104,7 +104,7 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
         let path_is_root = parsed.path().is_empty() || parsed.path() == "/";
         if !(parsed.scheme() == "https"
             || (parsed.scheme() == "http"
-                && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1"))))
+                && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))))
             || parsed.host_str().is_none()
             || !parsed.username().is_empty()
             || parsed.password().is_some()

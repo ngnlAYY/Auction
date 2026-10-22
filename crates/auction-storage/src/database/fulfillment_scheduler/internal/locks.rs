@@ -1,4 +1,5 @@
 //! 统一前缀与同 EID 的业务锁；外部观察在调用本模块之前已完成。
+//! 仅加锁的查询完整执行但不收集行；需要检查数量的 delivery 冲突探针仍保留有界结果。
 
 use super::sql_error;
 use auction_application::{FundingError, SettlementFulfillmentClaim};
@@ -7,7 +8,7 @@ use sqlx::{Postgres, Transaction};
 pub(super) async fn worlds(tx: &mut Transaction<'_, Postgres>) -> Result<(), FundingError> {
     // 与资金对账使用相同持久 code 排序；跨世界不拆事务。
     sqlx::query("SELECT id FROM public.worlds ORDER BY id FOR UPDATE")
-        .fetch_all(&mut **tx)
+        .execute(&mut **tx)
         .await
         .map_err(sql_error)?;
     Ok(())
@@ -27,13 +28,13 @@ pub(super) async fn before_credentials(
             .bind(claim.auction_id.as_uuid())
             .bind(&claim.external_equipment_id)
             .bind(super::validation::world(claim.equipment_world))
-            .fetch_all(&mut **tx)
+            .execute(&mut **tx)
             .await
             .map_err(sql_error)?;
     }
     sqlx::query("SELECT id FROM public.equipment WHERE id=$1 OR (external_equipment_id=$2 AND world_id=$3) ORDER BY id FOR UPDATE")
         .bind(claim.equipment_id.as_uuid()).bind(&claim.external_equipment_id)
-        .bind(super::validation::world(claim.equipment_world)).fetch_all(&mut **tx).await.map_err(sql_error)?;
+        .bind(super::validation::world(claim.equipment_world)).execute(&mut **tx).await.map_err(sql_error)?;
     Ok(())
 }
 
@@ -44,15 +45,15 @@ pub(super) async fn after_credentials(
     // users→obligations→actions→deliveries→fulfillments；直接依赖与同资产上下文均在同一序列。
     sqlx::query("SELECT id FROM public.users WHERE id=$1 FOR UPDATE")
         .bind(claim.recipient_user_id)
-        .fetch_all(&mut **tx)
+        .execute(&mut **tx)
         .await
         .map_err(sql_error)?;
     sqlx::query("SELECT o.id FROM public.settlement_obligations o WHERE o.auction_id=$1 OR o.equipment_id IN (SELECT id FROM public.equipment WHERE external_equipment_id=$2 AND world_id=$3) ORDER BY o.id FOR UPDATE")
         .bind(claim.auction_id.as_uuid()).bind(&claim.external_equipment_id)
-        .bind(super::validation::world(claim.equipment_world)).fetch_all(&mut **tx).await.map_err(sql_error)?;
+        .bind(super::validation::world(claim.equipment_world)).execute(&mut **tx).await.map_err(sql_error)?;
     sqlx::query("SELECT a.id FROM public.settlement_recovery_actions a JOIN public.settlement_recoveries r ON r.id=a.recovery_id WHERE r.auction_id=$1 OR r.lot_id IN (SELECT o.lot_id FROM public.settlement_obligations o JOIN public.equipment e ON e.id=o.equipment_id WHERE e.external_equipment_id=$2 AND e.world_id=$3) ORDER BY a.id FOR UPDATE OF a")
         .bind(claim.auction_id.as_uuid()).bind(&claim.external_equipment_id)
-        .bind(super::validation::world(claim.equipment_world)).fetch_all(&mut **tx).await.map_err(sql_error)?;
+        .bind(super::validation::world(claim.equipment_world)).execute(&mut **tx).await.map_err(sql_error)?;
     // 只锁当前投递及同 EID/world 的显式资产引用/owner 关联，历史通知不占行锁。
     // 上限包含一条溢出探针；超过上限整事务拒绝，绝不截断后声称已排除冲突。
     // 未知 schema/孤儿仍由 conflicts 的完整谓词读失败关闭；Serializable 的 SIREAD
@@ -96,6 +97,6 @@ pub(super) async fn after_credentials(
     }
     sqlx::query("SELECT f.obligation_id FROM public.settlement_obligation_fulfillments f JOIN public.settlement_obligations o ON o.id=f.obligation_id WHERE o.auction_id=$1 OR o.equipment_id IN (SELECT id FROM public.equipment WHERE external_equipment_id=$2 AND world_id=$3) ORDER BY f.obligation_id FOR UPDATE OF f")
         .bind(claim.auction_id.as_uuid()).bind(&claim.external_equipment_id)
-        .bind(super::validation::world(claim.equipment_world)).fetch_all(&mut **tx).await.map_err(sql_error)?;
+        .bind(super::validation::world(claim.equipment_world)).execute(&mut **tx).await.map_err(sql_error)?;
     Ok(())
 }

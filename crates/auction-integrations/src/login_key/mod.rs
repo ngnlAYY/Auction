@@ -68,16 +68,16 @@ impl MoogleMailLoginKeyIssuer {
             return Err(MailProcessingError::InvalidLoginKey.into());
         }
         let mut entropy = [0_u8; LOGIN_KEY_ENTROPY_BYTES];
-        self.random
-            .fill(&mut entropy)
-            .map_err(|_| crypto_error(LoginKeyCryptoError::RandomSource))?;
-        let encoded = URL_SAFE_NO_PAD.encode(entropy);
+        if self.random.fill(&mut entropy).is_err() {
+            entropy.fill(0);
+            return Err(crypto_error(LoginKeyCryptoError::RandomSource));
+        }
+        let encoded = URL_SAFE_NO_PAD.encode(entropy.as_slice());
         entropy.fill(0);
-        let key = MailLoginKey::from_encoded(&encoded).map_err(ApplicationError::from)?;
-        let issue = self.seal_admin_key_now(user_id, key)?;
+        let key = MailLoginKey::from_encoded(&encoded).map_err(ApplicationError::from);
         let mut encoded_bytes = encoded.into_bytes();
         encoded_bytes.fill(0);
-        Ok(issue)
+        self.seal_admin_key_now(user_id, key?)
     }
 
     fn seal_admin_key_now(
@@ -88,12 +88,16 @@ impl MoogleMailLoginKeyIssuer {
         if user_id.is_nil() {
             return Err(MailProcessingError::InvalidLoginKey.into());
         }
-        let mut plaintext = key.with_encoded(|value| value.as_bytes().to_vec());
         let aad = login_key_aad(user_id);
-        let (ciphertext, nonce) =
-            seal(&self.data_key, &plaintext, aad.as_bytes(), &self.random).map_err(crypto_error)?;
-        let fingerprint = fingerprint(&self.data_key, &plaintext);
-        plaintext.fill(0);
+        // 借用值对象中的短时明文，不为加密和指纹各自复制登录 key。
+        let (ciphertext, nonce, fingerprint) = key
+            .with_encoded(|value| {
+                let plaintext = value.as_bytes();
+                let (ciphertext, nonce) =
+                    seal(&self.data_key, plaintext, aad.as_bytes(), &self.random)?;
+                Ok((ciphertext, nonce, fingerprint(&self.data_key, plaintext)))
+            })
+            .map_err(crypto_error)?;
         let envelope = MailLoginKeyEnvelope::new(
             ciphertext,
             nonce,
@@ -217,16 +221,13 @@ fn verify_fingerprint(
 }
 
 fn fingerprint(data_key: &DataKey, plaintext: &[u8]) -> String {
-    let mut material = Vec::with_capacity(
-        SECRET_FINGERPRINT_PREFIX.len() + LOGIN_KEY_FINGERPRINT_DOMAIN.len() + 1 + plaintext.len(),
-    );
-    material.extend_from_slice(SECRET_FINGERPRINT_PREFIX);
-    material.extend_from_slice(LOGIN_KEY_FINGERPRINT_DOMAIN);
-    material.push(0);
-    material.extend_from_slice(plaintext);
-    hex_encode(
-        hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, data_key.material()), &material).as_ref(),
-    )
+    let key = hmac::Key::new(hmac::HMAC_SHA256, data_key.material());
+    let mut context = hmac::Context::with_key(&key);
+    context.update(SECRET_FINGERPRINT_PREFIX);
+    context.update(LOGIN_KEY_FINGERPRINT_DOMAIN);
+    context.update(&[0]);
+    context.update(plaintext);
+    hex_encode(context.sign().as_ref())
 }
 
 fn seal(
@@ -243,12 +244,17 @@ fn seal(
     let nonce_array: [u8; LOGIN_KEY_NONCE_BYTES] =
         nonce.as_slice().try_into().map_err(|_| LoginKeyCryptoError::Encryption)?;
     let mut buffer = plaintext.to_vec();
-    key.seal_in_place_append_tag(
-        aead::Nonce::assume_unique_for_key(nonce_array),
-        aead::Aad::from(aad),
-        &mut buffer,
-    )
-    .map_err(|_| LoginKeyCryptoError::Encryption)?;
+    if key
+        .seal_in_place_append_tag(
+            aead::Nonce::assume_unique_for_key(nonce_array),
+            aead::Aad::from(aad),
+            &mut buffer,
+        )
+        .is_err()
+    {
+        buffer.fill(0);
+        return Err(LoginKeyCryptoError::Encryption);
+    }
     Ok((buffer, nonce))
 }
 
@@ -272,16 +278,23 @@ fn open(
     let nonce_array: [u8; LOGIN_KEY_NONCE_BYTES] =
         nonce.try_into().map_err(|_| LoginKeyCryptoError::InvalidEnvelope)?;
     let mut buffer = ciphertext.to_vec();
-    let plaintext = key
+    let length = match key
         .open_in_place(
             aead::Nonce::assume_unique_for_key(nonce_array),
             aead::Aad::from(aad),
             &mut buffer,
         )
-        .map_err(|_| LoginKeyCryptoError::Decryption)?
-        .to_vec();
-    buffer.fill(0);
-    Ok(plaintext)
+        .map(|plaintext| plaintext.len())
+    {
+        Ok(length) => length,
+        Err(_) => {
+            buffer.fill(0);
+            return Err(LoginKeyCryptoError::Decryption);
+        }
+    };
+    buffer[length..].fill(0);
+    buffer.truncate(length);
+    Ok(buffer)
 }
 
 fn login_key_aad(user_id: Uuid) -> String {
