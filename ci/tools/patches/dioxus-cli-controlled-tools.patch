@@ -1,0 +1,40 @@
+--- a/src/esbuild.rs
++++ b/src/esbuild.rs
+@@ -34,0 +35,5 @@
++        // 禁下载模式必须与执行入口一致，只选择受控 PATH，不能回退到历史缓存。
++        if CliSettings::prefer_no_downloads() {
++            return which::which("esbuild").ok();
++        }
++
+--- a/src/wasm_opt.rs
++++ b/src/wasm_opt.rs
+@@ -212,0 +213,5 @@
++    // 先执行禁下载策略，避免历史缓存绕过调用方绑定的工具身份。
++    if CliSettings::prefer_no_downloads() {
++        return which::which("wasm-opt").map_err(|_| anyhow!("Missing wasm-opt"));
++    }
++
+@@ -218,8 +222,0 @@
+-    }
+-
+-    if CliSettings::prefer_no_downloads() {
+-        if let Ok(existing) = which::which("wasm-opt") {
+-            return Ok(existing);
+-        } else {
+-            return Err(anyhow!("Missing wasm-opt"));
+-        }
+@@ -235,0 +233,5 @@
++    // 查询与执行入口使用同一选择顺序，忽略历史缓存。
++    if CliSettings::prefer_no_downloads() {
++        return which::which("wasm-opt").ok();
++    }
++
+@@ -241,8 +242,0 @@
+-    }
+-
+-    if CliSettings::prefer_no_downloads() {
+-        if let Ok(existing) = which::which("wasm-opt") {
+-            return Some(existing);
+-        } else {
+-            return None;
+-        }

@@ -23,6 +23,7 @@
 - [可选单文件部署](#可选单文件部署)
 - [推荐目录](#推荐目录)
 - [发布制品](#发布制品)
+- [安全更新与整机重启](#安全更新与整机重启)
 - [首次部署配置](#首次部署配置)
 - [启动顺序](#启动顺序)
 - [邮件详情恢复与退件消费升级](#邮件详情恢复与退件消费升级)
@@ -76,6 +77,8 @@ Linux x86_64 四程序包，下载、14 天保留期及 ABI 边界见[CI 制品�
 部署兼容性，不会自动更新服务器。也可在本地逐步执行：
 
 ```bash
+bash ci/tools/rustup.sh
+bash ci/tools/bootstrap.sh install release
 just build-api
 just build-release
 just verify-artifacts
@@ -91,6 +94,25 @@ PostgreSQL 五字段敏感模板注入真实值。API-only 无 Web 资源；内�
 后端沿用[根 release profile](Cargo.toml)：opt-level=3/Fat LTO/单 CGU、panic 展开，通用包禁用构建机 `native`；WASM 以体积
 为先，LTO 增加构建时间和内存，不证明性能收益。[AMD KVM 定向候选](ops/build/README.md)不进入通用归档，须核对资源身份、
 CPUID/ABI 和运行证据；型号或 cargo check 不证明兼容性/性能。
+
+## 安全更新与整机重启
+
+依赖修复同时核对源码锁、构建工具、已安装程序和运行进程。Rust 静态依赖须重新构建发布；进程持有的 TLS 客户端和
+信任集合须通过受控重启刷新。构建工具使用[独立依赖锁及安装回执](ci/README.md#发布边界)，同版本旧二进制不得仅凭版本号复用。
+系统组件以发行版修复状态为准，记录实际运行内核、代理所用 Go/模块版本及生效的 SSH 配置。
+
+内核更新后，在已授权维护窗口按以下顺序重启分体部署：
+
+1. 保存并核验应用、配置、unit 及数据库备份，核对当前 schema 和所有已发布迁移校验和；记录 boot ID、三个服务的原启用状态和启用链接。
+2. 持久禁用三个应用服务的自动启动，再通过 `auctionctl deployment stop` 反序停稳，确认 Worker 正常 drain、数据库无遗留 writer，
+   runtime 命令账本没有 pending/unknown。准备完成回执落盘后才重启主机；`--runtime` 禁用或 mask 会随重启失效，不用于此流程。
+3. 新 boot 中核对目标内核、原制品及配置；确认应用未提前自启，通过总控重新按 Worker → Admin → Public 启动，复核启动回执、
+   readiness、进程哈希和稳定性，再还原原启用状态及链接。同步核对代理、SSH 和公开静态资源。
+
+当官方代理制品尚未包含上游修复时，可在同一官方源码版本上仅调整所需依赖和编译器，保存来源摘要、依赖差异、扫描及部署回执。
+这类自建 Caddy 制品的包管理版本号可能不变；后续安装官方包前须核对其 Go 和模块修复基线，避免覆盖为旧依赖制品。
+SSH 压缩相关缓解通过独立 drop-in 设置 `Compression no`，先运行 `sshd -t` 和 `sshd -T`，reload 后另建连接确认生效。
+每次执行结果另记[状态页](docs/status.md)，不把文档步骤当作已完成维护。
 
 ## Bot 内部履约与资金保护升级
 

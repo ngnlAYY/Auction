@@ -12,6 +12,7 @@
 | [release.sh](ci/release/release.sh) | API-only / 内嵌档构建、资源隔离、身份校验和确定性归档 |
 | [release-single.sh](ci/release/release-single.sh) | 由 release.sh 加载的合并服务变体，复用分体门禁；不是独立执行入口 |
 | [build-identity.sh](ci/release/build-identity.sh) | 被 release.sh 与 web-bundle.sh 加载的源码身份、路径输入指纹和 `BUILD-INFO` 字段读取；只有一份实现 |
+| [tools/](ci/tools/README.md) | rustup 安全自举；dx/sccache/cargo-audit 独立锁图重建、配套工具校验与安装回执 |
 
 ## 本地与 CI 入口
 
@@ -28,7 +29,8 @@ check.sh 无参数仍执行五项策略门禁（all），支持一次传入多�
 PostgreSQL/Redis 图、all-features Clippy 和两端 WASM 分别核验。`ci/release/release.sh source-fingerprint` 只输出
 源码身份指纹，供 CI 缓存键与人工核对复用判定。MSRV job 单独用 1.94.1 编译全工作区/all-targets/all-features，
 不代表长期支持或业务验收。依赖 job 固定 cargo-audit 0.22.2、cargo-machete 0.9.2，audit 联网读取 RustSec，
-漏洞和全部警告均阻断且无忽略项；machete 只扫描直接依赖，不替代 feature、可达性和许可审查。
+漏洞和全部警告均阻断且无忽略项；machete 只扫描直接依赖，不替代 feature、可达性和许可审查。cargo-audit 使用
+独立受控锁图重建，安装方法见[工具入口](ci/tools/README.md)，不接受只匹配版本字符串的旧二进制。
 
 装备诊断门禁只解析受控源码片段和最后一次同名 CHECK 定义，不连接数据库或执行解析/收件流程。
 原因集合、阶段分支或源码结构发生变化时必须同步核对；该门禁补充编译检查，不执行 PostgreSQL 迁移验证。
@@ -55,7 +57,8 @@ Documentation 工作流已合并），分支保护若绑定旧工作流名须核
 
 ## Runner 依赖与缓存
 
-全部 job 固定 `ubuntu-24.04`，避免 `ubuntu-latest` 切换发行版造成工具或 ABI 漂移。docs 在运行门禁前显式安装
+全部 job 固定 `ubuntu-24.04`，避免 `ubuntu-latest` 切换发行版造成工具或 ABI 漂移；安装 Rust 工具链前先通过
+`ci/tools/rustup.sh` 确认 rustup 至少 1.29.2。docs 在运行门禁前显式安装
 `ripgrep` 和 Perl，不能假设 runner 预装；缺少 `rg` 会在布局检查阶段退出 127，不得跳过门禁或忽略退出码。
 Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-stack.md#版本与升级)。编译缓存使用固定版本
 [rust-cache](https://github.com/Swatinem/rust-cache)，发布档另用 sccache：
@@ -65,17 +68,17 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
   递归清理 `target` 下原生 API-only/embedded 与 WASM 缓存，不复用发布校验结论。
 - 四个 Cargo job 的 `save-if` 都要求事件不是 `pull_request`：PR 缓存作用域是合并结果，写入后主分支无法复用且挤占
   额度；PR 仍完整恢复缓存并执行全部检查，`cache-on-failure` 保留。
-- 只有 artifacts 启用 sccache 0.18.0（Fat LTO、单 CGU 与三种 feature 变体是最贵编译面）；官方 musl 静态归档与 dx
-  一样固定 SHA-256 后解包，命中缓存仍复校。编译对象写入 Actions 缓存服务，键含 sccache 版本前缀，升级即整体失效；
+- 只有 artifacts 启用修复后的 sccache 0.18.0；与 dx 0.7.10 一起从固定源码包和独立锁图重建，避免旧官方二进制
+  的证书库残留。编译对象写入 Actions 缓存服务，额外前缀 `auction-tls-20261022` 隔离修复前的对象；
   凭据只存在于 action 上下文，由 `actions/github-script` 输出到 step outputs 并仅赋给构建步骤的
   `ACTIONS_RESULTS_URL`、`ACTIONS_RUNTIME_TOKEN`；`RUSTC_WRAPPER` 会写入 `BUILD-INFO`，与未启用包装器的产物不会互用。
 - artifacts 另按源码身份指纹缓存 `target/dist/artifacts` 与 `target/dx`（rust-cache 保存时会清掉非 Cargo 目录），
   并以 `release-artifacts-` 前缀回退：只改文档的提交也能拿到上次产物与 dx 增量目录，
   键来自 `bash ci/release/release.sh source-fingerprint`；命中即 `BUILD-INFO` 一致，前缀命中的旧目录仍由
   `release.sh` 按构建输入复核，不满足就重建，不会把过期二进制当结果。
-- security-audit 沿用含工具版本的键，缓存 Cargo 工具二进制及安装元数据，缺失、执行失败或版本不符才
-  `cargo install --locked --version ... --force` 重装。细粒度 `actions/cache` 只缓存官方 dx 0.7.10 与 sccache 0.18.0
-  压缩包，下载与恢复后均核对固定 SHA-256，不缓存运行配置、凭据或下载制品。
+- security-audit 对无 TLS 依赖的 cargo-machete 保留固定版本安装；cargo-audit 改用 audit 档独立锁重建。
+  `actions/cache` 分别保存 `target/audit-tools` 与 `target/build-tools`，按脚本/锁图/工具链身份分键，恢复后验证
+  配方身份与全部二进制哈希；两个安装 job 显式安装 CMake、pkg-config、OpenSSL 开发文件。
 - 缓存缺失不改变检查范围，命中后仍执行全部静态检查及审计，RustSec 仍联网更新，不缓存“通过”结论；release Cargo
   并发固定为 2，保留 Fat LTO、单 CGU 和通用 CPU 基线，不把原生 CPU 参数传给 WASM。
 
@@ -126,17 +129,20 @@ Linux 均兼容。构建、上传不启动程序、不连接业务数据库、�
 | `target/dist/api-only-assets/{public,admin}/` | API-only 的固定空资源目录，必须始终不存在实体内容 |
 | `target/dist/tmp/` | 装包临时目录，成功与失败路径都会清理 |
 | `target/sccache/` | 可选本地 sccache 缓存，经 `SCCACHE_DIR=target/sccache` 启用 |
+| `target/build-tools/`、`target/audit-tools/` | 两档受控工具、依赖锁身份及二进制哈希回执，由 tools/bootstrap.sh 拥有 |
+| `target/secure-build-tools/` | 工具源码包、独立源码解包与 Cargo 编译中间目录 |
 
 缓存判定读 `BUILD-INFO`，不读目录名或时间戳；删除 `target/dist/` 只损失复用，不影响正确性。
 
 ## 发布边界
 
 检查 job 不安装 dx、不构建页面，只有满足上述条件的 artifacts job 安装 dx 并构建完整包。`allow_missing` 只保证
-无页面也可编译，运行缺资源返回明确 503；web-bundle.sh 使用 wasm-release，dx 按需下载 esbuild 仅供构建。
+无页面也可编译，运行缺资源返回明确 503；web-bundle.sh 使用 wasm-release，先验证受控工具回执，dx 禁止自动下载。
+esbuild、wasm-bindgen、wasm-opt 由工具安装入口固定版本及 SHA-256 提供。
 payload 复用只在本脚本内生效：本 surface、`auction-web-shared`、`auction-contracts`、清单、构建身份脚本、工具链版本、
 构建环境与已存清单全部一致才跳过 dx；只改契约源码也会使双端 WASM 缓存失效，保证新后端内嵌同版 DTO 浏览器。
 原生与 WASM 共用环境摘要，覆盖 `CARGO_PROFILE_*`（包括 `CARGO_PROFILE_WASM_RELEASE_*`）、rustflags、
-目标 linker/target 及 rustc 包装器；`WEB-BUILD-INFO` 缺少摘要的旧缓存自动重建，环境值本身不写入清单。
+目标 linker/target、rustc 包装器及受控工具字节身份；`WEB-BUILD-INFO` 缺少摘要的旧缓存自动重建，环境值本身不写入清单。
 只改 native 代码或文档不会重跑 WASM；任何输入不同即整目录重建。
 release.sh 在构建前冻结构建输入（代码、迁移、内嵌模板、清单与发布脚本）并在各阶段复查，纯文档修改不触发重建；
 核验实际二进制标记、对端资源缺失与 Worker 依赖，再校验白名单、权限、

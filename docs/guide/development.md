@@ -6,7 +6,8 @@
 
 准备 Linux x86_64 GNU/glibc 主机、just、Bash、ripgrep（`rg`）、Perl、rustfmt、Clippy 与
 `wasm32-unknown-unknown` target；布局、配置及五语言检查需要 `rg`/Perl，CI 的 docs 前置门禁会显式安装，
-页面另需配套 dx CLI。版本、MSRV 和 profile 见[技术栈](docs/design/tech-stack.md)，缓存边界见
+页面与发布入口另需[受控构建工具](ci/tools/README.md)。首次源码安装这些工具还需 C 编译器、CMake、pkg-config、
+OpenSSL 开发文件、patch 和 curl/tar/coreutils。版本、MSRV 和 profile 见[技术栈](docs/design/tech-stack.md)，缓存边界见
 [CI 说明](ci/README.md#runner-依赖与缓存)。检查/发布使用 `--locked`，不手工清理条件平台或未启用可选依赖的
 锁记录。不设全局 `build.target`，保留 `target/release` 路径；浏览器显式选 WASM target，通用制品禁用
 `target-cpu=native`。
@@ -23,7 +24,9 @@ just verify
 浏览器测试及手工冒烟，保留已有测试。依赖审计独立联网获取 RustSec，不启动产品或修改锁图：
 
 ```bash
-cargo install cargo-audit --locked --version 0.22.2
+bash ci/tools/rustup.sh
+bash ci/tools/bootstrap.sh install audit
+export PATH="$PWD/target/audit-tools/bin:$PATH"
 cargo install cargo-machete --locked --version 0.9.2
 bash ci/checks/check.sh dependency-audit dependency-unused
 ```
@@ -61,7 +64,8 @@ AUCTION_CONFIG_FILE=ops/config/examples/public.toml cargo run --locked -p auctio
 ## 浏览器与发布构建
 
 ```bash
-cargo install dioxus-cli --version 0.7.10 --locked
+bash ci/tools/rustup.sh
+bash ci/tools/bootstrap.sh install release
 just web-build
 
 # 干净工作树上的完整分体归档。
@@ -72,12 +76,17 @@ just build-single
 just release-check --single-binary
 ```
 
+`web-build` 与 `ci/release/release.sh` 的所有入口（包括 `build-api`、`verify-artifacts` 和 `source-fingerprint`）
+先验证 release 工具回执，不在发布期间安装工具；默认 `just verify` 仍只需 Rust 静态检查工具。入口固定受控 PATH，
+dx 禁止自动下载配套工具，历史 dx 下载缓存也不参与选择。
+
 Web 使用 `wasm-release`；dx 的 esbuild 仅供构建，不增加 Node/npm 运行链。`build-*` 变体按 `BUILD-INFO` 判定复用，
-构建输入（代码、迁移、内嵌模板、发布脚本）、`Cargo.lock`、feature 与构建环境完全一致且制品完整时直接复用，
+构建输入（代码、迁移、内嵌模板、发布脚本与工具配方）、`Cargo.lock`、feature、工具二进制身份与构建环境完全一致且制品完整时直接复用，
 只改文档不重跑 WASM 或 Fat LTO；Web payload 另按 surface、共享层、契约、工具链版本及同一构建环境摘要单独复用，
 修改 `CARGO_PROFILE_WASM_RELEASE_*` 或 rustflags 会重新构建页面。本机可选用
 `RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache`（sccache 0.18.0）与
-`RUSTFLAGS="-C link-arg=-fuse-ld=lld"`（lld 链接）前缀，两者只在本地生效，不改变 feature、资源隔离或归档契约。复用判定、指纹实现、
+`RUSTFLAGS="-C link-arg=-fuse-ld=lld"`（lld 链接）前缀。发布入口将 sccache 解析为受控二进制，并按用户、工作区和工具身份
+选择独立 Unix socket，避免连接旧 daemon；不停止其他构建的进程。这些前缀不改变 feature、资源隔离或归档契约。复用判定、指纹实现、
 资源隔离与 `--allow-dirty` 限制归[CI 说明](ci/README.md#发布边界)及[发布手册](ops/README.md#发布制品)；
 [AMD KVM 候选](ops/build/README.md)仅叠加目标白名单/并发，本机微基准不能替代目标机或 PostgreSQL 并发验证。
 
