@@ -425,7 +425,7 @@ impl MoogleMailCredentialSession {
     }
 
     async fn invalidate_selected(&self) -> Result<(), MoogleMailError> {
-        let current = self.current.clone();
+        let current = &self.current;
         {
             let mut candidates = self.set.candidates.lock().map_err(|_| {
                 operation_error(

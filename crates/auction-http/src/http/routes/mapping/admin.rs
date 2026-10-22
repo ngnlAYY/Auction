@@ -118,7 +118,7 @@ pub(crate) fn valid_settlement_report(report: &SettlementReport, auction_id: Uui
             let mut movement_count = 2_i64;
             for lot in &report.lots {
                 if !lot_ids.insert(lot.id)
-                    || !lot_codes.insert((lot.equipment_category.clone(), lot.lot_number))
+                    || !lot_codes.insert((lot.equipment_category.as_str(), lot.lot_number))
                 {
                     return false;
                 }

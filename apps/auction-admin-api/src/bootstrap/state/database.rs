@@ -183,7 +183,6 @@ pub(super) async fn configure_state(
         config.admin_secret().context("admin_secret is missing from sensitive configuration")?;
     let lifecycle_store = Arc::clone(&store);
     let auction_create_store = Arc::clone(&store);
-    let auction_schedule_store = Arc::clone(&store);
     let admin_rules_store = Arc::clone(&store);
     let admin_runtime: Option<Arc<dyn AdminRuntimeConfigPort>> = if store.backend()
         == DatabaseBackend::Postgres
@@ -360,18 +359,14 @@ pub(super) async fn configure_state(
             lifecycle_policy,
             config.auction.policy()?,
         ));
-    let auction_create: Arc<dyn AdminAuctionCreatePort> =
-        Arc::new(DatabaseAdminAuctionCommands::new(
-            auction_create_store,
-            Arc::new(SystemClock),
-            config.auction.policy()?,
-        ));
-    let auction_schedule: Arc<dyn AdminAuctionSchedulePort> =
-        Arc::new(DatabaseAdminAuctionCommands::new(
-            auction_schedule_store,
-            Arc::new(SystemClock),
-            config.auction.policy()?,
-        ));
+    // 创建和排期共用无可变状态的适配器，避免重复构造同一策略快照与时钟。
+    let auction_commands = Arc::new(DatabaseAdminAuctionCommands::new(
+        auction_create_store,
+        Arc::new(SystemClock),
+        config.auction.policy()?,
+    ));
+    let auction_create: Arc<dyn AdminAuctionCreatePort> = auction_commands.clone();
+    let auction_schedule: Arc<dyn AdminAuctionSchedulePort> = auction_commands;
     let admin_rules: Arc<dyn AdminRulesPort> =
         Arc::new(DatabaseAdminRulesCommands::new(admin_rules_store, Arc::new(SystemClock)));
     let recovery_commands: Arc<dyn RecoveryCommandPort> =

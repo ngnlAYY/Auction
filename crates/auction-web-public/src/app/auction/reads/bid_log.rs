@@ -11,17 +11,19 @@ pub(crate) fn bid_log() -> Element {
     let query_state = use_public_query_state();
     let mut query_state_signal = query_state.state;
     let world_filter = use_memo(move || {
-        query_state_signal()
+        query_state_signal
+            .read()
             .world
             .clone()
             .filter(|world| matches!(world.as_str(), "main" | "isekai"))
             .unwrap_or_else(|| "main".to_owned())
     });
     let selected_auction_id =
-        use_memo(move || query_state_signal().auction_id.clone().unwrap_or_default());
-    let page_number = use_memo(move || query_state_signal().page);
-    let page_size = use_memo(move || query_state_signal().page_size);
-    let lot_filter = use_memo(move || query_state_signal().bid_log_lot.clone().unwrap_or_default());
+        use_memo(move || query_state_signal.read().auction_id.clone().unwrap_or_default());
+    let page_number = use_memo(move || query_state_signal.read().page);
+    let page_size = use_memo(move || query_state_signal.read().page_size);
+    let lot_filter =
+        use_memo(move || query_state_signal.read().bid_log_lot.clone().unwrap_or_default());
     let mut lot_write_generation = use_signal(|| 0_u64);
     // 迁移期间曾写出 `bidlog_page`；读取后立即无历史记录地收敛回旧版 `page`。
     use_effect(move || {
@@ -41,15 +43,23 @@ pub(crate) fn bid_log() -> Element {
         let refresh_generation = refresh_generation;
         move || {
             let _ = refresh_generation();
-            fetch_bid_log_auctions(world_filter())
+            let world = world_filter();
+            async move {
+                let result = fetch_bid_log_auctions(world.clone()).await;
+                (world, result)
+            }
         }
     });
 
     // 世界切换或分享链接指向另一世界时，自动落到该世界最新一场可公开读取的拍卖。
     use_effect(move || {
-        let Some(Ok(auction_list)) = &*auctions.read_unchecked() else {
+        let Some((world, Ok(auction_list))) = &*auctions.read_unchecked() else {
             return;
         };
+        // 世界切换期间 Resource 保留旧目录，不能据它纠偏新世界的场次选择。
+        if world != &world_filter() {
+            return;
+        }
         let next_auction_id = auction_list
             .iter()
             .find(|auction| auction.id == selected_auction_id())
@@ -79,18 +89,20 @@ pub(crate) fn bid_log() -> Element {
             let world = world_filter();
             let lot_id = lot_filter().trim().to_owned();
             let lot_id = (!lot_id.is_empty()).then_some(lot_id);
+            let requested = (auction_id.clone(), world.clone(), lot_id.clone(), page, page_size);
             async move {
-                if auction_id.is_empty() {
+                let result = if auction_id.is_empty() {
                     Ok(None)
                 } else {
                     fetch_bid_log_page(auction_id, page, world, lot_id, page_size).await.map(Some)
-                }
+                };
+                (requested, result)
             }
         }
     });
     use_bid_refresh(bid_log, true);
     let auction_options = match &*auctions.read_unchecked() {
-        Some(Ok(auction_list)) => auction_list.clone(),
+        Some((world, Ok(auction_list))) if world == &world_filter() => auction_list.clone(),
         _ => Vec::new(),
     };
     let selected_auction =
@@ -115,7 +127,19 @@ pub(crate) fn bid_log() -> Element {
             }
         });
     });
-    let body = match &*bid_log.read_unchecked() {
+    let bid_log_state = bid_log.read_unchecked();
+    // 同一查询的后台刷新保留完成快照；换世界、场次或 lot 后隐藏旧行和旧分页总数。
+    let current_result = bid_log_state
+        .as_ref()
+        .filter(|((auction_id, world, lot_id, page, size), _)| {
+            auction_id == &selected_auction_id()
+                && world == &world_filter()
+                && lot_id.as_deref().unwrap_or_default() == current_lot_filter.trim()
+                && *page == current_page
+                && *size == page_size()
+        })
+        .map(|(_, result)| result);
+    let body = match current_result {
         None => rsx! {
             p { class: "public-auction-bid-log-empty", role: "status", {t!("data-loading")} }
         },

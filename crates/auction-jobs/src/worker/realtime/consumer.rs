@@ -106,22 +106,25 @@ impl PersistentRealtimeConsumer {
                 break;
             }
 
-            match self.sink.publish(event.clone()).await {
+            // sink 消费完整事件；确认与失败记录只保留两个 Copy 标识，不复制 JSON payload。
+            let event_id = event.event_id;
+            let stream_sequence = event.stream_sequence;
+            match self.sink.publish(event).await {
                 Ok(()) => {
                     if let Err(error) = self
                         .store
                         .acknowledge(
                             self.request.consumer_key.clone(),
                             self.request.stream_key.clone(),
-                            event.event_id,
-                            event.stream_sequence,
+                            event_id,
+                            stream_sequence,
                         )
                         .await
                     {
                         // sink 可能已经收到事件；记录失败而不是重新发送一个没有持久化边界的
                         // 新事件。下次重试仍使用 event_id 幂等投递。
                         self.record_failure(
-                            event.event_id,
+                            event_id,
                             "cursor_advance_failed",
                             "实时事件已交给 sink，但消费游标提交失败",
                             now,
@@ -137,7 +140,7 @@ impl PersistentRealtimeConsumer {
                 Err(error) => {
                     let (failure_code, safe_detail) =
                         safe_sink_error(&error.failure_code, &error.safe_detail);
-                    self.record_failure(event.event_id, &failure_code, &safe_detail, now).await?;
+                    self.record_failure(event_id, &failure_code, &safe_detail, now).await?;
                     break;
                 }
             }

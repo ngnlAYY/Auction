@@ -217,8 +217,8 @@ impl CompetitionCommand {
     }
 
     fn trigger(
-        self,
-        snapshot: crate::CompetitionSnapshot,
+        &self,
+        snapshot: &crate::CompetitionSnapshot,
         now: chrono::DateTime<chrono::Utc>,
         proxy_usage_context: Option<ProxyUsageContext>,
     ) -> Result<CompetitionTrigger, DomainError> {
@@ -558,16 +558,17 @@ where
                         }
                     };
                     let bidder_id = command.bidder_id();
-                    let mut participants = vec![bidder_id];
-                    if let Some(active) = snapshot.active_proxy {
-                        participants.push(active.user_id);
-                    }
+                    // 资格参与者最多两个；栈内排序去重仍保持原 UUID 加锁顺序。
+                    let mut participants = [
+                        bidder_id,
+                        snapshot.active_proxy.map_or(bidder_id, |active| active.user_id),
+                    ];
                     participants.sort_unstable();
-                    participants.dedup();
+                    let participant_count = 1 + usize::from(participants[0] != participants[1]);
 
                     let mut bidder_eligible = false;
                     let mut active_proxy_eligible = true;
-                    for participant_id in participants {
+                    for &participant_id in &participants[..participant_count] {
                         let eligible =
                             transaction.participant_is_eligible_for_update(participant_id).await?;
                         if participant_id == bidder_id {
@@ -590,8 +591,7 @@ where
                         return Err(crate::CompetitionTransactionError::InvalidState.into());
                     }
                     let audit = command.audit_context(now);
-                    let mut prerequisite_plans = Vec::new();
-                    if let Some(active) = snapshot.active_proxy
+                    let prerequisite_plan = if let Some(active) = snapshot.active_proxy
                         && active.user_id != bidder_id
                         && !active_proxy_eligible
                     {
@@ -607,10 +607,11 @@ where
                         )?;
                         snapshot.state = freeze.final_lot;
                         snapshot.active_proxy = None;
-                        prerequisite_plans.push(freeze);
-                    }
-                    let trigger =
-                        command.clone().trigger(snapshot.clone(), now, proxy_usage_context)?;
+                        Some(freeze)
+                    } else {
+                        None
+                    };
+                    let trigger = command.trigger(&snapshot, now, proxy_usage_context)?;
                     let plan = CompetitionPlan::plan(
                         snapshot.rules,
                         snapshot.state,
@@ -635,7 +636,7 @@ where
                             result_payload: payload,
                         })
                         .await?;
-                    for prerequisite in prerequisite_plans {
+                    if let Some(prerequisite) = prerequisite_plan {
                         transaction.apply_plan(prerequisite, None, now).await?;
                     }
                     transaction.apply_plan(plan.clone(), Some(audit), now).await?;

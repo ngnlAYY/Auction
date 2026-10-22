@@ -27,6 +27,7 @@ Worker 不监听业务写入 HTTP，不创建第二套拍卖状态机。应用�
 `with_cash_evidence_gateway`，PM sender 与只读资料 reader 仅 `forum.enabled` 时装配
 （见[外部适配器](crates/auction-integrations/README.md)）。SIGINT/SIGTERM 将 control 标记为 draining、停止新 claim，
 在途任务沿原租约和结果证明路径收口；10 秒 drain 后停止心跳，第二次信号强制收口，最后按配置限时刷新 tracing exporter。
+control 只有一个停机接收者，通知保留到接收者开始等待，覆盖启动后立即停机的窗口，不依赖任务先被调度。
 邮件或论坛 owner 永久失效时，监督任务在一秒观察周期内通知装配根，沿用同一 10 秒排空上限并非零退出，由 systemd 等进程管理器
 重建 Worker。监督只读取已取得 owner 的已知失效状态；关闭功能或无 active 凭据时不启动对应监督，不增加数据库探测。失效后的新外呼继续
 失败关闭，在途发送保留原 sending/未知结果对账语义；新进程取得 advisory lock、提交新 generation 后才恢复邮件操作。
@@ -99,17 +100,18 @@ PostgreSQL recovery due 推进独立于邮件 transport；付款、超时、提�
 
 仅 PostgreSQL 且启用论坛时装配主题发布和回帖导入，每轮按“发布 → 导入”执行，一阶段失败不跳过另一阶段。
 只为实际 `live` 拍卖创建主题；未知 POST 先精确标题 GET 对账，未命中须通过
-[`authorize-forum-write-retry`](apps/auctionctl/README.md#论坛与结算核验)显式授权；固定 #1/#2 的 exact post ID
-和内容 lease 持久化后才处理 #3+。部署字段 `worker.forum.verify_post_body` 默认关闭，关闭时不保证远端正文与
-目标镜像一致（见[配置说明](ops/config/README.md#论坛与邮件)）。论坛数字账号 ID 是稳定身份，用户名只用于显示和
+[`authorize-forum-write-retry`](apps/auctionctl/README.md#论坛与结算核验)显式授权；全部目录页和系统日志的 exact post ID
+与内容 lease 持久化后，才处理固定区之后的用户回帖。部署字段 `worker.forum.verify_post_body` 默认关闭，关闭时不保证
+远端正文与目标镜像一致（见[配置说明](ops/config/README.md#论坛与邮件)）。论坛数字账号 ID 是稳定身份，用户名只用于显示和
 MM 收件；新作者可建立 revoked-key 的 `forum_only` 主体，不自动获 active Key。只导入普通 `bid`，
 `proxy`/`proxy lower` 静默忽略，`start/cancel` 与 PM-only `notify` 仅作 warning。
 
 ## 心跳与论坛启用状态
 
 数据库 Worker 发布启动、就绪、周期及停止心跳，含 runtime 投影后的 `details.forum_sync_enabled`；Public 据此显示
-实际启用状态，不从历史帖子推断，开关变更须重启 Worker。`[worker.control]` 提供受信目录、实例锁、固定 group/0660
-和 UID/GID peer allowlist 保护的 live/ready/status，部署见[systemd 手册](ops/README.md#systemd-服务与顺序控制)。
+实际启用状态，不从历史帖子推断，开关变更须重启 Worker。周期心跳每 10 秒唤醒，慢数据库导致漏 tick 时跳过补发，
+数据库恢复后不集中补写漏掉的周期。`[worker.control]` 提供受信目录、实例锁、固定 group/0660 和 UID/GID peer allowlist
+保护的 live/ready/status，部署见[systemd 手册](ops/README.md#systemd-服务与顺序控制)。
 
 ## 维护与验证
 

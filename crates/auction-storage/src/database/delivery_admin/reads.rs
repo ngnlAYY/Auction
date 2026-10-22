@@ -11,13 +11,19 @@ pub(crate) async fn list(
     pool: &TrackedPool<Postgres>,
     request: &DeliveryAdminListRequest,
 ) -> Result<DeliveryAdminPage, DeliveryAdminError> {
+    // Worker 持续迁移投递状态；筛选计数与当前页不能分属两个数据库快照。
+    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_storage_error)?;
     let status = request.status.as_deref();
     let total: i64 = sqlx::query_scalar(
         "SELECT count(*)::bigint FROM public.deliveries
          WHERE $1::text IS NULL OR status = $1::text",
     )
     .bind(status)
-    .fetch_one(pool)
+    .fetch_one(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
     let rows = sqlx::query(
@@ -34,9 +40,10 @@ pub(crate) async fn list(
     .bind(status)
     .bind(request.limit)
     .bind(request.offset)
-    .fetch_all(pool)
+    .fetch_all(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
+    transaction.commit().await.map_err(map_storage_error)?;
     let entries = rows.iter().map(snapshot).collect::<Result<Vec<_>, _>>()?;
     Ok(DeliveryAdminPage { entries, total, limit: request.limit, offset: request.offset })
 }

@@ -49,12 +49,12 @@ where
 
 /// 解析旧共享 client 接受的错误 envelope；顶层扩展允许存在，但三项基础字段必须显式出现。
 pub(crate) async fn decode_error(response: Response) -> Result<(String, Value), String> {
-    let payload = response.json::<Value>().await.map_err(|_| "invalid_response".to_owned())?;
-    let envelope = object(&payload).ok_or_else(|| "invalid_response".to_owned())?;
+    let mut payload = response.json::<Value>().await.map_err(|_| "invalid_response".to_owned())?;
+    let envelope = payload.as_object_mut().ok_or_else(|| "invalid_response".to_owned())?;
     let code =
         string(envelope.get("code")).ok_or_else(|| "invalid_response".to_owned())?.to_owned();
     string(envelope.get("message")).ok_or_else(|| "invalid_response".to_owned())?;
-    let data = envelope.get("data").ok_or_else(|| "invalid_response".to_owned())?.clone();
+    let data = envelope.remove("data").ok_or_else(|| "invalid_response".to_owned())?;
     Ok((code, data))
 }
 
@@ -63,23 +63,23 @@ pub(crate) async fn decode_error_code(response: Response) -> String {
     decode_error(response).await.map(|(code, _)| code).unwrap_or_else(|code| code)
 }
 
-fn decode_success_value<T, F>(payload: Value, validate: F) -> Result<T, String>
+fn decode_success_value<T, F>(mut payload: Value, validate: F) -> Result<T, String>
 where
     T: DeserializeOwned,
     F: FnOnce(&Value) -> bool,
 {
-    let envelope = object(&payload).ok_or_else(|| "invalid_response".to_owned())?;
+    let envelope = payload.as_object_mut().ok_or_else(|| "invalid_response".to_owned())?;
     if !string(envelope.get("code")).is_some()
         || !string(envelope.get("message")).is_some()
         || !envelope.contains_key("data")
     {
         return Err("invalid_response".to_owned());
     }
-    let data = envelope.get("data").ok_or_else(|| "invalid_response".to_owned())?;
-    if !validate(data) {
+    // 信封已归本次解码所有，直接移出 data；仍先校验原始值，再规范化兼容整数。
+    let mut data = envelope.remove("data").ok_or_else(|| "invalid_response".to_owned())?;
+    if !validate(&data) {
         return Err("invalid_response".to_owned());
     }
-    let mut data = data.clone();
     normalize_legacy_integer_numbers(&mut data);
     serde_json::from_value(data).map_err(|_| "invalid_response".to_owned())
 }

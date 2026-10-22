@@ -158,7 +158,7 @@ fn apply_worker(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsCo
         item_timeout_seconds: candidate.fulfillment.item_timeout_seconds,
         retry_delay_seconds: candidate.fulfillment.retry_delay_seconds,
         // COD 领取轮询仍由部署 worker.toml 拥有，runtime 覆盖不改这个节奏。
-        evidence_poll_seconds: FulfillmentWorkerConfig::default().evidence_poll_seconds,
+        evidence_poll_seconds: worker.fulfillment.evidence_poll_seconds,
     };
     worker.recovery = RecoveryWorkerConfig {
         batch_limit: candidate.recovery.batch_limit,

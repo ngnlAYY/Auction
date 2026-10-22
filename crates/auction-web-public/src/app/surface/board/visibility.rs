@@ -1,14 +1,20 @@
 //! Public 页面可见性共享状态：隐藏期间轮询与实时重连退避挂起而非重置，恢复可见后继续。
 
 use super::*;
-use std::task::{Poll, Waker};
+use std::{
+    rc::Weak,
+    task::{Poll, Waker},
+};
+
+type WakerSlot = RefCell<Option<Waker>>;
+type WakerRegistry = RefCell<Vec<Weak<WakerSlot>>>;
 
 /// 页面可见性；`visibilitychange` 监听器更新内部状态并唤醒挂起的轮询/退避等待者。
 /// 内部是 `Rc` 共享状态，克隆体与原体看到同一份可见性，供 router 轮询与实时 owner 共用。
 #[derive(Clone)]
 pub(crate) struct PageVisibility {
     hidden: Rc<Cell<bool>>,
-    wakers: Rc<RefCell<Vec<Waker>>>,
+    wakers: Rc<WakerRegistry>,
     #[cfg(target_arch = "wasm32")]
     listener: Rc<RefCell<Option<PageVisibilityListener>>>,
 }
@@ -67,9 +73,14 @@ impl PageVisibility {
     #[cfg(target_arch = "wasm32")]
     fn wake_waiters(&self) {
         // 先释放列表借用，再调用可能重新注册等待者的运行时回调。
-        let wakers = std::mem::take(&mut *self.wakers.borrow_mut());
-        for waker in wakers {
-            waker.wake();
+        let waiters = std::mem::take(&mut *self.wakers.borrow_mut());
+        for waiter in waiters {
+            if let Some(slot) = waiter.upgrade() {
+                let waker = slot.borrow_mut().take();
+                if let Some(waker) = waker {
+                    waker.wake();
+                }
+            }
         }
     }
 
@@ -78,15 +89,45 @@ impl PageVisibility {
         if !self.hidden.get() {
             return;
         }
+        let waiter = VisibilityWaiter { wakers: &self.wakers, slot: Rc::new(RefCell::new(None)) };
         futures_util::future::poll_fn(|context| {
             if self.hidden.get() {
-                self.wakers.borrow_mut().push(context.waker().clone());
+                waiter.register(context.waker());
                 Poll::Pending
             } else {
                 Poll::Ready(())
             }
         })
         .await;
+    }
+}
+
+/// 一个隐藏等待只登记一个槽位；取消 future 时立即解除登记，不等待页面再次可见。
+struct VisibilityWaiter<'a> {
+    wakers: &'a WakerRegistry,
+    slot: Rc<WakerSlot>,
+}
+
+impl VisibilityWaiter<'_> {
+    fn register(&self, waker: &Waker) {
+        let registration = Rc::downgrade(&self.slot);
+        let mut wakers = self.wakers.borrow_mut();
+        // 唤醒后、任务再次 poll 前可能重新隐藏；此时需要重新登记同一槽位。
+        if !wakers.iter().any(|known| known.ptr_eq(&registration)) {
+            wakers.push(registration);
+        }
+        let mut slot = self.slot.borrow_mut();
+        match slot.as_mut() {
+            Some(known) => known.clone_from(waker),
+            None => *slot = Some(waker.clone()),
+        }
+    }
+}
+
+impl Drop for VisibilityWaiter<'_> {
+    fn drop(&mut self) {
+        let registration = Rc::downgrade(&self.slot);
+        self.wakers.borrow_mut().retain(|known| !known.ptr_eq(&registration));
     }
 }
 

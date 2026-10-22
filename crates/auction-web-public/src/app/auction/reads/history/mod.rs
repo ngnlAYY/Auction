@@ -16,20 +16,20 @@ pub(crate) fn history() -> Element {
     // 筛选与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
-    let page_size = use_memo(move || query_state_signal().page_size);
+    let page_size = use_memo(move || query_state_signal.read().page_size);
     // 日期沿用既有恢复规则；非法名称/金额保留为字段错误并阻止查询，不改写地址栏。
     let applied_query = use_memo(move || {
         let query = normalize_history_query(query_state_signal());
         PriceHistoryQuery {
-            world: query.world.clone(),
-            name: query.history_name.clone(),
-            from: query.history_from.clone(),
-            to: query.history_to.clone(),
-            min_price: query.history_min_price.clone(),
-            max_price: query.history_max_price.clone(),
-            buyer: query.history_buyer.clone(),
-            seller: query.history_seller.clone(),
-            sort: query.history_sort.clone(),
+            world: query.world,
+            name: query.history_name,
+            from: query.history_from,
+            to: query.history_to,
+            min_price: query.history_min_price,
+            max_price: query.history_max_price,
+            buyer: query.history_buyer,
+            seller: query.history_seller,
+            sort: query.history_sort,
             page: query.page.max(1),
         }
     });

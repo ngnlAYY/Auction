@@ -81,8 +81,8 @@ just release-check --single-binary
 dx 禁止自动下载配套工具，历史 dx 下载缓存也不参与选择。
 
 Web 使用 `wasm-release`；dx 的 esbuild 仅供构建，不增加 Node/npm 运行链。`build-*` 变体按 `BUILD-INFO` 判定复用，
-构建输入（代码、迁移、内嵌模板、发布脚本与工具配方）、`Cargo.lock`、feature、工具二进制身份与构建环境完全一致且制品完整时直接复用，
-只改文档不重跑 WASM 或 Fat LTO；Web payload 另按 surface、共享层、契约、工具链版本及同一构建环境摘要单独复用，
+构建输入（apps、crates、迁移、配置示例、保留策略、清单与发布工具）、`Cargo.lock`、feature、工具二进制身份与构建环境完全一致且制品完整时直接复用，
+仅修改这些范围外的文档不会重跑原生 Fat LTO；Web payload 按 surface、共享层、契约、工具链版本及同一构建环境摘要独立复用，
 修改 `CARGO_PROFILE_WASM_RELEASE_*` 或 rustflags 会重新构建页面。本机可选用
 `RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache`（sccache 0.18.0）与
 `RUSTFLAGS="-C link-arg=-fuse-ld=lld"`（lld 链接）前缀。发布入口将 sccache 解析为受控二进制，并按用户、工作区和工具身份

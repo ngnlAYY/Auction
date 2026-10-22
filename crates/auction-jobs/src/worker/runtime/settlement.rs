@@ -17,7 +17,9 @@ where
 {
     let mut claim = claim;
     for _ in 0..MAXIMUM_FULFILLMENT_PHASE_ADVANCES {
-        let retry_claim = claim.clone();
+        // 日志与重试指标只需标识和次数，不复制装备明细及 delivery 快照。
+        let obligation_id = claim.obligation_id;
+        let retry_count = claim.retry_count;
         match claim.state {
             auction_application::SettlementFulfillmentState::Pending => {
                 let deadline = fulfillment_budget(&claim, clock.now());
@@ -40,7 +42,7 @@ where
                         obligation_id,
                         failure_code,
                     } => {
-                        observe_fulfillment_retry(metrics.as_ref(), &retry_claim);
+                        observe_fulfillment_retry(metrics.as_ref(), retry_count);
                         tracing::info!(
                             obligation_id = %obligation_id,
                             failure_code,
@@ -65,7 +67,7 @@ where
                         // 保持原 lease/fence，交给下一轮重新领取，不能在这里猜测并覆盖
                         // 阶段专属 error_code。
                         tracing::warn!(
-                            obligation_id = %retry_claim.obligation_id,
+                            obligation_id = %obligation_id,
                             "settlement fulfillment phase returned an unpersisted error"
                         );
                         return WorkerResult::Error;
@@ -89,7 +91,7 @@ where
                     obligation_id,
                     failure_code,
                 }) => {
-                    observe_fulfillment_retry(metrics.as_ref(), &retry_claim);
+                    observe_fulfillment_retry(metrics.as_ref(), retry_count);
                     tracing::info!(
                         obligation_id = %obligation_id,
                         failure_code,
@@ -112,7 +114,7 @@ where
                     // 该错误没有对应的旧版持久化阶段结果；保留 claim 的 fencing，避免
                     // 把存储/状态错误误分类为 delivery_unavailable。
                     tracing::warn!(
-                        obligation_id = %retry_claim.obligation_id,
+                        obligation_id = %obligation_id,
                         "settlement fulfillment phase returned an unpersisted error"
                     );
                     return WorkerResult::Error;
@@ -137,7 +139,7 @@ where
                     Ok(result) => {
                         match result.status {
                             auction_application::SettlementFulfillmentReconcileStatus::Deferred => {
-                                observe_fulfillment_retry(metrics.as_ref(), &retry_claim);
+                                observe_fulfillment_retry(metrics.as_ref(), retry_count);
                                 tracing::info!(
                                     obligation_id = %result.obligation_id,
                                     delivery_id = %result.delivery_id,
@@ -172,7 +174,7 @@ where
                         // reconcile 的 dependency/证据错误若已被应用服务识别，会以 Deferred、
                         // Failed 或 ManualReconcile 返回；这里只处理未完成持久迁移的错误。
                         tracing::warn!(
-                            obligation_id = %retry_claim.obligation_id,
+                            obligation_id = %obligation_id,
                             "settlement fulfillment reconcile returned an unpersisted error"
                         );
                         return WorkerResult::Error;
@@ -218,10 +220,10 @@ async fn bounded_fulfillment<T>(
         .map_err(|_| auction_application::ApplicationError::FulfillmentDependencyUnavailable)?
 }
 
-fn observe_fulfillment_retry(metrics: &dyn WorkerRecorder, claim: &SettlementFulfillmentClaim) {
+fn observe_fulfillment_retry(metrics: &dyn WorkerRecorder, retry_count: u32) {
     // 领取本身不增加 retry_count；只有本次 Deferred 已经把此前至少一次 release
     // 再次释放，才与旧版 ReleaseFulfillment 后的 retry 指标一致。
-    if claim.retry_count > 0 {
+    if retry_count > 0 {
         metrics.observe_retry(WorkerLoop::AuctionFulfillment, WorkerRetryKind::Persisted);
     }
 }

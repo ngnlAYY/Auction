@@ -47,7 +47,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let query_state = query.state;
     // 自动轮询开关与间隔入 URL（`poll` 键），默认关闭；页面隐藏时轮询挂起。
     // 轮询只重取三个分区的当前视图数据，不重置分页、不写地址栏。
-    let poll_seconds = use_memo(move || query_state().poll_seconds);
+    let poll_seconds = use_memo(move || query_state.read().poll_seconds);
     use_auto_poll(poll_seconds, move || {
         event_refresh.set(event_refresh().saturating_add(1));
         lag_refresh.set(lag_refresh().saturating_add(1));

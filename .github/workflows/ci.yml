@@ -95,7 +95,7 @@ jobs:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
       # rust-cache v2.9.2；自动键隔离 job、平台、工具链和依赖图。
-      # 只有默认分支 push 与手动运行写缓存：PR 缓存作用域与合并结果不同，全写会挤占同一仓库额度。
+      # 非 PR 事件才写缓存：PR 缓存作用域与合并结果不同，全写会挤占同一仓库额度。
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:

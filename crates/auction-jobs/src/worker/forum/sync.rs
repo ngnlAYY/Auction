@@ -107,6 +107,10 @@ where
     let mut processed = 0_u16;
     let mut first_error = None;
     while processed < runtime.batch_size && !worker.control.is_draining() {
+        // 领取与远端处理共用领取前截止，数据库等待不能重新获得完整处理预算。
+        let item_deadline = tokio::time::Instant::now()
+            .checked_add(runtime.item_timeout)
+            .ok_or(WorkerError::InvalidForumSyncConfiguration)?;
         let now = worker.clock.now();
         let recovery_before = *runtime.startup_recovery_before.get_or_init(|| now);
         let startup_recovery_before = runtime
@@ -117,15 +121,24 @@ where
             .checked_add_signed(lease_duration)
             .ok_or(WorkerError::InvalidForumSyncConfiguration)?;
         // 旧版按主题顺序逐条领取和发布；只领取即将执行的一条，避免排队任务提前耗尽租约。
-        let mut claims = runtime
-            .store
-            .claim_due(worker.worker_id.clone(), now, lease_until, startup_recovery_before, 1)
-            .await?;
+        let mut claims = tokio::time::timeout_at(
+            item_deadline,
+            runtime.store.claim_due(
+                worker.worker_id.clone(),
+                now,
+                lease_until,
+                startup_recovery_before,
+                1,
+            ),
+        )
+        .await
+        .map_err(|_| WorkerError::ForumTopicProcessingFailed)??;
         let Some(claim) = claims.pop() else {
             break;
         };
         processed += 1;
-        if let Err(error) = process_claim(runtime, Arc::clone(&worker.clock), claim).await
+        if let Err(error) =
+            process_claim(runtime, Arc::clone(&worker.clock), claim, item_deadline).await
             && first_error.is_none()
         {
             first_error = Some(error);
@@ -138,18 +151,21 @@ async fn process_claim<C>(
     runtime: &ForumSyncRuntime,
     clock: Arc<C>,
     claim: ForumSyncClaim,
+    item_deadline: tokio::time::Instant,
 ) -> Result<(), WorkerError>
 where
     C: Clock + 'static,
 {
+    if tokio::time::Instant::now() >= item_deadline {
+        // 可能已提交的 claim 留给原租约恢复；尚未开始外呼，不补造失败或发送证明。
+        return Err(WorkerError::ForumTopicProcessingFailed);
+    }
     let store = Arc::clone(&runtime.store);
     let failure_store = Arc::clone(&store);
     let failure_clock = Arc::clone(&clock);
     let failure_claim = claim.clone();
     let reconciliation_only = requires_reconciliation(&claim);
-    match tokio::time::timeout(runtime.item_timeout, process_claim_inner(runtime, clock, claim))
-        .await
-    {
+    match tokio::time::timeout_at(item_deadline, process_claim_inner(runtime, clock, claim)).await {
         Ok(result) => result,
         Err(_) => {
             record_failure(

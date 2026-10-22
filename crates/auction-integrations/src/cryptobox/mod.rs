@@ -66,9 +66,10 @@ impl DataKey {
         if !valid_key_id(id) {
             return Err(EquipmentKeySealerError::InvalidKeyId);
         }
-        let material =
+        let mut material =
             BASE64.decode(encoded).map_err(|_| EquipmentKeySealerError::InvalidDataKey)?;
         if material.len() != DATA_KEY_LENGTH {
+            material.fill(0);
             return Err(EquipmentKeySealerError::InvalidDataKey);
         }
         let key = hmac::Key::new(hmac::HMAC_SHA256, &material);
@@ -145,31 +146,31 @@ impl EquipmentKeySealer {
         let mut nonce = [0_u8; NONCE_LENGTH];
         self.random.fill(&mut nonce).map_err(|_| EquipmentKeySealerError::RandomSource)?;
         let aead_key = self.data_key.aead_key()?;
-        let mut ciphertext = key
+        let ciphertext = key
             .with_bytes(|plaintext| {
                 let mut buffer = plaintext.to_vec();
-                aead_key
+                if aead_key
                     .seal_in_place_append_tag(
                         aead::Nonce::assume_unique_for_key(nonce),
                         aead::Aad::from(aad.as_bytes()),
                         &mut buffer,
                     )
-                    .map(|()| buffer)
-                    .map_err(|_| EquipmentKeySealerError::Encryption)
+                    .is_err()
+                {
+                    buffer.fill(0);
+                    return Err(EquipmentKeySealerError::Encryption);
+                }
+                Ok(buffer)
             })
             .map_err(|_| EquipmentKeySealerError::Encryption)??;
 
-        let fingerprint = {
-            let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, &self.data_key.material);
-            let mut input = Vec::with_capacity(SECRET_FINGERPRINT_DOMAIN.len() + 10);
-            input.extend_from_slice(SECRET_FINGERPRINT_DOMAIN);
-            key.with_bytes(|plaintext| input.extend_from_slice(plaintext))
-                .map_err(|_| EquipmentKeySealerError::Encryption)?;
-            hex_encode(hmac::sign(&hmac_key, &input).as_ref())
-        };
+        // 与解密共用分块 HMAC，避免为指纹另建含明文 key 的拼接缓冲。
+        let fingerprint = key
+            .with_bytes(|plaintext| fingerprint(&self.data_key, plaintext))
+            .map_err(|_| EquipmentKeySealerError::Encryption)?;
 
         let envelope = EquipmentKeyEnvelope::new(
-            std::mem::take(&mut ciphertext),
+            ciphertext,
             nonce.to_vec(),
             self.data_key.id.clone(),
             fingerprint,

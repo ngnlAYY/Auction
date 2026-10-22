@@ -66,14 +66,14 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
 - verify、msrv、artifacts 采用 `v1-auction-build` 前缀，按 job、平台、Rust 工具链、Cargo 清单/锁图及构建配置
   隔离；缓存依赖和工作区编译产物，不跨工具链混用，也不缓存 Cargo 工具二进制。artifacts 使用独立 release 键，
   递归清理 `target` 下原生 API-only/embedded 与 WASM 缓存，不复用发布校验结论。
-- 四个 Cargo job 的 `save-if` 都要求事件不是 `pull_request`：PR 缓存作用域是合并结果，写入后主分支无法复用且挤占
+- verify、msrv、artifacts 的 `save-if` 要求事件不是 `pull_request`：PR 缓存作用域是合并结果，写入后主分支无法复用且挤占
   额度；PR 仍完整恢复缓存并执行全部检查，`cache-on-failure` 保留。
 - 只有 artifacts 启用修复后的 sccache 0.18.0；与 dx 0.7.10 一起从固定源码包和独立锁图重建，避免旧官方二进制
   的证书库残留。编译对象写入 Actions 缓存服务，额外前缀 `auction-tls-20261022` 隔离修复前的对象；
   凭据只存在于 action 上下文，由 `actions/github-script` 输出到 step outputs 并仅赋给构建步骤的
   `ACTIONS_RESULTS_URL`、`ACTIONS_RUNTIME_TOKEN`；`RUSTC_WRAPPER` 会写入 `BUILD-INFO`，与未启用包装器的产物不会互用。
 - artifacts 另按源码身份指纹缓存 `target/dist/artifacts` 与 `target/dx`（rust-cache 保存时会清掉非 Cargo 目录），
-  并以 `release-artifacts-` 前缀回退：只改文档的提交也能拿到上次产物与 dx 增量目录，
+  并以 `release-artifacts-` 前缀回退：只改构建输入范围外的文档时，也能拿到上次产物与 dx 增量目录，
   键来自 `bash ci/release/release.sh source-fingerprint`；命中即 `BUILD-INFO` 一致，前缀命中的旧目录仍由
   `release.sh` 按构建输入复核，不满足就重建，不会把过期二进制当结果。
 - security-audit 对无 TLS 依赖的 cargo-machete 保留固定版本安装；cargo-audit 改用 audit 档独立锁重建。
@@ -140,15 +140,19 @@ Linux 均兼容。构建、上传不启动程序、不连接业务数据库、�
 无页面也可编译，运行缺资源返回明确 503；web-bundle.sh 使用 wasm-release，先验证受控工具回执，dx 禁止自动下载。
 esbuild、wasm-bindgen、wasm-opt 由工具安装入口固定版本及 SHA-256 提供。
 payload 复用只在本脚本内生效：本 surface、`auction-web-shared`、`auction-contracts`、清单、构建身份脚本、工具链版本、
-构建环境与已存清单全部一致才跳过 dx；只改契约源码也会使双端 WASM 缓存失效，保证新后端内嵌同版 DTO 浏览器。
+构建环境与已存清单全部一致才跳过 dx；构建结束后再次核对源码与工具身份，变化时不签发复用标记。
+只改契约源码也会使双端 WASM 缓存失效，保证新后端内嵌同版 DTO 浏览器。
 原生与 WASM 共用环境摘要，覆盖 `CARGO_PROFILE_*`（包括 `CARGO_PROFILE_WASM_RELEASE_*`）、rustflags、
 目标 linker/target、rustc 包装器及受控工具字节身份；`WEB-BUILD-INFO` 缺少摘要的旧缓存自动重建，环境值本身不写入清单。
-只改 native 代码或文档不会重跑 WASM；任何输入不同即整目录重建。
-release.sh 在构建前冻结构建输入（代码、迁移、内嵌模板、清单与发布脚本）并在各阶段复查，纯文档修改不触发重建；
-核验实际二进制标记、对端资源缺失与 Worker 依赖，再校验白名单、权限、
-统一时间、两次相同 archive、内外哈希和依赖摘要；正式 package 要求干净工作树。分体包为 Public、Admin、Worker、
+只修改上述输入范围外的原生源码或文档不会重跑 WASM；输入目录中的 README 仍参与摘要，不按扩展名排除。
+release.sh 在构建前冻结构建输入（apps、crates、migrations、配置示例、保留策略、清单与发布工具）并在各阶段复查，
+范围外的文档修改不触发原生重建。核验实际二进制标记、对端资源缺失与 Worker 依赖，再校验白名单、权限、
+统一时间、两次相同 archive、内外哈希和依赖摘要；tar 流直接压缩，不落盘未压缩副本。
+构建与装包各自在子进程退出时清理本次候选目录；失败不删除旧制品或 Cargo 增量缓存。
+正式 package 要求干净工作树。分体包为 Public、Admin、Worker、
 auctionctl，仅两端内嵌各自页面；`--single-binary` 先通过分体门禁，再核对 server 双 payload 和独立无 Web 的
-auctionctl，归档只含这两个程序及合并 unit。目录和配置模板路径/权限保持不变，包内 `systemd/README.md` 改为导航，安装
-说明统一在 `docs/DEPLOYMENT.md`；输出目录、安装、配置、迁移与 `--allow-dirty` 限制见
+auctionctl，归档只含这两个程序及合并 unit。目录和配置模板路径/权限保持不变，包内 `systemd/README.md` 为导航，安装
+说明统一在 `docs/DEPLOYMENT.md`；部署手册中已有模板与恢复文件的仓库根链接在装包时转换，源码专属链接仍需查阅仓库。
+输出目录、安装、配置、迁移与 `--allow-dirty` 限制见
 [部署手册](ops/README.md#发布制品)。默认仅静态检查与获准构建，all-targets 只编译已有测试，不新增或执行行为测试、服务、
 数据库或手工冒烟；授权后才能开展 PostgreSQL 行锁、隔离、并发等运行验证，缺口见[状态页](docs/status.md)。

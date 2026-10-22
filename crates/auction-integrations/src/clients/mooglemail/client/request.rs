@@ -168,7 +168,6 @@ impl MoogleMailClient {
             )
         })?;
 
-        let encoded = SensitiveBytes(form.encode());
         let request = self
             .client
             .post(target.url.clone())
@@ -176,7 +175,7 @@ impl MoogleMailClient {
             .header(header::COOKIE, cookie.expose())
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
             .timeout(self.request_timeout)
-            .body(encoded.0.clone())
+            .body(form.encode())
             .build()
             .map_err(|_| self.configuration_for(operation, target.world))?;
         // 先前 compose 步骤可能已经暂存资产；失锁不能被降级为可安全重发。

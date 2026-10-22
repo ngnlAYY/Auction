@@ -51,6 +51,10 @@ DTO 只传递服务端结果，匹配逻辑与论坛颜色留在应用/集成层
   P21 布尔开关相互独立，未知开关通过错误表达而非默认 false。
 - `PUBLIC_EXPECTED_USER_ID_HEADER` 统一 Public 写操作的可选身份前置条件名称；HTTP 核对当前 Cookie 身份，
   浏览器冻结确认宿主的用户，具体适用动作与错误码见[请求边界](docs/contracts/routes.md#请求边界)。
+- `PublicLoginRequest`、`AdminSessionResponse` 和 `AdminUserMutationResponse` 保留原 JSON 与 `Debug` 能力，
+  但调试输出隐藏登录 key、CSRF token 和生成 key，不改变授权请求/响应的实际字段。
+- `AdminIntakeRequest` 的来源 URL、正式/预览装备和补偿账本响应的完整游戏 URL，以及 `PublicForumResponse`
+  的镜像正文在 `Debug` 中脱敏；这些字段可能包含装备 key。授权 JSON 输入/输出仍逐字保留原字段，不用脱敏值改写 wire。
 
 ## 命名与依赖边界
 

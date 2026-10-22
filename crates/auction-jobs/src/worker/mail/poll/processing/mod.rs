@@ -32,6 +32,7 @@ use fetch::fetch_with_retry;
 pub(super) async fn process_claim<C>(
     context: MailPollProcessContext<C>,
     claim: MailPollClaim,
+    mut lease_deadline: tokio::time::Instant,
 ) -> WorkerResult
 where
     C: Clock + 'static,
@@ -40,6 +41,18 @@ where
         tracing::error!("MoogleMail Worker 收到无效租约");
         return WorkerResult::Error;
     }
+    // 调用方在领取前冻结单调截止；返回租约只能收紧它，不能补回数据库/网络耗时。
+    let observed_at = tokio::time::Instant::now();
+    let Some(observed_deadline) = (claim.lease_until - context.clock.now())
+        .to_std()
+        .ok()
+        .and_then(|remaining| observed_at.checked_add(remaining))
+    else {
+        tracing::error!("MoogleMail Worker 收到已过期或不可表示的租约");
+        return WorkerResult::Error;
+    };
+    lease_deadline = lease_deadline.min(observed_deadline);
+    let lease_span = context.config.lease_duration;
     let Ok(lease_duration) = ChronoDuration::from_std(context.config.lease_duration) else {
         return WorkerResult::Error;
     };
@@ -54,20 +67,58 @@ where
         let renewal_sleep = tokio::time::sleep(renew_timeout);
         tokio::pin!(renewal_sleep);
         tokio::select! {
-            result = &mut work => return result,
+            biased;
+            () = tokio::time::sleep_until(lease_deadline) => {
+                tracing::error!(
+                    mailbox_key = %renewal_claim.mailbox_key,
+                    "MoogleMail 租约已过期，取消当前陈旧处理"
+                );
+                return WorkerResult::Error;
+            }
+            result = std::future::poll_fn(|context| {
+                if tokio::time::Instant::now() >= lease_deadline {
+                    return std::task::Poll::Pending;
+                }
+                work.as_mut().poll(context)
+            }) => return result,
             () = &mut renewal_sleep => {
+                let renewal_started = tokio::time::Instant::now();
+                if renewal_started >= lease_deadline {
+                    tracing::error!(
+                        mailbox_key = %renewal_claim.mailbox_key,
+                        "MoogleMail 续租开始前租约已过期"
+                    );
+                    return WorkerResult::Error;
+                }
+                let renewal_deadline = lease_deadline.min(renewal_started + renew_timeout);
+                let renewed_deadline = renewal_started + lease_span;
                 let now = clock.now();
                 let Some(lease_until) = now.checked_add_signed(lease_duration) else {
                     tracing::error!(mailbox_key = %renewal_claim.mailbox_key, "MoogleMail 续租截止时间溢出");
                     return WorkerResult::Error;
                 };
-                match tokio::time::timeout(
-                    renew_timeout,
+                // 新期限锚定续租发起时刻；等待和回执都不能越过已知旧租约。
+                match tokio::time::timeout_at(
+                    renewal_deadline,
                     store.renew(renewal_claim.clone(), now, lease_until),
                 )
                 .await
                 {
-                    Ok(Ok(updated)) => renewal_claim = updated,
+                    Ok(Ok(updated)) => {
+                        if tokio::time::Instant::now() >= renewal_deadline
+                            || tokio::time::Instant::now() >= renewed_deadline
+                            || clock.now() >= updated.lease_until
+                            || updated.lease_until < lease_until
+                        {
+                            tracing::error!(
+                                mailbox_key = %renewal_claim.mailbox_key,
+                                "MoogleMail 续租未在原租约内确认有效新期限"
+                            );
+                            return WorkerResult::Error;
+                        }
+                        renewal_claim = updated;
+                        lease_deadline = renewed_deadline;
+                    }
                     Ok(Err(error)) => {
                         tracing::error!(
                             error = %error,

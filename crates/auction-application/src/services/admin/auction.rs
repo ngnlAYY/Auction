@@ -76,6 +76,8 @@ where
                     }
 
                     // 已完成命令不受当前时刻或新模板影响；时间门禁只约束首次创建。
+                    // world/intake target 等锁可能跨过预览时间，必须锁齐备后才读取实时数据库时钟。
+                    transaction.lock_admin_auction_creation(&command.world_id).await?;
                     let now = transaction.current_time().await?;
                     if command.preview_scheduled_at < now {
                         return Err(

@@ -1,5 +1,7 @@
 //! 结算义务的闭集构造与稳定身份派生。
 
+use std::collections::HashMap;
+
 use auction_domain::{
     AuctionId, CommandId, SettlementId, SettlementObligation, SettlementObligationKind,
     SettlementObligationState, SettlementPlan, SettlementWorld, legacy_natural_key_uuid,
@@ -7,19 +9,23 @@ use auction_domain::{
 
 use crate::SettlementSnapshot;
 
-/// 根据已计算的结算明细构造支付、交接、卖家结算和退款义务。
-pub(super) fn append_obligations(
+/// 根据已计算的结算明细构造支付、交接、卖家结算和退款义务；不复制或修改输入计划。
+pub(super) fn build_obligations(
     command_id: CommandId,
     snapshot: &SettlementSnapshot,
-    plan: &mut SettlementPlan,
-) -> Result<(), auction_domain::DomainError> {
+    plan: &SettlementPlan,
+) -> Result<Vec<SettlementObligation>, auction_domain::DomainError> {
     let mut obligations = Vec::new();
+    // 只索引借用的明细；输出仍严格沿用锁内事实顺序，不能依赖 HashMap 迭代顺序。
+    let mut lines_by_id = HashMap::with_capacity(plan.lines.len());
+    for line in &plan.lines {
+        lines_by_id.entry(line.lot_id).or_insert(line);
+    }
 
     for fact in &snapshot.facts {
-        let line =
-            plan.lines.iter().find(|line| line.lot_id == fact.lot_id).ok_or(
-                auction_domain::DomainError::InvalidSettlementFacts("结算明细缺少对应 lot"),
-            )?;
+        let line = lines_by_id
+            .get(&fact.lot_id)
+            .ok_or(auction_domain::DomainError::InvalidSettlementFacts("结算明细缺少对应 lot"))?;
 
         let Some(winner_id) = fact.leader_id else {
             obligations.push(SettlementObligation {
@@ -137,8 +143,7 @@ pub(super) fn append_obligations(
         });
     }
 
-    plan.obligations = obligations;
-    Ok(())
+    Ok(obligations)
 }
 
 fn obligation_id(auction_id: AuctionId, lot_id: auction_domain::LotId, kind: &str) -> SettlementId {

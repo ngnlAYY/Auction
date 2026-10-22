@@ -26,7 +26,7 @@ pub(super) async fn run(
         signal = signals.recv() => signal.map(|_| ()).map_err(anyhow::Error::from)
     };
     let stopped = stop(&mut children, &mut signals).await;
-    // 直到所有子进程 wait 完成才释放 owner.lock；子进程也继承它以防父进程被强杀。
+    // 所有角色都完成回收尝试后才释放父进程的锁；未退出子进程仍持有继承的 owner.lock。
     drop(ownership);
     result.and(stopped)
 }
@@ -133,13 +133,23 @@ async fn stop(children: &mut [RoleChild], signals: &mut TerminationSignals) -> a
         for child in children.iter_mut().rev() {
             let _ = child.process.start_kill();
         }
+        let mut reap_error = None;
         for child in children.iter_mut().rev() {
-            tokio::time::timeout(Duration::from_secs(5), child.process.wait())
+            let result = tokio::time::timeout(Duration::from_secs(5), child.process.wait())
                 .await
                 .context(
                     "forced role reap timeout; inherited ownership lock remains until process exit",
-                )?
-                .context("reap forced role")?;
+                )
+                .and_then(|result| result.context("reap forced role"));
+            // 单个 wait 失败也必须继续等待其他角色，不能把剩余 Child 留给运行时兜底回收。
+            if let Err(error) = result
+                && reap_error.is_none()
+            {
+                reap_error = Some(error);
+            }
+        }
+        if let Some(error) = reap_error {
+            return Err(error);
         }
         bail!("server shutdown forced or exceeded its drain budget");
     }

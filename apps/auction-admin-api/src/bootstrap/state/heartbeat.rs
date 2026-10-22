@@ -8,6 +8,8 @@ use auction_observability::HeartbeatPublisher;
 pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(10));
+        // 心跳只报告当前状态；数据库恢复后不补发过期 tick，避免集中查询和写入。
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         ticker.tick().await;
         loop {
             ticker.tick().await;

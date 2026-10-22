@@ -156,7 +156,7 @@ fn valid_origin(value: &str) -> bool {
     Url::parse(value).is_ok_and(|parsed| {
         matches!(parsed.scheme(), "http" | "https")
             && (parsed.scheme() == "https"
-                || matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1")))
+                || matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")))
             && parsed.host_str().is_some()
             && parsed.username().is_empty()
             && parsed.password().is_none()

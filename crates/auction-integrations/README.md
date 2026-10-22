@@ -21,22 +21,31 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
 
 ## HTTP 与协议证明
 
-各客户端固定 origin/endpoint、禁止自动重定向，限制响应类型、字节数、请求间隔和总预算；正文按块在追加前检查上限，
-超时或截断不伪称取得完整响应，用户正文中的“登录”等文字不能作为凭据失效证明。HTML 解析使用 scraper 0.27 /
-selectors 0.38，关闭默认 CLI feature 但保留 `errors`，仅使用库 API，不以手写解析器替代协议边界。
+生产装配的论坛、MoogleMail 与装备来源客户端固定 origin/endpoint、禁止自动重定向，限制响应类型、字节数、
+请求间隔和总预算；正文按块在追加前检查上限，超时或截断不伪称取得完整响应。兼容注入构造器的代理和重定向策略
+仍由装配方保证，不能把任意 client 当成已验证的安全边界。论坛与 MoogleMail 的限速槽仅在等待完成后推进，
+取消排队请求不会预占未来时间槽。用户正文中的“登录”等文字不能作为凭据失效证明；战斗状态也只识别真实
+`battle_main` DOM 节点，不接受正文或脚本中的同名文字。HTML 解析使用 scraper 0.27 / selectors 0.38，
+关闭默认 CLI feature 但保留 `errors`，仅使用库 API，不以手写解析器替代协议边界。
+本地隔离端点的回环判断使用 URL 已解析的地址，支持带方括号的 IPv6 `::1`；论坛仍仅接受
+`localhost`、`127.0.0.1` 与 `::1`，MoogleMail 保留原 IPv4 回环网段策略，不扩展生产 origin。
 
 - MoogleMail 读取：列表/详情身份与资产一致，完整定位 cursor 后按旧到新返回连续详情前缀。持久轮询经 `fetch_claimed`
   先提交整窗 MID/列表身份，再发详情 GET；已有待读队列时优先直接读取 MID，恢复已读但尚未提交的无附件命令。
   journal 不可用时返回 `persistence_unavailable` 并停止详情读取，摘要或 world 无效时失败关闭；allowlist 不再允许的待读项保留待核对。
   多附件的独立领取按钮不按数量拒绝；装备 key 只采信附件 ID 对应的严格证据，正文其它装备链接即使畸形也不参与校验，
-  Unicode 正文不得触发字节切片 panic。
+  Unicode 正文不得触发字节切片 panic。脚本装备字段预筛选按每个附件 ID 扫描一次，不随左花括号数量重复扫描尾部；
+  预筛选不替代严格 JSON、重复字段及正文/脚本一致性校验。
 - ComposeSend：首次 POST 前取得 Sent baseline，之后独立扫描，只接受新增、唯一且 world、收件人、正文摘要、
-  Credits/COD、装备精确匹配的 MID。
+  Credits/COD、装备精确匹配的 MID。发送与失败诊断借用同一输入，分步附件证明使用原 ID 前缀，避免复制整封邮件；
+  compose 正文只提取一次，资产集合排序使用借用，表单编码直接移交 HTTP body，写入顺序及证明条件不变。
 - Return / Take：写前核对 sender 与预期资产；Return 只接受身份、正文及全部资产精确匹配的 `[RTS]` 回执，
   不再把未读 Inbox 中目标 MID 缺席当作成功（详情 GET 本身会标记已读）；缺少回执保持 `outcome_unknown`，不自动重寄。
   Take 证明身份不变、资产归零及唯一回执。
 - 论坛读取/写入：同 thread 规范分页与真实帖子/作者身份、完整页数；写入同源表单与精确 board/thread/post，
   回执始终核对，原始正文额外确认由 Worker 的 `verify_post_body` 开关控制。
+  HTTP 200 的创建回执与固定帖回执共用唯一 `Please stand by...` 标题、唯一 meta refresh 和一致同源链接证明；
+  错误页中的普通主题链接不得产生 `Created`，证据缺失或冲突保留 `write_unknown`，不授权再次 POST。
 - 论坛 PM：新鲜 MID 表单绑定当前姓名与 sender，单次 POST 保存 Sent、不 tracking；完整有界遍历自己的同标题 Sent
   后核验收件人 UID、完整正文、sender 与 Sent MSID。
 
@@ -51,6 +60,10 @@ Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；资
 [邮件诊断](ops/mail/diagnostics.md)与[领域不变量](docs/contracts/invariants.md)。
 未知 Send 的维护核对只使用正文实际保留入站 MID 的通知模板；同主题/正文的普通重复通知不能作为某次发送的独立证明。
 登录 key 读取或解密失败仍返回错误，不降级为发送未发生，也不授权重寄。
+
+入站 envelope 摘要与加密诊断恢复都按附件 ID 排序借用后直接散列，不复制 key 或逐件重新查找；
+保留原 `mooglemail-envelope-v1` 字段顺序、长度编码及 key 字节，不改变合法历史证据认证结果。
+Sent 正文摘要复用换行规范化的分配后截短尾部空白，不再生成额外的正文副本。
 
 [transport/outcomes/rejection.rs](crates/auction-integrations/src/clients/mooglemail/transport/outcomes/rejection.rs)
 负责将闭集拒收码映射为安全英文原因和处理建议；`auction_equipment_rejected` 新增 `{reason_text}`、`{next_steps}` 与
@@ -76,6 +89,9 @@ Worker 配置数据库凭据能力后读取唯一 active Cookie 并解密，暂�
 POST、布局回读及可选正文校验成本，配置预算校验只是单目录页下界。大场次需提高既有 `item_timeout_seconds`/
 `lease_duration_seconds` 并保持 lease 大于 item，超时仍走未知写入门禁。创建端口明确返回本轮 `Created` 或只读命中的
 `Existing`，同标题旧主题不是本轮新正文的成功回执；论坛仅导入普通出价，代理行在账本前忽略。
+系统作者与分页链接检查完整祖先链；深层嵌套的用户正文或签名不会因超过固定层数而被当成系统导航。
+正文提取按深度优先顺序维护引用状态与最近块元素，每个元素只入栈、出栈一次；深层 BBCode
+不再对每个节点重扫祖先链。引用排除、块间换行和空白规范化仍使用原有规则。
 
 `forum/render.rs` 按分类/编号排序，每帖最多 150 件、从 #1 连续分页，每页独立校验 65,531 字节上限，过长失败而不是
 截断装备；续页重复分类标题，旧主题按持久化 `legacy_single` 保持一页。解析器只合并紧邻首帖、同作者且拍卖/页码
@@ -130,6 +146,14 @@ HTTPS origin、精确 world 路径、响应类型或身份校验。`equipment/ga
 远端请求归 `clients/ehentai`，回帖执行归 Worker。装备标记 delivery 使用独立 `lot_watch` 来源和冻结安全正文，
 沿用原 ComposeSend/Sent 证明与 manual_reconcile；账号警告渠道由应用冻结，PM 使用独立 `ForumPmSender` 端口，
 不伪造 MoogleMail delivery、不降级双发。
+
+Cookie、装备 key 和用户登录 key 的指纹采用既有域字节分块 HMAC，不构造额外的明文拼接缓冲。Cookie 与登录 key
+解密后直接移交原认证缓冲，截短前清理尾部；随机源、加解密或指纹失败路径尽力清理已有敏感缓冲。
+AES-256-GCM、AAD、nonce、指纹域及十六进制编码保持原格式，不迁移或重写历史信封。
+运行时的 `EhentaiCookie`、`MoogleMailCookie`、`MoogleMailToken` 与 `MoogleMailEquipmentKey`
+销毁时尽力清理当前缓冲；MoogleMail 表单逐值覆写，而非仅缩短 `String` 长度。Cookie 构造不再
+无条件另建裁剪副本，确需裁剪时清理原值；会话建立/失效处理不再额外复制整个候选，附件 key 从解析表直接移交。
+这不承诺清理 HTTP/DOM 库内部或分配器曾产生的副本，也不改变凭据失效、owner 或未知写入策略。
 
 装备分类、品质、完整种类和名称识别统一来自
 [domain taxonomy](crates/auction-domain/src/equipment/taxonomy)，依据

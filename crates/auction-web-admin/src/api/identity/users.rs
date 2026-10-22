@@ -79,11 +79,22 @@ struct StrictUserData {
     user: StrictUser,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StrictUserDataWithKey {
     user: StrictUser,
     generated_key: String,
+}
+
+// 严格 wire 镜像同样遮蔽一次性 Key，不能绕过 contracts 的调试脱敏边界。
+impl std::fmt::Debug for StrictUserDataWithKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("StrictUserDataWithKey")
+            .field("user", &self.user)
+            .field("generated_key", &"[REDACTED]")
+            .finish()
+    }
 }
 
 /// 用户列表行的浏览器投影；它把基础用户响应与列表专属黑名单摘要合并，避免 UI 传播 wire 嵌套。
@@ -142,10 +153,21 @@ impl AdminUserStatusFilter {
 }
 
 /// 用户写命令的浏览器结果；基础用户 wire 响应在边界转换为列表行投影。
-#[derive(Debug, Clone, PartialEq)]
+/// 调试格式只保留是否生成 Key，不输出认证材料。
+#[derive(Clone, PartialEq)]
 pub(crate) struct AdminUserMutationResult {
     pub user: AdminUser,
     pub generated_key: Option<String>,
+}
+
+impl std::fmt::Debug for AdminUserMutationResult {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminUserMutationResult")
+            .field("user", &self.user)
+            .field("generated_key", &self.generated_key.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 /// 获取 Admin 用户列表。

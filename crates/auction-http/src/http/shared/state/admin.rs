@@ -19,7 +19,7 @@ use super::super::HttpBoundary;
 use super::super::security::AdminHttpSecurity;
 
 /// Admin surface 可使用的应用端口集合。
-/// 管理命令、查询和会话以后按 owner 逐项加入；缺失端口时只报告依赖不可用，不构造假数据。
+/// 管理命令、查询和会话按 owner 显式分离；缺失端口时只报告依赖不可用，不构造假数据。
 #[derive(Clone, Default)]
 pub struct AdminApiState {
     session: Option<Arc<dyn AdminSessionPort>>,
@@ -53,8 +53,9 @@ pub struct AdminApiState {
     credential_health: Option<Arc<dyn AdminCredentialHealthReader>>,
     realtime_admin: Option<Arc<dyn RealtimeAdminPort>>,
     worker_control: Option<Arc<dyn WorkerControlPort>>,
-    dashboard_worlds: Vec<AdminCredentialWorld>,
-    dashboard_mailbox_keys: Vec<String>,
+    // 启动配置投影只读共享，避免每次提取 State 都复制列表及邮箱标识。
+    dashboard_worlds: Arc<[AdminCredentialWorld]>,
+    dashboard_mailbox_keys: Arc<[String]>,
     metrics: Option<Arc<ProcessMetrics>>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
     security: AdminHttpSecurity,
@@ -125,8 +126,8 @@ impl AdminApiState {
             credential_health,
             realtime_admin,
             worker_control,
-            dashboard_worlds: Vec::new(),
-            dashboard_mailbox_keys: Vec::new(),
+            dashboard_worlds: Arc::default(),
+            dashboard_mailbox_keys: Arc::default(),
             metrics: None,
             readiness: None,
             security,
@@ -195,13 +196,13 @@ impl AdminApiState {
     /// 注入 Admin dashboard 需要严格检查的 Worker world 范围；空集合表示当前进程没有可靠的
     /// Worker 配置投影，HTTP 层只展示已观察到的邮件 world，不把未配置 world 误报为故障。
     pub fn with_dashboard_worlds(mut self, worlds: Vec<AdminCredentialWorld>) -> Self {
-        self.dashboard_worlds = worlds;
+        self.dashboard_worlds = worlds.into();
         self
     }
 
     /// 注入 Admin dashboard 需要严格检查的已配置邮箱标识；空集合表示不强制套用 Worker 配置范围。
     pub fn with_dashboard_mailbox_keys(mut self, mailbox_keys: Vec<String>) -> Self {
-        self.dashboard_mailbox_keys = mailbox_keys;
+        self.dashboard_mailbox_keys = mailbox_keys.into();
         self
     }
 

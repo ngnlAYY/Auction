@@ -28,8 +28,6 @@ impl AppConfig {
 
         let runtime_document =
             runtime_config_path.as_deref().map(load_admin_runtime_file).transpose()?;
-        let admin_runtime =
-            (role == Role::Admin).then(|| runtime_document.as_ref().cloned()).flatten();
         let equipment_colors = runtime_document
             .as_ref()
             .and_then(|runtime| runtime.equipment_colors.as_ref())
@@ -55,6 +53,8 @@ impl AppConfig {
             apply_runtime_document(&mut worker.mooglemail, runtime);
             apply_equipment_colors(&mut worker.forum, runtime);
         }
+        // 投影完成后转移完整文档，避免 Admin 启动时复制全部模板、名单和规则。
+        let admin_runtime = if role == Role::Admin { runtime_document } else { None };
         // 先保留主配置 listener，校验其 fallback 安全策略；runtime 覆盖必须在该阶段之后生效。
         let main_listener = resolve_http_listener(role, listener, listen_address)?;
         let main_listen_addr = main_listener
@@ -150,7 +150,7 @@ impl AppConfig {
         validate_session(&session)?;
 
         let listener = if role == Role::Admin {
-            runtime_document
+            admin_runtime
                 .as_ref()
                 .map(admin_runtime_listener)
                 .transpose()

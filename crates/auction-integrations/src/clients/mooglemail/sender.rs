@@ -157,12 +157,10 @@ impl MoogleMailSender {
         cookie: &MoogleMailCookie,
         request: MoogleMailSendRequest,
     ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
-        let world = request.world;
-        let expected = request.clone();
-        let outcome = self.send_verified(cookie, request).await;
+        let outcome = self.send_verified(cookie, &request).await;
         let failed = !matches!(outcome, Ok(MoogleMailSendOutcome::Sent(_)));
         if failed {
-            self.diagnose_after_failure(cookie, world, &expected).await;
+            self.diagnose_after_failure(cookie, request.world, &request).await;
         }
         outcome
     }
@@ -173,7 +171,7 @@ impl MoogleMailSender {
     async fn send_verified(
         &self,
         cookie: &MoogleMailCookie,
-        request: MoogleMailSendRequest,
+        request: &MoogleMailSendRequest,
     ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
         if !request.validate() {
             return Err(write_error(
@@ -207,7 +205,6 @@ impl MoogleMailSender {
             Err(_) => return Ok(MoogleMailSendOutcome::PreflightUnproven { dirty }),
         };
 
-        let mut equipment_ids = Vec::with_capacity(request.equipment_ids.len());
         if request.credits > 0 {
             let form =
                 MoogleMailForm::attach_credits(state.token(), &request.message, request.credits)
@@ -229,7 +226,7 @@ impl MoogleMailSender {
                         request.world,
                         &request.message,
                         request.credits,
-                        &equipment_ids,
+                        &[],
                         0,
                     ),
                 )
@@ -237,12 +234,11 @@ impl MoogleMailSender {
                 .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachAdd))?;
         }
 
-        for equipment_id in &request.equipment_ids {
+        for (index, equipment_id) in request.equipment_ids.iter().enumerate() {
             let form =
                 MoogleMailForm::attach_equipment(state.token(), &request.message, equipment_id)
                     .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachAdd))?;
             let response = self.client.post(&compose, cookie, form).await?;
-            equipment_ids.push(equipment_id.clone());
             state = self
                 .client
                 .diagnose_parse(
@@ -253,7 +249,7 @@ impl MoogleMailSender {
                         request.world,
                         &request.message,
                         request.credits,
-                        &equipment_ids,
+                        &request.equipment_ids[..=index],
                         0,
                     ),
                 )
@@ -275,7 +271,7 @@ impl MoogleMailSender {
                         request.world,
                         &request.message,
                         request.credits,
-                        &equipment_ids,
+                        &request.equipment_ids,
                         request.cod,
                     ),
                 )
@@ -330,8 +326,7 @@ impl MoogleMailSender {
             .await
             .ok()
             .flatten();
-        match self.verify_new_sent(&request, cookie, &baseline, confirmation_hint.as_deref()).await
-        {
+        match self.verify_new_sent(request, cookie, &baseline, confirmation_hint.as_deref()).await {
             Ok(external_mail_id) => {
                 // Sent 证明后必须再证明 compose 回到空表单；残留草稿意味着资产状态仍未收口。
                 match self.inspect_compose(cookie, request.world).await {

@@ -153,11 +153,17 @@ pub struct PublicMyProxyResponse {
     pub authorization: Option<PublicOwnedProxyResponse>,
 }
 
-/// Public 登录请求；原始 key 只在 HTTP 到应用端口的短路径中存在。
-#[derive(Debug, Clone, Deserialize, Serialize)]
+/// Public 登录请求；原始 key 只在 HTTP 到应用端口的短路径中存在，调试输出必须脱敏。
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PublicLoginRequest {
     pub key: String,
+}
+
+impl std::fmt::Debug for PublicLoginRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("PublicLoginRequest").field("key", &"[REDACTED]").finish()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -179,8 +185,8 @@ pub struct PublicSessionCurrentResponse {
 }
 
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；服务端两条路径都只
-/// 序列化本 DTO，收紧只影响反序列化。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+/// 序列化本 DTO，收紧只影响反序列化；调试输出隐藏 CSRF token，不影响授权响应字段。
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminSessionResponse {
     pub authenticated: bool,
@@ -188,6 +194,19 @@ pub struct AdminSessionResponse {
     pub csrf_token: String,
     pub expires_at: String,
     pub absolute_expires_at: String,
+}
+
+impl std::fmt::Debug for AdminSessionResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminSessionResponse")
+            .field("authenticated", &self.authenticated)
+            .field("actor", &self.actor)
+            .field("csrf_token", &"[REDACTED]")
+            .field("expires_at", &self.expires_at)
+            .field("absolute_expires_at", &self.absolute_expires_at)
+            .finish()
+    }
 }
 
 /// Public 黑名单响应中的可公开原因。

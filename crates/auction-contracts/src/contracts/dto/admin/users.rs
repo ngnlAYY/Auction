@@ -125,10 +125,20 @@ pub struct AdminUserListResponse {
     pub pagination: AdminUserPaginationResponse,
 }
 
-/// Admin 用户修改响应；生成 key 只在本次创建/重签响应中出现。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+/// Admin 用户修改响应；生成 key 只在本次创建/重签响应中出现，调试输出必须脱敏。
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminUserMutationResponse {
     pub user: AdminUserResponse,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generated_key: Option<String>,
+}
+
+impl std::fmt::Debug for AdminUserMutationResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminUserMutationResponse")
+            .field("user", &self.user)
+            .field("generated_key", &self.generated_key.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }

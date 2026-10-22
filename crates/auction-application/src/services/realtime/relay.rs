@@ -17,7 +17,7 @@ pub struct RealtimeRelayConfig {
     pub consumer_key: String,
     /// 只扫描拍卖事件 stream；当前固定为 `auction:`。
     pub stream_prefix: String,
-    /// 单轮最多读取的 stream 数量。
+    /// 每页最多读取的 stream 数量；一轮会沿目录游标继续读取后续页。
     pub stream_batch_size: u16,
     /// 单个 stream 单轮最多转发的事件数量。
     pub event_batch_size: u16,
@@ -70,7 +70,7 @@ impl RealtimeRelay {
         Ok(Self { stream_store, consumer_store, sink, config })
     }
 
-    /// 运行一轮有界扫描；失败事件会留在当前游标前等待重试，不会跳过历史。
+    /// 按有界分页扫描 stream 目录；失败事件会留在当前游标前等待重试，不会跳过历史。
     pub fn run_once(&self, now: DateTime<Utc>) -> crate::ApplicationFuture<'_, RealtimeRelayBatch> {
         Box::pin(async move {
             if now.timestamp_micros() == 0 {
@@ -101,8 +101,8 @@ impl RealtimeRelay {
                     break;
                 }
                 after_stream = streams
-                    .last()
-                    .cloned()
+                    .into_iter()
+                    .next_back()
                     .ok_or_else(|| repository_error("实时 relay stream 页为空"))?;
             }
             Ok(result)
@@ -177,9 +177,12 @@ impl RealtimeRelay {
                     .await?;
                 return Ok((delivered, 1));
             }
-            if let Err(error) = self.sink.publish(event.clone()).await {
+            // 后续只需要确认标识和序号，完整 payload 直接移交 sink，避免每条事件深拷贝。
+            let event_id = event.event_id;
+            let stream_sequence = event.stream_sequence;
+            if let Err(error) = self.sink.publish(event).await {
                 let (code, detail) = safe_sink_error(&error.failure_code, &error.safe_detail);
-                self.record_failure(&request, event.event_id, &code, &detail, now).await?;
+                self.record_failure(&request, event_id, &code, &detail, now).await?;
                 return Ok((delivered, 1));
             }
             if let Err(error) = self
@@ -187,14 +190,14 @@ impl RealtimeRelay {
                 .acknowledge(
                     request.consumer_key.clone(),
                     request.stream_key.clone(),
-                    event.event_id,
-                    event.stream_sequence,
+                    event_id,
+                    stream_sequence,
                 )
                 .await
             {
                 self.record_failure(
                     &request,
-                    event.event_id,
+                    event_id,
                     "cursor_advance_failed",
                     "实时 relay 已交给本地 sink，但消费游标提交失败",
                     now,

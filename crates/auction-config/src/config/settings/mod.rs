@@ -4,7 +4,7 @@
 use std::{
     collections::BTreeSet,
     env, fmt, fs, io,
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     path::{Path, PathBuf},
 };
 

@@ -47,7 +47,10 @@ Admin/Worker 生命周期；取得权威锁后才读取命令时刻，同一计�
 新后继冻结该模板，旧快照和已接受命令不重写。`draft_soft_close` 只对显式指定、从未发布的合格草稿修正 60/60 为
 900/900，默认检查只读，执行需稳定命令、版本及精确确认（门禁见[CLI](apps/auctionctl/README.md#草稿软截止显式修正)）。
 Admin 创建与改期统一要求 `preview < open < end`；两小时只是邮箱暂停提前量，不作为已登记轮次的最小预览窗口。
-
+首次 Admin 创建先按 world → intake target 取得原有业务锁，再读取数据库实时钟并校验预览计划；等锁跨过预览时间
+必须拒绝，创建时间也取锁后时刻。已接受命令在这组锁与时间门禁之前重放，不受当前世界状态或新模板影响。
+竞价资格最多涉及出价人和当前代理两个用户，使用栈内有序去重集合维持原 UUID 加锁顺序；
+资格冻结至多生成一个前置计划，仍先冻结再应用竞价，不改变锁后计时及事务原子性。
 
 装备标记由 [ports/public/watch.rs](crates/auction-application/src/ports/public/watch.rs) 与
 [services/public/watch.rs](crates/auction-application/src/services/public/watch.rs) 拥有：稳定命令摘要包含会话用户，
@@ -70,6 +73,8 @@ Recovery 每封退件由 storage 在同一事务追加唯一消费事实、增�
 
 [services/settlement](crates/auction-application/src/services/settlement) 拥有结算与履约用例，重放必须用冻结策略、
 资金池、lot 事实和义务验证原结果；历史账本通过独立防腐入口重建只读结果，缺失证据不回退到写入。
+新结算与新旧账本重放均按 lot 建立借用索引，避免明细、事实及代理关闭快照逐项全表扫描；
+义务构造不再复制整份计划，仍按锁内事实顺序生成稳定自然键，并完整校验重复 lot、金额总计和前置关系。
 履约激活继续沿用同一 claim 的 token/fencing，租约存在期间不写 `next_attempt_at`；紧接的
 reconcile 释放 claim 时原子写入下次追踪时间。COD、carrier 与卖家货款对齐共享五分钟窗口，
 其它装备寄送沿用普通重试间隔，保持发送 owner 与履约 owner 分离。
@@ -142,8 +147,9 @@ Public lot 查询允许装备分组与类型组合筛选，应用投影为预览
 [queries/countdown.rs](crates/auction-application/src/ports/auction/queries/countdown.rs) 定义论坛图片所需的公开时间快照，
 `AuctionReader` 读取时绑定公开可见性及数据库时钟。Public 指定列表接受正 `i64` 数量并保留 offset 防护
 （见[分页契约](docs/contracts/routes.md#public-分页世界与金额)）；规则缓存只接收有效可重建快照，miss、损坏、过期或
-后端失败均回源；完整装备 URL 仅能移交已授权的 HTTP DTO 或论坛渲染边界。Admin 装备录入把来源读取、key 加密和持锁
-写入分成窄端口，来源/策略拒绝发生在写事务前。
+后端失败均回源；GET 或损坏快照删除失败后，本次读取不再回填，避免权威读取成功后重复消耗故障缓存等待预算。
+完整装备 URL 仅能移交已授权的 HTTP DTO 或论坛渲染边界。Admin 装备录入把来源读取、key 加密和持锁写入分成窄端口，
+来源/策略拒绝发生在写事务前。
 成交价格历史的 `PublicPriceHistorySort` 限定时间、价格的升降序，旧 cursor 仅支持默认时间倒序；
 名称按 Unicode 空白或英文逗号拆成最多八个词条，各词按字面包含并以 AND 组合，不要求相邻或依输入顺序出现；
 完整筛选集统计的可选 `median_exact` 用规范十进制字符串保存整数或半个 Credit，应用与 HTTP 共同校验
@@ -205,6 +211,11 @@ key 撤销/重签永久废止旧会话；长连接通过只读 `inspect` 检查�
 撤销旧 Admin 会话，失败阻断启动，token 摘要绑定当前 actor/secret；账号/口令校验由会话 owner 导出，首次设置与敏感配置
 复用相同边界。[ports/realtime](crates/auction-application/src/ports/realtime) 定义事件、连续游标、消费所有权和重放边界，
 事件不能代替权威快照（见[实时契约](docs/contracts/events.md)）。
+Public/Admin 登录结果的 `Debug` 只保留身份投影，原始 session 与 CSRF token 始终脱敏；HTTP 所需字段保持不变。
+Admin 录入命令中的完整装备 URL、论坛镜像正文和邮箱 compose 草稿的主题/正文也在 `Debug` 中脱敏，
+避免 URL 包装或只读投影重新暴露装备 key、登录 key；实际业务字段和命令摘要保持原文。
+本地 relay 按有界分页遍历 stream 目录；每条已校验事件直接移交 sink，只保留确认所需的 ID/序号，
+避免复制完整 JSON payload。sink 失败不推进游标，sink 成功但游标提交失败仍按原 at-least-once 规则重投。
 
 ## 冻结策略与事务约束
 

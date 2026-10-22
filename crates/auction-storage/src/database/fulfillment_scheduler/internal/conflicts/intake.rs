@@ -1,6 +1,8 @@
 //! 以当前标的的最终邮件入库事实闭合旧动作；只读取历史，不把已完成退回当作当前持有证明。
 
 use chrono::{DateTime, Utc};
+use futures_util::TryStreamExt;
+use serde::Deserialize;
 
 use super::{
     AssetConflictTarget, AttachmentPayload, FundingError, Postgres, Row, Transaction, Uuid,
@@ -105,7 +107,8 @@ pub(super) async fn closed_source_history(
     }
 
     let mut closed = vec![id];
-    let returns = sqlx::query(
+    // 历史退回数量不设截断；逐行验证完整证明，只累计可闭合的 UUID。
+    let mut returns = sqlx::query(
         "SELECT d.id,d.command_id,d.origin_id,d.payload,d.result_metadata,d.external_reference,
             im.external_mail_id,im.decision_metadata->'attachment_count' AS attachment_count
          FROM public.deliveries d
@@ -132,10 +135,8 @@ pub(super) async fn closed_source_history(
     .bind(world(target.equipment_world))
     .bind(completed_at)
     .bind(&recipient)
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(sql_error)?;
-    for row in returns {
+    .fetch(&mut **tx);
+    while let Some(row) = returns.try_next().await.map_err(sql_error)? {
         let id: Uuid = row.try_get("id").map_err(sql_error)?;
         let command_id: Uuid = row.try_get("command_id").map_err(sql_error)?;
         let origin_id: String = row.try_get("origin_id").map_err(sql_error)?;
@@ -173,7 +174,7 @@ fn source_payload(
     operation: &str,
     mid: &str,
 ) -> Option<AttachmentPayload> {
-    let payload: AttachmentPayload = serde_json::from_value(value.clone()).ok()?;
+    let payload = AttachmentPayload::deserialize(value).ok()?;
     (payload.schema_version == 1
         && payload.world == world(target.equipment_world)
         && payload.operation == operation

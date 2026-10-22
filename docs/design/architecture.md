@@ -161,9 +161,11 @@ application 定分页端口，integrations 负责渲染/解析，jobs 负责顺�
 ## 配置与数据保护
 
 三角色共享非敏感公共 TOML，分别引用敏感文件，Admin/Worker 可共享 runtime。runtime 保存由 `auction-config` 使用文件
-锁、fingerprint、持久命令账本与原子替换，替换后账本确认失败须向前恢复，生效须重启，Admin 恢复结果未知或需人工
+锁、fingerprint、持久命令账本与原子替换，替换后回读或账本确认失败须向前恢复，生效须重启，Admin 恢复结果未知或需人工
 核对时停止启动；数据库 `worlds.enabled` 与仅控制邮件入站的 runtime world 开关分离，字段与恢复流程见
 [配置说明](ops/config/README.md)。
+角色/common/secrets 的读取预算与普通文件门禁由 `auction-config::config::reader` 统一拥有；runtime 启动和管理
+读取共用文件检查，管理写入身份与 root 只读部署装配分开，具体权限及大小边界见[配置手册](ops/config/README.md)。
 
 | 能力 | owner 与保护边界 |
 | --- | --- |
@@ -211,7 +213,7 @@ drain，第二次信号或超时强制收口，再完成心跳和有界 tracing 
 | 分体 | systemd 管单角色 PID/重启；`auctionctl deployment start/restart` 严格停机后迁移，按 Worker → Admin → Public 启动，反向停止。已全部运行时 start 只复核 readiness/回执 |
 | 合并 | server bootstrap 管进程树、预检及次序，config 管运行目录；首次明确确认后 storage 在迁移锁内检查专用空库和零其他客户端并初始化。普通启动只验 schema，升级显式 `migrate-managed` |
 
-分体 unit 停止预算 45 秒，合并 unit 为 155 秒；两种模式不得混用同一数据库，本机文件锁不证明跨主机隔离。备份、恢复、
+分体单角色停止预算 45 秒，总控及合并 unit 均为 155 秒；两种模式不得混用同一数据库，本机文件锁不证明跨主机隔离。备份、恢复、
 重建、v28 接管均为独立受控命令，不进入自动启动；一次性部署码保护独立设置页，只有合并模式的额外确认才授权专用空库
 初始化与启动（保留迁移兼容视图、锁和 checksum，结果未知时不得自动初始化）。门禁见[部署](ops/README.md)、
 [灾备](ops/deploy/RECOVERY.md)、[v28 接管](ops/deploy/LEGACY_V28_ADOPTION.md)及[合并服务](apps/auction-server/README.md)。

@@ -35,6 +35,8 @@ Dioxus、SQLx、reqwest、环境读取或日志初始化，依赖限于领域安
 - 代理降额只能降低上限并推进版本，保持原模式和状态；`FinalFast → FinalFast` 不得退回普通活动状态。
 - 结算明细校验金额守恒与税/补偿互斥；`WinnerPaymentCarrierCod` 的派发世界固定为 `main`。
 - `validate_settlement_price_breakdown` 按冻结费率校验展示金额的整数取整、加价/折扣及奖池上限，供履约与邮件边界复用；不读取现行策略。
+- 结算计算直接从成交价与挂牌价取得折扣，不另存逐 lot 的折扣数组；完整计划统一校验一次明细，
+  保留整数取整、比例补偿封顶和 `B+C=S+T` 的原计算顺序。
 
 ### 装备语义词典
 
@@ -78,14 +80,15 @@ HTML 结构、等级与交易状态属于外部页面适配器；收件品质和
 
 [src/settlement/internal](crates/auction-domain/src/settlement/internal) 只从原义务选择留存、付款、交接、卖方留存
 或合法退款动作，不改冻结 `B+C=S+T`、原义务 ID 或 payment→handoff→seller 顺序，Isekai 内部 carrier 不产生 1C 收支；
-WithdrawnReturn 没有内部授权，库存、来源和现金用途由外层证明与事务门禁决定。
+UnsoldReturn 与 WithdrawnReturn 均可选择装备留存动作；实际身份、库存、来源和现金用途仍由外层证明与事务门禁决定。
 
 ## 新模板与历史策略
 
-`AuctionRules` 新模板软截止窗口和延长统一为 900 秒：命中窗口的有效出价以接受时刻加 900 秒作为候选截止并与已有
+`AuctionRules` 新模板软截止窗口和延长默认均为 900 秒：命中窗口的有效出价以接受时刻加 900 秒作为候选截止并与已有
 截止取较晚者，资格、金额、最终阶段和代理规则不变，不使用分段 15/5/1；既有场次沿用冻结策略，未发布旧草稿只能
 通过[显式修正命令](apps/auctionctl/README.md#草稿软截止显式修正)处理。`SettlementPolicy::validate_for_new_auction`
 要求新拍卖折扣严格小于 50%（`adjustment_ppm >= -499999`），历史读取继续按冻结策略校验，非法结果失败关闭。
+显式零窗口禁用软截止；截止等值仍可接受合法出价，但普通及代理规划均不得因此重新延期，已接受命令仍重放原截止。
 
 ## 维护与验证
 

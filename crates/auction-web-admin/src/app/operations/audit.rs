@@ -259,7 +259,7 @@ fn AuditTable(
 ) -> Element {
     let empty = page.records.is_empty();
     // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
-    let mut records = page.records.clone();
+    let mut records = page.records;
     sort_audit_records(&mut records, &sort, direction);
     rsx! {
         div { class: "admin-shell__table-wrap admin-audit-table-wrap",

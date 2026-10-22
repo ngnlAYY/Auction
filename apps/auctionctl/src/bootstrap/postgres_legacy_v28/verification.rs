@@ -1,13 +1,13 @@
 //! PostgreSQL v28 archive、manifest 和文件路径的离线验证。
 
-use std::{fs, path::Path};
+use std::path::Path;
 
 use anyhow::Context;
 use auction_storage::LEGACY_V28_MIGRATION_VERSION;
 
 use super::super::{
-    is_sha256_hex, sha256_file, sha256_text, validate_private_evidence_path, verify_archive,
-    verify_private_regular_file,
+    is_sha256_hex, read_private_artifact, sha256_file, sha256_text, validate_private_evidence_path,
+    verify_archive, verify_private_regular_file,
 };
 use super::model::{
     LEGACY_V28_BACKUP_FORMAT, LegacyV28BackupManifest, MAX_LEGACY_MANIFEST_BYTES,
@@ -35,13 +35,11 @@ pub(super) fn verify_backup(
     manifest_path: &Path,
     confirmed_database_name: &str,
 ) -> anyhow::Result<VerifiedLegacyBackup> {
-    validate_private_evidence_path(manifest_path)?;
-    verify_private_regular_file(manifest_path, "legacy v28 backup manifest")?;
-    if fs::metadata(manifest_path)?.len() > MAX_LEGACY_MANIFEST_BYTES {
-        anyhow::bail!("legacy v28 backup manifest exceeds the bounded evidence size");
-    }
-    let manifest_bytes = fs::read(manifest_path)
-        .with_context(|| format!("read legacy v28 backup manifest: {}", manifest_path.display()))?;
+    let manifest_bytes = read_private_artifact(
+        manifest_path,
+        "legacy v28 backup manifest",
+        MAX_LEGACY_MANIFEST_BYTES,
+    )?;
     let manifest: LegacyV28BackupManifest =
         serde_json::from_slice(&manifest_bytes).context("decode legacy v28 backup manifest")?;
     validate_manifest(&manifest, confirmed_database_name)?;

@@ -24,17 +24,23 @@ pub(in crate::config::settings) fn apply_runtime_document(
         return;
     };
 
-    let existing_worlds = config.configured_worlds();
     let mut enabled_worlds = Vec::with_capacity(2);
     for (world_id, runtime) in [("main", &worlds.main), ("isekai", &worlds.isekai)] {
         if !runtime.enabled {
             continue;
         }
-        let mailbox_key = existing_worlds
-            .iter()
-            .find(|world| world.world_id == world_id)
-            .map(|world| world.mailbox_key.clone())
-            .unwrap_or_else(|| format!("mooglemail:{world_id}"));
+        // 只借用部署侧邮箱标识，不为查找复制所有发件人名单。
+        let mailbox_key = if config.world_id == world_id {
+            Some(config.mailbox_key.as_str())
+        } else {
+            config
+                .additional_worlds
+                .iter()
+                .find(|world| world.world_id == world_id)
+                .map(|world| world.mailbox_key.as_str())
+        }
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("mooglemail:{world_id}"));
         enabled_worlds.push(MoogleMailWorldConfig {
             world_id: world_id.to_owned(),
             mailbox_key,
@@ -43,16 +49,17 @@ pub(in crate::config::settings) fn apply_runtime_document(
         });
     }
 
+    let mut enabled_worlds = enabled_worlds.into_iter();
     // AdminRuntimeDocument::validate 已保证至少启用一个 world；这里仍失败关闭，避免未来调用者
     // 绕过 loader 后把 Worker 留在含义不明的空 world 状态。
-    let Some(primary) = enabled_worlds.first().cloned() else {
+    let Some(primary) = enabled_worlds.next() else {
         return;
     };
     config.world_id = primary.world_id;
     config.mailbox_key = primary.mailbox_key;
     config.sender_allowlist = primary.sender_allowlist;
     config.sender_allowlist_disabled = primary.sender_allowlist_disabled;
-    config.additional_worlds = enabled_worlds.into_iter().skip(1).collect();
+    config.additional_worlds = enabled_worlds.collect();
     config.equipment_filter = MoogleMailEquipmentFilterConfig {
         enabled: equipment_filter.enabled,
         qualities: if equipment_filter.qualities.is_empty() {

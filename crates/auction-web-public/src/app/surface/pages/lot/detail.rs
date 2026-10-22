@@ -76,13 +76,23 @@ pub(crate) fn LiveLotDetailView(
         let lot_id = lot.id.clone();
         move || {
             let _ = refresh_generation();
-            let page = bid_page();
-            fetch_lot_bid_log(auction_id.clone(), lot_id.clone(), page, page_size())
+            let requested = (bid_page(), page_size());
+            let auction_id = auction_id.clone();
+            let lot_id = lot_id.clone();
+            async move {
+                let result = fetch_lot_bid_log(auction_id, lot_id, requested.0, requested.1).await;
+                (requested, result)
+            }
         }
     });
     use_bid_refresh(bid_log, true);
     let show_countdown =
         lot.status == "live" && matches!(auction_status.as_str(), "live" | "final");
+    let loaded = bid_log.read_unchecked();
+    let current_bid_log = loaded
+        .as_ref()
+        .filter(|(requested, _)| *requested == (bid_page(), page_size()))
+        .map(|(_, result)| result);
 
     rsx! {
         section { class: "public-auction-lot", aria_labelledby: "lot-detail-title",
@@ -179,7 +189,7 @@ pub(crate) fn LiveLotDetailView(
             }
             section { class: "public-auction-lot__history", aria_labelledby: "lot-bid-history-title",
                 h2 { id: "lot-bid-history-title", {t!("lot-bid-history")} }
-                match &*bid_log.read_unchecked() {
+                match current_bid_log {
                     None => rsx! { p { role: "status", {t!("data-loading")} } },
                     Some(Err(_)) => rsx! {
                         div { class: "public-auction-page__status", role: "alert",

@@ -44,22 +44,25 @@ pub(crate) fn AuctionBoard() -> Element {
     let session = use_context::<PublicSessionResource>();
     let current_auction = use_context::<CurrentAuctionResource>();
     // 同路径的历史/当前切换也必须订阅查询，不能仅在 popstate 或首页按钮时重读。
-    let requested_auction = use_memo(move || query_state().auction_id.clone());
+    let requested_auction = use_memo(move || query_state.read().auction_id.clone());
     let historical = requested_auction().is_some();
     let historical_current = use_resource(move || {
         let _ = refresh_generation();
         let requested_auction = requested_auction();
         async move {
-            match requested_auction {
-                Some(auction_id) => fetch_historical_auction(auction_id).await.map(Some),
+            let result = match requested_auction.as_ref() {
+                Some(auction_id) => fetch_historical_auction(auction_id.clone()).await.map(Some),
                 None => Ok(None),
-            }
+            };
+            (requested_auction, result)
         }
     });
     let current = if historical {
-        historical_current.read().clone().filter(|result| {
-            !matches!(result, Ok(Some(auction)) if Some(&auction.id) != requested_auction().as_ref())
-        })
+        historical_current
+            .read()
+            .as_ref()
+            .filter(|(requested, _)| requested == &requested_auction())
+            .map(|(_, result)| result.clone())
     } else {
         let selected_world = selected_world();
         match current_auction.read().clone() {

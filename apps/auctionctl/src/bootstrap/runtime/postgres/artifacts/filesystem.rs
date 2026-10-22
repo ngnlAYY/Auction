@@ -73,6 +73,42 @@ pub(crate) fn verify_private_regular_file(path: &Path, label: &str) -> anyhow::R
     validate_private_evidence_path(path)?;
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("read {label} metadata: {}", path.display()))?;
+    verify_private_file_metadata(path, label, &metadata)
+}
+
+/// 在同一描述符上校验并限量读取私有证据，防止路径替换或并发增长绕过预算。
+pub(crate) fn read_private_artifact(
+    path: &Path,
+    label: &str,
+    maximum_bytes: u64,
+) -> anyhow::Result<Vec<u8>> {
+    validate_private_evidence_path(path)?;
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC);
+    let file = options.open(path).with_context(|| format!("open {label}: {}", path.display()))?;
+    let metadata =
+        file.metadata().with_context(|| format!("read {label} metadata: {}", path.display()))?;
+    verify_private_file_metadata(path, label, &metadata)?;
+    if metadata.len() > maximum_bytes {
+        anyhow::bail!("{label} exceeds the bounded evidence size");
+    }
+    let mut bytes = Vec::new();
+    file.take(maximum_bytes + 1)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("read {label}: {}", path.display()))?;
+    if bytes.len() as u64 > maximum_bytes {
+        anyhow::bail!("{label} exceeds the bounded evidence size");
+    }
+    Ok(bytes)
+}
+
+fn verify_private_file_metadata(
+    path: &Path,
+    label: &str,
+    metadata: &fs::Metadata,
+) -> anyhow::Result<()> {
     if !metadata.file_type().is_file() {
         anyhow::bail!("{label} is not a regular non-symlink file: {}", path.display());
     }

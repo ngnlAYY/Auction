@@ -30,7 +30,12 @@ pub fn page() -> Element {
         let _ = polling_refresh();
         let mailbox = active_mailbox();
         async move {
-            if mailbox.is_empty() { Ok(None) } else { fetch_mail_state(mailbox).await.map(Some) }
+            let result = if mailbox.is_empty() {
+                Ok(None)
+            } else {
+                fetch_mail_state(mailbox.clone()).await.map(Some)
+            };
+            (mailbox, result)
         }
     });
     let pagination = use_admin_pagination("mail", &["page_size"], Some(100), i64::from(i32::MAX));
@@ -135,12 +140,17 @@ pub fn page() -> Element {
         Some(Err(code)) => (None, false, Some(code.clone())),
         Some(Ok(value)) => (value.clone(), false, None),
     };
+    let polling_state = polling.read_unchecked();
+    // 只保留当前邮箱的完成快照；切换邮箱不能继续显示或操作上一邮箱的轮询状态。
+    let current_polling = polling_state
+        .as_ref()
+        .and_then(|(mailbox, result)| (mailbox == &active_mailbox()).then_some(result));
     let polling_content = if active_mailbox().is_empty() {
         rsx! {
             p { {t!("admin-mail-polling-not-loaded")} }
         }
     } else {
-        match &*polling.read_unchecked() {
+        match current_polling {
             None => rsx! {
                 AsyncState {
                     kind: AsyncStateKind::Loading,
@@ -161,6 +171,7 @@ pub fn page() -> Element {
             },
             Some(Ok(Some(polling))) => rsx! {
                 super::actions::MailPollingCard {
+                    key: "{polling.mailbox_key}",
                     polling: polling.clone(),
                     notice,
                     refresh: polling_refresh,

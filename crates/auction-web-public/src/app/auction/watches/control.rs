@@ -28,9 +28,11 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
 
     let authoritative = context.authoritative(&lot_id);
     let watched = authoritative.map(|(watched, _)| watched).unwrap_or_else(|| {
-        context.cached.read().as_ref().is_some_and(|page| {
-            page.watches.iter().any(|watch| watch.lot_id == lot_id && watch.watched)
-        })
+        context
+            .cached
+            .read()
+            .as_ref()
+            .is_some_and(|page| page.get(&lot_id).is_some_and(|(watched, _)| *watched))
     });
     let pending = context.commands.read().get(&lot_id).cloned();
     let busy = pending.as_ref().is_some_and(|pending| pending.busy);

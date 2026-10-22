@@ -326,7 +326,7 @@ history-filter-month-11 = 十一月
 history-filter-month-12 = 十二月
 
 login-key-label = 出价 Key
-login-key-placeholder = 您的 32 位 Key
+login-key-placeholder = 您的出价 Key
 login-submit = 登录
 login-working = 登录中…
 login-hint = 还没有 Key？在游戏内给拍卖机器人发送一封标题为 "register" 的 MoogleMail，系统会自动回信发放您的 Key。

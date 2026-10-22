@@ -23,11 +23,19 @@
 common、runtime 候选与首次设置内嵌模板同步；升级不覆盖文件中显式的 60，须核对 managed 有效来源并手动更新
 （步骤见[配置手册](ops/config/README.md#缓存与拍卖模板)）。
 
+角色、公共及普通敏感 TOML 各限 4 MiB；`config/reader.rs` 在同一描述符检查普通文件并有界读取，Unix 以
+`O_NONBLOCK` 打开，避免 FIFO 在类型检查前阻塞。普通配置继续允许部署侧 symlink；默认发现只有明确 `NotFound`
+才使用内置默认值，目录、断链和访问错误均失败关闭，不能当成“没有配置”。
+
+各角色仍独立加载并校验其文件快照，不缓存跨次文件内容。Admin 在窄投影完成后接管已解析 runtime 文档，不再复制
+完整文档；Worker 的 world 投影只借用部署邮箱标识，避免为查找邮箱复制发件人名单。
+
 `FirstRunConfig::write_to` 只向明确不存在的目标发布：私有临时目录中生成文件、固定非敏感 `0640`/敏感 `0600`，
 复用三角色 loader 与正式 runtime 校验后同步目录，以 Linux `RENAME_NOREPLACE` 发布并同步父目录。发布前只清理
 本次临时目录；发布后确认失败返回 `OutcomeUnknown` 并保留目标，不回滚，父目录必须受信。
 `write_managed_to` 只额外推导配置目录同级的私有 control 目录，不合并敏感配置。
 首次生成的论坛 `public_base_url` 与已校验 Public origin 一致，不继承示例主机。
+内嵌模板按完整 TOML 文档反序列化，再修改字段；不能使用仅解析单值的 `Value::FromStr`。
 
 ## 文件职责与敏感边界
 
@@ -42,17 +50,20 @@ PostgreSQL `[database]` 接收 host、port、username、password、name 并统�
 需要 Unix socket 或显式 TLS profile 时使用兼容 URL。旧 URI 必须明确指定 host/socket 和库名，省略端口固定为 5432；
 显式端口必须非零，不通过 PG* 环境补齐目标。缩略 URI、fragment、控制字符和无效百分号/UTF-8 转义失败关闭，凭据编码
 与其余驱动参数保持原文，输入与 `Debug` 均不得泄密。Admin actor/secret
-必须成对且 secret 至少 16 字节；装备、外部凭据、用户登录 key 各自使用独立数据密钥与非秘密 key ID，密钥为
-32 字节标准 Base64，不得互相复用。敏感文件禁止提交、限运行账号访问，字段与跨角色一致性见
-[敏感配置](ops/config/README.md#敏感字段)。`AUCTION_CONFIG_FILE` 仅选择角色配置文件，不覆盖任何单个字段。
+必须成对配置，缺少任一字段在加载敏感模型时失败，不能静默关闭登录；secret 至少 16 字节。装备、外部凭据、用户登录
+key 各自使用独立数据密钥与非秘密 key ID，密钥为 32 字节标准 Base64，不得互相复用。敏感文件禁止提交、限运行账号
+访问，字段与跨角色一致性见[敏感配置](ops/config/README.md#敏感字段)。`AUCTION_CONFIG_FILE` 仅选择角色配置文件，
+不覆盖任何单个字段。
 
 ## 维护凭据与本地联调
 
 `load_postgres_maintenance_secrets` 为 bootstrap/rebuild 独立加载指向 `postgres` 维护库的 TOML：要求规范绝对路径、
 普通非 symlink 文件和安全父目录，Unix 下须归当前有效用户、单 hard link、无 group/other 权限；维护 URL 仅经显式
 getter 短暂使用，不进入命令参数、日志、receipt 或 DTO（见[维护凭据](ops/config/README.md#postgresql-维护凭据)）。
-`load_mooglemail_keyenv` 只接受 `.keyenv` 的 `hv-ck-key1` 与 `hv-ck-key2`，拒绝未知/重复键、空值、控制字符和
-不安全权限：Worker 只使用 key1，key2 仅供显式隔离验证，不能作为候选或自动回退。
+`.keyenv` 与维护 TOML 各限 64 KiB，均以非阻塞方式打开后核验普通文件，避免特殊文件卡住启动或运维。
+`load_mooglemail_keyenv` 只接受 `.keyenv` 的 `hv-ck-key1` 与 `hv-ck-key2`，拒绝未知/重复键、空值、控制字符和不安全权限。
+保留 `.keyenv` 指向私有普通文件的 symlink 用法，但权限检查与读取使用同一描述符，不在检查后重新打开路径。
+Worker 只使用 key1，key2 仅供显式隔离验证，不能作为候选或自动回退。
 
 ## 参数与预算校验
 
@@ -61,14 +72,20 @@ Delivery 有效并发取配置与 transport 上限的较小值，MoogleMail tran
 必须大于两倍读取预算，sending grace 必须大于发送预算。每 world 独立 mailbox、轮询状态与 cron，
 `batch_timeout_seconds` 默认 600、范围 1–86400，不得小于 fetch 与 item 预算之和；预算耗尽只能提交已完成连续前缀，
 未完成邮件不能被 cursor 跳过。定时器只唤醒持久化任务，不能代替 due、租约或游标（值见
-[Worker 预算](ops/config/README.md#worker-循环预算)）。croner 4.0.1 前仍先做严格六字段语法检查，不开放上游新增
-昵称/宽松输入，不改秒字段和时区契约。`worker.forum.verify_post_body` 是默认关闭的部署侧正文校验开关，
+[Worker 预算](ops/config/README.md#worker-循环预算)）。交给 croner 4.0.1 前仍先做严格五字段语法检查，逐项读取固定五个
+字段，不为多余输入分配字段列表；英文月份/星期名称按 ASCII 忽略大小写匹配。不开放上游新增昵称或宽松输入，
+描述符、`@every` 与时区契约保持不变。`worker.forum.verify_post_body` 是默认关闭的部署侧正文校验开关，
 不属于 runtime 的 `operations.forum` 接管范围。
 
 ## Runtime 文件与生效范围
 
 Admin runtime 更新/恢复使用非阻塞 `File::try_lock()`，从恢复检查持续持有至文件与账本收口；竞争返回不可用，
-guard 取消后由 RAII 释放，锁文件不逐次删除。Unix runtime 文件须由有效 UID 拥有且为 0640；首次设置与敏感配置复用
+guard 取消后由 RAII 释放，锁文件不逐次删除。锁文件须由有效 UID 拥有、无 group/other 权限且为单链接普通文件，
+打开时拒绝 symlink。Unix runtime 文件固定为 0640；三角色启动和管理读取共用同一描述符的文件类型、权限及
+4 MiB 预算校验，拒绝 symlink/FIFO，实际最多读入上限加一字节。管理读写另要求文件由当前有效 UID 拥有；
+只读角色装配不拿运维进程 UID 代替服务账号，root 部署命令仍按实际 unit `User` 校验目标服务 owner。
+替换先写临时文件并固定权限，一次文件 fsync 后才 rename，再同步目录；替换或恢复后的回读/校验失败统一返回
+`OutcomeUnknown`，保留当前文件供账本恢复，不能解释为未写入。写前错误分类不变。首次设置与敏感配置复用
 application 会话凭据校验，拒绝生成不可登录的配置。
 runtime 的保存验证和启动使用同一 listener、HTTP 安全/规范 Origin、metrics、session、tracing 投影及部署校验。
 Admin 装配传入 OTLP headers 是否存在的非敏感上下文；仍有 headers 时不能保存关闭 tracing 的候选，须先移除敏感字段并重启。
@@ -97,6 +114,9 @@ MoogleMail 凭据、transport、mailbox 身份和全局启用仍归部署配置�
 Runtime world 开关只控制 Worker 候选，与数据库权威 `worlds.enabled` 不同（见
 [运行配置契约](docs/contracts/routes.md#runtime-配置与文件事务)）。
 
+`worker.fulfillment.evidence_poll_seconds` 始终由部署文件拥有；即使 `operations.worker.managed=true`，也保留已配置的
+COD 领取证据追踪窗口，不回退到默认 300 秒。
+
 ## 兼容与脱敏
 
 旧单文件敏感格式必须明确失败；新增字段同步解析、模板与运维说明。启用 Origin allowlist 且未填列表时，仅确定的
@@ -105,6 +125,9 @@ IANA 时区与周内顺序，关闭时也校验。HTTP 配置仅含 listener、O
 默认忽略转发头（TCP 代理须显式列入可信 CIDR，`trusted_unix_proxy` 只允许有效 Unix listener），Admin 主配置
 fallback 与 runtime 最终值分别校验。Operations alert 仅在 PostgreSQL 完整档通过安全水位生成持久化批次，
 通知不含原始错误或凭据。
+
+回环 HTTP origin 的 IPv6 文本使用 URL 规范形式 `[::1]`；首次设置、论坛 endpoint/Public 链接及 MoogleMail
+均接受该回环地址，不扩大各自既有 IPv4 范围或允许非回环 HTTP。
 
 敏感值与配置 `Debug` 固定脱敏，TOML 解析错误只报告安全路径/分类、不回显原始行；调用方只能通过显式 getter
 取得必要值，不得写入日志、错误、普通 DTO 或快照。启用 tracing 时拒绝上游 SDK 的环境导出头（见

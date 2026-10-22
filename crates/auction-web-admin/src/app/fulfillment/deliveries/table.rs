@@ -37,7 +37,8 @@ pub(super) fn DeliveryTable(
     on_cancel: EventHandler<()>,
 ) -> Element {
     // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
-    let mut deliveries = page.deliveries.clone();
+    let is_empty = page.deliveries.is_empty();
+    let mut deliveries = page.deliveries;
     sort_deliveries(&mut deliveries, &sort, direction);
     rsx! {
         div { class: "admin-delivery-table-wrap",
@@ -102,7 +103,7 @@ pub(super) fn DeliveryTable(
                 }
             }
         }
-        if page.deliveries.is_empty() {
+        if is_empty {
             AsyncState {
                 kind: AsyncStateKind::Empty,
                 title: t!("delivery-empty"),

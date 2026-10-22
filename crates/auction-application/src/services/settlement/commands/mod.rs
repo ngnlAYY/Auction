@@ -17,7 +17,7 @@ mod obligations;
 mod validation;
 
 use legacy::{StoredSettlementReplay, classify_stored_settlement, replay_legacy_settlement};
-use obligations::append_obligations;
+use obligations::build_obligations;
 use validation::{
     plan_proxy_closures, validate_replayed_settlement_plan, validate_settlement_due,
     validate_settlement_plan,
@@ -147,7 +147,7 @@ where
                     )?;
                     validate_settlement_due(command, &snapshot)?;
                     let proxy_closure_plans = plan_proxy_closures(command, &snapshot)?;
-                    append_obligations(command.command_id, &snapshot, &mut plan)?;
+                    plan.obligations = build_obligations(command.command_id, &snapshot, &plan)?;
                     validate_settlement_plan(command.command_id, &snapshot, &plan)?;
 
                     transaction

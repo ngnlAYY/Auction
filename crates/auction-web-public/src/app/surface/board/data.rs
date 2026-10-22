@@ -40,14 +40,16 @@ pub(crate) fn AuctionData(
     // 装备分组、分类与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
     let query_state = use_public_query_state();
     // Signal 为 Copy，各字段 memo 共享同一状态信号，只在各自字段变化时通知订阅者。
+    // 借用查询后只克隆所需字段，避免每个派生值先复制整份筛选与历史查询。
     let query_state_signal = query_state.state;
-    let active_category =
-        use_memo(move || query_state_signal().category.clone().unwrap_or_else(|| "all".to_owned()));
-    let active_equipment_group = use_memo(move || {
-        query_state_signal().equipment_group.clone().unwrap_or_else(|| "all".to_owned())
+    let active_category = use_memo(move || {
+        query_state_signal.read().category.clone().unwrap_or_else(|| "all".to_owned())
     });
-    let page_number = use_memo(move || query_state_signal().page.max(1));
-    let requested_page_size = use_memo(move || query_state_signal().page_size);
+    let active_equipment_group = use_memo(move || {
+        query_state_signal.read().equipment_group.clone().unwrap_or_else(|| "all".to_owned())
+    });
+    let page_number = use_memo(move || query_state_signal.read().page.max(1));
+    let requested_page_size = use_memo(move || query_state_signal.read().page_size);
     let realtime_state = use_context::<Signal<LiveConnectionState>>();
     let mut refresh_generation = use_context::<Signal<u64>>();
     let should_refresh_at_open = !historical && auction.presentation_mode != "live";

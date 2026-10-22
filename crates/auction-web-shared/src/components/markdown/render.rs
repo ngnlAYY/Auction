@@ -91,9 +91,30 @@ fn table_column_weights(headers: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>]) -> V
 }
 
 fn visible_units(nodes: &[Inline]) -> u16 {
-    let mut text = String::new();
-    collect_text(nodes, &mut text);
-    text.chars().take(96).map(|character| if character.is_ascii() { 1_u16 } else { 2 }).sum()
+    count_visible_units(nodes, &mut 96)
+}
+
+/// 列宽只采样前 96 个可见字符；直接遍历节点，避免先复制完整单元格再丢弃长后缀。
+fn count_visible_units(nodes: &[Inline], remaining: &mut usize) -> u16 {
+    let mut units = 0;
+    for node in nodes {
+        if *remaining == 0 {
+            break;
+        }
+        match node {
+            Inline::Text(value) | Inline::Code(value) | Inline::Image { alt: value, .. } => {
+                for character in value.chars().take(*remaining) {
+                    units += if character.is_ascii() { 1 } else { 2 };
+                    *remaining -= 1;
+                }
+            }
+            Inline::Strong(nodes) | Inline::Emphasis(nodes) | Inline::Strike(nodes) => {
+                units += count_visible_units(nodes, remaining);
+            }
+            Inline::Link { label, .. } => units += count_visible_units(label, remaining),
+        }
+    }
+    units
 }
 
 fn render_heading(level: u8, nodes: Vec<Inline>) -> Element {
@@ -126,7 +147,7 @@ fn heading_anchor(nodes: &[Inline]) -> Option<String> {
     (!slug.is_empty()).then_some(slug)
 }
 
-/// 递归收集行内节点的可见纯文本，供标题锚点与表格列权重使用。
+/// 递归收集标题行内节点的可见纯文本，供锚点生成使用。
 fn collect_text(nodes: &[Inline], output: &mut String) {
     for node in nodes {
         match node {

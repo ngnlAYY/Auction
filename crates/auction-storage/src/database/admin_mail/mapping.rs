@@ -6,7 +6,7 @@ use auction_application::MailDisplaySnapshot;
 pub(super) fn map_sql_error(error: sqlx::Error) -> AdminMailTransactionError {
     match &error {
         sqlx::Error::Database(database_error)
-            if database_error.code().as_deref() == Some("40001") =>
+            if matches!(database_error.code().as_deref(), Some("40001" | "40P01")) =>
         {
             AdminMailTransactionError::SerializationConflict
         }

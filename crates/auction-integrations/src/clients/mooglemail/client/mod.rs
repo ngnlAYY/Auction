@@ -1,11 +1,11 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use auction_application::{AdminCredentialRuntimeOwnership, MailDiagnosticRecorder};
 use reqwest::{Client, StatusCode, header};
-use tokio::time;
+use tokio::{sync::Mutex, time};
 use url::Url;
 
 use super::{

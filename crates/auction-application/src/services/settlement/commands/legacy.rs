@@ -14,7 +14,7 @@ use crate::{
 };
 
 use super::SettleAuctionCommand;
-use super::obligations::append_obligations;
+use super::obligations::build_obligations;
 use super::validation::validate_settlement_plan;
 
 const LEGACY_SETTLEMENT_ACTOR: &str = "auction-worker";
@@ -146,7 +146,7 @@ pub(super) fn replay_legacy_settlement(
         persisted.opening_pool,
         &snapshot.facts,
     )?;
-    append_obligations(command.command_id, snapshot, &mut plan)?;
+    plan.obligations = build_obligations(command.command_id, snapshot, &plan)?;
     validate_settlement_plan(command.command_id, snapshot, &plan)?;
     let generated_counts = generated_counts(&plan)?;
     let sold_count =

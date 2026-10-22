@@ -30,6 +30,9 @@ P12 成交价编号页的 `sort` 仅接受 `closed_desc`（默认）、`closed_a
 旧 cursor 仅配默认排序，其他组合返回 400。可选 `stats.median_exact` 保留精确半个 Credit，原整数 `median` 继续兼容。
 `http/mod.rs` 与各 `mod.rs` 只做装配/导出，`shared/state/{public,admin}.rs` 分别持有两个表面的窄端口、不能互用。
 
+两个 state 的端口与安全策略保持各自所有权。已校验的代理网段、Admin dashboard world/邮箱配置以只读 `Arc` 切片
+共享；请求提取 state 不再深复制这些列表。请求 span 在交出 Request 前借用路径和 trace 头，响应关联 ID 也不另建副本。
+
 [public/countdown](crates/auction-http/src/http/public/countdown) 拥有论坛动态 SVG 的 HTTP、固定英文视图及有界 CSS 动画，
 复用公开时间窄端口，无 JS、外链资源或会话依赖（见[图片契约](docs/contracts/routes.md#p22-自托管论坛倒计时)）。
 [routes/public/watch.rs](crates/auction-http/src/http/routes/public/watch.rs) 拥有 P23/P24 装备标记列表与 CAS 写入，
@@ -52,19 +55,33 @@ GET/PUT：两者复用会话、来源/CSRF、限流、strict JSON、JSON 405 与
 请求边界统一处理合法 `X-Request-ID`、trace context、安全头、访问日志、panic 与超时；普通请求处理预算 15 秒
 （WebSocket 豁免），连接层 HTTP/1 请求头预算固定 5 秒。默认忽略 `X-Forwarded-For`，仅显式信任的 TCP/Unix 代理
 可提供客户端地址；Unix listener 不伪造 TCP peer，应用不根据转发协议头推导 Origin 或 Secure Cookie
-（见[橙云部署](ops/README.md#cloudflare-整站代理)）。Public 竞价按限流 → Origin → 认证执行，Admin mutation 按
-限流 → Origin → CSRF → 会话执行，之后才读取校验 query/path/body；严格 JSON 保留各路由大小上限与字段闭集。
+（见[橙云部署](ops/README.md#cloudflare-整站代理)）。Public 竞价守卫按限流 → Origin → 认证执行，
+Admin mutation 守卫按限流 → Origin → CSRF → 会话执行。竞价、标记、警告渠道、生命周期和世界启停通过
+`decode_after_guard` 在守卫及 query/path 校验后读取正文；其余已挂载 `strict_json::enforce` 的旧路由仍先经过
+正文中间件，再进入 handler 守卫。不能混写成全站统一的正文顺序，也不能为减少解析次数改变原有错误优先级。
+两条严格 JSON 路径均保留路由大小上限、单值与 DTO 字段闭集。
 Public 竞价、代理、标记、警告渠道和注销在 Cookie 认证后核对可选 `x-auction-expected-user-id`；规范非零 UUID
 与当前身份不符返回 409 `session_changed`，无效或重复头返回 400 `invalid_expected_user_id`。省略该头保留旧 v1，读取路由行为不变。
+P25/P26 共用路由的方法拒绝响应始终声明 `Allow: GET, PUT`；HEAD 仍返回 405，不能由单一 GET builder
+提前固定为只有 GET 的方法清单。
+Admin 代理历史的旧二进制游标固定为 26 字节：除 `start` 外，先检查 35 字符无填充长度，再解码到
+26 字节栈缓冲；过长查询不再先分配解码 Vec，版本、种类、时间及 UUID 校验和 `invalid_cursor` 外壳不变。
 错误优先级、405/Allow 和缓存要求见[通用响应与错误](docs/contracts/routes.md#通用响应与错误)。
 Admin 结算报告读取或不变量校验失败时记录 `admin_settlement_report_failed`，字段限定为 `auction_id` 与
 闭集 `failure_code`，通过请求 span 关联请求 ID；底层错误文本、SQL 和敏感值不进入该诊断事件。
+
+Unix listener 的组名解析使用 `getgrnam_r` 和调用内独占缓冲，避免并发启动覆盖 libc 静态组记录；
+数字 GID 不分配缓冲。命名查询从 1 KiB 起步，仅在 `ERANGE` 时倍增，最多 1 MiB，未知组或超限失败关闭。
+该上限约束解析缓冲，不声称限制 NSS 后端的同步查询耗时；socket 目录链、owner/group、锁和清理身份约束不变。
 
 - 写命令使用稳定 `command_id`、摘要与版本门禁；成功竞价/代理响应直接使用事务内冻结结果，不在提交后重读权限。
 - 按已登记能力返回安全结果或明确不支持，不以空列表和默认值伪造成功。
 - Public 装备链接只在受限 DTO 边界短暂包含完整 URL，P09/P11/P14 固定 `no-store`；缓存分组不能放宽 handler 已声明的 `no-store`，敏感分组仍强制禁止存储。
 - Admin 凭据、用户 key、邮件诊断和 dashboard 严格投影安全字段，登录 key 只出现在创建/重签成功响应。
 - Runtime 保存与 Worker 唤醒接受结果不表示配置已热加载或远端任务完成。
+- 响应映射接管已持有的数据：dashboard recovery 不复制完整快照，代理摘要只为 wire 要求的嵌套 bid 副本复制文本，
+  结算报告的批次去重借用分类文本。旧 realtime replay 的派生 UUID 直接在原命名空间前缀后序列化 JSON，
+  不暂存第二份序列化缓冲区；命名空间、字段顺序和幂等输入不变。
 
 ## 实时连接与恢复
 
@@ -73,6 +90,11 @@ WebSocket 支持 HTTP/1.1 Upgrade 与 HTTP/2 扩展 CONNECT，只有服务端通
 单拍卖范围拒绝 settled，配额许可随连接 RAII 释放。Public 进程通过持久化 relay 向有界本地 Hub 分发；
 跳号、重连或 `refetch_required` 按[实时契约](docs/contracts/events.md)执行 Catch-up/权威快照恢复，
 慢连接可被淘汰，不把本地 Hub 或事件 payload 当成权威状态。
+
+Hub 不创建后台任务。进程总量 1024、每用户 8、发现流额外 128 槽以及每连接 1–1024 条缓冲的边界不变。
+广播先非阻塞预留队列槽位，再复制事件，满/闭队列原位淘汰，不暂存待删除 ID；配额仍在订阅真正结束时释放。
+每条连接继续独立检查事件范围与注册表，保持协议错误、慢消费者、会话失效及进程关闭的既有关闭码。
+事件校验、DTO 映射和序列化不另建共享缓存，持久化事件与会话端口仍是唯一权威。
 
 ## 静态产物内嵌
 
@@ -85,6 +107,10 @@ Public/Admin 装配根分别持有 `RustEmbed` 类型，仅显式 `web-embed` �
 GET/HEAD，浏览器入口与直接 HTML `no-store`，稳定文件名（含 favicon 别名）`no-cache`，仅非 HTML 内容指纹资源使用
 一年 `immutable`；正式边界默认给全部响应双 CDN `no-store` 头，只有静态 handler 私有标记可启用资源 CDN 策略。
 条件读取与各类 API 缓存见[静态契约](docs/contracts/routes.md#静态入口与缓存)。
+精确文件查找只接受单一前导斜线及非空普通路径段，拒绝 `.`、`..`、反斜线和重复斜线；不做百分号解码。
+这样不会把开发态 RustEmbed 的路径规范化当作 HTTP 授权，也不会按原始 `/assets/` 前缀给目录外文件签发缓存许可。
+校验只封闭请求路径穿越，不阻断可信资源目录内显式声明的符号链接；正式发布 payload 的禁 symlink 门禁仍须保留，
+开发态资源目录也必须由可信构建流程提供。批准的 SPA 路由、精确正常文件和 favicon 别名不变。
 
 ## 维护与验证
 

@@ -34,7 +34,8 @@ pub struct PublicEquipmentStatResponse {
 }
 
 /// 公开装备详情；attributes 仅由 lot 详情显式传入。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+/// 完整游戏装备 URL 含 key，允许 wire 展示但不能进入调试输出。
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicEquipmentResponse {
     pub name: String,
     pub category: String,
@@ -60,6 +61,24 @@ pub struct PublicEquipmentResponse {
     pub attributes: Option<serde_json::Value>,
 }
 
+impl std::fmt::Debug for PublicEquipmentResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PublicEquipmentResponse")
+            .field("name", &self.name)
+            .field("category", &self.category)
+            .field("equipment_group", &self.equipment_group)
+            .field("level", &self.level)
+            .field("primary_attribute_initials", &self.primary_attribute_initials)
+            .field("info_summary", &self.info_summary)
+            .field("stats", &self.stats)
+            .field("avg_roll", &self.avg_roll)
+            .field("game_equipment_url", &"[REDACTED]")
+            .field("attributes", &self.attributes)
+            .finish()
+    }
+}
+
 /// 正式竞拍 lot 的公开契约。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicLiveLotResponse {
@@ -81,7 +100,8 @@ pub struct PublicLiveLotResponse {
 }
 
 /// 预览 lot 的公开契约。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+/// 调试输出保留公开装备属性，但隐藏完整游戏装备 URL 中的 key。
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicPreviewLotResponse {
     pub id: String,
     pub auction_id: String,
@@ -112,8 +132,30 @@ pub struct PublicPreviewLotResponse {
     pub game_equipment_url: String,
 }
 
+impl std::fmt::Debug for PublicPreviewLotResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PublicPreviewLotResponse")
+            .field("id", &self.id)
+            .field("auction_id", &self.auction_id)
+            .field("code", &self.code)
+            .field("status", &self.status)
+            .field("seller_name", &self.seller_name)
+            .field("start_price", &self.start_price)
+            .field("equipment_name", &self.equipment_name)
+            .field("equipment_group", &self.equipment_group)
+            .field("equipment_category", &self.equipment_category)
+            .field("equipment_level", &self.equipment_level)
+            .field("primary_attribute_initials", &self.primary_attribute_initials)
+            .field("avg_roll", &self.avg_roll)
+            .field("game_equipment_url", &"[REDACTED]")
+            .finish()
+    }
+}
+
 /// 预览详情装备的公开契约；分类在旧版 wire 中允许缺失。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+/// 与正式详情相同，完整游戏装备 URL 只进入 wire，不进入调试输出。
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicPreviewEquipmentResponse {
     pub name: String,
     /// 必须与预览摘要的装备分组相同。
@@ -140,6 +182,23 @@ pub struct PublicPreviewEquipmentResponse {
     pub avg_roll: Option<f64>,
     /// P11 返回含 10 位 key 的真实 URL；历史空值只作兼容，不证明链接可用。
     pub game_equipment_url: String,
+}
+
+impl std::fmt::Debug for PublicPreviewEquipmentResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PublicPreviewEquipmentResponse")
+            .field("name", &self.name)
+            .field("equipment_group", &self.equipment_group)
+            .field("category", &self.category)
+            .field("level", &self.level)
+            .field("primary_attribute_initials", &self.primary_attribute_initials)
+            .field("info_summary", &self.info_summary)
+            .field("stats", &self.stats)
+            .field("avg_roll", &self.avg_roll)
+            .field("game_equipment_url", &"[REDACTED]")
+            .finish()
+    }
 }
 
 fn deserialize_optional_nonempty_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>

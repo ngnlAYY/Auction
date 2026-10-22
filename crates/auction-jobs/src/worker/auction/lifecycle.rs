@@ -91,9 +91,10 @@ where
         if worker.control.is_draining() {
             break;
         }
-        let item_started = std::time::Instant::now();
-        let claims = match tokio::time::timeout(
-            worker.auction.item_timeout,
+        // 截止在领取前冻结；spawn 到首次 poll 的排队时间也消耗同一预算。
+        let item_deadline = tokio::time::Instant::now() + worker.auction.item_timeout;
+        let claims = match tokio::time::timeout_at(
+            item_deadline,
             worker.schedule.claim_due(worker.worker_id.clone(), now, lease_until, wave_limit),
         )
         .await
@@ -115,7 +116,6 @@ where
         }
         let exhausted = claims.len() < usize::from(wave_limit);
         processed = processed.saturating_add(claims.len());
-        let item_timeout = worker.auction.item_timeout.saturating_sub(item_started.elapsed());
 
         let mut tasks = JoinSet::new();
         for claim in claims {
@@ -124,8 +124,12 @@ where
             let clock = Arc::clone(&worker.clock);
             tasks.spawn(async move {
                 let round_id = claim.round_id;
-                match tokio::time::timeout(
-                    item_timeout,
+                if tokio::time::Instant::now() >= item_deadline {
+                    tracing::warn!(%round_id, "auction lifecycle item expired before execution");
+                    return WorkerResult::Error;
+                }
+                match tokio::time::timeout_at(
+                    item_deadline,
                     process_claim(schedule, lifecycle, clock, claim),
                 )
                 .await
@@ -173,9 +177,9 @@ where
             phase_result = WorkerResult::Error;
             break;
         };
-        let item_started = std::time::Instant::now();
-        let claims = match tokio::time::timeout(
-            worker.auction.item_timeout,
+        let item_deadline = tokio::time::Instant::now() + worker.auction.item_timeout;
+        let claims = match tokio::time::timeout_at(
+            item_deadline,
             store.claim_due(worker.worker_id.clone(), now, lease_until, wave_limit),
         )
         .await
@@ -197,7 +201,6 @@ where
         }
         let exhausted = claims.len() < usize::from(wave_limit);
         processed = processed.saturating_add(claims.len());
-        let item_timeout = worker.auction.item_timeout.saturating_sub(item_started.elapsed());
 
         let mut tasks = JoinSet::new();
         for claim in claims {
@@ -206,11 +209,15 @@ where
             let clock = Arc::clone(&worker.clock);
             tasks.spawn(async move {
                 let workflow_id = claim.workflow_id;
+                if tokio::time::Instant::now() >= item_deadline {
+                    tracing::warn!(%workflow_id, "auction settlement item expired before execution");
+                    return WorkerResult::Error;
+                }
                 let failure_store = Arc::clone(&store);
                 let failure_clock = Arc::clone(&clock);
                 let failure_claim = claim.clone();
-                match tokio::time::timeout(
-                    item_timeout,
+                match tokio::time::timeout_at(
+                    item_deadline,
                     process_settlement_claim(store, commands, clock, claim),
                 )
                 .await

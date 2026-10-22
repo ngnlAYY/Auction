@@ -86,9 +86,10 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         .route("/api/v1/me/lot-watches", get(list_lot_watches))
         .route(
             "/api/v1/me/lot-watch-preference",
-            get(get_watch_preference)
+            axum::routing::get(get_watch_preference)
                 .put(set_watch_preference)
-                .layer(DefaultBodyLimit::max(4 << 10)),
+                .layer(DefaultBodyLimit::max(4 << 10))
+                .strict_methods("GET, PUT"),
         )
         .route(
             "/api/v1/lots/{lot_id}/watch",

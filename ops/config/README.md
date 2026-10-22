@@ -37,6 +37,10 @@ loader 先固定角色文件的绝对位置，再以其目录解析相对引用�
 启用 tracing 时，设置 `OTEL_EXPORTER_OTLP_HEADERS` 或 `OTEL_EXPORTER_OTLP_TRACES_HEADERS`（含空值）会被拒绝，防止 SDK 覆盖
 敏感 TOML 中的导出头；须在部署端移除，错误不回显变量值。
 
+角色、common 与普通 secrets TOML 各限 4 MiB；读取在同一文件描述符上检查普通文件并保留超限检测字节，
+FIFO 不会阻塞启动。独立 loader 保留合法符号链接；部署预检仍按更严格的路径规则拒绝符号链接。
+默认角色文件只有明确不存在时才回退，目录、断链或访问错误必须失败，不能静默使用默认配置。
+
 ## 首次部署配置生成
 
 内嵌 PostgreSQL Admin 的 `setup --output-dir <绝对路径>` 提供 loopback 一次性设置；无默认配置且未设置 AUCTION_CONFIG_FILE
@@ -107,10 +111,12 @@ Admin 新种类候选只显示武器/法杖/盾牌种类及 `Phase` 等护甲种
 流拍/撤拍装备留存。当前凭据身份与收件人不匹配时持久延期，不转普通外发，也不凭名单直接满足义务。
 修改名单须重启 Worker，只影响尚未生成 delivery 的新结算；已有 `manual_reconcile` 投递仍需人工收口。
 
-三角色共用 [runtime 模板](ops/config/examples/runtime/admin.toml)；共享文件须使用同一运行账号，文件归加载/更新进程
-有效 UID、权限 0640，父目录受信且禁止 group/other 写入。A26/A27 提交完整候选，以 fingerprint fence、命令账本和原子替换
-落盘，不热加载。Admin 启动恢复失败（含结果未知/需人工核对）即阻断启动，不沿用旧安全配置；恢复改变已加载指纹须重新部署
-重启。
+三角色共用 [runtime 模板](ops/config/examples/runtime/admin.toml)，共享文件须归同一实际服务账号、权限 0640，
+父目录受信且禁止 group/other 写入。启动和管理读取均在同一描述符核验普通文件、权限及 4 MiB 预算，拒绝符号链接。
+管理读写另核验当前有效 UID；只读装配不把 root 运维账号误当服务 owner，部署前仍按下述实际 unit 身份核对。
+跨进程锁必须是运行账号拥有、group/other 无权限的单链接普通文件，拒绝符号链接和特殊文件。
+A26/A27 提交完整候选，以 fingerprint fence、命令账本和原子替换落盘，不热加载；替换后的回读或账本确认失败属于结果未知，
+保留新文件并用原命令核对。Admin 启动恢复失败即阻断启动，不沿用旧安全配置；恢复改变已加载指纹须重新部署重启。
 runtime 保存与启动共用 listener、精确规范 HTTP(S) Origin、tracing endpoint、metrics 和 session 的部署校验；
 非规范 URL 不会先保存、再在重启时失败。严格部署预检要求 runtime 精确 `0640` 和不可被 group/other 写入的真实父目录。
 分体 `deployment start/restart` 还在迁移前按 Admin unit 的实际 `User` 核对文件和可写父目录属主，不以 root 运维账号替代；
@@ -307,7 +313,8 @@ Caddy 保持原运行用户，在它的 systemd drop-in 设置 `SupplementaryGro
 身份、POST 回执、幂等及人工写入门禁，但本地目标镜像不保证远端正文一致；历史未知结果不能仅凭现存帖子 ID 自动完成，
 关闭时同步转人工授权、回帖刷新保留未知门禁。该开关不受 `operations.forum` 接管，修改须重启 Worker，已有人工授权门禁不
 自动清空；显式填写新字段前须更新会读取 Worker 配置的程序（包括 auctionctl），旧程序严格拒绝未知字段。item timeout 须覆盖
-分页/写入/间隔且小于 lease；`worker.forum.public_base_url` 仅允许无凭据/路径/查询的 HTTPS origin，回环 HTTP 仅供本地联调。
+领取等待、分页、写入和间隔且小于 lease；发布和回帖导入均从领取前计算截止，不在拿到 claim 后重置预算。
+`worker.forum.public_base_url` 仅允许无凭据/路径/查询的 HTTPS origin，回环 HTTP 仅供本地联调。
 该字段默认省略，不显示 Web 地址；配置后固定 #1 的 `Auction address` 以 `[url=地址][b]地址[/b][/url]` 显示完整当期拍卖 URL，
 内层粗体阻止论坛截短链接文字并改写回读 BBCode，保留 `?auction=<UUID>` 和异世界参数；`About system` 固定链接到论坛说明
 主题 `301946`。修改配置需重启 Worker，该字段归部署配置所有、不受 `operations.forum` 接管；已有人工门禁任务仍须按
@@ -331,12 +338,13 @@ PM：PM 成功始终要求完整冻结内容、recipient/sender 与 Sent MSID �
 顶层生命周期、慢速代理和结算默认 60 秒周期、5 秒抖动、各阶段批次 100、单项 30 秒；主循环默认并发 8，示例使用同值，阶段
 失败不跳过后续阶段。fulfillment/recovery 独立循环默认立即执行后等待 60 秒加抖动，批次 100、并发 8、lease 60 秒、单项 30 秒；
 其中等待买家支付 COD、卖家领取货款的 MM 证据读取共享一个默认 300 秒的绝对时间窗口，由
-`worker.fulfillment.evidence_poll_seconds` 配置；窗口内新出现的待追踪邮件不会单独计时，而是在下一个窗口与其他邮件一起读取。
+`worker.fulfillment.evidence_poll_seconds` 配置，不受 `operations.worker.managed` 覆盖；窗口内新增待追踪邮件在下一窗口统一读取。
 
 PostgreSQL delivery 独立控制领取、续租、发送与终态确认；续租间隔小于 lease，sending grace 大于完整请求超时，默认
 timeout/grace 为 180/300 秒，启用 MM 时 timeout 大于两倍 fetch budget。实际并发取配置与 transport 上限较小者，MM compose
 账号状态固定上限 1。论坛和邮件每种 Cookie 全局最多一条 active，由 session advisory lock 保证 Worker owner；更换或失效后重启
-交接。`.keyenv` 仅由严格 loader 读取，Worker 只用 `hv-ck-key1`，`hv-ck-key2` 仅供显式隔离验证且不自动切换。
+交接。`.keyenv` 仅由严格 loader 同描述符检查和读取，限 64 KiB，文件须仅 owner 可访问；合法符号链接仍可用。
+Worker 只用 `hv-ck-key1`，`hv-ck-key2` 仅供显式隔离验证且不自动切换。
 
 operations_alert 的 scan/dispatch/reconcile 独立运行，默认 60 秒加最多 5 秒抖动，抖动不得大于间隔；各循环失败只影响自身
 重试，scan/reconcile 受 claim lease 约束，dispatch 另预留来源读取预算。其他范围和默认值以模板注释为准，修改后仍需重启。

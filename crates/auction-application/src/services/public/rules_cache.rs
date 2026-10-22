@@ -50,7 +50,7 @@ impl PublicRulesReader for CachedPublicRulesReader {
             };
 
             let cached = cache.get(key.clone()).await;
-            let cache_available = cached.is_ok();
+            let mut cache_available = cached.is_ok();
             if let Ok(Some(value)) = cached {
                 if let Ok(document) = serde_json::from_slice::<PublicRulesDocument>(&value)
                     && document.locale == request.locale
@@ -59,8 +59,8 @@ impl PublicRulesReader for CachedPublicRulesReader {
                     return Ok(Some(document));
                 }
 
-                // 损坏或旧版本快照不能阻断回源；删除只是尽力而为。
-                let _ = cache.invalidate(key.clone()).await;
+                // 损坏或旧版本快照不能阻断回源；失效失败也说明本次缓存已不可用，不再回填。
+                cache_available = cache.invalidate(key.clone()).await.is_ok();
             }
 
             let result = authority.get_public_rules(request).await?;

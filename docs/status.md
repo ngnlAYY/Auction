@@ -10,7 +10,7 @@
 ## 能力范围
 | 范围 | 源码中的实现边界 | 不能据此推导 |
 | --- | --- | --- |
-| HTTP 与页面 | Public 26、Admin 46 条 feature API；15/21 条浏览器入口 | 每条流程已经通过浏览器或部署验收 |
+| HTTP 与页面 | Public/Admin feature API 及浏览器入口见[路由口径](docs/contracts/routes.md#基线与统计口径) | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
 | 迁移 | PostgreSQL 57 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
@@ -31,9 +31,111 @@
 HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾登记“局部 R1”；原始证据索引不足，保留为历史隔离验证声明，不能替代具体执行记录或视为当前运行确认。
 
 ## 本轮静态检查
-各记录只覆盖注明的工作树与验证范围，不代表运行验收。下文 `verify全绿` 指完整 `just verify` 通过：文档份数（未注明为 45 份）、格式/仓库/布局/配置/i18n、工作区全部目标、独立 PostgreSQL/Redis、全特性 Clippy（`-D warnings`）及双端 WASM。检查入口见[开发指南](docs/guide/development.md#默认检查)。
+各记录只覆盖注明的工作树与验证范围，不代表运行验收。下文 `verify全绿` 沿用记录当时的完整 `just verify` 结果；历史文档份数不是当前自动检查项，也不证明链接或语义正确。当前静态门禁及独立检查范围见[开发指南](docs/guide/development.md#默认检查)，历史命令和失败结果保持原样。
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
+
+### 2026-10-22 全源码再审与边界修复（本地隔离验证，schema 57）
+
+覆盖 20 个工作区包及 CI/发布、配置和部署源码；按 owner 清点全部模块并逐段读取关键路径，
+不是逐行形式证明。保留开始时已有的 136 个工作树修改，不把上一轮成果算作本轮新修复。
+未增加运行依赖、迁移、业务路由或永久测试；外部 JSON、命令身份、金额算法和未知外部写入门禁保留。
+
+- domain/application/storage：零软截止窗口不在截止等值重新开启延期；规则新建与版本更新分开 CAS；
+  Admin 创建先取得原有锁再读实时钟，周轮次不再使用事务开始时间判断锁后截止。
+  realtime acknowledge/replay 统一锁序，补齐已有事务 runner 的死锁分类；资产冲突历史完整流式分类，移除 JSON 深复制。
+- HTTP/cache：拒绝静态资源路径穿越及缓存别名；固定游标先检查长度再栈内解码；
+  账号偏好方法错误正确声明 `GET, PUT`。Redis 原始错误不进入错误链，损坏缓存删除失败后不继续回填。
+- Worker/runtime：control 健康状态单次原子快照，论坛恢复不覆盖其他降级；拒绝迟到续租和已过绝对截止的排队任务；
+  HTTP/control 组名查询采用有界可重入缓冲。manifest、回执、规则正文同描述符限量读取，心跳 JSON 校验不构造完整字符串。
+- integrations：论坛创建要求真实确认页证明，错误页旧主题链接不再算成功；正文遍历维护状态栈；
+  入站摘要排序附件引用，清理指定秘密缓冲并减少副本。`retryable=true` 仍可进入只读对账，不代表可以再次 POST。
+- Web：隐藏等待取消即注销 Waker；Admin 每命令 busy 改为集合条目状态，避免 Signal 保留至页面卸载。
+  Public 成功、空结果和错误均绑定请求身份；装备标记建立共享索引，Markdown 列宽只扫描有界字符。
+- config/setup：普通 TOML、keyenv 及 runtime 读取预算/文件门禁补齐，默认发现只在明确不存在时回退；
+  两端与集成适配对齐 IPv6 回环。实际生成诊断另外发现 TOML 1.1 `Value::FromStr` 不能解析完整模板，
+  改用文档反序列化后原始 `write_to` 场景通过，未放宽校验。
+- 文档/发布：同步 owner 契约与中文注释，修正 Public 唯一路径计数及过期 notify 缺口说明；
+  构建失败清理本次候选目录，独立 Web 构建在签发复用标记前再次核对输入。
+
+Rust 1.99.0 下完整 `just verify`、MSRV 1.94.1 的 workspace/all-targets/all-features check、全部 CI ShellCheck、
+actionlint 和两份修改后发布脚本的 `bash -n` 通过。首轮修正格式，随后按已有 MSRV 惯例给两个 `fetch_update`
+调用添加最小 deprecated 例外；首次配置模板修复后完整静态门禁再次通过。`just web-build` 两端各生成 6 个 payload 文件；
+没有构建后端发布包或部署。LSP 启动退出，未计为通过；调用关系使用 CodeGraph，索引已同步。
+
+隔离 PostgreSQL 18.6 使用本次新建私有 cluster、专用空库和 Unix socket，禁 TCP，不执行仓库迁移：
+旧规则 SQL 重现缺失文档直接创建 revision 5，新 SQL 六种 CAS 场景通过；实际行锁等待跨截止后，
+旧事务时钟误判未错过、新实时钟正确判错过；旧 realtime 相反锁序产生 `40P01`，新顺序串行等待后双方提交，
+offset/failure 一致。仅证明选定 SQL 与真实锁行为，不代替完整 Rust 用例、SSI 或重试 runner 验收。
+
+临时 Rust/VirtualDom 诊断通过领域、Debug/wire、缓存故障、配置/FIFO/权限、命令生命周期、Router/HEAD/缓存头、
+游标、真实 RustEmbed 开发态读取、邮件/论坛解析、摘要、秘密缓冲、文件增长竞态及 Worker 截止场景。
+NSS 使用内存替身，不宣称真实系统后端时限；root 读取其他 UID runtime 的场景因本机非 root 明确跳过。
+探针自身的 retryable 误解和混选 MSRV rlib 已修正，未为使探针通过改变生产协议或关闭应用 lint。
+
+以下是隔离诊断计数，不是耗时、吞吐或峰值 RSS：
+
+| 场景 | 修改前 | 修改后 |
+| --- | --- | --- |
+| Public 隐藏等待 poll 1000 次，取消后保留的 Waker | 1000 | 0 |
+| Admin 隐藏等待 poll 64 次，取消后保留的 Waker | 64 | 0 |
+| 2000 层论坛正文的迭代步数 | 2013022 | 2010 |
+| 8 MiB 心跳值校验的分配请求字节 | 25165850 | 40 |
+
+新构建 Public WASM 在独立 Chromium 中只消费同源合成 GET：语言切换的延迟响应期间不显示旧规则正文；
+黑名单第一页失败后切第二页，等待期间不显示旧错误，完成后显示第二页及正确总数，未记录 JavaScript 异常。
+本地摘要和截图位于 `target/audits/source-reaudit-20261022/`。临时数据库、浏览器及预览服务已关闭；
+诊断源码与临时数据已清理。未运行测试套件、真实论坛/邮件、完整迁移、生产切换或性能基准。
+同步 systemctl/备份恢复/NSS 等待、可信 UDS 空闲连接与大库完整责任扫描仍有已登记资源边界，未擅加破坏运维契约的总超时。
+
+### 2026-10-22 再次全源码审计与资源优化（静态检查，schema 源码 57）
+
+覆盖 Cargo 元数据中的 20 个工作区包、CI/发布脚本及部署配置；按 owner 核对模块、调用路径、SQL、取消和安全边界，
+关键路径逐段读取，不把模块级审计称为逐行形式证明。没有新增依赖、数据库对象或迁移，路由、wire、金额和幂等协议保持不变。
+
+- core：结算关联改用借用索引，删除整计划复制、折扣临时数组及重复校验；竞价资格集合使用至多两项的栈内数组，
+  保留 UUID 锁序。实时 relay 移交事件所有权，不为随后只读 ID/序号深复制 JSON。
+- storage：账户代理、用户黑名单历史和 recovery action 改为当前页/报告 UUID 的批量读取；四类分页计数和记录使用
+  一致只读快照。纯加锁查询不收集弃用行集，历史通知载荷逐行分类；完整资金责任和历史证明仍不截断。
+- HTTP/cache：只读 dashboard/CIDR 数据共享，减少请求头、路径及投影复制；Hub 先预留容量再复制事件，原位淘汰慢连接。
+  缓存预算、失败回源和 WS 配额/关闭码保持不变，没有新增共享 wire 缓存。
+- Worker/runtime：邮箱领取与续租按发起前单调截止收口，存储在锁后及最终 CAS 检查数据库实时时钟；论坛领取等待计入
+  单项预算。control 响应流式限制 64 KiB，停机通知保留许可，心跳跳过漏 tick；tracing 关闭超时/Drop 取消所属任务，
+  导出健康快照一致读取，supervisor 强制回收不因首个错误放弃其他角色。CLI 帮助恢复成功退出。
+- config/setup：保留部署的 COD 证据轮询窗口，拒绝单边 Admin 凭据；runtime 启动/管理读取在解析前执行 4 MiB 预算，
+  管理读取核验同一描述符，锁文件要求私有、同 UID、单链接普通文件。写后回读失败属于结果未知；设置终态与退出通知共锁。
+- integrations：取消的限速等待不占未来时间槽；战斗状态只认真实 DOM 节点，论坛链接检查完整祖先链。
+  分块 HMAC 和认证缓冲移交减少秘密副本，收紧失败清理；发送、附件摘要和脚本预筛选减少复制与重复扫描。
+  Return 仍要求完整 RTS，未知 Send 的零条 Sent 匹配仍不能授权重寄。
+- Web：响应绑定完整查询身份，换世界/场次/lot/邮箱不呈现旧查询数据，同查询后台重读保留完成快照；lot UUID 隔离读取
+  与命令宿主，Admin 替换轮询时取消旧任务。表格移动已拥有行集，memo 借读查询，decoder/Fluent/Markdown 减少临时分配。
+  contracts、应用及浏览器认证镜像的 Debug 遮蔽 key/token/CSRF；未观察到实际日志泄露。五语登录提示不再误称 32 位 Key。
+- 发布/文档：tar 直接流式压缩，装包退出统一清理本次临时目录；修正包内部署链接、缓存复用说明和过期注释。
+  分体总控停止模板由 120 秒改为 155 秒，覆盖三角色合计 135 秒及 20 秒余量；未修改已安装 unit 或线上配置。
+
+以下是源码可数的 SQL 调用数，包含 BEGIN、隔离级别设置及 COMMIT，不是耗时或吞吐实测。N 为非空当前页/报告的项数：
+
+| 读取路径 | 修改前 | 修改后 |
+| --- | --- | --- |
+| 账户列表 | `7 + 2N` | `9` |
+| Admin 用户列表 | `5 + N` | `6` |
+| 已存在拍卖的 Recovery 报告 | `5 + N` | `6` |
+
+空页不执行批量补查，原调用数保持不变；最近代理竞价仍有 LATERAL 子查询，不宣称数据库计算量恒定。
+新增只读快照会增加事务控制开销，取舍是响应一致性。
+
+Rust 1.99.0 下完整 `just verify` 退出 0，覆盖策略、格式、全部已有目标、PostgreSQL/Redis 独立 feature、
+全特性 Clippy（`-D warnings`）及双端 WASM。首轮发现 Admin 轮询漏导入 `dioxus::core::Task`，补齐后完整重跑通过；
+随后五语提示修改再执行 `bash ci/checks/check.sh i18n wasm` 退出 0。
+`cargo +1.94.1 check --locked --workspace --all-targets --all-features`、全部 CI ShellCheck、
+`actionlint .github/workflows/ci.yml`、发布脚本 `bash -n` 均退出 0；按开发指南安装 cargo-machete 0.9.2 后，
+`dependency-unused` 通过，未发现未用直接依赖。未重跑联网 RustSec 审计，未改依赖锁。
+
+CodeGraph 已同步；LSP 因固定工具链未安装 rust-analyzer 而不可用，不计为通过。未新增、修改或运行行为测试，
+未做手工冒烟、浏览器、SQL 执行计划/并发锁、基准、真实论坛/邮件、发布构建、迁移或部署。本轮只证明源码及静态门禁，
+不宣称实际吞吐、峰值内存或生产稳定性已经测得提升。同步文件/外部子进程等待、隐藏页取消时 Waker 存留、
+可信 UDS 空闲连接及大库完整责任读取的资源边界仍需获准的运行证据。
+
 
 ### 2026-10-22 全源码审计确认项修复（本地验证，schema 源码 57）
 
@@ -1238,11 +1340,13 @@ Rust/Cargo `1.98.0`、just `1.58.0` 下 `just verify`（当时 51 份文档）�
 | A15 · 灾备文件替换 | [灾备安全边界](ops/deploy/RECOVERY.md#安全边界)：校验属主与完整受信目录链 |
 | A16/A17/A18 · 空库与恢复后验 | [存储迁移](crates/auction-storage/README.md#迁移)：共用完整对象盘点，subscription 限当前库，旧迁移也核对完整前缀与 checksum |
 
-旧版本提前物化的 Draft、缺失的邮件完成证明、未闭合 recovery 和不一致 runtime 仍须独立确认，本轮未清理、重放或改写历史现场；玩家提示与 systemd 停止预算缺口保留如下。
+旧版本提前物化的 Draft、缺失的邮件完成证明、未闭合 recovery 和不一致 runtime 仍须独立确认，本轮未清理、重放或改写历史现场；提示与停止预算的后续修复和剩余边界如下。
 
-[中文玩家指南](docs/guide/player-guide.md)核对发现两项提示偏差：[Public 中文登录占位文案](crates/auction-web-public/i18n/zh-CN.ftl)仍称“32 位 Key”，而[邮件 Key 协议](crates/auction-application/src/ports/mail/user/security.rs)实际使用 43 字符 canonical Base64URL；[论坛主题正文](crates/auction-integrations/src/forum/render.rs)把 notify 描述为反超提醒，但[通知 owner](crates/auction-jobs/src/worker/forum/reply/notification.rs)仅入队单次普通 MoogleMail 通知、论坛 PM 未接入。仅在指南说明并登记，未改译文、渲染或通知逻辑，未取得真实邮件或浏览器证据。
+[中文玩家指南](docs/guide/player-guide.md)此前核对出登录提示的长度偏差；本轮已删除五语占位文案中的“32 位”，按[邮件 Key 协议](crates/auction-application/src/ports/mail/user/security.rs)继续提示使用完整 43 字符 Key，未改变认证协议或取得浏览器运行证据。
+当前[论坛主题正文](crates/auction-integrations/src/forum/render.rs)已明确 `notify mm` 只请求单次拍卖通知，不是超价订阅，`notify pm` 不可用；
+与[通知 owner](crates/auction-jobs/src/worker/forum/reply/notification.rs)一致。本轮仅更正过期的缺口说明，未改通知语义，也无新增真实邮件证据。
 
-[分体总控 unit](ops/deploy/systemd/auction-stack.service.example)的 `TimeoutStopSec=120` 小于三角色依次各用满 45 秒的 135 秒，顺序停止可能外层先超时；部署前须重新核算，见[systemd 手册](ops/README.md#systemd-服务与顺序控制)。只登记缺口，未改模板或取得停止流程证据。
+[分体总控 unit](ops/deploy/systemd/auction-stack.service.example)此前 `TimeoutStopSec=120` 小于三角色各 45 秒的合计 135 秒；本轮模板调整为 155 秒，保留 20 秒总控余量。既有安装不会自动更新，仍须按[systemd 手册](ops/README.md#systemd-服务与顺序控制)在维护窗口同步；本轮未执行停止流程或部署。
 
 2026-10-12 装备拒收排查发现邮件开始时的 `now` 早于读取后生成的 `collected_at`，被记为 `snapshot_invalid / collected_at_future`；2026-10-13 的[拍卖入站修复](crates/auction-application/src/services/mail/processing/processor/auction.rs)改为每件装备读取后重新取时钟，规则与幂等字段不变。仅完成源码与静态验证，尚未部署或取得接收证据；关联退回/通知任务须独立核对，不盲目重放、不改历史诊断。
 

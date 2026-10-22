@@ -105,8 +105,8 @@ impl MoogleMailCookie {
     /// 校验 Cookie 行并建立脱敏值对象。
     pub fn new(value: impl Into<String>) -> Result<Self, MoogleMailError> {
         // Cookie 头首尾空白不参与语义；导入时粘贴的空格/制表符在此收口，内部空行仍失败关闭。
-        let value = value.into().trim().to_owned();
-        if !valid_secret(&value, MAX_COOKIE_BYTES) {
+        let mut value = value.into();
+        if !valid_secret(value.trim(), MAX_COOKIE_BYTES) {
             let mut bytes = value.into_bytes();
             bytes.fill(0);
             return Err(MoogleMailError::new(
@@ -116,11 +116,24 @@ impl MoogleMailCookie {
                 false,
             ));
         }
+        // 未裁剪时直接移交原缓冲；需要裁剪时也清理含完整 Cookie 的旧分配。
+        if value.trim().len() != value.len() {
+            let trimmed = value.trim().to_owned();
+            let mut bytes = std::mem::replace(&mut value, trimmed).into_bytes();
+            bytes.fill(0);
+        }
         Ok(Self(value.into_boxed_str()))
     }
 
     pub(crate) fn expose(&self) -> &str {
         &self.0
+    }
+}
+
+impl Drop for MoogleMailCookie {
+    fn drop(&mut self) {
+        let mut bytes = std::mem::take(&mut self.0).into_boxed_bytes();
+        bytes.fill(0);
     }
 }
 
@@ -147,6 +160,13 @@ impl MoogleMailToken {
 
     pub(crate) fn expose(&self) -> &str {
         &self.0
+    }
+}
+
+impl Drop for MoogleMailToken {
+    fn drop(&mut self) {
+        let mut bytes = std::mem::take(&mut self.0).into_boxed_bytes();
+        bytes.fill(0);
     }
 }
 
@@ -187,6 +207,12 @@ impl MoogleMailEquipmentKey {
 
     pub fn clear(&mut self) {
         self.0.fill(0);
+    }
+}
+
+impl Drop for MoogleMailEquipmentKey {
+    fn drop(&mut self) {
+        self.clear();
     }
 }
 

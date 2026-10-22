@@ -28,6 +28,9 @@ Admin 可由 runtime 覆盖，应用装配只传入敏感 TOML 中的 OTLP heade
 64 MiB 请求体上限（编码及压缩后），超限计入导出失败，不影响业务命令。未启用 gRPC 或 OTel 内部日志。
 上游 HTTP builder 会合并环境导出头，`auction-config` 在启用 tracing 时拒绝这类环境注入，装配根只传入
 校验后的 TOML 配置（见[配置边界](ops/config/README.md#文件职责)）。
+批处理器在关闭等待超时或被丢弃时取消所属任务，不让 exporter 和批次定时器脱离生命周期。
+导出状态、失败计数与时间戳在同一锁内更新和读取，防止并发心跳取得相互矛盾的状态组合；
+逐 span 的队列丢弃计数仍使用原子路径，不争用该锁。
 
 ## 日志约定与禁止内容
 
@@ -43,6 +46,8 @@ Admin 可由 runtime 覆盖，应用装配只传入敏感 TOML 中的 OTLP heade
 tracing degraded 只降级状态。各业务 owner 提供 dashboard 汇总，未装配、缺能力或读取失败均显式
 unknown/source_unavailable；`with_details` 只接受冻结的非敏感对象，Worker 论坛开关经专用端口读取，
 不把整个 details 暴露给浏览器；内部详情直接使用 `serde_json::Value`，本 crate 不额外声明未使用的直接 serde 依赖。响应语义见 [Dashboard 契约](docs/contracts/routes.md#dashboard-与-readiness)。
+心跳 details 的 64 KiB 校验直接流式计数紧凑 JSON 字节，超过预算立即拒绝，不为校验分配完整序列化副本；
+UTF-8、转义及对象限制与实际持久化编码保持一致。
 
 ## 指标与剩余验收证据
 

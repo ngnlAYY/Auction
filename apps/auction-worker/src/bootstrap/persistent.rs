@@ -373,7 +373,8 @@ pub(super) async fn run_worker(
     if let Err(error) = heartbeat.publish_stopping().await {
         tracing::warn!(error = %error, "worker heartbeat stopping publish failed");
     }
-    control_shutdown.notify_waiters();
+    // 只有一个接收者；即使控制任务尚未创建等待 future，也必须保留停机通知。
+    control_shutdown.notify_one();
     if let Err(error) =
         join_worker_control_task(&mut control_task, "persistent worker control").await
     {

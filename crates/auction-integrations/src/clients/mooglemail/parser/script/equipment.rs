@@ -16,19 +16,25 @@ pub(crate) fn equipment_keys(
         let Some(masked) = executable_javascript(&source) else {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         };
-        let starts = masked.match_indices('{').map(|(index, _)| index).collect::<Vec<_>>();
-        for start in starts {
-            let candidate = &source[start..];
-            if !wanted.iter().any(|equipment_id| has_json_property(candidate, equipment_id)) {
-                continue;
+        // 每个附件 ID 只扫描一次脚本；候选后仍有目标字段等价于起点不晚于最后一次命中。
+        // 保留原始严格 JSON 校验，避免对每个左花括号重复扫描整个脚本尾部。
+        let Some(last_property) =
+            wanted.iter().filter_map(|id| last_json_property(&source, id)).max()
+        else {
+            continue;
+        };
+        for (start, _) in masked.match_indices('{') {
+            if start > last_property {
+                break;
             }
+            let candidate = &source[start..];
             let (found, saw_wanted) = decode_equipment_root(candidate, wanted)
                 .map_err(|_| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
             if !saw_wanted {
                 continue;
             }
             for (equipment_id, key) in found {
-                if script_keys.insert(equipment_id.clone(), key).is_some() {
+                if script_keys.insert(equipment_id, key).is_some() {
                     return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
                 }
             }
@@ -96,23 +102,25 @@ pub(crate) fn body_equipment_keys(
     Ok(keys)
 }
 
-pub(crate) fn has_json_property(source: &str, name: &str) -> bool {
+fn last_json_property(source: &str, name: &str) -> Option<usize> {
     let needle = format!("\"{name}\"");
+    let mut found = None;
     let mut offset = 0;
     while offset < source.len() {
         let Some(relative) = source[offset..].find(&needle) else {
-            return false;
+            break;
         };
-        let mut index = offset + relative + needle.len();
+        let start = offset + relative;
+        let mut index = start + needle.len();
         while source.as_bytes().get(index).is_some_and(|byte| byte.is_ascii_whitespace()) {
             index += 1;
         }
         if source.as_bytes().get(index) == Some(&b':') {
-            return true;
+            found = Some(start);
         }
         offset = index;
     }
-    false
+    found
 }
 
 pub(crate) fn decode_equipment_root(

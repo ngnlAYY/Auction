@@ -148,21 +148,17 @@ impl EhentaiClient {
     }
 
     pub(super) async fn wait_rate(&self, operation: EhentaiOperation) -> Result<(), EhentaiError> {
-        let wait = {
-            let mut next = self.gate.lock().await;
-            let now = Instant::now();
-            let start = if *next > now { *next } else { now };
-            let wait = if start > now { start - now } else { Duration::ZERO };
-            let Some(next_deadline) = start.checked_add(self.minimum_request_interval) else {
-                // 限速截止时间不可表示时不能继续发起外部请求，交给 Worker 安全退避。
-                return Err(EhentaiError::remote_temporary(operation, false));
-            };
-            *next = next_deadline;
-            wait
-        };
+        // 等待期间持有异步锁；取消尚未获准的请求不能预占后续时间槽。
+        let mut next = self.gate.lock().await;
+        let wait = next.saturating_duration_since(Instant::now());
         if !wait.is_zero() {
             tokio::time::sleep(wait).await;
         }
+        let Some(next_deadline) = Instant::now().checked_add(self.minimum_request_interval) else {
+            // 限速截止时间不可表示时不能继续发起外部请求，交给 Worker 安全退避。
+            return Err(EhentaiError::remote_temporary(operation, false));
+        };
+        *next = next_deadline;
         Ok(())
     }
 }

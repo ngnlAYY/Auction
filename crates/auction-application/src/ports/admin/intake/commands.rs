@@ -7,6 +7,7 @@ pub struct AdminIntakeCommand {
     pub command_id: CommandId,
     pub world_id: String,
     pub source_kind: Option<AdminIntakeSourceKind>,
+    /// 完整来源 URL 含装备 key，只能用于来源读取和请求摘要，调试输出必须脱敏。
     pub equipment_url: Option<String>,
     pub equipment: Option<CanonicalEquipment>,
     pub start_price: i64,
@@ -22,7 +23,7 @@ impl fmt::Debug for AdminIntakeCommand {
             .field("command_id", &self.command_id)
             .field("world_id", &self.world_id)
             .field("source_kind", &self.source_kind)
-            .field("equipment_url", &self.equipment_url)
+            .field("equipment_url", &self.equipment_url.as_ref().map(|_| "[REDACTED]"))
             .field("equipment", &self.equipment)
             .field("start_price", &self.start_price)
             .field("player_id", &self.player_id)

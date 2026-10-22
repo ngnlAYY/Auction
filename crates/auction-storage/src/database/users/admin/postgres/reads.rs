@@ -1,5 +1,9 @@
 //! PostgreSQL Users/Admin 查询、列表和幂等命令读取。
 
+use std::collections::HashMap;
+
+use futures_util::TryStreamExt;
+
 use super::mapping::{map_postgres_user, map_storage_error, parse_postgres_command};
 use super::*;
 
@@ -43,13 +47,18 @@ pub(crate) async fn list_postgres(
     .fetch_all(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
-    let mut users = Vec::with_capacity(rows.len());
-    for row in rows {
-        let user = map_postgres_user(&row)?;
-        let (blacklist_count, blacklist_history) =
-            load_blacklist_history_postgres(&mut transaction, user.id).await?;
-        users.push(AdminUserListItem { user, blacklist_count, blacklist_history });
-    }
+    let page_users =
+        rows.into_iter().map(|row| map_postgres_user(&row)).collect::<Result<Vec<_>, _>>()?;
+    let user_ids = page_users.iter().map(|user| user.id).collect::<Vec<_>>();
+    let mut histories = load_blacklist_histories_postgres(&mut transaction, &user_ids).await?;
+    let users = page_users
+        .into_iter()
+        .map(|user| {
+            let (blacklist_count, blacklist_history) =
+                histories.remove(&user.id).unwrap_or_default();
+            AdminUserListItem { user, blacklist_count, blacklist_history }
+        })
+        .collect();
     transaction.commit().await.map_err(map_storage_error)?;
     let page = AdminUserPage { users, total, limit: request.limit, offset: request.offset };
     if page.validate(&request) {
@@ -59,35 +68,40 @@ pub(crate) async fn list_postgres(
     }
 }
 
-async fn load_blacklist_history_postgres(
+async fn load_blacklist_histories_postgres(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    user_id: Uuid,
-) -> Result<(i64, Vec<AdminUserBlacklistHistoryEntry>), ApplicationError> {
-    let rows = sqlx::query(
-        "SELECT public_reason, blacklisted_at, count(*) OVER () AS total_count
-         FROM public.user_blacklist_history
-         WHERE user_id = $1
-         ORDER BY blacklisted_at DESC, id DESC
-         LIMIT 10",
+    user_ids: &[Uuid],
+) -> Result<HashMap<Uuid, (i64, Vec<AdminUserBlacklistHistoryEntry>)>, ApplicationError> {
+    let mut histories = HashMap::<Uuid, (i64, Vec<AdminUserBlacklistHistoryEntry>)>::new();
+    if user_ids.is_empty() {
+        return Ok(histories);
+    }
+    // 每个当前页用户仍返回最近十条和完整计数，只合并数据库往返，不改变历史截取边界。
+    let mut rows = sqlx::query(
+        "SELECT selected.user_id, history.public_reason, history.blacklisted_at,
+                history.total_count
+         FROM unnest($1::uuid[]) AS selected(user_id)
+         CROSS JOIN LATERAL (
+             SELECT id, public_reason, blacklisted_at, count(*) OVER () AS total_count
+             FROM public.user_blacklist_history
+             WHERE user_id = selected.user_id
+             ORDER BY blacklisted_at DESC, id DESC
+             LIMIT 10
+         ) AS history
+         ORDER BY selected.user_id, history.blacklisted_at DESC, history.id DESC",
     )
-    .bind(user_id)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(map_storage_error)?;
-    let blacklist_count = rows
-        .first()
-        .map(|row| row.try_get("total_count"))
-        .transpose()
-        .map_err(map_storage_error)?
-        .unwrap_or(0);
-    let mut blacklist_history = Vec::with_capacity(rows.len());
-    for row in rows {
-        blacklist_history.push(AdminUserBlacklistHistoryEntry {
+    .bind(user_ids)
+    .fetch(&mut **transaction);
+    while let Some(row) = rows.try_next().await.map_err(map_storage_error)? {
+        let user_id = row.try_get("user_id").map_err(map_storage_error)?;
+        let total_count = row.try_get("total_count").map_err(map_storage_error)?;
+        let (_, history) = histories.entry(user_id).or_insert_with(|| (total_count, Vec::new()));
+        history.push(AdminUserBlacklistHistoryEntry {
             public_reason: row.try_get("public_reason").map_err(map_storage_error)?,
             blacklisted_at: row.try_get("blacklisted_at").map_err(map_storage_error)?,
         });
     }
-    Ok((blacklist_count, blacklist_history))
+    Ok(histories)
 }
 
 pub(crate) async fn find_command_postgres(

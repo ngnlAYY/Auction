@@ -335,7 +335,7 @@ fn valid_origin(value: &str) -> bool {
     let Ok(parsed) = Url::parse(value) else { return false };
     matches!(parsed.scheme(), "http" | "https")
         && (parsed.scheme() == "https"
-            || matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1")))
+            || matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")))
         && parsed.host_str().is_some()
         && parsed.username().is_empty()
         && parsed.password().is_none()
@@ -346,7 +346,8 @@ fn valid_origin(value: &str) -> bool {
 }
 
 fn template(source: &str) -> Result<Value, FirstRunError> {
-    source.parse().map_err(|_| FirstRunError::InvalidConfig)
+    // 模板是完整文档；Value::FromStr 在 TOML 1.1 中只解析单个值。
+    toml::from_str(source).map_err(|_| FirstRunError::InvalidConfig)
 }
 
 fn write_toml(path: PathBuf, document: &Value, mode: u32) -> Result<(), FirstRunError> {

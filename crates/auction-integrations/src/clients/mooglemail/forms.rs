@@ -201,9 +201,8 @@ impl fmt::Display for MoogleMailForm {
 
 impl Drop for MoogleMailForm {
     fn drop(&mut self) {
-        for (name, value) in &mut self.values {
-            name.clear();
-            value.clear();
+        for (_, value) in &mut self.values {
+            clear_string(value);
         }
     }
 }

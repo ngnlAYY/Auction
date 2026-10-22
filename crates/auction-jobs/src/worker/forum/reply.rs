@@ -139,17 +139,27 @@ where
     let mut processed = 0_u16;
     let mut topic_failed = false;
     while processed < runtime.batch_size && !worker.control.is_draining() {
+        // 内容租约必须覆盖领取和远端编辑的总预算，领取响应不重置单项时限。
+        let item_deadline = tokio::time::Instant::now()
+            .checked_add(runtime.item_timeout)
+            .ok_or(WorkerError::InvalidForumConfiguration)?;
         let now = worker.clock.now();
         let lease_until =
             now.checked_add_signed(lease_duration).ok_or(WorkerError::InvalidForumConfiguration)?;
         // 每次只领取即将处理的一场拍卖，避免批量候选在等待前序主题时耗尽内容租约。
-        let mut topics = runtime
-            .store
-            .claim_published_topics(worker.worker_id.clone(), now, lease_until, 1)
-            .await?;
+        let mut topics = tokio::time::timeout_at(
+            item_deadline,
+            runtime.store.claim_published_topics(worker.worker_id.clone(), now, lease_until, 1),
+        )
+        .await
+        .map_err(|_| WorkerError::ForumTopicProcessingFailed)??;
         let Some(topic) = topics.pop() else {
             break;
         };
+        if tokio::time::Instant::now() >= item_deadline {
+            // 不读取或编辑远端主题，也不把可能已提交的 claim 释放成新一轮工作。
+            return Err(WorkerError::ForumTopicProcessingFailed);
+        }
         if !seen_auctions.insert(topic.auction_id) {
             // 同一轮不重复读取远端主题；释放刚领取的重复 claim 后等待下一次 poll。
             let scanned_at = worker.clock.now();
@@ -179,8 +189,8 @@ where
         }
         processed += 1;
         let write_progress = ForumWriteProgress::default();
-        match tokio::time::timeout(
-            runtime.item_timeout,
+        match tokio::time::timeout_at(
+            item_deadline,
             process_topic(
                 runtime,
                 topic.clone(),

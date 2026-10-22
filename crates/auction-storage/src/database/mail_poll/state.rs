@@ -74,13 +74,17 @@ pub(crate) async fn renew(
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
 ) -> Result<MailPollClaim, ApplicationError> {
+    let mut transaction =
+        pool.begin().await.map_err(|_| storage_error("开启 MoogleMail 续租事务失败"))?;
+    lock_mailbox(&mut transaction, &claim.mailbox_key).await?;
     // 手动触发可以持有 paused 快照；续租仍必须匹配该快照，避免改变自动调度语义。
     let updated = sqlx::query(
         "UPDATE public.mail_poll_state
          SET claim_expires_at = $4, updated_at = $3
          WHERE mailbox_key = $1 AND claim_token = $2 AND claim_owner = $5
                AND state_version = $6 AND paused = $7
-               AND claim_expires_at > $3 AND claim_expires_at < $4",
+               AND claim_expires_at > $3 AND claim_expires_at < $4
+               AND claim_expires_at > clock_timestamp() AND $4 > clock_timestamp()",
     )
     .bind(&claim.mailbox_key)
     .bind(claim.claim_token)
@@ -89,14 +93,28 @@ pub(crate) async fn renew(
     .bind(&claim.worker_id)
     .bind(claim.state_version)
     .bind(claim.paused)
-    .execute(pool)
+    .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("续租 PostgreSQL MoogleMail 轮询状态失败"))?;
     if updated.rows_affected() != 1 {
         return Err(storage_error("MoogleMail 轮询续租 fence 已失效"));
     }
+    transaction.commit().await.map_err(|_| storage_error("提交 MoogleMail 续租事务失败"))?;
     claim.lease_until = lease_until;
     Ok(claim)
+}
+
+/// 先取得邮箱行锁，后续写入再检查数据库实时时钟，不能用等待锁前的时间复活或完成过期租约。
+pub(super) async fn lock_mailbox(
+    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    mailbox_key: &str,
+) -> Result<(), ApplicationError> {
+    sqlx::query("SELECT mailbox_key FROM public.mail_poll_state WHERE mailbox_key = $1 FOR UPDATE")
+        .bind(mailbox_key)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|_| storage_error("锁定 MoogleMail 邮箱租约失败"))?;
+    Ok(())
 }
 
 pub(crate) fn map(row: &sqlx::postgres::PgRow) -> Result<AdminMailPollState, ApplicationError> {

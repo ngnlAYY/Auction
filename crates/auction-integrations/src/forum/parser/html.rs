@@ -83,41 +83,62 @@ fn post_was_edited(element: ElementRef<'_>) -> bool {
 }
 
 fn render_post_text(element: ElementRef<'_>) -> String {
+    // IPB 的引用标题/正文和 blockquote 属于被引用作者，不能归到当前回帖者的竞价命令。
+    if element.ancestors().filter_map(ElementRef::wrap).any(|node| is_quote(node.value())) {
+        return String::new();
+    }
+    let inherited_block = element.ancestors().find_map(|node| match node.value() {
+        Node::Element(value) if is_text_block(value) => Some(node.id()),
+        _ => None,
+    });
     let mut source = String::new();
     let mut previous_block = None;
+    // 深度优先遍历中每个元素只入栈、出栈一次；深层 BBCode 不再为每个节点重扫祖先链。
+    let mut ancestors = Vec::new();
     for node in element.descendants() {
-        // IPB 的引用标题/正文和 blockquote 属于被引用作者，不能归到当前回帖者的竞价命令。
-        if node.ancestors().filter_map(ElementRef::wrap).any(|ancestor| {
-            ancestor.value().name() == "blockquote"
-                || ancestor
-                    .value()
-                    .classes()
-                    .any(|class| matches!(class, "quotetop" | "quotemain" | "quote" | "blockquote"))
-        }) {
-            source.push('\n');
-            continue;
+        let parent = node.parent().map(|parent| parent.id());
+        while ancestors.last().is_some_and(|(id, _, _)| Some(*id) != parent) {
+            ancestors.pop();
         }
-        match node.value() {
-            Node::Element(value) if value.name() == "br" => source.push('\n'),
-            Node::Text(value) => {
-                let block = node.ancestors().find_map(|ancestor| match ancestor.value() {
-                    Node::Element(value)
-                        if matches!(value.name(), "p" | "li" | "blockquote" | "div") =>
-                    {
-                        Some(ancestor.id())
+        let (block, quoted) = ancestors
+            .last()
+            .map(|(_, block, quoted)| (*block, *quoted))
+            .unwrap_or((inherited_block, false));
+        if quoted {
+            source.push('\n');
+        } else {
+            match node.value() {
+                Node::Element(value) if value.name() == "br" => source.push('\n'),
+                Node::Text(value) => {
+                    if previous_block.is_some() && block != previous_block {
+                        source.push('\n');
                     }
-                    _ => None,
-                });
-                if previous_block.is_some() && block != previous_block {
-                    source.push('\n');
+                    source.push_str(value);
+                    previous_block = block;
                 }
-                source.push_str(value);
-                previous_block = block;
+                _ => {}
             }
-            _ => {}
+        }
+        if let Node::Element(value) = node.value() {
+            ancestors.push((
+                node.id(),
+                if is_text_block(value) { Some(node.id()) } else { block },
+                quoted || is_quote(value),
+            ));
         }
     }
     super::text::normalize_text(&source)
+}
+
+fn is_quote(value: &scraper::node::Element) -> bool {
+    value.name() == "blockquote"
+        || value
+            .classes()
+            .any(|class| matches!(class, "quotetop" | "quotemain" | "quote" | "blockquote"))
+}
+
+fn is_text_block(value: &scraper::node::Element) -> bool {
+    matches!(value.name(), "p" | "li" | "blockquote" | "div")
 }
 
 fn extract_author(element: ElementRef<'_>) -> (Option<String>, Option<String>) {
@@ -159,10 +180,8 @@ fn extract_author(element: ElementRef<'_>) -> (Option<String>, Option<String>) {
 
 fn link_is_user_content(link: ElementRef<'_>) -> bool {
     let mut current = Some(link);
-    for _ in 0..16 {
-        let Some(element) = current else {
-            break;
-        };
+    // 用户可以任意嵌套 BBCode；固定祖先层数会把深层正文链接误当成系统作者或分页。
+    while let Some(element) = current {
         if element.attr("class").is_some_and(|classes| {
             classes.split_ascii_whitespace().any(|class| matches!(class, "postcolor" | "signature"))
         }) {

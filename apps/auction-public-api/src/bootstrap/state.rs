@@ -367,6 +367,8 @@ pub(super) fn spawn_realtime_relay(
 pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(10));
+        // 心跳只报告当前状态；数据库恢复后不补发过期 tick，避免集中查询和写入。
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         interval.tick().await;
         loop {
             interval.tick().await;

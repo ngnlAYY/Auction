@@ -240,6 +240,7 @@ async fn lock_rows(
     tx: &mut Transaction<'_, Postgres>,
     query: &'static str,
 ) -> Result<(), FundingError> {
-    sqlx::query(query).fetch_all(&mut **tx).await.map_err(storage)?;
+    // 只需完成有序加锁，不保留随后丢弃的全表行集；execute 仍完整执行 SELECT。
+    sqlx::query(query).execute(&mut **tx).await.map_err(storage)?;
     Ok(())
 }

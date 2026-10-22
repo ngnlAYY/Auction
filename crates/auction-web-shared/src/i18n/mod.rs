@@ -27,29 +27,33 @@ use unic_langid::{LanguageIdentifier, langid};
 
 /// 移除 Fluent 自动包裹动态变量的最外层 FSI/PDI，同时保留变量内部成对的隔离控制符。
 #[doc(hidden)]
-pub fn without_fluent_isolation(value: String) -> String {
+pub fn without_fluent_isolation(mut value: String) -> String {
     if !value.contains(['\u{2068}', '\u{2069}']) {
         return value;
     }
 
-    let mut result = String::with_capacity(value.len());
+    // 译文已经拥有独立缓冲区，原地保留字符，避免每次动态翻译再分配并复制整段文本。
     let mut isolation_depth = 0_u32;
-    for character in value.chars() {
-        match character {
-            '\u{2068}' if isolation_depth == 0 => isolation_depth = 1,
-            '\u{2068}' => {
-                isolation_depth += 1;
-                result.push(character);
-            }
-            '\u{2069}' if isolation_depth == 1 => isolation_depth = 0,
-            '\u{2069}' if isolation_depth > 1 => {
-                isolation_depth -= 1;
-                result.push(character);
-            }
-            _ => result.push(character),
+    value.retain(|character| match character {
+        '\u{2068}' if isolation_depth == 0 => {
+            isolation_depth = 1;
+            false
         }
-    }
-    result
+        '\u{2068}' => {
+            isolation_depth += 1;
+            true
+        }
+        '\u{2069}' if isolation_depth == 1 => {
+            isolation_depth = 0;
+            false
+        }
+        '\u{2069}' if isolation_depth > 1 => {
+            isolation_depth -= 1;
+            true
+        }
+        _ => true,
+    });
+    value
 }
 
 /// 兼容不显式传入语言的既有调用：按当前 `<html lang>` 格式化 Asia/Shanghai 时间。

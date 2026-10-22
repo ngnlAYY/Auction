@@ -25,17 +25,21 @@ pub(super) fn pool_page() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
-    let page_number = use_memo(move || query_state_signal().page.max(1));
-    let page_size = use_memo(move || query_state_signal().page_size);
+    let page_number = use_memo(move || query_state_signal.read().page.max(1));
+    let page_size = use_memo(move || query_state_signal.read().page_size);
     let selected_auction_id =
-        use_memo(move || query_state_signal().auction_id.clone().unwrap_or_default());
-    let movement_page = use_memo(move || query_state_signal().movement_page);
-    let movement_page_size = use_memo(move || query_state_signal().movement_page_size);
+        use_memo(move || query_state_signal.read().auction_id.clone().unwrap_or_default());
+    let movement_page = use_memo(move || query_state_signal.read().movement_page);
+    let movement_page_size = use_memo(move || query_state_signal.read().movement_page_size);
     let pool = use_resource({
         let refresh_generation = refresh_generation;
         move || {
             let _ = refresh_generation();
-            fetch_compensation_pool(page_number(), page_size())
+            let requested = (page_number(), page_size());
+            async move {
+                let result = fetch_compensation_pool(requested.0, requested.1).await;
+                (requested, result)
+            }
         }
     });
     let movements = use_resource({
@@ -64,7 +68,12 @@ pub(super) fn pool_page() -> Element {
         }
     });
 
-    match &*pool.read_unchecked() {
+    let loaded = pool.read_unchecked();
+    let current = loaded
+        .as_ref()
+        .filter(|(requested, _)| *requested == (page_number(), page_size()))
+        .map(|(_, result)| result);
+    match current {
         None => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Loading,

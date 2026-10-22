@@ -327,7 +327,7 @@ history-filter-month-11 = November
 history-filter-month-12 = December
 
 login-key-label = Bidder key
-login-key-placeholder = Your 32-character key
+login-key-placeholder = Your bidder key
 login-submit = Log in
 login-working = Logging in…
 login-hint = No key yet? Send an in-game MoogleMail titled "register" to the auction bot and it will reply with your key.

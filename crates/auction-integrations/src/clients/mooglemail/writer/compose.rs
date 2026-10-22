@@ -42,8 +42,8 @@ impl MoogleMailParser {
             return Err(compose_error(world, MoogleMailErrorCategory::Configuration));
         }
         let state = parse_compose_state(document, world)?;
-        let mut actual_equipment_ids = state.equipment_ids.clone();
-        let mut expected_equipment_ids = expected_equipment_ids.to_vec();
+        let mut actual_equipment_ids = state.equipment_ids.iter().collect::<Vec<_>>();
+        let mut expected_equipment_ids = expected_equipment_ids.iter().collect::<Vec<_>>();
         actual_equipment_ids.sort_unstable();
         expected_equipment_ids.sort_unstable();
         if actual_equipment_ids.windows(2).any(|pair| pair[0] == pair[1])
@@ -100,10 +100,13 @@ fn parse_compose_state(
     }
     let body_selector = selector("textarea[name='message_body']", world)?;
     let bodies = form.select(&body_selector).collect::<Vec<_>>();
-    if bodies.len() != 1 || !valid_body(&bodies[0].text().collect::<String>()) {
+    if bodies.len() != 1 {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let body = bodies[0].text().collect::<String>();
+    if !valid_body(&body) {
+        return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
+    }
     let assets = parse_compose_assets(&parsed, world)?;
     Ok(MoogleMailComposeState {
         token,

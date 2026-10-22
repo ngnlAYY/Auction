@@ -4,11 +4,9 @@
 //! - [`stable_scoped_command_id`]：多目标并行形态，按签名分别冻结 `command_id`，互不覆盖。
 //! - [`run_admin_action`] / [`run_admin_feedback_action`]：动作执行骨架，统一 busy
 //!   置位/复位与 spawn 边界。
-//! - [`run_admin_owned_action`]：把动作登记到 busy 信号的宿主；分页移除行组件不取消页面命令。
 
 use std::collections::HashMap;
 
-use dioxus::core::Runtime;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
@@ -65,23 +63,6 @@ pub fn run_admin_action<T, E, F>(
             Ok(value) => on_success(value),
             Err(error) => on_failure(error),
         }
-    });
-}
-
-/// 在 busy 的稳定宿主中运行命令，宿主卸载时仍由 Dioxus 取消，不跨页面或身份分离运行。
-/// 回调若保留子组件信号，必须用 try_write 等存活检查，不能无条件访问已卸载的行状态。
-pub fn run_admin_owned_action<T, E, F>(
-    busy: Signal<bool>,
-    action: F,
-    on_success: impl FnOnce(T) + 'static,
-    on_failure: impl FnOnce(E) + 'static,
-) where
-    T: 'static,
-    E: 'static,
-    F: std::future::Future<Output = Result<T, E>> + 'static,
-{
-    Runtime::current().in_scope(busy.origin_scope(), || {
-        run_admin_action(busy, action, on_success, on_failure);
     });
 }
 

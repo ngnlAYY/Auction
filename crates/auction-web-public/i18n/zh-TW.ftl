@@ -326,7 +326,7 @@ history-filter-month-11 = 十一月
 history-filter-month-12 = 十二月
 
 login-key-label = 出價 Key
-login-key-placeholder = 您的 32 位 Key
+login-key-placeholder = 您的出價 Key
 login-submit = 登入
 login-working = 登入中…
 login-hint = 還沒有 Key 嗎？在遊戲內寄一封標題為 "register" 的 MoogleMail 給拍賣機器人，系統會自動回信發放您的 Key。
