@@ -35,6 +35,41 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-22 安全依赖、构建工具与云端系统修复（R25 已部署，schema 56）
+
+本条时间采用 UTC。owner 为 `ci/tools`、发布脚本、GitHub Actions 与运维；发布源码提交为 `c95dd77`，
+源码指纹为 `dcd56dbe7d14dc917782f5eb67c87dc16a647f19676b7990ab780f2ecc6ce90f`。
+主程序继承下条已修复的三个证书依赖版本；本轮未改主 `Cargo.lock`、业务源码、HTTP/DTO 契约或迁移。
+`dx`、`sccache`、`cargo-audit` 使用独立依赖锁和受控源码构建，安装回执绑定脚本、补丁、锁文件及实际二进制摘要。
+项目发布入口固定工具来源、隔离旧工具缓存和 sccache daemon；Dioxus 禁用遥测和隐式工具下载，配套工具按固定摘要安装。
+本机和 CI 的 rustup 更新至 1.29.2，应用 Rust 工具链及 MSRV 保持不变。
+
+完整 `just verify`、依赖审计/未使用依赖检查、`build-api`、`build-release` 和 `verify-artifacts` 均退出 0；
+ShellCheck、actionlint 及修改脚本语法检查通过。主程序 537 个包对 1348 条 RustSec 公告审计为零漏洞、零警告；
+修复后的 cargo-audit 自身锁图经 RustSec/OSV 核对无命中。构建工具完整锁图的其他公告按实际启用 feature 和调用路径逐项核对，
+范围见[工具说明](ci/tools/README.md)，未向主程序审计加入忽略项。
+[本次 Actions](https://github.com/ngnlAYY/Auction/actions/runs/39707515978) 的 docs、verify、MSRV、security-audit、artifacts 五项均成功，
+受控工具构建、完整发布包校验、Linux 制品及校验清单上传均完成。
+
+R25 制品位于 `target/dist/cve-security-20261022-schema56-r25/`，部署与重启证据位于
+`target/dist/cve-security-20261022-ops-r25/`。已核验数据库备份，保留 R24 四程序、八份配置和 unit 定义，
+按 Worker → Admin → Public 切换；schema 56 的全部迁移校验和一致，迁移检查为 no-op，配置内容、权限和 owner 均保持一致。
+重启前后均核对三项 readiness 为 200、四程序及进程摘要匹配、双端 origin 和 Public HTTPS 共 16 项资源匹配。
+重启后 30 秒观察期内无自动重启，启动日志 error/warning 均为 0，三个 unit 的原启用状态和链接均已还原。
+部署和重启汇总为 `DEPLOYMENT-SUMMARY.json`、`REBOOT-SUMMARY-RECONCILED.json`，包含封存与补证回执摘要链。
+
+云端内核已重启生效为 `6.12.113+deb13-amd64`；Caddy 2.11.7 在同一官方源码上以 Go 1.26.10、`x/net 0.60.0`
+重新构建并替换，二进制漏洞扫描未发现受影响的包或符号，实际进程摘要及代理配置一致。
+SSH 通过 `Compression no` 缓解压缩相关问题，并核验有效配置及新连接；系统 CA 已移除 emSign ECC Root CA - G3，
+curl/libcurl 为发行版修复包 `8.14.1-2+deb13u7`。平台最终回执为 `target/cve-remediation-20261022-platform-final.json`。
+后续官方 Caddy 包升级须继续核对编译器和依赖修复基线，SSH 缓解待发行版补丁后再评估。
+
+维护中，disabled/inactive unit 被 systemd 回收，导致首次停机退出字段检查和重启后的对象读取门禁失败；
+一次单次属性读取尝试又因空 hook 字段被省略而停止。所有失败现场均保留，期间服务保持停止和禁用。
+按原 Worker 的 boot/PID/InvocationID 联核 drain 日志与 PID 1 正常停止事件后完成补证；
+随后通过同一 D-Bus 连接持有 `RefUnit`，完整复用原停止契约和恢复门禁成功启动，运维规则已同步。
+本轮运行核对限定为依赖、发布、配置、schema、备份、受控重启、就绪及静态资源，未运行单元、集成或浏览器业务测试。
+
 ### 2026-10-21 GitHub CI 证书依赖安全审计修复（本地静态检查）
 
 提交 `ad87dd4` 的 [Actions 运行](https://github.com/ngnlAYY/Auction/actions/runs/39615922774)

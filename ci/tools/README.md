@@ -71,6 +71,10 @@ dx/sccache 的完整发布锁仍有跨不兼容版本的公告与维护警告，
 | dx 的 lru 0.12.5，RUSTSEC-2026-0002/0253 | ratatui 只用 `LruCache::get_or_insert` 缓存 `(Rect, Layout)`；未调用问题 IterMut/pop，键类型也无可抛 panic 的自定义析构 |
 | sccache 的 jsonwebtoken 9.2.0，GHSA-h395-gr6q-cpjc | 由关闭的 dist-server feature 启用，`--no-default-features --features gha` 的 GNU 依赖图不编入它 |
 | sccache 的 rsa 0.9.10，RUSTSEC-2023-0071 | 仍在 GHA 的传递依赖图，但实际认证使用 bearer 和预签名 SAS；不调用 RSA 私钥签名/解密，缺少 Marvin 所需私钥操作 |
+| sccache 的 scc 2.1.0，RUSTSEC-2026-0205 | 由测试依赖 serial_test 引入，不在本次 release 普通依赖图中 |
+| sccache 的 ruzstd 0.8.1，RUSTSEC-2026-0344 | object 只读取静态库归档的原始成员用于哈希，未调用压缩节解码；缓存解压另用 zstd |
+| sccache 的 zip 0.6.6，RUSTSEC-2026-0368/0369 | 按编译器预期键读取，写入普通临时文件后放到编译器指定路径；不调用归档 extract，也不创建归档提供的符号链接 |
+| sccache 的 zip 0.6.6，RUSTSEC-2026-0367 | 正常写入将权限限制在 `0o777`，自定义读取仍会原样恢复 `unix_mode`；伪造缓存加高权限恢复可保留 SUID/SGID。当前本机及 CI 以非 root 用户构建并使用受控缓存，后续须保持此条件，升级时重新核对 |
 
 公告可从 [RustSec 数据库](https://rustsec.org/advisories/)及对应上游 security advisory 核对；构建工具升级需重新检查
 上述调用边界。维护停止和 yanked 提示仍作为上游工具后续升级事项保留，不加入应用审计忽略列表。

@@ -109,6 +109,12 @@ CPUID/ABI 和运行证据；型号或 cargo check 不证明兼容性/性能。
 3. 新 boot 中核对目标内核、原制品及配置；确认应用未提前自启，通过总控重新按 Worker → Admin → Public 启动，复核启动回执、
    readiness、进程哈希和稳定性，再还原原启用状态及链接。同步核对代理、SSH 和公开静态资源。
 
+禁用且停止的 unit 可能被 [systemd 回收](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#Unit%20Garbage%20Collection)，
+退出字段随之清空。停机前记录 boot、PID 和 InvocationID；若回收已发生，以同一进程的 drain 开始/完成日志和 PID 1 的成功停止事件
+核对正常退出，并保留原失败回执及补证链，不能把清零字段直接当作成功。读取停止契约时，在同一 D-Bus 连接上通过
+`Manager.RefUnit` 持有单元引用，再核对依赖、停止 hook、信号及超时，结束时释放引用并关闭连接，避免多次属性读取之间发生回收竞争。
+hook 按 D-Bus 类型和空数组校验；`systemctl show --all` 仍可能省略空的 `ExecStop`/`ExecStopPost`，不能把缺字段直接当作空 hook。
+
 当官方代理制品尚未包含上游修复时，可在同一官方源码版本上仅调整所需依赖和编译器，保存来源摘要、依赖差异、扫描及部署回执。
 这类自建 Caddy 制品的包管理版本号可能不变；后续安装官方包前须核对其 Go 和模块修复基线，避免覆盖为旧依赖制品。
 SSH 压缩相关缓解通过独立 drop-in 设置 `Compression no`，先运行 `sshd -t` 和 `sshd -T`，reload 后另建连接确认生效。
