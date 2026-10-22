@@ -44,8 +44,8 @@ pub(super) async fn claim_published_topics_postgres(
            AND sync.body IS NOT NULL
            AND sync.system_log_body IS NOT NULL
            AND sync.content_revision > 0
-           AND (auction.status IN ('live', 'final')
-                OR (auction.status = 'settled' AND sync.terminal_refresh_enabled
+           AND (auction.status IN ('preview', 'live', 'final', 'settling')
+                OR (auction.status IN ('settled', 'cancelled') AND sync.terminal_refresh_enabled
                     AND sync.terminal_synced_version IS NULL))
            AND sync.content_next_scan_at <= $1
            AND (
@@ -161,7 +161,7 @@ pub(super) async fn claim_published_topics_postgres(
             catalog_body,
             system_log_body,
             content_revision,
-            confirmed_settled_version: None,
+            confirmed_terminal_version: None,
             processed_through_post_number,
             content_claim_token,
             content_claim_owner: worker_id.to_owned(),

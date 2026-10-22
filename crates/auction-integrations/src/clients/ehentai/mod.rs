@@ -11,8 +11,9 @@ use std::{
 use auction_application::{
     AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter, AdminForumPreviewResult,
     ApplicationError, ApplicationFuture, ForumCredentialAvailability, ForumPostWriter,
-    ForumPublishedPost, ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderedPost,
-    ForumRenderedThread, ForumTopicMetadata, ForumTopicReader,
+    ForumPublishedPost, ForumPublishedThread, ForumPublisher, ForumReadPost, ForumRemoteError,
+    ForumRenderedPost, ForumRenderedThread, ForumTopicMetadata, ForumTopicReader,
+    MAX_FORUM_RECONCILIATION_TITLES,
 };
 use auction_domain::SettlementWorld;
 use chrono::Utc;

@@ -42,10 +42,13 @@ pub(super) fn valid_rendered(rendered: &ForumRenderedThread) -> bool {
         && rendered.title.len() <= MAX_RENDERED_TITLE_BYTES
         && !rendered.title.chars().any(char::is_control)
         && valid_text(&rendered.description, MAX_RENDERED_DESCRIPTION_BYTES)
-        && rendered
-            .legacy_title
-            .as_deref()
-            .is_none_or(|value| valid_text(value, MAX_RENDERED_TITLE_BYTES))
+        && rendered.reconciliation_titles.len()
+            <= auction_application::MAX_FORUM_RECONCILIATION_TITLES
+        && rendered.reconciliation_titles.iter().enumerate().all(|(index, value)| {
+            valid_text(value, MAX_RENDERED_TITLE_BYTES)
+                && value != &rendered.title
+                && !rendered.reconciliation_titles[..index].contains(value)
+        })
         && rendered.catalog_continuation.len() < auction_application::MAX_FORUM_CATALOG_PAGES
         && rendered.catalog_continuation.iter().all(valid_rendered_post)
         && !rendered.body.trim().is_empty()

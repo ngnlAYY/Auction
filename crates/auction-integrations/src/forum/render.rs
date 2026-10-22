@@ -13,10 +13,10 @@ use auction_application::{
     EquipmentColorFacts, EquipmentColorRule, FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot,
     ForumCurrentBidSource, ForumLotSnapshot, ForumRenderError, ForumRenderedPost,
     ForumRenderedThread, ForumRenderer, ForumSystemLogEntry, MAX_FORUM_CATALOG_LOTS,
-    PEERLESS_COLORS, PublicEquipmentGameLink, equipment_color_decision, forum_catalog_page_marker,
-    forum_world_name,
+    MAX_FORUM_RECONCILIATION_TITLES, PEERLESS_COLORS, PublicEquipmentGameLink,
+    equipment_color_decision, forum_catalog_page_marker, forum_world_name,
 };
-use auction_domain::{AuctionId, SettlementWorld};
+use auction_domain::{AuctionId, AuctionStatus, SettlementWorld};
 use sha2::{Digest, Sha256};
 use url::Url;
 
@@ -67,8 +67,35 @@ fn render_auction_thread_with_colors(
         SettlementWorld::Main => "Main",
         SettlementWorld::Isekai => "Isekai",
     };
+    let title = topic_title(world_title, snapshot.sequence, snapshot.state);
+    let mut reconciliation_titles = Vec::with_capacity(MAX_FORUM_RECONCILIATION_TITLES);
+    for state in [
+        AuctionStatus::Draft,
+        AuctionStatus::Preview,
+        AuctionStatus::Live,
+        AuctionStatus::Final,
+        AuctionStatus::Settling,
+        AuctionStatus::Settled,
+        AuctionStatus::Cancelled,
+    ] {
+        if state != snapshot.state {
+            reconciliation_titles.push(topic_title(world_title, snapshot.sequence, state));
+        }
+    }
+    let sequence_width = (snapshot.sequence.ilog10() as usize + 1).max(3);
+    let previous_title_width = "[Auction] ".len()
+        + world_title.len()
+        + " Equipment Auction - Session ".len()
+        + sequence_width;
+    // 旧版超长标题从未获准发帖；不能让它阻断全部合法 i64 序号的新标题。
+    if previous_title_width <= 50 {
+        reconciliation_titles.push(format!(
+            "[Auction] {world_title} Equipment Auction - Session {:03}",
+            snapshot.sequence
+        ));
+    }
     let digest = Sha256::digest(snapshot.auction_id.as_uuid().as_bytes());
-    let legacy_title = format!(
+    reconciliation_titles.push(format!(
         "[Auction] HV#{} {} {:02x}{:02x}{:02x}{:02x}",
         snapshot.sequence,
         forum_world_name(snapshot.world),
@@ -76,9 +103,7 @@ fn render_auction_thread_with_colors(
         digest[1],
         digest[2],
         digest[3]
-    );
-    let title =
-        format!("[Auction] {world_title} Equipment Auction - Session {:03}", snapshot.sequence);
+    ));
     let description = snapshot.scheduled_end_at.map_or_else(
         || {
             format!(
@@ -96,7 +121,7 @@ fn render_auction_thread_with_colors(
     );
     if title.len() > MAX_TITLE_BYTES
         || title.chars().count() > 50
-        || legacy_title.len() > MAX_TITLE_BYTES
+        || reconciliation_titles.iter().any(|candidate| candidate.chars().count() > 50)
         || description.len() > MAX_TITLE_BYTES
     {
         return Err(ForumRenderError::InvalidSnapshot);
@@ -279,10 +304,23 @@ fn render_auction_thread_with_colors(
     Ok(ForumRenderedThread {
         title,
         description,
-        legacy_title: Some(legacy_title),
+        reconciliation_titles,
         body: first.body,
         catalog_continuation: pages.collect(),
     })
+}
+
+fn topic_title(world: &str, sequence: i64, state: AuctionStatus) -> String {
+    let state = match state {
+        AuctionStatus::Draft => "Draft",
+        AuctionStatus::Preview => "Preview",
+        AuctionStatus::Live => "Live",
+        AuctionStatus::Final => "Final",
+        AuctionStatus::Settling => "Settling",
+        AuctionStatus::Settled => "Settled",
+        AuctionStatus::Cancelled => "Cancelled",
+    };
+    format!("[Auction] {world} #{sequence:03} ({state})")
 }
 
 /// 论坛主题渲染器；颜色规则来自 Admin runtime，渲染器本身无状态。

@@ -43,9 +43,14 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
   不再把未读 Inbox 中目标 MID 缺席当作成功（详情 GET 本身会标记已读）；缺少回执保持 `outcome_unknown`，不自动重寄。
   Take 证明身份不变、资产归零及唯一回执。
 - 论坛读取/写入：同 thread 规范分页与真实帖子/作者身份、完整页数；写入同源表单与精确 board/thread/post，
-  回执始终核对，原始正文额外确认由 Worker 的 `verify_post_body` 开关控制。
+  回执始终核对，原始正文额外确认由 Worker 的 `verify_post_body` 开关控制；启用时首帖同时精确核对编辑表单中的
+  真实标题与描述，不以正文相同或本地元数据代替标题证明。正文调试输出始终脱敏。
   HTTP 200 的创建回执与固定帖回执共用唯一 `Please stand by...` 标题、唯一 meta refresh 和一致同源链接证明；
   错误页中的普通主题链接不得产生 `Created`，证据缺失或冲突保留 `write_unknown`，不授权再次 POST。
+  标题使用 `[Auction] {Main|Isekai} #{sequence:03} ({state})`，状态直接来自同源数据库快照，最长合法序号仍不超过
+  50 字符。精确对账覆盖其余六种状态、合法长度的旧完整标题和旧 `HV#` 摘要标题；当前标题与候选合并为最多九个
+  精确标题，一次版面读取检查全部候选，不逐标题重复 GET。同名重复主题或候选指向不同主题一律失败关闭，
+  不进行模糊匹配，也不因状态变化自动新建主题。
 - 论坛 PM：新鲜 MID 表单绑定当前姓名与 sender，单次 POST 保存 Sent、不 tracking；完整有界遍历自己的同标题 Sent
   后核验收件人 UID、完整正文、sender 与 Sent MSID。
 

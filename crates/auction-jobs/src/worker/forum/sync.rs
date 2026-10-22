@@ -416,16 +416,10 @@ async fn find_reconciliation_topic(
     world: auction_domain::SettlementWorld,
     rendered: &ForumRenderedThread,
 ) -> Result<Option<ForumPublishedThread>, ApplicationError> {
-    if let Some(published) = publisher.find_topic_by_title(world, rendered.title.clone()).await? {
-        return Ok(Some(published));
-    }
-    let Some(legacy_title) = rendered.legacy_title.as_deref() else {
-        return Ok(None);
-    };
-    if legacy_title == rendered.title {
-        return Ok(None);
-    }
-    publisher.find_topic_by_title(world, legacy_title.to_owned()).await
+    // 一次版面读取同时检查当前及全部旧标题，不能按候选数放大读取与限速预算。
+    let titles =
+        std::iter::once(&rendered.title).chain(&rendered.reconciliation_titles).cloned().collect();
+    publisher.find_topic_by_titles(world, titles).await
 }
 
 async fn record_failure<C>(

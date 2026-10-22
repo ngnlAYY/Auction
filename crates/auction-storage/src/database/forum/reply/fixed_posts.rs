@@ -66,7 +66,7 @@ pub(super) async fn record_fixed_posts_update_postgres(
     .bind(topic.content_claim_fencing)
     .bind(processed_through_post_number)
     .bind((topic.catalog_continuation.len() + 1) as i32)
-    .bind(topic.confirmed_settled_version)
+    .bind(topic.confirmed_terminal_version)
     .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("写入论坛固定楼层正文证明失败"))?;
@@ -181,7 +181,7 @@ pub(super) async fn finish_topic_scan_postgres(
     .bind(topic.content_claim_fencing)
     .bind(processed_through_post_number)
     .bind((topic.catalog_continuation.len() + 1) as i32)
-    .bind(topic.confirmed_settled_version)
+    .bind(topic.confirmed_terminal_version)
     .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("完成论坛固定楼层扫描失败"))?;
@@ -197,12 +197,12 @@ async fn lock_terminal_version(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     topic: &ForumReplyTopic,
 ) -> Result<(), ApplicationError> {
-    let Some(version) = topic.confirmed_settled_version else { return Ok(()) };
+    let Some(version) = topic.confirmed_terminal_version else { return Ok(()) };
     if version <= 0 {
         return Err(storage_error("论坛终态证明版本无效"));
     }
     let matched = sqlx::query_scalar::<_, bool>(
-        "SELECT status = 'settled' AND state_version = $2
+        "SELECT status IN ('settled', 'cancelled') AND state_version = $2
          FROM public.auctions WHERE id = $1 FOR SHARE",
     )
     .bind(topic.auction_id.as_uuid())

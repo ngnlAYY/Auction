@@ -317,14 +317,14 @@ pub use forum_reply::{
 pub use forum_sync::{
     FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot, ForumCatalogLayout, ForumCredentialAvailability,
     ForumCurrentBidSource, ForumLotSettlement, ForumLotSnapshot, ForumPostWriter,
-    ForumPublishedLayout, ForumPublishedPost, ForumPublishedThread, ForumPublisher,
+    ForumPublishedLayout, ForumPublishedPost, ForumPublishedThread, ForumPublisher, ForumReadPost,
     ForumRemoteError, ForumRenderError, ForumRenderedPost, ForumRenderedThread, ForumRenderer,
     ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort, ForumSyncStore,
     ForumSystemLogEntry, ForumTopicMetadata, ForumTopicPublication, ForumWriteProgress,
     ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
-    MAX_FORUM_CATALOG_LOTS, MAX_FORUM_CATALOG_PAGES, MAX_FORUM_SYNC_RECOVERY_ITEMS,
-    forum_catalog_marker, forum_catalog_page_marker, forum_post_bodies_match,
-    forum_system_log_marker, forum_world_name,
+    MAX_FORUM_CATALOG_LOTS, MAX_FORUM_CATALOG_PAGES, MAX_FORUM_RECONCILIATION_TITLES,
+    MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_catalog_marker, forum_catalog_page_marker,
+    forum_post_bodies_match, forum_system_log_marker, forum_world_name,
 };
 pub use fulfillment::{
     SettlementDeliveryPreparation, SettlementFulfillmentActivationResult,

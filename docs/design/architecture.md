@@ -157,6 +157,8 @@ application 定分页端口，integrations 负责渲染/解析，jobs 负责顺�
 [图片契约](docs/contracts/routes.md#p22-自托管论坛倒计时)、
 [外部副作用契约](docs/contracts/invariants.md#i-08-外部写入发生在本地提交之后)与
 [Admin 设计](crates/auction-web-admin/DESIGN.md)。
+主题状态由 storage 同源快照投影，integrations 生成有界标题及精确历史候选，jobs 在一次论坛目录读取中对账并同步
+首帖元数据；取消仅刷新已有有效主题，不创建或继续导入竞价。完成证明复用终态版本字段，见上述外部副作用及 schema 契约。
 
 ## 配置与数据保护
 

@@ -5,11 +5,12 @@ use std::collections::VecDeque;
 
 use super::forms::{
     PostForm, TopicForm, body_looks_like_html, build_forum_http_client, clean_line, cookie_header,
-    fixed_post_form_values, form_selector, hidden_input_selector, is_loopback_host,
-    is_session_expired, link_selector, optional_query_identity, origin_of, post_body_selector,
-    posting_action_matches_board, posting_action_matches_target, posting_form_values, same_origin,
-    set_form_value, topic_title_selector, valid_cookie, valid_post_id, valid_rendered_post,
-    valid_rendered_thread, valid_topic_description, valid_topic_id, valid_topic_title,
+    fixed_post_form_values, fixed_post_metadata, form_selector, hidden_input_selector,
+    is_loopback_host, is_session_expired, link_selector, optional_query_identity, origin_of,
+    post_body_selector, posting_action_matches_board, posting_action_matches_target,
+    posting_form_values, same_origin, set_form_value, topic_title_selector, valid_cookie,
+    valid_post_id, valid_rendered_post, valid_rendered_thread, valid_topic_description,
+    valid_topic_id, valid_topic_title, valid_topic_titles,
 };
 use super::*;
 
@@ -212,20 +213,16 @@ impl EhentaiClient {
             return Err(EhentaiError::configuration(operation));
         }
         let (board_id, board_url, existing) = self
-            .find_topic_by_title_with_operation(world, cookie, &rendered.title, operation)
+            .find_topic_by_titles_with_operation(
+                world,
+                cookie,
+                &rendered.title,
+                &rendered.reconciliation_titles,
+                operation,
+            )
             .await?;
         if let Some(published) = existing {
             return Ok(auction_application::ForumTopicPublication::Existing(published));
-        }
-        if let Some(legacy_title) =
-            rendered.legacy_title.as_deref().filter(|legacy_title| *legacy_title != rendered.title)
-        {
-            let (_, _, legacy_existing) = self
-                .find_topic_by_title_with_operation(world, cookie, legacy_title, operation)
-                .await?;
-            if let Some(published) = legacy_existing {
-                return Ok(auction_application::ForumTopicPublication::Existing(published));
-            }
         }
 
         let form = self.load_topic_form(board_id, &board_url, cookie).await?;
@@ -234,39 +231,48 @@ impl EhentaiClient {
             .map(auction_application::ForumTopicPublication::Created)
     }
 
-    /// 只读按精确标题查找主题；该入口永远不会加载发帖表单或发送 POST。
-    pub async fn find_topic_by_title(
+    /// 一次版面读取核对全部精确标题及唯一主题身份；永远不加载发帖表单或发送 POST。
+    pub async fn find_topic_by_titles(
         &self,
         world: SettlementWorld,
         cookie: &EhentaiCookie,
-        title: &str,
+        titles: &[String],
     ) -> Result<Option<auction_application::ForumPublishedThread>, EhentaiError> {
+        let (title, reconciliation_titles) = titles
+            .split_first()
+            .ok_or_else(|| EhentaiError::configuration(EhentaiOperation::ReconcileTopic))?;
         let (_, _, published) = self
-            .find_topic_by_title_with_operation(
+            .find_topic_by_titles_with_operation(
                 world,
                 cookie,
                 title,
+                reconciliation_titles,
                 EhentaiOperation::ReconcileTopic,
             )
             .await?;
         Ok(published)
     }
 
-    async fn find_topic_by_title_with_operation(
+    async fn find_topic_by_titles_with_operation(
         &self,
         world: SettlementWorld,
         cookie: &EhentaiCookie,
         title: &str,
+        reconciliation_titles: &[String],
         operation: EhentaiOperation,
     ) -> Result<(i32, Url, Option<auction_application::ForumPublishedThread>), EhentaiError> {
-        if !self.valid_for() || !valid_cookie(cookie) || !valid_topic_title(title) {
+        if !self.valid_for()
+            || !valid_cookie(cookie)
+            || !valid_topic_titles(title, reconciliation_titles)
+        {
             return Err(EhentaiError::configuration(operation));
         }
         let board_id = self.board_for_world(world, operation)?;
         let board_value = board_id.to_string();
         let board_url = self.index_url(&[("showforum", board_value.as_str())], operation)?;
         let (body, _) = self.get_page(operation, board_url.clone(), None, cookie).await?;
-        let published = self.find_topic(&board_url, board_id, title, &body, operation)?;
+        let published =
+            self.find_topic(&board_url, board_id, title, reconciliation_titles, &body, operation)?;
         Ok((board_id, board_url, published))
     }
 
@@ -374,6 +380,13 @@ impl EhentaiClient {
         }
         let board_id = self.board_for_world(world, operation)?;
         let form = self.load_edit_form(board_id, thread_id, post_id, cookie).await?;
+        if metadata
+            .is_some_and(|metadata| metadata.title.is_some() || metadata.description.is_some())
+            && form.metadata.is_none()
+        {
+            // 缺少首帖元数据字段时不能假定服务器会接受额外标题字段。
+            return Err(EhentaiError::protocol(operation, false));
+        }
         self.submit_fixed_post(
             form,
             board_id,
@@ -389,15 +402,15 @@ impl EhentaiClient {
         .await
     }
 
-    /// 读取编辑表单中由服务器返回的原始 BBCode，作为固定楼层写入后的精确正文证明。
-    pub async fn read_post_body(
+    /// 读取已校验编辑表单的原始 BBCode 与首帖元数据，不能以正文代替标题证明。
+    pub async fn read_post(
         &self,
         world: SettlementWorld,
         thread_id: &str,
         post_id: &str,
         cookie: &EhentaiCookie,
-    ) -> Result<ForumRenderedPost, EhentaiError> {
-        let operation = EhentaiOperation::ReadPostBody;
+    ) -> Result<ForumReadPost, EhentaiError> {
+        let operation = EhentaiOperation::ReadPost;
         if !self.valid_for()
             || !valid_cookie(cookie)
             || !valid_topic_id(thread_id)
@@ -411,7 +424,7 @@ impl EhentaiClient {
         if !valid_rendered_post(&body) {
             return Err(EhentaiError::protocol(operation, false));
         }
-        Ok(body)
+        Ok(ForumReadPost { body: body.body, metadata: form.metadata })
     }
 }
 

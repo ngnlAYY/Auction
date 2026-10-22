@@ -4,11 +4,13 @@ use auction_application::{
     ApplicationError, ForumAuctionSnapshot, ForumCurrentBidSource, ForumLotSnapshot,
     ForumSyncClaim, PublicEquipment, PublicEquipmentLinkTarget, forum_world_name,
 };
-use auction_domain::{AuctionId, EquipmentId, SettlementWorld};
+use auction_domain::{AuctionId, AuctionStatus, EquipmentId, SettlementWorld};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::super::super::{PostgresStore, lots::map_forum_equipment};
+use super::super::super::{
+    PostgresStore, competition::parse_auction_status, lots::map_forum_equipment,
+};
 use super::validation::{lot_code, parse_world, storage_error};
 
 #[path = "settlement.rs"]
@@ -35,6 +37,7 @@ pub(super) async fn load_snapshot_postgres(
            AND sync.source_revision = $5
            AND sync.status = 'publishing'
            AND sync.lease_expires_at > CURRENT_TIMESTAMP
+           AND auction.status IN ('live', 'final', 'settling', 'settled')
            AND auction.state_version = sync.source_revision",
     )
     .bind(claim.auction_id.as_uuid())
@@ -93,7 +96,13 @@ async fn read_snapshot(
          FROM public.auctions AS auction
          JOIN public.auction_forum_sync AS sync ON sync.auction_id = auction.id
          LEFT JOIN public.auction_settlements AS settlement ON settlement.auction_id = auction.id
-         WHERE auction.id = $1",
+         WHERE auction.id = $1
+           AND auction.status <> 'draft'
+           AND (auction.status NOT IN ('preview', 'cancelled')
+                OR (sync.status = 'published'
+                    AND sync.thread_id IS NOT NULL
+                    AND sync.catalog_post_id IS NOT NULL
+                    AND sync.system_log_post_id IS NOT NULL))",
     )
     .bind(requested_auction_id.as_uuid())
     .fetch_optional(&mut **transaction)
@@ -124,7 +133,9 @@ async fn read_snapshot(
 
     let auction_status: String =
         auction_row.try_get("auction_status").map_err(|_| storage_error("读取论坛拍卖状态失败"))?;
-    let settled = auction_status == "settled";
+    let state = parse_auction_status(auction_status)
+        .map_err(|_| storage_error("论坛拍卖状态不在闭集内"))?;
+    let settled = state == AuctionStatus::Settled;
     let settled_auction_id: Option<Uuid> = auction_row
         .try_get("settled_auction_id")
         .map_err(|_| storage_error("读取论坛结算汇总证明失败"))?;
@@ -181,10 +192,14 @@ async fn read_snapshot(
           AND forum_command.auction_id = l.auction_id
           AND forum_command.command_kind = 'bid'
          WHERE l.auction_id = $1
-           AND l.status IN ('live', 'sold', 'unsold')
+           AND (($2 AND l.status = 'pending')
+                OR ($3 AND l.status = 'withdrawn')
+                OR (NOT $2 AND NOT $3 AND l.status IN ('live', 'sold', 'unsold')))
          ORDER BY l.lot_number, l.id",
     )
     .bind(auction_id)
+    .bind(state == AuctionStatus::Preview)
+    .bind(state == AuctionStatus::Cancelled)
     .fetch_all(&mut **transaction)
     .await
     .map_err(|_| storage_error("读取论坛快照 lot 失败"))?;
@@ -302,7 +317,7 @@ async fn read_snapshot(
         world,
         sequence,
         state_version,
-        settled,
+        state,
         scheduled_open_at,
         opened_at,
         scheduled_end_at,
