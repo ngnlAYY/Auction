@@ -10,6 +10,8 @@ static HIDDEN_INPUT_SELECTOR: LazyLock<Result<Selector, ()>> =
     LazyLock::new(|| Selector::parse("input[type='hidden'][name]").map_err(|_| ()));
 static TOPIC_TITLE_SELECTOR: LazyLock<Result<Selector, ()>> =
     LazyLock::new(|| Selector::parse("[name='TopicTitle']").map_err(|_| ()));
+static TOPIC_METADATA_SELECTOR: LazyLock<Result<Selector, ()>> =
+    LazyLock::new(|| Selector::parse("[name='TopicTitle'], [name='TopicDesc']").map_err(|_| ()));
 static POST_BODY_SELECTOR: LazyLock<Result<Selector, ()>> =
     LazyLock::new(|| Selector::parse("[name='Post']").map_err(|_| ()));
 static LINK_SELECTOR: LazyLock<Result<Selector, ()>> =
@@ -59,6 +61,8 @@ pub(super) struct PostForm {
     pub(super) values: Vec<(String, String)>,
     /// 服务端编辑表单中的原始 BBCode；回复表单通常为空。
     pub(super) body: String,
+    /// 只有首帖编辑表单携带主题标题与描述；不从本地期望值补齐。
+    pub(super) metadata: Option<ForumTopicMetadata>,
 }
 
 pub(super) fn posting_form_values(
@@ -128,6 +132,35 @@ pub(super) fn fixed_post_form_values(
     Some(values)
 }
 
+pub(super) fn fixed_post_metadata(
+    form: scraper::ElementRef<'_>,
+) -> Result<Option<ForumTopicMetadata>, ()> {
+    let selector = cached_selector(&TOPIC_METADATA_SELECTOR)?;
+    let mut title = None;
+    let mut description = None;
+    for field in form.select(selector) {
+        if field.value().name() != "input" {
+            return Err(());
+        }
+        let value = field.value().attr("value").ok_or(())?;
+        let destination = match field.value().attr("name") {
+            Some("TopicTitle") if valid_topic_title(value) => &mut title,
+            Some("TopicDesc") if valid_topic_description(value) => &mut description,
+            _ => return Err(()),
+        };
+        if destination.replace(value.to_owned()).is_some() {
+            return Err(());
+        }
+    }
+    match (title, description) {
+        (None, None) => Ok(None),
+        (Some(title), Some(description)) => {
+            Ok(Some(ForumTopicMetadata { title: Some(title), description: Some(description) }))
+        }
+        _ => Err(()),
+    }
+}
+
 pub(super) fn posting_action_matches_board(action: &Url, board_id: i32) -> bool {
     let wanted = board_id.to_string();
     optional_query_identity(action, &["f", "showforum"])
@@ -191,9 +224,8 @@ pub(super) fn valid_cookie(cookie: &EhentaiCookie) -> bool {
 
 pub(super) fn valid_rendered_thread(rendered: &ForumRenderedThread) -> bool {
     let body = rendered.body.trim();
-    valid_topic_title(&rendered.title)
+    valid_topic_titles(&rendered.title, &rendered.reconciliation_titles)
         && valid_topic_description(&rendered.description)
-        && rendered.legacy_title.as_deref().is_none_or(valid_topic_title)
         && rendered.catalog_continuation.len() < auction_application::MAX_FORUM_CATALOG_PAGES
         && rendered.catalog_continuation.iter().all(valid_rendered_post)
         && !body.is_empty()
@@ -219,6 +251,16 @@ pub(super) fn valid_topic_title(title: &str) -> bool {
         && title == title.trim()
         && title.chars().count() <= MAXIMUM_FORUM_TITLE_RUNES
         && title.chars().all(|character| !character.is_control())
+}
+
+pub(super) fn valid_topic_titles(title: &str, reconciliation_titles: &[String]) -> bool {
+    valid_topic_title(title)
+        && reconciliation_titles.len() <= MAX_FORUM_RECONCILIATION_TITLES
+        && reconciliation_titles.iter().enumerate().all(|(index, candidate)| {
+            valid_topic_title(candidate)
+                && candidate != title
+                && !reconciliation_titles[..index].contains(candidate)
+        })
 }
 
 pub(super) fn valid_topic_description(description: &str) -> bool {

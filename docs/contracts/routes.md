@@ -141,7 +141,7 @@ SQL 与用例 owner 为 lot-watch preference，不是每 lot 设置。GET/PUT �
 
 `list.svg` 为 List Timer：实际 `opened_at` 优先，否则 `scheduled_open_at`；`auction.svg` 为 Auction Timer：使用本场 `scheduled_end_at`，不合并单件 soft-close。图片固定英文标题、日/时/分/秒、UTC 日期及 `Closed`/`Ended` 终态，不接受标题、时间、任意 SVG、外链字体或其他自由文本。成功类型 `image/svg+xml; charset=utf-8`，不包 JSON；HEAD 无响应体，其他方法 JSON 405；非法 UUID/query 400，未知计时器、缺场次或隐藏场次 404，未装配/失败 503。
 
-剩余时间由数据库时钟在加载时计算，CSS 离散动画每秒换字，到期隐藏数字并显示终态，不运行 JavaScript、不维持连接或轮询；数字节点数不随剩余秒数增长，天数最多六位，输出至多 32 KiB；减少动态效果或不支持动画时只显示绝对日期兜底。已打开图片不会得知后续改期或状态变化，须刷新重读；此展示不能决定竞价资格、结算或单件截止。浏览器 `Cache-Control` 和两种 CDN 头均 `no-store`，不使用 ETag/Last-Modified/304；只有成功图片的私有响应标记启用 `Cross-Origin-Resource-Policy: cross-origin` 并将 CSP 收紧到禁止脚本/外部资源、仅允许内联样式，不允许 iframe、不放宽其他 API 或站点 CSP，也不依赖 Origin/Referer/Cookie 才能展示。论坛首帖从已配置公开 origin 生成同源图片链接并保留 `#.png` 兼容后缀，实际格式仍为 SVG；未配置公开 origin 时由首帖时间列表兜底，不回退第三方服务。上线顺序与 CDN 要求见[部署手册](ops/README.md#cloudflare-整站代理)。
+剩余时间由数据库时钟在加载时计算，CSS 离散动画每秒换字，到期隐藏数字并显示终态，不运行 JavaScript、不维持连接或轮询；数字节点数不随剩余秒数增长，天数最多六位，输出至多 32 KiB。计时数字默认可见，减少动态效果也保留逐秒变化，不发生滑动或闪烁；不支持或禁用动画时显示加载时的剩余数字快照，需刷新更新，UTC 截止始终保留。已打开图片不会得知后续改期或状态变化，须刷新重读；此展示不能决定竞价资格、结算或单件截止。浏览器 `Cache-Control` 和两种 CDN 头均 `no-store`，不使用 ETag/Last-Modified/304；只有成功图片的私有响应标记启用 `Cross-Origin-Resource-Policy: cross-origin` 并将 CSP 收紧到禁止脚本/外部资源、仅允许内联样式，不允许 iframe、不放宽其他 API 或站点 CSP，也不依赖 Origin/Referer/Cookie 才能展示。论坛首帖从已配置公开 origin 生成同源图片链接并保留 `#.png` 兼容后缀，实际格式仍为 SVG；未配置公开 origin 时由首帖时间列表兜底，不回退第三方服务。上线顺序与 CDN 要求见[部署手册](ops/README.md#cloudflare-整站代理)。
 
 ### P21 论坛同步开关
 

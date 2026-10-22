@@ -309,8 +309,8 @@ Caddy 保持原运行用户，在它的 systemd drop-in 设置 `SupplementaryGro
 完整字段见[Worker 模板](ops/config/examples/worker.toml)。Forum 独立循环“发布 → 回帖导入”，阶段失败不跳过后续阶段；默认
 周期 300 秒、抖动最多 5 秒，分页默认 10、硬上限 20，超限失败不截断出价。`worker.forum.verify_post_body` 默认 `false`
 （省略也关闭），同步发布及回帖刷新都不额外回读/逐字校验原始 BBCode；设为 `true` 才启用写前、写后及未知结果恢复的严格
-正文确认，比较规则见[外部写入契约](docs/contracts/invariants.md#i-08-外部写入发生在本地提交之后)。关闭时保留真实固定帖
-身份、POST 回执、幂等及人工写入门禁，但本地目标镜像不保证远端正文一致；历史未知结果不能仅凭现存帖子 ID 自动完成，
+正文及首帖标题/说明确认，比较规则见[外部写入契约](docs/contracts/invariants.md#i-08-外部写入发生在本地提交之后)。关闭时保留真实固定帖
+身份、POST 回执、幂等及人工写入门禁，但本地目标镜像不保证远端内容一致；历史未知结果不能仅凭现存帖子 ID 自动完成，
 关闭时同步转人工授权、回帖刷新保留未知门禁。该开关不受 `operations.forum` 接管，修改须重启 Worker，已有人工授权门禁不
 自动清空；显式填写新字段前须更新会读取 Worker 配置的程序（包括 auctionctl），旧程序严格拒绝未知字段。item timeout 须覆盖
 领取等待、分页、写入和间隔且小于 lease；发布和回帖导入均从领取前计算截止，不在拿到 claim 后重置预算。

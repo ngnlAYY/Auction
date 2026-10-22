@@ -27,7 +27,7 @@ WASM 分别内嵌；数据库仅 PostgreSQL，Redis 默认关闭。原生程序�
 | [auction-server](apps/auction-server/README.md) | 可选单文件 supervisor，自管三角色子进程 | 沿用 Public/Admin 两个入口 |
 默认分体发布；合并模式仅用于 Linux/PostgreSQL 单主机，auctionctl 仍独立。角色文件用 AUCTION_CONFIG_FILE 选择，合并服务用
 --config-dir 并拒绝该环境变量；配置分层、权限、首次设置及停机迁移见[运维手册](ops/README.md)，普通启动不隐式迁移。论坛新主题目录
-每帖最多 150 件并连续分页、更新楼位于目录之后，首帖倒计时图片由本站 Rust Public 服务生成且只展示计划时间；账户“竞价警告”默认
+每帖最多 150 件并连续分页、更新楼位于目录之后，标题末尾显示真实拍卖状态；首帖倒计时由本站 Rust Public 服务生成，显示计划截止的剩余时长。账户“竞价警告”默认
 MM 或论坛 PM 并按领先周期跨渠道去重，受控升级须追加 `000042`；入口支持 Cloudflare 橙云 → Caddy HTTPS → Unix socket，仅静态资源
 允许 CDN 缓存，细节见[玩家指南](docs/guide/player-guide.md)与[部署约束](ops/README.md#cloudflare-整站代理)及[技术栈](docs/design/tech-stack.md)。
 

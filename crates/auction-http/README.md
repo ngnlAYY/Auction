@@ -35,6 +35,7 @@ P12 成交价编号页的 `sort` 仅接受 `closed_desc`（默认）、`closed_a
 
 [public/countdown](crates/auction-http/src/http/public/countdown) 拥有论坛动态 SVG 的 HTTP、固定英文视图及有界 CSS 动画，
 复用公开时间窄端口，无 JS、外链资源或会话依赖（见[图片契约](docs/contracts/routes.md#p22-自托管论坛倒计时)）。
+计时数字默认可见；减少动态效果仍逐秒离散换字，不发生滑动或闪烁。动画不可用时保留加载时的数字快照和 UTC 截止。
 [routes/public/watch.rs](crates/auction-http/src/http/routes/public/watch.rs) 拥有 P23/P24 装备标记列表与 CAS 写入，
 [routes/public/watch_preference.rs](crates/auction-http/src/http/routes/public/watch_preference.rs) 拥有 P25/P26 账号渠道
 GET/PUT：两者复用会话、来源/CSRF、限流、strict JSON、JSON 405 与 `no-store`，不接收客户端 user_id；

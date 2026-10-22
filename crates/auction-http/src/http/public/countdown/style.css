@@ -26,9 +26,6 @@ text {
   font-size: 24px;
   font-weight: 700;
 }
-.countdown-fallback {
-  font-size: 18px;
-}
 .countdown-unit {
   font-size: 9px;
 }
@@ -48,20 +45,14 @@ text {
   from { visibility: hidden; }
   to { visibility: visible; }
 }
-/* 逐秒离散换字，不做滑动或闪烁；减少动态效果时保留绝对时间兜底。 */
-@media (prefers-reduced-motion: no-preference) {
-  @supports (animation: countdown-roll 1s steps(2, end) infinite) {
-    .countdown-running {
-      display: inline;
-      animation: countdown-expire var(--remaining) step-end forwards;
-    }
-    .countdown-finished {
-      display: inline;
-      visibility: hidden;
-      animation: countdown-complete var(--remaining) step-end forwards;
-    }
-    .countdown-fallback {
-      display: none;
-    }
+/* 数字变化承载剩余时间，steps 不产生滑动或闪烁；减少动态效果时也不能隐藏计时信息。 */
+@supports (animation: countdown-roll 1s steps(2, end) infinite) {
+  .countdown-running {
+    animation: countdown-expire var(--remaining) step-end forwards;
+  }
+  .countdown-finished {
+    display: inline;
+    visibility: hidden;
+    animation: countdown-complete var(--remaining) step-end forwards;
   }
 }

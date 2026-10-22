@@ -45,15 +45,15 @@ impl EhentaiGateway {
         Err(EhentaiError::credential(EhentaiOperation::CreateTopic))
     }
 
-    /// 只读按精确标题查找主题；读侧 session 过期时可安全轮换 Cookie。
-    pub async fn find_topic_by_title(
+    /// 只读按有界精确标题集合查找唯一主题；读侧 session 过期时可安全轮换 Cookie。
+    pub async fn find_topic_by_titles(
         &self,
         world: SettlementWorld,
-        title: &str,
+        titles: &[String],
     ) -> Result<Option<auction_application::ForumPublishedThread>, EhentaiError> {
         let mut session = self.credentials.begin()?;
         for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
-            match self.client.find_topic_by_title(world, session.cookie(), title).await {
+            match self.client.find_topic_by_titles(world, session.cookie(), titles).await {
                 Ok(published) => return Ok(published),
                 Err(error) if error.is_session_expired() => {
                     if session.invalidate_current().await.is_err() || session.advance().is_err() {
@@ -149,20 +149,20 @@ impl EhentaiGateway {
         Err(EhentaiError::credential(EhentaiOperation::EditPost))
     }
 
-    /// 只读回读固定楼层原始 BBCode；session 过期时可以安全轮换 Cookie。
-    pub async fn read_post_body(
+    /// 只读回读固定楼层原始 BBCode 与首帖元数据；session 过期时可以安全轮换 Cookie。
+    pub async fn read_post(
         &self,
         world: SettlementWorld,
         thread_id: &str,
         post_id: &str,
-    ) -> Result<ForumRenderedPost, EhentaiError> {
+    ) -> Result<ForumReadPost, EhentaiError> {
         let mut session = self.credentials.begin()?;
         for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
-            match self.client.read_post_body(world, thread_id, post_id, session.cookie()).await {
+            match self.client.read_post(world, thread_id, post_id, session.cookie()).await {
                 Ok(body) => return Ok(body),
                 Err(error) if error.is_session_expired() => {
                     if session.invalidate_current().await.is_err() || session.advance().is_err() {
-                        return Err(EhentaiError::credential(EhentaiOperation::ReadPostBody));
+                        return Err(EhentaiError::credential(EhentaiOperation::ReadPost));
                     }
                 }
                 Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
@@ -172,7 +172,7 @@ impl EhentaiGateway {
                 Err(error) => return Err(error),
             }
         }
-        Err(EhentaiError::credential(EhentaiOperation::ReadPostBody))
+        Err(EhentaiError::credential(EhentaiOperation::ReadPost))
     }
 }
 
@@ -245,13 +245,13 @@ impl fmt::Debug for EhentaiGateway {
 }
 
 impl ForumPublisher for EhentaiGateway {
-    fn find_topic_by_title(
+    fn find_topic_by_titles(
         &self,
         world: SettlementWorld,
-        title: String,
+        titles: Vec<String>,
     ) -> ApplicationFuture<'_, Option<ForumPublishedThread>> {
         Box::pin(async move {
-            EhentaiGateway::find_topic_by_title(self, world, &title)
+            EhentaiGateway::find_topic_by_titles(self, world, &titles)
                 .await
                 .map_err(EhentaiError::into_application_error)
         })
@@ -326,14 +326,14 @@ impl ForumPostWriter for EhentaiGateway {
         })
     }
 
-    fn read_post_body(
+    fn read_post(
         &self,
         world: SettlementWorld,
         thread_id: String,
         post_id: String,
-    ) -> ApplicationFuture<'_, ForumRenderedPost> {
+    ) -> ApplicationFuture<'_, ForumReadPost> {
         Box::pin(async move {
-            EhentaiGateway::read_post_body(self, world, &thread_id, &post_id)
+            EhentaiGateway::read_post(self, world, &thread_id, &post_id)
                 .await
                 .map_err(EhentaiError::into_application_error)
         })

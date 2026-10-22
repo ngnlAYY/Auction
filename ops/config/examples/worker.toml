@@ -121,7 +121,7 @@ socket_path = "/run/hv-auction/worker/control.sock"
 [worker.forum]
 # 可选：是否启用主题创建/幂等查找；默认 false。
 enabled = false
-# 可选：是否额外逐字校验固定帖原始 BBCode；默认 false，帖子身份和写入回执始终校验。
+# 可选：是否额外逐字校验固定帖 BBCode 及首帖标题/说明；默认 false，帖子身份和写入回执始终校验。
 verify_post_body = false
 # 可选：active ForumCookie 凭据 scope，可填 main、isekai 或 shared；默认 shared。
 credential_world = "shared"

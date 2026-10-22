@@ -11,7 +11,7 @@ pub enum EhentaiOperation {
     FetchTopic,
     ReplyTopic,
     EditPost,
-    ReadPostBody,
+    ReadPost,
 }
 
 impl EhentaiOperation {
@@ -23,7 +23,7 @@ impl EhentaiOperation {
             Self::FetchTopic => "fetch_topic",
             Self::ReplyTopic => "reply_topic",
             Self::EditPost => "edit_post",
-            Self::ReadPostBody => "read_post_body",
+            Self::ReadPost => "read_post",
         }
     }
 }

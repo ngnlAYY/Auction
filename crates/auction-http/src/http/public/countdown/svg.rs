@@ -53,7 +53,7 @@ pub(super) fn render(
     let mut body = String::with_capacity(16_384);
     write!(
         body,
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"124\" viewBox=\"0 0 320 124\" role=\"img\" aria-labelledby=\"timer-title timer-description\"><title id=\"timer-title\">{title}</title><desc id=\"timer-description\">Deadline: {deadline_text}. Planned time only; individual lots may extend. Refresh to read schedule changes; the auction website remains authoritative.</desc>"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"124\" viewBox=\"0 0 320 124\" role=\"img\" aria-labelledby=\"timer-title timer-description\"><title id=\"timer-title\">{title}</title><desc id=\"timer-description\">Deadline: {deadline_text}. Planned time only; individual lots may extend. Without animation, the numbers show the remaining time when loaded. Refresh to read schedule changes; the auction website remains authoritative.</desc>"
     )?;
     write!(body, "<style>{}</style>", include_str!("style.css"))?;
     body.push_str(
@@ -71,10 +71,6 @@ pub(super) fn render(
     });
     match remaining_ms {
         Some(remaining_ms) if remaining_ms > 0 => {
-            // 无动画支持或减少动态效果时只显示日期，不展示停止更新的剩余秒数。
-            body.push_str(
-                "<text class=\"countdown-fallback\" x=\"160\" y=\"66\">See deadline below</text>",
-            );
             write_running(&mut body, remaining_ms)?;
             write!(
                 body,

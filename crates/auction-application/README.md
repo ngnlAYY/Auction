@@ -159,10 +159,15 @@ Public lot 查询允许装备分组与类型组合筛选，应用投影为预览
 或内容版本推算；`ForumTopicPublication` 区分真实创建回执与找到既有主题，Admin 状态读取复用公开安全投影端口而不获得
 写入能力。同步端口冻结历史单页/新分页布局与新主题每帖 150 件的目录页大小、续页正文/身份与系统日志楼层，
 `ForumCatalogPage` 的调试正文始终脱敏；终态完成版本由 Worker 在全固定帖证明后填入 claim 的
-`confirmed_settled_version`，storage 必须锁内复核。`ForumReplyTopic` 持有有序续页证明，全部固定帖确认后才以同一版本推进处理水位；`ForumAuctionSnapshot.settled` 只代表
-权威结算状态及齐备明细，`ForumLotSettlement` 携带连续领先起点与持久 adjustment_ppm。`ForumCommandOutcome` 分开携带
-持久错误码及本地有界诊断，Worker
-只能生成白名单英文提示；未知论坛写入只能先只读对账，再按持久人工授权重试
+`confirmed_terminal_version`，storage 必须锁内复核 settled/cancelled 及同一版本。`ForumReplyTopic` 持有有序续页证明，
+全部固定帖确认后才以同一版本推进处理水位；`ForumAuctionSnapshot.state` 使用领域 `AuctionStatus`，来自同一数据库快照，
+不由截止时间推断；Settled 仍要求完整权威结算证明，`ForumLotSettlement` 携带连续领先起点与持久 adjustment_ppm。
+`ForumRenderedThread.reconciliation_titles` 最多携带八个去重的旧版/其他状态精确标题，不重复当前标题；
+`ForumPublisher::find_topic_by_titles` 将当前标题与候选合并为最多九个精确标题，一次版面读取核对唯一主题；
+未知写入不会逐标题重复 GET，也不能隐式创建新主题。
+`ForumReadPost` 从远端编辑表单携带原始正文及首帖标题/说明，调试正文脱敏，未知写入不能用本地标题替代证明。
+`ForumCommandOutcome` 分开携带持久错误码及本地有界诊断，Worker 只能生成白名单英文提示；
+未知论坛写入只能先只读对账，再按持久人工授权重试
 （见[外部写入不变量](docs/contracts/invariants.md#i-08-外部写入发生在本地提交之后)）。审计、邮件、实时和 dashboard
 端口只返回有界安全投影。
 

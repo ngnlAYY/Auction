@@ -13,12 +13,15 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use auction_domain::{AuctionId, SettlementWorld};
+use auction_domain::{AuctionId, AuctionStatus, SettlementWorld};
 
 use super::{ApplicationFuture, PublicEquipmentGameLink, PublicEquipmentLinkTarget, RequestHash};
 
 /// 运维侧单次最多列出的论坛未知写入恢复项数。
 pub const MAX_FORUM_SYNC_RECOVERY_ITEMS: u16 = 100;
+
+/// 当前状态之外的六个状态标题，以及两种历史标题；只用于精确只读对账。
+pub const MAX_FORUM_RECONCILIATION_TITLES: usize = 8;
 
 /// 每个目录帖子最多展示的装备件数。
 pub const FORUM_CATALOG_PAGE_SIZE: usize = 150;
@@ -206,8 +209,8 @@ pub struct ForumAuctionSnapshot {
     pub world: SettlementWorld,
     pub sequence: i64,
     pub state_version: i64,
-    /// 仅权威 settled 状态且全部结算明细齐备时为 true，不由墙钟推断。
-    pub settled: bool,
+    /// 与拍品来自同一权威快照，不由墙钟推断；Settled 仍须具备完整结算证明。
+    pub state: AuctionStatus,
     pub scheduled_open_at: DateTime<Utc>,
     pub opened_at: Option<DateTime<Utc>>,
     pub scheduled_end_at: Option<DateTime<Utc>>,
@@ -223,8 +226,8 @@ pub struct ForumRenderedThread {
     pub title: String,
     /// 远端 Topic Description；只放时间等主题备注，不混入目录正文。
     pub description: String,
-    /// 旧版标题兼容值；仅用于标题迁移期间的精确只读对账。
-    pub legacy_title: Option<String>,
+    /// 有界、去重的旧版及其他状态标题；不含当前标题，只用于精确只读对账。
+    pub reconciliation_titles: Vec<String>,
     pub body: String,
     /// 从 #2 起依次发布的目录续页；系统日志必须位于这些页面之后。
     pub catalog_continuation: Vec<ForumRenderedPost>,
@@ -248,7 +251,7 @@ impl fmt::Debug for ForumRenderedThread {
             .debug_struct("ForumRenderedThread")
             .field("title", &self.title)
             .field("description", &self.description)
-            .field("legacy_title", &self.legacy_title)
+            .field("reconciliation_titles", &self.reconciliation_titles)
             .field("body", &"[REDACTED]")
             .field("catalog_continuation", &self.catalog_continuation)
             .finish()
@@ -277,6 +280,41 @@ pub enum ForumTopicPublication {
 pub struct ForumTopicMetadata {
     pub title: Option<String>,
     pub description: Option<String>,
+}
+
+/// 从精确帖子编辑表单取得的原始正文与主题元数据；只有首帖携带元数据。
+#[derive(Clone, PartialEq, Eq)]
+pub struct ForumReadPost {
+    pub body: String,
+    pub metadata: Option<ForumTopicMetadata>,
+}
+
+impl ForumReadPost {
+    /// 正文只兼容末尾换行差异；指定的主题字段必须与远端编辑表单逐字一致。
+    pub fn matches(&self, body: &str, metadata: Option<&ForumTopicMetadata>) -> bool {
+        forum_post_bodies_match(&self.body, body)
+            && metadata.is_none_or(|expected| {
+                self.metadata.as_ref().is_some_and(|observed| {
+                    expected
+                        .title
+                        .as_ref()
+                        .is_none_or(|title| observed.title.as_ref() == Some(title))
+                        && expected.description.as_ref().is_none_or(|description| {
+                            observed.description.as_ref() == Some(description)
+                        })
+                })
+            })
+    }
+}
+
+impl fmt::Debug for ForumReadPost {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ForumReadPost")
+            .field("body", &"[REDACTED]")
+            .field("metadata", &self.metadata)
+            .finish()
+    }
 }
 
 /// 远端论坛单个帖子的稳定身份。
@@ -374,11 +412,12 @@ pub trait ForumSyncRecoveryPort: Send + Sync {
 
 /// 论坛远程发布/读取端口；实现必须自行处理固定 origin、限速和认证边界。
 pub trait ForumPublisher: Send + Sync {
-    /// 只读按精确标题查找远端主题；未知写入恢复只能调用该方法，不能隐式创建主题。
-    fn find_topic_by_title(
+    /// 在一次版面读取内按 1 至 9 个去重精确标题查找唯一主题；多个匹配身份必须失败关闭。
+    /// 未知写入恢复只能调用该只读方法，不能隐式创建主题或逐标题重复请求。
+    fn find_topic_by_titles(
         &self,
         world: SettlementWorld,
-        title: String,
+        titles: Vec<String>,
     ) -> ApplicationFuture<'_, Option<ForumPublishedThread>>;
 
     /// 创建或找到既有主题，必须明确本轮是否实际完成创建 POST。
@@ -420,14 +459,15 @@ pub trait ForumPostWriter: Send + Sync {
         progress: ForumWriteProgress,
     ) -> ApplicationFuture<'_, ForumPublishedPost>;
 
-    /// 从已校验的编辑表单读取服务端保存的原始 BBCode；只读操作允许轮换失效凭据。
-    /// 启用正文校验时统一通过 [`forum_post_bodies_match`] 比较，不得用布局标记或本地版本替代。
-    fn read_post_body(
+    /// 从已校验的编辑表单读取原始 BBCode 与首帖标题/说明；只读操作允许轮换失效凭据。
+    /// 启用正文校验时统一通过 [`forum_post_bodies_match`] 比较，元数据须精确核对。
+    /// 未知写入不得用布局标记、本地版本或本地标题替代远端证明。
+    fn read_post(
         &self,
         world: SettlementWorld,
         thread_id: String,
         post_id: String,
-    ) -> ApplicationFuture<'_, ForumRenderedPost>;
+    ) -> ApplicationFuture<'_, ForumReadPost>;
 }
 
 /// 将同一数据库快照转换为不含内部密钥和数据库行的论坛正文。

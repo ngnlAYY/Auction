@@ -5,8 +5,7 @@ use std::sync::Arc;
 use auction_application::{
     ApplicationError, ForumPostWriter, ForumPublishedLayout, ForumPublishedThread,
     ForumRemoteError, ForumRenderedPost, ForumRenderedThread, ForumTopicMetadata, ForumTopicReader,
-    forum_catalog_marker, forum_catalog_page_marker, forum_post_bodies_match,
-    forum_system_log_marker,
+    forum_catalog_marker, forum_catalog_page_marker, forum_system_log_marker,
 };
 
 pub(super) struct FixedLayoutRequest {
@@ -191,9 +190,8 @@ async fn reconcile_or_update_fixed_post(
     policy: FixedPostPolicy,
 ) -> Result<(), ApplicationError> {
     if policy.verify_body {
-        let observed =
-            writer.read_post_body(world, thread_id.to_owned(), post_id.to_owned()).await?;
-        if forum_post_bodies_match(&observed.body, &expected.body) {
+        let observed = writer.read_post(world, thread_id.to_owned(), post_id.to_owned()).await?;
+        if observed.matches(&expected.body, metadata.as_ref()) {
             return Ok(());
         }
         if policy.write_confirmed {
@@ -207,16 +205,16 @@ async fn reconcile_or_update_fixed_post(
     if !policy.allow_update {
         return Err(fixed_layout_error("write_authorization_required", false));
     }
+    let verification = policy.verify_body.then(|| (expected.body.clone(), metadata.clone()));
     let proof = writer
-        .edit_post(world, thread_id.to_owned(), post_id.to_owned(), metadata, expected.clone())
+        .edit_post(world, thread_id.to_owned(), post_id.to_owned(), metadata, expected)
         .await?;
     if proof.thread_id != thread_id || proof.post_id != post_id {
         return Err(fixed_layout_error("write_unknown", true));
     }
-    if policy.verify_body {
-        let confirmed =
-            writer.read_post_body(world, thread_id.to_owned(), post_id.to_owned()).await?;
-        if !forum_post_bodies_match(&confirmed.body, &expected.body) {
+    if let Some((expected_body, metadata)) = verification {
+        let confirmed = writer.read_post(world, thread_id.to_owned(), post_id.to_owned()).await?;
+        if !confirmed.matches(&expected_body, metadata.as_ref()) {
             return Err(fixed_layout_error("write_unknown", true));
         }
     }

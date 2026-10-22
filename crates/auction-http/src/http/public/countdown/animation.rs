@@ -2,7 +2,8 @@
 
 use std::fmt::{self, Write};
 
-/// 输出日/时/分/秒转盘。正毫秒差向上取整，进位在同一秒边界改变。
+/// 输出日/时/分/秒转盘；默认显示加载时的数字，CSS 只负责逐秒更新与到期切换。
+/// 正毫秒差向上取整，进位在同一秒边界改变。
 pub(super) fn write_running(body: &mut String, remaining_ms: i64) -> fmt::Result {
     let seconds = 1 + (remaining_ms - 1) / 1_000;
     let days = format!("{:02}", seconds / 86_400);
@@ -10,10 +11,7 @@ pub(super) fn write_running(body: &mut String, remaining_ms: i64) -> fmt::Result
     if days.len() > 6 {
         return Err(fmt::Error);
     }
-    write!(
-        body,
-        "<g class=\"countdown-running\" display=\"none\" style=\"--remaining:{remaining_ms}ms\">"
-    )?;
+    write!(body, "<g class=\"countdown-running\" style=\"--remaining:{remaining_ms}ms\">")?;
     for index in 0..days.len() {
         let power = (days.len() - index - 1) as u32;
         let unit_seconds = 86_400 * 10_i64.pow(power);

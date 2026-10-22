@@ -255,7 +255,13 @@ impl EhentaiClient {
             {
                 continue;
             }
-            return Ok(PostForm { action, referer: target.url, values, body });
+            let metadata = if target.post_id.is_some() {
+                fixed_post_metadata(form)
+                    .map_err(|_| EhentaiError::protocol(target.operation, false))?
+            } else {
+                None
+            };
+            return Ok(PostForm { action, referer: target.url, values, body, metadata });
         }
         Err(EhentaiError::protocol(target.operation, false))
     }
@@ -359,6 +365,7 @@ impl EhentaiClient {
         board_url: &Url,
         board_id: i32,
         title: &str,
+        reconciliation_titles: &[String],
         body: &[u8],
         operation: EhentaiOperation,
     ) -> Result<Option<auction_application::ForumPublishedThread>, EhentaiError> {
@@ -366,10 +373,11 @@ impl EhentaiClient {
             std::str::from_utf8(body).map_err(|_| EhentaiError::protocol(operation, false))?;
         let document = Html::parse_document(html);
         let selector = link_selector().map_err(|_| EhentaiError::protocol(operation, false))?;
-        let wanted = clean_line(title);
+        let mut matched = None::<ForumPublishedThread>;
         for element in document.select(selector) {
             let label = clean_line(&element.text().collect::<String>());
-            if label != wanted {
+            if label != title && !reconciliation_titles.iter().any(|candidate| candidate == &label)
+            {
                 continue;
             }
             let Some(reference) = element.value().attr("href") else {
@@ -378,10 +386,17 @@ impl EhentaiClient {
             if let Some(published) =
                 self.topic_from_reference(board_url, reference, board_id, operation)
             {
-                return Ok(Some(published));
+                // 不同精确标题及同标题重复主题都必须失败关闭，不能取第一个结果后新建或更新。
+                if matched
+                    .as_ref()
+                    .is_some_and(|previous| previous.thread_id != published.thread_id)
+                {
+                    return Err(EhentaiError::protocol(operation, false));
+                }
+                matched = Some(published);
             }
         }
-        Ok(None)
+        Ok(matched)
     }
 
     pub(super) fn topic_from_redirect_page(

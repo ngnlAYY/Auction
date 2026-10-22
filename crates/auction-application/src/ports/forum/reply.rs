@@ -29,9 +29,9 @@ pub struct ForumReplyTopic {
     pub catalog_body: String,
     pub system_log_body: String,
     pub content_revision: i64,
-    /// 领取时为空；Worker 仅在本轮所有固定帖确认后填入所渲染的 settled 版本。
+    /// 领取时为空；Worker 仅在本轮所有固定帖确认后填入所渲染的 settled/cancelled 版本。
     /// 存储完成入口必须在拍卖锁内复核；部分进度入口不得使用它声明完成。
-    pub confirmed_settled_version: Option<i64>,
+    pub confirmed_terminal_version: Option<i64>,
     pub processed_through_post_number: i32,
     pub content_claim_token: Uuid,
     pub content_claim_owner: String,

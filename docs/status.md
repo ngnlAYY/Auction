@@ -35,6 +35,30 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-22 论坛倒计时数字与主题状态（本地隔离验证，schema 57）
+
+针对[问题帖 302292](https://forums.e-hentai.org/index.php?showtopic=302292)及用户提供的
+[参考帖 302192](https://forums.e-hentai.org/index.php?showtopic=302192)，用户确认 Auction Timer 表示剩余时长。
+只读线上 SVG 在 `prefers-reduced-motion: reduce` 下显示 `See deadline below`，原因是本地样式主动隐藏了数字。
+`auction-http/public/countdown` 现默认显示数字，减少动态效果仍逐秒离散换字；动画不可用时保留加载时数字快照，
+不加脚本、轮询或第三方倒计时依赖，原 URL、时间来源、UTC 截止、终态与安全头契约不变。
+
+论坛主题采用 `[Auction] Main #002 (Live)` 形式，状态由 application/storage 的一致快照提供，
+integrations 渲染，jobs 同步标题/说明；短格式覆盖最长合法序号且不超过论坛 50 字符。
+当前及历史状态、原无状态标题、HV# 摘要标题以有界精确集合在一次目录 GET 中查找，冲突失败关闭。
+首帖正文相同不再掩盖标题单独变化；未知写入仍只读对账。已有 Preview/Cancelled 主题可刷新，
+取消不创建主题或导入竞价；终态完成复用原字段、版本/租约/CAS 与历史 Settled 豁免，无新增迁移。
+
+完整 `just verify`、MSRV 1.94.1 全目标/全特性检查及更新后的配置注释门禁通过。临时 Rust 诊断直接使用实际 renderer、
+回读匹配与 Worker 门禁函数：56 个世界/状态/序号组合通过，最大标题 49 字符；回环 EhentaiClient 验证元数据
+读写、缺失/冲突拒绝及九个标题仅一次 GET，未知写入不重复 POST。私有 PostgreSQL 18.6 执行重定向到临时表的实际
+SQL，七状态资格、历史豁免、取消终态、pending、陈旧版本/token、过期租约及两个完成入口通过并全部回滚。
+Chromium 验证减少动态效果和普通模式、分/时/日进位、毫秒边界、到期与静态数字；实际 `<img>` 在 reduce 模式正常加载并换字。
+
+证据在 `target/audits/countdown-status-20261022/`；临时源码、夹具、数据库与预览服务已清理。
+未新增永久测试，未运行完整业务测试套件、仓库迁移或线上部署；线上仅只读查看给定帖子与 SVG，未发帖、编辑或解除人工门禁。
+LSP 引用请求启动失败，未计为通过；调用迁移经 CodeGraph 和全目标编译核对。
+
 ### 2026-10-22 全源码再审与边界修复（本地隔离验证，schema 57）
 
 覆盖 20 个工作区包及 CI/发布、配置和部署源码；按 owner 清点全部模块并逐段读取关键路径，

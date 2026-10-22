@@ -3,10 +3,11 @@
 use std::fmt::Write;
 
 use auction_application::{ForumAuctionSnapshot, ForumLotSnapshot, ForumRenderError};
+use auction_domain::AuctionStatus;
 use chrono::{DateTime, Utc};
 
 pub(super) fn valid_snapshot(snapshot: &ForumAuctionSnapshot) -> bool {
-    if !snapshot.settled {
+    if snapshot.state != AuctionStatus::Settled {
         return snapshot.lots.iter().all(|lot| lot.settlement.is_none());
     }
     let Some(end) = snapshot.scheduled_end_at else { return false };

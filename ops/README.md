@@ -428,6 +428,9 @@ Cloudflare Cache Rules 按以下互斥范围设置，替换两个主机为真实
 先更新 Public API，再更新 Worker；合并部署更新 `auction-server`。沿用 Worker 的 `public_base_url` 作为公开 origin，正式论坛须
 使用浏览器可达的 HTTPS 地址，不能使用 loopback、Unix socket 或仅局域网可达地址；未配置 origin 时仅输出文字。升级不需要
 新增迁移，也不会绕过论坛未知写入门禁强行重发首帖；旧帖在正常、成功的固定帖刷新后才改用本站图片。
+本次数字显示修复只需更新 Public API 并重新加载图片，已有 `list.svg` / `auction.svg` URL 不变；
+主题状态后缀由更新后的 Worker 在下一次正常成功同步时写入。两项均不要求重建主题或手工解除未知写入门禁，
+历史已豁免的 settled 主题不自动回填，取消仅刷新已发布的有效主题。
 
 图片路径仍在 `/api/v1/` 下，虽然以 `.svg` 结尾也必须 Bypass cache，浏览器和两种 CDN 头均 `no-store`；不得给这些图片注入
 登录、交互挑战、SVG 转换或跨站图片阻断，也不需要开放 CORS 凭据。未知计时器、隐藏场次、依赖故障分别按接口契约失败，

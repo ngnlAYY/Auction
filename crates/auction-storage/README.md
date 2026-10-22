@@ -180,9 +180,15 @@ Recovery 来源不完整时仍持久化已证明的积压/证据过期异常及�
 `forum/catalog.rs` 拥有 `auction_forum_catalog_pages` 续页身份/正文（`000040` 增加主记录目录页数），发布和刷新在主
 记录 claim/revision CAS 的同一事务内更新所有续页；`catalog_layout` 冻结历史单页/新分页方案，仅从未尝试、无远端身份
 的队列项及新主题启用分页。`000043` 为 forum owner 增加纳入标记和 nullable 终态确认版本，历史 settled 仅豁免；
-`forum/sync/snapshot.rs` 在同一 Repeatable Read 中读取结算汇总、lot 明细和最终领先事实，
-`forum/reply/fixed_posts.rs` 只在全部固定帖确认后以 auction 共享锁核对 settled 版本与无 pending，再按 sync
-lease/fencing/revision CAS 收口；`forum/reply/queries.rs` 从既有命令账本投影 `last_error_code` 与有界详情，不回填历史。论坛领取可按 Worker 首轮水位重新领取旧凭据失败和未知写入，但不领取
+`forum/sync/snapshot.rs` 在同一 Repeatable Read 中读取领域状态闭集、结算汇总、lot 明细和最终领先事实；
+Preview 读取 pending，Cancelled 读取 withdrawn，只有 Settled 投影持久结算明细。已发布主题可刷新
+Preview/Live/Final/Settling，以及尚未完成终态证明的 Settled/Cancelled；旧 settled 豁免不变。
+取消只刷新已持久化有效主题，不新建主题、不导入新竞价；全部固定帖确认后停止轮询。
+`forum/reply/fixed_posts.rs` 以 auction 共享锁核对已渲染的 settled/cancelled 版本与无 pending，再按 sync
+lease/fencing/revision CAS 收口；部分进度不会写终态标记，`forum/reply/queries.rs` 的竞价资格仍仅 live/final。
+`forum/reply/queries.rs` 从既有命令账本投影 `last_error_code` 与有界详情，不回填历史。
+论坛标题候选有界、去重且不含当前标题；状态来自权威快照而非日期，不改变公开或命令 wire。
+论坛领取可按 Worker 首轮水位重新领取旧凭据失败和未知写入，但不领取
 `write_authorization_required`。Delivery Admin 重试由 `recovery_commands/commands/delivery_retry.rs` 在原 Serializable
 命令事务恢复匹配的失败投影并推进 fencing，不生成成功证明。
 

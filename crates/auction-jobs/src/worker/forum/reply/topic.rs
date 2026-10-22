@@ -351,8 +351,11 @@ async fn refresh_fixed_posts(
     }
     let mut snapshot = runtime.store.load_current_snapshot(topic.auction_id).await?;
     // pending 阻断扫描完成时只更新变化页，不能反复 POST 未变化的终态正文。
-    let confirmed_settled_version =
-        (snapshot.settled && scan_completed).then_some(snapshot.state_version);
+    let confirmed_terminal_version = (matches!(
+        snapshot.state,
+        auction_domain::AuctionStatus::Settled | auction_domain::AuctionStatus::Cancelled
+    ) && scan_completed)
+        .then_some(snapshot.state_version);
     snapshot.public_url = super::super::forum_sync::resolve_public_url(
         runtime.public_base_url.as_deref(),
         snapshot.public_url.as_deref(),
@@ -387,7 +390,7 @@ async fn refresh_fixed_posts(
     let system_log_changed = !forum_post_bodies_match(&system_log.body, &topic.system_log_body);
     let floor_changed = processed_through_post_number_i32 != topic.processed_through_post_number;
     let reconciliation_only = topic.content_last_error_code.as_deref() == Some("write_unknown");
-    if reconciliation_only || confirmed_settled_version.is_some() {
+    if reconciliation_only || confirmed_terminal_version.is_some() {
         // 准备完成终态刷新时，即使本地正文相同也须确认全部固定帖，不能用 live 镜像伪造完成。
         // 未知结果不能仅凭本轮固定帖身份收敛，否则会把期间尚未发送的新出价镜像吞掉。
         // 启用校验时须逐字回读；关闭时保留未知门禁，两种模式下都绝不重发未知 POST。
@@ -395,7 +398,7 @@ async fn refresh_fixed_posts(
             runtime,
             &topic,
             &topic.catalog_post_id,
-            (!reconciliation_only).then(|| ForumTopicMetadata {
+            Some(ForumTopicMetadata {
                 title: Some(catalog.title.clone()),
                 description: Some(catalog.description.clone()),
             }),
@@ -416,7 +419,7 @@ async fn refresh_fixed_posts(
     // 续页同样受逐帖证明与未知写入栅栏保护；全部页面证明齐备后才推进本地版本/水位。
     for (page, previous) in catalog.catalog_continuation.iter().zip(&topic.catalog_continuation) {
         if reconciliation_only
-            || confirmed_settled_version.is_some()
+            || confirmed_terminal_version.is_some()
             || !forum_post_bodies_match(&page.body, &previous.body)
         {
             reconcile_or_edit_fixed_post(
@@ -432,7 +435,7 @@ async fn refresh_fixed_posts(
     }
     // 仅在全部固定帖证明之后携带终态版本；存储完成入口再锁定拍卖复核。
     // scan 未完成时仅保存部分进度，绝不写终态完成版本。
-    topic.confirmed_settled_version = confirmed_settled_version;
+    topic.confirmed_terminal_version = confirmed_terminal_version;
     if !catalog_changed && !continuation_changed && !system_log_changed {
         if !scan_completed {
             if !floor_changed {
@@ -456,7 +459,7 @@ async fn refresh_fixed_posts(
             .finish_topic_scan(topic, processed_through_post_number_i32, updated_at, next_scan_at)
             .await;
     }
-    if catalog_changed && !reconciliation_only && confirmed_settled_version.is_none() {
+    if catalog_changed && !reconciliation_only && confirmed_terminal_version.is_none() {
         reconcile_or_edit_fixed_post(
             runtime,
             &topic,
@@ -470,7 +473,7 @@ async fn refresh_fixed_posts(
         )
         .await?;
     }
-    if system_log_changed && !reconciliation_only && confirmed_settled_version.is_none() {
+    if system_log_changed && !reconciliation_only && confirmed_terminal_version.is_none() {
         reconcile_or_edit_fixed_post(
             runtime,
             &topic,
@@ -519,9 +522,10 @@ async fn reconcile_or_edit_fixed_post(
     if runtime.verify_post_body {
         let current = runtime
             .writer
-            .read_post_body(topic.world, topic.thread_id.clone(), post_id.to_owned())
+            .read_post(topic.world, topic.thread_id.clone(), post_id.to_owned())
             .await?;
-        if forum_post_bodies_match(&current.body, &expected.body) {
+        // 首帖正文相同不证明状态标题已更新；未知结果也必须取得真实元数据。
+        if current.matches(&expected.body, metadata.as_ref()) {
             return Ok(());
         }
     }
@@ -529,6 +533,7 @@ async fn reconcile_or_edit_fixed_post(
     if topic.content_last_error_code.as_deref() == Some("write_unknown") {
         return Err(auction_application::ForumRemoteError::new("write_unknown", false, true).into());
     }
+    let verification = runtime.verify_post_body.then(|| (expected.body.clone(), metadata.clone()));
     let proof = runtime
         .writer
         .edit_post_with_progress(
@@ -536,19 +541,19 @@ async fn reconcile_or_edit_fixed_post(
             topic.thread_id.clone(),
             post_id.to_owned(),
             metadata,
-            expected.clone(),
+            expected,
             write_progress.clone(),
         )
         .await?;
     if proof.thread_id != topic.thread_id || proof.post_id != post_id {
         return Err(auction_application::ForumRemoteError::new("write_unknown", false, true).into());
     }
-    if runtime.verify_post_body {
+    if let Some((expected_body, metadata)) = verification {
         let observed = runtime
             .writer
-            .read_post_body(topic.world, topic.thread_id.clone(), post_id.to_owned())
+            .read_post(topic.world, topic.thread_id.clone(), post_id.to_owned())
             .await?;
-        if !forum_post_bodies_match(&observed.body, &expected.body) {
+        if !observed.matches(&expected_body, metadata.as_ref()) {
             return Err(
                 auction_application::ForumRemoteError::new("write_unknown", false, true).into()
             );
