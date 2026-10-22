@@ -53,11 +53,47 @@ pub(super) async fn after_credentials(
     sqlx::query("SELECT a.id FROM public.settlement_recovery_actions a JOIN public.settlement_recoveries r ON r.id=a.recovery_id WHERE r.auction_id=$1 OR r.lot_id IN (SELECT o.lot_id FROM public.settlement_obligations o JOIN public.equipment e ON e.id=o.equipment_id WHERE e.external_equipment_id=$2 AND e.world_id=$3) ORDER BY a.id FOR UPDATE OF a")
         .bind(claim.auction_id.as_uuid()).bind(&claim.external_equipment_id)
         .bind(super::validation::world(claim.equipment_world)).fetch_all(&mut **tx).await.map_err(sql_error)?;
-    // 全部delivery含孤儿，后续冲突筛查必须可见；world前缀串行化本lane写入。
-    sqlx::query("SELECT id FROM public.deliveries ORDER BY id FOR UPDATE")
+    // 只锁当前投递及同 EID/world 的显式资产引用/owner 关联，历史通知不占行锁。
+    // 上限包含一条溢出探针；超过上限整事务拒绝，绝不截断后声称已排除冲突。
+    // 未知 schema/孤儿仍由 conflicts 的完整谓词读失败关闭；Serializable 的 SIREAD
+    // 保留这些负向证明的幻行保护，world 前缀与同资产业务锁继续串行化写入。
+    let query =
+        "SELECT d.id FROM public.deliveries d
+         WHERE d.id=$1 OR (
+           NOT EXISTS(SELECT 1 FROM public.settlement_obligation_fulfillments f
+             WHERE f.delivery_id=d.id AND f.execution_state='satisfied' AND f.proof_digest IS NOT NULL)
+           AND NOT EXISTS(SELECT 1 FROM public.settlement_recovery_actions a
+             WHERE a.delivery_id=d.id AND a.execution_state='satisfied' AND a.proof_digest IS NOT NULL)
+           AND NOT EXISTS(SELECT 1 FROM public.settlement_legacy_self_reconciliations r
+             WHERE /* trusted_legacy_self */)
+           AND (EXISTS(SELECT 1 FROM public.settlement_obligations o
+             JOIN public.equipment e ON e.id=o.equipment_id
+             WHERE d.origin_kind='settlement' AND d.origin_id=o.id::text
+               AND e.external_equipment_id=$2 AND e.world_id=$3)
+           OR EXISTS(SELECT 1 FROM public.settlement_recovery_actions a
+             JOIN public.settlement_recoveries r ON r.id=a.recovery_id
+             JOIN public.settlement_obligations o ON o.id=r.payment_obligation_id
+             JOIN public.equipment e ON e.id=o.equipment_id
+             WHERE d.origin_id=a.id::text AND e.external_equipment_id=$2 AND e.world_id=$3)
+           OR (d.payload->>'world'=$3 AND (
+             d.payload->'attachment_ids' @> jsonb_build_array($2::text)
+             OR EXISTS(SELECT 1 FROM public.equipment e
+               WHERE e.external_equipment_id=$2 AND e.world_id=$3
+                 AND d.payload->'equipment_secret_refs'
+                     @> jsonb_build_array(jsonb_build_object('id',e.id::text)))))))
+         ORDER BY d.id LIMIT 257 FOR UPDATE OF d"
+        .replace("/* trusted_legacy_self */",
+            crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE);
+    let deliveries = sqlx::query_scalar::<_, uuid::Uuid>(sqlx::AssertSqlSafe(query.as_str()))
+        .bind(claim.delivery_id)
+        .bind(&claim.external_equipment_id)
+        .bind(super::validation::world(claim.equipment_world))
         .fetch_all(&mut **tx)
         .await
         .map_err(sql_error)?;
+    if deliveries.len() > 256 {
+        return Err(FundingError::Unproven);
+    }
     sqlx::query("SELECT f.obligation_id FROM public.settlement_obligation_fulfillments f JOIN public.settlement_obligations o ON o.id=f.obligation_id WHERE o.auction_id=$1 OR o.equipment_id IN (SELECT id FROM public.equipment WHERE external_equipment_id=$2 AND world_id=$3) ORDER BY f.obligation_id FOR UPDATE OF f")
         .bind(claim.auction_id.as_uuid()).bind(&claim.external_equipment_id)
         .bind(super::validation::world(claim.equipment_world)).fetch_all(&mut **tx).await.map_err(sql_error)?;

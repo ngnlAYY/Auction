@@ -23,10 +23,13 @@ Public 竞价与 Admin 管理状态留在各 surface，本 crate 不依赖存储
 表格一律 100% 容器宽度、固定布局与完整百分比列宽，不采用最小宽度、横向滚动或窄屏卡片化；`TableColumns`
 归一化调用方权重，业务组件拥有比例（见[列宽登记](docs/design/table-layouts.md)）。
 
-`Pager` 钳制页码并同步跳页输入，缺 total 时使用 has_more 语义，调用方显式提供数量选项才启用数字页码/省略号；
+`Pager` 钳制页码并同步跳页输入，纠偏调用可选 `on_page_clamp`（省略时回退 `on_page_change`），用户操作仍调用
+`on_page_change`；URL 调用方可分别使用 Replace / Push，避免纠偏污染历史。缺 total 时使用 has_more 语义，
+调用方显式提供数量选项才启用数字页码/省略号；
 `components/pager/size.rs` 提供显式启用的正整数输入，不设业务数量上限，溢出失败关闭，本地偏好不由共享层持有。
 `AsyncState` 区分加载、空态和错误的可访问播报；`Dialog` 只拥有外壳与关闭语义（点击背景保持打开，busy 时关闭
-入口禁用），焦点循环、恢复与滚动锁由外壳 hook 统一处理；`TruncatedText` 支持悬停、键盘/触控固定与选择，
+入口禁用且 Escape 不冒泡到背景），面板保留 `tabindex="-1"`，没有可用子控件时接管焦点与 Tab 循环；
+焦点循环、恢复与滚动锁由外壳 hook 统一处理；`TruncatedText` 支持悬停、键盘/触控固定与选择，
 不复制输入或弹窗正文到 title。原生事件回调必须恢复 Dioxus Runtime/Scope，延迟任务和监听随卸载清理。
 
 手机（48rem 以下）及触控横屏（64rem 以下）采用底部弹窗，编辑控件保持 16px 字号与 44px 最小高度，
@@ -52,11 +55,16 @@ Public 校时。CSRF/Basic Auth 由 Admin 构造请求，不能在共享层变�
 
 ## Markdown、可访问性与启动
 
-`components/markdown/` 解析 Markdown/GFM 并生成安全 DOM，原始 HTML 作为文本，链接协议经白名单校验。
-`a11y/` 提供初始聚焦、Tab 循环、背景滚动锁与关闭后焦点恢复，跳过隐藏或 inert 祖先下的控件，
+`components/markdown/` 解析 Markdown/GFM 并生成安全 DOM，原始 HTML 作为文本，链接协议经白名单校验；
+反斜杠及控制字符在 trim 前拒绝，站内分类使用同一规则，防止浏览器归一化成外部 authority。
+链接标签最多 1 KiB、目标最多 4 KiB，自动链接同样限制目标扫描窗口；超限结构按文本处理，不截断整个正文，
+固定窗口与递归深度上限避免未闭合链接反复扫描长后缀。
+`a11y/` 提供初始聚焦、Tab 循环、背景滚动锁与关闭后焦点恢复，跳过禁用、隐藏或 inert 祖先下的控件，
 只在真实换页时聚焦主内容。`bootstrap/` 在必要首屏
 请求完成（含错误态）后只触发一次骨架退出，15 秒未就绪只提示慢加载，真实 WASM panic 才写失败标记。金额缩写使用
-整数精确格式，时间按当前语言与既有 Asia/Shanghai 时区格式化，不参与业务时钟判断。
+整数精确格式；`Time` 直接订阅当前 I18n 语言并用显式语言 API 格式化 Asia/Shanghai 时间，不等待 `<html lang>`
+同步 effect，也不参与业务时钟判断。既有 `format_localized_time` 辅助函数保留 DOM 语言兼容语义，
+响应式调用方使用 `i18n::format_localized_time_for_language`。
 
 ## 语言选择
 

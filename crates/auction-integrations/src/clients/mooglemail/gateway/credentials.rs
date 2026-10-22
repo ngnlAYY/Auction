@@ -1,4 +1,4 @@
-//! MoogleMail 单 Cookie 会话和一次操作内的写入隔离。
+//! MoogleMail 单 Cookie 会话和完整逻辑操作的互斥隔离。
 
 use std::{
     collections::HashSet,
@@ -250,25 +250,7 @@ impl MoogleMailCredentialSet {
         self.ownership.as_ref().is_none_or(|ownership| ownership.is_valid())
     }
 
-    pub(crate) fn begin(
-        &self,
-        world: MoogleMailWorld,
-    ) -> Result<MoogleMailCredentialSession, MoogleMailError> {
-        let operation = MoogleMailOperation::Inbox;
-        let mut tried = HashSet::new();
-        let candidate = self.next_candidate(world, operation, &tried)?;
-        tried.insert(candidate.key);
-        Ok(MoogleMailCredentialSession {
-            set: self.clone(),
-            world,
-            operation,
-            current: candidate.clone(),
-            tried,
-            operation_guard: None,
-        })
-    }
-
-    /// 为会修改远端状态的完整逻辑操作取得凭据级独占 guard。
+    /// 为完整逻辑读写操作取得凭据级独占 guard；已有 session 的内部读取不得重复取得。
     pub(crate) async fn begin_exclusive(
         &self,
         world: MoogleMailWorld,
@@ -465,15 +447,6 @@ impl MoogleMailCredentialSession {
                 )
             })?;
         }
-        Ok(())
-    }
-
-    /// 兼容调用边界：当前单 Cookie 模型没有后备凭据，失效后会返回不可用。
-    pub(crate) fn advance(&mut self) -> Result<(), MoogleMailError> {
-        debug_assert!(self.operation_guard.is_none());
-        let candidate = self.set.next_candidate(self.world, self.operation, &self.tried)?;
-        self.tried.insert(candidate.key);
-        self.current = candidate;
         Ok(())
     }
 

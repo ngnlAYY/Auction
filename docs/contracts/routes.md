@@ -174,6 +174,7 @@ Public API 与内嵌页面需同版升级，配置共享与重启要求见[配�
 ### 标的编号、来源与历史读取
 
 所有 lot/竞价/账户/成交投影中的 `lot_number` 都是装备分类内从 1 开始的用户可见编号，必须与 `equipment.category` 组合解释为 `One01`、`Two01` 等编码，不是全局身份。详情和写命令只以 `lot_id` UUID 定位，价格历史的 opaque cursor 继续绑定内部场次顺序，不能由可重复的分类编号重建。P10 竞价日志额外保留 `world` 与 `lot` 筛选；`lot` 可以是 lot UUID 或 `One01` 一类分类编码，二者在内部请求中互斥，并在 storage 的全局结果集分页前应用，不能只筛选当前页面。条目按 `created_at`、`lot_id`、`accepted_state_version`、`fact_index`、`id` 降序排列，cursor 是绑定这五个字段的版本化 opaque 值；
+编码数字部分最少两位（如 `One01`），分类编号超过 99 时保留完整十进制位数（如 `One100`），不得截断、重排或复用既有编号；论坛目录与命令解析使用同一格式。
 带 cursor 的返回使用 next_cursor/has_more，不得把未知总数伪装成精确 total。可选 `source` 只允许 `forum`/`proxy`：论坛普通竞价仅在账本保存真实楼层时同时返回 `source_post_number`；若同一账本还能证明真实 thread/post ID，则增加规范 `source_post_url`。链接身份不得由楼层号或数字论坛账号 ID 推算，玩家展示继续用名称；代理事实不区分 fast/slow 且不携带楼层或帖子链接；普通 Web 出价三者都为空；历史论坛事实楼层未知时只标记论坛来源。P09/P11 的 preview/live 装备投影可选返回按 `Strength, Dexterity, Agility, Endurance, Intelligence, Wisdom` 固定顺序生成的 `primary_attribute_initials`，缺少对应属性时省略而不是伪造。
 P12 保留 `name`、`world`、日期、价格、buyer/seller 筛选；名称按 Unicode 空白或英文逗号拆词，忽略空词后进行忽略大小写的
 字面包含 AND 匹配，不要求词条相邻或依输入顺序出现；例如 `Leg Sav Pow Hel Bal` 可匹配 `Legendary Savage Power Helmet of Balance`。
@@ -292,6 +293,8 @@ PostgreSQL + `web-embed` 的 `auction-admin-api`/`auction-server` 初始化模�
 ### 公开读取与命令结果
 
 P02 接受可选 `lang`，缺失回退英文；P05 为安全黑名单页码投影。P07 的数字/keyset 分页、P10 world/lot 筛选及 P12 成交统计遵守上文分页契约。P09 保留 v1 preview/live 互斥数组、分类统计、页码及拍卖上下文；P11 只返回当前允许公开的 lot；P13/P14 返回补偿池批次、余额守恒摘要、opaque keyset cursor 与单场账本页，从同一 Serializable 快照读取。
+P13 的全局 `balance` 是所有 world 当前 `settlement_pools.balance` 的合计，`updated_at` 为池更新时间最大值；
+各批次的 opening/closing 仍是原场次冻结摘要，不拿最近某个世界的结算余额冒充全局当前余额。
 
 P09/P11/P14 在 PostgreSQL 按 lot/equipment/world 校验密文后短暂解密，直接在既有 `game_equipment_url` 返回固定 HentaVerse origin 的完整 URL；10 位 key 可供用户主动导航，但不得写日志、审计、事件或持久化缓存，响应 `no-store`、全局 `no-referrer`，不伪造 keyless 链接。
 P14 浏览器解码与目录复用同一完整链接校验：只接受 `https://hentaiverse.org/equip/{id}/{key}` 或 `/isekai/equip/{id}/{key}`，ID 为 1–32 位 ASCII 数字，key 为 10 位十六进制，拒绝额外路径、query、fragment 及凭据。`opening`/`closing` 省略装备、比例与时长字段；提供链接时不得为空串或仅含 ID。分页字段及金额、余额链语义不变。
@@ -321,6 +324,7 @@ A09–A12、A38 携带 `command_id`、`expected_state_version`；取消/提前�
 A39 只允许 `draft`/`preview`，请求含 `command_id`、`expected_state_version`、`preview_scheduled_at`、`scheduled_open_at`、`scheduled_end_at`，满足 `preview < open < end`；Draft 三者须在数据库当前时间之后，Preview 原样保留已发生的预览时间，其余在未来。完整档 Serializable 事务按 world、scheduled round、auction 加锁，同步计划列、结束策略快照、调度记录、账本、审计与 `auction.schedule_updated`；未过期且有 owner 的租约拒绝修改，实际变更时清除过期租约或无 owner 的失败退避并递增 round 版本，阻断陈旧 Worker 写回；事件 v1 字段不变，只唤醒权威快照重读，其他状态不提供修改。
 
 既有 delivery 投影接受独立 `lot_watch` 来源，不新增 Admin 路径或动作。只有原因/失败码均为 `lot_watch_invalidated`、状态 failed、无 sending/lease/外部引用、零 COD 的 watch 行使用发送前失败时间链；创建/领取/完成时间仍须有序，不伪造 sending 或 Sent 证明，此类行不展示重试入口。Admin release/retry/reconcile-retry 在 lot → delivery 锁内复用 watch proof，失效或缺来源不能重新排队，未知发送走原人工核对。A34–A37 为完整档 delivery 安全列表、状态筛选、数字页及 release/retry/reconcile，携带 fencing version 和独立账本；
+A34 的数字分页偏移必须在 `0..=100000`，HTTP、应用与存储复用同一边界，非法深分页返回 `400 invalid_query`。
 reconcile 请求明确 `retry`/`succeeded`/`failed` 与对应外部引用/失败码。已有持久资金 allocation 的新 release、retry、reconcile 三类请求（共五种动作）统一返回 `400 invalid_delivery_command`（Invalid），不改状态或释放资金；原 command_id 已提交成功结果先重放。无绑定旧 retry 在同事务按 recovery scope→所需业务锁→actions→delivery→fulfillment/reset 预锁，原权限与 CAS 不变，本轮不新增资金人工恢复 API。列表从 send payload 投影 COD，从 outcome metadata 投影 `reason_code`、`take_required`、`returned_mail_id`，不返回原文；
 `take_required=false` 省略，客户端缺失按 false，显式 null/非布尔仍无效。命令只推进本地状态，不伪造远端回执；基础通知、结算 Send、入站 Return/Take 与 Sent/Balance 核对由 Worker 执行，缺 exact remote ID 进入人工复核；未装配 owner 明确报告能力缺失。
 
@@ -372,6 +376,8 @@ A17 列表不增加该字段，不返回 payload、装备 key 或正文。上限
 ### Runtime 配置与文件事务
 
 A26/A27 已接入 PostgreSQL 完整档：GET 返回非敏感 TOML 文档的 JSON 投影和稳定 `sha256:` fingerprint，POST `:validate` 只执行严格候选校验，PUT 使用 `command_id` 与 fingerprint fence 写入 durable pending/applied/unknown 命令账本，并通过同目录临时文件、权限校验、fsync、rename 和目录同步原子替换。文件替换成功后若账本应用出错，保留新文件并返回 `503 reconciliation_required`；同一命令重试或启动恢复按数据库实际 pending/applied 状态向前收口，不能把提交确认丢失当成可回滚旧文件。
+候选写入复用当前部署启动侧 listener、规范 Origin、metrics、session 和 tracing 校验；已配置 Admin OTLP headers
+时不能通过 runtime 关闭 tracing，须先同步敏感部署配置。该门禁只传递 headers 是否存在，不把秘密材料带入候选或文件。
 启动恢复任何失败（含结果未知或需人工核对）都阻断 Admin 监听，仅恢复成功且文件指纹匹配启动快照才继续装配。成功更新返回 `restart_required`，不伪造热加载。运行时文件路径由三角色主 TOML 的 `runtime_config_file` 选择；Public 仅消费装备标色规则用于公开分组，Admin/Worker 继续按各自边界应用其余字段；文档还含兼容 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 对 MoogleMail 只把这些业务字段投影为启动快照；transport、凭据、mailbox identity 和全局启用开关仍由 Worker 主配置拥有，敏感 TOML、Cookie、密钥和连接串不进入该文档。
 Admin 重启后 `allow_manual_early_open` 与 `allow_manual_early_settlement` 分别决定人工提前开放、人工提前结算 capability 和对应锁内校验，两者默认关闭，计划时间已到的正常开放仍允许。`[equipment_source]` 冻结为装备来源适配器的 host/path allowlist、响应上限、共享请求间隔、全请求超时及 Admin 手工录入的可交易装备开关（默认关闭且不放宽来源安全或邮件过滤）；固定 HTTPS origin、无重定向、精确 world 路径及流式有界读取始终失败关闭。Admin WebUI 把该闭集投影映射为分组开关、数字、列表与文本输入，保存仍提交完整候选文档，因此所有页面修改最终由 PUT 的原子文件替换边界写回，不存在只在浏览器内生效的旁路。
 更新和启动恢复从首次读取到文件/账本收口持有同一跨进程 workflow 锁，锁竞争返回 `503 storage_unavailable`，客户端可复用原 command ID 重试。

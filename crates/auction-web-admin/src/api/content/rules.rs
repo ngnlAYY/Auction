@@ -64,7 +64,7 @@ pub(crate) async fn validate_admin_rules(
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
     let candidate = decode_candidate(payload.data).map_err(invalid_rules_response)?;
     if candidate.locale != request.locale
-        || candidate.title != request.title
+        || candidate.title != request.title.trim()
         || candidate.markdown != request.markdown
     {
         return Err(AdminApiFailure::client("invalid_response"));

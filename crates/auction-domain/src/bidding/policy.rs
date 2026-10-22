@@ -88,7 +88,7 @@ impl AuctionRules {
         lot_start_price.unwrap_or(self.default_start_price)
     }
 
-    /// 计算下一次允许的最低出价；固定增量和 PPM 网格增量都保留旧价格余数。
+    /// 计算下一次最低出价；`proxy_last` 仅供自动代理反超使用，不代表当前领先事实的机制。
     pub fn next_minimum_bid(
         self,
         lot_start_price: Option<BidAmount>,
@@ -133,7 +133,8 @@ impl AuctionRules {
             return Err(DomainError::AuctionClosed);
         }
 
-        let proxy_last = state.leader_proxy_last && state.leader_id == Some(bidder_id);
+        // 此入口校验参与者提交的出价；历史代理领先标记不能放宽普通出价的经济增量。
+        let proxy_last = false;
         let minimum_price = self.next_minimum_bid(
             Some(state.start_price),
             state.current_price,

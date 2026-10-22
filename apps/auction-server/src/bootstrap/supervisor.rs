@@ -104,16 +104,23 @@ fn ensure_running(children: &mut [RoleChild]) -> anyhow::Result<()> {
 async fn stop(children: &mut [RoleChild], signals: &mut TerminationSignals) -> anyhow::Result<()> {
     // 每个角色至多 10 秒 drain + 30 秒 tracing；三角色顺序关闭的总预算固定为 135 秒。
     let deadline = Instant::now() + Duration::from_secs(135);
+    let mut failed_status = None;
     let graceful = async {
         for child in children.iter_mut().rev() {
-            if child.process.try_wait()?.is_none() {
+            let status = if let Some(status) = child.process.try_wait()? {
+                status
+            } else {
                 if let Some(pid) = child.process.id() {
                     // SAFETY：只向仍由 Child 持有且未 wait 回收的 PID 发送终止信号。
                     if unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) } != 0 {
                         return Err(std::io::Error::last_os_error());
                     }
                 }
-                child.process.wait().await?;
+                child.process.wait().await?
+            };
+            // 一项 drain 失败仍须回收其余角色；全部 wait 后才把失败传播给 supervisor。
+            if !status.success() && failed_status.is_none() {
+                failed_status = Some((child.name, status));
             }
         }
         Ok::<_, std::io::Error>(())
@@ -135,6 +142,9 @@ async fn stop(children: &mut [RoleChild], signals: &mut TerminationSignals) -> a
                 .context("reap forced role")?;
         }
         bail!("server shutdown forced or exceeded its drain budget");
+    }
+    if let Some((role, status)) = failed_status {
+        bail!("role={role} exited unsuccessfully during shutdown: {status}");
     }
     Ok(())
 }

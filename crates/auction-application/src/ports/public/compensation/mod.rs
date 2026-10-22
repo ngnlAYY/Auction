@@ -107,7 +107,9 @@ impl PublicCompensationRound {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicCompensationPage {
     pub entries: Vec<PublicCompensationRound>,
+    /// 所有世界权威补偿池的当前余额合计，与批次页及分页范围无关。
     pub balance: i64,
+    /// 各世界权威资金池最近一次已提交更新时间的最大值。
     pub updated_at: Option<DateTime<Utc>>,
     pub total: Option<i64>,
     pub limit: i64,

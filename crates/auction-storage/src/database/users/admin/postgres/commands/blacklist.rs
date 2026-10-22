@@ -40,9 +40,8 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
     )
     .await?;
     let before = load_user_postgres_tx(&mut transaction, command.buyer_user_id).await?;
-    if command.occurred_at < before.created_at {
-        return Err(admin_error(AdminUserError::InvalidRequest));
-    }
+    // recovery 时间来自历史 claim；快照副作用不能早于用户已有状态，账本/审计仍保留原命令时间。
+    let side_effect_at = command.occurred_at.max(before.created_at).max(before.updated_at);
     if before.status == AdminUserStatus::Active {
         sqlx::query(
             "UPDATE public.users
@@ -50,7 +49,7 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
                  updated_at = GREATEST(created_at, updated_at, $1)
              WHERE id = $2",
         )
-        .bind(command.occurred_at)
+        .bind(side_effect_at)
         .bind(command.buyer_user_id)
         .execute(&mut *transaction)
         .await
@@ -68,7 +67,7 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
         .bind(command.buyer_user_id)
         .bind(&command.public_reason)
         .bind(RECOVERY_BUYER_BLACKLIST_ACTOR)
-        .bind(command.occurred_at)
+        .bind(side_effect_at)
         .execute(&mut *transaction)
         .await
         .map_err(map_admin_write_error)?;
@@ -81,7 +80,7 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
         .bind(command.buyer_user_id)
         .bind(&command.public_reason)
         .bind(RECOVERY_BUYER_BLACKLIST_ACTOR)
-        .bind(command.occurred_at)
+        .bind(side_effect_at)
         .execute(&mut *transaction)
         .await
         .map_err(map_admin_write_error)?;
@@ -145,11 +144,17 @@ pub(super) async fn apply_blacklist_effects_postgres(
     .map_err(map_storage_error)?;
 
     let proxies = sqlx::query(
-        "SELECT authorization_id, lot_id, maximum_amount, mode, status, state_version
-         FROM public.bid_proxy_authorizations
-         WHERE user_id = $1 AND status IN ('active', 'final_fast')
-         ORDER BY lot_id, user_id, authorization_id
-         FOR UPDATE",
+        "SELECT proxy.authorization_id, proxy.lot_id, proxy.maximum_amount,
+                proxy.mode, proxy.status, proxy.state_version,
+                GREATEST(proxy.created_at, proxy.updated_at, (
+                    SELECT max(transition.created_at)
+                    FROM public.bid_proxy_authorization_transitions AS transition
+                    WHERE transition.authorization_id = proxy.authorization_id
+                )) AS last_transition_at
+         FROM public.bid_proxy_authorizations AS proxy
+         WHERE proxy.user_id = $1 AND proxy.status IN ('active', 'final_fast')
+         ORDER BY proxy.lot_id, proxy.user_id, proxy.authorization_id
+         FOR UPDATE OF proxy",
     )
     .bind(user_id)
     .fetch_all(&mut **transaction)
@@ -166,6 +171,11 @@ pub(super) async fn apply_blacklist_effects_postgres(
         let mode: String = row.try_get("mode").map_err(map_storage_error)?;
         let status: String = row.try_get("status").map_err(map_storage_error)?;
         let state_version: i64 = row.try_get("state_version").map_err(map_storage_error)?;
+        let last_transition_at: DateTime<Utc> =
+            row.try_get("last_transition_at").map_err(map_storage_error)?;
+        // 新授权可能晚于历史 recovery claim；冻结快照和追加转换共用单调副作用时间，
+        // 确定性子命令仍使用原 now，不能改变命令重放身份或历史证据。
+        let side_effect_at = now.max(last_transition_at);
         let next_version = state_version
             .checked_add(1)
             .filter(|version| maximum_amount > 0 && *version > 1)
@@ -216,7 +226,7 @@ pub(super) async fn apply_blacklist_effects_postgres(
         )
         .bind(authorization_id)
         .bind(next_version)
-        .bind(now)
+        .bind(side_effect_at)
         .bind(&status)
         .bind(state_version)
         .execute(&mut **transaction)
@@ -240,7 +250,7 @@ pub(super) async fn apply_blacklist_effects_postgres(
         .bind(maximum_amount)
         .bind(&mode)
         .bind(&status)
-        .bind(now)
+        .bind(side_effect_at)
         .execute(&mut **transaction)
         .await
         .map_err(map_storage_error)?;
@@ -248,11 +258,12 @@ pub(super) async fn apply_blacklist_effects_postgres(
         sqlx::query(
             "UPDATE public.lots
              SET slow_authorization_id = NULL, slow_due_at = NULL,
-                 slow_generation = slow_generation + 1, updated_at = $2
+                 slow_generation = slow_generation + 1,
+                 updated_at = GREATEST(created_at, updated_at, $2)
              WHERE id = $1 AND slow_authorization_id = $3",
         )
         .bind(lot_id)
-        .bind(now)
+        .bind(side_effect_at)
         .bind(authorization_id)
         .execute(&mut **transaction)
         .await
@@ -261,7 +272,7 @@ pub(super) async fn apply_blacklist_effects_postgres(
 
     sqlx::query(
         "UPDATE public.public_sessions
-         SET revoked_at = $1
+         SET revoked_at = GREATEST(created_at, $1)
          WHERE user_id = $2 AND revoked_at IS NULL",
     )
     .bind(now)

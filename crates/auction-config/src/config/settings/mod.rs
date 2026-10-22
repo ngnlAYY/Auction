@@ -31,9 +31,11 @@ mod worker;
 mod worker_validation;
 
 use self::operations::apply_runtime_operations;
+pub(crate) use self::secrets::validate_runtime_startup;
 use self::secrets::{AppSecrets, SecretString};
 use self::secrets::{
-    load_admin_runtime_file, load_secret_file, runtime_http_security, runtime_session,
+    admin_runtime_listener, load_admin_runtime_file, load_secret_file, runtime_http_security,
+    runtime_session, runtime_tracing,
 };
 use self::validation::*;
 use self::worker::{apply_equipment_colors, apply_runtime_document};

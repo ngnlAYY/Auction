@@ -156,14 +156,31 @@ pub(super) async fn authorize_pending_or_prepared(
     Ok(AuthorizationResult::Authorized((claim, intent)))
 }
 
-/// enqueued 已经发生外部写入，只复核当前身份，不再因之后失格否定既有发送事实。
+/// enqueued 只复核不可变 UUID 身份；收件地址始终使用原 delivery，不追随改名或失格。
 pub(super) async fn authorize_enqueued_recipient(
     store: &dyn SettlementFulfillmentStore,
     recipients: &dyn SettlementFulfillmentRecipientReader,
     claim: SettlementFulfillmentClaim,
     retry_delay: Duration,
 ) -> Result<AuthorizationResult<SettlementFulfillmentClaim>, ApplicationError> {
-    resolve_recipient(store, recipients, claim, retry_delay, false, "evidence_unavailable").await
+    let mut claim = match resolve_recipient(
+        store,
+        recipients,
+        claim,
+        retry_delay,
+        false,
+        "evidence_unavailable",
+    )
+    .await?
+    {
+        AuthorizationResult::Authorized(claim) => claim,
+        result => return Ok(result),
+    };
+    let Some(snapshot) = claim.delivery_snapshot.as_ref() else {
+        return manual(store, claim, "invalid_fulfillment_fact").await;
+    };
+    claim.recipient = snapshot.recipient.clone();
+    Ok(AuthorizationResult::Authorized(claim))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -195,9 +212,10 @@ async fn resolve_recipient(
         return defer(store, claim, retry_delay, unavailable_code, "当前履约收件人暂不可用").await;
     }
     if snapshot.user_id.is_nil()
-        || snapshot.game_identity.is_empty()
-        || snapshot.game_identity != snapshot.game_identity.trim()
         || snapshot.state_version == 0
+        || (require_eligible
+            && (snapshot.game_identity.is_empty()
+                || snapshot.game_identity != snapshot.game_identity.trim()))
     {
         return manual(store, claim, "invalid_fulfillment_fact").await;
     }
@@ -211,7 +229,9 @@ async fn resolve_recipient(
         )
         .await;
     }
-    claim.recipient = snapshot.game_identity;
+    if require_eligible {
+        claim.recipient = snapshot.game_identity;
+    }
     Ok(AuthorizationResult::Authorized(claim))
 }
 

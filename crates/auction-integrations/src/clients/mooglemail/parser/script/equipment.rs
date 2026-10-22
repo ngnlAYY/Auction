@@ -54,6 +54,10 @@ pub(crate) fn body_equipment_keys(
     wanted: &HashSet<String>,
     world: MoogleMailWorld,
 ) -> Result<HashMap<String, MoogleMailEquipmentKey>, MoogleMailError> {
+    // 非装备邮件无需扫描正文；避免发送者在正文构造畸形 /equip 链接阻断整个收件轮次。
+    if wanted.is_empty() {
+        return Ok(HashMap::new());
+    }
     let mut keys = HashMap::new();
     let mut offset = 0;
     while let Some(relative) = body[offset..].find("/equip/") {
@@ -68,22 +72,24 @@ pub(crate) fn body_equipment_keys(
         }
         let equipment_id = &body[start..index];
         let key_start = index + 1;
+        // 正文中的其它装备链接不是附件证据；其长度、编码和 key 均不能阻断当前附件读取。
+        if !wanted.contains(equipment_id) {
+            offset = key_start;
+            continue;
+        }
         let key_end = key_start.saturating_add(10);
         // 邮件正文允许 Unicode；固定长度 key 必须先验证切片边界，不能因无效链接使 Worker panic。
         let Some(raw_key) = body.get(key_start..key_end).filter(|value| valid_hex_key(value))
         else {
-            offset = key_start;
-            continue;
+            return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         };
         if body.as_bytes().get(key_end).is_some_and(|byte| byte.is_ascii_hexdigit()) {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
-        if wanted.contains(equipment_id) {
-            let key = MoogleMailEquipmentKey::new(raw_key)
-                .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
-            if keys.insert(equipment_id.to_owned(), key).is_some() {
-                return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
-            }
+        let key = MoogleMailEquipmentKey::new(raw_key)
+            .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
+        if keys.insert(equipment_id.to_owned(), key).is_some() {
+            return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
         offset = key_end;
     }

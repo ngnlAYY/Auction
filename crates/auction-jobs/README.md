@@ -44,6 +44,10 @@ drain 与任务退出，`runtime/delivery/lease.rs` 统一准备、交接与发�
 allowlist、runtime 开关和数据库 enabled world 的交集中新建，已有轮次按冻结事实执行，配置变更不以旧命令 ID 重发
 新负载；结算使用持久化 claim 的 due_at，不以实际领取延迟改变业务时间。慢速代理扫描候选后交竞价事务重新校验，
 过期 generation 安全跳过。
+已登记的 Admin 首期/后继按数据库身份执行，不套用自动 bootstrap 的 UUID，也不要求两小时预览间隔。暂停/恢复命令
+按周基础身份、邮箱及本次观测版本派生，并把期望版本写入摘要；Admin 改动后不重放本周旧结果。已预览后取消的轮次
+恢复邮箱轮询；未预览的 missed 轮次不撤销与本轮无关的暂停状态。
+
 
 Fulfillment pending 通过 `prepare_next` 区分 External 与 `InternallySatisfied`：内部成功立即结束 claim，不 activate、
 不生成 delivery ID。pending 身份准备与 enqueued 收款核对采用不超过有效 lease/30 秒的单一超时，覆盖 guard 排队、

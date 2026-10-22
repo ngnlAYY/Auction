@@ -99,14 +99,13 @@ pub(super) async fn validate(
                 .fetch_one(&mut **tx)
                 .await
                 .map_err(sql_error)?;
-        if user.try_get::<String, _>("username").map_err(sql_error)? != c.recipient
-            || (!collected
-                && (user.try_get::<String, _>("status").map_err(sql_error)? != "active"
-                    || command.recipient_version
-                        != u64::try_from(
-                            user.try_get::<i64, _>("state_version").map_err(sql_error)?,
-                        )
-                        .ok()))
+        // 实收只验证 UUID 仍存在；地址由已发送 delivery 与 Sent 证明精确绑定。
+        if !collected
+            && (user.try_get::<String, _>("username").map_err(sql_error)? != c.recipient
+                || user.try_get::<String, _>("status").map_err(sql_error)? != "active"
+                || command.recipient_version
+                    != u64::try_from(user.try_get::<i64, _>("state_version").map_err(sql_error)?)
+                        .ok())
         {
             return Err(FundingError::Conflict);
         }

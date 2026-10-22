@@ -6,6 +6,11 @@ use super::model::Inline;
 /// 超限后把剩余内容按纯文本处理，避免栈耗尽或指数级解析开销。
 const MAX_INLINE_DEPTH: usize = 8;
 
+/// 单个链接最多扫描 1 KiB 标签和 4 KiB 目标；超限按文本处理，不截断正文。
+/// 固定窗口避免大量未闭合 `[` / `<http://` 对同一长后缀反复全量搜索。
+const MAX_LINK_LABEL_BYTES: usize = 1024;
+const MAX_LINK_TARGET_BYTES: usize = 4096;
+
 pub(super) fn parse_inline(value: &str) -> Vec<Inline> {
     parse_inline_at(value, 0)
 }
@@ -31,19 +36,19 @@ fn parse_inline_at(value: &str, depth: usize) -> Vec<Inline> {
         }
 
         if let Some((label, target, consumed)) = bracket_link(rest, true)
-            && let Some(source) = safe_link_target(&target)
+            && let Some(source) = safe_link_target(target)
         {
             flush_text(&mut nodes, &mut text);
-            nodes.push(Inline::Image { alt: label, source });
+            nodes.push(Inline::Image { alt: label.to_owned(), source });
             index += consumed;
             continue;
         }
 
         if let Some((label, target, consumed)) = bracket_link(rest, false)
-            && let Some(target) = safe_link_target(&target)
+            && let Some(target) = safe_link_target(target)
         {
             flush_text(&mut nodes, &mut text);
-            nodes.push(Inline::Link { label: parse_inline_at(&label, depth + 1), target });
+            nodes.push(Inline::Link { label: parse_inline_at(label, depth + 1), target });
             index += consumed;
             continue;
         }
@@ -82,7 +87,7 @@ fn parse_inline_at(value: &str, depth: usize) -> Vec<Inline> {
         }
 
         if (rest.starts_with("<http://") || rest.starts_with("<https://"))
-            && let Some(close) = rest.find('>')
+            && let Some(close) = bounded_prefix(rest, MAX_LINK_TARGET_BYTES + 2).find('>')
             && let Some(target) = safe_link_target(&rest[1..close])
         {
             flush_text(&mut nodes, &mut text);
@@ -119,7 +124,7 @@ impl InlineKind {
     }
 }
 
-fn bracket_link(value: &str, image: bool) -> Option<(String, String, usize)> {
+fn bracket_link(value: &str, image: bool) -> Option<(&str, &str, usize)> {
     let prefix_length = if image { 2 } else { 1 };
     if image {
         if !value.starts_with("![") {
@@ -128,27 +133,48 @@ fn bracket_link(value: &str, image: bool) -> Option<(String, String, usize)> {
     } else if !value.starts_with('[') {
         return None;
     }
-    let close_label = value[prefix_length..].find("](")? + prefix_length;
-    let close_target = value[close_label + 2..].find(')')? + close_label + 2;
-    let label = value[prefix_length..close_label].to_owned();
-    let target = value[close_label + 2..close_target].trim().to_owned();
-    Some((label, target, close_target + 1))
+    let label_and_close = bounded_prefix(&value[prefix_length..], MAX_LINK_LABEL_BYTES + 2);
+    let close_label = label_and_close.find("](")? + prefix_length;
+    let target_start = close_label + 2;
+    let close_target =
+        bounded_prefix(&value[target_start..], MAX_LINK_TARGET_BYTES + 1).find(')')? + target_start;
+    Some((&value[prefix_length..close_label], &value[target_start..close_target], close_target + 1))
+}
+
+/// 只取完整 UTF-8 字符边界；窗口结束处的多字节字符按普通文本留给主循环处理。
+fn bounded_prefix(value: &str, max_bytes: usize) -> &str {
+    let mut end = value.len().min(max_bytes);
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
 }
 
 fn safe_link_target(value: &str) -> Option<String> {
+    // 浏览器会把反斜杠当作斜杠，并移除 URL 内的 Tab/换行；必须在 trim 前拒绝原始目标。
+    if has_unsafe_target_character(value) {
+        return None;
+    }
     let value = value.trim();
-    let lower = value.to_ascii_lowercase();
-    let allowed = lower.starts_with("https://")
-        || lower.starts_with("http://")
-        || lower.starts_with("mailto:")
-        // 允许站内绝对路径（以单个 `/` 开头），但拒绝 `//` 开头的协议相对 URL：
-        // 协议相对 URL 会继承当前页面协议并跳转到外部域，从而绕过白名单。
-        || (value.starts_with('/') && !value[1..].starts_with('/'))
-        || value.starts_with("./")
-        || value.starts_with("../")
-        || value.starts_with('#')
-        || value.starts_with('?');
+    let allowed = value.get(..8).is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
+        || value.get(..7).is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+        || value.get(..7).is_some_and(|prefix| prefix.eq_ignore_ascii_case("mailto:"))
+        || is_internal_target(value);
     allowed.then(|| value.to_owned())
+}
+
+/// 与目标白名单共用站内判断；任何反斜杠或控制字符都不能成为站内导航。
+pub(super) fn is_internal_target(target: &str) -> bool {
+    !has_unsafe_target_character(target)
+        && ((target.starts_with('/') && !target.starts_with("//"))
+            || target.starts_with("./")
+            || target.starts_with("../")
+            || target.starts_with('#')
+            || target.starts_with('?'))
+}
+
+fn has_unsafe_target_character(target: &str) -> bool {
+    target.chars().any(|character| character == '\\' || character.is_control())
 }
 
 fn flush_text(nodes: &mut Vec<Inline>, text: &mut String) {

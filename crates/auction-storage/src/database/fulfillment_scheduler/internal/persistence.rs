@@ -7,12 +7,28 @@ use auction_application::{
 };
 use sqlx::{Postgres, Row, Transaction};
 
+// 保留既有 v1 命令摘要。新记录冻结原地址；旧记录仅从同 UUID 的改名历史重建，
+// 每个候选仍须重建完整原 payload 并逐字节命中既有摘要，绝不只比较义务 ID。
+const REPLAY_QUERY: &str = "SELECT obligation_id,request_digest,action,
+       ARRAY(SELECT recipient FROM (
+         SELECT c.evidence->>'recipient' AS recipient
+         UNION SELECT previous_username FROM public.user_renames WHERE user_id=$2
+         UNION SELECT next_username FROM public.user_renames WHERE user_id=$2
+         UNION SELECT previous_username FROM public.user_game_identity_history WHERE user_id=$2
+         UNION SELECT next_username FROM public.user_game_identity_history WHERE user_id=$2
+       ) names WHERE recipient IS NOT NULL) AS replay_recipients
+     FROM public.settlement_internal_commands c WHERE command_id=$1";
+
 pub(super) async fn replay_pool(
     pool: &crate::database::TrackedPool<Postgres>,
     c: &SettlementInternalCommand,
 ) -> Result<bool, FundingError> {
-    let row = sqlx::query("SELECT obligation_id,request_digest,action FROM public.settlement_internal_commands WHERE command_id=$1")
-        .bind(c.command_id).fetch_optional(pool).await.map_err(sql_error)?;
+    let row = sqlx::query(REPLAY_QUERY)
+        .bind(c.command_id)
+        .bind(c.claim.recipient_user_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(sql_error)?;
     matches_replay(row.as_ref(), c)
 }
 
@@ -20,8 +36,12 @@ pub(super) async fn replay(
     tx: &mut Transaction<'_, Postgres>,
     c: &SettlementInternalCommand,
 ) -> Result<bool, FundingError> {
-    let row = sqlx::query("SELECT obligation_id,request_digest,action FROM public.settlement_internal_commands WHERE command_id=$1")
-        .bind(c.command_id).fetch_optional(&mut **tx).await.map_err(sql_error)?;
+    let row = sqlx::query(REPLAY_QUERY)
+        .bind(c.command_id)
+        .bind(c.claim.recipient_user_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(sql_error)?;
     matches_replay(row.as_ref(), c)
 }
 
@@ -30,14 +50,30 @@ fn matches_replay(
     c: &SettlementInternalCommand,
 ) -> Result<bool, FundingError> {
     let Some(row) = row else { return Ok(false) };
-    validate_command(c, &row.try_get::<String, _>("action").map_err(sql_error)?)?;
+    let action = row.try_get::<String, _>("action").map_err(sql_error)?;
+    validate_command(c, &action)?;
     if row.try_get::<uuid::Uuid, _>("obligation_id").map_err(sql_error)?
         != c.claim.obligation_id.as_uuid()
-        || row.try_get::<Vec<u8>, _>("request_digest").map_err(sql_error)? != c.request_digest
     {
         return Err(FundingError::Conflict);
     }
-    Ok(true)
+    let stored_digest = row.try_get::<Vec<u8>, _>("request_digest").map_err(sql_error)?;
+    if stored_digest == c.request_digest {
+        return Ok(true);
+    }
+    if action == "external_refund" && c.claim.recipient_user_id.is_some() {
+        for recipient in row.try_get::<Vec<String>, _>("replay_recipients").map_err(sql_error)? {
+            let mut original = c.claim.clone();
+            original.recipient = recipient;
+            let expected =
+                SettlementInternalCommand::external_refund(original, c.recipient_version)
+                    .map_err(|_| FundingError::Invalid)?;
+            if expected.command_id == c.command_id && stored_digest == expected.request_digest {
+                return Ok(true);
+            }
+        }
+    }
+    Err(FundingError::Conflict)
 }
 
 pub(super) fn validate_command(
@@ -127,6 +163,7 @@ pub(super) async fn complete(
     };
     let evidence = serde_json::json!({
         "operation_id":e.operation_id,"identity":binding(&e.identity),
+        "recipient":c.claim.recipient,"recipient_user_id":c.claim.recipient_user_id,
         "claim_token":c.claim.claim_token,"claim_fencing":c.claim.claim_fencing,"state_version":c.claim.state_version,
         "equipment":e.equipment.as_ref().map(|v| serde_json::json!({
             "binding":binding(&v.binding),"equipment_id":v.equipment_id,"external_equipment_id":v.external_equipment_id,

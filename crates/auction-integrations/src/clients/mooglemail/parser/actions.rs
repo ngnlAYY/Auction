@@ -136,7 +136,7 @@ impl MoogleMailParser {
         })
     }
 
-    /// 通过当前只读 `[RTS]` 回执或旧版 Inbox 中目标 `mid` 缺席证明整封退回已完成。
+    /// 只通过身份、正文和资产精确匹配的 `[RTS]` 回执证明整封退回已完成。
     pub fn prove_return_completed(
         &self,
         before: &MoogleMailActionState,
@@ -162,50 +162,8 @@ impl MoogleMailParser {
         {
             return Ok(());
         }
-        let form_selector = selector("form#mailform", operation, world)
-            .map_err(|_| action_proof_error(operation, world))?;
-        let table_selector = selector("table#mmail_list", operation, world)
-            .map_err(|_| action_proof_error(operation, world))?;
-        let reference_selector = selector("[href], [onclick], [action]", operation, world)
-            .map_err(|_| action_proof_error(operation, world))?;
-        let tables = document.select(&table_selector).collect::<Vec<_>>();
-        if document.select(&form_selector).next().is_some()
-            || tables.len() != 1
-            || document.select(&reference_selector).any(|element| {
-                ["href", "onclick", "action"].iter().any(|attribute| {
-                    element
-                        .value()
-                        .attr(attribute)
-                        .is_some_and(|value| attribute_references_mail_id(value, external_mail_id))
-                })
-            })
-        {
-            return Err(action_proof_error(operation, world));
-        }
-        let row_selector =
-            selector("tr", operation, world).map_err(|_| action_proof_error(operation, world))?;
-        let cell_selector =
-            selector("td", operation, world).map_err(|_| action_proof_error(operation, world))?;
-        let empty_selector = selector("td#mmail_nnm", operation, world)
-            .map_err(|_| action_proof_error(operation, world))?;
-        let rows = tables[0].select(&row_selector).collect::<Vec<_>>();
-        if rows.len() < 2
-            || !valid_inbox_header(rows[0], world)
-                .map_err(|_| action_proof_error(operation, world))?
-        {
-            return Err(action_proof_error(operation, world));
-        }
-        for row in &rows[1..] {
-            let cells = row.select(&cell_selector).count();
-            if row.select(&empty_selector).count() == 1 && cells == 1 {
-                continue;
-            }
-            let mail_id = row.value().attr("onclick").and_then(extract_mid);
-            if cells != 4 || mail_id.as_deref().is_none_or(|mail_id| mail_id == external_mail_id) {
-                return Err(action_proof_error(operation, world));
-            }
-        }
-        Ok(())
+        // Inbox 只列未读邮件，写前详情 GET 本身就会使目标消失；缺席绝不是退回证明。
+        Err(action_proof_error(operation, world))
     }
 
     /// 通过动作前后的邮件身份、资产归零和正文回执证明附件领取已完成。

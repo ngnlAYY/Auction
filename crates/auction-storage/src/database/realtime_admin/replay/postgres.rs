@@ -1,5 +1,5 @@
-//! PostgreSQL realtime failure replay 事务；同事务内锁定 failure 与 stream、追加替代事件、收口
-//! failure 并写入审计与命令账本，提交前失败整体回滚。
+//! PostgreSQL realtime failure replay 事务；同事务内锁定 failure 与 stream、追加替代事件，
+//! 仅在连续边界越过所选 consumer 的原事件，收口 failure 并写入审计与命令账本。
 
 use auction_application::{
     ApplicationError, PublicRealtimeEvent, RealtimeAdminError, RealtimeReplayCommand,
@@ -14,6 +14,7 @@ use super::super::common::{admin_error, storage_error};
 use super::{REPLAY_COMMAND_KIND, replay_result_from_payload, replay_result_to_payload};
 use crate::database::PostgresStore;
 use crate::database::audit_health::AuditWriteResult as _;
+use crate::database::realtime_consumer::resolve_failure_postgres_tx;
 
 pub(crate) async fn replay_postgres(
     store: &PostgresStore,
@@ -99,7 +100,7 @@ async fn replay_postgres_inner(
     }
 
     let failure = sqlx::query(
-        "SELECT failure.resolved_at, failure.replay_event_id,
+        "SELECT failure.consumer_key, failure.resolved_at, failure.replay_event_id,
                 original.event_id, original.stream_key, original.stream_sequence,
                 original.kind, original.schema_version, original.public_payload,
                 original.state_version, original.origin_command_id,
@@ -123,6 +124,9 @@ async fn replay_postgres_inner(
     if resolved_at.is_some() || existing_replay.is_some() {
         return Err(admin_error(RealtimeAdminError::AlreadyResolved));
     }
+    let consumer_key: String = failure
+        .try_get("consumer_key")
+        .map_err(|_| storage_error("读取 PostgreSQL realtime failure consumer 失败"))?;
 
     let original = PublicRealtimeEvent {
         event_id: failure
@@ -223,21 +227,17 @@ async fn replay_postgres_inner(
     .await
     .map_err(|_| storage_error("写入 PostgreSQL realtime replay 事件失败"))?;
 
-    let resolved_at = command.created_at;
-    let updated = sqlx::query(
-        "UPDATE public.realtime_failures
-         SET resolved_at = $2, replay_event_id = $3
-         WHERE id = $1 AND resolved_at IS NULL AND replay_event_id IS NULL",
+    // 只恢复本 failure 绑定的 consumer；其他 consumer 即便失败于同一原事件，也必须
+    // 独立证明自己的连续边界。复用事务入口，不能在这里另开连接或嵌套提交。
+    resolve_failure_postgres_tx(
+        transaction,
+        &consumer_key,
+        &original.stream_key,
+        original.event_id,
+        replay.event_id,
+        command.created_at,
     )
-    .bind(command.failure_id)
-    .bind(resolved_at)
-    .bind(replay.event_id)
-    .execute(&mut **transaction)
-    .await
-    .map_err(|_| storage_error("解决 PostgreSQL realtime failure 失败"))?;
-    if updated.rows_affected() != 1 {
-        return Err(admin_error(RealtimeAdminError::AlreadyResolved));
-    }
+    .await?;
 
     let metadata = json!({
         "command_id": command.command_id,

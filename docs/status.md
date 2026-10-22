@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | HTTP 与页面 | Public 26、Admin 46 条 feature API；15/21 条浏览器入口 | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
-| 迁移 | PostgreSQL 56 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 57 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -34,6 +34,44 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 各记录只覆盖注明的工作树与验证范围，不代表运行验收。下文 `verify全绿` 指完整 `just verify` 通过：文档份数（未注明为 45 份）、格式/仓库/布局/配置/i18n、工作区全部目标、独立 PostgreSQL/Redis、全特性 Clippy（`-D warnings`）及双端 WASM。检查入口见[开发指南](docs/guide/development.md#默认检查)。
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
+
+### 2026-10-22 全源码审计确认项修复（本地验证，schema 源码 57）
+
+owner 涵盖 domain、application、storage、HTTP、integrations、jobs、config、双端 Web/shared、五个装配根及运维。
+修复 P14 含 key 响应的缓存优先级；Sent 恢复与资金 spent/履约/审计的原子收口；realtime replay 的连续消费游标；
+恢复拉黑和会话撤销的行时间下界；改名后已发送履约的冻结地址及旧退款 v1 精确摘要重建；多附件解析、RTS-only
+退回证明和共享 Cookie 的完整逻辑操作互斥。旧原名称无法从冻结证明或同 UUID 历史重建时持久化人工核对，
+不猜摘要、不重复资金化、不释放原资金或补发。
+
+代理 Fast/SlowDue/Final 及代理间自动反超统一使用 +1000，普通出价仍用冻结的 PPM/固定经济增量；
+不重写历史竞价和重放结果。Preview/Open/Final 与调度完成 fence 同事务，取消后恢复已由排期暂停的邮箱，
+周邮箱命令绑定观测版本。手工排期只要求 `preview < open < end`，两小时是邮箱暂停提前量，不是手工场次最小间隔。
+论坛代码支持 `One100` 等完整分类编号；全局补偿余额读取全部 world 的权威当前池合计。
+
+runtime 写时校验复用当前部署的启动校验，并纳入非敏感的 OTLP headers 存在性门禁；迁移前检查实际 Admin
+unit 身份与 runtime 0640/父目录。首次生成论坛地址使用实际 Public origin，废弃 `session_signing_key` 明确拒绝，
+Sent 证据导出复用私有目录与文件/目录 fsync。追加 `000057_account_read_indexes`，原 56 个迁移不变；
+本轮没有执行数据库迁移。未知 Send 的零条 Sent 匹配不是未发送证明，保留人工核对而非自动重发，相关旧说明已更正。
+
+Public 的完整 Router 位置、关闭世界历史深链、分页纠偏 Replace、账户响应页码和 realtime 恢复状态同步；
+shared 空 busy 弹窗聚焦面板、Markdown 链接与有界扫描、Time 直接订阅语言；Admin 本地时区文案和标题规范化同步。
+合并 supervisor 传播关闭期子进程非零状态，同时继续回收其余角色。
+
+完整 `just verify` 退出 0，覆盖仓库/布局/配置/i18n、格式、全部已有目标、PostgreSQL/Redis 独立 feature、
+全特性 Clippy（`-D warnings`）及双端 WASM。首轮发现 watch 本地分页遗漏新增纠偏回调，补齐后完整重跑通过；
+最终 `cargo fmt --all -- --check` 退出 0。`just web-build` 退出 0，每端生成 6 个 payload 文件；没有构建或部署后端发布包。
+
+临时本地 Rust 诊断例程直接执行实际领域、Public router、邮件解析/RTS proof 和 runtime 文件适配器，均退出 0；
+确认自动反超 105000→106000、人工 101000 未绕过 105000 门槛、代理间 200000→201000 和历史余数保留，
+P14/lot 依赖失败响应 `no-store`、普通 rules `no-cache`，多附件及无关畸形正文可读，重复 Return 和未读 Inbox
+缺席证明被拒绝、完整 RTS 被接受；规范 runtime 可接受，非规范 Origin/endpoint、headers 冲突和废弃密钥选项被拒绝。
+诊断源码执行后已删除，未新增永久测试。
+
+新构建 Public WASM 在独立本地 Chromium 中使用明确标识的合成只读响应，禁止写请求及外部域；
+观察关闭世界回退、历史 Router Link 的世界/场次保留、既有时间的语言切换、自动纠偏后的 Back、空弹窗 Tab 约束、
+恶意 Markdown 路径不生成链接，以及 262144 字符畸形 Markdown 完成渲染。此为隔离表面证据，不是数据库或真实业务验收。
+本地摘要和两张截图位于 `target/audits/source-audit-fixes/`；临时浏览器、预览服务、服务脚本及 profile 均已关闭/清理。
+未运行 PostgreSQL 并发/锁/迁移验证、真实论坛或邮件操作、认证 Admin 浏览器业务流程、测试套件或生产切换。
 
 ### 2026-10-22 安全依赖、构建工具与云端系统修复（R25 已部署，schema 56）
 

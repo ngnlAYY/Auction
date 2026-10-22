@@ -118,3 +118,5 @@ PostgreSQL consumer 启动时按命名空间化的 `consumer_key` 持有会话�
 schema 不可识别、序号缺口或外部 sink 失败都会写入 `realtime_failures` 且不推进游标，失败记录未解决前消费停在该边界。只有替代事件已追加到同一 stream 后，运维流程才能写入引用原事件的 `replay_event_id` 并越过原事件序号；原事件不被修改，替代事件按自己的新序号进入后续消费，保证重放不静默重排历史事件。
 
 PostgreSQL 提供游标、失败记录和 replay 适配器，Worker 可注入消费 runner。Public 的独立持久化 relay 追赶 `auction:` 目录（含 `auction:discovery`），交给本地有界 Hub 接收后才推进游标，队列满则淘汰慢连接；这只证明本实例已接收，外部广播 sink 仍需另行冻结协议。Admin A21–A24、A43 复用同一持久化边界，lag、failure 列表/详情与事件元数据只返回安全投影，failure 页保留 `data.pagination`。A24 v1 兼容请求仅含 `schema_version` 和公开 payload，HTTP 按 failure 与修正负载稳定派生 `command_id`，新客户端可显式携带并重用该 ID；事务锁定原 failure，追加带 `replay_of_event_id` 的事件、解决 failure、追加 audit 并写 `auction_commands`，同命令返回原事件投影，负载或 failure 不同则冲突。
+解决 failure 时，同一事务还须按原 `consumer_key/stream_key` 锁验并推进原事件的连续消费边界；不能仅隐藏 failure、
+也不能越过尚未处理的更早事件。替代事件仍按它的新序号独立消费，不伪造外部 sink 已接收。

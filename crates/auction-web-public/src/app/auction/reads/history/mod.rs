@@ -189,6 +189,13 @@ pub(crate) fn history() -> Element {
                             QueryWriteMode::Push,
                         );
                     },
+                    on_page_clamp: move |next_page: i64| {
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| query.page = next_page.max(1),
+                            QueryWriteMode::Replace,
+                        );
+                    },
                 }
             },
         }

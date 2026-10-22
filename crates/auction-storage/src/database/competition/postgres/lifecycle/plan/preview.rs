@@ -165,22 +165,13 @@ pub(super) async fn apply_preview_plan_postgres(
         if retained.rows_affected() != 1 {
             return Err(CompetitionTransactionError::InvalidState);
         }
-
-        if manual {
-            sqlx::query(
-                "UPDATE public.scheduled_rounds
-                 SET preview_command_id = $1, preview_completed_at = $2,
-                     state_version = state_version + 1, updated_at = $2
-                 WHERE auction_id = $3 AND status = 'active'
-                   AND preview_completed_at IS NULL",
-            )
-            .bind(command.command_id.as_uuid())
-            .bind(auction.updated_at)
-            .bind(auction.id.as_uuid())
-            .execute(&mut **transaction)
-            .await
-            .map_err(map_sql_error)?;
-        }
     }
+    super::complete_schedule_phase_postgres(
+        transaction,
+        command,
+        auction,
+        auction_application::ScheduledRoundPhase::Preview,
+    )
+    .await?;
     Ok(())
 }

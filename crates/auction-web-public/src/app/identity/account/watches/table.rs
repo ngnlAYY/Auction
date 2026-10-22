@@ -66,6 +66,7 @@ pub(super) fn WatchedTable(watched: WatchedAuction) -> Element {
                 total,
                 page_size: PAGE_SIZE,
                 on_page_change: move |page| requested_page.set(page),
+                on_page_clamp: move |page| requested_page.set(page),
             }
         }
     }

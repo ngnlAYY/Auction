@@ -236,6 +236,7 @@ impl FirstRunConfig {
         write_toml(directory.join("admin.toml"), &admin, 0o640)?;
 
         let mut worker = template(include_str!("../../../../ops/config/examples/worker.toml"))?;
+        worker["worker"]["forum"]["public_base_url"] = Value::String(self.public_origin.clone());
         worker["worker"]["concurrency"] = Value::Integer(i64::from(self.worker_concurrency));
         worker["worker"]["poll_interval_seconds"] =
             Value::Integer(self.worker_poll_interval_seconds as i64);

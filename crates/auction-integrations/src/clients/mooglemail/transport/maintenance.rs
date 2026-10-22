@@ -193,7 +193,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
 }
 
 impl MoogleMailMaintenanceAdapter {
-    /// 用部署模板与登录 key 重建通知主题与正文摘要；未知模板返回 None，保留原投递。
+    /// 用部署模板与登录 key 重建通知摘要；模板缺少入站 MID 关联时保留未知投递。
     fn notice_expectation_inner<'a>(
         &'a self,
         candidate: &'a MoogleMailboxUnprovenSend,
@@ -229,10 +229,24 @@ impl MoogleMailMaintenanceAdapter {
             if subject.is_empty() || subject.len() > 512 || body.is_empty() {
                 return Ok(None);
             }
-            Ok(Some(MoogleMailboxNoticeExpectation {
-                subject,
-                body_digest: canonical_mail_body_digest(&body),
-            }))
+            // 相同正文不能区分重复通知；只有实际保留入站 MID 的模板才可用于未知发送核对。
+            let alternative_reference = format!("{}-reconcile-proof", candidate.inbound_mail_id);
+            let Some((_, alternative_body)) = render_notification(
+                &self.templates,
+                &candidate.template,
+                result_code,
+                login_key.as_ref(),
+                &candidate.recipient,
+                &candidate.world_id,
+                &alternative_reference,
+            ) else {
+                return Ok(None);
+            };
+            let body_digest = canonical_mail_body_digest(&body);
+            if body_digest == canonical_mail_body_digest(&alternative_body) {
+                return Ok(None);
+            }
+            Ok(Some(MoogleMailboxNoticeExpectation { subject, body_digest }))
         })
     }
 }

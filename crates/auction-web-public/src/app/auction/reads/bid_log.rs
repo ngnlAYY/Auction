@@ -154,6 +154,13 @@ pub(crate) fn bid_log() -> Element {
                     write_public_query(&next, QueryWriteMode::Push);
                     query_state_signal.set(next);
                 },
+                on_page_clamp: move |next_page: i64| {
+                    // 纠偏同样保留尚未防抖写回的 lot 筛选，不建立可返回的无效页条目。
+                    let mut next = query_state_signal.peek().clone();
+                    next.page = next_page;
+                    write_public_query(&next, QueryWriteMode::Replace);
+                    query_state_signal.set(next);
+                },
                 on_page_size_change: move |size| {
                     let mut next = query_state_signal.peek().clone();
                     next.page_size = super::super::normalize_public_page_size(size);
@@ -262,6 +269,7 @@ pub(crate) fn BidLogTable(
     current_page: i64,
     lot_filter: String,
     on_page_change: EventHandler<i64>,
+    on_page_clamp: EventHandler<i64>,
     on_page_size_change: EventHandler<i64>,
 ) -> Element {
     let has_more = page.has_more.unwrap_or(false);
@@ -305,6 +313,7 @@ pub(crate) fn BidLogTable(
                 has_more,
                 label: t!("page-bidlog-title"),
                 on_page_change,
+                on_page_clamp,
                 on_page_size_change,
             }
         }

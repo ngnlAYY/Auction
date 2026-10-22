@@ -43,10 +43,12 @@ pub fn Dialog(
             // Escape 关闭挂在遮罩根上，弹窗内按键会冒泡到这里；stop_propagation 避免嵌套
             // 弹窗时一次 Escape 连关两层。
             onkeydown: move |event| {
-                if event.key() == Key::Escape && !busy {
+                if event.key() == Key::Escape {
                     event.prevent_default();
                     event.stop_propagation();
-                    on_close.call(());
+                    if !busy {
+                        on_close.call(());
+                    }
                 }
             },
             section {
@@ -54,6 +56,8 @@ pub fn Dialog(
                 role: "dialog",
                 aria_modal: "true",
                 aria_labelledby: "{title_id}",
+                // 提交时可能没有可用子控件，面板仍须承接初始焦点与 Tab 循环。
+                tabindex: "-1",
                 onclick: move |event| event.stop_propagation(),
                 div { class: "ui-dialog__header",
                     h2 { class: "ui-dialog__title", id: "{title_id}", "{title}" }

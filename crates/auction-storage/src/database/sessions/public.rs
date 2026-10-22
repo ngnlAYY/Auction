@@ -176,7 +176,7 @@ pub(super) async fn revoke_postgres(
 ) -> Result<(), ApplicationError> {
     sqlx::query(
         "UPDATE public.public_sessions
-         SET revoked_at = $1
+         SET revoked_at = GREATEST(created_at, $1)
          WHERE token_hash = $2 AND revoked_at IS NULL",
     )
     .bind(now)

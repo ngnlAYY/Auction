@@ -1,7 +1,7 @@
 //! 每周拍卖轮次的数据库时间、幂等 bootstrap 和安全投影。
 
 use auction_application::{ScheduledRoundBootstrap, ScheduledRoundSnapshot};
-use chrono::{DateTime, Datelike, Duration, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
@@ -279,7 +279,6 @@ fn validate_request(
         || !matches!(request.world_id.as_str(), "main" | "isekai")
         || request.local_week.weekday().num_days_from_monday() != 0
         || request.preview_due_at >= request.open_due_at
-        || request.open_due_at - request.preview_due_at < Duration::hours(2)
         || request.open_due_at >= request.scheduled_end_at
         || request.request_hash.as_bytes() == [0; 32]
     {

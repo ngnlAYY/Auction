@@ -102,21 +102,11 @@ pub(super) async fn mark_final_schedule_postgres(
     command: &AuctionLifecycleCommand,
     auction: &Auction,
 ) -> Result<(), CompetitionTransactionError> {
-    // 生命周期和轮次完成必须原子提交；Worker 不能依赖提交后的第二次 complete 才收口。
-    let transaction = transaction.transaction_mut()?;
-    sqlx::query(
-        "UPDATE public.scheduled_rounds
-             SET final_command_id = $1, final_completed_at = $2,
-                 lease_owner = NULL, lease_until = NULL,
-                 state_version = state_version + 1, updated_at = $2
-             WHERE auction_id = $3 AND status = 'active'
-               AND open_completed_at IS NOT NULL AND final_completed_at IS NULL",
+    super::complete_schedule_phase_postgres(
+        transaction,
+        command,
+        auction,
+        auction_application::ScheduledRoundPhase::Final,
     )
-    .bind(command.command_id.as_uuid())
-    .bind(auction.updated_at)
-    .bind(auction.id.as_uuid())
-    .execute(&mut **transaction)
     .await
-    .map_err(map_sql_error)?;
-    Ok(())
 }

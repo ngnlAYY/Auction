@@ -1,6 +1,6 @@
 //! MoogleMail 定期维护端口：compose 草稿、受控 discard、Sent 观察和本地证据写入。
 //!
-//! 维护流程只读取远端页面并记录观察；它不改变投递状态，也不自行宣告发送成功。
+//! 维护读取远端页面并记录观察；只有可证明的恢复才同事务迁移投递、资金、履约与审计。
 
 use std::future::Future;
 use std::pin::Pin;
@@ -88,11 +88,13 @@ pub struct MoogleMailboxUnprovenSend {
     pub result_code: Option<String>,
     /// 通知类登录 key 所属用户；只以 UUID 引用，明文不落库。
     pub user_key_user_id: Option<Uuid>,
-    /// 发送围栏时间；用于限定通知类 Sent 候选的时间窗。
+    /// 发送围栏时间；通知仅接受此时间之后的有界 Sent 证据，不回退到分钟起点。
     pub sending_at: DateTime<Utc>,
+    /// 原未知结果持久化时间，限定本次发送证据上界，不用任意时钟偏移扩展窗口。
+    pub outcome_recorded_at: DateTime<Utc>,
     /// `send` 或 `take`；take 只核对收件箱，不重建正文。
     pub operation: String,
-    /// take 动作要领取的入站附件 ID。
+    /// take 要领取的附件，或 settlement 冻结 secret 引用解析出的精确装备 ID；不含 secret。
     pub attachment_ids: Vec<String>,
     /// 维护已重排队次数；达到上限后保留人工核对，避免无限重试。
     pub sweep_retries: i64,
@@ -120,8 +122,8 @@ pub trait MoogleMailboxMaintenance: Send + Sync {
         observed_at: DateTime<Utc>,
     ) -> MailboxFuture<'a, MoogleMailboxSentState>;
 
-    /// 用部署模板与登录 key 重建通知类投递的精确主题与正文摘要。
-    /// 无法重建的模板返回 `None`，调用方保留原投递状态。
+    /// 用部署模板与登录 key 重建精确主题与正文摘要，且确认正文保留原入站关联。
+    /// 通用重复模板或无法证明关联的模板返回 `None`，调用方保留未知状态，不自动重发。
     fn notice_expectation<'a>(
         &'a self,
         candidate: &'a MoogleMailboxUnprovenSend,
@@ -135,7 +137,7 @@ pub trait MoogleMailboxMaintenance: Send + Sync {
     ) -> MailboxFuture<'a, Option<MoogleMailboxInboxAssets>>;
 }
 
-/// 维护流程的本地读取与追加证据端口；不修改投递状态机。
+/// 本地观察与受证明恢复端口；状态变更必须与资金、履约及追加审计原子提交。
 pub trait MoogleMailboxEvidenceStore: Send + Sync {
     fn unproven_sends<'a>(
         &'a self,
@@ -156,35 +158,35 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
     ) -> MailboxFuture<'a, ()>;
 
     /// 把唯一精确匹配的 Sent MID 绑定回原投递，并把履约重新排队等待收取证据。
-    /// 只用于升级前 `write_unknown` 的历史投递；成功证明标记为恢复证明，不冒充实时发送证明。
+    /// 资金占用同步收口为 Sent；返回 true 仅表示本事务实际迁移并已确认提交，不把重放计为恢复。
     fn bind_recovered_send<'a>(
         &'a self,
         delivery_id: Uuid,
         external_mail_id: String,
         metadata: Value,
-    ) -> MailboxFuture<'a, ()>;
+    ) -> MailboxFuture<'a, bool>;
 
-    /// 把唯一精确匹配的 Sent MID 绑定回通知类投递；通知没有履约事实可重新排队。
+    /// 把唯一精确匹配的 Sent MID 绑定回通知类投递；仅实际迁移并确认提交返回 true。
     fn bind_recovered_notice<'a>(
         &'a self,
         delivery_id: Uuid,
         external_mail_id: String,
         metadata: Value,
-    ) -> MailboxFuture<'a, ()>;
+    ) -> MailboxFuture<'a, bool>;
 
-    /// 把已不在收件箱的 take 动作收口为成功；附件已随邮件一起消失。
+    /// 把已不在收件箱的 take 动作收口为成功；仅实际迁移并确认提交返回 true。
     fn bind_recovered_action<'a>(
         &'a self,
         delivery_id: Uuid,
         external_mail_id: String,
         metadata: Value,
-    ) -> MailboxFuture<'a, ()>;
+    ) -> MailboxFuture<'a, bool>;
 
-    /// 把仍未证明的投递退回收件/发送队列重试，并累计重试次数。
+    /// 仅将已正向确认附件仍在的 take 重新排队，返回实际迁移结果；未知 Send 禁止走此入口。
     fn requeue_unproven<'a>(
         &'a self,
         delivery_id: Uuid,
         retries: i64,
         reason: &'a str,
-    ) -> MailboxFuture<'a, ()>;
+    ) -> MailboxFuture<'a, bool>;
 }

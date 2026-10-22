@@ -4,8 +4,6 @@ use std::path::PathBuf;
 
 #[cfg(feature = "postgres")]
 use std::{
-    fs::OpenOptions,
-    io::{BufWriter, Write},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -35,8 +33,8 @@ use chrono::Utc;
 use serde_json::json;
 use uuid::Uuid;
 
-#[cfg(all(unix, feature = "postgres"))]
-use std::os::unix::fs::OpenOptionsExt;
+#[cfg(feature = "postgres")]
+use super::super::postgres::write_private_evidence;
 
 /// 对指定撤拍义务执行只读 Sent 核对并创建安全 JSON 报告。
 #[cfg(feature = "postgres")]
@@ -136,16 +134,8 @@ pub(crate) async fn inspect_sent(obligation_id: Uuid, output: PathBuf) -> anyhow
         },
         "candidates": candidates,
     });
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let file =
-        options.open(&output).with_context(|| format!("create report {}", output.display()))?;
-    let mut writer = BufWriter::new(file);
-    serde_json::to_writer_pretty(&mut writer, &output_value).context("write Sent lookup report")?;
-    writer.flush().context("flush Sent lookup report")?;
-    writer.get_ref().sync_all().context("sync Sent lookup report")?;
+    let evidence = serde_json::to_vec_pretty(&output_value).context("encode Sent lookup report")?;
+    write_private_evidence(&output, &evidence)?;
     println!(
         "sent lookup: obligation_id={obligation_id} status={:?} candidates={} output={}",
         report.status,

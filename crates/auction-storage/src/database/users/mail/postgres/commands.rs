@@ -89,6 +89,24 @@ pub(crate) async fn register_postgres(
                     .map_err(map_storage_error)?;
                     let reissue = user.key_status != "active" || !envelope_exists;
                     let identity_changed = user.username != write.command.username;
+                    if identity_changed {
+                        // 大小写修正也是地址变更；与换绑一样保留原名称，供旧稳定退款摘要精确重建。
+                        sqlx::query(
+                            "INSERT INTO public.user_game_identity_history
+                                (id, user_id, source_command_id,
+                                 previous_username, next_username,
+                                 previous_game_player_id, next_game_player_id, created_at)
+                             VALUES ($1, $2, $1, $3, $4, $3, $4, $5)",
+                        )
+                        .bind(write.command.command_id.as_uuid())
+                        .bind(user.id)
+                        .bind(&user.username)
+                        .bind(&write.command.username)
+                        .bind(write.command.now)
+                        .execute(&mut *transaction)
+                        .await
+                        .map_err(map_storage_error)?;
+                    }
                     if reissue || identity_changed {
                         sqlx::query(
                             "UPDATE public.users

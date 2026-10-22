@@ -260,6 +260,10 @@ sudo /opt/auction/bin/auctionctl deployment stop
 预检不连接数据库；配置目录/common/角色/runtime/敏感文件均禁 symlink，strict-permissions 将权限警告升为失败。总控状态目录
 必须预建、规范绝对路径、归其有效用户所有且至多 0700。restart 先预检并反序停机，再迁移和启动；失败只回滚本次启动的
 unit，迁移不自动回退。独立建库/迁移命令见[auctionctl](apps/auctionctl/README.md#停机迁移与初始建库)。
+迁移前还按实际 Admin unit 的 `User` 验证 runtime 文件及可写父目录的属主，runtime 必须精确 `0640`；
+空 `User` 按 systemd 的 root 语义处理，`DynamicUser=yes` 不能满足持久可编辑 runtime 的固定属主要求。运维命令以
+root 执行不等于 runtime 应归 root，不能拿运维进程 UID 代替服务身份。旧 `session_signing_key` 无有效会话协议，
+新版显式拒绝该无效选项，须从敏感文件移除后再做部署预检。
 
 Admin 每次启动永久撤销旧管理会话，失败即阻断启动；须重新登录，Public 不受影响。轮换 actor/secret 前停掉所有旧凭据实例并
 统一新值，恢复旧配置不复活会话。SIGTERM：drain 最多 10 秒、exporter 最多 30 秒，分体 unit 45 秒；合并及外层预算见

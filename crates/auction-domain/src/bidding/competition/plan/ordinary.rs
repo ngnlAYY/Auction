@@ -32,6 +32,7 @@ pub(super) fn plan_ordinary_bid(
         return Err(DomainError::ActiveProxyExists);
     }
 
+    // 普通出价沿用完整经济增量；固定 +1000 只用于代理自动反超，不能由历史领先机制放宽。
     let minimum = rules.next_minimum_bid(
         Some(state.start_price),
         state.current_price,

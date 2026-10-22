@@ -152,7 +152,7 @@ pub(super) fn plan_create_proxy(
                 Some(final_state.start_price),
                 Some(loser.maximum_amount),
                 final_state.material,
-                false,
+                true,
             )?;
             price = price.min(winner_maximum).bid_ceiling();
             if let Some(current) = final_state.current_price {
@@ -215,7 +215,7 @@ pub(super) fn plan_lower_proxy(
             Some(state.start_price),
             state.current_price,
             state.material,
-            false,
+            true,
         )?
     } else {
         state.current_price.unwrap_or(state.start_price)

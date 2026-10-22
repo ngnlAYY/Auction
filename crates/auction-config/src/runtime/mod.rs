@@ -53,11 +53,15 @@ impl Drop for TomlRuntimeWorkflowGuard {
 pub struct TomlRuntimeFileStore {
     path: PathBuf,
     lock_path: PathBuf,
+    tracing_headers_configured: bool,
 }
 
 impl TomlRuntimeFileStore {
-    /// 校验规范化绝对路径和受信任的父目录。
-    pub fn new(path: impl AsRef<Path>) -> Result<Self, RuntimeFileStoreError> {
+    /// 校验规范化绝对路径和受信任的父目录；仅保留部署侧 OTLP 头是否存在，不接收头内容。
+    pub fn new(
+        path: impl AsRef<Path>,
+        tracing_headers_configured: bool,
+    ) -> Result<Self, RuntimeFileStoreError> {
         let path = path.as_ref().to_owned();
         if !path.is_absolute()
             || path
@@ -72,13 +76,17 @@ impl TomlRuntimeFileStore {
         }
         let directory = path.parent().ok_or(RuntimeFileStoreError::InvalidPath)?;
         validate_directory(directory)?;
-        Ok(Self { lock_path: directory.join(".admin-runtime-config.lock"), path })
+        Ok(Self {
+            lock_path: directory.join(".admin-runtime-config.lock"),
+            path,
+            tracing_headers_configured,
+        })
     }
 
     /// 首次部署在私有临时目录中复用正式读取校验；发布前不创建运行时锁文件。
     #[cfg(unix)]
     pub(crate) fn validate_initial_file(path: &Path) -> Result<(), RuntimeFileStoreError> {
-        Self::new(path)?.read_snapshot().map(|_| ())
+        Self::new(path, false)?.read_snapshot().map(|_| ())
     }
 
     fn open_lock(&self) -> Result<File, RuntimeFileStoreError> {
@@ -124,7 +132,7 @@ impl TomlRuntimeFileStore {
         let contents = String::from_utf8(bytes).map_err(|_| RuntimeFileStoreError::Parse)?;
         let document: AdminRuntimeDocument =
             toml::from_str(&contents).map_err(|_| RuntimeFileStoreError::Parse)?;
-        validate_runtime_document(&document, chrono::Utc::now())
+        self.validate_document(&document, chrono::Utc::now())
             .map_err(|error| RuntimeFileStoreError::InvalidDocument(error.to_string()))?;
         Ok(AdminRuntimeSnapshot {
             fingerprint: document.fingerprint(),
@@ -133,8 +141,23 @@ impl TomlRuntimeFileStore {
         })
     }
 
-    fn encode(document: &AdminRuntimeDocument) -> Result<Vec<u8>, RuntimeFileStoreError> {
-        validate_runtime_document(document, chrono::Utc::now())
+    fn validate_document(
+        &self,
+        document: &AdminRuntimeDocument,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), auction_application::AdminRuntimeConfigError> {
+        validate_runtime_document(document, now)?;
+        // headers 只由敏感部署文件拥有；不能保存一个重启后必因遗留 headers 而失败的关闭候选。
+        if !document.tracing.enabled && self.tracing_headers_configured {
+            return Err(auction_application::AdminRuntimeConfigError::InvalidDocument(
+                "关闭 tracing 前须先移除敏感 TOML 的 admin_otlp_headers 并重启 Admin".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn encode(&self, document: &AdminRuntimeDocument) -> Result<Vec<u8>, RuntimeFileStoreError> {
+        self.validate_document(document, chrono::Utc::now())
             .map_err(|error| RuntimeFileStoreError::InvalidDocument(error.to_string()))?;
         let encoded = toml::to_string_pretty(document).map_err(|_| RuntimeFileStoreError::Parse)?;
         let bytes = format!("{encoded}\n").into_bytes();
@@ -145,7 +168,7 @@ impl TomlRuntimeFileStore {
     }
 
     fn atomic_write(&self, document: &AdminRuntimeDocument) -> Result<(), RuntimeFileStoreError> {
-        let bytes = Self::encode(document)?;
+        let bytes = self.encode(document)?;
         let current = fs::symlink_metadata(&self.path).map_err(io_message)?;
         validate_runtime_file(&current)?;
         let directory = self.path.parent().ok_or(RuntimeFileStoreError::InvalidPath)?;
@@ -239,7 +262,7 @@ impl AdminRuntimeFileStore for TomlRuntimeFileStore {
         document: &AdminRuntimeDocument,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), ApplicationError> {
-        validate_runtime_document(document, now).map_err(ApplicationError::from)
+        self.validate_document(document, now).map_err(ApplicationError::from)
     }
 
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {

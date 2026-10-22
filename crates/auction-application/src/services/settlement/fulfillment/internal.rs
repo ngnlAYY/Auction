@@ -29,7 +29,9 @@ impl SettlementFulfillmentService {
         prepared_at: DateTime<Utc>,
         retry_delay: Duration,
     ) -> Result<Outcome, ApplicationError> {
-        super::validation::validate_claim(&claim)?;
+        if super::validation::validate_claim(&claim).is_err() {
+            return self.manual_internal(claim, "invalid_fulfillment_fact").await;
+        }
         if claim.state != SettlementFulfillmentState::Pending {
             return Err(repository_error("仅新 pending 可进行内部身份分支"));
         }
@@ -37,8 +39,18 @@ impl SettlementFulfillmentService {
             return self.defer_internal(claim, retry_delay, "internal_unsupported").await;
         };
         // 稳定命令先重放，不要求重试仍持原 claim/远端会话。
-        let replay = SettlementInternalCommand::new(claim.clone(), None, false)?;
-        if store.replay_internal(replay).await? {
+        let replay = match SettlementInternalCommand::new(claim.clone(), None, false) {
+            Ok(command) => command,
+            Err(_) => return self.manual_internal(claim, "invalid_fulfillment_fact").await,
+        };
+        let replayed = match store.replay_internal(replay).await {
+            Ok(replayed) => replayed,
+            Err(ApplicationError::FulfillmentDependencyMismatch) => {
+                return self.manual_internal(claim, "delivery_conflict").await;
+            }
+            Err(error) => return Err(error),
+        };
+        if replayed {
             return Ok(Outcome::InternallySatisfied { obligation_id: claim.obligation_id });
         }
         let policy = self.funding_policy().await?;
@@ -46,7 +58,9 @@ impl SettlementFulfillmentService {
         let repaired_uid =
             store.legacy_self_reconciliation_uid(claim.obligation_id.as_uuid()).await?;
         // 内部动作也遵守原义务的世界/金额/来源闭集，不绕过canonical intent校验。
-        super::intent::build_delivery_intent(&claim)?;
+        if super::intent::build_delivery_intent(&claim).is_err() {
+            return self.manual_internal(claim, "invalid_fulfillment_fact").await;
+        }
         if claim.delivery_id.is_some()
             || claim.prepare_command_id.is_some()
             || claim.activate_command_id.is_some()
@@ -66,7 +80,11 @@ impl SettlementFulfillmentService {
         } else {
             None
         };
-        let command = SettlementInternalCommand::new(claim.clone(), recipient_version, false)?;
+        let command = match SettlementInternalCommand::new(claim.clone(), recipient_version, false)
+        {
+            Ok(command) => command,
+            Err(_) => return self.manual_internal(claim, "invalid_fulfillment_fact").await,
+        };
         let request = match evidence_request(&command, self.clock.now(), false, false) {
             Ok(request) => request,
             Err(_) => {
@@ -122,12 +140,17 @@ impl SettlementFulfillmentService {
         };
         // 第二次组合读取必须仍使用第一次开始时的绝对预算，不重置30秒。
         drop(identity);
-        let mut request = evidence_request(
+        let mut request = match evidence_request(
             &command,
             self.clock.now(),
             action.requires_equipment(),
             action.requires_funding() && policy.observes_cash(),
-        )?;
+        ) {
+            Ok(request) => request,
+            Err(_) => {
+                return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
+            }
+        };
         request.deadline = request.deadline.min(deadline);
         let mut prepared = match reader.prepare_internal_evidence(request).await {
             Ok(prepared) => prepared,
@@ -168,6 +191,19 @@ impl SettlementFulfillmentService {
                 Err(repository_error("内部履约提交结果未知，须查询原稳定命令"))
             }
         }
+    }
+
+    pub(super) async fn manual_internal(
+        &self,
+        claim: SettlementFulfillmentClaim,
+        code: &'static str,
+    ) -> Result<Outcome, ApplicationError> {
+        let obligation_id = claim.obligation_id;
+        self.store.manual_reconcile(claim, code.to_owned()).await?;
+        Ok(Outcome::External(Box::new(SettlementFulfillmentPhaseResult::ManualReconcile {
+            obligation_id,
+            failure_code: code,
+        })))
     }
 
     pub(super) async fn defer_internal(

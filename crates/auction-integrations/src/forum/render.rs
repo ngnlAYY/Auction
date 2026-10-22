@@ -59,6 +59,7 @@ fn render_auction_thread_with_colors(
     lots.sort_by(|left, right| {
         category_order(&left.0.category)
             .cmp(&category_order(&right.0.category))
+            .then_with(|| left.0.code.len().cmp(&right.0.code.len()))
             .then_with(|| left.0.code.cmp(&right.0.code))
     });
 
@@ -462,9 +463,10 @@ fn valid_current_bid_source(source: &ForumCurrentBidSource) -> bool {
 
 fn valid_code(value: &str) -> bool {
     let bytes = value.as_bytes();
-    bytes.len() == 5
+    (5..=13).contains(&bytes.len())
         && bytes[..3].iter().all(u8::is_ascii_alphabetic)
         && bytes[3..].iter().all(u8::is_ascii_digit)
+        && value[3..].parse::<i32>().is_ok_and(|number| number > 0)
 }
 
 fn valid_primary_attribute_initials(value: &str) -> bool {

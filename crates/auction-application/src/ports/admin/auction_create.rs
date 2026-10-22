@@ -36,7 +36,7 @@ impl AdminCreateAuctionCommand {
             && valid_time(self.preview_scheduled_at)
             && valid_time(self.scheduled_open_at)
             && valid_time(self.scheduled_end_at)
-            && self.preview_scheduled_at <= self.scheduled_open_at
+            && self.preview_scheduled_at < self.scheduled_open_at
             && self.scheduled_end_at > self.scheduled_open_at
             && valid_text(&self.actor_id, 128)
             && self.request_id.as_deref().is_none_or(|value| valid_text(value, 128))

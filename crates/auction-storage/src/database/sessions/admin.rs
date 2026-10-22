@@ -16,11 +16,15 @@ pub(super) async fn revoke_all_postgres(
     store: &PostgresStore,
     now: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
-    sqlx::query("UPDATE public.admin_sessions SET revoked_at = $1 WHERE revoked_at IS NULL")
-        .bind(now)
-        .execute(store.pool())
-        .await
-        .map_err(|_| storage_error("撤销启动前的 Admin 会话失败"))?;
+    sqlx::query(
+        "UPDATE public.admin_sessions
+         SET revoked_at = GREATEST(created_at, $1)
+         WHERE revoked_at IS NULL",
+    )
+    .bind(now)
+    .execute(store.pool())
+    .await
+    .map_err(|_| storage_error("撤销启动前的 Admin 会话失败"))?;
     Ok(())
 }
 
@@ -48,7 +52,7 @@ pub(super) async fn create_postgres(
     .map_err(|_| storage_error("锁定 Admin 会话主体失败"))?;
     sqlx::query(
         "UPDATE public.admin_sessions
-         SET revoked_at = $1
+         SET revoked_at = GREATEST(created_at, $1)
          WHERE actor = $2 AND revoked_at IS NULL",
     )
     .bind(record.created_at)
@@ -125,7 +129,7 @@ pub(super) async fn revoke_postgres(
 ) -> Result<(), ApplicationError> {
     sqlx::query(
         "UPDATE public.admin_sessions
-         SET revoked_at = $1
+         SET revoked_at = GREATEST(created_at, $1)
          WHERE token_hash = $2 AND revoked_at IS NULL",
     )
     .bind(now)

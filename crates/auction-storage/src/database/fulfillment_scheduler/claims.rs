@@ -15,9 +15,37 @@ pub(super) async fn claim_postgres(
     limit: u16,
 ) -> Result<Vec<SettlementFulfillmentClaim>, auction_application::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
-    // 领取保持短事务；先按UUID锁义务，再锁execution，避免与满足事务的反向行锁。
-    sqlx::query("SELECT id FROM public.settlement_obligations WHERE business_state='ready' ORDER BY id FOR UPDATE SKIP LOCKED")
-        .fetch_all(&mut *transaction).await.map_err(map_storage_error)?;
+    // 先按到期顺序截取有界候选，再按 UUID 锁义务；未锁到的候选留待下一批，
+    // 不扫描并锁住全部 ready。先义务后 execution，与满足事务保持相同锁序。
+    let obligation_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"WITH candidates AS MATERIALIZED (
+               SELECT o.id
+               FROM public.settlement_obligations o
+               LEFT JOIN public.settlement_obligation_fulfillments f ON f.obligation_id=o.id
+               LEFT JOIN public.settlement_obligation_fulfillments prerequisite
+                   ON prerequisite.obligation_id=o.prerequisite_obligation_id
+               WHERE o.business_state='ready'
+                 AND (f.obligation_id IS NULL OR (
+                     f.execution_state IN ('pending','prepared','enqueued')
+                     AND ((f.claim_token IS NULL
+                           AND (f.next_attempt_at IS NULL OR f.next_attempt_at<=$1))
+                          OR f.claim_expires_at<=$1)))
+                 AND (o.prerequisite_obligation_id IS NULL
+                      OR prerequisite.execution_state='satisfied'
+                      OR prerequisite.obligation_id IS NULL)
+               ORDER BY o.created_at,o.auction_id,o.lot_id,o.obligation_kind,o.id
+               LIMIT $2
+           )
+           SELECT o.id FROM public.settlement_obligations o
+           JOIN candidates ON candidates.id=o.id
+           WHERE o.business_state='ready'
+           ORDER BY o.id FOR UPDATE OF o SKIP LOCKED"#,
+    )
+    .bind(now)
+    .bind(i64::from(limit))
+    .fetch_all(&mut *transaction)
+    .await
+    .map_err(map_storage_error)?;
     // ready obligation 可能尚未有 execution 行；只为缺失行补齐当前派发语义，
     // 不回写已有 delivery 的冻结操作。候选由锁保护，避免两个 Worker 同时补写同一行。
     sqlx::query(
@@ -29,15 +57,13 @@ pub(super) async fn claim_postgres(
                LEFT JOIN public.settlement_obligation_fulfillments AS prerequisite
                    ON prerequisite.obligation_id = o.prerequisite_obligation_id
                WHERE o.business_state = 'ready'
+                 AND o.id=ANY($1)
                  AND f.obligation_id IS NULL
                  AND (
                      o.prerequisite_obligation_id IS NULL
                      OR prerequisite.execution_state = 'satisfied'
                      OR prerequisite.obligation_id IS NULL
                  )
-               ORDER BY o.created_at, o.auction_id, o.lot_id, o.obligation_kind, o.id
-               FOR UPDATE OF o SKIP LOCKED
-               LIMIT $1
            )
            INSERT INTO public.settlement_obligation_fulfillments
                (obligation_id, execution_state, dispatch_world, delivery_operation)
@@ -53,7 +79,7 @@ pub(super) async fn claim_postgres(
            FROM candidates
            ON CONFLICT (obligation_id) DO NOTHING"#,
     )
-    .bind(i64::from(limit))
+    .bind(&obligation_ids)
     .execute(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
@@ -125,17 +151,19 @@ pub(super) async fn claim_postgres(
                  OR f.claim_expires_at <= $1
              )
              AND o.business_state = 'ready'
+             AND o.id=ANY($3)
              AND (
                  o.prerequisite_obligation_id IS NULL
                  OR prerequisite.execution_state = 'satisfied'
                  OR prerequisite.obligation_id IS NULL
              )
-           ORDER BY o.created_at, o.auction_id, o.lot_id, o.obligation_kind, o.id
+           ORDER BY f.obligation_id
            LIMIT $2
            FOR UPDATE OF f SKIP LOCKED"#,
     )
     .bind(now)
     .bind(i64::from(limit))
+    .bind(&obligation_ids)
     .fetch_all(&mut *transaction)
     .await
     .map_err(map_storage_error)?;

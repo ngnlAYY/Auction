@@ -115,7 +115,12 @@ impl MoogleMailGateway {
                 .checked_add(self.config.fetch_budget)
                 .ok_or_else(|| configuration(world))?,
         };
-        let mut session = self.credentials.begin(world)?;
+        let mut session = tokio::time::timeout_at(
+            deadline,
+            self.credentials.begin_exclusive(world, MoogleMailOperation::Inbox),
+        )
+        .await
+        .map_err(|_| fetch_budget_exhausted(world))??;
         for _ in 0..64 {
             match tokio::time::timeout_at(
                 deadline,
@@ -129,7 +134,7 @@ impl MoogleMailGateway {
                     tokio::time::timeout_at(deadline, session.invalidate_current())
                         .await
                         .map_err(|_| fetch_budget_exhausted(world))??;
-                    if session.advance().is_err() {
+                    if session.advance_exclusive().await.is_err() {
                         return Err(error);
                     }
                 }
@@ -157,7 +162,8 @@ impl MoogleMailGateway {
                 MoogleMailErrorCategory::Configuration,
             ));
         }
-        let mut session = self.credentials.begin(world)?;
+        let mut session =
+            self.credentials.begin_exclusive(world, MoogleMailOperation::Sent).await?;
         for _ in 0..64 {
             match self
                 .read_sent_with_cookie(world, external_mail_id, observed_at, session.cookie())
@@ -166,7 +172,7 @@ impl MoogleMailGateway {
                 Ok(snapshot) => return Ok(snapshot),
                 Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
                     session.invalidate_current().await?;
-                    if session.advance().is_err() {
+                    if session.advance_exclusive().await.is_err() {
                         return Err(error);
                     }
                 }
@@ -196,7 +202,12 @@ impl MoogleMailGateway {
             .checked_add(self.config.fetch_budget)
             .ok_or_else(|| configuration(request.world))?;
         let deadline = tokio::time::Instant::from_std(request.deadline.min(configured_deadline));
-        let session = self.credentials.begin(request.world)?;
+        let session = tokio::time::timeout_at(
+            deadline,
+            self.credentials.begin_exclusive(request.world, MoogleMailOperation::Sent),
+        )
+        .await
+        .map_err(|_| fetch_budget_exhausted(request.world))??;
         self.lookup_sent_with_cookie(&request, session.cookie(), deadline).await
     }
 
@@ -296,7 +307,8 @@ impl MoogleMailGateway {
                 MoogleMailErrorCategory::Configuration,
             ));
         }
-        let mut session = self.credentials.begin(world)?;
+        let mut session =
+            self.credentials.begin_exclusive(world, MoogleMailOperation::Balance).await?;
         for _ in 0..64 {
             let result = async {
                 let target = self.client.balance(world)?;
@@ -314,7 +326,7 @@ impl MoogleMailGateway {
                 Ok(snapshot) => return Ok(snapshot),
                 Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
                     session.invalidate_current().await?;
-                    if session.advance().is_err() {
+                    if session.advance_exclusive().await.is_err() {
                         return Err(error);
                     }
                 }

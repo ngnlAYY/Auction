@@ -39,19 +39,16 @@ pub(crate) fn AuctionPage() -> Element {
 pub(crate) fn AuctionBoard() -> Element {
     let selected_world = use_context::<Signal<String>>();
     let mut refresh_generation = use_context::<Signal<u64>>();
-    let location_revision = use_context::<PublicLocationRevision>().0;
+    let query_state = use_public_query_state().state;
     let readiness = use_context::<PublicReadinessResource>();
     let session = use_context::<PublicSessionResource>();
     let current_auction = use_context::<CurrentAuctionResource>();
-    // AuctionIndex 的历史与首页只靠 query 区分；直接订阅位置版本，不能依赖 Router 的路径变更。
-    let _ = location_revision();
-    let query = read_public_query();
-    let requested_auction = query.auction_id.clone();
-    let historical = requested_auction.is_some();
+    // 同路径的历史/当前切换也必须订阅查询，不能仅在 popstate 或首页按钮时重读。
+    let requested_auction = use_memo(move || query_state().auction_id.clone());
+    let historical = requested_auction().is_some();
     let historical_current = use_resource(move || {
         let _ = refresh_generation();
-        let _ = location_revision();
-        let requested_auction = read_public_query().auction_id;
+        let requested_auction = requested_auction();
         async move {
             match requested_auction {
                 Some(auction_id) => fetch_historical_auction(auction_id).await.map(Some),
@@ -60,7 +57,9 @@ pub(crate) fn AuctionBoard() -> Element {
         }
     });
     let current = if historical {
-        historical_current.read().clone()
+        historical_current.read().clone().filter(|result| {
+            !matches!(result, Ok(Some(auction)) if Some(&auction.id) != requested_auction().as_ref())
+        })
     } else {
         let selected_world = selected_world();
         match current_auction.read().clone() {

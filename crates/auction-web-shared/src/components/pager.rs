@@ -36,6 +36,9 @@ pub fn Pager(
     jump_label: String,
     jump_button_label: String,
     on_page_change: EventHandler<i64>,
+    /// 非用户操作的页码纠偏；URL 调用方可替换历史记录，省略时沿用 `on_page_change`。
+    #[props(default)]
+    on_page_clamp: Option<EventHandler<i64>>,
     /// 非空时启用数字分页与原生数量选择器；选项和文案归调用方。
     #[props(default)]
     page_size_options: Vec<i64>,
@@ -71,7 +74,7 @@ pub fn Pager(
     // 普通 props 不会被 effect 自动追踪；总量收缩后也须让父级重新读取有效页。
     use_effect(use_reactive((&page, &valid_page), move |(page, valid_page)| {
         if page != valid_page {
-            on_page_change.call(valid_page);
+            on_page_clamp.unwrap_or(on_page_change).call(valid_page);
         }
     }));
 

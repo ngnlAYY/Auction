@@ -125,14 +125,15 @@ where
         // 只在尚无轮次时发起创建；并发创建仍由存储层的锁、摘要和既有一致性检查保护。
         worker.schedule.ensure_current_round(request).await?
     };
-    let identity = identities(world_id, generation.local_week);
     if snapshot.world_id != world_id
         || snapshot.local_week != generation.local_week
-        || snapshot.round_id != identity.round_id
-        || snapshot.create_command_id != identity.create_command_id.as_uuid()
-        || snapshot.auction_id != snapshot.active.then_some(identity.auction_id)
+        // 已登记的 Admin 首期/后继拥有自己的稳定 ID，不能用自动 bootstrap 的 ID 反向拒绝。
+        || snapshot.round_id.is_nil()
+        || snapshot.create_command_id.is_nil()
+        || snapshot.active != snapshot.auction_id.is_some()
+        || snapshot.auction_id.is_some_and(|auction_id| auction_id.is_nil())
+        || snapshot.open_completed_at.is_some() && snapshot.preview_completed_at.is_none()
         || snapshot.preview_due_at >= snapshot.open_due_at
-        || snapshot.open_due_at - snapshot.preview_due_at < MAIL_PAUSE_LEAD
         || snapshot.open_due_at >= snapshot.scheduled_end_at
     {
         return Err(ApplicationError::CapabilityUnavailable("周计划冻结投影无效"));
@@ -234,30 +235,45 @@ async fn reconcile_mail(
         && now >= open_due_at - MAIL_PAUSE_LEAD
     {
         Some(true)
-    } else if snapshot.active && snapshot.open_completed_at.is_some() && now >= open_due_at {
+    } else if (!snapshot.active && snapshot.preview_completed_at.is_some())
+        || (snapshot.active && snapshot.open_completed_at.is_some() && now >= open_due_at)
+    {
+        // 取消/错过的轮次已经不再要求暂停；不能把本周邮箱永久留在 Preview 的暂停状态。
         Some(false)
     } else {
         None
     };
     let Some(desired) = desired else { return Ok(()) };
     let identity = identities(world_id, local_week);
-    let command_id = if desired { identity.pause_command_id } else { identity.resume_command_id };
+    let base_command_id =
+        if desired { identity.pause_command_id } else { identity.resume_command_id };
     #[derive(Serialize)]
     struct PauseRequest<'a> {
         mailbox_key: &'a str,
         paused: bool,
+        expected_state_version: i64,
     }
-    let request_hash = RequestHash::from_request(
-        "set_polling_paused",
-        command_id.as_uuid(),
-        &PauseRequest { mailbox_key: &mailbox_key, paused: desired },
-    )?;
     for _ in 0..3 {
         let state =
             mail.poll_state(AdminMailPollStateRequest { mailbox_key: mailbox_key.clone() }).await?;
         if state.paused == desired {
             return Ok(());
         }
+        // 同一观测版本保持稳定；Admin 改动后的新版本必须使用新命令，不能重放本周旧结果。
+        let version = state.state_version.to_be_bytes();
+        let command_id = CommandId::from_uuid(legacy_natural_key_uuid(
+            "auction-schedule-mail-poll-state",
+            &[base_command_id.as_uuid().as_bytes(), mailbox_key.as_bytes(), &version],
+        ));
+        let request_hash = RequestHash::from_request(
+            "set_polling_paused",
+            command_id.as_uuid(),
+            &PauseRequest {
+                mailbox_key: &mailbox_key,
+                paused: desired,
+                expected_state_version: state.state_version,
+            },
+        )?;
         match mail
             .set_polling_paused(AdminMailPollingCommand {
                 command_id,

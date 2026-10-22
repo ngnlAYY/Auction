@@ -60,7 +60,12 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => persistence::replay_pool(store.pool(), &command)
                     .await
-                    .map_err(|_| super::mapping::repository_error("内部命令账本不可用或负载冲突")),
+                    .map_err(|error| match error {
+                        FundingError::Conflict => {
+                            auction_application::ApplicationError::FulfillmentDependencyMismatch
+                        }
+                        _ => super::mapping::repository_error("内部命令账本暂不可用"),
+                    }),
             }
         })
     }
@@ -126,7 +131,7 @@ pub(super) async fn lock_legacy(
     locks::before_credentials(tx, claim).await?;
     locks::after_credentials(tx, claim).await?;
     if let Some(user_id) = claim.recipient_user_id {
-        let current: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM public.users WHERE id=$1 AND username=$2 AND ($3 OR status='active'))")
+        let current: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM public.users WHERE id=$1 AND ($3 OR (username=$2 AND status='active')))")
             .bind(user_id).bind(&claim.recipient)
             .bind(claim.state == auction_application::SettlementFulfillmentState::Enqueued)
             .fetch_one(&mut **tx).await.map_err(sql_error)?;

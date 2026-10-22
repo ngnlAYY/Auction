@@ -24,11 +24,6 @@ impl AppConfig {
         self.secrets.redis_url.as_ref().map(SecretString::expose_secret)
     }
 
-    /// 返回会话签名密钥。调用方不得输出、持久化副本或传给浏览器。
-    pub fn session_signing_key(&self) -> Option<&str> {
-        self.secrets.session_signing_key.as_ref().map(SecretString::expose_secret)
-    }
-
     /// 返回 E-Hentai Cookie。只允许外部集成适配器读取。
     pub fn ehentai_cookie(&self) -> Option<&str> {
         self.secrets.ehentai_cookie.as_ref().map(SecretString::expose_secret)

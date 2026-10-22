@@ -64,7 +64,14 @@ pub fn use_dialog_focus_trap(_lock_background_scroll: bool) {
             let focus_opener = Rc::clone(&opener);
             let focus_callback = Closure::<dyn FnMut(web_sys::FocusEvent)>::new(
                 move |event: web_sys::FocusEvent| {
-                    if top_dialog(&focus_document).is_some() {
+                    if let Some(dialog) = top_dialog(&focus_document) {
+                        let inside = event
+                            .target()
+                            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+                            .is_some_and(|target| dialog.contains(Some(target.as_ref())));
+                        if !inside && let Some(target) = preferred_dialog_focus(&dialog) {
+                            let _ = target.focus();
+                        }
                         return;
                     }
                     let Some(target) = event.target() else {
@@ -142,6 +149,11 @@ pub fn use_dialog_focus_trap(_lock_background_scroll: bool) {
                         controls.push(control);
                     }
                     let (Some(first), Some(last)) = (controls.first(), controls.last()) else {
+                        // busy 弹窗可能没有任何可 Tab 子控件，焦点必须留在面板而非背景。
+                        event.prevent_default();
+                        if let Ok(panel) = dialog.dyn_into::<web_sys::HtmlElement>() {
+                            let _ = panel.focus();
+                        }
                         return;
                     };
                     let active = callback_document.active_element();
@@ -196,6 +208,13 @@ pub fn use_dialog_focus_trap(_lock_background_scroll: bool) {
                 let options = web_sys::MutationObserverInit::new();
                 options.set_child_list(true);
                 options.set_subtree(true);
+                // busy 切换会禁用已聚焦控件；即使面板身份未变也须重新收敛焦点。
+                options.set_attributes(true);
+                options.set_attribute_filter(&js_sys::Array::of3(
+                    &"disabled".into(),
+                    &"hidden".into(),
+                    &"inert".into(),
+                ));
                 if let Some(root) = document.document_element() {
                     let _ = observer.observe_with_options(root.as_ref(), &options);
                 }
@@ -278,6 +297,7 @@ fn current_focusable(document: &web_sys::Document) -> Option<web_sys::HtmlElemen
 #[cfg(target_arch = "wasm32")]
 fn is_focusable(element: &web_sys::HtmlElement) -> bool {
     element.matches(FOCUSABLE_SELECTOR).unwrap_or(false)
+        && !element.matches(":disabled").unwrap_or(false)
         && element.is_connected()
         // 手机折叠菜单、关闭的 details 与隐藏祖先不能成为焦点循环的首尾控件。
         && element.closest("[hidden], [inert], [aria-hidden=\"true\"]").ok().flatten().is_none()
@@ -301,6 +321,16 @@ fn synchronize_dialog_state(
         _ => false,
     };
     if unchanged {
+        if let Some(dialog) = next_dialog
+            && !document.active_element().is_some_and(|element| {
+                dialog.contains(Some(element.as_ref()))
+                    && (element.is_same_node(Some(dialog.as_ref()))
+                        || element.dyn_ref::<web_sys::HtmlElement>().is_some_and(is_focusable))
+            })
+            && let Some(target) = preferred_dialog_focus(&dialog)
+        {
+            let _ = target.focus();
+        }
         return;
     }
     // 不能只记录“是否打开”：创建成功后会在同一次 DOM 更新中把表单弹窗替换成密钥弹窗。
@@ -369,7 +399,7 @@ fn preferred_dialog_focus(dialog: &web_sys::Element) -> Option<web_sys::HtmlElem
             return Some(control);
         }
     }
-    None
+    dialog.clone().dyn_into::<web_sys::HtmlElement>().ok()
 }
 
 #[cfg(target_arch = "wasm32")]

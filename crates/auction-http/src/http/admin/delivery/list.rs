@@ -64,6 +64,10 @@ pub(crate) async fn list(
     };
     let request =
         DeliveryAdminListRequest { status: query.get("status").cloned(), limit: page_size, offset };
+    if !request.validate() {
+        return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
+            .into_response();
+    }
     let Some(port) = state.delivery_admin() else {
         return feature_unavailable();
     };

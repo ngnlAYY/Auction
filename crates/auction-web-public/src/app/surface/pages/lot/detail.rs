@@ -209,7 +209,15 @@ pub(crate) fn LiveLotDetailView(
                             total: page.total,
                             has_more: page.has_more.unwrap_or(false),
                             label: t!("lot-bid-history"),
-                            on_page_size_change: move |size| update_public_page_size(query_state_signal, size),                            on_page_change: move |next_page| {
+                            on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
+                            on_page_clamp: move |next_page| {
+                                update_public_query_state(
+                                    query_state_signal,
+                                    |query| query.page = next_page,
+                                    QueryWriteMode::Replace,
+                                );
+                            },
+                            on_page_change: move |next_page| {
                                 update_public_query_state(
                                     query_state_signal,
                                     |query| query.page = next_page,
