@@ -100,6 +100,13 @@ Public `/api/v1/ws`：HTTP/1.1 GET Upgrade 返回 101，HTTP/2 扩展 CONNECT �
 
 浏览器握手预算 10 秒，先订阅、再从已确认游标 HTTP 回放并缓冲期间到达的帧；存活由服务端 Ping/Pong 判定，业务空闲不算断线，只有真实连接结束才每隔 3 秒重连。跳号切换到回放/快照，无法保持长连接时同样使用这两条恢复路径；SSE 尚无登记 endpoint。单拍卖缓存有界维护 cursor、event ID、bid fact identity、`state_version` 和 `fact_index`：相同事件/事实重复为 no-op，身份冲突、跳号或版本回退触发权威快照；快照恢复后首个晚于恢复 cursor 的事件只为对应 lot 建立 state/fact 基线，再恢复严格连续性校验，允许合法首事件的 `fact_index > 1`。发现流使用独立游标和缓存；页面仍周期读取 readiness、当前/共享拍卖、目录与活动 lot 详情作为兜底。
 
+## 内部投递唤醒提示
+
+PostgreSQL `auction_delivery_ready` 由 storage/delivery_scheduler 与 `000059` 拥有；新 pending 超价 MM 入队时发送，
+仅在业务事务提交后送达，载荷固定为空。jobs 经 `DeliveryWakeup` 订阅并合并即时扫描，不携带邮件/用户/凭据，不对外公布，
+不新增 Public kind/schema 或替代 outbox、租约及命令账本。断线重订阅后主动扫描，丢失仍靠持久队列和普通轮询恢复；
+已有在途发送不抢占，准备失败释放不再次发提示，drain 后停止订阅和新领取。
+
 ## 兼容和实现边界
 
 - auction-contracts 拥有 Rust 侧事件 DTO 和外部 JSON 映射。

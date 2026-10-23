@@ -154,8 +154,18 @@ where
     let poll_wakeup = worker.control.poll_wakeup();
     let mut poll_wakeup_wait = Box::pin(poll_wakeup.notified());
     let mut delivery_cycles = JoinSet::new();
+    let delivery_wakeup = Arc::new(tokio::sync::Notify::new());
+    let mut delivery_wakeup_tasks = JoinSet::new();
+    let mut delivery_wake_pending = false;
     let delivery_enabled = worker.delivery_store.is_some() && worker.delivery_transport.is_some();
     if delivery_enabled {
+        if let Some(store) = &worker.delivery_store {
+            delivery_wakeup_tasks.spawn(delivery::run_delivery_wakeup(
+                Arc::clone(store),
+                Arc::clone(&delivery_wakeup),
+                drain_sender.subscribe(),
+            ));
+        }
         let delivery_worker = Arc::clone(&worker);
         delivery_cycles.spawn(async move { run_delivery_cycle(delivery_worker.as_ref()).await });
     }
@@ -220,6 +230,7 @@ where
                 // 按原顺序等待所有组之后再返回首个错误，不为每组重置预算。
                 let results = [
                     drain_delivery_tasks(&mut delivery_cycles).await,
+                    drain_worker_tasks(&mut delivery_wakeup_tasks, "delivery wakeup").await,
                     drain_worker_tasks(&mut operations_alert_tasks, "operations alert").await,
                     drain_worker_tasks(&mut auction_tasks, "auction").await,
                     drain_worker_tasks(&mut fulfillment_tasks, "fulfillment").await,
@@ -254,9 +265,28 @@ where
                     }
                     None => {}
                 }
-                let wait = poll_delay(worker.delivery.poll_interval, worker.delivery.jitter);
+                let wait = if std::mem::take(&mut delivery_wake_pending) {
+                    std::time::Duration::ZERO
+                } else {
+                    poll_delay(worker.delivery.poll_interval, worker.delivery.jitter)
+                };
                 delivery_scheduled_wake = tokio::time::Instant::now() + wait;
                 delivery_sleep.as_mut().reset(delivery_scheduled_wake);
+            }
+            result = delivery_wakeup_tasks.join_next(), if !delivery_wakeup_tasks.is_empty() => {
+                if let Some(Err(error)) = result {
+                    worker.control.mark_degraded();
+                    return Err(WorkerError::DeliveryTaskJoin(error));
+                }
+            }
+            _ = delivery_wakeup.notified(), if delivery_enabled => {
+                if delivery_cycles.is_empty() {
+                    delivery_scheduled_wake = tokio::time::Instant::now();
+                    delivery_sleep.as_mut().reset(delivery_scheduled_wake);
+                } else {
+                    // 在途轮次结束后立刻再领取，不取消已经取得的安全发送句柄。
+                    delivery_wake_pending = true;
+                }
             }
             result = operations_alert_tasks.join_next(), if !operations_alert_tasks.is_empty() => {
                 worker.control.mark_degraded();

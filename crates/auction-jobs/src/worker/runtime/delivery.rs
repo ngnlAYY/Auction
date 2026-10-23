@@ -6,7 +6,9 @@ use super::*;
 use std::collections::HashSet;
 
 mod lease;
+mod wakeup;
 use lease::DeliveryLease;
+pub(super) use wakeup::run as run_delivery_wakeup;
 
 /// 以独立 cadence 和 bounded concurrency 处理 delivery outbox。
 /// 只有获得空闲并发槽后才领取下一条记录，避免已经领取但尚未执行的任务在队列中耗尽 lease。

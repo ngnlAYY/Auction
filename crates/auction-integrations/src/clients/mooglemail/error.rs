@@ -17,6 +17,10 @@ pub enum MoogleMailErrorCategory {
     RateLimited,
     /// 网络、超时或远端 5xx 等可重试失败。
     RemoteTemporary,
+    /// Sent 扫描达到页数上限仍未到末页；本地预算限制与远端故障分开记录。
+    SentScanPageLimit,
+    /// Sent 全量扫描耗尽时间预算；发送前只延后，发送后仍保留未知结果。
+    SentScanTimeout,
     /// 详情读取恢复队列未能确认持久化，禁止继续读取详情。
     PersistenceUnavailable,
     ResponseTooLarge,
@@ -41,6 +45,8 @@ impl MoogleMailErrorCategory {
             Self::AccountBusy => "account_busy",
             Self::RateLimited => "rate_limited",
             Self::RemoteTemporary => "remote_temporary",
+            Self::SentScanPageLimit => "sent_scan_page_limit",
+            Self::SentScanTimeout => "sent_scan_timeout",
             Self::PersistenceUnavailable => "persistence_unavailable",
             Self::ResponseTooLarge => "response_too_large",
             Self::ProtocolDrift => "protocol_drift",

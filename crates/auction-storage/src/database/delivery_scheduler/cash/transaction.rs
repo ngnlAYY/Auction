@@ -11,7 +11,7 @@ use sqlx::Postgres;
 
 use crate::{MailEvidenceTransactionError, database::TrackedPool};
 
-pub(super) enum FenceError {
+pub(in crate::database::delivery_scheduler) enum FenceError {
     Sqlx(sqlx::Error),
     Funding(FundingError),
     Evidence(MailEvidenceTransactionError),
@@ -60,11 +60,12 @@ pub(in crate::database::delivery_scheduler) async fn run(
     started_at: DateTime<Utc>,
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
     deadline: Option<Instant>,
+    intervals: &auction_application::DeliverySendIntervals,
 ) -> Result<DeliveryFenceOutcome, ApplicationError> {
     if evidence.is_some() != deadline.is_some() {
         return Err(uncertain());
     }
-    run_transaction(pool, claim, started_at, evidence, deadline).await
+    run_transaction(pool, claim, started_at, evidence, deadline, intervals).await
 }
 
 /// legacy沿用原返回类型，只有明确Sending才成功，缺授权/确定拒绝不伪装成功。
@@ -72,8 +73,9 @@ pub(in crate::database::delivery_scheduler) async fn run_legacy(
     pool: &TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
     started_at: DateTime<Utc>,
+    intervals: &auction_application::DeliverySendIntervals,
 ) -> Result<(), auction_application::RepositoryError> {
-    match run_transaction(pool, claim, started_at, None, None).await {
+    match run_transaction(pool, claim, started_at, None, None, intervals).await {
         Ok(DeliveryFenceOutcome::Sending) => Ok(()),
         _ => Err(auction_application::RepositoryError::Failed(
             "delivery发送fence未授权或未确定完成".to_owned(),
@@ -87,6 +89,7 @@ async fn run_transaction(
     started_at: DateTime<Utc>,
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
     deadline: Option<Instant>,
+    intervals: &auction_application::DeliverySendIntervals,
 ) -> Result<DeliveryFenceOutcome, ApplicationError> {
     for attempt in 0..3 {
         if deadline.is_some_and(|limit| Instant::now() >= limit) {
@@ -114,12 +117,20 @@ async fn run_transaction(
                     .execute(&mut *tx)
                     .await?;
             }
-            match evidence {
+            // 分类节奏锁在全部业务锁之前；未到期确定回滚，不在持有凭据期间睡眠。
+            let category = super::super::cadence::lock_due(&mut tx, claim, intervals).await?;
+            let outcome = match evidence {
                 Some(evidence) => {
                     super::authorization::authorize(&mut tx, claim, started_at, evidence).await
                 }
                 None => super::authorization::authorize_legacy(&mut tx, claim, started_at).await,
+            }?;
+            if matches!(outcome, DeliveryFenceOutcome::Sending)
+                && let Some(category) = category
+            {
+                super::super::cadence::record_started(&mut tx, &category).await?;
             }
+            Ok::<_, FenceError>(outcome)
         }
         .await;
         match result {

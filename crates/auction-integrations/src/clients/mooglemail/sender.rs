@@ -5,6 +5,8 @@ use std::{collections::HashSet, fmt, time::Duration};
 mod maintenance;
 mod proof;
 
+pub(crate) use proof::MoogleMailSentBaseline;
+
 pub use maintenance::{
     MoogleMailComposeSnapshot, MoogleMailDiscardOutcome, MoogleMailSentListEntry,
     MoogleMailSentObservation,
@@ -157,7 +159,26 @@ impl MoogleMailSender {
         cookie: &MoogleMailCookie,
         request: MoogleMailSendRequest,
     ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
-        let outcome = self.send_verified(cookie, &request).await;
+        self.send_with_baseline(cookie, request, None).await
+    }
+
+    /// 消费同一独占 session 在 sending fence 前取得的完整基线，写后证明保持不变。
+    pub(crate) async fn send_prepared(
+        &self,
+        cookie: &MoogleMailCookie,
+        request: MoogleMailSendRequest,
+        baseline: MoogleMailSentBaseline,
+    ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
+        self.send_with_baseline(cookie, request, Some(baseline)).await
+    }
+
+    async fn send_with_baseline(
+        &self,
+        cookie: &MoogleMailCookie,
+        request: MoogleMailSendRequest,
+        baseline: Option<MoogleMailSentBaseline>,
+    ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
+        let outcome = self.send_verified(cookie, &request, baseline).await;
         let failed = !matches!(outcome, Ok(MoogleMailSendOutcome::Sent(_)));
         if failed {
             self.diagnose_after_failure(cookie, request.world, &request).await;
@@ -172,6 +193,7 @@ impl MoogleMailSender {
         &self,
         cookie: &MoogleMailCookie,
         request: &MoogleMailSendRequest,
+        baseline: Option<MoogleMailSentBaseline>,
     ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
         if !request.validate() {
             return Err(write_error(
@@ -180,15 +202,18 @@ impl MoogleMailSender {
                 MoogleMailErrorCategory::Configuration,
             ));
         }
-        let baseline_deadline =
-            tokio::time::Instant::now().checked_add(self.verification_budget).ok_or_else(|| {
-                write_error(
-                    request.world,
-                    MoogleMailOperation::Sent,
-                    MoogleMailErrorCategory::Configuration,
-                )
-            })?;
-        let baseline = self.scan_sent_baseline(request.world, cookie, baseline_deadline).await?;
+        let baseline = match baseline {
+            Some(baseline) => baseline,
+            // 独立调用仍自行准备；持久 delivery 只能使用 fence 前已完成的基线。
+            None => self.prepare_sent_baseline(cookie, request.world).await?,
+        };
+        if baseline.world != request.world {
+            return Err(write_error(
+                request.world,
+                MoogleMailOperation::Sent,
+                MoogleMailErrorCategory::Configuration,
+            ));
+        }
         let compose = self.client.compose(request.world)?;
         let initial = self.client.get(&compose, cookie).await?;
         let parsed_initial = self.parser.parse_compose_state(&initial, request.world);
@@ -326,7 +351,10 @@ impl MoogleMailSender {
             .await
             .ok()
             .flatten();
-        match self.verify_new_sent(request, cookie, &baseline, confirmation_hint.as_deref()).await {
+        match self
+            .verify_new_sent(request, cookie, &baseline.seen, confirmation_hint.as_deref())
+            .await
+        {
             Ok(external_mail_id) => {
                 // Sent 证明后必须再证明 compose 回到空表单；残留草稿意味着资产状态仍未收口。
                 match self.inspect_compose(cookie, request.world).await {

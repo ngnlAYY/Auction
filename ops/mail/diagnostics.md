@@ -132,11 +132,17 @@ recipient、canonical subject 和装备 ID，并把结果标记为 `time_unverif
 
 主动 ComposeSend 固定四步验证：①发送前读取 compose 并证明为空表单；②对 Sent 做覆盖所有 MID 的完整有界
 baseline；③发送后执行独立有界 Sent scan 并要求收到新 MID 且字段精确匹配；④再次读取 compose 并证明回到空表单。
-任一步失败或页面 `mail_state` 与待领取资产矩阵不一致都标记结果未知。成功条件是
+前两步在持久 sending fence 前、同一独占凭据 session 内完成，失败只释放有效 claimed，不消耗发送间隔。
+写后失败或页面 `mail_state` 与待领取资产矩阵不一致仍标记结果未知。成功条件是
 新增且唯一的真实 MID，并同时精确匹配 world、recipient、subject、canonical body digest、Credits、COD 和装备 ID；0 资产
-通知也要求 0 资产 Sent 证明。资产不符、秒领取、无匹配、多匹配、未扫完或超时均标记结果未知并进入 `manual_reconcile`，
+通知也要求 0 资产 Sent 证明。写后资产不符、秒领取、无匹配、多匹配、未扫完或超时均标记结果未知并进入 `manual_reconcile`，
 不自动重寄；成功页、空 compose、本地 UUID 都不能替代证明。该规则覆盖静态通知、注册/重绑 key、运维告警及所有结算/返还
 金钱和装备。
+
+`sent_scan_page_limit` 表示完整扫描尚未到尾页就耗尽本地页数，`sent_scan_timeout` 表示本地总扫描预算耗尽；
+不再把这两类预算错误统称 `remote_temporary`。日志只含 world、闭集阶段、上限和计数，不含 MID/收件人/正文。
+基线句柄不可克隆、不可跨 session 缓存且只消费一次；发送后复用完整基线证明新增，不因上调预算跳过完整性。
+历史人工核对记录保持原状，`write_started=false` 或 Sent 零命中也不自动授权重发。
 
 外层 delivery timeout 默认 180 秒、sending grace 默认 300 秒；启用 MoogleMail 时 timeout 必须大于两倍 fetch budget，
 读取复用既有 `maximum_pages` 和 `fetch_timeout`，不新增配置字段。成功 metadata 为 `sent_verified=true`、

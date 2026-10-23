@@ -115,6 +115,10 @@ MoogleMail 凭据、transport、mailbox 身份和全局启用仍归部署配置�
 Runtime world 开关只控制 Worker 候选，与数据库权威 `worlds.enabled` 不同（见
 [运行配置契约](docs/contracts/routes.md#runtime-配置与文件事务)）。
 
+`operations.mail.send_intervals` 接管七类 Send 开始间隔，否则继承 `worker.mooglemail.send_intervals`；
+每项 0–86400 整数秒、缺省 0，全零不序列化以保持旧 runtime 指纹。0 不取消单账号串行或 HTTP 限速，保存后重启 Worker。
+字段、分类与迁移要求见[发送间隔](ops/config/README.md#邮件业务发送间隔)。
+
 `worker.fulfillment.evidence_poll_seconds` 始终由部署文件拥有；即使 `operations.worker.managed=true`，也保留已配置的
 COD 领取证据追踪窗口，不回退到默认 300 秒。
 

@@ -41,8 +41,13 @@ pub(super) async fn run_worker(
         run_worker_skeleton(config, metrics, shutdown).await?;
         return Ok(());
     };
-    let store =
-        Arc::new(DatabaseStore::connect(database_url).await.context("connect worker database")?);
+    let store = Arc::new(
+        DatabaseStore::connect(database_url)
+            .await
+            .context("connect worker database")?
+            .with_delivery_send_intervals(config.worker.mooglemail.send_intervals)
+            .context("configure delivery send intervals")?,
+    );
     metrics
         .register_pool_metrics(store.pool_metrics_source())
         .context("register worker database pool metrics")?;

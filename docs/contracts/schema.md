@@ -16,7 +16,7 @@
 
 ## 基线与 owner 规则
 
-当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000058`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
+当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000059`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
 
 ### 追加迁移与历史事实
 
@@ -163,6 +163,14 @@ MoogleMail preflight 释放由 delivery_scheduler 独占，同事务撤销有效
 | settlement_recovery_health | auction-application + auction-storage + auction-jobs | 恢复阻塞和健康投影；Worker 刷新，Admin 只读；战斗页暂时占用为 `busy`；仅记账策略的现金/现金证据状态成对为 `not_applicable`，不读取余额或产生现金不足告警，原数值只作历史保留且页面隐藏 |
 | deliveries | auction-application + auction-jobs：delivery | 外部投递 outbox、claim 和重试 |
 | delivery_admin_commands | auction-application：delivery | Admin 交付命令幂等账本 |
+| delivery_send_cadence | auction-application：delivery；auction-storage：delivery_scheduler | `000059` 七类跨世界发送起点，高水位与 sending fence 同事务推进，重启不清空 |
+
+`000059` 的 `delivery_send_category(origin,payload)` 是旧 wire 到业务节奏分组的唯一 SQL 映射，不改原 payload/digest。
+七个固定类别行从已有 sending_at 的最大值初始化，无历史发送为 NULL；不新增投递，不改任何历史结果。
+`delivery_scheduler/cadence.rs` 在原业务锁之前锁定单个分组，以数据库实时钟复核间隔；只有 Sending 与原审计同时提交才推进，
+确定延期/回滚不消费间隔。领取只作预过滤，超价优先后仍按 created_at/id 稳定排序，实际发送门仍完整复核资格、资金与租约。
+`notify_delivery_ready`/`delivery_ready_after_insert` 仅为新 pending lot_watch 在提交后发送固定空载荷 `auction_delivery_ready` 提示，
+不对准备失败释放再次通知；提示无权威任务数据，断线重订阅后主动扫描，周期轮询保留。运行时绑定 SQL，无新增 SQLx 离线宏元数据。
 
 买家装备 COD 的 `settlement_winner_equipment_cod` 投递沿用 schema-v1，`variables` 接受精确旧三字段
 `amount/item_name/reference`，或加上 `hold_ppm/adjustment_ppm/winning_bid/adjusted_price/pool_credit` 的完整八字段；
@@ -210,7 +218,7 @@ MoogleMail 异常原始数据不进入数据库 schema：Worker 按独立运维�
 
 `migrations/postgres/000035_mail_intake_display_snapshot` 仅属于 PostgreSQL 完整档：向 `inbound_mail` 追加 nullable `sender`、`subject` 和 `message_display`；sender/subject 必须成对出现并受 256/512 字节边界约束，展示快照固定 schema/redaction version，正文最多 64 KiB、JSON 最多 128 KiB、附件 ID 最多 1000 条，且只含正文脱敏结果、附件外部 ID、Credits 和 COD；装备 key 与认证邮件正文不会进入快照。它是非权威展示投影，不能参与入站幂等或 cursor，普通 replay 不会为历史 NULL 自动补写。
 
-主动 ComposeSend 的 Sent proof 使用既有 delivery/outcome metadata 与外部引用字段，不新增表、列或 migration；`sent_verified`、`external_reference_proven`、`proof` 和 `mooglemail:world:send:mid` 仍属于成功写回的安全结果投影，Sent baseline/scan 失败只保留 `manual_reconcile`，不伪造新的数据库事实。
+主动 ComposeSend 的 Sent proof 使用既有 delivery/outcome metadata 与外部引用字段，不新增表、列或 migration；`sent_verified`、`external_reference_proven`、`proof` 和 `mooglemail:world:send:mid` 仍属于成功写回的安全结果投影，fence 前完整 Sent baseline 失败只释放有效 claimed 并撤销该次领取计数；写后 scan 失败仍保留 `manual_reconcile`，不伪造成功或改旧未知事实。
 
 `migrations/postgres/000036_mail_intake_equipment_diagnostic` 仅为 PostgreSQL 完整档的 `inbound_mail` 增加 nullable `equipment_diagnostic` sidecar；它只在装备邮件被拒绝且首个装备读取失败时保存非权威安全投影，不能进入 `decision_metadata`、command digest、completion proof 或 cursor；成功读取只丢弃已加密准备内容。
 

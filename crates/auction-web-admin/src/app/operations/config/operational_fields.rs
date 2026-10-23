@@ -15,6 +15,13 @@ pub(super) const TEXT_FIELDS: &[&str] = &[
 ];
 
 pub(super) const NUMBER_FIELDS: &[&str] = &[
+    "operations.mail.send_intervals.outbid_seconds",
+    "operations.mail.send_intervals.account_seconds",
+    "operations.mail.send_intervals.intake_seconds",
+    "operations.mail.send_intervals.settlement_seconds",
+    "operations.mail.send_intervals.equipment_seconds",
+    "operations.mail.send_intervals.operations_seconds",
+    "operations.mail.send_intervals.manual_seconds",
     "operations.mail.maximum_response_bytes",
     "operations.mail.minimum_request_interval_millis",
     "operations.mail.request_timeout_seconds",

@@ -41,7 +41,7 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
   预筛选不替代严格 JSON、重复字段及正文/脚本一致性校验。
   `with_progress_observer` 只在持久 claim 路径通过应用窄端口报告真实详情 GET 目标，
   不以待读队首推断当前邮件；观测只进入 Worker 内存，不写入命令、cursor 或外部服务。
-- ComposeSend：首次 POST 前取得 Sent baseline，之后独立扫描，只接受新增、唯一且 world、收件人、正文摘要、
+- ComposeSend：完整 Sent baseline 在持久 sending fence 前、同一独占 session 内取得，之后一次消费且写后独立扫描，只接受新增、唯一且 world、收件人、正文摘要、
   Credits/COD、装备精确匹配的 MID。发送与失败诊断借用同一输入，分步附件证明使用原 ID 前缀，避免复制整封邮件；
   compose 正文只提取一次，资产集合排序使用借用，表单编码直接移交 HTTP body，写入顺序及证明条件不变。
 - Return / Take：写前核对 sender 与预期资产；Return 只接受身份、正文及全部资产精确匹配的 `[RTS]` 回执，
@@ -52,20 +52,23 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
   真实标题与描述，不以正文相同或本地元数据代替标题证明。正文调试输出始终脱敏。
   HTTP 200 的创建回执与固定帖回执共用唯一 `Please stand by...` 标题、唯一 meta refresh 和一致同源链接证明；
   错误页中的普通主题链接不得产生 `Created`，证据缺失或冲突保留 `write_unknown`，不授权再次 POST。
-  标题使用 `[Auction] {Main|Isekai} #{sequence:03} ({state})`，状态直接来自同源数据库快照，最长合法序号仍不超过
-  50 字符。精确对账覆盖其余六种状态、合法长度的旧完整标题和旧 `HV#` 摘要标题；当前标题与候选合并为最多九个
+  标题使用 `{Main|Isekai} Equipment Auction - Session {sequence:03} ({state})`，状态直接来自同源数据库快照；
+  保留至少三位期数，超过远端 50 字符则明确拒绝，不截断身份。精确对账覆盖其余六种新状态标题、七个旧短标题、
+  合法长度的旧完整标题和旧 `HV#` 摘要标题；当前标题与候选合并为最多十六个
   精确标题，一次版面读取检查全部候选，不逐标题重复 GET。同名重复主题或候选指向不同主题一律失败关闭，
   不进行模糊匹配，也不因状态变化自动新建主题。
 - 论坛 PM：新鲜 MID 表单绑定当前姓名与 sender，单次 POST 保存 Sent、不 tracking；完整有界遍历自己的同标题 Sent
   后核验收件人 UID、完整正文、sender 与 Sent MSID。
 
-Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；资产不符、无匹配、多匹配或预算耗尽进入
-`manual_reconcile`，不自动重寄。MoogleMail transport 在持久 sending fence 前 GET compose 并验证干净状态，
+Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；写后资产不符、无匹配、多匹配或预算耗尽进入
+`manual_reconcile`，不自动重寄。MoogleMail transport 在持久 sending fence 前 GET compose 并验证干净状态，再完整读取 Sent 基线，
 失败或超时只延后新任务；`prepare` 返回的消耗式 future 持有同一 credential session 独占 guard 直到写入结束或句柄
-被丢弃，fence 后仍复核 compose 和原 Sent baseline，最终写入只执行一次。不自动清草稿，当前 compose 干净仅允许
+被丢弃，fence 后仍复核 compose，消费原完整基线并执行独立新增证明，最终写入只执行一次。基线页数耗尽与超时分别为
+`sent_scan_page_limit`/`sent_scan_timeout`；准备失败只延后新任务，写后同类错误仍未知，历史人工核对记录不改写。不自动清草稿，当前 compose 干净仅允许
 新任务继续。[transport/delivery/authorization.rs](crates/auction-integrations/src/clients/mooglemail/transport/delivery/authorization.rs)
 通过 `with_cash_evidence_gateway` 注入共享原 client/credential set/owner 的联合证据 gateway，在同一 session 复用身份
-与 Main cash 读取，只读 Arc 租约不取得第二个 guard；准备绝对期限覆盖排队与全部读取，取消即同步撤销 owner。
+与 Main cash 读取，只读 Arc 租约不取得第二个 guard；Worker 原准备绝对期限覆盖排队与全部读取。
+完整基线完成后、首次资金证据读取前收紧到原 30 秒证据预算；后续交接/事务只收紧该截止，取消提交即同步撤销 owner。
 旧 `prepare/send` 拒绝非零 Credits Send，新授权入口缺 gateway 时只返回 legacy 候选。回执、诊断与人工核对要求见
 [邮件诊断](ops/mail/diagnostics.md)与[领域不变量](docs/contracts/invariants.md)。
 未知 Send 的维护核对只使用正文实际保留入站 MID 的通知模板；同主题/正文的普通重复通知不能作为某次发送的独立证明。

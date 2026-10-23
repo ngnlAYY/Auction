@@ -17,6 +17,10 @@
 `lib.rs` 只保留模块声明和公共导出；`ports/` 与 `services/` 按 `admin`、`auction`、`mail`、`realtime`、`recovery`、
 `settlement` 等职责分组，接口表达领域意图，不传递 SQL 行或部署配置。
 
+[ports/delivery/cadence.rs](crates/auction-application/src/ports/delivery/cadence.rs) 拥有七类 Send 间隔及提交后唤醒窄端口；
+间隔为 0–86400 秒、默认全零，非权威通知只加速领取，持久起点及发送资格仍归存储事务。runtime 同组 managed 控制接管，
+分组和兼容语义见[发送间隔](ops/config/README.md#邮件业务发送间隔)，不改变金额、命令身份或已发送结果。
+
 ## 身份与凭据约束
 
 [credentials/acquisition.rs](crates/auction-application/src/ports/admin/credentials/acquisition.rs) 定义互斥的粘贴 Cookie /

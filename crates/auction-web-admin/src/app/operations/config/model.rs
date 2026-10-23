@@ -141,6 +141,11 @@ impl RuntimeConfigForm {
             {
                 // 新字段对旧 runtime document 使用解析器默认值，避免历史文档无法打开。
                 inputs.insert((*path).to_owned(), "600".to_owned());
+            } else if path.starts_with("operations.mail.send_intervals.")
+                && nested_value(document, "operations.mail").is_some()
+                && nested_value(document, "operations.mail.send_intervals").is_none()
+            {
+                inputs.insert((*path).to_owned(), "0".to_owned());
             } else {
                 return Err(());
             }
@@ -380,6 +385,19 @@ impl RuntimeConfigForm {
     /// 生成服务端要求的完整闭集文档；任一数字处于空白或非法中间态时拒绝提交。
     pub(super) fn to_document(&self) -> Result<Value, ()> {
         let mut document = self.document.clone();
+        if self.boolean("operations.mail.managed")
+            && nested_value(&document, "operations.mail.send_intervals").is_none()
+            && self.inputs.iter().any(|(path, value)| {
+                path.starts_with("operations.mail.send_intervals.")
+                    && value.parse::<u64>().is_ok_and(|seconds| seconds != 0)
+            })
+        {
+            set_nested_value(
+                &mut document,
+                "operations.mail.send_intervals",
+                Value::Object(Map::new()),
+            )?;
+        }
         for path in TEXT_FIELDS.iter().chain(operational_fields::TEXT_FIELDS) {
             if !self.edits_field(path) {
                 continue;
@@ -407,6 +425,12 @@ impl RuntimeConfigForm {
             if *path == "operations.mail.batch_timeout_seconds"
                 && nested_value(&document, path).is_none()
                 && value == 600
+            {
+                continue;
+            }
+            if path.starts_with("operations.mail.send_intervals.")
+                && nested_value(&document, "operations.mail.send_intervals").is_none()
+                && value == 0
             {
                 continue;
             }

@@ -27,6 +27,22 @@ fn valid_mail(value: &Value) -> bool {
         normalized.insert("batch_timeout_seconds".to_owned(), Value::from(600_u64));
         return valid_mail(&Value::Object(normalized));
     }
+    if !object.contains_key("send_intervals") {
+        let mut normalized = object.clone();
+        normalized.insert(
+            "send_intervals".to_owned(),
+            serde_json::json!({
+                "outbid_seconds": 0,
+                "account_seconds": 0,
+                "intake_seconds": 0,
+                "settlement_seconds": 0,
+                "equipment_seconds": 0,
+                "operations_seconds": 0,
+                "manual_seconds": 0
+            }),
+        );
+        return valid_mail(&Value::Object(normalized));
+    }
     valid_scalars(
         value,
         &["managed"],
@@ -48,8 +64,9 @@ fn valid_mail(value: &Value) -> bool {
             ("retry_base_seconds", 1, 300),
             ("retry_maximum_seconds", 1, 300),
         ],
-        &[],
-    ) && value["renew_interval_seconds"].as_u64() < value["lease_duration_seconds"].as_u64()
+        &["send_intervals"],
+    ) && valid_send_intervals(&value["send_intervals"])
+        && value["renew_interval_seconds"].as_u64() < value["lease_duration_seconds"].as_u64()
         && value["fetch_timeout_seconds"].as_u64() > value["request_timeout_seconds"].as_u64()
         && value["item_timeout_seconds"].as_u64() > value["request_timeout_seconds"].as_u64()
         && value["batch_timeout_seconds"].as_u64().unwrap_or_default()
@@ -58,6 +75,24 @@ fn valid_mail(value: &Value) -> bool {
                 .unwrap_or_default()
                 .saturating_add(value["item_timeout_seconds"].as_u64().unwrap_or_default())
         && value["retry_base_seconds"].as_u64() <= value["retry_maximum_seconds"].as_u64()
+}
+
+fn valid_send_intervals(value: &Value) -> bool {
+    valid_scalars(
+        value,
+        &[],
+        &[],
+        &[
+            ("outbid_seconds", 0, 86_400),
+            ("account_seconds", 0, 86_400),
+            ("intake_seconds", 0, 86_400),
+            ("settlement_seconds", 0, 86_400),
+            ("equipment_seconds", 0, 86_400),
+            ("operations_seconds", 0, 86_400),
+            ("manual_seconds", 0, 86_400),
+        ],
+        &[],
+    )
 }
 
 fn valid_economics(value: &Value) -> bool {

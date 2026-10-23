@@ -24,6 +24,12 @@ PostgreSQL 连接入口独立校验 URI：拒绝缩略形式、fragment、控制
 | [legacy_v28](crates/auction-storage/src/database/legacy_v28) | canonical v28 格式防腐与接管 |
 | [deployment_identity](crates/auction-storage/src/deployment_identity) | 脱敏数据库目标身份与部署校验 |
 
+[delivery_scheduler/cadence.rs](crates/auction-storage/src/database/delivery_scheduler/cadence.rs) 与 `000059` 独占七类 Send 起点；
+在原业务锁前锁分组、数据库实时时钟复核，Sending/原审计与高水位同事务提交。领取按超价优先及时间/UUID 排序，
+准备失败不消耗间隔，未知/失败发送不退还间隔；投递负载和历史结果不改写。
+[delivery_scheduler/wakeup.rs](crates/auction-storage/src/database/delivery_scheduler/wakeup.rs) 独占固定空载荷频道订阅；
+只做提交后提示，断线不改变持久队列。SQL 映射、触发器、保留策略及迁移范围见[对象契约](docs/contracts/schema.md#结算恢复与交付)。
+
 ## 用户身份与消费 owner
 
 [users](crates/auction-storage/src/database/users) 在写锁内复核注册信封绑定的 UUID；论坛数字账号是稳定身份，

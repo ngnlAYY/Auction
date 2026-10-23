@@ -8,8 +8,9 @@ pub(super) async fn start_sending_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
     started_at: DateTime<Utc>,
+    intervals: &auction_application::DeliverySendIntervals,
 ) -> Result<(), auction_application::RepositoryError> {
-    super::cash::run_legacy(pool, claim, started_at).await
+    super::cash::run_legacy(pool, claim, started_at, intervals).await
 }
 
 #[cfg(feature = "postgres")]

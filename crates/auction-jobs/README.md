@@ -22,7 +22,8 @@
 ## 源码布局
 
 `lib.rs` 只负责导出，`worker/` 按业务 owner 拆分；`runtime/model.rs` 持有端口/参数，`runtime/runner.rs` 组合循环、
-drain 与任务退出，`runtime/delivery/lease.rs` 统一准备、交接与发送的有界续租。control 协议、handler、Unix server
+drain 与任务退出，`runtime/delivery/lease.rs` 统一准备、交接与发送的有界续租；
+`runtime/delivery/wakeup.rs` 经窄端口接收提交后提示、重连后补扫描并合并唤醒，退出跟随 drain。control 协议、handler、Unix server
 和 Admin client 独立放在 `control/transport/`，调度器通过 `WorkerControlHandle` 接入状态与唤醒。
 `worker/forum/reply/rejection.rs` 独占拒绝/警告的分类及英文展示白名单，不复制竞价规则或重试决定；
 `worker/forum/sync/layout.rs` 按顺序建立全部目录页及系统日志，并对账精确楼层、拍卖标记和 post ID。
@@ -64,6 +65,10 @@ Recovery take 的新 prepare 命令绑定 action 与来源 MID，activate 从该
 覆盖 prepare 已提交、action 未关联的升级窗口，避免同一 MID 产生第二个 take。退件消费唯一性及计数由 storage
 同事务保证，Worker 不清除消费历史。
 
+Delivery 的七类发送间隔由存储在领取和 sending fence 内复核，Worker 不持有第二套时间真值。
+超价 MM 提交后优先唤醒，当前轮次运行时合并为下一次即时扫描；不抢占在途任务，不额外唤醒 Auction。
+连接失效保留普通 poll/jitter，通知无任务数据、不能授权发送，断线重建后先补一次扫描。
+
 Delivery 有效并发取配置与 transport 的较小值（MoogleMail 当前上限 1）。发送前无凭据、compose prepare 失败或超时
 只释放 claim/在本轮排除该 world 的 Send，下轮重新读取真实 compose；Take/Return 独立运行，`batch_limit=1` 也能继续
 取其他合格任务。claimed 准备阶段在原 request_timeout 预算内续租，prepare 完成后先续租再提交 fence，明确成功后再次
@@ -94,7 +99,7 @@ exact post ID、拍卖/页码标记与本地持久化身份齐备后才导入普
 只读映射，原始有界详情只留本地命令账本。
 可重试身份/存储错误停止后续楼层，真实连续处理楼层遇待重试命令即停；导入前读取持久 pending 边界，
 原帖删除或原命令未收口时必须在执行后续竞价前停止。主题同步未知 POST（含 `reconcile_write_unknown`）短退避后只做
-当前标题、其余状态标题、旧完整标题及旧 `HV#` 摘要标题的精确只读对账；最多九个标题合并为一次版面读取，
+当前标题、其余新状态标题、全部旧短状态标题、旧完整标题及旧 `HV#` 摘要标题的精确只读对账；最多十六个标题合并为一次版面读取，
 不按候选数放大读取与限速预算，候选指向不同主题时失败关闭，
 无法证明原目标时等待 CLI 持久人工再授权；已发布主题的回帖刷新按持久 post ID 对账，关闭正文校验时保留内容未知门禁。
 状态后缀直接来自同源快照，不按日期推断。Preview、Live、Final、Settling 及需收口的终态可刷新已有主题，

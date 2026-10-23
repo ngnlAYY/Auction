@@ -7,6 +7,7 @@ use super::*;
 #[derive(Debug, Clone)]
 pub struct PostgresStore {
     pool: TrackedPool<Postgres>,
+    pub(crate) delivery_send_intervals: auction_application::DeliverySendIntervals,
 }
 
 #[cfg(feature = "postgres")]
@@ -15,7 +16,10 @@ impl PostgresStore {
         let options = crate::deployment_identity::postgres_connect_options(database_url)?;
         let pool = PgPoolOptions::new().max_connections(16).connect_with(options).await?;
 
-        Ok(Self { pool: TrackedPool::new(pool) })
+        Ok(Self {
+            pool: TrackedPool::new(pool),
+            delivery_send_intervals: auction_application::DeliverySendIntervals::default(),
+        })
     }
 
     pub(crate) fn pool(&self) -> &TrackedPool<Postgres> {

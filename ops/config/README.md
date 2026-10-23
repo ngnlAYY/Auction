@@ -115,6 +115,9 @@ Admin 新种类候选只显示武器/法杖/盾牌种类及 `Phase` 等护甲种
 父目录受信且禁止 group/other 写入。启动和管理读取均在同一描述符核验普通文件、权限及 4 MiB 预算，拒绝符号链接。
 管理读写另核验当前有效 UID；只读装配不把 root 运维账号误当服务 owner，部署前仍按下述实际 unit 身份核对。
 跨进程锁必须是运行账号拥有、group/other 无权限的单链接普通文件，拒绝符号链接和特殊文件。
+锁位于 runtime 文件同目录的 `.admin-runtime-config.lock`，部署权限使用 `0600`，与 runtime TOML 的 `0640` 分开核对。
+升级旧部署时若锁仍为 `0644`，先停稳三角色、确认服务属主/单链接/inode，再持有原 inode 的独占锁收紧权限并同步；
+保留属主、inode 和内容，不删除重建锁，不把 runtime TOML 改成锁的权限。启动前单独核对锁，Admin 实际恢复仍会再次校验。
 A26/A27 提交完整候选，以 fingerprint fence、命令账本和原子替换落盘，不热加载；替换后的回读或账本确认失败属于结果未知，
 保留新文件并用原命令核对。Admin 启动恢复失败即阻断启动，不沿用旧安全配置；恢复改变已加载指纹须重新部署重启。
 runtime 保存与启动共用 listener、精确规范 HTTP(S) Origin、tracing endpoint、metrics 和 session 的部署校验；
@@ -140,7 +143,7 @@ runtime 保存与启动共用 listener、精确规范 HTTP(S) Origin、tracing e
 | `operations.forum` | 论坛开关、批量、分页和请求/任务预算 | Worker |
 | `operations.alerts` | 告警开关、阈值、冷却、重试和收件人 | Worker |
 | `operations.worker` | 生命周期、delivery、fulfillment、recovery 预算 | Worker |
-| `operations.mail` | 邮件 cron、批量、分页、HTTP/处理预算、续租和退避 | Worker |
+| `operations.mail` | 邮件 cron、批量、分页、HTTP/处理预算、续租、退避与七类发送间隔 | Worker |
 
 六组 `operations` 默认 `managed=false`，接管后才覆盖公共/角色参数，表单候选不代表运行配置。预检始终要求 Admin/Worker 有效
 拍卖、结算模板和排期一致，runtime 同源要求不依赖接管开关。配置不回写已有拍卖快照、due、游标、账本或租约；论坛 endpoint/
@@ -153,6 +156,29 @@ mailbox/world。
 `allow_manual_early_settlement` 默认关闭，事务内按同一策略限制提前操作；提前结算要求理由并收紧 lot 截止时间，实际结算仍由
 Worker 执行。`equipment_source.require_tradeable` 默认关闭，仅影响 Admin 手工录入，邮件过滤独立拒绝不可交易来源。装备请求
 固定 HTTPS origin、禁重定向、精确 world 路径和有界响应；示例预算为 2 MiB、250 ms 间隔、10 秒总超时。
+
+### 邮件业务发送间隔
+
+Admin「参数配置 → 邮件调度、发送与处理 → 按业务分类的发送间隔」编辑
+`operations.mail.send_intervals`，须开启同组 `managed`；未接管时沿用
+`worker.mooglemail.send_intervals`。七项均为整数秒、范围 0–86400、默认 0；缺省补零，全零对象省略以保留旧指纹。
+
+| 字段 | 分组 |
+| --- | --- |
+| `outbid_seconds` | 超价提醒 |
+| `account_seconds` | 账号注册、登录 Key 与重绑回复 |
+| `intake_seconds` | 寄售接收/拒绝回执及论坛竞价通知 |
+| `settlement_seconds` | 结算付款、退款与付款提醒 |
+| `equipment_seconds` | 装备交付、重寄及流拍寄回 |
+| `operations_seconds` | 运维告警 |
+| `manual_seconds` | 手工及未归类邮件 |
+
+只约束 `operation=send`；取件 Take、原件 Return 和论坛 PM 保持各自调度。分组以原 origin/模板/附件引用作防腐映射，
+不修改冻结 payload 或幂等摘要；有装备附件的非提醒/账号/告警 Send 归装备组。无匹配来源归手工组，不推断业务成功。
+起点定义为提交 sending fence，Main/Isekai 共用七个持久高水位；失败或未知发送也占用间隔，fence 前准备失败不占用。
+保存后重启 Worker 生效；重启、改间隔或更换凭据不清空高水位。0 只移除业务附加等待，仍受账号串行、远端限速、租约和完整 Sent 证明约束。
+超价 MM 的新入队事务提交后发空载荷提示并优先领取，不等待普通轮询，也不抢占在途任务；通知丢失仍由周期领取恢复。
+部署须先追加 `000059`，见[发送节奏升级](ops/README.md#邮件发送节奏与-sent-准备升级)。
 
 ### 邮件正文模板
 

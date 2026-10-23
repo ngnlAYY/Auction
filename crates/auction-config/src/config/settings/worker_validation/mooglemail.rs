@@ -4,6 +4,11 @@ pub(crate) fn validate_mooglemail_worker(
     config: &MoogleMailWorkerConfig,
 ) -> Result<(), ConfigError> {
     validate_mooglemail_world(&config.world_id, &config.mailbox_key, &config.sender_allowlist)?;
+    if !config.send_intervals.is_valid() {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "send_intervals 各业务组必须位于 0 至 86400 秒",
+        ));
+    }
     if config.diagnostics.retention_days == 0 || config.diagnostics.retention_days > 365 {
         return Err(ConfigError::InvalidMoogleMailConfig(
             "diagnostics.retention_days 必须位于 1 至 365",

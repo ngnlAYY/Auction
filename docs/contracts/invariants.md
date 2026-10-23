@@ -142,9 +142,9 @@ PostgreSQL 完整档还必须在数据库边界保护拍卖聚合身份不可变
 
 论坛系统更新楼的拒绝提示只按持久错误码生成安全英文，区分已领先、金额过低/无效、截止、资格及状态等原因；原始有界诊断仍只留本地账本，不输出 SQL、凭据、代理上限或任意错误原文。旧 `command_rejected` 或空码只对完整白名单诊断格式做展示映射，金额诊断须含规范 i64，数值不回显；未知新码不得借旧详情重新解释，统一返回通用提示。展示映射不改历史记录、不重放拒绝出价，pending 仍表示将重试且阻止完成水位；正常镜像更新仍受活动主题、租约、写入证明及未知结果门禁约束。
 
-主题标题采用 `[Auction] {Main|Isekai} #{场次号，至少三位} ({真实拍卖状态})`，状态使用固定英文闭集：
-Draft、Preview、Live、Final、Settling、Settled、Cancelled。简短前缀保证最长合法场次号仍不超过论坛 50 字符限制。
-当前标题及最多八个旧/其他状态标题候选仅作精确对账；候选包括原无状态完整标题和旧 HV# 摘要标题，
+主题标题采用 `{Main|Isekai} Equipment Auction - Session {场次号，至少三位} ({真实拍卖状态})`，状态使用固定英文闭集：
+Draft、Preview、Live、Final、Settling、Settled、Cancelled。超过论坛 50 字符限制时明确拒绝，不截断场次身份。
+当前标题及最多十五个旧/其他状态标题候选仅作精确对账；候选包括其余新状态、七个旧短标题、合法长度的原无状态完整标题和旧 HV# 摘要标题，
 多个候选指向不同主题时失败关闭，不取第一个结果继续写入。状态变化不改主题身份，也不授权重复发帖。
 
 论坛目录按分类/编号稳定排序，每帖最多 150 件，#1 起连续分页；系统更新楼为目录页数加一，竞价起点再加一。每个目录页独立受 65,531 字节上限约束，不能静默丢弃装备；历史已尝试/发布/未知主题冻结为单页并继续处理出价，不强行分页，只有从未尝试且无远端身份的队列项及新主题启用分页。已发布楼层身份冻结，抢楼、缺页、布局与冻结目标冲突失败关闭，不能为了插入目录页覆盖日志或用户回帖；全部正文证明同事务收口，续页与系统帖不参与用户竞价或格式报错。更新楼采用静态白名单提示，保留 post/line 定位，区分 pending、警告、忽略；格式错误要求新增回帖，pending 不要求重发。通知处理可能晚于竞价成功，不能把通知 pending 或失败解释为竞价未接受；日志最多展示 100 条且受正文预算限制，优先 pending、再展示最近警告，省略数量必须明确，不能以省略诊断推进真实处理水位。
@@ -198,15 +198,19 @@ send 只能从能证明为无收件人、正文、附件和 COD 残留的干净 
 
 Worker 收到明确 `recipient_not_found` 后，必须只在当前领取轮次内暂时排除同一 `(world, recipient)` 的后续 delivery，并继续处理其他玩家；排除集合不得跨 world、不得批量改写未尝试 delivery，也不得形成永久黑名单，下一轮允许重新评估。首条失败 delivery 仍独立保留 `manual_reconcile`、退信引用和资产回收责任，禁止自动重发。明确的邮资拒绝只在 compose 中从未暂存 Credits、装备或 COD 时可以作为确定失败；任一资产暂存已经通过证明后，拒绝结果必须进入 `manual_reconcile`，禁止自动重发。失败 transport 元数据只能是有界的安全 object，storage owner 必须覆盖而不是信任其 `safe_detail` / `outcome_unknown`。普通日志、数据库和 DTO 不得保存原始响应、Cookie 或请求 payload，但业务拒绝、业务失败、处理超时以及 HTTP/解析异常可以按[邮件诊断](ops/mail/diagnostics.md)写入独立的加密异常证据，证据保存失败不得改变原有退回、投递、重试、游标或幂等结果。
 
-所有主动 ComposeSend（通知、注册/重绑 key、告警、结算/返还）在任意 POST 前完成覆盖所有 MID 的 Sent baseline，POST 后独立有界扫描；只有新增且唯一的真实 MID 与 world、recipient、subject、canonical body digest、Credits、COD、装备 ID 精确匹配才可成功，零资产邮件同样需要证明；资产不符、秒领取、无匹配、多匹配、扫描不完整或超时均进入 `manual_reconcile`，不自动重寄。成功页、空 compose、本地 UUID 或 Admin 提交的裸 `external_reference` 均不能替代证明。成功 metadata、默认 180 秒 delivery timeout/300 秒 sending grace 及预算约束见[Sent 证明](ops/mail/diagnostics.md#主动-composesend-的-sent-证明)。storage defense gate 对 Worker 和 Admin 同样生效，Admin `retry`/`failed` 仍需显式命令、版本 fence 和审计；Return/Take 使用独立 action proof 和人工核对路径，不套用 ComposeSend 证明。
+所有主动 ComposeSend（通知、注册/重绑 key、告警、结算/返还）在任意 POST 前完成覆盖所有 MID 的 Sent baseline，POST 后独立有界扫描；只有新增且唯一的真实 MID 与 world、recipient、subject、canonical body digest、Credits、COD、装备 ID 精确匹配才可成功，零资产邮件同样需要证明；写后资产不符、秒领取、无匹配、多匹配、扫描不完整或超时均进入 `manual_reconcile`，不自动重寄；fence 前完整基线失败只释放未发送的有效 claimed。成功页、空 compose、本地 UUID 或 Admin 提交的裸 `external_reference` 均不能替代证明。成功 metadata、默认 180 秒 delivery timeout/300 秒 sending grace 及预算约束见[Sent 证明](ops/mail/diagnostics.md#主动-composesend-的-sent-证明)。storage defense gate 对 Worker 和 Admin 同样生效，Admin `retry`/`failed` 仍需显式命令、版本 fence 和审计；Return/Take 使用独立 action proof 和人工核对路径，不套用 ComposeSend 证明。
 
 Delivery claim 必须在进入 `sending` 前按 payload world 检查 scoped/shared 凭据：当前无凭据时只能用完整 lease token 和 fencing 从 `claimed` 释放回 `pending`，不能写成终态失败；非法 payload 仍必须越过 availability gate 进入确定失败路径，避免永久滞留；进入 `sending` 后发生的凭据竞态、网络、响应边界或协议依赖失败不得收口为普通失败。本轮必须跳过已确认无凭据的 world 并继续领取其他 world，不可用队头不得阻塞有凭据的投递。
 
-MoogleMail Send 额外在 sending fence 前实际 GET compose，持有同一 Cookie 独占 guard 进入消耗式 prepared future；fence 未明确成功不得 poll 写入。prepare 在原请求总预算内为 claimed 周期续租，首次准备前及 fence 前后均确认续租；数据库等待受 finalize_timeout 和已知单调租约截止双重限制，回执已耗尽新 TTL 不得继续。首次外部 poll 前直接复核单调截止，超时/租约/续租处理优先；未 poll 的失败先 drop prepared，再尽力释放，不调用外部 unknown 结果落库；已 sending 或 fence 提交未知不能退回 pending，仍沿持久隔离恢复边界处理。只读准备失败/超时释放有效 claimed，事务内撤销本次 attempt_count 并追加 release 审计，不写 unknown；仅暂排该 world 的 Send，不占发送批次，Take/Return 仍独立；下轮重新检查实际草稿，禁止永久历史错误 SQL gate；发送 fence 后仍严格单次，旧 sending/manual_reconcile/outcome_unknown 不因新草稿干净而重发或结清。
+MoogleMail Send 在 sending fence 前实际 GET compose 并完整扫描 Sent 至尾页；页数/时间耗尽分别为 `sent_scan_page_limit`/`sent_scan_timeout`，不得当空历史。持有同一 Cookie 独占 guard 进入消耗式 prepared future；fence 未明确成功不得 poll 写入。prepare 在原请求总预算内为 claimed 周期续租，首次准备前及 fence 前后均确认续租；数据库等待受 finalize_timeout 和已知单调租约截止双重限制，回执已耗尽新 TTL 不得继续。首次外部 poll 前直接复核单调截止，超时/租约/续租处理优先；未 poll 的失败先 drop prepared，再尽力释放，不调用外部 unknown 结果落库；已 sending 或 fence 提交未知不能退回 pending，仍沿持久隔离恢复边界处理。只读准备失败/超时释放有效 claimed，事务内撤销本次 attempt_count 并追加 release 审计，不写 unknown；仅暂排该 world 的 Send，不占发送批次，Take/Return 仍独立；下轮重新检查实际草稿，禁止永久历史错误 SQL gate；发送 fence 后仍严格单次，旧 sending/manual_reconcile/outcome_unknown 不因新草稿干净而重发或结清。
 
 预期 `player_name`、Cookie 可用或 Item Shop 余额均非自身身份证明，来源未证明时明确 `identity_unproven`；数据库旧预期名为 None 也必须远端联合核验，非空预期值精确匹配；内部履约与现金门见 I-09h，业务规则及原子写门禁见[应用履约](crates/auction-application/README.md#结算与恢复端口)。
 
-可能超过初始 lease 的多步外部写必须周期续租，并在每次续租和最终写回中携带同一 lease token 与 fencing version。Worker 只能在有空闲执行槽时领取下一条，不能让批次内排队时间消耗新 claim 的租约；完整外部调用与终态写回必须分别有界，请求超时属于结果未知。续租失败后不得以 stale claimant 保存成功或确定失败，只有原 fence 仍有效时可以写入结果未知；过期 `sending` 必须在额外 sending grace 后进入 `manual_reconcile`，禁止重新领取并盲目重发。Delivery 每轮完成后必须使用有界 `poll + [0, jitter]` 再唤醒，避免多实例固定整点抢占；单轮 claim、持久化或外部处理错误必须由持久化状态保留重试边界并在下一轮继续，不能因此终止整个 Worker，循环任务异常退出仍必须失败关闭。
+可能超过初始 lease 的多步外部写必须周期续租，并在每次续租和最终写回中携带同一 lease token 与 fencing version。Worker 只能在有空闲执行槽时领取下一条，不能让批次内排队时间消耗新 claim 的租约；完整外部调用与终态写回必须分别有界，请求超时属于结果未知。续租失败后不得以 stale claimant 保存成功或确定失败，只有原 fence 仍有效时可以写入结果未知；过期 `sending` 必须在额外 sending grace 后进入 `manual_reconcile`，禁止重新领取并盲目重发。Delivery 普通轮询使用有界 `poll + [0, jitter]`；新超价 MM 提交后的空载荷提示可即时唤醒并优先领取，在途工作不抢占。提示不携带任务或发送授权，丢失/断线仍靠周期领取，准备失败释放不循环自唤醒；单轮 claim、持久化或外部处理错误必须由持久化状态保留重试边界并在下一轮继续，不能因此终止整个 Worker，循环任务异常退出仍必须失败关闭。
+
+同类 Send 的最小开始间隔按七类、跨 Main/Isekai 共用，起点为持久 sending fence。`000059` 的分组高水位与 Sending/审计同事务推进，
+准备失败或确定 Deferred 不消费间隔，发送失败/未知不退还；重启不清空。锁前缀为分组节奏 → 原 generation/world/资金及业务锁，
+同事务再次按数据库实时钟复核，不依赖领取时快照或内存定时器。Take/Return 不参与分组节奏；0 不绕过原串行、限速、资格与证明。
 
 ### I-09d Delivery 状态事实与审计不能分叉
 
@@ -253,11 +257,12 @@ PM 不进入 MM deliveries/Sent/COD 链，独立队列只有 pending/claimed/sen
 - 身份来自同一 MM Cookie 认证 HV UID 与该 UID 的论坛目标资料名；论坛 Cookie 只提供读取权限，不取页头登录者。forum.enabled 关闭或证据缺失明确延期，不暗中启用论坛，不把 MM Cookie 发往论坛。
 - 当前持有只接受批准七类 Armory organize 的精确 world/form/完整计数、非 disabled canonical eqids[] 及同 EID 行 handler，同 session compose 必须干净，且同 EID/world 历史出站、恢复及其他义务占用无冲突；详情可读不是库存证明。Isekai 独立读取且与 Main 同 UID，未知形状仅阻断相应分支，不复制 Main 库存。资产冲突依据真实 origin/payload 闭集 schema：已验证无装备通知不构成 EID 占用，attachment_ids 按外部 EID/world，secret 引用按实际装备 EID/world 核对；缺失/畸形/未知 schema、真实同资产占用仍失败关闭，不凭 succeeded 放行，不解除旧 unknown，保留精确 recovered_handoff 例外与来源关联检查。
 - 内部提交要求数据库 active credential ID/version、全局 mail_cookie generation 与最长 30 秒的新鲜证据；原 operation guard 持有到事务确定结束，开始可能提交后取消或结果未知同步撤销 owner，先查原稳定命令，不转外发。所有取得 mail owner 的新版程序（含配置 Cookie）先推进 generation 并提交，配置/keyenv 不伪造持久凭据身份。
-- 数据库统一锁序为 generation → 排序 worlds → 资金 scope/account → auction → recovery → lot/equipment → credentials → users → 排序 obligations → recovery actions → 排序 deliveries → 排序 fulfillments → allocation/proof/ledger/audit；可省无关锁，不反锁；远端读取在业务事务外；SQLSTATE 40001/40P01 保留类型、最多三次整事务尝试，每次复核实时租约与证据。
+- 数据库统一锁序为（Send 独有的分组节奏锁 →）generation → 排序 worlds → 资金 scope/account → auction → recovery → lot/equipment → credentials → users → 排序 obligations → recovery actions → 排序 deliveries → 排序 fulfillments → allocation/proof/ledger/audit；可省无关锁，不反锁；远端读取在业务事务外；SQLSTATE 40001/40P01 保留类型、最多三次整事务尝试，每次复核实时租约与证据。
 - 仅从未 prepare/activate/delivery 的新 pending 可内部满足；原稳定命令重放、资金动作、独立证明、satisfied、清 claim/版本、审计与直接 blocked 依赖解除同事务；prepared/enqueued/unknown 不转换，contingent 退款不自动激活。保持 B+C=S+T、原义务 ID 和 payment→handoff→seller；历史 `write_unknown` 投递只允许在 Sent 中 reference 与收件人唯一匹配、金额/资产矩阵一致时绑定 `sent_recovered_reference_v1` 并重新排队，绝不重发邮件；内部 carrier 不派发、不虚构 1C、无伪 delivery 或 Sent。bot 流拍与撤拍均直接留装备；配置在 `bot_players` 中的买家按内部 Purchase 分配真实 B/C，卖方 S 转 retained 或正常寄出；新配置只影响尚未生成 delivery 的新结算。
 - 资金账户固定认证 UID/Main/Credits，Cookie 换代不清余额或占用；普通 Balance/理论 pool 不是自有额度；preview 数据库零写、不取 owner、不计算已证明可用额度。apply 经真实现金及完整责任核对、版本/摘要和精确确认才开额度；旧无 UID 责任只保守隔离；新外部 COD 须同 session 精确 Sent-collected、原 exact-payload/冻结金额及唯一来源，且发送晚于 opening 边界、发行后占用不超过新鲜现金；历史/跨边界来源继续等待，不释放 quarantine。未资金化 Main 装备 COD/跨世界现金 carrier 已外发而收款事实未闭合，或关联 delivery 缺失，均阻断 preview/apply opening；不从本地未 satisfied 推断未收款，确定尚未外发的 pending/prepared 付款不误判为已收责任。补偿及隔离新增需求有零下界，既有 allocation 全计占用；collected 在满足/发行/解依赖之前，以已锁账户和同一有效 Main cash 检查既有占用，缺口确定提交冻结并返回 FundingDeferred，不满足义务、不发行、不解除依赖。
 - retained、税与受限补偿不自动再投资；退款仅原恢复授权、同 UID 支付来源及装备恢复/卖方互斥责任闭合后转移原资金；原 internal 才恢复原 proprietary，外部 collected 内部退款转受限留存，不新增经济权利或内部取消退款。
 - 旧 Bot 自寄仅通过单笔显式修复命令处理：原版本与完整摘要、真实同 UID 身份、干净 compose 和正向库存同事务核验，原投递、错误及全部指针快照形成只追加事实。流拍可留存；成交付款还要求明确自寄拒绝及原草稿清理证明，只恢复受持久 UID 约束的内部准备，不伪造付款、Sent 或收款，不降级为外发。旧实收的 Bot 卖家款须独立精确 Sent-collected 与当前现金证明，从已隔离责任逐标的转为留存，唯一目标防止双计，不重复发行旧 B 或增加自有额度。
+- 现金发送的完整 Sent 基线先在原 Worker 准备总预算内完成；基线不是资金证据。其后首次读取联合资金证据前收紧到最长 30 秒，后续 prepared/交接/提交不重建期限，仍持有同一 session。
 - 全部受保护现金 Send（含 carrier、generic、旧入口）按精确原义务/payload 预留；reserved→in_flight 与 sending fence 同事务，fence 成功及续租确认后才首次 poll。现金 fence 从 prepared 继承原单调绝对截止，等待/确认/存储预算取原证据、有效租约及 finalize 截止最小值，同一 commit guard 覆盖重试，不从交接重建 30 秒。数据库每次只用原剩余整毫秒与 UTC 证据窗口的交集设置 PostgreSQL 18 transaction_timeout，覆盖锁/审计/COMMIT；零预算拒绝，不以 0 禁用超时；旧有证据入口缺精确单调期限拒绝；过晚/错误/取消或提交未知撤销 owner，不 poll 发送。保留准备续租与慢续租公平性，无映射延期；余额缺口提交冻结且不发送。Sent 记 spent，失败/未知保留 unknown 占用；TTL、重启、人工 failed 不释放。无证据 legacy 只在同事务 scope 锁下排除所有保护账户和持久 allocation 后才可发送，缺 UID 不是其他账号证明。
 - 有 allocation 的新 Release/RetryFailed/ReconcileRetry/ReconcileSucceeded/ReconcileFailed 均 Invalid，原成功命令先重放；无 allocation 的旧 retry 按 recovery scope→中间业务锁→actions→delivery→fulfillment/reset 预锁，不增加人工权限；本轮无资金未知重发或人工返还入口，旧 32 条未知投递与草稿仍须另行核对。
 
