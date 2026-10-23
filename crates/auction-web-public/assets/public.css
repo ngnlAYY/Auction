@@ -1387,18 +1387,111 @@
   background: var(--color-accent-contrast);
 }
 
-/* 装备类型与列设置共用一行；窄屏让筛选项折行，不挤出视口。 */
-.public-auction-type-toolbar {
+/* 分组与等级控件同行；窄屏只折行控件，不改变目录的表格结构。 */
+.public-auction-group-toolbar {
   display: flex;
-  align-items: flex-start;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  min-inline-size: 0;
+  margin-block-end: var(--space-3);
+}
+
+.public-auction-group-toolbar > .public-auction-filter {
+  min-inline-size: 0;
+  margin: 0;
+}
+
+.public-catalog-level-filter {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  margin: 0;
+}
+
+.public-catalog-level-filter__controls,
+.public-catalog-level-filter__maximum,
+.public-catalog-level-filter__unleveled {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  font-size: var(--text-sm);
+}
+
+.public-catalog-level-filter__controls {
+  flex-wrap: wrap;
+}
+
+.public-catalog-level-filter__maximum,
+.public-catalog-level-filter__unleveled {
+  min-block-size: var(--size-target);
+  margin: 0;
+}
+
+.public-catalog-level-filter input[type="text"] {
+  inline-size: 5rem;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  min-block-size: 1.75rem;
+  padding: 0 var(--space-1);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+}
+
+.public-catalog-level-filter input[type="checkbox"] {
+  flex: 0 0 auto;
+  inline-size: 1rem;
+  block-size: 1rem;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.public-catalog-level-filter__unleveled {
+  cursor: pointer;
+}
+
+.public-catalog-level-filter input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.public-catalog-level-filter__error {
+  margin: var(--space-1) 0 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* 两列明确锁定同一网格行：类型内部可折行，列设置按钮始终在右侧，不降到下一行。 */
+.public-auction-type-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) fit-content(35%);
+  align-items: start;
   gap: var(--space-3);
   min-inline-size: 0;
   margin-block-end: var(--space-3);
 }
 
 .public-auction-type-toolbar > .public-auction-filter {
-  flex: 1 1 0;
+  grid-area: 1 / 1;
+  align-items: center;
   min-inline-size: 0;
+  margin: 0;
+}
+
+/* 标签与右侧按钮共享首行高度；类型选项仍可在左侧内部换行。 */
+.public-auction-type-toolbar .public-auction-filter__label {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: var(--size-target);
+}
+
+.public-auction-type-toolbar > .public-catalog-columns__toggle {
+  grid-area: 1 / 2;
+  justify-self: end;
+  max-inline-size: 100%;
   margin: 0;
 }
 
@@ -1503,10 +1596,12 @@
 
 /* ===== 账户区（登录引导 / 账户表格） ===== */
 
+.public-session-preference,
 .public-outbid-preference {
   margin-block-end: var(--space-6);
 }
 
+.public-session-preference fieldset,
 .public-outbid-preference fieldset {
   min-inline-size: 0;
   margin: 0;
@@ -1516,16 +1611,20 @@
   background: var(--color-surface);
 }
 
+.public-session-preference legend,
 .public-outbid-preference legend {
   font-size: var(--text-lg);
   font-weight: var(--font-weight-strong);
 }
 
+.public-session-preference p,
 .public-outbid-preference p {
   margin-block: var(--space-2);
   overflow-wrap: anywhere;
 }
 
+.public-session-preference__choices,
+.public-session-preference__actions,
 .public-outbid-preference__choices,
 .public-outbid-preference__actions {
   display: flex;
@@ -1534,12 +1633,14 @@
   margin-block-start: var(--space-3);
 }
 
+.public-session-preference__choices > div,
 .public-outbid-preference__choices > div {
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
 
+.public-session-preference__choices label,
 .public-outbid-preference label {
   display: inline-flex;
   align-items: center;
@@ -1547,10 +1648,12 @@
   cursor: pointer;
 }
 
+.public-session-preference input[type="radio"],
 .public-outbid-preference input {
   accent-color: var(--color-accent);
 }
 
+.public-session-preference button,
 .public-outbid-preference button {
   min-block-size: var(--size-target);
   padding: var(--space-2) var(--space-3);
@@ -1562,19 +1665,69 @@
   cursor: pointer;
 }
 
+.public-session-preference button:disabled,
 .public-outbid-preference button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
 
+.public-session-preference input:focus-visible,
+.public-session-preference select:focus-visible,
+.public-session-preference button:focus-visible,
 .public-outbid-preference input:focus-visible,
 .public-outbid-preference button:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
+.public-session-preference__error,
 .public-outbid-preference__error {
   color: var(--color-danger);
+}
+
+.public-session-preference__hint {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* 数值与单位按可用宽度自然折行，不设页面最小宽度或横向滚动。 */
+.public-session-preference__duration {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  max-inline-size: 24rem;
+  margin-block: var(--space-2);
+}
+
+.public-session-preference__field {
+  display: flex;
+  flex: 1 1 8rem;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+.public-session-preference__field input,
+.public-session-preference__field select {
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: var(--size-target);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  font: inherit;
+}
+
+.public-session-preference input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.public-session-preference__current {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .public-account-section {
@@ -3575,6 +3728,11 @@
     display: inline-flex;
     align-items: center;
     min-block-size: var(--size-target);
+  }
+
+  .public-catalog-level-filter input[type="text"] {
+    min-block-size: var(--size-target);
+    font-size: 1rem;
   }
 
   .public-world-switcher select,

@@ -140,7 +140,8 @@ runtime 邮箱开关分开建模（能力见[能力矩阵](docs/design/architect
 [ports/forum/colors.rs](crates/auction-application/src/ports/forum/colors.rs) 的 `equipment_color_decision` 同时拥有
 论坛渲染方案及公开页 `EquipmentGroup`：实际会上色为 `rare`，其余为 `fusion`；Peerless 固定彩虹属于稀有。
 首条规则只命中单边词缀时，名称中找不到对应片段仍按论坛纯文本回退归为融合；等级 0 与论坛快照一致视为未知。
-Public lot 查询允许装备分组与类型组合筛选，应用投影为预览、正式摘要和详情携带同一分组，页面验证复核筛选归属。
+Public lot 查询允许装备分组、等级上限、无等级显示与类型组合筛选；`PublicLotListRequest::matches_level` 拥有包含式上限
+及无等级独立判断，不能把 None 当零级。应用投影为预览、正式摘要和详情携带同一分组，列表验证复核全部筛选归属。
 
 [ports/auction/queries](crates/auction-application/src/ports/auction/queries) 定义拍卖、lot、竞价/价格历史及账户安全投影，
 [ports/public](crates/auction-application/src/ports/public) 定义规则、黑名单、补偿与装备链接等读取端口；
@@ -217,11 +218,13 @@ Recovery 外部余额失效时仍保留数据库积压与 `EvidenceStale` 告警
 ## 读取、实时与会话
 
 [services/sessions](crates/auction-application/src/services/sessions) 将 Public 认证版本与会话创建锁内复核衔接，
-key 撤销/重签永久废止旧会话；长连接通过只读 `inspect` 检查用户、凭据与双重过期边界，不滑动刷新。Admin 服务启动前
-撤销旧 Admin 会话，失败阻断启动，token 摘要绑定当前 actor/secret；账号/口令校验由会话 owner 导出，首次设置与敏感配置
-复用相同边界。[ports/realtime](crates/auction-application/src/ports/realtime) 定义事件、连续游标、消费所有权和重放边界，
-事件不能代替权威快照（见[实时契约](docs/contracts/events.md)）。
-Public/Admin 登录结果的 `Debug` 只保留身份投影，原始 session 与 CSRF token 始终脱敏；HTTP 所需字段保持不变。
+key 撤销/重签永久废止旧会话；Public 默认永久，有限期限不随普通活动延长。长连接只读 `inspect` 仍复核账号、凭据、
+撤销和有限截止。账号时长、版本与会话绑定摘要由 [session_preference.rs](crates/auction-application/src/ports/public/session_preference.rs)
+拥有；保存更新当前会话及后续登录偏好，重放返回原结果而不重置截止，其他会话不变。
+Admin 服务启动前撤销旧 Admin 会话，失败阻断启动，token 摘要绑定当前 actor/secret；账号/口令校验由会话 owner 导出，
+首次设置与敏感配置复用相同边界。[ports/realtime](crates/auction-application/src/ports/realtime) 定义事件、连续游标、
+消费所有权和重放边界，事件不能代替权威快照（见[实时契约](docs/contracts/events.md)）。
+Public/Admin 登录结果的 `Debug` 只保留身份投影，原始 session 与 CSRF token 始终脱敏；Public 两个截止同为 `None` 才表示永久。
 Admin 录入命令中的完整装备 URL、论坛镜像正文和邮箱 compose 草稿的主题/正文也在 `Debug` 中脱敏，
 避免 URL 包装或只读投影重新暴露装备 key、登录 key；实际业务字段和命令摘要保持原文。
 本地 relay 按有界分页遍历 stream 目录；每条已校验事件直接移交 sink，只保留确认所需的 ID/序号，

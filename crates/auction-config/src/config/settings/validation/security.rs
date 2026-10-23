@@ -143,6 +143,16 @@ pub(crate) fn validate_realtime(config: &RealtimeConfig) -> Result<(), ConfigErr
     Ok(())
 }
 
+/// Public 只验证并发上限；Admin/Worker 沿用原有双重时限验证。
+pub(crate) fn validate_role_session(config: &RoleSessionConfig) -> Result<(), ConfigError> {
+    match config {
+        RoleSessionConfig::Public(config) => {
+            validate_max_public_sessions(config.max_public_sessions)
+        }
+        RoleSessionConfig::Timed(config) => validate_session(config),
+    }
+}
+
 pub(crate) fn validate_session(config: &SessionConfig) -> Result<(), ConfigError> {
     if !(60..=24 * 60 * 60).contains(&config.idle_ttl_seconds) {
         return Err(ConfigError::InvalidSessionConfig("idle_ttl_seconds 必须位于 60 至 86400"));
@@ -154,7 +164,11 @@ pub(crate) fn validate_session(config: &SessionConfig) -> Result<(), ConfigError
             "absolute_ttl_seconds 必须不小于 idle_ttl_seconds 且不大于 2592000",
         ));
     }
-    if config.max_public_sessions == 0 || config.max_public_sessions > 100 {
+    validate_max_public_sessions(config.max_public_sessions)
+}
+
+fn validate_max_public_sessions(max_public_sessions: u32) -> Result<(), ConfigError> {
+    if max_public_sessions == 0 || max_public_sessions > 100 {
         return Err(ConfigError::InvalidSessionConfig("max_public_sessions 必须位于 1 至 100"));
     }
     Ok(())

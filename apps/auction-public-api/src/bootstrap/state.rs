@@ -239,11 +239,11 @@ pub(super) async fn configure_state(
         Arc::new(DatabaseCompetitionCommands::new(store.clone(), Arc::new(SystemClock)));
     let authenticator: Arc<dyn PublicLoginAuthenticator> = store.clone();
     let session_store: Arc<dyn PublicSessionStore> = store.clone();
-    let session_config = PublicSessionConfig {
-        idle_ttl: chrono::Duration::seconds(config.session.idle_ttl_seconds as i64),
-        absolute_ttl: chrono::Duration::seconds(config.session.absolute_ttl_seconds as i64),
-        max_public_sessions: config.session.max_public_sessions,
+    let auction_config::RoleSessionConfig::Public(session_settings) = config.session else {
+        anyhow::bail!("Public session configuration is unavailable");
     };
+    let session_config =
+        PublicSessionConfig { max_public_sessions: session_settings.max_public_sessions };
     let session: Arc<dyn PublicSessionPort> =
         Arc::new(PublicSessionService::new(authenticator, session_store, session_config)?);
     let hub =

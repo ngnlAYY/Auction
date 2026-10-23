@@ -1,4 +1,4 @@
-//! Public 与 Admin session 用例：登录、滑动刷新、只读复核和撤销。
+//! Public 固定期限/永久登录、偏好与只读复核；Admin 保持滑动刷新和撤销。
 
 use std::sync::Arc;
 
@@ -13,8 +13,8 @@ use crate::{
     AdminLoginResult, AdminSessionConfig, AdminSessionIdentity, AdminSessionPort,
     AdminSessionRecord, AdminSessionStore, ApplicationError, ApplicationFuture,
     PublicLoginAuthenticator, PublicLoginIdentity, PublicLoginResult, PublicSessionConfig,
-    PublicSessionIdentity, PublicSessionPort, PublicSessionRecord, PublicSessionStore,
-    SessionError,
+    PublicSessionIdentity, PublicSessionPort, PublicSessionPreferenceResult, PublicSessionRecord,
+    PublicSessionStore, SessionError, SetPublicSessionPreferenceCommand,
 };
 
 /// Public session 应用服务。
@@ -65,8 +65,6 @@ impl PublicSessionPort for PublicSessionService {
             }
 
             let (token, token_hash) = generate_token()?;
-            let (expires_at, absolute_expires_at) =
-                session_expiration_window(now, self.config.idle_ttl, self.config.absolute_ttl)?;
             let stored = self
                 .store
                 .create_public(
@@ -75,8 +73,6 @@ impl PublicSessionPort for PublicSessionService {
                         user_id: login.user_id,
                         authenticated_user_version: login.user_state_version,
                         created_at: now,
-                        expires_at,
-                        absolute_expires_at,
                     },
                     self.config.max_public_sessions,
                 )
@@ -94,9 +90,8 @@ impl PublicSessionPort for PublicSessionService {
         now: DateTime<Utc>,
     ) -> ApplicationFuture<'_, PublicSessionIdentity> {
         Box::pin(async move {
-            let (token_hash, next_expires_at) =
-                prepare_session_token(&raw_token, now, self.config.idle_ttl)?;
-            self.store.touch_public(token_hash, now, next_expires_at).await
+            let token_hash = hash_token(&raw_token)?;
+            self.store.touch_public(token_hash, now).await
         })
     }
 
@@ -104,6 +99,30 @@ impl PublicSessionPort for PublicSessionService {
         Box::pin(async move {
             let token_hash = hash_token(&raw_token)?;
             self.store.revoke_public(token_hash, now).await
+        })
+    }
+
+    fn get_preference(
+        &self,
+        raw_token: String,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
+        Box::pin(async move {
+            let token_hash = hash_token(&raw_token)?;
+            self.store.get_public_preference(token_hash, now).await
+        })
+    }
+
+    fn set_preference(
+        &self,
+        raw_token: String,
+        command: SetPublicSessionPreferenceCommand,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
+        Box::pin(async move {
+            let token_hash = hash_token(&raw_token)?;
+            command.validate()?;
+            self.store.set_public_preference(token_hash, command, now).await
         })
     }
 }

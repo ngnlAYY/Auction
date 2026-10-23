@@ -1,23 +1,22 @@
-//! 装备分组的分页前筛选：只流式扫描身份字段，完整规则仍由应用层统一判断。
+//! 装备分组与等级的分页前筛选：只流式扫描身份字段，规则仍由应用层统一判断。
 
 use futures_util::TryStreamExt;
 
 use super::super::*;
 
-pub(super) struct GroupPageSelection {
+pub(super) struct FilteredPageSelection {
     pub category_counts: BTreeMap<String, i64>,
     pub lot_ids: Vec<Uuid>,
 }
 
-/// 统计选定分组内的各类型，并只保留当前页 UUID；不把全场装备或属性数组留在内存。
-/// 与完整页查询共用同一 Serializable 快照，筛选始终先于 offset/limit。
-pub(super) async fn select_group_page(
+/// 统计选定分组及等级范围内的各类型，只保留当前页 UUID，不缓存全场装备。
+/// 与完整页查询共用同一 Serializable 快照，筛选始终先于计数和 offset/limit。
+pub(super) async fn select_filtered_page(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     auction_id: Uuid,
     request: &PublicLotListRequest,
-    equipment_group: EquipmentGroup,
     colors: &[EquipmentColorRule],
-) -> Result<GroupPageSelection, ApplicationError> {
+) -> Result<FilteredPageSelection, ApplicationError> {
     let mut rows = sqlx::query(
         "SELECT l.id, e.name, e.category, e.attributes - 'stats' AS identity_attributes
          FROM public.lots AS l
@@ -44,7 +43,7 @@ pub(super) async fn select_group_page(
         let attributes: sqlx::types::Json<Value> = row
             .try_get("identity_attributes")
             .map_err(|_| storage_error("读取分组装备身份失败"))?;
-        if map_equipment_group(name, category, attributes.0, colors)? != equipment_group {
+        if !matches_equipment_filters(name, category, attributes.0, colors, request)? {
             continue;
         }
         counts[0] = increment_count(counts[0])?;
@@ -71,7 +70,7 @@ pub(super) async fn select_group_page(
         }
         matched_count = increment_count(matched_count)?;
     }
-    Ok(GroupPageSelection { category_counts: map_counts(counts)?, lot_ids })
+    Ok(FilteredPageSelection { category_counts: map_counts(counts)?, lot_ids })
 }
 
 fn increment_count(count: i64) -> Result<i64, ApplicationError> {

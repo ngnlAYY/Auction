@@ -74,11 +74,7 @@ trusted_proxy_cidrs = []
 # 可选：是否信任 Unix socket 上游提供的 X-Forwarded-For；仅 listener.mode = unix 时可设为 true。
 trusted_unix_proxy = false
 
-# 可选区块：会话过期和并发策略；省略整个区块时使用默认值。
+# 可选区块：Public 会话并发策略；省略整个区块时上限为 5。登录时长由账号「我的」设置，默认永久。
 [session]
-# 可选：空闲过期秒数，默认 1800。
-idle_ttl_seconds = 1800
-# 可选：绝对过期秒数，默认 604800，不能小于空闲过期时间。
-absolute_ttl_seconds = 604800
 # 可选：单个公开用户允许的最大并发会话数，默认 5。
 max_public_sessions = 5

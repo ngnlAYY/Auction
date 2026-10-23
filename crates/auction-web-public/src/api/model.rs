@@ -34,6 +34,47 @@ impl Default for PriceHistoryQuery {
     }
 }
 
+/// 目录等级查询的浏览器投影；保留整数精度，不把无等级等同于零级。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CatalogLevelFilter {
+    pub max_level: Option<i64>,
+    pub include_unleveled: bool,
+}
+
+impl Default for CatalogLevelFilter {
+    fn default() -> Self {
+        Self { max_level: None, include_unleveled: true }
+    }
+}
+
+impl CatalogLevelFilter {
+    /// 草稿与 URL 共用严格解析；留空仅表示不限，非法值不得悄悄扩大查询。
+    pub fn parse(max_level: &str, include_unleveled: &str) -> Result<Self, ()> {
+        let max_level = if max_level.is_empty() {
+            None
+        } else {
+            if !max_level.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(());
+            }
+            Some(max_level.parse::<i64>().map_err(|_| ())?)
+        };
+        let include_unleveled = match include_unleveled {
+            "true" => true,
+            "false" => false,
+            _ => return Err(()),
+        };
+        Ok(Self { max_level, include_unleveled })
+    }
+
+    /// 只用于校验响应是否属于本次查询，不在浏览器分页后过滤或推算总数。
+    pub fn matches_level(self, level: Option<i64>) -> bool {
+        match level {
+            Some(level) => level >= 0 && self.max_level.is_none_or(|maximum| level <= maximum),
+            None => self.include_unleveled,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CatalogRow {
     pub lot_id: String,

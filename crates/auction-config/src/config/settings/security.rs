@@ -55,7 +55,7 @@ impl HttpSecurityConfig {
     }
 }
 
-/// 浏览器会话的滑动过期、绝对过期和并发上限，单位为秒。
+/// Admin 和 Worker 保留的会话时间配置；Public 不使用该模型或其中的部署时限。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SessionConfig {
@@ -77,16 +77,38 @@ impl Default for SessionConfig {
     }
 }
 
-impl SessionConfig {
-    /// 返回角色对应的旧版会话默认值；Admin 使用 15 分钟空闲和 8 小时绝对时限。
+/// Public 部署只拥有并发上限；登录时长由账号偏好拥有，未设置时默认永久。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PublicSessionSettings {
+    /// 单个公开用户允许的最大并发会话数；省略时为 5 个。
+    pub max_public_sessions: u32,
+}
+
+impl Default for PublicSessionSettings {
+    fn default() -> Self {
+        Self { max_public_sessions: 5 }
+    }
+}
+
+/// 按角色隔离有效会话配置，防止 Public 装配继续读取 Admin 的时间策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoleSessionConfig {
+    Public(PublicSessionSettings),
+    /// 保留 Admin 的解析、runtime 投影以及 Worker 原有的非生效会话配置。
+    Timed(SessionConfig),
+}
+
+impl RoleSessionConfig {
+    /// Public 不设置服务端到期；Admin 省略整个区块时仍为 15 分钟空闲和 8 小时绝对时限。
     pub(crate) fn for_role(role: Role) -> Self {
         match role {
-            Role::Admin => Self {
+            Role::Public => Self::Public(PublicSessionSettings::default()),
+            Role::Admin => Self::Timed(SessionConfig {
                 idle_ttl_seconds: 15 * 60,
                 absolute_ttl_seconds: 8 * 60 * 60,
                 max_public_sessions: 5,
-            },
-            Role::Public | Role::Worker => Self::default(),
+            }),
+            Role::Worker => Self::Timed(SessionConfig::default()),
         }
     }
 }

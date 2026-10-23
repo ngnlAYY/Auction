@@ -42,8 +42,9 @@ common、runtime 候选与首次设置内嵌模板同步；升级不覆盖文件
 三个角色必须通过 `common_file` 引用同一公共非敏感 TOML，各自通过 `secrets_file` 引用敏感 TOML；
 三角色可共用 `runtime_config_file`，文件按 owner 分别加载，禁止拼成敏感单文件。模板入口：
 [common](ops/config/examples/common.toml)、[Public](ops/config/examples/public.toml)、[Admin](ops/config/examples/admin.toml)、
-[Worker](ops/config/examples/worker.toml)、[runtime](ops/config/examples/runtime/admin.toml)。Public 会话默认
-idle/absolute 为 1800/604800 秒，Admin runtime 对应独立默认值 900/28800 秒，不能混用。
+[Worker](ops/config/examples/worker.toml)、[runtime](ops/config/examples/runtime/admin.toml)。Public 部署会话仅配置并发上限，默认 5；
+登录时长由账号设置，默认永久。旧 Public `idle_ttl_seconds` / `absolute_ttl_seconds` 明确拒绝，不静默忽略。
+Admin runtime 的独立默认值仍为 900/28800 秒；角色解析与迁移说明见[配置手册](ops/config/README.md#http-listener-与安全)。
 
 [settings/secrets](crates/auction-config/src/config/settings/secrets) 严格定义敏感字段，不接受任意键值透传。
 PostgreSQL `[database]` 接收 host、port、username、password、name 并统一编码为 URL，与兼容 `database_url` 互斥；
@@ -101,7 +102,7 @@ Public/Worker 的 metrics 来自公共文件，tracing 来自各自角色文件�
 每维新旧字段不能同时非空，同维 OR、维度间 AND，不展开为多条规则。Public/Worker 启动时冻结规则，保存后须协调重启；
 含非空新数组的文件需要支持该契约的三角色与配置运维工具读取，旧版本的未知字段拒绝保持不变。
 新种类数组支持十二种护甲材质族及完整部位名称的并集，材质族核对实际分类和首词/部位边界；旧种类单值保持精确匹配。
-Public 完整校验 runtime 后仅应用装备规则，继续使用自身 listener、安全、会话与公共拍卖模板；不应用 `operations`。
+Public 完整校验 runtime 后仅应用装备规则，继续使用自身 listener、安全、会话并发上限与公共拍卖模板；不应用 `operations`。
 分体及合并部署预检要求三角色 runtime 同源且规则快照一致，或全部省略；首次设置生成三份相同路径引用。
 升级旧配置及重启范围见[运行配置手册](ops/config/README.md#runtime-共享与重启)。
 

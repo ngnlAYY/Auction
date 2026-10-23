@@ -26,7 +26,7 @@ pub(super) fn observe_public_session_failure(status: u16, code: &str) {
     }
 }
 
-fn notify_public_session_change(invalidate: bool) {
+pub(super) fn notify_public_session_change(invalidate: bool) {
     let trigger = Runtime::try_current()
         .filter(|runtime| runtime.try_current_scope_id().is_some())
         .and_then(|_| try_consume_context::<PublicSessionCheckTrigger>());
@@ -157,8 +157,8 @@ fn valid_current_session(session: &PublicSession) -> bool {
         && valid_session_fields(
             &session.user_id,
             &session.username,
-            &session.expires_at,
-            &session.absolute_expires_at,
+            session.expires_at.as_deref(),
+            session.absolute_expires_at.as_deref(),
         )
 }
 
@@ -167,8 +167,8 @@ fn valid_login_session(session: &PublicLoginResponse) -> bool {
         && valid_session_fields(
             &session.user_id,
             &session.username,
-            &session.expires_at,
-            &session.absolute_expires_at,
+            session.expires_at.as_deref(),
+            session.absolute_expires_at.as_deref(),
         )
 }
 
@@ -193,16 +193,15 @@ fn has_exact_fields(value: &Value, fields: &[&str]) -> bool {
 fn valid_session_fields(
     user_id: &str,
     username: &str,
-    expires_at: &str,
-    absolute_expires_at: &str,
+    expires_at: Option<&str>,
+    absolute_expires_at: Option<&str>,
 ) -> bool {
     valid_legacy_uuid(user_id)
         && !username.is_empty()
         && username == username.trim()
         && username.len() <= 256
         && !username.chars().any(char::is_control)
-        && valid_legacy_time(expires_at)
-        && valid_legacy_time(absolute_expires_at)
+        && valid_session_deadlines(expires_at, absolute_expires_at)
 }
 
 fn valid_legacy_uuid(value: &str) -> bool {
@@ -213,12 +212,19 @@ fn valid_legacy_uuid(value: &str) -> bool {
     })
 }
 
-#[cfg(target_arch = "wasm32")]
-fn valid_legacy_time(value: &str) -> bool {
-    !value.is_empty() && !js_sys::Date::parse(value).is_nan()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn valid_legacy_time(value: &str) -> bool {
-    !value.is_empty() && chrono::DateTime::parse_from_rfc3339(value).is_ok()
+/// 永久会话必须同时为空；有限会话只接受完整 RFC3339 且截止不得晚于绝对截止。
+fn valid_session_deadlines(expires_at: Option<&str>, absolute_expires_at: Option<&str>) -> bool {
+    match (expires_at, absolute_expires_at) {
+        (None, None) => true,
+        (Some(expires_at), Some(absolute_expires_at)) => {
+            match (
+                chrono::DateTime::parse_from_rfc3339(expires_at),
+                chrono::DateTime::parse_from_rfc3339(absolute_expires_at),
+            ) {
+                (Ok(expires_at), Ok(absolute_expires_at)) => expires_at <= absolute_expires_at,
+                _ => false,
+            }
+        }
+        _ => false,
+    }
 }

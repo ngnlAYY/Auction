@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | HTTP 与页面 | Public/Admin feature API 及浏览器入口见[路由口径](docs/contracts/routes.md#基线与统计口径) | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
-| 迁移 | PostgreSQL 57 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 58 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -34,6 +34,76 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 各记录只覆盖注明的工作树与验证范围，不代表运行验收。下文 `verify全绿` 沿用记录当时的完整 `just verify` 结果；历史文档份数不是当前自动检查项，也不证明链接或语义正确。当前静态门禁及独立检查范围见[开发指南](docs/guide/development.md#默认检查)，历史命令和失败结果保持原样。
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
+
+### 2026-10-22 Public 登录时长设置（隔离 PostgreSQL 与浏览器验证）
+
+owner 为 application sessions、storage sessions、contracts/HTTP、config 与 Public Web。「我的」新增永久（默认）及分钟/小时/天
+自定义时长，保存影响当前会话和后续登录，其他设备现有期限不变。`000058` 添加账号偏好及独立版本、成对 nullable 截止，
+不回填旧会话或撤销事实；P27/P28 新增 GET/PUT，P06 支持永久截止投影。Admin 会话配置和生命周期保持独立。
+Public 旧部署 TTL 字段明确拒绝，升级边界见[运维说明](ops/README.md#public-登录时长升级)；保留策略元数据同步到 schema 58。
+
+静态门禁分阶段完成：repository/layout/config/i18n、格式、workspace/all-targets、独立 PostgreSQL/Redis feature、
+Clippy 及 Public/Admin WASM 均通过。最初 `just verify` 在新时长换算的 `manual_is_multiple_of` lint 处失败，
+修复后 `just lint` 通过；WASM 暴露 FixedOffset 与 UTC 相减的类型错误，归一化 UTC 后 `just wasm-check` 通过。
+Public Web bundle、`postgres,web-embed` Public dev 程序和 `postgres` auctionctl 构建成功；未新增永久行为测试文件。
+Public payload SHA-256 为 `7361c7da3a1593e8cd8e91361960e08b84c99334167b2167055feb2574b91802`，
+验证程序 SHA-256 为 `5c40cd4aad12652a9fcd6672c965ce9b0053adfd02205230ea5e66a729b43513`。
+
+独立 PostgreSQL 18.6 空库通过临时探针调用正式 `DatabaseStore::migrate` 到 58。真实 HTTP 验证默认永久、400 天 Cookie、
+有限固定期限、后续登录继承、其他会话不改、1 分钟/365 天边界、非法/缺失字段、Origin/身份门禁、同 ID 重放及跨会话冲突。
+并发同版本保存得到一个 200、一个 409；已提交后断开响应的浏览器重试保持原完整负载，只新增一条审计。
+行锁等待 3030ms 跨过旧截止后保存返回 401，偏好和审计不写入；永久退出后的读取和重放均为 401。
+永久 WebSocket 握手成功，退出后 29998ms 收到 1008“会话已失效”，没有绕过周期撤销复核。
+
+Chromium 验证五语 × 320/375/1440px 共 15 组无横向溢出；零值草稿可修正，半小时/天数换算、刷新恢复及永久切换生效。
+1 分钟保存的数据库截止与审计时间精确相差 60 秒，之后自然退回登录页、设置卸载；未把浏览器观察时刻当作精确到期延迟基准。
+配置诊断确认 Public 默认/空区块仅保留并发上限 5，两个旧 TTL 字段分别拒绝；Admin 省略区块仍为 900/28800 秒，
+既有显式部分区块仍为 1800/604800 秒。LSP 退出未取得引用结果，源码消费者通过 CodeGraph 与编译核对。
+
+探针首次误对编码后的 Cookie 字符串取摘要，未命中会话行；改为解码后 32 字节摘要并断言恰好命中一行后完成行锁验证。
+原始结果、配置证据和桌面/手机截图保存在本地 `target/audits/public-session-lifetime-20261022.COEpXa/`。
+仅使用合成账号和独立数据库；未替换现有服务、修改现有数据库或部署，未执行真实换钥/封禁、竞价、邮件或论坛流程。
+
+### 2026-10-22 Public 等级框与类型行紧凑调整（本地浏览器验证）
+
+owner 为 `auction-web-public::surface::catalog::filters` 与 Public 样式、五语提示。桌面等级框由 112×44px
+缩至 80×28px，内边距由上下 4px／左右 8px 改为上下 0／左右 4px；触控与窄屏仍保留 44px 输入高度及 16px 字号。
+移除等级应用按钮与五语废弃键，回车或离开字段提交有效草稿，非法输入保留错误且不替换已应用条件；
+装备类型标签与“显示列”按同一首行高度居中对齐。HTTP、查询字段、数据库、列偏好及竞价门禁不变。
+
+`bash ci/checks/check.sh fmt i18n`、Public all-targets Clippy（`-D warnings`）、Public WASM check
+及 Public Web bundle 均通过。新 payload SHA-256：
+`cec1a36c61918c491a56e87be21a4c9b883c1e2e621db3f7147942036e69d202`。
+Rust LSP 启动后退出，未取得引用查询结果；源码定位补用 CodeGraph，编译结论来自上述 Cargo 命令。
+
+Chromium 使用新 bundle，经仅允许 GET/HEAD 的临时 loopback 预览读取现有本地 Public API。
+320/375/1440px 与五语的 15 组布局均无横向溢出，类型标签与列按钮中心线一致；已观察失焦提交 400、
+回车提交 399、非法输入保留原 URL、输入清错、清空上限、直接切换复选框、同值失焦不增历史、返回及刷新恢复，
+并确认显示列展开、Escape 关闭与焦点恢复。证据与桌面/手机截图位于本地 `target/audits/catalog-filter-density-20261022/`。
+未新增行为测试文件，未替换运行服务、迁移、登录、出价或部署；不将局部界面验证视为数据库或生产验收。
+
+### 2026-10-23 Public 等级筛选与类型工具栏（静态检查、本地更新）
+
+owner 为 `auction-application::ports::auction::queries::lot` 的等级条件、`auction-storage::database::lots` 的同快照筛选/统计/分页、
+`auction-http::routes::reads::lots` 的查询边界，以及 `auction-web-public::surface::catalog::filters`、看板查询状态和本端五语/样式。
+分组同行新增包含式等级上限（默认留空）和独立的“显示无等级装备”复选框（默认勾选）；等于上限保留，高于上限隐藏，
+None 不当零级。原生输入支持回车/应用，复选框变化提交有效草稿；条件写回 URL、变化回第一页并隔离旧响应，非法条件不发出宽查询。
+“显示列”与装备类型固定为同一网格行的左右两列，类型选项内部折行，按钮不另起一行；表格列宽及列偏好不变。
+
+P09 仅增加可选 `max_level`、`include_unleveled` 查询，旧默认读取及 JSON 字段保持兼容；范围和错误见
+[装备筛选契约](docs/contracts/routes.md#p09p11-装备分组)。筛选先于类别统计和分页，浏览器只复核响应归属、不删本页行。
+装备事实、详情可见性、标记/竞价门禁、金额、事件、配置和数据库结构均不变；账户完整标记读取显式保持不限等级。
+
+完整 `just verify`、workspace/all-targets/all-features check、Public WASM check、格式与 diff 门禁通过；Public Web bundle
+及 `postgres,web-embed` dev 宿主构建完成。主动 LSP 对 15 个 Rust 文件未取得答复，CSS 既有 important/vertical-align 提示保留；
+未新增或运行行为测试、浏览器、登录或竞价流程，布局状态依据源码与静态构建。
+
+02:08:46 UTC 仅本地 Public 更新为 PID `3506289`，readiness 200；Admin PID `3401418` 未改变。
+先备份原 Public 程序与 Web payload，再优雅停止 Public，重建资源并原子替换程序；未运行迁移或更新云端，配置逐字节未变。
+Worker 未运行，active CK 和未暂停邮箱均为零。六文件 payload SHA-256：
+`2e2e49286e1a4caf001e2c6f4fe9bfc0f326c92d3155d68a9e719ff89615d51f`。
+本地私有回执 `local-test/state/PUBLIC-LEVEL-FILTER-20261023.json`、备份
+`local-test/backups/public-level-filter-20261023T020715Z/` 记录原/新身份；仅启动就绪确认，不作为浏览器验收或正式制品。
 
 ### 2026-10-23 Public 列设置密度与匿名出价入口（静态检查、本地资源更新）
 

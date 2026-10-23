@@ -44,8 +44,10 @@ apps 默认不含数据库驱动或 Web，自行调用 cargo 须显式选 postgr
 单 CGU、panic 展开与通用 CPU 基线，WASM 优先体积，参数不是性能验收。默认分支推送或手动运行通过 CI 后可下载四程序包，
 见[CI 制品说明](ci/README.md#下载-actions-制品)。
 ## 当前交付边界
-- 公开目录的稀有/融合分组、筛选和分页由[装备分组契约](docs/contracts/routes.md#p09p11-装备分组)定义；
+- 公开目录的稀有/融合分组、等级上限、无等级显示、组合筛选和分页由[装备分组契约](docs/contracts/routes.md#p09p11-装备分组)定义；
   名称拆分、详情类型及历史快照兼容由[装备录入契约](docs/contracts/invariants.md#i-05a-admin-装备录入的敏感边界和原子集合)定义。
+- “我的”支持账号登录时长，默认永久，可设置固定时长；当前与后续登录的范围及浏览器限制见
+  [登录时长契约](docs/contracts/routes.md#p27p28-登录时长)。启用前须追加 `000058` 并同版更新 Public API/页面。
 - 公开装备目录支持列显隐和浏览器本地记忆，宽屏使用可用区域；交互与边界见[Public 设计](crates/auction-web-public/DESIGN.md#5-表格与信息密度)。
 - 新场次软截止窗口/延长默认均为 900 秒，不改既有显式配置或冻结快照；
   老配置与草稿的处理见[截止升级说明](ops/README.md#截止规则与邮件发送隔离升级)。

@@ -11,6 +11,7 @@ use crate::app::surface::use_bid_refresh;
 use super::proxy::{
     proxy_mode_label, proxy_quota_label, proxy_status_label, proxy_transition_summary,
 };
+use super::session_preference::SessionPreference;
 use super::watch_preference::OutbidNotifications;
 use super::{
     Pager, PublicSessionResource, QueryWriteMode, Route, Time, format_amount,
@@ -67,6 +68,7 @@ pub(super) fn page() -> Element {
                 h1 { id: "account-title", {t!("page-account-title")} }
                 // 偏好宿主位于分页异步分支外；身份变化销毁旧意图，不因列表重读卸载。
                 OutbidNotifications { key: "preference-{identity.user_id}", user_id: identity.user_id.clone() }
+                SessionPreference { key: "session-preference-{identity.user_id}", user_id: identity.user_id.clone() }
                 watches::CurrentWatches { key: "watches-{identity.user_id}", user_id: identity.user_id.clone() }
                 AuthenticatedAccountData { key: "bids-{identity.user_id}" }
             }

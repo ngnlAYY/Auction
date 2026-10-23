@@ -92,6 +92,13 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
                 .strict_methods("GET, PUT"),
         )
         .route(
+            "/api/v1/me/session-preference",
+            axum::routing::get(get_session_preference)
+                .put(set_session_preference)
+                .layer(DefaultBodyLimit::max(4 << 10))
+                .strict_methods("GET, PUT"),
+        )
+        .route(
             "/api/v1/lots/{lot_id}/watch",
             put(set_lot_watch).layer(DefaultBodyLimit::max(4 << 10)),
         )

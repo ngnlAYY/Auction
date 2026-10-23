@@ -291,7 +291,17 @@ fn check_config(role: Role) -> anyhow::Result<()> {
         mooglemail_worlds.iter().map(|world| world.world_id.as_str()).collect::<Vec<_>>();
     let mooglemail_sender_allowlist_entry_count =
         mooglemail_worlds.iter().map(|world| world.sender_allowlist.len()).sum::<usize>();
-    let summary = serde_json::json!({
+    let session = match config.session {
+        auction_config::RoleSessionConfig::Public(session) => serde_json::json!({
+            "max_public_sessions": session.max_public_sessions,
+        }),
+        auction_config::RoleSessionConfig::Timed(session) => serde_json::json!({
+            "idle_ttl_seconds": session.idle_ttl_seconds,
+            "absolute_ttl_seconds": session.absolute_ttl_seconds,
+            "max_public_sessions": session.max_public_sessions,
+        }),
+    };
+    let mut summary = serde_json::json!({
         "role": config.role.name(),
         "listener": {
             "mode": listener_mode,
@@ -323,11 +333,6 @@ fn check_config(role: Role) -> anyhow::Result<()> {
             "trusted_unix_proxy": config.http_security.trusted_unix_proxy,
             "cookie_secure": config.http_security.cookie_secure,
         },
-        "session": {
-            "idle_ttl_seconds": config.session.idle_ttl_seconds,
-            "absolute_ttl_seconds": config.session.absolute_ttl_seconds,
-            "max_public_sessions": config.session.max_public_sessions,
-        },
         "worker": {
             "concurrency": config.worker_concurrency(),
             "poll_interval_seconds": config.worker_poll_interval_seconds(),
@@ -356,6 +361,7 @@ fn check_config(role: Role) -> anyhow::Result<()> {
         "secrets_file_configured": config.secrets_path.is_some(),
         "runtime_config_file": config.runtime_config_path.as_ref().map(|path| path.display().to_string()),
     });
+    summary["session"] = session;
     println!("{}", serde_json::to_string_pretty(&summary)?);
     Ok(())
 }

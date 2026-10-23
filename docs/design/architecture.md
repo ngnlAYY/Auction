@@ -51,9 +51,11 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
   不导入领域或集成适配器；该投影不进入 runtime 文档或配置指纹。
   配套解析诊断的数据库 CHECK 由 storage 和追加迁移 `000056` 拥有，不新增表、事件、路由或运行配置字段；
   词典响应扩展须显式查询选择，边界见[运行配置契约](docs/contracts/routes.md#runtime-配置与文件事务)。
-- 公开装备分组：`auction-application::ports::forum::colors` 统一拥有稀有/融合与论坛实际标色判定；
-  `auction-storage::database::lots::postgres::selection` 拥有同一读取快照内的轻量身份扫描、分组计数及当前页 ID 选择，
-  不复制匹配规则到 SQL。Public 装配只读规则快照，HTTP 映射稳定字段，Web 独占分组筛选、标签和五语展示。
+- 公开装备筛选：`auction-application::ports::forum::colors` 统一拥有稀有/融合与论坛实际标色判定，
+  `ports::auction::queries::lot` 拥有包含式等级上限、无等级显示和投影校验；
+  `auction-storage::database::lots::postgres::selection` 拥有同一读取快照内的轻量身份扫描、组合筛选计数及当前页 ID 选择，
+  不复制匹配规则到 SQL。HTTP 严格映射可选查询、保持响应字段不变；Web 的 `surface/catalog/filters.rs` 独占分组/等级表单，
+  `board/data.rs` 绑定查询快照身份，`api/model.rs` 仅解析浏览器查询及校验返回归属；无新持久化能力或迁移阶段。
 - 草稿软截止：`auction-application::draft_soft_close` 拥有修正规则与窄端口，
   `auction-storage::database::draft_soft_close` 独占一致快照检查、Serializable/CAS、原命令账本及追加审计，
   `auctionctl` 只装配命令，不在迁移中批量更正旧场次。
@@ -80,7 +82,7 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 | --- | --- |
 | 分体拓扑 | Public、Admin、Worker 独立进程；具备并发及多进程存储边界，具体扩展需验证 |
 | 竞价与生命周期 | Serializable、显式行锁、最多三次序列化冲突尝试；持久调度、慢速代理与结算 workflow |
-| Public | 目录、lot、bid-log、账户及成交价格、补偿事实的权威投影；登录用户装备标记与账号级 MM/PM 渠道偏好，统一来源按领先周期去重 |
+| Public | 目录、lot、bid-log、账户及成交价格、补偿事实的权威投影；账号级登录时长（默认永久、当前会话及后续登录生效），登录用户装备标记与账号级 MM/PM 渠道偏好，统一来源按领先周期去重 |
 | Admin | 用户、改名、黑名单、审计、规则、runtime、world、录入/报表及 realtime 运维 |
 | 结算与外部系统 | 结算、履约、recovery、凭据、论坛、邮件与告警的独立 owner；论坛目录每帖最多 150 件，续页身份与正文由 storage 持久化；forum owner 持有终态刷新纳入标记及全固定页确认版本，结算结果仍归 settlement |
 | 运维 | 显式灾备、canonical v28 接管；可选 Linux 单主机 supervisor 与确认后的专用空库初始化；单目标未发布草稿软截止修正（默认只读） |

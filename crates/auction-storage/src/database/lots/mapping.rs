@@ -252,17 +252,22 @@ pub(super) fn map_equipment(
     Ok(equipment)
 }
 
-/// 分组扫描只需身份字段；SQL 去掉 stats 后仍复用正式映射的严格属性解码。
-pub(super) fn map_equipment_group(
+/// 筛选扫描只需身份字段；严格解码等级后复用应用规则，不将无等级静默补为零级。
+pub(super) fn matches_equipment_filters(
     name: &str,
     category: &str,
     attributes: Value,
     colors: &[EquipmentColorRule],
-) -> Result<EquipmentGroup, ApplicationError> {
+    request: &PublicLotListRequest,
+) -> Result<bool, ApplicationError> {
     if !public_text(name, 512) || !category.is_empty() && !public_text(category, 128) {
-        return Err(storage_error("公开装备分组身份无效"));
+        return Err(storage_error("公开装备筛选身份无效"));
     }
-    Ok(parse_stored_equipment(attributes)?.equipment_group(name, category, colors))
+    let stored = parse_stored_equipment(attributes)?;
+    Ok(request.matches_level(stored.level)
+        && request
+            .equipment_group
+            .is_none_or(|group| stored.equipment_group(name, category, colors) == group))
 }
 
 fn parse_stored_equipment(

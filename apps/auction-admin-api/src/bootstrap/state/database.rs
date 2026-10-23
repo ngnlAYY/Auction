@@ -329,9 +329,12 @@ pub(super) async fn configure_state(
     let credential_health: Arc<dyn AdminCredentialHealthReader> = store.clone();
     let realtime_admin: Arc<dyn RealtimeAdminPort> = store.clone();
     let recovery_command_store = Arc::clone(&store);
+    let auction_config::RoleSessionConfig::Timed(session_settings) = config.session else {
+        anyhow::bail!("Admin session configuration is unavailable");
+    };
     let session_config = AdminSessionConfig {
-        idle_ttl: ChronoDuration::seconds(config.session.idle_ttl_seconds as i64),
-        absolute_ttl: ChronoDuration::seconds(config.session.absolute_ttl_seconds as i64),
+        idle_ttl: ChronoDuration::seconds(session_settings.idle_ttl_seconds as i64),
+        absolute_ttl: ChronoDuration::seconds(session_settings.absolute_ttl_seconds as i64),
     };
     let session: Arc<dyn AdminSessionPort> = Arc::new(
         AdminSessionService::new(
