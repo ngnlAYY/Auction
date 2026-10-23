@@ -35,6 +35,35 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-23 R27 云端发布与 schema 59（授权迁移、启动与制品核验）
+
+发布 owner 为 `ci/release`、`auctionctl` 分体停机/迁移控制器和三角色装配；邮件、凭据及论坛能力的 owner 见下方源码记录。
+干净提交 `1ae2cfb97638de8ec2629978283d7cb6900212c9`（包含 Admin 凭据获取提交 `af511375`）通过完整 `just verify` 与
+`just release-check`，实际重建通用 Linux x86_64 GNU API-only/embedded 四程序和双端 WASM，资源隔离及确定性归档门禁通过。
+归档 SHA-256 为 `d5f14d798c37ecf6e3e85d36c8c1588111acab64d602a70fe11d9dd6b5fc9e61`，未使用 native CPU 参数。
+本轮 Rust LSP 对 62 个变更文件未取得服务器答复，静态结论依据 Cargo、Clippy、WASM 与仓库策略门禁。
+
+云端原 R26/schema 58 的全部已发布迁移 checksum 匹配。保存旧程序、配置、unit 和可验证 schema 58 数据库备份后，
+Public → Admin → Worker 正常停稳，Worker clean drain、无遗留连接或未决 runtime 命令；同版 CLI 只追加 `000059`。
+迁移前后 83 张旧业务表（不含迁移账本）的行数与逐表摘要完全一致，新节奏表七类起点与既有 `sending_at` 高水位一致。
+未重写历史竞价、会话、凭据、投递或人工核对记录，未回退数据库。
+
+配置仅修改 `worker.toml` 四项：Sent/Inbox 页数 20→100、fetch 总预算 30→120 秒、完整 delivery 预算 180→300 秒、
+sending grace 300→360 秒。HTTP 最小间隔仍为 1000 毫秒，lease/renew 仍为 60/10 秒，批次预算仍为 600 秒；
+mail/worker 的 runtime 接管开关仍为 false，七类发送间隔缺省全零，其他配置值、凭据与启用开关保持原状。
+runtime 锁保留原 inode、属主和精确 0600 权限。准备/写后证明与未知结果边界见[升级说明](ops/README.md#邮件发送节奏与-sent-准备升级)。
+
+09:05:51 UTC 同版 Worker/Admin/Public 按序恢复，PID 为 `188169/188193/188202`；readiness 均 200、NRestarts 均零。
+09:07:36 UTC 后验确认运行/磁盘哈希、启动回执、schema、配置及权限一致；双端 Unix 与 Public HTTPS 共 16 项静态资源逐字节匹配，
+该核验窗口无 ERROR/WARN。09:15:47 UTC 后续只读观察进程身份仍不变、无 ERROR；Worker 有 18 条包含 `account_busy` 的收件读取/退避告警
+（包含同一次失败的多层记录），Public/Admin 无告警。保留该现象，不将部署就绪写成邮件实际送达验收。
+
+脱敏回执位于 `target/dist/mail-cadence-20261023-ops-r27/DEPLOYMENT-SUMMARY.json`、`cloud-evidence/` 与 `stability.json`；
+云端应用备份目录名为 `mail-cadence-20261023-schema59-r27`，数据库恢复点在 root 私有同名维护目录，完整路径与哈希留在私有回执。
+数据库归档、配置正文和原始日志未下载。本轮只做静态构建、授权部署及只读后验，未运行登录、竞价、发信、论坛或浏览器业务测试，
+未人工重发或清草稿。代理日志原因细分仍为讨论方案，未纳入本版。未启动本地 Worker 或替换本地 Public/Admin 运行程序；
+`target/dx` 开发资源目录由正式 Web 构建刷新。
+
 ### 2026-10-23 Admin 论坛账号获取 CK（真实登录与隔离数据库验证）
 
 owner 为 application credentials、integrations `credentials/acquire`、contracts/HTTP 与 Admin Web；
