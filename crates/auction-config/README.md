@@ -26,6 +26,9 @@ common、runtime 候选与首次设置内嵌模板同步；升级不覆盖文件
 角色、公共及普通敏感 TOML 各限 4 MiB；`config/reader.rs` 在同一描述符检查普通文件并有界读取，Unix 以
 `O_NONBLOCK` 打开，避免 FIFO 在类型检查前阻塞。普通配置继续允许部署侧 symlink；默认发现只有明确 `NotFound`
 才使用内置默认值，目录、断链和访问错误均失败关闭，不能当成“没有配置”。
+Admin 可选 `worker_config_file` 由配置 owner 有界读取非敏感 Worker 文件，仅冻结邮件启用状态及跨组预算；
+不加载 Worker 的 common/secrets，引用须与 Admin runtime 同源。候选按真实启动快照及 managed 覆盖验证，
+缺少可证明基值时明确拒绝，规则及升级步骤见[配置手册](ops/config/README.md#文件职责)。
 
 各角色仍独立加载并校验其文件快照，不缓存跨次文件内容。Admin 在窄投影完成后接管已解析 runtime 文档，不再复制
 完整文档；Worker 的 world 投影只借用部署邮箱标识，避免为查找邮箱复制发件人名单。
@@ -91,6 +94,8 @@ application 会话凭据校验，拒绝生成不可登录的配置。
 runtime 的保存验证和启动使用同一 listener、HTTP 安全/规范 Origin、metrics、session、tracing 投影及部署校验。
 Admin 装配传入 OTLP headers 是否存在的非敏感上下文；仍有 headers 时不能保存关闭 tracing 的候选，须先移除敏感字段并重启。
 验证只覆盖当前部署/环境快照，不承诺未来外部配置变更仍可启动。
+`AdminRuntimeMailDeliveryBudget` 是 Worker 启动与新 runtime 候选共用的跨组预算谓词；不自动放大请求时限，
+不把新规则追溯用于已接受命令的恢复。Worker 引用在 Admin 启动时读取，修改引用的部署参数后须重启以更新快照。
 `session_signing_key` 从未生效，已移除 accessor 和内部密钥容器；旧字段仅用于返回明确迁移错误，须从敏感 TOML 删除，
 既有不透明会话令牌协议不变。
 

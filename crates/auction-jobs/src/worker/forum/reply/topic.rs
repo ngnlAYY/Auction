@@ -16,6 +16,7 @@ pub(super) async fn process_topic(
 ) -> Result<(), ApplicationError> {
     let preview = runtime.reader.fetch_topic(topic.world, topic.thread_id.clone()).await?;
     validate_fixed_layout(&topic, &preview)?;
+    // 当前顺序仅用于本轮扫描边界；删帖会重新编号，稳定命令身份始终由 post_id 与原负载核对。
     let post_numbers = preview
         .posts
         .iter()
@@ -220,8 +221,8 @@ pub(super) async fn process_topic(
         let post_number = persisted_post_number.or(current_post_number);
         if outcome.status == ForumCommandStatus::Pending {
             // pending 是未完成事实，即使帖子后来被编辑或删除，也不能把更新水位推进到它之后。
-            let completed_floor =
-                post_number.map_or(fixed_floor, |value| value.saturating_sub(1).max(fixed_floor));
+            let completed_floor = current_post_number
+                .map_or(fixed_floor, |value| value.saturating_sub(1).max(fixed_floor));
             processed_through_post_number = processed_through_post_number.min(completed_floor);
             command_error.get_or_insert_with(|| repository_error("论坛命令账本仍有待重试记录"));
         }
@@ -346,9 +347,8 @@ async fn refresh_fixed_posts(
     let TopicScanProgress { processed_through_post_number, system_entries, scan_completed } = scan;
     let processed_through_post_number_i32 = i32::try_from(processed_through_post_number)
         .map_err(|_| repository_error("论坛已处理楼层超出持久化范围"))?;
-    if processed_through_post_number_i32 < topic.processed_through_post_number {
-        return Err(repository_error("论坛已处理楼层不能倒退"));
-    }
+    // 这是完整主题快照的派生水位，不是历史命令楼层；删帖或未解决 pending 可使当前边界下降。
+    // 存储仍通过内容 revision 和 claim CAS 防止过期扫描覆盖，命令账本的历史楼层不变。
     let mut snapshot = runtime.store.load_current_snapshot(topic.auction_id).await?;
     // pending 阻断扫描完成时只更新变化页，不能反复 POST 未变化的终态正文。
     let confirmed_terminal_version = (matches!(
@@ -536,7 +536,7 @@ async fn reconcile_or_edit_fixed_post(
     let verification = runtime.verify_post_body.then(|| (expected.body.clone(), metadata.clone()));
     let proof = runtime
         .writer
-        .edit_post_with_progress(
+        .edit_post(
             topic.world,
             topic.thread_id.clone(),
             post_id.to_owned(),

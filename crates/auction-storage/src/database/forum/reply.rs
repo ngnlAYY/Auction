@@ -45,6 +45,7 @@ impl ForumReplyStore for DatabaseStore {
         worker_id: String,
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
+        available_worlds: Vec<SettlementWorld>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumReplyTopic>> {
         Box::pin(async move {
@@ -54,14 +55,25 @@ impl ForumReplyStore for DatabaseStore {
                 || lease_until <= now
                 || limit == 0
                 || limit > MAX_REPLY_BATCH_SIZE
+                || available_worlds.len() > 2
             {
                 return Err(storage_error("论坛回帖主题批量大小无效"));
+            }
+            if available_worlds.is_empty() {
+                return Ok(Vec::new());
             }
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    claim_published_topics_postgres(store, &worker_id, now, lease_until, limit)
-                        .await
+                    claim_published_topics_postgres(
+                        store,
+                        &worker_id,
+                        now,
+                        lease_until,
+                        &available_worlds,
+                        limit,
+                    )
+                    .await
                 }
             }
         })
@@ -230,7 +242,6 @@ impl ForumReplyStore for DatabaseStore {
                 )
                 || topic.content_revision <= 0
                 || processed_through_post_number < topic.system_log_post_number() as i32
-                || processed_through_post_number < topic.processed_through_post_number
                 || topic.content_claim_token.is_nil()
                 || !valid_text(&topic.content_claim_owner, 256)
                 || topic.content_claim_fencing <= 0
@@ -281,7 +292,6 @@ impl ForumReplyStore for DatabaseStore {
                 )
                 || topic.content_revision <= 0
                 || processed_through_post_number < topic.system_log_post_number() as i32
-                || processed_through_post_number < topic.processed_through_post_number
                 || topic.content_claim_token.is_nil()
                 || !valid_text(&topic.content_claim_owner, 256)
                 || topic.content_claim_fencing <= 0
@@ -328,7 +338,6 @@ impl ForumReplyStore for DatabaseStore {
                 )
                 || topic.content_revision <= 0
                 || processed_through_post_number < topic.system_log_post_number() as i32
-                || processed_through_post_number < topic.processed_through_post_number
                 || topic.content_claim_token.is_nil()
                 || !valid_text(&topic.content_claim_owner, 256)
                 || topic.content_claim_fencing <= 0

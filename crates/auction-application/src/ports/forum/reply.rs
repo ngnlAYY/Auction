@@ -32,6 +32,7 @@ pub struct ForumReplyTopic {
     /// 领取时为空；Worker 仅在本轮所有固定帖确认后填入所渲染的 settled/cancelled 版本。
     /// 存储完成入口必须在拍卖锁内复核；部分进度入口不得使用它声明完成。
     pub confirmed_terminal_version: Option<i64>,
+    /// 当前完整扫描的派生楼层；删帖可使它下降，历史命令楼层与事实 sequence 不随之改写。
     pub processed_through_post_number: i32,
     pub content_claim_token: Uuid,
     pub content_claim_owner: String,
@@ -138,6 +139,7 @@ pub struct ForumBidCommandRecord {
     pub thread_id: String,
     pub post_id: String,
     /// 完整主题读取时观察到的真实楼层号；不得由 post ID 推算。
+    /// 首次记录后只作为历史观察事实，后续删帖引起的重新编号不改变稳定命令身份。
     pub post_number: i32,
     pub line_number: i32,
     pub lot_code: String,
@@ -167,11 +169,13 @@ pub struct ForumCommandStart {
 
 pub trait ForumReplyStore: Send + Sync {
     /// 领取固定楼层刷新目标；内容 lease 必须覆盖单主题总时限，避免多 Worker 交叉编辑远端帖子。
+    /// 必须在 LIMIT 前按实际凭据可用世界过滤，不能让不可用世界耗尽本轮名额。
     fn claim_published_topics(
         &self,
         worker_id: String,
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
+        available_worlds: Vec<SettlementWorld>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumReplyTopic>>;
 

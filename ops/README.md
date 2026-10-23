@@ -12,6 +12,7 @@
 | --- | --- |
 | [config/README.md](ops/config/README.md) 与 `config/examples/` | 准备公共、三角色、敏感及 runtime TOML；示例也供首次设置生成器使用，不能随意合并 |
 | `deploy/systemd/*.service.example` | 选择分体三角色＋总控，或单独合并 server；安装见[下文](#systemd-服务与顺序控制) |
+| [共享运行目录模板](ops/deploy/tmpfiles/hv-auction.conf.example) | 分体部署由 tmpfiles 独立预建 HTTP 共享根；不能由 Worker 停止时删除 |
 | [业务 Caddy](ops/deploy/caddy/Caddyfile) / [临时设置代理](ops/deploy/caddy/setup.Caddyfile.example) | 业务入口与远程首次设置分别审阅，后者不默认开放 |
 | [恢复](ops/deploy/RECOVERY.md) / [v28 接管](ops/deploy/LEGACY_V28_ADOPTION.md) | 当前库灾备 / 限定历史库接管；不是普通启动步骤 |
 | [retention-policy.v1.json](ops/deploy/retention-policy.v1.json) | 编译嵌入的保留盘点契约，不授权删除数据 |
@@ -32,10 +33,36 @@
 - [旧 Bot 结算的显式核对](#旧-bot-结算的显式核对)
 - [Public 登录时长升级](#public-登录时长升级)
 - [邮件发送节奏与 Sent 准备升级](#邮件发送节奏与-sent-准备升级)
+- [全源码审计修复升级](#全源码审计修复升级)
 - [数据库恢复与保留](#数据库恢复与保留)
 - [反向代理与 systemd](#反向代理与-systemd)
 - [Cloudflare 整站代理](#cloudflare-整站代理)
 - [systemd 安装、探针与权限](#systemd-服务与顺序控制)
+
+## 全源码审计修复升级
+
+本轮修复的源码与静态证据见[状态页](docs/status.md#2026-10-23-全源码审计修复静态验证)。未执行迁移或部署，
+不能将下列说明视为目标服务器已经更新：
+
+1. 先保存可验证的数据库备份、旧程序、配置及 unit，再按既有分体总控停稳全部旧 writer，同版 CLI 追加 `000060`。
+   新表只保存邮件维护尝试的环形游标，不修改旧投递、资金、命令或人工核对状态，也不是远端完成证明；禁止编辑既有迁移。
+2. 同版更新 Public/Admin API 与各自 WASM、Worker 和 auctionctl；合并模式同时更新 server。P06 GET 不再写 Cookie，
+   新增空正文、无 query 的 `PUT /api/v1/session` 显式同步。须刷新已经打开的旧页面，防止旧客户端仍发起无协调的 Cookie 写请求。
+   新页面使用安全上下文中的原生 Web Locks，HTTPS 或 localhost 且浏览器支持该 API 才能登录、退出、同步及保存登录时长；
+   不支持或锁等待超时会明确拒绝本次请求，不用假锁降级。锁仅协调同 origin 的升级客户端，不提供跨 origin 或恶意客户端保证。
+3. 需要分别接管 `operations.mail` / `operations.worker` 时，在 Admin 角色 TOML 配置 `worker_config_file` 指向本部署 Worker
+   非敏感角色文件；无需让 Admin 读取 Worker secrets。引用校验和有效预算使用 Admin 启动快照，修改 Worker 基值后重启相关进程；
+   未提供基值时单组 managed 的新候选明确拒绝，既有文件读取和 durable 命令恢复不改写。
+4. 分体部署安装[共享运行目录 tmpfiles 模板](ops/deploy/tmpfiles/hv-auction.conf.example)，并按
+   [systemd 安装顺序](#systemd-服务与顺序控制)先停旧 unit，再改 Worker 的 RuntimeDirectory。`/run/hv-auction` 由 tmpfiles 拥有，
+   Worker 只拥有 `/run/hv-auction/worker`；这不取消既有 Requires 关系或承诺 Worker 重启时 API 零中断。
+5. 预检要求三角色的装备密钥 ID/材料一致，其他凭据密钥仍按各自 owner 比较；修正不匹配配置后再启动，
+   不通过临时关闭解密、未知外写门禁或资金证明来绕过失败。
+
+旧 prepared 退款现在同样需要同账号、正确世界的真实 Armory 正向库存；无证明的任务继续等待或人工核对。
+旧 COD、退件和论坛命令不批量重发，既有未知结果不因为本轮修复而变成“未执行”。维护游标和 discard 围栏也不授权补造历史回执。
+`realtime.data.total_lag` 为新增必填汇总字段，不能混用旧 Admin 页面与新 API；完整接口、配置及安全边界见
+[路由](docs/contracts/routes.md)、[配置](ops/config/README.md)、[不变量](docs/contracts/invariants.md)。
 
 ## 邮件发送节奏与 Sent 准备升级
 
@@ -85,6 +112,8 @@ worker managed 控制 delivery 参数。发送总预算仍须大于两倍 fetch 
 统一规范主机名或 Unix socket 目录，显式填写 host/port，目标比较及未知参数/options 拒绝规则见
 [部署预检](apps/auctionctl/README.md#部署预检)。runtime 共享、operations 接管、恢复指纹变化后的重新部署重启见
 [配置手册](ops/config/README.md#runtime-共享与重启)；进程存活不证明配置生效。
+Admin 配置 `worker_config_file` 时，预检要求它指向本部署实际 Worker 角色文件，仅用于非敏感预算快照；
+不要求 Admin 读取 Worker secrets。已有独立 managed 部署须先补充该引用并重启 Admin，再保存依赖另一组部署基值的新候选。
 
 ## 发布制品
 
@@ -101,7 +130,7 @@ just verify-artifacts
 just package
 ```
 
-分体归档 `target/dist/package/` 仅含四程序、配置示例、systemd/Caddy 模板、恢复文档、retention policy、依赖摘要和 payload
+分体归档 `target/dist/package/` 仅含四程序、配置示例、systemd/Caddy/tmpfiles 模板、恢复文档、retention policy、依赖摘要和 payload
 清单；包内 SHA256SUMS 绑定全部批准文件，外层清单绑定 archive/依赖摘要。不含数据库、Cookie、.keyenv 或运行数据；解包后向
 PostgreSQL 五字段敏感模板注入真实值。API-only 无 Web 资源；内嵌档 Public/Admin 仅含各自 payload，Worker/auctionctl 无页面。
 源码身份须构建前冻结、各阶段复查；正式 package 拒绝脏树，`--allow-dirty` 仅供受控本地取证，不是上线批准。归档保留
@@ -497,12 +526,20 @@ readiness，数据库不可用或 schema 未就绪时 ready 保持 503。
 
 所有 `.example` 都是待审阅模板，不自动安装。先替换 User/Group、程序和配置路径，准备运行目录与用户组，核对敏感 TOML
 可读性、Worker control allowlist、Public/Admin listener 和代理上游。首次配置和数据库前置条件见[部署手册](#首次部署配置)。
+分体 Unix 部署还须按实际服务 UID、HTTP listener group 和代理遍历权限审阅
+[tmpfiles 模板](ops/deploy/tmpfiles/hv-auction.conf.example)。共享 `/run/hv-auction` 由 tmpfiles 管理，
+Worker 仅管理 `worker` 子目录；不可把共享根重新加入 Worker 的 `RuntimeDirectory`。
+升级旧模板必须先停稳旧三角色，等待旧 Worker 的目录清理完成，再安装新模板并预建目录；
+禁止在线删除根目录、HTTP socket 或实例锁，也不要递归 `chown` 既有目录树。
 
 ### 安装示例
 
-审阅并完成上述准备后安装四份分体 unit：
+先建立所需服务用户和代理组，审阅模板后预建共享目录，再安装四份分体 unit：
 
 ```bash
+sudo install -o root -g root -m 0644 ops/deploy/tmpfiles/hv-auction.conf.example \
+  /etc/tmpfiles.d/hv-auction.conf
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/hv-auction.conf
 sudo cp ops/deploy/systemd/auction-public-api.service.example \
   /etc/systemd/system/auction-public-api.service
 sudo cp ops/deploy/systemd/auction-admin-api.service.example \
@@ -539,14 +576,17 @@ StateDirectory=auction/deployment 创建私有状态目录；总控持非阻塞�
 绝对路径，归有效用户所有、权限至多 0700。回执仅含 unit、InvocationID、PID、单调启动时间及观察时间，不含配置/凭据。
 全部已运行时 start 复核 readiness/顺序并发布 adopted 回执；部分运行或转换中拒绝。须预建 auction-worker-control 组并纳入
 Worker/Admin supplementary group；TOML group、allowlist 须匹配实际 UID/GID，禁止照抄数字 ID。Admin/Worker 须匹配 control
-路径、三组数据密钥及有效拍卖/结算/排期；三角色须共用 runtime 或全部省略。保存不热加载，重启范围见
+路径、用户登录及外部凭据两组密钥和有效拍卖/结算/排期；装备数据密钥的标识与材料必须三角色一致，
+全部未配置仍保留既有能力降级。三角色须共用 runtime 或全部省略；Admin 的 Worker 预算引用还须绑定实际角色文件。保存不热加载，重启范围见
 [配置说明](ops/config/README.md#runtime-共享与重启)。
 
 ### 可写目录
 
-Admin 模板开放 `/etc/auction/runtime` 和 `/run/hv-auction`，Public 开放后者；Worker 用 RuntimeDirectory 预建
-`/run/hv-auction/worker`，开放 `/run/hv-auction`、`/var/lib/auction`。按实际 socket 和诊断目录收窄或补齐 ReadWritePaths，
-公共/敏感 TOML 保持只读。目录 owner/group、实例锁、inode 和 peer allowlist 仍由应用检查，systemd 可写声明不能替代这些门禁。
+Admin 模板开放 `/etc/auction/runtime` 和 `/run/hv-auction`，Public 开放后者；共享根由独立 tmpfiles 规则预建。
+Worker 仅用 `RuntimeDirectory=hv-auction/worker` 管理自身子目录，开放 `/run/hv-auction/worker`、`/var/lib/auction`；
+其自动重启不能清理 Public/Admin 的 socket 与锁。按实际 socket 和诊断目录收窄或补齐 ReadWritePaths，
+公共/敏感 TOML 保持只读。目录 owner/group、实例锁、inode 和 peer allowlist 仍由应用检查，
+systemd 可写声明不能替代这些门禁；显式重启 Worker 仍可能按既有 Requires 关系停止 API，不承诺无中断重启。
 
 ### 独立迁移门禁
 

@@ -78,12 +78,16 @@ impl SettlementFulfillmentStore for DatabaseStore {
         })
     }
 
-    fn prepare_delivery(
-        &self,
+    fn prepare_delivery<'a>(
+        &'a self,
         claim: SettlementFulfillmentClaim,
         preparation: SettlementDeliveryPreparation,
         _prepared_at: DateTime<Utc>,
-    ) -> auction_application::ApplicationFuture<'_, SettlementFulfillmentResult> {
+        _custody: Option<(
+            &'a auction_application::SettlementInternalEvidenceSnapshot,
+            std::time::Instant,
+        )>,
+    ) -> auction_application::ApplicationFuture<'a, SettlementFulfillmentResult> {
         Box::pin(async move {
             if preparation.recipient != claim.recipient || preparation.payload.is_null() {
                 return Err(repository_error("结算履约 prepared payload 与 claim 不一致"));
@@ -91,7 +95,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    prepare_postgres(store.pool(), &claim, &preparation, _prepared_at)
+                    prepare_postgres(store.pool(), &claim, &preparation, _prepared_at, _custody)
                         .await
                         .map_err(ApplicationError::from)
                 }
@@ -99,15 +103,19 @@ impl SettlementFulfillmentStore for DatabaseStore {
         })
     }
 
-    fn activate_delivery(
-        &self,
+    fn activate_delivery<'a>(
+        &'a self,
         _claim: SettlementFulfillmentClaim,
         _activate_command_id: CommandId,
         _activate_request_hash: auction_application::RequestHash,
         _activated_at: DateTime<Utc>,
         _next_attempt_at: Option<DateTime<Utc>>,
+        _custody: Option<(
+            &'a auction_application::SettlementInternalEvidenceSnapshot,
+            std::time::Instant,
+        )>,
     ) -> auction_application::ApplicationFuture<
-        '_,
+        'a,
         auction_application::SettlementFulfillmentActivationResult,
     > {
         Box::pin(async move {
@@ -120,6 +128,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
                     _activate_request_hash,
                     _activated_at,
                     _next_attempt_at,
+                    _custody,
                 )
                 .await
                 .map_err(ApplicationError::from),

@@ -35,6 +35,8 @@ pub fn forum_pm_digest(message: &ForumPmMessage) -> Result<RequestHash, crate::L
 pub struct LotWatchPmClaim {
     pub message: ForumPmMessage,
     pub lot_id: Uuid,
+    /// 来源 lot 所属拍卖的权威世界；不改已冻结 PM 正文或历史摘要。
+    pub world: auction_domain::SettlementWorld,
     pub digest: Vec<u8>,
     pub token: Uuid,
     pub fence: i64,
@@ -48,6 +50,8 @@ pub struct LotWatchPmClaimRequest {
     pub worker_id: String,
     pub lease_seconds: i64,
     pub reconcile: bool,
+    /// 按实际论坛 Cookie scope 过滤候选；必须在队列 LIMIT 前应用。
+    pub available_worlds: Vec<auction_domain::SettlementWorld>,
 }
 
 /// PM 存储只允许未 sending 的释放；过期 sending 永不重新发送。

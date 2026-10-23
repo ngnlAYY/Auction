@@ -1,17 +1,10 @@
 //! 会话当前状态和管理端状态名称的响应投影。
 
-use super::cookies::append_clear_cookie;
 use super::*;
 
-pub(crate) fn current_session_response(
-    state: &PublicApiState,
-    identity: Option<PublicSessionIdentity>,
-    clear_cookie: bool,
-) -> Response {
-    let mut response_headers = no_store_headers();
-    if clear_cookie {
-        append_clear_cookie(&mut response_headers, state.security().cookie_secure());
-    }
+/// 只投影权威身份，不修改浏览器 Cookie；迟到的匿名或旧身份读取不能覆盖新登录。
+pub(crate) fn current_session_response(identity: Option<PublicSessionIdentity>) -> Response {
+    let response_headers = no_store_headers();
     let data = identity.map(|identity| PublicSessionCurrentResponse {
         authenticated: true,
         user_id: identity.user_id.to_string(),

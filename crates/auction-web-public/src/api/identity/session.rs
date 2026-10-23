@@ -2,6 +2,9 @@
 //! 原始登录 key 只存在于浏览器表单和一次 HTTPS 请求中；成功后由服务端设置 HttpOnly Cookie，
 //! 组件只持有安全身份投影。
 
+#[path = "session/cookie.rs"]
+mod cookie;
+
 pub(crate) use auction_contracts::PublicSessionCurrentResponse as PublicSession;
 use auction_contracts::{PublicLoginRequest, PublicLoginResponse};
 use dioxus::{core::Runtime, prelude::*};
@@ -10,6 +13,17 @@ use serde_json::Value;
 use uuid::{Uuid, Variant};
 
 use super::{TransportError, decoder, send_get, send_request};
+
+/// 所有可能写入 Public Cookie 的请求必须先持有同一原生跨标签页锁。
+pub(super) async fn lock_cookie_mutation() -> Result<auction_web_shared::BrowserLock, &'static str>
+{
+    cookie::lock().await
+}
+
+/// 偏好写入可能只提交数据库、未收到响应；下次权威读取须重新核对浏览器持久期。
+pub(super) fn invalidate_cookie_sync() {
+    cookie::invalidate();
+}
 
 /// 外壳会话重读入口；参数为 true 时先失效旧身份，阻止继续使用旧确认宿主。
 #[derive(Clone, Copy)]
@@ -56,12 +70,56 @@ impl PublicSessionApiError {
     }
 }
 
+/// 普通读取不写 Cookie；只有首次读取、截止变化或持久期同步到期时进入显式串行化写路径。
 pub(crate) async fn fetch_public_session() -> Result<Option<PublicSession>, String> {
-    fetch_public_session_once().await
+    let current = fetch_public_session_once().await?;
+    let Some(current) = current else {
+        cookie::invalidate();
+        return Ok(None);
+    };
+    if !cookie::needs_sync(&current) {
+        return Ok(Some(current));
+    }
+    let _cookie_lock = lock_cookie_mutation().await.map_err(str::to_owned)?;
+    // 等锁期间另一标签页可能已经登录 B；必须重读现 Cookie，不能把外层旧 A 投影交给 UI。
+    let current = fetch_public_session_once().await?;
+    let Some(current) = current else {
+        cookie::invalidate();
+        return Ok(None);
+    };
+    if !cookie::needs_sync(&current) {
+        return Ok(Some(current));
+    }
+    let response = send_request(|abort_signal| {
+        Request::put("/api/v1/session")
+            .abort_signal(abort_signal)
+            .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, &current.user_id)
+            .build()
+            .map_err(|_| TransportError::Network(None))
+    })
+    .await
+    .map_err(|error| error.code().to_owned())?;
+    let successful = response.ok();
+    let synchronized = decode_current_session(response).await?;
+    match synchronized {
+        Some(identity) if identity.user_id == current.user_id => {
+            cookie::record(&identity);
+            Ok(Some(identity))
+        }
+        None if !successful => {
+            cookie::invalidate();
+            Ok(None)
+        }
+        _ => Err("invalid_response".to_owned()),
+    }
 }
 
 async fn fetch_public_session_once() -> Result<Option<PublicSession>, String> {
     let response = send_get("/api/v1/session").await.map_err(|error| error.code().to_owned())?;
+    decode_current_session(response).await
+}
+
+async fn decode_current_session(response: Response) -> Result<Option<PublicSession>, String> {
     if !response.ok() {
         let code = decoder::decode_error_code(response).await;
         return if code == "unauthenticated" { Ok(None) } else { Err(code) };
@@ -76,6 +134,8 @@ async fn fetch_public_session_once() -> Result<Option<PublicSession>, String> {
 }
 
 pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSessionApiError> {
+    let _cookie_lock = lock_cookie_mutation().await.map_err(PublicSessionApiError::local)?;
+    cookie::invalidate();
     let response = send_request(move |abort_signal| {
         Request::post("/api/v1/session")
             .abort_signal(abort_signal)
@@ -97,13 +157,15 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
     if !valid_login_session(&payload) {
         return Err(PublicSessionApiError::local("invalid_response"));
     }
-    Ok(PublicSession {
+    let session = PublicSession {
         authenticated: true,
         user_id: payload.user_id,
         username: payload.username,
         expires_at: payload.expires_at,
         absolute_expires_at: payload.absolute_expires_at,
-    })
+    };
+    cookie::record(&session);
+    Ok(session)
 }
 
 async fn parse_api_error(response: Response) -> PublicSessionApiError {
@@ -133,6 +195,8 @@ async fn parse_api_error(response: Response) -> PublicSessionApiError {
 }
 
 pub(crate) async fn logout_public(user_id: String) -> Result<(), String> {
+    let _cookie_lock = lock_cookie_mutation().await.map_err(str::to_owned)?;
+    cookie::invalidate();
     let response = send_request(|abort_signal| {
         Request::delete("/api/v1/session")
             .abort_signal(abort_signal)

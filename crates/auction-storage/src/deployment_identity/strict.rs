@@ -2,6 +2,7 @@
 
 use super::{
     DeploymentDatabaseIdentity, DeploymentDatabaseIdentityError, deployment_database_identity,
+    supported_postgres_query_key,
 };
 
 /// 拒绝隐式目标、未知参数和 search_path 覆盖后，使用驱动比较目标身份。
@@ -26,19 +27,7 @@ pub fn strict_deployment_database_identity(
                 "host" | "hostaddr" => host = !value.is_empty(),
                 "port" => port = !value.is_empty(),
                 "dbname" => database = !value.is_empty(),
-                "sslmode"
-                | "ssl-mode"
-                | "sslrootcert"
-                | "ssl-root-cert"
-                | "ssl-ca"
-                | "sslcert"
-                | "ssl-cert"
-                | "sslkey"
-                | "ssl-key"
-                | "statement-cache-capacity"
-                | "user"
-                | "password"
-                | "application_name" => (),
+                _ if supported_postgres_query_key(&key, false) => {}
                 _ => return Err(invalid()),
             }
         }

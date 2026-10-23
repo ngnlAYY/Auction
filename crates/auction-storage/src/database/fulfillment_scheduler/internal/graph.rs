@@ -9,7 +9,10 @@ pub(super) async fn validate_graph(
     tx: &mut Transaction<'_, Postgres>,
     c: &SettlementFulfillmentClaim,
 ) -> Result<(), FundingError> {
-    if c.kind == SettlementObligationKind::UnsoldReturn {
+    if matches!(
+        c.kind,
+        SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn
+    ) {
         return Ok(());
     }
     let valid: bool = sqlx::query_scalar(

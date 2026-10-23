@@ -42,8 +42,9 @@ GET/PUT：两者复用会话、来源/CSRF、限流、strict JSON、JSON 405 与
 词法错误 400、业务错误 422、命令/版本冲突 409、依赖缺失或集合超限 503，旧 channel 只接受 mm 占位。
 [routes/public/session_preference.rs](crates/auction-http/src/http/routes/public/session_preference.rs) 拥有 P27/P28 登录时长 GET/PUT，
 复用账号身份、Origin、限流、严格 JSON 与 `no-store`，不在 HTTP 层计算固定期限。P06 的截止字段支持成对 `null`；
-永久 Cookie 使用 400 天持久期，成功会话 GET 和设置保存刷新 Cookie，但不延长数据库期限。命令重放刷新 Cookie 时另读当前
-身份，避免历史结果覆盖后续期限，完整字段、错误及浏览器限制见[登录时长契约](docs/contracts/routes.md#p27p28-登录时长)。
+普通 GET session 不写入或清除 Cookie；P06 新增空 body、无 query 的 PUT，仅按权威 `inspect` 同步浏览器持久期。
+登录、退出、时长保存/重放及显式同步由浏览器同源原生锁串行化；重放保存仍另读当前期限，不延长数据库授权期。
+完整方法、错误、400 天上限及同版页面要求见[会话同步契约](docs/contracts/routes.md#p06-会话读取与-cookie-同步)。
 [admin/forum/status.rs](crates/auction-http/src/http/admin/forum/status.rs) 拥有 Admin 认证论坛状态 GET，
 严格空查询、`no-store`、不访远端论坛、不执行恢复授权。
 [admin/runtime_config/taxonomy.rs](crates/auction-http/src/http/admin/runtime_config/taxonomy.rs) 把领域统一装备词典

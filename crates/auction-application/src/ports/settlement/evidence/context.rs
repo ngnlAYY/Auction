@@ -91,6 +91,11 @@ impl InternalEvidenceCommitGuard<'_> {
         &self.prepared.snapshot
     }
 
+    /// 提交必须继续使用准备阶段的单调绝对截止点，不能从当前时间重新分配预算。
+    pub fn deadline(&self) -> Instant {
+        self.prepared.deadline
+    }
+
     /// 只有已获得数据库确定提交结果才能调用；结果未知须保留稳定命令并查询原结果。
     pub fn confirm_committed(mut self) {
         self.confirmed = true;

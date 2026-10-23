@@ -1,8 +1,10 @@
 //! 装备标记的整场读取与身份隔离 owner；所有行共享集合，不逐行请求。
 
 mod cache;
+mod commands;
 mod control;
 
+pub(crate) use commands::use_watch_command_owner;
 pub(crate) use control::LotWatchButton;
 
 use super::{PublicSessionResource, login_href_for_current_location};
@@ -14,6 +16,7 @@ use std::{collections::BTreeMap, rc::Rc};
 
 #[derive(Clone)]
 struct WatchCommand {
+    auction_id: String,
     payload: PublicSetLotWatchRequest,
     busy: bool,
     // 同一命令的未知结果累计保留；后续前置拒绝不能证明早先请求未提交。
@@ -22,7 +25,7 @@ struct WatchCommand {
 }
 
 #[derive(Clone, Copy)]
-struct WatchSubmit(EventHandler<(String, PublicSetLotWatchRequest)>);
+struct WatchSubmit(EventHandler<(String, String, PublicSetLotWatchRequest)>);
 
 /// 完整集合只索引一次，所有目录行按 lot UUID 查状态；false 墓碑保留其真实版本。
 type WatchSnapshot = BTreeMap<String, (bool, i64)>;
@@ -53,11 +56,10 @@ struct WatchContext {
     commands: Signal<BTreeMap<String, WatchCommand>>,
 }
 
-/// 身份变化会销毁整个命令宿主；匿名从不读写账号缓存或提交标记。
+/// 整场读取按稳定用户隔离；提交集合和任务由外层页面宿主持有。
 #[component]
 pub(crate) fn LotWatchScope(auction_id: String, children: Element) -> Element {
-    let session = use_context::<PublicSessionResource>();
-    let user_id = current_user(session);
+    let user_id = use_context::<super::PublicCommandOwner>().0();
     let scope = format!("{}:{}", user_id.as_deref().unwrap_or_default(), auction_id);
     rsx! {
         ScopedLotWatches { key: "{scope}", user_id, auction_id, children }
@@ -72,7 +74,7 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
     let mut cached = use_signal(|| {
         user_id.as_deref().and_then(|user| cache::load(user, &auction_id)).map(watch_snapshot)
     });
-    let commands = use_signal(BTreeMap::new);
+    let commands = use_context::<Signal<BTreeMap<String, WatchCommand>>>();
     let resource = use_resource({
         let user_id = user_id.clone();
         let auction_id = auction_id.clone();
@@ -113,11 +115,6 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
         commands,
     };
     use_context_provider(|| context.clone());
-    use_context_provider(|| {
-        let mut owner = context.clone();
-        // EventHandler 回到创建它的整场 scope，分页卸载单行不会取消提交并遗留 busy。
-        WatchSubmit(EventHandler::new(move |(lot_id, payload)| owner.submit(lot_id, payload)))
-    });
     let authenticated = context.identity_matches();
     let ready = context.ready();
     let failed = resource.read().as_ref().is_some_and(|loaded| loaded.result.is_err());
@@ -160,6 +157,7 @@ impl WatchContext {
 
     fn ready(&self) -> bool {
         self.identity_matches()
+            && *self.session.state().read() == UseResourceState::Ready
             && *self.resource.state().read() == UseResourceState::Ready
             && self.resource.read().as_ref().is_some_and(|loaded| {
                 loaded.revision == ((self.refresh)(), (self.revision)())
@@ -180,58 +178,5 @@ impl WatchContext {
     fn invalidate(&mut self) {
         let next = self.revision.peek().saturating_add(1);
         self.revision.set(next);
-    }
-
-    /// 提交前后都检查当前会话；拍卖由 keyed owner 固定，卸载取消所属任务。
-    fn submit(&mut self, lot_id: String, payload: PublicSetLotWatchRequest) {
-        if !self.identity_matches() {
-            return;
-        }
-        let Some(user_id) = self.user_id.clone() else { return };
-        let (payload, uncertain) = {
-            let commands = self.commands.peek();
-            match commands.get(&lot_id) {
-                Some(pending) => {
-                    if pending.busy
-                        || !pending.uncertain
-                        || pending.payload.command_id != payload.command_id
-                    {
-                        return;
-                    }
-                    // 重试只使用宿主冻结的完整负载，不接受调用方替换版本或新意图。
-                    (pending.payload.clone(), pending.uncertain)
-                }
-                None => (payload, false),
-            }
-        };
-        self.commands.write().insert(
-            lot_id.clone(),
-            WatchCommand { payload: payload.clone(), busy: true, uncertain, error: None },
-        );
-        let mut context = self.clone();
-        spawn(async move {
-            if !context.identity_matches() {
-                return;
-            }
-            let result = set_lot_watch(&user_id, &context.auction_id, &lot_id, &payload).await;
-            if !context.identity_matches() {
-                return;
-            }
-            match result {
-                Ok(_) => {
-                    context.commands.write().remove(&lot_id);
-                    // 命令重放可能返回旧版本；始终重读集合，绝不直接覆盖权威状态。
-                    context.invalidate();
-                }
-                Err(error) => {
-                    // 只有成功或明确 409 可解除未知状态；429 等拒绝只描述本次重试。
-                    let uncertain = error.status != 409 && (uncertain || error.outcome_uncertain());
-                    context.commands.write().insert(
-                        lot_id,
-                        WatchCommand { payload, busy: false, uncertain, error: Some(error) },
-                    );
-                }
-            }
-        });
     }
 }

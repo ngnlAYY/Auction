@@ -5,7 +5,7 @@ use std::sync::Arc;
 use auction_application::{
     ApplicationError, ForumPostWriter, ForumPublishedLayout, ForumPublishedThread,
     ForumRemoteError, ForumRenderedPost, ForumRenderedThread, ForumTopicMetadata, ForumTopicReader,
-    forum_catalog_marker, forum_catalog_page_marker, forum_system_log_marker,
+    ForumWriteProgress, forum_catalog_marker, forum_catalog_page_marker, forum_system_log_marker,
 };
 
 pub(super) struct FixedLayoutRequest {
@@ -19,6 +19,7 @@ pub(super) struct FixedLayoutRequest {
     pub catalog_written: bool,
     pub verify_post_body: bool,
     pub legacy_thread_id: Option<String>,
+    pub write_progress: ForumWriteProgress,
 }
 
 pub(super) async fn ensure_fixed_layout(
@@ -37,6 +38,7 @@ pub(super) async fn ensure_fixed_layout(
         mut catalog_written,
         verify_post_body,
         legacy_thread_id,
+        write_progress,
     } = request;
     let mut preview = reader.fetch_topic(world, published.thread_id.clone()).await?;
     let catalog_marker = forum_catalog_marker(auction_id);
@@ -75,6 +77,7 @@ pub(super) async fn ensure_fixed_layout(
                     description: Some(catalog.description.clone()),
                 }),
                 ForumRenderedPost { body: catalog.body.clone() },
+                write_progress.clone(),
             )
             .await?;
         if proof.thread_id != published.thread_id || proof.post_id != preview.catalog_post_id {
@@ -93,6 +96,7 @@ pub(super) async fn ensure_fixed_layout(
         verify_body: verify_post_body,
         allow_update: allow_content_update,
         write_confirmed: catalog_written,
+        write_progress: &write_progress,
     };
     if !verify_post_body && !allow_layout_writes {
         // 现存身份不证明未知 POST 的正文版本；关闭正文回读不能吞掉尚未发送的变化。
@@ -123,8 +127,14 @@ pub(super) async fn ensure_fixed_layout(
             if !allow_layout_writes {
                 return Err(fixed_layout_error("write_authorization_required", false));
             }
-            let proof =
-                writer.reply_topic(world, published.thread_id.clone(), body.clone()).await?;
+            let proof = writer
+                .reply_topic(
+                    world,
+                    published.thread_id.clone(),
+                    body.clone(),
+                    write_progress.clone(),
+                )
+                .await?;
             if proof.thread_id != published.thread_id {
                 return Err(fixed_layout_error("write_unknown", true));
             }
@@ -172,11 +182,12 @@ pub(super) async fn ensure_fixed_layout(
 }
 
 #[derive(Clone, Copy)]
-struct FixedPostPolicy {
+struct FixedPostPolicy<'a> {
     verify_body: bool,
     allow_update: bool,
     /// 仅指本轮目标正文的创建/编辑/回复回执，不是历史帖子身份。
     write_confirmed: bool,
+    write_progress: &'a ForumWriteProgress,
 }
 
 /// 已有远端布局证明后，按配置核对正文；任何内容更新仍须本轮人工授权。
@@ -187,7 +198,7 @@ async fn reconcile_or_update_fixed_post(
     post_id: &str,
     metadata: Option<ForumTopicMetadata>,
     expected: ForumRenderedPost,
-    policy: FixedPostPolicy,
+    policy: FixedPostPolicy<'_>,
 ) -> Result<(), ApplicationError> {
     if policy.verify_body {
         let observed = writer.read_post(world, thread_id.to_owned(), post_id.to_owned()).await?;
@@ -207,7 +218,14 @@ async fn reconcile_or_update_fixed_post(
     }
     let verification = policy.verify_body.then(|| (expected.body.clone(), metadata.clone()));
     let proof = writer
-        .edit_post(world, thread_id.to_owned(), post_id.to_owned(), metadata, expected)
+        .edit_post(
+            world,
+            thread_id.to_owned(),
+            post_id.to_owned(),
+            metadata,
+            expected,
+            policy.write_progress.clone(),
+        )
         .await?;
     if proof.thread_id != thread_id || proof.post_id != post_id {
         return Err(fixed_layout_error("write_unknown", true));

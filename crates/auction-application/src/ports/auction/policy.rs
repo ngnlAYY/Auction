@@ -141,6 +141,7 @@ impl AuctionPolicyTemplate {
                 "mode": recovery_mode_name(self.recovery.mode),
                 "payment_timeout_seconds": self.recovery.payment_timeout.num_seconds(),
                 "reminder_limit": self.recovery.reminder_limit,
+                "cod_return_limit": self.recovery.cod_return_limit,
             },
         })
     }

@@ -37,6 +37,11 @@ OpenSSL 开发文件、patch 以及 curl/tar/coreutils；两档在 CI 中分别�
 quinn-proto、tar 等依赖。安装先校验 TLS 基线，再以 `--locked` 构建，正常发布不运行 `cargo update`。
 完整上游锁还包含其他命令、平台或关闭功能的历史依赖，需结合实际调用路径评审；应用的零忽略审计门禁独立保留。
 
+sccache 独立锁图另将 `ctutils` 从 0.4.2 更新至 0.4.4，应用根锁同步从 0.4.3 更新至 0.4.4，
+修复 [RUSTSEC-2026-0385](https://rustsec.org/advisories/RUSTSEC-2026-0385.html)。只更新该包及其校验和，
+不改变 sccache feature 或密码学协议。锁图变化会使旧 release 工具回执失效；使用前须经上述安装入口重建并校验，
+不能手工改写回执来认可旧二进制。
+
 dx 编译期关闭自动下载，Web 入口同时设 `NO_DOWNLOADS=1`；补丁让 esbuild 和 wasm-opt 的所有查询/执行入口优先
 受控 PATH，忽略历史下载缓存。wasm-bindgen 原有入口已遵守此顺序；缺配套工具时明确失败。配套下载先校验归档哈希再解包，
 不用旧 dx 自身的 TLS 下载器。源码工具采用独立 GNU release profile、最多两个编译任务，并清除继承的 CPU、wrapper

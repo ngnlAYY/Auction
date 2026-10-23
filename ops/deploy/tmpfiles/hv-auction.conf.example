@@ -1,0 +1,6 @@
+# 分体部署共享运行根；以 root:root、0644 安装到 /etc/tmpfiles.d/hv-auction.conf。
+# 先建立服务用户与组；更改 User/Group 或 HTTP 代理组时同步审阅此处。
+# Public/Admin 必须拥有此目录；代理只授予组遍历权限，不得授予目录写权限。
+# d 且不设置 age：仅创建及调整根目录权限，不清理其中的 HTTP socket 或实例锁。
+# Worker unit 只管理 /run/hv-auction/worker，不得把共享根加入 RuntimeDirectory。
+d /run/hv-auction 0750 auction auction - -

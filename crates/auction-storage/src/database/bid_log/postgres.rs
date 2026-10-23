@@ -50,7 +50,7 @@ pub(super) async fn list_postgres(
         return Ok(None);
     }
 
-    // Public 只压缩同一普通命令内被代理立即反击的展示行；内部竞价事实与账户记录保持完整。
+    // 保留每条已接受事实；普通出价及同事务代理回应都公开，避免隐藏触发报价后造成自抬价错觉。
     let rows = sqlx::query(
         "SELECT
             b.id,
@@ -119,21 +119,6 @@ pub(super) async fn list_postgres(
            AND command.command_kind IN (
                 'place_bid', 'create_proxy', 'create_proxy_authorization',
                 'execute_slow_response', 'final_proxy_transition'
-           )
-           AND NOT (
-                command.command_kind = 'place_bid'
-                AND b.mechanism = 'ordinary'
-                AND EXISTS (
-                    SELECT 1
-                    FROM public.bids AS proxy_response
-                    WHERE proxy_response.command_id = b.command_id
-                      AND proxy_response.lot_id = b.lot_id
-                      AND proxy_response.fact_index = b.fact_index + 1
-                      AND proxy_response.accepted_state_version = b.accepted_state_version + 1
-                      AND proxy_response.bidder_user_id <> b.bidder_user_id
-                      AND proxy_response.amount >= b.amount
-                      AND proxy_response.mechanism = 'proxy'
-                )
            )
            AND (
                 NOT $5::boolean
@@ -231,21 +216,6 @@ pub(super) async fn list_postgres(
                    AND command.command_kind IN (
                         'place_bid', 'create_proxy', 'create_proxy_authorization',
                         'execute_slow_response', 'final_proxy_transition'
-                   )
-                   AND NOT (
-                        command.command_kind = 'place_bid'
-                        AND b.mechanism = 'ordinary'
-                        AND EXISTS (
-                            SELECT 1
-                            FROM public.bids AS proxy_response
-                            WHERE proxy_response.command_id = b.command_id
-                              AND proxy_response.lot_id = b.lot_id
-                              AND proxy_response.fact_index = b.fact_index + 1
-                              AND proxy_response.accepted_state_version = b.accepted_state_version + 1
-                              AND proxy_response.bidder_user_id <> b.bidder_user_id
-                              AND proxy_response.amount >= b.amount
-                              AND proxy_response.mechanism = 'proxy'
-                        )
                    )",
             )
             .bind(request.auction_id)

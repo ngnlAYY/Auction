@@ -125,10 +125,43 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
 pub(super) async fn lock_legacy(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     claim: &auction_application::SettlementFulfillmentClaim,
+    custody: Option<(&SettlementInternalEvidenceSnapshot, uuid::Uuid)>,
 ) -> Result<bool, FundingError> {
+    if claim.kind == auction_domain::SettlementObligationKind::BuyerRefund
+        && claim.state != auction_application::SettlementFulfillmentState::Enqueued
+    {
+        let (evidence, operation_id) = custody.ok_or(FundingError::Unproven)?;
+        if !evidence.valid_at(chrono::Utc::now())
+            || evidence.operation_id != operation_id
+            || evidence.observed_from < claim.claimed_at
+            || evidence.identity.world != claim.world
+            || !matches!(&evidence.purpose, auction_application::InternalEvidencePurpose::SettlementClaim {
+                obligation_id, claim_token, claim_fencing, state_version
+            } if *obligation_id == claim.obligation_id.as_uuid()
+                && *claim_token == claim.claim_token
+                && *claim_fencing == claim.claim_fencing
+                && *state_version == claim.state_version)
+            || evidence.equipment.as_ref().is_none_or(|equipment| {
+                equipment.equipment_id != claim.equipment_id
+                    || equipment.external_equipment_id != claim.external_equipment_id
+                    || equipment.binding.world != claim.equipment_world
+                    || !evidence.identity.same_account(&equipment.binding)
+            })
+        {
+            return Err(FundingError::Unproven);
+        }
+        crate::lock_mail_runtime_generation(tx, &evidence.identity.runtime)
+            .await
+            .map_err(evidence_error)?;
+    } else if custody.is_some() {
+        return Err(FundingError::Invalid);
+    }
     locks::worlds(tx).await?;
     let protected = crate::settlement_funding::funding_requires_authorization(tx).await?;
     locks::before_credentials(tx, claim).await?;
+    if let Some((evidence, _)) = custody {
+        crate::lock_mail_evidence_credentials(tx, evidence).await.map_err(evidence_error)?;
+    }
     locks::after_credentials(tx, claim).await?;
     if let Some(user_id) = claim.recipient_user_id {
         let current: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM public.users WHERE id=$1 AND ($3 OR (username=$2 AND status='active')))")
@@ -156,7 +189,7 @@ fn sql_error(error: sqlx::Error) -> FundingError {
 }
 
 #[cfg(feature = "postgres")]
-fn evidence_error(error: crate::MailEvidenceTransactionError) -> FundingError {
+pub(super) fn evidence_error(error: crate::MailEvidenceTransactionError) -> FundingError {
     match error {
         crate::MailEvidenceTransactionError::Sqlx(error) => sql_error(error),
         crate::MailEvidenceTransactionError::Rejected(_) => FundingError::Unproven,

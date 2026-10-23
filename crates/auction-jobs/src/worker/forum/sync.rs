@@ -6,7 +6,8 @@ use std::sync::{Arc, OnceLock};
 use auction_application::{
     ApplicationError, Clock, ForumCredentialAvailability, ForumPostWriter, ForumPublishedThread,
     ForumPublisher, ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncStore,
-    ForumTopicPublication, ForumTopicReader, PublicEquipmentLinkResolver, RepositoryError,
+    ForumTopicPublication, ForumTopicReader, ForumWriteProgress, PublicEquipmentLinkResolver,
+    RepositoryError,
 };
 use chrono::Duration;
 use url::Url;
@@ -107,20 +108,27 @@ where
     let mut processed = 0_u16;
     let mut first_error = None;
     while processed < runtime.batch_size && !worker.control.is_draining() {
+        let available_worlds =
+            [auction_domain::SettlementWorld::Main, auction_domain::SettlementWorld::Isekai]
+                .into_iter()
+                .filter(|world| {
+                    runtime.credential_availability.has_available_forum_credential(*world)
+                })
+                .collect::<Vec<_>>();
+        if available_worlds.is_empty() {
+            first_error.get_or_insert(WorkerError::ForumTopicProcessingFailed);
+        }
         // 领取与远端处理共用领取前截止，数据库等待不能重新获得完整处理预算。
         let item_deadline = tokio::time::Instant::now()
             .checked_add(runtime.item_timeout)
             .ok_or(WorkerError::InvalidForumSyncConfiguration)?;
         let now = worker.clock.now();
         let recovery_before = *runtime.startup_recovery_before.get_or_init(|| now);
-        let startup_recovery_before = runtime
-            .credential_availability
-            .has_available_forum_credential()
-            .then_some(recovery_before);
+        let startup_recovery_before = (!available_worlds.is_empty()).then_some(recovery_before);
         let lease_until = now
             .checked_add_signed(lease_duration)
             .ok_or(WorkerError::InvalidForumSyncConfiguration)?;
-        // 旧版按主题顺序逐条领取和发布；只领取即将执行的一条，避免排队任务提前耗尽租约。
+        // 只领取即将执行的一条；空世界集合仍初始化 live 投影，但不占租约或发起外呼。
         let mut claims = tokio::time::timeout_at(
             item_deadline,
             runtime.store.claim_due(
@@ -128,6 +136,7 @@ where
                 now,
                 lease_until,
                 startup_recovery_before,
+                available_worlds,
                 1,
             ),
         )
@@ -156,25 +165,39 @@ async fn process_claim<C>(
 where
     C: Clock + 'static,
 {
-    if tokio::time::Instant::now() >= item_deadline {
-        // 可能已提交的 claim 留给原租约恢复；尚未开始外呼，不补造失败或发送证明。
-        return Err(WorkerError::ForumTopicProcessingFailed);
-    }
     let store = Arc::clone(&runtime.store);
     let failure_store = Arc::clone(&store);
     let failure_clock = Arc::clone(&clock);
     let failure_claim = claim.clone();
     let reconciliation_only = requires_reconciliation(&claim);
-    match tokio::time::timeout_at(item_deadline, process_claim_inner(runtime, clock, claim)).await {
-        Ok(result) => result,
-        Err(_) => {
+    let write_progress = ForumWriteProgress::default();
+    let result = if tokio::time::Instant::now() >= item_deadline {
+        // 领取响应已到截止时，不首次 poll 内层任务；仍记录已知未开始外写的安全失败。
+        None
+    } else {
+        tokio::time::timeout_at(
+            item_deadline,
+            process_claim_inner(runtime, clock, claim, &write_progress),
+        )
+        .await
+        .ok()
+    };
+    match result {
+        Some(result) => result,
+        None => {
+            // 只有真实 POST 边界或历史未知结果才保留只读门禁；纯预读/渲染超时可普通重试。
+            let failure_code = if write_progress.has_unconfirmed_write() {
+                "write_unknown"
+            } else {
+                "topic_processing_timeout"
+            };
             record_failure(
                 failure_store,
                 failure_clock,
                 failure_claim,
-                scoped_failure_code(reconciliation_only, "write_unknown"),
+                scoped_failure_code(reconciliation_only, failure_code),
                 ApplicationError::Repository(auction_application::RepositoryError::Failed(
-                    "论坛同步单项处理超时，远端写入结果未知".to_owned(),
+                    "论坛同步单项处理超时，按实际写入进度保留重试边界".to_owned(),
                 )),
             )
             .await?;
@@ -187,6 +210,7 @@ async fn process_claim_inner<C>(
     runtime: &ForumSyncRuntime,
     clock: Arc<C>,
     claim: ForumSyncClaim,
+    write_progress: &ForumWriteProgress,
 ) -> Result<(), WorkerError>
 where
     C: Clock + 'static,
@@ -307,7 +331,8 @@ where
         match find_reconciliation_topic(publisher.as_ref(), world, &rendered).await {
             Ok(Some(published)) => ForumTopicPublication::Existing(published),
             Ok(None) if retry_authorized => {
-                match publisher.create_topic(world, rendered.clone()).await {
+                match publisher.create_topic(world, rendered.clone(), write_progress.clone()).await
+                {
                     Ok(published) => published,
                     Err(error) => {
                         // 已授权重试也只能在远端尚未开始写入时自动再次提交；一旦结果未知，
@@ -346,7 +371,7 @@ where
             }
         }
     } else {
-        match publisher.create_topic(world, rendered.clone()).await {
+        match publisher.create_topic(world, rendered.clone(), write_progress.clone()).await {
             Ok(published) => published,
             Err(error) => {
                 // 只要远端写入已经开始，后续状态一律先进入精确标题只读对账。
@@ -384,6 +409,7 @@ where
             catalog_written: newly_created,
             verify_post_body: runtime.verify_post_body,
             legacy_thread_id,
+            write_progress: write_progress.clone(),
         },
     )
     .await

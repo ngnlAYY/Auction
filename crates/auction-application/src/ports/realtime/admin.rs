@@ -132,19 +132,21 @@ impl RealtimeFailureWater {
 }
 
 /// realtime dashboard 的全量安全摘要。
-/// lag 只保留旧版 dashboard 的有界第一页；failure 只保留未解决水位，不包含正文和事件
-/// payload。详细运维列表仍由 realtime Admin 专用端点提供。
+/// total_lag 汇总同一只读快照内全部 consumer/stream；lags 只保留有界第一页。
+/// failure 只保留未解决水位，不包含正文和事件 payload。详细列表由 realtime Admin 专用端点提供。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeDashboardSnapshot {
     pub observed_at: DateTime<Utc>,
+    pub total_lag: i64,
     pub lags: Vec<RealtimeLagSnapshot>,
     pub failure: RealtimeFailureWater,
 }
 
 impl RealtimeDashboardSnapshot {
-    /// 校验观察时间、lag 数值和稳定排序，防止损坏投影进入 dashboard。
+    /// 校验观察时间、全量及明细 lag 数值和稳定排序，防止损坏投影进入 dashboard。
     pub fn validate(&self) -> bool {
         if self.observed_at.timestamp_nanos_opt().is_none()
+            || self.total_lag < 0
             || !i64::try_from(self.lags.len())
                 .is_ok_and(|lag_count| lag_count <= MAX_REALTIME_ADMIN_PAGE_SIZE)
             || !self.failure.validate()
@@ -152,6 +154,7 @@ impl RealtimeDashboardSnapshot {
             return false;
         }
         let mut previous: Option<(&str, &str)> = None;
+        let mut page_lag = 0_i64;
         for lag in &self.lags {
             if lag.offset < 0
                 || lag.latest_sequence < lag.offset
@@ -166,9 +169,13 @@ impl RealtimeDashboardSnapshot {
             {
                 return false;
             }
+            let Some(next_page_lag) = page_lag.checked_add(lag.lag) else {
+                return false;
+            };
+            page_lag = next_page_lag;
             previous = Some((&lag.consumer_key, &lag.stream_key));
         }
-        true
+        page_lag <= self.total_lag
     }
 }
 

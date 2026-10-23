@@ -29,7 +29,8 @@ just release-check --single-binary
 无其他客户端的专用空库；失败或无法确认终态时保留现场、须人工核对，不得删除配置重跑。
 普通启动仅校验完整 schema readiness，不隐式迁移，向导流程见[首次部署配置](ops/README.md#首次部署配置)。
 
-预检要求三角色同库、同公共文件，runtime 同源且装备规则快照一致（或全部省略），Admin/Worker 的拍卖策略、control 路径和三组数据密钥一致，
+预检要求三角色同库、同公共文件，runtime 同源且装备规则快照一致（或全部省略）；装备数据密钥的标识与材料三角色一致，
+用户登录/外部凭据密钥、拍卖策略及 control 路径只要求 Admin/Worker 一致。Admin 已配置的 `worker_config_file` 须绑定实际 Worker 角色文件。
 Worker control 须启用并允许 supervisor UID，监听地址不得冲突；Public/Admin 端口默认 8090/8091，
 可选 1–65535 且不同、固定 loopback，须自行同步代理并核对端口/权限。字段见[配置手册](ops/config/README.md)。
 私有运行目录为配置目录同级的 `.<配置目录名>.server`（0700），含 `control.sock` 和 `owner.lock`；

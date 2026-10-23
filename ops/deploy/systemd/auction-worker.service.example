@@ -1,7 +1,8 @@
 [Unit]
 Description=Auction Rust Worker
-After=network-online.target
+After=network-online.target systemd-tmpfiles-setup.service
 Wants=network-online.target
+Requires=systemd-tmpfiles-setup.service
 
 [Service]
 Type=simple
@@ -26,9 +27,10 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-RuntimeDirectory=hv-auction hv-auction/worker
+# 共享根由 tmpfiles.d 独立预建；Worker 停止只回收自己的子目录。
+RuntimeDirectory=hv-auction/worker
 RuntimeDirectoryMode=0750
-ReadWritePaths=/run/hv-auction /var/lib/auction
+ReadWritePaths=/run/hv-auction/worker /var/lib/auction
 LimitNOFILE=65536
 
 [Install]

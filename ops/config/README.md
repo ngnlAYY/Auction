@@ -34,6 +34,11 @@
 
 loader 先固定角色文件的绝对位置，再以其目录解析相对引用，包括默认发现和相对的配置选择器；不支持逐项环境变量覆盖。
 示例占位值不能用于生产，每个示例赋值字段前必须紧邻中文“可选/必填”注释，由 `bash ci/checks/check.sh config` 检查。
+
+Admin 可选 `worker_config_file` 指向本部署的 Worker 非敏感角色 TOML，相对路径仍以 Admin 文件目录解析。
+它只用于冻结邮件启用状态及 mail/delivery 预算，不读取 Worker 的 `common_file` 或 `secrets_file`；
+引用文件必须与 Admin 使用同一实际 runtime 文件，不允许嵌套 `worker_config_file`。首次设置与 Admin 示例默认引用
+同目录 `worker.toml`；Public/Worker 角色不得配置此字段，两种部署预检还会核对该引用确为实际 Worker 文件。
 启用 tracing 时，设置 `OTEL_EXPORTER_OTLP_HEADERS` 或 `OTEL_EXPORTER_OTLP_TRACES_HEADERS`（含空值）会被拒绝，防止 SDK 覆盖
 敏感 TOML 中的导出头；须在部署端移除，错误不回显变量值。
 
@@ -78,6 +83,9 @@ host/port，不从环境补齐目标。
 空目标、fragment、控制字符及无效百分号或 UTF-8 转义。URI/query 显式端口须非零；省略端口固定为 5432，配置层只追加
 该默认端口，不重写原文凭据编码。普通角色与直接存储连接都不使用 `PGHOST`、`PGPORT`、`PGDATABASE` 补齐目标；用户名、
 密码、pgpass、IPv6、socket 和 TLS 参数保留原驱动语义。
+普通连接在首次 SQLx 解析前拒绝未知查询键，错误只返回固定分类，不回显键值或驱动原始解析错误；
+允许当前驱动支持的 host/db/凭据、TLS 别名、statement-cache-capacity、application_name 及合法 `options`/`options[name]`。
+strict 部署身份仍禁止 options，避免同库目标被附加会话选项重解释；此区别不放宽任何未知参数。
 
 ## PostgreSQL 维护凭据
 
@@ -126,6 +134,11 @@ runtime 保存与启动共用 listener、精确规范 HTTP(S) Origin、tracing e
 使用 runtime 的 Admin unit 不支持 `DynamicUser=yes`，须先迁移为固定服务账号。
 候选校验针对当前进程环境与部署快照；Admin 只向文件存储传递 OTLP headers 是否配置的布尔值，不传递头内容。
 若仍有 `admin_otlp_headers`，关闭 tracing 的保存请求会被拒绝，须先移除敏感字段并重启 Admin 后再保存关闭配置。
+新候选的 mail/delivery 跨组预算与 Worker 启动共用同一谓词：启用邮件时，delivery 请求预算必须大于两倍 fetch 预算。
+配置了 `worker_config_file` 时，四种 managed 组合均以该真实启动快照叠加候选计算；没有快照时，两组都未接管沿用部署校验，
+两组都接管按启用场景验证完整候选，仅一组接管则明确拒绝并提示补充引用，不把 Admin 本地默认值冒充 Worker 配置。
+验证本身仍是纯本地计算；修改 Worker 部署预算后须协调重启 Admin/Worker。已有命令结果及文件恢复不按新预算重算，
+普通读取和无相关接管的旧启动也不因缺少引用失败。
 
 升级已使用 runtime 的部署时，在 `public.toml` 顶层补充与 Admin/Worker 相同的 `runtime_config_file` 引用；Public 完整校验文件，
 只保留装备规则窄投影，不接管 Admin listener、安全、会话或 Worker `operations`。分体及合并预检要求三角色引用同一文件且规则

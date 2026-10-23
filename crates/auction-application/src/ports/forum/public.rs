@@ -23,6 +23,7 @@ pub struct PublicForumThread {
     /// 全部目录页及系统日志的本地 CAS 版本；不暴露 Worker claim 或下次调度时间。
     pub content_revision: i64,
     /// 最近一次由完整主题读取证明已处理到的真实论坛楼层。
+    /// 这是当前观察投影，删帖后可下降；不可用作稳定命令身份或事实 sequence。
     pub processed_through_post_number: i32,
     pub content_synced_at: Option<DateTime<Utc>>,
     pub content_last_success_at: Option<DateTime<Utc>>,

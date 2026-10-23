@@ -367,12 +367,14 @@ pub struct ForumWriteRetryAuthorizationResult {
 pub trait ForumSyncStore: Send + Sync {
     /// 领取 due 任务；启动恢复水位只放行首轮前的凭据失败及未知写入只读对账，`None` 表示凭据不可用。
     /// 恢复必须将原失败码传入 claim，不授予 POST 权限；待人工写入授权的任务仍不领取。
+    /// 领取前按实际凭据可用世界过滤，空集合不领取，不能让不可用世界占满批次。
     fn claim_due(
         &self,
         worker_id: String,
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
         startup_recovery_before: Option<DateTime<Utc>>,
+        available_worlds: Vec<SettlementWorld>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumSyncClaim>>;
 
@@ -396,9 +398,9 @@ pub trait ForumSyncStore: Send + Sync {
     ) -> ApplicationFuture<'_, ()>;
 }
 
-/// 当前 Worker 单 Cookie 的只读可用性；不暴露 Cookie、scope 或数据库记录。
+/// 当前 Worker 单 Cookie 对目标世界的只读可用性；不暴露 Cookie、scope 或数据库记录。
 pub trait ForumCredentialAvailability: Send + Sync {
-    fn has_available_forum_credential(&self) -> bool;
+    fn has_available_forum_credential(&self, world: SettlementWorld) -> bool;
 }
 
 pub trait ForumSyncRecoveryPort: Send + Sync {
@@ -420,36 +422,29 @@ pub trait ForumPublisher: Send + Sync {
         titles: Vec<String>,
     ) -> ApplicationFuture<'_, Option<ForumPublishedThread>>;
 
-    /// 创建或找到既有主题，必须明确本轮是否实际完成创建 POST。
+    /// 创建或找到既有主题；必须在实际 POST 前标记进度，GET/限速等待不得标记。
     fn create_topic(
         &self,
         world: SettlementWorld,
         rendered: ForumRenderedThread,
+        progress: ForumWriteProgress,
     ) -> ApplicationFuture<'_, ForumTopicPublication>;
 }
 
 /// 固定论坛楼层写入端口；实现必须校验 exact thread/post 身份并保持 POST 后未知结果栅栏。
 pub trait ForumPostWriter: Send + Sync {
-    /// 在指定主题追加一条回复；仅用于按顺序建立目录续页与系统日志。
+    /// 在指定主题追加一条回复；仅用于按顺序建立固定楼层，并报告实际 POST 边界。
     fn reply_topic(
         &self,
         world: SettlementWorld,
         thread_id: String,
         body: ForumRenderedPost,
-    ) -> ApplicationFuture<'_, ForumPublishedPost>;
-
-    /// 编辑指定稳定 post ID；`title`/`description` 仅在编辑 #1 时写入主题元数据。
-    fn edit_post(
-        &self,
-        world: SettlementWorld,
-        thread_id: String,
-        post_id: String,
-        metadata: Option<ForumTopicMetadata>,
-        body: ForumRenderedPost,
+        progress: ForumWriteProgress,
     ) -> ApplicationFuture<'_, ForumPublishedPost>;
 
     /// 编辑稳定 post 并报告实际 POST 边界；预读或限速超时不得标记为已写入。
-    fn edit_post_with_progress(
+    /// `title`/`description` 仅在编辑 #1 时写入主题元数据。
+    fn edit_post(
         &self,
         world: SettlementWorld,
         thread_id: String,

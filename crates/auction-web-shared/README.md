@@ -38,10 +38,10 @@ Public 竞价与 Admin 管理状态留在各 surface，本 crate 不依赖存储
 
 ## 命令与浏览器状态
 
-`use_confirm_command` 按负载签名冻结 `command_id`：相同输入重试复用、成功清空、失败保留输入与身份；结果不确定时
-仅重放冻结请求，后续认证/限流拒绝不能清除原不确定状态，宿主卸载取消任务。`use_query_state` 只读写声明的 query
-键，popstate 经同一解析器恢复。`use_second_ticker` 在外壳提供惰性共享秒级时钟，`use_media_query` 管理自己的
-change 监听；所有监听、闭包与任务均绑定所属组件生命期。
+`use_confirm_command` 按负载签名冻结 `command_id`：相同输入重试复用、成功清空、失败保留输入与身份；
+提交中或累计未知时不能由迟到编辑替换负载，也不能重复提交。任务归创建 hook 的稳定 owner，
+结果未知只重放冻结请求，后续认证/限流拒绝不解除未知。宿主位置由各 surface 决定，数据读取分支卸载不能冒充用户取消。
+`use_query_state` 只读写声明的 query 键，popstate 经同一解析器恢复；共享时钟和监听均绑定所属组件生命期。
 `BaseStylesheet` 安装 `media/viewport.rs` 的 VisualViewport 监听，将宽高及偏移投影到 CSS 变量，
 供软键盘出现或缩放时的弹窗布局使用；卸载恢复原样式并移除监听，缺少 API 时使用 vh/dvh 回退。
 
@@ -53,6 +53,10 @@ change 监听；所有监听、闭包与任务均绑定所属组件生命期。
 独立 WASM 检查不能依赖合并 feature。响应保留状态/头，DTO 解码归 surface；observed 入口在响应头到达时通知
 Public 校时。CSRF/Basic Auth 由 Admin 构造请求，不能在共享层变成业务耦合。`TransportError` 返回稳定结构化分类，
 `classify_base_error` 只识别共用错误，业务码交 surface 映射，不得用展示字符串决定重试。
+`transport/browser_lock.rs` 提供通用 `BrowserLock`：只调用安全上下文的原生 Web Locks，按同源同名独占，
+等待有界且可取消，回调持有至原生 request Promise 收口；不支持时明确失败，没有存储锁或标签页内伪替代。
+调用方先获取锁再构造请求，按作用域保证请求取消在释放锁之前完成。共享传输超时先 abort，
+再消费 fetch/正文终止结果；业务锁名称、Cookie 策略和译文仍归各 surface。
 
 ## Markdown、可访问性与启动
 

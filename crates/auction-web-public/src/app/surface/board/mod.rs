@@ -14,9 +14,9 @@ use super::*;
 pub(crate) use data::AuctionData;
 pub(crate) use navigation::preview_history_switch;
 pub(crate) use realtime::{
-    PublicConnectionState, PublicReadinessState, PublicRealtimeOwner, PublicRealtimeTarget,
-    live_connection_state_name, public_connection_class, public_connection_state,
-    public_connection_state_name,
+    PublicConnectionState, PublicPageRealtimeTarget, PublicReadinessState, PublicRealtimeOwner,
+    PublicRealtimePageKey, PublicRealtimeTarget, live_connection_state_name,
+    public_connection_class, public_connection_state, public_connection_state_name,
 };
 pub(crate) use refresh::{PublicBidRefresh, use_bid_refresh};
 pub(crate) use visibility::{PageVisibility, sleep_while_visible};
@@ -25,7 +25,7 @@ pub(crate) use world::{WorldPicker, supported_worlds, world_label};
 #[component]
 pub(crate) fn AuctionIndex() -> Element {
     rsx! {
-        AuctionBoard {}
+        CatalogCommandScope { AuctionBoard {} }
     }
 }
 
@@ -55,6 +55,41 @@ pub(crate) fn AuctionBoard() -> Element {
                 None => Ok(None),
             };
             (requested_auction, result)
+        }
+    });
+    let mut page_target = use_context::<PublicPageRealtimeTarget>().0;
+    use_effect(move || {
+        let Some(requested) = requested_auction() else { return };
+        let loaded = historical_current.read();
+        let current = loaded
+            .as_ref()
+            .filter(|(loaded_id, _)| loaded_id.as_ref() == Some(&requested))
+            .map(|(_, result)| result);
+        let target = match current {
+            Some(Ok(Some(auction))) if auction.id == requested => {
+                let world = normalize_world_query(&auction.world);
+                if query_state.read().world != world {
+                    update_public_query_state(
+                        query_state,
+                        |query| query.world = world,
+                        QueryWriteMode::Replace,
+                    );
+                }
+                PublicRealtimeTarget::from_auction(auction)
+            }
+            Some(_) => PublicRealtimeTarget::IdentityError { target_id: requested.clone() },
+            None => PublicRealtimeTarget::Checking,
+        };
+        let next = Some((PublicRealtimePageKey::Auction(requested), target));
+        if *page_target.peek() != next {
+            page_target.set(next);
+        }
+    });
+    use_drop(move || {
+        if let Ok(mut current) = page_target.try_write()
+            && matches!(current.as_ref(), Some((PublicRealtimePageKey::Auction(_), _)))
+        {
+            *current = None;
         }
     });
     let current = if historical {
@@ -108,6 +143,11 @@ pub(crate) fn AuctionBoard() -> Element {
                 AuctionData {
                     auction: auction.clone(),
                     historical,
+                    authoritative: if historical {
+                        *historical_current.state().read() == UseResourceState::Ready
+                    } else {
+                        *current_auction.state().read() == UseResourceState::Ready
+                    },
                     boot_prerequisites_ready,
                 }
             }

@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | HTTP 与页面 | Public/Admin feature API 及浏览器入口见[路由口径](docs/contracts/routes.md#基线与统计口径) | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
-| 迁移 | PostgreSQL 59 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 60 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -34,6 +34,87 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 各记录只覆盖注明的工作树与验证范围，不代表运行验收。下文 `verify全绿` 沿用记录当时的完整 `just verify` 结果；历史文档份数不是当前自动检查项，也不证明链接或语义正确。当前静态门禁及独立检查范围见[开发指南](docs/guide/development.md#默认检查)，历史命令和失败结果保持原样。
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
+
+### 2026-10-23 公开竞价历史完整展示（静态验证）
+
+owner 为 `auction-storage::database::bid_log` 和 `auction-web-public`。公开竞价日志的明细及 total
+取消“同一普通命令被代理立即反击时隐藏普通行”的条件；普通报价与代理回应分别保留，不改原五字段降序、
+cursor、可见性、筛选或逐条分页。分页边界仍可能分开同事务两条事实，不合并或补造记录。
+普通 Web 行明确显示来源标记，两处竞价表增加原生 caption；领先状态改为“当前领先／当前未领先”，
+不再把已接受但未领先的报价读作无效。`en/zh-CN/zh-TW/ja/ko` 同步，不公开代理上限。
+
+前置授权只读诊断在云端 Clo09（`ea99163f-4db5-4004-b12b-451b142e3bf1`）核对到 14 条原始事实、
+9 条公开行，缺少的 5 条普通出价均与另一账户的代理回应在同一命令内；持久审计及对应 Public POST 日志相符。
+证据位于 `target/operations-evidence/lot-proxy-diagnosis-20261023/`。这是修复前 R27 的线上观察，
+不是新代码运行回执；原数据库事实完整，无需补写出价或更改价格。
+
+本项未新增 HTTP 路径、JSON 字段、事件、配置、迁移或依赖，竞价规则与命令结果不变；
+上线时配套更新 Public API 与 WASM。当前工作树仍包含前轮审计修复和 `000060`，
+本项无需新增迁移不代表整个工作树可以跳过既有[升级门禁](ops/README.md#全源码审计修复升级)。
+
+实跑 `cargo fmt --all`，以及独立 target 的完整 `just verify`（策略、格式、工作区 all-targets、
+PostgreSQL/Redis feature、Clippy `-D warnings`、双端 WASM）和 Rust 1.94.1
+`cargo check --locked --workspace --all-targets --all-features` 均通过。
+验证使用 `target/audits/source-audit-20261023-build` 与 `target/audits/source-repair-20261023-msrv`，
+脱敏回执为 `target/audits/bid-history-transparency-20261023/evidence.json`。
+CodeGraph 已同步，affected 未找到关联测试；RSX 组件调用未被 callers 完整识别，已按实际调用点核对并报告工具限制。
+Rust LSP references 仍以 server exited code 0 结束，不能算作引用检查通过。
+
+本轮未新增、扩展或运行行为测试，未执行新代码的数据库/浏览器回归、发布构建、迁移、部署或 Git 提交/推送。
+此前线上只读诊断不替代修改后的页面和分页运行验收；既有工作树改动与历史验证记录保留。
+
+### 2026-10-23 全源码审计修复（静态验证）
+
+修复本轮对 20 个工作区包、修复前 1406 个 Rust 源码文件及相关 SQL、Web/译文、配置与发布脚本审计列出的全部 37 项：
+1 项依赖公告、30 项 P2、6 项 P3。实现按既有 owner 落地，不把静态通过写成行为或生产验收。
+
+- `auction-domain` / `auction-application`：历史 Slow 的有效 1B 上限与同价优先、事实数量、
+  `cod_return_limit` 冻结、暂时装备读取错误的重试分类。
+- `auction-storage`：Admin/MM 大小写身份定位与锁后聚合时间、拉黑/会话锁序、删除凭据后的历史命令重放；
+  COD 重寄固定原 v1 七天窗口并追加同事务 Delivery 审计，WithdrawnReturn 图与来源 Take 闭合；
+  完整迁移历史的 retention 判断、全量 realtime lag 聚合。
+- `application` / `storage` / `integrations` / Worker：新 pending 和旧 prepared 退款都要求真实同账号、正确世界 Armory
+  正向库存与原提交截止；移除公开装备详情伪 custody。合法退信 MID 仅按严格矩阵投影，不能充当 Sent 证明。
+- `auction-jobs` / 邮件维护：整轮共享 fetch deadline、持久公平轮转、20/200 边界及一次性 discard 围栏；
+  空 Sent EID 明确拒绝，不再索引空集合。
+- 论坛 owner：真实 POST 进度区分纯读取超时与写后未知；稳定 post ID/原负载不随可变楼层重新编号；
+  当前连续楼层允许在完整扫描与 CAS 下下降，pending 仍阻断；真实 credential scope 贯通外呼并在 LIMIT 前筛选。
+  目录事实允许合法非整千金额，用户出价网格不放宽。
+- Public / `auction-web-shared` / HTTP：普通会话 GET 不再写 Cookie，显式 PUT 与登录、退出、偏好保存共用原生 Web Lock；
+  未知命令在快照故障和 Live/Final 切换时保留；Final 合法动作、权威跨世界实时目标及三语言 27 个消息值同步修复。
+- Admin：临时认证重读错误保留命令状态但关闭新写入；七类旧流程迁入完整负载/UUID 冻结与累计未知保护；
+  TCP/Unix 互斥字段清理，提前开拍与 Key 交付文案修正，邮件五态和全局实时积压不再伪报健康。
+- `auction-config` / 部署装配：普通 PostgreSQL URL 在驱动解析前拒绝未知参数；
+  Admin 新候选按真实 Worker 启动基值校验跨组预算；三角色装备密钥一并比较。
+  分体共享运行根改由 tmpfiles 拥有，Worker 只拥有自己的 control 子目录。
+- 应用及独立 sccache 锁中的 `ctutils` 升至 0.4.4，修复 `RUSTSEC-2026-0385`。
+  原问题是依赖公告风险，不声称发现本项目已发生的利用。
+
+新增迁移 `000060_mailbox_sweep_cursors.up.sql`，旧 59 个迁移未修改；新增 P06 `PUT /api/v1/session`、
+Admin `worker_config_file` 和必填 `realtime.data.total_lag`。同版升级、旧标签页刷新、Web Locks/安全上下文、
+tmpfiles 安装及旧未知任务边界见[升级说明](ops/README.md#全源码审计修复升级)。
+
+本轮实跑并通过：
+
+- `CARGO_TARGET_DIR=target/audits/source-audit-20261023-build just verify`：策略、格式、workspace all-targets、
+  独立 PostgreSQL/Redis feature、all-features Clippy `-D warnings`、Public/Admin WASM。
+- `CARGO_TARGET_DIR=target/audits/source-repair-20261023-msrv cargo +1.94.1 check --locked --workspace --all-targets --all-features`；
+  主工具链 rustc/cargo 1.99.0，独立 MSRV rustc/cargo 1.94.1，just 1.59.0。
+- `cargo audit --deny warnings`，以及最终 `bash ci/checks/check.sh dependency-audit dependency-unused`：
+  1350 条公告、537 个依赖，无漏洞或未使用直接依赖报告。
+- `bash ci/tools/bootstrap.sh install release` 重新构建 dx 0.7.10 / sccache 0.18.0，
+  随后的 release/audit 工具 receipt 校验通过。上游 sccache 编译仍有一条既有 dead_code warning，
+  不是产品 Clippy 警告，也不据此宣称全部工具依赖均无公告。
+- 八个受影响 CI/发布脚本的 `bash -n`。CodeGraph 已同步；定向 affected 未找到关联测试，不能视为测试通过。
+
+集中检查先发现并修复 Admin 回调参数推导缺失、storage 新 timeout 对 Tokio 普通依赖的 feature 声明遗漏、
+Worker 两个失效直接依赖；最终检查基于修复后的完整工作树。独立 target 避开审计基线中默认 target 的旧接口诊断，
+没有将旧失败忽略为当前通过。Rust LSP references 两次以 server exited code 0 结束，无可用引用结果，
+调用点核对依据当前源码、CodeGraph 与完整编译。
+
+脱敏记录位于 `target/audits/source-repair-20261023/evidence.json`。未新增、扩展或运行行为测试，未启动产品/浏览器，
+未执行数据库迁移、真实论坛/邮件操作、部署或 Git 提交/推送；双端 WASM 只做编译，不是页面交互或发布 payload 验收。
+此前 R27/schema 59 部署及历史任务处置证据保持原样，本轮源码修复没有更新那些运行进程。
 
 ### 2026-10-23 历史投递安全恢复（授权真实任务处置）
 

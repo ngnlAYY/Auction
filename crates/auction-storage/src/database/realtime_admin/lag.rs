@@ -34,6 +34,18 @@ pub(super) async fn list_lag_postgres(
     .fetch_one(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取 PostgreSQL realtime lag 总数失败"))?;
+    let entries = read_lag_entries_postgres(&mut transaction, &request).await?;
+    transaction.commit().await.map_err(|_| storage_error("提交 realtime lag 快照失败"))?;
+    validate_lag_page(&entries, total, &request)?;
+    Ok(RealtimeLagPage { entries, total, limit: request.limit, offset: request.offset })
+}
+
+/// 有界明细复用调用方快照，避免 dashboard 全量积压与列表观察不同的水位。
+#[cfg(feature = "postgres")]
+pub(super) async fn read_lag_entries_postgres(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request: &RealtimeLagListRequest,
+) -> Result<Vec<RealtimeLagSnapshot>, ApplicationError> {
     let rows = sqlx::query(
         "SELECT offset_row.consumer_key, offset_row.stream_key,
                 offset_row.last_sequence, stream.next_sequence - 1 AS latest_sequence,
@@ -45,17 +57,14 @@ pub(super) async fn list_lag_postgres(
          ORDER BY offset_row.consumer_key ASC, offset_row.stream_key ASC
          LIMIT $3 OFFSET $4",
     )
-    .bind(stream_prefix)
-    .bind(consumer_key)
+    .bind(request.stream_prefix.as_deref())
+    .bind(request.consumer_key.as_deref())
     .bind(request.limit)
     .bind(request.offset)
-    .fetch_all(&mut *transaction)
+    .fetch_all(&mut **transaction)
     .await
     .map_err(|_| storage_error("读取 PostgreSQL realtime lag 失败"))?;
-    transaction.commit().await.map_err(|_| storage_error("提交 realtime lag 快照失败"))?;
-    let entries = rows.into_iter().map(lag_from_postgres_row).collect::<Result<Vec<_>, _>>()?;
-    validate_lag_page(&entries, total, &request)?;
-    Ok(RealtimeLagPage { entries, total, limit: request.limit, offset: request.offset })
+    rows.into_iter().map(lag_from_postgres_row).collect()
 }
 
 #[cfg(feature = "postgres")]

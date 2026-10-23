@@ -2,12 +2,12 @@
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use auction_web_shared::{AsyncState, AsyncStateKind};
 
-use crate::api::{AdminApiFailure, Delivery, DeliveryAction, execute_delivery, fetch_deliveries};
-use crate::app::surface::{AdminActionFeedback, admin_api_error_message, stable_command_id};
+use crate::api::{Delivery, DeliveryAction, execute_delivery, fetch_deliveries};
+use crate::app::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
+use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
 use super::super::query::use_deliveries_query_state;
 use super::dialog::DeliveryDialog;
@@ -24,13 +24,12 @@ pub fn page() -> Element {
     let mut refresh = use_signal(|| 0_u64);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let mut success_action = use_signal(|| None::<DeliveryAction>);
-    let mut busy_delivery = use_signal(|| None::<String>);
+    let commands = use_pending_commands(refresh);
     // 状态筛选与分页跟地址栏双向同步；对话框、对账草稿和命令上下文是瞬态，不入 URL。
     let query = use_deliveries_query_state();
     let query_state = query.state;
     let mut pending_dialog = use_signal(|| None::<DeliveryDialogState>);
     let mut reconcile_draft = use_signal(|| None::<DeliveryReconcileDraft>);
-    let mut command_state = use_signal(|| None::<(String, Uuid)>);
     let pagination = use_admin_pagination("deliveries", &["page_size"], Some(100), i64::MAX);
     let deliveries = use_admin_page(
         pagination.clone(),
@@ -43,7 +42,7 @@ pub fn page() -> Element {
     );
 
     let open_dialog = move |(delivery, kind): (Delivery, DeliveryDialogKind)| {
-        if busy_delivery().is_none() {
+        if !commands.any_busy() && !commands.contains(&delivery.id) {
             notice.set(None);
             success_action.set(None);
             if kind == DeliveryDialogKind::Reconcile
@@ -58,6 +57,9 @@ pub fn page() -> Element {
         }
     };
     let update_reconcile_draft = move |draft: DeliveryReconcileDraft| {
+        if commands.contains(&draft.delivery_id) {
+            return;
+        }
         if reconcile_draft()
             .as_ref()
             .is_some_and(|current| current.delivery_id == draft.delivery_id)
@@ -66,7 +68,7 @@ pub fn page() -> Element {
         }
     };
     let confirm_action = move |request: DeliveryActionRequest| {
-        if busy_delivery().is_some() {
+        if commands.any_busy() || commands.contains(&request.delivery_id) {
             return;
         }
         if pending_dialog().is_some_and(|dialog| {
@@ -95,45 +97,43 @@ pub fn page() -> Element {
         } = request;
         notice.set(None);
         success_action.set(None);
-        busy_delivery.set(Some(delivery_id.clone()));
-        let signature = format!(
-            "{delivery_id}:{action:?}:{expected_fencing_version}:{external_reference:?}:{failure_code:?}"
+        let submitted = commands.submit(
+            delivery_id.clone(),
+            t!("delivery-confirm"),
+            move |command_id| {
+                let delivery_id = delivery_id.clone();
+                let external_reference = external_reference.clone();
+                let failure_code = failure_code.clone();
+                async move {
+                    execute_delivery(
+                        command_id,
+                        delivery_id,
+                        action,
+                        expected_fencing_version,
+                        external_reference,
+                        failure_code,
+                    )
+                    .await
+                    .map_err(|error| error.code)
+                }
+            },
+            move |_| {
+                set_if_alive(notice, Some(AdminActionFeedback::Success));
+                set_if_alive(success_action, Some(action));
+            },
+            move |code| {
+                // 新的版本拒绝不能抹掉更早一次未知；原 fence 与 UUID 仍由宿主保留。
+                if matches!(code.as_str(), "stale_delivery_state" | "stale_state_version") {
+                    let mut refresh = refresh;
+                    refresh.set(refresh().saturating_add(1));
+                }
+                set_if_alive(notice, Some(AdminActionFeedback::Error(code)));
+            },
         );
-        let command_id = stable_command_id(command_state, signature);
-        let mut busy_delivery = busy_delivery;
-        let mut success_action = success_action;
-        spawn(async move {
-            let result = execute_delivery(
-                command_id,
-                delivery_id,
-                action,
-                expected_fencing_version,
-                external_reference,
-                failure_code,
-            )
-            .await;
-            busy_delivery.set(None);
-            match result {
-                Ok(_) => {
-                    notice.set(Some(AdminActionFeedback::Success));
-                    success_action.set(Some(action));
-                    pending_dialog.set(None);
-                    command_state.set(None);
-                    reconcile_draft.set(None);
-                    refresh.set(refresh().saturating_add(1));
-                }
-                Err(error) if is_stale_delivery(&error) => {
-                    // 版本已失效时不能继续保留旧 fencing 和命令上下文，必须回到权威列表。
-                    pending_dialog.set(None);
-                    command_state.set(None);
-                    reconcile_draft.set(None);
-                    notice.set(None);
-                    success_action.set(None);
-                    refresh.set(refresh().saturating_add(1));
-                }
-                Err(error) => notice.set(Some(AdminActionFeedback::Error(error.code))),
-            }
-        });
+        if submitted {
+            pending_dialog.set(None);
+            reconcile_draft.set(None);
+        }
     };
 
     let (page, load_error) = match &*deliveries.read_unchecked() {
@@ -153,6 +153,7 @@ pub fn page() -> Element {
     rsx! {
         section { class: "admin-delivery-page", aria_labelledby: "delivery-title",
             h1 { id: "delivery-title", {t!("page-deliveries-title")} }
+            PendingCommandPanel { owner: commands }
             DeliveryFilters {
                 status: query_state().status.clone(),
                 on_status_change: move |status| {
@@ -176,7 +177,6 @@ pub fn page() -> Element {
                         on_sort_change.push(next);
                     },
                     on_open: open_dialog,
-                    busy_delivery,
                     pending_dialog: row_dialog,
                     draft: draft.clone(),
                     on_draft_change: update_reconcile_draft,
@@ -184,7 +184,6 @@ pub fn page() -> Element {
                     on_cancel: move |_| {
                         pending_dialog.set(None);
                         reconcile_draft.set(None);
-                        command_state.set(None);
                     },
                 }
             } else if let Some(error) = load_error {
@@ -229,7 +228,7 @@ pub fn page() -> Element {
                 DeliveryDialog {
                     delivery: dialog.delivery.clone(),
                     kind: dialog.kind,
-                    busy: busy_delivery().is_some(),
+                    busy: commands.any_busy(),
                     draft: draft.clone().unwrap_or_else(|| {
                         DeliveryReconcileDraft::for_delivery(&dialog.delivery)
                     }),
@@ -238,17 +237,11 @@ pub fn page() -> Element {
                     on_cancel: move |_| {
                         pending_dialog.set(None);
                         reconcile_draft.set(None);
-                        command_state.set(None);
                     },
                 }
             }
         }
     }
-}
-
-fn is_stale_delivery(error: &AdminApiFailure) -> bool {
-    error.is_conflict()
-        && matches!(error.code.as_str(), "stale_delivery_state" | "stale_state_version")
 }
 
 fn delivery_success_message(action: Option<DeliveryAction>) -> String {

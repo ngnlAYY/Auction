@@ -126,6 +126,7 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
         anyhow::bail!("Public、Admin 与 Worker 必须引用同一份 common_file");
     }
     validate_runtime_topology(&public.config, &admin.config, &worker.config)?;
+    validate_equipment_key_topology(&public.config, &admin.config, &worker.config)?;
     validate_admin_worker_topology(&admin.config, &worker.config)?;
 
     let public_listener = public_deployment_listener(&public.config)?;
@@ -192,6 +193,22 @@ fn deployment_listeners_conflict(left: &DeploymentListener, right: &DeploymentLi
     }
 }
 
+/// 装备信封由三角色共同消费；全部省略仍表示能力缺失，不在预检中强制启用。
+fn validate_equipment_key_topology(
+    public: &AppConfig,
+    admin: &AppConfig,
+    worker: &AppConfig,
+) -> anyhow::Result<()> {
+    for config in [public, admin] {
+        if config.equipment_data_key_id() != worker.equipment_data_key_id()
+            || config.equipment_data_key() != worker.equipment_data_key()
+        {
+            anyhow::bail!("Public、Admin 与 Worker 必须使用相同的 equipment_data_key 标识和材料");
+        }
+    }
+    Ok(())
+}
+
 fn validate_admin_worker_topology(admin: &AppConfig, worker: &AppConfig) -> anyhow::Result<()> {
     if admin.worker_control_socket_path() != worker.worker.control.socket_path.as_str() {
         anyhow::bail!("Admin 与 Worker 必须配置相同的 Worker control socket_path");
@@ -202,14 +219,15 @@ fn validate_admin_worker_topology(admin: &AppConfig, worker: &AppConfig) -> anyh
     {
         anyhow::bail!("Admin HTTP Unix listener 不能复用 Worker control socket_path");
     }
+    if let Some(path) = &admin.worker_config_path {
+        let worker_path = worker.config_path.as_deref().context("Worker 主配置路径缺失")?;
+        if fs::canonicalize(path).context("读取 Admin worker_config_file 身份失败")?
+            != fs::canonicalize(worker_path).context("读取 Worker 主配置身份失败")?
+        {
+            anyhow::bail!("Admin worker_config_file 必须指向当前部署的 Worker 主配置");
+        }
+    }
     for (name, admin_id, admin_key, worker_id, worker_key) in [
-        (
-            "equipment_data_key",
-            admin.equipment_data_key_id(),
-            admin.equipment_data_key(),
-            worker.equipment_data_key_id(),
-            worker.equipment_data_key(),
-        ),
         (
             "user_login_data_key",
             admin.user_login_data_key_id(),

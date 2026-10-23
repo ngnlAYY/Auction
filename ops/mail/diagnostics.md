@@ -163,7 +163,11 @@ Admin 人工 reconcile 不能把 `payload.operation=send` 与裸 `external_refer
 ## 定期三页维护
 
 MoogleMail Worker 每个 cron 周期（默认 5 分钟，仅 main）在收件轮询前额外读取三页：Sent 全量摘要、按需读取匹配 MID 的
-详情，以及 compose。普通命中只追加观察；满足精确恢复证明时，状态、资金收口与追加审计在同一事务提交：
+详情，以及 compose。普通命中只追加观察；满足精确恢复证明时，状态、资金收口与追加审计在同一事务提交。
+
+整轮共享既有 fetch_timeout，包含数据库、凭据/session 排队、Sent 列表及详情、compose/discard；
+耗尽后记录维护失败并继续 Inbox，不给每封详情重建整轮预算。`000060` 持久化 world 内环形尝试位置，
+最多 200 条候选、20 条通知/Take；仅在单条开始前推进，未处理后缀保留，长期无匹配项不能永久占据前缀。
 
 - Sent 命中本地仍为 `manual_reconcile` 且无 `external_reference` 的投递时，把 MID、collected、COD 与剩余资产数写入
   `deliveries.result_metadata.mailbox_sweep`，不自动判成功。
@@ -185,6 +189,8 @@ MoogleMail Worker 每个 cron 周期（默认 5 分钟，仅 main）在收件轮
   重试（上限 2 次）。登录页、解析漂移等无法证明缺失的情况只报错等待下一轮。
 - compose 非空时，只有收件人、业务 reference 和 COD 同时精确匹配唯一一条未证明投递才执行 discard；匹配不到或匹配到多条
   只记录日志，绝不丢弃来源不明的草稿。通知类没有业务 reference，不参与 compose 匹配。
+- discard 前在原投递上持久登记一次性尝试，再在同一凭据 session 重读并逐字段比较原草稿。
+  尝试提交未知、排队/读取取消或 POST 结果未知都保留人工核对，不能因下一轮仍看到草稿而自动再丢弃。
 - discard 成功后再读 compose 证明为空，并把结果写入 `result_metadata.compose_discard`。
 
 ## 装备读取失败诊断

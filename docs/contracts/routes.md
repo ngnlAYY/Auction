@@ -74,7 +74,7 @@ Public/Admin 统一 boundary 只接受 1 至 64 字节的 ASCII 字母数字/`-_
 
 客户端地址只在 TCP peer 命中配置的规范 CIDR，或 Public/Admin Unix listener 显式启用可信上游时解析 `X-Forwarded-For`；非法链整体丢弃，Unix 连接不伪造 TCP peer，Unix 信任开关不放宽真实 TCP peer，地址链从右向左跳过受信代理。`CF-Connecting-IP`、`Forwarded`、`X-Forwarded-Proto` 不用于推导客户端地址、Origin 或 Secure Cookie；Cloudflare 经 Caddy 清洗为可信 XFF 后交给应用，见[部署约束](ops/README.md#cloudflare-整站代理)。CSP 只允许同源脚本及 WASM 编译，内联样式例外仅用于 Dioxus 首屏防闪样式和组件 style 属性。登录/变更限流器按该地址工作，最多保留 4096 项并确定性淘汰最久未访问项。
 
-Public 浏览器的已认证写请求（P06 DELETE、P18–P20、P24、P26、P28）携带可选 `X-Auction-Expected-User-Id`，
+Public 浏览器的已认证写请求（P06 PUT/DELETE、P18–P20、P24、P26、P28）携带可选 `X-Auction-Expected-User-Id`，
 值为确认操作所属用户的规范非零 UUID。HTTP 仍只从当前 Cookie 获取权威身份；认证成功后、执行写命令前核对该前置条件，
 不匹配返回 `409 session_changed`，非法或重复头返回 `400 invalid_expected_user_id`，均不执行写入。
 未提供该头的既有 v1 客户端保持原身份门禁语义。浏览器登录、退出或保存登录时长只广播随机通知值，
@@ -99,7 +99,7 @@ Public 浏览器的已认证写请求（P06 DELETE、P18–P20、P24、P26、P28
 | P03 | GET | /api/v1/events | 公开读取；由 auction boundary 校验；从持久化事件表回放 | 200 | 400, 404, 503/504 |
 | P04 | GET/CONNECT | /api/v1/ws | Public session；只读服务端推送；连接范围必须明确 | HTTP/1.1 101；HTTP/2 200 | 400, 401, 403, 404, 429, 503/504 |
 | P05 | GET | /api/v1/blacklist | 公开；页码分页 | 200 | 400, 503/504 |
-| P06 | POST/GET/DELETE | /api/v1/session | POST 登录；GET/DELETE 会话边界 | 200 | 400, 401, 403, 409, 429, 503/504 |
+| P06 | POST/GET/PUT/DELETE | /api/v1/session | POST 登录；GET 读取；PUT 显式同步 Cookie；DELETE 注销 | 200 | 400, 401, 403, 409, 429, 503/504 |
 | P07 | GET | /api/v1/auctions | 公开 | 200 | 400, 503/504 |
 | P08 | GET | /api/v1/auctions/current | 公开 | 200 | 400, 503/504 |
 | P09 | GET | /api/v1/auctions/{auction_id}/lots | 公开；PostgreSQL 直接返回完整装备 URL；响应 `no-store` | 200 | 400, 404, 503/504 |
@@ -123,6 +123,19 @@ Public 浏览器的已认证写请求（P06 DELETE、P18–P20、P24、P26、P28
 | P27 | GET | /api/v1/me/session-preference | Public session；无 query；账号登录时长及当前截止；`no-store` | 200 | 400, 401, 503/504 |
 | P28 | PUT | /api/v1/me/session-preference | Public session、origin、限流、身份前置条件；无 query；独立版本 CAS；`no-store` | 200 | 400, 401, 403, 409, 413/415, 422, 429, 503/504 |
 
+### P06 会话读取与 Cookie 同步
+
+普通 GET 保持原安全身份响应及 `no-store`，但永不发送 `Set-Cookie`；匿名或过期 GET 也不清理 Cookie，
+避免迟到读取覆盖另一标签页的新登录。PUT 只同步当前 token 的浏览器持久期，沿用 GET 的已认证响应投影；
+不创建会话、不刷新活动、不延长数据库期限，也不撤销旧会话，因此不新增业务命令账本。
+PUT 拒绝任何 query（含空 query），只接受空 body；非空 body 为 `400 invalid_body`，不要求 JSON 内容。
+它复用 Origin、变更限流、认证及可选身份前置条件，未认证 401、身份改变 409、依赖不可用 503；成功为 200。
+
+Public 浏览器的登录、退出、时长保存/重放及显式 Cookie 同步在同源原生 Web Locks 独占锁下执行，
+先取得锁再构造请求，完整响应或取消收口前不释放。写 Cookie 前在锁内重新读取当前身份，不使用锁外旧快照。
+不支持原生锁、非安全上下文或等待超时明确返回本地前置错误，不用 localStorage 或标签页内锁伪造跨页保证；
+原有累计 unknown 不能被本次未发送的失败解除。API 与 WASM 须同版更新并刷新旧标签页，不承诺混用未参与锁的旧客户端。
+
 ### P27/P28 登录时长
 
 账号默认登录时长为永久。P27 返回 `PublicSessionPreferenceResponse {user_id, duration_seconds, version, expires_at}`：
@@ -142,9 +155,11 @@ P06 登录与当前会话响应的 `expires_at`、`absolute_expires_at` 均为�
 Public API 与内嵌页面须同版升级，不能让不识别 `null` 截止的旧页面继续使用新会话投影。
 
 永久是服务端无固定期限，不承诺浏览器无限保留 Cookie。Cookie 保持 HttpOnly、SameSite=Lax 和部署 Secure 策略，
-永久使用 400 天持久期，成功 GET session 和时长保存时刷新浏览器期限；有限 Cookie 不超过服务器实际截止。
-该处理遵守[浏览器 Cookie 期限上限](https://developer.chrome.com/blog/cookie-max-age-expires)；手动清理、浏览器策略或长期未访问
-仍可能要求重新登录。退出、换 Key、账号限制、撤销与原并发会话上限继续生效，Admin 会话策略不变。
+浏览器持久期最多 400 天，有限 Cookie 另取服务器实际截止的较早值。登录和时长保存立即同步；
+普通 GET 不写 Cookie，首次、期限变化或距上次明确同步满 24 小时后的权威读取可触发 P06 PUT。
+标签页仅保留一个无 token 的身份/期限同步提示，不持久化、不参与认证；同步在锁内重读后返回最新身份，不广播纯续期。
+该处理遵守[浏览器 Cookie 期限上限](https://developer.chrome.com/blog/cookie-max-age-expires)；手动清理、浏览器策略、
+长期未读取或响应丢失且旧 Cookie 已到期仍可能要求重新登录。退出、换 Key、账号限制、撤销与原并发上限继续生效，Admin 策略独立。
 
 ### P23/P24 装备标记与超价提醒
 
@@ -217,6 +232,17 @@ Public API 与内嵌页面需同版升级，配置共享与重启要求见[配�
 所有 lot/竞价/账户/成交投影中的 `lot_number` 都是装备分类内从 1 开始的用户可见编号，必须与 `equipment.category` 组合解释为 `One01`、`Two01` 等编码，不是全局身份。详情和写命令只以 `lot_id` UUID 定位，价格历史的 opaque cursor 继续绑定内部场次顺序，不能由可重复的分类编号重建。P10 竞价日志额外保留 `world` 与 `lot` 筛选；`lot` 可以是 lot UUID 或 `One01` 一类分类编码，二者在内部请求中互斥，并在 storage 的全局结果集分页前应用，不能只筛选当前页面。条目按 `created_at`、`lot_id`、`accepted_state_version`、`fact_index`、`id` 降序排列，cursor 是绑定这五个字段的版本化 opaque 值；
 编码数字部分最少两位（如 `One01`），分类编号超过 99 时保留完整十进制位数（如 `One100`），不得截断、重排或复用既有编号；论坛目录与命令解析使用同一格式。
 带 cursor 的返回使用 next_cursor/has_more，不得把未知总数伪装成精确 total。可选 `source` 只允许 `forum`/`proxy`：论坛普通竞价仅在账本保存真实楼层时同时返回 `source_post_number`；若同一账本还能证明真实 thread/post ID，则增加规范 `source_post_url`。链接身份不得由楼层号或数字论坛账号 ID 推算，玩家展示继续用名称；代理事实不区分 fast/slow 且不携带楼层或帖子链接；普通 Web 出价三者都为空；历史论坛事实楼层未知时只标记论坛来源。P09/P11 的 preview/live 装备投影可选返回按 `Strength, Dexterity, Agility, Endurance, Intelligence, Wisdom` 固定顺序生成的 `primary_attribute_initials`，缺少对应属性时省略而不是伪造。
+
+P10 与装备详情共用完整竞价事实投影：普通出价不再因同一命令内存在即时代理回应而隐藏，
+列表和 `total` 使用相同可见性范围，不压缩、合并或补造事实。既有五字段降序及逐条分页不变；
+同一事务的回应排在触发报价之前，两条记录也可能分处分页边界，继续翻页或使用 cursor 可读取后续事实。
+`valid` 仅表示该行用户与金额匹配当前领先投影，不表示其他已接受事实无效；Public 显示“当前领先／当前未领先”。
+普通 Web 来源字段仍为空，但页面明确标记“普通”；代理仍统一标记“代理”，论坛楼层及真实链接不变。
+不公开代理上限，不修改竞价规则、账本或历史事实，无新增路由、JSON 字段、事件或迁移。
+
+P15 的 `processed_through_post_number` 是当前完整扫描的派生连续楼层，不是事实 sequence。
+前序普通帖子删除后它可以下降；已完成竞价仍保留原稳定 post ID、业务负载及历史楼层（包括未知值），不随重新编号重写。
+pending 原帖删除、编辑或命令未收口仍阻断，固定布局、lease 和 claim/revision CAS 门禁不放宽。
 P12 保留 `name`、`world`、日期、价格、buyer/seller 筛选；名称按 Unicode 空白或英文逗号拆词，忽略空词后进行忽略大小写的
 字面包含 AND 匹配，不要求词条相邻或依输入顺序出现；例如 `Leg Sav Pow Hel Bal` 可匹配 `Legendary Savage Power Helmet of Balance`。
 原逗号形式继续支持，总长最多 1024 UTF-8 字节、最多八词、每词最多 128 字节；拆后词条中的控制字符拒绝，
@@ -369,6 +395,10 @@ A39 只允许 `draft`/`preview`，请求含 `command_id`、`expected_state_versi
 A34 的数字分页偏移必须在 `0..=100000`，HTTP、应用与存储复用同一边界，非法深分页返回 `400 invalid_query`。
 reconcile 请求明确 `retry`/`succeeded`/`failed` 与对应外部引用/失败码。已有持久资金 allocation 的新 release、retry、reconcile 三类请求（共五种动作）统一返回 `400 invalid_delivery_command`（Invalid），不改状态或释放资金；原 command_id 已提交成功结果先重放。无绑定旧 retry 在同事务按 recovery scope→所需业务锁→actions→delivery→fulfillment/reset 预锁，原权限与 CAS 不变，本轮不新增资金人工恢复 API。列表从 send payload 投影 COD，从 outcome metadata 投影 `reason_code`、`take_required`、`returned_mail_id`，不返回原文；
 `take_required=false` 省略，客户端缺失按 false，显式 null/非布尔仍无效。命令只推进本地状态，不伪造远端回执；基础通知、结算 Send、入站 Return/Take 与 Sent/Balance 核对由 Worker 执行，缺 exact remote ID 进入人工复核；未装配 owner 明确报告能力缺失。
+正常发送后的退件仅允许精确例外：`manual_reconcile`、`failure_code` 与 `reason_code` 均为 `recipient_not_found`、
+存在 COD、`take_required=true`，且 `external_reference` 精确等于合法十进制 `returned_mail_id`。
+存储另验证原 transport metadata；该 MID 只标识需领取的退件，不是 Sent 成功证明。
+发送前失败及其他失败原因仍不得带任意外部引用，其他时间、lease、attempt 和 fence 校验保持不变。
 
 ### 投递对账与远端证明
 
@@ -405,6 +435,12 @@ A02 已接入 Admin session、严格空查询校验和 PostgreSQL 的 `service_h
 fulfillment、recovery 复用 operations-alert source 的履约/恢复安全水位；credential aggregation 和 alerting section 也已接入安全投影。已登记 dashboard section 都有 owner；owner 未装配或读取失败返回 `unknown`，不伪造状态。三个进程装配根已有启动和周期心跳路径，SIGINT/SIGTERM 下停止周期任务并发布停止心跳；每轮周期心跳重新检查数据库和全部内嵌 migration，读取进程内饱和的审计写入失败计数，并由各自 tracing owner 提供安全状态；Public 同时检查 relay 新鲜度，Worker control 同时投影论坛循环的终止故障和可恢复降级。
 数据库、schema、审计完整性或必须运行的 relay 异常令 readiness 为 false，tracing degraded 令 heartbeat status 降级但不单独改变应用 readiness。外部广播不属于当前 dashboard 契约。
 Worker control 的 `ready/state` 来自同一原子快照；论坛恢复只清除论坛降级原因，不能覆盖其他故障或不可逆的 drain。
+
+`realtime.data.total_lag` 为必填非负 i64，统计全部 consumer/stream；`lags` 仍只保留最多 200 条有界明细。
+全量聚合、明细和 failure 水位来自同一只读一致快照；section 健康及浏览器积压卡片均使用 `total_lag`，
+不能把明细第一页当作全量。Admin API 与 Web 须同版升级，旧客户端不得将缺少该字段静默补为零。
+邮件轮询卡片分别显示未知、无轮询器、降级、暂停和运行；仅明确健康且存在有效 poller 时显示运行，
+缺能力或读取失败不能由“未观察到暂停”推导为健康。
 
 fulfillment 的 `pending` 只统计业务状态为 `ready` 且执行阶段为 `pending/prepared/enqueued` 的义务，与 Worker
 可领取的业务状态一致；`oldest_backlog_age_seconds` 由这些义务及独立的未终结 `blocked` 义务计算。
@@ -457,6 +493,9 @@ POST `:validate` 只执行严格候选校验；PUT 以 `command_id` 与 fingerpr
 不能把提交确认丢失当成可回滚旧文件。文件读取预算和锁身份由[配置手册](ops/config/README.md#runtime-共享与重启)定义。
 候选写入复用当前部署启动侧 listener、规范 Origin、metrics、session 和 tracing 校验；已配置 Admin OTLP headers
 时不能通过 runtime 关闭 tracing，须先同步敏感部署配置。该门禁只传递 headers 是否存在，不把秘密材料带入候选或文件。
+跨组邮件读取/投递预算复用 Worker 启动校验谓词；Admin 的可选 `worker_config_file` 仅提供非敏感部署基值。
+四种 managed 组合、缺基值时的拒绝和启动快照边界见[配置手册](ops/config/README.md#runtime-共享与重启)，
+只约束新候选，不用新校验改写既有物理文件或 durable 命令恢复。
 启动恢复任何失败（含结果未知或需人工核对）都阻断 Admin 监听，仅恢复成功且文件指纹匹配启动快照才继续装配。成功更新返回 `restart_required`，不伪造热加载。运行时文件路径由三角色主 TOML 的 `runtime_config_file` 选择；Public 仅消费装备标色规则用于公开分组，Admin/Worker 继续按各自边界应用其余字段；文档还含兼容 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 对 MoogleMail 只把这些业务字段投影为启动快照；transport、凭据、mailbox identity 和全局启用开关仍由 Worker 主配置拥有，敏感 TOML、Cookie、密钥和连接串不进入该文档。
 Admin 重启后 `allow_manual_early_open` 与 `allow_manual_early_settlement` 分别决定人工提前开放、人工提前结算 capability 和对应锁内校验，两者默认关闭，计划时间已到的正常开放仍允许。`[equipment_source]` 冻结为装备来源适配器的 host/path allowlist、响应上限、共享请求间隔、全请求超时及 Admin 手工录入的可交易装备开关（默认关闭且不放宽来源安全或邮件过滤）；固定 HTTPS origin、无重定向、精确 world 路径及流式有界读取始终失败关闭。Admin WebUI 把该闭集投影映射为分组开关、数字、列表与文本输入，保存仍提交完整候选文档，因此所有页面修改最终由 PUT 的原子文件替换边界写回，不存在只在浏览器内生效的旁路。
 更新和启动恢复从首次读取到文件/账本收口持有同一跨进程 workflow 锁，锁竞争返回 `503 storage_unavailable`，客户端可复用原 command ID 重试。

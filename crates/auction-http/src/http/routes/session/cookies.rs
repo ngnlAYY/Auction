@@ -114,17 +114,15 @@ pub(crate) fn append_clear_admin_cookies(headers: &mut HeaderMap, secure: bool) 
     }
 }
 
-/// 永久只表示数据库无截止；浏览器 Cookie 用 400 天持久期，在权威会话重读时刷新。
+/// 浏览器持久期最多 400 天；有限会话再受服务器截止约束，只由显式串行化写请求同步。
 pub(crate) fn public_session_cookie(
     token: &str,
     expires_at: Option<DateTime<Utc>>,
     now: DateTime<Utc>,
     secure: bool,
 ) -> Result<HeaderValue, ()> {
-    let expires_at = match expires_at {
-        Some(value) => value,
-        None => now.checked_add_signed(chrono::Duration::days(400)).ok_or(())?,
-    };
+    let browser_limit = now.checked_add_signed(chrono::Duration::days(400)).ok_or(())?;
+    let expires_at = expires_at.map_or(browser_limit, |value| value.min(browser_limit));
     let max_age = (expires_at - now).num_seconds().max(0);
     let mut value = format!(
         "{PUBLIC_SESSION_COOKIE}={token}; Path=/; Expires={}; Max-Age={max_age}; HttpOnly; SameSite=Lax",

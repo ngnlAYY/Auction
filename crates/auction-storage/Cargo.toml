@@ -18,16 +18,15 @@ futures-util.workspace = true
 sqlx.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
+# 可选：PostgreSQL 退款证明提交沿用原单调截止，覆盖连接池等待和完整事务。
+tokio = { workspace = true, optional = true }
 tracing.workspace = true
 uuid = { workspace = true, features = ["v5"] }
 url.workspace = true
 
 [features]
 default = []
-postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring-webpki"]
-
-[dev-dependencies]
-tokio.workspace = true
+postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring-webpki", "dep:tokio"]
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

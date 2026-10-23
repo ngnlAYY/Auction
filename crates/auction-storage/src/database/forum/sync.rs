@@ -67,6 +67,7 @@ impl ForumSyncStore for DatabaseStore {
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
         startup_recovery_before: Option<DateTime<Utc>>,
+        available_worlds: Vec<auction_domain::SettlementWorld>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumSyncClaim>> {
         Box::pin(async move {
@@ -77,6 +78,7 @@ impl ForumSyncStore for DatabaseStore {
                     .is_some_and(|value| value.timestamp_nanos_opt().is_none() || value > now)
                 || limit == 0
                 || limit > MAX_CLAIM_BATCH_SIZE
+                || available_worlds.len() > 2
             {
                 return Err(storage_error("论坛同步领取参数无效"));
             }
@@ -89,6 +91,7 @@ impl ForumSyncStore for DatabaseStore {
                         now,
                         lease_until,
                         startup_recovery_before,
+                        &available_worlds,
                         limit,
                     )
                     .await

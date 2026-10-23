@@ -6,6 +6,24 @@ use crate::DeliverySendIntervals;
 
 use super::{AdminRuntimeConfigError, require};
 
+/// Admin 启动时从真实 Worker 部署文件取得的非敏感跨组预算快照。
+/// 不进入 runtime 文档、命令摘要或 DTO，也不以 Admin 自身的 Worker 默认值补齐。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdminRuntimeMailDeliveryBudget {
+    pub mail_enabled: bool,
+    pub mail_fetch_timeout_seconds: u64,
+    pub delivery_request_timeout_seconds: u64,
+}
+
+impl AdminRuntimeMailDeliveryBudget {
+    /// 保存候选与 Worker 启动共用的跨组约束；各预算自身范围仍由原 owner 校验。
+    pub const fn is_valid(self) -> bool {
+        !self.mail_enabled
+            || self.delivery_request_timeout_seconds
+                > self.mail_fetch_timeout_seconds.saturating_mul(2)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeMailConfig {

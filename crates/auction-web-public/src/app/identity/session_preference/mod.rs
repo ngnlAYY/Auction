@@ -189,6 +189,10 @@ fn feedback(state: &PreferenceState) -> Option<String> {
         t!("session-duration-conflict")
     } else if state.pending_uncertain {
         t!("session-duration-unknown")
+    } else if error.code == "session_lock_unavailable" {
+        t!("session-lock-unavailable")
+    } else if error.code == "session_lock_timeout" {
+        t!("session-lock-timeout")
     } else if error.code == "invalid_session_preference" {
         t!("session-duration-validation")
     } else if state.pending.is_none() {

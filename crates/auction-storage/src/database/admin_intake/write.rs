@@ -3,6 +3,7 @@
 use auction_application::{
     AdminIntakeResult, AdminIntakeWrite, CommandLedgerError, CompetitionTransactionError,
 };
+use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
@@ -82,9 +83,15 @@ pub(super) async fn add_admin_intake_inner(
         return Err(CompetitionTransactionError::InvalidState);
     }
     let preview_intake = auction_status == "preview";
+    // 目标可能在外部采集或等待 world 锁期间切换；只使用取得当前目标锁后的数据库实时时间。
+    let now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?;
 
+    // 用户名按 Users 唯一身份口径匹配并锁定真实行；展示原文与命令摘要不做大小写改写。
     let player_status = sqlx::query_scalar::<_, String>(
-        "SELECT status FROM public.users WHERE username = $1 FOR SHARE",
+        "SELECT status FROM public.users WHERE lower(username) = lower($1) FOR SHARE",
     )
     .bind(&write.player_id)
     .fetch_optional(&mut **transaction)
@@ -172,7 +179,7 @@ pub(super) async fn add_admin_intake_inner(
     .bind(write.key_envelope.nonce())
     .bind(write.key_envelope.encryption_key_id())
     .bind(write.key_envelope.fingerprint())
-    .bind(write.collected_at)
+    .bind(now)
     .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
@@ -187,7 +194,7 @@ pub(super) async fn add_admin_intake_inner(
     .bind(write.command_id.as_uuid())
     .bind(auction_id)
     .bind(&write.player_id)
-    .bind(write.collected_at)
+    .bind(now)
     // `source_kind` 属于投稿 owner 闭集；URL/JSON 是 Admin 请求适配器种类，只进入来源引用与摘要。
     .bind("admin")
     .bind(&write.source_reference)
@@ -210,14 +217,15 @@ pub(super) async fn add_admin_intake_inner(
     .bind(category_number)
     .bind(write.start_price)
     .bind(write.candidate_submission_id)
-    .bind(write.collected_at)
+    .bind(now)
     .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
 
     let updated = sqlx::query(
         r#"UPDATE public.auctions
-           SET preview_revision = $1, state_version = $2, updated_at = $3
+           SET preview_revision = $1, state_version = $2,
+               updated_at = GREATEST(created_at, updated_at, $3)
            WHERE id = $4
              AND status = $7
              AND preview_revision = $5
@@ -226,7 +234,7 @@ pub(super) async fn add_admin_intake_inner(
     )
     .bind(next_preview_revision)
     .bind(next_state_version)
-    .bind(write.collected_at)
+    .bind(now)
     .bind(auction_id)
     .bind(current_preview_revision)
     .bind(current_state_version)

@@ -138,6 +138,15 @@ impl PreferenceOwner {
                     // 后续重试被前置拒绝不能证明首次未提交；只有明确冲突或成功解除累计未知。
                     state.pending_uncertain = error.status != 409
                         && (state.pending_uncertain || error.outcome_uncertain());
+                    if !state.pending_uncertain
+                        && matches!(
+                            error.code.as_str(),
+                            "session_lock_unavailable" | "session_lock_timeout"
+                        )
+                    {
+                        // 此次尚未发送且此前也没有未知提交，保留草稿并允许重新获取锁。
+                        state.pending = None;
+                    }
                     state.error = Some(error);
                 }
             }

@@ -185,7 +185,7 @@ fn browser_path_and_search() -> Option<String> {
 #[component]
 pub(super) fn SessionMenu() -> Element {
     let mut session = use_context::<PublicSessionResource>();
-    let mut logout_error = use_signal(|| false);
+    let mut logout_error = use_signal(|| None::<String>);
     let mut logout_busy = use_signal(|| false);
 
     let session_state = match &*session.read() {
@@ -225,14 +225,13 @@ pub(super) fn SessionMenu() -> Element {
                             if logout_busy() {
                                 return;
                             }
-                            logout_error.set(false);
+                            logout_error.set(None);
                             logout_busy.set(true);
                             let user_id = user_id.clone();
                             spawn(async move {
-                                if logout_public(user_id).await.is_ok() {
-                                    session.set(Some(Ok(None)));
-                                } else {
-                                    logout_error.set(true);
+                                match logout_public(user_id).await {
+                                    Ok(()) => session.set(Some(Ok(None))),
+                                    Err(error) => logout_error.set(Some(error)),
                                 }
                                 logout_busy.set(false);
                             });
@@ -241,11 +240,15 @@ pub(super) fn SessionMenu() -> Element {
                     }
                 },
             }}
-            if logout_error() {
+            if let Some(error) = logout_error() {
                 // 登出失败必须给明眼用户可见的反馈（此前仅 visually-hidden 公告，
                 // 只有读屏用户能感知），复用 crate 内既有的错误展示样式。
                 span { class: "action-feedback action-feedback--error", role: "alert",
-                    {t!("logout-error")}
+                    {match error.as_str() {
+                        "session_lock_unavailable" => t!("session-lock-unavailable"),
+                        "session_lock_timeout" => t!("session-lock-timeout"),
+                        _ => t!("logout-error"),
+                    }}
                 }
             }
         }
@@ -262,6 +265,8 @@ fn login_error_message(error: &PublicSessionApiError) -> String {
             return t!("login-blacklisted");
         }
         Some("session_limit") => return t!("login-session-limit"),
+        Some("session_lock_unavailable") => return t!("session-lock-unavailable"),
+        Some("session_lock_timeout") => return t!("session-lock-timeout"),
         _ => {}
     }
     error

@@ -71,7 +71,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
                     let Some((watched, version)) = click_context.authoritative(&click_lot) else {
                         return;
                     };
-                    submit.0.call((click_lot.clone(), PublicSetLotWatchRequest {
+                    submit.0.call((click_context.auction_id.clone(), click_lot.clone(), PublicSetLotWatchRequest {
                         command_id: Uuid::new_v4().to_string(),
                         watched: !watched,
                         channel: "mm".to_owned(),
@@ -99,7 +99,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
                                 && !pending.busy
                                 && pending.uncertain
                             {
-                                submit.0.call((retry_lot.clone(), pending.payload));
+                                submit.0.call((retry_context.auction_id.clone(), retry_lot.clone(), pending.payload));
                             }
                         },
                         {t!("watch-retry-command")}

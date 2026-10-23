@@ -2,6 +2,7 @@ use super::*;
 
 use std::collections::BTreeMap;
 
+use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -89,9 +90,15 @@ pub(super) async fn add_mail_auction_intake_inner(
         return Err(CompetitionTransactionError::Conflict);
     }
     let preview_intake = auction_status == "preview";
+    // 外部读取后可能已切换到新 Draft；聚合时间必须在 world/target/auction 锁取得后生成。
+    let now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?;
 
+    // 只规范化身份比较，不改邮件发件人原文、来源事实或已接受命令的摘要。
     let player_status = sqlx::query_scalar::<_, String>(
-        "SELECT status FROM public.users WHERE username = $1 FOR SHARE",
+        "SELECT status FROM public.users WHERE lower(username) = lower($1) FOR SHARE",
     )
     .bind(&write.seller)
     .fetch_optional(&mut **transaction)
@@ -230,7 +237,7 @@ pub(super) async fn add_mail_auction_intake_inner(
         .bind(item.key_envelope.nonce())
         .bind(item.key_envelope.encryption_key_id())
         .bind(item.key_envelope.fingerprint())
-        .bind(item.collected_at)
+        .bind(now)
         .execute(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
@@ -249,7 +256,7 @@ pub(super) async fn add_mail_auction_intake_inner(
         .bind(category_number)
         .bind(item.start_price)
         .bind(write.submission_id)
-        .bind(item.collected_at)
+        .bind(now)
         .execute(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
@@ -257,7 +264,8 @@ pub(super) async fn add_mail_auction_intake_inner(
 
     let updated = sqlx::query(
         r#"UPDATE public.auctions
-           SET preview_revision = $1, state_version = $2, updated_at = $3
+           SET preview_revision = $1, state_version = $2,
+               updated_at = GREATEST(created_at, updated_at, $3)
            WHERE id = $4
              AND status = $7
              AND preview_revision = $5
@@ -266,7 +274,7 @@ pub(super) async fn add_mail_auction_intake_inner(
     )
     .bind(next_preview_revision)
     .bind(next_state_version)
-    .bind(write.now)
+    .bind(now)
     .bind(auction_id)
     .bind(current_preview_revision)
     .bind(current_state_version)

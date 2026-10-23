@@ -1,6 +1,7 @@
 //! 单个 E-Hentai Cookie、失效回写与操作会话。
 
 use super::*;
+use auction_application::AdminCredentialWorld;
 
 /// 经过边界校验的 E-Hentai Cookie。
 #[derive(Clone, PartialEq, Eq)]
@@ -43,6 +44,7 @@ impl fmt::Debug for EhentaiCookie {
 struct EhentaiCredentialCandidate {
     key: Uuid,
     persistent_id: Option<Uuid>,
+    world: AdminCredentialWorld,
     cookie: EhentaiCookie,
 }
 
@@ -63,6 +65,7 @@ impl EhentaiCredentialSet {
                 .map(|cookie| EhentaiCredentialCandidate {
                     key: Uuid::new_v4(),
                     persistent_id: None,
+                    world: AdminCredentialWorld::Shared,
                     cookie,
                 })
                 .collect(),
@@ -72,41 +75,47 @@ impl EhentaiCredentialSet {
         )
     }
 
-    /// 从数据库解密后的单个 Cookie 建立可回写失效状态的集合。
+    /// 从数据库解密后的单个 Cookie 及实际 scope 建立可回写失效状态的集合。
     pub fn from_runtime_cookies(
-        cookies: Vec<(Uuid, EhentaiCookie)>,
+        cookies: Vec<(Uuid, String, EhentaiCookie)>,
         invalidator: Arc<dyn AdminCredentialRuntimeWriter>,
     ) -> Result<Self, EhentaiError> {
         Self::from_candidates(
             cookies
                 .into_iter()
-                .map(|(persistent_id, cookie)| EhentaiCredentialCandidate {
-                    key: Uuid::new_v4(),
-                    persistent_id: Some(persistent_id),
-                    cookie,
+                .map(|(persistent_id, scope, cookie)| {
+                    Ok(EhentaiCredentialCandidate {
+                        key: Uuid::new_v4(),
+                        persistent_id: Some(persistent_id),
+                        world: credential_world(&scope)?,
+                        cookie,
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, EhentaiError>>()?,
             Some(invalidator),
             None,
             true,
         )
     }
 
-    /// 从数据库解密后的单 Cookie 建立由当前 Worker 独占且可回写失效状态的集合。
+    /// 保留数据库实际 scope，并由当前 Worker 独占单 Cookie；配置选择值不能扩大授权范围。
     pub fn from_owned_runtime_cookies(
-        cookies: Vec<(Uuid, EhentaiCookie)>,
+        cookies: Vec<(Uuid, String, EhentaiCookie)>,
         invalidator: Arc<dyn AdminCredentialRuntimeWriter>,
         ownership: Arc<dyn AdminCredentialRuntimeOwnership>,
     ) -> Result<Self, EhentaiError> {
         Self::from_candidates(
             cookies
                 .into_iter()
-                .map(|(persistent_id, cookie)| EhentaiCredentialCandidate {
-                    key: Uuid::new_v4(),
-                    persistent_id: Some(persistent_id),
-                    cookie,
+                .map(|(persistent_id, scope, cookie)| {
+                    Ok(EhentaiCredentialCandidate {
+                        key: Uuid::new_v4(),
+                        persistent_id: Some(persistent_id),
+                        world: credential_world(&scope)?,
+                        cookie,
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, EhentaiError>>()?,
             Some(invalidator),
             Some(ownership),
             false,
@@ -116,10 +125,16 @@ impl EhentaiCredentialSet {
     /// 从本地单 Cookie 建立由当前 Worker 独占的集合。
     pub fn from_owned_cookie(
         cookie: EhentaiCookie,
+        world: AdminCredentialWorld,
         ownership: Arc<dyn AdminCredentialRuntimeOwnership>,
     ) -> Result<Self, EhentaiError> {
         Self::from_candidates(
-            vec![EhentaiCredentialCandidate { key: Uuid::new_v4(), persistent_id: None, cookie }],
+            vec![EhentaiCredentialCandidate {
+                key: Uuid::new_v4(),
+                persistent_id: None,
+                world,
+                cookie,
+            }],
             None,
             Some(ownership),
             false,
@@ -160,13 +175,18 @@ impl EhentaiCredentialSet {
         self.ownership.as_ref().is_none_or(|ownership| ownership.is_valid())
     }
 
-    /// 返回候选集是否为空；已失去 owner 的集合不再提供凭据。
-    pub fn is_empty(&self) -> bool {
-        !self.ownership_valid()
-            || self.candidates.lock().map(|candidates| candidates.is_empty()).unwrap_or(true)
+    /// 只有实际 scope 覆盖目标世界且 owner 有效时，调度和网关才允许使用此 Cookie。
+    pub(crate) fn available(&self, world: SettlementWorld) -> bool {
+        self.ownership_valid()
+            && self.candidates.lock().is_ok_and(|candidates| {
+                candidates.iter().any(|candidate| permits_world(candidate.world, world))
+            })
     }
 
-    pub(super) fn begin(&self) -> Result<EhentaiCredentialSession, EhentaiError> {
+    pub(super) fn begin(
+        &self,
+        world: Option<SettlementWorld>,
+    ) -> Result<EhentaiCredentialSession, EhentaiError> {
         if !self.ownership_valid() {
             return Err(EhentaiError::credential(EhentaiOperation::FetchTopic));
         }
@@ -174,11 +194,13 @@ impl EhentaiCredentialSet {
             .candidates
             .lock()
             .map_err(|_| EhentaiError::credential(EhentaiOperation::FetchTopic))?
-            .first()
+            .iter()
+            .find(|candidate| world.is_none_or(|world| permits_world(candidate.world, world)))
             .cloned()
             .ok_or_else(|| EhentaiError::credential(EhentaiOperation::FetchTopic))?;
         Ok(EhentaiCredentialSession {
             set: self.clone(),
+            world,
             tried: HashSet::from([candidate.key]),
             current: candidate,
         })
@@ -200,6 +222,7 @@ impl fmt::Debug for EhentaiCredentialSet {
 /// 一次论坛逻辑操作的稳定凭据选择。
 pub(super) struct EhentaiCredentialSession {
     set: EhentaiCredentialSet,
+    world: Option<SettlementWorld>,
     current: EhentaiCredentialCandidate,
     tried: HashSet<Uuid>,
 }
@@ -240,11 +263,30 @@ impl EhentaiCredentialSession {
             .lock()
             .map_err(|_| EhentaiError::credential(EhentaiOperation::FetchTopic))?
             .iter()
-            .find(|candidate| !self.tried.contains(&candidate.key))
+            .find(|candidate| {
+                !self.tried.contains(&candidate.key)
+                    && self.world.is_none_or(|world| permits_world(candidate.world, world))
+            })
             .cloned()
             .ok_or_else(|| EhentaiError::credential(EhentaiOperation::FetchTopic))?;
         self.tried.insert(candidate.key);
         self.current = candidate;
         Ok(())
     }
+}
+
+fn credential_world(scope: &str) -> Result<AdminCredentialWorld, EhentaiError> {
+    scope
+        .strip_prefix("ehentai:")
+        .and_then(AdminCredentialWorld::parse)
+        .ok_or_else(|| EhentaiError::credential(EhentaiOperation::FetchTopic))
+}
+
+fn permits_world(scope: AdminCredentialWorld, world: SettlementWorld) -> bool {
+    matches!(
+        (scope, world),
+        (AdminCredentialWorld::Shared, _)
+            | (AdminCredentialWorld::Main, SettlementWorld::Main)
+            | (AdminCredentialWorld::Isekai, SettlementWorld::Isekai)
+    )
 }

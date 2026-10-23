@@ -85,6 +85,7 @@ pub(crate) struct AdminRealtimeFailure {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AdminRealtimeData {
+    pub total_lag: i64,
     pub lags: Vec<AdminRealtimeLag>,
     pub failure: AdminRealtimeFailure,
     pub observed_at: String,
@@ -406,10 +407,11 @@ fn valid_mail_shape(value: &Value) -> bool {
 }
 
 fn valid_realtime_shape(value: &Value) -> bool {
-    let Some(data) = exact_object(value, &["failure", "lags", "observed_at"]) else {
+    let Some(data) = exact_object(value, &["failure", "lags", "observed_at", "total_lag"]) else {
         return false;
     };
     exact_object(&data["failure"], &["count", "latest_code", "oldest_at"]).is_some()
+        && data["total_lag"].as_i64().is_some_and(|total_lag| total_lag >= 0)
         && data["lags"].as_array().is_some_and(|lags| {
             lags.iter().all(|lag| {
                 exact_object(

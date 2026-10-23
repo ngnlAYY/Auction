@@ -70,15 +70,14 @@ pub(super) async fn configure_mail_poll(
             client = client.with_diagnostics(recorder);
         }
         let client = Arc::new(client);
-        let (processor, delivery_transport, custody_reader) =
-            processor::build_processor_and_delivery(
-                config,
-                mail_config,
-                &world_configs,
-                &store,
-                client.as_ref(),
-                &credentials,
-            )?;
+        let (processor, delivery_transport) = processor::build_processor_and_delivery(
+            config,
+            mail_config,
+            &world_configs,
+            &store,
+            client.as_ref(),
+            &credentials,
+        )?;
         let maintenance = Arc::new(auction_application::MailboxMaintenanceService::new(
             Arc::new(delivery_transport.maintenance_adapter())
                 as Arc<dyn auction_application::MoogleMailboxMaintenance>,
@@ -112,6 +111,10 @@ pub(super) async fn configure_mail_poll(
             .or_else(|| gateways.get(&MoogleMailWorld::Isekai))
             .cloned()
             .context("MoogleMail enabled but no world gateway is configured")?;
+        let custody_reader: Arc<dyn SettlementFulfillmentCustodyReader> =
+            Arc::new(super::fulfillment::MoogleMailFulfillmentCustodyReader {
+                gateway: Arc::clone(&gateway),
+            });
         let delivery_transport: Arc<dyn DeliveryTransport> = Arc::new(
             delivery_transport
                 .with_cash_evidence_gateway(gateway.clone())

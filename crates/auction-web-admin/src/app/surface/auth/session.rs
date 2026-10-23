@@ -5,7 +5,7 @@ const SESSION_REFRESH_SAFETY_MARGIN_MS: f64 = 1_000.0;
 #[cfg(target_arch = "wasm32")]
 const MIN_SESSION_REFRESH_DELAY_MS: f64 = 1_000.0;
 
-/// 会话查询失败时按旧版策略每 30 秒重试；成功后该组件随错误页一起卸载。
+/// 会话尚未确认时每 30 秒重试；重新确认后卸载，不替换已认证页面子树。
 #[component]
 pub(crate) fn AdminSessionRetry(mut reload_generation: Signal<u64>) -> Element {
     #[cfg(target_arch = "wasm32")]

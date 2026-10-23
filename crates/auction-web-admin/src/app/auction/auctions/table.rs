@@ -192,7 +192,7 @@ pub(super) fn AdminAuctionTable(
                         }
                     }
                 }
-                AdminAuctionCreateForm { reload_generation, notice }
+                AdminAuctionCreateForm { notice }
             }
             if let Some(notice) = notice() {
                 p { class: "action-feedback action-feedback--success", role: "status",

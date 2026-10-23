@@ -5,6 +5,7 @@
 //! compose 草稿只在收件人、业务 reference、明确 COD 和 Credits/附件数量全部匹配时丢弃。
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde_json::json;
 use uuid::Uuid;
@@ -12,10 +13,11 @@ use uuid::Uuid;
 use crate::{
     ApplicationError, Clock, MoogleMailboxComposeState, MoogleMailboxDiscard,
     MoogleMailboxEvidenceStore, MoogleMailboxMaintenance, MoogleMailboxSentEntry,
-    MoogleMailboxSentState, MoogleMailboxUnprovenSend, RepositoryError,
+    MoogleMailboxSentState, MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
+    RepositoryError,
 };
 
-/// 通知类单轮最多核对的投递数；其余留到下一轮，避免占满维护周期。
+/// 通知类单轮最多核对的投递数；达到上限即停止，不越过未处理后缀推进持久游标。
 const NOTICE_RECOVERY_PER_SWEEP: usize = 20;
 /// 单条投递允许的维护重排队次数；达到上限后保留人工核对，防止无限重试。
 const MAX_SWEEP_RETRIES: i64 = 2;
@@ -54,18 +56,22 @@ impl MailboxMaintenanceService {
         Self { maintenance, store, clock }
     }
 
-    /// 读取 Sent 与 compose 各一次；任何失败都只让本轮维护失败，不影响收件轮询。
+    /// Worker 以同一总截止点包住完整 future；DB、凭据排队与所有远端操作均计入维护预算。
+    /// 任何失败都只让本轮维护失败，不影响收件轮询；游标与 discard 围栏在取消后仍持久保留。
     pub async fn sweep(
         &self,
         world_id: &str,
+        deadline: Instant,
     ) -> Result<MailboxMaintenanceReport, ApplicationError> {
         if world_id != "main" {
             return Err(repository_error("维护流程只支持主世界"));
         }
+        check_deadline(deadline)?;
         let candidates = self.store.unproven_sends(world_id, 200).await?;
-        let sent = self.recover_sent(world_id, &candidates).await?;
+        let sent = self.recover_sent(world_id, &candidates, deadline).await?;
         let sent_observed = sent.0;
         let sent_recovered = sent.1;
+        check_deadline(deadline)?;
         let compose = self.maintenance.compose(world_id).await?;
         if compose.clean {
             return Ok(MailboxMaintenanceReport {
@@ -84,6 +90,7 @@ impl MailboxMaintenanceService {
         }
         let matched = candidates
             .iter()
+            .filter_map(|candidate| candidate.send.as_ref())
             .filter(|candidate| compose_matches(candidate, &compose))
             .collect::<Vec<_>>();
         if matched.len() != 1 {
@@ -102,7 +109,13 @@ impl MailboxMaintenanceService {
             });
         }
         let delivery_id = matched[0].delivery_id;
-        let outcome = self.maintenance.discard_compose(world_id).await?;
+        check_deadline(deadline)?;
+        if !self.store.begin_compose_discard(delivery_id).await? {
+            return Err(repository_error("草稿丢弃已尝试或投递状态已变化，保留人工核对"));
+        }
+        // 围栏在排队和 POST 前持久提交；其后任意超时或取消都不能自动重新授权 discard。
+        check_deadline(deadline)?;
+        let outcome = self.maintenance.discard_compose(world_id, &compose).await?;
         let discarded = outcome == MoogleMailboxDiscard::Discarded;
         if discarded {
             self.store
@@ -136,7 +149,8 @@ impl MailboxMaintenanceService {
     async fn recover_sent(
         &self,
         world_id: &str,
-        candidates: &[MoogleMailboxUnprovenSend],
+        candidates: &[MoogleMailboxSweepCandidate],
+        deadline: Instant,
     ) -> Result<(usize, usize, usize, usize, usize, Option<String>, usize), ApplicationError> {
         if candidates.is_empty() {
             // 没有未证明投递时仍完整读取一次 Sent，保持三页周期读取。
@@ -144,30 +158,35 @@ impl MailboxMaintenanceService {
             return Ok((0, 0, 0, 0, 0, None, 0));
         }
         let entries = self.maintenance.sent_entries(world_id).await?;
-        // 通知类每轮最多核对固定条数：逐封详情读取各自持有排他会话，全量会拖长维护周期。
+        // 按已读取的稳定环形批次逐条开始；候选批次本身不推进持久游标。
         let mut notice_budget = NOTICE_RECOVERY_PER_SWEEP;
         let mut observed = 0;
+        let mut attempted = 0;
         let mut recovered = 0;
         let mut matched_count = 0;
         let mut failed = 0;
         let mut requeued = 0;
         let mut state_error = None;
-        for candidate in candidates {
+        for slot in candidates {
+            if notice_budget == 0 {
+                break;
+            }
+            check_deadline(deadline)?;
+            if !self.store.record_sweep_attempt(world_id, slot.delivery_id).await? {
+                continue;
+            }
+            attempted += 1;
+            // 不可重建的旧行也获得一次轮转机会，但不读取远端、不产生恢复证明。
+            let Some(candidate) = slot.send.as_ref() else { continue };
             let step = match (candidate.origin_kind.as_str(), candidate.operation.as_str()) {
                 ("settlement", "send") => {
                     self.recover_settlement(world_id, candidate, &entries).await?
                 }
                 ("mail_intake", "send") => {
-                    if notice_budget == 0 {
-                        continue;
-                    }
                     notice_budget -= 1;
                     self.recover_notice(world_id, candidate, &entries).await?
                 }
                 ("mail_intake", "take") => {
-                    if notice_budget == 0 {
-                        continue;
-                    }
                     notice_budget -= 1;
                     self.recover_take(world_id, candidate).await?
                 }
@@ -192,7 +211,7 @@ impl MailboxMaintenanceService {
                 state_error = step.error;
             }
         }
-        Ok((observed, recovered, candidates.len(), matched_count, failed, state_error, requeued))
+        Ok((observed, recovered, attempted, matched_count, failed, state_error, requeued))
     }
 
     /// 结算类：标题携带义务 reference，详情必须仍带对应装备或 carrier。
@@ -511,6 +530,13 @@ fn compose_matches(
         && compose.attachment_count == candidate.attachment_ids.len()
         && (compose.subject.contains(&candidate.reference)
             || compose.body.contains(&candidate.reference))
+}
+
+fn check_deadline(deadline: Instant) -> Result<(), ApplicationError> {
+    if Instant::now() >= deadline {
+        return Err(repository_error("MoogleMail 维护总预算耗尽"));
+    }
+    Ok(())
 }
 
 fn repository_error(message: &str) -> ApplicationError {

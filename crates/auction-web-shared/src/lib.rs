@@ -29,8 +29,8 @@ pub use errors::{BaseErrorKind, base_api_error_message, classify_base_error};
 pub use media::use_media_query;
 pub use query::{QueryState, QueryWriteMode, read_query_pairs, use_query_state, write_query_pairs};
 pub use transport::{
-    DEFAULT_REQUEST_TIMEOUT_MILLIS, TransportError, send_get, send_get_observed, send_request,
-    send_request_observed, send_request_with_timeout,
+    BrowserLock, BrowserLockError, DEFAULT_REQUEST_TIMEOUT_MILLIS, TransportError, send_get,
+    send_get_observed, send_request, send_request_observed, send_request_with_timeout,
 };
 
 pub use components::{

@@ -9,6 +9,7 @@ use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
 use auction_web_shared::{AsyncState, AsyncStateKind, Time};
 
 use crate::api::{RealtimeFailure, RealtimeFailurePage};
+use crate::app::surface::pending::PendingCommands;
 
 /// 展示可供操作员选择 replay 的 failure 安全投影。
 #[component]
@@ -16,6 +17,7 @@ pub(super) fn RealtimeFailureTable(
     page: RealtimeFailurePage,
     on_select: EventHandler<RealtimeFailure>,
 ) -> Element {
+    let pending = use_context::<PendingCommands>();
     let is_empty = page.failures.is_empty();
     rsx! {
         div { class: "admin-shell__table-wrap",
@@ -85,6 +87,7 @@ pub(super) fn RealtimeFailureTable(
                                         if !failure.resolved {
                                             button {
                                                 r#type: "button",
+                                                disabled: pending.any_busy() || pending.contains(&failure.id),
                                                 onclick: move |_| on_select.call(failure_for_action.clone()),
                                                 {t!("realtime-replay")}
                                             }

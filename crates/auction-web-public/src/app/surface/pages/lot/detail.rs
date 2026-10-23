@@ -113,7 +113,7 @@ pub(crate) fn LiveLotDetailView(
                     equipment: EquipmentCardData::from(lot.equipment.clone()),
                     leading: is_leading,
                     watch_control: rsx! {
-                        if auction_status == "live" && lot.status == "live" {
+                        if matches!(auction_status.as_str(), "live" | "final") && lot.status == "live" {
                             LotWatchButton {
                                 lot_id: lot.id.clone(),
                                 lot_code: lot_code_for(&lot.equipment.category, lot.lot_number),
@@ -167,8 +167,8 @@ pub(crate) fn LiveLotDetailView(
                     if session_error {
                         p { role: "alert", {t!("session-error")} }
                     }
-                    // 拍卖或拍品结束后不再展示出价、代理，装备分组行的标记沿用同一状态门禁。
-                    if auction_status == "live" && lot.status == "live" {
+                    // Final 仍可普通出价、Fast 和降低授权；Slow 新建仅在 Live 开放。
+                    if matches!(auction_status.as_str(), "live" | "final") && lot.status == "live" {
                         LiveCatalogActions {
                             lot_id: lot.id.clone(),
                             lot_code: lot_code_for(&lot.equipment.category, lot.lot_number),

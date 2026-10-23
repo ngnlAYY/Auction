@@ -15,14 +15,9 @@ pub(crate) async fn load_realtime_section(
         return Err(());
     }
 
-    let total_lag = snapshot
-        .lags
-        .iter()
-        .try_fold(0_i64, |total, entry| total.checked_add(entry.lag))
-        .ok_or(())?;
     let error_code = if snapshot.failure.count > 0 {
         Some("unresolved_failure")
-    } else if total_lag > 0 {
+    } else if snapshot.total_lag > 0 {
         Some("consumer_lag")
     } else {
         None
@@ -37,6 +32,7 @@ pub(crate) async fn load_realtime_section(
         error_code: None,
         data: Some(json!({
             "observed_at": timestamp(snapshot.observed_at),
+            "total_lag": snapshot.total_lag,
             "lags": snapshot.lags.into_iter().map(|entry| json!({
                 "stream_key": entry.stream_key,
                 "consumer_key": entry.consumer_key,

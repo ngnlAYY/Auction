@@ -225,9 +225,10 @@ impl CompetitionCommand {
         match self {
             Self::PlaceBid(command) => {
                 let fact_count = snapshot.active_proxy.map_or(1, |active| {
-                    if command.amount <= active.maximum_amount
-                        && (command.amount == active.maximum_amount
-                            || active.mode == ProxyMode::Fast)
+                    // 与领域规划共用有效上限，保证历史超额 Slow 在上限同价守位时有两条事实。
+                    let maximum = active.maximum_amount.bid_ceiling();
+                    if command.amount <= maximum
+                        && (command.amount == maximum || active.mode == ProxyMode::Fast)
                     {
                         2
                     } else {

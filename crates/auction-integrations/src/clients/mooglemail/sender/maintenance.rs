@@ -88,11 +88,12 @@ impl MoogleMailSender {
     }
 
     /// 丢弃 compose 草稿并在 POST 后重新读取证明页面已干净。
-    /// 只允许对精确匹配已知投递的草稿调用；失败时不重试，交由下一轮维护重新读取。
+    /// 只允许对已登记一次性尝试且精确匹配已知投递的草稿调用；失败只读核对，不自动重发 discard。
     pub async fn discard_compose(
         &self,
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
+        expected: &auction_application::MoogleMailboxComposeState,
     ) -> Result<MoogleMailDiscardOutcome, MoogleMailError> {
         let compose = self.client.compose(world)?;
         let document = self.client.get(&compose, cookie).await?;
@@ -103,18 +104,31 @@ impl MoogleMailSender {
         if state.is_clean() {
             return Ok(MoogleMailDiscardOutcome::AlreadyClean);
         }
-        let form = MoogleMailForm::discard(state.token(), &state.message_fields())
-            .map_err(|_| protocol_drift(world))?;
+        let fields = state.message_fields();
+        // 原快照与本次 POST 之间重新取得了 session；持锁重读后逐字段一致才有权丢弃。
+        if expected.clean
+            || fields.recipient != expected.recipient
+            || fields.subject != expected.subject
+            || fields.body != expected.body
+            || state.credits() != expected.credits
+            || state.cod() != expected.cod
+            || state.attachment_count() != expected.attachment_count
+        {
+            return Err(protocol_drift(world));
+        }
+        let form =
+            MoogleMailForm::discard(state.token(), &fields).map_err(|_| protocol_drift(world))?;
         self.client.post(&compose, cookie, form).await?;
-        let document = self.client.get(&compose, cookie).await?;
+        let document = self.client.get(&compose, cookie).await.map_err(discard_unknown)?;
         let after = self
             .client
             .diagnose_parse(&compose, &document, self.parser.parse_compose_state(&document, world))
-            .await?;
+            .await
+            .map_err(discard_unknown)?;
         if after.is_clean() {
             Ok(MoogleMailDiscardOutcome::Discarded)
         } else {
-            Err(protocol_drift(world))
+            Err(write_unknown(world, MoogleMailOperation::Discard))
         }
     }
 
@@ -253,6 +267,15 @@ impl MoogleMailSender {
 
 fn protocol_drift(world: MoogleMailWorld) -> MoogleMailError {
     MoogleMailError::protocol_drift(MoogleMailOperation::Compose, world)
+}
+
+/// POST 后的读取/解析失败仍属未知外写；保留已有加密诊断引用，不降级成可重试读错误。
+fn discard_unknown(error: MoogleMailError) -> MoogleMailError {
+    let mut unknown = write_unknown(error.world, MoogleMailOperation::Discard);
+    unknown.evidence_id = error.evidence_id;
+    unknown.evidence_status = error.evidence_status;
+    unknown.evidence_failure = error.evidence_failure;
+    unknown
 }
 
 fn unavailable(world: MoogleMailWorld) -> MoogleMailError {

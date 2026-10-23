@@ -1,8 +1,8 @@
 //! 泛型两阶段确认命令状态机。
 //!
 //! 表单命令先冻结负载与 `command_id` 进入确认态，二次确认后才调用外部 API；同一输入重试期间
-//! `command_id` 保持稳定以支撑服务端幂等，输入变更则重新生成。`begin` 在签名一致时复用已冻结
-//! 命令，否则生成新 `Uuid::new_v4()` 并清空上次失败；`submit` 成功清空状态并回调 `on_success`，
+//! `command_id` 保持稳定以支撑服务端幂等。已提交命令未决时 `begin` 保留冻结负载；否则
+//! 签名变化才生成新 `Uuid::new_v4()` 并清空上次失败。`submit` 成功清空状态并回调 `on_success`，
 //! 失败退出确认态但保留命令与输入以便原样重试，`uncertain` 由调用方分类并在取得原结果或显式
 //! 取消前保留——前置拒绝不能否定先前提交。`cancel_confirmation` 回编辑态但保留冻结命令，
 //! `reset` 彻底清空。
@@ -58,7 +58,13 @@ pub fn use_confirm_command<P, E>() -> ConfirmCommand<P, E> {
 impl<P: Clone + 'static, E: 'static> ConfirmCommand<P, E> {
     /// 第一阶段：冻结负载并进入确认态，返回冻结后的负载。
     /// 签名一致时复用其 `command_id`（同一输入的重试幂等），否则生成 `Uuid::new_v4()`。
+    /// 提交中或结果未知时忽略迟到的编辑事件，不能替换原负载与 UUID。
     pub fn begin(&mut self, signature: String, build: impl FnOnce(Uuid) -> P) -> P {
+        if (*self.submitting.peek() || *self.uncertain.peek())
+            && let Some(pending) = self.command.peek().as_ref()
+        {
+            return pending.clone();
+        }
         let command_id = match (self.frozen)() {
             Some((current, command_id)) if current == signature => command_id,
             _ => {
@@ -91,6 +97,15 @@ impl<P: Clone + 'static, E: 'static> ConfirmCommand<P, E> {
         F: FnOnce(P) -> Fut + 'static,
         Fut: std::future::Future<Output = Result<R, E>> + 'static,
     {
+        if *self.submitting.peek() {
+            return;
+        }
+        let pending = if *self.uncertain.peek() {
+            let Some(pending) = self.command.peek().clone() else { return };
+            pending
+        } else {
+            pending
+        };
         self.failure.set(None);
         self.submitting.set(true);
         let mut state = *self;
@@ -130,6 +145,9 @@ impl<P: Clone + 'static, E: 'static> ConfirmCommand<P, E> {
 
     /// 彻底清空命令状态（弹窗关闭路径使用）。
     pub fn reset(&mut self) {
+        if *self.submitting.peek() {
+            return;
+        }
         self.command.set(None);
         self.confirmation.set(None);
         self.frozen.set(None);

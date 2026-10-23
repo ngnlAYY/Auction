@@ -21,13 +21,14 @@ pub(super) async fn process(
             // 尚未执行只读请求，不消耗人工核对意图；租约到期后仍可领取。
             return Ok(());
         }
-        let receipt = runtime.sender.reconcile(&claim.message, sender).await.ok().flatten();
+        let receipt =
+            runtime.sender.reconcile(claim.world, &claim.message, sender).await.ok().flatten();
         return runtime.store.finish(claim, receipt).await;
     }
     if *drain.borrow() {
         return runtime.store.release_unsent(claim).await;
     }
-    let prepared = match runtime.sender.prepare(&claim.message).await {
+    let prepared = match runtime.sender.prepare(claim.world, &claim.message).await {
         Ok(prepared) => prepared,
         // prepare 契约保证只有 GET，只有这阶段才允许安全延期。
         Err(_) => return runtime.store.release_unsent(claim).await,

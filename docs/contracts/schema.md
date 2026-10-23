@@ -16,7 +16,7 @@
 
 ## 基线与 owner 规则
 
-当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000059`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
+当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000060`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
 
 ### 追加迁移与历史事实
 
@@ -32,6 +32,7 @@
 | 邮件预期名称：PostgreSQL `000045` | credential_keys 增加 nullable player_name，仅 mail_cookie 可设置，受长度/空白/控制字符约束 | 旧记录保持 NULL，无 verified 列、不回填或授权内部履约；保留旧凭据与未知发送证据 |
 | 账户读取索引：PostgreSQL `000057` | 为 `bids` 的用户/时间/UUID 列表及代理授权的用户/更新时间/lot 列表增加完整历史索引，SQL owner 为 storage/account | 不改表、用户归属、命令账本、竞价与结算事实；索引创建仍须走停机迁移门禁 |
 | 登录时长：PostgreSQL `000058` | users 增加 nullable 固定时长及独立偏好版本；Public 截止允许成对 NULL 表示永久，有限值必须有序且非 infinity | 默认仅影响新登录，保留旧会话截止、撤销及认证版本；不恢复过期或撤销令牌，不改变 Admin 会话 |
+| 邮件维护轮转：PostgreSQL `000060` | 新增 world 内稳定环形候选游标及待证明投递部分索引，逐条开始前提交，跳过不可重建行但不跳过未处理后缀 | 游标只表示一次核对机会，不是 Sent、领取、discard 或业务成功证明；不改变 delivery、资金、履约或历史命令事实 |
 
 ### Bot 内部履约对象
 
@@ -194,6 +195,7 @@ activate 跟随持久 prepare；同轮重试保持稳定，不同真实退件互
 | mail_commands | auction-application + auction-jobs：mail intake | 入站完成命令账本，绑定 `inbound_mail`、32 字节内容摘要与处理结果；发送 outbox 由 `deliveries` 拥有 |
 | mail_poll_state | auction-storage：mail state | MoogleMail 轮询游标、租约、失败退避和状态 |
 | mail_poll_pending_reads | auction-storage：mail poll；auction-application：MailPollReadJournal | 详情 GET 前持久登记的 mailbox/world、MID 与列表身份；按持久序号恢复，随完成前缀原子删除；不含正文或凭据 |
+| mailbox_sweep_cursors | auction-application：mail maintenance；auction-storage：mailbox_sweep | `000060` 保存 world 内最近开始核对的 `(created_at,id)`；批量读取不推进，单条尝试先持久提交，尾部回绕；不是业务完成水位 |
 | mail_admin_commands | auction-storage：mail admin command ledger | Admin 邮件控制命令幂等账本 |
 | auction_forum_sync | auction-storage：forum sync/reply；auction-integrations + auction-jobs：forum | 论坛主题发布状态、租约、fencing、冻结 lot 编号/分页方案、目录页数，以及首帖/系统日志身份、内容版本、逐主题调度、真实连续处理楼层、最近成功时间和有界安全错误 |
 | auction_forum_catalog_pages | auction-storage：forum/catalog；auction-integrations + auction-jobs：forum | 目录续页的连续楼层、真实 post ID 与正文证明；与主记录同事务发布及 CAS 更新，不是竞价权威事实 |
@@ -206,6 +208,13 @@ activate 跟随持久 prepare；同轮重试保持稳定，不同真实退件互
 
 A16-A19 使用 `auction-storage` 的邮件表做 PostgreSQL 完整档状态与审查投影；A20 的全局 Worker control 唤醒不写入额外触发表；`000008_mooglemail_polling` 追加 `mail_poll_state` 的 lease/fencing 与失败字段，Worker 在同一事务中提交 `inbound_mail`、`mail_commands` 和 cursor。应用层定义命令与查询端口，`auction-jobs`/`auction-integrations` 负责远程读取；基础通知和结算 delivery 已进入 outbox transport，结算 send 的 Sent/Balance 严格解析、exact remote ID 查找和自动 proof 对账已接入 PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。
 `000052_mail_poll_pending_reads` 新建详情读取恢复队列；无附件邮件详情 GET 会改变远端已读状态，因此同一 claim 下先持久登记整窗列表摘要，再读取详情。`database/mail_poll/reads.rs` 独占队列 SQL，主键 `read_sequence` 保存处理顺序，`(mailbox_key, external_mail_id)` 唯一且外键绑定 `mail_poll_state`；world 为 main/isekai，MID/发件人/主题有界并拒绝控制字符，不保存正文、HTML、Cookie、token 或装备 key。读取/登记先锁邮箱行，再以数据库实时钟重验 token、owner、版本、有效期及 world；重复 MID 必须身份一致。Worker 优先按 MID 恢复最早待读前缀，已存在 cursor 不重置；提交入站事实、命令账本与 cursor 时同事务删除队列完成前缀，失败或取消保留后缀。`sender` 仅保留首次列表显示名快照，可能被截断，不作为详情身份、业务身份或 allowlist 依据；详情完整发件人才是入站与回复的身份来源。每批候选不按列表名称预过滤，完整详情不在当前 allowlist 时保留队列、失败关闭且不推进 cursor，后续项等待调整配置；world 冲突同样保留。旧截断摘要按原 MID 恢复，无需重写记录或新增迁移；迁移不猜测升级前已读但未记录的 MID。查询使用运行时绑定 SQL，无新增 SQLx 宏离线元数据。
+`000060_mailbox_sweep_cursors` 初始游标为空；候选按 `(created_at,id)` 严格排序，从持久游标之后取最多 200 条并在尾部回绕。
+每条开始核对前单独推进游标；通知类达到 20 条即结束本轮，未处理后缀不推进。不可重建行也保留轮转身份并仅推进，
+不形成业务事实。慢响应或进程中断最多消费当前一条核对机会，下轮从其后继续；只读失败候选在完整回绕后再次取得机会。
+Worker 使用收件读取的 `fetch_timeout` 作为维护整轮预算，数据库、凭据排队、Sent 摘要/详情、compose 和 discard 共用一个截止点，
+耗尽后仍进入 Inbox。discard 前通过原 delivery 的 `result_metadata.compose_discard_attempt` 原子登记一次性尝试；
+提交结果不确定或后续取消均不重新授权 POST。成功后的 `compose_discard` 仍为独立观察，不授权 Send 重发，
+也不把轮转游标或草稿清空证明当作投递/资金完成证明。迁移不执行远端动作，不修改旧发送结果。
 显式单封临时跳过或隔离属于独立授权运维，分别追加 `mail.operator_skip_unprocessed` / `mail.operator_quarantine_pending` 审计，
 不写入虚构的 `inbound_mail` 或 `mail_commands` 完成事实，不创建 delivery；精确目标、备份、租约/版本及邻接队列保护见
 [邮件运维边界](ops/mail/diagnostics.md#显式单封跳过的运维边界)。

@@ -5,6 +5,10 @@
 
 #[cfg(feature = "postgres")]
 use super::*;
+#[cfg(feature = "postgres")]
+use crate::database::delivery_audit::{
+    COD_RETURN_RESEND, DeliveryAudit, append as append_delivery_audit,
+};
 
 #[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn advance_cod_return_postgres(
@@ -118,6 +122,92 @@ async fn resend_cod(
     payment_obligation_id: Uuid,
     state_version: i64,
 ) -> Result<(String, Option<String>, i64), RecoveryCommandError> {
+    // 清空当前结果之前冻结安全投影；退件证明只授权本次回收重排，不补造旧 Sent 证明。
+    let previous = sqlx::query(
+        r#"SELECT delivery.id, delivery.command_id, delivery.fencing_version,
+                  jsonb_build_object(
+                      'status', 'pending',
+                      'original_delivery_id', delivery.id,
+                      'original_command_id', delivery.command_id,
+                      'previous_status', delivery.status,
+                      'previous_fencing_version', delivery.fencing_version,
+                      'fencing_version', delivery.fencing_version + 1,
+                      'previous_attempt_count', delivery.attempt_count,
+                      'previous_claimed_at', delivery.claimed_at,
+                      'previous_sending_at', delivery.sending_at,
+                      'previous_completed_at', delivery.completed_at,
+                      'recovery_id', recovery.id,
+                      'payment_obligation_id', recovery.payment_obligation_id,
+                      'return_count', recovery.cod_return_count,
+                      'return_limit', recovery.cod_return_limit,
+                      'return_mail_id', recovery.return_mail_id,
+                      'return_external_mail_id', recovery.return_external_mail_id,
+                      'return_consumed_at', consumed.recorded_at,
+                      'reclaim_action_id', reclaim.id,
+                      'reclaim_delivery_id', reclaim.delivery_id,
+                      'custody_proof_kind', recovery.custody_proof_kind,
+                      'custody_proof_reference', recovery.custody_proof_reference,
+                      'custody_proof_digest', encode(recovery.custody_proof_digest, 'hex'),
+                      'custody_proof_observed_at', recovery.custody_proof_observed_at,
+                      'proven_sent', CASE
+                          WHEN delivery.status = 'succeeded'
+                           AND delivery.failure_code IS NULL
+                           AND delivery.sending_at IS NOT NULL
+                           AND delivery.completed_at >= delivery.sending_at
+                           AND delivery.result_metadata->>'operation' = 'send'
+                           AND delivery.result_metadata->'external_reference_proven' = 'true'::jsonb
+                           AND delivery.result_metadata->>'proof' IN (
+                               'sent_exact_payload_v1', 'sent_recovered_reference_v1')
+                           AND delivery.external_reference ~ '^mooglemail:main:send:[0-9]{1,32}$'
+                           AND (delivery.result_metadata->>'proof' = 'sent_recovered_reference_v1'
+                                OR delivery.result_metadata->'sent_verified' = 'true'::jsonb)
+                          THEN jsonb_build_object(
+                              'external_reference', delivery.external_reference,
+                              'proof', delivery.result_metadata->>'proof')
+                          ELSE NULL
+                      END
+                  ) AS audit_metadata
+           FROM public.settlement_obligation_fulfillments AS fulfillment
+           JOIN public.deliveries AS delivery ON delivery.id = fulfillment.delivery_id
+           JOIN public.settlement_recoveries AS recovery
+               ON recovery.id = $2 AND recovery.payment_obligation_id = fulfillment.obligation_id
+           JOIN public.settlement_recovery_return_consumptions AS consumed
+               ON consumed.recovery_id = recovery.id
+              AND consumed.return_mail_id = recovery.return_mail_id
+           JOIN public.inbound_mail AS inbound
+               ON inbound.id = recovery.return_mail_id
+              AND inbound.external_mail_id = recovery.return_external_mail_id
+              AND inbound.world_id = 'main'
+           JOIN public.settlement_recovery_actions AS reclaim
+               ON reclaim.recovery_id = recovery.id
+              AND reclaim.kind = 'reclaim_equipment_take'
+              AND reclaim.execution_state = 'satisfied'
+              AND reclaim.source_mail_id = recovery.return_mail_id
+              AND reclaim.proof_kind = 'delivery_recovery_take_succeeded'
+              AND reclaim.proof_kind = recovery.custody_proof_kind
+              AND reclaim.proof_reference = recovery.return_external_mail_id
+              AND reclaim.proof_reference = recovery.custody_proof_reference
+              AND reclaim.proof_digest = recovery.custody_proof_digest
+           WHERE fulfillment.obligation_id = $1
+             AND delivery.origin_kind = 'settlement'
+             AND delivery.origin_id = fulfillment.obligation_id::text
+             AND delivery.status IN ('succeeded', 'manual_reconcile')
+             AND recovery.stage = 'reclaiming' AND recovery.state_version = $3
+             AND recovery.cod_return_count BETWEEN 1 AND recovery.cod_return_limit - 1
+             AND recovery.return_external_mail_id ~ '^[0-9]{1,32}$'
+           FOR UPDATE OF delivery"#,
+    )
+    .bind(payment_obligation_id)
+    .bind(recovery_id)
+    .bind(state_version)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?
+    .ok_or(RecoveryCommandError::InvalidStoredResult)?;
+    let delivery_id: Uuid = previous.try_get("id").map_err(map_sql_error)?;
+    let command_id: Uuid = previous.try_get("command_id").map_err(map_sql_error)?;
+    let previous_fencing: i64 = previous.try_get("fencing_version").map_err(map_sql_error)?;
+    let audit_metadata: Value = previous.try_get("audit_metadata").map_err(map_sql_error)?;
     let delivery = sqlx::query_scalar::<_, Uuid>(
         r#"UPDATE public.deliveries AS delivery
            SET status = 'pending',
@@ -132,20 +222,37 @@ async fn resend_cod(
                fencing_version = delivery.fencing_version + 1,
                result_metadata = '{}'::jsonb,
                updated_at = $2
-           FROM public.settlement_obligation_fulfillments AS fulfillment
-           WHERE fulfillment.obligation_id = $1
-             AND delivery.id = fulfillment.delivery_id
-             -- 退回邮件已存在说明确实寄出过；发送证明可能停在人工核对，一并重置。
+           WHERE delivery.id = $1
+             AND delivery.fencing_version = $3
              AND delivery.status IN ('succeeded', 'manual_reconcile')
            RETURNING delivery.id"#,
     )
-    .bind(payment_obligation_id)
+    .bind(delivery_id)
     .bind(now)
+    .bind(previous_fencing)
     .fetch_optional(&mut **transaction)
     .await
     .map_err(map_sql_error)?
     .ok_or(RecoveryCommandError::InvalidStoredResult)?;
-    let _ = delivery;
+    if delivery != delivery_id {
+        return Err(RecoveryCommandError::InvalidStoredResult);
+    }
+    let request_id = command_id.to_string();
+    append_delivery_audit(
+        transaction,
+        DeliveryAudit {
+            occurred_at: now,
+            actor_type: "system",
+            actor_id: "recovery-service",
+            action: COD_RETURN_RESEND,
+            delivery_id,
+            request_id: Some(&request_id),
+            source: "system",
+            metadata: audit_metadata,
+        },
+    )
+    .await
+    .map_err(map_sql_error)?;
 
     let fulfillment = sqlx::query_scalar::<_, Uuid>(
         r#"UPDATE public.settlement_obligation_fulfillments
@@ -175,10 +282,11 @@ async fn resend_cod(
     .ok_or(RecoveryCommandError::InvalidStoredResult)?;
     let _ = fulfillment;
 
+    // 当前已冻结的 recovery v1 唯一付款窗口为七天；已延长的绝对截止不再参与计算。
     let next_state_version: i64 = sqlx::query_scalar(
         r#"UPDATE public.settlement_recoveries
            SET stage = 'awaiting_payment',
-               payment_deadline_at = $2 + (payment_deadline_at - created_at),
+               payment_deadline_at = $2 + interval '604800 seconds',
                reminder_count = 0,
                return_mail_id = NULL,
                return_external_mail_id = NULL,
@@ -193,6 +301,7 @@ async fn resend_cod(
            WHERE id = $1
              AND stage = 'reclaiming'
              AND state_version = $3
+             AND policy_version = 1
            RETURNING state_version"#,
     )
     .bind(recovery_id)

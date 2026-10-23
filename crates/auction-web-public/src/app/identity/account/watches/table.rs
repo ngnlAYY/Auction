@@ -3,7 +3,9 @@
 use auction_web_shared::{TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
 
-use crate::app::surface::{Route, auction_status_label, lot_status_label, world_label};
+use crate::app::surface::{
+    auction_status_label, lot_detail_world_href, lot_status_label, world_label,
+};
 
 use super::super::AccountPager;
 use super::load::WatchedAuction;
@@ -42,10 +44,10 @@ pub(super) fn WatchedTable(watched: WatchedAuction) -> Element {
                         for row in watched.rows.into_iter().skip(offset).take(PAGE_SIZE as usize) {
                             tr { key: "{row.lot_id}",
                                 td { class: "public-account-code", "data-label": t!("account-lot"),
-                                    Link { to: Route::LotDetail { lot_code: row.lot_id.clone() }, "{row.code}" }
+                                    Link { to: lot_detail_world_href(&row.lot_id, &auction.world), "{row.code}" }
                                 }
                                 td { "data-label": t!("account-watches-equipment"),
-                                    Link { to: Route::LotDetail { lot_code: row.lot_id.clone() },
+                                    Link { to: lot_detail_world_href(&row.lot_id, &auction.world),
                                         TruncatedText { value: row.name, size: "wide", focusable: false, portal: true }
                                     }
                                 }

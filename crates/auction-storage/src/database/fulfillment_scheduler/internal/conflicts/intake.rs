@@ -14,12 +14,13 @@ pub(super) async fn closed_source_history(
     tx: &mut Transaction<'_, Postgres>,
     target: &AssetConflictTarget<'_>,
 ) -> Result<Vec<Uuid>, FundingError> {
-    // 仅这两种库存动作共享例外；普通内部路径已由 validation 验证精确装备证明，
+    // 仅成交自留及无成交返还库存动作共享例外；普通内部路径已由 validation 验证精确装备证明，
     // 专用修复路径也已在写事务核对同一新鲜快照。卖家留款等无库存动作保持原门。
     if !matches!(
         target.kind,
         auction_domain::SettlementObligationKind::WinnerEquipmentCod
             | auction_domain::SettlementObligationKind::UnsoldReturn
+            | auction_domain::SettlementObligationKind::WithdrawnReturn
     ) {
         return Ok(Vec::new());
     }
@@ -36,7 +37,7 @@ pub(super) async fn closed_source_history(
             AND im.external_mail_id=s.external_mail_id AND im.world_id=e.world_id
          JOIN public.deliveries d ON im.decision_metadata->'delivery_ids'=jsonb_build_array(d.id::text)
          WHERE o.id=$1 AND o.lot_id=$2 AND e.external_equipment_id=$3 AND e.world_id=$4
-           AND o.obligation_kind IN ('winner_equipment_cod','unsold_return')
+           AND o.obligation_kind IN ('winner_equipment_cod','unsold_return','withdrawn_return')
            AND s.source_kind='mail' AND s.mailbox_key='mooglemail:'||e.world_id
            AND im.status='accepted' AND im.decision_code='auction_accepted'
            AND im.sender=s.seller AND im.sender=d.recipient

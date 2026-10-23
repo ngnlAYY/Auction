@@ -137,7 +137,7 @@ pub(super) async fn satisfy_postgres(
     // 审计 ID 在重试轮次外生成，保证一次逻辑提交只对应一个审计身份。
     let audit_id = Uuid::new_v4();
     run_reconcile_transaction!(pool, transaction, {
-        let protected = super::internal::lock_legacy(&mut transaction, claim)
+        let protected = super::internal::lock_legacy(&mut transaction, claim, None)
             .await
             .map_err(ReconcileTransactionError::Funding)?;
         if protected

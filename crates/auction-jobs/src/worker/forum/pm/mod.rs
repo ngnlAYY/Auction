@@ -54,10 +54,18 @@ impl LotWatchPmRuntime {
                 if *drain.borrow() {
                     break;
                 }
+                let available_worlds = [
+                    auction_domain::SettlementWorld::Main,
+                    auction_domain::SettlementWorld::Isekai,
+                ]
+                .into_iter()
+                .filter(|world| self.sender.has_available_forum_credential(*world))
+                .collect();
                 let request = LotWatchPmClaimRequest {
                     worker_id: worker_id.clone(),
                     lease_seconds: self.lease_seconds,
                     reconcile,
+                    available_worlds,
                 };
                 match tokio::time::timeout(
                     self.item_timeout,

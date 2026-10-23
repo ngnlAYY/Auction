@@ -8,10 +8,11 @@ use std::{
 
 use auction_application::{
     ApplicationError, CompetitionCommandPort, CompetitionTransactionError, CreateProxyCommand,
-    ForumBidCommandRecord, ForumCommandStatus, ForumPostWriter, ForumRenderer, ForumReplyStore,
-    ForumTopicReader, ForumWriteProgress, LowerProxyCommand, MailDeliveryCommand,
-    MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
-    PlaceBidCommand, PublicEquipmentLinkResolver, RequestHash, forum_world_name,
+    ForumBidCommandRecord, ForumCommandStatus, ForumCredentialAvailability, ForumPostWriter,
+    ForumRenderer, ForumReplyStore, ForumTopicReader, ForumWriteProgress, LowerProxyCommand,
+    MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryOrigin,
+    MailNotificationTemplate, PlaceBidCommand, PublicEquipmentLinkResolver, RequestHash,
+    forum_world_name,
 };
 use auction_domain::{BidAmount, CommandId, ProxyMode};
 use chrono::Duration;
@@ -52,6 +53,7 @@ struct ForumCommandContext<'a> {
 /// 论坛回帖导入运行时依赖。
 pub struct ForumReplyPorts {
     pub store: Arc<dyn ForumReplyStore>,
+    pub credential_availability: Arc<dyn ForumCredentialAvailability>,
     pub reader: Arc<dyn ForumTopicReader>,
     pub writer: Arc<dyn ForumPostWriter>,
     pub renderer: Arc<dyn ForumRenderer>,
@@ -62,6 +64,7 @@ pub struct ForumReplyPorts {
 
 pub struct ForumReplyRuntime {
     pub(crate) store: Arc<dyn ForumReplyStore>,
+    pub(crate) credential_availability: Arc<dyn ForumCredentialAvailability>,
     pub(crate) reader: Arc<dyn ForumTopicReader>,
     pub(crate) writer: Arc<dyn ForumPostWriter>,
     pub(crate) renderer: Arc<dyn ForumRenderer>,
@@ -93,6 +96,7 @@ impl ForumReplyRuntime {
         }
         let ForumReplyPorts {
             store,
+            credential_availability,
             reader,
             writer,
             renderer,
@@ -102,6 +106,7 @@ impl ForumReplyRuntime {
         } = ports;
         Ok(Self {
             store,
+            credential_availability,
             reader,
             writer,
             renderer,
@@ -139,6 +144,17 @@ where
     let mut processed = 0_u16;
     let mut topic_failed = false;
     while processed < runtime.batch_size && !worker.control.is_draining() {
+        let available_worlds =
+            [auction_domain::SettlementWorld::Main, auction_domain::SettlementWorld::Isekai]
+                .into_iter()
+                .filter(|world| {
+                    runtime.credential_availability.has_available_forum_credential(*world)
+                })
+                .collect::<Vec<_>>();
+        if available_worlds.is_empty() {
+            topic_failed = true;
+            break;
+        }
         // 内容租约必须覆盖领取和远端编辑的总预算，领取响应不重置单项时限。
         let item_deadline = tokio::time::Instant::now()
             .checked_add(runtime.item_timeout)
@@ -149,7 +165,13 @@ where
         // 每次只领取即将处理的一场拍卖，避免批量候选在等待前序主题时耗尽内容租约。
         let mut topics = tokio::time::timeout_at(
             item_deadline,
-            runtime.store.claim_published_topics(worker.worker_id.clone(), now, lease_until, 1),
+            runtime.store.claim_published_topics(
+                worker.worker_id.clone(),
+                now,
+                lease_until,
+                available_worlds,
+                1,
+            ),
         )
         .await
         .map_err(|_| WorkerError::ForumTopicProcessingFailed)??;

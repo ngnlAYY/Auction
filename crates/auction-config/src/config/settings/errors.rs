@@ -168,4 +168,7 @@ pub enum ConfigError {
 
     #[error("invalid Admin runtime configuration {path}: {reason}")]
     InvalidRuntimeConfig { path: PathBuf, reason: String },
+
+    #[error("Admin runtime Worker 部署引用无效：{0}")]
+    InvalidRuntimeWorkerConfig(&'static str),
 }

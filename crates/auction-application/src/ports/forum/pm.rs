@@ -48,15 +48,17 @@ pub trait PreparedForumPm: Send {
 }
 
 /// 共享论坛网关及凭据 owner；核对不到副本不代表未发送。
-pub trait ForumPmSender: Send + Sync {
-    /// 仅 GET/解析，无远端写入。
+pub trait ForumPmSender: crate::ForumCredentialAvailability {
+    /// 仅 GET/解析，无远端写入；world 是通知来源 lot 的权威世界。
     fn prepare<'a>(
         &'a self,
+        world: auction_domain::SettlementWorld,
         message: &'a ForumPmMessage,
     ) -> ForumPmFuture<'a, Box<dyn PreparedForumPm>>;
     /// 仅原 sender 的只读 Sent 核对，不授权重新发送。
     fn reconcile<'a>(
         &'a self,
+        world: auction_domain::SettlementWorld,
         message: &'a ForumPmMessage,
         sender_forum_account_id: &'a str,
     ) -> ForumPmFuture<'a, Option<ForumPmReceipt>>;

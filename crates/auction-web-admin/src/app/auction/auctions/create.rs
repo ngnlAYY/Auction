@@ -5,26 +5,25 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{create_admin_auction, normalize_datetime};
+use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::pending::{PendingCommands, set_if_alive};
 use crate::app::surface::validation::{FieldError, focus_field};
-use crate::app::surface::{AdminActionFeedback, run_admin_action};
 
 use super::actions::AdminAuctionNotice;
 use super::helpers::{AuctionScheduleIssue, auction_schedule_issue};
 
 #[component]
-pub(super) fn AdminAuctionCreateForm(
-    reload_generation: Signal<u64>,
-    mut notice: Signal<Option<AdminAuctionNotice>>,
-) -> Element {
+pub(super) fn AdminAuctionCreateForm(mut notice: Signal<Option<AdminAuctionNotice>>) -> Element {
     let mut open = use_signal(|| false);
-    let busy = use_signal(|| false);
+    let pending = use_context::<PendingCommands>();
 
     rsx! {
         button {
             class: "admin-btn-primary admin-auction-create-opener",
             r#type: "button",
+            disabled: pending.contains("create-auction"),
             onclick: move |_| {
-                if !open() {
+                if !open() && !pending.contains("create-auction") {
                     // 打开新流程时清掉上一次的页面级成功提示。
                     notice.set(None);
                     open.set(true);
@@ -37,9 +36,9 @@ pub(super) fn AdminAuctionCreateForm(
             Dialog {
                 title: t!("admin-auctions-create-title"),
                 close_label: t!("admin-auctions-create-close"),
-                busy: busy(),
+                busy: pending.is_busy("create-auction"),
                 on_close: move |_| open.set(false),
-                AdminAuctionCreateFields { reload_generation, open, busy, notice }
+                AdminAuctionCreateFields { open, notice }
             }
         }
     }
@@ -48,7 +47,6 @@ pub(super) fn AdminAuctionCreateForm(
 /// 首次提交时冻结标识与规范时间；未知结果重试不重新取时间或生成身份。
 #[derive(Clone)]
 struct CreateRequest {
-    command_id: Uuid,
     auction_id: Uuid,
     world_id: String,
     sequence: i64,
@@ -122,17 +120,17 @@ fn create_field_issue_message(issue: CreateFieldIssue) -> String {
 
 #[component]
 fn AdminAuctionCreateFields(
-    reload_generation: Signal<u64>,
     mut open: Signal<bool>,
-    busy: Signal<bool>,
-    mut notice: Signal<Option<AdminAuctionNotice>>,
+    notice: Signal<Option<AdminAuctionNotice>>,
 ) -> Element {
     let mut world_id = use_signal(String::new);
     let mut sequence = use_signal(|| "1".to_owned());
     let mut preview_scheduled_at = use_signal(String::new);
     let mut scheduled_open_at = use_signal(String::new);
     let mut scheduled_end_at = use_signal(String::new);
-    let mut request_state = use_signal(|| None::<CreateRequest>);
+    let pending = use_context::<PendingCommands>();
+    let busy = move || pending.is_busy("create-auction");
+    let frozen = move || pending.contains("create-auction");
     let mut feedback = use_signal(|| None::<AdminActionFeedback>);
     let mut field_errors = use_signal(CreateFieldErrors::default);
 
@@ -143,7 +141,7 @@ fn AdminAuctionCreateFields(
             aria_busy: busy().to_string(),
             onsubmit: move |event| {
                     event.prevent_default();
-                    if busy() {
+                    if frozen() {
                         return;
                     }
                     let world_id_value = world_id();
@@ -168,8 +166,8 @@ fn AdminAuctionCreateFields(
                     if scheduled_end_at_value.trim().is_empty() {
                         errors.end = Some(CreateFieldIssue::Required);
                     }
-                    // 原样重试由服务端先查账本，不能用当前时钟否定已提交的请求。
-                    if request_state().is_none() && errors.preview.is_none() && errors.open.is_none() && errors.end.is_none() {
+                    // 重试只通过页级冻结工厂执行，不再经过当前时间校验。
+                    if errors.preview.is_none() && errors.open.is_none() && errors.end.is_none() {
                         match auction_schedule_issue(
                             &preview_scheduled_at_value,
                             &scheduled_open_at_value,
@@ -204,53 +202,45 @@ fn AdminAuctionCreateFields(
                     };
                     field_errors.set(CreateFieldErrors::default());
                     feedback.set(None);
-                    let request = request_state().unwrap_or_else(|| {
-                        let request = CreateRequest {
-                            command_id: Uuid::new_v4(),
-                            auction_id: Uuid::new_v4(),
-                            world_id: world_id_value,
-                            sequence: sequence_value,
-                            preview_scheduled_at: normalize_datetime(&preview_scheduled_at_value),
-                            scheduled_open_at: normalize_datetime(&scheduled_open_at_value),
-                            scheduled_end_at: normalize_datetime(&scheduled_end_at_value),
-                        };
-                        request_state.set(Some(request.clone()));
-                        request
-                    });
-                    let mut feedback = feedback;
-                    let mut field_errors = field_errors;
-                    let mut reload_generation = reload_generation;
-                    let mut notice = notice;
-                    let mut open = open;
-                    run_admin_action(
-                        busy,
-                        async move {
-                            create_admin_auction(
-                                request.command_id,
-                                request.auction_id,
-                                request.world_id,
-                                request.sequence,
-                                request.preview_scheduled_at,
-                                request.scheduled_open_at,
-                                request.scheduled_end_at,
-                            )
-                            .await
+                    let request = CreateRequest {
+                        auction_id: Uuid::new_v4(),
+                        world_id: world_id_value,
+                        sequence: sequence_value,
+                        preview_scheduled_at: normalize_datetime(&preview_scheduled_at_value),
+                        scheduled_open_at: normalize_datetime(&scheduled_open_at_value),
+                        scheduled_end_at: normalize_datetime(&scheduled_end_at_value),
+                    };
+                    pending.submit(
+                        "create-auction".to_owned(),
+                        t!("admin-auctions-create-submit"),
+                        move |command_id| {
+                            let request = request.clone();
+                            async move {
+                                create_admin_auction(
+                                    command_id,
+                                    request.auction_id,
+                                    request.world_id,
+                                    request.sequence,
+                                    request.preview_scheduled_at,
+                                    request.scheduled_open_at,
+                                    request.scheduled_end_at,
+                                )
+                                .await
+                            }
                         },
                         move |_| {
-                            // 对话框内反馈随关闭一并销毁；成功提示移交页面级 notice。
-                            feedback.set(None);
-                            notice.set(Some(AdminAuctionNotice::Created));
-                            field_errors.set(CreateFieldErrors::default());
-                            reload_generation.set(reload_generation().saturating_add(1));
-                            open.set(false);
+                            // 页面持有成功提示；关闭弹窗不取消请求，也不丢弃回执。
+                            set_if_alive(notice, Some(AdminAuctionNotice::Created));
+                            set_if_alive(open, false);
                         },
                         move |code| {
-                            // 可归属字段的服务端错误落到字段旁，其余保持页面级反馈。
-                            if code == "world_not_found" {
-                                field_errors.write().world = Some(CreateFieldIssue::WorldNotFound);
-                                focus_field("create-world");
+                            let mut field_errors = field_errors;
+                            if code == "world_not_found"
+                                && let Ok(mut errors) = field_errors.try_write()
+                            {
+                                errors.world = Some(CreateFieldIssue::WorldNotFound);
                             }
-                            feedback.set(Some(AdminActionFeedback::Error(code)));
+                            set_if_alive(feedback, Some(AdminActionFeedback::Error(code)));
                         },
                     );
                 },
@@ -261,15 +251,15 @@ fn AdminAuctionCreateFields(
                 }
                 select {
                     id: "create-world",
-                    disabled: busy(),
+                    disabled: frozen(),
                     autofocus: true,
                     required: true,
                     aria_invalid: field_errors().world.is_some().then_some("true"),
                     aria_describedby: field_errors().world.is_some().then_some("create-world-error"),
                     value: world_id(),
                     onchange: move |event| {
+                        if frozen() { return; }
                         world_id.set(event.value());
-                        request_state.set(None);
                         field_errors.write().world = None;
                         feedback.set(None);
                     },
@@ -290,13 +280,13 @@ fn AdminAuctionCreateFields(
                     r#type: "number",
                     min: "1",
                     required: true,
-                    disabled: busy(),
+                    disabled: frozen(),
                     aria_invalid: field_errors().sequence.is_some().then_some("true"),
                     aria_describedby: field_errors().sequence.is_some().then_some("create-sequence-error"),
                     value: sequence(),
                     oninput: move |event| {
+                        if frozen() { return; }
                         sequence.set(event.value());
-                        request_state.set(None);
                         field_errors.write().sequence = None;
                         feedback.set(None);
                     },
@@ -313,13 +303,13 @@ fn AdminAuctionCreateFields(
                     id: "create-preview",
                     r#type: "datetime-local",
                     required: true,
-                    disabled: busy(),
+                    disabled: frozen(),
                     aria_invalid: field_errors().preview.is_some().then_some("true"),
                     aria_describedby: field_errors().preview.is_some().then_some("create-preview-error"),
                     value: preview_scheduled_at(),
                     oninput: move |event| {
+                        if frozen() { return; }
                         preview_scheduled_at.set(event.value());
-                        request_state.set(None);
                         field_errors.write().preview = None;
                         feedback.set(None);
                     },
@@ -336,13 +326,13 @@ fn AdminAuctionCreateFields(
                     id: "create-open",
                     r#type: "datetime-local",
                     required: true,
-                    disabled: busy(),
+                    disabled: frozen(),
                     aria_invalid: field_errors().open.is_some().then_some("true"),
                     aria_describedby: field_errors().open.is_some().then_some("create-open-error"),
                     value: scheduled_open_at(),
                     oninput: move |event| {
+                        if frozen() { return; }
                         scheduled_open_at.set(event.value());
-                        request_state.set(None);
                         field_errors.write().open = None;
                         feedback.set(None);
                     },
@@ -359,13 +349,13 @@ fn AdminAuctionCreateFields(
                     id: "create-end",
                     r#type: "datetime-local",
                     required: true,
-                    disabled: busy(),
+                    disabled: frozen(),
                     aria_invalid: field_errors().end.is_some().then_some("true"),
                     aria_describedby: field_errors().end.is_some().then_some("create-end-error"),
                     value: scheduled_end_at(),
                     oninput: move |event| {
+                        if frozen() { return; }
                         scheduled_end_at.set(event.value());
-                        request_state.set(None);
                         field_errors.write().end = None;
                         feedback.set(None);
                     },
@@ -376,7 +366,7 @@ fn AdminAuctionCreateFields(
                 }
                 button {
                     r#type: "submit",
-                    disabled: busy(),
+                    disabled: frozen(),
                     if busy() { {t!("admin-action-working")} } else { {t!("admin-auctions-create-submit")} }
                 }
                 if let Some(feedback) = feedback() {

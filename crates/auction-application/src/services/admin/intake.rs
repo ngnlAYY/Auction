@@ -59,7 +59,6 @@ where
             return Ok(result);
         }
 
-        let now = self.clock.now();
         let source_kind = command.normalized_source_kind();
         let mut snapshot = match source_kind {
             AdminIntakeSourceKind::Url => {
@@ -79,8 +78,8 @@ where
                     .await?
             }
         };
-        snapshot.collected_at = now;
-        snapshot.validate_for_admin(now, self.policy)?;
+        // 来源采集时间保持原文；读取完成后再校验，聚合写入时间由持锁事务单独取得。
+        snapshot.validate_for_admin(self.clock.now(), self.policy)?;
 
         let equipment_id = EquipmentId::from_uuid(Uuid::new_v4());
         let submission_id = Uuid::new_v4();

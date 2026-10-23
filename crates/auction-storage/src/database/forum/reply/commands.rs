@@ -68,8 +68,7 @@ pub(super) async fn begin_command_postgres(
     // canonical v28 旧账本使用另一套稳定 ID；自然键相同且负载逐项一致时必须复用旧 ID，
     // 否则历史回复会在每轮全主题扫描中持续触发唯一约束并阻断后续新命令。
     let rows = sqlx::query(
-        "SELECT command_id, auction_id, world_id, thread_id, post_id, post_number,
-                line_number, lot_code,
+        "SELECT command_id, auction_id, world_id, thread_id, post_id, line_number, lot_code,
                 actor, command_kind, amount, status
          FROM public.auction_forum_bid_commands
          WHERE command_id = $1
@@ -104,8 +103,6 @@ pub(super) async fn begin_command_postgres(
         row.try_get("thread_id").map_err(|_| storage_error("读取论坛命令主题标识失败"))?;
     let existing_post_id: String =
         row.try_get("post_id").map_err(|_| storage_error("读取论坛命令帖子标识失败"))?;
-    let existing_post_number: Option<i32> =
-        row.try_get("post_number").map_err(|_| storage_error("读取论坛命令楼层号失败"))?;
     let existing_line_number: i32 =
         row.try_get("line_number").map_err(|_| storage_error("读取论坛命令行号失败"))?;
     let existing_lot_code: String =
@@ -118,11 +115,11 @@ pub(super) async fn begin_command_postgres(
         row.try_get("amount").map_err(|_| storage_error("读取论坛命令金额失败"))?;
     let stored_status: String =
         row.try_get("status").map_err(|_| storage_error("读取论坛命令状态失败"))?;
+    // post_id 与原业务负载决定身份；全主题重新编号不是负载变化，不能阻断已完成命令。
     let same = existing_auction_id == record.auction_id.as_uuid()
         && existing_world == forum_world_name(record.world)
         && existing_thread_id == record.thread_id
         && existing_post_id == record.post_id
-        && existing_post_number.is_none_or(|value| value == record.post_number)
         && existing_line_number == record.line_number
         && existing_lot_code == record.lot_code
         && existing_actor == record.actor
@@ -131,18 +128,7 @@ pub(super) async fn begin_command_postgres(
     if !same {
         return Err(storage_error("论坛命令标识与既有负载冲突"));
     }
-    if existing_post_number.is_none() {
-        sqlx::query(
-            "UPDATE public.auction_forum_bid_commands
-             SET post_number = $2, updated_at = CURRENT_TIMESTAMP
-             WHERE command_id = $1 AND post_number IS NULL",
-        )
-        .bind(existing_command_id)
-        .bind(record.post_number)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|_| storage_error("补齐论坛命令真实楼层号失败"))?;
-    }
+    // 所有既有楼层都保留首次观察，旧账本的 NULL 也不能用删帖后的当前编号补造。
     let (status, should_run) = match stored_status.as_str() {
         "pending" => {
             sqlx::query(

@@ -24,8 +24,14 @@ pub(super) fn parse_command(
     if !result.validate() {
         return Err(admin_error(AdminCredentialError::StoredResultCorrupt));
     }
+    // 删除凭据会通过外键 SET NULL 清空关联；摘要和历史 payload 仍是原命令的重放依据。
+    // 关联仍存在时必须一致，不能读取当前凭据替换历史结果。
     match (&result.credential, &result.deleted, credential_id) {
-        (Some(credential), None, Some(stored_id)) if credential.id == stored_id => Ok(result),
+        (Some(credential), None, stored_id)
+            if stored_id.is_none_or(|stored_id| credential.id == stored_id) =>
+        {
+            Ok(result)
+        }
         (None, Some(deleted), stored_id)
             if stored_id.is_none_or(|stored_id| stored_id == deleted.credential_id) =>
         {

@@ -36,6 +36,8 @@ impl AppConfig {
                 session: None,
                 secrets_path: None,
                 runtime_config_path: None,
+                worker_config_path: None,
+                runtime_worker_budget: None,
             },
         )
     }
@@ -84,10 +86,16 @@ impl AppConfig {
             realtime,
             secrets_file,
             runtime_config_file,
+            worker_config_file,
             worker,
             http_security,
             session: _,
         } = file;
+        if worker_config_file.is_some() && role != Role::Admin {
+            return Err(ConfigError::InvalidRuntimeWorkerConfig(
+                "worker_config_file 只能由 Admin 角色配置",
+            ));
+        }
         let common_config_path = resolve_config_path(config_path.as_deref(), common_file);
         let common = load_common_file(&common_config_path)?;
         let CommonFileConfig { log_filter, metrics, cache, auction } = common;
@@ -95,6 +103,12 @@ impl AppConfig {
         let secrets_path = Some(resolve_secrets_path(config_path.as_deref(), secrets_file));
         let runtime_config_path =
             runtime_config_file.map(|path| resolve_config_path(config_path.as_deref(), path));
+        let worker_config_path =
+            worker_config_file.map(|path| resolve_config_path(config_path.as_deref(), path));
+        let runtime_worker_budget = worker_config_path
+            .as_deref()
+            .map(|path| load_runtime_worker_budget(path, runtime_config_path.as_deref()))
+            .transpose()?;
 
         Self::build(
             role,
@@ -114,6 +128,8 @@ impl AppConfig {
                 session: Some(session),
                 secrets_path,
                 runtime_config_path,
+                worker_config_path,
+                runtime_worker_budget,
             },
         )
     }
@@ -124,4 +140,38 @@ fn load_common_file(path: &Path) -> Result<CommonFileConfig, ConfigError> {
     let contents = read_toml_file(path)
         .map_err(|source| ConfigError::Read { path: path.to_owned(), source })?;
     toml::from_str(&contents).map_err(|_| ConfigError::Parse { path: path.to_owned() })
+}
+
+/// 有界读取真实 Worker 角色文件并冻结最小预算基值，不递归加载 common 或 secrets。
+fn load_runtime_worker_budget(
+    path: &Path,
+    runtime_path: Option<&Path>,
+) -> Result<auction_application::AdminRuntimeMailDeliveryBudget, ConfigError> {
+    let runtime_path = runtime_path.ok_or(ConfigError::InvalidRuntimeWorkerConfig(
+        "worker_config_file 要求 Admin 同时配置 runtime_config_file",
+    ))?;
+    let contents = read_toml_file(path)
+        .map_err(|source| ConfigError::Read { path: path.to_owned(), source })?;
+    let file: FileConfig<SessionConfig> =
+        toml::from_str(&contents).map_err(|_| ConfigError::Parse { path: path.to_owned() })?;
+    if file.worker_config_file.is_some() {
+        return Err(ConfigError::InvalidRuntimeWorkerConfig(
+            "worker_config_file 必须指向 Worker 角色文件，不能包含另一个 worker_config_file",
+        ));
+    }
+    let worker_runtime_path =
+        file.runtime_config_file.ok_or(ConfigError::InvalidRuntimeWorkerConfig(
+            "worker_config_file 指向的 Worker 必须配置同源 runtime_config_file",
+        ))?;
+    let worker_runtime_path = resolve_config_path(Some(path), worker_runtime_path);
+    let worker_runtime_identity = fs::canonicalize(&worker_runtime_path)
+        .map_err(|source| ConfigError::Read { path: worker_runtime_path, source })?;
+    let runtime_identity = fs::canonicalize(runtime_path)
+        .map_err(|source| ConfigError::Read { path: runtime_path.to_owned(), source })?;
+    if worker_runtime_identity != runtime_identity {
+        return Err(ConfigError::InvalidRuntimeWorkerConfig(
+            "Admin 与 worker_config_file 指向的 Worker 必须共用同一 runtime_config_file",
+        ));
+    }
+    Ok(file.worker.mail_delivery_budget())
 }

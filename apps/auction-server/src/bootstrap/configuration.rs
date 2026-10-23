@@ -81,6 +81,14 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
     }
     let worker = &plans[0].config;
     let admin = &plans[1].config;
+    if let Some(path) = &admin.worker_config_path {
+        let worker_path = worker.config_path.as_deref().context("Worker 主配置路径缺失")?;
+        if fs::canonicalize(path).context("读取 Admin worker_config_file 身份失败")?
+            != fs::canonicalize(worker_path).context("读取 Worker 主配置身份失败")?
+        {
+            bail!("Admin worker_config_file 必须指向当前部署的 Worker 主配置");
+        }
+    }
     let expected = auction_storage::strict_deployment_database_identity(
         worker.database_url().context("database required")?,
     )?;
@@ -92,6 +100,12 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
             || plan.config.equipment_colors != worker.equipment_colors
         {
             bail!("三角色必须共用同一 runtime_config_file（或全部省略），且装备规则快照一致");
+        }
+        // 全部省略仍保留能力缺失语义；装备信封的三角色消费者不得持有不同密钥。
+        if plan.config.equipment_data_key_id() != worker.equipment_data_key_id()
+            || plan.config.equipment_data_key() != worker.equipment_data_key()
+        {
+            bail!("Public、Admin 与 Worker 必须使用相同的 equipment_data_key 标识和材料");
         }
         if auction_storage::strict_deployment_database_identity(
             plan.config.database_url().context("database required")?,
@@ -109,8 +123,6 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
     }
     if admin.auction != worker.auction
         || admin.worker_control_socket_path() != worker.worker.control.socket_path
-        || admin.equipment_data_key_id() != worker.equipment_data_key_id()
-        || admin.equipment_data_key() != worker.equipment_data_key()
         || admin.user_login_data_key_id() != worker.user_login_data_key_id()
         || admin.user_login_data_key() != worker.user_login_data_key()
         || admin.credential_data_key_id() != worker.credential_data_key_id()
