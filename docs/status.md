@@ -35,6 +35,28 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-23 历史投递安全恢复（授权真实任务处置）
+
+用户选择“安全恢复”：只处理云端 `auction_test` 的 24 条原单次 Sent 基线读取失败，重排队 4 条注册回复和 6 条仍有效的
+超价提醒，终结 14 条已永久失效提醒；保留原 1 条实际发送未知及 10 条已有专项处置的旧结算失败。判断同时核对原发布版本
+sender 的错误传播：基线错误以 `operation=sent/stage=read` 返回，写后证明错误统一包装为 `operation=send/write_unknown`，
+并核验原单次 attempt/fence、零资产、无资金绑定及当前来源资格，不仅凭 `write_started=false` 或 Sent 零命中授权重发。
+
+先将完整目标行、来源通知、标记、领先周期、原未知和旧结算行保存为云端 root 私有行级补偿备份，落盘同步并复核 SHA-256；
+原 R27 升级前全库恢复点继续保留。本次经正式 Admin 会话、CSRF 与 reconcile API 执行，24 个稳定 command ID、
+原 fencing version CAS、命令账本及追加审计逐条确认；未直接写业务 SQL，处置后注销临时管理会话。原 metadata 已在私有备份留存。
+
+09:39:51 UTC 24 项管理命令全部完成。至 09:51:39 UTC，正常 Worker 已将其中 9 条补发证明为 `sent_exact_payload_v1`
+（3 条注册回复、6 条提醒）；14 条过期提醒为 `failed/lot_watch_invalidated`。剩余注册回复
+`9b2c4e59-7d51-5a6d-942d-accad8ca24ac` 在这次实际发送后缺少完整 Sent 证明，进入 `manual_reconcile/write_unknown`，
+未再次重试；原未知 `332fa19b-fd0b-59a4-b1c6-38053070ac48` 和旧结算投递逐行摘要保持不变。人工核对总数由 25 降至 2，
+不把发后未知判为成功或未发送。新未知响应的加密证据已离线认证核对，只留脱敏摘要，临时明文已删除。
+
+处置前两份认证响应确有 `battle_main` DOM、没有正常邮件 DOM，说明当时 `account_busy` 为游戏战斗页；之后邮件读取恢复，
+未让程序代操作战斗或更换 CK。Worker PID `188169`、invocation 与重启计数保持原状；未改配置、迁移或启动本地 Worker。
+脱敏回执位于 `target/operations-evidence/delivery-recovery-20261023/`，完整行级备份留在云端私有目录。
+本次为获准历史任务实际补发及只读结果核验，没有额外触发注册、竞价、论坛或浏览器测试。
+
 ### 2026-10-23 R27 云端发布与 schema 59（授权迁移、启动与制品核验）
 
 发布 owner 为 `ci/release`、`auctionctl` 分体停机/迁移控制器和三角色装配；邮件、凭据及论坛能力的 owner 见下方源码记录。
