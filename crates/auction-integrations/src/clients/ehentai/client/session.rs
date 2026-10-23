@@ -31,10 +31,18 @@ impl EhentaiClient {
                 continue;
             }
             let pairs = url.query_pairs().collect::<Vec<_>>();
-            profile |= pairs.len() == 1
-                && pairs[0].0 == "showuser"
-                && pairs[0].1.bytes().all(|byte| byte.is_ascii_digit())
-                && pairs[0].1.parse::<u64>().is_ok_and(|value| value > 0);
+            // 仅带共享认证字段的首个请求会生成短时 s；它不改变系统个人链接的账号身份。
+            // 仍只接受唯一 showuser 与至多一个合法 session，不接受额外或重复参数。
+            profile |= (1..=2).contains(&pairs.len())
+                && pairs.iter().filter(|(key, _)| key == "showuser").count() == 1
+                && pairs.iter().all(|(key, value)| match key.as_ref() {
+                    "showuser" => {
+                        value.bytes().all(|byte| byte.is_ascii_digit())
+                            && value.parse::<u64>().is_ok_and(|value| value > 0)
+                    }
+                    "s" => value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                    _ => false,
+                });
             logout |= pairs.iter().filter(|(key, _)| key == "act").count() == 1
                 && pairs.iter().any(|(key, value)| key == "act" && value == "Login")
                 && pairs.iter().filter(|(key, _)| key == "CODE").count() == 1

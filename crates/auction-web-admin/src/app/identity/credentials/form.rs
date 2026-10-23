@@ -1,5 +1,6 @@
 //! 凭据页面的安全录入表单。
 
+use auction_contracts::{AdminCredentialCreateRequest, AdminCredentialLoginRequest};
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 use uuid::Uuid;
@@ -15,12 +16,18 @@ struct CredentialFieldErrors {
     label: Option<CredentialFieldIssue>,
     player_name: Option<CredentialFieldIssue>,
     secret: Option<CredentialFieldIssue>,
+    username: Option<CredentialFieldIssue>,
+    password: Option<CredentialFieldIssue>,
 }
 
 impl CredentialFieldErrors {
     /// 是否存在任一字段错误。
     const fn any(&self) -> bool {
-        self.label.is_some() || self.player_name.is_some() || self.secret.is_some()
+        self.label.is_some()
+            || self.player_name.is_some()
+            || self.secret.is_some()
+            || self.username.is_some()
+            || self.password.is_some()
     }
 
     /// 表单序上第一个错误字段的控件 id，用于提交失败后聚焦。
@@ -31,6 +38,10 @@ impl CredentialFieldErrors {
             Some("import-player-name")
         } else if self.secret.is_some() {
             Some("import-secret")
+        } else if self.username.is_some() {
+            Some("import-username")
+        } else if self.password.is_some() {
+            Some("current-password")
         } else {
             None
         }
@@ -47,6 +58,10 @@ enum CredentialFieldIssue {
     PlayerNameInvalid,
     /// 服务端返回凭据内容无效。
     SecretInvalid,
+    /// 论坛账号名称超出长度或字符边界。
+    UsernameInvalid,
+    /// 论坛密码超出长度或字符边界。
+    PasswordInvalid,
     /// 服务端返回凭据冲突（同 world/kind 下标签重复）。
     LabelConflict,
 }
@@ -59,8 +74,17 @@ fn credential_field_issue_message(issue: CredentialFieldIssue) -> String {
             t!("admin-credentials-field-player-name-invalid")
         }
         CredentialFieldIssue::SecretInvalid => t!("admin-credentials-field-secret-invalid"),
+        CredentialFieldIssue::UsernameInvalid => t!("admin-credentials-field-username-invalid"),
+        CredentialFieldIssue::PasswordInvalid => t!("admin-credentials-field-password-invalid"),
         CredentialFieldIssue::LabelConflict => t!("admin-credentials-field-label-conflict"),
     }
+}
+
+/// 只选择当前导入来源；获取成功仍仅写入所选 kind/world 的一条凭据。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CredentialSource {
+    Cookie,
+    ForumLogin,
 }
 
 #[component]
@@ -70,9 +94,13 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
     let mut label = use_signal(String::new);
     let mut player_name = use_signal(String::new);
     let mut secret = use_signal(String::new);
+    let mut source = use_signal(|| CredentialSource::Cookie);
+    let mut username = use_signal(String::new);
+    let mut password = use_signal(String::new);
     let mut command_id_state = use_signal(|| None::<Uuid>);
     let busy = use_signal(|| false);
-    // 未知结果累计在原表单；Cookie 不复制到未决集合，只有明确成功才能解除锁定。
+    // 未知结果累计在原表单；来源、密码/CK 和其他字段原样冻结，不复制到未决集合。
+    // 只有用户提交才发起登录；后续前置拒绝不能解除先前未知，只有明确成功才能解锁。
     let mut unknown = use_signal(|| false);
     let mut feedback = use_signal(|| None::<AdminActionFeedback>);
     let mut field_errors = use_signal(CredentialFieldErrors::default);
@@ -81,6 +109,7 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
         form {
             class: "admin-credentials-import",
             aria_busy: busy(),
+            method: "post",
             aria_describedby: unknown().then_some("import-unknown-help"),
             onsubmit: move |event| {
                     event.prevent_default();
@@ -93,12 +122,22 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                     let mut player_name_signal = player_name;
                     let mut secret_signal = secret;
                     let kind = kind_signal();
+                    let submitted_source = source();
                     let world = world_signal();
                     let label = label_signal();
                     let expected_player_name = player_name_signal();
                     let player_name = (kind == "mail_cookie" && !expected_player_name.is_empty())
                         .then_some(expected_player_name);
-                    let raw_secret = secret();
+                    let (raw_secret, login) = match submitted_source {
+                        CredentialSource::Cookie => (secret(), None),
+                        CredentialSource::ForumLogin => (
+                            String::new(),
+                            Some(AdminCredentialLoginRequest {
+                                username: username(),
+                                password: password(),
+                            }),
+                        ),
+                    };
                     // 逐字段校验并定位错误；提交失败聚焦第一个错误字段。
                     let mut errors = CredentialFieldErrors::default();
                     if label.trim().is_empty() {
@@ -109,7 +148,23 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                     }) {
                         errors.player_name = Some(CredentialFieldIssue::PlayerNameInvalid);
                     }
-                    if raw_secret.is_empty() {
+                    if let Some(login) = &login {
+                        if login.username.is_empty() {
+                            errors.username = Some(CredentialFieldIssue::Required);
+                        } else if login.username.len() > 256
+                            || login.username != login.username.trim()
+                            || login.username.chars().any(char::is_control)
+                        {
+                            errors.username = Some(CredentialFieldIssue::UsernameInvalid);
+                        }
+                        if login.password.is_empty() {
+                            errors.password = Some(CredentialFieldIssue::Required);
+                        } else if login.password.len() > 4096
+                            || login.password.bytes().any(|byte| byte.is_ascii_control())
+                        {
+                            errors.password = Some(CredentialFieldIssue::PasswordInvalid);
+                        }
+                    } else if raw_secret.is_empty() {
                         errors.secret = Some(CredentialFieldIssue::Required);
                     }
                     if errors.any() {
@@ -129,12 +184,19 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                             command_id
                         }
                     };
+                    let command = AdminCredentialCreateRequest {
+                        command_id,
+                        kind,
+                        world,
+                        label,
+                        player_name,
+                        secret: raw_secret,
+                        login,
+                    };
                     run_admin_action(
                         busy,
                         async move {
-                            create_admin_credential(command_id, kind, world, label, player_name, raw_secret)
-                                .await
-                                .map(|_| ())
+                            create_admin_credential(command).await.map(|_| ())
                         },
                         move |()| {
                             feedback.set(Some(AdminActionFeedback::Success));
@@ -143,6 +205,9 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                             label_signal.set(String::new());
                             player_name_signal.set(String::new());
                             secret_signal.set(String::new());
+                            username.set(String::new());
+                            password.set(String::new());
+                            source.set(CredentialSource::Cookie);
                             command_id_state.set(None);
                             unknown.set(false);
                             field_errors.set(CredentialFieldErrors::default());
@@ -155,6 +220,8 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                                 | "invalid_credential_request" | "invalid_credential_label"
                                 | "invalid_credential_player_name" | "invalid_credential_secret"
                                 | "credential_conflict"
+                                | "credential_login_rejected" | "credential_login_challenge"
+                                | "credential_login_unavailable" | "credential_login_busy"
                             );
                             unknown.set(unknown() || !rejected);
                             // 可归属字段的服务端错误落到字段旁，其余保持页面级反馈。
@@ -169,7 +236,8 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                                         Some(CredentialFieldIssue::PlayerNameInvalid);
                                     focus_field("import-player-name");
                                 }
-                                "invalid_credential_secret" => {
+                                "invalid_credential_secret"
+                                    if submitted_source == CredentialSource::Cookie => {
                                     field_errors.write().secret =
                                         Some(CredentialFieldIssue::SecretInvalid);
                                     focus_field("import-secret");
@@ -271,16 +339,54 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                 }
             }
             label {
+                    r#for: "import-source",
+                    {t!("admin-credentials-source")}
+                    select {
+                        id: "import-source",
+                        disabled: busy() || unknown(),
+                        aria_describedby: "import-source-help",
+                        value: match source() {
+                            CredentialSource::Cookie => "cookie",
+                            CredentialSource::ForumLogin => "forum_login",
+                        },
+                        onchange: move |event| {
+                            if busy() || unknown() { return; }
+                            source.set(if event.value() == "forum_login" {
+                                CredentialSource::ForumLogin
+                            } else {
+                                CredentialSource::Cookie
+                            });
+                            // 已知未写入时切换来源，清除离开分支的敏感值，避免隐藏表单继续持有。
+                            secret.set(String::new());
+                            username.set(String::new());
+                            password.set(String::new());
+                            command_id_state.set(None);
+                            let mut errors = field_errors.write();
+                            errors.secret = None;
+                            errors.username = None;
+                            errors.password = None;
+                            feedback.set(None);
+                        },
+                        option { value: "cookie", {t!("admin-credentials-source-cookie")} }
+                        option { value: "forum_login", {t!("admin-credentials-source-login")} }
+                    }
+            }
+            p { id: "import-source-help", {t!("admin-credentials-source-help")} }
+            if source() == CredentialSource::Cookie {
+            label {
                     r#for: "import-secret",
                     {t!("admin-credentials-secret")}
                     input {
                         id: "import-secret",
                         r#type: "password",
                         autocomplete: "off",
+                        autocapitalize: "none",
+                        "autocorrect": "off",
+                        spellcheck: "false",
                         disabled: busy() || unknown(),
                         required: true,
                         aria_invalid: field_errors().secret.is_some().then_some("true"),
-                        aria_describedby: field_errors().secret.is_some().then_some("import-secret-error"),
+                        aria_describedby: "import-secret-help import-secret-error",
                         value: secret(),
                         oninput: move |event| {
                             if busy() || unknown() { return; }
@@ -293,6 +399,68 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
             FieldError {
                     id: "import-secret-error",
                     message: field_errors().secret.map(credential_field_issue_message),
+            }
+                p { id: "import-secret-help", {t!("admin-credentials-secret-help")} }
+            } else {
+                label {
+                    r#for: "import-username",
+                    {t!("admin-credentials-login-username")}
+                    input {
+                        id: "import-username",
+                        name: "username",
+                        r#type: "text",
+                        autocomplete: "username",
+                        autocapitalize: "none",
+                        "autocorrect": "off",
+                        spellcheck: "false",
+                        disabled: busy() || unknown(),
+                        required: true,
+                        maxlength: 256,
+                        aria_invalid: field_errors().username.is_some().then_some("true"),
+                        aria_describedby: "import-login-help import-username-error",
+                        value: username(),
+                        oninput: move |event| {
+                            if busy() || unknown() { return; }
+                            username.set(event.value());
+                            command_id_state.set(None);
+                            field_errors.write().username = None;
+                        },
+                    }
+                }
+                FieldError {
+                    id: "import-username-error",
+                    message: field_errors().username.map(credential_field_issue_message),
+                }
+                label {
+                    r#for: "current-password",
+                    {t!("admin-credentials-login-password")}
+                    input {
+                        id: "current-password",
+                        name: "password",
+                        r#type: "password",
+                        autocomplete: "current-password",
+                        autocapitalize: "none",
+                        "autocorrect": "off",
+                        spellcheck: "false",
+                        disabled: busy() || unknown(),
+                        required: true,
+                        maxlength: 4096,
+                        aria_invalid: field_errors().password.is_some().then_some("true"),
+                        aria_describedby: "import-login-help import-password-error",
+                        value: password(),
+                        oninput: move |event| {
+                            if busy() || unknown() { return; }
+                            password.set(event.value());
+                            command_id_state.set(None);
+                            field_errors.write().password = None;
+                        },
+                    }
+                }
+                FieldError {
+                    id: "import-password-error",
+                    message: field_errors().password.map(credential_field_issue_message),
+                }
+                p { id: "import-login-help", {t!("admin-credentials-login-help")} }
             }
             if unknown() {
                 p { id: "import-unknown-help", role: "status",
@@ -313,9 +481,12 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
             button {
                     r#type: "submit",
                     class: "admin-btn-primary",
-                    disabled: busy() || label().trim().is_empty() || secret().is_empty(),
+                    disabled: busy(),
                     if busy() { {t!("admin-action-working")} }
                     else if unknown() { {t!("admin-pending-retry")} }
+                    else if source() == CredentialSource::ForumLogin {
+                        {t!("admin-credentials-login-submit")}
+                    }
                     else { {t!("admin-credentials-create-submit")} }
             }
         }

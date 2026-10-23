@@ -276,7 +276,7 @@ Public 浏览器仅在已认证且当前拍卖为 `live`/`final` 时启用 P04�
 | A29 | GET | /api/v1/admin/renames | 200 | 400, 401, 503/504 |
 | A30 | POST | /api/v1/admin/renames/{rename_id}/revert | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
 | A31 | PUT/DELETE | /api/v1/admin/users/{user_id}/blacklist | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
-| A32 | GET/POST/PATCH/DELETE | /api/v1/admin/credentials | GET 200；POST 201；PATCH/DELETE 200 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 |
+| A32 | GET/POST/PATCH/DELETE | /api/v1/admin/credentials | GET 200；POST 201；PATCH/DELETE 200 | 400, 401, 403, 404, 409, 413/415, 422, 429, 501, 503/504 |
 | A33 | GET | /api/v1/admin/audit | 200 | 400, 401, 503/504 |
 | A34 | GET | /api/v1/admin/deliveries | 200 | 400, 401, 501, 503/504 |
 | A35 | POST | /api/v1/admin/deliveries/{delivery_id}/release | 200 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 |
@@ -515,6 +515,30 @@ A28 已接入 Admin session、CSRF、列表筛选分页、用户安全投影及�
 A32 已接入 Admin session、origin/CSRF、`command_id` 和 `expected_state_version`，支持 `mail_cookie`/`forum_cookie` 的安全投影列表、导入、改名、启停和删除。secret 只在应用加密边界短暂存在，不进入响应、审计、命令结果或页面；该路由要求 PostgreSQL 与独立 `credential_data_key`，未配置密钥时返回 `501 feature_not_supported`；Worker 的 active 凭据读取不属于浏览器 DTO，`.keyenv` 只作兼容回退入口。`mail_cookie` 与 `forum_cookie` 各自全局最多一条 active，导入或重新启用同类第二条返回 `409 credential_conflict`，调用方必须先经同一路由停用旧记录并重启 Worker 完成交接。
 
 A32 导入与安全投影支持可省略/nullable 的 `player_name`，仅 `mail_cookie` 接受非空完整游戏玩家名称（非数字 UID）：Some 不含控制字符、无首尾空白且最多 256 UTF-8 字节，不 trim、不折叠大小写或猜别名，forum 设置即拒绝；None 不改变旧导入命令摘要，旧账本/DTO 缺字段按 None 解码，改名及启停不修改绑定。这是预期声明，不是 verified 状态；现有凭据保持原记录与密文，本轮没有补绑定写入口。当前 gateway 即使预期名 None 也读取同 MM 认证 UID 与论坛目标资料名，有值精确匹配，缺证据返回内部稳定码 `identity_unproven`；内部提交要求数据库 active ID/version、generation 和组合证明，不新增身份核验 HTTP 路由。A44 的 Valid 仅为可用性观测，Item Shop 余额也不是自身名称证明，不能授权内部免寄。
+
+A32 POST 保留粘贴 `secret` 的旧请求，新增可选 `login: { username, password }`；二者必须且只能选择一种。
+账号登录时 `secret` 省略或为空；粘贴时 `login` 省略或为 null。嵌套未知字段拒绝，不接受目标 URL、代理或浏览器 Cookie jar。
+论坛用户名为 1–256 UTF-8 字节，无首尾空白或控制字符；密码为 1–4096 UTF-8 字节，无 ASCII 控制字符，原样传递、不 trim。
+游戏和论坛获取均登录同一论坛账号；每次只导入所选 kind/world，不联动覆盖、启用另一种凭据，也不推导 `player_name`。
+
+粘贴完整论坛 Cookie 可用于 `mail_cookie`，新导入只密封 `ipb_member_id` 与 `ipb_pass_hash`；
+`forum_cookie` 保留通过校验的完整 Cookie header。缺失、重复或非法认证字段为 `400 invalid_credential_secret`。
+旧记录不重写、不迁移；粘贴来源仍按原始输入计算历史兼容摘要，再规范化待密封值。
+账号来源使用独立域、长度前缀和 `credential_data_key` 的 HMAC 绑定用户名/密码，再与来源、类型、世界、标签和预期名称组成摘要；
+不落盘密码、裸密码散列或远端响应。原命令已提交时先重放安全结果，不再次远端登录；不同来源或负载仍返回 409。
+
+远端流程固定为论坛 HTTPS 新鲜登录表单、一次 POST、只用两个共享认证字段读取用户控制台证明登录成功；
+提交目标限定同 origin 的 `/index.php?act=Login&CODE=01`，允许新鲜表单提供唯一、32 位十六进制的 `s` 会话参数并原样传递；
+重复参数、不同动作或跨 origin 失败关闭。`referer` 只接受同源登录页，兼容该站点生成的双重 HTML 转义 `amp;act`，不二次解码或跟随。
+不自动重试、不跟随重定向、不使用环境代理，也不执行论坛发帖或游戏写操作。验证码/额外验证为
+`422 credential_login_challenge`，管理员须在论坛浏览器登录后改用粘贴来源，不绕过验证；
+明确账号拒绝为 `422 credential_login_rejected`，协议/网络/超时为 `503 credential_login_unavailable`。
+每进程最多一个登录在飞，完成、失败或取消后冷却 30 秒；竞争或远端限流为
+`429 credential_login_busy`（`Retry-After: 30`）。远端总预算 10 秒、单请求 4 秒、相邻请求间隔 1 秒、单正文 512 KiB；
+浏览器仅导入请求使用 20 秒等待预算，服务端普通请求默认仍为 15 秒。
+成功响应仍为 `AdminCredentialMutationResponse`，只含安全投影与 `restart_required`，不返回取得的 Cookie。
+密码/CK 仅暂留当前页面内存供手动原样重试；结果未知时冻结来源、完整原值及 UUID，后续拒绝不解除累计未知，
+成功或离开页面清空。密码不写浏览器持久化存储，离开页面不表示服务端未提交。
 
 A44 只校验已保存凭据，不接受原始 Cookie 或远端 URL。请求是严格 JSON `{ "expected_state_version": 1 }`，最多 4 KiB，无查询参数；保留 Admin session、Origin、CSRF 与 mutation 限流，尽管使用 POST 防止跨站/预取触发，操作只读，不使用 `command_id` 或持久化命令账本；active、disabled、invalid 均可检查，不改变启停、Worker 所有权、版本、审计或重启要求。响应使用标准 `ApiResponse`，`data` 的必填闭集为 `credential_id`、`state_version`、`checked_at`（UTC RFC3339）和 `checks`；
 每项仅含 `world` 与 `status`，`status` 为 `valid`、`invalid`、`inconclusive`。论坛固定一项 `shared`，只证明登录态，不证明发帖权限；游戏按凭据范围检查 `main` 或 `isekai`，shared 固定按 main、isekai 顺序各返回一项。网络、超时、限流、战斗页、403/Cloudflare、未知页面或格式无法确认返回 `inconclusive`；只有明确登录失效证据才返回 `invalid`，两者仍为 HTTP 200，不触发 Admin 退出登录。探测固定 HTTPS 论坛用户控制台与游戏 Item Shop 余额页，不跟随重定向、不自动重试、不打开邮件或执行发帖、compose、send、take、return。

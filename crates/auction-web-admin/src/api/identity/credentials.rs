@@ -1,6 +1,6 @@
 //! Admin 凭据管理 API 客户端。
-//! 浏览器只保存凭据安全投影。导入表单的 secret 仅用于当前请求，成功后清空本地状态，
-//! 列表和命令响应都不包含凭据内容。
+//! 浏览器只保存凭据安全投影。导入的密码/CK 仅留在当前表单与请求内存中，成功后清空，
+//! 未知结果只允许原样手动重试；列表和命令响应都不包含凭据内容。
 
 use auction_contracts::{
     AdminCredentialCheckRequest, AdminCredentialCreateRequest, AdminCredentialDeleteRequest,
@@ -17,9 +17,12 @@ use uuid::Uuid;
 
 use super::{
     ApiResponse, MAX_JSON_SAFE_INTEGER, fetch_csrf_token, invalid_request_error,
-    invalid_response_error, response_error, send_get, send_request, valid_admin_time,
-    valid_trimmed_text, valid_uuid,
+    invalid_response_error, response_error, send_get, send_request, send_request_with_timeout,
+    valid_admin_time, valid_trimmed_text, valid_uuid,
 };
+
+// 导入须容纳服务端 10 秒论坛获取及原子写入；不延长其他 API 请求，也不自动重试。
+const CREDENTIAL_IMPORT_TIMEOUT_MILLIS: u32 = 20_000;
 
 // 本地 Strict 镜像已删除：contracts 的 `AdminCredentialResponse`（`rotated_at` 保持必填
 // nullable 语义）、`AdminCredentialListResponse`/`AdminCredentialMutationResponse`/
@@ -125,25 +128,21 @@ pub(crate) async fn fetch_admin_credentials(
         .map_err(invalid_response_error)
 }
 
-/// 导入一条凭据；secret 不会被写入前端状态或响应模型。
+/// 导入一条凭据；来源由完整命令确定，密码/CK 不进入持久化状态或响应模型。
 pub(crate) async fn create_admin_credential(
-    command_id: Uuid,
-    kind: String,
-    world: String,
-    label: String,
-    player_name: Option<String>,
-    secret: String,
+    command: AdminCredentialCreateRequest,
 ) -> Result<AdminCredential, String> {
     let csrf_token = fetch_csrf_token().await?;
-    let command =
-        AdminCredentialCreateRequest { command_id, kind, world, label, player_name, secret };
-    let response = send_request(|abort_signal| {
-        Request::post("/api/v1/admin/credentials")
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
+    let response = send_request_with_timeout(
+        |abort_signal| {
+            Request::post("/api/v1/admin/credentials")
+                .abort_signal(abort_signal)
+                .header("x-csrf-token", &csrf_token)
+                .json(&command)
+                .map_err(invalid_request_error)
+        },
+        CREDENTIAL_IMPORT_TIMEOUT_MILLIS,
+    )
     .await?;
     if !response.ok() {
         return Err(response_error(response).await);

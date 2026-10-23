@@ -4,9 +4,9 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{
-    AdminCredentialCommandKind, AdminCredentialDeleteCommand, AdminCredentialImportCommand,
-    AdminCredentialRenameCommand, AdminCredentialStatusCommand, ApplicationError, RequestHash,
-    credential_secret_hash,
+    AdminCredentialAcquirer, AdminCredentialCommandKind, AdminCredentialDeleteCommand,
+    AdminCredentialImportCommand, AdminCredentialImportSource, AdminCredentialRenameCommand,
+    AdminCredentialStatusCommand, ApplicationError, RequestHash, credential_secret_hash,
 };
 
 #[derive(Serialize)]
@@ -18,6 +18,9 @@ struct ImportDigest<'a> {
     // 无绑定保持旧摘要的精确序列化形状，避免破坏历史重放。
     #[serde(skip_serializing_if = "Option::is_none")]
     player_name: Option<&'a str>,
+    // 粘贴 Cookie 保留历史摘要；账号登录必须与 Cookie 来源分域，避免跨来源重放。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -42,7 +45,16 @@ struct DeleteDigest {
 
 pub(super) fn import_hash(
     command: &AdminCredentialImportCommand,
+    acquirer: &dyn AdminCredentialAcquirer,
 ) -> Result<RequestHash, ApplicationError> {
+    let (secret_hash, source) = match &command.source {
+        AdminCredentialImportSource::Cookie(secret) => {
+            (credential_secret_hash(secret.as_bytes()), None)
+        }
+        AdminCredentialImportSource::ForumLogin(login) => {
+            (acquirer.login_digest(login)?, Some("forum_login"))
+        }
+    };
     RequestHash::from_request(
         AdminCredentialCommandKind::Import.as_str(),
         Uuid::NAMESPACE_URL,
@@ -50,8 +62,9 @@ pub(super) fn import_hash(
             kind: command.kind.as_str(),
             world: command.world.as_str(),
             label: &command.label,
-            secret_hash: credential_secret_hash(command.secret.as_bytes()),
+            secret_hash,
             player_name: command.player_name.as_deref(),
+            source,
         },
     )
     .map_err(ApplicationError::from)

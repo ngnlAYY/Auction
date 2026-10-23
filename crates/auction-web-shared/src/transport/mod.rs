@@ -1,5 +1,5 @@
 //! 同源请求的共享传输边界。
-//! 唯一的 fetch 实现：10 秒 `AbortController` 取消边界与结构化 [`TransportError`] 分类。
+//! 唯一的 fetch 实现：默认 10 秒、可按单次请求指定的取消预算与结构化 [`TransportError`] 分类。
 //! Admin 的 CSRF token 与 Basic Auth **不进入本层**：调用方在 `build` 闭包里建立
 //! `web_sys::Request` 时自行叠加 header，本层只负责发送、超时取消与错误分类。
 
@@ -12,7 +12,7 @@ use gloo_net::http::{Request, Response};
 #[cfg(target_arch = "wasm32")]
 use gloo_timers::future::TimeoutFuture;
 
-/// 两端共用的请求超时上限（恢复旧版 10 秒语义）。
+/// 两端共用的默认请求超时上限（恢复旧版 10 秒语义）。
 pub const DEFAULT_REQUEST_TIMEOUT_MILLIS: u32 = 10_000;
 
 /// 共享传输层的结构化错误。
@@ -20,7 +20,7 @@ pub const DEFAULT_REQUEST_TIMEOUT_MILLIS: u32 = 10_000;
 /// 再经错误码映射层（见 `errors` 模块）转成本地化文案。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransportError {
-    /// 响应头与正文未在 [`DEFAULT_REQUEST_TIMEOUT_MILLIS`] 内完整读取；fetch 已取消。
+    /// 响应头与正文未在本次预算内完整读取；默认 [`DEFAULT_REQUEST_TIMEOUT_MILLIS`]，fetch 已取消。
     Timeout,
     /// 浏览器层网络失败或无法建立请求；正文读取失败保留已收到的 HTTP 状态。
     Network(Option<u16>),
@@ -77,13 +77,29 @@ pub async fn send_get_observed(
 pub async fn send_request(
     build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, TransportError>,
 ) -> Result<Response, TransportError> {
-    send_request_observed(build, |_| {}).await
+    send_request_with_timeout(build, DEFAULT_REQUEST_TIMEOUT_MILLIS).await
+}
+
+/// 为单次请求显式指定预算；复用相同的正文读取、取消和错误边界，不添加自动重试。
+pub async fn send_request_with_timeout(
+    build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, TransportError>,
+    timeout_millis: u32,
+) -> Result<Response, TransportError> {
+    send_request_observed_with_timeout(build, |_| {}, timeout_millis).await
 }
 
 /// 允许 surface 在响应头到达时校时，避免把正文传输耗时误算为时钟偏差；返回前仍完整读取正文。
 pub async fn send_request_observed(
     build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, TransportError>,
     observe: impl FnOnce(&Response),
+) -> Result<Response, TransportError> {
+    send_request_observed_with_timeout(build, observe, DEFAULT_REQUEST_TIMEOUT_MILLIS).await
+}
+
+async fn send_request_observed_with_timeout(
+    build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, TransportError>,
+    observe: impl FnOnce(&Response),
+    timeout_millis: u32,
 ) -> Result<Response, TransportError> {
     #[cfg(target_arch = "wasm32")]
     {
@@ -108,7 +124,7 @@ pub async fn send_request_observed(
                 if matches!(status, 204 | 205 | 304) { None } else { Some(body.as_mut_slice()) };
             builder.body(body).map_err(|_| TransportError::Decode)
         };
-        let timeout = TimeoutFuture::new(DEFAULT_REQUEST_TIMEOUT_MILLIS);
+        let timeout = TimeoutFuture::new(timeout_millis);
         pin_mut!(send, timeout);
         return match select(send, timeout).await {
             Either::Left((response, _)) => response,
@@ -121,7 +137,7 @@ pub async fn send_request_observed(
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = DEFAULT_REQUEST_TIMEOUT_MILLIS;
+        let _ = timeout_millis;
         let response = build(None)?.send().await.map_err(|_| TransportError::Network(None))?;
         observe(&response);
         Ok(response)

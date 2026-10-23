@@ -61,6 +61,9 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
   `auctionctl` 只装配命令，不在迁移中批量更正旧场次。
 - 身份证明：credentials owner 拥有预期 `player_name`、校验及版本传递，integrations 复用其 ownership，无预期名称
   也核验 HV 认证 UID 与论坛目标资料名，缺证据返回 `identity_unproven`，不建第二 Cookie 客户端。
+- 凭据获取：application 的 `ports/admin/credentials/acquisition.rs` 定义 Cookie/论坛账号来源、分域摘要与获取端口；
+  integrations 的 `credentials/acquire/` 独占新鲜登录表单、受限传输和论坛/游戏字段映射。
+  Admin Web 只提交所选来源，HTTP 保持安全响应；原 credential 存储事务、审计、单 active 和 Worker 重启边界不变，无新增迁移。
 - 邮件正文：domain 拥有冻结费率与价格明细的一致性校验，application 拥有通知身份与冻结结算 intent；storage 的
   [claims/pricing.rs](crates/auction-storage/src/database/fulfillment_scheduler/claims/pricing.rs) 投影不可变结算明细；integrations 的
   [settlement/pricing.rs](crates/auction-integrations/src/clients/mooglemail/transport/payload/settlement/pricing.rs) 仅校验和格式化价格解释，

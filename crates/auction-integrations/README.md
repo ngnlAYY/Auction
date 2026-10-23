@@ -15,7 +15,7 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
 | [src/clients/ehentai/client/pm](crates/auction-integrations/src/clients/ehentai/client/pm) | PM 新鲜表单准备、单次发送与同账号 Sent 精确证明 |
 | [src/clients/mooglemail](crates/auction-integrations/src/clients/mooglemail) | 邮件读取、动作/发送证明与加密诊断 |
 | [src/equipment](crates/auction-integrations/src/equipment) | 装备来源策略、页面解析与安全链接解析 |
-| [src/credentials](crates/auction-integrations/src/credentials) | Cookie 信封与 Admin 只读认证探测 |
+| [src/credentials](crates/auction-integrations/src/credentials) | Cookie 信封、Admin 论坛账号获取及只读认证探测 |
 | [src/cryptobox](crates/auction-integrations/src/cryptobox)、[src/login_key](crates/auction-integrations/src/login_key) | 装备/登录 key 加密与短时解密 |
 | [src/forum](crates/auction-integrations/src/forum) | 纯本地论坛解析与 BBCode 渲染 |
 
@@ -129,6 +129,14 @@ Opened、Bidding deadline，`Auction address` 使用原生 `[url=地址][b]地�
 Admin A44 在 [credentials/check.rs](crates/auction-integrations/src/credentials/check.rs) 使用独立只读探测器，仅接受
 数据库信封：401/明确登录失效为 invalid，挑战、战斗页、限流、超时或协议变化为 inconclusive，无写入、重试或状态回写。
 每进程单并发、站点间隔 2 秒、每范围含等待预算 5 秒、正文上限 2 MiB，成功只证明当次登录态。
+
+Admin A32 的 [credentials/acquire](crates/auction-integrations/src/credentials/acquire) 独占账号密码登录与 Cookie 字段映射：
+新鲜表单、一次 POST、共享认证字段的控制台正向证明；固定 HTTPS 目标，无代理、重定向、自动重试或远端业务写入。
+游戏只保留 `ipb_member_id`/`ipb_pass_hash`，论坛保留校验后的完整 header；密码仅在短时内存，命令摘要使用独立域 HMAC。
+进程单并发、取消后仍冷却、响应大小及绝对预算见 [A32 契约](docs/contracts/routes.md#外部凭据)；
+显式 `for_loopback` 仅供隔离协议验证，不由管理 API 或部署配置选择。自有敏感缓冲尽力清零，不承诺清理 reqwest/DOM 内部副本。
+全新论坛会话的表单 action 与认证导航可能携带短时 `s`：提交保留唯一合法 session 参数，
+控制台个人链接允许唯一 `showuser` 与可选合法 `s`，仍拒绝重复或额外参数；不记录这些短时 URL。
 
 ### PM 准备与已发送副本
 

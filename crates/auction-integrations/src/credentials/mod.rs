@@ -1,5 +1,5 @@
-//! 外部凭据密封适配器；mail_cookie 与 forum_cookie 使用不同 AAD 和指纹域，
-//! 本模块不读配置或数据库，只把明文转换为不透明密文信封。
+//! 外部凭据获取、校验与密封适配器；mail_cookie 与 forum_cookie 使用不同 AAD 和指纹域，
+//! 本模块不读配置或数据库，账号密码仅供单次论坛登录，持久化边界只接收不透明密文信封。
 
 use std::{fmt, sync::Arc};
 
@@ -16,7 +16,9 @@ use uuid::Uuid;
 
 use crate::DataKey;
 
+mod acquire;
 mod check;
+pub use acquire::CredentialAcquirer;
 pub use check::CredentialVerifier;
 
 const NONCE_LENGTH: usize = 12;

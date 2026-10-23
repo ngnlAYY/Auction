@@ -26,7 +26,7 @@ where
         command: AdminCredentialImportCommand,
     ) -> Result<AdminCredential, ApplicationError> {
         validate_import(&command)?;
-        let request_hash = import_hash(&command)?;
+        let request_hash = import_hash(&command, self.acquirer.as_ref())?;
         if let Some(result) = self
             .store
             .find_command(command.command_id, AdminCredentialCommandKind::Import, request_hash)
@@ -35,10 +35,13 @@ where
             return replay_credential(result);
         }
 
+        // 先按原输入重放，再执行远端登录；响应丢失后的重试不再次登录或更换 Cookie。
+        // 网络期间不持有数据库事务，Cookie 与安全命令结果仍由原存储事务原子提交。
+        let secret = self.acquirer.acquire(command.kind, command.source).await?;
         let credential_id = Uuid::new_v4();
         let scope = credential_scope(command.kind, command.world);
-        let envelope =
-            self.sealer.seal(command.kind, credential_id, &scope, command.secret.as_bytes())?;
+        let envelope = self.sealer.seal(command.kind, credential_id, &scope, secret.as_bytes())?;
+        drop(secret);
         let expected_label = command.label.clone();
         let expected_player_name = command.player_name.clone();
         let result = self

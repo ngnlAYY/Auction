@@ -45,8 +45,13 @@ pub(crate) async fn bootstrap_mail_credentials(world: &str, label: &str) -> anyh
             .await
             .context("connect database for credential bootstrap")?,
     );
-    let sealer = Arc::new(CredentialSealer::new(Arc::new(data_key)));
-    let service = AdminCredentialService::new(store, sealer);
+    let data_key = Arc::new(data_key);
+    let sealer = Arc::new(CredentialSealer::new(Arc::clone(&data_key)));
+    let acquirer = Arc::new(
+        auction_integrations::CredentialAcquirer::production(data_key)
+            .context("initialize credential acquisition client")?,
+    );
+    let service = AdminCredentialService::new(store, sealer, acquirer);
     let credential = service
         .import(AdminCredentialImportCommand {
             command_id: Uuid::new_v4(),
@@ -54,7 +59,7 @@ pub(crate) async fn bootstrap_mail_credentials(world: &str, label: &str) -> anyh
             world: credential_world,
             label: label.to_owned(),
             player_name: None,
-            secret,
+            source: auction_application::AdminCredentialImportSource::Cookie(secret),
             actor_id: "auctionctl/bootstrap-mail-credentials".to_owned(),
             request_id: None,
             now: Utc::now(),

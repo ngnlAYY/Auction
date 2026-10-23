@@ -204,14 +204,25 @@ pub(crate) async fn send_get(url: &str) -> Result<Response, String> {
 pub(crate) async fn send_request(
     build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, String>,
 ) -> Result<Response, String> {
+    send_request_with_timeout(build, auction_web_shared::DEFAULT_REQUEST_TIMEOUT_MILLIS).await
+}
+
+/// 为单次 Admin 请求指定等待预算；仍复用共享 fetch，不改变其他请求预算或添加重试。
+pub(crate) async fn send_request_with_timeout(
+    build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, String>,
+    timeout_millis: u32,
+) -> Result<Response, String> {
     let build_failure = std::cell::RefCell::new(None::<String>);
-    let result = auction_web_shared::send_request(|abort_signal| {
-        build(abort_signal).map_err(|code| {
-            // 占位错误不会被外层使用：build 失败时以暂存的业务 code 为准。
-            *build_failure.borrow_mut() = Some(code);
-            TransportError::Network(None)
-        })
-    })
+    let result = auction_web_shared::send_request_with_timeout(
+        |abort_signal| {
+            build(abort_signal).map_err(|code| {
+                // 占位错误不会被外层使用：build 失败时以暂存的业务 code 为准。
+                *build_failure.borrow_mut() = Some(code);
+                TransportError::Network(None)
+            })
+        },
+        timeout_millis,
+    )
     .await;
     match result {
         Ok(response) => Ok(response),

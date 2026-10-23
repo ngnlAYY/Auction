@@ -264,32 +264,37 @@ pub(super) async fn configure_state(
             None => None,
         };
     let mut credential_check: Option<Arc<dyn AdminCredentialCheckPort>> = None;
-    let admin_credentials: Option<Arc<dyn AdminCredentialPort>> =
-        if store.backend() == DatabaseBackend::Postgres {
-            match config.credential_data_key_id().zip(config.credential_data_key()) {
-                Some((key_id, key_material)) => {
-                    let data_key = Arc::new(
-                        DataKey::from_base64(key_id, key_material)
-                            .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-                    );
-                    let sealer = Arc::new(CredentialSealer::new(data_key));
-                    let opener: Arc<dyn AdminCredentialOpener> = sealer.clone();
-                    let verifier = Arc::new(
-                        CredentialVerifier::production(opener)
-                            .context("initialize credential check clients")?,
-                    );
-                    credential_check = Some(Arc::new(AdminCredentialCheckService::new(
-                        Arc::clone(&store),
-                        verifier,
-                        Arc::new(SystemClock),
-                    )));
-                    Some(Arc::new(AdminCredentialService::new(Arc::clone(&store), sealer)))
-                }
-                None => None,
+    let admin_credentials: Option<Arc<dyn AdminCredentialPort>> = if store.backend()
+        == DatabaseBackend::Postgres
+    {
+        match config.credential_data_key_id().zip(config.credential_data_key()) {
+            Some((key_id, key_material)) => {
+                let data_key = Arc::new(
+                    DataKey::from_base64(key_id, key_material)
+                        .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                );
+                let sealer = Arc::new(CredentialSealer::new(Arc::clone(&data_key)));
+                let acquirer = Arc::new(
+                    auction_integrations::CredentialAcquirer::production(data_key)
+                        .context("initialize credential acquisition client")?,
+                );
+                let opener: Arc<dyn AdminCredentialOpener> = sealer.clone();
+                let verifier = Arc::new(
+                    CredentialVerifier::production(opener)
+                        .context("initialize credential check clients")?,
+                );
+                credential_check = Some(Arc::new(AdminCredentialCheckService::new(
+                    Arc::clone(&store),
+                    verifier,
+                    Arc::new(SystemClock),
+                )));
+                Some(Arc::new(AdminCredentialService::new(Arc::clone(&store), sealer, acquirer)))
             }
-        } else {
-            None
-        };
+            None => None,
+        }
+    } else {
+        None
+    };
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
     let health: Arc<dyn HealthReader> = Arc::new(HealthService::new(heartbeat_store));
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
