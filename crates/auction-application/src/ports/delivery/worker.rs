@@ -203,6 +203,13 @@ pub trait DeliveryTransport: Send + Sync {
 
 /// delivery outbox 的窄存储端口。
 pub trait DeliveryWorkStore: Send + Sync {
+    /// 订阅提交后的非权威唤醒提示；旧适配器保留周期轮询，不伪造通知能力。
+    fn subscribe_wakeups(&self) -> ApplicationFuture<'_, Box<dyn crate::DeliveryWakeup>> {
+        Box::pin(async {
+            Err(crate::ApplicationError::CapabilityUnavailable("delivery wakeup subscription"))
+        })
+    }
+
     /// 领取可发送任务；compose 安全由 transport 在 sending fence 前实时只读检查。
     /// 历史未知结果保留人工核对，但不能按历史错误永久阻断同 world 新任务。
     fn claim_due(

@@ -8,7 +8,7 @@ impl MoogleMailDeliveryTransport {
         claim: &DeliveryWorkClaim,
         payload: &SettlementDeliveryPayload,
         world: MoogleMailWorld,
-        session: &mut MoogleMailCredentialSession,
+        session: &mut PreparedMoogleMailCredentials,
     ) -> Result<DeliverySendResult, DeliveryTransportError> {
         let (subject, body) =
             render_settlement(payload, &self.templates).ok_or_else(invalid_payload)?;
@@ -55,7 +55,7 @@ impl MoogleMailDeliveryTransport {
         claim: &DeliveryWorkClaim,
         payload: &MailDeliveryPayload,
         world: MoogleMailWorld,
-        session: &mut MoogleMailCredentialSession,
+        session: &mut PreparedMoogleMailCredentials,
     ) -> Result<DeliverySendResult, DeliveryTransportError> {
         let template = payload.template.as_deref().ok_or_else(invalid_payload)?;
         let result_code = payload.result_code.as_deref().ok_or_else(invalid_payload)?;

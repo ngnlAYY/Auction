@@ -76,10 +76,11 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 | [000056_equipment_source_diagnostic_codes.up.sql](migrations/postgres/000056_equipment_source_diagnostic_codes.up.sql) | 为 parse/protocol_drift 诊断允许九个来源解析原因，保留历史空原因和原证据约束 |
 | [000057_account_read_indexes.up.sql](migrations/postgres/000057_account_read_indexes.up.sql) | Public 账户按用户读取/统计的竞价时间倒序、代理更新时间倒序与 lot 升序索引，覆盖历史终态 |
 | [000058_public_session_preference.up.sql](migrations/postgres/000058_public_session_preference.up.sql) | 账号固定登录时长/独立版本与 Public 成对可空截止；默认永久，不回填既有会话 |
+| [000059_delivery_send_cadence.up.sql](migrations/postgres/000059_delivery_send_cadence.up.sql) | 七类 Send 起点高水位、旧载荷分组映射、超价优先索引与提交后空载荷唤醒 |
 
 ## 原则与基线
 
-当前 `000001`–`000058` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
+当前 `000001`–`000059` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
 是只读兼容视图，权威写入进入授权与转换历史表。执行门禁见[执行边界](migrations/postgres/README.md#执行边界)，对象归属见[数据库契约](docs/contracts/schema.md)。
 
 ## 追加迁移语义

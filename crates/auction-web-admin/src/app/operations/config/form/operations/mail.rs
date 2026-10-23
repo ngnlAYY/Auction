@@ -13,6 +13,18 @@ pub(super) fn MailFields(
 ) -> Element {
     rsx! {
         ManagedSection { form, disabled, path: "operations.mail.managed", title: t!("admin-runtime-op-section-mail"), note: t!("admin-runtime-op-note-mail"), on_dirty,
+            RuntimeGroup { title: t!("admin-runtime-op-mail-intervals"),
+                p { class: "admin-runtime-section-note", {t!("admin-runtime-op-mail-intervals-note")} }
+                div { class: "admin-runtime-field-grid",
+                NumberField { form, disabled, path: "operations.mail.send_intervals.outbid_seconds", label: t!("admin-runtime-op-mail-interval-outbid"), minimum: "0", maximum: "86400", on_dirty }
+                NumberField { form, disabled, path: "operations.mail.send_intervals.account_seconds", label: t!("admin-runtime-op-mail-interval-account"), minimum: "0", maximum: "86400", on_dirty }
+                NumberField { form, disabled, path: "operations.mail.send_intervals.intake_seconds", label: t!("admin-runtime-op-mail-interval-intake"), minimum: "0", maximum: "86400", on_dirty }
+                NumberField { form, disabled, path: "operations.mail.send_intervals.settlement_seconds", label: t!("admin-runtime-op-mail-interval-settlement"), minimum: "0", maximum: "86400", on_dirty }
+                NumberField { form, disabled, path: "operations.mail.send_intervals.equipment_seconds", label: t!("admin-runtime-op-mail-interval-equipment"), minimum: "0", maximum: "86400", on_dirty }
+                NumberField { form, disabled, path: "operations.mail.send_intervals.operations_seconds", label: t!("admin-runtime-op-mail-interval-operations"), minimum: "0", maximum: "86400", on_dirty }
+                NumberField { form, disabled, path: "operations.mail.send_intervals.manual_seconds", label: t!("admin-runtime-op-mail-interval-manual"), minimum: "0", maximum: "86400", on_dirty }
+                }
+            }
             RuntimeGroup { title: t!("admin-runtime-op-mail-scheduling"),
                 div { class: "admin-runtime-field-grid",
                 TextField { form, disabled, path: "operations.mail.schedule", label: t!("admin-runtime-op-mail-schedule"), on_dirty }

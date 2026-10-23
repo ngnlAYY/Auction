@@ -22,6 +22,7 @@ use super::{
     forms::valid_body,
     gateway::MoogleMailCredentialSession,
     protocol::{valid_decimal_id, valid_line, valid_opaque_id},
+    sender::MoogleMailSentBaseline,
 };
 
 mod delivery;

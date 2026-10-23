@@ -35,8 +35,8 @@ impl MoogleMailDeliveryTransport {
         if !requires_cash_gate(&claim) {
             return self.prepare(claim).await.map(|send| AuthorizedDeliverySend::new(send, None));
         }
-        // 同一绝对预算覆盖guard排队、原clean-compose和A的全部GET。
-        let deadline = auction_application::internal_evidence_deadline(deadline);
+        // 原 Worker 绝对预算覆盖排队、compose、完整 Sent 基线和证据准备；基线不是资金证据。
+        // 资金证据开始读取后另收紧到原有 30 秒上限，绝不延长已经生成的证据寿命。
         tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
             let policy = match &self.funding_policy_reader {
                 Some(reader) => reader.funding_policy().await.map_err(|_| cash_unproven())?,
@@ -50,7 +50,10 @@ impl MoogleMailDeliveryTransport {
                 "settlement" => decode_settlement_payload(&claim)?.1,
                 _ => decode_payload(&claim)?.1,
             };
-            let session = Arc::new(self.prepare_credentials(world).await?);
+            let PreparedMoogleMailCredentials { session, baseline } =
+                self.prepare_credentials(world).await?;
+            let session = Arc::new(session);
+            let deadline = auction_application::internal_evidence_deadline(deadline);
             let evidence = if let Some(gateway) = &self.cash_evidence_gateway {
                 let request = InternalEvidenceRequest {
                     operation_id: claim.command_id,
@@ -109,7 +112,8 @@ impl MoogleMailDeliveryTransport {
             let fence_lease = Box::new(SharedSession(Arc::clone(&session)));
             let send: DeliveryPreparedSend<'_> = Box::pin(async move {
                 let session = Arc::try_unwrap(session).map_err(|_| cash_unproven())?;
-                self.send_claim(claim, Some(session)).await
+                self.send_claim(claim, Some(PreparedMoogleMailCredentials { session, baseline }))
+                    .await
             });
             Ok(AuthorizedDeliverySend::new(send, evidence).with_fence_lease(fence_lease))
         })

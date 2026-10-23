@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | HTTP 与页面 | Public/Admin feature API 及浏览器入口见[路由口径](docs/contracts/routes.md#基线与统计口径) | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
-| 迁移 | PostgreSQL 58 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 59 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -65,6 +65,44 @@ A32 新增互斥的账号密码来源，游戏导入可直接使用完整论坛 
 首次 Web 构建因构建期间译文变化被指纹门禁拒绝，输入稳定后重建成功；LSP 初始化退出，引用由 CodeGraph、调用点及编译核对。
 脱敏证据为 `target/audits/credential-acquisition-20261023/evidence.json` 与 `live-success.png`，
 不保存原始登录请求、密码、Cookie 或带 session 的远端 URL。
+
+### 2026-10-23 邮件发送节奏、Sent 准备与论坛标题（源码阶段）
+
+application/delivery 定义七类发送间隔和非权威唤醒端口，config/Admin Web 接入接管、严格数值校验及五语表单；
+storage/delivery_scheduler 经 `000059` 保存发送起点、fence 内复核及提交后通知，jobs 优先领取超价 MM 并保留断线轮询。
+integrations 把完整 Sent baseline 移到同一独占 session 的 sending fence 前，区分 `sent_scan_page_limit`/`sent_scan_timeout`，
+写后未知仍不重寄；现金证据在基线完成后另以原 30 秒窗口取得并持有至提交。论坛新标题采用完整世界/Session/状态格式，
+保留旧短标题及更早标题的精确核对候选，不以改名重新授权发帖。
+
+本轮工作区 `cargo check --locked --workspace --all-targets --all-features` 已通过；其后仍有修改，完整门禁与发布结果另行登记。
+未新增或运行行为测试，未迁移/启动本地 Worker，尚未把这些修改部署云端。旧人工核对投递不批量重发。
+
+### 2026-10-23 R26 云端发布与 schema 58（授权迁移、启动与制品核验）
+
+用户授权本地构建后迁移部署。发布 owner 为 `ci/release`、`auctionctl` 的分体停机/迁移控制器及三角色装配；
+配置兼容由 `auction-config` 拥有。干净提交 `003a45033a3547ad97527d742e6ad13491d00f09` 通过完整 `just verify` 与
+`just release-check`；同源 API-only/embedded 制品按输入指纹校验复用，通用 Linux x86_64 GNU 四程序、双端页面、资源隔离及归档门禁通过。
+归档 SHA-256 为 `4d81630b0e547c22e96b3e0ce7f067b3a618cfec4832992d208b9278c6d68781`；未启用 native CPU 参数。
+
+云端 `auction_test` 从 R25/schema 56 升至 58，旧 56 项迁移 checksum 全部匹配；先保存旧程序、配置、unit 及可验证数据库恢复点，
+Public → Admin → Worker 停稳且 Worker 正常 drain、无其他数据库连接/runtime 未决命令后，用同版 CLI 追加 `000057/000058`。
+迁移前后全部 Public 会话行、用户旧字段的摘要与行数一致，新偏好不回填旧会话。P09 等级筛选、P27/P28 登录时长及邮件修复随同版程序上线，
+契约分别见[HTTP](docs/contracts/routes.md)、[Public 登录升级](ops/README.md#public-登录时长升级)与既有邮件记录。
+
+首轮候选配置预检因废弃 `session_signing_key` 拒绝，未停服或修改线上配置，失败证据保留。后续只移除 Public 两个旧 TTL 字段、
+Public/Admin 敏感文件中从未生效的 `session_signing_key`，其他 TOML 值、凭据与开关保持原值。05:08:06 UTC 迁移完成后，
+Admin 因旧 runtime 锁为 `0644` 启动失败并自动重启 11 次，总控退出并停稳三角色。保留失败日志后，在原 inode `656282` 的独占锁内
+只将权限收紧至 `0600`，属主及内容不变；未回退数据库或程序。重新启动仅做 schema 58 的已应用迁移校验，未重复改写历史事实。
+
+05:12:32 UTC 同版 Worker/Admin/Public 按序恢复，PID 分别 `151829/151846/151854`，三端 readiness 均 200。
+后续独立核对运行/磁盘哈希、启动回执、schema 与配置一致，进程身份未变且本次启动重启计数均零；双端 Unix 与 Public HTTPS 共 16 项
+静态资源字节全部匹配。该核验窗口无 ERROR；日志保留 Public 的 `there is no transaction in progress` 与 Worker Sent
+`remote_temporary` 维护告警，后续另观察到发送失败后的 compose 重读告警；未人工清草稿、触发投递或重发。
+
+脱敏回执位于 `target/dist/public-session-20261023-ops-r26-attempt2/DEPLOYMENT-SUMMARY.json` 及 `cloud-evidence/`；
+云端应用备份目录名为 `public-session-20261023-schema58-r26-attempt2`，数据库恢复点位于 root 私有目录
+`hv-auction-public-session-20261023-schema58-r26-attempt2`，完整路径见私有回执。首轮预检失败目录继续保留。
+本次只做静态发布门禁、授权迁移/启动与只读部署后验，未运行浏览器、登录、竞价或邮件行为测试；本地服务 PID 未变，Worker/CK/轮询未启用。
 
 ### 2026-10-22 Public 登录时长设置（隔离 PostgreSQL 与浏览器验证）
 

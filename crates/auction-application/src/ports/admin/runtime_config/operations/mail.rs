@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::DeliverySendIntervals;
+
 use super::{AdminRuntimeConfigError, require};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -9,6 +11,9 @@ use super::{AdminRuntimeConfigError, require};
 pub struct AdminRuntimeMailConfig {
     /// 是否接管邮件运行参数；默认关闭，不改变既有 Worker 行为。
     pub managed: bool,
+    /// 同类邮件开始发送的最小间距；全零省略，保存后重启 Worker 生效。
+    #[serde(skip_serializing_if = "DeliverySendIntervals::is_zero")]
+    pub send_intervals: DeliverySendIntervals,
     /// 标准五字段 cron、旧版描述符或 @every；完整解析由配置适配器校验。
     pub schedule: String,
     /// 单次响应最大字节数，范围 1–8 MiB。
@@ -52,6 +57,7 @@ impl Default for AdminRuntimeMailConfig {
     fn default() -> Self {
         Self {
             managed: false,
+            send_intervals: DeliverySendIntervals::default(),
             schedule: "*/5 * * * *".to_owned(),
             maximum_response_bytes: 8 * 1024 * 1024,
             minimum_request_interval_millis: 1000,
@@ -74,6 +80,7 @@ impl Default for AdminRuntimeMailConfig {
 
 impl AdminRuntimeMailConfig {
     pub(super) fn validate(&self) -> Result<(), AdminRuntimeConfigError> {
+        require(self.send_intervals.is_valid(), "mail.send_intervals")?;
         require(
             !self.schedule.is_empty()
                 && self.schedule.len() <= 256

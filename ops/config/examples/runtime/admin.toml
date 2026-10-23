@@ -460,3 +460,20 @@ batch_timeout_seconds = 600
 retry_base_seconds = 1
 # 可选：指数退避上限秒数，范围 1-300 且不小于 retry_base_seconds；默认 30。
 retry_maximum_seconds = 30
+
+# 可选区块：仅 managed=true 时接管，保存后重启 Worker；不影响取件/原件退回及 HTTP 限速。
+[operations.mail.send_intervals]
+# 可选：超价提醒的同类发送起点最小间隔，单位秒，范围 0-86400；默认 0，不额外等待。
+outbid_seconds = 0
+# 可选：账号注册、登录 Key 与重绑回复的同类发送起点最小间隔，单位秒，范围 0-86400；默认 0，不额外等待。
+account_seconds = 0
+# 可选：寄售接收/拒绝回执及论坛竞价通知的同类发送起点最小间隔，单位秒，范围 0-86400；默认 0，不额外等待。
+intake_seconds = 0
+# 可选：结算付款、退款与付款提醒的同类发送起点最小间隔，单位秒，范围 0-86400；默认 0，不额外等待。
+settlement_seconds = 0
+# 可选：装备交付、重寄及流拍寄回的同类发送起点最小间隔，单位秒，范围 0-86400；默认 0，不额外等待。
+equipment_seconds = 0
+# 可选：运维告警的同类发送起点最小间隔，单位秒，范围 0-86400；默认 0，不额外等待。
+operations_seconds = 0
+# 可选：手工及未归类邮件的同类发送起点最小间隔，单位秒，范围 0-86400；默认 0，不额外等待。
+manual_seconds = 0

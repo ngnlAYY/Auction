@@ -3,7 +3,7 @@
   "format": "auction-retention-policy.v1",
   "policy_id": "auction-retention-policy",
   "version": 1,
-  "database_schema_version": 58,
+  "database_schema_version": 59,
   "authority": "repository-conservative-default",
   "inventory_authorizes_mutation": false,
   "families": [
@@ -125,6 +125,7 @@
         "settlement_recovery_commands",
         "settlement_recovery_health",
         "deliveries",
+        "delivery_send_cadence",
         "delivery_admin_commands"
       ]
     },

@@ -5,7 +5,7 @@ use super::mapping::*;
 use super::*;
 
 pub(super) async fn claim_postgres(
-    pool: &crate::database::TrackedPool<Postgres>,
+    store: &super::super::PostgresStore,
     worker_id: &str,
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
@@ -13,6 +13,9 @@ pub(super) async fn claim_postgres(
     exclusions: &DeliveryClaimExclusions,
     limit: u16,
 ) -> Result<Vec<DeliveryWorkClaim>, auction_application::RepositoryError> {
+    let pool = store.pool();
+    let intervals = serde_json::to_value(store.delivery_send_intervals)
+        .map_err(|_| repository_error_owned("delivery 发送间隔无法序列化"))?;
     let sending_grace_micros = i64::try_from(sending_grace.as_micros())
         .map_err(|_| repository_error_owned("delivery sending grace 超出数据库范围"))?;
     // 过期结果单独短事务：资金scope/account必须在delivery前，不能批量先锁delivery。
@@ -78,7 +81,12 @@ pub(super) async fn claim_postgres(
                  WHERE deliveries.payload ->> 'operation' = 'send'
                    AND lower(deliveries.payload ->> 'world') = excluded.world
              )
-           ORDER BY created_at, id
+             AND NOT EXISTS (
+                 SELECT 1 FROM public.delivery_send_cadence AS cadence
+                 WHERE cadence.category = public.delivery_send_category(deliveries.origin_kind, deliveries.payload)
+                   AND cadence.last_started_at + (($7 ->> (cadence.category || '_seconds'))::bigint * interval '1 second') > $1
+             )
+           ORDER BY CASE WHEN origin_kind = 'lot_watch' THEN 0 ELSE 1 END, created_at, id
            LIMIT $2
            FOR UPDATE SKIP LOCKED"#
     ))
@@ -88,6 +96,7 @@ pub(super) async fn claim_postgres(
     .bind(excluded_names)
     .bind(&exclusions.unavailable_worlds)
     .bind(&exclusions.unavailable_send_worlds)
+    .bind(intervals)
     .fetch_all(&mut *transaction)
     .await
     .map_err(map_storage_error)?;

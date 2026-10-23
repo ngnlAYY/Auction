@@ -97,6 +97,8 @@ macro_rules! delivery_completion_gate {
     };
 }
 
+#[cfg(feature = "postgres")]
+mod cadence;
 mod capability;
 #[cfg(feature = "postgres")]
 mod cash;
@@ -111,6 +113,8 @@ mod outcome;
 mod quarantine;
 #[cfg(feature = "postgres")]
 mod state;
+#[cfg(feature = "postgres")]
+mod wakeup;
 #[cfg(feature = "postgres")]
 mod watch;
 
@@ -134,6 +138,18 @@ use sqlx::{Postgres, Row, postgres::PgRow};
 const EXPIRED_SENDING_RECONCILE_LIMIT: i64 = 100;
 
 impl DeliveryWorkStore for DatabaseStore {
+    fn subscribe_wakeups(
+        &self,
+    ) -> auction_application::ApplicationFuture<'_, Box<dyn auction_application::DeliveryWakeup>>
+    {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => wakeup::subscribe(store.raw_pool()).await,
+            }
+        })
+    }
+
     fn claim_due(
         &self,
         worker_id: String,
@@ -175,7 +191,7 @@ impl DeliveryWorkStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => claim_postgres(
-                    store.pool(),
+                    store,
                     &worker_id,
                     now,
                     lease_until,
@@ -197,9 +213,14 @@ impl DeliveryWorkStore for DatabaseStore {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
-                Self::Postgres(store) => start_sending_postgres(store.pool(), &_claim, _started_at)
-                    .await
-                    .map_err(ApplicationError::from),
+                Self::Postgres(store) => start_sending_postgres(
+                    store.pool(),
+                    &_claim,
+                    _started_at,
+                    &store.delivery_send_intervals,
+                )
+                .await
+                .map_err(ApplicationError::from),
             }
         })
     }
@@ -220,7 +241,15 @@ impl DeliveryWorkStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    cash::run(store.pool(), &_claim, _started_at, None, None).await
+                    cash::run(
+                        store.pool(),
+                        &_claim,
+                        _started_at,
+                        None,
+                        None,
+                        &store.delivery_send_intervals,
+                    )
+                    .await
                 }
             }
         })
@@ -237,8 +266,15 @@ impl DeliveryWorkStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    cash::run(store.pool(), &_claim, _started_at, Some(_evidence), Some(_deadline))
-                        .await
+                    cash::run(
+                        store.pool(),
+                        &_claim,
+                        _started_at,
+                        Some(_evidence),
+                        Some(_deadline),
+                        &store.delivery_send_intervals,
+                    )
+                    .await
                 }
             }
         })

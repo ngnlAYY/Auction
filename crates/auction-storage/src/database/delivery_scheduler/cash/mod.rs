@@ -4,4 +4,5 @@ mod authorization;
 mod persistence;
 mod transaction;
 
+pub(in crate::database::delivery_scheduler) use transaction::FenceError;
 pub(super) use transaction::{run, run_legacy};

@@ -126,17 +126,17 @@ impl MoogleMailSender {
     ) -> Result<Vec<MoogleMailSentListEntry>, MoogleMailError> {
         let deadline = Instant::now()
             .checked_add(self.verification_budget)
-            .ok_or_else(|| unavailable(world))?;
+            .ok_or_else(|| proof::scan_timeout(world))?;
         let mut seen = HashSet::new();
         let mut summaries = Vec::new();
         for page_index in 0..self.verification_pages {
             if Instant::now() >= deadline {
-                return Err(unavailable(world));
+                return Err(proof::scan_timeout(world));
             }
             let target = self.client.sent_page(world, page_index)?;
             let document = timeout_at(deadline, self.client.get(&target, cookie))
                 .await
-                .map_err(|_| unavailable(world))??;
+                .map_err(|_| proof::scan_timeout(world))??;
             let page = self.parser.scan_sent_page(&document, world, page_index, &mut seen)?;
             summaries.extend(page.summaries.into_iter().map(|summary| MoogleMailSentListEntry {
                 external_mail_id: summary.external_mail_id,
@@ -148,7 +148,7 @@ impl MoogleMailSender {
                 return Ok(summaries);
             }
         }
-        Err(unavailable(world))
+        Err(self.scan_page_limit(world, "maintenance", seen.len()))
     }
 
     /// 只读确认入站邮件是否仍存在并返回当前附件 ID。

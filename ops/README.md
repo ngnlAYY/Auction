@@ -31,10 +31,25 @@
 - [Bot 内部履约与资金保护升级](#bot-内部履约与资金保护升级)
 - [旧 Bot 结算的显式核对](#旧-bot-结算的显式核对)
 - [Public 登录时长升级](#public-登录时长升级)
+- [邮件发送节奏与 Sent 准备升级](#邮件发送节奏与-sent-准备升级)
 - [数据库恢复与保留](#数据库恢复与保留)
 - [反向代理与 systemd](#反向代理与-systemd)
 - [Cloudflare 整站代理](#cloudflare-整站代理)
 - [systemd 安装、探针与权限](#systemd-服务与顺序控制)
+
+## 邮件发送节奏与 Sent 准备升级
+
+同版更新 Public/Admin/Worker/auctionctl，先保存可验证数据库备份、旧程序/配置和 unit，按分体总控停稳全部旧 writer 后
+追加 `000059`；七类发送起点只从既有 sending_at 初始化，不改旧投递/命令/人工核对状态。新 Worker 依赖该表和映射函数，
+不能先启动程序再补迁移；回退也须保留新表与高水位，禁止删除它们来跳过间隔。
+
+管理页字段见[配置手册](ops/config/README.md#邮件业务发送间隔)。升级不默认开启 managed 或改各类间隔；已保存非零新字段后，
+只回退到支持该配置/schema 的同版兼容制品。Sent 的页数和总预算须一起调整，并检查有效来源：mail managed 控制读取参数、
+worker managed 控制 delivery 参数。发送总预算仍须大于两倍 fetch 预算，grace 必须大于发送预算；租约可由原续租路径延长，
+资金证据仍保持首次读取后最长 30 秒的原截止。准备阶段页数/时间耗尽只延后，写后失败仍未知；不以错误码批量重发历史记录。
+
+论坛标题改名只在正常发布/刷新时应用，保留旧标题精确核对；不清除未知写入门禁、不强制重发主题，已完成终态刷新不批量重开。
+发布核验只确认程序/配置/schema/资源及就绪状态；发送和论坛业务验收须另行授权。
 
 ## 可选单文件部署
 
@@ -265,6 +280,8 @@ unit，迁移不自动回退。独立建库/迁移命令见[auctionctl](apps/auc
 空 `User` 按 systemd 的 root 语义处理，`DynamicUser=yes` 不能满足持久可编辑 runtime 的固定属主要求。运维命令以
 root 执行不等于 runtime 应归 root，不能拿运维进程 UID 代替服务身份。旧 `session_signing_key` 无有效会话协议，
 新版显式拒绝该无效选项，须从敏感文件移除后再做部署预检。
+旧部署还须检查 runtime 同目录的 `.admin-runtime-config.lock` 属主和 `0600` 权限；保留 inode 的停机收紧流程见
+[Runtime 共享与重启](ops/config/README.md#runtime-共享与重启)，不能只核对 TOML 的 `0640`。
 
 Admin 每次启动永久撤销旧管理会话，失败即阻断启动；须重新登录，Public 不受影响。轮换 actor/secret 前停掉所有旧凭据实例并
 统一新值，恢复旧配置不复活会话。SIGTERM：drain 最多 10 秒、exporter 最多 30 秒，分体 unit 45 秒；合并及外层预算见

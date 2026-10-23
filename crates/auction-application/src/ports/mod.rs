@@ -58,6 +58,9 @@ mod core_repository;
 mod delivery;
 #[path = "delivery/admin.rs"]
 mod delivery_admin;
+#[path = "delivery/cadence.rs"]
+mod delivery_cadence;
+pub use delivery_cadence::{DeliverySendIntervals, DeliveryWakeup};
 #[path = "public/equipment_link.rs"]
 mod equipment_link;
 #[path = "forum/public.rs"]

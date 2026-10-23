@@ -27,7 +27,7 @@ WASM 分别内嵌；数据库仅 PostgreSQL，Redis 默认关闭。原生程序�
 | [auction-server](apps/auction-server/README.md) | 可选单文件 supervisor，自管三角色子进程 | 沿用 Public/Admin 两个入口 |
 默认分体发布；合并模式仅用于 Linux/PostgreSQL 单主机，auctionctl 仍独立。角色文件用 AUCTION_CONFIG_FILE 选择，合并服务用
 --config-dir 并拒绝该环境变量；配置分层、权限、首次设置及停机迁移见[运维手册](ops/README.md)，普通启动不隐式迁移。论坛新主题目录
-每帖最多 150 件并连续分页、更新楼位于目录之后，标题末尾显示真实拍卖状态；首帖倒计时由本站 Rust Public 服务生成，显示计划截止的剩余时长。账户“竞价警告”默认
+每帖最多 150 件并连续分页、更新楼位于目录之后，标题为 `{世界} Equipment Auction - Session {期数} ({状态})`；首帖倒计时由本站 Rust Public 服务生成，显示计划截止的剩余时长。账户“竞价警告”默认
 MM 或论坛 PM 并按领先周期跨渠道去重，受控升级须追加 `000042`；入口支持 Cloudflare 橙云 → Caddy HTTPS → Unix socket，仅静态资源
 允许 CDN 缓存，细节见[玩家指南](docs/guide/player-guide.md)与[部署约束](ops/README.md#cloudflare-整站代理)及[技术栈](docs/design/tech-stack.md)。
 
@@ -51,9 +51,10 @@ apps 默认不含数据库驱动或 Web，自行调用 cargo 须显式选 postgr
 - 公开装备目录支持列显隐和浏览器本地记忆，宽屏使用可用区域；交互与边界见[Public 设计](crates/auction-web-public/DESIGN.md#5-表格与信息密度)。
 - 新场次软截止窗口/延长默认均为 900 秒，不改既有显式配置或冻结快照；
   老配置与草稿的处理见[截止升级说明](ops/README.md#截止规则与邮件发送隔离升级)。
+- Admin 支持[七类邮件发送间隔](ops/config/README.md#邮件业务发送间隔)，超价 MM 提交后优先唤醒；需追加 `000059`，保存后重启 Worker。
 - Admin Cookie 页支持论坛账号密码获取，也可将完整论坛 CK 导入为游戏 CK；密码不持久化，取得的 CK 不回传浏览器，
   共享字段、幂等与挑战处理见[外部凭据契约](docs/contracts/routes.md#外部凭据)。无需新增迁移，替换凭据后仍须重启 Worker。
-- MoogleMail 在发送 fence 前只读检查草稿；Bot 内部履约依赖联合身份、正向库存、资金账本及统一现金发送门。
+- MoogleMail 在发送 fence 前只读检查草稿并完成完整 Sent 基线；Bot 内部履约依赖联合身份、正向库存、资金账本及统一现金发送门。
   启用前须[停机同版升级并显式对账](ops/README.md#bot-内部履约与资金保护升级)；旧未知投递仍人工核对，税与内部留存不自动再投资。
 
 源码、路由和静态编译不构成生产验收。[状态页](docs/status.md)分别登记实现、历史证据与缺口；

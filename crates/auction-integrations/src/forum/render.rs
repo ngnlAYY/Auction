@@ -78,16 +78,23 @@ fn render_auction_thread_with_colors(
         AuctionStatus::Settled,
         AuctionStatus::Cancelled,
     ] {
-        if state != snapshot.state {
-            reconciliation_titles.push(topic_title(world_title, snapshot.sequence, state));
+        let candidate = topic_title(world_title, snapshot.sequence, state);
+        if state != snapshot.state && candidate.chars().count() <= 50 {
+            reconciliation_titles.push(candidate);
         }
+        // 升级前的短标题仍是只读核对候选，不能因改名把未知发帖当成不存在。
+        reconciliation_titles.push(format!(
+            "[Auction] {world_title} #{:03} ({})",
+            snapshot.sequence,
+            topic_state(state)
+        ));
     }
     let sequence_width = (snapshot.sequence.ilog10() as usize + 1).max(3);
     let previous_title_width = "[Auction] ".len()
         + world_title.len()
         + " Equipment Auction - Session ".len()
         + sequence_width;
-    // 旧版超长标题从未获准发帖；不能让它阻断全部合法 i64 序号的新标题。
+    // 旧候选仅纳入远端允许的长度；当前标题同样严格校验，不截断期数。
     if previous_title_width <= 50 {
         reconciliation_titles.push(format!(
             "[Auction] {world_title} Equipment Auction - Session {:03}",
@@ -311,7 +318,11 @@ fn render_auction_thread_with_colors(
 }
 
 fn topic_title(world: &str, sequence: i64, state: AuctionStatus) -> String {
-    let state = match state {
+    format!("{world} Equipment Auction - Session {sequence:03} ({})", topic_state(state))
+}
+
+fn topic_state(state: AuctionStatus) -> &'static str {
+    match state {
         AuctionStatus::Draft => "Draft",
         AuctionStatus::Preview => "Preview",
         AuctionStatus::Live => "Live",
@@ -319,8 +330,7 @@ fn topic_title(world: &str, sequence: i64, state: AuctionStatus) -> String {
         AuctionStatus::Settling => "Settling",
         AuctionStatus::Settled => "Settled",
         AuctionStatus::Cancelled => "Cancelled",
-    };
-    format!("[Auction] {world} #{sequence:03} ({state})")
+    }
 }
 
 /// 论坛主题渲染器；颜色规则来自 Admin runtime，渲染器本身无状态。

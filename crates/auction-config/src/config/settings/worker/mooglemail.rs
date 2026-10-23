@@ -30,6 +30,8 @@ pub struct MoogleMailWorkerConfig {
     /// 单次 MoogleMail 响应最大字节数，不能超过 8 MiB。
     pub maximum_response_bytes: usize,
     pub minimum_request_interval_millis: u64,
+    /// 各类 Send 开始的最小间距；不影响 Take/Return，与 HTTP 限速独立。
+    pub send_intervals: auction_application::DeliverySendIntervals,
     /// 单次 MoogleMail HTTP 请求与响应正文读取的超时秒数。
     pub request_timeout_seconds: u64,
     pub batch_size: u16,
@@ -374,6 +376,7 @@ impl Default for MoogleMailWorkerConfig {
             endpoint: "https://hentaiverse.org".to_owned(),
             maximum_response_bytes: 8 * 1024 * 1024,
             minimum_request_interval_millis: 1_000,
+            send_intervals: auction_application::DeliverySendIntervals::default(),
             request_timeout_seconds: 15,
             batch_size: 100,
             maximum_pages: 20,

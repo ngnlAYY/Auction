@@ -60,6 +60,7 @@ fn apply_mail(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsConf
     };
     let mail = &mut worker.mooglemail;
     // 不覆盖 endpoint、Cookie、全局 enabled 或邮箱身份，持久化 due、游标和租约也不在此改写。
+    mail.send_intervals = candidate.send_intervals;
     mail.schedule = candidate.schedule.clone();
     mail.maximum_response_bytes = candidate.maximum_response_bytes;
     mail.minimum_request_interval_millis = candidate.minimum_request_interval_millis;

@@ -8,6 +8,8 @@ mod credentials;
 mod messages;
 mod settlement_secrets;
 
+use credentials::PreparedMoogleMailCredentials;
+
 impl MoogleMailDeliveryTransport {
     /// 配置所有 Send 操作的发送前后 Sent 核对边界。
     pub fn with_send_verification(
@@ -71,7 +73,7 @@ impl MoogleMailDeliveryTransport {
     async fn send_claim(
         &self,
         claim: DeliveryWorkClaim,
-        mut session: Option<MoogleMailCredentialSession>,
+        mut session: Option<PreparedMoogleMailCredentials>,
     ) -> Result<DeliverySendResult, DeliveryTransportError> {
         match claim.origin_kind.as_str() {
             "mail_intake" => {
