@@ -20,6 +20,10 @@ pub const PUBLIC_LOT_CATEGORIES: [&str; 8] =
 pub struct PublicLotListRequest {
     pub category: Option<String>,
     pub equipment_group: Option<EquipmentGroup>,
+    /// 数字等级的包含式上限；None 不限制数字等级，不把无等级装备视为零级。
+    pub max_level: Option<i64>,
+    /// 无数字等级装备独立控制；未指定上限时也生效。
+    pub include_unleveled: bool,
     pub limit: i64,
     pub offset: i64,
 }
@@ -40,7 +44,18 @@ impl PublicLotListRequest {
         {
             return Err("公开 lot 分类参数无效");
         }
+        if self.max_level.is_some_and(|level| level < 0) {
+            return Err("公开 lot 等级上限无效");
+        }
         Ok(())
+    }
+
+    /// 目录筛选不改变装备事实或出价资格；无等级是否保留由独立选项决定。
+    pub fn matches_level(&self, level: Option<i64>) -> bool {
+        match level {
+            Some(level) => level >= 0 && self.max_level.is_none_or(|maximum| level <= maximum),
+            None => self.include_unleveled,
+        }
     }
 }
 
@@ -407,16 +422,16 @@ pub struct PublicLotPage {
 }
 
 impl PublicLotPage {
-    /// 分组筛选必须在分页前完成，返回页的两种投影均不得夹入其他分组。
-    pub fn validate_equipment_group(
-        &self,
-        equipment_group: Option<EquipmentGroup>,
-    ) -> Result<(), &'static str> {
-        if equipment_group.is_some_and(|group| {
-            self.preview.iter().any(|lot| lot.equipment_group != group)
-                || self.live.iter().any(|lot| lot.equipment.equipment_group != group)
+    /// 分组及等级筛选必须先于统计和分页；返回页的两种投影复核同一请求条件。
+    pub fn validate_filters(&self, request: &PublicLotListRequest) -> Result<(), &'static str> {
+        if self.preview.iter().any(|lot| {
+            request.equipment_group.is_some_and(|group| lot.equipment_group != group)
+                || !request.matches_level(lot.equipment_level)
+        }) || self.live.iter().any(|lot| {
+            request.equipment_group.is_some_and(|group| lot.equipment.equipment_group != group)
+                || !request.matches_level(lot.equipment.level)
         }) {
-            return Err("公开 lot 页装备分组无效");
+            return Err("公开 lot 页装备筛选无效");
         }
         Ok(())
     }

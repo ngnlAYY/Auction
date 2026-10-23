@@ -1,6 +1,7 @@
 //! Public 拍卖数据加载、倒计时和目录展示编排。
 
 use super::*;
+use crate::api::CatalogLevelFilter;
 use crate::api::LotEnvelope;
 
 /// 目录读取与展示的上下文；预览修订号不属于上下文，允许同场后台更新时保留已确认目录。
@@ -16,6 +17,8 @@ struct CatalogScope {
     user_id: Option<String>,
     category: String,
     equipment_group: String,
+    max_level: Option<String>,
+    include_unleveled: String,
     page: i64,
     page_size: i64,
 }
@@ -48,6 +51,9 @@ pub(crate) fn AuctionData(
     let active_equipment_group = use_memo(move || {
         query_state_signal.read().equipment_group.clone().unwrap_or_else(|| "all".to_owned())
     });
+    let active_max_level = use_memo(move || query_state_signal.read().max_level.clone());
+    let active_include_unleveled =
+        use_memo(move || query_state_signal.read().include_unleveled.clone());
     let page_number = use_memo(move || query_state_signal.read().page.max(1));
     let requested_page_size = use_memo(move || query_state_signal.read().page_size);
     let realtime_state = use_context::<Signal<LiveConnectionState>>();
@@ -99,6 +105,8 @@ pub(crate) fn AuctionData(
                     .map(|identity| identity.user_id.clone()),
                 category: active_category(),
                 equipment_group: active_equipment_group(),
+                max_level: active_max_level(),
+                include_unleveled: active_include_unleveled(),
                 page: page_number(),
                 page_size: requested_page_size(),
             }
@@ -127,10 +135,17 @@ pub(crate) fn AuctionData(
             let category = (scope.category != "all").then(|| scope.category.clone());
             let equipment_group =
                 (scope.equipment_group != "all").then(|| scope.equipment_group.clone());
+            let Ok(levels) = CatalogLevelFilter::parse(
+                scope.max_level.as_deref().unwrap_or_default(),
+                &scope.include_unleveled,
+            ) else {
+                return (scope, Err("invalid_level_filter".to_owned()));
+            };
             let result = fetch_current_lots(
                 scope.auction_id.clone(),
                 category,
                 equipment_group,
+                levels,
                 scope.page,
                 scope.page_size,
             )
@@ -251,17 +266,8 @@ pub(crate) fn AuctionData(
                     category_counts: page.category_counts.clone().unwrap_or_default(),
                     active_category: active_category(),
                     active_equipment_group: active_equipment_group(),
-                    on_equipment_group_change: move |equipment_group: String| {
-                        update_public_query_state(
-                            query_state_signal,
-                            |query| {
-                                query.equipment_group = (equipment_group != "all")
-                                    .then_some(equipment_group.clone());
-                                query.page = 1;
-                            },
-                            QueryWriteMode::Push,
-                        );
-                    },
+                    level_filtered: scope.max_level.as_ref().is_some_and(|value| !value.is_empty())
+                        || scope.include_unleveled != "true",
                     page_number: page_number(),
                     on_category_change: move |category: String| {
                         update_public_query_state(
@@ -341,6 +347,39 @@ pub(crate) fn AuctionData(
                         }
                     }
                 }
+                CatalogGroupFilters {
+                    active_equipment_group: active_equipment_group(),
+                    max_level: active_max_level(),
+                    include_unleveled: active_include_unleveled(),
+                    on_equipment_group_change: move |equipment_group: String| {
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| {
+                                query.equipment_group = (equipment_group != "all").then_some(equipment_group);
+                                query.page = 1;
+                            },
+                            QueryWriteMode::Push,
+                        );
+                    },
+                    on_level_change: move |levels: CatalogLevelFilter| {
+                        let max_level = levels.max_level.map(|value| value.to_string());
+                        let include_unleveled = levels.include_unleveled.to_string();
+                        if query_state_signal.peek().max_level == max_level
+                            && query_state_signal.peek().include_unleveled == include_unleveled
+                        {
+                            return;
+                        }
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| {
+                                query.max_level = max_level;
+                                query.include_unleveled = include_unleveled;
+                                query.page = 1;
+                            },
+                            QueryWriteMode::Push,
+                        );
+                    },
+                }
                 if !historical && is_live_presentation {
                     section { aria_labelledby: "auction-lots",
                         h2 { id: "auction-lots", class: "public-visually-hidden",
@@ -399,6 +438,7 @@ fn AuctionHeaderCountdown(
 /// （[`base_api_error_message`]），最后落到通用兜底。
 fn lot_list_error_message(error: &str) -> String {
     match error {
+        "invalid_level_filter" => return t!("filter-level-invalid"),
         "request_cancelled" => return t!("error-request-cancelled"),
         "NOT_FOUND" => return t!("error-not-found"),
         "internal" | "INTERNAL" => return t!("error-internal"),

@@ -30,6 +30,10 @@ PostgreSQL 连接入口独立校验 URI：拒绝缩略形式、fragment、控制
 `username` 只是可变显示名和 MM 收件人，二者不能互换。[sessions](crates/auction-storage/src/database/sessions) 保存会话
 摘要：Admin 启动撤销旧 Admin 会话，Public key 撤销/重签与旧会话永久撤销同事务提交，只读 inspect 不刷新过期时间。
 Admin 启动、轮换及注销和 Public 注销的撤销时间至少为该会话创建时间，时钟回拨不妨碍永久撤销。
+Public [sessions/public/preference.rs](crates/auction-storage/src/database/sessions/public/preference.rs) 拥有账号时长读取及命令事务：
+Serializable 按 user → 当前 session → 账本取锁，锁后和写入时复核期限，偏好、当前截止、账本与审计同事务提交。
+`000058` 新增独立偏好版本和可空的成对截止；默认只影响新登录，旧截止和撤销事实不回填。永久会话也参与原有并发计数，
+认证仍要求账号及 Key active；未知重放不延长截止，HTTP 刷新 Cookie 前须另读当前会话。SQL owner 与约束见[数据库契约](docs/contracts/schema.md)。
 Recovery 拉黑仍按历史 claim 时间保存稳定命令、证明与审计；当前用户/黑名单、代理及转换、lot 与会话副作用分别以下辖行
 已有创建/更新时间及最后转换时间为下界，不因 claim 之后新建的会话或代理使整笔拉黑回滚。
 用户、论坛身份及登录 key 信封的快照更新时间以已存创建/更新时间为下界；`000044` 只修复 MM 注册账本与论坛身份历史
@@ -135,11 +139,11 @@ generation、due、授权与资格；调度字段与确定性命令持久化，�
 最近竞价仍以同用户/lot 的下一 usage 创建时间截断，缺失或不连续转换继续失败关闭。页校验直接移交结果，不复制整页。
 Recovery 报告同样只对本报告 case 批量读取 action，并按各 case 原有 kind/ID 顺序映射，不截断完整报告。
 Public 的 `DatabaseStore::public_lot_reader` 接受启动时冻结的装备标色规则，由应用共用判定生成稀有/融合分组。
-[lots/postgres/selection.rs](crates/auction-storage/src/database/lots/postgres/selection.rs) 在选择分组时流式扫描
-本场可见装备的身份字段（不读取 stats），先计算该分组内的类型统计，再按类型及 offset/limit 保留当前页 UUID；
-同一 Serializable 事务按 UUID 读取完整页并保持原排序，`total` 包含两层筛选。内存只保留计数和当前页 UUID，
-选择分组的计算量随本场装备数量增长；未选分组时保留原 SQL 统计和分页。预览、当前场次和历史详情使用相同规则，
-不增加持久分组字段或迁移，装备事实和竞价语义不变。
+[lots/postgres/selection.rs](crates/auction-storage/src/database/lots/postgres/selection.rs) 在选择分组、等级上限或隐藏无等级时流式扫描
+本场可见装备的身份字段（不读取 stats），严格解码后复用应用等级/分组条件，先计类型总数，再按类型及 offset/limit 保留当前页 UUID；
+同一 Serializable 事务按 UUID 读取完整页并保持原排序，`total` 包含全部筛选。内存只保留计数和当前页 UUID，
+计算量随本场装备数量增长；无这些条件时保留原 SQL 统计和分页。None 等级不补零；预览、当前及历史某场目录一致，
+详情不应用列表筛选。不增加持久字段或迁移，装备事实、金额及竞价语义不变。
 [auctions/countdown.rs](crates/auction-storage/src/database/auctions/countdown.rs) 用单条 SQL 读取同场公开时间及数据库
 时钟，不加载装备、凭据或论坛正文，不公开草稿、取消场次或被遮蔽的预览，无需新增表和迁移。Public 拍卖、竞价日志、
 成交历史与补偿批次的游标查询仅对额外探测行使用饱和加法，不截断请求数量（见[分页契约](docs/contracts/routes.md#public-分页世界与金额)）。

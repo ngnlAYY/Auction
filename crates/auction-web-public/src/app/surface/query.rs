@@ -103,6 +103,9 @@ pub(crate) struct PublicBoardQuery {
     pub(crate) auction_id: Option<String>,
     pub(crate) category: Option<String>,
     pub(crate) equipment_group: Option<String>,
+    /// 非法等级参数保留原文供筛选栏修正，不能先丢条件再发出宽查询。
+    pub(crate) max_level: Option<String>,
+    pub(crate) include_unleveled: String,
     pub(crate) status: Option<String>,
     pub(crate) history_name: Option<String>,
     pub(crate) history_from: Option<String>,
@@ -142,6 +145,8 @@ impl Default for PublicBoardQuery {
             auction_id: None,
             category: None,
             equipment_group: None,
+            max_level: None,
+            include_unleveled: "true".to_owned(),
             status: None,
             history_name: None,
             history_from: None,
@@ -211,6 +216,8 @@ fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
                 query.equipment_group =
                     matches!(value.as_ref(), "rare" | "fusion").then(|| value.into_owned());
             }
+            "max_level" => query.max_level = Some(value.into_owned()),
+            "include_unleveled" => query.include_unleveled = value.into_owned(),
             "status" if is_history_status(&value) => query.status = Some(value.into_owned()),
             "name" => {
                 // 名称非法值交给历史页显示字段错误；提前丢弃会扩大为无此条件的查询。
@@ -345,6 +352,12 @@ pub(crate) fn public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, Strin
     if let Some(equipment_group) = query.equipment_group.as_deref() {
         pairs.push(("equipment_group".to_owned(), equipment_group.to_owned()));
     }
+    if let Some(max_level) = query.max_level.as_deref() {
+        pairs.push(("max_level".to_owned(), max_level.to_owned()));
+    }
+    if query.include_unleveled != "true" {
+        pairs.push(("include_unleveled".to_owned(), query.include_unleveled.clone()));
+    }
     if let Some(category) = query.category.as_deref() {
         pairs.push(("type".to_owned(), category.to_owned()));
     }
@@ -398,6 +411,8 @@ const PUBLIC_QUERY_KEYS: &[&str] = &[
     "auction",
     "type",
     "equipment_group",
+    "max_level",
+    "include_unleveled",
     "status",
     "name",
     "from",

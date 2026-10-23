@@ -23,4 +23,8 @@ pub enum SessionError {
     InvalidConfiguration,
     #[error("公开登录身份无效")]
     InvalidIdentity,
+    #[error("公开登录时长偏好无效")]
+    InvalidPreference,
+    #[error("公开登录时长偏好版本或命令冲突")]
+    PreferenceConflict,
 }

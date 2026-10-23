@@ -141,6 +141,7 @@ pub(crate) fn PublicShell() -> Element {
     });
     use_context_provider(|| crate::api::PublicSessionCheckTrigger(check_session));
     super::session::use_public_session_sync(check_session);
+    super::session::use_public_session_expiry(session, check_session);
     let current_auction = use_resource(move || {
         let _ = refresh_generation();
         let world = selected_world();

@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::api::{
-    CatalogRow, CurrentAuction, LotEnvelopeRows, fetch_current_auction, fetch_current_lots,
-    fetch_lot_watches,
+    CatalogLevelFilter, CatalogRow, CurrentAuction, LotEnvelopeRows, fetch_current_auction,
+    fetch_current_lots, fetch_lot_watches,
 };
 
 /// 当前场次及其完整公开标记结果；总数由真实匹配行数产生。
@@ -61,9 +61,16 @@ async fn load_catalog(
     let mut seen = BTreeSet::new();
     let mut result = Vec::new();
     loop {
-        let envelope = fetch_current_lots(auction.id.clone(), None, None, page_number, PAGE_SIZE)
-            .await
-            .map_err(|_| ())?;
+        let envelope = fetch_current_lots(
+            auction.id.clone(),
+            None,
+            None,
+            CatalogLevelFilter::default(),
+            page_number,
+            PAGE_SIZE,
+        )
+        .await
+        .map_err(|_| ())?;
         let total = envelope.total.ok_or(())?;
         if envelope.auction_id != auction.id
             || envelope.auction_status != auction.status

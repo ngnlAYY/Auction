@@ -295,6 +295,52 @@ pub(crate) fn use_public_session_sync(check_session: EventHandler<bool>) {
     let _ = check_session;
 }
 
+/// 有限会话只在真实截止后复核一次；永久会话不建立计时器，也不把远期日期当永久。
+pub(crate) fn use_public_session_expiry(
+    session: PublicSessionResource,
+    check_session: EventHandler<bool>,
+) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        // 同一身份及截止的重复快照不重启已完成的任务，避免服务端时钟误差造成忙轮询。
+        let deadline = use_memo(move || {
+            session
+                .read()
+                .as_ref()
+                .and_then(|result| result.as_ref().ok())
+                .and_then(|identity| identity.as_ref())
+                .filter(|identity| identity.authenticated)
+                .and_then(|identity| {
+                    chrono::DateTime::parse_from_rfc3339(identity.expires_at.as_deref()?).ok().map(
+                        |expiry| (identity.user_id.clone(), expiry.with_timezone(&chrono::Utc)),
+                    )
+                })
+        });
+        let _expiry_check = use_resource(move || {
+            let deadline = deadline();
+            async move {
+                let Some((_, expiry)) = deadline else { return };
+                loop {
+                    // Date 头只有秒精度；给出一秒余量，长截止分段等待以免浏览器 i32 超时溢出。
+                    let remaining = (expiry - crate::api::estimated_now())
+                        .num_milliseconds()
+                        .saturating_add(1_000);
+                    if remaining <= 0 {
+                        check_session.call(false);
+                        return;
+                    }
+                    gloo_timers::future::TimeoutFuture::new(
+                        remaining.min(i64::from(i32::MAX)) as u32
+                    )
+                    .await;
+                }
+            }
+        });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (session, check_session);
+}
+
 #[cfg(target_arch = "wasm32")]
 struct PublicSessionSync {
     window: web_sys::Window,

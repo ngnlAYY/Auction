@@ -226,9 +226,11 @@ group。Admin runtime 覆盖主配置 fallback，其 tcp 可保留未使用的 r
 group/other 写入（仅 root-owned sticky 祖先例外），整条目录链禁 symlink。代理组仅需遍历/连接权限；两端锁名不同，不得复用
 Worker control socket。metrics 仅允许有效 loopback TCP 或 Unix listener，禁止经代理公开。
 
-`[http_security]` 管精确 origin、限速、Secure Cookie、请求超时和可信代理；`[session]` 管会话预算。`trusted_proxy_cidrs` 最多
-64 个规范、不重复 CIDR，默认空时忽略 X-Forwarded-For；`trusted_unix_proxy` 仅用于有效 Unix listener，不放宽 TCP peer；
-同源 allowlist 默认启用。会话默认空闲/绝对期限：Public 30 分钟/7 天，Admin runtime 15 分钟/8 小时。
+`[http_security]` 管精确 origin、限速、Secure Cookie、请求超时和可信代理。`trusted_proxy_cidrs` 最多 64 个规范、不重复 CIDR，
+默认空时忽略 X-Forwarded-For；`trusted_unix_proxy` 仅用于有效 Unix listener，不放宽 TCP peer；同源 allowlist 默认启用。
+Public `[session]` 只接受 `max_public_sessions`（默认 5，范围 1–100），登录时长由账号「我的」设置、默认永久。
+旧 Public `idle_ttl_seconds`、`absolute_ttl_seconds` 须从角色文件删除，保留时加载明确失败；新登录及既有会话的范围见
+[登录时长契约](docs/contracts/routes.md#p27p28-登录时长)。Admin runtime 空闲/绝对期限仍为 15 分钟/8 小时，Admin 角色解析不变。
 
 ## Cloudflare 与 Unix 上游
 

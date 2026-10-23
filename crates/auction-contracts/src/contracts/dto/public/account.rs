@@ -166,22 +166,58 @@ impl std::fmt::Debug for PublicLoginRequest {
     }
 }
 
+/// Public 登录结果；两个截止字段同时为 null 表示可撤销的永久会话。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicLoginResponse {
     pub user_id: String,
     pub username: String,
     pub status: String,
-    pub expires_at: String,
-    pub absolute_expires_at: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub expires_at: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub absolute_expires_at: Option<String>,
 }
 
+/// Public 权威会话；永久会话仍受账号、凭据和撤销状态约束。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicSessionCurrentResponse {
     pub authenticated: bool,
     pub user_id: String,
     pub username: String,
-    pub expires_at: String,
-    pub absolute_expires_at: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub expires_at: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub absolute_expires_at: Option<String>,
+}
+
+/// 账号后续登录时长及当前会话实际截止；偏好与现有其他设备会话相互独立。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicSessionPreferenceResponse {
+    pub user_id: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub duration_seconds: Option<i64>,
+    pub version: i64,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub expires_at: Option<String>,
+}
+
+/// 更新当前会话与后续登录时长；必须显式提交 null 才选择永久，缺字段不能扩大有效期。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicSetSessionPreferenceRequest {
+    pub command_id: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub duration_seconds: Option<i64>,
+    pub expected_version: i64,
+}
+
+fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
 }
 
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；服务端两条路径都只

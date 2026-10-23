@@ -23,12 +23,17 @@ mod realtime;
 mod rules;
 #[path = "identity/session.rs"]
 mod session;
+#[path = "identity/session_preference.rs"]
+mod session_preference;
 mod status;
 #[path = "identity/watch_preference.rs"]
 mod watch_preference;
 #[path = "auction/watches.rs"]
 mod watches;
 
+pub(crate) use session_preference::{
+    fetch_session_preference, set_session_preference, valid_session_duration,
+};
 pub(crate) use watch_preference::{fetch_lot_watch_preference, set_lot_watch_preference};
 
 #[cfg(target_arch = "wasm32")]
@@ -49,7 +54,9 @@ pub(crate) use compensation::{
     fetch_compensation_movements, fetch_compensation_pool,
 };
 pub(crate) use forum::{ForumThread, fetch_forum_sync_enabled, fetch_forum_thread};
-pub(crate) use model::{CatalogRow, LotEnvelopeRows, PriceHistoryQuery, lot_code_for};
+pub(crate) use model::{
+    CatalogLevelFilter, CatalogRow, LotEnvelopeRows, PriceHistoryQuery, lot_code_for,
+};
 pub(crate) use queries::{
     LotDetailFetchError, PriceHistoryFetchError, fetch_auction_list, fetch_auction_page,
     fetch_bid_log_auctions, fetch_bid_log_page, fetch_current_auction, fetch_current_lots,

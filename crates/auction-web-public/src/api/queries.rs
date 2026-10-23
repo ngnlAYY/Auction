@@ -1,8 +1,8 @@
 //! Public 拍卖、lot、竞价日志和价格历史查询。
 
 use super::{
-    AuctionListPage, BidLogPage, CurrentAuction, LotEnvelope, PriceHistoryPage, PriceHistoryQuery,
-    TransportError, Worlds, decoder, send_get,
+    AuctionListPage, BidLogPage, CatalogLevelFilter, CurrentAuction, LotEnvelope, PriceHistoryPage,
+    PriceHistoryQuery, TransportError, Worlds, decoder, send_get,
 };
 use gloo_timers::future::TimeoutFuture;
 use url::form_urlencoded;
@@ -69,7 +69,8 @@ pub(crate) async fn fetch_current_auction(
 /// 旧 v1 lot wire 不包含世界、场次号和计划结束时间；这些展示上下文必须从拍卖目录
 /// 读取，不能通过扩张 lot 响应破坏旧客户端的严格字段闭集。
 pub(crate) async fn fetch_historical_auction(auction_id: String) -> Result<CurrentAuction, String> {
-    let envelope = fetch_current_lots(auction_id, None, None, 1, 10).await?;
+    let envelope =
+        fetch_current_lots(auction_id, None, None, CatalogLevelFilter::default(), 1, 10).await?;
     let status = envelope.auction_status.clone();
     if !matches!(status.as_str(), "live" | "final" | "settled") {
         return fetch_matching_current_auction(&envelope.auction_id, &status).await;
@@ -280,6 +281,7 @@ pub(crate) async fn fetch_current_lots(
     auction_id: String,
     category: Option<String>,
     equipment_group: Option<String>,
+    levels: CatalogLevelFilter,
     page: i64,
     page_size: i64,
 ) -> Result<LotEnvelope, String> {
@@ -287,6 +289,7 @@ pub(crate) async fn fetch_current_lots(
         &auction_id,
         category.as_deref(),
         equipment_group.as_deref(),
+        levels,
         page,
         page_size,
     )
@@ -300,6 +303,7 @@ pub(crate) async fn fetch_current_lots(
         &auction_id,
         category.as_deref(),
         equipment_group.as_deref(),
+        levels,
         page,
         page_size,
     )
@@ -310,6 +314,7 @@ async fn fetch_current_lots_once(
     auction_id: &str,
     category: Option<&str>,
     equipment_group: Option<&str>,
+    levels: CatalogLevelFilter,
     page: i64,
     page_size: i64,
 ) -> Result<LotEnvelope, String> {
@@ -321,12 +326,18 @@ async fn fetch_current_lots_once(
     if let Some(equipment_group) = equipment_group {
         query.append_pair("equipment_group", equipment_group);
     }
+    if let Some(maximum) = levels.max_level {
+        query.append_pair("max_level", &maximum.to_string());
+    }
+    if !levels.include_unleveled {
+        query.append_pair("include_unleveled", "false");
+    }
     let url = format!("/api/v1/auctions/{auction_id}/lots?{}", query.finish());
     let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(decoder::decode_error_code(response).await);
     }
-    decoder::decode_lot_list(response, auction_id, category, equipment_group).await
+    decoder::decode_lot_list(response, auction_id, category, equipment_group, levels).await
 }
 
 pub(crate) async fn fetch_lot_detail(lot_id: String) -> Result<LotEnvelope, LotDetailFetchError> {

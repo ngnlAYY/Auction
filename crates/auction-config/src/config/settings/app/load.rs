@@ -3,7 +3,7 @@
 use crate::config::reader::read_toml_file;
 
 use super::super::*;
-use super::model::{AppConfig, BuildInput, CommonFileConfig, FileConfig};
+use super::model::{AppConfig, BuildInput, CommonFileConfig, FileConfig, PublicSessionFileConfig};
 
 impl AppConfig {
     pub fn load(role: Role) -> Result<Self, ConfigError> {
@@ -48,16 +48,33 @@ impl AppConfig {
             .map_err(|source| ConfigError::Read { path: requested_path.to_owned(), source })?;
         let contents = read_toml_file(&path)
             .map_err(|source| ConfigError::Read { path: path.clone(), source })?;
-        let file: FileConfig =
-            toml::from_str(&contents).map_err(|_| ConfigError::Parse { path: path.clone() })?;
-
-        Self::from_file(role, Some(path), file)
+        match role {
+            Role::Public => {
+                let mut file: FileConfig<PublicSessionFileConfig> = toml::from_str(&contents)
+                    .map_err(|_| ConfigError::Parse { path: path.clone() })?;
+                // 在加载公共文件或敏感文件前拒绝旧时限，错误只包含固定迁移说明。
+                let session =
+                    RoleSessionConfig::Public(file.session.take().unwrap_or_default().resolve()?);
+                Self::from_file(role, Some(path), file, session)
+            }
+            Role::Admin | Role::Worker => {
+                let mut file: FileConfig<SessionConfig> = toml::from_str(&contents)
+                    .map_err(|_| ConfigError::Parse { path: path.clone() })?;
+                let session = file
+                    .session
+                    .take()
+                    .map(RoleSessionConfig::Timed)
+                    .unwrap_or_else(|| RoleSessionConfig::for_role(role));
+                Self::from_file(role, Some(path), file, session)
+            }
+        }
     }
 
-    fn from_file(
+    fn from_file<Session>(
         role: Role,
         config_path: Option<PathBuf>,
-        file: FileConfig,
+        file: FileConfig<Session>,
+        session: RoleSessionConfig,
     ) -> Result<Self, ConfigError> {
         let FileConfig {
             common_file,
@@ -69,7 +86,7 @@ impl AppConfig {
             runtime_config_file,
             worker,
             http_security,
-            session,
+            session: _,
         } = file;
         let common_config_path = resolve_config_path(config_path.as_deref(), common_file);
         let common = load_common_file(&common_config_path)?;
@@ -94,7 +111,7 @@ impl AppConfig {
                 auction,
                 worker,
                 http_security,
-                session,
+                session: Some(session),
                 secrets_path,
                 runtime_config_path,
             },

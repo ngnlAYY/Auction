@@ -4,6 +4,7 @@ use super::*;
 
 mod actions;
 mod columns;
+mod filters;
 mod helpers;
 mod rows;
 mod tables;
@@ -12,6 +13,7 @@ pub(crate) use actions::*;
 use columns::{
     CatalogColumn, CatalogColumnsButton, CatalogColumnsPanel, CatalogLayout, CatalogVisibility,
 };
+pub(crate) use filters::CatalogGroupFilters;
 pub(crate) use helpers::*;
 pub(crate) use rows::*;
 pub(crate) use tables::*;

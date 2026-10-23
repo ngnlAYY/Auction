@@ -16,7 +16,7 @@
 
 ## 基线与 owner 规则
 
-当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000057`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
+当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000058`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
 
 ### 追加迁移与历史事实
 
@@ -31,6 +31,7 @@
 | 用户时间：PostgreSQL `000044` | MM 注册账本时间等于创建时间、论坛身份历史时间等于倒退更新时间的用户；提升更新时间、推进版本并追加更正审计 | 不猜远端时区、不改创建时间/凭据/命令账本；剩余未知来源异常由新约束阻断迁移 |
 | 邮件预期名称：PostgreSQL `000045` | credential_keys 增加 nullable player_name，仅 mail_cookie 可设置，受长度/空白/控制字符约束 | 旧记录保持 NULL，无 verified 列、不回填或授权内部履约；保留旧凭据与未知发送证据 |
 | 账户读取索引：PostgreSQL `000057` | 为 `bids` 的用户/时间/UUID 列表及代理授权的用户/更新时间/lot 列表增加完整历史索引，SQL owner 为 storage/account | 不改表、用户归属、命令账本、竞价与结算事实；索引创建仍须走停机迁移门禁 |
+| 登录时长：PostgreSQL `000058` | users 增加 nullable 固定时长及独立偏好版本；Public 截止允许成对 NULL 表示永久，有限值必须有序且非 infinity | 默认仅影响新登录，保留旧会话截止、撤销及认证版本；不恢复过期或撤销令牌，不改变 Admin 会话 |
 
 ### Bot 内部履约对象
 
@@ -75,8 +76,9 @@ canonical PostgreSQL v28 转换由 `legacy_v28` bridge 持有：精确格式预�
 | users | auction-application：users | 可变 MM/显示名称、稳定唯一论坛账号 ID、活动状态和版本；历史 game_player_id 仅作兼容镜像 |
 | user_blacklist | auction-application：users | 公开资格与封禁原因 |
 | user_renames | auction-application：users | 用户名变更追加历史 |
-| public_sessions | auction-application：sessions | Public 会话权威状态；滑动闲置有效期受绝对有效期限制；长连接只读复核撤销、active 账号/凭据与双重过期，不刷新活动时间 |
+| public_sessions | auction-application：sessions | Public 权威会话；成对 NULL 表示永久，有限截止不滑动刷新；认证和长连接仍复核撤销、active 账号/Key 及有限过期边界 |
 | admin_sessions | auction-application：sessions | Admin 会话与 CSRF 关联状态；token_hash 为绑定 actor/secret 的 HMAC-SHA256 摘要，Admin 启动永久撤销所有未撤销行；保留滑动有效期、绝对上限与原撤销时间，不新增凭据校验值或列 |
+| users.public_session_duration_seconds / public_session_preference_version | auction-application：sessions | 账号后续登录固定时长及独立 CAS 版本，默认 NULL/1；不改变 users 身份 state_version，SQL 由 storage/sessions 独占 |
 | rules_documents | auction-application：rules | 版本化规则文档；PostgreSQL 首次接管可由 auctionctl 经同一应用端口导入受控目录 |
 | audit_records | auction-application：audit | 追加式审计事实，不允许编辑历史 |
 | service_heartbeats | auction-observability | 进程/服务心跳与过期判断 |

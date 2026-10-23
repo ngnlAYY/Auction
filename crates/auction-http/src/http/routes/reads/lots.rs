@@ -8,8 +8,11 @@ pub(crate) async fn list_lots(
 ) -> Result<Json<ApiResponse<PublicLotEnvelopeResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
     let auction_id = parse_public_uuid(&auction_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
-    let query = parse_query(&uri, &["category", "equipment_group", "page", "page_size"])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let query = parse_query(
+        &uri,
+        &["category", "equipment_group", "max_level", "include_unleveled", "page", "page_size"],
+    )
+    .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let page_size = parse_positive_i64(query.get("page_size"), 20, None)
@@ -27,7 +30,34 @@ pub(crate) async fn list_lots(
                 .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "装备分组无效"))
         })
         .transpose()?;
-    let request = PublicLotListRequest { category, equipment_group, limit: page_size, offset };
+    let max_level = query
+        .get("max_level")
+        .map(|value| {
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(api_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_query",
+                    "装备等级上限无效",
+                ));
+            }
+            value.parse::<i64>().map_err(|_| {
+                api_error(StatusCode::BAD_REQUEST, "invalid_query", "装备等级上限无效")
+            })
+        })
+        .transpose()?;
+    let include_unleveled = match query.get("include_unleveled").map(String::as_str) {
+        None | Some("true") => true,
+        Some("false") => false,
+        _ => return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "无等级筛选无效")),
+    };
+    let request = PublicLotListRequest {
+        category,
+        equipment_group,
+        max_level,
+        include_unleveled,
+        limit: page_size,
+        offset,
+    };
     request
         .validate()
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
@@ -36,14 +66,14 @@ pub(crate) async fn list_lots(
         return Err(lot_dependency_unavailable());
     };
     let page_result = reader
-        .list_public_lots(auction_id, request)
+        .list_public_lots(auction_id, request.clone())
         .await
         .map_err(|_| lot_dependency_unavailable())?;
     let Some(page_result) = page_result else {
         return Err(not_found_error());
     };
     if page_result.validate(auction_id, query.get("category").map(String::as_str)).is_err()
-        || page_result.validate_equipment_group(equipment_group).is_err()
+        || page_result.validate_filters(&request).is_err()
         || page_result.limit != page_size
         || page_result.offset != offset
     {

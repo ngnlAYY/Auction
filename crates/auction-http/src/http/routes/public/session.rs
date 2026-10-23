@@ -27,7 +27,7 @@ pub(crate) async fn login_session(
             let mut response_headers = no_store_headers();
             let Ok(cookie) = public_session_cookie(
                 &result.token,
-                result.identity.absolute_expires_at,
+                result.identity.effective_expires_at(),
                 now,
                 state.security().cookie_secure(),
             ) else {
@@ -38,8 +38,8 @@ pub(crate) async fn login_session(
                 user_id: result.identity.user_id.to_string(),
                 username: result.identity.username,
                 status: "active".to_owned(),
-                expires_at: public_timestamp(result.identity.expires_at),
-                absolute_expires_at: public_timestamp(result.identity.absolute_expires_at),
+                expires_at: result.identity.expires_at.map(public_timestamp),
+                absolute_expires_at: result.identity.absolute_expires_at.map(public_timestamp),
             };
             (StatusCode::OK, response_headers, Json(ApiResponse::ok("登录成功", data)))
                 .into_response()
@@ -62,8 +62,21 @@ pub(crate) async fn current_session(
     let Some(raw_token) = read_public_session_cookie(&headers) else {
         return current_session_response(&state, None, true);
     };
-    match session.current(raw_token, Utc::now()).await {
-        Ok(identity) => current_session_response(&state, Some(identity), false),
+    let now = Utc::now();
+    match session.current(raw_token.clone(), now).await {
+        Ok(identity) => {
+            let Ok(cookie) = public_session_cookie(
+                &raw_token,
+                identity.effective_expires_at(),
+                now,
+                state.security().cookie_secure(),
+            ) else {
+                return internal_error();
+            };
+            let mut response = current_session_response(&state, Some(identity), false);
+            response.headers_mut().insert(header::SET_COOKIE, cookie);
+            response
+        }
         Err(error) if is_unauthenticated(&error) => current_session_response(&state, None, true),
         Err(_) => session_unavailable(),
     }

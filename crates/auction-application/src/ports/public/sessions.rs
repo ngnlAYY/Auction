@@ -1,24 +1,22 @@
+//! Public 固定期限/永久会话与 Admin 滑动会话的应用端口。
+
 use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::ApplicationFuture;
-use crate::SessionError;
+use crate::{PublicSessionPreferenceResult, SessionError, SetPublicSessionPreferenceCommand};
 
-/// Public 会话的滑动过期、绝对过期和并发上限。
+/// Public 会话的并发上限；登录期限由账号偏好决定。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PublicSessionConfig {
-    pub idle_ttl: Duration,
-    pub absolute_ttl: Duration,
     pub max_public_sessions: u32,
 }
 
 impl PublicSessionConfig {
-    /// 校验会话时间必须为正，且滑动过期不能超过绝对过期。
+    /// 并发上限必须为正，不再以部署配置控制 Public 登录期限。
     pub fn validate(self) -> Result<(), SessionError> {
-        if self.idle_ttl <= Duration::zero()
-            || self.absolute_ttl < self.idle_ttl
-            || self.max_public_sessions == 0
-        {
+        if self.max_public_sessions == 0 {
             return Err(SessionError::InvalidConfiguration);
         }
         Ok(())
@@ -52,25 +50,35 @@ pub struct PublicLoginIdentity {
     pub public_reason: Option<String>,
 }
 
-/// 公开会话的安全投影；只读复核不延长其中的过期时间。
-#[derive(Debug, Clone)]
+/// 公开会话的安全投影；双截止同为空表示永久，读取或活动不延长期限。
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicSessionIdentity {
     pub user_id: Uuid,
     pub username: String,
-    pub expires_at: DateTime<Utc>,
-    pub absolute_expires_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub absolute_expires_at: Option<DateTime<Utc>>,
 }
 
-/// sessions owner 接收的公开会话持久化记录。
-#[derive(Debug, Clone)]
+impl PublicSessionIdentity {
+    /// 旧会话保留双截止的较早值；永久没有截止，混合空值保守采用存在的截止。
+    pub fn effective_expires_at(&self) -> Option<DateTime<Utc>> {
+        match (self.expires_at, self.absolute_expires_at) {
+            (Some(expires_at), Some(absolute_expires_at)) => {
+                Some(expires_at.min(absolute_expires_at))
+            }
+            (expires_at, absolute_expires_at) => expires_at.or(absolute_expires_at),
+        }
+    }
+}
+
+/// sessions owner 接收的登录记录；存储锁定用户后读取偏好并计算固定截止。
+#[derive(Debug, Clone, Copy)]
 pub struct PublicSessionRecord {
     pub token_hash: [u8; 32],
     pub user_id: Uuid,
     /// 仅用于创建会话的版本门禁，不持久化凭据摘要或改变既有会话的响应契约。
     pub authenticated_user_version: i64,
     pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub absolute_expires_at: DateTime<Utc>,
 }
 
 /// 登录成功后只向 HTTP 边界暴露一次的原始 token 和安全投影；调试输出不包含 token。
@@ -147,14 +155,29 @@ pub trait PublicSessionStore: Send + Sync {
         now: DateTime<Utc>,
     ) -> ApplicationFuture<'_, PublicSessionIdentity>;
 
+    /// 只更新最后活动时间，不延长旧截止或永久会话。
     fn touch_public(
         &self,
         token_hash: [u8; 32],
         now: DateTime<Utc>,
-        next_expires_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, PublicSessionIdentity>;
 
     fn revoke_public(&self, token_hash: [u8; 32], now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
+
+    /// 同一查询中读取有效会话和账号偏好，不刷新活动时间或期限。
+    fn get_public_preference(
+        &self,
+        token_hash: [u8; 32],
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, PublicSessionPreferenceResult>;
+
+    /// 同事务锁用户后锁当前会话，复核授权，再重放或原子保存偏好、截止和账本。
+    fn set_public_preference(
+        &self,
+        token_hash: [u8; 32],
+        command: SetPublicSessionPreferenceCommand,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, PublicSessionPreferenceResult>;
 }
 
 /// Admin 会话持久化窄端口；数据库只保存 token 和 CSRF 摘要。
@@ -196,6 +219,21 @@ pub trait PublicSessionPort: Send + Sync {
     ) -> ApplicationFuture<'_, PublicSessionIdentity>;
 
     fn logout(&self, raw_token: String, now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
+
+    /// 返回账号默认时长和当前会话实际截止；二者可以因旧会话或其他设备而不同。
+    fn get_preference(
+        &self,
+        raw_token: String,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, PublicSessionPreferenceResult>;
+
+    /// 保存后续登录默认值，并且只重设本次认证会话的固定截止。
+    fn set_preference(
+        &self,
+        raw_token: String,
+        command: SetPublicSessionPreferenceCommand,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, PublicSessionPreferenceResult>;
 }
 
 /// Admin session 用例端口，供管理 HTTP 表面使用。

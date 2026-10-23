@@ -18,8 +18,8 @@ Public/Admin HTTP 路由、认证、安全、DTO 映射和静态资源适配。�
 
 ## 路由与源码布局
 
-P09 接收 `equipment_group=rare|fusion` 并交给应用读取端口，在分页前与类型组合筛选；P09/P11 映射服务端分组到
-正式装备、预览摘要和预览详情 DTO，边界检查返回行与请求分组一致。具体字段及统计约定见
+P09 接收 `equipment_group=rare|fusion`、可选 `max_level` 与默认 true 的 `include_unleveled`，严格解析后交给应用读取端口，
+在分页前与类型组合筛选；P09/P11 响应 DTO 保持不变，边界检查返回行与请求分组及等级一致。具体字段及统计约定见
 [装备分组契约](docs/contracts/routes.md#p09p11-装备分组)。
 
 [HTTP 契约](docs/contracts/routes.md)是路由、状态码、DTO、分页和能力清单；Public 指定列表的 `page_size` 不设 200 条上限，仍严格检查正整数、
@@ -40,6 +40,10 @@ P12 成交价编号页的 `sort` 仅接受 `closed_desc`（默认）、`closed_a
 [routes/public/watch_preference.rs](crates/auction-http/src/http/routes/public/watch_preference.rs) 拥有 P25/P26 账号渠道
 GET/PUT：两者复用会话、来源/CSRF、限流、strict JSON、JSON 405 与 `no-store`，不接收客户端 user_id；
 词法错误 400、业务错误 422、命令/版本冲突 409、依赖缺失或集合超限 503，旧 channel 只接受 mm 占位。
+[routes/public/session_preference.rs](crates/auction-http/src/http/routes/public/session_preference.rs) 拥有 P27/P28 登录时长 GET/PUT，
+复用账号身份、Origin、限流、严格 JSON 与 `no-store`，不在 HTTP 层计算固定期限。P06 的截止字段支持成对 `null`；
+永久 Cookie 使用 400 天持久期，成功会话 GET 和设置保存刷新 Cookie，但不延长数据库期限。命令重放刷新 Cookie 时另读当前
+身份，避免历史结果覆盖后续期限，完整字段、错误及浏览器限制见[登录时长契约](docs/contracts/routes.md#p27p28-登录时长)。
 [admin/forum/status.rs](crates/auction-http/src/http/admin/forum/status.rs) 拥有 Admin 认证论坛状态 GET，
 严格空查询、`no-store`、不访远端论坛、不执行恢复授权。
 [admin/runtime_config/taxonomy.rs](crates/auction-http/src/http/admin/runtime_config/taxonomy.rs) 把领域统一装备词典

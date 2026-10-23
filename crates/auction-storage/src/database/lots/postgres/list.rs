@@ -35,10 +35,13 @@ async fn list_postgres_transaction(
     let Some(projection) = postgres_list_projection(transaction, auction_id).await? else {
         return Ok(None);
     };
-    // 未选择分组时保留原 SQL 统计和分页；选定分组才扫描身份，避免默认列表额外遍历规则。
-    let (counts, page_ids) = if let Some(group) = request.equipment_group {
+    // 无分组或等级条件时保留原 SQL 快路；有条件才流式扫描，不在分页后丢行。
+    let (counts, page_ids) = if request.equipment_group.is_some()
+        || request.max_level.is_some()
+        || !request.include_unleveled
+    {
         let selection =
-            super::selection::select_group_page(transaction, auction_id, &request, group, colors)
+            super::selection::select_filtered_page(transaction, auction_id, &request, colors)
                 .await?;
         (selection.category_counts, Some(selection.lot_ids))
     } else {
@@ -166,7 +169,7 @@ async fn list_postgres_transaction(
             .collect::<Result<_, _>>()?;
     }
     page.validate(auction_id, request.category.as_deref()).map_err(storage_error)?;
-    page.validate_equipment_group(request.equipment_group).map_err(storage_error)?;
+    page.validate_filters(&request).map_err(storage_error)?;
     Ok(Some(page))
 }
 

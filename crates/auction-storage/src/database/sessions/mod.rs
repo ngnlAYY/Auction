@@ -2,7 +2,8 @@
 
 use auction_application::{
     AdminSessionIdentity, AdminSessionRecord, AdminSessionStore, ApplicationFuture,
-    PublicSessionIdentity, PublicSessionRecord, PublicSessionStore,
+    PublicSessionIdentity, PublicSessionPreferenceResult, PublicSessionRecord, PublicSessionStore,
+    SetPublicSessionPreferenceCommand,
 };
 use chrono::{DateTime, Utc};
 
@@ -98,13 +99,12 @@ impl PublicSessionStore for DatabaseStore {
         &self,
         token_hash: [u8; 32],
         now: DateTime<Utc>,
-        next_expires_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, PublicSessionIdentity> {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    public::touch_postgres(store, token_hash, now, next_expires_at).await
+                    public::touch_postgres(store, token_hash, now).await
                 }
             }
         })
@@ -116,6 +116,37 @@ impl PublicSessionStore for DatabaseStore {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
                     public::revoke_postgres(store, token_hash, now).await
+                }
+            }
+        })
+    }
+
+    fn get_public_preference(
+        &self,
+        token_hash: [u8; 32],
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    public::get_preference_postgres(store, token_hash, now).await
+                }
+            }
+        })
+    }
+
+    fn set_public_preference(
+        &self,
+        token_hash: [u8; 32],
+        command: SetPublicSessionPreferenceCommand,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    public::set_preference_postgres(store, token_hash, command, now).await
                 }
             }
         })

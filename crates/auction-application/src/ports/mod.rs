@@ -131,6 +131,8 @@ mod rules;
 mod schedule_source;
 #[path = "scheduling/worker.rs"]
 mod scheduler;
+#[path = "public/session_preference.rs"]
+mod session_preference;
 #[path = "public/sessions.rs"]
 mod sessions;
 #[path = "settlement/commands.rs"]
@@ -445,6 +447,9 @@ pub use rules::{
 pub use scheduler::{
     ScheduledRoundBootstrap, ScheduledRoundClaim, ScheduledRoundPhase, ScheduledRoundSnapshot,
     ScheduledRoundStore,
+};
+pub use session_preference::{
+    PublicSessionPreference, PublicSessionPreferenceResult, SetPublicSessionPreferenceCommand,
 };
 pub use sessions::{
     AdminLoginResult, AdminSessionConfig, AdminSessionIdentity, AdminSessionPort,

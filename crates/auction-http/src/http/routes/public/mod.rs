@@ -11,6 +11,7 @@ mod account;
 mod competition;
 #[path = "session.rs"]
 mod session;
+mod session_preference;
 mod watch;
 mod watch_preference;
 pub(crate) use watch_preference::{get_watch_preference, set_watch_preference};
@@ -20,3 +21,4 @@ pub(crate) use watch::{list_lot_watches, set_lot_watch};
 pub(crate) use account::{get_my_proxy_authorization, list_my_bids};
 pub(crate) use competition::{create_proxy_authorization, lower_proxy_authorization, place_bid};
 pub(crate) use session::{PUBLIC_SESSION_COOKIE, current_session, login_session, logout_session};
+pub(crate) use session_preference::{get_session_preference, set_session_preference};

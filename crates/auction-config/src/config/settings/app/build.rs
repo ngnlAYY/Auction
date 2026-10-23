@@ -69,7 +69,7 @@ impl AppConfig {
             })
             .transpose()?;
         let mut http_security = http_security.unwrap_or_else(|| HttpSecurityConfig::for_role(role));
-        let session = session.unwrap_or_else(|| SessionConfig::for_role(role));
+        let session = session.unwrap_or_else(|| RoleSessionConfig::for_role(role));
 
         // Admin runtime 文件是 Admin 运行时策略的唯一生效源；否则 metrics 区块虽然能被
         // 解析并通过 runtime API 返回，进程装配却仍会读取主配置，形成“可写但不生效”的假配置。
@@ -147,7 +147,7 @@ impl AppConfig {
         // 即使 Admin runtime 随后覆盖该区块，也拒绝主配置中无法解析的备用安全策略。
         resolve_http_security_origins(&mut http_security, main_listen_addr)?;
         validate_http_security(&http_security)?;
-        validate_session(&session)?;
+        validate_role_session(&session)?;
 
         let listener = if role == Role::Admin {
             admin_runtime
@@ -188,7 +188,10 @@ impl AppConfig {
             ));
         }
         validate_metrics_listener(role, metrics, admin_uses_unix || public_uses_unix, listen_addr)?;
-        let session = admin_runtime.as_ref().map(runtime_session).unwrap_or(session);
+        let session = admin_runtime
+            .as_ref()
+            .map(|runtime| RoleSessionConfig::Timed(runtime_session(runtime)))
+            .unwrap_or(session);
 
         Ok(Self {
             role,

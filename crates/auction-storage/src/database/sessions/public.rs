@@ -1,14 +1,22 @@
-//! Public 会话的 PostgreSQL 持久化实现。
+//! Public 会话的固定期限与永久会话持久化；账号偏好命令独立放在子模块。
 
 use auction_application::{
-    ApplicationError, PublicSessionIdentity, PublicSessionRecord, SessionError,
+    ApplicationError, PublicSessionIdentity, PublicSessionPreference, PublicSessionRecord,
+    SessionError, TransactionPolicy, TransactionRunner,
 };
 use chrono::{DateTime, Utc};
-use sqlx::Row;
+use sqlx::{Row, postgres::PgRow};
 
 use super::common::storage_error;
 #[cfg(feature = "postgres")]
 use crate::database::PostgresStore;
+use crate::database::{PostgresCompetitionTransaction, competition::map_sql_error};
+
+mod preference;
+
+pub(super) use preference::{
+    get_postgres as get_preference_postgres, set_postgres as set_preference_postgres,
+};
 
 #[cfg(feature = "postgres")]
 pub(super) async fn create_postgres(
@@ -16,23 +24,32 @@ pub(super) async fn create_postgres(
     record: PublicSessionRecord,
     max_public_sessions: u32,
 ) -> Result<PublicSessionIdentity, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开始 Public 会话事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    store
+        .run(TransactionPolicy::serializable(), |transaction| {
+            Box::pin(create_locked(transaction, record, max_public_sessions))
+        })
         .await
-        .map_err(|_| storage_error("设置 Public 会话事务隔离级别失败"))?;
+}
+
+/// 用户锁同时串行化新登录、偏好修改、封禁与换钥；重试复用同一个新 token。
+async fn create_locked(
+    transaction: &mut PostgresCompetitionTransaction,
+    record: PublicSessionRecord,
+    max_public_sessions: u32,
+) -> Result<PublicSessionIdentity, ApplicationError> {
+    let transaction = transaction.transaction_mut()?;
 
     let user = sqlx::query(
-        "SELECT id, username, state_version
+        "SELECT id AS user_id, username, state_version,
+                public_session_duration_seconds, public_session_preference_version
          FROM public.users
          WHERE id = $1 AND status = 'active' AND key_status = 'active'
          FOR UPDATE",
     )
     .bind(record.user_id)
-    .fetch_optional(&mut *transaction)
+    .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("锁定 Public 会话用户失败"))?;
+    .map_err(map_sql_error)?;
     let Some(user) = user else {
         return Err(SessionError::AccountInactive { public_reason: None }.into());
     };
@@ -45,41 +62,46 @@ pub(super) async fn create_postgres(
     {
         return Err(SessionError::InvalidCredentials.into());
     }
+    let preference = map_preference(&user)?;
+    let expires_at = preference
+        .expires_at_from(record.created_at)
+        .map_err(|_| storage_error("Public 登录时长偏好无效"))?;
     let count: i64 = sqlx::query_scalar(
         "SELECT count(*)
          FROM public.public_sessions
-         WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > $2",
+         WHERE user_id = $1 AND revoked_at IS NULL
+           AND ((expires_at IS NULL AND absolute_expires_at IS NULL)
+             OR (expires_at > $2 AND absolute_expires_at > $2))",
     )
     .bind(record.user_id)
     .bind(record.created_at)
-    .fetch_one(&mut *transaction)
+    .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| storage_error("统计 Public 活跃会话失败"))?;
+    .map_err(map_sql_error)?;
     if count >= i64::from(max_public_sessions) {
         return Err(SessionError::SessionLimit.into());
     }
-    sqlx::query(
+    let session = sqlx::query(
         "INSERT INTO public.public_sessions
             (token_hash, user_id, created_at, last_activity_at, expires_at, absolute_expires_at)
-         VALUES ($1, $2, $3, $3, $4, $5)",
+         VALUES ($1, $2, $3, $3, $4, $4)
+         RETURNING expires_at, absolute_expires_at",
     )
     .bind(record.token_hash.as_slice())
     .bind(record.user_id)
     .bind(record.created_at)
-    .bind(record.expires_at)
-    .bind(record.absolute_expires_at)
-    .execute(&mut *transaction)
+    .bind(expires_at)
+    .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| storage_error("创建 Public 会话失败"))?;
-    transaction.commit().await.map_err(|_| storage_error("提交 Public 会话事务失败"))?;
+    .map_err(map_sql_error)?;
 
     Ok(PublicSessionIdentity {
-        user_id: user.try_get("id").map_err(|_| storage_error("读取 Public 会话用户标识失败"))?,
+        user_id: record.user_id,
         username: user
             .try_get("username")
             .map_err(|_| storage_error("读取 Public 会话用户名失败"))?,
-        expires_at: record.expires_at,
-        absolute_expires_at: record.absolute_expires_at,
+        expires_at: session.try_get("expires_at").map_err(map_sql_error)?,
+        absolute_expires_at: session.try_get("absolute_expires_at").map_err(map_sql_error)?,
     })
 }
 
@@ -97,7 +119,8 @@ pub(super) async fn inspect_postgres(
          JOIN public.users AS account ON account.id = session.user_id
          WHERE session.token_hash = $1
            AND session.revoked_at IS NULL
-           AND session.expires_at > $2 AND session.absolute_expires_at > $2
+           AND ((session.expires_at IS NULL AND session.absolute_expires_at IS NULL)
+             OR (session.expires_at > $2 AND session.absolute_expires_at > $2))
            AND account.status = 'active' AND account.key_status = 'active'",
     )
     .bind(token_hash.as_slice())
@@ -106,20 +129,7 @@ pub(super) async fn inspect_postgres(
     .await
     .map_err(|_| storage_error("复核 Public 会话失败"))?
     .ok_or(SessionError::Unauthenticated)?;
-    Ok(PublicSessionIdentity {
-        user_id: row
-            .try_get("user_id")
-            .map_err(|_| storage_error("读取 Public 会话用户标识失败"))?,
-        username: row
-            .try_get("username")
-            .map_err(|_| storage_error("读取 Public 会话用户名失败"))?,
-        expires_at: row
-            .try_get("expires_at")
-            .map_err(|_| storage_error("读取 Public 会话过期时间失败"))?,
-        absolute_expires_at: row
-            .try_get("absolute_expires_at")
-            .map_err(|_| storage_error("读取 Public 会话绝对过期时间失败"))?,
-    })
+    map_identity(&row)
 }
 
 #[cfg(feature = "postgres")]
@@ -127,16 +137,15 @@ pub(super) async fn touch_postgres(
     store: &PostgresStore,
     token_hash: [u8; 32],
     now: DateTime<Utc>,
-    next_expires_at: DateTime<Utc>,
 ) -> Result<PublicSessionIdentity, ApplicationError> {
     let row = sqlx::query(
         "UPDATE public.public_sessions AS session
-         SET last_activity_at = GREATEST(session.last_activity_at, $1),
-             expires_at = LEAST(session.absolute_expires_at, GREATEST(session.expires_at, $2))
+         SET last_activity_at = GREATEST(session.last_activity_at, $1)
          FROM public.users AS account
-         WHERE session.token_hash = $3
+         WHERE session.token_hash = $2
            AND session.revoked_at IS NULL
-           AND session.expires_at > $1
+           AND ((session.expires_at IS NULL AND session.absolute_expires_at IS NULL)
+             OR (session.expires_at > $1 AND session.absolute_expires_at > $1))
            AND account.id = session.user_id
            AND account.status = 'active'
            AND account.key_status = 'active'
@@ -144,7 +153,6 @@ pub(super) async fn touch_postgres(
                    session.absolute_expires_at",
     )
     .bind(now)
-    .bind(next_expires_at)
     .bind(token_hash.as_slice())
     .fetch_optional(store.pool())
     .await
@@ -152,20 +160,7 @@ pub(super) async fn touch_postgres(
     let Some(row) = row else {
         return Err(SessionError::Unauthenticated.into());
     };
-    Ok(PublicSessionIdentity {
-        user_id: row
-            .try_get("user_id")
-            .map_err(|_| storage_error("读取 Public 会话用户标识失败"))?,
-        username: row
-            .try_get("username")
-            .map_err(|_| storage_error("读取 Public 会话用户名失败"))?,
-        expires_at: row
-            .try_get("expires_at")
-            .map_err(|_| storage_error("读取 Public 会话过期时间失败"))?,
-        absolute_expires_at: row
-            .try_get("absolute_expires_at")
-            .map_err(|_| storage_error("读取 Public 会话绝对过期时间失败"))?,
-    })
+    map_identity(&row)
 }
 
 #[cfg(feature = "postgres")]
@@ -185,4 +180,23 @@ pub(super) async fn revoke_postgres(
     .await
     .map_err(|_| storage_error("撤销 Public 会话失败"))?;
     Ok(())
+}
+
+fn map_identity(row: &PgRow) -> Result<PublicSessionIdentity, ApplicationError> {
+    Ok(PublicSessionIdentity {
+        user_id: row.try_get("user_id").map_err(map_sql_error)?,
+        username: row.try_get("username").map_err(map_sql_error)?,
+        expires_at: row.try_get("expires_at").map_err(map_sql_error)?,
+        absolute_expires_at: row.try_get("absolute_expires_at").map_err(map_sql_error)?,
+    })
+}
+
+fn map_preference(row: &PgRow) -> Result<PublicSessionPreference, ApplicationError> {
+    let preference = PublicSessionPreference {
+        user_id: row.try_get("user_id").map_err(map_sql_error)?,
+        duration_seconds: row.try_get("public_session_duration_seconds").map_err(map_sql_error)?,
+        version: row.try_get("public_session_preference_version").map_err(map_sql_error)?,
+    };
+    preference.validate().map_err(|_| storage_error("Public 登录时长偏好记录无效"))?;
+    Ok(preference)
 }

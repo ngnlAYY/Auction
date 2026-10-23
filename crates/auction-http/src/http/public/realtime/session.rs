@@ -22,7 +22,7 @@ pub(super) struct RealtimeSession {
     service: Arc<dyn PublicSessionPort>,
     raw_token: String,
     user_id: Uuid,
-    expires_at: DateTime<Utc>,
+    expires_at: Option<DateTime<Utc>>,
 }
 
 impl RealtimeSession {
@@ -35,13 +35,15 @@ impl RealtimeSession {
             service,
             raw_token,
             user_id: identity.user_id,
-            expires_at: identity.expires_at.min(identity.absolute_expires_at),
+            expires_at: identity.effective_expires_at(),
         }
     }
 
-    /// 到期时重新读取，允许真实 HTTP 活动已延长会话；不能仅凭旧快照关闭活跃用户。
+    /// 到期时重新读取，允许账号设置已修改期限；永久会话也定期复核撤销状态。
     pub(super) fn next_check_delay(&self) -> Duration {
-        (self.expires_at - Utc::now()).to_std().unwrap_or_default().min(SESSION_CHECK_INTERVAL)
+        self.expires_at.map_or(SESSION_CHECK_INTERVAL, |expires_at| {
+            (expires_at - Utc::now()).to_std().unwrap_or_default().min(SESSION_CHECK_INTERVAL)
+        })
     }
 
     pub(super) async fn recheck(&mut self) -> Result<(), SessionCheckError> {
@@ -57,12 +59,13 @@ impl RealtimeSession {
         };
         let now = Utc::now();
         if identity.user_id != self.user_id
-            || identity.expires_at <= now
-            || identity.absolute_expires_at <= now
+            || identity.expires_at.is_some() != identity.absolute_expires_at.is_some()
+            || identity.expires_at.is_some_and(|expires_at| expires_at <= now)
+            || identity.absolute_expires_at.is_some_and(|expires_at| expires_at <= now)
         {
             return Err(SessionCheckError::Expired);
         }
-        self.expires_at = identity.expires_at.min(identity.absolute_expires_at);
+        self.expires_at = identity.effective_expires_at();
         Ok(())
     }
 }

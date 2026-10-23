@@ -17,7 +17,7 @@
 
 ## 基线与统计口径
 
-`auction-http` 拥有路径注册，`auction-contracts` 拥有稳定 DTO。feature API 现为 Public **25** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，P25/P26 共用账号偏好路径，不计健康、静态资源或代理路径。仅支持 PostgreSQL；已发布路径、字段、错误码和未装配能力的错误处理必须保留，运行证据见[验证状态](docs/status.md)。
+`auction-http` 拥有路径注册，`auction-contracts` 拥有稳定 DTO。feature API 现为 Public **26** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，P25/P26 与 P27/P28 各共用一个账号偏好路径，不计健康、静态资源或代理路径。仅支持 PostgreSQL；已发布路径、字段、错误码和未装配能力的错误处理必须保留，运行证据见[验证状态](docs/status.md)。
 
 首次部署另有独立进程的 `/setup`、部署码验证接口和两个配置接口，不计入 feature API；正式 Admin 不注册它们，`/setup` 在正式静态入口返回 404。
 
@@ -56,7 +56,7 @@ live/ready 均用统一 `{code,message,data}` 外壳。`/health/live` 不访问�
 | 404 | 资源不存在或公开边界不允许暴露 |
 | 409 | 状态版本、命令幂等或业务条件冲突 |
 | 413/415 | 请求体过大或 Content-Type 不支持 |
-| 422 | P24 标记或 P26 账号警告偏好的业务输入无效 |
+| 422 | P24 标记、P26 账号警告偏好或 P28 登录时长的业务输入无效 |
 | 429 | 限流或有界连接资源耗尽 |
 | 500 | 服务器内部无法安全完成请求 |
 | 501 | 当前部署档位或端口不提供该能力 |
@@ -74,10 +74,10 @@ Public/Admin 统一 boundary 只接受 1 至 64 字节的 ASCII 字母数字/`-_
 
 客户端地址只在 TCP peer 命中配置的规范 CIDR，或 Public/Admin Unix listener 显式启用可信上游时解析 `X-Forwarded-For`；非法链整体丢弃，Unix 连接不伪造 TCP peer，Unix 信任开关不放宽真实 TCP peer，地址链从右向左跳过受信代理。`CF-Connecting-IP`、`Forwarded`、`X-Forwarded-Proto` 不用于推导客户端地址、Origin 或 Secure Cookie；Cloudflare 经 Caddy 清洗为可信 XFF 后交给应用，见[部署约束](ops/README.md#cloudflare-整站代理)。CSP 只允许同源脚本及 WASM 编译，内联样式例外仅用于 Dioxus 首屏防闪样式和组件 style 属性。登录/变更限流器按该地址工作，最多保留 4096 项并确定性淘汰最久未访问项。
 
-Public 浏览器的已认证写请求（P06 DELETE、P18–P20、P24、P26）携带可选 `X-Auction-Expected-User-Id`，
+Public 浏览器的已认证写请求（P06 DELETE、P18–P20、P24、P26、P28）携带可选 `X-Auction-Expected-User-Id`，
 值为确认操作所属用户的规范非零 UUID。HTTP 仍只从当前 Cookie 获取权威身份；认证成功后、执行写命令前核对该前置条件，
 不匹配返回 `409 session_changed`，非法或重复头返回 `400 invalid_expected_user_id`，均不执行写入。
-未提供该头的既有 v1 客户端保持原语义，JSON DTO 与命令摘要不变。浏览器登录/退出只广播随机通知值，
+未提供该头的既有 v1 客户端保持原身份门禁语义。浏览器登录、退出或保存登录时长只广播随机通知值，
 其他标签页收到通知或页面恢复可见时重新读取会话；业务 401 或 `session_changed` 也触发重读，换号后销毁旧用户的确认状态与命令宿主。
 
 ### 静态入口与缓存
@@ -120,6 +120,31 @@ Public 浏览器的已认证写请求（P06 DELETE、P18–P20、P24、P26）携
 | P24 | PUT | /api/v1/lots/{lot_id}/watch | Public session、origin、限流；版本 CAS；`no-store` | 200 | 400, 401, 403, 404, 409, 413/415, 422, 429, 503/504 |
 | P25 | GET | /api/v1/me/lot-watch-preference | Public session；无 query；账号警告渠道；`no-store` | 200 | 400, 401, 503/504 |
 | P26 | PUT | /api/v1/me/lot-watch-preference | Public session、origin/CSRF、限流；无 query；独立版本 CAS；`no-store` | 200 | 400, 401, 403, 409, 413/415, 422, 429, 503/504 |
+| P27 | GET | /api/v1/me/session-preference | Public session；无 query；账号登录时长及当前截止；`no-store` | 200 | 400, 401, 503/504 |
+| P28 | PUT | /api/v1/me/session-preference | Public session、origin、限流、身份前置条件；无 query；独立版本 CAS；`no-store` | 200 | 400, 401, 403, 409, 413/415, 422, 429, 503/504 |
+
+### P27/P28 登录时长
+
+账号默认登录时长为永久。P27 返回 `PublicSessionPreferenceResponse {user_id, duration_seconds, version, expires_at}`：
+`duration_seconds=null` 表示永久，否则为 60–31536000 的整数秒且必须整除 60（1 分钟至 365 天）；
+`version` 为独立正 i64，默认 1。`expires_at` 是当前 Cookie 会话的实际截止，可与账号后续登录偏好不同。
+P28 必填 `command_id`、`duration_seconds`、`expected_version`；永久必须显式提交 `null`，省略字段或未知字段为 400。
+时长/版本业务无效为 422 `invalid_session_preference`，命令或版本冲突为 409 `session_preference_conflict`。
+服务器只从 Cookie 取得账号和会话；身份前置条件不匹配仍为 409 `session_changed`，失效会话为 401，依赖失败为 503。
+
+保存从锁后服务器时间计算当前会话固定截止，并原子保存账号后续登录偏好、账本及审计；其他设备的既有会话不变。
+同 command_id、同账号/当前会话及完整负载重放原结果，不重置截止；不同负载或跨会话重放冲突。授权和期限复核先于重放，
+过期或撤销会话不能借旧命令恢复。成功或重放后浏览器重读最新设置；HTTP 刷新 Cookie 使用另读的当前会话，而非历史重放截止。
+
+P06 登录与当前会话响应的 `expires_at`、`absolute_expires_at` 均为必填可空字段：同为 `null` 表示永久；
+有限时必须同为 RFC3339 时间，前者不晚于后者。新有限会话两者相等，普通 HTTP 活动与 WebSocket 心跳均不续期。
+`000058` 保留既有会话的原截止和撤销事实，不再滑动刷新；尚有效的旧会话可主动保存新时长，重新登录使用账号偏好。
+Public API 与内嵌页面须同版升级，不能让不识别 `null` 截止的旧页面继续使用新会话投影。
+
+永久是服务端无固定期限，不承诺浏览器无限保留 Cookie。Cookie 保持 HttpOnly、SameSite=Lax 和部署 Secure 策略，
+永久使用 400 天持久期，成功 GET session 和时长保存时刷新浏览器期限；有限 Cookie 不超过服务器实际截止。
+该处理遵守[浏览器 Cookie 期限上限](https://developer.chrome.com/blog/cookie-max-age-expires)；手动清理、浏览器策略或长期未访问
+仍可能要求重新登录。退出、换 Key、账号限制、撤销与原并发会话上限继续生效，Admin 会话策略不变。
 
 ### P23/P24 装备标记与超价提醒
 
@@ -162,10 +187,19 @@ P18-P20 新提交的普通出价、代理创建/降低金额最高为 1B（1,000
 ### P09/P11 装备分组
 
 P09 的可选 `equipment_group` 查询参数只接受 `rare`、`fusion`，省略表示全部；空值、`all`、未知值、重复参数返回 400。
-它与既有 `category` 组合，并在分页前应用。`category_counts` 统计所选装备分组下各类型的总数，
+它与既有 `category` 及等级条件组合，并在分页前应用。`category_counts` 统计所选装备分组和等级条件下各类型的总数，
 `total` 统计再叠加类型条件后的总数；数量与当前页来自同一数据库读取快照，越界空页仍保留真实总数。
-未选择分组时沿用现有 SQL 计数和分页；选择分组时流式读取轻量身份，用应用层统一规则筛选，
+没有分组、等级上限或隐藏无等级条件时沿用现有 SQL 计数和分页；有条件时流式读取轻量身份，用应用层统一规则筛选，
 仅保留请求页的 ID，再在同一事务中读取完整拍品，保持既有顺序。
+
+P09 `GET /api/v1/auctions/{auction_id}/lots` 可选等级参数：
+- `max_level`：包含式数字等级上限，省略表示不限。仅接受非空 ASCII 十进制数字且可表示为非负 `i64`；
+  等于上限保留，高于上限隐藏。空值、符号、空白、小数、指数、溢出和重复参数返回 `400 invalid_query`。
+- `include_unleveled`：只接受 `true`/`false`，省略为 `true`。它独立控制无数字等级装备，`false` 在未指定上限时也生效；
+  空值、其它拼写和重复参数返回 `400 invalid_query`。无等级依据原安全投影 `None`，不当作 0；合法数字 0 仍是数字等级。
+
+只扩展查询参数，不变更 P09/P11 的响应字段、详情读取、标记或竞价门禁，无新增配置、事件或数据库迁移。
+服务端与浏览器均复核返回行的分组和等级归属，漏筛响应明确失败，不在浏览器删行掩盖错误或重算总数。
 
 P09/P11 的正式装备对象、预览摘要与预览详情装备对象均返回必填 `equipment_group: "rare" | "fusion"`；
 预览摘要与详情值必须相同。分组由应用层与论坛共用的标色判定生成：Peerless 固定彩虹或首条匹配规则实际产生名称颜色时为
@@ -173,7 +207,9 @@ P09/P11 的正式装备对象、预览摘要与预览详情装备对象均返回
 当前、预览及历史拍卖目录都使用进程启动时载入的规则；规则不写入装备身份、拍卖快照或历史审计。
 
 公开页把“全部／稀有／融合”置于装备类型筛选上方，默认全部；任一筛选变化回到第一页，并保留另一筛选及每页数量。
-URL、异步请求作用域与实时刷新携带同一分组；列表装备列仅显示名称，装备详情展示服务端分组。
+URL、异步请求作用域与实时刷新携带同一分组及等级条件；列表装备列仅显示名称，装备详情展示服务端分组。
+等级上限与“显示无等级装备”位于分组同行；输入留空时省略 API 上限参数，非法浏览器 URL 保留字段错误并阻止读取。
+完整交互及类型行右侧列设置布局见[Public 设计](crates/auction-web-public/DESIGN.md#5-表格与信息密度)。
 Public API 与内嵌页面需同版升级，配置共享与重启要求见[配置说明](ops/config/README.md)。
 
 ### 标的编号、来源与历史读取

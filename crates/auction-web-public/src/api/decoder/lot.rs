@@ -2,7 +2,7 @@
 //! 代理授权的配额与转换历史谓词由 `account` 模块共享（`pub(super)`），两处投影必须保持
 //! 同一条严格边界。
 
-use super::super::{LotEnvelope, ProxyCommandAuthorization};
+use super::super::{CatalogLevelFilter, LotEnvelope, ProxyCommandAuthorization};
 use super::account::{valid_quota, valid_transitions};
 use super::*;
 use auction_contracts::{
@@ -15,9 +15,12 @@ pub(crate) async fn decode_lot_list(
     auction_id: &str,
     category: Option<&str>,
     equipment_group: Option<&str>,
+    levels: CatalogLevelFilter,
 ) -> Result<LotEnvelope, String> {
-    decode_success(response, |value| valid_lot_list(value, auction_id, category, equipment_group))
-        .await
+    decode_success(response, |value| {
+        valid_lot_list(value, auction_id, category, equipment_group, levels)
+    })
+    .await
 }
 
 pub(crate) async fn decode_lot_detail(
@@ -70,6 +73,7 @@ fn valid_lot_list(
     auction_id: &str,
     category: Option<&str>,
     equipment_group: Option<&str>,
+    levels: CatalogLevelFilter,
 ) -> bool {
     let Some(value) = object(value) else { return false };
     if !only(
@@ -116,14 +120,18 @@ fn valid_lot_list(
                 && (string(value.get("auction_status")) != Some("settled")
                     || object(lot).and_then(|lot| string(lot.get("status"))) != Some("live"))
         };
-        // 请求分组和每行服务端判定必须一致，防止响应串用或分页遗漏条件。
+        // 请求分组、等级和每行服务端判定必须一致；只校验，不把漏筛响应变成残缺页。
+        let equipment = if preview {
+            object(lot)
+        } else {
+            object(lot).and_then(|lot| lot.get("equipment")).and_then(object)
+        };
+        let level = equipment.and_then(|equipment| {
+            int(equipment.get(if preview { "equipment_level" } else { "level" }))
+        });
         valid
+            && levels.matches_level(level)
             && equipment_group.is_none_or(|expected| {
-                let equipment = if preview {
-                    object(lot)
-                } else {
-                    object(lot).and_then(|lot| lot.get("equipment")).and_then(object)
-                };
                 equipment.and_then(|equipment| string(equipment.get("equipment_group")))
                     == Some(expected)
             })

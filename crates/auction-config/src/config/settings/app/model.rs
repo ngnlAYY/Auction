@@ -5,7 +5,7 @@ use auction_application::EquipmentColorRule;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct FileConfig {
+pub(super) struct FileConfig<Session> {
     /// 必填的公共非敏感 TOML 路径；共享日志、指标、缓存和拍卖策略只从该文件加载。
     pub(super) common_file: PathBuf,
     /// 兼容旧格式的可选监听地址；与 `listener` 同时提供会失败，建议使用完整 listener 区块。
@@ -32,9 +32,42 @@ pub(super) struct FileConfig {
     /// 可选 HTTP 安全区块；省略时按进程角色使用内置默认值。
     #[serde(default)]
     pub(super) http_security: Option<HttpSecurityConfig>,
-    /// 可选会话区块；省略时按 Public/Admin 使用各自的旧版默认值。
+    /// 可选会话区块；Public 只解析并发上限，Admin/Worker 保留原有时间配置。
     #[serde(default)]
-    pub(super) session: Option<SessionConfig>,
+    pub(super) session: Option<Session>,
+}
+
+/// 旧 Public 时限仅记录字段存在性，加载时明确拒绝且不保留或回显其值。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct PublicSessionFileConfig {
+    max_public_sessions: u32,
+    #[serde(rename = "idle_ttl_seconds")]
+    obsolete_idle_ttl_seconds: Option<serde::de::IgnoredAny>,
+    #[serde(rename = "absolute_ttl_seconds")]
+    obsolete_absolute_ttl_seconds: Option<serde::de::IgnoredAny>,
+}
+
+impl Default for PublicSessionFileConfig {
+    fn default() -> Self {
+        Self {
+            max_public_sessions: PublicSessionSettings::default().max_public_sessions,
+            obsolete_idle_ttl_seconds: None,
+            obsolete_absolute_ttl_seconds: None,
+        }
+    }
+}
+
+impl PublicSessionFileConfig {
+    pub(super) fn resolve(self) -> Result<PublicSessionSettings, ConfigError> {
+        if self.obsolete_idle_ttl_seconds.is_some() || self.obsolete_absolute_ttl_seconds.is_some()
+        {
+            return Err(ConfigError::InvalidSessionConfig(
+                "Public [session] 不再支持 idle_ttl_seconds 或 absolute_ttl_seconds；请删除这两个字段，仅保留 max_public_sessions。登录时长由用户在 Public「我的」设置，默认永久；现有会话期限保留，Admin 配置不变",
+            ));
+        }
+        Ok(PublicSessionSettings { max_public_sessions: self.max_public_sessions })
+    }
 }
 
 /// 三个进程共同引用的非敏感配置；闭集模型同时阻止角色专属字段混入公共文件。
@@ -63,7 +96,7 @@ pub(super) struct BuildInput {
     pub(super) auction: AuctionConfig,
     pub(super) worker: WorkerConfig,
     pub(super) http_security: Option<HttpSecurityConfig>,
-    pub(super) session: Option<SessionConfig>,
+    pub(super) session: Option<RoleSessionConfig>,
     pub(super) secrets_path: Option<PathBuf>,
     pub(super) runtime_config_path: Option<PathBuf>,
 }
@@ -88,7 +121,8 @@ pub struct AppConfig {
     pub auction: AuctionConfig,
     pub worker: WorkerConfig,
     pub http_security: HttpSecurityConfig,
-    pub session: SessionConfig,
+    /// 当前角色的会话策略；Public 只包含并发上限，不拥有账号登录时长。
+    pub session: RoleSessionConfig,
     /// 主配置文件路径；程序化默认配置时为 None。
     pub config_path: Option<PathBuf>,
     /// 公共非敏感配置文件路径；文件配置加载时由必填 common_file 解析得到。
