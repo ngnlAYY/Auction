@@ -40,6 +40,40 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
         ApplicationError::AdminCredential(AdminCredentialError::InvalidRequest) => {
             invalid_request("invalid_credential_request", "凭据管理参数无效")
         }
+        ApplicationError::AdminCredential(AdminCredentialError::InvalidCookie) => {
+            invalid_request("invalid_credential_secret", "Cookie 认证字段无效")
+        }
+        ApplicationError::AdminCredential(AdminCredentialError::LoginRejected) => super::api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "credential_login_rejected",
+            "论坛拒绝账号密码登录",
+        )
+        .into_response(),
+        ApplicationError::AdminCredential(AdminCredentialError::LoginChallenge) => {
+            super::api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "credential_login_challenge",
+                "请在论坛浏览器完成验证后手动导入 Cookie",
+            )
+            .into_response()
+        }
+        ApplicationError::AdminCredential(AdminCredentialError::LoginUnavailable) => {
+            super::api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "credential_login_unavailable",
+                "论坛登录暂不可用",
+            )
+            .into_response()
+        }
+        ApplicationError::AdminCredential(AdminCredentialError::LoginBusy) => (
+            [(axum::http::header::RETRY_AFTER, "30")],
+            super::api_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "credential_login_busy",
+                "论坛登录繁忙，请稍后重试",
+            ),
+        )
+            .into_response(),
         ApplicationError::AdminCredential(AdminCredentialError::NotFound) => {
             super::not_found_error().into_response()
         }

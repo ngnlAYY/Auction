@@ -7,6 +7,16 @@ use thiserror::Error;
 pub enum AdminCredentialError {
     #[error("Admin 凭据命令参数无效")]
     InvalidRequest,
+    #[error("Cookie 缺少有效认证字段或包含歧义字段")]
+    InvalidCookie,
+    #[error("论坛拒绝账号密码登录")]
+    LoginRejected,
+    #[error("论坛要求在浏览器完成验证，请使用手动 Cookie 导入")]
+    LoginChallenge,
+    #[error("论坛登录暂不可用")]
+    LoginUnavailable,
+    #[error("论坛登录繁忙，请稍后重试")]
+    LoginBusy,
     #[error("Admin 凭据不存在")]
     NotFound,
     #[error("Admin 凭据唯一约束、标签或密文指纹冲突")]

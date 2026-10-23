@@ -47,8 +47,9 @@ change 监听；所有监听、闭包与任务均绑定所属组件生命期。
 
 ## 传输与错误
 
-`send_get`/`send_request` 使用 gloo-net 0.7、gloo-timers 0.4，以统一 10 秒预算读取响应头与正文，超时或取消通过
-AbortController 终止 fetch。本 crate 只声明 Gloo HTTP feature，JSON/WebSocket 由实际调用的 surface 增补；
+`send_get`/`send_request` 使用 gloo-net 0.7、gloo-timers 0.4，默认以 10 秒预算读取响应头与正文；
+`send_request_with_timeout` 可为单次请求显式指定预算，仍复用唯一 fetch 与错误路径，无自动重试。
+超时或取消通过 AbortController 终止 fetch。本 crate 只声明 Gloo HTTP feature，JSON/WebSocket 由实际调用的 surface 增补；
 独立 WASM 检查不能依赖合并 feature。响应保留状态/头，DTO 解码归 surface；observed 入口在响应头到达时通知
 Public 校时。CSRF/Basic Auth 由 Admin 构造请求，不能在共享层变成业务耦合。`TransportError` 返回稳定结构化分类，
 `classify_base_error` 只识别共用错误，业务码交 surface 映射，不得用展示字符串决定重试。

@@ -109,9 +109,14 @@ bash ci/release/web-bundle.sh admin
 `mail_disposition_conflict` 隔离只允许核对后标失败，禁止成功确认和重试。凭据更改提示 Worker 重启；A44 只保留当前页
 的分范围认证观测，不能证明写权限或改变凭据状态。邮件 Cookie 导入可填可选 `player_name`（精确完整游戏名称，非数字
 UID），forum Cookie 不接受该字段；可信自身身份页面协议未闭合时配置预期名称仍返回 `identity_unproven`。导入一旦结果
-未知，锁定 kind/world/label/player_name/secret 原值与 UUID，只能原样重试，后续认证、限流或业务拒绝不解除累计未知。
+未知，锁定来源、kind/world/label/player_name、密码或 Cookie 原值与 UUID，只能原样手动重试，后续认证、限流或业务拒绝不解除累计未知。
 既有 delivery 列表兼容独立 `lot_watch` 来源并使用五语言类型标签，只为 `lot_watch_invalidated` 的明确 failed/无 sending/
 无租约/无外部引用/零 COD 投影接受 preflight 时间链且不提供重试入口（见[Admin 契约](docs/contracts/routes.md#admin)）。
+
+`/cookies` 提供粘贴 CK 与论坛账号密码两种来源；游戏导入接受完整论坛 CK，但服务端只保存两个共享认证字段。
+账号密码由服务端完成获取，不返回 CK、不保存密码、不猜测玩家名，每次只导入选定类型/世界。
+密码只暂留当前表单内存，成功或离开页面清空；验证码提示使用论坛浏览器登录后粘贴，不自动重试或绕过验证。
+导入等待预算独立为 20 秒，其他 API 保持 10 秒；字段、状态码及敏感边界见[外部凭据契约](docs/contracts/routes.md#外部凭据)。
 
 装备读取的解析失败在原有诊断详情中展示九种低基数原因及原始代码，覆盖名称、品质、种类、大类及其不一致、等级、
 页面结构、属性和结构化数据不一致；仅接受 `stage=parse/category=protocol_drift` 的对应原因组合，历史无明细记录继续可读。

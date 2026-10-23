@@ -200,7 +200,8 @@ AUCTION_CONFIG_FILE=/etc/auction/admin.toml /opt/auction/bin/auctionctl import-r
 ```
 
 凭据命令仅接受 Worker 已启用的 `main`/`isekai`，用敏感配置的独立 credential 数据密钥加密写入 PostgreSQL；
-Cookie 只经 stdin，来源文件须 owner-only，导入后按 runtime 要求重启 Worker。规则命令加载 Admin 配置，须提供
+Cookie 只经 stdin，来源文件须 owner-only；可输入完整论坛 CK，新导入只保存 `ipb_member_id` 与 `ipb_pass_hash`。
+CLI 不接收论坛密码、不发起登录；导入后按 runtime 要求重启 Worker。规则命令加载 Admin 配置，须提供
 `en.md`、`zh-CN.md`、`zh-TW.md`、`ja.md`、`ko.md` 五个 UTF-8 普通非符号链接文件：移除单个开头 BOM，首个非空行
 去掉前导 `#` 作为标题。已有相同内容报告 `preserved`，任何不同内容在首个写入前拒绝，缺失语言才发布；各语言 UUID
 由批次 ID 稳定派生，部分完成后用同一批次重试。输出 `sha256` 针对去 BOM 后正文；Redis 配置要求

@@ -35,6 +35,37 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-23 Admin 论坛账号获取 CK（真实登录与隔离数据库验证）
+
+owner 为 application credentials、integrations `credentials/acquire`、contracts/HTTP 与 Admin Web；
+A32 新增互斥的账号密码来源，游戏导入可直接使用完整论坛 CK，只密封 `ipb_member_id` 与 `ipb_pass_hash`。
+每次只导入所选类型/世界；密码不持久化、取得的 CK 不返回浏览器，原事务、审计、单 active 与 Worker 重启要求不变。
+无新增数据库迁移或配置字段，精确协议见[外部凭据](docs/contracts/routes.md#外部凭据)。
+
+用户配合浏览器退出/登录，核对实际表单字段与 Set-Cookie 名称；全新无 Cookie 会话与已登录浏览器不同：
+表单 action 携带 `s`，referer 可带双重 HTML 转义的 `amp;act`，控制台个人链接也可能为 `s + showuser`。
+前两次真实获取分别在表单目标、控制台证明处返回 503，未写入凭据；修复为保留唯一合法 session 参数、
+限定同源登录动作及唯一账号链接。相同真实匿名/认证页面样本在旧程序失败、修复后通过；
+重复 session、跨源目标、不同动作、非法 session 或重复 showuser 仍失败关闭。
+
+独立 PostgreSQL 18.6 临时库使用当时工作树的 59 项迁移（含另一项尚未提交的邮件节奏迁移），运行本地 `postgres,web-embed` Admin，不启动 Worker。
+最终用户真实账号登录返回 201，密码表单清空；原完整命令重放仍为 201、同一凭据，A44 论坛认证返回 valid。
+新取得论坛 CK 的两个共享字段与已验证游戏 CK 一致；游戏主世界、异世界只读认证均为 valid。
+直接核对临时库密文解密后的字段集合：游戏仅两项，论坛为四项 IPB 字段；三次成功导入只有三条 import 账本和三条导入审计，
+命令结果不含密码或 Cookie 字段。临时库、私有配置、服务和验证页面已清理，未更新线上凭据或部署。
+
+真实 HTTP 还覆盖混合来源、嵌套未知字段、非法用户名、缺失认证字段、同 ID 同负载重放及不同负载 409；
+本地 Cookie 提取探针另验证重复认证字段与非法 hash 被拒绝。
+浏览器在服务器已提交后丢弃响应，表单冻结原 UUID/来源/值；手动重试只产生一次导入并清空敏感输入。
+11.1 秒迟到响应仍可处理，20.1 秒无完整响应进入冻结未知状态；五语言 × 1440/375/320px 共 15 组无横向溢出。
+本地协议探针验证新鲜隐藏字段、重复 Set-Cookie 更新、正向认证证明、拒绝/挑战、重定向、正文超限与未知字段；
+未把隔离样本当作所有远端挑战、并发或生产运行验收。
+
+最终源码完整 `just verify` 通过；Admin WASM payload 与原生验证程序构建成功，未新增永久行为测试文件。
+首次 Web 构建因构建期间译文变化被指纹门禁拒绝，输入稳定后重建成功；LSP 初始化退出，引用由 CodeGraph、调用点及编译核对。
+脱敏证据为 `target/audits/credential-acquisition-20261023/evidence.json` 与 `live-success.png`，
+不保存原始登录请求、密码、Cookie 或带 session 的远端 URL。
+
 ### 2026-10-22 Public 登录时长设置（隔离 PostgreSQL 与浏览器验证）
 
 owner 为 application sessions、storage sessions、contracts/HTTP、config 与 Public Web。「我的」新增永久（默认）及分钟/小时/天

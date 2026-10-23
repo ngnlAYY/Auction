@@ -1,9 +1,9 @@
 use std::net::SocketAddr;
 
 use auction_application::{
-    AdminCredentialDeleteCommand, AdminCredentialImportCommand, AdminCredentialKind,
-    AdminCredentialRenameCommand, AdminCredentialSecret, AdminCredentialStatus,
-    AdminCredentialStatusCommand, AdminCredentialWorld,
+    AdminCredentialDeleteCommand, AdminCredentialImportCommand, AdminCredentialImportSource,
+    AdminCredentialKind, AdminCredentialLogin, AdminCredentialRenameCommand, AdminCredentialSecret,
+    AdminCredentialStatus, AdminCredentialStatusCommand, AdminCredentialWorld,
 };
 use auction_contracts::{
     AdminCredentialCreateRequest, AdminCredentialDeleteRequest, AdminCredentialDeleteResponse,
@@ -63,9 +63,25 @@ pub(crate) async fn create(
             "预期玩家名称无效或凭据类型不支持",
         );
     }
-    let secret = match AdminCredentialSecret::new(input.secret) {
-        Ok(secret) => secret,
-        Err(_) => return invalid_request("invalid_credential_secret", "凭据内容无效"),
+    let source = match input.login {
+        Some(login) if input.secret.is_empty() => {
+            match AdminCredentialLogin::new(login.username, login.password) {
+                Ok(login) => AdminCredentialImportSource::ForumLogin(login),
+                Err(_) => {
+                    return invalid_request("invalid_credential_request", "论坛登录字段无效");
+                }
+            }
+        }
+        None => match AdminCredentialSecret::new(input.secret) {
+            Ok(secret) => AdminCredentialImportSource::Cookie(secret),
+            Err(_) => return invalid_request("invalid_credential_secret", "凭据内容无效"),
+        },
+        Some(_) => {
+            return invalid_request(
+                "invalid_credential_request",
+                "Cookie 与账号密码必须且只能提供一种",
+            );
+        }
     };
     let Some(port) = state.admin_credentials() else {
         return feature_unavailable();
@@ -77,7 +93,7 @@ pub(crate) async fn create(
             world,
             label: input.label,
             player_name: input.player_name,
-            secret,
+            source,
             actor_id: identity.actor,
             request_id: request_id(&headers),
             now: Utc::now(),

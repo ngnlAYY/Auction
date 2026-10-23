@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use crate::{
-    AdminCredential, AdminCredentialDeleteCommand, AdminCredentialDeleteResult,
-    AdminCredentialImportCommand, AdminCredentialListRequest, AdminCredentialPage,
-    AdminCredentialPort, AdminCredentialRenameCommand, AdminCredentialSealer,
+    AdminCredential, AdminCredentialAcquirer, AdminCredentialDeleteCommand,
+    AdminCredentialDeleteResult, AdminCredentialImportCommand, AdminCredentialListRequest,
+    AdminCredentialPage, AdminCredentialPort, AdminCredentialRenameCommand, AdminCredentialSealer,
     AdminCredentialStatusCommand, AdminCredentialStore, ApplicationFuture,
 };
 
@@ -26,6 +26,7 @@ mod validation;
 pub struct AdminCredentialService<S, E> {
     store: Arc<S>,
     sealer: Arc<E>,
+    acquirer: Arc<dyn AdminCredentialAcquirer>,
 }
 
 impl<S, E> AdminCredentialService<S, E>
@@ -33,9 +34,9 @@ where
     S: AdminCredentialStore,
     E: AdminCredentialSealer,
 {
-    /// 绑定凭据 storage 与独立的凭据数据密钥适配器。
-    pub fn new(store: Arc<S>, sealer: Arc<E>) -> Self {
-        Self { store, sealer }
+    /// 绑定存储、独立凭据密钥及受限获取端口；导入只持久化最终 Cookie 密文。
+    pub fn new(store: Arc<S>, sealer: Arc<E>, acquirer: Arc<dyn AdminCredentialAcquirer>) -> Self {
+        Self { store, sealer, acquirer }
     }
 }
 

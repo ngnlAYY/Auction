@@ -50,6 +50,8 @@ PostgreSQL runtime 服务组合应用端口、TOML 原子替换和 durable 命�
 装备来源适配器使用启动时唯一 active `mail_cookie`，无数据库记录时才兼容敏感文件单 Cookie，远端登录失效后标记失效、不自动切换。
 `require_tradeable` 默认关闭，仅影响 Admin 手工录入。A44 手动只读校验每次读取指定凭据 ID 的当前信封，
 不复用该快照或回退配置；缺密钥返回 501，不改变 Worker owner 或重启要求。
+同一凭据数据密钥另装配 A32 `CredentialAcquirer`，只在显式导入账号来源时发起固定论坛登录；
+新鲜表单、共享 Cookie 提取与远端正向证明归 integrations，装配根不保存密码、不接受动态外部目标。
 
 ## 生命周期与监听
 

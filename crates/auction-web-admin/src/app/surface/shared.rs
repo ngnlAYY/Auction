@@ -35,6 +35,11 @@ pub fn admin_api_error_message(code: &str) -> String {
         }
         "equipment_conflict" => return t!("admin-error-equipment-conflict"),
         "invalid_credentials" => return t!("admin-error-invalid-credentials"),
+        "invalid_credential_secret" => return t!("admin-credentials-field-secret-invalid"),
+        "credential_login_rejected" => return t!("admin-error-credential-login-rejected"),
+        "credential_login_challenge" => return t!("admin-error-credential-login-challenge"),
+        "credential_login_unavailable" => return t!("admin-error-credential-login-unavailable"),
+        "credential_login_busy" => return t!("admin-error-credential-login-busy"),
         "manual_early_settlement_disabled" => {
             return t!("admin-error-manual-early-settlement-disabled");
         }

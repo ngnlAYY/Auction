@@ -19,6 +19,11 @@
 
 ## 身份与凭据约束
 
+[credentials/acquisition.rs](crates/auction-application/src/ports/admin/credentials/acquisition.rs) 定义互斥的粘贴 Cookie /
+论坛账号来源与获取窄端口；[services/admin/credentials](crates/auction-application/src/services/admin/credentials) 先核对命令账本，
+再交集成适配器获取并密封 Cookie，网络期间不持有数据库事务。密码不持久化，账号来源只使用带密钥、分域的输入摘要；
+原 Cookie 来源保持历史摘要形状，最终密文、安全结果与审计仍由原存储事务原子提交，单 active 不变量不变。
+
 MoogleMail 注册/找回先读取用户 UUID 再签发绑定该身份的登录 key 信封，Users 写事务必须重新锁定并复核身份；
 身份变化交给有界重试，新换绑必须由 active key 授权，已完成命令按账本重放。注册/换绑使用本地处理时钟，不以偏快的
 邮件接收时间抬高用户创建时间；装备投稿的既有接收时间门禁不变。`AdminCredentialRuntimeOwnership` 暴露有界所有权

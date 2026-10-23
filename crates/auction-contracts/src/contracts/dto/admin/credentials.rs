@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// Admin 凭据导入请求；secret 只在请求体和本次加密调用中存在，Debug 实现必须脱敏。
+/// Admin 凭据导入请求；Cookie 与登录输入互斥，敏感字段只在本次请求内存在。
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminCredentialCreateRequest {
@@ -13,7 +13,10 @@ pub struct AdminCredentialCreateRequest {
     /// 可选预期完整玩家名称，仅 mail_cookie 接受；不是身份证明。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player_name: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub secret: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login: Option<AdminCredentialLoginRequest>,
 }
 
 impl std::fmt::Debug for AdminCredentialCreateRequest {
@@ -25,7 +28,22 @@ impl std::fmt::Debug for AdminCredentialCreateRequest {
             .field("world", &self.world)
             .field("label", &self.label)
             .field("secret", &"[REDACTED]")
+            .field("login", &self.login)
             .finish()
+    }
+}
+
+/// 论坛账号登录输入；响应只包含导入后的凭据安全投影，不返回 Cookie。
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminCredentialLoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+impl std::fmt::Debug for AdminCredentialLoginRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("[REDACTED]")
     }
 }
 

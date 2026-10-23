@@ -96,6 +96,8 @@ canonical PostgreSQL v28 转换由 `legacy_v28` bridge 持有：精确格式预�
 Worker 心跳在既有 `details` JSON 对象内发布布尔 `forum_sync_enabled`，值来自本进程启动时的 `[worker.forum].enabled`；observability/storage health owner 继续独占心跳写入。PostgreSQL 完整档的 Public forum 读取 owner 仅聚合该字段：忽略过期和停止实例，任一 true 表示启用，全部明确 false 才表示关闭，缺失、非布尔或无有效实例保留未知。该展示投影不控制论坛任务或竞价，不改变表结构，也不将心跳 details 原文公开给浏览器。
 
 A32 使用 `credential_keys` 与 `credential_admin_commands`，后者到凭据行的引用为 `ON DELETE SET NULL`（`000009_credential_admin_compat`）；`AdminCredentialEnvelope` 校验 nonce、key id 和指纹，账本只保存安全投影/删除结果；Worker 用独立数据密钥读取唯一 active Cookie，Cookie 明文不进入账本。
+账号密码来源复用这些表和原 import 命令，不增加迁移；请求摘要绑定独立域 HMAC，不保存密码或裸密码散列。
+新游戏导入只密封共享的两个认证字段，旧 Cookie 信封与历史粘贴命令摘要不重写，详见[A32](docs/contracts/routes.md#外部凭据)。
 
 ## 拍卖与竞价核心
 

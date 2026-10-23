@@ -30,6 +30,10 @@ GET/PUT（响应 user_id/channel/version，请求 command_id/channel/expected_ve
 [dto/admin/mail/progress.rs](crates/auction-contracts/src/contracts/dto/admin/mail/progress.rs) 拥有 A16 显式选择的安全邮件诊断；
 与原始游标、进程内 claim 及数据库模型分离，旧请求不增加字段，字段与闭集见[邮件契约](docs/contracts/routes.md#邮件审查与轮询)。
 
+[dto/admin/credentials.rs](crates/auction-contracts/src/contracts/dto/admin/credentials.rs) 拥有 A32 的互斥 Cookie/账号登录输入。
+新增嵌套登录 DTO 的 Debug 同时隐藏用户名和密码，导入响应继续只有安全投影，不回传取得的 CK；
+旧 `secret` 请求保持可用，精确字段和错误见[外部凭据契约](docs/contracts/routes.md#外部凭据)。
+
 ## 稳定投影
 
 公开拍品的正式装备、预览摘要与预览详情装备使用必填 `equipment_group` 表达 `rare` / `fusion`；

@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::super::RequestHash;
+use super::AdminCredentialImportSource;
 use super::value::{
-    AdminCredential, AdminCredentialEnvelope, AdminCredentialKind, AdminCredentialSecret,
-    AdminCredentialStatus, AdminCredentialWorld,
+    AdminCredential, AdminCredentialEnvelope, AdminCredentialKind, AdminCredentialStatus,
+    AdminCredentialWorld,
 };
 
 /// 凭据管理命令闭集。
@@ -38,7 +39,7 @@ pub struct AdminCredentialImportCommand {
     pub world: AdminCredentialWorld,
     pub label: String,
     pub player_name: Option<String>,
-    pub secret: AdminCredentialSecret,
+    pub source: AdminCredentialImportSource,
     pub actor_id: String,
     pub request_id: Option<String>,
     pub now: DateTime<Utc>,
@@ -52,7 +53,7 @@ impl fmt::Debug for AdminCredentialImportCommand {
             .field("kind", &self.kind)
             .field("world", &self.world)
             .field("label", &self.label)
-            .field("secret", &"[REDACTED]")
+            .field("source", &self.source)
             .field("actor_id", &self.actor_id)
             .field("request_id", &self.request_id)
             .field("now", &self.now)

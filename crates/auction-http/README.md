@@ -59,6 +59,10 @@ GET/PUT：两者复用会话、来源/CSRF、限流、strict JSON、JSON 405 与
 `include_diagnostics=true` 查询下组合安全已完成 MID 与可选 Worker 观测。旧查询及暂停/恢复响应保持原字段集合，
 原始/非数字游标不出服务端；Worker 不可用不抹掉数据库侧安全游标，不增加业务写入。
 
+[admin/credentials](crates/auction-http/src/http/admin/credentials) 将 A32 的互斥 Cookie/论坛账号输入映射为应用来源，
+复用会话、Origin/CSRF、严格 JSON 与 `no-store`。远端账号拒绝/挑战使用 422，不触发 Admin 401 退出；
+获取结果不回传明文，原导入事务、单 active 约束和 Worker 重启边界不变，详见[外部凭据](docs/contracts/routes.md#外部凭据)。
+
 ## 请求边界与能力边界
 
 请求边界统一处理合法 `X-Request-ID`、trace context、安全头、访问日志、panic 与超时；普通请求处理预算 15 秒
