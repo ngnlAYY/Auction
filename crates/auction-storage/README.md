@@ -7,8 +7,9 @@
 锁序、幂等与审计语义见[领域不变量](docs/contracts/invariants.md)。
 
 PostgreSQL 连接入口独立校验 URI：拒绝缩略形式、fragment、控制字符和无效编码，host/socket 与库名必须由 URI/query
-明确给出；省略端口固定为 5432，不能由 PG* 环境补齐目标。凭据、pgpass、IPv6、socket 与 TLS 查询覆盖仍交给驱动，
-连接错误不回显 URI。配置字段规则见[连接参数](ops/config/README.md#postgresql-连接参数)。
+明确给出；省略端口固定为 5432，不能由 PG* 环境补齐目标。首次驱动解析前按 SQLx 当前支持的查询键闭集拒绝未知参数，
+错误不保留原 URI、查询值或驱动解析错误链。普通连接保留合法 `options`，strict 部署身份继续拒绝它；
+凭据、pgpass、IPv6、socket 与 TLS 语义不变，字段规则见[连接参数](ops/config/README.md#postgresql-连接参数)。
 
 ## 源码入口
 
@@ -42,6 +43,8 @@ Serializable 按 user → 当前 session → 账本取锁，锁后和写入时�
 认证仍要求账号及 Key active；未知重放不延长截止，HTTP 刷新 Cookie 前须另读当前会话。SQL owner 与约束见[数据库契约](docs/contracts/schema.md)。
 Recovery 拉黑仍按历史 claim 时间保存稳定命令、证明与审计；当前用户/黑名单、代理及转换、lot 与会话副作用分别以下辖行
 已有创建/更新时间及最后转换时间为下界，不因 claim 之后新建的会话或代理使整笔拉黑回滚。
+人工和 Recovery 拉黑统一按 lot → proxy → user → session 取得锁，先冻结授权，再锁用户并撤销会话；
+序列化冲突和死锁保留结构化分类，以原命令最多尝试三次完整事务，不重新签发密钥或重建摘要。
 用户、论坛身份及登录 key 信封的快照更新时间以已存创建/更新时间为下界；`000044` 只修复 MM 注册账本与论坛身份历史
 共同证明的时间倒退，推进版本并追加更正审计，保留创建时间与所有凭据，未知来源异常阻断整次迁移
 （见[用户快照时间修复升级](ops/README.md#用户快照时间修复升级)）。
@@ -61,6 +64,8 @@ Admin 用户列表只对当前页 UUID 批量读取黑名单历史，每人仍�
 凭据 owner 的首次永久撤销通过结构化日志记录凭据类型及闭集原因
 （`probe_failed`、`session_unavailable`、`check_cancelled`、`internal_use_revoked`）；不记录连接错误原文、凭据或账号。
 后续成功探测不能恢复已撤销 owner，重建必须由新进程重新取得 advisory lock 并推进邮件 generation。
+合法删除凭据后，命令账本的外键可变为 NULL；历史导入、改名和启停仍按原类型、摘要及安全结果快照重放，
+不读取当前凭据重建结果，不因删除而重新执行外部获取或导入。
 
 Admin realtime replay 在追加替代事件的同一事务复用 consumer 恢复入口：先锁 failure，再锁绑定的 consumer/stream 游标；
 只有游标恰为原事件前一序号才推进到原事件，较早的未处理序号使整笔 replay 回滚，已超过边界不倒退。
@@ -83,6 +88,9 @@ Admin 规则、邮箱管理、Recovery 命令及周轮次 bootstrap 的已有重
 不通过 UPSERT 创建跳号文档，失败不提交规则、命令账本或审计。
 Admin 新建拍卖先由 `lock_admin_auction_creation` 完成原 world → intake target 锁前缀，再由应用层读取数据库
 实时时钟并校验预览窗口；写入复用同事务锁和该时间，命令重放不重新执行当前时间门禁。
+Admin/MM 录入以 Users 的大小写不敏感唯一名称定位并锁定卖家；查不到大小写完全相同的展示名不能绕过黑名单。
+取得 world/target/auction 锁后才读取数据库实时时钟写本地事实及聚合更新时间，更新时间保持单调；
+来源 `collected_at` 继续表达采集事实，不因录入跨越 Open/取消后的 target 切换而写回新草稿的较早时间。
 人工生命周期动作不得抢占仍有效的轮次 Worker 租约；有轮次时必须按顺序精确更新一行，未登记轮次的合法历史场次
 保持可操作。阶段提交后的 Worker complete 只确认同轮次/拍卖/命令完成证据，提交与进程崩溃之间不留下永久重试窗口。
 
@@ -139,8 +147,13 @@ generation、due、授权与资格；调度字段与确定性命令持久化，�
 领取先选择至多请求批量的到期候选，再按 UUID 锁义务和 execution；不锁全部 ready 义务，锁竞争的候选留待后续批次。
 
 编号页 total 与当前页来自一致快照，禁用 world 的活动投影不能公开，已 settled 历史按契约读取。
+`bid_log/postgres.rs` 的明细及 total 均保留同一命令内的普通出价和即时代理回应，不因后续代理事实而隐藏触发报价。
+原命令白名单、拍卖/world 可见性、五字段 keyset 排序和分页边界不变；结果仍只含公开金额、玩家和来源，
+不读取或暴露代理秘密上限。`valid` 只标识当前领先投影，完整事实不会因不再领先而从历史中删除。
 公开黑名单、Admin delivery 及 realtime failure/lag 的计数与当前页共用 Repeatable Read 只读事务，
 避免并发状态变化造成同一响应的总数与列表不一致；筛选、排序、空页总数和分页上限保持原契约。
+Realtime dashboard 的全量 lag 聚合、有界明细与 failure 水位共用同一只读一致快照；健康和总积压使用全量值，
+不能从排序前 200 条明细推断全局无积压，wire 字段见[Dashboard 契约](docs/contracts/routes.md#dashboard-与-readiness)。
 账户页只对当前页授权批量读取完整转换历史和最近代理竞价，详情共用同一归属查询；转换按授权/序号排列，
 最近竞价仍以同用户/lot 的下一 usage 创建时间截断，缺失或不连续转换继续失败关闭。页校验直接移交结果，不复制整页。
 Recovery 报告同样只对本报告 case 批量读取 action，并按各 case 原有 kind/ID 顺序映射，不截断完整报告。
@@ -171,6 +184,9 @@ Dashboard 与 operations alert 共用该投影，字段契约见[Dashboard 与 r
 Delivery 进入 sending 前须证明命令已提交，未知发送结果进入 manual_reconcile，不自动重寄。
 Fulfillment 激活后保留原 claim 的 token/fencing 继续对账，领取期间 `next_attempt_at` 始终为空；
 COD 与卖家货款的下次共享追踪窗口由对账延期在清除 claim 的同一事务持久化，不在激活事务提前写入。
+BuyerRefund 的 prepare/activate（含旧 prepared）借用真实 Armory 联合证据及原单调截止；
+generation、credential、claim 与数据库时效在原业务锁序内复核，连接池等待与 COMMIT 均不能延长预算。
+应用持 opaque guard 至确定结果，不再以装备详情可读替代持有证明。
 [delivery_scheduler/cash](crates/auction-storage/src/database/delivery_scheduler/cash) 统一新旧 sending 入口：有证据时按
 generation→排序 worlds→资金 scope/account→必要业务/凭据→义务→delivery→fulfillment→allocation 加锁，无证据时早锁
 scope 及持久 allocation 关联；完整 payload、recipient、command/hash 及 token/fencing/实时 lease 锁内精确匹配。
@@ -185,6 +201,10 @@ claimed/sending，先取 delivery 行锁再复核 token/fencing 及 `clock_times
 通知、take 成功与 take 重排队也同事务追加审计，仅实际迁移才返回 true；重放、引用已占用和并发输家不重复计数或审计。
 所有恢复绑定统一核对外部引用未被其他投递占用；明确序列化冲突/死锁最多尝试三次，
 未知/失败提交不宣告成功，不据此重发。Send 不进入维护重排队入口，观察元数据本身不迁移状态。
+`mailbox_sweep_cursors`（`000060`）只持久记录逐条维护尝试的 `(created_at,id)` 环形位置，不表示投递完成；
+预算未处理的后缀不推进。原 delivery 的一次性 discard CAS 只阻止未知草稿删除自动重放，不授权 Send。
+COD 重排队使用冻结 v1 七天窗口，并在清旧投影前同事务追加 `delivery.cod_return_resend` 安全历史审计。
+Admin 列表和命令读取只为精确收件人不存在的人工核对退信接受 MID 引用，不把它当作发送成功。
 Recovery 来源不完整时仍持久化已证明的积压/证据过期异常及不可用信号，但不关闭未出现的历史异常。
 
 `forum/catalog.rs` 拥有 `auction_forum_catalog_pages` 续页身份/正文（`000040` 增加主记录目录页数），发布和刷新在主
@@ -201,6 +221,8 @@ lease/fencing/revision CAS 收口；部分进度不会写终态标记，`forum/r
 论坛领取可按 Worker 首轮水位重新领取旧凭据失败和未知写入，但不领取
 `write_authorization_required`。Delivery Admin 重试由 `recovery_commands/commands/delivery_retry.rs` 在原 Serializable
 命令事务恢复匹配的失败投影并推进 fencing，不生成成功证明。
+论坛同步、回帖及 PM 领取在 LIMIT 前按实际可用 world 过滤。命令历史按稳定帖子身份核对，不因当前位置改变改写账本；
+完整扫描的派生楼层可在原 claim/revision CAS 下下降，pending 删除/编辑仍阻止后续命令和终态完成。
 
 ## 内部履约原子事务设计
 
@@ -217,6 +239,8 @@ lease/fencing/revision CAS 收口；部分进度不会写终态标记，`forum/r
   Serializable SIREAD 保留幻行保护，既有 world/资产业务锁及三次冲突重试不变。
 - 资产冲突的普通投递分类和已闭合入站退回历史逐行读取完整载荷，只累计通过原闭集证明的 UUID；
   不整批保存正文或附件，也不先复制 JSON 树再解码。所有候选、未知 schema 的失败关闭及原事务快照保持不变。
+- UnsoldReturn/WithdrawnReturn 均不套成交资金图；已证明的同标的来源 Take 按同一闭集规则闭合，
+  不放宽未知历史、其它标的或其它装备的冲突防线。
 - 复核当前用户版本、有效 claim token/fencing/state_version 及数据库实时时效；新 pending 必须从未准备、激活或关联
   delivery。`conflicts.rs` 按真实 origin/payload 闭集 schema 排除已验证无装备通知：论坛 `forum_auction_notice` 仍属
   mail_intake，仅同 command/world 的 `auction_forum_bid_commands` notify 账本、零命令金额及完整 producer origin 重建
@@ -297,6 +321,8 @@ realtime 水位，不授予删除资格；[recovery_preflight](crates/auction-st
 锁下创建缺失库，不提供 DROP 或 migration；[rebuild](crates/auction-storage/src/database/rebuild) 是独立破坏性边界，
 要求精确目标与受限目录。备份、人工确认、停止进程和 receipt 归 `auctionctl`（见
 [数据库恢复与保留](ops/README.md#数据库恢复与保留)）。
+`retention_inventory` 的 `migration.current` 也复用完整版本、success 和受限兼容 checksum 校验，
+最高版本相同不能替代完整迁移历史；盘点和 schema 60 的维护游标登记均不授予删除权限。
 
 ```bash
 cargo check --locked -p auction-storage --no-default-features --features postgres

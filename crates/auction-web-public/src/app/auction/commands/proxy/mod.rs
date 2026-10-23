@@ -20,6 +20,7 @@ use success::proxy_success_panel;
 /// 公开 lot 的代理授权表单参数；账户状态由服务端投影，不在浏览器端复制代理状态机。
 pub struct ProxyFormInput {
     pub lot_id: String,
+    pub can_bid: bool,
     pub current_price: i64,
     pub next_bid: i64,
     pub lot_status: String,
@@ -41,6 +42,7 @@ pub struct ProxyFormInput {
 pub fn proxy_form(input: ProxyFormInput) -> Element {
     let ProxyFormInput {
         lot_id,
+        can_bid,
         current_price,
         next_bid,
         lot_status,
@@ -67,6 +69,9 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
     };
     if let Some(command) = uncertain_command {
         return rsx! { super::retry::ProxyRetry { lot_id, command, saved_authorization, on_close } };
+    }
+    if !can_bid {
+        return rsx! { p { role: "status", {t!("bid-unavailable")} } };
     }
     match proxy.as_ref() {
         None => rsx! { p { role: "status", {t!("proxy-loading")} } },

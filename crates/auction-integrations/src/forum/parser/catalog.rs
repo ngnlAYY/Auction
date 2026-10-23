@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use auction_application::AdminForumLot;
 
-use super::commands::{parse_amount, parse_catalog_amount};
+use super::commands::parse_catalog_amount;
 use super::{CATALOG_CATEGORIES, CatalogParse, DEFAULT_START_PRICE};
 
 pub(super) fn parse_catalog(input: &str) -> Result<CatalogParse, ()> {
@@ -127,7 +127,7 @@ fn seller_and_bid(description: &str) -> (Option<String>, Option<String>, Option<
             .split_whitespace()
             .next()
             .map(|value| value.trim_matches(|character: char| matches!(character, ',' | ';')))
-            .and_then(|value| parse_amount(value).ok());
+            .and_then(|value| parse_catalog_amount(value).ok());
         let bidder = current
             .to_ascii_lowercase()
             .find(" by ")
@@ -148,7 +148,7 @@ fn seller_and_bid(description: &str) -> (Option<String>, Option<String>, Option<
     let mut bidder = None;
     let mut price = None;
     for index in 0..fields.len() {
-        if let Ok(value) = parse_amount(fields[index]) {
+        if let Ok(value) = parse_catalog_amount(fields[index]) {
             if index > 0 {
                 bidder = Some(fields[..index].join(" "));
             }

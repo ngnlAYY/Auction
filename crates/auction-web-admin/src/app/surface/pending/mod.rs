@@ -1,6 +1,6 @@
-//! 当前 Admin 路由内已提交命令的稀疏宿主；不保存未提交草稿、认证材料或结果。
-//! 工厂只拥有首次提交的完整参数与 UUID，重试不读取行、版本或表单。任务登记在页级
-//! Signal 的 Scope，翻页卸载行不取消任务；离开路由/登出由 Dioxus 取消并释放所有工厂。
+//! 当前 Admin 稳定 owner 内已提交命令的稀疏宿主；不保存未提交草稿或成功结果。
+//! 工厂只拥有首次提交的完整参数与 UUID，重试不读取行、版本或表单。任务登记在 owner
+//! 的 Scope，行或弹窗卸载不取消任务；owner 销毁同时释放工厂，敏感负载只驻留内存。
 
 use std::{future::Future, pin::Pin, rc::Rc};
 
@@ -24,7 +24,7 @@ struct PendingCommand {
     factory: CommandFactory,
 }
 
-/// 只在稳定页面安装，子组件只消费该句柄；一个实体同时最多保留一个已提交意图。
+/// 只在稳定 owner 安装，子组件只消费该句柄；一个实体同时最多保留一个已提交意图。
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct PendingCommands {
     entries: Signal<Vec<PendingCommand>>,
@@ -95,7 +95,7 @@ impl Drop for PendingCommandGateGuard {
     }
 }
 
-/// 生命周期与页面资源一致；没有跨路由上下文、持久化或自动重放。
+/// 生命周期与安装 owner 一致；通常属于页面，配置草稿随认证外壳，无持久化或自动重放。
 pub(crate) fn use_pending_commands(reload: Signal<u64>) -> PendingCommands {
     use_pending_commands_with_gate(reload, None)
 }
@@ -139,7 +139,10 @@ impl PendingCommands {
         T: 'static,
         F: Future<Output = Result<T, String>> + 'static,
     {
-        if self.contains(&entity) || self.gate.is_some_and(PendingCommandGate::blocked) {
+        if !crate::api::admin_session_writes_allowed()
+            || self.contains(&entity)
+            || self.gate.is_some_and(PendingCommandGate::blocked)
+        {
             return false;
         }
         let command_id = Uuid::new_v4();
@@ -176,6 +179,9 @@ impl PendingCommands {
     }
 
     fn retry(mut self, command_id: Uuid) {
+        if !crate::api::admin_session_writes_allowed() {
+            return;
+        }
         let mut entries = self.entries.write();
         let Some(entry) = entries.iter_mut().find(|entry| entry.command_id == command_id) else {
             return;
@@ -258,6 +264,19 @@ pub(crate) fn definite_rejection(code: &str) -> bool {
             | "stale_state_version"
             | "stale_user_state"
             | "stale_credential_state"
+            | "stale_delivery_state"
+            | "user_conflict"
+            | "world_not_found"
+            | "invalid_user_command"
+            | "invalid_delivery_command"
+            | "invalid_locale"
+            | "invalid_rule_document"
+            | "invalid_runtime_config"
+            | "invalid_replay"
+            | "state_conflict"
+            | "conflict"
+            | "command_conflict"
+            | "not_found"
             | "invalid_auction_state"
             | "invalid_lifecycle"
             | "equipment_conflict"
@@ -290,7 +309,8 @@ pub(crate) fn PendingCommandPanel(owner: PendingCommands) -> Element {
                                 p { class: "action-feedback action-feedback--error", {admin_api_error_message(&code)} }
                             }
                             button { r#type: "button",
-                                disabled: entry.busy || owner.gate.is_some_and(PendingCommandGate::blocked),
+                                disabled: entry.busy || !crate::api::admin_session_writes_allowed()
+                                    || owner.gate.is_some_and(PendingCommandGate::blocked),
                                 onclick: move |_| owner.retry(entry.command_id),
                                 {t!("admin-pending-retry")}
                             }

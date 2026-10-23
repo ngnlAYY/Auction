@@ -42,6 +42,8 @@ drain 与任务退出，`runtime/delivery/lease.rs` 统一准备、交接与发�
 | Operations alert | scan、dispatch、reconcile 各自 cadence、预算与失败边界 |
 
 主题发布与回帖导入的单项截止在领取前冻结，领取和外呼共用预算，慢领取不能延长处理时间越过 lease。
+创建、回复和编辑的实际 POST 共用写入进度；纯读取超时保存普通可重试失败，
+本轮已写或历史未知仍保留 reconcile/人工授权，不能把暂时数据库读取失败误记为未知外写。
 生命周期、结算、履约与 recovery action 的并发任务也沿用领取前绝对截止，任务排队不重置剩余预算；
 首次 poll 已到期时不开始应用命令或外呼，保留原持久 claim 交由租约恢复。
 
@@ -87,6 +89,9 @@ Mail 仅对可重试错误与超时做有界 inline retry，处理前先查持�
 邮箱租约的单调截止在领取请求前建立，回执只会按剩余 TTL 收紧；续租等待不得跨越已知旧租约，
 新截止锚定续租发起时刻。租约失效或回执过晚只取消原处理 future，不额外释放或重排已开始的副作用。
 主世界维护结束后重新检查 drain，停止时不再领取新的邮箱 claim。
+维护整轮受同一 fetch_timeout 约束，包含数据库和 session 排队；耗尽后继续收件，不为每封详情重置预算。
+候选以 `000060` 的持久环形游标逐条轮转，20/200 边界不推进未处理后缀；discard 的一次性尝试围栏保留未知结果，
+不自动重新删除草稿或发送邮件，精确规则见[维护契约](ops/mail/diagnostics.md#定期三页维护)。
 轮询将当前 claim 传给 `fetch_claimed`；生产 MoogleMail gateway 在首个详情 GET 前持久登记整窗列表身份，优先恢复同邮箱、
 同 world 的待读前缀。完成 cursor 与队列前缀在同一 fenced 事务提交，读取取消或业务失败保留未完成后缀，不能靠未读列表恢复。
 
@@ -97,11 +102,11 @@ exact post ID、拍卖/页码标记与本地持久化身份齐备后才导入普
 标题和描述，标题-only 变化不能被相同正文短路。系统更新楼使用白名单英文摘要与
 具体错误码（如 `already_leading`、`bid_too_low`、`auction_closed`），旧通用码 `command_rejected` 只对已知完整诊断作
 只读映射，原始有界详情只留本地命令账本。
-可重试身份/存储错误停止后续楼层，真实连续处理楼层遇待重试命令即停；导入前读取持久 pending 边界，
-原帖删除或原命令未收口时必须在执行后续竞价前停止。主题同步未知 POST（含 `reconcile_write_unknown`）短退避后只做
-当前标题、其余新状态标题、全部旧短状态标题、旧完整标题及旧 `HV#` 摘要标题的精确只读对账；最多十六个标题合并为一次版面读取，
-不按候选数放大读取与限速预算，候选指向不同主题时失败关闭，
-无法证明原目标时等待 CLI 持久人工再授权；已发布主题的回帖刷新按持久 post ID 对账，关闭正文校验时保留内容未知门禁。
+可重试身份/存储错误停止后续楼层，导入前按稳定 post ID 读取 pending 边界；pending 原帖删除、编辑或未收口仍阻断。
+已完成命令按稳定帖子身份和原业务负载重放，不因前序普通帖子删除而重新编号历史；完整扫描的派生楼层可下降，
+仍受固定布局、lease 和 claim/revision CAS 保护，不回退事实 sequence。主题同步未知 POST（含 `reconcile_write_unknown`）
+短退避后只做当前及历史标题的精确只读对账；最多十六个标题合并一次版面读取，候选指向不同主题时失败关闭。
+无法证明原目标时等待 CLI 持久人工再授权；已发布主题的回帖刷新按持久 post ID 对账，关闭正文校验仍保留内容未知门禁。
 状态后缀直接来自同源快照，不按日期推断。Preview、Live、Final、Settling 及需收口的终态可刷新已有主题，
 只有 Live/Final 继续导入竞价；Cancelled 只刷新既有主题，不创建新帖或导入新竞价，完整证明后停止轮询。
 终态刷新保留升级时历史 settled 的豁免；部分进度、租约丢失及 write_unknown 不提前完成。
@@ -110,6 +115,8 @@ exact post ID、拍卖/页码标记与本地持久化身份齐备后才导入普
 不深复制事件 payload。当前广播边界是 Public 本地 Hub，未冻结外部 sink 不得伪装为已发送。
 PM 的 prepare 只能 GET，持久 sending fence 明确提交才消费 prepared.send，任何 sending 不能安全延期；单项总预算覆盖
 claim/prepare/fence/send/finish 且严格小于 lease，drain 停止新领取、主进程 drain 结束后 abort 剩余任务。
+同步、回帖及 PM 共用唯一 gateway 的实际 world 可用性，数据库在 LIMIT 前过滤不可用世界；
+PM 的来源世界从通知关联拍卖读取，不改冻结消息或摘要，shared 凭据仍允许两世界。
 各循环默认值、预算及有效并发见[配置手册](ops/config/README.md#worker-循环预算)。
 
 ## Worker control

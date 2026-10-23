@@ -153,6 +153,8 @@ release.sh 在构建前冻结构建输入（apps、crates、migrations、配置�
 auctionctl，仅两端内嵌各自页面；`--single-binary` 先通过分体门禁，再核对 server 双 payload 和独立无 Web 的
 auctionctl，归档只含这两个程序及合并 unit。目录和配置模板路径/权限保持不变，包内 `systemd/README.md` 为导航，安装
 说明统一在 `docs/DEPLOYMENT.md`；部署手册中已有模板与恢复文件的仓库根链接在装包时转换，源码专属链接仍需查阅仓库。
+分体包另包含 `tmpfiles/hv-auction.conf.example`，安装说明由同一部署手册维护并在装包时转换链接；
+共享运行根不能再由 Worker unit 清理。合并包仍使用自己的私有运行目录，不安装该分体模板。
 输出目录、安装、配置、迁移与 `--allow-dirty` 限制见
 [部署手册](ops/README.md#发布制品)。默认仅静态检查与获准构建，all-targets 只编译已有测试，不新增或执行行为测试、服务、
 数据库或手工冒烟；授权后才能开展 PostgreSQL 行锁、隔离、并发等运行验证，缺口见[状态页](docs/status.md)。

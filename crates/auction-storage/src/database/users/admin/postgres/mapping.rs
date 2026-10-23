@@ -1,5 +1,7 @@
 //! PostgreSQL Users/Admin 行映射、幂等结果持久化和错误边界。
 
+use auction_application::CompetitionTransactionError;
+
 use super::*;
 
 pub(super) fn map_postgres_user(row: &PgRow) -> Result<AdminUser, ApplicationError> {
@@ -170,13 +172,13 @@ pub(super) fn map_admin_write_error(error: sqlx::Error) -> ApplicationError {
 }
 
 pub(super) fn map_storage_error(error: sqlx::Error) -> ApplicationError {
-    let message = match &error {
+    match &error {
         sqlx::Error::Database(database_error)
-            if database_error.code().as_deref() == Some("40001") =>
+            if matches!(database_error.code().as_deref(), Some("40001" | "40P01")) =>
         {
-            "Admin Users 事务发生序列化冲突"
+            // 不把可重试冲突降成字符串；事务 owner 负责保留原命令并执行有界重试。
+            CompetitionTransactionError::SerializationConflict.into()
         }
-        _ => "Admin Users 存储操作失败",
-    };
-    storage_error(message)
+        _ => storage_error("Admin Users 存储操作失败"),
+    }
 }

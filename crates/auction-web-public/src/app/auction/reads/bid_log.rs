@@ -170,6 +170,7 @@ pub(crate) fn bid_log() -> Element {
             BidLogTable {
                 page: page.clone(),
                 current_page,
+                world: world_filter(),
                 lot_filter: current_lot_filter.clone(),
                 on_page_change: move |next_page: i64| {
                     // lot 输入可能仍在等待防抖写回；从当前状态提交，不能用旧 URL 丢掉筛选。
@@ -291,6 +292,7 @@ pub(crate) fn bid_log() -> Element {
 pub(crate) fn BidLogTable(
     page: BidLogPage,
     current_page: i64,
+    world: String,
     lot_filter: String,
     on_page_change: EventHandler<i64>,
     on_page_clamp: EventHandler<i64>,
@@ -312,6 +314,7 @@ pub(crate) fn BidLogTable(
             div { class: "public-auction-bid-log-table-wrap",
                 table {
                     class: "public-auction-bid-log-table ui-table--responsive",
+                    caption { {t!("bidlog-history-note")} }
                     auction_web_shared::TableColumns { layout: "public-bid-log", widths: vec![30, 12, 40, 18] }
                     thead {
                         tr {
@@ -324,7 +327,7 @@ pub(crate) fn BidLogTable(
                     tbody {
                         for bid in bids {
                             // 以服务端 bid id 作为稳定 key，避免翻页/筛选刷新后行状态错位。
-                            BidLogRow { key: "{bid.id}", bid }
+                            BidLogRow { key: "{bid.id}", bid, world: world.clone() }
                         }
                     }
                 }
@@ -345,7 +348,7 @@ pub(crate) fn BidLogTable(
 }
 
 #[component]
-pub(crate) fn BidLogRow(bid: BidLogEntry) -> Element {
+pub(crate) fn BidLogRow(bid: BidLogEntry, world: String) -> Element {
     let lot_code = lot_code_for(&bid.equipment_category, bid.lot_number);
     let lot_id = bid.lot_id.clone();
     let validity = if bid.valid { t!("bidlog-valid") } else { t!("bidlog-invalid") };
@@ -356,7 +359,7 @@ pub(crate) fn BidLogRow(bid: BidLogEntry) -> Element {
                 Time { value: bid.created_at.clone() }
             }
             td { class: "public-auction-bid-log-code", "data-label": t!("bidlog-lot"),
-                Link { to: Route::LotDetail { lot_code: lot_id }, "{lot_code}" }
+                Link { to: crate::app::surface::lot_detail_world_href(&lot_id, &world), "{lot_code}" }
             }
             td { class: "public-auction-bid-log-participant", "data-label": t!("bidlog-bidder"),
                 BidHistoryParticipant {

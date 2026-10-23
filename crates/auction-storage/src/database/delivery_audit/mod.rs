@@ -13,6 +13,8 @@ pub(super) const ADMIN_RECONCILE: &str = "delivery.admin_reconcile";
 pub(super) const ADMIN_RELEASE: &str = "delivery.admin_release";
 pub(super) const ADMIN_RETRY_FAILED: &str = "delivery.admin_retry_failed";
 pub(super) const CLAIM: &str = "delivery.claim";
+/// 确认原退件已取回后重排同一 COD；保留被清理的旧结果及消费身份。
+pub(super) const COD_RETURN_RESEND: &str = "delivery.cod_return_resend";
 pub(super) const CREATE: &str = "delivery.create";
 pub(super) const FAIL: &str = "delivery.fail";
 pub(super) const OUTCOME_UNKNOWN: &str = "delivery.outcome_unknown";

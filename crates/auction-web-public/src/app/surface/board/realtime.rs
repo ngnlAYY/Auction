@@ -27,6 +27,10 @@ pub(crate) enum PublicRealtimeTarget {
     Checking,
     Anonymous,
     SessionError,
+    /// 页面目标的拍卖身份读取失败；不拿 URL 世界或默认 Main 代替权威归属。
+    IdentityError {
+        target_id: String,
+    },
     /// 已确认未进入竞价期；世界进入 key，切换世界不会保留上一世界的连接目标。
     Inactive {
         world: String,
@@ -43,12 +47,38 @@ pub(crate) enum PublicRealtimeTarget {
     },
 }
 
+/// 页面实时目标必须绑定明确请求，不能跨 lot 或显式拍卖查询复用。
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) enum PublicRealtimePageKey {
+    Lot(String),
+    Auction(String),
+}
+
+/// 页面公布已按拍卖 UUID 解析的实时目标；外壳只接纳当前请求身份的结果。
+#[derive(Clone, Copy)]
+pub(crate) struct PublicPageRealtimeTarget(
+    pub Signal<Option<(PublicRealtimePageKey, PublicRealtimeTarget)>>,
+);
+
 impl PublicRealtimeTarget {
+    pub(crate) fn from_auction(auction: &CurrentAuction) -> Self {
+        if matches!(auction.status.as_str(), "live" | "final") {
+            Self::Auction {
+                auction_id: auction.id.clone(),
+                world: auction.world.clone(),
+                preview_revision: auction.preview_revision,
+            }
+        } else {
+            Self::Inactive { world: auction.world.clone(), preview: auction.status == "preview" }
+        }
+    }
+
     pub(crate) fn key(&self) -> String {
         match self {
             Self::Checking => "checking".to_owned(),
             Self::Anonymous => "anonymous".to_owned(),
             Self::SessionError => "session-error".to_owned(),
+            Self::IdentityError { target_id } => format!("identity-error:{target_id}"),
             Self::Inactive { world, preview } => {
                 format!("inactive:world:{world}:preview:{preview}")
             }
@@ -112,7 +142,8 @@ pub(crate) fn PublicRealtimeOwner(
                     realtime_state.set(LiveConnectionState::Manual);
                     return;
                 }
-                PublicRealtimeTarget::CurrentError { .. } => {
+                PublicRealtimeTarget::CurrentError { .. }
+                | PublicRealtimeTarget::IdentityError { .. } => {
                     realtime_state.set(LiveConnectionState::Degraded);
                     return;
                 }
@@ -267,7 +298,9 @@ pub(crate) fn public_connection_state(
     }
     match target {
         PublicRealtimeTarget::Inactive { .. } => return PublicConnectionState::Idle,
-        PublicRealtimeTarget::CurrentError { .. } => return PublicConnectionState::Degraded,
+        PublicRealtimeTarget::CurrentError { .. } | PublicRealtimeTarget::IdentityError { .. } => {
+            return PublicConnectionState::Degraded;
+        }
         PublicRealtimeTarget::Checking => return PublicConnectionState::Connecting,
         _ => {}
     }

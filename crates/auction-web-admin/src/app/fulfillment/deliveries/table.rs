@@ -10,6 +10,7 @@ use auction_web_shared::{
 };
 
 use crate::api::{Delivery, DeliveryPage};
+use crate::app::surface::pending::PendingCommands;
 
 use super::super::sort::{SortDirection, SortableTh, directed};
 use super::dialog::DeliveryDialog;
@@ -29,7 +30,6 @@ pub(super) fn DeliveryTable(
     direction: SortDirection,
     on_sort_change: EventHandler<(String, SortDirection)>,
     on_open: EventHandler<(Delivery, DeliveryDialogKind)>,
-    busy_delivery: Signal<Option<String>>,
     pending_dialog: Option<DeliveryDialogState>,
     draft: Option<DeliveryReconcileDraft>,
     on_draft_change: EventHandler<DeliveryReconcileDraft>,
@@ -92,7 +92,6 @@ pub(super) fn DeliveryTable(
                             key: "{delivery.id}",
                             delivery,
                             on_open,
-                            busy_delivery,
                             pending_dialog: pending_dialog.clone(),
                             draft: draft.clone(),
                             on_draft_change,
@@ -118,13 +117,13 @@ pub(super) fn DeliveryTable(
 pub(super) fn DeliveryRow(
     delivery: Delivery,
     on_open: EventHandler<(Delivery, DeliveryDialogKind)>,
-    busy_delivery: Signal<Option<String>>,
     pending_dialog: Option<DeliveryDialogState>,
     draft: Option<DeliveryReconcileDraft>,
     on_draft_change: EventHandler<DeliveryReconcileDraft>,
     on_confirm: EventHandler<DeliveryActionRequest>,
     on_cancel: EventHandler<()>,
 ) -> Element {
+    let commands = use_context::<PendingCommands>();
     let kind = match delivery.status.as_str() {
         "claimed" => Some(DeliveryDialogKind::Release),
         "failed"
@@ -201,7 +200,7 @@ pub(super) fn DeliveryRow(
                         button {
                             r#type: "button",
                             class: "admin-btn-primary",
-                            disabled: busy_delivery().is_some(),
+                            disabled: commands.any_busy() || commands.contains(&delivery.id),
                             onclick: move |_| on_open.call((delivery_for_action.clone(), kind)),
                             "{label}"
                         }
@@ -219,7 +218,7 @@ pub(super) fn DeliveryRow(
                     DeliveryDialog {
                         delivery: dialog.delivery,
                         kind: dialog.kind,
-                        busy: busy_delivery().is_some(),
+                        busy: commands.any_busy(),
                         draft: draft.unwrap_or_else(|| {
                             DeliveryReconcileDraft::for_delivery(&delivery)
                         }),

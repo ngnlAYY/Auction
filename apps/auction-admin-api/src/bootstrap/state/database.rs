@@ -189,8 +189,12 @@ pub(super) async fn configure_state(
     {
         if let Some(path) = config.runtime_config_path.clone() {
             let files = Arc::new(
-                TomlRuntimeFileStore::new(path, config.tracing_headers().is_some())
-                    .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                TomlRuntimeFileStore::new(
+                    path,
+                    config.tracing_headers().is_some(),
+                    config.runtime_worker_budget,
+                )
+                .map_err(|error| anyhow::Error::msg(error.to_string()))?,
             );
             let commands = Arc::new(DatabaseAdminRuntimeCommands::new(Arc::clone(&store)));
             let service =

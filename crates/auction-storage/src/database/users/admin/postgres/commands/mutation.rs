@@ -2,16 +2,35 @@
 //!
 //! 快照更新时间以已存创建/更新时间为下界；旧时间高水位不能导致新管理命令产出非法投影。
 
+use auction_application::{CompetitionTransactionError, TransactionFailure, TransactionPolicy};
+
 use super::super::mapping::*;
 use super::super::reads::{load_command_postgres_tx, load_user_postgres_tx};
 use super::super::*;
-use super::blacklist::apply_blacklist_effects_postgres;
+use super::blacklist::{freeze_blacklist_proxies_postgres, revoke_public_sessions_postgres};
 
 pub(crate) async fn mutate_postgres(
     store: &super::super::super::super::super::PostgresStore,
     write: AdminUserMutationWrite,
 ) -> Result<AdminUserCommandResult, ApplicationError> {
     validate_mutation_write(&write)?;
+    // 重试不重新生成 key 或命令身份，只在结构化序列化冲突/死锁时重跑完整事务。
+    let max_attempts = TransactionPolicy::serializable().max_attempts;
+    for attempt in 0..max_attempts {
+        match mutate_postgres_once(store, &write).await {
+            Err(error) if error.is_serialization_conflict() && attempt + 1 < max_attempts => {
+                continue;
+            }
+            result => return result,
+        }
+    }
+    Err(CompetitionTransactionError::SerializationConflict.into())
+}
+
+async fn mutate_postgres_once(
+    store: &super::super::super::super::super::PostgresStore,
+    write: &AdminUserMutationWrite,
+) -> Result<AdminUserCommandResult, ApplicationError> {
     let mut transaction = store.pool().begin().await.map_err(map_storage_error)?;
     set_serializable(&mut transaction).await?;
     lock_command(&mut transaction, write.command_id).await?;
@@ -27,10 +46,10 @@ pub(crate) async fn mutate_postgres(
         return Ok(result);
     }
 
-    // 竞价事务使用 lot -> proxy -> user 的锁序；拉黑必须先取得相同的 lot/proxy 锁，
-    // 才能在用户资格变更前原子冻结授权，避免与并发出价形成反向锁。
+    // 竞价与登录共用 lot -> proxy -> user -> session 锁序；先冻结授权，再锁用户并撤销会话，
+    // 避免拉黑提前持有 session 后与并发登录、偏好写入形成反向锁。
     if write.action == AdminUserMutationAction::Blacklist {
-        apply_blacklist_effects_postgres(
+        freeze_blacklist_proxies_postgres(
             &mut transaction,
             write.command_id,
             write.user_id,
@@ -50,7 +69,7 @@ pub(crate) async fn mutate_postgres(
             current_version: before.state_version,
         }));
     }
-    apply_mutation_postgres(&mut transaction, &write, &before).await?;
+    apply_mutation_postgres(&mut transaction, write, &before).await?;
     let user = load_user_postgres_tx(&mut transaction, write.user_id).await?;
     let result = AdminUserCommandResult {
         user,
@@ -250,20 +269,13 @@ async fn apply_mutation_postgres(
     }
     if matches!(
         write.action,
-        AdminUserMutationAction::RevokeKey | AdminUserMutationAction::ReissueKey
+        AdminUserMutationAction::RevokeKey
+            | AdminUserMutationAction::ReissueKey
+            | AdminUserMutationAction::Blacklist
     ) {
-        // 会话撤销与凭据变更原子提交；后续重新启用 Key 不能恢复旧 token。
+        // 会话撤销与资格/凭据变更原子提交；后续恢复资格或重新启用 Key 不能恢复旧 token。
         // 保留已撤销事实，并容忍登录请求时钟领先于本次管理命令。
-        sqlx::query(
-            "UPDATE public.public_sessions
-             SET revoked_at = GREATEST(created_at, $1)
-             WHERE user_id = $2 AND revoked_at IS NULL",
-        )
-        .bind(now)
-        .bind(id)
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_storage_error)?;
+        revoke_public_sessions_postgres(transaction, id, now).await?;
     }
     Ok(())
 }

@@ -144,7 +144,7 @@ impl SettlementFulfillmentService {
             return Err(repository_error("当前履约阶段不允许生成 prepared delivery"));
         }
         let classified_recipient = claim.recipient.clone();
-        let (claim, intent) = match authorize_pending_or_prepared(
+        let (claim, intent, mut custody) = match authorize_pending_or_prepared(
             self.store.as_ref(),
             self.recipient_reader.as_ref(),
             self.custody_reader.as_ref(),
@@ -152,7 +152,7 @@ impl SettlementFulfillmentService {
             self.clock.as_ref(),
             claim,
             retry_delay,
-            self.funding_policy().await?.observes_cash(),
+            &self.funding_policy().await?,
         )
         .await?
         {
@@ -194,9 +194,24 @@ impl SettlementFulfillmentService {
             recipient: claim.recipient.clone(),
             payload: canonical.payload,
         };
-        Ok(SettlementFulfillmentPhaseResult::Advanced(
-            self.store.prepare_delivery(claim, preparation, prepared_at).await?,
-        ))
+        let guard = custody
+            .as_mut()
+            .map(|prepared| prepared.begin_commit())
+            .transpose()
+            .map_err(|_| ApplicationError::FulfillmentDependencyUnavailable)?;
+        let result = self
+            .store
+            .prepare_delivery(
+                claim,
+                preparation,
+                prepared_at,
+                guard.as_ref().map(|guard| (guard.snapshot(), guard.deadline())),
+            )
+            .await?;
+        if let Some(guard) = guard {
+            guard.confirm_committed();
+        }
+        Ok(SettlementFulfillmentPhaseResult::Advanced(result))
     }
 
     async fn activate_now(
@@ -212,7 +227,7 @@ impl SettlementFulfillmentService {
         if claim.state != SettlementFulfillmentState::Prepared {
             return Err(repository_error("当前履约阶段不允许激活 delivery"));
         }
-        let (claim, intent) = match authorize_pending_or_prepared(
+        let (claim, intent, mut custody) = match authorize_pending_or_prepared(
             self.store.as_ref(),
             self.recipient_reader.as_ref(),
             self.custody_reader.as_ref(),
@@ -220,7 +235,7 @@ impl SettlementFulfillmentService {
             self.clock.as_ref(),
             claim,
             retry_delay,
-            self.funding_policy().await?.observes_cash(),
+            &self.funding_policy().await?,
         )
         .await?
         {
@@ -256,17 +271,26 @@ impl SettlementFulfillmentService {
             activation_request_hash(claim.obligation_id, delivery_id, prepare_request_hash)?;
         // 激活继续复用当前 claim；持有租约时 next_attempt_at 必须为空。
         // 下方 reconcile 释放 claim 时再把 COD/货款对齐到共享追踪窗口。
-        Ok(SettlementFulfillmentPhaseResult::Advanced(
-            self.store
-                .activate_delivery(
-                    claim,
-                    activation_command_id,
-                    activation_request_hash,
-                    activated_at,
-                    None,
-                )
-                .await?,
-        ))
+        let guard = custody
+            .as_mut()
+            .map(|prepared| prepared.begin_commit())
+            .transpose()
+            .map_err(|_| ApplicationError::FulfillmentDependencyUnavailable)?;
+        let result = self
+            .store
+            .activate_delivery(
+                claim,
+                activation_command_id,
+                activation_request_hash,
+                activated_at,
+                None,
+                guard.as_ref().map(|guard| (guard.snapshot(), guard.deadline())),
+            )
+            .await?;
+        if let Some(guard) = guard {
+            guard.confirm_committed();
+        }
+        Ok(SettlementFulfillmentPhaseResult::Advanced(result))
     }
 
     async fn reconcile_now(

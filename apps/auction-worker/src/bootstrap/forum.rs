@@ -57,6 +57,7 @@ pub(super) async fn configure_forum(
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?;
             cookies.push((
                 record.id,
+                record.scope,
                 EhentaiCookie::from_bytes(&secret)
                     .map_err(|error| anyhow::Error::msg(error.to_string()))?,
             ));
@@ -82,6 +83,7 @@ pub(super) async fn configure_forum(
         EhentaiCredentialSet::from_owned_cookie(
             EhentaiCookie::from_bytes(cookie.as_bytes())
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+            credential_world,
             ownership,
         )
     }
@@ -136,7 +138,7 @@ pub(super) async fn configure_forum(
         auction_jobs::ForumSyncRuntime::new(
             auction_jobs::ForumSyncPorts {
                 store: store_port,
-                credential_availability,
+                credential_availability: credential_availability.clone(),
                 publisher,
                 reader: reader.clone(),
                 post_writer: post_writer.clone(),
@@ -158,6 +160,7 @@ pub(super) async fn configure_forum(
         auction_jobs::ForumReplyRuntime::new(
             auction_jobs::ForumReplyPorts {
                 store: reply_store,
+                credential_availability,
                 reader,
                 writer: post_writer,
                 renderer,

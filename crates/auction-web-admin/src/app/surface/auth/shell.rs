@@ -9,6 +9,8 @@ pub(crate) fn AdminAuthenticatedShell(
     checked_generation: u64,
     mut reload_generation: Signal<u64>,
     readiness: AdminReadinessState,
+    session_confirmed: bool,
+    on_logout: EventHandler<()>,
 ) -> Element {
     // 旧凭据表的 importedBy 列由当前登录操作者合成，不扩散到凭据 DTO 或数据库投影。
     use_context_provider(|| session.clone());
@@ -28,11 +30,15 @@ pub(crate) fn AdminAuthenticatedShell(
     rsx! {
         div {
             class: "admin-shell",
-            // 达到绝对过期上限后 expires_at 不再增加；每次已完成的读取仍须重新安排检查。
-            AdminSessionRefresh {
-                key: "{checked_generation}:{session.expires_at}",
-                session: session.clone(),
-                reload_generation,
+            // 仅已确认会话安排过期检查；临时故障统一退避，不能按旧截止时间连续重查。
+            if session_confirmed {
+                AdminSessionRefresh {
+                    key: "{checked_generation}:{session.expires_at}",
+                    session: session.clone(),
+                    reload_generation,
+                }
+            } else {
+                AdminSessionRetry { reload_generation }
             }
             a { class: "admin-shell__skip", href: "#admin-content", {t!("skip")} }
             header { class: "admin-shell__header",
@@ -69,9 +75,7 @@ pub(crate) fn AdminAuthenticatedShell(
                                 let result = logout_admin(csrf_token).await;
                                 logging_out.set(false);
                                 match result {
-                                    Ok(()) => {
-                                        reload_generation.set(reload_generation().saturating_add(1));
-                                    }
+                                    Ok(()) => on_logout.call(()),
                                     Err(code) => logout_error.set(Some(code)),
                                 }
                             });
@@ -82,6 +86,16 @@ pub(crate) fn AdminAuthenticatedShell(
             }
             if let Some(code) = logout_error() {
                 p { class: "admin-shell__banner", role: "alert", {admin_api_error_message(&code)} }
+            }
+            if !session_confirmed {
+                p { class: "admin-shell__banner", role: "alert",
+                    {t!("admin-session-recheck-blocked")}
+                    button {
+                        r#type: "button",
+                        onclick: move |_| reload_generation.set(reload_generation().saturating_add(1)),
+                        {t!("admin-retry")}
+                    }
+                }
             }
             div { class: "admin-shell__body",
                 nav {
@@ -174,7 +188,11 @@ pub(crate) fn AdminAuthenticatedShell(
                     },
                     id: "admin-content",
                     tabindex: "-1",
-                    Outlet::<Route> {}
+                    fieldset {
+                        disabled: !session_confirmed,
+                        style: "display: contents;",
+                        Outlet::<Route> {}
+                    }
                 }
             }
         }

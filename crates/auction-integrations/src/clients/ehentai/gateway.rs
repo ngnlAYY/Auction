@@ -25,10 +25,12 @@ impl EhentaiGateway {
         &self,
         world: SettlementWorld,
         rendered: ForumRenderedThread,
+        progress: auction_application::ForumWriteProgress,
     ) -> Result<auction_application::ForumTopicPublication, EhentaiError> {
-        let mut session = self.credentials.begin()?;
+        let mut session = self.credentials.begin(Some(world))?;
+        let client = self.client.as_ref().clone().with_write_progress(progress);
         for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
-            match self.client.create_topic(world, session.cookie(), rendered.clone()).await {
+            match client.create_topic(world, session.cookie(), rendered.clone()).await {
                 Ok(published) => return Ok(published),
                 Err(error) if error.is_session_expired() => {
                     if session.invalidate_current().await.is_err() || session.advance().is_err() {
@@ -51,7 +53,7 @@ impl EhentaiGateway {
         world: SettlementWorld,
         titles: &[String],
     ) -> Result<Option<auction_application::ForumPublishedThread>, EhentaiError> {
-        let mut session = self.credentials.begin()?;
+        let mut session = self.credentials.begin(Some(world))?;
         for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
             match self.client.find_topic_by_titles(world, session.cookie(), titles).await {
                 Ok(published) => return Ok(published),
@@ -72,7 +74,7 @@ impl EhentaiGateway {
         world: SettlementWorld,
         thread_id: &str,
     ) -> Result<AdminForumPreviewResult, EhentaiError> {
-        let mut session = self.credentials.begin()?;
+        let mut session = self.credentials.begin(Some(world))?;
         for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
             match self.client.fetch_topic(world, thread_id, session.cookie()).await {
                 Ok(result) => return Ok(result),
@@ -97,10 +99,12 @@ impl EhentaiGateway {
         world: SettlementWorld,
         thread_id: &str,
         body: ForumRenderedPost,
+        progress: auction_application::ForumWriteProgress,
     ) -> Result<ForumPublishedPost, EhentaiError> {
-        let mut session = self.credentials.begin()?;
+        let mut session = self.credentials.begin(Some(world))?;
+        let client = self.client.as_ref().clone().with_write_progress(progress);
         for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
-            match self.client.reply_topic(world, thread_id, body.clone(), session.cookie()).await {
+            match client.reply_topic(world, thread_id, body.clone(), session.cookie()).await {
                 Ok(published) => return Ok(published),
                 Err(error) if error.is_session_expired() => {
                     if session.invalidate_current().await.is_err() || session.advance().is_err() {
@@ -125,11 +129,12 @@ impl EhentaiGateway {
         post_id: &str,
         metadata: Option<&ForumTopicMetadata>,
         body: ForumRenderedPost,
+        progress: auction_application::ForumWriteProgress,
     ) -> Result<ForumPublishedPost, EhentaiError> {
-        let mut session = self.credentials.begin()?;
+        let mut session = self.credentials.begin(Some(world))?;
+        let client = self.client.as_ref().clone().with_write_progress(progress);
         for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
-            match self
-                .client
+            match client
                 .edit_post(world, thread_id, post_id, metadata, body.clone(), session.cookie())
                 .await
             {
@@ -156,7 +161,7 @@ impl EhentaiGateway {
         thread_id: &str,
         post_id: &str,
     ) -> Result<ForumReadPost, EhentaiError> {
-        let mut session = self.credentials.begin()?;
+        let mut session = self.credentials.begin(Some(world))?;
         for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
             match self.client.read_post(world, thread_id, post_id, session.cookie()).await {
                 Ok(body) => return Ok(body),
@@ -189,7 +194,7 @@ impl auction_application::ForumTargetProfileReader for EhentaiGateway {
             tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
                 let session = self
                     .credentials
-                    .begin()
+                    .begin(None)
                     .map_err(|_| auction_application::InternalEvidenceError::Unavailable)?;
                 self.client.read_target_profile(&target_uid, session.cookie()).await
             })
@@ -202,12 +207,13 @@ impl auction_application::ForumTargetProfileReader for EhentaiGateway {
 impl auction_application::ForumPmSender for EhentaiGateway {
     fn prepare<'a>(
         &'a self,
+        world: SettlementWorld,
         message: &'a auction_application::ForumPmMessage,
     ) -> auction_application::ForumPmFuture<'a, Box<dyn auction_application::PreparedForumPm>> {
         Box::pin(async move {
             let session = self
                 .credentials
-                .begin()
+                .begin(Some(world))
                 .map_err(|_| auction_application::ForumPmError::Unavailable)?;
             self.client.prepare_pm(message, session).await
         })
@@ -215,13 +221,14 @@ impl auction_application::ForumPmSender for EhentaiGateway {
 
     fn reconcile<'a>(
         &'a self,
+        world: SettlementWorld,
         message: &'a auction_application::ForumPmMessage,
         sender_forum_account_id: &'a str,
     ) -> auction_application::ForumPmFuture<'a, Option<auction_application::ForumPmReceipt>> {
         Box::pin(async move {
             let session = self
                 .credentials
-                .begin()
+                .begin(Some(world))
                 .map_err(|_| auction_application::ForumPmError::Unavailable)?;
             self.client.reconcile_pm(message, sender_forum_account_id, session).await
         })
@@ -229,8 +236,8 @@ impl auction_application::ForumPmSender for EhentaiGateway {
 }
 
 impl ForumCredentialAvailability for EhentaiGateway {
-    fn has_available_forum_credential(&self) -> bool {
-        !self.credentials.is_empty()
+    fn has_available_forum_credential(&self, world: SettlementWorld) -> bool {
+        self.credentials.available(world)
     }
 }
 
@@ -261,9 +268,10 @@ impl ForumPublisher for EhentaiGateway {
         &self,
         world: SettlementWorld,
         rendered: ForumRenderedThread,
+        progress: auction_application::ForumWriteProgress,
     ) -> ApplicationFuture<'_, auction_application::ForumTopicPublication> {
         Box::pin(async move {
-            EhentaiGateway::create_topic(self, world, rendered)
+            EhentaiGateway::create_topic(self, world, rendered, progress)
                 .await
                 .map_err(EhentaiError::into_application_error)
         })
@@ -276,9 +284,10 @@ impl ForumPostWriter for EhentaiGateway {
         world: SettlementWorld,
         thread_id: String,
         body: ForumRenderedPost,
+        progress: auction_application::ForumWriteProgress,
     ) -> ApplicationFuture<'_, ForumPublishedPost> {
         Box::pin(async move {
-            EhentaiGateway::reply_topic(self, world, &thread_id, body)
+            EhentaiGateway::reply_topic(self, world, &thread_id, body, progress)
                 .await
                 .map_err(EhentaiError::into_application_error)
         })
@@ -291,35 +300,17 @@ impl ForumPostWriter for EhentaiGateway {
         post_id: String,
         metadata: Option<ForumTopicMetadata>,
         body: ForumRenderedPost,
-    ) -> ApplicationFuture<'_, ForumPublishedPost> {
-        Box::pin(async move {
-            EhentaiGateway::edit_post(self, world, &thread_id, &post_id, metadata.as_ref(), body)
-                .await
-                .map_err(EhentaiError::into_application_error)
-        })
-    }
-
-    fn edit_post_with_progress(
-        &self,
-        world: SettlementWorld,
-        thread_id: String,
-        post_id: String,
-        metadata: Option<ForumTopicMetadata>,
-        body: ForumRenderedPost,
         progress: auction_application::ForumWriteProgress,
     ) -> ApplicationFuture<'_, ForumPublishedPost> {
-        let gateway = Self {
-            client: Arc::new(self.client.as_ref().clone().with_write_progress(progress)),
-            credentials: self.credentials.clone(),
-        };
         Box::pin(async move {
             EhentaiGateway::edit_post(
-                &gateway,
+                self,
                 world,
                 &thread_id,
                 &post_id,
                 metadata.as_ref(),
                 body,
+                progress,
             )
             .await
             .map_err(EhentaiError::into_application_error)

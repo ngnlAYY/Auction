@@ -682,6 +682,7 @@ package_release() (
 	# 源文档使用仓库根相对链接；装包时只把已有模板与恢复文件映射到归档布局，保留标题锚点。
 	sed -i \
 		-e 's|](ops/deploy/systemd/|](../systemd/|g' \
+		-e 's|](ops/deploy/tmpfiles/|](../tmpfiles/|g' \
 		-e 's|](ops/deploy/caddy/|](../caddy/|g' \
 		-e 's|](ops/config/|](../config/|g' \
 		-e 's|](ops/deploy/RECOVERY\.md|](RECOVERY.md|g' \
@@ -705,6 +706,7 @@ package_release() (
 		install_release_file ops/deploy/systemd/auction-admin-api.service.example systemd/auction-admin-api.service.example 644 "$package_root"
 		install_release_file ops/deploy/systemd/auction-worker.service.example systemd/auction-worker.service.example 644 "$package_root"
 		install_release_file ops/deploy/systemd/auction-stack.service.example systemd/auction-stack.service.example 644 "$package_root"
+		install_release_file ops/deploy/tmpfiles/hv-auction.conf.example tmpfiles/hv-auction.conf.example 644 "$package_root"
 	fi
 	install_release_file ops/config/README.md config/README.md 644 "$package_root"
 	install_release_file ops/config/examples/common.toml config/examples/common.toml 640 "$package_root"

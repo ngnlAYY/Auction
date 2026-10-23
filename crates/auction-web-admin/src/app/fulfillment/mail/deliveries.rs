@@ -3,10 +3,10 @@
 use crate::app::surface::pagination::{AdminPager as Pager, use_admin_pagination};
 use auction_web_shared::{Dialog, TableColumns, TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use crate::api::{AdminMailIntakeDelivery, DeliveryAction, execute_delivery};
-use crate::app::surface::{AdminActionFeedback, run_admin_action, stable_command_id};
+use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::pending::{PendingCommands, set_if_alive};
 
 use super::super::deliveries::helpers::delivery_status_label;
 
@@ -15,15 +15,15 @@ pub(super) fn MailDeliveriesPanel(
     intake_id: String,
     deliveries: Vec<AdminMailIntakeDelivery>,
     mut notice: Signal<Option<(String, AdminActionFeedback)>>,
-    mut refresh: Signal<u64>,
+    refresh: Signal<u64>,
 ) -> Element {
     let mut page = use_signal(|| 1_i64);
     let pagination =
         use_admin_pagination("mail-deliveries", &["mail_delivery_page_size"], None, i64::MAX);
     let page_size = pagination.size();
-    let busy = use_signal(|| false);
+    let commands = use_context::<PendingCommands>();
+    let busy = move || commands.any_busy();
     let mut pending = use_signal(|| None::<AdminMailIntakeDelivery>);
-    let mut command_state = use_signal(|| None::<(String, Uuid)>);
     let confirm_intake_id = intake_id.clone();
     let confirm_action = move |_| {
         if busy() {
@@ -35,44 +35,50 @@ pub(super) fn MailDeliveriesPanel(
         let Some(action) = retry_action(&delivery) else {
             return;
         };
-        let command_id = stable_command_id(
-            command_state,
-            format!("{}:{action:?}:{}", delivery.id, delivery.fencing_version),
-        );
+        if commands.contains(&delivery.id) {
+            return;
+        }
         let success_intake_id = confirm_intake_id.clone();
         let failure_intake_id = confirm_intake_id.clone();
         notice.set(None);
-        run_admin_action(
-            busy,
-            async move {
-                execute_delivery(
-                    command_id,
-                    delivery.id,
-                    action,
-                    delivery.fencing_version,
-                    None,
-                    None,
-                )
-                .await
+        let submitted = commands.submit(
+            delivery.id.clone(),
+            retry_label(&delivery.operation),
+            move |command_id| {
+                let delivery_id = delivery.id.clone();
+                async move {
+                    execute_delivery(
+                        command_id,
+                        delivery_id,
+                        action,
+                        delivery.fencing_version,
+                        None,
+                        None,
+                    )
+                    .await
+                    .map_err(|error| error.code)
+                }
             },
             move |_| {
-                pending.set(None);
-                command_state.set(None);
-                notice.set(Some((success_intake_id, AdminActionFeedback::Success)));
-                refresh.set(refresh().saturating_add(1));
+                set_if_alive(
+                    notice,
+                    Some((success_intake_id.clone(), AdminActionFeedback::Success)),
+                );
             },
-            move |error| {
-                if error.is_conflict()
-                    && matches!(error.code.as_str(), "stale_delivery_state" | "stale_state_version")
-                {
-                    // 版本冲突必须重新读取任务，不能用旧 fence 或新命令绕过并发校验。
-                    pending.set(None);
-                    command_state.set(None);
+            move |code| {
+                if matches!(code.as_str(), "stale_delivery_state" | "stale_state_version") {
+                    let mut refresh = refresh;
                     refresh.set(refresh().saturating_add(1));
                 }
-                notice.set(Some((failure_intake_id, AdminActionFeedback::Error(error.code))));
+                set_if_alive(
+                    notice,
+                    Some((failure_intake_id.clone(), AdminActionFeedback::Error(code))),
+                );
             },
         );
+        if submitted {
+            pending.set(None);
+        }
     };
     let total = i64::try_from(deliveries.len()).unwrap_or(i64::MAX);
     let current_page = page().clamp(1, if total == 0 { 1 } else { 1 + (total - 1) / page_size });
@@ -108,10 +114,10 @@ pub(super) fn MailDeliveriesPanel(
                         for delivery in visible {
                             MailDeliveryRow {
                                 key: "{delivery.id}",
+                                busy: busy() || commands.contains(&delivery.id),
                                 delivery,
-                                busy: busy(),
-                                on_retry: move |delivery| {
-                                    if !busy() {
+                                on_retry: move |delivery: AdminMailIntakeDelivery| {
+                                    if !busy() && !commands.contains(&delivery.id) {
                                         notice.set(None);
                                         pending.set(Some(delivery));
                                     }
@@ -149,7 +155,6 @@ pub(super) fn MailDeliveriesPanel(
                     on_close: move |_| {
                         if !busy() {
                             pending.set(None);
-                            command_state.set(None);
                         }
                     },
                     p { {t!("admin-mail-delivery-confirm", recipient: delivery.recipient.clone())} }
@@ -176,7 +181,6 @@ pub(super) fn MailDeliveriesPanel(
                             disabled: busy(),
                             onclick: move |_| {
                                 pending.set(None);
-                                command_state.set(None);
                             },
                             {t!("delivery-cancel")}
                         }

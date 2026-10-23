@@ -126,15 +126,29 @@ pub(crate) fn PublicShell() -> Element {
     let discovery_after = use_signal(|| 0_i64);
     let auction_after = use_signal(|| None::<(String, i64)>);
     let mut stable_realtime_target = use_signal(|| PublicRealtimeTarget::Checking);
+    let page_realtime_target = use_signal(|| None::<(PublicRealtimePageKey, PublicRealtimeTarget)>);
     let realtime_state = use_signal(|| LiveConnectionState::Connecting);
     let readiness = use_resource(move || {
         let _ = readiness_generation();
         fetch_public_readiness()
     });
     let mut session = use_resource(fetch_public_session);
+    let mut command_owner = use_signal(|| None::<String>);
+    use_effect(move || {
+        if let Some(Ok(identity)) = session.read().as_ref() {
+            let next = identity
+                .as_ref()
+                .filter(|identity| identity.authenticated)
+                .map(|identity| identity.user_id.clone());
+            if *command_owner.peek() != next {
+                command_owner.set(next);
+            }
+        }
+    });
     let check_session = use_callback(move |invalidate: bool| {
         if invalidate {
             // 已知认证变化先卸载旧用户命令；普通 focus 重读保留原快照，避免打断同身份提交。
+            command_owner.set(None);
             session.set(None);
         }
         session.restart();
@@ -200,9 +214,11 @@ pub(crate) fn PublicShell() -> Element {
     use_context_provider(|| refresh_generation);
     use_context_provider(|| bid_refresh);
     use_context_provider(|| realtime_state);
+    use_context_provider(|| PublicPageRealtimeTarget(page_realtime_target));
     use_context_provider(|| PublicLocationRevision(location_generation));
     let session_context = session;
     use_context_provider(move || session_context);
+    use_context_provider(|| PublicCommandOwner(command_owner));
     let readiness_context = readiness;
     use_context_provider(move || readiness_context);
     let current_auction_context = current_auction;
@@ -257,10 +273,27 @@ pub(crate) fn PublicShell() -> Element {
     // Routable 不包含 query；位于 AuctionIndex 时，只有查询不同才需要绕过 Router 的同路由优化。
     let auction_home_needs_query_reset = matches!(&current_route, Route::AuctionIndex {})
         && current_public_query != auction_home_query;
-    let realtime_target_candidate = match session_snapshot {
-        None => PublicRealtimeTarget::Checking,
-        Some(Err(_)) => PublicRealtimeTarget::SessionError,
-        Some(Ok(_)) => match current_auction.read().clone() {
+    let requested_page_target = match &current_route {
+        Route::LotDetail { lot_code } => Some(PublicRealtimePageKey::Lot(lot_code.clone())),
+        Route::AuctionIndex {} | Route::AuctionPage {} => {
+            current_public_query.auction_id.clone().map(PublicRealtimePageKey::Auction)
+        }
+        _ => None,
+    };
+    let realtime_target_candidate = match (session_snapshot, requested_page_target.as_ref()) {
+        (None, _) => PublicRealtimeTarget::Checking,
+        (Some(Err(_)), _) => PublicRealtimeTarget::SessionError,
+        (Some(Ok(_)), Some(requested)) => match page_realtime_target.read().as_ref() {
+            Some((loaded, target)) if loaded == requested => {
+                if matches!(target, PublicRealtimeTarget::Auction { .. }) && !authenticated {
+                    PublicRealtimeTarget::Anonymous
+                } else {
+                    target.clone()
+                }
+            }
+            _ => PublicRealtimeTarget::Checking,
+        },
+        (Some(Ok(_)), None) => match current_auction.read().clone() {
             Some((loaded_world, Ok(Some(auction))))
                 if loaded_world == selected_world_value
                     && matches!(auction.status.as_str(), "live" | "final")
@@ -297,15 +330,17 @@ pub(crate) fn PublicShell() -> Element {
     // 同一 world 的权威 current 快照重读期间保留既有目标；首屏、登出和 world 切换仍失败关闭。
     let remembered_target = stable_realtime_target();
     let realtime_target = match realtime_target_candidate {
-        PublicRealtimeTarget::Checking if authenticated => match &remembered_target {
-            PublicRealtimeTarget::Auction { world, .. } if world == &selected_world_value => {
-                remembered_target
+        PublicRealtimeTarget::Checking if authenticated && requested_page_target.is_none() => {
+            match &remembered_target {
+                PublicRealtimeTarget::Auction { world, .. } if world == &selected_world_value => {
+                    remembered_target
+                }
+                PublicRealtimeTarget::Inactive { world, .. } if world == &selected_world_value => {
+                    remembered_target
+                }
+                _ => PublicRealtimeTarget::Checking,
             }
-            PublicRealtimeTarget::Inactive { world, .. } if world == &selected_world_value => {
-                remembered_target
-            }
-            _ => PublicRealtimeTarget::Checking,
-        },
+        }
         target => target,
     };
     use_effect(use_reactive((&realtime_target,), move |(remembered,)| {

@@ -16,7 +16,12 @@ pub(crate) fn LotDetail(lot_code: String) -> Element {
         return rsx! { LotMissing {} };
     }
     // Router 会复用详情路由组件；目标 UUID 改变时销毁旧读取与命令宿主。
-    rsx! { ValidLotDetail { key: "{lot_code}", lot_id: lot_code } }
+    rsx! {
+        CatalogCommandScope {
+            key: "{lot_code}",
+            ValidLotDetail { lot_id: lot_code }
+        }
+    }
 }
 
 /// 旧版浏览器只接受小写、带连字符、RFC 4122 variant 且版本为 1 至 5 的 UUID。
@@ -44,6 +49,78 @@ fn ValidLotDetail(lot_id: String) -> Element {
         async move { fetch_lot_detail(lot_id).await }
     });
     use_bid_refresh(detail, true);
+    let auction_identity = use_memo(move || {
+        detail.read().as_ref().and_then(|result| {
+            result.as_ref().ok().map(|page| {
+                (page.auction_id.clone(), page.auction_status.clone(), page.preview_revision)
+            })
+        })
+    });
+    let auction = use_resource(move || {
+        let _ = refresh_generation();
+        let identity = auction_identity();
+        async move {
+            match identity {
+                Some(identity) => {
+                    let result = fetch_historical_auction(identity.0.clone()).await;
+                    Some((identity, result))
+                }
+                None => None,
+            }
+        }
+    });
+    let mut realtime_target = use_context::<PublicPageRealtimeTarget>().0;
+    let query = use_public_query_state().state;
+    use_effect({
+        let lot_id = lot_id.clone();
+        move || {
+            let identity = auction_identity();
+            let detail_failed = detail.read().as_ref().is_some_and(Result::is_err);
+            let loaded = auction.read();
+            let resolved = loaded
+                .as_ref()
+                .and_then(Option::as_ref)
+                .filter(|(requested, _)| Some(requested) == identity.as_ref());
+            let target = match resolved {
+                Some((expected, Ok(auction)))
+                    if auction.id == expected.0 && auction.status == expected.1 =>
+                {
+                    // URL 世界只保留导航意图；实际房间与返回目录都由拍卖 UUID 的权威读取绑定。
+                    let current = query();
+                    let world = normalize_world_query(&auction.world);
+                    if current.world != world
+                        || current.auction_id.as_deref() != Some(auction.id.as_str())
+                    {
+                        update_public_query_state(
+                            query,
+                            |query| {
+                                query.world = world;
+                                query.auction_id = Some(auction.id.clone());
+                            },
+                            QueryWriteMode::Replace,
+                        );
+                    }
+                    PublicRealtimeTarget::from_auction(auction)
+                }
+                Some(_) => PublicRealtimeTarget::IdentityError { target_id: lot_id.clone() },
+                None if detail_failed => {
+                    PublicRealtimeTarget::IdentityError { target_id: lot_id.clone() }
+                }
+                None => PublicRealtimeTarget::Checking,
+            };
+            let next = Some((PublicRealtimePageKey::Lot(lot_id.clone()), target));
+            if *realtime_target.peek() != next {
+                realtime_target.set(next);
+            }
+        }
+    });
+    use_drop(move || {
+        if let Ok(mut current) = realtime_target.try_write()
+            && matches!(current.as_ref(), Some((PublicRealtimePageKey::Lot(loaded), _)) if loaded == &lot_id)
+        {
+            *current = None;
+        }
+    });
 
     match &*detail.read_unchecked() {
         None => rsx! {
@@ -77,7 +154,8 @@ fn ValidLotDetail(lot_id: String) -> Element {
                     LiveLotDetailView {
                         auction_id: page.auction_id.clone(),
                         auction_status: page.auction_status.clone(),
-                        bidding_open: page.bidding_open,
+                        bidding_open: page.bidding_open
+                            && *detail.state().read() == UseResourceState::Ready,
                         lot: lot.clone(),
                     }
                 }

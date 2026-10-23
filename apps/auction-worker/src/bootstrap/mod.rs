@@ -16,16 +16,16 @@ use auction_application::{
     PublicEquipmentLinkSecretReader, RecoveryBuyerBlacklister, RecoveryHealthConfig,
     RecoveryHealthService, RecoveryResolutionStore, RecoveryWorkStore, ScheduledRoundStore,
     SettlementCommandPort, SettlementFulfillmentBalanceEvidence, SettlementFulfillmentCommandPort,
-    SettlementFulfillmentCustodyReader, SettlementFulfillmentCustodySnapshot,
-    SettlementFulfillmentEvidenceReader, SettlementFulfillmentRecipientReader,
-    SettlementFulfillmentSentEvidence, SettlementFulfillmentService, SettlementFulfillmentStore,
-    SettlementWorkStore, SlowProxyCommandPort, SlowProxyDueReader,
+    SettlementFulfillmentCustodyReader, SettlementFulfillmentEvidenceReader,
+    SettlementFulfillmentRecipientReader, SettlementFulfillmentSentEvidence,
+    SettlementFulfillmentService, SettlementFulfillmentStore, SettlementWorkStore,
+    SlowProxyCommandPort, SlowProxyDueReader,
 };
 #[cfg(feature = "postgres")]
 use auction_application::{
-    MailAuctionIntakeService, MailEquipmentAttachment, MailEquipmentFilter, MailEquipmentReader,
-    MailLoginKeyReader, MailPollStore, MailProcessor, MailProcessorConfig, MailUserService,
-    RecurringSchedule, SettlementFulfillmentEquipmentSecretReader,
+    MailAuctionIntakeService, MailEquipmentFilter, MailLoginKeyReader, MailPollStore,
+    MailProcessor, MailProcessorConfig, MailUserService, RecurringSchedule,
+    SettlementFulfillmentEquipmentSecretReader,
 };
 use auction_cache::CacheStore;
 use auction_config::{AppConfig, CacheBackend, Role};

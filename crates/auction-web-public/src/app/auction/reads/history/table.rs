@@ -157,7 +157,7 @@ pub(crate) fn PriceHistoryRow(
     on_buyer_filter: EventHandler<String>,
     on_seller_filter: EventHandler<String>,
 ) -> Element {
-    let lot_href = format!("/lots/{}", row.lot_id);
+    let lot_href = crate::app::surface::lot_detail_world_href(&row.lot_id, &row.world_id);
     let auction_href = history_auction_href(&row.auction_id, &row.world_id);
     let lot_code = lot_code_for(&row.equipment_category, row.lot_number);
     let equipment_label = format!("{lot_code} · {}", row.equipment_name);

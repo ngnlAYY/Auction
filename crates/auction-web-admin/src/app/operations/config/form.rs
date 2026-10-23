@@ -194,8 +194,8 @@ pub(super) fn RuntimeConfigFields(
                     } else {
                         TextField { form, disabled, path: "listener.group", label: t!("admin-runtime-listener-group"), on_dirty: on_dirty }
                         TextField { form, disabled, path: "listener.socket_path", label: t!("admin-runtime-listener-socket"), on_dirty: on_dirty }
+                        TextField { form, disabled, path: "listener.runtime_directory", label: t!("admin-runtime-listener-directory"), on_dirty: on_dirty }
                     }
-                    TextField { form, disabled, path: "listener.runtime_directory", label: t!("admin-runtime-listener-directory"), on_dirty: on_dirty }
                 }
             }
 

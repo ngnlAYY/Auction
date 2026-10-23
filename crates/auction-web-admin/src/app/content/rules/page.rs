@@ -6,9 +6,10 @@ use dioxus::prelude::*;
 
 use crate::api::fetch_admin_rules;
 use crate::app::surface::admin_api_error_message;
+use crate::app::surface::pending::{PendingCommandPanel, use_pending_commands};
 
 use super::helpers::{DEFAULT_RULES_LOCALE, missing_rules_document, to_draft};
-use super::model::{RuleCommand, RuleNotice};
+use super::model::RuleNotice;
 use super::workspace::AdminRulesWorkspace;
 
 /// 读取并展示 Admin 规则文档；语言切换会让请求带上旧版约定的 `lang` 查询参数。
@@ -19,9 +20,9 @@ pub fn page() -> Element {
     });
     let new_locale = use_signal(String::new);
     let reload_generation = use_signal(|| 0_u64);
+    let pending = use_pending_commands(reload_generation);
     let mut draft = use_signal(|| None::<crate::api::AdminRulesCandidate>);
     let mut checked_signature = use_signal(String::new);
-    let mut command = use_signal(|| None::<RuleCommand>);
     let mut notice = use_signal(|| None::<RuleNotice>);
     let busy = use_signal(|| false);
     let rules = use_resource(move || {
@@ -45,7 +46,6 @@ pub fn page() -> Element {
         {
             draft.set(Some(to_draft(&document, &requested_locale)));
             checked_signature.set(String::new());
-            command.set(None);
             notice.set(None);
         }
     });
@@ -79,7 +79,6 @@ pub fn page() -> Element {
                     target_signal: target,
                     draft,
                     checked_signature,
-                    command,
                     notice,
                     busy,
                     reload_generation,
@@ -101,7 +100,6 @@ pub fn page() -> Element {
                 target_signal: target,
                 draft,
                 checked_signature,
-                command,
                 notice,
                 busy,
                 reload_generation,
@@ -115,6 +113,7 @@ pub fn page() -> Element {
             aria_labelledby: "rules-title",
             h1 { id: "rules-title", {t!("page-rules-title")} }
             p { class: "admin-rules-intro", {t!("admin-rules-description")} }
+            PendingCommandPanel { owner: pending }
             {content}
         }
     }

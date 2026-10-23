@@ -12,8 +12,9 @@ use std::{
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
 use auction_application::{
-    AdminRuntimeDocument, AdminRuntimeFileError, AdminRuntimeFileStore, AdminRuntimeReplacement,
-    AdminRuntimeSnapshot, ApplicationError, ApplicationFuture, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
+    AdminRuntimeDocument, AdminRuntimeFileError, AdminRuntimeFileStore,
+    AdminRuntimeMailDeliveryBudget, AdminRuntimeReplacement, AdminRuntimeSnapshot,
+    ApplicationError, ApplicationFuture, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
 };
 
 mod validation;
@@ -54,13 +55,15 @@ pub struct TomlRuntimeFileStore {
     path: PathBuf,
     lock_path: PathBuf,
     tracing_headers_configured: bool,
+    worker_budget: Option<AdminRuntimeMailDeliveryBudget>,
 }
 
 impl TomlRuntimeFileStore {
-    /// 校验规范化绝对路径和受信任的父目录；仅保留部署侧 OTLP 头是否存在，不接收头内容。
+    /// 校验规范化绝对路径和受信任的父目录；只保留 OTLP 头存在性与 Worker 非敏感预算快照。
     pub fn new(
         path: impl AsRef<Path>,
         tracing_headers_configured: bool,
+        worker_budget: Option<AdminRuntimeMailDeliveryBudget>,
     ) -> Result<Self, RuntimeFileStoreError> {
         let path = path.as_ref().to_owned();
         if !path.is_absolute()
@@ -80,13 +83,14 @@ impl TomlRuntimeFileStore {
             lock_path: directory.join(".admin-runtime-config.lock"),
             path,
             tracing_headers_configured,
+            worker_budget,
         })
     }
 
     /// 首次部署在私有临时目录中复用正式读取校验；发布前不创建运行时锁文件。
     #[cfg(unix)]
     pub(crate) fn validate_initial_file(path: &Path) -> Result<(), RuntimeFileStoreError> {
-        Self::new(path, false)?.read_snapshot().map(|_| ())
+        Self::new(path, false, None)?.read_snapshot().map(|_| ())
     }
 
     fn open_lock(&self) -> Result<File, RuntimeFileStoreError> {
@@ -279,7 +283,12 @@ impl AdminRuntimeFileStore for TomlRuntimeFileStore {
         document: &AdminRuntimeDocument,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), ApplicationError> {
-        self.validate_document(document, now).map_err(ApplicationError::from)
+        self.validate_document(document, now).map_err(ApplicationError::from)?;
+        // 保存只使用启动时冻结的真实部署基值，不在同步候选校验路径读取文件或猜测 defaults。
+        if let Some(operations) = &document.operations {
+            operations.validate_mail_delivery_budget(self.worker_budget)?;
+        }
+        Ok(())
     }
 
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {

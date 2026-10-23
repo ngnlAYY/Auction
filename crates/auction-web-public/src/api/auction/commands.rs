@@ -25,7 +25,9 @@ pub(crate) struct CommandError {
 impl CommandError {
     /// 缺少明确业务结果时只允许重放原命令；新输入仍须经过正常表单校验。
     pub(crate) fn outcome_uncertain(&self) -> bool {
-        self.status == 0 || self.status >= 500 || self.code == "invalid_response"
+        // 浏览器会话锁失败发生在 HTTP 发送前，不把首次拒绝误报为未知外写。
+        !matches!(self.code.as_str(), "session_lock_unavailable" | "session_lock_timeout")
+            && (self.status == 0 || self.status >= 500 || self.code == "invalid_response")
     }
 
     fn transport(error: TransportError) -> Self {

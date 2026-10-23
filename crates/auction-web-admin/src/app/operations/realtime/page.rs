@@ -4,7 +4,6 @@ use std::rc::Rc;
 
 use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use crate::api::{
     RealtimeFailure, fetch_realtime_event_page, fetch_realtime_event_total,
@@ -18,9 +17,8 @@ use super::failure::{RealtimeFailurePager, RealtimeFailureTable};
 use super::filters::{RealtimeEventFilters, RealtimeFailureFilters};
 use super::lag::{RealtimeLagPager, RealtimeLagTable};
 use crate::app::surface::pagination::{use_admin_page, use_admin_pagination};
-use crate::app::surface::{
-    AdminActionFeedback, admin_api_error_message, run_admin_feedback_action, stable_command_id,
-};
+use crate::app::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
+use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
 use auction_web_shared::{AsyncState, AsyncStateKind};
 
@@ -36,11 +34,11 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let mut lag_refresh = use_signal(|| 0_u64);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let mut selected_failure = use_signal(|| None::<String>);
-    let mut replay_command_id = use_signal(|| None::<(String, Uuid)>);
+    let pending = use_pending_commands(failure_refresh);
     let mut schema_version = use_signal(|| "1".to_owned());
     let mut public_payload = use_signal(|| "{}".to_owned());
     let mut replay_invalid = use_signal(|| false);
-    let replay_busy = use_signal(|| false);
+    let replay_busy = move || pending.any_busy();
     // 已应用的事件/failure 筛选与三个分区的分页跟地址栏双向同步；筛选输入框草稿（留在
     // 筛选组件本地）、replay 对话框与负载输入是瞬态，不入 URL。
     let query = use_realtime_query_state();
@@ -127,7 +125,6 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         next.failure_page = 1;
         load_failures_query.push(next);
         selected_failure.set(None);
-        replay_command_id.set(None);
     };
     // 顶部手动刷新、轮询开关与 failure 状态选择各持一份 hook 克隆。
     let mut refresh_query = query.clone();
@@ -221,11 +218,11 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             RealtimeFailureTable {
                 page: failure_page.clone(),
                 on_select: move |failure: RealtimeFailure| {
+                    if replay_busy() || pending.contains(&failure.id) { return; }
                     schema_version.set("1".to_owned());
                     public_payload.set("{}".to_owned());
                     replay_invalid.set(false);
                     selected_failure.set(Some(failure.id));
-                    replay_command_id.set(None);
                     notice.set(None);
                 },
             }
@@ -285,6 +282,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
 
     rsx! {
         section { class: "admin-realtime-page", aria_labelledby: "outbox-title",
+            PendingCommandPanel { owner: pending }
             div { class: "admin-realtime-heading",
                 h1 { id: "outbox-title", {page_title} }
                 div { class: "admin-realtime-heading__actions",
@@ -302,7 +300,6 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                     class: "admin-btn-secondary",
                     onclick: move |_| {
                         selected_failure.set(None);
-                        replay_command_id.set(None);
                         notice.set(None);
                         // 手动刷新把三个分区都带回第一页并写回地址栏。
                         let mut next = query_state();
@@ -385,7 +382,6 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                     next.failure_page = 1;
                                     state_query.push(next);
                                     selected_failure.set(None);
-                                    replay_command_id.set(None);
                                 },
                                 option { value: "", {t!("realtime-filter-all")} }
                                 option { value: "pending", disabled: true, {t!("realtime-state-pending")} }
@@ -425,7 +421,6 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                     busy: replay_busy(),
                     on_close: move |_| {
                         selected_failure.set(None);
-                        replay_command_id.set(None);
                     },
                     div { class: "admin-realtime-dialog",
                         p {
@@ -439,11 +434,12 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                 min: "1",
                                 step: "1",
                                 autofocus: true,
+                                disabled: replay_busy(),
                                 value: schema_version(),
                                 oninput: move |event| {
+                                    if replay_busy() { return; }
                                     schema_version.set(event.value());
                                     replay_invalid.set(false);
-                                    replay_command_id.set(None);
                                 },
                             }
                         }
@@ -451,11 +447,12 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                             {t!("realtime-replay-payload")}
                             textarea {
                                 spellcheck: "false",
+                                disabled: replay_busy(),
                                 value: public_payload(),
                                 oninput: move |event| {
+                                    if replay_busy() { return; }
                                     public_payload.set(event.value());
                                     replay_invalid.set(false);
-                                    replay_command_id.set(None);
                                 },
                             }
                         }
@@ -467,7 +464,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                 r#type: "button",
                                 disabled: replay_busy(),
                                 onclick: move |_| {
-                                    if replay_busy() {
+                                    if replay_busy() || pending.contains(&failure.id) {
                                         return;
                                     }
                                     let failure_id = failure.id.clone();
@@ -485,30 +482,37 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                         return;
                                     }
                                     replay_invalid.set(false);
-                                    let command_id = stable_command_id(
-                                        replay_command_id,
-                                        format!("{failure_id}:{schema}:{payload}"),
-                                    );
-                                    run_admin_feedback_action(
-                                        replay_busy,
-                                        notice,
-                                        async move {
-                                            replay_realtime_failure(
-                                                failure_id,
-                                                command_id,
-                                                schema,
-                                                payload,
-                                            )
-                                            .await
+                                    notice.set(None);
+                                    let submitted = pending.submit(
+                                        failure_id.clone(),
+                                        t!("realtime-replay-submit"),
+                                        move |command_id| {
+                                            let failure_id = failure_id.clone();
+                                            let payload = payload.clone();
+                                            async move {
+                                                replay_realtime_failure(
+                                                    failure_id,
+                                                    command_id,
+                                                    schema,
+                                                    payload,
+                                                )
+                                                .await
+                                            }
                                         },
                                         move |()| {
-                                            selected_failure.set(None);
-                                            replay_command_id.set(None);
+                                            set_if_alive(notice, Some(AdminActionFeedback::Success));
+                                            let mut event_refresh = event_refresh;
+                                            let mut lag_refresh = lag_refresh;
                                             event_refresh.set(event_refresh().saturating_add(1));
-                                            failure_refresh.set(failure_refresh().saturating_add(1));
                                             lag_refresh.set(lag_refresh().saturating_add(1));
                                         },
+                                        move |code| {
+                                            set_if_alive(notice, Some(AdminActionFeedback::Error(code)));
+                                        },
                                     );
+                                    if submitted {
+                                        selected_failure.set(None);
+                                    }
                                 },
                                 {t!("realtime-replay-submit")}
                             }
@@ -518,7 +522,6 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                 disabled: replay_busy(),
                                 onclick: move |_| {
                                     selected_failure.set(None);
-                                    replay_command_id.set(None);
                                 },
                                 {t!("realtime-replay-cancel")}
                             }

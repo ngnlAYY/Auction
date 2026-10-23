@@ -21,6 +21,8 @@ impl AppConfig {
             session,
             secrets_path,
             runtime_config_path,
+            worker_config_path,
+            runtime_worker_budget,
         } = input;
         let secret_file =
             secrets_path.as_deref().map(load_secret_file).transpose()?.unwrap_or_default();
@@ -106,10 +108,7 @@ impl AppConfig {
         validate_auction(&auction)?;
         validate_worker_control(&worker.control)?;
         validate_mooglemail_worker(&worker.mooglemail)?;
-        if worker.mooglemail.enabled
-            && worker.delivery.request_timeout_seconds
-                <= worker.mooglemail.fetch_timeout_seconds.saturating_mul(2)
-        {
+        if !worker.mail_delivery_budget().is_valid() {
             return Err(ConfigError::InvalidDeliveryWorkerConfig(
                 "MoogleMail 启用时 delivery.request_timeout_seconds 必须大于 fetch_timeout_seconds 的两倍",
             ));
@@ -210,6 +209,8 @@ impl AppConfig {
             common_config_path,
             secrets_path,
             runtime_config_path,
+            worker_config_path,
+            runtime_worker_budget,
             admin_runtime,
             equipment_colors,
             worker_bot_players,

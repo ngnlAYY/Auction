@@ -1,15 +1,12 @@
 //! Admin 用户创建表单和生成 key 展示。
 
-use std::rc::Rc;
-
 use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use crate::api::create_admin_user;
-use crate::app::surface::pending::PendingCommandGate;
+use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::pending::{PendingCommandGate, PendingCommands, set_if_alive};
 use crate::app::surface::validation::{FieldError, focus_field};
-use crate::app::surface::{AdminActionFeedback, run_admin_action};
 
 /// 创建用户表单各字段的校验结果；None 表示该字段当前无错误。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -80,7 +77,6 @@ pub(super) struct AdminUserCreated {
 
 #[component]
 pub(super) fn AdminUserCreateForm(
-    reload_generation: Signal<u64>,
     command_gate: PendingCommandGate,
     on_created: EventHandler<AdminUserCreated>,
     on_close: EventHandler<()>,
@@ -89,9 +85,8 @@ pub(super) fn AdminUserCreateForm(
     let mut forum_account_id = use_signal(String::new);
     let mut key_mode = use_signal(|| "generated".to_owned());
     let mut manual_key = use_signal(String::new);
-    let mut command_id_state = use_signal(|| None::<(Uuid, Uuid)>);
-    let busy = use_signal(|| false);
-    let feedback = use_signal(|| None::<AdminActionFeedback>);
+    let pending = use_context::<PendingCommands>();
+    let mut feedback = use_signal(|| None::<AdminActionFeedback>);
     let mut field_errors = use_signal(UserFieldErrors::default);
 
     // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；同时修正旧版 aria_labelledby
@@ -100,13 +95,13 @@ pub(super) fn AdminUserCreateForm(
         Dialog {
             title: t!("admin-users-create-title"),
             close_label: t!("admin-users-create-close"),
-            busy: busy(),
+            busy: pending.is_busy("create-user"),
             on_close: move |_| on_close.call(()),
             form {
                     class: "admin-users-create",
                     onsubmit: move |event| {
                         event.prevent_default();
-                        if busy() || command_gate.blocked() {
+                        if pending.contains("create-user") || command_gate.blocked() {
                             return;
                         }
                         let username = username().trim().to_owned();
@@ -137,89 +132,62 @@ pub(super) fn AdminUserCreateForm(
                             }
                             return;
                         }
-                        // 与补发首次提交及面板重试共用同步门禁；检查通过后、spawn 前占用。
-                        let Some(guard) = command_gate.try_acquire() else {
-                            return;
-                        };
-                        // 两个完成回调共享守卫，使成功 Key 交付页面后才释放运行占用；
-                        // 表单任务被取消时也会释放，不留下卡死的页级门禁。
-                        let success_guard = Rc::new(guard);
-                        let failure_guard = success_guard.clone();
                         field_errors.set(UserFieldErrors::default());
-                        let signature = create_signature(
-                            &username,
-                            &forum_account_id,
-                            &key_mode,
-                            &submitted_manual_key,
-                        );
-                        let command_id = match command_id_state() {
-                            Some((current_signature, command_id))
-                                if current_signature == signature =>
-                            {
-                                command_id
-                            }
-                            None => {
-                                let command_id = Uuid::new_v4();
-                                command_id_state.set(Some((signature, command_id)));
-                                command_id
-                            }
-                            Some(_) => {
-                                let command_id = Uuid::new_v4();
-                                command_id_state.set(Some((signature, command_id)));
-                                command_id
-                            }
-                        };
-                        if key_mode == "manual" {
-                            manual_key.set(String::new());
-                        }
-                        let mut feedback = feedback;
-                        let mut field_errors = field_errors;
-                        let mut reload_generation = reload_generation;
-                        let on_created = on_created;
                         feedback.set(None);
-                        run_admin_action(
-                            busy,
-                            async move {
-                                create_admin_user(
-                                    command_id,
-                                    username,
-                                    (!forum_account_id.is_empty()).then_some(forum_account_id),
-                                    if key_mode == "manual" { "manual" } else { "generated" },
-                                    (key_mode == "manual").then_some(submitted_manual_key),
-                                )
-                                .await
-                            },
-                            move |result| {
-                                let _guard = success_guard;
-                                let username = result.user.username;
-                                let generated_key =
-                                    result.generated_key.map(|key| AdminUserGeneratedKey { key });
-                                on_created.call(AdminUserCreated { username, generated_key });
-                                command_id_state.set(None);
-                                reload_generation.set(reload_generation().saturating_add(1));
-                            },
-                            move |code| {
-                                let _guard = failure_guard;
-                                // 用户冲突可归属用户名字段，其余错误保持页面级反馈。
-                                if code == "user_conflict" {
-                                    field_errors.write().username =
-                                        Some(UserFieldIssue::UsernameConflict);
-                                    focus_field("create-username");
-                                } else {
-                                    feedback.set(Some(AdminActionFeedback::Error(code)));
+                        // 手动 Key 仅留在页级工厂内存；重试复制原值，不从已清空的输入框重建。
+                        let manual = (key_mode == "manual").then_some(submitted_manual_key);
+                        let submitted = pending.submit(
+                            "create-user".to_owned(),
+                            t!("admin-users-create-submit"),
+                            move |command_id| {
+                                let username = username.clone();
+                                let forum_account_id = (!forum_account_id.is_empty())
+                                    .then(|| forum_account_id.clone());
+                                let manual = manual.clone();
+                                async move {
+                                    create_admin_user(
+                                        command_id,
+                                        username,
+                                        forum_account_id,
+                                        if manual.is_some() { "manual" } else { "generated" },
+                                        manual,
+                                    )
+                                    .await
                                 }
                             },
+                            move |result| {
+                                let generated_key =
+                                    result.generated_key.map(|key| AdminUserGeneratedKey { key });
+                                on_created.call(AdminUserCreated {
+                                    username: result.user.username,
+                                    generated_key,
+                                });
+                            },
+                            move |code| {
+                                let mut field_errors = field_errors;
+                                if code == "user_conflict"
+                                    && let Ok(mut errors) = field_errors.try_write()
+                                {
+                                    errors.username = Some(UserFieldIssue::UsernameConflict);
+                                }
+                                set_if_alive(feedback, Some(AdminActionFeedback::Error(code)));
+                            },
                         );
+                        if submitted {
+                            manual_key.set(String::new());
+                        }
                     },
                     label { r#for: "create-username", {t!("admin-users-username")} }
                     input {
                         id: "create-username",
+                        disabled: pending.contains("create-user"),
                         r#type: "text",
                         required: true,
                         aria_invalid: field_errors().username.is_some().then_some("true"),
                         aria_describedby: field_errors().username.is_some().then_some("create-username-error"),
                         value: username(),
                         oninput: move |event| {
+                            if pending.contains("create-user") { return; }
                             username.set(event.value());
                             field_errors.write().username = None;
                         },
@@ -231,6 +199,7 @@ pub(super) fn AdminUserCreateForm(
                     label { r#for: "create-forum-account-id", {t!("admin-users-forum-account-id")} }
                     input {
                         id: "create-forum-account-id",
+                        disabled: pending.contains("create-user"),
                         r#type: "text",
                         inputmode: "numeric",
                         pattern: "[1-9][0-9]*",
@@ -242,6 +211,7 @@ pub(super) fn AdminUserCreateForm(
                         aria_invalid: field_errors().forum_account.is_some().then_some("true"),
                         value: forum_account_id(),
                         oninput: move |event| {
+                            if pending.contains("create-user") { return; }
                             forum_account_id.set(event.value());
                             field_errors.write().forum_account = None;
                         },
@@ -254,8 +224,10 @@ pub(super) fn AdminUserCreateForm(
                     label { r#for: "create-key-mode", {t!("admin-users-key-mode")} }
                     select {
                         id: "create-key-mode",
+                        disabled: pending.contains("create-user"),
                         value: key_mode(),
                         onchange: move |event| {
+                            if pending.contains("create-user") { return; }
                             key_mode.set(event.value());
                             manual_key.set(String::new());
                             field_errors.write().manual_key = None;
@@ -267,6 +239,7 @@ pub(super) fn AdminUserCreateForm(
                         label { r#for: "create-key", {t!("admin-users-manual-key")} }
                         input {
                             id: "create-key",
+                            disabled: pending.contains("create-user"),
                             r#type: "password",
                             autocomplete: "new-password",
                             minlength: "32",
@@ -275,6 +248,7 @@ pub(super) fn AdminUserCreateForm(
                             aria_describedby: field_errors().manual_key.is_some().then_some("create-key-error"),
                             value: manual_key(),
                             oninput: move |event| {
+                                if pending.contains("create-user") { return; }
                                 manual_key.set(event.value());
                                 field_errors.write().manual_key = None;
                             },
@@ -287,7 +261,7 @@ pub(super) fn AdminUserCreateForm(
                     button {
                         r#type: "submit",
                         class: "admin-btn-primary",
-                        disabled: busy() || command_gate.blocked(),
+                        disabled: pending.contains("create-user") || command_gate.blocked(),
                         {t!("admin-users-create-submit")}
                     }
                 }
@@ -297,7 +271,7 @@ pub(super) fn AdminUserCreateForm(
                 div { class: "admin-shell__dialog-actions",
                     button {
                         r#type: "button",
-                        disabled: busy(),
+                        disabled: pending.is_busy("create-user"),
                         onclick: move |_| on_close.call(()),
                         {t!("admin-users-create-close")}
                     }
@@ -331,20 +305,6 @@ pub(super) fn AdminUserGeneratedKeyDialog(
             }
         }
     }
-}
-
-fn create_signature(
-    username: &str,
-    forum_account_id: &str,
-    key_mode: &str,
-    manual_key: &str,
-) -> Uuid {
-    let mut payload = Vec::new();
-    for value in [username, forum_account_id, key_mode, manual_key] {
-        payload.extend_from_slice(&(value.len() as u64).to_be_bytes());
-        payload.extend_from_slice(value.as_bytes());
-    }
-    Uuid::new_v5(&Uuid::NAMESPACE_OID, &payload)
 }
 
 /// 论坛账号 ID 校验：与输入框 `pattern="[1-9][0-9]*"` 一致，首位非零的全数字文本。

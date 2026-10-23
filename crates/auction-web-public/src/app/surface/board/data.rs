@@ -34,6 +34,7 @@ struct CatalogSnapshot {
 pub(crate) fn AuctionData(
     auction: CurrentAuction,
     historical: bool,
+    authoritative: bool,
     boot_prerequisites_ready: bool,
 ) -> Element {
     // 开场刷新每秒重算：订阅外壳提供的共享秒级节拍，不再自起独立定时器。
@@ -297,7 +298,10 @@ pub(crate) fn AuctionData(
                     page_total: page.total,
                     page_size,
                     has_more,
-                    can_bid: is_live_presentation && auction.bidding_open,
+                    can_bid: authoritative
+                        && *lots.state().read() == UseResourceState::Ready
+                        && is_live_presentation
+                        && auction.bidding_open,
                     allow_slow: auction.status == "live",
                     session_ready,
                     authenticated,

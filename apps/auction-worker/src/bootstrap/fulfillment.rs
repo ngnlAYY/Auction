@@ -3,160 +3,24 @@
 #[cfg(feature = "postgres")]
 use super::*;
 #[cfg(feature = "postgres")]
-use serde::Serialize;
-#[cfg(feature = "postgres")]
-use sha2::{Digest, Sha256};
+use auction_application::{
+    InternalEvidenceError, InternalEvidenceFuture, InternalEvidenceRequest,
+    PreparedSettlementInternalEvidence, SettlementInternalEvidenceReader,
+};
 
 #[cfg(feature = "postgres")]
-pub(super) struct EquipmentFulfillmentCustodyReader {
-    secrets: Arc<dyn SettlementFulfillmentEquipmentSecretReader>,
-    opener: EquipmentKeyOpener,
-    equipment: Arc<dyn MailEquipmentReader>,
-    clock: Arc<dyn Clock>,
+pub(super) struct MoogleMailFulfillmentCustodyReader {
+    pub(super) gateway: Arc<MoogleMailGateway>,
 }
 
 #[cfg(feature = "postgres")]
-impl EquipmentFulfillmentCustodyReader {
-    pub(super) fn new(
-        secrets: Arc<dyn SettlementFulfillmentEquipmentSecretReader>,
-        opener: EquipmentKeyOpener,
-        equipment: Arc<dyn MailEquipmentReader>,
-        clock: Arc<dyn Clock>,
-    ) -> Self {
-        Self { secrets, opener, equipment, clock }
-    }
-}
-
-#[cfg(feature = "postgres")]
-impl SettlementFulfillmentCustodyReader for EquipmentFulfillmentCustodyReader {
+impl SettlementFulfillmentCustodyReader for MoogleMailFulfillmentCustodyReader {
     fn read_custody(
         &self,
-        equipment_id: auction_domain::EquipmentId,
-        world: SettlementWorld,
-        external_equipment_id: String,
-    ) -> ApplicationFuture<'_, SettlementFulfillmentCustodySnapshot> {
-        Box::pin(async move {
-            if equipment_id.is_nil()
-                || external_equipment_id.is_empty()
-                || external_equipment_id != external_equipment_id.trim()
-            {
-                return Err(ApplicationError::FulfillmentDependencyUnavailable);
-            }
-            let secret = self
-                .secrets
-                .read_equipment_secret(equipment_id)
-                .await
-                .map_err(|_| ApplicationError::FulfillmentDependencyUnavailable)?;
-            if secret.equipment_id != equipment_id
-                || secret.external_equipment_id != external_equipment_id
-            {
-                return Err(ApplicationError::FulfillmentDependencyMismatch);
-            }
-            let key = self
-                .opener
-                .open(equipment_id, &secret.envelope)
-                .map_err(|_| ApplicationError::FulfillmentDependencyUnavailable)?;
-            let mut source = self
-                .equipment
-                .read(
-                    settlement_world_id(world).to_owned(),
-                    MailEquipmentAttachment {
-                        external_equipment_id: external_equipment_id.clone(),
-                        key,
-                    },
-                )
-                .await
-                .map_err(custody_source_error)?;
-            source.clear_secret();
-            if source.external_equipment_id != external_equipment_id {
-                return Err(ApplicationError::FulfillmentDependencyMismatch);
-            }
-            if !source.attributes.is_object() {
-                return Err(ApplicationError::FulfillmentDependencyUnavailable);
-            }
-            let observed_at = self.clock.now();
-            let digest =
-                custody_digest(equipment_id, world, &external_equipment_id, &source.attributes)?;
-            Ok(SettlementFulfillmentCustodySnapshot {
-                equipment_id,
-                world,
-                external_equipment_id,
-                custodied: true,
-                observed_at,
-                digest,
-            })
-        })
-    }
-}
-
-#[cfg(feature = "postgres")]
-#[derive(Serialize)]
-struct CustodyDigestPayload<'a> {
-    equipment_id: String,
-    world: &'static str,
-    external_equipment_id: &'a str,
-    attributes: &'a serde_json::Value,
-}
-
-#[cfg(feature = "postgres")]
-fn custody_digest(
-    equipment_id: auction_domain::EquipmentId,
-    world: SettlementWorld,
-    external_equipment_id: &str,
-    attributes: &serde_json::Value,
-) -> Result<[u8; 32], ApplicationError> {
-    let encoded = serde_json::to_vec(&CustodyDigestPayload {
-        equipment_id: equipment_id.to_string(),
-        world: settlement_world_id(world),
-        external_equipment_id,
-        attributes,
-    })
-    .map_err(|_| ApplicationError::FulfillmentDependencyUnavailable)?;
-    let digest = Sha256::digest(go_json_compatible_bytes(encoded));
-    Ok(digest.into())
-}
-
-#[cfg(feature = "postgres")]
-fn go_json_compatible_bytes(encoded: Vec<u8>) -> Vec<u8> {
-    let mut output = Vec::with_capacity(encoded.len());
-    let mut index = 0;
-    while index < encoded.len() {
-        let replacement = match encoded[index] {
-            b'<' => Some((br"\u003c".as_slice(), 1)),
-            b'>' => Some((br"\u003e".as_slice(), 1)),
-            b'&' => Some((br"\u0026".as_slice(), 1)),
-            0xe2 if encoded.get(index..index + 3) == Some([0xe2, 0x80, 0xa8].as_slice()) => {
-                Some((br"\u2028".as_slice(), 3))
-            }
-            0xe2 if encoded.get(index..index + 3) == Some([0xe2, 0x80, 0xa9].as_slice()) => {
-                Some((br"\u2029".as_slice(), 3))
-            }
-            _ => None,
-        };
-        if let Some((replacement, consumed)) = replacement {
-            output.extend_from_slice(replacement);
-            index += consumed;
-        } else {
-            output.push(encoded[index]);
-            index += 1;
-        }
-    }
-    output
-}
-
-#[cfg(feature = "postgres")]
-fn custody_source_error(error: ApplicationError) -> ApplicationError {
-    match error {
-        ApplicationError::FulfillmentDependencyMismatch => error,
-        _ => ApplicationError::FulfillmentDependencyUnavailable,
-    }
-}
-
-#[cfg(feature = "postgres")]
-fn settlement_world_id(world: SettlementWorld) -> &'static str {
-    match world {
-        SettlementWorld::Main => "main",
-        SettlementWorld::Isekai => "isekai",
+        request: InternalEvidenceRequest,
+    ) -> InternalEvidenceFuture<'_, PreparedSettlementInternalEvidence> {
+        // 装备详情可公开读取，不能证明托管。仅复用当前账号、世界与独占会话的 Armory 正向证据。
+        self.gateway.prepare_internal_evidence(request)
     }
 }
 
@@ -271,11 +135,9 @@ pub(super) struct UnavailableFulfillmentCustodyReader;
 impl SettlementFulfillmentCustodyReader for UnavailableFulfillmentCustodyReader {
     fn read_custody(
         &self,
-        _equipment_id: auction_domain::EquipmentId,
-        _world: SettlementWorld,
-        _external_equipment_id: String,
-    ) -> ApplicationFuture<'_, SettlementFulfillmentCustodySnapshot> {
-        Box::pin(async { Err(ApplicationError::FulfillmentDependencyUnavailable) })
+        _request: InternalEvidenceRequest,
+    ) -> InternalEvidenceFuture<'_, PreparedSettlementInternalEvidence> {
+        Box::pin(async { Err(InternalEvidenceError::Unavailable) })
     }
 }
 

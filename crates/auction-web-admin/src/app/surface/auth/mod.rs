@@ -13,8 +13,8 @@ use auction_web_shared::{
 };
 
 use crate::api::{
-    AdminReadinessState, AdminSession, AdminSessionCheckTrigger, fetch_admin_readiness,
-    fetch_admin_session, login_admin, logout_admin,
+    AdminReadinessState, AdminSession, AdminSessionCheckTrigger, AdminSessionWritePermission,
+    fetch_admin_readiness, fetch_admin_session, login_admin, logout_admin,
 };
 
 use super::{AdminReadinessResource, Route, admin_api_error_message};
@@ -40,12 +40,40 @@ pub(super) fn AdminShell() -> Element {
     let is_login_path = matches!(&current_route, Route::Login {});
     let is_dashboard_path = matches!(&current_route, Route::Dashboard {});
     let mut reload_generation = use_signal(|| 0_u64);
+    let mut confirmed_session = use_signal(|| None::<AdminSession>);
+    let mut identity_epoch = use_signal(|| 0_u64);
     use_context_provider(move || AdminSessionCheckTrigger(reload_generation));
     let readiness = use_resource(fetch_admin_readiness);
     let session = use_resource(move || {
         let generation = reload_generation();
-        async move { (generation, fetch_admin_session().await) }
+        async move {
+            let result = fetch_admin_session().await;
+            // 注销或更新检查代数后，迟到结果不能恢复旧身份。
+            if generation == *reload_generation.peek()
+                && let Ok(current) = &result
+            {
+                let changed = confirmed_session
+                    .peek()
+                    .as_ref()
+                    .map(|session| (&session.actor, &session.csrf_token))
+                    != current.as_ref().map(|session| (&session.actor, &session.csrf_token));
+                if changed {
+                    let next_epoch = identity_epoch.peek().saturating_add(1);
+                    identity_epoch.set(next_epoch);
+                }
+                confirmed_session.set(current.clone());
+            }
+            (generation, result)
+        }
     });
+    let mutation_permission = use_memo(move || {
+        session.read().as_ref().is_some_and(|(generation, result)| {
+            *generation == reload_generation()
+                && matches!(result, Ok(Some(_)))
+                && confirmed_session.read().is_some()
+        })
+    });
+    use_context_provider(move || AdminSessionWritePermission(mutation_permission));
     let readiness_context: AdminReadinessResource = readiness;
     use_context_provider(move || readiness_context);
     let (checked_generation, session_snapshot) =
@@ -64,6 +92,26 @@ pub(super) fn AdminShell() -> Element {
         Some(Ok(true)) => AdminReadinessState::Ready,
         Some(Ok(false) | Err(_)) => AdminReadinessState::Degraded,
     };
+    if let Some(current) = confirmed_session() {
+        if is_login_path {
+            return rsx! { AdminReturnRedirect {} };
+        }
+        return rsx! {
+            AdminAuthenticatedShell {
+                key: "{identity_epoch}",
+                session: current,
+                checked_generation,
+                reload_generation,
+                readiness: readiness_state,
+                session_confirmed: mutation_permission(),
+                on_logout: move |_| {
+                    confirmed_session.set(None);
+                    identity_epoch.set(identity_epoch().saturating_add(1));
+                    reload_generation.set(reload_generation().saturating_add(1));
+                },
+            }
+        };
+    }
 
     match session_snapshot.as_ref() {
         None => rsx! {
@@ -95,16 +143,8 @@ pub(super) fn AdminShell() -> Element {
                 readiness: readiness_state,
             }
         },
-        Some(Ok(Some(_))) if is_login_path => rsx! {
-            AdminReturnRedirect {}
-        },
-        Some(Ok(Some(current))) => rsx! {
-            AdminAuthenticatedShell {
-                session: current.clone(),
-                checked_generation,
-                reload_generation,
-                readiness: readiness_state,
-            }
+        Some(Ok(Some(_))) => rsx! {
+            div { role: "status", {t!("admin-session-loading")} }
         },
     }
 }

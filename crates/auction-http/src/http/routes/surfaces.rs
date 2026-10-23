@@ -74,13 +74,14 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
             "/api/v1/session",
             axum::routing::get(current_session)
                 .post(login_session)
+                .put(refresh_session_cookie)
                 .delete(logout_session)
                 .layer(DefaultBodyLimit::max(4 << 10))
                 .layer(middleware::from_fn_with_state(
                     strict_json::post(4 << 10),
                     strict_json::enforce,
                 ))
-                .strict_methods("DELETE, GET, POST"),
+                .strict_methods("DELETE, GET, POST, PUT"),
         )
         .route("/api/v1/me/bids", get(list_my_bids))
         .route("/api/v1/me/lot-watches", get(list_lot_watches))

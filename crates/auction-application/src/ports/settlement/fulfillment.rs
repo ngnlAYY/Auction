@@ -156,17 +156,6 @@ pub struct SettlementFulfillmentEquipmentSecret {
     pub envelope: EquipmentKeyEnvelope,
 }
 
-/// BuyerRefund 执行前由装备来源返回的当前托管证明。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SettlementFulfillmentCustodySnapshot {
-    pub equipment_id: EquipmentId,
-    pub world: SettlementWorld,
-    pub external_equipment_id: String,
-    pub custodied: bool,
-    pub observed_at: DateTime<Utc>,
-    pub digest: [u8; 32],
-}
-
 /// 只读诊断所需的已冻结结算发送目标；不包含 secret、claim 或 lease 身份。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettlementFulfillmentSentLookupTarget {
@@ -196,14 +185,13 @@ pub trait SettlementFulfillmentEquipmentSecretReader: Send + Sync {
     ) -> ApplicationFuture<'_, SettlementFulfillmentEquipmentSecret>;
 }
 
-/// Worker 与装备来源 owner 之间的当前 custody 证明读取端口。
+/// Worker 与唯一邮件 owner 之间的正向库存证明端口。
+/// 返回值必须持有认证会话；调用方将 guard 保留到 prepare/activate 事务确定结束。
 pub trait SettlementFulfillmentCustodyReader: Send + Sync {
     fn read_custody(
         &self,
-        equipment_id: EquipmentId,
-        world: SettlementWorld,
-        external_equipment_id: String,
-    ) -> ApplicationFuture<'_, SettlementFulfillmentCustodySnapshot>;
+        request: crate::InternalEvidenceRequest,
+    ) -> crate::InternalEvidenceFuture<'_, crate::PreparedSettlementInternalEvidence>;
 }
 
 /// 读取冻结 delivery 目标供离线 Sent 核对；实现不得领取、续租或写回状态。
@@ -343,15 +331,16 @@ pub trait SettlementFulfillmentStore: Send + Sync {
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<SettlementFulfillmentClaim>>;
 
-    fn prepare_delivery(
-        &self,
+    fn prepare_delivery<'a>(
+        &'a self,
         claim: SettlementFulfillmentClaim,
         preparation: SettlementDeliveryPreparation,
         prepared_at: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, SettlementFulfillmentResult>;
+        custody: Option<(&'a crate::SettlementInternalEvidenceSnapshot, std::time::Instant)>,
+    ) -> ApplicationFuture<'a, SettlementFulfillmentResult>;
 
-    fn activate_delivery(
-        &self,
+    fn activate_delivery<'a>(
+        &'a self,
         claim: SettlementFulfillmentClaim,
         activate_command_id: CommandId,
         activate_request_hash: RequestHash,
@@ -359,7 +348,8 @@ pub trait SettlementFulfillmentStore: Send + Sync {
         // 保留参数以兼容既有适配器；当前激活继续持有 claim，调用方须传 None。
         // COD/货款的下次 MM 追踪时间在 reconcile 释放 claim 的同一事务内写入。
         next_attempt_at: Option<DateTime<Utc>>,
-    ) -> ApplicationFuture<'_, SettlementFulfillmentActivationResult>;
+        custody: Option<(&'a crate::SettlementInternalEvidenceSnapshot, std::time::Instant)>,
+    ) -> ApplicationFuture<'a, SettlementFulfillmentActivationResult>;
 
     fn satisfy(
         &self,

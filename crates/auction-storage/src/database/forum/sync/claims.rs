@@ -14,10 +14,16 @@ pub(super) async fn claim_due_postgres(
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
     startup_recovery_before: Option<DateTime<Utc>>,
+    available_worlds: &[auction_domain::SettlementWorld],
     limit: u16,
 ) -> Result<Vec<ForumSyncClaim>, ApplicationError> {
     use sqlx::Row;
 
+    let available_worlds = available_worlds
+        .iter()
+        .copied()
+        .map(auction_application::forum_world_name)
+        .collect::<Vec<_>>();
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启论坛同步领取事务失败"))?;
     // 旧版只在拍卖首次进入 live 时建立一次主题任务；不能在 Worker 重启后为历史终态拍卖补帖。
@@ -41,6 +47,7 @@ pub(super) async fn claim_due_postgres(
          FROM public.auction_forum_sync AS sync
          JOIN public.auctions AS auction ON auction.id = sync.auction_id
          WHERE auction.opened_at IS NOT NULL
+           AND auction.world_id = ANY($4::text[])
            AND auction.status IN ('live', 'final', 'settling', 'settled')
            AND (auction.status <> 'settled' OR sync.terminal_refresh_enabled)
            AND (
@@ -70,6 +77,7 @@ pub(super) async fn claim_due_postgres(
     .bind(now)
     .bind(i64::from(limit))
     .bind(startup_recovery_before)
+    .bind(&available_worlds)
     .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取 due 论坛同步任务失败"))?;

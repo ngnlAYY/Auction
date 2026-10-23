@@ -23,10 +23,16 @@ pub(super) async fn claim_published_topics_postgres(
     worker_id: &str,
     now: chrono::DateTime<chrono::Utc>,
     lease_until: chrono::DateTime<chrono::Utc>,
+    available_worlds: &[auction_domain::SettlementWorld],
     limit: u16,
 ) -> Result<Vec<ForumReplyTopic>, ApplicationError> {
     use sqlx::Row;
 
+    let available_worlds = available_worlds
+        .iter()
+        .copied()
+        .map(auction_application::forum_world_name)
+        .collect::<Vec<_>>();
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启论坛回帖领取事务失败"))?;
     let rows = sqlx::query(
@@ -37,6 +43,7 @@ pub(super) async fn claim_published_topics_postgres(
          FROM public.auction_forum_sync AS sync
          JOIN public.auctions AS auction ON auction.id = sync.auction_id
          WHERE sync.status = 'published'
+           AND auction.world_id = ANY($3::text[])
            AND sync.thread_id IS NOT NULL
            AND sync.catalog_post_id IS NOT NULL
            AND sync.system_log_post_id IS NOT NULL
@@ -59,6 +66,7 @@ pub(super) async fn claim_published_topics_postgres(
     )
     .bind(now)
     .bind(i64::from(limit))
+    .bind(&available_worlds)
     .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取已发布论坛主题失败"))?;

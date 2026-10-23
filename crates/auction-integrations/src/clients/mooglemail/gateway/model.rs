@@ -50,11 +50,11 @@ impl MoogleMailSentLookupRequest {
             && self.subject == self.subject.trim()
             && !self.subject.is_empty()
             && !self.subject.chars().any(char::is_control)
+            && !self.external_equipment_id.is_empty()
             && self.external_equipment_id.len() <= 32
             && self.external_equipment_id.bytes().all(|byte| byte.is_ascii_digit())
             && (self.external_equipment_id.len() == 1
                 || self.external_equipment_id.as_bytes()[0] != b'0')
-            && !self.external_equipment_id.is_empty()
             && (1..=configured_pages).contains(&self.maximum_pages)
             && self.observed_at.timestamp_nanos_opt().is_some()
     }

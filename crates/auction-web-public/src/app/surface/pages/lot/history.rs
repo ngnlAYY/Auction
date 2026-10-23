@@ -7,6 +7,7 @@ pub(crate) fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
     rsx! {
         div { class: "public-auction-lot__table",
             table { class: "ui-table--responsive",
+                caption { {t!("bidlog-history-note")} }
                 auction_web_shared::TableColumns { layout: "public-lot-bid-history", widths: vec![38, 22, 40] }
                 thead {
                     tr {
@@ -24,6 +25,9 @@ pub(crate) fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
                                     source: bid.source.clone(),
                                     source_post_number: bid.source_post_number,
                                     source_post_url: bid.source_post_url.clone(),
+                                }
+                                span { class: "public-visually-hidden",
+                                    if bid.valid { {t!("bidlog-valid")} } else { {t!("bidlog-invalid")} }
                                 }
                             }
                             td { class: "public-auction-lot__amount public-auction-lot__number", "data-label": t!("bidlog-amount"), "{format_amount(bid.amount)}" }

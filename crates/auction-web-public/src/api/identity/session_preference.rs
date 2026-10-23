@@ -27,6 +27,10 @@ pub(crate) async fn set_session_preference(
     user_id: &str,
     command: &PublicSetSessionPreferenceRequest,
 ) -> Result<PublicSessionPreferenceResponse, CommandError> {
+    // 成功、重放和未知结果的重发都须与登录共用原生锁，防止迟到 Set-Cookie 换回旧身份。
+    let _cookie_lock =
+        super::session::lock_cookie_mutation().await.map_err(|code| failure(code, 0))?;
+    super::session::invalidate_cookie_sync();
     let response = send_request(|abort_signal| {
         Request::put(PATH)
             .abort_signal(abort_signal)

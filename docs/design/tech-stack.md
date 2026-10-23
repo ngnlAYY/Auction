@@ -30,6 +30,11 @@
 Cargo.lock，也不代表活动驱动或运行支持。升级逐项核对 MSRV、WASM、PostgreSQL 和发布图，检查使用 `--locked`，不在
 发布时隐式刷新依赖。只有上游正式声明才能称 LTS，MSRV 不是长期支持承诺。
 
+密码学传递依赖 `ctutils` 在应用锁图和 sccache 独立锁图中均锁定为 0.4.4，修复
+[RUSTSEC-2026-0385](https://rustsec.org/advisories/RUSTSEC-2026-0385.html) 的非恒定时间掩码生成及部分
+32 位目标 `u128` 比较。此更新不改变 HMAC/SHA-256 算法、摘要或会话身份；依赖命中不等于已证明本程序存在可利用侧信道。
+旧应用与构建工具二进制不会随锁图自动更新，必须分别重新构建；实际检查范围见[状态页](docs/status.md)。
+
 ## 编译优化边界
 
 [根清单](Cargo.toml)统一拥有生产 profile，定向构建不复制优化参数：

@@ -281,6 +281,19 @@ impl RuntimeConfigForm {
     }
 
     pub(super) fn set_input(&mut self, path: &'static str, value: String) {
+        if path == "listener.mode" {
+            // 切换模式即清空不适用字段，确保确认清单与最终提交展示同一份清理结果。
+            let inactive_fields: &[&str] = match value.as_str() {
+                "tcp" => &["listener.group", "listener.runtime_directory", "listener.socket_path"],
+                "unix" => &["listener.address"],
+                _ => &[],
+            };
+            for field in inactive_fields {
+                if let Some(input) = self.inputs.get_mut(*field) {
+                    input.clear();
+                }
+            }
+        }
         self.inputs.insert(path.to_owned(), value);
     }
 

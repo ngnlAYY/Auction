@@ -1,12 +1,16 @@
 //! 履约阶段推进前的收件人、custody 与余额授权。
 
+use std::time::Instant;
+
 use auction_domain::SettlementObligationKind;
 use chrono::Duration;
 
 use crate::{
-    ApplicationError, Clock, SettlementFulfillmentClaim, SettlementFulfillmentCustodyReader,
-    SettlementFulfillmentEvidenceReader, SettlementFulfillmentOperation,
-    SettlementFulfillmentRecipientReader, SettlementFulfillmentStore,
+    ApplicationError, Clock, FundingPolicy, InternalEquipmentTarget, InternalEvidencePurpose,
+    InternalEvidenceRequest, PreparedSettlementInternalEvidence, SettlementFulfillmentClaim,
+    SettlementFulfillmentCustodyReader, SettlementFulfillmentEvidenceReader,
+    SettlementFulfillmentOperation, SettlementFulfillmentRecipientReader,
+    SettlementFulfillmentState, SettlementFulfillmentStore,
 };
 
 use super::evidence::validate_balance_evidence;
@@ -32,9 +36,13 @@ pub(super) async fn authorize_pending_or_prepared(
     clock: &dyn Clock,
     claim: SettlementFulfillmentClaim,
     retry_delay: Duration,
-    observe_cash: bool,
+    policy: &FundingPolicy,
 ) -> Result<
-    AuthorizationResult<(SettlementFulfillmentClaim, SettlementDeliveryIntent)>,
+    AuthorizationResult<(
+        SettlementFulfillmentClaim,
+        SettlementDeliveryIntent,
+        Option<PreparedSettlementInternalEvidence>,
+    )>,
     ApplicationError,
 > {
     // 已冻结的旧 Return 不能改写成新 Send，也不能凭原邮件动作继续推进装备返还。
@@ -67,43 +75,80 @@ pub(super) async fn authorize_pending_or_prepared(
     };
 
     if claim.kind == SettlementObligationKind::BuyerRefund {
-        let snapshot = match custody
-            .read_custody(
-                claim.equipment_id,
-                claim.equipment_world,
-                claim.external_equipment_id.clone(),
+        let Some(budget) = (claim.lease_until - clock.now())
+            .to_std()
+            .ok()
+            .map(|budget| budget.min(std::time::Duration::from_secs(30)))
+            .filter(|budget| *budget > std::time::Duration::from_secs(1))
+        else {
+            return defer(
+                store,
+                claim,
+                retry_delay,
+                "evidence_unavailable",
+                "装备 custody 证明预算不足",
             )
-            .await
-        {
-            Ok(snapshot) => snapshot,
-            Err(ApplicationError::FulfillmentDependencyMismatch) => {
-                return manual(store, claim, "evidence_mismatch").await;
+            .await;
+        };
+        let operation_id = match claim.state {
+            SettlementFulfillmentState::Pending => {
+                super::intent::stable_prepare_command_id(claim.obligation_id)
             }
+            SettlementFulfillmentState::Prepared => {
+                super::intent::stable_activate_command_id(claim.obligation_id)
+            }
+            _ => return Err(repository_error("退款 custody 读取阶段无效")),
+        }
+        .as_uuid();
+        let purpose = InternalEvidencePurpose::SettlementClaim {
+            obligation_id: claim.obligation_id.as_uuid(),
+            claim_token: claim.claim_token,
+            claim_fencing: claim.claim_fencing,
+            state_version: claim.state_version,
+        };
+        let request = InternalEvidenceRequest {
+            operation_id,
+            purpose: purpose.clone(),
+            world: claim.world,
+            equipment: Some(InternalEquipmentTarget {
+                equipment_id: claim.equipment_id,
+                external_equipment_id: claim.external_equipment_id.clone(),
+                world: claim.equipment_world,
+            }),
+            observe_main_cash: policy.observes_cash(),
+            deadline: Instant::now() + budget,
+        };
+        let prepared = match custody.read_custody(request).await {
+            Ok(prepared) => prepared,
             Err(_) => {
                 return defer(
                     store,
                     claim,
                     retry_delay,
                     "evidence_unavailable",
-                    "装备 custody 证明暂不可用",
+                    "同账号 Armory 正向库存证明暂不可用",
                 )
                 .await;
             }
         };
-        let checked_at = clock.now();
-        if snapshot.equipment_id != claim.equipment_id
-            || snapshot.world != claim.equipment_world
-            || snapshot.external_equipment_id != claim.external_equipment_id
-            || snapshot.external_equipment_id.is_empty()
-            || snapshot.external_equipment_id != snapshot.external_equipment_id.trim()
-            || !snapshot.custodied
-            || snapshot.digest == [0; 32]
-            || snapshot.observed_at == chrono::DateTime::<chrono::Utc>::default()
-            || snapshot.observed_at.timestamp_nanos_opt().is_none()
+        let snapshot = prepared.snapshot();
+        if snapshot.operation_id != operation_id
+            || snapshot.purpose != purpose
+            || snapshot.identity.world != claim.world
+            || !policy.matches_identity(&snapshot.identity.authenticated_uid)
+            || snapshot.equipment.as_ref().is_none_or(|equipment| {
+                equipment.equipment_id != claim.equipment_id
+                    || equipment.external_equipment_id != claim.external_equipment_id
+                    || equipment.binding.world != claim.equipment_world
+                    || !snapshot.identity.same_account(&equipment.binding)
+            })
         {
             return manual(store, claim, "evidence_mismatch").await;
         }
-        if snapshot.observed_at < claim.claimed_at || snapshot.observed_at > checked_at {
+        if snapshot.observed_from < claim.claimed_at
+            || !snapshot.valid_at(clock.now())
+            || prepared.check_current().await.is_err()
+        {
             return defer(
                 store,
                 claim,
@@ -113,9 +158,23 @@ pub(super) async fn authorize_pending_or_prepared(
             )
             .await;
         }
+        // 同一不可重入会话内已读取现金；不得再通过独立 Balance 端口抢锁或换账号。
+        if policy.observes_cash()
+            && snapshot.main_cash.as_ref().is_none_or(|cash| cash.credits < intent.credits)
+        {
+            return defer(
+                store,
+                claim,
+                retry_delay,
+                "balance_insufficient",
+                "同账号 Main Balance 不足以执行当前履约",
+            )
+            .await;
+        }
+        return Ok(AuthorizationResult::Authorized((claim, intent, Some(prepared))));
     }
 
-    if intent.credits > 0 && observe_cash {
+    if intent.credits > 0 && policy.observes_cash() {
         let observed_at = clock.now();
         let balance = match evidence.read_balance(claim.world, observed_at).await {
             Ok(balance) => balance,
@@ -153,7 +212,7 @@ pub(super) async fn authorize_pending_or_prepared(
             .await;
         }
     }
-    Ok(AuthorizationResult::Authorized((claim, intent)))
+    Ok(AuthorizationResult::Authorized((claim, intent, None)))
 }
 
 /// enqueued 只复核不可变 UUID 身份；收件地址始终使用原 delivery，不追随改名或失格。

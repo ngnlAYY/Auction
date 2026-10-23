@@ -120,11 +120,24 @@ pub struct MoogleMailboxUnprovenSend {
     pub template: String,
 }
 
+/// 稳定轮转中的单条候选；不可重建的旧行仍保留 ID，避免永远占据批次前缀。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoogleMailboxSweepCandidate {
+    pub delivery_id: Uuid,
+    /// `None` 只允许推进核对游标，不得据此读取或迁移投递业务状态。
+    pub send: Option<MoogleMailboxUnprovenSend>,
+}
+
 /// 远端三页读取端口。
 pub trait MoogleMailboxMaintenance: Send + Sync {
     fn compose<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, MoogleMailboxComposeState>;
 
-    fn discard_compose<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, MoogleMailboxDiscard>;
+    /// 调用前必须持久登记一次性尝试；持有同一会话重读并逐字段比对预期草稿后才可 POST。
+    fn discard_compose<'a>(
+        &'a self,
+        world_id: &'a str,
+        expected: &'a MoogleMailboxComposeState,
+    ) -> MailboxFuture<'a, MoogleMailboxDiscard>;
 
     fn sent_entries<'a>(
         &'a self,
@@ -155,11 +168,22 @@ pub trait MoogleMailboxMaintenance: Send + Sync {
 
 /// 本地观察与受证明恢复端口；状态变更必须与资金、履约及追加审计原子提交。
 pub trait MoogleMailboxEvidenceStore: Send + Sync {
+    /// 按持久游标稳定回绕读取候选；读取本身不推进，未处理后缀必须留给下一轮。
     fn unproven_sends<'a>(
         &'a self,
         world_id: &'a str,
         limit: i64,
-    ) -> MailboxFuture<'a, Vec<MoogleMailboxUnprovenSend>>;
+    ) -> MailboxFuture<'a, Vec<MoogleMailboxSweepCandidate>>;
+
+    /// 单条开始核对前推进游标；提交不确定时停止，不把尝试位置当作业务完成证明。
+    fn record_sweep_attempt<'a>(
+        &'a self,
+        world_id: &'a str,
+        delivery_id: Uuid,
+    ) -> MailboxFuture<'a, bool>;
+
+    /// 原子登记一次性 discard 尝试；已登记、状态已变化或提交未知均不授权再次外写。
+    fn begin_compose_discard(&self, delivery_id: Uuid) -> MailboxFuture<'_, bool>;
 
     fn record_sent_observation<'a>(
         &'a self,

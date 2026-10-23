@@ -91,7 +91,7 @@ pub(crate) async fn build_for_world(
     let cookie = EhentaiCookie::from_bytes(&secret);
     secret.fill(0);
     let forum_credentials = EhentaiCredentialSet::from_owned_runtime_cookies(
-        vec![(record.id, cookie?)],
+        vec![(record.id, record.scope, cookie?)],
         store,
         forum_owner,
     )?;

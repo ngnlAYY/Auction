@@ -1,13 +1,8 @@
 //! MoogleMail 入站 processor、装备来源、用户 key 和 delivery transport 装配。
 
-use super::super::fulfillment::EquipmentFulfillmentCustodyReader;
 use super::super::*;
 
-type MailProcessorPorts = (
-    Arc<dyn MailProcessor>,
-    MoogleMailDeliveryTransport,
-    Arc<dyn SettlementFulfillmentCustodyReader>,
-);
+type MailProcessorPorts = (Arc<dyn MailProcessor>, MoogleMailDeliveryTransport);
 
 pub(super) fn build_processor_and_delivery(
     config: &AppConfig,
@@ -28,10 +23,6 @@ pub(super) fn build_processor_and_delivery(
             let data_key = DataKey::from_base64(data_key_id, data_key_material)
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?;
             let sealer = Arc::new(EquipmentKeySealer::new(data_key));
-            // custody 与 intake 共享同一配置密钥，但分别拥有短生命周期的加密/解密适配器。
-            let custody_data_key = DataKey::from_base64(data_key_id, data_key_material)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            let opener = EquipmentKeyOpener::new(custody_data_key);
             let delivery_data_key = DataKey::from_base64(data_key_id, data_key_material)
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?;
             let delivery_opener = EquipmentKeyOpener::new(delivery_data_key);
@@ -48,16 +39,8 @@ pub(super) fn build_processor_and_delivery(
                 equipment = equipment.with_diagnostics(recorder);
             }
             let equipment = Arc::new(equipment);
-            let custody_equipment: Arc<dyn MailEquipmentReader> = equipment.clone();
             let equipment_secrets: Arc<dyn SettlementFulfillmentEquipmentSecretReader> =
                 store.clone();
-            let custody: Arc<dyn SettlementFulfillmentCustodyReader> =
-                Arc::new(EquipmentFulfillmentCustodyReader::new(
-                    Arc::clone(&equipment_secrets),
-                    opener,
-                    custody_equipment,
-                    Arc::new(SystemClock),
-                ));
             let auctions = Arc::new(MailAuctionIntakeService::new(
                 Arc::new(postgres_store.clone()),
                 sealer,
@@ -117,7 +100,7 @@ pub(super) fn build_processor_and_delivery(
                 )
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?,
             );
-            Ok((processor, delivery_transport, custody))
+            Ok((processor, delivery_transport))
         }
     }
 }

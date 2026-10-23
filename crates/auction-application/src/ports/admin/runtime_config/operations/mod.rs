@@ -14,7 +14,7 @@ use super::errors::AdminRuntimeConfigError;
 pub use alerts::AdminRuntimeAlertsConfig;
 pub use economics::AdminRuntimeEconomicsConfig;
 pub use forum::AdminRuntimeForumConfig;
-pub use mail::AdminRuntimeMailConfig;
+pub use mail::{AdminRuntimeMailConfig, AdminRuntimeMailDeliveryBudget};
 pub use schedule::AdminRuntimeScheduleConfig;
 pub use worker::{
     AdminRuntimeDeliveryConfig, AdminRuntimeFulfillmentConfig, AdminRuntimeRecoveryConfig,
@@ -54,6 +54,46 @@ impl AdminRuntimeOperationsConfig {
         self.worker.validate()?;
         if let Some(mail) = &self.mail {
             mail.validate()?;
+        }
+        Ok(())
+    }
+
+    /// 只校验新候选的有效预算，不改变既有命令结果或读取时的文档合法性。
+    /// 未接管值来自真实 Worker 启动快照；缺失上下文时不能把编辑页候选当作部署基值。
+    pub fn validate_mail_delivery_budget(
+        &self,
+        base: Option<AdminRuntimeMailDeliveryBudget>,
+    ) -> Result<(), AdminRuntimeConfigError> {
+        let mail = self.mail.as_ref().filter(|mail| mail.managed);
+        let budget = if let Some(mut budget) = base {
+            if let Some(mail) = mail {
+                budget.mail_fetch_timeout_seconds = mail.fetch_timeout_seconds;
+            }
+            if self.worker.managed {
+                budget.delivery_request_timeout_seconds =
+                    self.worker.delivery.request_timeout_seconds;
+            }
+            budget
+        } else {
+            match (mail, self.worker.managed) {
+                (None, false) => return Ok(()),
+                (Some(mail), true) => AdminRuntimeMailDeliveryBudget {
+                    // 两组完整接管可证明启用时也安全，无需猜测部署侧 enabled。
+                    mail_enabled: true,
+                    mail_fetch_timeout_seconds: mail.fetch_timeout_seconds,
+                    delivery_request_timeout_seconds: self.worker.delivery.request_timeout_seconds,
+                },
+                _ => {
+                    return Err(AdminRuntimeConfigError::InvalidDocument(
+                        "单独接管 operations.mail 或 operations.worker 前，须在 Admin 配置 worker_config_file 并重启，以校验真实 Worker 部署预算".to_owned(),
+                    ));
+                }
+            }
+        };
+        if !budget.is_valid() {
+            return Err(AdminRuntimeConfigError::InvalidDocument(
+                "MoogleMail 启用时 operations.worker.delivery.request_timeout_seconds 必须大于有效 mail.fetch_timeout_seconds 的两倍".to_owned(),
+            ));
         }
         Ok(())
     }

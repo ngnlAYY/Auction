@@ -177,6 +177,20 @@ pub(crate) fn lot_detail_href(lot_code: &str) -> String {
     public_href(&format!("/lots/{lot_code}"), &read_public_query())
 }
 
+/// 已知世界的入口不能借用地址栏的默认世界；裸详情仍会按拍卖 UUID 复核。
+pub(crate) fn lot_detail_world_href(lot_id: &str, world: &str) -> String {
+    let query =
+        PublicBoardQuery { world: normalize_world_query(world), ..PublicBoardQuery::default() };
+    public_href(&format!("/lots/{lot_id}"), &query)
+}
+
+/// 账户竞价 wire 只有拍卖 UUID，没有世界；保留已知身份，不推测世界。
+pub(crate) fn lot_detail_auction_href(lot_id: &str, auction_id: &str) -> String {
+    let query =
+        PublicBoardQuery { auction_id: Some(auction_id.to_owned()), ..PublicBoardQuery::default() };
+    public_href(&format!("/lots/{lot_id}"), &query)
+}
+
 pub(crate) fn current_auction_href() -> String {
     public_href("/auction", &read_public_query())
 }

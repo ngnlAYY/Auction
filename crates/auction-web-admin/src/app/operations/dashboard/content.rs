@@ -11,12 +11,23 @@ use super::super::Route;
 pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot, children: Element) -> Element {
     let process = snapshot.process.data.as_ref();
     let mail = snapshot.mail.data.as_ref();
-    let poll_paused = mail.is_some_and(|data| data.pollers.iter().any(|poller| poller.paused));
+    let (poll_state, poll_status) = match (snapshot.mail.status.as_str(), mail) {
+        ("unknown", _) | (_, None) => ("neutral", t!("dashboard-legacy-poll-unknown")),
+        (_, Some(data)) if data.pollers.is_empty() => {
+            ("neutral", t!("dashboard-legacy-poll-no-pollers"))
+        }
+        (_, Some(data)) if data.pollers.iter().any(|poller| poller.consecutive_failures > 0) => {
+            ("warn", t!("dashboard-legacy-poll-degraded"))
+        }
+        (_, Some(data)) if data.pollers.iter().any(|poller| poller.paused) => {
+            ("neutral", t!("dashboard-legacy-poll-paused"))
+        }
+        ("ok", Some(_)) => ("ok", t!("dashboard-legacy-poll-running")),
+        _ => ("warn", t!("dashboard-legacy-poll-degraded")),
+    };
     let realtime = snapshot.realtime.data.as_ref();
     let has_realtime_consumers = realtime.is_some_and(|data| !data.lags.is_empty());
-    let pending = realtime.map_or(0, |data| {
-        data.lags.iter().fold(0_i64, |total, item| total.saturating_add(item.lag))
-    });
+    let pending = realtime.map_or(0, |data| data.total_lag);
     let failures = realtime.map_or(0, |data| data.failure.count);
     let outbox_state = if realtime.is_none() {
         "neutral"
@@ -189,14 +200,7 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot, children: Eleme
                 )}
                 {card(
                     t!("dashboard-legacy-poll-status"),
-                    badge(
-                        if poll_paused { "neutral" } else { "ok" },
-                        if poll_paused {
-                            t!("dashboard-legacy-poll-paused")
-                        } else {
-                            t!("dashboard-legacy-poll-running")
-                        },
-                    ),
+                    badge(poll_state, poll_status),
                 )}
             }
 

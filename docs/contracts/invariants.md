@@ -24,6 +24,9 @@
 
 Public 登录时长命令必须先在锁内复核当前会话仍有效，再查询/重放账本；不能把“原命令成功”解释为过期或撤销会话仍可授权。
 摘要绑定账号、当前会话、时长和预期版本；重放返回原期限，不延长当前会话、不重复写审计。
+合法删除凭据导致命令外键变为 NULL，不得破坏旧导入、改名和启停的安全结果重放；仍核对原类型、摘要及 payload，
+不重取现行凭据或重新外呼。浏览器未决命令属于稳定身份/页面宿主，加载错误、分页或展示阶段变化不能清除原 UUID、
+版本和负载；临时会话故障保留状态但禁写，累计未知不因之后的明确拒绝解除。
 
 ### I-02 可重试写入使用确定性事实标识
 
@@ -45,6 +48,8 @@ Worker 租约。后续 Worker complete 只能确认原轮次/拍卖/命令的已
 规则文档不存在时仅 `expected_revision=0` 可创建 revision 1；非零预期版本必须匹配现存文档，不能通过 UPSERT 跳号新建。
 Admin 创建拍卖先按 world → intake target 取得原有锁，再读取数据库实时时钟校验预览时间；已接受命令仍先重放。
 周轮次 bootstrap 同样使用锁后 `clock_timestamp()`，不能把事务开始时间当作锁等待后的当前时间。
+Admin/MM 录入同样分离来源采集时间与本地业务时间：取得 world/target/auction 锁后读取数据库实时钟，
+聚合更新时间不早于其创建/原更新时间。卖家按 Users 的大小写不敏感唯一名称定位并锁定，不能把大小写变化当新身份放行黑名单。
 
 ### I-04 PostgreSQL 并发机制
 
@@ -53,6 +58,8 @@ Admin 创建拍卖先按 world → intake target 取得原有锁，再读取数�
 - PostgreSQL 结算事务提交只重试明确映射为序列化冲突或死锁的错误；连接中断、约束失败和其他提交错误必须保留原分类并立即失败，不能重放未知提交结果。
 - PostgreSQL 的队列领取、游标推进等路径可以使用 Read Committed，但必须通过明确锁、唯一约束或条件更新保护领取和状态变化，不能把较低隔离级别扩展到竞价正确性路径。
 - 非法状态迁移必须失败关闭，不能用“最后一次写入获胜”掩盖并发冲突。
+- 人工及 Recovery 拉黑使用 lot → proxy → user → session 锁序，与偏好/登录的 user → session 保持一致；
+  只重试明确的 `40001`/`40P01`，最多三次完整事务，原命令、密钥材料、摘要及历史时刻不重新生成。
 
 ### I-05 成功竞价的写入集合是原子的
 
@@ -120,12 +127,15 @@ PostgreSQL 完整档还必须在数据库边界保护拍卖聚合身份不可变
 
 实际实现必须以 `auction-domain` 的领域常量、金额类型和边界条件为权威。所有金额都必须为正且不溢出；外部普通出价、代理上限、论坛命令和规则默认值额外校验信用网格。存量 lot 起拍价/当前价与自动代理事实不得被静默取整：固定增量直接保留原网格余数，PPM 分支先把当前价向上折算为信用网格单位，再把向上取整的整千增量加回原始当前价，同样保留余数。软截止按接受时刻加延长时长、与当前截止取较晚值，不是旧截止累加 900 秒，不采用 15/5/1 分段；只允许把结束时间向后延长，不得缩短已经确定的有效结束时间；程序默认值不覆盖显式模板或旧冻结快照。
 软截止窗口为 0 时禁用延期，包括接受时刻恰好等于有效截止的情况；截止等值的出价资格保持原规则。
+合法普通出价达到 `min(历史代理上限, 1B)` 时，Fast/Slow 均立即追加原代理同价事实；
+应用预分配的事实数量必须与领域规划一致，不能等待 SlowDue/Final 在截止后补救，也不能截断历史授权原值。
 
 未发布草稿只通过显式 `repair-draft-soft-close` 单目标修正：默认只读；execute 必须具有目标、版本、稳定 command_id、actor 与精确确认短语。应用规则及 storage 锁内门禁要求从未发布/开始、无竞价/授权/结算、无论坛或未知发布证据、无排期租约且行/快照一致为 60/60，失败关闭，不删除证据绕过。Serializable 按 world → scheduled round → auction 锁序，40001/40P01 最多三次；先重放原账本再校验当前状态，CAS 只修改两时间字段及对应快照、版本和更新时间，与原结果/追加审计同事务提交；不追溯进行中或已结算场次，不自动重开或批量修改。
 
 ### I-07a 结算策略与命令重放必须可从权威事实重建
 
 `hold_curve_v1` 必须启用补偿池，`legacy_zero_v0` 必须关闭补偿池；配置不能组合出会计算税额但不写资金池账本的第三种语义。当前格式的完成命令重放必须使用冻结策略、首次结算资金池和锁内 lot 事实重新计算计划及义务，并与结算摘要和账本 payload 全量相等；只满足 payload 内部加总守恒不足以证明结果合法。任何漂移都失败关闭，不现场修补或重复执行结算。
+后续新拍卖显式冻结 recovery 的 `cod_return_limit`；旧快照缺字段仍按三次解释，不回写已冻结场次或恢复记录。
 
 ### I-07b 拍品展示编号与内部顺序必须分离
 
@@ -148,6 +158,9 @@ Draft、Preview、Live、Final、Settling、Settled、Cancelled。超过论坛 5
 多个候选指向不同主题时失败关闭，不取第一个结果继续写入。状态变化不改主题身份，也不授权重复发帖。
 
 论坛目录按分类/编号稳定排序，每帖最多 150 件，#1 起连续分页；系统更新楼为目录页数加一，竞价起点再加一。每个目录页独立受 65,531 字节上限约束，不能静默丢弃装备；历史已尝试/发布/未知主题冻结为单页并继续处理出价，不强行分页，只有从未尝试且无远端身份的队列项及新主题启用分页。已发布楼层身份冻结，抢楼、缺页、布局与冻结目标冲突失败关闭，不能为了插入目录页覆盖日志或用户回帖；全部正文证明同事务收口，续页与系统帖不参与用户竞价或格式报错。更新楼采用静态白名单提示，保留 post/line 定位，区分 pending、警告、忽略；格式错误要求新增回帖，pending 不要求重发。通知处理可能晚于竞价成功，不能把通知 pending 或失败解释为竞价未接受；日志最多展示 100 条且受正文预算限制，优先 pending、再展示最近警告，省略数量必须明确，不能以省略诊断推进真实处理水位。
+普通回复的位置不是命令身份：已接受命令按稳定 post ID 与原业务负载重放，历史 post_number（含 NULL）不重新编号。
+pending 边界按当前完整帖子集合映射，删除或未收口仍阻断；经固定布局、完整扫描和 claim/revision CAS 证明后，
+`processed_through_post_number` 可随前序删帖下降，这是当前观察投影变化，不是事实 sequence 或命令账本回退。
 
 结算终态只消费已保存的结算汇总/明细和最终领先事实，不按墙钟或舍入时长推断状态、金额或百分比。取消只刷新已有有效主题的状态，不创建新主题或导入新竞价。`000043` 的历史 settled 豁免保持不变；纳入的 Settled/Cancelled 主题停止新竞价导入，既有 pending 保留诊断并阻止完成。所有固定目录页、首帖元数据和日志确认后才能持久化所渲染的终态版本，存储在 auction 锁和 sync lease/fencing/revision CAS 下复核；扫描期间进入终态也不能跳过最终确认。扫描未完成时只更新实际变化页，不因终态反复 POST 未变化内容，完成后停止轮询。未知写入仍须只读对账，部分进度和未知结果不得提前写入完成版本，冻结分页及正文上限不变。
 
@@ -158,6 +171,8 @@ Draft、Preview、Live、Final、Settling、Settled、Cancelled。超过论坛 5
 主题未找到、缺固定楼层或开启校验时正文不符仍进入人工授权/未知结果门禁；关闭开关和重启均不自动清空已持久化的 `write_authorization_required`。
 启用回读校验时，首帖同时核对编辑表单中的真实标题/说明和原始正文；正文相同不能证明标题已更新。
 普通标题单独变化仍须提交元数据更新；未知写入中的标题/说明不匹配仍保持只读对账或人工门禁，不能自动重发。
+创建、回复、编辑共用真实 POST 进度标记：明确尚未外写的读取超时可普通重试；已经写入或历史未知结果仍只读对账，
+不因本轮没有新 POST 解除人工门禁。论坛及 PM 的 world 资格必须来自实际 credential scope，并在 LIMIT 前过滤不可用世界。
 
 普通邮件入站的 take/return/notice 即使已经写入 delivery outbox，也必须等 `inbound_mail` 与 `mail_commands` 完成事实提交，并由入站决定中的精确 delivery ID 授权后才能领取或进入 sending；复用 MailIntake origin 的论坛通知通过同 command ID/world 的论坛 notify owner 证明，不能用任意模板名绕过门禁；投递命令摘要与邮件内容摘要属于不同命令，不能要求二者相等。拍卖收件必须在已接受装备的持久化边界保留可恢复的决定，后续 Take 入队失败时重试只能恢复已接受的入站结果，不能重新检查出重复装备后转为拒绝或退件；未知主题中的纯 Credits 也属于资产，不能因装备附件为空就归档为无资产邮件。Take/Return 入队与入库都在 Serializable 边界核对相反意图，历史冲突在领取及发送前继续阻断，并以 `mail_disposition_conflict` 保留原负载进入人工核对；该隔离只允许人工终结为失败，不能确认成功或重试，失败终结也不解除原资产互斥，后续处理必须另行核对权威库存与远端证据。
 
@@ -179,6 +194,11 @@ Delivery 续租回执超过本次 finalize 或旧租约截止时必须拒绝，�
 
 诊断是非权威投影：完整装备响应先加密 prepare，失败才在 2 秒预算内 retain，成功即丢弃；每封邮件最多挂接首个失败 sidecar，不能进入 `decision_metadata`、command digest、completion proof 或 cursor，没有历史 trace 不补因、不重放。留证必须在 item/batch 业务定时器之外执行，实际耗时顺延后续 batch deadline；中间失败保留原 retryability，只有 terminal `OkRejected` 挂接 sidecar。留证关闭、失败或完成未知时仍输出安全关联日志，不伪称取得完整 body 或保证文件永久存在；阶段、字段闭集、HTTP 状态与计时范围、回执和调用顺序统一见[装备诊断契约](ops/mail/diagnostics.md#装备读取失败诊断)。
 
+主世界三页维护复用一次 fetch 总预算，覆盖数据库、session 排队、逐封详情及 compose/discard，耗尽后仍继续 Inbox。
+`000060` 的维护游标只在单条开始核对前持久推进，最多 200 条候选和 20 条通知/Take 边界不得跳过未处理后缀；
+到尾稳定回绕，不把观察、轮转或超时条目记为业务完成。discard 前先持久登记一次性尝试，再于同一 session 重读并精确比较原草稿；
+尝试提交未知、取消或外写未知都不自动再次 discard，更不授权重发 Send。
+
 ### I-09a Operations alert 的通知冷却不能早于入队证明
 
 Operations alert 批次创建时即持有第一次 claim，`claim_fencing` 与 `attempt_count` 从 1 开始；lease 过期或 fencing 不匹配的 Worker 不得确认入队或释放 claim。普通 delivery Create 失败只把批次释放为错误码为空的 `pending` 并设置持久化退避，identity 不一致立即进入 `failed/dependency_mismatch`，第三次失败或第三次 lease 过期进入 `failed/retry_exhausted`。signal 的 `last_notified_at`、`next_notify_at` 和版本只能在批次、delivery 同一事务确认入队后推进，领取或 Create 失败不能提前消耗 cooldown；
@@ -195,6 +215,8 @@ PostgreSQL 流拍的 `unsold_return` 与撤拍的 `withdrawn_return` 默认必�
 ### I-09c MoogleMail 明确发送失败必须保留资产后果
 
 send 只能从能证明为无收件人、正文、附件和 COD 残留的干净 compose 页开始，无法证明时必须进入 `preflight_unproven` 人工对账，不得覆盖或自动清理可能属于上一次结果未知的资产。send 失败只能根据远端 body 中的可见协议文字分类，script、style、noscript 和邮件 textarea 中的同名短语必须排除。明确的收件人不存在已有拒绝证明，但仍必须保留唯一、合法的退信 `mid`、`take_required` 和稳定 reason code，并在退信资产取回前进入人工对账，不得直接终结为普通失败。
+Admin 只对上述精确 `recipient_not_found/manual_reconcile` 形状接受退信 MID 作为外部引用，
+它必须与 `returned_mail_id` 一致且保留取回责任、原执行时间链及安全 transport 元数据；退信引用不是 Sent 成功证明。
 
 Worker 收到明确 `recipient_not_found` 后，必须只在当前领取轮次内暂时排除同一 `(world, recipient)` 的后续 delivery，并继续处理其他玩家；排除集合不得跨 world、不得批量改写未尝试 delivery，也不得形成永久黑名单，下一轮允许重新评估。首条失败 delivery 仍独立保留 `manual_reconcile`、退信引用和资产回收责任，禁止自动重发。明确的邮资拒绝只在 compose 中从未暂存 Credits、装备或 COD 时可以作为确定失败；任一资产暂存已经通过证明后，拒绝结果必须进入 `manual_reconcile`，禁止自动重发。失败 transport 元数据只能是有界的安全 object，storage owner 必须覆盖而不是信任其 `safe_detail` / `outcome_unknown`。普通日志、数据库和 DTO 不得保存原始响应、Cookie 或请求 payload，但业务拒绝、业务失败、处理超时以及 HTTP/解析异常可以按[邮件诊断](ops/mail/diagnostics.md)写入独立的加密异常证据，证据保存失败不得改变原有退回、投递、重试、游标或幂等结果。
 
@@ -218,6 +240,8 @@ Delivery 的创建/准备/激活、claim、进入发送、释放、成功、失�
 
 三页维护依据精确证明绑定恢复结果，也必须在同一事务追加 Delivery 审计；有持久资金分配的已证明 Send 同事务把
 `unknown/in_flight` 收口为 `spent`，不能只修改 delivery。未影响任何行的幂等观察不追加重复审计，也不计作恢复成功。
+已确认 COD 退件后的重排队，在清理旧结果前追加 `delivery.cod_return_resend` 审计，
+保留原投递身份、fence、执行时间、真正已证明的引用及退件消费/次数关联；审计、清结果和 recovery 推进同事务提交。
 
 ### I-09e Fulfillment 与 Recovery 不得共享易失调度边界
 
@@ -230,6 +254,7 @@ PostgreSQL fulfillment 和 recovery 必须使用各自的持久化领取循环�
 `return_mail_id` 不解除原邮件的消费。迁移只回填可证明已消费的来源，不自动修正既有计数。每次真实退件的 take
 prepare 与 activate 必须拥有独立且同轮稳定的命令身份，不能随 claim、租约或重试次数改变；旧 prepared/enqueued
 继续原身份，旧 prepare 已提交但未关联 action 时先完整核对原投递，不能为同一 MID 另建 take。
+recovery v1 每次 COD 重寄沿用冻结的 604800 秒付款窗口，不从已经延期的 deadline 减最初 created_at 重新推导时长。
 
 ### I-09f Auction 生命周期与结算必须独立于集成轮询
 
@@ -257,6 +282,9 @@ PM 不进入 MM deliveries/Sent/COD 链，独立队列只有 pending/claimed/sen
 - 身份来自同一 MM Cookie 认证 HV UID 与该 UID 的论坛目标资料名；论坛 Cookie 只提供读取权限，不取页头登录者。forum.enabled 关闭或证据缺失明确延期，不暗中启用论坛，不把 MM Cookie 发往论坛。
 - 当前持有只接受批准七类 Armory organize 的精确 world/form/完整计数、非 disabled canonical eqids[] 及同 EID 行 handler，同 session compose 必须干净，且同 EID/world 历史出站、恢复及其他义务占用无冲突；详情可读不是库存证明。Isekai 独立读取且与 Main 同 UID，未知形状仅阻断相应分支，不复制 Main 库存。资产冲突依据真实 origin/payload 闭集 schema：已验证无装备通知不构成 EID 占用，attachment_ids 按外部 EID/world，secret 引用按实际装备 EID/world 核对；缺失/畸形/未知 schema、真实同资产占用仍失败关闭，不凭 succeeded 放行，不解除旧 unknown，保留精确 recovered_handoff 例外与来源关联检查。
 - 内部提交要求数据库 active credential ID/version、全局 mail_cookie generation 与最长 30 秒的新鲜证据；原 operation guard 持有到事务确定结束，开始可能提交后取消或结果未知同步撤销 owner，先查原稳定命令，不转外发。所有取得 mail owner 的新版程序（含配置 Cookie）先推进 generation 并提交，配置/keyenv 不伪造持久凭据身份。
+- BuyerRefund 的新 pending 和旧 prepared 在准备/激活时都必须取得同账号、同装备世界的 Armory 正向库存证明；
+  opaque guard 持有到事务确定结束，原单调截止覆盖连接池等待、重试与 COMMIT，数据库时效另行复核。
+  公开详情可读、无资金账户或历史 prepared 均不能替代库存证明，也不能把不确定提交伪装成已回滚。
 - 数据库统一锁序为（Send 独有的分组节奏锁 →）generation → 排序 worlds → 资金 scope/account → auction → recovery → lot/equipment → credentials → users → 排序 obligations → recovery actions → 排序 deliveries → 排序 fulfillments → allocation/proof/ledger/audit；可省无关锁，不反锁；远端读取在业务事务外；SQLSTATE 40001/40P01 保留类型、最多三次整事务尝试，每次复核实时租约与证据。
 - 仅从未 prepare/activate/delivery 的新 pending 可内部满足；原稳定命令重放、资金动作、独立证明、satisfied、清 claim/版本、审计与直接 blocked 依赖解除同事务；prepared/enqueued/unknown 不转换，contingent 退款不自动激活。保持 B+C=S+T、原义务 ID 和 payment→handoff→seller；历史 `write_unknown` 投递只允许在 Sent 中 reference 与收件人唯一匹配、金额/资产矩阵一致时绑定 `sent_recovered_reference_v1` 并重新排队，绝不重发邮件；内部 carrier 不派发、不虚构 1C、无伪 delivery 或 Sent。bot 流拍与撤拍均直接留装备；配置在 `bot_players` 中的买家按内部 Purchase 分配真实 B/C，卖方 S 转 retained 或正常寄出；新配置只影响尚未生成 delivery 的新结算。
 - 资金账户固定认证 UID/Main/Credits，Cookie 换代不清余额或占用；普通 Balance/理论 pool 不是自有额度；preview 数据库零写、不取 owner、不计算已证明可用额度。apply 经真实现金及完整责任核对、版本/摘要和精确确认才开额度；旧无 UID 责任只保守隔离；新外部 COD 须同 session 精确 Sent-collected、原 exact-payload/冻结金额及唯一来源，且发送晚于 opening 边界、发行后占用不超过新鲜现金；历史/跨边界来源继续等待，不释放 quarantine。未资金化 Main 装备 COD/跨世界现金 carrier 已外发而收款事实未闭合，或关联 delivery 缺失，均阻断 preview/apply opening；不从本地未 satisfied 推断未收款，确定尚未外发的 pending/prepared 付款不误判为已收责任。补偿及隔离新增需求有零下界，既有 allocation 全计占用；collected 在满足/发行/解依赖之前，以已锁账户和同一有效 Main cash 检查既有占用，缺口确定提交冻结并返回 FundingDeferred，不满足义务、不发行、不解除依赖。
@@ -310,6 +338,9 @@ Public 永久会话仅以成对 NULL 截止表示，仍要求未撤销、账号 
 在同一事务提交账号偏好及独立版本、当前会话截止、命令结果和追加审计，不修改其他会话或用户认证版本。
 命令历史响应与当前真实截止可能不同，HTTP 必须另读当前会话生成 Cookie，不能用旧重放结果覆盖后续期限。
 浏览器 Cookie 持久期不等于服务器授权期，数据库和认证边界仍为真值，Admin 会话策略独立不变。
+普通会话 GET 永不写入或清除 Cookie。浏览器登录、退出、时长保存/重放和显式期限同步共用同源原生独占锁，
+持锁后重新取当前身份；不支持锁时明确拒绝本次 Cookie 写操作。同步只影响浏览器持久期，不改变数据库期限，
+不以迟到响应恢复旧身份，协议与同版升级要求见[P06](docs/contracts/routes.md#p06-会话读取与-cookie-同步)。
 
 ## 能力档位和模块 owner
 

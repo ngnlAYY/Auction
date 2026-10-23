@@ -60,26 +60,60 @@ pub(crate) async fn current_session(
         return session_unavailable();
     };
     let Some(raw_token) = read_public_session_cookie(&headers) else {
-        return current_session_response(&state, None, true);
+        return current_session_response(None);
     };
-    let now = Utc::now();
-    match session.current(raw_token.clone(), now).await {
-        Ok(identity) => {
-            let Ok(cookie) = public_session_cookie(
-                &raw_token,
-                identity.effective_expires_at(),
-                now,
-                state.security().cookie_secure(),
-            ) else {
-                return internal_error();
-            };
-            let mut response = current_session_response(&state, Some(identity), false);
-            response.headers_mut().insert(header::SET_COOKIE, cookie);
-            response
-        }
-        Err(error) if is_unauthenticated(&error) => current_session_response(&state, None, true),
+    match session.current(raw_token, Utc::now()).await {
+        Ok(identity) => current_session_response(Some(identity)),
+        Err(error) if is_unauthenticated(&error) => current_session_response(None),
         Err(_) => session_unavailable(),
     }
+}
+
+/// 显式同步当前 Cookie 的浏览器持久期；调用方须与登录、退出和偏好保存共用跨标签页锁。
+/// 不创建会话、不延长数据库截止，也不在匿名或认证失败时清除可能已被新登录替换的 Cookie。
+pub(crate) async fn refresh_session_cookie(
+    State(state): State<PublicApiState>,
+    ConnectInfo(address): ConnectInfo<SocketAddr>,
+    request: Request,
+) -> Response {
+    let (parts, body) = request.into_parts();
+    if let Some(response) = session_guard(&state, &parts.headers, address, true, false) {
+        return response;
+    }
+    if parts.uri.query().is_some() {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "会话同步不接受查询参数")
+            .into_response();
+    }
+    let Some(session) = state.session() else {
+        return session_unavailable();
+    };
+    let Some(raw_token) = read_public_session_cookie(&parts.headers) else {
+        return authentication_error();
+    };
+    if axum::body::to_bytes(body, 0).await.is_err() {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_body", "会话同步只接受空请求体")
+            .into_response();
+    }
+    let now = Utc::now();
+    let identity = match session.inspect(raw_token.clone(), now).await {
+        Ok(identity) => identity,
+        Err(error) if is_unauthenticated(&error) => return authentication_error(),
+        Err(_) => return session_unavailable(),
+    };
+    if let Err(response) = check_public_expected_user(&parts.headers, identity.user_id) {
+        return *response;
+    }
+    let Ok(cookie) = public_session_cookie(
+        &raw_token,
+        identity.effective_expires_at(),
+        now,
+        state.security().cookie_secure(),
+    ) else {
+        return internal_error();
+    };
+    let mut response = current_session_response(Some(identity));
+    response.headers_mut().insert(header::SET_COOKIE, cookie);
+    response
 }
 
 pub(crate) async fn logout_session(

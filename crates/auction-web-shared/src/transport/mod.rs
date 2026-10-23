@@ -3,6 +3,10 @@
 //! Admin 的 CSRF token 与 Basic Auth **不进入本层**：调用方在 `build` 闭包里建立
 //! `web_sys::Request` 时自行叠加 header，本层只负责发送、超时取消与错误分类。
 
+mod browser_lock;
+
+pub use browser_lock::{BrowserLock, BrowserLockError};
+
 #[cfg(target_arch = "wasm32")]
 use futures_util::{
     future::{Either, select},
@@ -128,8 +132,10 @@ async fn send_request_observed_with_timeout(
         pin_mut!(send, timeout);
         return match select(send, timeout).await {
             Either::Left((response, _)) => response,
-            Either::Right((_, _)) => {
+            Either::Right((_, send)) => {
                 controller.0.abort();
+                // 取消后消费 fetch/body 的终止结果，再允许外层跨标签页锁释放。
+                let _ = send.await;
                 Err(TransportError::Timeout)
             }
         };

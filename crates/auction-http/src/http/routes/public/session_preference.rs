@@ -81,6 +81,7 @@ pub(crate) async fn set_session_preference(
         Err(error) => return failure(error),
     };
     // 重放返回原命令结果，但后续命令可能已改变当前期限；Cookie 必须使用新权威快照，不能回写历史截止。
+    // 该响应仍立即同步 Cookie，避免有限延长/改永久被旧浏览器截止截断；浏览器须持有登录共用锁。
     let now = Utc::now();
     let current = match session.inspect(raw_token.clone(), now).await {
         Ok(current) if current.user_id == identity.user_id => current,

@@ -87,6 +87,10 @@ use auction_web_shared::{
 /// Public 外壳唯一拥有的会话快照；页面只消费该资源，避免同一渲染树重复请求 session。
 pub(crate) type PublicSessionResource = Resource<Result<Option<PublicSession>, String>>;
 
+/// 命令宿主的已确认身份；暂时会话读取失败不清理，不能用于授权新写入。
+#[derive(Clone, Copy)]
+pub(crate) struct PublicCommandOwner(pub Signal<Option<String>>);
+
 /// Public 外壳唯一拥有的 readiness 快照；默认首页用它协调主内容与首屏门禁。
 pub(crate) type PublicReadinessResource = Resource<Result<bool, String>>;
 

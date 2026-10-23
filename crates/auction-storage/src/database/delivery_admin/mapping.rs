@@ -50,6 +50,7 @@ pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdm
     };
     if !valid_live_lease(&snapshot.status, lease_token.as_ref(), snapshot.lease_expires_at.as_ref())
         || !valid_snapshot(&snapshot)
+        || !valid_failed_reference_metadata(&snapshot, &payload, &result_metadata)
     {
         return Err(DeliveryAdminError::StoredResultCorrupt);
     }
@@ -223,6 +224,7 @@ impl LegacyDeliveryPayload {
             lease_token.as_ref(),
             snapshot.lease_expires_at.as_ref(),
         ) || !valid_snapshot(&snapshot)
+            || !valid_failed_reference_metadata(&snapshot, &self.payload, &self.result_metadata)
         {
             return Err(DeliveryAdminError::StoredResultCorrupt);
         }
@@ -417,13 +419,50 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
                 && snapshot.claimed_at.is_some()
                 && snapshot.sending_at.is_some()
                 && snapshot.completed_at.is_some()
-                && snapshot.external_reference.is_none()
+                && (snapshot.external_reference.is_none() || valid_returned_reference(snapshot))
                 && snapshot.failure_code.as_deref().is_some_and(valid_stored_text)
                 && snapshot.fencing_version > 0
                 && snapshot.attempt_count > 0
         }
         _ => false,
     }
+}
+
+/// 唯一可带引用的未知失败是已识别收件人不存在、仍待回收资产的退信；MID 不是 Sent 证明。
+fn valid_returned_reference(snapshot: &DeliveryAdminSnapshot) -> bool {
+    snapshot.status == "manual_reconcile"
+        && snapshot.failure_code.as_deref() == Some("recipient_not_found")
+        && snapshot.reason_code.as_deref() == Some("recipient_not_found")
+        && snapshot.cod.is_some()
+        && snapshot.take_required
+        && snapshot.returned_mail_id.as_deref().is_some_and(|mid| {
+            valid_returned_mail_id(mid) && snapshot.external_reference.as_deref() == Some(mid)
+        })
+}
+
+/// 列表及完整命令账本共用 transport 的精确形状，不能把任意失败引用降级成安全退信。
+fn valid_failed_reference_metadata(
+    snapshot: &DeliveryAdminSnapshot,
+    payload: &Value,
+    metadata: &Value,
+) -> bool {
+    if snapshot.external_reference.is_none() || snapshot.status == "succeeded" {
+        return true;
+    }
+    valid_returned_reference(snapshot)
+        && matches!(payload.get("world").and_then(Value::as_str), Some("main" | "isekai"))
+        && metadata.get("stage").and_then(Value::as_str) == Some("send")
+        && metadata.get("operation").and_then(Value::as_str) == Some("send")
+        && metadata.get("category").and_then(Value::as_str) == Some("recipient_not_found")
+        && metadata.get("recipient_skipped_for_cycle").and_then(Value::as_bool) == Some(true)
+        && metadata.get("retryable").and_then(Value::as_bool) == Some(false)
+        && metadata.get("take_required").and_then(Value::as_bool) == Some(true)
+        && metadata.get("returned_mail_id").and_then(Value::as_str)
+            == snapshot.external_reference.as_deref()
+        && metadata.get("outcome_unknown").is_none_or(|value| value == true)
+        && metadata.get("external_reference_proven").is_none_or(|value| value == false)
+        && metadata.get("sent_verified").is_none_or(|value| value == false)
+        && metadata.get("proof").is_none()
 }
 
 fn valid_invalidated_watch_metadata(metadata: &Value) -> bool {
@@ -511,10 +550,12 @@ fn take_required_from_metadata(metadata: &Value) -> bool {
 
 fn returned_mail_id_from_metadata(metadata: &Value) -> Option<String> {
     let value = metadata.get("returned_mail_id").and_then(Value::as_str)?;
-    if !(1..=32).contains(&value.len())
-        || !value.bytes().all(|character| character.is_ascii_digit())
-    {
+    if !valid_returned_mail_id(value) {
         return None;
     }
     Some(value.to_owned())
+}
+
+fn valid_returned_mail_id(value: &str) -> bool {
+    (1..=32).contains(&value.len()) && value.bytes().all(|character| character.is_ascii_digit())
 }

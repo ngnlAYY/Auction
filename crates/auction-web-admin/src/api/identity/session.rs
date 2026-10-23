@@ -6,18 +6,29 @@ use auction_contracts::{AdminSessionResponse, ApiResponse};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use dioxus::{
     core::Runtime,
-    prelude::{Signal, WritableExt, try_consume_context},
+    prelude::{Memo, Signal, WritableExt, try_consume_context},
 };
 use gloo_net::http::Request;
 use serde_json::Value;
 
-use super::{
-    invalid_response_error, read_response_failure, response_error, send_get, send_request,
-};
+use super::{invalid_response_error, response_error, send_get, send_request};
 
 /// 当前认证外壳拥有的会话检查触发器；API 只发出重读请求，不据网络错误推断已登出。
 #[derive(Clone, Copy)]
 pub(crate) struct AdminSessionCheckTrigger(pub(crate) Signal<u64>);
+
+/// 认证 owner 提供的实时写门禁；临时会话检查失败不会销毁旧草稿，但必须停止新请求。
+#[derive(Clone, Copy)]
+pub(crate) struct AdminSessionWritePermission(pub(crate) Memo<bool>);
+
+/// API 与页面命令宿主共用门禁；缺少认证上下文或已卸载时失败关闭。
+pub(crate) fn admin_session_writes_allowed() -> bool {
+    let Some(runtime) = Runtime::try_current() else { return false };
+    if runtime.try_current_scope_id().is_none() {
+        return false;
+    }
+    try_consume_context::<AdminSessionWritePermission>().is_some_and(|permission| (permission.0)())
+}
 
 /// 业务 API 明确返回未认证后重新检查会话，统一退出旧登录态或展示会话读取错误。
 pub(super) fn request_admin_session_check() {
@@ -88,8 +99,7 @@ pub(crate) async fn fetch_admin_session() -> Result<Option<AdminSession>, String
     let response = send_get("/api/v1/admin/session").await?;
     if response.status() == 401 {
         // 会话读取自身的 401 直接完成本次检查，不能再次触发自己而形成无限重读。
-        let failure = read_response_failure(response).await;
-        return if failure.code == "unauthenticated" { Ok(None) } else { Err(failure.code) };
+        return Ok(None);
     }
     if !response.ok() {
         return Err(response_error(response).await);

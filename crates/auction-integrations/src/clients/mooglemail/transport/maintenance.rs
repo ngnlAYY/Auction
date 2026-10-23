@@ -74,11 +74,15 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
         })
     }
 
-    fn discard_compose<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, MoogleMailboxDiscard> {
+    fn discard_compose<'a>(
+        &'a self,
+        world_id: &'a str,
+        expected: &'a MoogleMailboxComposeState,
+    ) -> MailboxFuture<'a, MoogleMailboxDiscard> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
             let mut session = self.session(world).await?;
-            match self.sender.discard_compose(session.cookie(), world).await {
+            match self.sender.discard_compose(session.cookie(), world, expected).await {
                 Ok(MoogleMailDiscardOutcome::AlreadyClean) => {
                     Ok(MoogleMailboxDiscard::AlreadyClean)
                 }
@@ -257,9 +261,10 @@ fn maintenance_world(world_id: &str) -> Result<MoogleMailWorld, ApplicationError
 
 fn maintenance_remote_error(error: MoogleMailError, detail: &str) -> ApplicationError {
     maintenance_error(&format!(
-        "{detail}: operation={} category={}",
+        "{detail}: operation={} category={} write_started={}",
         error.operation.as_str(),
-        error.category.as_str()
+        error.category.as_str(),
+        error.write_started()
     ))
 }
 

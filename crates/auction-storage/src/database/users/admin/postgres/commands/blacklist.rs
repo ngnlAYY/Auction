@@ -1,5 +1,7 @@
 //! PostgreSQL recovery buyer 黑名单命令。
 
+use auction_application::{CompetitionTransactionError, TransactionFailure, TransactionPolicy};
+
 use super::super::mapping::*;
 use super::super::reads::{load_command_postgres_tx, load_user_postgres_tx};
 use super::super::*;
@@ -7,6 +9,23 @@ use super::super::*;
 pub(crate) async fn ensure_recovery_blacklist_postgres(
     store: &super::super::super::super::super::PostgresStore,
     command: RecoveryBuyerBlacklistCommand,
+) -> Result<RecoveryBuyerBlacklistResult, ApplicationError> {
+    // 与竞价事务共用三次以内的有界策略；每次重试仍借用同一命令、摘要和历史时间。
+    let max_attempts = TransactionPolicy::serializable().max_attempts;
+    for attempt in 0..max_attempts {
+        match ensure_recovery_blacklist_postgres_once(store, &command).await {
+            Err(error) if error.is_serialization_conflict() && attempt + 1 < max_attempts => {
+                continue;
+            }
+            result => return result,
+        }
+    }
+    Err(CompetitionTransactionError::SerializationConflict.into())
+}
+
+async fn ensure_recovery_blacklist_postgres_once(
+    store: &super::super::super::super::super::PostgresStore,
+    command: &RecoveryBuyerBlacklistCommand,
 ) -> Result<RecoveryBuyerBlacklistResult, ApplicationError> {
     let mut transaction = store.pool().begin().await.map_err(map_storage_error)?;
     set_serializable(&mut transaction).await?;
@@ -25,14 +44,14 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
         {
             return Err(admin_error(AdminUserError::StoredResultCorrupt));
         }
-        let result = recovery_blacklist_result(&command, result.user)?;
+        let result = recovery_blacklist_result(command, result.user)?;
         transaction.commit().await.map_err(map_storage_error)?;
         return Ok(result);
     }
 
     // recovery 与人工拉黑共用完整副作用；即使用户已是 blacklisted，也要修复仍存活的
     // 代理授权和公开会话，再为 recovery 命令保存独立 proof。
-    apply_blacklist_effects_postgres(
+    freeze_blacklist_proxies_postgres(
         &mut transaction,
         command.command_id,
         command.buyer_user_id,
@@ -85,6 +104,8 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
         .await
         .map_err(map_admin_write_error)?;
     }
+    revoke_public_sessions_postgres(&mut transaction, command.buyer_user_id, side_effect_at)
+        .await?;
 
     let user = load_user_postgres_tx(&mut transaction, command.buyer_user_id).await?;
     if user.status != AdminUserStatus::Blacklisted {
@@ -111,15 +132,15 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
         command.occurred_at,
     )
     .await?;
-    let result = recovery_blacklist_result(&command, user)?;
+    let result = recovery_blacklist_result(command, user)?;
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(result)
 }
 
-/// 在 Users 拉黑事务内冻结有效代理、清理慢速调度并撤销公开会话。
-/// 锁顺序固定为 lot -> proxy，调用方随后才锁 user，与竞价事务一致；每个代理转换都写入独立的
-/// 确定性拍卖子命令，使追加式转换记录的 `origin_command_id` 始终有账本证据。
-pub(super) async fn apply_blacklist_effects_postgres(
+/// 在 Users 拉黑事务内冻结有效代理并清理慢速调度；这里不锁公开会话。
+/// 锁顺序固定为 lot -> proxy，调用方随后必须锁 user，再撤销 session，与竞价和登录事务一致。
+/// 每个代理转换写入确定性拍卖子命令，使追加式转换的 `origin_command_id` 始终有账本证据。
+pub(super) async fn freeze_blacklist_proxies_postgres(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     source_command_id: Uuid,
     user_id: Uuid,
@@ -269,7 +290,15 @@ pub(super) async fn apply_blacklist_effects_postgres(
         .await
         .map_err(map_storage_error)?;
     }
+    Ok(())
+}
 
+/// 调用方须已持有 user 行锁；会话撤销不能早于用户锁，避免与登录或偏好写入反向等待。
+pub(super) async fn revoke_public_sessions_postgres(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<(), ApplicationError> {
     sqlx::query(
         "UPDATE public.public_sessions
          SET revoked_at = GREATEST(created_at, $1)

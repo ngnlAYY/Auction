@@ -91,7 +91,8 @@ pub(crate) use runtime_config::{
     fetch_admin_runtime_config, update_admin_runtime_config, validate_admin_runtime_config,
 };
 pub(crate) use session::{
-    AdminSession, AdminSessionCheckTrigger, fetch_admin_session, login_admin, logout_admin,
+    AdminSession, AdminSessionCheckTrigger, AdminSessionWritePermission,
+    admin_session_writes_allowed, fetch_admin_session, login_admin, logout_admin,
 };
 pub(crate) use settlement::{
     AdminSettlementLot, AdminSettlementReport, AdminSettlementSummary, fetch_admin_settlement,
@@ -639,12 +640,22 @@ fn valid_state_fields(
                 )
                 && value.fencing_version == 0
                 && value.attempt_count == 0;
+            // 已证明收件人不存在的退信 MID 是人工取回线索，不是发送成功引用。
+            let returned_to_sender = value.status == "manual_reconcile"
+                && value.failure_code.as_deref() == Some("recipient_not_found")
+                && value.reason_code.as_deref() == Some("recipient_not_found")
+                && value.cod.is_some()
+                && value.take_required
+                && value.returned_mail_id.as_deref().is_some_and(|mid| {
+                    value.external_reference.as_deref() == Some(mid)
+                        && valid_returned_mail_id(Some(mid))
+                });
             before_activation
                 || (lease_expires_at.is_none()
                     && claimed_at.is_some()
                     && sending_at.is_some()
                     && completed_at.is_some()
-                    && value.external_reference.is_none()
+                    && (value.external_reference.is_none() || returned_to_sender)
                     && value.failure_code.as_deref().is_some_and(valid_stored_text)
                     && value.fencing_version > 0
                     && value.attempt_count > 0)
@@ -779,11 +790,20 @@ pub(crate) async fn execute_delivery(
 }
 
 async fn fetch_csrf_token() -> Result<String, String> {
+    // 保留认证内状态不等于继续授权；会话复核未确认时不发起新的管理写入。
+    if !admin_session_writes_allowed() {
+        return Err("unauthenticated".to_owned());
+    }
     let response = send_get("/api/v1/admin/session").await?;
     if !response.ok() {
         return Err(response_error(response).await);
     }
     let payload: ApiResponse<AdminSessionResponse> =
         response.json().await.map_err(invalid_response_error)?;
-    session::decode_admin_session(payload.data).map(|session| session.csrf_token)
+    let current = session::decode_admin_session(payload.data)?;
+    // 获取 CSRF 的等待期间也可能进入暂时未确认状态，不能带着旧页面授权继续提交。
+    if !admin_session_writes_allowed() {
+        return Err("unauthenticated".to_owned());
+    }
+    Ok(current.csrf_token)
 }

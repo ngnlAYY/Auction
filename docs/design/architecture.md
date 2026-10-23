@@ -95,6 +95,7 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 | COD 退件去重 | `000051` 由 recovery owner 追加退件消费事实，与退回计数、回收动作同事务；每封退件派生独立且可重放的投递命令 |
 | 邮件详情恢复 | `000052` 由 mail-poll owner 持久保存待读邮件摘要；应用层提供窄日志端口，集成层读取详情前入队，完成前缀与入站事实同事务移除 |
 | 邮件发送节奏 | `000059` 由 application/delivery 定义七类间隔，storage/delivery_scheduler 持久化分组发送起点、fence 内串行复核；jobs 消费提交后唤醒并优先领取超价提醒，Admin runtime 编辑、Worker 重启生效 |
+| 邮件维护轮转 | `000060` 由 application/mail maintenance 定义只读候选轮转，storage/mailbox_sweep 持久化 world 内 `(created_at,id)` 游标；只在逐条开始核对前推进，不把批次后缀、时间预算耗尽或观察当作业务完成；discard 另以原投递元数据的持久尝试围栏禁止未知外写重放 |
 | 邮件运行诊断 | application 定义只读观测端口；integrations/jobs 报告真实目标，jobs 持有有界进程快照，HTTP/独立 Admin DTO 显式选择安全数字 MID；无新增迁移或业务写入，重启清空观测 |
 | 装备读取诊断 | application 定义安全原因闭集，storage/mail_poll 通过 `000036` sidecar 和 `000056` 扩展 CHECK 保存首个拒收诊断；诊断不参与命令摘要、完成证明或游标身份 |
 | 旧自寄履约核对 | `000053` 由 application 结算修复端口与 storage legacy repair owner 保存只追加的身份、库存和旧投递关联证明；单笔显式命令处理已核实的 Bot 自持装备，保留原发送证据与命令身份 |
@@ -176,6 +177,9 @@ application 定分页端口，integrations 负责渲染/解析，jobs 负责顺�
 [配置说明](ops/config/README.md)。
 角色/common/secrets 的读取预算与普通文件门禁由 `auction-config::config::reader` 统一拥有；runtime 启动和管理
 读取共用文件检查，管理写入身份与 root 只读部署装配分开，具体权限及大小边界见[配置手册](ops/config/README.md)。
+Admin 的可选 `worker_config_file` 只由 config 读取非敏感 Worker 预算/enabled 及 runtime 同源身份，
+冻结为三个标量的验证上下文；候选验证不另做 I/O。两套部署预检绑定实际 Worker 文件，并核对三角色装备密钥，
+不会要求 Public 持有仅 Admin/Worker 使用的登录或外部凭据密钥。
 
 | 能力 | owner 与保护边界 |
 | --- | --- |
@@ -208,6 +212,11 @@ Public `identity/account/watches/` 拥有“我的”当期标记列表，组合
 同账号/世界的后台重读保留已完成列表与分页，不订阅只改变价格的普通竞价通知；身份变化立即隔离旧结果。
 Public `surface/router.rs` 与 `surface/board/realtime.rs` 拥有浏览器实时启用策略，仅登录后的 `live`/`final` 场次建立连接，
 预览及其他非竞价状态停用，通过既有 60 秒权威场次读取发现开拍。显式“立即刷新”先呈现忙碌反馈再整页重载，自动同步保持原地更新。
+Public `surface/catalog/command_scope.rs` 与 `auction/watches/commands.rs` 在异步展示分支外持有稳定命令，
+GET 错误、阶段和分页不丢失未知意图；实际拍卖查询决定 lot/显式拍卖的实时目标，不由缺省 world 猜测。
+shared `transport/browser_lock.rs` 只提供原生同源独占锁和取消机制；Public `api/identity/session/cookie.rs`
+拥有 Cookie 同步策略，普通 GET 不改 Cookie，所有写 Cookie 操作串行，数据库仍是唯一会话真值。
+Admin API-owned 会话写门禁与认证外壳分离：临时错误保留草稿和未决状态但禁写，明确身份变化才清理。
 
 首次设置 UI 位于 Admin crate，由独立 `auction-setup` 服务提供，不使用正式 Admin 会话或持久化凭据，端口与周排期归
 setup DTO。REST/WebSocket DTO 由 contracts 拥有；通知只提示重读，
@@ -224,6 +233,9 @@ drain，第二次信号或超时强制收口，再完成心跳和有界 tracing 
 | --- | --- |
 | 分体 | systemd 管单角色 PID/重启；`auctionctl deployment start/restart` 严格停机后迁移，按 Worker → Admin → Public 启动，反向停止。已全部运行时 start 只复核 readiness/回执 |
 | 合并 | server bootstrap 管进程树、预检及次序，config 管运行目录；首次明确确认后 storage 在迁移锁内检查专用空库和零其他客户端并初始化。普通启动只验 schema，升级显式 `migrate-managed` |
+
+分体 HTTP 共享运行根由 tmpfiles 独立预建，Worker 的 RuntimeDirectory 只拥有控制 socket 子目录；
+角色重启不得清理其他角色的 HTTP socket 或实例锁，安装和旧模板切换见[部署手册](ops/README.md#systemd-服务与顺序控制)。
 
 分体单角色停止预算 45 秒，总控及合并 unit 均为 155 秒；两种模式不得混用同一数据库，本机文件锁不证明跨主机隔离。备份、恢复、
 重建、v28 接管均为独立受控命令，不进入自动启动；一次性部署码保护独立设置页，只有合并模式的额外确认才授权专用空库

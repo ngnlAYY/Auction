@@ -55,14 +55,16 @@ pub(super) fn plan_ordinary_bid(
     }];
 
     if let Some(active) = active {
-        if amount > active.maximum_amount {
+        // 历史授权仍保留原上限；普通出价触及有效上限时，Slow 也立即同价守位。
+        let maximum = active.maximum_amount.bid_ceiling();
+        if amount > maximum {
             let (after, transition) =
                 exhaust_proxy(active, command_id, ProxyTerminalReason::StrictlyDefeated)?;
             final_state = clear_slow_schedule(final_state)?;
             transitions.push(transition);
             proxy_states.push(after);
             active_proxy_id = None;
-        } else if amount == active.maximum_amount {
+        } else if amount == maximum {
             final_state = clear_slow_schedule(final_state)?;
             let bid_id = *bid_ids
                 .get(1)
@@ -74,8 +76,7 @@ pub(super) fn plan_ordinary_bid(
                 mechanism: BidMechanism::Proxy,
             });
         } else if active.mode == ProxyMode::Fast {
-            let response =
-                proxy_response_amount(rules, final_state, amount, active.maximum_amount)?;
+            let response = proxy_response_amount(rules, final_state, amount, maximum)?;
             let bid_id = *bid_ids
                 .get(1)
                 .ok_or(DomainError::InvalidBidState("快速代理缺少第二条事实标识"))?;

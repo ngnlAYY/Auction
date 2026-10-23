@@ -1,6 +1,6 @@
 //! Admin 用户管理页面。
-//! 页面只维护筛选、表单和安全用户投影；所有改变状态的动作都由后端命令 API 生成
-//! command_id，页面会在同一输入重试时复用它，并使用返回的 state_version。
+//! 页面只维护筛选、表单和安全用户投影；页级命令宿主冻结完整负载和 command_id，
+//! 原样重试并使用返回的 state_version，一次性 Key 由稳定页面接收。
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
@@ -134,9 +134,9 @@ pub(super) fn page() -> Element {
                 button {
                     class: "admin-btn-primary",
                     r#type: "button",
-                    disabled: command_gate.blocked(),
+                    disabled: command_gate.blocked() || pending.contains("create-user"),
                     onclick: move |_| {
-                        if command_gate.blocked() { return; }
+                        if command_gate.blocked() || pending.contains("create-user") { return; }
                         action_feedback.set(None);
                         create_notice.set(None);
                         create_open.set(true);
@@ -149,7 +149,6 @@ pub(super) fn page() -> Element {
             }
             if create_open() {
                 AdminUserCreateForm {
-                    reload_generation,
                     command_gate,
                     on_created: move |created: AdminUserCreated| {
                         create_notice.set(Some(t!(

@@ -9,14 +9,25 @@ use sqlx::Row;
 
 use super::common::storage_error;
 #[cfg(feature = "postgres")]
-use super::lag::list_lag_postgres;
+use super::lag::read_lag_entries_postgres;
 #[cfg(feature = "postgres")]
 pub(super) async fn dashboard_snapshot_postgres(
     store: &super::super::PostgresStore,
 ) -> Result<RealtimeDashboardSnapshot, ApplicationError> {
-    let lag_page = list_lag_postgres(
-        store,
-        RealtimeLagListRequest {
+    // 全量积压、有界明细和失败水位共用只读快照；第 201 条之后的 lag 也必须影响健康。
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|_| storage_error("开启 realtime dashboard 快照失败"))?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| storage_error("设置 realtime dashboard 快照失败"))?;
+    let total_lag = total_lag_postgres(&mut transaction).await?;
+    let lags = read_lag_entries_postgres(
+        &mut transaction,
+        &RealtimeLagListRequest {
             stream_prefix: None,
             consumer_key: None,
             limit: MAX_REALTIME_ADMIN_PAGE_SIZE,
@@ -24,9 +35,9 @@ pub(super) async fn dashboard_snapshot_postgres(
         },
     )
     .await?;
-    let failure = failure_water_postgres(store).await?;
-    let snapshot =
-        RealtimeDashboardSnapshot { observed_at: Utc::now(), lags: lag_page.entries, failure };
+    let failure = failure_water_postgres(&mut transaction).await?;
+    transaction.commit().await.map_err(|_| storage_error("提交 realtime dashboard 快照失败"))?;
+    let snapshot = RealtimeDashboardSnapshot { observed_at: Utc::now(), total_lag, lags, failure };
     if snapshot.validate() {
         Ok(snapshot)
     } else {
@@ -35,8 +46,33 @@ pub(super) async fn dashboard_snapshot_postgres(
 }
 
 #[cfg(feature = "postgres")]
+async fn total_lag_postgres(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<i64, ApplicationError> {
+    // SUM(bigint) 使用 numeric 累加，再严格转换为 i64；溢出或任一水位倒退均失败关闭。
+    let row = sqlx::query(
+        "SELECT COALESCE(SUM(stream.next_sequence - 1 - offset_row.last_sequence), 0)::bigint
+                    AS total_lag,
+                COALESCE(BOOL_AND(offset_row.last_sequence >= 0
+                    AND offset_row.last_sequence < stream.next_sequence), true) AS valid
+         FROM public.realtime_consumer_offsets AS offset_row
+         JOIN public.realtime_streams AS stream ON stream.stream_key = offset_row.stream_key",
+    )
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|_| storage_error("读取 PostgreSQL realtime 全量 lag 失败"))?;
+    if !row
+        .try_get::<bool, _>("valid")
+        .map_err(|_| storage_error("读取 realtime lag 有效性失败"))?
+    {
+        return Err(storage_error("PostgreSQL realtime lag 水位无效"));
+    }
+    row.try_get("total_lag").map_err(|_| storage_error("读取 realtime 全量 lag 数值失败"))
+}
+
+#[cfg(feature = "postgres")]
 async fn failure_water_postgres(
-    store: &super::super::PostgresStore,
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<RealtimeFailureWater, ApplicationError> {
     let row = sqlx::query(
         "SELECT COUNT(*) AS count,
@@ -51,7 +87,7 @@ async fn failure_water_postgres(
          FROM public.realtime_failures
          WHERE resolved_at IS NULL",
     )
-    .fetch_one(store.pool())
+    .fetch_one(&mut **transaction)
     .await
     .map_err(|_| storage_error("读取 PostgreSQL realtime failure 水位失败"))?;
     let water = RealtimeFailureWater {

@@ -1,7 +1,7 @@
 //! 应用配置输入模型、构建中间值和脱敏后的公共配置模型。
 
 use super::super::*;
-use auction_application::EquipmentColorRule;
+use auction_application::{AdminRuntimeMailDeliveryBudget, EquipmentColorRule};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,6 +26,9 @@ pub(super) struct FileConfig<Session> {
     /// 装备分组规则，Worker 投影邮件业务、论坛规则及 bot 内部履约名单。
     #[serde(default)]
     pub(super) runtime_config_file: Option<PathBuf>,
+    /// Admin 可选的 Worker 角色非敏感 TOML 路径；只读取预算与 runtime 引用，不读取其 secrets。
+    #[serde(default)]
+    pub(super) worker_config_file: Option<PathBuf>,
     /// 可选 Worker 区块；省略时并发为 8，轮询为 60 秒。
     #[serde(default)]
     pub(super) worker: WorkerConfig,
@@ -99,6 +102,8 @@ pub(super) struct BuildInput {
     pub(super) session: Option<RoleSessionConfig>,
     pub(super) secrets_path: Option<PathBuf>,
     pub(super) runtime_config_path: Option<PathBuf>,
+    pub(super) worker_config_path: Option<PathBuf>,
+    pub(super) runtime_worker_budget: Option<AdminRuntimeMailDeliveryBudget>,
 }
 
 #[derive(Clone)]
@@ -131,6 +136,10 @@ pub struct AppConfig {
     pub secrets_path: Option<PathBuf>,
     /// Admin 管理 runtime 文件路径；三角色可配置，省略时为 None。
     pub runtime_config_path: Option<PathBuf>,
+    /// Admin 引用的真实 Worker 角色配置路径；其 runtime 必须与 Admin 同源。
+    pub worker_config_path: Option<PathBuf>,
+    /// Admin 启动时冻结的 Worker 部署预算基值；不包含 runtime 覆盖或敏感配置。
+    pub runtime_worker_budget: Option<AdminRuntimeMailDeliveryBudget>,
     /// 已校验并应用到 Admin 进程的 runtime 文档；Public/Worker 只保留窄投影，因此为 None。
     pub admin_runtime: Option<AdminRuntimeDocument>,
     /// 三角色同源的装备规则启动快照；Public 判定稀有/融合，Worker 用于论坛名称标色。
@@ -162,6 +171,7 @@ impl fmt::Debug for AppConfig {
             .field("common_config_path", &self.common_config_path)
             .field("secrets_path", &self.secrets_path)
             .field("runtime_config_path", &self.runtime_config_path)
+            .field("worker_config_path", &self.worker_config_path)
             .field("admin_runtime_configured", &self.admin_runtime.is_some())
             .finish()
     }

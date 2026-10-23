@@ -4,8 +4,9 @@ use super::super::commands::{auction_request_hash, decision, stable_command_id};
 use super::super::pricing::resolve_start_price_plan;
 use super::*;
 use crate::{
-    MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext, MailEquipmentDiagnosticStage,
-    MailEquipmentEvidenceStatus, MailEquipmentObservation, MailEquipmentReadOutcome,
+    AdminIntakeError, MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext,
+    MailEquipmentDiagnosticStage, MailEquipmentEvidenceStatus, MailEquipmentObservation,
+    MailEquipmentReadOutcome,
 };
 
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
@@ -140,18 +141,24 @@ where
             }
             let mut snapshot = match read_result {
                 Ok(snapshot) => snapshot,
-                Err(_) => {
-                    let result = if message.returnable {
-                        self.reject_with_return_and_notice(
-                            &message,
-                            attachment_ids,
-                            MailNotificationTemplate::AuctionEquipmentRejected,
-                            "auction_equipment_rejected",
-                            "auction_equipment_rejected",
-                        )
-                        .await
-                    } else {
-                        Err(MailProcessingError::UnsafeDisposition.into())
+                Err(error) => {
+                    // 只有来源明确无效才安排退回；暂时不可用等错误保留给 Jobs 重试，诊断仍留证。
+                    let result = match error {
+                        ApplicationError::AdminIntake(AdminIntakeError::InvalidSource) => {
+                            if message.returnable {
+                                self.reject_with_return_and_notice(
+                                    &message,
+                                    attachment_ids,
+                                    MailNotificationTemplate::AuctionEquipmentRejected,
+                                    "auction_equipment_rejected",
+                                    "auction_equipment_rejected",
+                                )
+                                .await
+                            } else {
+                                Err(MailProcessingError::UnsafeDisposition.into())
+                            }
+                        }
+                        error => Err(error),
                     };
                     let stage = observation.stage;
                     let category = observation.category;
@@ -231,7 +238,7 @@ where
                 level: snapshot.level,
                 attributes: snapshot.attributes.clone(),
                 source_fingerprint: snapshot.source_fingerprint,
-                collected_at: now,
+                collected_at: snapshot.collected_at,
                 start_price: start_prices[index],
                 key: snapshot.key,
             });
@@ -253,7 +260,7 @@ where
                 received_at: message.received_at,
                 content_digest: message.content_digest,
                 items,
-                now,
+                now: self.clock.now().max(now),
             })
             .await?;
         self.finish_accepted_auction(&message, result, attachment_ids).await

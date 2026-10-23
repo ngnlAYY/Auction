@@ -146,8 +146,9 @@ self-send 对已核实自持的流拍装备追加留存事实；成交自寄明�
 
 ## 部署预检
 
-`deployment-check` 只读三角色及其公共、runtime、敏感文件，核对同一公共文件/数据库目标、listener 冲突、
-Admin/Worker control socket、三组数据密钥和有效拍卖/结算模板与排期；三角色必须引用同一 runtime 文件且装备规则快照一致，
+`deployment-check` 只读三角色及其公共、runtime、敏感文件，核对同一公共文件/数据库目标、listener 冲突，
+三角色的装备数据密钥，以及 Admin/Worker 的 control socket、用户登录/外部凭据密钥和有效拍卖/结算模板与排期；
+Admin 已配置的 `worker_config_file` 必须指向实际 Worker 角色文件。三角色必须引用同一 runtime 文件且装备规则快照一致，
 或全部省略 runtime。默认报告权限警告，生产使用 `--strict-permissions`，配置目录和文件均不得是
 符号链接；命令不连接数据库、迁移、启动服务或访问外部服务。目标比较复用 SQLx 解析并允许不同数据库账号，
 PostgreSQL 显式提供 host、非零 port 和库名，允许受支持的 host/hostaddr/port/dbname 覆盖及 Unix socket，
@@ -270,6 +271,8 @@ realtime 水位，并保存[政策](ops/deploy/retention-policy.v1.json) SHA-256
 `eligibility_authorized=false` 固定不变，不能据此归档或删除。`recovery-preflight` 使用同形参数，只核验目标身份、
 可写主节点、其他连接和空库/迁移条件，`restore_preflight_passed` 不代表 archive 已验证，也不会停止连接或建库。
 两者均创建不可覆盖 0600 证据（示例见[数据库恢复与保留](ops/README.md#数据库恢复与保留)）。
+盘点中的 `migration.current` 复用完整 SQLx 迁移历史校验：版本集合、成功状态及受限兼容 checksum 全部匹配才为真，
+不能仅凭最高版本相同判定完整；该结果仍不授权删除或恢复。
 
 ## 备份与历史接管
 

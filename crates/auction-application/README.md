@@ -61,6 +61,10 @@ Admin 创建与改期统一要求 `preview < open < end`；两小时只是邮箱
 竞价资格最多涉及出价人和当前代理两个用户，使用栈内有序去重集合维持原 UUID 加锁顺序；
 资格冻结至多生成一个前置计划，仍先冻结再应用竞价，不改变锁后计时及事务原子性。
 
+新拍卖的 recovery 快照显式冻结 `cod_return_limit`，创建、自动 bootstrap 和后继共用同一模板序列化；
+旧快照缺字段时仍按三次处理，不回写已有场次或已接受结果。普通出价的事实 ID 数量与领域规划共同使用有效
+`bid_ceiling()`；历史超额 Slow 代理在 1B 同价边界立即守位，不依赖之后的慢速任务纠正领先者。
+
 装备标记由 [ports/public/watch.rs](crates/auction-application/src/ports/public/watch.rs) 与
 [services/public/watch.rs](crates/auction-application/src/services/public/watch.rs) 拥有：稳定命令摘要包含会话用户，
 Serializable 锁内重放/CAS，同值新命令仍推进 fence；超价通知身份按 lot/用户/领先周期确定，冻结正文只含公开标识和
@@ -105,6 +109,8 @@ enqueued 对账只复核收件用户 UUID；原地址取 delivery 快照，改�
 直接依赖解锁前调用资金 owner。B 及实际 C 转原 seller S/受限 T，retained 不自动再投资；Isekai 付款前及 handoff 各自
 重核同 UID 真实库存，现金仍在 Main。[存储原子事务](crates/auction-storage/README.md#内部履约原子事务设计)独立保存
 `bot_internal_v1` 证明，不伪造 Sent。
+外部退款的 prepare/activate（包括旧 prepared）同样借用不可复制的 Armory 联合证据，
+沿准备时的单调截止持有 commit guard 至事务确定结果；无账户 legacy 不再以公开装备详情替代库存证明。
 
 ### 资金对账与用途端口
 
@@ -138,6 +144,8 @@ Bot 卖家款提供独立责任认领：同账号精确 Sent-collected、冻结�
 runtime 邮箱开关分开建模（能力见[能力矩阵](docs/design/architecture.md#部署档位与能力)）。Runtime 文件更新和恢复
 从开始到收口持有 `WorkflowGuard`，文件发布后只能向前恢复账本，结果未知不得恢复旧文件（见
 [运行配置契约](docs/contracts/routes.md#runtime-配置与文件事务)）。
+`AdminRuntimeMailDeliveryBudget` 只携带 Worker 非敏感启用/读取/投递预算；候选校验复用同一谓词，
+不在应用层读取部署文件，也不以新规则改写历史 durable 命令。
 
 装备标色规则的 `categories`、`equipment_types`、`qualities` 保存同一条规则的多选条件：同维任一匹配，
 维度间同时满足；每维空数组沿用旧单值字段，两者均空则不过滤。同维新旧字段同时非空、重复或未规范化条目
@@ -180,6 +188,9 @@ Public lot 查询允许装备分组、等级上限、无等级显示与类型组
 未知论坛写入只能先只读对账，再按持久人工授权重试
 （见[外部写入不变量](docs/contracts/invariants.md#i-08-外部写入发生在本地提交之后)）。审计、邮件、实时和 dashboard
 端口只返回有界安全投影。
+`ForumWriteProgress` 贯通创建、回复和编辑，只按实际写入进度分类本轮超时；历史未知仍保留对账门禁。
+调度端口接收当前可用世界，适配器在 LIMIT 前过滤；稳定帖子身份、原业务负载与可变楼层投影分离，
+详细约束见[论坛不变量](docs/contracts/invariants.md#i-08-外部写入发生在本地提交之后)。
 
 ## 投递、邮件与调度
 
@@ -200,6 +211,8 @@ token/fencing 和数据库实时租约，过期不得复活；release 只接受�
 后续只随已完成前缀的入站事务删除，不把正文或凭据交给队列。
 仅 `Retryable` 错误与超时进入有界重试；原始邮件/响应只进入独立加密诊断，不参与命令摘要、完成证明或 cursor
 （见[邮件诊断](ops/mail/diagnostics.md)）。
+装备来源的临时网络、限流或服务故障保留原可重试错误及诊断任务，不转为永久拒收或安排 Return；
+确定的来源、身份或过滤拒绝继续沿原受控退件路径。来源采集时间与本地业务变更时间分离，外部读取不能决定锁后聚合时间。
 `ports/mail/equipment_diagnostics/reason.rs` 拥有来源解析的九项闭集诊断码，进程内观察使用枚举，
 只有 parse/protocol_drift 组合可投影到原有 sidecar 的 `detail_code`；不接受原始来源错误文本，
 不参与业务决定、命令摘要或历史记录重写。
@@ -213,6 +226,9 @@ token/fencing 和数据库实时租约，过期不得复活；release 只接受�
 通知还要求正文保留唯一原入站关联，Sent 时间落在原 `sending_at` 与未知结果记录时间之间；
 分钟精度不能向下放宽围栏，通用重复模板、关联缺失及精度歧义均保持未知，单条模板重建失败不阻断其他候选。
 compose 的未知 COD 不视为零；Admin delivery offset 上限为 `100_000`，Admin 邮件可选空筛选等同省略。
+`MoogleMailboxSweepCandidate` 即使无法重建发送载荷也保留投递身份；维护在尝试单条前持久推进环形位置，
+不跨过未处理的预算后缀。整轮原 deadline 覆盖数据库、session 与远端；discard 必须先消费持久一次性尝试，
+再在同 session 重读草稿，未知或取消不能自动重复。游标与发送完成证明互不替代。
 
 可配置 MM 正文仍为 14 项，默认使用分段英文；模板只展示已决定的拒收、结算与账户事实，不重新决定退回或金额。
 买家装备 COD 的 `{price_breakdown}` 只消费冻结结算明细，`{amount}` 保持实际 COD；已冻结正文与幂等摘要不因默认文案升级

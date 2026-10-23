@@ -167,8 +167,15 @@ where
     if runtime.world_id != "main" {
         return;
     }
-    match maintenance.sweep(&runtime.world_id).await {
-        Ok(report) => {
+    // 一次维护共用读取预算；等待数据库、凭据排队、列表/详情及 compose/discard 都不得重置截止点。
+    let deadline = tokio::time::Instant::now() + runtime.config.fetch_timeout;
+    let result = tokio::time::timeout_at(
+        deadline,
+        maintenance.sweep(&runtime.world_id, deadline.into_std()),
+    )
+    .await;
+    match result {
+        Ok(Ok(report)) => {
             tracing::info!(
                 world_id = %runtime.world_id,
                 compose_clean = report.compose_clean,
@@ -185,12 +192,24 @@ where
                 "MoogleMail 三页维护完成"
             );
         }
-        Err(error) => {
+        Err(_) => {
+            tracing::warn!(
+                world_id = %runtime.world_id,
+                "MoogleMail 维护总预算耗尽；保留未知外写围栏，继续 Inbox 轮询"
+            );
+        }
+        Ok(Err(_)) if tokio::time::Instant::now() >= deadline => {
+            tracing::warn!(
+                world_id = %runtime.world_id,
+                "MoogleMail 维护总预算耗尽；保留未知外写围栏，继续 Inbox 轮询"
+            );
+        }
+        Ok(Err(error)) => {
             // 维护失败不阻断收件轮询，也不把读到的部分观察当作成功。
             tracing::warn!(
                 error = %error,
                 world_id = %runtime.world_id,
-                "MoogleMail 三页维护失败；下一轮重新读取"
+                "MoogleMail 三页维护失败；保留未知外写围栏，继续 Inbox 轮询"
             );
         }
     }

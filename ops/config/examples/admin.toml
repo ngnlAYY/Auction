@@ -7,6 +7,8 @@ common_file = "common.toml"
 secrets_file = "secrets.toml"
 # 可选：三角色共享的非敏感 runtime TOML 路径；省略时不加载，部署须三角色同时省略。
 runtime_config_file = "runtime/admin.toml"
+# 可选：真实 Worker 角色非敏感 TOML 路径，相对本文件解析；单独接管邮件或 Worker 预算时必填。
+worker_config_file = "worker.toml"
 
 # 可选区块：Admin HTTP 监听器；存在 runtime 文件时由 runtime.listener 覆盖，省略整个区块时使用 TCP 127.0.0.1:8091。
 [listener]

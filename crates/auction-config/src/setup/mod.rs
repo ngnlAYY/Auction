@@ -233,6 +233,7 @@ impl FirstRunConfig {
         admin["http_security"]["trusted_proxy_cidrs"] =
             Value::Array(vec![Value::String("127.0.0.1/32".to_owned())]);
         admin["runtime_config_file"] = Value::String("runtime/admin.toml".to_owned());
+        admin["worker_config_file"] = Value::String("worker.toml".to_owned());
         write_toml(directory.join("admin.toml"), &admin, 0o640)?;
 
         let mut worker = template(include_str!("../../../../ops/config/examples/worker.toml"))?;

@@ -131,33 +131,31 @@ pub(super) async fn read_schema_identity(
 pub(super) async fn read_migration_inventory(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<PostgresMigrationInventory, RetentionInventoryError> {
-    let summary = sqlx::query(
-        "SELECT COUNT(*)::bigint AS migration_count,
-                COALESCE(MAX(version), 0)::bigint AS latest_version,
-                COALESCE(BOOL_AND(success), true) AS all_success
-         FROM public._sqlx_migrations",
-    )
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(|source| query_error("migration_summary", source))?;
-    let latest_description = sqlx::query_scalar::<_, String>(
-        "SELECT description
+    let rows = sqlx::query(
+        "SELECT version, description, success, checksum
          FROM public._sqlx_migrations
-         ORDER BY version DESC
-         LIMIT 1",
+         ORDER BY version",
     )
-    .fetch_optional(&mut **transaction)
+    .fetch_all(&mut **transaction)
     .await
-    .map_err(|source| query_error("migration_description", source))?;
-    let migration_count: i64 = summary
-        .try_get("migration_count")
+    .map_err(|source| query_error("migration_identity", source))?;
+    let migration_count =
+        i64::try_from(rows.len()).map_err(|_| RetentionInventoryError::CountOverflow)?;
+    let latest_version = rows
+        .last()
+        .map_or(Ok(0_i64), |row| row.try_get("version"))
         .map_err(|source| query_error("migration_summary", source))?;
-    let latest_version: i64 = summary
-        .try_get("latest_version")
-        .map_err(|source| query_error("migration_summary", source))?;
-    let all_success: bool = summary
-        .try_get("all_success")
-        .map_err(|source| query_error("migration_summary", source))?;
+    let latest_description = rows
+        .last()
+        .map(|row| row.try_get("description"))
+        .transpose()
+        .map_err(|source| query_error("migration_description", source))?;
+    let mut all_success = true;
+    for row in &rows {
+        all_success &= row
+            .try_get::<bool, _>("success")
+            .map_err(|source| query_error("migration_summary", source))?;
+    }
     let expected_version = crate::database::postgres_expected_migration_version();
     Ok(PostgresMigrationInventory {
         migration_count,
@@ -165,7 +163,8 @@ pub(super) async fn read_migration_inventory(
         latest_description,
         all_success,
         expected_version,
-        current: all_success && latest_version == expected_version,
+        // current 只证明完整迁移身份；盘点结果不构成任何删除授权。
+        current: super::super::migrations::postgres_history_matches(&rows, expected_version),
     })
 }
 

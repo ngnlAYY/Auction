@@ -172,7 +172,7 @@ impl EhentaiClient {
         self
     }
 
-    /// 为一次固定楼层编辑注入独立进度；克隆仍共享限速器和凭据所有权。
+    /// 为一次论坛写入注入独立进度；克隆仍共享连接池、限速器和凭据所有权。
     pub(crate) fn with_write_progress(
         mut self,
         progress: auction_application::ForumWriteProgress,

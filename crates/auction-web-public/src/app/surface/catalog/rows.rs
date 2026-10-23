@@ -34,7 +34,7 @@ pub(crate) fn CatalogParticipant(
     }
 }
 
-/// 竞价历史参与者使用玩家名称；论坛楼层紧贴名称并链接真实帖子，代理只展示统一来源。
+/// 竞价历史明确标记普通/代理来源；论坛楼层紧贴玩家名称并链接真实帖子。
 #[component]
 pub(crate) fn BidHistoryParticipant(
     name: String,
@@ -80,6 +80,11 @@ pub(crate) fn BidHistoryParticipant(
                 span {
                     class: "public-auction-participant-identity__marker public-auction-participant-identity__marker--trailing",
                     {t!("bidlog-source-proxy")}
+                }
+            } else if source.is_none() {
+                span {
+                    class: "public-auction-participant-identity__marker public-auction-participant-identity__marker--trailing",
+                    {t!("bidlog-source-ordinary")}
                 }
             }
         }

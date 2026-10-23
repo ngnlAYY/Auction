@@ -14,8 +14,9 @@ use super::proxy::{
 use super::session_preference::SessionPreference;
 use super::watch_preference::OutbidNotifications;
 use super::{
-    Pager, PublicSessionResource, QueryWriteMode, Route, Time, format_amount,
-    login_href_for_current_location, update_public_query_state, use_public_query_state,
+    Pager, PublicSessionResource, QueryWriteMode, Time, format_amount,
+    login_href_for_current_location, lot_detail_auction_href, update_public_query_state,
+    use_public_query_state,
 };
 
 const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 10;
@@ -282,7 +283,7 @@ fn BidRow(bid: OwnedBid) -> Element {
             aria_describedby: bid_status_id.clone(),
             td { class: "public-account-code", "data-label": t!("account-lot"),
                 Link {
-                    to: Route::LotDetail { lot_code: bid.lot_id.clone() },
+                    to: lot_detail_auction_href(&bid.lot_id, &bid.auction_id),
                     {lot_code_for(&bid.equipment.category, bid.lot_number)}
                 }
                 // 可见领先状态由装备行高亮表达；隐藏文案保留非视觉用户可读取的同等语义。
@@ -355,7 +356,7 @@ fn ProxyRow(proxy: OwnedProxy) -> Element {
         tr {
             td { class: "public-account-code", "data-label": t!("account-lot"),
                 Link {
-                    to: Route::LotDetail { lot_code: proxy.lot_id.clone() },
+                    to: lot_detail_auction_href(&proxy.lot_id, &proxy.auction_id),
                     {lot_code_for(&proxy.equipment.category, proxy.lot_number)}
                 }
             }

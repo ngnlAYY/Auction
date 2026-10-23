@@ -10,6 +10,7 @@ use crate::api::{fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state}
 use super::super::query::{MailQuery, use_mail_query_state};
 use super::super::{AdminActionFeedback, admin_api_error_message};
 use crate::app::surface::pagination::{use_admin_page, use_admin_pagination};
+use crate::app::surface::pending::{PendingCommandPanel, use_pending_commands};
 
 /// 加载并展示指定邮箱的轮询状态和入站邮件摘要。
 pub fn page() -> Element {
@@ -20,6 +21,7 @@ pub fn page() -> Element {
     let mut mailbox_key = use_signal(String::new);
     let mut active_mailbox = use_signal(String::new);
     let mut refresh = use_signal(|| 0_u64);
+    let delivery_commands = use_pending_commands(refresh);
     let mut polling_refresh = use_signal(|| 0_u64);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
     // 重排反馈由页面持有，详情刷新或切换期间不会把成功排队误报为已送达。
@@ -186,6 +188,7 @@ pub fn page() -> Element {
     rsx! {
         section { class: "admin-mail-page", aria_labelledby: "mail-title",
                     h1 { id: "mail-title", {t!("page-mails-title")} }
+                    PendingCommandPanel { owner: delivery_commands }
                     div { class: "admin-mail-filters",
                         label {
                             r#for: "mail-world",

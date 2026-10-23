@@ -34,7 +34,7 @@ pub use errors::{AdminRuntimeCommandError, AdminRuntimeConfigError, AdminRuntime
 pub use operations::{
     AdminRuntimeAlertsConfig, AdminRuntimeDeliveryConfig, AdminRuntimeEconomicsConfig,
     AdminRuntimeForumConfig, AdminRuntimeFulfillmentConfig, AdminRuntimeMailConfig,
-    AdminRuntimeOperationsConfig, AdminRuntimeRecoveryConfig, AdminRuntimeScheduleConfig,
-    AdminRuntimeWorkerConfig,
+    AdminRuntimeMailDeliveryBudget, AdminRuntimeOperationsConfig, AdminRuntimeRecoveryConfig,
+    AdminRuntimeScheduleConfig, AdminRuntimeWorkerConfig,
 };
 pub use ports::{AdminRuntimeCommandStore, AdminRuntimeConfigPort, AdminRuntimeFileStore};

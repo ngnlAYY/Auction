@@ -122,7 +122,7 @@ fn CompensationMovementRow(
                 if let Some((lot_code, Some(lot_id))) = lot {
                     Link {
                         class: "public-compensation-lot-link",
-                        to: Route::LotDetail { lot_code: lot_id },
+                        to: crate::app::surface::lot_detail_world_href(&lot_id, &world_id),
                         "{lot_code}"
                     }
                 } else if let Some((lot_code, None)) = lot {
