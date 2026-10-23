@@ -40,7 +40,7 @@ impl AdminMailPollState {
 }
 
 /// Admin 邮件 dashboard 展示的单个轮询器安全摘要。
-/// 这里刻意不包含 cursor_value；游标属于同步实现细节，不能进入浏览器或管理概览响应。
+/// 概览不包含原始 cursor_value；显式邮箱诊断只能另行投影通过安全校验的数字 MID。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminMailPollerSnapshot {
     pub mailbox_key: String,

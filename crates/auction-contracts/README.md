@@ -27,6 +27,9 @@
 GET/PUT（响应 user_id/channel/version，请求 command_id/channel/expected_version），未知字段一律拒绝。
 两者都不把数据库任务行或凭据发给浏览器。
 
+[dto/admin/mail/progress.rs](crates/auction-contracts/src/contracts/dto/admin/mail/progress.rs) 拥有 A16 显式选择的安全邮件诊断；
+与原始游标、进程内 claim 及数据库模型分离，旧请求不增加字段，字段与闭集见[邮件契约](docs/contracts/routes.md#邮件审查与轮询)。
+
 ## 稳定投影
 
 公开拍品的正式装备、预览摘要与预览详情装备使用必填 `equipment_group` 表达 `rare` / `fusion`；

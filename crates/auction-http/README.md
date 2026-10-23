@@ -51,6 +51,10 @@ GET/PUT：两者复用会话、来源/CSRF、限流、strict JSON、JSON 405 与
 单值及数组中，经领域 `resolve_kind` 为合法有限兼容种类补充独立 `resolved_kinds`（最多 16 项）。
 缓存不持有配置或草稿，不改变既有 `no-store` 响应头、词典 revision、文档指纹或命令重放结果。
 
+[admin/mail/diagnostics.rs](crates/auction-http/src/http/admin/mail/diagnostics.rs) 仅在 A16 的
+`include_diagnostics=true` 查询下组合安全已完成 MID 与可选 Worker 观测。旧查询及暂停/恢复响应保持原字段集合，
+原始/非数字游标不出服务端；Worker 不可用不抹掉数据库侧安全游标，不增加业务写入。
+
 ## 请求边界与能力边界
 
 请求边界统一处理合法 `X-Request-ID`、trace context、安全头、访问日志、panic 与超时；普通请求处理预算 15 秒

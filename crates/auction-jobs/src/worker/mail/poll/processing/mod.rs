@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use auction_application::{
-    Clock, MailMessage, MailPollBatch, MailPollClaim, MailPollCompletion, MailProcessingDecision,
-    MailProcessor,
+    Clock, MailMessage, MailPollBatch, MailPollClaim, MailPollCompletion, MailPollProgressStage,
+    MailProcessingDecision, MailProcessor,
 };
 use auction_observability::WorkerResult;
 use chrono::Duration as ChronoDuration;
@@ -24,9 +24,11 @@ use super::{
 mod business;
 mod diagnostics;
 mod fetch;
+mod progress;
 
 use business::process_with_retry;
 use fetch::fetch_with_retry;
+use progress::MailPollProgressGuard;
 
 /// 在整封邮件处理期间维护数据库租约；续租失败时立即取消本地 future，并由 fence 阻止陈旧提交。
 pub(super) async fn process_claim<C>(
@@ -60,6 +62,11 @@ where
     let clock = Arc::clone(&context.clock);
     let renew_timeout = context.config.renew_interval;
     let mut renewal_claim = claim.clone();
+    let mut progress = MailPollProgressGuard::new(
+        context.progress_observer.clone(),
+        claim.clone(),
+        &context.world_id,
+    );
     let work = process_claim_inner(context, claim);
     tokio::pin!(work);
 
@@ -80,7 +87,10 @@ where
                     return std::task::Poll::Pending;
                 }
                 work.as_mut().poll(context)
-            }) => return result,
+            }) => {
+                progress.finish(&result);
+                return result;
+            },
             () = &mut renewal_sleep => {
                 let renewal_started = tokio::time::Instant::now();
                 if renewal_started >= lease_deadline {
@@ -152,6 +162,7 @@ where
         gateway,
         processor,
         diagnostics,
+        progress_observer,
         clock,
         world_id,
         mailbox_key: _,
@@ -250,6 +261,13 @@ where
     let mut suffix_failure = None;
     let mut last_completed_external_mail_id = None;
     for mut message in page.messages {
+        if let Some(observer) = &progress_observer {
+            observer.update(
+                &claim,
+                MailPollProgressStage::Processing,
+                Some(&message.external_mail_id),
+            );
+        }
         let Some(lookup_remaining) =
             batch_deadline.checked_duration_since(std::time::Instant::now())
         else {
@@ -405,6 +423,9 @@ where
         next_poll_at,
         items,
     };
+    if let Some(observer) = &progress_observer {
+        observer.update(&claim, MailPollProgressStage::Committing, None);
+    }
     if let Err(error) = store.commit(claim.clone(), batch).await {
         tracing::error!(
             error = %error,

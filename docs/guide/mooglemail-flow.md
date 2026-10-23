@@ -46,15 +46,20 @@ flowchart TD
   B --> C[读取 inbox 分页<br/>maximum_pages / batch_size]
   C --> D{游标之后的新邮件}
   D -- 无 --> E[提交 next_poll_at]
-  D -- 有 --> F[按 sender allowlist 过滤<br/>disabled 表示全部允许]
+  D -- 有 --> F[持久登记 MID 与列表快照]
   F --> G[读取详情<br/>parse_detail]
-  G --> H[幂等入库 inbound_mail]
+  G --> K{详情完整发件人通过 allowlist?<br/>disabled 表示全部允许}
+  K -- 否 --> L[保留待读项并失败关闭<br/>不执行业务、不推进游标]
+  K -- 是 --> H[幂等入库 inbound_mail]
   H --> I[mail_commands 执行<br/>同一事务]
   I --> J[推进 cursor_value 与 last_poll_at]
 ```
 
 - 游标、失败次数、暂停标记都在 `mail_poll_state`，Worker 重启不丢进度。
 - 详情解析失败按分类退避，不会把未知邮件当作成功。
+- 列表发件人可能被截断，仅保留在恢复快照中；入站、注册/重绑、回复地址和 allowlist 全部使用详情完整发件人。
+- `batch_size` 限制详情候选总数，不再按列表名称预过滤。不在白名单的详情保留待核对并阻断后续处理，
+  不领取、退回或回复；调整白名单后仍按原 MID 恢复，不修改旧摘要或手工跳游标。
 - 收件轮询与三页维护共用同一排他凭据会话，维护失败不影响下一轮收件。
 
 ## 3. 收件分流

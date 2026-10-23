@@ -32,6 +32,10 @@ impl WorkerControlClient {
         self.request(WORKER_CONTROL_STATUS_PATH, None::<()>, "ok").await
     }
 
+    async fn fetch_mail_progress(&self) -> Result<MailProgressResult, WorkerControlClientError> {
+        self.request(WORKER_CONTROL_MAIL_PROGRESS_PATH, None::<()>, "ok").await
+    }
+
     /// 触发 Worker 唤醒所有已装配的 MoogleMail poller。
     pub async fn trigger_poll(
         &self,
@@ -106,6 +110,33 @@ impl WorkerControlClient {
 }
 
 impl WorkerControlPort for WorkerControlClient {
+    fn mail_progress(&self) -> ApplicationFuture<'_, WorkerControlMailProgress> {
+        Box::pin(async move {
+            match self.fetch_mail_progress().await {
+                Ok(result) => {
+                    let snapshot = WorkerControlMailProgress {
+                        condition: WorkerControlCondition::Available,
+                        observed_at: Some(result.observed_at),
+                        pollers: result.pollers,
+                    };
+                    if snapshot.validate() {
+                        Ok(snapshot)
+                    } else {
+                        Ok(WorkerControlMailProgress::unavailable(
+                            WorkerControlCondition::Incompatible,
+                        ))
+                    }
+                }
+                Err(error) => Ok(WorkerControlMailProgress::unavailable(match error {
+                    WorkerControlClientError::Unavailable => WorkerControlCondition::Unavailable,
+                    WorkerControlClientError::Timeout => WorkerControlCondition::Timeout,
+                    WorkerControlClientError::Incompatible => WorkerControlCondition::Incompatible,
+                    WorkerControlClientError::Rejected => WorkerControlCondition::Rejected,
+                })),
+            }
+        })
+    }
+
     fn status(&self) -> ApplicationFuture<'_, WorkerControlStatus> {
         Box::pin(async move {
             match self.fetch_status().await {

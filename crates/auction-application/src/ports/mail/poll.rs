@@ -9,6 +9,13 @@ use uuid::Uuid;
 
 use super::{AdminMailPollState, ApplicationFuture, MailDisplaySnapshot};
 
+#[path = "poll/progress.rs"]
+mod progress;
+pub use progress::{
+    MAX_MAIL_PROGRESS_POLLERS, MailPollProgressFailure, MailPollProgressObserver,
+    MailPollProgressOutcome, MailPollProgressSnapshot, MailPollProgressStage, is_safe_mail_poll_id,
+};
+
 #[path = "poll/reads.rs"]
 mod reads;
 pub use reads::{MailPollReadJournal, MailPollReadSummary};

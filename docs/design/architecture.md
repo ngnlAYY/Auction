@@ -89,6 +89,7 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 | Bot 现金与内部履约 | `000047` 真实资产及全部责任对账、来源唯一资金账本/预留、统一现金发送门；`000048` 独立内部证明与原义务依赖原子推进；初始自有资金为 0，未对账及未知资金不开放 |
 | COD 退件去重 | `000051` 由 recovery owner 追加退件消费事实，与退回计数、回收动作同事务；每封退件派生独立且可重放的投递命令 |
 | 邮件详情恢复 | `000052` 由 mail-poll owner 持久保存待读邮件摘要；应用层提供窄日志端口，集成层读取详情前入队，完成前缀与入站事实同事务移除 |
+| 邮件运行诊断 | application 定义只读观测端口；integrations/jobs 报告真实目标，jobs 持有有界进程快照，HTTP/独立 Admin DTO 显式选择安全数字 MID；无新增迁移或业务写入，重启清空观测 |
 | 装备读取诊断 | application 定义安全原因闭集，storage/mail_poll 通过 `000036` sidecar 和 `000056` 扩展 CHECK 保存首个拒收诊断；诊断不参与命令摘要、完成证明或游标身份 |
 | 旧自寄履约核对 | `000053` 由 application 结算修复端口与 storage legacy repair owner 保存只追加的身份、库存和旧投递关联证明；单笔显式命令处理已核实的 Bot 自持装备，保留原发送证据与命令身份 |
 | 旧实收责任接管 | `000054` 由 application funding 端口与 storage settlement funding owner 保存逐笔接管事实；同账号精确 Sent-collected 证明将已隔离责任转入对应标的用途，卖家留存不重复发行旧收款或增加自有额度 |
@@ -136,7 +137,8 @@ Worker 只负责持久调度、重试与执行时机；due、游标、attempt、
 完成 fence 同事务提交，`scheduled_rounds.schedule_snapshot` 固定自动排期的本地时区来源。关闭世界阻止新场次、不取消
 已有履约/恢复，drain 后各 owner 停止领取。实际取得的邮件或论坛 credential owner 永久失效时，装配根触发有界 drain 并
 非零退出，由进程管理器重建。外部副作用只在本地提交后执行：入站详情 GET 前按有效租约保存邮件摘要，
-崩溃后优先按持久 MID 恢复；按连续前缀提交完成证明、cursor 并移除对应待读项，
+崩溃后优先按持久 MID 恢复；完整发件人及 allowlist 判定只采信详情，列表显示名仅保留快照兼容。
+详情未获白名单授权时保留待读项并阻断后续处理；按连续前缀提交完成证明、cursor 并移除对应待读项，
 未知写入先人工对账，不能凭本地 UUID 或成功页面重发，流拍/撤拍逐件 Send 原装备，不能 Return 已取件原邮件。
 
 ComposeSend 先取 Sent baseline，再接受新增、唯一且精确匹配的 MID，Take/Return 各有独立动作证明；每种 Cookie 只有

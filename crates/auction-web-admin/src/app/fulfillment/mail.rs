@@ -12,6 +12,8 @@ mod helpers;
 mod messages;
 #[path = "mail/page.rs"]
 mod page;
+#[path = "mail/progress.rs"]
+mod progress;
 #[path = "mail/table.rs"]
 mod table;
 

@@ -14,6 +14,9 @@ pub(crate) use auction_contracts::{
     AdminMailIntakeSummaryResponse as AdminMailIntake,
     AdminMailPollingResponse as AdminMailPolling,
 };
+#[path = "mail/diagnostics.rs"]
+mod diagnostics;
+
 use gloo_net::http::Request;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -45,6 +48,8 @@ struct StrictMailPolling {
     paused: bool,
     state_version: i64,
     updated_at: String,
+    #[serde(default)]
+    diagnostics: Option<auction_contracts::AdminMailPollingDiagnosticsResponse>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,14 +104,16 @@ pub(crate) struct AdminMailIntakeQuery {
 
 pub(crate) async fn fetch_mail_state(mailbox_key: String) -> Result<AdminMailPolling, String> {
     let encoded = encode_query(&mailbox_key);
-    let response = send_get(&format!("/api/v1/admin/mail?mailbox_key={encoded}")).await?;
+    let response =
+        send_get(&format!("/api/v1/admin/mail?mailbox_key={encoded}&include_diagnostics=true"))
+            .await?;
     if !response.ok() {
         return Err(response_error(response).await);
     }
     let payload: ApiResponse<StrictMailState> =
         response.json().await.map_err(invalid_response_error)?;
     let polling = decode_mail_state(payload.data).map_err(invalid_response_error)?;
-    if polling.mailbox_key != mailbox_key {
+    if polling.mailbox_key != mailbox_key || polling.diagnostics.is_none() {
         return Err("invalid_response".to_owned());
     }
     Ok(polling)
@@ -248,6 +255,10 @@ fn decode_mail_state(data: StrictMailState) -> Result<AdminMailPolling, &'static
         || polling.consecutive_failures < 0
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&polling.state_version)
         || !valid_admin_time(&polling.updated_at)
+        || polling
+            .diagnostics
+            .as_ref()
+            .is_some_and(|value| !diagnostics::valid_diagnostics(value, &polling.mailbox_key))
     {
         return Err("mail_polling");
     }
@@ -259,6 +270,7 @@ fn decode_mail_state(data: StrictMailState) -> Result<AdminMailPolling, &'static
         paused: polling.paused,
         state_version: polling.state_version,
         updated_at: polling.updated_at,
+        diagnostics: polling.diagnostics,
     })
 }
 

@@ -216,7 +216,11 @@ fn ScopedCatalogActions(
                     }
                 }
             } else if can_bid && session_ready && !limit_reached {
-                Link { to: login_href_for_current_location(), {t!("catalog-login-to-bid")} }
+                Link {
+                    class: "public-auction-catalog__login",
+                    to: login_href_for_current_location(),
+                    {t!("catalog-login-to-bid")}
+                }
             } else if show_proxy_summary {
                 button {
                     r#type: "button",

@@ -17,9 +17,10 @@ use std::{
     fs::{File, OpenOptions},
 };
 
+use super::MailPollProgressTracker;
 use auction_application::{
-    ApplicationFuture, WorkerControlCondition, WorkerControlPort, WorkerControlStatus,
-    WorkerControlTrigger,
+    ApplicationFuture, MailPollProgressSnapshot, WorkerControlCondition, WorkerControlMailProgress,
+    WorkerControlPort, WorkerControlStatus, WorkerControlTrigger,
 };
 use auction_observability::{METRICS_ROUTE, MetricsError, ProcessMetrics};
 use axum::{
@@ -57,6 +58,8 @@ pub const WORKER_CONTROL_PROTOCOL_VERSION: &str = "v1";
 pub const WORKER_CONTROL_LIVE_PATH: &str = "/v1/health/live";
 pub const WORKER_CONTROL_READY_PATH: &str = "/v1/health/ready";
 pub const WORKER_CONTROL_STATUS_PATH: &str = "/v1/status";
+/// 只读的进程内邮件观测，不包含原始游标或 claim 凭据。
+pub const WORKER_CONTROL_MAIL_PROGRESS_PATH: &str = "/v1/mail/progress";
 /// Worker control MoogleMail 唤醒路径。
 pub const WORKER_CONTROL_TRIGGER_POLL_PATH: &str = "/v1/mail/polls:trigger";
 /// Worker control peer-authenticated Prometheus scrape path。
@@ -177,6 +180,7 @@ impl WorkerControlServerConfig {
 #[derive(Clone)]
 pub struct WorkerControlHandle {
     inner: Arc<WorkerControlInner>,
+    mail_progress: MailPollProgressTracker,
 }
 
 struct WorkerControlInner {
@@ -246,7 +250,14 @@ impl WorkerControlHandle {
                     ),
                 }),
             }),
+            mail_progress: MailPollProgressTracker::default(),
         }
+    }
+
+    /// 在克隆控制句柄前注入同一份邮件观测 owner；不改变任何就绪或调度事实。
+    pub fn with_mail_progress(mut self, progress: MailPollProgressTracker) -> Self {
+        self.mail_progress = progress;
+        self
     }
 
     /// 标记 Worker 已经可以接受控制请求。

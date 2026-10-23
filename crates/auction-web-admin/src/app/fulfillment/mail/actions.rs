@@ -8,6 +8,7 @@ use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
 use crate::app::surface::{run_admin_feedback_action, stable_command_id};
 
 use super::super::{AdminActionFeedback, format_admin_time};
+use super::progress::MailPollingProgress;
 
 #[component]
 pub(super) fn MailTriggerButton(
@@ -77,6 +78,7 @@ pub(super) fn MailPollingCard(
                     dd { {format_admin_time(&polling.next_poll_at)} }
                 }
             }
+            MailPollingProgress { diagnostics: polling.diagnostics.clone() }
             button {
                 r#type: "button",
                 disabled: busy(),

@@ -6,6 +6,8 @@
 mod commands;
 #[path = "common.rs"]
 mod common;
+#[path = "diagnostics.rs"]
+mod diagnostics;
 #[path = "intake.rs"]
 mod intake;
 #[path = "state.rs"]

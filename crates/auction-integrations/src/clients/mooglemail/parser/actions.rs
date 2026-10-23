@@ -1,7 +1,7 @@
 use super::*;
 
 impl MoogleMailParser {
-    /// 严格解析单封详情，并以收件箱摘要校验稳定身份。
+    /// 严格解析单封详情；摘要只提供 MID、world 与收件时间，完整发件人只采信详情。
     pub fn parse_detail(
         &self,
         document: &[u8],
@@ -37,10 +37,8 @@ impl MoogleMailParser {
         {
             return Err(detail_error(summary.world, MoogleMailErrorCategory::ProtocolDrift));
         }
+        // 列表显示名可能被服务端截断，不能据此拒绝详情中的完整发件人或重建业务身份。
         let fields = parse_detail_fields(forms[0], summary.world)?;
-        if !fields.sender.eq_ignore_ascii_case(&summary.sender) {
-            return Err(detail_error(summary.world, MoogleMailErrorCategory::IdentityMismatch));
-        }
         let textarea_selector = selector("textarea", MoogleMailOperation::Detail, summary.world)?;
         let textareas = forms[0].select(&textarea_selector).collect::<Vec<_>>();
         if textareas.len() != 1 {

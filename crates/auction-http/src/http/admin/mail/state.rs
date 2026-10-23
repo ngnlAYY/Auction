@@ -27,8 +27,16 @@ pub(crate) async fn state(
     if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    let query = match parse_query(&uri, &["mailbox_key"]) {
+    let query = match parse_query(&uri, &["mailbox_key", "include_diagnostics"]) {
         Ok(query) if query.get("mailbox_key").is_some_and(|value| !value.is_empty()) => query,
+        _ => {
+            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
+                .into_response();
+        }
+    };
+    let include_diagnostics = match query.get("include_diagnostics").map(String::as_str) {
+        None => false,
+        Some("true") => true,
         _ => {
             return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
                 .into_response();
@@ -50,13 +58,17 @@ pub(crate) async fn state(
     if !result.validate() {
         return internal_error();
     }
+    let diagnostics = if include_diagnostics {
+        Some(super::diagnostics::read_polling_diagnostics(&state, &result).await)
+    } else {
+        None
+    };
+    let mut polling = map_poll_state(result);
+    polling.diagnostics = diagnostics;
     (
         StatusCode::OK,
         no_store_headers(),
-        Json(ApiResponse::ok(
-            "邮件轮询状态已加载",
-            AdminMailStateResponse { polling: map_poll_state(result) },
-        )),
+        Json(ApiResponse::ok("邮件轮询状态已加载", AdminMailStateResponse { polling })),
     )
         .into_response()
 }
@@ -71,5 +83,6 @@ pub(crate) fn map_poll_state(state: AdminMailPollState) -> AdminMailPollingRespo
         paused: state.paused,
         state_version: state.state_version,
         updated_at: timestamp(state.updated_at),
+        diagnostics: None,
     }
 }

@@ -4,6 +4,8 @@
 //! 游标或入站事务。
 
 use super::ApplicationFuture;
+use crate::{MAX_MAIL_PROGRESS_POLLERS, MailPollProgressSnapshot};
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 /// Worker control client 读取失败时向 Admin 暴露的有限分类。
@@ -65,9 +67,47 @@ pub struct WorkerControlTrigger {
     pub pollers: i64,
 }
 
+/// Worker 邮件进度的有界读取结果；不可用时不返回旧观测。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerControlMailProgress {
+    pub condition: WorkerControlCondition,
+    pub observed_at: Option<DateTime<Utc>>,
+    pub pollers: Vec<MailPollProgressSnapshot>,
+}
+
+impl WorkerControlMailProgress {
+    /// 明确标识诊断不可用，不能把空集合解释为所有邮箱空闲。
+    pub fn unavailable(condition: WorkerControlCondition) -> Self {
+        Self { condition, observed_at: None, pollers: Vec::new() }
+    }
+
+    /// 校验可选能力与快照的字段关联、唯一性和数量边界。
+    pub fn validate(&self) -> bool {
+        if self.condition != WorkerControlCondition::Available {
+            return self.observed_at.is_none() && self.pollers.is_empty();
+        }
+        let Some(observed_at) = self.observed_at else { return false };
+        observed_at.timestamp_nanos_opt().is_some()
+            && self.pollers.len() <= MAX_MAIL_PROGRESS_POLLERS
+            && self.pollers.iter().enumerate().all(|(index, poller)| {
+                poller.validate(observed_at)
+                    && self.pollers[..index]
+                        .iter()
+                        .all(|previous| previous.mailbox_key != poller.mailbox_key)
+            })
+    }
+}
+
 /// Admin dashboard 读取 Worker control 的窄端口。
 pub trait WorkerControlPort: Send + Sync {
     fn status(&self) -> ApplicationFuture<'_, WorkerControlStatus>;
+
+    /// 读取可选的邮件运行观测；旧适配器明确不可用，不假装空闲。
+    fn mail_progress(&self) -> ApplicationFuture<'_, WorkerControlMailProgress> {
+        Box::pin(async {
+            Ok(WorkerControlMailProgress::unavailable(WorkerControlCondition::Unavailable))
+        })
+    }
 
     fn trigger_poll(&self, command_id: Uuid) -> ApplicationFuture<'_, WorkerControlTrigger>;
 }

@@ -2,6 +2,9 @@
 
 use super::*;
 
+mod progress;
+pub use progress::*;
+
 /// Admin 邮件轮询状态安全响应；不包含外部 Cookie 或原始游标。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -13,6 +16,9 @@ pub struct AdminMailPollingResponse {
     pub paused: bool,
     pub state_version: i64,
     pub updated_at: String,
+    /// 仅显式选择诊断时出现；旧响应和暂停/恢复命令保持原字段集合。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<AdminMailPollingDiagnosticsResponse>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
