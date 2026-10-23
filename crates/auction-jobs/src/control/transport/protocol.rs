@@ -1,6 +1,7 @@
 //! Worker control 的 DTO、响应编码与请求头校验。
 
 use super::*;
+use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -22,6 +23,14 @@ pub struct StatusResult {
     pub ready: bool,
     pub state: String,
     pub version: String,
+}
+
+/// 独立只读路径的进度响应，避免改变旧 status 的闭集。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct MailProgressResult {
+    pub(super) observed_at: DateTime<Utc>,
+    pub(super) pollers: Vec<MailPollProgressSnapshot>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

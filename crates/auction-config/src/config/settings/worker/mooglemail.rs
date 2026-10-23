@@ -50,9 +50,10 @@ pub struct MoogleMailWorkerConfig {
     /// 内联与持久化指数退避的基础秒数。
     pub retry_base_seconds: u64,
     pub retry_maximum_seconds: u64,
-    /// 发件人 allowlist；未显式关闭 allowlist 时只读取其中的详情。
+    /// 发件人 allowlist；仅与详情完整名称比较，不匹配时保留待读项并失败关闭。
+    /// 留空且未关闭 allowlist 时拒绝读取详情，等待配置修正。
     pub sender_allowlist: Vec<String>,
-    /// 明确关闭发件人 allowlist 后才读取所有发件人详情。
+    /// 明确关闭发件人 allowlist 后才接受所有详情完整发件人。
     pub sender_allowlist_disabled: bool,
     /// 额外启用的 MoogleMail 世界；每个条目拥有独立邮箱游标和发件人策略。
     /// 顶层字段继续描述第一个世界，以保持现有单世界配置可用；新增世界通过

@@ -23,6 +23,7 @@ pub(super) async fn configure_mail_poll(
     config: &AppConfig,
     store: Arc<DatabaseStore>,
     profile_reader: Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
+    progress_observer: Arc<dyn auction_application::MailPollProgressObserver>,
 ) -> anyhow::Result<(
     Vec<MailPollRuntime>,
     Option<Arc<dyn DeliveryTransport>>,
@@ -90,8 +91,11 @@ pub(super) async fn configure_mail_poll(
             credentials,
             profile_reader,
             processor,
-            Arc::clone(&store),
-            schedule,
+            runtime::MailPollRuntimePorts {
+                store: Arc::clone(&store),
+                schedule,
+                progress_observer,
+            },
         )
         .await?;
         let mut runtimes = runtimes;

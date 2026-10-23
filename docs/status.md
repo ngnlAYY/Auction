@@ -35,6 +35,120 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-23 Public 列设置密度与匿名出价入口（静态检查、本地资源更新）
+
+owner 为 `auction-web-public::surface::catalog::{columns,actions}` 及本端样式。显示列内联面板将恢复全部与关闭移至标题行，
+内边距改为 8px，网格弹性基准由 12rem 收至 8rem，行/列间距为 4px/8px；保留原生复选框与 44px 点击区域，
+不改变列权重、至少一列约束、偏好键或命令宿主。匿名“登录后出价”增加独立 BEM 类，与“登录后标记”共用按钮视觉、
+可见焦点及触控尺寸，仍使用原登录导航和安全返回地址；无 HTTP/JSON、权限、金额或业务命令变化，无新依赖或译文。
+
+格式、Public WASM check、包级全目标 Clippy（`-D warnings`）、repository/layout/config/i18n 和 diff 静态门禁通过；
+Public Web bundle 与 `postgres,web-embed` dev 宿主构建通过。Rust LSP 未取得答复；CSS 原有 important/vertical-align 提示保留，
+未计 LSP 全绿，未扩改无关样式。未新增或运行行为测试、浏览器、登录或竞价流程。
+
+仅更新本地 Public 资源并优雅重启，Admin PID `3401418` 保持不变。首轮派生后身份登记失败，核验同一 Public PID 后恢复状态，
+未重复派生；后续使用有界 `/proc` 身份等待。01:17:15 UTC 最终 Public PID `3446240`，readiness 200，
+Worker 未运行、active CK 和未暂停邮箱均为零；未访问或更新云端。最终六文件 Public payload SHA-256 为
+`d8d5dff885f6bb3a746f7c95b4cf986df20a390c6d341c1a31776a01275252d2`。
+本地 `state/PUBLIC-COLUMNS-DENSITY-20261023.json` 保留首轮记录，`state/PUBLIC-UI-20261023.json` 记录最终资源和进程身份；
+dev 原生二进制哈希未变化，资源来自本地源码构建目录，不作为正式发布制品或浏览器验收。
+
+### 2026-10-23 线上业务的本地隔离副本（授权准备与启动就绪）
+
+用户确认更新现有本地 `127.0.0.1:55432/auction_test`、隔离认证，并仅保留 Public/Admin 局域网网页。
+owner 为 `auctionctl` 备份/重建/恢复/迁移、`auction-integrations::cryptobox` 装备转封及两 HTTP 装配根；
+未修改线上数据库或停止其服务；系统 5432 仅在定位阶段于维护库只读列库，全部覆盖与迁移只作用于 55432 目标。
+流程见[隔离手册](ops/deploy/RECOVERY.md#授权的本地业务快照隔离)。
+
+00:19:52 UTC 取得线上 schema 56 的只读一致性快照；84 表计数与 pg_dump 共用导出 snapshot，逐项 checksum 匹配源码。
+archive SHA-256 为 `deb6f2319c7f293c3ebf5e8638090d9c81b4f22f992f78c0adfa267ef3833759`。
+本地三角色停止后，原 schema 57 库备份通过官方离线 verify；沿用精确目标、维护凭据、零连接与空库门禁重建恢复，
+恢复后的 84 表逐表行数一致，再显式前向迁移至 57。业务数据保留用户 62、拍卖 3、装备/标的 76、入站邮件 89、投递 154。
+
+仅在本地原子禁用两条 active CK、撤销 160 条 Public/1 条 Admin 会话、暂停邮箱并保持游标；
+76 条装备信封经正式 opener/sealer 校验原 AAD/指纹、转封到原本地密钥并重新认证。
+线上装备数据密钥只在短命进程内使用，不保存；不复制 CK 解密密钥或线上敏感 TOML，本地三份敏感 TOML 逐字节保持不变。
+追加审计 `81771cfc-652c-48ee-90e8-dd79ed3a7fe6`，未更改命令、历史审计、金额或投递结果。
+
+双端 Web payload、Public/Admin `postgres,web-embed` dev 制品及 auctionctl 构建通过；只更新本地程序，未构建正式发布包。
+00:40:37 UTC 两端 readiness 均 200，active CK、未撤销导入会话、未暂停邮箱均为零，Worker 进程不存在；
+本地启动脚本只启动 Public/Admin，并拒绝开启外部集成、配置 CK/.keyenv 或改变隔离数据库目标。
+正常 HTTP 启动仅另增加进程心跳和本地 realtime 位点元数据；未新增或运行测试套件、浏览器、业务流程或真实外部调用。
+
+证据位于私有 `local-test/backups/cloud-sync-20261023T001327Z/`，含原本地备份、源 archive/manifest、
+rebuild/restore、隔离计划/回执及最终后验；`local-test/state/CLOUD-REFRESH-20261023.json` 和
+`LOCAL-BUILD-20261023.json` 分别记录就绪/数据与二进制/Web 身份。旧本地验证和原发布回执保留，不改写历史结论。
+
+### 2026-10-22 Admin 入站处理定位（源码静态验证）
+
+owner 为 `auction-application` 观测端口、`auction-integrations` 实际详情目标、`auction-jobs` 有界进程快照与取消守卫，
+Worker 装配同一 tracker，`auction-http/contracts` 提供显式诊断投影，`auction-web-admin` 负责独立状态卡、严格解码及五语。
+`/mails` 加载/刷新指定邮箱时显示安全已完成 MID、真实当前阶段/MID、最近失败阶段/MID/时间及观测时间；
+完成、失败和取消收口当前目标，不从待读队首猜测。Worker 不可用、尚未观测和空闲分别呈现，进程重启清空最近失败观测。
+
+A16 仅在 `include_diagnostics=true` 增加可选 `polling.diagnostics`，旧查询及暂停/恢复的字段集合保持兼容；
+同一 peer-authenticated control 增加只读 `/v1/mail/progress`，旧 status 闭集不变。仅投影安全数字 MID，
+不导出原始 cursor、claim token、发件人、正文或凭据；不新增业务写入、配置、依赖或迁移。
+协议见[邮件契约](docs/contracts/routes.md#邮件审查与轮询)，操作见[入站观测](ops/mail/diagnostics.md#admin-入站处理观测)。
+
+完整 `just verify` 退出 0，workspace/all-targets/all-features check 与 Clippy（`-D warnings`）、
+`repository/layout/config/i18n` 策略门禁、格式和 `git diff --check` 通过。主动 LSP 对 35 个变更 Rust 文件未取得服务器答复，
+未计为通过。未新增、修改或执行行为测试，未做浏览器验证、构建发布制品或部署云端。
+
+### 2026-10-22 MoogleMail 完整发件人与单封临时跳过（静态检查、限定线上维护）
+
+本条时间采用 UTC。源码 owner 为 `auction-integrations` 的 Inbox parser/gateway；`auction-application` 仅补充
+待读快照端口说明，`auction-config` 同步白名单注释与示例。入站、注册/重绑及回复身份只采信详情完整发件人，
+列表显示名只保留恢复快照兼容，不再与详情比对或用于 allowlist。候选窗口仍有界，详情未获白名单授权时保留待读项、
+失败关闭，不领取、退回、回复或越过；未关闭白名单且名单为空时拒绝详情读取。MID/world/时间、详情结构与资产校验、
+租约/完成前缀及命令账本保持原义；无新增 HTTP/JSON 字段、迁移或 Sent 成功证明放宽。
+
+Rust 1.99.0 下完整 `just verify` 退出 0，覆盖策略、格式、全部已有目标、独立 PostgreSQL/Redis feature、
+全特性 Clippy（`-D warnings`）及双端 WASM；`cargo fmt --all -- --check`、`git diff --check` 通过。
+主动 LSP 探测四个 Rust 文件均未取得服务端答复，未计为通过。未新增、修改或执行行为测试、浏览器或真实 MM 验证；
+源码修复未构建发布制品、未上线。
+
+授权只读排查确认主邮箱 MID `3120535` 的持久列表显示名为 15 字节、认证详情完整名为 18 字节，
+旧 parser/gateway 的完整相等比较导致重复失败。详情证据 `2fa5ceb9-a231-4685-bb34-5d2087223134`
+确认为 `register`，`attach_count=0`、`attach_cod=0`、`mail_state=2` 且无附件列表；离线解密临时明文已清理。
+用户随后明确确认仅跳过云端 `auction_test / mooglemail:main / 3120535`，并知悉不自动注册或回复。
+
+16:31:40 的单次维护先保存并核验原状态、目标待读记录和计划；持同一 Serializable 事务的邮箱/队列行锁，
+确认无 claim、窗口仅有待读序号 17、尚无入站事实后，原子将 cursor `3120513 → 3120535`、版本 `5382 → 5383`，
+仅移除目标待读项并追加 `mail.operator_skip_unprocessed` 审计。稳定 command/audit ID 为
+`e247e7e4-a6ab-48a2-b7fb-6ac740ce27eb`；没有伪造处理成功或创建 delivery，没有直接 MM 写入、重发或重启。
+原失败历史、调度及其他邮箱保持不变。行级备份 SHA-256 为
+`bc41da40d19c648cd3ff5a8daf14c2a11f9e963b9a3d1dded58e00e9ba5de4ef`；
+云端私有 `mail-skip-3120535-20261022T163127Z-e247e7e4/` 保留原记录、计划、回执和加密原证据，文件均为 `0600`。
+脱敏回执及本次一次性脚本位于 `target/operations-evidence/mm-skip-20261022/`，回执 SHA-256 为
+`400d6626ae3892f531fdc2460ce3967a599f416c84d677099dccc8d8eaf66f39`；
+[运维边界](ops/mail/diagnostics.md#显式单封跳过的运维边界)不授权未来自动跳过其他邮件。
+
+16:35 的正常轮询转而在同一发件人的重发注册 MID `3120551` 失败；认证证据
+`eedd3dd8-392c-4d05-b33d-949435b41921` 同样为零资产。该项序号 21 位于六条待读记录中，前面仍有三封其他邮件，
+因此用户再次明确确认只隔离这封、保持 cursor `3120535` 及其他五条记录。首计划
+`ac2b9b3f-791c-4fd1-b6c6-bfde8aa789f7` 因预检后邮箱快照变化在 mutation 前中止，未写入；确认该审计 ID 不存在后，
+新计划改为在持续持有同一邮箱/窗口行锁期间取快照、同步核验完整窗口备份并提交。
+
+16:43:44 确认无 claim、目标尚未入站后，原子仅移除 `3120551`，版本 `5391 → 5392`，cursor 保持 `3120535`；
+提交前逐项确认 `3120539 / 3120540 / 3120550 / 3120569 / 3120572` 五条记录和顺序均保留。
+新 command/audit ID `b367e8a2-4d2c-45c4-94f0-f44b24d88065` 的 `mail.operator_quarantine_pending` 审计绑定
+原失败计划、证据、请求及备份摘要。没有注册、回复、创建入站成功事实、直接 MM 写入或重启。
+云端私有 `mail-quarantine-3120551-20261022T164344Z-b367e8a2/` 保留完整窗口、计划、回执及加密原证据；
+行级备份 SHA-256 为 `522760f5675a02da53432acd4e727e014fffabee0b6480f6c0fe402dc49e5dd2`。
+同一本地证据目录中的 `receipt-3120551.json` SHA-256 为
+`c4f367bf1a3c106ce0b13570ee7c435807fa75b9b6f66fc5b5b8a7978e3892f1`，先前中止计划及脚本均保留。
+
+16:47:09 只读复核：16:45 的正常轮询已推进 cursor 至 `3120572`、连续失败归零、待读队列为空；
+五条受保护邮件均已入站，其中四条 `registration_accepted`、一条 `archived`。两封跳过邮件仍无伪造入站事实，
+两条成功运维审计存在，首个中止计划无审计。新建 `mail_intake` 出站为成功 1、发送中 1、待发 2；
+Worker 仍为原 PID 2123、自动重启 0，隔离后日志无新增 warning/error。此为正常业务流的限定只读观察，
+未扩展成测试套件或执行主动重发。
+
+16:49 UTC 续查：上述四条新注册回复均已 `succeeded`，逐条具备 `sent_exact_payload_v1` 和 external reference；
+cursor `3120572`、失败计数为零且待读为空，两封跳过件仍无入站事实。正常恢复未部署详情发件人的根因修复，
+也不授权未来自动跳过其他邮件。
+
 ### 2026-10-22 公开装备列显隐与目录留白（本地页面验证）
 
 owner 为 `auction-web-public::surface::catalog::columns`、目录表格及 Public 样式/五语资源。

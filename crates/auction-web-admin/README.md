@@ -84,6 +84,9 @@ bash ci/release/web-bundle.sh admin
 请求，未编辑时间保留原 RFC3339 精度；录入表单按 world 隔离、处理中禁止切换世界，复合结果只接受匹配请求 world 的
 响应。
 邮件轮询状态与读取时的邮箱绑定，切换邮箱立即隐藏旧快照，操作卡片也按邮箱重建；同一邮箱后台刷新仍保留完成快照。
+[mail/progress.rs](crates/auction-web-admin/src/app/fulfillment/mail/progress.rs) 在状态卡显示已完成 MID、当前阶段/目标及最近失败定位，
+[API 诊断校验](crates/auction-web-admin/src/api/fulfillment/mail/diagnostics.rs) 独立验证闭集、邮箱绑定、数字 MID 与时间。
+仅加载/刷新状态时更新，不自动触发轮询、跳过或重发；交互与观测边界见[Admin 设计](crates/auction-web-admin/DESIGN.md#邮件诊断与投递)。
 创建/改期和审计筛选的 `datetime-local` 按浏览器本地时区输入，提交时转换为 UTC；展示文案明确这一边界，
 未编辑的既有 RFC3339 时间仍保留原精度。规则候选校验接受服务端去除标题首尾空白后的规范值，并以该值继续发布。
 

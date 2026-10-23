@@ -8,15 +8,22 @@ struct MoogleMailWorkerGateway {
     journal: Arc<dyn auction_application::MailPollReadJournal>,
 }
 
+/// 同一组轮询器共享的持久化、调度与只读观测端口。
+pub(super) struct MailPollRuntimePorts {
+    pub(super) store: Arc<DatabaseStore>,
+    pub(super) schedule: Arc<dyn RecurringSchedule>,
+    pub(super) progress_observer: Arc<dyn auction_application::MailPollProgressObserver>,
+}
+
 pub(super) async fn build_poll_runtimes(
     mail_config: &auction_config::MoogleMailWorkerConfig,
     client: Arc<MoogleMailClient>,
     credentials: MoogleMailCredentialSet,
     profile_reader: Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
     processor: Arc<dyn MailProcessor>,
-    store: Arc<DatabaseStore>,
-    schedule: Arc<dyn RecurringSchedule>,
+    ports: MailPollRuntimePorts,
 ) -> anyhow::Result<(Vec<MailPollRuntime>, HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>)> {
+    let MailPollRuntimePorts { store, schedule, progress_observer } = ports;
     let world_configs = mail_config.configured_worlds();
     let store_port: Arc<dyn MailPollStore> = store.clone();
     let journal: Arc<dyn auction_application::MailPollReadJournal> = store.clone();
@@ -36,6 +43,7 @@ pub(super) async fn build_poll_runtimes(
             },
         )
         .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+        gateway = gateway.with_progress_observer(Arc::clone(&progress_observer));
         if let Some(reader) = &profile_reader {
             gateway = gateway.with_forum_profile_reader(reader.clone());
         }
@@ -75,7 +83,8 @@ pub(super) async fn build_poll_runtimes(
                 retry_base: std::time::Duration::from_secs(mail_config.retry_base_seconds),
                 retry_maximum: std::time::Duration::from_secs(mail_config.retry_maximum_seconds),
             },
-        )?;
+        )?
+        .with_progress_observer(Arc::clone(&progress_observer));
         if let Some(recorder) = client.diagnostic_recorder() {
             runtime = runtime.with_diagnostics(recorder);
         }

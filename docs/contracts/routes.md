@@ -382,6 +382,36 @@ A16-A19 已接入 PostgreSQL 完整档：轮询状态和入站审查读取使用
 A17 列表不增加该字段，不返回 payload、装备 key 或正文。上限为正文 64 KiB、JSON 128 KiB、附件 1000 条，装备 key 和认证邮件正文隐藏；该投影只用于敏感审查，不参与幂等或 cursor，响应 `no-store`，历史 NULL 不由普通 replay 补写。A20 在至少一个邮箱已装配时返回 `202 accepted`：请求经 Admin session/CSRF 与单个 `command_id` 校验后，经 Worker control 全局唤醒已装配 poller，返回 `command_id` 与 `pollers`；空快照返回 `409 poll_rejected`；
 手动触发让已暂停邮箱执行一次领取，但不修改 `paused` 状态、不隐式恢复自动轮询，也不表示外部读取已完成。
 
+#### A16 可选的入站处理诊断
+
+GET `/api/v1/admin/mail` 仍要求 `mailbox_key`；仅显式 `include_diagnostics=true` 时在 `polling` 内增加
+`diagnostics`。省略时保留原响应字段集合；重复、未知 query、`false` 或其它值均为 `400 invalid_query`。
+暂停/恢复响应不增加该扩展。Admin 会话、邮箱绑定与 `no-store` 保持不变，不新增业务写入或 feature API 路径。
+
+`diagnostics` 是闭集：`observed_at`、`cursor_status`、`completed_external_mail_id`、`worker_condition`、
+`worker_observed_at`、`progress`。`cursor_status` 为 `available/empty/hidden`；仅 `available` 时返回经过筛选的
+正十进制 MID 字符串（1—64 个 ASCII 数字、首位非零），`empty/hidden` 时值为 null；原始 opaque cursor 不返回。
+`worker_condition` 为 `available/unavailable/timeout/incompatible/rejected`；不可用时 Worker 时间与进度均为 null，
+数据库侧安全已完成 MID 仍可读取，不能把不可用或尚未观测解释为空闲。
+
+`progress` 可为空，非空时字段为 `mailbox_key`、`world_id`、`stage`、`external_mail_id`、`updated_at`、`last_failure`，
+且 mailbox 必须与请求一致。`stage` 闭集为 `fetching/reading_detail/processing/committing/idle/failed/canceled`；
+当前 MID 仅在读取详情或本地处理阶段可用，其余阶段为 null。`last_failure` 可为空；非空时包含失败时实际在途的
+`stage`、安全 `external_mail_id` 与 `occurred_at`，批次级失败不伪造单封 MID。所有时间均为 RFC3339，
+Worker 内部更新时间和失败时间不得晚于其快照观测时间；浏览器同样校验闭集、数字 MID、邮箱和时间关联。
+
+该观测仅覆盖入站 claim，不覆盖三页维护或发件流程；阶段由真实读取/处理调用前报告，不能从待读队首猜测。
+完成、失败和取消清除当前 MID，版本与 claim token 只在进程内部隔离迟到更新，不进入响应；最近失败在 Worker 重启后清空。
+页面通过加载/刷新状态读取快照，不授权触发、跳过或重发，也不构成投递完成证明。
+
+#### Worker control 邮件进度读取
+
+同一 peer-authenticated UDS 新增只读 `GET /v1/mail/progress`，沿用 `v1` 协议头、请求关联 ID、有限超时与
+64 KiB 响应上限；旧 `/v1/status` 的闭集不变。成功为 `200` 标准 control 信封，`data` 含 `observed_at` 与最多两个
+`pollers`；每项使用上述进度字段，`stage` 为同一闭集，`updated_at` 与 `last_failure.occurred_at` 不晚于快照时间。
+锁损坏或观测无法安全投影时返回 `503 unavailable`，不返回旧快照。旧 Worker 未实现此路径时 Admin 将其显示为诊断不可用；
+原状态读取仍可用。进程观测不新增表、迁移、配置或外部 MM 请求。
+
 ### Runtime 配置与文件事务
 
 A26/A27 已接入 PostgreSQL 完整档：GET 返回非敏感 TOML 文档的 JSON 投影和稳定 `sha256:` fingerprint，

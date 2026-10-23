@@ -32,6 +32,10 @@ control 只有一个停机接收者，通知保留到接收者开始等待，覆
 重建 Worker。监督只读取已取得 owner 的已知失效状态；关闭功能或无 active 凭据时不启动对应监督，不增加数据库探测。失效后的新外呼继续
 失败关闭，在途发送保留原 sending/未知结果对账语义；新进程取得 advisory lock、提交新 generation 后才恢复邮件操作。
 
+`persistent.rs` 在装配时创建同一 `MailPollProgressTracker`，经 `mail/runtime.rs` 的 `MailPollRuntimePorts`
+同时注入 gateway、轮询任务与 control。它只保存有界进程观测，不能授权或恢复业务；协议和旧端降级见
+[邮件诊断契约](docs/contracts/routes.md#邮件审查与轮询)，本次诊断不新增配置或迁移。
+
 ## 部署配置与 runtime
 
 Worker 没有业务 `listen_address`。Admin/Worker 可共用 `runtime_config_file`；Worker 只消费 world、发件人、

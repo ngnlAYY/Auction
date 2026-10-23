@@ -322,7 +322,11 @@ Caddy 保持原运行用户，在它的 systemd drop-in 设置 `SupplementaryGro
 
 MoogleMail 按 world 独立调度/唤醒。cron 默认 `*/5 * * * *`，兼容描述符、`@every`、`TZ=`/`CRON_TZ=`；时区省略时取 Worker
 本地值，部署宜显式指定。共享客户端默认间隔 1 秒、请求超时 15 秒；fetch/item 预算须覆盖请求，确定性错误不 inline retry。
-拉取在绝对 deadline 内返回已解析的最旧详情前缀，batch_size 仅为上限；无法完整定位 cursor/末尾即失败关闭。batch_timeout
+拉取在绝对 deadline 内返回已解析的最旧详情前缀，batch_size 仅为上限；无法完整定位 cursor/末尾即失败关闭。
+发件人 allowlist 仅与详情完整名称作原有的忽略 ASCII 大小写精确比较，不读取列表截断名称作为授权依据。
+候选总数仍受 batch_size 限制；不匹配时保留待读项并失败关闭，不执行业务或推进游标，后续邮件等待调整白名单；
+`sender_allowlist_disabled=true` 才允许全部发件人；未关闭且白名单为空时直接按 `configuration` 拒绝拉取，不读取详情。
+配置生效后按原 MID 恢复，不改旧摘要或重发已完成邮件。batch_timeout
 默认 600 秒、范围 1–86400，至少覆盖一次 fetch_timeout + item_timeout，可先于全部重试到期；到期仅提交完成前缀及末封 ID，
 无完成项则持久化失败退避。批次续租，token/fence 失效即取消陈旧处理。runtime 的 worlds/equipment_filter/mail_templates 须
 完整同时存在或全部缺失，仅全缺失时沿用主配置兼容值。

@@ -184,13 +184,18 @@ token/fencing 和数据库实时租约，过期不得复活；release 只接受�
 [ports/mail](crates/auction-application/src/ports/mail) 与 [services/mail](crates/auction-application/src/services/mail)
 拥有轮询、用户命令、装备入站及 delivery outbox 编排：处理前检查持久化完成证明，原接受决定可恢复，不能因取件后
 资产变化改判退件；`MailPollStore::fail_after_prefix` 要求同一 fenced 事务提交连续成功前缀、游标和失败退避。
-`MailPollReadJournal` 是详情 GET 前的窄持久队列端口，只传列表身份与当前 claim。读取与登记均核对 mailbox/world、token、
-owner、版本和锁后数据库实时租约；详情读取前先提交整窗摘要，后续只随已完成前缀的入站事务删除，不把正文或凭据交给队列。
+`MailPollReadJournal` 是详情 GET 前的窄持久队列端口，只传定位、列表快照与当前 claim。列表发件人仅为可能截断的
+展示快照，完整业务身份与 allowlist 只采信详情；未获授权的待读项保留待核对，不推进游标或执行业务。
+读取与登记均核对 mailbox/world、token、owner、版本和锁后数据库实时租约；详情读取前先提交整窗摘要，
+后续只随已完成前缀的入站事务删除，不把正文或凭据交给队列。
 仅 `Retryable` 错误与超时进入有界重试；原始邮件/响应只进入独立加密诊断，不参与命令摘要、完成证明或 cursor
 （见[邮件诊断](ops/mail/diagnostics.md)）。
 `ports/mail/equipment_diagnostics/reason.rs` 拥有来源解析的九项闭集诊断码，进程内观察使用枚举，
 只有 parse/protocol_drift 组合可投影到原有 sidecar 的 `detail_code`；不接受原始来源错误文本，
 不参与业务决定、命令摘要或历史记录重写。
+
+[poll/progress.rs](crates/auction-application/src/ports/mail/poll/progress.rs) 定义只读轮询观测端口与安全数字 MID 边界，
+`WorkerControlPort::mail_progress` 提供可选跨进程读取；观测失败不改变命令、租约或持久游标，旧适配器明确不可用。
 
 `MailboxMaintenanceService` 不把零条 Sent 匹配当作未发送证明，未知 Send 始终保留人工核对；
 只有已正向确认原附件仍在的 take 可有界重排队。恢复计数只统计已确认提交的实际状态迁移，

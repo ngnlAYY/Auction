@@ -10,7 +10,10 @@ use chrono::{DateTime, Utc};
 use super::super::protocol::valid_opaque_id;
 use super::*;
 use crate::clients::mooglemail::parser::subject_is_list_projection;
-use auction_application::{MailPollClaim, MailPollReadJournal, MailPollReadSummary};
+use auction_application::{
+    MailPollClaim, MailPollProgressObserver, MailPollProgressStage, MailPollReadJournal,
+    MailPollReadSummary,
+};
 
 type ReadJournalContext<'a> = (&'a dyn MailPollReadJournal, &'a MailPollClaim);
 
@@ -21,6 +24,7 @@ pub struct MoogleMailGateway {
     pub(super) config: MoogleMailGatewayConfig,
     pub(super) parser: MoogleMailParser,
     pub(super) profile_reader: Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
+    progress_observer: Option<Arc<dyn MailPollProgressObserver>>,
 }
 
 impl MoogleMailGateway {
@@ -49,7 +53,20 @@ impl MoogleMailGateway {
             }
         }
         let client = Arc::new(client.as_ref().clone().with_ownership(credentials.ownership()));
-        Ok(Self { client, credentials, config, parser: MoogleMailParser, profile_reader: None })
+        Ok(Self {
+            client,
+            credentials,
+            config,
+            parser: MoogleMailParser,
+            profile_reader: None,
+            progress_observer: None,
+        })
+    }
+
+    /// 注入进程内观测；仅持有 claim 的轮询路径报告真实读取目标，不参与协议或授权决定。
+    pub fn with_progress_observer(mut self, observer: Arc<dyn MailPollProgressObserver>) -> Self {
+        self.progress_observer = Some(observer);
+        self
     }
 
     /// 读取一个 world 的未完成邮件窗口；cursor 是最后一封已完成邮件的 external_mail_id。
@@ -107,6 +124,11 @@ impl MoogleMailGateway {
             || limit > MAX_FETCH_LIMIT
             || cursor.is_some_and(|value| !valid_opaque_id(value))
         {
+            return Err(configuration(world));
+        }
+        // 空白名单且未显式放行所有人时不可能授权任何详情，避免无意义地改变远端已读状态。
+        // 拒绝拉取但保留原队列与游标，等待配置修正；不以列表显示名推断任何发件人身份。
+        if !self.config.sender_allowlist_disabled && self.config.sender_allowlist.is_empty() {
             return Err(configuration(world));
         }
         let deadline = match requested_deadline {
@@ -419,6 +441,7 @@ impl MoogleMailGateway {
         deadline: tokio::time::Instant,
         journal: Option<ReadJournalContext<'_>>,
     ) -> Result<MoogleMailPage, MoogleMailError> {
+        self.report_poll_progress(journal, MailPollProgressStage::Fetching, None);
         let mut seen = HashSet::new();
         let mut window = VecDeque::with_capacity(limit);
         if let Some((store, claim)) = journal {
@@ -447,7 +470,7 @@ impl MoogleMailGateway {
                     subject: summary.subject,
                     received_at: summary.received_at,
                 };
-                if !summary.validate() || !self.allowed_sender(&summary.sender) {
+                if !summary.validate() {
                     return Err(configuration(world));
                 }
                 window.push_back(summary);
@@ -481,15 +504,12 @@ impl MoogleMailGateway {
                     found_cursor = true;
                     continue;
                 }
-                // allowlist 必须在占用详情配额前生效，不能让大量无关发件人挤掉真正需要解析的邮件。
-                if self.allowed_sender(&summary.sender) {
-                    // 页面按远端收件箱顺序扫描；窗口满时丢弃队首，保留游标之前最旧的
-                    // limit 条，避免 backlog 超过 limit 时跳过尚未处理的旧邮件。
-                    if window.len() == limit {
-                        window.pop_front();
-                    }
-                    window.push_back(summary);
+                // 列表显示名不代表完整身份；先有界保留最旧窗口，白名单只能在详情解析后判断。
+                // 窗口满时丢弃队首，避免 backlog 超过 limit 时跳过尚未处理的旧邮件。
+                if window.len() == limit {
+                    window.pop_front();
                 }
+                window.push_back(summary);
             }
             if found_cursor {
                 break;
@@ -528,6 +548,11 @@ impl MoogleMailGateway {
             deadline.checked_sub(std::time::Duration::from_millis(100)).unwrap_or(deadline);
         let mut messages = Vec::with_capacity(window.len());
         for summary in window.into_iter().rev() {
+            self.report_poll_progress(
+                journal,
+                MailPollProgressStage::ReadingDetail,
+                Some(&summary.external_mail_id),
+            );
             let target = self.client.detail(world, &summary.external_mail_id)?;
             let document =
                 match tokio::time::timeout_at(detail_deadline, self.client.get(&target, cookie))
@@ -544,7 +569,6 @@ impl MoogleMailGateway {
             if message.external_mail_id != summary.external_mail_id
                 || message.world != summary.world
                 || message.received_at != summary.received_at
-                || !message.sender.eq_ignore_ascii_case(&summary.sender)
             {
                 return self
                     .client
@@ -560,6 +584,11 @@ impl MoogleMailGateway {
                     )
                     .await;
             }
+            // 业务身份与白名单只使用详情完整发件人；旧待读摘要的截断名称不参与授权。
+            // 不匹配时保留队列并失败关闭，不越过可能含资产的邮件，也不执行任何业务命令。
+            if !self.allowed_sender(&message.sender) {
+                return Err(configuration(world));
+            }
             messages.push(message);
         }
         if messages.is_empty() && !had_candidates {
@@ -568,10 +597,20 @@ impl MoogleMailGateway {
         if messages.is_empty() {
             return Err(fetch_budget_exhausted(world));
         }
-        // 没有任何 allowlist 命中的详情时不能推进 cursor，否则后续补充 allowlist 会永久错过
-        // 已经扫描过的邮件；有成功解析的邮件时才允许跳过同一窗口内明确忽略的发件人。
+        // cursor 只取详情完整性与完整发件人白名单均已通过的连续前缀，不跳过未获授权的邮件。
         let next_cursor = messages.last().map(|message| message.external_mail_id.clone());
         Ok(MoogleMailPage { messages, next_cursor })
+    }
+
+    fn report_poll_progress(
+        &self,
+        journal: Option<ReadJournalContext<'_>>,
+        stage: MailPollProgressStage,
+        mail_id: Option<&str>,
+    ) {
+        if let (Some(observer), Some((_, claim))) = (&self.progress_observer, journal) {
+            observer.update(claim, stage, mail_id);
+        }
     }
 
     fn allowed_sender(&self, sender: &str) -> bool {

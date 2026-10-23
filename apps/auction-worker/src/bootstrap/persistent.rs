@@ -61,6 +61,7 @@ pub(super) async fn run_worker(
         Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
     let (forum_sync, forum_reply, forum_pm, forum_profile_reader, forum_runtime_ownership) =
         configure_forum(config, Arc::clone(&store), config.worker.mooglemail.enabled).await?;
+    let mail_progress = auction_jobs::MailPollProgressTracker::default();
     let (
         mail_polls,
         mail_delivery_transport,
@@ -68,7 +69,13 @@ pub(super) async fn run_worker(
         mail_custody_reader,
         internal_evidence_reader,
         mail_runtime_ownership,
-    ) = configure_mail_poll(config, Arc::clone(&store), forum_profile_reader).await?;
+    ) = configure_mail_poll(
+        config,
+        Arc::clone(&store),
+        forum_profile_reader,
+        Arc::new(mail_progress.clone()),
+    )
+    .await?;
     let runtime_owners = [
         ("mail_owner_invalid", mail_runtime_ownership),
         ("forum_owner_invalid", forum_runtime_ownership),
@@ -143,7 +150,8 @@ pub(super) async fn run_worker(
             Some(evidence_reader),
         )
     };
-    let control = WorkerControlHandle::new(env!("CARGO_PKG_VERSION"), mail_polls.len());
+    let control = WorkerControlHandle::new(env!("CARGO_PKG_VERSION"), mail_polls.len())
+        .with_mail_progress(mail_progress);
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
     let database_health: Arc<dyn HeartbeatHealthReader> = store.clone();
     let heartbeat = Arc::new(

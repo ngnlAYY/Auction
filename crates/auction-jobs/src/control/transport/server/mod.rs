@@ -92,6 +92,7 @@ impl WorkerControlServer {
             .route(WORKER_CONTROL_LIVE_PATH, get(live))
             .route(WORKER_CONTROL_READY_PATH, get(ready))
             .route(WORKER_CONTROL_STATUS_PATH, get(status))
+            .route(WORKER_CONTROL_MAIL_PROGRESS_PATH, get(mail_progress))
             .route(WORKER_CONTROL_TRIGGER_POLL_PATH, post(trigger_poll))
             .route(WORKER_CONTROL_METRICS_PATH, get(metrics))
             .fallback(not_found)

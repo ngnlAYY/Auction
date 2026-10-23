@@ -63,12 +63,24 @@ pub(crate) fn CatalogColumnsPanel(
             },
             div { class: "public-catalog-columns__header",
                 strong { id: TITLE_ID, {t!("catalog-columns")} }
-                button {
-                    class: "public-catalog-columns__close",
-                    r#type: "button",
-                    aria_label: t!("catalog-columns-close"),
-                    onclick: move |_| close(open),
-                    {t!("catalog-close")}
+                div { class: "public-catalog-columns__actions",
+                    button {
+                        class: "public-catalog-columns__reset",
+                        r#type: "button",
+                        onclick: move |_| {
+                            let all = CatalogVisibility::default();
+                            visibility.set(all);
+                            all.save();
+                        },
+                        {t!("catalog-columns-reset")}
+                    }
+                    button {
+                        class: "public-catalog-columns__close",
+                        r#type: "button",
+                        aria_label: t!("catalog-columns-close"),
+                        onclick: move |_| close(open),
+                        {t!("catalog-close")}
+                    }
                 }
             }
             p { id: HINT_ID, class: "public-catalog-columns__hint",
@@ -98,16 +110,6 @@ pub(crate) fn CatalogColumnsPanel(
                         span { {column.label(layout)} }
                     }
                 }
-            }
-            button {
-                class: "public-catalog-columns__reset",
-                r#type: "button",
-                onclick: move |_| {
-                    let all = CatalogVisibility::default();
-                    visibility.set(all);
-                    all.save();
-                },
-                {t!("catalog-columns-reset")}
             }
         }
     }

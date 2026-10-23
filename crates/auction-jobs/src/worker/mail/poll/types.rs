@@ -3,8 +3,9 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use auction_application::{
-    MAX_MAIL_POLL_BATCH_SIZE, MailDiagnosticRecorder, MailMessage, MailPollClaim, MailPollStore,
-    MailProcessor, MailboxMaintenanceService, RecurringSchedule,
+    MAX_MAIL_POLL_BATCH_SIZE, MailDiagnosticRecorder, MailMessage, MailPollClaim,
+    MailPollProgressObserver, MailPollStore, MailProcessor, MailboxMaintenanceService,
+    RecurringSchedule,
 };
 use auction_observability::WorkerLoop;
 use chrono::{DateTime, Utc};
@@ -162,6 +163,7 @@ pub struct MailPollRuntime {
     pub gateway: Arc<dyn MailPollGateway>,
     pub processor: Option<Arc<dyn MailProcessor>>,
     pub(super) diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
+    pub(super) progress_observer: Option<Arc<dyn MailPollProgressObserver>>,
     pub(super) maintenance: Option<Arc<MailboxMaintenanceService>>,
     pub world_id: String,
     pub mailbox_key: String,
@@ -186,6 +188,7 @@ impl MailPollRuntime {
             gateway,
             processor,
             diagnostics: None,
+            progress_observer: None,
             maintenance: None,
             world_id,
             mailbox_key,
@@ -197,6 +200,12 @@ impl MailPollRuntime {
             return Err(WorkerError::InvalidMailPollConfiguration);
         }
         Ok(runtime)
+    }
+
+    /// 注入只读运行观测；不可用只影响诊断，不影响命令、游标或租约。
+    pub fn with_progress_observer(mut self, observer: Arc<dyn MailPollProgressObserver>) -> Self {
+        self.progress_observer = Some(observer);
+        self
     }
 
     /// 为异常邮件注入独立证据记录器；不参与命令、游标或租约的正确性判断。

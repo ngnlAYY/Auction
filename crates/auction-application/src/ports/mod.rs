@@ -361,8 +361,10 @@ pub use mail_maintenance::{
 };
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,
-    MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MailPollBatch, MailPollClaim, MailPollCompletion,
-    MailPollIntake, MailPollReadJournal, MailPollReadSummary, MailPollStore,
+    MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MAX_MAIL_PROGRESS_POLLERS, MailPollBatch, MailPollClaim,
+    MailPollCompletion, MailPollIntake, MailPollProgressFailure, MailPollProgressObserver,
+    MailPollProgressOutcome, MailPollProgressSnapshot, MailPollProgressStage, MailPollReadJournal,
+    MailPollReadSummary, MailPollStore, is_safe_mail_poll_id,
 };
 pub use mail_processing::{
     MailAuctionAcceptance, MailAuctionIntakeCommand, MailAuctionIntakeLookup,
@@ -467,7 +469,8 @@ pub use user_mail::{
     MailUserResultCode, MailUserStore,
 };
 pub use worker_control::{
-    WorkerControlCondition, WorkerControlPort, WorkerControlStatus, WorkerControlTrigger,
+    WorkerControlCondition, WorkerControlMailProgress, WorkerControlPort, WorkerControlStatus,
+    WorkerControlTrigger,
 };
 
 pub use schedule_source::{AuctionScheduleSource, AuctionScheduleTimes};

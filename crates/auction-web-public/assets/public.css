@@ -1420,40 +1420,57 @@
   color: var(--color-accent);
 }
 
+/* 列设置只压缩留白和网格，不缩减原生复选框及按钮的 44px 点击区域。 */
 .public-catalog-columns {
   min-inline-size: 0;
-  margin-block: 0 var(--space-5);
+  padding: var(--space-2);
+  margin-block: 0 var(--space-3);
 }
 
 .public-catalog-columns__header {
   flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin-block-end: var(--space-1);
+}
+
+.public-catalog-columns__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  min-inline-size: 0;
+  max-inline-size: 100%;
 }
 
 .public-catalog-columns__close,
 .public-catalog-columns__reset {
+  min-inline-size: var(--size-target);
   max-inline-size: 100%;
+  padding-inline: var(--space-2);
+  font-size: var(--text-sm);
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
 .public-catalog-columns__hint {
-  margin-block: 0 var(--space-3);
+  margin-block: 0 var(--space-1);
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
 
 .public-catalog-columns__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
-  gap: var(--space-2) var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+  gap: var(--space-1) var(--space-2);
 }
 
 .public-catalog-columns__option {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
   min-inline-size: 0;
   min-block-size: var(--size-target);
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -1476,10 +1493,6 @@
 
 .public-catalog-columns__option input:disabled + span {
   color: var(--color-text-muted);
-}
-
-.public-catalog-columns__reset {
-  margin-block-start: var(--space-3);
 }
 
 /* 稳定 DOM 保留隐藏列的命令宿主；同时压过基础打印样式的 td display。 */
@@ -2922,8 +2935,7 @@
     justify-content: center;
   }
 
-  .public-history-settings-panel,
-  .public-catalog-columns {
+  .public-history-settings-panel {
     padding: var(--space-3);
   }
 
@@ -3478,6 +3490,8 @@
   vertical-align: middle;
 }
 
+/* 匿名出价与标记入口共用按钮视觉，仍保留原生链接的导航与键盘语义。 */
+.public-auction-catalog__login,
 .public-lot-watch button,
 .public-lot-watch__login,
 .public-lot-watches__sync button {
@@ -3496,6 +3510,7 @@
   white-space: nowrap;
 }
 
+.public-auction-catalog__login:focus-visible,
 .public-lot-watch button:focus-visible,
 .public-lot-watch__login:focus-visible,
 .public-lot-watches__sync button:focus-visible {
@@ -3567,6 +3582,7 @@
   .public-history-player-filter,
   .public-auction-history-links a,
   .public-auction-catalog__actions-list > button,
+  .public-auction-catalog__login,
   .public-lot-watch button,
   .public-lot-watch__login,
   .public-lot-watches__sync button,

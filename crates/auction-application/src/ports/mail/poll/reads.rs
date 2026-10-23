@@ -6,11 +6,12 @@ use chrono::{DateTime, Utc};
 
 use super::{ApplicationFuture, MailPollClaim};
 
-/// 恢复详情读取所需的列表身份；不含正文、HTML、Cookie、token 或装备 key。
+/// 恢复详情读取所需的定位与列表快照；不含正文、HTML、Cookie、token 或装备 key。
 #[derive(Clone, PartialEq, Eq)]
 pub struct MailPollReadSummary {
     pub external_mail_id: String,
     pub world_id: String,
+    /// 首次列表显示名可能被截断，仅保留恢复快照兼容；详情身份与白名单不得使用该值。
     pub sender: String,
     pub subject: String,
     pub received_at: DateTime<Utc>,

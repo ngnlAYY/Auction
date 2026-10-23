@@ -51,6 +51,34 @@ pub(super) async fn status(
     )
 }
 
+/// 仅返回当前进程的安全邮件观测；不触发远端读取或业务写入。
+pub(super) async fn mail_progress(
+    State(handle): State<WorkerControlHandle>,
+    headers: HeaderMap,
+) -> Response {
+    let request_id = match request_id(&headers) {
+        Ok(request_id) => request_id,
+        Err(()) => return invalid_request_id_response(),
+    };
+    let snapshot = handle.mail_progress.snapshot();
+    let Some(observed_at) = snapshot.observed_at.filter(|_| snapshot.validate()) else {
+        return response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ResponseCode::Unavailable,
+            "邮件运行观测不可用",
+            Option::<MailProgressResult>::None,
+            &request_id,
+        );
+    };
+    response(
+        StatusCode::OK,
+        ResponseCode::Ok,
+        "邮件运行观测已加载",
+        Some(MailProgressResult { observed_at, pollers: snapshot.pollers }),
+        &request_id,
+    )
+}
+
 pub(super) async fn trigger_poll(
     State(handle): State<WorkerControlHandle>,
     headers: HeaderMap,

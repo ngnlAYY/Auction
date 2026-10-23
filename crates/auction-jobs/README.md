@@ -109,7 +109,7 @@ claim/prepare/fence/send/finish 且严格小于 lease，drain 停止新领取、
 
 ## Worker control
 
-只经 UDS 提供 live、ready、status、`/metrics` 和全局邮件唤醒，不启动第二个指标监听器。socket 位于受信 runtime 目录，
+只经 UDS 提供 live、ready、status、`/metrics`、只读邮件进度和全局邮件唤醒，不启动第二个指标监听器。socket 位于受信 runtime 目录，
 持 `0600` 实例锁，只清理已证明失效且 inode 未变的旧 socket；新 socket 固定配置 group 与 `0660`，连接须通过显式
 UID/GID allowlist，并受请求/响应大小与处理预算限制。Admin client 逐块限制 JSON 响应为 64 KiB，
 缺少 Content-Length 的响应也不能先完整缓冲再验限。唤醒使用有界内存 replay window，只表示已接受，
@@ -117,7 +117,12 @@ UID/GID allowlist，并受请求/响应大小与处理预算限制。Admin clien
 进程启动、降级原因与 drain 使用同一原子状态；论坛健康恢复只清除自身原因，不能覆盖其他任务故障，
 `status.ready` 和 `status.state` 来自同一快照。group 名称使用调用独占缓冲的可重入 NSS 查询，避免并发查询覆盖 GID；
 缓冲从 1 KiB 倍增且不超过 1 MiB，查询失败或仍超限时拒绝绑定。
-协议与部署参数见[Worker 入口](apps/auction-worker/README.md)。
+[control/mail_progress.rs](crates/auction-jobs/src/control/mail_progress.rs) 持有最多两个世界的进程内观测；
+详情 GET、入站处理和批次提交前报告真实阶段/MID，`processing/progress.rs` 的 RAII 守卫在完成、取消或提前返回时收口。
+内部按 claim token/版本隔离迟到回调，不向协议导出这些值；失败阶段/MID 保留到本进程后续观测，重启清空。
+`GET /v1/mail/progress` 复用原 peer allowlist、协议头、64 KiB 与请求预算，旧 status 闭集不变；
+它只观测入站 claim，不推断三页维护或外发状态，也不能代替持久化完成事实。
+协议与部署参数见[Worker 入口](apps/auction-worker/README.md)和[邮件诊断契约](docs/contracts/routes.md#邮件审查与轮询)。
 
 ## 边界约束
 
