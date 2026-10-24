@@ -1,4 +1,4 @@
-//! Delivery Admin 重试与 Recovery 父子投影的原子衔接。
+//! Delivery 人工重试、精确发送证明与 Recovery 父子投影的原子衔接。
 
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
@@ -100,4 +100,80 @@ pub(crate) async fn reset_after_delivery_retry(
     .execute(&mut **transaction)
     .await?;
     Ok(projected.rows_affected() == 1)
+}
+
+/// 调用方已按 recovery→credentials→actions→delivery 锁序取得相关行，并写入真实发送证明。
+/// 只恢复由这封提醒的未知结果形成的阻断；不重排 delivery，不清除别的动作或人工业务阻断。
+pub(crate) async fn resume_after_delivery_proof(
+    transaction: &mut Transaction<'_, Postgres>,
+    delivery_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    let resumed: Option<(Uuid, Uuid)> = sqlx::query_as(
+        "UPDATE public.settlement_recovery_actions AS action
+         SET execution_state='enqueued',last_error_code=NULL,
+             claim_token=NULL,claimed_at=NULL,claim_expires_at=NULL,
+             claim_fencing=action.claim_fencing+1,state_version=action.state_version+1,
+             next_attempt_at=NULL,completed_at=NULL,updated_at=clock_timestamp()
+         FROM public.settlement_recoveries AS recovery,public.deliveries AS delivery
+         WHERE action.delivery_id=$1 AND delivery.id=$1
+           AND recovery.id=action.recovery_id AND recovery.stage<>'completed'
+           AND recovery.resolution IS NULL AND action.kind='payment_reminder'
+           AND action.execution_state='manual_reconcile'
+           AND action.last_error_code='recovery_outcome_unknown'
+           AND action.proof_kind IS NULL AND action.proof_reference IS NULL
+           AND action.proof_digest IS NULL AND action.proof_observed_at IS NULL
+           AND delivery.origin_kind='settlement_recovery_action'
+           AND delivery.origin_id='recovery:'||recovery.id::text
+           AND delivery.command_id=action.prepare_command_id
+           AND delivery.request_digest=action.prepare_request_digest
+           AND delivery.activation_command_id=action.activate_command_id
+           AND delivery.activation_request_digest=action.activate_request_digest
+           AND delivery.payload->>'operation'='send'
+           AND delivery.payload->>'template'='recovery_payment_reminder'
+           AND public.delivery_has_frozen_sent_proof(
+               delivery.id,delivery.result_metadata,delivery.external_reference)
+         RETURNING action.id,action.recovery_id",
+    )
+    .bind(delivery_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some((action_id, recovery_id)) = resumed else { return Ok(None) };
+    // 父 recovery 已锁定；其它动作的完成/失败也先锁此行，因此当前阻断投影不会穿插变化。
+    sqlx::query(
+        "WITH other_blocker AS (
+             SELECT COALESCE(last_error_code,'recovery_delivery_conflict') AS code,
+                    CASE WHEN execution_state='manual_reconcile' THEN delivery_id ELSE NULL END AS delivery_id
+             FROM public.settlement_recovery_actions
+             WHERE recovery_id=$1 AND id<>$2 AND execution_state IN ('failed','manual_reconcile')
+             ORDER BY id LIMIT 1
+         )
+         UPDATE public.settlement_recoveries
+         SET blocking_code=(SELECT code FROM other_blocker),
+             manual_reconcile_delivery_id=(SELECT delivery_id FROM other_blocker),
+             state_version=state_version+1,updated_at=clock_timestamp()
+         WHERE id=$1 AND stage<>'completed' AND resolution IS NULL
+           AND blocking_code='recovery_outcome_unknown' AND manual_reconcile_delivery_id=$3",
+    )
+    .bind(recovery_id)
+    .bind(action_id)
+    .bind(delivery_id)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO public.audit_records
+         (id,occurred_at,actor_type,actor_id,action,entity_type,entity_id,result,source,metadata)
+         VALUES($1,clock_timestamp(),'system','auction-recovery','auction.recovery.delivery_proven',
+                'settlement_recovery_action',$2,'success','worker',$3)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(action_id.to_string())
+    .bind(serde_json::json!({
+        "delivery_id": delivery_id,
+        "recovery_id": recovery_id,
+        "state": "enqueued",
+        "delivery_requeued": false,
+    }))
+    .execute(&mut **transaction)
+    .await?;
+    Ok(Some(action_id))
 }

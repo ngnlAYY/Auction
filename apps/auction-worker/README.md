@@ -83,8 +83,8 @@ Retryable/超时进入有界重试（参数见[论坛与邮件配置](ops/config
 详情 GET 可能把无附件邮件标为已读。轮询先在当前 claim 下持久登记整窗 MID 和列表摘要，再读取详情；重启或取消后优先
 按持久队列直接读取 MID，入站事实、命令账本与 cursor 提交时原子删除完成前缀。队列沿用 batch limit，已有 cursor 保留；
 allowlist 改动使待读发件人不再获准时失败关闭并保留队列，须核对配置后恢复，不静默丢弃待读项。新队列不补造升级前已丢失的 MID。
-Main 收件前的三页维护使用独立的单次 fetch 总预算，包含数据库、凭据排队及所有远端读取；
-预算耗尽后继续 Inbox。`000060` 持久化逐条核对的环形位置，长期无匹配项不再饿死后缀，游标不是业务完成证明。
+每个已配置世界的维护与 Inbox 处理并行运行，各自使用有界预算；Sent、Read Mail 与 Inbox 共用同一 client 的读取协调器。
+`000060` 持久化逐条核对的环形位置，长期无匹配项不再饿死后缀，游标不是业务完成证明；Read Mail 只定位已知恢复目标，不重放历史入站。
 
 ## 持久化与外部结果证明
 
@@ -96,6 +96,8 @@ MoogleMail delivery 在 sending fence 前做只读 compose preflight，prepared 
 不伪造 delivery/Sent，Send 与 Return/Take 各有独立证明。证明与资产核对见[邮件诊断手册](ops/mail/diagnostics.md)，
 业务原子边界见[履约端口](crates/auction-application/README.md#结算与恢复端口)，启动前须
 [停机同版升级与显式资金核对](ops/README.md#bot-内部履约与资金保护升级)。
+`000061` 在 Sending 同事务冻结实际发送内容摘要、资产矩阵和尝试身份；后续核对不使用当前模板或当前登录 key 猜测原正文。
+所有发送来源使用同一精确证明与唯一远端 MID 绑定。升级前停止旧 Worker，按[共享读取升级](ops/README.md#邮箱共享读取与发送证明升级)执行。
 
 凭据由 PostgreSQL 独立数据密钥解密，论坛和邮件每种 Cookie 全局最多一条 active，生命周期 advisory lock 保证单 Worker
 owner；失效后不切换 Cookie，导入或轮换后须重启交接。未配置凭据数据密钥时保留受限 `.keyenv`/敏感文件兼容入口

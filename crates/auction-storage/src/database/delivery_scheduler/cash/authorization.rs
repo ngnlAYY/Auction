@@ -1,8 +1,8 @@
 //! Credits Send资金授权；所有远端观察已在持同session的业务事务外完成。
 
 use auction_application::{
-    DeliveryFenceOutcome, DeliveryWorkClaim, FundingMutation, InternalEvidencePurpose,
-    SettlementInternalEvidenceSnapshot,
+    DeliveryFenceOutcome, DeliverySendExpectation, DeliveryWorkClaim, FundingMutation,
+    InternalEvidencePurpose, SettlementInternalEvidenceSnapshot,
 };
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Transaction};
@@ -19,15 +19,28 @@ pub(super) async fn authorize_legacy(
     tx: &mut Transaction<'_, Postgres>,
     claim: &DeliveryWorkClaim,
     started_at: DateTime<Utc>,
+    expectation: Option<&DeliverySendExpectation>,
 ) -> Result<DeliveryFenceOutcome, FenceError> {
+    if let Some(binding) = expectation.and_then(|expectation| expectation.credential.as_ref()) {
+        crate::lock_mail_runtime_generation(
+            tx,
+            &auction_application::MailRuntimeBinding { generation: binding.runtime_generation },
+        )
+        .await?;
+    }
     let account = funding::lock_funded_delivery_account(tx, claim.delivery_id).await?;
     let protected = funding::funding_requires_authorization(tx).await?;
     if account.is_some() || (requires_cash_gate(claim) && protected) {
         return Err(FenceError::Rejected);
     }
     crate::database::lot_watch::lock_delivery_lot(tx, claim.delivery_id).await?;
+    if let Some(expectation) = expectation
+        && !super::super::attempts::lock_credential(tx, expectation).await?
+    {
+        return Err(FenceError::Rejected);
+    }
     lock_exact_claim(tx, claim).await?;
-    persist_sending(tx, claim, started_at, None).await?;
+    persist_sending(tx, claim, started_at, None, expectation).await?;
     Ok(DeliveryFenceOutcome::Sending)
 }
 
@@ -41,6 +54,7 @@ pub(super) async fn authorize(
     claim: &DeliveryWorkClaim,
     started_at: DateTime<Utc>,
     evidence: &SettlementInternalEvidenceSnapshot,
+    expectation: Option<&DeliverySendExpectation>,
 ) -> Result<DeliveryFenceOutcome, FenceError> {
     if !requires_cash_gate(claim)
         || evidence.operation_id != claim.command_id
@@ -51,6 +65,15 @@ pub(super) async fn authorize(
                 claim_fencing: claim.fencing_version,
                 request_hash: claim.request_hash,
             })
+    {
+        return Err(FenceError::Rejected);
+    }
+    let binding = expectation
+        .and_then(|expectation| expectation.credential.as_ref())
+        .ok_or(FenceError::Rejected)?;
+    if binding.credential_id != evidence.identity.credential_id
+        || binding.credential_version != evidence.identity.credential_version
+        || binding.runtime_generation != evidence.identity.runtime.generation
     {
         return Err(FenceError::Rejected);
     }
@@ -149,6 +172,6 @@ pub(super) async fn authorize(
         return Err(FenceError::Rejected);
     }
     crate::validate_mail_evidence_time(tx, evidence).await?;
-    persist_sending(tx, claim, started_at, Some(evidence)).await?;
+    persist_sending(tx, claim, started_at, Some(evidence), expectation).await?;
     Ok(DeliveryFenceOutcome::Sending)
 }

@@ -98,6 +98,8 @@ macro_rules! delivery_completion_gate {
 }
 
 #[cfg(feature = "postgres")]
+pub(super) mod attempts;
+#[cfg(feature = "postgres")]
 mod cadence;
 mod capability;
 #[cfg(feature = "postgres")]
@@ -230,6 +232,7 @@ impl DeliveryWorkStore for DatabaseStore {
         _claim: DeliveryWorkClaim,
         _started_at: DateTime<Utc>,
         _evidence: Option<&'a auction_application::SettlementInternalEvidenceSnapshot>,
+        _expectation: Option<&'a auction_application::DeliverySendExpectation>,
     ) -> auction_application::ApplicationFuture<'a, auction_application::DeliveryFenceOutcome> {
         Box::pin(async move {
             // 旧入口没有原单调截止，不能将有证据的现金授权降级为无期限提交。
@@ -248,6 +251,7 @@ impl DeliveryWorkStore for DatabaseStore {
                         None,
                         None,
                         &store.delivery_send_intervals,
+                        _expectation,
                     )
                     .await
                 }
@@ -261,6 +265,7 @@ impl DeliveryWorkStore for DatabaseStore {
         _started_at: DateTime<Utc>,
         _evidence: &'a auction_application::SettlementInternalEvidenceSnapshot,
         _deadline: std::time::Instant,
+        _expectation: Option<&'a auction_application::DeliverySendExpectation>,
     ) -> auction_application::ApplicationFuture<'a, auction_application::DeliveryFenceOutcome> {
         Box::pin(async move {
             match self {
@@ -273,8 +278,26 @@ impl DeliveryWorkStore for DatabaseStore {
                         Some(_evidence),
                         Some(_deadline),
                         &store.delivery_send_intervals,
+                        _expectation,
                     )
                     .await
+                }
+            }
+        })
+    }
+
+    fn reject_preparation(
+        &self,
+        _claim: DeliveryWorkClaim,
+        _completed_at: DateTime<Utc>,
+    ) -> auction_application::ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    reject_preparation_postgres(store.pool(), &_claim, _completed_at)
+                        .await
+                        .map_err(ApplicationError::from)
                 }
             }
         })

@@ -102,25 +102,25 @@ flowchart TD
 ```mermaid
 flowchart TD
   P[pending] --> C[claimed<br/>lease + fencing]
-  C --> G[sending<br/>sending_at 写入围栏]
-  G --> V{发送前预检}
-  V -- compose 有草稿 --> CD[compose_dirty<br/>未执行 POST]
-  V -- 无法证明干净 --> PU[preflight_unproven]
-  V -- 通过 --> W[MoogleMail POST]
-  W --> S{Sent 证明}
-  S -- 成功 --> OK[succeeded<br/>external_reference=mooglemail:world:send:MID]
-  S -- 结果未知 --> MR
-  S -- 明确失败 --> F[failed]
-  MR --> AD{管理员核对}
-  AD -- 已寄出 --> OK
-  AD -- 未寄出 --> RETRY[重排队 pending]
+  C --> V{发送前准备}
+  V -- 凭据或草稿不可用 --> P
+  V -- 确定非法载荷 --> F[failed]
+  V -- 完整基线与准备通过 --> G[sending<br/>冻结实际发送摘要和发送围栏]
+  G --> W[MoogleMail POST]
+  W --> S{结果证明}
+  S -- 完整 Sent 与干净 compose --> OK[succeeded<br/>唯一远端 MID 绑定]
+  S -- 结果未知 --> MR[manual_reconcile]
+  S -- 明确失败 --> F
+  MR --> R{原尝试精确恢复证明}
+  R -- 唯一且完整 --> OK
+  R -- 缺失或歧义 --> MR
+  MR --> AD[符合业务门禁的显式人工处理<br/>不凭裸 MID 标记 Send 成功]
+  AD -- 授权重排 --> P
   AD -- 确认失败 --> F
-  RETRY --> P
 ```
 
-- 发送前必须先证明 `filter=new` 的 compose 为空；有草稿时返回 `compose_dirty`，不执行 POST，避免脏内容混入新邮件。
-- 第 1、2 步任一失败都会只读回读 compose，用 `clean/credits/cod/attachment_count` 判断是草稿内容问题还是远端问题；
-  日志不含主题、正文或收件人。
+- 围栏前先渲染实际正文并取得完整 Sent 基线、干净 compose；准备失败不执行 POST，不以旧草稿干净与否推断历史投递。
+- `000061` 持久保存原尝试的完整主题、正文摘要、Credits/COD/装备矩阵；后续发送不重渲染，普通日志不含正文或凭据。
 - `sending_at` 是“可能已经写入远端”的围栏；有它就说明不能假设邮件没发。
 - `succeeded` 必须同时有 `external_reference` 与有效证明；普通发送不接受人工伪造 MID。
 - `take` 的预检必须核对邮件仍在、附件 ID 与 credits/COD 与 payload 一致。
@@ -131,11 +131,12 @@ flowchart TD
 sequenceDiagram
   participant D as delivery worker
   participant M as MoogleMail
-  D->>M: 读取 Sent 全量基线（MID 集合）
+  D->>D: 渲染一次并保留实际请求
   D->>M: 读取 compose（必须干净）
-  D->>M: POST compose（recipient/subject/body/credits/COD/附件）
-  D->>M: 重新读取 Sent 列表
-  D->>M: 读取新 MID 的详情
+  D->>M: 取得发送前完整 Sent 基线
+  D->>D: 同事务提交 Sending、冻结摘要与审计
+  D->>M: POST compose（实际冻结的正文与资产）
+  D->>M: 取得发送后的新读取代次，核对 Sent 列表及新增 MID 详情
   Note over D: 校验 recipient、主题、正文 digest、credits、COD、附件清单
   D->>D: 写入 sent_exact_payload_v1 + MID
 ```
@@ -149,25 +150,26 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-  M1[Sent 全量摘要] --> M2{本地 manual_reconcile 候选}
-  M2 -- settlement --> M3[reference 前缀匹配<br/>详情确认完整 reference]
-  M2 -- mail_intake send --> M4[模板重渲染主题+正文摘要]
-  M2 -- mail_intake take --> M5[按精确 MID 读取详情与资产]
-  M3 --> B{唯一且矩阵一致}
+  M1[共享 Sent 全量摘要] --> M2{本地未证明投递}
+  M2 -- 有冻结尝试，各发送来源 --> M3[原主题、正文摘要、资产矩阵<br/>当前凭据与原尝试时间窗]
+  M2 -- 无冻结尝试的历史记录 --> M4[仅保留可证明的旧恢复规则<br/>不读取当前登录 key 猜测旧信]
+  M2 -- take --> M5[共享 Inbox / Read Mail 定位已知 MID<br/>读取当前详情与资产]
+  M3 --> B{唯一且证明完整}
   M4 --> B
-  B -- 是 --> B1[绑定 MID<br/>sent_recovered_reference_v1 / sent_recovered_notice_v1]
+  B -- 是 --> B1[同事务绑定唯一 MID<br/>投递、资金与审计收口]
   B -- 否 --> B2[保留人工核对，不自动重发 Send]
-  M5 --> T1{邮件已不存在/资产已取完}
-  T1 -- 是 --> T2[action_recovered_inbox_v1 收口成功]
-  T1 -- 否 --> T3[重排队重试, 上限 2 次]
-  M1 --> C1[compose 读取]
-  C1 --> C2{干净?}
-  C2 -- 否 --> C3[仅当收件人+reference+COD 唯一匹配时 discard]
+  M5 --> T1{严格缺失或完整资产证明}
+  T1 -- 明确已取完 --> T2[action_recovered_inbox_v1]
+  T1 -- 原资产精确未变 --> T3[有界重排 Take]
+  T1 -- 部分或矛盾 --> B2
+  C1[独立 compose 维护] --> C2{当前草稿精确匹配唯一未证明尝试}
+  C2 -- 是且持久一次性授权 --> C3[同一写会话复核并 discard]
 ```
 
-- 维护每轮最多核对固定条数的通知类候选，避免逐封详情读取占满周期。
-- 绑定不会重发邮件；Sent 零命中不证明未发送，通知仍保留人工核对，不自动重发。Take 仅按独立动作证明进行有界恢复。
-- `operations_alert` 与 `lot_watch` 正文来自冻结载荷，不从模板重建。
+- 每个已配置世界的 Inbox、Read Mail 与 Sent 维护分别有界运行；一个页面失败不取消其他页面已提交的处理。
+- 同一有效观察窗口内的列表和详情共享读取；发送前后、资产写入前后使用新鲜屏障，不把缓存当作业务授权。
+- `Read Mail` 是已读邮箱列表，不是邮件详情页；只服务既有待读与动作恢复，不重新执行业务。页面语义参见 [MoogleMail](https://ehwiki.org/wiki/MoogleMail)。
+- 绑定不会重发邮件；Sent 零命中不证明未发送。所有新发送来源使用冻结摘要，旧无证明记录不自动升级或重寄。
 
 ## 7. COD 支付与货款轮询
 

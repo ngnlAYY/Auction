@@ -143,6 +143,9 @@ baseline；③发送后执行独立有界 Sent scan 并要求收到新 MID 且�
 不再把这两类预算错误统称 `remote_temporary`。日志只含 world、闭集阶段、上限和计数，不含 MID/收件人/正文。
 基线句柄不可克隆、不可跨 session 缓存且只消费一次；发送后复用完整基线证明新增，不因上调预算跳过完整性。
 历史人工核对记录保持原状，`write_started=false` 或 Sent 零命中也不自动授权重发。
+所有新 Send 在准备阶段冻结实际主题、正文摘要、Credits/COD/装备矩阵和安全凭据绑定；
+`000061` 与 Sending 同事务登记发送尝试。实际 POST 消费该次已渲染请求，不能在 fence 后重新读取模板或登录 key。
+恢复后的 `sent_recovered_frozen_v1` 与原实时证明保持区分；下游通过数据库原尝试及唯一 MID 绑定核验，不只检查标签。
 
 外层 delivery timeout 默认 180 秒、sending grace 默认 300 秒；启用 MoogleMail 时 timeout 必须大于两倍 fetch budget，
 读取复用既有 `maximum_pages` 和 `fetch_timeout`，不新增配置字段。成功 metadata 为 `sent_verified=true`、
@@ -162,12 +165,13 @@ Admin 人工 reconcile 不能把 `payload.operation=send` 与裸 `external_refer
 
 ## 定期三页维护
 
-MoogleMail Worker 每个 cron 周期（默认 5 分钟，仅 main）在收件轮询前额外读取三页：Sent 全量摘要、按需读取匹配 MID 的
-详情，以及 compose。普通命中只追加观察；满足精确恢复证明时，状态、资金收口与追加审计在同一事务提交。
+MoogleMail 的三个邮箱列表为 Inbox、Read Mail、Sent；compose 是独立的可变草稿，不再被算作第三个只读邮箱。
+每个已配置世界在 cron 周期内并行执行 Inbox 处理、Read Mail 观察与 Sent/草稿维护，三者各自有界；
+Read Mail 的慢响应或失败不延迟 Sent 核对，维护失败不撤销并行入站处理。共享请求只复用同一有效观察窗口，
+新发送基线及写后证据必须跨越新鲜屏障。详情 GET 前仍先持久登记原 MID，读历史不创建新的业务命令。
 
-整轮共享既有 fetch_timeout，包含数据库、凭据/session 排队、Sent 列表及详情、compose/discard；
-耗尽后记录维护失败并继续 Inbox，不给每封详情重建整轮预算。`000060` 持久化 world 内环形尝试位置，
-最多 200 条候选、20 条通知/Take；仅在单条开始前推进，未处理后缀保留，长期无匹配项不能永久占据前缀。
+维护的数据库、凭据/session 排队、Sent 列表及详情、compose/discard 共用既有 fetch_timeout，不给每封详情重建整轮预算。
+`000060` 持久化 world 内环形尝试位置；最多 200 条候选、20 条通知/Take，仅在单条开始前推进，未处理后缀保留。
 
 - Sent 命中本地仍为 `manual_reconcile` 且无 `external_reference` 的投递时，把 MID、collected、COD 与剩余资产数写入
   `deliveries.result_metadata.mailbox_sweep`，不自动判成功。
@@ -178,13 +182,13 @@ MoogleMail Worker 每个 cron 周期（默认 5 分钟，仅 main）在收件轮
   `manual_reconcile` 重新排队为 `enqueued`，让后续收取证据（`CoD Paid`）继续推进；有资金分配时同事务收口为 `spent`。
   恢复要求当前详情仍保留冻结 Credits/COD/装备集合，已领取后的空资产不能反推原金额。绑定不会重发邮件，也不把恢复
   证明冒充实时发送的 `sent_exact_payload_v1`。
-- 通知类（`origin_kind=mail_intake`）用部署模板与登录 key 重渲染主题和正文摘要，正文必须保留原入站 MID 的唯一关联；
-  通用重复正文不能用于绑定某次发送。Sent 时间还须处于原 sending fence 至原未知结果记录的实际时间窗内，不为分钟精度放宽
-  到更早时间；详情主题、正文摘要及零资产矩阵必须一致。只有完整证明才绑定 `sent_recovered_notice_v1`，并同事务写审计；
-  `operations_alert`、`lot_watch` 的正文来自冻结载荷，维护流程不重建也不绑定。
+- 有冻结发送尝试的记录覆盖全部来源，包括 `mail_intake`、`settlement`、`settlement_recovery_action`、`operations_alert` 和
+  `lot_watch`。匹配完整主题、原正文摘要、世界/收件人、原资产矩阵及原实际发送窗口，验证当前凭据身份；不重渲染历史正文。
+  多个同内容候选或竞争发送尝试不绑定；单候选详情读取失败也不能忽略后误认另一封。恢复成功使用 `sent_recovered_frozen_v1`，
+  并同事务绑定唯一 MID、收口资金与审计。旧无冻结尝试只保留既有安全 reference/无密钥通知规则，不读当前登录 key 猜测旧信。
 - Sent 中没有对应通知不能证明当时未发送；零命中、多命中、时间或关联身份不充分都保留 `manual_reconcile`，
   不自动退回发送队列。恢复绑定不重发邮件，不以模板相同或单独的时间窗口替代唯一发送身份。
-- `take` 直接按 MID 读取详情，未读 Inbox 缺席不是不存在证明。缺失只接受唯一系统框完整的
+- `take` 通过共享 Inbox/Read Mail 定位已知 MID，再直接读取当前详情；两个列表缺席都不是不存在证明。缺失只接受唯一系统框完整的
   “Mail does not exist”（允许末尾句点），且不得混有详情节点或隐藏正文；其他对象缺失、登录页、残缺结构和未知文案保留核对。
   完整详情的全部装备、Credits、COD 均归零，才可按 `action_recovered_inbox_v1` 收口；
   只有原装备集合和冻结金额精确相同才可重排（上限 2 次）。部分、额外、重复资产或金额漂移不成功、不重排。

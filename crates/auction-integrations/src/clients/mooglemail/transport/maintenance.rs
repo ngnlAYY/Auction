@@ -1,7 +1,7 @@
 //! 定期维护适配：复用 delivery transport 的凭据集合与发送器读取三页。
 //!
-//! 适配器只持有可克隆的凭据集合与发送器，不接管 transport 的 delivery 状态；读取与
-//! discard 都走同一排他凭据会话，避免与发送并发覆盖 compose。
+//! 普通邮箱读取不占 compose guard；只有 compose 观察和 discard 持有短时排他会话。
+//! 读取接受前重新核验当前凭据与 owner，不把共享观察升级成资金或库存授权。
 
 use auction_application::{
     ApplicationError, MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard,
@@ -22,7 +22,6 @@ pub struct MoogleMailMaintenanceAdapter {
     credentials: MoogleMailCredentialSet,
     sender: MoogleMailSender,
     templates: MoogleMailNotificationTemplates,
-    login_keys: std::sync::Arc<dyn MailLoginKeyReader>,
 }
 
 impl MoogleMailDeliveryTransport {
@@ -32,13 +31,12 @@ impl MoogleMailDeliveryTransport {
             credentials: self.credentials.clone(),
             sender: self.sender.clone(),
             templates: self.templates.clone(),
-            login_keys: std::sync::Arc::clone(&self.login_keys),
         }
     }
 }
 
 impl MoogleMailMaintenanceAdapter {
-    async fn session(
+    async fn compose_session(
         &self,
         world: MoogleMailWorld,
     ) -> Result<MoogleMailCredentialSession, ApplicationError> {
@@ -47,23 +45,40 @@ impl MoogleMailMaintenanceAdapter {
             .await
             .map_err(|_| maintenance_error("MoogleMail 维护会话不可用"))
     }
+
+    async fn read_session(
+        &self,
+        world: MoogleMailWorld,
+        operation: MoogleMailOperation,
+    ) -> Result<MoogleMailCredentialSession, ApplicationError> {
+        self.credentials
+            .begin_read(world, operation)
+            .await
+            .map_err(|_| maintenance_error("MoogleMail 维护读取会话不可用"))
+    }
 }
 
 impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     fn compose<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, MoogleMailboxComposeState> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
-            let mut session = self.session(world).await?;
+            let mut session = self.compose_session(world).await?;
             match self.sender.inspect_compose(session.cookie(), world).await {
-                Ok(state) => Ok(MoogleMailboxComposeState {
-                    clean: state.is_clean(),
-                    recipient: state.recipient,
-                    subject: state.subject,
-                    body: state.body,
-                    credits: state.credits,
-                    cod: state.cod,
-                    attachment_count: state.attachment_count,
-                }),
+                Ok(state) => {
+                    check_observation_session(&session).await?;
+                    Ok(MoogleMailboxComposeState {
+                        clean: state.is_clean(),
+                        body_digest: canonical_mail_body_digest(&state.body),
+                        recipient: state.recipient,
+                        subject: state.subject,
+                        body: state.body,
+                        credits: state.credits,
+                        cod: state.cod,
+                        attachment_count: state.attachment_count,
+                        equipment_ids: state.equipment_ids,
+                        observation_credential: session.observation_credential_binding(),
+                    })
+                }
                 Err(error) => {
                     if error.is_session_expired() {
                         let _ = session.invalidate_current().await;
@@ -81,7 +96,11 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     ) -> MailboxFuture<'a, MoogleMailboxDiscard> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
-            let mut session = self.session(world).await?;
+            let mut session = self.compose_session(world).await?;
+            check_observation_session(&session).await?;
+            if session.observation_credential_binding() != expected.observation_credential {
+                return Err(maintenance_error("compose 草稿观察的凭据或运行时已变化"));
+            }
             match self.sender.discard_compose(session.cookie(), world, expected).await {
                 Ok(MoogleMailDiscardOutcome::AlreadyClean) => {
                     Ok(MoogleMailboxDiscard::AlreadyClean)
@@ -103,22 +122,45 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     ) -> MailboxFuture<'a, Vec<MoogleMailboxSentEntry>> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
-            let mut session = self.session(world).await?;
+            let mut session = self.read_session(world, MoogleMailOperation::Sent).await?;
             match self.sender.scan_sent_summaries(session.cookie(), world).await {
-                Ok(entries) => Ok(entries
-                    .into_iter()
-                    .map(|entry| MoogleMailboxSentEntry {
-                        external_mail_id: entry.external_mail_id,
-                        recipient: entry.recipient,
-                        subject: entry.subject,
-                        sent_at: entry.sent_at,
-                    })
-                    .collect()),
+                Ok(entries) => {
+                    check_observation_session(&session).await?;
+                    Ok(entries
+                        .into_iter()
+                        .map(|entry| MoogleMailboxSentEntry {
+                            external_mail_id: entry.external_mail_id,
+                            recipient: entry.recipient,
+                            subject: entry.subject,
+                            sent_at: entry.sent_at,
+                        })
+                        .collect())
+                }
                 Err(error) => {
                     if error.is_session_expired() {
                         let _ = session.invalidate_current().await;
                     }
                     Err(maintenance_remote_error(error, "Sent 列表读取失败"))
+                }
+            }
+        })
+    }
+
+    fn read_mail_observed<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, usize> {
+        Box::pin(async move {
+            let world = maintenance_world(world_id)?;
+            let mut session = self.read_session(world, MoogleMailOperation::ReadMail).await?;
+            match self.sender.scan_read_summaries(session.cookie(), world).await {
+                Ok(entries) => {
+                    check_observation_session(&session).await?;
+                    // 历史 Read Mail 只产生计数，不回灌 inbox journal 或业务命令。
+                    Ok(entries.len())
+                }
+                Err(error) => {
+                    if error.is_session_expired() {
+                        let _ = session.invalidate_current().await;
+                    }
+                    Err(maintenance_remote_error(error, "Read Mail 列表读取失败"))
                 }
             }
         })
@@ -138,18 +180,21 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     ) -> MailboxFuture<'a, Option<MoogleMailboxInboxAssets>> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
-            let mut session = self.session(world).await?;
+            let mut session = self.read_session(world, MoogleMailOperation::Detail).await?;
             match self
                 .sender
                 .inspect_inbox_attachments(session.cookie(), world, external_mail_id)
                 .await
             {
-                Ok(Some(assets)) => Ok(Some(MoogleMailboxInboxAssets {
-                    equipment_ids: assets.equipment_ids,
-                    credits: assets.credits,
-                    cod: assets.cod,
-                })),
-                Ok(None) => Ok(None),
+                Ok(assets) => {
+                    check_observation_session(&session).await?;
+                    Ok(assets.map(|assets| MoogleMailboxInboxAssets {
+                        sender: assets.sender,
+                        equipment_ids: assets.equipment_ids,
+                        credits: assets.credits,
+                        cod: assets.cod,
+                    }))
+                }
                 Err(error) => {
                     if error.is_session_expired() {
                         let _ = session.invalidate_current().await;
@@ -168,7 +213,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     ) -> MailboxFuture<'a, MoogleMailboxSentState> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
-            let mut session = self.session(world).await?;
+            let mut session = self.read_session(world, MoogleMailOperation::SentDetail).await?;
             let summary = MoogleMailSentListEntry {
                 external_mail_id: entry.external_mail_id.clone(),
                 recipient: entry.recipient.clone(),
@@ -176,15 +221,19 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
                 sent_at: entry.sent_at,
             };
             match self.sender.inspect_sent(session.cookie(), world, &summary, observed_at).await {
-                Ok(state) => Ok(MoogleMailboxSentState {
-                    external_mail_id: state.external_mail_id,
-                    subject: state.subject,
-                    collected: state.collected,
-                    cod_pending: state.cod_pending,
-                    remaining_credits: state.remaining_credits,
-                    remaining_equipment_ids: state.remaining_equipment_ids,
-                    body_digest: state.body_digest,
-                }),
+                Ok(state) => {
+                    check_observation_session(&session).await?;
+                    Ok(MoogleMailboxSentState {
+                        external_mail_id: state.external_mail_id,
+                        subject: state.subject,
+                        collected: state.collected,
+                        cod_pending: state.cod_pending,
+                        remaining_credits: state.remaining_credits,
+                        remaining_equipment_ids: state.remaining_equipment_ids,
+                        body_digest: state.body_digest,
+                        observation_credential: session.observation_credential_binding(),
+                    })
+                }
                 Err(error) => {
                     if error.is_session_expired() {
                         let _ = session.invalidate_current().await;
@@ -197,33 +246,25 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
 }
 
 impl MoogleMailMaintenanceAdapter {
-    /// 用部署模板与登录 key 重建通知摘要；模板缺少入站 MID 关联时保留未知投递。
+    /// 旧通知仅保留无 key 且带原 MID 的保守证明；当前 key 无法证明历史实际发送字节。
     fn notice_expectation_inner<'a>(
         &'a self,
         candidate: &'a MoogleMailboxUnprovenSend,
     ) -> MailboxFuture<'a, Option<MoogleMailboxNoticeExpectation>> {
         Box::pin(async move {
+            if candidate.send_expectation.is_some() || candidate.user_key_user_id.is_some() {
+                return Ok(None);
+            }
             let Some(result_code) = candidate.result_code.as_deref() else { return Ok(None) };
-            // operations_alert 与 lot_watch 的正文来自冻结载荷而非模板键，维护流程不重建。
+            // operations_alert 与 lot_watch 的旧正文未在此保存，不能用新模板猜测历史内容。
             if matches!(candidate.template.as_str(), "operations_alert" | "lot_watch") {
                 return Ok(None);
             }
-            let login_key = match candidate.user_key_user_id {
-                Some(user_id) => {
-                    let key = self
-                        .login_keys
-                        .read(user_id)
-                        .await
-                        .map_err(|_| maintenance_error("MoogleMail 通知登录 key 不可用"))?;
-                    Some(key)
-                }
-                None => None,
-            };
             let Some((subject, body)) = render_notification(
                 &self.templates,
                 &candidate.template,
                 result_code,
-                login_key.as_ref(),
+                None,
                 &candidate.recipient,
                 &candidate.world_id,
                 &candidate.inbound_mail_id,
@@ -239,7 +280,7 @@ impl MoogleMailMaintenanceAdapter {
                 &self.templates,
                 &candidate.template,
                 result_code,
-                login_key.as_ref(),
+                None,
                 &candidate.recipient,
                 &candidate.world_id,
                 &alternative_reference,
@@ -253,6 +294,12 @@ impl MoogleMailMaintenanceAdapter {
             Ok(Some(MoogleMailboxNoticeExpectation { subject, body_digest }))
         })
     }
+}
+
+async fn check_observation_session(
+    session: &MoogleMailCredentialSession,
+) -> Result<(), ApplicationError> {
+    session.check_current().await.map_err(|_| maintenance_error("MoogleMail 维护读取会话已失效"))
 }
 
 fn maintenance_world(world_id: &str) -> Result<MoogleMailWorld, ApplicationError> {

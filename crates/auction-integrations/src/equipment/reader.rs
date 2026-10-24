@@ -191,11 +191,14 @@ impl EquipmentSourceAdapter {
             };
         };
         let mut session = credentials
-            .begin_exclusive(world, MoogleMailOperation::Detail)
+            .begin_read(world, MoogleMailOperation::Equipment)
             .await
             .map_err(|_| AdminIntakeError::SourceUnavailable)?;
         match self.fetch_document_attempt(target, Some(session.cookie())).await {
-            Ok(body) => Ok(body),
+            Ok(body) => {
+                session.check_current().await.map_err(|_| AdminIntakeError::SourceUnavailable)?;
+                Ok(body)
+            }
             Err(EquipmentFetchError::Intake(error)) => Err(error),
             Err(EquipmentFetchError::SessionExpired) => {
                 let _ = session.invalidate_current().await;
@@ -283,7 +286,7 @@ impl EquipmentSourceAdapter {
             });
         };
         let mut session = credentials
-            .begin_exclusive(world, MoogleMailOperation::Detail)
+            .begin_read(world, MoogleMailOperation::Equipment)
             .await
             .map_err(|_| fetch::EquipmentFetchFailure {
                 category: MailEquipmentDiagnosticCategory::CredentialUnavailable,
@@ -310,7 +313,15 @@ impl EquipmentSourceAdapter {
             body: None,
         })?;
         match result {
-            Ok(body) => Ok(body),
+            Ok(body) => {
+                session.check_current().await.map_err(|_| fetch::EquipmentFetchFailure {
+                    category: MailEquipmentDiagnosticCategory::CredentialUnavailable,
+                    status: fetch::nonzero_status(&status_slot),
+                    elapsed_millis: fetch::elapsed_millis(started),
+                    body: None,
+                })?;
+                Ok(body)
+            }
             Err(EquipmentFetchError::Observed(failure)) => {
                 if failure.category == MailEquipmentDiagnosticCategory::SessionExpired {
                     // 单 Cookie 失效后停止；即使回写失败，也保留本次登录页和状态码证据。

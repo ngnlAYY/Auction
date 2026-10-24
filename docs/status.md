@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | HTTP 与页面 | Public/Admin feature API 及浏览器入口见[路由口径](docs/contracts/routes.md#基线与统计口径) | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
-| 迁移 | PostgreSQL 60 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 61 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -34,6 +34,44 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 各记录只覆盖注明的工作树与验证范围，不代表运行验收。下文 `verify全绿` 沿用记录当时的完整 `just verify` 结果；历史文档份数不是当前自动检查项，也不证明链接或语义正确。当前静态门禁及独立检查范围见[开发指南](docs/guide/development.md#默认检查)，历史命令和失败结果保持原样。
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
+
+### 2026-10-23 邮箱共享读取与冻结发送证明
+
+用户批准隔离 PostgreSQL 18 与本机合成邮件对端验证。修改前工作区干净；本轮未执行 Git 提交、推送或部署，
+未读取真实邮箱、修改现有凭据或迁移运行数据库。
+
+- integrations：Inbox、Read Mail、Sent 共享有界读取与详情请求合并；普通读取不等待 compose 操作锁。
+  列表扫描和改变已读状态的详情分阶段协调，Read Mail 只恢复已知 MID，不重放历史入站；
+  POST 开始、结束和取消均形成新鲜屏障，失效凭据/owner 的旧观察拒绝继续使用。
+- application/storage：新增 `000061`，实际发送只渲染一次；主题、正文摘要、资产矩阵与 Sending、节奏和审计同事务冻结。
+  原发送 fence 与当前 CAS fence 分开，过期隔离后仍能核对原尝试；唯一 MID 绑定及强证明谓词贯通履约、资金和恢复。
+  正文、登录 key、Cookie 不进入新证据表，历史缺证据不补造、不自动重寄。
+- jobs/Worker：各已配置世界的 Inbox、Read Mail 与 Sent/草稿维护并行、分别有界；一方失败不撤销其他 owner 的事实。
+  普通观察不授予现金或库存提交权限，原独占授权上下文、generation、租约和绝对截止继续生效。
+- Admin：准备阶段 `failed/invalid_payload` 不伪造 `sending_at`；服务端安全投影与浏览器 Rust decoder 接受同一明确未写入形状，
+  矛盾写入标记、未知发送、缺失领取时间、倒序时间或外部引用仍拒绝。
+
+复审中实际复现并修复五类边界：临时读取错误缓存阻断真实重试、成功提醒仍被旧 Recovery 阻断、
+同内容已领取候选被跳过而错绑另一封、收件人大小写使跨批次竞争漏查，以及准备失败破坏 Admin 投影/解码。
+保留失败前证据，不把后续通过覆盖为历史全绿。
+
+实际验证：
+
+- Rust/cargo 1.99.0：最终完整 `just verify` 通过，包括策略、格式、workspace all-targets、独立 feature、
+  Clippy `-D warnings`、Public/Admin WASM；Rust 1.94.1 的 workspace all-targets/all-features 静态检查通过。
+- 独立 PostgreSQL 18.6、私有 Unix socket：**44 项场景通过**。覆盖全部 61 个迁移的 checksum/幂等与约束、
+  发送摘要/围栏/审计原子提交及回滚、全部发送来源的冻结恢复、MID 冲突、原 fence 恢复、真实行锁等待跨 TTL、
+  取消/丢弃应用确认、资金关联与 unknown/spent 收口、提醒父子投影及严格下游证明。
+- 本机合成 HTTP/typed 对端：**18 项邮箱流程通过**。共享列表/详情各一次网络读取、持 compose 时三类读取继续、
+  等待者取消、凭据隔离/撤销、新鲜屏障、并发/请求/响应/保留字节边界、渲染冻结、重复 MID 拒绝及真实待读账本恢复。
+  内存场景用同一代次的并发响应验证，不把跨 30 秒复用窗口的顺序读取总量当作同时保留量。
+- 额外真实 Admin 存储投影及矛盾写入标记拒绝通过；实际 Admin Rust decoder 的临时原生探针失败前/通过后均留证，
+  该临时测试已移除。未新增永久测试，也未运行已有行为测试套件。
+
+证据索引：`target/audits/mailbox-redesign-20261023/evidence.json`。临时 PostgreSQL 已退出，数据库目录及探针源码已清理，
+只保留脱敏 JSON 证据。没有真实邮箱协议、完整现金 reserve/授权、PostgreSQL 线级 COMMIT 故障、浏览器视觉、
+RSS/120 秒到期实测或生产负载验收声明；资金验证范围限真实终态记账及关联保护。
+升级须按[共享读取与发送证明升级](ops/README.md#邮箱共享读取与发送证明升级)停止旧 writer、追加迁移并同版更新。
 
 ### 2026-10-23 全项目性能与稳定性复审
 

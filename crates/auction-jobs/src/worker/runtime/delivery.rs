@@ -264,9 +264,22 @@ where
     .await
     {
         Ok(Ok(prepared)) => prepared,
+        Ok(Err(error)) if error.failure_code == "invalid_payload" => {
+            // 确定的本地载荷错误未执行任何写入；不能伪造 Sending，也不能永久重领坏任务。
+            let result = tokio::time::timeout(
+                config.finalize_timeout,
+                delivery_store.reject_preparation(claim, clock.now()),
+            )
+            .await;
+            return DeliveryTaskResult::completed(if matches!(result, Ok(Ok(()))) {
+                WorkerResult::Success
+            } else {
+                WorkerResult::Error
+            });
+        }
         preparation => {
             let failure_code = match preparation {
-                Ok(Err(failure_code)) => failure_code,
+                Ok(Err(error)) => error.failure_code,
                 _ => "preflight_timeout".to_owned(),
             };
             tracing::warn!(delivery_id = %claim.delivery_id, %failure_code, "delivery preflight deferred before sending fence");
@@ -423,17 +436,17 @@ async fn prepare_delivery<'a, C: Clock>(
     claim: &DeliveryWorkClaim,
     lease: &mut DeliveryLease,
     request_deadline: tokio::time::Instant,
-) -> Result<auction_application::AuthorizedDeliverySend<'a>, String> {
+) -> Result<auction_application::AuthorizedDeliverySend<'a>, DeliveryTransportError> {
     // 首次确认独立于 select 排序，不能为了操作公平性绕过准备前的续租门禁。
     // 调用方 timeout_at 覆盖本次确认及后续全部续租，预算不随回执重置。
-    lease.renew(store, claim, clock, config).await.map_err(str::to_owned)?;
+    lease.renew(store, claim, clock, config).await.map_err(delivery_preparation_error)?;
     let mut preparation = transport
         .prepare_authorized(claim.clone(), request_deadline.min(lease.deadline).into_std());
     loop {
         tokio::select! {
             biased;
-            _ = tokio::time::sleep_until(request_deadline) => return Err("preflight_timeout".to_owned()),
-            _ = tokio::time::sleep_until(lease.deadline) => return Err("lease_expired".to_owned()),
+            _ = tokio::time::sleep_until(request_deadline) => return Err(delivery_preparation_error("preflight_timeout")),
+            _ = tokio::time::sleep_until(lease.deadline) => return Err(delivery_preparation_error("lease_expired")),
             result = std::future::poll_fn(|context| {
                 // 与发送相同：直接核对两个截止，确保成功续租后操作先获得一次 poll。
                 let now = tokio::time::Instant::now();
@@ -441,11 +454,22 @@ async fn prepare_delivery<'a, C: Clock>(
                     return std::task::Poll::Pending;
                 }
                 preparation.as_mut().poll(context)
-            }) => return result.map_err(|error| error.failure_code),
+            }) => return result,
             _ = tokio::time::sleep_until(lease.renew_at) => {
-                lease.renew(store, claim, clock, config).await.map_err(str::to_owned)?;
+                lease.renew(store, claim, clock, config).await.map_err(delivery_preparation_error)?;
             }
         }
+    }
+}
+
+/// 准备期没有外部写入；租约或预算失败只能延期，不产生未知发送结果。
+fn delivery_preparation_error(stage: &str) -> DeliveryTransportError {
+    DeliveryTransportError {
+        failure_code: stage.to_owned(),
+        safe_detail: "delivery 只读准备未完成，尚未开始远端写入".to_owned(),
+        outcome_unknown: false,
+        external_reference: None,
+        result_metadata: serde_json::json!({"stage": stage, "write_started": false}),
     }
 }
 
@@ -486,6 +510,8 @@ async fn confirm_delivery_handoff<C: Clock>(
     {
         return false;
     }
+    // 冻结的实际发送摘要与 Sending 同事务落库；Arc 只借用原准备对象，不重渲染或复制正文。
+    let expectation = prepared.send_expectation().cloned();
     prepared.begin_fence();
     let confirmed = if let Some(evidence) = prepared.evidence_mut() {
         match evidence.begin_commit() {
@@ -498,6 +524,7 @@ async fn confirm_delivery_handoff<C: Clock>(
                         clock.now(),
                         guard.snapshot(),
                         deadline.into_std(),
+                        expectation.as_deref(),
                     ),
                 )
                 .await
@@ -515,7 +542,12 @@ async fn confirm_delivery_handoff<C: Clock>(
     } else {
         match tokio::time::timeout_at(
             deadline,
-            store.start_sending_authorized(claim.clone(), clock.now(), None),
+            store.start_sending_authorized(
+                claim.clone(),
+                clock.now(),
+                None,
+                expectation.as_deref(),
+            ),
         )
         .await
         {

@@ -51,6 +51,7 @@ pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdm
     if !valid_live_lease(&snapshot.status, lease_token.as_ref(), snapshot.lease_expires_at.as_ref())
         || !valid_snapshot(&snapshot)
         || !valid_failed_reference_metadata(&snapshot, &payload, &result_metadata)
+        || !valid_preparation_rejection_metadata(&snapshot, &result_metadata)
     {
         return Err(DeliveryAdminError::StoredResultCorrupt);
     }
@@ -225,6 +226,7 @@ impl LegacyDeliveryPayload {
             snapshot.lease_expires_at.as_ref(),
         ) || !valid_snapshot(&snapshot)
             || !valid_failed_reference_metadata(&snapshot, &self.payload, &self.result_metadata)
+            || !valid_preparation_rejection_metadata(&snapshot, &self.result_metadata)
         {
             return Err(DeliveryAdminError::StoredResultCorrupt);
         }
@@ -283,6 +285,26 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
         || snapshot.updated_at < snapshot.created_at
     {
         return false;
+    }
+
+    // 新准备阶段可以确定拒绝非法载荷；没有发送事实，仍要求完整 claimed/completed 时间链。
+    if preparation_rejected(snapshot) {
+        return snapshot.reason_code.is_none()
+            && snapshot.lease_expires_at.is_none()
+            && snapshot.external_reference.is_none()
+            && !snapshot.take_required
+            && snapshot.returned_mail_id.is_none()
+            && snapshot.fencing_version > 0
+            && snapshot.attempt_count > 0
+            && snapshot.claimed_at.is_some_and(|claimed| {
+                !is_zero_time(claimed)
+                    && claimed >= snapshot.created_at
+                    && snapshot.completed_at.is_some_and(|completed| {
+                        !is_zero_time(completed)
+                            && completed >= claimed
+                            && completed <= snapshot.updated_at
+                    })
+            });
     }
 
     // 历史资产处置冲突在发送之前隔离，不能为了适配终态投影而伪造 sending 事实。
@@ -463,6 +485,27 @@ fn valid_failed_reference_metadata(
         && metadata.get("external_reference_proven").is_none_or(|value| value == false)
         && metadata.get("sent_verified").is_none_or(|value| value == false)
         && metadata.get("proof").is_none()
+}
+
+fn preparation_rejected(snapshot: &DeliveryAdminSnapshot) -> bool {
+    snapshot.status == "failed"
+        && snapshot.failure_code.as_deref() == Some("invalid_payload")
+        && snapshot.sending_at.is_none()
+}
+
+/// 列表和完整命令账本都必须验证持久化的未写入标记；不能只凭无 sending 时间放宽终态。
+fn valid_preparation_rejection_metadata(
+    snapshot: &DeliveryAdminSnapshot,
+    metadata: &Value,
+) -> bool {
+    !preparation_rejected(snapshot)
+        || (metadata.get("stage").and_then(Value::as_str) == Some("preflight_blocked")
+            && metadata.get("failure_code").and_then(Value::as_str) == Some("invalid_payload")
+            && metadata.get("write_started").and_then(Value::as_bool) == Some(false)
+            && metadata.get("outcome_unknown").and_then(Value::as_bool) == Some(false)
+            && metadata.get("proof").is_none()
+            && metadata.get("sent_verified").is_none_or(|value| value == false)
+            && metadata.get("external_reference_proven").is_none_or(|value| value == false))
 }
 
 fn valid_invalidated_watch_metadata(metadata: &Value) -> bool {

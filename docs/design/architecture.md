@@ -96,6 +96,7 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 | 邮件详情恢复 | `000052` 由 mail-poll owner 持久保存待读邮件摘要；应用层提供窄日志端口，集成层读取详情前入队，完成前缀与入站事实同事务移除 |
 | 邮件发送节奏 | `000059` 由 application/delivery 定义七类间隔，storage/delivery_scheduler 持久化分组发送起点、fence 内串行复核；jobs 消费提交后唤醒并优先领取超价提醒，Admin runtime 编辑、Worker 重启生效 |
 | 邮件维护轮转 | `000060` 由 application/mail maintenance 定义只读候选轮转，storage/mailbox_sweep 持久化 world 内 `(created_at,id)` 游标；只在逐条开始核对前推进，不把批次后缀、时间预算耗尽或观察当作业务完成；discard 另以原投递元数据的持久尝试围栏禁止未知外写重放 |
+| 邮箱共享读取与发送证明 | integrations 独占 Inbox/Read Mail/Sent 的有界观察、合并读取与发送前后屏障；application/delivery 定义实际发送摘要，storage/delivery_scheduler 与 `000061` 在 Sending 同事务冻结发送尝试并唯一绑定远端 MID；普通观察不授予资金或库存写入权限 |
 | 邮件运行诊断 | application 定义只读观测端口；integrations/jobs 报告真实目标，jobs 持有有界进程快照，HTTP/独立 Admin DTO 显式选择安全数字 MID；无新增迁移或业务写入，重启清空观测 |
 | 装备读取诊断 | application 定义安全原因闭集，storage/mail_poll 通过 `000036` sidecar 和 `000056` 扩展 CHECK 保存首个拒收诊断；诊断不参与命令摘要、完成证明或游标身份 |
 | 旧自寄履约核对 | `000053` 由 application 结算修复端口与 storage legacy repair owner 保存只追加的身份、库存和旧投递关联证明；单笔显式命令处理已核实的 Bot 自持装备，保留原发送证据与命令身份 |

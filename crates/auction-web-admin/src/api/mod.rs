@@ -397,7 +397,20 @@ fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
     let disposition_conflict = value.reason_code.as_deref() == Some("mail_disposition_conflict");
     let watch_invalidated = value.origin_kind == "lot_watch"
         && value.reason_code.as_deref() == Some("lot_watch_invalidated");
-    let timeline_valid = if disposition_conflict || watch_invalidated {
+    let preparation_rejected = value.status == "failed"
+        && value.failure_code.as_deref() == Some("invalid_payload")
+        && sending_at.is_none();
+    let timeline_valid = if preparation_rejected {
+        claimed_at.is_some_and(|claimed| {
+            !is_zero_delivery_time(claimed)
+                && claimed >= created_at
+                && completed_at.is_some_and(|completed| {
+                    !is_zero_delivery_time(completed)
+                        && completed >= claimed
+                        && completed <= updated_at
+                })
+        })
+    } else if disposition_conflict || watch_invalidated {
         sending_at.is_none()
             && claimed_at.is_none_or(|claimed| {
                 !is_zero_delivery_time(claimed) && claimed >= created_at && value.attempt_count > 0
@@ -552,6 +565,21 @@ fn valid_state_fields(
     sending_at: Option<DateTime<Utc>>,
     completed_at: Option<DateTime<Utc>>,
 ) -> bool {
+    // 服务端已验证未写入 metadata；浏览器只接受明确非法载荷的完整领取/完成形状。
+    if value.status == "failed"
+        && value.failure_code.as_deref() == Some("invalid_payload")
+        && sending_at.is_none()
+    {
+        return value.reason_code.is_none()
+            && lease_expires_at.is_none()
+            && claimed_at.is_some()
+            && completed_at.is_some()
+            && value.external_reference.is_none()
+            && !value.take_required
+            && value.returned_mail_id.is_none()
+            && value.fencing_version > 0
+            && value.attempt_count > 0;
+    }
     // watch 失效只能作为未发送的明确失败；不能放宽普通失败或未知发送的时间链。
     if value.reason_code.as_deref() == Some("lot_watch_invalidated") {
         return value.origin_kind == "lot_watch"

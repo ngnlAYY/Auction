@@ -139,7 +139,7 @@ impl MoogleMailGateway {
         });
         let mut session = tokio::time::timeout_at(
             deadline,
-            self.credentials.begin_exclusive(world, MoogleMailOperation::Inbox),
+            self.credentials.begin_read(world, MoogleMailOperation::Inbox),
         )
         .await
         .map_err(|_| fetch_budget_exhausted(world))??;
@@ -151,12 +151,15 @@ impl MoogleMailGateway {
             .await
             {
                 Err(_) => return Err(fetch_budget_exhausted(world)),
-                Ok(Ok(page)) => return Ok(page),
+                Ok(Ok(page)) => {
+                    session.check_current().await?;
+                    return Ok(page);
+                }
                 Ok(Err(error)) if error.category == MoogleMailErrorCategory::SessionExpired => {
                     tokio::time::timeout_at(deadline, session.invalidate_current())
                         .await
                         .map_err(|_| fetch_budget_exhausted(world))??;
-                    if session.advance_exclusive().await.is_err() {
+                    if session.advance_read().await.is_err() {
                         return Err(error);
                     }
                 }
@@ -184,17 +187,25 @@ impl MoogleMailGateway {
                 MoogleMailErrorCategory::Configuration,
             ));
         }
-        let mut session =
-            self.credentials.begin_exclusive(world, MoogleMailOperation::Sent).await?;
+        let mut session = self.credentials.begin_read(world, MoogleMailOperation::Sent).await?;
         for _ in 0..64 {
             match self
-                .read_sent_with_cookie(world, external_mail_id, observed_at, session.cookie())
+                .read_sent_with_cookie(
+                    world,
+                    external_mail_id,
+                    observed_at,
+                    session.cookie(),
+                    false,
+                )
                 .await
             {
-                Ok(snapshot) => return Ok(snapshot),
+                Ok(snapshot) => {
+                    session.check_current().await?;
+                    return Ok(snapshot);
+                }
                 Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
                     session.invalidate_current().await?;
-                    if session.advance_exclusive().await.is_err() {
+                    if session.advance_read().await.is_err() {
                         return Err(error);
                     }
                 }
@@ -226,11 +237,13 @@ impl MoogleMailGateway {
         let deadline = tokio::time::Instant::from_std(request.deadline.min(configured_deadline));
         let session = tokio::time::timeout_at(
             deadline,
-            self.credentials.begin_exclusive(request.world, MoogleMailOperation::Sent),
+            self.credentials.begin_read(request.world, MoogleMailOperation::Sent),
         )
         .await
         .map_err(|_| fetch_budget_exhausted(request.world))??;
-        self.lookup_sent_with_cookie(&request, session.cookie(), deadline).await
+        let report = self.lookup_sent_with_cookie(&request, session.cookie(), deadline).await?;
+        session.check_current().await?;
+        Ok(report)
     }
 
     async fn lookup_sent_with_cookie(
@@ -239,80 +252,76 @@ impl MoogleMailGateway {
         cookie: &MoogleMailCookie,
         deadline: tokio::time::Instant,
     ) -> Result<MoogleMailSentLookupReport, MoogleMailError> {
-        let mut seen = HashSet::new();
+        let round = self.client.read_round(cookie, request.world, false)?;
+        let list = tokio::time::timeout_at(
+            deadline,
+            self.client.observe_sent_list(cookie, &round, request.maximum_pages),
+        )
+        .await
+        .map_err(|_| fetch_budget_exhausted(request.world))??;
         let mut candidates = Vec::new();
-        for page_index in 0..request.maximum_pages {
-            let target = self.client.sent_page(request.world, page_index)?;
-            let document = tokio::time::timeout_at(deadline, self.client.get(&target, cookie))
-                .await
-                .map_err(|_| fetch_budget_exhausted(request.world))??;
-            let page =
-                self.parser.scan_sent_page(&document, request.world, page_index, &mut seen)?;
+        for summary in list.summaries.iter().filter(|summary| {
+            summary.recipient.eq_ignore_ascii_case(&request.recipient)
+                && subject_is_list_projection(&summary.subject, &request.subject)
+        }) {
+            let detail_target =
+                self.client.sent_detail(request.world, &summary.external_mail_id)?;
+            let document = tokio::time::timeout_at(
+                deadline,
+                self.client.get_in_round(&detail_target, cookie, &round),
+            )
+            .await
+            .map_err(|_| fetch_budget_exhausted(request.world))??;
+            let snapshot = self
+                .client
+                .diagnose_parse(
+                    &detail_target,
+                    &document,
+                    self.parser.parse_sent_detail(
+                        &document,
+                        summary,
+                        request.observed_at.min(round.observed_at()),
+                    ),
+                )
+                .await?;
             if tokio::time::Instant::now() >= deadline {
                 return Err(fetch_budget_exhausted(request.world));
             }
-            for summary in page.summaries.iter().filter(|summary| {
-                summary.recipient.eq_ignore_ascii_case(&request.recipient)
-                    && subject_is_list_projection(&summary.subject, &request.subject)
-            }) {
-                let detail_target =
-                    self.client.sent_detail(request.world, &summary.external_mail_id)?;
-                let detail_document =
-                    tokio::time::timeout_at(deadline, self.client.get(&detail_target, cookie))
-                        .await
-                        .map_err(|_| fetch_budget_exhausted(request.world))??;
-                let snapshot = self.parser.parse_sent_detail(
-                    &detail_document,
-                    summary,
-                    request.observed_at,
-                )?;
-                if tokio::time::Instant::now() >= deadline {
-                    return Err(fetch_budget_exhausted(request.world));
+            if snapshot.recipient.eq_ignore_ascii_case(&request.recipient)
+                && snapshot.subject == request.subject
+                && snapshot.remaining_credits == 0
+                && snapshot.cod_pending == 0
+                && (snapshot.collected
+                    || snapshot.remaining_equipment_ids.as_slice()
+                        == std::slice::from_ref(&request.external_equipment_id))
+            {
+                candidates.push(snapshot);
+                if candidates.len() >= 2 {
+                    break;
                 }
-                if snapshot.recipient.eq_ignore_ascii_case(&request.recipient)
-                    && snapshot.subject == request.subject
-                    && snapshot.remaining_credits == 0
-                    && snapshot.cod_pending == 0
-                    && (snapshot.collected
-                        || snapshot.remaining_equipment_ids.as_slice()
-                            == std::slice::from_ref(&request.external_equipment_id))
-                {
-                    candidates.push(snapshot);
-                    if candidates.len() >= 2 {
-                        return Ok(MoogleMailSentLookupReport {
-                            status: MoogleMailSentLookupStatus::Multiple,
-                            candidates,
-                            pages_scanned: page_index + 1,
-                            scan_complete: false,
-                            observed_at: request.observed_at,
-                        });
-                    }
-                }
-            }
-            if !page.has_next_page {
-                let status = match candidates.as_slice() {
-                    [] => MoogleMailSentLookupStatus::NotObserved,
-                    [candidate] if candidate.collected => {
-                        MoogleMailSentLookupStatus::CollectedUnproven
-                    }
-                    [_] => MoogleMailSentLookupStatus::Unique,
-                    _ => MoogleMailSentLookupStatus::Multiple,
-                };
-                return Ok(MoogleMailSentLookupReport {
-                    status,
-                    candidates,
-                    pages_scanned: page_index + 1,
-                    scan_complete: true,
-                    observed_at: request.observed_at,
-                });
             }
         }
+        self.client.check_read_round(cookie, &round).await?;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(fetch_budget_exhausted(request.world));
+        }
+        let status = if candidates.len() >= 2 {
+            MoogleMailSentLookupStatus::Multiple
+        } else if !list.complete {
+            MoogleMailSentLookupStatus::Incomplete
+        } else {
+            match candidates.as_slice() {
+                [] => MoogleMailSentLookupStatus::NotObserved,
+                [candidate] if candidate.collected => MoogleMailSentLookupStatus::CollectedUnproven,
+                _ => MoogleMailSentLookupStatus::Unique,
+            }
+        };
         Ok(MoogleMailSentLookupReport {
-            status: MoogleMailSentLookupStatus::Incomplete,
+            status,
             candidates,
-            pages_scanned: request.maximum_pages,
-            scan_complete: false,
-            observed_at: request.observed_at,
+            pages_scanned: list.pages_scanned,
+            scan_complete: list.complete,
+            observed_at: request.observed_at.min(round.observed_at()),
         })
     }
 
@@ -329,8 +338,7 @@ impl MoogleMailGateway {
                 MoogleMailErrorCategory::Configuration,
             ));
         }
-        let mut session =
-            self.credentials.begin_exclusive(world, MoogleMailOperation::Balance).await?;
+        let mut session = self.credentials.begin_read(world, MoogleMailOperation::Balance).await?;
         for _ in 0..64 {
             let result = async {
                 let target = self.client.balance(world)?;
@@ -345,10 +353,13 @@ impl MoogleMailGateway {
             }
             .await;
             match result {
-                Ok(snapshot) => return Ok(snapshot),
+                Ok(snapshot) => {
+                    session.check_current().await?;
+                    return Ok(snapshot);
+                }
                 Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
                     session.invalidate_current().await?;
-                    if session.advance_exclusive().await.is_err() {
+                    if session.advance_read().await.is_err() {
                         return Err(error);
                     }
                 }
@@ -368,68 +379,69 @@ impl MoogleMailGateway {
         external_mail_id: &str,
         observed_at: DateTime<Utc>,
         cookie: &MoogleMailCookie,
+        fresh: bool,
     ) -> Result<MoogleMailSentSnapshot, MoogleMailError> {
-        let mut seen = HashSet::new();
-        for page_index in 0..self.config.maximum_pages {
-            let target = self.client.sent_page(world, page_index)?;
-            let document = self.client.get(&target, cookie).await?;
-            let sent_page = self
+        let round = self.client.read_round(cookie, world, fresh)?;
+        let deadline = tokio::time::Instant::now() + self.config.fetch_budget;
+        tokio::time::timeout_at(deadline, async {
+            let list =
+                self.client.observe_sent_list(cookie, &round, self.config.maximum_pages).await?;
+            if !list.complete {
+                return Err(operation_error(
+                    MoogleMailOperation::Sent,
+                    world,
+                    MoogleMailErrorCategory::ProtocolDrift,
+                ));
+            }
+            let summary = list
+                .summaries
+                .iter()
+                .find(|summary| summary.external_mail_id == external_mail_id)
+                .ok_or_else(|| {
+                    operation_error(
+                        MoogleMailOperation::Sent,
+                        world,
+                        MoogleMailErrorCategory::NotObserved,
+                    )
+                })?;
+            let target = self.client.sent_detail(world, external_mail_id)?;
+            let document = self.client.get_in_round(&target, cookie, &round).await?;
+            let snapshot = self
                 .client
                 .diagnose_parse(
                     &target,
                     &document,
-                    self.parser.scan_sent_page(&document, world, page_index, &mut seen),
+                    self.parser.parse_sent_detail(
+                        &document,
+                        summary,
+                        observed_at.min(round.observed_at()),
+                    ),
                 )
                 .await?;
-            if let Some(summary) = sent_page
-                .summaries
-                .iter()
-                .find(|summary| summary.external_mail_id == external_mail_id)
+            if snapshot.external_mail_id != external_mail_id
+                || snapshot.world != world
+                || !snapshot.recipient.eq_ignore_ascii_case(&summary.recipient)
+                || !subject_is_list_projection(&summary.subject, &snapshot.subject)
+                || snapshot.sent_at != summary.sent_at
             {
-                let detail_target = self.client.sent_detail(world, external_mail_id)?;
-                let detail_document = self.client.get(&detail_target, cookie).await?;
-                let snapshot = self
+                return self
                     .client
                     .diagnose_parse(
-                        &detail_target,
-                        &detail_document,
-                        self.parser.parse_sent_detail(&detail_document, summary, observed_at),
+                        &target,
+                        &document,
+                        Err(operation_error(
+                            MoogleMailOperation::SentDetail,
+                            world,
+                            MoogleMailErrorCategory::IdentityMismatch,
+                        )),
                     )
-                    .await?;
-                if snapshot.external_mail_id != external_mail_id
-                    || snapshot.world != world
-                    || !snapshot.recipient.eq_ignore_ascii_case(&summary.recipient)
-                    || !subject_is_list_projection(&summary.subject, &snapshot.subject)
-                    || snapshot.sent_at != summary.sent_at
-                {
-                    return self
-                        .client
-                        .diagnose_parse(
-                            &detail_target,
-                            &detail_document,
-                            Err(operation_error(
-                                MoogleMailOperation::SentDetail,
-                                world,
-                                MoogleMailErrorCategory::IdentityMismatch,
-                            )),
-                        )
-                        .await;
-                }
-                return Ok(snapshot);
+                    .await;
             }
-            if !sent_page.has_next_page {
-                return Err(operation_error(
-                    MoogleMailOperation::Sent,
-                    world,
-                    MoogleMailErrorCategory::NotObserved,
-                ));
-            }
-        }
-        Err(operation_error(
-            MoogleMailOperation::Sent,
-            world,
-            MoogleMailErrorCategory::ProtocolDrift,
-        ))
+            self.client.check_read_round(cookie, &round).await?;
+            Ok(snapshot)
+        })
+        .await
+        .map_err(|_| fetch_budget_exhausted(world))?
     }
 
     async fn fetch_with_cookie(
@@ -442,6 +454,7 @@ impl MoogleMailGateway {
         journal: Option<ReadJournalContext<'_>>,
     ) -> Result<MoogleMailPage, MoogleMailError> {
         self.report_poll_progress(journal, MailPollProgressStage::Fetching, None);
+        let round = self.client.read_round(cookie, world, false)?;
         let mut seen = HashSet::new();
         let mut window = VecDeque::with_capacity(limit);
         if let Some((store, claim)) = journal {
@@ -477,50 +490,65 @@ impl MoogleMailGateway {
             }
         }
         let recovering = !window.is_empty();
-        let mut found_cursor = false;
-        let mut reached_end = recovering;
-        for page_index in 0..self.config.maximum_pages {
-            if recovering {
-                break;
-            }
-            if deadline.checked_duration_since(tokio::time::Instant::now()).is_none() {
-                return Err(fetch_budget_exhausted(world));
-            }
-            let target = self.client.inbox_page(world, page_index)?;
-            let document = self.client.get(&target, cookie).await?;
-            let inbox_page = self
-                .client
-                .diagnose_parse(
-                    &target,
-                    &document,
-                    self.parser.scan_inbox_page(&document, world, page_index, &mut seen),
-                )
-                .await?;
-            for summary in inbox_page.summaries {
-                if found_cursor {
-                    continue;
+        // 必须先扫完列表，再允许任何详情 GET 改变 Inbox/Read Mail 成员关系。
+        let inbox = self
+            .client
+            .observe_incoming_list(cookie, &round, self.config.maximum_pages, false)
+            .await?;
+        if !inbox.complete {
+            return Err(protocol_error(world));
+        }
+        if recovering {
+            let missing_from_inbox = window.iter().any(|pending| {
+                !inbox
+                    .summaries
+                    .iter()
+                    .any(|summary| summary.external_mail_id == pending.external_mail_id)
+            });
+            let read = if missing_from_inbox {
+                let read = self
+                    .client
+                    .observe_incoming_list(cookie, &round, self.config.maximum_pages, true)
+                    .await?;
+                if !read.complete {
+                    return Err(protocol_error(world));
                 }
+                Some(read)
+            } else {
+                None
+            };
+            for pending in &window {
+                let found = inbox
+                    .summaries
+                    .iter()
+                    .find(|summary| summary.external_mail_id == pending.external_mail_id)
+                    .or_else(|| {
+                        read.as_ref().and_then(|list| {
+                            list.summaries.iter().find(|summary| {
+                                summary.external_mail_id == pending.external_mail_id
+                            })
+                        })
+                    });
+                if found.is_some_and(|summary| {
+                    summary.world != pending.world || summary.received_at != pending.received_at
+                }) {
+                    return Err(protocol_error(world));
+                }
+                // 历史列表只定位既有账本 MID；不把其他 Read Mail 行加入待处理窗口。
+                // 两个列表都缺失仍按原 MID 读取并核验，绝不丢弃持久 pending。
+            }
+        } else {
+            for summary in &inbox.summaries {
                 if cursor.is_some_and(|value| value == summary.external_mail_id) {
-                    found_cursor = true;
-                    continue;
+                    break;
                 }
                 // 列表显示名不代表完整身份；先有界保留最旧窗口，白名单只能在详情解析后判断。
                 // 窗口满时丢弃队首，避免 backlog 超过 limit 时跳过尚未处理的旧邮件。
                 if window.len() == limit {
                     window.pop_front();
                 }
-                window.push_back(summary);
+                window.push_back(summary.clone());
             }
-            if found_cursor {
-                break;
-            }
-            if !inbox_page.has_next_page {
-                reached_end = true;
-                break;
-            }
-        }
-        if !found_cursor && !reached_end {
-            return Err(protocol_error(world));
         }
         let had_candidates = !window.is_empty();
         if had_candidates
@@ -554,14 +582,16 @@ impl MoogleMailGateway {
                 Some(&summary.external_mail_id),
             );
             let target = self.client.detail(world, &summary.external_mail_id)?;
-            let document =
-                match tokio::time::timeout_at(detail_deadline, self.client.get(&target, cookie))
-                    .await
-                {
-                    Ok(Ok(document)) => document,
-                    Err(_) => break,
-                    Ok(Err(error)) => return Err(error),
-                };
+            let document = match tokio::time::timeout_at(
+                detail_deadline,
+                self.client.get_in_round(&target, cookie, &round),
+            )
+            .await
+            {
+                Ok(Ok(document)) => document,
+                Err(_) => break,
+                Ok(Err(error)) => return Err(error),
+            };
             let message = self
                 .client
                 .diagnose_parse(&target, &document, self.parser.parse_detail(&document, &summary))
@@ -591,6 +621,7 @@ impl MoogleMailGateway {
             }
             messages.push(message);
         }
+        self.client.check_read_round(cookie, &round).await?;
         if messages.is_empty() && !had_candidates {
             return Ok(MoogleMailPage { messages, next_cursor: cursor.map(str::to_owned) });
         }

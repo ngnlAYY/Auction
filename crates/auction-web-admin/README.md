@@ -124,6 +124,8 @@ UID），forum Cookie 不接受该字段；可信自身身份页面协议未闭�
 未知，锁定来源、kind/world/label/player_name、密码或 Cookie 原值与 UUID，只能原样手动重试，后续认证、限流或业务拒绝不解除累计未知。
 既有 delivery 列表兼容独立 `lot_watch` 来源并使用五语言类型标签，只为 `lot_watch_invalidated` 的明确 failed/无 sending/
 无租约/无外部引用/零 COD 投影接受 preflight 时间链且不提供重试入口（见[Admin 契约](docs/contracts/routes.md#admin)）。
+准备阶段的 `failed/invalid_payload` 另要求真实 claimed/completed、有序时间与正 attempt/fencing，且无 sending/租约/
+远端引用/退信责任；未知发送不能套用该例外。Storage 验证原始未写入标记，浏览器只消费安全 DTO，不伪造发送时间。
 
 `/cookies` 提供粘贴 CK 与论坛账号密码两种来源；游戏导入接受完整论坛 CK，但服务端只保存两个共享认证字段。
 账号密码由服务端完成获取，不返回 CK、不保存密码、不猜测玩家名，每次只导入选定类型/世界。

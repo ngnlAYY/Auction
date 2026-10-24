@@ -405,6 +405,10 @@ reconcile 请求明确 `retry`/`succeeded`/`failed` 与对应外部引用/失败
 Admin `reconcile` 的 `succeeded` 分支不能用 `payload.operation=send` 加裸 `external_reference` 完成状态；缺少 Sent exact payload proof 的请求按既有 invalid 条件拒绝，Admin Web 隐藏该成功选项，`retry`/`failed` 仍须显式命令并审计，Return/Take 保留独立人工核对路径；该防御不新增 HTTP 字段或错误类别。Delivery 列表允许告警确定未发送的失败形状：仅 `operations_alert`、`reason_code=operations_alert_batch_terminal`、错误码 `dependency_mismatch|retry_exhausted`，attempt/fencing 为零、claimed/sending/lease/外部引用为空且完成时间有效；
 Storage 与 Admin Web 按同一闭集接受，其他投递终态仍须提供完整执行轨迹。另一个具名例外是 `mail_intake` 的 `reason_code=mail_disposition_conflict`：历史待发送资产冲突可在没有 `sending_at` 时进入 `manual_reconcile`，保留原 payload/命令和隔离原因，只允许人工确认 `failed`，禁止确认成功、重试和失败后重新激活；收件详情的关联 delivery 同步返回可省略的 `reason_code`，不暴露原始 metadata。主动 ComposeSend 的成功 metadata 固定包含 `sent_verified=true`、`external_reference_proven=true`、`proof=sent_exact_payload_v1` 与真实引用 `mooglemail:world:send:mid`；
 Return/Take 使用独立 action proof。baseline/scan、精确匹配和结果未知边界见[Sent 证明](ops/mail/diagnostics.md#主动-composesend-的-sent-证明)，不新增 HTTP 路由。
+准备阶段确定的非法载荷另允许 `failed/invalid_payload`：必须有真实 `claimed_at` 与有序 `completed_at`、正的
+attempt/fencing，且无 `sending_at`、租约、远端引用、退信责任或额外 reason。Storage 还须验证持久
+`stage=preflight_blocked`、`write_started=false`、`outcome_unknown=false` 与无发送证明；Admin 浏览器按同一安全形状解码，
+不放宽普通失败或未知发送的完整执行轨迹，不新增路径、JSON 字段或错误类别。
 
 ### Recovery 与实时运维
 

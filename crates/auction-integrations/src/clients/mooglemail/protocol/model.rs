@@ -1,6 +1,12 @@
 //! MoogleMail 世界、操作和短生命周期协议值对象。
 
-use std::fmt;
+use std::{
+    fmt,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use url::Url;
 
@@ -51,6 +57,8 @@ impl fmt::Display for MoogleMailWorld {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MoogleMailOperation {
     Inbox,
+    /// 已读历史列表；不得当作新入站业务来源。
+    ReadMail,
     Detail,
     Sent,
     SentDetail,
@@ -73,6 +81,7 @@ impl MoogleMailOperation {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Inbox => "inbox",
+            Self::ReadMail => "read_mail",
             Self::Detail => "detail",
             Self::Sent => "sent",
             Self::SentDetail => "sent_detail",
@@ -98,8 +107,14 @@ impl fmt::Display for MoogleMailOperation {
 }
 
 /// 仅在受控边界内临时使用的 MoogleMail Cookie。
-#[derive(Clone, PartialEq, Eq)]
-pub struct MoogleMailCookie(Box<str>);
+#[derive(Clone)]
+pub struct MoogleMailCookie(Arc<MoogleMailCookieValue>);
+
+struct MoogleMailCookieValue {
+    value: Box<str>,
+    observation_key: uuid::Uuid,
+    revoked: AtomicBool,
+}
 
 impl MoogleMailCookie {
     /// 校验 Cookie 行并建立脱敏值对象。
@@ -122,17 +137,42 @@ impl MoogleMailCookie {
             let mut bytes = std::mem::replace(&mut value, trimmed).into_bytes();
             bytes.fill(0);
         }
-        Ok(Self(value.into_boxed_str()))
+        Ok(Self(Arc::new(MoogleMailCookieValue {
+            value: value.into_boxed_str(),
+            observation_key: uuid::Uuid::new_v4(),
+            revoked: AtomicBool::new(false),
+        })))
     }
 
     pub(crate) fn expose(&self) -> &str {
-        &self.0
+        &self.0.value
+    }
+
+    /// 同一凭据的所有克隆共享撤销标记和只在内存使用的观测身份。
+    pub(crate) fn observation_key(&self) -> uuid::Uuid {
+        self.0.observation_key
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        !self.0.revoked.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn revoke(&self) {
+        self.0.revoked.store(true, Ordering::Release);
     }
 }
 
-impl Drop for MoogleMailCookie {
+impl PartialEq for MoogleMailCookie {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.value == other.0.value
+    }
+}
+
+impl Eq for MoogleMailCookie {}
+
+impl Drop for MoogleMailCookieValue {
     fn drop(&mut self) {
-        let mut bytes = std::mem::take(&mut self.0).into_boxed_bytes();
+        let mut bytes = std::mem::take(&mut self.value).into_boxed_bytes();
         bytes.fill(0);
     }
 }

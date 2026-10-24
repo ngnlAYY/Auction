@@ -105,8 +105,12 @@ pub(super) async fn claim_postgres(
                   delivery.payload AS delivery_payload,
                   delivery.external_reference AS delivery_external_reference,
                   delivery.failure_code AS delivery_failure_code,
-                  delivery.result_metadata ->> 'external_reference_proven'
-                      AS delivery_external_reference_proven,
+                  CASE WHEN delivery.result_metadata ->> 'proof' = 'sent_recovered_frozen_v1'
+                    THEN CASE WHEN public.delivery_has_frozen_sent_proof(
+                      delivery.id, delivery.result_metadata, delivery.external_reference)
+                      THEN 'true' ELSE 'false' END
+                    ELSE delivery.result_metadata ->> 'external_reference_proven'
+                  END AS delivery_external_reference_proven,
                   delivery.result_metadata ->> 'operation' AS delivery_result_operation,
                   delivery.result_metadata ->> 'proof' AS delivery_result_proof,
                   o.id AS obligation_row_id,

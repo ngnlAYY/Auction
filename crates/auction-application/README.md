@@ -21,6 +21,12 @@
 间隔为 0–86400 秒、默认全零，非权威通知只加速领取，持久起点及发送资格仍归存储事务。runtime 同组 managed 控制接管，
 分组和兼容语义见[发送间隔](ops/config/README.md#邮件业务发送间隔)，不改变金额、命令身份或已发送结果。
 
+[ports/delivery/expectation.rs](crates/auction-application/src/ports/delivery/expectation.rs) 定义实际 Send 的安全冻结身份；
+`AuthorizedDeliverySend` 持有同一渲染请求对应的不可变 `Arc`，sending fence 取得身份后才可消费发送 future。
+主题、规范化正文摘要、精确金额/EID 与可选凭据版本绑定同事务持久化，不存正文、登录 key 或 Cookie。
+无冻结身份不得授权 Send；发送前确定的非法负载经 `reject_preparation` 直接失败，不伪造 sending 或释放资金占用。
+维护恢复接受所有来源的原尝试身份，不从当前模板/key 猜测旧邮件；旧身份缺失仍限既有安全证明。
+
 ## 身份与凭据约束
 
 [credentials/acquisition.rs](crates/auction-application/src/ports/admin/credentials/acquisition.rs) 定义互斥的粘贴 Cookie /
@@ -228,13 +234,14 @@ token/fencing 和数据库实时租约，过期不得复活；release 只接受�
 `MailboxMaintenanceService` 不把零条 Sent 匹配当作未发送证明，未知 Send 始终保留人工核对；
 Take 只有严格缺失证明或完整详情的全部资产归零才可确认成功；仅原装备集合、Credits、COD 完全相同才可有界重排。
 部分、额外、重复装备或金额漂移保留人工核对。恢复计数只统计已确认提交的实际迁移；
-Send 恢复仍要求冻结金额与资产证明，不能从已领取后的空资产反推原值。
-通知还要求正文保留唯一原入站关联，Sent 时间落在原 `sending_at` 与未知结果记录时间之间；
-分钟精度不能向下放宽围栏，通用重复模板、关联缺失及精度歧义均保持未知，单条模板重建失败不阻断其他候选。
+Send 恢复仍要求原冻结金额与资产证明，不能从已领取后的空资产反推原值；全部来源使用原实际渲染身份，
+不重建当前模板/key，当前观测凭据版本必须匹配原身份。旧无身份通知仅保留无登录 key 的唯一入站关联证明；
+Sent 时间落在原 `sending_at` 与未知结果记录时间之间，分钟精度不能向下放宽围栏，重复匹配与精度歧义均保持未知。
 compose 的未知 COD 不视为零；Admin delivery offset 上限为 `100_000`，Admin 邮件可选空筛选等同省略。
 `MoogleMailboxSweepCandidate` 即使无法重建发送载荷也保留投递身份；维护在尝试单条前持久推进环形位置，
-不跨过未处理的预算后缀。整轮原 deadline 覆盖数据库、session 与远端；discard 必须先消费持久一次性尝试，
-再在同 session 重读草稿，未知或取消不能自动重复。游标与发送完成证明互不替代。
+不跨过未处理的预算后缀。整轮原 deadline 覆盖数据库、session 与远端；discard 必须先消费精确 fence/身份的一次性尝试，
+全库同内容未绑定尝试不能仅凭批次前缀消歧；再在同 session 重读草稿，未知或取消不能自动重复。观察也核对原 fence，
+不会附着到管理员重试后的新尝试；游标与发送完成证明互不替代。
 
 可配置 MM 正文仍为 14 项，默认使用分段英文；模板只展示已决定的拒收、结算与账户事实，不重新决定退回或金额。
 买家装备 COD 的 `{price_breakdown}` 只消费冻结结算明细，`{amount}` 保持实际 COD；已冻结正文与幂等摘要不因默认文案升级

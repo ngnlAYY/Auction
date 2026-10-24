@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
@@ -88,6 +90,7 @@ pub type DeliveryPreparation<'a> = std::pin::Pin<
 pub struct AuthorizedDeliverySend<'a> {
     send: DeliveryPreparedSend<'a>,
     evidence: Option<crate::PreparedSettlementInternalEvidence>,
+    expectation: Option<Arc<crate::DeliverySendExpectation>>,
     cancellation: DeliveryFenceCancellation,
 }
 
@@ -114,7 +117,26 @@ impl<'a> AuthorizedDeliverySend<'a> {
         send: DeliveryPreparedSend<'a>,
         evidence: Option<crate::PreparedSettlementInternalEvidence>,
     ) -> Self {
-        Self { send, evidence, cancellation: DeliveryFenceCancellation::default() }
+        Self {
+            send,
+            evidence,
+            expectation: None,
+            cancellation: DeliveryFenceCancellation::default(),
+        }
+    }
+
+    /// 发送 future 必须消费生成此身份的同一渲染请求，不在 fence 后重读模板或密钥。
+    pub fn with_send_expectation(
+        mut self,
+        expectation: Arc<crate::DeliverySendExpectation>,
+    ) -> Self {
+        self.expectation = Some(expectation);
+        self
+    }
+
+    /// 只借用不可变身份；数据库事务借用现金证据前可低成本复制 Arc 句柄。
+    pub fn send_expectation(&self) -> Option<&Arc<crate::DeliverySendExpectation>> {
+        self.expectation.as_ref()
     }
 
     /// 使用原session的撤销能力；不取得第二个operation guard。
@@ -222,6 +244,7 @@ pub trait DeliveryWorkStore: Send + Sync {
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<DeliveryWorkClaim>>;
 
+    /// 旧入口只能处理非 Send 动作；真实发送必须经过冻结身份授权。
     fn start_sending(
         &self,
         claim: DeliveryWorkClaim,
@@ -230,17 +253,21 @@ pub trait DeliveryWorkStore: Send + Sync {
 
     /// 证据借自原prepared/commit guard。Err表示未确定提交状态，调用方必须撤销owner。
     /// 确定拒绝或冻结用Deferred；None仍须经过数据库legacy保护门。
-    /// 旧适配器仅保留无证据旧语义，不能消费Some并伪报现金授权。
+    /// 旧适配器不得忽略冻结身份而沿用未证明的 Send 授权。
     fn start_sending_authorized<'a>(
         &'a self,
         claim: DeliveryWorkClaim,
         started_at: DateTime<Utc>,
         evidence: Option<&'a crate::SettlementInternalEvidenceSnapshot>,
+        expectation: Option<&'a crate::DeliverySendExpectation>,
     ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
         Box::pin(async move {
-            if evidence.is_some() {
+            if evidence.is_some()
+                || expectation.is_some()
+                || claim.payload.get("operation").and_then(Value::as_str) == Some("send")
+            {
                 return Err(crate::ApplicationError::CapabilityUnavailable(
-                    "delivery cash authorization",
+                    "frozen delivery send authorization",
                 ));
             }
             self.start_sending(claim, started_at).await?;
@@ -257,11 +284,23 @@ pub trait DeliveryWorkStore: Send + Sync {
         _started_at: DateTime<Utc>,
         _evidence: &'a crate::SettlementInternalEvidenceSnapshot,
         _deadline: std::time::Instant,
+        _expectation: Option<&'a crate::DeliverySendExpectation>,
     ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
         Box::pin(async move {
             Err(crate::ApplicationError::CapabilityUnavailable(
                 "deadline-bound delivery cash authorization",
             ))
+        })
+    }
+
+    /// 只用于发送前确定的 invalid_payload；不得伪造 sending 或释放既有资金占用。
+    fn reject_preparation(
+        &self,
+        _claim: DeliveryWorkClaim,
+        _completed_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async {
+            Err(crate::ApplicationError::CapabilityUnavailable("delivery preparation rejection"))
         })
     }
 
