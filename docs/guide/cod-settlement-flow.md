@@ -10,7 +10,7 @@
 | `winner_equipment_cod` | main | `settlement_winner_equipment_cod` | 0 | 买方应付 | 买家 | 无 |
 | `winner_payment_carrier_cod` | main | `settlement_payment_carrier` | 1（载体） | 买方应付+1 | 异世界买家 | 无 |
 | `winner_equipment_handoff` | isekai | `settlement_equipment_handoff` | 0 | 0 | 异世界买家 | carrier 实收 |
-| `seller_payout` | main | `settlement_seller_payout` | 卖家应得 | 0 | 卖家 | 装备 COD（iseskai 时为 handoff） |
+| `seller_payout` | main | `settlement_seller_payout` | 卖家应得 | 0 | 卖家 | 装备 COD（isekai 时为 handoff） |
 | `buyer_refund` | main | `settlement_buyer_refund` | 金额 | 0 | 买家（contingent） | 装备 COD |
 | `unsold_return` / `withdrawn_return` | 原世界 | `settlement_equipment_handoff` | 0 | 0 | 原卖家 | 无 |
 
@@ -82,12 +82,12 @@ flowchart TD
 
 | 要验证什么 | 权威证据 | 查询方式 |
 | --- | --- | --- |
-| COD 邮件是否真的发出 | `deliveries.status='succeeded'` + `external_reference='mooglemail:<world>:send:<mid>'` + `result_metadata.sent_verified=true`；游戏 Sent 箱该 MID | Admin 投递队列；`auctionctl mail-evidence export <evidence_id>`；Worker 日志 `sent_verified` |
+| COD 邮件是否真的发出 | delivery 成功、精确 Sent 载荷证明；有冻结尝试时还须匹配 `delivery_send_attempts` 与唯一 `delivery_sent_bindings`，不能仅看 `sent_verified` 标志 | Admin 投递队列；受控导出的加密证据；游戏 Sent 箱对应 MID |
 | 买家是否收货并付款 | Bot 的 Sent 详情出现 `CoD Paid: <金额>` 回执，`collected=true`；随后 delivery 不再有待领取资产 | Worker 日志 `settlement fulfillment reconciled external Sent/Balance evidence`；`delivery status`/义务状态 |
 | 卖家是否收到 Credits | `seller_payout` 投递 `succeeded`，`credits=<卖家应得>`、`cod=0`；游戏 Sent 箱对应 credits 邮件 | Admin 投递队列；卖家游戏邮箱余额 |
 
-`write_unknown` 表示 POST 已经发出、但 Sent 证明未成立：**先核对游戏 Sent 箱**，
-确认已发出就不要再 retry（会重复发信），确认未发出才允许 `reconcile → retry`。
+`write_unknown` 表示外部写入结果未获完整证明：保留 `manual_reconcile`，先核对原尝试和游戏 Sent 证据。
+Sent 零命中、成功提示或空草稿均不能单独授权重发；人工命令仍受原版本、资金占用和证明门禁约束，不能绕过 [I-09h](docs/contracts/invariants.md#i-09h-bot-内部履约与现金保护)。
 `preflight_unproven` / `compose_not_clean` 表示 compose 页有草稿残留，需先清空（无附件、无正文、`Credits: 0`、`COD: 0`）。
 
 ## 收件人是 Bot 自己
@@ -106,6 +106,8 @@ MoogleMail 无法给自己发信（`recipient_is_sender`），因此义务在领
 分流条件是 MoogleMail 凭据身份 `player_name` 等于义务收件人，**或**收件人命中 Admin runtime
 `bot_players`（大小写不敏感）里配置的 bot 显示名。**已经生成外部 delivery 的历史行不会退回内部路径**：
 这类行会以 `recipient_is_sender` 进入 `manual_reconcile`，必须人工核对后收口；新配置只影响后续新结算。
+上述名称匹配只选择内部候选，不是提交授权；还须满足同一有效凭据的远端身份、generation、新鲜装备/资金证据与持有至事务结束的 guard。
+具体 `strict_cash` / `record_only` 差异由 [I-09h](docs/contracts/invariants.md#i-09h-bot-内部履约与现金保护) 唯一维护，缺证据不得伪造付款、库存或 Sent。
 
 买家是 bot 时不会产生 COD 邮件：内部 `Purchase` 直接按买方应付分配资金并解锁 `seller_payout`，
 卖家仍按正常 credits 邮件收款（卖家是 bot 时走 `RetainSeller` 内部入账）。

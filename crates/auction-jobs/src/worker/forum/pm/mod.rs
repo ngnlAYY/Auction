@@ -67,9 +67,10 @@ impl LotWatchPmRuntime {
                     reconcile,
                     available_worlds,
                 };
-                match tokio::time::timeout(
-                    self.item_timeout,
-                    delivery::process(&self, request, &drain),
+                let deadline = tokio::time::Instant::now() + self.item_timeout;
+                match tokio::time::timeout_at(
+                    deadline,
+                    delivery::process(&self, request, &drain, deadline),
                 )
                 .await
                 {

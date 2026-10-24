@@ -610,7 +610,7 @@ admin-mail-delivery-confirm-unknown = 上次操作结果尚未确认。请先核
 admin-mail-delivery-requeued = 已重新排队，等待后台执行；这不表示邮件已发送、退回或领取成功。
 
 admin-mail-loading = 正在加载邮件数据……
-admin-mail-mailbox = 发件人
+admin-mail-mailbox = 邮箱键
 admin-mail-load = 确认
 admin-mail-trigger = 手动触发收件轮询
 admin-mail-action-success = 邮件轮询状态已更新。

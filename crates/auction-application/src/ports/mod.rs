@@ -63,7 +63,10 @@ mod delivery_cadence;
 pub use delivery_cadence::{DeliverySendIntervals, DeliveryWakeup};
 #[path = "delivery/expectation.rs"]
 mod delivery_expectation;
-pub use delivery_expectation::{DeliverySendCredentialBinding, DeliverySendExpectation};
+pub use delivery_expectation::{
+    DeliveryPreparedExpectation, DeliverySendCredentialBinding, DeliverySendExpectation,
+    DeliveryTakeExpectation,
+};
 #[path = "public/equipment_link.rs"]
 mod equipment_link;
 #[path = "forum/public.rs"]
@@ -364,9 +367,9 @@ pub use mail_diagnostics::{
 pub use mail_display::MailDisplaySnapshot;
 pub use mail_maintenance::{
     MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxEvidenceStore,
-    MoogleMailboxInboxAssets, MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation,
-    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxSweepCandidate,
-    MoogleMailboxUnprovenSend,
+    MoogleMailboxInboxAssets, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
+    MoogleMailboxNoticeExpectation, MoogleMailboxSentEntry, MoogleMailboxSentState,
+    MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
 };
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,

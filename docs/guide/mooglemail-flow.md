@@ -35,7 +35,7 @@ flowchart LR
 三条硬规则：
 
 1. 远端只读与本地写入分离：先解析出 typed envelope，再在本地事务里做幂等命令；外部写入永远在本地提交之后。
-2. 发送必须留证据：新发送要求 `sent_exact_payload_v1`（MID + 主题 + 正文摘要 + 资产矩阵），历史未知投递才允许恢复证明。
+2. 发送必须留证据：新发送要求 `sent_exact_payload_v1`（MID + 主题 + 正文摘要 + 资产矩阵）；发送后结果未知时，由恢复路径核对原冻结尝试，不重发邮件。
 3. 维护只补证据或重排队，不猜金额、不改义务；金额只能来自持久 obligation/payload。
 
 ## 2. 收件轮询
@@ -60,7 +60,7 @@ flowchart TD
 - 列表发件人可能被截断，仅保留在恢复快照中；入站、注册/重绑、回复地址和 allowlist 全部使用详情完整发件人。
 - `batch_size` 限制详情候选总数，不再按列表名称预过滤。不在白名单的详情保留待核对并阻断后续处理，
   不领取、退回或回复；调整白名单后仍按原 MID 恢复，不修改旧摘要或手工跳游标。
-- 收件轮询与三页维护共用同一排他凭据会话，维护失败不影响下一轮收件。
+- 普通收件与三页观察共享绑定凭据、世界和代次的有界读取，不占用 compose/资产操作 guard；写入及资金授权仍持有独占 guard，维护失败不撤销其他路径已提交的事实。
 
 ## 3. 收件分流
 
@@ -192,15 +192,16 @@ flowchart TD
   A[买家退回未付款 COD] --> B[inbound_mail 证据<br/>cod_return_count +1]
   B --> C[recovery reclaiming]
   C --> D[reclaim_equipment_take<br/>从退回邮件领取装备]
-  D --> E{次数}
-  E -- 1/2 --> F[原 COD 投递重置 pending<br/>履约重新排队<br/>awaiting_payment 重算期限]
-  E -- 3 --> G[拉黑买家<br/>理由: 反复退回COD导致拉黑]
+  D --> E{是否达到冻结的 cod_return_limit}
+  E -- 未达上限 --> F[原 COD 投递重置 pending<br/>履约重新排队<br/>awaiting_payment 重算期限]
+  E -- 达到上限 --> G[拉黑买家<br/>理由包含冻结上限的中文次数]
   G --> H[withdrawn_return 义务<br/>装备寄回卖家]
   H --> I[原 COD 与收款履约 failed<br/>resolution=returned_after_three_cod_returns]
 ```
 
 - 退回上限在 `[auction.settlement.recovery] cod_return_limit` 配置（默认 3，范围 1–10），创建 recovery 时冻结。
 - 黑名单理由随冻结次数生成，例如默认三次为“连续三次退回COD邮件”。
+- `cod_returned_three_times` / `returned_after_three_cod_returns` 保留历史代码名；实际触发点为冻结上限，不固定为第三次。
 - Bot 作为买家时不发装备 COD，直接走内部资金把 credits 结给卖家；Bot 作为卖家时不发货款信，直接 COD 装备给买家。
 - 流拍、撤拍和退回装备统一生成 `unsold_return` / `withdrawn_return` 义务，由投递队列自动寄回卖家。
 

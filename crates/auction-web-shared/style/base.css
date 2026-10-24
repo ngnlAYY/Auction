@@ -288,7 +288,7 @@ button:disabled {
   display: inline-block;
   inline-size: fit-content;
   min-inline-size: 0;
-  max-inline-size: var(--truncated-text-max-inline-size);
+  max-inline-size: min(100%, var(--truncated-text-max-inline-size, 100%));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -143,34 +143,25 @@ impl MoogleMailGateway {
         )
         .await
         .map_err(|_| fetch_budget_exhausted(world))??;
-        for _ in 0..64 {
-            match tokio::time::timeout_at(
-                deadline,
-                self.fetch_with_cookie(world, cursor, limit, session.cookie(), deadline, journal),
-            )
-            .await
-            {
-                Err(_) => return Err(fetch_budget_exhausted(world)),
-                Ok(Ok(page)) => {
-                    session.check_current().await?;
-                    return Ok(page);
-                }
-                Ok(Err(error)) if error.category == MoogleMailErrorCategory::SessionExpired => {
-                    tokio::time::timeout_at(deadline, session.invalidate_current())
-                        .await
-                        .map_err(|_| fetch_budget_exhausted(world))??;
-                    if session.advance_read().await.is_err() {
-                        return Err(error);
-                    }
-                }
-                Ok(Err(error)) => return Err(error),
+        match tokio::time::timeout_at(
+            deadline,
+            self.fetch_with_cookie(world, cursor, limit, session.cookie(), deadline, journal),
+        )
+        .await
+        {
+            Err(_) => Err(fetch_budget_exhausted(world)),
+            Ok(Ok(page)) => {
+                session.check_current().await?;
+                Ok(page)
             }
+            Ok(Err(error)) if error.category == MoogleMailErrorCategory::SessionExpired => {
+                tokio::time::timeout_at(deadline, session.invalidate_current())
+                    .await
+                    .map_err(|_| fetch_budget_exhausted(world))??;
+                Err(error)
+            }
+            Ok(Err(error)) => Err(error),
         }
-        Err(operation_error(
-            MoogleMailOperation::Inbox,
-            world,
-            MoogleMailErrorCategory::CredentialUnavailable,
-        ))
     }
 
     /// 按 exact remote ID 扫描 world-specific Sent 列表并读取详情证明。
@@ -188,35 +179,20 @@ impl MoogleMailGateway {
             ));
         }
         let mut session = self.credentials.begin_read(world, MoogleMailOperation::Sent).await?;
-        for _ in 0..64 {
-            match self
-                .read_sent_with_cookie(
-                    world,
-                    external_mail_id,
-                    observed_at,
-                    session.cookie(),
-                    false,
-                )
-                .await
-            {
-                Ok(snapshot) => {
-                    session.check_current().await?;
-                    return Ok(snapshot);
-                }
-                Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
-                    session.invalidate_current().await?;
-                    if session.advance_read().await.is_err() {
-                        return Err(error);
-                    }
-                }
-                Err(error) => return Err(error),
+        match self
+            .read_sent_with_cookie(world, external_mail_id, observed_at, session.cookie(), false)
+            .await
+        {
+            Ok(snapshot) => {
+                session.check_current().await?;
+                Ok(snapshot)
             }
+            Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
+                session.invalidate_current().await?;
+                Err(error)
+            }
+            Err(error) => Err(error),
         }
-        Err(operation_error(
-            MoogleMailOperation::Sent,
-            world,
-            MoogleMailErrorCategory::CredentialUnavailable,
-        ))
     }
 
     /// 在有界页数和绝对截止时间内按收件人、主题和装备剩余资产核对 Sent。
@@ -339,38 +315,29 @@ impl MoogleMailGateway {
             ));
         }
         let mut session = self.credentials.begin_read(world, MoogleMailOperation::Balance).await?;
-        for _ in 0..64 {
-            let result = async {
-                let target = self.client.balance(world)?;
-                let document = self.client.get(&target, session.cookie()).await?;
-                self.client
-                    .diagnose_parse(
-                        &target,
-                        &document,
-                        self.parser.parse_balance(&document, world, observed_at),
-                    )
-                    .await
-            }
-            .await;
-            match result {
-                Ok(snapshot) => {
-                    session.check_current().await?;
-                    return Ok(snapshot);
-                }
-                Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
-                    session.invalidate_current().await?;
-                    if session.advance_read().await.is_err() {
-                        return Err(error);
-                    }
-                }
-                Err(error) => return Err(error),
-            }
+        let result = async {
+            let target = self.client.balance(world)?;
+            let document = self.client.get(&target, session.cookie()).await?;
+            self.client
+                .diagnose_parse(
+                    &target,
+                    &document,
+                    self.parser.parse_balance(&document, world, observed_at),
+                )
+                .await
         }
-        Err(operation_error(
-            MoogleMailOperation::Balance,
-            world,
-            MoogleMailErrorCategory::CredentialUnavailable,
-        ))
+        .await;
+        match result {
+            Ok(snapshot) => {
+                session.check_current().await?;
+                Ok(snapshot)
+            }
+            Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
+                session.invalidate_current().await?;
+                Err(error)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub(super) async fn read_sent_with_cookie(
@@ -382,7 +349,9 @@ impl MoogleMailGateway {
         fresh: bool,
     ) -> Result<MoogleMailSentSnapshot, MoogleMailError> {
         let round = self.client.read_round(cookie, world, fresh)?;
-        let deadline = tokio::time::Instant::now() + self.config.fetch_budget;
+        let deadline = tokio::time::Instant::now()
+            .checked_add(self.config.fetch_budget)
+            .ok_or_else(|| configuration(world))?;
         tokio::time::timeout_at(deadline, async {
             let list =
                 self.client.observe_sent_list(cookie, &round, self.config.maximum_pages).await?;

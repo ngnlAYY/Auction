@@ -106,11 +106,11 @@ where
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
                     tracing::error!(error = %error, delivery_id = %claim.delivery_id, "delivery worker failed to release unavailable claim");
-                    delivery_result = WorkerResult::Error;
+                    merge_worker_result(&mut delivery_result, WorkerResult::Error);
                 }
                 Err(_) => {
                     tracing::error!(delivery_id = %claim.delivery_id, "delivery worker timed out while releasing unavailable claim");
-                    delivery_result = WorkerResult::Error;
+                    merge_worker_result(&mut delivery_result, WorkerResult::Error);
                 }
             }
             let world = claim.payload.get("world").and_then(serde_json::Value::as_str);
@@ -157,7 +157,7 @@ where
         );
     }
     if claim_error.is_some() {
-        delivery_result = WorkerResult::Error;
+        merge_worker_result(&mut delivery_result, WorkerResult::Error);
     }
     worker.metrics.observe_iteration(
         WorkerLoop::Delivery,
@@ -187,11 +187,7 @@ fn merge_delivery_task_result(
             if let Some(recipient) = result.skipped_recipient {
                 skipped_recipients.insert(recipient);
             }
-            match result.worker_result {
-                WorkerResult::Success => {}
-                WorkerResult::Error => *delivery_result = WorkerResult::Error,
-                WorkerResult::Canceled => *delivery_result = WorkerResult::Canceled,
-            }
+            merge_worker_result(delivery_result, result.worker_result);
         }
         Err(error) => {
             tracing::error!(error = %error, "delivery worker task join failed");
@@ -482,6 +478,16 @@ async fn confirm_delivery_handoff<C: Clock>(
     lease: &mut DeliveryLease,
     prepared: &mut auction_application::AuthorizedDeliverySend<'_>,
 ) -> bool {
+    // 现金证据只授权 Send；Take 的原账号期待随普通 fence 冻结，不能进入现金授权路径。
+    if prepared.evidence_mut().is_some()
+        && (claim.payload.get("operation").and_then(serde_json::Value::as_str) != Some("send")
+            || !matches!(
+                prepared.expectation(),
+                Some(auction_application::DeliveryPreparedExpectation::Send(_))
+            ))
+    {
+        return false;
+    }
     let renewed = if let Some(evidence) = prepared.evidence_mut() {
         let deadline = lease
             .operation_deadline(config.finalize_timeout)
@@ -510,8 +516,8 @@ async fn confirm_delivery_handoff<C: Clock>(
     {
         return false;
     }
-    // 冻结的实际发送摘要与 Sending 同事务落库；Arc 只借用原准备对象，不重渲染或复制正文。
-    let expectation = prepared.send_expectation().cloned();
+    // Send 摘要或 Take 原账号期待与 Sending 同事务落库；只复制枚举内的 Arc，不复制内容。
+    let expectation = prepared.expectation().cloned();
     prepared.begin_fence();
     let confirmed = if let Some(evidence) = prepared.evidence_mut() {
         match evidence.begin_commit() {
@@ -524,7 +530,7 @@ async fn confirm_delivery_handoff<C: Clock>(
                         clock.now(),
                         guard.snapshot(),
                         deadline.into_std(),
-                        expectation.as_deref(),
+                        expectation.as_ref(),
                     ),
                 )
                 .await
@@ -542,12 +548,7 @@ async fn confirm_delivery_handoff<C: Clock>(
     } else {
         match tokio::time::timeout_at(
             deadline,
-            store.start_sending_authorized(
-                claim.clone(),
-                clock.now(),
-                None,
-                expectation.as_deref(),
-            ),
+            store.start_sending_authorized(claim.clone(), clock.now(), None, expectation.as_ref()),
         )
         .await
         {

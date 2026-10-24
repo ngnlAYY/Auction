@@ -48,10 +48,9 @@ pub(super) fn MailTriggerButton(mut notice: Signal<Option<AdminActionFeedback>>)
 }
 
 #[component]
-pub(super) fn MailPollingCard(
-    polling: AdminMailPolling,
-    mut notice: Signal<Option<AdminActionFeedback>>,
-) -> Element {
+pub(super) fn MailPollingCard(polling: AdminMailPolling) -> Element {
+    // 反馈属于按邮箱重挂载的卡片；旧命令仍由稳定宿主持有，不能写到后来选择的邮箱。
+    let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let desired_paused = !polling.paused;
     let label = if polling.paused { t!("admin-mail-resume") } else { t!("admin-mail-pause") };
     let state_label =
@@ -109,6 +108,17 @@ pub(super) fn MailPollingCard(
                     );
                 },
                 if busy { {t!("admin-action-working")} } else { "{label}" }
+            }
+            if let Some(feedback) = notice() {
+                p {
+                    class: if feedback.is_success() {
+                        "admin-panel__note action-feedback action-feedback--success"
+                    } else {
+                        "admin-panel__note action-feedback action-feedback--error"
+                    },
+                    role: if feedback.is_success() { "status" } else { "alert" },
+                    {feedback.message(t!("admin-mail-action-success"))}
+                }
             }
         }
     }

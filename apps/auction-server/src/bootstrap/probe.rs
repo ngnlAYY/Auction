@@ -48,12 +48,22 @@ async fn http(stream: &mut (impl AsyncRead + AsyncWrite + Unpin), path: &str) ->
     }
     let mut buffer = [0u8; 512];
     let mut length = 0;
-    while length < buffer.len() && !buffer[..length].contains(&b'\n') {
-        match stream.read(&mut buffer[length..]).await {
+    while length < buffer.len() {
+        let count = match stream.read(&mut buffer[length..]).await {
             Ok(0) | Err(_) => return false,
-            Ok(count) => length += count,
+            Ok(count) => count,
+        };
+        let start = length;
+        length += count;
+        // 只扫描本次新增字节；未终止或仅 LF 的状态行不能证明 HTTP 服务已就绪。
+        if let Some(offset) = buffer[start..length].iter().position(|byte| *byte == b'\n') {
+            let end = start + offset;
+            if end == 0 || buffer[end - 1] != b'\r' {
+                return false;
+            }
+            let line = &buffer[..end - 1];
+            return line.starts_with(b"HTTP/1.1 200 ") || line.starts_with(b"HTTP/1.0 200 ");
         }
     }
-    let line = buffer[..length].split(|byte| *byte == b'\n').next().unwrap_or_default();
-    line.starts_with(b"HTTP/1.1 200 ") || line.starts_with(b"HTTP/1.0 200 ")
+    false
 }

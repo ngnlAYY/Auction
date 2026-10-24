@@ -27,7 +27,7 @@ WASM 分别内嵌；数据库仅 PostgreSQL，Redis 默认关闭。原生程序�
 | [auction-server](apps/auction-server/README.md) | 可选单文件 supervisor，自管三角色子进程 | 沿用 Public/Admin 两个入口 |
 默认分体发布；合并模式仅用于 Linux/PostgreSQL 单主机，auctionctl 仍独立。角色文件用 AUCTION_CONFIG_FILE 选择，合并服务用
 --config-dir 并拒绝该环境变量；配置分层、权限、首次设置及停机迁移见[运维手册](ops/README.md)，普通启动不隐式迁移。论坛新主题目录
-每帖最多 150 件并连续分页、更新楼位于目录之后，标题为 `{世界} Equipment Auction - Session {期数} ({状态})`；首帖倒计时由本站 Rust Public 服务生成，显示计划截止的剩余时长。账户“竞价警告”默认
+每帖最多 150 件并连续分页、更新楼位于目录之后，标题为 `[Auction] {世界} Equipment Auction - Session {期数} ({状态})`；首帖倒计时由本站 Rust Public 服务生成，显示计划截止的剩余时长。账户“竞价警告”默认
 MM 或论坛 PM 并按领先周期跨渠道去重，受控升级须追加 `000042`；入口支持 Cloudflare 橙云 → Caddy HTTPS → Unix socket，仅静态资源
 允许 CDN 缓存，细节见[玩家指南](docs/guide/player-guide.md)与[部署约束](ops/README.md#cloudflare-整站代理)及[技术栈](docs/design/tech-stack.md)。
 
@@ -58,10 +58,12 @@ apps 默认不含数据库驱动或 Web，自行调用 cargo 须显式选 postgr
   共享字段、幂等与挑战处理见[外部凭据契约](docs/contracts/routes.md#外部凭据)。无需新增迁移，替换凭据后仍须重启 Worker。
 - MoogleMail 在发送 fence 前只读检查草稿并完成完整 Sent 基线；Bot 内部履约依赖联合身份、正向库存、资金账本及统一现金发送门。
   启用前须[停机同版升级并显式对账](ops/README.md#bot-内部履约与资金保护升级)；旧未知投递仍人工核对，税与内部留存不自动再投资。
-- 本轮全源码审计修复需追加 `000060`，并同步更新 Public/API、Admin/API 与 Worker；涉及会话 Cookie 显式同步、
+- 会话 Cookie 同步与邮件维护轮转升级需追加 `000060`，并同步更新 Public/API、Admin/API 与 Worker；涉及
   邮件维护游标、Admin 预算引用和共享运行目录，按[升级说明](ops/README.md#全源码审计修复升级)处理，不能只替换单个旧进程。
-- MoogleMail 的 Inbox、Read Mail、Sent 共享有界读取，编写与资金授权保持独立互斥；所有新发送冻结实际内容摘要并唯一绑定远端 MID。
+- MoogleMail 的 Inbox、Read Mail、Sent 共享有界读取，写入与资金授权保持独立互斥；所有新发送冻结实际内容摘要并唯一绑定远端 MID。
   需追加 `000061`，按[共享读取升级说明](ops/README.md#邮箱共享读取与发送证明升级)停机同版切换，不补造旧发送证明。
+- `000062` 加速发送引用碰撞查询，`000063` 冻结 Take 原账号并对恢复实施身份/fence 核对；
+  会话、未决命令、握手超时及启动收口修复须同版更新并刷新页面，前提见[稳定性修复升级](ops/README.md#发送引用索引与稳定性修复升级)。
 
 源码、路由和静态编译不构成生产验收。[状态页](docs/status.md)分别登记实现、历史证据与缺口；
 真实服务、非空数据、并发、浏览器和恢复流程须另行授权验证。默认不新增或执行行为测试，已有测试保留。

@@ -33,6 +33,11 @@ impl SettlementFact {
     /// 校验结算事实的获胜/流拍矩阵和外部身份边界。
     pub fn validate(&self, policy: &SettlementPolicy) -> Result<(), DomainError> {
         policy.validate()?;
+        self.validate_shape()
+    }
+
+    /// 批量计算已校验冻结策略后复用事实检查，避免逐 lot 重扫同一锚点曲线。
+    pub(super) fn validate_shape(&self) -> Result<(), DomainError> {
         if self.lot_id.is_nil()
             || self.equipment_id.is_nil()
             || self.seller_identity.trim().is_empty()

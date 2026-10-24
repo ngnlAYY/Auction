@@ -178,7 +178,6 @@ pub fn page() -> Element {
                 super::actions::MailPollingCard {
                     key: "{polling.mailbox_key}",
                     polling: polling.clone(),
-                    notice,
                 }
             },
             Some(Ok(None)) => rsx! {

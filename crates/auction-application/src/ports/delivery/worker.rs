@@ -90,7 +90,7 @@ pub type DeliveryPreparation<'a> = std::pin::Pin<
 pub struct AuthorizedDeliverySend<'a> {
     send: DeliveryPreparedSend<'a>,
     evidence: Option<crate::PreparedSettlementInternalEvidence>,
-    expectation: Option<Arc<crate::DeliverySendExpectation>>,
+    expectation: Option<crate::DeliveryPreparedExpectation>,
     cancellation: DeliveryFenceCancellation,
 }
 
@@ -112,7 +112,7 @@ impl Drop for DeliveryFenceCancellation {
 }
 
 impl<'a> AuthorizedDeliverySend<'a> {
-    /// 可信适配器组装；None 只表示 legacy 候选，数据库仍须核验全部资金保护。
+    /// 可信适配器组装；None 只表示没有内部现金证据，不授予绕过 Send/Take 冻结身份的能力。
     pub fn new(
         send: DeliveryPreparedSend<'a>,
         evidence: Option<crate::PreparedSettlementInternalEvidence>,
@@ -130,12 +130,21 @@ impl<'a> AuthorizedDeliverySend<'a> {
         mut self,
         expectation: Arc<crate::DeliverySendExpectation>,
     ) -> Self {
-        self.expectation = Some(expectation);
+        self.expectation = Some(crate::DeliveryPreparedExpectation::Send(expectation));
         self
     }
 
-    /// 只借用不可变身份；数据库事务借用现金证据前可低成本复制 Arc 句柄。
-    pub fn send_expectation(&self) -> Option<&Arc<crate::DeliverySendExpectation>> {
+    /// Take future 必须持有生成此身份的原会话，不能在 sending fence 后重新选择账号。
+    pub fn with_take_expectation(
+        mut self,
+        expectation: Arc<crate::DeliveryTakeExpectation>,
+    ) -> Self {
+        self.expectation = Some(crate::DeliveryPreparedExpectation::Take(expectation));
+        self
+    }
+
+    /// 只借用不可变身份；复制枚举只增加其内部单层 Arc 计数，不复制内容或会话。
+    pub fn expectation(&self) -> Option<&crate::DeliveryPreparedExpectation> {
         self.expectation.as_ref()
     }
 
@@ -244,7 +253,7 @@ pub trait DeliveryWorkStore: Send + Sync {
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<DeliveryWorkClaim>>;
 
-    /// 旧入口只能处理非 Send 动作；真实发送必须经过冻结身份授权。
+    /// 旧入口只允许无需冻结身份的 Return；Send 与 Take 必须经过各自准备身份授权。
     fn start_sending(
         &self,
         claim: DeliveryWorkClaim,
@@ -253,21 +262,24 @@ pub trait DeliveryWorkStore: Send + Sync {
 
     /// 证据借自原prepared/commit guard。Err表示未确定提交状态，调用方必须撤销owner。
     /// 确定拒绝或冻结用Deferred；None仍须经过数据库legacy保护门。
-    /// 旧适配器不得忽略冻结身份而沿用未证明的 Send 授权。
+    /// 旧适配器不得忽略冻结身份而沿用未证明的 Send 或 Take 授权。
     fn start_sending_authorized<'a>(
         &'a self,
         claim: DeliveryWorkClaim,
         started_at: DateTime<Utc>,
         evidence: Option<&'a crate::SettlementInternalEvidenceSnapshot>,
-        expectation: Option<&'a crate::DeliverySendExpectation>,
+        expectation: Option<&'a crate::DeliveryPreparedExpectation>,
     ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
         Box::pin(async move {
             if evidence.is_some()
                 || expectation.is_some()
-                || claim.payload.get("operation").and_then(Value::as_str) == Some("send")
+                || matches!(
+                    claim.payload.get("operation").and_then(Value::as_str),
+                    Some("send" | "take")
+                )
             {
                 return Err(crate::ApplicationError::CapabilityUnavailable(
-                    "frozen delivery send authorization",
+                    "frozen delivery authorization",
                 ));
             }
             self.start_sending(claim, started_at).await?;
@@ -277,14 +289,14 @@ pub trait DeliveryWorkStore: Send + Sync {
 
     /// 现金 fence 沿用原 prepared 单调截止，并收紧至本次租约/提交预算。
     /// 仅期限前确定 Sending 才允许外发；Err/超时须撤销 owner，Deferred 表示确定结束。
-    /// 默认明确不支持，旧实现不因编译兼容而获得忽略提交期限的授权能力。
+    /// 仅 Send 可进入现金授权；默认明确不支持，不因编译兼容而忽略提交期限或接受 Take。
     fn start_sending_authorized_until<'a>(
         &'a self,
         _claim: DeliveryWorkClaim,
         _started_at: DateTime<Utc>,
         _evidence: &'a crate::SettlementInternalEvidenceSnapshot,
         _deadline: std::time::Instant,
-        _expectation: Option<&'a crate::DeliverySendExpectation>,
+        _expectation: Option<&'a crate::DeliveryPreparedExpectation>,
     ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
         Box::pin(async move {
             Err(crate::ApplicationError::CapabilityUnavailable(

@@ -671,7 +671,7 @@ admin-mail-delivery-confirm-unknown = 上次操作結果尚未確認。請先核
 admin-mail-delivery-requeued = 已重新排隊，等待背景執行；這不表示郵件已傳送、退回或領取成功。
 
 admin-mail-loading = 正在載入郵件資料……
-admin-mail-mailbox = 寄件者
+admin-mail-mailbox = 信箱鍵
 admin-mail-load = 確認
 admin-mail-trigger = 手動觸發收件輪詢
 admin-mail-action-success = 郵件輪詢狀態已更新。

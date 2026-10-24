@@ -43,8 +43,8 @@ axum = { version = "0.8.9", default-features = false, features = [
     "tracing",
     "ws",
 ] }
-# 直接识别 Axum WebSocket 的类型化容量错误，才能恢复旧 v1 的 1009 close 契约。
-tungstenite = { version = "0.30.0", default-features = false }
+# 必填：与 Axum 的实际传递版本一致；跨版本 Error 类型无法 downcast，会丢失 v1 的 1009 close 契约。
+tungstenite = { version = "0.29.0", default-features = false }
 # 浏览器端使用 Dioxus CSR：产物为静态 WASM/JS/HTML，由 auction-http 内嵌后提供。
 # 不启用 fullstack/server，避免第二套 HTTP 服务器与 auction-http 的路由所有权冲突。
 dioxus = { version = "0.7.10", default-features = false, features = [

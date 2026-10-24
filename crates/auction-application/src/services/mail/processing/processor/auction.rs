@@ -232,11 +232,11 @@ where
                 );
             }
             items.push(crate::MailAuctionItem {
-                external_equipment_id: snapshot.external_equipment_id.clone(),
-                name: snapshot.name.clone(),
-                category: snapshot.category.clone(),
+                external_equipment_id: snapshot.external_equipment_id,
+                name: snapshot.name,
+                category: snapshot.category,
                 level: snapshot.level,
-                attributes: snapshot.attributes.clone(),
+                attributes: snapshot.attributes,
                 source_fingerprint: snapshot.source_fingerprint,
                 collected_at: snapshot.collected_at,
                 start_price: start_prices[index],

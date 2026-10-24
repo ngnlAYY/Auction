@@ -55,16 +55,27 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         )
         .context("initialize Prometheus metrics")?,
     );
-    let listener = listener::bind(config).await?;
+    // 订阅信号后也必须轮询启动等待；取消时 listener 与未完成装配一起释放，尚无后台任务。
+    let (listener, state, heartbeat, realtime_relay) = tokio::select! {
+        biased;
+        signal = signals.recv() => {
+            let signal = signal.context("receive public-api startup signal")?;
+            anyhow::bail!("public-api startup interrupted by {signal}");
+        }
+        result = async {
+            let listener = listener::bind(config).await?;
+            let (state, heartbeat, realtime_relay) = state::configure_state(
+                config,
+                telemetry.health_reader(),
+                Arc::clone(&metrics),
+                cache.clone(),
+            )
+            .await
+            .context("configure public-api state")?;
+            Ok::<_, anyhow::Error>((listener, state, heartbeat, realtime_relay))
+        } => result?,
+    };
     let listener_description = listener.description();
-    let (state, heartbeat, realtime_relay) = state::configure_state(
-        config,
-        telemetry.health_reader(),
-        Arc::clone(&metrics),
-        cache.clone(),
-    )
-    .await
-    .context("configure public-api state")?;
     #[cfg(not(feature = "postgres"))]
     let _ = realtime_relay;
     let state = state.with_metrics(metrics);

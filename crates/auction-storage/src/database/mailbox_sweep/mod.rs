@@ -1,8 +1,9 @@
 //! MoogleMail 维护的本地证据与受证明恢复；状态、资金、履约及追加审计同事务提交。
 
 use auction_application::{
-    ApplicationFuture, DeliverySendExpectation, MoogleMailboxEvidenceStore,
-    MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend, RepositoryError,
+    ApplicationFuture, DeliverySendCredentialBinding, DeliverySendExpectation,
+    DeliveryTakeExpectation, MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate,
+    MoogleMailboxUnprovenSend, RepositoryError,
 };
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -11,7 +12,7 @@ use uuid::Uuid;
 #[cfg(feature = "postgres")]
 use super::delivery_audit::{DeliveryAudit, RELEASE, SUCCEED, append as append_delivery_audit};
 #[cfg(feature = "postgres")]
-use super::delivery_scheduler::attempts;
+use super::delivery_scheduler::{attempts, take_attempts};
 #[cfg(feature = "postgres")]
 use super::settlement_funding as funding;
 use super::{DatabaseStore, TrackedPool};
@@ -170,11 +171,15 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
     fn bind_recovered_action<'a>(
         &'a self,
         delivery_id: Uuid,
+        fencing_version: i64,
         external_mail_id: String,
         metadata: Value,
+        expectation: &'a DeliveryTakeExpectation,
+        observation: &'a DeliverySendCredentialBinding,
     ) -> ApplicationFuture<'a, bool> {
         Box::pin(async move {
             if delivery_id.is_nil()
+                || fencing_version <= 0
                 || external_mail_id.is_empty()
                 || external_mail_id.len() > 64
                 || !external_mail_id.bytes().all(|byte| byte.is_ascii_digit())
@@ -185,8 +190,16 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    bind_recovered_action(store.pool(), delivery_id, external_mail_id, metadata)
-                        .await
+                    bind_recovered_action(
+                        store.pool(),
+                        delivery_id,
+                        fencing_version,
+                        external_mail_id,
+                        metadata,
+                        expectation,
+                        observation,
+                    )
+                    .await
                 }
             }
         })
@@ -195,17 +208,33 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
     fn requeue_unproven<'a>(
         &'a self,
         delivery_id: Uuid,
+        fencing_version: i64,
         retries: i64,
         reason: &'a str,
+        expectation: &'a DeliveryTakeExpectation,
+        observation: &'a DeliverySendCredentialBinding,
     ) -> ApplicationFuture<'a, bool> {
         Box::pin(async move {
-            if delivery_id.is_nil() || !(0..=8).contains(&retries) || reason.is_empty() {
+            if delivery_id.is_nil()
+                || fencing_version <= 0
+                || !(0..=8).contains(&retries)
+                || reason.is_empty()
+            {
                 return Err(storage_error("MoogleMail 维护重排队参数无效"));
             }
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    requeue_unproven(store.pool(), delivery_id, retries, reason).await
+                    requeue_unproven(
+                        store.pool(),
+                        delivery_id,
+                        fencing_version,
+                        retries,
+                        reason,
+                        expectation,
+                        observation,
+                    )
+                    .await
                 }
             }
         })
@@ -235,6 +264,8 @@ struct UnprovenSendRow {
     sending_fencing_version: i64,
     has_send_attempt: bool,
     expectation: Option<Value>,
+    has_take_attempt: bool,
+    take_expectation: Option<Value>,
 }
 
 #[cfg(feature = "postgres")]
@@ -276,12 +307,17 @@ async fn unproven_sends(
                 ) ELSE COALESCE(d.payload->'attachment_ids','[]'::jsonb) END AS attachment_value,
                 COALESCE((d.result_metadata->>'sweep_retries')::bigint, 0) AS sweep_retries,
                 d.fencing_version,
-                COALESCE(attempt.sending_fencing_version,d.fencing_version) AS sending_fencing_version,
+                COALESCE(attempt.sending_fencing_version,take_attempt.taking_fencing_version,
+                         d.fencing_version) AS sending_fencing_version,
                 EXISTS (SELECT 1 FROM public.delivery_send_attempts history
                         WHERE history.delivery_id=d.id) AS has_send_attempt,
-                attempt.expectation
+                attempt.expectation,
+                EXISTS (SELECT 1 FROM public.delivery_take_attempts history
+                        WHERE history.delivery_id=d.id) AS has_take_attempt,
+                take_attempt.expectation AS take_expectation
          FROM public.deliveries d
          LEFT JOIN LATERAL public.delivery_current_send_attempt(d.id) attempt ON true
+         LEFT JOIN LATERAL public.delivery_current_take_attempt(d.id) take_attempt ON true
          LEFT JOIN public.mailbox_sweep_cursors sweep ON sweep.world_id = $1
          WHERE d.status = 'manual_reconcile'
            AND d.payload->>'operation' IN ('send', 'take')
@@ -332,11 +368,15 @@ fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailbo
         sending_fencing_version,
         has_send_attempt,
         expectation,
+        has_take_attempt,
+        take_expectation,
     } = row;
     if recipient.is_empty() || cod < 0 || credits < 0 || outcome_recorded_at < sending_at {
         return None;
     }
-    if has_send_attempt && expectation.is_none() {
+    if (has_send_attempt && expectation.is_none())
+        || (has_take_attempt && take_expectation.is_none())
+    {
         // 当前发送签名损坏或已换尝试，不能把新格式记录降级成旧模板恢复。
         return None;
     }
@@ -351,6 +391,20 @@ fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailbo
                 || frozen.credits != credits
                 || frozen.equipment_ids != attachment_ids
                 || operation != "send"
+            {
+                return None;
+            }
+            Some(frozen)
+        }
+        None => None,
+    };
+    let take_expectation = match take_expectation {
+        Some(value) => {
+            let frozen: DeliveryTakeExpectation = serde_json::from_value(value).ok()?;
+            if !frozen.validate()
+                || frozen.world_id != world_id
+                || frozen.external_mail_id != inbound_mail_id
+                || operation != "take"
             {
                 return None;
             }
@@ -396,6 +450,7 @@ fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailbo
         fencing_version,
         sending_fencing_version,
         send_expectation,
+        take_expectation,
     })
 }
 
@@ -447,29 +502,50 @@ async fn begin_compose_discard(
 #[cfg(feature = "postgres")]
 enum RecoveryUpdate<'a> {
     Send(&'a str, &'a Value, i64, Option<&'a DeliverySendExpectation>),
-    Action(&'a str, &'a Value),
-    Requeue(i64, &'a str),
+    Action(&'a str, &'a Value, i64, &'a DeliveryTakeExpectation, &'a DeliverySendCredentialBinding),
+    Requeue(i64, &'a str, i64, &'a DeliveryTakeExpectation, &'a DeliverySendCredentialBinding),
 }
 
 #[cfg(feature = "postgres")]
 async fn bind_recovered_action(
     pool: &TrackedPool<Postgres>,
     delivery_id: Uuid,
+    fencing_version: i64,
     external_mail_id: String,
     metadata: Value,
+    expectation: &DeliveryTakeExpectation,
+    observation: &DeliverySendCredentialBinding,
 ) -> Result<bool, auction_application::ApplicationError> {
-    persist_transition(pool, delivery_id, RecoveryUpdate::Action(&external_mail_id, &metadata))
-        .await
+    persist_transition(
+        pool,
+        delivery_id,
+        RecoveryUpdate::Action(
+            &external_mail_id,
+            &metadata,
+            fencing_version,
+            expectation,
+            observation,
+        ),
+    )
+    .await
 }
 
 #[cfg(feature = "postgres")]
 async fn requeue_unproven(
     pool: &TrackedPool<Postgres>,
     delivery_id: Uuid,
+    fencing_version: i64,
     retries: i64,
     reason: &str,
+    expectation: &DeliveryTakeExpectation,
+    observation: &DeliverySendCredentialBinding,
 ) -> Result<bool, auction_application::ApplicationError> {
-    persist_transition(pool, delivery_id, RecoveryUpdate::Requeue(retries, reason)).await
+    persist_transition(
+        pool,
+        delivery_id,
+        RecoveryUpdate::Requeue(retries, reason, fencing_version, expectation, observation),
+    )
+    .await
 }
 
 #[cfg(feature = "postgres")]
@@ -540,8 +616,15 @@ async fn persist_transition_once(
     let mut tx = pool.begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE").execute(&mut *tx).await?;
     // 当前观测 generation→资金→recovery→credential→action→delivery；历史 generation 只作身份。
-    if let RecoveryUpdate::Send(_, metadata, _, Some(expectation)) = update {
-        recovery::lock_observation(&mut tx, expectation, metadata).await?;
+    match update {
+        RecoveryUpdate::Send(_, metadata, _, Some(expectation)) => {
+            recovery::lock_observation(&mut tx, expectation, metadata).await?;
+        }
+        RecoveryUpdate::Action(_, _, _, expectation, observation)
+        | RecoveryUpdate::Requeue(_, _, _, expectation, observation) => {
+            recovery::lock_take_observation(&mut tx, expectation, observation).await?;
+        }
+        RecoveryUpdate::Send(_, _, _, None) => {}
     }
     let account = funding::lock_funded_delivery_account(&mut tx, delivery_id).await?;
     let recovery_send = if matches!(update, RecoveryUpdate::Send(..)) {
@@ -562,6 +645,17 @@ async fn persist_transition_once(
     {
         return Err(RecoveryError::Rejected);
     }
+    if let RecoveryUpdate::Action(_, _, _, expectation, _)
+    | RecoveryUpdate::Requeue(_, _, _, expectation, _) = update
+        && !attempts::lock_credential_binding(
+            &mut tx,
+            &expectation.world_id,
+            expectation.credential.as_ref(),
+        )
+        .await?
+    {
+        return Err(RecoveryError::Rejected);
+    }
     if recovery_send {
         super::recovery_commands::lock_recovery_delivery_retry_actions(&mut tx, delivery_id)
             .await?;
@@ -570,23 +664,42 @@ async fn persist_transition_once(
         .bind(delivery_id)
         .fetch_optional(&mut *tx)
         .await?;
+    let taking_fencing_version = match update {
+        RecoveryUpdate::Action(_, _, fencing_version, expectation, _)
+        | RecoveryUpdate::Requeue(_, _, fencing_version, expectation, _) => {
+            let Some((original_fencing, frozen)) =
+                take_attempts::load_current(&mut tx, delivery_id, *fencing_version).await?
+            else {
+                tx.rollback().await?;
+                return Ok(false);
+            };
+            if &frozen != *expectation {
+                tx.rollback().await?;
+                return Ok(false);
+            }
+            Some(original_fencing)
+        }
+        RecoveryUpdate::Send(..) => None,
+    };
     let (origin_kind, origin_id, completed_at): (String, String, DateTime<Utc>) = match update {
-        RecoveryUpdate::Requeue(retries, reason) => {
+        RecoveryUpdate::Requeue(retries, reason, fencing_version, _, _) => {
             let updated: Option<(String, DateTime<Utc>)> = sqlx::query_as(
                 "UPDATE public.deliveries
                  SET status='pending', completed_at=NULL, failure_code=NULL, lease_token=NULL,
-                     lease_expires_at=NULL, sending_at=NULL, updated_at=clock_timestamp(),
+                     lease_expires_at=NULL, claimed_at=NULL, sending_at=NULL, updated_at=clock_timestamp(),
                      result_metadata=COALESCE(result_metadata, '{}'::jsonb)
                          || jsonb_build_object('sweep_retries',$2::bigint,
                              'sweep_requeued_at',clock_timestamp(),'sweep_requeue_reason',$3::text)
                  WHERE id=$1 AND status='manual_reconcile' AND origin_kind='mail_intake'
                    AND payload->>'operation'='take' AND external_reference IS NULL
                    AND COALESCE((result_metadata->>'sweep_retries')::bigint,0)=$2-1
+                   AND fencing_version=$4
                  RETURNING origin_id,updated_at",
             )
             .bind(delivery_id)
             .bind(retries)
             .bind(reason)
+            .bind(fencing_version)
             .fetch_optional(&mut *tx)
             .await?;
             let Some(row) = updated else {
@@ -611,16 +724,17 @@ async fn persist_transition_once(
             };
             row
         }
-        RecoveryUpdate::Action(mid, metadata) => {
-            let world: String = sqlx::query_scalar(
-                "SELECT COALESCE(payload->>'world','main') FROM public.deliveries WHERE id=$1",
-            )
-            .bind(delivery_id)
-            .fetch_one(&mut *tx)
-            .await?;
-            if !matches!(world.as_str(), "main" | "isekai") {
+        RecoveryUpdate::Action(mid, metadata, fencing_version, expectation, _) => {
+            if *mid != expectation.external_mail_id
+                || metadata.get("operation").and_then(Value::as_str) != Some("take")
+                || metadata.get("proof").and_then(Value::as_str)
+                    != Some("action_recovered_inbox_v1")
+                || metadata.get("external_reference_proven").and_then(Value::as_bool) != Some(true)
+                || metadata.get("recovered_mid").and_then(Value::as_str) != Some(*mid)
+            {
                 return Err(RecoveryError::Rejected);
             }
+            let world = &expectation.world_id;
             let reference = format!("mooglemail:{world}:take:{mid}");
             let updated: Option<(String, DateTime<Utc>)> = sqlx::query_as(
                 "UPDATE public.deliveries
@@ -632,6 +746,7 @@ async fn persist_transition_once(
                    AND payload->>'operation'='take' AND external_reference IS NULL
                    AND sending_at IS NOT NULL AND COALESCE(payload->>'world','main')=$4
                    AND payload->>'external_mail_id'=$5
+                   AND fencing_version=$6
                    AND NOT EXISTS (
                        SELECT 1 FROM public.deliveries other WHERE other.external_reference=$2)
                  RETURNING origin_id,completed_at",
@@ -639,8 +754,9 @@ async fn persist_transition_once(
             .bind(delivery_id)
             .bind(&reference)
             .bind(*metadata)
-            .bind(&world)
+            .bind(world)
             .bind(*mid)
+            .bind(fencing_version)
             .fetch_optional(&mut *tx)
             .await?;
             let Some(row) = updated else {
@@ -702,8 +818,15 @@ async fn persist_transition_once(
                 "mailbox_maintenance": true,
                 "resumed_recovery_action": resumed_action,
                 "fencing_version": match update {
-                    RecoveryUpdate::Send(_, _, fencing_version, _) => Some(*fencing_version),
-                    _ => None,
+                    RecoveryUpdate::Send(_, _, fencing_version, _)
+                    | RecoveryUpdate::Action(_, _, fencing_version, _, _)
+                    | RecoveryUpdate::Requeue(_, _, fencing_version, _, _) => *fencing_version,
+                },
+                "taking_fencing_version": taking_fencing_version,
+                "observation_credential": match update {
+                    RecoveryUpdate::Action(_, _, _, _, observation)
+                    | RecoveryUpdate::Requeue(_, _, _, _, observation) => Some(observation),
+                    RecoveryUpdate::Send(..) => None,
                 },
                 "sending_fencing_version": match update {
                     RecoveryUpdate::Send(_, metadata, _, Some(_)) => {
@@ -712,7 +835,7 @@ async fn persist_transition_once(
                     _ => None,
                 },
                 "recovered_mid": match update {
-                    RecoveryUpdate::Send(mid, _, _, _) | RecoveryUpdate::Action(mid, _) => Some(*mid),
+                    RecoveryUpdate::Send(mid, _, _, _) | RecoveryUpdate::Action(mid, _, _, _, _) => Some(*mid),
                     _ => None,
                 },
             }),

@@ -31,6 +31,7 @@ Public 竞价与 Admin 管理状态留在各 surface，本 crate 不依赖存储
 入口禁用且 Escape 不冒泡到背景），面板保留 `tabindex="-1"`，没有可用子控件时接管焦点与 Tab 循环；
 焦点循环、恢复与滚动锁由外壳 hook 统一处理；`TruncatedText` 支持悬停、键盘/触控固定与选择，
 不复制输入或弹窗正文到 title。原生事件回调必须恢复 Dioxus Runtime/Scope，延迟任务和监听随卸载清理。
+截断文本的 compact/medium/wide 档位只是展示上限，同时不得超过所在容器宽度；窄屏仍保留完整内容提示。
 
 手机（48rem 以下）及触控横屏（64rem 以下）采用底部弹窗，编辑控件保持 16px 字号与 44px 最小高度，
 分页与操作组允许换行。共享安全区变量供两端页面留出系统边缘空间；弹窗按可见视口限制尺寸和滚动范围。
@@ -72,9 +73,9 @@ Public 校时。CSRF/Basic Auth 由 Admin 构造请求，不能在共享层变�
 `a11y/` 提供初始聚焦、Tab 循环、背景滚动锁与关闭后焦点恢复，跳过禁用、隐藏或 inert 祖先下的控件，
 只在真实换页时聚焦主内容。`bootstrap/` 在必要首屏
 请求完成（含错误态）后只触发一次骨架退出，15 秒未就绪只提示慢加载，真实 WASM panic 才写失败标记。金额缩写使用
-整数精确格式；`Time` 直接订阅当前 I18n 语言并用显式语言 API 格式化 Asia/Shanghai 时间，不等待 `<html lang>`
-同步 effect，也不参与业务时钟判断。既有 `format_localized_time` 辅助函数保留 DOM 语言兼容语义，
-响应式调用方使用 `i18n::format_localized_time_for_language`。
+整数精确格式；`Time` 与两端时间辅助函数直接订阅当前 I18n 语言，并调用
+`i18n::format_localized_time_for_language` 格式化 Asia/Shanghai 时间，不等待 `<html lang>` 同步 effect，
+也不参与业务时钟判断；不再保留读取 DOM 语言的兼容入口。
 
 ## 语言选择
 

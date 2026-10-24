@@ -82,6 +82,9 @@ P03 读取 PostgreSQL `realtime_events`，先校验拍卖公开边界；发现�
 
 Public `/api/v1/ws`：HTTP/1.1 GET Upgrade 返回 101，HTTP/2 扩展 CONNECT 返回 200，其他方法 405；两种握手共用会话、Origin、限流与范围门禁。连接必须显式选择一种范围：`auction_id=<uuid>` 订阅单一拍卖流，`scope=auctions` 订阅公开发现范围；查询必须且只能包含上述一个键，`after`、`page_size` 或同时出现两个目标返回 400。每个文本帧是一个 v1 公开事件对象，不使用 API 外壳，也不发送事件页；发现流只允许 `auction.created`，客户端不得把内部 `stream_key` 当公开字段。单拍卖连接除核对事件所属 `auction_id` 外，还核对 `auction.created`、`auction.opened`、`auction.schedule_updated`、`preview_catalog_changed` 的 world 与当前页面 world；HTTP catch-up 按 v1 只冻结 `auction_id` 的事件页目标语义。
 
+升级前的会话读取与握手受 `request_timeout_seconds`（默认 15 秒）约束，数据库等待不能无限占用握手任务。
+101/扩展 CONNECT 200 返回后，请求计时器结束；已升级连接不受此期限限制，继续遵守下述会话、Ping/Pong、写入与 drain 边界。
+
 连接使用已认证会话，服务端只推送事件，浏览器消息不得作为业务命令入口。启用 origin allowlist 时握手必须且只能携带一个精确命中的 `Origin`；连接尝试限流未拒绝时错误优先级为 origin→query→session，其固定窗口账本数值沿用 `mutation_rate_limit` 但与 mutation 额度互不消耗。升级成功后不发送 `hello`、`ack` 等应用握手帧。每条连接 frame/message 读取上限 4 KiB，初始 Pong 期限 60 秒、收到 Pong 后延长 60 秒、服务端每 50 秒 Ping，事件、Ping 和主动 Close 的每次写入受 5 秒期限约束。
 
 升级后首次推送前必须只读复核同一 Public 会话；有限会话在 30 秒与当前剩余有效期的较小值后再次复核，永久会话固定每 30 秒复核，单次读取最多 5 秒。检查覆盖持久化撤销、用户/凭据 active 状态及有限截止，不更新活动时间或有效期，Pong 不能续命；到期时重读权威状态，明确保存登录时长已修改同一会话期限时允许继续连接。注销、封禁、换钥撤销在下一次检查生效，不承诺与命令提交同步关闭；检查前可能等待当前一次有界写入，关闭帧仍遵守 5 秒写入预算。Pong 超时、其他 framing/读错误、事件或 Ping 写失败直接结束，不得伪装成应用原因；慢客户端不得阻塞竞价事务或事件持久化。连接关闭使用以下冻结 code/reason：

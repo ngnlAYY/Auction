@@ -57,18 +57,26 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
   compose 正文只提取一次，资产集合排序使用借用，表单编码直接移交 HTTP body，写入顺序及证明条件不变。
 - Return / Take：写前核对 sender 与预期资产；Return 只接受身份、正文及全部资产精确匹配的 `[RTS]` 回执，
   不再把未读 Inbox 中目标 MID 缺席当作成功（详情 GET 本身会标记已读）；缺少回执保持 `outcome_unknown`，不自动重寄。
-  Take 证明身份不变、资产归零及唯一回执。
-  维护读取复用完整详情解析；严格缺失提示、全空资产与精确原资产重排的区别见[维护契约](ops/mail/diagnostics.md#定期三页维护)。
+  Take 证明身份不变、资产归零及唯一回执。Take 授权准备先固定原独占凭据 session 并核验 owner；
+  `DeliveryTakeExpectation` 仅冻结 world/MID 与原 credential ID/version/generation，资产仍来自不可变 claim。
+  原 session 同时覆盖持久 sending fence 的撤销 guard 和一次性动作 future；详情 GET、精确资产校验及 POST
+  留在该 future 内，fence 后不重新取得当前 Cookie。Return 不扩展为 Take 冻结或自动恢复。
+  维护读取复用完整详情解析，明确缺失也返回当次观察的 credential binding；应用核对原账号/版本，
+  存储再锁验当前 generation、原尝试与候选 fence。新旧账号的同 MID 缺失不能混用。
+  旧无 Take 冻结身份或配置 Cookie 无持久 binding 时可即时证明动作，但未知后不自动确认或重排；
+  严格缺失提示、全空资产与精确原资产重排的区别见[维护契约](ops/mail/diagnostics.md#定期三页维护)。
 - 论坛读取/写入：同 thread 规范分页与真实帖子/作者身份、完整页数；写入同源表单与精确 board/thread/post，
   回执始终核对，原始正文额外确认由 Worker 的 `verify_post_body` 开关控制；启用时首帖同时精确核对编辑表单中的
   真实标题与描述，不以正文相同或本地元数据代替标题证明。正文调试输出始终脱敏。
+  创建主题还要求表单 action 为同源 `/index.php`，可选 `act`/`CODE` 与新主题动作一致，且不携带已有 thread/post；
+  短时 `s` 与既有同值重复隐藏字段仍按原协议保留，冲突路由在 POST 前拒绝。
   HTTP 200 的创建回执与固定帖回执共用唯一 `Please stand by...` 标题、唯一 meta refresh 和一致同源链接证明；
   错误页中的普通主题链接不得产生 `Created`，证据缺失或冲突保留 `write_unknown`，不授权再次 POST。
-  标题使用 `{Main|Isekai} Equipment Auction - Session {sequence:03} ({state})`，状态直接来自同源数据库快照；
-  保留至少三位期数，超过远端 50 字符则明确拒绝，不截断身份。精确对账覆盖其余六种新状态标题、七个旧短标题、
-  合法长度的旧完整标题和旧 `HV#` 摘要标题；当前标题与候选合并为最多十六个
-  精确标题，一次版面读取检查全部候选，不逐标题重复 GET。同名重复主题或候选指向不同主题一律失败关闭，
-  不进行模糊匹配，也不因状态变化自动新建主题。
+  标题使用 `[Auction] {Main|Isekai} Equipment Auction - Session {sequence:03} ({state})`，状态直接来自同源数据库快照；
+  保留至少三位期数，本地最多 80 字符，不截断身份；远端是否接受长标题须另行验证，原回执/回读及未知写入门禁不变。
+  精确对账覆盖其余六种新状态标题、七个旧无前缀状态标题、七个旧短标题、旧无状态完整标题和旧 `HV#` 摘要标题，
+  历史形式仍遵守当时的长度边界；当前标题与候选合并为最多二十三个精确标题，一次版面读取完成核对。
+  同名重复主题或候选指向不同主题一律失败关闭，不模糊匹配，也不因状态变化自动新建主题。
 - 论坛 PM：新鲜 MID 表单绑定当前姓名与 sender，单次 POST 保存 Sent、不 tracking；完整有界遍历自己的同标题 Sent
   后核验收件人 UID、完整正文、sender 与 Sent MSID。
 
@@ -116,6 +124,8 @@ Worker 配置数据库凭据能力后读取唯一 active Cookie 并解密，暂�
 论坛数据库凭据同样保留真实 scope，不以部署选择器覆盖它；世界相关主题和 PM 在 session 开始时核对 scope，
 每次物理请求仍检查 owner。无世界目标的账号资料读取不伪造世界限制，所有路径复用同一 Cookie、连接池和限速器。
 论坛及装备读取直接消费唯一候选；失效回写后结束当前操作，不保留无效轮换循环或为重试复制完整正文。
+普通邮箱与维护读取也只尝试当前唯一 Cookie，失效后撤销并返回，不维护轮换集合或重复尝试循环。
+Sent 读取预算无法表示为绝对截止时返回 `Configuration`，不因超大调用方预算触发时间加法 panic。
 
 论坛完整主题额外最多四路分页读取，共享请求间隔与 32 MiB 聚合上限，作者身份只采信系统作者链接；目录续页增加顺序
 POST、布局回读及可选正文校验成本，配置预算校验只是单目录页下界。大场次需提高既有 `item_timeout_seconds`/
@@ -127,6 +137,8 @@ POST、布局回读及可选正文校验成本，配置预算校验只是单目�
 不再对每个节点重扫祖先链。引用排除、块间换行和空白规范化仍使用原有规则。
 完整目录只建立一次借用 code 索引；规范 post ID 的严格递增同时证明唯一，不另存重复身份集合。
 装备 DOM 基数检查使用有界迭代，attributes JSON 只构造一次，严格结构与字段校验不变。
+装备 URL 借用拆分路径，不建立路径片段集合或重复复制 ID；手工 URL 与邮件诊断共用快照投影。
+canonical 指纹分块散列原域与原 JSON 字节，不再复制整份 JSON 拼接前缀，历史摘要保持一致。
 
 `forum/render.rs` 按分类/编号排序，每帖最多 150 件、从 #1 连续分页，每页独立校验 65,531 字节上限，过长失败而不是
 截断装备；续页重复分类标题，旧主题按持久化 `legacy_single` 保持一页。解析器只合并紧邻首帖、同作者且拍卖/页码
@@ -179,6 +191,8 @@ HTTP gate；安全 PM client 在构造时建立、随克隆共享连接池并独
 ASCII 且拒绝 BBCode/HTML 括号；Sent 列表的同标题行证明 recipient 数字 UID，只请求该行的同源
 `CODE=03&VID=sent&MSID=...` 详情并核验 sender、标题和 `.postcolor` 完整纯文本。每次核对最多 8 个列表页、8 个同标题
 候选、8 MiB 聚合响应，分页只跟随实际校验链接、不猜 `st` 步长并去除 `s` 参数；发现首个副本不提前成功。
+POST 或写后 Sent 明确返回 401/登录失效时，同样撤销当前 Cookie；发送结果仍为 `OutcomeUnknown`，
+不因失效判定未发送、不自动换号或重发，普通 403 不构成凭据失效证明。
 `reconcile` 只用当前凭据读取同 sender 的 Sent，换账号拒绝、未找到返回 `None`，绝不授权重寄。远端按姓名投递，
 准备后改名可能误投且只能事后发现；历史浏览器样本不等价于本适配器验收，本轮无实发或行为测试。
 
@@ -194,6 +208,7 @@ HTTPS origin、精确 world 路径、响应类型或身份校验。`equipment/ga
 
 Cookie、装备 key 和用户登录 key 的指纹采用既有域字节分块 HMAC，不构造额外的明文拼接缓冲。Cookie 与登录 key
 解密后直接移交原认证缓冲，截短前清理尾部；随机源、加解密或指纹失败路径尽力清理已有敏感缓冲。
+装备、Cookie、用户登录 key 与邮件诊断归档的加密缓冲一次预留认证标签容量，避免追加标签时再次扩容复制密文。
 AES-256-GCM、AAD、nonce、指纹域及十六进制编码保持原格式，不迁移或重写历史信封。
 运行时的 `EhentaiCookie`、`MoogleMailCookie`、`MoogleMailToken` 与 `MoogleMailEquipmentKey`
 销毁时尽力清理当前缓冲；MoogleMail 表单逐值覆写，而非仅缩短 `String` 长度。Cookie 构造不再

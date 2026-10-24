@@ -59,6 +59,7 @@ allowlist、runtime 开关和数据库 enabled world 的交集中新建，已有
 Fulfillment pending 通过 `prepare_next` 区分 External 与 `InternallySatisfied`：内部成功立即结束 claim，不 activate、
 不生成 delivery ID。pending 身份准备与 enqueued 收款核对采用不超过有效 lease/30 秒的单一超时，覆盖 guard 排队、
 只读请求及数据库提交，不 detach future；提交阶段取消由 opaque guard 撤销 owner，普通证据/资金等待由应用持久延期。
+每次阶段交接先复核 claim 截止，零剩余预算不 poll 应用 future，避免 Tokio timeout 的首次 poll 在过期后启动只读外呼。
 阶段收口只保留日志所需的 obligation ID 与重试次数，不为指标复制整份装备/交付快照。
 自动恢复健康与履约复用数据库资金策略：仅记账账户跳过 Balance 请求，现金状态标为不适用，仍更新恢复积压及真实投递状态。
 
@@ -83,6 +84,8 @@ Delivery 有效并发取配置与 transport 的较小值（MoogleMail 当前上�
 且不 poll；确定 Deferred 只延后，legacy 候选也保留撤销钩子。Send、Return、Take 的证明由各 owner 校验，
 成功不取决于 HTTP 成功页（见[邮件诊断](ops/mail/diagnostics.md)）。
 实际发送的完整主题、正文摘要及资产矩阵由准备句柄冻结，交接时随原 Sending 事务落库；Worker 不重渲染正文。
+Take 的准备句柄冻结原账号与 world/MID，并持有原凭据会话；Worker 通过 Send/Take 判别期待原样传给普通 Sending fence。
+现金证据只授权 Send，Take 不进入现金授权入口；回执迟到、续租失败和取消继续沿同一截止与撤销路径收口。
 确定的 `invalid_payload` 在有效 claimed 下失败收口并追加审计，不伪造 Sending；其它只读准备失败仍延期。
 
 Mail 仅对可重试错误与超时做有界 inline retry，处理前先查持久化完成证明。批次预算独立于 lease，耗尽只提交已完成
@@ -90,12 +93,13 @@ Mail 仅对可重试错误与超时做有界 inline retry，处理前先查持�
 完成证明和已接受决定允许恢复提交前已完成的步骤，不能按取件后的资产变化重新解释旧邮件。
 邮箱租约的单调截止在领取请求前建立，回执只会按剩余 TTL 收紧；续租等待不得跨越已知旧租约，
 新截止锚定续租发起时刻。租约失效或回执过晚只取消原处理 future，不额外释放或重排已开始的副作用。
-各已配置世界的维护与 Inbox 处理并行运行，拥有独立的 fetch/处理预算；一方失败不撤销另一方已提交的结果。
-两条 future 归同一轮次持有，取消与排空不遗留 detached 任务；停止后不再领取新的邮箱 claim。
+各已配置世界的 Read Mail 观察、Sent/compose 维护与 Inbox 处理三条 future 并行运行，拥有独立的 fetch/处理预算；
+一方失败不撤销其他分支已提交的结果。三条 future 归同一轮次持有，取消与排空不遗留 detached 任务；停止后不再领取新的邮箱 claim。
 候选以 `000060` 的持久环形游标逐条轮转，20/200 边界不推进未处理后缀；discard 的一次性尝试围栏保留未知结果，
 不自动重新删除草稿或发送邮件。普通读取共享观察，但不借用 compose 或资金写授权，精确规则见[维护契约](ops/mail/diagnostics.md#定期三页维护)。
 批次 ID 使用借用哈希集合做期望线性去重，不复制邮件或 ID；论坛 512 字符摘要惰性生成，不先建立完整分词/拼接副本。
 recovery 摘要只借用字段，旧 prepare 查询仅保留一个必要 owned 副本，JSON、摘要与命令身份不变。
+轮询上下文直接按 claim 构造并转移给处理器，不再建立只用于克隆的临时上下文和重复复制邮箱/world 字符串。
 轮询将当前 claim 传给 `fetch_claimed`；生产 MoogleMail gateway 在首个详情 GET 前持久登记整窗列表身份，优先恢复同邮箱、
 同 world 的待读前缀。完成 cursor 与队列前缀在同一 fenced 事务提交，读取取消或业务失败保留未完成后缀，不能靠未读列表恢复。
 
@@ -109,7 +113,7 @@ exact post ID、拍卖/页码标记与本地持久化身份齐备后才导入普
 可重试身份/存储错误停止后续楼层，导入前按稳定 post ID 读取 pending 边界；pending 原帖删除、编辑或未收口仍阻断。
 已完成命令按稳定帖子身份和原业务负载重放，不因前序普通帖子删除而重新编号历史；完整扫描的派生楼层可下降，
 仍受固定布局、lease 和 claim/revision CAS 保护，不回退事实 sequence。主题同步未知 POST（含 `reconcile_write_unknown`）
-短退避后只做当前及历史标题的精确只读对账；最多十六个标题合并一次版面读取，候选指向不同主题时失败关闭。
+短退避后只做当前及历史标题的精确只读对账；最多二十三个标题合并一次版面读取，候选指向不同主题时失败关闭。
 无法证明原目标时等待 CLI 持久人工再授权；已发布主题的回帖刷新按持久 post ID 对账，关闭正文校验仍保留内容未知门禁。
 状态后缀直接来自同源快照，不按日期推断。Preview、Live、Final、Settling 及需收口的终态可刷新已有主题，
 只有 Live/Final 继续导入竞价；Cancelled 只刷新既有主题，不创建新帖或导入新竞价，完整证明后停止轮询。
@@ -119,6 +123,7 @@ exact post ID、拍卖/页码标记与本地持久化身份齐备后才导入普
 不深复制事件 payload。当前广播边界是 Public 本地 Hub，未冻结外部 sink 不得伪装为已发送。
 PM 的 prepare 只能 GET，持久 sending fence 明确提交才消费 prepared.send，任何 sending 不能安全延期；单项总预算覆盖
 claim/prepare/fence/send/finish 且严格小于 lease，drain 停止新领取、主进程 drain 结束后 abort 剩余任务。
+单项单调截止在领取前冻结，并在每个阶段回执后复核；迟到的 sending 成功回执不授权首次 poll Send，保留原 sending 对账。
 同步、回帖及 PM 共用唯一 gateway 的实际 world 可用性，数据库在 LIMIT 前过滤不可用世界；
 PM 的来源世界从通知关联拍卖读取，不改冻结消息或摘要，shared 凭据仍允许两世界。
 各循环默认值、预算及有效并发见[配置手册](ops/config/README.md#worker-循环预算)。

@@ -67,7 +67,7 @@ impl fmt::Display for MoogleMailErrorCategory {
 /// MoogleMail 外部错误。
 /// 错误只保留操作、世界、分类、是否可重试和加密证据引用，不保存 URL、Cookie、token、原始 HTML 或底层
 /// HTTP 错误，避免错误被日志或 Admin DTO 间接回显敏感数据。`write_started` 用于区分“读侧
-/// 登录失效可安全轮换”和“写请求已发出只能标记失效、不能盲目重试”。
+/// 登录失效尚未外写”和“写请求已发出只能标记失效、不能盲目重试”；单 Cookie 不自动轮换。
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 #[error(
     "MoogleMail 请求失败: operation={operation} world={world} category={category} temporary={temporary} write_started={write_started} evidence_status={evidence_status} evidence_id={evidence_id:?}"
@@ -129,7 +129,7 @@ impl MoogleMailError {
         self.write_started
     }
 
-    /// 只有读侧的 session 失效才允许尝试下一个凭据。
+    /// 标识尚未外部写入的会话失效，供调用方撤销当前凭据。
     pub const fn is_session_expired(self) -> bool {
         matches!(self.category, MoogleMailErrorCategory::SessionExpired) && !self.write_started
     }

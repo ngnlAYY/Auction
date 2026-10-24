@@ -56,22 +56,6 @@ pub fn without_fluent_isolation(mut value: String) -> String {
     value
 }
 
-/// 兼容不显式传入语言的既有调用：按当前 `<html lang>` 格式化 Asia/Shanghai 时间。
-/// 响应式组件应直接订阅 I18n 并调用 [`format_localized_time_for_language`]，避免 DOM effect 时序滞后。
-pub fn format_localized_time(value: &str) -> String {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let locale = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.document_element())
-            .and_then(|root| root.get_attribute("lang"))
-            .unwrap_or_else(|| "en".to_owned());
-        format_localized_time_for_language(value, &locale)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    format_localized_time_for_language(value, "en")
-}
-
 /// 按显式语言把 RFC3339 时间显示为 Asia/Shanghai 时间，不读取 DOM 或依赖语言同步 effect。
 /// 浏览器使用 `Intl.DateTimeFormat`；非 WASM 构建保留同一目标时区的兜底格式。
 pub fn format_localized_time_for_language(value: &str, _language: &str) -> String {

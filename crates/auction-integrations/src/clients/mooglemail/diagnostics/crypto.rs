@@ -24,8 +24,11 @@ pub fn seal(
         aead::UnboundKey::new(&aead::AES_256_GCM, &derived.0)
             .map_err(|_| MailDiagnosticError::Encryption)?,
     );
-    let mut output = nonce.to_vec();
-    let mut plain = SensitiveBytes(plaintext.to_vec());
+    let sealed_len = plaintext.len() + aead::AES_256_GCM.tag_len();
+    let mut output = Vec::with_capacity(NONCE + sealed_len);
+    output.extend_from_slice(&nonce);
+    let mut plain = SensitiveBytes(Vec::with_capacity(sealed_len));
+    plain.0.extend_from_slice(plaintext);
     aead.seal_in_place_append_tag(
         aead::Nonce::assume_unique_for_key(nonce),
         aead::Aad::from(aad),
@@ -79,7 +82,8 @@ fn derive(key: &DataKey, source: &str, label: &[u8]) -> SensitiveBytes {
 }
 
 pub fn aad(header: &[u8]) -> Vec<u8> {
-    let mut output = MAGIC.to_vec();
+    let mut output = Vec::with_capacity(MAGIC.len() + header.len());
+    output.extend_from_slice(MAGIC);
     output.extend_from_slice(header);
     output
 }

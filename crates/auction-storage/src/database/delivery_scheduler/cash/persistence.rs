@@ -1,7 +1,7 @@
 //! 精确delivery锁验、持久sending与追加现金证据审计。
 
 use auction_application::{
-    DeliverySendExpectation, DeliveryWorkClaim, SettlementInternalEvidenceSnapshot,
+    DeliveryPreparedExpectation, DeliveryWorkClaim, SettlementInternalEvidenceSnapshot,
 };
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row, Transaction};
@@ -39,7 +39,7 @@ pub(super) async fn persist_sending(
     claim: &DeliveryWorkClaim,
     started_at: DateTime<Utc>,
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
-    expectation: Option<&DeliverySendExpectation>,
+    expectation: Option<&DeliveryPreparedExpectation>,
 ) -> Result<(), FenceError> {
     let changed = sqlx::query(concat!(
         "UPDATE public.deliveries AS deliveries SET status='sending',sending_at=$2,updated_at=clock_timestamp() WHERE id=$1 AND status='claimed' AND lease_token=$3 AND fencing_version=$4 AND lease_expires_at>$2 AND lease_expires_at>clock_timestamp() AND ",
@@ -49,15 +49,21 @@ pub(super) async fn persist_sending(
     if changed.rows_affected() != 1 {
         return Err(FenceError::Rejected);
     }
-    if let Some(expectation) = expectation {
-        super::super::attempts::freeze(tx, claim, started_at, expectation).await?;
-    }
     let request_id = claim.command_id.to_string();
     let mut metadata =
         worker_state_metadata("sending", claim.fencing_version, claim.attempt_count, None);
-    if let Some(expectation) = expectation {
-        metadata["send_expectation"] =
-            serde_json::to_value(expectation).map_err(|_| FenceError::Rejected)?;
+    match expectation {
+        Some(DeliveryPreparedExpectation::Send(expectation)) => {
+            super::super::attempts::freeze(tx, claim, started_at, expectation).await?;
+            metadata["send_expectation"] =
+                serde_json::to_value(expectation.as_ref()).map_err(|_| FenceError::Rejected)?;
+        }
+        Some(DeliveryPreparedExpectation::Take(expectation)) => {
+            super::super::take_attempts::freeze(tx, claim, started_at, expectation).await?;
+            metadata["take_expectation"] =
+                serde_json::to_value(expectation.as_ref()).map_err(|_| FenceError::Rejected)?;
+        }
+        None => {}
     }
     if let Some(evidence) = evidence {
         // 追加非敏感瞬时证明，不把generation/观测时间混入稳定reserve命令摘要。

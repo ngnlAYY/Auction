@@ -61,6 +61,8 @@ PostgreSQL runtime 服务组合应用端口、TOML 原子替换和 durable 命�
 Linux Unix 模式的目录、owner/group、锁和 `0660` socket 门禁见[配置说明](ops/config/README.md#http-listener-与安全)。
 SIGINT/SIGTERM 停止接收 HTTP、停止 heartbeat 并发布停止状态，drain 最多 10 秒，第二次信号强制收口，
 随后按配置限时刷新 exporter；稳定退出码仍待统一。
+启动期的 listener 绑定与异步依赖装配同时等待 SIGINT/SIGTERM；收到信号即取消未完成装配并释放 listener，
+不会等到数据库恢复后才退出，也不会启动 heartbeat。已写入的 runtime 恢复事实仍按 durable/unknown 契约核对，取消不代表回滚。
 
 ## 产物、feature 与验证
 

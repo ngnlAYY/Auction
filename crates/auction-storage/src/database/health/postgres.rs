@@ -77,7 +77,7 @@ pub(super) async fn publish_postgres(
     .bind(&command.tracing.last_error_code)
     .bind(command.observation_sequence)
     .bind(ttl_micros)
-    .bind(Json(command.details.clone()))
+    .bind(Json(&command.details))
     .fetch_optional(store.pool())
     .await
     .map_err(|_| storage_error("写入 PostgreSQL 服务心跳失败"))?;

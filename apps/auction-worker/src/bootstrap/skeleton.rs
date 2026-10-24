@@ -1,7 +1,7 @@
 //! 无数据库 Worker 启动骨架与非持久化运行模式。
 
 use super::control::{
-    WorkerControlTaskExit, join_worker_control_task, worker_control_server_config,
+    WorkerRuntimeTaskExit, join_worker_control_task, worker_control_server_config,
 };
 use super::*;
 
@@ -46,7 +46,8 @@ pub(super) async fn run_worker_skeleton(
             .context("bind Worker control socket for worker skeleton")?;
     let control_shutdown = Arc::new(tokio::sync::Notify::new());
     let control_stop = Arc::clone(&control_shutdown);
-    let task_exit = WorkerControlTaskExit::new(control.clone(), runtime_failure);
+    let task_exit =
+        WorkerRuntimeTaskExit::new(control.clone(), runtime_failure, "control_server_stopped");
     let mut control_task = Some(TaskGuard::new(tokio::spawn(async move {
         let _task_exit = task_exit;
         server.run(async move { control_stop.notified().await }).await

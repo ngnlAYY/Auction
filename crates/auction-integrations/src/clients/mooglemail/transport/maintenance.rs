@@ -5,8 +5,9 @@
 
 use auction_application::{
     ApplicationError, MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard,
-    MoogleMailboxInboxAssets, MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation,
-    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxUnprovenSend, RepositoryError,
+    MoogleMailboxInboxAssets, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
+    MoogleMailboxNoticeExpectation, MoogleMailboxSentEntry, MoogleMailboxSentState,
+    MoogleMailboxUnprovenSend, RepositoryError,
 };
 use chrono::{DateTime, Utc};
 
@@ -177,7 +178,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
         &'a self,
         world_id: &'a str,
         external_mail_id: &'a str,
-    ) -> MailboxFuture<'a, Option<MoogleMailboxInboxAssets>> {
+    ) -> MailboxFuture<'a, MoogleMailboxInboxObservation> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
             let mut session = self.read_session(world, MoogleMailOperation::Detail).await?;
@@ -188,12 +189,16 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
             {
                 Ok(assets) => {
                     check_observation_session(&session).await?;
-                    Ok(assets.map(|assets| MoogleMailboxInboxAssets {
-                        sender: assets.sender,
-                        equipment_ids: assets.equipment_ids,
-                        credits: assets.credits,
-                        cod: assets.cod,
-                    }))
+                    Ok(MoogleMailboxInboxObservation {
+                        assets: assets.map(|assets| MoogleMailboxInboxAssets {
+                            sender: assets.sender,
+                            equipment_ids: assets.equipment_ids,
+                            credits: assets.credits,
+                            cod: assets.cod,
+                        }),
+                        // 明确缺失也必须携带原观察会话身份，不能把换号后的缺席当作 Take 证明。
+                        observation_credential: session.observation_credential_binding(),
+                    })
                 }
                 Err(error) => {
                     if error.is_session_expired() {

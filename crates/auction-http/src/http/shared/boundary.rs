@@ -26,7 +26,6 @@ use uuid::Uuid;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
-const WEBSOCKET_PATH: &str = "/api/v1/ws";
 
 /// 一个 surface 的非业务 HTTP 边界配置。
 #[derive(Clone)]
@@ -99,7 +98,6 @@ pub(crate) async fn enforce(
         .insert(ConnectInfo(SocketAddr::new(client_address, peer.map_or(0, |value| value.port()))));
 
     let method = request.method();
-    let is_websocket = request.uri().path() == WEBSOCKET_PATH;
     let route_pattern =
         request.extensions().get::<MatchedPath>().map(MatchedPath::as_str).unwrap_or("");
     let traceparent = single_header(request.headers(), "traceparent");
@@ -118,20 +116,7 @@ pub(crate) async fn enforce(
     let response_request_id = request_id.as_str();
     let response = async move {
         let run = AssertUnwindSafe(next.run(request)).catch_unwind();
-        if is_websocket {
-            return match run.await {
-                Ok(response) => response,
-                Err(_) => {
-                    tracing::error!("HTTP handler panic");
-                    error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "internal_error",
-                        "服务暂时不可用",
-                        response_request_id,
-                    )
-                }
-            };
-        }
+        // 超时覆盖 WebSocket 握手；on_upgrade 已独立持有长连接，不受请求计时器约束。
         match tokio::time::timeout(boundary.request_timeout, run).await {
             Ok(Ok(response)) => response,
             Ok(Err(_)) => {

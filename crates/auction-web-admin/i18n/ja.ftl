@@ -671,7 +671,7 @@ admin-mail-delivery-confirm-unknown = 前回の結果は未確認です。重複
 admin-mail-delivery-requeued = バックグラウンド処理に再登録しました。送信、返送、受け取りの成功はまだ確認されていません。
 
 admin-mail-loading = メールデータを読み込んでいます…
-admin-mail-mailbox = 差出人
+admin-mail-mailbox = メールボックスキー
 admin-mail-load = 確認
 admin-mail-trigger = 受信ポーリングを手動実行
 admin-mail-action-success = メールのポーリング状態を更新しました。

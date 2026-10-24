@@ -9,7 +9,6 @@ use std::{
 };
 
 use anyhow::Context;
-use auction_config::{AppConfig, Role};
 
 use super::super::ControllerOptions;
 use super::super::probe::{ReadinessProbe, readiness_probe};
@@ -17,8 +16,7 @@ use super::super::receipt::{self, RoleReceipt, StartupReceipt};
 use super::super::systemd::{ManagedRole, SystemdClient, UnitSnapshot};
 use super::model::{Controller, DeploymentLock, PreparedDeployment, RolePlan, StartFailure};
 use super::validation::{
-    canonical_now, ensure_unit_config, validate_config_dir, validate_deployment_config_file,
-    validate_private_state_dir,
+    canonical_now, ensure_unit_config, validate_config_dir, validate_private_state_dir,
 };
 use crate::bootstrap::{
     DeploymentListener, admin_deployment_listener, deployment_check, public_deployment_listener,
@@ -86,20 +84,12 @@ impl Controller {
         config_dir: &Path,
     ) -> anyhow::Result<PreparedDeployment> {
         let config_dir = validate_config_dir(config_dir)?;
-        deployment_check(&config_dir, true).context("部署配置严格预检失败")?;
+        let [public, admin, worker] =
+            deployment_check(&config_dir, true).context("部署配置严格预检失败")?;
 
         let public_path = config_dir.join("public.toml");
         let admin_path = config_dir.join("admin.toml");
         let worker_path = config_dir.join("worker.toml");
-        for path in [&public_path, &admin_path, &worker_path] {
-            validate_deployment_config_file(path)?;
-        }
-        let public = AppConfig::load_from_path(Role::Public, &public_path)
-            .context("加载 Public 部署配置失败")?;
-        let admin = AppConfig::load_from_path(Role::Admin, &admin_path)
-            .context("加载 Admin 部署配置失败")?;
-        let worker = AppConfig::load_from_path(Role::Worker, &worker_path)
-            .context("加载 Worker 部署配置失败")?;
 
         let public_listener = public_deployment_listener(&public)?;
         let admin_probe = match admin_deployment_listener(&admin)? {

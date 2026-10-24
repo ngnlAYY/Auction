@@ -19,7 +19,7 @@ pub struct HttpSecurityConfig {
     pub rate_limit_window_seconds: u64,
     /// 是否为浏览器 Cookie 设置 Secure；省略时关闭，生产环境应开启。
     pub cookie_secure: bool,
-    /// 普通 HTTP 请求的最长处理秒数；省略时为 15 秒，WebSocket 握手路径不受此限制。
+    /// HTTP 请求和 WebSocket 握手的最长处理秒数；省略时为 15 秒，不限制升级后的连接生命周期。
     pub request_timeout_seconds: u64,
     /// 可以提供 `X-Forwarded-For` 的可信反向代理网段；省略时不信任任何 TCP 代理。
     pub trusted_proxy_cidrs: Vec<String>,

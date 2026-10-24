@@ -20,6 +20,10 @@ where
         // 日志与重试指标只需标识和次数，不复制装备明细及 delivery 快照。
         let obligation_id = claim.obligation_id;
         let retry_count = claim.retry_count;
+        if clock.now() >= claim.lease_until {
+            tracing::warn!(%obligation_id, "settlement fulfillment lease expired before phase");
+            return WorkerResult::Error;
+        }
         match claim.state {
             auction_application::SettlementFulfillmentState::Pending => {
                 let deadline = fulfillment_budget(&claim, clock.now());
@@ -215,6 +219,10 @@ async fn bounded_fulfillment<T>(
     budget: std::time::Duration,
     operation: impl std::future::Future<Output = Result<T, auction_application::ApplicationError>>,
 ) -> Result<T, auction_application::ApplicationError> {
+    // timeout 会先 poll 内层 future；零预算不能启动远端证据读取。
+    if budget.is_zero() {
+        return Err(auction_application::ApplicationError::FulfillmentDependencyUnavailable);
+    }
     tokio::time::timeout(budget, operation)
         .await
         .map_err(|_| auction_application::ApplicationError::FulfillmentDependencyUnavailable)?

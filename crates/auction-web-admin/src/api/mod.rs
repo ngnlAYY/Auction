@@ -112,7 +112,7 @@ pub(crate) use worlds::{
 
 use auction_contracts::{
     AdminDeliveryCommandRequest, AdminDeliveryCommandResponse, AdminDeliveryListResponse,
-    AdminDeliveryResponse, AdminSessionResponse, ApiResponse,
+    AdminDeliveryResponse, ApiResponse,
 };
 pub(crate) use auction_contracts::{
     AdminDeliveryListResponse as DeliveryPage, AdminDeliveryResponse as Delivery,
@@ -822,15 +822,25 @@ async fn fetch_csrf_token() -> Result<String, String> {
     if !admin_session_writes_allowed() {
         return Err("unauthenticated".to_owned());
     }
-    let response = send_get("/api/v1/admin/session").await?;
-    if !response.ok() {
-        return Err(response_error(response).await);
-    }
-    let payload: ApiResponse<AdminSessionResponse> =
-        response.json().await.map_err(invalid_response_error)?;
-    let current = session::decode_admin_session(payload.data)?;
+    let current = match fetch_admin_session().await {
+        Ok(Some(current)) => current,
+        result => {
+            // CSRF 复核失败也撤回写许可；旧宿主与未决命令交给既有会话重查流程保留。
+            session::request_admin_session_check();
+            return Err(result.err().unwrap_or_else(|| "unauthenticated".to_owned()));
+        }
+    };
     // 获取 CSRF 的等待期间也可能进入暂时未确认状态，不能带着旧页面授权继续提交。
     if !admin_session_writes_allowed() {
+        return Err("unauthenticated".to_owned());
+    }
+    // 其他标签页可能已重新登录；新会话的 token 不能授权旧宿主保存的命令或草稿。
+    let same_identity =
+        dioxus::prelude::try_consume_context::<AdminSession>().is_some_and(|confirmed| {
+            confirmed.actor == current.actor && confirmed.csrf_token == current.csrf_token
+        });
+    if !same_identity {
+        session::request_admin_session_check();
         return Err("unauthenticated".to_owned());
     }
     Ok(current.csrf_token)

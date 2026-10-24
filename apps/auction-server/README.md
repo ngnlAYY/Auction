@@ -53,6 +53,8 @@ Worker control 须启用并允许 supervisor UID，监听地址不得冲突；Pu
 总 drain 上限 135 秒，二次信号强制终止；强杀后逐角色回收最多 5 秒。任一角色在关闭时非零退出也会使
 supervisor 失败退出，但仍先回收其余角色，不把 drain 失败报告为正常停止；强制回收中单个 wait 失败
 或超时也会继续等待其他角色，最终传播失败。
+readiness 仅接受 512 字节内由 CRLF 完整终止的 HTTP/1.0 或 HTTP/1.1 200 状态行；
+分片到达的 CRLF 可正常识别，EOF、仅 LF、未终止满缓冲区及非 200 响应均不算就绪。
 子进程继承部署锁，Linux parent-death signal 防止无主进程。使用独立
 [systemd 模板](ops/deploy/systemd/auction-server.service.example)，禁止同时启用分体 unit/总控，安装与探测门禁见
 [systemd 手册](ops/README.md#systemd-服务与顺序控制)；Admin 每次启动撤销旧管理会话、需重新登录，Public 不受影响。

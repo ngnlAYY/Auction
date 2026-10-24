@@ -67,7 +67,7 @@ mutation_rate_limit = 60
 rate_limit_window_seconds = 60
 # 可选：是否给浏览器 Cookie 设置 Secure；生产环境应为 true。
 cookie_secure = false
-# 可选：普通 HTTP 请求处理超时秒数，范围 1-120，默认 15；WebSocket 路径不受该值限制。
+# 可选：HTTP 请求及 WebSocket 升级前握手的处理超时秒数，范围 1-120，默认 15；不限制升级后的连接寿命。
 request_timeout_seconds = 15
 # 可选：允许提供 X-Forwarded-For 的规范 TCP 代理 CIDR，最多 64 项；默认不信任任何代理。
 trusted_proxy_cidrs = []

@@ -8,7 +8,7 @@
 
 | 文档 | 冻结内容 | 源码 owner |
 | --- | --- | --- |
-| [HTTP](docs/contracts/routes.md) | P01–P21、A01–A44、初始化、健康、认证、缓存、方法与输入输出边界 | [auction-http](crates/auction-http/README.md)、[auction-contracts](crates/auction-contracts/README.md) |
+| [HTTP](docs/contracts/routes.md) | Public/Admin 版本化路径、初始化、健康、认证、缓存、方法与输入输出边界；编号与统计只在路由契约维护 | [auction-http](crates/auction-http/README.md)、[auction-contracts](crates/auction-contracts/README.md) |
 | [实时事件](docs/contracts/events.md) | kind/schema、Public v1、sequence、Catch-up 与快照恢复 | contracts、application realtime、HTTP 和 Public decoder |
 | [数据库对象](docs/contracts/schema.md) | PostgreSQL 对象的逻辑 owner、SQL owner 与历史迁移范围 | [auction-storage](crates/auction-storage/README.md)、[迁移](migrations/postgres/README.md) |
 | [领域不变量](docs/contracts/invariants.md) | I 编号、幂等、锁、金额、生命周期、审计与外部副作用 | [domain](crates/auction-domain/README.md)、[application](crates/auction-application/README.md) |

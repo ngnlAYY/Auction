@@ -79,10 +79,12 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 | [000059_delivery_send_cadence.up.sql](migrations/postgres/000059_delivery_send_cadence.up.sql) | 七类 Send 起点高水位、旧载荷分组映射、超价优先索引与提交后空载荷唤醒 |
 | [000060_mailbox_sweep_cursors.up.sql](migrations/postgres/000060_mailbox_sweep_cursors.up.sql) | world 内 `(created_at,id)` 稳定环形维护游标与待证明投递部分索引；只推进已开始核对的单条，不把游标当作业务完成 |
 | [000061_delivery_send_expectations.up.sql](migrations/postgres/000061_delivery_send_expectations.up.sql) | 只追加发送尝试的实际内容摘要与资产矩阵，唯一绑定远端 MID；不回填旧邮件或改变未知结果 |
+| [000062_delivery_reference_index.up.sql](migrations/postgres/000062_delivery_reference_index.up.sql) | 非空外部引用的非唯一部分索引，加速绑定 Sent MID 前的历史碰撞核对，不改变旧行或证明规则 |
+| [000063_delivery_take_expectations.up.sql](migrations/postgres/000063_delivery_take_expectations.up.sql) | Take 原命令/MID/凭据尝试的只追加绑定；旧无原账号证明的未知动作不自动恢复或重排 |
 
 ## 原则与基线
 
-当前 `000001`–`000061` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
+当前 `000001`–`000063` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
 是只读兼容视图，权威写入进入授权与转换历史表。执行门禁见[执行边界](migrations/postgres/README.md#执行边界)，对象归属见[数据库契约](docs/contracts/schema.md)。
 
 ## 追加迁移语义
@@ -120,6 +122,13 @@ prepared/enqueued/unknown 改成内部成功。迁移前可验证备份并停止
 升级须停止旧 writer，并使用同版 Worker 与最新内嵌迁移；执行前保留可验证备份。完整 owner 与证明边界见
 [邮件、论坛与外部集成](docs/contracts/schema.md#邮件论坛与外部集成)。
 
+`000062` 只索引非空外部引用，不新增唯一约束，不重写旧投递或发送证明；原碰撞查询继续在 Serializable 事务内执行。
+索引创建仍走停机迁移门禁，大表须为扫描、索引空间及维护窗口留出余量，见[升级说明](ops/README.md#发送引用索引与稳定性修复升级)。
+
+`000063` 不回填历史 Take 的凭据身份。新动作在 Sending 前固定同一会话，并在原事务保存命令、摘要、时间和账号绑定；
+恢复按原 sending_at/命令/摘要定位原尝试，再核对当前候选 fence 与观察身份。配置 Cookie 没有持久凭据绑定时仍可即时执行，
+但未知结果留在人工核对；不同账号的“邮件不存在”不能关闭原任务。
+
 ## 历史 checksum 兼容
 
 `000005`/`000015` 历史文件与原始 checksum 保持不可变。[auction-storage 执行视图](crates/auction-storage/src/database/migrations)
@@ -142,7 +151,7 @@ canonical PostgreSQL v28 使用[专用接管手册](ops/deploy/LEGACY_V28_ADOPTI
 
 ## 执行边界
 
-当前执行器注册 `000001`–`000060`；新增迁移必须用内嵌最新迁移的 auctionctl 走受控停机升级，普通重启不执行迁移。
+当前执行器内嵌上文迁移索引列出的全部迁移；新增迁移必须用内嵌最新迁移的 auctionctl 走受控停机升级，普通重启不执行迁移。
 `000050` 为每个 recovery 冻结 `cod_return_limit`（默认 3，范围 1–10），并把退回上限从固定三次改为该列，同时给
 `buyer_blacklist` action 增加冻结的公开理由。
 `000051` 只从当前退件指针、回收动作及既有 take 来源回填消费身份，保留历史退回计数；`000052` 初始队列为空，

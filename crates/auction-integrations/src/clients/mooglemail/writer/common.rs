@@ -6,6 +6,7 @@ use scraper::{ElementRef, Html, Selector};
 
 use super::model::MAX_BODY_BYTES;
 use super::*;
+use crate::clients::mooglemail::parser::parse_canonical_credits;
 
 pub(super) fn input_value(
     form: ElementRef<'_>,
@@ -23,7 +24,7 @@ pub(super) fn input_value(
 pub(super) fn parse_credit_attachment(value: &str) -> Option<i64> {
     let value = value.strip_suffix(" Credits")?;
     let value = value.strip_suffix('x').unwrap_or(value);
-    let amount = parse_amount(value)?;
+    let amount = parse_canonical_credits(value)?;
     (amount > 0).then_some(amount)
 }
 
@@ -39,7 +40,7 @@ pub(super) fn parse_attachment_count(value: &str) -> Option<(usize, Option<i64>)
         None
     } else {
         let amount = suffix.strip_prefix(" - CoD: ").or_else(|| suffix.strip_prefix(" – CoD: "))?;
-        Some(parse_amount(amount)?)
+        Some(parse_canonical_credits(amount)?)
     };
     Some((usize::try_from(count).ok()?, cod))
 }
@@ -83,34 +84,6 @@ pub(super) fn attachment_count_text(element: ElementRef<'_>) -> Option<String> {
     }
     let decoded = normalize_text(decoded);
     parse_attachment_count(&decoded).is_some().then_some(decoded)
-}
-
-pub(super) fn parse_amount(value: &str) -> Option<i64> {
-    if value.is_empty()
-        || (value.len() > 1 && value.starts_with('0'))
-        || value
-            .bytes()
-            .enumerate()
-            .any(|(index, byte)| byte == b',' && (index < 1 || index + 1 >= value.len()))
-    {
-        return None;
-    }
-    let groups = value.split(',').collect::<Vec<_>>();
-    if groups.len() > 1
-        && (groups[0].is_empty()
-            || groups[0].len() > 3
-            || !groups[0].bytes().all(|byte| byte.is_ascii_digit())
-            || groups[0].starts_with('0')
-            || groups[1..]
-                .iter()
-                .any(|group| group.len() != 3 || !group.bytes().all(|byte| byte.is_ascii_digit())))
-    {
-        return None;
-    }
-    if groups.len() == 1 && !groups[0].bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    value.replace(',', "").parse::<i64>().ok()
 }
 
 pub(super) fn parse_unsigned(value: &str) -> Option<u64> {

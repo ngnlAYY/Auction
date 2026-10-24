@@ -31,8 +31,9 @@ control 只有一个停机接收者，通知保留到接收者开始等待，覆
 邮件或论坛 owner 永久失效时，监督任务在一秒观察周期内通知装配根，沿用同一 10 秒排空上限并非零退出，由 systemd 等进程管理器
 重建 Worker。监督只读取已取得 owner 的已知失效状态；关闭功能或无 active 凭据时不启动对应监督，不增加数据库探测。失效后的新外呼继续
 失败关闭，在途发送保留原 sending/未知结果对账语义；新进程取得 advisory lock、提交新 generation 后才恢复邮件操作。
-control 任务提前退出、panic 或取消立即撤销 readiness，并沿用同一 drain 预算后非零退出；
-固定容量故障队列保留首个原因，正常停机的 control 收口不另开超时，也不覆盖已选定的正常关闭结果。
+control 或独立 PM 任务提前退出、panic 或取消立即撤销 readiness，并沿用同一 drain 预算后非零退出；
+退出守卫在 spawn 前建立，覆盖首次 poll 前取消。固定容量故障队列保留首个原因，正常停机收口不另开超时，
+也不覆盖已选定的正常关闭结果；任务所有权仍由 abort-on-drop 守卫持有。
 
 `persistent.rs` 在装配时创建同一 `MailPollProgressTracker`，经 `mail/runtime.rs` 的 `MailPollRuntimePorts`
 同时注入 gateway、轮询任务与 control。它只保存有界进程观测，不能授权或恢复业务；协议和旧端降级见
@@ -83,7 +84,7 @@ Retryable/超时进入有界重试（参数见[论坛与邮件配置](ops/config
 详情 GET 可能把无附件邮件标为已读。轮询先在当前 claim 下持久登记整窗 MID 和列表摘要，再读取详情；重启或取消后优先
 按持久队列直接读取 MID，入站事实、命令账本与 cursor 提交时原子删除完成前缀。队列沿用 batch limit，已有 cursor 保留；
 allowlist 改动使待读发件人不再获准时失败关闭并保留队列，须核对配置后恢复，不静默丢弃待读项。新队列不补造升级前已丢失的 MID。
-每个已配置世界的维护与 Inbox 处理并行运行，各自使用有界预算；Sent、Read Mail 与 Inbox 共用同一 client 的读取协调器。
+每个已配置世界的 Read Mail 观察、Sent/compose 维护与 Inbox 处理三路并行，各自使用有界预算并共用同一 client 的读取协调器。
 `000060` 持久化逐条核对的环形位置，长期无匹配项不再饿死后缀，游标不是业务完成证明；Read Mail 只定位已知恢复目标，不重放历史入站。
 
 ## 持久化与外部结果证明
@@ -98,6 +99,8 @@ MoogleMail delivery 在 sending fence 前做只读 compose preflight，prepared 
 [停机同版升级与显式资金核对](ops/README.md#bot-内部履约与资金保护升级)。
 `000061` 在 Sending 同事务冻结实际发送内容摘要、资产矩阵和尝试身份；后续核对不使用当前模板或当前登录 key 猜测原正文。
 所有发送来源使用同一精确证明与唯一远端 MID 绑定。升级前停止旧 Worker，按[共享读取升级](ops/README.md#邮箱共享读取与发送证明升级)执行。
+Take 在 Sending 前持有原账号会话并冻结 world/MID/凭据身份；交接失败或取消不重新选择 Cookie。
+其期待通过普通 fence 持久化，不进入 Send 的现金授权入口；未知结果的恢复须同时核验原绑定和本次观察身份。
 
 凭据由 PostgreSQL 独立数据密钥解密，论坛和邮件每种 Cookie 全局最多一条 active，生命周期 advisory lock 保证单 Worker
 owner；失效后不切换 Cookie，导入或轮换后须重启交接。未配置凭据数据密钥时保留受限 `.keyenv`/敏感文件兼容入口

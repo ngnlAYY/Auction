@@ -1,7 +1,7 @@
 //! Credits Send资金授权；所有远端观察已在持同session的业务事务外完成。
 
 use auction_application::{
-    DeliveryFenceOutcome, DeliverySendExpectation, DeliveryWorkClaim, FundingMutation,
+    DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliveryWorkClaim, FundingMutation,
     InternalEvidencePurpose, SettlementInternalEvidenceSnapshot,
 };
 use chrono::{DateTime, Utc};
@@ -19,9 +19,17 @@ pub(super) async fn authorize_legacy(
     tx: &mut Transaction<'_, Postgres>,
     claim: &DeliveryWorkClaim,
     started_at: DateTime<Utc>,
-    expectation: Option<&DeliverySendExpectation>,
+    expectation: Option<&DeliveryPreparedExpectation>,
 ) -> Result<DeliveryFenceOutcome, FenceError> {
-    if let Some(binding) = expectation.and_then(|expectation| expectation.credential.as_ref()) {
+    let credential = expectation.map(|expectation| match expectation {
+        DeliveryPreparedExpectation::Send(expectation) => {
+            (expectation.world_id.as_str(), expectation.credential.as_ref())
+        }
+        DeliveryPreparedExpectation::Take(expectation) => {
+            (expectation.world_id.as_str(), expectation.credential.as_ref())
+        }
+    });
+    if let Some((_, Some(binding))) = credential {
         crate::lock_mail_runtime_generation(
             tx,
             &auction_application::MailRuntimeBinding { generation: binding.runtime_generation },
@@ -34,8 +42,8 @@ pub(super) async fn authorize_legacy(
         return Err(FenceError::Rejected);
     }
     crate::database::lot_watch::lock_delivery_lot(tx, claim.delivery_id).await?;
-    if let Some(expectation) = expectation
-        && !super::super::attempts::lock_credential(tx, expectation).await?
+    if let Some((world_id, binding)) = credential
+        && !super::super::attempts::lock_credential_binding(tx, world_id, binding).await?
     {
         return Err(FenceError::Rejected);
     }
@@ -54,7 +62,7 @@ pub(super) async fn authorize(
     claim: &DeliveryWorkClaim,
     started_at: DateTime<Utc>,
     evidence: &SettlementInternalEvidenceSnapshot,
-    expectation: Option<&DeliverySendExpectation>,
+    expectation: Option<&DeliveryPreparedExpectation>,
 ) -> Result<DeliveryFenceOutcome, FenceError> {
     if !requires_cash_gate(claim)
         || evidence.operation_id != claim.command_id
@@ -69,7 +77,10 @@ pub(super) async fn authorize(
         return Err(FenceError::Rejected);
     }
     let binding = expectation
-        .and_then(|expectation| expectation.credential.as_ref())
+        .and_then(|expectation| match expectation {
+            DeliveryPreparedExpectation::Send(expectation) => expectation.credential.as_ref(),
+            DeliveryPreparedExpectation::Take(_) => None,
+        })
         .ok_or(FenceError::Rejected)?;
     if binding.credential_id != evidence.identity.credential_id
         || binding.credential_version != evidence.identity.credential_version

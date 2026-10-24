@@ -1,9 +1,6 @@
 //! MoogleMail 单 Cookie 普通读会话与资产操作的互斥隔离。
 
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use auction_application::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
 use chrono::Utc;
@@ -256,15 +253,12 @@ impl MoogleMailCredentialSet {
         world: MoogleMailWorld,
         operation: MoogleMailOperation,
     ) -> Result<MoogleMailCredentialSession, MoogleMailError> {
-        let mut tried = HashSet::new();
-        let current = self.next_candidate(world, operation, &tried)?;
-        tried.insert(current.key);
+        let current = self.current_candidate(world, operation)?;
         let session = MoogleMailCredentialSession {
             set: self.clone(),
             world,
             operation,
             current,
-            tried,
             operation_guard: None,
         };
         session.check_current().await?;
@@ -277,30 +271,29 @@ impl MoogleMailCredentialSet {
         world: MoogleMailWorld,
         operation: MoogleMailOperation,
     ) -> Result<MoogleMailCredentialSession, MoogleMailError> {
-        let mut tried = HashSet::new();
-        for _ in 0..64 {
-            let candidate = self.next_candidate(world, operation, &tried)?;
-            tried.insert(candidate.key);
-            let operation_guard = Arc::clone(&candidate.operation_lock).lock_owned().await;
-            if self.candidate_is_active(candidate.key, world, operation)? {
-                return Ok(MoogleMailCredentialSession {
-                    set: self.clone(),
-                    world,
-                    operation,
-                    current: candidate,
-                    tried,
-                    operation_guard: Some(operation_guard),
-                });
-            }
+        let current = self.current_candidate(world, operation)?;
+        let operation_guard = Arc::clone(&current.operation_lock).lock_owned().await;
+        // 集合最多一条凭据且只会撤销；等待期间失效必须失败，不能重获或换号。
+        if !self.candidate_is_active(current.key, world, operation)? {
+            return Err(operation_error(
+                operation,
+                world,
+                MoogleMailErrorCategory::CredentialUnavailable,
+            ));
         }
-        Err(operation_error(operation, world, MoogleMailErrorCategory::CredentialUnavailable))
+        Ok(MoogleMailCredentialSession {
+            set: self.clone(),
+            world,
+            operation,
+            current,
+            operation_guard: Some(operation_guard),
+        })
     }
 
-    fn next_candidate(
+    fn current_candidate(
         &self,
         world: MoogleMailWorld,
         operation: MoogleMailOperation,
-        tried: &HashSet<Uuid>,
     ) -> Result<MoogleMailCredentialCandidate, MoogleMailError> {
         if !self.ownership_valid() {
             return Err(operation_error(
@@ -316,9 +309,7 @@ impl MoogleMailCredentialSet {
             })?
             .iter()
             .find(|candidate| {
-                candidate.world.is_none_or(|scope| scope == world)
-                    && candidate.cookie.is_active()
-                    && !tried.contains(&candidate.key)
+                candidate.world.is_none_or(|scope| scope == world) && candidate.cookie.is_active()
             })
             .cloned()
             .ok_or_else(|| {
@@ -367,7 +358,6 @@ pub(crate) struct MoogleMailCredentialSession {
     world: MoogleMailWorld,
     operation: MoogleMailOperation,
     current: MoogleMailCredentialCandidate,
-    tried: HashSet<Uuid>,
     operation_guard: Option<OwnedMutexGuard<()>>,
 }
 
@@ -410,14 +400,6 @@ impl MoogleMailCredentialSession {
             return Err(unavailable());
         }
         Ok(())
-    }
-
-    pub(crate) async fn advance_read(&mut self) -> Result<(), MoogleMailError> {
-        self.operation_guard.take();
-        let current = self.set.next_candidate(self.world, self.operation, &self.tried)?;
-        self.tried.insert(current.key);
-        self.current = current;
-        self.check_current().await
     }
 
     /// 本次取得独占 guard 时的派发世界；跨世界读取仍另验 scope。
@@ -523,26 +505,6 @@ impl MoogleMailCredentialSession {
             })?;
         }
         Ok(())
-    }
-
-    /// 释放当前凭据 guard；当前单 Cookie 失效后不会自动切换到其它 Cookie。
-    pub(crate) async fn advance_exclusive(&mut self) -> Result<(), MoogleMailError> {
-        self.operation_guard.take();
-        for _ in 0..64 {
-            let candidate = self.set.next_candidate(self.world, self.operation, &self.tried)?;
-            self.tried.insert(candidate.key);
-            let operation_guard = Arc::clone(&candidate.operation_lock).lock_owned().await;
-            if self.set.candidate_is_active(candidate.key, self.world, self.operation)? {
-                self.current = candidate;
-                self.operation_guard = Some(operation_guard);
-                return Ok(());
-            }
-        }
-        Err(operation_error(
-            self.operation,
-            self.world,
-            MoogleMailErrorCategory::CredentialUnavailable,
-        ))
     }
 }
 

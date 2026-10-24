@@ -24,23 +24,28 @@ pub(super) struct PreferenceState {
 #[derive(Clone)]
 pub(super) struct PreferenceOwner {
     pub(super) user_id: String,
+    pub(super) identity: Signal<Option<String>>,
     pub(super) session: PublicSessionResource,
     pub(super) state: Signal<PreferenceState>,
 }
 
 impl PreferenceOwner {
     pub(super) fn identity_matches(&self) -> bool {
-        self.session.peek().as_ref().is_some_and(|snapshot| {
-            snapshot
-                .as_ref()
-                .ok()
-                .and_then(|identity| identity.as_ref())
-                .is_some_and(|identity| identity.authenticated && identity.user_id == self.user_id)
-        })
+        self.identity.peek().as_deref() == Some(self.user_id.as_str())
+    }
+
+    /// 新输入须有当前已完成的会话证明；结果收口与原样重试只依赖稳定宿主身份。
+    pub(super) fn session_ready(&self) -> bool {
+        self.identity_matches()
+            && *self.session.state().read() == UseResourceState::Ready
+            && self.session.read().as_ref().is_some_and(|snapshot| {
+                matches!(snapshot, Ok(Some(identity)) if identity.authenticated
+                    && identity.user_id == self.user_id)
+            })
     }
 
     pub(super) fn change(&mut self, update: impl FnOnce(&mut DurationDraft)) {
-        if !self.identity_matches() {
+        if !self.session_ready() {
             return;
         }
         let mut state = self.state.write();
@@ -92,6 +97,7 @@ impl PreferenceOwner {
         if !self.identity_matches() || self.state.peek().busy {
             return;
         }
+        let session_ready = self.session_ready();
         let payload = {
             let mut state = self.state.write();
             if let Some(pending) = &state.pending {
@@ -100,6 +106,9 @@ impl PreferenceOwner {
                 }
                 pending.clone()
             } else {
+                if !session_ready {
+                    return;
+                }
                 let Some(preference) = &state.authoritative else { return };
                 let expected_version = preference.version;
                 let Ok(duration_seconds) = state.draft.seconds() else {

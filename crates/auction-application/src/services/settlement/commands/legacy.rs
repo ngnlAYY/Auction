@@ -82,10 +82,21 @@ pub(super) fn classify_stored_settlement(
         return Ok(StoredSettlementReplay::Current);
     }
 
-    let legacy_hash = legacy_complete_hash(command)?;
     if stored.command_kind != "settlement_complete"
         || stored.aggregate_id != command.auction_id.as_uuid()
-        || stored.request_hash != legacy_hash
+    {
+        return Err(CommandLedgerError::Conflict.into());
+    }
+    // Go RFC3339Nano 会去掉小数尾零；保留早期 Rust AutoSi 摘要兼容，不改写既有账本。
+    let due_at = crate::format_public_time_wire(command.due_at);
+    let now = crate::format_public_time_wire(command.now);
+    if stored.request_hash != legacy_complete_hash(command, &due_at, &now)?
+        && stored.request_hash
+            != legacy_complete_hash(
+                command,
+                &command.due_at.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+                &command.now.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+            )?
     {
         return Err(CommandLedgerError::Conflict.into());
     }
@@ -246,17 +257,19 @@ fn validate_command_identity(command: SettleAuctionCommand) -> Result<(), Applic
     Ok(())
 }
 
-fn legacy_complete_hash(command: SettleAuctionCommand) -> Result<RequestHash, ApplicationError> {
-    let due_at = command.due_at.to_rfc3339_opts(SecondsFormat::AutoSi, true);
-    let now = command.now.to_rfc3339_opts(SecondsFormat::AutoSi, true);
+fn legacy_complete_hash(
+    command: SettleAuctionCommand,
+    due_at: &str,
+    now: &str,
+) -> Result<RequestHash, ApplicationError> {
     let payload = serde_json::to_vec(&LegacySettlementCompleteHash {
         command_id: uuid_bytes(command.command_id.as_uuid()),
         workflow_id: uuid_bytes(command.workflow_id),
         claim_command_id: uuid_bytes(command.claim_command_id.as_uuid()),
         auction_id: uuid_bytes(command.auction_id.as_uuid()),
-        due_at: &due_at,
+        due_at,
         actor: LEGACY_SETTLEMENT_ACTOR,
-        now: &now,
+        now,
     })?;
     let digest = Sha256::digest(payload);
     let mut bytes = [0_u8; 32];

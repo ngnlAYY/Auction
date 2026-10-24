@@ -73,8 +73,9 @@ async fn delivery_snapshot(
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertDeliverySnapshot, ApplicationError> {
     // 仅完整匹配追加修复事实及原投递身份的 failed 才已解决；不能仅凭 metadata 消除告警。
-    // 替换内容只有已审核的编译期 SQL 常量，不插入任何运行时业务值。
-    let query = r#"SELECT
+    // 替换内容只有已审核的编译期 SQL 常量，不插入任何运行时业务值；仅缓存 SQL 文本，不缓存水位。
+    static QUERY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        r#"SELECT
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status IN ('prepared', 'pending', 'claimed', 'sending')) AS pending,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
@@ -103,11 +104,12 @@ async fn delivery_snapshot(
                 AS oldest_returned_mail,
             MAX(updated_at) FILTER (WHERE origin_kind <> 'operations_alert') AS last_update
          FROM public.deliveries d"#
-        .replace(
-            "/* trusted_legacy_self */",
-            crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE,
-        );
-    let row = sqlx::query(sqlx::AssertSqlSafe(query.as_str()))
+            .replace(
+                "/* trusted_legacy_self */",
+                crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE,
+            )
+    });
+    let row = sqlx::query(sqlx::AssertSqlSafe(QUERY.as_str()))
         .fetch_one(pool)
         .await
         .map_err(|_| storage_error("读取 operations alert delivery 水位失败"))?;

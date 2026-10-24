@@ -6,10 +6,13 @@ pub(super) async fn process(
     runtime: &LotWatchPmRuntime,
     request: LotWatchPmClaimRequest,
     drain: &watch::Receiver<bool>,
+    deadline: tokio::time::Instant,
 ) -> Result<(), LotWatchError> {
+    check_deadline(deadline)?;
     let Some(mut claim) = runtime.store.claim(request).await? else {
         return Ok(());
     };
+    check_deadline(deadline)?;
     if claim.reconcile {
         let sender = claim
             .sender
@@ -23,12 +26,15 @@ pub(super) async fn process(
         }
         let receipt =
             runtime.sender.reconcile(claim.world, &claim.message, sender).await.ok().flatten();
+        check_deadline(deadline)?;
         return runtime.store.finish(claim, receipt).await;
     }
     if *drain.borrow() {
         return runtime.store.release_unsent(claim).await;
     }
-    let prepared = match runtime.sender.prepare(claim.world, &claim.message).await {
+    let prepared = runtime.sender.prepare(claim.world, &claim.message).await;
+    check_deadline(deadline)?;
+    let prepared = match prepared {
         Ok(prepared) => prepared,
         // prepare 契约保证只有 GET，只有这阶段才允许安全延期。
         Err(_) => return runtime.store.release_unsent(claim).await,
@@ -43,8 +49,15 @@ pub(super) async fn process(
     if !runtime.store.start_sending(claim.clone(), sender.clone()).await? {
         return Ok(());
     }
+    check_deadline(deadline)?;
     claim.sender = Some(sender);
     // start 提交响应未知直接返回；绝不执行 POST，也绝不释放回 pending。
     let receipt = if *drain.borrow() { None } else { prepared.send().await.ok() };
+    check_deadline(deadline)?;
     runtime.store.finish(claim, receipt).await
+}
+
+/// timeout 可能先 poll 出迟到回执；每次阶段交接都复核原截止，过期后只保留持久 claim。
+fn check_deadline(deadline: tokio::time::Instant) -> Result<(), LotWatchError> {
+    if tokio::time::Instant::now() >= deadline { Err(LotWatchError::Unavailable) } else { Ok(()) }
 }

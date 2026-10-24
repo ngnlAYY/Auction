@@ -6,12 +6,12 @@ use scraper::Html;
 
 use super::common::{
     attachment_count_text, compose_error, direct_element_children, extract_equipment_id,
-    has_visible_result_message, input_value, normalize_text, parse_amount, parse_attachment_count,
+    has_visible_result_message, input_value, normalize_text, parse_attachment_count,
     parse_credit_attachment, selector, valid_body,
 };
 use super::model::{MAX_COMPOSE_ATTACHMENTS, MAX_RECIPIENT_BYTES, MAX_SUBJECT_BYTES};
 use super::*;
-use crate::clients::mooglemail::parser::canonical_mail_body;
+use crate::clients::mooglemail::parser::{canonical_mail_body, parse_canonical_credits};
 
 impl MoogleMailParser {
     /// 严格解析新邮件页面，提取下一步 POST 所需的 token 和可证明状态。
@@ -217,7 +217,7 @@ fn parse_compose_assets(
             .value()
             .attr("value")
             .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
-        let value = parse_amount(raw)
+        let value = parse_canonical_credits(raw)
             .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
         if cod.is_some_and(|existing| existing != value) {
             return Err(compose_error(world, MoogleMailErrorCategory::IdentityMismatch));

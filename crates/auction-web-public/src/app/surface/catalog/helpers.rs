@@ -196,7 +196,7 @@ pub(crate) fn current_auction_href() -> String {
 }
 
 pub(crate) fn format_auction_time(value: &str) -> String {
-    format_localized_time(value)
+    format_localized_time_for_language(value, &i18n().language().to_string())
 }
 
 /// 解析 credit 缩写；无后缀或 K 使用整数千，M/B 最多支持三/六位小数，精确到信用网格。

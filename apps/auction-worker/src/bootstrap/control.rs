@@ -2,28 +2,30 @@
 
 use super::*;
 
-/// control 任务退出即撤销 readiness；panic、abort 和首轮 poll 前取消也必须触发同一收口。
+/// 常驻任务退出即撤销 readiness；panic、abort 和首轮 poll 前取消也必须触发同一收口。
 #[cfg(unix)]
-pub(super) struct WorkerControlTaskExit {
+pub(super) struct WorkerRuntimeTaskExit {
     control: WorkerControlHandle,
     runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
+    reason: &'static str,
 }
 
 #[cfg(unix)]
-impl WorkerControlTaskExit {
+impl WorkerRuntimeTaskExit {
     pub(super) fn new(
         control: WorkerControlHandle,
         runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
+        reason: &'static str,
     ) -> Self {
-        Self { control, runtime_failure }
+        Self { control, runtime_failure, reason }
     }
 }
 
 #[cfg(unix)]
-impl Drop for WorkerControlTaskExit {
+impl Drop for WorkerRuntimeTaskExit {
     fn drop(&mut self) {
         self.control.mark_draining();
-        let _ = self.runtime_failure.try_send("control_server_stopped");
+        let _ = self.runtime_failure.try_send(self.reason);
     }
 }
 

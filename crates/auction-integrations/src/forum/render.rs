@@ -20,7 +20,7 @@ use auction_domain::{AuctionId, AuctionStatus, SettlementWorld};
 use sha2::{Digest, Sha256};
 use url::Url;
 
-use crate::clients::ehentai::PRODUCTION_ENDPOINT;
+use crate::clients::ehentai::{MAXIMUM_FORUM_TITLE_RUNES, PRODUCTION_ENDPOINT};
 
 const MAX_TITLE_BYTES: usize = 512;
 const MAX_BODY_BYTES: usize = 65_531;
@@ -78,9 +78,17 @@ fn render_auction_thread_with_colors(
         AuctionStatus::Settled,
         AuctionStatus::Cancelled,
     ] {
-        let candidate = topic_title(world_title, snapshot.sequence, state);
-        if state != snapshot.state && candidate.chars().count() <= 50 {
-            reconciliation_titles.push(candidate);
+        if state != snapshot.state {
+            reconciliation_titles.push(topic_title(world_title, snapshot.sequence, state));
+        }
+        // 无前缀的上一版状态标题只保留当时 50 字符边界内的实际可发布形式。
+        let previous_title = format!(
+            "{world_title} Equipment Auction - Session {:03} ({})",
+            snapshot.sequence,
+            topic_state(state)
+        );
+        if previous_title.chars().count() <= 50 {
+            reconciliation_titles.push(previous_title);
         }
         // 升级前的短标题仍是只读核对候选，不能因改名把未知发帖当成不存在。
         reconciliation_titles.push(format!(
@@ -94,7 +102,7 @@ fn render_auction_thread_with_colors(
         + world_title.len()
         + " Equipment Auction - Session ".len()
         + sequence_width;
-    // 旧候选仅纳入远端允许的长度；当前标题同样严格校验，不截断期数。
+    // 更早的无状态标题沿用当时 50 字符边界；不补造或截断历史身份。
     if previous_title_width <= 50 {
         reconciliation_titles.push(format!(
             "[Auction] {world_title} Equipment Auction - Session {:03}",
@@ -127,8 +135,10 @@ fn render_auction_thread_with_colors(
         },
     );
     if title.len() > MAX_TITLE_BYTES
-        || title.chars().count() > 50
-        || reconciliation_titles.iter().any(|candidate| candidate.chars().count() > 50)
+        || title.chars().count() > MAXIMUM_FORUM_TITLE_RUNES
+        || reconciliation_titles
+            .iter()
+            .any(|candidate| candidate.chars().count() > MAXIMUM_FORUM_TITLE_RUNES)
         || description.len() > MAX_TITLE_BYTES
     {
         return Err(ForumRenderError::InvalidSnapshot);
@@ -318,7 +328,7 @@ fn render_auction_thread_with_colors(
 }
 
 fn topic_title(world: &str, sequence: i64, state: AuctionStatus) -> String {
-    format!("{world} Equipment Auction - Session {sequence:03} ({})", topic_state(state))
+    format!("[Auction] {world} Equipment Auction - Session {sequence:03} ({})", topic_state(state))
 }
 
 fn topic_state(state: AuctionStatus) -> &'static str {
