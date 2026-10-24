@@ -78,7 +78,7 @@ pub(crate) async fn inspect_sent(obligation_id: Uuid, output: PathBuf) -> anyhow
     )
     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let observed_at = Utc::now();
-    let mail_world = match format!("{:?}", target.world).as_str() {
+    let mail_world = match target_world_name.as_str() {
         "Main" => auction_integrations::mooglemail::MoogleMailWorld::Main,
         "Isekai" => auction_integrations::mooglemail::MoogleMailWorld::Isekai,
         _ => anyhow::bail!("invalid settlement world"),
@@ -165,21 +165,16 @@ async fn load_readonly_credentials(
         );
         let opener = CredentialSealer::new(data_key);
         let reader: &dyn AdminCredentialRuntimeReader = store;
-        let mut records = Vec::new();
         let world = match target_world {
             "Main" => AdminCredentialWorld::Main,
             "Isekai" => AdminCredentialWorld::Isekai,
             _ => anyhow::bail!("invalid settlement world"),
         };
-        for world in [world, AdminCredentialWorld::Shared] {
-            let mut active = reader
-                .list_active(AdminCredentialKind::MailCookie, world)
-                .await
-                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-            records.append(&mut active);
-        }
-        records.sort_by_key(|record| record.id);
-        records.dedup_by_key(|record| record.id);
+        // 存储端一次查询已经包含目标 world 与 shared scope，不能跨两个快照拼接凭据。
+        let mut records = reader
+            .list_active(AdminCredentialKind::MailCookie, world)
+            .await
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         anyhow::ensure!(records.len() <= 1, "more than one active MoogleMail credential");
         let Some(record) = records.pop() else {
             anyhow::bail!("no active MoogleMail credential");

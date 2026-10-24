@@ -86,8 +86,7 @@ pub(crate) fn extract_mid(value: &str) -> Option<String> {
         if start == end {
             return None;
         }
-        let encoded = format!("mid={}", &value[start..end]);
-        let decoded = decode_form_component(encoded.strip_prefix("mid=")?)?;
+        let decoded = decode_form_component(&value[start..end])?;
         if !valid_opaque_id(&decoded) {
             return None;
         }
@@ -145,7 +144,19 @@ pub(crate) fn valid_message_body(value: &str) -> bool {
 }
 
 pub(crate) fn normalize_text(value: String) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ")
+    let mut words = value.split_whitespace();
+    let Some(first) = words.next() else { return String::new() };
+    if first.len() == value.len() {
+        return value;
+    }
+    // 直接写入有界输出，不为每个单词保留额外切片，避免大页面按词数放大临时内存。
+    let mut normalized = String::with_capacity(value.len());
+    normalized.push_str(first);
+    for word in words {
+        normalized.push(' ');
+        normalized.push_str(word);
+    }
+    normalized
 }
 
 pub(crate) fn direct_children<'a>(element: ElementRef<'a>, tag: &str) -> Vec<ElementRef<'a>> {

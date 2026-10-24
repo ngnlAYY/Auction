@@ -85,6 +85,8 @@ Public 浏览器的已认证写请求（P06 PUT/DELETE、P18–P20、P24、P26�
 未注册的 `/api`、`/health` 保留路径固定返回 `404 not_found` JSON；其他未知请求在 `Accept` 明确允许 HTML 时返回最小页面 404，否则返回同一 JSON 404。静态文件和批准的浏览器路径只接受 GET/HEAD，其他方法返回带 `Allow: GET, HEAD` 的 JSON 405。Public 15 条（含独立 `/forum` 页面）、Admin 21 条浏览器路由由两个 Dioxus `Route` 枚举与 `auction-http/src/assets/routes.rs` 同步维护，只有这些路径可读 `index.html`；批准路径缺构建产物时返回 503。
 精确静态文件查找拒绝空段、`.`、`..`、反斜线及重复斜线，不将路径规范化后再选文件或授予 immutable。
 百分号编码仍按原始路径查找；开发态资源必须来自受信目录，正式 payload 的符号链接禁令保持不变。
+Admin 冷启动在认证等待前恢复原路径的 query，显式筛选/数量、未知 query、hash 与 Router history state 保留；
+这不增加浏览器注册路径或 API 权限。登录 return 只接受受限站内路径，网络路径、反斜线和登录自循环回退首页。
 
 缓存：Public 普通公开读取（含 P15 forum）为 `no-cache`；P14 补偿流水、P21 `/forum/sync-status`、events/session/lot 列表与详情/账户/竞价/代理/标记及全部 Admin 业务接口为 `no-store`，错误响应沿用相同策略；浏览器路由入口、直接 `index.html` 和 HTML 资源为 `no-store`；直接静态文件中只有 `assets/` 非 HTML 指纹资源使用一年 `immutable`，`wasm/*.js`、`*.wasm`、稳定别名 `/favicon.ico` 和其他稳定文件名使用 `no-cache`、`Last-Modified` 与 `If-Modified-Since`；未知 404/静态 405/产物缺失 503 均为 `no-store`。
 
@@ -439,6 +441,9 @@ A02 已接入 Admin session、严格空查询校验和 PostgreSQL 的 `service_h
 fulfillment、recovery 复用 operations-alert source 的履约/恢复安全水位；credential aggregation 和 alerting section 也已接入安全投影。已登记 dashboard section 都有 owner；owner 未装配或读取失败返回 `unknown`，不伪造状态。三个进程装配根已有启动和周期心跳路径，SIGINT/SIGTERM 下停止周期任务并发布停止心跳；每轮周期心跳重新检查数据库和全部内嵌 migration，读取进程内饱和的审计写入失败计数，并由各自 tracing owner 提供安全状态；Public 同时检查 relay 新鲜度，Worker control 同时投影论坛循环的终止故障和可恢复降级。
 数据库、schema、审计完整性或必须运行的 relay 异常令 readiness 为 false，tracing degraded 令 heartbeat status 降级但不单独改变应用 readiness。外部广播不属于当前 dashboard 契约。
 Worker control 的 `ready/state` 来自同一原子快照；论坛恢复只清除论坛降级原因，不能覆盖其他故障或不可逆的 drain。
+A02 在认证、查询校验与基础 health/process 读取后，在同一请求任务内并发等待六个独立 owner；
+不创建后台任务，取消释放全部读取，原 unknown 降级、DTO、`no-store` 与总预算不变。
+各 section 仍取各 owner 的独立快照，不承诺跨 owner 原子一致。
 
 `realtime.data.total_lag` 为必填非负 i64，统计全部 consumer/stream；`lags` 仍只保留最多 200 条有界明细。
 全量聚合、明细和 failure 水位来自同一只读一致快照；section 健康及浏览器积压卡片均使用 `total_lag`，

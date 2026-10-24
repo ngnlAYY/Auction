@@ -1,11 +1,15 @@
 //! PostgreSQL 备份 manifest 与文件摘要校验。
 
 use super::super::*;
-use super::read_private_artifact;
+use super::{filesystem::open_private_artifact, read_private_artifact};
 
-pub(crate) fn read_backup_manifest(path: &Path) -> anyhow::Result<PostgresBackupManifest> {
+/// 同时返回解析结果和原始字节，留证摘要必须绑定实际解析的同一快照。
+pub(crate) fn read_backup_manifest(
+    path: &Path,
+) -> anyhow::Result<(PostgresBackupManifest, Vec<u8>)> {
     let bytes = read_private_artifact(path, "backup manifest", MAX_BACKUP_MANIFEST_BYTES)?;
-    serde_json::from_slice(&bytes).context("decode PostgreSQL backup manifest")
+    let manifest = serde_json::from_slice(&bytes).context("decode PostgreSQL backup manifest")?;
+    Ok((manifest, bytes))
 }
 
 pub(crate) fn validate_backup_manifest(
@@ -51,8 +55,7 @@ pub(crate) fn manifest_archive_path(
 }
 
 pub(crate) fn sha256_file(path: &Path) -> anyhow::Result<String> {
-    let mut file =
-        fs::File::open(path).with_context(|| format!("open artifact: {}", path.display()))?;
+    let (mut file, _) = open_private_artifact(path, "artifact")?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -66,13 +69,21 @@ pub(crate) fn sha256_file(path: &Path) -> anyhow::Result<String> {
 }
 
 pub(crate) fn sha256_text(value: &str) -> String {
-    let mut digest = Sha256::new();
-    digest.update(value.as_bytes());
-    hex_digest(digest.finalize().as_slice())
+    sha256_bytes(value.as_bytes())
+}
+
+pub(crate) fn sha256_bytes(value: &[u8]) -> String {
+    hex_digest(Sha256::digest(value).as_slice())
 }
 
 pub(crate) fn hex_digest(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
 }
 
 pub(crate) fn is_sha256_hex(value: &str) -> bool {

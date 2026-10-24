@@ -48,18 +48,10 @@ pub(super) fn DeliveryDialog(
     let failure = delivery.failure_code.clone().unwrap_or_else(|| "failed".to_owned());
     let is_send_delivery = delivery.cod.is_some();
     let send_success_blocked = is_send_delivery && draft_action == "succeeded";
-    let dialog_identity = match kind {
-        DeliveryDialogKind::Release => "release",
-        DeliveryDialogKind::Retry => "retry",
-        DeliveryDialogKind::Reconcile => "reconcile",
-        DeliveryDialogKind::ReconcileRetry => "reconcile-retry",
-    };
 
-    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；key 保留以区分不同 delivery
-    // 动作的弹窗实例。
+    // 外壳只拥有焦点和标题 ID；草稿与已提交命令由页面持有，不靠内层 key 重建。
     rsx! {
         Dialog {
-            key: "{dialog_identity}",
             title,
             close_label: t!("delivery-cancel"),
             busy,
@@ -103,6 +95,7 @@ pub(super) fn DeliveryDialog(
                                 {t!("delivery-cancel")}
                             }
                         } else {
+                            // 条件选项可能晚于 select.value 挂载；逐项 selected 保证显示与提交动作一致。
                             select {
                                 id: "delivery-reconcile-action-{delivery_id}",
                                 value: draft_action.clone(),
@@ -115,12 +108,12 @@ pub(super) fn DeliveryDialog(
                                     });
                                 },
                                 if !disposition_conflict {
-                                    option { value: "retry", {t!("delivery-reconcile-action-retry")} }
+                                    option { value: "retry", selected: draft_action == "retry", {t!("delivery-reconcile-action-retry")} }
                                 }
                                 if !is_send_delivery && !disposition_conflict {
-                                    option { value: "succeeded", {t!("delivery-reconcile-action-succeeded")} }
+                                    option { value: "succeeded", selected: draft_action == "succeeded", {t!("delivery-reconcile-action-succeeded")} }
                                 }
-                                option { value: "failed", {t!("delivery-reconcile-action-failed")} }
+                                option { value: "failed", selected: draft_action == "failed", {t!("delivery-reconcile-action-failed")} }
                             }
                         }
                         if draft_action == "succeeded" && !send_success_blocked {

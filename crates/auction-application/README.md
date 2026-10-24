@@ -160,6 +160,8 @@ runtime 邮箱开关分开建模（能力见[能力矩阵](docs/design/architect
 `AdminRuntimeMailDeliveryBudget` 只携带 Worker 非敏感启用/读取/投递预算；候选校验复用同一谓词，
 不在应用层读取部署文件，也不以新规则改写历史 durable 命令。
 规则候选、发布命令和存储快照共用借用校验，不再为检查大小而复制整篇 Markdown；错误优先级与 1 MiB 上限不变。
+runtime 名单与过滤词条按原输入顺序使用借用集合判重，保持大小写、错误优先级与配置指纹。
+Admin 重签 key 直接移交密文信封，并在等待存储前销毁本地候选明文；响应仍来自已提交账本。
 
 装备标色规则的 `categories`、`equipment_types`、`qualities` 保存同一条规则的多选条件：同维任一匹配，
 维度间同时满足；每维空数组沿用旧单值字段，两者均空则不过滤。同维新旧字段同时非空、重复或未规范化条目
@@ -194,8 +196,8 @@ Public lot 查询允许装备分组、等级上限、无等级显示与类型组
 `confirmed_terminal_version`，storage 必须锁内复核 settled/cancelled 及同一版本。`ForumReplyTopic` 持有有序续页证明，
 全部固定帖确认后才以同一版本推进处理水位；`ForumAuctionSnapshot.state` 使用领域 `AuctionStatus`，来自同一数据库快照，
 不由截止时间推断；Settled 仍要求完整权威结算证明，`ForumLotSettlement` 携带连续领先起点与持久 adjustment_ppm。
-`ForumRenderedThread.reconciliation_titles` 最多携带八个去重的旧版/其他状态精确标题，不重复当前标题；
-`ForumPublisher::find_topic_by_titles` 将当前标题与候选合并为最多九个精确标题，一次版面读取核对唯一主题；
+`ForumRenderedThread.reconciliation_titles` 最多携带二十二个去重的旧版/其他状态精确标题，不重复当前标题；
+`ForumPublisher::find_topic_by_titles` 将当前标题与候选合并为最多二十三个精确标题，一次版面读取核对唯一主题；
 未知写入不会逐标题重复 GET，也不能隐式创建新主题。
 `ForumReadPost` 从远端编辑表单携带原始正文及首帖标题/说明，调试正文脱敏，未知写入不能用本地标题替代证明。
 `ForumCommandOutcome` 分开携带持久错误码及本地有界诊断，Worker 只能生成白名单英文提示；
@@ -228,6 +230,8 @@ token/fencing 和数据库实时租约，过期不得复活；release 只接受�
 邮件附件和投稿项以借用 ID 集合去重，保持输入顺序、数量上限与原错误优先级，不复制附件正文或装备实体。
 Admin 与邮件装备来源通过校验后直接移交已消费快照的名称、分类、外部 ID 和 JSON 属性，避免额外深拷贝；
 事务重试仍持有独立可重放写入值，key 清零与封装边界不变。
+起拍价分词借用原文，保持 CR/LF/CRLF 和原诊断索引；拒收 Return 移交原排序附件，不为保留数量复制列表。
+安全展示在无附件 key 时跳过逐窗口摘要，但仍检查和屏蔽 URL key；URL-span 验证只读到首个命中。
 装备来源的临时网络、限流或服务故障保留原可重试错误及诊断任务，不转为永久拒收或安排 Return；
 确定的来源、身份或过滤拒绝继续沿原受控退件路径。来源采集时间与本地业务变更时间分离，外部读取不能决定锁后聚合时间。
 `ports/mail/equipment_diagnostics/reason.rs` 拥有来源解析的九项闭集诊断码，进程内观察使用枚举，
@@ -253,6 +257,8 @@ compose 的未知 COD 不视为零；Admin delivery offset 上限为 `100_000`�
 旧无冻结身份的 compose 草稿也必须匹配规范排序且无重复的精确 EID，不能用附件数量冒充身份；
 Credits 独立按金额核对，不因远端将其计作一条附件而误拒绝原现金草稿。Take 恢复与重排同样携带原观察的
 `fencing_version`，管理员重试后的新尝试不能消费旧资产观察。
+维护唯一性判断只保留借用候选；冻结 Send 在第 33 个列表匹配处即按既有 32 项上限拒绝，不先收集全部命中。
+compose 仍统计完整匹配数；零匹配、多匹配、资产或身份不充分都不授予绑定、discard 或重寄权限。
 
 可配置 MM 正文仍为 14 项，默认使用分段英文；模板只展示已决定的拒收、结算与账户事实，不重新决定退回或金额。
 买家装备 COD 的 `{price_breakdown}` 只消费冻结结算明细，`{amount}` 保持实际 COD；已冻结正文与幂等摘要不因默认文案升级
@@ -264,6 +270,8 @@ Credits 独立按金额核对，不因远端将其计作一条附件而误拒绝
 告警评估与批次状态，告警不改变拍卖或外部投递事实；[errors](crates/auction-application/src/errors) 保留领域分类和可重试性。
 Recovery 外部余额失效时仍保留数据库积压与 `EvidenceStale` 告警，并同时报告 `source_unavailable`；
 不伪造来源健康，也不在不完整观察中关闭旧告警。
+告警批次由 `canonical_summary_prefix` 一次选取原排序下可容纳的最大非空前缀，避免反复删尾并重建正文；
+正文、序号和摘要字节不变，存储只截取该前缀，未纳入信号仍留在持久队列。
 
 ## 读取、实时与会话
 

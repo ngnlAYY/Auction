@@ -265,6 +265,8 @@ pub(crate) fn definite_rejection(code: &str) -> bool {
             | "stale_user_state"
             | "stale_credential_state"
             | "stale_delivery_state"
+            | "stale_world_state"
+            | "rename_not_revertable"
             | "user_conflict"
             | "world_not_found"
             | "invalid_user_command"

@@ -17,25 +17,78 @@ pub fn canonical_summary(
     {
         return Err(OperationsAlertError::Invalid);
     }
-    let mut lines = Vec::with_capacity(items.len());
+    let mut body_bytes = 0;
     for (index, item) in items.iter().enumerate() {
-        if i32::try_from(index).ok().and_then(|index| index.checked_add(1)) != Some(item.ordinal)
-            || item.fingerprint == [0; 32]
-            || item.signal_version <= 0
-            || item.summary.is_empty()
-            || item.summary != item.summary.trim()
-            || item.summary.len() > 512
-            || item.summary.chars().any(char::is_control)
-        {
-            return Err(OperationsAlertError::StoredResultCorrupt);
-        }
-        lines.push(format!("- {}", item.summary));
+        validate_summary_item(item, index)?;
+        body_bytes += item.summary.len() + 2 + usize::from(index > 0);
     }
-    let result = lines.join("\n");
-    if result.len() > maximum_body_bytes {
+    if body_bytes > maximum_body_bytes {
         return Err(OperationsAlertError::Invalid);
     }
-    Ok(result)
+    Ok(render_summary(items, body_bytes))
+}
+
+/// 一次选择原逐项删尾流程可接受的最大非空前缀；不改序号或重写正文。
+/// 未纳入的后缀仍由持久队列保留；首项无效时沿用原错误分类。
+pub fn canonical_summary_prefix(
+    items: &[OperationsAlertBatchItem],
+    maximum_body_bytes: usize,
+) -> Result<(usize, String), OperationsAlertError> {
+    if items.is_empty()
+        || maximum_body_bytes == 0
+        || maximum_body_bytes > MAX_OPERATIONS_ALERT_BODY_BYTES
+    {
+        return Err(OperationsAlertError::Invalid);
+    }
+    let mut count = 0;
+    let mut body_bytes = 0;
+    for (index, item) in items.iter().take(MAX_OPERATIONS_ALERT_BATCH_ITEMS).enumerate() {
+        if let Err(error) = validate_summary_item(item, index) {
+            if count == 0 {
+                return Err(error);
+            }
+            break;
+        }
+        let next_body_bytes = body_bytes + item.summary.len() + 2 + usize::from(index > 0);
+        if next_body_bytes > maximum_body_bytes {
+            break;
+        }
+        count += 1;
+        body_bytes = next_body_bytes;
+    }
+    if count == 0 {
+        return Err(OperationsAlertError::Invalid);
+    }
+    Ok((count, render_summary(&items[..count], body_bytes)))
+}
+
+fn validate_summary_item(
+    item: &OperationsAlertBatchItem,
+    index: usize,
+) -> Result<(), OperationsAlertError> {
+    if i32::try_from(index).ok().and_then(|index| index.checked_add(1)) != Some(item.ordinal)
+        || item.fingerprint == [0; 32]
+        || item.signal_version <= 0
+        || item.summary.is_empty()
+        || item.summary != item.summary.trim()
+        || item.summary.len() > 512
+        || item.summary.chars().any(char::is_control)
+    {
+        return Err(OperationsAlertError::StoredResultCorrupt);
+    }
+    Ok(())
+}
+
+fn render_summary(items: &[OperationsAlertBatchItem], body_bytes: usize) -> String {
+    let mut summary = String::with_capacity(body_bytes);
+    for (index, item) in items.iter().enumerate() {
+        if index > 0 {
+            summary.push('\n');
+        }
+        summary.push_str("- ");
+        summary.push_str(&item.summary);
+    }
+    summary
 }
 
 /// 计算冻结正文摘要。

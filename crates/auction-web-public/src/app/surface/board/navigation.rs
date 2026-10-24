@@ -3,7 +3,7 @@
 use super::*;
 
 pub(crate) fn preview_history_switch(
-    state: &Option<PreviewHistoryLoad>,
+    state: Option<&PreviewHistoryLoad>,
     auction: &CurrentAuction,
     historical: bool,
 ) -> Element {

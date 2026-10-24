@@ -28,6 +28,8 @@
 `stream_key` 是持久化和进程内 Hub 的路由字段，不属于 Public v1 事件 JSON；对外 `events[]` 与 WebSocket 单事件帧只含 `event_id`、`stream_sequence`、`kind`、`schema_version`、`payload`、`created_at`，目标流由查询参数和回放响应顶层字段表达。`created_at` 及 payload 内时间按 Public RFC3339Nano 输出：UTC 用 `Z`，裁掉小数尾随零，整秒不补六位；存储层不得为 PostgreSQL 已丢失的亚微秒位伪造精度；零时间判断用 `0001-01-01T00:00:00Z`，Unix epoch 是合法时间，二者不可混同。
 
 事件先生成 Draft，再由数据库分配流序号；`state_version` 用于业务幂等和快照一致性，`stream_sequence` 用于回放和客户端游标，二者不能互替。事件不暴露数据库行或凭据：每个 kind/version 的字段集合、类型、范围和枚举均为闭集，未知字段拒绝；公开 UUID 必须小写规范、非 nil 的 RFC4122 v1–v5；整数限于 JavaScript 安全整数范围，序号、版本及 ID 计数按注册表区分正数/非负数；world 最多 64 字节且仅小写字母、数字、`_`、`-`。校验在 HTTP、WebSocket 和 relay 公布事件前执行。
+Recovery 重挂的 `preview_catalog_changed` 持久 `state_version` 取同一事务内 auction 更新结果；
+payload 的 `preview_revision` 仍独立表示目录修订号，不能代替聚合状态版本。
 
 ## 已冻结的事件注册表
 

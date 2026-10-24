@@ -17,9 +17,11 @@ pub(crate) fn LotDetail(lot_code: String) -> Element {
     }
     // Router 会复用详情路由组件；目标 UUID 改变时销毁旧读取与命令宿主。
     rsx! {
-        CatalogCommandScope {
-            key: "{lot_code}",
-            ValidLotDetail { lot_id: lot_code }
+        for lot_code in [lot_code] {
+            CatalogCommandScope {
+                key: "{lot_code}",
+                ValidLotDetail { lot_id: lot_code }
+            }
         }
     }
 }

@@ -33,6 +33,10 @@ CLI 只装配配置、应用/存储端口和受控外部工具，不能绕过领
 当前格式/v28 备份 manifest 与 systemd 启动回执均在同一已打开描述符上校验普通文件及权限，
 并以既有 64 KiB 上限加一个检测字节限量读取；规则导入同样按既有正文上限加单个 UTF-8 BOM 限量读取。
 这些读取拒绝符号链接和特殊文件，文件并发增长也不能绕过内存预算；不把 metadata 的读取前长度当作最终上限。
+灾备摘要与 fsync 也复用拒绝 symlink、非阻塞的同一描述符校验，FIFO 不会阻塞在普通 open。
+当前格式和 v28 manifest 的摘要绑定本次实际解析的原始字节，不在 archive 校验后重开路径；
+二次证据比较、精确目标确认和私有文件规则仍保留，这不使同 UID 主动改写或外部 pg_restore 路径打开成为事务。
+CLI 摘要展示统一使用预分配的小写十六进制编码，资金/legacy 确认短语不变。
 
 ## 命令示例
 
@@ -75,6 +79,8 @@ AUCTION_CONFIG_FILE=/etc/auction/public.toml /opt/auction/bin/auctionctl check-c
 回填仅接受 `parsed_message`、不覆盖已有展示。示例见[邮件诊断](ops/mail/diagnostics.md)。
 `inspect-sent` 报告复用私有证据写入器：输出必须位于规范私有目录，采用 `create_new`/0600，完成文件和父目录 fsync
 后才报告成功；不覆盖既有证据，不导出凭据。
+Sent 诊断只按目标 world 读取一次 active 凭据，该查询已包含 shared scope；
+不跨两次读取拼接不同版本，唯一 active、无凭据拒绝及 keyenv key1 规则不变。
 
 ## Bot资金对账
 

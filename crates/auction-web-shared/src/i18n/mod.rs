@@ -57,7 +57,7 @@ pub fn without_fluent_isolation(mut value: String) -> String {
 }
 
 /// 按显式语言把 RFC3339 时间显示为 Asia/Shanghai 时间，不读取 DOM 或依赖语言同步 effect。
-/// 浏览器使用 `Intl.DateTimeFormat`；非 WASM 构建保留同一目标时区的兜底格式。
+/// 浏览器复用最近语言的 `Intl.DateTimeFormat`；非 WASM 构建保留同一目标时区的兜底格式。
 pub fn format_localized_time_for_language(value: &str, _language: &str) -> String {
     if value.is_empty() {
         return "—".to_owned();
@@ -67,33 +67,7 @@ pub fn format_localized_time_for_language(value: &str, _language: &str) -> Strin
     {
         let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
         if date.get_time().is_finite() {
-            let locales = js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(_language));
-            let options = js_sys::Object::new();
-            for (name, option) in [
-                ("day", "numeric"),
-                ("hour", "2-digit"),
-                ("minute", "2-digit"),
-                ("month", "short"),
-                ("second", "2-digit"),
-                ("year", "numeric"),
-            ] {
-                let _ = js_sys::Reflect::set(
-                    &options,
-                    &wasm_bindgen::JsValue::from_str(name),
-                    &wasm_bindgen::JsValue::from_str(option),
-                );
-            }
-            let _ = js_sys::Reflect::set(
-                &options,
-                &wasm_bindgen::JsValue::from_str("hour12"),
-                &wasm_bindgen::JsValue::FALSE,
-            );
-            let _ = js_sys::Reflect::set(
-                &options,
-                &wasm_bindgen::JsValue::from_str("timeZone"),
-                &wasm_bindgen::JsValue::from_str("Asia/Shanghai"),
-            );
-            let formatter = js_sys::Intl::DateTimeFormat::new(&locales, &options);
+            let formatter = time_formatter(_language);
             if let Ok(formatted) =
                 formatter.format().call1(&wasm_bindgen::JsValue::NULL, date.as_ref())
                 && let Some(formatted) = formatted.as_string()
@@ -111,6 +85,53 @@ pub fn format_localized_time_for_language(value: &str, _language: &str) -> Strin
         })
         .map(|instant| instant.format("%d %b %Y, %H:%M:%S").to_string())
         .unwrap_or_else(|| "—".to_owned())
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    // 两端同一渲染树使用一种语言；单槽缓存避免逐时间单元格构造 Intl，也不随语言输入无限增长。
+    static TIME_FORMATTER: std::cell::RefCell<Option<(String, js_sys::Intl::DateTimeFormat)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn time_formatter(language: &str) -> js_sys::Intl::DateTimeFormat {
+    TIME_FORMATTER.with_borrow_mut(|cached| {
+        if let Some((cached_language, formatter)) = cached.as_ref()
+            && cached_language == language
+        {
+            return formatter.clone();
+        }
+        let locales = js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(language));
+        let options = js_sys::Object::new();
+        for (name, option) in [
+            ("day", "numeric"),
+            ("hour", "2-digit"),
+            ("minute", "2-digit"),
+            ("month", "short"),
+            ("second", "2-digit"),
+            ("year", "numeric"),
+        ] {
+            let _ = js_sys::Reflect::set(
+                &options,
+                &wasm_bindgen::JsValue::from_str(name),
+                &wasm_bindgen::JsValue::from_str(option),
+            );
+        }
+        let _ = js_sys::Reflect::set(
+            &options,
+            &wasm_bindgen::JsValue::from_str("hour12"),
+            &wasm_bindgen::JsValue::FALSE,
+        );
+        let _ = js_sys::Reflect::set(
+            &options,
+            &wasm_bindgen::JsValue::from_str("timeZone"),
+            &wasm_bindgen::JsValue::from_str("Asia/Shanghai"),
+        );
+        let formatter = js_sys::Intl::DateTimeFormat::new(&locales, &options);
+        *cached = Some((language.to_owned(), formatter.clone()));
+        formatter
+    })
 }
 
 /// 旧系统的语言偏好存储键。跨系统共享该键，不得重命名。

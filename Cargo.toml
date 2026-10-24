@@ -33,11 +33,11 @@ tokio = { version = "~1.53.3", features = ["macros", "net", "rt-multi-thread", "
 
 # HTTP 与 Web
 # 查询参数由 HTTP owner 严格解析；不启用未使用的宏、Form/Query 提取器。
+# 未消费 OriginalUri；禁用自动 URI 复制和逐请求 extension 分配，路由指标继续使用 MatchedPath。
 axum = { version = "0.8.9", default-features = false, features = [
     "http1",
     "json",
     "matched-path",
-    "original-uri",
     "tokio",
     "tower-log",
     "tracing",
@@ -81,8 +81,8 @@ url = "2.5.8"
 # 上游缺陷补齐：dioxus-web 0.7.10 的 src/history.rs 无条件调用 `Window::location()`，
 # 但它的 web-sys 依赖没有声明 `Location` feature，只能靠依赖图中其他 crate 顺带启用。
 # 这里显式启用该 feature；升级 Dioxus 时应复查上游是否已修，届时可移除对应项。
-# AbortController/AbortSignal 供 Public 浏览器请求恢复旧版 10 秒取消边界；Request/RequestInit
-# 允许共用 GET 边界绕过 gloo-net 0.6.0 给已有 query 追加空参数的缺陷。
+# AbortController/AbortSignal 保持浏览器请求的 10 秒取消边界；Request/RequestInit
+# 供共享 GET 保留精确 URL，并统一响应头、正文读取与取消的总预算。
 web-sys = { version = "0.3.106", features = [
     "AbortController",
     "AbortSignal",
@@ -147,6 +147,10 @@ tracing-opentelemetry = "0.34.0"
 tower = { version = "0.5.3", features = ["util"] }
 # 指标只导出 Prometheus 文本；保留进程 collector，使用 plain_model，避免二进制 protobuf 编码依赖。
 prometheus = { version = "0.14.0", default-features = false, features = ["process"] }
+
+[profile.dev]
+# 可选：保留文件/行号回溯，省去完整类型与局部变量调试信息；需要时用 CARGO_PROFILE_DEV_DEBUG=2 恢复。
+debug = "line-tables-only"
 
 [profile.release]
 # 可选：后端运行性能优先，保持通用目标指令集；不隐式采用构建机 native CPU。

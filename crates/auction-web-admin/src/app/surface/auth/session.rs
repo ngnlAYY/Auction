@@ -20,25 +20,26 @@ pub(crate) fn AdminSessionRetry(mut reload_generation: Signal<u64>) -> Element {
     rsx! {}
 }
 
-/// 每次会话读取成功后安排下一次 GET；即使绝对过期上限使 deadline 不变，也会由父组件
-/// 的已完成检查代数重挂载，在截止点之后读到服务端权威的未认证结果。
+/// 每次检查完成后重设下一次 GET；即使绝对截止未变，也必须在截止后再次确认身份。
+/// 定时器只持有截止字段，不复制 actor 或 CSRF token。
 #[component]
 pub(crate) fn AdminSessionRefresh(
-    session: AdminSession,
+    checked_generation: u64,
+    expires_at: String,
+    absolute_expires_at: String,
     mut reload_generation: Signal<u64>,
 ) -> Element {
     #[cfg(target_arch = "wasm32")]
-    {
-        let delay = session_refresh_delay(&session.expires_at, &session.absolute_expires_at);
-        use_future(move || async move {
+    use_resource(use_reactive(
+        (&checked_generation, &expires_at, &absolute_expires_at),
+        move |(_, expires_at, absolute_expires_at)| async move {
+            let delay = session_refresh_delay(&expires_at, &absolute_expires_at);
             TimeoutFuture::new(delay).await;
             reload_generation.set(reload_generation().saturating_add(1));
-        });
-    }
+        },
+    ));
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = (session, reload_generation);
-    }
+    let _ = (checked_generation, expires_at, absolute_expires_at, reload_generation);
     rsx! {}
 }
 

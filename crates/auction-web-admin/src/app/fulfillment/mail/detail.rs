@@ -192,12 +192,15 @@ pub(super) fn MailIntakeDetailPanel(
                 dt { {t!("admin-mail-delivery-ids")} }
                 dd { "{delivery_ids}" }
             }
-            super::deliveries::MailDeliveriesPanel {
-                key: "{detail.id}",
-                intake_id: detail.id.clone(),
-                deliveries: detail.deliveries,
-                notice: delivery_notice,
-                refresh,
+            // 只重建当前收件的分页与未提交确认；已提交 delivery 仍归稳定页级命令宿主。
+            for (intake_id, deliveries) in [(detail.id, detail.deliveries)] {
+                super::deliveries::MailDeliveriesPanel {
+                    key: "{intake_id}",
+                    intake_id,
+                    deliveries,
+                    notice: delivery_notice,
+                    refresh,
+                }
             }
             section { class: "admin-mail-original", aria_labelledby: "admin-mail-original-title",
                 h3 { id: "admin-mail-original-title", {t!("admin-mail-original")} }

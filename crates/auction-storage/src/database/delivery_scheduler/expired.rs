@@ -48,10 +48,14 @@ async fn expire_one(
         .bind(id)
         .fetch_optional(&mut *tx)
         .await?;
+    // 过期只改变本次结果与 CAS fence，不能重置自动维护的跨尝试重排预算。
     let row=sqlx::query(
         "UPDATE public.deliveries SET status='manual_reconcile',lease_token=NULL,lease_expires_at=NULL,
          completed_at=$2,external_reference=NULL,failure_code='lease_expired_outcome_unknown',
-         result_metadata='{\"outcome_unknown\":true,\"reason\":\"sending_lease_expired\"}'::jsonb,
+         result_metadata='{\"outcome_unknown\":true,\"reason\":\"sending_lease_expired\"}'::jsonb
+             || CASE WHEN result_metadata ? 'sweep_retries'
+                 THEN jsonb_build_object('sweep_retries',result_metadata->'sweep_retries')
+                 ELSE '{}'::jsonb END,
          fencing_version=fencing_version+1,updated_at=clock_timestamp()
          WHERE id=$1 AND status='sending'
          AND lease_expires_at+($3::bigint*interval '1 microsecond')<=$2

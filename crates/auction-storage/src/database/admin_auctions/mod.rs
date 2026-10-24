@@ -52,8 +52,17 @@ async fn list_postgres(
     .await
     .map_err(|_| storage_error("读取 Admin 拍卖列表总数失败"))?;
 
+    // 计数保持完整筛选集；lot 汇总只处理当前页，避免历史场次越多每页扫描越重。
     let rows = sqlx::query(
-        "SELECT
+        "WITH page_auctions AS MATERIALIZED (
+            SELECT a.id
+            FROM public.auctions AS a
+            WHERE ($1::text IS NULL OR a.world_id = $1)
+              AND ($2::text IS NULL OR a.status = $2)
+            ORDER BY a.created_at DESC, a.id DESC
+            LIMIT $3 OFFSET $4
+         )
+         SELECT
             a.id, a.world_id, a.sequence, a.status, a.preview_scheduled_at,
             a.scheduled_open_at, a.preview_opened_at, a.preview_manual_open,
             a.preview_revision, a.opened_at, a.final_phase_at, a.settled_at,
@@ -66,13 +75,11 @@ async fn list_postgres(
                 (a.policy_snapshot ->> 'scheduled_end_at')::timestamptz
             ) AS scheduled_ends_at,
             COUNT(l.id)::bigint AS lot_count
-         FROM public.auctions AS a
+         FROM page_auctions
+         JOIN public.auctions AS a ON a.id = page_auctions.id
          LEFT JOIN public.lots AS l ON l.auction_id = a.id
-         WHERE ($1::text IS NULL OR a.world_id = $1)
-           AND ($2::text IS NULL OR a.status = $2)
          GROUP BY a.id
-         ORDER BY a.created_at DESC, a.id DESC
-         LIMIT $3 OFFSET $4",
+         ORDER BY a.created_at DESC, a.id DESC",
     )
     .bind(request.world_id.as_deref())
     .bind(request.status.as_deref())

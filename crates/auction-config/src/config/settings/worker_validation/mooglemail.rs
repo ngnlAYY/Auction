@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use super::*;
 
 pub(crate) fn validate_mooglemail_worker(
@@ -131,9 +133,7 @@ pub(crate) fn validate_mooglemail_worker(
         }
     }
     let mut mailboxes = BTreeSet::new();
-    if !mailboxes.insert(config.mailbox_key.as_str()) {
-        return Err(ConfigError::InvalidMoogleMailConfig("mailbox_key 必须唯一"));
-    }
+    mailboxes.insert(config.mailbox_key.as_str());
     for world in &config.additional_worlds {
         if !mailboxes.insert(world.mailbox_key.as_str()) {
             return Err(ConfigError::InvalidMoogleMailConfig(
@@ -206,10 +206,9 @@ pub(crate) fn validate_mooglemail_equipment_filter(
                 "equipment_filter 每个 token 列表最多 256 项",
             ));
         }
-        for (index, value) in list.iter().enumerate() {
-            if !valid_config_text(value, 128)
-                || list[..index].iter().any(|previous| previous == value)
-            {
+        let mut seen = HashSet::with_capacity(list.len());
+        for value in list {
+            if !valid_config_text(value, 128) || !seen.insert(value.as_str()) {
                 return Err(ConfigError::InvalidMoogleMailConfig(
                     "equipment_filter token 必须是唯一、非空且不含控制字符的文本",
                 ));
@@ -357,10 +356,10 @@ pub(crate) fn validate_mooglemail_world(
     if sender_allowlist.len() > 1000 {
         return Err(ConfigError::InvalidMoogleMailConfig("sender_allowlist 最多 1000 项"));
     }
-    for (index, sender) in sender_allowlist.iter().enumerate() {
-        if !valid_config_text(sender, 128)
-            || sender_allowlist[..index].iter().any(|previous| previous == sender)
-        {
+    // 借用原文建索引，避免千项名单逐项扫描前缀；不归一化、重排或复制发件人。
+    let mut seen = HashSet::with_capacity(sender_allowlist.len());
+    for sender in sender_allowlist {
+        if !valid_config_text(sender, 128) || !seen.insert(sender.as_str()) {
             return Err(ConfigError::InvalidMoogleMailConfig(
                 "sender_allowlist 含有重复或无效发件人",
             ));

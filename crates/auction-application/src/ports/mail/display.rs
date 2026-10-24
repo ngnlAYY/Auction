@@ -86,7 +86,7 @@ impl MailDisplaySnapshot {
                 .body
                 .chars()
                 .all(|character| !character.is_control() || matches!(character, '\n' | '\r' | '\t'))
-            && url_key_ranges(&self.body).is_empty()
+            && url_key_ranges(&self.body).next().is_none()
             && self.credits >= 0
             && self.cod >= 0
             && self.attachment_ids.len() <= MAX_ATTACHMENT_IDS
@@ -115,15 +115,17 @@ fn key_fingerprint(key: &[u8], state: &RandomState) -> u64 {
 }
 
 fn redact_body(source: &str, keys: &HashSet<u64>, hash_state: &RandomState) -> String {
-    let mut ranges = url_key_ranges(source);
+    let mut ranges = url_key_ranges(source).collect::<Vec<_>>();
     // 原始 key 不离开同步借用；集合仅保留本次随机盐指纹，碰撞最多额外屏蔽正文。
     // 附件 key 固定十字节；一次扫描同时匹配全部 key，成本不随附件数乘倍增长。
-    for (start, window) in source.as_bytes().windows(10).enumerate() {
-        if keys.contains(&key_fingerprint(window, hash_state))
-            && source.is_char_boundary(start)
-            && source.is_char_boundary(start + 10)
-        {
-            ranges.push((start, start + 10));
+    if !keys.is_empty() {
+        for (start, window) in source.as_bytes().windows(10).enumerate() {
+            if keys.contains(&key_fingerprint(window, hash_state))
+                && source.is_char_boundary(start)
+                && source.is_char_boundary(start + 10)
+            {
+                ranges.push((start, start + 10));
+            }
         }
     }
     ranges.sort_unstable();
@@ -149,21 +151,17 @@ fn redact_body(source: &str, keys: &HashSet<u64>, hash_state: &RandomState) -> S
     redacted
 }
 
-fn url_key_ranges(text: &str) -> Vec<(usize, usize)> {
+fn url_key_ranges(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
     let bytes = text.as_bytes();
-    let mut ranges = Vec::new();
-    for slash in 0..bytes.len() {
-        if bytes[slash] != b'/' || slash + 11 > bytes.len() {
-            continue;
+    bytes.iter().enumerate().filter_map(move |(slash, byte)| {
+        if *byte != b'/' || slash + 11 > bytes.len() {
+            return None;
         }
         let end = slash + 11;
-        if bytes[slash + 1..end].iter().all(u8::is_ascii_hexdigit)
+        (bytes[slash + 1..end].iter().all(u8::is_ascii_hexdigit)
             && bytes.get(end).is_none_or(|byte| !byte.is_ascii_hexdigit())
             && text.is_char_boundary(slash + 1)
-            && text.is_char_boundary(end)
-        {
-            ranges.push((slash + 1, end));
-        }
-    }
-    ranges
+            && text.is_char_boundary(end))
+        .then_some((slash + 1, end))
+    })
 }

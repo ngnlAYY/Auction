@@ -33,8 +33,9 @@ pub(crate) fn AdminAuthenticatedShell(
             // 仅已确认会话安排过期检查；临时故障统一退避，不能按旧截止时间连续重查。
             if session_confirmed {
                 AdminSessionRefresh {
-                    key: "{checked_generation}:{session.expires_at}",
-                    session: session.clone(),
+                    checked_generation,
+                    expires_at: session.expires_at.clone(),
+                    absolute_expires_at: session.absolute_expires_at.clone(),
                     reload_generation,
                 }
             } else {

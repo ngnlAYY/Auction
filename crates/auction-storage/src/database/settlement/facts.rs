@@ -45,15 +45,16 @@ pub(super) async fn close_settlement_lots(
 
     let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
     // 撤回记录不属于结算明细，但它们残留的活动代理同样必须阻止结算提交。
+    // 只关联仍活动的授权，沿用其部分索引；终态历史不能放大 lot 汇总的中间结果。
     let counts = sqlx::query(
         r#"SELECT
                COUNT(DISTINCT l.id)
                    FILTER (WHERE l.status <> 'withdrawn')::bigint AS lot_count,
                COUNT(DISTINCT l.id) FILTER (WHERE l.status = 'live')::bigint AS live_count,
-               COUNT(DISTINCT p.authorization_id)
-                   FILTER (WHERE p.status IN ('active', 'final_fast'))::bigint AS active_proxy_count
+               COUNT(DISTINCT p.authorization_id)::bigint AS active_proxy_count
            FROM public.lots AS l
-           LEFT JOIN public.bid_proxy_authorizations AS p ON p.lot_id = l.id
+           LEFT JOIN public.bid_proxy_authorizations AS p
+             ON p.lot_id = l.id AND p.status IN ('active', 'final_fast')
            WHERE l.auction_id = $1"#,
     )
     .bind(auction_id.as_uuid())

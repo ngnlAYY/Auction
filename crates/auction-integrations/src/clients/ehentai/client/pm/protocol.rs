@@ -109,5 +109,13 @@ pub(super) fn plain_body(element: ElementRef<'_>) -> Result<String, ForumPmError
 }
 
 pub(super) fn normalize(value: &str) -> String {
-    value.split_ascii_whitespace().collect::<Vec<_>>().join(" ")
+    let value = value.trim_ascii();
+    let mut normalized = String::with_capacity(value.len());
+    for word in value.split_ascii_whitespace() {
+        if !normalized.is_empty() {
+            normalized.push(' ');
+        }
+        normalized.push_str(word);
+    }
+    normalized
 }

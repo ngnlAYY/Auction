@@ -10,7 +10,7 @@ use super::{
 
 const MAX_RECIPIENT_BYTES: usize = 256;
 const MAX_SUBJECT_BYTES: usize = 512;
-const MAX_BODY_BYTES: usize = 64 * 1024;
+pub(super) const MAX_BODY_BYTES: usize = 64 * 1024;
 
 /// 每次 compose POST 都需要重放的消息字段。
 #[derive(Clone, PartialEq, Eq)]

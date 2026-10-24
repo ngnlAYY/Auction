@@ -211,15 +211,27 @@ impl MoogleMailGateway {
             .checked_add(self.config.fetch_budget)
             .ok_or_else(|| configuration(request.world))?;
         let deadline = tokio::time::Instant::from_std(request.deadline.min(configured_deadline));
-        let session = tokio::time::timeout_at(
+        let mut session = tokio::time::timeout_at(
             deadline,
             self.credentials.begin_read(request.world, MoogleMailOperation::Sent),
         )
         .await
         .map_err(|_| fetch_budget_exhausted(request.world))??;
-        let report = self.lookup_sent_with_cookie(&request, session.cookie(), deadline).await?;
-        session.check_current().await?;
-        Ok(report)
+        tokio::time::timeout_at(deadline, async {
+            match self.lookup_sent_with_cookie(&request, session.cookie(), deadline).await {
+                Ok(report) => {
+                    session.check_current().await?;
+                    Ok(report)
+                }
+                Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
+                    session.invalidate_current().await?;
+                    Err(error)
+                }
+                Err(error) => Err(error),
+            }
+        })
+        .await
+        .map_err(|_| fetch_budget_exhausted(request.world))?
     }
 
     async fn lookup_sent_with_cookie(

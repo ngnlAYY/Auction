@@ -1,5 +1,7 @@
 //! 只从追加修复表与原投递完整身份相互匹配的事实解除历史阻塞；不相信单独 metadata。
 
+use std::sync::LazyLock;
+
 use super::*;
 
 /// 调用方固定使用 r/d 别名；该条件不包含付款满足或资金用途授权。
@@ -35,17 +37,20 @@ pub(crate) async fn legacy_self_uid(
     tx: &mut Transaction<'_, Postgres>,
     obligation_id: Uuid,
 ) -> Result<Option<String>, FundingError> {
-    let query=format!(
-        "SELECT r.uid, ({TRUSTED_DELIVERY_PREDICATE}) IS TRUE AS trusted FROM public.settlement_legacy_self_reconciliations r
+    // 与其他冲突门一致，仅缓存编译期 SQL 文本，不缓存任何义务或凭据的证明结果。
+    static QUERY: LazyLock<String> = LazyLock::new(|| {
+        format!(
+            "SELECT r.uid, ({TRUSTED_DELIVERY_PREDICATE}) IS TRUE AS trusted FROM public.settlement_legacy_self_reconciliations r
          JOIN public.deliveries d ON d.id=r.delivery_id
          JOIN public.settlement_obligations o ON o.id=r.obligation_id
          WHERE r.obligation_id=$1 AND r.action='reopen_payment'
            AND (to_jsonb(o)-'state_version'-'updated_at'-'business_state')=
                ((r.original_snapshot->'obligation')-'state_version'-'updated_at'-'business_state')"
-    );
+        )
+    });
     use sqlx::Row;
     // 仅拼接本模块编译期常量；业务值始终通过 bind 传入。
-    let row = sqlx::query(sqlx::AssertSqlSafe(query.as_str()))
+    let row = sqlx::query(sqlx::AssertSqlSafe(QUERY.as_str()))
         .bind(obligation_id)
         .fetch_optional(&mut **tx)
         .await

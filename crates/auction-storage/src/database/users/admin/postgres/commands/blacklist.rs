@@ -232,7 +232,7 @@ pub(super) async fn freeze_blacklist_proxies_postgres(
         )
         .bind(child_command_id)
         .bind(lot_id)
-        .bind(request_hash.as_bytes().to_vec())
+        .bind(request_hash.as_bytes().as_slice())
         .bind(Json(result_payload))
         .bind(now)
         .execute(&mut **transaction)

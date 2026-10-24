@@ -62,7 +62,9 @@ pub(crate) fn LotWatchScope(auction_id: String, children: Element) -> Element {
     let user_id = use_context::<super::PublicCommandOwner>().0();
     let scope = format!("{}:{}", user_id.as_deref().unwrap_or_default(), auction_id);
     rsx! {
-        ScopedLotWatches { key: "{scope}", user_id, auction_id, children }
+        for (scope, user_id, auction_id, children) in [(scope, user_id, auction_id, children)] {
+            ScopedLotWatches { key: "{scope}", user_id, auction_id, children }
+        }
     }
 }
 

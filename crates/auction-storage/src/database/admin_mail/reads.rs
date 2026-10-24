@@ -70,9 +70,10 @@ pub(super) async fn list_intakes_postgres(
     store: &crate::database::PostgresStore,
     request: AdminMailIntakeFilter,
 ) -> Result<AdminMailIntakePage, ApplicationError> {
+    // 与 delivery 列表共用只读一致快照，保留 total/当前页原子投影，不参与写事务的 SSI。
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启邮件入站读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *transaction)
         .await
         .map_err(|_| storage_error("设置邮件入站读取隔离级别失败"))?;

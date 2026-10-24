@@ -2,13 +2,13 @@
 
 use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 
 use crate::api::{AdminRecovery, AdminRecoveryReport, confirm_admin_recovery};
+use crate::app::surface::AdminActionFeedback;
 use crate::app::surface::pagination::AdminPagination;
-use crate::app::surface::{AdminActionFeedback, stable_scoped_command_id};
+use crate::app::surface::pending::{PendingCommands, set_if_alive};
 
 use super::RecoveryConfirmationDraft;
 use super::helpers::{recovery_action_summary, recovery_command_label, recovery_stage_label};
@@ -91,6 +91,7 @@ fn AdminRecoveryRow(
     mut reason: Signal<String>,
     mut action_feedback: Signal<Option<AdminActionFeedback>>,
 ) -> Element {
+    let pending = use_context::<PendingCommands>();
     let recovery_id = recovery.id.clone();
     let display_equipment_name = recovery.equipment_name.clone();
     let display_equipment_identity = format!("{display_equipment_name}({})", recovery.world_id);
@@ -128,8 +129,11 @@ fn AdminRecoveryRow(
                                 button {
                                     class: "admin-btn-primary admin-auction-recovery-action",
                                     r#type: "button",
-                                    disabled: action_busy(),
+                                    disabled: action_busy() || pending.contains(&recovery_id),
                                     onclick: move |_| {
+                                        if pending.any_busy() || pending.contains(&draft.recovery_id) {
+                                            return;
+                                        }
                                         confirmation.set(Some(draft.clone()));
                                         reason.set(String::new());
                                         if action_feedback()
@@ -155,14 +159,13 @@ pub(super) fn AdminRecoveryDialog(
     draft: Option<RecoveryConfirmationDraft>,
     mut confirmation: Signal<Option<RecoveryConfirmationDraft>>,
     mut reason: Signal<String>,
-    mut busy: Signal<bool>,
+    busy: Signal<bool>,
     mut feedback: Signal<Option<AdminActionFeedback>>,
-    mut command_ids: Signal<std::collections::HashMap<String, Uuid>>,
     selected_auction_id: Signal<String>,
     selection_generation: Signal<u64>,
-    mut reload_generation: Signal<u64>,
     mut recovery_reload_generation: Signal<u64>,
 ) -> Element {
+    let pending = use_context::<PendingCommands>();
     let Some(draft) = draft else {
         return rsx! {};
     };
@@ -185,78 +188,66 @@ pub(super) fn AdminRecoveryDialog(
                     class: "admin-auction-recovery-confirm",
                     onsubmit: move |event| {
                         event.prevent_default();
-                        if busy() || (requires_reason && reason().trim().is_empty()) {
+                        if pending.any_busy() || pending.contains(&draft.recovery_id)
+                            || (requires_reason && reason().trim().is_empty())
+                        {
                             return;
                         }
-                        busy.set(true);
                         let draft = draft.clone();
                         let reason_value = if draft.action == "reclaimed" {
                             String::new()
                         } else {
                             reason().trim().to_owned()
                         };
-                        let command_signature = format!(
-                            "{}:{}:{}:{reason_value}",
-                            draft.recovery_id, draft.state_version, draft.action
-                        );
-                        let command_id =
-                            stable_scoped_command_id(command_ids, &command_signature);
-                        feedback.set(None);
-                        let mut busy = busy;
-                        let mut confirmation = confirmation;
-                        let mut reason = reason;
-                        let mut feedback = feedback;
-                        let mut command_ids = command_ids;
-                        let selected_auction_id = selected_auction_id;
-                        let selection_generation = selection_generation;
                         let submitted_selection_generation = selection_generation();
-                        let mut reload_generation = reload_generation;
-                        let mut recovery_reload_generation = recovery_reload_generation;
-                        spawn(async move {
-                            let submitted_auction_id = draft.auction_id.clone();
-                            let result = confirm_admin_recovery(
-                                command_id,
-                                draft.recovery_id,
-                                draft.state_version,
-                                draft.action,
-                                reason_value,
-                            )
-                            .await;
-                            let still_selected = selected_auction_id() == submitted_auction_id
-                                && selection_generation() == submitted_selection_generation;
-                            match result {
-                                Ok(_) => {
-                                    command_ids.write().remove(&command_signature);
-                                    if still_selected {
-                                        confirmation.set(None);
-                                        reason.set(String::new());
-                                        feedback.set(Some(AdminActionFeedback::Success));
-                                        // 旧版成功后同时失效 auction、settlement 与 recovery；共享
-                                        // generation 正好驱动这三个权威读取，不能只刷新当前表。
-                                        reload_generation
-                                            .set(reload_generation().saturating_add(1));
-                                    }
-                                }
-                                Err(error) if error.is_conflict() => {
-                                    if still_selected {
-                                        // 旧版对全部 409 都关闭失效上下文，但保留错误和命令 ID 供同一动作重试。
-                                        confirmation.set(None);
-                                        reason.set(String::new());
-                                        feedback.set(Some(AdminActionFeedback::Error(error.code)));
+                        let success_auction_id = draft.auction_id.clone();
+                        let failure_auction_id = draft.auction_id.clone();
+                        let submitted = pending.submit(
+                            draft.recovery_id.clone(),
+                            recovery_command_label(&draft.action),
+                            move |command_id| {
+                                let draft = draft.clone();
+                                let reason_value = reason_value.clone();
+                                async move {
+                                    let result = confirm_admin_recovery(
+                                        command_id,
+                                        draft.recovery_id,
+                                        draft.state_version,
+                                        draft.action,
+                                        reason_value,
+                                    ).await;
+                                    if result.as_ref().is_err_and(|error| error.is_conflict())
+                                        && selected_auction_id() == draft.auction_id
+                                        && selection_generation() == submitted_selection_generation
+                                    {
                                         recovery_reload_generation.set(
                                             recovery_reload_generation().saturating_add(1),
                                         );
                                     }
+                                    result.map_err(|error| error.code)
                                 }
-                                Err(error) => {
-                                    if still_selected {
-                                        // 400/503 保留对话框、输入和命令，便于同次重试。
-                                        feedback.set(Some(AdminActionFeedback::Error(error.code)));
-                                    }
+                            },
+                            move |_| {
+                                if selected_auction_id() == success_auction_id
+                                    && selection_generation() == submitted_selection_generation
+                                {
+                                    set_if_alive(feedback, Some(AdminActionFeedback::Success));
                                 }
-                            }
-                            busy.set(false);
-                        });
+                            },
+                            move |code| {
+                                if selected_auction_id() == failure_auction_id
+                                    && selection_generation() == submitted_selection_generation
+                                {
+                                    set_if_alive(feedback, Some(AdminActionFeedback::Error(code)));
+                                }
+                            },
+                        );
+                        if submitted {
+                            // 完整意图归页级宿主；关闭展示不能修改未知命令的原因、版本或 UUID。
+                            confirmation.set(None);
+                            reason.set(String::new());
+                            feedback.set(None);
+                        }
                     },
                     if requires_reason {
                         label {

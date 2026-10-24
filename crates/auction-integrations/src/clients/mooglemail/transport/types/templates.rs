@@ -1,6 +1,7 @@
 //! MoogleMail 通知模板快照及占位符校验。
 
 use super::super::*;
+use crate::clients::mooglemail::forms::MAX_BODY_BYTES;
 
 const MOOGLEMAIL_TEMPLATE_KEYS: &[&str] = &[
     "auction_assets_rejected",
@@ -251,9 +252,17 @@ impl MoogleMailNotificationTemplates {
             let end = start + 1 + template[start + 1..].find('}')?;
             let placeholder = &template[start + 1..end];
             let value = variables.iter().find(|(name, _)| *name == placeholder)?.1;
+            // 按展开后的字节数限流；重复占位符不能先膨胀成巨型正文再交给发送校验。
+            if output.len().checked_add(start - cursor)?.checked_add(value.len())? > MAX_BODY_BYTES
+            {
+                return None;
+            }
             output.push_str(&template[cursor..start]);
             output.push_str(value);
             cursor = end + 1;
+        }
+        if output.len().checked_add(template.len() - cursor)? > MAX_BODY_BYTES {
+            return None;
         }
         output.push_str(&template[cursor..]);
         Some(output)
@@ -263,7 +272,7 @@ impl MoogleMailNotificationTemplates {
 fn validate_template_body(key: &str, value: &str) -> Result<(), String> {
     if value.is_empty()
         || value != value.trim()
-        || value.len() > 64 * 1024
+        || value.len() > MAX_BODY_BYTES
         || value
             .chars()
             .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))

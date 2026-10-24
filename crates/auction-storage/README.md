@@ -103,10 +103,10 @@ Admin realtime replay 在追加替代事件的同一事务复用 consumer 恢复
 生命周期使用对应排他锁；取得锁后读取数据库时间，同一计划的代理、领先时间、截止、审计及接受事实共用该时刻。
 命令账本、状态、审计和 realtime/outbox 同事务提交，Preview/Open/Final 与轮次完成标记也原子写入。`competition/postgres/` 按
 bidding、lifecycle、admin 拆分；旧竞价账本重放仍在一致快照中取得冻结策略、授权版本和转换历史，不重新执行当前状态
-门禁。竞价及关键生命周期使用 Serializable、明确行锁，最多三次尝试（含首次）；队列领取才使用 Read Committed 加锁，
-只重试已分类的序列化冲突/死锁，未知提交结果不能盲目重放。
-竞价命令账本和 MM 超价通知直接借用原 32 字节请求摘要绑定 `bytea`，不为每次写入另建临时字节向量；
-摘要算法、字段内容、幂等比较及原事务边界不变。
+门禁。竞价及关键生命周期（含 `final → settling` 领取）使用 Serializable、明确行锁，最多三次尝试（含首次）；
+普通队列领取可按 owner 使用 Read Committed 加锁。只重试已分类的序列化冲突/死锁，未知提交不能盲目重放。
+命令、告警、用户及通知写入借用原请求摘要绑定 `bytea`；信封文本与 replay JSON 同样借用已持有数据，
+不另建参数 Vec 或深克隆 JSON，摘要、编码、幂等比较及事务边界不变。
 Admin 规则、邮箱管理、Recovery 命令及周轮次 bootstrap 的已有重试边界也按 `40001`/`40P01` 识别明确中止，
 保持原最多三次整事务尝试；唯一约束、未知提交及普通连接失败不因此重试。
 规则发布仅允许 `expected_revision = 0` 新建；非零版本只更新匹配旧版本的既有语言文档，缺失时返回当前版本 0，
@@ -141,6 +141,8 @@ suppressed 且不回退 MM；sending 永不回 pending，过期 sending 只转 m
 不由启动或迁移丢弃队列。查询使用运行时绑定 SQL，无新增 SQLx 宏离线元数据。
 轮询续租和失败退避先取得邮箱行锁，再用 `clock_timestamp()` 校验实时租约；入站提交的最终 cursor CAS
 也使用实时数据库时间，不能用调用前时间或事务起始时间完成已过期租约。token、owner、版本和暂停快照规则不变。
+入站 `received_at` 的幂等比较采用 PostgreSQL 微秒精度，接受合法亚微秒输入的自读结果；
+安全 JSON 快照与摘要借用绑定，`processed_at` 仍保留首次处理值，不改变完成证明。
 论坛发布/内容确认、告警批次、recovery action、履约失败及 PM 收口同样先按原锁序取得目标行，
 再在后续语句复核实时租约；单独在首次 UPDATE 谓词中调用实时时钟不构成锁后检查。
 过期保留原 stale 分类，未知外写不会因此重新入队。
@@ -178,8 +180,10 @@ generation、due、授权与资格；调度字段与确定性命令持久化，�
 `bid_log/postgres.rs` 的明细及 total 均保留同一命令内的普通出价和即时代理回应，不因后续代理事实而隐藏触发报价。
 原命令白名单、拍卖/world 可见性、五字段 keyset 排序和分页边界不变；结果仍只含公开金额、玩家和来源，
 不读取或暴露代理秘密上限。`valid` 只标识当前领先投影，完整事实不会因不再领先而从历史中删除。
-公开黑名单、Admin delivery 及 realtime failure/lag 的计数与当前页共用 Repeatable Read 只读事务，
+公开黑名单、Admin 邮件入站/delivery 及 realtime failure/lag 的计数与当前页共用 Repeatable Read 只读事务，
 避免并发状态变化造成同一响应的总数与列表不一致；筛选、排序、空页总数和分页上限保持原契约。
+Public/Admin 拍卖列表与 Public 补偿批次先物化当前页拍卖 ID，再汇总该页 lot 或账本；
+total 与全局补偿余额仍覆盖原完整范围，原排序、游标、无 lot 场次及金额 fallback 保持，不增加索引或迁移。
 Realtime dashboard 的全量 lag 聚合、有界明细与 failure 水位共用同一只读一致快照；健康和总积压使用全量值，
 不能从排序前 200 条明细推断全局无积压，wire 字段见[Dashboard 契约](docs/contracts/routes.md#dashboard-与-readiness)。
 账户页只对当前页授权批量读取完整转换历史和最近代理竞价，详情共用同一归属查询；转换按授权/序号排列，
@@ -206,7 +210,7 @@ Admin 读取不为补全投影临时写入；邮件展示和诊断 sidecar 均�
 `pending/prepared/enqueued` 阶段；最老积压按这批义务及独立的未终结 `blocked` 义务计算。
 `contingent` 退款保持未触发事实，不进入待处理与积压年龄；`blocked/failed/manual_reconcile` 保持各自计数，
 Dashboard 与 operations alert 共用该投影，字段契约见[Dashboard 与 readiness](docs/contracts/routes.md#dashboard-与-readiness)。
-Delivery 告警、内部履约冲突/锁定及资金分类查询只在首次调用时组合固定的修复证明 SQL，后续复用不可变文本；
+Delivery 告警、内部履约冲突/锁定、资金分类及旧履约证明查询只在首次调用时组合固定 SQL，后续复用不可变文本；
 每次仍读取当前事务事实并取得原锁集合，不缓存水位/资格、不放宽 `TRUSTED_DELIVERY_PREDICATE`，也不拼接业务输入。
 结算报告在同一 Serializable 快照内读取汇总与明细，序列化冲突最多尝试三次；明细排除不参与结算的
 `withdrawn` 标的，其余 lot 缺失结算事实时失败关闭。赢家累计领先时长由追加式 bid 重建，无领先事实时为零。
@@ -214,6 +218,8 @@ Delivery 告警、内部履约冲突/锁定及资金分类查询只在首次调�
 可由追加式 bid 证明的未结算 live lot 投影，不改已结算金额、终态 lot 或历史审计。
 `settlement` 的 `ReadOnlySettled` 历史核验继续使用 `leader_since` 旧连续区间，不扫描并丢弃未使用的 bids 累计时长；
 正常新结算仍按追加事实累计领先，历史金额、策略兼容及核验边界不变。
+结算完成检查只联接 `active/final_fast` 代理，避免终态授权历史扩行；全部 lot 仍参与检查，
+`withdrawn` 标的上的活动授权也必须阻断提交。
 
 Delivery 进入 sending 前须证明命令已提交，未知发送结果进入 manual_reconcile，不自动重寄。
 Fulfillment 激活后保留原 claim 的 token/fencing 继续对账，领取期间 `next_attempt_at` 始终为空；
@@ -238,6 +244,8 @@ claimed/sending，先取 delivery 行锁再复核 token/fencing 及 `clock_times
 未知/失败提交不宣告成功，不据此重发。Send 不进入维护重排队入口，观察元数据本身不迁移状态。
 维护 Requeue 只接受原 Take 尝试及当前凭据证明匹配的 `mail_intake/take`；回到 pending 时一并清除 `claimed_at`，
 保持待领取投影完整，不把原 sending 或未知 Send 伪装成从未发送。
+自动领取、释放、收口及过期隔离只保留已消费的 `sweep_retries`，清除其余旧结果证明；
+自动维护最多重排两次，Admin 显式重试沿用原重置规则。升级不推断或回填旧版本已丢失的计数。
 `mailbox_sweep_cursors`（`000060`）只持久记录逐条维护尝试的 `(created_at,id)` 环形位置，不表示投递完成；
 预算未处理的后缀不推进。一次性 discard 同时匹配当前 fence/冻结身份，拒绝全库内容歧义，只阻止未知草稿删除重放，不授权 Send。
 COD 重排队使用冻结 v1 七天窗口，并在清旧投影前同事务追加 `delivery.cod_return_resend` 安全历史审计。

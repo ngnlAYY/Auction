@@ -9,6 +9,60 @@ use super::{
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+use std::{cell::RefCell, rc::Rc};
+
+/// 仅在冷启动含 query 时保存一次原始相对地址，不持久化或记录查询值。
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
+struct InitialAdminLocation(Option<Rc<RefCell<Option<String>>>>);
+
+/// 与 Public 相同，在 Router 规范化地址前保留未在 Routable 声明的查询。
+pub(super) fn use_initial_admin_location() {
+    #[cfg(target_arch = "wasm32")]
+    use_context_provider(|| {
+        let initial = web_sys::window().and_then(|window| {
+            let location = window.location();
+            let search = location.search().ok()?;
+            if search.is_empty() {
+                return None;
+            }
+            let mut url = location.pathname().ok()?;
+            let hash = location.hash().ok()?;
+            url.reserve(search.len() + hash.len());
+            url.push_str(&search);
+            url.push_str(&hash);
+            Some(url)
+        });
+        InitialAdminLocation(initial.map(|url| Rc::new(RefCell::new(Some(url)))))
+    });
+}
+
+/// 认证请求前恢复当前路径的首次 query；只消费一次，不覆盖后来导航或已有的新查询。
+pub(super) fn restore_initial_admin_location() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(initial) =
+            try_consume_context::<InitialAdminLocation>().and_then(|location| location.0)
+        else {
+            return;
+        };
+        let Some(url) = initial.borrow_mut().take() else { return };
+        let Some((pathname, _)) = url.split_once('?') else { return };
+        let Some(window) = web_sys::window() else { return };
+        let location = window.location();
+        if location.pathname().ok().as_deref() != Some(pathname)
+            || location.search().ok().as_deref() != Some("")
+        {
+            return;
+        }
+        if let Ok(history) = window.history() {
+            let state = history.state().unwrap_or(wasm_bindgen::JsValue::NULL);
+            let _ = history.replace_state_with_url(&state, "", Some(&url));
+        }
+    }
+}
+
 /// 管理端路由表。
 /// 路径逐条对应旧系统已冻结的管理端 route。管理命令的实现必须走版本化 REST 契约，
 /// 不在浏览器端重建状态机。

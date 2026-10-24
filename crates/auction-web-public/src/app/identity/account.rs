@@ -56,7 +56,9 @@ pub(super) fn page() -> Element {
             }
         }
         Some(Ok(Some(identity))) => rsx! {
-            AccountReadScope { key: "account-{identity.user_id}", user_id: identity.user_id.clone() }
+            for user_id in [identity.user_id.clone()] {
+                AccountReadScope { key: "account-{user_id}", user_id }
+            }
         },
     };
 
@@ -64,7 +66,7 @@ pub(super) fn page() -> Element {
         section { class: "public-account-bids-page", aria_labelledby: "account-title",
             h1 { id: "account-title", {t!("page-account-title")} }
             // 会话暂时读取失败只禁用新写；与竞价宿主一样，明确换号或登出才销毁未知命令。
-            if let Some(user_id) = command_owner() {
+            for user_id in command_owner() {
                 AccountPreferenceScope { key: "preferences-{user_id}", user_id }
             }
             {account}

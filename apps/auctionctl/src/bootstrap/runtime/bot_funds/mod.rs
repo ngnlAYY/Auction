@@ -57,7 +57,7 @@ pub(super) async fn run(args: BotFundsArgs) -> anyhow::Result<()> {
     if !args.execute {
         let preview = store.preview_funding(args.expected_uid).await?;
         println!("{}", serde_json::to_string_pretty(&preview)?);
-        let digest: String = preview.digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        let digest = super::hex_digest(&preview.digest);
         println!("preview_digest={digest}");
         println!(
             "只读预览：远端身份/余额尚未核验，无可用额度。apply要求专用账号、无并发资金写入/未登记负债、停止旧Worker并同版升级。确认格式：RECONCILE BOT FUNDS <UID> <VERSION> <PROPRIETARY> <COMPENSATION> <DIGEST>"

@@ -4,7 +4,7 @@ use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;
 
-use super::args::{LegacyTargetArgs, digest_hex};
+use super::{super::hex_digest, args::LegacyTargetArgs};
 
 pub(super) fn preview<T: Serialize>(
     operation: &str,
@@ -23,7 +23,7 @@ pub(super) fn preview<T: Serialize>(
             "obligation_id": args.obligation_id,
             "expected_uid": args.expected_uid,
             "expected_state_version": version,
-            "expected_digest": digest_hex(digest),
+            "expected_digest": hex_digest(digest),
             "confirm_write": confirmation,
             "remote_evidence_verified": false,
             "worker_must_be_stopped_for_execute": true,

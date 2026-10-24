@@ -17,11 +17,12 @@ pub(super) async fn process_topic(
     let preview = runtime.reader.fetch_topic(topic.world, topic.thread_id.clone()).await?;
     validate_fixed_layout(&topic, &preview)?;
     // 当前顺序仅用于本轮扫描边界；删帖会重新编号，稳定命令身份始终由 post_id 与原负载核对。
+    // preview 持有整轮快照；索引只借用 ID，避免每次扫描再逐帖分配相同字符串。
     let post_numbers = preview
         .posts
         .iter()
         .enumerate()
-        .map(|(index, post)| (post.post.id.clone(), index + 2))
+        .map(|(index, post)| (post.post.id.as_str(), index + 2))
         .collect::<HashMap<_, _>>();
     let fixed_floor = topic.system_log_post_number();
     let mut system_entries = warning_entries(&topic, &preview, &post_numbers);
@@ -39,7 +40,7 @@ pub(super) async fn process_topic(
     let mut pending_boundary = pending
         .iter()
         .filter(|outcome| outcome.status == ForumCommandStatus::Pending)
-        .map(|outcome| post_numbers.get(&outcome.post_id).copied().unwrap_or(fixed_floor))
+        .map(|outcome| post_numbers.get(outcome.post_id.as_str()).copied().unwrap_or(fixed_floor))
         .min();
     let mut command_error = None;
     let mut processed_through_post_number =
@@ -49,7 +50,7 @@ pub(super) async fn process_topic(
         if !commands_open {
             break;
         }
-        let Some(post_number) = post_numbers.get(&post.post.id).copied() else {
+        let Some(post_number) = post_numbers.get(post.post.id.as_str()).copied() else {
             return Err(repository_error("论坛帖子缺少真实楼层映射"));
         };
         if post.post.id == topic.system_log_post_id
@@ -199,7 +200,9 @@ pub(super) async fn process_topic(
             pending_boundary = pending
                 .iter()
                 .filter(|outcome| outcome.status == ForumCommandStatus::Pending)
-                .map(|outcome| post_numbers.get(&outcome.post_id).copied().unwrap_or(fixed_floor))
+                .map(|outcome| {
+                    post_numbers.get(outcome.post_id.as_str()).copied().unwrap_or(fixed_floor)
+                })
                 .min();
             if pending_boundary.is_some_and(|boundary| boundary <= post_number) {
                 command_error = Some(repository_error("论坛原命令未收口，停止后续楼层"));
@@ -217,7 +220,7 @@ pub(super) async fn process_topic(
         }
         let persisted_post_number =
             outcome.post_number.and_then(|value| usize::try_from(value).ok());
-        let current_post_number = post_numbers.get(&outcome.post_id).copied();
+        let current_post_number = post_numbers.get(outcome.post_id.as_str()).copied();
         let post_number = persisted_post_number.or(current_post_number);
         if outcome.status == ForumCommandStatus::Pending {
             // pending 是未完成事实，即使帖子后来被编辑或删除，也不能把更新水位推进到它之后。
@@ -303,14 +306,14 @@ fn validate_fixed_layout(
 fn warning_entries(
     topic: &auction_application::ForumReplyTopic,
     preview: &auction_application::AdminForumPreviewResult,
-    post_numbers: &HashMap<String, usize>,
+    post_numbers: &HashMap<&str, usize>,
 ) -> Vec<ForumSystemLogEntry> {
     preview
         .warnings
         .iter()
         .filter_map(|warning| {
             let (post_number, post_id) = match warning.post_id.as_ref() {
-                Some(post_id) => (post_numbers.get(post_id).copied()?, post_id.as_str()),
+                Some(post_id) => (post_numbers.get(post_id.as_str()).copied()?, post_id.as_str()),
                 None => (1, preview.catalog_post_id.as_str()),
             };
             let catalog_warning = post_number < topic.system_log_post_number()

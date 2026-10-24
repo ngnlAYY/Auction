@@ -122,7 +122,7 @@ pub(crate) fn PublicShell() -> Element {
     let mut manual_refresh_error = use_signal(|| false);
     let bid_refresh = PublicBidRefresh(use_signal(|| 0_u64));
     let mut readiness_generation = use_signal(|| 0_u64);
-    // 发现流游标属于整个 Public 外壳；current-auction 刷新导致实时 owner 按 key 重建时也不能丢失。
+    // 游标归整个 Public 外壳；订阅因目标或用户身份变化重启时仍保留已确认位置。
     let discovery_after = use_signal(|| 0_i64);
     let auction_after = use_signal(|| None::<(String, i64)>);
     let mut stable_realtime_target = use_signal(|| PublicRealtimeTarget::Checking);
@@ -266,6 +266,12 @@ pub(crate) fn PublicShell() -> Element {
     let session_view = PublicSessionView::from_snapshot(session_snapshot.as_ref());
     let session_pending = session_view.pending;
     let authenticated = session_view.authenticated;
+    let realtime_user_id = session_snapshot
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .and_then(Option::as_ref)
+        .filter(|identity| identity.authenticated)
+        .map(|identity| identity.user_id.clone());
     let selected_world_value = selected_world();
     let current_public_query = read_public_query();
     let auction_home_query = public_auction_home_query(&selected_world_value);
@@ -348,9 +354,6 @@ pub(crate) fn PublicShell() -> Element {
             stable_realtime_target.set(remembered);
         }
     }));
-    let realtime_key = realtime_target.key();
-    // Dioxus 的 key 特殊属性会消费该值，但 WASM release 展开后仍会产生误报。
-    let _ = realtime_key.as_str();
     let inactive = matches!(&realtime_target, PublicRealtimeTarget::Inactive { .. });
     let preview = matches!(&realtime_target, PublicRealtimeTarget::Inactive { preview: true, .. });
     let connection_state = public_connection_state(
@@ -375,7 +378,7 @@ pub(crate) fn PublicShell() -> Element {
     rsx! {
         div { class: "public-shell",
             PublicRealtimeOwner {
-                key: realtime_key,
+                user_id: realtime_user_id,
                 target: realtime_target,
                 refresh_generation,
                 discovery_after,

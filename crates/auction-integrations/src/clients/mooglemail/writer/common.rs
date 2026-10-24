@@ -4,9 +4,10 @@ use std::str;
 
 use scraper::{ElementRef, Html, Selector};
 
-use super::model::MAX_BODY_BYTES;
 use super::*;
-use crate::clients::mooglemail::parser::parse_canonical_credits;
+use crate::clients::mooglemail::parser::{
+    direct_element_children, normalize_text, parse_canonical_credits,
+};
 
 pub(super) fn input_value(
     form: ElementRef<'_>,
@@ -19,13 +20,6 @@ pub(super) fn input_value(
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     Ok(fields[0].value().attr("value").unwrap_or_default().to_owned())
-}
-
-pub(super) fn parse_credit_attachment(value: &str) -> Option<i64> {
-    let value = value.strip_suffix(" Credits")?;
-    let value = value.strip_suffix('x').unwrap_or(value);
-    let amount = parse_canonical_credits(value)?;
-    (amount > 0).then_some(amount)
 }
 
 pub(super) fn parse_attachment_count(value: &str) -> Option<(usize, Option<i64>)> {
@@ -208,45 +202,8 @@ pub(super) fn has_visible_result_message(
         .any(|paragraph| !normalize_text(paragraph.text().collect::<String>()).is_empty()))
 }
 
-pub(super) fn direct_element_children(element: ElementRef<'_>) -> Vec<ElementRef<'_>> {
-    element.children().filter_map(ElementRef::wrap).collect()
-}
-
 pub(super) fn selector(value: &str, world: MoogleMailWorld) -> Result<Selector, MoogleMailError> {
     Selector::parse(value).map_err(|_| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))
-}
-
-pub(super) fn extract_equipment_id(value: &str) -> Option<String> {
-    let marker = "equips.set(";
-    let matches = value.match_indices(marker).collect::<Vec<_>>();
-    if matches.len() != 1 {
-        return None;
-    }
-    let (start, _) = matches[0];
-    if start > 0
-        && !value[..start]
-            .chars()
-            .next_back()
-            .is_some_and(|character| character.is_whitespace() || character == ';')
-    {
-        return None;
-    }
-    let remainder = value[start + marker.len()..].trim_start();
-    let end = remainder.find(|character: char| !character.is_ascii_digit())?;
-    let equipment_id = &remainder[..end];
-    (valid_decimal_id(equipment_id) && remainder[end..].trim_start().starts_with(','))
-        .then(|| equipment_id.to_owned())
-}
-
-pub(super) fn valid_body(value: &str) -> bool {
-    value.len() <= MAX_BODY_BYTES
-        && !value
-            .chars()
-            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
-}
-
-pub(super) fn normalize_text(value: String) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub(super) fn compose_error(

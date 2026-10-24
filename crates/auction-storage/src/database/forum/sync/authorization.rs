@@ -124,7 +124,7 @@ pub(super) async fn authorize(
     )
     .bind(command.command_id)
     .bind(COMMAND_KIND)
-    .bind(command.request_hash.as_bytes().to_vec())
+    .bind(command.request_hash.as_bytes().as_slice())
     .bind(command.auction_id)
     .bind(&command.actor_id)
     .bind(payload)

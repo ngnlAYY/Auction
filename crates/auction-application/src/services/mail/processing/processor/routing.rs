@@ -2,7 +2,7 @@
 
 use super::super::commands::{
     decision, extract_login_key, has_user_assets, settlement_return_obligation_id,
-    settlement_return_subject, stable_command_id, user_request_hash,
+    stable_command_id, user_request_hash,
 };
 use super::*;
 
@@ -41,12 +41,10 @@ where
             }
             "register" => self.process_register(message, now).await,
             "rebind" => self.process_rebind(message, now).await,
-            subject if settlement_return_subject(subject) => {
-                let obligation_id = settlement_return_obligation_id(subject)
-                    .ok_or(MailProcessingError::InvalidMessage)?;
-                self.process_settlement_return(message, obligation_id)
-            }
-            _ => self.process_unknown(message).await,
+            subject => match settlement_return_obligation_id(subject) {
+                Some(obligation_id) => self.process_settlement_return(message, obligation_id),
+                None => self.process_unknown(message).await,
+            },
         }
     }
 
@@ -194,19 +192,20 @@ where
         &self,
         message: MailMessage,
     ) -> Result<MailProcessingDecision, ApplicationError> {
-        let attachment_ids = message.sorted_attachment_ids();
         if !has_user_assets(&message) {
             return decision("unknown", "accepted", "archived", json!({}));
         }
         if !message.returnable {
             return Err(MailProcessingError::UnsafeDisposition.into());
         }
-        let delivery_id = self.enqueue_return(&message, attachment_ids.clone()).await?;
+        let attachment_ids = message.sorted_attachment_ids();
+        let attachment_count = attachment_ids.len();
+        let delivery_id = self.enqueue_return(&message, attachment_ids).await?;
         decision(
             "unknown",
             "rejected",
             "unknown_assets_rejected",
-            json!({ "attachment_count": attachment_ids.len(), "delivery_ids": [delivery_id] }),
+            json!({ "attachment_count": attachment_count, "delivery_ids": [delivery_id] }),
         )
     }
 
@@ -219,7 +218,8 @@ where
             return Err(MailProcessingError::UnsafeDisposition.into());
         }
         let attachment_ids = message.sorted_attachment_ids();
-        let return_id = self.enqueue_return(message, attachment_ids.clone()).await?;
+        let attachment_count = attachment_ids.len();
+        let return_id = self.enqueue_return(message, attachment_ids).await?;
         let notice_id = self
             .enqueue_notice(
                 message,
@@ -233,7 +233,7 @@ where
             "rejected",
             "user_assets_rejected",
             json!({
-                "attachment_count": attachment_ids.len(),
+                "attachment_count": attachment_count,
                 "delivery_ids": [return_id, notice_id],
             }),
         )

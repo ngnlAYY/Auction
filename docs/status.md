@@ -35,6 +35,110 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-24 全项目复审与通用构建优化
+
+基线为干净的 `b7db347138931d95ca20a3ccb94c942e746bf1cb`。覆盖 20 个工作区包、1415 个 Rust 文件，以及
+SQL、注释、48 份正式文档、依赖清单、构建工具、CI/发布脚本和浏览器资源。方法为全路径风险扫描、
+按 owner 审查关键调用链及定向运行，不是逐行形式化证明或全业务验收。本轮修改 121 个 Rust 源文件；
+12 项已有测试及其 8 个测试模块保持原文，没有为减少数量删除真实边界保护，没有新增或运行永久测试套件。
+
+#### 源码修复与不变量
+
+- domain/application：装备 header 借用分词，密文/nonce getter 改为切片并迁移全部调用者；删除四个无消费者竞价常量。
+  邮件起拍价分词、文本规范化、附件移交及安全展示减少中间集合、复制和无意义摘要；无附件 key 仍检查 URL key。
+  名单判重由平方扫描改为借用集合；告警一次选取可容纳的最大非空前缀，保留排序、ordinal、正文、摘要和原错误优先级。
+- storage：结算 `final → settling` 领取从 8 次收敛至含首次最多 3 次，保持 Serializable、稳定命令及明确中止分类；
+  拍卖/补偿列表先分页再汇总，结算只联接活动代理，withdrawn 上的活动授权仍阻断。
+  `sweep_retries` 不再被自动 claim/outcome/expired 清零，Admin 显式 reset 语义不变；Recovery relist 持久事件使用真正的
+  auction `state_version`，payload 的 preview revision 不变。入站时间按已有 PostgreSQL 微秒约定比较；
+  Admin 邮件分页改用只读 Repeatable Read，摘要/JSON 借用绑定及固定证明 SQL 缓存不改变事实或权限。
+- integrations：通知模板在追加前执行既有 64 KiB 正文上限，拒绝合法模板的巨大变量展开，不截断或发送部分内容；
+  Sent lookup 明确失效后撤销原 Cookie，owner 检查和失效回写共用原 deadline。
+  论坛导航继承正文/签名状态，避免逐链接重扫祖先；分类排序、BBCode、分页身份、金额/附件辅助及 nonce 解密移除重复分配。
+- jobs/HTTP/observability：周排期在只读等待后复核 drain，不再新建后续轮次或邮箱命令，已提交结果保留。
+  Dashboard 在同一请求任务并发等待独立 owner，取消收口全部读取；XFF 不建整链 Vec，仍校验完整地址链。
+  W3C carrier 借用头字段，OTLP 注释按完整 endpoint 原样传入修正；未改缓存真值、WS/Cookie/限流或指标契约。
+- CLI/config/装配：灾备 hash/fsync/限量读取统一使用不跟随 symlink 的非阻塞描述符校验；
+  当前格式和 v28 manifest 的结构与 SHA 绑定同一次原始字节读取。Sent 诊断只做一次已包含 Shared 的 active 凭据查询；
+  hex 输出预分配，Admin 装配删除不可达的其他数据库分支。未放宽文件权限、精确目标确认、凭据和资金边界。
+- Web：Recovery、世界启停、改名回滚接入稳定未决宿主，冻结 UUID/完整负载及首次 fence；
+  unknown 后 stale 不换新意图。Public 修复世界/历史辅助读取、会话错误展示、隐藏论坛轮询、浮层旧正文及时间格式器重复构造。
+  实际浏览器另证明单个静态组件 key 不足以保证身份 Scope 销毁：Public 订阅显式依赖用户 UUID，
+  Admin 认证树及其他有状态目标使用真实 keyed iterator，只需重读的组件改为显式资源依赖。
+  冷启动 Admin query 不再丢失；对账条件 option 的显示选择与提交动作一致；不安全 return 不再留下空白登录页。
+  CSS、五语键、业务规则、HTTP 字段及公开事件 payload 未变，未新增迁移。
+
+#### 通用构建与依赖
+
+本地 dev 使用 `debug="line-tables-only"`，保留增量编译、断言和文件/行号回溯；完整调试可显式恢复。
+CI verify/MSRV 不生成调试信息，受控工具回执有效时不再运行源码构建依赖的 apt 安装。生产仍为
+`opt-level=3`、Fat LTO、单 CGU、非增量和 `panic=unwind`，WASM 仍以体积为先；
+没有加入 `native`、PGO/BOLT 或未经代表性负载证明的“最优性能”承诺。
+固定 Rust/MSRV 均已默认使用 GNU x86_64 LLD，不再建议多余的全局 linker 覆盖。
+
+发布指纹批量读取文件 metadata/SHA-256，并纳入 Cargo 层级配置、C/C++ 参数；阶段复核同时验证环境，
+修复修改 `.cargo/config.toml` 或编译参数后仍复用旧制品的问题。旧指纹自动失效，不改变资源隔离或归档白名单。
+
+依赖核对覆盖 262 项直接声明；cargo-machete 未发现未使用的直接库，只移除无消费者的 Axum `original-uri` feature。
+四份锁文件均与基线逐字相同，应用仍为 536 个锁条目，不为减少包数强行统一上游不兼容版本。
+独立联网 RustSec 快照为 1352 条公告，提交 `21d909e4c8bd4e14c7aea58bf980c881a0053ab1`：
+应用与 cargo-audit 锁均零漏洞/零警告；dx 仍为 13 个漏洞匹配项、11 个警告，sccache 为 5/9。
+相关工具包仍在 GNU 活跃图，不加入公告忽略项。应用 MPL 和 dx 的 GPL/IJG/MPL 分发义务见
+[工具风险与许可边界](ci/tools/README.md#上游公告与实际使用范围)，安装回执不消除这些风险。
+
+#### 实际验证与局部测量
+
+- 最终完整 `CARGO_TARGET_DIR=target/audits/project-review-20261024/verify-build just verify` 通过，
+  包含策略、格式、workspace all-targets、独立 PostgreSQL/Redis feature、Clippy `-D warnings` 和双端 WASM。
+  Rust 1.94.1 workspace all-targets/all-features 通过；ShellCheck、Actionlint 和依赖检查通过。
+  受控工具两档重建并校验；原生通用 release `auctionctl --features postgres` 完成链接及 `--help` 运行，
+  不等于完整四程序发布包或 Actions 制品上传已通过。
+- 真实领域/应用/集成源码 before/after：598 个 header 输入、18,270 个应用等价场景、1,125 个邮箱规范化输入、
+  2,744 个集成规范化输入通过；另覆盖加密往返、原信封不变、错误 AAD/篡改拒绝和模板 UTF-8/字节边界。
+  这些是临时程序，不是新增永久行为测试。
+- 私有 Unix socket PostgreSQL 18.6：两版真实 migrator 的 63 项迁移；领取前及提交期 `40001/40P01` 重试
+  8→3、普通约束错误只一次、失败无状态/账本/审计/事件残留、第三次成功及有效租约排他均通过。
+  16 组源码 SQL 结果等价，保存 8 份真实计划；每版 18 组拥有/借用参数往返及 NUL 拒绝一致。
+  Take 未知/过期计数由反复为零变为 `0,1,2` 后停止，原身份/fence、终态计数与 Admin reset/幂等通过；
+  relist 的 auction/event 从 `8/4` 变为 `8/8`，后段失败整体回滚。纳秒入站由自身冲突变为合法微秒持久化，
+  重放保留首次时间。并发插入期间，Admin 分页的 total/行仍来自同一只读快照。
+- 本机运行：HTTP 两个各 300 ms 的读取在 500 ms 预算下由 504 变为 200；更慢读取仍超时并释放全部 guard，
+  认证/query 优先级、嵌套 Uri/MatchedPath、404/405/Allow/HEAD/no-store 保持。Worker 8 组前后场景确认 drain 边界；
+  只读失效邮箱由两次外呼变为一次，后续明确凭据不可用。
+  CLI 文件 48 次调用、每版 168 项配置及 18 项凭据场景通过；真实 pg_dump/pg_restore --list 的 manifest 替换
+  验证覆盖当前格式与 v28 格式，但不证明 v28 恢复/接管。FIFO 摘要不再挂起，32 字节 hex 由逐字节分配变为单次分配。
+- Chromium 加真实调试 WASM：Public 九组主路径通过，Admin 三组 frozen intent、六组 actor/CSRF 隔离及新身份新工厂、
+  三组暂时会话失败保留通过；固定绝对截止在两版都能三次 GET 后回登录，不把此等价观察冒充旧版故障。
+  附加 Public 生命周期 8/8、Admin 生命周期 8/8（167 项检查）通过。冷启动 URL/控件/首个 API 请求保留世界与数量；
+  Requeue 的显示与实际 retry 请求一致。Xvfb 原生隐藏标签 31 秒窗口由 11 个论坛周期请求变为零，恢复可见后继续；
+  同场换号关闭旧 WS，新连接保留 `after=7`；五语时间和旧浮层关闭/键盘重开已核对。
+
+下表是明确输入下的分配请求/构建步骤测量，不是进程 RSS、全服务吞吐或生产 p99：
+
+| 局部路径与输入 | 修改前 | 修改后 |
+| --- | ---: | ---: |
+| 构建输入指纹，同一不可变源码，三次中位数 | 5.009 秒 | 0.185 秒 |
+| 告警 64 条压至一条前缀，分配次数 | 4288 | 1 |
+| 1500 行分类排序，分配次数 | 13838 | 1 |
+| 模板重复展开，额外分配请求峰值 | 18874368 字节 | 73728 字节 |
+| 100 个时间单元格切换五语，formatter 构造次数 | 500 | 5 |
+
+SQL 计划中，Public/Admin 的聚合场次由 206/240 限至各 25，补偿账本读取行次由 824 限至 100；
+终态代理历史连接输出由 3002 降至 100，结果仍为 `89/0/2`，活动授权继续阻断结算。
+单次合成数据计划不能外推生产负载性能。
+
+早期 Admin 漏删一处恒真后端条件、RSX 所有权错误均在静态门禁发现并修复。临时探针的 DTO、选择器、权限、NUL
+预期及首次 `dx bundle --profile dev` 调用错误已保留回执；共享 target 的跨源码树构建曾生成相同旧 WASM，
+分离 target 并核对实际 SHA 后才接受新版浏览器结果。部分基线场景本就通过，Public 的三个 CDP 超时不计为已定位源码失败。
+LSP references 仍以 code 0 退出，使用调用图、精确引用及实际编译补充；未用空 affected 结果代替测试审查。
+48 份正式文档、1297 个站内链接/锚点的一次性结构核对通过，没有新增永久文档门禁。
+私有 PostgreSQL、fixture、浏览器和显示服务均已停止；临时源码、WASM 样本和含虚构密钥的目录已清理，
+保留脱敏 JSON、日志、截图、公告快照及可复用静态检查/工具缓存。
+
+证据入口：`target/audits/project-review-20261024/evidence.json`。未提交、推送、部署、访问真实论坛/游戏，
+未迁移运行库；原生/浏览器/数据库证据均限所述隔离范围。正式升级前提见
+[本轮升级边界](ops/README.md#性能与页面生命周期修复升级)。实际 Actions 耗时、完整发布归档、生产并发/性能及灾备切换仍未验收。
+
 ### 2026-10-24 论坛主题增加 Auction 前缀
 
 主题标题改为 `[Auction] {Main|Isekai} Equipment Auction - Session {sequence:03} ({state})`；

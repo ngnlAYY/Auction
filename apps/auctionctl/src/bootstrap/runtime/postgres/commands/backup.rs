@@ -102,12 +102,9 @@ pub(crate) async fn postgres_backup_verify(
     manifest_path: &Path,
     confirmed_database_name: &str,
 ) -> anyhow::Result<()> {
-    validate_private_evidence_path(manifest_path)?;
-    let manifest = read_backup_manifest(manifest_path)?;
+    let (manifest, _) = read_backup_manifest(manifest_path)?;
     validate_backup_manifest(&manifest, confirmed_database_name)?;
     let archive_path = manifest_archive_path(manifest_path, &manifest)?;
-    validate_private_evidence_path(&archive_path)?;
-    verify_private_regular_file(&archive_path, "backup archive")?;
     let actual_sha256 = sha256_file(&archive_path)?;
     if actual_sha256 != manifest.archive_sha256 {
         anyhow::bail!("backup archive SHA-256 does not match its manifest");

@@ -46,10 +46,18 @@ Cargo.lock，也不代表活动驱动或运行支持。升级逐项核对 MSRV�
 
 | 档位 | 参数 | 取舍 |
 | --- | --- | --- |
+| 本地 dev | `debug="line-tables-only"`，保留默认增量编译 | 保留文件/行号回溯，减少调试数据生成与链接；完整调试可用 `CARGO_PROFILE_DEV_DEBUG=2` |
+| CI 静态检查 | verify/MSRV 的 `CARGO_PROFILE_DEV_DEBUG=0` | 不运行程序，不生成调试数据；不覆盖 release/WASM profile |
 | 后端 release | `opt-level=3`、`lto="fat"`、`codegen-units=1`、`incremental=false` | 优先跨 crate 优化，接受更长编译时间和更高链接峰值内存 |
 | 后端 panic | `unwind` | 保留 Tokio 任务隔离及 drop/drain 语义，不以全进程 abort 换体积 |
 | WASM release | `opt-level="z"`、Fat LTO、单 CGU、`panic="abort"` | 保留浏览器下载体积优先策略，不把后端 CPU 参数传给 WASM |
 | 通用 CPU | Linux x86_64 目标默认基线 | 不启用 `native`、架构专属指令、全局 fast-math 或 `panic=abort` |
+
+本地与 Actions 使用的 Rust 1.99.0、MSRV 1.94.1 均已包含 GNU x86_64 的默认 LLD，
+无需再安装系统 linker 或添加全局 `-fuse-ld=lld`；依据见
+[Rust 1.90 发布说明](https://blog.rust-lang.org/2025/09/18/Rust-1.90.0/)。
+调试信息取舍沿用 [Cargo 构建性能指南](https://doc.rust-lang.org/cargo/guide/build-performance.html)，
+不改变优化级别、断言、溢出检查或 panic 语义。没有代表性业务负载，不用 Thin LTO 替换现有生产档来换取未经量化的运行时取舍。
 
 [AMD 定向候选](ops/build/README.md)仅叠加已审阅的目标 CPUID 与构建并发；没有代表性业务负载时，不启用 PGO/BOLT、
 不宣称“最佳性能”，历史领域微基准不能证明新版服务吞吐/p99（验证范围见[状态页](docs/status.md)）。Rust 1.99 将
@@ -62,6 +70,10 @@ Axum/Tower 拥有协议适配，Hyper/hyper-util 补足请求头超时、HTTP/2 
 栈的类型化容量错误；TCP/Linux Unix 共用服务安全边界，Worker control 独立。auction-process 只提供信号/任务原语，
 停止顺序归装配根；可选 auction-server 用 Tokio process 与 Linux parent-death signal 管理三角色子进程并复用 lib
 装配，不引入第二运行时。
+
+Axum 未启用无人消费的 `original-uri` feature：HTTP owner 直接使用请求 URI，不为每次路由额外克隆 URI
+并插入 `OriginalUri` 扩展。此裁剪只减少启用能力，不减少锁图包数；`futures-util` 默认宏仍被 OTel/Dioxus
+实际使用，保留原声明，避免无收益的 feature 改写。
 
 直接 `tungstenite` 使用 0.29.0，与 Axum 0.8.9 经 `tokio-tungstenite` 引入的实际类型一致。
 不能单独升至另一个 minor 后仍以其 `Error` downcast：Rust 会将它们视为不同类型，导致超限帧丢失约定的 1009 关闭响应。

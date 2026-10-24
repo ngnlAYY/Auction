@@ -34,8 +34,12 @@ pub(super) struct CommandDialogContext(pub Signal<Option<CommandDialogInput>>);
 pub(crate) fn CatalogCommandScope(children: Element) -> Element {
     let owner = use_context::<PublicCommandOwner>().0;
     let user_id = owner();
-    let key = user_id.as_deref().unwrap_or_default();
-    rsx! { IdentityCommandScope { key: "{key}", user_id, children } }
+    // 单元素 keyed 列表建立真正的身份生命周期；静态子组件的 key 不会替换 scope。
+    rsx! {
+        for (user_id, children) in [(user_id, children)] {
+            IdentityCommandScope { key: "{user_id:?}", user_id, children }
+        }
+    }
 }
 
 #[component]
@@ -54,7 +58,7 @@ fn IdentityCommandScope(user_id: Option<String>, children: Element) -> Element {
         {pending_watches}
         if let Some(input) = input {
             // 一个页面只有一个模态弹窗；关闭才卸载，后台 GET/分页/阶段切换均不替换它。
-            CatalogCommandDialog { key: "{input.lot_id}", input, dialog }
+            CatalogCommandDialog { input, dialog }
         }
     }
 }

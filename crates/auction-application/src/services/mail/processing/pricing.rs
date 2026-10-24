@@ -53,8 +53,7 @@ pub(super) fn resolve_start_price_plan(
     const IDENTITY_MISMATCH: &str = "start_price_identity_mismatch";
     const NOT_FOUND: &str = "start_price_attachment_not_found";
     let attachment_count = attachments.len();
-    let normalized = body.replace("\r\n", "\n").replace('\r', "\n");
-    let tokens = collect_pricing_tokens(&normalized);
+    let tokens = collect_pricing_tokens(body);
     // 正文已受 64 KiB 边界限制，诊断记录完整分词数量，而不是首次超限时的数量下界。
     let token_count = tokens.len();
 
@@ -290,22 +289,22 @@ pub(super) fn resolve_start_price_plan(
 }
 
 fn collect_pricing_tokens(body: &str) -> Vec<PricingToken<'_>> {
-    body.split('\n')
-        .flat_map(|line| {
-            let fields = strip_start_price_comment(line).split_whitespace().collect::<Vec<_>>();
-            let field_count = fields.len();
-            fields.into_iter().enumerate().map(move |(line_index, value)| {
-                (line_index == 0, line_index + 1 == field_count, value)
-            })
-        })
-        .enumerate()
-        .map(|(index, (is_line_start, is_line_end, value))| PricingToken {
-            value,
-            index,
-            is_line_start,
-            is_line_end,
-        })
-        .collect()
+    let mut tokens = Vec::new();
+    // 直接借用原文；CRLF 多出的空行不产生 token，保留原换行规范化后的首尾标记。
+    for line in body.split(['\r', '\n']) {
+        let mut fields = strip_start_price_comment(line).split_whitespace().peekable();
+        let mut is_line_start = true;
+        while let Some(value) = fields.next() {
+            tokens.push(PricingToken {
+                value,
+                index: tokens.len(),
+                is_line_start,
+                is_line_end: fields.peek().is_none(),
+            });
+            is_line_start = false;
+        }
+    }
+    tokens
 }
 
 /// 识别明确的 start 形态；普通说明中的 starting/starter 或非金额句子不触发定价。
@@ -380,13 +379,12 @@ fn parse_start_price_amount(value: &str) -> Option<i64> {
     if value.is_empty() || value.len() > 32 {
         return None;
     }
-    let lowered = value.to_ascii_lowercase();
-    let (numeric, factor, decimal_allowed) = if let Some(numeric) = lowered.strip_suffix('k') {
+    let (numeric, factor, decimal_allowed) = if let Some(numeric) = value.strip_suffix(['k', 'K']) {
         (numeric, 1_000_i128, true)
-    } else if let Some(numeric) = lowered.strip_suffix('m') {
+    } else if let Some(numeric) = value.strip_suffix(['m', 'M']) {
         (numeric, 1_000_000_i128, true)
     } else {
-        (lowered.as_str(), 1_i128, false)
+        (value, 1_i128, false)
     };
     let (integer, fraction) = numeric
         .split_once('.')

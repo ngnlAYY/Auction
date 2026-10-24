@@ -5,13 +5,18 @@ use std::collections::HashSet;
 use scraper::Html;
 
 use super::common::{
-    attachment_count_text, compose_error, direct_element_children, extract_equipment_id,
-    has_visible_result_message, input_value, normalize_text, parse_attachment_count,
-    parse_credit_attachment, selector, valid_body,
+    attachment_count_text, compose_error, has_visible_result_message, input_value,
+    parse_attachment_count, selector,
 };
 use super::model::{MAX_COMPOSE_ATTACHMENTS, MAX_RECIPIENT_BYTES, MAX_SUBJECT_BYTES};
 use super::*;
-use crate::clients::mooglemail::parser::{canonical_mail_body, parse_canonical_credits};
+use crate::clients::mooglemail::{
+    forms::valid_body,
+    parser::{
+        canonical_mail_body, direct_element_children, extract_equipment_id, normalize_text,
+        parse_canonical_credits, parse_credits_text,
+    },
+};
 
 impl MoogleMailParser {
     /// 严格解析新邮件页面，提取下一步 POST 所需的 token 和可证明状态。
@@ -178,7 +183,7 @@ fn parse_compose_assets(
         hooks.extend(entry.select(&hook_selector));
         let text = normalize_text(entry.text().collect::<String>());
         if hooks.is_empty() {
-            let amount = parse_credit_attachment(&text)
+            let amount = parse_credits_text(&text)
                 .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
             if credits != 0 {
                 return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
@@ -223,9 +228,6 @@ fn parse_compose_assets(
             return Err(compose_error(world, MoogleMailErrorCategory::IdentityMismatch));
         }
         cod = Some(value);
-    }
-    if cod.is_none() && entries.is_empty() {
-        cod = Some(0);
     }
     Ok(ComposeAssets { equipment_ids, credits, cod, attachment_count: entries.len() })
 }

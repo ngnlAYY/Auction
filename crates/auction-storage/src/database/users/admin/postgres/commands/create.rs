@@ -32,7 +32,7 @@ pub(crate) async fn create_postgres(
     )
     .bind(write.user_id)
     .bind(&write.username)
-    .bind(write.key.public_key_hash.to_vec())
+    .bind(write.key.public_key_hash.as_slice())
     .bind(write.forum_account_id.as_deref())
     .bind(write.now)
     .execute(&mut *transaction)

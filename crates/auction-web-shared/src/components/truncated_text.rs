@@ -114,6 +114,9 @@ pub fn TruncatedText(
 ) -> Element {
     #[cfg(target_arch = "wasm32")]
     let display_differs = display.as_ref().is_some_and(|display| display != &value);
+    #[cfg(target_arch = "wasm32")]
+    let display_differs =
+        use_memo(use_reactive((&display_differs,), |(display_differs,)| display_differs));
     let display = display.unwrap_or_else(|| value.clone());
     let size = match size.as_deref() {
         Some("compact") => "compact",
@@ -185,6 +188,21 @@ pub fn TruncatedText(
     };
     #[cfg(target_arch = "wasm32")]
     {
+        // 固定宽度文本变化不触发 ResizeObserver；内容提交到 DOM 后重测，且不保留旧 portal 正文。
+        use_effect(use_reactive((&value, &display), move |_| {
+            if let Some(element) = mounted_element.peek().clone() {
+                if interaction.position.peek().is_some() {
+                    interaction.close();
+                }
+                update_truncated_state(
+                    &element,
+                    *display_differs.peek(),
+                    truncated,
+                    tooltip_position,
+                    portal_element,
+                );
+            }
+        }));
         // 原生 DOM 回调没有 Dioxus 上下文；稳定回调恢复本组件 scope，让延迟任务随组件卸载取消。
         let defer_close = use_callback(move |()| interaction.defer_close());
         let cleanup_handle = Rc::clone(&dismiss_handle);
@@ -338,7 +356,7 @@ pub fn TruncatedText(
                     mounted_element.set(Some(element.clone()));
                     update_truncated_state(
                         &element,
-                        display_differs,
+                        *display_differs.peek(),
                         truncated,
                         tooltip_position,
                         portal_element,
@@ -348,7 +366,7 @@ pub fn TruncatedText(
                     let measure_callback = Closure::<dyn FnMut()>::new(move || {
                         update_truncated_state(
                             &measure_element,
-                            display_differs,
+                            *display_differs.peek(),
                             truncated,
                             tooltip_position,
                             portal_element,
@@ -376,7 +394,7 @@ pub fn TruncatedText(
                     >::new(move |_entries, _observer| {
                         update_truncated_state(
                             &observed_element,
-                            display_differs,
+                            *display_differs.peek(),
                             truncated,
                             tooltip_position,
                             portal_element,
@@ -402,7 +420,7 @@ pub fn TruncatedText(
                 #[cfg(target_arch = "wasm32")]
                 show_tooltip(
                     mounted_element(),
-                    display_differs,
+                    *display_differs.peek(),
                     truncated,
                     tooltip_position,
                     portal_element,
@@ -419,7 +437,7 @@ pub fn TruncatedText(
                 if !*interaction.dismissed.peek() {
                     show_tooltip(
                         mounted_element(),
-                        display_differs,
+                        *display_differs.peek(),
                         truncated,
                         tooltip_position,
                         portal_element,
@@ -436,7 +454,7 @@ pub fn TruncatedText(
                 if focusable && truncated() {
                     event.stop_propagation();
                     #[cfg(target_arch = "wasm32")]
-                    toggle_tooltip(interaction, mounted_element(), display_differs, truncated, click_request.clone());
+                    toggle_tooltip(interaction, mounted_element(), *display_differs.peek(), truncated, click_request.clone());
                 }
             },
             onkeydown: move |event| {
@@ -448,7 +466,7 @@ pub fn TruncatedText(
                     event.prevent_default();
                     event.stop_propagation();
                     #[cfg(target_arch = "wasm32")]
-                    toggle_tooltip(interaction, mounted_element(), display_differs, truncated, keyboard_request.clone());
+                    toggle_tooltip(interaction, mounted_element(), *display_differs.peek(), truncated, keyboard_request.clone());
                 }
             },
             "{display}"
@@ -598,7 +616,8 @@ fn hide_tooltip(
     mut portal_element: Signal<Option<web_sys::HtmlElement>>,
 ) {
     tooltip_position.set(None);
-    if let Some(element) = portal_element()
+    let element = portal_element.peek().clone();
+    if let Some(element) = element
         && let Some(parent) = element.parent_node()
     {
         let _ = parent.remove_child(&element);
@@ -608,7 +627,8 @@ fn hide_tooltip(
 
 #[cfg(target_arch = "wasm32")]
 fn remove_tooltip(mut portal_element: Signal<Option<web_sys::HtmlElement>>) {
-    if let Some(element) = portal_element()
+    let element = portal_element.peek().clone();
+    if let Some(element) = element
         && let Some(parent) = element.parent_node()
     {
         let _ = parent.remove_child(&element);

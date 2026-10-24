@@ -116,11 +116,11 @@ pub(crate) async fn insert_or_verify_intake(
     .bind(&item.external_mail_id)
     .bind(&item.world_id)
     .bind(&item.mail_kind)
-    .bind(item.content_digest.to_vec())
+    .bind(item.content_digest.as_slice())
     .bind(item.received_at)
     .bind(&item.status)
     .bind(&item.decision_code)
-    .bind(Json(item.decision_metadata.clone()))
+    .bind(Json(&item.decision_metadata))
     .bind(item.processed_at)
     .bind(&item.sender)
     .bind(&item.subject)
@@ -161,12 +161,12 @@ pub(crate) async fn insert_or_verify_intake(
         .try_get("decision_metadata")
         .map_err(|_| storage_error("读取 MoogleMail 入站 metadata 失败"))?;
     // `processed_at` 保留首次入站轮询写入的时间值，并非远端邮件事实。PostgreSQL 会把 Rust
-    // 纳秒时间规范到微秒，后续重放也会产生新的本轮时间，因此既不能参与冲突比较，也不能覆盖原值。
+    // 纳秒时间规范到微秒；received_at 按相同存储精度比较，processed_at 不参与重放比较或覆盖。
     if stored_id != item.id
         || stored_world != item.world_id
         || stored_kind != item.mail_kind
         || stored_digest != item.content_digest
-        || stored_received != item.received_at
+        || stored_received.timestamp_micros() != item.received_at.timestamp_micros()
         || stored_status != item.status
         || stored_code != item.decision_code
         || stored_metadata.0 != item.decision_metadata
@@ -198,9 +198,9 @@ pub(crate) async fn insert_or_verify_mail_command(
          ON CONFLICT (command_id) DO NOTHING",
     )
     .bind(command_id)
-    .bind(item.content_digest.to_vec())
+    .bind(item.content_digest.as_slice())
     .bind(item.id)
-    .bind(Json(result_payload.clone()))
+    .bind(Json(&result_payload))
     .execute(&mut **transaction)
     .await
     .map_err(|_| storage_error("写入 MoogleMail 命令账本失败"))?;

@@ -18,6 +18,8 @@ enum LoginState {
 
 #[derive(Clone)]
 enum SessionMenuState {
+    Checking,
+    Unavailable,
     Anonymous,
     Authenticated { user_id: String, username: String },
 }
@@ -193,12 +195,28 @@ pub(super) fn SessionMenu() -> Element {
             user_id: identity.user_id.clone(),
             username: identity.username.clone(),
         },
-        None | Some(Err(_)) | Some(Ok(None)) | Some(Ok(Some(_))) => SessionMenuState::Anonymous,
+        None => SessionMenuState::Checking,
+        Some(Err(_)) => SessionMenuState::Unavailable,
+        Some(Ok(None)) | Some(Ok(Some(_))) => SessionMenuState::Anonymous,
     };
 
     rsx! {
         div { class: "public-account-session-menu", aria_label: t!("session-menu-label"),
             {match session_state {
+                SessionMenuState::Checking => rsx! {
+                    span { role: "status", {t!("common-loading")} }
+                },
+                SessionMenuState::Unavailable => rsx! {
+                    span { class: "action-feedback action-feedback--error", role: "alert",
+                        {t!("session-error")}
+                    }
+                    button {
+                        r#type: "button",
+                        disabled: *session.state().read() != UseResourceState::Ready,
+                        onclick: move |_| session.restart(),
+                        {t!("data-retry")}
+                    }
+                },
                 SessionMenuState::Anonymous => rsx! {
                     Link {
                         to: Route::Me {},

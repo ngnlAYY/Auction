@@ -20,8 +20,7 @@ pub(super) fn AdminAuctionForumStatus(auctions: Vec<AdminAuction>) -> Element {
         return rsx! {};
     };
     let auction_id = auction.id.clone();
-    // 切换拍卖时重建读取组件，旧请求结果和刷新状态不能串到新拍卖。
-    let _ = auction_id.as_str();
+    let readout_auction_id = auction_id.clone();
     rsx! {
         section { class: "admin-forum-status", aria_labelledby: "admin-forum-title",
             h2 { id: "admin-forum-title", {t!("admin-forum-title")} }
@@ -29,7 +28,7 @@ pub(super) fn AdminAuctionForumStatus(auctions: Vec<AdminAuction>) -> Element {
             label { r#for: "admin-forum-auction", {t!("admin-forum-auction")} }
             select {
                 id: "admin-forum-auction",
-                value: auction_id.clone(),
+                value: auction_id,
                 onchange: move |event| selected.set(event.value()),
                 for auction in auctions {
                     option { value: auction.id,
@@ -37,7 +36,7 @@ pub(super) fn AdminAuctionForumStatus(auctions: Vec<AdminAuction>) -> Element {
                     }
                 }
             }
-            ForumStatusReadout { key: "{auction_id}", auction_id: auction_id.clone() }
+            ForumStatusReadout { auction_id: readout_auction_id }
         }
     }
 }
@@ -45,13 +44,25 @@ pub(super) fn AdminAuctionForumStatus(auctions: Vec<AdminAuction>) -> Element {
 #[component]
 fn ForumStatusReadout(auction_id: String) -> Element {
     let mut generation = use_signal(|| 0_u64);
-    let status = use_resource(move || {
+    // 普通 prop 不会自动重启资源；显式订阅拍卖身份，不依赖静态组件的 key。
+    let status = use_resource(use_reactive((&auction_id,), move |(auction_id,)| {
         let _ = generation();
-        fetch_admin_forum_status(auction_id.clone())
-    });
+        async move {
+            let result = fetch_admin_forum_status(auction_id.clone()).await;
+            (auction_id, result)
+        }
+    }));
     let busy = status.state().cloned() != UseResourceState::Ready;
-    // 正在刷新时不显示上一轮结果，避免把过期状态当作最新观测。
-    let result = if busy { None } else { status.read().clone() };
+    // 正在刷新或切换拍卖时不显示上一轮结果，避免把旧观测展示在新拍卖下。
+    let result = if busy {
+        None
+    } else {
+        status
+            .read()
+            .as_ref()
+            .filter(|(loaded_auction, _)| loaded_auction == &auction_id)
+            .map(|(_, result)| result.clone())
+    };
     rsx! {
         button {
             r#type: "button",

@@ -63,9 +63,11 @@ pub(super) fn AdminAuctionTable(
             sort_auctions(&mut auctions, &sort, direction);
             rsx! {
                 if capabilities.manual_intake && matches!(world.as_str(), "main" | "isekai") {
-                    AdminIntakeForm {
-                        key: "{world}",
-                        world_id: world.clone(),
+                    for world_id in [world.clone()] {
+                        AdminIntakeForm {
+                            key: "{world_id}",
+                            world_id,
+                        }
                     }
                 }
                 if !is_empty {

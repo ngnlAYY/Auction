@@ -2,16 +2,19 @@
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 
 use crate::api::{CurrentAuction, ForumThread, fetch_forum_sync_enabled, fetch_forum_thread};
 
-use super::{CurrentAuctionResource, auction_world_label, format_auction_time};
+use super::{
+    CurrentAuctionResource, PageVisibility, auction_world_label, format_auction_time,
+    sleep_while_visible,
+};
 
 /// 先读取独立的开关投影，明确启用后才挂载当前拍卖的论坛进度。
 pub(super) fn page() -> Element {
     let mut status_generation = use_signal(|| 0_u64);
     let refresh_generation = use_context::<Signal<u64>>();
+    let visibility = use_context::<PageVisibility>();
     let sync_enabled = use_resource(move || {
         let _ = status_generation();
         let _ = refresh_generation();
@@ -20,8 +23,9 @@ pub(super) fn page() -> Element {
     // 关闭和短暂不可用时也定期重读，以便 Worker 重启后自动恢复，不能继续显示旧楼层。
     let _poll = use_resource(move || {
         let _ = status_generation();
+        let visibility = visibility.clone();
         async move {
-            TimeoutFuture::new(30_000).await;
+            sleep_while_visible(&visibility, 30_000).await;
             status_generation.set(status_generation().saturating_add(1));
         }
     });
@@ -77,14 +81,9 @@ fn ForumCurrentAuction() -> Element {
                 }
             }
         },
-        Some(Ok(Some(auction))) => {
-            let forum_key = format!("{}:{}", auction.world, auction.id);
-            // Dioxus 的 key 特殊属性会消费该值，但 WASM release 展开后仍可能产生误报。
-            let _ = forum_key.as_str();
-            rsx! {
-                ForumAuctionPanel { key: "{forum_key}", auction }
-            }
-        }
+        Some(Ok(Some(auction))) => rsx! {
+            ForumAuctionPanel { auction }
+        },
     }
 }
 
@@ -101,42 +100,46 @@ fn forum_page_state(message: String, alert: bool) -> Element {
 
 #[component]
 fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
-    let poll_generation = use_signal(|| 0_u64);
-    let thread = use_resource({
-        let auction_id = auction.id.clone();
-        move || {
-            let _ = poll_generation();
-            let auction_id = auction_id.clone();
-            async move { fetch_forum_thread(auction_id).await }
+    let mut poll_generation = use_signal(|| 0_u64);
+    let visibility = use_context::<PageVisibility>();
+    // 此组件只拥有读取和轮询任务；拍卖 UUID 是显式依赖，不用静态 key 假装重挂载。
+    let thread = use_resource(use_reactive((&auction.id,), move |(auction_id,)| {
+        let _ = poll_generation();
+        async move {
+            let result = fetch_forum_thread(auction_id.clone()).await;
+            (auction_id, result)
         }
-    });
+    }));
     // 每次读取完成后才开始轮询间隔，不能用两秒节拍取消尚未完成的慢请求。
     // 发布前两秒、发布后三十秒；明确失败时暂停，重新进入页面后重读。手动刷新入口只在 Admin。
-    let _poll = use_resource({
-        let mut poll_generation = poll_generation;
-        move || {
-            let poll_delay = if thread.state().cloned() != UseResourceState::Ready {
-                None
-            } else {
-                let current = thread.read();
-                match current.as_ref() {
-                    Some(Ok(thread)) if thread.status == "published" => Some(30_000),
-                    Some(Ok(thread)) if thread.status == "failed" => None,
-                    Some(Ok(_)) => Some(2_000),
-                    Some(Err(_)) | None => None,
-                }
-            };
-            async move {
-                let Some(poll_delay) = poll_delay else {
-                    return;
-                };
-                TimeoutFuture::new(poll_delay).await;
-                let next_generation = poll_generation.peek().saturating_add(1);
-                poll_generation.set(next_generation);
+    let _poll = use_resource(use_reactive((&auction.id,), move |(auction_id,)| {
+        let visibility = visibility.clone();
+        let poll_delay = if thread.state().cloned() != UseResourceState::Ready {
+            None
+        } else {
+            let current = thread.read();
+            match current.as_ref().filter(|(loaded_id, _)| loaded_id == &auction_id) {
+                Some((_, Ok(thread))) if thread.status == "published" => Some(30_000),
+                Some((_, Ok(thread))) if thread.status == "failed" => None,
+                Some((_, Ok(_))) => Some(2_000),
+                Some((_, Err(_))) | None => None,
             }
+        };
+        async move {
+            let Some(poll_delay) = poll_delay else {
+                return;
+            };
+            sleep_while_visible(&visibility, poll_delay).await;
+            let next_generation = poll_generation.peek().saturating_add(1);
+            poll_generation.set(next_generation);
         }
-    });
-    let thread_state = thread.read().clone();
+    }));
+    // Resource 会保留旧结果；切换场次后不能把旧成功或错误显示在新标题下面。
+    let thread_state = thread
+        .read()
+        .as_ref()
+        .filter(|(loaded_id, _)| loaded_id == &auction.id)
+        .map(|(_, result)| result.clone());
     let content = match thread_state {
         None => forum_page_state(t!("forum-loading"), false),
         Some(Err(_)) => forum_page_state(t!("forum-unavailable-note"), true),

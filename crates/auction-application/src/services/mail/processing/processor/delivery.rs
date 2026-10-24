@@ -22,14 +22,15 @@ where
         if !message.returnable {
             return Err(MailProcessingError::UnsafeDisposition.into());
         }
-        let return_id = self.enqueue_return(message, attachment_ids.clone()).await?;
+        let attachment_count = attachment_ids.len();
+        let return_id = self.enqueue_return(message, attachment_ids).await?;
         let notice_id = self.enqueue_notice(message, template, reason_code, None).await?;
         decision(
             "equipment",
             "rejected",
             decision_code,
             json!({
-                "attachment_count": attachment_ids.len(),
+                "attachment_count": attachment_count,
                 "delivery_ids": [return_id, notice_id],
                 "reason_code": reason_code,
             }),

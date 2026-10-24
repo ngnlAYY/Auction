@@ -91,4 +91,3 @@ impl fmt::Debug for MoogleMailComposeState {
 pub(super) const MAX_COMPOSE_ATTACHMENTS: usize = 1000;
 pub(super) const MAX_RECIPIENT_BYTES: usize = 256;
 pub(super) const MAX_SUBJECT_BYTES: usize = 512;
-pub(super) const MAX_BODY_BYTES: usize = 64 * 1024;

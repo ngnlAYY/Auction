@@ -76,12 +76,11 @@ pub(crate) fn verify_private_regular_file(path: &Path, label: &str) -> anyhow::R
     verify_private_file_metadata(path, label, &metadata)
 }
 
-/// 在同一描述符上校验并限量读取私有证据，防止路径替换或并发增长绕过预算。
-pub(crate) fn read_private_artifact(
+/// 摘要、限量读取和 fsync 共用同一描述符校验，路径被换成 symlink/FIFO 时立即拒绝。
+pub(super) fn open_private_artifact(
     path: &Path,
     label: &str,
-    maximum_bytes: u64,
-) -> anyhow::Result<Vec<u8>> {
+) -> anyhow::Result<(fs::File, fs::Metadata)> {
     validate_private_evidence_path(path)?;
     let mut options = fs::OpenOptions::new();
     options.read(true);
@@ -91,10 +90,20 @@ pub(crate) fn read_private_artifact(
     let metadata =
         file.metadata().with_context(|| format!("read {label} metadata: {}", path.display()))?;
     verify_private_file_metadata(path, label, &metadata)?;
+    Ok((file, metadata))
+}
+
+/// 在同一描述符上校验并限量读取私有证据，防止路径替换或并发增长绕过预算。
+pub(crate) fn read_private_artifact(
+    path: &Path,
+    label: &str,
+    maximum_bytes: u64,
+) -> anyhow::Result<Vec<u8>> {
+    let (file, metadata) = open_private_artifact(path, label)?;
     if metadata.len() > maximum_bytes {
         anyhow::bail!("{label} exceeds the bounded evidence size");
     }
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
     file.take(maximum_bytes + 1)
         .read_to_end(&mut bytes)
         .with_context(|| format!("read {label}: {}", path.display()))?;
@@ -360,9 +369,8 @@ pub(crate) fn write_private_evidence(path: &Path, contents: &[u8]) -> anyhow::Re
 
 /// 在破坏性数据库操作前证明恢复文件内容及其目录项已经完成持久化。
 pub(crate) fn sync_private_artifact(path: &Path) -> anyhow::Result<()> {
-    verify_private_regular_file(path, "recovery artifact")?;
-    fs::File::open(path)
-        .context("打开灾备文件以同步失败")?
+    open_private_artifact(path, "recovery artifact")?
+        .0
         .sync_all()
         .context("同步灾备文件内容失败")?;
     sync_artifact_parent(path)

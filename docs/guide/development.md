@@ -12,6 +12,11 @@ OpenSSL 开发文件、patch 和 curl/tar/coreutils。版本、MSRV 和 profile 
 锁记录。不设全局 `build.target`，保留 `target/release` 路径；浏览器显式选 WASM target，通用制品禁用
 `target-cpu=native`。
 
+本地 dev 默认只生成文件/行号调试表，保留增量编译与有位置的 panic 回溯；需要查看类型和局部变量时，
+为原 Cargo 命令加 `CARGO_PROFILE_DEV_DEBUG=2`，不要为一次调试修改生产 profile。
+GNU x86_64 的默认工具链已使用随 Rust 提供的 LLD，无需全局 linker/rustflags 覆盖；参数与限制见
+[编译优化边界](docs/design/tech-stack.md#编译优化边界)。
+
 ## 默认检查
 
 ```bash
@@ -83,10 +88,10 @@ dx 禁止自动下载配套工具，历史 dx 下载缓存也不参与选择。
 Web 使用 `wasm-release`；dx 的 esbuild 仅供构建，不增加 Node/npm 运行链。`build-*` 变体按 `BUILD-INFO` 判定复用，
 构建输入（apps、crates、迁移、配置示例、保留策略、清单与发布工具）、`Cargo.lock`、feature、工具二进制身份与构建环境完全一致且制品完整时直接复用，
 仅修改这些范围外的文档不会重跑原生 Fat LTO；Web payload 按 surface、共享层、契约、工具链版本及同一构建环境摘要独立复用，
-修改 `CARGO_PROFILE_WASM_RELEASE_*` 或 rustflags 会重新构建页面。本机可选用
-`RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache`（sccache 0.18.0）与
-`RUSTFLAGS="-C link-arg=-fuse-ld=lld"`（lld 链接）前缀。发布入口将 sccache 解析为受控二进制，并按用户、工作区和工具身份
-选择独立 Unix socket，避免连接旧 daemon；不停止其他构建的进程。这些前缀不改变 feature、资源隔离或归档契约。复用判定、指纹实现、
+修改 `CARGO_PROFILE_WASM_RELEASE_*`、rustflags 或 Cargo 配置会重新构建页面。本机可选
+`RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache`（sccache 0.18.0）。
+发布入口将 sccache 解析为受控二进制，并按用户、工作区和工具身份选择独立 Unix socket，
+避免连接旧 daemon；不停止其他构建的进程，不改变 feature、资源隔离或归档契约。复用判定、指纹实现、
 资源隔离与 `--allow-dirty` 限制归[CI 说明](ci/README.md#发布边界)及[发布手册](ops/README.md#发布制品)；
 [AMD KVM 候选](ops/build/README.md)仅叠加目标白名单/并发，本机微基准不能替代目标机或 PostgreSQL 并发验证。
 

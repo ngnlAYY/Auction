@@ -228,10 +228,6 @@ pub(super) fn user_request_hash(
     )?)
 }
 
-pub(super) fn settlement_return_subject(subject: &str) -> bool {
-    settlement_return_obligation_id(subject).is_some()
-}
-
 pub(super) fn settlement_return_obligation_id(subject: &str) -> Option<Uuid> {
     let (base, encoded) = subject.rsplit_once(" [")?;
     if !subject.ends_with(']')

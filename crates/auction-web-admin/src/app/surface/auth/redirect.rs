@@ -52,10 +52,13 @@ fn admin_return_path() -> String {
         };
         let search = window.location().search().unwrap_or_default();
         let raw = search.strip_prefix('?').unwrap_or_default();
+        // 与生成端保持一致：拒绝登录自循环，以及浏览器会按网络地址解释的反斜线。
         for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
             if key == "return"
                 && value.starts_with('/')
                 && !value.starts_with("//")
+                && !value.contains('\\')
+                && value.split(['?', '#']).next() != Some("/login")
                 && !value.chars().any(char::is_control)
             {
                 return value.into_owned();

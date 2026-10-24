@@ -204,12 +204,12 @@ pub use ports::{
     WorkerControlMailProgress, WorkerControlPort, WorkerControlStatus, WorkerControlTrigger,
     WorldReader, WorldSnapshot, admin_intake_aggregate_id, admin_mail_aggregate_id,
     admin_world_aggregate_id, allowed_recovery_commands, body_digest,
-    canonical_settlement_fulfillment_subject, canonical_summary, credential_scope,
-    credential_secret_hash, default_accepted_qualities, evaluate_snapshot, format_public_time_wire,
-    forum_catalog_marker, forum_catalog_page_marker, forum_post_bodies_match,
-    forum_system_log_marker, forum_world_name, is_recovery_buyer_blacklist_reason,
-    is_safe_mail_poll_id, is_stale_slow_proxy_error, mail_auction_aggregate_id,
-    recovery_buyer_blacklist_reason, request_hash,
+    canonical_settlement_fulfillment_subject, canonical_summary, canonical_summary_prefix,
+    credential_scope, credential_secret_hash, default_accepted_qualities, evaluate_snapshot,
+    format_public_time_wire, forum_catalog_marker, forum_catalog_page_marker,
+    forum_post_bodies_match, forum_system_log_marker, forum_world_name,
+    is_recovery_buyer_blacklist_reason, is_safe_mail_poll_id, is_stale_slow_proxy_error,
+    mail_auction_aggregate_id, recovery_buyer_blacklist_reason, request_hash,
 };
 pub use ports::{
     AdminCredentialCheckObservation, AdminCredentialCheckPort, AdminCredentialCheckRecord,

@@ -58,9 +58,11 @@ pub(super) fn AdminLotTable(
                 if matches!(page.auction.status.as_str(), "draft" | "preview")
                     && page.capabilities.manual_intake
                 {
-                    AdminIntakeForm {
-                        key: "{page.auction.world_id}",
-                        world_id: page.auction.world_id.clone(),
+                    for world_id in [page.auction.world_id] {
+                        AdminIntakeForm {
+                            key: "{world_id}",
+                            world_id,
+                        }
                     }
                 }
                 div { class: "admin-auction-table-wrap admin-auction-lot-table-wrap",
@@ -140,7 +142,7 @@ pub(super) fn AdminLotTable(
                     on_page_change,
                 }
             }
-            if let Some((lot_id, lot_code)) = selected_lot() {
+            for (lot_id, lot_code) in selected_lot() {
                 AdminProxyHistory { key: "{lot_id}", lot_id, lot_code, selected_lot, reload_generation }
             }
         }

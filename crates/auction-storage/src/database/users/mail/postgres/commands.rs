@@ -50,7 +50,7 @@ pub(crate) async fn register_postgres(
             )
             .bind(write.user_id)
             .bind(&write.command.username)
-            .bind(write.public_key_hash.to_vec())
+            .bind(write.public_key_hash.as_slice())
             .bind(&write.command.username)
             .bind(write.command.now)
             .execute(&mut *transaction)
@@ -120,7 +120,7 @@ pub(crate) async fn register_postgres(
                         )
                         .bind(&write.command.username)
                         .bind(reissue)
-                        .bind(write.public_key_hash.to_vec())
+                        .bind(write.public_key_hash.as_slice())
                         .bind(write.command.now)
                         .bind(user.id)
                         .execute(&mut *transaction)
@@ -210,7 +210,7 @@ pub(crate) async fn rebind_postgres(
          ORDER BY id
          FOR UPDATE",
     )
-    .bind(command.old_key_hash.to_vec())
+    .bind(command.old_key_hash.as_slice())
     .bind(&command.next_username)
     .fetch_all(&mut *transaction)
     .await

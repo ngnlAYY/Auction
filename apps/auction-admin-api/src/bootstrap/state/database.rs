@@ -31,7 +31,7 @@ use auction_observability::{
 use auction_storage::{
     DatabaseAdminAuctionCommands, DatabaseAdminIntakeCommands, DatabaseAdminLotCommands,
     DatabaseAdminMailCommands, DatabaseAdminRulesCommands, DatabaseAdminRuntimeCommands,
-    DatabaseAdminWorldCommands, DatabaseAuctionLifecycleCommands, DatabaseBackend, DatabaseStore,
+    DatabaseAdminWorldCommands, DatabaseAuctionLifecycleCommands, DatabaseStore,
 };
 use chrono::Duration as ChronoDuration;
 use chrono::{DateTime, Utc};
@@ -184,72 +184,64 @@ pub(super) async fn configure_state(
     let lifecycle_store = Arc::clone(&store);
     let auction_create_store = Arc::clone(&store);
     let admin_rules_store = Arc::clone(&store);
-    let admin_runtime: Option<Arc<dyn AdminRuntimeConfigPort>> = if store.backend()
-        == DatabaseBackend::Postgres
+    let admin_runtime: Option<Arc<dyn AdminRuntimeConfigPort>> = if let Some(path) =
+        config.runtime_config_path.clone()
     {
-        if let Some(path) = config.runtime_config_path.clone() {
-            let files = Arc::new(
-                TomlRuntimeFileStore::new(
-                    path,
-                    config.tracing_headers().is_some(),
-                    config.runtime_worker_budget,
-                )
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+        let files = Arc::new(
+            TomlRuntimeFileStore::new(
+                path,
+                config.tracing_headers().is_some(),
+                config.runtime_worker_budget,
+            )
+            .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+        );
+        let commands = Arc::new(DatabaseAdminRuntimeCommands::new(Arc::clone(&store)));
+        let service =
+            Arc::new(AdminRuntimeConfigService::new(commands, files, Arc::new(SystemClock)));
+        // 恢复失败可能发生在候选文件已经替换之后；结果未知时不得带旧安全配置监听。
+        service
+            .recover()
+            .await
+            .context("恢复 runtime 配置失败；停止启动，请按恢复手册核对文件与命令账本")?;
+        let restored = service.current().await.context("读取恢复后的 runtime 配置")?;
+        if config
+            .admin_runtime
+            .as_ref()
+            .is_none_or(|loaded| loaded.fingerprint() != restored.fingerprint)
+        {
+            anyhow::bail!(
+                "runtime 文件与已加载的启动配置不一致；请重新执行部署重启，加载最新的 Admin/Worker 配置"
             );
-            let commands = Arc::new(DatabaseAdminRuntimeCommands::new(Arc::clone(&store)));
-            let service =
-                Arc::new(AdminRuntimeConfigService::new(commands, files, Arc::new(SystemClock)));
-            // 恢复失败可能发生在候选文件已经替换之后；结果未知时不得带旧安全配置监听。
-            service
-                .recover()
-                .await
-                .context("恢复 runtime 配置失败；停止启动，请按恢复手册核对文件与命令账本")?;
-            let restored = service.current().await.context("读取恢复后的 runtime 配置")?;
-            if config
-                .admin_runtime
-                .as_ref()
-                .is_none_or(|loaded| loaded.fingerprint() != restored.fingerprint)
-            {
-                anyhow::bail!(
-                    "runtime 文件与已加载的启动配置不一致；请重新执行部署重启，加载最新的 Admin/Worker 配置"
-                );
-            }
-            Some(service)
-        } else {
-            None
         }
+        Some(service)
     } else {
         None
     };
-    let admin_intake = if store.backend() == DatabaseBackend::Postgres {
-        match config.equipment_data_key_id().zip(config.equipment_data_key()) {
-            Some((key_id, key_material)) => {
-                let data_key = DataKey::from_base64(key_id, key_material)
-                    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-                let mut source = EquipmentSourceAdapter::production(
-                    build_equipment_http_client()?,
-                    config::equipment_source_policy(config)?,
-                )
+    let admin_intake = match config.equipment_data_key_id().zip(config.equipment_data_key()) {
+        Some((key_id, key_material)) => {
+            let data_key = DataKey::from_base64(key_id, key_material)
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-                if let Some(credentials) =
-                    load_equipment_source_credentials(config, Arc::clone(&store)).await?
-                {
-                    source = source.with_mooglemail_credentials(credentials);
-                }
-                let sealer = EquipmentKeySealer::new(data_key);
-                let intake: Arc<dyn AdminIntakePort> = Arc::new(DatabaseAdminIntakeCommands::new(
-                    Arc::clone(&store),
-                    Arc::new(source),
-                    Arc::new(sealer),
-                    Arc::new(SystemClock),
-                    config::admin_intake_policy(config),
-                ));
-                Some(intake)
+            let mut source = EquipmentSourceAdapter::production(
+                build_equipment_http_client()?,
+                config::equipment_source_policy(config)?,
+            )
+            .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+            if let Some(credentials) =
+                load_equipment_source_credentials(config, Arc::clone(&store)).await?
+            {
+                source = source.with_mooglemail_credentials(credentials);
             }
-            None => None,
+            let sealer = EquipmentKeySealer::new(data_key);
+            let intake: Arc<dyn AdminIntakePort> = Arc::new(DatabaseAdminIntakeCommands::new(
+                Arc::clone(&store),
+                Arc::new(source),
+                Arc::new(sealer),
+                Arc::new(SystemClock),
+                config::admin_intake_policy(config),
+            ));
+            Some(intake)
         }
-    } else {
-        None
+        None => None,
     };
     let forum_preview: Arc<dyn AdminForumPreviewPort> = Arc::new(ForumPreviewAdapter::new());
     let admin_audit: Arc<dyn AdminAuditPort> = store.clone();
@@ -268,9 +260,7 @@ pub(super) async fn configure_state(
             None => None,
         };
     let mut credential_check: Option<Arc<dyn AdminCredentialCheckPort>> = None;
-    let admin_credentials: Option<Arc<dyn AdminCredentialPort>> = if store.backend()
-        == DatabaseBackend::Postgres
-    {
+    let admin_credentials: Option<Arc<dyn AdminCredentialPort>> =
         match config.credential_data_key_id().zip(config.credential_data_key()) {
             Some((key_id, key_material)) => {
                 let data_key = Arc::new(
@@ -295,10 +285,7 @@ pub(super) async fn configure_state(
                 Some(Arc::new(AdminCredentialService::new(Arc::clone(&store), sealer, acquirer)))
             }
             None => None,
-        }
-    } else {
-        None
-    };
+        };
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
     let health: Arc<dyn HealthReader> = Arc::new(HealthService::new(heartbeat_store));
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
@@ -358,11 +345,7 @@ pub(super) async fn configure_state(
     );
     let lifecycle_policy = AuctionLifecyclePolicy::new(
         config.admin_runtime.as_ref().is_some_and(|runtime| runtime.allow_manual_early_open),
-        store.backend() == DatabaseBackend::Postgres
-            && config
-                .admin_runtime
-                .as_ref()
-                .is_some_and(|runtime| runtime.allow_manual_early_settlement),
+        config.admin_runtime.as_ref().is_some_and(|runtime| runtime.allow_manual_early_settlement),
     );
     let lifecycle: Arc<dyn AuctionLifecycleCommandPort> =
         Arc::new(DatabaseAuctionLifecycleCommands::new(

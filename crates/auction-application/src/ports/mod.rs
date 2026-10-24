@@ -398,8 +398,8 @@ pub use operations_alert::{
     OperationsAlertProcessState, OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
     OperationsAlertRuntimeStatus, OperationsAlertSignal, OperationsAlertSnapshot,
     OperationsAlertSource, OperationsAlertSourceObservation, OperationsAlertSourceReader,
-    OperationsAlertStore, OperationsAlertTarget, body_digest, canonical_summary, evaluate_snapshot,
-    request_hash,
+    OperationsAlertStore, OperationsAlertTarget, body_digest, canonical_summary,
+    canonical_summary_prefix, evaluate_snapshot, request_hash,
 };
 pub use queries::{
     AuctionReader, CurrentAuctionSnapshot, DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE,

@@ -228,10 +228,9 @@ impl EquipmentKeyOpener {
             return Err(EquipmentKeyOpenerError::InvalidEnvelope);
         }
 
-        let mut nonce = envelope.nonce();
         let nonce_array: [u8; NONCE_LENGTH] =
-            nonce.as_slice().try_into().map_err(|_| EquipmentKeyOpenerError::InvalidEnvelope)?;
-        let mut buffer = envelope.ciphertext();
+            envelope.nonce().try_into().map_err(|_| EquipmentKeyOpenerError::InvalidEnvelope)?;
+        let mut buffer = envelope.ciphertext().to_vec();
         let result = (|| {
             let aead_key =
                 self.data_key.aead_key().map_err(|_| EquipmentKeyOpenerError::Decryption)?;
@@ -253,7 +252,6 @@ impl EquipmentKeyOpener {
             EquipmentKey::new(plaintext).map_err(|_| EquipmentKeyOpenerError::InvalidPlaintext)
         })();
         buffer.fill(0);
-        nonce.fill(0);
         result
     }
 }

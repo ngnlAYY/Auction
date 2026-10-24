@@ -10,7 +10,7 @@ use thiserror::Error;
 #[derive(Debug, Clone)]
 pub struct TracingConfig {
     pub enabled: bool,
-    /// OTLP/HTTP collector 地址；导出器会按 OTLP 约定补充 `/v1/traces`。
+    /// OTLP/HTTP trace 完整地址；显式配置会原样传入，不自动追加 `/v1/traces`。
     pub endpoint: String,
     pub batch_timeout: Duration,
     pub export_timeout: Duration,

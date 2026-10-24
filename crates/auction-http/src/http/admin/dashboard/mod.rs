@@ -57,29 +57,63 @@ pub(crate) async fn get(
         Ok(snapshot) => snapshot,
         Err(error) => return map_error(error),
     };
-    let worker = match state.worker_control() {
-        Some(port) => match port.status().await {
-            Ok(status) => status,
-            Err(_) => WorkerControlStatus::unavailable(WorkerControlCondition::Unavailable),
-        },
-        None => WorkerControlStatus::unavailable(WorkerControlCondition::Unavailable),
+    // 基础健康读取成功后，各 owner 的只读 section 彼此独立；同一请求内并发等待，
+    // 避免依赖延迟相加耗尽总预算。无独立 spawn，取消请求仍会一起释放这些读取。
+    let worker = async {
+        match state.worker_control() {
+            Some(port) => match port.status().await {
+                Ok(status) => status,
+                Err(_) => WorkerControlStatus::unavailable(WorkerControlCondition::Unavailable),
+            },
+            None => WorkerControlStatus::unavailable(WorkerControlCondition::Unavailable),
+        }
     };
-    let mail = match state.admin_mail() {
-        Some(port) => sections::load_mail_section(port, state.dashboard_mailbox_keys())
-            .await
-            .unwrap_or_else(|_| sections::unknown_section()),
-        None => sections::unknown_section(),
+    let mail = async {
+        match state.admin_mail() {
+            Some(port) => sections::load_mail_section(port, state.dashboard_mailbox_keys())
+                .await
+                .unwrap_or_else(|_| sections::unknown_section()),
+            None => sections::unknown_section(),
+        }
     };
-    let realtime = match state.realtime_admin() {
-        Some(port) => sections::load_realtime_section(port)
-            .await
-            .unwrap_or_else(|_| sections::unknown_section()),
-        None => sections::unknown_section(),
+    let realtime = async {
+        match state.realtime_admin() {
+            Some(port) => sections::load_realtime_section(port)
+                .await
+                .unwrap_or_else(|_| sections::unknown_section()),
+            None => sections::unknown_section(),
+        }
     };
-    let owner_snapshot = match state.operations_alert_source() {
-        Some(port) => port.snapshot(chrono::Utc::now()).await.ok(),
-        None => None,
+    let owner_snapshot = async {
+        match state.operations_alert_source() {
+            Some(port) => port.snapshot(chrono::Utc::now()).await.ok(),
+            None => None,
+        }
     };
+    let alerting = async {
+        match state.operations_alert() {
+            Some(port) => match port.health().await {
+                Ok(health) => sections::map_alerting(health),
+                Err(_) => sections::unknown_section_with_code("source_unavailable"),
+            },
+            None => sections::unknown_section_with_code("source_unavailable"),
+        }
+    };
+    let credentials = async {
+        match state.credential_health() {
+            Some(port) => match port.health().await {
+                Ok(credentials) => sections::map_credentials(
+                    credentials,
+                    &snapshot.process,
+                    state.dashboard_worlds(),
+                ),
+                Err(_) => sections::unknown_section_with_code("source_unavailable"),
+            },
+            None => sections::unknown_section_with_code("source_unavailable"),
+        }
+    };
+    let (worker, mail, realtime, owner_snapshot, alerting, credentials) =
+        tokio::join!(worker, mail, realtime, owner_snapshot, alerting, credentials);
     let fulfillment = owner_snapshot
         .as_ref()
         .and_then(|snapshot| snapshot.fulfillment.map(sections::map_fulfillment))
@@ -91,22 +125,6 @@ pub(crate) async fn get(
     let recovery = owner_snapshot
         .and_then(|snapshot| snapshot.recovery.map(sections::map_recovery))
         .unwrap_or_else(sections::unknown_section);
-    let alerting = match state.operations_alert() {
-        Some(port) => match port.health().await {
-            Ok(health) => sections::map_alerting(health),
-            Err(_) => sections::unknown_section_with_code("source_unavailable"),
-        },
-        None => sections::unknown_section_with_code("source_unavailable"),
-    };
-    let credentials = match state.credential_health() {
-        Some(port) => match port.health().await {
-            Ok(credentials) => {
-                sections::map_credentials(credentials, &snapshot.process, state.dashboard_worlds())
-            }
-            Err(_) => sections::unknown_section_with_code("source_unavailable"),
-        },
-        None => sections::unknown_section_with_code("source_unavailable"),
-    };
     let response = mapping::map_dashboard(
         snapshot,
         worker,

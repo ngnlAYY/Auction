@@ -9,20 +9,39 @@ use super::{
 
 /// 将页面 header 大类标签映射到原七个规范值；级别与交易状态由页面适配器另行读取。
 pub fn category_from_header(value: &str) -> Result<EquipmentCategory, TaxonomyError> {
-    let normalized = value
-        .to_ascii_lowercase()
-        .replace(['-', '_'], " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    match normalized.as_str() {
-        "one handed weapon" => Ok(EquipmentCategory::OneHanded),
-        "two handed weapon" => Ok(EquipmentCategory::TwoHanded),
-        "staff" => Ok(EquipmentCategory::Staff),
-        "shield" => Ok(EquipmentCategory::Shield),
-        "cloth armor" => Ok(EquipmentCategory::Cloth),
-        "light armor" => Ok(EquipmentCategory::Light),
-        "heavy armor" => Ok(EquipmentCategory::Heavy),
+    // 直接比较借用的 token，保留 Unicode 空白、分隔符与 ASCII 大小写兼容，不建立规范化副本。
+    let mut fields = value
+        .split(|character: char| character.is_whitespace() || matches!(character, '-' | '_'))
+        .filter(|field| !field.is_empty());
+    match [fields.next(), fields.next(), fields.next(), fields.next()] {
+        [Some(first), Some(second), Some(third), None]
+            if second.eq_ignore_ascii_case("handed") && third.eq_ignore_ascii_case("weapon") =>
+        {
+            if first.eq_ignore_ascii_case("one") {
+                Ok(EquipmentCategory::OneHanded)
+            } else if first.eq_ignore_ascii_case("two") {
+                Ok(EquipmentCategory::TwoHanded)
+            } else {
+                Err(TaxonomyError::UnknownCategory)
+            }
+        }
+        [Some(first), Some(second), None, None] if second.eq_ignore_ascii_case("armor") => {
+            if first.eq_ignore_ascii_case("cloth") {
+                Ok(EquipmentCategory::Cloth)
+            } else if first.eq_ignore_ascii_case("light") {
+                Ok(EquipmentCategory::Light)
+            } else if first.eq_ignore_ascii_case("heavy") {
+                Ok(EquipmentCategory::Heavy)
+            } else {
+                Err(TaxonomyError::UnknownCategory)
+            }
+        }
+        [Some(first), None, None, None] if first.eq_ignore_ascii_case("staff") => {
+            Ok(EquipmentCategory::Staff)
+        }
+        [Some(first), None, None, None] if first.eq_ignore_ascii_case("shield") => {
+            Ok(EquipmentCategory::Shield)
+        }
         _ => Err(TaxonomyError::UnknownCategory),
     }
 }

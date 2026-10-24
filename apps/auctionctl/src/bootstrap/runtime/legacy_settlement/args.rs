@@ -90,11 +90,6 @@ impl LegacyTargetArgs {
 }
 
 #[cfg(feature = "postgres")]
-pub(super) fn digest_hex(value: &[u8; 32]) -> String {
-    value.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-#[cfg(feature = "postgres")]
 fn parse_digest(value: &str) -> anyhow::Result<[u8; 32]> {
     anyhow::ensure!(
         value.len() == 64
