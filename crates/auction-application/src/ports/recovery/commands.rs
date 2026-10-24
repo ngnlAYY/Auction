@@ -87,52 +87,25 @@ impl RecoveryConfirmationCommand {
         action: RecoveryConfirmationAction,
         reason: &str,
     ) -> Result<RequestHash, serde_json::Error> {
-        let mut payload = Vec::with_capacity(128);
-        payload.extend_from_slice(b"{\"RecoveryID\":[");
-        for (index, byte) in recovery_id.as_bytes().iter().enumerate() {
-            if index != 0 {
-                payload.push(b',');
-            }
-            payload.extend_from_slice(byte.to_string().as_bytes());
+        #[derive(Serialize)]
+        struct LegacyRecoveryRequest<'a> {
+            #[serde(rename = "RecoveryID")]
+            recovery_id: [u8; 16],
+            #[serde(rename = "Version")]
+            version: i64,
+            #[serde(rename = "Action")]
+            action: &'static str,
+            #[serde(rename = "Reason")]
+            reason: &'a str,
         }
-        payload.extend_from_slice(b"],\"Version\":");
-        payload.extend_from_slice(expected_state_version.to_string().as_bytes());
-        payload.extend_from_slice(b",\"Action\":");
-        append_go_json_string(&mut payload, action.as_str())?;
-        payload.extend_from_slice(b",\"Reason\":");
-        append_go_json_string(&mut payload, reason.trim())?;
-        payload.push(b'}');
-        Ok(RequestHash::from_canonical_bytes(&payload))
-    }
-}
 
-/// 让摘要字符串遵循 Go `encoding/json` 的 HTML 安全转义细节。
-fn append_go_json_string(payload: &mut Vec<u8>, value: &str) -> Result<(), serde_json::Error> {
-    let encoded = serde_json::to_vec(value)?;
-    let mut index = 0;
-    while index < encoded.len() {
-        let remaining = &encoded[index..];
-        if remaining.starts_with(b"<") {
-            payload.extend_from_slice(br#"\u003c"#);
-            index += 1;
-        } else if remaining.starts_with(b">") {
-            payload.extend_from_slice(br#"\u003e"#);
-            index += 1;
-        } else if remaining.starts_with(b"&") {
-            payload.extend_from_slice(br#"\u0026"#);
-            index += 1;
-        } else if remaining.starts_with(&[0xe2, 0x80, 0xa8]) {
-            payload.extend_from_slice(br#"\u2028"#);
-            index += 3;
-        } else if remaining.starts_with(&[0xe2, 0x80, 0xa9]) {
-            payload.extend_from_slice(br#"\u2029"#);
-            index += 3;
-        } else {
-            payload.push(encoded[index]);
-            index += 1;
-        }
+        RequestHash::from_legacy_go_json(&LegacyRecoveryRequest {
+            recovery_id: *recovery_id.as_bytes(),
+            version: expected_state_version,
+            action: action.as_str(),
+            reason: reason.trim(),
+        })
     }
-    Ok(())
 }
 
 /// recovery 确认成功后持久化并可安全重放的结果。

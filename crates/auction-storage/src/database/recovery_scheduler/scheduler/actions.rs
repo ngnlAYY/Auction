@@ -116,6 +116,20 @@ where
     Err(repository_error("recovery action Serializable 重试状态异常"))
 }
 
+/// 先锁 action，再由后续 UPDATE 检查实时租约；需要父 case 的调用方必须先锁 recovery。
+#[cfg(feature = "postgres")]
+async fn lock_action(
+    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    action_id: Uuid,
+) -> Result<(), RecoveryActionTransactionError> {
+    sqlx::query("SELECT id FROM public.settlement_recovery_actions WHERE id = $1 FOR UPDATE")
+        .bind(action_id)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(RecoveryActionTransactionError::from)?;
+    Ok(())
+}
+
 #[cfg(feature = "postgres")]
 #[path = "actions/claim.rs"]
 mod claim;

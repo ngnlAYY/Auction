@@ -125,19 +125,19 @@ where
             let request = RecoveryPaymentReminderRequest {
                 recovery_id: claim.recovery_id.as_uuid(),
                 action_id,
-                recipient: recipient.clone(),
-                payment_reference: claim.payment_reference.clone(),
+                recipient: &recipient,
+                payment_reference: &claim.payment_reference,
             };
             RequestHash::from_request("recovery_payment_reminder", action_id, &request)
         } else {
             let request = RecoveryTakeRequest {
                 recovery_id: claim.recovery_id.as_uuid(),
                 action_id,
-                recipient: recipient.clone(),
-                source_external_mail_id: external_mail_id.clone(),
+                recipient: &recipient,
+                source_external_mail_id: &external_mail_id,
                 expected_credits: claim.expected_credits,
                 expected_cod: claim.expected_cod,
-                expected_attachment_ids: claim.expected_attachment_ids.clone(),
+                expected_attachment_ids: &claim.expected_attachment_ids,
             };
             RequestHash::from_request("recovery_take", action_id, &request)
         };
@@ -186,10 +186,10 @@ where
             // 升级前可能已 prepare 提交却未 link；先精确恢复原 ID，避免同 MID 再建一个 take。
             let mut legacy_command = command.clone();
             legacy_command.command_id = legacy_command_id;
-            match delivery.find_recovery_preparation(legacy_command.clone()).await {
+            match delivery.find_recovery_preparation(legacy_command).await {
                 Ok(Some(_)) => {
                     command_id = legacy_command_id;
-                    command = legacy_command;
+                    command.command_id = legacy_command_id;
                 }
                 Ok(None) => {}
                 Err(error) => {
@@ -278,20 +278,20 @@ where
 }
 
 #[derive(Debug, Serialize)]
-struct RecoveryPaymentReminderRequest {
+struct RecoveryPaymentReminderRequest<'a> {
     recovery_id: uuid::Uuid,
     action_id: uuid::Uuid,
-    recipient: String,
-    payment_reference: String,
+    recipient: &'a str,
+    payment_reference: &'a str,
 }
 
 #[derive(Debug, Serialize)]
-struct RecoveryTakeRequest {
+struct RecoveryTakeRequest<'a> {
     recovery_id: uuid::Uuid,
     action_id: uuid::Uuid,
-    recipient: String,
-    source_external_mail_id: String,
+    recipient: &'a str,
+    source_external_mail_id: &'a str,
     expected_credits: i64,
     expected_cod: i64,
-    expected_attachment_ids: Vec<String>,
+    expected_attachment_ids: &'a [String],
 }

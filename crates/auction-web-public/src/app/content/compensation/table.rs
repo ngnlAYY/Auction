@@ -57,16 +57,23 @@ pub(super) fn CompensationPoolTable(
                             }
                         }
                         tbody {
-                            for round in page.rounds.clone() {
-                                CompensationRoundRow {
-                                    round: round.clone(),
-                                    open: selected_auction_id.as_str() == round.auction_id.as_str(),
-                                    movements: movements.clone(),
-                                    on_select_round,
-                                    on_movement_page_change,
-                                    on_movement_page_clamp,
-                                    on_movement_page_size_change,
-                                    on_retry_movements,
+                            for round in page.rounds {
+                                {
+                                    let open = selected_auction_id == round.auction_id;
+                                    // 只有展开行消费流水；不能给每个折叠批次复制完整流水页。
+                                    let movements = if open { movements.clone() } else { None };
+                                    rsx! {
+                                        CompensationRoundRow {
+                                            round,
+                                            open,
+                                            movements,
+                                            on_select_round,
+                                            on_movement_page_change,
+                                            on_movement_page_clamp,
+                                            on_movement_page_size_change,
+                                            on_retry_movements,
+                                        }
+                                    }
                                 }
                             }
                         }

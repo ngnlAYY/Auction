@@ -131,12 +131,12 @@ impl MoogleMailGateway {
         if !self.config.sender_allowlist_disabled && self.config.sender_allowlist.is_empty() {
             return Err(configuration(world));
         }
-        let deadline = match requested_deadline {
-            Some(deadline) => tokio::time::Instant::from_std(deadline),
-            None => tokio::time::Instant::now()
-                .checked_add(self.config.fetch_budget)
-                .ok_or_else(|| configuration(world))?,
-        };
+        let configured_deadline = tokio::time::Instant::now()
+            .checked_add(self.config.fetch_budget)
+            .ok_or_else(|| configuration(world))?;
+        let deadline = requested_deadline.map_or(configured_deadline, |deadline| {
+            tokio::time::Instant::from_std(deadline).min(configured_deadline)
+        });
         let mut session = tokio::time::timeout_at(
             deadline,
             self.credentials.begin_exclusive(world, MoogleMailOperation::Inbox),
@@ -274,8 +274,8 @@ impl MoogleMailGateway {
                     && snapshot.remaining_credits == 0
                     && snapshot.cod_pending == 0
                     && (snapshot.collected
-                        || snapshot.remaining_equipment_ids
-                            == vec![request.external_equipment_id.clone()])
+                        || snapshot.remaining_equipment_ids.as_slice()
+                            == std::slice::from_ref(&request.external_equipment_id))
                 {
                     candidates.push(snapshot);
                     if candidates.len() >= 2 {

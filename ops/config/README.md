@@ -264,6 +264,9 @@ group。Admin runtime 覆盖主配置 fallback，其 tcp 可保留未使用的 r
 目录 owner/group、目录锁和 stale socket 身份，socket 固定 0660；目录禁 group/other 写入，祖先须 root/运行账号所有且禁
 group/other 写入（仅 root-owned sticky 祖先例外），整条目录链禁 symlink。代理组仅需遍历/连接权限；两端锁名不同，不得复用
 Worker control socket。metrics 仅允许有效 loopback TCP 或 Unix listener，禁止经代理公开。
+Worker control 的 runtime 目录也禁止 group/other 写入，祖先必须由 root 或运行 UID 拥有且不可被 group/other 写入，
+仅 root-owned sticky 祖先例外，整条链禁止 symlink。升级前须修正旧的 group 可写目录；
+默认 `0750` 不变，控制组只获得遍历和连接权限，不获得替换 socket/实例锁的目录写权限。
 
 `[http_security]` 管精确 origin、限速、Secure Cookie、请求超时和可信代理。`trusted_proxy_cidrs` 最多 64 个规范、不重复 CIDR，
 默认空时忽略 X-Forwarded-For；`trusted_unix_proxy` 仅用于有效 Unix listener，不放宽 TCP peer；同源 allowlist 默认启用。

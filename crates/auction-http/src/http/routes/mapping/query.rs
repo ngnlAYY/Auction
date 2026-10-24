@@ -96,6 +96,8 @@ pub(crate) fn parse_history_name_terms(value: Option<&String>) -> Result<Vec<Str
         .split(|character: char| character == ',' || character.is_whitespace())
         .map(str::trim)
         .filter(|term| !term.is_empty())
+        // 第九个非空词已足够判定超限，不再为剩余无效输入分配字符串。
+        .take(MAX_PUBLIC_HISTORY_NAME_TERMS + 1)
         .map(ToOwned::to_owned)
         .collect::<Vec<_>>();
     if terms.len() > MAX_PUBLIC_HISTORY_NAME_TERMS {

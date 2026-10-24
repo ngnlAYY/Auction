@@ -92,6 +92,8 @@ Mail 仅对可重试错误与超时做有界 inline retry，处理前先查持�
 维护整轮受同一 fetch_timeout 约束，包含数据库和 session 排队；耗尽后继续收件，不为每封详情重置预算。
 候选以 `000060` 的持久环形游标逐条轮转，20/200 边界不推进未处理后缀；discard 的一次性尝试围栏保留未知结果，
 不自动重新删除草稿或发送邮件，精确规则见[维护契约](ops/mail/diagnostics.md#定期三页维护)。
+批次 ID 使用借用哈希集合做期望线性去重，不复制邮件或 ID；论坛 512 字符摘要惰性生成，不先建立完整分词/拼接副本。
+recovery 摘要只借用字段，旧 prepare 查询仅保留一个必要 owned 副本，JSON、摘要与命令身份不变。
 轮询将当前 claim 传给 `fetch_claimed`；生产 MoogleMail gateway 在首个详情 GET 前持久登记整窗列表身份，优先恢复同邮箱、
 同 world 的待读前缀。完成 cursor 与队列前缀在同一 fenced 事务提交，读取取消或业务失败保留未完成后缀，不能靠未读列表恢复。
 
@@ -129,6 +131,9 @@ UID/GID allowlist，并受请求/响应大小与处理预算限制。Admin clien
 进程启动、降级原因与 drain 使用同一原子状态；论坛健康恢复只清除自身原因，不能覆盖其他任务故障，
 `status.ready` 和 `status.state` 来自同一快照。group 名称使用调用独占缓冲的可重入 NSS 查询，避免并发查询覆盖 GID；
 缓冲从 1 KiB 倍增且不超过 1 MiB，查询失败或仍超限时拒绝绑定。
+control 目录禁止 group/other 写入；祖先只允许 root/运行 UID 拥有且不可由 group/other 写入，root-owned sticky 祖先例外。
+权限写入前后均核对 socket 身份；未进入 run 便丢弃 server 时也先清理 socket、再释放实例锁。
+root/运行 UID 仍属于信任边界，路径复核不宣称消除受信账号恶意替换产生的全部 TOCTOU。
 [control/mail_progress.rs](crates/auction-jobs/src/control/mail_progress.rs) 持有最多两个世界的进程内观测；
 详情 GET、入站处理和批次提交前报告真实阶段/MID，`processing/progress.rs` 的 RAII 守卫在完成、取消或提前返回时收口。
 内部按 claim token/版本隔离迟到回调，不向协议导出这些值；失败阶段/MID 保留到本进程后续观测，重启清空。

@@ -32,6 +32,7 @@ pub(crate) async fn mark_action_enqueued_postgres(
         let activate_digest = activate_digest.clone();
         let prepare_digest = prepare_digest.clone();
         Box::pin(async move {
+            lock_action(transaction, claim.action_id.as_uuid()).await?;
             let result = sqlx::query(
                 r#"UPDATE public.settlement_recovery_actions
                    SET execution_state = 'enqueued',

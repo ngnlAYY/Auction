@@ -112,6 +112,7 @@ pub(super) async fn inspect_postgres(
     token_hash: [u8; 32],
     now: DateTime<Utc>,
 ) -> Result<PublicSessionIdentity, ApplicationError> {
+    // 查询可能在连接池中等过截止；读取时取实时钟，同时保留请求时间作为保守下界。
     let row = sqlx::query(
         "SELECT session.user_id, account.username,
                 session.expires_at, session.absolute_expires_at
@@ -120,7 +121,8 @@ pub(super) async fn inspect_postgres(
          WHERE session.token_hash = $1
            AND session.revoked_at IS NULL
            AND ((session.expires_at IS NULL AND session.absolute_expires_at IS NULL)
-             OR (session.expires_at > $2 AND session.absolute_expires_at > $2))
+             OR (session.expires_at > GREATEST($2, clock_timestamp())
+               AND session.absolute_expires_at > GREATEST($2, clock_timestamp())))
            AND account.status = 'active' AND account.key_status = 'active'",
     )
     .bind(token_hash.as_slice())
@@ -138,18 +140,25 @@ pub(super) async fn touch_postgres(
     token_hash: [u8; 32],
     now: DateTime<Utc>,
 ) -> Result<PublicSessionIdentity, ApplicationError> {
+    // 外层截止条件依赖已物化的锁定行，连接或行锁等待不能让过期身份再次通过认证。
     let row = sqlx::query(
-        "UPDATE public.public_sessions AS session
+        "WITH locked AS MATERIALIZED (
+            SELECT session.token_hash, session.expires_at, session.absolute_expires_at,
+                   account.username
+            FROM public.public_sessions AS session
+            JOIN public.users AS account ON account.id = session.user_id
+            WHERE session.token_hash = $2 AND session.revoked_at IS NULL
+              AND account.status = 'active' AND account.key_status = 'active'
+            FOR UPDATE OF session
+         )
+         UPDATE public.public_sessions AS session
          SET last_activity_at = GREATEST(session.last_activity_at, $1)
-         FROM public.users AS account
-         WHERE session.token_hash = $2
-           AND session.revoked_at IS NULL
-           AND ((session.expires_at IS NULL AND session.absolute_expires_at IS NULL)
-             OR (session.expires_at > $1 AND session.absolute_expires_at > $1))
-           AND account.id = session.user_id
-           AND account.status = 'active'
-           AND account.key_status = 'active'
-         RETURNING session.user_id, account.username, session.expires_at,
+         FROM locked
+         WHERE session.token_hash = locked.token_hash
+           AND ((locked.expires_at IS NULL AND locked.absolute_expires_at IS NULL)
+             OR (locked.expires_at > GREATEST($1, clock_timestamp())
+               AND locked.absolute_expires_at > GREATEST($1, clock_timestamp())))
+         RETURNING session.user_id, locked.username, session.expires_at,
                    session.absolute_expires_at",
     )
     .bind(now)

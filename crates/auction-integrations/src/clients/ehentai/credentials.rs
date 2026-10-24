@@ -198,12 +198,7 @@ impl EhentaiCredentialSet {
             .find(|candidate| world.is_none_or(|world| permits_world(candidate.world, world)))
             .cloned()
             .ok_or_else(|| EhentaiError::credential(EhentaiOperation::FetchTopic))?;
-        Ok(EhentaiCredentialSession {
-            set: self.clone(),
-            world,
-            tried: HashSet::from([candidate.key]),
-            current: candidate,
-        })
+        Ok(EhentaiCredentialSession { set: self.clone(), current: candidate })
     }
 }
 
@@ -222,9 +217,7 @@ impl fmt::Debug for EhentaiCredentialSet {
 /// 一次论坛逻辑操作的稳定凭据选择。
 pub(super) struct EhentaiCredentialSession {
     set: EhentaiCredentialSet,
-    world: Option<SettlementWorld>,
     current: EhentaiCredentialCandidate,
-    tried: HashSet<Uuid>,
 }
 
 impl EhentaiCredentialSession {
@@ -250,27 +243,6 @@ impl EhentaiCredentialSession {
                 .await
                 .map_err(|_| EhentaiError::credential(EhentaiOperation::FetchTopic))?;
         }
-        Ok(())
-    }
-
-    pub(super) fn advance(&mut self) -> Result<(), EhentaiError> {
-        if !self.set.ownership_valid() {
-            return Err(EhentaiError::credential(EhentaiOperation::FetchTopic));
-        }
-        let candidate = self
-            .set
-            .candidates
-            .lock()
-            .map_err(|_| EhentaiError::credential(EhentaiOperation::FetchTopic))?
-            .iter()
-            .find(|candidate| {
-                !self.tried.contains(&candidate.key)
-                    && self.world.is_none_or(|world| permits_world(candidate.world, world))
-            })
-            .cloned()
-            .ok_or_else(|| EhentaiError::credential(EhentaiOperation::FetchTopic))?;
-        self.tried.insert(candidate.key);
-        self.current = candidate;
         Ok(())
     }
 }

@@ -1,10 +1,10 @@
-//! Public lot 的跨后端字段映射、装备安全投影和输入校验。
+//! Public lot 的 PostgreSQL 字段映射、装备安全投影和输入校验。
 //!
 //! 数据库原始行在这里转换为应用 DTO；未知状态、越界文本和损坏的装备属性必须失败关闭。
 
 use super::*;
 
-// 两个后端的列名映射在此集中收口；参数分别对应公开契约字段，拆成临时结构会让行映射跨越适配器边界。
+// 数据库列名映射在此集中收口；参数分别对应公开契约字段，拆成临时结构会让行映射跨越适配器边界。
 #[allow(clippy::too_many_arguments)]
 pub(super) fn map_projection(
     auction_id: Uuid,
@@ -200,11 +200,13 @@ pub(super) fn map_equipment(
     {
         return Err(storage_error("公开装备字段无效"));
     }
-    let stored = parse_stored_equipment(attributes.clone())?;
-    let info_summary =
-        if stored.type_name.is_empty() { category.to_owned() } else { stored.type_name.clone() };
-    let info_summary =
-        stored.level.map_or(info_summary.clone(), |level| format!("{info_summary} Lv{level}"));
+    // 原始属性仍归公开投影持有；借用反序列化，避免先复制整棵 JSON 再消费副本。
+    let stored = parse_stored_equipment(&attributes)?;
+    let type_name = if stored.type_name.is_empty() { category } else { &stored.type_name };
+    let info_summary = match stored.level {
+        Some(level) => format!("{type_name} Lv{level}"),
+        None => type_name.to_owned(),
+    };
     if !info_summary.is_empty() && !public_text(&info_summary, 512)
         || stored.level.is_some_and(|level| level < 0)
     {
@@ -270,11 +272,11 @@ pub(super) fn matches_equipment_filters(
             .is_none_or(|group| stored.equipment_group(name, category, colors) == group))
 }
 
-fn parse_stored_equipment(
-    attributes: Value,
+fn parse_stored_equipment<'de>(
+    attributes: impl serde::Deserializer<'de>,
 ) -> Result<StoredEquipmentAttributes, ApplicationError> {
-    let stored: StoredEquipmentAttributes =
-        serde_json::from_value(attributes).map_err(|_| storage_error("公开装备属性无效"))?;
+    let stored = StoredEquipmentAttributes::deserialize(attributes)
+        .map_err(|_| storage_error("公开装备属性无效"))?;
     if !public_text(&stored.quality, 128)
         || (!stored.type_name.is_empty() && !public_text(&stored.type_name, 128))
         || (!stored.prefix.is_empty() && !public_text(&stored.prefix, 128))

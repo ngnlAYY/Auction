@@ -66,9 +66,7 @@ use auction_web_shared::{
     use_locale_effects,
 };
 
-pub(super) use command::{
-    run_admin_action, run_admin_feedback_action, stable_command_id, stable_scoped_command_id,
-};
+pub(super) use command::{run_admin_action, run_admin_feedback_action, stable_scoped_command_id};
 use router::Route;
 pub(super) use shared::{AdminActionFeedback, admin_api_error_message, format_admin_time};
 

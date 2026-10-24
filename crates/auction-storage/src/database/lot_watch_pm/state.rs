@@ -43,10 +43,15 @@ pub(super) async fn start(
     }
     let eligible: bool = row.try_get("eligible").map_err(sql_error)?;
     if !eligible {
-        sqlx::query("UPDATE public.lot_watch_pm_deliveries SET status='suppressed',failure_code='source_invalid',
+        let count = sqlx::query("UPDATE public.lot_watch_pm_deliveries SET status='suppressed',failure_code='source_invalid',
             lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,completed_at=clock_timestamp(),updated_at=clock_timestamp()
-            WHERE notification_id=$1 AND lease_token=$2 AND fencing_version=$3 AND sending_at IS NULL")
-            .bind(claim.message.notification_id).bind(claim.token).bind(claim.fence).execute(&mut *tx).await.map_err(sql_error)?;
+            WHERE notification_id=$1 AND lease_token=$2 AND fencing_version=$3 AND sending_at IS NULL
+            AND lease_expires_at > clock_timestamp()")
+            .bind(claim.message.notification_id).bind(claim.token).bind(claim.fence)
+            .execute(&mut *tx).await.map_err(sql_error)?.rows_affected();
+        if count != 1 {
+            return Err(LotWatchError::Conflict);
+        }
         tx.commit().await.map_err(sql_error)?;
         return Ok(false);
     }
@@ -80,14 +85,17 @@ pub(super) async fn release(
         return Err(LotWatchError::Invalid);
     }
     let DatabaseStore::Postgres(store) = store;
+    let mut tx = store.pool().begin().await.map_err(sql_error)?;
+    lock_delivery(&mut tx, claim.message.notification_id).await?;
     let count = sqlx::query("UPDATE public.lot_watch_pm_deliveries SET status='pending',failure_code='prepare_unavailable',
         lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,updated_at=clock_timestamp()
         WHERE notification_id=$1 AND lease_token=$2 AND fencing_version=$3 AND status='claimed'
         AND sending_at IS NULL AND lease_kind='send' AND lease_expires_at > clock_timestamp()")
-        .bind(claim.message.notification_id).bind(claim.token).bind(claim.fence).execute(store.pool()).await.map_err(sql_error)?.rows_affected();
+        .bind(claim.message.notification_id).bind(claim.token).bind(claim.fence).execute(&mut *tx).await.map_err(sql_error)?.rows_affected();
     if count != 1 {
         return Err(LotWatchError::Conflict);
     }
+    tx.commit().await.map_err(sql_error)?;
     Ok(())
 }
 
@@ -113,6 +121,8 @@ pub(super) async fn finish(
         return Err(LotWatchError::Unavailable);
     }
     let DatabaseStore::Postgres(store) = store;
+    let mut tx = store.pool().begin().await.map_err(sql_error)?;
+    lock_delivery(&mut tx, claim.message.notification_id).await?;
     // 完成不再检查 watch，发送后的取消不能擦除已发生的远端结果。
     let count = sqlx::query("UPDATE public.lot_watch_pm_deliveries q SET status=CASE WHEN $5::text IS NULL THEN 'manual_reconcile' ELSE 'succeeded' END,
         external_reference=$5,failure_code=CASE WHEN $5::text IS NOT NULL THEN NULL WHEN $6 THEN 'evidence_missing' ELSE 'outcome_unknown' END,
@@ -126,9 +136,26 @@ pub(super) async fn finish(
         AND n.id=q.notification_id AND n.channel='pm' AND n.request_digest=$7 AND n.payload=$8 AND n.recipient=$9")
         .bind(claim.message.notification_id).bind(claim.token).bind(claim.fence).bind(sender).bind(external).bind(claim.reconcile)
         .bind(&claim.digest).bind(serde_json::to_value(&claim.message).map_err(|_| LotWatchError::Unavailable)?).bind(&claim.message.recipient_forum_account_id)
-        .execute(store.pool()).await.map_err(sql_error)?.rows_affected();
+        .execute(&mut *tx).await.map_err(sql_error)?.rows_affected();
     if count != 1 {
         return Err(LotWatchError::Conflict);
     }
+    tx.commit().await.map_err(sql_error)?;
+    Ok(())
+}
+
+/// 释放与完成只锁队列；取得锁后重新计算 TTL，不反向取得 lot 锁。
+async fn lock_delivery(
+    tx: &mut Transaction<'_, Postgres>,
+    notification_id: Uuid,
+) -> Result<(), LotWatchError> {
+    sqlx::query(
+        "SELECT notification_id FROM public.lot_watch_pm_deliveries
+         WHERE notification_id = $1 FOR UPDATE",
+    )
+    .bind(notification_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(sql_error)?;
     Ok(())
 }

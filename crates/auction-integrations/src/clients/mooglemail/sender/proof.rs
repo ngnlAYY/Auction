@@ -53,7 +53,7 @@ impl MoogleMailSender {
             .checked_add(self.verification_budget)
             .ok_or_else(|| scan_timeout(world))?;
         let expected_body = canonical_mail_body_digest(&request.message.body);
-        let mut expected_equipment = request.equipment_ids.clone();
+        let mut expected_equipment = request.equipment_ids.iter().collect::<Vec<_>>();
         expected_equipment.sort_unstable();
         let mut seen = HashSet::new();
         let mut verified: Option<String> = None;
@@ -89,7 +89,7 @@ impl MoogleMailSender {
                     || proof.subject != request.message.subject
                     || proof.remaining_credits != request.credits
                     || proof.cod_pending != request.cod
-                    || proof.remaining_equipment_ids != expected_equipment
+                    || !proof.remaining_equipment_ids.iter().eq(expected_equipment.iter().copied())
                     || verified.is_some()
                 {
                     return Err(verification_unavailable(world));

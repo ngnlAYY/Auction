@@ -20,6 +20,7 @@ pub(in crate::database::sessions) async fn get_postgres(
     token_hash: [u8; 32],
     now: DateTime<Utc>,
 ) -> Result<PublicSessionPreferenceResult, ApplicationError> {
+    // 与只读 inspect 共用池等待后的截止门禁，不能按请求开始时间返回过期身份。
     let row = sqlx::query(
         "SELECT session.user_id, account.username,
                 account.public_session_duration_seconds, account.public_session_preference_version,
@@ -28,7 +29,8 @@ pub(in crate::database::sessions) async fn get_postgres(
          JOIN public.users AS account ON account.id = session.user_id
          WHERE session.token_hash = $1 AND session.revoked_at IS NULL
            AND ((session.expires_at IS NULL AND session.absolute_expires_at IS NULL)
-             OR (session.expires_at > $2 AND session.absolute_expires_at > $2))
+             OR (session.expires_at > GREATEST($2, clock_timestamp())
+               AND session.absolute_expires_at > GREATEST($2, clock_timestamp())))
            AND account.status = 'active' AND account.key_status = 'active'",
     )
     .bind(token_hash.as_slice())

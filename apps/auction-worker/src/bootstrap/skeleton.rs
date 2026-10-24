@@ -1,6 +1,8 @@
 //! 无数据库 Worker 启动骨架与非持久化运行模式。
 
-use super::control::{join_worker_control_task, worker_control_server_config};
+use super::control::{
+    WorkerControlTaskExit, join_worker_control_task, worker_control_server_config,
+};
 use super::*;
 
 #[cfg(not(feature = "postgres"))]
@@ -8,12 +10,13 @@ pub(super) async fn run_worker(
     config: &AppConfig,
     _tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
+    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     if config.database_url().is_some() {
         anyhow::bail!("worker 配置了数据库，但当前制品未编译 postgres feature");
     }
-    run_worker_skeleton(config, metrics, shutdown).await?;
+    run_worker_skeleton(config, metrics, runtime_failure, shutdown).await?;
     Ok(())
 }
 
@@ -24,6 +27,7 @@ pub(super) async fn run_worker(
 pub(super) async fn run_worker_skeleton(
     config: &AppConfig,
     metrics: Arc<ProcessMetrics>,
+    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     if !config.worker.control.enabled {
@@ -42,7 +46,9 @@ pub(super) async fn run_worker_skeleton(
             .context("bind Worker control socket for worker skeleton")?;
     let control_shutdown = Arc::new(tokio::sync::Notify::new());
     let control_stop = Arc::clone(&control_shutdown);
+    let task_exit = WorkerControlTaskExit::new(control.clone(), runtime_failure);
     let mut control_task = Some(TaskGuard::new(tokio::spawn(async move {
+        let _task_exit = task_exit;
         server.run(async move { control_stop.notified().await }).await
     })));
 
@@ -63,6 +69,7 @@ pub(super) async fn run_worker_skeleton(
 async fn run_worker_skeleton(
     config: &AppConfig,
     _metrics: Arc<ProcessMetrics>,
+    _runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     if config.worker.control.enabled {

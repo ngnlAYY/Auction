@@ -107,11 +107,7 @@ impl FirstRunConfig {
             || !(100..=5_000).contains(&self.realtime_poll_interval_millis)
             || self.control_group.is_empty()
             || self.control_group.len() > 64
-            || !self
-                .control_group
-                .as_bytes()
-                .first()
-                .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
+            || !self.control_group.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
             || !self
                 .control_group
                 .bytes()

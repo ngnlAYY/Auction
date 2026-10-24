@@ -5,12 +5,13 @@ use std::collections::HashSet;
 use scraper::Html;
 
 use super::common::{
-    attachment_count_text, canonical_body, compose_error, direct_element_children,
-    extract_equipment_id, has_visible_result_message, input_value, normalize_text, parse_amount,
-    parse_attachment_count, parse_credit_attachment, selector, valid_body,
+    attachment_count_text, compose_error, direct_element_children, extract_equipment_id,
+    has_visible_result_message, input_value, normalize_text, parse_amount, parse_attachment_count,
+    parse_credit_attachment, selector, valid_body,
 };
 use super::model::{MAX_COMPOSE_ATTACHMENTS, MAX_RECIPIENT_BYTES, MAX_SUBJECT_BYTES};
 use super::*;
+use crate::clients::mooglemail::parser::canonical_mail_body;
 
 impl MoogleMailParser {
     /// 严格解析新邮件页面，提取下一步 POST 所需的 token 和可证明状态。
@@ -50,7 +51,7 @@ impl MoogleMailParser {
             || expected_equipment_ids.windows(2).any(|pair| pair[0] == pair[1])
             || state.recipient != message.recipient
             || state.subject != message.subject
-            || canonical_body(&state.body) != canonical_body(&message.body)
+            || canonical_mail_body(&state.body) != canonical_mail_body(&message.body)
             || state.credits != expected_credits
             || actual_equipment_ids != expected_equipment_ids
             || state.cod != Some(expected_cod)

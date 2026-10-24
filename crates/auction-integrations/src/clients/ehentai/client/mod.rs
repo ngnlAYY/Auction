@@ -103,8 +103,8 @@ pub struct EhentaiClient {
 
 impl EhentaiClient {
     /// 使用已有 HTTP client 建立兼容构造器。
-    /// 生产装配应使用 [`Self::with_config`]，它会强制关闭自动重定向；该方法保留给已有
-    /// 装配代码和受控本地协议适配器使用。
+    /// 生产装配应使用 [`Self::with_config`]，它会强制关闭自动重定向和传输层重试；
+    /// 注入 client 的两项策略由调用方保证，该方法仅供已有装配和受控协议适配器使用。
     pub fn new(base_url: Url, client: Client) -> Self {
         let origin = origin_of(&base_url).unwrap_or_default();
         Self {
@@ -133,7 +133,7 @@ impl EhentaiClient {
         Self::from_config_and_client(config, client)
     }
 
-    /// 使用调用方提供的 client 建立客户端；调用方必须保证其不跟随重定向。
+    /// 使用调用方提供的 client 建立客户端；调用方必须禁止重定向和传输层重试。
     pub fn from_config_and_client(
         config: EhentaiClientConfig,
         client: Client,

@@ -67,25 +67,29 @@ fn current_uid() -> u32 {
 }
 
 #[cfg(unix)]
-pub(super) fn validate_runtime_directory(
-    path: &Path,
-    group_id: u32,
-) -> Result<(), WorkerControlServerError> {
+pub(super) fn validate_runtime_directory(path: &Path) -> Result<(), WorkerControlServerError> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let resolved = std::fs::canonicalize(path).map_err(WorkerControlServerError::Io)?;
     if resolved != path {
         return Err(WorkerControlServerError::UnsafeRuntimeDirectory);
     }
-    let metadata = std::fs::symlink_metadata(path).map_err(WorkerControlServerError::Io)?;
-    let mode = metadata.permissions().mode() & 0o777;
-    if metadata.file_type().is_symlink()
-        || !metadata.is_dir()
-        || metadata.uid() != current_uid()
-        || mode & 0o002 != 0
-        || mode & 0o020 != 0 && metadata.gid() != group_id
-    {
-        return Err(WorkerControlServerError::UnsafeRuntimeDirectory);
+    let owner = current_uid();
+    // 仅保护叶目录不能阻止祖先被重命名；control 组只需遍历和连接权限，不拥有目录写权限。
+    // 与 HTTP Unix listener 使用相同信任边界：运行账号/root 可信，root-owned sticky 祖先例外。
+    for directory in path.ancestors() {
+        let metadata =
+            std::fs::symlink_metadata(directory).map_err(WorkerControlServerError::Io)?;
+        let mode = metadata.permissions().mode();
+        let protected_shared_ancestor =
+            directory != path && metadata.uid() == 0 && mode & 0o1000 != 0;
+        if !metadata.is_dir()
+            || metadata.file_type().is_symlink()
+            || mode & 0o022 != 0 && !protected_shared_ancestor
+            || metadata.uid() != owner && (directory == path || metadata.uid() != 0)
+        {
+            return Err(WorkerControlServerError::UnsafeRuntimeDirectory);
+        }
     }
     Ok(())
 }
@@ -179,6 +183,12 @@ pub(super) fn secure_bound_socket(
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 
+    // 目录链必须先经可信权限校验；重查 inode 只拒绝已发生的替换，不宣称消除受信账号的竞态。
+    if socket_identity(path)? != identity {
+        return Err(WorkerControlServerError::InvalidSecurityConfig(
+            "绑定后的 socket 身份已变化，拒绝修改权限",
+        ));
+    }
     let encoded = CString::new(path.as_os_str().as_bytes())
         .map_err(|_| WorkerControlServerError::InvalidSocketPath)?;
     // SAFETY: encoded 是已校验路径的 NUL 结尾副本，uid/gid 均为本地内核标识。

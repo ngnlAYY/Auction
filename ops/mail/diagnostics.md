@@ -184,14 +184,17 @@ MoogleMail Worker 每个 cron 周期（默认 5 分钟，仅 main）在收件轮
   `operations_alert`、`lot_watch` 的正文来自冻结载荷，维护流程不重建也不绑定。
 - Sent 中没有对应通知不能证明当时未发送；零命中、多命中、时间或关联身份不充分都保留 `manual_reconcile`，
   不自动退回发送队列。恢复绑定不重发邮件，不以模板相同或单独的时间窗口替代唯一发送身份。
-- `take` 动作直接按 MID 读取详情（Inbox 列表只含未读邮件，不能作为“邮件不存在”的证据）：远端明确返回
-  “Mail does not exist” 或详情已无目标装备/credits/COD 时按 `action_recovered_inbox_v1` 收口成功；仍有资产则退回收发队列
-  重试（上限 2 次）。登录页、解析漂移等无法证明缺失的情况只报错等待下一轮。
+- `take` 直接按 MID 读取详情，未读 Inbox 缺席不是不存在证明。缺失只接受唯一系统框完整的
+  “Mail does not exist”（允许末尾句点），且不得混有详情节点或隐藏正文；其他对象缺失、登录页、残缺结构和未知文案保留核对。
+  完整详情的全部装备、Credits、COD 均归零，才可按 `action_recovered_inbox_v1` 收口；
+  只有原装备集合和冻结金额精确相同才可重排（上限 2 次）。部分、额外、重复资产或金额漂移不成功、不重排。
 - compose 非空时，只有收件人、业务 reference 和 COD 同时精确匹配唯一一条未证明投递才执行 discard；匹配不到或匹配到多条
   只记录日志，绝不丢弃来源不明的草稿。通知类没有业务 reference，不参与 compose 匹配。
 - discard 前在原投递上持久登记一次性尝试，再在同一凭据 session 重读并逐字段比较原草稿。
   尝试提交未知、排队/读取取消或 POST 结果未知都保留人工核对，不能因下一轮仍看到草稿而自动再丢弃。
 - discard 成功后再读 compose 证明为空，并把结果写入 `result_metadata.compose_discard`。
+写后明确登录失效同样触发当前 Cookie 的失效处理，但保留 `write_started` 和未知写入边界；
+失效不是未发送证明，不能据此换 Cookie 或自动重发。
 
 ## 装备读取失败诊断
 

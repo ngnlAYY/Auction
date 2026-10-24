@@ -20,6 +20,10 @@ pub(super) fn page() -> Element {
     // 已应用的筛选与分页跟地址栏双向同步；表单草稿是提交前的瞬态，只在提交时入 URL。
     let query = use_audit_query_state();
     let query_state = query.state;
+    let requested_query = use_memo(move || {
+        let current = query_state.read();
+        (current.page, current.filter.clone())
+    });
     // 草稿初值取自地址栏恢复的已应用筛选，刷新后表单与列表保持一致；之后的编辑不落 URL。
     let filter = use_signal(move || query_state.peek().filter.clone());
     let mut refresh = use_signal(|| 0_u64);
@@ -28,8 +32,7 @@ pub(super) fn page() -> Element {
         pagination.clone(),
         move || {
             let _ = refresh();
-            let current = query_state();
-            (current.page, current.filter)
+            requested_query()
         },
         |(page, filter), size| fetch_admin_audit(page, filter, size),
     );

@@ -22,6 +22,10 @@ pub(super) fn page() -> Element {
     // 名称即时筛选与分页跟地址栏双向同步；回滚确认对话框和命令上下文是瞬态，不入 URL。
     let query = use_renames_query_state();
     let query_state = query.state;
+    let requested_query = use_memo(move || {
+        let current = query_state.read();
+        (current.name.clone(), current.page)
+    });
     let mut refresh = use_signal(|| 0_u64);
     let mut busy_rename = use_signal(|| None::<String>);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
@@ -34,8 +38,7 @@ pub(super) fn page() -> Element {
         pagination.clone(),
         move || {
             let _ = refresh();
-            let current = query_state();
-            (current.name, current.page)
+            requested_query()
         },
         |(name, page), size| fetch_admin_renames("all".to_owned(), name, page, size),
     );

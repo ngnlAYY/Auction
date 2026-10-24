@@ -1,25 +1,16 @@
 //! Admin Dashboard 邮件轮询控制。
-//! 控件保持旧版扁平动作区和独立命令 ID owner；暂停冲突会刷新唯一 Dashboard 快照，但不会把
-//! stale 结果伪装成成功。
-
-use std::collections::HashMap;
+//! 命令由稳定 Dashboard 页面持有，后台快照失败卸载控件时仍保留原参数与 UUID；
+//! 暂停冲突会刷新唯一 Dashboard 快照，但不会把 stale 结果伪装成成功。
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
-use crate::app::surface::{run_admin_action, stable_scoped_command_id};
+use crate::app::surface::pending::{PendingCommands, set_if_alive};
 
 #[component]
-pub(super) fn MailPollerControls(
-    pollers: Vec<AdminMailPolling>,
-    mut refresh: Signal<u64>,
-) -> Element {
-    let trigger_busy = use_signal(|| false);
-    let pause_busy = use_signal(|| false);
-    let mut trigger_command = use_signal(|| None::<Uuid>);
-    let mut pause_commands = use_signal(HashMap::<String, Uuid>::new);
+pub(super) fn MailPollerControls(pollers: Vec<AdminMailPolling>, refresh: Signal<u64>) -> Element {
+    let owner = use_context::<PendingCommands>();
     let mut notice = use_signal(|| None::<String>);
     let mut error_code = use_signal(|| None::<String>);
 
@@ -29,34 +20,31 @@ pub(super) fn MailPollerControls(
                 button {
                     class: "admin-btn-primary",
                     r#type: "button",
-                    disabled: trigger_busy(),
+                    disabled: owner.contains("mail-poll-trigger"),
                     onclick: move |_| {
-                        if trigger_busy() {
+                        if owner.contains("mail-poll-trigger") {
                             return;
                         }
                         notice.set(None);
                         error_code.set(None);
-                        let command_id = trigger_command().unwrap_or_else(|| {
-                            let command_id = Uuid::new_v4();
-                            trigger_command.set(Some(command_id));
-                            command_id
-                        });
-                        run_admin_action(
-                            trigger_busy,
-                            async move { trigger_mail_poll(command_id).await },
+                        owner.submit(
+                            "mail-poll-trigger".to_owned(),
+                            t!("dashboard-legacy-trigger-poll"),
+                            |command_id| async move {
+                                trigger_mail_poll(command_id).await.map_err(|error| error.code)
+                            },
                             move |count| {
-                                trigger_command.set(None);
-                                notice.set(Some(t!(
+                                set_if_alive(notice, Some(t!(
                                     "dashboard-legacy-poll-triggered",
                                     count: count
                                 )));
                             },
-                            move |error| error_code.set(Some(error.code)),
+                            move |code| set_if_alive(error_code, Some(code)),
                         );
                     },
                     {t!("dashboard-legacy-trigger-poll")}
                 }
-                for polling in pollers.iter().cloned() {
+                for polling in pollers {
                     {
                         let desired_paused = !polling.paused;
                         let action = if polling.paused {
@@ -70,44 +58,37 @@ pub(super) fn MailPollerControls(
                             mailbox: polling.mailbox_key.clone()
                         );
                         let mailbox_key = polling.mailbox_key.clone();
+                        let command_label = label.clone();
                         rsx! {
                             button {
                                 class: "admin-btn-secondary",
                                 key: "{mailbox_key}",
                                 r#type: "button",
-                                disabled: pause_busy(),
+                                disabled: owner.contains("mail-polling"),
                                 onclick: move |_| {
-                                    if pause_busy() {
+                                    if owner.contains("mail-polling") {
                                         return;
                                     }
                                     notice.set(None);
                                     error_code.set(None);
                                     let polling = polling.clone();
-                                    let signature = format!(
-                                        "{}:{}:{}",
-                                        polling.mailbox_key,
-                                        polling.state_version,
-                                        desired_paused
-                                    );
-                                    let command_id =
-                                        stable_scoped_command_id(pause_commands, &signature);
-                                    run_admin_action(
-                                        pause_busy,
-                                        async move {
-                                            set_mail_paused(command_id, polling, desired_paused)
-                                                .await
-                                        },
-                                        move |_| {
-                                            pause_commands.write().remove(&signature);
-                                            notice.set(Some(t!("dashboard-legacy-poll-updated")));
-                                            refresh.set(refresh().saturating_add(1));
-                                        },
-                                        move |error| {
-                                            if error.is_conflict() {
-                                                refresh.set(refresh().saturating_add(1));
+                                    // 保留本页暂停/恢复串行策略；未知结果必须先原样解决。
+                                    owner.submit(
+                                        "mail-polling".to_owned(),
+                                        command_label.clone(),
+                                        move |command_id| {
+                                            let polling = polling.clone();
+                                            async move {
+                                                let result = set_mail_paused(command_id, polling, desired_paused).await;
+                                                if result.as_ref().is_err_and(|error| error.is_conflict()) {
+                                                    let mut refresh = refresh;
+                                                    refresh.set(refresh().saturating_add(1));
+                                                }
+                                                result.map_err(|error| error.code)
                                             }
-                                            error_code.set(Some(error.code));
                                         },
+                                        move |_| set_if_alive(notice, Some(t!("dashboard-legacy-poll-updated"))),
+                                        move |code| set_if_alive(error_code, Some(code)),
                                     );
                                 },
                                 "{label}"

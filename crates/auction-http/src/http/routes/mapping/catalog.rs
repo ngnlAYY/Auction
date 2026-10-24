@@ -322,15 +322,13 @@ pub(crate) fn decode_public_cursor(raw: &str) -> Result<PublicAuctionCursor, ()>
     if raw == "start" {
         return Ok(PublicAuctionCursor::Start);
     }
-    if raw.is_empty() || raw.len() > 128 {
+    // 固定 26 字节只接受 35 个无填充字符；严格引擎已拒绝非规范尾位，无需重编码分配。
+    if raw.len() != 35 {
         return Err(());
     }
-    let decoded = URL_SAFE_NO_PAD.decode(raw).map_err(|_| ())?;
-    if decoded.len() != 26
-        || URL_SAFE_NO_PAD.encode(&decoded) != raw
-        || decoded[0] != 1
-        || decoded[1] != 3
-    {
+    let mut decoded = [0_u8; 26];
+    let decoded_len = URL_SAFE_NO_PAD.decode_slice(raw, &mut decoded).map_err(|_| ())?;
+    if decoded_len != decoded.len() || decoded[0] != 1 || decoded[1] != 3 {
         return Err(());
     }
     let sequence = i64::from_be_bytes(decoded[2..10].try_into().map_err(|_| ())?);
@@ -368,15 +366,13 @@ pub(crate) fn decode_public_bid_log_cursor(raw: &str) -> Result<PublicBidLogCurs
     if raw == "start" {
         return Ok(PublicBidLogCursor::Start);
     }
-    if raw.is_empty() || raw.len() > 128 {
+    // v1/type4 固定 54 字节；与目录游标相同，直接解码到栈并保留严格字母表/尾位校验。
+    if raw.len() != 72 {
         return Err(());
     }
-    let decoded = URL_SAFE_NO_PAD.decode(raw).map_err(|_| ())?;
-    if decoded.len() != 54
-        || URL_SAFE_NO_PAD.encode(&decoded) != raw
-        || decoded[0] != 1
-        || decoded[1] != 4
-    {
+    let mut decoded = [0_u8; 54];
+    let decoded_len = URL_SAFE_NO_PAD.decode_slice(raw, &mut decoded).map_err(|_| ())?;
+    if decoded_len != decoded.len() || decoded[0] != 1 || decoded[1] != 4 {
         return Err(());
     }
     let timestamp_micros = i64::from_be_bytes(decoded[2..10].try_into().map_err(|_| ())?);
@@ -419,15 +415,13 @@ pub(crate) fn decode_public_price_history_cursor(
     if raw == "start" {
         return Ok(PublicPriceHistoryCursor::Start);
     }
-    if raw.is_empty() || raw.len() > 128 {
+    // v1/type5 固定 38 字节，对应 51 个无填充字符；不为无效长度或规范性复核分配堆内存。
+    if raw.len() != 51 {
         return Err(());
     }
-    let decoded = URL_SAFE_NO_PAD.decode(raw).map_err(|_| ())?;
-    if decoded.len() != 38
-        || URL_SAFE_NO_PAD.encode(&decoded) != raw
-        || decoded[0] != 1
-        || decoded[1] != 5
-    {
+    let mut decoded = [0_u8; 38];
+    let decoded_len = URL_SAFE_NO_PAD.decode_slice(raw, &mut decoded).map_err(|_| ())?;
+    if decoded_len != decoded.len() || decoded[0] != 1 || decoded[1] != 5 {
         return Err(());
     }
     let timestamp_micros = i64::from_be_bytes(decoded[2..10].try_into().map_err(|_| ())?);

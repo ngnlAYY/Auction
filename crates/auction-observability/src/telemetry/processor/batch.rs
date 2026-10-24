@@ -201,6 +201,7 @@ async fn run_batch_processor<E>(
                         let _ = response.send(result);
                     }
                     ProcessorControl::Shutdown(response, timeout) => {
+                        span_receiver.close();
                         let result = match export_pending(
                             &mut span_receiver,
                             &mut batch,
@@ -244,12 +245,20 @@ async fn export_pending<E>(
 where
     E: SdkSpanExporter + 'static,
 {
+    // flush 只排空进入本轮时已入队的前缀；持续到来的新 span 不能无限延长控制消息。
+    let mut remaining = span_receiver.len();
     loop {
-        while batch.len() < max_export_batch_size {
+        while remaining > 0 && batch.len() < max_export_batch_size {
             match span_receiver.try_recv() {
-                Ok(span) => batch.push(span),
+                Ok(span) => {
+                    batch.push(span);
+                    remaining -= 1;
+                }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-                | Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
+                | Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    remaining = 0;
+                    break;
+                }
             }
         }
         if batch.is_empty() {

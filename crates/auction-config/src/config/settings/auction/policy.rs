@@ -58,20 +58,29 @@ impl Default for AuctionScheduleConfig {
 }
 
 impl AuctionConfig {
-    /// 将 TOML 设置转换为应用层策略模板；秒数超出 chrono 范围时返回配置错误。
+    /// 将 TOML 设置转换为应用层策略模板；模式不在闭集或秒数超出 chrono 范围时返回配置错误。
     pub fn policy(&self) -> Result<AuctionPolicyTemplate, ConfigError> {
-        // 此公开转换也可能在主配置校验之前调用，不能依赖调用方先排除极端 i64。
+        // 此公开转换也可能在主配置校验之前调用，模式和时间转换都必须独立失败关闭。
         let duration = |seconds| {
             Duration::try_seconds(seconds)
                 .ok_or(ConfigError::InvalidAuctionConfig("策略秒数超出可表示范围"))
         };
         let settlement_mode = match self.settlement.mode.as_str() {
             "legacy_zero_v0" => SettlementMode::LegacyZeroV0,
-            _ => SettlementMode::HoldCurveV1,
+            "hold_curve_v1" => SettlementMode::HoldCurveV1,
+            _ => {
+                return Err(ConfigError::InvalidAuctionConfig(
+                    "settlement.mode 只能是 legacy_zero_v0 或 hold_curve_v1",
+                ));
+            }
         };
         let recovery_mode = match self.settlement.recovery.mode.as_str() {
             "remind_v1" => RecoveryMode::RemindV1,
-            _ => RecoveryMode::RemindV1,
+            _ => {
+                return Err(ConfigError::InvalidAuctionConfig(
+                    "settlement.recovery.mode 只能是 remind_v1",
+                ));
+            }
         };
         Ok(AuctionPolicyTemplate {
             start_price: self.economics.start_price,

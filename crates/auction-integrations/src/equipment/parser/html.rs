@@ -24,27 +24,27 @@ pub(super) fn extract_equipment_page(
     let document = std::str::from_utf8(body).map_err(|_| EquipmentParseError::PageStructure)?;
     let document = Html::parse_document(document);
     let panel_selector = selector("div.showequip")?;
-    let panels: Vec<ElementRef<'_>> = document.select(&panel_selector).collect();
-    if panels.len() != 1 {
+    let mut panels = document.select(&panel_selector);
+    let panel = panels.next().ok_or(EquipmentParseError::PageStructure)?;
+    if panels.next().is_some() {
         return Err(EquipmentParseError::PageStructure);
     }
-    let panel = panels[0];
     let child_selector = selector("div.showequip > div")?;
-    let children: Vec<ElementRef<'_>> = panel.select(&child_selector).collect();
-    if children.len() < 2 {
-        return Err(EquipmentParseError::PageStructure);
-    }
-    let name = normalize_text(children[0].text().collect::<String>());
+    let mut children = panel.select(&child_selector);
+    let name_element = children.next().ok_or(EquipmentParseError::PageStructure)?;
+    let details = children.next().ok_or(EquipmentParseError::PageStructure)?;
+    let name = normalize_text(name_element.text().collect::<String>());
     if !valid_text(&name, 512) {
         return Err(EquipmentParseError::InvalidName);
     }
     let header_selector = selector(".eqt")?;
-    let headers: Vec<_> = children[1].select(&header_selector).collect();
-    if headers.len() != 1 {
+    let mut headers = details.select(&header_selector);
+    let header = headers.next().ok_or(EquipmentParseError::PageStructure)?;
+    if headers.next().is_some() {
         return Err(EquipmentParseError::PageStructure);
     }
-    let header = normalize_text(headers[0].text().collect::<String>());
-    let stats = parse_stats(children[1])?;
+    let header = normalize_text(header.text().collect::<String>());
+    let stats = parse_stats(details)?;
     Ok(EquipmentPageFields { name, header, stats })
 }
 
@@ -78,24 +78,30 @@ fn parse_stats(
     }
     let row_selector = selector(".ex > div, .ep > div")?;
     for row in panel.select(&row_selector) {
-        let elements: Vec<ElementRef<'_>> = row.children().filter_map(ElementRef::wrap).collect();
+        let mut elements = row.children().filter_map(ElementRef::wrap);
+        let name_element = elements.next();
+        let value_element = elements.next();
         let title = row.value().attr("title");
         // 分组内允许纯标题/说明。出现 Base 声明或带符号数值后就是属性行，列丢失必须报错；
         // 四列及以上也不能丢掉多余结构后伪装成完整快照。
-        if elements.len() < 2
+        if value_element.is_none()
             && !declares_base(title)
             && !has_stat_marker(&normalize_text(row.text().collect::<String>()))
         {
             continue;
         }
-        if !(2..=3).contains(&elements.len()) {
+        let (Some(name_element), Some(value_element)) = (name_element, value_element) else {
+            return Err(EquipmentParseError::InvalidAttributes);
+        };
+        let unit_element = elements.next();
+        if elements.next().is_some() {
             return Err(EquipmentParseError::InvalidAttributes);
         }
-        let name = normalize_text(elements[0].text().collect::<String>());
-        let value = normalize_stat_value(&normalize_text(elements[1].text().collect::<String>()))
+        let name = normalize_text(name_element.text().collect::<String>());
+        let value = normalize_stat_value(&normalize_text(value_element.text().collect::<String>()))
             .ok_or(EquipmentParseError::InvalidAttributes)?;
-        if elements.len() == 3 {
-            let unit = normalize_text(elements[2].text().collect::<String>());
+        if let Some(unit_element) = unit_element {
+            let unit = normalize_text(unit_element.text().collect::<String>());
             if unit != "%" && unit != "x" {
                 return Err(EquipmentParseError::InvalidAttributes);
             }

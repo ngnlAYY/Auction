@@ -158,32 +158,33 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     );
 
     let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
-    let (credential_owner_lost_sender, credential_owner_lost_receiver) =
-        tokio::sync::oneshot::channel::<&'static str>();
+    // 首个运行时故障即可触发收口；固定容量避免并发故障排队或阻塞 Drop 路径。
+    let (runtime_failure_sender, mut runtime_failure_receiver) =
+        tokio::sync::mpsc::channel::<&'static str>(1);
     let worker = run_worker(
         config,
         telemetry.health_reader(),
         Arc::clone(&metrics),
-        credential_owner_lost_sender,
+        runtime_failure_sender,
         Box::pin(async move {
             let _ = shutdown_receiver.await;
         }),
     );
     tokio::pin!(worker);
-    let credential_owner_lost = async {
-        match credential_owner_lost_receiver.await {
-            Ok(reason) => reason,
-            // 未启用、无 active 凭据或启动提前失败时，不把 sender 关闭当作 owner 失效。
-            Err(_) => std::future::pending::<&'static str>().await,
+    let runtime_failure = async {
+        match runtime_failure_receiver.recv().await {
+            Some(reason) => reason,
+            // 未启用 control/凭据或启动提前失败时，sender 关闭本身不是运行时故障。
+            None => std::future::pending::<&'static str>().await,
         }
     };
-    tokio::pin!(credential_owner_lost);
+    tokio::pin!(runtime_failure);
     let result = tokio::select! {
         result = &mut worker => {
             drop(shutdown_sender);
             result
         }
-        reason = &mut credential_owner_lost => {
+        reason = &mut runtime_failure => {
             tracing::error!(reason, "worker drain started");
             let _ = shutdown_sender.send(());
             let drained = match wait_for_drain(&mut signals, DEFAULT_DRAIN_TIMEOUT, &mut worker).await {
@@ -194,7 +195,10 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
                 }
                 Err(error) => Err(error).context("wait for worker drain"),
             };
-            drained.context("drain worker after credential runtime ownership loss")?;
+            drained.context("drain worker after runtime failure")?;
+            if reason == "control_server_stopped" {
+                return Err(anyhow::anyhow!("worker control server stopped; worker restart required"));
+            }
             // 即使所有在途任务正常结束也须非零退出，由进程管理器获取新 owner/generation。
             Err(anyhow::anyhow!("credential runtime ownership revoked; worker restart required"))
         }
@@ -254,10 +258,10 @@ async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
-    credential_owner_lost: tokio::sync::oneshot::Sender<&'static str>,
+    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
-    persistent::run_worker(config, tracing_health, metrics, credential_owner_lost, shutdown).await
+    persistent::run_worker(config, tracing_health, metrics, runtime_failure, shutdown).await
 }
 
 #[cfg(not(feature = "postgres"))]
@@ -265,10 +269,10 @@ async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
-    _credential_owner_lost: tokio::sync::oneshot::Sender<&'static str>,
+    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
-    skeleton::run_worker(config, tracing_health, metrics, shutdown).await
+    skeleton::run_worker(config, tracing_health, metrics, runtime_failure, shutdown).await
 }
 
 fn configure_cache(config: &AppConfig) -> anyhow::Result<CacheStore> {

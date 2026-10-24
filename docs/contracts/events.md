@@ -97,8 +97,10 @@ Public `/api/v1/ws`：HTTP/1.1 GET Upgrade 返回 101，HTTP/2 扩展 CONNECT �
 | Tungstenite `MessageTooLong` | 尝试 1009 | 空 |
 
 所有范围共用每 Public 进程 1024 条、每用户 8 条活跃连接配额，跨拍卖、会话和 discovery 合计；额度不足在升级前返回 HTTP 429 `realtime_busy`。Hub 在分配订阅缓冲区前取得配额，失败升级、取消和订阅结束自动归还，最后一条连接结束后删除用户计数，慢消费者仍持有订阅时不能提前释放配额。`scope=auctions` 另受 discovery 专属 128 槽限制，耗尽返回 HTTP 429 `discovery_busy`，普通 `auction_id` 连接不占 discovery 槽。这些是进程内资源保护，不是跨实例集群总配额，也不替代连接尝试限流。新的单拍卖连接在预检时拒绝已 `settled` 的拍卖并返回 404，已建立连接仍可接收随后产生的 `auction.settled`。
+进程 drain 先拒绝新订阅，再通知既有连接关闭，并在装配根原有总预算内等待全部升级许可归零；
+普通流、发现流和 pending upgrade 均计入。HTTP 连接任务结束不代表 WebSocket 已排空，失败升级和取消必须归还许可。
 
-浏览器握手预算 10 秒，先订阅、再从已确认游标 HTTP 回放并缓冲期间到达的帧；存活由服务端 Ping/Pong 判定，业务空闲不算断线，只有真实连接结束才每隔 3 秒重连。跳号切换到回放/快照，无法保持长连接时同样使用这两条恢复路径；SSE 尚无登记 endpoint。单拍卖缓存有界维护 cursor、event ID、bid fact identity、`state_version` 和 `fact_index`：相同事件/事实重复为 no-op，身份冲突、跳号或版本回退触发权威快照；快照恢复后首个晚于恢复 cursor 的事件只为对应 lot 建立 state/fact 基线，再恢复严格连续性校验，允许合法首事件的 `fact_index > 1`。发现流使用独立游标和缓存；页面仍周期读取 readiness、当前/共享拍卖、目录与活动 lot 详情作为兜底。
+浏览器握手预算 10 秒，先订阅、再从已确认游标 HTTP 回放并缓冲期间到达的帧；存活由服务端 Ping/Pong 判定，业务空闲不算断线，只有真实连接结束才按客户端退避策略重连。跳号切换到回放/快照，无法保持长连接时同样使用这两条恢复路径；SSE 尚无登记 endpoint。单拍卖缓存有界维护 cursor、event ID、bid fact identity、`state_version` 和 `fact_index`：相同事件/事实重复为 no-op，身份冲突、跳号或版本回退触发权威快照；快照恢复后首个晚于恢复 cursor 的事件只为对应 lot 建立 state/fact 基线，再恢复严格连续性校验，允许合法首事件的 `fact_index > 1`。发现流使用独立游标和缓存；页面仍周期读取 readiness、当前/共享拍卖、目录与活动 lot 详情作为兜底。
 
 ## 内部投递唤醒提示
 

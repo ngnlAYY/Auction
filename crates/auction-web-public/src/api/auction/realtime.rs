@@ -53,18 +53,21 @@ impl SeenSet {
         self.members.contains(value)
     }
 
-    /// 记录一个新键；超出上限时按插入顺序淘汰最旧条目。
+    /// 记录一个新键；超出上限时返回被淘汰的最旧键，供关联缓存同步删除。
     /// 重复键不改变其原有位置：调用方在重复路径上本就直接忽略事件，
     /// 不会走到这里依赖重排续期。
-    fn remember(&mut self, value: String) {
-        if self.members.insert(value.clone()) {
-            self.order.push_back(value);
-            while self.order.len() > SEEN_REALTIME_LIMIT {
-                if let Some(oldest) = self.order.pop_front() {
-                    self.members.remove(&oldest);
-                }
-            }
+    fn remember(&mut self, value: String) -> Option<String> {
+        if !self.members.insert(value.clone()) {
+            return None;
         }
+        self.order.push_back(value);
+        if self.order.len() > SEEN_REALTIME_LIMIT
+            && let Some(oldest) = self.order.pop_front()
+        {
+            self.members.remove(&oldest);
+            return Some(oldest);
+        }
+        None
     }
 }
 
@@ -231,7 +234,7 @@ impl RealtimeCache {
         let Some((key, version)) = event_version(event) else { return EventMerge::Gap };
         let newer = version > self.versions.get(&key).copied().unwrap_or(0);
         self.after = event.stream_sequence;
-        self.seen.remember(event.event_id.clone());
+        let _ = self.seen.remember(event.event_id.clone());
         if newer {
             self.versions.insert(key, version);
         }
@@ -269,7 +272,7 @@ impl RealtimeCache {
             if stored_identity != &identity {
                 return EventMerge::Gap;
             }
-            self.seen.remember(event.event_id.clone());
+            let _ = self.seen.remember(event.event_id.clone());
             self.after = event.stream_sequence;
             return EventMerge::Applied { refresh: false };
         }
@@ -285,9 +288,10 @@ impl RealtimeCache {
 
         // 校验全部通过后才写入状态：与原先「先克隆 seen、确认无误再写回」的事务语义
         // 一致，Gap 路径不会污染防重集合。
-        self.seen.remember(event.event_id.clone());
-        self.seen_facts.remember(bid_id.to_owned());
-        self.fact_identities.retain(|known_bid_id, _| self.seen_facts.contains(known_bid_id));
+        let _ = self.seen.remember(event.event_id.clone());
+        if let Some(evicted) = self.seen_facts.remember(bid_id.to_owned()) {
+            self.fact_identities.remove(&evicted);
+        }
         self.fact_identities.insert(bid_id.to_owned(), identity);
         self.last_facts.insert(lot_id.to_owned(), LastBidFact { fact_index, state_version });
         self.versions.insert(lot_id.to_owned(), state_version);

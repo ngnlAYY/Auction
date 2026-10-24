@@ -23,6 +23,7 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
     // 分页与当前页排序跟地址栏双向同步（?page=&sort=&dir=），刷新与浏览器前进/后退都能恢复。
     let query = use_lots_query_state();
     let query_state = query.state;
+    let requested_page = use_memo(move || query_state.read().page);
     let reload_generation = use_signal(|| 0_u64);
     let pending = use_pending_commands(reload_generation);
     let pagination = use_admin_pagination("lots", &["page_size"], Some(100), 100_000);
@@ -30,7 +31,7 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
         pagination.clone(),
         move || {
             let _ = reload_generation();
-            (auction_id.clone(), query_state().page)
+            (auction_id.clone(), requested_page())
         },
         |(auction_id, page), size| fetch_admin_lots(auction_id, page, size),
     );

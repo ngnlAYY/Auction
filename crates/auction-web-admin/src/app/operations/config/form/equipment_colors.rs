@@ -21,7 +21,8 @@ pub(super) fn EquipmentColorRulesField(
     let Some(taxonomy) = form.read().equipment_taxonomy() else {
         return rsx! { p { role: "alert", {t!("admin-runtime-invalid-form")} } };
     };
-    let rules = form.read().equipment_colors();
+    let form_state = form.read();
+    let rules = form_state.equipment_colors();
     let last_index = rules.len().saturating_sub(1);
     rsx! {
         div { class: "admin-runtime-color-rules",

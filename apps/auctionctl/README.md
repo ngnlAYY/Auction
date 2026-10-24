@@ -156,6 +156,7 @@ PostgreSQL 显式提供 host、非零 port 和库名，允许受支持的 host/h
 严格模式同时要求 runtime 文件精确 `0640`，父目录为非符号链接且禁止 group/other 写入。分体启动/重启在迁移前读取
 实际 Admin unit 的 `User`（空值按 systemd root 语义），要求 runtime 文件和可写父目录归该固定 UID；
 不能用运维调用者 UID 代替服务身份，使用 runtime 时拒绝 `DynamicUser=yes` 并要求先调整部署。
+Public 与 Admin 的 Unix listener 都不得复用已启用 Worker control 的 socket 路径，冲突在只读预检时拒绝。
 
 ## Systemd 总控
 
@@ -166,6 +167,8 @@ PostgreSQL 显式提供 host、非零 port 和库名，允许受支持的 host/h
 unit，由 `--systemctl`、`--state-dir`、`--worker-unit`、`--admin-unit`、`--public-unit` 覆盖；start/restart
 默认配置目录 `/etc/auction`，每角色 readiness 预算 30 秒（1–300 秒可调）。锁、unit 环境绑定、1 秒单次探针
 与回执见[systemd 手册](ops/README.md#systemd-服务与顺序控制)。
+systemctl stdout 在读取阶段限制为 64 KiB，超限立即终止并回收直接子进程；stderr 由一个临时读取线程并发排空，
+只保留 2 KiB 诊断前缀。单行诊断按 UTF-8 字节预算截断，不因中文字符超过上限；未新增总墙钟 timeout。
 
 ## 停机迁移与初始建库
 
@@ -281,6 +284,8 @@ realtime 水位，并保存[政策](ops/deploy/retention-policy.v1.json) SHA-256
 使用独立备份/verify/adoption：默认只读，执行需专用恢复点、`--execute`、逐字 `ADOPT LEGACY V28 <数据库名>`
 和新 receipt，普通 backup/restore 不接受 v28 manifest，bridge 或接管已提交后失败不能再次 adoption。
 步骤见[恢复手册](ops/deploy/RECOVERY.md)与[v28 手册](ops/deploy/LEGACY_V28_ADOPTION.md)。
+pg_dump 输出 Path 独立传入 argv，不经 `display()` 有损编码，保留 Linux 原生非 UTF-8 路径字节；
+私有文件验证、工具退出检查及发布门禁不变。
 
 ## 恢复与破坏性重建
 

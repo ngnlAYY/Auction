@@ -12,9 +12,9 @@ use uuid::Uuid;
 
 use crate::{
     ApplicationError, Clock, MoogleMailboxComposeState, MoogleMailboxDiscard,
-    MoogleMailboxEvidenceStore, MoogleMailboxMaintenance, MoogleMailboxSentEntry,
-    MoogleMailboxSentState, MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
-    RepositoryError,
+    MoogleMailboxEvidenceStore, MoogleMailboxInboxAssets, MoogleMailboxMaintenance,
+    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxSweepCandidate,
+    MoogleMailboxUnprovenSend, RepositoryError,
 };
 
 /// 通知类单轮最多核对的投递数；达到上限即停止，不越过未处理后缀推进持久游标。
@@ -359,7 +359,7 @@ impl MailboxMaintenanceService {
         Ok(step)
     }
 
-    /// take 动作：入站邮件已消失或目标附件已不在，视为已领取；仍有附件则重试。
+    /// take 只凭明确缺失或资产完全清空收口；精确原资产仍在才可重排，部分或矛盾结果保持未知。
     async fn recover_take(
         &self,
         world_id: &str,
@@ -376,16 +376,15 @@ impl MailboxMaintenanceService {
                 });
             }
         };
-        let target = candidate.attachment_ids.iter().collect::<std::collections::HashSet<_>>();
         match assets {
             None => self.bind_take(candidate, "inbox_mail_absent").await,
             Some(present) => {
-                let remaining =
-                    present.equipment_ids.iter().filter(|id| target.contains(id)).count();
-                if remaining == 0 && present.credits == 0 && present.cod == 0 {
+                if present.equipment_ids.is_empty() && present.credits == 0 && present.cod == 0 {
                     self.bind_take(candidate, "attachments_absent").await
+                } else if take_assets_match(candidate, &present) {
+                    self.requeue(candidate, "take_assets_still_present").await
                 } else {
-                    self.requeue(world_id, candidate, "take_assets_still_present").await
+                    Ok(RecoveryStep::default())
                 }
             }
         }
@@ -417,7 +416,6 @@ impl MailboxMaintenanceService {
 
     async fn requeue(
         &self,
-        world_id: &str,
         candidate: &MoogleMailboxUnprovenSend,
         reason: &str,
     ) -> Result<RecoveryStep, ApplicationError> {
@@ -428,7 +426,6 @@ impl MailboxMaintenanceService {
             .store
             .requeue_unproven(candidate.delivery_id, candidate.sweep_retries + 1, reason)
             .await?;
-        let _ = world_id;
         Ok(RecoveryStep { requeued, ..RecoveryStep::default() })
     }
 
@@ -515,6 +512,23 @@ fn reference_is_subject_projection(subject: &str, reference: &str) -> bool {
     let tail = &subject[start + 1..];
     let prefix = tail.split(']').next().unwrap_or(tail).trim();
     prefix.len() >= 6 && reference.starts_with(prefix)
+}
+
+/// 重排只接受未发生部分领取的原完整资产；集合比较不依赖远端顺序，也不接受重复 ID。
+fn take_assets_match(
+    candidate: &MoogleMailboxUnprovenSend,
+    present: &MoogleMailboxInboxAssets,
+) -> bool {
+    if candidate.attachment_ids.is_empty()
+        || candidate.attachment_ids.len() != present.equipment_ids.len()
+        || candidate.credits != present.credits
+        || candidate.cod != present.cod
+    {
+        return false;
+    }
+    let mut expected = candidate.attachment_ids.iter().collect::<std::collections::HashSet<_>>();
+    expected.len() == candidate.attachment_ids.len()
+        && present.equipment_ids.iter().all(|id| expected.remove(id))
 }
 
 fn compose_matches(

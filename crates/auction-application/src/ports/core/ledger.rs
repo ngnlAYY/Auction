@@ -38,7 +38,9 @@ impl RequestHash {
     /// 与 U+2029，因此兼容 owner 必须统一经过此入口。
     pub fn from_legacy_go_json<T: Serialize>(value: &T) -> Result<Self, serde_json::Error> {
         let encoded = serde_json::to_vec(value)?;
-        let mut canonical = Vec::with_capacity(encoded.len());
+        // 未转义片段直接送入摘要，避免为兼容转义再分配、扩容并复制整份 JSON。
+        let mut digest = Sha256::new();
+        let mut start = 0;
         let mut index = 0;
         while index < encoded.len() {
             let replacement = match encoded[index] {
@@ -54,14 +56,19 @@ impl RequestHash {
                 _ => None,
             };
             if let Some((replacement, consumed)) = replacement {
-                canonical.extend_from_slice(replacement);
+                digest.update(&encoded[start..index]);
+                digest.update(replacement);
                 index += consumed;
+                start = index;
             } else {
-                canonical.push(encoded[index]);
                 index += 1;
             }
         }
-        Ok(Self::from_canonical_bytes(&canonical))
+        digest.update(&encoded[start..]);
+        let digest = digest.finalize();
+        let mut bytes = [0_u8; 32];
+        bytes.copy_from_slice(&digest);
+        Ok(Self::new(bytes))
     }
 
     /// 按稳定的命令种类、聚合标识和请求 DTO 计算 SHA-256 摘要。

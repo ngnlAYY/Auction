@@ -39,6 +39,8 @@ relay 只分发本实例的持久化事件，未实现的外部广播 sink 不�
 默认 `127.0.0.1:8090`；配置准备与显式启动见[开发指南](docs/guide/development.md#配置准备与显式运行)。
 普通启动不迁移数据库。SIGINT/SIGTERM 停止接收 HTTP、heartbeat/relay 与停止心跳，drain 最多 10 秒，
 第二次信号强制收口，随后按配置限时刷新 exporter；稳定退出码仍待统一。
+HTTP 连接结束后仍等待普通/发现 WebSocket 许可归零；HTTP task 自行退出也先通知 realtime shutdown。
+全部关闭等待共用原 10 秒与第二信号预算，不因升级连接另开计时器。
 周期心跳跳过错过的 tick，依赖恢复后只发布当前状态，不集中补发过期观测。
 SPA 由本 app 的 `RustEmbed` 类型内嵌、再交 `auction-http` 提供；`bash ci/release/web-bundle.sh public` 生成页面，
 `just build-release` 构建内嵌发布制品。API-only 使用固定空资源集合，构建机残留 `target/dx` 不会误嵌入；

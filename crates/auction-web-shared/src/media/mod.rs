@@ -10,8 +10,8 @@ pub(crate) use viewport::use_visual_viewport;
 use wasm_bindgen::{JsCast, closure::Closure};
 
 /// 订阅一条 CSS media query，返回随匹配结果更新的信号。
-/// 首次渲染同步给出当前结果，之后经 `change` 监听更新，组件卸载时自动移除监听；非 WASM
-/// 构建（仅静态检查）恒为 `false`。
+/// 首次 effect 同步当前结果，之后经 `change` 监听更新；组件卸载时自动移除监听。
+/// effect 执行前与非 WASM 构建（仅静态检查）的初值均为 `false`。
 pub fn use_media_query(_query: String) -> Signal<bool> {
     let matches = use_signal(|| false);
 

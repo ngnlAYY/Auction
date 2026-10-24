@@ -12,7 +12,7 @@ use auction_observability::ProcessMetrics;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 
 use super::super::HttpBoundary;
-use super::super::realtime_hub::RealtimeHub;
+use super::super::realtime_hub::{RealtimeHub, RealtimeSubscriptionError};
 use super::super::security::PublicHttpSecurity;
 
 const MAX_PUBLIC_DISCOVERY_CONNECTIONS: usize = 128;
@@ -169,9 +169,21 @@ impl PublicApiState {
         self
     }
 
-    /// 通知已建立的 Public WebSocket 进入旧版 1001 有界关闭流程。
+    /// 停止新订阅，并通知已受理的 Public WebSocket 进入旧版 1001 有界关闭流程。
     pub fn begin_realtime_shutdown(&self) {
+        if let Some(hub) = self.realtime_hub.as_ref() {
+            hub.begin_shutdown();
+        }
         self.realtime_shutdown.send_replace(true);
+    }
+
+    /// 在停止接收且 HTTP 排空后等待全部 WebSocket 释放配额，覆盖发现流及已受理的升级任务。
+    /// 必须先调用 begin_realtime_shutdown；本方法不另建超时，沿用进程统一 drain 预算。
+    pub async fn drain_realtime_connections(&self) -> Result<(), RealtimeSubscriptionError> {
+        if let Some(hub) = self.realtime_hub.as_ref() {
+            hub.drain().await?;
+        }
+        Ok(())
     }
 
     /// 返回与本 state 同源的协议边界，供路由装配时建立全局 middleware。

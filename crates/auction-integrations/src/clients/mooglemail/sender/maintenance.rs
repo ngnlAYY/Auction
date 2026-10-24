@@ -75,11 +75,11 @@ impl MoogleMailSender {
             .diagnose_parse(&compose, &document, self.parser.parse_compose_state(&document, world))
             .await?;
         let clean = state.is_clean();
-        let fields = state.message_fields();
+        let mut fields = state.message_fields();
         Ok(MoogleMailComposeSnapshot {
-            recipient: fields.recipient.clone(),
-            subject: fields.subject.clone(),
-            body: fields.body.clone(),
+            recipient: std::mem::take(&mut fields.recipient),
+            subject: std::mem::take(&mut fields.subject),
+            body: std::mem::take(&mut fields.body),
             credits: state.credits(),
             cod: state.cod(),
             attachment_count: state.attachment_count(),
@@ -158,6 +158,9 @@ impl MoogleMailSender {
                 subject: summary.subject,
                 sent_at: summary.sent_at,
             }));
+            if Instant::now() >= deadline {
+                return Err(proof::scan_timeout(world));
+            }
             if !page.has_next_page {
                 return Ok(summaries);
             }
@@ -178,51 +181,45 @@ impl MoogleMailSender {
     ) -> Result<Option<MoogleMailInboxAssets>, MoogleMailError> {
         let target = self.client.detail(world, external_mail_id)?;
         let document = self.client.get(&target, cookie).await?;
-        let source = std::str::from_utf8(&document).map_err(|_| unavailable(world))?;
-        if source.trim().is_empty() {
-            return Err(unavailable(world));
-        }
-        let html = scraper::Html::parse_document(source);
-        let envelope_selector =
-            super::super::parser::selector("#mmail_outer", MoogleMailOperation::Detail, world)?;
-        let form_selector =
-            super::super::parser::selector("form#mailform", MoogleMailOperation::Detail, world)?;
-        let panes_selector = super::super::parser::selector(
-            "#mmail_attachpanes",
-            MoogleMailOperation::Detail,
-            world,
-        )?;
-        let present = html.select(&envelope_selector).count() == 1
-            && html.select(&form_selector).count() == 1
-            && html.select(&panes_selector).count() == 1;
-        if !present {
-            if super::super::parser::has_result_message(&html, world)? {
-                let selector = super::super::parser::selector(
+        let state = match self.parser.parse_action_state(&document, world) {
+            Ok(state) => state,
+            Err(error) => {
+                let source = std::str::from_utf8(&document).map_err(|_| error)?;
+                let html = scraper::Html::parse_document(source);
+                let content_selector = super::super::parser::selector(
+                    "#mmail_outer, form#mailform, #mmail_attachpanes",
+                    MoogleMailOperation::Detail,
+                    world,
+                )?;
+                if html.select(&content_selector).next().is_some() {
+                    return Err(error);
+                }
+                let message_selector = super::super::parser::selector(
                     "#messagebox_inner",
                     MoogleMailOperation::Detail,
                     world,
                 )?;
-                let text = html
-                    .select(&selector)
-                    .flat_map(|item| item.text())
-                    .collect::<String>()
-                    .to_ascii_lowercase();
-                if text.contains("does not exist") {
+                let mut messages = html.select(&message_selector);
+                let Some(message) = messages.next() else { return Err(error) };
+                let hidden_selector = super::super::parser::selector(
+                    "script, style, noscript, textarea",
+                    MoogleMailOperation::Detail,
+                    world,
+                )?;
+                // 只接受完整的邮件缺失提示；其他对象不存在、隐藏正文或残缺详情都不能证明 Take。
+                let text = super::super::parser::normalize_text(message.text().collect::<String>());
+                if messages.next().is_none()
+                    && message.select(&hidden_selector).next().is_none()
+                    && text.trim_end_matches('.').eq_ignore_ascii_case("Mail does not exist")
+                {
                     return Ok(None);
                 }
+                return Err(error);
             }
-            return Err(unavailable(world));
-        }
-        // scraper 的 DOM 不是 Send，解析在 await 之前同步完成，避免把 DOM 带进 future。
-        let manifest = super::super::parser::parse_detail_asset_manifest(&html, world)?;
-        let mut equipment_ids = manifest.equipment_ids;
+        };
+        let mut equipment_ids = state.equipment_ids;
         equipment_ids.sort_unstable();
-        equipment_ids.dedup();
-        Ok(Some(MoogleMailInboxAssets {
-            equipment_ids,
-            credits: manifest.credits,
-            cod: manifest.cod,
-        }))
+        Ok(Some(MoogleMailInboxAssets { equipment_ids, credits: state.credits, cod: state.cod }))
     }
 
     /// 读取单封 Sent 的实收状态；读取失败由调用方保留上一轮证据。
@@ -271,18 +268,15 @@ fn protocol_drift(world: MoogleMailWorld) -> MoogleMailError {
 
 /// POST 后的读取/解析失败仍属未知外写；保留已有加密诊断引用，不降级成可重试读错误。
 fn discard_unknown(error: MoogleMailError) -> MoogleMailError {
-    let mut unknown = write_unknown(error.world, MoogleMailOperation::Discard);
+    let category = if error.category == MoogleMailErrorCategory::SessionExpired {
+        MoogleMailErrorCategory::SessionExpired
+    } else {
+        MoogleMailErrorCategory::WriteUnknown
+    };
+    let mut unknown =
+        MoogleMailError::after_write(MoogleMailOperation::Discard, error.world, category);
     unknown.evidence_id = error.evidence_id;
     unknown.evidence_status = error.evidence_status;
     unknown.evidence_failure = error.evidence_failure;
     unknown
-}
-
-fn unavailable(world: MoogleMailWorld) -> MoogleMailError {
-    MoogleMailError::new(
-        MoogleMailOperation::Sent,
-        world,
-        MoogleMailErrorCategory::RemoteTemporary,
-        true,
-    )
 }

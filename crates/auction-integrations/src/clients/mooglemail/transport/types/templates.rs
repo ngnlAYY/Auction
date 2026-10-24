@@ -295,6 +295,9 @@ fn validate_template_body(key: &str, value: &str) -> Result<(), String> {
     let mut seen = Vec::new();
     while let Some(relative_start) = value[cursor..].find('{') {
         let start = cursor + relative_start;
+        if value[cursor..start].contains('}') {
+            return Err(format!("MoogleMail mail_templates.{key} 占位符未闭合"));
+        }
         let relative_end = value[start + 1..]
             .find('}')
             .ok_or_else(|| format!("MoogleMail mail_templates.{key} 占位符未闭合"))?;

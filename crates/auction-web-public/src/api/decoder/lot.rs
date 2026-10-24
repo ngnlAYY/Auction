@@ -487,17 +487,7 @@ fn valid_command_authorization(value: &Value) -> bool {
         && positive(value.get("state_version"))
         && valid_lifecycle(value)
         && valid_transitions(value.get("transitions"), value)
-        && value.get("bid").is_none_or(valid_bid_result_without_route)
-}
-
-fn valid_bid_result_without_route(value: &Value) -> bool {
-    let Some(value) = object(value) else { return false };
-    only(value, &["lot_id", "current_price", "effective_end_at", "state_version", "leading"], &[])
-        && uuid(string(value.get("lot_id")).unwrap_or_default())
-        && positive(value.get("current_price"))
-        && time(value.get("effective_end_at"))
-        && positive(value.get("state_version"))
-        && bool_value(value.get("leading")).is_some()
+        && value.get("bid").is_none_or(valid_bid_result)
 }
 
 fn valid_lifecycle(value: &Map<String, Value>) -> bool {

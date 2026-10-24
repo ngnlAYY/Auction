@@ -162,7 +162,7 @@ impl MoogleMailParser {
             external_mail_id: summary.external_mail_id.clone(),
             world: summary.world,
             recipient: summary.recipient.clone(),
-            subject: fields.subject.clone(),
+            subject: fields.subject,
             body_digest,
             remaining_credits,
             cod_pending: cod,

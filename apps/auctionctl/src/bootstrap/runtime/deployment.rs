@@ -144,6 +144,12 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
     if deployment_listeners_conflict(&public_listener, &admin_listener) {
         anyhow::bail!("public and admin listener endpoints must be different");
     }
+    if worker.config.worker.control.enabled
+        && let DeploymentListener::Unix(path) = &public_listener
+        && path.as_path() == Path::new(&worker.config.worker.control.socket_path)
+    {
+        anyhow::bail!("Public HTTP Unix listener 不能复用 Worker control socket_path");
+    }
 
     println!(
         "deployment-check passed roles=3 database_backend={} strict_permissions={}",

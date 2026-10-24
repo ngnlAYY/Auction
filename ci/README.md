@@ -148,6 +148,8 @@ payload 复用只在本脚本内生效：本 surface、`auction-web-shared`、`a
 release.sh 在构建前冻结构建输入（apps、crates、migrations、配置示例、保留策略、清单与发布工具）并在各阶段复查，
 范围外的文档修改不触发原生重建。核验实际二进制标记、对端资源缺失与 Worker 依赖，再校验白名单、权限、
 统一时间、两次相同 archive、内外哈希和依赖摘要；tar 流直接压缩，不落盘未压缩副本。
+同一次原生复用判定由 `verify_build_info` 统一计算并核对构建输入摘要，不再紧接着重复全目录扫描；
+feature、构建环境和二进制完整性仍分别检查，构建及封存阶段的身份复核不减少。
 构建与装包各自在子进程退出时清理本次候选目录；失败不删除旧制品或 Cargo 增量缓存。
 正式 package 要求干净工作树。分体包为 Public、Admin、Worker、
 auctionctl，仅两端内嵌各自页面；`--single-binary` 先通过分体门禁，再核对 server 双 payload 和独立无 Web 的

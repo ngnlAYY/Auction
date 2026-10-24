@@ -5,7 +5,7 @@ mod detail;
 use super::super::*;
 
 impl MoogleMailParser {
-    /// 严格解析一页 Sent 列表，并将跨页重复 ID 视为协议漂移。
+    /// 严格解析一页 Sent，去重已见 MID；非空页若全部重复仍按协议漂移处理。
     pub fn scan_sent_page(
         &self,
         document: &[u8],
@@ -34,11 +34,11 @@ impl MoogleMailParser {
         }
 
         let cell_selector = selector("td", MoogleMailOperation::Sent, world)?;
+        let empty_selector = selector("td#mmail_nnm", MoogleMailOperation::Sent, world)?;
         let mut summaries = Vec::with_capacity(rows.len().saturating_sub(1));
         let mut empty_row = false;
         for row in rows.iter().skip(1) {
             let cells = row.select(&cell_selector).collect::<Vec<_>>();
-            let empty_selector = selector("td#mmail_nnm", MoogleMailOperation::Sent, world)?;
             let is_empty = row.select(&empty_selector).count() == 1;
             if is_empty {
                 if cells.len() != 1 || empty_row || !summaries.is_empty() {
@@ -56,8 +56,8 @@ impl MoogleMailParser {
                 .ok_or_else(|| protocol(MoogleMailOperation::Sent, world))?;
             let external_mail_id =
                 extract_mid(onclick).ok_or_else(|| protocol(MoogleMailOperation::Sent, world))?;
-            // 翻页期间新邮件到达会让整页下移并重复同一 MID；重复只跳过该行，
-            // 不能因此中止整轮读取。真正缺行由调用方的数量/分页校验发现。
+            // 翻页期间新邮件到达可能重复 MID，跳过已见行；去重不等于远端一致性快照，
+            // 调用方仍须读到末页，并独立核对新增 MID 的完整详情。
             if !seen.insert(external_mail_id.clone()) {
                 continue;
             }

@@ -105,7 +105,7 @@ impl ProcessMetrics {
         Ok(Self { enabled: true, registry, worker, business })
     }
 
-    /// 创建关闭状态的指标对象；关闭时不分配注册表或后台资源。
+    /// 创建空注册表与 no-op 记录器；关闭时不注册 collector，也不建立后台任务。
     pub fn disabled() -> Self {
         Self {
             enabled: false,

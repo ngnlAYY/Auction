@@ -20,6 +20,7 @@ pub(super) async fn record_fixed_posts_update_postgres(
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启论坛分页正文证明事务失败"))?;
     lock_terminal_version(&mut transaction, topic).await?;
+    lock_content_claim(&mut transaction, topic).await?;
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
          SET title = $2,
@@ -48,8 +49,8 @@ pub(super) async fn record_fixed_posts_update_postgres(
            AND content_claim_owner = $12
            AND content_claim_fencing = $13
            AND content_lease_expires_at > $5
-           AND ($16::bigint IS NULL OR (terminal_refresh_enabled AND terminal_synced_version IS NULL
-                AND content_lease_expires_at > clock_timestamp()))",
+           AND content_lease_expires_at > clock_timestamp()
+           AND ($16::bigint IS NULL OR (terminal_refresh_enabled AND terminal_synced_version IS NULL))",
     )
     .bind(topic.auction_id.as_uuid())
     .bind(&catalog.title)
@@ -88,6 +89,7 @@ pub(super) async fn record_fixed_posts_progress_postgres(
 ) -> Result<(), ApplicationError> {
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启论坛分页进度事务失败"))?;
+    lock_content_claim(&mut transaction, topic).await?;
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
          SET title = $2,
@@ -107,7 +109,8 @@ pub(super) async fn record_fixed_posts_progress_postgres(
            AND content_claim_token = $10
            AND content_claim_owner = $11
            AND content_claim_fencing = $12
-           AND content_lease_expires_at > $5",
+           AND content_lease_expires_at > $5
+           AND content_lease_expires_at > clock_timestamp()",
     )
     .bind(topic.auction_id.as_uuid())
     .bind(&catalog.title)
@@ -144,6 +147,7 @@ pub(super) async fn finish_topic_scan_postgres(
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启论坛扫描完成事务失败"))?;
     lock_terminal_version(&mut transaction, topic).await?;
+    lock_content_claim(&mut transaction, topic).await?;
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
          SET processed_through_post_number = $11,
@@ -166,8 +170,8 @@ pub(super) async fn finish_topic_scan_postgres(
            AND content_claim_owner = $9
            AND content_claim_fencing = $10
            AND content_lease_expires_at > $2
-           AND ($13::bigint IS NULL OR (terminal_refresh_enabled AND terminal_synced_version IS NULL
-                AND content_lease_expires_at > clock_timestamp()))",
+           AND content_lease_expires_at > clock_timestamp()
+           AND ($13::bigint IS NULL OR (terminal_refresh_enabled AND terminal_synced_version IS NULL))",
     )
     .bind(topic.auction_id.as_uuid())
     .bind(scanned_at)
@@ -189,6 +193,21 @@ pub(super) async fn finish_topic_scan_postgres(
         return Err(storage_error("论坛固定楼层扫描 claim 已失效"));
     }
     transaction.commit().await.map_err(|_| storage_error("提交论坛扫描完成事务失败"))?;
+    Ok(())
+}
+
+/// 先取得内容行锁，再由后续写入检查实时时钟；终态调用方已先锁 auction。
+async fn lock_content_claim(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    topic: &ForumReplyTopic,
+) -> Result<(), ApplicationError> {
+    sqlx::query(
+        "SELECT auction_id FROM public.auction_forum_sync WHERE auction_id = $1 FOR UPDATE",
+    )
+    .bind(topic.auction_id.as_uuid())
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|_| storage_error("锁定论坛内容租约失败"))?;
     Ok(())
 }
 

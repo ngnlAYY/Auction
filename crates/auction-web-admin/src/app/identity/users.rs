@@ -35,6 +35,10 @@ pub(super) fn page() -> Element {
     // 已应用的名称筛选、状态筛选与分页跟地址栏双向同步；名称输入框草稿只在提交时入 URL。
     let query = use_users_query_state();
     let query_state = query.state;
+    let requested_query = use_memo(move || {
+        let current = query_state.read();
+        (current.name.clone(), current.status, current.page)
+    });
     // 草稿初值取自地址栏恢复的已应用筛选，刷新后表单与列表保持一致；之后的编辑不落 URL。
     let name_draft = use_signal(move || query_state.peek().name.clone());
     let mut reload_generation = use_signal(|| 0_u64);
@@ -52,8 +56,7 @@ pub(super) fn page() -> Element {
         pagination.clone(),
         move || {
             let _ = reload_generation();
-            let current = query_state();
-            (current.name, current.status, current.page)
+            requested_query()
         },
         |(name, status, page), size| fetch_admin_users(name, status, page, size),
     );

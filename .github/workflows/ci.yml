@@ -142,10 +142,11 @@ jobs:
         run: |
           bash ci/tools/bootstrap.sh install audit
           printf '%s\n' "$GITHUB_WORKSPACE/target/audit-tools/bin" >> "$GITHUB_PATH"
+      # cargo-machete 的 --version 只输出版本号；程序名前缀会使缓存命中也强制重装。
       - name: Install cargo-machete when needed
         run: |
           if ! version=$(cargo machete --version 2>/dev/null) ||
-            [[ "$version" != "cargo-machete 0.9.2" ]]; then
+            [[ "$version" != "0.9.2" ]]; then
             cargo install cargo-machete --locked --version 0.9.2 --force
           fi
       # 缓存命中也联网审计，漏洞和全部警告均失败，不忽略公告。

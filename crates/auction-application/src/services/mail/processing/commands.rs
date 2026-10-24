@@ -1,5 +1,7 @@
 //! MoogleMail 命令校验、幂等结果、摘要和安全决定辅助函数。
 
+use std::collections::HashSet;
+
 use super::pricing::{decimal_identity, valid_text};
 use super::*;
 
@@ -19,7 +21,8 @@ pub(super) fn validate_command(command: &MailAuctionIntakeCommand) -> Result<(),
     {
         return Err(MailProcessingError::InvalidAuctionCommand.into());
     }
-    for (index, item) in command.items.iter().enumerate() {
+    let mut equipment_ids = HashSet::with_capacity(command.items.len());
+    for item in &command.items {
         if !decimal_identity(&item.external_equipment_id)
             || !valid_text(&item.name, 512)
             || !valid_text(&item.category, 128)
@@ -29,10 +32,7 @@ pub(super) fn validate_command(command: &MailAuctionIntakeCommand) -> Result<(),
             || item.collected_at < command.received_at
             || item.collected_at > command.now
             || item.start_price <= 0
-            || index > 0
-                && command.items[..index]
-                    .iter()
-                    .any(|previous| previous.external_equipment_id == item.external_equipment_id)
+            || !equipment_ids.insert(item.external_equipment_id.as_str())
         {
             return Err(MailProcessingError::InvalidAuctionCommand.into());
         }

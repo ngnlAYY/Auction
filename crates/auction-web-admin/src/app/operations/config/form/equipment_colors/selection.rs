@@ -14,7 +14,8 @@ fn update_selection(
     option: Option<&str>,
     checked: bool,
 ) {
-    let Some(rule) = form.read().equipment_colors().get(index).cloned() else { return };
+    let form_state = form.read();
+    let Some(rule) = form_state.equipment_colors().get(index) else { return };
     let current = match field {
         "category" => &rule.category,
         "equipment_type" => &rule.equipment_type,
@@ -24,6 +25,7 @@ fn update_selection(
         _ => return,
     };
     let mut selected = selected_values(current);
+    drop(form_state);
     if let Some(option) = option {
         selected.retain(|value| !value.eq_ignore_ascii_case(option));
         if checked {

@@ -109,7 +109,7 @@ pub(super) async fn list_postgres(
          WHERE p.user_id = $1
            AND a.status IN ('live', 'final', 'settling', 'settled')
            AND l.status IN ('live', 'sold', 'unsold')
-         ORDER BY p.updated_at DESC, p.lot_id
+         ORDER BY p.updated_at DESC, p.lot_id, p.authorization_id
          LIMIT $2 OFFSET $3",
     )
     .bind(user_id)

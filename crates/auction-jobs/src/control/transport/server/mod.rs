@@ -23,8 +23,9 @@ pub struct WorkerControlServer {
     handle: WorkerControlHandle,
     config: WorkerControlServerConfig,
     metrics: Option<Arc<ProcessMetrics>>,
-    _lock: File,
+    // 字段按声明顺序析构；未进入 run 就 Drop 时也必须先清理 socket，最后释放实例锁。
     _socket_guard: SocketCleanupGuard,
+    _lock: File,
 }
 
 #[cfg(unix)]
@@ -46,7 +47,7 @@ impl WorkerControlServer {
         metrics: Option<Arc<ProcessMetrics>>,
     ) -> Result<Self, WorkerControlServerError> {
         let group_id = resolve_group_id(&config.group)?;
-        validate_runtime_directory(&config.runtime_directory, group_id)?;
+        validate_runtime_directory(&config.runtime_directory)?;
         let lock = acquire_instance_lock(&config.socket_path)?;
         prepare_socket_path(&config.socket_path).await?;
         let listener = tokio::net::UnixListener::bind(&config.socket_path)

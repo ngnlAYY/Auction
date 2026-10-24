@@ -143,6 +143,7 @@ async fn read_snapshot(
         return Err(storage_error("已结算论坛快照缺少权威结算汇总"));
     }
 
+    // 累计领先时长仅供已结算成交项展示；活动场次刷新不能重复扫描整段竞价历史。
     let rows = sqlx::query(
         "SELECT l.id AS lot_id, e.id AS equipment_id, e.external_equipment_id,
                 CASE sync.numbering_scheme
@@ -152,6 +153,7 @@ async fn read_snapshot(
                 l.status, l.start_price, l.current_price,
                 l.leader_user_id, l.leader_since,
                 settlement.end_price AS settlement_end_price, settlement.adjustment_ppm,
+                CASE WHEN $4::boolean AND l.status = 'sold' THEN
                 (SELECT COALESCE(SUM(GREATEST(0, LEAST(
           EXTRACT(EPOCH FROM (COALESCE(b.next_at, l.effective_end_at) - b.created_at)) * 1000000000,
           EXTRACT(EPOCH FROM (l.effective_end_at - b.created_at)) * 1000000000
@@ -164,7 +166,8 @@ async fn read_snapshot(
             FROM public.bids AS bid
             WHERE bid.lot_id = l.id
         ) AS b
-        WHERE b.bidder_user_id = l.leader_user_id) AS leader_held_nanos,
+        WHERE b.bidder_user_id = l.leader_user_id)
+        ELSE NULL::bigint END AS leader_held_nanos,
                 l.effective_end_at, e.name AS equipment_name, e.category AS equipment_category,
                 e.attributes AS equipment_attributes,
                 submission.seller AS seller_name, leader.username AS leader_name,
@@ -200,6 +203,7 @@ async fn read_snapshot(
     .bind(auction_id)
     .bind(state == AuctionStatus::Preview)
     .bind(state == AuctionStatus::Cancelled)
+    .bind(settled)
     .fetch_all(&mut **transaction)
     .await
     .map_err(|_| storage_error("读取论坛快照 lot 失败"))?;

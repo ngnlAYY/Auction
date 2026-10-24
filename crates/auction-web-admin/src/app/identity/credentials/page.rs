@@ -2,19 +2,16 @@
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use auction_web_shared::{AsyncState, AsyncStateKind};
 
 use crate::api::{AdminCredential, delete_admin_credential, fetch_admin_credentials};
 
 use super::super::query::use_page_query_state;
-use super::super::{
-    AdminActionFeedback, admin_api_error_message, run_admin_feedback_action, stable_command_id,
-};
+use super::super::{AdminActionFeedback, admin_api_error_message};
 use super::{CredentialCreateForm, CredentialDeleteDialog, CredentialPager, CredentialTable};
 use crate::app::surface::pagination::{use_admin_page, use_admin_pagination};
-use crate::app::surface::pending::{PendingCommandPanel, use_pending_commands};
+use crate::app::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
 
 /// 加载并展示 Admin 凭据管理页面。
 pub fn page() -> Element {
@@ -23,17 +20,16 @@ pub fn page() -> Element {
     // 分页跟地址栏双向同步（?page=）；创建表单与删除确认对话框是瞬态，不入 URL。
     let query = use_page_query_state();
     let query_state = query.state;
+    let requested_page = use_memo(move || query_state.read().page);
     let mut pending_delete = use_signal(|| None::<AdminCredential>);
-    let delete_busy = use_signal(|| false);
     let mut delete_feedback = use_signal(|| None::<AdminActionFeedback>);
-    let mut delete_command_state = use_signal(|| None::<(String, Uuid)>);
     let pagination =
         use_admin_pagination("credentials", &["page_size"], Some(200), i64::from(i32::MAX));
     let credentials = use_admin_page(
         pagination.clone(),
         move || {
             let _ = reload_generation();
-            query_state().page
+            requested_page()
         },
         |page, size| {
             fetch_admin_credentials(String::new(), String::new(), String::new(), page, size)
@@ -41,27 +37,29 @@ pub fn page() -> Element {
     );
 
     let open_delete = move |credential: AdminCredential| {
-        if !delete_busy() && !pending_commands.contains(&format!("credential:{}", credential.id)) {
+        if !pending_commands.contains(&format!("credential:{}", credential.id)) {
             delete_feedback.set(None);
             pending_delete.set(Some(credential));
         }
     };
     let confirm_delete = move |credential: AdminCredential| {
-        if delete_busy() || pending_commands.contains(&format!("credential:{}", credential.id)) {
+        if pending_commands.contains(&format!("credential:{}", credential.id)) {
             return;
         }
-        let signature = format!("delete:{}:{}", credential.id, credential.state_version);
-        let command_id = stable_command_id(delete_command_state, signature);
-        run_admin_feedback_action(
-            delete_busy,
-            delete_feedback,
-            async move { delete_admin_credential(command_id, &credential).await.map(|_| ()) },
-            move |()| {
-                pending_delete.set(None);
-                delete_command_state.set(None);
-                reload_generation.set(reload_generation().saturating_add(1));
+        delete_feedback.set(None);
+        // 删除与行内变更共用实体门禁；关闭确认框不能丢弃未知结果的原 UUID 和版本。
+        if pending_commands.submit(
+            format!("credential:{}", credential.id),
+            t!("admin-credentials-action-delete"),
+            move |command_id| {
+                let credential = credential.clone();
+                async move { delete_admin_credential(command_id, &credential).await.map(|_| ()) }
             },
-        );
+            move |()| set_if_alive(delete_feedback, Some(AdminActionFeedback::Success)),
+            move |code| set_if_alive(delete_feedback, Some(AdminActionFeedback::Error(code))),
+        ) {
+            pending_delete.set(None);
+        }
     };
 
     let list_content = match &*credentials.read_unchecked() {
@@ -135,8 +133,8 @@ pub fn page() -> Element {
         }
         if let Some(credential) = pending {
             CredentialDeleteDialog {
+                busy: pending_commands.is_busy(&format!("credential:{}", credential.id)),
                 credential,
-                busy: delete_busy(),
                 on_confirm: confirm_delete,
                 on_cancel: move |_| pending_delete.set(None),
             }

@@ -24,7 +24,8 @@ pub(crate) fn validate_operations_alert_worker(
         return Err(ConfigError::InvalidOperationsAlertConfig("world_id 只能是 main 或 isekai"));
     }
     if config.enabled
-        && !mooglemail.configured_worlds().iter().any(|world| world.world_id == config.world_id)
+        && config.world_id != mooglemail.world_id
+        && !mooglemail.additional_worlds.iter().any(|world| world.world_id == config.world_id)
     {
         return Err(ConfigError::InvalidOperationsAlertConfig(
             "启用告警时 world_id 必须位于已启用的 MoogleMail worlds",

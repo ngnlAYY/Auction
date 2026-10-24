@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 use super::RealtimeSubscriptionError;
@@ -15,6 +16,7 @@ const MAX_CONNECTIONS_PER_USER: usize = 8;
 #[derive(Default)]
 struct ConnectionCounts {
     total: usize,
+    draining: bool,
     users: BTreeMap<Uuid, usize>,
 }
 
@@ -22,6 +24,7 @@ struct ConnectionCounts {
 #[derive(Default)]
 pub(super) struct ConnectionLimits {
     counts: Mutex<ConnectionCounts>,
+    drained: Notify,
 }
 
 impl ConnectionLimits {
@@ -33,6 +36,9 @@ impl ConnectionLimits {
             return Err(RealtimeSubscriptionError::Unavailable);
         }
         let mut counts = self.counts.lock().map_err(|_| RealtimeSubscriptionError::Unavailable)?;
+        if counts.draining {
+            return Err(RealtimeSubscriptionError::Unavailable);
+        }
         let user_count = counts.users.get(&user_id).copied().unwrap_or(0);
         if counts.total >= MAX_CONNECTIONS || user_count >= MAX_CONNECTIONS_PER_USER {
             return Err(RealtimeSubscriptionError::Capacity);
@@ -40,6 +46,31 @@ impl ConnectionLimits {
         counts.total += 1;
         counts.users.insert(user_id, user_count + 1);
         Ok(ConnectionPermit { limits: Arc::clone(self), user_id })
+    }
+
+    pub(super) fn begin_shutdown(&self) {
+        if let Ok(mut counts) = self.counts.lock() {
+            counts.draining = true;
+        }
+    }
+
+    /// 许可在升级闭包创建前取得，普通流、发现流及尚未完成升级的任务都在同一计数中。
+    pub(super) async fn wait_drained(&self) -> Result<(), RealtimeSubscriptionError> {
+        loop {
+            // notify_waiters 从 Notified 创建时起生效；先登记再读计数，避免最后一次 Drop 丢失唤醒。
+            let drained = self.drained.notified();
+            {
+                let counts =
+                    self.counts.lock().map_err(|_| RealtimeSubscriptionError::Unavailable)?;
+                if !counts.draining {
+                    return Err(RealtimeSubscriptionError::Unavailable);
+                }
+                if counts.total == 0 {
+                    return Ok(());
+                }
+            }
+            drained.await;
+        }
     }
 }
 
@@ -62,5 +93,10 @@ impl Drop for ConnectionPermit {
             counts.users.remove(&self.user_id);
         }
         counts.total -= 1;
+        let drained = counts.total == 0;
+        drop(counts);
+        if drained {
+            self.limits.drained.notify_waiters();
+        }
     }
 }

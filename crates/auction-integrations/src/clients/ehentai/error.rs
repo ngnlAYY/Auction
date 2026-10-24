@@ -94,7 +94,7 @@ impl EhentaiError {
         self.write_started
     }
 
-    /// 只有读侧、尚未发生写入时才允许使当前凭据失效；单 Cookie 模型不会自动切换。
+    /// 识别尚未发生写入的会话失效；写后失效必须保留 `write_started`，不能降级为未发送。
     pub const fn is_session_expired(self) -> bool {
         matches!(self.category, EhentaiErrorCategory::SessionExpired) && !self.write_started
     }

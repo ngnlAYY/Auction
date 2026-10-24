@@ -2,42 +2,47 @@
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
-use crate::app::surface::{run_admin_feedback_action, stable_command_id};
+use crate::app::surface::pending::{
+    PendingCommandPanel, PendingCommands, set_if_alive, use_pending_commands,
+};
 
 use super::super::{AdminActionFeedback, format_admin_time};
 use super::progress::MailPollingProgress;
 
+/// 轮询卡片可以随邮箱切换，命令宿主始终保留；成功只刷新轮询状态，不干扰入站投递。
 #[component]
-pub(super) fn MailTriggerButton(
-    mut notice: Signal<Option<AdminActionFeedback>>,
-    mut refresh: Signal<u64>,
-) -> Element {
-    let busy = use_signal(|| false);
-    let mut command_state = use_signal(|| None::<(String, Uuid)>);
+pub(super) fn MailPollingCommands(refresh: Signal<u64>, children: Element) -> Element {
+    let owner = use_pending_commands(refresh);
+    rsx! {
+        PendingCommandPanel { owner }
+        {children}
+    }
+}
+
+#[component]
+pub(super) fn MailTriggerButton(mut notice: Signal<Option<AdminActionFeedback>>) -> Element {
+    let owner = use_context::<PendingCommands>();
+    let busy = owner.is_busy("mail-poll-trigger");
     rsx! {
         button {
             class: "admin-btn-primary",
             r#type: "button",
-            disabled: busy(),
+            disabled: owner.contains("mail-poll-trigger"),
             onclick: move |_| {
-                if busy() {
-                    return;
-                }
-                let command_id = stable_command_id(command_state, "trigger".to_owned());
-                run_admin_feedback_action(
-                    busy,
-                    notice,
-                    async move { trigger_mail_poll(command_id).await.map_err(|error| error.code) },
-                    move |_| {
-                        command_state.set(None);
-                        refresh.set(refresh().saturating_add(1));
+                notice.set(None);
+                owner.submit(
+                    "mail-poll-trigger".to_owned(),
+                    t!("admin-mail-trigger"),
+                    |command_id| async move {
+                        trigger_mail_poll(command_id).await.map_err(|error| error.code)
                     },
+                    move |_| set_if_alive(notice, Some(AdminActionFeedback::Success)),
+                    move |code| set_if_alive(notice, Some(AdminActionFeedback::Error(code))),
                 );
             },
-            if busy() { {t!("admin-action-working")} } else { {t!("admin-mail-trigger")} }
+            if busy { {t!("admin-action-working")} } else { {t!("admin-mail-trigger")} }
         }
     }
 }
@@ -46,19 +51,21 @@ pub(super) fn MailTriggerButton(
 pub(super) fn MailPollingCard(
     polling: AdminMailPolling,
     mut notice: Signal<Option<AdminActionFeedback>>,
-    mut refresh: Signal<u64>,
 ) -> Element {
     let desired_paused = !polling.paused;
     let label = if polling.paused { t!("admin-mail-resume") } else { t!("admin-mail-pause") };
     let state_label =
         if polling.paused { t!("admin-mail-paused") } else { t!("admin-mail-running") };
-    let busy = use_signal(|| false);
-    let mut command_state = use_signal(|| None::<(String, Uuid)>);
+    let owner = use_context::<PendingCommands>();
+    let entity = format!("mailbox:{}", polling.mailbox_key);
+    let busy = owner.is_busy(&entity);
+    let blocked = owner.contains(&entity);
     let pause_polling = polling.clone();
+    let action_label = label.clone();
     rsx! {
         article {
             class: "admin-mail-state",
-            aria_busy: busy().to_string(),
+            aria_busy: busy.to_string(),
             h3 { {polling.mailbox_key.clone()} }
             dl {
                 div {
@@ -81,31 +88,27 @@ pub(super) fn MailPollingCard(
             MailPollingProgress { diagnostics: polling.diagnostics.clone() }
             button {
                 r#type: "button",
-                disabled: busy(),
+                disabled: blocked,
                 onclick: move |_| {
-                    if busy() {
-                        return;
-                    }
+                    notice.set(None);
+                    // 卡片随邮箱切换卸载，已提交暂停/恢复仍由页级 owner 保留原负载和结果。
                     let polling = pause_polling.clone();
-                    let command_id = stable_command_id(
-                        command_state,
-                        format!("pause:{}:{}:{}", polling.mailbox_key, polling.state_version, desired_paused),
-                    );
-                    run_admin_feedback_action(
-                        busy,
-                        notice,
-                        async move {
-                            set_mail_paused(command_id, polling, desired_paused)
-                                .await
-                                .map_err(|error| error.code)
+                    owner.submit(
+                        entity.clone(),
+                        action_label.clone(),
+                        move |command_id| {
+                            let polling = polling.clone();
+                            async move {
+                                set_mail_paused(command_id, polling, desired_paused)
+                                    .await
+                                    .map_err(|error| error.code)
+                            }
                         },
-                        move |_| {
-                            command_state.set(None);
-                            refresh.set(refresh().saturating_add(1));
-                        },
+                        move |_| set_if_alive(notice, Some(AdminActionFeedback::Success)),
+                        move |code| set_if_alive(notice, Some(AdminActionFeedback::Error(code))),
                     );
                 },
-                if busy() { {t!("admin-action-working")} } else { "{label}" }
+                if busy { {t!("admin-action-working")} } else { "{label}" }
             }
         }
     }
