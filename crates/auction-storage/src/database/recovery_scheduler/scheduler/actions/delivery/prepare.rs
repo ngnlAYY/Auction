@@ -22,6 +22,7 @@ pub(crate) async fn link_action_postgres(
         let claim = claim_snapshot.clone();
         let request_digest = request_digest.clone();
         Box::pin(async move {
+            lock_action(transaction, claim.action_id.as_uuid()).await?;
             let result = sqlx::query(
                 r#"UPDATE public.settlement_recovery_actions
                    SET execution_state = 'prepared',

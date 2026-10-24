@@ -369,11 +369,18 @@ impl LegacyBidResult {
             return false;
         }
         let first = &self.facts[0];
+        // 普通命令最多追加另一位用户的代理反击，不能仅凭首条事实放行损坏的第二条事实。
         Uuid::from_bytes(first.bid_id)
             == deterministic_id(command.command_id, "auction-bid-fact", 1)
             && first.amount == command.amount.value()
             && Uuid::from_bytes(first.leader_id) == command.bidder_id.as_uuid()
             && first.mechanism == LegacyBidMechanism::Ordinary
+            && self.facts.get(1).is_none_or(|response| {
+                Uuid::from_bytes(response.bid_id)
+                    == deterministic_id(command.command_id, "auction-bid-fact", 2)
+                    && response.mechanism == LegacyBidMechanism::Proxy
+                    && response.leader_id != first.leader_id
+            })
     }
 
     fn into_plan(self, last_proxy_sequence: u64) -> Result<CompetitionPlan, ApplicationError> {

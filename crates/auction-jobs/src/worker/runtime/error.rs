@@ -5,22 +5,12 @@ use super::*;
 /// Worker 调度器错误；数据库或应用错误只通过安全的应用错误分类向上返回。
 #[derive(Debug, Error)]
 pub enum WorkerError {
-    #[error("worker concurrency must be greater than zero")]
-    InvalidConcurrency,
-    #[error("worker poll interval must be greater than zero")]
-    InvalidPollInterval,
     #[error("worker auction loop configuration is invalid")]
     InvalidAuctionConfiguration,
     #[error("auction worker task failed")]
     AuctionTaskJoin(#[source] tokio::task::JoinError),
     #[error("auction worker task exited unexpectedly")]
     AuctionTaskExited,
-    #[error("worker recovery retry delay must be between 1 and 86400 seconds")]
-    InvalidRecoveryRetryDelay,
-    #[error("worker recovery batch limit must be between 1 and 1000")]
-    InvalidRecoveryBatchLimit,
-    #[error("worker recovery concurrency must be between 1 and recovery batch limit")]
-    InvalidRecoveryConcurrency,
     #[error("worker delivery loop configuration is invalid")]
     InvalidDeliveryConfiguration,
     #[error("worker fulfillment loop configuration is invalid")]
@@ -41,8 +31,6 @@ pub enum WorkerError {
     OperationsAlertTaskJoin(#[source] tokio::task::JoinError),
     #[error("operations alert worker task exited unexpectedly")]
     OperationsAlertTaskExited,
-    #[error("worker recovery health refresh interval must be greater than zero")]
-    InvalidRecoveryHealthRefreshInterval,
     #[error("worker identity must not be empty")]
     InvalidWorkerIdentity,
     #[error("MoogleMail poll configuration is invalid")]

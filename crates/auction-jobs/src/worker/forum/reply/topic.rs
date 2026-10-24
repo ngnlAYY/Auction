@@ -610,7 +610,12 @@ fn system_entry(
 }
 
 fn clean_system_message(value: &str) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(512).collect()
+    value
+        .split_whitespace()
+        .enumerate()
+        .flat_map(|(index, word)| (index > 0).then_some(' ').into_iter().chain(word.chars()))
+        .take(512)
+        .collect()
 }
 
 fn target_map(

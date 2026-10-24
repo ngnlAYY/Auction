@@ -1,13 +1,15 @@
 //! 论坛竞价命令、通知选项和金额解析。
 
-use auction_application::{AdminForumBidPost, AdminForumCommand, AdminForumLot, AdminForumWarning};
+use std::collections::HashSet;
+
+use auction_application::{AdminForumBidPost, AdminForumCommand, AdminForumWarning};
 
 use super::CREDIT_GRID;
 use super::model::ParsedPost;
 
 pub(super) fn parse_bid_post(
     post: ParsedPost,
-    lots: &[AdminForumLot],
+    lot_codes: &HashSet<&str>,
 ) -> (AdminForumBidPost, Vec<AdminForumWarning>) {
     let post_id = post.id.clone();
     if post.edited {
@@ -41,7 +43,7 @@ pub(super) fn parse_bid_post(
         if trimmed.is_empty() {
             continue;
         }
-        match parse_command_line(trimmed, line_index + 1, lots, actor.as_deref()) {
+        match parse_command_line(trimmed, line_index + 1, lot_codes, actor.as_deref()) {
             Ok(Some(command)) => commands.push(command),
             // 论坛只接受普通出价；代理命令属于 Web 专属能力，且按产品约定不写入系统更新楼。
             Ok(None) => {}
@@ -66,7 +68,7 @@ pub(super) fn parse_bid_post(
 fn parse_command_line(
     line: &str,
     line_number: usize,
-    lots: &[AdminForumLot],
+    lot_codes: &HashSet<&str>,
     actor: Option<&str>,
 ) -> Result<Option<AdminForumCommand>, (&'static str, &'static str)> {
     let mut tokens = line.split_whitespace().peekable();
@@ -76,7 +78,7 @@ fn parse_command_line(
         let Some(code) = super::helpers::normalize_lot_code(raw) else {
             break;
         };
-        if !lots.iter().any(|lot| lot.code == code) {
+        if !lot_codes.contains(code.as_str()) {
             unknown_lot = true;
         }
         codes.push(code);
@@ -191,22 +193,11 @@ fn parse_positive_amount(raw: &str, require_credit_grid: bool) -> Result<i64, ()
 
 #[cfg(test)]
 mod tests {
-    use auction_application::AdminForumLot;
-
     use super::*;
 
     #[test]
     fn forum_proxy_lines_are_silently_ignored() {
-        let lots = vec![AdminForumLot {
-            code: "One01".to_owned(),
-            category: "One-Handed".to_owned(),
-            description: "Test rapier".to_owned(),
-            seller: Some("seller".to_owned()),
-            start_price: 50_000,
-            material: false,
-            current_bidder: None,
-            current_price: None,
-        }];
+        let lot_codes = HashSet::from(["One01"]);
         let post = ParsedPost {
             id: "6956801".to_owned(),
             author_id: Some("5501029".to_owned()),
@@ -216,7 +207,7 @@ mod tests {
             edited: false,
         };
 
-        let (parsed, warnings) = parse_bid_post(post, &lots);
+        let (parsed, warnings) = parse_bid_post(post, &lot_codes);
 
         assert!(warnings.is_empty());
         assert_eq!(parsed.commands.len(), 1);

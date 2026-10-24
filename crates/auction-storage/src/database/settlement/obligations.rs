@@ -84,6 +84,13 @@ pub(super) async fn insert_recoveries(
         .filter(|limit| (1..=10).contains(limit))
         .ok_or_else(|| invalid("恢复 COD 退回上限超出数据库范围"))?;
     let auction_uuid = auction_id.as_uuid();
+    // 每个付款只查同 lot 的冻结义务，避免持有结算锁时反复全表扫描计划。
+    let mut obligations = BTreeMap::new();
+    for obligation in &plan.obligations {
+        obligations
+            .entry((obligation.lot_id, obligation_kind(obligation.kind)))
+            .or_insert(obligation);
+    }
 
     for payment in plan.obligations.iter().filter(|obligation| {
         matches!(
@@ -94,25 +101,19 @@ pub(super) async fn insert_recoveries(
     }) {
         let winner_user_id =
             payment.recipient_user_id.ok_or_else(|| invalid("获胜付款义务缺少买方身份"))?;
-        let seller_payout = find_obligation(
-            &plan.obligations,
-            payment.lot_id,
-            SettlementObligationKind::SellerPayout,
-        )
-        .ok_or_else(|| invalid("结算恢复缺少卖方付款义务"))?;
-        let buyer_refund = find_obligation(
-            &plan.obligations,
-            payment.lot_id,
-            SettlementObligationKind::BuyerRefund,
-        )
-        .ok_or_else(|| invalid("结算恢复缺少买方退款义务"))?;
+        let seller_payout =
+            find_obligation(&obligations, payment.lot_id, SettlementObligationKind::SellerPayout)
+                .ok_or_else(|| invalid("结算恢复缺少卖方付款义务"))?;
+        let buyer_refund =
+            find_obligation(&obligations, payment.lot_id, SettlementObligationKind::BuyerRefund)
+                .ok_or_else(|| invalid("结算恢复缺少买方退款义务"))?;
         let (recovery_world, equipment_obligation_id) = match payment.kind {
             SettlementObligationKind::WinnerEquipmentCod => (SettlementWorld::Main, None),
             SettlementObligationKind::WinnerPaymentCarrierCod => (
                 SettlementWorld::Isekai,
                 Some(
                     find_obligation(
-                        &plan.obligations,
+                        &obligations,
                         payment.lot_id,
                         SettlementObligationKind::WinnerEquipmentHandoff,
                     )
@@ -161,12 +162,12 @@ pub(super) async fn insert_recoveries(
     Ok(())
 }
 
-pub(super) fn find_obligation(
-    obligations: &[SettlementObligation],
+fn find_obligation<'a>(
+    obligations: &BTreeMap<(auction_domain::LotId, &'static str), &'a SettlementObligation>,
     lot_id: auction_domain::LotId,
     kind: SettlementObligationKind,
-) -> Option<&SettlementObligation> {
-    obligations.iter().find(|obligation| obligation.lot_id == lot_id && obligation.kind == kind)
+) -> Option<&'a SettlementObligation> {
+    obligations.get(&(lot_id, obligation_kind(kind))).copied()
 }
 
 pub(super) async fn insert_settlement_audit(

@@ -18,6 +18,10 @@ pub fn page() -> Element {
     // 邮箱轮询输入、详情面板开合和操作反馈是瞬态，仍由 signal 持有、不入 URL。
     let query = use_mail_query_state();
     let query_state = query.state;
+    let requested_query = use_memo(move || {
+        let current = query_state.read();
+        (current.to_intake_query(), current.page)
+    });
     let mut mailbox_key = use_signal(String::new);
     let mut active_mailbox = use_signal(String::new);
     let mut refresh = use_signal(|| 0_u64);
@@ -45,8 +49,7 @@ pub fn page() -> Element {
         pagination.clone(),
         move || {
             let _ = refresh();
-            let current = query_state();
-            (current.to_intake_query(), current.page)
+            requested_query()
         },
         |(query, page), size| fetch_mail_intakes(query, page, size),
     );
@@ -176,7 +179,6 @@ pub fn page() -> Element {
                     key: "{polling.mailbox_key}",
                     polling: polling.clone(),
                     notice,
-                    refresh: polling_refresh,
                 }
             },
             Some(Ok(None)) => rsx! {
@@ -297,8 +299,11 @@ pub fn page() -> Element {
                             }
                             button { r#type: "submit", {t!("admin-mail-load")} }
                         }
-                        super::actions::MailTriggerButton { notice, refresh: polling_refresh }
-                        {polling_content}
+                        super::actions::MailPollingCommands {
+                            refresh: polling_refresh,
+                            super::actions::MailTriggerButton { notice }
+                            {polling_content}
+                        }
                         if let Some(feedback) = notice() {
                             p {
                                 class: if feedback.is_success() {

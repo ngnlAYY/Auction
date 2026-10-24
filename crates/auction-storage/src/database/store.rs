@@ -56,7 +56,14 @@ impl DatabaseStore {
                 };
                 let migrator =
                     migrations::postgres_migrator_with_applied_checksums(&applied_checksums)?;
-                migrator.run(store.raw_pool()).await.map_err(|source| StorageError::Migration {
+                let mut connection =
+                    store.raw_pool().acquire().await.map_err(|source| StorageError::Migration {
+                        backend: DatabaseBackend::Postgres,
+                        source: source.into(),
+                    })?;
+                // SQLx 的提前错误或取消不保证到达 unlock；专用会话不能携带迁移锁归池。
+                connection.close_on_drop();
+                migrator.run(&mut *connection).await.map_err(|source| StorageError::Migration {
                     backend: DatabaseBackend::Postgres,
                     source,
                 })
@@ -189,7 +196,6 @@ impl DatabaseStore {
 
 #[cfg(feature = "postgres")]
 async fn check_postgres_readiness(store: &PostgresStore) -> Result<(), ()> {
-    sqlx::query("SELECT 1").execute(store.raw_pool()).await.map_err(|_| ())?;
     let rows =
         sqlx::query("SELECT version, success, checksum FROM _sqlx_migrations ORDER BY version ASC")
             .fetch_all(store.raw_pool())

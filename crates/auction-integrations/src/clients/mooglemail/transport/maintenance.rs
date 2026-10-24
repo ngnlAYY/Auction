@@ -88,7 +88,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
                 }
                 Ok(MoogleMailDiscardOutcome::Discarded) => Ok(MoogleMailboxDiscard::Discarded),
                 Err(error) => {
-                    if error.is_session_expired() {
+                    if error.category == MoogleMailErrorCategory::SessionExpired {
                         let _ = session.invalidate_current().await;
                     }
                     Err(maintenance_remote_error(error, "compose 草稿丢弃失败"))

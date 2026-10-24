@@ -49,20 +49,17 @@ pub(crate) fn parse_html_pages(pages: Vec<ParsedHtmlPage>) -> Result<AdminForumP
     if pages.is_empty() {
         return Err(());
     }
-    let mut seen_post_ids = HashSet::new();
-    let mut posts = Vec::new();
-    let mut previous_post_id = None;
+    let mut posts = Vec::<ParsedPost>::new();
     for page in pages {
         for post in page.into_posts() {
             if !html::canonical_post_id(&post.id)
-                || previous_post_id
-                    .as_deref()
-                    .is_some_and(|previous| !decimal_id_precedes(previous, &post.id))
-                || !seen_post_ids.insert(post.id.clone())
+                // canonical 数字 ID 严格递增已经排除全部重复，不再复制 ID 维护第二个集合。
+                || posts
+                    .last()
+                    .is_some_and(|previous| !decimal_id_precedes(&previous.id, &post.id))
             {
                 return Err(());
             }
-            previous_post_id = Some(post.id.clone());
             posts.push(post);
         }
     }
@@ -144,10 +141,12 @@ fn parse_thread_with_identity(
         posts: Vec::with_capacity(posts.len().saturating_sub(1)),
         warnings: catalog_warnings,
     };
+    // 完整目录只建一次借用索引；每条命令不再线性扫描全部拍品。
+    let lot_codes = result.catalog.lots.iter().map(|lot| lot.code.as_str()).collect();
     for post in posts.into_iter().skip(1) {
-        let parsed = commands::parse_bid_post(post, &result.catalog.lots);
-        result.warnings.extend(parsed.1.iter().cloned());
-        result.posts.push(parsed.0);
+        let (parsed, warnings) = commands::parse_bid_post(post, &lot_codes);
+        result.warnings.extend(warnings);
+        result.posts.push(parsed);
     }
     helpers::sort_warnings(&mut result.warnings);
     Ok(result)

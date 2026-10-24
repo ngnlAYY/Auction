@@ -321,6 +321,9 @@ pub(crate) fn validate_mooglemail_template_body(
     let mut seen = BTreeSet::new();
     while let Some(relative_start) = value[cursor..].find('{') {
         let start = cursor + relative_start;
+        if value[cursor..start].contains('}') {
+            return Err(ConfigError::InvalidMoogleMailConfig("mail_templates 占位符未闭合"));
+        }
         let relative_end = value[start + 1..]
             .find('}')
             .ok_or(ConfigError::InvalidMoogleMailConfig("mail_templates 占位符未闭合"))?;

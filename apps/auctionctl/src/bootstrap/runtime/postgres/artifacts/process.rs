@@ -10,7 +10,8 @@ pub(crate) fn run_pg_dump(
     let mut command = ProcessCommand::new("pg_dump");
     command
         .args(["--no-password", "--format=custom", "--no-owner", "--no-privileges"])
-        .arg(format!("--file={}", output.display()))
+        .arg("--file")
+        .arg(output)
         .stdin(Stdio::null())
         .stdout(Stdio::null());
     environment.apply(&mut command);

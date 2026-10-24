@@ -113,6 +113,16 @@ impl RealtimeHub {
         RealtimeHubHealth { subscriptions: state.next_id, open_streams: state.streams.len() }
     }
 
+    /// 关闭新订阅入口；已取得许可的升级任务仍由连接自身发送既有关闭帧。
+    pub(crate) fn begin_shutdown(&self) {
+        self.connections.begin_shutdown();
+    }
+
+    /// 等待所有升级任务释放许可；时间预算和强制退出继续由进程 owner 统一持有。
+    pub(crate) async fn drain(&self) -> Result<(), RealtimeSubscriptionError> {
+        self.connections.wait_drained().await
+    }
+
     fn remove(&self, stream_key: &str, id: u64) {
         let Ok(mut state) = self.state.lock() else {
             return;

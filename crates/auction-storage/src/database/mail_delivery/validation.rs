@@ -1,5 +1,7 @@
 //! MoogleMail delivery 命令的闭集校验与通知载荷边界。
 
+use std::collections::HashSet;
+
 use auction_application::{
     ApplicationError, MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin,
     RepositoryError,
@@ -74,12 +76,8 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
         )
         .into());
     }
-    if command
-        .attachment_ids
-        .iter()
-        .enumerate()
-        .any(|(index, value)| command.attachment_ids[..index].contains(value))
-    {
+    let mut attachment_ids = HashSet::with_capacity(command.attachment_ids.len());
+    if command.attachment_ids.iter().any(|value| !attachment_ids.insert(value.as_str())) {
         return Err(RepositoryError::Failed("MoogleMail delivery 附件重复".to_owned()).into());
     }
     match command.operation {

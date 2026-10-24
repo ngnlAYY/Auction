@@ -57,12 +57,27 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         use_admin_pagination("realtime-failures", &["failure_page_size"], Some(200), 1_000_000);
     let lag_pagination =
         use_admin_pagination("realtime-lag", &["lag_page_size"], Some(200), 1_000_000);
+    // 三个分区只订阅自己的请求身份；另一区翻页或切换轮询间隔不重发无关 GET。
+    let event_query = use_memo(move || {
+        let current = query_state.read();
+        (current.event_page, current.event_stream.clone(), current.event_kind.clone())
+    });
+    let lag_query = use_memo(move || query_state.read().lag_page);
+    let failure_query = use_memo(move || {
+        let current = query_state.read();
+        (
+            current.failure_page,
+            current.failure_stream.clone(),
+            current.failure_consumer.clone(),
+            current.failure_code.clone(),
+            current.failure_state.clone(),
+        )
+    });
     let events = use_admin_page(
         event_pagination.clone(),
         move || {
             let _ = event_refresh();
-            let current = query_state();
-            (current.event_page, current.event_stream, current.event_kind)
+            event_query()
         },
         |(page, stream, kind), size| fetch_realtime_event_page(page, stream, kind, size),
     );
@@ -74,7 +89,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         lag_pagination.clone(),
         move || {
             let _ = lag_refresh();
-            query_state().lag_page
+            lag_query()
         },
         |page, size| fetch_realtime_lag_page(page, String::new(), String::new(), size),
     );
@@ -82,14 +97,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         failure_pagination.clone(),
         move || {
             let _ = failure_refresh();
-            let current = query_state();
-            (
-                current.failure_page,
-                current.failure_stream,
-                current.failure_consumer,
-                current.failure_code,
-                current.failure_state,
-            )
+            failure_query()
         },
         |(page, stream, consumer, code, state), size| {
             fetch_realtime_failure_page(page, stream, consumer, code, state, size)

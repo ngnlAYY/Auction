@@ -17,8 +17,8 @@ pub(crate) fn exact_action_expectation(
     {
         return false;
     }
-    let mut observed_ids = state.equipment_ids().to_vec();
-    let mut expected_ids = expected.attachment_ids.clone();
+    let mut observed_ids = state.equipment_ids().iter().collect::<Vec<_>>();
+    let mut expected_ids = expected.attachment_ids.iter().collect::<Vec<_>>();
     observed_ids.sort_unstable();
     expected_ids.sort_unstable();
     observed_ids == expected_ids

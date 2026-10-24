@@ -1,5 +1,7 @@
 //! 普通 MoogleMail delivery payload 的安全校验。
 
+use std::collections::HashSet;
+
 use super::super::*;
 
 pub(crate) fn decode_payload(
@@ -23,12 +25,14 @@ pub(crate) fn decode_payload(
         || payload.credits < 0
         || payload.cod < 0
         || payload.attachment_ids.len() > MAX_ATTACHMENT_IDS
-        || payload.attachment_ids.iter().any(|id| !valid_decimal_id(id))
-        || payload
-            .attachment_ids
-            .iter()
-            .enumerate()
-            .any(|(index, id)| payload.attachment_ids[..index].contains(id))
+    {
+        return Err(invalid_payload());
+    }
+    let mut attachment_ids = HashSet::with_capacity(payload.attachment_ids.len());
+    if payload
+        .attachment_ids
+        .iter()
+        .any(|id| !valid_decimal_id(id) || !attachment_ids.insert(id.as_str()))
     {
         return Err(invalid_payload());
     }

@@ -1,4 +1,4 @@
-//! Settlement recovery 五阶段持久化循环的稳定装配；循环 cadence 与阶段顺序在此。
+//! Settlement recovery 持久化循环的稳定装配；循环 cadence 与阶段顺序在此。
 
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ use health::refresh_health;
 use resolutions::{advance_cod_returns, advance_relists, complete_refunds};
 use returns::record_returns;
 
-/// 立即依次推进 health、case、return、action、relist 与 refund，随后按旧版 cadence 重试。
+/// 立即依次推进 health、case、return、action、COD return、relist 与 refund，随后按旧版 cadence 重试。
 pub(super) async fn run_loop<C>(
     worker: Arc<PersistentWorker<C>>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,

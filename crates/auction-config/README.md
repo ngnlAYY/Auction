@@ -19,7 +19,8 @@
 
 `config/settings/` 按 `auction`、`worker`、`secrets`、`app`、`validation` 和 `operations` 分工。角色文件先定位为
 绝对路径，相对公共/敏感/runtime 引用均以其目录解析，该步骤不解除 symlink 安全检查。`AuctionConfig::policy()`
-返回 `Result`，不可表示的时间范围应返回配置错误，不 panic 或截断。新场次 soft-close 窗口/延长默认均为 900 秒，
+返回 `Result`，自身拒绝未知结算/恢复模式及不可表示的时间范围，不依赖外层先校验、不静默替换策略。
+新场次 soft-close 窗口/延长默认均为 900 秒，
 common、runtime 候选与首次设置内嵌模板同步；升级不覆盖文件中显式的 60，须核对 managed 有效来源并手动更新
 （步骤见[配置手册](ops/config/README.md#缓存与拍卖模板)）。
 
@@ -32,6 +33,7 @@ Admin 可选 `worker_config_file` 由配置 owner 有界读取非敏感 Worker �
 
 各角色仍独立加载并校验其文件快照，不缓存跨次文件内容。Admin 在窄投影完成后接管已解析 runtime 文档，不再复制
 完整文档；Worker 的 world 投影只借用部署邮箱标识，避免为查找邮箱复制发件人名单。
+告警 world 成员检查同样只借用世界标识，不为成员判断克隆邮箱、发件人名单或排序。
 
 `FirstRunConfig::write_to` 只向明确不存在的目标发布：私有临时目录中生成文件、固定非敏感 `0640`/敏感 `0600`，
 复用三角色 loader 与正式 runtime 校验后同步目录，以 Linux `RENAME_NOREPLACE` 发布并同步父目录。发布前只清理
@@ -39,6 +41,7 @@ Admin 可选 `worker_config_file` 由配置 owner 有界读取非敏感 Worker �
 `write_managed_to` 只额外推导配置目录同级的私有 control 目录，不合并敏感配置。
 首次生成的论坛 `public_base_url` 与已校验 Public origin 一致，不继承示例主机。
 内嵌模板按完整 TOML 文档反序列化，再修改字段；不能使用仅解析单值的 `Value::FromStr`。
+首次设置在发布前拒绝正式 loader 必拒的控制组名前导下划线，不先接受不可发布的候选。
 
 ## 文件职责与敏感边界
 
@@ -80,6 +83,8 @@ Delivery 有效并发取配置与 transport 上限的较小值，MoogleMail tran
 字段，不为多余输入分配字段列表；英文月份/星期名称按 ASCII 忽略大小写匹配。不开放上游新增昵称或宽松输入，
 描述符、`@every` 与时区契约保持不变。`worker.forum.verify_post_body` 是默认关闭的部署侧正文校验开关，
 不属于 runtime 的 `operations.forum` 接管范围。
+cron 的五个规范字段直接追加到最终缓冲，不建立逐字段临时 String；原语法、时区及 DOM/DOW 语义保持。
+邮件模板闭集校验拒绝任意位置的孤立右花括号，与 runtime 和 transport 边界一致。
 
 ## Runtime 文件与生效范围
 

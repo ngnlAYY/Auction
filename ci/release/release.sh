@@ -119,12 +119,6 @@ artifacts_reusable() {
 		printf '%s 已记构建环境与当前不同，重新构建：%s\n' "$variant" "$artifact_directory" >&2
 		return 1
 	fi
-	# 构建输入（代码、迁移、内嵌模板）未变时复用；纯文档修改不应重跑 WASM 与 Fat LTO。
-	if [[ $(read_build_info "$info" build_inputs_sha256) != "$(build_inputs_fingerprint)" ]]; then
-		printf '%s 已记构建输入与当前不同，重新构建：%s\n' "$variant" "$artifact_directory" >&2
-		return 1
-	fi
-
 	local binary path
 	for binary in "${selected_binaries[@]}"; do
 		path="$artifact_directory/bin/$binary"

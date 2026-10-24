@@ -194,25 +194,15 @@ impl EquipmentSourceAdapter {
             .begin_exclusive(world, MoogleMailOperation::Detail)
             .await
             .map_err(|_| AdminIntakeError::SourceUnavailable)?;
-        for _ in 0..64 {
-            match self.fetch_document_attempt(target.clone(), Some(session.cookie())).await {
-                Ok(body) => return Ok(body),
-                Err(EquipmentFetchError::Intake(error)) => return Err(error),
-                Err(EquipmentFetchError::SessionExpired) => {
-                    session
-                        .invalidate_current()
-                        .await
-                        .map_err(|_| AdminIntakeError::SourceUnavailable)?;
-                    if session.advance_exclusive().await.is_err() {
-                        return Err(AdminIntakeError::SourceUnavailable);
-                    }
-                }
-                Err(EquipmentFetchError::Observed(_)) => {
-                    return Err(AdminIntakeError::SourceUnavailable);
-                }
+        match self.fetch_document_attempt(target, Some(session.cookie())).await {
+            Ok(body) => Ok(body),
+            Err(EquipmentFetchError::Intake(error)) => Err(error),
+            Err(EquipmentFetchError::SessionExpired) => {
+                let _ = session.invalidate_current().await;
+                Err(AdminIntakeError::SourceUnavailable)
             }
+            Err(EquipmentFetchError::Observed(_)) => Err(AdminIntakeError::SourceUnavailable),
         }
-        Err(AdminIntakeError::SourceUnavailable)
     }
 
     async fn fetch_document_attempt(
@@ -301,63 +291,46 @@ impl EquipmentSourceAdapter {
                 elapsed_millis: None,
                 body: None,
             })?;
-        for attempt in 0..64 {
-            self.await_request_slot().await;
-            let status_slot = Arc::new(AtomicU16::new(0));
-            let started = std::time::Instant::now();
-            let result = timeout(
-                self.policy.request_timeout,
-                self.fetch_document_once_observed(
-                    target.clone(),
-                    Some(session.cookie()),
-                    Some(Arc::clone(&status_slot)),
-                ),
-            )
-            .await
-            .map_err(|_| fetch::EquipmentFetchFailure {
-                category: MailEquipmentDiagnosticCategory::Timeout,
-                status: fetch::nonzero_status(&status_slot),
-                elapsed_millis: fetch::elapsed_millis(started),
-                body: None,
-            })?;
-            match result {
-                Ok(body) => return Ok(body),
-                Err(EquipmentFetchError::Observed(failure))
-                    if failure.category == MailEquipmentDiagnosticCategory::SessionExpired =>
-                {
-                    // 已看到的登录页和状态码属于这次失败证据，不能在凭据耗尽后丢弃。
-                    if session.invalidate_current().await.is_err()
-                        || session.advance_exclusive().await.is_err()
-                        || attempt == 63
-                    {
-                        return Err(failure);
-                    }
-                }
-                Err(EquipmentFetchError::Observed(failure)) => return Err(failure),
-                Err(EquipmentFetchError::SessionExpired) => {
-                    return Err(fetch::EquipmentFetchFailure {
-                        category: MailEquipmentDiagnosticCategory::SessionExpired,
-                        status: None,
-                        elapsed_millis: None,
-                        body: None,
-                    });
-                }
-                Err(EquipmentFetchError::Intake(_)) => {
-                    return Err(fetch::EquipmentFetchFailure {
-                        category: MailEquipmentDiagnosticCategory::Network,
-                        status: None,
-                        elapsed_millis: None,
-                        body: None,
-                    });
-                }
-            }
-        }
-        Err(fetch::EquipmentFetchFailure {
-            category: MailEquipmentDiagnosticCategory::SessionExpired,
-            status: None,
-            elapsed_millis: None,
+        self.await_request_slot().await;
+        let status_slot = Arc::new(AtomicU16::new(0));
+        let started = std::time::Instant::now();
+        let result = timeout(
+            self.policy.request_timeout,
+            self.fetch_document_once_observed(
+                target,
+                Some(session.cookie()),
+                Some(Arc::clone(&status_slot)),
+            ),
+        )
+        .await
+        .map_err(|_| fetch::EquipmentFetchFailure {
+            category: MailEquipmentDiagnosticCategory::Timeout,
+            status: fetch::nonzero_status(&status_slot),
+            elapsed_millis: fetch::elapsed_millis(started),
             body: None,
-        })
+        })?;
+        match result {
+            Ok(body) => Ok(body),
+            Err(EquipmentFetchError::Observed(failure)) => {
+                if failure.category == MailEquipmentDiagnosticCategory::SessionExpired {
+                    // 单 Cookie 失效后停止；即使回写失败，也保留本次登录页和状态码证据。
+                    let _ = session.invalidate_current().await;
+                }
+                Err(failure)
+            }
+            Err(EquipmentFetchError::SessionExpired) => Err(fetch::EquipmentFetchFailure {
+                category: MailEquipmentDiagnosticCategory::SessionExpired,
+                status: None,
+                elapsed_millis: None,
+                body: None,
+            }),
+            Err(EquipmentFetchError::Intake(_)) => Err(fetch::EquipmentFetchFailure {
+                category: MailEquipmentDiagnosticCategory::Network,
+                status: None,
+                elapsed_millis: None,
+                body: None,
+            }),
+        }
     }
 
     async fn fetch_document_once_observed(

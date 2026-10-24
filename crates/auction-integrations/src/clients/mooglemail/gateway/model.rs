@@ -9,11 +9,11 @@ use chrono::{DateTime, Utc};
 #[derive(Debug, Clone)]
 pub struct MoogleMailGatewayConfig {
     pub maximum_pages: usize,
-    /// 发件人 allowlist；默认只解析 allowlist 内邮件的详情。
+    /// 发件人 allowlist；授权只使用详情中的完整发件人，列表截断显示名不能替代身份。
     pub sender_allowlist: Vec<String>,
-    /// 明确关闭 allowlist 后才允许读取所有发件人详情。
+    /// 明确关闭 allowlist 后才允许所有完整发件人通过授权。
     pub sender_allowlist_disabled: bool,
-    /// 单次 inbox 扫描及详情读取共享的总预算，覆盖限速、凭据切换和 HTTP 正文读取。
+    /// 单次 inbox 扫描及详情读取共享的总预算，覆盖限速、凭据失效处理和 HTTP 正文读取。
     pub fetch_budget: Duration,
 }
 

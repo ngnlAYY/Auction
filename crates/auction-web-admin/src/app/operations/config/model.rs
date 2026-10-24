@@ -340,8 +340,9 @@ impl RuntimeConfigForm {
         }
     }
 
-    pub(super) fn equipment_colors(&self) -> Vec<RuntimeEquipmentColorForm> {
-        self.equipment_colors.clone()
+    /// 展示与单项编辑只借用集合，避免每次勾选复制全部规则及其文本。
+    pub(super) fn equipment_colors(&self) -> &[RuntimeEquipmentColorForm] {
+        &self.equipment_colors
     }
 
     pub(super) fn add_equipment_color(&mut self) {

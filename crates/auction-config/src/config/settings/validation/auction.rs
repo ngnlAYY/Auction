@@ -5,21 +5,11 @@ use chrono::Timelike;
 use super::super::*;
 
 pub(crate) fn validate_auction(config: &AuctionConfig) -> Result<(), ConfigError> {
-    if !matches!(config.settlement.mode.as_str(), "legacy_zero_v0" | "hold_curve_v1") {
-        return Err(ConfigError::InvalidAuctionConfig(
-            "settlement.mode 只能是 legacy_zero_v0 或 hold_curve_v1",
-        ));
-    }
-    if config.settlement.recovery.mode != "remind_v1" {
-        return Err(ConfigError::InvalidAuctionConfig("settlement.recovery.mode 只能是 remind_v1"));
-    }
+    let policy = config.policy()?;
     if config.schedule.enabled {
         config.schedule.validate()?;
     }
-    config
-        .policy()?
-        .validate()
-        .map_err(|_| ConfigError::InvalidAuctionConfig("经济、结算或恢复字段边界无效"))
+    policy.validate().map_err(|_| ConfigError::InvalidAuctionConfig("经济、结算或恢复字段边界无效"))
 }
 
 impl AuctionScheduleConfig {

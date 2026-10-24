@@ -2,6 +2,31 @@
 
 use super::*;
 
+/// control 任务退出即撤销 readiness；panic、abort 和首轮 poll 前取消也必须触发同一收口。
+#[cfg(unix)]
+pub(super) struct WorkerControlTaskExit {
+    control: WorkerControlHandle,
+    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
+}
+
+#[cfg(unix)]
+impl WorkerControlTaskExit {
+    pub(super) fn new(
+        control: WorkerControlHandle,
+        runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
+    ) -> Self {
+        Self { control, runtime_failure }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for WorkerControlTaskExit {
+    fn drop(&mut self) {
+        self.control.mark_draining();
+        let _ = self.runtime_failure.try_send("control_server_stopped");
+    }
+}
+
 #[cfg(feature = "postgres")]
 struct WorkerHeartbeatHealth {
     database: Arc<dyn HeartbeatHealthReader>,

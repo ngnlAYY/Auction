@@ -323,15 +323,13 @@ fn decode_cursor(raw: &str) -> Result<PublicCompensationCursor, ()> {
     if raw == "start" {
         return Ok(PublicCompensationCursor::Start);
     }
-    if raw.is_empty() || raw.len() > 128 {
+    // 固定 26 字节只接受 35 个无填充字符；严格引擎校验规范尾位，不再分配解码/重编码副本。
+    if raw.len() != 35 {
         return Err(());
     }
-    let decoded = URL_SAFE_NO_PAD.decode(raw).map_err(|_| ())?;
-    if decoded.len() != 26
-        || URL_SAFE_NO_PAD.encode(&decoded) != raw
-        || decoded[0] != 1
-        || decoded[1] != 6
-    {
+    let mut decoded = [0_u8; 26];
+    let decoded_len = URL_SAFE_NO_PAD.decode_slice(raw, &mut decoded).map_err(|_| ())?;
+    if decoded_len != decoded.len() || decoded[0] != 1 || decoded[1] != 6 {
         return Err(());
     }
     let sequence = i64::from_be_bytes(decoded[2..10].try_into().map_err(|_| ())?);

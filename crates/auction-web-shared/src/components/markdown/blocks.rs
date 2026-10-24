@@ -21,14 +21,20 @@ pub(super) fn parse_blocks(markdown: &str) -> Vec<MarkdownBlock> {
             index += 1;
             while index < lines.len() {
                 let candidate = lines[index].trim_start();
-                if candidate.starts_with(fence) {
+                // 结束围栏必须与开头同类且至少同长；短标记或带正文的行仍属于代码。
+                if candidate.strip_prefix(fence).is_some_and(|rest| {
+                    rest.trim_start_matches(char::from(fence.as_bytes()[0])).trim().is_empty()
+                }) {
                     index += 1;
                     break;
                 }
                 value.push(lines[index]);
                 index += 1;
             }
-            blocks.push(MarkdownBlock::Code { language, value: value.join("\n") });
+            blocks.push(MarkdownBlock::Code {
+                language: language.map(str::to_owned),
+                value: value.join("\n"),
+            });
             continue;
         }
 
@@ -135,15 +141,17 @@ fn starts_block(lines: &[&str], index: usize) -> bool {
             && is_table_separator(lines[index + 1].trim()))
 }
 
-fn fence_start(value: &str) -> Option<(char, Option<String>)> {
-    let (fence, rest) = if let Some(rest) = value.strip_prefix("```") {
-        ('`', rest)
-    } else {
-        let rest = value.strip_prefix("~~~")?;
-        ('~', rest)
-    };
-    let language = rest.trim();
-    Some((fence, (!language.is_empty()).then(|| language.to_owned())))
+fn fence_start(value: &str) -> Option<(&str, Option<&str>)> {
+    let marker = *value.as_bytes().first()?;
+    if !matches!(marker, b'`' | b'~') {
+        return None;
+    }
+    let length = value.bytes().take_while(|byte| *byte == marker).count();
+    if length < 3 {
+        return None;
+    }
+    let language = value[length..].trim();
+    Some((&value[..length], (!language.is_empty()).then_some(language)))
 }
 
 fn heading(value: &str) -> Option<(u8, &str)> {

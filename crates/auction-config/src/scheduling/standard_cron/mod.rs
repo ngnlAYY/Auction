@@ -141,7 +141,7 @@ fn calendar_kind(
         if index > 0 {
             canonical.push(' ');
         }
-        canonical.push_str(&parse_field(field, field_bounds)?.canonical(field_bounds));
+        parse_field(field, field_bounds)?.write_canonical(field_bounds, &mut canonical);
     }
     if fields.next().is_some() {
         return Err(StandardCronScheduleError::InvalidExpression);

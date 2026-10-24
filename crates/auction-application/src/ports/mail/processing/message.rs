@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::HashSet, fmt};
 
 use chrono::{DateTime, Utc};
 
@@ -108,12 +108,11 @@ impl MailMessage {
         {
             return Err(MailProcessingError::InvalidMessage);
         }
-        for (index, attachment) in self.attachments.iter().enumerate() {
+        // 只索引借用的外部 ID，避免千件附件逐项扫描前缀；不复制装备 key 或改动附件顺序。
+        let mut attachment_ids = HashSet::with_capacity(self.attachments.len());
+        for attachment in &self.attachments {
             if !decimal_identity(&attachment.external_equipment_id)
-                || index > 0
-                    && self.attachments[..index].iter().any(|previous| {
-                        previous.external_equipment_id == attachment.external_equipment_id
-                    })
+                || !attachment_ids.insert(attachment.external_equipment_id.as_str())
             {
                 return Err(MailProcessingError::InvalidMessage);
             }

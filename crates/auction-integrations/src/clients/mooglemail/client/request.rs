@@ -41,11 +41,14 @@ impl MoogleMailClient {
             )
         })?;
 
+        let mut cookie_header = header::HeaderValue::from_str(cookie.expose())
+            .map_err(|_| self.configuration(target))?;
+        cookie_header.set_sensitive(true);
         let request = self
             .client
             .get(target.url.clone())
             .header(header::USER_AGENT, USER_AGENT)
-            .header(header::COOKIE, cookie.expose())
+            .header(header::COOKIE, cookie_header)
             .timeout(self.request_timeout)
             .build()
             .map_err(|_| self.configuration(target))?;
@@ -168,11 +171,14 @@ impl MoogleMailClient {
             )
         })?;
 
+        let mut cookie_header = header::HeaderValue::from_str(cookie.expose())
+            .map_err(|_| self.configuration_for(operation, target.world))?;
+        cookie_header.set_sensitive(true);
         let request = self
             .client
             .post(target.url.clone())
             .header(header::USER_AGENT, USER_AGENT)
-            .header(header::COOKIE, cookie.expose())
+            .header(header::COOKIE, cookie_header)
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
             .timeout(self.request_timeout)
             .body(form.encode())

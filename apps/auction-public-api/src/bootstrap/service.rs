@@ -110,9 +110,10 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         signal = signals.recv() => Some(signal.context("receive public-api shutdown signal")?),
     };
 
+    // HTTP server 自行退出时也须关闭已升级连接，不能只依靠 listener graceful shutdown。
+    realtime_shutdown_state.begin_realtime_shutdown();
     if let Some(signal) = signal {
         tracing::info!(signal = %signal, "public api drain started");
-        realtime_shutdown_state.begin_realtime_shutdown();
         let _ = shutdown_sender.send(());
     } else {
         drop(shutdown_sender);
@@ -128,13 +129,22 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         {
             tracing::warn!(error = %error, "public heartbeat stopping publish failed");
         }
-        match immediate_server_result.take() {
+        let server_result = match immediate_server_result.take() {
             Some(result) => Some(result),
             None => server_task.join().await,
+        };
+        let realtime_result = realtime_shutdown_state
+            .drain_realtime_connections()
+            .await
+            .context("drain public realtime connections");
+        match (public_server_result(server_result), realtime_result) {
+            (Ok(()), result) => result,
+            (Err(error), Ok(())) => Err(error),
+            (Err(error), Err(realtime_error)) => Err(error.context(realtime_error)),
         }
     };
     let result = match wait_for_drain(&mut signals, DEFAULT_DRAIN_TIMEOUT, drain).await {
-        Ok(DrainOutcome::Completed(result)) => public_server_result(result),
+        Ok(DrainOutcome::Completed(result)) => result,
         Ok(DrainOutcome::TimedOut) => {
             force_public_tasks(&mut heartbeat_task, &mut realtime_relay_task, &mut server_task)
                 .await;

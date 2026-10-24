@@ -24,6 +24,8 @@ impl PostgresStore {
             .acquire()
             .await
             .map_err(|source| query_error("acquire_adoption_connection", source))?;
+        // session 锁请求发出前即禁止归池；等待响应、预检或迁移期间取消也必须关闭物理连接。
+        connection.close_on_drop();
         Migrate::lock(&mut *connection)
             .await
             .map_err(|source| PostgresLegacyV28Error::MigrationLock { source })?;
@@ -148,10 +150,6 @@ impl PostgresStore {
         .await;
 
         let unlock = Migrate::unlock(&mut *connection).await;
-        if unlock.is_err() {
-            // session advisory lock 可能仍由该物理连接持有；禁止把连接放回池中污染后续迁移。
-            connection.close_on_drop();
-        }
         match (result, unlock) {
             (Ok(result), Ok(())) => Ok(result),
             (Err(error), _) => Err(error),

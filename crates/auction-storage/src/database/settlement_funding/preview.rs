@@ -95,6 +95,7 @@ pub(super) async fn snapshot(
     let mut blockers = Vec::new();
     let mut liabilities = 0i64;
     let mut compensation = 0i64;
+    let delivery_rows = deliveries.as_array().ok_or(FundingError::Storage)?;
     for lot in lots.as_array().ok_or(FundingError::Storage)? {
         if lot["buyer_amount"].as_i64() == Some(0) {
             continue;
@@ -147,11 +148,13 @@ pub(super) async fn snapshot(
             }
         } else {
             if !lot["payment_delivery"].is_null() {
-                let payment_delivery = deliveries
-                    .as_array()
-                    .ok_or(FundingError::Storage)?
-                    .iter()
-                    .find(|delivery| delivery["id"] == lot["payment_delivery"]);
+                // SQL 已按 UUID 排序；规范 UUID 文本顺序一致，无需另建索引或每个 lot 全表扫描。
+                let payment_delivery = delivery_rows
+                    .binary_search_by_key(&lot["payment_delivery"].as_str(), |delivery| {
+                        delivery["id"].as_str()
+                    })
+                    .ok()
+                    .map(|index| &delivery_rows[index]);
                 // Main装备COD及跨世界现金carrier都可能在本地收款核对前已被领取。
                 // 已外发或关联缺失时阻断opening，不能把未satisfied推断成现金尚未到账。
                 if payment_delivery.is_none_or(|delivery| {
@@ -164,7 +167,7 @@ pub(super) async fn snapshot(
             compensation = compensation.checked_add(c).ok_or(FundingError::Invalid)?;
         }
     }
-    for delivery in deliveries.as_array().ok_or(FundingError::Storage)? {
+    for delivery in delivery_rows {
         // 只解除该旧投递的未知结果门；不标成功、不重发，也不授予任何可消费资金。
         if delivery["id"].as_str().is_some_and(|id| excluded.contains(id)) {
             continue;

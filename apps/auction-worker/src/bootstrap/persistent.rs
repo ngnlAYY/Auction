@@ -2,10 +2,12 @@
 
 #[cfg(feature = "postgres")]
 use super::control::{
-    abort_worker_task, join_worker_task, spawn_heartbeat, worker_heartbeat_health,
+    WorkerControlTaskExit, join_worker_control_task, worker_control_server_config,
 };
 #[cfg(feature = "postgres")]
-use super::control::{join_worker_control_task, worker_control_server_config};
+use super::control::{
+    abort_worker_task, join_worker_task, spawn_heartbeat, worker_heartbeat_health,
+};
 #[cfg(feature = "postgres")]
 use super::forum::configure_forum;
 #[cfg(feature = "postgres")]
@@ -28,7 +30,7 @@ pub(super) async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
-    credential_owner_lost: tokio::sync::oneshot::Sender<&'static str>,
+    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     let Some(database_url) = config.database_url() else {
@@ -38,7 +40,7 @@ pub(super) async fn run_worker(
         {
             anyhow::bail!("启用外部 Worker 功能时必须配置 PostgreSQL database_url");
         }
-        run_worker_skeleton(config, metrics, shutdown).await?;
+        run_worker_skeleton(config, metrics, runtime_failure, shutdown).await?;
         return Ok(());
     };
     let store = Arc::new(
@@ -87,6 +89,7 @@ pub(super) async fn run_worker(
     ];
     let mut credential_owner_task =
         runtime_owners.iter().any(|(_, owner)| owner.is_some()).then(|| {
+            let runtime_failure = runtime_failure.clone();
             TaskGuard::new(tokio::spawn(async move {
                 // 两类已取得的 owner 都只观察 sticky 状态；失效后有界排空，不原地抢锁。
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
@@ -95,7 +98,7 @@ pub(super) async fn run_worker(
                     interval.tick().await;
                     for (reason, ownership) in &runtime_owners {
                         if ownership.as_ref().is_some_and(|owner| !owner.is_valid()) {
-                            let _ = credential_owner_lost.send(*reason);
+                            let _ = runtime_failure.try_send(*reason);
                             return;
                         }
                     }
@@ -190,7 +193,9 @@ pub(super) async fn run_worker(
         .await
         .context("bind Worker control socket")?;
         let shutdown = Arc::clone(&control_shutdown);
+        let task_exit = WorkerControlTaskExit::new(control.clone(), runtime_failure);
         Some(TaskGuard::new(tokio::spawn(async move {
+            let _task_exit = task_exit;
             server.run(async move { shutdown.notified().await }).await
         })))
     } else {
@@ -388,13 +393,10 @@ pub(super) async fn run_worker(
     }
     // 只有一个接收者；即使控制任务尚未创建等待 future，也必须保留停机通知。
     control_shutdown.notify_one();
-    if let Err(error) =
-        join_worker_control_task(&mut control_task, "persistent worker control").await
-    {
-        tracing::warn!(error = %error, "Worker control server stopped with an error");
-    }
+    let control_result =
+        join_worker_control_task(&mut control_task, "persistent worker control").await;
     result.context("run persistent worker")?;
-    Ok(())
+    control_result
 }
 
 #[cfg(feature = "postgres")]

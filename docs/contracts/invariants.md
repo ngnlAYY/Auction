@@ -21,6 +21,8 @@
 每个可变命令必须有稳定 `command_id`。通用 `auction_commands` 账本保存 UUID 主键 `command_id`、非空 `command_kind`、聚合 `aggregate_id`、32 字节 `request_hash`、稳定 `result_code`、JSON object `result_payload` 和事务时间 `created_at`；专用账本按各自契约绑定同等幂等身份。相同 command_id 加相同请求摘要必须重放原结果，相同 command_id 搭配不同摘要必须返回冲突；重复请求不得再次写入竞价事实、审计记录、结算义务或外部命令。
 
 创建拍卖也必须先查询账本，再校验当前时间，原命令成功后的重放不能因预览时间已过去而失败。浏览器处理未知写入结果时保留完整命令负载及版本，不能只保留 ID 后重新读取并拼装另一份请求。历史 `accepted + CompetitionPlan` 重放也必须核对 payload 与命令/lot 绑定；普通竞价首条事实核对请求金额、竞价者、Ordinary 机制和确定性 ID；慢速计划还核对授权、清除后的 generation 及反超/资格冻结结果形状，不得用内部自洽的其他命令结果替代原结果，也不能按当前状态重算旧命令。
+普通命令存在第二条事实时，还必须绑定确定性第二条 bid ID、Proxy 机制和不同于首条的出价人；
+合法同价反击继续允许，不以内部自洽替代命令归属证明。
 
 Public 登录时长命令必须先在锁内复核当前会话仍有效，再查询/重放账本；不能把“原命令成功”解释为过期或撤销会话仍可授权。
 摘要绑定账号、当前会话、时长和预期版本；重放返回原期限，不延长当前会话、不重复写审计。
@@ -186,6 +188,9 @@ Worker 的命令账本、outbox、消费游标、领取状态、重试次数和�
 邮件续租与失败退避必须先锁定邮箱，再用数据库 `clock_timestamp()` 复核租约；不能使用调用方时间或事务开始时间
 延长已过期 claim。入站提交的最终 cursor CAS 同样检查实时有效期，过期时回滚同事务的事实、完成前缀及队列删除，
 不复活租约、不释放未知外部写入，也不绕过原 token、owner、版本和暂停快照。
+论坛内容/发布确认、告警批次、recovery action、履约失败和 PM 终态同样遵守先锁行、后复核实时租约。
+在首次 UPDATE 的扫描谓词内使用 `clock_timestamp()` 仍可能先判断再等锁，不能冒充锁后有效性证明；
+原 owner/token/fencing、业务锁序及未知外写门禁不变。
 Worker 在邮件领取与续租发起前记录单调截止，回执只能收紧剩余预算，不能补回数据库或网络等待耗时；
 旧租约到期、续租失败或回执已过新截止时取消陈旧处理。论坛发布和回帖导入的领取与处理共用同一单项截止，
 超时不重置预算、不自动重寄可能已写出的外部请求。
@@ -209,12 +214,19 @@ delivery 的外部失败与人工复核只投影为稳定的 `delivery_failed` /
 return/take 只能在已重新读取的详情页上执行，动作前必须证明 sender 与当前 delivery 收件人一致；take 还必须精确比对装备 ID 集合、Credits、COD、附件条目数和 claimable 动作，只检查按钮存在不构成资产证明；前置证明失败时不得发起 POST，也不得将未知远端状态当作可自动重试的确定失败。
 
 POST 后，return 必须取得唯一只读 `[RTS]` 回执，并与动作前 To/From/Subject、正文、装备 ID、Credits、COD 和附件数逐项绑定，精确证明收发件人反转、固定 MoogleMail 发件人、标题前缀、正文退回后缀、资产不变且 return/take 动作都已消失。详情 GET 会使邮件转为已读，目标 `mid` 不在未读 Inbox（包括完整末页）不能证明已退回，不再作为兼容成功证明。take 必须证明 To/From/Subject 不变、资产与 COD 归零、claimable 消失，且动作前正文是动作后正文的前缀，预期的 `CoD Paid` 和 `Removed attachment` 回执数量与金额精确一致。仅出现“成功”文字、`[RTS]` 标题或动作按钮消失都不足以证明完成；后置证明失败必须进入 `manual_reconcile`，不得盲目重发。
+未知 Take 的维护恢复只接受严格邮件缺失证明，或完整详情的全部装备、Credits、COD 均为空；
+仅原装备集合与金额完全相同才允许原有有界重排。部分、无关、额外或重复资产及金额漂移均保持人工核对，
+不能把“目标装备交集为空”解释为取件成功。
 
 PostgreSQL 流拍的 `unsold_return` 与撤拍的 `withdrawn_return` 默认必须逐件 compose Send：使用原 lot/equipment 身份、原世界和冻结卖家，Credits/COD 均为零，暂存与 Sent 证据只能包含这一件原装备。收件人显示名命中 Admin runtime 的 `bot_players` 时，两者都直接内部留存并确认完成，不生成寄回投递。拍卖收件已 Take 的装备不能通过原邮件 Return 找回，也不能因一个 lot 撤拍而退整封多附件邮件。本地事务仅原子记录义务，外部寄送在提交后执行；稳定 delivery/prepare/activate 身份、租约和未知结果门禁保持不变，历史已冻结的 Return 请求不得自动改写为 Send 或重寄。
 
 ### I-09c MoogleMail 明确发送失败必须保留资产后果
 
-send 只能从能证明为无收件人、正文、附件和 COD 残留的干净 compose 页开始，无法证明时必须进入 `preflight_unproven` 人工对账，不得覆盖或自动清理可能属于上一次结果未知的资产。send 失败只能根据远端 body 中的可见协议文字分类，script、style、noscript 和邮件 textarea 中的同名短语必须排除。明确的收件人不存在已有拒绝证明，但仍必须保留唯一、合法的退信 `mid`、`take_required` 和稳定 reason code，并在退信资产取回前进入人工对账，不得直接终结为普通失败。
+send 只能从能证明为无收件人、正文、附件和 COD 残留的干净 compose 页开始，无法证明时必须进入 `preflight_unproven`
+人工对账，不得覆盖或自动清理可能属于上一次结果未知的资产。明确拒绝只采信唯一 `#messagebox_inner` 的可见协议提示；
+系统框外文本、script、style、noscript 和邮件 textarea 中的同名短语不能证明拒绝。
+收件人不存在的拒绝仍须保留唯一、合法的退信 `mid`、`take_required` 和稳定 reason code，
+退信资产取回前进入人工对账，不得直接终结为普通失败。
 Admin 只对上述精确 `recipient_not_found/manual_reconcile` 形状接受退信 MID 作为外部引用，
 它必须与 `returned_mail_id` 一致且保留取回责任、原执行时间链及安全 transport 元数据；退信引用不是 Sent 成功证明。
 

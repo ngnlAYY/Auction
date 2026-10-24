@@ -1,4 +1,4 @@
-//! Recovery relist 与 refund resolution 阶段。
+//! Recovery COD return、relist 与 refund resolution 阶段。
 
 use auction_application::Clock;
 use auction_observability::WorkerResult;

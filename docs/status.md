@@ -35,6 +35,83 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-23 全项目性能与稳定性复审
+
+基线工作树干净，HEAD 为 `ff5bb4591dc0d81ef2d77251e8e53898ef98b399`。按 11 个互斥 owner 切片覆盖
+20 个包、修改前 1410 个 Rust 文件，并核对相关注释、SQL、Web/五语言、配置及 CI/发布脚本。
+覆盖方式为全路径结构/风险扫描与重点调用链审读，不是逐行形式化证明。调整 124 个源码路径
+（123 个 Rust 路径含删除 1 个未装配模块，另 1 个 CSS 仅删过期注释），父级另改 Admin feature、发布脚本和 CI 缓存门禁。
+保留 12 项现有行为测试，只精简一处无关 fixture；不新增永久测试，也未运行已有测试套件。
+
+主要 owner 与落地结果：
+
+- domain/application：普通命令第二条代理反击的确定性身份与机制绑定、收款人原字段互斥、未知 Take 的精确资产矩阵；
+  统一 Go JSON 摘要、栈内 token 解码、附件/投稿去重。竞价规则、历史合法金额、账本和审计不变。
+- storage：会话在池等待/行锁等待后复核截止；16 个论坛、告警、recovery、履约及 PM 入口先锁行再检查实时租约；
+  迁移/接管专用连接在申请 session lock 前标记退出关闭。补齐授权分页唯一尾键，只缓存不可变迁移验证视图，
+  删除 readiness 冗余查询；义务索引、关闭计划、资金二分查找及非结算论坛历史分支减少重复工作。
+- integrations/jobs：金额脚本不明改写、系统框外拒绝诱饵、残缺 Take 详情均失败关闭；读取 deadline 不能放大配置预算；
+  明确关闭传输自动重试并标记敏感 Cookie，写后登录失效仍保留未知写入。删除单凭据死轮换与正文副本，
+  批次/附件用借用集合去重，控制 socket 增加可信祖先链、权限写前身份门禁及正确析构顺序。
+- HTTP/装配/运维：普通、发现及 pending upgrade 的 WebSocket 纳入原 10 秒 drain；control 提前退出、panic、取消触发
+  Worker 收口。systemctl 输出在读取时限界并回收子进程，stderr 并发排空；pg_dump 保留原生路径字节，
+  tracing flush 只处理有限队列前缀，Public/control socket 冲突在预检拒绝。
+- Web：本地排序和 Outbox 分区查询隔离；凭据删除、邮箱及 Dashboard 命令不随展示卸载丢失；
+  最后计时分片结束仍检查可见性。修复 Markdown 围栏，实时事实只清理淘汰键，补偿流水只传展开行，
+  装备标色 getter 改借用。无视觉声明、五语言键、HTTP/事件字段变化。
+- CI/依赖：原生复用判定取消紧邻的第二次全输入扫描；cargo-machete 缓存按其真实裸版本号比较，避免无谓强制重装。
+  Admin 移除未用 UUID v5，独立 WASM 活跃图从 177 到 176 个节点，移出 `sha1_smol`；根及工具锁文件不变。
+
+定向分配/工作量观察，仅代表相应隔离输入，不是生产吞吐、RSS、p99 或整体体积基准：
+
+| 路径与输入 | 修改前 | 修改后 |
+| --- | ---: | ---: |
+| 五字段 wildcard cron 规范化分配次数 | 7 | 2 |
+| 含 1000 个 sender 的告警 world 成员判断分配次数 | 1004 | 0 |
+| 200 条装备标色规则 getter 分配次数 | 2001 | 0 |
+| 有效非 `start` Public 游标临时分配次数 | 2 | 0 |
+| 同一次原生制品复用的完整输入扫描次数 | 2 | 1 |
+
+实际验证：
+
+- 完整 `CARGO_TARGET_DIR=target/audits/source-audit-20261023-build just verify` 通过：
+  策略、格式、workspace all-targets、独立 PostgreSQL/Redis feature、Clippy `-D warnings`、双端 WASM。
+  Rust/cargo 1.99.0；独立 Rust 1.94.1 的 `cargo check --locked --workspace --all-targets --all-features` 通过。
+  随后文档/示例注释及 CI 缓存条件同步，受影响的 `actionlint`、`all fmt` 再次通过。
+- 8 个 shell 脚本 `bash -n`、ShellCheck 0.11.0、Actionlint 1.7.12 通过；修改后的真实 cargo-machete 缓存步骤复用了
+  已安装 0.9.2，没有执行 install。最终 cargo-machete 未报告未使用直接依赖。
+- 独立 PostgreSQL 18.6、仅私有 Unix socket：Admin/Public 等锁跨截止旧查询各接受 1 行，新查询 0 行且时间字段不变；
+  正常、永久、撤销、错误 CSRF、inactive、并发撤销/延长及迟到只读路径符合断言。
+  16 个租约入口 × 前后版本 × 有效/跨截止/旧 token 共 96 项通过。
+  迁移取消前后证明旧 session 可留锁、新连接关闭释放；真实 `DatabaseStore::migrate` 的 `Dirty(1)` 失败保持分类且不留锁。
+  完整/旧前缀/缺口/失败/checksum 损坏及兼容历史校验通过；未结算 generic plan 的 bids 子计划实际执行次数为 0。
+- 原生临时探针实际执行摘要/编码等价、重放/资产/模板拒绝、集合边界、论坛/邮件 parser 与仅回环 HTTP、
+  control 权限/替换/drop、子进程双管道与回收、非 UTF-8 路径、SIGTERM/drain、持续补入 tracing flush。
+  真实 auctionctl 预检的合法配置返回 0、Public/control 冲突返回 2，没有连接业务数据库。
+- 真实回环 Hyper/Axum/Tungstenite：普通与发现 WS 在 HTTP 结束后仍等待，实际收到 1001 后排空；
+  pending upgrade、失败/取消、迟到注册及 256 次最后许可释放竞争通过。授权端口是本地 fixture，不证明数据库鉴权。
+- 使用受控 dx 构建两端独立调试 WASM，在真实 Chromium 中以仅回环的合成 API fixture 验证：
+  Users 排序重排而 GET 数不增；Outbox 单区翻页只新增该区请求，切 poll 不重取；
+  删除/邮件/Dashboard 未决命令跨卡片替换或快照错误保留原 UUID/版本，后续明确拒绝不清除 unknown；
+  邮件成功只重读当前邮箱，不重读入站列表。五语言保留同一意图，320px 保留表格结构且无横向溢出。
+  Xvfb headed Chromium 实测最后分片转隐藏时 Admin/Public 均不新增轮询，恢复后仅执行一轮；
+  Markdown 与补偿展开/等式实际渲染通过。Public 的请求取消 `ERR_ABORTED` 保留在回执中，未观察到未处理 JS 异常。
+
+依赖审计使用 1350 条 RustSec 公告：应用 537 个锁图条目及 cargo-audit 独立锁均无漏洞/警告。
+dx 工具完整锁仍有 13 个漏洞匹配项、12 个警告，sccache 有 5 个漏洞匹配项、12 个警告；这些漏洞包仍在相关 GNU 活跃图，
+不能把受限调用路径当成依赖无风险。未添加忽略项、未跨不兼容范围强替工具内部库；限制见
+[构建工具审计](ci/tools/README.md#上游公告与实际使用范围)。四项 MPL-2.0 依赖的分发义务仍须履行，不构成法律合规认证。
+
+脱敏证据入口：`target/audits/source-optimization-20261023/evidence.json`，含 owner 清单、原始通过/失败回执、
+依赖图及浏览器截图。早期临时探针的缺依赖、截断快照、模块定位等装配问题仅修复于 target，未放宽正式门禁；
+headless 无法切换真实可见状态后，改用 headed 浏览器完成该项验证。CodeGraph 已同步；LSP references 仍不可用，
+空 affected 结果不能替代人工核对的 12 项已有测试。
+
+临时探针源码、独立构建输出、数据库和浏览器 profile 已清理，所有本轮服务/标签页已关闭，仅保留 JSON/文本/图片证据。
+本轮没有提交、推送、部署、真实论坛/游戏调用或执行项目迁移 SQL，没有新增迁移；
+既有同版升级与 `000060` 要求仍有效。升级前检查 control 目录的 group 写权限及非法模板括号。
+上述验证不是完整业务事务、真实外部协议、HTTP/2 NACK、生产并发或性能验收。
+
 ### 2026-10-23 公开竞价历史完整展示（静态验证）
 
 owner 为 `auction-storage::database::bid_log` 和 `auction-web-public`。公开竞价日志的明细及 total

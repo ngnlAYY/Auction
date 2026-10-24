@@ -30,7 +30,7 @@ pub(super) struct EquipmentStat {
 
 impl EquipmentFacts {
     pub(super) fn attributes(&self) -> Result<serde_json::Value, AdminIntakeError> {
-        serde_json::to_value(serde_json::json!({
+        Ok(serde_json::json!({
             "type": self.base_name,
             "quality": self.quality,
             "prefix": self.prefix,
@@ -39,7 +39,6 @@ impl EquipmentFacts {
             "tradeable": self.tradeable,
             "stats": self.stats,
         }))
-        .map_err(|_| AdminIntakeError::InvalidSource)
     }
 }
 

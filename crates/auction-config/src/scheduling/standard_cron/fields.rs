@@ -44,21 +44,21 @@ pub(super) struct ParsedField {
 }
 
 impl ParsedField {
-    pub(super) fn canonical(self, bounds: FieldBounds) -> String {
+    pub(super) fn write_canonical(self, bounds: FieldBounds, value: &mut String) {
         if self.wildcard {
-            return "*".to_owned();
+            value.push('*');
+            return;
         }
-        let mut value = String::new();
+        let start = value.len();
         for current in bounds.minimum..=bounds.maximum {
             if self.bits & (1_u64 << current) == 0 {
                 continue;
             }
-            if !value.is_empty() {
+            if value.len() != start {
                 value.push(',');
             }
-            let _ = std::fmt::Write::write_fmt(&mut value, format_args!("{current}"));
+            let _ = std::fmt::Write::write_fmt(value, format_args!("{current}"));
         }
-        value
     }
 }
 

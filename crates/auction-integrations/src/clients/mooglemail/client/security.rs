@@ -4,10 +4,14 @@ use scraper::{ElementRef, Html, Node};
 
 use super::*;
 
-/// 构造不跟随重定向、关闭环境代理的 MoogleMail HTTP client。
+/// 构造不跟随重定向、关闭环境代理及自动重试的 MoogleMail HTTP client。
 pub(super) fn build_mooglemail_http_client() -> Result<Client, reqwest::Error> {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()).build()
+    Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+        .build()
 }
 
 pub(super) fn is_html_content_type(headers: &header::HeaderMap) -> bool {

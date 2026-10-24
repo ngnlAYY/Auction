@@ -60,6 +60,9 @@ impl SettlementObligation {
             || self.equipment_id.is_nil()
             || self.submission_id.is_some_and(SubmissionId::is_nil)
             || self.prerequisite_id.is_some_and(SettlementId::is_nil)
+            // 收款人必须在原字段上互斥；无效 UUID 或未规范化文本不能被当作“未提供”。
+            || self.recipient_user_id.is_some_and(UserId::is_nil)
+            || has_user && !self.recipient_game_identity.is_empty()
             || has_user == has_identity
         {
             return Err(DomainError::InvalidSettlementObligation("义务身份或收款人不完整"));

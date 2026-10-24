@@ -102,11 +102,26 @@ fn permitted(
                 || header("origin") == Some(remote.origin.as_str()))
     } else {
         // 本地模式也绑定 Host，防止任意域名解析到 loopback 后读取初始化页面。
-        let address = policy.listen.to_string();
-        let localhost = format!("localhost:{}", policy.listen.port());
+        let default_port = policy.listen.port() == 80;
+        let mut address = policy.listen.to_string();
+        let mut localhost = format!("localhost:{}", policy.listen.port());
+        // 浏览器省略 HTTP 默认端口；显式 :80 与省略形式仍绑定同一精确 Host/Origin。
+        if default_port {
+            address.truncate(address.len() - ":80".len());
+            localhost.truncate(localhost.len() - ":80".len());
+        }
         peer.ip().is_loopback()
-            && matches!(header("host"), Some(host) if host == address || host == localhost)
+            && header("host").is_some_and(|host| {
+                let host =
+                    if default_port { host.strip_suffix(":80").unwrap_or(host) } else { host };
+                host == address || host == localhost
+            })
             && header("origin").is_none_or(|origin| {
+                let origin = if default_port {
+                    origin.strip_suffix(":80").unwrap_or(origin)
+                } else {
+                    origin
+                };
                 origin == format!("http://{address}") || origin == format!("http://{localhost}")
             })
     }

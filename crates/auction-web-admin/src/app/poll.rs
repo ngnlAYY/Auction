@@ -159,6 +159,8 @@ pub(crate) async fn sleep_while_visible(visibility: &PageVisibility, delay_milli
         TimeoutFuture::new(slice).await;
         remaining -= slice;
     }
+    // 最后一片计时期间也可能转入后台；不能在隐藏状态下交付下一次轮询。
+    visibility.wait_until_visible().await;
 }
 
 /// 可选自动轮询 hook：间隔为 0 时关闭；开启后每隔 `interval_seconds` 秒执行一次

@@ -7,6 +7,7 @@ use dioxus::prelude::*;
 
 use crate::api::fetch_dashboard;
 
+use super::pending::{PendingCommandPanel, use_pending_commands};
 use super::poll::{AutoPollControls, use_auto_poll};
 use super::query::use_dashboard_query_state;
 use super::{AdminReadinessResource, admin_api_error_message};
@@ -22,6 +23,7 @@ use controls::MailPollerControls;
 /// 按旧版单快照请求模型加载管理总览。
 pub(super) fn page() -> Element {
     let mut refresh = use_signal(|| 0_u64);
+    let pending = use_pending_commands(refresh);
     let dashboard = use_resource(move || {
         let _ = refresh();
         fetch_dashboard()
@@ -62,6 +64,7 @@ pub(super) fn page() -> Element {
                     }
                 }
             }
+            PendingCommandPanel { owner: pending }
             if state.is_none() {
                 AsyncState {
                     kind: AsyncStateKind::Loading,

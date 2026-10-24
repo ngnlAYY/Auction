@@ -64,6 +64,10 @@ Admin 创建与改期统一要求 `preview < open < end`；两小时只是邮箱
 新拍卖的 recovery 快照显式冻结 `cod_return_limit`，创建、自动 bootstrap 和后继共用同一模板序列化；
 旧快照缺字段时仍按三次处理，不回写已有场次或已接受结果。普通出价的事实 ID 数量与领域规划共同使用有效
 `bid_ceiling()`；历史超额 Slow 代理在 1B 同价边界立即守位，不依赖之后的慢速任务纠正领先者。
+普通命令可选的第二条事实必须是确定性第二条 ID、Proxy 机制及另一位出价者，合法同价反击保持；
+新编码与历史重放共用此绑定校验，不按当前状态重新计算历史结果。
+Recovery 复用 `RequestHash::from_legacy_go_json` 的固定字段序与转义规则；连续片段直接进入摘要，
+不另建完整 canonical 缓冲或维护第二套字符串编码器。
 
 装备标记由 [ports/public/watch.rs](crates/auction-application/src/ports/public/watch.rs) 与
 [services/public/watch.rs](crates/auction-application/src/services/public/watch.rs) 拥有：稳定命令摘要包含会话用户，
@@ -211,6 +215,7 @@ token/fencing 和数据库实时租约，过期不得复活；release 只接受�
 后续只随已完成前缀的入站事务删除，不把正文或凭据交给队列。
 仅 `Retryable` 错误与超时进入有界重试；原始邮件/响应只进入独立加密诊断，不参与命令摘要、完成证明或 cursor
 （见[邮件诊断](ops/mail/diagnostics.md)）。
+邮件附件和投稿项以借用 ID 集合去重，保持输入顺序、数量上限与原错误优先级，不复制附件正文或装备实体。
 装备来源的临时网络、限流或服务故障保留原可重试错误及诊断任务，不转为永久拒收或安排 Return；
 确定的来源、身份或过滤拒绝继续沿原受控退件路径。来源采集时间与本地业务变更时间分离，外部读取不能决定锁后聚合时间。
 `ports/mail/equipment_diagnostics/reason.rs` 拥有来源解析的九项闭集诊断码，进程内观察使用枚举，
@@ -221,8 +226,9 @@ token/fencing 和数据库实时租约，过期不得复活；release 只接受�
 `WorkerControlPort::mail_progress` 提供可选跨进程读取；观测失败不改变命令、租约或持久游标，旧适配器明确不可用。
 
 `MailboxMaintenanceService` 不把零条 Sent 匹配当作未发送证明，未知 Send 始终保留人工核对；
-只有已正向确认原附件仍在的 take 可有界重排队。恢复计数只统计已确认提交的实际状态迁移，
-并核对冻结 Credits、COD 和精确装备集合；已领取邮件不再暴露原金额/资产，不凭清空后的剩余值恢复。
+Take 只有严格缺失证明或完整详情的全部资产归零才可确认成功；仅原装备集合、Credits、COD 完全相同才可有界重排。
+部分、额外、重复装备或金额漂移保留人工核对。恢复计数只统计已确认提交的实际迁移；
+Send 恢复仍要求冻结金额与资产证明，不能从已领取后的空资产反推原值。
 通知还要求正文保留唯一原入站关联，Sent 时间落在原 `sending_at` 与未知结果记录时间之间；
 分钟精度不能向下放宽围栏，通用重复模板、关联缺失及精度歧义均保持未知，单条模板重建失败不阻断其他候选。
 compose 的未知 COD 不视为零；Admin delivery offset 上限为 `100_000`，Admin 邮件可选空筛选等同省略。
@@ -233,6 +239,7 @@ compose 的未知 COD 不视为零；Admin delivery offset 上限为 `100_000`�
 可配置 MM 正文仍为 14 项，默认使用分段英文；模板只展示已决定的拒收、结算与账户事实，不重新决定退回或金额。
 买家装备 COD 的 `{price_breakdown}` 只消费冻结结算明细，`{amount}` 保持实际 COD；已冻结正文与幂等摘要不因默认文案升级
 重写。模板占位符与保存生效范围见[配置手册](ops/config/README.md#邮件正文模板)。
+三层模板边界均拒绝任意位置的孤立右花括号；合法占位符、必需字段与已冻结正文不变。
 
 [ports/scheduling](crates/auction-application/src/ports/scheduling) 只表达冻结轮次与下一 UTC 触发时刻（cron 解析在配置层），
 定时器不能替代持久化 due、游标和租约；[ports/operations](crates/auction-application/src/ports/operations) 定义安全水位、
@@ -250,6 +257,7 @@ Admin 服务启动前撤销旧 Admin 会话，失败阻断启动，token 摘要�
 首次设置与敏感配置复用相同边界。[ports/realtime](crates/auction-application/src/ports/realtime) 定义事件、连续游标、
 消费所有权和重放边界，事件不能代替权威快照（见[实时契约](docs/contracts/events.md)）。
 Public/Admin 登录结果的 `Debug` 只保留身份投影，原始 session 与 CSRF token 始终脱敏；Public 两个截止同为 `None` 才表示永久。
+会话 token 先检查 43 字节无填充编码长度，再解码到 32 字节栈缓冲；摘要输入仍是解码字节，不是 Cookie 文本。
 Admin 录入命令中的完整装备 URL、论坛镜像正文和邮箱 compose 草稿的主题/正文也在 `Debug` 中脱敏，
 避免 URL 包装或只读投影重新暴露装备 key、登录 key；实际业务字段和命令摘要保持原文。
 本地 relay 按有界分页遍历 stream 目录；每条已校验事件直接移交 sink，只保留确认所需的 ID/序号，

@@ -259,7 +259,7 @@ fn next_session_expiration(
     now.checked_add_signed(ttl).ok_or(SessionError::InvalidConfiguration.into())
 }
 
-/// 统一把原始 session token 转为摘要并计算滑动过期时间，避免 Public/Admin 入口分叉。
+/// 把 Admin 原始 session token 转为摘要并计算滑动过期时间；Public 活动不延长期限。
 fn prepare_session_token(
     raw_token: &str,
     now: DateTime<Utc>,
@@ -338,8 +338,15 @@ fn generate_token() -> Result<(String, [u8; 32]), ApplicationError> {
 }
 
 fn hash_token(raw_token: &str) -> Result<[u8; 32], ApplicationError> {
-    let decoded = URL_SAFE_NO_PAD.decode(raw_token).map_err(|_| SessionError::Unauthenticated)?;
-    if decoded.len() != 32 {
+    // 固定 32 字节 token 的无填充编码恰为 43 字节；先拒绝其他长度，再解码到栈。
+    if raw_token.len() != 43 {
+        return Err(SessionError::Unauthenticated.into());
+    }
+    let mut decoded = [0_u8; 32];
+    let decoded_len = URL_SAFE_NO_PAD
+        .decode_slice(raw_token, &mut decoded)
+        .map_err(|_| SessionError::Unauthenticated)?;
+    if decoded_len != decoded.len() {
         return Err(SessionError::Unauthenticated.into());
     }
     Ok(Sha256::digest(decoded).into())

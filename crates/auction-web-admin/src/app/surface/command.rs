@@ -1,6 +1,4 @@
 //! Admin 幂等命令与动作执行骨架的统一 helper。
-//! - [`stable_command_id`]：单命令形态。同一输入签名复用已冻结的 `command_id`（支撑服务端
-//!   幂等重试），签名变更即重新生成。
 //! - [`stable_scoped_command_id`]：多目标并行形态，按签名分别冻结 `command_id`，互不覆盖。
 //! - [`run_admin_action`] / [`run_admin_feedback_action`]：动作执行骨架，统一 busy
 //!   置位/复位与 spawn 边界。
@@ -11,21 +9,6 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use super::AdminActionFeedback;
-
-/// 为同一组输入复用 `command_id`，避免重复提交生成不同命令；输入签名变更即重新生成。
-pub fn stable_command_id(
-    mut command_state: Signal<Option<(String, Uuid)>>,
-    signature: String,
-) -> Uuid {
-    match command_state() {
-        Some((current, command_id)) if current == signature => command_id,
-        _ => {
-            let command_id = Uuid::new_v4();
-            command_state.set(Some((signature, command_id)));
-            command_id
-        }
-    }
-}
 
 /// 按签名分别冻结 `command_id` 的多目标形态；不同签名互不覆盖，成功后由调用方
 /// `remove` 对应条目。

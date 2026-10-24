@@ -215,7 +215,10 @@ pub(super) fn cookie_header(
     cookie: &EhentaiCookie,
     operation: EhentaiOperation,
 ) -> Result<HeaderValue, EhentaiError> {
-    HeaderValue::from_str(cookie.as_str()).map_err(|_| EhentaiError::credential(operation))
+    let mut header =
+        HeaderValue::from_str(cookie.as_str()).map_err(|_| EhentaiError::credential(operation))?;
+    header.set_sensitive(true);
+    Ok(header)
 }
 
 pub(super) fn valid_cookie(cookie: &EhentaiCookie) -> bool {
@@ -381,7 +384,8 @@ pub(super) fn is_loopback_host(url: &Url) -> bool {
 
 pub(super) fn build_forum_http_client() -> Result<Client, reqwest::Error> {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    Client::builder().no_proxy().redirect(Policy::none()).build()
+    // 单次论坛写入不能由传输层隐式重放；重试决定只能来自持久任务及远端证明。
+    Client::builder().no_proxy().redirect(Policy::none()).retry(reqwest::retry::never()).build()
 }
 
 #[cfg(test)]

@@ -24,10 +24,8 @@ pub(super) fn map_mooglemail_message(
     let returnable = message.returnable;
     let claimable = message.claimable;
     let business = into_application_message(message, mailbox_key)?;
-    let sender = (!business.sender.is_empty()).then(|| business.sender.clone());
-    let display_subject = (!business.subject.is_empty()).then(|| business.subject.clone());
-    let headers_present = sender.is_some() && display_subject.is_some();
-    let sender = sender.filter(|_| headers_present);
+    let headers_present = !business.sender.is_empty() && !business.subject.is_empty();
+    let sender = headers_present.then(|| business.sender.clone());
     let message_display =
         headers_present.then(|| MailDisplaySnapshot::from_message(&business)).flatten();
     Ok(MailPollFetchedMessage {

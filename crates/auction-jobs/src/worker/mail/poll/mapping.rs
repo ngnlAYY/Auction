@@ -1,5 +1,7 @@
 //! MoogleMail Worker 的安全批次校验与入站事实映射。
 
+use std::collections::HashSet;
+
 use auction_application::{MailPollClaim, MailPollIntake, MailProcessingDecision};
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -13,6 +15,8 @@ pub(super) fn valid_page(
     world_id: &str,
     batch_size: u16,
 ) -> bool {
+    // 只借用 ID，不复制正文或字符串；批次去重不能对每封重新扫描整个已见前缀。
+    let mut seen_mail_ids = HashSet::new();
     page.mailbox_key == claim.mailbox_key
         && page.world_id == world_id
         && page.messages.len() <= usize::from(batch_size)
@@ -28,7 +32,7 @@ pub(super) fn valid_page(
             page.next_cursor.as_deref()
                 == page.messages.last().map(|message| message.external_mail_id.as_str())
         }
-        && page.messages.iter().enumerate().all(|(index, message)| {
+        && page.messages.iter().all(|message| {
             !message.external_mail_id.is_empty()
                 // 任意成功前缀的末封邮件都可能成为 cursor，必须满足持久化游标的长度边界。
                 && message.external_mail_id.len() <= 256
@@ -42,10 +46,7 @@ pub(super) fn valid_page(
                 && message.credits >= 0
                 && message.cod >= 0
                 && message.attachment_count <= 1000
-                && (index == 0
-                    || page.messages[..index]
-                        .iter()
-                        .all(|previous| previous.external_mail_id != message.external_mail_id))
+                && seen_mail_ids.insert(message.external_mail_id.as_str())
                 && message.business.as_ref().is_none_or(|business| {
                     business.mailbox_key == claim.mailbox_key
                         && business.external_mail_id == message.external_mail_id

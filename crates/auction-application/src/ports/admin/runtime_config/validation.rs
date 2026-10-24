@@ -182,6 +182,11 @@ fn validate_runtime_template_body(
     let mut seen = Vec::new();
     while let Some(relative_start) = value[cursor..].find('{') {
         let start = cursor + relative_start;
+        if value[cursor..start].contains('}') {
+            return Err(AdminRuntimeConfigError::InvalidDocument(
+                "mail_templates 占位符未闭合".to_owned(),
+            ));
+        }
         let relative_end = value[start + 1..].find('}').ok_or_else(|| {
             AdminRuntimeConfigError::InvalidDocument("mail_templates 占位符未闭合".to_owned())
         })?;
@@ -196,6 +201,11 @@ fn validate_runtime_template_body(
             seen.push(placeholder);
         }
         cursor = end + 1;
+    }
+    if value[cursor..].contains('}') {
+        return Err(AdminRuntimeConfigError::InvalidDocument(
+            "mail_templates 占位符未闭合".to_owned(),
+        ));
     }
     if required.iter().any(|placeholder| !seen.contains(placeholder)) {
         return Err(AdminRuntimeConfigError::InvalidDocument(

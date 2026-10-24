@@ -11,8 +11,8 @@ use super::common::{
 use super::*;
 
 impl MoogleMailParser {
-    /// 证明最终发送响应成功，并尽可能提取远端邮件 ID。
-    /// 返回 None 只表示明确成功页没有暴露唯一 mid；没有明确成功页时必须进入 write_unknown。
+    /// 解析最终发送响应的成功提示，并尽可能提取远端邮件 ID。
+    /// 返回 None 表示提示页未暴露唯一 mid；提示缺失或解析失败也不能替代独立 Sent 证明。
     pub fn prove_send_completed(
         &self,
         document: &[u8],
@@ -40,7 +40,7 @@ impl MoogleMailParser {
         Err(compose_error(world, MoogleMailErrorCategory::WriteUnknown))
     }
 
-    /// 只从可见协议文字识别明确发送失败；自寄拒绝须来自唯一系统提示区。
+    /// 只从唯一系统提示区的可见协议文字识别明确发送失败。
     /// script/style/noscript/textarea 中的诱饵短语不参与分类；已有 `#mmail_fin` 的页面交给
     /// 成功证明处理，不会被误分类为失败。
     pub fn classify_send_response_failure(
@@ -60,17 +60,21 @@ impl MoogleMailParser {
         if bodies.len() != 1 || parsed.select(&confirmation_selector).next().is_some() {
             return Ok(None);
         }
-        // 自寄提示只采信实际系统消息，不把装备名称或其他可控可见文字当作拒绝证明。
+        // 所有拒绝提示都只采信系统消息，不把装备名称或其他可控可见文字当作拒绝证明。
         let message_selector = selector("#messagebox_inner", world)?;
-        let messages = parsed.select(&message_selector).collect::<Vec<_>>();
-        if messages.len() == 1
-            && visible_body_text(messages[0]).eq_ignore_ascii_case(
-                "Messaging yourself must be the ultimate form of social withdrawal, kupo! Seek help, kupo!",
-            )
+        let mut messages = parsed.select(&message_selector);
+        let Some(message) = messages.next() else { return Ok(None) };
+        if messages.next().is_some() {
+            return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
+        }
+        let visible = visible_body_text(message);
+        if visible.eq_ignore_ascii_case(
+            "Messaging yourself must be the ultimate form of social withdrawal, kupo! Seek help, kupo!",
+        )
         {
             return Ok(Some(MoogleMailSendResponseFailure::RecipientIsSender));
         }
-        let visible = visible_body_text(bodies[0]).to_ascii_lowercase();
+        let visible = visible.to_ascii_lowercase();
         const RECIPIENT_NOT_FOUND_PHRASES: &[&str] = &[
             "recipient not found",
             "recipient does not exist",

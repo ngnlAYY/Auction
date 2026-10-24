@@ -90,15 +90,21 @@ pub(super) async fn touch_postgres(
     now: DateTime<Utc>,
     next_expires_at: DateTime<Utc>,
 ) -> Result<AdminSessionIdentity, ApplicationError> {
+    // 物化锁定行后再判断截止；只在 UPDATE 谓词换用实时钟，仍可能先判断再等待行锁。
     let row = sqlx::query(
-        "UPDATE public.admin_sessions
-         SET last_activity_at = GREATEST(last_activity_at, $1),
-             expires_at = LEAST(absolute_expires_at, GREATEST(expires_at, $2))
-         WHERE token_hash = $3
-           AND csrf_hash = $4
-           AND revoked_at IS NULL
-           AND expires_at > $1
-         RETURNING actor, expires_at, absolute_expires_at",
+        "WITH locked AS MATERIALIZED (
+            SELECT token_hash, expires_at
+            FROM public.admin_sessions
+            WHERE token_hash = $3 AND csrf_hash = $4 AND revoked_at IS NULL
+            FOR UPDATE
+         )
+         UPDATE public.admin_sessions AS session
+         SET last_activity_at = GREATEST(session.last_activity_at, $1),
+             expires_at = LEAST(session.absolute_expires_at, GREATEST(session.expires_at, $2))
+         FROM locked
+         WHERE session.token_hash = locked.token_hash
+           AND locked.expires_at > GREATEST($1, clock_timestamp())
+         RETURNING session.actor, session.expires_at, session.absolute_expires_at",
     )
     .bind(now)
     .bind(next_expires_at)

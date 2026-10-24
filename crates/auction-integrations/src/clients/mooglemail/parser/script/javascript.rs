@@ -4,7 +4,7 @@ use super::*;
 
 pub(crate) fn required_script_value(source: &str, name: &str) -> Option<i64> {
     // 页面既可能逐行 `var x = 0;`，也可能使用 let/const、逗号声明或有符号整数。
-    // 只接受“标识符边界 + = + 整数 + 语句分隔”的赋值形态，出现多处不同写法即失败。
+    // 任何重复赋值、非整数右值或复合改写都会使状态不再唯一，不能忽略后沿用较早的整数。
     let mut found = None;
     for (index, _) in source.match_indices(name) {
         let before = source[..index].chars().next_back();
@@ -23,8 +23,24 @@ pub(crate) fn required_script_value(source: &str, name: &str) -> Option<i64> {
         while source.as_bytes().get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
             cursor += 1;
         }
-        if source.as_bytes().get(cursor) != Some(&b'=') {
+        let prefix = source[..index].trim_end();
+        let suffix = &source[cursor..];
+        if prefix.ends_with("++")
+            || prefix.ends_with("--")
+            || [
+                "++", "--", "+=", "-=", "*=", "/=", "%=", "**=", "<<=", ">>=", ">>>=", "&=", "^=",
+                "|=", "&&=", "||=", "??=",
+            ]
+            .iter()
+            .any(|operator| suffix.starts_with(operator))
+        {
+            return None;
+        }
+        if !suffix.starts_with('=') || suffix.starts_with("==") {
             continue;
+        }
+        if prefix.ends_with('.') || found.is_some() {
+            return None;
         }
         cursor += 1;
         while source.as_bytes().get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
@@ -32,18 +48,14 @@ pub(crate) fn required_script_value(source: &str, name: &str) -> Option<i64> {
         }
         let negative = matches!(source.as_bytes().get(cursor), Some(b'-' | b'+'));
         if negative {
-            let sign = source.as_bytes()[cursor];
             cursor += 1;
-            if sign == b'+' {
-                // 正号没有信息量，但仍允许。
-            }
         }
         let start = cursor;
         while source.as_bytes().get(cursor).is_some_and(|byte| byte.is_ascii_digit()) {
             cursor += 1;
         }
         if start == cursor {
-            continue;
+            return None;
         }
         let value = source[start..cursor].parse::<i64>().ok()?;
         let value = if negative && source.as_bytes().get(start - 1) == Some(&b'-') {
@@ -56,11 +68,9 @@ pub(crate) fn required_script_value(source: &str, name: &str) -> Option<i64> {
         }
         let terminator = source.as_bytes().get(cursor).copied();
         if !matches!(terminator, None | Some(b';' | b',' | b'}')) {
-            continue;
-        }
-        if found.replace(value).is_some() {
             return None;
         }
+        found = Some(value);
     }
     found
 }

@@ -1,5 +1,7 @@
 //! Operations alert signal 观察事务。
 
+use std::collections::HashSet;
+
 use super::super::*;
 
 pub(crate) async fn observe_postgres(
@@ -15,17 +17,16 @@ pub(crate) async fn observe_postgres(
         pool.begin().await.map_err(|_| storage_error("开启 operations alert 观察事务失败"))?;
 
     for observation in &command.observations {
-        let mut fingerprints = Vec::with_capacity(observation.signals.len());
+        let mut fingerprints = HashSet::with_capacity(observation.signals.len());
         for signal in &observation.signals {
             signal.validate().map_err(ApplicationError::from)?;
-            if fingerprints.contains(&signal.fingerprint) {
+            if !fingerprints.insert(signal.fingerprint) {
                 return rollback_operations_alert(
                     transaction,
                     "operations alert 单轮出现重复 signal",
                 )
                 .await;
             }
-            fingerprints.push(signal.fingerprint);
             let state_version: i64 = sqlx::query_scalar(
                 "INSERT INTO public.operations_alert_signals
                     (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
@@ -83,7 +84,7 @@ pub(crate) async fn observe_postgres(
             let fingerprint: Vec<u8> = row
                 .try_get("fingerprint")
                 .map_err(|_| storage_error("读取 operations alert fingerprint 失败"))?;
-            if !fingerprints.iter().any(|value| value.as_slice() == fingerprint.as_slice()) {
+            if !fingerprints.contains(fingerprint.as_slice()) {
                 sqlx::query(
                     "UPDATE public.operations_alert_signals
                      SET active = false, resolved_at = $2, next_notify_at = NULL,

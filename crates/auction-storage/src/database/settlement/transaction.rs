@@ -1,5 +1,7 @@
 //! 结算事务主流程与锁内计划应用；事务边界由父模块统一装配。
 
+use std::collections::HashSet;
+
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -705,7 +707,12 @@ pub(super) fn validate_proxy_closure_plans(
     settlement_plan: &SettlementPlan,
     closure_plans: &[CompetitionPlan],
 ) -> Result<(), SettlementTransactionError> {
-    for (index, plan) in closure_plans.iter().enumerate() {
+    if closure_plans.is_empty() {
+        return Ok(());
+    }
+    let lot_ids: HashSet<_> = settlement_plan.lines.iter().map(|line| line.lot_id).collect();
+    let mut closed_lots = HashSet::with_capacity(closure_plans.len());
+    for plan in closure_plans {
         plan.validate().map_err(|_| invalid("结算代理关闭计划校验失败"))?;
         let transition = match (plan.proxy_transitions.as_slice(), plan.proxy_states.as_slice()) {
             ([transition], [state]) => (transition, state),
@@ -717,10 +724,8 @@ pub(super) fn validate_proxy_closure_plans(
             || transition.0.new_status != ProxyStatus::Closed
             || transition.1.status != ProxyStatus::Closed
             || transition.1.lot_id != plan.final_lot.lot_id
-            || !settlement_plan.lines.iter().any(|line| line.lot_id == plan.final_lot.lot_id)
-            || closure_plans[..index]
-                .iter()
-                .any(|previous| previous.final_lot.lot_id == plan.final_lot.lot_id)
+            || !lot_ids.contains(&plan.final_lot.lot_id)
+            || !closed_lots.insert(plan.final_lot.lot_id)
         {
             return Err(invalid("结算代理关闭计划与结算命令或 lot 不一致"));
         }

@@ -112,7 +112,7 @@ group = "auction-worker-control"
 allowed_peer_gids = []
 # 可选：允许访问 control 的内核认证 UID 列表；默认空，启用时与 GID 列表至少填写一项。
 allowed_peer_uids = []
-# 可选：预先建立、归 Worker 运行用户所有且不可被 other 写入的 runtime 目录；默认 /run/hv-auction/worker。
+# 可选：预建且归 Worker 用户所有、禁 group/other 写入的受信 runtime 目录；祖先链同样受检，默认 /run/hv-auction/worker。
 runtime_directory = "/run/hv-auction/worker"
 # 可选：规范化绝对 Unix socket 路径；默认 /run/hv-auction/worker/control.sock。
 socket_path = "/run/hv-auction/worker/control.sock"

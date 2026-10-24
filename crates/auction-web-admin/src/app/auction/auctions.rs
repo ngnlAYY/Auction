@@ -28,6 +28,11 @@ pub(super) fn page() -> Element {
     // 世界筛选与分页跟地址栏双向同步：刷新、分享链接和浏览器前进/后退都能恢复视图。
     let query = use_auctions_query_state();
     let query_state = query.state;
+    // 请求只订阅服务端筛选和页码；本地排序变化不能重发列表请求。
+    let requested_query = use_memo(move || {
+        let current = query_state.read();
+        (current.world.clone(), current.page)
+    });
     let reload_generation = use_signal(|| 0_u64);
     let pending = use_pending_commands(reload_generation);
     let pagination = use_admin_pagination("auctions", &["page_size"], Some(100), 100_000);
@@ -35,8 +40,7 @@ pub(super) fn page() -> Element {
         pagination.clone(),
         move || {
             let _ = reload_generation();
-            let current = query_state();
-            (current.world, current.page)
+            requested_query()
         },
         |(world, page), size| fetch_admin_auctions(world, "all".to_owned(), page, size),
     );

@@ -67,7 +67,16 @@ pub(super) async fn document_once(
     let mut request =
         adapter.client.get(target).header(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT);
     if let Some(cookie) = cookie {
-        request = request.header(reqwest::header::COOKIE, cookie.expose());
+        let mut header = reqwest::header::HeaderValue::from_str(cookie.expose()).map_err(|_| {
+            observed_failure(
+                MailEquipmentDiagnosticCategory::CredentialUnavailable,
+                None,
+                started,
+                None,
+            )
+        })?;
+        header.set_sensitive(true);
+        request = request.header(reqwest::header::COOKIE, header);
     }
     // 装备读取使用独立 reqwest client，但共享同一个 MoogleMail 凭据 owner。
     if let Some(ownership) =

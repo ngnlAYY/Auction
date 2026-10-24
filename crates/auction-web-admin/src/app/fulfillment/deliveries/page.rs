@@ -28,6 +28,10 @@ pub fn page() -> Element {
     // 状态筛选与分页跟地址栏双向同步；对话框、对账草稿和命令上下文是瞬态，不入 URL。
     let query = use_deliveries_query_state();
     let query_state = query.state;
+    let requested_query = use_memo(move || {
+        let current = query_state.read();
+        (current.status.clone(), current.page)
+    });
     let mut pending_dialog = use_signal(|| None::<DeliveryDialogState>);
     let mut reconcile_draft = use_signal(|| None::<DeliveryReconcileDraft>);
     let pagination = use_admin_pagination("deliveries", &["page_size"], Some(100), i64::MAX);
@@ -35,8 +39,7 @@ pub fn page() -> Element {
         pagination.clone(),
         move || {
             let _ = refresh();
-            let current = query_state();
-            (current.status, current.page)
+            requested_query()
         },
         |(status, page), size| fetch_deliveries(status, page, size),
     );

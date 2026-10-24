@@ -18,6 +18,14 @@ pub(super) async fn publish_postgres(
 ) -> Result<(), ApplicationError> {
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启论坛分页发布证明事务失败"))?;
+    // 锁等待结束后才检查实时租约，不能凭远端回执的旧时间提交过期 claim。
+    sqlx::query(
+        "SELECT auction_id FROM public.auction_forum_sync WHERE auction_id = $1 FOR UPDATE",
+    )
+    .bind(claim.auction_id.as_uuid())
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| storage_error("锁定论坛发布租约失败"))?;
     let page_count = (rendered.catalog_continuation.len() + 1) as i32;
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
@@ -50,7 +58,8 @@ pub(super) async fn publish_postgres(
            AND source_revision = $13
            AND catalog_page_count IN (1, $14)
            AND (catalog_post_id IS NULL OR (catalog_post_id = $6 AND system_log_post_id = $7))
-           AND lease_expires_at > $9",
+           AND lease_expires_at > $9
+           AND lease_expires_at > clock_timestamp()",
     )
     .bind(claim.auction_id.as_uuid())
     .bind(&rendered.title)

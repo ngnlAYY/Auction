@@ -303,6 +303,9 @@ async fn finalize_postgres(
         .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
     let audit_id = Uuid::new_v4();
     run_reconcile_transaction!(pool, transaction, {
+        lock_fulfillment(&mut transaction, claim.obligation_id.as_uuid())
+            .await
+            .map_err(ReconcileTransactionError::Storage)?;
         let updated = sqlx::query(
             r#"UPDATE public.settlement_obligation_fulfillments
                    SET execution_state = $1,
@@ -437,6 +440,10 @@ pub(super) async fn fail_postgres(
         .ok_or_else(|| repository_error_owned("结算履约重试间隔无效"))?;
     let state_version = i64::try_from(claim.state_version)
         .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
+    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+    lock_fulfillment(&mut transaction, claim.obligation_id.as_uuid())
+        .await
+        .map_err(map_storage_error)?;
     let result = sqlx::query(
         r#"UPDATE public.settlement_obligation_fulfillments
            SET claim_token = NULL,
@@ -461,12 +468,29 @@ pub(super) async fn fail_postgres(
     .bind(state_version)
     .bind(claim.claim_token)
     .bind(claim.claim_fencing)
-    .execute(pool)
+    .execute(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
         return Err(repository_error_owned("结算履约失败记录的 claim 已失效"));
     }
+    transaction.commit().await.map_err(map_storage_error)?;
+    Ok(())
+}
+
+/// 取得 execution 行锁后再校验 TTL，避免锁等待前求值的时钟放过过期 claim。
+#[cfg(feature = "postgres")]
+async fn lock_fulfillment(
+    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    obligation_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "SELECT obligation_id FROM public.settlement_obligation_fulfillments
+         WHERE obligation_id = $1 FOR UPDATE",
+    )
+    .bind(obligation_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
     Ok(())
 }
 

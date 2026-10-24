@@ -34,7 +34,6 @@ const MAXIMUM_FORUM_TITLE_RUNES: usize = 50;
 const MAXIMUM_FORM_FIELDS: usize = 128;
 const MAXIMUM_FORM_FIELD_BYTES: usize = 4 * 1024;
 const MAXIMUM_COOKIE_BYTES: usize = 16 * 1024;
-const MAXIMUM_CREDENTIAL_CANDIDATES: usize = 1;
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_MINIMUM_REQUEST_INTERVAL: Duration = Duration::from_millis(750);
 const DEFAULT_MAXIMUM_TOPIC_PAGES: usize = 10;

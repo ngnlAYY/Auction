@@ -155,4 +155,6 @@ pub(crate) async fn sleep_while_visible(visibility: &PageVisibility, delay_milli
         TimeoutFuture::new(slice).await;
         remaining -= slice;
     }
+    // 最后一片计时期间也可能转入隐藏；不能在隐藏页完成等待并立即发起轮询或重连。
+    visibility.wait_until_visible().await;
 }

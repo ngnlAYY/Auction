@@ -5,13 +5,15 @@ use std::{
     collections::BTreeMap,
     ffi::OsStr,
     fs,
+    io::{self, Read},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::{Child, Command, Output, Stdio},
 };
 
 use anyhow::Context;
 
+const MAX_SYSTEMCTL_OUTPUT_BYTES: usize = 64 * 1024;
 const MAX_SYSTEMCTL_DIAGNOSTIC_BYTES: usize = 2_048;
 
 pub(super) const START_ORDER: [ManagedRole; 3] =
@@ -201,12 +203,17 @@ impl SystemdClient {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let output = Command::new(&self.executable)
+        let child = Command::new(&self.executable)
             .arg("--no-pager")
             .arg("--no-ask-password")
             .args(arguments)
-            .output()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .with_context(|| format!("{label}：无法执行 {}", self.executable.display()))?;
+        let output =
+            capture_output(child).with_context(|| format!("{label}：读取 systemctl 输出失败"))?;
         if output.status.success() {
             return Ok(output);
         }
@@ -218,6 +225,51 @@ impl SystemdClient {
             if diagnostic.is_empty() { "systemctl 未提供诊断" } else { &diagnostic },
         )
     }
+}
+
+/// stdout 在读取时限量；stderr 并发排空但只保留诊断前缀，避免双管道互相阻塞。
+/// 超限或读取失败必须先杀死并回收子进程，再等待诊断读取线程结束。
+fn capture_output(mut child: Child) -> anyhow::Result<Output> {
+    let result = (|| {
+        let stdout = child.stdout.take().context("systemctl stdout pipe is missing")?;
+        let stderr = child.stderr.take().context("systemctl stderr pipe is missing")?;
+        std::thread::scope(|scope| {
+            let diagnostic = std::thread::Builder::new().spawn_scoped(scope, move || {
+                let mut stderr = stderr;
+                let mut bytes = Vec::with_capacity(MAX_SYSTEMCTL_DIAGNOSTIC_BYTES);
+                stderr
+                    .by_ref()
+                    .take(MAX_SYSTEMCTL_DIAGNOSTIC_BYTES as u64)
+                    .read_to_end(&mut bytes)?;
+                io::copy(&mut stderr, &mut io::sink())?;
+                Ok::<_, io::Error>(bytes)
+            })?;
+            let stdout = (|| {
+                let mut bytes = Vec::new();
+                stdout.take(MAX_SYSTEMCTL_OUTPUT_BYTES as u64 + 1).read_to_end(&mut bytes)?;
+                if bytes.len() > MAX_SYSTEMCTL_OUTPUT_BYTES {
+                    anyhow::bail!("systemctl 输出超过 64 KiB 上限");
+                }
+                Ok::<_, anyhow::Error>(bytes)
+            })();
+            if stdout.is_err() {
+                let _ = child.kill();
+            }
+            let status = child.wait();
+            if status.is_err() {
+                let _ = child.kill();
+            }
+            let stderr = diagnostic
+                .join()
+                .map_err(|_| anyhow::anyhow!("systemctl diagnostic reader panicked"))?;
+            Ok(Output { status: status?, stdout: stdout?, stderr: stderr? })
+        })
+    })();
+    if result.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    result
 }
 
 fn validate_systemctl(path: &Path) -> anyhow::Result<PathBuf> {
@@ -251,7 +303,7 @@ fn validate_unit_name(unit: &str) -> anyhow::Result<()> {
 }
 
 fn parse_snapshot(bytes: &[u8]) -> anyhow::Result<UnitSnapshot> {
-    if bytes.len() > 64 * 1024 {
+    if bytes.len() > MAX_SYSTEMCTL_OUTPUT_BYTES {
         anyhow::bail!("systemctl show 输出超过 64 KiB 上限")
     }
     let text = std::str::from_utf8(bytes).context("systemctl show 输出不是 UTF-8")?;
@@ -296,10 +348,11 @@ fn parse_snapshot(bytes: &[u8]) -> anyhow::Result<UnitSnapshot> {
 pub(super) fn single_line(value: &str, limit: usize) -> String {
     let mut output = String::with_capacity(value.len().min(limit));
     for character in value.chars() {
-        if output.len() >= limit {
+        let character = if character.is_control() { ' ' } else { character };
+        if character.len_utf8() > limit.saturating_sub(output.len()) {
             break;
         }
-        output.push(if character.is_control() { ' ' } else { character });
+        output.push(character);
     }
     output.trim().to_owned()
 }

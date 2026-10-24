@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// 负责按读侧 session 过期结果轮换论坛凭据的网关。
+/// 使用唯一论坛 Cookie；明确失效会回写，不自动换号或重放外部写入。
 #[derive(Clone)]
 pub struct EhentaiGateway {
     client: Arc<EhentaiClient>,
@@ -20,7 +20,7 @@ impl EhentaiGateway {
         Ok(Self { client, credentials })
     }
 
-    /// 创建主题；只有读侧 session 过期才会尝试下一个 Cookie。
+    /// 创建主题；读侧会话失效返回凭据不可用，写后失效保留原写入未知标记。
     pub async fn create_topic(
         &self,
         world: SettlementWorld,
@@ -29,71 +29,56 @@ impl EhentaiGateway {
     ) -> Result<auction_application::ForumTopicPublication, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
         let client = self.client.as_ref().clone().with_write_progress(progress);
-        for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
-            match client.create_topic(world, session.cookie(), rendered.clone()).await {
-                Ok(published) => return Ok(published),
-                Err(error) if error.is_session_expired() => {
-                    if session.invalidate_current().await.is_err() || session.advance().is_err() {
-                        return Err(EhentaiError::credential(EhentaiOperation::CreateTopic));
-                    }
-                }
-                Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
-                    let _ = session.invalidate_current().await;
-                    return Err(error);
-                }
-                Err(error) => return Err(error),
+        match client.create_topic(world, session.cookie(), rendered).await {
+            Err(error) if error.is_session_expired() => {
+                let _ = session.invalidate_current().await;
+                Err(EhentaiError::credential(EhentaiOperation::CreateTopic))
             }
+            Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
+                let _ = session.invalidate_current().await;
+                Err(error)
+            }
+            result => result,
         }
-        Err(EhentaiError::credential(EhentaiOperation::CreateTopic))
     }
 
-    /// 只读按有界精确标题集合查找唯一主题；读侧 session 过期时可安全轮换 Cookie。
+    /// 只读按有界精确标题集合查找唯一主题；会话失效后停止，不切换 Cookie。
     pub async fn find_topic_by_titles(
         &self,
         world: SettlementWorld,
         titles: &[String],
     ) -> Result<Option<auction_application::ForumPublishedThread>, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
-        for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
-            match self.client.find_topic_by_titles(world, session.cookie(), titles).await {
-                Ok(published) => return Ok(published),
-                Err(error) if error.is_session_expired() => {
-                    if session.invalidate_current().await.is_err() || session.advance().is_err() {
-                        return Err(EhentaiError::credential(EhentaiOperation::ReconcileTopic));
-                    }
-                }
-                Err(error) => return Err(error),
+        match self.client.find_topic_by_titles(world, session.cookie(), titles).await {
+            Err(error) if error.is_session_expired() => {
+                let _ = session.invalidate_current().await;
+                Err(EhentaiError::credential(EhentaiOperation::ReconcileTopic))
             }
+            result => result,
         }
-        Err(EhentaiError::credential(EhentaiOperation::ReconcileTopic))
     }
 
-    /// 读取主题；读取失败且确认为 session 过期时才会尝试下一个 Cookie。
+    /// 读取主题；明确会话失效时回写并返回，不重试当前逻辑操作。
     pub async fn fetch_topic(
         &self,
         world: SettlementWorld,
         thread_id: &str,
     ) -> Result<AdminForumPreviewResult, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
-        for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
-            match self.client.fetch_topic(world, thread_id, session.cookie()).await {
-                Ok(result) => return Ok(result),
-                Err(error) if error.is_session_expired() => {
-                    if session.invalidate_current().await.is_err() || session.advance().is_err() {
-                        return Err(EhentaiError::credential(EhentaiOperation::FetchTopic));
-                    }
-                }
-                Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
-                    let _ = session.invalidate_current().await;
-                    return Err(error);
-                }
-                Err(error) => return Err(error),
+        match self.client.fetch_topic(world, thread_id, session.cookie()).await {
+            Err(error) if error.is_session_expired() => {
+                let _ = session.invalidate_current().await;
+                Err(EhentaiError::credential(EhentaiOperation::FetchTopic))
             }
+            Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
+                let _ = session.invalidate_current().await;
+                Err(error)
+            }
+            result => result,
         }
-        Err(EhentaiError::credential(EhentaiOperation::FetchTopic))
     }
 
-    /// 建立目录续页或系统日志；仅在 POST 尚未开始且明确 session 过期时轮换凭据。
+    /// 建立目录续页或系统日志；正文只移交一次，POST 开始后保持写入未知边界。
     pub async fn reply_topic(
         &self,
         world: SettlementWorld,
@@ -103,22 +88,17 @@ impl EhentaiGateway {
     ) -> Result<ForumPublishedPost, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
         let client = self.client.as_ref().clone().with_write_progress(progress);
-        for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
-            match client.reply_topic(world, thread_id, body.clone(), session.cookie()).await {
-                Ok(published) => return Ok(published),
-                Err(error) if error.is_session_expired() => {
-                    if session.invalidate_current().await.is_err() || session.advance().is_err() {
-                        return Err(EhentaiError::credential(EhentaiOperation::ReplyTopic));
-                    }
-                }
-                Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
-                    let _ = session.invalidate_current().await;
-                    return Err(error);
-                }
-                Err(error) => return Err(error),
+        match client.reply_topic(world, thread_id, body, session.cookie()).await {
+            Err(error) if error.is_session_expired() => {
+                let _ = session.invalidate_current().await;
+                Err(EhentaiError::credential(EhentaiOperation::ReplyTopic))
             }
+            Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
+                let _ = session.invalidate_current().await;
+                Err(error)
+            }
+            result => result,
         }
-        Err(EhentaiError::credential(EhentaiOperation::ReplyTopic))
     }
 
     /// 编辑固定目录页或系统日志；POST 开始后绝不切换 Cookie 重发。
@@ -133,28 +113,20 @@ impl EhentaiGateway {
     ) -> Result<ForumPublishedPost, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
         let client = self.client.as_ref().clone().with_write_progress(progress);
-        for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
-            match client
-                .edit_post(world, thread_id, post_id, metadata, body.clone(), session.cookie())
-                .await
-            {
-                Ok(published) => return Ok(published),
-                Err(error) if error.is_session_expired() => {
-                    if session.invalidate_current().await.is_err() || session.advance().is_err() {
-                        return Err(EhentaiError::credential(EhentaiOperation::EditPost));
-                    }
-                }
-                Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
-                    let _ = session.invalidate_current().await;
-                    return Err(error);
-                }
-                Err(error) => return Err(error),
+        match client.edit_post(world, thread_id, post_id, metadata, body, session.cookie()).await {
+            Err(error) if error.is_session_expired() => {
+                let _ = session.invalidate_current().await;
+                Err(EhentaiError::credential(EhentaiOperation::EditPost))
             }
+            Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
+                let _ = session.invalidate_current().await;
+                Err(error)
+            }
+            result => result,
         }
-        Err(EhentaiError::credential(EhentaiOperation::EditPost))
     }
 
-    /// 只读回读固定楼层原始 BBCode 与首帖元数据；session 过期时可以安全轮换 Cookie。
+    /// 只读回读固定楼层原始 BBCode 与首帖元数据；明确失效后返回凭据不可用。
     pub async fn read_post(
         &self,
         world: SettlementWorld,
@@ -162,22 +134,17 @@ impl EhentaiGateway {
         post_id: &str,
     ) -> Result<ForumReadPost, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
-        for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
-            match self.client.read_post(world, thread_id, post_id, session.cookie()).await {
-                Ok(body) => return Ok(body),
-                Err(error) if error.is_session_expired() => {
-                    if session.invalidate_current().await.is_err() || session.advance().is_err() {
-                        return Err(EhentaiError::credential(EhentaiOperation::ReadPost));
-                    }
-                }
-                Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
-                    let _ = session.invalidate_current().await;
-                    return Err(error);
-                }
-                Err(error) => return Err(error),
+        match self.client.read_post(world, thread_id, post_id, session.cookie()).await {
+            Err(error) if error.is_session_expired() => {
+                let _ = session.invalidate_current().await;
+                Err(EhentaiError::credential(EhentaiOperation::ReadPost))
             }
+            Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
+                let _ = session.invalidate_current().await;
+                Err(error)
+            }
+            result => result,
         }
-        Err(EhentaiError::credential(EhentaiOperation::ReadPost))
     }
 }
 

@@ -81,6 +81,7 @@ pub(super) async fn mark_enqueued_postgres(
         .ok_or_else(|| storage_error("operations alert 冷却时间溢出"))?;
     let mut transaction =
         pool.begin().await.map_err(|_| storage_error("开启 operations alert 入队确认事务失败"))?;
+    lock_batch(&mut transaction, claim.batch_id).await?;
     let updated = sqlx::query(
         "UPDATE public.operations_alert_batches
          SET status = 'enqueued', claim_token = NULL, claimed_at = NULL,
@@ -88,7 +89,7 @@ pub(super) async fn mark_enqueued_postgres(
              updated_at = $5
          WHERE id = $1 AND delivery_id = $2 AND status = 'claimed'
            AND claim_token = $3 AND claim_fencing = $4
-           AND claim_expires_at > $5",
+           AND claim_expires_at > $5 AND claim_expires_at > clock_timestamp()",
     )
     .bind(claim.batch_id)
     .bind(claim.delivery_id)
@@ -170,6 +171,7 @@ pub(super) async fn mark_claim_failed_postgres(
     };
     let mut transaction =
         pool.begin().await.map_err(|_| storage_error("开启 operations alert 失败退避事务失败"))?;
+    lock_batch(&mut transaction, claim.batch_id).await?;
     let updated = if terminal {
         let terminal_code = if error_code == OperationsAlertDispatchErrorCode::DependencyMismatch {
             error_code.as_str()
@@ -183,7 +185,7 @@ pub(super) async fn mark_claim_failed_postgres(
                  delivery_error_code = $3, completed_at = $4, updated_at = $4
              WHERE id = $1 AND delivery_id = $2 AND status = 'claimed'
                AND claim_token = $5 AND claim_fencing = $6
-               AND claim_expires_at > $4",
+               AND claim_expires_at > $4 AND claim_expires_at > clock_timestamp()",
         )
         .bind(claim.batch_id)
         .bind(claim.delivery_id)
@@ -203,7 +205,8 @@ pub(super) async fn mark_claim_failed_postgres(
                  delivery_error_code = '', completed_at = NULL, updated_at = $4
              WHERE id = $1 AND delivery_id = $2 AND status = 'claimed'
                AND claim_token = $5 AND claim_fencing = $6
-               AND claim_expires_at > $4 AND attempt_count < 3",
+               AND claim_expires_at > $4 AND claim_expires_at > clock_timestamp()
+               AND attempt_count < 3",
         )
         .bind(claim.batch_id)
         .bind(claim.delivery_id)
@@ -233,6 +236,19 @@ pub(super) async fn mark_claim_failed_postgres(
         .await?;
     }
     transaction.commit().await.map_err(|_| storage_error("提交 operations alert 失败退避事务失败"))
+}
+
+/// batch → delivery → signal 锁序不变；持锁后检查实时时钟，避免排队跨过 claim 截止。
+async fn lock_batch(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    batch_id: uuid::Uuid,
+) -> Result<(), ApplicationError> {
+    sqlx::query("SELECT id FROM public.operations_alert_batches WHERE id = $1 FOR UPDATE")
+        .bind(batch_id)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|_| storage_error("锁定 operations alert 批次租约失败"))?;
+    Ok(())
 }
 
 #[cfg(feature = "postgres")]

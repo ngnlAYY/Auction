@@ -149,8 +149,8 @@ pub(super) fn visible_confirmation_text(
 }
 
 /// 当前 HentaiVerse 也会用单一 CSS sprite 表示“邮件已发送”。
-/// 该证明只在调用方已经确认唯一 `#mmail_fin` 且页面不存在 compose form 后使用；这里再要求
-/// 完整的直接子结构，避免任意 `c5y` class 充当成功证据。
+/// 该提示只在调用方已经确认唯一 `#mmail_fin` 后使用；这里再要求完整的直接子结构，
+/// 避免任意 `c5y` class 充当提示。最终成功仍须独立完成 Sent 与空 compose 证明。
 pub(super) fn is_css_send_confirmation(element: ElementRef<'_>) -> bool {
     if !normalize_text(element.text().collect::<String>()).is_empty() {
         return false;
@@ -270,10 +270,6 @@ pub(super) fn valid_body(value: &str) -> bool {
         && !value
             .chars()
             .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
-}
-
-pub(super) fn canonical_body(value: &str) -> String {
-    value.replace("\r\n", "\n").trim_end_matches([' ', '\t', '\n']).to_owned()
 }
 
 pub(super) fn normalize_text(value: String) -> String {

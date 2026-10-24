@@ -93,6 +93,7 @@ pub(crate) async fn release_action_postgres(
         let claim = claim_snapshot.clone();
         let failure_code = failure_code.clone();
         Box::pin(async move {
+            lock_action(transaction, claim.action_id.as_uuid()).await?;
             let result = sqlx::query(
                 r#"UPDATE public.settlement_recovery_actions
                    SET claim_token = NULL,
@@ -178,6 +179,7 @@ pub(super) async fn complete_action_in_transaction(
         .fetch_one(&mut **transaction)
         .await
         .map_err(RecoveryActionTransactionError::from)?;
+    lock_action(transaction, claim.action_id.as_uuid()).await?;
     let (proof_kind, proof_reference, proof_digest, proof_observed_at) = terminal.proof().map_or(
         (None, None, None, None),
         |(kind, reference, digest, observed_at)| {

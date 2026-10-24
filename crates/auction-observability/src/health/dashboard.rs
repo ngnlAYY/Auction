@@ -102,7 +102,7 @@ impl HealthReader for HealthService {
                 return Err(HealthError::InvalidData);
             }
             let health = summarize(&heartbeats);
-            let processes = heartbeats.iter().map(process_state).collect::<Vec<_>>();
+            let processes = heartbeats.into_iter().map(process_state).collect::<Vec<_>>();
             let observed_at = processes.iter().map(|process| process.observed_at).max();
             let status = if health.status == HeartbeatStatus::Ready {
                 DashboardStatus::Ok
@@ -175,17 +175,17 @@ fn summarize(heartbeats: &[Heartbeat]) -> HealthSummary {
     }
 }
 
-fn process_state(heartbeat: &Heartbeat) -> ProcessState {
+fn process_state(heartbeat: Heartbeat) -> ProcessState {
     ProcessState {
         service_name: heartbeat.service_name,
         process_role: heartbeat.process_role,
-        instance_id: heartbeat.instance_id.clone(),
-        version: heartbeat.version.clone(),
+        instance_id: heartbeat.instance_id,
+        version: heartbeat.version,
         started_at: heartbeat.started_at,
         status: heartbeat.status,
         readiness: heartbeat.readiness,
         audit_failure_count: heartbeat.audit_failure_count,
-        tracing: heartbeat.tracing.clone(),
+        tracing: heartbeat.tracing,
         observed_at: heartbeat.observed_at,
         expires_at: heartbeat.expires_at,
     }
