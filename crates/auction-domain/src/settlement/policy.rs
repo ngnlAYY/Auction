@@ -173,6 +173,11 @@ impl SettlementPolicy {
     /// 按旧系统的整数 half-away-from-zero 规则插值调整比例。
     pub fn interpolate_adjustment(&self, hold_ppm: i64) -> Result<i64, DomainError> {
         self.validate()?;
+        self.interpolate_validated(hold_ppm)
+    }
+
+    /// 仅供已完整校验策略的结算计算调用；保留原整数取整，不重复扫描全部锚点。
+    pub(super) fn interpolate_validated(&self, hold_ppm: i64) -> Result<i64, DomainError> {
         if !(0..=SETTLEMENT_PPM).contains(&hold_ppm) {
             return Err(DomainError::InvalidSettlementFacts("持有时长比例超出范围"));
         }
@@ -180,23 +185,22 @@ impl SettlementPolicy {
             return Ok(0);
         }
 
-        for index in 1..self.anchors.len() {
-            let right = self.anchors[index];
-            if hold_ppm > right.hold_ppm {
-                continue;
-            }
-            if hold_ppm == right.hold_ppm {
-                return Ok(right.adjustment_ppm);
-            }
-            let left = self.anchors[index - 1];
-            let numerator = i128::from(hold_ppm - left.hold_ppm)
-                * i128::from(right.adjustment_ppm - left.adjustment_ppm);
-            let denominator = i128::from(right.hold_ppm - left.hold_ppm);
-            let delta = divide_half_away_from_zero(numerator, denominator)?;
-            let result = delta + i128::from(left.adjustment_ppm);
-            return i64::try_from(result).map_err(|_| DomainError::SettlementAmountOverflow);
+        // 严格递增的 hold_ppm 已由 validate 保证；从第二个锚点找右端点，0 仍落在首段。
+        let index = 1 + self.anchors[1..].partition_point(|anchor| anchor.hold_ppm < hold_ppm);
+        let right = self
+            .anchors
+            .get(index)
+            .ok_or(DomainError::InvalidSettlementFacts("持有时长比例没有落在结算曲线内"))?;
+        if hold_ppm == right.hold_ppm {
+            return Ok(right.adjustment_ppm);
         }
-        Err(DomainError::InvalidSettlementFacts("持有时长比例没有落在结算曲线内"))
+        let left = self.anchors[index - 1];
+        let numerator = i128::from(hold_ppm - left.hold_ppm)
+            * i128::from(right.adjustment_ppm - left.adjustment_ppm);
+        let denominator = i128::from(right.hold_ppm - left.hold_ppm);
+        let delta = divide_half_away_from_zero(numerator, denominator)?;
+        let result = delta + i128::from(left.adjustment_ppm);
+        i64::try_from(result).map_err(|_| DomainError::SettlementAmountOverflow)
     }
 }
 

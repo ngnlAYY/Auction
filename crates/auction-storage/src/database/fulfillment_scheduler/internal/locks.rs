@@ -1,6 +1,8 @@
 //! 统一前缀与同 EID 的业务锁；外部观察在调用本模块之前已完成。
 //! 仅加锁的查询完整执行但不收集行；需要检查数量的 delivery 冲突探针仍保留有界结果。
 
+use std::sync::LazyLock;
+
 use super::sql_error;
 use auction_application::{FundingError, SettlementFulfillmentClaim};
 use sqlx::{Postgres, Transaction};
@@ -58,7 +60,8 @@ pub(super) async fn after_credentials(
     // 上限包含一条溢出探针；超过上限整事务拒绝，绝不截断后声称已排除冲突。
     // 未知 schema/孤儿仍由 conflicts 的完整谓词读失败关闭；Serializable 的 SIREAD
     // 保留这些负向证明的幻行保护，world 前缀与同资产业务锁继续串行化写入。
-    let query =
+    // 只缓存固定 SQL 文本，每次仍重新取得同一有序锁集合。
+    static QUERY: LazyLock<String> = LazyLock::new(|| {
         "SELECT d.id FROM public.deliveries d
          WHERE d.id=$1 OR (
            NOT EXISTS(SELECT 1 FROM public.settlement_obligation_fulfillments f
@@ -84,8 +87,9 @@ pub(super) async fn after_credentials(
                      @> jsonb_build_array(jsonb_build_object('id',e.id::text)))))))
          ORDER BY d.id LIMIT 257 FOR UPDATE OF d"
         .replace("/* trusted_legacy_self */",
-            crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE);
-    let deliveries = sqlx::query_scalar::<_, uuid::Uuid>(sqlx::AssertSqlSafe(query.as_str()))
+            crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE)
+    });
+    let deliveries = sqlx::query_scalar::<_, uuid::Uuid>(sqlx::AssertSqlSafe(QUERY.as_str()))
         .bind(claim.delivery_id)
         .bind(&claim.external_equipment_id)
         .bind(super::validation::world(claim.equipment_world))

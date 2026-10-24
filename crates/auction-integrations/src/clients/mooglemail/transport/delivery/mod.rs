@@ -8,6 +8,7 @@ mod credentials;
 mod messages;
 mod settlement_secrets;
 
+use actions::PreparedMoogleMailTake;
 use credentials::PreparedMoogleMailCredentials;
 
 impl MoogleMailDeliveryTransport {
@@ -74,6 +75,7 @@ impl MoogleMailDeliveryTransport {
     async fn send_action_claim(
         &self,
         claim: DeliveryWorkClaim,
+        take: Option<PreparedMoogleMailTake>,
     ) -> Result<DeliverySendResult, DeliveryTransportError> {
         if claim.origin_kind == "settlement" {
             let (payload, _) = decode_settlement_payload(&claim)?;
@@ -88,16 +90,25 @@ impl MoogleMailDeliveryTransport {
         let (payload, world) = decode_payload(&claim)?;
         match payload.operation.as_str() {
             "return" => {
+                let session = self
+                    .credentials
+                    .begin_exclusive(world, MoogleMailOperation::ReturnMessage)
+                    .await
+                    .map_err(|error| transport_error(error, false))?;
                 self.send_action(
                     &claim,
                     &payload.external_mail_id,
                     world,
                     MoogleMailOperation::ReturnMessage,
                     None,
+                    session,
                 )
                 .await
             }
             "take" => {
+                let take = take.ok_or_else(invalid_payload)?;
+                let session = Arc::try_unwrap(take.session)
+                    .map_err(|_| preflight_unproven(MoogleMailOperation::Take))?;
                 self.send_action(
                     &claim,
                     &payload.external_mail_id,
@@ -106,8 +117,9 @@ impl MoogleMailDeliveryTransport {
                     Some(ActionExpectation {
                         credits: payload.credits,
                         cod: payload.cod,
-                        attachment_ids: payload.attachment_ids.clone(),
+                        attachment_ids: payload.attachment_ids,
                     }),
+                    session,
                 )
                 .await
             }
@@ -142,7 +154,8 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
     fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_> {
         Box::pin(async move {
             let Some(rendered) = self.render_send(&claim).await? else {
-                let send: DeliveryPreparedSend<'_> = Box::pin(self.send_action_claim(claim));
+                let take = self.prepare_take(&claim).await?;
+                let send: DeliveryPreparedSend<'_> = Box::pin(self.send_action_claim(claim, take));
                 return Ok(send);
             };
             if rendered.request.credits != 0 {

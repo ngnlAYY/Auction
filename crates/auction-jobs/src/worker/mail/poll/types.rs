@@ -214,7 +214,7 @@ impl MailPollRuntime {
         self
     }
 
-    /// 注入三页定期维护；只在主世界运行，失败只记录日志，不影响收件轮询。
+    /// 注入当前已配置世界的定期维护；Read Mail、Sent/compose 与 Inbox 各自有界并行。
     pub fn with_maintenance(mut self, maintenance: Arc<MailboxMaintenanceService>) -> Self {
         self.maintenance = Some(maintenance);
         self

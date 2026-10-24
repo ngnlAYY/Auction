@@ -61,7 +61,9 @@ impl CredentialSealer {
         let mut nonce = [0_u8; NONCE_LENGTH];
         self.random.fill(&mut nonce).map_err(|_| crypto_error())?;
         let key = self.data_key.aead_key().map_err(|_| crypto_error())?;
-        let mut ciphertext = secret.to_vec();
+        // 预留认证标签，避免追加标签时扩容并复制整份加密缓冲。
+        let mut ciphertext = Vec::with_capacity(secret.len() + aead::AES_256_GCM.tag_len());
+        ciphertext.extend_from_slice(secret);
         if key
             .seal_in_place_append_tag(
                 aead::Nonce::assume_unique_for_key(nonce),

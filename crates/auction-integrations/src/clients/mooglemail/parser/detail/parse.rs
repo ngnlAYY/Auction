@@ -64,25 +64,27 @@ pub(crate) fn parse_detail_fields_for(
     if lefts.len() != 1 {
         return Err(detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let mut values = HashMap::<String, String>::with_capacity(3);
+    let mut values = [None; 3];
     for row in lefts[0].select(&row_selector) {
-        let divs = row.select(&div_selector).collect::<Vec<_>>();
-        let label = divs.first().map(|div| detail_field_label(*div)).unwrap_or_default();
-        if !matches!(label.as_str(), "To" | "From" | "Subject") {
-            continue;
-        }
-        let inputs = row.select(&input_selector).collect::<Vec<_>>();
+        let label = row.select(&div_selector).next().map(detail_field_label).unwrap_or_default();
+        let index = match label.as_str() {
+            "To" => 0,
+            "From" => 1,
+            "Subject" => 2,
+            _ => continue,
+        };
+        let mut inputs = row.select(&input_selector);
         let value =
-            inputs.first().and_then(|input| input.value().attr("value")).ok_or_else(|| {
+            inputs.next().and_then(|input| input.value().attr("value")).ok_or_else(|| {
                 detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift)
             })?;
-        if inputs.len() != 1 || values.insert(label, value.to_owned()).is_some() {
+        if inputs.next().is_some() || values[index].replace(value).is_some() {
             return Err(detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift));
         }
     }
-    let recipient = values.get("To").map(String::as_str).unwrap_or_default().trim();
-    let sender = values.get("From").map(String::as_str).unwrap_or_default();
-    let subject = values.get("Subject").map(String::as_str).unwrap_or_default();
+    let recipient = values[0].unwrap_or_default().trim();
+    let sender = values[1].unwrap_or_default();
+    let subject = values[2].unwrap_or_default();
     if recipient.is_empty()
         || !valid_line(recipient, 256, false)
         || !valid_line(sender, 256, false)
@@ -233,28 +235,21 @@ pub(crate) fn parse_credits_text(value: &str) -> Option<i64> {
 }
 
 pub(crate) fn parse_canonical_credits(value: &str) -> Option<i64> {
-    if value.is_empty() {
-        return None;
-    }
-    let groups = value.split(',').collect::<Vec<_>>();
-    if groups.len() > 1 {
-        if groups[0].is_empty()
-            || groups[0].len() > 3
-            || !groups[0].bytes().all(|byte| byte.is_ascii_digit())
-            || groups[0].starts_with('0')
-            || groups[1..]
-                .iter()
-                .any(|group| group.len() != 3 || !group.bytes().all(|byte| byte.is_ascii_digit()))
-        {
-            return None;
-        }
-    } else if (value.len() > 1 && value.starts_with('0'))
-        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    let mut groups = value.split(',').peekable();
+    let first = groups.next()?;
+    let grouped = groups.peek().is_some();
+    if first.is_empty()
+        || !first.bytes().all(|byte| byte.is_ascii_digit())
+        || (first.len() > 1 && first.starts_with('0'))
+        || (grouped && (first.len() > 3 || first == "0"))
+        || groups.any(|group| group.len() != 3 || !group.bytes().all(|byte| byte.is_ascii_digit()))
     {
         return None;
     }
-    let digits = value.replace(',', "");
-    digits.parse::<i64>().ok()
+    // 校验分组后直接累加数字；不为金额解析分配分组 Vec 或去逗号的副本。
+    value.bytes().filter(|byte| *byte != b',').try_fold(0_i64, |amount, digit| {
+        amount.checked_mul(10)?.checked_add(i64::from(digit - b'0'))
+    })
 }
 
 pub(crate) fn parse_current_cod(value: &str) -> Option<i64> {

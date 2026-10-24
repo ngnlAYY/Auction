@@ -51,7 +51,17 @@ impl EhentaiClient {
             };
             let action_value = form.value().attr("action").unwrap_or(target.as_str());
             let action = self.resolve_same_origin(&target, action_value, operation)?;
-            if !posting_action_matches_board(&action, board_id)
+            // 隐藏字段不能覆盖 action 中的冲突路由；新主题不得投向其它端点或已有帖子。
+            if action.path() != "/index.php"
+                || !posting_action_matches_board(&action, board_id)
+                || !optional_query_identity(&action, &["act"])
+                    .is_ok_and(|value| value.is_none_or(|value| value == "Post"))
+                || !optional_query_identity(&action, &["CODE"])
+                    .is_ok_and(|value| value.is_none_or(|value| value == "01"))
+                || !optional_query_identity(&action, &["t", "showtopic"])
+                    .is_ok_and(|value| value.is_none())
+                || !optional_query_identity(&action, &["p", "pid", "gopid"])
+                    .is_ok_and(|value| value.is_none())
                 || !form.value().attr("method").unwrap_or("GET").eq_ignore_ascii_case("POST")
             {
                 continue;

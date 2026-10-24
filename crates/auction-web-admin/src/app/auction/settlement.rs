@@ -62,7 +62,6 @@ struct CatalogLookupLoad {
     result: Result<Option<AdminSettlementCatalogPage>, String>,
 }
 
-#[derive(Clone)]
 struct DetailLoad<T> {
     auction_id: String,
     result: Result<Option<T>, String>,
@@ -285,10 +284,11 @@ pub(super) fn page() -> Element {
     let current_catalog_page = catalog_page();
     let selected = selected_auction_id();
     let desired_sequence = requested_sequence();
-    let catalog_state = catalog.read_unchecked().clone();
-    let catalog_lookup_state = catalog_lookup.read_unchecked().clone();
-    let settlement_state = settlement.read_unchecked().clone();
-    let recovery_state = recovery.read_unchecked().clone();
+    // 先借用完整快照核对身份，只在交给子组件时复制所需结果，避免重绘时复制两遍报告。
+    let catalog_state = catalog.read_unchecked();
+    let catalog_lookup_state = catalog_lookup.read_unchecked();
+    let settlement_state = settlement.read_unchecked();
+    let recovery_state = recovery.read_unchecked();
     let current_catalog = catalog_state.as_ref().filter(|load| {
         load.world_id == current_world
             && load.page == current_catalog_page

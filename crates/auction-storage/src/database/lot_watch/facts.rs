@@ -153,7 +153,7 @@ async fn notify(
     .bind(bid.id.as_uuid())
     .bind(version)
     .bind(delivery.delivery_id)
-    .bind(command.request_hash.as_bytes().to_vec())
+    .bind(command.request_hash.as_bytes().as_slice())
     .bind(&command.recipient)
     .bind(crate::database::mail_delivery::payload(&command))
     .bind(occurred_at)

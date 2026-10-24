@@ -35,6 +35,11 @@ Cargo.lock，也不代表活动驱动或运行支持。升级逐项核对 MSRV�
 32 位目标 `u128` 比较。此更新不改变 HMAC/SHA-256 算法、摘要或会话身份；依赖命中不等于已证明本程序存在可利用侧信道。
 旧应用与构建工具二进制不会随锁图自动更新，必须分别重新构建；实际检查范围见[状态页](docs/status.md)。
 
+构建工具独立锁的 Tokio 已统一到应用所用的 1.53.3，处理
+[RUSTSEC-2026-0386](https://rustsec.org/advisories/RUSTSEC-2026-0386.html)；另更新可兼容的 yanked 依赖。
+上述工具更新不改变应用 Tokio 或启用新的运行能力。应用与工具的公告结果必须分开表述，剩余风险及重建前提见
+[构建工具审计](ci/tools/README.md#上游公告与实际使用范围)。
+
 ## 编译优化边界
 
 [根清单](Cargo.toml)统一拥有生产 profile，定向构建不复制优化参数：
@@ -57,6 +62,10 @@ Axum/Tower 拥有协议适配，Hyper/hyper-util 补足请求头超时、HTTP/2 
 栈的类型化容量错误；TCP/Linux Unix 共用服务安全边界，Worker control 独立。auction-process 只提供信号/任务原语，
 停止顺序归装配根；可选 auction-server 用 Tokio process 与 Linux parent-death signal 管理三角色子进程并复用 lib
 装配，不引入第二运行时。
+
+直接 `tungstenite` 使用 0.29.0，与 Axum 0.8.9 经 `tokio-tungstenite` 引入的实际类型一致。
+不能单独升至另一个 minor 后仍以其 `Error` downcast：Rust 会将它们视为不同类型，导致超限帧丢失约定的 1009 关闭响应。
+本次移除未被其他路径使用的 0.30.0 锁条目；未启用的 Dioxus 可选旧分支不因此获得运行支持。
 
 ## 浏览器与国际化
 
@@ -144,4 +153,4 @@ Base64 0.22 和 Dioxus 预发布子组件，不通过开启 fullstack、跨不�
 
 三个 WASM 包独立 check 与其他结果见[状态页](docs/status.md#2026-10-14-低风险依赖精简)。锁图残留不代表制品启用，节点
 减少不证明 WASM 体积下降；不为包数重写 HTML/CSS、Fluent、URL、TLS、密码学、RESP、WebSocket 或迁移装载器，保留
-`sqlx::migrate!` 的 macros/migrate、系统 CA、双后端隔离及纯 CSR。
+`sqlx::migrate!` 的 macros/migrate、系统 CA、PostgreSQL/Redis feature 隔离及纯 CSR。

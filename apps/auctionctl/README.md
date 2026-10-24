@@ -158,6 +158,10 @@ PostgreSQL 显式提供 host、非零 port 和库名，允许受支持的 host/h
 不能用运维调用者 UID 代替服务身份，使用 runtime 时拒绝 `DynamicUser=yes` 并要求先调整部署。
 Public 与 Admin 的 Unix listener 都不得复用已启用 Worker control 的 socket 路径，冲突在只读预检时拒绝。
 
+预检按 Public、Admin、Worker 顺序各加载一次，返回已经联合校验的配置快照；分体启停控制和
+`migrate-managed` 直接消费这些值，不在预检后重新加载另一组配置。各进程启动仍独立读取自己的配置文件，
+因此运维仍须在停机窗口保持文件稳定，这不是跨文件原子快照或配置热更新。
+
 ## Systemd 总控
 
 `deployment start/restart/stop/status` 只用于 Linux/systemd 分体部署。三角色均停止时，start 严格预检、迁移，
@@ -169,6 +173,8 @@ unit，由 `--systemctl`、`--state-dir`、`--worker-unit`、`--admin-unit`、`-
 与回执见[systemd 手册](ops/README.md#systemd-服务与顺序控制)。
 systemctl stdout 在读取阶段限制为 64 KiB，超限立即终止并回收直接子进程；stderr 由一个临时读取线程并发排空，
 只保留 2 KiB 诊断前缀。单行诊断按 UTF-8 字节预算截断，不因中文字符超过上限；未新增总墙钟 timeout。
+Readiness 只接受 512 字节预算内完整 CRLF 结尾的 HTTP/1.0 或 HTTP/1.1 `200` 状态行；
+半行后 EOF、仅 LF、超长未终止行都失败关闭。分片响应只扫描新增字节，不反复搜索已读前缀。
 
 ## 停机迁移与初始建库
 

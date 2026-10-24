@@ -46,7 +46,7 @@ impl SettlementPlan {
         let mut discount_demand = SettlementAmount::zero();
 
         for fact in facts {
-            fact.validate(policy)?;
+            fact.validate_shape()?;
             let Some(end_price) = fact.end_price else {
                 lines.push(SettlementLine {
                     lot_id: fact.lot_id,
@@ -72,7 +72,7 @@ impl SettlementPlan {
             } else {
                 0
             };
-            let adjustment_ppm = policy.interpolate_adjustment(hold_ppm)?;
+            let adjustment_ppm = policy.interpolate_validated(hold_ppm)?;
             let mut line = SettlementLine {
                 lot_id: fact.lot_id,
                 end_price,

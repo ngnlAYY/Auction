@@ -33,18 +33,19 @@ impl PreparedForumPm for PreparedPm {
         &self.sender
     }
 
-    fn send(self: Box<Self>) -> ForumPmFuture<'static, ForumPmReceipt> {
+    fn send(mut self: Box<Self>) -> ForumPmFuture<'static, ForumPmReceipt> {
         Box::pin(async move {
             // 调用方必须先持久化 sending fence；本对象不存在重试、换号或重新准备分支。
-            self.client
-                .submit_pm(&self.form, self.session.cookie())
-                .await
-                .map_err(|_| ForumPmError::OutcomeUnknown)?;
-            self.client
-                .scan_sent(&self.message, &self.sender, self.session.cookie())
-                .await
-                .map_err(|_| ForumPmError::OutcomeUnknown)?
-                .ok_or(ForumPmError::OutcomeUnknown)
+            let result = async {
+                self.client.submit_pm(&self.form, self.session.cookie()).await?;
+                self.client.scan_sent(&self.message, &self.sender, self.session.cookie()).await
+            }
+            .await;
+            if matches!(result, Err(ForumPmError::Authentication)) {
+                // 写后失效同样停用当前 Cookie，但不能据此认定未发送或授权重发。
+                let _ = self.session.invalidate_current().await;
+            }
+            result.map_err(|_| ForumPmError::OutcomeUnknown)?.ok_or(ForumPmError::OutcomeUnknown)
         })
     }
 }
@@ -189,12 +190,16 @@ impl EhentaiClient {
             .send()
             .await
             .map_err(|_| ForumPmError::OutcomeUnknown)?;
-        let accepted =
-            response.status().is_success() && !response.headers().contains_key(header::LOCATION);
-        self.read_response(response, EhentaiOperation::CheckSession, true)
+        let status = response.status();
+        let location = response.headers().get(header::LOCATION).cloned();
+        let body = self
+            .read_response(response, EhentaiOperation::CheckSession, true)
             .await
             .map_err(|_| ForumPmError::OutcomeUnknown)?;
-        if !accepted {
+        if is_session_expired(status, location.as_ref(), &body) {
+            return Err(ForumPmError::Authentication);
+        }
+        if !status.is_success() || location.is_some() {
             return Err(ForumPmError::OutcomeUnknown);
         }
         // HTTP 200 只是允许开始只读核对，并非发送回执。

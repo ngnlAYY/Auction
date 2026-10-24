@@ -140,6 +140,8 @@ IANA 时区与周内顺序，关闭时也校验。HTTP 配置仅含 listener、O
 默认忽略转发头（TCP 代理须显式列入可信 CIDR，`trusted_unix_proxy` 只允许有效 Unix listener），Admin 主配置
 fallback 与 runtime 最终值分别校验。Operations alert 仅在 PostgreSQL 完整档通过安全水位生成持久化批次，
 通知不含原始错误或凭据。
+`request_timeout_seconds` 同时限制 HTTP 请求处理和 WebSocket 握手，默认 15 秒；升级完成后的长连接生命周期
+由 realtime owner 管理，不沿用该请求处理时限。
 
 回环 HTTP origin 的 IPv6 文本使用 URL 规范形式 `[::1]`；首次设置、论坛 endpoint/Public 链接及 MoogleMail
 均接受该回环地址，不扩大各自既有 IPv4 范围或允许非回环 HTTP。
@@ -148,6 +150,9 @@ fallback 与 runtime 最终值分别校验。Operations alert 仅在 PostgreSQL 
 取得必要值，不得写入日志、错误、普通 DTO 或快照。启用 tracing 时拒绝上游 SDK 的环境导出头（见
 [文件职责](ops/config/README.md#文件职责)）；诊断归档属于部署配置，原始数据只能按
 [邮件诊断规则](ops/mail/diagnostics.md)加密保存。
+OTLP 头按 exporter 的同一规则严格百分号解码后，检查名称、禁止覆盖字段、大小写无关重复键、
+UTF-8、控制字符及值的 1024 字节上限；原始列表仍限 8192 字节和 32 项。无编码值只借用原文，
+不为预检建立字段列表或复制值；非法编码在配置预检阶段失败，不延迟到 exporter 启动。
 
 ## 维护与验证
 

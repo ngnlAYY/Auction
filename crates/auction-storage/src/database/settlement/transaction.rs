@@ -183,19 +183,6 @@ impl PostgresCompetitionTransaction {
                        l.current_price,
                        l.leader_user_id,
                        l.leader_since,
-                       (SELECT COALESCE(SUM(GREATEST(0, LEAST(
-          EXTRACT(EPOCH FROM (COALESCE(b.next_at, l.effective_end_at) - b.created_at)) * 1000000000,
-          EXTRACT(EPOCH FROM (l.effective_end_at - b.created_at)) * 1000000000
-        )))::bigint, 0)
-        FROM (
-            SELECT bid.bidder_user_id, bid.created_at,
-                   LEAD(bid.created_at) OVER (
-                       ORDER BY bid.accepted_state_version, bid.fact_index, bid.id
-                   ) AS next_at
-            FROM public.bids AS bid
-            WHERE bid.lot_id = l.id
-        ) AS b
-        WHERE b.bidder_user_id = l.leader_user_id) AS leader_held_nanos,
                        l.effective_end_at,
                        l.equipment_id,
                        l.submission_id,

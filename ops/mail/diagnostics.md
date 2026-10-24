@@ -188,12 +188,13 @@ Read Mail 的慢响应或失败不延迟 Sent 核对，维护失败不撤销并�
   并同事务绑定唯一 MID、收口资金与审计。旧无冻结尝试只保留既有安全 reference/无密钥通知规则，不读当前登录 key 猜测旧信。
 - Sent 中没有对应通知不能证明当时未发送；零命中、多命中、时间或关联身份不充分都保留 `manual_reconcile`，
   不自动退回发送队列。恢复绑定不重发邮件，不以模板相同或单独的时间窗口替代唯一发送身份。
-- `take` 通过共享 Inbox/Read Mail 定位已知 MID，再直接读取当前详情；两个列表缺席都不是不存在证明。缺失只接受唯一系统框完整的
-  “Mail does not exist”（允许末尾句点），且不得混有详情节点或隐藏正文；其他对象缺失、登录页、残缺结构和未知文案保留核对。
-  完整详情的全部装备、Credits、COD 均归零，才可按 `action_recovered_inbox_v1` 收口；
-  只有原装备集合和冻结金额精确相同才可重排（上限 2 次）。部分、额外、重复资产或金额漂移不成功、不重排。
-- compose 非空时，只有收件人、业务 reference 和 COD 同时精确匹配唯一一条未证明投递才执行 discard；匹配不到或匹配到多条
-  只记录日志，绝不丢弃来源不明的草稿。通知类没有业务 reference，不参与 compose 匹配。
+- `take` 先核对 `000063` 原尝试冻结的 world/MID 与 credential ID/version，再通过共享 Inbox/Read Mail 定位并读取同账号详情。
+  两个列表缺席都不是不存在证明；缺失只接受唯一系统框完整的“Mail does not exist”（允许末尾句点），且不得混有详情节点或隐藏正文。
+  完整详情的发件人匹配原收件人且装备、Credits、COD 均归零，才可按 `action_recovered_inbox_v1` 收口。
+  只有原装备集合和金额精确相同才可重排（上限 2 次）；部分、额外、重复资产或金额漂移均保留人工核对。
+  成功及重排同事务复核当前 generation、原 credential ID/version 和候选 fence；旧无绑定或配置 Cookie 无持久身份的未知 Take 不自动恢复。
+- compose 非空时，只有收件人、业务 reference、Credits/COD 和精确装备集合同时匹配唯一未证明投递才执行 discard；
+  资产总数可能包含 Credits 条目，不能代替装备 ID 集合。匹配不到或多匹配只记录日志，绝不丢弃来源不明的草稿；通知类没有业务 reference，不参与旧草稿匹配。
 - discard 前在原投递上持久登记一次性尝试，再在同一凭据 session 重读并逐字段比较原草稿。
   尝试提交未知、排队/读取取消或 POST 结果未知都保留人工核对，不能因下一轮仍看到草稿而自动再丢弃。
 - discard 成功后再读 compose 证明为空，并把结果写入 `result_metadata.compose_discard`。

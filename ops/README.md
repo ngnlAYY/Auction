@@ -35,10 +35,27 @@
 - [邮件发送节奏与 Sent 准备升级](#邮件发送节奏与-sent-准备升级)
 - [全源码审计修复升级](#全源码审计修复升级)
 - [邮箱共享读取与发送证明升级](#邮箱共享读取与发送证明升级)
+- [发送引用索引与稳定性修复升级](#发送引用索引与稳定性修复升级)
 - [数据库恢复与保留](#数据库恢复与保留)
 - [反向代理与 systemd](#反向代理与-systemd)
 - [Cloudflare 整站代理](#cloudflare-整站代理)
 - [systemd 安装、探针与权限](#systemd-服务与顺序控制)
+
+## 发送引用索引与稳定性修复升级
+
+先保留可验证数据库备份、旧制品、配置及 unit，停止旧 writer，再用同版 `auctionctl` 追加
+`000062_delivery_reference_index` 与 `000063_delivery_take_expectations`。前者只为非空外部引用建立非唯一部分索引，
+不清理历史重复；后者只追加新 Take 的原账号/MID 尝试，不回填旧凭据或成功证明。
+索引创建需要扫描已有 deliveries，大表须预留磁盘和维护窗口。普通服务启动仍不执行迁移。
+
+同版更新 Public/Admin API、两端 WASM、Worker 和 auctionctl，合并模式同时更新 server；刷新旧标签页，禁止混用旧 Worker。
+本次会话与未决命令修复不改变 HTTP 字段、命令身份或服务端权限；未知外写不能因升级而重发。
+WebSocket 的升级前握手受原 `request_timeout_seconds` 约束，升级后的连接仍按实时协议的会话、写入及 drain 预算运行。
+启动期收到终止信号会取消初始化；readiness 只接受完整 CRLF 终止的成功状态行，不再把截断响应当作就绪。
+工具独立锁变化须重新执行[受控工具安装与校验](ci/tools/README.md#安装与验证)，不能沿用旧回执或旧工具二进制。
+这些要求不表示目标环境已升级，实际验证与剩余风险见[状态页](docs/status.md)。
+旧无冻结账号的未知 Take，以及配置 Cookie 没有持久绑定的未知 Take，升级后仍须人工核对。
+只有与原 credential ID/version 一致、当前 generation 有效且原 fence 未被替换的观察才能恢复；不因当前账号查无 MID 而认定旧账号已领取。
 
 ## 邮箱共享读取与发送证明升级
 

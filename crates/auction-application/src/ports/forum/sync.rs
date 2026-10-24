@@ -20,8 +20,8 @@ use super::{ApplicationFuture, PublicEquipmentGameLink, PublicEquipmentLinkTarge
 /// 运维侧单次最多列出的论坛未知写入恢复项数。
 pub const MAX_FORUM_SYNC_RECOVERY_ITEMS: u16 = 100;
 
-/// 六个其他状态的新标题、七个旧短标题及两种更早标题；仅用于精确只读对账。
-pub const MAX_FORUM_RECONCILIATION_TITLES: usize = 15;
+/// 六个其他新状态、七个旧无前缀状态、七个旧短标题及两种更早标题；仅用于精确只读对账。
+pub const MAX_FORUM_RECONCILIATION_TITLES: usize = 22;
 
 /// 每个目录帖子最多展示的装备件数。
 pub const FORUM_CATALOG_PAGE_SIZE: usize = 150;

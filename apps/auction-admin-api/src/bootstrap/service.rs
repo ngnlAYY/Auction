@@ -49,11 +49,22 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         )
         .context("initialize Prometheus metrics")?,
     );
-    let bound_listener = listener::bind(config).await.context("bind admin-api listener")?;
-    let (state, heartbeat) =
-        state::configure_state(config, telemetry.health_reader(), Arc::clone(&metrics))
-            .await
-            .context("configure admin-api state")?;
+    // 依赖装配可能等待数据库锁或连接；终止信号不能等到开始提供 HTTP 后才被读取。
+    let (bound_listener, state, heartbeat) = tokio::select! {
+        biased;
+        signal = signals.recv() => {
+            let signal = signal.context("receive admin-api startup signal")?;
+            anyhow::bail!("admin-api startup interrupted by {signal}");
+        }
+        result = async {
+            let bound_listener = listener::bind(config).await.context("bind admin-api listener")?;
+            let (state, heartbeat) =
+                state::configure_state(config, telemetry.health_reader(), Arc::clone(&metrics))
+                    .await
+                    .context("configure admin-api state")?;
+            Ok::<_, anyhow::Error>((bound_listener, state, heartbeat))
+        } => result?,
+    };
     let state = state.with_metrics(metrics).with_public_rules_cache(cache.clone());
     #[cfg(feature = "postgres")]
     let mut heartbeat_task =

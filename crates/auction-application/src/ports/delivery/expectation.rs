@@ -1,9 +1,11 @@
-//! sending fence 前冻结实际渲染身份；持久层只接收正文摘要与非敏感资产、凭据引用。
+//! sending fence 前冻结实际 Send 内容或 Take 会话身份；不保存正文、Cookie 或页面令牌。
+
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// 原发送会话的持久凭据及 owner 版本，不含 Cookie、页面令牌或凭据摘要。
+/// 原外部动作会话的持久凭据及 owner 版本，不含 Cookie、页面令牌或凭据摘要。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeliverySendCredentialBinding {
@@ -51,4 +53,33 @@ impl DeliverySendExpectation {
             && self.equipment_ids.windows(2).all(|ids| ids[0] < ids[1])
             && self.credential.as_ref().is_none_or(DeliverySendCredentialBinding::validate)
     }
+}
+
+/// 一次实际 Take 的原会话与邮件身份；资产仍由同 command/hash 的不可变 payload 拥有。
+/// 配置 Cookie 可立即证明动作，但没有持久凭据身份时禁止未知结果自动恢复。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeliveryTakeExpectation {
+    pub world_id: String,
+    pub external_mail_id: String,
+    pub credential: Option<DeliverySendCredentialBinding>,
+}
+
+impl DeliveryTakeExpectation {
+    /// MID 保持规范正十进制文本，不收窄为数据库整数或推断跨账号唯一。
+    pub fn validate(&self) -> bool {
+        matches!(self.world_id.as_str(), "main" | "isekai")
+            && !self.external_mail_id.is_empty()
+            && self.external_mail_id.len() <= 64
+            && !self.external_mail_id.starts_with('0')
+            && self.external_mail_id.bytes().all(|byte| byte.is_ascii_digit())
+            && self.credential.as_ref().is_none_or(DeliverySendCredentialBinding::validate)
+    }
+}
+
+/// 准备 future 与持久 fence 共用的单层共享身份；Send 与 Take 不得互换授权。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeliveryPreparedExpectation {
+    Send(Arc<DeliverySendExpectation>),
+    Take(Arc<DeliveryTakeExpectation>),
 }

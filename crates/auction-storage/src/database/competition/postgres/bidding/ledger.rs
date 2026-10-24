@@ -84,7 +84,7 @@ impl PostgresCompetitionTransaction {
             .bind(command.command_id.as_uuid())
             .bind(&command.command_kind)
             .bind(command.aggregate_id)
-            .bind(command.request_hash.as_bytes().to_vec())
+            .bind(command.request_hash.as_bytes().as_slice())
             .bind(&command.result_code)
             .bind(payload)
             .execute(&mut **transaction)

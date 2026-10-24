@@ -293,7 +293,7 @@ impl MoogleMailSender {
             return Ok(None);
         };
         if let Some(summary) = summary {
-            // Read Mail 的历史摘要也必须与原 MID 详情的发件人、主题及时间交叉校验。
+            // 历史摘要仅定位原 MID；仍执行完整详情与装备 key 校验，不从截断显示名重建身份。
             let mut message = self
                 .client
                 .diagnose_parse(&target, &document, self.parser.parse_detail(&document, summary))

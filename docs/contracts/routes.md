@@ -70,7 +70,7 @@ live/ready 均用统一 `{code,message,data}` 外壳。`/health/live` 不访问�
 
 ### 请求边界
 
-Public/Admin 统一 boundary 只接受 1 至 64 字节的 ASCII 字母数字/`-_.` `X-Request-ID`，缺失时生成并在响应回传，重复或非法值返回 `400 invalid_request_id`；同一值进入 Public 竞价/代理、Admin 生命周期和管理 mutation 的追加式审计，不参与命令请求哈希。边界还提取 W3C trace context、记录访问日志、隔离 panic、设置安全响应头、执行默认 15 秒处理超时和固定 5 秒 HTTP/1 请求头读取超时，`/api/v1/ws` 不受处理超时限制。
+Public/Admin 统一 boundary 只接受 1 至 64 字节的 ASCII 字母数字/`-_.` `X-Request-ID`，缺失时生成并在响应回传，重复或非法值返回 `400 invalid_request_id`；同一值进入 Public 竞价/代理、Admin 生命周期和管理 mutation 的追加式审计，不参与命令请求哈希。边界还提取 W3C trace context、记录访问日志、隔离 panic、设置安全响应头，执行默认 15 秒请求处理超时和固定 5 秒 HTTP/1 请求头读取超时。WebSocket 升级前的鉴权与握手同受请求预算约束，超时返回 504；升级后的连接寿命由实时协议独立管理。
 
 客户端地址只在 TCP peer 命中配置的规范 CIDR，或 Public/Admin Unix listener 显式启用可信上游时解析 `X-Forwarded-For`；非法链整体丢弃，Unix 连接不伪造 TCP peer，Unix 信任开关不放宽真实 TCP peer，地址链从右向左跳过受信代理。`CF-Connecting-IP`、`Forwarded`、`X-Forwarded-Proto` 不用于推导客户端地址、Origin 或 Secure Cookie；Cloudflare 经 Caddy 清洗为可信 XFF 后交给应用，见[部署约束](ops/README.md#cloudflare-整站代理)。CSP 只允许同源脚本及 WASM 编译，内联样式例外仅用于 Dioxus 首屏防闪样式和组件 style 属性。登录/变更限流器按该地址工作，最多保留 4096 项并确定性淘汰最久未访问项。
 

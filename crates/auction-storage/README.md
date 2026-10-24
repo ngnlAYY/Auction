@@ -39,6 +39,16 @@ Sending、节奏起点和原审计同事务提交。正常成功和维护恢复�
 [mailbox_sweep/recovery.rs](crates/auction-storage/src/database/mailbox_sweep/recovery.rs) 的新证明供下游
 `delivery_has_frozen_sent_proof` 强谓词消费，不把新 proof 标签直接加入旧字符串白名单。升级先停止旧 Worker，
 迁移不回填历史渲染身份；无身份的旧行仅保留原安全证明，未知 Send 不自动重排。
+`000062` 为 delivery_scheduler 的升级前 Sent 引用碰撞核对新增 `deliveries.external_reference` 非唯一部分索引，
+仅收录非空引用；不改写历史引用、不把索引当唯一证明，原完整绑定谓词及 Serializable 幻行冲突保护保持不变。
+
+[delivery_scheduler/take_attempts.rs](crates/auction-storage/src/database/delivery_scheduler/take_attempts.rs) 与 `000063` 拥有
+只追加的 `delivery_take_attempts`：Take 在 Sending 前冻结 world/MID 与原凭据引用，和 Sending、审计同事务提交。
+`delivery_current_take_attempt` 按原 `sending_at`、命令及摘要解析 `taking_fencing_version`，当前 delivery CAS fence
+仍单独匹配；过期隔离推进当前 fence 不覆盖原尝试。维护只接受同 credential ID/version，允许重启后的新 generation，
+但本次观测 generation 必须锁内仍为当前 owner。无旧尝试或配置 Cookie 的空凭据绑定不自动判成功、也不自动重排；
+不以当前账号回填历史身份。升级停止旧 Worker 后追加迁移，Send 的 `000061` 和 Return 恢复边界不变。
+授权入口按 `DeliveryPreparedExpectation::{Send, Take}` 区分动作，现金 until 授权仅允许 Send。
 
 ## 用户身份与消费 owner
 
@@ -77,6 +87,8 @@ Admin 用户列表只对当前页 UUID 批量读取黑名单历史，每人仍�
 后续成功探测不能恢复已撤销 owner，重建必须由新进程重新取得 advisory lock 并推进邮件 generation。
 合法删除凭据后，命令账本的外键可变为 NULL；历史导入、改名和启停仍按原类型、摘要及安全结果快照重放，
 不读取当前凭据重建结果，不因删除而重新执行外部获取或导入。
+Admin 凭据改名、启停及 Worker 失效回写的快照时间以该行 `created_at`/`updated_at` 为下界；
+首次 `rotated_at` 使用同一下界，角色时钟落后或回拨不能阻止撤销，既有轮换时间、密文和命令审计时间保持原样。
 
 Admin realtime replay 在追加替代事件的同一事务复用 consumer 恢复入口：先锁 failure，再锁绑定的 consumer/stream 游标；
 只有游标恰为原事件前一序号才推进到原事件，较早的未处理序号使整笔 replay 回滚，已超过边界不倒退。
@@ -93,6 +105,8 @@ Admin realtime replay 在追加替代事件的同一事务复用 consumer 恢复
 bidding、lifecycle、admin 拆分；旧竞价账本重放仍在一致快照中取得冻结策略、授权版本和转换历史，不重新执行当前状态
 门禁。竞价及关键生命周期使用 Serializable、明确行锁，最多三次尝试（含首次）；队列领取才使用 Read Committed 加锁，
 只重试已分类的序列化冲突/死锁，未知提交结果不能盲目重放。
+竞价命令账本和 MM 超价通知直接借用原 32 字节请求摘要绑定 `bytea`，不为每次写入另建临时字节向量；
+摘要算法、字段内容、幂等比较及原事务边界不变。
 Admin 规则、邮箱管理、Recovery 命令及周轮次 bootstrap 的已有重试边界也按 `40001`/`40P01` 识别明确中止，
 保持原最多三次整事务尝试；唯一约束、未知提交及普通连接失败不因此重试。
 规则发布仅允许 `expected_revision = 0` 新建；非零版本只更新匹配旧版本的既有语言文档，缺失时返回当前版本 0，
@@ -192,10 +206,14 @@ Admin 读取不为补全投影临时写入；邮件展示和诊断 sidecar 均�
 `pending/prepared/enqueued` 阶段；最老积压按这批义务及独立的未终结 `blocked` 义务计算。
 `contingent` 退款保持未触发事实，不进入待处理与积压年龄；`blocked/failed/manual_reconcile` 保持各自计数，
 Dashboard 与 operations alert 共用该投影，字段契约见[Dashboard 与 readiness](docs/contracts/routes.md#dashboard-与-readiness)。
+Delivery 告警、内部履约冲突/锁定及资金分类查询只在首次调用时组合固定的修复证明 SQL，后续复用不可变文本；
+每次仍读取当前事务事实并取得原锁集合，不缓存水位/资格、不放宽 `TRUSTED_DELIVERY_PREDICATE`，也不拼接业务输入。
 结算报告在同一 Serializable 快照内读取汇总与明细，序列化冲突最多尝试三次；明细排除不参与结算的
 `withdrawn` 标的，其余 lot 缺失结算事实时失败关闭。赢家累计领先时长由追加式 bid 重建，无领先事实时为零。
 `leader_since` 按全部接受事实判断连续领先是否中断（普通出价后被原领先者快速代理反超也重新计时）；`000037` 只重建
 可由追加式 bid 证明的未结算 live lot 投影，不改已结算金额、终态 lot 或历史审计。
+`settlement` 的 `ReadOnlySettled` 历史核验继续使用 `leader_since` 旧连续区间，不扫描并丢弃未使用的 bids 累计时长；
+正常新结算仍按追加事实累计领先，历史金额、策略兼容及核验边界不变。
 
 Delivery 进入 sending 前须证明命令已提交，未知发送结果进入 manual_reconcile，不自动重寄。
 Fulfillment 激活后保留原 claim 的 token/fencing 继续对账，领取期间 `next_attempt_at` 始终为空；
@@ -218,6 +236,8 @@ claimed/sending，先取 delivery 行锁再复核 token/fencing 及 `clock_times
 通知、take 成功与 take 重排队也同事务追加审计，仅实际迁移才返回 true；重放、引用已占用和并发输家不重复计数或审计。
 所有 Send 恢复共享不可变 world/MID 绑定，并排除全库同内容/时窗的其它未绑定尝试；明确序列化冲突/死锁最多尝试三次，
 未知/失败提交不宣告成功，不据此重发。Send 不进入维护重排队入口，观察元数据本身不迁移状态。
+维护 Requeue 只接受原 Take 尝试及当前凭据证明匹配的 `mail_intake/take`；回到 pending 时一并清除 `claimed_at`，
+保持待领取投影完整，不把原 sending 或未知 Send 伪装成从未发送。
 `mailbox_sweep_cursors`（`000060`）只持久记录逐条维护尝试的 `(created_at,id)` 环形位置，不表示投递完成；
 预算未处理的后缀不推进。一次性 discard 同时匹配当前 fence/冻结身份，拒绝全库内容歧义，只阻止未知草稿删除重放，不授权 Send。
 COD 重排队使用冻结 v1 七天窗口，并在清旧投影前同事务追加 `delivery.cod_return_resend` 安全历史审计。
@@ -334,6 +354,7 @@ acquire 均经过 `TrackedPool`，不额外查询 SQL，也不暴露数据库名
 失败计数，异常失败关闭。
 readiness 直接查询完整迁移历史，不再先做独立 `SELECT 1`；仅缓存二进制内嵌迁移生成的只读验证视图，
 每次仍逐行核对当前数据库版本、success 与 checksum，不缓存健康或匹配结果。
+心跳写入借用命令中的 details JSON 编码，不在每次发布前复制整棵树；观测序号、数据库 TTL 和同序号重放规则不变。
 
 [retention_inventory](crates/auction-storage/src/database/retention_inventory) 在只读快照按版本化政策盘点关系、依赖和
 realtime 水位，不授予删除资格；[recovery_preflight](crates/auction-storage/src/database/recovery_preflight) 只核对恢复

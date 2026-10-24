@@ -105,6 +105,8 @@ pub(super) fn canonical_fingerprint(
     world_id: &str,
     facts: &EquipmentFacts,
 ) -> Result<[u8; 32], AdminIntakeError> {
+    use sha2::{Digest, Sha256};
+
     let encoded = serde_json::to_vec(&CanonicalFingerprint {
         world: world_id,
         external_equipment_id: &facts.external_equipment_id,
@@ -120,9 +122,11 @@ pub(super) fn canonical_fingerprint(
         stats: &facts.stats,
     })
     .map_err(|_| AdminIntakeError::InvalidSource)?;
-    let mut input = b"manual-json-v1\0".to_vec();
-    input.extend_from_slice(&encoded);
-    Ok(sha256(input))
+    // 沿用同一域和 JSON 字节，不为域前缀再次复制完整装备快照。
+    let mut digest = Sha256::new();
+    digest.update(b"manual-json-v1\0");
+    digest.update(&encoded);
+    Ok(digest.finalize().into())
 }
 
 pub(super) fn sha256(bytes: Vec<u8>) -> [u8; 32] {

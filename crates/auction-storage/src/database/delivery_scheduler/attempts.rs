@@ -1,6 +1,8 @@
 //! 冻结 Send 身份及跨正常收口/维护恢复共享的唯一 Sent MID 绑定。
 
-use auction_application::{DeliverySendExpectation, DeliveryWorkClaim};
+use auction_application::{
+    DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryWorkClaim,
+};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction};
@@ -30,7 +32,16 @@ pub(in crate::database) async fn lock_credential(
     tx: &mut Transaction<'_, Postgres>,
     expectation: &DeliverySendExpectation,
 ) -> Result<bool, sqlx::Error> {
-    let Some(binding) = expectation.credential.as_ref() else {
+    lock_credential_binding(tx, &expectation.world_id, expectation.credential.as_ref()).await
+}
+
+/// Send 与 Take 共用 active 凭据锁验；调用者负责冻结各自不同的请求身份。
+pub(in crate::database) async fn lock_credential_binding(
+    tx: &mut Transaction<'_, Postgres>,
+    world_id: &str,
+    binding: Option<&DeliverySendCredentialBinding>,
+) -> Result<bool, sqlx::Error> {
+    let Some(binding) = binding else {
         return Ok(true);
     };
     let row: Option<(String, String, String, i64)> = sqlx::query_as(
@@ -43,7 +54,7 @@ pub(in crate::database) async fn lock_credential(
     let Some((kind, status, scope, version)) = row else {
         return Ok(false);
     };
-    let world = match expectation.world_id.as_str() {
+    let world = match world_id {
         "main" => auction_application::AdminCredentialWorld::Main,
         "isekai" => auction_application::AdminCredentialWorld::Isekai,
         _ => return Ok(false),

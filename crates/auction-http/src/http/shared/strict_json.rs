@@ -102,8 +102,8 @@ pub(crate) const fn post_patch_delete(limit: usize) -> Policy {
 }
 
 /// 在认证和 route-specific path/query 校验之后读取严格 JSON，恢复旧 mutation 的可观察顺序。
-/// 调用方必须移除该 route 的前置 body extractor 与 `DefaultBodyLimit`；大小、媒体类型、单值和
-/// DTO 未知字段均在这里一次完成，未认证请求不会提前暴露请求体分类。
+/// 调用方必须移除前置 body extractor，由本方法独占正文大小、媒体类型、单值与 DTO 字段校验；
+/// 原始 `Body` 不消费 `DefaultBodyLimit`，未认证请求不会提前暴露请求体分类。
 pub(crate) async fn decode_after_guard<T>(
     headers: &HeaderMap,
     body: Body,

@@ -3,7 +3,6 @@
 use super::*;
 
 struct DeploymentConfig {
-    role: Role,
     config: AppConfig,
     backend: DatabaseBackend,
 }
@@ -25,10 +24,12 @@ impl DeploymentListener {
     }
 }
 
-/// 执行不连接数据库、不启动进程的三进程部署预检。
-/// 旧版启动脚本同时承担配置检查、进程装配和数据库操作；该只读命令保持独立，也由
-/// `deployment start/restart` 在任何 unit mutation 前复用，避免预检触发外部 MoogleMail/论坛请求。
-pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> anyhow::Result<()> {
+/// 执行不连接数据库、不启动进程的三进程部署预检，按 Public、Admin、Worker 顺序返回快照。
+/// 启动与迁移直接消费通过拓扑校验的同一组值，不重新读取一组未经联合校验的配置。
+pub(super) fn deployment_check(
+    config_dir: &Path,
+    strict_permissions: bool,
+) -> anyhow::Result<[AppConfig; 3]> {
     let config_dir_metadata = fs::symlink_metadata(config_dir).with_context(|| {
         format!("read deployment config directory metadata: {}", config_dir.display())
     })?;
@@ -83,11 +84,13 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
             backend,
             listener.description(),
         );
-        configs.push(DeploymentConfig { role, config, backend });
+        configs.push(DeploymentConfig { config, backend });
     }
 
-    let expected_backend = configs[0].backend;
-    if configs.iter().any(|entry| entry.backend != expected_backend) {
+    let [public, admin, worker]: [DeploymentConfig; 3] =
+        configs.try_into().map_err(|_| anyhow::anyhow!("部署配置必须包含三个角色"))?;
+    let expected_backend = public.backend;
+    if admin.backend != expected_backend || worker.backend != expected_backend {
         anyhow::bail!(
             "deployment database backend mismatch; all public/admin/worker configs must use {}",
             expected_backend
@@ -95,9 +98,9 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
     }
 
     let expected_database = super::deployment_identity::database_identity(
-        configs[0].config.database_url().context("Public 数据库配置缺失")?,
+        public.config.database_url().context("Public 数据库配置缺失")?,
     )?;
-    for entry in &configs[1..] {
+    for entry in [&admin, &worker] {
         let identity = super::deployment_identity::database_identity(
             entry.config.database_url().context("部署数据库配置缺失")?,
         )?;
@@ -106,18 +109,6 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
         }
     }
 
-    let public = configs
-        .iter()
-        .find(|entry| entry.role == Role::Public)
-        .ok_or_else(|| anyhow::anyhow!("public config was not loaded"))?;
-    let admin = configs
-        .iter()
-        .find(|entry| entry.role == Role::Admin)
-        .ok_or_else(|| anyhow::anyhow!("admin config was not loaded"))?;
-    let worker = configs
-        .iter()
-        .find(|entry| entry.role == Role::Worker)
-        .ok_or_else(|| anyhow::anyhow!("worker config was not loaded"))?;
     let common_path = public.config.common_config_path.as_deref();
     if common_path.is_none()
         || admin.config.common_config_path.as_deref() != common_path
@@ -155,7 +146,7 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
         "deployment-check passed roles=3 database_backend={} strict_permissions={}",
         expected_backend, strict_permissions
     );
-    Ok(())
+    Ok([public.config, admin.config, worker.config])
 }
 
 pub(super) fn public_deployment_listener(config: &AppConfig) -> anyhow::Result<DeploymentListener> {

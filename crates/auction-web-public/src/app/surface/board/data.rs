@@ -37,9 +37,7 @@ pub(crate) fn AuctionData(
     authoritative: bool,
     boot_prerequisites_ready: bool,
 ) -> Element {
-    // 开场刷新每秒重算：订阅外壳提供的共享秒级节拍，不再自起独立定时器。
-    // 倒计时显示的秒针订阅已下沉到 AuctionHeaderCountdown / LiveRowCountdown 叶子组件，
-    // 顶层不再持有每秒变化的时钟信号，避免整个 AuctionData 子树每秒全量重渲染。
+    // 开场检查只在 effect 中读取共享秒针；倒计时由叶子组件订阅，目录不随每秒重渲染。
     let tick = use_second_tick();
     // 装备分组、分类与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
     let query_state = use_public_query_state();
@@ -57,7 +55,7 @@ pub(crate) fn AuctionData(
         use_memo(move || query_state_signal.read().include_unleveled.clone());
     let page_number = use_memo(move || query_state_signal.read().page.max(1));
     let requested_page_size = use_memo(move || query_state_signal.read().page_size);
-    let realtime_state = use_context::<Signal<LiveConnectionState>>();
+    let visibility = use_context::<PageVisibility>();
     let mut refresh_generation = use_context::<Signal<u64>>();
     let should_refresh_at_open = !historical && auction.presentation_mode != "live";
     let opening_at =
@@ -72,9 +70,10 @@ pub(crate) fn AuctionData(
             opening_refresh_key.set(Some(opening_key.clone()));
             opening_refreshed.set(false);
         }
+        // 预览不建立 WebSocket，不能用 Live 连接态作为开场补读前提；这里只失效权威读取。
         if should_refresh_at_open
             && !*opening_refreshed.peek()
-            && *realtime_state.peek() == LiveConnectionState::Live
+            && visibility.is_visible()
             && opening_at.is_some_and(|opens_at| now >= opens_at)
         {
             opening_refreshed.set(true);

@@ -36,8 +36,19 @@ impl MoogleMailDeliveryTransport {
         // 原 Worker 绝对预算覆盖渲染、排队、compose、完整 Sent 基线和证据准备。
         tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
             let Some(rendered) = self.render_send(&claim).await? else {
-                let send: DeliveryPreparedSend<'_> = Box::pin(self.send_action_claim(claim));
-                return Ok(AuthorizedDeliverySend::new(send, None));
+                let take = self.prepare_take(&claim).await?;
+                let expectation = take.as_ref().map(|take| Arc::clone(&take.expectation));
+                let fence_lease =
+                    take.as_ref().map(|take| Box::new(SharedSession(Arc::clone(&take.session))));
+                let send: DeliveryPreparedSend<'_> = Box::pin(self.send_action_claim(claim, take));
+                let mut prepared = AuthorizedDeliverySend::new(send, None);
+                if let Some(expectation) = expectation {
+                    prepared = prepared.with_take_expectation(expectation);
+                }
+                if let Some(fence_lease) = fence_lease {
+                    prepared = prepared.with_fence_lease(fence_lease);
+                }
+                return Ok(prepared);
             };
             let mut expectation = rendered.expectation(None)?;
             let world = rendered.request.world;

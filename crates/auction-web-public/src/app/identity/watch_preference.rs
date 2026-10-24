@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use super::PublicSessionResource;
 use crate::api::{CommandError, fetch_lot_watch_preference, set_lot_watch_preference};
+use crate::app::surface::PublicCommandOwner;
 
 #[derive(Default)]
 struct PreferenceState {
@@ -22,19 +23,24 @@ struct PreferenceState {
 #[derive(Clone)]
 struct PreferenceOwner {
     user_id: String,
+    identity: Signal<Option<String>>,
     session: PublicSessionResource,
     state: Signal<PreferenceState>,
 }
 
 impl PreferenceOwner {
     fn identity_matches(&self) -> bool {
-        self.session.peek().as_ref().is_some_and(|snapshot| {
-            snapshot
-                .as_ref()
-                .ok()
-                .and_then(|identity| identity.as_ref())
-                .is_some_and(|identity| identity.authenticated && identity.user_id == self.user_id)
-        })
+        self.identity.peek().as_deref() == Some(self.user_id.as_str())
+    }
+
+    /// 会话暂时失败不能清除已提交意图，但也不能授权新的渠道变更。
+    fn session_ready(&self) -> bool {
+        self.identity_matches()
+            && *self.session.state().read() == UseResourceState::Ready
+            && self.session.read().as_ref().is_some_and(|snapshot| {
+                matches!(snapshot, Ok(Some(identity)) if identity.authenticated
+                    && identity.user_id == self.user_id)
+            })
     }
 
     /// 只有首次读取、确定性失败后的显式刷新或已确认写入才重读；未知命令不得丢弃。
@@ -83,6 +89,9 @@ impl PreferenceOwner {
                 }
                 pending.clone()
             } else {
+                if !self.session_ready() {
+                    return;
+                }
                 let Some(preference) = &state.authoritative else { return };
                 let Some(channel) = &state.selected else { return };
                 PublicSetLotWatchPreferenceRequest {
@@ -129,7 +138,8 @@ impl PreferenceOwner {
 pub(super) fn OutbidNotifications(user_id: String) -> Element {
     let session = use_context::<PublicSessionResource>();
     let mut state = use_signal(PreferenceState::default);
-    let owner = PreferenceOwner { user_id, session, state };
+    let identity = use_context::<PublicCommandOwner>().0;
+    let owner = PreferenceOwner { user_id, identity, session, state };
     use_effect({
         let mut owner = owner.clone();
         move || owner.load(false)
@@ -137,7 +147,7 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
     let snapshot = state.read();
     let busy = snapshot.busy;
     let pending = snapshot.pending.is_some();
-    let ready = snapshot.authoritative.is_some() && owner.identity_matches();
+    let ready = owner.session_ready() && snapshot.authoritative.is_some();
     let failed = snapshot.error.is_some();
     let uncertain = snapshot.pending_uncertain;
     let message = if !pending {
@@ -171,7 +181,7 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
                             value: "mm", checked: mm, disabled: !ready || busy || pending,
                             aria_describedby: "outbid-feedback",
                             onchange: move |_| {
-                                if select_mm.identity_matches() && !state.peek().busy && state.peek().pending.is_none() {
+                                if select_mm.session_ready() && !state.peek().busy && state.peek().pending.is_none() {
                                     let mut state = state.write();
                                     state.selected = Some("mm".to_owned());
                                     state.confirmed = false;
@@ -186,7 +196,7 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
                             value: "pm", checked: pm, disabled: !ready || busy || pending,
                             aria_describedby: "outbid-feedback",
                             onchange: move |_| {
-                                if select_pm.identity_matches() && !state.peek().busy && state.peek().pending.is_none() {
+                                if select_pm.session_ready() && !state.peek().busy && state.peek().pending.is_none() {
                                     let mut state = state.write();
                                     state.selected = Some("pm".to_owned());
                                     state.confirmed = false;

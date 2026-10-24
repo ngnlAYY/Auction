@@ -96,7 +96,7 @@ impl InternalEvidencePurpose {
                     delivery_id.to_string(),
                     claim_token.to_string(),
                     claim_fencing.to_string(),
-                    request_hash.as_bytes().iter().map(|byte| format!("{byte:02x}")).collect(),
+                    hex_digest(request_hash.as_bytes()),
                 ])
             }
             Self::FundingReconciliation { command_id, expected_account_version } => {
@@ -367,5 +367,11 @@ pub(super) fn facts_digest(fields: &[String]) -> [u8; 32] {
 }
 
 pub(super) fn hex_digest(value: [u8; 32]) -> String {
-    value.iter().map(|byte| format!("{byte:02x}")).collect()
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(64);
+    for byte in value {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
 }

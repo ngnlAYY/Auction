@@ -53,8 +53,7 @@ pub(super) async fn migrate(config_dir: &Path) -> anyhow::Result<()> {
     if !config_dir.is_absolute() {
         anyhow::bail!("managed config directory must be absolute");
     }
-    deployment_check(config_dir, true)?;
-    let config = AppConfig::load_from_path(Role::Public, config_dir.join("public.toml"))?;
+    let [config, _, _] = deployment_check(config_dir, true)?;
     // 缺少合并部署标记不允许此命令绕过分体 systemd 停止门禁。
     let runtime = auction_config::managed_runtime_directory(&config_dir.canonicalize()?)?;
     if !runtime.join("owner.lock").try_exists()? {

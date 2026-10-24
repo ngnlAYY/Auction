@@ -17,9 +17,7 @@ mod media;
 mod query;
 mod transport;
 
-pub use i18n::{
-    LanguagePicker, SUPPORTED_LOCALES, SupportedLocale, format_localized_time, use_locale_effects,
-};
+pub use i18n::{LanguagePicker, SUPPORTED_LOCALES, SupportedLocale, use_locale_effects};
 
 pub use a11y::{use_dialog_focus_trap, use_route_focus};
 pub use bootstrap::{install_panic_hook, use_app_boot_ready};

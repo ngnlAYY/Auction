@@ -671,7 +671,7 @@ admin-mail-delivery-confirm-unknown = 이전 작업의 결과가 확인되지 �
 admin-mail-delivery-requeued = 백그라운드 처리 대기열에 다시 넣었습니다. 발송, 반환 또는 수령 성공은 아직 확인되지 않았습니다.
 
 admin-mail-loading = 메일 데이터를 불러오는 중…
-admin-mail-mailbox = 보낸 사람
+admin-mail-mailbox = 사서함 키
 admin-mail-load = 확인
 admin-mail-trigger = 수신 폴링 수동 실행
 admin-mail-action-success = 메일 폴링 상태가 업데이트되었습니다.

@@ -29,6 +29,11 @@ impl PageVisibility {
         }
     }
 
+    /// 同步读取可见性，供已使用共享秒针的边界提醒跳过隐藏页；不建立额外监听或定时器。
+    pub(crate) fn is_visible(&self) -> bool {
+        !self.hidden.get()
+    }
+
     /// 安装 `visibilitychange` 监听（仅浏览器目标）；恢复可见时先执行 `on_visible`
     /// 补偿一次权威重读，再唤醒所有挂起的轮询/退避。与 PublicShell 同寿命，只安装一次。
     #[cfg(target_arch = "wasm32")]

@@ -1,5 +1,7 @@
 //! 排除同 EID/world 的全部本系统占用，关联不全失败关闭；不替旧 unknown 洗白。
 
+use std::sync::LazyLock;
+
 use super::{sql_error, validation::world};
 use auction_application::{FundingError, SettlementFulfillmentClaim};
 use futures_util::TryStreamExt;
@@ -140,7 +142,9 @@ async fn exclude_conflicts(
     // JSON只用于定位出站资产，不是资金授权。schema损坏/未知世界无法排除关联，保守阻断。
     // 成功delivery必须有对应的已满足fulfillment或recovery action；孤儿成功也不是清白。
     // 竞得装备正文只接受精确旧三变量或新八变量；缺字段、未知字段和非字符串值仍视为冲突。
-    let outgoing_query = "SELECT EXISTS(SELECT 1 FROM public.deliveries d
+    // 只缓存固定 SQL 文本，冲突事实仍在当前事务重新读取。
+    static OUTGOING_QUERY: LazyLock<String> = LazyLock::new(|| {
+        "SELECT EXISTS(SELECT 1 FROM public.deliveries d
          WHERE d.id IS DISTINCT FROM $3 AND (
            d.payload->'schema_version' IS DISTINCT FROM '1'::jsonb
            OR d.payload->>'world' IS NULL OR d.payload->>'world' NOT IN ('main','isekai')
@@ -220,9 +224,10 @@ async fn exclude_conflicts(
                WHERE a.delivery_id=d.id AND a.execution_state='satisfied' AND a.proof_digest IS NOT NULL)
            AND NOT EXISTS(SELECT 1 FROM public.settlement_legacy_self_reconciliations r
                WHERE /* trusted_legacy_self */))".replace("/* trusted_legacy_self */",
-                   crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE);
+                   crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE)
+    });
     // 替换值仅来自已审查的编译期 SQL 常量，不插入业务文本。
-    let outgoing: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(outgoing_query.as_str()))
+    let outgoing: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(OUTGOING_QUERY.as_str()))
         .bind(c.external_equipment_id)
         .bind(world(c.equipment_world))
         .bind(recovered_handoff)

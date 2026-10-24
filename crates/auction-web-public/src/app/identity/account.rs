@@ -6,7 +6,7 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
 use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
-use crate::app::surface::use_bid_refresh;
+use crate::app::surface::{PublicCommandOwner, use_bid_refresh};
 
 use super::proxy::{
     proxy_mode_label, proxy_quota_label, proxy_status_label, proxy_transition_summary,
@@ -26,54 +26,67 @@ mod watches;
 
 pub(super) fn page() -> Element {
     let mut session = use_context::<PublicSessionResource>();
+    let command_owner = use_context::<PublicCommandOwner>().0;
     let session_snapshot = session.read().clone();
-
-    match session_snapshot.as_ref() {
+    let account = match session_snapshot.as_ref() {
         None => rsx! {
-            section { class: "public-account-bids-page", aria_labelledby: "account-loading-title",
-                h1 { id: "account-loading-title", {t!("page-account-title")} }
-                p { class: "public-page-status", role: "status", {t!("data-loading")} }
-            }
+            p { class: "public-page-status", role: "status", {t!("data-loading")} }
         },
         Some(Err(_)) => rsx! {
-            section { class: "public-account-bids-page", aria_labelledby: "account-error-title",
-                h1 { id: "account-error-title", {t!("page-account-title")} }
-                div { class: "public-auction-empty", role: "alert",
-                    p { class: "public-auction-empty__title", {t!("data-error")} }
-                    button {
-                        class: "public-auction-empty__retry",
-                        r#type: "button",
-                        onclick: move |_| session.restart(),
-                        {t!("data-retry")}
-                    }
+            div { class: "public-auction-empty", role: "alert",
+                p { class: "public-auction-empty__title", {t!("data-error")} }
+                button {
+                    class: "public-auction-empty__retry",
+                    r#type: "button",
+                    onclick: move |_| session.restart(),
+                    {t!("data-retry")}
                 }
             }
         },
         Some(Ok(None)) | Some(Ok(Some(crate::api::PublicSession { authenticated: false, .. }))) => {
             rsx! {
-                section { class: "public-account-bids-page", aria_labelledby: "account-login-title",
-                    h1 { id: "account-login-title", {t!("page-account-title")} }
-                    div { class: "public-account-login-prompt", role: "status",
-                        p { {t!("account-login-required")} }
-                        Link {
-                            class: "public-account-login-cta",
-                            to: login_href_for_current_location(),
-                            {t!("account-login-cta")}
-                        }
+                div { class: "public-account-login-prompt", role: "status",
+                    p { {t!("account-login-required")} }
+                    Link {
+                        class: "public-account-login-cta",
+                        to: login_href_for_current_location(),
+                        {t!("account-login-cta")}
                     }
                 }
             }
         }
         Some(Ok(Some(identity))) => rsx! {
-            section { class: "public-account-bids-page", aria_labelledby: "account-title",
-                h1 { id: "account-title", {t!("page-account-title")} }
-                // 偏好宿主位于分页异步分支外；身份变化销毁旧意图，不因列表重读卸载。
-                OutbidNotifications { key: "preference-{identity.user_id}", user_id: identity.user_id.clone() }
-                SessionPreference { key: "session-preference-{identity.user_id}", user_id: identity.user_id.clone() }
-                watches::CurrentWatches { key: "watches-{identity.user_id}", user_id: identity.user_id.clone() }
-                AuthenticatedAccountData { key: "bids-{identity.user_id}" }
-            }
+            AccountReadScope { key: "account-{identity.user_id}", user_id: identity.user_id.clone() }
         },
+    };
+
+    rsx! {
+        section { class: "public-account-bids-page", aria_labelledby: "account-title",
+            h1 { id: "account-title", {t!("page-account-title")} }
+            // 会话暂时读取失败只禁用新写；与竞价宿主一样，明确换号或登出才销毁未知命令。
+            if let Some(user_id) = command_owner() {
+                AccountPreferenceScope { key: "preferences-{user_id}", user_id }
+            }
+            {account}
+        }
+    }
+}
+
+/// 同一稳定账号的两个偏好命令共用 keyed 宿主；不添加 DOM 包装或依赖会话读取分支。
+#[component]
+fn AccountPreferenceScope(user_id: String) -> Element {
+    rsx! {
+        OutbidNotifications { user_id: user_id.clone() }
+        SessionPreference { user_id }
+    }
+}
+
+/// 整组只读列表以账号隔离；换号时同时重建标记及竞价读取，避免复用另一账号的快照。
+#[component]
+fn AccountReadScope(user_id: String) -> Element {
+    rsx! {
+        watches::CurrentWatches { user_id }
+        AuthenticatedAccountData {}
     }
 }
 

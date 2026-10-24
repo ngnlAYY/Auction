@@ -116,6 +116,8 @@ mod quarantine;
 #[cfg(feature = "postgres")]
 mod state;
 #[cfg(feature = "postgres")]
+pub(super) mod take_attempts;
+#[cfg(feature = "postgres")]
 mod wakeup;
 #[cfg(feature = "postgres")]
 mod watch;
@@ -232,7 +234,7 @@ impl DeliveryWorkStore for DatabaseStore {
         _claim: DeliveryWorkClaim,
         _started_at: DateTime<Utc>,
         _evidence: Option<&'a auction_application::SettlementInternalEvidenceSnapshot>,
-        _expectation: Option<&'a auction_application::DeliverySendExpectation>,
+        _expectation: Option<&'a auction_application::DeliveryPreparedExpectation>,
     ) -> auction_application::ApplicationFuture<'a, auction_application::DeliveryFenceOutcome> {
         Box::pin(async move {
             // 旧入口没有原单调截止，不能将有证据的现金授权降级为无期限提交。
@@ -265,7 +267,7 @@ impl DeliveryWorkStore for DatabaseStore {
         _started_at: DateTime<Utc>,
         _evidence: &'a auction_application::SettlementInternalEvidenceSnapshot,
         _deadline: std::time::Instant,
-        _expectation: Option<&'a auction_application::DeliverySendExpectation>,
+        _expectation: Option<&'a auction_application::DeliveryPreparedExpectation>,
     ) -> auction_application::ApplicationFuture<'a, auction_application::DeliveryFenceOutcome> {
         Box::pin(async move {
             match self {

@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | HTTP 与页面 | Public/Admin feature API 及浏览器入口见[路由口径](docs/contracts/routes.md#基线与统计口径) | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
-| 迁移 | PostgreSQL 61 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 63 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -34,6 +34,104 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 各记录只覆盖注明的工作树与验证范围，不代表运行验收。下文 `verify全绿` 沿用记录当时的完整 `just verify` 结果；历史文档份数不是当前自动检查项，也不证明链接或语义正确。当前静态门禁及独立检查范围见[开发指南](docs/guide/development.md#默认检查)，历史命令和失败结果保持原样。
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
+
+### 2026-10-24 论坛主题增加 Auction 前缀
+
+主题标题改为 `[Auction] {Main|Isekai} Equipment Auction - Session {sequence:03} ({state})`；
+期号至少三位，状态仍取同源快照。用户明确选择完整格式并放宽本地限制，renderer 与论坛客户端共用 80 字符预算，
+不截断期号；最大合法 i64 期号与最长状态的完整标题为 76 字符。远端是否接受长标题尚未验证。
+
+原无前缀状态标题保留为精确只读对账候选，兼容旧短标题、旧无状态完整标题和 HV# 摘要标题。
+应用端候选上限由 15 调整为 22，连同当前标题最多 23 个，仍合并一次版面 GET；历史形式保留原长度边界。
+不修改正文、拍卖状态、未知写入门禁、HTTP 字段或持久化结构，不批量改写既有主题。
+
+完整 `CARGO_TARGET_DIR=target/audits/source-audit-20261023-build just verify` 通过。
+临时原生 probe 实际执行两世界、七状态及五种期号的 70 个 renderer 场景；本机 HTTP 对端验证新/旧标题定位、
+同一主题的历史别名、冲突主题拒绝、80/81 字符边界、候选数量边界及截断标题不误匹配，共 5 次 GET、无 POST。
+临时 probe 的导入路径和无关正文措辞断言曾失败，已仅修正探针并保留回执；正式行为测试未新增或运行。
+证据：`target/audits/forum-title-prefix-20261024/evidence.json`；探针和独立构建目录已清理。
+本项未提交、推送、部署或访问真实论坛；工作区原有审计改动保留，不把本项无新迁移解读为整个工作树无需升级迁移。
+
+### 2026-10-23 最新源码、性能与稳定性审计
+
+基线为干净的 `67342f9df5ff99609347e5dd9b761abba4e24b27`。覆盖 20 个工作区包、修改前 1414 个 Rust 文件，
+以及相关 SQL、配置、CI/发布脚本、CSS、五语资源和正式文档。方法为全路径结构/风险扫描、关键调用链审读及定向运行；
+不是逐行形式化证明，也不是全业务或生产验收。本轮修改 141 个正式路径，其中 91 个 Rust 文件；全部 12 项现有行为测试保留，没有为减少数量删掉真实边界保护，
+未新增永久测试、未运行既有行为测试套件。本轮另用执行后删除的临时探针取得下述证据。
+
+主要修复与 owner：
+
+- domain/application：结算曲线先校验一次并用二分定位锚点，曲线处理由 `O(N×M)` 降至 `O(M+N log M)`；
+  公开入口仍严格校验，完整计划、义务、整数取整和金额守恒不变。旧 Go 结算摘要接受 RFC3339Nano，
+  并保留已发布 Rust AutoSi 重放；旧 compose 改比精确 EID，Credits 条目不再误作装备计数。
+  移动已消费装备快照、借用规则 Markdown 校验、去除逐字节 hex 临时字符串。
+- application/integrations/storage/jobs：`000063` 在 Take 的 Sending/审计事务冻结原 world/MID/凭据尝试，
+  prepared 固定同一 session；维护的缺失观察也携身份，恢复同时复核原 credential ID/version、当前 generation 和候选 fence。
+  重启 generation 与原尝试分开；旧无绑定及配置 Cookie 无持久身份的未知 Take 仍人工核对，不回填或自动重发。
+  Take 重排清除旧 `claimed_at`，避免 pending 被 Admin 安全投影拒绝；Send `000061` 和 Return 证明不弱化。
+- storage：凭据失效/启停时间保留创建和既有更新时间下界；删除旧结算只读分支未使用的 bids 扫描，
+  固定 SQL 只组合一次，摘要及心跳 JSON 改借用。`000062` 的非空外部引用部分索引加速旧 MID 碰撞检查，
+  不新增唯一约束，不移除 Serializable 谓词或历史碰撞门。
+- integrations：新论坛主题 action 在 POST 前核对路径/动作/目标；PM 写后明确失效撤销 Cookie，但仍保留 unknown。
+  删除单 Cookie 下不可达轮换循环，统一无临时集合的金额解析；超大读取预算失败关闭而不 panic，
+  AEAD 缓冲预留标签/头部容量，原密文、AAD、摘要与错误分类保持。
+- jobs/Worker：PM 使用领取前绝对截止，迟到回执不再启动下一阶段；PM 退出、panic、取消触发原 readiness 撤销与有界 drain。
+  Fulfillment 过期/零预算不首次 poll 外呼；取消优先的指标合并复用既有规则，邮箱上下文直接转移。
+- HTTP/装配/CLI/config：WebSocket 只在升级前受原请求预算约束；Public/Admin 初始化可被终止信号取消；
+  CLI/server readiness 只接受完整 CRLF 状态行。TCP peer 改在请求扩展注入，避免逐连接重装 Router。
+  CLI 直接消费联合预检快照，不二次读取未共同校验的配置；OTLP 预检与 exporter 均在严格百分号解码后校验。
+- Web：Public 两项偏好的 unknown 跨会话 GET 瞬时失败保留，换号仍清理；可见预览跨开场时间补读权威状态。
+  Admin 写前绑定原 actor/CSRF，临时故障禁写但保留 pending，迟到邮箱反馈不串目标；结算展示去掉中间深复制。
+  实际浏览器还发现并修复时间语言滞后、窄屏命令 ID 溢出；两端改用显式 I18n 时间格式，删除旧 DOM 语言入口，
+  截断宽度同时受容器约束。邮箱键五语标签修正，业务表结构和 HTTP/事件字段不变。
+
+依赖核对另发现 direct tungstenite 0.30 与 Axum 实际使用的 0.29 不同型，静态编译不能发现 downcast 恒不匹配；
+已对齐 0.29 并移除多余锁条目，恢复超限帧约定的 1009 空原因关闭。三个工具锁统一 Tokio 1.53.3，
+处理 [RUSTSEC-2026-0386](https://rustsec.org/advisories/RUSTSEC-2026-0386.html)，并更新四项可兼容的 yanked 依赖。
+
+实际验证：
+
+- Rust/cargo 1.99.0：最终完整 `CARGO_TARGET_DIR=target/audits/source-audit-20261023-build just verify` 通过，
+  含策略、格式、workspace all-targets、独立 PostgreSQL/Redis feature、Clippy `-D warnings`、双端 WASM。
+  Rust 1.94.1 的 workspace all-targets/all-features 检查通过；ShellCheck 与 Actionlint 通过。
+- 真实领域/应用源码 before/after 每版 808 个场景：745 个完整计划、14 个插值、10 个历史摘要、8 个 compose、
+  19 个 Take 应用边界、4 个 hex、8 个规则输入。计划/插值/hex/规则结果完全一致；记录型窄端口只证明应用编排。
+- 私有 Unix socket 的 PostgreSQL 18.6：完整 63 个迁移、重复迁移及全部原文件 SHA-384 通过；
+  Take/Sending/审计原子回滚、追加保护、原 fence 解析、跨账号/版本/generation 拒绝和两个真实行锁竞争通过。
+  同凭据合法重启恢复、Admin pending 投影、配置 Cookie 即时 Take、旧缺绑定拒绝、Send 唯一 MID/重放与 Return 回归通过。
+  凭据真实旧/新 UPDATE 复现旧 CHECK 失败与倒退，新幂等/时间下界/CAS 通过并回滚。
+- 本机合成 HTTP/原生探针：63 个论坛/PM/URL/指纹/信封场景通过；金额解析 137257 个短输入加 10 个边界与旧算法一致。
+  邮箱共享读取、取消、fresh 屏障、512 次真实请求预算、401 一次失效、Take 原 session/fence 撤销及带身份观察通过。
+  Worker before/after 各 18 个真实 Tokio/窄端口场景通过；迟到 fence 的发送 poll、零预算应用 poll 均从 1 降至 0。
+- 真实 CLI 配置生成/权限与预检通过；配置冲突前后退出码为 0/2/0，11 组 readiness、19 组 OTLP 接受集合通过。
+  Server 原函数另有 11 组状态行前后断言。真实 TCP/Unix peer/XFF、挂起握手 504、长连接存活及 1001 drain 通过；
+  4097 字节帧在历史基线为无 Close 断开，对齐依赖后收到 1009。两 API 的 TERM/INT 在假 PostgreSQL 握手阻塞及
+  真实 PG 表锁未释放时均及时非零退出、释放监听；真实锁等待 WS 在约 1 秒返回 504，解锁后同 token 为 401。
+- 受控 dx 构建真实双端调试 WASM，在 Chromium 合成 API 夹具中复现旧 Public 命令丢失、旧 Admin 跨会话写入及反馈串目标；
+  新版保留同 UUID/负载重试，换号/退出隔离，同身份续期可写，临时失败禁新写且草稿恢复。预览及时补读，
+  服务端未开场不提前开拍，匿名不建认证 WS；Xvfb headed Chromium 实测隐藏期间零补读、恢复可见后一轮。
+  五语邮箱标签/时间、320px 容器与截断修复均实际核对。夹具不证明真实账户、邮箱或生产业务流程。
+
+20 万合成 delivery、PostgreSQL generic plan 的单次定向观察如下，不是吞吐/p99/RSS 基准：
+
+| 路径 | 修改前 | 修改后 |
+| --- | --- | --- |
+| 无命中旧发送引用碰撞查询 | Parallel Seq Scan，24.469 ms | 部分索引 Index Scan，0.052 ms |
+| 旧结算只读核验 | 执行未消费的 bids 子查询 | 不访问该子查询，消费字段相同 |
+
+最终 RustSec 快照为 1352 条公告，提交 `8a5b8090ef20c9c1b425f3373f28b0b23cc5c7a0`。
+应用 536 个锁条目与 cargo-audit 独立锁均无漏洞/警告，cargo-machete 未发现未使用直接依赖。
+dx 仍有 13 个漏洞匹配项、11 个警告，sccache 为 5/9；相关漏洞包仍在 GNU 活跃图，不能宣称工具无风险。
+四项 MPL-2.0 包的分发义务仍须履行。两档工具均已重建/校验，剩余风险与限制见[工具审计](ci/tools/README.md#上游公告与实际使用范围)。
+
+早期 Public 借用/RSX key、Clippy 借用警告及临时探针/构建参数接缝失败均保留回执，修复后才记录最终通过；
+未降低 lint 或公告门禁。CodeGraph 已同步；Rust LSP references 仍以 code 0 提前退出，使用调用图与全调用点核对，
+空 affected 结果不替代测试审查。47 份正式文档、1290 个站内链接/锚点的一次性结构核对通过，不新增永久文档门禁。
+
+脱敏证据入口：`target/audits/latest-source-review-20261023/evidence.json`。本轮没有提交、推送、部署、真实论坛/游戏调用，
+没有迁移运行数据库；临时环境和探针按本轮清理记录回收。上线须按[稳定性修复升级](ops/README.md#发送引用索引与稳定性修复升级)
+停旧 writer、追加 `000062`/`000063`、同版更新并刷新页面。不承诺 HTTP/2 CONNECT、完整现金授权、完整 Worker 进程 drain、
+真实远端 HTML、生产并发、生产性能或灾备验收。
 
 ### 2026-10-23 邮箱共享读取与冻结发送证明
 

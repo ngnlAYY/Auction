@@ -1,6 +1,6 @@
 //! 对账只读分类例外：永久修复事实或已严格解码的无资产通知，不改旧投递结果。
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::LazyLock};
 
 use futures_util::TryStreamExt;
 
@@ -11,15 +11,18 @@ pub(super) async fn repaired_deliveries(
     tx: &mut Transaction<'_, Postgres>,
     uid: &str,
 ) -> Result<Vec<Uuid>, FundingError> {
-    let query = "SELECT d.id FROM public.deliveries d
+    // 只缓存固定 SQL 文本，不缓存任一 UID 的修复结果。
+    static QUERY: LazyLock<String> = LazyLock::new(|| {
+        "SELECT d.id FROM public.deliveries d
         JOIN public.settlement_legacy_self_reconciliations r ON r.delivery_id=d.id
         WHERE r.uid=$1 AND (/* trusted_legacy_self */) ORDER BY d.id"
-        .replace(
-            "/* trusted_legacy_self */",
-            crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE,
-        );
+            .replace(
+                "/* trusted_legacy_self */",
+                crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE,
+            )
+    });
     // 替换只来自已审查的编译期常量，不拼接UID、业务载荷或管理员文本。
-    sqlx::query_scalar(sqlx::AssertSqlSafe(query.as_str()))
+    sqlx::query_scalar(sqlx::AssertSqlSafe(QUERY.as_str()))
         .bind(uid)
         .fetch_all(&mut **tx)
         .await

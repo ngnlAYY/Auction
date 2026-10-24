@@ -42,6 +42,12 @@ sccache 独立锁图另将 `ctutils` 从 0.4.2 更新至 0.4.4，应用根锁同
 不改变 sccache feature 或密码学协议。锁图变化会使旧 release 工具回执失效；使用前须经上述安装入口重建并校验，
 不能手工改写回执来认可旧二进制。
 
+三个工具独立锁另将 Tokio 统一到 1.53.3，修复
+[RUSTSEC-2026-0386](https://rustsec.org/advisories/RUSTSEC-2026-0386.html) 的 `AsyncFd` I/O 安全公告；
+应用根锁原已使用该版本。dx 的 `auth-git2` 升至 0.5.9；sccache 的 `chacha20`、`iana-time-zone`、
+`spin` 0.9 分支分别升至 0.10.2、0.1.65、0.9.9，移除实际构建图中的 yanked 版本。
+时区补丁同步解析其 Windows 依赖闭包，不扩展 Linux 以外的发布支持。工具版本、feature 与受控安装流程不变。
+
 dx 编译期关闭自动下载，Web 入口同时设 `NO_DOWNLOADS=1`；补丁让 esbuild 和 wasm-opt 的所有查询/执行入口优先
 受控 PATH，忽略历史下载缓存。wasm-bindgen 原有入口已遵守此顺序；缺配套工具时明确失败。配套下载先校验归档哈希再解包，
 不用旧 dx 自身的 TLS 下载器。源码工具采用独立 GNU release profile、最多两个编译任务，并清除继承的 CPU、wrapper
@@ -90,6 +96,19 @@ dx 完整锁有 13 个漏洞匹配项、12 个警告，sccache 完整锁有 5 �
 sccache 的 `scc` 仅位于测试图，另外三个 yanked 包仍在实际 GHA 构建图内。
 安装回执只证明固定配方与二进制一致，不消除这些公告。未跨不兼容版本强行替换工具内部库，也未加入公告忽略项；
 受限用途、非 root 构建和受控缓存条件继续有效，检查证据见[本轮状态](docs/status.md)。
+
+最终使用 1352 条公告（数据库提交 `8a5b8090ef20c9c1b425f3373f28b0b23cc5c7a0`）复审上述兼容更新；应用锁在 WebSocket 类型对齐后为 536 个条目：
+
+| 独立锁 | 漏洞匹配项 | 警告 | GNU 普通/构建图 |
+| --- | ---: | ---: | --- |
+| Auction 应用 | 0 | 0 | 三角色、server、auctionctl 与双端 WASM 分别核对 |
+| cargo-audit | 0 | 0 | 未命中公告或 yanked 包 |
+| dx | 13 | 11 | 漏洞包仍编入；没有 yanked 包 |
+| sccache | 5 | 9 | rsa、ruzstd、zip 仍编入；仅完整锁的测试依赖 scc 仍 yanked |
+
+两档工具已按更新后的锁重建并校验回执。cargo-audit 的上游宏仍产生 21 条 future-incompatible 编译警告，
+sccache 仍有一条 dead-code 编译警告；它们不是应用 Clippy 结果，也不是 RustSec 公告数量。
+剩余跨不兼容版本问题未通过强制 patch 或忽略公告掩盖，上表及受限调用边界不构成工具链无风险声明。
 
 升级工具或应用 wasm-bindgen 时，核对官方源码/制品身份与依赖公告，更新对应锁图、固定哈希及配套版本，运行
 `bash -n`、ShellCheck、Actions 静态检查和相关工具构建，再按项目默认范围执行编译门禁。不得通过忽略公告或降低

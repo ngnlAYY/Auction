@@ -121,10 +121,13 @@ pub(super) async fn mutate_postgres(
     {
         return Err(admin_error(AdminCredentialError::InvalidRequest));
     }
+    // 与用户快照一致，凭据修改不能倒退时间；首次停用也必须满足 rotated_at 的创建时间下界。
     let row = sqlx::query(
         "UPDATE public.credential_keys
-         SET label = $2, status = $3, state_version = $4, updated_at = $5,
-             rotated_at = CASE WHEN $3 = 'active' THEN rotated_at ELSE COALESCE(rotated_at, $5) END
+         SET label = $2, status = $3, state_version = $4,
+             updated_at = GREATEST(created_at, updated_at, $5),
+             rotated_at = CASE WHEN $3 = 'active' THEN rotated_at
+                 ELSE COALESCE(rotated_at, GREATEST(created_at, updated_at, $5)) END
          WHERE id = $1 AND state_version = $6
          RETURNING id, credential_kind, scope, label, player_name, status, state_version,
                    created_at, rotated_at, updated_at",

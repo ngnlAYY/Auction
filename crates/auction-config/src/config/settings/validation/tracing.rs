@@ -1,5 +1,7 @@
 //! OTLP tracing exporter 和 header 安全校验。
 
+use std::borrow::Cow;
+
 use super::super::*;
 
 pub(crate) fn validate_tracing(
@@ -65,18 +67,18 @@ pub(crate) fn validate_tracing_headers(value: &str) -> Result<(), ConfigError> {
             "OTLP headers 必须是不超过 8192 字节的安全列表",
         ));
     }
-    let parts = value.split(',').collect::<Vec<_>>();
-    if parts.len() > 32 {
+    if value.split(',').count() > 32 {
         return Err(ConfigError::InvalidTracingConfig("OTLP headers 最多包含 32 项"));
     }
     let mut seen = BTreeSet::new();
-    for part in parts {
+    for part in value.split(',') {
         let Some((key, header_value)) = part.split_once('=') else {
             return Err(ConfigError::InvalidTracingConfig("OTLP headers 必须使用 key=value 格式"));
         };
-        let key = key.trim();
-        let header_value = header_value.trim();
-        if !valid_http_header_token(key)
+        // exporter 按百分号解码后校验；配置预检必须使用同一名称、长度和控制字符边界。
+        let key = decode_tracing_header(key.trim())?;
+        let header_value = decode_tracing_header(header_value.trim())?;
+        if !valid_http_header_token(&key)
             || header_value.is_empty()
             || header_value.len() > 1024
             || header_value.chars().any(char::is_control)
@@ -101,6 +103,29 @@ pub(crate) fn validate_tracing_headers(value: &str) -> Result<(), ConfigError> {
         }
     }
     Ok(())
+}
+
+/// 严格解码 OTLP 的 URL 百分号形式；普通值只借用原文，不把 `+` 当作表单空格。
+fn decode_tracing_header(value: &str) -> Result<Cow<'_, str>, ConfigError> {
+    if !value.as_bytes().contains(&b'%') {
+        return Ok(Cow::Borrowed(value));
+    }
+    let invalid = || ConfigError::InvalidTracingConfig("OTLP headers 百分号编码无效");
+    let mut bytes = value.bytes();
+    let mut decoded = Vec::with_capacity(value.len());
+    while let Some(byte) = bytes.next() {
+        let byte = if byte == b'%' {
+            let high =
+                bytes.next().and_then(|byte| char::from(byte).to_digit(16)).ok_or_else(invalid)?;
+            let low =
+                bytes.next().and_then(|byte| char::from(byte).to_digit(16)).ok_or_else(invalid)?;
+            (high * 16 + low) as u8
+        } else {
+            byte
+        };
+        decoded.push(byte);
+    }
+    String::from_utf8(decoded).map(Cow::Owned).map_err(|_| invalid())
 }
 
 pub(crate) fn valid_http_header_token(value: &str) -> bool {

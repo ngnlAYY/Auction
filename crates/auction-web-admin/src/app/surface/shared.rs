@@ -1,15 +1,14 @@
 //! 管理端跨页面展示辅助组件。
 
 use auction_web_shared::{
-    BaseErrorKind, base_api_error_message, format_localized_time, legacy_t as t,
+    BaseErrorKind, base_api_error_message, i18n::format_localized_time_for_language, legacy_t as t,
 };
+use dioxus_i18n::prelude::i18n;
 
-/// 按旧版管理端约定把 UTC 时间显示为当前界面语言的 Asia/Shanghai 时间。
-/// 旧版使用浏览器 `Intl.DateTimeFormat`，因此不能在 Rust 侧固定月份语言；WASM 路径继续
-/// 使用浏览器的本地化格式，非 WASM 构建只保留静态检查所需的稳定兜底。`datetime` 属性
-/// 仍保留原始 RFC3339 值，屏幕文案统一经过这一层。
+/// 直接订阅当前 I18n 语言，避免 `<html lang>` 的同步 effect 使时间文案滞后一轮。
+/// 时区固定为 Asia/Shanghai，格式及非法时间回退由共享层拥有。
 pub fn format_admin_time(value: &str) -> String {
-    format_localized_time(value)
+    format_localized_time_for_language(value, &i18n().language().to_string())
 }
 
 /// 将 Admin API 的稳定错误码映射为当前语言的可操作提示。

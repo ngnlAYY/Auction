@@ -1,6 +1,8 @@
-//! 跨全部 Send 来源的精确恢复门；旧尝试、过期 owner 与重复 MID 都不能冒充当前事实。
+//! 冻结账号与精确恢复门；旧尝试、过期 owner 与重复 MID 都不能冒充当前事实。
 
-use auction_application::{DeliverySendCredentialBinding, DeliverySendExpectation};
+use auction_application::{
+    DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
+};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction};
@@ -19,6 +21,28 @@ pub(super) async fn lock_observation(
         metadata.get("observation_credential").cloned().ok_or(RecoveryError::Rejected)?,
     )
     .map_err(|_| RecoveryError::Rejected)?;
+    if !expectation.validate()
+        || !observed.validate()
+        || observed.credential_id != original.credential_id
+        || observed.credential_version != original.credential_version
+    {
+        return Err(RecoveryError::Rejected);
+    }
+    crate::lock_mail_runtime_generation(
+        tx,
+        &auction_application::MailRuntimeBinding { generation: observed.runtime_generation },
+    )
+    .await?;
+    Ok(())
+}
+
+/// Take 缺原绑定一律拒绝；同账号重启可换 generation，但本次观察必须属于当前 owner。
+pub(super) async fn lock_take_observation(
+    tx: &mut Transaction<'_, Postgres>,
+    expectation: &DeliveryTakeExpectation,
+    observed: &DeliverySendCredentialBinding,
+) -> Result<(), RecoveryError> {
+    let original = expectation.credential.as_ref().ok_or(RecoveryError::Rejected)?;
     if !expectation.validate()
         || !observed.validate()
         || observed.credential_id != original.credential_id

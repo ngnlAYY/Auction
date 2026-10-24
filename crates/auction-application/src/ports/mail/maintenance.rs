@@ -89,6 +89,13 @@ pub struct MoogleMailboxInboxAssets {
     pub cod: i64,
 }
 
+/// 同一读取会话的资产观察；明确缺失也必须携带当前凭据，不能用另一账号的缺失完成旧 Take。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoogleMailboxInboxObservation {
+    pub assets: Option<MoogleMailboxInboxAssets>,
+    pub observation_credential: Option<crate::DeliverySendCredentialBinding>,
+}
+
 /// 无登录 key 的历史通知保守重建摘要；带 key 的旧行不能用当前 key 冒充原发送内容。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailboxNoticeExpectation {
@@ -102,11 +109,13 @@ pub struct MoogleMailboxUnprovenSend {
     pub delivery_id: Uuid,
     /// 当前投递行的 fencing version；只用于观察、discard 与恢复事务的 CAS。
     pub fencing_version: i64,
-    /// 冻结发送的原始 fencing version；Sending 过期提升当前版本后仍保留此尝试身份。
-    /// 无冻结期望的旧行不据此推断历史发送身份，只沿用保守历史证明。
+    /// 冻结 Send/Take 的原始 fencing version；Sending 过期提升当前版本后仍保留此尝试身份。
+    /// 无冻结期望的旧行不据此推断原账号或历史动作结果。
     pub sending_fencing_version: i64,
     /// 真实发送前冻结的精确身份；旧行缺失时只允许原有保守历史证明路径。
     pub send_expectation: Option<crate::DeliverySendExpectation>,
+    /// 原 Take 会话身份；旧行或配置 Cookie 缺少持久绑定时不得自动恢复或重排。
+    pub take_expectation: Option<crate::DeliveryTakeExpectation>,
     /// 投递业务 owner；冻结 Send 统一精确比对，旧行仍按历史规则隔离。
     pub origin_kind: String,
     pub world_id: String,
@@ -176,15 +185,16 @@ pub trait MoogleMailboxMaintenance: Send + Sync {
         candidate: &'a MoogleMailboxUnprovenSend,
     ) -> MailboxFuture<'a, Option<MoogleMailboxNoticeExpectation>>;
 
-    /// 只读确认入站邮件是否仍存在并返回当前资产；`None` 只表示远端明确答复邮件不存在。
+    /// 只读返回当前会话的资产及凭据；assets=None 仅证明该账号明确答复目标邮件不存在。
     fn inbox_assets<'a>(
         &'a self,
         world_id: &'a str,
         external_mail_id: &'a str,
-    ) -> MailboxFuture<'a, Option<MoogleMailboxInboxAssets>>;
+    ) -> MailboxFuture<'a, MoogleMailboxInboxObservation>;
 }
 
 /// 本地观察与受证明恢复端口；状态变更必须与资金、履约及追加审计原子提交。
+/// Take 恢复与重排必须锁验原冻结尝试、当前候选 fence 及观察凭据的有效 generation，不能只相信调用方比对。
 pub trait MoogleMailboxEvidenceStore: Send + Sync {
     /// 按持久游标稳定回绕读取候选；读取本身不推进，未处理后缀必须留给下一轮。
     fn unproven_sends<'a>(
@@ -233,19 +243,25 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         expectation: Option<&'a crate::DeliverySendExpectation>,
     ) -> MailboxFuture<'a, bool>;
 
-    /// 把已不在收件箱的 take 动作收口为成功；仅实际迁移并确认提交返回 true。
+    /// 把原 fencing 尝试已证明完成的 take 收口为成功；仅实际迁移并确认提交返回 true。
     fn bind_recovered_action<'a>(
         &'a self,
         delivery_id: Uuid,
+        fencing_version: i64,
         external_mail_id: String,
         metadata: Value,
+        expectation: &'a crate::DeliveryTakeExpectation,
+        observation: &'a crate::DeliverySendCredentialBinding,
     ) -> MailboxFuture<'a, bool>;
 
-    /// 仅将已正向确认附件仍在的 take 重新排队，返回实际迁移结果；未知 Send 禁止走此入口。
+    /// 仅将原 fencing 尝试已正向确认附件仍在的 take 重新排队；未知 Send 禁止走此入口。
     fn requeue_unproven<'a>(
         &'a self,
         delivery_id: Uuid,
+        fencing_version: i64,
         retries: i64,
         reason: &'a str,
+        expectation: &'a crate::DeliveryTakeExpectation,
+        observation: &'a crate::DeliverySendCredentialBinding,
     ) -> MailboxFuture<'a, bool>;
 }

@@ -41,11 +41,11 @@
 ### 论坛主题名称
 
 ```text
-[Auction] Main #001 (Live)
-[Auction] Isekai #001 (Settled)
+[Auction] Main Equipment Auction - Session 001 (Live)
+[Auction] Isekai Equipment Auction - Session 001 (Settled)
 ```
 
-`#` 后是场次期号，不足三位补零，括号内显示真实拍卖状态，标题不含日期；备注使用 UTC 格式
+`Session` 后是场次期号，不足三位补零，超过三位不截断；括号内显示真实拍卖状态，标题不含日期。备注使用 UTC 格式
 `Bid Start:开拍时间 UTC / Bid End:计划截止时间 UTC`，未排定截止时显示 `Bid End:Not scheduled`。备注是计划时间，
 不是单件软截止延长后的实时截止。首帖顶部 `List Timer` 表示本场收件在开拍时关闭，`Auction Timer` 表示计划竞价截止。
 倒计时由本站生成动态 SVG，显示计划截止的剩余时长，到期显示 `Closed` / `Ended`，不依赖第三方服务。

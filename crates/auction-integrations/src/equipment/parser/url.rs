@@ -37,17 +37,15 @@ pub(crate) fn parse_equipment_url(
         return Err(AdminIntakeError::InvalidSource);
     }
     let prefix = if world_id == "isekai" { "/isekai/equip/" } else { "/equip/" };
-    let parts: Vec<String> = parsed
-        .path()
-        .strip_prefix(prefix)
-        .unwrap_or_default()
-        .split('/')
-        .map(str::to_owned)
-        .collect();
-    if parts.len() != 2 || !valid_decimal_id(&parts[0]) || EquipmentKey::new(&parts[1]).is_err() {
+    let path = parsed.path().strip_prefix(prefix).ok_or(AdminIntakeError::InvalidSource)?;
+    let (equipment_id, key) = path.split_once('/').ok_or(AdminIntakeError::InvalidSource)?;
+    // key 的领域校验也排除额外路径段；借用路径片段，避免建立集合和重复复制 ID。
+    if !valid_decimal_id(equipment_id) || EquipmentKey::new(key).is_err() {
         return Err(AdminIntakeError::InvalidSource);
     }
-    Ok((parsed, parts[0].clone(), parts[1].to_ascii_lowercase()))
+    let equipment_id = equipment_id.to_owned();
+    let key = key.to_ascii_lowercase();
+    Ok((parsed, equipment_id, key))
 }
 
 /// 兼容从自然语言复制的 URL 包裹和句末标点；规范化后仍执行完整 origin、路径和 key 校验。

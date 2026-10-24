@@ -610,7 +610,7 @@ admin-mail-delivery-confirm-unknown = The previous outcome is unconfirmed. Check
 admin-mail-delivery-requeued = Queued again for background processing. Sending, returning, or claiming has not yet been confirmed.
 
 admin-mail-loading = Loading mail data…
-admin-mail-mailbox = From
+admin-mail-mailbox = Mailbox key
 admin-mail-load = Confirm
 admin-mail-trigger = Trigger inbox poll
 admin-mail-action-success = Mail polling state updated.

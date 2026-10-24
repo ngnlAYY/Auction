@@ -66,14 +66,16 @@ GET/PUT：两者复用会话、来源/CSRF、限流、strict JSON、JSON 405 与
 
 ## 请求边界与能力边界
 
-请求边界统一处理合法 `X-Request-ID`、trace context、安全头、访问日志、panic 与超时；普通请求处理预算 15 秒
-（WebSocket 豁免），连接层 HTTP/1 请求头预算固定 5 秒。默认忽略 `X-Forwarded-For`，仅显式信任的 TCP/Unix 代理
+请求边界统一处理合法 `X-Request-ID`、trace context、安全头、访问日志、panic 与超时；普通请求和 WebSocket
+握手共用 15 秒处理预算，升级后的长连接不受该计时器限制。连接层 HTTP/1 请求头预算固定 5 秒；默认忽略 `X-Forwarded-For`，仅显式信任的 TCP/Unix 代理
 可提供客户端地址；Unix listener 不伪造 TCP peer，应用不根据转发协议头推导 Origin 或 Secure Cookie
 （见[橙云部署](ops/README.md#cloudflare-整站代理)）。Public 竞价守卫按限流 → Origin → 认证执行，
 Admin mutation 守卫按限流 → Origin → CSRF → 会话执行。竞价、标记、警告渠道、生命周期和世界启停通过
 `decode_after_guard` 在守卫及 query/path 校验后读取正文；其余已挂载 `strict_json::enforce` 的旧路由仍先经过
 正文中间件，再进入 handler 守卫。不能混写成全站统一的正文顺序，也不能为减少解析次数改变原有错误优先级。
 两条严格 JSON 路径均保留路由大小上限、单值与 DTO 字段闭集。
+TCP peer 直接注入每次请求的扩展，不为每条连接重新给整张路由表装配 middleware；
+Unix 连接仍不注入伪造地址，原可信代理解析、5 秒请求头预算及连接排空边界不变。
 Public 竞价、代理、标记、警告渠道和注销在 Cookie 认证后核对可选 `x-auction-expected-user-id`；规范非零 UUID
 与当前身份不符返回 409 `session_changed`，无效或重复头返回 400 `invalid_expected_user_id`。省略该头保留旧 v1，读取路由行为不变。
 P25/P26 共用路由的方法拒绝响应始终声明 `Allow: GET, PUT`；HEAD 仍返回 405，不能由单一 GET builder

@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use auction_application::{
-    ApplicationError, DeliveryFenceOutcome, DeliverySendExpectation, DeliveryWorkClaim,
+    ApplicationError, DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliveryWorkClaim,
     FundingError, SettlementInternalEvidenceSnapshot,
 };
 use chrono::{DateTime, Utc};
@@ -61,7 +61,7 @@ pub(in crate::database::delivery_scheduler) async fn run(
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
     deadline: Option<Instant>,
     intervals: &auction_application::DeliverySendIntervals,
-    expectation: Option<&DeliverySendExpectation>,
+    expectation: Option<&DeliveryPreparedExpectation>,
 ) -> Result<DeliveryFenceOutcome, ApplicationError> {
     if evidence.is_some() != deadline.is_some() {
         return Err(uncertain());
@@ -91,9 +91,22 @@ async fn run_transaction(
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
     deadline: Option<Instant>,
     intervals: &auction_application::DeliverySendIntervals,
-    expectation: Option<&DeliverySendExpectation>,
+    expectation: Option<&DeliveryPreparedExpectation>,
 ) -> Result<DeliveryFenceOutcome, ApplicationError> {
-    if !super::super::attempts::matches_claim(claim, expectation) {
+    let matches_claim = match expectation {
+        Some(DeliveryPreparedExpectation::Send(expectation)) => {
+            super::super::attempts::matches_claim(claim, Some(expectation))
+        }
+        Some(DeliveryPreparedExpectation::Take(expectation)) => {
+            super::super::take_attempts::matches_claim(claim, expectation)
+        }
+        None => {
+            super::super::attempts::matches_claim(claim, None)
+                && claim.payload.get("operation").and_then(serde_json::Value::as_str)
+                    != Some("take")
+        }
+    };
+    if !matches_claim {
         return Ok(DeliveryFenceOutcome::Deferred);
     }
     for attempt in 0..3 {

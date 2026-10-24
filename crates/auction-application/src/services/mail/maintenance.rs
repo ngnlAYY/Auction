@@ -11,10 +11,11 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::{
-    ApplicationError, Clock, DeliverySendExpectation, MoogleMailboxComposeState,
-    MoogleMailboxDiscard, MoogleMailboxEvidenceStore, MoogleMailboxInboxAssets,
-    MoogleMailboxMaintenance, MoogleMailboxSentEntry, MoogleMailboxSentState,
-    MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend, RepositoryError,
+    ApplicationError, Clock, DeliverySendCredentialBinding, DeliverySendExpectation,
+    DeliveryTakeExpectation, MoogleMailboxComposeState, MoogleMailboxDiscard,
+    MoogleMailboxEvidenceStore, MoogleMailboxInboxAssets, MoogleMailboxMaintenance,
+    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxSweepCandidate,
+    MoogleMailboxUnprovenSend, RepositoryError,
 };
 
 /// 单轮最多核对的投递数；达到上限即停止，不越过未处理后缀推进持久游标。
@@ -517,33 +518,59 @@ impl MailboxMaintenanceService {
         Ok(step)
     }
 
-    /// take 只凭明确缺失或资产完全清空收口；精确原资产仍在才可重排，部分或矛盾结果保持未知。
+    /// Take 只解释原账号下的明确缺失或完整资产观察；旧无绑定记录保留人工核对。
     async fn recover_take(
         &self,
         world_id: &str,
         candidate: &MoogleMailboxUnprovenSend,
     ) -> Result<RecoveryStep, ApplicationError> {
-        let assets = match self.maintenance.inbox_assets(world_id, &candidate.inbound_mail_id).await
-        {
-            Ok(value) => value,
-            Err(error) => {
-                return Ok(RecoveryStep {
-                    failed: true,
-                    error: Some(error.to_string()),
-                    ..RecoveryStep::default()
-                });
-            }
+        let Some(expectation) = candidate.take_expectation.as_ref() else {
+            return Ok(RecoveryStep::default());
         };
-        match assets {
-            None => self.bind_take(candidate, "inbox_mail_absent").await,
+        if !expectation.validate()
+            || expectation.world_id != world_id
+            || expectation.world_id != candidate.world_id
+            || expectation.external_mail_id != candidate.inbound_mail_id
+            || candidate.sending_fencing_version <= 0
+            || candidate.sending_fencing_version > candidate.fencing_version
+        {
+            return Ok(RecoveryStep::default());
+        }
+        let Some(expected_credential) = expectation.credential.as_ref() else {
+            return Ok(RecoveryStep::default());
+        };
+        let observed =
+            match self.maintenance.inbox_assets(world_id, &candidate.inbound_mail_id).await {
+                Ok(value) => value,
+                Err(error) => {
+                    return Ok(RecoveryStep {
+                        failed: true,
+                        error: Some(error.to_string()),
+                        ..RecoveryStep::default()
+                    });
+                }
+            };
+        let Some(observation) = observed.observation_credential.as_ref() else {
+            return Ok(RecoveryStep::default());
+        };
+        // 重启可推进 generation，但不能换凭据或版本；本次 generation 仍由存储锁内复核。
+        if !observation.validate()
+            || observation.credential_id != expected_credential.credential_id
+            || observation.credential_version != expected_credential.credential_version
+        {
+            return Ok(RecoveryStep::default());
+        }
+        match observed.assets {
+            None => self.bind_take(candidate, expectation, observation, "inbox_mail_absent").await,
             Some(present) => {
                 if !present.sender.eq_ignore_ascii_case(&candidate.recipient) {
                     return Ok(RecoveryStep::default());
                 }
                 if present.equipment_ids.is_empty() && present.credits == 0 && present.cod == 0 {
-                    self.bind_take(candidate, "attachments_absent").await
+                    self.bind_take(candidate, expectation, observation, "attachments_absent").await
                 } else if take_assets_match(candidate, &present) {
-                    self.requeue(candidate, "take_assets_still_present").await
+                    self.requeue(candidate, expectation, observation, "take_assets_still_present")
+                        .await
                 } else {
                     Ok(RecoveryStep::default())
                 }
@@ -554,12 +581,15 @@ impl MailboxMaintenanceService {
     async fn bind_take(
         &self,
         candidate: &MoogleMailboxUnprovenSend,
+        expectation: &DeliveryTakeExpectation,
+        observation: &DeliverySendCredentialBinding,
         reason: &str,
     ) -> Result<RecoveryStep, ApplicationError> {
         let recovered = self
             .store
             .bind_recovered_action(
                 candidate.delivery_id,
+                candidate.fencing_version,
                 candidate.inbound_mail_id.clone(),
                 json!({
                     "observed_at": self.clock.now(),
@@ -570,6 +600,8 @@ impl MailboxMaintenanceService {
                     "reason": reason,
                     "attachment_count": candidate.attachment_ids.len(),
                 }),
+                expectation,
+                observation,
             )
             .await?;
         Ok(RecoveryStep { recovered, ..RecoveryStep::default() })
@@ -578,6 +610,8 @@ impl MailboxMaintenanceService {
     async fn requeue(
         &self,
         candidate: &MoogleMailboxUnprovenSend,
+        expectation: &DeliveryTakeExpectation,
+        observation: &DeliverySendCredentialBinding,
         reason: &str,
     ) -> Result<RecoveryStep, ApplicationError> {
         if candidate.sweep_retries >= MAX_SWEEP_RETRIES {
@@ -585,7 +619,14 @@ impl MailboxMaintenanceService {
         }
         let requeued = self
             .store
-            .requeue_unproven(candidate.delivery_id, candidate.sweep_retries + 1, reason)
+            .requeue_unproven(
+                candidate.delivery_id,
+                candidate.fencing_version,
+                candidate.sweep_retries + 1,
+                reason,
+                expectation,
+                observation,
+            )
             .await?;
         Ok(RecoveryStep { requeued, ..RecoveryStep::default() })
     }
@@ -768,11 +809,13 @@ fn compose_matches(
             && compose.equipment_ids == expectation.equipment_ids;
     }
     // 通知类没有业务 reference；空串会匹配任意草稿，必须显式排除。
+    // 旧行也必须核对原装备身份；总附件数还包含 Credits，不能代替 EID 证明。
     !candidate.reference.is_empty()
         && candidate.recipient.eq_ignore_ascii_case(&compose.recipient)
         && compose.cod == Some(candidate.cod)
         && compose.credits == candidate.credits
-        && compose.attachment_count == candidate.attachment_ids.len()
+        && candidate.attachment_ids.windows(2).all(|ids| ids[0] < ids[1])
+        && compose.equipment_ids == candidate.attachment_ids
         && (compose.subject.contains(&candidate.reference)
             || compose.body.contains(&candidate.reference))
 }

@@ -57,9 +57,11 @@ pub(super) async fn mark_invalid_postgres(
     credential_id: Uuid,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), ApplicationError> {
+    // 远端失效不能因角色时钟落后或回拨而被时间顺序约束拒绝；状态版本仍只推进一次。
     let affected = sqlx::query(
         "UPDATE public.credential_keys
-         SET status = 'invalid', state_version = state_version + 1, updated_at = $2
+         SET status = 'invalid', state_version = state_version + 1,
+             updated_at = GREATEST(created_at, updated_at, $2)
          WHERE id = $1 AND status <> 'invalid'",
     )
     .bind(credential_id)

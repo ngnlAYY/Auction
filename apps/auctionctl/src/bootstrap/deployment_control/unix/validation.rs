@@ -60,20 +60,6 @@ pub(in crate::bootstrap::deployment_control::unix) fn validate_config_dir(
     Ok(canonical)
 }
 
-pub(in crate::bootstrap::deployment_control::unix) fn validate_deployment_config_file(
-    path: &Path,
-) -> anyhow::Result<()> {
-    let metadata = fs::symlink_metadata(path)
-        .with_context(|| format!("读取部署主配置元数据失败：{}", path.display()))?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        anyhow::bail!("部署主配置必须是无符号链接的普通文件：{}", path.display())
-    }
-    if metadata.permissions().mode() & 0o022 != 0 {
-        anyhow::bail!("部署主配置不得允许 group/other 写入：{}", path.display())
-    }
-    Ok(())
-}
-
 pub(in crate::bootstrap::deployment_control::unix) fn ensure_unit_config(
     role: ManagedRole,
     unit: &str,

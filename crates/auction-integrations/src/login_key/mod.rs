@@ -243,7 +243,9 @@ fn seal(
     random.fill(&mut nonce).map_err(|_| LoginKeyCryptoError::RandomSource)?;
     let nonce_array: [u8; LOGIN_KEY_NONCE_BYTES] =
         nonce.as_slice().try_into().map_err(|_| LoginKeyCryptoError::Encryption)?;
-    let mut buffer = plaintext.to_vec();
+    // 预留认证标签，避免追加标签时扩容并复制整份加密缓冲。
+    let mut buffer = Vec::with_capacity(plaintext.len() + aead::AES_256_GCM.tag_len());
+    buffer.extend_from_slice(plaintext);
     if key
         .seal_in_place_append_tag(
             aead::Nonce::assume_unique_for_key(nonce_array),

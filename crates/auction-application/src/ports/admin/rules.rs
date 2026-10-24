@@ -38,18 +38,7 @@ impl AdminRulesCandidate {
 
     /// 校验规则候选的语言、标题和正文边界。
     pub fn validate(&self) -> Result<(), AdminRulesError> {
-        if !valid_locale(&self.locale) {
-            return Err(AdminRulesError::InvalidLocale);
-        }
-        if self.title.is_empty()
-            || self.title != self.title.trim()
-            || self.title.len() > MAX_RULE_TITLE_BYTES
-            || self.title.chars().any(char::is_control)
-            || self.markdown.len() > MAX_RULE_MARKDOWN_BYTES
-        {
-            return Err(AdminRulesError::InvalidDocument);
-        }
-        Ok(())
+        validate_document_fields(&self.locale, &self.title, &self.markdown)
     }
 }
 
@@ -67,12 +56,7 @@ pub struct AdminRulesDocument {
 impl AdminRulesDocument {
     /// 校验从存储层返回的完整规则快照。
     pub fn validate(&self) -> Result<(), AdminRulesError> {
-        AdminRulesCandidate {
-            locale: self.locale.clone(),
-            title: self.title.clone(),
-            markdown: self.markdown.clone(),
-        }
-        .validate()?;
+        validate_document_fields(&self.locale, &self.title, &self.markdown)?;
         if self.revision <= 0
             || self.published_at.timestamp_micros() == 0
             || !valid_text(&self.published_by, MAX_RULE_ACTOR_BYTES)
@@ -116,12 +100,7 @@ impl AdminRulesPublishCommand {
         {
             return Err(AdminRulesError::InvalidCommand);
         }
-        AdminRulesCandidate {
-            locale: self.locale.clone(),
-            title: self.title.clone(),
-            markdown: self.markdown.clone(),
-        }
-        .validate()
+        validate_document_fields(&self.locale, &self.title, &self.markdown)
     }
 }
 
@@ -248,6 +227,21 @@ pub const MAX_RULE_MARKDOWN_BYTES: usize = 1 << 20;
 pub const MAX_RULE_ACTOR_BYTES: usize = 128;
 /// 请求关联 ID 允许的最大字节数。
 pub const MAX_RULE_REQUEST_ID_BYTES: usize = 128;
+
+/// 候选、发布命令和存储快照复用借用校验，避免仅为检查上限而复制整篇 Markdown。
+fn validate_document_fields(
+    locale: &str,
+    title: &str,
+    markdown: &str,
+) -> Result<(), AdminRulesError> {
+    if !valid_locale(locale) {
+        return Err(AdminRulesError::InvalidLocale);
+    }
+    if !valid_text(title, MAX_RULE_TITLE_BYTES) || markdown.len() > MAX_RULE_MARKDOWN_BYTES {
+        return Err(AdminRulesError::InvalidDocument);
+    }
+    Ok(())
+}
 
 fn valid_locale(value: &str) -> bool {
     !value.is_empty()

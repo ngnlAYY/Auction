@@ -154,9 +154,9 @@ PostgreSQL 完整档还必须在数据库边界保护拍卖聚合身份不可变
 
 论坛系统更新楼的拒绝提示只按持久错误码生成安全英文，区分已领先、金额过低/无效、截止、资格及状态等原因；原始有界诊断仍只留本地账本，不输出 SQL、凭据、代理上限或任意错误原文。旧 `command_rejected` 或空码只对完整白名单诊断格式做展示映射，金额诊断须含规范 i64，数值不回显；未知新码不得借旧详情重新解释，统一返回通用提示。展示映射不改历史记录、不重放拒绝出价，pending 仍表示将重试且阻止完成水位；正常镜像更新仍受活动主题、租约、写入证明及未知结果门禁约束。
 
-主题标题采用 `{Main|Isekai} Equipment Auction - Session {场次号，至少三位} ({真实拍卖状态})`，状态使用固定英文闭集：
-Draft、Preview、Live、Final、Settling、Settled、Cancelled。超过论坛 50 字符限制时明确拒绝，不截断场次身份。
-当前标题及最多十五个旧/其他状态标题候选仅作精确对账；候选包括其余新状态、七个旧短标题、合法长度的原无状态完整标题和旧 HV# 摘要标题，
+主题标题采用 `[Auction] {Main|Isekai} Equipment Auction - Session {场次号，至少三位} ({真实拍卖状态})`，状态使用固定英文闭集：
+Draft、Preview、Live、Final、Settling、Settled、Cancelled。本地校验上限为 80 字符，不截断场次身份；这不代表远端已验证接受该长度。
+当前标题及最多二十二个旧/其他状态候选仅作精确对账；包括其余六种新状态、七个旧无前缀状态、七个旧短标题、合法长度的旧无状态完整标题和旧 HV# 摘要标题。
 多个候选指向不同主题时失败关闭，不取第一个结果继续写入。状态变化不改主题身份，也不授权重复发帖。
 
 论坛目录按分类/编号稳定排序，每帖最多 150 件，#1 起连续分页；系统更新楼为目录页数加一，竞价起点再加一。每个目录页独立受 65,531 字节上限约束，不能静默丢弃装备；历史已尝试/发布/未知主题冻结为单页并继续处理出价，不强行分页，只有从未尝试且无远端身份的队列项及新主题启用分页。已发布楼层身份冻结，抢楼、缺页、布局与冻结目标冲突失败关闭，不能为了插入目录页覆盖日志或用户回帖；全部正文证明同事务收口，续页与系统帖不参与用户竞价或格式报错。更新楼采用静态白名单提示，保留 post/line 定位，区分 pending、警告、忽略；格式错误要求新增回帖，pending 不要求重发。通知处理可能晚于竞价成功，不能把通知 pending 或失败解释为竞价未接受；日志最多展示 100 条且受正文预算限制，优先 pending、再展示最近警告，省略数量必须明确，不能以省略诊断推进真实处理水位。
@@ -199,7 +199,7 @@ Delivery 续租回执超过本次 finalize 或旧租约截止时必须拒绝，�
 
 诊断是非权威投影：完整装备响应先加密 prepare，失败才在 2 秒预算内 retain，成功即丢弃；每封邮件最多挂接首个失败 sidecar，不能进入 `decision_metadata`、command digest、completion proof 或 cursor，没有历史 trace 不补因、不重放。留证必须在 item/batch 业务定时器之外执行，实际耗时顺延后续 batch deadline；中间失败保留原 retryability，只有 terminal `OkRejected` 挂接 sidecar。留证关闭、失败或完成未知时仍输出安全关联日志，不伪称取得完整 body 或保证文件永久存在；阶段、字段闭集、HTTP 状态与计时范围、回执和调用顺序统一见[装备诊断契约](ops/mail/diagnostics.md#装备读取失败诊断)。
 
-主世界三页维护复用一次 fetch 总预算，覆盖数据库、session 排队、逐封详情及 compose/discard，耗尽后仍继续 Inbox。
+每个已配置世界的 Inbox、Read Mail 和 Sent/草稿维护并行且分别有界；维护自身的 fetch 总预算覆盖数据库、session 排队、逐封详情及 compose/discard，一条路径失败不撤销其他路径已提交的事实。
 `000060` 的维护游标只在单条开始核对前持久推进，最多 200 条候选和 20 条通知/Take 边界不得跳过未处理后缀；
 到尾稳定回绕，不把观察、轮转或超时条目记为业务完成。discard 前先持久登记一次性尝试，再于同一 session 重读并精确比较原草稿；
 尝试提交未知、取消或外写未知都不自动再次 discard，更不授权重发 Send。
@@ -214,9 +214,11 @@ delivery 的外部失败与人工复核只投影为稳定的 `delivery_failed` /
 return/take 只能在已重新读取的详情页上执行，动作前必须证明 sender 与当前 delivery 收件人一致；take 还必须精确比对装备 ID 集合、Credits、COD、附件条目数和 claimable 动作，只检查按钮存在不构成资产证明；前置证明失败时不得发起 POST，也不得将未知远端状态当作可自动重试的确定失败。
 
 POST 后，return 必须取得唯一只读 `[RTS]` 回执，并与动作前 To/From/Subject、正文、装备 ID、Credits、COD 和附件数逐项绑定，精确证明收发件人反转、固定 MoogleMail 发件人、标题前缀、正文退回后缀、资产不变且 return/take 动作都已消失。详情 GET 会使邮件转为已读，目标 `mid` 不在未读 Inbox（包括完整末页）不能证明已退回，不再作为兼容成功证明。take 必须证明 To/From/Subject 不变、资产与 COD 归零、claimable 消失，且动作前正文是动作后正文的前缀，预期的 `CoD Paid` 和 `Removed attachment` 回执数量与金额精确一致。仅出现“成功”文字、`[RTS]` 标题或动作按钮消失都不足以证明完成；后置证明失败必须进入 `manual_reconcile`，不得盲目重发。
-未知 Take 的维护恢复只接受严格邮件缺失证明，或完整详情的全部装备、Credits、COD 均为空；
-仅原装备集合与金额完全相同才允许原有有界重排。部分、无关、额外或重复资产及金额漂移均保持人工核对，
-不能把“目标装备交集为空”解释为取件成功。
+未知 Take 的维护恢复须先取得 `000063` 冻结的原 world/MID 与持久 credential ID/version，再解释同账号的严格邮件缺失证明或完整详情资产归零。
+当前观察 generation 在恢复事务中锁验，原尝试按 sending_at/command_id/request_digest 定位，候选当前 fencing version 另作 CAS；
+原 generation 不要求与重启后的当前 generation 相同。旧缺原绑定、配置 Cookie 无持久身份、换账号/版本或过期观察均保留人工核对。
+仅原装备集合与金额完全相同才允许原有有界重排；部分、无关、额外或重复资产及金额漂移均不成功、不重排。
+不能把“目标装备交集为空”或另一账号的“邮件不存在”解释为取件成功。重排清除旧 claimed_at 等执行时间，不生成新命令身份。
 
 PostgreSQL 流拍的 `unsold_return` 与撤拍的 `withdrawn_return` 默认必须逐件 compose Send：使用原 lot/equipment 身份、原世界和冻结卖家，Credits/COD 均为零，暂存与 Sent 证据只能包含这一件原装备。收件人显示名命中 Admin runtime 的 `bot_players` 时，两者都直接内部留存并确认完成，不生成寄回投递。拍卖收件已 Take 的装备不能通过原邮件 Return 找回，也不能因一个 lot 撤拍而退整封多附件邮件。本地事务仅原子记录义务，外部寄送在提交后执行；稳定 delivery/prepare/activate 身份、租约和未知结果门禁保持不变，历史已冻结的 Return 请求不得自动改写为 Send 或重寄。
 

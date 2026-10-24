@@ -42,6 +42,8 @@ relay 只分发本实例的持久化事件，未实现的外部广播 sink 不�
 HTTP 连接结束后仍等待普通/发现 WebSocket 许可归零；HTTP task 自行退出也先通知 realtime shutdown。
 全部关闭等待共用原 10 秒与第二信号预算，不因升级连接另开计时器。
 周期心跳跳过错过的 tick，依赖恢复后只发布当前状态，不集中补发过期观测。
+启动期的 listener 绑定与异步依赖装配同时等待 SIGINT/SIGTERM；收到信号即取消未完成装配并释放 listener，
+不会等到数据库恢复后才退出，也不会启动 heartbeat/relay。已持久化事实不因取消而撤销，外层 tracing 仍按原预算刷新。
 SPA 由本 app 的 `RustEmbed` 类型内嵌、再交 `auction-http` 提供；`bash ci/release/web-bundle.sh public` 生成页面，
 `just build-release` 构建内嵌发布制品。API-only 使用固定空资源集合，构建机残留 `target/dx` 不会误嵌入；
 缺页面只让静态路由返回 503，不阻止 API 和健康接口。

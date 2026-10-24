@@ -2,7 +2,7 @@
 
 #[cfg(feature = "postgres")]
 use super::control::{
-    WorkerControlTaskExit, join_worker_control_task, worker_control_server_config,
+    WorkerRuntimeTaskExit, join_worker_control_task, worker_control_server_config,
 };
 #[cfg(feature = "postgres")]
 use super::control::{
@@ -193,7 +193,11 @@ pub(super) async fn run_worker(
         .await
         .context("bind Worker control socket")?;
         let shutdown = Arc::clone(&control_shutdown);
-        let task_exit = WorkerControlTaskExit::new(control.clone(), runtime_failure);
+        let task_exit = WorkerRuntimeTaskExit::new(
+            control.clone(),
+            runtime_failure.clone(),
+            "control_server_stopped",
+        );
         Some(TaskGuard::new(tokio::spawn(async move {
             let _task_exit = task_exit;
             server.run(async move { shutdown.notified().await }).await
@@ -264,7 +268,12 @@ pub(super) async fn run_worker(
     let (pm_drain, pm_receiver) = tokio::sync::watch::channel(false);
     let mut pm_task = forum_pm.map(|runtime| {
         let worker_id = worker_id.clone();
-        TaskGuard::new(tokio::spawn(runtime.run(worker_id, pm_receiver)))
+        let task_exit =
+            WorkerRuntimeTaskExit::new(control.clone(), runtime_failure, "lot_watch_pm_stopped");
+        TaskGuard::new(tokio::spawn(async move {
+            let _task_exit = task_exit;
+            runtime.run(worker_id, pm_receiver).await;
+        }))
     });
     // 主 shutdown 一经触发即停止 PM 新领取，不等其他循环排空完成。
     let shutdown = async {

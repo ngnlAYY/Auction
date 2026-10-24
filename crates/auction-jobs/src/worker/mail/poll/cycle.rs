@@ -141,23 +141,23 @@ where
         return Ok(WorkerResult::Success);
     }
 
-    let context = MailPollProcessContext {
-        store: Arc::clone(&runtime.store),
-        gateway: Arc::clone(&runtime.gateway),
-        processor: runtime.processor.clone(),
-        diagnostics: runtime.diagnostics.clone(),
-        progress_observer: runtime.progress_observer.clone(),
-        clock: Arc::clone(&worker.clock),
-        world_id: runtime.world_id.clone(),
-        mailbox_key: runtime.mailbox_key.clone(),
-        config: runtime.config,
-        schedule: Arc::clone(&runtime.schedule),
-        metrics: Arc::clone(&worker.metrics),
-        loop_kind: runtime.loop_kind(),
-    };
     let mut iteration_result = WorkerResult::Success;
     for claim in claims {
-        let item_result = process_claim(context.clone(), claim, lease_deadline).await;
+        let context = MailPollProcessContext {
+            store: Arc::clone(&runtime.store),
+            gateway: Arc::clone(&runtime.gateway),
+            processor: runtime.processor.clone(),
+            diagnostics: runtime.diagnostics.clone(),
+            progress_observer: runtime.progress_observer.clone(),
+            clock: Arc::clone(&worker.clock),
+            world_id: runtime.world_id.clone(),
+            mailbox_key: runtime.mailbox_key.clone(),
+            config: runtime.config,
+            schedule: Arc::clone(&runtime.schedule),
+            metrics: Arc::clone(&worker.metrics),
+            loop_kind: runtime.loop_kind(),
+        };
+        let item_result = process_claim(context, claim, lease_deadline).await;
         super::super::merge_worker_result(&mut iteration_result, item_result);
     }
     Ok(iteration_result)
@@ -254,23 +254,4 @@ pub(super) struct MailPollProcessContext<C> {
     pub(super) schedule: Arc<dyn RecurringSchedule>,
     pub(super) metrics: Arc<dyn WorkerRecorder>,
     pub(super) loop_kind: WorkerLoop,
-}
-
-impl<C> Clone for MailPollProcessContext<C> {
-    fn clone(&self) -> Self {
-        Self {
-            store: Arc::clone(&self.store),
-            gateway: Arc::clone(&self.gateway),
-            processor: self.processor.clone(),
-            diagnostics: self.diagnostics.clone(),
-            progress_observer: self.progress_observer.clone(),
-            clock: Arc::clone(&self.clock),
-            world_id: self.world_id.clone(),
-            mailbox_key: self.mailbox_key.clone(),
-            config: self.config,
-            schedule: Arc::clone(&self.schedule),
-            metrics: Arc::clone(&self.metrics),
-            loop_kind: self.loop_kind,
-        }
-    }
 }

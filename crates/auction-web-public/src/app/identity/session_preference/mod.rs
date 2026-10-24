@@ -8,14 +8,15 @@ use dioxus::prelude::*;
 
 use self::duration::DurationUnit;
 use self::state::{PreferenceOwner, PreferenceState};
-use crate::app::surface::PublicSessionResource;
+use crate::app::surface::{PublicCommandOwner, PublicSessionResource};
 
 /// 父页面按用户 UUID 隔离宿主；账号变化或卸载取消任务并销毁未决命令。
 #[component]
 pub(super) fn SessionPreference(user_id: String) -> Element {
     let session = use_context::<PublicSessionResource>();
     let mut state = use_signal(PreferenceState::default);
-    let owner = PreferenceOwner { user_id, session, state };
+    let identity = use_context::<PublicCommandOwner>().0;
+    let owner = PreferenceOwner { user_id, identity, session, state };
     use_effect({
         let mut owner = owner.clone();
         move || owner.load(false)
@@ -37,7 +38,7 @@ pub(super) fn SessionPreference(user_id: String) -> Element {
     let snapshot = state.read();
     let busy = snapshot.busy;
     let pending = snapshot.pending.is_some();
-    let ready = snapshot.authoritative.is_some() && owner.identity_matches();
+    let ready = owner.session_ready() && snapshot.authoritative.is_some();
     let controls_disabled = !ready || busy || pending;
     let permanent = ready && snapshot.draft.permanent;
     let custom = ready && !snapshot.draft.permanent;

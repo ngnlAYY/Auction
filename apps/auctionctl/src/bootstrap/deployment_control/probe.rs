@@ -85,16 +85,22 @@ async fn http_ready(stream: &mut (impl AsyncRead + AsyncWrite + Unpin), path: &s
     }
     let mut response = [0_u8; 512];
     let mut length = 0;
-    while length < response.len() && !response[..length].contains(&b'\n') {
+    while length < response.len() {
         match stream.read(&mut response[length..]).await {
-            Ok(0) => break,
-            Ok(read) => length += read,
-            Err(_) => return false,
+            Ok(0) | Err(_) => return false,
+            Ok(read) => {
+                // 只扫描新增字节；未收到完整 CRLF 状态行不能证明服务已经 ready。
+                if let Some(newline) =
+                    response[length..length + read].iter().position(|byte| *byte == b'\n')
+                {
+                    let line = &response[..length + newline];
+                    return line.ends_with(b"\r")
+                        && (line.starts_with(b"HTTP/1.1 200 ")
+                            || line.starts_with(b"HTTP/1.0 200 "));
+                }
+                length += read;
+            }
         }
     }
-    if length == 0 {
-        return false;
-    }
-    let first_line = response[..length].split(|byte| *byte == b'\n').next().unwrap_or_default();
-    first_line.starts_with(b"HTTP/1.1 200 ") || first_line.starts_with(b"HTTP/1.0 200 ")
+    false
 }

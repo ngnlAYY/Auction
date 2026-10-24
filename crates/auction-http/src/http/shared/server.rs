@@ -4,7 +4,7 @@
 
 use std::{future::Future, io, net::SocketAddr, time::Duration};
 
-use axum::{Extension, Router, body::Body, extract::ConnectInfo, serve::Listener};
+use axum::{Router, body::Body, extract::ConnectInfo, serve::Listener};
 use hyper::body::Incoming;
 use hyper_util::{
     rt::{TokioExecutor, TokioIo, TokioTimer},
@@ -35,13 +35,15 @@ where
             (stream, address) = listener.accept() => {
                 let watcher = graceful.watcher();
                 let address = address.into();
-                let mut app = app.clone();
-                if let Some(address) = address {
-                    app = app.layer(Extension(ConnectInfo(address)));
-                }
+                let app = app.clone();
                 connections.spawn(async move {
-                    let service = app
-                        .map_request(|request: hyper::Request<Incoming>| request.map(Body::new));
+                    // 连接地址直接写入请求，避免为每条 TCP 连接重建全部路由的 middleware。
+                    let service = app.map_request(move |mut request: hyper::Request<Incoming>| {
+                        if let Some(address) = address {
+                            request.extensions_mut().insert(ConnectInfo(address));
+                        }
+                        request.map(Body::new)
+                    });
                     let service = TowerToHyperService::new(service);
                     let mut builder = Builder::new(TokioExecutor::new());
                     builder
