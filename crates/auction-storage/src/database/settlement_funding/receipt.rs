@@ -61,7 +61,8 @@ async fn validate_receipt_boundary(
         e.name AS equipment_name,d.payload,d.recipient,d.result_metadata,
         s.end_price AS settlement_end_price,s.buyer_amount AS settlement_buyer_amount,
         s.compensation_amount AS settlement_compensation_amount,
-        s.hold_ppm AS settlement_hold_ppm,s.adjustment_ppm AS settlement_adjustment_ppm
+        s.hold_ppm AS settlement_hold_ppm,s.adjustment_ppm AS settlement_adjustment_ppm,
+        public.delivery_has_frozen_sent_proof(d.id,d.result_metadata,d.external_reference) AS frozen_sent_proven
         FROM public.settlement_obligations o
         JOIN public.equipment e ON e.id=o.equipment_id
         JOIN public.settlement_obligation_fulfillments f ON f.obligation_id=o.id
@@ -135,11 +136,12 @@ async fn validate_receipt_boundary(
     let expected = json!({"schema_version":1,"operation":"send","world":"main","template":template,
         "variables":variables,"credits":carrier,"cod":cod,"equipment_secret_refs":equipment});
     let metadata: serde_json::Value = row.try_get("result_metadata").map_err(storage)?;
-    let exact = metadata["proof"] == "sent_exact_payload_v1"
+    let exact = (metadata["proof"] == "sent_exact_payload_v1"
         && metadata["sent_verified"] == true
-        && metadata["settlement_obligation_id"] == payment.to_string();
-    // 开户前的既有责任允许使用原维护恢复事实；新收款仍只接受发送时的 exact 证明。
-    // 此分支不升级旧 proof，也不代替本次同账号、精确 MID 的已收款联合证据。
+        && metadata["settlement_obligation_id"] == payment.to_string())
+        || row.try_get::<bool, _>("frozen_sent_proven").map_err(storage)?;
+    // 新恢复证明必须关联不可变发送尝试及唯一 MID，不能只凭 proof 标签资金化。
+    // 旧 reference 恢复仍仅限开户前责任；两者均不代替本次同账号已收款联合证据。
     let recovered = legacy
         && legacy_recovered_proof(&metadata, &sent.external_mail_id, &sent.recipient, cod, carrier);
     if payload != expected

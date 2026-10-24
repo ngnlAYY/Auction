@@ -1,8 +1,8 @@
 //! MoogleMail 维护的本地证据与受证明恢复；状态、资金、履约及追加审计同事务提交。
 
 use auction_application::{
-    ApplicationFuture, MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate,
-    MoogleMailboxUnprovenSend, RepositoryError,
+    ApplicationFuture, DeliverySendExpectation, MoogleMailboxEvidenceStore,
+    MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend, RepositoryError,
 };
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -11,10 +11,15 @@ use uuid::Uuid;
 #[cfg(feature = "postgres")]
 use super::delivery_audit::{DeliveryAudit, RELEASE, SUCCEED, append as append_delivery_audit};
 #[cfg(feature = "postgres")]
+use super::delivery_scheduler::attempts;
+#[cfg(feature = "postgres")]
 use super::settlement_funding as funding;
 use super::{DatabaseStore, TrackedPool};
 #[cfg(feature = "postgres")]
 use sqlx::Postgres;
+
+#[cfg(feature = "postgres")]
+mod recovery;
 
 impl MoogleMailboxEvidenceStore for DatabaseStore {
     fn unproven_sends<'a>(
@@ -51,14 +56,25 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
         })
     }
 
-    fn begin_compose_discard(&self, delivery_id: Uuid) -> ApplicationFuture<'_, bool> {
+    fn begin_compose_discard<'a>(
+        &'a self,
+        delivery_id: Uuid,
+        fencing_version: i64,
+        expectation: Option<&'a DeliverySendExpectation>,
+    ) -> ApplicationFuture<'a, bool> {
         Box::pin(async move {
-            if delivery_id.is_nil() {
+            if delivery_id.is_nil()
+                || fencing_version <= 0
+                || expectation.is_some_and(|expectation| !expectation.validate())
+            {
                 return Err(storage_error("MoogleMail 草稿丢弃围栏参数无效"));
             }
             match self {
                 #[cfg(feature = "postgres")]
-                Self::Postgres(store) => begin_compose_discard(store.pool(), delivery_id).await,
+                Self::Postgres(store) => {
+                    begin_compose_discard(store.pool(), delivery_id, fencing_version, expectation)
+                        .await
+                }
             }
         })
     }
@@ -66,17 +82,24 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
     fn record_sent_observation<'a>(
         &'a self,
         delivery_id: Uuid,
+        fencing_version: i64,
         observation: Value,
     ) -> ApplicationFuture<'a, ()> {
         Box::pin(async move {
-            if delivery_id.is_nil() || !observation.is_object() {
+            if delivery_id.is_nil() || fencing_version <= 0 || !observation.is_object() {
                 return Err(storage_error("MoogleMail Sent 观察参数无效"));
             }
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    record_observation(store.pool(), delivery_id, "mailbox_sweep", observation)
-                        .await
+                    record_observation(
+                        store.pool(),
+                        delivery_id,
+                        fencing_version,
+                        "mailbox_sweep",
+                        observation,
+                    )
+                    .await
                 }
             }
         })
@@ -85,17 +108,24 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
     fn record_compose_discard<'a>(
         &'a self,
         delivery_id: Uuid,
+        fencing_version: i64,
         observation: Value,
     ) -> ApplicationFuture<'a, ()> {
         Box::pin(async move {
-            if delivery_id.is_nil() || !observation.is_object() {
+            if delivery_id.is_nil() || fencing_version <= 0 || !observation.is_object() {
                 return Err(storage_error("MoogleMail 草稿丢弃证据参数无效"));
             }
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    record_observation(store.pool(), delivery_id, "compose_discard", observation)
-                        .await
+                    record_observation(
+                        store.pool(),
+                        delivery_id,
+                        fencing_version,
+                        "compose_discard",
+                        observation,
+                    )
+                    .await
                 }
             }
         })
@@ -104,22 +134,34 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
     fn bind_recovered_send<'a>(
         &'a self,
         delivery_id: Uuid,
+        fencing_version: i64,
         external_mail_id: String,
         metadata: Value,
+        expectation: Option<&'a DeliverySendExpectation>,
     ) -> ApplicationFuture<'a, bool> {
         Box::pin(async move {
             if delivery_id.is_nil()
+                || fencing_version <= 0
                 || external_mail_id.is_empty()
                 || external_mail_id.len() > 64
                 || !external_mail_id.bytes().all(|byte| byte.is_ascii_digit())
                 || !metadata.is_object()
+                || expectation.is_some_and(|expectation| !expectation.validate())
             {
                 return Err(storage_error("MoogleMail 恢复证明参数无效"));
             }
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    bind_recovered_send(store.pool(), delivery_id, external_mail_id, metadata).await
+                    bind_recovered_send(
+                        store.pool(),
+                        delivery_id,
+                        fencing_version,
+                        external_mail_id,
+                        metadata,
+                        expectation,
+                    )
+                    .await
                 }
             }
         })
@@ -168,53 +210,32 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             }
         })
     }
-
-    fn bind_recovered_notice<'a>(
-        &'a self,
-        delivery_id: Uuid,
-        external_mail_id: String,
-        metadata: Value,
-    ) -> ApplicationFuture<'a, bool> {
-        Box::pin(async move {
-            if delivery_id.is_nil()
-                || external_mail_id.is_empty()
-                || external_mail_id.len() > 64
-                || !external_mail_id.bytes().all(|byte| byte.is_ascii_digit())
-                || !metadata.is_object()
-            {
-                return Err(storage_error("MoogleMail 通知恢复证明参数无效"));
-            }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    bind_recovered_notice(store.pool(), delivery_id, external_mail_id, metadata)
-                        .await
-                }
-            }
-        })
-    }
 }
 
-/// 未证明投递的扁平行：id、来源、收件人、COD、credits、reference、模板、
-/// result_code、登录 key 用户、入站 MID、发送围栏与未知结果记录时间。
+/// 每次尝试的冻结身份优先；旧行只保留既有安全恢复所需的最小投影。
 #[cfg(feature = "postgres")]
-type UnprovenSendRow = (
-    Uuid,
-    String,
-    String,
-    i64,
-    i64,
-    String,
-    String,
-    Option<String>,
-    Option<Uuid>,
-    String,
-    DateTime<Utc>,
-    DateTime<Utc>,
-    String,
-    serde_json::Value,
-    i64,
-);
+#[derive(sqlx::FromRow)]
+struct UnprovenSendRow {
+    delivery_id: Uuid,
+    origin_kind: String,
+    recipient: String,
+    cod: i64,
+    credits: i64,
+    reference: String,
+    template: String,
+    result_code: Option<String>,
+    user_key_user_id: Option<Uuid>,
+    inbound_mail_id: String,
+    sending_at: DateTime<Utc>,
+    outcome_recorded_at: DateTime<Utc>,
+    operation: String,
+    attachment_value: Value,
+    sweep_retries: i64,
+    fencing_version: i64,
+    sending_fencing_version: i64,
+    has_send_attempt: bool,
+    expectation: Option<Value>,
+}
 
 #[cfg(feature = "postgres")]
 async fn unproven_sends(
@@ -222,49 +243,56 @@ async fn unproven_sends(
     world_id: &str,
     limit: i64,
 ) -> Result<Vec<MoogleMailboxSweepCandidate>, auction_application::ApplicationError> {
-    // 只暴露可供比对的最小安全字段：来源、收件人、COD、reference 与通知渲染引用；
-    // 正文密文、登录 key 明文都不出库。
+    // 所有 Send 来源共享冻结身份；不按 origin 白名单漏掉 watch、alert 或恢复发送。
+    // 仅旧结算解析既有装备引用；正文和登录 key 不进入维护投影。
     let rows: Vec<UnprovenSendRow> = sqlx::query_as(
-        "SELECT id,
-                origin_kind,
-                recipient,
-                COALESCE((payload->>'cod')::bigint, 0),
-                COALESCE((payload->>'credits')::bigint, 0),
-                COALESCE(payload->'variables'->>'reference', ''),
-                COALESCE(payload->>'template', ''),
-                payload->>'result_code',
-                NULLIF(payload->>'user_key_user_id', '')::uuid,
-                COALESCE(payload->>'external_mail_id', ''),
-                sending_at,
-                completed_at,
-                COALESCE(payload->>'operation', ''),
-                CASE WHEN origin_kind='settlement' THEN (
+        "SELECT d.id AS delivery_id,
+                d.origin_kind,
+                d.recipient,
+                COALESCE((d.payload->>'cod')::bigint, 0) AS cod,
+                COALESCE((d.payload->>'credits')::bigint, 0) AS credits,
+                COALESCE(d.payload->'variables'->>'reference', '') AS reference,
+                COALESCE(d.payload->>'template', '') AS template,
+                d.payload->>'result_code' AS result_code,
+                NULLIF(d.payload->>'user_key_user_id', '')::uuid AS user_key_user_id,
+                COALESCE(d.payload->>'external_mail_id', '') AS inbound_mail_id,
+                d.sending_at,
+                d.completed_at AS outcome_recorded_at,
+                COALESCE(d.payload->>'operation', '') AS operation,
+                CASE WHEN attempt.expectation IS NOT NULL
+                    THEN attempt.expectation->'equipment_ids'
+                WHEN d.origin_kind='settlement' THEN (
                     SELECT CASE
                         WHEN count(e.id)=jsonb_array_length(
-                            COALESCE(payload->'equipment_secret_refs','[]'::jsonb))
+                            COALESCE(d.payload->'equipment_secret_refs','[]'::jsonb))
                         THEN COALESCE(jsonb_agg(e.external_equipment_id ORDER BY e.external_equipment_id)
                             FILTER (WHERE e.id IS NOT NULL),'[]'::jsonb)
                         ELSE 'null'::jsonb END
                     FROM jsonb_array_elements(
-                        COALESCE(payload->'equipment_secret_refs','[]'::jsonb)) AS ref
+                        COALESCE(d.payload->'equipment_secret_refs','[]'::jsonb)) AS ref
                     LEFT JOIN public.equipment e ON e.id::text=ref->>'id'
                         AND ref->>'kind'='auction_equipment_key'
-                        AND e.world_id=COALESCE(payload->>'world','main')
-                ) ELSE COALESCE(payload->'attachment_ids','[]'::jsonb) END,
-                COALESCE((result_metadata->>'sweep_retries')::bigint, 0)
-         FROM public.deliveries
+                        AND e.world_id=COALESCE(d.payload->>'world','main')
+                ) ELSE COALESCE(d.payload->'attachment_ids','[]'::jsonb) END AS attachment_value,
+                COALESCE((d.result_metadata->>'sweep_retries')::bigint, 0) AS sweep_retries,
+                d.fencing_version,
+                COALESCE(attempt.sending_fencing_version,d.fencing_version) AS sending_fencing_version,
+                EXISTS (SELECT 1 FROM public.delivery_send_attempts history
+                        WHERE history.delivery_id=d.id) AS has_send_attempt,
+                attempt.expectation
+         FROM public.deliveries d
+         LEFT JOIN LATERAL public.delivery_current_send_attempt(d.id) attempt ON true
          LEFT JOIN public.mailbox_sweep_cursors sweep ON sweep.world_id = $1
-         WHERE status = 'manual_reconcile'
-           AND payload->>'operation' IN ('send', 'take')
-           AND external_reference IS NULL
-           AND sending_at IS NOT NULL
-           AND completed_at IS NOT NULL
-           AND origin_kind IN ('settlement', 'mail_intake')
-           AND COALESCE(payload->>'world', 'main') = $1
+         WHERE d.status = 'manual_reconcile'
+           AND d.payload->>'operation' IN ('send', 'take')
+           AND d.external_reference IS NULL
+           AND d.sending_at IS NOT NULL
+           AND d.completed_at IS NOT NULL
+           AND COALESCE(d.payload->>'world', 'main') = $1
          ORDER BY CASE WHEN sweep.last_created_at IS NULL
-                            OR (created_at, id) > (sweep.last_created_at, sweep.last_delivery_id)
+                            OR (d.created_at, d.id) > (sweep.last_created_at, sweep.last_delivery_id)
                        THEN 0 ELSE 1 END,
-                  created_at, id
+                  d.created_at, d.id
          LIMIT $2",
     )
     .bind(world_id)
@@ -272,12 +300,11 @@ async fn unproven_sends(
     .fetch_all(pool.raw())
     .await
     .map_err(|_| storage_error("MoogleMail 未证明投递查询失败"))?;
-    // 每行只出现一次，即使批次跨过尾部回绕也不会在本轮重复核对。
-    // 不可重建行仍返回轮转身份，避免固定坏前缀占满 200 条后永久隐藏后缀。
+    // 不可重建行仍返回轮转身份，避免固定坏前缀永久隐藏后缀。
     Ok(rows
         .into_iter()
         .map(|row| MoogleMailboxSweepCandidate {
-            delivery_id: row.0,
+            delivery_id: row.delivery_id,
             send: recoverable_send(world_id, row),
         })
         .collect())
@@ -285,7 +312,7 @@ async fn unproven_sends(
 
 #[cfg(feature = "postgres")]
 fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailboxUnprovenSend> {
-    let (
+    let UnprovenSendRow {
         delivery_id,
         origin_kind,
         recipient,
@@ -301,24 +328,51 @@ fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailbo
         operation,
         attachment_value,
         sweep_retries,
-    ) = row;
+        fencing_version,
+        sending_fencing_version,
+        has_send_attempt,
+        expectation,
+    } = row;
     if recipient.is_empty() || cod < 0 || credits < 0 || outcome_recorded_at < sending_at {
         return None;
     }
+    if has_send_attempt && expectation.is_none() {
+        // 当前发送签名损坏或已换尝试，不能把新格式记录降级成旧模板恢复。
+        return None;
+    }
     let attachment_ids = serde_json::from_value::<Vec<String>>(attachment_value).ok()?;
-    // 结算恢复靠义务 reference；通知恢复靠结果码重建正文；take 靠入站 MID 与附件。
-    let usable = match (origin_kind.as_str(), operation.as_str()) {
-        ("settlement", "send") => !reference.is_empty(),
-        ("mail_intake", "send") => result_code.is_some() && !inbound_mail_id.is_empty(),
-        ("mail_intake", "take") => {
-            !inbound_mail_id.is_empty()
-                && !attachment_ids.is_empty()
-                && attachment_ids.iter().all(|id| {
-                    !id.is_empty() && id.len() <= 32 && id.bytes().all(|byte| byte.is_ascii_digit())
-                })
+    let send_expectation = match expectation {
+        Some(value) => {
+            let frozen: DeliverySendExpectation = serde_json::from_value(value).ok()?;
+            if !frozen.validate()
+                || frozen.world_id != world_id
+                || frozen.recipient != recipient
+                || frozen.cod != cod
+                || frozen.credits != credits
+                || frozen.equipment_ids != attachment_ids
+                || operation != "send"
+            {
+                return None;
+            }
+            Some(frozen)
         }
-        _ => false,
+        None => None,
     };
+    let usable = send_expectation.is_some()
+        || match (origin_kind.as_str(), operation.as_str()) {
+            ("settlement", "send") => !reference.is_empty(),
+            ("mail_intake", "send") => result_code.is_some() && !inbound_mail_id.is_empty(),
+            ("mail_intake", "take") => {
+                !inbound_mail_id.is_empty()
+                    && !attachment_ids.is_empty()
+                    && attachment_ids.iter().all(|id| {
+                        !id.is_empty()
+                            && id.len() <= 32
+                            && id.bytes().all(|byte| byte.is_ascii_digit())
+                    })
+            }
+            _ => false,
+        };
     if !usable {
         return None;
     }
@@ -339,6 +393,9 @@ fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailbo
         sweep_retries,
         reference,
         template,
+        fencing_version,
+        sending_fencing_version,
+        send_expectation,
     })
 }
 
@@ -357,7 +414,6 @@ async fn record_sweep_attempt(
            AND status = 'manual_reconcile' AND external_reference IS NULL
            AND payload->>'operation' IN ('send', 'take')
            AND sending_at IS NOT NULL AND completed_at IS NOT NULL
-           AND origin_kind IN ('settlement', 'mail_intake')
          ON CONFLICT (world_id) DO UPDATE
          SET last_created_at = EXCLUDED.last_created_at,
              last_delivery_id = EXCLUDED.last_delivery_id",
@@ -374,33 +430,23 @@ async fn record_sweep_attempt(
 async fn begin_compose_discard(
     pool: &TrackedPool<Postgres>,
     delivery_id: Uuid,
+    fencing_version: i64,
+    expectation: Option<&DeliverySendExpectation>,
 ) -> Result<bool, auction_application::ApplicationError> {
-    // 一次性尝试围栏不是成功证明；即使后续尚未 POST 就取消，也保守保留，不自动重置。
-    let result = sqlx::query(
-        "UPDATE public.deliveries
-         SET result_metadata = COALESCE(result_metadata, '{}'::jsonb)
-             || jsonb_build_object('compose_discard_attempt',
-                 jsonb_build_object('started_at', clock_timestamp()))
-         WHERE id = $1 AND status = 'manual_reconcile' AND external_reference IS NULL
-           AND payload->>'operation' = 'send'
-           AND sending_at IS NOT NULL AND completed_at IS NOT NULL
-           AND origin_kind IN ('settlement', 'mail_intake')
-           AND COALESCE(payload->>'world', 'main') = 'main'
-           AND COALESCE(payload->'variables'->>'reference', '') <> ''
-           AND NOT (COALESCE(result_metadata, '{}'::jsonb) ? 'compose_discard_attempt')
-           AND NOT (COALESCE(result_metadata, '{}'::jsonb) ? 'compose_discard')",
-    )
-    .bind(delivery_id)
-    .execute(pool.raw())
-    .await
-    .map_err(|_| storage_error("MoogleMail 草稿丢弃围栏提交未确认"))?;
-    Ok(result.rows_affected() == 1)
+    // 一次性尝试不是远端成功证明；仅明确中止的冲突可以重试，不重放未知提交。
+    for attempt in 0..3 {
+        match recovery::begin_discard_once(pool, delivery_id, fencing_version, expectation).await {
+            Ok(changed) => return Ok(changed),
+            Err(error) if error.retryable() && attempt < 2 => continue,
+            Err(_) => return Err(storage_error("MoogleMail 草稿丢弃围栏提交未确认")),
+        }
+    }
+    Err(storage_error("MoogleMail 草稿丢弃围栏重试已耗尽"))
 }
 
 #[cfg(feature = "postgres")]
 enum RecoveryUpdate<'a> {
-    Send(&'a str, &'a Value),
-    Notice(&'a str, &'a Value),
+    Send(&'a str, &'a Value, i64, Option<&'a DeliverySendExpectation>),
     Action(&'a str, &'a Value),
     Requeue(i64, &'a str),
 }
@@ -427,33 +473,24 @@ async fn requeue_unproven(
 }
 
 #[cfg(feature = "postgres")]
-async fn bind_recovered_notice(
-    pool: &TrackedPool<Postgres>,
-    delivery_id: Uuid,
-    external_mail_id: String,
-    metadata: Value,
-) -> Result<bool, auction_application::ApplicationError> {
-    persist_transition(pool, delivery_id, RecoveryUpdate::Notice(&external_mail_id, &metadata))
-        .await
-}
-
-#[cfg(feature = "postgres")]
 async fn record_observation(
     pool: &TrackedPool<Postgres>,
     delivery_id: Uuid,
+    fencing_version: i64,
     key: &str,
     observation: Value,
 ) -> Result<(), auction_application::ApplicationError> {
-    // 观察只追加安全元数据；受证明状态迁移由独立事务同时更新资金、履约和审计。
+    // 只记录当前尝试的安全观察；旧响应不能附着到管理员重试后的新 fence。
     sqlx::query(
         "UPDATE public.deliveries
          SET result_metadata = COALESCE(result_metadata, '{}'::jsonb)
              || jsonb_build_object($2::text, $3::jsonb)
-         WHERE id = $1 AND status = 'manual_reconcile'",
+         WHERE id = $1 AND fencing_version=$4 AND status = 'manual_reconcile'",
     )
     .bind(delivery_id)
     .bind(key)
     .bind(observation)
+    .bind(fencing_version)
     .execute(pool.raw())
     .await
     .map_err(|_| storage_error("MoogleMail 维护证据写入失败"))?;
@@ -464,10 +501,17 @@ async fn record_observation(
 async fn bind_recovered_send(
     pool: &TrackedPool<Postgres>,
     delivery_id: Uuid,
+    fencing_version: i64,
     external_mail_id: String,
     metadata: Value,
+    expectation: Option<&DeliverySendExpectation>,
 ) -> Result<bool, auction_application::ApplicationError> {
-    persist_transition(pool, delivery_id, RecoveryUpdate::Send(&external_mail_id, &metadata)).await
+    persist_transition(
+        pool,
+        delivery_id,
+        RecoveryUpdate::Send(&external_mail_id, &metadata, fencing_version, expectation),
+    )
+    .await
 }
 
 /// 只重试明确的序列化冲突/死锁；提交结果未知必须报错，不能计为恢复成功或重发。
@@ -495,16 +539,40 @@ async fn persist_transition_once(
 ) -> Result<bool, RecoveryError> {
     let mut tx = pool.begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE").execute(&mut *tx).await?;
-    // 先取得资金 scope/account，再锁 delivery；未知分配不能因恢复路径漏记而继续占用。
-    // Serializable 的重复引用谓词同时阻止不同维护事务把同一 MID 绑定给两条投递。
+    // 当前观测 generation→资金→recovery→credential→action→delivery；历史 generation 只作身份。
+    if let RecoveryUpdate::Send(_, metadata, _, Some(expectation)) = update {
+        recovery::lock_observation(&mut tx, expectation, metadata).await?;
+    }
     let account = funding::lock_funded_delivery_account(&mut tx, delivery_id).await?;
+    let recovery_send = if matches!(update, RecoveryUpdate::Send(..)) {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT origin_kind='settlement_recovery_action' FROM public.deliveries WHERE id=$1",
+        )
+        .bind(delivery_id)
+        .fetch_one(&mut *tx)
+        .await?
+    } else {
+        false
+    };
+    if recovery_send {
+        super::recovery_commands::lock_recovery_delivery_retry_scope(&mut tx, delivery_id).await?;
+    }
+    if let RecoveryUpdate::Send(_, _, _, Some(expectation)) = update
+        && !attempts::lock_credential(&mut tx, expectation).await?
+    {
+        return Err(RecoveryError::Rejected);
+    }
+    if recovery_send {
+        super::recovery_commands::lock_recovery_delivery_retry_actions(&mut tx, delivery_id)
+            .await?;
+    }
     sqlx::query("SELECT id FROM public.deliveries WHERE id=$1 FOR UPDATE")
         .bind(delivery_id)
         .fetch_optional(&mut *tx)
         .await?;
-    let (origin_id, completed_at): (String, DateTime<Utc>) = match update {
+    let (origin_kind, origin_id, completed_at): (String, String, DateTime<Utc>) = match update {
         RecoveryUpdate::Requeue(retries, reason) => {
-            let updated = sqlx::query_as(
+            let updated: Option<(String, DateTime<Utc>)> = sqlx::query_as(
                 "UPDATE public.deliveries
                  SET status='pending', completed_at=NULL, failure_code=NULL, lease_token=NULL,
                      lease_expires_at=NULL, sending_at=NULL, updated_at=clock_timestamp(),
@@ -513,7 +581,6 @@ async fn persist_transition_once(
                              'sweep_requeued_at',clock_timestamp(),'sweep_requeue_reason',$3::text)
                  WHERE id=$1 AND status='manual_reconcile' AND origin_kind='mail_intake'
                    AND payload->>'operation'='take' AND external_reference IS NULL
-                   AND COALESCE(payload->>'world','main')='main'
                    AND COALESCE((result_metadata->>'sweep_retries')::bigint,0)=$2-1
                  RETURNING origin_id,updated_at",
             )
@@ -526,26 +593,45 @@ async fn persist_transition_once(
                 tx.rollback().await?;
                 return Ok(false);
             };
+            ("mail_intake".to_owned(), row.0, row.1)
+        }
+        RecoveryUpdate::Send(mid, metadata, fencing_version, expectation) => {
+            let Some(row) = recovery::bind_send(
+                &mut tx,
+                delivery_id,
+                *fencing_version,
+                mid,
+                metadata,
+                *expectation,
+            )
+            .await?
+            else {
+                tx.rollback().await?;
+                return Ok(false);
+            };
             row
         }
-        RecoveryUpdate::Send(mid, metadata)
-        | RecoveryUpdate::Notice(mid, metadata)
-        | RecoveryUpdate::Action(mid, metadata) => {
-            let settlement = matches!(update, RecoveryUpdate::Send(..));
-            let operation =
-                if matches!(update, RecoveryUpdate::Action(..)) { "take" } else { "send" };
-            let origin = if settlement { "settlement" } else { "mail_intake" };
-            let reference = format!("mooglemail:main:{operation}:{mid}");
-            let updated = sqlx::query_as(
+        RecoveryUpdate::Action(mid, metadata) => {
+            let world: String = sqlx::query_scalar(
+                "SELECT COALESCE(payload->>'world','main') FROM public.deliveries WHERE id=$1",
+            )
+            .bind(delivery_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            if !matches!(world.as_str(), "main" | "isekai") {
+                return Err(RecoveryError::Rejected);
+            }
+            let reference = format!("mooglemail:{world}:take:{mid}");
+            let updated: Option<(String, DateTime<Utc>)> = sqlx::query_as(
                 "UPDATE public.deliveries
                  SET external_reference=$2,status='succeeded',failure_code=NULL,
                      completed_at=clock_timestamp(),updated_at=clock_timestamp(),
                      lease_token=NULL,lease_expires_at=NULL,
                      result_metadata=COALESCE(result_metadata,'{}'::jsonb)||$3::jsonb
-                 WHERE id=$1 AND status='manual_reconcile' AND origin_kind=$4
-                   AND payload->>'operation'=$5 AND external_reference IS NULL
-                   AND sending_at IS NOT NULL AND COALESCE(payload->>'world','main')='main'
-                   AND ($5<>'take' OR payload->>'external_mail_id'=$6)
+                 WHERE id=$1 AND status='manual_reconcile' AND origin_kind='mail_intake'
+                   AND payload->>'operation'='take' AND external_reference IS NULL
+                   AND sending_at IS NOT NULL AND COALESCE(payload->>'world','main')=$4
+                   AND payload->>'external_mail_id'=$5
                    AND NOT EXISTS (
                        SELECT 1 FROM public.deliveries other WHERE other.external_reference=$2)
                  RETURNING origin_id,completed_at",
@@ -553,8 +639,7 @@ async fn persist_transition_once(
             .bind(delivery_id)
             .bind(&reference)
             .bind(*metadata)
-            .bind(origin)
-            .bind(operation)
+            .bind(&world)
             .bind(*mid)
             .fetch_optional(&mut *tx)
             .await?;
@@ -562,19 +647,21 @@ async fn persist_transition_once(
                 tx.rollback().await?;
                 return Ok(false);
             };
-            row
+            ("mail_intake".to_owned(), row.0, row.1)
         }
     };
-    if matches!(update, RecoveryUpdate::Send(..)) {
-        if let Some(account) = account {
-            funding::finish_funded_delivery(
-                &mut tx,
-                &account,
-                delivery_id,
-                auction_application::FundingDeliveryOutcome::Sent,
-            )
-            .await?;
-        }
+    if matches!(update, RecoveryUpdate::Send(..))
+        && let Some(account) = account
+    {
+        funding::finish_funded_delivery(
+            &mut tx,
+            &account,
+            delivery_id,
+            auction_application::FundingDeliveryOutcome::Sent,
+        )
+        .await?;
+    }
+    if origin_kind == "settlement" && matches!(update, RecoveryUpdate::Send(..)) {
         let obligation_id = Uuid::parse_str(&origin_id).map_err(|_| RecoveryError::Rejected)?;
         let enqueued = sqlx::query(
             "UPDATE public.settlement_obligation_fulfillments
@@ -593,6 +680,11 @@ async fn persist_transition_once(
             return Err(RecoveryError::Rejected);
         }
     }
+    let resumed_action = if recovery_send {
+        super::recovery_commands::resume_after_delivery_proof(&mut tx, delivery_id).await?
+    } else {
+        None
+    };
     let requeued = matches!(update, RecoveryUpdate::Requeue(..));
     append_delivery_audit(
         &mut tx,
@@ -608,6 +700,21 @@ async fn persist_transition_once(
                 "status": if requeued { "pending" } else { "succeeded" },
                 "recovered": !requeued,
                 "mailbox_maintenance": true,
+                "resumed_recovery_action": resumed_action,
+                "fencing_version": match update {
+                    RecoveryUpdate::Send(_, _, fencing_version, _) => Some(*fencing_version),
+                    _ => None,
+                },
+                "sending_fencing_version": match update {
+                    RecoveryUpdate::Send(_, metadata, _, Some(_)) => {
+                        metadata.get("sending_fencing_version").and_then(Value::as_i64)
+                    }
+                    _ => None,
+                },
+                "recovered_mid": match update {
+                    RecoveryUpdate::Send(mid, _, _, _) | RecoveryUpdate::Action(mid, _) => Some(*mid),
+                    _ => None,
+                },
             }),
         },
     )
@@ -621,6 +728,7 @@ async fn persist_transition_once(
 enum RecoveryError {
     Sqlx(sqlx::Error),
     Funding(auction_application::FundingError),
+    Evidence(crate::MailEvidenceTransactionError),
     Rejected,
 }
 
@@ -639,6 +747,13 @@ impl From<auction_application::FundingError> for RecoveryError {
 }
 
 #[cfg(feature = "postgres")]
+impl From<crate::MailEvidenceTransactionError> for RecoveryError {
+    fn from(error: crate::MailEvidenceTransactionError) -> Self {
+        Self::Evidence(error)
+    }
+}
+
+#[cfg(feature = "postgres")]
 impl RecoveryError {
     fn retryable(&self) -> bool {
         match self {
@@ -647,6 +762,7 @@ impl RecoveryError {
                 .and_then(|error| error.code())
                 .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01")),
             Self::Funding(auction_application::FundingError::SerializationConflict) => true,
+            Self::Evidence(error) => error.is_serialization_conflict(),
             _ => false,
         }
     }

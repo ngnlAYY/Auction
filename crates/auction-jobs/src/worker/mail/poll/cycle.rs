@@ -82,9 +82,21 @@ async fn run_cycle<C>(
 where
     C: Clock + 'static,
 {
+    if !runtime.validate() {
+        return Err(WorkerError::InvalidMailPollConfiguration);
+    }
+    if worker.control.is_draining() {
+        return Ok(());
+    }
     let loop_kind = runtime.loop_kind();
     let iteration_started = std::time::Instant::now();
-    let result = run_cycle_inner(worker, runtime, force).await;
+    // 三条 future 各自有界；慢 Read Mail 或 Sent 不延迟入站领取和另一类观察。
+    // 本轮统一持有、取消和排空，不派生无人持有的后台任务。
+    let (_, _, result) = tokio::join!(
+        run_read_observation(runtime),
+        run_maintenance(runtime),
+        run_cycle_inner(worker, runtime, force),
+    );
     let metric_result = match &result {
         Ok(result) => *result,
         Err(_) => WorkerResult::Error,
@@ -101,14 +113,6 @@ async fn run_cycle_inner<C>(
 where
     C: Clock + 'static,
 {
-    if !runtime.validate() {
-        return Err(WorkerError::InvalidMailPollConfiguration);
-    }
-    if worker.control.is_draining() {
-        return Ok(WorkerResult::Success);
-    }
-    run_maintenance(worker, runtime).await;
-    // 维护包含远端等待；完成后必须重新确认 drain，不能在停机期间再领取邮箱。
     if worker.control.is_draining() {
         return Ok(WorkerResult::Success);
     }
@@ -159,14 +163,35 @@ where
     Ok(iteration_result)
 }
 
-async fn run_maintenance<C>(_worker: &PersistentWorker<C>, runtime: &MailPollRuntime)
-where
-    C: Clock + 'static,
-{
+/// Read Mail 的周期观察独立于发送核对；只定位既有待读/动作目标，不创建历史入站命令。
+async fn run_read_observation(runtime: &MailPollRuntime) {
     let Some(maintenance) = &runtime.maintenance else { return };
-    if runtime.world_id != "main" {
-        return;
+    let deadline = tokio::time::Instant::now() + runtime.config.fetch_timeout;
+    match tokio::time::timeout_at(
+        deadline,
+        maintenance.observe_read_mail(&runtime.world_id, deadline.into_std()),
+    )
+    .await
+    {
+        Ok(Ok(observed)) => tracing::info!(
+            world_id = %runtime.world_id,
+            read_observed = observed,
+            "MoogleMail Read Mail 共享观察完成"
+        ),
+        Ok(Err(error)) => tracing::warn!(
+            world_id = %runtime.world_id,
+            error = %error,
+            "MoogleMail Read Mail 观察失败；不撤销其它页面处理"
+        ),
+        Err(_) => tracing::warn!(
+            world_id = %runtime.world_id,
+            "MoogleMail Read Mail 观察预算耗尽；不撤销其它页面处理"
+        ),
     }
+}
+
+async fn run_maintenance(runtime: &MailPollRuntime) {
+    let Some(maintenance) = &runtime.maintenance else { return };
     // 一次维护共用读取预算；等待数据库、凭据排队、列表/详情及 compose/discard 都不得重置截止点。
     let deadline = tokio::time::Instant::now() + runtime.config.fetch_timeout;
     let result = tokio::time::timeout_at(
@@ -179,6 +204,7 @@ where
             tracing::info!(
                 world_id = %runtime.world_id,
                 compose_clean = report.compose_clean,
+                compose_error = ?report.compose_error,
                 compose_matches = report.compose_matches,
                 discarded = report.discarded,
                 matched_delivery = ?report.matched_delivery,
@@ -189,19 +215,19 @@ where
                 sent_observed = report.sent_observed,
                 sent_recovered = report.sent_recovered,
                 sweep_requeued = report.sweep_requeued,
-                "MoogleMail 三页维护完成"
+                "MoogleMail 共享读取维护完成"
             );
         }
         Err(_) => {
             tracing::warn!(
                 world_id = %runtime.world_id,
-                "MoogleMail 维护总预算耗尽；保留未知外写围栏，继续 Inbox 轮询"
+                "MoogleMail 维护总预算耗尽；保留未知外写围栏，不撤销并行 Inbox 处理"
             );
         }
         Ok(Err(_)) if tokio::time::Instant::now() >= deadline => {
             tracing::warn!(
                 world_id = %runtime.world_id,
-                "MoogleMail 维护总预算耗尽；保留未知外写围栏，继续 Inbox 轮询"
+                "MoogleMail 维护总预算耗尽；保留未知外写围栏，不撤销并行 Inbox 处理"
             );
         }
         Ok(Err(error)) => {
@@ -209,7 +235,7 @@ where
             tracing::warn!(
                 error = %error,
                 world_id = %runtime.world_id,
-                "MoogleMail 三页维护失败；保留未知外写围栏，继续 Inbox 轮询"
+                "MoogleMail 共享读取维护失败；保留未知外写围栏，不撤销并行 Inbox 处理"
             );
         }
     }

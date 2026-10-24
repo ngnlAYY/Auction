@@ -3,8 +3,8 @@
 use std::time::Instant;
 
 use auction_application::{
-    ApplicationError, DeliveryFenceOutcome, DeliveryWorkClaim, FundingError,
-    SettlementInternalEvidenceSnapshot,
+    ApplicationError, DeliveryFenceOutcome, DeliverySendExpectation, DeliveryWorkClaim,
+    FundingError, SettlementInternalEvidenceSnapshot,
 };
 use chrono::{DateTime, Utc};
 use sqlx::Postgres;
@@ -61,11 +61,12 @@ pub(in crate::database::delivery_scheduler) async fn run(
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
     deadline: Option<Instant>,
     intervals: &auction_application::DeliverySendIntervals,
+    expectation: Option<&DeliverySendExpectation>,
 ) -> Result<DeliveryFenceOutcome, ApplicationError> {
     if evidence.is_some() != deadline.is_some() {
         return Err(uncertain());
     }
-    run_transaction(pool, claim, started_at, evidence, deadline, intervals).await
+    run_transaction(pool, claim, started_at, evidence, deadline, intervals, expectation).await
 }
 
 /// legacy沿用原返回类型，只有明确Sending才成功，缺授权/确定拒绝不伪装成功。
@@ -75,7 +76,7 @@ pub(in crate::database::delivery_scheduler) async fn run_legacy(
     started_at: DateTime<Utc>,
     intervals: &auction_application::DeliverySendIntervals,
 ) -> Result<(), auction_application::RepositoryError> {
-    match run_transaction(pool, claim, started_at, None, None, intervals).await {
+    match run_transaction(pool, claim, started_at, None, None, intervals, None).await {
         Ok(DeliveryFenceOutcome::Sending) => Ok(()),
         _ => Err(auction_application::RepositoryError::Failed(
             "delivery发送fence未授权或未确定完成".to_owned(),
@@ -90,7 +91,11 @@ async fn run_transaction(
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
     deadline: Option<Instant>,
     intervals: &auction_application::DeliverySendIntervals,
+    expectation: Option<&DeliverySendExpectation>,
 ) -> Result<DeliveryFenceOutcome, ApplicationError> {
+    if !super::super::attempts::matches_claim(claim, expectation) {
+        return Ok(DeliveryFenceOutcome::Deferred);
+    }
     for attempt in 0..3 {
         if deadline.is_some_and(|limit| Instant::now() >= limit) {
             // 尚未开始事务的确定拒绝；重试不能重建证据寿命。
@@ -121,9 +126,19 @@ async fn run_transaction(
             let category = super::super::cadence::lock_due(&mut tx, claim, intervals).await?;
             let outcome = match evidence {
                 Some(evidence) => {
-                    super::authorization::authorize(&mut tx, claim, started_at, evidence).await
+                    super::authorization::authorize(
+                        &mut tx,
+                        claim,
+                        started_at,
+                        evidence,
+                        expectation,
+                    )
+                    .await
                 }
-                None => super::authorization::authorize_legacy(&mut tx, claim, started_at).await,
+                None => {
+                    super::authorization::authorize_legacy(&mut tx, claim, started_at, expectation)
+                        .await
+                }
             }?;
             if matches!(outcome, DeliveryFenceOutcome::Sending)
                 && let Some(category) = category

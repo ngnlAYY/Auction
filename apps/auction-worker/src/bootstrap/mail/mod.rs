@@ -97,13 +97,11 @@ pub(super) async fn configure_mail_poll(
             },
         )
         .await?;
-        let mut runtimes = runtimes;
-        if let Some(runtime) =
-            runtimes.iter_mut().find(|runtime| runtime.world_id == MoogleMailWorld::Main.as_str())
-        {
-            // 维护只读取主世界三页；失败不影响同轮收件处理。
-            *runtime = std::mem::replace(runtime, runtime.clone()).with_maintenance(maintenance);
-        }
+        // 各世界独立维护；共享同一读取协调器，不让主世界维护覆盖异世界邮件。
+        let runtimes = runtimes
+            .into_iter()
+            .map(|runtime| runtime.with_maintenance(Arc::clone(&maintenance)))
+            .collect();
         // gateway 本身接受显式 world；C/D 复用同一个实例、凭据集合与 owner。
         // 论坛关闭时不注入 reader，联合证据明确不可用，不隐式开启论坛能力。
         let gateway = gateways

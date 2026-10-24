@@ -31,6 +31,15 @@ PostgreSQL 连接入口独立校验 URI：拒绝缩略形式、fragment、控制
 [delivery_scheduler/wakeup.rs](crates/auction-storage/src/database/delivery_scheduler/wakeup.rs) 独占固定空载荷频道订阅；
 只做提交后提示，断线不改变持久队列。SQL 映射、触发器、保留策略及迁移范围见[对象契约](docs/contracts/schema.md#结算恢复与交付)。
 
+[delivery_scheduler/attempts.rs](crates/auction-storage/src/database/delivery_scheduler/attempts.rs) 与 `000061` 拥有
+`delivery_send_attempts`、`delivery_sent_bindings`：实际发送身份按 delivery/fence 只追加，正文只存摘要；
+Sending、节奏起点和原审计同事务提交。正常成功和维护恢复共享 world/MID 唯一绑定，同一绑定重放无新副作用，
+管理员重试不覆盖旧尝试。恢复按当前观测 generation→资金→凭据→delivery 取锁，原发送 generation 只作历史身份；
+冻结记录精确比对后同事务收口状态、资金、履约和审计，跨批次存在相同内容/时窗的候选时保留未知。
+[mailbox_sweep/recovery.rs](crates/auction-storage/src/database/mailbox_sweep/recovery.rs) 的新证明供下游
+`delivery_has_frozen_sent_proof` 强谓词消费，不把新 proof 标签直接加入旧字符串白名单。升级先停止旧 Worker，
+迁移不回填历史渲染身份；无身份的旧行仅保留原安全证明，未知 Send 不自动重排。
+
 ## 用户身份与消费 owner
 
 [users](crates/auction-storage/src/database/users) 在写锁内复核注册信封绑定的 UUID；论坛数字账号是稳定身份，
@@ -195,21 +204,22 @@ BuyerRefund 的 prepare/activate（含旧 prepared）借用真实 Armory 联合�
 generation、credential、claim 与数据库时效在原业务锁序内复核，连接池等待与 COMMIT 均不能延长预算。
 应用持 opaque guard 至确定结果，不再以装备详情可读替代持有证明。
 [delivery_scheduler/cash](crates/auction-storage/src/database/delivery_scheduler/cash) 统一新旧 sending 入口：有证据时按
-generation→排序 worlds→资金 scope/account→必要业务/凭据→义务→delivery→fulfillment→allocation 加锁，无证据时早锁
-scope 及持久 allocation 关联；完整 payload、recipient、command/hash 及 token/fencing/实时 lease 锁内精确匹配。
+generation→排序 worlds→资金 scope/account→必要业务/凭据→义务→delivery→fulfillment→allocation 加锁；非现金发送的
+持久凭据同样先锁 generation，再锁 scope/持久 allocation 关联及 active 凭据。完整 payload、recipient、command/hash
+与 token/fencing/实时 lease 锁内精确匹配，无冻结身份的旧入口不得授权 Send。
 现金不足只提交冻结并返回 Deferred；现金 until 入口沿用 prepared 原单调截止与 UTC 证据窗口的交集，PostgreSQL 18
 `transaction_timeout` 在业务锁/审计前设置并覆盖 COMMIT。已有 allocation 的五种新 Admin 动作全部返回 Invalid 且不写
 状态，原稳定命令先重放。compose 安全由 transport 在 sending fence 前实际只读检查，不再按历史失败永久阻断整个 world。
 未开始写入的有效 claim 释放回 pending 时撤销本次领取 attempt_count 并在同事务追加 release 审计。续租仅允许当前有效
 claimed/sending，先取 delivery 行锁再复核 token/fencing 及 `clock_timestamp()`，新截止不得缩短已有租约。
 
-`mailbox_sweep` 的受证明恢复以 Serializable 事务先锁资金 scope/account，再锁 delivery；
+`mailbox_sweep` 的受证明恢复以 Serializable 事务按当前观测 generation→资金 scope/account→凭据→delivery 加锁；
 真实 Sent 将原分配从 unknown/in_flight 原子收口为 spent，并同时恢复原 fulfillment 的对账排队与追加投递审计。
 通知、take 成功与 take 重排队也同事务追加审计，仅实际迁移才返回 true；重放、引用已占用和并发输家不重复计数或审计。
-所有恢复绑定统一核对外部引用未被其他投递占用；明确序列化冲突/死锁最多尝试三次，
+所有 Send 恢复共享不可变 world/MID 绑定，并排除全库同内容/时窗的其它未绑定尝试；明确序列化冲突/死锁最多尝试三次，
 未知/失败提交不宣告成功，不据此重发。Send 不进入维护重排队入口，观察元数据本身不迁移状态。
 `mailbox_sweep_cursors`（`000060`）只持久记录逐条维护尝试的 `(created_at,id)` 环形位置，不表示投递完成；
-预算未处理的后缀不推进。原 delivery 的一次性 discard CAS 只阻止未知草稿删除自动重放，不授权 Send。
+预算未处理的后缀不推进。一次性 discard 同时匹配当前 fence/冻结身份，拒绝全库内容歧义，只阻止未知草稿删除重放，不授权 Send。
 COD 重排队使用冻结 v1 七天窗口，并在清旧投影前同事务追加 `delivery.cod_return_resend` 安全历史审计。
 Admin 列表和命令读取只为精确收件人不存在的人工核对退信接受 MID 引用，不把它当作发送成功。
 Recovery 来源不完整时仍持久化已证明的积压/证据过期异常及不可用信号，但不关闭未出现的历史异常。
@@ -309,8 +319,9 @@ delivery 锁之前按持久 allocation 关联早锁原账户，孤儿/歧义失�
 卖家款认领：锁定既有隔离用途、原付款/卖家义务与同账号精确 Sent-collected 证明，逐标的将隔离责任转为卖家留存，
 不再次创建旧收款 source 或发行 B。两种修复保存稳定命令、唯一目标、完整证明及追加审计，未知提交只查询原命令。
 旧款认领另接受原维护产生的 `sent_recovered_reference_v1` 闭集事实，精确核对原 MID、收件人及恢复时资产矩阵；
-恢复时尚未付款的历史保留原状，本次仍须用同一真实会话证明该 MID 已收款且无剩余资产。普通新收款继续只接受
-`sent_exact_payload_v1`；旧恢复证明不改标、不新增来源，开户前时间边界、完整原载荷和 prepare/activate 绑定保持不变。
+恢复时尚未付款的历史保留原状，本次仍须用同一真实会话证明该 MID 已收款且无剩余资产。普通新收款接受
+实时 `sent_exact_payload_v1`，或经过不可变尝试和唯一 MID 绑定核验的 `sent_recovered_frozen_v1`；旧 reference
+恢复证明不改标、不新增来源，开户前时间边界、完整原载荷和 prepare/activate 绑定保持不变。
 资金预览仅对严格解码且零 Credits、零 COD、无附件的纯通知排除资金未知阻塞，保留通知本身的人工核对状态。
 该分类流式读取历史载荷，只保留通过原闭集解码器的 UUID；不省略任何候选，也不把正文整批保存在内存。
 

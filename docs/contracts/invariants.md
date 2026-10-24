@@ -238,6 +238,13 @@ Delivery claim 必须在进入 `sending` 前按 payload world 检查 scoped/shar
 
 MoogleMail Send 在 sending fence 前实际 GET compose 并完整扫描 Sent 至尾页；页数/时间耗尽分别为 `sent_scan_page_limit`/`sent_scan_timeout`，不得当空历史。持有同一 Cookie 独占 guard 进入消耗式 prepared future；fence 未明确成功不得 poll 写入。prepare 在原请求总预算内为 claimed 周期续租，首次准备前及 fence 前后均确认续租；数据库等待受 finalize_timeout 和已知单调租约截止双重限制，回执已耗尽新 TTL 不得继续。首次外部 poll 前直接复核单调截止，超时/租约/续租处理优先；未 poll 的失败先 drop prepared，再尽力释放，不调用外部 unknown 结果落库；已 sending 或 fence 提交未知不能退回 pending，仍沿持久隔离恢复边界处理。只读准备失败/超时释放有效 claimed，事务内撤销本次 attempt_count 并追加 release 审计，不写 unknown；仅暂排该 world 的 Send，不占发送批次，Take/Return 仍独立；下轮重新检查实际草稿，禁止永久历史错误 SQL gate；发送 fence 后仍严格单次，旧 sending/manual_reconcile/outcome_unknown 不因新草稿干净而重发或结清。
 
+普通 Inbox/Read Mail/Sent 观察不取得 compose/资产操作 guard，但必须绑定当前凭据与有效 owner；跨凭据、世界、
+读取代次或发送后时序屏障不得复用旧响应。完整列表窗口采集与可能改变已读状态的详情 GET 分阶段协调，
+详情前仍须持久登记待读 MID；Read Mail 只定位已知恢复任务，不把历史已读邮件作为新业务。
+共享观察只减少重复读取，不是资金/库存授权；内部证据仍遵守 I-09h 的原会话、generation 和绝对截止。
+所有新 Send 在围栏前渲染一次，实际发送消费原正文；`000061` 将主题、正文摘要、资产矩阵与尝试身份同事务冻结，
+不持久化登录 key 明文或含密钥正文。确定的非法载荷在有效 claimed 下失败收口，不能伪造 Sending 或永久重领坏任务。
+
 预期 `player_name`、Cookie 可用或 Item Shop 余额均非自身身份证明，来源未证明时明确 `identity_unproven`；数据库旧预期名为 None 也必须远端联合核验，非空预期值精确匹配；内部履约与现金门见 I-09h，业务规则及原子写门禁见[应用履约](crates/auction-application/README.md#结算与恢复端口)。
 
 可能超过初始 lease 的多步外部写必须周期续租，并在每次续租和最终写回中携带同一 lease token 与 fencing version。Worker 只能在有空闲执行槽时领取下一条，不能让批次内排队时间消耗新 claim 的租约；完整外部调用与终态写回必须分别有界，请求超时属于结果未知。续租失败后不得以 stale claimant 保存成功或确定失败，只有原 fence 仍有效时可以写入结果未知；过期 `sending` 必须在额外 sending grace 后进入 `manual_reconcile`，禁止重新领取并盲目重发。Delivery 普通轮询使用有界 `poll + [0, jitter]`；新超价 MM 提交后的空载荷提示可即时唤醒并优先领取，在途工作不抢占。提示不携带任务或发送授权，丢失/断线仍靠周期领取，准备失败释放不循环自唤醒；单轮 claim、持久化或外部处理错误必须由持久化状态保留重试边界并在下一轮继续，不能因此终止整个 Worker，循环任务异常退出仍必须失败关闭。
@@ -252,6 +259,11 @@ Delivery 的创建/准备/激活、claim、进入发送、释放、成功、失�
 
 三页维护依据精确证明绑定恢复结果，也必须在同一事务追加 Delivery 审计；有持久资金分配的已证明 Send 同事务把
 `unknown/in_flight` 收口为 `spent`，不能只修改 delivery。未影响任何行的幂等观察不追加重复审计，也不计作恢复成功。
+新发送及冻结恢复还须原子建立唯一 world/MID 绑定；一个 MID 不能证明不同发送尝试成功。
+`sent_recovered_frozen_v1` 必须关联原不可变摘要与尝试，不能仅凭 proof 标签进入履约或资金来源。
+重复同内容候选、竞争尝试、缺页、立即领取后的空资产或旧凭据观察都不授权猜测绑定；历史缺证据不回填、不自动重寄。
+冻结证明恢复付款提醒时，还须按 recovery→credentials→actions→delivery 的统一锁序恢复原 action 的未知结果投影，
+使其重新领取并消费已经成功的原 delivery；不重排邮件，不覆盖其它动作或人工业务阻断，恢复和审计同事务。
 已确认 COD 退件后的重排队，在清理旧结果前追加 `delivery.cod_return_resend` 审计，
 保留原投递身份、fence、执行时间、真正已证明的引用及退件消费/次数关联；审计、清结果和 recovery 推进同事务提交。
 

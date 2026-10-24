@@ -1,4 +1,4 @@
-//! MoogleMail 单 Cookie 会话和完整逻辑操作的互斥隔离。
+//! MoogleMail 单 Cookie 普通读会话与资产操作的互斥隔离。
 
 use std::{
     collections::HashSet,
@@ -250,7 +250,28 @@ impl MoogleMailCredentialSet {
         self.ownership.as_ref().is_none_or(|ownership| ownership.is_valid())
     }
 
-    /// 为完整逻辑读写操作取得凭据级独占 guard；已有 session 的内部读取不得重复取得。
+    /// 普通读取只固定当前凭据，不等待 compose/资产操作 guard，也不能授权内部现金证据。
+    pub(crate) async fn begin_read(
+        &self,
+        world: MoogleMailWorld,
+        operation: MoogleMailOperation,
+    ) -> Result<MoogleMailCredentialSession, MoogleMailError> {
+        let mut tried = HashSet::new();
+        let current = self.next_candidate(world, operation, &tried)?;
+        tried.insert(current.key);
+        let session = MoogleMailCredentialSession {
+            set: self.clone(),
+            world,
+            operation,
+            current,
+            tried,
+            operation_guard: None,
+        };
+        session.check_current().await?;
+        Ok(session)
+    }
+
+    /// 为 compose、资产动作或内部证据取得独占 guard；普通邮箱读取使用 begin_read。
     pub(crate) async fn begin_exclusive(
         &self,
         world: MoogleMailWorld,
@@ -296,6 +317,7 @@ impl MoogleMailCredentialSet {
             .iter()
             .find(|candidate| {
                 candidate.world.is_none_or(|scope| scope == world)
+                    && candidate.cookie.is_active()
                     && !tried.contains(&candidate.key)
             })
             .cloned()
@@ -317,7 +339,9 @@ impl MoogleMailCredentialSet {
             .lock()
             .map(|candidates| {
                 candidates.iter().any(|candidate| {
-                    candidate.key == key && candidate.world.is_none_or(|scope| scope == world)
+                    candidate.key == key
+                        && candidate.cookie.is_active()
+                        && candidate.world.is_none_or(|scope| scope == world)
                 })
             })
             .map_err(|_| {
@@ -329,9 +353,10 @@ impl MoogleMailCredentialSet {
     pub(crate) fn available(&self, world: MoogleMailWorld) -> bool {
         self.ownership_valid()
             && self.candidates.lock().is_ok_and(|candidates| {
-                candidates
-                    .iter()
-                    .any(|candidate| candidate.world.is_none_or(|scope| scope == world))
+                candidates.iter().any(|candidate| {
+                    candidate.cookie.is_active()
+                        && candidate.world.is_none_or(|scope| scope == world)
+                })
             })
     }
 }
@@ -347,6 +372,54 @@ pub(crate) struct MoogleMailCredentialSession {
 }
 
 impl MoogleMailCredentialSession {
+    /// 普通观测的持久凭据身份；只用于匹配冻结发送记录，不建立资金/库存授权。
+    pub(crate) fn observation_credential_binding(
+        &self,
+    ) -> Option<auction_application::DeliverySendCredentialBinding> {
+        if !self.set.candidate_is_active(self.current.key, self.world, self.operation).ok()? {
+            return None;
+        }
+        let runtime = self.set.ownership.as_ref()?.mail_runtime_binding()?;
+        let binding = auction_application::DeliverySendCredentialBinding {
+            credential_id: self.current.persistent_id?,
+            credential_version: self.current.state_version?,
+            runtime_generation: runtime.generation,
+        };
+        binding.validate().then_some(binding)
+    }
+
+    /// 网络调用前后以及复用观测后均检查原凭据和 owner；失效不偷偷重建 session。
+    pub(crate) async fn check_current(&self) -> Result<(), MoogleMailError> {
+        let unavailable = || {
+            operation_error(
+                self.operation,
+                self.world,
+                MoogleMailErrorCategory::CredentialUnavailable,
+            )
+        };
+        if !self.set.candidate_is_active(self.current.key, self.world, self.operation)? {
+            return Err(unavailable());
+        }
+        if let Some(owner) = &self.set.ownership {
+            tokio::time::timeout(std::time::Duration::from_secs(1), owner.check())
+                .await
+                .map_err(|_| unavailable())?
+                .map_err(|_| unavailable())?;
+        }
+        if !self.set.candidate_is_active(self.current.key, self.world, self.operation)? {
+            return Err(unavailable());
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn advance_read(&mut self) -> Result<(), MoogleMailError> {
+        self.operation_guard.take();
+        let current = self.set.next_candidate(self.world, self.operation, &self.tried)?;
+        self.tried.insert(current.key);
+        self.current = current;
+        self.check_current().await
+    }
+
     /// 本次取得独占 guard 时的派发世界；跨世界读取仍另验 scope。
     pub(crate) fn internal_world(&self) -> MoogleMailWorld {
         self.world
@@ -403,6 +476,7 @@ impl MoogleMailCredentialSession {
         if let Some(owner) = &self.set.ownership {
             owner.revoke_internal_use();
         }
+        self.current.cookie.revoke();
         if let Ok(mut candidates) = self.set.candidates.lock() {
             candidates.clear();
         }
@@ -426,6 +500,7 @@ impl MoogleMailCredentialSession {
 
     async fn invalidate_selected(&self) -> Result<(), MoogleMailError> {
         let current = &self.current;
+        current.cookie.revoke();
         {
             let mut candidates = self.set.candidates.lock().map_err(|_| {
                 operation_error(

@@ -82,16 +82,18 @@ Delivery 有效并发取配置与 transport 的较小值（MoogleMail 当前上�
 不从交接时刻重建 30 秒预算。只有截止前收到确定回执才确认 guard/fence，过晚回执、提交未知或取消撤销同一 mail owner
 且不 poll；确定 Deferred 只延后，legacy 候选也保留撤销钩子。Send、Return、Take 的证明由各 owner 校验，
 成功不取决于 HTTP 成功页（见[邮件诊断](ops/mail/diagnostics.md)）。
+实际发送的完整主题、正文摘要及资产矩阵由准备句柄冻结，交接时随原 Sending 事务落库；Worker 不重渲染正文。
+确定的 `invalid_payload` 在有效 claimed 下失败收口并追加审计，不伪造 Sending；其它只读准备失败仍延期。
 
 Mail 仅对可重试错误与超时做有界 inline retry，处理前先查持久化完成证明。批次预算独立于 lease，耗尽只提交已完成
 连续前缀及 cursor；处理中途确定失败时同一 fenced 提交保存成功前缀与失败退避，不采用失败页整体 next_cursor。
 完成证明和已接受决定允许恢复提交前已完成的步骤，不能按取件后的资产变化重新解释旧邮件。
 邮箱租约的单调截止在领取请求前建立，回执只会按剩余 TTL 收紧；续租等待不得跨越已知旧租约，
 新截止锚定续租发起时刻。租约失效或回执过晚只取消原处理 future，不额外释放或重排已开始的副作用。
-主世界维护结束后重新检查 drain，停止时不再领取新的邮箱 claim。
-维护整轮受同一 fetch_timeout 约束，包含数据库和 session 排队；耗尽后继续收件，不为每封详情重置预算。
+各已配置世界的维护与 Inbox 处理并行运行，拥有独立的 fetch/处理预算；一方失败不撤销另一方已提交的结果。
+两条 future 归同一轮次持有，取消与排空不遗留 detached 任务；停止后不再领取新的邮箱 claim。
 候选以 `000060` 的持久环形游标逐条轮转，20/200 边界不推进未处理后缀；discard 的一次性尝试围栏保留未知结果，
-不自动重新删除草稿或发送邮件，精确规则见[维护契约](ops/mail/diagnostics.md#定期三页维护)。
+不自动重新删除草稿或发送邮件。普通读取共享观察，但不借用 compose 或资金写授权，精确规则见[维护契约](ops/mail/diagnostics.md#定期三页维护)。
 批次 ID 使用借用哈希集合做期望线性去重，不复制邮件或 ID；论坛 512 字符摘要惰性生成，不先建立完整分词/拼接副本。
 recovery 摘要只借用字段，旧 prepare 查询仅保留一个必要 owned 副本，JSON、摘要与命令身份不变。
 轮询将当前 claim 传给 `fetch_claimed`；生产 MoogleMail gateway 在首个详情 GET 前持久登记整窗列表身份，优先恢复同邮箱、

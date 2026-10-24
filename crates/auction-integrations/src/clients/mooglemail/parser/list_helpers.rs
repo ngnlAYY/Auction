@@ -138,6 +138,11 @@ pub(crate) fn valid_next_page_href(
     }
     values.get("s").map(String::as_str) == Some("Bazaar")
         && values.get("ss").map(String::as_str) == Some("mm")
-        && values.get("filter").map(String::as_str) == Some(filter)
+        && values.get("filter").is_some_and(|value| match filter {
+            "inbox" => matches!(value.as_str(), "inbox" | "Inbox"),
+            "sent" => matches!(value.as_str(), "sent" | "Sent Mail"),
+            "Read Mail" => matches!(value.as_str(), "read" | "Read Mail"),
+            _ => false,
+        })
         && values.get("page").and_then(|value| value.parse::<usize>().ok()) == Some(expected_page)
 }

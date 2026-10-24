@@ -39,7 +39,8 @@ async fn observe_action_in_transaction(
     let row = sqlx::query(
         "SELECT status, external_reference, failure_code, result_metadata,
                 command_id, request_digest, origin_kind, origin_id, recipient, payload,
-                activation_command_id, activation_request_digest
+                activation_command_id, activation_request_digest,
+                public.delivery_has_frozen_sent_proof(id,result_metadata,external_reference) AS frozen_sent_proven
          FROM public.deliveries WHERE id = $1",
     )
     .bind(delivery_id)
@@ -68,6 +69,7 @@ async fn observe_action_in_transaction(
             observed_at,
             external_reference,
             &result_metadata,
+            row.try_get("frozen_sent_proven").map_err(map_storage_error)?,
         )?,
         "failed" if failure_code.as_deref().is_some_and(valid_failure_code) => (
             RecoveryActionOutcome::Failed { failure_code: "recovery_delivery_failed".to_owned() },
@@ -91,6 +93,7 @@ fn succeeded_outcome(
     observed_at: DateTime<Utc>,
     external_reference: Option<String>,
     result_metadata: &serde_json::Value,
+    frozen_sent_proven: bool,
 ) -> Result<(RecoveryActionOutcome, RecoveryTerminalState), RecoveryActionTransactionError> {
     let (operation, world_id, proof_kind, expected_reference, proven) = match claim.kind.as_str() {
         "payment_reminder" => (
@@ -104,10 +107,11 @@ fn succeeded_outcome(
                     == Some("send")
                 && result_metadata.get("template").and_then(serde_json::Value::as_str)
                     == Some("recovery_payment_reminder")
-                && result_metadata.get("sent_verified").and_then(serde_json::Value::as_bool)
+                && ((result_metadata.get("sent_verified").and_then(serde_json::Value::as_bool)
                     == Some(true)
-                && result_metadata.get("proof").and_then(serde_json::Value::as_str)
-                    == Some("sent_exact_payload_v1"),
+                    && result_metadata.get("proof").and_then(serde_json::Value::as_str)
+                        == Some("sent_exact_payload_v1"))
+                    || frozen_sent_proven),
         ),
         "reclaim_equipment_take" | "cancel_carrier_take" | "recover_equipment_take" => {
             let Some(expected_reference) = claim.source_external_mail_id.as_deref() else {

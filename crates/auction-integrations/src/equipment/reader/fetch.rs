@@ -92,6 +92,14 @@ pub(super) async fn document_once(
             None,
         ));
     }
+    if cookie.is_some_and(|cookie| !cookie.is_active()) {
+        return Err(observed_failure(
+            MailEquipmentDiagnosticCategory::CredentialUnavailable,
+            None,
+            started,
+            None,
+        ));
+    }
     let mut response = request.send().await.map_err(|_| {
         EquipmentFetchError::Observed(EquipmentFetchFailure {
             category: MailEquipmentDiagnosticCategory::Network,

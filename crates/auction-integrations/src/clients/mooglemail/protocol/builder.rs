@@ -41,6 +41,20 @@ impl MoogleMailUrlBuilder {
         Ok(target)
     }
 
+    /// Read Mail 使用远端真实页签值，不映射为 Inbox 或详情请求。
+    pub(crate) fn read_mail_page(
+        &self,
+        world: MoogleMailWorld,
+        page: usize,
+    ) -> Result<MoogleMailTarget, MoogleMailError> {
+        let mut target =
+            self.moogle_mail(world, MoogleMailOperation::ReadMail, "Read Mail", None)?;
+        if page > 0 {
+            target.url.query_pairs_mut().append_pair("page", &page.to_string());
+        }
+        Ok(target)
+    }
+
     pub(crate) fn detail(
         &self,
         world: MoogleMailWorld,

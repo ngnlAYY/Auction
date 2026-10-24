@@ -223,7 +223,9 @@ async fn validate_collected(
           AND d.origin_id=$2::uuid::text AND d.recipient=$3 AND d.payload=$4
           AND d.command_id=$5 AND d.request_digest=$6
           AND d.activation_command_id=$7 AND d.activation_request_digest=$8
-          AND d.external_reference=$9 AND d.result_metadata->>'proof' IN ('sent_exact_payload_v1','sent_recovered_reference_v1')
+          AND d.external_reference=$9
+          AND (d.result_metadata->>'proof' IN ('sent_exact_payload_v1','sent_recovered_reference_v1')
+            OR public.delivery_has_frozen_sent_proof(d.id,d.result_metadata,d.external_reference))
           AND d.result_metadata->>'external_reference_proven'='true'
           AND d.result_metadata->>'operation'='send')"
     ).bind(delivery.id).bind(c.obligation_id.as_uuid()).bind(&c.recipient).bind(&delivery.payload)

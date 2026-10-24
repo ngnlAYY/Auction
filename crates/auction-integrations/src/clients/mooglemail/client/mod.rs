@@ -16,9 +16,11 @@ use super::{
 use super::{forms::MoogleMailForm, protocol::MoogleMailUrlBuilder};
 
 mod diagnostics;
+mod reads;
 mod request;
 mod security;
 
+pub(crate) use reads::MoogleMailReadRound;
 pub(crate) use security::is_hentaiverse_login_response;
 use security::{IntervalGate, build_mooglemail_http_client};
 
@@ -56,6 +58,7 @@ pub struct MoogleMailClient {
     builder: MoogleMailUrlBuilder,
     client: Client,
     gate: Arc<IntervalGate>,
+    reads: Arc<reads::MailboxReads>,
     maximum_response_bytes: usize,
     request_timeout: Duration,
     diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
@@ -115,6 +118,7 @@ impl MoogleMailClient {
             builder,
             client,
             gate: Arc::new(IntervalGate::new(config.minimum_request_interval)),
+            reads: Arc::new(reads::MailboxReads::default()),
             maximum_response_bytes,
             request_timeout: config.request_timeout,
             diagnostics: None,
@@ -171,6 +175,15 @@ impl MoogleMailClient {
         page: usize,
     ) -> Result<MoogleMailTarget, MoogleMailError> {
         self.builder.inbox_page(world, page)
+    }
+
+    /// 已读历史列表，不作为新入站指令来源。
+    pub fn read_mail_page(
+        &self,
+        world: MoogleMailWorld,
+        page: usize,
+    ) -> Result<MoogleMailTarget, MoogleMailError> {
+        self.builder.read_mail_page(world, page)
     }
 
     pub fn detail(

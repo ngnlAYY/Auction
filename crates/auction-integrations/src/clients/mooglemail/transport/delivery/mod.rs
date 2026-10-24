@@ -70,108 +70,44 @@ impl MoogleMailDeliveryTransport {
         self
     }
 
-    async fn send_claim(
+    /// Send 已由 prepared 请求独占承载；这里仅保留 Return/Take 原动作证明路径。
+    async fn send_action_claim(
         &self,
         claim: DeliveryWorkClaim,
-        mut session: Option<PreparedMoogleMailCredentials>,
     ) -> Result<DeliverySendResult, DeliveryTransportError> {
-        match claim.origin_kind.as_str() {
-            "mail_intake" => {
-                let (payload, world) = decode_payload(&claim)?;
-                match payload.operation.as_str() {
-                    "send" => {
-                        self.send_notification(
-                            &claim,
-                            &payload,
-                            world,
-                            session.as_mut().ok_or_else(invalid_payload)?,
-                        )
-                        .await
-                    }
-                    "return" => {
-                        self.send_action(
-                            &claim,
-                            &payload.external_mail_id,
-                            world,
-                            MoogleMailOperation::ReturnMessage,
-                            None,
-                        )
-                        .await
-                    }
-                    "take" => {
-                        self.send_action(
-                            &claim,
-                            &payload.external_mail_id,
-                            world,
-                            MoogleMailOperation::Take,
-                            Some(ActionExpectation {
-                                credits: payload.credits,
-                                cod: payload.cod,
-                                attachment_ids: payload.attachment_ids.clone(),
-                            }),
-                        )
-                        .await
-                    }
-                    _ => Err(invalid_payload()),
-                }
-            }
-            "settlement" => {
-                let (payload, world) = decode_settlement_payload(&claim)?;
-                match payload.operation.as_str() {
-                    "send" => {
-                        self.send_settlement(
-                            &claim,
-                            &payload,
-                            world,
-                            session.as_mut().ok_or_else(invalid_payload)?,
-                        )
-                        .await
-                    }
-                    // 旧 payload 只允许读取并隔离；原邮件的 Return 不能证明已入库装备返还。
-                    // 历史执行结果无法在此证明，保留人工态，且不执行任何远端写入。
-                    "return" => Err(legacy_settlement_return()),
-                    _ => Err(invalid_payload()),
-                }
-            }
-            "settlement_recovery_action" => {
-                let (payload, world) = decode_payload(&claim)?;
-                match payload.operation.as_str() {
-                    "send" => {
-                        self.send_notification(
-                            &claim,
-                            &payload,
-                            world,
-                            session.as_mut().ok_or_else(invalid_payload)?,
-                        )
-                        .await
-                    }
-                    "take" => {
-                        self.send_action(
-                            &claim,
-                            &payload.external_mail_id,
-                            world,
-                            MoogleMailOperation::Take,
-                            Some(ActionExpectation {
-                                credits: payload.credits,
-                                cod: payload.cod,
-                                attachment_ids: payload.attachment_ids.clone(),
-                            }),
-                        )
-                        .await
-                    }
-                    _ => Err(invalid_payload()),
-                }
-            }
-            "operations_alert" | "lot_watch" => {
-                let (payload, world) = decode_payload(&claim)?;
-                if payload.operation != "send" {
-                    return Err(invalid_payload());
-                }
-                self.send_notification(
+        if claim.origin_kind == "settlement" {
+            let (payload, _) = decode_settlement_payload(&claim)?;
+            // 旧 payload 只允许读取并隔离；原邮件的 Return 不能证明已入库装备返还。
+            // 历史执行结果无法在此证明，保留人工态，且不执行任何远端写入。
+            return Err(if payload.operation == "return" {
+                legacy_settlement_return()
+            } else {
+                invalid_payload()
+            });
+        }
+        let (payload, world) = decode_payload(&claim)?;
+        match payload.operation.as_str() {
+            "return" => {
+                self.send_action(
                     &claim,
-                    &payload,
+                    &payload.external_mail_id,
                     world,
-                    session.as_mut().ok_or_else(invalid_payload)?,
+                    MoogleMailOperation::ReturnMessage,
+                    None,
+                )
+                .await
+            }
+            "take" => {
+                self.send_action(
+                    &claim,
+                    &payload.external_mail_id,
+                    world,
+                    MoogleMailOperation::Take,
+                    Some(ActionExpectation {
+                        credits: payload.credits,
+                        cod: payload.cod,
+                        attachment_ids: payload.attachment_ids.clone(),
+                    }),
                 )
                 .await
             }
@@ -205,30 +141,21 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
 
     fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_> {
         Box::pin(async move {
-            if authorization::requires_cash_gate(&claim) {
+            let Some(rendered) = self.render_send(&claim).await? else {
+                let send: DeliveryPreparedSend<'_> = Box::pin(self.send_action_claim(claim));
+                return Ok(send);
+            };
+            if rendered.request.credits != 0 {
                 return Err(authorization::cash_unproven());
             }
-            let world = match claim.origin_kind.as_str() {
-                "settlement" => decode_settlement_payload(&claim)
-                    .ok()
-                    .filter(|(payload, _)| payload.operation == "send")
-                    .map(|(_, world)| world),
-                "mail_intake" | "settlement_recovery_action" | "operations_alert" | "lot_watch" => {
-                    decode_payload(&claim)
-                        .ok()
-                        .filter(|(payload, _)| payload.operation == "send")
-                        .map(|(_, world)| world)
-                }
-                _ => None,
-            };
-            let session = match world {
-                Some(world) => Some(self.prepare_credentials(world).await?),
-                None => None,
-            };
-            // 独占 session 被移入尚未 poll 的 future；数据库 fence 失败或超时丢弃句柄即释放。
-            let prepared: DeliveryPreparedSend<'_> =
-                Box::pin(async move { self.send_claim(claim, session).await });
-            Ok(prepared)
+            let expectation = rendered.expectation(None)?;
+            let mut session = self.prepare_credentials(rendered.request.world).await?;
+            // 独占 session 与已渲染请求一起移入未 poll 的 future，不重新读取当前 key。
+            let send: DeliveryPreparedSend<'_> = Box::pin(async move {
+                self.send_rendered(rendered, &mut session, &expectation, claim.fencing_version)
+                    .await
+            });
+            Ok(send)
         })
     }
 
@@ -237,7 +164,7 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
         claim: DeliveryWorkClaim,
         deadline: std::time::Instant,
     ) -> auction_application::AuthorizedDeliveryPreparation<'_> {
-        Box::pin(self.prepare_cash_authorized(claim, deadline))
+        Box::pin(self.prepare_authorized_claim(claim, deadline))
     }
 
     fn send(

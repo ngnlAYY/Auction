@@ -26,6 +26,10 @@ pub struct MoogleMailboxComposeState {
     /// 页面未提供可证明的 CoD 时为空。
     pub cod: Option<i64>,
     pub attachment_count: usize,
+    /// 可见草稿的精确装备身份与规范正文摘要，只用于比对原冻结发送。
+    pub equipment_ids: Vec<String>,
+    pub body_digest: [u8; 32],
+    pub observation_credential: Option<crate::DeliverySendCredentialBinding>,
 }
 
 impl std::fmt::Debug for MoogleMailboxComposeState {
@@ -71,17 +75,21 @@ pub struct MoogleMailboxSentState {
     pub remaining_equipment_ids: Vec<String>,
     /// 详情正文的规范摘要；用于通知类恢复证明的逐字比对。
     pub body_digest: [u8; 32],
+    /// 本次详情读取的持久凭据身份；普通观察不产生内部资金或库存授权。
+    pub observation_credential: Option<crate::DeliverySendCredentialBinding>,
 }
 
 /// 入站邮件当前仍挂着的资产；用于 take 动作是否已生效。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailboxInboxAssets {
+    /// 原 MID 详情证明的发件人，不能仅凭资产为空把另一身份的邮件视为已领取。
+    pub sender: String,
     pub equipment_ids: Vec<String>,
     pub credits: i64,
     pub cod: i64,
 }
 
-/// 通知类投递可重建的发送身份；来自部署模板与登录 key，不含正文。
+/// 无登录 key 的历史通知保守重建摘要；带 key 的旧行不能用当前 key 冒充原发送内容。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailboxNoticeExpectation {
     pub subject: String,
@@ -92,7 +100,14 @@ pub struct MoogleMailboxNoticeExpectation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailboxUnprovenSend {
     pub delivery_id: Uuid,
-    /// `settlement` 或 `mail_intake`；决定恢复证明的匹配规则。
+    /// 当前投递行的 fencing version；只用于观察、discard 与恢复事务的 CAS。
+    pub fencing_version: i64,
+    /// 冻结发送的原始 fencing version；Sending 过期提升当前版本后仍保留此尝试身份。
+    /// 无冻结期望的旧行不据此推断历史发送身份，只沿用保守历史证明。
+    pub sending_fencing_version: i64,
+    /// 真实发送前冻结的精确身份；旧行缺失时只允许原有保守历史证明路径。
+    pub send_expectation: Option<crate::DeliverySendExpectation>,
+    /// 投递业务 owner；冻结 Send 统一精确比对，旧行仍按历史规则隔离。
     pub origin_kind: String,
     pub world_id: String,
     pub recipient: String,
@@ -104,7 +119,7 @@ pub struct MoogleMailboxUnprovenSend {
     pub result_code: Option<String>,
     /// 通知类登录 key 所属用户；只以 UUID 引用，明文不落库。
     pub user_key_user_id: Option<Uuid>,
-    /// 发送围栏时间；通知仅接受此时间之后的有界 Sent 证据，不回退到分钟起点。
+    /// 发送围栏时间；恢复仅接受此时间之后的有界 Sent 证据，不回退到分钟起点。
     pub sending_at: DateTime<Utc>,
     /// 原未知结果持久化时间，限定本次发送证据上界，不用任意时钟偏移扩展窗口。
     pub outcome_recorded_at: DateTime<Utc>,
@@ -144,6 +159,9 @@ pub trait MoogleMailboxMaintenance: Send + Sync {
         world_id: &'a str,
     ) -> MailboxFuture<'a, Vec<MoogleMailboxSentEntry>>;
 
+    /// 只观察 Read Mail 列表并返回数量，不把历史已读邮件重新投进业务 intake。
+    fn read_mail_observed<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, usize>;
+
     fn sent_state<'a>(
         &'a self,
         world_id: &'a str,
@@ -151,8 +169,8 @@ pub trait MoogleMailboxMaintenance: Send + Sync {
         observed_at: DateTime<Utc>,
     ) -> MailboxFuture<'a, MoogleMailboxSentState>;
 
-    /// 用部署模板与登录 key 重建精确主题与正文摘要，且确认正文保留原入站关联。
-    /// 通用重复模板或无法证明关联的模板返回 `None`，调用方保留未知状态，不自动重发。
+    /// 仅无登录 key 的旧行可按原模板保守核对，且正文必须保留原入站关联。
+    /// 不读取当前登录 key；缺少原内容身份或通用重复模板返回 `None`，禁止自动重发。
     fn notice_expectation<'a>(
         &'a self,
         candidate: &'a MoogleMailboxUnprovenSend,
@@ -182,18 +200,25 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         delivery_id: Uuid,
     ) -> MailboxFuture<'a, bool>;
 
-    /// 原子登记一次性 discard 尝试；已登记、状态已变化或提交未知均不授权再次外写。
-    fn begin_compose_discard(&self, delivery_id: Uuid) -> MailboxFuture<'_, bool>;
+    /// 原子登记原 fencing 尝试的一次性 discard；状态、冻结身份变化或提交未知均不授权外写。
+    fn begin_compose_discard<'a>(
+        &'a self,
+        delivery_id: Uuid,
+        fencing_version: i64,
+        expectation: Option<&'a crate::DeliverySendExpectation>,
+    ) -> MailboxFuture<'a, bool>;
 
     fn record_sent_observation<'a>(
         &'a self,
         delivery_id: Uuid,
+        fencing_version: i64,
         observation: Value,
     ) -> MailboxFuture<'a, ()>;
 
     fn record_compose_discard<'a>(
         &'a self,
         delivery_id: Uuid,
+        fencing_version: i64,
         observation: Value,
     ) -> MailboxFuture<'a, ()>;
 
@@ -202,16 +227,10 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
     fn bind_recovered_send<'a>(
         &'a self,
         delivery_id: Uuid,
+        fencing_version: i64,
         external_mail_id: String,
         metadata: Value,
-    ) -> MailboxFuture<'a, bool>;
-
-    /// 把唯一精确匹配的 Sent MID 绑定回通知类投递；仅实际迁移并确认提交返回 true。
-    fn bind_recovered_notice<'a>(
-        &'a self,
-        delivery_id: Uuid,
-        external_mail_id: String,
-        metadata: Value,
+        expectation: Option<&'a crate::DeliverySendExpectation>,
     ) -> MailboxFuture<'a, bool>;
 
     /// 把已不在收件箱的 take 动作收口为成功；仅实际迁移并确认提交返回 true。

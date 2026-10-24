@@ -1,7 +1,7 @@
 //! 定期维护读取：compose 草稿快照、受控 discard、Sent 摘要与实收探查。
 //!
-//! 这三个读取只在持有同一凭据排他会话时调用；它们不参与发送证明，也不把读取结果直接
-//! 提升为投递成功。discard 只丢弃调用方已精确匹配到本地已知投递的草稿。
+//! 普通列表和详情不持有 compose 排他会话；只有草稿读取与 discard 需要窄互斥。
+//! 观测本身不提升为投递成功；discard 只丢弃调用方已精确匹配到本地已知投递的草稿。
 
 use super::*;
 use chrono::{DateTime, Utc};
@@ -15,6 +15,8 @@ pub struct MoogleMailComposeSnapshot {
     pub credits: i64,
     pub cod: Option<i64>,
     pub attachment_count: usize,
+    /// 字典序排列的精确装备集合，不以附件计数代替资产身份。
+    pub equipment_ids: Vec<String>,
     pub clean: bool,
 }
 
@@ -34,6 +36,7 @@ pub enum MoogleMailDiscardOutcome {
 /// 入站邮件当前资产快照；take 恢复据此判断动作是否已生效。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailInboxAssets {
+    pub sender: String,
     pub equipment_ids: Vec<String>,
     pub credits: i64,
     pub cod: i64,
@@ -76,6 +79,8 @@ impl MoogleMailSender {
             .await?;
         let clean = state.is_clean();
         let mut fields = state.message_fields();
+        let mut equipment_ids = state.equipment_ids().to_vec();
+        equipment_ids.sort_unstable();
         Ok(MoogleMailComposeSnapshot {
             recipient: std::mem::take(&mut fields.recipient),
             subject: std::mem::take(&mut fields.subject),
@@ -83,6 +88,7 @@ impl MoogleMailSender {
             credits: state.credits(),
             cod: state.cod(),
             attachment_count: state.attachment_count(),
+            equipment_ids,
             clean,
         })
     }
@@ -105,6 +111,8 @@ impl MoogleMailSender {
             return Ok(MoogleMailDiscardOutcome::AlreadyClean);
         }
         let fields = state.message_fields();
+        let mut equipment_ids = state.equipment_ids().iter().collect::<Vec<_>>();
+        equipment_ids.sort_unstable();
         // 原快照与本次 POST 之间重新取得了 session；持锁重读后逐字段一致才有权丢弃。
         if expected.clean
             || fields.recipient != expected.recipient
@@ -113,6 +121,7 @@ impl MoogleMailSender {
             || state.credits() != expected.credits
             || state.cod() != expected.cod
             || state.attachment_count() != expected.attachment_count
+            || !equipment_ids.into_iter().eq(expected.equipment_ids.iter())
         {
             return Err(protocol_drift(world));
         }
@@ -138,88 +147,169 @@ impl MoogleMailSender {
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
     ) -> Result<Vec<MoogleMailSentListEntry>, MoogleMailError> {
+        self.scan_sent_summaries_with_freshness(cookie, world, false).await
+    }
+
+    /// 显式请求屏障后的完整 Sent 观测，供需要排除先前在途读取的恢复调用使用。
+    pub async fn scan_sent_summaries_fresh(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+    ) -> Result<Vec<MoogleMailSentListEntry>, MoogleMailError> {
+        self.scan_sent_summaries_with_freshness(cookie, world, true).await
+    }
+
+    async fn scan_sent_summaries_with_freshness(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        fresh: bool,
+    ) -> Result<Vec<MoogleMailSentListEntry>, MoogleMailError> {
         let deadline = Instant::now()
             .checked_add(self.verification_budget)
             .ok_or_else(|| proof::scan_timeout(world))?;
-        let mut seen = HashSet::new();
-        let mut summaries = Vec::new();
-        for page_index in 0..self.verification_pages {
-            if Instant::now() >= deadline {
-                return Err(proof::scan_timeout(world));
-            }
-            let target = self.client.sent_page(world, page_index)?;
-            let document = timeout_at(deadline, self.client.get(&target, cookie))
-                .await
-                .map_err(|_| proof::scan_timeout(world))??;
-            let page = self.parser.scan_sent_page(&document, world, page_index, &mut seen)?;
-            summaries.extend(page.summaries.into_iter().map(|summary| MoogleMailSentListEntry {
-                external_mail_id: summary.external_mail_id,
-                recipient: summary.recipient,
-                subject: summary.subject,
-                sent_at: summary.sent_at,
-            }));
-            if Instant::now() >= deadline {
-                return Err(proof::scan_timeout(world));
-            }
-            if !page.has_next_page {
-                return Ok(summaries);
-            }
+        let round = self.client.read_round(cookie, world, fresh)?;
+        let list = timeout_at(
+            deadline,
+            self.client.observe_sent_list(cookie, &round, self.verification_pages),
+        )
+        .await
+        .map_err(|_| proof::scan_timeout(world))??;
+        if !list.complete {
+            return Err(self.scan_page_limit(world, "maintenance", list.summaries.len()));
         }
-        Err(self.scan_page_limit(world, "maintenance", seen.len()))
+        Ok(list
+            .summaries
+            .iter()
+            .map(|summary| MoogleMailSentListEntry {
+                external_mail_id: summary.external_mail_id.clone(),
+                recipient: summary.recipient.clone(),
+                subject: summary.subject.clone(),
+                sent_at: summary.sent_at,
+            })
+            .collect())
+    }
+
+    /// 已读历史列表与 Take/持久 pending 恢复共用数据；不得据此创建新入站命令。
+    pub async fn scan_read_summaries(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+    ) -> Result<Vec<super::super::parser::MoogleMailSummary>, MoogleMailError> {
+        let deadline = Instant::now()
+            .checked_add(self.verification_budget)
+            .ok_or_else(|| proof::scan_timeout(world))?;
+        let round = self.client.read_round(cookie, world, false)?;
+        let list = timeout_at(
+            deadline,
+            self.client.observe_incoming_list(cookie, &round, self.verification_pages, true),
+        )
+        .await
+        .map_err(|_| proof::scan_timeout(world))??;
+        if !list.complete {
+            return Err(MoogleMailError::protocol_drift(MoogleMailOperation::ReadMail, world));
+        }
+        Ok(list.summaries.clone())
     }
 
     /// 只读确认入站邮件是否仍存在并返回当前附件 ID。
     ///
-    /// 邮件详情直接按 MID 读取：Inbox 列表只展示未读邮件，扫描列表会把“已读但未领取”
-    /// 误判为不存在。缺失必须由远端明确的 “Mail does not exist” 页面证明，登录页或解析
-    /// 漂移一律返回错误，不能收口 take 动作。
+    /// 先在完整 Inbox/Read Mail 观测中定位既有 MID，再读取详情；历史其他邮件不进入业务。
+    /// 两表都缺失仍不能证明 Take，必须由远端明确的 “Mail does not exist” 页面证明；
+    /// 登录页或解析漂移一律返回错误，不能收口 take 动作。
     pub async fn inspect_inbox_attachments(
         &self,
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
         external_mail_id: &str,
     ) -> Result<Option<MoogleMailInboxAssets>, MoogleMailError> {
-        let target = self.client.detail(world, external_mail_id)?;
-        let document = self.client.get(&target, cookie).await?;
-        let state = match self.parser.parse_action_state(&document, world) {
-            Ok(state) => state,
-            Err(error) => {
-                let source = std::str::from_utf8(&document).map_err(|_| error)?;
-                let html = scraper::Html::parse_document(source);
-                let content_selector = super::super::parser::selector(
-                    "#mmail_outer, form#mailform, #mmail_attachpanes",
-                    MoogleMailOperation::Detail,
-                    world,
-                )?;
-                if html.select(&content_selector).next().is_some() {
-                    return Err(error);
-                }
-                let message_selector = super::super::parser::selector(
-                    "#messagebox_inner",
-                    MoogleMailOperation::Detail,
-                    world,
-                )?;
-                let mut messages = html.select(&message_selector);
-                let Some(message) = messages.next() else { return Err(error) };
-                let hidden_selector = super::super::parser::selector(
-                    "script, style, noscript, textarea",
-                    MoogleMailOperation::Detail,
-                    world,
-                )?;
-                // 只接受完整的邮件缺失提示；其他对象不存在、隐藏正文或残缺详情都不能证明 Take。
-                let text = super::super::parser::normalize_text(message.text().collect::<String>());
-                if messages.next().is_none()
-                    && message.select(&hidden_selector).next().is_none()
-                    && text.trim_end_matches('.').eq_ignore_ascii_case("Mail does not exist")
-                {
-                    return Ok(None);
-                }
-                return Err(error);
+        let deadline = Instant::now()
+            .checked_add(self.verification_budget)
+            .ok_or_else(|| proof::scan_timeout(world))?;
+        let round = self.client.read_round(cookie, world, false)?;
+        timeout_at(deadline, async {
+            let inbox = self
+                .client
+                .observe_incoming_list(cookie, &round, self.verification_pages, false)
+                .await?;
+            if !inbox.complete {
+                return Err(MoogleMailError::protocol_drift(MoogleMailOperation::Inbox, world));
             }
+            let summary =
+                inbox.summaries.iter().find(|summary| summary.external_mail_id == external_mail_id);
+            if let Some(summary) = summary {
+                return self
+                    .inspect_inbox_attachments_in_round(
+                        cookie,
+                        world,
+                        external_mail_id,
+                        &round,
+                        Some(summary),
+                    )
+                    .await;
+            }
+            let read = self
+                .client
+                .observe_incoming_list(cookie, &round, self.verification_pages, true)
+                .await?;
+            if !read.complete {
+                return Err(MoogleMailError::protocol_drift(MoogleMailOperation::ReadMail, world));
+            }
+            let summary =
+                read.summaries.iter().find(|summary| summary.external_mail_id == external_mail_id);
+            self.inspect_inbox_attachments_in_round(
+                cookie,
+                world,
+                external_mail_id,
+                &round,
+                summary,
+            )
+            .await
+        })
+        .await
+        .map_err(|_| proof::scan_timeout(world))?
+    }
+
+    async fn inspect_inbox_attachments_in_round(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        external_mail_id: &str,
+        round: &super::super::client::MoogleMailReadRound,
+        summary: Option<&super::super::parser::MoogleMailSummary>,
+    ) -> Result<Option<MoogleMailInboxAssets>, MoogleMailError> {
+        let target = self.client.detail(world, external_mail_id)?;
+        let document = self.client.get_in_round(&target, cookie, round).await?;
+        let state = self
+            .client
+            .diagnose_parse(
+                &target,
+                &document,
+                self.parser.parse_action_state_or_missing(&document, world),
+            )
+            .await?;
+        let Some(state) = state else {
+            self.client.check_read_round(cookie, round).await?;
+            return Ok(None);
         };
+        if let Some(summary) = summary {
+            // Read Mail 的历史摘要也必须与原 MID 详情的发件人、主题及时间交叉校验。
+            let mut message = self
+                .client
+                .diagnose_parse(&target, &document, self.parser.parse_detail(&document, summary))
+                .await?;
+            message.clear_secrets();
+        }
+        let sender = state.sender().to_owned();
         let mut equipment_ids = state.equipment_ids;
         equipment_ids.sort_unstable();
-        Ok(Some(MoogleMailInboxAssets { equipment_ids, credits: state.credits, cod: state.cod }))
+        self.client.check_read_round(cookie, round).await?;
+        Ok(Some(MoogleMailInboxAssets {
+            sender,
+            equipment_ids,
+            credits: state.credits,
+            cod: state.cod,
+        }))
     }
 
     /// 读取单封 Sent 的实收状态；读取失败由调用方保留上一轮证据。
@@ -230,8 +320,9 @@ impl MoogleMailSender {
         summary: &MoogleMailSentListEntry,
         _observed_at: DateTime<Utc>,
     ) -> Result<MoogleMailSentObservation, MoogleMailError> {
+        let round = self.client.read_round(cookie, world, false)?;
         let detail = self.client.sent_detail(world, &summary.external_mail_id)?;
-        let document = self.client.get(&detail, cookie).await?;
+        let document = self.client.get_in_round(&detail, cookie, &round).await?;
         let parser_summary = super::super::parser::MoogleMailSentSummary {
             external_mail_id: summary.external_mail_id.clone(),
             world,
@@ -250,6 +341,7 @@ impl MoogleMailSender {
         let collected = proof.remaining_credits == 0
             && proof.cod_pending == 0
             && proof.remaining_equipment_ids.is_empty();
+        self.client.check_read_round(cookie, &round).await?;
         Ok(MoogleMailSentObservation {
             external_mail_id: proof.external_mail_id,
             subject: proof.subject,

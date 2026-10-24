@@ -16,7 +16,7 @@
 
 ## 基线与 owner 规则
 
-当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000060`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
+当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000061`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
 
 ### 追加迁移与历史事实
 
@@ -33,6 +33,7 @@
 | 账户读取索引：PostgreSQL `000057` | 为 `bids` 的用户/时间/UUID 列表及代理授权的用户/更新时间/lot 列表增加完整历史索引，SQL owner 为 storage/account | 不改表、用户归属、命令账本、竞价与结算事实；索引创建仍须走停机迁移门禁 |
 | 登录时长：PostgreSQL `000058` | users 增加 nullable 固定时长及独立偏好版本；Public 截止允许成对 NULL 表示永久，有限值必须有序且非 infinity | 默认仅影响新登录，保留旧会话截止、撤销及认证版本；不恢复过期或撤销令牌，不改变 Admin 会话 |
 | 邮件维护轮转：PostgreSQL `000060` | 新增 world 内稳定环形候选游标及待证明投递部分索引，逐条开始前提交，跳过不可重建行但不跳过未处理后缀 | 游标只表示一次核对机会，不是 Sent、领取、discard 或业务成功证明；不改变 delivery、资金、履约或历史命令事实 |
+| 发送尝试证明：PostgreSQL `000061` | 新增只追加的发送尝试摘要与唯一远端 MID 绑定；实际渲染摘要与 Sending 同事务保存，覆盖所有出站来源 | 不回填旧发送内容、账号身份或成功结果；缺少旧证明仍人工核对，不因共享读取而重发 |
 
 ### Bot 内部履约对象
 
@@ -165,6 +166,8 @@ MoogleMail preflight 释放由 delivery_scheduler 独占，同事务撤销有效
 | deliveries | auction-application + auction-jobs：delivery | 外部投递 outbox、claim 和重试 |
 | delivery_admin_commands | auction-application：delivery | Admin 交付命令幂等账本 |
 | delivery_send_cadence | auction-application：delivery；auction-storage：delivery_scheduler | `000059` 七类跨世界发送起点，高水位与 sending fence 同事务推进，重启不清空 |
+| delivery_send_attempts | auction-application：delivery；auction-storage：delivery_scheduler | `000061` 按 delivery/fencing 保存每次实际发送的主题、正文摘要、资产矩阵和安全凭据绑定；与 Sending/审计同事务，只追加 |
+| delivery_sent_bindings | auction-application：delivery；auction-storage：delivery_scheduler | `000061` 唯一绑定 world/MID 与发送尝试；mailbox_sweep 复用同一绑定入口，重复观察幂等，不允许一封远端邮件证明不同尝试成功；旧证明不伪造 expectation |
 
 `000059` 的 `delivery_send_category(origin,payload)` 是旧 wire 到业务节奏分组的唯一 SQL 映射，不改原 payload/digest。
 七个固定类别行从已有 sending_at 的最大值初始化，无历史发送为 NULL；不新增投递，不改任何历史结果。

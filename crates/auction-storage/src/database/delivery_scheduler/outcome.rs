@@ -43,7 +43,37 @@ pub(super) async fn succeed_postgres(
             failure: None,
             metadata: &result.result_metadata,
             audit: SUCCEED,
+            preparation_rejected: false,
             funding: auction_application::FundingDeliveryOutcome::Sent,
+        },
+    )
+    .await
+}
+
+/// 确定未开始外部写入的非法负载直接失败；不伪造发送围栏，也不释放资金责任。
+pub(super) async fn reject_preparation_postgres(
+    pool: &crate::database::TrackedPool<Postgres>,
+    claim: &DeliveryWorkClaim,
+    completed_at: DateTime<Utc>,
+) -> Result<(), auction_application::RepositoryError> {
+    let metadata = serde_json::json!({
+        "stage": "preflight_blocked",
+        "write_started": false,
+        "outcome_unknown": false,
+        "failure_code": "invalid_payload",
+    });
+    persist(
+        pool,
+        claim,
+        completed_at,
+        Terminal {
+            status: "failed",
+            reference: None,
+            failure: Some("invalid_payload"),
+            metadata: &metadata,
+            audit: FAIL,
+            preparation_rejected: true,
+            funding: auction_application::FundingDeliveryOutcome::Unknown,
         },
     )
     .await
@@ -68,6 +98,7 @@ pub(super) async fn fail_postgres(
             failure: Some(failure_code),
             metadata: result_metadata,
             audit: if outcome_unknown { OUTCOME_UNKNOWN } else { FAIL },
+            preparation_rejected: false,
             funding: auction_application::FundingDeliveryOutcome::Unknown,
         },
     )
@@ -80,6 +111,7 @@ struct Terminal<'a> {
     failure: Option<&'a str>,
     metadata: &'a serde_json::Value,
     audit: &'static str,
+    preparation_rejected: bool,
     funding: auction_application::FundingDeliveryOutcome,
 }
 
@@ -117,26 +149,98 @@ async fn persist_once(
         .bind(claim.delivery_id)
         .fetch_optional(&mut *tx)
         .await?;
+    if terminal.audit == SUCCEED
+        && claim.payload.get("operation").and_then(serde_json::Value::as_str) == Some("send")
+    {
+        let expectation = super::attempts::load(&mut tx, claim.delivery_id, claim.fencing_version)
+            .await?
+            .ok_or(OutcomeError::Rejected)?;
+        if !super::attempts::matches_claim(claim, Some(&expectation))
+            || !super::attempts::matches_proof(
+                terminal.metadata,
+                &expectation,
+                claim.fencing_version,
+            )
+        {
+            return Err(OutcomeError::Rejected);
+        }
+        let prefix = format!("mooglemail:{}:send:", expectation.world_id);
+        let mid = terminal
+            .reference
+            .and_then(|reference| reference.strip_prefix(&prefix))
+            .ok_or(OutcomeError::Rejected)?;
+        if !super::attempts::bind_sent(
+            &mut tx,
+            claim.delivery_id,
+            claim.fencing_version,
+            &expectation.world_id,
+            mid,
+            true,
+        )
+        .await?
+        {
+            return Err(OutcomeError::Rejected);
+        }
+        // 提交应答丢失后的同一事实重放允许成功，但不重新扣资金或追加成功审计。
+        let repeated: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM public.deliveries
+             WHERE id=$1 AND status='succeeded' AND fencing_version=$2
+               AND command_id=$3 AND request_digest=$4 AND origin_kind=$5 AND origin_id=$6
+               AND recipient=$7 AND payload=$8 AND external_reference=$9 AND result_metadata=$10)",
+        )
+        .bind(claim.delivery_id)
+        .bind(claim.fencing_version)
+        .bind(claim.command_id)
+        .bind(claim.request_hash.as_bytes().as_slice())
+        .bind(&claim.origin_kind)
+        .bind(&claim.origin_id)
+        .bind(&claim.recipient)
+        .bind(&claim.payload)
+        .bind(terminal.reference)
+        .bind(terminal.metadata)
+        .fetch_one(&mut *tx)
+        .await?;
+        if repeated {
+            tx.rollback().await?;
+            return Ok(());
+        }
+    }
     let updated=sqlx::query(
         "UPDATE public.deliveries SET status=$2,lease_token=NULL,lease_expires_at=NULL,
          completed_at=$3,external_reference=$4,failure_code=$5,result_metadata=$6,updated_at=clock_timestamp()
-         WHERE id=$1 AND status='sending' AND lease_token=$7 AND fencing_version=$8
+         WHERE id=$1 AND status=$15 AND lease_token=$7 AND fencing_version=$8
          AND lease_expires_at>$3 AND lease_expires_at>clock_timestamp()
          AND command_id=$9 AND request_digest=$10 AND origin_kind=$11 AND origin_id=$12
-         AND recipient=$13 AND payload=$14",
+         AND recipient=$13 AND payload=$14
+         AND (NOT $16 OR (sending_at IS NULL AND external_reference IS NULL))",
     ).bind(claim.delivery_id).bind(terminal.status).bind(completed_at).bind(terminal.reference)
         .bind(terminal.failure).bind(terminal.metadata).bind(claim.lease_token).bind(claim.fencing_version)
         .bind(claim.command_id).bind(claim.request_hash.as_bytes().to_vec())
         .bind(&claim.origin_kind).bind(&claim.origin_id).bind(&claim.recipient).bind(&claim.payload)
+        .bind(if terminal.preparation_rejected { "claimed" } else { "sending" })
+        .bind(terminal.preparation_rejected)
         .execute(&mut *tx).await?;
     if updated.rows_affected() != 1 {
         return Err(OutcomeError::Rejected);
     }
-    if let Some(account) = account {
+    if !terminal.preparation_rejected
+        && let Some(account) = account
+    {
         funding::finish_funded_delivery(&mut tx, &account, claim.delivery_id, terminal.funding)
             .await?;
     }
     let request_id = claim.command_id.to_string();
+    let mut audit_metadata = worker_state_metadata(
+        terminal.status,
+        claim.fencing_version,
+        claim.attempt_count,
+        terminal.failure,
+    );
+    if terminal.preparation_rejected {
+        audit_metadata["preflight_blocked"] = serde_json::json!(true);
+        audit_metadata["write_started"] = serde_json::json!(false);
+        audit_metadata["outcome_unknown"] = serde_json::json!(false);
+    }
     append_delivery_audit(
         &mut tx,
         DeliveryAudit {
@@ -147,12 +251,7 @@ async fn persist_once(
             delivery_id: claim.delivery_id,
             request_id: Some(&request_id),
             source: "worker",
-            metadata: worker_state_metadata(
-                terminal.status,
-                claim.fencing_version,
-                claim.attempt_count,
-                terminal.failure,
-            ),
+            metadata: audit_metadata,
         },
     )
     .await?;

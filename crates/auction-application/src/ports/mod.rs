@@ -61,6 +61,9 @@ mod delivery_admin;
 #[path = "delivery/cadence.rs"]
 mod delivery_cadence;
 pub use delivery_cadence::{DeliverySendIntervals, DeliveryWakeup};
+#[path = "delivery/expectation.rs"]
+mod delivery_expectation;
+pub use delivery_expectation::{DeliverySendCredentialBinding, DeliverySendExpectation};
 #[path = "public/equipment_link.rs"]
 mod equipment_link;
 #[path = "forum/public.rs"]

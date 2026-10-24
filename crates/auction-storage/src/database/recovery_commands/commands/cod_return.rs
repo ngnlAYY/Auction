@@ -156,11 +156,12 @@ async fn resend_cod(
                            AND delivery.completed_at >= delivery.sending_at
                            AND delivery.result_metadata->>'operation' = 'send'
                            AND delivery.result_metadata->'external_reference_proven' = 'true'::jsonb
-                           AND delivery.result_metadata->>'proof' IN (
-                               'sent_exact_payload_v1', 'sent_recovered_reference_v1')
                            AND delivery.external_reference ~ '^mooglemail:main:send:[0-9]{1,32}$'
                            AND (delivery.result_metadata->>'proof' = 'sent_recovered_reference_v1'
-                                OR delivery.result_metadata->'sent_verified' = 'true'::jsonb)
+                                OR (delivery.result_metadata->>'proof' = 'sent_exact_payload_v1'
+                                    AND delivery.result_metadata->'sent_verified' = 'true'::jsonb)
+                                OR public.delivery_has_frozen_sent_proof(
+                                    delivery.id, delivery.result_metadata, delivery.external_reference))
                           THEN jsonb_build_object(
                               'external_reference', delivery.external_reference,
                               'proof', delivery.result_metadata->>'proof')

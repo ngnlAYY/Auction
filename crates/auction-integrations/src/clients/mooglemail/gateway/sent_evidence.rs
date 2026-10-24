@@ -98,6 +98,7 @@ impl MoogleMailGateway {
                     &target.external_mail_id,
                     Utc::now(),
                     session.cookie(),
+                    true,
                 )
                 .await
             {

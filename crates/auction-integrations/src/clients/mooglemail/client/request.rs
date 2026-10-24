@@ -14,6 +14,11 @@ impl MoogleMailClient {
         target: &MoogleMailTarget,
         cookie: &MoogleMailCookie,
     ) -> Result<Vec<u8>, MoogleMailError> {
+        let _membership = if target.operation == MoogleMailOperation::Detail {
+            Some(self.incoming_detail_guard(cookie, target.world).await?)
+        } else {
+            None
+        };
         let mut response = DiagnosticResponse::default();
         match self.get_inner(target, cookie, &mut response).await {
             Ok(body) => Ok(body),
@@ -61,6 +66,14 @@ impl MoogleMailClient {
                 false,
             )
         })?;
+        if !cookie.is_active() {
+            return Err(MoogleMailError::new(
+                target.operation,
+                target.world,
+                MoogleMailErrorCategory::CredentialUnavailable,
+                false,
+            ));
+        }
         let response = self.client.execute(request).await.map_err(|_| {
             MoogleMailError::new(
                 target.operation,
@@ -130,6 +143,22 @@ impl MoogleMailClient {
         if !status.is_success() || !is_html {
             return Err(self.protocol(target));
         }
+        self.check_ownership().await.map_err(|_| {
+            MoogleMailError::new(
+                target.operation,
+                target.world,
+                MoogleMailErrorCategory::CredentialUnavailable,
+                false,
+            )
+        })?;
+        if !cookie.is_active() {
+            return Err(MoogleMailError::new(
+                target.operation,
+                target.world,
+                MoogleMailErrorCategory::CredentialUnavailable,
+                false,
+            ));
+        }
         diagnostic.body.take().ok_or_else(|| self.protocol(target))
     }
 
@@ -186,6 +215,13 @@ impl MoogleMailClient {
             .map_err(|_| self.configuration_for(operation, target.world))?;
         // 先前 compose 步骤可能已经暂存资产；失锁不能被降级为可安全重发。
         self.check_ownership().await.map_err(|_| self.write_unknown(operation, target.world))?;
+        if !cookie.is_active() {
+            return Err(self.write_unknown(operation, target.world));
+        }
+        // 必须覆盖请求发出前至完整响应；Drop 同时处理取消和未知远端结果。
+        let _write_barrier = self
+            .write_barrier(cookie, target.world)
+            .map_err(|_| self.write_unknown(operation, target.world))?;
         let response = self
             .client
             .execute(request)
@@ -338,7 +374,7 @@ impl Drop for DiagnosticResponse {
     }
 }
 
-struct SensitiveBytes(Vec<u8>);
+pub(super) struct SensitiveBytes(pub(super) Vec<u8>);
 
 impl Drop for SensitiveBytes {
     fn drop(&mut self) {

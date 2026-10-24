@@ -5,7 +5,7 @@ use crate::clients::mooglemail::parser::{canonical_mail_body_digest, subject_is_
 use tokio::time::{Instant, timeout_at};
 
 /// 同一独占凭据会话内取得的完整 Sent 基线；不可克隆，随 prepared 句柄一次消费。
-/// 只有扫描到末页才能构造，不持久化、不跨会话缓存，也不把缺页当作空历史。
+/// 只有本次 fresh 轮次扫描到末页才能构造；不持久化，也不把缺页当作空历史。
 pub(crate) struct MoogleMailSentBaseline {
     pub(super) world: MoogleMailWorld,
     pub(super) seen: HashSet<String>,
@@ -21,21 +21,20 @@ impl MoogleMailSender {
         let deadline = Instant::now()
             .checked_add(self.verification_budget)
             .ok_or_else(|| scan_timeout(world))?;
-        let mut seen = HashSet::new();
-        for page_index in 0..self.verification_pages {
-            check_deadline(deadline, world)?;
-            let target = self.client.sent_page(world, page_index)?;
-            let document = timeout_at(deadline, self.client.get(&target, cookie))
-                .await
-                .map_err(|_| scan_timeout(world))??;
-            let page = self.parser.scan_sent_page(&document, world, page_index, &mut seen)?;
-            check_deadline(deadline, world)?;
-            if !page.has_next_page {
-                return Ok(MoogleMailSentBaseline { world, seen });
-            }
+        let round = self.client.read_round(cookie, world, true)?;
+        let list = timeout_at(
+            deadline,
+            self.client.observe_sent_list(cookie, &round, self.verification_pages),
+        )
+        .await
+        .map_err(|_| scan_timeout(world))??;
+        check_deadline(deadline, world)?;
+        if !list.complete {
+            // 未扫描到尾页不能排除同标题旧邮件；此时尚未执行任何 POST。
+            return Err(self.scan_page_limit(world, "baseline", list.summaries.len()));
         }
-        // 未扫描到尾页不能排除同标题旧邮件；此时尚未执行任何 POST。
-        Err(self.scan_page_limit(world, "baseline", seen.len()))
+        let seen = list.summaries.iter().map(|summary| summary.external_mail_id.clone()).collect();
+        Ok(MoogleMailSentBaseline { world, seen })
     }
 
     pub(super) async fn verify_new_sent(
@@ -55,55 +54,61 @@ impl MoogleMailSender {
         let expected_body = canonical_mail_body_digest(&request.message.body);
         let mut expected_equipment = request.equipment_ids.iter().collect::<Vec<_>>();
         expected_equipment.sort_unstable();
-        let mut seen = HashSet::new();
+        // POST 的完成/取消屏障之外再建立 fresh 轮次，绝不接受发送前或发送中的观测。
+        let round = self.client.read_round(cookie, world, true)?;
+        let list = timeout_at(
+            deadline,
+            self.client.observe_sent_list(cookie, &round, self.verification_pages),
+        )
+        .await
+        .map_err(|_| scan_timeout(world))??;
+        if !list.complete {
+            return Err(self.scan_page_limit(world, "after_send", list.summaries.len()));
+        }
         let mut verified: Option<String> = None;
-        for page_index in 0..self.verification_pages {
-            check_deadline(deadline, world)?;
-            let target = self.client.sent_page(world, page_index)?;
-            let document = timeout_at(deadline, self.client.get(&target, cookie))
+        for summary in list.summaries.iter().filter(|summary| {
+            !baseline.contains(&summary.external_mail_id)
+                && summary.world == world
+                && summary.recipient.eq_ignore_ascii_case(&request.message.recipient)
+                && subject_is_list_projection(&summary.subject, &request.message.subject)
+        }) {
+            let target = self.client.sent_detail(world, &summary.external_mail_id)?;
+            let detail = timeout_at(deadline, self.client.get_in_round(&target, cookie, &round))
                 .await
                 .map_err(|_| scan_timeout(world))??;
-            let page = self.parser.scan_sent_page(&document, world, page_index, &mut seen)?;
+            let proof = self
+                .client
+                .diagnose_parse(
+                    &target,
+                    &detail,
+                    self.parser.parse_sent_content_proof(&detail, summary),
+                )
+                .await?;
             check_deadline(deadline, world)?;
-            for summary in page.summaries.into_iter().filter(|summary| {
-                !baseline.contains(&summary.external_mail_id)
-                    && summary.world == world
-                    && summary.recipient.eq_ignore_ascii_case(&request.message.recipient)
-                    && subject_is_list_projection(&summary.subject, &request.message.subject)
-            }) {
-                let detail_target = self.client.sent_detail(world, &summary.external_mail_id)?;
-                let detail = timeout_at(deadline, self.client.get(&detail_target, cookie))
-                    .await
-                    .map_err(|_| scan_timeout(world))??;
-                let proof = self.parser.parse_sent_content_proof(&detail, &summary)?;
-                check_deadline(deadline, world)?;
-                if proof.body_digest != expected_body {
-                    if response_mail_id == Some(proof.external_mail_id.as_str()) {
-                        return Err(verification_unavailable(world));
-                    }
-                    continue;
-                }
-                // 同一正文的资产缺失可能来自立即领取，不能忽略后误认另一封为本次成功。
-                if proof.world != world
-                    || !proof.recipient.eq_ignore_ascii_case(&request.message.recipient)
-                    || proof.subject != request.message.subject
-                    || proof.remaining_credits != request.credits
-                    || proof.cod_pending != request.cod
-                    || !proof.remaining_equipment_ids.iter().eq(expected_equipment.iter().copied())
-                    || verified.is_some()
-                {
+            if proof.body_digest != expected_body {
+                if response_mail_id == Some(proof.external_mail_id.as_str()) {
                     return Err(verification_unavailable(world));
                 }
-                verified = Some(proof.external_mail_id);
+                continue;
             }
-            if !page.has_next_page {
-                check_deadline(deadline, world)?;
-                return verified
-                    .filter(|mail_id| response_mail_id.is_none_or(|hint| hint == mail_id))
-                    .ok_or_else(|| verification_unavailable(world));
+            // 同一正文的资产缺失可能来自立即领取，不能忽略后误认另一封为本次成功。
+            if proof.world != world
+                || !proof.recipient.eq_ignore_ascii_case(&request.message.recipient)
+                || proof.subject != request.message.subject
+                || proof.remaining_credits != request.credits
+                || proof.cod_pending != request.cod
+                || !proof.remaining_equipment_ids.iter().eq(expected_equipment.iter().copied())
+                || verified.is_some()
+            {
+                return Err(verification_unavailable(world));
             }
+            verified = Some(proof.external_mail_id);
         }
-        Err(self.scan_page_limit(world, "after_send", seen.len()))
+        self.client.check_read_round(cookie, &round).await?;
+        check_deadline(deadline, world)?;
+        verified
+            .filter(|mail_id| response_mail_id.is_none_or(|hint| hint == mail_id))
+            .ok_or_else(|| verification_unavailable(world))
     }
 
     /// 只输出计数与闭集阶段；不把 MID、收件人、正文或凭据带入普通日志。
