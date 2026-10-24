@@ -33,7 +33,7 @@ pub(super) async fn notify_pm(
     sqlx::query("INSERT INTO public.lot_watch_notifications (id,user_id,lot_id,leadership_cycle,displaced_bid_id,watch_version,command_id,request_digest,recipient,payload,created_at,channel,preference_version)
         VALUES ($1,$2,$3,$4,$5,$6,$1,$7,$8,$9,$10,'pm',$11)")
         .bind(notification_id).bind(fact.user_id).bind(lot_id).bind(i64::try_from(fact.cycle).map_err(|_| invalid())?)
-        .bind(bid.id.as_uuid()).bind(fact.watch_version).bind(digest.as_bytes().to_vec()).bind(&recipient).bind(payload).bind(fact.occurred_at).bind(fact.preference_version)
+        .bind(bid.id.as_uuid()).bind(fact.watch_version).bind(digest.as_bytes().as_slice()).bind(&recipient).bind(payload).bind(fact.occurred_at).bind(fact.preference_version)
         .execute(&mut **transaction).await.map_err(sql_error)?;
     sqlx::query("INSERT INTO public.lot_watch_pm_deliveries (notification_id,status,failure_code,completed_at)
         VALUES ($1,$2,$3,CASE WHEN $2 = 'suppressed' THEN clock_timestamp() ELSE NULL END)")

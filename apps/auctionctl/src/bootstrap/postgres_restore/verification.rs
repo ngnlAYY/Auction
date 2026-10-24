@@ -4,18 +4,15 @@ pub(super) fn verify_backup_pair(
     manifest_path: &Path,
     confirmed_database_name: &str,
 ) -> anyhow::Result<VerifiedBackup> {
-    validate_private_evidence_path(manifest_path)?;
-    let manifest = read_backup_manifest(manifest_path)?;
+    let (manifest, manifest_bytes) = read_backup_manifest(manifest_path)?;
     validate_backup_manifest(&manifest, confirmed_database_name)?;
     let archive_path = manifest_archive_path(manifest_path, &manifest)?;
-    validate_private_evidence_path(&archive_path)?;
-    verify_private_regular_file(&archive_path, "backup archive")?;
     let actual_archive_sha256 = sha256_file(&archive_path)?;
     if actual_archive_sha256 != manifest.archive_sha256 {
         anyhow::bail!("backup archive SHA-256 does not match its manifest");
     }
     verify_archive(&archive_path)?;
-    Ok(VerifiedBackup { manifest, archive_path, manifest_sha256: sha256_file(manifest_path)? })
+    Ok(VerifiedBackup { manifest, archive_path, manifest_sha256: sha256_bytes(&manifest_bytes) })
 }
 
 pub(super) fn require_empty_restore_target(

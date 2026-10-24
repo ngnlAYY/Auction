@@ -61,7 +61,7 @@ async fn load_catalog(
     let mut seen = BTreeSet::new();
     let mut result = Vec::new();
     loop {
-        let envelope = fetch_current_lots(
+        let mut envelope = fetch_current_lots(
             auction.id.clone(),
             None,
             None,
@@ -87,7 +87,7 @@ async fn load_catalog(
         }
         expected_total = Some(total);
         let offset = (page_number - 1).checked_mul(PAGE_SIZE).ok_or(())?;
-        let rows = envelope.rows();
+        let rows = envelope.take_rows();
         let expected_rows = (total - offset).clamp(0, PAGE_SIZE);
         if i64::try_from(rows.len()).map_err(|_| ())? != expected_rows {
             return Err(());

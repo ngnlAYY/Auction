@@ -112,7 +112,7 @@ pub(super) async fn insert_command(
     )
     .bind(command_id)
     .bind(kind.as_str())
-    .bind(request_hash.as_bytes().to_vec())
+    .bind(request_hash.as_bytes().as_slice())
     .bind(credential_id)
     .bind(Json(serde_json::to_value(payload)?))
     .bind(now)

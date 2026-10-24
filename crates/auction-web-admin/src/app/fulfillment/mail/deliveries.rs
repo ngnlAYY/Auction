@@ -148,7 +148,6 @@ pub(super) fn MailDeliveriesPanel(
             }
             if let Some(delivery) = pending() {
                 Dialog {
-                    key: "mail-delivery-{delivery.id}",
                     title: retry_label(&delivery.operation),
                     close_label: t!("delivery-cancel"),
                     busy: busy(),

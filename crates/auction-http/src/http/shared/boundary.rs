@@ -270,27 +270,27 @@ fn resolve_client_address(
     if !peer_is_trusted {
         return fallback;
     }
-    let Some(forwarded) = forwarded_addresses(headers) else {
-        return fallback;
-    };
-    for candidate in forwarded.iter().rev() {
-        if !boundary.trusted_proxy_cidrs.iter().any(|network| network.contains(candidate)) {
-            return *candidate;
-        }
-    }
-    forwarded.first().copied().unwrap_or(fallback)
+    forwarded_address(headers, boundary).unwrap_or(fallback)
 }
 
-fn forwarded_addresses(headers: &HeaderMap) -> Option<Vec<IpAddr>> {
-    let mut result = Vec::new();
-    for value in headers.get_all(FORWARDED_FOR_HEADER) {
+fn forwarded_address(headers: &HeaderMap, boundary: &HttpBoundary) -> Option<IpAddr> {
+    let mut first = None;
+    let mut client = None;
+    // 直接倒序借用各头与地址段，不分配整条地址链；找到客户端后仍须校验剩余左侧，
+    // 保留任意位置非法时整链回退、全部受信时使用最左地址的既有语义。
+    for value in headers.get_all(FORWARDED_FOR_HEADER).iter().rev() {
         let value = value.to_str().ok()?;
-        for raw in value.split(',') {
+        for raw in value.rsplit(',') {
             let address = raw.trim().parse::<IpAddr>().ok().map(canonical_ip)?;
-            result.push(address);
+            first = Some(address);
+            if client.is_none()
+                && !boundary.trusted_proxy_cidrs.iter().any(|network| network.contains(&address))
+            {
+                client = Some(address);
+            }
         }
     }
-    Some(result)
+    client.or(first)
 }
 
 fn canonical_ip(address: IpAddr) -> IpAddr {

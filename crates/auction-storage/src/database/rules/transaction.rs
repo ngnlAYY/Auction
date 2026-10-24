@@ -142,7 +142,7 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
             )
             .bind(command.command_id.as_uuid())
             .bind(command.command_kind)
-            .bind(command.request_hash.as_bytes().to_vec())
+            .bind(command.request_hash.as_bytes().as_slice())
             .bind(command.locale)
             .bind(result_payload)
             .execute(&mut **self.transaction_mut()?)

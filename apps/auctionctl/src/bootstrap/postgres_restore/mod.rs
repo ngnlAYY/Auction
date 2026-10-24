@@ -12,8 +12,7 @@ use chrono::Utc;
 use super::{
     PostgresBackupManifest, PostgresCommandEnvironment, PrivateReceiptReservation,
     RestoreReceiptSpec, manifest_archive_path, read_backup_manifest, run_external_command,
-    sha256_file, sha256_text, validate_backup_manifest, validate_private_evidence_path,
-    verify_archive, verify_private_regular_file,
+    sha256_bytes, sha256_file, sha256_text, validate_backup_manifest, verify_archive,
 };
 
 mod process;

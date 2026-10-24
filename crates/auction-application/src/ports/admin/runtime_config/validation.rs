@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 
 use ipnet::IpNet;
 
@@ -50,10 +50,9 @@ fn validate_runtime_world(
             "worlds.{name}.sender_allowlist 最多 1000 项"
         )));
     }
-    for (index, sender) in config.sender_allowlist.iter().enumerate() {
-        if !valid_runtime_identity(sender)
-            || config.sender_allowlist[..index].iter().any(|previous| previous == sender)
-        {
+    let mut senders = HashSet::with_capacity(config.sender_allowlist.len());
+    for sender in &config.sender_allowlist {
+        if !valid_runtime_identity(sender) || !senders.insert(sender.as_str()) {
             return Err(AdminRuntimeConfigError::InvalidDocument(format!(
                 "worlds.{name}.sender_allowlist 含有重复或无效身份"
             )));
@@ -87,9 +86,9 @@ fn validate_runtime_equipment_filter(
                 "equipment_filter 每个 token 列表最多 256 项".to_owned(),
             ));
         }
-        for (index, value) in list.iter().enumerate() {
-            if !valid_runtime_token(value) || list[..index].iter().any(|previous| previous == value)
-            {
+        let mut seen = HashSet::with_capacity(list.len());
+        for value in list {
+            if !valid_runtime_token(value) || !seen.insert(value.as_str()) {
                 return Err(AdminRuntimeConfigError::InvalidDocument(
                     "equipment_filter token 必须是唯一的 1 至 128 字节单行文本".to_owned(),
                 ));
@@ -278,20 +277,17 @@ pub(super) fn validate_dashboard_mailboxes(
             "dashboard_mailboxes 最多只能配置两个 world".to_owned(),
         ));
     }
-    let mut world_ids = Vec::with_capacity(mailboxes.len());
-    let mut mailbox_keys = Vec::with_capacity(mailboxes.len());
-    for mailbox in mailboxes {
+    for (index, mailbox) in mailboxes.iter().enumerate() {
         if !matches!(mailbox.world_id.as_str(), "main" | "isekai")
             || !valid_text(&mailbox.mailbox_key, 256)
-            || world_ids.iter().any(|world| world == &mailbox.world_id)
-            || mailbox_keys.iter().any(|key| key == &mailbox.mailbox_key)
+            || mailboxes[..index].iter().any(|previous| {
+                previous.world_id == mailbox.world_id || previous.mailbox_key == mailbox.mailbox_key
+            })
         {
             return Err(AdminRuntimeConfigError::InvalidDocument(
                 "dashboard_mailboxes 的 world_id/mailbox_key 无效或重复".to_owned(),
             ));
         }
-        world_ids.push(mailbox.world_id.clone());
-        mailbox_keys.push(mailbox.mailbox_key.clone());
     }
     Ok(())
 }

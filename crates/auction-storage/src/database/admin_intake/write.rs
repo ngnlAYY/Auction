@@ -30,7 +30,7 @@ pub(super) async fn add_admin_intake_inner(
     )
     .bind(write.command_id.as_uuid())
     .bind(write.aggregate_id)
-    .bind(write.request_hash.as_bytes().to_vec())
+    .bind(write.request_hash.as_bytes().as_slice())
     .bind(json!({}))
     .execute(&mut **transaction)
     .await
@@ -198,7 +198,7 @@ pub(super) async fn add_admin_intake_inner(
     // `source_kind` 属于投稿 owner 闭集；URL/JSON 是 Admin 请求适配器种类，只进入来源引用与摘要。
     .bind("admin")
     .bind(&write.source_reference)
-    .bind(write.source_fingerprint.to_vec())
+    .bind(write.source_fingerprint.as_slice())
     .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;

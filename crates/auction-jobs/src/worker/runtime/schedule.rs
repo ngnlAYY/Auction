@@ -18,6 +18,9 @@ pub(crate) async fn run_schedule_bootstrap<C>(worker: &PersistentWorker<C>) -> W
 where
     C: Clock + 'static,
 {
+    if worker.control.is_draining() {
+        return WorkerResult::Success;
+    }
     let Some(config) = worker.schedule_runtime.as_ref() else {
         return WorkerResult::Success;
     };
@@ -29,6 +32,9 @@ where
         tracing::warn!("读取周计划数据库时间失败");
         return WorkerResult::Error;
     };
+    if worker.control.is_draining() {
+        return WorkerResult::Success;
+    }
     let Ok(generation) = generation(config, now) else {
         tracing::error!("生成当前本地周拍卖计划失败");
         return WorkerResult::Error;
@@ -47,6 +53,9 @@ where
 
     let mut result = WorkerResult::Success;
     for world_id in &config.worlds {
+        if worker.control.is_draining() {
+            break;
+        }
         let Some(world) = worlds.iter().find(|world| world.id.as_str() == world_id.as_str()) else {
             tracing::error!(world_id, "周计划配置的业务世界不存在");
             result = WorkerResult::Error;
@@ -73,6 +82,7 @@ where
             };
         if let Err(error) = reconcile_mail(
             config,
+            &worker.control,
             &snapshot,
             world_id,
             snapshot.local_week,
@@ -102,6 +112,10 @@ where
     // 即使新配置的预览窗口尚未到达，也必须按既有轮次的时间继续对账邮箱暂停/恢复。
     let existing =
         worker.schedule.find_current_round(world_id.to_owned(), generation.local_week).await?;
+    // 冻结事实读取可能跨过 drain；此时不能再创建新轮次或开启邮箱状态命令。
+    if worker.control.is_draining() {
+        return Ok(None);
+    }
     let snapshot = if let Some(snapshot) = existing {
         snapshot
     } else {
@@ -212,6 +226,7 @@ impl BootstrapRequest {
 
 async fn reconcile_mail(
     config: &super::AuctionScheduleRuntimeConfig,
+    control: &crate::WorkerControlHandle,
     snapshot: &ScheduledRoundSnapshot,
     world_id: &str,
     local_week: NaiveDate,
@@ -254,9 +269,13 @@ async fn reconcile_mail(
         expected_state_version: i64,
     }
     for _ in 0..3 {
+        if control.is_draining() {
+            return Ok(());
+        }
         let state =
             mail.poll_state(AdminMailPollStateRequest { mailbox_key: mailbox_key.clone() }).await?;
-        if state.paused == desired {
+        // 状态读取与版本冲突重试均可能跨过 drain；已提交命令不回滚，未开始的写入停止。
+        if control.is_draining() || state.paused == desired {
             return Ok(());
         }
         // 同一观测版本保持稳定；Admin 改动后的新版本必须使用新命令，不能重放本周旧结果。

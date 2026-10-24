@@ -76,6 +76,8 @@ Admin mutation 守卫按限流 → Origin → CSRF → 会话执行。竞价、�
 两条严格 JSON 路径均保留路由大小上限、单值与 DTO 字段闭集。
 TCP peer 直接注入每次请求的扩展，不为每条连接重新给整张路由表装配 middleware；
 Unix 连接仍不注入伪造地址，原可信代理解析、5 秒请求头预算及连接排空边界不变。
+可信 XFF 倒序借用头和地址段选择客户端，不建立整链 Vec；找到候选后仍校验完整左侧链，
+任一非法段整体回退，全部受信时仍取最左地址。未消费的 Axum `OriginalUri` 扩展不再启用。
 Public 竞价、代理、标记、警告渠道和注销在 Cookie 认证后核对可选 `x-auction-expected-user-id`；规范非零 UUID
 与当前身份不符返回 409 `session_changed`，无效或重复头返回 400 `invalid_expected_user_id`。省略该头保留旧 v1，读取路由行为不变。
 P25/P26 共用路由的方法拒绝响应始终声明 `Allow: GET, PUT`；HEAD 仍返回 405，不能由单一 GET builder

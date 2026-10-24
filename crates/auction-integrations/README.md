@@ -101,12 +101,16 @@ Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；写
 入站 envelope 摘要与加密诊断恢复都按附件 ID 排序借用后直接散列，不复制 key 或逐件重新查找；
 保留原 `mooglemail-envelope-v1` 字段顺序、长度编码及 key 字节，不改变合法历史证据认证结果。
 Sent 正文摘要复用换行规范化的分配后截短尾部空白，不再生成额外的正文副本。
+读写页面共用空白、附件 ID、Credits 与正文校验辅助；空白规范化直接写输出，不建立按词数增长的切片数组，
+唯一回执匹配最多检查两个命中。
 
 [transport/outcomes/rejection.rs](crates/auction-integrations/src/clients/mooglemail/transport/outcomes/rejection.rs)
 负责将闭集拒收码映射为安全英文原因和处理建议；`auction_equipment_rejected` 新增 `{reason_text}`、`{next_steps}` 与
 `{mail_reference}`（`world:external_mail_id`），保留旧 `{reason_code}`。正文不包含原始来源错误，整封邮件退回由独立 Return
 投递及其远端证明负责。模板键仍为 14 项；买家 COD 价格明细只使用应用层冻结的结算事实，金额与幂等身份保持原义。
 完整占位符与升级方式见[邮件正文模板](ops/config/README.md#邮件正文模板)。
+模板按展开后的 UTF-8 字节数，在每段追加前执行发送正文上限；重复占位符不会先构造超大正文再拒绝，
+超限不截断、不发送部分内容。
 
 [transport/payload/settlement/pricing.rs](crates/auction-integrations/src/clients/mooglemail/transport/payload/settlement/pricing.rs)
 校验买家装备 COD 的完整价格变量并格式化千分位金额、带符号百分比与适用的奖池抵扣；旧三变量载荷仅省略价格明细，
@@ -124,18 +128,19 @@ Worker 配置数据库凭据能力后读取唯一 active Cookie 并解密，暂�
 论坛数据库凭据同样保留真实 scope，不以部署选择器覆盖它；世界相关主题和 PM 在 session 开始时核对 scope，
 每次物理请求仍检查 owner。无世界目标的账号资料读取不伪造世界限制，所有路径复用同一 Cookie、连接池和限速器。
 论坛及装备读取直接消费唯一候选；失效回写后结束当前操作，不保留无效轮换循环或为重试复制完整正文。
-普通邮箱与维护读取也只尝试当前唯一 Cookie，失效后撤销并返回，不维护轮换集合或重复尝试循环。
-Sent 读取预算无法表示为绝对截止时返回 `Configuration`，不因超大调用方预算触发时间加法 panic。
+普通邮箱、维护及只读 Sent lookup 都只尝试当前唯一 Cookie，明确失效后撤销并返回，不维护轮换或重复尝试循环。
+完成 owner 复核和失效回写共用原绝对截止；Sent 预算无法表示为截止时返回 `Configuration`，不因时间加法 panic。
 
 论坛完整主题额外最多四路分页读取，共享请求间隔与 32 MiB 聚合上限，作者身份只采信系统作者链接；目录续页增加顺序
 POST、布局回读及可选正文校验成本，配置预算校验只是单目录页下界。大场次需提高既有 `item_timeout_seconds`/
 `lease_duration_seconds` 并保持 lease 大于 item；真实 POST 进度区分纯预读超时与写后未知。
 创建端口明确返回本轮 `Created` 或只读命中的 `Existing`，同标题旧主题不是本轮新正文的成功回执；
 所有创建、回复及编辑统一传递写入进度，历史未知不因本轮未写而解除；论坛仅导入普通出价，代理行在账本前忽略。
-系统作者与分页链接检查完整祖先链；深层嵌套的用户正文或签名不会因超过固定层数而被当成系统导航。
-正文提取按深度优先顺序维护引用状态与最近块元素，每个元素只入栈、出栈一次；深层 BBCode
-不再对每个节点重扫祖先链。引用排除、块间换行和空白规范化仍使用原有规则。
+系统作者检查完整祖先链；正文与分页导航按深度优先顺序维护继承状态，每个元素只入栈、出栈一次。
+正文保留引用排除、最近块元素、块间换行与空白规则；导航继承正文/签名标记，不再逐链接重扫祖先，
+深层嵌套不会因固定层数上限而被误认作系统导航。
 完整目录只建立一次借用 code 索引；规范 post ID 的严格递增同时证明唯一，不另存重复身份集合。
+分页身份索引借用 post ID，query 唯一性复用既有检查；同值重复参数仍拒绝，空 `st` 的编辑链接兼容保留。
 装备 DOM 基数检查使用有界迭代，attributes JSON 只构造一次，严格结构与字段校验不变。
 装备 URL 借用拆分路径，不建立路径片段集合或重复复制 ID；手工 URL 与邮件诊断共用快照投影。
 canonical 指纹分块散列原域与原 JSON 字节，不再复制整份 JSON 拼接前缀，历史摘要保持一致。
@@ -153,6 +158,8 @@ canonical 指纹分块散列原域与原 JSON 字节，不再复制整份 JSON �
 渲染器不拆分多选规则，也不把 Admin 候选词表变成装备采集或品质接收政策。
 渲染器与公开页使用应用层 `equipment_color_decision` 的同一命中结果；名称片段缺失的纯文本回退、首条规则优先级及
 Peerless 彩虹共同决定公开页稀有/融合分组。BBCode 上色只在论坛执行，公开页消费分组字段。
+分类排序直接执行借用的 ASCII 大小写比较；BBCode 规范化和括号转义直接写目标缓冲，颜色片段保留原空白，
+不改变排序键、页数、字节上限或标色结果。
 新种类数组可选择十二种护甲材质族，由应用规则核对实际大类和完整种类的首词/部位边界；完整部位选项及旧种类单值精确匹配。
 `forum/render/log.rs` 分类显示 pending、警告、忽略记录及总数，优先 pending 再取最近记录、最多 100 条且受正文预算
 约束，超出时明确显示已展示/总条数。`forum/render/countdown.rs` 只在首帖顶部生成 `List Timer` 与 `Auction Timer` 的
@@ -210,6 +217,7 @@ Cookie、装备 key 和用户登录 key 的指纹采用既有域字节分块 HMA
 解密后直接移交原认证缓冲，截短前清理尾部；随机源、加解密或指纹失败路径尽力清理已有敏感缓冲。
 装备、Cookie、用户登录 key 与邮件诊断归档的加密缓冲一次预留认证标签容量，避免追加标签时再次扩容复制密文。
 AES-256-GCM、AAD、nonce、指纹域及十六进制编码保持原格式，不迁移或重写历史信封。
+装备信封的只读字段改为借用，nonce 转为栈数组；仅原地解密复制必要的可变密文缓冲，原信封不变。
 运行时的 `EhentaiCookie`、`MoogleMailCookie`、`MoogleMailToken` 与 `MoogleMailEquipmentKey`
 销毁时尽力清理当前缓冲；MoogleMail 表单逐值覆写，而非仅缩短 `String` 长度。Cookie 构造不再
 无条件另建裁剪副本，确需裁剪时清理原值；会话建立/失效处理不再额外复制整个候选，附件 key 从解析表直接移交。

@@ -48,7 +48,7 @@ pub(crate) async fn observe_postgres(
                    AND operations_alert_signals.source = EXCLUDED.source
                  RETURNING state_version",
             )
-            .bind(signal.fingerprint.to_vec())
+            .bind(signal.fingerprint.as_slice())
             .bind(signal.kind.as_str())
             .bind(&signal.scope)
             .bind(signal.source.as_str())

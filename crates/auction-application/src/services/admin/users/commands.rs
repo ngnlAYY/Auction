@@ -95,13 +95,12 @@ where
 
         let issue =
             if wants_key { Some(self.issuer.generate(command.user_id).await?) } else { None };
-        let public_key_hash = issue.as_ref().map(|value| value.key.public_key_hash());
         let expected_username = command.username.clone();
         let expected_forum_account_id = command.forum_account_id.clone();
-        let key = issue.as_ref().map(|value| AdminUserKeyWrite {
-            public_key_hash: public_key_hash.unwrap_or([0; 32]),
-            envelope: value.envelope.clone(),
+        let key = issue.map(|value| AdminUserKeyWrite {
+            public_key_hash: value.key.public_key_hash(),
             response_envelope: Some(value.envelope.clone()),
+            envelope: value.envelope,
         });
         let result = self
             .store

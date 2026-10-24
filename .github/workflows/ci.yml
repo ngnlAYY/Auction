@@ -83,6 +83,9 @@ jobs:
     if: needs.docs.outputs.run-checks == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      # 仅静态检查，不生成调试信息；本地 dev 仍保留行号回溯。
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -133,7 +136,16 @@ jobs:
         with:
           path: target/audit-tools
           key: audit-tools-linux-${{ hashFiles('ci/tools/*.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
+      - name: Check audit tool receipt
+        id: audit-tools
+        run: |
+          if bash ci/tools/bootstrap.sh verify audit; then
+            printf 'needs-build=false\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'needs-build=true\n' >> "$GITHUB_OUTPUT"
+          fi
       - name: Install audit tool build dependencies
+        if: steps.audit-tools.outputs.needs-build == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends cmake pkg-config libssl-dev build-essential patch
@@ -158,6 +170,8 @@ jobs:
     if: needs.docs.outputs.run-checks == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -220,7 +234,16 @@ jobs:
         with:
           path: target/build-tools
           key: release-tools-linux-${{ hashFiles('ci/tools/*.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
+      - name: Check release tool receipt
+        id: release-tools
+        run: |
+          if bash ci/tools/bootstrap.sh verify release; then
+            printf 'needs-build=false\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'needs-build=true\n' >> "$GITHUB_OUTPUT"
+          fi
       - name: Install native tool build dependencies
+        if: steps.release-tools.outputs.needs-build == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends cmake pkg-config libssl-dev build-essential patch

@@ -96,7 +96,7 @@ impl EhentaiClient {
     ) -> Result<TopicPageIdentity, EhentaiError> {
         let mut post_ids = BTreeSet::new();
         for post_id in page.post_ids() {
-            if !post_ids.insert(post_id.to_owned()) {
+            if !post_ids.insert(post_id) {
                 return Err(EhentaiError::protocol(operation, false));
             }
         }
@@ -120,37 +120,31 @@ impl EhentaiClient {
                 continue;
             }
             resolved.set_fragment(None);
-            let topic_values = query_values(&resolved, &["showtopic", "t"]);
-            if topic_values.is_empty() {
+            let Some(topic_id) = optional_query_identity(&resolved, &["showtopic", "t"])
+                .map_err(|_| EhentaiError::protocol(operation, false))?
+            else {
                 continue;
-            }
-            if topic_values.len() != 1 {
-                return Err(EhentaiError::protocol(operation, false));
-            }
-            if topic_values[0] != thread_id {
+            };
+            if topic_id != thread_id {
                 continue;
             }
             thread_identity_seen = true;
-            let post_values = query_values(&resolved, &["p", "pid", "gopid"]);
-            if post_values.len() > 1 {
-                return Err(EhentaiError::protocol(operation, false));
-            }
-            if post_values.first().is_some_and(|post_id| post_ids.contains(post_id)) {
+            let post_id = optional_query_identity(&resolved, &["p", "pid", "gopid"])
+                .map_err(|_| EhentaiError::protocol(operation, false))?;
+            if post_id.as_deref().is_some_and(|post_id| post_ids.contains(post_id)) {
                 page_post_identity_seen = true;
             }
-            let offset_values = query_values(&resolved, &["st"]);
-            if offset_values.is_empty() {
+            let Some(offset_value) = optional_query_identity(&resolved, &["st"])
+                .map_err(|_| EhentaiError::protocol(operation, false))?
+            else {
                 continue;
-            }
-            if offset_values.len() != 1 {
-                return Err(EhentaiError::protocol(operation, false));
-            }
+            };
             // 论坛 Full Edit 等同主题操作链接会携带合法的空 `st=`；它没有声明分页目标，
             // 只能忽略，不能把空值降级成第 0 页，也不能因此拒绝整个主题。
-            if offset_values[0].is_empty() {
+            if offset_value.is_empty() {
                 continue;
             }
-            let offset = canonical_page_offset(&offset_values[0])
+            let offset = canonical_page_offset(&offset_value)
                 .ok_or_else(|| EhentaiError::protocol(operation, false))?;
             if !offset.is_multiple_of(FORUM_POSTS_PER_PAGE) {
                 return Err(EhentaiError::protocol(operation, false));
@@ -164,13 +158,6 @@ impl EhentaiClient {
             u64::try_from(post_ids.len()).map_err(|_| EhentaiError::protocol(operation, false))?;
         Ok(TopicPageIdentity { offsets, post_count })
     }
-}
-
-fn query_values(url: &Url, names: &[&str]) -> Vec<String> {
-    url.query_pairs()
-        .filter(|(name, _)| names.iter().any(|wanted| name.as_ref() == *wanted))
-        .map(|(_, value)| value.into_owned())
-        .collect()
 }
 
 fn canonical_page_offset(value: &str) -> Option<u64> {
@@ -191,11 +178,12 @@ fn validate_target_offset(
     expected_offset: u64,
     operation: EhentaiOperation,
 ) -> Result<(), EhentaiError> {
-    let values = query_values(page_target, &["st"]);
+    let value = optional_query_identity(page_target, &["st"])
+        .map_err(|_| EhentaiError::protocol(operation, false))?;
     let valid = if expected_offset == 0 {
-        values.is_empty() || values.len() == 1 && values[0] == "0"
+        value.as_deref().is_none_or(|value| value == "0")
     } else {
-        values.len() == 1 && canonical_page_offset(&values[0]) == Some(expected_offset)
+        value.as_deref().and_then(canonical_page_offset) == Some(expected_offset)
     };
     if !valid {
         return Err(EhentaiError::protocol(operation, false));

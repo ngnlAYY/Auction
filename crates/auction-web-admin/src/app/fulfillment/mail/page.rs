@@ -175,9 +175,11 @@ pub fn page() -> Element {
                 }
             },
             Some(Ok(Some(polling))) => rsx! {
-                super::actions::MailPollingCard {
-                    key: "{polling.mailbox_key}",
-                    polling: polling.clone(),
+                for polling in [polling.clone()] {
+                    super::actions::MailPollingCard {
+                        key: "{polling.mailbox_key}",
+                        polling,
+                    }
                 }
             },
             Some(Ok(None)) => rsx! {

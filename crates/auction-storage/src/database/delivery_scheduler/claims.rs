@@ -116,6 +116,7 @@ pub(super) async fn claim_postgres(
             .ok_or_else(|| repository_error_owned("delivery 尝试次数溢出"))?;
         let attempt_count_db = i32::try_from(attempt_count)
             .map_err(|_| repository_error_owned("delivery 尝试次数超出数据库范围"))?;
+        // 自动领取只清理上次结果证明；维护重排次数属于跨尝试预算，不能随领取归零。
         let updated = sqlx::query(concat!(
             r#"UPDATE public.deliveries AS deliveries
                SET status = 'claimed',
@@ -128,7 +129,9 @@ pub(super) async fn claim_postgres(
                    completed_at = NULL,
                    external_reference = NULL,
                    failure_code = NULL,
-                   result_metadata = '{}'::jsonb,
+                   result_metadata = CASE WHEN result_metadata ? 'sweep_retries'
+                       THEN jsonb_build_object('sweep_retries', result_metadata -> 'sweep_retries')
+                       ELSE '{}'::jsonb END,
                    updated_at = CURRENT_TIMESTAMP
                WHERE id = $1
                  AND (

@@ -233,8 +233,11 @@ pub(crate) async fn fetch_auction_page(
     decoder::decode_auction_list(response, world_id.as_deref(), &status).await
 }
 
-pub(crate) async fn fetch_auction_list() -> Result<Vec<super::HistoricalAuction>, String> {
-    Ok(fetch_auction_page(None, "settled".to_owned(), 1, 200).await?.auctions)
+/// 预览切换只消费同一世界的近期结算场次，避免被其他世界的前 200 条挤出目录。
+pub(crate) async fn fetch_auction_list(
+    world_id: String,
+) -> Result<Vec<super::HistoricalAuction>, String> {
+    Ok(fetch_auction_page(Some(world_id), "settled".to_owned(), 1, 200).await?.auctions)
 }
 
 pub(crate) async fn fetch_price_history(

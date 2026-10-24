@@ -58,6 +58,8 @@ pub trait AdminCredentialStore: Send + Sync {
 
 /// Worker active 凭据读取端口；查询只允许明确的 kind/world 组合。
 pub trait AdminCredentialRuntimeReader: Send + Sync {
+    /// 一次返回同 kind 下目标 world 与 Shared scope 的全部 active 凭据。
+    /// 请求 Shared 时只返回 Shared；调用方无需再查 Shared 或合并去重，仍须拒绝多 active。
     fn list_active(
         &self,
         kind: AdminCredentialKind,

@@ -42,11 +42,12 @@ pub(super) async fn ensure_fixed_layout(
     } = request;
     let mut preview = reader.fetch_topic(world, published.thread_id.clone()).await?;
     let catalog_marker = forum_catalog_marker(auction_id);
+    // 请求已转移目录所有权；续页直接移动，避免额外复制整份 BBCode 正文。
     let mut replies = catalog
         .catalog_continuation
-        .iter()
+        .into_iter()
         .enumerate()
-        .map(|(index, page)| (page.clone(), forum_catalog_page_marker(auction_id, index + 2)))
+        .map(|(index, page)| (page, forum_catalog_page_marker(auction_id, index + 2)))
         .collect::<Vec<_>>();
     replies.push((system_log, forum_system_log_marker(auction_id)));
 

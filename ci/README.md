@@ -66,6 +66,8 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
 - verify、msrv、artifacts 采用 `v1-auction-build` 前缀，按 job、平台、Rust 工具链、Cargo 清单/锁图及构建配置
   隔离；缓存依赖和工作区编译产物，不跨工具链混用，也不缓存 Cargo 工具二进制。artifacts 使用独立 release 键，
   递归清理 `target` 下原生 API-only/embedded 与 WASM 缓存，不复用发布校验结论。
+  verify/MSRV 另设 `CARGO_PROFILE_DEV_DEBUG=0`，省去静态检查不需要的调试数据；rust-cache 自身关闭增量编译，
+  不重复生成随后会被缓存清理的 incremental 目录。本地仍保留 dev 增量编译及行号回溯。
 - verify、msrv、artifacts 的 `save-if` 要求事件不是 `pull_request`：PR 缓存作用域是合并结果，写入后主分支无法复用且挤占
   额度；PR 仍完整恢复缓存并执行全部检查，`cache-on-failure` 保留。
 - 只有 artifacts 启用修复后的 sccache 0.18.0；与 dx 0.7.10 一起从固定源码包和独立锁图重建，避免旧官方二进制
@@ -78,7 +80,8 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
   `release.sh` 按构建输入复核，不满足就重建，不会把过期二进制当结果。
 - security-audit 对无 TLS 依赖的 cargo-machete 保留固定版本安装；cargo-audit 改用 audit 档独立锁重建。
   `actions/cache` 分别保存 `target/audit-tools` 与 `target/build-tools`，按脚本/锁图/工具链身份分键，恢复后验证
-  配方身份与全部二进制哈希；两个安装 job 显式安装 CMake、pkg-config、OpenSSL 开发文件。
+  配方身份与全部二进制哈希；仅回执无效或缓存缺失时安装 CMake、pkg-config、OpenSSL 等源码构建依赖。
+  不能仅凭缓存键命中跳过回执验证，也不跳过随后联网公告审计。
 - 缓存缺失不改变检查范围，命中后仍执行全部静态检查及审计，RustSec 仍联网更新，不缓存“通过”结论；release Cargo
   并发固定为 2，保留 Fat LTO、单 CGU 和通用 CPU 基线，不把原生 CPU 参数传给 WASM。
 
@@ -90,10 +93,10 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
 页面、API-only 对照及 embedded 四程序，执行资源隔离、源码身份和确定性归档门禁，再上传结果；源码身份、锁图、feature
 与构建环境（`RUSTFLAGS`、`RUSTC_WRAPPER`、`CARGO_PROFILE_*`）同既有 `BUILD-INFO` 一致时复用制品并跳过页面重建。
 不另建构建参数或归档白名单；feature 沿用 release.sh 的 PostgreSQL、Redis（`cache-redis`）和双端 web-embed，
-API-only 对照制品仍只启用 PostgreSQL。本机可选 `RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache` 或
-`RUSTFLAGS="-C link-arg=-fuse-ld=lld"` 前缀复用同一脚本，两者都会写入 `BUILD-INFO`，条件不同不会混用；
-CI 只对 artifacts 启用 sccache，不启用 lld。PR、非默认分支和标签的自动运行只检查、
-不发布制品。在 GitHub 的 **Actions → auction-build → 对应运行 → Artifacts** 下载
+API-only 对照制品仍只启用 PostgreSQL。本机可选 `RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache` 前缀复用同一脚本；
+包装器身份进入 `BUILD-INFO`，条件不同不会混用。GNU x86_64 已由固定 Rust 工具链默认使用 LLD，
+不另装系统 linker 或设置全局 `-fuse-ld=lld`。CI 只对 artifacts 启用 sccache。
+PR、非默认分支和标签的自动运行只检查、不发布制品。在 GitHub 的 **Actions → auction-build → 对应运行 → Artifacts** 下载
 `auction-linux-x86_64-<commit>-<attempt>`（私有库需相应仓库权限），包内含 `.tar.gz`、外层 `SHA256SUMS` 和
 `DEPENDENCIES.md`，先校验清单再解包；tar 内的 `auction-rust-<version>-<commit>/bin/` 包含且仅包含：
 
@@ -143,13 +146,14 @@ payload 复用只在本脚本内生效：本 surface、`auction-web-shared`、`a
 构建环境与已存清单全部一致才跳过 dx；构建结束后再次核对源码与工具身份，变化时不签发复用标记。
 只改契约源码也会使双端 WASM 缓存失效，保证新后端内嵌同版 DTO 浏览器。
 原生与 WASM 共用环境摘要，覆盖 `CARGO_PROFILE_*`（包括 `CARGO_PROFILE_WASM_RELEASE_*`）、rustflags、
-目标 linker/target、rustc 包装器及受控工具字节身份；`WEB-BUILD-INFO` 缺少摘要的旧缓存自动重建，环境值本身不写入清单。
+目标 linker/target、rustc 包装器、C/C++ 编译器与 flags、受控工具字节身份，以及 Cargo 逐层读取的当前目录、
+父目录和 `CARGO_HOME` 配置文件。只写入摘要，不把配置或环境原文写入清单；旧摘要自动失效。
 只修改上述输入范围外的原生源码或文档不会重跑 WASM；输入目录中的 README 仍参与摘要，不按扩展名排除。
-release.sh 在构建前冻结构建输入（apps、crates、migrations、配置示例、保留策略、清单与发布工具）并在各阶段复查，
-范围外的文档修改不触发原生重建。核验实际二进制标记、对端资源缺失与 Worker 依赖，再校验白名单、权限、
-统一时间、两次相同 archive、内外哈希和依赖摘要；tar 流直接压缩，不落盘未压缩副本。
-同一次原生复用判定由 `verify_build_info` 统一计算并核对构建输入摘要，不再紧接着重复全目录扫描；
-feature、构建环境和二进制完整性仍分别检查，构建及封存阶段的身份复核不减少。
+release.sh 在构建前冻结构建输入（apps、crates、migrations、配置示例、保留策略、清单、`.cargo` 与发布工具），
+各阶段同时复查输入和环境摘要；范围外的文档修改不触发原生重建。核验实际二进制标记、对端资源缺失与 Worker 依赖，
+再校验白名单、权限、统一时间、两次相同 archive、内外哈希和依赖摘要；tar 流直接压缩，不落盘未压缩副本。
+文件指纹批量读取 metadata/SHA-256，避免逐文件启动两个进程；NUL 路径、权限、删除及符号链接身份仍参与摘要。
+`verify_build_info` 统一拥有复用和阶段复核，feature 与二进制完整性另行检查，不重复紧接扫描同一输入。
 构建与装包各自在子进程退出时清理本次候选目录；失败不删除旧制品或 Cargo 增量缓存。
 正式 package 要求干净工作树。分体包为 Public、Admin、Worker、
 auctionctl，仅两端内嵌各自页面；`--single-binary` 先通过分体门禁，再核对 server 双 payload 和独立无 Web 的

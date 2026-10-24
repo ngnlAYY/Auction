@@ -166,16 +166,9 @@ pub(crate) async fn claim_postgres(
             summary: signal.render_summary().map_err(ApplicationError::from)?,
         });
     }
-    let summary = loop {
-        match canonical_summary(&items, request.max_body_bytes) {
-            Ok(value) => break value,
-            Err(error) if items.len() > 1 => {
-                items.pop();
-                let _ = error;
-            }
-            Err(error) => return Err(error.into()),
-        }
-    };
+    let (item_count, summary) =
+        canonical_summary_prefix(&items, request.max_body_bytes).map_err(ApplicationError::from)?;
+    items.truncate(item_count);
     let batch_id = Uuid::new_v4();
     let command_id = Uuid::new_v4();
     let delivery_id = Uuid::new_v5(
@@ -208,7 +201,7 @@ pub(crate) async fn claim_postgres(
     )
     .bind(delivery_id)
     .bind(command_id)
-    .bind(request_hash.as_bytes().to_vec())
+    .bind(request_hash.as_bytes().as_slice())
     .bind(&origin_id)
     .bind(&request.target.recipient)
     .bind(payload)
@@ -228,12 +221,12 @@ pub(crate) async fn claim_postgres(
     .bind(batch_id)
     .bind(command_id)
     .bind(delivery_id)
-    .bind(request_hash.as_bytes().to_vec())
+    .bind(request_hash.as_bytes().as_slice())
     .bind(claim_token)
     .bind(request.now)
     .bind(request.lease_until)
     .bind(i32::try_from(items.len()).map_err(|_| OperationsAlertError::Invalid)? as i32)
-    .bind(body_digest.to_vec())
+    .bind(body_digest.as_slice())
     .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("写入 operations alert 批次失败"))?;
@@ -244,7 +237,7 @@ pub(crate) async fn claim_postgres(
              VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(batch_id)
-        .bind(item.fingerprint.to_vec())
+        .bind(item.fingerprint.as_slice())
         .bind(item.signal_version)
         .bind(item.ordinal)
         .bind(&item.summary)

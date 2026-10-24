@@ -193,6 +193,8 @@ Read Mail 的慢响应或失败不延迟 Sent 核对，维护失败不撤销并�
   完整详情的发件人匹配原收件人且装备、Credits、COD 均归零，才可按 `action_recovered_inbox_v1` 收口。
   只有原装备集合和金额精确相同才可重排（上限 2 次）；部分、额外、重复资产或金额漂移均保留人工核对。
   成功及重排同事务复核当前 generation、原 credential ID/version 和候选 fence；旧无绑定或配置 Cookie 无持久身份的未知 Take 不自动恢复。
+  自动领取、释放、收口及过期隔离保留已消费次数；只有现有 Admin 显式重试沿用原重置规则。
+  升级不推断或回填旧版本已丢失的计数，不改变原 Take 身份及候选 fence 校验。
 - compose 非空时，只有收件人、业务 reference、Credits/COD 和精确装备集合同时匹配唯一未证明投递才执行 discard；
   资产总数可能包含 Credits 条目，不能代替装备 ID 集合。匹配不到或多匹配只记录日志，绝不丢弃来源不明的草稿；通知类没有业务 reference，不参与旧草稿匹配。
 - discard 前在原投递上持久登记一次性尝试，再在同一凭据 session 重读并逐字段比较原草稿。

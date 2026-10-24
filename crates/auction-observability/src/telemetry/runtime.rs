@@ -8,7 +8,7 @@ use std::{
 
 use opentelemetry::{
     KeyValue,
-    propagation::TextMapPropagator,
+    propagation::{Extractor, TextMapPropagator},
     trace::{TraceContextExt, TracerProvider as _},
 };
 use opentelemetry_otlp::{RetryPolicy, SpanExporter, WithExportConfig, WithHttpConfig};
@@ -26,6 +26,32 @@ use super::{
     processor::{DropAwareBatchSpanProcessor, HealthSpanExporter},
 };
 
+/// 传播器仅借用两个已筛选的头，不为每次 HTTP 请求复制键、值或建立哈希表。
+struct TraceContextHeaders<'a> {
+    traceparent: &'a str,
+    tracestate: Option<&'a str>,
+}
+
+impl Extractor for TraceContextHeaders<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        if key.eq_ignore_ascii_case("traceparent") {
+            Some(self.traceparent)
+        } else if key.eq_ignore_ascii_case("tracestate") {
+            self.tracestate
+        } else {
+            None
+        }
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        if self.tracestate.is_some() {
+            vec!["traceparent", "tracestate"]
+        } else {
+            vec!["traceparent"]
+        }
+    }
+}
+
 /// 把经过 HTTP 边界筛选的 W3C trace context 设为当前 server span 的远端父级。
 /// 无效或超长字段会被忽略；函数不记录 header 原文，避免把不受信任的传播数据带入日志。
 pub fn attach_remote_trace_context(
@@ -36,11 +62,10 @@ pub fn attach_remote_trace_context(
     let Some(traceparent) = traceparent.filter(|value| value.len() <= 512) else {
         return;
     };
-    let mut carrier = HashMap::with_capacity(2);
-    carrier.insert("traceparent".to_owned(), traceparent.to_owned());
-    if let Some(tracestate) = tracestate.filter(|value| value.len() <= 1024) {
-        carrier.insert("tracestate".to_owned(), tracestate.to_owned());
-    }
+    let carrier = TraceContextHeaders {
+        traceparent,
+        tracestate: tracestate.filter(|value| value.len() <= 1024),
+    };
     let context = TraceContextPropagator::new().extract(&carrier);
     if context.span().span_context().is_valid() {
         let _ = span.set_parent(context);

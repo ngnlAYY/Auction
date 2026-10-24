@@ -6,8 +6,7 @@ use anyhow::Context;
 use auction_storage::LEGACY_V28_MIGRATION_VERSION;
 
 use super::super::{
-    is_sha256_hex, read_private_artifact, sha256_file, sha256_text, validate_private_evidence_path,
-    verify_archive, verify_private_regular_file,
+    is_sha256_hex, read_private_artifact, sha256_bytes, sha256_file, sha256_text, verify_archive,
 };
 use super::model::{
     LEGACY_V28_BACKUP_FORMAT, LegacyV28BackupManifest, MAX_LEGACY_MANIFEST_BYTES,
@@ -55,8 +54,6 @@ pub(super) fn verify_backup(
         .parent()
         .ok_or_else(|| anyhow::anyhow!("legacy backup manifest parent is missing"))?
         .join(&manifest.archive_file_name);
-    validate_private_evidence_path(&archive_path)?;
-    verify_private_regular_file(&archive_path, "legacy v28 backup archive")?;
     let archive_sha256 = sha256_file(&archive_path)?;
     if archive_sha256 != manifest.archive_sha256 {
         anyhow::bail!("legacy v28 backup archive SHA-256 does not match its manifest");
@@ -66,7 +63,7 @@ pub(super) fn verify_backup(
     Ok(VerifiedLegacyBackup {
         manifest,
         archive_path,
-        manifest_sha256: sha256_file(manifest_path)?,
+        manifest_sha256: sha256_bytes(&manifest_bytes),
     })
 }
 

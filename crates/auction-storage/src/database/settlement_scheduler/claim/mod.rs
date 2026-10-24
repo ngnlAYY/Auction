@@ -22,7 +22,7 @@ use evidence::{insert_settlement_claim_audit, insert_settlement_claim_event};
 use ids::{claim_command_id, request_hash, settlement_command_id, workflow_id};
 use locking::lock_initial_lots;
 
-const CLAIM_TRANSACTION_ATTEMPTS: usize = 8;
+const CLAIM_TRANSACTION_ATTEMPTS: usize = 3;
 const CLAIM_RETRY_BASE_DELAY: Duration = Duration::from_millis(10);
 
 /// 保留数据库原始错误，直到确认是否属于可安全重放的 SQLSTATE。
@@ -70,7 +70,7 @@ pub(super) async fn claim_postgres(
         match claim_transaction(pool, worker_id, now, lease_until, limit).await {
             Ok(claims) => return Ok(claims),
             Err(error) if error.is_retryable() && attempt < CLAIM_TRANSACTION_ATTEMPTS => {
-                // 与旧版 RunSerializable 一致使用有界线性退避；下一次必须从开启事务开始重放。
+                // 与竞价/结算相同，含首次最多三次；每次从新事务开始，保留有界线性退避。
                 sqlx::__rt::sleep(CLAIM_RETRY_BASE_DELAY.saturating_mul(attempt as u32)).await;
             }
             Err(error) => return Err(error.into_repository()),

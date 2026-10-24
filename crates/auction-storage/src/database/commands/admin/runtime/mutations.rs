@@ -63,7 +63,7 @@ pub(super) async fn insert_pending_postgres(
     )
     .bind(command.command_id.as_uuid())
     .bind(i16::try_from(command.digest_version).map_err(|_| command_corrupt("digest version 超出 PostgreSQL smallint".to_owned()))?)
-    .bind(command.request_hash.as_bytes().to_vec())
+    .bind(command.request_hash.as_bytes().as_slice())
     .bind(&command.expected_fingerprint)
     .bind(&command.old_fingerprint)
     .bind(&command.new_fingerprint)
@@ -140,7 +140,7 @@ pub(super) async fn apply_postgres(
 
     let row = sqlx::query(UPDATE_APPLY)
         .bind(command_id.as_uuid())
-        .bind(request_hash.as_bytes().to_vec())
+        .bind(request_hash.as_bytes().as_slice())
         .bind(applied_at)
         .bind(applied_at)
         .fetch_optional(&mut *transaction)
@@ -169,7 +169,7 @@ pub(super) async fn mark_unknown_postgres(
         .map_err(|_| command_failed("开启 runtime 配置未知状态事务失败"))?;
     let row = sqlx::query(UPDATE_UNKNOWN)
         .bind(command_id.as_uuid())
-        .bind(request_hash.as_bytes().to_vec())
+        .bind(request_hash.as_bytes().as_slice())
         .bind(category)
         .bind(updated_at)
         .fetch_optional(&mut *transaction)
@@ -214,7 +214,7 @@ pub(super) async fn reopen_postgres(
         store.pool().begin().await.map_err(|_| command_failed("开启 runtime 配置重开事务失败"))?;
     let row = sqlx::query(UPDATE_REOPEN)
         .bind(command_id.as_uuid())
-        .bind(request_hash.as_bytes().to_vec())
+        .bind(request_hash.as_bytes().as_slice())
         .bind(updated_at)
         .fetch_optional(&mut *transaction)
         .await

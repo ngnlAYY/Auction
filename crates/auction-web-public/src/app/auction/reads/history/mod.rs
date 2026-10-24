@@ -163,39 +163,42 @@ pub(crate) fn history() -> Element {
                 }
             }
             Some(Ok(page)) => rsx! {
-                PriceHistoryTable {
-                    key: "{table_scope_key}",
-                    page: page.clone(),
-                    grouping: query_state_signal().history_group,
-                    current_page: applied_query().page,
-                    on_buyer_filter: move |name| {
-                        update_public_query_state(query_state_signal, |query| {
-                            query.history_buyer = Some(name);
-                            query.page = 1;
-                        }, QueryWriteMode::Push);
-                    },
-                    on_seller_filter: move |name| {
-                        update_public_query_state(query_state_signal, |query| {
-                            query.history_seller = Some(name);
-                            query.page = 1;
-                        }, QueryWriteMode::Push);
-                    },
-                    on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
-                    on_page_change: move |next_page: i64| {
-                        let next_page = next_page.max(1);
-                        update_public_query_state(
-                            query_state_signal,
-                            |query| query.page = next_page,
-                            QueryWriteMode::Push,
-                        );
-                    },
-                    on_page_clamp: move |next_page: i64| {
-                        update_public_query_state(
-                            query_state_signal,
-                            |query| query.page = next_page.max(1),
-                            QueryWriteMode::Replace,
-                        );
-                    },
+                // 查询身份同时隔离子分组的折叠状态；同查询后台重读保留当前展开选择。
+                for (table_scope_key, page) in [(table_scope_key, page.clone())] {
+                    PriceHistoryTable {
+                        key: "{table_scope_key}",
+                        page,
+                        grouping: query_state_signal().history_group,
+                        current_page: applied_query().page,
+                        on_buyer_filter: move |name| {
+                            update_public_query_state(query_state_signal, |query| {
+                                query.history_buyer = Some(name);
+                                query.page = 1;
+                            }, QueryWriteMode::Push);
+                        },
+                        on_seller_filter: move |name| {
+                            update_public_query_state(query_state_signal, |query| {
+                                query.history_seller = Some(name);
+                                query.page = 1;
+                            }, QueryWriteMode::Push);
+                        },
+                        on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
+                        on_page_change: move |next_page: i64| {
+                            let next_page = next_page.max(1);
+                            update_public_query_state(
+                                query_state_signal,
+                                |query| query.page = next_page,
+                                QueryWriteMode::Push,
+                            );
+                        },
+                        on_page_clamp: move |next_page: i64| {
+                            update_public_query_state(
+                                query_state_signal,
+                                |query| query.page = next_page.max(1),
+                                QueryWriteMode::Replace,
+                            );
+                        },
+                    }
                 }
             },
         }

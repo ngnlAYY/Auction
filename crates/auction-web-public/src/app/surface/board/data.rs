@@ -111,19 +111,26 @@ pub(crate) fn AuctionData(
                 page_size: requested_page_size(),
             }
         }));
-    let history_switch = use_resource({
-        let world = auction.world.clone();
-        let should_load = historical || auction.presentation_mode != "live";
-        move || {
-            let world = world.clone();
-            async move {
-                if !should_load {
+    let history_switch_world = use_memo(use_reactive(
+        (&auction.world, &historical, &auction.presentation_mode),
+        |(world, historical, presentation_mode)| {
+            (historical || presentation_mode != "live").then_some(world)
+        },
+    ));
+    let history_switch = use_resource(move || {
+        let _ = refresh_generation();
+        let requested_world = history_switch_world();
+        async move {
+            let result = async {
+                let Some(world) = requested_world.as_ref() else {
                     return Ok(None);
-                }
-                let current = fetch_current_auction(world).await?;
-                let rounds = fetch_auction_list().await?;
+                };
+                let current = fetch_current_auction(world.clone()).await?;
+                let rounds = fetch_auction_list(world.clone()).await?;
                 Ok(Some((current, rounds)))
             }
+            .await;
+            (requested_world, result)
         }
     });
     let mut lots_refresh_generation = use_signal(|| 0_u64);
@@ -150,7 +157,10 @@ pub(crate) fn AuctionData(
                 scope.page_size,
             )
             .await
-            .map(|page| CatalogSnapshot { rows: Rc::new(page.rows()), page: Rc::new(page) });
+            .map(|mut page| CatalogSnapshot {
+                rows: Rc::new(page.take_rows()),
+                page: Rc::new(page),
+            });
             (scope, result)
         }
     });
@@ -310,6 +320,12 @@ pub(crate) fn AuctionData(
         }
         _ => rsx! { p { class: "public-page-status", role: "status", {t!("common-loading")} } },
     };
+    // 切换世界或展示模式时，旧辅助结果不能冒充本次查询；同查询刷新保留已完成快照。
+    let history_switch_snapshot = history_switch.read();
+    let current_history_switch = history_switch_snapshot
+        .as_ref()
+        .filter(|(world, _)| *world == history_switch_world())
+        .map(|(_, result)| result);
 
     rsx! {
         section { class: "public-auction-page", aria_labelledby: "auction-title",
@@ -337,7 +353,7 @@ pub(crate) fn AuctionData(
                             status: auction.status.clone(),
                         }
                     }
-                    {preview_history_switch(&history_switch.read_unchecked(), &auction, historical)}
+                    {preview_history_switch(current_history_switch, &auction, historical)}
                 }
                 if !historical && is_live_presentation && auction.bidding_open && session_error {
                     div { class: "ui-empty-state", role: "alert",

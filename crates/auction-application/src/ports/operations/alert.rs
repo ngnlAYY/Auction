@@ -39,7 +39,7 @@ pub use delivery::{
     OperationsAlertDeliveryStatus, OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch,
     OperationsAlertObserveCommand,
 };
-pub use digest::{body_digest, canonical_summary, request_hash};
+pub use digest::{body_digest, canonical_summary, canonical_summary_prefix, request_hash};
 pub use evaluate::evaluate_snapshot;
 pub use health::{
     OperationsAlertHealth, OperationsAlertRuntimeStatus, OperationsAlertSourceReader,

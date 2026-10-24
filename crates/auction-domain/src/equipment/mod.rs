@@ -96,7 +96,7 @@ pub struct EquipmentKeyEnvelope {
 }
 
 impl EquipmentKeyEnvelope {
-    /// 从已经完成加密的字段建立信封，并复制调用方缓冲区。
+    /// 从已经完成加密的字段建立信封，接收调用方缓冲区的所有权。
     pub fn new(
         ciphertext: Vec<u8>,
         nonce: Vec<u8>,
@@ -120,13 +120,14 @@ impl EquipmentKeyEnvelope {
         Ok(())
     }
 
-    /// 返回密文副本供持久化适配器使用。
-    pub fn ciphertext(&self) -> Vec<u8> {
-        self.ciphertext.clone()
+    /// 借用密文供持久化适配器使用；需要原地解密的调用方自行建立可变副本。
+    pub fn ciphertext(&self) -> &[u8] {
+        &self.ciphertext
     }
 
-    pub fn nonce(&self) -> Vec<u8> {
-        self.nonce.clone()
+    /// 借用 nonce，避免只读校验和持久化绑定重复分配缓冲区。
+    pub fn nonce(&self) -> &[u8] {
+        &self.nonce
     }
 
     /// 返回非秘密数据密钥标识。

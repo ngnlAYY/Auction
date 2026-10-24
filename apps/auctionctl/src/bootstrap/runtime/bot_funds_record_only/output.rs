@@ -14,7 +14,7 @@ pub(super) fn preview(
     confirmation: String,
     preview: &impl Serialize,
 ) -> anyhow::Result<()> {
-    let digest: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    let digest = super::super::hex_digest(digest);
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({

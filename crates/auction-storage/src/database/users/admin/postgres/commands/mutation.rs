@@ -190,7 +190,7 @@ async fn apply_mutation_postgres(
                      state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $2)
                  WHERE id = $3",
             )
-            .bind(key.public_key_hash.to_vec())
+            .bind(key.public_key_hash.as_slice())
             .bind(now)
             .bind(id)
             .execute(&mut **transaction)

@@ -51,8 +51,24 @@ pub(super) async fn list(
             .map_err(|_| storage_error("读取公开拍卖列表总数失败"))?,
         )
     };
+    // 先确定当前页拍卖，再聚合其 lot；历史页不必为页外场次重复扫描和汇总全部装备。
     let rows = sqlx::query(
-        "SELECT
+        "WITH page_auctions AS MATERIALIZED (
+            SELECT a.id
+            FROM public.auctions AS a
+            JOIN public.worlds AS w ON w.id = a.world_id
+            WHERE a.status = $1
+              AND (w.enabled OR a.status = 'settled')
+              AND ($2::text IS NULL OR a.world_id = $2)
+              AND (
+                   NOT $3::boolean
+                   OR a.sequence < $4
+                   OR (a.sequence = $4 AND a.id < $5)
+              )
+            ORDER BY a.sequence DESC, a.id DESC
+            LIMIT $6 OFFSET $7
+         )
+         SELECT
             a.id,
             a.world_id,
             a.sequence,
@@ -71,21 +87,12 @@ pub(super) async fn list(
                 0
             )::bigint AS sold_amount,
             a.state_version
-         FROM public.auctions AS a
-         INNER JOIN public.worlds AS w ON w.id = a.world_id
+         FROM page_auctions
+         JOIN public.auctions AS a ON a.id = page_auctions.id
          LEFT JOIN public.lots AS l ON l.auction_id = a.id
          LEFT JOIN public.lot_settlements AS ls ON ls.lot_id = l.id
-         WHERE a.status = $1
-           AND (w.enabled OR a.status = 'settled')
-           AND ($2::text IS NULL OR a.world_id = $2)
-           AND (
-                NOT $3::boolean
-                OR a.sequence < $4
-                OR (a.sequence = $4 AND a.id < $5)
-           )
          GROUP BY a.id
-         ORDER BY a.sequence DESC, a.id DESC
-         LIMIT $6 OFFSET $7",
+         ORDER BY a.sequence DESC, a.id DESC",
     )
     .bind(&request.status)
     .bind(request.world_id.as_deref())

@@ -85,6 +85,8 @@ Delivery 有效并发取配置与 transport 上限的较小值，MoogleMail tran
 不属于 runtime 的 `operations.forum` 接管范围。
 cron 的五个规范字段直接追加到最终缓冲，不建立逐字段临时 String；原语法、时区及 DOM/DOW 语义保持。
 邮件模板闭集校验拒绝任意位置的孤立右花括号，与 runtime 和 transport 边界一致。
+发件人名单与装备 token 使用借用原文的集合判重，避免最大名单的平方扫描；
+保持大小写、输入顺序、256/1000 项预算与错误边界，不复制名单字符串。
 
 ## Runtime 文件与生效范围
 

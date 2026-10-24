@@ -408,14 +408,16 @@ fn colored_equipment_name(lot: &ForumLotSnapshot, colors: &[EquipmentColorRule])
                 out,
                 "[color={}]{}[/color]",
                 PEERLESS_COLORS[index.min(PEERLESS_COLORS.len() - 1)],
-                bbcode_text(&character.to_string())
+                character
             );
         }
         out.push(' ');
     }
     match decision.matched {
         Some((rule, matched)) if matched.prefix && matched.suffix => {
-            let _ = write!(out, "[color={}]{}[/color]", rule.combined_color, bbcode_segment(rest));
+            let _ = write!(out, "[color={}]", rule.combined_color);
+            push_bbcode_segment(&mut out, rest);
+            out.push_str("[/color]");
         }
         Some((rule, matched)) if matched.prefix => {
             write_colored_segment(&mut out, rest, &lot.equipment_prefix, &rule.prefix_color, false);
@@ -444,9 +446,11 @@ fn write_colored_segment(out: &mut String, text: &str, needle: &str, color: &str
     if last && start >= 3 && lower.get(start - 3..start) == Some("of ") {
         start -= 3;
     }
-    out.push_str(&bbcode_segment(&text[..start]));
-    let _ = write!(out, "[color={color}]{}[/color]", bbcode_segment(&text[start..end]));
-    out.push_str(&bbcode_segment(&text[end..]));
+    push_bbcode_segment(out, &text[..start]);
+    let _ = write!(out, "[color={color}]");
+    push_bbcode_segment(out, &text[start..end]);
+    out.push_str("[/color]");
+    push_bbcode_segment(out, &text[end..]);
 }
 
 /// 首帖与续页使用同一页尾和独立字节上限，任何一页超限都在远端写入前失败。
@@ -555,38 +559,53 @@ fn valid_public_url(value: &str) -> bool {
 }
 
 fn category_order(value: &str) -> usize {
-    match value.to_ascii_lowercase().as_str() {
-        "one-handed" | "one" => 1,
-        "two-handed" | "two" => 2,
-        "staff" | "sta" => 3,
-        "shield" | "shd" => 4,
-        "cloth" | "clo" => 5,
-        "light" | "lig" => 6,
-        "heavy" | "hea" => 7,
+    // 排序比较器会反复调用，按 ASCII 忽略大小写借用比较，不为每次比较分配小写副本。
+    match value {
+        value if value.eq_ignore_ascii_case("one-handed") || value.eq_ignore_ascii_case("one") => 1,
+        value if value.eq_ignore_ascii_case("two-handed") || value.eq_ignore_ascii_case("two") => 2,
+        value if value.eq_ignore_ascii_case("staff") || value.eq_ignore_ascii_case("sta") => 3,
+        value if value.eq_ignore_ascii_case("shield") || value.eq_ignore_ascii_case("shd") => 4,
+        value if value.eq_ignore_ascii_case("cloth") || value.eq_ignore_ascii_case("clo") => 5,
+        value if value.eq_ignore_ascii_case("light") || value.eq_ignore_ascii_case("lig") => 6,
+        value if value.eq_ignore_ascii_case("heavy") || value.eq_ignore_ascii_case("hea") => 7,
         _ => usize::MAX,
     }
 }
 
 fn category_label(value: &str) -> String {
-    match value.to_ascii_lowercase().as_str() {
-        "one-handed" | "one" => "One-Handed".to_owned(),
-        "two-handed" | "two" => "Two-Handed".to_owned(),
-        "staff" | "sta" => "Staff".to_owned(),
-        "shield" | "shd" => "Shield".to_owned(),
-        "cloth" | "clo" => "Cloth".to_owned(),
-        "light" | "lig" => "Light Armor".to_owned(),
-        "heavy" | "hea" => "Heavy Armor".to_owned(),
+    match category_order(value) {
+        1 => "One-Handed".to_owned(),
+        2 => "Two-Handed".to_owned(),
+        3 => "Staff".to_owned(),
+        4 => "Shield".to_owned(),
+        5 => "Cloth".to_owned(),
+        6 => "Light Armor".to_owned(),
+        7 => "Heavy Armor".to_owned(),
         _ => bbcode_text(value),
     }
 }
 
 fn bbcode_text(value: &str) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ").replace('[', "［").replace(']', "］")
+    let value = value.trim();
+    let mut output = String::with_capacity(value.len());
+    for word in value.split_whitespace() {
+        if !output.is_empty() {
+            output.push(' ');
+        }
+        push_bbcode_segment(&mut output, word);
+    }
+    output
 }
 
-/// 保留原始空格的分段转义，避免颜色标签把相邻单词粘在一起。
-fn bbcode_segment(value: &str) -> String {
-    value.replace('[', "［").replace(']', "］")
+/// 保留原始空格并直接写入目标缓冲，避免颜色标签粘连相邻单词或为每个片段另建副本。
+fn push_bbcode_segment(output: &mut String, value: &str) {
+    for character in value.chars() {
+        output.push(match character {
+            '[' => '［',
+            ']' => '］',
+            _ => character,
+        });
+    }
 }
 
 fn format_forum_time(value: chrono::DateTime<chrono::Utc>) -> String {

@@ -87,7 +87,7 @@ pub(super) async fn persist_user_mail_result(
     )
     .bind(command_id.as_uuid())
     .bind(kind.as_str())
-    .bind(request_hash.as_bytes().to_vec())
+    .bind(request_hash.as_bytes().as_slice())
     .bind(result.user_id)
     .bind(result_code)
     .bind(json!({ "result_code": result_code }))

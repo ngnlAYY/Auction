@@ -31,7 +31,7 @@ pub(crate) enum PublicRealtimeTarget {
     IdentityError {
         target_id: String,
     },
-    /// 已确认未进入竞价期；世界进入 key，切换世界不会保留上一世界的连接目标。
+    /// 已确认未进入竞价期；世界属于目标身份，切换世界不会沿用旧连接目标。
     Inactive {
         world: String,
         preview: bool,
@@ -72,22 +72,6 @@ impl PublicRealtimeTarget {
             Self::Inactive { world: auction.world.clone(), preview: auction.status == "preview" }
         }
     }
-
-    pub(crate) fn key(&self) -> String {
-        match self {
-            Self::Checking => "checking".to_owned(),
-            Self::Anonymous => "anonymous".to_owned(),
-            Self::SessionError => "session-error".to_owned(),
-            Self::IdentityError { target_id } => format!("identity-error:{target_id}"),
-            Self::Inactive { world, preview } => {
-                format!("inactive:world:{world}:preview:{preview}")
-            }
-            Self::CurrentError { world } => format!("current-error:world:{world}"),
-            Self::Auction { auction_id, world, preview_revision } => {
-                format!("auction:{auction_id}:world:{world}:preview:{preview_revision}")
-            }
-        }
-    }
 }
 
 /// 重连退避起点：1 秒起步，避免旧版固定 3 秒在故障初期空等。
@@ -109,10 +93,11 @@ fn reconnect_delay_millis(failures: u32) -> u32 {
     half + (js_sys::Math::random() * f64::from(base - half)) as u32
 }
 
-/// 根据共享 session/current 快照建立唯一实时连接；目标变化时取消旧任务并按新目标重建。
+/// 根据共享 session/current 快照建立唯一实时连接；目标或用户变化时取消旧任务并重新握手。
 #[component]
 pub(crate) fn PublicRealtimeOwner(
     target: PublicRealtimeTarget,
+    user_id: Option<String>,
     refresh_generation: Signal<u64>,
     mut discovery_after: Signal<i64>,
     mut auction_after: Signal<Option<(String, i64)>>,
@@ -120,7 +105,8 @@ pub(crate) fn PublicRealtimeOwner(
 ) -> Element {
     let page_visibility = use_context::<PageVisibility>();
     let bid_refresh = use_context::<PublicBidRefresh>();
-    let _stream = use_resource(use_reactive((&target,), move |(target,)| {
+    // 身份必须进入资源依赖；单独修改静态组件的 key 不会使相等的 target 重启订阅。
+    let _stream = use_resource(use_reactive((&target, &user_id), move |(target, _)| {
         let page_visibility = page_visibility.clone();
         async move {
             let (auction_target, cache) = match target {
@@ -206,8 +192,8 @@ pub(crate) fn PublicRealtimeOwner(
                         };
                     callback_cursor.set(next_after);
                     if callback_cache.is_none() {
-                        // current-auction 刷新会让目标短暂切到 Checking，并按 key 重建 owner；先把
-                        // discovery 游标写回外壳，避免重建后从 0 重放同一事件并形成请求风暴。
+                        // current-auction 重读可能让目标短暂切到 Checking 并重启订阅；先把
+                        // discovery 游标写回外壳，避免从 0 重放同一事件并形成请求风暴。
                         callback_discovery_after.set(next_after);
                     } else if let Some(auction_id) = callback_auction_id.as_ref() {
                         callback_auction_after.set(Some((auction_id.clone(), next_after)));

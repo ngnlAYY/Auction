@@ -121,6 +121,7 @@ pub(super) async fn relist_recovery(
         target_id,
         &recovery.world_id,
         next_revision,
+        target_next_state_version,
         command_id,
         preview_event_id,
     )
@@ -145,6 +146,7 @@ pub(super) async fn insert_preview_event(
     auction_id: Uuid,
     world_id: &str,
     preview_revision: i64,
+    state_version: i64,
     command_id: CommandId,
     event_id: Uuid,
 ) -> Result<(), RecoveryCommandError> {
@@ -182,7 +184,7 @@ pub(super) async fn insert_preview_event(
         "auction_id": auction_id,
         "preview_revision": preview_revision,
     }))
-    .bind(preview_revision)
+    .bind(state_version)
     .bind(command_id.as_uuid())
     .execute(&mut **transaction)
     .await

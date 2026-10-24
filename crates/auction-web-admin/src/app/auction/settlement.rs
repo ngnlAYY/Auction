@@ -2,11 +2,8 @@
 //! 上方选择已结算场次的世界/期号，下方读取对应 UUID 的结算与 recovery 权威报告；
 //! 所有屏幕均使用单列自然文档流，由页面统一滚动。
 
-use std::collections::HashMap;
-
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use auction_web_shared::{AsyncState, AsyncStateKind};
 
@@ -17,6 +14,9 @@ use crate::api::{
 
 use super::pagination::use_admin_pagination;
 use super::{AdminActionFeedback, admin_api_error_message};
+use crate::app::surface::pending::{
+    PendingCommandPanel, use_pending_command_gate, use_pending_commands_with_gate,
+};
 
 #[path = "settlement/helpers.rs"]
 mod helpers;
@@ -87,11 +87,12 @@ pub(super) fn page() -> Element {
     let recovery_reload_generation = use_signal(|| 0_u64);
     let confirmation = use_signal(|| None::<RecoveryConfirmationDraft>);
     let reason = use_signal(String::new);
-    let action_busy = use_signal(|| false);
+    let mut action_busy = use_signal(|| false);
     let action_feedback = use_signal(|| None::<AdminActionFeedback>);
     let selection_generation = use_signal(|| 0_u64);
-    // 同一 recovery/version/action/reason 重试必须复用命令 ID。
-    let recovery_command_ids = use_signal(HashMap::<String, Uuid>::new);
+    let command_gate = use_pending_command_gate();
+    let pending = use_pending_commands_with_gate(reload_generation, Some(command_gate));
+    use_effect(move || action_busy.set(pending.any_busy()));
     let location_revision = use_settlement_location_revision();
 
     // 浏览器返回/前进可能只改变 query；按地址恢复筛选并关闭旧报告上的操作上下文。
@@ -377,6 +378,7 @@ pub(super) fn page() -> Element {
             class: "admin-auction-page admin-settlement-page",
             aria_labelledby: "settlement-title",
             h1 { id: "settlement-title", {t!("page-settlement-title")} }
+            PendingCommandPanel { owner: pending }
             div { class: "admin-settlement-layout",
                 section {
                     class: "admin-settlement-layout__selector",
@@ -449,16 +451,19 @@ pub(super) fn page() -> Element {
                             }
                         }
                         if let Some(report) = report {
-                            AdminSettlementReportView {
-                                key: "{selected}",
-                                report,
-                                recovery: recovery_report,
-                                lot_page,
-                                recovery_page,
-                                action_busy,
-                                confirmation,
-                                reason,
-                                action_feedback,
+                            // key 必须位于迭代片段，才能随场次销毁报告内的分页草稿；页级命令宿主保留。
+                            for (report, recovery) in [(report, recovery_report)] {
+                                AdminSettlementReportView {
+                                    key: "{report.auction.id}",
+                                    report,
+                                    recovery,
+                                    lot_page,
+                                    recovery_page,
+                                    action_busy,
+                                    confirmation,
+                                    reason,
+                                    action_feedback,
+                                }
                             }
                         }
                     }
@@ -481,10 +486,8 @@ pub(super) fn page() -> Element {
                 reason,
                 busy: action_busy,
                 feedback: action_feedback,
-                command_ids: recovery_command_ids,
                 selected_auction_id,
                 selection_generation,
-                reload_generation,
                 recovery_reload_generation,
             }
         }

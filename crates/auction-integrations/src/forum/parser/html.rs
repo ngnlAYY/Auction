@@ -55,15 +55,25 @@ pub(super) fn extract_html_page(input: &str) -> Result<ParsedHtmlPage, ()> {
         return Err(());
     }
 
-    // 分页校验只消费用户正文区以外的主题链接；提前形成轻量事实后即可释放完整 DOM。
-    let link_selector = cached_selector(&LINK_SELECTOR)?;
-    let navigation_references = document
-        .select(link_selector)
-        .filter(|link| !link_is_user_content(*link))
-        .filter_map(|link| link.attr("href"))
-        .filter(|reference| topic_reference_candidate(reference))
-        .map(str::to_owned)
-        .collect();
+    // 分页校验只消费用户正文区以外的主题链接；沿 DOM 深度维护状态，避免每个链接重扫祖先链。
+    let mut navigation_references = Vec::new();
+    let mut ancestors = Vec::new();
+    for element in document.root_element().descendants().filter_map(ElementRef::wrap) {
+        let parent = element.parent().map(|parent| parent.id());
+        while ancestors.last().is_some_and(|(id, _)| Some(*id) != parent) {
+            ancestors.pop();
+        }
+        let user_content = ancestors.last().is_some_and(|(_, user_content)| *user_content)
+            || is_user_content(element);
+        if !user_content
+            && element.value().name() == "a"
+            && let Some(reference) =
+                element.attr("href").filter(|value| topic_reference_candidate(value))
+        {
+            navigation_references.push(reference.to_owned());
+        }
+        ancestors.push((element.id(), user_content));
+    }
     Ok(ParsedHtmlPage::new(posts, navigation_references))
 }
 
@@ -182,14 +192,18 @@ fn link_is_user_content(link: ElementRef<'_>) -> bool {
     let mut current = Some(link);
     // 用户可以任意嵌套 BBCode；固定祖先层数会把深层正文链接误当成系统作者或分页。
     while let Some(element) = current {
-        if element.attr("class").is_some_and(|classes| {
-            classes.split_ascii_whitespace().any(|class| matches!(class, "postcolor" | "signature"))
-        }) {
+        if is_user_content(element) {
             return true;
         }
         current = element.parent().and_then(ElementRef::wrap);
     }
     false
+}
+
+fn is_user_content(element: ElementRef<'_>) -> bool {
+    element.attr("class").is_some_and(|classes| {
+        classes.split_ascii_whitespace().any(|class| matches!(class, "postcolor" | "signature"))
+    })
 }
 
 fn topic_reference_candidate(reference: &str) -> bool {

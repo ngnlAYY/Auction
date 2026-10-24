@@ -78,7 +78,7 @@ where
         recovery_id: claim.recovery_id,
         action_id: claim.action_id,
         buyer_user_id: claim.buyer_user_id,
-        public_reason: public_reason.clone(),
+        public_reason,
         actor_id: RECOVERY_BUYER_BLACKLIST_ACTOR.to_owned(),
         occurred_at: claim.created_at,
     };

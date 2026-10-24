@@ -109,26 +109,24 @@ impl MailboxMaintenanceService {
         if compose.clean {
             return Ok(report);
         }
-        let matched = candidates
-            .iter()
-            .filter_map(|candidate| candidate.send.as_ref())
-            .filter(|candidate| {
+        let mut matches =
+            candidates.iter().filter_map(|candidate| candidate.send.as_ref()).filter(|candidate| {
                 candidate.world_id == world_id && compose_matches(candidate, &compose)
-            })
-            .collect::<Vec<_>>();
-        report.compose_matches = matched.len();
-        if matched.len() != 1 {
+            });
+        let Some(matched) = matches.next() else { return Ok(report) };
+        report.compose_matches = 1 + matches.count();
+        if report.compose_matches != 1 {
             return Ok(report);
         }
-        let delivery_id = matched[0].delivery_id;
+        let delivery_id = matched.delivery_id;
         report.matched_delivery = Some(delivery_id);
         check_deadline(deadline)?;
         if !self
             .store
             .begin_compose_discard(
                 delivery_id,
-                matched[0].fencing_version,
-                matched[0].send_expectation.as_ref(),
+                matched.fencing_version,
+                matched.send_expectation.as_ref(),
             )
             .await?
         {
@@ -149,11 +147,11 @@ impl MailboxMaintenanceService {
             self.store
                 .record_compose_discard(
                     delivery_id,
-                    matched[0].fencing_version,
+                    matched.fencing_version,
                     json!({
                         "observed_at": self.clock.now(),
                         "outcome": "discarded",
-                        "matched_reference": matched[0].reference,
+                        "matched_reference": matched.reference,
                         "recipient_matches": true,
                         "cod_matches": true,
                     }),
@@ -279,6 +277,7 @@ impl MailboxMaintenanceService {
         let hits = entries
             .iter()
             .filter(|entry| frozen_entry_matches(candidate, expectation, entry, self.clock.now()))
+            .take(EXACT_MATCH_CANDIDATES + 1)
             .collect::<Vec<_>>();
         if hits.is_empty() || hits.len() > EXACT_MATCH_CANDIDATES {
             return Ok(RecoveryStep::default());
@@ -370,17 +369,17 @@ impl MailboxMaintenanceService {
         if candidate.reference.is_empty() {
             return Ok(RecoveryStep::default());
         }
-        let hits =
-            entries.iter().filter(|entry| sent_matches(candidate, entry)).collect::<Vec<_>>();
-        if hits.len() != 1 {
+        let mut hits = entries.iter().filter(|entry| sent_matches(candidate, entry));
+        let Some(entry) = hits.next() else { return Ok(RecoveryStep::default()) };
+        if hits.next().is_some() {
             return Ok(RecoveryStep::default());
         }
         let mut step = RecoveryStep { matched: true, ..RecoveryStep::default() };
-        let Some(state) = self.sent_state(world_id, hits[0], &mut step).await? else {
+        let Some(state) = self.sent_state(world_id, entry, &mut step).await? else {
             return Ok(step);
         };
         // 列表标题被截断，详情完整标题必须再次包含完整 reference。
-        if state.external_mail_id != hits[0].external_mail_id
+        if state.external_mail_id != entry.external_mail_id
             || !state.subject.contains(&candidate.reference)
         {
             return Ok(step);
@@ -453,26 +452,24 @@ impl MailboxMaintenanceService {
                 });
             }
         };
-        let hits = entries
-            .iter()
-            .filter(|entry| {
-                candidate.recipient.eq_ignore_ascii_case(&entry.recipient)
-                    && notice_subject_matches(&expectation.subject, &entry.subject)
-                    // 页面时间仅精确到分钟；不向下取整 fence，不把更早同分钟邮件当作本次发送。
-                    // 模板原入站关联由 expectation owner 保证，时间窗本身不是发送身份。
-                    && entry.sent_at >= candidate.sending_at
-                    && entry.sent_at <= candidate.outcome_recorded_at
-                    && entry.sent_at <= self.clock.now()
-            })
-            .collect::<Vec<_>>();
-        if hits.len() != 1 {
+        let mut hits = entries.iter().filter(|entry| {
+            candidate.recipient.eq_ignore_ascii_case(&entry.recipient)
+                && notice_subject_matches(&expectation.subject, &entry.subject)
+                // 页面时间仅精确到分钟；不向下取整 fence，不把更早同分钟邮件当作本次发送。
+                // 模板原入站关联由 expectation owner 保证，时间窗本身不是发送身份。
+                && entry.sent_at >= candidate.sending_at
+                && entry.sent_at <= candidate.outcome_recorded_at
+                && entry.sent_at <= self.clock.now()
+        });
+        let Some(entry) = hits.next() else { return Ok(RecoveryStep::default()) };
+        if hits.next().is_some() {
             return Ok(RecoveryStep::default());
         }
         let mut step = RecoveryStep { matched: true, ..RecoveryStep::default() };
-        let Some(state) = self.sent_state(world_id, hits[0], &mut step).await? else {
+        let Some(state) = self.sent_state(world_id, entry, &mut step).await? else {
             return Ok(step);
         };
-        if state.external_mail_id != hits[0].external_mail_id
+        if state.external_mail_id != entry.external_mail_id
             || state.subject != expectation.subject
             || state.body_digest != expectation.body_digest
             || state.remaining_credits != 0

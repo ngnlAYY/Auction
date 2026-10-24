@@ -32,6 +32,7 @@ pub(super) use shell::AdminAuthenticatedShell;
 /// 管理端外壳。与公开端外壳完全独立，并沿用旧版的左侧纵向导航布局。
 #[component]
 pub(super) fn AdminShell() -> Element {
+    use_hook(super::router::restore_initial_admin_location);
     // 与 Public 外壳一致：弹窗打开期间锁定背景滚动（原 admin=false 不一致，已统一为 true）。
     use_dialog_focus_trap(true);
     // layout 在 `/login` 与认证后页面间不会重挂载；必须订阅 Router 的当前路由，不能直接
@@ -96,19 +97,22 @@ pub(super) fn AdminShell() -> Element {
         if is_login_path {
             return rsx! { AdminReturnRedirect {} };
         }
+        // 身份变化必须销毁整棵草稿/命令 Scope；单个静态组件的 key 不会形成 keyed diff。
         return rsx! {
-            AdminAuthenticatedShell {
-                key: "{identity_epoch}",
-                session: current,
-                checked_generation,
-                reload_generation,
-                readiness: readiness_state,
-                session_confirmed: mutation_permission(),
-                on_logout: move |_| {
-                    confirmed_session.set(None);
-                    identity_epoch.set(identity_epoch().saturating_add(1));
-                    reload_generation.set(reload_generation().saturating_add(1));
-                },
+            for (epoch, current) in [(identity_epoch(), current)] {
+                AdminAuthenticatedShell {
+                    key: "{epoch}",
+                    session: current,
+                    checked_generation,
+                    reload_generation,
+                    readiness: readiness_state,
+                    session_confirmed: mutation_permission(),
+                    on_logout: move |_| {
+                        confirmed_session.set(None);
+                        identity_epoch.set(identity_epoch().saturating_add(1));
+                        reload_generation.set(reload_generation().saturating_add(1));
+                    },
+                }
             }
         };
     }

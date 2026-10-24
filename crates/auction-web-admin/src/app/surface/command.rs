@@ -1,28 +1,8 @@
-//! Admin 幂等命令与动作执行骨架的统一 helper。
-//! - [`stable_scoped_command_id`]：多目标并行形态，按签名分别冻结 `command_id`，互不覆盖。
-//! - [`run_admin_action`] / [`run_admin_feedback_action`]：动作执行骨架，统一 busy
-//!   置位/复位与 spawn 边界。
-
-use std::collections::HashMap;
+//! Admin 只读校验与页面动作的 busy 边界；持久命令及重试由 pending 宿主拥有。
 
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use super::AdminActionFeedback;
-
-/// 按签名分别冻结 `command_id` 的多目标形态；不同签名互不覆盖，成功后由调用方
-/// `remove` 对应条目。
-pub fn stable_scoped_command_id(
-    mut command_ids: Signal<HashMap<String, Uuid>>,
-    signature: &str,
-) -> Uuid {
-    if let Some(command_id) = command_ids.read().get(signature).copied() {
-        return command_id;
-    }
-    let command_id = Uuid::new_v4();
-    command_ids.write().insert(signature.to_owned(), command_id);
-    command_id
-}
 
 /// 管理动作统一执行骨架：`busy` 置位 → spawn 执行 → 按结果回调 → `busy` 复位。
 /// 只负责 busy 边界与 spawn，正常结束或取消均复位 busy；反馈、命令状态清理、权威数据

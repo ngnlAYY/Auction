@@ -54,6 +54,8 @@ allowlist、runtime 开关和数据库 enabled world 的交集中新建，已有
 已登记的 Admin 首期/后继按数据库身份执行，不套用自动 bootstrap 的 UUID，也不要求两小时预览间隔。暂停/恢复命令
 按周基础身份、邮箱及本次观测版本派生，并把期望版本写入摘要；Admin 改动后不重放本周旧结果。已预览后取消的轮次
 恢复邮箱轮询；未预览的 missed 轮次不撤销与本轮无关的暂停状态。
+周排期在数据库时间、world、冻结轮次和邮箱状态读取后复核同一 drain 门禁；
+读取跨过门禁后，不再创建轮次、进入下一世界或发起邮箱状态命令，已提交结果保留。
 
 
 Fulfillment pending 通过 `prepare_next` 区分 External 与 `InternallySatisfied`：内部成功立即结束 claim，不 activate、
@@ -100,6 +102,8 @@ Mail 仅对可重试错误与超时做有界 inline retry，处理前先查持�
 批次 ID 使用借用哈希集合做期望线性去重，不复制邮件或 ID；论坛 512 字符摘要惰性生成，不先建立完整分词/拼接副本。
 recovery 摘要只借用字段，旧 prepare 查询仅保留一个必要 owned 副本，JSON、摘要与命令身份不变。
 轮询上下文直接按 claim 构造并转移给处理器，不再建立只用于克隆的临时上下文和重复复制邮箱/world 字符串。
+论坛楼层索引借用整轮 preview 的帖子 ID，固定布局移动已拥有的目录续页，避免重复复制 ID 和 BBCode；
+原顺序、逐页证明、命令身份与未知 POST 门禁不变。
 轮询将当前 claim 传给 `fetch_claimed`；生产 MoogleMail gateway 在首个详情 GET 前持久登记整窗列表身份，优先恢复同邮箱、
 同 world 的待读前缀。完成 cursor 与队列前缀在同一 fenced 事务提交，读取取消或业务失败保留未完成后缀，不能靠未读列表恢复。
 

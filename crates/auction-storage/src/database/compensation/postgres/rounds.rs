@@ -32,8 +32,23 @@ pub(crate) async fn list(
         .await
         .map_err(|_| storage_error("设置公开补偿池读取隔离级别失败"))?;
 
+    // 先按原游标或编号页选定批次，再读取账本合计，避免页外场次重复执行 LATERAL 聚合。
     let rows = sqlx::query(
-        "SELECT
+        "WITH page_auctions AS MATERIALIZED (
+            SELECT a.id
+            FROM public.auction_settlements AS settlement
+            JOIN public.auctions AS a
+              ON a.id = settlement.auction_id AND a.status = 'settled'
+            JOIN public.worlds AS world ON world.id = a.world_id
+            WHERE (
+                NOT $1::boolean
+                OR a.sequence < $2::bigint
+                OR (a.sequence = $2::bigint AND a.id < $3::uuid)
+            )
+            ORDER BY a.sequence DESC, a.id DESC
+            LIMIT $4 OFFSET $5
+         )
+         SELECT
             a.id AS auction_id,
             a.world_id,
             a.sequence AS auction_sequence,
@@ -44,10 +59,9 @@ pub(crate) async fn list(
             settlement.closing_pool_balance AS closing_balance,
             totals.movement_count,
             settlement.settled_at
-         FROM public.auction_settlements AS settlement
-         JOIN public.auctions AS a
-           ON a.id = settlement.auction_id AND a.status = 'settled'
-         JOIN public.worlds AS world ON world.id = a.world_id
+         FROM page_auctions
+         JOIN public.auctions AS a ON a.id = page_auctions.id
+         JOIN public.auction_settlements AS settlement ON settlement.auction_id = a.id
          JOIN LATERAL (
              SELECT
                  count(*)::bigint AS movement_count,
@@ -60,13 +74,7 @@ pub(crate) async fn list(
              FROM public.compensation_ledger AS ledger
              WHERE ledger.auction_id = settlement.auction_id
          ) AS totals ON true
-         WHERE (
-             NOT $1::boolean
-             OR a.sequence < $2::bigint
-             OR (a.sequence = $2::bigint AND a.id < $3::uuid)
-         )
-         ORDER BY a.sequence DESC, a.id DESC
-         LIMIT $4 OFFSET $5",
+         ORDER BY a.sequence DESC, a.id DESC",
     )
     .bind(use_boundary)
     .bind(boundary_sequence)

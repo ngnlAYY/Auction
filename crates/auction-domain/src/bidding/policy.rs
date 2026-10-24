@@ -11,10 +11,6 @@ pub const DEFAULT_START_PRICE: i64 = 1_000;
 pub const DEFAULT_BID_INCREMENT_PPM: i64 = 50_000;
 pub const DEFAULT_PROXY_MAX_OUTBID_USES: u32 = 3;
 pub const DEFAULT_FINAL_PHASE_LEAD: Duration = Duration::minutes(15);
-pub const SMALL_BID_INCREMENT: i64 = 30_000;
-pub const REGULAR_BID_INCREMENT: i64 = 50_000;
-pub const LARGE_BID_THRESHOLD: i64 = 2_000_000;
-pub const SMALL_BID_THRESHOLD: i64 = 200_000;
 pub const PROXY_LAST_INCREMENT: i64 = 1_000;
 /// 新场次固定最后15分钟触发；既有场次仍使用自己的冻结快照。
 pub const DEFAULT_SOFT_CLOSE_WINDOW: Duration = Duration::minutes(15);

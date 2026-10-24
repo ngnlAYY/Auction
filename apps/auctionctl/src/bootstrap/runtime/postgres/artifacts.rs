@@ -30,8 +30,8 @@ pub(crate) use filesystem::{
 pub(crate) use input::read_bootstrap_cookie;
 #[cfg(feature = "postgres")]
 pub(crate) use manifest::{
-    is_sha256_hex, manifest_archive_path, read_backup_manifest, sha256_file, sha256_text,
-    validate_backup_manifest,
+    hex_digest, is_sha256_hex, manifest_archive_path, read_backup_manifest, sha256_bytes,
+    sha256_file, sha256_text, validate_backup_manifest,
 };
 #[cfg(feature = "postgres")]
 pub(crate) use process::{run_external_command, run_pg_dump, verify_archive};

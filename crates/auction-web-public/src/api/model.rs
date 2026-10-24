@@ -97,26 +97,27 @@ pub(crate) struct CatalogRow {
 
 /// 将稳定 lot wire 契约转换为页面表格所需的展示行。
 pub(crate) trait LotEnvelopeRows {
-    fn rows(&self) -> Vec<CatalogRow>;
+    /// 移出列表负载，只保留分页与拍卖元数据；目录快照不再同时持有两份装备字符串。
+    fn take_rows(&mut self) -> Vec<CatalogRow>;
 }
 
 impl LotEnvelopeRows for LotEnvelope {
-    fn rows(&self) -> Vec<CatalogRow> {
-        match self.lots.as_ref() {
+    fn take_rows(&mut self) -> Vec<CatalogRow> {
+        match self.lots.take() {
             Some(LotItems::Preview(lots)) => lots
-                .iter()
+                .into_iter()
                 .map(|lot| CatalogRow {
-                    lot_id: lot.id.clone(),
-                    code: lot.code.clone(),
-                    name: lot.equipment_name.clone(),
-                    game_equipment_url: lot.game_equipment_url.clone(),
+                    lot_id: lot.id,
+                    code: lot.code,
+                    name: lot.equipment_name,
+                    game_equipment_url: lot.game_equipment_url,
                     // 缺失分类沿用旧版归入 Other，但不把缺失重新编码成 wire 空字符串。
-                    category: lot.equipment_category.clone().unwrap_or_else(|| "other".to_owned()),
-                    equipment_group: lot.equipment_group.clone(),
-                    status: lot.status.clone(),
-                    seller_name: lot.seller_name.clone(),
+                    category: lot.equipment_category.unwrap_or_else(|| "other".to_owned()),
+                    equipment_group: lot.equipment_group,
+                    status: lot.status,
+                    seller_name: lot.seller_name,
                     level: lot.equipment_level,
-                    primary_attribute_initials: lot.primary_attribute_initials.clone(),
+                    primary_attribute_initials: lot.primary_attribute_initials,
                     avg_roll: lot.avg_roll,
                     start_price: lot.start_price,
                     current_price: lot.start_price,
@@ -126,24 +127,24 @@ impl LotEnvelopeRows for LotEnvelope {
                 })
                 .collect(),
             Some(LotItems::Live(lots)) => lots
-                .iter()
+                .into_iter()
                 .map(|lot| CatalogRow {
-                    lot_id: lot.id.clone(),
+                    lot_id: lot.id,
                     code: lot_code_for(&lot.equipment.category, lot.lot_number),
-                    name: lot.equipment.name.clone(),
-                    game_equipment_url: lot.equipment.game_equipment_url.clone(),
-                    category: lot.equipment.category.clone(),
-                    equipment_group: lot.equipment.equipment_group.clone(),
-                    status: lot.status.clone(),
-                    seller_name: lot.seller_name.clone(),
+                    name: lot.equipment.name,
+                    game_equipment_url: lot.equipment.game_equipment_url,
+                    category: lot.equipment.category,
+                    equipment_group: lot.equipment.equipment_group,
+                    status: lot.status,
+                    seller_name: lot.seller_name,
                     level: lot.equipment.level,
-                    primary_attribute_initials: lot.equipment.primary_attribute_initials.clone(),
+                    primary_attribute_initials: lot.equipment.primary_attribute_initials,
                     avg_roll: lot.equipment.avg_roll,
                     start_price: lot.start_price,
                     current_price: lot.current_price,
                     next_bid: lot.next_bid,
-                    leader_name: lot.leader_name.clone(),
-                    remaining: lot.effective_end_at.clone().unwrap_or_default(),
+                    leader_name: lot.leader_name,
+                    remaining: lot.effective_end_at.unwrap_or_default(),
                 })
                 .collect(),
             None => Vec::new(),

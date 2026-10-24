@@ -178,11 +178,11 @@ pub(crate) fn executable_javascript(source: &str) -> Option<String> {
 
 pub(crate) fn extract_equipment_id(value: &str) -> Option<String> {
     let marker = "equips.set(";
-    let matches = value.match_indices(marker).take(2).collect::<Vec<_>>();
-    if matches.len() != 1 {
+    let mut matches = value.match_indices(marker);
+    let (marker_start, _) = matches.next()?;
+    if matches.next().is_some() {
         return None;
     }
-    let (marker_start, _) = matches[0];
     if marker_start > 0
         && !value[..marker_start]
             .chars()

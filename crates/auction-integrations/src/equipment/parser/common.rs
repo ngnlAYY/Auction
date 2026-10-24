@@ -9,7 +9,15 @@ pub(super) fn selector(raw: &str) -> Result<Selector, EquipmentParseError> {
 }
 
 pub(super) fn normalize_text(value: impl AsRef<str>) -> String {
-    value.as_ref().split_whitespace().collect::<Vec<_>>().join(" ")
+    let value = value.as_ref().trim();
+    let mut normalized = String::with_capacity(value.len());
+    for word in value.split_whitespace() {
+        if !normalized.is_empty() {
+            normalized.push(' ');
+        }
+        normalized.push_str(word);
+    }
+    normalized
 }
 
 pub(super) fn valid_text(value: &str, maximum: usize) -> bool {

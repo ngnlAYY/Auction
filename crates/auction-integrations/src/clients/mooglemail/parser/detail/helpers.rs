@@ -172,11 +172,12 @@ pub(crate) fn canonical_mail_body_digest(body: &str) -> [u8; 32] {
 
 pub(crate) fn take_cod_receipt_amount(value: &str) -> Option<i64> {
     const MARKER: &str = "CoD Paid: ";
-    let matches = value.match_indices(MARKER).take(2).collect::<Vec<_>>();
-    if matches.len() != 1 {
+    let mut matches = value.match_indices(MARKER);
+    let (start, _) = matches.next()?;
+    if matches.next().is_some() {
         return None;
     }
-    let remainder = &value[matches[0].0 + MARKER.len()..];
+    let remainder = &value[start + MARKER.len()..];
     let amount_end = remainder
         .find(|character: char| !character.is_ascii_digit() && character != ',')
         .unwrap_or(remainder.len());
@@ -188,14 +189,12 @@ pub(crate) fn take_cod_receipt_amount(value: &str) -> Option<i64> {
 
 pub(crate) fn valid_removed_attachment_receipt(value: &str, expected: bool) -> bool {
     const MARKER: &str = "Removed attachment:";
-    let matches = value.match_indices(MARKER).take(2).collect::<Vec<_>>();
-    if !expected {
-        return matches.is_empty();
-    }
-    if matches.len() != 1 {
+    let mut matches = value.match_indices(MARKER);
+    let Some((start, _)) = matches.next() else { return !expected };
+    if !expected || matches.next().is_some() {
         return false;
     }
-    let remainder = &value[matches[0].0 + MARKER.len()..];
+    let remainder = &value[start + MARKER.len()..];
     let line =
         remainder.trim_start_matches([' ', '\t']).split(['\r', '\n']).next().unwrap_or_default();
     !line.trim().is_empty()

@@ -36,6 +36,8 @@ Public 竞价与 Admin 管理状态留在各 surface，本 crate 不依赖存储
 手机（48rem 以下）及触控横屏（64rem 以下）采用底部弹窗，编辑控件保持 16px 字号与 44px 最小高度，
 分页与操作组允许换行。共享安全区变量供两端页面留出系统边缘空间；弹窗按可见视口限制尺寸和滚动范围。
 `TruncatedText` 的浮层按可见视口定位，视口移动或缩放时关闭；弹窗中的浮层挂载在所属弹窗内。
+内容改变后在 DOM 提交后重测截断并关闭旧正文浮层；尺寸监听读取最新缩写判定，
+不要求固定尺寸盒子额外产生 ResizeObserver 通知。
 
 ## 命令与浏览器状态
 
@@ -76,6 +78,8 @@ Public 校时。CSRF/Basic Auth 由 Admin 构造请求，不能在共享层变�
 整数精确格式；`Time` 与两端时间辅助函数直接订阅当前 I18n 语言，并调用
 `i18n::format_localized_time_for_language` 格式化 Asia/Shanghai 时间，不等待 `<html lang>` 同步 effect，
 也不参与业务时钟判断；不再保留读取 DOM 语言的兼容入口。
+格式化器仅缓存最近语言的 `Intl.DateTimeFormat`，表格共用同一对象；时间值及输出不缓存，
+语言和 Asia/Shanghai 选项不变。
 
 ## 语言选择
 

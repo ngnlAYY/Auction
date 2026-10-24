@@ -14,8 +14,12 @@ use crate::app::surface::pending::{PendingCommandPanel, use_pending_commands};
 
 /// 加载并展示一个拍卖的 Admin lot 安全投影。
 pub fn page(auction_id: String) -> Element {
-    // Router 会复用相同路由组件；按拍卖身份重挂载资源与交互状态，历史跳转不能沿用旧场次。
-    rsx! { AdminAuctionLotsPage { key: "{auction_id}", auction_id } }
+    // Router 会复用相同路由组件；迭代片段按拍卖身份重挂载资源与交互状态，历史跳转不能沿用旧场次。
+    rsx! {
+        for auction_id in [auction_id] {
+            AdminAuctionLotsPage { key: "{auction_id}", auction_id }
+        }
+    }
 }
 
 #[component]

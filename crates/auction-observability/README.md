@@ -28,6 +28,8 @@ Admin 可由 runtime 覆盖，应用装配只传入敏感 TOML 中的 OTLP heade
 64 MiB 请求体上限（编码及压缩后），超限计入导出失败，不影响业务命令。未启用 gRPC 或 OTel 内部日志。
 上游 HTTP builder 会合并环境导出头，`auction-config` 在启用 tracing 时拒绝这类环境注入，装配根只传入
 校验后的 TOML 配置（见[配置边界](ops/config/README.md#文件职责)）。
+显式 OTLP endpoint 是完整 trace URL，原样传给 SDK，不自动追加 `/v1/traces`。
+W3C carrier 借用已筛选的 `traceparent/tracestate`，不建立逐请求字符串 HashMap；长度门禁、解析器及父级语义不变。
 批处理器在关闭等待超时或被丢弃时取消所属任务，不让 exporter 和批次定时器脱离生命周期。
 导出状态、失败计数与时间戳在同一锁内更新和读取，防止并发心跳取得相互矛盾的状态组合；
 逐 span 的队列丢弃计数仍使用原子路径，不争用该锁。

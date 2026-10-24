@@ -4,13 +4,16 @@
 
 use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, Time, TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
-use uuid::Uuid;
 
-use std::{cmp::Ordering, collections::HashMap};
+use std::{cell::RefCell, cmp::Ordering, rc::Rc};
 
 use crate::api::{
     AdminRename, AdminRenamePage, AdminRenameRevertCommand, fetch_admin_renames,
     prepare_admin_rename_revert, revert_admin_rename,
+};
+use crate::app::surface::pending::{
+    PendingCommandPanel, PendingCommands, set_if_alive, use_pending_command_gate,
+    use_pending_commands_with_gate,
 };
 use crate::app::surface::sort::{SortDirection, SortableTh, directed};
 
@@ -27,10 +30,9 @@ pub(super) fn page() -> Element {
         (current.name.clone(), current.page)
     });
     let mut refresh = use_signal(|| 0_u64);
-    let mut busy_rename = use_signal(|| None::<String>);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
-    // 按改名事实保留完整请求；关闭确认框或切换目标不能丢弃结果尚未确认的命令。
-    let mut commands = use_signal(HashMap::<String, AdminRenameRevertCommand>::new);
+    let command_gate = use_pending_command_gate();
+    let pending = use_pending_commands_with_gate(refresh, Some(command_gate));
     let mut selected = use_signal(|| None::<AdminRename>);
     let pagination =
         use_admin_pagination("renames", &["page_size"], Some(200), i64::from(i32::MAX));
@@ -49,50 +51,47 @@ pub(super) fn page() -> Element {
         let Some(rename) = selected() else {
             return;
         };
-        if rename.reverted_at.is_some() || busy_rename().is_some() {
+        if rename.reverted_at.is_some() || pending.any_busy() || pending.contains(&rename.user_id) {
             return;
         }
-        notice.set(None);
-        busy_rename.set(Some(rename.id.clone()));
-        let existing_command = commands.read().get(&rename.id).cloned();
-        let mut busy_rename = busy_rename;
-        spawn(async move {
-            let result = async {
-                let command = match existing_command {
-                    Some(command) => command,
-                    None => {
-                        let command = prepare_admin_rename_revert(Uuid::new_v4(), &rename).await?;
-                        // 在发送 mutation 前冻结；传输失败、正文无效或取消确认都不能换 fence。
-                        commands.write().insert(rename.id.clone(), command.clone());
-                        command
-                    }
-                };
-                revert_admin_rename(&command).await
-            }
-            .await;
-            match result {
-                Ok(_) => {
-                    notice.set(Some(AdminActionFeedback::Success));
-                    commands.write().remove(&rename.id);
-                    selected.set(None);
+        // 首次准备成功后冻结 fence；重放只使用同一请求，不能重新读取用户版本。
+        let frozen = Rc::new(RefCell::new(None::<AdminRenameRevertCommand>));
+        let submitted = pending.submit(
+            rename.user_id.clone(),
+            t!("admin-renames-revert"),
+            move |command_id| {
+                let rename = rename.clone();
+                let frozen = Rc::clone(&frozen);
+                async move {
+                    let existing = frozen.borrow().clone();
+                    let command = match existing {
+                        Some(command) => command,
+                        None => {
+                            let command = prepare_admin_rename_revert(command_id, &rename).await?;
+                            *frozen.borrow_mut() = Some(command.clone());
+                            command
+                        }
+                    };
+                    revert_admin_rename(&command).await
+                }
+            },
+            move |_| set_if_alive(notice, Some(AdminActionFeedback::Success)),
+            move |code| {
+                if matches!(code.as_str(), "stale_user_state" | "rename_not_revertable") {
+                    let mut refresh = refresh;
                     refresh.set(refresh().saturating_add(1));
                 }
-                Err(code) => {
-                    if matches!(code.as_str(), "stale_user_state" | "rename_not_revertable") {
-                        // 明确的业务拒绝没有写入当前命令；重新读取后才能由操作者开启新命令。
-                        commands.write().remove(&rename.id);
-                        selected.set(None);
-                        refresh.set(refresh().saturating_add(1));
-                    }
-                    notice.set(Some(AdminActionFeedback::Error(code)));
-                }
-            }
-            busy_rename.set(None);
-        });
+                set_if_alive(notice, Some(AdminActionFeedback::Error(code)));
+            },
+        );
+        if submitted {
+            notice.set(None);
+            selected.set(None);
+        }
     };
 
-    let state = renames.read_unchecked().clone();
-    let content = match state {
+    let state = renames.read_unchecked();
+    let content = match &*state {
         None => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Loading,
@@ -103,7 +102,7 @@ pub(super) fn page() -> Element {
         Some(Err(error)) => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Error,
-                title: admin_api_error_message(&error),
+                title: admin_api_error_message(error),
                 detail: "",
                 // 错误态提供页内重试入口，不必刷新浏览器。
                 retry_label: t!("admin-retry"),
@@ -118,7 +117,11 @@ pub(super) fn page() -> Element {
                 page: page.clone(),
                 sort: query_state().sort.clone(),
                 direction: query_state().direction,
-                on_select: move |rename| selected.set(Some(rename)),
+                on_select: move |rename: AdminRename| {
+                    if !pending.any_busy() && !pending.contains(&rename.user_id) {
+                        selected.set(Some(rename));
+                    }
+                },
                 on_sort_change: move |(sort, direction)| {
                     // 排序只影响当前页展示顺序；筛选与翻页保持不变。
                     let mut next = query_state();
@@ -126,7 +129,6 @@ pub(super) fn page() -> Element {
                     next.direction = direction;
                     on_sort_change.push(next);
                 },
-                busy_rename,
             }
             if page.renames.is_empty() {
                 AsyncState {
@@ -172,6 +174,7 @@ pub(super) fn page() -> Element {
     rsx! {
         section { class: "admin-users-page", aria_labelledby: "admin-renames-title",
             h1 { id: "admin-renames-title", {t!("page-renames-title")} }
+            PendingCommandPanel { owner: pending }
             div { class: "admin-users-renames-filter",
                 label {
                     r#for: "rename-name",
@@ -196,7 +199,7 @@ pub(super) fn page() -> Element {
                 Dialog {
                     title: t!("admin-renames-revert-confirm-title"),
                     close_label: t!("admin-renames-cancel"),
-                    busy: busy_rename().is_some(),
+                    busy: pending.any_busy(),
                     on_close: move |_| selected.set(None),
                     p {
                         {t!(
@@ -208,14 +211,14 @@ pub(super) fn page() -> Element {
                     div { class: "admin-shell__dialog-actions",
                         button {
                             r#type: "button",
-                            disabled: busy_rename().is_some(),
+                            disabled: pending.any_busy(),
                             onclick: confirm_revert,
                             {t!("admin-users-action-confirm")}
                         }
                         button {
                             r#type: "button",
                             autofocus: true,
-                            disabled: busy_rename().is_some(),
+                            disabled: pending.any_busy(),
                             onclick: move |_| selected.set(None),
                             {t!("admin-renames-cancel")}
                         }
@@ -234,14 +237,14 @@ fn RenameTable(
     direction: SortDirection,
     on_select: EventHandler<AdminRename>,
     on_sort_change: EventHandler<(String, SortDirection)>,
-    busy_rename: Signal<Option<String>>,
 ) -> Element {
+    let pending = use_context::<PendingCommands>();
     // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
     let mut renames = page.renames;
     sort_renames(&mut renames, &sort, direction);
     rsx! {
         div { class: "admin-shell__table-wrap",
-            table { class: "admin-shell__table", aria_busy: busy_rename().is_some().to_string(),
+            table { class: "admin-shell__table", aria_busy: pending.any_busy().to_string(),
                 auction_web_shared::TableColumns { layout: "admin-renames", widths: vec![21, 21, 9, 20, 20, 9] }
                 thead {
                     tr {
@@ -289,6 +292,7 @@ fn RenameTable(
 
 #[component]
 fn RenameRow(rename: AdminRename, on_select: EventHandler<AdminRename>) -> Element {
+    let pending = use_context::<PendingCommands>();
     let is_reverted = rename.reverted_at.is_some();
     let rename_for_action = rename.clone();
     rsx! {
@@ -316,6 +320,7 @@ fn RenameRow(rename: AdminRename, on_select: EventHandler<AdminRename>) -> Eleme
                 } else {
                     button {
                         r#type: "button",
+                        disabled: pending.any_busy() || pending.contains(&rename_for_action.user_id),
                         onclick: move |_| on_select.call(rename_for_action.clone()),
                         {t!("admin-renames-revert")}
                     }

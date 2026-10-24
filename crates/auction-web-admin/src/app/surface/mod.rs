@@ -66,7 +66,7 @@ use auction_web_shared::{
     use_locale_effects,
 };
 
-pub(super) use command::{run_admin_action, run_admin_feedback_action, stable_scoped_command_id};
+pub(super) use command::{run_admin_action, run_admin_feedback_action};
 use router::Route;
 pub(super) use shared::{AdminActionFeedback, admin_api_error_message, format_admin_time};
 
@@ -82,6 +82,7 @@ pub fn run() {
 
 #[component]
 fn App() -> Element {
+    router::use_initial_admin_location();
     // 语言资源在编译期内嵌；管理端默认简体中文，并沿用已保存的语言偏好。
     let i18n = use_init_i18n(|| {
         I18nConfig::new(initial_language(DEFAULT_ADMIN_LOCALE))

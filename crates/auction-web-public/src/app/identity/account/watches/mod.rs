@@ -126,9 +126,11 @@ fn WorldWatches(user_id: String, world: String) -> Element {
                     p { class: "public-account-empty", {t!("account-watches-no-current")} }
                 },
                 Some(Ok(Some(watched))) => rsx! {
-                    table::WatchedTable {
-                        key: "{user_id}:{world}:{watched.auction.id}",
-                        watched: watched.clone(),
+                    for watched in [watched.clone()] {
+                        table::WatchedTable {
+                            key: "{user_id}:{world}:{watched.auction.id}",
+                            watched,
+                        }
                     }
                 },
             }
