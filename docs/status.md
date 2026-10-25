@@ -35,6 +35,33 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-25 R33 装备状态准备与注册账号提示发布
+
+按用户授权，冻结干净提交 `9831675e5354ea1c05f08982942a22459f78c1e5`，以通用 Linux x86_64 GNU、
+`CARGO_BUILD_JOBS=2` 重新执行完整 `just verify` 与 `just release-check`，均退出 0。API-only 与 embedded
+四程序分别重新编译约 6 分 12 秒、6 分 17 秒，双端 WASM 经本轮 bundle 生成并通过资源隔离、确定性归档门禁。
+源码指纹为 `ddcc83a65052f82c313c81e2ac7f74800f2168a5c16fe8b27c3658c4cb1888da`，
+归档 SHA-256 为 `e0ee2bb92a06d442837335b4012b14ef293dfbea0b7e25bdf565e142d299eb8f`。
+
+- `auction-integrations` 的装备状态准备与 contracts/HTTP/Public Web 的 P29 注册账号提示同版发布。
+  既有 runtime 配置含 1 个机器人显示名；未改配置或手工调用新业务接口。外部契约见
+  [附件装备状态准备](ops/mail/diagnostics.md#附件装备状态准备)与[P29 注册账号提示](docs/contracts/routes.md#p29-注册账号提示)。
+- 使用新 R33 私有目录、冻结计划与 launch-once 入口，上传并核验 30 个包文件；旧 Worker 正常 drain。
+  原 CLI 创建 schema64 数据库恢复点，新 CLI 完成离线验证，未恢复数据库；schema64 → schema64，无待执行的新迁移，已发布迁移未重放。
+  停稳后的 88 张业务表共 8,818 行，更新前后逐表行数与完整行摘要一致。
+- 三角色配置、runtime、managed、发送预算、unit、tmpfiles 和原 runtime 锁 inode/0600 权限均保持。
+  既有三个拍卖策略快照仍为 v1，包括 Main 第003期草稿；原三条人工核对投递完整行摘要保持，未重排、补发或强制结清。
+- `2026-10-25 12:26:38 UTC` 部署完成，`deploy.exit=0`，按 Worker → Admin → Public 启动，三角色 readiness 200，
+  两端与公网共 16 项静态资源匹配。`12:29:44 UTC` 仍为同一组进程、`NRestarts=0`，日志 WARN/ERROR 为零且未截断，
+  runtime 未决命令为零，人工核对投递仍为三条。
+- 本地隔离角色在本轮开始前已经全部停止，更新后保持停止；仅构建刷新开发 Web 工作目录，未启动本地 Worker 或刷新数据库。
+  本轮未新增或执行业务、浏览器、真实解锁／发送或注册流程测试；下文先前隔离验证记录保留原时点与范围。
+  Rust LSP 对 26 个变化文件无有效回答，未记为通过。
+
+回执在 `target/dist/equipment-unlock-20261025-ops-r33/`：本轮构建门禁、`plan.json`、`upload.json`、`launch.json`、
+`postflight.json`、`stability.json`、`DEPLOYMENT-SUMMARY.json` 及 12 份 `cloud-evidence/` 闭集脱敏回执。
+敏感配置、原始日志及数据库归档留在云端私有目录；部署就绪不扩展为真实游戏协议验收。
+
 ### 2026-10-25 登录页显示配置机器人账号
 
 config 将既有 runtime `bot_players` 投影给 Public，装配根只向 HTTP 注入非敏感名单；
