@@ -17,7 +17,7 @@
 
 ## 基线与统计口径
 
-`auction-http` 拥有路径注册，`auction-contracts` 拥有稳定 DTO。feature API 现为 Public **26** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，P25/P26 与 P27/P28 各共用一个账号偏好路径，不计健康、静态资源或代理路径。仅支持 PostgreSQL；已发布路径、字段、错误码和未装配能力的错误处理必须保留，运行证据见[验证状态](docs/status.md)。
+`auction-http` 拥有路径注册，`auction-contracts` 拥有稳定 DTO。feature API 现为 Public **27** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，P25/P26 与 P27/P28 各共用一个账号偏好路径，不计健康、静态资源或代理路径。仅支持 PostgreSQL；已发布路径、字段、错误码和未装配能力的错误处理必须保留，运行证据见[验证状态](docs/status.md)。
 
 首次部署另有独立进程的 `/setup`、部署码验证接口和两个配置接口，不计入 feature API；正式 Admin 不注册它们，`/setup` 在正式静态入口返回 404。
 
@@ -124,6 +124,16 @@ Admin 冷启动在认证等待前恢复原路径的 query，显式筛选/数量�
 | P26 | PUT | /api/v1/me/lot-watch-preference | Public session、origin/CSRF、限流；无 query；独立版本 CAS；`no-store` | 200 | 400, 401, 403, 409, 413/415, 422, 429, 503/504 |
 | P27 | GET | /api/v1/me/session-preference | Public session；无 query；账号登录时长及当前截止；`no-store` | 200 | 400, 401, 503/504 |
 | P28 | PUT | /api/v1/me/session-preference | Public session、origin、限流、身份前置条件；无 query；独立版本 CAS；`no-store` | 200 | 400, 401, 403, 409, 413/415, 422, 429, 503/504 |
+| P29 | GET | /api/v1/registration-info | 公开；无 query；配置中的机器人账号安全投影；`no-store` | 200 | 400, 503/504 |
+
+### P29 注册账号提示
+
+返回 `PublicRegistrationInfoResponse {bot_players: string[]}`，只包含 Public 启动时从 `runtime_config_file`
+顶层 `bot_players` 读取的已校验显示名，保持配置顺序；不暴露完整 runtime、Cookie、Key 或数据库凭据。
+未配置名单返回空数组，不依赖数据库或调用游戏；未注入配置快照返回 `503 configuration_unavailable`。
+非空查询返回 `400 invalid_query`，除 GET 外均为 `405 method_not_allowed`，成功与失败均 `no-store`，不写 Cookie。
+登录提示按五语文案显示全部配置账号；名单为空、加载中或请求失败时保留原通用提示，不猜测账号。
+该名单展示不是远端邮箱可用证明。修改配置后重启 Public 生效，不改变 Worker 内部履约或注册处理规则。
 
 ### P06 会话读取与 Cookie 同步
 
@@ -510,7 +520,7 @@ POST `:validate` 只执行严格候选校验；PUT 以 `command_id` 与 fingerpr
 跨组邮件读取/投递预算复用 Worker 启动校验谓词；Admin 的可选 `worker_config_file` 仅提供非敏感部署基值。
 四种 managed 组合、缺基值时的拒绝和启动快照边界见[配置手册](ops/config/README.md#runtime-共享与重启)，
 只约束新候选，不用新校验改写既有物理文件或 durable 命令恢复。
-启动恢复任何失败（含结果未知或需人工核对）都阻断 Admin 监听，仅恢复成功且文件指纹匹配启动快照才继续装配。成功更新返回 `restart_required`，不伪造热加载。运行时文件路径由三角色主 TOML 的 `runtime_config_file` 选择；Public 仅消费装备标色规则用于公开分组，Admin/Worker 继续按各自边界应用其余字段；文档还含兼容 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 对 MoogleMail 只把这些业务字段投影为启动快照；transport、凭据、mailbox identity 和全局启用开关仍由 Worker 主配置拥有，敏感 TOML、Cookie、密钥和连接串不进入该文档。
+启动恢复任何失败（含结果未知或需人工核对）都阻断 Admin 监听，仅恢复成功且文件指纹匹配启动快照才继续装配。成功更新返回 `restart_required`，不伪造热加载。运行时文件路径由三角色主 TOML 的 `runtime_config_file` 选择；Public 仅消费装备标色规则用于公开分组，并通过 P29 展示 `bot_players` 注册账号，Admin/Worker 继续按各自边界应用其余字段；文档还含兼容 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 对 MoogleMail 只把这些业务字段投影为启动快照；transport、凭据、mailbox identity 和全局启用开关仍由 Worker 主配置拥有，敏感 TOML、Cookie、密钥和连接串不进入该文档。
 Admin 重启后 `allow_manual_early_open` 与 `allow_manual_early_settlement` 分别决定人工提前开放、人工提前结算 capability 和对应锁内校验，两者默认关闭，计划时间已到的正常开放仍允许。`[equipment_source]` 冻结为装备来源适配器的 host/path allowlist、响应上限、共享请求间隔、全请求超时及 Admin 手工录入的可交易装备开关（默认关闭且不放宽来源安全或邮件过滤）；固定 HTTPS origin、无重定向、精确 world 路径及流式有界读取始终失败关闭。Admin WebUI 把该闭集投影映射为分组开关、数字、列表与文本输入，保存仍提交完整候选文档，因此所有页面修改最终由 PUT 的原子文件替换边界写回，不存在只在浏览器内生效的旁路。
 更新和启动恢复从首次读取到文件/账本收口持有同一跨进程 workflow 锁，锁竞争返回 `503 storage_unavailable`，客户端可复用原 command ID 重试。
 

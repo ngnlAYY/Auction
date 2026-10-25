@@ -45,6 +45,9 @@ GET/PUT：两者复用会话、来源/CSRF、限流、strict JSON、JSON 405 与
 普通 GET session 不写入或清除 Cookie；P06 新增空 body、无 query 的 PUT，仅按权威 `inspect` 同步浏览器持久期。
 登录、退出、时长保存/重放及显式同步由浏览器同源原生锁串行化；重放保存仍另读当前期限，不延长数据库授权期。
 完整方法、错误、400 天上限及同版页面要求见[会话同步契约](docs/contracts/routes.md#p06-会话读取与-cookie-同步)。
+[public/registration.rs](crates/auction-http/src/http/public/registration.rs) 拥有 P29 匿名注册说明，仅读取装配根注入的 bot 名单快照，
+不读取配置文件、数据库或游戏凭据。响应直接序列化共享安全 DTO，不逐请求复制名单；方法、缓存与空名单边界见
+[注册提示契约](docs/contracts/routes.md#p29-注册账号提示)。
 [admin/forum/status.rs](crates/auction-http/src/http/admin/forum/status.rs) 拥有 Admin 认证论坛状态 GET，
 严格空查询、`no-store`、不访远端论坛、不执行恢复授权。
 [admin/runtime_config/taxonomy.rs](crates/auction-http/src/http/admin/runtime_config/taxonomy.rs) 把领域统一装备词典

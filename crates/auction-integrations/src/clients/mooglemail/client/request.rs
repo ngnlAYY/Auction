@@ -162,7 +162,7 @@ impl MoogleMailClient {
         diagnostic.body.take().ok_or_else(|| self.protocol(target))
     }
 
-    /// 对 compose/detail typed target 执行恰好一次表单 POST。
+    /// 对 compose/detail/Armory organize typed target 执行恰好一次表单 POST。
     /// 请求开始后，无论是网络错误、响应结构错误还是远端明确拒绝，都不能证明远端没有
     /// 发生变化，因此统一返回 write_unknown，由上层进入人工对账或基于页面证明继续。
     pub async fn post(
@@ -213,7 +213,7 @@ impl MoogleMailClient {
             .body(form.encode())
             .build()
             .map_err(|_| self.configuration_for(operation, target.world))?;
-        // 先前 compose 步骤可能已经暂存资产；失锁不能被降级为可安全重发。
+        // 先前步骤可能已准备装备或暂存 compose 资产；失锁不能被降级为可安全重发。
         self.check_ownership().await.map_err(|_| self.write_unknown(operation, target.world))?;
         if !cookie.is_active() {
             return Err(self.write_unknown(operation, target.world));

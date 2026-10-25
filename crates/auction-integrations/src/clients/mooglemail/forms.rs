@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::HashSet, fmt};
 
 use url::form_urlencoded;
 
@@ -131,6 +131,22 @@ impl MoogleMailForm {
         Ok(form)
     }
 
+    /// 仅把本批明确装备移出仓库，不支持切换或重新入库。
+    pub(crate) fn unstore_equipment(
+        token: &MoogleMailToken,
+        equipment_ids: &[&str],
+    ) -> Result<Self, MoogleMailError> {
+        Self::inventory_action(MoogleMailOperation::EquipmentUnstore, token, equipment_ids)
+    }
+
+    /// `set_locked=-1` 同时清除 protected 和 locked，不触碰穿戴状态。
+    pub(crate) fn unlock_equipment(
+        token: &MoogleMailToken,
+        equipment_ids: &[&str],
+    ) -> Result<Self, MoogleMailError> {
+        Self::inventory_action(MoogleMailOperation::EquipmentUnlock, token, equipment_ids)
+    }
+
     /// 返回表单对应的外部动作，不暴露任何字段值。
     pub const fn operation(&self) -> MoogleMailOperation {
         self.operation
@@ -180,6 +196,32 @@ impl MoogleMailForm {
                 ("action_value".to_owned(), "0".to_owned()),
             ],
         })
+    }
+
+    fn inventory_action(
+        operation: MoogleMailOperation,
+        token: &MoogleMailToken,
+        equipment_ids: &[&str],
+    ) -> Result<Self, MoogleMailError> {
+        let field = match operation {
+            MoogleMailOperation::EquipmentUnstore => "set_stored",
+            MoogleMailOperation::EquipmentUnlock => "set_locked",
+            _ => return Err(form_configuration(operation)),
+        };
+        let mut seen = HashSet::with_capacity(equipment_ids.len());
+        if token.expose().is_empty()
+            || equipment_ids.is_empty()
+            || equipment_ids.iter().any(|id| !valid_decimal_id(id) || !seen.insert(*id))
+        {
+            return Err(form_configuration(operation));
+        }
+        let mut form = Self { operation, values: Vec::with_capacity(equipment_ids.len() + 2) };
+        form.set("postoken", token.expose());
+        for equipment_id in equipment_ids {
+            form.set("eqids[]", equipment_id);
+        }
+        form.set(field, "-1");
+        Ok(form)
     }
 
     fn set(&mut self, name: &str, value: &str) {

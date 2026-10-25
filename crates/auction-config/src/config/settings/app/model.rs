@@ -144,8 +144,8 @@ pub struct AppConfig {
     pub admin_runtime: Option<AdminRuntimeDocument>,
     /// 三角色同源的装备规则启动快照；Public 判定稀有/融合，Worker 用于论坛名称标色。
     pub equipment_colors: Vec<EquipmentColorRule>,
-    /// 仅供 Worker 内部履约使用的 runtime bot 显示名投影；其他角色或未配置时为空。
-    pub worker_bot_players: Vec<String>,
+    /// Public 注册提示与 Worker 内部履约共用的 runtime bot 显示名投影；未配置时为空。
+    pub bot_players: Vec<String>,
     pub(super) secrets: AppSecrets,
 }
 

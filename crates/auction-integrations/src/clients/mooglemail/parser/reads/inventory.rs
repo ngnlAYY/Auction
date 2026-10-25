@@ -1,10 +1,15 @@
-//! Armory organize 的精确 EID 正向存在解析；没有命中不是负向库存证明。
+//! Armory organize 的完整正向库存证据与发送前状态读取；没有命中不是负向库存证明。
 
 use std::collections::{BTreeMap, HashSet};
 
 use super::super::*;
 use super::identity::{trusted_document, unique, verify_main_url};
 use crate::clients::mooglemail::protocol::MoogleMailInventoryCategory;
+
+mod names;
+mod preparation;
+
+pub(crate) use preparation::MoogleMailInventoryPreparation;
 
 impl MoogleMailParser {
     /// 完整结构/计数/行身份都成立后才返回目标的正向命中，不接受 disabled 或分页片段。
@@ -21,17 +26,35 @@ impl MoogleMailParser {
             return Err(fail());
         }
         let document = trusted_document(bytes, world, operation)?;
-        verify_main_url(&document, world, operation)?;
-        unique(&document, "#mainpane", world, operation)?;
-        let armory = unique(&document, "#armory_outer", world, operation)?;
+        let mut present = false;
+        self.visit_inventory_rows(&document, world, category, |eid, _, _| {
+            present |= eid == external_equipment_id;
+            Ok(())
+        })?;
+        Ok(present)
+    }
+
+    /// 两种库存读取共用完整页面证据，发送准备额外验证目标标签和状态。
+    fn visit_inventory_rows<'a>(
+        &self,
+        document: &'a Html,
+        world: MoogleMailWorld,
+        category: MoogleMailInventoryCategory,
+        mut visit: impl FnMut(&'a str, ElementRef<'a>, ElementRef<'a>) -> Result<(), MoogleMailError>,
+    ) -> Result<ElementRef<'a>, MoogleMailError> {
+        let operation = MoogleMailOperation::Inventory;
+        let fail = || protocol(operation, world);
+        verify_main_url(document, world, operation)?;
+        unique(document, "#mainpane", world, operation)?;
+        let armory = unique(document, "#armory_outer", world, operation)?;
         if armory.parent().and_then(ElementRef::wrap).and_then(|node| node.attr("id"))
             != Some("mainpane")
         {
             return Err(fail());
         }
-        let form = unique(&document, "#equipform", world, operation)?;
-        let list = unique(&document, "#equiplist", world, operation)?;
-        let count = unique(&document, "#equipcount", world, operation)?;
+        let form = unique(document, "#equipform", world, operation)?;
+        let list = unique(document, "#equiplist", world, operation)?;
+        let count = unique(document, "#equipcount", world, operation)?;
         if form.value().name() != "form"
             || form.attr("method").is_none_or(|method| !method.eq_ignore_ascii_case("post"))
             || !descendant_of(form, armory)
@@ -106,15 +129,16 @@ impl MoogleMailParser {
                 || input.attr("id") != Some(format!("e{eid}").as_str())
                 || row.attr("onclick")
                     != Some(format!("return select_equip({eid},event,this)").as_str())
-                || !seen.insert(eid.to_owned())
+                || !seen.insert(eid)
             {
                 return Err(fail());
             }
+            visit(eid, row, input)?;
         }
         if seen.len() != available {
             return Err(fail());
         }
-        Ok(seen.contains(external_equipment_id))
+        Ok(form)
     }
 }
 

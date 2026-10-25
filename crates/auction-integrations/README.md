@@ -57,7 +57,11 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
   owner 与写屏障校验不变。新发送基线、未知候选搜索和写后新增证明仍要求完整扫描，资金证据期限不变。
 - ComposeSend：完整 Sent baseline 在持久 sending fence 前、同一独占 session 内取得，之后一次消费且写后独立扫描，只接受新增、唯一且 world、收件人、正文摘要、
   Credits/COD、装备精确匹配的 MID。发送与失败诊断借用同一输入，分步附件证明使用原 ID 前缀，避免复制整封邮件；
-  compose 正文只提取一次，资产集合排序使用借用，表单编码直接移交 HTTP body，写入顺序及证明条件不变。
+  compose 正文只提取一次，资产集合排序使用借用，表单编码直接移交 HTTP body，原有 compose 暂存顺序及最终证明条件不变。
+- 装备发送准备：`sender/equipment.rs` 在 sending fence 后、暂存任何资产前，按完整七类 Armory 库存核对本次装备，
+  按需移出仓库并解除保护／锁定；`parser/reads/inventory/` 绑定原生 EID、显示名、状态及短期 token，
+  与内部履约的正向库存读取共用页面证明。外写后必须回读，不自动卸装、回滚或重试；
+  协议字段与故障处理见[附件装备状态准备](ops/mail/diagnostics.md#附件装备状态准备)。
 - Return / Take：写前核对 sender 与预期资产；Return 只接受身份、正文及全部资产精确匹配的 `[RTS]` 回执，
   不再把未读 Inbox 中目标 MID 缺席当作成功（详情 GET 本身会标记已读）；缺少回执保持 `outcome_unknown`，不自动重寄。
   Take 证明身份不变、资产归零及唯一回执。Take 授权准备先固定原独占凭据 session 并核验 owner；

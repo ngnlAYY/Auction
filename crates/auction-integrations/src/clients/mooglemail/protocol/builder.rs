@@ -143,6 +143,22 @@ impl MoogleMailUrlBuilder {
         }
     }
 
+    /// Armory 写入仅使用固定 organize 目标，不复用带分类的只读 URL。
+    pub(crate) fn inventory_organize(&self, world: MoogleMailWorld) -> MoogleMailTarget {
+        let mut url = self.endpoint.clone();
+        url.set_path(world.path());
+        url.query_pairs_mut()
+            .append_pair("s", "Bazaar")
+            .append_pair("ss", "am")
+            .append_pair("screen", "organize");
+        MoogleMailTarget {
+            operation: MoogleMailOperation::InventoryOrganize,
+            world,
+            url,
+            origin: self.origin.clone(),
+        }
+    }
+
     pub(crate) fn equipment(
         &self,
         world: MoogleMailWorld,

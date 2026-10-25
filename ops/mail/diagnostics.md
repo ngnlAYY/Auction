@@ -179,6 +179,29 @@ Admin 人工 reconcile 不能把 `payload.operation=send` 与裸 `external_refer
 均不可重试。确认后复用既有 delivery retry/reconcile（`action=retry`），携带稳定 `command_id`、CSRF 和
 `expected_fencing_version`；成功文案只表示“重新排队”，结果未知时提示先核对 MM。
 
+### 附件装备状态准备
+
+发送包含装备时，fence 后先证明 compose 干净，再读取本世界七类 Armory organize 库存；
+所有请求 EID 均唯一命中且未穿戴后才可修改。正常装备不执行 Armory POST，无装备邮件不读取 Armory。
+同分类需要处理的目标可批量提交，但不得夹带未请求装备。状态只来自精确 EID 行，
+先剥离元数据中的实际显示名再解析原生状态图标，避免自定义名称中的图标触发误判。
+
+- 固定写目标为本世界的 `?s=Bazaar&ss=am&screen=organize`，表单使用新鲜 `postoken` 与重复的 `eqids[]`。
+- 仓库状态使用 `set_stored=-1`；保护和锁定共用 `set_locked=-1`。不使用 toggle，不改变置顶、穿戴或其它装备。
+- 每个待修改分类写前重新读取；每次 POST 后回读同分类，核对目标集合及所需状态并取得新 token。
+  出库后仍受保护时继续解除；两个条件均满足才进入附件暂存。实际修改后再次 GET compose，核对干净状态并刷新邮件 token。
+- 对应安全操作码为 `inventory_organize`、`equipment_unstore`、`equipment_unlock`，修改阶段为 `equipment_preparation`。
+  token、Cookie、原始装备页面和完整表单不得进入普通日志或 DTO。
+
+读取不完整、目标缺失／重复、页面身份不符、已穿戴、状态无法证明均停止本次发送。
+Armory 写后未生效、断连或回读失败按 `write_unknown` 保留人工核对；明确会话失效保留 `session_expired`，
+但仍属于未知写入，不换 Cookie 或重发。此时装备可能已出库／解锁，也可能尚未附加，
+不能把空 compose 或“未收到邮件”当作可以直接重试的证明。操作员须核对原目标装备、草稿和 Sent，
+再走原投递的受审计处理流程；程序不自动恢复保护或放回仓库。
+
+这部分只有外部适配器行为变化，无新迁移、HTTP 字段或运行配置。源码与隔离证据见[状态页](docs/status.md)，
+隔离响应不等同于真实游戏协议或生产发送验收。
+
 ## 定期三页维护
 
 MoogleMail 的三个邮箱列表为 Inbox、Read Mail、Sent；compose 是独立的可变草稿，不再被算作第三个只读邮箱。

@@ -116,12 +116,12 @@ Public/Worker 的 metrics 来自公共文件，tracing 来自各自角色文件�
 每维新旧字段不能同时非空，同维 OR、维度间 AND，不展开为多条规则。Public/Worker 启动时冻结规则，保存后须协调重启；
 含非空新数组的文件需要支持该契约的三角色与配置运维工具读取，旧版本的未知字段拒绝保持不变。
 新种类数组支持十二种护甲材质族及完整部位名称的并集，材质族核对实际分类和首词/部位边界；旧种类单值保持精确匹配。
-Public 完整校验 runtime 后仅应用装备规则，继续使用自身 listener、安全、会话并发上限与公共拍卖模板；不应用 `operations`。
+Public 完整校验 runtime 后仅应用装备规则及注册提示账号，继续使用自身 listener、安全、会话并发上限与公共拍卖模板；不应用 `operations`。
 分体及合并部署预检要求三角色 runtime 同源且规则快照一致，或全部省略；首次设置生成三份相同路径引用。
 升级旧配置及重启范围见[运行配置手册](ops/config/README.md#runtime-共享与重启)。
 
-Worker 将 `bot_players` 单独保留为 `AppConfig.worker_bot_players` 窄投影，不持有完整 Admin runtime 文档；名单只用于
-选择内部履约证据路径，实际完成仍须通过当前远端身份及资产/资金核验。
+Public/Worker 将 `bot_players` 单独保留为 `AppConfig.bot_players` 窄投影，不持有完整 Admin runtime 文档。
+Public 只展示注册收件账号；Worker 仍用名单选择内部履约证据路径，实际完成须通过当前远端身份及资产/资金核验。
 
 `operations` 的 economics、schedule、forum、alerts、worker、mail 六组 `managed` 默认关闭：经济与排期仅影响新拍卖/
 后续轮次并须重启 Admin/Worker，其余组重启 Worker；预检始终要求有效模板/排期一致，runtime 同源要求不依赖接管开关，

@@ -56,6 +56,8 @@ mod realtime;
 mod realtime_admin;
 #[path = "../shared/realtime_hub/mod.rs"]
 mod realtime_hub;
+#[path = "../public/registration.rs"]
+mod registration;
 #[path = "../shared/response_cache.rs"]
 mod response_cache;
 #[path = "../public/rules.rs"]

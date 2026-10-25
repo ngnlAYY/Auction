@@ -22,6 +22,8 @@ Dioxus 纯客户端渲染的公开端 SPA，拥有公开读取、竞价交互、
 及账号隔离缓存（对应传输在 `api/auction/watches.rs`），`app/identity/watch_preference.rs` 与
 `api/identity/watch_preference.rs` 拥有账号竞价警告渠道表单与严格解码，账户页以用户 UUID 隔离宿主。
 `app/identity/account/watches/` 拥有当期标记列表的只读组合、账号/世界隔离、完整目录读取与本地分页展示。
+`api/identity/registration.rs` 只在登录页读取 P29 的配置账号安全投影，`app/identity/session.rs` 将名单作为纯文本
+插入五语注册提示；不把示例账号或完整运行配置编入 WASM，展示与失败边界见[Public 设计](crates/auction-web-public/DESIGN.md#6-竞价与代理交互)。
 `surface/board/refresh.rs` 拥有资源失效与合并读取，`auction/commands/` 按普通出价、代理创建/降额、确认及未知结果
 重试拆分，`surface/pagination/` 统一各列表的数字分页、正整数数量与译文（`preferences.rs` 拥有 Public 本地数量偏好）。
 `surface/catalog/columns/` 拥有装备目录的列显隐、默认权重、内联设置面板与本地展示偏好；不向 API 增加字段选择参数。

@@ -330,6 +330,9 @@ fn transport_stage(operation: MoogleMailOperation) -> &'static str {
         MoogleMailOperation::Compose => "compose_preflight",
         MoogleMailOperation::AttachAdd => "compose_attach",
         MoogleMailOperation::AttachCod => "compose_cod",
+        MoogleMailOperation::InventoryOrganize
+        | MoogleMailOperation::EquipmentUnstore
+        | MoogleMailOperation::EquipmentUnlock => "equipment_preparation",
         MoogleMailOperation::Send => "send",
         MoogleMailOperation::ReturnMessage | MoogleMailOperation::Take => "action",
         _ => "read",

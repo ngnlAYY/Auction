@@ -2,6 +2,7 @@
 
 use std::{collections::HashSet, fmt, time::Duration};
 
+mod equipment;
 mod maintenance;
 mod proof;
 
@@ -178,7 +179,11 @@ impl MoogleMailSender {
         request: MoogleMailSendRequest,
         baseline: Option<MoogleMailSentBaseline>,
     ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
-        let outcome = self.send_verified(cookie, &request, baseline).await;
+        let mut equipment_write_started = false;
+        let outcome = self
+            .send_verified(cookie, &request, baseline, &mut equipment_write_started)
+            .await
+            .map_err(|error| equipment::preserve_write_unknown(error, equipment_write_started));
         let failed = !matches!(outcome, Ok(MoogleMailSendOutcome::Sent(_)));
         if failed {
             self.diagnose_after_failure(cookie, request.world, &request).await;
@@ -186,7 +191,7 @@ impl MoogleMailSender {
         outcome
     }
 
-    /// 执行 compose、附件/COD 分步写入并证明最终发送结果。
+    /// 执行装备准备、compose 附件/COD 分步写入并证明最终发送结果。
     /// 任何一次 POST 成功但后续页面无法证明的情况都会返回 write_unknown；调用方不得把
     /// 该结果自动重试为第二次远程写入。
     async fn send_verified(
@@ -194,6 +199,7 @@ impl MoogleMailSender {
         cookie: &MoogleMailCookie,
         request: &MoogleMailSendRequest,
         baseline: Option<MoogleMailSentBaseline>,
+        equipment_write_started: &mut bool,
     ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
         if !request.validate() {
             return Err(write_error(
@@ -229,6 +235,24 @@ impl MoogleMailSender {
             Ok(state) => state,
             Err(_) => return Ok(MoogleMailSendOutcome::PreflightUnproven { dirty }),
         };
+
+        self.prepare_equipment(cookie, request, equipment_write_started).await?;
+        if *equipment_write_started {
+            // Armory 写入可能使先前 compose token 失效；重新证明空草稿后才暂存任何资产。
+            let refreshed = self.client.get(&compose, cookie).await?;
+            let parsed =
+                self.parser.parse_compose_state(&refreshed, request.world).and_then(|state| {
+                    if state.is_clean() {
+                        Ok(state)
+                    } else {
+                        Err(MoogleMailError::protocol_drift(
+                            MoogleMailOperation::Compose,
+                            request.world,
+                        ))
+                    }
+                });
+            state = self.client.diagnose_parse(&compose, &refreshed, parsed).await?;
+        }
 
         if request.credits > 0 {
             let form =

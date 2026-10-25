@@ -248,6 +248,14 @@ Worker 收到明确 `recipient_not_found` 后，必须只在当前领取轮次�
 
 所有主动 ComposeSend（通知、注册/重绑 key、告警、结算/返还）在任意 POST 前完成覆盖所有 MID 的 Sent baseline，POST 后独立有界扫描；只有新增且唯一的真实 MID 与 world、recipient、subject、canonical body digest、Credits、COD、装备 ID 精确匹配才可成功，零资产邮件同样需要证明；写后资产不符、秒领取、无匹配、多匹配、扫描不完整或超时均进入 `manual_reconcile`，不自动重寄；fence 前完整基线失败只释放未发送的有效 claimed。成功页、空 compose、本地 UUID 或 Admin 提交的裸 `external_reference` 均不能替代证明。成功 metadata、默认 180 秒 delivery timeout/300 秒 sending grace 及预算约束见[Sent 证明](ops/mail/diagnostics.md#主动-composesend-的-sent-证明)。storage defense gate 对 Worker 和 Admin 同样生效，Admin `retry`/`failed` 仍需显式命令、版本 fence 和审计；Return/Take 使用独立 action proof 和人工核对路径，不套用 ComposeSend 证明。
 
+主动发送包含装备时，必须在既有 sending fence 和同一独占凭据会话内、暂存 Credits／装备／COD 前，
+完成七类 Armory 库存的精确 EID 唯一定位和状态校验；原生显示名中的状态图标不能作为真实状态。
+仅对本次冻结装备集合中已证明在仓库或受保护／锁定的条目执行显式出库／解除操作，不自动卸下已穿戴装备。
+每次 Armory POST 后重新读取同分类，确认原目标身份、未穿戴及所需状态，再使用新 token 继续；
+任一次外写后证据缺失、身份／状态不符、失效或超时均保留未知结果，禁止自动重试、回滚或跳过该装备寄送。
+装备准备实际写入后还须重新证明 compose 干净；出库或解锁成功本身不构成邮件成功，最终附件与 Sent 证明不变。
+具体字段、边界及人工处理见[附件装备状态准备](ops/mail/diagnostics.md#附件装备状态准备)。
+
 Delivery claim 必须在进入 `sending` 前按 payload world 检查 scoped/shared 凭据：当前无凭据时只能用完整 lease token 和 fencing 从 `claimed` 释放回 `pending`，不能写成终态失败；非法 payload 仍必须越过 availability gate 进入确定失败路径，避免永久滞留；进入 `sending` 后发生的凭据竞态、网络、响应边界或协议依赖失败不得收口为普通失败。本轮必须跳过已确认无凭据的 world 并继续领取其他 world，不可用队头不得阻塞有凭据的投递。
 
 MoogleMail Send 在 sending fence 前实际 GET compose 并完整扫描 Sent 至尾页；页数/时间耗尽分别为 `sent_scan_page_limit`/`sent_scan_timeout`，不得当空历史。持有同一 Cookie 独占 guard 进入消耗式 prepared future；fence 未明确成功不得 poll 写入。prepare 在原请求总预算内为 claimed 周期续租，首次准备前及 fence 前后均确认续租；数据库等待受 finalize_timeout 和已知单调租约截止双重限制，回执已耗尽新 TTL 不得继续。首次外部 poll 前直接复核单调截止，超时/租约/续租处理优先；未 poll 的失败先 drop prepared，再尽力释放，不调用外部 unknown 结果落库；已 sending 或 fence 提交未知不能退回 pending，仍沿持久隔离恢复边界处理。只读准备失败/超时释放有效 claimed，事务内撤销本次 attempt_count 并追加 release 审计，不写 unknown；仅暂排该 world 的 Send，不占发送批次，Take/Return 仍独立；下轮重新检查实际草稿，禁止永久历史错误 SQL gate；发送 fence 后仍严格单次，旧 sending/manual_reconcile/outcome_unknown 不因新草稿干净而重发或结清。
