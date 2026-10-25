@@ -151,6 +151,7 @@ pub struct AdminSettlementLotResponse {
     pub buyer_amount: i64,
     pub seller_amount: i64,
     pub tax_amount: i64,
+    /// 奖池实分支出；hold_curve_v2 仅为按全场预算同比缩放后的基础优惠。
     pub compensation_amount: i64,
     pub hold_ppm: i32,
     pub adjustment_ppm: i32,

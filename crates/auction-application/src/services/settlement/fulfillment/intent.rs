@@ -3,7 +3,8 @@
 use std::collections::BTreeMap;
 
 use auction_domain::{
-    CommandId, SettlementId, SettlementObligationKind, SettlementWorld, legacy_natural_key_uuid,
+    CommandId, SettlementId, SettlementMode, SettlementObligationKind, SettlementWorld,
+    legacy_natural_key_uuid,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -64,6 +65,7 @@ pub(super) fn build_delivery_intent(
         cod: 0,
         equipment_id: None,
         settlement_line: None,
+        settlement_mode: None,
     };
 
     match claim.kind {
@@ -94,6 +96,11 @@ pub(super) fn build_delivery_intent(
                     .filter(|line| line.lot_id == claim.lot_id)
                     .ok_or_else(|| repository_error("竞得装备邮件缺少对应的冻结结算明细"))?;
                 intent.settlement_line = Some(line.clone());
+                intent.settlement_mode = Some(
+                    claim
+                        .settlement_mode
+                        .ok_or_else(|| repository_error("竞得装备邮件缺少对应的冻结结算模式"))?,
+                );
             }
         }
         SettlementObligationKind::WinnerPaymentCarrierCod => {
@@ -167,15 +174,14 @@ pub(super) fn build_canonical_delivery(
                         variables.insert("hold_ppm", line.hold_ppm.to_string());
                         variables.insert("adjustment_ppm", line.adjustment_ppm.to_string());
                         variables.insert("winning_bid", line.end_price.value().to_string());
-                        // 补偿在奖惩后额外扣除；正调整时 listed_price 不含加价，不能用于买方账单。
-                        let adjusted_price = line
-                            .buyer_amount
-                            .value()
-                            .checked_add(line.compensation_amount.value())
-                            .ok_or_else(|| repository_error("竞得装备邮件调整后价格溢出"))?;
+                        // v2 从成交价统一抵扣实分总优惠；旧八变量仍按原含义和原摘要发送。
+                        if intent.settlement_mode == Some(SettlementMode::HoldCurveV2) {
+                            variables.insert("pricing_mode", "hold_curve_v2".to_owned());
+                        }
+                        let pool_credit = line.buyer_pool_credit()?;
+                        let adjusted_price = line.buyer_amount.checked_add(pool_credit)?;
                         variables.insert("adjusted_price", adjusted_price.to_string());
-                        variables
-                            .insert("pool_credit", line.compensation_amount.value().to_string());
+                        variables.insert("pool_credit", pool_credit.to_string());
                     }
                 }
                 "settlement_payment_carrier" => {

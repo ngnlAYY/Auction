@@ -389,6 +389,11 @@ A01 使用 Basic Auth、CSRF 和持久化会话。Admin 每次装配数据库会
 
 A04 的 `equipment_source.require_tradeable` 默认关闭，允许手工 Soulbound；开启后在事务前限制可交易装备，不改变 MoogleMail 过滤，也不回传来源 URL/canonical 正文/key。A07 的 `adjustment_ppm` 正为税费/惩罚、负为折扣，页面不从税额反推持有比例；报告序列化冲突/死锁最多尝试 3 次（含首次）。已结算报告排除未参与结算的 `withdrawn` 标的，其余标的缺少结算明细仍明确失败；累计领先时长从同一快照中的追加竞价事实计算。A42 指定世界按期号降序，否则按结算时间、世界、期号、UUID 稳定排序；结算页用第一页首项作为默认最新一期，再按 UUID 读报告。
 
+A07 的 `adjustment.policy` 保留旧值并允许 `hold_curve_v2`；该模式下 `seller_amount=final_price`，
+`compensation_amount/compensation_out` 仅为按预算同比缩放后的基础优惠，不追加额外优惠，不能高于 `discount_demand`。
+HTTP 按冻结模式委托领域校验矩阵，不增加路由、字段或在读取时重算旧金额；迁移要求见
+[结算对象契约](docs/contracts/schema.md#结算恢复与交付)。
+
 A09–A12、A38 携带 `command_id`、`expected_state_version`；取消/提前结算另需非空理由，原因最多 1024 字节且不含控制字符，其他动作不得携带 reason；状态、账本、动作 metadata、审计与事件同事务写入。人工 Final 将晚于事务时间加冻结 `final_phase_lead_seconds` 的 live lot 截止收紧至该窗口（默认 900 秒），不延长更早截止，之后仍允许软截止延长。A38 仅在完整档且 `allow_manual_early_settlement=true` 时提供（默认关闭），接受 `live`/`final`，将未到期 live lot 截止收紧到事务时间；成交、义务与履约仍由提交后的 settlement Worker 写入；未开启或缺能力返回 `403 manual_early_settlement_disabled`，不套用一般能力缺失的 501。
 
 A39 只允许 `draft`/`preview`，请求含 `command_id`、`expected_state_version`、`preview_scheduled_at`、`scheduled_open_at`、`scheduled_end_at`，满足 `preview < open < end`；Draft 三者须在数据库当前时间之后，Preview 原样保留已发生的预览时间，其余在未来。完整档 Serializable 事务按 world、scheduled round、auction 加锁，同步计划列、结束策略快照、调度记录、账本、审计与 `auction.schedule_updated`；未过期且有 owner 的租约拒绝修改，实际变更时清除过期租约或无 owner 的失败退避并递增 round 版本，阻断陈旧 Worker 写回；事件 v1 字段不变，只唤醒权威快照重读，其他状态不提供修改。

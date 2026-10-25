@@ -37,7 +37,7 @@ impl SettlementPlan {
         if facts.is_empty() {
             return Err(DomainError::InvalidSettlementFacts("结算至少需要一条 lot 事实"));
         }
-        if policy.mode == SettlementMode::HoldCurveV1 && scheduled_end_at <= scheduled_open_at {
+        if policy.mode != SettlementMode::LegacyZeroV0 && scheduled_end_at <= scheduled_open_at {
             return Err(DomainError::InvalidSettlementFacts("结算计划时间窗口无效"));
         }
 
@@ -62,7 +62,7 @@ impl SettlementPlan {
                 continue;
             };
 
-            let hold_ppm = if policy.mode == SettlementMode::HoldCurveV1 {
+            let hold_ppm = if policy.mode != SettlementMode::LegacyZeroV0 {
                 calculate_hold_ppm(
                     scheduled_open_at,
                     scheduled_end_at,
@@ -92,8 +92,10 @@ impl SettlementPlan {
             } else if adjustment_ppm < 0 {
                 let discount = floor_ppm(end_price, -adjustment_ppm)?;
                 line.listed_price = end_price.checked_sub(discount)?;
-                line.buyer_amount = line.listed_price;
-                line.seller_amount = line.listed_price;
+                if policy.mode == SettlementMode::HoldCurveV1 {
+                    line.buyer_amount = line.listed_price;
+                    line.seller_amount = line.listed_price;
+                }
                 discount_demand = discount_demand.checked_add(discount)?;
             }
             lines.push(line);
@@ -115,13 +117,14 @@ impl SettlementPlan {
                 if discount.value() == 0 {
                     continue;
                 }
-                // 旧版按需求比例分配后仍以该 lot 的实际折扣封顶；资金池大于总需求时不能
-                // 让补偿超过折扣，否则买方金额和补偿池都会失去守恒。
+                // v2 只分配基础优惠：min(floor(A*D/ΣD),D) = floor(D*min(1,A/ΣD))。
+                // 每件向下取整，尾差留池；零预算无优惠但仍结算，卖方始终全额收款。
+                // v1 在卖方原让利价上分配额外抵扣，同样按 D 封顶，冻结历史公式不变。
                 let compensation =
                     proportional_floor(available_pool, discount, discount_demand)?.min(discount);
-                line.compensation_amount = compensation;
                 line.buyer_amount = line.buyer_amount.checked_sub(compensation)?;
-                compensation_total = compensation_total.checked_add(compensation)?;
+                line.compensation_amount = compensation;
+                compensation_total = compensation_total.checked_add(line.compensation_amount)?;
             }
         }
 
@@ -165,7 +168,25 @@ impl SettlementPlan {
             return Err(DomainError::InvalidSettlementFacts("结算计划策略或资金池不一致"));
         }
         for line in &self.lines {
-            line.validate()?;
+            line.validate_for_mode(policy.mode)?;
+            if policy.mode == SettlementMode::HoldCurveV2 {
+                let discount = line.end_price.checked_sub(line.listed_price)?;
+                let expected = if self.discount_demand.value() > 0 {
+                    proportional_floor(
+                        self.opening_pool.checked_add(self.tax_total)?,
+                        discount,
+                        self.discount_demand,
+                    )?
+                    .min(discount)
+                } else {
+                    SettlementAmount::zero()
+                };
+                if line.compensation_amount != expected {
+                    return Err(DomainError::InvalidSettlementFacts(
+                        "v2 结算优惠未按全场名义需求同比缩放",
+                    ));
+                }
+            }
         }
         for obligation in &self.obligations {
             obligation.validate()?;

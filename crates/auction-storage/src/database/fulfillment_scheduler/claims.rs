@@ -124,6 +124,7 @@ pub(super) async fn claim_postgres(
                   settlement.end_price, settlement.listed_price, settlement.buyer_amount,
                   settlement.seller_amount, settlement.tax_amount, settlement.compensation_amount,
                   settlement.hold_ppm, settlement.adjustment_ppm,
+                  settlement.adjustment_metadata ->> 'policy' AS settlement_policy_mode,
                   o.submission_id, submission.source_kind AS submission_source_kind,
                   submission.source_reference AS submission_source_reference,
                   submission.mailbox_key AS submission_mailbox_key,
@@ -528,6 +529,7 @@ pub(super) fn map_claim(
             .map_err(ClaimMappingError::Context)?,
         equipment_name: string_column(row, "equipment_name").map_err(ClaimMappingError::Context)?,
         settlement_line: pricing::map_settlement_line(row).map_err(ClaimMappingError::Context)?,
+        settlement_mode: pricing::map_settlement_mode(row).map_err(ClaimMappingError::Context)?,
         submission_id: submission_id.map(SubmissionId::from_uuid),
         submission_source_kind: row
             .try_get("submission_source_kind")

@@ -10,7 +10,10 @@ pub const SETTLEMENT_PPM: i64 = 1_000_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SettlementMode {
     LegacyZeroV0,
+    /// 历史算法：基础折扣由卖方让利，仅供既有冻结快照继续结算、读取与重放。
     HoldCurveV1,
+    /// 卖方按成交价全额收款，买方全部优惠由补偿池承担。
+    HoldCurveV2,
 }
 
 /// 结算恢复策略的闭集。
@@ -87,8 +90,8 @@ pub struct SettlementPolicy {
 impl Default for SettlementPolicy {
     fn default() -> Self {
         Self {
-            version: 1,
-            mode: SettlementMode::HoldCurveV1,
+            version: 2,
+            mode: SettlementMode::HoldCurveV2,
             compensation_pool_enabled: true,
             isekai_carrier_credit: 1,
             anchors: vec![
@@ -131,8 +134,9 @@ impl SettlementPolicy {
                     return Err(DomainError::InvalidSettlementPolicy("legacy zero 策略字段不一致"));
                 }
             }
-            SettlementMode::HoldCurveV1 => {
-                if self.version != 1
+            SettlementMode::HoldCurveV1 | SettlementMode::HoldCurveV2 => {
+                let expected_version = if self.mode == SettlementMode::HoldCurveV2 { 2 } else { 1 };
+                if self.version != expected_version
                     || !self.compensation_pool_enabled
                     || self.isekai_carrier_credit != 1
                     || self.anchors.len() < 2
@@ -158,13 +162,18 @@ impl SettlementPolicy {
     }
 
     /// 校验新拍卖模板；保留历史结构校验范围，避免改变已结算记录的读取与重放。
-    /// 补偿最多再抵扣一份折扣，50% 折扣在足额资金池下会产生零付款，违反 COD 义务
-    /// 必须为正的不变量；更高折扣会产生负数。因此新曲线每个锚点都必须严格高于 -50%。
+    /// 保留既有折扣严格小于 50% 的保守模板上限；本次移除额外优惠不顺带扩大可配置范围。
+    /// v2 足额时只抵扣一份基础优惠，仍要求 COD 付款为正。
     pub fn validate_for_new_auction(&self) -> Result<(), DomainError> {
         self.validate()?;
+        if self.mode == SettlementMode::HoldCurveV1 {
+            return Err(DomainError::InvalidSettlementPolicy(
+                "hold_curve_v1 仅供历史快照读取；新拍卖须使用卖方全额结算的 hold_curve_v2",
+            ));
+        }
         if self.anchors.iter().any(|anchor| anchor.adjustment_ppm <= -SETTLEMENT_PPM / 2) {
             return Err(DomainError::InvalidSettlementPolicy(
-                "新拍卖结算折扣必须小于 50%，以保证足额补偿后的付款为正",
+                "新拍卖结算折扣必须小于既有 50% 模板上限",
             ));
         }
         Ok(())

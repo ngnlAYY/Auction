@@ -47,6 +47,13 @@ HV UID 读取论坛目标资料，预期名称为 `None` 仍自动远端核验�
 观察，纳入完整摘要、时间门禁与同 session 锁序。opaque prepared 保留同 session/独占 guard，提交作用域未确定结束就
 取消或销毁会 sticky 撤销 owner；请求 purpose 区分结算 claim、投递 claim、资金运维命令，同一绝对预算最多 30 秒。
 
+## 卖方全额结算
+
+新拍卖模板默认冻结 `hold_curve_v2/version=2`，拒绝以 v1 新建；历史快照、命令与金额不回写。
+结算用例在原 Serializable 事务中按锁内奖池及全场名义需求同比缩放优惠，再同事务保存成功账本、义务、审计及持久化任务；
+零预算仍正常结算，不能让卖方承担差额。v2 只保留基础优惠，九变量账单展示其实分金额，不追加另一份优惠或重复抵扣。
+规则与旧版本边界见[结算不变量](docs/contracts/invariants.md#i-07a-结算策略与命令重放必须可从权威事实重建)。
+
 ## 竞价与生命周期端口
 
 [ports/core](crates/auction-application/src/ports/core) 定义事务、账本、仓储、竞价与时钟端口；
@@ -108,7 +115,7 @@ reconcile 释放 claim 时原子写入下次追踪时间。COD、carrier 与卖�
 payload、稳定身份及摘要不得包含装备 secret，派发世界与装备来源世界分别建模；`SettlementFulfillmentBotIdentityReader`
 只读当前 active Cookie/world 的 `VerifiedMailPlayerIdentity`，无预期绑定也远端核验，无法证明时返回错误。
 买家装备 COD intent 从 claim 的对应 `SettlementLine` 冻结价格变量；调整后价格取买家应付与奖池抵扣之和，不使用现行策略
-重算。精确旧三变量的 prepared/enqueued 快照沿用原 canonical 字节与摘要；新八变量形状及兼容边界见
+重算。精确旧三/八变量的 prepared/enqueued 快照沿用原 canonical 字节与摘要；显式 v2 九变量形状及兼容边界见
 [交付载荷契约](docs/contracts/schema.md#结算恢复与交付)。
 
 [ports/settlement/internal](crates/auction-application/src/ports/settlement/internal) 与履约服务的 `internal.rs`、

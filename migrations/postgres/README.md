@@ -81,10 +81,11 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 | [000061_delivery_send_expectations.up.sql](migrations/postgres/000061_delivery_send_expectations.up.sql) | 只追加发送尝试的实际内容摘要与资产矩阵，唯一绑定远端 MID；不回填旧邮件或改变未知结果 |
 | [000062_delivery_reference_index.up.sql](migrations/postgres/000062_delivery_reference_index.up.sql) | 非空外部引用的非唯一部分索引，加速绑定 Sent MID 前的历史碰撞核对，不改变旧行或证明规则 |
 | [000063_delivery_take_expectations.up.sql](migrations/postgres/000063_delivery_take_expectations.up.sql) | Take 原命令/MID/凭据尝试的只追加绑定；旧无原账号证明的未知动作不自动恢复或重排 |
+| [000064_seller_full_settlement.up.sql](migrations/postgres/000064_seller_full_settlement.up.sql) | 扩展既有拍卖/结算 CHECK 支持 v2 卖方全额及奖池同比缩放优惠；不更改任何历史经济事实 |
 
 ## 原则与基线
 
-当前 `000001`–`000063` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
+当前 `000001`–`000064` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
 是只读兼容视图，权威写入进入授权与转换历史表。执行门禁见[执行边界](migrations/postgres/README.md#执行边界)，对象归属见[数据库契约](docs/contracts/schema.md)。
 
 ## 追加迁移语义
@@ -128,6 +129,12 @@ prepared/enqueued/unknown 改成内部成功。迁移前可验证备份并停止
 `000063` 不回填历史 Take 的凭据身份。新动作在 Sending 前固定同一会话，并在原事务保存命令、摘要、时间和账号绑定；
 恢复按原 sending_at/命令/摘要定位原尝试，再核对当前候选 fence 与观察身份。配置 Cookie 没有持久凭据绑定时仍可即时执行，
 但未知结果留在人工核对；不同账号的“邮件不存在”不能关闭原任务。
+
+`000064` 仅扩展新策略及金额矩阵约束，不更新旧拍卖、结算、义务、投递、余额或追加账本。
+历史 v1 仍要求卖方金额等于列示价；带 v2 policy 标记的新行必须按成交价全额结给卖方，
+奖池实分优惠介于零与一份名义基础折扣之间；精确同比缩放及尾差由领域和锁内命令重放校验。
+升级先备份并停稳全部旧 writer，同版 `auctionctl` 执行后成套更新角色；现有草稿不自动切换策略，详见
+[卖方全额升级](ops/README.md#卖方全额结算升级)。
 
 ## 历史 checksum 兼容
 

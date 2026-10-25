@@ -104,6 +104,7 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 | Bot 仅记账策略 | `000055` 由 funding owner 持久化 UID 账户策略；显式初始化 `record_only`，按单笔冻结经济记录有限会计来源和用途，不采集或比较账号现金；默认 `strict_cash` 维持原现金门 |
 | 账户读取索引 | `000057` 由 storage/account 增加用户维度的 bids 与代理授权历史索引；不新增表、业务状态、HTTP 字段或权限 |
 | 投递外部引用索引 | `000062` 由 storage/delivery_scheduler 为非空 `deliveries.external_reference` 增加非唯一部分索引；加速新 MID 绑定前的历史碰撞查询，不改变 Serializable、唯一绑定或历史投递事实 |
+| 卖方全额结算 | `000064` 只扩展既有拍卖/结算表约束；domain 的 `hold_curve_v2` 保证卖方等于成交价，奖池仅承担买方基础优惠，不足按全场权重同比缩减、逐件取整留池，零预算无优惠仍结算；旧快照与账本不改 |
 | Take 原账号恢复证明 | `000063` 由 application/delivery 定义冻结 Take 身份，integrations 在 fence 前固定同一凭据会话，storage/delivery_scheduler 只追加原尝试；mailbox_sweep 同时核对原账号、当前 generation 与候选 fence，旧缺绑定任务保留人工核对 |
 
 以上为源码能力，运行与独立复审状态见[状态页](docs/status.md)，输入、成功与缺失状态由

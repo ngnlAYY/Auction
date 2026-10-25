@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use auction_domain::{
     AuctionId, CommandId, EquipmentId, EquipmentKeyEnvelope, LotId, SettlementId, SettlementLine,
-    SettlementObligationKind, SettlementWorld, SubmissionId,
+    SettlementMode, SettlementObligationKind, SettlementWorld, SubmissionId,
 };
 
 use super::{ApplicationFuture, RequestHash};
@@ -116,6 +116,8 @@ pub struct SettlementFulfillmentClaim {
     pub equipment_name: String,
     /// 竞得装备邮件使用的冻结结算明细；不从当前竞价或现行奖惩配置重算。
     pub settlement_line: Option<SettlementLine>,
+    /// 与明细同源的冻结模式；v2 账单必须明确名义比例与实分奖池优惠的区别。
+    pub settlement_mode: Option<SettlementMode>,
     pub submission_id: Option<SubmissionId>,
     /// 投稿来源闭集；流拍与撤拍均根据来源授权逐件发送原装备。
     pub submission_source_kind: Option<String>,

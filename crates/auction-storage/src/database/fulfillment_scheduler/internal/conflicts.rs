@@ -141,7 +141,7 @@ async fn exclude_conflicts(
     unrelated_attachments.extend(intake::closed_source_history(tx, c).await?);
     // JSON只用于定位出站资产，不是资金授权。schema损坏/未知世界无法排除关联，保守阻断。
     // 成功delivery必须有对应的已满足fulfillment或recovery action；孤儿成功也不是清白。
-    // 竞得装备正文只接受精确旧三变量或新八变量；缺字段、未知字段和非字符串值仍视为冲突。
+    // 竞得装备正文只接受精确旧三/八变量或显式 v2 九变量；缺字段、未知模式/字段和非字符串值仍视为冲突。
     // 只缓存固定 SQL 文本，冲突事实仍在当前事务重新读取。
     static OUTGOING_QUERY: LazyLock<String> = LazyLock::new(|| {
         "SELECT EXISTS(SELECT 1 FROM public.deliveries d
@@ -173,6 +173,18 @@ async fn exclude_conflicts(
              OR jsonb_typeof(d.payload->'variables') IS DISTINCT FROM 'object'
              OR d.payload->'variables' IS DISTINCT FROM CASE d.payload->>'template'
                  WHEN 'settlement_winner_equipment_cod' THEN CASE
+                     WHEN d.payload->'variables' ? 'pricing_mode' THEN CASE
+                         WHEN d.payload->'variables'->>'pricing_mode'='hold_curve_v2' THEN jsonb_build_object(
+                             'amount',d.payload->'variables'->'amount',
+                             'item_name',d.payload->'variables'->'item_name',
+                             'reference',d.payload->'variables'->'reference',
+                             'hold_ppm',d.payload->'variables'->'hold_ppm',
+                             'adjustment_ppm',d.payload->'variables'->'adjustment_ppm',
+                             'winning_bid',d.payload->'variables'->'winning_bid',
+                             'adjusted_price',d.payload->'variables'->'adjusted_price',
+                             'pool_credit',d.payload->'variables'->'pool_credit',
+                             'pricing_mode','hold_curve_v2')
+                         ELSE NULL END
                      WHEN d.payload->'variables' ? 'hold_ppm' THEN jsonb_build_object(
                          'amount',d.payload->'variables'->'amount',
                          'item_name',d.payload->'variables'->'item_name',

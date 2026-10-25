@@ -37,6 +37,12 @@
 | 投递引用索引：PostgreSQL `000062` | 为非空 `deliveries.external_reference` 建立非唯一部分索引，供 delivery_scheduler 绑定 MID 前检查旧成功行 | 不回填引用、不删除重复历史、不授予发送成功；原 Serializable 谓词检查及唯一 MID 绑定继续生效 |
 | Take 原账号证明：PostgreSQL `000063` | 新增只追加的 Take 尝试绑定，保存原命令/摘要、world/MID、sending_at 与可用的持久凭据 ID/version/generation | 不复制原 payload 资产、不回填旧账号；历史缺绑定或配置 Cookie 无持久身份时，不自动确认未知 Take 或重排 |
 
+`000064` 由 settlement owner 扩展 `auctions.policy_snapshot`、`auction_settlements` 与 `lot_settlements` 的闭集约束，
+允许 `hold_curve_v2/version=2`；不新增表，不更新旧快照、价格、义务、投递、奖池余额或历史账本。
+新模式的 `seller_amount=end_price`，`compensation_amount` 仅为该标的按预算缩放后的基础优惠，不追加额外优惠，
+保持 `buyer_amount + compensation_amount = seller_amount + tax_amount`。`listed_price` 只表示未缩放曲线的名义价，不是实际应付。
+新拍卖模板不得再选择 v1；已冻结 v1 按原公式读取、结算及重放，不补发历史差额。
+
 ### Bot 内部履约对象
 
 基础持久化能力由 `000046`—`000048` 定义，旧结算核对与账户策略由 `000053`—`000055` 追加；实际执行证据见[状态页](docs/status.md)。以下是对象及 owner，不修改已发布迁移或历史证据。
@@ -181,12 +187,17 @@ MoogleMail preflight 释放由 delivery_scheduler 独占，同事务撤销有效
 
 买家装备 COD 的 `settlement_winner_equipment_cod` 投递沿用 schema-v1，`variables` 接受精确旧三字段
 `amount/item_name/reference`，或加上 `hold_ppm/adjustment_ppm/winning_bid/adjusted_price/pool_credit` 的完整八字段；
-不接受部分明细或未知变量。新字段均为规范整数字符串，来自对应不可变 `lot_settlements`；`adjusted_price` 为冻结
-`buyer_amount + compensation_amount`，`pool_credit` 为后者，必须满足 `adjusted_price - pool_credit = amount = COD`。
-领域统一核对冻结费率按整数向下取整后的调整价格；只有负费率允许奖池抵扣，且不超过基础折扣。
-比例使用原 PPM，正文格式化不参与结算或 canonical 摘要计算。已准备或派发的旧三变量任务保留原 payload、摘要和身份，
-新模板的价格明细展开为空；新八变量写入后要求发送、核对及运维工具使用支持该扩展的版本，升级边界见
-[邮件正文模板](ops/config/README.md#邮件正文模板)。此扩展不增加数据库列或迁移。
+v2 必须在八字段之外增加 `pricing_mode=hold_curve_v2`，形成精确九字段闭集。拒绝部分明细、未知模式或未知变量。
+数值字段都是规范整数字符串，模式及金额来自同一不可变结算明细；始终满足
+`adjusted_price=buyer_amount+pool_credit`、`adjusted_price-pool_credit=amount=COD`。
+旧八变量按 v1 校验：抵扣前价已包含基础折扣，`pool_credit` 仅是额外优惠；v2 抵扣前价为成交价加税费，
+`pool_credit=compensation_amount` 仅为同比缩放后的基础优惠，不追加第二份优惠，也不再预扣名义折扣。
+v2 的 `listed_price` 与 `adjustment_ppm` 保留未缩放曲线事实，精确预算分配由领域使用首次锁内奖池重建，
+单件抵扣不得超过一份名义基础折扣。领域按显式模式校验整数取整、金额矩阵及上限，旧模式校验不放宽。
+比例使用原 PPM，v2 正文区分曲线名义比例与实分优惠；格式化不参与结算或 canonical 摘要计算。
+已准备或派发的旧三/八变量任务保留原 payload、摘要、正文和身份；旧三变量明细展开为空。
+新九变量要求发送、核对及运维工具同版升级，见[邮件正文模板](ops/config/README.md#邮件正文模板)。
+载荷扩展不增加数据库列；v2 金额矩阵须先追加 `000064`。
 
 `000051` 给退件建立持久消费事实，回填当前退件指针、回收动作来源和历史 recovery take 投递可证明已消费的
 入站邮件，保留原计数；重寄清空当前指针也不释放消费身份。take prepare 的新命令身份绑定 action 与来源 MID，

@@ -204,14 +204,15 @@ Admin「参数配置 → 邮件调度、发送与处理 → 按业务分类的�
 | 模板 | 占位符与事实来源 |
 | --- | --- |
 | `auction_equipment_rejected` | `{reason_text}` 为可读拒收原因，`{next_steps}` 为后续处理建议，`{mail_reference}` 为 `world:external_mail_id`；旧 `{reason_code}` 仍可选用 |
-| `settlement_winner_equipment_cod` | `{price_breakdown}` 使用冻结结算事实，列出领先时长占比、带符号费率、成交价、费率调整后价格及适用时的奖池抵扣；`{amount}` 始终为实际收取的 COD |
+| `settlement_winner_equipment_cod` | `{price_breakdown}` 使用冻结结算事实，列出领先时长占比、曲线费率、成交价及奖池抵扣；v2 明确费率为未缩放名义比例，单列实分总优惠；`{amount}` 始终为实际收取的 COD |
 
 其它模板的占位符范围保持不变。拒收邮件中的退回提示表示已请求单独执行整封邮件 Return，退回完成仍以对应投递的远端
 证明为准。正文说明不改变金额、结算或退回决定，模板保存不改写已持久化正文、摘要或投递身份。
 超价 MM 提醒由应用层固定生成，包含已接受价格、网站继续出价提示和 lot reference，不增加第 15 个可配置模板；正文随
 通知创建冻结，旧提醒保留原正文及摘要。
 
-买家 COD 明细扩展既有 schema-v1 投递载荷，不新增数据库迁移；完整字段及旧三变量兼容见
+买家 COD 明细扩展既有 schema-v1 投递载荷：旧三/八变量形状及正文不变，v2 新增显式模式九变量；载荷本身不增数据库列，
+v2 金额矩阵另须迁移 `000064`。完整字段及兼容规则见
 [交付载荷契约](docs/contracts/schema.md#结算恢复与交付)。升级时成套更新 Public、Admin、Worker 与 `auctionctl`，使模板
 校验、持久载荷读取和发送端支持同一版本。已生成扩展载荷后，回退版本也须支持新变量集，不能仅凭数据库 schema 未变
 回退旧解码器。旧三变量投递继续使用原 canonical 载荷和摘要，`{price_breakdown}` 展开为空，不补造历史价格明细。
@@ -253,6 +254,14 @@ OTLP headers 的名称和值先按严格百分号编码解码，再检查 HTTP t
 `[auction]` 的 schedule/economics/settlement/recovery 默认值见[公共模板](ops/config/examples/common.toml)。新拍卖创建时冻结
 `policy_snapshot`，后续出价/取消使用快照；模板改动不回写旧场次。自动后继也是新聚合，冻结 Admin/Worker 启动时有效模板，
 而非复制前驱经济规则。
+
+新拍卖默认 `[auction.settlement] version=2, mode="hold_curve_v2"`：卖方全额收成交价，买方仅享一份基础优惠，
+由奖池承担，不再叠加额外优惠；不足时按全场基础优惠同比缩减，每件向下取整、尾差留池，不暂缓结算，不降低卖方收入。
+零奖池正常结算且无优惠。v2 的 `compensation_amount` 与显式九变量账单的 `pool_credit` 均只表示实分基础优惠；
+曲线比例仍是未缩放名义比例，账单抵扣前价为成交价加税费，不能重复预扣基础折扣。
+旧 `hold_curve_v1/version=1` 仅供已冻结场次继续结算、读取与重放，新模板拒绝该模式；升级前须显式更新公共文件
+的 version/mode 并核对 Admin/Worker 有效模板。不会修改已有草稿、已发布或已结算快照，也不补发历史差额。
+程序、备份及迁移顺序见[卖方全额结算升级](ops/README.md#卖方全额结算升级)。
 
 新场次软截止窗口 `soft_close_window_seconds` 与延长 `soft_close_extension_seconds` 默认均为 900 秒（固定 15 分钟）。有效出价的
 候选截止是接受时刻加 900 秒，不是旧截止加 900 秒，且不得回退。升级程序不会覆盖部署文件中的显式 60，也不会修改既有

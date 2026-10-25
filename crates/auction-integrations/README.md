@@ -117,7 +117,8 @@ Sent 正文摘要复用换行规范化的分配后截短尾部空白，不再生
 
 [transport/payload/settlement/pricing.rs](crates/auction-integrations/src/clients/mooglemail/transport/payload/settlement/pricing.rs)
 校验买家装备 COD 的完整价格变量并格式化千分位金额、带符号百分比与适用的奖池抵扣；旧三变量载荷仅省略价格明细，
-不补零或套用现行曲线。只接受精确旧三变量或完整新八变量，字段集合与金额关系见
+不补零或套用现行曲线。只接受精确旧三/八变量或显式 `pricing_mode=hold_curve_v2` 的九变量；
+v2 正文区分未缩放曲线与实分总优惠（含零），旧模式正文保持原字节。字段集合与金额关系见
 [交付载荷契约](docs/contracts/schema.md#结算恢复与交付)。
 
 ## 凭据装配与外部请求

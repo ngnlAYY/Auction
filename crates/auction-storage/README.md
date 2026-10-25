@@ -50,6 +50,12 @@ Sending、节奏起点和原审计同事务提交。正常成功和维护恢复�
 不以当前账号回填历史身份。升级停止旧 Worker 后追加迁移，Send 的 `000061` 和 Return 恢复边界不变。
 授权入口按 `DeliveryPreparedExpectation::{Send, Take}` 区分动作，现金 until 授权仅允许 Send。
 
+`000064` 由 settlement owner 扩展既有三张拍卖/结算表的版本与金额约束，支持卖方全额的 `hold_curve_v2`；
+只替换 CHECK，不修改旧快照、结算、奖池余额、义务、投递或账本；v2 实分优惠可为零且不超过一份名义基础折扣。
+履约及资金收款边界从同一事务的冻结明细和 policy 模式重建账单，v2 显式九变量仅抵扣实分基础优惠；
+旧三/八变量摘要、完整 Sent、命令、generation 与现金用途校验保持不变。
+升级与 owner 见[对象契约](docs/contracts/schema.md#结算恢复与交付)。
+
 ## 用户身份与消费 owner
 
 [users](crates/auction-storage/src/database/users) 在写锁内复核注册信封绑定的 UUID；论坛数字账号是稳定身份，
