@@ -235,7 +235,6 @@ bidlog-bidder = 입찰자
 bidlog-amount = 금액
 bidlog-valid = 현재 선두
 bidlog-invalid = 현재 선두 아님
-bidlog-history-note = 승인된 일반 입찰과 대리 입찰을 최신순으로 표시합니다.
 bidlog-time = 시간
 bidlog-round = 회차
 bidlog-round-option = #{ $number } · { $status }

@@ -7,7 +7,7 @@ pub(crate) fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
     rsx! {
         div { class: "public-auction-lot__table",
             table { class: "ui-table--responsive",
-                caption { {t!("bidlog-history-note")} }
+                caption { class: "public-visually-hidden", {t!("page-bidlog-title")} }
                 auction_web_shared::TableColumns { layout: "public-lot-bid-history", widths: vec![38, 22, 40] }
                 thead {
                     tr {

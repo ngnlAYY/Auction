@@ -235,7 +235,6 @@ bidlog-bidder = 競價者
 bidlog-amount = 金額
 bidlog-valid = 目前領先
 bidlog-invalid = 目前未領先
-bidlog-history-note = 已接受的一般出價與代理出價均保留，最新紀錄在前。
 bidlog-time = 時間
 bidlog-round = 場次
 bidlog-round-option = 第 { $number } 期 · { $status }

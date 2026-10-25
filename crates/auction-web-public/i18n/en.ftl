@@ -236,7 +236,6 @@ bidlog-bidder = Bidder
 bidlog-amount = Amount
 bidlog-valid = Currently leading
 bidlog-invalid = Not currently leading
-bidlog-history-note = All accepted manual and proxy bids, newest first.
 bidlog-time = Time
 bidlog-round = Auction
 bidlog-round-option = #{ $number } · { $status }
