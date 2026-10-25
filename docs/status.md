@@ -35,6 +35,53 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-25 R31 已知 Sent MID 履约核对修复（授权发布与既有队列观察）
+
+读取修复 owner 为 `auction-integrations` 的 `client/reads` 与 `gateway/reader`；结清、资金授权、claim/fencing
+及原子审计仍分别属于应用与存储。已知 MID 原路径会在命中后继续扫描全部历史，反复耗尽履约外层 30 秒预算。
+现逐页定位精确 MID，命中合法摘要即核对详情；只有完整到尾仍缺席才返回未观察到，页数耗尽仍为不完整扫描。
+普通履约使用独立新鲜观察，防止共享缓存时间早于本次 claim；不失效其他读取者。资金组合保留原独占 session、
+新鲜屏障与最长 30 秒期限；新发送基线、未知候选及写后新增唯一证明继续要求完整扫描。
+
+- 冻结干净源码 `fe3214e2135d807031a9e69ee496e9bb753ed28a`，source fingerprint 为
+  `032d0d408c98bf619f81570ab0496f265a29e3da17182804f66ef59d18de2846`。
+  当前源码完整 `just verify`、`just release-check` 通过；API-only 与 embedded 四程序均重新构建，
+  双端 WASM 因输入未变经当前门禁核验后复用。通用 Linux x86_64 GNU、`CARGO_BUILD_JOBS=2`，无 native CPU 参数。
+  Rust LSP 未取得有效响应，未记为通过。R30 候选因补充新鲜观察修复被废弃，其构建输入身份门禁拒绝旧输入，未上传或切换线上。
+- 归档 `auction-rust-0.1.0-fe3214e2135d.tar.gz`，SHA256
+  `797552d65a35a467324c64e35a3231bfeea54481dd3be99568c8816da4311363`；稳定计划 SHA256
+  `c80f2a5decd50ca04447238642a6cbb0cada36ea4e42f479be4d750b3badfa15`。
+- 独立 R31 目录验证 30 个包文件及历史 63 项迁移 checksum；三角色正常停机，等待只读阶段窗口并确认无在途发送/准备，
+  Worker 正常排空、退出码 0。旧 CLI 创建 schema63 完整恢复点，新 CLI 验证归档及 manifest；未执行恢复。
+  备份归档 SHA256 `bb30be84c91c0add101590d784b331b4cb87fcfab6c2669565f6b720f1718b34`。
+  停稳后的 88 张既有业务表在替换程序前后行数与摘要完全一致；无追加迁移，schema 保持 63。
+- `02:10:39 UTC` 按 Worker → Admin → Public 恢复，四程序来自同版源码；部署退出码 0，readiness 200，
+  16 项静态资源匹配。至 `02:30:55 UTC` 三角色维持同一 PID/invocation、`NRestarts=0`，日志无 WARN/ERROR，
+  runtime 未决命令 0。配置、邮件预算、managed、unit/tmpfiles 及原 runtime 锁 inode/权限均未变。
+- Main 原战斗页已由账号持有人结束战斗后恢复；`02:15:03 UTC` 收件轮询成功、连续失败 0。
+  `01:57:18 UTC` 快照中 15 条履约为 `evidence_unavailable`；`02:17:26 UTC` 已降为 0。
+  当前 114 条 `satisfied`、17 条 `enqueued/evidence_not_observed`（13 货款、3 装备 COD、1 流拍返还），
+  仍等待外部领取/付款证明；4 条卖方款业务阻塞、60 条退款为条件义务，另 1 条装备 COD 履约人工核对。
+  投递队列保留 3 条历史发送未知；比较完整行摘要及 attempt/fence，均保持原状，未重试或强制结清。
+- 只收集 9 份闭集脱敏回执，敏感备份/配置及原始日志留在云端。证据索引为
+  `target/dist/sent-mid-20261025-ops-r31/DEPLOYMENT-SUMMARY.json` 与
+  `target/operations-evidence/delivery-fulfillment-health-20261025/FINDINGS.json`。
+  本地 Public/Admin PID 与运行程序哈希不变、未启动 Worker；正式构建刷新了本地 Public 开发 payload，Admin payload 未变。
+  本轮范围为静态门禁、部署核验和用户授权的既有队列观察；未新增或执行行为测试、浏览器测试，未新增业务样例。
+
+外部 HTTP/JSON/事件、配置选择器及数据库版本不变；剩余待领取/付款、业务阻塞与人工核对如实保留。
+运维解释见[已知 MID 履约读取](ops/mail/diagnostics.md#已知-mid-的履约读取)。
+
+### 2026-10-25 R29 Public 竞价历史说明移除（授权单角色发布）
+
+Public owner 移除竞价日志和装备详情表格中的额外说明，五语同步；保留仅屏幕阅读器可读的表格标题，
+不改变事实、顺序、分页、列宽或竞价规则。冻结源码 `df8b037e78e496cbfb49ee36ff65c5a2d92b1d0d`，
+完整 `just verify` 与 `just release-check` 通过；归档 SHA256
+`115d04cac80c87e70ebc2576196c90a6670ba0bc41660f81d38cf5c8c6f48f52`。
+验证 schema63 完整备份后仅替换 Public 内嵌程序，Worker/Admin 在该次切换中未重启，未迁移或修改配置。
+发布后 readiness 与 16 项静态资源核验通过；该页面修改已包含在后续 R31 同源发布中。
+回执索引 `target/dist/public-bid-note-20261025-ops-r29/DEPLOYMENT-SUMMARY.json`；未执行浏览器或竞价测试。
+
 ### 2026-10-25 R28 云端发布与 schema 63（授权停机迁移与制品核验）
 
 发布 owner 为 `ci/release`、`auctionctl` 分体停机/迁移控制器及三角色装配；新增持久对象由
