@@ -164,7 +164,7 @@ impl MoogleMailGateway {
         }
     }
 
-    /// 按 exact remote ID 扫描 world-specific Sent 列表并读取详情证明。
+    /// 按已知 MID 定位 Sent 列表行并核对详情；命中不扫无关尾页，判缺失必须到尾页。
     pub async fn read_sent(
         &self,
         world: MoogleMailWorld,
@@ -365,26 +365,45 @@ impl MoogleMailGateway {
             .checked_add(self.config.fetch_budget)
             .ok_or_else(|| configuration(world))?;
         tokio::time::timeout_at(deadline, async {
-            let list =
-                self.client.observe_sent_list(cookie, &round, self.config.maximum_pages).await?;
-            if !list.complete {
-                return Err(operation_error(
-                    MoogleMailOperation::Sent,
-                    world,
-                    MoogleMailErrorCategory::ProtocolDrift,
-                ));
-            }
-            let summary = list
-                .summaries
-                .iter()
-                .find(|summary| summary.external_mail_id == external_mail_id)
-                .ok_or_else(|| {
-                    operation_error(
+            let mut seen = HashSet::new();
+            let mut summary = None;
+            // 已知 MID 的正向列表身份证明不依赖无关尾页；原始分页仍在同一轮次合并读取。
+            // 这不是新发送的基线/候选搜索，不能据此缩短后者的完整扫描或放宽资金证据期限。
+            for page_index in 0..self.config.maximum_pages {
+                let target = self.client.sent_page(world, page_index)?;
+                let document = self.client.get_in_round(&target, cookie, &round).await?;
+                let page = self
+                    .client
+                    .diagnose_parse(
+                        &target,
+                        &document,
+                        self.parser.scan_sent_page(&document, world, page_index, &mut seen),
+                    )
+                    .await?;
+                if let Some(found) = page
+                    .summaries
+                    .into_iter()
+                    .find(|entry| entry.external_mail_id == external_mail_id)
+                {
+                    summary = Some(found);
+                    break;
+                }
+                if !page.has_next_page {
+                    return Err(operation_error(
                         MoogleMailOperation::Sent,
                         world,
                         MoogleMailErrorCategory::NotObserved,
-                    )
-                })?;
+                    ));
+                }
+            }
+            // 页数耗尽不是目标不存在，保持不完整错误；不得生成领取或结算成功证明。
+            let summary = summary.ok_or_else(|| {
+                operation_error(
+                    MoogleMailOperation::Sent,
+                    world,
+                    MoogleMailErrorCategory::SentScanPageLimit,
+                )
+            })?;
             let target = self.client.sent_detail(world, external_mail_id)?;
             let document = self.client.get_in_round(&target, cookie, &round).await?;
             let snapshot = self
@@ -394,7 +413,7 @@ impl MoogleMailGateway {
                     &document,
                     self.parser.parse_sent_detail(
                         &document,
-                        summary,
+                        &summary,
                         observed_at.min(round.observed_at()),
                     ),
                 )
