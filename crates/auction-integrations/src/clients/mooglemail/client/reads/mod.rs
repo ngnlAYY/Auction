@@ -202,6 +202,27 @@ impl MoogleMailClient {
         Ok(MoogleMailReadRound { key, scope, epoch })
     }
 
+    /// 为已知 MID 的履约证明建立独立新鲜轮次；不复用 claim 前的页面，也不失效其他读取者。
+    /// 此轮次仍受同一 owner/代次、全局请求并发及内存上限约束，本身不授予资产提交权限。
+    pub(crate) fn isolated_read_round(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+    ) -> Result<MoogleMailReadRound, MoogleMailError> {
+        let (key, scope) = self.read_scope(cookie, world)?;
+        let mut state = scope.state.lock().map_err(|_| read_unavailable(world))?;
+        state.touched = Instant::now();
+        let epoch = Arc::new(ReadEpoch {
+            revision: scope.revision.load(Ordering::Acquire),
+            started: Instant::now(),
+            observed_at: Utc::now(),
+            requests: StdMutex::new(ReadRequests::default()),
+            lists: lists::ListCells::default(),
+        });
+        drop(state);
+        Ok(MoogleMailReadRound { key, scope, epoch })
+    }
+
     /// 同一轮次的同一 typed 目标只派发一次；取消某个等待者不取消共享请求。
     pub(crate) async fn get_in_round(
         &self,
