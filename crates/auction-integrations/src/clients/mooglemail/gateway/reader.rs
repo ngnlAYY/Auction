@@ -360,14 +360,20 @@ impl MoogleMailGateway {
         cookie: &MoogleMailCookie,
         fresh: bool,
     ) -> Result<MoogleMailSentSnapshot, MoogleMailError> {
-        let round = self.client.read_round(cookie, world, fresh)?;
+        // 履约证据不能早于 claim；普通已知 MID 读取使用新鲜私有轮次，不借用旧缓存时间。
+        // 资金组合读取仍沿用原 fresh 写屏障及独占 session，不能把私有只读轮次当作资产授权。
+        let round = if fresh {
+            self.client.read_round(cookie, world, true)?
+        } else {
+            self.client.isolated_read_round(cookie, world)?
+        };
         let deadline = tokio::time::Instant::now()
             .checked_add(self.config.fetch_budget)
             .ok_or_else(|| configuration(world))?;
         tokio::time::timeout_at(deadline, async {
             let mut seen = HashSet::new();
             let mut summary = None;
-            // 已知 MID 的正向列表身份证明不依赖无关尾页；原始分页仍在同一轮次合并读取。
+            // 已知 MID 的正向列表身份证明不依赖无关尾页；每次履约观察保持独立新鲜。
             // 这不是新发送的基线/候选搜索，不能据此缩短后者的完整扫描或放宽资金证据期限。
             for page_index in 0..self.config.maximum_pages {
                 let target = self.client.sent_page(world, page_index)?;
