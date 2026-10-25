@@ -35,6 +35,40 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-25 R28 云端发布与 schema 63（授权停机迁移与制品核验）
+
+发布 owner 为 `ci/release`、`auctionctl` 分体停机/迁移控制器及三角色装配；新增持久对象由
+`auction-storage` 的 mailbox sweep / delivery owner 拥有。用户明确要求重新编译、更新线上并迁移数据库。
+冻结干净提交 `a8d7d19f45cb25afeeaac2ff6d69f91ede0f81eb`，完整 `just verify` 与 `just release-check` 通过。
+API-only 四程序重新编译；embedded 四程序及双端 WASM 已属同一提交、同一输入/环境/工具身份，
+经当前门禁验证后复用，不把旧版本验证结果代替本次检查。通用 GNU x86_64，未使用 `target-cpu=native`。
+
+归档 `auction-rust-0.1.0-a8d7d19f45cb.tar.gz` 的 SHA-256 为
+`b912fb8e410f1f52db50ebcb5c131d076a5990e8c823554daea6f4e45e74963a`。
+云端新建 R28 一次性私有发布目录，核验 30 个包文件、原 R27 磁盘/运行身份及已发布 59 项迁移 checksum。
+保留旧程序、配置和 unit，Public → Admin → Worker 正常停稳，Worker clean drain；旧 CLI 创建 schema59 全库备份，
+新 CLI 验证 manifest、归档 SHA-256 与归档格式。该恢复点的归档 SHA-256 为
+`30312ef07d7f68b9c577884d6e75e11c16fbd70b76545b2f4f6009bb25251c0f`，未执行恢复或数据库回滚。
+
+同版 CLI 只追加 `000060`–`000063`。84 张旧业务表迁移前后的逐表行数与摘要完全一致；
+新建维护游标、Send 尝试/MID 绑定和 Take 尝试四张表，启动前均为空，不回填旧账号或发送/领取证明。
+全部角色配置、shared runtime、managed 开关、邮件预算、unit/tmpfiles 保持原值；runtime 锁仍为原 inode 656282、0600。
+未人工重排队、改写或重发历史未知投递，预检及后续观察均有 3 条 `manual_reconcile`。
+
+01:08:29 UTC 按 Worker → Admin → Public 恢复，PID 分别为 255590/255611/255622；
+readiness 均为 200、启动回执匹配、NRestarts 均为 0。两端 Unix socket 及 Public HTTPS 共 16 项静态资源逐字节匹配。
+初始日志无 ERROR/WARN；01:10:55 UTC 再观察，三角色身份不变、无 ERROR，Worker 有 29 条 WARN，
+其中 28 条显式 `failure_code=account_busy`，另 1 条 poll cycle 错误链也含该码，是同类失败的多层记录，不等于 29 次独立投递失败。
+对当前 Main 加密证据做官方离线认证导出，确认有 `battle_main`、没有正常邮件 DOM；临时明文随后删除。
+该战斗页会阻塞邮件读取，未让程序代操作游戏、切换 CK 或重寄未知邮件。
+
+本地 Public/Admin PID 及运行程序哈希未变，Worker 未启动；双端开发 payload 清单摘要也未变。
+10 份闭集脱敏回执与完整摘要位于 `target/dist/schema63-20261025-ops-r28/`；
+数据库归档、敏感配置备份和原始日志仅保留云端私有目录。本轮验证为静态/发布门禁、停机迁移、
+就绪/资源/日志核验及本地加密证据检查，未额外触发注册、竞价、真实补发、论坛或浏览器业务测试。
+升级包含会话及浏览器协议修复，已有页面须刷新，Admin 须重新登录；源码升级前提见
+[部署说明](ops/README.md#发送引用索引与稳定性修复升级)。
+
 ### 2026-10-24 全项目复审与通用构建优化
 
 基线为干净的 `b7db347138931d95ca20a3ccb94c942e746bf1cb`。覆盖 20 个工作区包、1415 个 Rust 文件，以及
