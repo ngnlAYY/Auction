@@ -314,7 +314,7 @@ pub(crate) fn BidLogTable(
             div { class: "public-auction-bid-log-table-wrap",
                 table {
                     class: "public-auction-bid-log-table ui-table--responsive",
-                    caption { {t!("bidlog-history-note")} }
+                    caption { class: "public-visually-hidden", {t!("page-bidlog-title")} }
                     auction_web_shared::TableColumns { layout: "public-bid-log", widths: vec![30, 12, 40, 18] }
                     thead {
                         tr {

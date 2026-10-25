@@ -235,7 +235,6 @@ bidlog-bidder = 入札者
 bidlog-amount = 金額
 bidlog-valid = 現在の最高入札
 bidlog-invalid = 現在の最高入札ではありません
-bidlog-history-note = 受理済みの通常入札と代理入札を新しい順に表示します。
 bidlog-time = 時刻
 bidlog-round = 開催回
 bidlog-round-option = #{ $number } · { $status }
