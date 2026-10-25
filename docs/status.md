@@ -35,6 +35,33 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-25 R32 基础优惠 v2 发布与 schema64
+
+按用户授权，冻结 `476b5f978b0a18847e18868ad7ce8c40a3ab8bd7`，以通用 Linux x86_64 GNU、
+`CARGO_BUILD_JOBS=2` 重新执行完整 `just verify` 与 `just release-check`，均退出 0。API-only 与 embedded
+四程序分别重新编译约 8 分 43 秒、8 分 23 秒；双端 WASM 本轮亦重新构建，发布 payload 字节摘要与 R31 相同。
+源码指纹为 `eec5ed4029ef88cdbfeda845c723afc42add2608066ad94195bf8eb7103da411`，
+归档 SHA-256 为 `ebd48ea4803dae552fdf389ec367b35da736f752fd316efafec35e67a1262e98`。
+
+- 使用独立 R32 目录、冻结计划与 launch-once 入口，上传并核验 30 个包文件。按原停止契约关闭 Public/Admin，
+  在无在途 Sending/preparing 的安全窗口正常 drain Worker；保留原发送/资金证据期限，不主动打断外写。
+- 旧 CLI 创建 schema63 恢复点，新 CLI 离线验证 archive、manifest、数据库身份和完整迁移前缀；未执行恢复。
+  同版 CLI 只追加 `000064_seller_full_settlement`，四个新 CHECK 全部 validated；不新增表。
+  停稳后的 88 张既有业务表共 8,706 行，迁移前后逐表行数与完整行摘要一致。
+- settlement owner 的新默认现已部署：common 的结算 version/mode 明确改为 `2/hold_curve_v2`，并更新两条默认值注释。
+  曲线、其他配置、managed、预算、unit、tmpfiles 及原 runtime 锁 inode/0600 权限不变；新建场次仅享一份奖池基础优惠，
+  卖方全额收成交价，奖池不足同比缩减、零预算照常结算。规则见[结算不变量](docs/contracts/invariants.md#i-07a-结算策略与命令重放必须可从权威事实重建)。
+- 既有三个拍卖策略快照摘要保持不变，均为 v1，包括 Main 第003期草稿；没有自动切换、追溯改账或补差。
+  原三条人工核对投递完整行摘要保持不变，没有重试、补造成功或强制结清。
+- `2026-10-25 07:07:07 UTC` 部署完成、`deploy.exit=0`，Worker → Admin → Public 启动，三角色 readiness 200，
+  两端及公网共 16 项静态资源匹配。本地隔离 Public/Admin 的运行 PID/哈希不变；构建刷新开发 Web 工作目录，Worker 仍未启动。
+- `07:10:20 UTC` 稳定性复核：三角色同部署进程、`NRestarts=0`，日志 WARN/ERROR 均为零且未截断，runtime 未决命令为零，
+  人工核对投递仍为三条。没有新增或执行业务、浏览器或真实结算测试，没有主动发信、论坛命令或本地数据库刷新。
+
+回执在 `target/dist/seller-base-20261025-ops-r32/`：本轮构建门禁、`plan.json`、`upload.json`、`launch.json`、
+`postflight.json`、`stability.json`、`DEPLOYMENT-SUMMARY.json` 及 14 份 `cloud-evidence/` 闭集脱敏回执。
+敏感配置、原始日志与数据库归档留在云端私有目录；本地只归档受控摘要，不把发布就绪扩展为 v2 真实业务验收。
+
 ### 2026-10-25 v2 仅保留基础优惠（源码修正，尚未部署）
 
 用户进一步明确：不再保留旧 v1 的额外奖池优惠。`auction-domain` 的新 v2 仅按一份基础优惠 D 分配，
