@@ -36,6 +36,11 @@ GET/PUT（响应 user_id/channel/version，请求 command_id/channel/expected_ve
 
 ## 稳定投影
 
+Admin 结算报告沿用原字段，`adjustment.policy` 可标识 `hold_curve_v2`。`compensation_amount/compensation_out`
+始终表示奖池总支出；v2 仅为按全场名义需求同比缩放后的基础优惠，不追加额外优惠。v2 九变量账单显式标记模式，
+以成交价加税费为抵扣前价，`pool_credit` 等于实分基础优惠；旧八变量仍只表示额外优惠。
+金额及版本矩阵由领域/HTTP 校验，DTO 不重算策略；历史 v0/v1 形状不变，见[结算契约](docs/contracts/schema.md#结算恢复与交付)。
+
 公开拍品的正式装备、预览摘要与预览详情装备使用必填 `equipment_group` 表达 `rare` / `fusion`；
 DTO 只传递服务端结果，匹配逻辑与论坛颜色留在应用/集成层，见[装备分组契约](docs/contracts/routes.md#p09p11-装备分组)。
 

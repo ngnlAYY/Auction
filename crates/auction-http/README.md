@@ -85,6 +85,8 @@ P25/P26 共用路由的方法拒绝响应始终声明 `Allow: GET, PUT`；HEAD �
 Admin 代理历史的旧二进制游标固定为 26 字节：除 `start` 外，先检查 35 字符无填充长度，再解码到
 26 字节栈缓冲；过长查询不再先分配解码 Vec，版本、种类、时间及 UUID 校验和 `invalid_cursor` 外壳不变。
 错误优先级、405/Allow 和缓存要求见[通用响应与错误](docs/contracts/routes.md#通用响应与错误)。
+Admin 结算报告按原 `adjustment.policy` 区分冻结的 v0/v1/v2，金额矩阵交领域校验，不在 HTTP 重算政策。
+v2 的 `compensation_amount/compensation_out` 仅为按奖池预算缩放后的基础优惠，逐项和汇总均不超过基础优惠需求；路径和字段不变。
 Admin 结算报告读取或不变量校验失败时记录 `admin_settlement_report_failed`，字段限定为 `auction_id` 与
 闭集 `failure_code`，通过请求 span 关联请求 ID；底层错误文本、SQL 和敏感值不进入该诊断事件。
 

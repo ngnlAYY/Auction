@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | HTTP 与页面 | Public/Admin feature API 及浏览器入口见[路由口径](docs/contracts/routes.md#基线与统计口径) | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
-| 迁移 | PostgreSQL 63 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 64 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -34,6 +34,73 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 各记录只覆盖注明的工作树与验证范围，不代表运行验收。下文 `verify全绿` 沿用记录当时的完整 `just verify` 结果；历史文档份数不是当前自动检查项，也不证明链接或语义正确。当前静态门禁及独立检查范围见[开发指南](docs/guide/development.md#默认检查)，历史命令和失败结果保持原样。
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
+
+### 2026-10-25 v2 仅保留基础优惠（源码修正，尚未部署）
+
+用户进一步明确：不再保留旧 v1 的额外奖池优惠。`auction-domain` 的新 v2 仅按一份基础优惠 D 分配，
+`C=min(D,floor(A×D/ΣD))`；A 仍为同一锁内世界奖池期初余额加本场税费，零需求时 C 为零。
+卖方始终收 P，买方付 `P+T-C`；不额外发 C 红包、不重复减价。原默认曲线保持不变，基础优惠 2% 时
+足额最多优惠 2%，成交 100K 的买方付 98K、卖方收 100K；优惠预算只覆盖一半时买方付 99K。
+
+- 保留同比缩减、逐件向下取整和尾差留池，零预算无优惠仍结算。旧 v0/v1 冻结快照、命令重放及三/八变量邮件不变。
+- 领域计划、明细和 v2 九变量账单均将实分金额封顶为一份 D；integrations 的 v2 正文不再描述额外优惠。
+  HTTP 报告恢复总支出不超过基础优惠需求的闭集，沿用尚未发布的 `000064` 并同步收紧其 CHECK；没有修改已发布迁移。
+- 新模板保留既有折扣严格小于 50% 的保守上限，不借本次移除额外优惠扩大可配置范围；实际默认最高优惠仍为 2%。
+- 本次完整 `CARGO_BUILD_JOBS=2 just verify` 通过，覆盖策略门禁、格式、工作区/独立 feature、all-features
+  Clippy `-D warnings` 与双端 WASM check。最终日志为 `target/seller-base-only-verify-final.log`，对应 `.exit` 为 0。
+  Rust LSP 对 20 个改动文件仍无有效回答，未记为通过；pi-lens 另有既有金额格式化函数的 `chars().enumerate()`
+  AST 提示 1 条，该函数实现本轮未改。未新增或执行行为测试，未发布、执行迁移、切换已有草稿、补差或改写历史账款。
+
+规则及载荷边界见[结算不变量](docs/contracts/invariants.md#i-07a-结算策略与命令重放必须可从权威事实重建)
+与[结算交付契约](docs/contracts/schema.md#结算恢复与交付)。
+
+### 2026-10-25 v2 奖池不足同比缩放（含双份优惠的未发布中间方案，已取代）
+
+以下保留当时的双份优惠方案和静态检查记录；当前 v2 仅保留基础优惠。
+
+用户修正预算不足规则：`auction-domain` 以全场名义优惠为权重，统一缩小基础及额外优惠；
+`C=min(2D,floor(A×D/ΣD))`，A 为同一锁内世界奖池期初余额加本场税费。每件向下取整、尾差留池；
+奖池为零则无优惠仍正常结算，卖方始终收成交价。取消此前未发布中间方案的奖池不足错误与 Worker 等待分支。
+
+- 沿用尚未发布的 `hold_curve_v2/version=2` 草案与 `000064`：CHECK 允许实分优惠为零至两份名义折扣。
+  逐件同比分配仍由领域计划和 application 的首次冻结奖池/锁内事实重建校验；不改旧迁移或历史经济行。
+- application/storage 从同源明细读取冻结模式，v2 买家邮件使用显式 `pricing_mode=hold_curve_v2` 的精确九变量，
+  抵扣前价为成交价加税费，`pool_credit` 为实际总优惠。integrations 单独渲染 v2 的名义曲线和实分优惠，
+  旧三/八变量的载荷、摘要和正文保持原形状；完整 Sent、命令、用途授权、generation 与 sending fence 不放宽。
+- 静态检查：`cargo check --locked --workspace --all-targets --all-features` 及完整
+  `CARGO_BUILD_JOBS=2 just verify` 通过（格式、策略门禁、工作区/独立 feature、all-features Clippy `-D warnings`、双端 WASM）。
+  最终日志/退出码为 `target/seller-full-proportional-check-final.{log,exit}` 与
+  `target/seller-full-proportional-verify-final.{log,exit}`，均退出 0。Rust LSP 对 20 个改动文件未返回有效回答，未记为通过。
+- storage 的资产冲突识别同步精确九变量闭集，仍只定位出站资产，不授予资金或发送权限。
+  本轮未新增或执行行为测试，未执行迁移、启动服务、发布制品、切换草稿或改写历史账款。
+  未改变此前生产 R31/schema63，也未补差或发送邮件。
+
+金额公式见[结算不变量](docs/contracts/invariants.md#i-07a-结算策略与命令重放必须可从权威事实重建)，
+载荷闭集见[结算交付契约](docs/contracts/schema.md#结算恢复与交付)。
+
+### 2026-10-25 卖方全额结算 v2（未发布中间方案，已被同比缩放方案取代）
+
+以下保留当时工作区及静态检查记录，不代表当前预算不足处理逻辑。
+
+按用户选择，仅修正后续新场次，保留买方原有优惠，不补发历史差额。domain 的 `hold_curve_v2/version=2`
+保证卖方应收等于成交价；负调整时基础折扣及额外优惠全部由奖池承担，总支出为两份基础折扣。
+奖池不足则整笔结算返回 `settlement_pool_insufficient`，application 不写成功命令/义务，jobs 复用原持久 workflow
+保持 settling 并退避重试。已有 v0/v1 快照继续按冻结公式结算及重放，新模板拒绝 v1。
+
+- `compensation_amount` 继续表示奖池总支出；领域 `buyer_pool_credit` 分离额外买方优惠，application 邮件及
+  storage 收款证明重建共用该结果，不把卖方补足额重复扣减 CoD；原命令摘要、Sending fence、现金用途授权不放宽。
+- storage 追加 `000064_seller_full_settlement.up.sql`，只扩展三张既有拍卖/结算表的版本/金额 CHECK，
+  不修改旧快照、价格、义务、余额、投递或账本；本轮未执行该迁移，未启动服务、改线上配置或补发邮件。
+- HTTP/DTO 路径与字段不变；A07 允许原 policy 字段标识 v2，报告按领域模式矩阵与逐标的折扣/税费/补偿总数核对。
+  新模式奖池总支出可高于基础折扣需求，旧 v1 仍保留原上限；买家邮件八变量保持原形状和额外优惠含义。
+- 当时工作区完整 `CARGO_BUILD_JOBS=2 just verify` 通过：仓库策略、格式、工作区/独立 feature 编译、
+  all-features Clippy `-D warnings` 与双端 WASM check；最终日志及退出码为
+  `target/seller-full-verify-final.log`、`target/seller-full-verify-final.exit=0`。
+  Rust LSP 对 15 个改动文件无有效回答，未记为通过；未新增或执行行为测试、数据库迁移验收或真实结算。
+  线上仍为此前 R31/schema63；已有 Main 第003期草稿快照仍为 v1，未经单目标确认不自动切换。
+
+owner、配置与部署边界分别见[结算不变量](docs/contracts/invariants.md#i-07a-结算策略与命令重放必须可从权威事实重建)、
+[对象契约](docs/contracts/schema.md#结算恢复与交付)与[升级说明](ops/README.md#卖方全额结算升级)。
 
 ### 2026-10-25 R31 已知 Sent MID 履约核对修复（授权发布与既有队列观察）
 

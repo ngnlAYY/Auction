@@ -151,6 +151,7 @@ fn settlement_mode_name(mode: SettlementMode) -> &'static str {
     match mode {
         SettlementMode::LegacyZeroV0 => "legacy_zero_v0",
         SettlementMode::HoldCurveV1 => "hold_curve_v1",
+        SettlementMode::HoldCurveV2 => "hold_curve_v2",
     }
 }
 

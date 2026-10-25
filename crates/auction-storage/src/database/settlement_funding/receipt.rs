@@ -59,9 +59,12 @@ async fn validate_receipt_boundary(
     let row = sqlx::query(
         r#"SELECT o.obligation_kind,o.amount,o.carrier_credit,o.equipment_id,
         e.name AS equipment_name,d.payload,d.recipient,d.result_metadata,
-        s.end_price AS settlement_end_price,s.buyer_amount AS settlement_buyer_amount,
+        o.lot_id AS settlement_lot_id,s.end_price AS settlement_end_price,
+        s.buyer_amount AS settlement_buyer_amount,s.listed_price AS settlement_listed_price,
+        s.seller_amount AS settlement_seller_amount,s.tax_amount AS settlement_tax_amount,
         s.compensation_amount AS settlement_compensation_amount,
         s.hold_ppm AS settlement_hold_ppm,s.adjustment_ppm AS settlement_adjustment_ppm,
+        s.adjustment_metadata ->> 'policy' AS settlement_policy_mode,
         public.delivery_has_frozen_sent_proof(d.id,d.result_metadata,d.external_reference) AS frozen_sent_proven
         FROM public.settlement_obligations o
         JOIN public.equipment e ON e.id=o.equipment_id
@@ -164,10 +167,9 @@ fn append_frozen_pricing(
     let amount = |column: &str| {
         row.try_get::<Option<i64>, _>(column).map_err(storage)?.ok_or(FundingError::Unproven)
     };
-    let winning_bid = amount("settlement_end_price")?;
-    let buyer_amount = amount("settlement_buyer_amount")?;
-    let pool_credit = amount("settlement_compensation_amount")?;
-    let adjusted_price = buyer_amount.checked_add(pool_credit).ok_or(FundingError::Unproven)?;
+    let settlement_amount = |column| {
+        auction_domain::SettlementAmount::new(amount(column)?).map_err(|_| FundingError::Unproven)
+    };
     let hold_ppm = row
         .try_get::<Option<i64>, _>("settlement_hold_ppm")
         .map_err(storage)?
@@ -176,16 +178,34 @@ fn append_frozen_pricing(
         .try_get::<Option<i64>, _>("settlement_adjustment_ppm")
         .map_err(storage)?
         .ok_or(FundingError::Unproven)?;
+    let line = auction_domain::SettlementLine {
+        lot_id: auction_domain::LotId::from_uuid(
+            row.try_get("settlement_lot_id").map_err(storage)?,
+        ),
+        end_price: settlement_amount("settlement_end_price")?,
+        listed_price: settlement_amount("settlement_listed_price")?,
+        buyer_amount: settlement_amount("settlement_buyer_amount")?,
+        seller_amount: settlement_amount("settlement_seller_amount")?,
+        tax_amount: settlement_amount("settlement_tax_amount")?,
+        compensation_amount: settlement_amount("settlement_compensation_amount")?,
+        hold_ppm,
+        adjustment_ppm,
+    };
+    let winning_bid = line.end_price.value();
+    let buyer_amount = line.buyer_amount.value();
+    let pool_credit = line.buyer_pool_credit().map_err(|_| FundingError::Unproven)?.value();
+    let adjusted_price = buyer_amount.checked_add(pool_credit).ok_or(FundingError::Unproven)?;
     if buyer_amount != buyer || !(0..=SETTLEMENT_PPM).contains(&hold_ppm) {
         return Err(FundingError::Unproven);
     }
-    auction_domain::validate_settlement_price_breakdown(
-        winning_bid,
-        adjustment_ppm,
-        adjusted_price,
-        pool_credit,
-    )
-    .map_err(|_| FundingError::Unproven)?;
+    let mode: Option<String> = row.try_get("settlement_policy_mode").map_err(storage)?;
+    let mode =
+        crate::database::settlement_policy::decode_mode(mode.as_deref().unwrap_or("hold_curve_v1"))
+            .map_err(|_| FundingError::Unproven)?;
+    line.validate_for_mode(mode).map_err(|_| FundingError::Unproven)?;
+    if mode == auction_domain::SettlementMode::HoldCurveV2 {
+        variables["pricing_mode"] = "hold_curve_v2".into();
+    }
     variables["hold_ppm"] = hold_ppm.to_string().into();
     variables["adjustment_ppm"] = adjustment_ppm.to_string().into();
     variables["winning_bid"] = winning_bid.to_string().into();

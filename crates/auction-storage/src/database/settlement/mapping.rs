@@ -54,6 +54,7 @@ pub(super) fn settlement_mode(mode: SettlementMode) -> &'static str {
     match mode {
         SettlementMode::LegacyZeroV0 => "legacy_zero_v0",
         SettlementMode::HoldCurveV1 => "hold_curve_v1",
+        SettlementMode::HoldCurveV2 => "hold_curve_v2",
     }
 }
 
@@ -63,6 +64,7 @@ pub(super) fn parse_settlement_mode(
     match value.as_str() {
         "legacy_zero_v0" => Ok(SettlementMode::LegacyZeroV0),
         "hold_curve_v1" => Ok(SettlementMode::HoldCurveV1),
+        "hold_curve_v2" => Ok(SettlementMode::HoldCurveV2),
         _ => Err(invalid("结算摘要策略模式未知")),
     }
 }

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{DomainError, EquipmentId, LotId, SubmissionId, UserId};
 
-use super::{SETTLEMENT_PPM, SettlementAmount, SettlementPolicy};
+use super::{SETTLEMENT_PPM, SettlementAmount, SettlementMode, SettlementPolicy};
 
 /// 结算业务使用的世界闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +75,7 @@ pub struct SettlementLine {
     pub buyer_amount: SettlementAmount,
     pub seller_amount: SettlementAmount,
     pub tax_amount: SettlementAmount,
+    /// 实分奖池支出；v2 仅为按全场预算同比缩放后的基础优惠，不追加第二份优惠。
     pub compensation_amount: SettlementAmount,
     pub hold_ppm: i64,
     pub adjustment_ppm: i64,
@@ -110,11 +111,12 @@ impl SettlementLine {
             let tax_amount = self.tax_amount.value();
             let compensation_amount = self.compensation_amount.value();
             if self.listed_price.value() == 0
-                || self.seller_amount != self.listed_price
+                || (self.seller_amount != self.listed_price && seller_amount != end_price)
+                || seller_amount < self.listed_price.value()
                 || tax_amount > 0 && compensation_amount > 0
                 || tax_amount > 0 && seller_amount != end_price
                 || tax_amount == 0 && seller_amount > end_price
-                || compensation_amount > 0 && seller_amount >= end_price
+                || compensation_amount > 0 && self.listed_price.value() >= end_price
             {
                 return Err(DomainError::InvalidSettlementFacts(
                     "成交结算明细价格、税费或补偿矩阵不一致",
@@ -125,7 +127,93 @@ impl SettlementLine {
     }
 }
 
-/// 校验冻结费率与买方价格明细一致；不读取现行曲线，也不改变已有结算事实。
+impl SettlementLine {
+    /// 返回实分奖池抵扣；v1 是历史额外优惠，v2 仅为同比缩放后的基础优惠。
+    /// 抵扣前价格必须配合冻结模式校验，不能将 v2 名义折扣先扣一次再抵扣总额。
+    pub fn buyer_pool_credit(&self) -> Result<SettlementAmount, DomainError> {
+        self.validate()?;
+        Ok(self.compensation_amount)
+    }
+
+    /// 冻结模式决定卖方是否让利；旧 v1 不得借用 v2 的全额卖方矩阵通过重放校验。
+    pub fn validate_for_mode(&self, mode: SettlementMode) -> Result<(), DomainError> {
+        let credit = self.buyer_pool_credit()?;
+        let discount = if self.adjustment_ppm < 0 {
+            super::floor_ppm(self.end_price, -self.adjustment_ppm)?
+        } else {
+            SettlementAmount::zero()
+        };
+        if self.listed_price != self.end_price.checked_sub(discount)? {
+            return Err(DomainError::InvalidSettlementFacts("名义列示价与冻结曲线不一致"));
+        }
+        if self.end_price.value() > 0 {
+            validate_settlement_price_breakdown_for_mode(
+                mode,
+                self.end_price.value(),
+                self.adjustment_ppm,
+                self.buyer_amount.checked_add(credit)?.value(),
+                credit.value(),
+            )?;
+        }
+        let valid = match mode {
+            SettlementMode::LegacyZeroV0 => {
+                self.adjustment_ppm == 0
+                    && self.listed_price == self.end_price
+                    && self.seller_amount == self.end_price
+                    && self.tax_amount.value() == 0
+                    && self.compensation_amount.value() == 0
+            }
+            SettlementMode::HoldCurveV1 => {
+                self.seller_amount == self.listed_price && self.compensation_amount <= discount
+            }
+            SettlementMode::HoldCurveV2 => {
+                self.seller_amount == self.end_price
+                    && (self.end_price.value() == 0 || self.buyer_amount.value() > 0)
+                    && self.compensation_amount <= discount
+            }
+        };
+        if !valid {
+            return Err(DomainError::InvalidSettlementFacts(
+                "冻结结算模式与卖方金额或奖池支出不一致",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// 按冻结模式校验账单，v2 从成交价抵扣实分基础优惠，不追加或重复预扣折扣。
+/// 此处只校验单件边界；全场同比缩放必须由计划用首次锁内奖池重建。
+pub fn validate_settlement_price_breakdown_for_mode(
+    mode: SettlementMode,
+    end_price: i64,
+    adjustment_ppm: i64,
+    adjusted_price: i64,
+    pool_credit: i64,
+) -> Result<(), DomainError> {
+    if mode != SettlementMode::HoldCurveV2 || adjustment_ppm >= 0 {
+        return validate_settlement_price_breakdown(
+            end_price,
+            adjustment_ppm,
+            adjusted_price,
+            pool_credit,
+        );
+    }
+    if end_price <= 0
+        || adjusted_price != end_price
+        || pool_credit < 0
+        || pool_credit >= end_price
+        || adjustment_ppm < -SETTLEMENT_PPM
+    {
+        return Err(DomainError::InvalidSettlementFacts("v2 结算价格明细范围无效"));
+    }
+    let discount = i128::from(end_price) * -i128::from(adjustment_ppm) / i128::from(SETTLEMENT_PPM);
+    if i128::from(pool_credit) > discount {
+        return Err(DomainError::InvalidSettlementFacts("v2 实分优惠超过名义基础折扣"));
+    }
+    Ok(())
+}
+
+/// 校验旧模式冻结费率与买方价格明细一致；不读取现行曲线，也不改变已有结算事实。
 /// 奖惩先按整数向下取整，奖池仅对折扣追加抵扣且最多抵扣一份基础折扣。
 pub fn validate_settlement_price_breakdown(
     end_price: i64,

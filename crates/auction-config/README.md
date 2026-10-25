@@ -20,6 +20,8 @@
 `config/settings/` 按 `auction`、`worker`、`secrets`、`app`、`validation` 和 `operations` 分工。角色文件先定位为
 绝对路径，相对公共/敏感/runtime 引用均以其目录解析，该步骤不解除 symlink 安全检查。`AuctionConfig::policy()`
 返回 `Result`，自身拒绝未知结算/恢复模式及不可表示的时间范围，不依赖外层先校验、不静默替换策略。
+新拍卖结算默认 `version=2/mode=hold_curve_v2`，卖方全额收款；旧 v1 只保留冻结快照读取，不能作为新建模板。
+显式旧配置须按[升级说明](ops/README.md#卖方全额结算升级)修改 version/mode，不静默替换，也不回写已有场次。
 新场次 soft-close 窗口/延长默认均为 900 秒，
 common、runtime 候选与首次设置内嵌模板同步；升级不覆盖文件中显式的 60，须核对 managed 有效来源并手动更新
 （步骤见[配置手册](ops/config/README.md#缓存与拍卖模板)）。

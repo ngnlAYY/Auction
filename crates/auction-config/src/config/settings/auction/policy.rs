@@ -68,9 +68,10 @@ impl AuctionConfig {
         let settlement_mode = match self.settlement.mode.as_str() {
             "legacy_zero_v0" => SettlementMode::LegacyZeroV0,
             "hold_curve_v1" => SettlementMode::HoldCurveV1,
+            "hold_curve_v2" => SettlementMode::HoldCurveV2,
             _ => {
                 return Err(ConfigError::InvalidAuctionConfig(
-                    "settlement.mode 只能是 legacy_zero_v0 或 hold_curve_v1",
+                    "settlement.mode 只能是 legacy_zero_v0、hold_curve_v1 或 hold_curve_v2",
                 ));
             }
         };
@@ -166,9 +167,9 @@ impl Default for AuctionEconomicsConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuctionSettlementConfig {
-    /// 结算策略版本；当前支持 0 或 1，省略时为 1。
+    /// 新模板结算策略版本为 0 或 2，省略时为 2；1 仅用于历史快照解码。
     pub version: u32,
-    /// 结算模式，只能是 hold_curve_v1 或 legacy_zero_v0；省略时为 hold_curve_v1。
+    /// 新模板使用 hold_curve_v2 或 legacy_zero_v0，默认 hold_curve_v2；v1 不得用于新拍卖。
     pub mode: String,
     /// 是否启用补偿池；省略时启用。
     pub compensation_pool_enabled: bool,
@@ -184,7 +185,7 @@ impl Default for AuctionSettlementConfig {
         let policy = SettlementPolicy::default();
         Self {
             version: policy.version,
-            mode: "hold_curve_v1".to_owned(),
+            mode: "hold_curve_v2".to_owned(),
             compensation_pool_enabled: policy.compensation_pool_enabled,
             isekai_carrier_credit: policy.isekai_carrier_credit,
             anchors: policy

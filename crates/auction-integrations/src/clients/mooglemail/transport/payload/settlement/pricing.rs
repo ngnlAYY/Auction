@@ -2,7 +2,9 @@
 
 use std::collections::BTreeMap;
 
-use auction_domain::{SETTLEMENT_PPM, validate_settlement_price_breakdown};
+use auction_domain::{
+    SETTLEMENT_PPM, SettlementMode, validate_settlement_price_breakdown_for_mode,
+};
 
 use super::exact_variables;
 
@@ -19,6 +21,7 @@ const PRICED_VARIABLES: &[&str] = &[
 ];
 
 struct WinnerPricing {
+    mode: SettlementMode,
     hold_ppm: i64,
     adjustment_ppm: i64,
     winning_bid: i64,
@@ -26,21 +29,29 @@ struct WinnerPricing {
     pool_credit: i64,
 }
 
-/// 只接受完整新变量集或精确旧变量集，拒绝半套价格数据和未知字段。
+/// 接受精确旧三/八变量或显式标记 v2 的九变量，拒绝半套价格数据和未知字段。
 pub(super) fn valid_winner_variables(variables: &BTreeMap<String, String>) -> bool {
     exact_variables(variables, LEGACY_VARIABLES) || winner_pricing(variables).is_some()
 }
 
 fn winner_pricing(variables: &BTreeMap<String, String>) -> Option<WinnerPricing> {
-    if !exact_variables(variables, PRICED_VARIABLES) {
-        return None;
-    }
+    let mode = match variables.get("pricing_mode").map(String::as_str) {
+        None if exact_variables(variables, PRICED_VARIABLES) => SettlementMode::HoldCurveV1,
+        Some("hold_curve_v2")
+            if variables.len() == PRICED_VARIABLES.len() + 1
+                && PRICED_VARIABLES.iter().all(|key| variables.contains_key(*key)) =>
+        {
+            SettlementMode::HoldCurveV2
+        }
+        _ => return None,
+    };
     let integer = |name: &str| {
         let value = variables.get(name)?;
         let parsed = value.parse::<i64>().ok()?;
         (parsed.to_string() == *value).then_some(parsed)
     };
     let pricing = WinnerPricing {
+        mode,
         hold_ppm: integer("hold_ppm")?,
         adjustment_ppm: integer("adjustment_ppm")?,
         winning_bid: integer("winning_bid")?,
@@ -49,7 +60,8 @@ fn winner_pricing(variables: &BTreeMap<String, String>) -> Option<WinnerPricing>
     };
     let amount = integer("amount")?;
     if !(0..=SETTLEMENT_PPM).contains(&pricing.hold_ppm)
-        || validate_settlement_price_breakdown(
+        || validate_settlement_price_breakdown_for_mode(
+            pricing.mode,
             pricing.winning_bid,
             pricing.adjustment_ppm,
             pricing.adjusted_price,
@@ -75,19 +87,35 @@ pub(super) fn render_price_breakdown(variables: &BTreeMap<String, String>) -> Op
         std::cmp::Ordering::Equal => "no adjustment",
         std::cmp::Ordering::Greater => "surcharge",
     };
+    // 旧模式的标签与字节保持原样；v2 明确区分曲线名义比例和预算缩放后的实际优惠。
+    let (adjustment_title, price_title, credit_title) =
+        if pricing.mode == SettlementMode::HoldCurveV2 {
+            (
+                "Curve adjustment (before pool scaling)",
+                "Price before pool discounts",
+                "Pool-funded buyer discount",
+            )
+        } else {
+            ("Price adjustment", "Price after adjustment", "Additional pool credit")
+        };
     let mut output = format!(
-        "Leading time share: {}\nPrice adjustment: {} ({adjustment_label})\n\n\
-         Winning bid: {} Credits\nPrice after adjustment: {} Credits\n",
+        "Leading time share: {}\n{adjustment_title}: {} ({adjustment_label})\n\n\
+         Winning bid: {} Credits\n{price_title}: {} Credits\n",
         format_percent(pricing.hold_ppm, false),
         format_percent(pricing.adjustment_ppm, true),
         format_credits(pricing.winning_bid),
         format_credits(pricing.adjusted_price),
     );
-    if pricing.pool_credit > 0 {
+    if pricing.pool_credit > 0
+        || pricing.mode == SettlementMode::HoldCurveV2 && pricing.adjustment_ppm < 0
+    {
         output.push_str(&format!(
-            "Additional pool credit: {} Credits\n",
+            "{credit_title}: {} Credits\n",
             format_credits(pricing.pool_credit)
         ));
+    }
+    if pricing.mode == SettlementMode::HoldCurveV2 && pricing.adjustment_ppm < 0 {
+        output.push_str("Base discount is pool-funded and scaled to available funds.\n");
     }
     output.push('\n');
     Some(output)

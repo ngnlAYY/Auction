@@ -14,16 +14,22 @@ struct StoredSettlementPolicy {
     anchors: Vec<AdjustmentAnchor>,
 }
 
+/// 冻结快照、履约和收款证明共用的模式闭集，不把未知标签降级为历史算法。
+pub(super) fn decode_mode(mode: &str) -> Result<SettlementMode, &'static str> {
+    match mode {
+        "legacy_zero_v0" => Ok(SettlementMode::LegacyZeroV0),
+        "hold_curve_v1" => Ok(SettlementMode::HoldCurveV1),
+        "hold_curve_v2" => Ok(SettlementMode::HoldCurveV2),
+        _ => Err("结算策略模式未知"),
+    }
+}
+
 pub(super) fn decode(snapshot: &Value) -> Result<SettlementPolicy, &'static str> {
     let stored = StoredSettlementPolicy::deserialize(
         snapshot.get("settlement").ok_or("拍卖策略快照缺少 settlement")?,
     )
     .map_err(|_| "结算策略快照字段无效")?;
-    let mode = match stored.mode.as_str() {
-        "legacy_zero_v0" => SettlementMode::LegacyZeroV0,
-        "hold_curve_v1" => SettlementMode::HoldCurveV1,
-        _ => return Err("结算策略模式未知"),
-    };
+    let mode = decode_mode(&stored.mode)?;
     let policy = SettlementPolicy {
         version: stored.version,
         mode,

@@ -104,16 +104,17 @@ pub(crate) fn valid_settlement_report(report: &SettlementReport, auction_id: Uui
                 || settlement.tax_income < 0
                 || settlement.discount_demand < 0
                 || settlement.compensation_out < 0
+                || settlement.compensation_out > settlement.discount_demand
                 || settlement.closing_balance < 0
                 || settlement.movement_count < 2
                 || report.lots.is_empty()
-                || settlement.discount_demand < settlement.compensation_out
             {
                 return false;
             }
             let mut lot_ids = BTreeSet::new();
             let mut lot_codes = BTreeSet::new();
             let mut tax_income = 0_i64;
+            let mut discount_demand = 0_i64;
             let mut compensation_out = 0_i64;
             let mut movement_count = 2_i64;
             for lot in &report.lots {
@@ -125,6 +126,14 @@ pub(crate) fn valid_settlement_report(report: &SettlementReport, auction_id: Uui
                 if !valid_settlement_lot(lot) {
                     return false;
                 }
+                discount_demand = match lot
+                    .final_price
+                    .checked_sub(lot.listed_price)
+                    .and_then(|discount| discount_demand.checked_add(discount))
+                {
+                    Some(value) => value,
+                    None => return false,
+                };
                 tax_income = match tax_income.checked_add(lot.tax_amount) {
                     Some(value) => value,
                     None => return false,
@@ -147,7 +156,8 @@ pub(crate) fn valid_settlement_report(report: &SettlementReport, auction_id: Uui
             else {
                 return false;
             };
-            tax_income == settlement.tax_income
+            discount_demand == settlement.discount_demand
+                && tax_income == settlement.tax_income
                 && compensation_out == settlement.compensation_out
                 && closing_balance == settlement.closing_balance
                 && movement_count == settlement.movement_count
@@ -186,7 +196,7 @@ fn valid_report_auction_lifecycle(auction: &SettlementAuctionSnapshot) -> bool {
     }
 }
 
-/// 结算 lot 的金额规则与旧版 `SettlementReportLot.Validate` 保持同一闭集。
+/// 结算 lot 的身份与状态边界保持原闭集，金额矩阵交领域按冻结模式验证。
 fn valid_settlement_lot(lot: &SettlementLotReport) -> bool {
     if lot.id.is_nil()
         || lot.lot_number <= 0
@@ -227,27 +237,13 @@ fn valid_settlement_lot(lot: &SettlementLotReport) -> bool {
             if buyer_side != seller_side || lot.tax_amount > 0 && lot.compensation_amount > 0 {
                 return false;
             }
-            match lot.adjustment_ppm.cmp(&0) {
-                std::cmp::Ordering::Greater => {
-                    lot.listed_price == lot.final_price
-                        && lot.seller_amount == lot.final_price
-                        && lot.compensation_amount == 0
-                }
-                std::cmp::Ordering::Less => {
-                    // 折扣按整数金额向下取整，极小成交额可能保留负比例但折扣金额为零。
-                    lot.tax_amount == 0
-                        && lot.listed_price <= lot.final_price
-                        && lot.seller_amount == lot.listed_price
-                        && lot.compensation_amount <= lot.final_price - lot.listed_price
-                }
-                std::cmp::Ordering::Equal => {
-                    lot.listed_price == lot.final_price
-                        && lot.buyer_amount == lot.final_price
-                        && lot.seller_amount == lot.final_price
-                        && lot.tax_amount == 0
-                        && lot.compensation_amount == 0
-                }
-            }
+            let mode = match lot.adjustment.policy.as_deref() {
+                Some("legacy_zero_v0") => auction_domain::SettlementMode::LegacyZeroV0,
+                Some("hold_curve_v1") | None => auction_domain::SettlementMode::HoldCurveV1,
+                Some("hold_curve_v2") => auction_domain::SettlementMode::HoldCurveV2,
+                _ => return false,
+            };
+            settlement_report_line(lot).is_some_and(|line| line.validate_for_mode(mode).is_ok())
         }
         "unsold" => {
             lot.winner.is_none()
@@ -262,6 +258,22 @@ fn valid_settlement_lot(lot: &SettlementLotReport) -> bool {
         }
         _ => false,
     }
+}
+
+/// 只在 HTTP 边界转换报告字段，金额规则由领域按冻结模式统一校验。
+fn settlement_report_line(lot: &SettlementLotReport) -> Option<auction_domain::SettlementLine> {
+    let amount = |value| auction_domain::SettlementAmount::new(value).ok();
+    Some(auction_domain::SettlementLine {
+        lot_id: lot.id,
+        end_price: amount(lot.final_price)?,
+        listed_price: amount(lot.listed_price)?,
+        buyer_amount: amount(lot.buyer_amount)?,
+        seller_amount: amount(lot.seller_amount)?,
+        tax_amount: amount(lot.tax_amount)?,
+        compensation_amount: amount(lot.compensation_amount)?,
+        hold_ppm: i64::from(lot.hold_ppm),
+        adjustment_ppm: i64::from(lot.adjustment_ppm),
+    })
 }
 
 fn valid_report_text(value: &str, maximum: usize) -> bool {
