@@ -1,11 +1,11 @@
 # Admin runtime 非敏感配置示例：字段都支持省略，旧字段使用应用模型默认值，operations 各组默认沿用部署配置。
-# 不能放 [database]、database_url、redis_url、Cookie、密码、签名密钥或装备数据密钥；生产置于受信目录并设 0640，修改后重启 Admin/Worker 生效。
+# 不能放 [database]、database_url、redis_url、Cookie、密码、签名密钥或装备数据密钥；生产置于受信目录并设 0640，修改后重启受影响角色生效。
 
 # 可选：是否允许人工提前开放拍卖；省略时为 false。
 allow_manual_early_open = false
 # 可选：是否允许 Admin 提前结束竞价并进入结算队列；默认 false，修改后需重启。
 allow_manual_early_settlement = false
-# 可选：bot 显示名列表，命中即内部履约（买家不发 COD、返还直接留存）；省略不启用。
+# 可选：bot 显示名列表，供 Public 注册提示及 Worker 内部履约使用；默认空名单，修改后重启 Public/Worker。
 # bot_players = ["ngnlAYY"]
 
 # 可选区块：主世界 MoogleMail 入站策略；与 isekai、equipment_filter、mail_templates 同时省略时兼容升级前文档。

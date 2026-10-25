@@ -5,3 +5,5 @@ mod identity;
 mod inbox;
 mod inventory;
 mod sent;
+
+pub(crate) use inventory::MoogleMailInventoryPreparation;

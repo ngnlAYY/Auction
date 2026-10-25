@@ -64,12 +64,20 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 - 凭据获取：application 的 `ports/admin/credentials/acquisition.rs` 定义 Cookie/论坛账号来源、分域摘要与获取端口；
   integrations 的 `credentials/acquire/` 独占新鲜登录表单、受限传输和论坛/游戏字段映射。
   Admin Web 只提交所选来源，HTTP 保持安全响应；原 credential 存储事务、审计、单 active 和 Worker 重启边界不变，无新增迁移。
+- 注册账号提示：config 将同源 runtime 的 `bot_players` 投影为 Public/Worker 共用窄名单；
+  Public 装配根注入共享只读 DTO，HTTP 的 `public/registration.rs` 拥有 P29，contracts 拥有字段，
+  Public Web 的 `api/identity/registration.rs` 与登录页拥有读取和五语纯文本展示。无新持久对象或迁移；
+  不把完整配置、邮件凭据或邮箱可用性声明传给匿名浏览器。
 - 邮件正文：domain 拥有冻结费率与价格明细的一致性校验，application 拥有通知身份与冻结结算 intent；storage 的
   [claims/pricing.rs](crates/auction-storage/src/database/fulfillment_scheduler/claims/pricing.rs) 投影不可变结算明细；integrations 的
   [settlement/pricing.rs](crates/auction-integrations/src/clients/mooglemail/transport/payload/settlement/pricing.rs) 仅校验和格式化价格解释，
   [outcomes/rejection.rs](crates/auction-integrations/src/clients/mooglemail/transport/outcomes/rejection.rs) 仅将闭集拒收码转为安全文案。
   14 项 runtime 模板由 application 定义、config 解析；变量兼容与同版升级见
   [邮件正文模板](ops/config/README.md#邮件正文模板)及[交付载荷契约](docs/contracts/schema.md#结算恢复与交付)。
+- 附件装备准备：integrations 的 `clients/mooglemail/sender/equipment.rs` 独占 Armory 出库／解除保护编排，
+  `parser/reads/inventory/` 拥有精确装备状态和 token 证明，`protocol`／`forms` 拥有固定目标与闭集动作。
+  仅修改本次冻结发送集合内的装备；原 sending fence、凭据独占、限速及 Sent 证明不变。
+  不增加应用端口、HTTP 字段、配置或持久化对象，内部正向库存证明的语义保持不变。
 - Bot 内部履约：credentials 增加全局 mail generation，integrations 联合核验身份并读取精确库存，application 编排
   内部义务与资金用途，storage `settlement_funding` 独占来源/分配/追加账本，fulfillment 独占内部满足事实，
   delivery 经资金窄端口保护现金外发；预期名、普通余额或装备详情可读都不构成证明，论坛资料 reader 复用已启用

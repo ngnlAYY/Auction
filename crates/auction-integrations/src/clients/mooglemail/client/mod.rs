@@ -233,6 +233,11 @@ impl MoogleMailClient {
         self.builder.inventory(world, category)
     }
 
+    /// 装备发送准备专用的固定 Armory 写入目标。
+    pub(crate) fn inventory_organize(&self, world: MoogleMailWorld) -> MoogleMailTarget {
+        self.builder.inventory_organize(world)
+    }
+
     pub fn equipment(
         &self,
         world: MoogleMailWorld,

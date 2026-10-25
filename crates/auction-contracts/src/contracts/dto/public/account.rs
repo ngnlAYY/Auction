@@ -153,6 +153,13 @@ pub struct PublicMyProxyResponse {
     pub authorization: Option<PublicOwnedProxyResponse>,
 }
 
+/// Public 注册说明中的配置账号；不包含凭据，也不表示远端邮箱已通过可用性验证。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicRegistrationInfoResponse {
+    pub bot_players: Vec<String>,
+}
+
 /// Public 登录请求；原始 key 只在 HTTP 到应用端口的短路径中存在，调试输出必须脱敏。
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

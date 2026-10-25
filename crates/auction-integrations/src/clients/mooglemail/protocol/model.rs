@@ -67,6 +67,12 @@ pub enum MoogleMailOperation {
     Identity,
     /// Armory organize 正向库存页面，只读不提交表单。
     Inventory,
+    /// Armory organize 固定写入目标；不能接收任意分类或动作参数。
+    InventoryOrganize,
+    /// 将明确选中的装备移出仓库。
+    EquipmentUnstore,
+    /// 解除明确选中装备的保护和锁定；不卸下已穿戴装备。
+    EquipmentUnlock,
     Compose,
     AttachAdd,
     AttachCod,
@@ -89,6 +95,9 @@ impl MoogleMailOperation {
             Self::Equipment => "equipment",
             Self::Identity => "identity",
             Self::Inventory => "inventory",
+            Self::InventoryOrganize => "inventory_organize",
+            Self::EquipmentUnstore => "equipment_unstore",
+            Self::EquipmentUnlock => "equipment_unlock",
             Self::Compose => "compose",
             Self::AttachAdd => "attach_add",
             Self::AttachCod => "attach_cod",
@@ -189,7 +198,7 @@ impl fmt::Display for MoogleMailCookie {
     }
 }
 
-/// 详情页面中的短生命周期 `mmtoken`。
+/// 详情/compose 的 `mmtoken` 或 Armory 的 `postoken`；只用于短生命周期表单。
 #[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailToken(Box<str>);
 

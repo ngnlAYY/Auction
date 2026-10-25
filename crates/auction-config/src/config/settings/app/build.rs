@@ -35,15 +35,15 @@ impl AppConfig {
             .and_then(|runtime| runtime.equipment_colors.as_ref())
             .map(|colors| colors.to_rules())
             .unwrap_or_default();
-        // Worker 只保留履约所需的名单，不能依赖只由 Admin 持有的完整 runtime 文档。
-        let worker_bot_players = if role == Role::Worker {
+        // Public 注册提示和 Worker 履约只保留名单投影，不持有完整 Admin runtime 文档。
+        let bot_players = if matches!(role, Role::Public | Role::Worker) {
             runtime_document.as_ref().map(|runtime| runtime.bot_players.clone()).unwrap_or_default()
         } else {
             Vec::new()
         };
         let mut auction = auction;
         let mut worker = worker;
-        // Public 只消费装备分组规则；创建者模板和 Worker 运行参数仍由原角色拥有。
+        // Public 仅展示装备分组和 bot 名单；创建者模板与 Worker 运行参数仍由原角色拥有。
         if matches!(role, Role::Admin | Role::Worker)
             && let Some(runtime) = &runtime_document
         {
@@ -213,7 +213,7 @@ impl AppConfig {
             runtime_worker_budget,
             admin_runtime,
             equipment_colors,
-            worker_bot_players,
+            bot_players,
             secrets,
         })
     }

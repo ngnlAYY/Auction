@@ -8,6 +8,7 @@ use auction_application::{
     PublicEquipmentLinkResolver, PublicForumReader, PublicLotReader, PublicPriceHistoryReader,
     PublicRealtimeReader, PublicRulesReader, PublicSessionPort, WorldReader,
 };
+use auction_contracts::PublicRegistrationInfoResponse;
 use auction_observability::ProcessMetrics;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 
@@ -35,6 +36,7 @@ pub struct PublicApiState {
     realtime: Option<Arc<dyn PublicRealtimeReader>>,
     account: Option<Arc<dyn PublicAccountReader>>,
     session: Option<Arc<dyn PublicSessionPort>>,
+    registration_info: Option<Arc<PublicRegistrationInfoResponse>>,
     security: PublicHttpSecurity,
     watches: Option<Arc<dyn auction_application::LotWatchPort>>,
     watch_preference: Option<Arc<dyn auction_application::LotWatchPreferencePort>>,
@@ -62,6 +64,7 @@ impl Default for PublicApiState {
             realtime: None,
             account: None,
             session: None,
+            registration_info: None,
             security: PublicHttpSecurity::default(),
             watches: None,
             watch_preference: None,
@@ -112,6 +115,7 @@ impl PublicApiState {
             realtime,
             account,
             session,
+            registration_info: None,
             security,
             watches: None,
             watch_preference: None,
@@ -124,6 +128,16 @@ impl PublicApiState {
             realtime_hub: None,
             realtime_shutdown: watch::channel(false).0,
         }
+    }
+
+    /// 仅注入已校验的公开 bot 名单，不把完整运行配置或凭据交给 HTTP 层。
+    pub fn with_registration_info(mut self, bot_players: Vec<String>) -> Self {
+        self.registration_info = Some(Arc::new(PublicRegistrationInfoResponse { bot_players }));
+        self
+    }
+
+    pub(crate) fn registration_info(&self) -> Option<&PublicRegistrationInfoResponse> {
+        self.registration_info.as_deref()
     }
 
     /// 注入当前用户的权威装备标记端口；缺失时明确返回 503。

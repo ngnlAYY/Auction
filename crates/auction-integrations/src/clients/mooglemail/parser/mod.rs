@@ -37,5 +37,6 @@ mod types;
 pub(crate) use common::*;
 pub(crate) use detail::*;
 pub(crate) use list_helpers::*;
+pub(crate) use reads::MoogleMailInventoryPreparation;
 pub(crate) use script::*;
 pub use types::*;

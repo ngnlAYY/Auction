@@ -29,7 +29,7 @@
 | [common.toml](ops/config/examples/common.toml) | 日志、指标、缓存、拍卖策略 | 三角色必填 `common_file`，必须指向同一普通文件 |
 | [public.toml](ops/config/examples/public.toml)、[admin.toml](ops/config/examples/admin.toml)、[worker.toml](ops/config/examples/worker.toml) | 角色 listener、tracing、realtime、session 或任务调度 | 默认 `ops/config/{role}.toml`；`AUCTION_CONFIG_FILE` 仅改选文件 |
 | [敏感模板](ops/config/examples/secrets.toml) | PostgreSQL、Cookie、密钥等敏感字段 | 每角色必填 `secrets_file` |
-| [runtime/admin.toml](ops/config/examples/runtime/admin.toml) | 可审计的 Admin 参数、邮件业务策略、装备规则、可接管运行参数 | 三角色共享 `runtime_config_file`；Public 只使用装备分组规则投影 |
+| [runtime/admin.toml](ops/config/examples/runtime/admin.toml) | 可审计的 Admin 参数、邮件业务策略、装备规则、可接管运行参数 | 三角色共享 `runtime_config_file`；Public 只使用装备分组及注册提示账号投影 |
 | [维护凭据](ops/config/examples/secrets/postgres-rebuild.toml) | 短期建库/重建权限 | 仅 CLI 的 `--maintenance-secrets-file` |
 
 loader 先固定角色文件的绝对位置，再以其目录解析相对引用，包括默认发现和相对的配置选择器；不支持逐项环境变量覆盖。
@@ -114,10 +114,12 @@ Leather/Drakehide/Kevlar/Shade、Heavy 的 Plate/Chain/Reactive/Power。材质�
 Admin 新种类候选只显示武器/法杖/盾牌种类及 `Phase` 等护甲种类，护甲选项覆盖全部部位；已有 `Shade Helmet` 等
 完整名规则继续显示且保持精确匹配，取消后不再作为新种类候选。品质候选仅列 `Peerless`、`Legendary`、`Magnificent`，
 已有其它品质选择继续保留；候选范围不修改 `equipment_filter.qualities` 收件门槛。
-`bot_players` 是 runtime 顶层的 bot 显示名列表（最多 16 个，匹配大小写不敏感），Worker 启动时读取独立名单投影。
+`bot_players` 是 runtime 顶层的 bot 显示名列表（最多 16 个，每项 1–64 UTF-8 字节，大小写不重复），Public/Worker 启动时读取独立名单投影。
 命中名单的买家或流拍/撤拍返还收件人保留在内部履约路径；仅在真实远端身份、装备及资金证明全部通过后完成内部义务，
 流拍/撤拍装备留存。当前凭据身份与收件人不匹配时持久延期，不转普通外发，也不凭名单直接满足义务。
-修改名单须重启 Worker，只影响尚未生成 delivery 的新结算；已有 `manual_reconcile` 投递仍需人工收口。
+修改名单须重启 Public/Worker：Public 登录提示按配置顺序展示全部账号，名单未配置时保留通用提示；
+Worker 仍只影响尚未生成 delivery 的新结算，已有 `manual_reconcile` 投递须人工收口。
+Public 仅通过 [P29 安全投影](docs/contracts/routes.md#p29-注册账号提示)公开显示名，不读取或暴露 Worker 凭据；该展示不证明邮箱可用。
 
 三角色共用 [runtime 模板](ops/config/examples/runtime/admin.toml)，共享文件须归同一实际服务账号、权限 0640，
 父目录受信且禁止 group/other 写入。启动和管理读取均在同一描述符核验普通文件、权限及 4 MiB 预算，拒绝符号链接。
@@ -141,7 +143,7 @@ runtime 保存与启动共用 listener、精确规范 HTTP(S) Origin、tracing e
 普通读取和无相关接管的旧启动也不因缺少引用失败。
 
 升级已使用 runtime 的部署时，在 `public.toml` 顶层补充与 Admin/Worker 相同的 `runtime_config_file` 引用；Public 完整校验文件，
-只保留装备规则窄投影，不接管 Admin listener、安全、会话或 Worker `operations`。分体及合并预检要求三角色引用同一文件且规则
+只保留装备规则与注册提示账号的窄投影，不接管 Admin listener、安全、会话或 Worker `operations`。分体及合并预检要求三角色引用同一文件且规则
 快照一致，或三角色全部省略。全部省略时使用空规则，Peerless 仍归稀有，其余归融合。
 规则保存后协调重启 Public 和 Worker，使公开页分组与之后生成的论坛帖子使用同版规则；已发布帖子在后续实际同步前保留原内容。
 
@@ -150,7 +152,7 @@ runtime 保存与启动共用 listener、精确规范 HTTP(S) Origin、tracing e
 | Admin listener/security/session、人工提前操作、equipment_source | Admin 启动快照 | Admin |
 | `worlds`、发件人 allowlist、`equipment_filter`、14 个 `mail_templates` | Admin 管理、Worker 邮件业务快照 | 受影响的 Admin/Worker |
 | `equipment_colors` | Admin 管理、Public 装备分组与 Worker 论坛标色启动快照 | Public、Worker |
-| `bot_players` | Admin 管理、Worker 内部履约收件人名单快照 | Worker |
+| `bot_players` | Admin 管理、Public 注册提示及 Worker 内部履约收件人名单快照 | Public、Worker |
 | `operations.economics` | 后续新拍卖的冻结经济模板 | Admin、Worker |
 | `operations.schedule` | 后续周排期的时区/星期/时间/world | Admin、Worker |
 | `operations.forum` | 论坛开关、批量、分页和请求/任务预算 | Worker |

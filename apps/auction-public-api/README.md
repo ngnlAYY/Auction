@@ -27,6 +27,8 @@ URL 只在最终 `no-store` DTO 映射时生成；OTLP headers 只从敏感 TOML
 公开名称保持原样；规则同源、旧配置升级与重启范围见[配置手册](ops/config/README.md#runtime-共享与重启)。
 `PublicApiState::with_lot_watches`、`with_lot_watch_preference` 注入同一 PostgreSQL store 支撑标记与 P25/P26，
 未编译或未装配数据库时这些接口明确 503，不增加进程、配置或外部依赖。
+`service.rs` 将 `AppConfig.bot_players` 的已校验启动快照注入 P29 注册提示；无数据库模式也使用同一路径。
+只公开非敏感显示名，不装配 Worker 的凭据或邮件客户端，修改名单后重启 Public 生效。
 
 ## 持锁 relay 与故障边界
 

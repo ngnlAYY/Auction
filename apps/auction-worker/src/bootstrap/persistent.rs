@@ -138,7 +138,7 @@ pub(super) async fn run_worker(
             Arc::new(SystemClock),
         )
         .with_funding_policy_reader(store.clone())
-        .with_bot_players(config.worker_bot_players.clone())
+        .with_bot_players(config.bot_players.clone())
         .with_evidence_poll_delay(chrono::Duration::seconds(
             i64::try_from(config.worker.fulfillment.evidence_poll_seconds).unwrap_or(300),
         ));

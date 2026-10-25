@@ -78,7 +78,7 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     let listener_description = listener.description();
     #[cfg(not(feature = "postgres"))]
     let _ = realtime_relay;
-    let state = state.with_metrics(metrics);
+    let state = state.with_registration_info(config.bot_players.clone()).with_metrics(metrics);
     let realtime_shutdown_state = state.clone();
     #[cfg(feature = "postgres")]
     let mut heartbeat_task =

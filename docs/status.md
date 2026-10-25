@@ -35,6 +35,51 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-25 登录页显示配置机器人账号
+
+config 将既有 runtime `bot_players` 投影给 Public，装配根只向 HTTP 注入非敏感名单；
+contracts/HTTP 拥有新增 P29 `GET /api/v1/registration-info`，Public Web 将账号作为五语纯文本插入注册提示。
+多个账号保持配置顺序，空名单或读取失败保留原提示；不新增 TOML 字段、数据库对象或迁移，不改变 Worker 注册／履约规则。
+字段、方法和重启边界见[P29 契约](docs/contracts/routes.md#p29-注册账号提示)及[配置手册](ops/config/README.md#runtime-共享与重启)。
+
+- 通过正式 `ci/release/web-bundle.sh public` 构建 WASM，并用 `web-embed` 构建本机 Public 程序。
+  三个临时回环实例加载单账号、多账号、空名单 TOML，不含数据库、真实 Cookie 或密钥；P29 均返回配置中的精确名单。
+  native HTTP 确认 `no-store` 且不写 Cookie，GET 非空 query 为 400，HEAD/POST 为 405 且 `Allow: GET`。
+- 实际 Chromium 登录页确认五语均展示配置账号；多账号名称中的 `<b>` 只显示为文字，不生成 HTML 元素。
+  375px 页面无横向溢出，空名单及人为中断 P29 请求均保留原注册说明，不伪造账号。
+  临时实例未配置数据库，页头原有会话／readiness 不可用提示保留，未把页面展示验证当成真实 Key 登录验收。
+- 首次临时 runtime 目录／文件权限不合规则被正式 loader 拒绝；按既有 0750/0640 边界修正后启动，
+  未放宽产品权限校验。三个临时实例均经 SIGTERM 正常退出 0，浏览器及临时配置均已清理。
+- 完整 `CARGO_BUILD_JOBS=2 just verify` 退出 0，覆盖仓库策略、格式、工作区／独立 feature 编译、
+  all-features Clippy `-D warnings` 及双端 WASM。CodeGraph affected 未发现关联测试文件，
+  本轮未单独运行 MSRV 门禁。
+- 证据与桌面／手机截图位于 `target/audits/login-registration-20261025/`。未新增或执行永久行为测试，
+  未访问真实游戏／论坛、执行 PostgreSQL 场景、迁移、提交、推送或部署；Rust LSP 异常退出，未记为通过。
+
+### 2026-10-25 附件装备自动出库与解除保护
+
+owner 为 `auction-integrations` 的 Armory 协议、库存解析及 MoogleMail sender。按用户提供的 HVUT 4.2.4
+协议参考实现 Rust 侧发送准备，不依赖该脚本运行：七类完整库存唯一定位，按需出库和解除保护／锁定，
+每次修改后重新读取并核验目标状态，再执行原附件与 Sent 证明。
+状态提取绑定精确 EID 及元数据中的显示名，不把自定义名称中的图标解释为状态；原内部正向库存证明保持不变。
+完整协议和失败边界见[附件装备状态准备](ops/mail/diagnostics.md#附件装备状态准备)。
+
+- 临时 Rust 入口实际调用公开 `MoogleMailSender::send`，连接本机隔离 HTTP 协议响应；20 个场景均通过，
+  并核对请求字段、顺序、token 轮换、目标状态和无关装备不变。覆盖已就绪、仓库、保护、锁定、组合批次、
+  Isekai 多分类、名称含图标，以及写入未生效、写后断连、回读失败、目标缺失／跨分类重复、穿戴、
+  重复 token、EID 不符、跨世界页面、无装备通知和脏草稿。
+- 成功路径取得精确 Sent MID 和空 compose；异常准备路径未进入附件／Credits／COD 暂存或最终发送。
+  所有写后故障保留不可自动重试的 `write_unknown`，没有自动回滚或第二次 Armory POST。
+- 首轮临时 MM 附件 fixture 错用了 Armory 的 hover hook，被既有附件证明拒绝；修正为既有
+  `equips.set(EID,...)` 协议后通过，没有放宽产品附件解析。临时 Rust 入口、运行配置和回环服务均已清理，
+  脱敏证据保留于 `target/audits/equipment-preparation-20261025/evidence.json`。
+- 完整 `CARGO_BUILD_JOBS=2 just verify` 退出 0，覆盖仓库策略、`cargo fmt --all -- --check`、
+  工作区／独立 feature 编译、all-features Clippy `-D warnings` 和双端 WASM；Rust/Cargo 为 1.99.0。
+  本轮未单独执行 MSRV 门禁，不能把当前工具链通过扩展为 MSRV 证据。
+- 未新增、删除或运行永久行为测试；未访问真实游戏／论坛、启动产品服务、执行 PostgreSQL 场景或迁移，
+  未部署或修改线上装备。没有原生 Armory HTML 样本或真实游戏协议验收，隔离成功不扩展为生产验收。
+  Rust LSP 启动后异常退出，未记为通过；CodeGraph affected 未发现关联测试文件。
+
 ### 2026-10-25 R32 基础优惠 v2 发布与 schema64
 
 按用户授权，冻结 `476b5f978b0a18847e18868ad7ce8c40a3ab8bd7`，以通用 Linux x86_64 GNU、

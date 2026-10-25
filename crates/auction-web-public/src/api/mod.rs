@@ -19,6 +19,8 @@ mod model;
 mod queries;
 #[path = "auction/realtime.rs"]
 mod realtime;
+#[path = "identity/registration.rs"]
+mod registration;
 #[path = "content/rules.rs"]
 mod rules;
 #[path = "identity/session.rs"]
@@ -66,6 +68,7 @@ pub(crate) use queries::{
 pub(crate) use realtime::{
     RealtimeCache, RealtimeEvent, RealtimePage, subscribe_auction_realtime, subscribe_realtime,
 };
+pub(crate) use registration::fetch_registration_info;
 pub(crate) use rules::{RulesDocument, fetch_rules};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use session::PUBLIC_SESSION_CHANGE_STORAGE_KEY;

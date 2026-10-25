@@ -135,6 +135,10 @@ pub(super) fn post_allowed(
         MoogleMailOperation::Detail => {
             matches!(form_operation, MoogleMailOperation::ReturnMessage | MoogleMailOperation::Take)
         }
+        MoogleMailOperation::InventoryOrganize => matches!(
+            form_operation,
+            MoogleMailOperation::EquipmentUnstore | MoogleMailOperation::EquipmentUnlock
+        ),
         _ => false,
     }
 }

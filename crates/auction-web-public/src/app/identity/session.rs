@@ -6,7 +6,9 @@ use auction_web_shared::{BaseErrorKind, base_api_error_message, legacy_t as t};
 use dioxus::prelude::*;
 use url::form_urlencoded;
 
-use crate::api::{PublicSession, PublicSessionApiError, login_public, logout_public};
+use crate::api::{
+    PublicSession, PublicSessionApiError, fetch_registration_info, login_public, logout_public,
+};
 
 use super::{PublicSessionResource, Route};
 
@@ -38,6 +40,15 @@ pub(super) fn login(return_to: Option<String>) -> Element {
     let mut result = use_signal(|| None::<LoginState>);
     let mut submitting = use_signal(|| false);
     let mut session_resource = use_context::<PublicSessionResource>();
+    let registration_accounts = use_resource(|| async move {
+        fetch_registration_info().await.map(|info| info.bot_players.join(", "))
+    });
+    let bot_account = match &*registration_accounts.read() {
+        Some(Ok(accounts)) if !accounts.is_empty() => {
+            t!("login-bot-account", accounts: accounts.as_str())
+        }
+        _ => String::new(),
+    };
     let navigator = use_navigator();
     let return_path = safe_return_path(return_to.as_deref());
     let failed = matches!(result(), Some(LoginState::Failure(_)));
@@ -115,7 +126,7 @@ pub(super) fn login(return_to: Option<String>) -> Element {
                     if submitting() { {t!("login-working")} } else { {t!("login-submit")} }
                 }
             }
-            p { class: "public-account-login-hint", {t!("login-hint")} }
+            p { class: "public-account-login-hint", {t!("login-hint", bot_account: bot_account)} }
             if let Some(LoginState::Success(session)) = result() {
                 p { class: "action-feedback action-feedback--success", role: "status",
                     {t!("login-success", username: session.username)}

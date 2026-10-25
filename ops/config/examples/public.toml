@@ -5,7 +5,7 @@
 common_file = "common.toml"
 # 必填：敏感 TOML 路径；相对路径相对于本文件所在目录解析。
 secrets_file = "secrets.toml"
-# 可选：与 Admin/Worker 共享同一 runtime 文件；仅投影装备分组规则，默认不加载。
+# 可选：与 Admin/Worker 共享同一 runtime 文件；仅投影装备分组规则及登录提示的 bot_players，默认不加载。
 runtime_config_file = "runtime/admin.toml"
 
 # 可选区块：Public HTTP 监听器；省略整个区块时使用 TCP 127.0.0.1:8090。
