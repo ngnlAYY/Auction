@@ -84,7 +84,7 @@
 
   .public-session-preference fieldset,
   .public-outbid-preference fieldset {
-    padding: var(--space-3);
+    padding: var(--space-2);
   }
 
   .public-session-preference__choices,
@@ -199,40 +199,164 @@
     overflow-wrap: anywhere;
   }
 
+  /* 控件按 DOM 顺序组成两列；会话和错误独占整行，避免长文案挤压选择器。 */
   .public-shell__controls {
-    gap: var(--space-2) var(--space-3);
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+    gap: var(--space-3);
     inline-size: 100%;
-    flex-wrap: wrap;
     margin-inline-start: 0;
   }
 
   .public-shell__controls > * {
+    min-inline-size: 0;
     max-inline-size: 100%;
   }
 
   .public-world-switcher {
-    flex-wrap: wrap;
+    display: grid;
+    gap: var(--space-1);
   }
 
-  .public-account-session-menu {
-    flex: 1 1 100%;
-    justify-content: space-between;
-    gap: var(--space-2) var(--space-3);
-    padding-block-start: var(--space-2);
-    border-block-start: var(--border-width) solid var(--color-border);
+  .public-world-switcher > span {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
-  .public-account-session-menu > a {
-    display: inline-flex;
-    align-items: center;
+  .public-shell__controls :is(select, .public-connection-refresh) {
+    inline-size: 100%;
+    min-inline-size: 0;
     min-block-size: var(--size-target);
   }
 
+  .public-connection-badge {
+    align-self: end;
+    min-block-size: var(--size-target);
+    padding: var(--space-2);
+    border-radius: var(--radius-sm);
+    overflow-wrap: anywhere;
+  }
+
+  .public-connection-refresh {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .public-shell__controls > .language-picker {
+    display: block;
+  }
+
+  .public-shell__controls:not(:has(> .public-connection-refresh)) > .language-picker,
+  .public-shell__controls:has(> .public-connection-refresh__error) > .language-picker,
+  .public-connection-refresh__error {
+    grid-column: 1 / -1;
+  }
+
+  .public-account-session-menu {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-3);
+    padding-block-start: var(--space-3);
+    border-block-start: var(--border-width) solid var(--color-border);
+  }
+
+  .public-account-session-menu > :is(a, button) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-inline-size: 0;
+    min-block-size: var(--size-target);
+    padding-inline: var(--space-2);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .public-account-session-menu > .public-account-session-name {
+    justify-content: start;
+    padding-inline-start: 0;
+  }
+
+  .public-account-session-menu > :is([role="status"], [role="alert"]),
   .public-account-session-error {
     position: static;
-    flex-basis: 100%;
+    grid-column: 1 / -1;
+    inline-size: 100%;
     max-inline-size: 100%;
     overflow-wrap: anywhere;
+  }
+
+  /* 所有 Public 分页共用同一分组：总数／数量、定制数量、页码、跳页各占独立行。 */
+  .public-shell .ui-pager {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: center;
+    gap: var(--space-3);
+    inline-size: 100%;
+    text-align: start;
+  }
+
+  .public-shell .ui-pager > * {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+
+  .public-shell .ui-pager__total {
+    overflow-wrap: anywhere;
+  }
+
+  .public-shell .ui-pager :is(.ui-pager__size, .ui-pager__select, .ui-pager__input) {
+    inline-size: 100%;
+    min-inline-size: 0;
+  }
+
+  .public-shell .ui-pager__controls {
+    grid-column: 1 / -1;
+    inline-size: 100%;
+    justify-content: center;
+    gap: var(--space-2);
+  }
+
+  .public-shell .ui-pager button {
+    min-inline-size: var(--size-target);
+    min-block-size: var(--size-target);
+    padding-inline: var(--space-2);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .public-shell .ui-pager:not(.ui-pager--numbered) > .ui-pager__controls {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    text-align: center;
+  }
+
+  .public-shell .ui-pager__status {
+    overflow-wrap: anywhere;
+  }
+
+  .public-shell :is(.ui-pager__custom, .ui-pager__jump) {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    align-items: end;
+    gap: var(--space-2);
+    inline-size: 100%;
+  }
+
+  .public-shell .ui-pager__label {
+    display: grid;
+    gap: var(--space-1);
+    overflow-wrap: anywhere;
+  }
+
+  .public-shell .ui-pager__input {
+    padding-inline: var(--space-2);
+  }
+
+  .public-shell .ui-pager__error {
+    grid-column: 1 / -1;
   }
 
   .public-auction-round__end {
@@ -253,10 +377,10 @@
     overflow-wrap: anywhere;
   }
 
-  /* 表头、列宽和行结构保持不变；操作列内部纵排让手机上的三个动作各占一整行。 */
+  /* 卡片操作占满整行，仍按出价、代理、标记的原 DOM 顺序排列。 */
   .public-auction-catalog__action-controls,
   .public-shell .public-auction-catalog td.public-auction-catalog__actions .public-auction-catalog__actions-list {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-2);
   }
 
@@ -265,6 +389,14 @@
     padding-inline: var(--space-1);
   }
 
+
+  .public-auction-catalog__action-controls > .public-auction-catalog__actions-list {
+    grid-column: 1 / -1;
+  }
+
+  .public-auction-catalog__action-controls > .public-lot-watch {
+    grid-column: 1 / -1;
+  }
   .public-auction-bid-form__actions button {
     min-block-size: var(--size-target);
     flex: 1 1 0;
@@ -355,6 +487,129 @@
   .public-history-pagination {
     flex-wrap: wrap;
   }
+
+  /* 复用同一业务表和本地化字段名；只重排直接子级，嵌套补偿流水不会混入外层卡片。 */
+  .public-shell :is(div, section):has(> table > tbody > tr > [data-label]) {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .public-shell table:has(> tbody > tr > [data-label]) {
+    display: block;
+    border: 0;
+    font-size: var(--text-base);
+  }
+
+  .public-shell table:has(> tbody > tr > [data-label]) > colgroup {
+    display: none;
+  }
+
+  /* 表头仍供辅助技术读取；可见标签由各单元格既有的五语 data-label 提供。 */
+  .public-shell table:has(> tbody > tr > [data-label]) > thead {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .public-shell table:has(> tbody > tr > [data-label]) > :is(tbody, tfoot) {
+    display: grid;
+    gap: var(--space-3);
+    min-inline-size: 0;
+  }
+
+  .public-shell table:has(> tbody > tr > [data-label]) > tbody > tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-3);
+    min-inline-size: 0;
+    padding: var(--space-2);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-md);
+  }
+
+  .public-shell table:has(> tbody > tr > [data-label]) > tbody > tr:not(:is(.public-auction-catalog__leading, .public-account-leading, .public-auction-bid-log-leading, .public-auction-lot__leading)) {
+    background: var(--color-surface);
+  }
+
+  .public-shell table:has(> tbody > tr > [data-label]) > :is(tbody, tfoot) > tr > :is(td, th) {
+    display: block;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    padding: var(--space-1);
+    border: 0;
+    overflow: visible;
+    text-align: start;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .public-shell table > tbody > tr > [data-label]::before {
+    display: block;
+    margin-block-end: var(--space-1);
+    color: var(--color-text-muted);
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
+    font-weight: normal;
+    content: attr(data-label);
+  }
+
+  .public-shell table > tbody > tr > :is(:first-child, .public-auction-catalog__name, .public-auction-catalog__actions, .public-history-equipment, .public-auction-rounds__links, [colspan]),
+  .public-shell table > tbody > tr > :is(td, th):has(.shared-truncated-text--wide),
+  .public-shell .public-blacklist-table td:nth-child(2) {
+    grid-column: 1 / -1;
+  }
+
+  /* 卡片已有字段宽度，长名称、时间及金额可折行；完整值提示和原生链接保持可用。 */
+  .public-shell table [data-label] :is(a, span, time, code, strong, small, button):not([role="tooltip"]),
+  .public-auction-equipment__name.shared-truncated-text {
+    max-inline-size: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* 账户卡片压缩字段留白，保留两列标签、完整值及原生表格语义。 */
+  .public-shell .public-account-table > tbody {
+    gap: var(--space-2);
+  }
+
+  .public-shell .public-account-table > tbody > tr {
+    gap: var(--space-1) var(--space-2);
+  }
+
+  .public-shell .public-account-table > tbody > tr > td {
+    padding-block: 0;
+  }
+
+  .public-shell .public-account-table > tbody > tr > [data-label]::before {
+    margin-block-end: calc(var(--space-1) / 2);
+  }
+
+  .public-shell .public-compensation-table > tbody > .public-compensation-details-row {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+
+  .public-compensation-movements {
+    padding: var(--space-2);
+    border-inline-start: 2px solid var(--color-accent);
+  }
+
+  .public-compensation-movement-table > tfoot > tr {
+    display: block;
+    margin-block-start: var(--space-3);
+  }
+
+  .public-compensation-equation .shared-truncated-text {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
 
 /* ===== 响应式：拍品详情与论坛移动端布局 ===== */
@@ -363,12 +618,39 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .public-auction-equipment__facts {
+    overflow: visible;
+  }
+
   .public-auction-equipment__facts-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    inline-size: 100%;
     gap: var(--space-2);
   }
 
   .public-auction-equipment__fact {
+    display: grid;
+    align-content: start;
     gap: var(--space-1);
+    padding: var(--space-2);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-sm);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .public-auction-equipment__fact--group {
+    grid-column: 1 / -1;
+  }
+
+  .public-auction-equipment__fact--group > dd {
+    flex-wrap: wrap;
+  }
+
+  .public-auction-equipment__fact-value {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .public-auction-lot__bidding dl {

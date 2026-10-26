@@ -78,12 +78,14 @@ pub(super) fn page() -> Element {
     }
 }
 
-/// 同一稳定账号的两个偏好命令共用 keyed 宿主；不添加 DOM 包装或依赖会话读取分支。
+/// 同一稳定账号的两个偏好命令共用 keyed 宿主；布局容器不依赖宽度或会话读取分支。
 #[component]
 fn AccountPreferenceScope(user_id: String) -> Element {
     rsx! {
-        OutbidNotifications { user_id: user_id.clone() }
-        SessionPreference { user_id }
+        div { class: "public-account-preferences",
+            OutbidNotifications { user_id: user_id.clone() }
+            SessionPreference { user_id }
+        }
     }
 }
 
@@ -197,7 +199,7 @@ fn AccountPage(
 ) -> Element {
     let page_size = if page.page_size > 0 { page.page_size } else { DEFAULT_ACCOUNT_PAGE_SIZE };
     rsx! {
-        div {
+        div { class: "public-account-activity",
             BidSection {
                 bids: page.bids,
                 page: bid_page,
@@ -228,19 +230,22 @@ fn AccountPager(
     on_page_clamp: EventHandler<i64>,
 ) -> Element {
     rsx! {
-        Pager {
-            page,
-            page_size,
-            total: Some(total),
-            has_more: false,
-            label,
-            previous_label: t!("catalog-previous"),
-            status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
-            next_label: t!("catalog-next"),
-            jump_label: t!("catalog-page-input"),
-            jump_button_label: t!("catalog-page-go"),
-            on_page_change,
-            on_page_clamp,
+        // 单页不占控件空间；保留 Pager 挂载，让总量收缩后的页码与 URL 仍能自动收敛。
+        div { hidden: total <= page_size,
+            Pager {
+                page,
+                page_size,
+                total: Some(total),
+                has_more: false,
+                label,
+                previous_label: t!("catalog-previous"),
+                status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
+                next_label: t!("catalog-next"),
+                jump_label: t!("catalog-page-input"),
+                jump_button_label: t!("catalog-page-go"),
+                on_page_change,
+                on_page_clamp,
+            }
         }
     }
 }

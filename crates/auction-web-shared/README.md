@@ -24,8 +24,8 @@ Public 竞价与 Admin 管理状态留在各 surface，本 crate 不依赖存储
 不依赖 Dioxus 不保证的 head 插入顺序；分别作为静态 CSS asset 打包，不使用未被当前 dx 递归打包的相对 `@import`。
 共享组件不再提供 `.ui-empty-state*` 兼容别名；Public 专属空态仍由本端维护。
 同时移除无人消费的强制 sheet 变体与旧表格结构恢复规则。
-表格一律 100% 容器宽度、固定布局与完整百分比列宽，不采用最小宽度、横向滚动或窄屏卡片化；`TableColumns`
-归一化调用方权重，业务组件拥有比例（见[列宽登记](docs/design/table-layouts.md)）。
+表格基础规则为 100% 容器宽度、固定布局与完整百分比列宽，不采用最小宽度或横向滚动；`TableColumns`
+归一化调用方权重，业务组件拥有比例。Public 在本端移动样式中将同一业务表重排为卡片；Admin、Markdown 和打印保留表格，详见[列宽登记](docs/design/table-layouts.md)。
 
 `Pager` 钳制页码并同步跳页输入，纠偏调用可选 `on_page_clamp`（省略时回退 `on_page_change`），用户操作仍调用
 `on_page_change`；URL 调用方可分别使用 Replace / Push，避免纠偏污染历史。缺 total 时使用 has_more 语义，

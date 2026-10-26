@@ -42,7 +42,7 @@
   align-items: center;
   gap: var(--space-4) var(--space-5);
   padding-block: max(var(--space-3), var(--safe-area-top)) var(--space-3);
-  padding-inline: max(var(--space-5), var(--safe-area-left)) max(var(--space-5), var(--safe-area-right));
+  padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
   border-block-end: var(--border-width) solid var(--color-border);
   background: var(--color-surface);
   box-shadow: var(--shadow-1);
@@ -315,12 +315,12 @@
 }
 
 .public-shell__content {
-  inline-size: min(100%, 96rem);
+  inline-size: 100%;
   min-inline-size: 0;
   flex: 1;
   margin-inline: auto;
   padding-block: var(--space-5) max(var(--space-5), var(--safe-area-bottom));
-  padding-inline: max(var(--space-5), var(--safe-area-left)) max(var(--space-5), var(--safe-area-right));
+  padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
 }
 
 .public-page-status {
@@ -354,7 +354,7 @@
 /* ===== 规则页与状态页 ===== */
 
 .public-rules-page {
-  max-inline-size: 47.5rem;
+  min-inline-size: 0;
 }
 
 .public-rules-page__document {
@@ -404,7 +404,7 @@
 
 .public-forum-page {
   display: grid;
-  max-inline-size: 58rem;
+  min-inline-size: 0;
   gap: var(--space-5);
 }
 
@@ -1603,9 +1603,29 @@
 
 /* ===== 账户区（登录引导 / 账户表格） ===== */
 
-.public-account-navigation {
+.public-account-bids-page > h1 {
+  margin: 0 0 var(--space-2);
+}
+
+.public-account-preferences,
+.public-account-activity {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
   min-inline-size: 0;
   margin-block-end: var(--space-4);
+}
+
+.public-account-preferences > section,
+.public-account-activity > section {
+  min-inline-size: 0;
+  margin-block-end: 0;
+}
+
+.public-account-navigation {
+  min-inline-size: 0;
+  margin-block-end: var(--space-3);
   border-block-end: var(--border-width) solid var(--color-border);
 }
 
@@ -1621,14 +1641,14 @@
 
 .public-session-preference,
 .public-outbid-preference {
-  margin-block-end: var(--space-6);
+  margin-block-end: var(--space-4);
 }
 
 .public-session-preference fieldset,
 .public-outbid-preference fieldset {
   min-inline-size: 0;
   margin: 0;
-  padding: var(--space-4);
+  padding: var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
@@ -1636,13 +1656,13 @@
 
 .public-session-preference legend,
 .public-outbid-preference legend {
-  font-size: var(--text-lg);
+  font-size: var(--text-base);
   font-weight: var(--font-weight-strong);
 }
 
 .public-session-preference p,
 .public-outbid-preference p {
-  margin-block: var(--space-2);
+  margin-block: var(--space-1);
   overflow-wrap: anywhere;
 }
 
@@ -1652,8 +1672,8 @@
 .public-outbid-preference__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
-  margin-block-start: var(--space-3);
+  gap: var(--space-2);
+  margin-block-start: var(--space-2);
 }
 
 .public-session-preference__choices > div,
@@ -1717,7 +1737,7 @@
 .public-session-preference__duration {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--space-2);
   max-inline-size: 24rem;
   margin-block: var(--space-2);
 }
@@ -1754,12 +1774,25 @@
 }
 
 .public-account-section {
-  margin-block-end: var(--space-6);
+  margin-block-end: var(--space-4);
 }
 
 .public-account-section h2 {
-  margin: 0 0 var(--space-3);
+  margin: 0 0 var(--space-2);
   font-size: var(--text-lg);
+}
+
+.public-account-section h3 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-base);
+}
+
+.public-account-section .public-account-section:last-child {
+  margin-block-end: 0;
+}
+
+.public-account-empty {
+  margin: var(--space-1) 0;
 }
 
 .public-account-hint,
@@ -1768,7 +1801,7 @@
 }
 
 .public-account-hint {
-  margin: 0 0 var(--space-3);
+  margin: 0 0 var(--space-2);
   font-size: var(--text-sm);
 }
 
@@ -2669,7 +2702,7 @@
 /* ===== 登录页 ===== */
 
 .public-account-login-page {
-  max-inline-size: 26.25rem;
+  min-inline-size: 0;
 }
 
 .public-account-login-form {
@@ -3052,7 +3085,7 @@
   outline-offset: 2px;
 }
 
-/* 详情事实始终横排；窄屏仅此信息栏可横向查看，保留完整文字与按钮命中区域。 */
+/* 桌面事实横排；手机由 mobile.css 重排为字段卡片，沿用同一份事实与标记控件。 */
 .public-auction-equipment__facts-list {
   display: flex;
   flex-wrap: nowrap;
@@ -3170,14 +3203,6 @@
 
 .public-auction-catalog th.public-auction-catalog__number {
   white-space: nowrap;
-}
-
-/* 目录可能包在标记状态宿主内；按后代页面限定全宽与安全边距，不影响其他页面或打印。 */
-@media screen {
-  .public-shell__content:has(.public-auction-page) {
-    inline-size: 100%;
-    padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
-  }
 }
 
 /* ===== 打印样式（@media print） ===== */

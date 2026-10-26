@@ -179,6 +179,26 @@
     margin-block-end: var(--space-2);
     font-size: var(--text-base);
   }
+
+  .public-account-preferences {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  }
+
+  .public-account-table {
+    font-size: var(--text-sm);
+  }
+
+  .public-account-table :is(th, td) {
+    padding: var(--space-1) var(--space-2);
+  }
+}
+
+/* 宽屏保留代理历史较大的字段空间，两个列表仍按 DOM 顺序独立分页。 */
+@media screen and (min-width: 80rem) {
+  .public-account-activity {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: var(--space-4);
+  }
 }
 
 @media screen {
