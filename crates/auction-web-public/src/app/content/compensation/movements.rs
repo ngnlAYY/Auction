@@ -118,7 +118,7 @@ fn CompensationMovementRow(
         };
     rsx! {
         tr {
-            td {
+            td { "data-label": t!("compensation-lot"),
                 if let Some((lot_code, Some(lot_id))) = lot {
                     Link {
                         class: "public-compensation-lot-link",
@@ -131,7 +131,7 @@ fn CompensationMovementRow(
                     "—"
                 }
             }
-            td {
+            td { "data-label": t!("compensation-equipment"),
                 if let Some(url) = movement.game_equipment_url.as_deref() {
                     a {
                         class: "public-compensation-equipment-link",
@@ -144,21 +144,21 @@ fn CompensationMovementRow(
                     TruncatedText { value: equipment, size: "wide", portal: true }
                 }
             }
-            td { "{world_label(&world_id)}" }
-            td { class: "public-compensation-number",
+            td { "data-label": t!("compensation-world"), "{world_label(&world_id)}" }
+            td { class: "public-compensation-number", "data-label": t!("compensation-hold"),
                 {movement.hold_ppm.map(|value| format_ppm(value, false)).unwrap_or_else(|| "—".to_owned())}
             }
-            td { class: "public-compensation-number",
+            td { class: "public-compensation-number", "data-label": t!("compensation-adjustment"),
                 {movement.adjustment_ppm.map(|value| format_ppm(value, true)).unwrap_or_else(|| "—".to_owned())}
             }
-            td { class: "public-compensation-number",
+            td { class: "public-compensation-number", "data-label": t!("compensation-held-time"),
                 {movement
                     .leader_held_nanos
                     .map(format_held_duration)
                     .unwrap_or_else(|| "—".to_owned())}
             }
-            td { span { class: kind_class, "{compensation_kind_label(&movement.kind)}" } }
-            td { class: "public-compensation-number", "{amount}" }
+            td { "data-label": t!("compensation-kind"), span { class: kind_class, "{compensation_kind_label(&movement.kind)}" } }
+            td { class: "public-compensation-number", "data-label": t!("compensation-amount"), "{amount}" }
         }
     }
 }

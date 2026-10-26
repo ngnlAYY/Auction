@@ -219,6 +219,8 @@ shared `media/viewport.rs` 拥有 VisualViewport 监听及 CSS 变量生命周�
 `style/mobile.css` 单独维护触控字段、分页与底部弹窗。各 surface 的桌面／移动纯展示模块和独立 CSS 拥有导航与设备布局，
 请求、表单、表格、身份和未决命令仍由稳定的共享业务组件持有，不因宽度变化重新挂载或重复读取。
 CSS 以 `foundation, surface, desktop, mobile` 固定优先级，不依赖 Dioxus 的 head 顺序；无新增运行依赖或迁移阶段。
+Public 手机业务表与装备事实由本端 `assets/mobile.css` 重排为卡片，仍使用同一业务 DOM 和五语字段名；
+全页边距由 `assets/public.css` 统一拥有，具体展示与桌面／打印边界见 [Public 设计](crates/auction-web-public/DESIGN.md#3-外壳与布局)。
 装备标记只允许登录用户修改，Public 按 user UUID 与 auction UUID 隔离本地缓存，服务器为唯一权威，不增加业务表列，
 也不把装备链接、代理上限或凭据写入标记缓存。
 Public `identity/account/watches/` 拥有“我的”当期标记列表，组合既有当前场次、账号标记与完整公开目录 API，

@@ -109,7 +109,7 @@ fn CompensationRoundRow(
     let auction_id = round.auction_id.clone();
     rsx! {
         tr { class: "public-compensation-round",
-            td { class: "public-compensation-toggle-cell",
+            td { class: "public-compensation-toggle-cell", "data-label": t!("compensation-details"),
                 button {
                     class: "public-compensation-expand",
                     r#type: "button",
@@ -124,14 +124,14 @@ fn CompensationRoundRow(
                     span { aria_hidden: "true", if open { "−" } else { "+" } }
                 }
             }
-            td { "#{round.auction_sequence}" }
-            td { "{world_label(&round.world_id)}" }
-            td { class: "public-compensation-number", "{format_amount(round.opening_balance)}" }
-            td { class: "public-compensation-number", "{format_amount(round.tax_income)}" }
-            td { class: "public-compensation-number", "{format_amount(round.discount_demand)}" }
-            td { class: "public-compensation-number", "{format_amount(round.compensation_out)}" }
-            td { class: "public-compensation-number public-compensation-closing", "{format_amount(round.closing_balance)}" }
-            td {
+            td { "data-label": t!("compensation-round-label"), "#{round.auction_sequence}" }
+            td { "data-label": t!("compensation-world"), "{world_label(&round.world_id)}" }
+            td { class: "public-compensation-number", "data-label": t!("compensation-opening"), "{format_amount(round.opening_balance)}" }
+            td { class: "public-compensation-number", "data-label": t!("compensation-tax"), "{format_amount(round.tax_income)}" }
+            td { class: "public-compensation-number", "data-label": t!("compensation-discount"), "{format_amount(round.discount_demand)}" }
+            td { class: "public-compensation-number", "data-label": t!("compensation-out"), "{format_amount(round.compensation_out)}" }
+            td { class: "public-compensation-number public-compensation-closing", "data-label": t!("compensation-closing"), "{format_amount(round.closing_balance)}" }
+            td { "data-label": t!("compensation-settled"),
                 Time { value: round.settled_at.clone() }
             }
         }
