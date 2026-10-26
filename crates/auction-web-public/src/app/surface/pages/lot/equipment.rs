@@ -146,7 +146,7 @@ pub(crate) fn EquipmentCard(
             }
             if !equipment.stats.is_empty() {
                 div { class: "public-auction-equipment__stats-wrap",
-                    table { class: "public-auction-equipment__stats ui-table--responsive",
+                    table { class: "public-auction-equipment__stats",
                         caption { class: "public-visually-hidden", {t!("equipment-stats")} }
                         auction_web_shared::TableColumns { layout: "public-equipment-stats", widths: vec![42, 24, 17, 17] }
                         thead {

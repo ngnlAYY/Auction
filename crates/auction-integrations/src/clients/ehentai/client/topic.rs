@@ -132,7 +132,7 @@ impl EhentaiClient {
 
         self.wait_rate(operation).await?;
         // 尚未发送本次 POST；历史或前序写入的未知状态由调用方进度和持久门禁保留。
-        self.check_ownership().await.map_err(|_| EhentaiError::credential(operation))?;
+        self.check_ownership(cookie).await.map_err(|_| EhentaiError::credential(operation))?;
         let request = self
             .client
             .post(action.clone())

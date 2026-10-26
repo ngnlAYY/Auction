@@ -66,7 +66,7 @@ pub(super) fn AdminLotTable(
                     }
                 }
                 div { class: "admin-auction-table-wrap admin-auction-lot-table-wrap",
-                    table { class: "admin-auction-table admin-auction-lot-table ui-table--responsive",
+                    table { class: "admin-auction-table admin-auction-lot-table",
                         caption { class: "admin-visually-hidden",
                             {t!("page-auction-lots-title", auction: page.auction.sequence)}
                         }

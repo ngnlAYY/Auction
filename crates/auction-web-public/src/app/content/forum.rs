@@ -29,7 +29,7 @@ pub(super) fn page() -> Element {
             status_generation.set(status_generation().saturating_add(1));
         }
     });
-    let content = match sync_enabled.read().clone() {
+    let content = match &*sync_enabled.read() {
         None => forum_page_state(t!("forum-loading"), false),
         Some(Ok(false)) => forum_page_state(t!("forum-sync-disabled"), false),
         Some(Ok(true)) => rsx! { ForumCurrentAuction {} },
@@ -52,10 +52,11 @@ fn ForumCurrentAuction() -> Element {
     let selected_world = use_context::<Signal<String>>();
     let current_auction = use_context::<CurrentAuctionResource>();
     let selected_world_value = selected_world();
-    let current = match current_auction.read().clone() {
-        Some((loaded_world, result)) if loaded_world == selected_world_value => Some(result),
-        _ => None,
-    };
+    let loaded = current_auction.read();
+    let current = loaded
+        .as_ref()
+        .filter(|(loaded_world, _)| loaded_world == &selected_world_value)
+        .map(|(_, result)| result);
 
     match current {
         None => forum_page_state(t!("forum-loading"), false),
@@ -82,7 +83,7 @@ fn ForumCurrentAuction() -> Element {
             }
         },
         Some(Ok(Some(auction))) => rsx! {
-            ForumAuctionPanel { auction }
+            ForumAuctionPanel { auction: auction.clone() }
         },
     }
 }

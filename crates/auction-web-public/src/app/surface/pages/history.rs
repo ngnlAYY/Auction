@@ -167,7 +167,7 @@ pub(crate) fn AuctionHistoryPage(
 pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuction>) -> Element {
     rsx! {
         div { class: "public-auction-rounds__table",
-            table { class: "ui-table--responsive",
+            table {
                 caption { class: "public-visually-hidden", {t!("page-auctions-title")} }
                 auction_web_shared::TableColumns { layout: "public-auction-history", widths: vec![12, 8, 22, 7, 7, 7, 21, 16] }
                 thead {

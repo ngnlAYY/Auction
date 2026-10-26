@@ -1,11 +1,18 @@
 //! 单个 E-Hentai Cookie、失效回写与操作会话。
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use super::*;
 use auction_application::AdminCredentialWorld;
 
-/// 经过边界校验的 E-Hentai Cookie。
-#[derive(Clone, PartialEq, Eq)]
-pub struct EhentaiCookie(pub(super) String);
+/// 经过边界校验的 E-Hentai Cookie；克隆共享明文缓冲和不可逆撤销状态。
+#[derive(Clone)]
+pub struct EhentaiCookie(Arc<EhentaiCookieValue>);
+
+struct EhentaiCookieValue {
+    value: String,
+    revoked: AtomicBool,
+}
 
 impl EhentaiCookie {
     /// 从密钥管理器刚解出的字节建立 Cookie，并拒绝 header 注入字符。
@@ -18,18 +25,34 @@ impl EhentaiCookie {
         }
         let value = String::from_utf8(value.to_vec())
             .map_err(|_| EhentaiError::credential(EhentaiOperation::CreateTopic))?;
-        Ok(Self(value))
+        Ok(Self(Arc::new(EhentaiCookieValue { value, revoked: AtomicBool::new(false) })))
     }
 
     /// 返回仅供建立单次 HTTP header 使用的 Cookie 文本。
     pub(super) fn as_str(&self) -> &str {
-        &self.0
+        &self.0.value
+    }
+
+    pub(super) fn is_active(&self) -> bool {
+        !self.0.revoked.load(Ordering::Acquire)
+    }
+
+    fn revoke(&self) {
+        self.0.revoked.store(true, Ordering::Release);
     }
 }
 
-impl Drop for EhentaiCookie {
+impl PartialEq for EhentaiCookie {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.value == other.0.value
+    }
+}
+
+impl Eq for EhentaiCookie {}
+
+impl Drop for EhentaiCookieValue {
     fn drop(&mut self) {
-        let mut bytes = std::mem::take(&mut self.0).into_bytes();
+        let mut bytes = std::mem::take(&mut self.value).into_bytes();
         bytes.fill(0);
     }
 }
@@ -179,7 +202,9 @@ impl EhentaiCredentialSet {
     pub(crate) fn available(&self, world: SettlementWorld) -> bool {
         self.ownership_valid()
             && self.candidates.lock().is_ok_and(|candidates| {
-                candidates.iter().any(|candidate| permits_world(candidate.world, world))
+                candidates.iter().any(|candidate| {
+                    candidate.cookie.is_active() && permits_world(candidate.world, world)
+                })
             })
     }
 
@@ -195,7 +220,10 @@ impl EhentaiCredentialSet {
             .lock()
             .map_err(|_| EhentaiError::credential(EhentaiOperation::FetchTopic))?
             .iter()
-            .find(|candidate| world.is_none_or(|world| permits_world(candidate.world, world)))
+            .find(|candidate| {
+                candidate.cookie.is_active()
+                    && world.is_none_or(|world| permits_world(candidate.world, world))
+            })
             .cloned()
             .ok_or_else(|| EhentaiError::credential(EhentaiOperation::FetchTopic))?;
         Ok(EhentaiCredentialSession { set: self.clone(), current: candidate })
@@ -227,6 +255,8 @@ impl EhentaiCredentialSession {
 
     pub(super) async fn invalidate_current(&mut self) -> Result<(), EhentaiError> {
         let current = &self.current;
+        // 先同步撤销已准备的 PM、分页和发帖会话；失效回写取消或失败不能复活这些克隆。
+        current.cookie.revoke();
         {
             let mut candidates = self
                 .set

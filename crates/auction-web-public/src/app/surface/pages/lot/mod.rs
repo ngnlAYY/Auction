@@ -180,8 +180,8 @@ fn ValidLotDetail(lot_id: String) -> Element {
 #[component]
 fn LotMissing() -> Element {
     rsx! {
-        div { class: "ui-empty-state", role: "status",
-            p { class: "ui-empty-state__title", {t!("lot-not-found")} }
+        div { class: "ui-async-state", role: "status",
+            p { class: "ui-async-state__title", {t!("lot-not-found")} }
         }
     }
 }

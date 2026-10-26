@@ -83,7 +83,7 @@ pub(crate) fn script_text(
     let selector = selector("script", operation, world)?;
     let mut source = String::new();
     for script in document.select(&selector) {
-        source.push_str(&script.text().collect::<String>());
+        source.extend(script.text());
         source.push('\n');
     }
     Ok(source)

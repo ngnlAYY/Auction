@@ -217,6 +217,8 @@ async fn validate_collected(
     {
         return Err(FundingError::Unproven);
     }
+    let prepare_digest = c.prepare_request_hash.map(|hash| hash.as_bytes());
+    let activate_digest = c.activate_request_hash.map(|hash| hash.as_bytes());
     let proven: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM public.deliveries d JOIN public.settlement_obligation_fulfillments f ON f.delivery_id=d.id
          WHERE d.id=$1 AND f.obligation_id=$2 AND d.status='succeeded' AND d.origin_kind='settlement'
@@ -229,8 +231,8 @@ async fn validate_collected(
           AND d.result_metadata->>'external_reference_proven'='true'
           AND d.result_metadata->>'operation'='send')"
     ).bind(delivery.id).bind(c.obligation_id.as_uuid()).bind(&c.recipient).bind(&delivery.payload)
-        .bind(c.prepare_command_id.map(|id| id.as_uuid())).bind(c.prepare_request_hash.map(|h| h.as_bytes().to_vec()))
-        .bind(c.activate_command_id.map(|id| id.as_uuid())).bind(c.activate_request_hash.map(|h| h.as_bytes().to_vec()))
+        .bind(c.prepare_command_id.map(|id| id.as_uuid())).bind(prepare_digest.as_ref().map(|value| value.as_slice()))
+        .bind(c.activate_command_id.map(|id| id.as_uuid())).bind(activate_digest.as_ref().map(|value| value.as_slice()))
         .bind(format!("mooglemail:{}:send:{}",validation::world(c.world),sent.external_mail_id))
         .fetch_one(&mut **tx).await.map_err(sql_error)?;
     if !proven {

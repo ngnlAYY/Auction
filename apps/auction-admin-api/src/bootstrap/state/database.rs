@@ -350,16 +350,12 @@ pub(super) async fn configure_state(
     let lifecycle: Arc<dyn AuctionLifecycleCommandPort> =
         Arc::new(DatabaseAuctionLifecycleCommands::new(
             lifecycle_store,
-            Arc::new(SystemClock),
             lifecycle_policy,
             config.auction.policy()?,
         ));
-    // 创建和排期共用无可变状态的适配器，避免重复构造同一策略快照与时钟。
-    let auction_commands = Arc::new(DatabaseAdminAuctionCommands::new(
-        auction_create_store,
-        Arc::new(SystemClock),
-        config.auction.policy()?,
-    ));
+    // 创建和排期共用无可变状态的适配器，避免重复构造同一策略快照。
+    let auction_commands =
+        Arc::new(DatabaseAdminAuctionCommands::new(auction_create_store, config.auction.policy()?));
     let auction_create: Arc<dyn AdminAuctionCreatePort> = auction_commands.clone();
     let auction_schedule: Arc<dyn AdminAuctionSchedulePort> = auction_commands;
     let admin_rules: Arc<dyn AdminRulesPort> =

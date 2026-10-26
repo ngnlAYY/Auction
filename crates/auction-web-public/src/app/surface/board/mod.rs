@@ -92,26 +92,27 @@ pub(crate) fn AuctionBoard() -> Element {
             *current = None;
         }
     });
+    let historical_snapshot = historical_current.read();
+    let current_snapshot = current_auction.read();
     let current = if historical {
-        historical_current
-            .read()
+        historical_snapshot
             .as_ref()
             .filter(|(requested, _)| requested == &requested_auction())
-            .map(|(_, result)| result.clone())
+            .map(|(_, result)| result)
     } else {
         let selected_world = selected_world();
-        match current_auction.read().clone() {
-            Some((loaded_world, result)) if loaded_world == selected_world => Some(result),
-            _ => None,
-        }
+        current_snapshot
+            .as_ref()
+            .filter(|(loaded_world, _)| loaded_world == &selected_world)
+            .map(|(_, result)| result)
     };
     let boot_prerequisites_ready =
         readiness.read().is_some() && session.read().is_some() && current_auction.read().is_some();
-    let terminal_without_auction = matches!(current.as_ref(), Some(Err(_)) | Some(Ok(None)));
+    let terminal_without_auction = matches!(current, Some(Err(_)) | Some(Ok(None)));
     // 错误与空拍卖本身就是可操作的最终首屏；有拍卖时由 AuctionData 等待主要 lots。
     use_app_boot_ready(boot_prerequisites_ready && terminal_without_auction);
 
-    match current.as_ref() {
+    match current {
         None => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Loading,

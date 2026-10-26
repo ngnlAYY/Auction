@@ -48,34 +48,33 @@ impl SettlementDeliveryIntent {
         {
             return false;
         }
+        let mut reference_buffer = Uuid::encode_buffer();
+        let reference: &str = self.obligation_id.hyphenated().encode_lower(&mut reference_buffer);
+        if self.reference != reference {
+            return false;
+        }
 
         let has_equipment = self.equipment_id.is_some_and(|id| !id.is_nil());
         match self.kind {
             SettlementObligationKind::WinnerEquipmentCod => {
-                self.operation == "send"
-                    && self.world == "main"
+                self.world == "main"
                     && self.template == "settlement_winner_equipment_cod"
-                    && self.reference == self.obligation_id.to_string()
                     && trimmed_non_empty(&self.item_name)
                     && self.credits == 0
                     && self.cod > 0
                     && has_equipment
             }
             SettlementObligationKind::WinnerPaymentCarrierCod => {
-                self.operation == "send"
-                    && self.world == "main"
+                self.world == "main"
                     && self.template == "settlement_payment_carrier"
-                    && self.reference == self.obligation_id.to_string()
                     && self.item_name.is_empty()
                     && self.credits > 0
                     && self.cod > self.credits
                     && self.equipment_id.is_none()
             }
             SettlementObligationKind::WinnerEquipmentHandoff => {
-                self.operation == "send"
-                    && self.world == "isekai"
+                self.world == "isekai"
                     && self.template == "settlement_equipment_handoff"
-                    && self.reference == self.obligation_id.to_string()
                     && trimmed_non_empty(&self.item_name)
                     && self.credits == 0
                     && self.cod == 0
@@ -89,7 +88,6 @@ impl SettlementDeliveryIntent {
             }
             SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
                 self.template == "settlement_equipment_handoff"
-                    && self.reference == self.obligation_id.to_string()
                     && trimmed_non_empty(&self.item_name)
                     && self.credits == 0
                     && self.cod == 0
@@ -100,10 +98,8 @@ impl SettlementDeliveryIntent {
 }
 
 fn valid_credit_delivery(intent: &SettlementDeliveryIntent, template: &str) -> bool {
-    intent.operation == "send"
-        && intent.world == "main"
+    intent.world == "main"
         && intent.template == template
-        && intent.reference == intent.obligation_id.to_string()
         && intent.item_name.is_empty()
         && intent.credits > 0
         && intent.cod == 0

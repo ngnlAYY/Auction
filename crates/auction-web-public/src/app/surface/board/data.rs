@@ -356,10 +356,10 @@ pub(crate) fn AuctionData(
                     {preview_history_switch(current_history_switch, &auction, historical)}
                 }
                 if !historical && is_live_presentation && auction.bidding_open && session_error {
-                    div { class: "ui-empty-state", role: "alert",
-                        p { class: "ui-empty-state__title", {t!("session-error")} }
+                    div { class: "ui-async-state", role: "alert",
+                        p { class: "ui-async-state__title", {t!("session-error")} }
                         button {
-                            class: "ui-empty-state__retry",
+                            class: "ui-async-state__retry",
                             r#type: "button",
                             onclick: move |_| session.restart(),
                             {t!("data-retry")}

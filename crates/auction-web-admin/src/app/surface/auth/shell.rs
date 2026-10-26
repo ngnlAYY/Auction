@@ -44,14 +44,10 @@ pub(crate) fn AdminAuthenticatedShell(
             a { class: "admin-shell__skip", href: "#admin-content", {t!("skip")} }
             header { class: "admin-shell__header",
                 span { class: "admin-shell__logo", {t!("admin-brand")} }
-                button {
-                    class: "admin-shell__nav-toggle",
-                    r#type: "button",
-                    aria_controls: "admin-primary-navigation",
-                    aria_expanded: navigation_open().to_string(),
-                    onmounted: move |event| navigation_toggle.set(Some(event.data())),
-                    onclick: move |_| navigation_open.set(!navigation_open()),
-                    {t!("nav-label")}
+                navigation::mobile::NavigationToggle {
+                    open: navigation_open(),
+                    on_mount: move |event: MountedEvent| navigation_toggle.set(Some(event.data())),
+                    on_toggle: move |_| navigation_open.toggle(),
                 }
                 div { class: "admin-shell__controls",
                     div { class: "admin-shell__health",
@@ -99,16 +95,12 @@ pub(crate) fn AdminAuthenticatedShell(
                 }
             }
             div { class: "admin-shell__body",
-                nav {
-                    id: "admin-primary-navigation",
-                    class: if navigation_open() {
-                        "admin-shell__nav admin-shell__nav--open"
-                    } else {
-                        "admin-shell__nav"
-                    },
-                    aria_label: t!("nav-label"),
-                    onclick: move |_| navigation_open.set(false),
-                    onkeydown: move |event| {
+                navigation::desktop::Navigation { current_route: current_route.clone() }
+                navigation::mobile::Navigation {
+                    current_route,
+                    open: navigation_open(),
+                    on_navigate: move |_| navigation_open.set(false),
+                    on_keydown: move |event: KeyboardEvent| {
                         if event.key() == Key::Escape && navigation_open() {
                             event.prevent_default();
                             event.stop_propagation();
@@ -120,66 +112,6 @@ pub(crate) fn AdminAuthenticatedShell(
                             }
                         }
                     },
-                    Link {
-                        class: admin_nav_class(matches!(&current_route, Route::Dashboard {})),
-                        to: Route::Dashboard {},
-                        {t!("nav-dashboard")}
-                    }
-                    Link {
-                        class: admin_nav_class(matches!(&current_route, Route::Mails {})),
-                        to: Route::Mails {},
-                        {t!("nav-mails")}
-                    }
-                    Link {
-                        class: admin_nav_class(matches!(&current_route, Route::Auctions {})),
-                        to: Route::Auctions {},
-                        {t!("nav-auctions")}
-                    }
-                    Link {
-                        class: admin_nav_class(matches!(&current_route, Route::Cookies {})),
-                        to: Route::Cookies {},
-                        {t!("nav-cookies")}
-                    }
-                    Link {
-                        class: admin_nav_class(matches!(&current_route, Route::Users {})),
-                        to: Route::Users {},
-                        {t!("nav-users")}
-                    }
-                    Link {
-                        class: admin_nav_class(matches!(&current_route, Route::Renames {})),
-                        to: Route::Renames {},
-                        {t!("nav-renames")}
-                    }
-                    Link {
-                        class: admin_nav_class(matches!(&current_route, Route::Deliveries {})),
-                        to: Route::Deliveries {},
-                        {t!("nav-deliveries")}
-                    }
-                    Link {
-                        class: admin_nav_class(matches!(&current_route, Route::Outbox {})),
-                        to: Route::Outbox {},
-                        {t!("page-outbox-title")}
-                    }
-                    Link {
-                        class: admin_nav_class(matches!(&current_route, Route::Settlement {})),
-                        to: Route::Settlement {},
-                        {t!("nav-settlement")}
-                    }
-                    Link {
-                        class: admin_nav_class(matches!(&current_route, Route::Config {})),
-                        to: Route::Config {},
-                        {t!("nav-config")}
-                    }
-                    Link {
-                        class: admin_nav_class(matches!(&current_route, Route::RulesContent {})),
-                        to: Route::RulesContent {},
-                        {t!("page-rules-content-title")}
-                    }
-                    Link {
-                        class: admin_nav_class(matches!(&current_route, Route::Audit {})),
-                        to: Route::Audit {},
-                        {t!("nav-audit")}
-                    }
                 }
                 main {
                     class: if settlement_route {
@@ -198,9 +130,4 @@ pub(crate) fn AdminAuthenticatedShell(
             }
         }
     }
-}
-
-/// 输出当前导航项的 BEM 激活修饰类（与 admin.css 的 .admin-shell__nav-link--active 对应）。
-fn admin_nav_class(active: bool) -> &'static str {
-    if active { "admin-shell__nav-link--active" } else { "" }
 }

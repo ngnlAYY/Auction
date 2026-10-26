@@ -266,7 +266,7 @@ fn AuditTable(
     sort_audit_records(&mut records, &sort, direction);
     rsx! {
         div { class: "admin-shell__table-wrap admin-audit-table-wrap",
-            table { class: "admin-shell__table admin-audit-table ui-table--responsive",
+            table { class: "admin-shell__table admin-audit-table",
                 caption { class: "admin-visually-hidden", {t!("page-audit-title")} }
                 auction_web_shared::TableColumns { layout: "admin-audit", widths: vec![17, 12, 18, 15, 6, 6, 10, 16] }
                 thead {

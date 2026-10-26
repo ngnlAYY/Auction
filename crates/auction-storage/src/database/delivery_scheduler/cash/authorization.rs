@@ -143,7 +143,7 @@ pub(super) async fn authorize(
         .bind(id)
         .bind(claim.delivery_id)
         .bind(claim.command_id)
-        .bind(claim.request_hash.as_bytes().to_vec())
+        .bind(claim.request_hash.as_bytes().as_slice())
         .fetch_optional(&mut **tx)
         .await?;
         if exists != Some(id) {

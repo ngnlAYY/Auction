@@ -80,8 +80,8 @@ pub(super) fn page() -> Element {
 
     // 只有服务端快照变化时才初始化表单，不能在普通输入重绘时覆盖用户草稿。
     use_effect(move || {
-        let snapshot = config.read_unchecked().clone();
-        if let Some(Ok(value)) = snapshot {
+        let snapshot = config.read_unchecked();
+        if let Some(Ok(value)) = snapshot.as_ref() {
             // 未决命令保留提交时的配置与基线，读取不能改变重试或确认的负载。
             if command.peek().is_some() && baseline.peek().is_some() {
                 form_ready.set(true);
@@ -110,12 +110,12 @@ pub(super) fn page() -> Element {
                     return;
                 }
             }
-            match RuntimeConfigForm::from_response(&value) {
+            match RuntimeConfigForm::from_response(value) {
                 Ok(next_form) => {
                     baseline.set(Some(next_form.clone()));
                     form.set(next_form);
                     form_ready.set(true);
-                    fingerprint.set(Some(value.fingerprint));
+                    fingerprint.set(Some(value.fingerprint.clone()));
                     restart_required.set(value.restart_required);
                     checked_signature.set(String::new());
                     command.set(None);

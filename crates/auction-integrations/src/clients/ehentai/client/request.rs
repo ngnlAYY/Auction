@@ -19,7 +19,7 @@ impl EhentaiClient {
         if let Some(referer) = referer {
             request = request.header(header::REFERER, referer.as_str());
         }
-        self.check_ownership().await.map_err(|_| EhentaiError::credential(operation))?;
+        self.check_ownership(cookie).await.map_err(|_| EhentaiError::credential(operation))?;
         let response = request
             .timeout(self.request_timeout)
             .send()
@@ -45,6 +45,9 @@ impl EhentaiClient {
         }
         if location.is_some() || !body_looks_like_html(&body) {
             return Err(EhentaiError::protocol(operation, false));
+        }
+        if !cookie.is_active() {
+            return Err(EhentaiError::credential(operation));
         }
         Ok((body, status))
     }

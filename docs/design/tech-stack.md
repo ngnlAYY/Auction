@@ -12,6 +12,7 @@
 | 边界 | 仓库选择 | 约束 |
 | --- | --- | --- |
 | 原生平台 | 仅 Linux x86_64，正式发布 GNU/glibc | apps 编译期守卫；浏览器 wasm32-unknown-unknown 保留 |
+| 系统调用 | libc 锁定 0.2.191 | PR #3 仅更新应用 Cargo.lock；不扩大原生平台支持 |
 | Rust | 1.99.0，edition 2024；MSRV 1.94.1 | resolver 3 按 MSRV 回退解析，固定工具链、独立 MSRV 编译 |
 | Tokio | 声明 ~1.53.3，锁定 1.53.3 | 官方 1.53.x LTS，后续只接收该分支补丁 |
 | HTTP | Axum 0.8.9、Hyper、hyper-util、Tower | 共用连接栈，Public/Admin 路由分离 |
@@ -85,6 +86,9 @@ Dioxus Rust 组件和路由满足浏览器全 Rust 约束，纯 CSR 消费版本
 fullstack/server 增加 HTTP owner，因此不启用。直接浏览器传输使用 gloo-net 0.7.0、gloo-timers 0.4.0，间接
 gloo-utils 为 0.3.0；共享 GET 仍直接构造浏览器请求，保留精确 URL、同一头/正文超时预算和取消语义。锁图保留可选
 fullstack 路径上的 gloo-net 0.6.0 / gloo-utils 0.2.0，当前活跃依赖树未启用该路径，不为清空锁图开启 fullstack。
+`chrono` 的 `clock` feature 只由 `auction-config` 为旧标准 cron 的 `Local` 时区启用；共享图保留 `now/serde/std`。
+独立 Public/Admin WASM 图不再启用 `iana-time-zone`，UTC 时钟与既有浏览器时间格式不变；原生 cron 的本地时区仍保留。
+这属于能力裁剪，不移除根锁中后端仍需要的包，也不声称已测得 WASM 体积或执行速度收益。
 资源隔离、`web-embed`/API-only 与缺页 503 见[架构](docs/design/architecture.md#浏览器实时与制品)。
 
 ## SQL 与事务
@@ -125,14 +129,14 @@ prometheus-client 需要另审 OpenMetrics 与进程指标兼容，Leptos CSR �
 
 ### 2026-10-15 全依赖审计
 
-以下两节保留当时决策与缓解措施，不是当前构建指南；覆盖 20 个工作区包、50 项直接依赖、完整锁图、全 feature/全 target
+以下两节保留当时决策与缓解措施，不是当前构建指南；当前版本见[版本与升级](#版本与升级)。当时覆盖 20 个工作区包、50 项直接依赖、完整锁图、全 feature/全 target
 活跃图及工具链、dx、CI Actions，MSRV 保持 1.94.1（1.99.1 manifest 当时返回 404，故取 1.99.0）。节点统计与命令结果见
 [状态页](docs/status.md#2026-10-15-依赖审计与编译优化)。
 
 | 决定 | 依赖范围 | 理由与兼容边界 |
 | --- | --- | --- |
 | 安全升级 | rustls 0.23.46；锁图同步 h2、rustls-webpki、hyper-rustls、tokio-rustls、quinn 系列补丁 | 修复下列 RustSec 命中；保留 ring/TLS 1.2/系统 CA，不启用 HTTP/3 |
-| 协议与基础库升级 | hyper 1.12.0、hyper-util 0.1.21、ipnet 2.12.2、libc 0.2.190、redis 1.7.1、rust-embed 8.13.0 | 不改 HTTP、缓存故障回源、Web 资源隔离或部署档位 |
+| 协议与基础库升级 | hyper 1.12.0、hyper-util 0.1.21、ipnet 2.12.2、libc 0.2.190（当时版本）、redis 1.7.1、rust-embed 8.13.0 | 不改 HTTP、缓存故障回源、Web 资源隔离或部署档位 |
 | 数据与密码学升级 | base64 0.23.1、hmac 0.13.0、sha2 0.11.1、serde_json 1.0.154、thiserror 2.0.21、toml 1.1.8、uuid 1.28.0 | base64 仅开 std、不直接开启新 SIMD；保留严格引擎、编码与摘要格式；淘汰旧 hmac 0.12 |
 | 排期与浏览器升级 | croner 4.0.1、dioxus-i18n 0.6.0、wasm-bindgen 0.2.129、js-sys/web-sys 0.3.106 | cron 先经原严格六字段校验，不开放昵称/宽松语法；项目未用被删除的 I18n::init；CSR/五语言保持 |
 | 兼容性保留 | 直接 tungstenite 0.29.0，不升 0.30.0 | Axum 经 tokio-tungstenite 0.29.0 暴露具体错误类型；单独升级破坏 downcast，且增加重复版本 |

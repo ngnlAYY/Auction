@@ -22,17 +22,18 @@ pub(super) fn RealtimeFailureTable(
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table admin-realtime-table",
+                caption { class: "admin-visually-hidden", {t!("realtime-failure-title")} }
                 auction_web_shared::TableColumns { layout: "admin-realtime-failures", widths: vec![17, 20, 17, 9, 12, 12, 7, 6] }
                 thead {
                     tr {
-                        th { class: "admin-realtime-col-failure", {t!("realtime-failure-time")} }
-                        th { class: "admin-realtime-col-error", {t!("realtime-failure-error")} }
-                        th { class: "admin-realtime-col-subject", {t!("realtime-stream")} }
-                        th { class: "admin-realtime-col-topic", {t!("realtime-consumer")} }
-                        th { class: "admin-realtime-col-event", {t!("realtime-failure-event-id")} }
-                        th { class: "admin-realtime-col-id", {t!("realtime-failure-id")} }
-                        th { class: "admin-realtime-col-status", {t!("realtime-failure-state")} }
-                        th { {t!("catalog-actions")} }
+                        th { scope: "col", class: "admin-realtime-col-failure", {t!("realtime-failure-time")} }
+                        th { scope: "col", class: "admin-realtime-col-error", {t!("realtime-failure-error")} }
+                        th { scope: "col", class: "admin-realtime-col-subject", {t!("realtime-stream")} }
+                        th { scope: "col", class: "admin-realtime-col-topic", {t!("realtime-consumer")} }
+                        th { scope: "col", class: "admin-realtime-col-event", {t!("realtime-failure-event-id")} }
+                        th { scope: "col", class: "admin-realtime-col-id", {t!("realtime-failure-id")} }
+                        th { scope: "col", class: "admin-realtime-col-status", {t!("realtime-failure-state")} }
+                        th { scope: "col", {t!("catalog-actions")} }
                     }
                 }
                 tbody {
@@ -83,13 +84,15 @@ pub(super) fn RealtimeFailureTable(
                                             }
                                         }
                                     }
-                                    td { "data-label": t!("catalog-actions"), class: "admin-realtime__actions",
-                                        if !failure.resolved {
-                                            button {
-                                                r#type: "button",
-                                                disabled: pending.any_busy() || pending.contains(&failure.id),
-                                                onclick: move |_| on_select.call(failure_for_action.clone()),
-                                                {t!("realtime-replay")}
+                                    td { "data-label": t!("catalog-actions"),
+                                        div { class: "admin-realtime__actions",
+                                            if !failure.resolved {
+                                                button {
+                                                    r#type: "button",
+                                                    disabled: pending.any_busy() || pending.contains(&failure.id),
+                                                    onclick: move |_| on_select.call(failure_for_action.clone()),
+                                                    {t!("realtime-replay")}
+                                                }
                                             }
                                         }
                                     }
@@ -114,7 +117,8 @@ fn compact_realtime_id(value: &str) -> String {
     if value.len() <= 12 {
         value.to_owned()
     } else {
-        value.chars().rev().take(8).collect::<String>().chars().rev().collect()
+        let start = value.char_indices().rev().nth(7).map_or(0, |(index, _)| index);
+        value[start..].to_owned()
     }
 }
 

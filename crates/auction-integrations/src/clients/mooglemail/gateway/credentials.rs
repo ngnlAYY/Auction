@@ -443,12 +443,18 @@ impl MoogleMailCredentialSession {
         deadline: std::time::Instant,
     ) -> Result<(), auction_application::InternalEvidenceError> {
         use auction_application::InternalEvidenceError as Error;
+        if std::time::Instant::now() >= deadline {
+            return Err(Error::Expired);
+        }
         self.internal_credential_binding(self.world)?;
         let owner = self.set.ownership.as_ref().ok_or(Error::Unsupported)?;
         tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), owner.check())
             .await
             .map_err(|_| Error::Expired)?
             .map_err(|_| Error::Revoked)?;
+        if std::time::Instant::now() >= deadline {
+            return Err(Error::Expired);
+        }
         self.internal_credential_binding(self.world)?;
         Ok(())
     }

@@ -228,7 +228,7 @@ async fn execute_transaction(
     )
     .bind(command.command_id)
     .bind(command.action.command_kind())
-    .bind(command.request_hash.as_bytes().to_vec())
+    .bind(command.request_hash.as_bytes().as_slice())
     .bind(command.delivery_id)
     .bind(payload)
     .execute(transaction.connection()?)
@@ -458,6 +458,7 @@ async fn update_settlement_fulfillment(
     proof_digest: Option<RequestHash>,
 ) -> Result<(), DeliveryAdminTransactionError> {
     let completed_at = Utc::now();
+    let proof_digest = proof_digest.map(RequestHash::as_bytes);
     let updated = sqlx::query(
         r#"UPDATE public.settlement_obligation_fulfillments
            SET execution_state = $2,
@@ -479,7 +480,7 @@ async fn update_settlement_fulfillment(
     .bind(next_state)
     .bind(failure_code)
     .bind(proof_reference)
-    .bind(proof_digest.map(|value| value.as_bytes().to_vec()))
+    .bind(proof_digest.as_ref().map(|value| value.as_slice()))
     .bind(completed_at)
     .execute(transaction.connection()?)
     .await

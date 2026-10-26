@@ -25,6 +25,7 @@ pub(super) async fn postgres(
     limit: u16,
 ) -> Result<Vec<ScheduledRoundClaim>, auction_application::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+    // Preview/Open 不消费 lot 截止；只为已 Open 的 Live 轮次执行 Final 到期聚合。
     let rows = sqlx::query(
         "SELECT round.id, round.auction_id, round.create_command_id,
                 round.world_id, round.local_week,
@@ -36,6 +37,7 @@ pub(super) async fn postgres(
              SELECT MIN(lot.effective_end_at) AS earliest_end_at
              FROM public.lots AS lot
              WHERE lot.auction_id = round.auction_id AND lot.status = 'live'
+               AND round.open_completed_at IS NOT NULL AND auction.status = 'live'
          ) AS deadline ON true
          WHERE round.status = 'active'
            AND round.final_completed_at IS NULL

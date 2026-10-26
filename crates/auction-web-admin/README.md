@@ -12,6 +12,7 @@ Dioxus 纯客户端渲染的管理端 SPA，拥有管理认证、查询、命令
 | [src/app/surface](crates/auction-web-admin/src/app/surface) | 路由、认证外壳与会话内状态 |
 | [src/app/surface/pagination](crates/auction-web-admin/src/app/surface/pagination) | 每表数量 URL、本地偏好、共享 Pager 译文与请求身份门禁 |
 | [src/app/surface/pending](crates/auction-web-admin/src/app/surface/pending) | 当前路由已提交命令的稀疏宿主、累计未知结果与原样重试区 |
+| [src/app/surface/auth/navigation](crates/auction-web-admin/src/app/surface/auth/navigation) | `desktop.rs` 常驻侧栏、`mobile.rs` 折叠菜单与按钮；共享唯一入口清单，不持有会话、草稿或请求 |
 | [src/api/pagination](crates/auction-web-admin/src/api/pagination) | 显式分页请求的安全乘法与既有服务端边界校验 |
 | [runtime_config/taxonomy.rs](crates/auction-web-admin/src/api/operations/runtime_config/taxonomy.rs) | 服务端装备词典投影的界限、唯一性及引用完整性校验 |
 | [src/app/auction](crates/auction-web-admin/src/app/auction) | 拍卖、lot、录入、结算/恢复页面 |
@@ -21,7 +22,8 @@ Dioxus 纯客户端渲染的管理端 SPA，拥有管理认证、查询、命令
 | [equipment_colors/options](crates/auction-web-admin/src/app/operations/config/form/equipment_colors/options) | 按服务端装备词典投影计算标色候选的筛选和去重并集 |
 | [equipment_colors/selection.rs](crates/auction-web-admin/src/app/operations/config/form/equipment_colors/selection.rs) | 原生复选框多选、旧候选保留及多类别种类/词缀并集关联 |
 | [src/app/content](crates/auction-web-admin/src/app/content)、[src/api](crates/auction-web-admin/src/api) | 规则工作区、同源请求与严格 DTO 解码 |
-| [assets](crates/auction-web-admin/assets)、[i18n](crates/auction-web-admin/i18n) | Admin 样式与五语言译文 |
+| [assets/admin.css](crates/auction-web-admin/assets/admin.css)、[desktop.css](crates/auction-web-admin/assets/desktop.css)、[mobile.css](crates/auction-web-admin/assets/mobile.css) | 分别拥有设备无关视觉、桌面布局、手机/触控布局；三份独立静态资源按 CSS layer 排序 |
+| [i18n](crates/auction-web-admin/i18n) | Admin 独立维护的五语言译文 |
 
 ## 职责与实现边界
 
@@ -61,9 +63,16 @@ lot、delivery、用户、凭据、入站邮件、改名和审计表直接排序
 更改轮询间隔不立即刷新无关列表，显式刷新和命令成功刷新仍保留。
 
 手机竖屏与 64rem 内的触控横屏使用顶部折叠导航，切换路由自动收起；导航内按 Escape 返回触发按钮。
-页头、工作区、登录与首次设置保留屏幕安全区，表外筛选、诊断、配置和确认动作按可用宽度重排。
-复选项及细小详情按钮使用整行触控区域；用户黑名单历史支持点击或键盘激活后打开可滚动详情。
-移动布局继续使用同一套管理命令与草稿，完整行列和列宽比例保持不变。
+桌面/手机导航由独立 Rust 纯展示模块输出，CSS 只显示适用导航；手机控制区只有一个 `admin-primary-navigation` ID。
+两种展示不持有 `Outlet`、认证 epoch、读取资源或业务事件工厂；主区、配置草稿、页级未决命令、登录及设置表单始终只有一份，
+改宽度不切换业务组件树、不引入第二次 API 读取，也不自动关闭未知命令。
+`admin.css` 的 `surface` 层保留设备无关视觉；`desktop.css`/`mobile.css` 分别承接布局，全部先声明
+`foundation, surface, desktop, mobile`，不依赖 Dioxus 静态 head 的资源输出顺序，也不使用运行时 CSS `@import`。
+主布局断点为 48rem，64rem 内粗指针设备同样使用手机导航；Dashboard 在 64rem 内单栏、其上双栏、100rem 起三栏。
+页头、工作区、登录与首次设置保留屏幕安全区；筛选、诊断、规则、配置、确认与未决动作按可用宽度重排。
+首次设置在 48rem 内使用单列表单；共享层拥有移动输入的 16px 字号和 44px 高度，Admin 负责具体表单布局。
+业务表始终保持完整行列与百分比列宽；凭据、Realtime 动作布局放在单元格内部，不把 `td` 改为 flex。
+复选项和诊断展开入口使用整行触控区域，长文本继续使用共享键盘/触控全文查看。
 
 拍卖、lot、用户、凭据、投递、邮件关联任务、Recovery、业务世界启停、改名回滚、规则和 replay 在稳定宿主安装未决操作区；runtime 未决命令与草稿同属认证外壳。
 已提交意图冻结完整负载、原 UUID 和版本，任务不随行、弹窗或邮件详情卸载取消；不把关闭展示解释为取消服务器请求。
@@ -76,6 +85,9 @@ lot、delivery、用户、凭据、入站邮件、改名和审计表直接排序
 Recovery 冻结动作、原因和版本；世界命令冻结 enabled/revision；改名回滚按用户 UUID 隔离，
 首次准备后冻结完整 fence。未知后的 stale 拒绝不换 UUID 或重读新版本，只能原样重试。
 装备标色规则以借用集合展示，单项选择只复制待修改字段；Admin 不再启用无消费者的 UUID v5 feature。
+未决面板借用稀疏条目，仅复制展示文字，不为重绘复制整张集合与冻结工厂；规则和 runtime 初始化也先借用完成快照，
+再按原查询/指纹门禁更新草稿。首次设置的静态字段组不逐次分配 Vec。移除未接入模块树的旧 Dashboard 指标/运行详情实现、
+对应 CSS 与五语废弃消息，唯一 Dashboard 快照和当前 `content.rs` 分组保持不变。
 
 ## 国际化
 

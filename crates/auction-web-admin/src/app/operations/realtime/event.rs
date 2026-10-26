@@ -15,20 +15,21 @@ pub(super) fn RealtimeEventTable(page: RealtimeEventPage) -> Element {
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table admin-realtime-table admin-realtime-event-table",
+                caption { class: "admin-visually-hidden", {t!("realtime-event-title")} }
                 auction_web_shared::TableColumns { layout: "admin-realtime-events", widths: vec![18, 22, 26, 6, 7, 21] }
                 thead {
                     tr {
-                        th { {t!("realtime-event-created-at")} }
-                        th { {t!("realtime-event-kind")} }
-                        th { {t!("realtime-stream")} }
-                        th { {t!("realtime-event-sequence")} }
-                        th { {t!("realtime-event-schema")} }
-                        th { {t!("realtime-event-id")} }
+                        th { scope: "col", {t!("realtime-event-created-at")} }
+                        th { scope: "col", {t!("realtime-event-kind")} }
+                        th { scope: "col", {t!("realtime-stream")} }
+                        th { scope: "col", {t!("realtime-event-sequence")} }
+                        th { scope: "col", {t!("realtime-event-schema")} }
+                        th { scope: "col", {t!("realtime-event-id")} }
                     }
                 }
                 tbody {
                     for event in page.events {
-                        tr { class: "admin-realtime__row",
+                        tr { key: "{event.event_id}", class: "admin-realtime__row",
                             td { "data-label": t!("realtime-event-created-at"),
                                 Time { value: event.created_at.clone() }
                             }

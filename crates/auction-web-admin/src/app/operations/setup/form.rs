@@ -98,10 +98,10 @@ pub(super) fn ConfigurationForm(
             p { class: "admin-setup__hint", {t!("setup-form-help")} }
             SetupErrors { issues, advanced_open }
             for (legend, fields) in [
-                ("setup-database", SetupField::DATABASE.to_vec()),
-                ("setup-admin", SetupField::ADMIN.to_vec()),
-                ("setup-basic", SetupField::BASIC.to_vec()),
-                ("setup-listener", SetupField::LISTENER.to_vec()),
+                ("setup-database", SetupField::DATABASE.as_slice()),
+                ("setup-admin", SetupField::ADMIN.as_slice()),
+                ("setup-basic", SetupField::BASIC.as_slice()),
+                ("setup-listener", SetupField::LISTENER.as_slice()),
             ] {
                 fieldset { key: "{legend}", disabled: busy,
                     legend { {t!(legend)} }
@@ -111,7 +111,7 @@ pub(super) fn ConfigurationForm(
                         p { class: "admin-setup__hint", {t!("setup-listener-help")} }
                     }
                     div { class: "admin-setup__grid",
-                        for field in fields {
+                        for field in fields.iter().copied() {
                             SetupInput { key: "{field.id()}", field, draft, issues, busy }
                         }
                     }

@@ -78,11 +78,14 @@ pub fn Pager(
         }
     }));
 
-    let clean = jump_page().trim().to_owned();
-    let jump_target = (!clean.is_empty() && clean.bytes().all(|value| value.is_ascii_digit()))
-        .then(|| clean.parse::<i64>().ok())
-        .flatten()
-        .filter(|target| (1..=total_pages).contains(target));
+    let jump_target = {
+        let value = jump_page.read();
+        let clean = value.trim();
+        (!clean.is_empty() && clean.bytes().all(|value| value.is_ascii_digit()))
+            .then(|| clean.parse::<i64>().ok())
+            .flatten()
+            .filter(|target| (1..=total_pages).contains(target))
+    };
     let can_jump = jump_target.is_some();
     let numbered = !page_size_options.is_empty();
 

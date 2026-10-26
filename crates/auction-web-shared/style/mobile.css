@@ -1,0 +1,57 @@
+/* 通用触控字段、分页和底部弹窗；业务布局由各 surface 的 mobile 样式拥有。 */
+@layer foundation, surface, desktop, mobile;
+
+@layer mobile {
+  @media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
+    body {
+      font-size: 1rem;
+    }
+
+    /* 编辑字段至少 16px，避免手机聚焦时缩放；不改变复选框或单选框的原生尺寸。 */
+    html body :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]) {
+      font-size: 1rem;
+    }
+
+    html body :is(input, select):not([type="checkbox"]):not([type="radio"]) {
+      min-block-size: var(--size-target);
+    }
+
+    .ui-dialog {
+      padding: 0;
+      align-items: end;
+      justify-items: stretch;
+    }
+
+    .ui-dialog__panel {
+      inline-size: 100%;
+      max-block-size: min(calc(var(--visual-viewport-height) * 0.85), calc(var(--visual-viewport-height) - var(--safe-area-top)));
+      padding: var(--space-4)
+        max(var(--space-4), var(--safe-area-right))
+        max(var(--space-4), var(--safe-area-bottom))
+        max(var(--space-4), var(--safe-area-left));
+      border-block-end: none;
+      border-inline: none;
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    }
+  }
+
+  @media screen and (max-width: 48rem) {
+    .ui-pager,
+    .ui-pager__jump {
+      align-items: stretch;
+    }
+
+    .ui-pager__controls,
+    .ui-pager__jump {
+      inline-size: 100%;
+    }
+
+    .ui-pager__controls {
+      justify-content: space-between;
+    }
+
+    .ui-pager--numbered {
+      justify-content: flex-start;
+    }
+  }
+}

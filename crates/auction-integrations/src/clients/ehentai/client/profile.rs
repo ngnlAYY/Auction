@@ -86,7 +86,7 @@ impl EhentaiClient {
         // 仅 GET 资料；复用强制不重定向的安全池，不经过发帖或 PM 准备流程。
         let source = self.pm_get(target.clone(), cookie).await.map_err(profile_get_failure)?;
         let name = parse_target_profile(&source, &target, target_uid)?;
-        self.check_ownership()
+        self.check_ownership(cookie)
             .await
             .map_err(|_| profile_failure(ProfileStage::Owner, InternalEvidenceError::Revoked))?;
         let observed_at = chrono::Utc::now();

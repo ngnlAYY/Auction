@@ -388,6 +388,7 @@ account-login-required = 입찰 Key로 로그인하면 내 입찰과 자동 입�
 account-login-cta = 로그인
 account-no-bids = 아직 입찰한 적이 없어요.
 account-no-proxies = 활성화된 자동 입찰이 없어요.
+account-section-navigation = 계정 섹션 이동
 account-watches-title = 현재 경매에서 표시한 장비
 account-watches-loading = 현재 표시한 장비를 불러오는 중…
 account-watches-error = 표시한 장비 목록 전체를 불러오지 못했습니다. 다시 시도하세요.

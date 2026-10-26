@@ -181,7 +181,10 @@ impl EhentaiClient {
         self
     }
 
-    async fn check_ownership(&self) -> Result<(), ()> {
+    async fn check_ownership(&self, cookie: &EhentaiCookie) -> Result<(), ()> {
+        if !cookie.is_active() {
+            return Err(());
+        }
         if let Some(ownership) = &self.ownership {
             // 预算同时覆盖持锁连接的排队与探测；超时取消会永久撤销 owner。
             tokio::time::timeout(Duration::from_secs(1), ownership.check())
@@ -189,7 +192,7 @@ impl EhentaiClient {
                 .map_err(|_| ())?
                 .map_err(|_| ())?;
         }
-        Ok(())
+        cookie.is_active().then_some(()).ok_or(())
     }
 
     /// 返回底层 HTTP client，供需要共享连接池的装配代码使用。

@@ -55,7 +55,7 @@ async fn list_postgres_transaction(
         .unwrap_or_else(|| counts.get("all").copied().unwrap_or_default());
 
     let mut page = PublicLotPage {
-        projection: projection.clone(),
+        projection,
         preview: Vec::new(),
         live: Vec::new(),
         total,
@@ -63,7 +63,7 @@ async fn list_postgres_transaction(
         offset: request.offset,
         category_counts: counts,
     };
-    if projection.projection_kind == "preview" {
+    if page.projection.projection_kind == "preview" {
         let rows = sqlx::query(
             "SELECT
                 l.id,
@@ -108,7 +108,7 @@ async fn list_postgres_transaction(
         .map_err(|_| storage_error("读取 PostgreSQL 预览 lot 列表失败"))?;
         page.preview = rows
             .into_iter()
-            .map(|row| map_postgres_preview(row, &projection.world_id, colors))
+            .map(|row| map_postgres_preview(row, &page.projection.world_id, colors))
             .collect::<Result<_, _>>()?;
     } else {
         let rows = sqlx::query(
@@ -165,7 +165,7 @@ async fn list_postgres_transaction(
         .map_err(|_| storage_error("读取 PostgreSQL 正式 lot 列表失败"))?;
         page.live = rows
             .into_iter()
-            .map(|row| map_postgres_live(row, &projection.world_id, colors))
+            .map(|row| map_postgres_live(row, &page.projection.world_id, colors))
             .collect::<Result<_, _>>()?;
     }
     page.validate(auction_id, request.category.as_deref()).map_err(storage_error)?;

@@ -19,6 +19,10 @@
 复用这些 DTO，数据库行与领域聚合在边界转换。路由、状态码、字段语义与版本规则见
 [HTTP 契约](docs/contracts/routes.md)和[实时契约](docs/contracts/events.md)，字段清单不在本页复制。
 
+通用字段解码集中在 [dto/shared.rs](crates/auction-contracts/src/contracts/dto/shared.rs)，仅供 crate 内 DTO 使用：
+`deserialize_required_option` 保留“字段必填、值可为 null”；`deserialize_null_default` 保留旧 Go 标量 null 到零值的映射，
+缺失仍由各字段原有 `default` 控制。错误类型、未知字段拒绝及序列化形状不变，业务校验与错误分类仍归应用/HTTP。
+
 ## DTO 布局与消费方
 
 [dto/public/watch.rs](crates/auction-contracts/src/contracts/dto/public/watch.rs) 定义装备标记的完整集合、CAS 请求和

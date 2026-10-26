@@ -38,28 +38,29 @@ pub fn page() -> Element {
     use_effect(move || {
         let requested_locale = target();
         let state = rules.state().cloned();
-        let snapshot = rules.read_unchecked().clone();
+        let snapshot = rules.read_unchecked();
         if state == UseResourceState::Ready
-            && let Some((loaded_locale, Ok(document))) = snapshot
-            && loaded_locale == requested_locale
+            && let Some((loaded_locale, Ok(document))) = snapshot.as_ref()
+            && loaded_locale == &requested_locale
             && document.locale == requested_locale
         {
-            draft.set(Some(to_draft(&document, &requested_locale)));
+            draft.set(Some(to_draft(document, &requested_locale)));
             checked_signature.set(String::new());
             notice.set(None);
         }
     });
 
     // Resource 重读时保留旧值；旧语言的文档与错误均不能装配成新语言编辑器。
-    let snapshot = if rules.state().cloned() == UseResourceState::Ready {
-        rules
-            .read_unchecked()
-            .clone()
-            .and_then(|(loaded_locale, result)| (loaded_locale == target()).then_some(result))
+    let snapshot = rules.read_unchecked();
+    let current = if rules.state().cloned() == UseResourceState::Ready {
+        snapshot
+            .as_ref()
+            .filter(|(loaded_locale, _)| loaded_locale == &target())
+            .map(|(_, result)| result)
     } else {
         None
     };
-    let content = match snapshot.as_ref() {
+    let content = match current {
         None => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Loading,

@@ -13,7 +13,6 @@ use super::admin_api_error_message;
 type Attempt = Pin<Box<dyn Future<Output = Result<(), String>>>>;
 type CommandFactory = Rc<dyn Fn(Uuid) -> Attempt>;
 
-#[derive(Clone)]
 struct PendingCommand {
     entity: String,
     action: String,
@@ -292,36 +291,51 @@ pub(crate) fn definite_rejection(code: &str) -> bool {
 /// 页级常驻操作区只展示实体、动作、命令ID与结果类别，不展示冻结负载或成功结果。
 #[component]
 pub(crate) fn PendingCommandPanel(owner: PendingCommands) -> Element {
-    let entries = owner.entries.read().clone();
+    let entries = owner.entries.read();
+    let writes_blocked = !crate::api::admin_session_writes_allowed()
+        || owner.gate.is_some_and(PendingCommandGate::blocked);
     rsx! {
         if !entries.is_empty() {
-            section { class: "admin-panel", aria_label: t!("admin-pending-title"),
+            section { class: "admin-panel admin-pending", aria_label: t!("admin-pending-title"),
                 h2 { {t!("admin-pending-title")} }
                 p { class: "admin-panel__note", {t!("admin-pending-help")} }
-                ul {
-                    for entry in entries {
-                        li { key: "{entry.command_id}",
-                            strong { TruncatedText { value: entry.action } }
-                            TruncatedText { value: entry.entity }
-                            TruncatedText { value: entry.command_id.to_string() }
-                            p { role: "status",
-                                if entry.busy { {t!("admin-pending-busy")} }
-                                if entry.unknown { {t!("admin-pending-unknown")} }
-                                else if !entry.busy { {t!("admin-pending-rejected")} }
-                            }
-                            if let Some(code) = entry.error {
-                                p { class: "action-feedback action-feedback--error", {admin_api_error_message(&code)} }
-                            }
-                            button { r#type: "button",
-                                disabled: entry.busy || !crate::api::admin_session_writes_allowed()
-                                    || owner.gate.is_some_and(PendingCommandGate::blocked),
-                                onclick: move |_| owner.retry(entry.command_id),
-                                {t!("admin-pending-retry")}
-                            }
-                            if !entry.busy && !entry.unknown {
-                                button { r#type: "button",
-                                    onclick: move |_| owner.dismiss(entry.command_id),
-                                    {t!("admin-pending-dismiss")}
+                ul { class: "admin-pending__list",
+                    for entry in entries.iter() {
+                        {
+                            let command_id = entry.command_id;
+                            rsx! {
+                                li { class: "admin-pending__entry", key: "{command_id}",
+                                    "data-command-id": "{command_id}",
+                                    div { class: "admin-pending__identity",
+                                        strong { TruncatedText { value: entry.action.clone() } }
+                                        TruncatedText { value: entry.entity.clone() }
+                                        code { TruncatedText { value: command_id.to_string() } }
+                                    }
+                                    div { class: "admin-pending__result",
+                                        p { role: "status",
+                                            if entry.busy { {t!("admin-pending-busy")} }
+                                            if entry.unknown { {t!("admin-pending-unknown")} }
+                                            else if !entry.busy { {t!("admin-pending-rejected")} }
+                                        }
+                                        if let Some(code) = entry.error.as_deref() {
+                                            p { class: "action-feedback action-feedback--error",
+                                                {admin_api_error_message(code)}
+                                            }
+                                        }
+                                    }
+                                    div { class: "admin-pending__actions",
+                                        button { r#type: "button",
+                                            disabled: entry.busy || writes_blocked,
+                                            onclick: move |_| owner.retry(command_id),
+                                            {t!("admin-pending-retry")}
+                                        }
+                                        if !entry.busy && !entry.unknown {
+                                            button { r#type: "button",
+                                                onclick: move |_| owner.dismiss(command_id),
+                                                {t!("admin-pending-dismiss")}
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

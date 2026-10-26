@@ -51,7 +51,8 @@ pub(super) fn login(return_to: Option<String>) -> Element {
     };
     let navigator = use_navigator();
     let return_path = safe_return_path(return_to.as_deref());
-    let failed = matches!(result(), Some(LoginState::Failure(_)));
+    let result_snapshot = result.read();
+    let failed = matches!(result_snapshot.as_ref(), Some(LoginState::Failure(_)));
 
     rsx! {
         section {
@@ -99,6 +100,8 @@ pub(super) fn login(return_to: Option<String>) -> Element {
                     spellcheck: "false",
                     enterkeyhint: "go",
                     maxlength: "1024",
+                    aria_invalid: failed.to_string(),
+                    aria_describedby: if failed { "public-login-hint public-login-error" } else { "public-login-hint" },
                     placeholder: if submitting() || failed {
                         "••••••••••••••••••••••••••••••••".to_owned()
                     } else {
@@ -109,10 +112,10 @@ pub(super) fn login(return_to: Option<String>) -> Element {
                     value: "{key}",
                     oninput: move |event| key.set(event.value()),
                 }
-                if let Some(LoginState::Failure(error)) = result() {
-                    p { class: "public-account-login-error", role: "alert",
-                        span { {login_error_message(&error)} }
-                        if let Some(reason) = login_blacklisted_reason(&error) {
+                if let Some(LoginState::Failure(error)) = result_snapshot.as_ref() {
+                    p { id: "public-login-error", class: "public-account-login-error", role: "alert",
+                        span { {login_error_message(error)} }
+                        if let Some(reason) = login_blacklisted_reason(error) {
                             span { class: "public-account-login-ban-reason",
                                 {t!("login-blacklisted-reason", reason: reason)}
                             }
@@ -121,15 +124,15 @@ pub(super) fn login(return_to: Option<String>) -> Element {
                 }
                 button {
                     r#type: "submit",
-                    disabled: submitting() || key().trim().is_empty(),
+                    disabled: submitting() || key.read().trim().is_empty(),
                     "data-error": failed.to_string(),
                     if submitting() { {t!("login-working")} } else { {t!("login-submit")} }
                 }
             }
-            p { class: "public-account-login-hint", {t!("login-hint", bot_account: bot_account)} }
-            if let Some(LoginState::Success(session)) = result() {
+            p { id: "public-login-hint", class: "public-account-login-hint", {t!("login-hint", bot_account: bot_account)} }
+            if let Some(LoginState::Success(session)) = result_snapshot.as_ref() {
                 p { class: "action-feedback action-feedback--success", role: "status",
-                    {t!("login-success", username: session.username)}
+                    {t!("login-success", username: session.username.as_str())}
                 }
             }
         }

@@ -10,21 +10,29 @@ pub(crate) fn history_name_value(value: &str) -> Result<Option<String>, HistoryF
     if value.len() > 1_024 {
         return Err(HistoryFilterError::NameTooLong);
     }
-    let terms = value
+    let mut term_count = 0;
+    let mut term_too_long = false;
+    let mut invalid = false;
+    for term in value
         .split(|character: char| character == ',' || character.is_whitespace())
         .filter(|term| !term.is_empty())
-        .collect::<Vec<_>>();
-    if terms.len() > 8 {
-        return Err(HistoryFilterError::NameTooManyTerms);
+    {
+        term_count += 1;
+        if term_count > 8 {
+            return Err(HistoryFilterError::NameTooManyTerms);
+        }
+        term_too_long |= term.len() > 128;
+        invalid = invalid || (!term_too_long && term.chars().any(char::is_control));
     }
-    if terms.iter().any(|term| term.len() > 128) {
+    // 保留总长、词数、单词长度、控制字符的既有错误优先级，不为校验建立词数组。
+    if term_too_long {
         return Err(HistoryFilterError::NameTermTooLong);
     }
-    if terms.iter().any(|term| term.chars().any(char::is_control)) {
+    if invalid {
         return Err(HistoryFilterError::NameInvalid);
     }
     // 只有分隔符的输入与服务端的空词集合一致，不把它当成有效条件加载全部历史。
-    Ok((!terms.is_empty()).then(|| value.to_owned()))
+    Ok((term_count != 0).then(|| value.to_owned()))
 }
 
 /// 将名称字段的稳定错误分类转换为本 surface 的文案。

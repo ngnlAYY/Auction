@@ -15,11 +15,15 @@ Public 竞价与 Admin 管理状态留在各 surface，本 crate 不依赖存储
 | [src/i18n](crates/auction-web-shared/src/i18n)、[src/format](crates/auction-web-shared/src/format) | 语言偏好、时间与金额展示 |
 | [src/a11y](crates/auction-web-shared/src/a11y)、[src/bootstrap](crates/auction-web-shared/src/bootstrap) | 焦点、背景滚动与首屏门禁 |
 | [src/clock](crates/auction-web-shared/src/clock)、[src/media](crates/auction-web-shared/src/media) | 共享时钟、媒体查询与可见视口 |
-| [style/base.css](crates/auction-web-shared/style/base.css) | 设计变量与共享组件样式 |
+| [style/base.css](crates/auction-web-shared/style/base.css)、[style/mobile.css](crates/auction-web-shared/style/mobile.css) | 共享设计变量／组件与独立移动规则 |
 
 ## 设计变量与组件
 
-`base.css` 提供颜色、字号、间距、圆角、层级等变量及 `.ui-*` 样式，两端业务 BEM 类留在各自 assets。
+`base.css` 提供颜色、字号、间距、圆角、层级等变量及 `.ui-*` 样式，`mobile.css` 拥有触控字段、分页和底部弹窗规则；
+两端业务 BEM 类与设备展示留在各自 assets。所有样式显式声明 `foundation, surface, desktop, mobile` 层顺序，
+不依赖 Dioxus 不保证的 head 插入顺序；分别作为静态 CSS asset 打包，不使用未被当前 dx 递归打包的相对 `@import`。
+共享组件不再提供 `.ui-empty-state*` 兼容别名；Public 专属空态仍由本端维护。
+同时移除无人消费的强制 sheet 变体与旧表格结构恢复规则。
 表格一律 100% 容器宽度、固定布局与完整百分比列宽，不采用最小宽度、横向滚动或窄屏卡片化；`TableColumns`
 归一化调用方权重，业务组件拥有比例（见[列宽登记](docs/design/table-layouts.md)）。
 
@@ -47,6 +51,8 @@ Public 竞价与 Admin 管理状态留在各 surface，本 crate 不依赖存储
 `use_query_state` 只读写声明的 query 键，popstate 经同一解析器恢复；共享时钟和监听均绑定所属组件生命期。
 `BaseStylesheet` 安装 `media/viewport.rs` 的 VisualViewport 监听，将宽高及偏移投影到 CSS 变量，
 供软键盘出现或缩放时的弹窗布局使用；卸载恢复原样式并移除监听，缺少 API 时使用 vh/dvh 回退。
+尺寸与偏移按数值比较，仅变化项才格式化并写入 CSS；重复 scroll/resize 通知不再分配四份字符串或读取四次 CSS 属性。
+原值恢复使用固定四项数组，监听失败与卸载均保持原有清理边界。该优化没有运行时吞吐或移动浏览器测量结论。
 
 ## 传输与错误
 

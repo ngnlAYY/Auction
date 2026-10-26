@@ -27,7 +27,7 @@ mod watches;
 pub(super) fn page() -> Element {
     let mut session = use_context::<PublicSessionResource>();
     let command_owner = use_context::<PublicCommandOwner>().0;
-    let session_snapshot = session.read().clone();
+    let session_snapshot = session.read();
     let account = match session_snapshot.as_ref() {
         None => rsx! {
             p { class: "public-page-status", role: "status", {t!("data-loading")} }
@@ -65,6 +65,10 @@ pub(super) fn page() -> Element {
     rsx! {
         section { class: "public-account-bids-page", aria_labelledby: "account-title",
             h1 { id: "account-title", {t!("page-account-title")} }
+            if command_owner().is_some() {
+                super::presentation::desktop::AccountNavigation {}
+                super::presentation::mobile::AccountNavigation {}
+            }
             // 会话暂时读取失败只禁用新写；与竞价宿主一样，明确换号或登出才销毁未知命令。
             for user_id in command_owner() {
                 AccountPreferenceScope { key: "preferences-{user_id}", user_id }
@@ -251,13 +255,13 @@ fn BidSection(
     on_page_clamp: EventHandler<i64>,
 ) -> Element {
     rsx! {
-        section { class: "public-account-section",
-            h2 { {t!("account-bids-title")} }
+        section { class: "public-account-section", aria_labelledby: "account-bids-title",
+            h2 { id: "account-bids-title", {t!("account-bids-title")} }
             if bids.is_empty() {
                 p { class: "public-account-empty", {t!("account-no-bids")} }
             } else {
                 div { class: "public-account-table-wrap",
-                    table { class: "public-account-table ui-table--responsive",
+                    table { class: "public-account-table",
                         caption { class: "public-visually-hidden", {t!("account-bids-title")} }
                         auction_web_shared::TableColumns { layout: "public-account-bids", widths: vec![18, 28, 54] }
                         thead {
@@ -324,13 +328,13 @@ fn ProxySection(
     on_page_clamp: EventHandler<i64>,
 ) -> Element {
     rsx! {
-        section { class: "public-account-section",
-            h2 { {t!("account-proxies-title")} }
+        section { class: "public-account-section", aria_labelledby: "account-proxies-title",
+            h2 { id: "account-proxies-title", {t!("account-proxies-title")} }
             if proxies.is_empty() {
                 p { class: "public-account-empty", {t!("account-no-proxies")} }
             } else {
                 div { class: "public-account-table-wrap",
-                    table { class: "public-account-table ui-table--responsive",
+                    table { class: "public-account-table",
                         caption { class: "public-visually-hidden", {t!("account-proxies-title")} }
                         auction_web_shared::TableColumns { layout: "public-account-proxies", widths: vec![10, 18, 38, 10, 10, 14] }
                         thead {

@@ -36,6 +36,7 @@ pub fn CredentialTable(
         p { class: "admin-credentials__feedback", {t!("admin-credentials-check-hint")} }
         div { class: "admin-credentials-table-wrap",
             table { class: "admin-credentials-table",
+                caption { class: "admin-visually-hidden", {t!("page-credentials-title")} }
                 // 列序：名称、世界、类型、状态、轮换时间、使用时间、导入者、操作；五个操作按钮允许换行。
                 auction_web_shared::TableColumns { layout: "admin-credentials", widths: vec![14, 6, 10, 6, 14, 14, 6, 30] }
                 thead {
@@ -76,9 +77,9 @@ pub fn CredentialTable(
                             direction,
                             on_sort: on_sort_change,
                         }
-                        th { {t!("admin-credentials-last-used")} }
-                        th { {t!("admin-credentials-imported-by")} }
-                        th { {t!("admin-credentials-actions")} }
+                        th { scope: "col", {t!("admin-credentials-last-used")} }
+                        th { scope: "col", {t!("admin-credentials-imported-by")} }
+                        th { scope: "col", {t!("admin-credentials-actions")} }
                     }
                 }
                 tbody {
@@ -155,60 +156,61 @@ pub fn CredentialRow(
             }
             td {
                 "data-label": t!("admin-credentials-actions"),
-                class: "admin-credentials__row-actions",
                 aria_describedby: feedback().is_some().then_some(feedback_id.clone()),
-                button {
-                    r#type: "button",
-                    disabled: busy() || blocked || credential.status == "active",
-                    onclick: move |_| {
-                        let credential = credential_for_enable.clone();
-                        if busy() { return; }
-                        submit_credential(owner, credential, "set_status", None, Some("active".to_owned()), feedback);
-                    },
-                    {t!("admin-credentials-action-enable")}
-                }
-                button {
-                    r#type: "button",
-                    disabled: busy() || blocked || credential.status == "disabled",
-                    onclick: move |_| {
-                        let credential = credential_for_disable.clone();
-                        if busy() { return; }
-                        submit_credential(owner, credential, "set_status", None, Some("disabled".to_owned()), feedback);
-                    },
-                    {t!("admin-credentials-action-disable")}
-                }
-                button {
-                    r#type: "button",
-                    disabled: busy() || blocked,
-                    onclick: move |_| {
-                        rename_value.set(credential_for_rename.label.clone());
-                        rename_dialog.set(true);
-                    },
-                    {t!("admin-credentials-action-rename-open")}
-                }
-                button {
-                    r#type: "button",
-                    class: "admin-btn-danger",
-                    disabled: busy() || blocked,
-                    onclick: move |_| on_delete.call(credential_for_delete.clone()),
-                    {t!("admin-credentials-action-delete")}
-                }
-                CredentialCheckAction { credential: credential.clone(), busy, blocked }
-                if let Some(feedback) = feedback() {
-                    span {
-                        id: feedback_id.clone(),
-                        class: if feedback.is_success() {
-                            "admin-credentials__feedback admin-credentials__feedback--success"
-                        } else {
-                            "admin-credentials__feedback admin-credentials__feedback--error"
+                div { class: "admin-credentials__row-actions",
+                    button {
+                        r#type: "button",
+                        disabled: busy() || blocked || credential.status == "active",
+                        onclick: move |_| {
+                            let credential = credential_for_enable.clone();
+                            if busy() { return; }
+                            submit_credential(owner, credential, "set_status", None, Some("active".to_owned()), feedback);
                         },
-                        role: if feedback.is_success() { "status" } else { "alert" },
-                        aria_label: format!(
-                            "{}: {}",
-                            credential.label,
-                            feedback.message(t!("admin-credentials-action-success")),
-                        ),
-                        {feedback.message(t!("admin-credentials-action-success"))}
+                        {t!("admin-credentials-action-enable")}
+                    }
+                    button {
+                        r#type: "button",
+                        disabled: busy() || blocked || credential.status == "disabled",
+                        onclick: move |_| {
+                            let credential = credential_for_disable.clone();
+                            if busy() { return; }
+                            submit_credential(owner, credential, "set_status", None, Some("disabled".to_owned()), feedback);
+                        },
+                        {t!("admin-credentials-action-disable")}
+                    }
+                    button {
+                        r#type: "button",
+                        disabled: busy() || blocked,
+                        onclick: move |_| {
+                            rename_value.set(credential_for_rename.label.clone());
+                            rename_dialog.set(true);
+                        },
+                        {t!("admin-credentials-action-rename-open")}
+                    }
+                    button {
+                        r#type: "button",
+                        class: "admin-btn-danger",
+                        disabled: busy() || blocked,
+                        onclick: move |_| on_delete.call(credential_for_delete.clone()),
+                        {t!("admin-credentials-action-delete")}
+                    }
+                    CredentialCheckAction { credential: credential.clone(), busy, blocked }
+                    if let Some(feedback) = feedback() {
+                        span {
+                            id: feedback_id.clone(),
+                            class: if feedback.is_success() {
+                                "admin-credentials__feedback admin-credentials__feedback--success"
+                            } else {
+                                "admin-credentials__feedback admin-credentials__feedback--error"
+                            },
+                            role: if feedback.is_success() { "status" } else { "alert" },
+                            aria_label: format!(
+                                "{}: {}",
+                                credential.label,
+                                feedback.message(t!("admin-credentials-action-success")),
+                            ),
+                            {feedback.message(t!("admin-credentials-action-success"))}
+                        }
                     }
                 }
             }

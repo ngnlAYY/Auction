@@ -79,9 +79,7 @@ impl PublicRealtimeEvent {
             return Err("实时事件负载必须是对象");
         };
         if object.len() != fields.len()
-            || fields.iter().any(|field| {
-                object.get(*field).is_none_or(Value::is_null) || !object.contains_key(*field)
-            })
+            || fields.iter().any(|field| object.get(*field).is_none_or(Value::is_null))
         {
             return Err("实时事件负载字段不符合注册表");
         }

@@ -276,8 +276,25 @@ async fn unproven_sends(
 ) -> Result<Vec<MoogleMailboxSweepCandidate>, auction_application::ApplicationError> {
     // 所有 Send 来源共享冻结身份；不按 origin 白名单漏掉 watch、alert 或恢复发送。
     // 仅旧结算解析既有装备引用；正文和登录 key 不进入维护投影。
+    // 先物化轮转前缀，再解析冻结尝试和旧装备引用，避免为本批未处理的后缀执行关联查询。
     let rows: Vec<UnprovenSendRow> = sqlx::query_as(
-        "SELECT d.id AS delivery_id,
+        "WITH candidates AS MATERIALIZED (
+            SELECT d.id, d.created_at,
+                   CASE WHEN sweep.last_created_at IS NULL
+                              OR (d.created_at, d.id) > (sweep.last_created_at, sweep.last_delivery_id)
+                        THEN 0 ELSE 1 END AS sweep_order
+            FROM public.deliveries d
+            LEFT JOIN public.mailbox_sweep_cursors sweep ON sweep.world_id = $1
+            WHERE d.status = 'manual_reconcile'
+              AND d.payload->>'operation' IN ('send', 'take')
+              AND d.external_reference IS NULL
+              AND d.sending_at IS NOT NULL
+              AND d.completed_at IS NOT NULL
+              AND COALESCE(d.payload->>'world', 'main') = $1
+            ORDER BY sweep_order, d.created_at, d.id
+            LIMIT $2
+         )
+         SELECT d.id AS delivery_id,
                 d.origin_kind,
                 d.recipient,
                 COALESCE((d.payload->>'cod')::bigint, 0) AS cod,
@@ -315,21 +332,11 @@ async fn unproven_sends(
                 EXISTS (SELECT 1 FROM public.delivery_take_attempts history
                         WHERE history.delivery_id=d.id) AS has_take_attempt,
                 take_attempt.expectation AS take_expectation
-         FROM public.deliveries d
+         FROM candidates
+         JOIN public.deliveries d ON d.id = candidates.id
          LEFT JOIN LATERAL public.delivery_current_send_attempt(d.id) attempt ON true
          LEFT JOIN LATERAL public.delivery_current_take_attempt(d.id) take_attempt ON true
-         LEFT JOIN public.mailbox_sweep_cursors sweep ON sweep.world_id = $1
-         WHERE d.status = 'manual_reconcile'
-           AND d.payload->>'operation' IN ('send', 'take')
-           AND d.external_reference IS NULL
-           AND d.sending_at IS NOT NULL
-           AND d.completed_at IS NOT NULL
-           AND COALESCE(d.payload->>'world', 'main') = $1
-         ORDER BY CASE WHEN sweep.last_created_at IS NULL
-                            OR (d.created_at, d.id) > (sweep.last_created_at, sweep.last_delivery_id)
-                       THEN 0 ELSE 1 END,
-                  d.created_at, d.id
-         LIMIT $2",
+         ORDER BY candidates.sweep_order, candidates.created_at, candidates.id",
     )
     .bind(world_id)
     .bind(limit)

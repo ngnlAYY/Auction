@@ -126,9 +126,12 @@ impl MoogleMailParser {
                 || input.ancestors().filter_map(ElementRef::wrap).any(|node| {
                     node.value().name() == "fieldset" && node.attr("disabled").is_some()
                 })
-                || input.attr("id") != Some(format!("e{eid}").as_str())
-                || row.attr("onclick")
-                    != Some(format!("return select_equip({eid},event,this)").as_str())
+                || input.attr("id").and_then(|id| id.strip_prefix('e')) != Some(eid)
+                || row
+                    .attr("onclick")
+                    .and_then(|handler| handler.strip_prefix("return select_equip("))
+                    .and_then(|handler| handler.strip_suffix(",event,this)"))
+                    != Some(eid)
                 || !seen.insert(eid)
             {
                 return Err(fail());

@@ -245,6 +245,7 @@ fn RenameTable(
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table", aria_busy: pending.any_busy().to_string(),
+                caption { class: "admin-visually-hidden", {t!("page-renames-title")} }
                 auction_web_shared::TableColumns { layout: "admin-renames", widths: vec![21, 21, 9, 20, 20, 9] }
                 thead {
                     tr {
@@ -276,13 +277,13 @@ fn RenameTable(
                             direction,
                             on_sort: on_sort_change,
                         }
-                        th { {t!("admin-renames-reverted")} }
-                        th { {t!("admin-users-actions")} }
+                        th { scope: "col", {t!("admin-renames-reverted")} }
+                        th { scope: "col", {t!("admin-users-actions")} }
                     }
                 }
                 tbody {
                     for rename in renames {
-                        RenameRow { rename, on_select }
+                        RenameRow { key: "{rename.id}", rename, on_select }
                     }
                 }
             }

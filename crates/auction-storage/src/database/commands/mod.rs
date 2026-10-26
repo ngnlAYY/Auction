@@ -76,37 +76,30 @@ impl AdminWorldPort for DatabaseAdminWorldCommands {
     }
 }
 
-/// 绑定运行时数据库和时钟的 Public 竞价命令端口。
-pub struct DatabaseCompetitionCommands<C> {
+/// 绑定运行时数据库的 Public 竞价命令端口；命令时间由锁后数据库时钟提供。
+pub struct DatabaseCompetitionCommands {
     store: Arc<DatabaseStore>,
-    clock: Arc<C>,
 }
 
-impl<C> DatabaseCompetitionCommands<C>
-where
-    C: Clock + 'static,
-{
-    pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>) -> Self {
-        Self { store, clock }
+impl DatabaseCompetitionCommands {
+    pub fn new(store: Arc<DatabaseStore>) -> Self {
+        Self { store }
     }
 }
 
-impl<C> CompetitionCommandPort for DatabaseCompetitionCommands<C>
-where
-    C: Clock + 'static,
-{
+impl CompetitionCommandPort for DatabaseCompetitionCommands {
     fn place_bid(
         &self,
         command: PlaceBidCommand,
     ) -> ApplicationFuture<'_, CompetitionCommandOutcome> {
         let store = Arc::clone(&self.store);
-        let clock = Arc::clone(&self.clock);
-        let _ = (&command, &clock);
+        #[cfg(not(feature = "postgres"))]
+        let _ = &command;
         Box::pin(async move {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
+                    let service = CompetitionService::new(Arc::new(store.clone()));
                     service.place_bid(command).await
                 }
             }
@@ -118,14 +111,13 @@ where
         command: CreateProxyCommand,
     ) -> ApplicationFuture<'_, CompetitionCommandOutcome> {
         let store = Arc::clone(&self.store);
-        let clock = Arc::clone(&self.clock);
         #[cfg(not(feature = "postgres"))]
-        let _ = (&command, &clock);
+        let _ = &command;
         Box::pin(async move {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
+                    let service = CompetitionService::new(Arc::new(store.clone()));
                     service.create_proxy(command).await
                 }
             }
@@ -137,12 +129,11 @@ where
         command: LowerProxyCommand,
     ) -> ApplicationFuture<'_, CompetitionCommandOutcome> {
         let store = Arc::clone(&self.store);
-        let clock = Arc::clone(&self.clock);
         Box::pin(async move {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
+                    let service = CompetitionService::new(Arc::new(store.clone()));
                     service.lower_proxy(command).await
                 }
             }
@@ -150,21 +141,17 @@ where
     }
 }
 
-impl<C> SlowProxyCommandPort for DatabaseCompetitionCommands<C>
-where
-    C: Clock + 'static,
-{
+impl SlowProxyCommandPort for DatabaseCompetitionCommands {
     fn execute_slow_proxy(
         &self,
         command: ExecuteSlowProxyCommand,
     ) -> ApplicationFuture<'_, CompetitionPlan> {
         let store = Arc::clone(&self.store);
-        let clock = Arc::clone(&self.clock);
         Box::pin(async move {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
+                    let service = CompetitionService::new(Arc::new(store.clone()));
                     service.execute_slow_proxy(command).await
                 }
             }
@@ -172,33 +159,25 @@ where
     }
 }
 
-/// 绑定运行时数据库和时钟的 Admin/Worker 生命周期命令端口。
-pub struct DatabaseAuctionLifecycleCommands<C> {
+/// 绑定运行时数据库的 Admin/Worker 生命周期命令端口；锁后读取权威时间。
+pub struct DatabaseAuctionLifecycleCommands {
     store: Arc<DatabaseStore>,
-    clock: Arc<C>,
     policy: AuctionLifecyclePolicy,
     successor_policy: AuctionPolicyTemplate,
 }
 
-impl<C> DatabaseAuctionLifecycleCommands<C>
-where
-    C: Clock + 'static,
-{
+impl DatabaseAuctionLifecycleCommands {
     /// 建立不向 HTTP 暴露具体数据库类型、并冻结运行期授权策略的生命周期命令端口。
     pub fn new(
         store: Arc<DatabaseStore>,
-        clock: Arc<C>,
         policy: AuctionLifecyclePolicy,
         successor_policy: AuctionPolicyTemplate,
     ) -> Self {
-        Self { store, clock, policy, successor_policy }
+        Self { store, policy, successor_policy }
     }
 }
 
-impl<C> AuctionLifecycleCommandPort for DatabaseAuctionLifecycleCommands<C>
-where
-    C: Clock + 'static,
-{
+impl AuctionLifecycleCommandPort for DatabaseAuctionLifecycleCommands {
     fn allows_manual_early_open(&self) -> bool {
         self.policy.allows_manual_early_open()
     }
@@ -212,7 +191,6 @@ where
         command: AuctionLifecycleCommand,
     ) -> ApplicationFuture<'_, AuctionLifecycleResult> {
         let store = Arc::clone(&self.store);
-        let clock = Arc::clone(&self.clock);
         let policy = self.policy;
         let successor_policy = self.successor_policy.clone();
         Box::pin(async move {
@@ -221,7 +199,6 @@ where
                 DatabaseStore::Postgres(store) => {
                     let service = AuctionLifecycleService::new(
                         Arc::new(store.clone()),
-                        clock,
                         policy,
                         successor_policy,
                     );
@@ -232,11 +209,10 @@ where
     }
 }
 
-/// 绑定运行时数据库和时钟的 Admin 创建拍卖命令端口。
+/// 绑定运行时数据库的 Admin 创建拍卖命令端口；锁后读取权威时间。
 /// 创建拍卖将 intake target、策略快照、审计和 realtime 事件在同一事务提交。
-pub struct DatabaseAdminAuctionCommands<C> {
+pub struct DatabaseAdminAuctionCommands {
     store: Arc<DatabaseStore>,
-    clock: Arc<C>,
     policy: AuctionPolicyTemplate,
 }
 
@@ -285,35 +261,27 @@ where
     }
 }
 
-impl<C> DatabaseAdminAuctionCommands<C>
-where
-    C: Clock + 'static,
-{
-    pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>, policy: AuctionPolicyTemplate) -> Self {
-        Self { store, clock, policy }
+impl DatabaseAdminAuctionCommands {
+    pub fn new(store: Arc<DatabaseStore>, policy: AuctionPolicyTemplate) -> Self {
+        Self { store, policy }
     }
 }
 
-impl<C> AdminAuctionCreatePort for DatabaseAdminAuctionCommands<C>
-where
-    C: Clock + 'static,
-{
+impl AdminAuctionCreatePort for DatabaseAdminAuctionCommands {
     fn create(
         &self,
         command: AdminCreateAuctionCommand,
     ) -> ApplicationFuture<'_, AdminAuctionSummary> {
         let store = Arc::clone(&self.store);
-        let clock = Arc::clone(&self.clock);
         #[cfg(feature = "postgres")]
         let policy = self.policy.clone();
         #[cfg(not(feature = "postgres"))]
-        let _ = (&command, &clock, &self.policy);
+        let _ = (&command, &self.policy);
         Box::pin(async move {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service =
-                        AdminAuctionCreateService::new(Arc::new(store.clone()), clock, policy);
+                    let service = AdminAuctionCreateService::new(Arc::new(store.clone()), policy);
                     service.create(command).await
                 }
             }
@@ -321,10 +289,7 @@ where
     }
 }
 
-impl<C> AdminAuctionSchedulePort for DatabaseAdminAuctionCommands<C>
-where
-    C: Clock + 'static,
-{
+impl AdminAuctionSchedulePort for DatabaseAdminAuctionCommands {
     fn update_schedule(
         &self,
         command: AdminUpdateAuctionScheduleCommand,

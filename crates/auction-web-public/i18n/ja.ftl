@@ -388,6 +388,7 @@ account-login-required = 入札用 Key でログインすると、ご自身の�
 account-login-cta = ログイン
 account-no-bids = まだ入札していません。
 account-no-proxies = 有効な代理入札はありません。
+account-section-navigation = アカウント内の移動
 account-watches-title = 現在のオークションでマークした装備
 account-watches-loading = 現在のマーク済み装備を読み込み中…
 account-watches-error = マーク済み装備の一覧全体を読み込めませんでした。再試行してください。

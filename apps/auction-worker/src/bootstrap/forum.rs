@@ -153,7 +153,7 @@ pub(super) async fn configure_forum(
     );
     let reply_store: Arc<dyn ForumReplyStore> = store.clone();
     let commands: Arc<dyn CompetitionCommandPort> =
-        Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
+        Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store)));
     let notifier: Option<Arc<dyn MailDeliveryEnqueuer>> =
         if delivery_enabled { Some(store.clone()) } else { None };
     let reply = Some(

@@ -279,11 +279,11 @@ fn legacy_complete_hash(
 
 fn persisted_counts(
     counts: &[PersistedSettlementObligationCount],
-) -> Result<BTreeMap<String, u64>, ApplicationError> {
+) -> Result<BTreeMap<&'static str, u64>, ApplicationError> {
     let mut mapped = BTreeMap::new();
     for entry in counts {
         if entry.count == 0
-            || mapped.insert(obligation_kind_name(entry.kind).to_owned(), entry.count).is_some()
+            || mapped.insert(obligation_kind_name(entry.kind), entry.count).is_some()
         {
             return Err(failed("权威结算义务数量投影无效"));
         }
@@ -294,18 +294,18 @@ fn persisted_counts(
     Ok(mapped)
 }
 
-fn generated_counts(plan: &SettlementPlan) -> Result<BTreeMap<String, u64>, ApplicationError> {
+fn generated_counts(
+    plan: &SettlementPlan,
+) -> Result<BTreeMap<&'static str, u64>, ApplicationError> {
     let mut counts = BTreeMap::new();
     for obligation in &plan.obligations {
-        let count = counts.entry(obligation_kind_name(obligation.kind).to_owned()).or_insert(0_u64);
+        let count = counts.entry(obligation_kind_name(obligation.kind)).or_insert(0_u64);
         *count = count.checked_add(1).ok_or_else(|| failed("结算义务数量溢出"))?;
     }
     Ok(counts)
 }
 
-fn legacy_counts(
-    counts: &BTreeMap<String, i64>,
-) -> Result<BTreeMap<String, u64>, ApplicationError> {
+fn legacy_counts(counts: &BTreeMap<String, i64>) -> Result<BTreeMap<&str, u64>, ApplicationError> {
     counts
         .iter()
         .map(|(kind, count)| {
@@ -315,7 +315,7 @@ fn legacy_counts(
             u64::try_from(*count)
                 .ok()
                 .filter(|count| *count > 0)
-                .map(|count| (kind.clone(), count))
+                .map(|count| (kind.as_str(), count))
                 .ok_or_else(|| failed("旧版结算义务数量无效"))
         })
         .collect()

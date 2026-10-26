@@ -26,7 +26,7 @@ pub(super) async fn add_mail_auction_intake_inner(
     )
     .bind(write.command_id.as_uuid())
     .bind(write.aggregate_id)
-    .bind(write.request_hash.as_bytes().to_vec())
+    .bind(write.request_hash.as_bytes().as_slice())
     .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;

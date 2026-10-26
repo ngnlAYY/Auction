@@ -17,7 +17,7 @@ pub(super) enum SessionCheckError {
     Unavailable,
 }
 
-/// 长连接固定绑定握手身份；之后的复核只确认权威状态，不替换身份或刷新过期时间。
+/// 长连接固定绑定握手身份；只读复核不续期，但会跟随权威偏好变更更新下次截止检查。
 pub(super) struct RealtimeSession {
     service: Arc<dyn PublicSessionPort>,
     raw_token: String,

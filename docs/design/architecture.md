@@ -215,8 +215,10 @@ Public/Admin 是分离的 Dioxus CSR SPA，各有路由、译文、产物和 HTT
 URL 更新与 `preferences.rs` 本地偏好，shared `Pager`/`components/pager/size.rs` 只提供可选数字分页与页码限制。
 Public `surface/catalog/columns/` 独占装备目录列身份、默认权重、显隐控件和浏览器偏好；仅改变展示，
 不增加 HTTP 字段选择或服务端配置。保留命令宿主与表格结构，共享 `TableColumns` 仍只负责可见权重归一化。
-shared `media/viewport.rs` 拥有 VisualViewport 监听及 CSS 变量生命周期，`style/base.css` 拥有安全区、
-弹窗可见高度与触控字段基础样式；两端 assets 分别拥有手机导航、筛选和原表格列内的操作布局。
+shared `media/viewport.rs` 拥有 VisualViewport 监听及 CSS 变量生命周期，`style/base.css` 拥有公共基础样式，
+`style/mobile.css` 单独维护触控字段、分页与底部弹窗。各 surface 的桌面／移动纯展示模块和独立 CSS 拥有导航与设备布局，
+请求、表单、表格、身份和未决命令仍由稳定的共享业务组件持有，不因宽度变化重新挂载或重复读取。
+CSS 以 `foundation, surface, desktop, mobile` 固定优先级，不依赖 Dioxus 的 head 顺序；无新增运行依赖或迁移阶段。
 装备标记只允许登录用户修改，Public 按 user UUID 与 auction UUID 隔离本地缓存，服务器为唯一权威，不增加业务表列，
 也不把装备链接、代理上限或凭据写入标记缓存。
 Public `identity/account/watches/` 拥有“我的”当期标记列表，组合既有当前场次、账号标记与完整公开目录 API，

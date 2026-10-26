@@ -1,5 +1,6 @@
 //! lot 相关 DTO。
 
+use super::super::shared::deserialize_required_option;
 use super::*;
 
 /// Admin lot 的安全投影；不包含装备密钥、代理上限或原始外部正文。
@@ -46,15 +47,6 @@ pub struct AdminLotResponse {
     pub external_mail_id: Option<String>,
     #[serde(deserialize_with = "deserialize_required_option")]
     pub submission_received_at: Option<String>,
-}
-
-/// `Option` 默认会把缺失字段折叠成 `None`；旧 v1 decoder 要求 nullable 字段必须显式出现。
-fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
 }
 
 /// Admin draft lot 修改成功响应；返回同一事务快照中的 lot 安全投影。

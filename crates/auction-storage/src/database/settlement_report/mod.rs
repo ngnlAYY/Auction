@@ -410,7 +410,7 @@ async fn postgres_report_once(
 fn decode_settlement_adjustment(
     value: serde_json::Value,
 ) -> Result<SettlementAdjustment, ApplicationError> {
-    let serde_json::Value::Object(fields) = value else {
+    let serde_json::Value::Object(mut fields) = value else {
         return if value.is_null() {
             Ok(SettlementAdjustment { policy: None })
         } else {
@@ -420,12 +420,12 @@ fn decode_settlement_adjustment(
     if fields.keys().any(|key| key != "policy") {
         return Err(storage_error("结算 adjustment metadata 含未知字段"));
     }
-    let policy = match fields.get("policy") {
+    let policy = match fields.remove("policy") {
         None | Some(serde_json::Value::Null) => None,
         Some(serde_json::Value::String(policy))
             if !policy.is_empty() && policy == policy.trim() =>
         {
-            Some(policy.clone())
+            Some(policy)
         }
         Some(_) => return Err(storage_error("结算 adjustment policy 无效")),
     };

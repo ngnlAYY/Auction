@@ -60,13 +60,14 @@ pub(crate) fn bid_log() -> Element {
         if world != &world_filter() {
             return;
         }
+        let selected = selected_auction_id();
         let next_auction_id = auction_list
             .iter()
-            .find(|auction| auction.id == selected_auction_id())
+            .find(|auction| auction.id == selected)
             .or_else(|| auction_list.first())
             .map(|auction| auction.id.clone());
         let next_auction_id = next_auction_id.unwrap_or_default();
-        if selected_auction_id() != next_auction_id {
+        if selected != next_auction_id {
             update_public_query_state(
                 query_state_signal,
                 |query| {
@@ -101,12 +102,13 @@ pub(crate) fn bid_log() -> Element {
         }
     });
     use_bid_refresh(bid_log, true);
-    let auction_options = match &*auctions.read_unchecked() {
-        Some((world, Ok(auction_list))) if world == &world_filter() => auction_list.clone(),
-        _ => Vec::new(),
+    let auction_snapshot = auctions.read_unchecked();
+    let auction_options = match &*auction_snapshot {
+        Some((world, Ok(auction_list))) if world == &world_filter() => auction_list.as_slice(),
+        _ => &[],
     };
-    let selected_auction =
-        auction_options.iter().find(|auction| auction.id == selected_auction_id()).cloned();
+    let selected = selected_auction_id();
+    let selected_auction = auction_options.iter().find(|auction| auction.id == selected);
     let current_page = page_number();
     let current_lot_filter = lot_filter();
     let on_lot_filter_change = use_callback(move |value: String| {
@@ -221,8 +223,8 @@ pub(crate) fn bid_log() -> Element {
                                 QueryWriteMode::Push,
                             );
                         },
-                        for world in world_options.clone() {
-                            option { value: world.clone(), {world_label(&world)} }
+                        for world in &world_options {
+                            option { value: world.clone(), {world_label(world)} }
                         }
                     }
                 }
@@ -230,7 +232,7 @@ pub(crate) fn bid_log() -> Element {
                     span { {t!("bidlog-round")} }
                     select {
                         id: "public-auction-bid-log-round",
-                        value: selected_auction_id(),
+                        value: selected,
                         disabled: auction_options.is_empty(),
                         onchange: move |event| {
                             let auction_id = event.value();
@@ -244,7 +246,7 @@ pub(crate) fn bid_log() -> Element {
                                 QueryWriteMode::Push,
                             );
                         },
-                        for auction in auction_options.clone() {
+                        for auction in auction_options {
                             option {
                                 value: auction.id.clone(),
                                 {t!("bidlog-round-option", number: auction.sequence,
@@ -271,6 +273,10 @@ pub(crate) fn bid_log() -> Element {
                 label { r#for: "public-auction-bid-log-filter", {t!("bidlog-filter-label")} }
                 input {
                     id: "public-auction-bid-log-filter",
+                    r#type: "search",
+                    enterkeyhint: "search",
+                    autocapitalize: "none",
+                    spellcheck: "false",
                     value: current_lot_filter.clone(),
                     placeholder: t!("bidlog-filter-placeholder"),
                     oninput: move |event| on_lot_filter_change.call(event.value()),
@@ -313,7 +319,7 @@ pub(crate) fn BidLogTable(
             } else {
             div { class: "public-auction-bid-log-table-wrap",
                 table {
-                    class: "public-auction-bid-log-table ui-table--responsive",
+                    class: "public-auction-bid-log-table",
                     caption { class: "public-visually-hidden", {t!("page-bidlog-title")} }
                     auction_web_shared::TableColumns { layout: "public-bid-log", widths: vec![30, 12, 40, 18] }
                     thead {

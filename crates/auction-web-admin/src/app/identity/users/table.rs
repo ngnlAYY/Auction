@@ -77,6 +77,7 @@ pub(super) fn AdminUserTable(
         }
         div { class: "admin-users-table-wrap",
             table { class: "admin-users-table",
+                caption { class: "admin-visually-hidden", {t!("page-users-title")} }
                 // 列序：名称、论坛 ID、状态、封禁理由、次数、注册时间、操作；为四个操作按钮预留同排空间。
                 auction_web_shared::TableColumns { layout: "admin-users", widths: vec![12, 10, 6, 14, 5, 13, 40] }
                 thead { tr {
@@ -87,7 +88,7 @@ pub(super) fn AdminUserTable(
                         direction,
                         on_sort: on_sort_change,
                     }
-                    th { {t!("admin-users-forum-account-id")} }
+                    th { scope: "col", {t!("admin-users-forum-account-id")} }
                     SortableTh {
                         column: "status",
                         label: t!("admin-users-status"),
@@ -95,7 +96,7 @@ pub(super) fn AdminUserTable(
                         direction,
                         on_sort: on_sort_change,
                     }
-                    th { {t!("admin-users-blacklist-history")} }
+                    th { scope: "col", {t!("admin-users-blacklist-history")} }
                     SortableTh {
                         column: "blacklist_count",
                         label: t!("admin-users-blacklist-count"),
@@ -110,7 +111,7 @@ pub(super) fn AdminUserTable(
                         direction,
                         on_sort: on_sort_change,
                     }
-                    th { {t!("admin-users-actions")} }
+                    th { scope: "col", {t!("admin-users-actions")} }
                 } }
                 tbody {
                     for user in users {

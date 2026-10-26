@@ -71,10 +71,11 @@ impl MoogleMailDeliveryTransport {
             )
         })?;
         let result = self.sender.send_prepared(prepared.session.cookie(), request, baseline).await;
-        // 写后明确失效也要撤下当前凭据；只做失效回写，不轮换或重发。
-        if result
-            .as_ref()
-            .is_err_and(|error| error.category == MoogleMailErrorCategory::SessionExpired)
+        // 诊断 GET 的失效同样撤销凭据，但保留原投递结果；不轮换或重发。
+        if !prepared.session.cookie().is_active()
+            || result
+                .as_ref()
+                .is_err_and(|error| error.category == MoogleMailErrorCategory::SessionExpired)
         {
             let _ = prepared.session.invalidate_current().await;
         }

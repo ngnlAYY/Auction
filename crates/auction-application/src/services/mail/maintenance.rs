@@ -168,10 +168,17 @@ impl MailboxMaintenanceService {
         candidates: &[MoogleMailboxSweepCandidate],
         deadline: Instant,
     ) -> Result<(usize, usize, usize, usize, usize, Option<String>, usize), ApplicationError> {
-        // Sent 故障不阻止其他页面观察；已开始的 take 可独立读取，但不能跳过未核对的 Send。
-        let (entries, mut state_error) = match self.maintenance.sent_entries(world_id).await {
-            Ok(entries) => (Some(entries), None),
-            Err(error) => (None, Some(error.to_string())),
+        // 只有可重建的 Send 候选才读取 Sent；Take 与纯游标轮转不依赖该列表。
+        let needs_sent = candidates
+            .iter()
+            .any(|slot| slot.send.as_ref().is_some_and(|candidate| candidate.operation == "send"));
+        let (entries, mut state_error) = if needs_sent {
+            match self.maintenance.sent_entries(world_id).await {
+                Ok(entries) => (Some(entries), None),
+                Err(error) => (None, Some(error.to_string())),
+            }
+        } else {
+            (None, None)
         };
         // 按已读取的稳定环形批次逐条开始；候选批次本身不推进持久游标。
         let mut recovery_budget = RECOVERY_PER_SWEEP;

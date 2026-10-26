@@ -54,6 +54,8 @@ pub(super) async fn validate(
     {
         return Err(FundingError::Unproven);
     }
+    let prepare_digest = c.prepare_request_hash.map(|hash| hash.as_bytes());
+    let activate_digest = c.activate_request_hash.map(|hash| hash.as_bytes());
     let valid: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM public.settlement_obligations o
          JOIN public.settlement_obligation_fulfillments f ON f.obligation_id=o.id
@@ -86,8 +88,8 @@ pub(super) async fn validate(
         .bind(&c.recipient).bind(c.prepare_command_id.map(|id| id.as_uuid()))
         .bind(c.activate_command_id.map(|id| id.as_uuid())).bind(c.submission_id.map(|id| id.as_uuid()))
         .bind(c.lease_until)
-        .bind(c.prepare_request_hash.map(|h| h.as_bytes().to_vec()))
-        .bind(c.activate_request_hash.map(|h| h.as_bytes().to_vec()))
+        .bind(prepare_digest.as_ref().map(|value| value.as_slice()))
+        .bind(activate_digest.as_ref().map(|value| value.as_slice()))
         .fetch_one(&mut **tx).await.map_err(sql_error)?;
     if !valid {
         return Err(FundingError::Conflict);

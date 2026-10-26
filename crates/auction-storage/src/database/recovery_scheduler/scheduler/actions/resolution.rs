@@ -48,10 +48,10 @@ impl RecoveryTerminalState {
         }
     }
 
-    fn proof(&self) -> Option<(&str, &str, [u8; 32], DateTime<Utc>)> {
+    fn proof(&self) -> Option<(&str, &str, &[u8], DateTime<Utc>)> {
         match self {
             Self::Satisfied { proof_kind, proof_reference, proof_digest, proof_observed_at } => {
-                Some((proof_kind, proof_reference, *proof_digest, *proof_observed_at))
+                Some((proof_kind, proof_reference, proof_digest.as_slice(), *proof_observed_at))
             }
             Self::Failed { .. } | Self::ManualReconcile { .. } => None,
         }
@@ -183,7 +183,7 @@ pub(super) async fn complete_action_in_transaction(
     let (proof_kind, proof_reference, proof_digest, proof_observed_at) = terminal.proof().map_or(
         (None, None, None, None),
         |(kind, reference, digest, observed_at)| {
-            (Some(kind), Some(reference), Some(digest.to_vec()), Some(observed_at))
+            (Some(kind), Some(reference), Some(digest), Some(observed_at))
         },
     );
     let updated = sqlx::query(
@@ -214,7 +214,7 @@ pub(super) async fn complete_action_in_transaction(
     .bind(terminal.failure_code())
     .bind(proof_kind)
     .bind(proof_reference)
-    .bind(proof_digest.clone())
+    .bind(proof_digest)
     .bind(proof_observed_at)
     .bind(claim.action_id.as_uuid())
     .bind(claim.recovery_id.as_uuid())

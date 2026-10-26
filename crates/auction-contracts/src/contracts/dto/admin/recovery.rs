@@ -1,5 +1,6 @@
 //! recovery 相关 DTO。
 
+use super::super::shared::{deserialize_null_default, deserialize_required_option};
 use super::*;
 
 /// Admin recovery 确认请求；`expected_state_version` 是报告快照中的版本 fence。
@@ -97,22 +98,4 @@ pub struct AdminRecoveryResponse {
 pub struct AdminRecoveryReportResponse {
     pub auction_id: String,
     pub recoveries: Vec<AdminRecoveryResponse>,
-}
-
-/// `Option` 默认会把缺失字段折叠成 `None`；旧 v1 decoder 要求 nullable 字段必须显式出现。
-fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
-}
-
-/// 兼容 Go `encoding/json` 对 struct 标量 `null` 的处理：映射为该类型零值，交给业务校验。
-fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de> + Default,
-{
-    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }

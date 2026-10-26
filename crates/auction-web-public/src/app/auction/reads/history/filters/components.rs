@@ -207,6 +207,7 @@ pub(crate) fn PriceHistoryFilters(
                                 onclick: move |_| on_reset.call(()),
                                 {t!("history-filter-clear")}
                             }
+                            crate::app::surface::presentation::mobile::HistoryApply {}
                         }
                     }
             }

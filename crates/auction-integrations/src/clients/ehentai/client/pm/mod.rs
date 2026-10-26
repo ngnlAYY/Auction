@@ -127,7 +127,7 @@ impl EhentaiClient {
         cookie: &EhentaiCookie,
     ) -> Result<String, ForumPmError> {
         self.wait_rate(EhentaiOperation::CheckSession).await.map_err(map_error)?;
-        self.check_ownership().await.map_err(|_| ForumPmError::Unavailable)?;
+        self.check_ownership(cookie).await.map_err(|_| ForumPmError::Unavailable)?;
         let response = self
             .pm_client
             .as_ref()
@@ -161,12 +161,15 @@ impl EhentaiClient {
         if !status.is_success() || location.is_some() || !html {
             return Err(ForumPmError::Protocol);
         }
+        if !cookie.is_active() {
+            return Err(ForumPmError::Unavailable);
+        }
         String::from_utf8(body).map_err(|_| ForumPmError::Protocol)
     }
 
     async fn submit_pm(&self, form: &PmForm, cookie: &EhentaiCookie) -> Result<(), ForumPmError> {
         self.wait_rate(EhentaiOperation::CheckSession).await.map_err(map_error)?;
-        self.check_ownership().await.map_err(|_| ForumPmError::Unavailable)?;
+        self.check_ownership(cookie).await.map_err(|_| ForumPmError::Unavailable)?;
         // 复用已有 URL 编码器，不为 PM 额外开启 reqwest feature。
         let encoded = url::form_urlencoded::Serializer::new(String::new())
             .extend_pairs(form.values.iter().map(|(name, value)| (name.as_str(), value.as_str())))

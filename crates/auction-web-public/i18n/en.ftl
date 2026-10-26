@@ -389,6 +389,7 @@ account-login-required = Log in with your bidder key to see your bids and proxie
 account-login-cta = Log in
 account-no-bids = You have not placed any bids yet.
 account-no-proxies = No active proxy bids.
+account-section-navigation = Account sections
 account-watches-title = Marked equipment in current auctions
 account-watches-loading = Loading current auction marks…
 account-watches-error = Could not load the complete marked equipment list. Try again.

@@ -1,5 +1,6 @@
 //! settlement 相关 DTO。
 
+use super::super::shared::deserialize_required_option;
 use super::*;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -79,15 +80,6 @@ pub struct AdminAuctionResponse {
     pub lot_count: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
-}
-
-/// `Option` 默认会把缺失字段折叠成 `None`；旧 v1 decoder 要求 nullable 字段必须显式出现。
-fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
 }
 
 /// 旧 wire 的兼容扩展字段：允许缺失，但一旦出现就不接受 JSON `null`。

@@ -76,7 +76,7 @@ pub(crate) async fn enqueue_in_transaction(
     )
     .bind(delivery_id)
     .bind(command.command_id.as_uuid())
-    .bind(command.request_hash.as_bytes().to_vec())
+    .bind(command.request_hash.as_bytes().as_slice())
     .bind(command.origin.as_str())
     .bind(&command.origin_id)
     .bind(&command.recipient)

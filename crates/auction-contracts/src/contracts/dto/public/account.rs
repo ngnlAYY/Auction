@@ -1,5 +1,6 @@
 //! account 相关 DTO。
 
+use super::super::shared::deserialize_required_option;
 use super::*;
 
 /// Public 普通竞价成功后的稳定结果。
@@ -217,14 +218,6 @@ pub struct PublicSetSessionPreferenceRequest {
     #[serde(deserialize_with = "deserialize_required_option")]
     pub duration_seconds: Option<i64>,
     pub expected_version: i64,
-}
-
-fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
 }
 
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；服务端两条路径都只
