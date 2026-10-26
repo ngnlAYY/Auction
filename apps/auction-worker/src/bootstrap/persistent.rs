@@ -59,13 +59,12 @@ pub(super) async fn run_worker(
     let lifecycle: Arc<dyn AuctionLifecycleCommandPort> =
         Arc::new(DatabaseAuctionLifecycleCommands::new(
             lifecycle_store,
-            Arc::new(SystemClock),
             AuctionLifecyclePolicy::default(),
             config.auction.policy()?,
         ));
     let slow_proxy_due: Arc<dyn SlowProxyDueReader> = store.clone();
     let slow_proxy_commands: Arc<dyn SlowProxyCommandPort> =
-        Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
+        Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store)));
     let (forum_sync, forum_reply, forum_pm, forum_profile_reader, forum_runtime_ownership) =
         configure_forum(config, Arc::clone(&store), config.worker.mooglemail.enabled).await?;
     let mail_progress = auction_jobs::MailPollProgressTracker::default();
@@ -257,7 +256,18 @@ pub(super) async fn run_worker(
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "worker heartbeat ready publish failed");
     }
-    let mut heartbeat_task = Some(TaskGuard::new(spawn_heartbeat(Arc::clone(&heartbeat))));
+    // 装配等待可能跨过外层停止信号；不能先启动 PM 再让主循环补发 drain。
+    let mut shutdown = shutdown;
+    let stopping = tokio::select! {
+        biased;
+        () = &mut shutdown => true,
+        () = std::future::ready(()) => false,
+    };
+    if stopping {
+        control.mark_draining();
+    }
+    let mut heartbeat_task =
+        (!stopping).then(|| TaskGuard::new(spawn_heartbeat(Arc::clone(&heartbeat))));
     let poll_interval_seconds = config.worker_poll_interval_seconds();
     let lease_duration_seconds = poll_interval_seconds
         .checked_mul(3)
@@ -265,8 +275,8 @@ pub(super) async fn run_worker(
         .max(30);
     let auction_poll_interval = std::time::Duration::from_secs(poll_interval_seconds);
     let auction_lease_duration = std::time::Duration::from_secs(lease_duration_seconds);
-    let (pm_drain, pm_receiver) = tokio::sync::watch::channel(false);
-    let mut pm_task = forum_pm.map(|runtime| {
+    let (pm_drain, pm_receiver) = tokio::sync::watch::channel(stopping);
+    let mut pm_task = forum_pm.filter(|_| !stopping).map(|runtime| {
         let worker_id = worker_id.clone();
         let task_exit =
             WorkerRuntimeTaskExit::new(control.clone(), runtime_failure, "lot_watch_pm_stopped");
@@ -277,7 +287,9 @@ pub(super) async fn run_worker(
     });
     // 主 shutdown 一经触发即停止 PM 新领取，不等其他循环排空完成。
     let shutdown = async {
-        shutdown.await;
+        if !stopping {
+            shutdown.await;
+        }
         pm_drain.send_replace(true);
     };
     let result = auction_jobs::run_persistent_with_settlement_until_shutdown(

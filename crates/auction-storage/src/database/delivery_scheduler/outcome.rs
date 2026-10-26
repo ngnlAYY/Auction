@@ -228,7 +228,7 @@ async fn persist_once(
     .bind(claim.lease_token)
     .bind(claim.fencing_version)
     .bind(claim.command_id)
-    .bind(claim.request_hash.as_bytes().to_vec())
+    .bind(claim.request_hash.as_bytes().as_slice())
     .bind(&claim.origin_kind)
     .bind(&claim.origin_id)
     .bind(&claim.recipient)

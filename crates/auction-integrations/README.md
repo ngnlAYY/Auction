@@ -38,6 +38,7 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
   恢复已读但尚未提交的无附件命令。旧摘要显示名仅保留快照兼容，不重写旧记录、不重置 cursor；
   journal 不可用时返回 `persistence_unavailable` 并停止详情读取，摘要结构或 world 无效时失败关闭。
   已登记 MID 不在 Inbox 时，通过 Read Mail 列表与原身份定位；历史已读邮件不成为新入站命令。
+  恢复窗口只为本批 pending 建立借用索引，Inbox/Read Mail 各线性遍历一次；不为每个 MID 重扫整箱，也不丢弃两表均缺失的待读项。
   多附件的独立领取按钮不按数量拒绝；装备 key 只采信附件 ID 对应的严格证据，正文其它装备链接即使畸形也不参与校验，
   Unicode 正文不得触发字节切片 panic。脚本装备字段预筛选按每个附件 ID 扫描一次，不随左花括号数量重复扫描尾部；
   预筛选不替代严格 JSON、重复字段及正文/脚本一致性校验。
@@ -61,6 +62,7 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
 - 装备发送准备：`sender/equipment.rs` 在 sending fence 后、暂存任何资产前，按完整七类 Armory 库存核对本次装备，
   按需移出仓库并解除保护／锁定；`parser/reads/inventory/` 绑定原生 EID、显示名、状态及短期 token，
   与内部履约的正向库存读取共用页面证明。外写后必须回读，不自动卸装、回滚或重试；
+  每行 checkbox ID 与 handler 直接借用剥离固定前后缀后精确比较，不为全库存逐行构造期望字符串。
   协议字段与故障处理见[附件装备状态准备](ops/mail/diagnostics.md#附件装备状态准备)。
 - Return / Take：写前核对 sender 与预期资产；Return 只接受身份、正文及全部资产精确匹配的 `[RTS]` 回执，
   不再把未读 Inbox 中目标 MID 缺席当作成功（详情 GET 本身会标记已读）；缺少回执保持 `outcome_unknown`，不自动重寄。
@@ -103,11 +105,14 @@ Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；写
 旧无冻结摘要的 Send 只保留可证明的历史 reference/无密钥通知恢复；不能用当前登录 key 猜测原正文。
 歧义候选、竞争发送尝试、缺页、凭据不符或资产已变化仍保留人工核对，不授权重寄。
 明确发送拒绝只采信唯一系统提示区的可见文本，附件/正文诱饵不能跳过 Sent 核对。
-写后明确登录失效也触发当前凭据失效处理，但保留未知写入与原证据，不换号、不重发。
+写后 Sent 或最终 compose 核对的明确登录失效保留原类别、原加密证据并撤销当前凭据，不能被通用 `write_unknown`
+掩盖；发送 POST 响应仍独立留证。已明确失效时不再追加诊断 GET；诊断 GET 首次发现失效则同步撤销，并由原 session
+回写失效状态，不覆盖原投递结果、不换号、不重发。
 
 入站 envelope 摘要与加密诊断恢复都按附件 ID 排序借用后直接散列，不复制 key 或逐件重新查找；
 保留原 `mooglemail-envelope-v1` 字段顺序、长度编码及 key 字节，不改变合法历史证据认证结果。
 Sent 正文摘要复用换行规范化的分配后截短尾部空白，不再生成额外的正文副本。
+脚本正文直接追加各文本片段，不为每个 `<script>` 另建中间字符串；遮罩、重复赋值与 JSON 严格校验不变。
 读写页面共用空白、附件 ID、Credits 与正文校验辅助；空白规范化直接写输出，不建立按词数增长的切片数组，
 唯一回执匹配最多检查两个命中。
 
@@ -137,7 +142,9 @@ Worker 配置数据库凭据能力后读取唯一 active Cookie 并解密，暂�
 每次物理请求仍检查 owner。无世界目标的账号资料读取不伪造世界限制，所有路径复用同一 Cookie、连接池和限速器。
 论坛及装备读取直接消费唯一候选；失效回写后结束当前操作，不保留无效轮换循环或为重试复制完整正文。
 普通邮箱、维护及只读 Sent lookup 都只尝试当前唯一 Cookie，明确失效后撤销并返回，不维护轮换或重复尝试循环。
-完成 owner 复核和失效回写共用原绝对截止；Sent 预算无法表示为截止时返回 `Configuration`，不因时间加法 panic。
+Inbox 的完成 owner 复核、已知 MID Sent 与余额读取的会话取得/失效回写均受同一配置绝对截止约束；
+同步解析、缓存立即就绪及列表投影完成后再核对截止，不能仅靠 `timeout_at` 拒绝逾期结果。维护 Sent/Read Mail 扫描、
+附件检查及单封 Sent 核对也遵守原验证预算。Sent 预算无法表示为截止时返回 `Configuration`，不因时间加法 panic。
 
 论坛完整主题额外最多四路分页读取，共享请求间隔与 32 MiB 聚合上限，作者身份只采信系统作者链接；目录续页增加顺序
 POST、布局回读及可选正文校验成本，配置预算校验只是单目录页下界。大场次需提高既有 `item_timeout_seconds`/
@@ -226,9 +233,9 @@ Cookie、装备 key 和用户登录 key 的指纹采用既有域字节分块 HMA
 装备、Cookie、用户登录 key 与邮件诊断归档的加密缓冲一次预留认证标签容量，避免追加标签时再次扩容复制密文。
 AES-256-GCM、AAD、nonce、指纹域及十六进制编码保持原格式，不迁移或重写历史信封。
 装备信封的只读字段改为借用，nonce 转为栈数组；仅原地解密复制必要的可变密文缓冲，原信封不变。
-运行时的 `EhentaiCookie`、`MoogleMailCookie`、`MoogleMailToken` 与 `MoogleMailEquipmentKey`
-销毁时尽力清理当前缓冲；MoogleMail 表单逐值覆写，而非仅缩短 `String` 长度。Cookie 构造不再
-无条件另建裁剪副本，确需裁剪时清理原值；会话建立/失效处理不再额外复制整个候选，附件 key 从解析表直接移交。
+运行时的 `EhentaiCookie` 与 `MoogleMailCookie` 克隆共享明文缓冲和不可逆撤销位，最后一个引用释放时尽力清理；
+`MoogleMailToken` 与 `MoogleMailEquipmentKey` 销毁时同样清理当前缓冲。MoogleMail 表单逐值覆写，而非仅缩短
+`String` 长度。Cookie 构造不无条件另建裁剪副本，确需裁剪时清理原值；附件 key 从解析表直接移交。
 这不承诺清理 HTTP/DOM 库内部或分配器曾产生的副本，也不改变凭据失效、owner 或未知写入策略。
 
 装备分类、品质、完整种类和名称识别统一来自
@@ -263,6 +270,8 @@ HTML 来源要求唯一 header、存在 `.eq` 属性区域且至少读取到一�
 Worker 凭据 owner 随集合传给 gateway、克隆客户端、发送器和分页上下文，装备来源也共用 MoogleMail owner；
 每个物理请求在限速后、发送前以有界检查核验原持锁 session，失锁永久停用，GET 返回不可用、POST 保守归为未知。
 该边界不能撤回已发请求，也不能把本地检查与远端写入原子化。
+论坛凭据在持久失效回写前同步撤销所有克隆；已准备 PM、分页和发帖会话在 owner 检查前后及构造 Cookie header 时
+拒绝该凭据，普通 GET/PM GET 完成后也复核撤销位。撤销不能撤回已发送请求，既有写后未知边界不变。
 [联合证据 gateway](crates/auction-integrations/src/clients/mooglemail/gateway/internal.rs) 从同一独占 session 读取
 Character Equipment 的唯一 `let uid`、[论坛目标资料](crates/auction-integrations/src/clients/ehentai/client/profile.rs)
 的完整名称和精确目标 MID，两站 Cookie 互不传递；论坛只读能力复用安全池、gate 与 owner，预期名称有值精确比较、
@@ -272,6 +281,7 @@ session 的既有列表/详情解析，精确匹配 MID/world/收件人/主题�
 organize 表单省略或留空 `action` 时按当前固定 world/category 请求 URL 解析；显式地址仍须同源、同 world 且四项 query 完全匹配。
 准备、限速、所有 GET/body 和提交共享不超过 30 秒的绝对预算并保留一秒提交余量；内部提交只接受数据库 active
 ID/version 与持久 generation，配置 Cookie 或旧 owner 明确 Unsupported。
+内部租约的 owner 检查前后均复核原绝对截止；即使检查 future 立即完成，也不能接受已过期租约。
 `record_only` 由应用从持久账户策略决定是否请求现金，transport 在原 session 中保留身份和发送授权，但不读取余额。
 联合证据失败仅记录闭集阶段和错误类别；论坛目标资料另记录结构阶段及目标 MID 数量，不记录 UID、整页、URL 或凭据。
 

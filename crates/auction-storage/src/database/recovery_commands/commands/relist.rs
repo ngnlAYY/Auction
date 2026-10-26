@@ -252,7 +252,7 @@ pub(super) async fn insert_recovery_command(
     .bind(command.recovery_id.as_uuid())
     .bind(command.expected_state_version)
     .bind(command.action.as_str())
-    .bind(command.request_hash.as_bytes().to_vec())
+    .bind(command.request_hash.as_bytes().as_slice())
     .bind(payload)
     .bind(now)
     .execute(&mut **transaction)

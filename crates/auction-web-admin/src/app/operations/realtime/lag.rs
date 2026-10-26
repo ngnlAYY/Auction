@@ -23,19 +23,20 @@ pub(super) fn RealtimeLagTable(page: RealtimeLagPage) -> Element {
         } else {
             div { class: "admin-shell__table-wrap",
                 table { class: "admin-shell__table admin-realtime-table",
+                    caption { class: "admin-visually-hidden", {t!("realtime-lag-title")} }
                     auction_web_shared::TableColumns { layout: "admin-realtime-lag", widths: vec![22, 45, 11, 12, 10] }
                     thead {
                         tr {
-                            th { {t!("realtime-consumer")} }
-                            th { {t!("realtime-stream")} }
-                            th { {t!("realtime-offset")} }
-                            th { {t!("realtime-latest-sequence")} }
-                            th { {t!("realtime-lag")} }
+                            th { scope: "col", {t!("realtime-consumer")} }
+                            th { scope: "col", {t!("realtime-stream")} }
+                            th { scope: "col", {t!("realtime-offset")} }
+                            th { scope: "col", {t!("realtime-latest-sequence")} }
+                            th { scope: "col", {t!("realtime-lag")} }
                         }
                     }
                     tbody {
                         for lag in page.lags {
-                            tr { class: "admin-realtime__row",
+                            tr { key: "{lag.consumer_key.len()}:{lag.consumer_key}{lag.stream_key}", class: "admin-realtime__row",
                                 td { "data-label": t!("realtime-consumer"), TruncatedText { value: lag.consumer_key } }
                                 td { "data-label": t!("realtime-stream"), TruncatedText { value: lag.stream_key } }
                                 td {

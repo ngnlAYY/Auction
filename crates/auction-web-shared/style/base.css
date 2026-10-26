@@ -1,13 +1,13 @@
 /*
  * base.css —— 全站共享设计地基（token / reset / 通用组件）。
  *
- * 断点契约：纯 CSS 无法在 @media 中使用 var()，故断点不定义为 token，
- * 仅以本注释作为契约。全仓 @media 断点只允许以下三档：
- *   --bp-sm: 48rem   小屏（手机）
- *   --bp-md: 64rem   中屏（平板 / 窄桌面）
- *   --bp-lg: 75rem   大屏（宽桌面）
- * 新增断点前必须先修订本契约，禁止引入第四档。
+ * 基础断点为 48rem（手机）、64rem（平板）和 75rem（窄桌面布局）。
+ * Admin 仪表盘沿用 100rem 三栏阈值，由其 desktop.css 单独维护。
+ * @media 不能引用 CSS 变量；新增设备断点须同步所属 surface 设计。
  */
+@layer foundation, surface, desktop, mobile;
+
+@layer foundation {
 :root {
   color-scheme: dark;
   --color-bg: #0e1116;
@@ -20,7 +20,7 @@
   --color-accent: #d9a441;
   --color-accent-contrast: #14100a;
   --color-live: #3fb96f;
-  /* 语义化成功色：与 --color-live 同源同值；--color-live 保留以向后兼容，新代码优先用 --color-success。 */
+  /* 通用成功状态与 live 状态同色，调用方按语义选用。 */
   --color-success: var(--color-live);
   --color-warning: #d9a441;
   --color-danger: #e05555;
@@ -46,7 +46,7 @@
   --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
   --shadow-2: 0 4px 12px rgb(0 0 0 / 45%);
   --shadow-surface: var(--shadow-2);
-  /* z-index 阶梯：popover(20) < float(40) < dialog(100)，全仓只允许这三级。 */
+  /* 浮层变量层级：popover(20) < float(40) < dialog(100)。 */
   --z-popover: 20;
   --z-float: 40;
   --z-dialog: 100;
@@ -347,20 +347,6 @@ button:disabled {
   transform: translateY(-100%);
 }
 
-@media (max-width: 48rem), (max-width: 64rem) and (pointer: coarse) {
-  body {
-    font-size: 1rem;
-  }
-
-  /* 保持编辑字段为 16px；优先级覆盖两端紧凑筛选器的字号继承。 */
-  html body :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]) {
-    font-size: 1rem;
-  }
-
-  html body :is(input, select):not([type="checkbox"]):not([type="radio"]) {
-    min-block-size: var(--size-target);
-  }
-}
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -431,21 +417,6 @@ button:disabled {
   inline-size: 5rem;
 }
 
-@media (max-width: 48rem) {
-  .ui-pager,
-  .ui-pager__jump {
-    align-items: stretch;
-  }
-
-  .ui-pager__controls,
-  .ui-pager__jump {
-    inline-size: 100%;
-  }
-
-  .ui-pager__controls {
-    justify-content: space-between;
-  }
-}
 
 /* 数字分页按调用方显式启用；未接入页面继续使用原布局。 */
 .ui-pager--numbered {
@@ -528,17 +499,10 @@ button:disabled {
   white-space: nowrap;
 }
 
-@media (max-width: 48rem) {
-  .ui-pager--numbered {
-    justify-content: flex-start;
-  }
-}
 
-/* ===== 异步状态面板（AsyncState 组件 / 旧 EmptyState 兼容类） ===== */
-/* .ui-empty-state* 作为兼容别名与 .ui-async-state* 共享同一组规则。 */
+/* ===== 异步状态面板 ===== */
 
-.ui-async-state,
-.ui-empty-state {
+.ui-async-state {
   position: relative;
   padding: var(--space-6) var(--space-5);
   border: var(--border-width) dashed var(--color-border);
@@ -547,27 +511,17 @@ button:disabled {
   text-align: center;
 }
 
-.ui-async-state__title,
-.ui-empty-state__title {
+.ui-async-state__title {
   margin: 0;
   font-size: var(--text-lg);
 }
 
-.ui-async-state__detail,
-.ui-empty-state__hint {
+.ui-async-state__detail {
   margin: var(--space-2) 0 0;
   color: var(--color-text-muted);
 }
 
-.ui-empty-state__detail {
-  display: block;
-  margin-block-start: var(--space-2);
-  color: var(--color-text-muted);
-  overflow-wrap: anywhere;
-}
-
-.ui-async-state__retry,
-.ui-empty-state__retry {
+.ui-async-state__retry {
   min-block-size: var(--size-target);
   margin-block-start: var(--space-4);
   padding: var(--space-2) var(--space-4);
@@ -578,15 +532,12 @@ button:disabled {
   font-weight: var(--font-weight-strong);
 }
 
-.ui-async-state__retry:focus-visible,
-.ui-empty-state__retry:focus-visible {
+.ui-async-state__retry:focus-visible {
   border-color: var(--color-link);
 }
 
 /* ===== 全站百分比表格契约 ===== */
-/* 表格占满容器；各业务表按预计内容独立定义百分比列宽，Markdown 按典型内容长度分配。
-   窄屏保留表头和行结构；数据截断与悬浮说明替代横向滚动或卡片化。
-   ui-table--responsive 保留为兼容类名，不再改变 table 的结构。 */
+/* 表格占满容器；列宽归业务组件，窄屏保留表头和行结构，通过完整文本提示查看截断内容。 */
 table {
   inline-size: 100%;
   min-inline-size: 0;
@@ -715,49 +666,6 @@ table {
   }
 }
 
-/* 移动形态（sheet 变体）：`.ui-dialog--sheet` 为显式 opt-in 修饰类（加在遮罩根上，
-   任意断点强制抽屉形态）；同时 bp-sm（48rem）以下通过媒体查询对所有 `.ui-dialog`
-   以及 bp-md（64rem）以下触控横屏自动生效，上口圆角、宽度撑满，
-   最大高度约束在可见视口 85%，为键盘和系统安全区保留空间。组件无需感知断点。 */
-
-.ui-dialog--sheet {
-  padding: 0;
-  align-items: end;
-  justify-items: stretch;
-}
-
-.ui-dialog--sheet .ui-dialog__panel {
-  inline-size: 100%;
-  max-block-size: min(calc(var(--visual-viewport-height) * 0.85), calc(var(--visual-viewport-height) - var(--safe-area-top)));
-  padding: var(--space-4)
-    max(var(--space-4), var(--safe-area-right))
-    max(var(--space-4), var(--safe-area-bottom))
-    max(var(--space-4), var(--safe-area-left));
-  border-block-end: none;
-  border-inline: none;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-}
-
-@media (max-width: 48rem), (max-width: 64rem) and (pointer: coarse) {
-  .ui-dialog {
-    padding: 0;
-    align-items: end;
-    justify-items: stretch;
-  }
-
-  .ui-dialog__panel {
-    inline-size: 100%;
-    max-block-size: min(calc(var(--visual-viewport-height) * 0.85), calc(var(--visual-viewport-height) - var(--safe-area-top)));
-    padding: var(--space-4)
-      max(var(--space-4), var(--safe-area-right))
-      max(var(--space-4), var(--safe-area-bottom))
-      max(var(--space-4), var(--safe-area-left));
-    border-block-end: none;
-    border-inline: none;
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  }
-}
-
 /* ===== 打印样式（@media print） ===== */
 /* 存证打印场景（规则 / 黑名单 / 补偿流水）：整体切换浅色纸面配色（覆盖 dark color-scheme，
    仅重写 token，组件无需改动）；隐藏弹窗与悬浮 tooltip；截断文本还原全文（存证需要完整
@@ -826,28 +734,5 @@ table {
     break-inside: avoid;
   }
 
-  /* 打印继续保留表头与行结构，兼容类名不产生 data-label 副本。 */
-  .ui-table--responsive {
-    display: table;
-  }
-
-  .ui-table--responsive thead {
-    display: table-header-group;
-  }
-
-  .ui-table--responsive tbody {
-    display: table-row-group;
-  }
-
-  .ui-table--responsive tr {
-    display: table-row;
-  }
-
-  .ui-table--responsive td {
-    display: table-cell;
-  }
-
-  .ui-table--responsive td::before {
-    content: none;
-  }
+}
 }

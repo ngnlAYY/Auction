@@ -151,23 +151,3 @@ impl MoogleMailSender {
         self.client.diagnose_parse(&target, &document, parsed).await
     }
 }
-
-/// 装备准备已写入后，后续读失败或 compose 写前失败都不能重新变成可安全重发。
-pub(super) fn preserve_write_unknown(
-    error: MoogleMailError,
-    equipment_write_started: bool,
-) -> MoogleMailError {
-    if !equipment_write_started {
-        return error;
-    }
-    let category = if error.category == MoogleMailErrorCategory::SessionExpired {
-        MoogleMailErrorCategory::SessionExpired
-    } else {
-        MoogleMailErrorCategory::WriteUnknown
-    };
-    let mut unknown = MoogleMailError::after_write(error.operation, error.world, category);
-    unknown.evidence_id = error.evidence_id;
-    unknown.evidence_status = error.evidence_status;
-    unknown.evidence_failure = error.evidence_failure;
-    unknown
-}

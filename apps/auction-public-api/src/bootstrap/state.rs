@@ -14,7 +14,7 @@ use anyhow::Context;
 use auction_application::ReadModelCache;
 #[cfg(feature = "postgres")]
 use auction_application::{
-    ApplicationError, ApplicationFuture, AuctionReader, CachedPublicRulesReader, Clock,
+    ApplicationError, ApplicationFuture, AuctionReader, CachedPublicRulesReader,
     CompetitionCommandPort, ProcessReadinessPort, PublicAccountReader, PublicBidLogReader,
     PublicBlacklistReader, PublicCompensationReader, PublicEquipmentLinkResolver,
     PublicEquipmentLinkSecretReader, PublicForumReader, PublicLoginAuthenticator, PublicLotReader,
@@ -38,15 +38,11 @@ use auction_observability::{
 #[cfg(feature = "postgres")]
 use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
 #[cfg(feature = "postgres")]
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 #[cfg(feature = "postgres")]
 use uuid::Uuid;
 
 use super::config;
-
-#[cfg(feature = "postgres")]
-#[derive(Clone, Copy)]
-struct SystemClock;
 
 #[cfg(feature = "postgres")]
 struct PublicRealtimeRelayHealth {
@@ -142,13 +138,6 @@ impl Drop for RealtimeRelayTaskHealthGuard {
 }
 
 #[cfg(feature = "postgres")]
-impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
-    }
-}
-
-#[cfg(feature = "postgres")]
 fn configure_equipment_links(
     config: &AppConfig,
     store: &Arc<DatabaseStore>,
@@ -236,7 +225,7 @@ pub(super) async fn configure_state(
     let realtime: Arc<dyn PublicRealtimeReader> = store.clone();
     let account: Arc<dyn PublicAccountReader> = store.clone();
     let commands: Arc<dyn CompetitionCommandPort> =
-        Arc::new(DatabaseCompetitionCommands::new(store.clone(), Arc::new(SystemClock)));
+        Arc::new(DatabaseCompetitionCommands::new(store.clone()));
     let authenticator: Arc<dyn PublicLoginAuthenticator> = store.clone();
     let session_store: Arc<dyn PublicSessionStore> = store.clone();
     let auction_config::RoleSessionConfig::Public(session_settings) = config.session else {

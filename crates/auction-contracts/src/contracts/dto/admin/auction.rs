@@ -1,5 +1,6 @@
 //! auction 相关 DTO。
 
+use super::super::shared::{deserialize_null_default, deserialize_required_option};
 use super::*;
 
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；wire 冻结后只收紧
@@ -43,25 +44,16 @@ pub struct AdminAuctionCommandResponse {
     pub updated_at: String,
 }
 
-/// `Option` 默认会把缺失字段折叠成 `None`；旧 v1 decoder 要求 nullable 字段必须显式出现。
-fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminCreateAuctionRequest {
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub command_id: String,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub auction_id: String,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub world_id: String,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub sequence: i64,
     #[serde(default)]
     pub preview_scheduled_at: Option<DateTime<Utc>>,
@@ -69,7 +61,7 @@ pub struct AdminCreateAuctionRequest {
     pub scheduled_open_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub scheduled_end_at: Option<DateTime<Utc>>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub expected_state_version: i64,
 }
 
@@ -81,7 +73,7 @@ pub struct AdminAuctionCreateResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUpdateAuctionScheduleRequest {
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub command_id: String,
     #[serde(default)]
     pub preview_scheduled_at: Option<DateTime<Utc>>,
@@ -89,7 +81,7 @@ pub struct AdminUpdateAuctionScheduleRequest {
     pub scheduled_open_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub scheduled_end_at: Option<DateTime<Utc>>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub expected_state_version: i64,
 }
 
@@ -105,7 +97,7 @@ pub struct AdminUpdateAuctionScheduleResponse {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminIntakeRequest {
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub command_id: String,
     #[serde(default)]
     pub source_kind: Option<String>,
@@ -113,9 +105,9 @@ pub struct AdminIntakeRequest {
     pub equipment_url: Option<String>,
     #[serde(default)]
     pub equipment: Option<AdminCanonicalEquipmentRequest>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub start_price: i64,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub player_id: String,
 }
 
@@ -211,14 +203,6 @@ impl Drop for AdminCanonicalEquipmentRequest {
             bytes.fill(0);
         }
     }
-}
-
-fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de> + Default,
-{
-    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// Admin 装备录入成功响应；字段与旧版 `addIntakeItem` 契约保持一致。nullable 的

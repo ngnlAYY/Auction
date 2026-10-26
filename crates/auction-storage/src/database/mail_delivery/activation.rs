@@ -52,7 +52,7 @@ pub(super) async fn activate_postgres(
             )
             .bind(activation.delivery_id)
             .bind(activation.activate_command_id.as_uuid())
-            .bind(activation.activate_request_hash.as_bytes().to_vec())
+            .bind(activation.activate_request_hash.as_bytes().as_slice())
             .bind(activation.activated_at)
             .execute(&mut *transaction)
             .await

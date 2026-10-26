@@ -111,8 +111,8 @@ anyhow = "1.0.104"
 # 只使用现有 GeneralPurpose 引擎；不为未调用的 SIMD 引擎开启默认 simd-unsafe。
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 libc = "0.2.190"
-# `now` 提供 `Utc::now()`；`clock` 还用于恢复旧版标准 cron 的进程本地时区语义。
-chrono = { version = "0.4.45", default-features = false, features = ["clock", "now", "serde", "std"] }
+# 共享图只需 UTC 时间；进程本地时区的 clock feature 由配置 owner 单独启用。
+chrono = { version = "0.4.45", default-features = false, features = ["now", "serde", "std"] }
 chrono-tz = "0.10.4"
 # 调度边界先规范化旧版五字段语法，仅启用现有 chrono 后端，不引入 jiff。
 croner = { version = "4.0.1", default-features = false, features = ["chrono"] }

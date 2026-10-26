@@ -1,5 +1,6 @@
 //! commands 相关 DTO。
 
+use super::super::shared::deserialize_null_default;
 use super::*;
 
 /// 浏览器用于即时反馈的 1B 出价上限；新命令仍由领域层校验，HTTP 编译门禁保证两者一致。
@@ -40,15 +41,6 @@ pub struct LowerProxyAuthorizationRequest {
     pub command_id: String,
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub maximum_amount: i64,
-}
-
-/// 复现 Go `encoding/json` 对非指针 scalar 的 `null`/缺失零值语义；错误类型仍严格拒绝。
-fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de> + Default,
-{
-    Option::<T>::deserialize(deserializer).map(Option::unwrap_or_default)
 }
 
 /// 状态命令的最小确认数据，供前端区分接受、重放和冲突。

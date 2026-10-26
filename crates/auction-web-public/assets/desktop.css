@@ -1,0 +1,191 @@
+@layer foundation, surface, desktop, mobile;
+
+@layer desktop {
+/* Public 桌面密度与设备视图；业务表格、颜色和组件基础样式由 public.css 拥有。 */
+@media screen and (width > 64rem) {
+  .public-auction-page {
+    gap: var(--space-2);
+  }
+
+  .public-auction-round {
+    gap: var(--space-1) var(--space-3);
+    margin-block-end: var(--space-3);
+  }
+
+  .public-auction-round__title {
+    gap: var(--space-2);
+  }
+
+  .public-auction-summary {
+    gap: var(--space-3);
+    padding: var(--space-3);
+  }
+
+  .public-auction-filter {
+    gap: var(--space-1);
+    margin-block-end: var(--space-3);
+  }
+
+  .public-auction-filter__tab {
+    gap: var(--space-1);
+    padding: calc(var(--space-1) / 2) var(--space-2);
+    font-size: var(--text-sm);
+  }
+
+  .public-auction-category {
+    margin-block-end: var(--space-4);
+  }
+
+  .public-auction-category__title {
+    margin-block-end: var(--space-2);
+    font-size: var(--text-base);
+  }
+
+  .public-auction-catalog table {
+    min-inline-size: 0;
+    table-layout: fixed;
+    font-size: var(--text-sm);
+  }
+
+  .public-auction-catalog th,
+  .public-auction-catalog td {
+    padding: var(--space-1) var(--space-2);
+  }
+
+  .public-auction-participant-identity__name {
+    max-inline-size: 10rem;
+  }
+
+  .public-auction-catalog__actions-list {
+    gap: var(--space-1);
+  }
+
+  .public-auction-catalog .public-auction-catalog__actions-list > a,
+  .public-auction-catalog .public-auction-catalog__actions-list > button {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .public-auction-catalog__leading-reason {
+    max-inline-size: 12rem;
+  }
+
+  .public-auction-catalog__actions-list > button {
+    min-block-size: 2rem;
+    padding: 0 var(--space-1);
+    font-size: var(--text-sm);
+  }
+
+  .public-auction-lot__back {
+    margin-block-end: var(--space-2);
+  }
+
+  .public-auction-lot__header {
+    gap: var(--space-2);
+    margin-block-end: var(--space-3);
+  }
+
+  .public-auction-lot__grid {
+    gap: var(--space-3);
+    margin-block-end: var(--space-4);
+  }
+
+  .public-auction-equipment,
+  .public-auction-lot__bidding {
+    padding: var(--space-3);
+  }
+
+  .public-auction-equipment h2,
+  .public-auction-lot__history h2 {
+    margin-block-end: var(--space-2);
+    font-size: var(--text-base);
+  }
+
+  .public-auction-lot__bidding dl {
+    gap: var(--space-1) var(--space-3);
+    margin-block-end: var(--space-3);
+  }
+
+  .public-auction-equipment__facts-list {
+    gap: var(--space-2);
+  }
+
+  .public-auction-equipment__facts {
+    margin-block-end: var(--space-2);
+  }
+
+  .public-auction-equipment__fact {
+    gap: var(--space-1);
+  }
+
+  .public-auction-equipment__link {
+    margin-block-start: var(--space-2);
+  }
+
+  .public-auction-equipment__stats,
+  .public-auction-lot__table table {
+    font-size: var(--text-sm);
+  }
+
+  .public-auction-equipment__stats th,
+  .public-auction-equipment__stats td,
+  .public-auction-lot__table th,
+  .public-auction-lot__table td {
+    padding: var(--space-1) var(--space-2);
+  }
+
+  .public-auction-bid-form,
+  .public-auction-bid-form form {
+    gap: var(--space-2);
+  }
+
+  .public-auction-bid-form {
+    margin-block-start: var(--space-3);
+  }
+
+  .public-auction-bid-form input[type="text"],
+  .public-auction-bid-form select,
+  .public-auction-bid-form button {
+    min-block-size: 2.25rem;
+  }
+
+  .public-auction-bid-form input[type="text"],
+  .public-auction-bid-form select {
+    padding: var(--space-1) var(--space-2);
+  }
+
+  .public-auction-bid-form button {
+    padding: var(--space-1) var(--space-3);
+  }
+
+  .public-auction-bid-form__actions {
+    gap: var(--space-2);
+    margin-block-start: var(--space-1);
+  }
+
+  .public-auction-bid-form fieldset {
+    padding: var(--space-2);
+  }
+
+  .public-auction-proxy-summary {
+    padding-block-start: var(--space-3);
+    margin-block-start: var(--space-3);
+  }
+
+  .public-auction-proxy-summary h2 {
+    margin-block-end: var(--space-2);
+    font-size: var(--text-base);
+  }
+}
+
+@media screen {
+  .public-account-navigation.public-desktop {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+  }
+}
+}

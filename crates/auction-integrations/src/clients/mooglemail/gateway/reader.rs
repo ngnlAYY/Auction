@@ -1,7 +1,7 @@
 //! MoogleMail 收件、Sent 和余额的有界读取流程。
 
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
 };
 
@@ -151,7 +151,12 @@ impl MoogleMailGateway {
         {
             Err(_) => Err(fetch_budget_exhausted(world)),
             Ok(Ok(page)) => {
-                session.check_current().await?;
+                tokio::time::timeout_at(deadline, session.check_current())
+                    .await
+                    .map_err(|_| fetch_budget_exhausted(world))??;
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(fetch_budget_exhausted(world));
+                }
                 Ok(page)
             }
             Ok(Err(error)) if error.category == MoogleMailErrorCategory::SessionExpired => {
@@ -178,21 +183,39 @@ impl MoogleMailGateway {
                 MoogleMailErrorCategory::Configuration,
             ));
         }
-        let mut session = self.credentials.begin_read(world, MoogleMailOperation::Sent).await?;
-        match self
-            .read_sent_with_cookie(world, external_mail_id, observed_at, session.cookie(), false)
-            .await
-        {
-            Ok(snapshot) => {
-                session.check_current().await?;
-                Ok(snapshot)
+        let deadline = tokio::time::Instant::now()
+            .checked_add(self.config.fetch_budget)
+            .ok_or_else(|| configuration(world))?;
+        let result = tokio::time::timeout_at(deadline, async {
+            let mut session = self.credentials.begin_read(world, MoogleMailOperation::Sent).await?;
+            match self
+                .read_sent_with_cookie(
+                    world,
+                    external_mail_id,
+                    observed_at,
+                    session.cookie(),
+                    false,
+                )
+                .await
+            {
+                Ok(snapshot) => {
+                    session.check_current().await?;
+                    Ok(snapshot)
+                }
+                Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
+                    session.invalidate_current().await?;
+                    Err(error)
+                }
+                Err(error) => Err(error),
             }
-            Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
-                session.invalidate_current().await?;
-                Err(error)
-            }
-            Err(error) => Err(error),
+        })
+        .await
+        .map_err(|_| fetch_budget_exhausted(world))?;
+        // timeout_at 不抢占同步解析，也可能直接接受已就绪的缓存结果。
+        if tokio::time::Instant::now() >= deadline {
+            return Err(fetch_budget_exhausted(world));
         }
+        result
     }
 
     /// 在有界页数和绝对截止时间内按收件人、主题和装备剩余资产核对 Sent。
@@ -221,6 +244,9 @@ impl MoogleMailGateway {
             match self.lookup_sent_with_cookie(&request, session.cookie(), deadline).await {
                 Ok(report) => {
                     session.check_current().await?;
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(fetch_budget_exhausted(request.world));
+                    }
                     Ok(report)
                 }
                 Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
@@ -326,30 +352,42 @@ impl MoogleMailGateway {
                 MoogleMailErrorCategory::Configuration,
             ));
         }
-        let mut session = self.credentials.begin_read(world, MoogleMailOperation::Balance).await?;
-        let result = async {
-            let target = self.client.balance(world)?;
-            let document = self.client.get(&target, session.cookie()).await?;
-            self.client
-                .diagnose_parse(
-                    &target,
-                    &document,
-                    self.parser.parse_balance(&document, world, observed_at),
-                )
-                .await
-        }
-        .await;
-        match result {
-            Ok(snapshot) => {
-                session.check_current().await?;
-                Ok(snapshot)
+        let deadline = tokio::time::Instant::now()
+            .checked_add(self.config.fetch_budget)
+            .ok_or_else(|| configuration(world))?;
+        let result = tokio::time::timeout_at(deadline, async {
+            let mut session =
+                self.credentials.begin_read(world, MoogleMailOperation::Balance).await?;
+            let result = async {
+                let target = self.client.balance(world)?;
+                let document = self.client.get(&target, session.cookie()).await?;
+                self.client
+                    .diagnose_parse(
+                        &target,
+                        &document,
+                        self.parser.parse_balance(&document, world, observed_at),
+                    )
+                    .await
             }
-            Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
-                session.invalidate_current().await?;
-                Err(error)
+            .await;
+            match result {
+                Ok(snapshot) => {
+                    session.check_current().await?;
+                    Ok(snapshot)
+                }
+                Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
+                    session.invalidate_current().await?;
+                    Err(error)
+                }
+                Err(error) => Err(error),
             }
-            Err(error) => Err(error),
+        })
+        .await
+        .map_err(|_| fetch_budget_exhausted(world))?;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(fetch_budget_exhausted(world));
         }
+        result
     }
 
     pub(super) async fn read_sent_with_cookie(
@@ -386,6 +424,9 @@ impl MoogleMailGateway {
                         self.parser.scan_sent_page(&document, world, page_index, &mut seen),
                     )
                     .await?;
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(fetch_budget_exhausted(world));
+                }
                 if let Some(found) = page
                     .summaries
                     .into_iter()
@@ -444,6 +485,9 @@ impl MoogleMailGateway {
                     .await;
             }
             self.client.check_read_round(cookie, &round).await?;
+            if tokio::time::Instant::now() >= deadline {
+                return Err(fetch_budget_exhausted(world));
+            }
             Ok(snapshot)
         })
         .await
@@ -505,13 +549,18 @@ impl MoogleMailGateway {
             return Err(protocol_error(world));
         }
         if recovering {
-            let missing_from_inbox = window.iter().any(|pending| {
-                !inbox
-                    .summaries
-                    .iter()
-                    .any(|summary| summary.external_mail_id == pending.external_mail_id)
-            });
-            let read = if missing_from_inbox {
+            // 索引只借用本批 pending，按列表线性定位，避免每个 MID 重扫整个邮箱。
+            let mut pending: HashMap<_, _> =
+                window.iter().map(|summary| (summary.external_mail_id.as_str(), summary)).collect();
+            for summary in &inbox.summaries {
+                if let Some(expected) = pending.remove(summary.external_mail_id.as_str())
+                    && (summary.world != expected.world
+                        || summary.received_at != expected.received_at)
+                {
+                    return Err(protocol_error(world));
+                }
+            }
+            if !pending.is_empty() {
                 let read = self
                     .client
                     .observe_incoming_list(cookie, &round, self.config.maximum_pages, true)
@@ -519,30 +568,16 @@ impl MoogleMailGateway {
                 if !read.complete {
                     return Err(protocol_error(world));
                 }
-                Some(read)
-            } else {
-                None
-            };
-            for pending in &window {
-                let found = inbox
-                    .summaries
-                    .iter()
-                    .find(|summary| summary.external_mail_id == pending.external_mail_id)
-                    .or_else(|| {
-                        read.as_ref().and_then(|list| {
-                            list.summaries.iter().find(|summary| {
-                                summary.external_mail_id == pending.external_mail_id
-                            })
-                        })
-                    });
-                if found.is_some_and(|summary| {
-                    summary.world != pending.world || summary.received_at != pending.received_at
-                }) {
-                    return Err(protocol_error(world));
+                for summary in &read.summaries {
+                    if let Some(expected) = pending.remove(summary.external_mail_id.as_str())
+                        && (summary.world != expected.world
+                            || summary.received_at != expected.received_at)
+                    {
+                        return Err(protocol_error(world));
+                    }
                 }
-                // 历史列表只定位既有账本 MID；不把其他 Read Mail 行加入待处理窗口。
-                // 两个列表都缺失仍按原 MID 读取并核验，绝不丢弃持久 pending。
             }
+            // 历史列表只定位既有账本 MID；两表都缺失仍按原 MID 读取，不删除或新增 pending。
         } else {
             for summary in &inbox.summaries {
                 if cursor.is_some_and(|value| value == summary.external_mail_id) {

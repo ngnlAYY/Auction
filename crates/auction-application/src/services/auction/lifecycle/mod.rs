@@ -28,28 +28,24 @@ use plan::lifecycle_plan;
 use schedule::successor_plan;
 
 /// Admin/Worker 共享的拍卖生命周期用例。
-pub struct AuctionLifecycleService<R, C> {
+pub struct AuctionLifecycleService<R> {
     repository: Arc<R>,
-    // 保留既有装配签名；命令时刻由锁后的事务端口提供。
-    _clock: Arc<C>,
     policy: AuctionLifecyclePolicy,
     successor_policy: AuctionPolicyTemplate,
 }
 
-impl<R, C> AuctionLifecycleService<R, C>
+impl<R> AuctionLifecycleService<R>
 where
     R: TransactionRunner,
     R::Transaction: CompetitionTransaction + AuctionLifecycleTransaction,
-    C: crate::Clock,
 {
-    /// 建立只依赖事务 runner、时钟端口和启动期冻结策略的生命周期服务。
+    /// 建立只依赖事务 runner 和启动期冻结策略的服务；命令时刻由锁后的事务端口提供。
     pub fn new(
         repository: Arc<R>,
-        clock: Arc<C>,
         policy: AuctionLifecyclePolicy,
         successor_policy: AuctionPolicyTemplate,
     ) -> Self {
-        Self { repository, _clock: clock, policy, successor_policy }
+        Self { repository, policy, successor_policy }
     }
 
     /// 在 Serializable 事务中查重、锁定聚合、应用领域迁移并追加账本记录。
@@ -234,11 +230,10 @@ fn lifecycle_state(message: &str) -> ApplicationError {
     CompetitionTransactionError::Failed(message.to_owned()).into()
 }
 
-impl<R, C> AuctionLifecycleCommandPort for AuctionLifecycleService<R, C>
+impl<R> AuctionLifecycleCommandPort for AuctionLifecycleService<R>
 where
     R: TransactionRunner + 'static,
     R::Transaction: CompetitionTransaction + AuctionLifecycleTransaction,
-    C: crate::Clock,
 {
     fn allows_manual_early_open(&self) -> bool {
         self.policy.allows_manual_early_open()

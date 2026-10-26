@@ -20,6 +20,7 @@ use crate::api::{
 use super::{AdminReadinessResource, Route, admin_api_error_message};
 
 mod login;
+mod navigation;
 mod redirect;
 mod session;
 mod shell;

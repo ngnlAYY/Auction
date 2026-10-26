@@ -155,6 +155,10 @@ baseline；③发送后执行独立有界 Sent scan 并要求收到新 MID 且�
 不自动重寄；成功页、空 compose、本地 UUID 都不能替代证明。该规则覆盖静态通知、注册/重绑 key、运维告警及所有结算/返还
 金钱和装备。
 
+若写后 Sent 或最终 compose 检查明确发现 `session_expired`，保留该原因及原加密证据并撤销当前 Cookie，
+不再用通用 `write_unknown` 覆盖登录失效原因；结果仍属于未知写入，不能自动重发。
+已知失效不追加诊断 GET；诊断 GET 首次发现失效也只撤销原 session，不改变此前的投递结果。
+
 `sent_scan_page_limit` 表示完整扫描尚未到尾页就耗尽本地页数，`sent_scan_timeout` 表示本地总扫描预算耗尽；
 不再把这两类预算错误统称 `remote_temporary`。日志只含 world、闭集阶段、上限和计数，不含 MID/收件人/正文。
 基线句柄不可克隆、不可跨 session 缓存且只消费一次；发送后复用完整基线证明新增，不因上调预算跳过完整性。

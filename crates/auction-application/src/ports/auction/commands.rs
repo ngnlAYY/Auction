@@ -20,11 +20,12 @@ pub type ApplicationFuture<'a, T> =
 /// 领域与存储仍使用 `DateTime<Utc>`；只有对外 wire 去掉无意义的小数尾零，整秒不伪造
 /// `.000000`，并继续用 `Z` 表示 UTC。
 pub fn format_public_time_wire(value: DateTime<Utc>) -> String {
-    let encoded = value.to_rfc3339_opts(SecondsFormat::Nanos, true);
+    let mut encoded = value.to_rfc3339_opts(SecondsFormat::Nanos, true);
     let Some(body) = encoded.strip_suffix('Z') else { return encoded };
-    let mut trimmed = body.trim_end_matches('0').trim_end_matches('.').to_owned();
-    trimmed.push('Z');
-    trimmed
+    let length = body.trim_end_matches('0').trim_end_matches('.').len();
+    encoded.truncate(length);
+    encoded.push('Z');
+    encoded
 }
 
 /// 一次竞价命令冻结的时间 instant 与 Public wire 字符串。

@@ -35,6 +35,71 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### libc 0.2.191 依赖 PR 合并与同步
+
+按用户选择，仅合并 [PR #3](https://github.com/ngnlAYY/Auction/pull/3)，将应用锁中的 libc 从 0.2.190 更新到 0.2.191；
+[PR #2](https://github.com/ngnlAYY/Auction/pull/2) 的 tungstenite 0.30 升级暂缓，不关闭、不设置忽略规则。
+当前 HTTP 活跃链仍为 Axum 0.8.9、tokio-tungstenite 0.29.0 和直接 tungstenite 0.29.0，避免跨版本 downcast 破坏 1009 关闭契约。
+
+PR #3 的 docs、verify、security-audit、MSRV 检查成功；重复工作流按原策略跳过。GitHub squash 提交为
+`97698f743574805be755ee348dd70c858c212769`，远端 `mergedAt` 回执为 `2026-10-26T02:48:22Z`。
+本地以普通 merge 保留原未推送提交 `31de07af64cac9fd35b3ca1799aa46dfe8893ff1`，生成
+`fb04e0324ce93d86ddb205a34cb4ca64a899b64e`；仅合入 Cargo.lock，不重写原提交，不提交本轮审计工作。
+同步前后的未提交 tracked diff 摘要及 11 个未跟踪源码文件摘要完全一致，既有审计改动未被覆盖。
+
+合入后重新执行完整 `CARGO_BUILD_JOBS=2 just verify` 和 Rust 1.94.1 的工作区 all-targets/all-features check，均退出 0；
+应用锁的 `cargo audit --deny warnings` 为零漏洞／零警告，公告库仍为 1352 条、提交
+`21d909e4c8bd4e14c7aea58bf980c881a0053ab1`。没有运行行为测试、迁移或部署，也未推送本地合并提交与审计改动。
+本阶段没有重建发布程序或 Web payload；下节双端资源构建记录对应依赖 PR 合入前的锁图。
+回执及合并后检查日志保存在 `target/audits/project-mobile-20261025/dependency-pr-sync.json` 和同目录日志。
+
+### 2026-10-25 全仓复审与桌面移动展示分离
+
+基于干净提交 `31de07af64cac9fd35b3ca1799aa46dfe8893ff1`，按 20 个工作区包的 owner 做结构、调用与热点审计，
+并核对注释、既有测试、依赖图及正式文档；不把结构扫描描述为逐文件行为验收。
+
+- application/storage/apps 删除三个命令服务及适配器中未消费的 Clock 泛型、字段和构造参数；时间仍取锁后事务。
+  旧竞价重放借用历史投影；contracts 将 11 份同义解码函数集中为两个内部实现，保留 missing/null/type-error 区别。
+  邮箱维护仅在批次包含可重建 Send 时读取完整 Sent；空批次、仅 Take 或仅不可重建旧行不做该扫描，
+  也不增加无关 Sent 失败统计。有 Send 却缺完整列表时，仍保留首个 Send 及其后缀的轮转位置。
+- storage 的邮箱维护先限定环形候选批次再关联发送／领取证明，页外歧义检查保持；调度只对需要截止的阶段聚合 lot。
+  结算失败先锁拍卖行再生成退避起点；删除临时 roll/lot ID 数组、摘要 Vec 与已消费字符串副本，不改锁序、Serializable、CAS 或审计。
+- integrations 将论坛 Cookie 克隆改为共享且不可逆撤销，防止已准备会话在失效后继续发新请求；
+  Send 后的明确登录失效保留原证据，仍属于未知写入。补齐 session/owner 检查的绝对预算和完成后截止检查。
+  pending 邮件恢复由逐 MID 重扫列表改为本批借用索引，预期复杂度由 `O(P×(I+R))` 降为 `O(P+I+R)`；未测量运行时吞吐。
+- HTTP 有界正文复用单帧 `Bytes`，多帧才合并；装备链接投影转移所有权，删除必然被覆盖的缓存头扫描。
+  Worker 在派生任务前检查初始化期间已到达的停止请求，原在途排空与未知外写策略不变。
+- Public/Admin 分别增加桌面／移动 Rust 纯展示模块和 CSS；请求、表单、身份、表格与未决命令保留单份。
+  手机目录采用同源计数的原生类型选择器，账户提供折叠章节导航；Admin 修正把 flex 直接施加到 `td` 的操作列，
+  调整触控表单、导航、首次设置及未决命令布局。共享层按数值缓存 VisualViewport，减少重复事件的字符串分配和 CSS 往返。
+  全部样式声明 `foundation, surface, desktop, mobile` 层顺序，不依赖 Dioxus 未保证的 head 顺序。
+- 删除四个未注册的 Admin Dashboard 源文件及其 CSS、每种语言 53 条孤立消息；清理旧空态别名、无行为的表格类及无人使用的 sheet 变体。
+  12 个现有测试分别保护迁移、协议和安全边界，没有发现可删除的重复测试，全部保留；未新增、扩展或运行测试。
+- root README 更正“v2 奖池不足暂缓结算”的过期说明；当前是一份基础优惠同比缩减，零预算仍结算。
+  领域公式和历史冻结快照没有修改，旧状态记录保留原时点结论。
+
+最终 `CARGO_BUILD_JOBS=2 just verify` 退出 0，覆盖仓库策略、格式、工作区 all-targets、独立 PostgreSQL/Redis feature、
+all-features Clippy `-D warnings` 与双端 WASM check；编译器为 Rust 1.99.0。独立目录的
+`cargo +1.94.1 check --locked --workspace --all-targets --all-features` 同样通过。
+首次门禁发现 Public 选项 Vec 在 RSX 中提前移动、Admin 对 bool 调用 clone，两处均已修正，未放宽 lint。
+`CARGO_BUILD_JOBS=2 just web-build` 生成双端正式 `wasm-release` payload；每端五个 CSS 引用均指向实际打包资源，
+压缩后的层首次声明顺序仍为 `foundation, surface, desktop, mobile`，无悬空相对导入。
+8 份 CSS 的独立静态解析无诊断；48 份正式／协作文档的 1,359 个本地路径与标题锚点检查无错误。
+设备视图互斥、菜单开合、原表单内的移动提交按钮仅完成源码／CSS 级核对，不是浏览器或真实 DOM 执行证据。
+
+依赖核对：`cargo machete --with-metadata` 未发现未使用的直接依赖。`chrono clock` 收敛到唯一使用本地时区的 config owner；
+独立 Public/Admin WASM feature 图保留 `now`，不再启用 `clock/iana-time-zone`；config 原生图仍保留。
+应用 536 条锁记录在 1352 条 RustSec 公告、提交 `21d909e4c8bd4e14c7aea58bf980c881a0053ab1` 下为零漏洞／零警告；
+cargo-audit 独立锁同样为零。dx 仍有 13 个漏洞匹配／11 个警告，sccache 为 5／9，未忽略公告或强行跨不兼容版本替换；
+受限用途和许可边界见[构建工具说明](ci/tools/README.md#上游公告与实际使用范围)。未增加应用依赖或修改锁版本。
+
+本轮验证限定为静态检查与资源构建；未执行单元／集成／浏览器测试、手工冒烟、数据库查询场景或真实外部操作。
+一个临时本机静态预览辅助服务曾短暂启动，在访问前停止并删除脚本；没有启动 Chromium 或产品服务。
+移动设备视觉、缩放／软键盘、改动路径的并发和外部协议行为均未验收，不宣称延迟、RSS 或吞吐提升已量化。
+Rust LSP 启动后异常退出，未记为通过；CodeGraph 的代表性改动文件 affected 查询未找到独立测试文件，不代表内联测试覆盖。
+未执行迁移、提交、推送或部署。升级与历史未知结果边界见[运维说明](ops/README.md#全仓复审与设备展示拆分升级)；
+静态回执与依赖图保存在 `target/audits/project-mobile-20261025/`。
+
 ### 2026-10-25 R33 装备状态准备与注册账号提示发布
 
 按用户授权，冻结干净提交 `9831675e5354ea1c05f08982942a22459f78c1e5`，以通用 Linux x86_64 GNU、

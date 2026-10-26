@@ -1,0 +1,38 @@
+@layer foundation, surface, desktop, mobile;
+
+/* 桌面布局不参与业务生命周期；手机断点的互补条件只控制纯展示。 */
+@layer desktop {
+  @media screen and (width > 48rem) and (pointer: fine), screen and (width > 48rem) and (pointer: none), screen and (width > 64rem) {
+    .admin-shell__nav--desktop {
+      display: flex;
+      inline-size: 12rem;
+      flex: 0 0 12rem;
+      flex-direction: column;
+      border-inline-end: var(--border-width) solid var(--color-border);
+    }
+
+    .admin-pending__entry {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+      align-items: start;
+    }
+  }
+
+  @media screen and (width > 64rem) {
+    .admin-dashboard-panels {
+      columns: 2;
+    }
+  }
+
+  @media screen and (min-width: 100rem) {
+    .admin-dashboard-panels {
+      columns: 3;
+    }
+  }
+
+  @media screen and (48rem < width <= 75rem) {
+    .admin-audit-filter__primary,
+    .admin-audit-filter__advanced-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+}

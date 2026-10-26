@@ -8,8 +8,9 @@
 
 管理端服务可信操作员，目标是清楚区分当前事实、候选修改、已接受命令和外部最终结果；界面优先保证可审查、可追踪、
 可恢复，不把危险动作包装为普通快捷按钮。管理页面及认证内状态由 [src/app/](crates/auction-web-admin/src/app/) 拥有，API/命令提交由
-[src/api/](crates/auction-web-admin/src/api/) 拥有；专属样式为 [admin.css](crates/auction-web-admin/assets/admin.css)，
-文案为 [i18n/](crates/auction-web-admin/i18n/)。Admin 不导入 Public，`/rules` 别名转到独立的校验/发布页，
+[src/api/](crates/auction-web-admin/src/api/) 拥有；设备无关视觉为 [admin.css](crates/auction-web-admin/assets/admin.css)，
+桌面与手机布局分别由 [desktop.css](crates/auction-web-admin/assets/desktop.css)、[mobile.css](crates/auction-web-admin/assets/mobile.css) 维护。
+文案为 [i18n/](crates/auction-web-admin/i18n/)。Admin 不导入 Public，`/rules` 别名转到独立的校验/发布页；
 共享层不拥有权限、配置草稿或业务命令。
 
 ## 2. 信息架构
@@ -55,10 +56,27 @@
 主工作区随页面滚动。手机上的邮件诊断标签/值纵向排列，筛选控件、配置动作和确认按钮允许换行，结算选择器在
 48rem 内转为单列，仍保留同一份表单、草稿与请求身份。
 
+### 设备展示所有权
+
+[auth/navigation/desktop.rs](crates/auction-web-admin/src/app/surface/auth/navigation/desktop.rs) 仅展示常驻侧栏；
+[auth/navigation/mobile.rs](crates/auction-web-admin/src/app/surface/auth/navigation/mobile.rs) 仅展示手机按钮和折叠菜单。
+二者复用同目录的路由/译文清单，不自行读取会话、安装资源或注册命令工厂；菜单开合与焦点引用仍由认证外壳持有。
+两份导航只有链接，没有重复表单或业务 ID；不适用的导航使用 CSS `display: none` 移出布局和可访问树。
+`Outlet`、登录/设置表单、页面草稿、分页与未决操作区不位于任何设备条件分支内，宽度变化不会重挂载这些 owner。
+只有原有 actor/CSRF 身份 epoch 或业务实体身份变化才触发对应生命周期边界。
+
+三个 Admin CSS 资源独立由 `asset!` 打包，使用固定 `foundation, surface, desktop, mobile` 层顺序，
+避免静态 head 链接顺序改变样式优先级；不依赖不被当前打包器展开的相对 `@import`。
+`surface` 层拥有颜色、边框、反馈和表格语义，`desktop`/`mobile` 层只通过 `screen` 媒体查询改变布局。
+导航的手机条件为宽度不超过 48rem，或宽度不超过 64rem 且主指针为粗指针；桌面条件取其互补。
+Dashboard 保留原 DOM 顺序，64rem 内单栏、其上双栏、100rem 起三栏，图表和按钮不重复渲染。
+设置页单列断点统一为 48rem；触控展开入口、未决重试/关闭、规则和 Dashboard 动作允许整行点击及文字换行。
+
+
 ## 4. 视觉基底
 
 共享 [base.css](crates/auction-web-shared/style/base.css) 的背景、文字、强调色、字体、间距与断点；表单、状态徽章和
-高密度表格由 [admin.css](crates/auction-web-admin/assets/admin.css) 独立维护。控件沿用中性灰底，普通/登录输入框边界
+高密度表格由 Admin 的 `surface` 层维护，设备布局分别归属桌面和手机样式文件。控件沿用中性灰底，普通/登录输入框边界
 分开；危险按钮使用深红底/白字，不直接套用较亮的错误文字色。正常、待处理和错误状态均配文字，待处理不代表成功；
 浮层使用共享层级，不引入外部字体或 UI 框架。
 
@@ -73,6 +91,9 @@
 `--size-target` 的 44px 控件高度，装备多选等复选项由完整标签承接点击；密集列中的按钮宽度仍受该列约束。
 用户黑名单历史保留桌面悬浮摘要，点击或键盘激活可打开共享模态详情，支持长历史滚动与关闭后的焦点恢复，
 直接使用当前已加载数据，不引入额外查询。
+所有业务表都保留具名 caption 和列 scope；凭据与 Realtime 的动作容器必须在 `td` 内部，不能通过 flex 改写单元格布局。
+手机动作样式使用实际的 `admin-users-actions`、`admin-delivery-actions` 等类，不能只覆盖已无消费者的旧类。
+未决面板使用独立的身份、结果和动作分区；只借用当前条目渲染，不复制工厂，也不因重排生成新的 UUID。
 
 列表统一用 `page_size`（auctions/lots/settlement-catalog 上限 100/offset 100000；users/renames/credentials/audit 与
 mail 上限 200/100、offset 2147483647；deliveries 100/i64 安全乘法边界），特例键为 realtime 的 `event_page_size`/
@@ -230,6 +251,8 @@ HTTP 不开放该入口，设置使用一次性部署码、不复用普通 Admin
 密码确认只在浏览器校验、不进入 DTO，敏感值只存页面内存。保存超时或返回 `setup_outcome_unknown` 时清空敏感值并锁定
 页面，要求核对现场，不把刷新当作安全重试；合并模式的空库初始化与启动必须有额外明确授权，保存响应不是进程 readiness。
 HTTP Origin 仅接受规范的 `localhost`、`127.0.0.1` 与 `[::1]` 回环地址；其它主机必须使用 HTTPS。
+设置表单的静态字段组直接遍历切片；技术标识输入关闭自动纠错和自动大写，不更改服务器校验。
+桌面和手机共享一份部署码、字段草稿、校验结果与不可逆未知状态。
 
 ## 8. 文案、可访问性与错误边界
 
@@ -247,3 +270,18 @@ Admin 默认 `zh-CN`，支持 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`；文案来
 `bash ci/release/web-bundle.sh admin` 只生成 Admin 页面，上线还需重编并部署启用 `web-embed` 的宿主（见[开发指南](docs/guide/development.md)）。
 分体 Public 不含管理资源，合并制品也保持 router 隔离。修改同步模块说明、五语言与受影响契约，共享控件变化核对两端；
 技术栈和默认测试限制见[协作规范](AGENTS.md#web-规则)。
+
+需获得行为验证授权后，再在 320/375/768px 与桌面宽度之间切换，检查同一会话下未保存配置、创建表单、
+一次性 Key 与未知命令不丢失，且网络读取不因改宽度重发。重点入口及选择器：
+
+| 入口 | 展示与状态边界 |
+| --- | --- |
+| `/login` | `.admin-auth-form`、`#admin-actor`、`#admin-secret`；输入及自动填充保持 |
+| `/` | `.admin-dashboard-panels`、`.admin-dashboard-heading__actions`、`.admin-pending`；单快照与原命令 ID |
+| 任一认证页 | `.admin-shell__nav--desktop`、`.admin-shell__nav--mobile`、`.admin-shell__nav-toggle`、`#admin-content`；只显示一个导航，Escape 恢复焦点 |
+| `/config`、`/rules-content` | `.admin-config-form`、`.admin-rules-form`；改宽度不覆盖草稿或丢失校验/未知状态 |
+| `/users`、`/cookies`、`/deliveries`、`/outbox` | `.admin-users-actions`、`.admin-credentials__row-actions`、`.admin-delivery-actions`、`.admin-realtime__actions`；`td` 仍为表格单元格，动作在原列内换行 |
+| `/auctions`、`/auctions/:auction_id/lots`、`/mails`、`/renames`、`/settlement`、`/audit` | `table`、`colgroup`、`caption`、`.admin-pending [data-command-id]`；完整表头、100% 列宽、无横向滚动、全文查看与命令身份 |
+| 独立设置服务 `/setup` | `.admin-setup__form`、`.admin-setup__grid`；部署码门禁与草稿保持，不向正式 Admin 添加设置入口 |
+
+上述为待授权行为验收点，不是已执行结果。静态编译、CSS 打包和翻译门禁不能代替浏览器触控、焦点及 resize 验收。

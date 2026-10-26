@@ -137,7 +137,7 @@ pub(crate) async fn movements(
         )
         .await
         .map_err(map_reader_error)?;
-    let Some(result) = result else {
+    let Some(mut result) = result else {
         return Err(not_found_error());
     };
     if result.round.auction_id != auction_id
@@ -152,7 +152,7 @@ pub(crate) async fn movements(
         ));
     }
 
-    let equipment_urls = resolve_movement_equipment_urls(&state, &result).await?;
+    let equipment_urls = resolve_movement_equipment_urls(&state, &mut result).await?;
     let mut headers = HeaderMap::new();
     // 流水含完整装备 key，与 lot 目录/详情一致，禁止浏览器或中间缓存保存。
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -198,19 +198,20 @@ fn map_pool_page(
     }
 }
 
+/// 投影已经校验，旧链接只供解析器核对；直接转移，避免逐行复制后再丢弃。
 async fn resolve_movement_equipment_urls(
     state: &PublicApiState,
-    page: &PublicCompensationMovementPage,
+    page: &mut PublicCompensationMovementPage,
 ) -> Result<std::collections::HashMap<Uuid, String>, (StatusCode, Json<ApiErrorResponse>)> {
     let targets = page
         .entries
-        .iter()
+        .iter_mut()
         .filter_map(|movement| {
             Some(PublicEquipmentLinkTarget {
                 lot_id: movement.lot_id?,
                 equipment_id: movement.equipment_id?,
                 world_id: page.round.world_id.clone(),
-                projected_game_equipment_url: movement.projected_game_equipment_url.clone()?,
+                projected_game_equipment_url: movement.projected_game_equipment_url.take()?,
             })
         })
         .collect::<Vec<_>>();

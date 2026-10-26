@@ -175,10 +175,11 @@ impl MoogleMailSender {
         )
         .await
         .map_err(|_| proof::scan_timeout(world))??;
+        proof::check_deadline(deadline, world)?;
         if !list.complete {
             return Err(self.scan_page_limit(world, "maintenance", list.summaries.len()));
         }
-        Ok(list
+        let summaries = list
             .summaries
             .iter()
             .map(|summary| MoogleMailSentListEntry {
@@ -187,7 +188,9 @@ impl MoogleMailSender {
                 subject: summary.subject.clone(),
                 sent_at: summary.sent_at,
             })
-            .collect())
+            .collect();
+        proof::check_deadline(deadline, world)?;
+        Ok(summaries)
     }
 
     /// 已读历史列表与 Take/持久 pending 恢复共用数据；不得据此创建新入站命令。
@@ -206,10 +209,13 @@ impl MoogleMailSender {
         )
         .await
         .map_err(|_| proof::scan_timeout(world))??;
+        proof::check_deadline(deadline, world)?;
         if !list.complete {
             return Err(MoogleMailError::protocol_drift(MoogleMailOperation::ReadMail, world));
         }
-        Ok(list.summaries.clone())
+        let summaries = list.summaries.clone();
+        proof::check_deadline(deadline, world)?;
+        Ok(summaries)
     }
 
     /// 只读确认入站邮件是否仍存在并返回当前附件 ID。
@@ -227,11 +233,12 @@ impl MoogleMailSender {
             .checked_add(self.verification_budget)
             .ok_or_else(|| proof::scan_timeout(world))?;
         let round = self.client.read_round(cookie, world, false)?;
-        timeout_at(deadline, async {
+        let result = timeout_at(deadline, async {
             let inbox = self
                 .client
                 .observe_incoming_list(cookie, &round, self.verification_pages, false)
                 .await?;
+            proof::check_deadline(deadline, world)?;
             if !inbox.complete {
                 return Err(MoogleMailError::protocol_drift(MoogleMailOperation::Inbox, world));
             }
@@ -252,6 +259,7 @@ impl MoogleMailSender {
                 .client
                 .observe_incoming_list(cookie, &round, self.verification_pages, true)
                 .await?;
+            proof::check_deadline(deadline, world)?;
             if !read.complete {
                 return Err(MoogleMailError::protocol_drift(MoogleMailOperation::ReadMail, world));
             }
@@ -267,7 +275,9 @@ impl MoogleMailSender {
             .await
         })
         .await
-        .map_err(|_| proof::scan_timeout(world))?
+        .map_err(|_| proof::scan_timeout(world))?;
+        proof::check_deadline(deadline, world)?;
+        result
     }
 
     async fn inspect_inbox_attachments_in_round(
@@ -320,37 +330,46 @@ impl MoogleMailSender {
         summary: &MoogleMailSentListEntry,
         _observed_at: DateTime<Utc>,
     ) -> Result<MoogleMailSentObservation, MoogleMailError> {
-        let round = self.client.read_round(cookie, world, false)?;
-        let detail = self.client.sent_detail(world, &summary.external_mail_id)?;
-        let document = self.client.get_in_round(&detail, cookie, &round).await?;
-        let parser_summary = super::super::parser::MoogleMailSentSummary {
-            external_mail_id: summary.external_mail_id.clone(),
-            world,
-            recipient: summary.recipient.clone(),
-            subject: summary.subject.clone(),
-            sent_at: summary.sent_at,
-        };
-        let proof = self
-            .client
-            .diagnose_parse(
-                &detail,
-                &document,
-                self.parser.parse_sent_content_proof(&document, &parser_summary),
-            )
-            .await?;
-        let collected = proof.remaining_credits == 0
-            && proof.cod_pending == 0
-            && proof.remaining_equipment_ids.is_empty();
-        self.client.check_read_round(cookie, &round).await?;
-        Ok(MoogleMailSentObservation {
-            external_mail_id: proof.external_mail_id,
-            subject: proof.subject,
-            remaining_credits: proof.remaining_credits,
-            cod_pending: proof.cod_pending,
-            remaining_equipment_ids: proof.remaining_equipment_ids,
-            collected,
-            body_digest: proof.body_digest,
+        let deadline = Instant::now()
+            .checked_add(self.verification_budget)
+            .ok_or_else(|| proof::scan_timeout(world))?;
+        let result = timeout_at(deadline, async {
+            let round = self.client.read_round(cookie, world, false)?;
+            let detail = self.client.sent_detail(world, &summary.external_mail_id)?;
+            let document = self.client.get_in_round(&detail, cookie, &round).await?;
+            let parser_summary = super::super::parser::MoogleMailSentSummary {
+                external_mail_id: summary.external_mail_id.clone(),
+                world,
+                recipient: summary.recipient.clone(),
+                subject: summary.subject.clone(),
+                sent_at: summary.sent_at,
+            };
+            let proof = self
+                .client
+                .diagnose_parse(
+                    &detail,
+                    &document,
+                    self.parser.parse_sent_content_proof(&document, &parser_summary),
+                )
+                .await?;
+            let collected = proof.remaining_credits == 0
+                && proof.cod_pending == 0
+                && proof.remaining_equipment_ids.is_empty();
+            self.client.check_read_round(cookie, &round).await?;
+            Ok(MoogleMailSentObservation {
+                external_mail_id: proof.external_mail_id,
+                subject: proof.subject,
+                remaining_credits: proof.remaining_credits,
+                cod_pending: proof.cod_pending,
+                remaining_equipment_ids: proof.remaining_equipment_ids,
+                collected,
+                body_digest: proof.body_digest,
+            })
         })
+        .await
+        .map_err(|_| proof::scan_timeout(world))?;
+        proof::check_deadline(deadline, world)?;
+        result
     }
 }
 

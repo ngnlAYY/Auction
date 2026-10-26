@@ -51,6 +51,8 @@ pub(super) fn SetupInput(
                     r#type: field.input_type(),
                     inputmode: if bounds.is_some() { "numeric" } else if field.input_type() == "url" { "url" } else { "text" },
                     autocomplete: field.autocomplete(),
+                    autocapitalize: "none",
+                    autocorrect: "off",
                     spellcheck: "false",
                     required: true,
                     disabled: busy,

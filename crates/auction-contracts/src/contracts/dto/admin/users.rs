@@ -1,17 +1,18 @@
 //! users 相关 DTO。
 
+use super::super::shared::deserialize_null_default;
 use super::*;
 
 /// Admin 用户创建请求；`key` 仅在手工 key 模式提供，服务端不会把它写入日志或命令账本。
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUserCreateRequest {
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub command_id: String,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub username: String,
     pub forum_account_id: Option<String>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub key_mode: String,
     pub key: Option<String>,
 }
@@ -32,13 +33,13 @@ impl std::fmt::Debug for AdminUserCreateRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUserMutationRequest {
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub command_id: String,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub user_id: String,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub expected_state_version: i64,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub action: String,
     pub username: Option<String>,
     pub forum_account_id: Option<String>,
@@ -47,20 +48,20 @@ pub struct AdminUserMutationRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUserBlacklistRequest {
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub command_id: String,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub expected_state_version: i64,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub public_reason: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUserUnblacklistRequest {
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub command_id: String,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub expected_state_version: i64,
 }
 
@@ -68,19 +69,10 @@ pub struct AdminUserUnblacklistRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminRenameRevertRequest {
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub command_id: String,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub expected_state_version: i64,
-}
-
-/// Go 旧 wire 把缺失或 `null` 的非指针标量保留为零值，再由业务边界给出稳定错误分类。
-fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de> + Default,
-{
-    Option::<T>::deserialize(deserializer).map(Option::unwrap_or_default)
 }
 
 /// Admin 用户安全响应。

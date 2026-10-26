@@ -60,6 +60,7 @@ HV UID 读取论坛目标资料，预期名称为 `None` 仍自动远端核验�
 [services/auction/competition.rs](crates/auction-application/src/services/auction/competition.rs) 统一 Public 竞价和
 Worker 慢速代理，[services/auction/lifecycle](crates/auction-application/src/services/auction/lifecycle) 统一
 Admin/Worker 生命周期；取得权威锁后才读取命令时刻，同一计划共用该时间，Preview/Open/Final 与调度完成标记原子提交。
+竞价、生命周期与 Admin 创建服务不接受进程时钟参数；统一由事务在全部业务锁齐备后提供实时钟，不保留兼容占位泛型。
 基础 `AuctionService::create` 位于 [services/auction/commands.rs](crates/auction-application/src/services/auction/commands.rs)，
 正式 Admin 创建由 [services/admin/auction.rs](crates/auction-application/src/services/admin/auction.rs) 的
 `AdminAuctionCreateService` 拥有（稳定命令、冻结策略、幂等重放），二者不能混作同一入口。竞价成功响应在事务内冻结
@@ -80,6 +81,7 @@ Admin 创建与改期统一要求 `preview < open < end`；两小时只是邮箱
 `bid_ceiling()`；历史超额 Slow 代理在 1B 同价边界立即守位，不依赖之后的慢速任务纠正领先者。
 普通命令可选的第二条事实必须是确定性第二条 ID、Proxy 机制及另一位出价者，合法同价反击保持；
 新编码与历史重放共用此绑定校验，不按当前状态重新计算历史结果。
+旧竞价账本借用已解码结果构造计划与响应，不复制完整代理历史；时间编码原地裁剪 RFC3339 小数尾零，wire 字节不变。
 Recovery 复用 `RequestHash::from_legacy_go_json` 的固定字段序与转义规则；连续片段直接进入摘要，
 不另建完整 canonical 缓冲或维护第二套字符串编码器。
 
@@ -108,6 +110,7 @@ Recovery 每封退件由 storage 在同一事务追加唯一消费事实、增�
 不改写旧账本或重新结算。内部证据摘要仍使用原小写十六进制字节，固定 32 字节摘要只分配一次编码缓冲。
 新结算与新旧账本重放均按 lot 建立借用索引，避免明细、事实及代理关闭快照逐项全表扫描；
 义务构造不再复制整份计划，仍按锁内事实顺序生成稳定自然键，并完整校验重复 lot、金额总计和前置关系。
+旧结算义务统计借用闭集种类名及账本字段，不为每条义务重新分配字符串；计数溢出、重复种类与完整重放对账仍严格拒绝。
 履约激活继续沿用同一 claim 的 token/fencing，租约存在期间不写 `next_attempt_at`；紧接的
 reconcile 释放 claim 时原子写入下次追踪时间。COD、carrier 与卖家货款对齐共享五分钟窗口，
 其它装备寄送沿用普通重试间隔，保持发送 owner 与履约 owner 分离。
@@ -117,6 +120,7 @@ payload、稳定身份及摘要不得包含装备 secret，派发世界与装备
 买家装备 COD intent 从 claim 的对应 `SettlementLine` 冻结价格变量；调整后价格取买家应付与奖池抵扣之和，不使用现行策略
 重算。精确旧三/八变量的 prepared/enqueued 快照沿用原 canonical 字节与摘要；显式 v2 九变量形状及兼容边界见
 [交付载荷契约](docs/contracts/schema.md#结算恢复与交付)。
+履约 intent 在栈内编码一次规范小写 UUID，统一核对所有义务的 reference；不通过宽松 UUID 解析接受其他拼写或改变 canonical 摘要。
 
 [ports/settlement/internal](crates/auction-application/src/ports/settlement/internal) 与履约服务的 `internal.rs`、
 `collected.rs`、`refund.rs` 拥有新 pending 的真实身份分支、内部满足、外部 COD 资金化及原合法退款用途授权：
@@ -249,6 +253,8 @@ Admin 与邮件装备来源通过校验后直接移交已消费快照的名称�
 `WorkerControlPort::mail_progress` 提供可选跨进程读取；观测失败不改变命令、租约或持久游标，旧适配器明确不可用。
 
 `MailboxMaintenanceService` 不把零条 Sent 匹配当作未发送证明，未知 Send 始终保留人工核对；
+只在本批存在可重建的 Send 候选时读取完整 Sent 列表；空批次、仅 Take 或仅不可重建旧行不发起该扫描，
+也不把无关 Sent 故障计为本批失败。有 Send 却没有完整列表时，仍停在首个 Send 候选前，不推进它及其后缀。
 Take 先匹配原冻结 world/MID 与凭据 ID/version，才可解释严格缺失或原发件人完整详情的全部资产归零；
 仅原装备集合、Credits、COD 完全相同才可有界重排。`MoogleMailboxInboxObservation` 的明确缺失同样携带观察凭据，
 换账号、换凭据版本、旧无绑定或配置 Cookie 缺少持久绑定均保留人工核对。重启可改变 generation，但当前 generation、
@@ -295,6 +301,7 @@ Admin 录入命令中的完整装备 URL、论坛镜像正文和邮箱 compose �
 避免 URL 包装或只读投影重新暴露装备 key、登录 key；实际业务字段和命令摘要保持原文。
 本地 relay 按有界分页遍历 stream 目录；每条已校验事件直接移交 sink，只保留确认所需的 ID/序号，
 避免复制完整 JSON payload。sink 失败不推进游标，sink 成功但游标提交失败仍按原 at-least-once 规则重投。
+公开事件注册表按每个字段一次查找同时拒绝缺失与 `null`；完整字段集合、类型、金额范围和流身份校验不变。
 
 ## 冻结策略与事务约束
 

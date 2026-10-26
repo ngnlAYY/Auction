@@ -147,10 +147,16 @@ impl MoogleMailSender {
                 attachment_count = snapshot.attachment_count,
                 "MoogleMail send failed; compose page rechecked"
             ),
-            Err(error) => tracing::warn!(
-                error = %error,
-                "MoogleMail send failed; compose page unreadable"
-            ),
+            Err(error) => {
+                if error.category == MoogleMailErrorCategory::SessionExpired {
+                    // 诊断 GET 也可证明凭据失效；不覆盖原投递结果，由原 session 回写撤销。
+                    cookie.revoke();
+                }
+                tracing::warn!(
+                    error = %error,
+                    "MoogleMail send failed; compose page unreadable"
+                );
+            }
         }
     }
 
@@ -183,9 +189,13 @@ impl MoogleMailSender {
         let outcome = self
             .send_verified(cookie, &request, baseline, &mut equipment_write_started)
             .await
-            .map_err(|error| equipment::preserve_write_unknown(error, equipment_write_started));
+            .map_err(|error| preserve_write_unknown(error, equipment_write_started));
         let failed = !matches!(outcome, Ok(MoogleMailSendOutcome::Sent(_)));
-        if failed {
+        if failed
+            && !outcome
+                .as_ref()
+                .is_err_and(|error| error.category == MoogleMailErrorCategory::SessionExpired)
+        {
             self.diagnose_after_failure(cookie, request.world, &request).await;
         }
         outcome
@@ -375,36 +385,36 @@ impl MoogleMailSender {
             .await
             .ok()
             .flatten();
-        match self
-            .verify_new_sent(request, cookie, &baseline.seen, confirmation_hint.as_deref())
-            .await
-        {
-            Ok(external_mail_id) => {
-                // Sent 证明后必须再证明 compose 回到空表单；残留草稿意味着资产状态仍未收口。
-                match self.inspect_compose(cookie, request.world).await {
-                    Ok(state) if state.is_clean() => {
-                        Ok(MoogleMailSendOutcome::Sent(MoogleMailSendReceipt { external_mail_id }))
-                    }
-                    _ => {
-                        self.client
-                            .diagnose_parse(
-                                &compose,
-                                &response,
-                                Err(write_unknown(request.world, MoogleMailOperation::Send)),
-                            )
-                            .await
-                    }
-                }
+        let proof = async {
+            let external_mail_id = self
+                .verify_new_sent(request, cookie, &baseline.seen, confirmation_hint.as_deref())
+                .await?;
+            // Sent 证明后必须再证明 compose 回到空表单；残留草稿意味着资产状态仍未收口。
+            let state = self.inspect_compose(cookie, request.world).await?;
+            if !state.is_clean() {
+                return Err(write_unknown(request.world, MoogleMailOperation::Send));
             }
-            Err(_) => {
-                // 即使 POST 有成功提示，缺少 Sent 证明也要留存这次响应，不能记成功或重寄。
-                self.client
+            Ok(MoogleMailSendOutcome::Sent(MoogleMailSendReceipt { external_mail_id }))
+        }
+        .await;
+        match proof {
+            Ok(outcome) => Ok(outcome),
+            Err(error) => {
+                // 即使 POST 有成功提示，缺少 Sent/compose 证明仍留存响应，不能记成功或重寄。
+                let unknown = self
+                    .client
                     .diagnose_parse(
                         &compose,
                         &response,
                         Err(write_unknown(request.world, MoogleMailOperation::Send)),
                     )
-                    .await
+                    .await;
+                // 保留只读证明阶段的明确登录失效及原证据，交由原 session 撤销 Cookie。
+                if error.category == MoogleMailErrorCategory::SessionExpired {
+                    Err(preserve_write_unknown(error, true))
+                } else {
+                    unknown
+                }
             }
         }
     }
@@ -420,4 +430,21 @@ fn write_error(
     category: MoogleMailErrorCategory,
 ) -> MoogleMailError {
     MoogleMailError::new(operation, world, category, false)
+}
+
+/// 已发生外写后，读失败或后续写前失败都不能重新变成可安全重发；保留失效类别和原证据。
+fn preserve_write_unknown(error: MoogleMailError, write_started: bool) -> MoogleMailError {
+    if !write_started {
+        return error;
+    }
+    let category = if error.category == MoogleMailErrorCategory::SessionExpired {
+        MoogleMailErrorCategory::SessionExpired
+    } else {
+        MoogleMailErrorCategory::WriteUnknown
+    };
+    let mut unknown = MoogleMailError::after_write(error.operation, error.world, category);
+    unknown.evidence_id = error.evidence_id;
+    unknown.evidence_status = error.evidence_status;
+    unknown.evidence_failure = error.evidence_failure;
+    unknown
 }

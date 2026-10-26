@@ -29,7 +29,7 @@ pub(crate) fn CatalogTable(
 ) -> Element {
     let columns_open = use_signal(|| false);
     let visibility = use_signal(CatalogVisibility::load);
-    let active = active_category.clone();
+    let active = active_category;
     let groups = grouped_catalog_rows(&rows, &active);
     let is_live = projection_kind == "live";
     // 历史成交目录仍使用 live 价格投影；是否保留操作列单独按拍卖阶段决定。
@@ -42,38 +42,29 @@ pub(crate) fn CatalogTable(
         CatalogLayout::Settled
     };
     let effective_visibility = visibility().for_layout(layout);
-    let all_count = catalog_count(&category_counts, "all", &rows);
+    let counts = std::array::from_fn(|index| {
+        let category = if index == 0 { "all" } else { CATALOG_CATEGORIES[index - 1].0 };
+        catalog_count(&category_counts, category, &rows)
+    });
 
     rsx! {
         div { class: "public-auction-type-toolbar",
-            nav { class: "public-auction-filter", aria_label: t!("filter-label"),
-                span { class: "public-auction-filter__label", {t!("filter-equipment-type")} }
-                button {
-                    class: "public-auction-filter__tab",
-                    r#type: "button",
-                    // 筛选 tab 表达的是“当前视图”而非开关态，语义上用 aria-current 而非 aria-pressed。
-                    aria_current: if active == "all" { "true" } else { "false" },
-                    onclick: move |_| on_category_change.call("all".to_owned()),
-                    {t!("filter-all")}
-                    span { class: "public-auction-filter__count", "{all_count}" }
-                }
-                for (category, _) in CATALOG_CATEGORIES {
-                    button {
-                        class: "public-auction-filter__tab",
-                        r#type: "button",
-                        aria_current: if active == category { "true" } else { "false" },
-                        onclick: move |_| on_category_change.call(category.to_owned()),
-                        {catalog_category_label(category)}
-                        span { class: "public-auction-filter__count", "{catalog_count(&category_counts, category, &rows)}" }
-                    }
-                }
+            presentation::desktop::CategoryFilter {
+                active: active.clone(),
+                counts,
+                on_change: on_category_change,
+            }
+            presentation::mobile::CategoryFilter {
+                active: active.clone(),
+                counts,
+                on_change: on_category_change,
             }
             CatalogColumnsButton { open: columns_open }
         }
         CatalogColumnsPanel { open: columns_open, visibility, layout }
         if groups.is_empty() {
-            div { class: "ui-empty-state", role: "status",
-                p { class: "ui-empty-state__title",
+            div { class: "ui-async-state", role: "status",
+                p { class: "ui-async-state__title",
                     if active_equipment_group != "all" || level_filtered {
                         {t!("catalog-empty-filtered")}
                     } else if active == "all" {
@@ -144,7 +135,7 @@ pub(crate) fn LiveCatalogTable(
     let widths = visibility.widths(column_layout);
     rsx! {
         div { class: "public-auction-catalog",
-            table { class: "public-auction-catalog__table public-auction-catalog__table--live ui-table--responsive",
+            table { class: "public-auction-catalog__table public-auction-catalog__table--live",
                 caption { class: "public-visually-hidden", {t!("auction-lots")} }
                 auction_web_shared::TableColumns { layout, widths }
                 thead {
@@ -195,7 +186,7 @@ pub(crate) fn PreviewCatalogTable(
 ) -> Element {
     rsx! {
         div { class: "public-auction-catalog",
-            table { class: "public-auction-catalog__table public-auction-catalog__table--preview ui-table--responsive",
+            table { class: "public-auction-catalog__table public-auction-catalog__table--preview",
                 caption { class: "public-visually-hidden", {t!("auction-preview-lots")} }
                 // 预览目录不提供行内操作；默认十一列，隐藏列后按相同权重重新归一化。
                 auction_web_shared::TableColumns { layout: "public-catalog-preview", widths: visibility.widths(CatalogLayout::Preview) }

@@ -142,8 +142,16 @@ where
 
     bind_worker_metric_modes(worker.metrics.as_ref());
 
-    let shutdown = shutdown;
     tokio::pin!(shutdown);
+    // spawn 可立即在其他线程领取工作；先消费启动等待期间已到达的停止请求。
+    tokio::select! {
+        biased;
+        () = &mut shutdown => {
+            worker.control.mark_draining();
+            return Ok(());
+        }
+        () = std::future::ready(()) => {}
+    }
     tracing::info!(
         worker_id = %worker.worker_id,
         worker_concurrency = worker.auction.concurrency,

@@ -34,6 +34,7 @@ impl MoogleMailSender {
             return Err(self.scan_page_limit(world, "baseline", list.summaries.len()));
         }
         let seen = list.summaries.iter().map(|summary| summary.external_mail_id.clone()).collect();
+        check_deadline(deadline, world)?;
         Ok(MoogleMailSentBaseline { world, seen })
     }
 
@@ -135,7 +136,10 @@ impl MoogleMailSender {
     }
 }
 
-fn check_deadline(deadline: Instant, world: MoogleMailWorld) -> Result<(), MoogleMailError> {
+pub(super) fn check_deadline(
+    deadline: Instant,
+    world: MoogleMailWorld,
+) -> Result<(), MoogleMailError> {
     if Instant::now() >= deadline { Err(scan_timeout(world)) } else { Ok(()) }
 }
 

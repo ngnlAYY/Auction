@@ -207,7 +207,6 @@ impl PostgresCompetitionTransaction {
         };
 
         let mut facts = Vec::with_capacity(rows.len());
-        let mut lot_ids = Vec::with_capacity(rows.len());
         for row in rows {
             let lot_id = row
                 .try_get::<Uuid, _>("id")
@@ -264,16 +263,17 @@ impl PostgresCompetitionTransaction {
                     .map_err(map_sql_error)?
                     .map(auction_domain::SubmissionId::from_uuid),
             };
-            lot_ids.push(lot_id);
             facts.push(fact);
         }
 
         let mut lot_competitions = Vec::new();
         if auction_status == "settling" {
-            lot_competitions.reserve(lot_ids.len());
-            for lot_id in lot_ids {
+            lot_competitions.reserve(facts.len());
+            for fact in &facts {
                 lot_competitions.push(
-                    self.load_for_settlement_inner(lot_id).await.map_err(map_competition_error)?,
+                    self.load_for_settlement_inner(fact.lot_id)
+                        .await
+                        .map_err(map_competition_error)?,
                 );
             }
         }

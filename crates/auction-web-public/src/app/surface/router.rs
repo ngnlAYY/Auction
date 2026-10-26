@@ -4,6 +4,9 @@ use super::*;
 
 /// 公开端 surface 样式。设计变量由 `auction-web-shared` 提供。
 const PUBLIC_CSS: Asset = asset!("/assets/public.css", AssetOptions::css().with_static_head(true));
+const DESKTOP_CSS: Asset =
+    asset!("/assets/desktop.css", AssetOptions::css().with_static_head(true));
+const MOBILE_CSS: Asset = asset!("/assets/mobile.css", AssetOptions::css().with_static_head(true));
 
 pub fn run() {
     dioxus::launch(App);
@@ -89,6 +92,8 @@ pub(crate) fn App() -> Element {
     rsx! {
         BaseStylesheet {}
         document::Stylesheet { href: PUBLIC_CSS }
+        document::Stylesheet { href: DESKTOP_CSS }
+        document::Stylesheet { href: MOBILE_CSS }
         div { class: "app-root",
             Router::<Route> {}
         }
@@ -262,7 +267,7 @@ pub(crate) fn PublicShell() -> Element {
         Some(Ok(true)) => PublicReadinessState::Ready,
         Some(Ok(false) | Err(_)) => PublicReadinessState::Degraded,
     };
-    let session_snapshot = session.read().clone();
+    let session_snapshot = session.read();
     let session_view = PublicSessionView::from_snapshot(session_snapshot.as_ref());
     let session_pending = session_view.pending;
     let authenticated = session_view.authenticated;
@@ -286,53 +291,56 @@ pub(crate) fn PublicShell() -> Element {
         }
         _ => None,
     };
-    let realtime_target_candidate = match (session_snapshot, requested_page_target.as_ref()) {
-        (None, _) => PublicRealtimeTarget::Checking,
-        (Some(Err(_)), _) => PublicRealtimeTarget::SessionError,
-        (Some(Ok(_)), Some(requested)) => match page_realtime_target.read().as_ref() {
-            Some((loaded, target)) if loaded == requested => {
-                if matches!(target, PublicRealtimeTarget::Auction { .. }) && !authenticated {
-                    PublicRealtimeTarget::Anonymous
-                } else {
-                    target.clone()
-                }
-            }
-            _ => PublicRealtimeTarget::Checking,
-        },
-        (Some(Ok(_)), None) => match current_auction.read().clone() {
-            Some((loaded_world, Ok(Some(auction))))
-                if loaded_world == selected_world_value
-                    && matches!(auction.status.as_str(), "live" | "final")
-                    && authenticated =>
-            {
-                PublicRealtimeTarget::Auction {
-                    auction_id: auction.id,
-                    world: auction.world,
-                    preview_revision: auction.preview_revision,
-                }
-            }
-            Some((loaded_world, Ok(Some(auction)))) if loaded_world == selected_world_value => {
-                if matches!(auction.status.as_str(), "live" | "final") {
-                    PublicRealtimeTarget::Anonymous
-                } else {
-                    PublicRealtimeTarget::Inactive {
-                        world: selected_world_value.clone(),
-                        preview: auction.status == "preview",
+    let realtime_target_candidate =
+        match (session_snapshot.as_ref(), requested_page_target.as_ref()) {
+            (None, _) => PublicRealtimeTarget::Checking,
+            (Some(Err(_)), _) => PublicRealtimeTarget::SessionError,
+            (Some(Ok(_)), Some(requested)) => match page_realtime_target.read().as_ref() {
+                Some((loaded, target)) if loaded == requested => {
+                    if matches!(target, PublicRealtimeTarget::Auction { .. }) && !authenticated {
+                        PublicRealtimeTarget::Anonymous
+                    } else {
+                        target.clone()
                     }
                 }
-            }
-            Some((loaded_world, Ok(None))) if loaded_world == selected_world_value => {
-                PublicRealtimeTarget::Inactive {
-                    world: selected_world_value.clone(),
-                    preview: false,
+                _ => PublicRealtimeTarget::Checking,
+            },
+            (Some(Ok(_)), None) => match current_auction.read().as_ref() {
+                Some((loaded_world, Ok(Some(auction))))
+                    if loaded_world == &selected_world_value
+                        && matches!(auction.status.as_str(), "live" | "final")
+                        && authenticated =>
+                {
+                    PublicRealtimeTarget::Auction {
+                        auction_id: auction.id.clone(),
+                        world: auction.world.clone(),
+                        preview_revision: auction.preview_revision,
+                    }
                 }
-            }
-            Some((loaded_world, Err(_))) if loaded_world == selected_world_value => {
-                PublicRealtimeTarget::CurrentError { world: selected_world_value.clone() }
-            }
-            _ => PublicRealtimeTarget::Checking,
-        },
-    };
+                Some((loaded_world, Ok(Some(auction))))
+                    if loaded_world == &selected_world_value =>
+                {
+                    if matches!(auction.status.as_str(), "live" | "final") {
+                        PublicRealtimeTarget::Anonymous
+                    } else {
+                        PublicRealtimeTarget::Inactive {
+                            world: selected_world_value.clone(),
+                            preview: auction.status == "preview",
+                        }
+                    }
+                }
+                Some((loaded_world, Ok(None))) if loaded_world == &selected_world_value => {
+                    PublicRealtimeTarget::Inactive {
+                        world: selected_world_value.clone(),
+                        preview: false,
+                    }
+                }
+                Some((loaded_world, Err(_))) if loaded_world == &selected_world_value => {
+                    PublicRealtimeTarget::CurrentError { world: selected_world_value.clone() }
+                }
+                _ => PublicRealtimeTarget::Checking,
+            },
+        };
     // 同一 world 的权威 current 快照重读期间保留既有目标；首屏、登出和 world 切换仍失败关闭。
     let remembered_target = stable_realtime_target();
     let realtime_target = match realtime_target_candidate {
@@ -375,6 +383,16 @@ pub(crate) fn PublicShell() -> Element {
     let can_manual_refresh =
         matches!(connection_state, PublicConnectionState::Degraded | PublicConnectionState::Manual);
 
+    let go_home = EventHandler::new(move |()| {
+        if auction_home_needs_query_reset {
+            // 同路由的首页入口仍清除历史场次与筛选；两端导航共享同一写回动作。
+            let query = public_auction_home_query(&selected_world.peek());
+            set_public_query(&query, false);
+        }
+        navigation_open.set(false);
+        location_generation.set(location_generation().saturating_add(1));
+    });
+
     rsx! {
         div { class: "public-shell",
             PublicRealtimeOwner {
@@ -391,55 +409,21 @@ pub(crate) fn PublicShell() -> Element {
                     class: "public-shell__logo",
                     to: auction_home_href.clone(),
                     onclick_only: auction_home_needs_query_reset,
-                    onclick: move |_| {
-                        if auction_home_needs_query_reset {
-                            // 同一路由时直接写入首页查询，否则 Router 可能保留当前历史拍卖 URL。
-                            let query = public_auction_home_query(&selected_world.peek());
-                            set_public_query(&query, false);
-                        }
-                        location_generation
-                            .set(location_generation().saturating_add(1));
-                    },
+                    onclick: move |_| go_home.call(()),
                     {t!("app-title")}
                 }
-                button {
-                    class: "public-shell__nav-toggle",
-                    r#type: "button",
-                    aria_controls: "public-primary-navigation",
-                    aria_expanded: navigation_open().to_string(),
-                    onclick: move |_| navigation_open.set(!navigation_open()),
-                    {t!("nav-label")}
+                presentation::desktop::Navigation {
+                    auction_home_href: auction_home_href.clone(),
+                    reset_home_query: auction_home_needs_query_reset,
+                    on_home: go_home,
                 }
-                nav {
-                    id: "public-primary-navigation",
-                    class: if navigation_open() {
-                        "public-shell__nav public-shell__nav--open"
-                    } else {
-                        "public-shell__nav"
-                    },
-                    aria_label: t!("nav-label"),
-                    onclick: move |_| navigation_open.set(false),
-                    Link {
-                        to: auction_home_href,
-                        onclick_only: auction_home_needs_query_reset,
-                        onclick: move |_| {
-                            if auction_home_needs_query_reset {
-                                // 清除 auction、筛选和分页查询，再重建共享 AuctionIndex 的内容。
-                                let query = public_auction_home_query(&selected_world.peek());
-                                set_public_query(&query, false);
-                            }
-                            location_generation
-                                .set(location_generation().saturating_add(1));
-                        },
-                        {t!("nav-auctions")}
-                    }
-                    Link { to: Route::BidLog {}, {t!("page-bidlog-title")} }
-                    Link { to: Route::AuctionList {}, {t!("nav-auction-history")} }
-                    Link { to: Route::History {}, {t!("nav-price-history")} }
-                    Link { to: Route::Rules {}, {t!("page-rules-title")} }
-                    Link { to: Route::Blacklist {}, {t!("nav-blacklist")} }
-                    Link { to: Route::CompensationPool {}, {t!("page-compensation-pool-title")} }
-                    Link { to: Route::Forum {}, {t!("nav-forum")} }
+                presentation::mobile::Navigation {
+                    auction_home_href,
+                    reset_home_query: auction_home_needs_query_reset,
+                    open: navigation_open(),
+                    on_toggle: move |_| navigation_open.set(!navigation_open()),
+                    on_close: move |_| navigation_open.set(false),
+                    on_home: go_home,
                 }
                 div { class: "public-shell__controls",
                     WorldPicker { selected_world }

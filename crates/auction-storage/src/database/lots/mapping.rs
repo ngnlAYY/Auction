@@ -215,7 +215,9 @@ pub(super) fn map_equipment(
     let quality = quality_range(&stored.quality);
     let equipment_group = stored.equipment_group(name, category, colors);
     let mut stats = BTreeMap::new();
-    let mut rolls = Vec::new();
+    // 保留原 sum 的浮点初值及属性顺序，不为均值另建每件装备的 roll 列表。
+    let mut roll_total = -0.0_f64;
+    let mut roll_count = 0_usize;
     for (stat_name, stat) in stored.stats {
         if !public_text(&stat_name, 128)
             || !public_text(&stat.value, 256)
@@ -226,14 +228,12 @@ pub(super) fn map_equipment(
         let roll =
             quality.and_then(|range| stat.base.map(|base| public_equipment_roll(base, range)));
         if let Some(roll) = roll {
-            rolls.push(roll);
+            roll_total += roll;
+            roll_count += 1;
         }
         stats.insert(stat_name, PublicEquipmentStat { value: stat.value, base: stat.base, roll });
     }
-    let avg_roll = (!rolls.is_empty()).then(|| {
-        let total: f64 = rolls.iter().sum();
-        (total / rolls.len() as f64 * 10.0).round() / 10.0
-    });
+    let avg_roll = (roll_count > 0).then(|| (roll_total / roll_count as f64 * 10.0).round() / 10.0);
     let path = if world_id == "isekai" {
         format!("/isekai/equip/{external_id}")
     } else {

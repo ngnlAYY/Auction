@@ -46,14 +46,14 @@ pub(crate) fn map_lot_page(
     if game_equipment_urls.len() != expected_links {
         return None;
     }
-    let mut game_equipment_urls = game_equipment_urls.into_iter();
     let lots = if projection.projection_kind == "preview" {
         PublicLotListItemsResponse::Preview(
             page.preview
                 .into_iter()
-                .map(|lot| {
+                .zip(game_equipment_urls)
+                .map(|(lot, game_equipment_url)| {
                     let mut mapped = map_preview_lot(lot);
-                    mapped.game_equipment_url = game_equipment_urls.next().unwrap_or_default();
+                    mapped.game_equipment_url = game_equipment_url;
                     mapped
                 })
                 .collect(),
@@ -62,18 +62,15 @@ pub(crate) fn map_lot_page(
         PublicLotListItemsResponse::Live(
             page.live
                 .into_iter()
-                .map(|lot| {
+                .zip(game_equipment_urls)
+                .map(|(lot, game_equipment_url)| {
                     let mut mapped = map_live_lot(lot, None);
-                    mapped.equipment.game_equipment_url =
-                        game_equipment_urls.next().unwrap_or_default();
+                    mapped.equipment.game_equipment_url = game_equipment_url;
                     mapped
                 })
                 .collect(),
         )
     };
-    if game_equipment_urls.next().is_some() {
-        return None;
-    }
     let response = map_lot_envelope(projection);
     Some(PublicLotEnvelopeResponse {
         lots: Some(lots),
@@ -85,27 +82,28 @@ pub(crate) fn map_lot_page(
     })
 }
 
+/// 接管已校验投影中的旧链接；调用方只能在解析器成功后映射替换链接，不能再直接返回原投影。
 pub(crate) fn lot_page_equipment_targets(
-    page: &PublicLotPage,
+    page: &mut PublicLotPage,
 ) -> Result<Vec<PublicEquipmentLinkTarget>, ()> {
     let targets = if page.projection.projection_kind == "preview" {
         page.preview
-            .iter()
+            .iter_mut()
             .map(|lot| PublicEquipmentLinkTarget {
                 lot_id: lot.id,
                 equipment_id: lot.equipment_id,
                 world_id: page.projection.world_id.clone(),
-                projected_game_equipment_url: lot.game_equipment_url.clone(),
+                projected_game_equipment_url: std::mem::take(&mut lot.game_equipment_url),
             })
             .collect::<Vec<_>>()
     } else {
         page.live
-            .iter()
+            .iter_mut()
             .map(|lot| PublicEquipmentLinkTarget {
                 lot_id: lot.id,
                 equipment_id: lot.equipment_id,
                 world_id: page.projection.world_id.clone(),
-                projected_game_equipment_url: lot.equipment.game_equipment_url.clone(),
+                projected_game_equipment_url: std::mem::take(&mut lot.equipment.game_equipment_url),
             })
             .collect::<Vec<_>>()
     };
@@ -115,16 +113,20 @@ pub(crate) fn lot_page_equipment_targets(
     Ok(targets)
 }
 
+/// 详情与列表使用同一链接所有权转移，保留完整投影校验在提取之前执行。
 pub(crate) fn lot_detail_equipment_target(
-    detail: &PublicLotDetail,
+    detail: &mut PublicLotDetail,
     lot_id: Uuid,
 ) -> Result<PublicEquipmentLinkTarget, ()> {
     let projected_game_equipment_url = detail
         .preview
-        .as_ref()
-        .map(|preview| preview.equipment.game_equipment_url.clone())
+        .as_mut()
+        .map(|preview| std::mem::take(&mut preview.equipment.game_equipment_url))
         .or_else(|| {
-            detail.live.as_ref().map(|live| live.summary.equipment.game_equipment_url.clone())
+            detail
+                .live
+                .as_mut()
+                .map(|live| std::mem::take(&mut live.summary.equipment.game_equipment_url))
         })
         .ok_or(())?;
     let target = PublicEquipmentLinkTarget {

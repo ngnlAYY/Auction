@@ -4,28 +4,25 @@ use auction_domain::DomainError;
 
 use crate::{
     AdminAuctionCreatePort, AdminAuctionCreateTransaction, AdminAuctionSummary,
-    AdminCreateAuctionCommand, ApplicationError, ApplicationFuture, AuctionPolicyTemplate, Clock,
+    AdminCreateAuctionCommand, ApplicationError, ApplicationFuture, AuctionPolicyTemplate,
     CommandLedgerError, CompetitionTransaction, CompetitionTransactionError, StoredCommand,
     TransactionPolicy, TransactionRunner,
 };
 
 /// Admin 创建拍卖用例。
-pub struct AdminAuctionCreateService<R, C> {
+pub struct AdminAuctionCreateService<R> {
     repository: Arc<R>,
-    // 保留既有装配签名；命令时刻由锁后的事务端口提供。
-    _clock: Arc<C>,
     policy: AuctionPolicyTemplate,
 }
 
-impl<R, C> AdminAuctionCreateService<R, C>
+impl<R> AdminAuctionCreateService<R>
 where
     R: TransactionRunner,
     R::Transaction: CompetitionTransaction + AdminAuctionCreateTransaction,
-    C: Clock,
 {
-    /// 建立只依赖事务端口和时钟的创建用例。
-    pub fn new(repository: Arc<R>, clock: Arc<C>, policy: AuctionPolicyTemplate) -> Self {
-        Self { repository, _clock: clock, policy }
+    /// 建立只依赖事务端口和冻结策略的创建用例；命令时刻由锁后的事务端口提供。
+    pub fn new(repository: Arc<R>, policy: AuctionPolicyTemplate) -> Self {
+        Self { repository, policy }
     }
 
     /// 在同一 Serializable 事务中创建 draft、登记 intake target、账本、审计和创建事件。
@@ -118,11 +115,10 @@ where
     }
 }
 
-impl<R, C> AdminAuctionCreatePort for AdminAuctionCreateService<R, C>
+impl<R> AdminAuctionCreatePort for AdminAuctionCreateService<R>
 where
     R: TransactionRunner + 'static,
     R::Transaction: CompetitionTransaction + AdminAuctionCreateTransaction,
-    C: Clock,
 {
     fn create(
         &self,

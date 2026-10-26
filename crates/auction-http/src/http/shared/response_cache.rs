@@ -20,13 +20,13 @@ pub(crate) async fn no_store(request: Request, next: Next) -> Response {
 async fn with_policy(request: Request, next: Next, policy: HeaderValue) -> Response {
     let mut response = next.run(request).await;
     // no-store 分组始终兜住敏感响应；no-cache 分组不能放宽 handler 的禁止存储策略。
-    let handler_forbids_storage =
-        response.headers().get_all(header::CACHE_CONTROL).iter().any(|value| {
+    if policy == "no-store"
+        || !response.headers().get_all(header::CACHE_CONTROL).iter().any(|value| {
             value.to_str().is_ok_and(|value| {
                 value.split(',').any(|directive| directive.trim().eq_ignore_ascii_case("no-store"))
             })
-        });
-    if policy == "no-store" || !handler_forbids_storage {
+        })
+    {
         response.headers_mut().insert(header::CACHE_CONTROL, policy);
     }
     response

@@ -388,6 +388,7 @@ account-login-required = 使用您的出价 Key 登录，查看您的出价与�
 account-login-cta = 登录
 account-no-bids = 您还没有出过价。
 account-no-proxies = 暂无生效中的代理出价。
+account-section-navigation = 账户分区导航
 account-watches-title = 当期标记装备
 account-watches-loading = 正在加载当期标记装备…
 account-watches-error = 未能完整加载标记装备列表，请重试。

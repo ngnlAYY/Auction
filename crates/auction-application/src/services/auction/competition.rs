@@ -7,7 +7,7 @@ use auction_domain::{
 use serde::Serialize;
 
 use crate::{
-    ApplicationError, Clock, CompetitionCommandAuditContext, CompetitionCommandAuditKind,
+    ApplicationError, CompetitionCommandAuditContext, CompetitionCommandAuditKind,
     CompetitionCommandOutcome, CompetitionCommandPort, CompetitionTransaction,
     CompetitionWireTimestamp, ExecuteSlowProxyCommand, ProxyUsageContext, RequestHash,
     SLOW_PROXY_COMMAND_KIND, SlowProxyCommandPort, SlowProxyExecutionContext, StoredCommand,
@@ -301,22 +301,19 @@ const fn proxy_mode_name(mode: ProxyMode) -> &'static str {
     }
 }
 
-/// 竞价用例服务，只编排端口和纯领域规划器。
-pub struct CompetitionService<R, C> {
+/// 竞价用例服务，只编排端口和纯领域规划器；命令时刻只从锁后的事务端口读取。
+pub struct CompetitionService<R> {
     repository: Arc<R>,
-    // 保留既有装配签名；命令时刻由锁后的事务端口提供。
-    _clock: Arc<C>,
 }
 
-impl<R, C> CompetitionService<R, C>
+impl<R> CompetitionService<R>
 where
     R: TransactionRunner,
     R::Transaction: CompetitionTransaction,
-    C: Clock,
 {
     /// 建立不持有具体数据库或网络实现的竞价用例。
-    pub fn new(repository: Arc<R>, clock: Arc<C>) -> Self {
-        Self { repository, _clock: clock }
+    pub fn new(repository: Arc<R>) -> Self {
+        Self { repository }
     }
 
     /// 锁定竞价快照、计算计划并交给仓储在同一事务中原子应用。
@@ -669,11 +666,10 @@ fn map_slow_proxy_planning_error(error: DomainError) -> ApplicationError {
     }
 }
 
-impl<R, C> CompetitionCommandPort for CompetitionService<R, C>
+impl<R> CompetitionCommandPort for CompetitionService<R>
 where
     R: TransactionRunner,
     R::Transaction: CompetitionTransaction,
-    C: Clock,
 {
     fn place_bid(
         &self,
@@ -697,11 +693,10 @@ where
     }
 }
 
-impl<R, C> SlowProxyCommandPort for CompetitionService<R, C>
+impl<R> SlowProxyCommandPort for CompetitionService<R>
 where
     R: TransactionRunner,
     R::Transaction: CompetitionTransaction,
-    C: Clock,
 {
     fn execute_slow_proxy(
         &self,

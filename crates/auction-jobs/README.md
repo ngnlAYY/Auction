@@ -46,6 +46,7 @@ drain 与任务退出，`runtime/delivery/lease.rs` 统一准备、交接与发�
 本轮已写或历史未知仍保留 reconcile/人工授权，不能把暂时数据库读取失败误记为未知外写。
 生命周期、结算、履约与 recovery action 的并发任务也沿用领取前绝对截止，任务排队不重置剩余预算；
 首次 poll 已到期时不开始应用命令或外呼，保留原持久 claim 交由租约恢复。
+持久化 runner 在启动任何循环前先轮询停止 future；装配期间已到达的停止请求直接进入 drain，不先派生任务再补停机通知。
 
 `run_persistent_until_shutdown` 消费持久化轮次；领取后冻结 owner、精确租约与 state_version。周拍卖只在配置
 allowlist、runtime 开关和数据库 enabled world 的交集中新建，已有轮次按冻结事实执行，配置变更不以旧命令 ID 重发

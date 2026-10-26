@@ -8,7 +8,8 @@ publish.workspace = true
 [dependencies]
 auction-application.workspace = true
 auction-domain.workspace = true
-chrono.workspace = true
+# 旧版标准 cron 的 Local 时区由配置 owner 解析；浏览器无需本机时区数据库。
+chrono = { workspace = true, features = ["clock"] }
 chrono-tz.workspace = true
 croner.workspace = true
 ipnet.workspace = true

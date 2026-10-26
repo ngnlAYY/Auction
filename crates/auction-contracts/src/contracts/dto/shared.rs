@@ -1,6 +1,25 @@
-//! 通用响应、健康探针和错误 DTO。
+//! 通用响应、健康探针、错误 DTO 与字段反序列化边界。
 
 use super::*;
+
+/// 字段必须显式出现，但可为 `null`；调用方不得附加 `default` 放宽缺失字段。
+pub(super) fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
+/// 复现 Go 非指针标量的 `null` 零值语义；缺失字段由调用方的 `default` 单独控制。
+/// 类型错误仍拒绝，零值交给业务边界生成原有错误分类。
+pub(super) fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Option::<T>::deserialize(deserializer).map(Option::unwrap_or_default)
+}
 
 /// 旧系统统一响应外壳的成功形式。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

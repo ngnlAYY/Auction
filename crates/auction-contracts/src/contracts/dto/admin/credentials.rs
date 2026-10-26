@@ -1,5 +1,6 @@
 //! credentials 相关 DTO。
 
+use super::super::shared::deserialize_required_option;
 use super::*;
 
 /// Admin 凭据导入请求；Cookie 与登录输入互斥，敏感字段只在本次请求内存在。
@@ -111,15 +112,6 @@ pub struct AdminCredentialResponse {
     #[serde(deserialize_with = "deserialize_required_option")]
     pub rotated_at: Option<String>,
     pub updated_at: String,
-}
-
-/// `Option` 默认会把缺失字段折叠成 `None`；旧 v1 decoder 要求 nullable 字段必须显式出现。
-fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
 }
 
 /// Admin 凭据列表分页。

@@ -8,7 +8,7 @@ use std::error::Error as _;
 use auction_contracts::ApiErrorResponse;
 use axum::{
     Json,
-    body::{Body, to_bytes},
+    body::{Body, Bytes, to_bytes},
     extract::{Request, State},
     http::{HeaderMap, Method, StatusCode, header},
     middleware::Next,
@@ -149,27 +149,35 @@ enum OversizedPrefixResult {
 }
 
 /// 只保留 `limit` 字节用于分类，并通过额外观察一个字节确认请求是否真正超限。
-async fn read_bounded_prefix(body: Body, limit: usize) -> Result<(Vec<u8>, bool), ()> {
+/// 单帧正文直接交给解码器；只有多帧才合并，不预分配整条路由上限或复制超限观察字节。
+async fn read_bounded_prefix(body: Body, limit: usize) -> Result<(Bytes, bool), ()> {
     let mut stream = body.into_data_stream();
-    let mut bytes = Vec::with_capacity(limit.min(64 << 10).saturating_add(1));
-    let observation_limit = limit.saturating_add(1);
+    let mut first = None;
+    let mut bytes = Vec::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|_| ())?;
         if chunk.is_empty() {
             continue;
         }
-        let remaining = observation_limit.saturating_sub(bytes.len());
-        if remaining == 0 {
-            return Ok((bytes, true));
-        }
+        let buffered = first.as_ref().map_or(bytes.len(), Bytes::len);
+        let remaining = limit.saturating_sub(buffered);
         let copied = chunk.len().min(remaining);
+        if let Some(first) = first.take() {
+            if copied == 0 {
+                return Ok((first, true));
+            }
+            bytes.reserve(buffered + copied);
+            bytes.extend_from_slice(&first);
+        } else if bytes.is_empty() && copied == chunk.len() {
+            first = Some(chunk);
+            continue;
+        }
         bytes.extend_from_slice(&chunk[..copied]);
-        if bytes.len() > limit || copied < chunk.len() {
-            bytes.truncate(limit);
-            return Ok((bytes, true));
+        if copied < chunk.len() {
+            return Ok((bytes.into(), true));
         }
     }
-    Ok((bytes, false))
+    Ok((first.unwrap_or_else(|| bytes.into()), false))
 }
 
 /// 使用通用 JSON 流确定首值是否能在上限内闭合，再对完整首值执行目标 DTO 校验。

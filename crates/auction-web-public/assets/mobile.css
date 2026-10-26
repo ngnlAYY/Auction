@@ -1,0 +1,452 @@
+@layer foundation, surface, desktop, mobile;
+
+@layer mobile {
+/* Public 手机布局与触控尺寸；只改变展示，不隐藏用户选择的表格列或复制表单。 */
+/* ===== 响应式：移动端全局布局 ===== */
+@media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
+  .public-desktop {
+    display: none;
+  }
+
+  .public-catalog-category-picker {
+    display: grid;
+    grid-area: 1 / 1;
+    gap: var(--space-1);
+    min-inline-size: 0;
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  .public-catalog-category-picker select {
+    inline-size: 100%;
+    min-inline-size: 0;
+    min-block-size: var(--size-target);
+    padding: var(--space-2);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-text);
+    background: var(--color-surface);
+    font: inherit;
+    font-size: 1rem;
+  }
+
+  .public-catalog-category-picker select:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  .public-auction-type-toolbar > .public-catalog-columns__toggle {
+    align-self: end;
+  }
+
+  .public-auction-group-toolbar > .public-auction-filter {
+    inline-size: 100%;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .public-auction-group-toolbar .public-auction-filter__label {
+    flex-basis: auto;
+  }
+
+  .public-catalog-level-filter {
+    inline-size: 100%;
+  }
+
+  .public-catalog-level-filter__controls {
+    gap: var(--space-1) var(--space-3);
+  }
+
+  .public-account-navigation.public-mobile {
+    display: block;
+    padding-block-end: var(--space-2);
+  }
+
+  .public-account-navigation summary {
+    min-block-size: var(--size-target);
+    padding: var(--space-2);
+    cursor: pointer;
+    overflow-wrap: anywhere;
+  }
+
+  .public-account-navigation nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+
+  .public-account-navigation a {
+    display: flex;
+    align-items: center;
+    min-block-size: var(--size-target);
+  }
+
+  .public-session-preference fieldset,
+  .public-outbid-preference fieldset {
+    padding: var(--space-3);
+  }
+
+  .public-session-preference__choices,
+  .public-outbid-preference__choices {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+
+  .public-session-preference__choices > div,
+  .public-outbid-preference__choices > div {
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .public-session-preference__actions button,
+  .public-outbid-preference__actions button {
+    flex: 1 1 8rem;
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .public-account-login-page {
+    inline-size: 100%;
+    margin-inline: auto;
+  }
+
+  .public-history-filter-actions__apply.public-mobile {
+    display: inline-flex;
+    justify-content: center;
+  }
+
+  .public-history-filter-actions,
+  .public-auction-bid-form__actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+  }
+
+  .public-history-filter-actions__apply {
+    color: var(--color-accent-contrast);
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+  }
+
+  .public-auction-bid-log-controls,
+  .public-auction-rounds__controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  }
+
+  .public-auction-bid-log-controls label,
+  .public-auction-rounds__controls label {
+    display: grid;
+    min-inline-size: 0;
+    gap: var(--space-1);
+  }
+
+  .public-auction-bid-log-controls select,
+  .public-auction-rounds__controls select {
+    inline-size: 100%;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    min-block-size: var(--size-target);
+  }
+
+  .public-auction-bid-log-toolbar input {
+    flex: 1 1 10rem;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+
+  .public-auction-bid-log-toolbar label {
+    flex-basis: 100%;
+  }
+
+  .public-shell__header {
+    gap: var(--space-3);
+    padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
+  }
+
+  .public-shell__content {
+    padding-block-start: var(--space-4);
+    padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
+  }
+
+  .public-shell__logo {
+    margin-inline-end: auto;
+  }
+
+  .public-shell__nav-toggle {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .public-shell__nav {
+    display: none;
+    inline-size: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-4);
+  }
+
+  .public-shell__nav--open {
+    display: grid;
+  }
+
+  .public-shell__nav a {
+    display: flex;
+    align-items: center;
+    min-inline-size: 0;
+    min-block-size: var(--size-target);
+    padding: var(--space-2);
+    overflow-wrap: anywhere;
+  }
+
+  .public-shell__controls {
+    gap: var(--space-2) var(--space-3);
+    inline-size: 100%;
+    flex-wrap: wrap;
+    margin-inline-start: 0;
+  }
+
+  .public-shell__controls > * {
+    max-inline-size: 100%;
+  }
+
+  .public-world-switcher {
+    flex-wrap: wrap;
+  }
+
+  .public-account-session-menu {
+    flex: 1 1 100%;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-3);
+    padding-block-start: var(--space-2);
+    border-block-start: var(--border-width) solid var(--color-border);
+  }
+
+  .public-account-session-menu > a {
+    display: inline-flex;
+    align-items: center;
+    min-block-size: var(--size-target);
+  }
+
+  .public-account-session-error {
+    position: static;
+    flex-basis: 100%;
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .public-auction-round__end {
+    flex-wrap: wrap;
+  }
+
+  .public-auction-filter {
+    margin-block-end: var(--space-4);
+  }
+
+  .public-auction-filter__label {
+    flex-basis: 100%;
+  }
+
+  .public-auction-filter__tab {
+    min-block-size: var(--size-target);
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  /* 表头、列宽和行结构保持不变；操作列内部纵排让手机上的三个动作各占一整行。 */
+  .public-auction-catalog__action-controls,
+  .public-shell .public-auction-catalog td.public-auction-catalog__actions .public-auction-catalog__actions-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+
+  .public-shell .public-auction-catalog td.public-auction-catalog__actions :is(.public-auction-catalog__actions-list, .public-lot-watch) > :is(button, a) {
+    min-block-size: var(--size-target);
+    padding-inline: var(--space-1);
+  }
+
+  .public-auction-bid-form__actions button {
+    min-block-size: var(--size-target);
+    flex: 1 1 0;
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .public-auction-summary {
+    flex-direction: column;
+  }
+
+  .public-auction-preview-stats {
+    inline-size: 100%;
+  }
+
+  .public-history-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .public-history-primary-filters,
+  .public-history-view-controls,
+  .public-history-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .public-history-filter-toolbar {
+    align-items: stretch;
+  }
+
+  .public-history-filter-toolbar button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .public-history-settings-panel {
+    padding: var(--space-3);
+  }
+
+  .public-history-primary-filters > label,
+  .public-history-view-controls > label {
+    min-inline-size: 0;
+  }
+
+  .public-history-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  .public-history-stat {
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .public-auction-history-controls label {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+
+  .public-auction-history-controls select {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    flex: 1;
+  }
+
+  .public-auction-history-links {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .public-account-login-form,
+  .public-account-login-prompt {
+    padding: var(--space-4);
+  }
+
+  .public-history-table {
+    min-inline-size: 0;
+  }
+
+  .public-compensation-heading {
+    display: grid;
+  }
+
+  .public-compensation-balance {
+    min-width: 0;
+  }
+
+  .public-history-pagination {
+    flex-wrap: wrap;
+  }
+}
+
+/* ===== 响应式：拍品详情与论坛移动端布局 ===== */
+@media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
+  .public-auction-lot__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .public-auction-equipment__facts-list {
+    gap: var(--space-2);
+  }
+
+  .public-auction-equipment__fact {
+    gap: var(--space-1);
+  }
+
+  .public-auction-lot__bidding dl {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    overflow-wrap: anywhere;
+  }
+
+  .public-auction-equipment,
+  .public-auction-lot__bidding {
+    min-inline-size: 0;
+    padding: var(--space-3);
+  }
+
+  .public-forum-card__header,
+  .public-forum-card__content,
+  .public-forum-state {
+    padding: var(--space-4);
+  }
+
+  .public-forum-metadata {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 触控设备沿用原生链接、选择器和表单；命中区域独立于桌面的紧凑视觉密度。 */
+@media screen and (pointer: coarse), screen and (max-width: 48rem) {
+  .public-shell__logo,
+  .public-auction-view-switch__options a,
+  .public-auction-lot__back a,
+  .public-auction-equipment__link,
+  .public-account-login-cta {
+    display: inline-flex;
+    align-items: center;
+    min-block-size: var(--size-target);
+  }
+
+  .public-catalog-level-filter input[type="text"] {
+    min-block-size: var(--size-target);
+    font-size: 1rem;
+  }
+
+  .public-world-switcher select,
+  .public-history-group-toggle,
+  .public-history-player-filter,
+  .public-auction-history-links a,
+  .public-auction-catalog__actions-list > button,
+  .public-auction-catalog__login,
+  .public-lot-watch button,
+  .public-lot-watch__login,
+  .public-lot-watches__sync button,
+  .public-auction-bid-form input[type="text"],
+  .public-auction-bid-form select,
+  .public-auction-bid-form button {
+    min-block-size: var(--size-target);
+  }
+
+  .public-auction-history-links a,
+  .public-history-player-filter {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .public-auction-bid-form__mode {
+    align-items: center;
+  }
+
+  .public-auction-bid-form .public-auction-bid-form__mode label {
+    display: flex;
+    align-items: center;
+    min-block-size: var(--size-target);
+    cursor: pointer;
+  }
+
+  .public-compensation-expand {
+    inline-size: 100%;
+    block-size: var(--size-target);
+    padding-inline: 0;
+    border-radius: var(--radius-sm);
+  }
+}
+}

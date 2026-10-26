@@ -215,6 +215,9 @@ pub(super) fn cookie_header(
     cookie: &EhentaiCookie,
     operation: EhentaiOperation,
 ) -> Result<HeaderValue, EhentaiError> {
+    if !valid_cookie(cookie) {
+        return Err(EhentaiError::credential(operation));
+    }
     let mut header =
         HeaderValue::from_str(cookie.as_str()).map_err(|_| EhentaiError::credential(operation))?;
     header.set_sensitive(true);
@@ -222,7 +225,9 @@ pub(super) fn cookie_header(
 }
 
 pub(super) fn valid_cookie(cookie: &EhentaiCookie) -> bool {
-    !cookie.0.is_empty() && cookie.0.len() <= MAXIMUM_COOKIE_BYTES
+    cookie.is_active()
+        && !cookie.as_str().is_empty()
+        && cookie.as_str().len() <= MAXIMUM_COOKIE_BYTES
 }
 
 pub(super) fn valid_rendered_thread(rendered: &ForumRenderedThread) -> bool {

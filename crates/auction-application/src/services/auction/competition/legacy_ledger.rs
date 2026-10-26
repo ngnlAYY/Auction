@@ -57,7 +57,7 @@ pub(super) fn replay(
                 return Err(legacy_payload_error());
             }
             let effective_end_at = result.effective_end.clone();
-            (result.into_plan(0)?, None, effective_end_at)
+            (result.to_plan(0)?, None, effective_end_at)
         }
         CompetitionCommand::CreateProxy(create) => {
             let result: LegacyProxyResult =
@@ -65,7 +65,7 @@ pub(super) fn replay(
             if !result.validate_create_proxy(create) {
                 return Err(legacy_payload_error());
             }
-            let plan = result.clone().into_plan(command)?;
+            let plan = result.to_plan(command)?;
             let proxy = Some(result.command_outcome(&plan)?);
             let effective_end_at = result.response_effective_end_at()?;
             (plan, proxy, effective_end_at)
@@ -76,7 +76,7 @@ pub(super) fn replay(
             if !result.validate_lower_proxy(lower) {
                 return Err(legacy_payload_error());
             }
-            let plan = result.clone().into_plan(command)?;
+            let plan = result.to_plan(command)?;
             let proxy = Some(result.command_outcome(&plan)?);
             let effective_end_at = result.response_effective_end_at()?;
             (plan, proxy, effective_end_at)
@@ -286,7 +286,7 @@ impl LegacyAcceptedBidTransition {
             && self.accepted_state_version > 0
     }
 
-    fn into_domain(self) -> Result<AcceptedBid, ApplicationError> {
+    fn to_domain(&self) -> Result<AcceptedBid, ApplicationError> {
         Ok(AcceptedBid {
             id: BidId::from_uuid(Uuid::from_bytes(self.bid_id)),
             command_id: CommandId::from_uuid(Uuid::from_bytes(self.origin_command_id)),
@@ -303,7 +303,7 @@ impl LegacyAcceptedBidTransition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LegacyBidResult {
     lot_id: [u8; 16],
@@ -383,7 +383,7 @@ impl LegacyBidResult {
             })
     }
 
-    fn into_plan(self, last_proxy_sequence: u64) -> Result<CompetitionPlan, ApplicationError> {
+    fn to_plan(&self, last_proxy_sequence: u64) -> Result<CompetitionPlan, ApplicationError> {
         // 旧 BidResult 不携带 lot 原始起拍价；无副作用重放使用首条已接受事实作为安全下界，
         // 不能把可能更高的最终价反向冒充起拍价。
         let replay_start =
@@ -397,8 +397,8 @@ impl LegacyBidResult {
             self.facts.last().is_some_and(|fact| fact.mechanism == LegacyBidMechanism::Proxy);
         let public_bids = self
             .facts
-            .into_iter()
-            .map(LegacyAcceptedBidTransition::into_domain)
+            .iter()
+            .map(LegacyAcceptedBidTransition::to_domain)
             .collect::<Result<Vec<_>, _>>()?;
         let plan = CompetitionPlan {
             public_bids,
@@ -583,7 +583,7 @@ impl LegacyProxyTransitionKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LegacyProxyTransitionRecord {
     transition_number: i64,
@@ -744,7 +744,7 @@ impl LegacyProxyTransitionRecord {
         }
     }
 
-    fn into_domain(self, command_id: CommandId) -> Result<ProxyTransition, ApplicationError> {
+    fn to_domain(&self, command_id: CommandId) -> Result<ProxyTransition, ApplicationError> {
         let transition = ProxyTransition {
             authorization_id: ProxyAuthorizationId::from_uuid(Uuid::nil()),
             command_id,
@@ -768,7 +768,7 @@ impl LegacyProxyTransitionRecord {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LegacyProxyResult {
     authorization_id: [u8; 16],
@@ -994,7 +994,7 @@ impl LegacyProxyResult {
         })
     }
 
-    fn into_plan(self, command: &CompetitionCommand) -> Result<CompetitionPlan, ApplicationError> {
+    fn to_plan(&self, command: &CompetitionCommand) -> Result<CompetitionPlan, ApplicationError> {
         let command_id = command.command_id();
         let authorization_id =
             ProxyAuthorizationId::from_uuid(Uuid::from_bytes(self.authorization_id));
@@ -1029,14 +1029,14 @@ impl LegacyProxyResult {
         };
         let mut proxy_transitions = Vec::with_capacity(current_records.len());
         for record in current_records {
-            let mut transition = record.clone().into_domain(command_id)?;
+            let mut transition = record.to_domain(command_id)?;
             transition.authorization_id = authorization_id;
             proxy_transitions.push(transition);
         }
 
-        let (public_bids, final_lot) = match self.bid {
+        let (public_bids, final_lot) = match self.bid.as_ref() {
             Some(bid) => {
-                let plan = bid.into_plan(
+                let plan = bid.to_plan(
                     u64::try_from(self.authorization_sequence)
                         .map_err(|_| legacy_payload_error())?,
                 )?;

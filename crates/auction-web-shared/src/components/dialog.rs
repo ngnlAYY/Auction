@@ -4,7 +4,7 @@
 //! `[role="dialog"][aria-modal="true"]`）。
 //! 遮罩点击始终不关闭弹窗，避免误触丢失草稿；正常关闭用 Escape、关闭或内容区取消按钮。
 //! `busy=true` 时 Escape 与关闭按钮禁用，内容区取消按钮由调用方同步保护。
-//! 移动形态不靠额外 props：`base.css` 中 `.ui-dialog` 在 ≤48rem（bp-sm）下自动切为贴底抽屉。
+//! `style/mobile.css` 在手机及触控横屏下将同一面板切为贴底抽屉，不重建内容或命令状态。
 //! 文案一律由调用方经 props 传入，本 crate 不持有任何 i18n key。
 
 use std::sync::atomic::{AtomicUsize, Ordering};

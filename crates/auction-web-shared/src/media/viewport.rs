@@ -23,6 +23,9 @@ pub(crate) fn use_visual_viewport() {
 }
 
 #[cfg(target_arch = "wasm32")]
+use std::cell::Cell;
+
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};
 
 #[cfg(target_arch = "wasm32")]
@@ -38,7 +41,7 @@ struct ViewportGuard {
     viewport: web_sys::VisualViewport,
     root: web_sys::HtmlElement,
     callback: Closure<dyn FnMut()>,
-    previous: Vec<(&'static str, String, String)>,
+    previous: [(&'static str, String, String); 4],
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -49,20 +52,19 @@ impl ViewportGuard {
         let root =
             window.document()?.document_element()?.dyn_into::<web_sys::HtmlElement>().ok()?;
         let style = root.style();
-        let previous = VIEWPORT_PROPERTIES
-            .iter()
-            .map(|&name| {
-                (
-                    name,
-                    style.get_property_value(name).unwrap_or_default(),
-                    style.get_property_priority(name),
-                )
-            })
-            .collect();
+        let previous = VIEWPORT_PROPERTIES.map(|name| {
+            (
+                name,
+                style.get_property_value(name).unwrap_or_default(),
+                style.get_property_priority(name),
+            )
+        });
+        let last_dimensions = Cell::new([f64::NAN; 4]);
+        synchronize(&viewport, &root, &last_dimensions);
         let callback_viewport = viewport.clone();
         let callback_root = root.clone();
         let callback = Closure::<dyn FnMut()>::new(move || {
-            synchronize(&callback_viewport, &callback_root);
+            synchronize(&callback_viewport, &callback_root, &last_dimensions);
         });
         let guard = Self { viewport, root, callback, previous };
         for event in ["resize", "scroll"] {
@@ -71,28 +73,34 @@ impl ViewportGuard {
                 .add_event_listener_with_callback(event, guard.callback.as_ref().unchecked_ref())
                 .ok()?;
         }
-        synchronize(&guard.viewport, &guard.root);
         Some(guard)
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn synchronize(viewport: &web_sys::VisualViewport, root: &web_sys::HtmlElement) {
+fn synchronize(
+    viewport: &web_sys::VisualViewport,
+    root: &web_sys::HtmlElement,
+    last_dimensions: &Cell<[f64; 4]>,
+) {
     let dimensions =
         [viewport.width(), viewport.height(), viewport.offset_left(), viewport.offset_top()];
+    let mut previous = last_dimensions.get();
     if dimensions.iter().any(|value| !value.is_finite())
         || dimensions[0] <= 0.0
         || dimensions[1] <= 0.0
+        || dimensions == previous
     {
         return;
     }
     let style = root.style();
-    for (name, value) in VIEWPORT_PROPERTIES.iter().zip(dimensions) {
-        let value = format!("{value}px");
-        if style.get_property_value(name).ok().as_deref() != Some(&value) {
-            let _ = style.set_property(name, &value);
+    // 滚动事件常不改变可见尺寸；只格式化并写入变化项，不逐项往返读取 CSS 字符串。
+    for (index, (&name, value)) in VIEWPORT_PROPERTIES.iter().zip(dimensions).enumerate() {
+        if previous[index] != value && style.set_property(name, &format!("{value}px")).is_ok() {
+            previous[index] = value;
         }
     }
+    last_dimensions.set(previous);
 }
 
 #[cfg(target_arch = "wasm32")]

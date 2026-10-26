@@ -73,8 +73,12 @@ pub(super) use shared::{AdminActionFeedback, admin_api_error_message, format_adm
 /// Admin 登录外壳唯一拥有的 readiness 快照；默认 Dashboard 用它协调首屏门禁。
 pub(crate) type AdminReadinessResource = Resource<Result<bool, String>>;
 
-/// 管理端 surface 样式。设计变量由 `auction-web-shared` 提供。
+/// 三份样式均声明相同层顺序，不依赖静态 head 资源的输出先后。
 const ADMIN_CSS: Asset = asset!("/assets/admin.css", AssetOptions::css().with_static_head(true));
+const ADMIN_DESKTOP_CSS: Asset =
+    asset!("/assets/desktop.css", AssetOptions::css().with_static_head(true));
+const ADMIN_MOBILE_CSS: Asset =
+    asset!("/assets/mobile.css", AssetOptions::css().with_static_head(true));
 
 pub fn run() {
     dioxus::launch(App);
@@ -98,6 +102,8 @@ fn App() -> Element {
     rsx! {
         BaseStylesheet {}
         document::Stylesheet { href: ADMIN_CSS }
+        document::Stylesheet { href: ADMIN_DESKTOP_CSS }
+        document::Stylesheet { href: ADMIN_MOBILE_CSS }
         div { class: "app-root",
             Router::<Route> {}
         }
