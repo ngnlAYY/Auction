@@ -30,7 +30,7 @@ sample_ratio_ppm = 0
 [worker]
 # 可选：Auction 主循环并发数，范围 1-batch_limit，默认 8。
 concurrency = 8
-# 可选：Auction 主循环及兼容 owner 的轮询间隔秒数，范围 1-86400，默认 60。
+# 可选：Auction 主循环及兼容 owner 的轮询间隔秒数，范围 1-86400，默认 60；主循环在生命周期、慢速代理或结算的未来到期时刻提前唤醒，本值是最长等待。
 poll_interval_seconds = 60
 # 可选：生命周期和结算各自的单轮批次上限，范围 1-1000，默认 100。
 batch_limit = 100

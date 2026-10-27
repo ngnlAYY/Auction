@@ -2,11 +2,11 @@
 
 use std::net::SocketAddr;
 
-use auction_application::{PublicRealtimeAuctionStatus, PublicRealtimeEvent};
+use auction_application::PublicRealtimeAuctionStatus;
 use axum::{
     extract::{
         ConnectInfo, State, WebSocketUpgrade,
-        ws::{CloseFrame, Message, WebSocket},
+        ws::{CloseFrame, Message, Utf8Bytes, WebSocket},
     },
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
@@ -18,7 +18,6 @@ use tokio::{
 
 use super::super::realtime_hub::{RealtimeSubscription, RealtimeSubscriptionError};
 use super::super::{PublicApiState, api_error, not_found_error, parse_query};
-use super::mapping::map_event;
 use super::session::{RealtimeSession, SessionCheckError};
 use super::target::{RealtimeTarget, parse_websocket_target};
 
@@ -28,13 +27,11 @@ const PONG_WAIT: Duration = Duration::from_secs(60);
 const PING_PERIOD: Duration = Duration::from_secs(50);
 
 const CLOSE_GOING_AWAY: u16 = 1001;
-const CLOSE_PROTOCOL_ERROR: u16 = 1002;
 const CLOSE_POLICY_VIOLATION: u16 = 1008;
 const CLOSE_MESSAGE_TOO_BIG: u16 = 1009;
 const CLOSE_TRY_AGAIN_LATER: u16 = 1013;
 
 const REASON_SHUTDOWN: &str = "服务正在关闭";
-const REASON_PROTOCOL_ERROR: &str = "实时事件合同错误";
 const REASON_CLIENT_DATA: &str = "实时连接只允许服务端推送";
 const REASON_SLOW_CONSUMER: &str = "连接消费速度过慢";
 const REASON_SESSION_EXPIRED: &str = "会话已失效";
@@ -144,27 +141,18 @@ pub(crate) async fn websocket(
         .max_message_size(MAX_MESSAGE_BYTES)
         .max_frame_size(MAX_MESSAGE_BYTES)
         .on_upgrade(move |socket| {
-            stream_events(
-                socket,
-                target,
-                subscription,
-                session,
-                discovery_permit,
-                realtime_shutdown,
-            )
+            stream_events(socket, subscription, session, discovery_permit, realtime_shutdown)
         })
         .into_response()
 }
 
 async fn stream_events(
     mut socket: WebSocket,
-    target: RealtimeTarget,
     mut subscription: RealtimeSubscription,
     mut session: RealtimeSession,
     _discovery_permit: Option<OwnedSemaphorePermit>,
     mut realtime_shutdown: watch::Receiver<bool>,
 ) {
-    let expected_stream = target.stream_key();
     let mut ticker = interval_at(Instant::now() + PING_PERIOD, PING_PERIOD);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let pong_deadline = sleep(PONG_WAIT);
@@ -231,8 +219,9 @@ async fn stream_events(
                         return;
                     }
                 },
-                RealtimeInput::Event(event) => {
-                    let Some(event) = event else {
+                RealtimeInput::Event(frame) => {
+                    // Hub 只投递 sink 已按注册表校验、并按本订阅 stream 精确路由的已编码帧。
+                    let Some(frame) = frame else {
                         close_connection(
                             &mut socket,
                             CLOSE_TRY_AGAIN_LATER,
@@ -241,23 +230,7 @@ async fn stream_events(
                         .await;
                         return;
                     };
-                    if event.validate().is_err()
-                        || event.stream_key != expected_stream
-                        || matches!(target, RealtimeTarget::Discovery) && event.kind != "auction.created"
-                    {
-                        close_connection(
-                            &mut socket,
-                            CLOSE_PROTOCOL_ERROR,
-                            REASON_PROTOCOL_ERROR,
-                        )
-                        .await;
-                        return;
-                    }
-                    let message = match serde_json::to_string(&map_event(event)) {
-                        Ok(message) => message,
-                        Err(_) => return,
-                    };
-                    if !send_message(&mut socket, Message::Text(message.into())).await {
+                    if !send_message(&mut socket, Message::Text(frame)).await {
                         return;
                     }
                 }
@@ -268,7 +241,7 @@ async fn stream_events(
 
 enum RealtimeInput {
     Client(Option<Result<Message, axum::Error>>),
-    Event(Option<PublicRealtimeEvent>),
+    Event(Option<Utf8Bytes>),
 }
 
 async fn receive_input(
@@ -278,7 +251,7 @@ async fn receive_input(
     // 两个数据来源公平竞争；外层仍优先处理关闭、会话和存活期限。
     tokio::select! {
         message = socket.recv() => RealtimeInput::Client(message),
-        event = subscription.recv() => RealtimeInput::Event(event),
+        frame = subscription.recv() => RealtimeInput::Event(frame),
     }
 }
 

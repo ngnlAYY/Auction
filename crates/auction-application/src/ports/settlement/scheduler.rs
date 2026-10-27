@@ -34,6 +34,10 @@ pub trait SettlementWorkStore: Send + Sync {
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<SettlementWorkClaim>>;
 
+    /// 返回严格晚于 `now` 的最早结算到期或重试时刻，只作 Worker 唤醒提示，不放宽领取谓词。
+    fn next_claimable_at(&self, now: DateTime<Utc>)
+    -> ApplicationFuture<'_, Option<DateTime<Utc>>>;
+
     fn complete(
         &self,
         claim: SettlementWorkClaim,

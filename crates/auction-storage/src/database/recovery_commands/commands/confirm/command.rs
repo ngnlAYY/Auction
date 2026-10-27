@@ -25,11 +25,8 @@ pub(in crate::database::recovery_commands) async fn confirm_postgres_once(
     command: RecoveryConfirmationCommand,
     preview_event_id: Uuid,
 ) -> Result<RecoveryConfirmationResult, RecoveryCommandError> {
-    let mut transaction = pool.begin().await.map_err(map_sql_error)?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
-        .await
-        .map_err(map_sql_error)?;
+    let mut transaction =
+        pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_sql_error)?;
 
     if let Some(result) = load_replayed_command(&mut transaction, &command).await? {
         transaction.commit().await.map_err(map_sql_error)?;

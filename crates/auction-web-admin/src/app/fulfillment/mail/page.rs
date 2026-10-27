@@ -121,7 +121,6 @@ pub fn page() -> Element {
                         on_page_change.push(next);
                     },
                     on_sort_change: move |(sort, direction)| {
-                        // 排序只影响当前页展示顺序；筛选与翻页保持不变。
                         let mut next = query_state();
                         next.sort = sort;
                         next.direction = direction;

@@ -35,6 +35,51 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-27 Worker 到期唤醒、事务入口收敛与规则阅读行宽
+
+在上一条记录的同一未提交工作树上，按用户授权继续处理三项遗留：
+
+- Auction 主循环以 `poll + jitter` 为最长等待，scheduler、slow proxy 与 settlement 各自的 storage owner 新增只读提示，
+  返回严格未来的最早到期／重试时刻，主循环在该时刻加 50 ms 余量（至少 200 ms）提前唤醒；领取仍由原锁内谓词决定，
+  已过期未领取事项与提示失败沿用原周期，避免持续失败时空转。开拍、最终阶段、慢速代理与结算的理论延迟由最多约
+  一个轮询周期降到亚秒级；[不变量契约](docs/contracts/invariants.md)与配置说明同步。
+- 余下 33 个事务入口（含 3 个已删除的 `set_serializable` 辅助函数的 9 个调用方、4 个运维预检与 3 个仅只读模式入口）
+  全部改为在 `BEGIN` 中声明，仓库不再发送独立的 `SET TRANSACTION`；锁序、重试分类、预检语句/锁等待上限与访问模式不变。
+- Public 规则正文与服务说明的段落、列表、引用和标题限制为 70ch 阅读行宽，页面容器与表格仍占满可用宽度。
+
+Rust 1.99.0 下 `just verify` 通过（43 秒），Rust 1.94.1 的 `cargo check --locked --workspace --all-targets --all-features`
+通过。`CARGO_BUILD_JOBS=2 just web-build` 重建 Public payload，SHA-256 为
+`bef90038ab4008ae426cfb5bd5b66f5851c5b40eae1114eb1e402499decaa28f`；Admin 输入未变，复用
+`54ca7ebb7071c7353b6a8a4802add7a6ad223b92b0d1b7986c17ab57c152885c`，各 9 个文件。本次同样未执行数据库、浏览器或
+外部服务行为验证，未部署；唤醒提示 SQL 与实际节奏仍需隔离 PostgreSQL 环境证明。
+
+### 2026-10-26 读取快照与实时分发复审
+
+基线为干净的 `5bfe53fb`，本轮改动尚未提交。按竞价热路径、Public 读取与会话、实时 relay/Hub、存储事务入口、
+Worker 循环、依赖图与双端样式审读调用链和正式文档；源码审读不是逐行形式证明，也不等于生产验收。
+
+- Public relay 原先每 250 ms 遍历全部历史 stream，并为每条 stream 在持锁连接上执行一次读取事务；现在目录查询只列出
+  `next_sequence - 1` 超过本 consumer 游标的 stream，未使用且可绕过持锁 session 的连接池目录实现已删除。
+  进程内 Hub 改为每事件只校验、编码一次并共享引用计数文本帧，连接任务不再逐条复校验、深拷贝或序列化。
+- 竞价等十一处事件追加改用单条持锁 upsert 分配 stream 序号（原为三次往返），同一竞价计划只查询一次拍卖归属；
+  四个事务 runner 与 47 处 BEGIN 后紧跟 `SET TRANSACTION` 的入口改为在 `BEGIN` 中声明隔离级别与访问模式。
+- Public 目录、详情、竞价日志、成交历史、账户及补偿池共 9 处读取由 Serializable 改为 Repeatable Read 只读快照，
+  不再持有 SSI 谓词锁；会话认证保留与 inspect 相同的谓词，`last_activity_at` 改为最多每 60 秒写入一次。
+- 限流满表时先整批移除已过期窗口；`Date` 头交由 Hyper 统一生成；36 份相同的 `storage_error` 收敛为一处，
+  并删除无人装配且会使用空标色规则的 `PublicLotReader for DatabaseStore`；Admin 各表格调用处重复的“仅当前页排序”
+  与“错误可页内重试”注释共 20 行删除，约束仍由共享 `app/sort.rs` 与组件文档说明。
+- `tracing-subscriber` 关闭未使用的 `ansi`，`nu-ansi-term` 退出锁图；其余依赖核对结论见[技术栈](docs/design/tech-stack.md#2026-10-26-性能复审中的依赖核对)。
+- 共享样式新增对三层底色均不低于 3:1 的控件边界色，Public 输入/选择器、分页与语言选择改用该色；
+  错误文字在 raised 底上提升至不低于 4.5:1，Admin 错误横幅改用深红底，并增加 `prefers-contrast: more` 适配；
+  注册提示与数据库名说明改用本地化引号，少量物理 CSS 属性改为逻辑属性。已有行为测试未删除或新增。
+
+Rust 1.99.0 下最终 `just verify` 通过，覆盖仓库策略、格式、工作区已有目标、独立 feature、Clippy `-D warnings`
+与双端 WASM 检查；Rust 1.94.1 的 `cargo check --locked --workspace --all-targets --all-features` 也通过，
+`cargo machete` 未发现未使用直接依赖。`CARGO_BUILD_JOBS=2 just web-build` 从未提交工作树构建双端
+正式资源成功：Public payload SHA-256 为 `d5323e07803e0c36cd79b6944383b0b371d72a1def95de09e677bd8c573ed37a`，
+Admin 为 `54ca7ebb7071c7353b6a8a4802add7a6ad223b92b0d1b7986c17ab57c152885c`，各 9 个文件。
+本次未执行数据库、浏览器、并发负载或外部服务行为验证，也未部署；查询改写与隔离调整的运行效果仍需隔离环境证明。
+
 ### 2026-10-26 全仓审计后的审查复核
 
 结算 Worker 将锁内身份冲突与命令账本摘要冲突统一记录为 `settlement_mismatch`，沿用原有持久退避；

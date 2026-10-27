@@ -97,6 +97,12 @@ impl ExecuteSlowProxyCommand {
 /// lot、代理、用户资格和同一 generation。
 pub trait SlowProxyDueReader: Send + Sync {
     fn list_due_slow_proxies(&self, limit: u16) -> ApplicationFuture<'_, Vec<SlowProxyDue>>;
+
+    /// 返回严格晚于 `now` 的最早慢速代理到期时刻，只作 Worker 唤醒提示；执行仍重读全部 fence。
+    fn next_slow_proxy_due_at(
+        &self,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, Option<DateTime<Utc>>>;
 }
 
 /// 慢速代理命令执行端口。实现必须把账本、竞价事实、代理冻结、审计和事件原子提交。

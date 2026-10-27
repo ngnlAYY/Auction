@@ -71,8 +71,7 @@ async fn fail_transaction(
     claim: &SettlementWorkClaim,
     failure_code: &str,
 ) -> Result<(), sqlx::Error> {
-    let mut transaction = pool.begin().await?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE").execute(&mut *transaction).await?;
+    let mut transaction = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     // 先取得原 UPDATE 的目标锁，再读取退避起点；仅加锁的竞争者不能耗尽新一轮退避。
     sqlx::query("SELECT id FROM public.auctions WHERE id = $1 FOR UPDATE")
         .bind(claim.auction_id.as_uuid())

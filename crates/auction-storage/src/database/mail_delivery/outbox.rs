@@ -32,17 +32,16 @@ async fn insert_postgres(
     command: &MailDeliveryCommand,
     prepared_status: Option<&str>,
 ) -> Result<MailDeliveryResult, RepositoryError> {
-    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
-    if command.origin == MailDeliveryOrigin::MailIntake
+    // 入站录入在 Serializable 快照内读取相反意图，处置事务也必须参与 SSI：
+    // 单独 SELECT FOR UPDATE 无法刷新等待方已建快照。40001 由邮件有界重试重跑整次事务。
+    let begin = if command.origin == MailDeliveryOrigin::MailIntake
         && command.operation != MailDeliveryOperation::Send
     {
-        // 入站录入在 Serializable 快照内读取相反意图，处置事务也必须参与 SSI：
-        // 单独 SELECT FOR UPDATE 无法刷新等待方已建快照。40001 由邮件有界重试重跑整次事务。
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-            .execute(&mut *transaction)
-            .await
-            .map_err(map_storage_error)?;
-    }
+        pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+    } else {
+        pool.begin()
+    };
+    let mut transaction = begin.await.map_err(map_storage_error)?;
     let result = enqueue_in_transaction(&mut transaction, command, prepared_status)
         .await
         .map_err(MailDeliveryTransactionError::into_repository)?;

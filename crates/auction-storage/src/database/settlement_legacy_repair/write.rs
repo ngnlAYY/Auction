@@ -11,12 +11,9 @@ pub(super) async fn run(
 ) -> Result<LegacySelfReconciliationOutcome, FundingError> {
     command.validate()?;
     for attempt in 0..3 {
-        let mut tx = pool.begin().await.map_err(sql_error)?;
+        let mut tx =
+            pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(sql_error)?;
         let operation = async {
-            sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-                .execute(&mut *tx)
-                .await
-                .map_err(sql_error)?;
             if let Some(result) = read::replay(&mut tx, command).await? {
                 return Ok(result);
             }

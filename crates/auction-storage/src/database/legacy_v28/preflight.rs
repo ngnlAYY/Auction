@@ -17,7 +17,7 @@ impl PostgresStore {
         validate_database_name(confirmed_database_name)?;
         let mut transaction = self
             .pool()
-            .begin()
+            .begin_with(PREFLIGHT_BEGIN)
             .await
             .map_err(|source| query_error("begin_read_only_transaction", source))?;
         let preflight =
@@ -30,16 +30,15 @@ impl PostgresStore {
     }
 }
 
-/// 在调用方已经拥有的连接事务中执行完整只读预检；接管路径借此避免连接池把自身空闲连接
-/// 误计为外部会话，同时仍在 migration advisory lock 内重新核对全部来源事实。
+/// 预检事务的开启语句：隔离级别与只读模式随 BEGIN 声明，两个调用方共用。
+pub(super) const PREFLIGHT_BEGIN: &str = "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY";
+
+/// 在调用方以 [`PREFLIGHT_BEGIN`] 开启的连接事务中执行完整只读预检；接管路径借此避免连接池把
+/// 自身空闲连接误计为外部会话，同时仍在 migration advisory lock 内重新核对全部来源事实。
 pub(super) async fn collect_configured_preflight(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     confirmed_database_name: &str,
 ) -> Result<PostgresLegacyV28Preflight, PostgresLegacyV28Error> {
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        .execute(&mut **transaction)
-        .await
-        .map_err(|source| query_error("transaction_policy", source))?;
     sqlx::query("SET LOCAL statement_timeout = '10s'")
         .execute(&mut **transaction)
         .await

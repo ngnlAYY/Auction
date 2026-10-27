@@ -3,11 +3,12 @@
 #[cfg(feature = "postgres")]
 use auction_application::SettlementCatalogEntry;
 use auction_application::{
-    ApplicationError, ApplicationFuture, RepositoryError, SettlementCatalogPage,
-    SettlementCatalogReader, SettlementCatalogRequest,
+    ApplicationError, ApplicationFuture, SettlementCatalogPage, SettlementCatalogReader,
+    SettlementCatalogRequest,
 };
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 impl SettlementCatalogReader for DatabaseStore {
     fn list_settlement_catalog(
@@ -34,12 +35,11 @@ async fn list_postgres(
     use auction_domain::AuctionId;
     use sqlx::Row;
 
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启结算报表目录读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("设置结算报表目录隔离级别失败"))?;
+        .map_err(|_| storage_error("开启结算报表目录读取事务失败"))?;
     let total = sqlx::query_scalar::<_, i64>(
         "SELECT count(*)::bigint
          FROM public.auctions AS auction
@@ -101,8 +101,4 @@ async fn list_postgres(
         return Err(storage_error("结算报表目录返回不变量失败"));
     }
     Ok(page)
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

@@ -29,7 +29,6 @@ pub fn CredentialTable(
 ) -> Element {
     let session = use_context::<AdminSession>();
     let is_empty = page.credentials.is_empty();
-    // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
     let mut credentials = page.credentials;
     sort_credentials(&mut credentials, &sort, direction);
     rsx! {

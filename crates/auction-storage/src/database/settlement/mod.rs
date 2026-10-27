@@ -4,7 +4,7 @@ use auction_application::{
     CommandLedgerError, PersistedSettlement, PersistedSettlementObligationCount,
     SettlementSnapshot, SettlementTransaction, SettlementTransactionError,
     SettlementTransactionFailure, SettlementTransactionRunner, StoredCommand, TransactionFuture,
-    TransactionIsolation, TransactionPolicy,
+    TransactionPolicy,
 };
 use auction_domain::{
     AuctionId, CommandId, CompetitionPlan, ProxyStatus, RecoveryPolicy, SettlementAmount,
@@ -18,6 +18,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::database::audit_health::AuditWriteResult as _;
+use crate::database::competition::begin_statement;
 
 use super::{PostgresCompetitionTransaction, PostgresStore};
 #[path = "facts.rs"]
@@ -54,24 +55,16 @@ impl SettlementTransactionRunner for PostgresStore {
             }
 
             for attempt in 0..policy.max_attempts {
-                let transaction = match self.pool().begin().await {
-                    Ok(transaction) => transaction,
-                    Err(_) => {
-                        return Err(E::from(SettlementTransactionError::Failed(
-                            "PostgreSQL 结算事务无法开始".to_owned(),
-                        )));
-                    }
-                };
+                let transaction =
+                    match self.pool().begin_with(begin_statement(policy.isolation)).await {
+                        Ok(transaction) => transaction,
+                        Err(_) => {
+                            return Err(E::from(SettlementTransactionError::Failed(
+                                "PostgreSQL 结算事务无法开始".to_owned(),
+                            )));
+                        }
+                    };
                 let mut transaction = PostgresCompetitionTransaction::new(transaction);
-
-                if let Err(error) = set_isolation(&mut transaction, policy.isolation).await {
-                    if matches!(error, SettlementTransactionError::SerializationConflict)
-                        && attempt + 1 < policy.max_attempts
-                    {
-                        continue;
-                    }
-                    return Err(E::from(error));
-                }
 
                 match operation(&mut transaction).await {
                     Ok(value) => match transaction.commit().await {
@@ -146,17 +139,4 @@ impl SettlementTransaction for PostgresCompetitionTransaction {
             .await
         }
     }
-}
-
-async fn set_isolation(
-    transaction: &mut PostgresCompetitionTransaction,
-    isolation: TransactionIsolation,
-) -> Result<(), SettlementTransactionError> {
-    let statement = match isolation {
-        TransactionIsolation::Serializable => "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
-        TransactionIsolation::ReadCommitted => "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
-    };
-    let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
-    sqlx::query(statement).execute(&mut **transaction).await.map_err(map_sql_error)?;
-    Ok(())
 }

@@ -11,6 +11,7 @@ use auction_application::{
 };
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 impl SettlementReportReader for DatabaseStore {
     fn settlement_report(
@@ -92,13 +93,9 @@ async fn postgres_report_once(
 
     let mut transaction = store
         .pool()
-        .begin()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
         .map_err(|error| PostgresReportError::database(error, "打开结算报告快照失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| PostgresReportError::database(error, "设置结算报告快照失败"))?;
 
     let row = sqlx::query(
         r#"SELECT
@@ -430,8 +427,4 @@ fn decode_settlement_adjustment(
         Some(_) => return Err(storage_error("结算 adjustment policy 无效")),
     };
     Ok(SettlementAdjustment { policy })
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(auction_application::RepositoryError::Failed(message.to_owned()))
 }

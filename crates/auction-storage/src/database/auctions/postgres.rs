@@ -26,12 +26,11 @@ pub(super) async fn list(
     // 仅额外探测行采用饱和加法；i64::MAX 已覆盖可表示行数，不改变请求及响应数量。
     let query_limit = if use_cursor { request.limit.saturating_add(1) } else { request.limit };
     // 数字页总数与条目共享 MVCC 快照；越界空页仍返回完整筛选集的总数。
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开始公开拍卖列表快照失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("设置公开拍卖列表快照失败"))?;
+        .map_err(|_| storage_error("开始公开拍卖列表快照失败"))?;
     let total = if use_cursor {
         None
     } else {

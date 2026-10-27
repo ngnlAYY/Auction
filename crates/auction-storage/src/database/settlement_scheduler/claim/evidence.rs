@@ -3,7 +3,7 @@
 use auction_domain::{CommandId, deterministic_uuid};
 use chrono::{DateTime, Utc};
 use serde_json::json;
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::database::audit_health::AuditWriteResult as _;
@@ -40,25 +40,12 @@ pub(super) async fn insert_settlement_claim_event(
     occurred_at: DateTime<Utc>,
 ) -> Result<(), sqlx::Error> {
     let stream_key = format!("auction:{auction_id}");
-    sqlx::query(
-        "INSERT INTO public.realtime_streams (stream_key, updated_at) VALUES ($1, $2)
-         ON CONFLICT (stream_key) DO NOTHING",
+    let sequence = crate::database::realtime::allocate_stream_sequence(
+        transaction,
+        &stream_key,
+        Some(occurred_at),
     )
-    .bind(&stream_key)
-    .bind(occurred_at)
-    .execute(&mut **transaction)
     .await?;
-    let row = sqlx::query(
-        r#"UPDATE public.realtime_streams
-           SET next_sequence = next_sequence + 1, updated_at = $2
-           WHERE stream_key = $1
-           RETURNING next_sequence - 1 AS stream_sequence"#,
-    )
-    .bind(&stream_key)
-    .bind(occurred_at)
-    .fetch_one(&mut **transaction)
-    .await?;
-    let sequence: i64 = row.try_get("stream_sequence")?;
     sqlx::query(
         r#"INSERT INTO public.realtime_events
                (event_id, stream_key, stream_sequence, kind, schema_version,

@@ -10,7 +10,7 @@ pub(super) struct FilteredPageSelection {
 }
 
 /// 统计选定分组及等级范围内的各类型，只保留当前页 UUID，不缓存全场装备。
-/// 与完整页查询共用同一 Serializable 快照，筛选始终先于计数和 offset/limit。
+/// 与完整页查询共用同一只读快照，筛选始终先于计数和 offset/limit。
 pub(super) async fn select_filtered_page(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     auction_id: Uuid,

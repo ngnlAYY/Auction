@@ -1,6 +1,7 @@
 //! Public 与 Admin 规则文档的 PostgreSQL 只读投影。
 
 use super::*;
+use crate::database::storage_error;
 
 impl PublicRulesReader for DatabaseStore {
     fn get_public_rules(
@@ -89,8 +90,4 @@ async fn get_postgres(
         })
     })
     .transpose()
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(auction_application::RepositoryError::Failed(message.to_owned()))
 }

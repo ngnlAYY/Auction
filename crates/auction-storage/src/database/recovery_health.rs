@@ -6,6 +6,7 @@ use auction_application::{
 };
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 impl RecoveryHealthStore for DatabaseStore {
     fn refresh_world_health(&self, update: RecoveryHealthUpdate) -> ApplicationFuture<'_, ()> {
@@ -91,9 +92,4 @@ async fn refresh_postgres(
         return Err(storage_error("recovery health world 行不存在"));
     }
     Ok(())
-}
-
-#[cfg(feature = "postgres")]
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

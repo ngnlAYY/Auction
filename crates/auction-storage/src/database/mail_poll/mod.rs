@@ -10,6 +10,7 @@ use auction_application::{
 use chrono::{DateTime, Utc};
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 #[cfg(feature = "postgres")]
 mod inbound;
@@ -271,8 +272,4 @@ fn valid_text(value: &str, maximum: usize) -> bool {
         && value.len() <= maximum
         && value == value.trim()
         && !value.chars().any(char::is_control)
-}
-
-fn storage_error(message: &str) -> auction_application::ApplicationError {
-    auction_application::RepositoryError::Failed(message.to_owned()).into()
 }

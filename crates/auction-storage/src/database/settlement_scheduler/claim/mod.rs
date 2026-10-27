@@ -89,13 +89,10 @@ async fn claim_transaction(
     lease_until: DateTime<Utc>,
     limit: u16,
 ) -> Result<Vec<SettlementWorkClaim>, ClaimError> {
-    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     // 旧版把 final→settling 领取本身视为 Serializable 业务事务，不能只依赖行锁和
-    // SKIP LOCKED；隔离级别必须在首条业务查询前确定。
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
-        .await
-        .map_err(map_storage_error)?;
+    // SKIP LOCKED；隔离级别随 BEGIN 声明，先于首条业务查询确定。
+    let mut transaction =
+        pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_storage_error)?;
     // 初次领取与失败重试均只统计未撤回的 lot，且必须至少一件全部为已到期 live。
     // Settled 只补 workflow 完成证明，使用冻结 due，不再聚合历史 lot。
     let rows = sqlx::query(

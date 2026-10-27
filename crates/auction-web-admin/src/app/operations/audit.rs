@@ -68,7 +68,6 @@ pub(super) fn page() -> Element {
                 sort: query_state().sort.clone(),
                 direction: query_state().direction,
                 on_sort_change: move |(sort, direction)| {
-                    // 排序只影响当前页展示顺序；筛选与翻页保持不变。
                     let mut next = query_state();
                     next.sort = sort;
                     next.direction = direction;
@@ -287,7 +286,6 @@ fn AuditTable(
     on_sort_change: EventHandler<(String, SortDirection)>,
 ) -> Element {
     let empty = page.records.is_empty();
-    // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
     let mut records = page.records;
     sort_audit_records(&mut records, &sort, direction);
     rsx! {

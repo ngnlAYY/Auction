@@ -11,7 +11,7 @@ use auction_application::{
 use auction_application::{
     AdminRulesPublishCommand, AdminRulesStoredCommand, AdminRulesTransaction,
     AdminRulesTransactionError, AdminRulesTransactionFailure, AdminRulesTransactionRunner,
-    RequestHash, TransactionFuture, TransactionIsolation, TransactionPolicy,
+    RequestHash, TransactionFuture, TransactionPolicy,
 };
 use chrono::{DateTime, Utc};
 #[cfg(feature = "postgres")]

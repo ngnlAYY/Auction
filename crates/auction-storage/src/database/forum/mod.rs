@@ -11,6 +11,7 @@ use auction_application::{
 use uuid::Uuid;
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 impl PublicForumReader for DatabaseStore {
     fn public_forum_sync_enabled(&self) -> ApplicationFuture<'_, Option<bool>> {
@@ -123,8 +124,4 @@ async fn forum_postgres(
     }
     thread.validate().map_err(storage_error)?;
     Ok(Some(thread))
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(auction_application::RepositoryError::Failed(message.to_owned()))
 }

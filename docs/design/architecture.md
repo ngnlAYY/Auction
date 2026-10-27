@@ -153,7 +153,9 @@ fence 与只读对账；`000042` 的账号偏好 SQL 由 storage 独占，旧 wa
 ## Worker 与外部副作用
 
 Worker 只负责持久调度、重试与执行时机；due、游标、attempt、lease、fencing 及命令结果由数据库持有，Final 与调度
-完成 fence 同事务提交，`scheduled_rounds.schedule_snapshot` 固定自动排期的本地时区来源。关闭世界阻止新场次、不取消
+完成 fence 同事务提交，`scheduled_rounds.schedule_snapshot` 固定自动排期的本地时区来源。Auction 主循环以轮询间隔为
+最长等待，按 scheduler、slow proxy 与 settlement storage owner 的只读到期提示在严格未来的到期时刻提前唤醒；
+提示不是调度事实，丢失或失败只退回原轮询。关闭世界阻止新场次、不取消
 已有履约/恢复，drain 后各 owner 停止领取。实际取得的邮件或论坛 credential owner 永久失效时，装配根触发有界 drain 并
 非零退出，由进程管理器重建。外部副作用只在本地提交后执行：入站详情 GET 前按有效租约保存邮件摘要，
 崩溃后优先按持久 MID 恢复；完整发件人及 allowlist 判定只采信详情，列表显示名仅保留快照兼容。
@@ -230,7 +232,8 @@ Public `identity/account/watches/` 拥有“我的”当期标记列表，组合
 按账号、世界和场次隔离结果；分页完整读取后复核场次与标记版本，再以真实交集本地分页，不新增服务端写入或持久化 owner。
 同账号/世界的后台重读保留已完成列表与分页，不订阅只改变价格的普通竞价通知；身份变化立即隔离旧结果。
 Public `surface/router.rs` 与 `surface/board/realtime.rs` 拥有浏览器实时启用策略，仅登录后的 `live`/`final` 场次建立连接，
-预览及其他非竞价状态停用，通过既有 60 秒权威场次读取发现开拍。显式“立即刷新”先呈现忙碌反馈再整页重载，自动同步保持原地更新。
+预览及其他非竞价状态停用，通过既有 60 秒权威场次读取发现开拍。服务端 relay 只列出仍有待转发事件的 stream，
+进程内 Hub 每个事件校验、编码一次后按精确 stream 共享文本帧；持久事件与 Catch-up 仍是唯一恢复依据。显式“立即刷新”先呈现忙碌反馈再整页重载，自动同步保持原地更新。
 Public `surface/catalog/command_scope.rs` 与 `auction/watches/commands.rs` 在异步展示分支外持有稳定命令，
 GET 错误、阶段和分页不丢失未知意图；实际拍卖查询决定 lot/显式拍卖的实时目标，不由缺省 world 猜测。
 shared `transport/browser_lock.rs` 只提供原生同源独占锁和取消机制；Public `api/identity/session/cookie.rs`

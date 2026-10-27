@@ -5,6 +5,7 @@ use auction_application::{
 };
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 #[cfg(feature = "postgres")]
 mod postgres;
@@ -23,8 +24,4 @@ impl AdminAuditPort for DatabaseStore {
             }
         })
     }
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(auction_application::RepositoryError::Failed(message.to_owned()))
 }

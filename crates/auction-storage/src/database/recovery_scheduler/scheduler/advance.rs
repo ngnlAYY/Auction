@@ -23,11 +23,8 @@ pub(super) async fn advance_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
 ) -> Result<Option<RecoveryCaseAdvance>, auction_application::RepositoryError> {
-    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
-        .await
-        .map_err(map_storage_error)?;
+    let mut transaction =
+        pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_storage_error)?;
 
     let Some(row) = sqlx::query(
         r#"SELECT recovery.id,

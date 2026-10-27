@@ -9,12 +9,11 @@ pub(in crate::database::lots) async fn detail_postgres(
     lot_id: Uuid,
     colors: &[EquipmentColorRule],
 ) -> Result<Option<PublicLotDetail>, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启公开 lot 详情事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("设置公开 lot 详情隔离级别失败"))?;
+        .map_err(|_| storage_error("开启公开 lot 详情事务失败"))?;
     let Some(projection) = postgres_detail_projection(&mut transaction, lot_id).await? else {
         transaction.commit().await.map_err(|_| storage_error("提交公开 lot 详情事务失败"))?;
         return Ok(None);

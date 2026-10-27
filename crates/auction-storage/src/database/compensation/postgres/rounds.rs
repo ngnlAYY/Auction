@@ -11,7 +11,7 @@ use uuid::Uuid;
 use super::super::storage_error;
 use crate::database::PostgresStore;
 
-/// 在同一 Serializable 快照中读取补偿批次分页、汇总和最新余额。
+/// 在同一只读快照中读取补偿批次分页、汇总和最新余额。
 #[cfg(feature = "postgres")]
 pub(crate) async fn list(
     store: &PostgresStore,
@@ -25,12 +25,11 @@ pub(crate) async fn list(
     // 仅额外探测行采用饱和加法；i64::MAX 已覆盖可表示行数，不改变请求及响应数量。
     let query_limit = if use_cursor { request.limit.saturating_add(1) } else { request.limit };
 
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启公开补偿池读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("设置公开补偿池读取隔离级别失败"))?;
+        .map_err(|_| storage_error("开启公开补偿池读取事务失败"))?;
 
     // 先按原游标或编号页选定批次，再读取账本合计，避免页外场次重复执行 LATERAL 聚合。
     let rows = sqlx::query(

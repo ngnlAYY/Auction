@@ -1,15 +1,14 @@
 //! 公开页面查看游戏装备时使用的密文读取适配器。
 
-#[cfg(feature = "postgres")]
-use auction_application::RepositoryError;
 use auction_application::{
-    ApplicationError, ApplicationFuture, PublicEquipmentLinkSecret, PublicEquipmentLinkSecretReader,
+    ApplicationFuture, PublicEquipmentLinkSecret, PublicEquipmentLinkSecretReader,
 };
 use auction_domain::EquipmentId;
 
 use super::DatabaseStore;
 #[cfg(feature = "postgres")]
 use super::equipment_secrets::read_stored_equipment_secrets_postgres;
+use crate::database::storage_error;
 
 impl PublicEquipmentLinkSecretReader for DatabaseStore {
     fn read_public_equipment_link_secrets(
@@ -41,9 +40,4 @@ impl PublicEquipmentLinkSecretReader for DatabaseStore {
             }
         })
     }
-}
-
-#[cfg(feature = "postgres")]
-fn storage_error(message: &str) -> ApplicationError {
-    RepositoryError::Failed(message.to_owned()).into()
 }

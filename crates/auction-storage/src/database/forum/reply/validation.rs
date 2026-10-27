@@ -1,6 +1,7 @@
 //! 论坛回帖存储的输入闭集、文本边界和能力错误。
 
-use auction_application::{ApplicationError, ForumBidCommandRecord, RepositoryError};
+pub(super) use crate::database::storage_error;
+use auction_application::{ApplicationError, ForumBidCommandRecord};
 #[cfg(feature = "postgres")]
 use auction_domain::SettlementWorld;
 
@@ -52,8 +53,4 @@ pub(super) fn valid_decimal_id(value: &str, maximum: usize) -> bool {
 #[cfg(feature = "postgres")]
 pub(super) fn parse_world(value: &str) -> Result<SettlementWorld, ApplicationError> {
     super::super::sync::parse_world(value)
-}
-
-pub(super) fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

@@ -32,7 +32,7 @@ drain 与任务退出，`runtime/delivery/lease.rs` 统一准备、交接与发�
 
 | 循环 | 编排要求 |
 | --- | --- |
-| Auction | 生命周期、slow due、结算依次执行，各阶段失败不跳过后续阶段 |
+| Auction | 生命周期、slow due、结算依次执行，各阶段失败不跳过后续阶段；`worker/auction/wakeup.rs` 以只读提示在最早的未来到期时刻提前唤醒，轮询间隔为最长等待 |
 | Fulfillment | 按可用并发槽领取，持久化 prepared/enqueued 与 delivery 关联，不提前占满租约 |
 | Recovery | 保持 case → return → action → relist → refund 顺序，各阶段独立收口 |
 | Delivery | claim 后先查可用性并只读 prepare，持有 prepared guard 后才进入 sending；续租、最终写回和未知结果受 fencing 保护 |
@@ -52,7 +52,8 @@ drain 与任务退出，`runtime/delivery/lease.rs` 统一准备、交接与发�
 `run_persistent_until_shutdown` 消费持久化轮次；领取后冻结 owner、精确租约与 state_version。周拍卖只在配置
 allowlist、runtime 开关和数据库 enabled world 的交集中新建，已有轮次按冻结事实执行，配置变更不以旧命令 ID 重发
 新负载；结算使用持久化 claim 的 due_at，不以实际领取延迟改变业务时间。慢速代理扫描候选后交竞价事务重新校验，
-过期 generation 安全跳过。
+过期 generation 安全跳过。唤醒提示由调度、慢速代理与结算各自的 storage owner 只读计算，生命周期与慢速代理以数据库时钟、
+结算以其领取所用的进程时钟为参照；提示只决定醒来时刻，2 秒内未取得或已过期时沿用 `poll + jitter`，避免持续失败时空转。
 结算完成请求摘要由应用层统一计算，保留原 `workflow_id`、`due_at` 字段顺序和稳定命令身份。
 锁内身份或命令摘要冲突均记录为 `settlement_mismatch`；失败仍按原 claim 持久退避，不把冲突当作可重试的事务序列化错误。
 v2 优惠按奖池同比缩放由领域计划拥有，Worker 不为等优惠预算暂停结算，也不自行发行或补充奖池。

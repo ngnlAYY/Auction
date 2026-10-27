@@ -33,7 +33,6 @@ pub(super) fn AdminLotTable(
     let selected_lot = use_signal(|| None::<(String, String)>);
     let notice = use_signal(|| None::<LotUpdateNotice>);
     let allow_lot_update = page.auction.status == "draft";
-    // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
     let is_empty = page.lots.is_empty();
     let mut lots = page.lots;
     sort_lots(&mut lots, &sort, direction);

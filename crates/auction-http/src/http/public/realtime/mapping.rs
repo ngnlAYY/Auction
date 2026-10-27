@@ -4,6 +4,7 @@ use auction_application::{PublicRealtimeEvent, PublicRealtimePage};
 use auction_contracts::{
     PublicRealtimeDiscoveryResponse, PublicRealtimeEventResponse, PublicRealtimeResponse,
 };
+use axum::extract::ws::Utf8Bytes;
 use uuid::Uuid;
 
 use super::super::public_timestamp;
@@ -57,6 +58,14 @@ pub(super) fn map_discovery_page(page: PublicRealtimePage) -> PublicRealtimeDisc
         has_more: page.has_more,
         refetch_required: page.refetch_required,
     }
+}
+
+/// 将已通过注册表校验的事件编码为 WebSocket v1 文本帧；Hub 每个事件只编码一次，
+/// 同一 stream 的全部连接共享同一份引用计数正文。
+pub(crate) fn encode_websocket_frame(
+    event: PublicRealtimeEvent,
+) -> Result<Utf8Bytes, serde_json::Error> {
+    serde_json::to_string(&map_event(event)).map(Utf8Bytes::from)
 }
 
 /// 映射旧版 WebSocket 单事件信封；`stream_key` 是内部路由字段，不进入公开 v1 wire。

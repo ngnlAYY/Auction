@@ -178,16 +178,6 @@ pub(super) async fn lock_command(
     Ok(())
 }
 
-pub(super) async fn set_serializable(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-) -> Result<(), ApplicationError> {
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_storage_error)?;
-    Ok(())
-}
-
 pub(super) fn validate_register_write(
     write: &MailUserRegisterWrite,
 ) -> Result<(), ApplicationError> {

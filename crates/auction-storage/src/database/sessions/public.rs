@@ -140,26 +140,29 @@ pub(super) async fn touch_postgres(
     token_hash: [u8; 32],
     now: DateTime<Utc>,
 ) -> Result<PublicSessionIdentity, ApplicationError> {
-    // 外层截止条件依赖已物化的锁定行，连接或行锁等待不能让过期身份再次通过认证。
+    // 认证谓词与只读 inspect 相同，并按实时钟复核截止，连接池等待不能复活过期身份。
+    // Public 期限不随活动续期，`last_activity_at` 只供运维观察：距上次记录不足 60 秒时不写入，
+    // 普通读取因此不再逐请求持有会话行锁；需要写入时仍只向前推进且不早于创建时间。
     let row = sqlx::query(
-        "WITH locked AS MATERIALIZED (
-            SELECT session.token_hash, session.expires_at, session.absolute_expires_at,
-                   account.username
+        "WITH current_session AS MATERIALIZED (
+            SELECT session.token_hash, session.user_id, account.username,
+                   session.expires_at, session.absolute_expires_at
             FROM public.public_sessions AS session
             JOIN public.users AS account ON account.id = session.user_id
             WHERE session.token_hash = $2 AND session.revoked_at IS NULL
+              AND ((session.expires_at IS NULL AND session.absolute_expires_at IS NULL)
+                OR (session.expires_at > GREATEST($1, clock_timestamp())
+                  AND session.absolute_expires_at > GREATEST($1, clock_timestamp())))
               AND account.status = 'active' AND account.key_status = 'active'
-            FOR UPDATE OF session
+         ), recorded_activity AS (
+            UPDATE public.public_sessions AS session
+            SET last_activity_at = $1
+            FROM current_session
+            WHERE session.token_hash = current_session.token_hash
+              AND session.revoked_at IS NULL
+              AND session.last_activity_at < $1 - interval '60 seconds'
          )
-         UPDATE public.public_sessions AS session
-         SET last_activity_at = GREATEST(session.last_activity_at, $1)
-         FROM locked
-         WHERE session.token_hash = locked.token_hash
-           AND ((locked.expires_at IS NULL AND locked.absolute_expires_at IS NULL)
-             OR (locked.expires_at > GREATEST($1, clock_timestamp())
-               AND locked.absolute_expires_at > GREATEST($1, clock_timestamp())))
-         RETURNING session.user_id, locked.username, session.expires_at,
-                   session.absolute_expires_at",
+         SELECT user_id, username, expires_at, absolute_expires_at FROM current_session",
     )
     .bind(now)
     .bind(token_hash.as_slice())

@@ -23,20 +23,29 @@ impl RealtimeConsumerOwnership {
 }
 
 impl RealtimeStreamStore for RealtimeConsumerOwnership {
-    fn list_stream_keys(
+    fn list_pending_stream_keys(
         &self,
+        consumer_key: String,
         prefix: String,
         after: String,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<String>> {
         Box::pin(async move {
+            self.validate_owner(&consumer_key)?;
             validate_stream_directory_query(&prefix, &after, limit)?;
             match &self.backend {
                 #[cfg(feature = "postgres")]
                 OwnedRealtimeBackend::Postgres(connection) => {
                     // 空目录扫描也使用原 session，不能在锁已失效时继续报告 relay 健康。
                     let mut connection = connection.lock().await;
-                    super::list_streams_postgres(&mut connection, &prefix, &after, limit).await
+                    super::list_pending_streams_postgres(
+                        &mut connection,
+                        &consumer_key,
+                        &prefix,
+                        &after,
+                        limit,
+                    )
+                    .await
                 }
             }
         })

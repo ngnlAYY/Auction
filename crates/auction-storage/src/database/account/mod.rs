@@ -4,7 +4,7 @@
 use auction_application::{
     ApplicationError, ApplicationFuture, PublicAccountReader, PublicMyBid, PublicMyBidsPage,
     PublicMyBidsRequest, PublicOwnedProxy, PublicProxyBid, PublicProxyCapabilities,
-    PublicProxyTransition, RepositoryError,
+    PublicProxyTransition,
 };
 use auction_domain::{AuctionRules, BidAmount};
 use chrono::{DateTime, Utc};

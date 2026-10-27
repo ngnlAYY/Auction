@@ -58,7 +58,6 @@ pub(super) fn AdminAuctionTable(
             let is_empty = page.auctions.is_empty();
             let capabilities = page.capabilities;
             let page_info = page.pagination;
-            // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
             let mut auctions = page.auctions.clone();
             sort_auctions(&mut auctions, &sort, direction);
             rsx! {

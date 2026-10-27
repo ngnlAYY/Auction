@@ -9,12 +9,11 @@ pub(super) async fn list_postgres(
     store: &super::super::PostgresStore,
     request: AdminCredentialListRequest,
 ) -> Result<AdminCredentialPage, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启凭据列表事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("设置凭据列表隔离级别失败"))?;
+        .map_err(|_| storage_error("开启凭据列表事务失败"))?;
 
     let kind = request.kind.map(AdminCredentialKind::as_str);
     let (mail_scope, forum_scope) = world_scopes(request.world, request.kind);

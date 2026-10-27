@@ -1,6 +1,7 @@
 //! Realtime consumer 的共享校验与错误映射。
 
-use auction_application::{ApplicationError, RealtimeConsumerRequest, RepositoryError};
+pub(super) use crate::database::storage_error;
+use auction_application::{ApplicationError, RealtimeConsumerRequest};
 use uuid::Uuid;
 
 pub(super) fn validate_cursor_keys(
@@ -43,8 +44,4 @@ pub(super) fn validate_failure_text(
         return Err(storage_error("实时消费失败分类或安全说明无效"));
     }
     Ok(())
-}
-
-pub(super) fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

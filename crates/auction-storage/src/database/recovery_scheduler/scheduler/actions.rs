@@ -65,7 +65,7 @@ where
         + Send,
 {
     for attempt in 0..3 {
-        let mut transaction = match pool.begin().await {
+        let mut transaction = match pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await {
             Ok(transaction) => transaction,
             Err(error) => {
                 let error = RecoveryActionTransactionError::from(error);
@@ -75,20 +75,6 @@ where
                 return Err(error.into_repository_error());
             }
         };
-
-        if let Err(error) = sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-            .execute(&mut *transaction)
-            .await
-        {
-            let error = RecoveryActionTransactionError::from(error);
-            let retryable = error.is_retryable();
-            let mapped = error.into_repository_error();
-            let _ = transaction.rollback().await;
-            if retryable && attempt < 2 {
-                continue;
-            }
-            return Err(mapped);
-        }
 
         match operation(&mut transaction).await {
             Ok(value) => match transaction.commit().await {

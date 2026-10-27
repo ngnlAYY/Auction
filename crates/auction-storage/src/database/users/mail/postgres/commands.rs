@@ -11,8 +11,11 @@ pub(crate) async fn register_postgres(
     write: MailUserRegisterWrite,
 ) -> Result<MailUserResult, ApplicationError> {
     validate_register_write(&write)?;
-    let mut transaction = store.pool().begin().await.map_err(map_storage_error)?;
-    set_serializable(&mut transaction).await?;
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        .await
+        .map_err(map_storage_error)?;
     lock_command(&mut transaction, write.command.command_id).await?;
 
     if let Some(result) = load_mail_command_tx(
@@ -187,8 +190,11 @@ pub(crate) async fn rebind_postgres(
     command: MailUserRebindCommand,
 ) -> Result<MailUserResult, ApplicationError> {
     validate_rebind_command(&command)?;
-    let mut transaction = store.pool().begin().await.map_err(map_storage_error)?;
-    set_serializable(&mut transaction).await?;
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        .await
+        .map_err(map_storage_error)?;
     lock_command(&mut transaction, command.command_id).await?;
     if let Some(result) = load_mail_command_tx(
         &mut transaction,

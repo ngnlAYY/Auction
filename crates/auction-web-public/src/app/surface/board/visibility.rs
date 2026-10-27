@@ -95,7 +95,7 @@ impl PageVisibility {
             return;
         }
         let waiter = VisibilityWaiter { wakers: &self.wakers, slot: Rc::new(RefCell::new(None)) };
-        futures_util::future::poll_fn(|context| {
+        std::future::poll_fn(|context| {
             if self.hidden.get() {
                 waiter.register(context.waker());
                 Poll::Pending

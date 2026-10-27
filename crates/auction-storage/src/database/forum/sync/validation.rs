@@ -1,8 +1,9 @@
 //! 论坛主题同步的输入闭集、编码约束和后端能力错误。
 
+pub(super) use crate::database::storage_error;
 use auction_application::{
     ApplicationError, ForumPublishedLayout, ForumPublishedThread, ForumRenderedPost,
-    ForumRenderedThread, ForumSyncClaim, RepositoryError,
+    ForumRenderedThread, ForumSyncClaim,
 };
 #[cfg(feature = "postgres")]
 use auction_domain::SettlementWorld;
@@ -126,8 +127,4 @@ pub(super) fn lot_code(category: &str, lot_number: i32) -> Result<String, Applic
         return Err(storage_error("论坛快照分类序号必须为正数"));
     }
     Ok(format!("{prefix}{lot_number:02}"))
-}
-
-pub(super) fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

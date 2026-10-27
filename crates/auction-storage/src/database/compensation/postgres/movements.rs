@@ -11,19 +11,18 @@ use uuid::Uuid;
 use super::super::storage_error;
 use crate::database::PostgresStore;
 
-/// 在同一 Serializable 快照中读取批次摘要和该场补偿账本。
+/// 在同一只读快照中读取批次摘要和该场补偿账本。
 #[cfg(feature = "postgres")]
 pub(crate) async fn movements(
     store: &PostgresStore,
     auction_id: Uuid,
     request: PublicCompensationMovementRequest,
 ) -> Result<Option<PublicCompensationMovementPage>, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启公开补偿账本读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("设置公开补偿账本读取隔离级别失败"))?;
+        .map_err(|_| storage_error("开启公开补偿账本读取事务失败"))?;
 
     let round_row = sqlx::query(
         "SELECT

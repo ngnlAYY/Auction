@@ -104,7 +104,6 @@ pub(super) fn page() -> Element {
                 kind: AsyncStateKind::Error,
                 title: admin_api_error_message(error),
                 detail: "",
-                // 错误态提供页内重试入口，不必刷新浏览器。
                 retry_label: t!("admin-retry"),
                 on_retry: move |_| refresh.set(refresh().saturating_add(1)),
             }
@@ -123,7 +122,6 @@ pub(super) fn page() -> Element {
                     }
                 },
                 on_sort_change: move |(sort, direction)| {
-                    // 排序只影响当前页展示顺序；筛选与翻页保持不变。
                     let mut next = query_state();
                     next.sort = sort;
                     next.direction = direction;
@@ -243,7 +241,6 @@ fn RenameTable(
     on_sort_change: EventHandler<(String, SortDirection)>,
 ) -> Element {
     let pending = use_context::<PendingCommands>();
-    // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
     let mut renames = page.renames;
     sort_renames(&mut renames, &sort, direction);
     rsx! {

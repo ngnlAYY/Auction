@@ -16,12 +16,11 @@ pub(super) async fn list_failures_postgres(
     request: RealtimeFailureListRequest,
 ) -> Result<RealtimeFailurePage, ApplicationError> {
     // failure 可在读取期间被追加或解决；计数与页面必须来自同一快照。
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启 realtime failure 快照失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("设置 realtime failure 快照失败"))?;
+        .map_err(|_| storage_error("开启 realtime failure 快照失败"))?;
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*)
          FROM public.realtime_failures AS failure

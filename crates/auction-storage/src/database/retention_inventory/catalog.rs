@@ -83,13 +83,10 @@ pub(super) fn map_foreign_key(
     })
 }
 
+/// 为调用方以 `begin_read_snapshot` 开启的只读快照设置语句与锁等待上限。
 pub(super) async fn set_read_only_limits(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<(), RetentionInventoryError> {
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        .execute(&mut **transaction)
-        .await
-        .map_err(|source| query_error("transaction_policy", source))?;
     sqlx::query("SET LOCAL statement_timeout = '5s'")
         .execute(&mut **transaction)
         .await

@@ -14,13 +14,9 @@ pub(super) async fn list_postgres(
 ) -> Result<PublicMyBidsPage, ApplicationError> {
     let mut transaction = store
         .pool()
-        .begin()
+        .begin_read_snapshot()
         .await
         .map_err(|_| storage_error("开启 PostgreSQL 账户读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
-        .await
-        .map_err(|_| storage_error("设置 PostgreSQL 账户读取隔离级别失败"))?;
 
     let bid_rows = sqlx::query(
         "SELECT
@@ -161,13 +157,9 @@ pub(super) async fn proxy_postgres(
 ) -> Result<Option<PublicOwnedProxy>, ApplicationError> {
     let mut transaction = store
         .pool()
-        .begin()
+        .begin_read_snapshot()
         .await
         .map_err(|_| storage_error("开启 PostgreSQL 用户代理读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
-        .await
-        .map_err(|_| storage_error("设置 PostgreSQL 用户代理读取隔离级别失败"))?;
     let row = {
         let statement = if authorization_id.is_some() {
             "SELECT

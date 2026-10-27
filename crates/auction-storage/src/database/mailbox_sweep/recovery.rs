@@ -251,8 +251,7 @@ pub(super) async fn begin_discard_once(
     fencing_version: i64,
     expected: Option<&DeliverySendExpectation>,
 ) -> Result<bool, RecoveryError> {
-    let mut tx = pool.begin().await?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE").execute(&mut *tx).await?;
+    let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     sqlx::query("SELECT id FROM public.deliveries WHERE id=$1 FOR UPDATE")
         .bind(delivery_id)
         .fetch_optional(&mut *tx)

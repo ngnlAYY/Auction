@@ -153,17 +153,6 @@ pub(super) async fn insert_audit(
 }
 
 #[cfg(feature = "postgres")]
-pub(super) async fn set_serializable(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-) -> Result<(), ApplicationError> {
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_storage_error)?;
-    Ok(())
-}
-
-#[cfg(feature = "postgres")]
 pub(super) async fn lock_command(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     command_id: Uuid,

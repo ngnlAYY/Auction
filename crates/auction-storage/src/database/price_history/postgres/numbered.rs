@@ -17,12 +17,11 @@ pub(super) async fn list(
     store: &PostgresStore,
     request: PublicPriceHistoryListRequest,
 ) -> Result<PublicPriceHistoryPage, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启公开价格历史读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("设置公开价格历史隔离级别失败"))?;
+        .map_err(|_| storage_error("开启公开价格历史读取事务失败"))?;
 
     // 编号页仍需返回同一快照内的完整统计；仅物化筛选、排序和金额所需的窄行，避免两次
     // 执行完整过滤联表。装备等级只为当前页读取，空页通过统计行保留 total/stats。

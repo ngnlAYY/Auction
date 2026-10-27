@@ -4,12 +4,13 @@
 
 use auction_application::{
     ApplicationError, ApplicationFuture, PublicLoginAuthenticator, PublicLoginIdentity,
-    RepositoryError, SessionError,
+    SessionError,
 };
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 mod admin;
 mod mail;
@@ -69,8 +70,4 @@ async fn authenticate_postgres(
             .try_get("public_reason")
             .map_err(|_| storage_error("读取公开封禁原因失败"))?,
     })
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

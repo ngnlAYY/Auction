@@ -52,30 +52,10 @@ pub(super) async fn append_admin_lot_record_inner(
     let item_count: i64 = event_data.try_get("item_count").map_err(map_sql_error)?;
     let manual_open: bool = event_data.try_get("preview_manual_open").map_err(map_sql_error)?;
     let stream_key = format!("auction:{}", result.auction_id.as_uuid());
-    sqlx::query(
-        "INSERT INTO public.realtime_streams (stream_key)
-         VALUES ($1) ON CONFLICT (stream_key) DO NOTHING",
-    )
-    .bind(&stream_key)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    let sequence: i64 = sqlx::query_scalar(
-        "SELECT next_sequence FROM public.realtime_streams WHERE stream_key = $1 FOR UPDATE",
-    )
-    .bind(&stream_key)
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    sqlx::query(
-        "UPDATE public.realtime_streams
-         SET next_sequence = next_sequence + 1, updated_at = CURRENT_TIMESTAMP
-         WHERE stream_key = $1",
-    )
-    .bind(&stream_key)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
+    let sequence =
+        crate::database::realtime::allocate_stream_sequence(transaction, &stream_key, None)
+            .await
+            .map_err(map_sql_error)?;
     sqlx::query(
         "INSERT INTO public.realtime_events
             (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,

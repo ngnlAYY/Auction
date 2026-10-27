@@ -273,6 +273,11 @@ impl RateLimiter {
             value.count += 1;
             return None;
         }
+        if entries.len() >= self.max_entries {
+            // 窗口已过期的记录与缺失记录等价（下次访问会重置），可整批移除而不改变限流结果；
+            // 满表时一次清理即可摊还后续新地址的插入，只有全部活跃时才逐个淘汰最久未见者。
+            entries.retain(|_, value| now.duration_since(value.started) < self.window);
+        }
         if entries.len() >= self.max_entries
             && let Some(oldest) = entries
                 .iter()

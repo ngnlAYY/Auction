@@ -6,6 +6,7 @@ use auction_application::{
 };
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 impl AdminRenameReader for DatabaseStore {
     fn list(&self, request: AdminRenameListRequest) -> ApplicationFuture<'_, AdminRenamePage> {
@@ -29,12 +30,11 @@ async fn list_postgres(
     use chrono::{DateTime, Utc};
     use sqlx::Row;
 
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启 Admin 改名历史读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("设置 Admin 改名历史读取隔离级别失败"))?;
+        .map_err(|_| storage_error("开启 Admin 改名历史读取事务失败"))?;
 
     let name = request.name.as_deref().filter(|value| !value.is_empty());
     let total: i64 = sqlx::query_scalar(
@@ -112,8 +112,4 @@ async fn list_postgres(
     } else {
         Err(storage_error("Admin 改名历史分页结果无效"))
     }
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(auction_application::RepositoryError::Failed(message.to_owned()))
 }

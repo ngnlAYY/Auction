@@ -100,11 +100,14 @@ pub trait RealtimeConsumerStore: Send + Sync {
     ) -> ApplicationFuture<'_, ()>;
 }
 
-/// Public relay 用于发现全部拍卖 stream 的持久化目录端口。
+/// Public relay 用于发现待转发拍卖 stream 的持久化目录端口。
 pub trait RealtimeStreamStore: Send + Sync {
-    /// 按稳定 stream key 分页返回指定前缀后的 stream；结果必须按字典序递增。
-    fn list_stream_keys(
+    /// 按稳定 stream key 分页返回指定前缀后、仍有事件位于该 consumer 游标之后的 stream；
+    /// 结果必须按字典序递增。已追平的历史 stream 不进入每轮扫描，使轮询成本只随待转发
+    /// stream 增长；失败事件不推进游标，因此仍会在后续轮次被列出并重试。
+    fn list_pending_stream_keys(
         &self,
+        consumer_key: String,
         prefix: String,
         after: String,
         limit: u16,

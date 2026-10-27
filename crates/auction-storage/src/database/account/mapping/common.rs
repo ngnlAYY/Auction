@@ -1,4 +1,5 @@
 use super::*;
+pub(in crate::database::account) use crate::database::storage_error;
 
 pub(in crate::database::account) fn validate_page(
     page: PublicMyBidsPage,
@@ -41,8 +42,4 @@ where
     for<'r> T: sqlx::Decode<'r, sqlx::Postgres> + sqlx::Type<sqlx::Postgres>,
 {
     row.try_get(column).map_err(|_| storage_error(label))
-}
-
-pub(in crate::database::account) fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

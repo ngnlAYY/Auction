@@ -1,7 +1,6 @@
 //! 凭据适配器共享错误、命令结果和安全文本校验；本模块不执行数据库操作，只维护共用安全映射。
 
-#[cfg(feature = "postgres")]
-use auction_application::RepositoryError;
+pub(super) use crate::database::storage_error;
 #[cfg(feature = "postgres")]
 use auction_application::{AdminCredential, AdminCredentialDeleteResult};
 use auction_application::{AdminCredentialError, ApplicationError};
@@ -17,9 +16,4 @@ pub(super) struct StoredCredentialPayload {
 
 pub(super) fn admin_error(error: AdminCredentialError) -> ApplicationError {
     ApplicationError::AdminCredential(error)
-}
-
-#[cfg(feature = "postgres")]
-pub(super) fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

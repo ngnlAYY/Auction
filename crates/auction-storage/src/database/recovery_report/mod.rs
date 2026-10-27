@@ -12,6 +12,7 @@ use auction_application::{RecoveryActionReport, RecoveryReportEntry, allowed_rec
 use auction_domain::{LotId, SettlementId};
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 impl RecoveryReportReader for DatabaseStore {
     fn recovery_report(
@@ -42,12 +43,11 @@ async fn postgres_report(
     use sqlx::Row;
     use uuid::Uuid;
 
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("打开 recovery 报告快照失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("设置 recovery 报告快照失败"))?;
+        .map_err(|_| storage_error("打开 recovery 报告快照失败"))?;
 
     let auction_exists = sqlx::query("SELECT id FROM public.auctions WHERE id = $1")
         .bind(auction_id.as_uuid())
@@ -227,8 +227,4 @@ async fn postgres_report(
 
     transaction.commit().await.map_err(|_| storage_error("提交 recovery 报告快照失败"))?;
     Ok(Some(RecoveryReport { auction_id, recoveries }))
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(auction_application::RepositoryError::Failed(message.to_owned()))
 }

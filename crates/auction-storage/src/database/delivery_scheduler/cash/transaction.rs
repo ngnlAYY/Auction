@@ -114,9 +114,9 @@ async fn run_transaction(
             // 尚未开始事务的确定拒绝；重试不能重建证据寿命。
             return Ok(DeliveryFenceOutcome::Deferred);
         }
-        let mut tx = pool.begin().await.map_err(|_| uncertain())?;
+        let mut tx =
+            pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(|_| uncertain())?;
         let result = async {
-            sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE").execute(&mut *tx).await?;
             if let (Some(deadline), Some(evidence)) = (deadline, evidence) {
                 let remaining =
                     deadline.checked_duration_since(Instant::now()).ok_or(FenceError::Rejected)?;

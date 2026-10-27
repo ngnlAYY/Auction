@@ -139,7 +139,7 @@
 
 .public-world-switcher select {
   padding: var(--space-1) var(--space-2);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
@@ -399,6 +399,13 @@
 
 .public-rules-page__document a {
   color: var(--color-link);
+}
+
+/* 容器与表格仍占满可用宽度；只限制正文段落、列表、引用和标题的阅读行宽并保持靠左，
+   约合 75–80 个拉丁字符或 35–40 个汉字，宽屏长文不再横跨整屏。 */
+.public-rules-page__document :is(p, ul, ol, blockquote, h2, h3, h4, h5, h6),
+.public-status-page p {
+  max-inline-size: 70ch;
 }
 
 .public-status-page h2 {
@@ -889,7 +896,7 @@
   min-block-size: var(--size-target);
   box-sizing: border-box;
   padding: var(--space-1) var(--space-2);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
@@ -1062,7 +1069,7 @@
   min-block-size: var(--size-target);
   box-sizing: border-box;
   padding: var(--space-1) var(--space-2);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
@@ -1383,7 +1390,7 @@
   max-inline-size: 100%;
   min-block-size: 1.75rem;
   padding: 0 var(--space-1);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
@@ -1698,7 +1705,7 @@
   min-inline-size: 0;
   min-block-size: var(--size-target);
   padding: var(--space-2) var(--space-3);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
@@ -2073,7 +2080,7 @@
 
 .public-auction-bid-log-controls select {
   padding: var(--space-1) var(--space-2);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
@@ -2114,7 +2121,7 @@
   min-block-size: var(--size-target);
   max-inline-size: 100%;
   padding: var(--space-2);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
@@ -2410,7 +2417,7 @@
   min-inline-size: 0;
   min-block-size: var(--size-target);
   padding: var(--space-2) var(--space-3);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface);
@@ -2604,7 +2611,7 @@
   min-inline-size: 0;
   max-inline-size: 100%;
   padding: var(--space-1) var(--space-2);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
@@ -2721,7 +2728,7 @@
   min-inline-size: 0;
   min-block-size: var(--size-target);
   padding: var(--space-2) var(--space-3);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
@@ -2847,7 +2854,7 @@
 
 .public-compensation-heading h1,
 .public-compensation-intro {
-  margin-top: 0;
+  margin-block-start: 0;
 }
 
 .public-compensation-empty {
@@ -2856,7 +2863,7 @@
 }
 
 .public-compensation-balance {
-  min-width: 13rem;
+  min-inline-size: 13rem;
   display: grid;
   gap: var(--space-1);
   padding: var(--space-3);
@@ -2878,7 +2885,7 @@
 
 .public-compensation-table,
 .public-compensation-movement-table {
-  width: 100%;
+  inline-size: 100%;
   border-collapse: collapse;
 }
 
@@ -2887,7 +2894,7 @@
 .public-compensation-movement-table th,
 .public-compensation-movement-table td {
   padding: var(--space-2) var(--space-3);
-  border-bottom: var(--border-width) solid var(--color-border);
+  border-block-end: var(--border-width) solid var(--color-border);
   text-align: left;
   white-space: nowrap;
 }

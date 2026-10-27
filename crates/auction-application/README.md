@@ -312,7 +312,8 @@ Public/Admin 登录结果的 `Debug` 只保留身份投影，原始 session 与 
 会话 token 先检查 43 字节无填充编码长度，再解码到 32 字节栈缓冲；摘要输入仍是解码字节，不是 Cookie 文本。
 Admin 录入命令中的完整装备 URL、论坛镜像正文和邮箱 compose 草稿的主题/正文也在 `Debug` 中脱敏，
 避免 URL 包装或只读投影重新暴露装备 key、登录 key；实际业务字段和命令摘要保持原文。
-本地 relay 按有界分页遍历 stream 目录；每条已校验事件直接移交 sink，只保留确认所需的 ID/序号，
+本地 relay 只按有界分页遍历仍有事件位于本 consumer 游标之后的 stream，已追平的历史 stream 不进入每轮扫描；
+每条已校验事件直接移交 sink，只保留确认所需的 ID/序号，
 避免复制完整 JSON payload。sink 失败不推进游标，sink 成功但游标提交失败仍按原 at-least-once 规则重投。
 公开事件注册表按每个字段一次查找同时拒绝缺失与 `null`；完整字段集合、类型、金额范围和流身份校验不变。
 

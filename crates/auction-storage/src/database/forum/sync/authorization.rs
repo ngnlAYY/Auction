@@ -3,7 +3,7 @@
 
 use auction_application::{
     ApplicationError, ForumSyncRecoveryItem, ForumWriteRetryAuthorizationCommand,
-    ForumWriteRetryAuthorizationResult, RepositoryError,
+    ForumWriteRetryAuthorizationResult,
 };
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -11,6 +11,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use super::super::super::PostgresStore;
+use crate::database::storage_error;
 
 const COMMAND_KIND: &str = "authorize_write_retry";
 const AUTHORIZATION_REQUIRED: &str = "write_authorization_required";
@@ -233,8 +234,4 @@ fn map_item(row: sqlx::postgres::PgRow) -> Result<ForumSyncRecoveryItem, Applica
         return Err(storage_error("论坛恢复投影无效"));
     }
     Ok(item)
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

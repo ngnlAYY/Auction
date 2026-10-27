@@ -213,17 +213,12 @@ pub(crate) fn bid_mechanism(mechanism: BidMechanism) -> &'static str {
     }
 }
 
-pub(crate) async fn set_isolation(
-    transaction: Result<&mut PgTransaction, CompetitionTransactionError>,
-    isolation: TransactionIsolation,
-) -> Result<(), CompetitionTransactionError> {
-    let transaction = transaction?;
-    let statement = match isolation {
-        TransactionIsolation::Serializable => "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
-        TransactionIsolation::ReadCommitted => "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
-    };
-    sqlx::query(statement).execute(&mut **transaction).await.map_err(map_sql_error)?;
-    Ok(())
+/// 事务隔离级别随 `BEGIN` 一并声明；各事务 runner 共用此映射，不再单独发送 `SET TRANSACTION`。
+pub(crate) const fn begin_statement(isolation: TransactionIsolation) -> &'static str {
+    match isolation {
+        TransactionIsolation::Serializable => "BEGIN ISOLATION LEVEL SERIALIZABLE",
+        TransactionIsolation::ReadCommitted => "BEGIN ISOLATION LEVEL READ COMMITTED",
+    }
 }
 
 pub(crate) fn map_sql_error(error: sqlx::Error) -> CompetitionTransactionError {

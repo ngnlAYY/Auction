@@ -1,6 +1,7 @@
 //! PostgreSQL Admin 邮件行、轮询状态和安全 metadata 映射。
 
 use super::*;
+pub(super) use crate::database::storage_error;
 use auction_application::MailDisplaySnapshot;
 
 pub(super) fn map_sql_error(error: sqlx::Error) -> AdminMailTransactionError {
@@ -17,10 +18,6 @@ pub(super) fn map_sql_error(error: sqlx::Error) -> AdminMailTransactionError {
         }
         _ => AdminMailTransactionError::Failed("PostgreSQL 邮件 Admin 事务操作失败".to_owned()),
     }
-}
-
-pub(super) fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(auction_application::RepositoryError::Failed(message.to_owned()))
 }
 
 pub(super) fn map_poll_state(

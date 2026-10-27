@@ -1,8 +1,9 @@
 //! Public 价格历史的共享分页、筛选、统计与安全映射。
 
+pub(crate) use crate::database::storage_error;
 use auction_application::{
     ApplicationError, PublicPriceHistoryCursor, PublicPriceHistoryEntry,
-    PublicPriceHistoryListRequest, PublicPriceHistoryStats, RepositoryError,
+    PublicPriceHistoryListRequest, PublicPriceHistoryStats,
 };
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -81,8 +82,4 @@ pub(crate) fn validate_stats(
 ) -> Result<PublicPriceHistoryStats, ApplicationError> {
     stats.validate().map_err(storage_error)?;
     Ok(stats)
-}
-
-pub(crate) fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

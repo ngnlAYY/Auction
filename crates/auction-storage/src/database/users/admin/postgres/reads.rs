@@ -11,9 +11,9 @@ pub(crate) async fn list_postgres(
     store: &super::super::super::super::PostgresStore,
     request: AdminUserListRequest,
 ) -> Result<AdminUserPage, ApplicationError> {
-    let mut transaction = store.pool().begin().await.map_err(map_storage_error)?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
         .map_err(map_storage_error)?;
     let name = request.name.as_deref().filter(|value| !value.is_empty());

@@ -41,8 +41,7 @@ async fn expire_one(
     now: DateTime<Utc>,
     grace_micros: i64,
 ) -> Result<(), OutcomeError> {
-    let mut tx = pool.begin().await?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE").execute(&mut *tx).await?;
+    let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     let account = funding::lock_funded_delivery_account(&mut tx, id).await?;
     sqlx::query("SELECT id FROM public.deliveries WHERE id=$1 FOR UPDATE")
         .bind(id)

@@ -73,7 +73,8 @@ where
     let custody = custody.map(|(snapshot, _)| snapshot);
     let run = async {
         for attempt in 0..3 {
-            let mut transaction = match pool.begin().await {
+            let mut transaction = match pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await
+            {
                 Ok(transaction) => transaction,
                 Err(error) => {
                     let error = DeliveryTransactionError::from(error);
@@ -83,19 +84,6 @@ where
                     return Err(error.into_repository_error());
                 }
             };
-
-            if let Err(error) = sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-                .execute(&mut *transaction)
-                .await
-            {
-                let error = DeliveryTransactionError::from(error);
-                if error.is_retryable() && attempt < 2 {
-                    let _ = transaction.rollback().await;
-                    continue;
-                }
-                let _ = transaction.rollback().await;
-                return Err(error.into_repository_error());
-            }
 
             let operation_result = async {
                 if let Some(custody) = custody {

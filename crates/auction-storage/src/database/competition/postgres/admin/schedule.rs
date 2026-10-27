@@ -318,30 +318,10 @@ async fn append_admin_auction_schedule_record_inner(
         "scheduled_end_at": command.scheduled_end_at,
         "state_version": result.auction.state_version,
     });
-    sqlx::query(
-        "INSERT INTO public.realtime_streams (stream_key)
-         VALUES ($1) ON CONFLICT (stream_key) DO NOTHING",
-    )
-    .bind(&stream_key)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    let sequence: i64 = sqlx::query_scalar(
-        "SELECT next_sequence FROM public.realtime_streams WHERE stream_key = $1 FOR UPDATE",
-    )
-    .bind(&stream_key)
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    sqlx::query(
-        "UPDATE public.realtime_streams
-         SET next_sequence = next_sequence + 1, updated_at = CURRENT_TIMESTAMP
-         WHERE stream_key = $1",
-    )
-    .bind(&stream_key)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
+    let sequence =
+        crate::database::realtime::allocate_stream_sequence(transaction, &stream_key, None)
+            .await
+            .map_err(map_sql_error)?;
     sqlx::query(
         r#"INSERT INTO public.realtime_events
             (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,

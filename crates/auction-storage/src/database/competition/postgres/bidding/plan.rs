@@ -12,9 +12,10 @@ impl PostgresCompetitionTransaction {
     ) -> Result<(), CompetitionTransactionError> {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         super::apply_proxy_changes(self, &plan, occurred_at).await?;
+        let mut auction_id = None;
         for bid in &plan.public_bids {
             super::insert_bid(self, bid, occurred_at).await?;
-            super::insert_realtime_event(self, bid).await?;
+            super::insert_realtime_event(self, &mut auction_id, bid).await?;
         }
         super::update_lot(self, &plan, occurred_at).await?;
         if let Some(audit) = audit {
@@ -33,10 +34,11 @@ impl PostgresCompetitionTransaction {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         let command_id = plan_command_id(&plan)?;
         super::apply_proxy_changes(self, &plan, occurred_at).await?;
+        let mut auction_id = None;
         for bid in &plan.public_bids {
             super::insert_bid(self, bid, occurred_at).await?;
             super::insert_audit_for_bid(self, bid, request_id.as_deref()).await?;
-            super::insert_realtime_event(self, bid).await?;
+            super::insert_realtime_event(self, &mut auction_id, bid).await?;
         }
         super::insert_audit_for_proxy_changes(self, &plan, command_id, request_id.as_deref())
             .await?;
@@ -53,9 +55,10 @@ impl PostgresCompetitionTransaction {
         context.validate()?;
         let occurred_at = context.executed_at;
         super::apply_proxy_changes(self, &plan, occurred_at).await?;
+        let mut auction_id = None;
         for bid in &plan.public_bids {
             super::insert_bid(self, bid, occurred_at).await?;
-            super::insert_realtime_event(self, bid).await?;
+            super::insert_realtime_event(self, &mut auction_id, bid).await?;
         }
         super::update_lot(self, &plan, occurred_at).await?;
         super::insert_audit_for_slow_proxy(self, &plan, context).await

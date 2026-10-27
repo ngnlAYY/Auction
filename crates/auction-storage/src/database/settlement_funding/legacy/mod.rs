@@ -22,9 +22,9 @@ impl LegacyBotSellerStore for crate::DatabaseStore {
             if obligation_id.is_nil() {
                 return Err(FundingError::Invalid);
             }
-            let mut tx = self.postgres_pool().begin().await.map_err(super::storage)?;
-            sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-                .execute(&mut *tx)
+            let mut tx = self
+                .postgres_pool()
+                .begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY")
                 .await
                 .map_err(super::storage)?;
             let target = preview::load(&mut tx, obligation_id, &expected_uid).await?;
@@ -39,11 +39,8 @@ impl LegacyBotSellerStore for crate::DatabaseStore {
     ) -> FundingFuture<'_, Option<LegacyBotSellerResult>> {
         Box::pin(async move {
             command.validate()?;
-            let mut tx = self.postgres_pool().begin().await.map_err(super::storage)?;
-            sqlx::query("SET TRANSACTION READ ONLY")
-                .execute(&mut *tx)
-                .await
-                .map_err(super::storage)?;
+            let mut tx =
+                self.postgres_pool().begin_with("BEGIN READ ONLY").await.map_err(super::storage)?;
             let result = transaction::replay(&mut tx, &command).await?;
             tx.commit().await.map_err(super::storage)?;
             Ok(result)

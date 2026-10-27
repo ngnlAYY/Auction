@@ -31,12 +31,11 @@ pub(super) async fn list_postgres(
     // 仅额外探测行采用饱和加法；i64::MAX 已覆盖可表示行数，不改变请求及响应数量。
     let query_limit = request.limit.saturating_add(1);
 
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启公开价格历史读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("设置公开价格历史隔离级别失败"))?;
+        .map_err(|_| storage_error("开启公开价格历史读取事务失败"))?;
     let rows = sqlx::query(
         "SELECT
             l.id AS lot_id,
