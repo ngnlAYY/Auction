@@ -124,3 +124,39 @@ sccache 仍有一条 dead-code 编译警告；它们不是应用 Clippy 结果�
 升级工具或应用 wasm-bindgen 时，核对官方源码/制品身份与依赖公告，更新对应锁图、固定哈希及配套版本，运行
 `bash -n`、ShellCheck、Actions 静态检查和相关工具构建，再按项目默认范围执行编译门禁。不得通过忽略公告或降低
 应用 `cargo audit --deny warnings` 门禁完成升级。
+
+### 2026-10-26 Zstandard 公告
+
+本节结合 [RustSec 的 zstd-safe 公告](https://rustsec.org/packages/zstd-safe.html)、已锁版本、离线 Linux
+feature 图及源码调用路径；版本匹配不能单独证明实际入口可触发漏洞。
+
+- 升级前 dx 锁定 `zstd-safe 7.2.4`，版本匹配 RUSTSEC-2026-0395–0406 共 12 项，其中 0398、0403 为漏洞；
+  sccache 仍锁定 7.1.0，匹配其中 9 项，其中 0403 为漏洞。修复版本为 `zstd-safe >=8.2.0`。
+  两个工具实际的 GNU feature 图均未启用 0398 所需的 `seekable`。0403 需要 legacy 帧及受影响的输出缓冲区；
+  dx 图未启用 `legacy`，sccache 虽启用该 feature，缓存读取实际使用 `zstd::stream::copy_decode`，
+  它使用公告明确排除的 `read::Decoder`。这些限定不证明两个工具的所有调用路径安全。
+- 升级前 dx 的 `zstd 0.13.3` 还匹配 [RUSTSEC-2026-0391](https://rustsec.org/advisories/RUSTSEC-2026-0391.html)，
+  触发条件是复用 `with_context`。当前 `dx bundle --platform web` 源码路径和已查依赖未发现该调用；
+  其 feature 图经 `tower-http`、`async-compression` 和 `compression-codecs` 引入 zstd。sccache 的
+  `zstd 0.13.1` 不在 0391 受影响版本范围。
+- 升级前 dx 的 `zstd-sys 2.0.16` 与 sccache 的 `2.0.10` 匹配
+  [RUSTSEC-2026-0410](https://rustsec.org/advisories/RUSTSEC-2026-0410.html) 的版本范围，但该公告限定
+  wasm32；本入口只构建 Linux x86_64 工具，不能将这一结论扩展至其他平台。
+- dx 锁已按受控候选升级：`compression-codecs` 0.4.38 → 0.4.40、`compression-core` 0.4.32 → 0.4.34，
+  `zstd` 0.13.3 → 0.14.3、`zstd-safe` 7.2.4 → 8.2.0、`zstd-sys` 2.0.16 → 2.1.2；
+  离线 GNU feature 图其余包及 feature 未变。新 Zstandard 包声明 BSD-3-Clause 许可，分发工具缓存时须纳入许可审查。
+  sccache 0.18.0 及 0.19.0 均要求 `zstd ^0.13`，不能只通过锁文件升级到修复版。
+
+本轮使用受控 cargo-audit 0.22.2、`--deny warnings` 和独立公告库执行完整锁审计。公告库包含 1378 条公告，
+提交为 `3279c99911354c400e1d41e47c7d60e39258b147`；数字包含未启用 feature、其他平台及测试依赖，不能直接等同可利用漏洞。
+
+| 锁图 | 漏洞匹配项 | 被拒绝的警告 | 结果 |
+| --- | ---: | ---: | --- |
+| Auction 应用 | 0 | 0 | 通过 |
+| cargo-audit | 0 | 0 | 通过 |
+| dx 升级前 | 17 | 21 | 失败 |
+| sccache | 7 | 17 | 失败 |
+| dx 升级后 | 13 | 11 | 失败 |
+
+应用锁和工具锁分别审计，不为工具公告设置忽略项。dx 的完整锁仍命中其他公告；受限调用路径不等于零风险。
+受控 cargo-audit 已重建；dx 和 sccache 按 release 配方重建并签发回执，sccache 锁没有变化。

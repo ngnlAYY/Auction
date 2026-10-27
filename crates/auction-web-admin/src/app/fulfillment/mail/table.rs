@@ -131,10 +131,10 @@ fn MailIntakeRow(intake: AdminMailIntake, on_select: EventHandler<String>) -> El
                 button {
                     class: "admin-mail__detail-trigger",
                     r#type: "button",
-                    title: t!("admin-mail-open-detail"),
+                    title: detail_label.clone(),
                     aria_label: detail_label,
                     onclick: move |_| on_select.call(intake_id.clone()),
-                    TruncatedText { value: external_mail_id, size: "compact" }
+                    span { class: "shared-truncated-text shared-truncated-text--compact", "{external_mail_id}" }
                 }
             }
             td { "data-label": t!("admin-mail-intake-world"), TruncatedText { value: intake.world_id, size: "compact" } }

@@ -2,7 +2,7 @@
 
 use std::str;
 
-use scraper::{ElementRef, Html, Selector};
+use scraper::{ElementRef, Html, Node, Selector};
 
 use super::*;
 use crate::clients::mooglemail::parser::{
@@ -176,17 +176,30 @@ pub(super) fn response_mail_id(source: &str) -> Option<String> {
 }
 
 pub(super) fn visible_body_text(body: ElementRef<'_>) -> String {
+    // 提示区自身或其外层处于隐藏元素时，任何后代文字都不能作为拒绝证据。
+    if body.ancestors().filter_map(ElementRef::wrap).any(|ancestor| {
+        matches!(ancestor.value().name(), "script" | "style" | "noscript" | "textarea")
+    }) {
+        return String::new();
+    }
     let mut visible = String::new();
+    let mut ancestors = Vec::new();
+    // 深层嵌套只遍历一次祖先栈，保持隐藏诱饵和可见文本的原有边界。
     for node in body.descendants() {
-        let Some(text) = node.value().as_text() else {
-            continue;
-        };
-        let hidden = node.ancestors().filter_map(ElementRef::wrap).any(|ancestor| {
-            matches!(ancestor.value().name(), "script" | "style" | "noscript" | "textarea")
-        });
-        if !hidden {
-            visible.push_str(text);
-            visible.push(' ');
+        let parent = node.parent().map(|parent| parent.id());
+        while ancestors.last().is_some_and(|(id, _)| Some(*id) != parent) {
+            ancestors.pop();
+        }
+        let hidden = ancestors.last().is_some_and(|(_, hidden)| *hidden)
+            || matches!(node.value(), Node::Element(element)
+                if matches!(element.name(), "script" | "style" | "noscript" | "textarea"));
+        match node.value() {
+            Node::Element(_) => ancestors.push((node.id(), hidden)),
+            Node::Text(text) if !hidden => {
+                visible.push_str(text);
+                visible.push(' ');
+            }
+            _ => {}
         }
     }
     normalize_text(visible)

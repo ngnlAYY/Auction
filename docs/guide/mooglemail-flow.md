@@ -89,7 +89,8 @@ flowchart TD
 
 ## 4. 投递队列
 
-`deliveries` 是所有出站动作的唯一队列，按 `payload.operation` 区分：
+`deliveries` 是 MoogleMail 发送、领取和退回动作的持久队列，按 `payload.operation` 区分；论坛 PM 使用独立队列，
+不进入 MoogleMail/Sent/COD 链。
 
 | operation | 来源 | 说明 |
 | --- | --- | --- |

@@ -7,7 +7,7 @@ use serde::Deserialize;
 pub struct ForumSyncWorkerConfig {
     /// 是否启用论坛主题创建/幂等查找；默认关闭，避免配置不完整时触发远程 POST。
     pub enabled: bool,
-    /// 是否额外回读并逐字校验固定帖原始 BBCode；默认关闭，不影响帖子身份及写入回执校验。
+    /// 正常发布/刷新是否额外回读 BBCode；默认关闭，回帖未知写入始终只读核对。
     pub verify_post_body: bool,
     /// active ForumCookie 凭据所属的 world scope；允许 main、isekai 或 shared。
     pub credential_world: String,

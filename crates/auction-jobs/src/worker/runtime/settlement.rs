@@ -253,23 +253,24 @@ where
         return WorkerResult::Success;
     }
 
-    let request =
-        SettlementWorkflowRequest { workflow_id: claim.workflow_id, due_at: claim.due_at };
-    let request_hash =
-        match RequestHash::from_request("settle_auction", claim.auction_id.as_uuid(), &request) {
-            Ok(hash) => hash,
-            Err(error) => {
-                record_settlement_failure(
-                    settlement_store,
-                    clock,
-                    claim,
-                    "internal",
-                    format!("无法生成结算命令摘要: {error}"),
-                )
-                .await;
-                return WorkerResult::Error;
-            }
-        };
+    let request_hash = match auction_application::settlement_complete_request_hash(
+        claim.auction_id.as_uuid(),
+        claim.workflow_id,
+        claim.due_at,
+    ) {
+        Ok(hash) => hash,
+        Err(error) => {
+            record_settlement_failure(
+                settlement_store,
+                clock,
+                claim,
+                "internal",
+                format!("无法生成结算命令摘要: {error}"),
+            )
+            .await;
+            return WorkerResult::Error;
+        }
+    };
     let command = SettleAuctionCommand {
         command_id: claim.settlement_command_id,
         workflow_id: claim.workflow_id,
@@ -304,13 +305,19 @@ where
 
 fn settlement_failure_code(error: &auction_application::ApplicationError) -> &'static str {
     match error {
-        auction_application::ApplicationError::Domain(_) => "settlement_mismatch",
+        auction_application::ApplicationError::Domain(_)
+        | auction_application::ApplicationError::CommandLedger(
+            auction_application::CommandLedgerError::Conflict,
+        ) => "settlement_mismatch",
         auction_application::ApplicationError::Repository(_)
         | auction_application::ApplicationError::Serialization(_)
         | auction_application::ApplicationError::TransactionPolicy(_) => "persistence",
         auction_application::ApplicationError::SettlementTransaction(error) => match error {
             auction_application::SettlementTransactionError::NotFound => "invalid_state",
-            auction_application::SettlementTransactionError::Conflict => "settlement_mismatch",
+            auction_application::SettlementTransactionError::Conflict
+            | auction_application::SettlementTransactionError::CommandLedger(
+                auction_application::CommandLedgerError::Conflict,
+            ) => "settlement_mismatch",
             auction_application::SettlementTransactionError::Failed(_)
             | auction_application::SettlementTransactionError::SerializationConflict => {
                 "persistence"
@@ -341,9 +348,4 @@ pub(super) async fn record_settlement_failure<C>(
     {
         tracing::error!(error = %error, failure_code, "settlement worker failed to persist retry state");
     }
-}
-#[derive(Debug, Serialize)]
-struct SettlementWorkflowRequest {
-    workflow_id: uuid::Uuid,
-    due_at: DateTime<Utc>,
 }

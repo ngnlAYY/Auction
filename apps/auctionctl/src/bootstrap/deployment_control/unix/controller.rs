@@ -207,6 +207,11 @@ impl Controller {
                 canonical_now(),
             ));
         }
+        if let Err(error) = self.verify_receipt_instances(prepared, &receipts) {
+            return Err(
+                self.rollback_failure(StartFailure::new("startup-receipt", error), &started)
+            );
+        }
         if let Err(error) = self.publish_receipt("started", receipts) {
             return Err(
                 self.rollback_failure(StartFailure::new("startup-receipt", error), &started)
@@ -254,6 +259,7 @@ impl Controller {
             let observed = canonical_now();
             receipts.push(self.role_receipt(plan.role, snapshot, observed.clone(), observed));
         }
+        self.verify_receipt_instances(prepared, &receipts)?;
         Ok(receipts)
     }
 
@@ -278,13 +284,20 @@ impl Controller {
                 )
             }
             if snapshot.running() && readiness_probe(&plan.probe, deadline).await {
-                println!(
-                    "role={} unit={} readiness=ready main_pid={}",
-                    plan.role.name(),
-                    self.unit(plan.role),
-                    snapshot.main_pid,
-                );
-                return Ok(snapshot);
+                // 探针前后的 systemd 进程身份必须一致；仅 PID 不能区分重启或复用。
+                let current = self.snapshot(plan.role)?;
+                if !current.running() || !snapshot.same_process(&current) {
+                    anyhow::bail!("{} unit 在 readiness 探测期间退出或重启", plan.role.name());
+                }
+                if Instant::now() < deadline {
+                    println!(
+                        "role={} unit={} readiness=ready main_pid={}",
+                        plan.role.name(),
+                        self.unit(plan.role),
+                        current.main_pid,
+                    );
+                    return Ok(current);
+                }
             }
             if Instant::now() >= deadline {
                 anyhow::bail!(
@@ -299,6 +312,24 @@ impl Controller {
             )
             .await;
         }
+    }
+
+    /// 发布前复核各角色仍是已通过探测的代次；探测本身不证明 socket 的 PID 归属。
+    fn verify_receipt_instances(
+        &self,
+        prepared: &PreparedDeployment,
+        receipts: &[RoleReceipt],
+    ) -> anyhow::Result<()> {
+        if receipts.len() != prepared.plans.len() {
+            anyhow::bail!("启动回执缺少角色记录");
+        }
+        for (plan, receipt) in prepared.plans.iter().zip(receipts) {
+            let snapshot = self.snapshot(plan.role)?;
+            if !snapshot.running() || !receipt.matches(plan.role, self.unit(plan.role), &snapshot) {
+                anyhow::bail!("{} unit 在 readiness 后退出或重启", plan.role.name());
+            }
+        }
+        Ok(())
     }
 
     pub(in crate::bootstrap::deployment_control::unix) fn ensure_addresses_available(

@@ -323,7 +323,7 @@ pub(crate) fn BidLogTable(
     on_page_size_change: EventHandler<i64>,
 ) -> Element {
     let has_more = page.has_more.unwrap_or(false);
-    let bids = page.bids.clone();
+    let bids = page.bids;
     rsx! {
         div {
             if bids.is_empty() {

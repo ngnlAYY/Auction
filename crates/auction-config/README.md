@@ -63,6 +63,7 @@ PostgreSQL `[database]` 接收 host、port、username、password、name 并统�
 key 各自使用独立数据密钥与非秘密 key ID，密钥为 32 字节标准 Base64，不得互相复用。敏感文件禁止提交、限运行账号
 访问，字段与跨角色一致性见[敏感配置](ops/config/README.md#敏感字段)。`AUCTION_CONFIG_FILE` 仅选择角色配置文件，
 不覆盖任何单个字段。
+无百分号转义的连接串校验与账号、密码转义直接借用输入，减少启动时无用的敏感文本副本。
 
 ## 维护凭据与本地联调
 

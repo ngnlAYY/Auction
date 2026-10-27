@@ -134,7 +134,7 @@ fn valid_locale(value: &str) -> bool {
         && value.len() <= 35
         && !value.starts_with('-')
         && !value.ends_with('-')
-        && value.chars().all(|character| character.is_alphanumeric() || character == '-')
+        && value.chars().all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
 fn invalid_rules_response(_error: &'static str) -> AdminRulesApiError {

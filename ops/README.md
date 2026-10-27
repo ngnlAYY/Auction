@@ -37,11 +37,17 @@
 - [邮箱共享读取与发送证明升级](#邮箱共享读取与发送证明升级)
 - [发送引用索引与稳定性修复升级](#发送引用索引与稳定性修复升级)
 - [卖方全额结算升级](#卖方全额结算升级)
+- [论坛镜像](#论坛镜像)
 - [全仓复审与设备展示拆分升级](#全仓复审与设备展示拆分升级)
 - [数据库恢复与保留](#数据库恢复与保留)
 - [反向代理与 systemd](#反向代理与-systemd)
 - [Cloudflare 整站代理](#cloudflare-整站代理)
 - [systemd 安装、探针与权限](#systemd-服务与顺序控制)
+
+## 论坛镜像
+
+论坛目录中的游戏装备直链及装备 key 是公开数据；数据库镜像和备份中的这些链接不构成隐私泄露。
+论坛正文继续保留固定帖身份、内容版本及未知写入对账。完整数据库备份仍按其中其他敏感资料的保护规则保管。
 
 ## 卖方全额结算升级
 
@@ -139,7 +145,12 @@ worker managed 控制 delivery 参数。发送总预算仍须大于两倍 fetch 
 才保存、初始化预备专用空库并启动；普通启动不隐式迁移，只校验 schema。
 
 仅启用[合并 unit](ops/deploy/systemd/auction-server.service.example)，同库禁并行分体或远端角色；合并锁与分体停机门禁互不替代。
-路径/锁、远程 HTTPS 设置、失败处置及 `migrate-managed` 见[server 手册](apps/auction-server/README.md)。
+路径/锁、远程 HTTPS 设置、失败处置及 `migrate-managed` 见[server 手册](apps/auction-server/README.md)。托管迁移必须
+在同一次打开流程中取得现有 runtime 目录与 `owner.lock` 的独占锁，核对属主、权限和 inode，并持有到迁移结束；
+目录或锁缺失、替换或竞争时拒绝，不能降级为无锁迁移。持锁期间仍须保持目录及锁路径稳定。
+首次空库初始化和普通启动前，Unix 监听路径只允许不存在，或为当前服务账号拥有且连接明确拒绝的旧 socket；
+活动 socket、其他文件、属主不符、连接超时或路径替换均阻止继续。预检不删除路径，实际绑定仍复核，预检后须保持目录稳定。
+
 
 ## 推荐目录
 
@@ -655,6 +666,8 @@ UnsetEnvironment、PassEnvironment、PAMName，不回显环境值。systemctl sh
 
 StateDirectory=auction/deployment 创建私有状态目录；总控持非阻塞锁、原子发布 startup-order.v1.json。手工运行须预建规范
 绝对路径，归有效用户所有、权限至多 0700。回执仅含 unit、InvocationID、PID、单调启动时间及观察时间，不含配置/凭据。
+每次 readiness 成功前后复核 unit 的运行状态、PID、InvocationID 和单调启动时间，发布 started/adopted 回执前再次复核三角色身份。
+started 失败回滚本轮启动的 unit；adopted 失败不停止既有 unit。身份一致不证明 socket 归该 PID，发布后仍可能退出。
 全部已运行时 start 复核 readiness/顺序并发布 adopted 回执；部分运行或转换中拒绝。须预建 auction-worker-control 组并纳入
 Worker/Admin supplementary group；TOML group、allowlist 须匹配实际 UID/GID，禁止照抄数字 ID。Admin/Worker 须匹配 control
 路径、用户登录及外部凭据两组密钥和有效拍卖/结算/排期；装备数据密钥的标识与材料必须三角色一致，

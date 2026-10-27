@@ -190,6 +190,7 @@ struct WorkerControlInner {
     version: String,
     mail_pollers: usize,
     poll_wakeup: Arc<Notify>,
+    fatal_wakeup: Arc<Notify>,
     trigger_history: Mutex<TriggerHistory>,
 }
 
@@ -243,6 +244,7 @@ impl WorkerControlHandle {
                 version: version.into(),
                 mail_pollers,
                 poll_wakeup: Arc::new(Notify::new()),
+                fatal_wakeup: Arc::new(Notify::new()),
                 trigger_history: Mutex::new(TriggerHistory {
                     order: VecDeque::with_capacity(MAX_REMEMBERED_TRIGGER_COMMANDS),
                     results: std::collections::HashMap::with_capacity(
@@ -307,6 +309,20 @@ impl WorkerControlHandle {
     /// 标记 Worker 正在收口；之后的手动唤醒会被拒绝。
     pub fn mark_draining(&self) {
         self.inner.state.fetch_or(CONTROL_DRAINING, std::sync::atomic::Ordering::AcqRel);
+    }
+
+    /// 致命循环故障通知只供装配根的一个接收者使用；通知在首次等待前仍保留。
+    pub fn fatal_wakeup(&self) -> Arc<Notify> {
+        Arc::clone(&self.inner.fatal_wakeup)
+    }
+
+    /// 原子撤销就绪并停止新领取，再通知装配根启动有界排空。
+    pub(crate) fn report_fatal(&self) {
+        self.inner.state.fetch_or(
+            CONTROL_STARTED | CONTROL_DEGRADED | CONTROL_DRAINING,
+            std::sync::atomic::Ordering::AcqRel,
+        );
+        self.inner.fatal_wakeup.notify_one();
     }
 
     pub fn poll_wakeup(&self) -> Arc<Notify> {

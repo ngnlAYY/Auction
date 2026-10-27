@@ -3,6 +3,9 @@
 use auction_web_shared::{
     BaseErrorKind, base_api_error_message, i18n::format_localized_time_for_language, legacy_t as t,
 };
+use dioxus::prelude::Memo;
+#[cfg(target_arch = "wasm32")]
+use dioxus::prelude::{ReadableExt, use_drop, use_effect, use_hook};
 use dioxus_i18n::prelude::i18n;
 
 /// 直接订阅当前 I18n 语言，避免 `<html lang>` 的同步 effect 使时间文案滞后一轮。
@@ -96,5 +99,62 @@ impl AdminActionFeedback {
             Self::Success => success,
             Self::Error(code) => admin_api_error_message(code),
         }
+    }
+}
+
+/// 有未保存的会话草稿时请求浏览器原生确认；同文档切页不触发此事件。
+pub(super) fn use_unload_warning(_dirty: Memo<bool>) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use std::{cell::RefCell, rc::Rc};
+        use wasm_bindgen::{JsCast, closure::Closure};
+
+        let guard = use_hook(|| Rc::new(RefCell::new(None::<UnloadWarning>)));
+        let cleanup = Rc::clone(&guard);
+        use_drop(move || {
+            cleanup.borrow_mut().take();
+        });
+        use_effect(move || {
+            if !_dirty() {
+                guard.borrow_mut().take();
+                return;
+            }
+            if guard.borrow().is_some() {
+                return;
+            }
+            let Some(window) = web_sys::window() else { return };
+            let callback = Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(
+                move |event: web_sys::BeforeUnloadEvent| {
+                    if *_dirty.peek() {
+                        event.prevent_default();
+                        // 提示文本由浏览器控制；非空 returnValue 兼容仍依赖该属性的浏览器。
+                        event.set_return_value(" ");
+                    }
+                },
+            );
+            if window
+                .add_event_listener_with_callback("beforeunload", callback.as_ref().unchecked_ref())
+                .is_ok()
+            {
+                guard.replace(Some(UnloadWarning { window, callback }));
+            }
+        });
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct UnloadWarning {
+    window: web_sys::Window,
+    callback: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::BeforeUnloadEvent)>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for UnloadWarning {
+    fn drop(&mut self) {
+        use wasm_bindgen::JsCast;
+        let _ = self.window.remove_event_listener_with_callback(
+            "beforeunload",
+            self.callback.as_ref().unchecked_ref(),
+        );
     }
 }

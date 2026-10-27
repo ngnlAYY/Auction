@@ -485,7 +485,7 @@ pub(super) fn page() -> Element {
             p { class: "admin-config-intro", {t!("admin-runtime-note")} }
             AdminBusinessWorlds {}
             h2 { class: "admin-config-page__runtime-title", {t!("admin-runtime-document-title")} }
-            PendingCommandPanel { owner: pending }
+            PendingCommandPanel { owner: pending, session_scoped: true }
             {content}
             if reload_confirm_open() {
                 Dialog {

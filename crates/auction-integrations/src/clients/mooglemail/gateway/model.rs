@@ -1,7 +1,10 @@
 //! MoogleMail gateway 的配置和安全读取结果模型。
 
 use super::*;
-use std::time::{Duration, Instant};
+use std::{
+    fmt,
+    time::{Duration, Instant},
+};
 
 use chrono::{DateTime, Utc};
 
@@ -29,7 +32,7 @@ impl Default for MoogleMailGatewayConfig {
 }
 
 /// 只读 Sent 核对请求；不会执行任何写入动作。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MoogleMailSentLookupRequest {
     pub world: MoogleMailWorld,
     pub recipient: String,
@@ -38,6 +41,21 @@ pub struct MoogleMailSentLookupRequest {
     pub maximum_pages: usize,
     pub deadline: Instant,
     pub observed_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for MoogleMailSentLookupRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MoogleMailSentLookupRequest")
+            .field("world", &self.world)
+            .field("recipient", &"[REDACTED]")
+            .field("subject", &"[REDACTED]")
+            .field("external_equipment_id", &self.external_equipment_id)
+            .field("maximum_pages", &self.maximum_pages)
+            .field("deadline", &self.deadline)
+            .field("observed_at", &self.observed_at)
+            .finish()
+    }
 }
 
 impl MoogleMailSentLookupRequest {

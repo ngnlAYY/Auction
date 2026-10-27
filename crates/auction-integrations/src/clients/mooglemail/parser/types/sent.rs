@@ -3,7 +3,7 @@
 use super::*;
 
 /// 已发送邮件列表中可用于 exact ID 查找的安全摘要。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailSentSummary {
     /// 远端 `mid`。
     pub external_mail_id: String,
@@ -12,6 +12,19 @@ pub struct MoogleMailSentSummary {
     pub subject: String,
     /// 远端页面按 UTC 展示的时间。
     pub sent_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for MoogleMailSentSummary {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MoogleMailSentSummary")
+            .field("external_mail_id", &self.external_mail_id)
+            .field("world", &self.world)
+            .field("recipient", &"[REDACTED]")
+            .field("subject", &"[REDACTED]")
+            .field("sent_at", &self.sent_at)
+            .finish()
+    }
 }
 
 impl MoogleMailSentSummary {
@@ -72,7 +85,7 @@ pub struct MoogleMailSentPage {
 }
 
 /// 精确 remote ID 的已发送邮件与当前待领取资产快照。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailSentSnapshot {
     pub external_mail_id: String,
     pub world: MoogleMailWorld,
@@ -86,6 +99,24 @@ pub struct MoogleMailSentSnapshot {
     /// 页面是否明确证明邮件已领取完毕。
     pub collected: bool,
     pub observed_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for MoogleMailSentSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MoogleMailSentSnapshot")
+            .field("external_mail_id", &self.external_mail_id)
+            .field("world", &self.world)
+            .field("recipient", &"[REDACTED]")
+            .field("subject", &"[REDACTED]")
+            .field("sent_at", &self.sent_at)
+            .field("remaining_credits", &self.remaining_credits)
+            .field("cod_pending", &self.cod_pending)
+            .field("remaining_equipment_ids", &self.remaining_equipment_ids)
+            .field("collected", &self.collected)
+            .field("observed_at", &self.observed_at)
+            .finish()
+    }
 }
 
 impl MoogleMailSentSnapshot {

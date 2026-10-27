@@ -278,8 +278,11 @@ pub(super) async fn run_worker(
     let (pm_drain, pm_receiver) = tokio::sync::watch::channel(stopping);
     let mut pm_task = forum_pm.filter(|_| !stopping).map(|runtime| {
         let worker_id = worker_id.clone();
-        let task_exit =
-            WorkerRuntimeTaskExit::new(control.clone(), runtime_failure, "lot_watch_pm_stopped");
+        let task_exit = WorkerRuntimeTaskExit::new(
+            control.clone(),
+            runtime_failure.clone(),
+            "lot_watch_pm_stopped",
+        );
         TaskGuard::new(tokio::spawn(async move {
             let _task_exit = task_exit;
             runtime.run(worker_id, pm_receiver).await;
@@ -292,7 +295,8 @@ pub(super) async fn run_worker(
         }
         pm_drain.send_replace(true);
     };
-    let result = auction_jobs::run_persistent_with_settlement_until_shutdown(
+    let fatal_wakeup = control.fatal_wakeup();
+    let runner = auction_jobs::run_persistent_with_settlement_until_shutdown(
         auction_jobs::PersistentWorker {
             schedule,
             worlds: Some(store.clone()),
@@ -397,8 +401,17 @@ pub(super) async fn run_worker(
             worker_id,
         },
         shutdown,
-    )
-    .await;
+    );
+    tokio::pin!(runner);
+    let result = tokio::select! {
+        result = &mut runner => result,
+        () = fatal_wakeup.notified() => {
+            // 运行器正在收口时不会再轮询 shutdown；先阻止 PM 继续领取，再启动外层统一限时排空。
+            pm_drain.send_replace(true);
+            let _ = runtime_failure.try_send("persistent_worker_stopped");
+            runner.await
+        }
+    };
     control.mark_draining();
     pm_drain.send_replace(true);
     abort_worker_task(&credential_owner_task);

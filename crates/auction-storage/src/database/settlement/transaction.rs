@@ -81,6 +81,9 @@ impl PostgresCompetitionTransaction {
                        a.scheduled_open_at,
                        a.scheduled_end_at,
                        a.settled_at,
+                       a.settlement_workflow_id,
+                       a.settlement_claim_command_id,
+                       a.settlement_due_at,
                        a.settlement_complete_command_id,
                        a.policy_snapshot,
                        p.balance AS opening_pool,
@@ -98,6 +101,9 @@ impl PostgresCompetitionTransaction {
                        a.scheduled_open_at,
                        a.scheduled_end_at,
                        a.settled_at,
+                       a.settlement_workflow_id,
+                       a.settlement_claim_command_id,
+                       a.settlement_due_at,
                        a.settlement_complete_command_id,
                        a.policy_snapshot,
                        p.balance AS opening_pool,
@@ -297,6 +303,12 @@ impl PostgresCompetitionTransaction {
 
         Ok(SettlementSnapshot {
             auction_id,
+            workflow_id: auction_row.try_get("settlement_workflow_id").map_err(map_sql_error)?,
+            claim_command_id: auction_row
+                .try_get::<Option<Uuid>, _>("settlement_claim_command_id")
+                .map_err(map_sql_error)?
+                .map(CommandId::from_uuid),
+            due_at: auction_row.try_get("settlement_due_at").map_err(map_sql_error)?,
             auction_state_version,
             policy,
             recovery_policy,

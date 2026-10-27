@@ -30,7 +30,9 @@ impl CompetitionPlan {
             .checked_sub(self.public_bids.len() as u64)
             .ok_or(DomainError::InvalidBidState("公开竞价事实超过最终状态版本"))?;
         let mut command_id = None;
-        let mut seen_bid_ids = HashSet::with_capacity(self.public_bids.len());
+        // 新竞价最多两条事实；更长的历史或异常结果仍使用集合，避免二次扫描。
+        let mut seen_bid_ids =
+            (self.public_bids.len() > 2).then(|| HashSet::with_capacity(self.public_bids.len()));
         for (index, bid) in self.public_bids.iter().enumerate() {
             bid.validate()?;
             let expected_fact_index = u32::try_from(index)
@@ -39,11 +41,15 @@ impl CompetitionPlan {
                 .ok_or(DomainError::InvalidBidState("公开竞价事实序号溢出"))?;
             let expected_state_version =
                 previous_version.checked_add(1).ok_or(DomainError::StateVersionOverflow)?;
+            let duplicate_id = seen_bid_ids.as_mut().map_or_else(
+                || self.public_bids[..index].iter().any(|previous| previous.id == bid.id),
+                |seen| !seen.insert(bid.id),
+            );
             if bid.fact_index != expected_fact_index
                 || bid.lot_id != self.final_lot.lot_id
                 || bid.state_version != expected_state_version
                 || bid.effective_end_at != self.final_lot.effective_end_at
-                || !seen_bid_ids.insert(bid.id)
+                || duplicate_id
             {
                 return Err(DomainError::InvalidBidState("公开竞价事实顺序或版本无效"));
             }
@@ -157,9 +163,14 @@ pub(super) fn validate_trigger_basics(trigger: &CompetitionTrigger) -> Result<()
         return Err(DomainError::InvalidBidState("竞价命令缺少有效标识或时间"));
     }
 
-    let mut seen = HashSet::with_capacity(trigger.bid_ids().len());
-    for bid_id in trigger.bid_ids() {
-        if bid_id.is_nil() || !seen.insert(*bid_id) {
+    let bid_ids = trigger.bid_ids();
+    // 常见的零、一或两条事实不需要堆集合，较长输入继续线性时间判重。
+    let mut seen = (bid_ids.len() > 2).then(|| HashSet::with_capacity(bid_ids.len()));
+    for (index, bid_id) in bid_ids.iter().enumerate() {
+        let duplicate_id = seen
+            .as_mut()
+            .map_or_else(|| bid_ids[..index].contains(bid_id), |seen| !seen.insert(*bid_id));
+        if bid_id.is_nil() || duplicate_id {
             return Err(DomainError::InvalidBidState("公开竞价事实标识重复或无效"));
         }
     }

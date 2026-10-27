@@ -160,9 +160,9 @@ auction-empty-no-auction-hint = オークションは毎週開催されます—
 
 
 page-auctions-title = オークション履歴
-page-auctions-note = 過去のオークションを一覧し、各回の出品を確認できます。
-auction-history-empty-title = オークションはまだありません
-auction-history-empty-hint = 精算されたオークションがここに表示されます。
+page-auctions-note = オークションを一覧し、各回の出品を確認できます。
+auction-history-empty-title = 選択した条件に一致するオークションはありません
+auction-history-empty-hint = ワールドまたは状態を変更してください。
 page-bidlog-title = 入札ログ
 page-history-title = 落札価格の履歴
 page-history-note = 過去に落札された出品を検索して、装備の相場を確認できます。

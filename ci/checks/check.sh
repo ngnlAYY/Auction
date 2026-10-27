@@ -4,9 +4,11 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 check_layout() {
-	local flat clusters invalid missing_subdirectories
+	local flat clusters invalid missing_subdirectories source_files
 
-	flat=$(rg --files apps crates | awk -F/ '/\/src\/[^/]+$/ { name=$NF; if (name != "lib.rs" && name != "main.rs") print }')
+	# 所有规则共用一次文件清单，避免按每个 crate 反复遍历源码树。
+	source_files=$(rg --files apps crates)
+	flat=$(awk -F/ '/\/src\/[^/]+$/ { name=$NF; if (name != "lib.rs" && name != "main.rs") print }' <<<"$source_files")
 	if [[ -n "$flat" ]]; then
 		printf '%s\n' "源码实现不得平铺在 src 根目录：" >&2
 		printf '%s\n' "$flat" >&2
@@ -14,19 +16,24 @@ check_layout() {
 	fi
 
 	missing_subdirectories=$(
-		for source_root in apps/*/src crates/*/src; do
-			if ! rg --files "$source_root" | awk -v prefix="$source_root/" '
-        index($0, prefix) == 1 {
-          relative=substr($0, length(prefix) + 1)
-          if (relative ~ /\//) {
-            found=1
+		awk '
+        BEGIN {
+          for (i = 1; i < ARGC - 1; i++) {
+            roots[i] = ARGV[i]
+            ARGV[i] = ""
           }
         }
-        END { exit(found ? 0 : 1) }
-      '; then
-				printf '%s\n' "$source_root"
-			fi
-		done
+        /^(apps|crates)\/[^/]+\/src\/[^/]+\// {
+          root = $0
+          sub(/\/src\/.*/, "/src", root)
+          found[root] = 1
+        }
+        END {
+          for (i = 1; i < ARGC - 1; i++) {
+            if (!(roots[i] in found)) print roots[i]
+          }
+        }
+      ' apps/*/src crates/*/src - <<<"$source_files"
 	)
 	if [[ -n "$missing_subdirectories" ]]; then
 		printf '%s\n' "每个模块的 src 都必须包含按职责划分的源码子目录：" >&2
@@ -34,8 +41,8 @@ check_layout() {
 		return 1
 	fi
 
-	clusters=$(rg --files apps crates -g '*.rs' | awk -F/ '
-    {
+	clusters=$(awk -F/ '
+    /\.rs$/ {
       file=$NF
       dir=$0
       sub("/[^/]+$", "", dir)
@@ -54,15 +61,15 @@ check_layout() {
         }
       }
     }
-  ' | sort)
+  ' <<<"$source_files" | sort)
 	if [[ -n "$clusters" ]]; then
 		printf '%s\n' "同一目录存在至少三个同前缀源码文件，请按职责建立子目录：" >&2
 		printf '%s\n' "$clusters" >&2
 		return 1
 	fi
 
-	invalid=$(rg --files apps crates -g '*.rs' | awk -F/ '
-    {
+	invalid=$(awk -F/ '
+    /\.rs$/ {
       file=$NF
       if (file !~ /^[a-z][a-z0-9_]*\.rs$/) {
         print
@@ -77,7 +84,7 @@ check_layout() {
         }
       }
     }
-  ' | sort -u)
+  ' <<<"$source_files" | sort -u)
 	if [[ -n "$invalid" ]]; then
 		printf '%s\n' "src 下的 Rust 文件和子目录必须使用 snake_case：" >&2
 		printf '%s\n' "$invalid" >&2

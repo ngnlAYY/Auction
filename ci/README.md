@@ -32,6 +32,12 @@ PostgreSQL/Redis 图、all-features Clippy 和两端 WASM 分别核验。`ci/rel
 漏洞和全部警告均阻断且无忽略项；machete 只扫描直接依赖，不替代 feature、可达性和许可审查。cargo-audit 使用
 独立受控锁图重建，安装方法见[工具入口](ci/tools/README.md)，不接受只匹配版本字符串的旧二进制。
 
+布局门禁共用一次源码文件清单，仍分别检查 `src` 根目录、职责子目录、同前缀聚类及命名；不会按 crate
+重复遍历源码树。默认图、最小 feature、全 feature Clippy、WASM 和 MSRV 面向不同编译配置，均予保留。
+
+2026-10-26 的 Zstandard 新公告影响 dx 与 sccache 的独立锁；版本、受限调用路径与候选修复见
+[工具锁公告说明](ci/tools/README.md#2026-10-26-zstandard-公告)。此前的公告结果不能作为当前结论。
+
 装备诊断门禁只解析受控源码片段和最后一次同名 CHECK 定义，不连接数据库或执行解析/收件流程。
 原因集合、阶段分支或源码结构发生变化时必须同步核对；该门禁补充编译检查，不执行 PostgreSQL 迁移验证。
 
@@ -143,7 +149,8 @@ Linux 均兼容。构建、上传不启动程序、不连接业务数据库、�
 无页面也可编译，运行缺资源返回明确 503；web-bundle.sh 使用 wasm-release，先验证受控工具回执，dx 禁止自动下载。
 esbuild、wasm-bindgen、wasm-opt 由工具安装入口固定版本及 SHA-256 提供。
 payload 复用只在本脚本内生效：本 surface、`auction-web-shared`、`auction-contracts`、清单、构建身份脚本、工具链版本、
-构建环境与已存清单全部一致才跳过 dx；构建结束后再次核对源码与工具身份，变化时不签发复用标记。
+构建环境与已存清单全部一致才跳过 dx；构建后完成 payload 的权限和时间归一化，复核源码与工具身份，最后原子发布复用标记。
+归一化或身份复核失败时不能将半成品作为可复用 payload。
 只改契约源码也会使双端 WASM 缓存失效，保证新后端内嵌同版 DTO 浏览器。
 原生与 WASM 共用环境摘要，覆盖 `CARGO_PROFILE_*`（包括 `CARGO_PROFILE_WASM_RELEASE_*`）、rustflags、
 目标 linker/target、rustc 包装器、C/C++ 编译器与 flags、受控工具字节身份，以及 Cargo 逐层读取的当前目录、

@@ -161,8 +161,10 @@ pub(crate) fn map_lot_detail(
             mapped.equipment.game_equipment_url = game_equipment_url;
             PublicLotDetailItemResponse::Preview(mapped)
         }
-        (None, Some(live)) => {
-            let mut mapped = map_live_lot(live.summary, Some(live.equipment_attributes));
+        (None, Some(mut live)) => {
+            // 正式详情属性只持有一份；映射前移交给 wire，而不是复制整棵 JSON。
+            let attributes = std::mem::take(&mut live.summary.equipment.attributes);
+            let mut mapped = map_live_lot(live.summary, Some(attributes));
             mapped.equipment.game_equipment_url = game_equipment_url.unwrap_or_default();
             PublicLotDetailItemResponse::Live(mapped)
         }

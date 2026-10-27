@@ -39,16 +39,30 @@ pub(crate) fn is_hentaiverse_login_response(
         return false;
     }
     let mut text = String::new();
+    let mut ancestors = Vec::new();
+    // 沿深度维护隐藏状态，避免嵌套页面的每个节点都重扫完整祖先链。
     for node in root.descendants() {
-        if node.ancestors().filter_map(ElementRef::wrap).any(|element| {
-            matches!(element.value().name(), "textarea" | "script" | "style" | "noscript")
-        }) {
+        let parent = node.parent().map(|parent| parent.id());
+        while ancestors.last().is_some_and(|(id, _)| Some(*id) != parent) {
+            ancestors.pop();
+        }
+        let hidden = ancestors.last().is_some_and(|(_, hidden)| *hidden)
+            || matches!(node.value(), Node::Element(element)
+                if matches!(element.name(), "textarea" | "script" | "style" | "noscript"));
+        if matches!(node.value(), Node::Element(_)) {
+            ancestors.push((node.id(), hidden));
+        }
+        if hidden {
             continue;
         }
         match node.value() {
             Node::Text(value) => {
-                text.push_str(value);
-                text.push(' ');
+                for word in value.split_whitespace() {
+                    if !text.is_empty() {
+                        text.push(' ');
+                    }
+                    text.push_str(word);
+                }
             }
             Node::Element(element) => {
                 let reference = match element.name() {
@@ -63,7 +77,7 @@ pub(crate) fn is_hentaiverse_login_response(
             _ => {}
         }
     }
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_lowercase();
+    text.make_ascii_lowercase();
     text.contains("you are not logged in")
         || text.contains("this page requires you to log on")
         || text.contains("you must be logged on to visit the hentaiverse")

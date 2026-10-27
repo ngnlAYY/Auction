@@ -74,7 +74,9 @@ pub use sessions::{
     AdminSessionService, PublicSessionService, validate_admin_actor, validate_admin_secret,
 };
 pub use settlement::{
-    SettleAuctionCommand, SettlementCommandPort, SettlementService, verify_legacy_settlement_replay,
+    SettleAuctionCommand, SettlementCommandPort, SettlementService, settlement_claim_command_id,
+    settlement_complete_command_id, settlement_complete_request_hash, settlement_workflow_id,
+    verify_legacy_settlement_replay,
 };
 pub use user_mail::MailUserService;
 

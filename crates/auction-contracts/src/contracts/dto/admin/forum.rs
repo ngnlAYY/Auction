@@ -1,4 +1,5 @@
 //! forum 相关 DTO。
+// 管理员输入的预览正文和派生标识可能含装备 key；Debug 仅保留安全形状信息。
 
 use super::*;
 
@@ -21,7 +22,7 @@ impl std::fmt::Debug for AdminForumPreviewRequest {
 }
 
 /// Admin 论坛预览中的 lot。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumLotResponse {
     pub code: String,
     pub category: String,
@@ -36,16 +37,43 @@ pub struct AdminForumLotResponse {
     pub current_price: Option<i64>,
 }
 
+impl std::fmt::Debug for AdminForumLotResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminForumLotResponse")
+            .field("code", &"[REDACTED]")
+            .field("category", &"[REDACTED]")
+            .field("description_bytes", &self.description.len())
+            .field("seller", &self.seller.as_ref().map(|_| "[REDACTED]"))
+            .field("start_price", &self.start_price)
+            .field("material", &self.material)
+            .field("current_bidder", &self.current_bidder.as_ref().map(|_| "[REDACTED]"))
+            .field("current_price", &self.current_price)
+            .finish()
+    }
+}
+
 /// Admin 论坛预览目录。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumCatalogResponse {
     pub categories: Vec<String>,
     pub lots: Vec<AdminForumLotResponse>,
     pub warnings: Vec<AdminForumWarningResponse>,
 }
 
+impl std::fmt::Debug for AdminForumCatalogResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminForumCatalogResponse")
+            .field("category_count", &self.categories.len())
+            .field("lots", &self.lots)
+            .field("warnings", &self.warnings)
+            .finish()
+    }
+}
+
 /// Admin 论坛预览帖子。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumPostResponse {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,7 +84,20 @@ pub struct AdminForumPostResponse {
     pub edited: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+impl std::fmt::Debug for AdminForumPostResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminForumPostResponse")
+            .field("id", &"[REDACTED]")
+            .field("author_id", &self.author_id.as_ref().map(|_| "[REDACTED]"))
+            .field("author", &self.author.as_ref().map(|_| "[REDACTED]"))
+            .field("text_bytes", &self.text.len())
+            .field("edited", &self.edited)
+            .finish()
+    }
+}
+
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumCommandResponse {
     pub line: usize,
     pub text: String,
@@ -74,6 +115,23 @@ pub struct AdminForumCommandResponse {
     pub notify: Option<String>,
 }
 
+impl std::fmt::Debug for AdminForumCommandResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminForumCommandResponse")
+            .field("line", &self.line)
+            .field("text_bytes", &self.text.len())
+            .field("actor", &self.actor.as_ref().map(|_| "[REDACTED]"))
+            .field("lot_code_count", &self.lot_codes.len())
+            .field("kind", &"[REDACTED]")
+            .field("amount", &self.amount)
+            .field("proxy", &self.proxy.as_ref().map(|_| "[REDACTED]"))
+            .field("proxy_lower", &self.proxy_lower)
+            .field("notify", &self.notify.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
+}
+
 /// Admin 论坛预览帖子命令集合。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumBidPostResponse {
@@ -86,7 +144,7 @@ pub struct AdminForumBidPostResponse {
 }
 
 /// Admin 论坛预览警告。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumWarningResponse {
     pub line: usize,
     pub code: String,
@@ -95,6 +153,19 @@ pub struct AdminForumWarningResponse {
     pub text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub post_id: Option<String>,
+}
+
+impl std::fmt::Debug for AdminForumWarningResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminForumWarningResponse")
+            .field("line", &self.line)
+            .field("code", &"[REDACTED]")
+            .field("message_bytes", &self.message.len())
+            .field("text_bytes", &self.text.as_ref().map(String::len))
+            .field("post_id", &self.post_id.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 /// Admin 论坛拍卖预览成功响应数据。

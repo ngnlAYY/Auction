@@ -25,7 +25,7 @@ pub(super) async fn list(
         .map_err(|_| storage_error("设置公开价格历史隔离级别失败"))?;
 
     // 编号页仍需返回同一快照内的完整统计；仅物化筛选、排序和金额所需的窄行，避免两次
-    // 执行完整过滤联表。装备属性等大字段只为当前页读取，空页通过统计行保留 total/stats。
+    // 执行完整过滤联表。装备等级只为当前页读取，空页通过统计行保留 total/stats。
     // 中位数先选中间一至两笔再按 numeric 求均值，不将 bigint 价格转为浮点或先整数求和。
     // 旧整数 median 显式半数取偶，保留原 float8 转 bigint 的数值口径。
     let rows = sqlx::query(
@@ -86,7 +86,8 @@ pub(super) async fn list(
                 page_lots.auction_sequence, page_lots.ordering_lot_number,
                 l.category_number AS lot_number,
                 e.name AS equipment_name, e.category AS equipment_category,
-                e.attributes AS equipment_attributes, buyer.username AS buyer_name,
+                COALESCE(e.attributes -> 'level', 'null'::jsonb) AS equipment_level,
+                buyer.username AS buyer_name,
                 COALESCE(submission.seller, '—')::text AS seller_name,
                 page_lots.price, page_lots.closed_at
          FROM statistics

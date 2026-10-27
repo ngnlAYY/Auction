@@ -2,7 +2,7 @@
 
 use std::net::SocketAddr;
 
-use auction_application::PublicRealtimeAuctionStatus;
+use auction_application::{PublicRealtimeAuctionStatus, PublicRealtimeEvent};
 use axum::{
     extract::{
         ConnectInfo, State, WebSocketUpgrade,
@@ -203,8 +203,8 @@ async fn stream_events(
                     return;
                 }
             }
-            message = socket.recv() => {
-                match message {
+            input = receive_input(&mut socket, &mut subscription) => match input {
+                RealtimeInput::Client(message) => match message {
                     Some(Ok(Message::Close(_))) | None => return,
                     Some(Ok(Message::Ping(payload))) => {
                         if !send_message(&mut socket, Message::Pong(payload)).await {
@@ -230,39 +230,55 @@ async fn stream_events(
                         }
                         return;
                     }
+                },
+                RealtimeInput::Event(event) => {
+                    let Some(event) = event else {
+                        close_connection(
+                            &mut socket,
+                            CLOSE_TRY_AGAIN_LATER,
+                            REASON_SLOW_CONSUMER,
+                        )
+                        .await;
+                        return;
+                    };
+                    if event.validate().is_err()
+                        || event.stream_key != expected_stream
+                        || matches!(target, RealtimeTarget::Discovery) && event.kind != "auction.created"
+                    {
+                        close_connection(
+                            &mut socket,
+                            CLOSE_PROTOCOL_ERROR,
+                            REASON_PROTOCOL_ERROR,
+                        )
+                        .await;
+                        return;
+                    }
+                    let message = match serde_json::to_string(&map_event(event)) {
+                        Ok(message) => message,
+                        Err(_) => return,
+                    };
+                    if !send_message(&mut socket, Message::Text(message.into())).await {
+                        return;
+                    }
                 }
-            }
-            event = subscription.recv() => {
-                let Some(event) = event else {
-                    close_connection(
-                        &mut socket,
-                        CLOSE_TRY_AGAIN_LATER,
-                        REASON_SLOW_CONSUMER,
-                    )
-                    .await;
-                    return;
-                };
-                if event.validate().is_err()
-                    || event.stream_key != expected_stream
-                    || matches!(target, RealtimeTarget::Discovery) && event.kind != "auction.created"
-                {
-                    close_connection(
-                        &mut socket,
-                        CLOSE_PROTOCOL_ERROR,
-                        REASON_PROTOCOL_ERROR,
-                    )
-                    .await;
-                    return;
-                }
-                let message = match serde_json::to_string(&map_event(event)) {
-                    Ok(message) => message,
-                    Err(_) => return,
-                };
-                if !send_message(&mut socket, Message::Text(message.into())).await {
-                    return;
-                }
-            }
+            },
         }
+    }
+}
+
+enum RealtimeInput {
+    Client(Option<Result<Message, axum::Error>>),
+    Event(Option<PublicRealtimeEvent>),
+}
+
+async fn receive_input(
+    socket: &mut WebSocket,
+    subscription: &mut RealtimeSubscription,
+) -> RealtimeInput {
+    // 两个数据来源公平竞争；外层仍优先处理关闭、会话和存活期限。
+    tokio::select! {
+        message = socket.recv() => RealtimeInput::Client(message),
+        event = subscription.recv() => RealtimeInput::Event(event),
     }
 }
 

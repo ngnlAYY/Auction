@@ -28,6 +28,9 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
 取消排队请求不会预占未来时间槽。用户正文中的“登录”等文字不能作为凭据失效证明；战斗状态也只识别真实
 `battle_main` DOM 节点，不接受正文或脚本中的同名文字。HTML 解析使用 scraper 0.27 / selectors 0.38，
 关闭默认 CLI feature 但保留 `errors`，仅使用库 API，不以手写解析器替代协议边界。
+邮件和装备请求的登录页判断沿 DOM 深度维护隐藏状态，拒绝提示也沿同一原则提取可见文本；深层嵌套不再逐节点重扫祖先。
+被 `script`、`style`、`noscript` 或 `textarea` 包围的内容仍不能作为登录失效或发送拒绝证据。
+Sent 摘要、快照与维护查询的 `Debug` 隐藏收件人和主题；内部投递载荷不提供会输出正文的 `Debug`。
 本地隔离端点的回环判断使用 URL 已解析的地址，支持带方括号的 IPv6 `::1`；论坛仍仅接受
 `localhost`、`127.0.0.1` 与 `::1`，MoogleMail 保留原 IPv4 回环网段策略，不扩展生产 origin。
 
@@ -40,8 +43,8 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
   已登记 MID 不在 Inbox 时，通过 Read Mail 列表与原身份定位；历史已读邮件不成为新入站命令。
   恢复窗口只为本批 pending 建立借用索引，Inbox/Read Mail 各线性遍历一次；不为每个 MID 重扫整箱，也不丢弃两表均缺失的待读项。
   多附件的独立领取按钮不按数量拒绝；装备 key 只采信附件 ID 对应的严格证据，正文其它装备链接即使畸形也不参与校验，
-  Unicode 正文不得触发字节切片 panic。脚本装备字段预筛选按每个附件 ID 扫描一次，不随左花括号数量重复扫描尾部；
-  预筛选不替代严格 JSON、重复字段及正文/脚本一致性校验。
+  Unicode 正文不得触发字节切片 panic。脚本预筛选一次扫描附件 ID 和遮罩后的括号栈，只解析目标字段所属的最内层对象，
+  避免外层 JavaScript 函数体被误当作 JSON；预筛选不替代严格 JSON、重复字段及正文/脚本一致性校验。
   `with_progress_observer` 只在持久 claim 路径通过应用窄端口报告真实详情 GET 目标，
   不以待读队首推断当前邮件；观测只进入 Worker 内存，不写入命令、cursor 或外部服务。
   调用方绝对截止只能收紧配置 fetch budget；末页同步解析完成后仍复核期限。
@@ -59,6 +62,8 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
 - ComposeSend：完整 Sent baseline 在持久 sending fence 前、同一独占 session 内取得，之后一次消费且写后独立扫描，只接受新增、唯一且 world、收件人、正文摘要、
   Credits/COD、装备精确匹配的 MID。发送与失败诊断借用同一输入，分步附件证明使用原 ID 前缀，避免复制整封邮件；
   compose 正文只提取一次，资产集合排序使用借用，表单编码直接移交 HTTP body，原有 compose 暂存顺序及最终证明条件不变。
+  任何 compose 资产暂存成功后，后续写前失败也保留已外写状态；暂存证明解析失败保留原加密诊断引用，仍按未知写入处理。
+  最终发送响应的拒绝分类与成功提示共用一次 DOM，仍分别留证，Sent 与空 compose 才构成成功证明。
 - 装备发送准备：`sender/equipment.rs` 在 sending fence 后、暂存任何资产前，按完整七类 Armory 库存核对本次装备，
   按需移出仓库并解除保护／锁定；`parser/reads/inventory/` 绑定原生 EID、显示名、状态及短期 token，
   与内部履约的正向库存读取共用页面证明。外写后必须回读，不自动卸装、回滚或重试；
@@ -66,6 +71,7 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
   协议字段与故障处理见[附件装备状态准备](ops/mail/diagnostics.md#附件装备状态准备)。
 - Return / Take：写前核对 sender 与预期资产；Return 只接受身份、正文及全部资产精确匹配的 `[RTS]` 回执，
   不再把未读 Inbox 中目标 MID 缺席当作成功（详情 GET 本身会标记已读）；缺少回执保持 `outcome_unknown`，不自动重寄。
+  Return 精确比较借用原正文与装备 ID，不构造包含原文的完整预期副本。
   Take 证明身份不变、资产归零及唯一回执。Take 授权准备先固定原独占凭据 session 并核验 owner；
   `DeliveryTakeExpectation` 仅冻结 world/MID 与原 credential ID/version/generation，资产仍来自不可变 claim。
   原 session 同时覆盖持久 sending fence 的撤销 guard 和一次性动作 future；详情 GET、精确资产校验及 POST
@@ -75,8 +81,8 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
   旧无 Take 冻结身份或配置 Cookie 无持久 binding 时可即时证明动作，但未知后不自动确认或重排；
   严格缺失提示、全空资产与精确原资产重排的区别见[维护契约](ops/mail/diagnostics.md#定期三页维护)。
 - 论坛读取/写入：同 thread 规范分页与真实帖子/作者身份、完整页数；写入同源表单与精确 board/thread/post，
-  回执始终核对，原始正文额外确认由 Worker 的 `verify_post_body` 开关控制；启用时首帖同时精确核对编辑表单中的
-  真实标题与描述，不以正文相同或本地元数据代替标题证明。正文调试输出始终脱敏。
+  回执始终核对；正常正文额外确认由 Worker 的 `verify_post_body` 开关控制，回帖未知写入始终只读核对，
+  首帖同时精确核对编辑表单中的真实标题与描述。正文调试输出始终脱敏。
   创建主题还要求表单 action 为同源 `/index.php`，可选 `act`/`CODE` 与新主题动作一致，且不携带已有 thread/post；
   短时 `s` 与既有同值重复隐藏字段仍按原协议保留，冲突路由在 POST 前拒绝。
   HTTP 200 的创建回执与固定帖回执共用唯一 `Please stand by...` 标题、唯一 meta refresh 和一致同源链接证明；
@@ -154,6 +160,7 @@ POST、布局回读及可选正文校验成本，配置预算校验只是单目�
 系统作者检查完整祖先链；正文与分页导航按深度优先顺序维护继承状态，每个元素只入栈、出栈一次。
 正文保留引用排除、最近块元素、块间换行与空白规则；导航继承正文/签名标记，不再逐链接重扫祖先，
 深层嵌套不会因固定层数上限而被误认作系统导航。
+论坛解析内部帖子和页面的 `Debug` 仅显示长度、数量及标志，不输出原文、用户输入或包含短时参数的导航 URL。
 完整目录只建立一次借用 code 索引；规范 post ID 的严格递增同时证明唯一，不另存重复身份集合。
 分页身份索引借用 post ID，query 唯一性复用既有检查；同值重复参数仍拒绝，空 `st` 的编辑链接兼容保留。
 装备 DOM 基数检查使用有界迭代，attributes JSON 只构造一次，严格结构与字段校验不变。
@@ -222,9 +229,11 @@ POST 或写后 Sent 明确返回 401/登录失效时，同样撤销当前 Cookie
 
 `equipment/` 分别拥有来源配置、无代理读取、页面/身份/属性解析和 canonical 事实；关闭业务 allowlist 不放宽固定
 HTTPS origin、精确 world 路径、响应类型或身份校验。`equipment/game_link.rs` 将安全目标与密文 owner 绑定后短暂解密，
-完整 URL 只移交受限 HTTP DTO 或论坛渲染。装备信封使用绑定装备 ID 的 AES-256-GCM，Cookie、装备 key 与用户登录 key
-使用各自数据密钥和域分离；明文不进入持久化 payload、日志、审计或普通 DTO。`forum/` 只在内存解析预览和渲染，
-远端请求归 `clients/ehentai`，回帖执行归 Worker。装备标记 delivery 使用独立 `lot_watch` 来源和冻结安全正文，
+完整 URL 移交受限 HTTP DTO 或论坛渲染。装备信封使用绑定装备 ID 的 AES-256-GCM，Cookie、装备 key 与用户登录 key
+使用各自数据密钥和域分离；按用户选择，论坛目录、P15 和认证后的 A46 可以返回完整装备 URL，具体边界见
+[I-05a](docs/contracts/invariants.md#i-05a-admin-装备录入的敏感边界和原子集合)。
+论坛首帖和续页的数据库正文镜像可包含公开游戏装备直链；固定楼层身份及未知写入的对账仍遵守论坛同步契约。
+`forum/` 只在内存解析预览和渲染，远端请求归 `clients/ehentai`，回帖执行归 Worker。装备标记 delivery 使用独立 `lot_watch` 来源和冻结安全正文，
 沿用原 ComposeSend/Sent 证明与 manual_reconcile；账号警告渠道由应用冻结，PM 使用独立 `ForumPmSender` 端口，
 不伪造 MoogleMail delivery、不降级双发。
 

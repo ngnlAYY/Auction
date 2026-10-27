@@ -1,6 +1,6 @@
 //! Admin 改名历史读取端口。
-//! 改名记录是追加式身份事实。这里仅暴露安全投影和有界分页，回滚命令另由后续写入切片
-//! 负责，避免把用户状态迁移拆成不完整的半套实现。
+//! 改名记录是追加式身份事实。这里仅暴露安全投影和有界分页；回滚由 Users owner 的
+//! 幂等命令和状态版本 fence 负责，避免在读取端重复状态迁移。
 
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -80,19 +80,22 @@ impl AdminRenamePage {
             && self.limit == request.limit
             && self.offset == request.offset
             && i64::try_from(self.entries.len()).is_ok_and(|entry_count| entry_count <= self.limit)
-            && self.entries.iter().enumerate().all(|(index, entry)| {
-                entry.validate()
-                    && request.user_id.is_none_or(|user_id| entry.user_id == user_id)
-                    && request.name.as_deref().is_none_or(|name| {
-                        let needle = name.to_lowercase();
-                        entry.previous_username.to_lowercase().contains(&needle)
-                            || entry.next_username.to_lowercase().contains(&needle)
-                    })
-                    && self.entries.get(index + 1).is_none_or(|next| {
-                        entry.created_at > next.created_at
-                            || entry.created_at == next.created_at && entry.id > next.id
-                    })
-            })
+            && {
+                // 名称筛选对整页相同；保留 Unicode 小写语义，只归一化一次。
+                let needle = request.name.as_deref().map(str::to_lowercase);
+                self.entries.iter().enumerate().all(|(index, entry)| {
+                    entry.validate()
+                        && request.user_id.is_none_or(|user_id| entry.user_id == user_id)
+                        && needle.as_deref().is_none_or(|needle| {
+                            entry.previous_username.to_lowercase().contains(needle)
+                                || entry.next_username.to_lowercase().contains(needle)
+                        })
+                        && self.entries.get(index + 1).is_none_or(|next| {
+                            entry.created_at > next.created_at
+                                || entry.created_at == next.created_at && entry.id > next.id
+                        })
+                })
+            }
     }
 }
 

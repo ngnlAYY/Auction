@@ -255,10 +255,11 @@ impl RateLimiter {
 
     /// 消耗一个地址的固定窗口额度；`None` 表示允许，`Some` 是拒绝后的最短重试秒数。
     fn allow(&self, address: IpAddr) -> Option<u64> {
-        let now = Instant::now();
         let Ok(mut entries) = self.entries.lock() else {
             return Some(self.window.as_secs().max(1));
         };
+        // 以锁内顺序取时间，防止并发请求按旧时刻覆盖较新的 last_seen 或窗口起点。
+        let now = Instant::now();
         if let Some(value) = entries.get_mut(&address) {
             if now.duration_since(value.started) >= self.window {
                 *value = RateWindow { started: now, last_seen: now, count: 1 };

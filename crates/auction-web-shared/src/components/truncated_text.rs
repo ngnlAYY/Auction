@@ -100,8 +100,9 @@ impl Drop for ResizeObserverHandle {
 
 /// 展示可能很长的标识或 metadata，并在确实发生截断时提供可聚焦 tooltip。
 /// `display` 用于调用方已提供缩写文本的场景，展示值与完整值不同也视为截断。浏览器端用
-/// `ResizeObserver` 重测宽度，响应式变化后仍只把真正需要提示的文本加入 Tab 顺序；legacy
-/// DOM 模式省略 `title` 降级，只输出旧版显式 tooltip。
+/// `ResizeObserver` 重测宽度，响应式变化后仍只把真正需要提示的文本加入 Tab 顺序；当
+/// `focusable=false` 时内联浮层也不加入 Tab 顺序，避免在按钮或链接中产生嵌套焦点。
+/// legacy DOM 模式省略 `title` 降级，只输出旧版显式 tooltip。
 #[component]
 pub fn TruncatedText(
     value: String,
@@ -476,7 +477,7 @@ pub fn TruncatedText(
                 id: tooltip_id.clone(),
                 class: tooltip_class_name,
                 role: "tooltip",
-                tabindex: "0",
+                tabindex: focusable.then_some("0"),
                 "data-placement": position.placement,
                 style: "--truncated-text-tooltip-left: {position.left}px; --truncated-text-tooltip-top: {position.top}px; --truncated-text-tooltip-width: {position.width}px; --truncated-text-tooltip-max-height: {position.maximum_height}px;",
                 "{value}"
@@ -518,7 +519,11 @@ fn update_truncated_state(
     portal_element: Signal<Option<web_sys::HtmlElement>>,
 ) {
     let next = element_is_truncated(element, display_differs);
-    truncated.set(next);
+    // 相同测量值不写信号，避免表格中每个文本在窗口与观察器重复通知时重渲染。
+    let changed = *truncated.peek() != next;
+    if changed {
+        truncated.set(next);
+    }
     if !next {
         hide_tooltip(tooltip_position, portal_element);
     }
@@ -542,7 +547,10 @@ fn show_tooltip(
         return;
     };
     let next = element_is_truncated(&element, display_differs);
-    truncated.set(next);
+    let changed = *truncated.peek() != next;
+    if changed {
+        truncated.set(next);
+    }
     if !next {
         hide_tooltip(tooltip_position, portal_element);
         return;
@@ -615,14 +623,17 @@ fn hide_tooltip(
     mut tooltip_position: Signal<Option<TooltipPosition>>,
     mut portal_element: Signal<Option<web_sys::HtmlElement>>,
 ) {
-    tooltip_position.set(None);
-    let element = portal_element.peek().clone();
-    if let Some(element) = element
-        && let Some(parent) = element.parent_node()
-    {
-        let _ = parent.remove_child(&element);
+    let visible = tooltip_position.peek().is_some();
+    if visible {
+        tooltip_position.set(None);
     }
-    portal_element.set(None);
+    let element = portal_element.peek().clone();
+    if let Some(element) = element {
+        if let Some(parent) = element.parent_node() {
+            let _ = parent.remove_child(&element);
+        }
+        portal_element.set(None);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -17,10 +17,11 @@ pub(super) fn parse_settlement_policy(
             Some("remind_v1") => auction_domain::RecoveryMode::RemindV1,
             _ => return Err(invalid("恢复策略模式未知")),
         },
-        payment_timeout: chrono::Duration::seconds(json_i64(
+        payment_timeout: chrono::Duration::try_seconds(json_i64(
             recovery.get("payment_timeout_seconds"),
             "恢复付款超时",
-        )?),
+        )?)
+        .ok_or_else(|| invalid("恢复付款超时"))?,
         reminder_limit: json_u32(recovery.get("reminder_limit"), "恢复提醒上限")?,
         // 旧快照没有该字段时按默认三次处理，保持已冻结策略可重放。
         cod_return_limit: match recovery.get("cod_return_limit") {

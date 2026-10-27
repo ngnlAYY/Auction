@@ -95,10 +95,8 @@ pub(super) fn AdminShell() -> Element {
         Some(Ok(false) | Err(_)) => AdminReadinessState::Degraded,
     };
     if let Some(current) = confirmed_session() {
-        if is_login_path {
-            return rsx! { AdminReturnRedirect {} };
-        }
         // 身份变化必须销毁整棵草稿/命令 Scope；单个静态组件的 key 不会形成 keyed diff。
+        // 已认证访问登录地址只重定向，不卸载会话草稿和未决命令宿主。
         return rsx! {
             for (epoch, current) in [(identity_epoch(), current)] {
                 AdminAuthenticatedShell {
@@ -108,12 +106,16 @@ pub(super) fn AdminShell() -> Element {
                     reload_generation,
                     readiness: readiness_state,
                     session_confirmed: mutation_permission(),
+                    redirecting: is_login_path,
                     on_logout: move |_| {
                         confirmed_session.set(None);
                         identity_epoch.set(identity_epoch().saturating_add(1));
                         reload_generation.set(reload_generation().saturating_add(1));
                     },
                 }
+            }
+            if is_login_path {
+                AdminReturnRedirect {}
             }
         };
     }

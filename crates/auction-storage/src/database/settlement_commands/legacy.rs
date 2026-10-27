@@ -1,22 +1,15 @@
 //! 旧版已完成结算账本的 PostgreSQL 只读快照核验。
 
 use auction_application::{
-    ApplicationError, LegacySettlementVerification, RepositoryError, RequestHash,
-    SettleAuctionCommand, verify_legacy_settlement_replay,
+    ApplicationError, LegacySettlementVerification, RepositoryError, SettleAuctionCommand,
+    settlement_complete_request_hash, verify_legacy_settlement_replay,
 };
 use auction_domain::{AuctionId, CommandId};
 use chrono::{DateTime, Utc};
-use serde::Serialize;
 use sqlx::Row;
 use uuid::Uuid;
 
 use super::super::{PostgresCompetitionTransaction, PostgresStore};
-
-#[derive(Serialize)]
-struct SettlementWorkflowRequest {
-    workflow_id: Uuid,
-    due_at: DateTime<Utc>,
-}
 
 /// 在 PostgreSQL 可证明一致的只读快照中核验旧 complete 账本；该路径没有任何写语句。
 pub(super) async fn verify_postgres(
@@ -76,12 +69,8 @@ pub(super) async fn verify_postgres(
         return Err(storage_error("目标命令不是旧版 settlement_complete 账本"));
     }
     let auction_id = AuctionId::from_uuid(auction_uuid);
-    let request_hash = RequestHash::from_request(
-        "settle_auction",
-        auction_uuid,
-        &SettlementWorkflowRequest { workflow_id, due_at },
-    )
-    .map_err(|_| storage_error("生成当前结算请求摘要失败"))?;
+    let request_hash = settlement_complete_request_hash(auction_uuid, workflow_id, due_at)
+        .map_err(|_| storage_error("生成当前结算请求摘要失败"))?;
     let snapshot = transaction
         .load_settled_snapshot_read_only(auction_id)
         .await

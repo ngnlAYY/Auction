@@ -113,11 +113,14 @@ fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
         tr {
             td { class: "admin-auction-num", "{lot_code}" }
             td {
+                TruncatedText { value: equipment_name.clone(), portal: true }
                 a {
+                    class: "admin-settlement-equipment-link",
                     href: equipment_url,
                     target: "_blank",
                     rel: "noopener noreferrer",
-                    TruncatedText { value: equipment_name }
+                    aria_label: t!("admin-settlement-open-equipment-label", equipment: equipment_name),
+                    {t!("admin-settlement-open-equipment")}
                 }
             }
             td { TruncatedText { value: seller } }

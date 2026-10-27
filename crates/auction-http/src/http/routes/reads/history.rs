@@ -60,7 +60,7 @@ pub(crate) async fn list_bid_log(
         lot_code,
         limit: page_size,
         offset,
-        cursor: cursor.clone(),
+        cursor,
     };
     request
         .validate()

@@ -47,7 +47,7 @@ pub(super) async fn list_postgres(
             l.category_number AS lot_number,
             e.name AS equipment_name,
             e.category AS equipment_category,
-            e.attributes AS equipment_attributes,
+            COALESCE(e.attributes -> 'level', 'null'::jsonb) AS equipment_level,
             buyer.username AS buyer_name,
             COALESCE(submission.seller, '—')::text AS seller_name,
             l.current_price AS price,
@@ -129,8 +129,8 @@ pub(super) async fn list_postgres(
 fn map_postgres_entry(
     row: sqlx::postgres::PgRow,
 ) -> Result<PublicPriceHistoryEntry, ApplicationError> {
-    let attributes: sqlx::types::Json<Value> = row
-        .try_get("equipment_attributes")
+    let level: sqlx::types::Json<Value> = row
+        .try_get("equipment_level")
         .map_err(|_| storage_error("读取 PostgreSQL 历史装备属性失败"))?;
     Ok(PublicPriceHistoryEntry {
         lot_id: row
@@ -159,7 +159,7 @@ fn map_postgres_entry(
         equipment_category: row
             .try_get("equipment_category")
             .map_err(|_| storage_error("读取 PostgreSQL 历史装备分类失败"))?,
-        equipment_level: equipment_level(attributes.0),
+        equipment_level: equipment_level(level.0),
         buyer_name: row
             .try_get("buyer_name")
             .map_err(|_| storage_error("读取 PostgreSQL 历史买家名称失败"))?,

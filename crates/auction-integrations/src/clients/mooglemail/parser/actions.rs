@@ -244,19 +244,22 @@ fn returned_receipt_matches(
     }
     let assets = parse_detail_asset_manifest(document, world)?;
     let (returnable, claimable) = parse_detail_actions(envelopes[0], world)?;
-    let mut actual_equipment_ids = assets.equipment_ids;
-    let mut expected_equipment_ids = before.equipment_ids.clone();
+    // 退信证明只比较原资产和正文，不复制装备 ID 或整段可能含密钥的正文。
+    let mut actual_equipment_ids = assets.equipment_ids.iter().collect::<Vec<_>>();
+    let mut expected_equipment_ids = before.equipment_ids.iter().collect::<Vec<_>>();
     actual_equipment_ids.sort_unstable();
     expected_equipment_ids.sort_unstable();
-    let expected_subject = format!("[RTS] {}", before.subject);
-    let expected_body =
-        format!("{}\n\nThis message was returned from {}, kupo!", before.body, before.recipient);
+    let body_matches = body
+        .strip_prefix(before.body.as_str())
+        .and_then(|suffix| suffix.strip_prefix("\n\nThis message was returned from "))
+        .and_then(|suffix| suffix.strip_prefix(before.recipient.as_str()))
+        == Some(", kupo!");
     Ok(!returnable
         && !claimable
         && fields.recipient.eq_ignore_ascii_case(&before.sender)
         && fields.sender == "MoogleMail"
-        && fields.subject == expected_subject
-        && body == expected_body
+        && fields.subject.strip_prefix("[RTS] ") == Some(before.subject.as_str())
+        && body_matches
         && assets.credits == before.credits
         && assets.cod == before.cod
         && assets.entry_count == before.attachment_count

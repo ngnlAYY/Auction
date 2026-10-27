@@ -34,7 +34,7 @@ pub enum MoogleMailDiscardOutcome {
 }
 
 /// 入站邮件当前资产快照；take 恢复据此判断动作是否已生效。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailInboxAssets {
     pub sender: String,
     pub equipment_ids: Vec<String>,
@@ -42,8 +42,20 @@ pub struct MoogleMailInboxAssets {
     pub cod: i64,
 }
 
+impl fmt::Debug for MoogleMailInboxAssets {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MoogleMailInboxAssets")
+            .field("sender", &"[REDACTED]")
+            .field("equipment_ids", &self.equipment_ids)
+            .field("credits", &self.credits)
+            .field("cod", &self.cod)
+            .finish()
+    }
+}
+
 /// Sent 列表摘要；`collected` 只有读取详情后才可知。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailSentListEntry {
     pub external_mail_id: String,
     pub recipient: String,
@@ -51,8 +63,20 @@ pub struct MoogleMailSentListEntry {
     pub sent_at: DateTime<Utc>,
 }
 
+impl fmt::Debug for MoogleMailSentListEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MoogleMailSentListEntry")
+            .field("external_mail_id", &self.external_mail_id)
+            .field("recipient", &"[REDACTED]")
+            .field("subject", &"[REDACTED]")
+            .field("sent_at", &self.sent_at)
+            .finish()
+    }
+}
+
 /// 单封 Sent 邮件的当前待领取状态。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailSentObservation {
     pub external_mail_id: String,
     pub subject: String,
@@ -62,6 +86,21 @@ pub struct MoogleMailSentObservation {
     pub collected: bool,
     /// 详情正文的规范摘要；通知类恢复证明据此逐字比对，正文本身不返回。
     pub body_digest: [u8; 32],
+}
+
+impl fmt::Debug for MoogleMailSentObservation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MoogleMailSentObservation")
+            .field("external_mail_id", &self.external_mail_id)
+            .field("subject", &"[REDACTED]")
+            .field("remaining_credits", &self.remaining_credits)
+            .field("cod_pending", &self.cod_pending)
+            .field("remaining_equipment_ids", &self.remaining_equipment_ids)
+            .field("collected", &self.collected)
+            .field("body_digest", &self.body_digest)
+            .finish()
+    }
 }
 
 impl MoogleMailSender {

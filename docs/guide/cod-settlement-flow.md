@@ -14,8 +14,8 @@
 | `buyer_refund` | main | `settlement_buyer_refund` | 金额 | 0 | 买家（contingent） | 装备 COD |
 | `unsold_return` / `withdrawn_return` | 原世界 | `settlement_equipment_handoff` | 0 | 0 | 原卖家 | 无 |
 
-买方应付是冻结的 `buyer_amount`，已包含奖惩与额外奖池抵扣。主世界竞得邮件分开列出成交价、费率调整后价格和最终 CoD，
-并显示赢家累计领先时长占比及奖惩比例；有奖池抵扣时单列金额。正文与历史任务兼容规则见
+买方应付是冻结的 `buyer_amount`，反映该场策略的曲线调整和实际奖池分摊。主世界竞得邮件分开列出成交价、
+抵扣前价格和最终 CoD，并显示赢家累计领先时长占比及奖惩比例；有奖池抵扣时单列金额。正文与历史任务兼容规则见
 [邮件正文模板](ops/config/README.md#邮件正文模板)。
 
 ## 卖方全额与版本边界

@@ -77,7 +77,7 @@ async fn auction_list<T>(
             status: status.to_owned(),
             limit: page_size,
             offset,
-            cursor: cursor.clone(),
+            cursor,
             include_forum_thread_url,
         })
         .await

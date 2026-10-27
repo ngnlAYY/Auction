@@ -162,7 +162,12 @@ use uuid::Uuid;
 /// 解析旧 Public v1 使用的规范小写、非零 UUID。
 pub(crate) fn parse_public_uuid(value: &str) -> Result<Uuid, ()> {
     let id = Uuid::parse_str(value).map_err(|_| ())?;
-    if id.is_nil() || id.to_string() != value {
+    if id.is_nil() {
+        return Err(());
+    }
+    let mut buffer = Uuid::encode_buffer();
+    let canonical: &str = id.hyphenated().encode_lower(&mut buffer);
+    if canonical != value {
         return Err(());
     }
     Ok(id)

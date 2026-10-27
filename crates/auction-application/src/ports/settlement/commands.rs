@@ -81,6 +81,12 @@ pub struct PersistedSettlement {
 pub struct SettlementSnapshot {
     pub auction_id: AuctionId,
     pub auction_state_version: u64,
+    /// 锁内冻结的结算工作流身份；历史已结算记录可能缺少此字段。
+    pub workflow_id: Option<Uuid>,
+    /// 锁内领取命令身份；首次结算必须与调用方一致。
+    pub claim_command_id: Option<CommandId>,
+    /// 锁内冻结的结算截止世代；首次结算必须与调用方一致。
+    pub due_at: Option<DateTime<Utc>>,
     pub policy: SettlementPolicy,
     /// 结算时一并冻结的 recovery 策略；后续 Worker 不能读取实时规则替换它。
     pub recovery_policy: RecoveryPolicy,

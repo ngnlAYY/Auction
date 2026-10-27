@@ -181,6 +181,9 @@ systemctl stdout 在读取阶段限制为 64 KiB，超限立即终止并回收�
 只保留 2 KiB 诊断前缀。单行诊断按 UTF-8 字节预算截断，不因中文字符超过上限；未新增总墙钟 timeout。
 Readiness 只接受 512 字节预算内完整 CRLF 结尾的 HTTP/1.0 或 HTTP/1.1 `200` 状态行；
 半行后 EOF、仅 LF、超长未终止行都失败关闭。分片响应只扫描新增字节，不反复搜索已读前缀。
+探测前后核对同一 systemd `MainPID`、`InvocationID` 和单调启动时间，发布 started/adopted 回执前再次核对
+各角色仍在运行且身份未变。启动期身份变化会回滚本次启动的 unit；adopted 复核失败不停止已有 unit。
+这些身份检查不能证明响应 socket 一定属于所记录 PID，也不能保证回执发布后进程不会退出。
 
 ## 停机迁移与初始建库
 
@@ -200,6 +203,9 @@ AUCTION_CONFIG_FILE=/etc/auction/public.toml /opt/auction/bin/auctionctl migrate
 合并部署先停止整个 `auction-server`，以相同服务账号执行 `auctionctl migrate-managed --config-dir <配置目录>`：
 它要求既有 `owner.lock` 并取得 supervisor/子进程共享锁的独占所有权，普通 migrate 与分体总控也复查此锁，
 不能在同库混用合并和分体部署，失败使用退出码 3。
+`migrate-managed` 只以实际打开并独占持有的锁证明合并部署存在；预检后运行目录消失不能退回无锁迁移。
+获取锁时固定运行目录描述符并相对打开 `owner.lock`；加锁后复核目录和锁的 inode，发现路径被替换则拒绝迁移。
+运行目录及锁文件仍须由操作者保持稳定，不得在运行或迁移期间移动、删除或替换。
 
 ## Cargo feature
 

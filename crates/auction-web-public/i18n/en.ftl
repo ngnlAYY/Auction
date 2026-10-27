@@ -161,9 +161,9 @@ auction-empty-no-auction-hint = Auctions open weekly — check back on Friday.
 
 
 page-auctions-title = Auction history
-page-auctions-note = Browse past auctions and view their lots.
-auction-history-empty-title = No auctions yet
-auction-history-empty-hint = Ended auctions will appear here after they settle.
+page-auctions-note = Browse auctions and view their lots.
+auction-history-empty-title = No auctions match the selected filters
+auction-history-empty-hint = Try another world or status.
 page-bidlog-title = Bid log
 page-history-title = Price history
 page-history-note = Look up past sold lots to gauge what equipment has gone for.

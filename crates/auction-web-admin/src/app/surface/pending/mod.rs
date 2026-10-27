@@ -104,8 +104,17 @@ pub(crate) fn use_pending_commands_with_gate(
     reload: Signal<u64>,
     gate: Option<PendingCommandGate>,
 ) -> PendingCommands {
+    let owner = use_owned_pending_commands(reload, gate);
+    use_context_provider(|| owner)
+}
+
+/// 只创建命令宿主，不覆盖同一 Scope 中其他业务的 PendingCommands context。
+pub(crate) fn use_owned_pending_commands(
+    reload: Signal<u64>,
+    gate: Option<PendingCommandGate>,
+) -> PendingCommands {
     let entries = use_signal(Vec::new);
-    use_context_provider(|| PendingCommands { entries, reload, gate })
+    PendingCommands { entries, reload, gate }
 }
 
 impl PendingCommands {
@@ -288,9 +297,12 @@ pub(crate) fn definite_rejection(code: &str) -> bool {
     )
 }
 
-/// 页级常驻操作区只展示实体、动作、命令ID与结果类别，不展示冻结负载或成功结果。
+/// 常驻操作区只展示实体、动作、命令 ID 与结果类别，不展示冻结负载或成功结果。
 #[component]
-pub(crate) fn PendingCommandPanel(owner: PendingCommands) -> Element {
+pub(crate) fn PendingCommandPanel(
+    owner: PendingCommands,
+    #[props(default)] session_scoped: bool,
+) -> Element {
     let entries = owner.entries.read();
     let writes_blocked = !crate::api::admin_session_writes_allowed()
         || owner.gate.is_some_and(PendingCommandGate::blocked);
@@ -298,7 +310,9 @@ pub(crate) fn PendingCommandPanel(owner: PendingCommands) -> Element {
         if !entries.is_empty() {
             section { class: "admin-panel admin-pending", aria_label: t!("admin-pending-title"),
                 h2 { {t!("admin-pending-title")} }
-                p { class: "admin-panel__note", {t!("admin-pending-help")} }
+                p { class: "admin-panel__note",
+                    if session_scoped { {t!("admin-pending-session-help")} } else { {t!("admin-pending-help")} }
+                }
                 ul { class: "admin-pending__list",
                     for entry in entries.iter() {
                         {

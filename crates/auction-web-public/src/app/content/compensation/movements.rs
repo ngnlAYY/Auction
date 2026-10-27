@@ -138,7 +138,9 @@ fn CompensationMovementRow(
                         href: url,
                         target: "_blank",
                         rel: "noopener noreferrer",
-                        TruncatedText { value: equipment, size: "wide", portal: true }
+                        aria_label: equipment.clone(),
+                        title: equipment.clone(),
+                        TruncatedText { value: equipment.clone(), size: "wide", focusable: false, portal: true }
                     }
                 } else {
                     TruncatedText { value: equipment, size: "wide", portal: true }

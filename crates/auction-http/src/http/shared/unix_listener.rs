@@ -196,6 +196,12 @@ fn acquire_instance_lock(runtime_directory: &Path, lock_file_name: &str) -> io::
         .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
         .open(&lock_path)
         .map_err(|error| with_context(error, "打开 Unix listener 单实例锁失败"))?;
+    // 先验证文件身份，再修改权限；拒绝硬链接或其他对象时不能连带修改原文件。
+    let metadata =
+        lock.metadata().map_err(|error| with_context(error, "读取 Unix listener 单实例锁失败"))?;
+    if !metadata.is_file() || metadata.nlink() != 1 || metadata.uid() != current_uid() {
+        return Err(invalid("Unix listener 单实例锁不满足安全约束"));
+    }
     lock.set_permissions(fs::Permissions::from_mode(0o600))
         .map_err(|error| with_context(error, "设置 Unix listener 单实例锁权限失败"))?;
     let metadata =

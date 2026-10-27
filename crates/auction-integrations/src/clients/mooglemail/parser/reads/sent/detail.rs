@@ -189,7 +189,7 @@ impl MoogleMailParser {
         // claim.claimed_at 与 observed_at 把关，出现偏差异常时保留证据但不拒绝整封邮件。
         if observed_at < summary.sent_at {
             tracing::warn!(
-                external_mail_id = %summary.external_mail_id,
+                world = %summary.world,
                 sent_at = %summary.sent_at,
                 observed_at = %observed_at,
                 "MoogleMail Sent 详情时间晚于本地观测；按弱时间语义继续解析"

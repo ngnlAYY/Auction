@@ -26,11 +26,13 @@ impl LotWatchPmRuntime {
         item_timeout: Duration,
         lease: Duration,
     ) -> Result<Self, &'static str> {
+        // 持久化接口只接受整秒；比较实际领取时长，不能让小数秒超出数据库 lease。
+        let lease_seconds = lease.as_secs();
         if poll_interval.is_zero()
             || item_timeout.is_zero()
-            || item_timeout >= lease
-            || lease.as_secs() > 86400
-            || lease.as_secs() == 0
+            || lease_seconds == 0
+            || lease_seconds > 86400
+            || item_timeout >= Duration::from_secs(lease_seconds)
         {
             return Err("PM 轮询、总预算与论坛租约无效");
         }
@@ -40,7 +42,7 @@ impl LotWatchPmRuntime {
             poll_interval,
             jitter,
             item_timeout,
-            lease_seconds: lease.as_secs() as i64,
+            lease_seconds: lease_seconds as i64,
         })
     }
 

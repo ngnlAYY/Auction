@@ -21,10 +21,15 @@ pub(crate) fn AuctionList() -> Element {
     let page_size = use_memo(move || query_state_signal.read().page_size);
     let mut refresh_generation = use_signal(|| 0_u64);
     let worlds = use_resource(fetch_worlds);
-    let world_options = match &*worlds.read_unchecked() {
+    let mut world_options = match &*worlds.read_unchecked() {
         Some(Ok(worlds)) => supported_worlds(worlds),
         _ => vec!["main".to_owned(), "isekai".to_owned()],
     };
+    let selected_world = world_filter();
+    // 历史深链的世界即使已从当前目录移除，也必须在筛选器中保留真实值。
+    if selected_world != "all" && !world_options.contains(&selected_world) {
+        world_options.push(selected_world.clone());
+    }
     let auctions = use_resource(move || {
         let _ = refresh_generation();
         let world = world_filter();
@@ -49,13 +54,9 @@ pub(crate) fn AuctionList() -> Element {
                 && *size == page_size()
         })
         .map(|(_, result)| result);
-    match current_result {
+    let content = match current_result {
         None => rsx! {
-            AsyncState {
-                kind: AsyncStateKind::Loading,
-                title: t!("page-auctions-title"),
-                detail: t!("data-loading"),
-            }
+            p { role: "status", {t!("data-loading")} }
         },
         Some(Err(_)) => rsx! {
             AsyncState {
@@ -78,22 +79,8 @@ pub(crate) fn AuctionList() -> Element {
         Some(Ok(page)) => rsx! {
             AuctionHistoryPage {
                 page: page.clone(),
-                world_filter: world_filter(),
                 page_number: page_number(),
-                world_options,
                 on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
-                on_world_change: move |world: String| {
-                    update_public_query_state(
-                        query_state_signal,
-                        |query| {
-                            query.world = (world != "all").then_some(world.clone());
-                            query.auction_id = None;
-                            query.category = None;
-                            query.page = 1;
-                        },
-                        QueryWriteMode::Push,
-                    );
-                },
                 on_page_change: move |page| {
                     update_public_query_state(
                         query_state_signal,
@@ -110,22 +97,9 @@ pub(crate) fn AuctionList() -> Element {
                 },
             }
         },
-    }
-}
-
-#[component]
-pub(crate) fn AuctionHistoryPage(
-    page: AuctionListPage<HistoricalAuctionWithForum>,
-    world_filter: String,
-    page_number: i64,
-    world_options: Vec<String>,
-    on_world_change: EventHandler<String>,
-    on_page_change: EventHandler<i64>,
-    on_page_clamp: EventHandler<i64>,
-    on_page_size_change: EventHandler<i64>,
-) -> Element {
-    let page_size = page.page_size.max(1);
+    };
     rsx! {
+        // 筛选器保持挂载，切换查询、失败或重试时不会丢失键盘焦点。
         section { class: "public-auction-rounds", aria_labelledby: "auction-history-title",
             h1 { id: "auction-history-title", {t!("page-auctions-title")} }
             p { class: "public-auction-history-intro", {t!("page-auctions-note")} }
@@ -133,15 +107,65 @@ pub(crate) fn AuctionHistoryPage(
                 label {
                     {t!("auction-history-world")}
                     select {
-                        value: world_filter,
-                        onchange: move |event| on_world_change.call(event.value()),
+                        name: "world",
+                        value: selected_world,
+                        onchange: move |event| {
+                            let world = event.value();
+                            update_public_query_state(
+                                query_state_signal,
+                                |query| {
+                                    query.world = (world != "all").then_some(world.clone());
+                                    query.auction_id = None;
+                                    query.category = None;
+                                    query.page = 1;
+                                },
+                                QueryWriteMode::Push,
+                            );
+                        },
                         option { value: "all", {t!("auction-history-world-all")} }
                         for world in world_options {
                             option { value: world.clone(), {world_label(&world)} }
                         }
                     }
                 }
+                label {
+                    {t!("auction-history-status")}
+                    select {
+                        name: "status",
+                        value: status_filter(),
+                        onchange: move |event| {
+                            let status = event.value();
+                            update_public_query_state(
+                                query_state_signal,
+                                |query| {
+                                    query.status = Some(status);
+                                    query.page = 1;
+                                },
+                                QueryWriteMode::Push,
+                            );
+                        },
+                        option { value: "settled", {t!("auction-history-status-settled")} }
+                        option { value: "final", {t!("auction-history-status-final")} }
+                        option { value: "live", {t!("auction-history-status-live")} }
+                    }
+                }
             }
+            {content}
+        }
+    }
+}
+
+#[component]
+pub(crate) fn AuctionHistoryPage(
+    page: AuctionListPage<HistoricalAuctionWithForum>,
+    page_number: i64,
+    on_page_change: EventHandler<i64>,
+    on_page_clamp: EventHandler<i64>,
+    on_page_size_change: EventHandler<i64>,
+) -> Element {
+    let page_size = page.page_size.max(1);
+    rsx! {
+        div {
             if page.auctions.is_empty() {
                 div { class: "public-auction-empty", role: "status",
                     p { class: "public-auction-empty__title", {t!("auction-history-empty-title")} }
@@ -213,15 +237,17 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuctionWithForum>) -> Elem
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-sold"), "{auction.sold_count}" }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-unsold"), "{auction.unsold_count}" }
                                     td { class: "public-auction-rounds__total", "data-label": t!("auction-history-total"), "{format_amount(auction.sold_amount)}" }
-                                    td { class: "public-auction-rounds__links", "data-label": t!("auction-history-links"),
-                                        Link { to: lots_href, {t!("auction-history-link-lots")} }
-                                        Link { to: bid_log_href, {t!("auction-history-link-bidlog")} }
-                                        if let Some(forum_thread_url) = forum_thread_url {
-                                            a {
-                                                href: forum_thread_url,
-                                                target: "_blank",
-                                                rel: "noopener noreferrer",
-                                                {t!("auction-history-link-forum")}
+                                    td { class: "public-auction-rounds__links-cell", "data-label": t!("auction-history-links"),
+                                        div { class: "public-auction-rounds__links",
+                                            Link { to: lots_href, {t!("auction-history-link-lots")} }
+                                            Link { to: bid_log_href, {t!("auction-history-link-bidlog")} }
+                                            if let Some(forum_thread_url) = forum_thread_url {
+                                                a {
+                                                    href: forum_thread_url,
+                                                    target: "_blank",
+                                                    rel: "noopener noreferrer",
+                                                    {t!("auction-history-link-forum")}
+                                                }
                                             }
                                         }
                                     }

@@ -1,65 +1,101 @@
 //! 规则页面加载、语言切换和 workspace 装配。
 
 use auction_web_shared::legacy_t as t;
-use auction_web_shared::{AsyncState, AsyncStateKind, SUPPORTED_LOCALES};
+use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
 use crate::api::fetch_admin_rules;
 use crate::app::surface::admin_api_error_message;
-use crate::app::surface::pending::{PendingCommandPanel, use_pending_commands};
+use crate::app::surface::pending::PendingCommandPanel;
 
-use super::helpers::{DEFAULT_RULES_LOCALE, missing_rules_document, to_draft};
-use super::model::RuleNotice;
+use super::helpers::{missing_rules_document, to_draft};
+use super::model::{RuleNotice, RulesBaseline, RulesDraft};
 use super::workspace::AdminRulesWorkspace;
 
 /// 读取并展示 Admin 规则文档；语言切换会让请求带上旧版约定的 `lang` 查询参数。
 pub fn page() -> Element {
-    let target = use_signal(|| DEFAULT_RULES_LOCALE.to_owned());
-    let locales = use_signal(|| {
-        SUPPORTED_LOCALES.iter().map(|locale| locale.code.to_owned()).collect::<Vec<_>>()
-    });
+    let RulesDraft {
+        target,
+        locales,
+        mut draft,
+        mut baseline,
+        mut checked_candidate,
+        mut notice,
+        busy,
+        reload_generation,
+        pending,
+        dirty,
+    } = use_context::<RulesDraft>();
     let new_locale = use_signal(String::new);
-    let reload_generation = use_signal(|| 0_u64);
-    let pending = use_pending_commands(reload_generation);
-    let mut draft = use_signal(|| None::<crate::api::AdminRulesCandidate>);
-    let mut checked_signature = use_signal(String::new);
-    let mut notice = use_signal(|| None::<RuleNotice>);
-    let busy = use_signal(|| false);
     let rules = use_resource(move || {
-        let _ = reload_generation();
+        let generation = reload_generation();
         let locale = target();
         async move {
             let result = fetch_admin_rules(locale.clone()).await;
-            (locale, result)
+            ((locale, generation), result)
         }
     });
 
-    // 规则请求成功后才初始化编辑器，避免用户编辑过程中普通重绘把草稿覆盖掉。
+    // 回页时先核对权威语言与版本；草稿有修改时绝不被读取结果覆盖。
     use_effect(move || {
         let requested_locale = target();
-        let state = rules.state().cloned();
+        let requested_generation = reload_generation();
+        if rules.state().cloned() != UseResourceState::Ready {
+            return;
+        }
         let snapshot = rules.read_unchecked();
-        if state == UseResourceState::Ready
-            && let Some((loaded_locale, Ok(document))) = snapshot.as_ref()
-            && loaded_locale == &requested_locale
-            && document.locale == requested_locale
-        {
-            draft.set(Some(to_draft(document, &requested_locale)));
-            checked_signature.set(String::new());
+        let Some(((loaded_locale, loaded_generation), result)) = snapshot.as_ref() else { return };
+        if loaded_locale != &requested_locale || *loaded_generation != requested_generation {
+            return;
+        }
+        let missing;
+        let document = match result {
+            Ok(document) if document.locale == requested_locale => document,
+            Err(error) if error.status == Some(404) => {
+                missing = missing_rules_document(requested_locale.clone());
+                &missing
+            }
+            _ => return,
+        };
+        let has_edits = baseline.peek().as_ref().is_some_and(|base| {
+            base.matches_locale(&requested_locale)
+                && draft.peek().as_ref().is_some_and(|candidate| !base.matches_candidate(candidate))
+        });
+        if has_edits {
+            if baseline.peek().as_ref().is_none_or(|base| !base.matches_document(document)) {
+                checked_candidate.set(None);
+                notice.set(None);
+            }
+            return;
+        }
+        baseline.set(Some(RulesBaseline::from_document(document)));
+        draft.set(Some(to_draft(document, &requested_locale)));
+        checked_candidate.set(None);
+        // 成功反馈属于已完成的发布，不因后续权威快照落地而消失。
+        if !matches!(notice.peek().as_ref(), Some(RuleNotice::Published)) {
             notice.set(None);
         }
     });
 
-    // Resource 重读时保留旧值；旧语言的文档与错误均不能装配成新语言编辑器。
+    // Resource 重读时保留旧值；旧语言或旧世代的响应均不能装配编辑器。
     let snapshot = rules.read_unchecked();
     let current = if rules.state().cloned() == UseResourceState::Ready {
         snapshot
             .as_ref()
-            .filter(|(loaded_locale, _)| loaded_locale == &target())
+            .filter(|((loaded_locale, generation), _)| {
+                loaded_locale == &target() && *generation == reload_generation()
+            })
             .map(|(_, result)| result)
     } else {
         None
     };
+    let baseline_ready =
+        baseline.read().as_ref().is_some_and(|base| base.matches_locale(&target()));
+    let needs_baseline = current.is_some_and(|result| match result {
+        Ok(_) => true,
+        Err(error) => error.status == Some(404),
+    });
+    let current = if needs_baseline && !baseline_ready { None } else { current };
     let content = match current {
         None => rsx! {
             AsyncState {
@@ -79,10 +115,13 @@ pub fn page() -> Element {
                     new_locale,
                     target_signal: target,
                     draft,
-                    checked_signature,
+                    checked_candidate,
+                    baseline,
                     notice,
                     busy,
                     reload_generation,
+                    pending,
+                    dirty,
                 }
             }
         }
@@ -100,10 +139,13 @@ pub fn page() -> Element {
                 new_locale,
                 target_signal: target,
                 draft,
-                checked_signature,
+                checked_candidate,
+                baseline,
                 notice,
                 busy,
                 reload_generation,
+                pending,
+                dirty,
             }
         },
     };
@@ -114,7 +156,7 @@ pub fn page() -> Element {
             aria_labelledby: "rules-title",
             h1 { id: "rules-title", {t!("page-rules-title")} }
             p { class: "admin-rules-intro", {t!("admin-rules-description")} }
-            PendingCommandPanel { owner: pending }
+            PendingCommandPanel { owner: pending, session_scoped: true }
             {content}
         }
     }

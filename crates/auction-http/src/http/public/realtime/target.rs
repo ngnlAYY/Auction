@@ -73,9 +73,5 @@ pub(super) fn parse_page_size(value: Option<&String>) -> Result<i64, ()> {
 }
 
 fn parse_auction_id(value: &str) -> Result<Uuid, ()> {
-    let auction_id = Uuid::parse_str(value).map_err(|_| ())?;
-    if auction_id.is_nil() || auction_id.to_string() != value {
-        return Err(());
-    }
-    Ok(auction_id)
+    super::super::parse_public_uuid(value)
 }

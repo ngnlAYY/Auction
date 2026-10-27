@@ -55,6 +55,15 @@ impl RoleReceipt {
             observed_ready_at,
         }
     }
+
+    /// 只比较已有回执中的身份；运行状态由调用者另行检查。
+    pub(super) fn matches(&self, role: ManagedRole, unit: &str, snapshot: &UnitSnapshot) -> bool {
+        self.role == role.name()
+            && self.unit == unit
+            && self.main_pid == snapshot.main_pid
+            && self.invocation_id == snapshot.invocation_id
+            && self.started_monotonic_micros == snapshot.started_monotonic_micros
+    }
 }
 
 pub(super) fn publish(
@@ -159,13 +168,7 @@ pub(super) fn receipt_match(
     receipt
         .roles
         .iter()
-        .find(|entry| entry.role == role.name())
-        .filter(|entry| {
-            entry.unit == unit
-                && entry.main_pid == snapshot.main_pid
-                && entry.invocation_id == snapshot.invocation_id
-                && entry.started_monotonic_micros == snapshot.started_monotonic_micros
-        })
+        .find(|entry| entry.matches(role, unit, snapshot))
         .map_or("stale", |_| "matched")
 }
 

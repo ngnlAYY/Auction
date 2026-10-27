@@ -274,20 +274,17 @@ impl PublicLiveLotSummary {
 #[derive(Debug, Clone)]
 pub struct PublicLiveLotDetail {
     pub summary: PublicLiveLotSummary,
-    pub equipment_attributes: Value,
 }
 
 impl PublicLiveLotDetail {
-    /// 校验正式详情的 attributes 与已映射装备保持同一持久快照。
+    /// 校验正式详情的装备属性是可公开的 JSON 对象。
     pub fn validate(
         &self,
         auction_status: &str,
         opens_at: DateTime<Utc>,
     ) -> Result<(), &'static str> {
         self.summary.validate(auction_status, opens_at)?;
-        if !self.equipment_attributes.is_object()
-            || self.equipment_attributes != self.summary.equipment.attributes
-        {
+        if !self.summary.equipment.attributes.is_object() {
             return Err("公开正式 lot 详情装备属性无效");
         }
         Ok(())

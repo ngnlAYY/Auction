@@ -419,21 +419,6 @@
     overflow-wrap: anywhere;
   }
 
-  .public-auction-history-controls label {
-    flex: 1 1 100%;
-    flex-wrap: wrap;
-  }
-
-  .public-auction-history-controls select {
-    min-inline-size: 0;
-    max-inline-size: 100%;
-    flex: 1;
-  }
-
-  .public-auction-history-links {
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
 
   .public-account-login-form,
   .public-account-login-prompt {
@@ -453,25 +438,25 @@
   }
 
 
-  /* 复用同一业务表和本地化字段名；只重排直接子级，嵌套补偿流水不会混入外层卡片。 */
-  .public-shell :is(div, section):has(> table > tbody > tr > [data-label]) {
+  /* 复用同一业务表和本地化字段名；空流水仍保留汇总末行的手机布局。 */
+  .public-shell :is(div, section):has(> table > tbody > tr > [data-label], > table.public-compensation-movement-table) {
     border: 0;
     border-radius: 0;
     background: transparent;
   }
 
-  .public-shell table:has(> tbody > tr > [data-label]) {
+  .public-shell table:is(:has(> tbody > tr > [data-label]), .public-compensation-movement-table) {
     display: block;
     border: 0;
     font-size: var(--text-base);
   }
 
-  .public-shell table:has(> tbody > tr > [data-label]) > colgroup {
+  .public-shell table:is(:has(> tbody > tr > [data-label]), .public-compensation-movement-table) > colgroup {
     display: none;
   }
 
   /* 表头仍供辅助技术读取；可见标签由各单元格既有的五语 data-label 提供。 */
-  .public-shell table:has(> tbody > tr > [data-label]) > thead {
+  .public-shell table:is(:has(> tbody > tr > [data-label]), .public-compensation-movement-table) > thead {
     position: absolute;
     inline-size: 1px;
     block-size: 1px;
@@ -482,13 +467,13 @@
     white-space: nowrap;
   }
 
-  .public-shell table:has(> tbody > tr > [data-label]) > :is(tbody, tfoot) {
+  .public-shell table:is(:has(> tbody > tr > [data-label]), .public-compensation-movement-table) > :is(tbody, tfoot) {
     display: grid;
     gap: var(--space-3);
     min-inline-size: 0;
   }
 
-  .public-shell table:has(> tbody > tr > [data-label]) > tbody > tr {
+  .public-shell table:is(:has(> tbody > tr > [data-label]), .public-compensation-movement-table) > tbody > tr {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-2) var(--space-3);
@@ -498,11 +483,11 @@
     border-radius: var(--radius-md);
   }
 
-  .public-shell table:has(> tbody > tr > [data-label]) > tbody > tr:not(:is(.public-auction-catalog__leading, .public-account-leading, .public-auction-bid-log-leading, .public-auction-lot__leading)) {
+  .public-shell table:is(:has(> tbody > tr > [data-label]), .public-compensation-movement-table) > tbody > tr:not(:is(.public-auction-catalog__leading, .public-account-leading, .public-auction-bid-log-leading, .public-auction-lot__leading)) {
     background: var(--color-surface);
   }
 
-  .public-shell table:has(> tbody > tr > [data-label]) > :is(tbody, tfoot) > tr > :is(td, th) {
+  .public-shell table:is(:has(> tbody > tr > [data-label]), .public-compensation-movement-table) > :is(tbody, tfoot) > tr > :is(td, th) {
     display: block;
     min-inline-size: 0;
     max-inline-size: 100%;
@@ -524,7 +509,7 @@
     content: attr(data-label);
   }
 
-  .public-shell table > tbody > tr > :is(:first-child, .public-auction-catalog__name, .public-auction-catalog__actions, .public-history-equipment, .public-auction-rounds__links, [colspan]),
+  .public-shell table > tbody > tr > :is(:first-child, .public-auction-catalog__name, .public-auction-catalog__actions, .public-history-equipment, .public-auction-rounds__links-cell, [colspan]),
   .public-shell table > tbody > tr > :is(td, th):has(.shared-truncated-text--wide),
   .public-shell .public-blacklist-table td:nth-child(2) {
     grid-column: 1 / -1;
@@ -674,7 +659,7 @@
   .public-world-switcher select,
   .public-history-group-toggle,
   .public-history-player-filter,
-  .public-auction-history-links a,
+  .public-auction-rounds__links a,
   .public-auction-catalog__actions-list > button,
   .public-auction-catalog__login,
   .public-lot-watch button,
@@ -686,7 +671,7 @@
     min-block-size: var(--size-target);
   }
 
-  .public-auction-history-links a,
+  .public-auction-rounds__links a,
   .public-history-player-filter {
     display: inline-flex;
     align-items: center;
