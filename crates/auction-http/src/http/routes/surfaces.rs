@@ -57,6 +57,7 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         .route("/api/v1/blacklist", get(blacklist::list))
         .route("/api/v1/compensation-pool", get(compensation::pool))
         .route("/api/v1/auctions", get(list_auctions))
+        .route("/api/v2/auctions", get(list_auctions_v2))
         .route("/api/v1/auctions/current", get(current_auction))
         .route("/api/v1/auctions/{auction_id}/bid-log", get(list_bid_log))
         .route("/api/v1/price-history", get(list_price_history))

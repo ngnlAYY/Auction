@@ -35,6 +35,96 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-26 统一分页右对齐
+
+owner 为 `auction-web-shared::style`，Public 与 Admin 共用。`base.css` 将分页容器及折行数字组右对齐；
+`mobile.css` 在既有手机和触控横屏断点中按内容宽度排列三列导航并靠右，保留前后按钮的 44px 触控列。
+共享 README 与两端设计已同步；仅调整 CSS，DOM／键盘顺序、页码钳制、数量、查询与命令状态不变。
+
+最终 `just verify && just web-build` 完整成功，覆盖格式、静态策略、工作区已有目标编译、独立 feature、
+Clippy `-D warnings`、双端 WASM 检查及正式 `wasm-release` 打包。两端均生成新的 9 文件 payload，已重读 manifest：
+
+- Public：`ffd28f8d50ed7f736a79454269ac0c1c6a884a69685cb057d356912e93cc2211`。
+- Admin：`b2a9415921d00eb310c750513d9b69a0deeef2a16a0ce880087c6c00d196d261`。
+
+按既定范围只做静态检查与构建，没有新增或运行行为测试、浏览器及手工冒烟；实际页面的对齐、折行与触控布局仍未运行验收。
+未部署或执行运行库迁移；此前各阶段产物与验证记录保留原范围。
+
+### 2026-10-26 恢复拍卖历史原有查看入口
+
+owner 为 `auction-web-public`。按用户澄清，拍卖历史“查看”列保留原有“拍品”和“出价记录”，仅追加可用的
+“论坛地址”；未发布或未对账时只省略论坛外链，不影响两个原有入口。
+
+同时恢复 `/bidlog` 的 `live`／`final`／`settled` 目录及已结算状态文案，使历史链接继续选中原场次，
+不再因结算跳到进行中场次或空态。保留目录代际、查询身份、分页与旧响应隔离；五语复用已有消息。
+Public README、设计、表格契约与 P30 契约已同步；HTTP／DTO、数据库及迁移没有新增变化。
+
+最终 `cargo fmt --all && just verify && just web-build` 完整成功。静态门禁包含格式、仓库策略、工作区已有目标编译、
+独立 feature、Clippy `-D warnings` 与双端 WASM 检查；正式入口重新编译 Public，Admin 输入未变并通过校验后复用。
+两端各 9 个 payload 文件，已重读 manifest；本次 Public `wasm-release` payload SHA-256 为
+`eca357719d9fd778b8145a73a40f9ae65f7249c6bb54ba55902fa89b8c41d354`，Admin 摘要保持此前记录。
+
+按既定范围仅执行静态检查与构建，没有新增或运行行为测试、浏览器或手工冒烟；历史链接点击、翻页和返回仍未作运行验收。
+未部署或执行运行库迁移。本节更正下方记录中的历史入口收敛，不改写此前的检查结果。
+
+### 2026-10-26 统一分页与拍卖历史论坛链接
+
+本节关于移除历史出价记录入口的做法已由[恢复原有入口](docs/status.md#2026-10-26-恢复拍卖历史原有查看入口)更正；
+以下保留当时的实现与验证记录。
+
+Public、Admin 与 shared 三个 Web owner 统一列表分页布局，调整手机数字页码与顶栏、缩小并居中 Key 登录输入框，
+适配桌面与手机补偿展开控件。Public 活动竞价记录排除已结算场次，历史操作列移除对应出价记录入口，
+场次标题与“按拍品筛选”同排；历史页“查看”列增加真实论坛地址。相关模块说明、设计与表格契约已同步。
+
+新增 P30 `GET /api/v2/auctions`：contracts 拥有独立 v2 摘要，application 拥有不可绕过构造校验的 `PublicForumLink`，
+storage 在原分页 SELECT 与同一只读快照内投影地址及内容证明，HTTP 映射已校验链接。历史页每页一次读取，
+不逐行调用 P15，也不加载镜像正文；P07 v1 的 DTO 字段闭集保留。application 复用工作区已有 `url` 依赖，未升级版本。
+
+`LEFT JOIN` 资格包含 `published`、正内容版本及非空同步时间；`000025` 保留的未对账历史场次正常返回，仅省略链接。
+声明有证明的记录仍须满足有效非零同步时间、有界且无空白／控制字符的无用户信息 HTTPS 地址；损坏时返回
+`503 storage_unavailable`，不能降级成无链接。SQL 先限制地址投影为最多 2048 字节，应用层与浏览器分别校验安全边界。
+版本、遗漏与损坏的区分及部署顺序见[P30 契约](docs/contracts/routes.md#p30-v2-拍卖历史与论坛地址)。无新增迁移。
+
+本轮 `cargo fmt --all && just verify && just web-build` 完整成功，覆盖格式、仓库策略、工作区已有目标编译、
+独立 feature、Clippy `-D warnings`、双端 WASM 检查及正式 `wasm-release` 构建。首次检查发现新类型缺少 crate 根导出，
+补齐后重跑通过。最后一次源码调整后，经正式入口与两端 manifest 复核的 payload SHA-256：
+
+- Public：`28ec92a4c3c8b72ad007f654ff79f9853a1e497fb3ace6a1f0f126480385648c`。
+- Admin：`41108f6e18248a82dffed2ee13f895870a4b4cbf2c43464d12ec5584f28ec8bd`。
+
+随后将 P15 地址校验显式放入 `published` 分支，其他状态继续校验可选地址，所有分支均复用 `valid_forum_url`，
+每个地址只解析一次。该调整后完整执行 `cargo fmt --all && just verify` 通过，并再次运行 `just web-build` 成功。
+正式入口确认两端输入指纹未变，分别复用通过校验的 9 文件 payload；重新读取两个 `auction-web-manifest.v1`，
+确认上列 SHA-256 与前次一致。本次执行没有触发新的 WASM 编译，不将复用结果表述为重新编译。
+同时核对 `cargo tree --locked --target wasm32-unknown-unknown --workspace --invert auction-application`：
+两端 Web 均不在 `auction-application` 的反向依赖图中，与正式入口判定浏览器输入未变一致。
+
+本轮按用户限定只做静态检查与构建，没有新增或执行行为测试、浏览器验证、手工冒烟或数据库场景。
+分页交互、视觉效果与 P30 的实际 PostgreSQL／HTTP 行为未作运行验收；LSP 查询因服务异常退出不可用，未计为通过。
+未部署或执行运行库迁移；本条保留此前静态检查和浏览器验收记录各自的范围。
+
+### 2026-10-26 全前端交互语义与可访问性修订
+
+owner 为 `auction-web-public`、`auction-web-admin` 与 `auction-web-shared`。Public 补齐登录、竞价／代理和查询表单的
+输入语义、错误描述关联与登录失败焦点，成交历史高级条件支持 Escape 关闭并将焦点返回触发按钮。Admin 补齐登录、
+拍卖、用户、凭据、规则、邮箱、审计、Realtime、Runtime 与首次设置字段语义，用户名称筛选增加显式搜索按钮并同步五语。
+共享层统一标题折行、原生控件表面、可见焦点与触控反馈，自定义分页数量非法提交会显示错误并聚焦输入，Markdown
+代码禁止浏览器自动翻译；双端入口同步主题色。沿用现有布局、纯 Rust CSR 和五语资源，HTTP／JSON、数据库、配置、
+命令身份及会话写门禁契约不变，无新增依赖或迁移。相关设计与模块 README 已同步。
+
+完整 `just verify` 退出 0，工具链为 Rust 1.99.0；覆盖仓库／布局／配置／i18n 等静态策略、rustfmt、工作区已有目标编译、
+独立 feature、Clippy `-D warnings` 及双端 WASM 检查。首次编译发现新增筛选错误 ID 的两处 E0382，改为借用后重跑通过。
+
+`just web-build` 退出 0，Dioxus CLI 0.7.10 分别生成 Public／Admin 的正式 `wasm-release` payload；
+每端清单含 9 个文件，并通过构建入口的文件结构、资源清单及输入指纹检查。payload SHA-256：
+
+- Public：`fb74e1795e6b35f24532ae688f2645204e8cf936d73c03cd634a959e9fa975e3`。
+- Admin：`c20300cdb7869ce867bab3dec30aa0dde150043f80a753c98f6373929965a3b8`。
+
+**未做实际页面验证**。本轮按用户明确限定，只执行静态检查与构建；没有创建样本服务器、启动 Chromium、执行浏览器测试
+或手工冒烟，也未新增或运行行为测试。视觉效果、键盘／触控交互及读屏效果仍待实际页面验证；静态通过不代表运行验收。
+未连接数据库或真实外部服务，未部署或执行运行库迁移；本条不改写此前各轮浏览器验证记录。
+
 ### 2026-10-26 Public“我的”页面信息密度
 
 owner 为 `auction-web-public`：`identity/account.rs` 增加稳定的偏好与列表布局容器，统一 AccountPager 在空／单页时

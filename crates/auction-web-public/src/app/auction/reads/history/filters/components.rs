@@ -31,6 +31,15 @@ pub(crate) fn PriceHistoryFilters(
     on_reset: EventHandler<()>,
 ) -> Element {
     let current_error = filter_error();
+    let mut settings_toggle = use_signal(|| None::<MountedEvent>);
+    let close_settings = use_callback(move |()| {
+        settings_open.set(false);
+        if let Some(toggle) = settings_toggle() {
+            spawn(async move {
+                let _ = toggle.set_focus(true).await;
+            });
+        }
+    });
     let name_error = history_name_error(current_error);
     let name_description = if name_error.is_some() {
         "public-history-name-hint public-history-name-error"
@@ -40,6 +49,7 @@ pub(crate) fn PriceHistoryFilters(
     rsx! {
         form {
             class: "public-history-filters",
+            autocomplete: "off",
             onsubmit: move |event| {
                 event.prevent_default();
                 on_apply.call(());
@@ -48,6 +58,7 @@ pub(crate) fn PriceHistoryFilters(
                     label {
                         span { {t!("history-filter-world")} }
                         select {
+                            name: "world",
                             value: world(),
                             onchange: move |event| {
                                 world.set(event.value());
@@ -91,6 +102,7 @@ pub(crate) fn PriceHistoryFilters(
                             class: "public-history-settings-toggle",
                             aria_controls: "public-history-settings",
                             aria_expanded: settings_open().to_string(),
+                            onmounted: move |event| settings_toggle.set(Some(event)),
                             onclick: move |_| settings_open.set(!settings_open()),
                             span { aria_hidden: "true", "⚙" }
                             {t!("history-filter-settings")}
@@ -119,18 +131,26 @@ pub(crate) fn PriceHistoryFilters(
                         class: "public-history-settings-panel",
                         role: "group",
                         aria_label: t!("history-filter-settings"),
+                        onkeydown: move |event| {
+                            if event.key() == Key::Escape {
+                                event.prevent_default();
+                                event.stop_propagation();
+                                close_settings.call(());
+                            }
+                        },
                         div { class: "public-history-settings-header",
                             strong { {t!("history-filter-settings")} }
                             button {
                                 r#type: "button",
                                 class: "public-history-settings-close",
                                 aria_label: t!("history-filter-settings-close"),
-                                onclick: move |_| settings_open.set(false),
+                                onclick: move |_| close_settings.call(()),
                                 span { aria_hidden: "true", "×" }
                             }
                         }
                         div { class: "public-history-settings-grid",
                             HistoryDateFilter {
+                                field_name: "from",
                                 label: t!("history-filter-from"),
                                 month_label: t!("history-filter-from-month"),
                                 year_label: t!("history-filter-from-year"),
@@ -140,6 +160,7 @@ pub(crate) fn PriceHistoryFilters(
                                 filter_error,
                             }
                             HistoryDateFilter {
+                                field_name: "to",
                                 label: t!("history-filter-to"),
                                 month_label: t!("history-filter-to-month"),
                                 year_label: t!("history-filter-to-year"),
@@ -149,6 +170,7 @@ pub(crate) fn PriceHistoryFilters(
                                 filter_error,
                             }
                             HistoryPriceFilter {
+                                field_name: "minimum_price",
                                 label: t!("history-filter-min-price"),
                                 value_label: t!("history-filter-min-price-value"),
                                 unit_label: t!("history-filter-min-price-unit"),
@@ -158,6 +180,7 @@ pub(crate) fn PriceHistoryFilters(
                                 filter_error,
                             }
                             HistoryPriceFilter {
+                                field_name: "maximum_price",
                                 label: t!("history-filter-max-price"),
                                 value_label: t!("history-filter-max-price-value"),
                                 unit_label: t!("history-filter-max-price-unit"),
@@ -169,6 +192,7 @@ pub(crate) fn PriceHistoryFilters(
                             label { class: "public-history-filter-cell",
                                 span { {t!("history-filter-buyer")} }
                                 input {
+                                    name: "buyer",
                                     r#type: "search",
                                     enterkeyhint: "search",
                                     autocapitalize: "none",
@@ -184,6 +208,7 @@ pub(crate) fn PriceHistoryFilters(
                             label { class: "public-history-filter-cell",
                                 span { {t!("history-filter-seller")} }
                                 input {
+                                    name: "seller",
                                     r#type: "search",
                                     enterkeyhint: "search",
                                     autocapitalize: "none",
@@ -218,6 +243,7 @@ pub(crate) fn PriceHistoryFilters(
 /// 渲染一个年月组合筛选字段。
 #[component]
 fn HistoryDateFilter(
+    field_name: &'static str,
     label: String,
     month_label: String,
     year_label: String,
@@ -226,11 +252,14 @@ fn HistoryDateFilter(
     error: Option<String>,
     mut filter_error: Signal<Option<HistoryFilterError>>,
 ) -> Element {
+    let error_id = format!("public-history-{field_name}-error");
     rsx! {
         fieldset { class: "public-history-filter-cell",
             legend { {label} }
             div { class: "public-history-compound public-history-date",
                 select {
+                    name: "{field_name}_month",
+                    aria_describedby: error.as_ref().map(|_| error_id.clone()),
                     aria_label: month_label,
                     aria_invalid: error.is_some().to_string(),
                     value: month(),
@@ -247,6 +276,8 @@ fn HistoryDateFilter(
                     }
                 }
                 input {
+                    name: "{field_name}_year",
+                    aria_describedby: error.as_ref().map(|_| error_id.clone()),
                     r#type: "number",
                     min: "1",
                     max: "9999",
@@ -262,7 +293,7 @@ fn HistoryDateFilter(
                 }
             }
             if let Some(ref error) = error {
-                span { class: "public-history-field-error", role: "alert", {error.clone()} }
+                span { id: error_id.as_str(), class: "public-history-field-error", role: "alert", {error.clone()} }
             }
         }
     }
@@ -271,6 +302,7 @@ fn HistoryDateFilter(
 /// 渲染一个带 K/M 单位选择的价格字段。
 #[component]
 fn HistoryPriceFilter(
+    field_name: &'static str,
     label: String,
     value_label: String,
     unit_label: String,
@@ -279,6 +311,7 @@ fn HistoryPriceFilter(
     error: Option<String>,
     mut filter_error: Signal<Option<HistoryFilterError>>,
 ) -> Element {
+    let error_id = format!("public-history-{field_name}-error");
     let input_mode = match price_unit() {
         HistoryPriceUnit::C => "numeric",
         HistoryPriceUnit::K | HistoryPriceUnit::M => "decimal",
@@ -288,6 +321,8 @@ fn HistoryPriceFilter(
             legend { {label} }
             div { class: "public-history-compound public-history-price-control",
                 input {
+                    name: field_name,
+                    aria_describedby: error.as_ref().map(|_| error_id.clone()),
                     r#type: "text",
                     inputmode: input_mode,
                     maxlength: "32",
@@ -300,6 +335,8 @@ fn HistoryPriceFilter(
                     },
                 }
                 select {
+                    name: "{field_name}_unit",
+                    aria_describedby: error.as_ref().map(|_| error_id.clone()),
                     aria_label: unit_label,
                     value: price_unit().as_str(),
                     onchange: move |event| {
@@ -312,7 +349,7 @@ fn HistoryPriceFilter(
                 }
             }
             if let Some(ref error) = error {
-                span { class: "public-history-field-error", role: "alert", {error.clone()} }
+                span { id: error_id.as_str(), class: "public-history-field-error", role: "alert", {error.clone()} }
             }
         }
     }

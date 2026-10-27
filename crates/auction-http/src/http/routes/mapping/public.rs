@@ -3,12 +3,13 @@
 use super::super::*;
 use super::*;
 
-pub(crate) fn map_auction_page(
+pub(crate) fn map_auction_page<T>(
     page: PublicAuctionPage,
     page_number: i64,
     cursor: Option<String>,
-) -> AuctionListResponse {
-    let auctions = page.entries.into_iter().map(map_auction_summary).collect();
+    map_summary: impl FnMut(PublicAuctionSummary) -> T,
+) -> AuctionListResponse<T> {
+    let auctions = page.entries.into_iter().map(map_summary).collect();
     let next_cursor = page.next_cursor.as_ref().map(encode_public_cursor);
     let has_more = cursor.as_ref().map(|_| page.has_more);
     AuctionListResponse {

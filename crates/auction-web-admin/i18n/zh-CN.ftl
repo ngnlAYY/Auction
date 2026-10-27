@@ -1134,6 +1134,7 @@ admin-action-working = 正在处理……
 admin-users-loading = 正在加载用户……
 admin-users-filter-name = 名称前缀
 admin-users-filter-status = 状态
+admin-users-filter-apply = 搜索用户
 admin-users-status-all = 全部
 admin-users-status-active = 正常
 admin-users-status-blacklisted = 黑名单

@@ -22,9 +22,9 @@ mod realtime;
 
 pub(crate) use account::{decode_my_bids, decode_my_proxy};
 pub(crate) use catalog::{
-    decode_auction_list, decode_bid_log_page, decode_blacklist, decode_compensation_movements,
-    decode_compensation_pool, decode_current_auction, decode_price_history_page, decode_rules,
-    decode_worlds,
+    decode_auction_list, decode_auction_list_v2, decode_bid_log_page, decode_blacklist,
+    decode_compensation_movements, decode_compensation_pool, decode_current_auction,
+    decode_price_history_page, decode_rules, decode_worlds,
 };
 pub(crate) use lot::{
     decode_bid_command, decode_create_proxy_command, decode_lot_detail, decode_lot_list,

@@ -161,6 +161,8 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                     {t!("admin-intake-source")}
                     select {
                         id: "auction-intake-source",
+                        name: "source",
+                        autocomplete: "off",
                         disabled: busy(),
                         value: source_kind(),
                         onchange: move |event| {
@@ -179,6 +181,10 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                         {t!("admin-intake-equipment-url")}
                         input {
                             id: "auction-intake-url",
+                            name: "equipment_url",
+                            inputmode: "url",
+                            autocapitalize: "none",
+                            spellcheck: "false",
                             r#type: "url",
                             autocomplete: "off",
                             maxlength: "2048",
@@ -207,6 +213,10 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                         }
                         textarea {
                             id: "auction-intake-json",
+                            name: "equipment_json",
+                            autocomplete: "off",
+                            autocapitalize: "none",
+                            spellcheck: "false",
                             aria_describedby: if field_errors().source.is_some() {
                                 "auction-intake-json-hint auction-intake-json-error"
                             } else {
@@ -238,6 +248,9 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                     {t!("admin-intake-start-price")}
                     input {
                         id: "auction-intake-price",
+                        name: "start_price",
+                        inputmode: "numeric",
+                        autocomplete: "off",
                         r#type: "number",
                         min: "1",
                         step: "1",
@@ -263,6 +276,9 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                     {t!("admin-intake-player-id")}
                     input {
                         id: "auction-intake-player",
+                        name: "player",
+                        autocapitalize: "none",
+                        spellcheck: "false",
                         r#type: "text",
                         autocomplete: "off",
                         maxlength: "256",

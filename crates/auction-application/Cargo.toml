@@ -17,6 +17,8 @@ serde.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
+# 必填：复用工作区 URL 解析器校验公开 HTTPS 地址，不进行网络访问。
+url.workspace = true
 uuid = { workspace = true, features = ["v5"] }
 
 [lints]

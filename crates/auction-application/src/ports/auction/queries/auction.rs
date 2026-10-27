@@ -12,6 +12,8 @@ pub struct PublicAuctionListRequest {
     pub limit: i64,
     pub offset: i64,
     pub cursor: Option<PublicAuctionCursor>,
+    /// 仅新版本目录需要主题链接；旧版本不读取论坛同步记录。
+    pub include_forum_thread_url: bool,
 }
 
 /// Public 拍卖列表的稳定 keyset 游标。
@@ -38,6 +40,8 @@ pub struct PublicAuctionSummary {
     pub unsold_count: i64,
     pub sold_amount: i64,
     pub state_version: i64,
+    /// 按请求选择且已通过内容证明与 HTTPS 校验的论坛链接，不包含镜像正文。
+    pub forum_link: Option<crate::PublicForumLink>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -17,6 +17,10 @@
 `lib.rs` 只保留模块声明和公共导出；`ports/` 与 `services/` 按 `admin`、`auction`、`mail`、`realtime`、`recovery`、
 `settlement` 等职责分组，接口表达领域意图，不传递 SQL 行或部署配置。
 
+[ports/forum/public.rs](crates/auction-application/src/ports/forum/public.rs) 共同拥有 P15 与 P30 的内容证明和公开链接校验。
+`PublicForumLink` 只允许经校验构造，字段私有；复用工作区 `url` 做纯 HTTPS 解析，不进行网络访问。
+P30 对历史未对账记录省略链接，对声明有内容证明但数据损坏的记录失败关闭，见[v2 拍卖历史契约](docs/contracts/routes.md#p30-v2-拍卖历史与论坛地址)。
+
 [ports/delivery/cadence.rs](crates/auction-application/src/ports/delivery/cadence.rs) 拥有七类 Send 间隔及提交后唤醒窄端口；
 间隔为 0–86400 秒、默认全零，非权威通知只加速领取，持久起点及发送资格仍归存储事务。runtime 同组 managed 控制接管，
 分组和兼容语义见[发送间隔](ops/config/README.md#邮件业务发送间隔)，不改变金额、命令身份或已发送结果。

@@ -59,6 +59,7 @@ pub(super) fn MarkdownBlockView(block: MarkdownBlock) -> Element {
         }
         MarkdownBlock::Code { language, value } => rsx! {
             pre {
+                translate: "no",
                 if let Some(language) = language {
                     code { class: "language-{language}", "{value}" }
                 } else {
@@ -170,7 +171,7 @@ fn MarkdownInline(nodes: Vec<Inline>) -> Element {
                 Inline::Strong(nodes) => rsx! { strong { key: "{index}", MarkdownInline { nodes } } },
                 Inline::Emphasis(nodes) => rsx! { em { key: "{index}", MarkdownInline { nodes } } },
                 Inline::Strike(nodes) => rsx! { del { key: "{index}", MarkdownInline { nodes } } },
-                Inline::Code(value) => rsx! { code { key: "{index}", "{value}" } },
+                Inline::Code(value) => rsx! { code { key: "{index}", translate: "no", "{value}" } },
                 Inline::Link { label, target } => {
                     // 站内链接在当前页跳转，避免整页刷新打断 SPA；外链才开新页并加 noreferrer。
                     if is_internal_target(&target) {

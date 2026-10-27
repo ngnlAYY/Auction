@@ -117,6 +117,7 @@ fn AuditFilters(
     rsx! {
         form {
             class: "admin-audit-filter",
+            autocomplete: "off",
             onsubmit: move |event| {
                 event.prevent_default();
                 submit_filter.call(filter());
@@ -126,6 +127,11 @@ fn AuditFilters(
                 label {
                     {t!("admin-audit-actor-id")}
                     input {
+                        name: "actor",
+                        r#type: "search",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        enterkeyhint: "search",
                         maxlength: "256",
                         value: filter().actor,
                         oninput: move |event| {
@@ -136,6 +142,11 @@ fn AuditFilters(
                 label {
                     {t!("admin-audit-entity-identity")}
                     input {
+                        name: "entity",
+                        r#type: "search",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        enterkeyhint: "search",
                         maxlength: "385",
                         value: filter().entity,
                         oninput: move |event| {
@@ -146,6 +157,11 @@ fn AuditFilters(
                 label {
                     {t!("admin-audit-action")}
                     input {
+                        name: "action",
+                        r#type: "search",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        enterkeyhint: "search",
                         maxlength: "128",
                         value: filter().action,
                         oninput: move |event| {
@@ -156,6 +172,11 @@ fn AuditFilters(
                 label {
                     {t!("admin-audit-request-id")}
                     input {
+                        name: "request_id",
+                        r#type: "search",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        enterkeyhint: "search",
                         maxlength: "128",
                         value: filter().request_id,
                         oninput: move |event| {
@@ -172,6 +193,7 @@ fn AuditFilters(
                     label {
                         {t!("admin-audit-actor-type")}
                         select {
+                            name: "actor_type",
                             value: filter().actor_type,
                             onchange: move |event| {
                                 filter.write().actor_type = event.value();
@@ -186,6 +208,7 @@ fn AuditFilters(
                     label {
                         {t!("admin-audit-source")}
                         select {
+                            name: "source",
                             value: filter().source,
                             onchange: move |event| {
                                 filter.write().source = event.value();
@@ -200,6 +223,7 @@ fn AuditFilters(
                     label {
                         {t!("admin-audit-result")}
                         select {
+                            name: "result",
                             value: filter().result,
                             onchange: move |event| {
                                 filter.write().result = event.value();
@@ -213,6 +237,7 @@ fn AuditFilters(
                     label {
                         {t!("admin-audit-from")}
                         input {
+                            name: "occurred_from",
                             r#type: "datetime-local",
                             value: filter().occurred_from,
                             oninput: move |event| {
@@ -223,6 +248,7 @@ fn AuditFilters(
                     label {
                         {t!("admin-audit-to")}
                         input {
+                            name: "occurred_to",
                             r#type: "datetime-local",
                             value: filter().occurred_to,
                             oninput: move |event| {

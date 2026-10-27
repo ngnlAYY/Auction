@@ -68,6 +68,10 @@ pub(super) fn page() -> Element {
                             label { r#for: "setup-token", {t!("setup-token")} }
                             input {
                                 id: "setup-token",
+                                name: "setup_token",
+                                autocapitalize: "none",
+                                spellcheck: "false",
+                                enterkeyhint: "go",
                                 r#type: "password",
                                 autocomplete: "off",
                                 required: true,

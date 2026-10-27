@@ -34,6 +34,10 @@ GET/PUT（响应 user_id/channel/version，请求 command_id/channel/expected_ve
 [dto/public/account.rs](crates/auction-contracts/src/contracts/dto/public/account.rs) 拥有 P29 的 `PublicRegistrationInfoResponse`，
 只向登录页传递配置中的 bot 显示名，不与认证结果或完整 runtime 文档混用；字段见[注册提示契约](docs/contracts/routes.md#p29-注册账号提示)。
 
+[dto/public/catalog/auction.rs](crates/auction-contracts/src/contracts/dto/public/catalog/auction.rs) 保留 v1 的
+`AuctionSummaryResponse`；P30 显式使用平铺的 `AuctionSummaryV2Response`。两个版本复用泛型分页信封，默认类型仍为 v1，
+论坛地址仅进入 v2，字段与消费顺序见[v2 拍卖历史契约](docs/contracts/routes.md#p30-v2-拍卖历史与论坛地址)。
+
 [dto/admin/mail/progress.rs](crates/auction-contracts/src/contracts/dto/admin/mail/progress.rs) 拥有 A16 显式选择的安全邮件诊断；
 与原始游标、进程内 claim 及数据库模型分离，旧请求不增加字段，字段与闭集见[邮件契约](docs/contracts/routes.md#邮件审查与轮询)。
 

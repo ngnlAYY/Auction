@@ -2,9 +2,10 @@
 
 use super::*;
 use auction_contracts::{
-    AuctionListResponse, CurrentAuctionResponse, PublicBidLogListResponse, PublicBlacklistResponse,
-    PublicCompensationMovementPageResponse, PublicCompensationResponse,
-    PublicPriceHistoryListResponse, PublicRulesResponse, WorldsResponse,
+    AuctionListResponse, AuctionSummaryV2Response, CurrentAuctionResponse,
+    PublicBidLogListResponse, PublicBlacklistResponse, PublicCompensationMovementPageResponse,
+    PublicCompensationResponse, PublicPriceHistoryListResponse, PublicRulesResponse,
+    WorldsResponse,
 };
 use gloo_net::http::Response;
 use serde_json::{Map, Value};
@@ -27,7 +28,16 @@ pub(crate) async fn decode_auction_list(
     world: Option<&str>,
     status: &str,
 ) -> Result<AuctionListResponse, String> {
-    decode_success(response, |value| valid_auction_list(value, world, status)).await
+    decode_success(response, |value| valid_auction_list(value, world, status, false)).await
+}
+
+/// v2 独立扩展摘要字段闭集；v1 仍拒绝论坛地址字段。
+pub(crate) async fn decode_auction_list_v2(
+    response: Response,
+    world: Option<&str>,
+    status: &str,
+) -> Result<AuctionListResponse<AuctionSummaryV2Response>, String> {
+    decode_success(response, |value| valid_auction_list(value, world, status, true)).await
 }
 
 /// 解码按编号分页且顺序稳定的公开竞价事实。
@@ -137,16 +147,28 @@ fn valid_current_auction(value: &Value, world: &str) -> bool {
     }
 }
 
-fn valid_auction_list(value: &Value, world: Option<&str>, status: &str) -> bool {
+fn valid_auction_list(
+    value: &Value,
+    world: Option<&str>,
+    status: &str,
+    with_forum_url: bool,
+) -> bool {
     let Some(value) = object(value) else { return false };
     only(value, &["auctions", "page", "page_size", "total"], &[])
         && valid_numbered_page(value)
         && value.get("auctions").and_then(Value::as_array).is_some_and(|auctions| {
-            auctions.iter().all(|auction| valid_auction_summary(auction, world, status))
+            auctions
+                .iter()
+                .all(|auction| valid_auction_summary(auction, world, status, with_forum_url))
         })
 }
 
-fn valid_auction_summary(value: &Value, world: Option<&str>, status: &str) -> bool {
+fn valid_auction_summary(
+    value: &Value,
+    world: Option<&str>,
+    status: &str,
+    with_forum_url: bool,
+) -> bool {
     let Some(value) = object(value) else { return false };
     if !only(
         value,
@@ -162,7 +184,11 @@ fn valid_auction_summary(value: &Value, world: Option<&str>, status: &str) -> bo
             "sold_amount",
             "state_version",
         ],
-        &["opened_at", "final_phase_at", "effective_end_at", "settled_at"],
+        if with_forum_url {
+            &["opened_at", "final_phase_at", "effective_end_at", "settled_at", "forum_thread_url"]
+        } else {
+            &["opened_at", "final_phase_at", "effective_end_at", "settled_at"]
+        },
     ) || !uuid(string(value.get("id")).unwrap_or_default())
         || !account_nonempty(value.get("world_id"))
         || string(value.get("status")) != Some(status)
@@ -178,6 +204,9 @@ fn valid_auction_summary(value: &Value, world: Option<&str>, status: &str) -> bo
         || !nonnegative(value.get("unsold_count"))
         || !nonnegative(value.get("sold_amount"))
         || !positive(value.get("state_version"))
+        || value.get("forum_thread_url").is_some_and(|value| {
+            !string(Some(value)).is_some_and(super::super::forum::valid_forum_url)
+        })
     {
         return false;
     }

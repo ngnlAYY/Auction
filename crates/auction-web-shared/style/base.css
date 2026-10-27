@@ -111,6 +111,18 @@ p {
   margin-block-start: 0;
 }
 
+/* 数据页以标题和数值建立层级；长译文和玩家内容不能撑开布局。 */
+:where(h1, h2, h3, h4, h5, h6) {
+  line-height: 1.3;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+  scroll-margin-block-start: var(--space-5);
+}
+
+:where(p, li, dd) {
+  overflow-wrap: anywhere;
+}
+
 h1 {
   margin-block-end: var(--space-4);
   font-size: var(--text-xl);
@@ -126,6 +138,26 @@ select,
 textarea {
   font: inherit;
   color: inherit;
+}
+
+/* 保留双指缩放，去掉控件双击等待；点击反馈统一使用既有链接色。 */
+:where(a, button, input, select, textarea, summary, label) {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgb(110 168 254 / 20%);
+}
+
+select {
+  color: var(--color-text);
+  background-color: var(--color-surface-raised);
+}
+
+:where(input, select, textarea) {
+  scroll-margin-block: var(--space-5);
+}
+
+::selection {
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
 }
 
 button:not(:disabled),
@@ -158,8 +190,8 @@ button:disabled {
 }
 
 :focus-visible {
-  outline: var(--border-width) solid var(--color-link);
-  outline-offset: var(--space-1);
+  outline: calc(2 * var(--border-width)) solid var(--color-link);
+  outline-offset: calc(2 * var(--border-width));
 }
 
 .language-picker {
@@ -364,26 +396,52 @@ button:disabled {
 .ui-pager {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--space-3);
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  inline-size: 100%;
+  max-inline-size: 100%;
   margin-block-start: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.ui-pager > *,
+.ui-pager__controls > * {
+  min-inline-size: 0;
+  max-inline-size: 100%;
 }
 
 .ui-pager__controls,
-.ui-pager__jump,
+.ui-pager__pages,
 .ui-pager__label {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
   min-inline-size: 0;
   max-inline-size: 100%;
 }
 
+/* 只让中间数字组换行；前后导航始终位于两侧，不参与数字组的折行。 */
+.ui-pager__pages {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ui-pager__label > span,
+.ui-pager__status,
+.ui-pager__total {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
 .ui-pager button,
-.ui-pager__input {
+.ui-pager__input,
+.ui-pager__select {
+  min-inline-size: var(--size-target);
   min-block-size: var(--size-target);
-  padding: var(--space-1) var(--space-3);
+  max-inline-size: 100%;
+  padding: var(--space-1) var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
@@ -392,6 +450,9 @@ button:disabled {
 
 .ui-pager button {
   cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 @media (hover: hover) {
@@ -414,25 +475,16 @@ button:disabled {
 }
 
 .ui-pager__input {
+  flex: 0 1 5rem;
   inline-size: 5rem;
+  font-variant-numeric: tabular-nums;
 }
 
-
-/* 数字分页按调用方显式启用；未接入页面继续使用原布局。 */
-.ui-pager--numbered {
-  align-items: center;
-  justify-content: flex-end;
-  font-size: var(--text-sm);
+.ui-pager__input,
+.ui-pager__select {
+  font-size: 1rem;
 }
 
-.ui-pager--numbered .ui-pager__controls,
-.ui-pager--numbered .ui-pager__jump {
-  flex-wrap: wrap;
-  inline-size: auto;
-  max-inline-size: 100%;
-  justify-content: flex-start;
-  align-items: center;
-}
 
 .ui-pager__total,
 .ui-pager__ellipsis {
@@ -444,11 +496,14 @@ button:disabled {
   max-inline-size: 100%;
 }
 
-.ui-pager__custom {
-  display: flex;
-  flex-wrap: wrap;
+/* 标签、字段与提交保持同一行；标签可折行，字段错误独占下一行。 */
+.ui-pager__custom,
+.ui-pager__jump {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-2);
+  min-inline-size: 0;
   max-inline-size: 100%;
 }
 
@@ -457,29 +512,15 @@ button:disabled {
 }
 
 .ui-pager__error {
-  flex-basis: 100%;
+  grid-column: 1 / -1;
   color: var(--color-danger);
   /* 分页也会置于居中的空态面板内，字段错误不能继承面板的居中对齐。 */
   text-align: start;
   overflow-wrap: anywhere;
 }
 
-.ui-pager__select {
-  min-block-size: var(--size-target);
-  max-inline-size: 100%;
-  padding: var(--space-1) var(--space-2);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-raised);
-}
 
-.ui-pager--numbered .ui-pager__controls button {
-  min-inline-size: var(--size-target);
-  padding-inline: var(--space-2);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 当前页的成对前景/背景色优先于分页器及 Admin 面板的通用悬浮、聚焦样式。 */
+/* 当前页保留金色成对前景/背景；各 surface 的通用控件规则不得覆盖共享分页器。 */
 .ui-pager.ui-pager--numbered .ui-pager__page[aria-current="page"] {
   border-color: var(--color-accent);
   color: var(--color-accent-contrast);
@@ -504,11 +545,20 @@ button:disabled {
 
 .ui-async-state {
   position: relative;
-  padding: var(--space-6) var(--space-5);
-  border: var(--border-width) dashed var(--color-border);
-  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-inline-start: calc(3 * var(--border-width)) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
   background: var(--color-surface);
-  text-align: center;
+  text-align: start;
+}
+
+.ui-async-state--loading {
+  border-inline-start-color: var(--color-accent);
+}
+
+.ui-async-state--error {
+  border-inline-start-color: var(--color-danger);
 }
 
 .ui-async-state__title {
@@ -517,6 +567,7 @@ button:disabled {
 }
 
 .ui-async-state__detail {
+  max-inline-size: 68ch;
   margin: var(--space-2) 0 0;
   color: var(--color-text-muted);
 }
@@ -534,6 +585,13 @@ button:disabled {
 
 .ui-async-state__retry:focus-visible {
   border-color: var(--color-link);
+}
+
+@media (hover: hover) {
+  .ui-async-state__retry:hover {
+    border-color: var(--color-text);
+    box-shadow: inset 0 0 0 var(--border-width) var(--color-accent-contrast);
+  }
 }
 
 /* ===== 全站百分比表格契约 ===== */
@@ -631,6 +689,7 @@ table {
 
 .ui-dialog__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
@@ -646,6 +705,8 @@ table {
 .ui-dialog__close {
   flex: 0 0 auto;
   min-block-size: var(--size-target);
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
   padding: var(--space-1) var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);

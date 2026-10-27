@@ -150,18 +150,33 @@
     min-block-size: var(--size-target);
   }
 
-  .public-auction-bid-log-toolbar input {
-    flex: 1 1 10rem;
-    min-inline-size: 0;
-    max-inline-size: 100%;
+  .public-auction-bid-log-heading {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
   }
 
+  .public-auction-bid-log-toolbar {
+    display: grid;
+    grid-column: 2;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-1);
+    margin-inline-start: 0;
+  }
+
+  .public-auction-bid-log-toolbar input {
+    inline-size: 100%;
+  }
+
+  .public-auction-bid-log-toolbar input:last-child,
   .public-auction-bid-log-toolbar label {
-    flex-basis: 100%;
+    grid-column: 1 / -1;
   }
 
   .public-shell__header {
-    gap: var(--space-3);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-2);
     padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
   }
 
@@ -171,16 +186,21 @@
   }
 
   .public-shell__logo {
-    margin-inline-end: auto;
+    min-inline-size: 0;
+    margin-inline-end: 0;
+    overflow-wrap: anywhere;
   }
 
   .public-shell__nav-toggle {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
+    min-inline-size: var(--size-target);
   }
 
   .public-shell__nav {
     display: none;
+    grid-column: 1 / -1;
     inline-size: 100%;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-2) var(--space-4);
@@ -199,12 +219,13 @@
     overflow-wrap: anywhere;
   }
 
-  /* 控件按 DOM 顺序组成两列；会话和错误独占整行，避免长文案挤压选择器。 */
+  /* 世界和语言同行；连接、刷新及账户按内容换行，视觉和键盘顺序一致。 */
   .public-shell__controls {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: end;
-    gap: var(--space-3);
+    display: flex;
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
     inline-size: 100%;
     margin-inline-start: 0;
   }
@@ -214,111 +235,74 @@
     max-inline-size: 100%;
   }
 
-  .public-world-switcher {
+  .public-shell__preferences {
     display: grid;
-    gap: var(--space-1);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    flex-basis: 100%;
+    gap: var(--space-2);
+    inline-size: 100%;
   }
 
+  .public-world-switcher {
+    display: block;
+    min-inline-size: 0;
+  }
+
+  /* 原生 label 保留可访问名称，手机用选择值表达世界，省去独立标签行。 */
   .public-world-switcher > span {
-    white-space: normal;
-    overflow-wrap: anywhere;
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
-  .public-shell__controls :is(select, .public-connection-refresh) {
+  .public-shell__preferences :is(select, .language-picker) {
     inline-size: 100%;
     min-inline-size: 0;
-    min-block-size: var(--size-target);
+    max-inline-size: 100%;
+  }
+
+  .public-shell__connection {
+    flex: 1 1 12rem;
+    gap: var(--space-2);
   }
 
   .public-connection-badge {
-    align-self: end;
+    flex: 1 1 6rem;
     min-block-size: var(--size-target);
-    padding: var(--space-2);
-    border-radius: var(--radius-sm);
+    padding: var(--space-1) 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
     overflow-wrap: anywhere;
   }
 
   .public-connection-refresh {
+    flex: 0 1 auto;
+    min-inline-size: var(--size-target);
     white-space: normal;
     overflow-wrap: anywhere;
   }
 
-  .public-shell__controls > .language-picker {
-    display: block;
-  }
-
-  .public-shell__controls:not(:has(> .public-connection-refresh)) > .language-picker,
-  .public-shell__controls:has(> .public-connection-refresh__error) > .language-picker,
   .public-connection-refresh__error {
-    grid-column: 1 / -1;
+    flex-basis: 100%;
+    overflow-wrap: anywhere;
   }
 
   .public-account-session-menu {
-    display: grid;
-    grid-column: 1 / -1;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: var(--space-3);
-    padding-block-start: var(--space-3);
-    border-block-start: var(--border-width) solid var(--color-border);
+    flex: 1 1 9rem;
+    justify-content: flex-end;
+    gap: var(--space-2);
   }
 
   .public-account-session-menu > :is(a, button) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-inline-size: 0;
-    min-block-size: var(--size-target);
-    padding-inline: var(--space-2);
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-
-  .public-account-session-menu > .public-account-session-name {
-    justify-content: start;
-    padding-inline-start: 0;
-  }
-
-  .public-account-session-menu > :is([role="status"], [role="alert"]),
-  .public-account-session-error {
-    position: static;
-    grid-column: 1 / -1;
-    inline-size: 100%;
-    max-inline-size: 100%;
-    overflow-wrap: anywhere;
-  }
-
-  /* 所有 Public 分页共用同一分组：总数／数量、定制数量、页码、跳页各占独立行。 */
-  .public-shell .ui-pager {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: center;
-    gap: var(--space-3);
-    inline-size: 100%;
-    text-align: start;
-  }
-
-  .public-shell .ui-pager > * {
-    min-inline-size: 0;
-    max-inline-size: 100%;
-  }
-
-  .public-shell .ui-pager__total {
-    overflow-wrap: anywhere;
-  }
-
-  .public-shell .ui-pager :is(.ui-pager__size, .ui-pager__select, .ui-pager__input) {
-    inline-size: 100%;
-    min-inline-size: 0;
-  }
-
-  .public-shell .ui-pager__controls {
-    grid-column: 1 / -1;
-    inline-size: 100%;
-    justify-content: center;
-    gap: var(--space-2);
-  }
-
-  .public-shell .ui-pager button {
     min-inline-size: var(--size-target);
     min-block-size: var(--size-target);
     padding-inline: var(--space-2);
@@ -326,38 +310,22 @@
     overflow-wrap: anywhere;
   }
 
-  .public-shell .ui-pager:not(.ui-pager--numbered) > .ui-pager__controls {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    text-align: center;
+  .public-account-session-menu > .public-account-session-name {
+    flex: 1 1 0;
+    min-inline-size: 0;
+    justify-content: start;
+    padding-inline-start: 0;
   }
 
-  .public-shell .ui-pager__status {
-    overflow-wrap: anywhere;
-  }
-
-  .public-shell :is(.ui-pager__custom, .ui-pager__jump) {
-    display: grid;
-    grid-column: 1 / -1;
-    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-    align-items: end;
-    gap: var(--space-2);
+  .public-account-session-menu > :is([role="status"], [role="alert"]),
+  .public-account-session-error {
+    position: static;
+    flex-basis: 100%;
     inline-size: 100%;
-  }
-
-  .public-shell .ui-pager__label {
-    display: grid;
-    gap: var(--space-1);
+    max-inline-size: 100%;
     overflow-wrap: anywhere;
   }
 
-  .public-shell .ui-pager__input {
-    padding-inline: var(--space-2);
-  }
-
-  .public-shell .ui-pager__error {
-    grid-column: 1 / -1;
-  }
 
   .public-auction-round__end {
     flex-wrap: wrap;
@@ -484,9 +452,6 @@
     min-width: 0;
   }
 
-  .public-history-pagination {
-    flex-wrap: wrap;
-  }
 
   /* 复用同一业务表和本地化字段名；只重排直接子级，嵌套补偿流水不会混入外层卡片。 */
   .public-shell :is(div, section):has(> table > tbody > tr > [data-label]) {
@@ -588,6 +553,20 @@
 
   .public-shell .public-account-table > tbody > tr > [data-label]::before {
     margin-block-end: calc(var(--space-1) / 2);
+  }
+
+  /* 展开入口作为卡片首行：说明与方形按钮分居两端，不再拉伸图标。 */
+  .public-shell .public-compensation-table > tbody > tr > .public-compensation-toggle-cell {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding-block-end: var(--space-2);
+    border-block-end: var(--border-width) solid var(--color-border);
+  }
+
+  .public-shell .public-compensation-table .public-compensation-toggle-cell::before {
+    margin-block-end: 0;
   }
 
   .public-shell .public-compensation-table > tbody > .public-compensation-details-row {
@@ -724,11 +703,5 @@
     cursor: pointer;
   }
 
-  .public-compensation-expand {
-    inline-size: 100%;
-    block-size: var(--size-target);
-    padding-inline: 0;
-    border-radius: var(--radius-sm);
-  }
 }
 }

@@ -426,55 +426,59 @@ pub(crate) fn PublicShell() -> Element {
                     on_home: go_home,
                 }
                 div { class: "public-shell__controls",
-                    WorldPicker { selected_world }
-                    span {
-                        class: "public-connection-badge {connection_class}",
-                        "data-state": connection_state_name,
-                        role: "status",
-                        aria_label: connection_label,
-                        {connection_message}
-                    }
-                    if can_manual_refresh || inactive {
-                        button {
-                            class: "public-connection-refresh",
-                            r#type: "button",
-                            disabled: manual_refresh_busy(),
-                            aria_busy: manual_refresh_busy().to_string(),
-                            onclick: move |_| {
-                                if *manual_refresh_busy.peek() {
-                                    return;
-                                }
-                                manual_refresh_error.set(false);
-                                manual_refresh_busy.set(true);
-                                spawn(async move {
-                                    // 先让忙碌文案和图标进入一帧，再响应用户的整页刷新意图。
-                                    // 自动轮询继续只读资源，不经过此处，也不会触发页面 reload。
-                                    gloo_timers::future::TimeoutFuture::new(80).await;
-                                    let reloaded = web_sys::window()
-                                        .is_some_and(|window| window.location().reload().is_ok());
-                                    if !reloaded {
-                                        manual_refresh_busy.set(false);
-                                        manual_refresh_error.set(true);
-                                        // 浏览器拒绝导航时仍补读权威资源，并明确展示失败，不回显原始异常。
-                                        let next_refresh = refresh_generation.peek().saturating_add(1);
-                                        refresh_generation.set(next_refresh);
-                                    }
-                                });
-                            },
-                            if manual_refresh_busy() {
-                                span { class: "public-connection-refresh__spinner", aria_hidden: "true", "↻" }
-                                {t!("realtime-refreshing")}
-                            } else {
-                                {t!("realtime-refresh")}
-                            }
+                    div { class: "public-shell__preferences",
+                        WorldPicker { selected_world }
+                        LanguagePicker {
+                            label: t!("language-label"),
+                            default_locale: "en",
                         }
                     }
-                    if manual_refresh_error() {
-                        span { class: "public-connection-refresh__error", role: "alert", {t!("data-error")} }
-                    }
-                    LanguagePicker {
-                        label: t!("language-label"),
-                        default_locale: "en",
+                    div { class: "public-shell__connection",
+                        span {
+                            class: "public-connection-badge {connection_class}",
+                            "data-state": connection_state_name,
+                            role: "status",
+                            aria_label: connection_label,
+                            {connection_message}
+                        }
+                        if can_manual_refresh || inactive {
+                            button {
+                                class: "public-connection-refresh",
+                                r#type: "button",
+                                disabled: manual_refresh_busy(),
+                                aria_busy: manual_refresh_busy().to_string(),
+                                onclick: move |_| {
+                                    if *manual_refresh_busy.peek() {
+                                        return;
+                                    }
+                                    manual_refresh_error.set(false);
+                                    manual_refresh_busy.set(true);
+                                    spawn(async move {
+                                        // 先让忙碌文案和图标进入一帧，再响应用户的整页刷新意图。
+                                        // 自动轮询继续只读资源，不经过此处，也不会触发页面 reload。
+                                        gloo_timers::future::TimeoutFuture::new(80).await;
+                                        let reloaded = web_sys::window()
+                                            .is_some_and(|window| window.location().reload().is_ok());
+                                        if !reloaded {
+                                            manual_refresh_busy.set(false);
+                                            manual_refresh_error.set(true);
+                                            // 浏览器拒绝导航时仍补读权威资源，并明确展示失败，不回显原始异常。
+                                            let next_refresh = refresh_generation.peek().saturating_add(1);
+                                            refresh_generation.set(next_refresh);
+                                        }
+                                    });
+                                },
+                                if manual_refresh_busy() {
+                                    span { class: "public-connection-refresh__spinner", aria_hidden: "true", "↻" }
+                                    {t!("realtime-refreshing")}
+                                } else {
+                                    {t!("realtime-refresh")}
+                                }
+                            }
+                        }
+                        if manual_refresh_error() {
+                            span { class: "public-connection-refresh__error", role: "alert", {t!("data-error")} }
+                        }
                     }
                     session::SessionMenu {}
                 }

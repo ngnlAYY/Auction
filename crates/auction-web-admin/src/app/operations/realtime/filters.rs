@@ -18,6 +18,7 @@ pub(super) fn RealtimeEventFilters(
     rsx! {
         form {
             class: "admin-realtime-filter admin-realtime-filter--events",
+            autocomplete: "off",
             onsubmit: move |event| {
                 event.prevent_default();
                 on_load
@@ -29,6 +30,11 @@ pub(super) fn RealtimeEventFilters(
             label {
                 {t!("realtime-filter-stream")}
                 input {
+                    name: "stream",
+                    r#type: "search",
+                    autocapitalize: "none",
+                    spellcheck: "false",
+                    enterkeyhint: "search",
                     maxlength: "256",
                     value: stream_filter(),
                     oninput: move |event| stream_filter.set(event.value()),
@@ -37,6 +43,11 @@ pub(super) fn RealtimeEventFilters(
             label {
                 {t!("realtime-filter-kind")}
                 input {
+                    name: "kind",
+                    r#type: "search",
+                    autocapitalize: "none",
+                    spellcheck: "false",
+                    enterkeyhint: "search",
                     maxlength: "128",
                     value: kind_filter(),
                     oninput: move |event| kind_filter.set(event.value()),
@@ -63,6 +74,7 @@ pub(super) fn RealtimeFailureFilters(
             summary { {t!("realtime-failure-filters")} }
             form {
                 class: "admin-realtime-filter",
+                autocomplete: "off",
                 onsubmit: move |event| {
                     event.prevent_default();
                     on_load
@@ -75,6 +87,11 @@ pub(super) fn RealtimeFailureFilters(
                 label {
                     {t!("realtime-filter-stream")}
                     input {
+                        name: "stream",
+                        r#type: "search",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        enterkeyhint: "search",
                         maxlength: "256",
                         value: stream_filter(),
                         oninput: move |event| stream_filter.set(event.value()),
@@ -83,6 +100,11 @@ pub(super) fn RealtimeFailureFilters(
                 label {
                     {t!("realtime-filter-consumer")}
                     input {
+                        name: "consumer",
+                        r#type: "search",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        enterkeyhint: "search",
                         maxlength: "128",
                         value: consumer_filter(),
                         oninput: move |event| consumer_filter.set(event.value()),
@@ -91,6 +113,11 @@ pub(super) fn RealtimeFailureFilters(
                 label {
                     {t!("realtime-filter-code")}
                     input {
+                        name: "code",
+                        r#type: "search",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        enterkeyhint: "search",
                         maxlength: "64",
                         value: code_filter(),
                         oninput: move |event| code_filter.set(event.value()),

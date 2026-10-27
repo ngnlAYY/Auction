@@ -42,7 +42,7 @@ pub(super) fn CompensationPoolTable(
             } else {
                 div { class: "public-compensation-table-wrap ui-table--fit",
                     table { class: "public-compensation-table",
-                        auction_web_shared::TableColumns { layout: "public-compensation", widths: vec![3, 6, 8, 10, 14, 16, 14, 10, 19] }
+                        auction_web_shared::TableColumns { layout: "public-compensation", widths: vec![8, 6, 8, 9, 13, 15, 13, 9, 19] }
                         thead {
                             tr {
                                 th { scope: "col", class: "public-compensation-toggle-cell", aria_label: t!("compensation-details") }

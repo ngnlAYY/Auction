@@ -180,6 +180,10 @@ pub(super) fn AdminUserCreateForm(
                     label { r#for: "create-username", {t!("admin-users-username")} }
                     input {
                         id: "create-username",
+                        name: "username",
+                        autocomplete: "off",
+                        autocapitalize: "none",
+                        spellcheck: "false",
                         disabled: pending.contains("create-user"),
                         r#type: "text",
                         required: true,
@@ -199,6 +203,8 @@ pub(super) fn AdminUserCreateForm(
                     label { r#for: "create-forum-account-id", {t!("admin-users-forum-account-id")} }
                     input {
                         id: "create-forum-account-id",
+                        name: "forum_account_id",
+                        autocomplete: "off",
                         disabled: pending.contains("create-user"),
                         r#type: "text",
                         inputmode: "numeric",
@@ -224,6 +230,8 @@ pub(super) fn AdminUserCreateForm(
                     label { r#for: "create-key-mode", {t!("admin-users-key-mode")} }
                     select {
                         id: "create-key-mode",
+                        name: "key_mode",
+                        autocomplete: "off",
                         disabled: pending.contains("create-user"),
                         value: key_mode(),
                         onchange: move |event| {
@@ -239,6 +247,7 @@ pub(super) fn AdminUserCreateForm(
                         label { r#for: "create-key", {t!("admin-users-manual-key")} }
                         input {
                             id: "create-key",
+                            name: "login_key",
                             disabled: pending.contains("create-user"),
                             r#type: "password",
                             autocomplete: "new-password",

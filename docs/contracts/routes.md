@@ -17,7 +17,7 @@
 
 ## 基线与统计口径
 
-`auction-http` 拥有路径注册，`auction-contracts` 拥有稳定 DTO。feature API 现为 Public **27** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，P25/P26 与 P27/P28 各共用一个账号偏好路径，不计健康、静态资源或代理路径。仅支持 PostgreSQL；已发布路径、字段、错误码和未装配能力的错误处理必须保留，运行证据见[验证状态](docs/status.md)。
+`auction-http` 拥有路径注册，`auction-contracts` 拥有稳定 DTO。feature API 现为 Public **28** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，P25/P26 与 P27/P28 各共用一个账号偏好路径，不计健康、静态资源或代理路径。仅支持 PostgreSQL；已发布路径、字段、错误码和未装配能力的错误处理必须保留，运行证据见[验证状态](docs/status.md)。
 
 首次部署另有独立进程的 `/setup`、部署码验证接口和两个配置接口，不计入 feature API；正式 Admin 不注册它们，`/setup` 在正式静态入口返回 404。
 
@@ -125,6 +125,7 @@ Admin 冷启动在认证等待前恢复原路径的 query，显式筛选/数量�
 | P27 | GET | /api/v1/me/session-preference | Public session；无 query；账号登录时长及当前截止；`no-store` | 200 | 400, 401, 503/504 |
 | P28 | PUT | /api/v1/me/session-preference | Public session、origin、限流、身份前置条件；无 query；独立版本 CAS；`no-store` | 200 | 400, 401, 403, 409, 413/415, 422, 429, 503/504 |
 | P29 | GET | /api/v1/registration-info | 公开；无 query；配置中的机器人账号安全投影；`no-store` | 200 | 400, 503/504 |
+| P30 | GET | /api/v2/auctions | 公开；分页摘要附带已发布论坛主题地址；`no-cache` | 200 | 400, 503/504 |
 
 ### P29 注册账号提示
 
@@ -198,6 +199,27 @@ SQL 与用例 owner 为 lot-watch preference，不是每 lot 设置。GET/PUT �
 ### P21 论坛同步开关
 
 P21 使用 `PublicForumSyncStatusResponse`，成功响应固定 `code=ok`、`data={"enabled": true/false}`，不依赖当前世界或拍卖是否存在。布尔值来自 Worker 按 `[worker.forum].enabled` 发布的非敏感心跳字段，仅采纳数据库时钟下未过期且非 `stopping` 的 Worker：任一明确 true 表示启用，所有有效实例均明确 false 才表示关闭。无实例、旧版心跳缺字段或无法证明开关值时返回 `503 forum_sync_unavailable`；未装配存储或查询失败返回 `503 storage_unavailable`。启用不表示主题已发布或扫描成功，真实楼层仍由 P15 的 `processed_through_post_number` 提供。Public `/forum` 每 30 秒重读 P21，关闭提示优先于无拍卖/未开拍状态，关闭时不挂载 P15 轮询；未知和请求失败显示不可用，不解释为关闭；公开页无手动重试按钮。手动刷新入口在 Admin `/auctions`，升级须同时更新 Worker、两端 API 与内嵌页面。
+
+### P30 v2 拍卖历史与论坛地址
+
+`GET /api/v2/auctions` 复用 P07 的 `world`、`status`、`page`、`page_size`、`cursor` 校验、筛选、排序、分页信封与错误状态，
+编号页保留同快照总数，cursor 页不统计总数。每条摘要在原有平铺字段外增加可选 `forum_thread_url`，来源为该场次
+`auction_forum_sync` 中状态为 `published`、`content_revision > 0` 且 `content_synced_at IS NOT NULL` 的真实 `thread_url`。
+没有已发布主题，或属于 `000025` 保留的未对账历史记录时，仅省略链接，场次及整页仍正常返回。既有 P07 `/api/v1/auctions`
+继续使用原 `AuctionSummaryResponse`，不增加该字段，旧页面的严格字段闭集保持可用。
+
+PostgreSQL 仍在同一只读 Repeatable Read 事务中先确定当前页场次；原分页 SELECT 通过 LEFT JOIN 的资格条件筛选有内容证明的主题，
+再投影最多 2048 字节的地址与证明元数据，不增加逐行 SQL 往返，也不读取镜像正文。v1 明确关闭这项关联。
+应用层复用 P15 的内容证明与地址校验，以私有字段的 `PublicForumLink` 保证 HTTP 只能消费已校验地址：内容版本为正、
+同步时间有效且非零，URL 不超过 2048 字节、没有前后空白或控制字符、使用 HTTPS、有主机且不含用户信息。
+声明有内容证明但地址或证明数据损坏时返回 `503 storage_unavailable`，不能把损坏记录降级成无链接；预期的未对账记录不触发此错误。
+历史页改为一次 P30 读取本页摘要与链接，不逐行调用 P15，请求数量不随 `page_size` 增长；原有数量与 offset 边界不变。
+浏览器绑定完整列表查询身份，并独立校验地址安全边界；“查看”列始终保留原有“拍品”和“出价记录”，有地址时追加
+“论坛地址”，以新标签页打开并设置 `noopener noreferrer`，没有地址时只省略该外链。`/bidlog` 继续支持已结算场次深链。
+v1 与 v2 分别校验字段闭集，不能让 v2 扩展进入 v1 解码器。
+
+部署先提供支持 P30 的 Public API，再发布新页面；旧页面仍可继续读取 P07，不要求它们立即刷新。新页面不回退到逐行 P15。
+此版本不新增数据库字段或迁移，不改变 P10 历史竞价事实的读取边界。
 
 ### Public 分页、世界与金额
 

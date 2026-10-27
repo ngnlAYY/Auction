@@ -198,6 +198,7 @@ pub(super) fn ProxyAuthorizationForm(
                         label { for: maximum_id.clone(), {t!("proxy-lower-label")} }
                         input {
                             id: maximum_id,
+                            name: "maximum_amount",
                             r#type: "text",
                             autofocus: true,
                             // 与创建代理一致，允许在手机键盘输入 K/M 缩写。
@@ -206,10 +207,18 @@ pub(super) fn ProxyAuthorizationForm(
                             autocapitalize: "none",
                             autocomplete: "off",
                             spellcheck: "false",
-                            aria_describedby: "public-proxy-lower-hint",
+                            aria_invalid: validation().is_some().to_string(),
+                            aria_describedby: if validation().is_some() {
+                                "public-proxy-lower-hint public-proxy-lower-error"
+                            } else {
+                                "public-proxy-lower-hint"
+                            },
                             disabled: submitting(),
                             value: "{maximum_amount}",
-                            oninput: move |event| maximum_amount.set(event.value()),
+                            oninput: move |event| {
+                                maximum_amount.set(event.value());
+                                validation.set(None);
+                            },
                         }
                         {amount_hint(
                             &maximum_amount(),
@@ -219,7 +228,7 @@ pub(super) fn ProxyAuthorizationForm(
                         p { class: "public-auction-bid-form__hint", {t!("proxy-shorthand-hint")} }
                     }
                     if let Some(message) = validation() {
-                        p { class: "action-feedback action-feedback--error", role: "alert", "{message}" }
+                        p { id: "public-proxy-lower-error", class: "action-feedback action-feedback--error", role: "alert", "{message}" }
                     }
                     if let Some(error) = (command.failure)() {
                         p { class: "action-feedback action-feedback--error", role: "alert",

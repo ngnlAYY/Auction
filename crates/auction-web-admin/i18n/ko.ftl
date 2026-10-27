@@ -1195,6 +1195,7 @@ admin-action-working = 처리 중…
 admin-users-loading = 사용자를 불러오는 중…
 admin-users-filter-name = 이름 접두사
 admin-users-filter-status = 상태
+admin-users-filter-apply = 사용자 검색
 admin-users-status-all = 전체
 admin-users-status-active = 활성
 admin-users-status-blacklisted = 블랙리스트

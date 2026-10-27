@@ -4,6 +4,7 @@ use super::{
     AuctionListPage, BidLogPage, CatalogLevelFilter, CurrentAuction, LotEnvelope, PriceHistoryPage,
     PriceHistoryQuery, TransportError, Worlds, decoder, send_get,
 };
+use gloo_net::http::Response;
 use gloo_timers::future::TimeoutFuture;
 use url::form_urlencoded;
 
@@ -153,7 +154,7 @@ pub(crate) async fn fetch_bid_log_page(
     decoder::decode_bid_log_page(response).await
 }
 
-/// 读取可供公开竞价日志选择的拍卖；旧版只展示 live、final 和 settled 拍卖。
+/// 读取可供公开竞价日志选择的 live、final 和 settled 拍卖，保留已结算场次的历史深链。
 pub(crate) async fn fetch_bid_log_auctions(
     world_id: String,
 ) -> Result<Vec<super::HistoricalAuction>, String> {
@@ -210,27 +211,52 @@ pub(crate) async fn fetch_lot_bid_log(
     decoder::decode_bid_log_page(response).await
 }
 
-pub(crate) async fn fetch_auction_page(
+async fn fetch_auction_page(
     world_id: Option<String>,
     status: String,
     page: i64,
     page_size: i64,
 ) -> Result<AuctionListPage, String> {
+    let world = world_id.as_deref().filter(|world| !world.is_empty() && *world != "all");
+    let response =
+        auction_page_response("/api/v1/auctions", world, &status, page, page_size).await?;
+    decoder::decode_auction_list(response, world, &status).await
+}
+
+/// 历史页用 v2 一次取得本页摘要与论坛地址，不按行加载完整论坛镜像。
+pub(crate) async fn fetch_auction_history_page(
+    world_id: Option<String>,
+    status: String,
+    page: i64,
+    page_size: i64,
+) -> Result<AuctionListPage<super::HistoricalAuctionWithForum>, String> {
+    let world = world_id.as_deref().filter(|world| !world.is_empty() && *world != "all");
+    let response =
+        auction_page_response("/api/v2/auctions", world, &status, page, page_size).await?;
+    decoder::decode_auction_list_v2(response, world, &status).await
+}
+
+async fn auction_page_response(
+    endpoint: &str,
+    world: Option<&str>,
+    status: &str,
+    page: i64,
+    page_size: i64,
+) -> Result<Response, String> {
     let mut query = form_urlencoded::Serializer::new(String::new());
     query
         .append_pair("page", &page.to_string())
         .append_pair("page_size", &page_size.to_string())
-        .append_pair("status", &status);
-    let world_id = world_id.filter(|world| !world.is_empty() && world != "all");
-    if let Some(world_id) = world_id.as_deref() {
-        query.append_pair("world", world_id);
+        .append_pair("status", status);
+    if let Some(world) = world {
+        query.append_pair("world", world);
     }
-    let url = format!("/api/v1/auctions?{}", query.finish());
+    let url = format!("{endpoint}?{}", query.finish());
     let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(decoder::decode_error_code(response).await);
     }
-    decoder::decode_auction_list(response, world_id.as_deref(), &status).await
+    Ok(response)
 }
 
 /// 预览切换只消费同一世界的近期结算场次，避免被其他世界的前 200 条挤出目录。

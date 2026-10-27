@@ -54,6 +54,7 @@ auction-history-total = Total
 auction-history-links = View
 auction-history-link-lots = Lots
 auction-history-link-bidlog = Bid log
+auction-history-link-forum = Forum thread
 
 
 filter-label = Filter lots by type
@@ -160,7 +161,7 @@ auction-empty-no-auction-hint = Auctions open weekly — check back on Friday.
 
 
 page-auctions-title = Auction history
-page-auctions-note = Browse every past auction and open its lots or bid log.
+page-auctions-note = Browse past auctions and view their lots.
 auction-history-empty-title = No auctions yet
 auction-history-empty-hint = Ended auctions will appear here after they settle.
 page-bidlog-title = Bid log
@@ -251,7 +252,6 @@ bidlog-filter-label = Filter by lot
 bidlog-filter-placeholder = Lot ID or lot code
 bidlog-filter-clear = Clear
 bidlog-filter-empty = No bids match this lot filter.
-bidlog-no-rounds = No auctions in this world yet.
 bidlog-empty = No bids in this auction yet.
 
 history-world = World

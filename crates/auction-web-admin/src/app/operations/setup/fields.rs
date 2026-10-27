@@ -31,6 +31,8 @@ pub(super) fn SetupInput(
             if field.is_weekday() {
                 select {
                     id,
+                    name: id,
+                    autocomplete: "off",
                     required: true,
                     disabled: busy,
                     aria_invalid: invalid.to_string(),
@@ -48,6 +50,7 @@ pub(super) fn SetupInput(
             } else {
                 input {
                     id,
+                    name: id,
                     r#type: field.input_type(),
                     inputmode: if bounds.is_some() { "numeric" } else if field.input_type() == "url" { "url" } else { "text" },
                     autocomplete: field.autocomplete(),

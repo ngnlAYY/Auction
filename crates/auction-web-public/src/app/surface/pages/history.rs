@@ -1,6 +1,7 @@
 //! Public 历史拍卖列表。
 
 use super::super::*;
+use crate::api::{HistoricalAuctionWithForum, fetch_auction_history_page};
 
 #[component]
 pub(crate) fn AuctionList() -> Element {
@@ -33,7 +34,7 @@ pub(crate) fn AuctionList() -> Element {
         let requested = (world.clone(), status.clone(), page, size);
         let world = (world != "all").then_some(world);
         async move {
-            let result = fetch_auction_page(world, status, page, size).await;
+            let result = fetch_auction_history_page(world, status, page, size).await;
             (requested, result)
         }
     });
@@ -114,7 +115,7 @@ pub(crate) fn AuctionList() -> Element {
 
 #[component]
 pub(crate) fn AuctionHistoryPage(
-    page: AuctionListPage,
+    page: AuctionListPage<HistoricalAuctionWithForum>,
     world_filter: String,
     page_number: i64,
     world_options: Vec<String>,
@@ -164,7 +165,7 @@ pub(crate) fn AuctionHistoryPage(
 }
 
 #[component]
-pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuction>) -> Element {
+pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuctionWithForum>) -> Element {
     rsx! {
         div { class: "public-auction-rounds__table",
             table {
@@ -185,6 +186,8 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuction>) -> Element {
                 tbody {
                     for auction in rows {
                         {
+                            let forum_thread_url = auction.forum_thread_url;
+                            let auction = auction.auction;
                             let ended = auction.settled_at.clone()
                                 .or_else(|| auction.effective_end_at.clone())
                                 .or_else(|| auction.opened_at.clone())
@@ -213,6 +216,14 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuction>) -> Element {
                                     td { class: "public-auction-rounds__links", "data-label": t!("auction-history-links"),
                                         Link { to: lots_href, {t!("auction-history-link-lots")} }
                                         Link { to: bid_log_href, {t!("auction-history-link-bidlog")} }
+                                        if let Some(forum_thread_url) = forum_thread_url {
+                                            a {
+                                                href: forum_thread_url,
+                                                target: "_blank",
+                                                rel: "noopener noreferrer",
+                                                {t!("auction-history-link-forum")}
+                                            }
+                                        }
                                     }
                                 }
                             }
