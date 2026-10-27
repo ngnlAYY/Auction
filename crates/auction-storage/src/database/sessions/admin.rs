@@ -33,12 +33,11 @@ pub(super) async fn create_postgres(
     store: &PostgresStore,
     record: AdminSessionRecord,
 ) -> Result<AdminSessionIdentity, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开始 Admin 会话事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("设置 Admin 会话事务隔离级别失败"))?;
+        .map_err(|_| storage_error("开始 Admin 会话事务失败"))?;
     // 同一 actor 只允许一个未撤销会话；先锁定已有行，再在本事务中轮换旧 token。
     sqlx::query(
         "SELECT actor

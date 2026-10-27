@@ -5,16 +5,27 @@ use auction_application::format_public_time_wire;
 use super::super::mapping::*;
 use super::super::*;
 
+/// 追加一条 `lot.bid_accepted`。计划已校验全部事实都属于 `final_lot`，拍卖归属经调用方持有的
+/// `auction_id` 缓存只读取一次；后续事实持有 stream 行锁时不再重复查询。
 pub(in crate::database::competition) async fn insert_realtime_event(
     transaction: &mut PostgresCompetitionTransaction,
+    auction_id: &mut Option<Uuid>,
     bid: &AcceptedBid,
 ) -> Result<(), CompetitionTransactionError> {
     let transaction = transaction.transaction_mut()?;
-    let auction_id: Uuid = sqlx::query_scalar("SELECT auction_id FROM public.lots WHERE id = $1")
-        .bind(bid.lot_id.as_uuid())
-        .fetch_one(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?;
+    let auction_id = match *auction_id {
+        Some(auction_id) => auction_id,
+        None => {
+            let lot_auction_id: Uuid =
+                sqlx::query_scalar("SELECT auction_id FROM public.lots WHERE id = $1")
+                    .bind(bid.lot_id.as_uuid())
+                    .fetch_one(&mut **transaction)
+                    .await
+                    .map_err(map_sql_error)?;
+            *auction_id = Some(lot_auction_id);
+            lot_auction_id
+        }
+    };
     let stream_key = format!("auction:{auction_id}");
     let payload = json!({
         "auction_id": auction_id,
@@ -26,29 +37,10 @@ pub(in crate::database::competition) async fn insert_realtime_event(
         "fact_index": bid.fact_index,
         "mechanism": bid_mechanism_name(bid.mechanism),
     });
-    sqlx::query(
-        r#"INSERT INTO public.realtime_streams (stream_key) VALUES ($1)
-         ON CONFLICT (stream_key) DO NOTHING"#,
-    )
-    .bind(&stream_key)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    let sequence: i64 = sqlx::query_scalar(
-        "SELECT next_sequence FROM public.realtime_streams WHERE stream_key = $1 FOR UPDATE",
-    )
-    .bind(&stream_key)
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    sqlx::query(
-        r#"UPDATE public.realtime_streams SET next_sequence = next_sequence + 1,
-         updated_at = CURRENT_TIMESTAMP WHERE stream_key = $1"#,
-    )
-    .bind(&stream_key)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
+    let sequence =
+        crate::database::realtime::allocate_stream_sequence(transaction, &stream_key, None)
+            .await
+            .map_err(map_sql_error)?;
     sqlx::query(
         r#"INSERT INTO public.realtime_events
             (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,

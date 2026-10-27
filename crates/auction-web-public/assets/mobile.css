@@ -23,7 +23,7 @@
     min-inline-size: 0;
     min-block-size: var(--size-target);
     padding: var(--space-2);
-    border: var(--border-width) solid var(--color-border);
+    border: var(--border-width) solid var(--color-border-control);
     border-radius: var(--radius-sm);
     color: var(--color-text);
     background: var(--color-surface);
@@ -434,7 +434,7 @@
   }
 
   .public-compensation-balance {
-    min-width: 0;
+    min-inline-size: 0;
   }
 
 

@@ -31,12 +31,9 @@ pub(super) async fn run(
 ) -> Result<FundingCommitOutcome, FundingError> {
     command.validate()?;
     for attempt in 0..3 {
-        let mut tx = pool.begin().await.map_err(storage)?;
+        let mut tx =
+            pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(storage)?;
         let operation = async {
-            sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-                .execute(&mut *tx)
-                .await
-                .map_err(storage)?;
             if let Some(result) = replay(&mut tx, command).await? {
                 return Ok(result);
             }

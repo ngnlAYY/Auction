@@ -10,9 +10,11 @@ pub(super) async fn import_postgres(
     write: AdminCredentialImportWrite,
 ) -> Result<AdminCredentialCommandResult, ApplicationError> {
     validate_import_write(&write)?;
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启凭据导入事务失败"))?;
-    set_serializable(&mut transaction).await?;
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        .await
+        .map_err(|_| storage_error("开启凭据导入事务失败"))?;
     lock_command(&mut transaction, write.command_id).await?;
     if let Some(result) = find_command_in_transaction(
         &mut transaction,
@@ -89,9 +91,11 @@ pub(super) async fn mutate_postgres(
     write: AdminCredentialMutationWrite,
 ) -> Result<AdminCredentialCommandResult, ApplicationError> {
     validate_mutation_write(&write)?;
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启凭据修改事务失败"))?;
-    set_serializable(&mut transaction).await?;
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        .await
+        .map_err(|_| storage_error("开启凭据修改事务失败"))?;
     lock_command(&mut transaction, write.command_id).await?;
     if let Some(result) = find_command_in_transaction(
         &mut transaction,
@@ -173,9 +177,11 @@ pub(super) async fn delete_postgres(
     write: AdminCredentialDeleteWrite,
 ) -> Result<AdminCredentialCommandResult, ApplicationError> {
     validate_delete_write(&write)?;
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启凭据删除事务失败"))?;
-    set_serializable(&mut transaction).await?;
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        .await
+        .map_err(|_| storage_error("开启凭据删除事务失败"))?;
     lock_command(&mut transaction, write.command_id).await?;
     if let Some(result) = find_command_in_transaction(
         &mut transaction,

@@ -18,12 +18,9 @@ pub(super) async fn run(
     external_refund: bool,
 ) -> Result<Outcome, FundingError> {
     for attempt in 0..3 {
-        let mut tx = pool.begin().await.map_err(sql_error)?;
+        let mut tx =
+            pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(sql_error)?;
         let operation = async {
-            sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-                .execute(&mut *tx)
-                .await
-                .map_err(sql_error)?;
             persistence::validate_command(
                 command,
                 if external_refund {

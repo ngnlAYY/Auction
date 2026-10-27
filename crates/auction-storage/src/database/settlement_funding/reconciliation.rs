@@ -39,9 +39,9 @@ impl FundingReconciliationWriter for crate::DatabaseStore {
         Box::pin(async move {
             command.validate()?;
             for attempt in 0..3 {
-                let mut tx = self.postgres_pool().begin().await.map_err(storage)?;
-                sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-                    .execute(&mut *tx)
+                let mut tx = self
+                    .postgres_pool()
+                    .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
                     .await
                     .map_err(storage)?;
                 match apply(&mut tx, command, evidence).await {

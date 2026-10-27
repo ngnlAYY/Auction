@@ -155,7 +155,7 @@ pub trait PublicSessionStore: Send + Sync {
         now: DateTime<Utc>,
     ) -> ApplicationFuture<'_, PublicSessionIdentity>;
 
-    /// 只更新最后活动时间，不延长旧截止或永久会话。
+    /// 复核会话并节流记录最后活动时间（距上次记录满 60 秒才写入），不延长旧截止或永久会话。
     fn touch_public(
         &self,
         token_hash: [u8; 32],

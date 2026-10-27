@@ -64,9 +64,8 @@ async fn ensure_postgres_once(
     pool: &TrackedPool<Postgres>,
     request: ScheduledRoundBootstrap,
 ) -> Result<ScheduledRoundSnapshot, PostgresBootstrapError> {
-    let mut transaction = pool.begin().await.map_err(PostgresBootstrapError::Storage)?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = pool
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
         .map_err(PostgresBootstrapError::Storage)?;
     let enabled: Option<bool> =

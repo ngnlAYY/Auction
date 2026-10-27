@@ -27,11 +27,8 @@ pub(in crate::database::recovery_commands) async fn advance_relist_postgres_once
     retry_after: ChronoDuration,
     preview_event_id: Uuid,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
-    let mut transaction = pool.begin().await.map_err(map_sql_error)?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
-        .await
-        .map_err(map_sql_error)?;
+    let mut transaction =
+        pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_sql_error)?;
 
     // 先锁 world，再锁 recovery，保持与 Admin recovery 确认的锁顺序，避免 relist 与人工确认
     // 在同一 world 上形成 recovery/world 反向等待。

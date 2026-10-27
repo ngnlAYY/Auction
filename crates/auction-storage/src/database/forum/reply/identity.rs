@@ -26,12 +26,11 @@ pub(super) async fn resolve_bidder_postgres(
         return Err(ApplicationError::ForumIdentityRejected("论坛账号数字 ID 或玩家名称无效"));
     }
     let world_id = forum_world_name(world);
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启论坛身份事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("设置论坛身份事务隔离级别失败"))?;
+        .map_err(|_| storage_error("开启论坛身份事务失败"))?;
     // 同一 showuser 在 main/isekai 必须串行决定唯一 Users owner。
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(external_account_id)

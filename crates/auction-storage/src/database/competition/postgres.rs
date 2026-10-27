@@ -87,22 +87,12 @@ impl TransactionRunner for PostgresStore {
             }
 
             for attempt in 0..policy.max_attempts {
-                let transaction = match self.pool().begin().await {
-                    Ok(transaction) => transaction,
-                    Err(error) => return Err(E::from(map_sql_error(error))),
-                };
+                let transaction =
+                    match self.pool().begin_with(begin_statement(policy.isolation)).await {
+                        Ok(transaction) => transaction,
+                        Err(error) => return Err(E::from(map_sql_error(error))),
+                    };
                 let mut transaction = PostgresCompetitionTransaction::new(transaction);
-
-                if let Err(error) =
-                    set_isolation(transaction.transaction_mut(), policy.isolation).await
-                {
-                    let retryable =
-                        matches!(error, CompetitionTransactionError::SerializationConflict);
-                    if retryable && attempt + 1 < policy.max_attempts {
-                        continue;
-                    }
-                    return Err(E::from(error));
-                }
 
                 match operation(&mut transaction).await {
                     Ok(value) => match transaction.commit().await {

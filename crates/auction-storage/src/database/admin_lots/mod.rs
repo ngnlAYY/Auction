@@ -9,6 +9,7 @@ use auction_application::{AdminLotSummary, SettlementAuctionSnapshot};
 use auction_domain::{AuctionId, EquipmentId, LotId, ProxyAuthorizationId, SubmissionId, UserId};
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 impl AdminLotReader for DatabaseStore {
     fn list_admin_lots(
@@ -36,12 +37,11 @@ async fn list_postgres(
     use serde_json::Value;
     use sqlx::Row;
 
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启 Admin lot 读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("设置 Admin lot 读取隔离级别失败"))?;
+        .map_err(|_| storage_error("开启 Admin lot 读取事务失败"))?;
 
     let auction_row = sqlx::query(
         "SELECT
@@ -259,8 +259,4 @@ async fn list_postgres(
         return Err(storage_error("Admin lot 存储返回不变量失败"));
     }
     Ok(Some(page))
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(auction_application::RepositoryError::Failed(message.to_owned()))
 }

@@ -37,6 +37,12 @@ impl DatabaseBackend {
     }
 }
 
+/// 存储适配器统一的仓储失败；消息只描述固定分类，不携带 SQL、连接串或驱动原文。
+#[cfg(feature = "postgres")]
+pub(crate) fn storage_error(message: &str) -> auction_application::ApplicationError {
+    auction_application::RepositoryError::Failed(message.to_owned()).into()
+}
+
 /// 不向驱动传入会被容忍或有损解码的 URI，错误只报告固定分类。
 fn valid_url_encoding(value: &str) -> bool {
     let mut bytes = value.bytes();

@@ -53,17 +53,15 @@ pub(super) struct PostgresDeliveryAdminTransaction {
 }
 
 impl PostgresDeliveryAdminTransaction {
-    /// 从连接池开始一次全新的 SERIALIZABLE 事务；SET 失败也保留原始错误。
+    /// 从连接池开始一次全新的 SERIALIZABLE 事务；隔离级别随 BEGIN 声明，失败保留原始错误。
     pub(super) async fn begin(
         pool: &TrackedPool<Postgres>,
     ) -> Result<Self, DeliveryAdminTransactionError> {
-        let transaction = pool.begin().await.map_err(DeliveryAdminTransactionError::Sqlx)?;
-        let mut transaction = Self { transaction: Some(transaction) };
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-            .execute(transaction.connection()?)
+        let transaction = pool
+            .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
             .await
             .map_err(DeliveryAdminTransactionError::Sqlx)?;
-        Ok(transaction)
+        Ok(Self { transaction: Some(transaction) })
     }
 
     /// 返回底层事务，供同一事务的审计写入使用。

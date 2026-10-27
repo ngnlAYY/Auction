@@ -12,9 +12,9 @@ impl FundingReconciliationReader for crate::DatabaseStore {
     fn preview_funding(&self, expected_uid: String) -> FundingFuture<'_, FundingPreview> {
         Box::pin(async move {
             auction_domain::FundingAccountKey::new(&expected_uid).map_err(invalid)?;
-            let mut tx = self.postgres_pool().begin().await.map_err(storage)?;
-            sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE READ ONLY")
-                .execute(&mut *tx)
+            let mut tx = self
+                .postgres_pool()
+                .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE, READ ONLY")
                 .await
                 .map_err(storage)?;
             let result = snapshot(&mut tx, &expected_uid).await?;
@@ -28,8 +28,8 @@ impl FundingReconciliationReader for crate::DatabaseStore {
     ) -> FundingFuture<'_, Option<FundingReconciliationResult>> {
         Box::pin(async move {
             command.validate()?;
-            let mut tx = self.postgres_pool().begin().await.map_err(storage)?;
-            sqlx::query("SET TRANSACTION READ ONLY").execute(&mut *tx).await.map_err(storage)?;
+            let mut tx =
+                self.postgres_pool().begin_with("BEGIN READ ONLY").await.map_err(storage)?;
             let result = super::reconciliation::replay_command(&mut tx, &command).await?;
             tx.commit().await.map_err(storage)?;
             Ok(result)

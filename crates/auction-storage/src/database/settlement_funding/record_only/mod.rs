@@ -15,8 +15,8 @@ impl FundingRecordOnlyStore for crate::DatabaseStore {
     ) -> FundingFuture<'_, Option<FundingReconciliationResult>> {
         Box::pin(async move {
             command.validate()?;
-            let mut tx = self.postgres_pool().begin().await.map_err(storage)?;
-            sqlx::query("SET TRANSACTION READ ONLY").execute(&mut *tx).await.map_err(storage)?;
+            let mut tx =
+                self.postgres_pool().begin_with("BEGIN READ ONLY").await.map_err(storage)?;
             let result = transaction::replay(&mut tx, &command).await?;
             tx.commit().await.map_err(storage)?;
             Ok(result)

@@ -9,8 +9,11 @@ pub(crate) async fn revert_postgres(
     write: AdminRenameRevertWrite,
 ) -> Result<AdminUserCommandResult, ApplicationError> {
     validate_revert_write(&write)?;
-    let mut transaction = store.pool().begin().await.map_err(map_storage_error)?;
-    set_serializable(&mut transaction).await?;
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        .await
+        .map_err(map_storage_error)?;
     lock_command(&mut transaction, write.command_id).await?;
     if let Some(result) = load_command_postgres_tx(
         &mut transaction,

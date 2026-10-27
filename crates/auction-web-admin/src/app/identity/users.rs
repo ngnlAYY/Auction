@@ -75,7 +75,6 @@ pub(super) fn page() -> Element {
                 kind: AsyncStateKind::Error,
                 title: admin_api_error_message(&error),
                 detail: "",
-                // 错误态提供页内重试入口，不必刷新浏览器。
                 retry_label: t!("admin-retry"),
                 on_retry: move |_| reload_generation.set(reload_generation().saturating_add(1)),
             }
@@ -111,7 +110,6 @@ pub(super) fn page() -> Element {
                     on_page_change.push(next);
                 },
                 on_sort_change: move |(sort, direction)| {
-                    // 排序只影响当前页展示顺序；筛选与翻页保持不变。
                     let mut next = query_state();
                     next.sort = sort;
                     next.direction = direction;

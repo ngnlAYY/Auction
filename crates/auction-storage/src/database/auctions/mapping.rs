@@ -1,8 +1,9 @@
 //! Public 拍卖行到应用投影的跨后端映射与请求校验。
 
+pub(super) use crate::database::storage_error;
 use auction_application::{
     ApplicationError, CurrentAuctionSnapshot, PublicAuctionListRequest, PublicAuctionSummary,
-    PublicForumLink, PublicRealtimeAuctionStatus, RepositoryError,
+    PublicForumLink, PublicRealtimeAuctionStatus,
 };
 #[cfg(feature = "postgres")]
 use sqlx::Row;
@@ -102,10 +103,6 @@ pub(super) fn map_postgres_current(
     };
     snapshot.validate().map_err(storage_error)?;
     Ok(snapshot)
-}
-
-pub(super) fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }
 
 pub(super) fn validate_list_request(

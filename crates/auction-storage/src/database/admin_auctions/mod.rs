@@ -8,6 +8,7 @@ use auction_application::{
 };
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 impl AdminAuctionReader for DatabaseStore {
     fn list_admin_auctions(
@@ -33,12 +34,11 @@ async fn list_postgres(
 ) -> Result<AdminAuctionPage, ApplicationError> {
     use sqlx::Row;
 
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启 Admin 拍卖列表读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("设置 Admin 拍卖列表读取隔离级别失败"))?;
+        .map_err(|_| storage_error("开启 Admin 拍卖列表读取事务失败"))?;
 
     let total: i64 = sqlx::query_scalar(
         "SELECT count(*)
@@ -187,8 +187,4 @@ fn map_auction(
             .try_get("updated_at")
             .map_err(|_| storage_error("读取 Admin 拍卖更新时间失败"))?,
     })
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(auction_application::RepositoryError::Failed(message.to_owned()))
 }

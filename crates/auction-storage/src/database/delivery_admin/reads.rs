@@ -12,11 +12,7 @@ pub(crate) async fn list(
     request: &DeliveryAdminListRequest,
 ) -> Result<DeliveryAdminPage, DeliveryAdminError> {
     // Worker 持续迁移投递状态；筛选计数与当前页不能分属两个数据库快照。
-    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-        .execute(&mut *transaction)
-        .await
-        .map_err(map_storage_error)?;
+    let mut transaction = pool.begin_read_snapshot().await.map_err(map_storage_error)?;
     let status = request.status.as_deref();
     let total: i64 = sqlx::query_scalar(
         "SELECT count(*)::bigint FROM public.deliveries

@@ -2,14 +2,14 @@
 //! 任务、不提前持锁，已过竞价截止的候选在 LIMIT 前排除，避免 Final 失败时反复占满批次。
 //! 真正执行必须回到 PostgreSQL 竞价 Serializable 事务重新核对全部 fence。
 
-use auction_application::{
-    ApplicationError, ApplicationFuture, RepositoryError, SlowProxyDue, SlowProxyDueReader,
-};
+use auction_application::{ApplicationError, ApplicationFuture, SlowProxyDue, SlowProxyDueReader};
 use auction_domain::{LotId, ProxyAuthorizationId};
+use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 impl SlowProxyDueReader for DatabaseStore {
     fn list_due_slow_proxies(&self, limit: u16) -> ApplicationFuture<'_, Vec<SlowProxyDue>> {
@@ -23,6 +23,42 @@ impl SlowProxyDueReader for DatabaseStore {
             }
         })
     }
+
+    fn next_slow_proxy_due_at(
+        &self,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, Option<DateTime<Utc>>> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => next_due_postgres(store, now).await,
+            }
+        })
+    }
+}
+
+/// 唤醒提示沿用扫描的 live 谓词与 `lots_due_slow_idx`；截止后才到期的调度永远不会执行，提前排除。
+/// 只返回严格晚于 `now` 的到期时刻，已到期候选仍由 `list_due_slow_proxies` 按常规节奏扫描。
+#[cfg(feature = "postgres")]
+async fn next_due_postgres(
+    store: &super::PostgresStore,
+    now: DateTime<Utc>,
+) -> Result<Option<DateTime<Utc>>, ApplicationError> {
+    sqlx::query_scalar::<_, DateTime<Utc>>(
+        "SELECT lot.slow_due_at
+         FROM public.lots AS lot
+         JOIN public.auctions AS auction ON auction.id = lot.auction_id
+         WHERE lot.status = 'live'
+           AND auction.status = 'live'
+           AND lot.slow_due_at > $1
+           AND lot.effective_end_at > lot.slow_due_at
+         ORDER BY lot.slow_due_at, lot.id
+         LIMIT 1",
+    )
+    .bind(now)
+    .fetch_optional(store.pool())
+    .await
+    .map_err(|_| storage_error("读取 PostgreSQL 慢速代理下次到期失败"))
 }
 
 #[cfg(feature = "postgres")]
@@ -81,8 +117,4 @@ fn positive_generation(value: i64) -> Result<u64, ApplicationError> {
         return Err(storage_error("慢速代理世代必须为正数"));
     }
     u64::try_from(value).map_err(|_| storage_error("慢速代理世代超出领域范围"))
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

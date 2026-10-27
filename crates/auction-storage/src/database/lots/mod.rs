@@ -8,7 +8,7 @@ use auction_application::{
     PublicAuctionProjection, PublicEquipment, PublicEquipmentStat, PublicFinalRestriction,
     PublicLiveLotDetail, PublicLiveLotSummary, PublicLotDetail, PublicLotListRequest,
     PublicLotPage, PublicLotReader, PublicPreviewLotDetail, PublicPreviewLotSummary,
-    RepositoryError, equipment_color_decision,
+    equipment_color_decision,
 };
 use auction_domain::{AuctionRules, BidAmount, EquipmentId};
 use chrono::{DateTime, Utc};
@@ -62,36 +62,6 @@ impl PublicLotReader for DatabasePublicLotReader {
                 DatabaseStore::Postgres(store) => {
                     detail_postgres(store, lot_id, &self.colors).await
                 }
-            }
-        })
-    }
-}
-
-impl PublicLotReader for DatabaseStore {
-    fn list_public_lots(
-        &self,
-        auction_id: Uuid,
-        request: PublicLotListRequest,
-    ) -> ApplicationFuture<'_, Option<PublicLotPage>> {
-        Box::pin(async move {
-            validate_lot_request(auction_id, &request)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    list_postgres(store, auction_id, request, &[]).await
-                }
-            }
-        })
-    }
-
-    fn public_lot(&self, lot_id: Uuid) -> ApplicationFuture<'_, Option<PublicLotDetail>> {
-        Box::pin(async move {
-            if lot_id.is_nil() {
-                return Err(storage_error("公开 lot 标识无效"));
-            }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => detail_postgres(store, lot_id, &[]).await,
             }
         })
     }

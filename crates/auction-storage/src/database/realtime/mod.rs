@@ -3,7 +3,7 @@
 
 use auction_application::{
     ApplicationError, ApplicationFuture, PublicRealtimeEvent, PublicRealtimePage,
-    PublicRealtimeReader, PublicRealtimeRequest, RepositoryError,
+    PublicRealtimeReader, PublicRealtimeRequest,
 };
 #[cfg(feature = "postgres")]
 use serde_json::Value;
@@ -11,6 +11,11 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use super::DatabaseStore;
+use crate::database::storage_error;
+
+mod sequence;
+
+pub(crate) use sequence::allocate_stream_sequence;
 
 impl PublicRealtimeReader for DatabaseStore {
     fn list_public_events(
@@ -35,12 +40,11 @@ async fn list_postgres(
     let stream_key = stream_key(request.auction_id);
     let limit =
         request.page_size.checked_add(1).ok_or_else(|| storage_error("实时事件页大小溢出"))?;
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("打开实时事件快照失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ")
         .await
-        .map_err(|_| storage_error("设置实时事件快照失败"))?;
+        .map_err(|_| storage_error("打开实时事件快照失败"))?;
 
     if let Some(auction_id) = request.auction_id {
         let visible = sqlx::query(
@@ -159,10 +163,6 @@ fn page(
 
 fn stream_key(auction_id: Option<Uuid>) -> String {
     auction_id.map_or_else(|| "auction:discovery".to_owned(), |id| format!("auction:{id}"))
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }
 
 fn rows_len_is_more<T>(page_size: i64, rows: &[T]) -> bool {

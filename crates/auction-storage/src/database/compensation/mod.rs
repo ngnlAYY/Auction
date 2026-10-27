@@ -4,13 +4,13 @@
 mod postgres;
 
 use auction_application::{
-    ApplicationError, ApplicationFuture, PublicCompensationListRequest,
-    PublicCompensationMovementPage, PublicCompensationMovementRequest, PublicCompensationPage,
-    PublicCompensationReader,
+    ApplicationFuture, PublicCompensationListRequest, PublicCompensationMovementPage,
+    PublicCompensationMovementRequest, PublicCompensationPage, PublicCompensationReader,
 };
 use uuid::Uuid;
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 impl PublicCompensationReader for DatabaseStore {
     fn list_public_compensation(
@@ -44,8 +44,4 @@ impl PublicCompensationReader for DatabaseStore {
             }
         })
     }
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(auction_application::RepositoryError::Failed(message.to_owned()))
 }

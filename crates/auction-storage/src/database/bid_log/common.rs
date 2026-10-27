@@ -1,8 +1,8 @@
 //! Public 竞价日志共享的 cursor、结果校验和错误映射。
 
+pub(super) use crate::database::storage_error;
 use auction_application::{
     ApplicationError, PublicBidLogCursor, PublicBidLogEntry, PublicBidLogListRequest,
-    RepositoryError,
 };
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -104,8 +104,4 @@ fn canonical_forum_id(value: &str) -> bool {
         && value.len() <= 32
         && !value.starts_with('0')
         && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-pub(super) fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

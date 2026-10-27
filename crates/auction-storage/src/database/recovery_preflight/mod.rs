@@ -26,7 +26,7 @@ impl PostgresStore {
         validate_database_name(confirmed_database_name)?;
         let mut transaction = self
             .pool()
-            .begin()
+            .begin_read_snapshot()
             .await
             .map_err(|source| query_error("begin_read_only_transaction", source))?;
         set_read_only_limits(&mut transaction).await?;

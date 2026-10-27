@@ -32,7 +32,7 @@ impl PostgresStore {
 
         let result = async {
             let mut preflight_transaction = connection
-                .begin()
+                .begin_with(super::preflight::PREFLIGHT_BEGIN)
                 .await
                 .map_err(|source| query_error("begin_locked_preflight_transaction", source))?;
             let preflight =
@@ -48,11 +48,7 @@ impl PostgresStore {
             require_locked_source(&mut connection, confirmed_database_name).await?;
 
             let mut transaction = connection
-                .begin()
-                .await
-                .map_err(|source| PostgresLegacyV28Error::Bridge { source })?;
-            sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-                .execute(&mut *transaction)
+                .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
                 .await
                 .map_err(|source| PostgresLegacyV28Error::Bridge { source })?;
             sqlx::raw_sql(include_str!("bridge.sql"))

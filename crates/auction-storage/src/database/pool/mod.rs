@@ -16,7 +16,10 @@ use std::{
 
 use auction_observability::PoolMetricsSnapshot;
 use futures_util::{TryStreamExt, future::BoxFuture, stream::BoxStream};
-use sqlx::{Database, Either, Execute, Executor, Pool, SqlStr, Transaction, pool::PoolConnection};
+use sqlx::{
+    Database, Either, Execute, Executor, Pool, SqlSafeStr, SqlStr, Transaction,
+    pool::PoolConnection,
+};
 
 #[cfg(feature = "postgres")]
 mod metrics;
@@ -134,11 +137,37 @@ where
     pub(crate) fn begin(
         &self,
     ) -> BoxFuture<'static, Result<Transaction<'static, DB>, sqlx::Error>> {
+        self.begin_statement(None)
+    }
+
+    /// 以单条固定 `BEGIN ...` 语句同时声明隔离级别与访问模式，省去随后的 `SET TRANSACTION` 往返。
+    pub(crate) fn begin_with(
+        &self,
+        statement: &'static str,
+    ) -> BoxFuture<'static, Result<Transaction<'static, DB>, sqlx::Error>> {
+        self.begin_statement(Some(statement.into_sql_str()))
+    }
+
+    fn begin_statement(
+        &self,
+        statement: Option<SqlStr>,
+    ) -> BoxFuture<'static, Result<Transaction<'static, DB>, sqlx::Error>> {
         let pool = self.clone();
         Box::pin(async move {
             let connection = pool.acquire().await?;
-            Transaction::begin(connection, None).await
+            Transaction::begin(connection, statement).await
         })
+    }
+}
+
+#[cfg(feature = "postgres")]
+impl TrackedPool<sqlx::Postgres> {
+    /// 只读一致快照：同一响应的计数、页与投影共用 Repeatable Read 快照；不持有 SSI 谓词锁，
+    /// 高频读取不会放大 Serializable 写事务的序列化冲突，自身也不会因 40001 失败。
+    pub(crate) fn begin_read_snapshot(
+        &self,
+    ) -> BoxFuture<'static, Result<Transaction<'static, sqlx::Postgres>, sqlx::Error>> {
+        self.begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY")
     }
 }
 

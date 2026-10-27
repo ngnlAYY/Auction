@@ -20,7 +20,7 @@ PostgreSQL 连接入口独立校验 URI：拒绝缩略形式、fragment、控制
 | [draft_soft_close](crates/auction-storage/src/database/draft_soft_close) | 未发布草稿只读检查及显式 Serializable/CAS 修正、账本重放和追加审计 |
 | [settlement](crates/auction-storage/src/database/settlement)、[settlement_policy](crates/auction-storage/src/database/settlement_policy) | 结算事实与冻结策略解码 |
 | [scheduler](crates/auction-storage/src/database/scheduler)、[slow_proxy_due.rs](crates/auction-storage/src/database/slow_proxy_due.rs) | 持久轮次、领取与慢速代理候选 |
-| [realtime_consumer](crates/auction-storage/src/database/realtime_consumer) | 独占消费、连续游标与失败恢复 |
+| [realtime](crates/auction-storage/src/database/realtime)、[realtime_consumer](crates/auction-storage/src/database/realtime_consumer) | 公开回放与 stream 序号分配；独占消费、待转发目录、连续游标与失败恢复 |
 | [migrations](crates/auction-storage/src/database/migrations)、[initialization](crates/auction-storage/src/database/initialization) | 追加迁移、兼容执行与首次空库初始化 |
 | [legacy_v28](crates/auction-storage/src/database/legacy_v28) | canonical v28 格式防腐与接管 |
 | [deployment_identity](crates/auction-storage/src/deployment_identity) | 脱敏数据库目标身份与部署校验 |
@@ -66,8 +66,9 @@ Sending、节奏起点和原审计同事务提交。正常成功和维护恢复�
 `username` 只是可变显示名和 MM 收件人，二者不能互换。[sessions](crates/auction-storage/src/database/sessions) 保存会话
 摘要：Admin 启动撤销旧 Admin 会话，Public key 撤销/重签与旧会话永久撤销同事务提交，只读 inspect 不刷新过期时间。
 Admin 启动、轮换及注销和 Public 注销的撤销时间至少为该会话创建时间，时钟回拨不妨碍永久撤销。
-Admin/Public touch 先物化并锁定会话行，再取请求时间与数据库实时时钟的较大值检查截止；
-等锁跨过截止不认证、不续期。Public inspect 和偏好读取也在查询时复核截止，连接池等待不能复活身份。
+Admin touch 先物化并锁定会话行，再取请求时间与数据库实时时钟的较大值检查截止；等锁跨过截止不认证、不续期。
+Public touch 与 inspect 使用同一认证谓词并按实时钟复核截止；有限期限不随活动续期，`last_activity_at` 只在距上次记录
+满 60 秒时向前写入，普通请求不再逐次持有会话行锁。Public inspect 和偏好读取也在查询时复核截止，连接池等待不能复活身份。
 Public [sessions/public/preference.rs](crates/auction-storage/src/database/sessions/public/preference.rs) 拥有账号时长读取及命令事务：
 Serializable 按 user → 当前 session → 账本取锁，锁后和写入时复核期限，偏好、当前截止、账本与审计同事务提交。
 `000058` 新增独立偏好版本和可空的成对截止；默认只影响新登录，旧截止和撤销事实不回填。永久会话也参与原有并发计数，
@@ -202,13 +203,18 @@ Preview/Open 轮次不聚合未使用的 lot 截止；Final 仍读取已 Open �
 原命令白名单、拍卖/world 可见性、五字段 keyset 排序和分页边界不变；结果仍只含公开金额、玩家和来源，
 不读取或暴露代理秘密上限。`valid` 只标识当前领先投影，完整事实不会因不再领先而从历史中删除。
 Admin 代理历史编号页与总数共用 Serializable 快照；仅 cursor 页多读取一条确定 `has_more`，编号页不生成游标。
-公开黑名单、Admin 邮件入站/delivery 及 realtime failure/lag 的计数与当前页共用 Repeatable Read 只读事务，
-避免并发状态变化造成同一响应的总数与列表不一致；筛选、排序、空页总数和分页上限保持原契约。
+公开黑名单、目录列表与详情、竞价日志、成交历史、账户、补偿池，以及 Admin 邮件入站/delivery 和 realtime failure/lag
+的计数与当前页共用 Repeatable Read 只读事务，避免并发状态变化造成同一响应的总数与列表不一致；只读快照不持有 SSI
+谓词锁，高频公开读取不会放大 Serializable 竞价与结算事务的序列化冲突，自身也不会因 40001 失败。筛选、排序、
+空页总数和分页上限保持原契约。
 Public/Admin 拍卖列表与 Public 补偿批次先物化当前页拍卖 ID，再汇总该页 lot 或账本；
 total 与全局补偿余额仍覆盖原完整范围，原排序、游标、无 lot 场次及金额 fallback 保持，不增加索引或迁移。
 Realtime dashboard 的全量 lag 聚合、有界明细与 failure 水位共用同一只读一致快照；健康和总积压使用全量值，
 不能从排序前 200 条明细推断全局无积压，wire 字段见[Dashboard 契约](docs/contracts/routes.md#dashboard-与-readiness)。
 Public realtime 回放按实际读取行数预留事件空间；空页不按请求上限分配，原序号推进与 refetch 门禁不变。
+竞价、生命周期、录入、结算与恢复追加公开事件时共用 [realtime/sequence.rs](crates/auction-storage/src/database/realtime/sequence.rs)：
+单条 `ON CONFLICT DO UPDATE ... RETURNING` 补建 stream、持行锁递增 `next_sequence` 并返回本次序号，与原三段语句取得同一锁；
+同一竞价计划只读取一次拍卖归属。Admin replay 仍先 `FOR UPDATE` 核对替代关系再递增，不并入该入口。
 账户页只对当前页授权批量读取完整转换历史和最近代理竞价，详情共用同一归属查询；转换按授权/序号排列，
 最近竞价仍以同用户/lot 的下一 usage 创建时间截断，缺失或不连续转换继续失败关闭。页校验直接移交结果，不复制整页。
 授权历史以 `updated_at DESC, lot_id, authorization_id` 形成严格全序，时间和 lot 相同也有唯一分页尾键。
@@ -216,7 +222,7 @@ Recovery 报告同样只对本报告 case 批量读取 action，并按各 case �
 Public 的 `DatabaseStore::public_lot_reader` 接受启动时冻结的装备标色规则，由应用共用判定生成稀有/融合分组。
 [lots/postgres/selection.rs](crates/auction-storage/src/database/lots/postgres/selection.rs) 在选择分组、等级上限或隐藏无等级时流式扫描
 本场可见装备的身份字段（不读取 stats），严格解码后复用应用等级/分组条件，先计类型总数，再按类型及 offset/limit 保留当前页 UUID；
-同一 Serializable 事务按 UUID 读取完整页并保持原排序，`total` 包含全部筛选。内存只保留计数和当前页 UUID，
+同一只读快照按 UUID 读取完整页并保持原排序，`total` 包含全部筛选。内存只保留计数和当前页 UUID，
 计算量随本场装备数量增长；无这些条件时保留原 SQL 统计和分页。None 等级不补零；预览、当前及历史某场目录一致，
 详情不应用列表筛选。不增加持久字段或迁移，装备事实、金额及竞价语义不变。
 完整装备映射借用原 attributes JSON 解码，不复制整棵临时 Value；筛选仍消费窄身份投影，严格校验和原始属性保留不变。
@@ -226,7 +232,7 @@ Public 的 `DatabaseStore::public_lot_reader` 接受启动时冻结的装备标�
 [auctions/countdown.rs](crates/auction-storage/src/database/auctions/countdown.rs) 用单条 SQL 读取同场公开时间及数据库
 时钟，不加载装备、凭据或论坛正文，不公开草稿、取消场次或被遮蔽的预览，无需新增表和迁移。Public 拍卖、竞价日志、
 成交历史与补偿批次的游标查询仅对额外探测行使用饱和加法，不截断请求数量（见[分页契约](docs/contracts/routes.md#public-分页世界与金额)）。
-`price_history/postgres/numbered.rs` 在同一 Serializable 快照内按完整筛选集计算统计和服务端排序分页；
+`price_history/postgres/numbered.rs` 在同一只读快照内按完整筛选集计算统计和服务端排序分页；
 两种分页只从装备 JSON 投影等级，缺失、非整数或负数等级仍为空，避免传输和解析未使用的属性与统计。
 编号页与 cursor 共用名称字面包含词条及 `ILIKE ALL`：空白或逗号分隔的缩写逐词 AND，仍转义 `%`、`_` 与反斜杠。
 排序仅接受时间、价格升降序，价格相同后沿用时间、场次、内部 lot 顺序与 UUID 保持稳定。
@@ -393,7 +399,10 @@ delivery 锁之前按持久 allocation 关联早锁原账户，孤儿/歧义失�
 默认不编译驱动，运行须显式启用 `postgres` feature，使用 SQLx PostgreSQL/rustls。
 `DatabaseStore::pool_metrics_source` 暴露借出、空闲、总数、上限及真实 acquisition 累计指标，普通查询、事务与显式
 acquire 均经过 `TrackedPool`，不额外查询 SQL，也不暴露数据库名或连接串。readiness 检查数据库、内嵌迁移及审计写入
-失败计数，异常失败关闭。
+失败计数，异常失败关闭。全部事务入口以单条 `BEGIN ISOLATION LEVEL ...` 声明隔离级别与访问模式（`TrackedPool::begin_with`
+或 SQLx 原生 `begin_with`），不再另发 `SET TRANSACTION`：竞价/生命周期、结算、规则及邮件事务 runner 共用
+`competition::begin_statement`，只读页与运维预检使用 `begin_read_snapshot` 或预检专用开启语句；隔离语义、锁序、
+三次重试边界及预检的语句/锁等待上限不变。
 readiness 直接查询完整迁移历史，不再先做独立 `SELECT 1`；仅缓存二进制内嵌迁移生成的只读验证视图，
 每次仍逐行核对当前数据库版本、success 与 checksum，不缓存健康或匹配结果。
 心跳写入借用命令中的 details JSON 编码，不在每次发布前复制整棵树；观测序号、数据库 TTL 和同序号重放规则不变。

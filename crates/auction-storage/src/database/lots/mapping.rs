@@ -3,6 +3,7 @@
 //! 数据库原始行在这里转换为应用 DTO；未知状态、越界文本和损坏的装备属性必须失败关闭。
 
 use super::*;
+pub(super) use crate::database::storage_error;
 
 // 数据库列名映射在此集中收口；参数分别对应公开契约字段，拆成临时结构会让行映射跨越适配器边界。
 #[allow(clippy::too_many_arguments)]
@@ -389,8 +390,4 @@ pub(super) fn validate_lot_request(
         return Err(storage_error("公开 lot 拍卖标识无效"));
     }
     request.validate().map_err(storage_error)
-}
-
-pub(super) fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

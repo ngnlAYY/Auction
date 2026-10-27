@@ -141,8 +141,7 @@ async fn persist_once(
     completed_at: DateTime<Utc>,
     terminal: &Terminal<'_>,
 ) -> Result<(), OutcomeError> {
-    let mut tx = pool.begin().await?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE").execute(&mut *tx).await?;
+    let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     // 无远端身份也只能使用持久关联，frozen/spent/returned均不能丢失绑定。
     let account = funding::lock_funded_delivery_account(&mut tx, claim.delivery_id).await?;
     sqlx::query("SELECT id FROM public.deliveries WHERE id=$1 FOR UPDATE")

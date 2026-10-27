@@ -9,6 +9,7 @@ use std::{
 };
 
 use auction_application::{PublicRealtimeEvent, RealtimeEventSink, RealtimeSinkError};
+use axum::extract::ws::Utf8Bytes;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use uuid::Uuid;
 
@@ -38,7 +39,7 @@ pub struct RealtimeHubHealth {
 
 struct HubState {
     next_id: u64,
-    streams: BTreeMap<String, BTreeMap<u64, Sender<PublicRealtimeEvent>>>,
+    streams: BTreeMap<String, BTreeMap<u64, Sender<Utf8Bytes>>>,
 }
 
 /// 单个 Public 进程拥有的 stream 广播器。
@@ -84,24 +85,24 @@ impl RealtimeHub {
         })
     }
 
-    /// 非阻塞广播到同一 stream；队列已满或连接已关闭的订阅会被淘汰。
-    pub fn broadcast(&self, event: PublicRealtimeEvent) {
+    /// 非阻塞广播已编码帧；队列已满或连接已关闭的订阅会被淘汰。
+    fn broadcast(&self, stream_key: &str, frame: Utf8Bytes) {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
-        let Some(clients) = state.streams.get_mut(&event.stream_key) else {
+        let Some(clients) = state.streams.get_mut(stream_key) else {
             return;
         };
-        // 满/闭队列无需复制事件；原位淘汰也不另建 stale 列表或再次查找订阅。
+        // 帧正文按引用计数共享；满/闭队列原位淘汰，不另建 stale 列表或再次查找订阅。
         clients.retain(|_, sender| {
             let Ok(permit) = sender.try_reserve() else {
                 return false;
             };
-            permit.send(event.clone());
+            permit.send(frame.clone());
             true
         });
         if clients.is_empty() {
-            state.streams.remove(&event.stream_key);
+            state.streams.remove(stream_key);
         }
     }
 
@@ -142,14 +143,14 @@ pub struct RealtimeSubscription {
     hub: Arc<RealtimeHub>,
     stream_key: String,
     id: u64,
-    receiver: Receiver<PublicRealtimeEvent>,
+    receiver: Receiver<Utf8Bytes>,
     // Hub 淘汰发送端时不能提前归还槽位；消费者真正结束前仍占用连接资源。
     _connection_permit: ConnectionPermit,
 }
 
 impl RealtimeSubscription {
-    /// 等待下一个已提交并广播的事件；通道关闭表示连接应当结束。
-    pub async fn recv(&mut self) -> Option<PublicRealtimeEvent> {
+    /// 等待下一个已提交、已校验并编码的 v1 事件帧；通道关闭表示连接应当结束。
+    pub async fn recv(&mut self) -> Option<Utf8Bytes> {
         self.receiver.recv().await
     }
 }
@@ -181,11 +182,19 @@ impl RealtimeEventSink for RealtimeHubSink {
         Box<dyn std::future::Future<Output = Result<(), RealtimeSinkError>> + Send + '_>,
     > {
         Box::pin(async move {
+            // 注册表校验已覆盖流名、发现流事件种类及负载归属；Hub 只按 stream 精确路由，
+            // 因此每个事件在这里校验并编码一次，连接任务不再逐条重复校验或序列化。
             event.validate().map_err(|detail| RealtimeSinkError {
                 failure_code: "schema_invalid".to_owned(),
                 safe_detail: detail.to_owned(),
             })?;
-            self.hub.broadcast(event);
+            let stream_key = event.stream_key.clone();
+            let frame =
+                super::realtime::encode_websocket_frame(event).map_err(|_| RealtimeSinkError {
+                    failure_code: "encode_failed".to_owned(),
+                    safe_detail: "实时事件编码失败".to_owned(),
+                })?;
+            self.hub.broadcast(&stream_key, frame);
             Ok(())
         })
     }

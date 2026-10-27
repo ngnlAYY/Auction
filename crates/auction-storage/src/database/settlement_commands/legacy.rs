@@ -1,7 +1,7 @@
 //! 旧版已完成结算账本的 PostgreSQL 只读快照核验。
 
 use auction_application::{
-    ApplicationError, LegacySettlementVerification, RepositoryError, SettleAuctionCommand,
+    ApplicationError, LegacySettlementVerification, SettleAuctionCommand,
     settlement_complete_request_hash, verify_legacy_settlement_replay,
 };
 use auction_domain::{AuctionId, CommandId};
@@ -10,6 +10,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use super::super::{PostgresCompetitionTransaction, PostgresStore};
+use crate::database::storage_error;
 
 /// 在 PostgreSQL 可证明一致的只读快照中核验旧 complete 账本；该路径没有任何写语句。
 pub(super) async fn verify_postgres(
@@ -20,14 +21,13 @@ pub(super) async fn verify_postgres(
         return Err(storage_error("旧版结算核验拍卖标识无效"));
     }
 
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开始旧版结算只读核验事务失败"))?;
     // DEFERRABLE 让 PostgreSQL 等待可证明安全的 Serializable 快照，避免只读核验因并发写入
-    // 读到不能串行化的组合；该语句必须是事务中的第一条命令。
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE READ ONLY DEFERRABLE")
-        .execute(&mut *transaction)
+    // 读到不能串行化的组合；隔离与访问模式随 BEGIN 声明，先于任何查询生效。
+    let transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE, READ ONLY, DEFERRABLE")
         .await
-        .map_err(|_| storage_error("建立旧版结算只读快照失败"))?;
+        .map_err(|_| storage_error("开始旧版结算只读核验事务失败"))?;
     let mut transaction = PostgresCompetitionTransaction::new(transaction);
 
     let identity = sqlx::query(
@@ -106,8 +106,4 @@ fn required_uuid(
         return Err(storage_error(missing));
     }
     Ok(value)
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    RepositoryError::Failed(message.to_owned()).into()
 }

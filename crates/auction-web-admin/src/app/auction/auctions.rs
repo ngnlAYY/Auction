@@ -62,7 +62,6 @@ pub(super) fn page() -> Element {
             direction: query_state().direction,
             on_query_change: move |next: AuctionsQuery| on_query_change.push(next),
             on_sort_change: move |(sort, direction)| {
-                // 排序只影响当前页展示顺序；翻页与其他筛选保持不变。
                 let mut next = query_state();
                 next.sort = sort;
                 next.direction = direction;

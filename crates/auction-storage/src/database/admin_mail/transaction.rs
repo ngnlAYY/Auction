@@ -2,6 +2,7 @@
 
 use super::mapping::{map_poll_state, map_sql_error};
 use super::*;
+use crate::database::competition::begin_statement;
 
 pub struct PostgresMailTransaction {
     transaction: Option<Transaction<'static, Postgres>>,
@@ -47,19 +48,12 @@ impl AdminMailTransactionRunner for crate::database::PostgresStore {
                 return Err(E::from(error));
             }
             for attempt in 0..policy.max_attempts {
-                let transaction = match self.pool().begin().await {
-                    Ok(transaction) => transaction,
-                    Err(error) => return Err(E::from(map_sql_error(error))),
-                };
+                let transaction =
+                    match self.pool().begin_with(begin_statement(policy.isolation)).await {
+                        Ok(transaction) => transaction,
+                        Err(error) => return Err(E::from(map_sql_error(error))),
+                    };
                 let mut transaction = PostgresMailTransaction::new(transaction);
-                if let Err(error) = set_isolation(&mut transaction, policy.isolation).await {
-                    if matches!(error, AdminMailTransactionError::SerializationConflict)
-                        && attempt + 1 < policy.max_attempts
-                    {
-                        continue;
-                    }
-                    return Err(E::from(error));
-                }
                 match operation(&mut transaction).await {
                     Ok(value) => match transaction.commit().await {
                         Ok(()) => return Ok(value),
@@ -310,19 +304,4 @@ impl AdminMailTransaction for PostgresMailTransaction {
             Ok(())
         }
     }
-}
-
-async fn set_isolation(
-    transaction: &mut PostgresMailTransaction,
-    isolation: TransactionIsolation,
-) -> Result<(), AdminMailTransactionError> {
-    let statement = match isolation {
-        TransactionIsolation::Serializable => "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
-        TransactionIsolation::ReadCommitted => "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
-    };
-    sqlx::query(statement)
-        .execute(&mut **transaction.transaction_mut()?)
-        .await
-        .map_err(map_sql_error)?;
-    Ok(())
 }

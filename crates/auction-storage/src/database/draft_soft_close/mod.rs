@@ -58,11 +58,9 @@ async fn inspect(
     auction_id: Uuid,
 ) -> Result<DraftSoftCloseInspection, DraftSoftCloseError> {
     let result: Result<_, Failure> = async {
-        let mut transaction = store.pool().begin().await?;
         // 默认检查由数据库强制只读，无行锁、账本、审计或隐含写入。
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE READ ONLY")
-            .execute(&mut *transaction)
-            .await?;
+        let mut transaction =
+            store.pool().begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE, READ ONLY").await?;
         let snapshot = read::snapshot(&mut transaction, auction_id).await?;
         let inspection = snapshot.inspect();
         transaction.commit().await?;

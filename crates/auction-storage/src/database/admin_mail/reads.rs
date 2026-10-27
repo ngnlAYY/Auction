@@ -71,12 +71,11 @@ pub(super) async fn list_intakes_postgres(
     request: AdminMailIntakeFilter,
 ) -> Result<AdminMailIntakePage, ApplicationError> {
     // 与 delivery 列表共用只读一致快照，保留 total/当前页原子投影，不参与写事务的 SSI。
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启邮件入站读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("设置邮件入站读取隔离级别失败"))?;
+        .map_err(|_| storage_error("开启邮件入站读取事务失败"))?;
 
     // 可选空串与省略具有相同筛选语义，不能绑定为 column = ''。
     let mailbox_key = request.mailbox_key.as_deref().filter(|value| !value.is_empty());

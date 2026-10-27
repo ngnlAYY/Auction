@@ -17,13 +17,9 @@ pub(super) async fn dashboard_snapshot_postgres(
     // 全量积压、有界明细和失败水位共用只读快照；第 201 条之后的 lag 也必须影响健康。
     let mut transaction = store
         .pool()
-        .begin()
+        .begin_read_snapshot()
         .await
         .map_err(|_| storage_error("开启 realtime dashboard 快照失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-        .execute(&mut *transaction)
-        .await
-        .map_err(|_| storage_error("设置 realtime dashboard 快照失败"))?;
     let total_lag = total_lag_postgres(&mut transaction).await?;
     let lags = read_lag_entries_postgres(
         &mut transaction,

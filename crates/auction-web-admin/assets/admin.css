@@ -285,7 +285,8 @@
   margin: 0;
   padding: var(--space-2) var(--space-5);
   color: var(--color-text-on-danger);
-  background: var(--color-danger);
+  /* 白字只放在深红底上（约 5.70:1）；浅色 --color-danger 只用于错误文字与边框。 */
+  background: var(--color-danger-button);
 }
 
 .admin-shell__health {
@@ -1988,7 +1989,7 @@
 .admin-delivery-table th,
 .admin-delivery-table td {
   padding: var(--admin-space-table-block) var(--admin-space-table-inline);
-  border-bottom: var(--border-width) solid var(--color-border);
+  border-block-end: var(--border-width) solid var(--color-border);
   text-align: start;
   vertical-align: top;
 }

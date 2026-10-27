@@ -11,7 +11,7 @@ use auction_application::{
     AdminMailPollTriggerCommand, AdminMailPollerSnapshot, AdminMailPollingCommand,
     AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
     AdminMailTransactionFailure, AdminMailTransactionRunner, MAX_ADMIN_MAIL_POLLER_COUNT,
-    RequestHash, TransactionFuture, TransactionIsolation, TransactionPolicy,
+    RequestHash, TransactionFuture, TransactionPolicy,
 };
 #[cfg(feature = "postgres")]
 use chrono::{DateTime, Utc};

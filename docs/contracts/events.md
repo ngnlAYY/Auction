@@ -95,11 +95,14 @@ Public `/api/v1/ws`：HTTP/1.1 GET Upgrade 返回 101，HTTP/2 扩展 CONNECT �
 | --- | --- | --- |
 | 客户端 Text/Binary | 1008 | 实时连接只允许服务端推送 |
 | Hub 淘汰慢消费者 | 1013 | 连接消费速度过慢 |
-| 非法公开事件或 discovery 非 `auction.created` | 1002 | 实时事件合同错误 |
 | 进程 drain | 1001 | 服务正在关闭 |
 | 会话失效 | 1008 | 会话已失效 |
 | 会话复核超时/依赖不可用 | 1013 | 会话校验暂不可用 |
 | Tungstenite `MessageTooLong` | 尝试 1009 | 空 |
+
+非法公开事件或 discovery 非 `auction.created` 在进程内广播前即被 sink 按注册表拒绝，relay 记录 `schema_invalid` failure
+且不推进游标；这类事件不进入任何连接，因此不再以 1002 关闭既有连接。Hub 只按精确 stream key 路由，
+每个事件编码一次后由同 stream 的全部连接共享同一文本帧。
 
 所有范围共用每 Public 进程 1024 条、每用户 8 条活跃连接配额，跨拍卖、会话和 discovery 合计；额度不足在升级前返回 HTTP 429 `realtime_busy`。Hub 在分配订阅缓冲区前取得配额，失败升级、取消和订阅结束自动归还，最后一条连接结束后删除用户计数，慢消费者仍持有订阅时不能提前释放配额。`scope=auctions` 另受 discovery 专属 128 槽限制，耗尽返回 HTTP 429 `discovery_busy`，普通 `auction_id` 连接不占 discovery 槽。这些是进程内资源保护，不是跨实例集群总配额，也不替代连接尝试限流。新的单拍卖连接在预检时拒绝已 `settled` 的拍卖并返回 404，已建立连接仍可接收随后产生的 `auction.settled`。
 进程 drain 先拒绝新订阅，再通知既有连接关闭，并在装配根原有总预算内等待全部升级许可归零；

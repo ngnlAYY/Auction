@@ -11,6 +11,8 @@ mod claim;
 mod lookup;
 mod mapping;
 mod resolution;
+#[cfg(feature = "postgres")]
+mod wakeup;
 
 impl ScheduledRoundStore for DatabaseStore {
     fn database_now(&self) -> auction_application::ApplicationFuture<'_, DateTime<Utc>> {
@@ -75,6 +77,20 @@ impl ScheduledRoundStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
+            }
+        })
+    }
+
+    fn next_claimable_at(
+        &self,
+        now: DateTime<Utc>,
+    ) -> auction_application::ApplicationFuture<'_, Option<DateTime<Utc>>> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => wakeup::next_claimable_postgres(store.pool(), now)
+                    .await
+                    .map_err(ApplicationError::from),
             }
         })
     }

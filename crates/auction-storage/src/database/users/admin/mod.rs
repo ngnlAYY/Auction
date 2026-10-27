@@ -11,7 +11,7 @@ use auction_application::{
     AdminUserListItem, AdminUserListRequest, AdminUserMutationAction, AdminUserMutationWrite,
     AdminUserPage, AdminUserStatus, AdminUserStore, ApplicationError, ApplicationFuture,
     MailLoginKeyEnvelope, RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklistResult,
-    RecoveryBuyerBlacklister, RepositoryError, RequestHash,
+    RecoveryBuyerBlacklister, RequestHash,
 };
 #[cfg(feature = "postgres")]
 use auction_domain::{CommandId, deterministic_uuid};
@@ -27,6 +27,7 @@ use crate::database::audit_health::AuditWriteResult as _;
 use sqlx::{postgres::PgRow, types::Json};
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 impl AdminUserStore for DatabaseStore {
     fn list(&self, request: AdminUserListRequest) -> ApplicationFuture<'_, AdminUserPage> {
@@ -120,10 +121,6 @@ struct StoredUserPayload {
 
 fn admin_error(error: AdminUserError) -> ApplicationError {
     ApplicationError::AdminUser(error)
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }
 
 fn validate_create_write(write: &AdminUserCreateWrite) -> Result<(), ApplicationError> {

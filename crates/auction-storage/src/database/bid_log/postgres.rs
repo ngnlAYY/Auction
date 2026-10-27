@@ -25,12 +25,11 @@ pub(super) async fn list_postgres(
     let query_limit =
         if request.cursor.is_some() { request.limit.saturating_add(1) } else { request.limit };
 
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启公开竞价日志读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("设置公开竞价日志隔离级别失败"))?;
+        .map_err(|_| storage_error("开启公开竞价日志读取事务失败"))?;
 
     let projection = sqlx::query(
         "SELECT a.id

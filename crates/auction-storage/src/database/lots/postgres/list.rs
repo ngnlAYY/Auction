@@ -14,12 +14,11 @@ pub(in crate::database::lots) async fn list_postgres(
     request: PublicLotListRequest,
     colors: &[EquipmentColorRule],
 ) -> Result<Option<PublicLotPage>, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启公开 lot 读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("设置公开 lot 读取隔离级别失败"))?;
+        .map_err(|_| storage_error("开启公开 lot 读取事务失败"))?;
     let page = list_postgres_transaction(&mut transaction, auction_id, request, colors).await?;
     transaction.commit().await.map_err(|_| storage_error("提交公开 lot 读取事务失败"))?;
     Ok(page)

@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::database::audit_health::AuditWriteResult as _;
 use crate::database::competition::{PostgresCompetitionTransaction, map_sql_error};
+use crate::database::realtime::allocate_stream_sequence;
 
 use super::failed;
 
@@ -42,30 +43,8 @@ pub(super) async fn append_admin_intake_record_inner(
     .map_err(map_sql_error)?;
 
     let stream_key = format!("auction:{}", record.result.auction_id);
-    sqlx::query(
-        "INSERT INTO public.realtime_streams (stream_key) VALUES ($1)
-         ON CONFLICT (stream_key) DO NOTHING",
-    )
-    .bind(&stream_key)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    let sequence = sqlx::query_scalar::<_, i64>(
-        "SELECT next_sequence FROM public.realtime_streams WHERE stream_key = $1 FOR UPDATE",
-    )
-    .bind(&stream_key)
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    sqlx::query(
-        "UPDATE public.realtime_streams
-         SET next_sequence = next_sequence + 1, updated_at = CURRENT_TIMESTAMP
-         WHERE stream_key = $1",
-    )
-    .bind(&stream_key)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
+    let sequence =
+        allocate_stream_sequence(transaction, &stream_key, None).await.map_err(map_sql_error)?;
     let payload = json!({
         "world": record.world_id,
         "auction_id": record.result.auction_id,

@@ -15,10 +15,13 @@ use super::{
 
 #[path = "slow_proxy.rs"]
 mod slow_proxy;
+#[path = "wakeup.rs"]
+mod wakeup;
 
 const SETTLEMENT_FAILURE_RECORD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// 立即处理生命周期和结算批次，随后按旧版 polling+jitter cadence 重试。
+/// 立即处理生命周期和结算批次，随后按旧版 polling+jitter cadence 重试；若生命周期、慢速代理或
+/// 结算有更早的未来到期时刻，则在该时刻提前醒来，常规间隔只作为等待上限。
 pub(super) async fn run_loop<C>(
     worker: Arc<PersistentWorker<C>>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -49,7 +52,10 @@ pub(super) async fn run_loop<C>(
         }
         worker.metrics.observe_iteration(WorkerLoop::Auction, result, started.elapsed());
 
-        let wait = poll_delay(worker.auction.poll_interval, worker.auction.jitter);
+        let poll_wait = poll_delay(worker.auction.poll_interval, worker.auction.jitter);
+        let wait = wakeup::next_due_wait(worker.as_ref())
+            .await
+            .map_or(poll_wait, |due_wait| due_wait.min(poll_wait));
         let scheduled_wake = tokio::time::Instant::now() + wait;
         if super::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
             return;

@@ -11,6 +11,8 @@ use super::DatabaseStore;
 mod claim;
 #[cfg(feature = "postgres")]
 mod resolution;
+#[cfg(feature = "postgres")]
+mod wakeup;
 
 impl SettlementWorkStore for DatabaseStore {
     fn claim_due(
@@ -34,6 +36,20 @@ impl SettlementWorkStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
+            }
+        })
+    }
+
+    fn next_claimable_at(
+        &self,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, Option<DateTime<Utc>>> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => wakeup::next_claimable_postgres(store.pool(), now)
+                    .await
+                    .map_err(ApplicationError::from),
             }
         })
     }

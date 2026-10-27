@@ -1,6 +1,8 @@
 //! PostgreSQL Admin 规则发布事务与命令账本。
 
 use super::*;
+#[cfg(feature = "postgres")]
+use crate::database::competition::begin_statement;
 
 /// Admin 规则发布使用的 PostgreSQL 事务对象。
 #[cfg(feature = "postgres")]
@@ -50,19 +52,12 @@ impl AdminRulesTransactionRunner for PostgresStore {
                 return Err(E::from(error));
             }
             for attempt in 0..policy.max_attempts {
-                let transaction = match self.pool().begin().await {
-                    Ok(transaction) => transaction,
-                    Err(error) => return Err(E::from(map_sql_error(error))),
-                };
+                let transaction =
+                    match self.pool().begin_with(begin_statement(policy.isolation)).await {
+                        Ok(transaction) => transaction,
+                        Err(error) => return Err(E::from(map_sql_error(error))),
+                    };
                 let mut transaction = PostgresRulesTransaction::new(transaction);
-                if let Err(error) = set_isolation(&mut transaction, policy.isolation).await {
-                    if matches!(error, AdminRulesTransactionError::SerializationConflict)
-                        && attempt + 1 < policy.max_attempts
-                    {
-                        continue;
-                    }
-                    return Err(E::from(error));
-                }
                 match operation(&mut transaction).await {
                     Ok(value) => match transaction.commit().await {
                         Ok(()) => return Ok(value),
@@ -239,22 +234,6 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
             Ok(())
         }
     }
-}
-
-#[cfg(feature = "postgres")]
-async fn set_isolation(
-    transaction: &mut PostgresRulesTransaction,
-    isolation: TransactionIsolation,
-) -> Result<(), AdminRulesTransactionError> {
-    let statement = match isolation {
-        TransactionIsolation::Serializable => "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
-        TransactionIsolation::ReadCommitted => "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
-    };
-    sqlx::query(statement)
-        .execute(&mut **transaction.transaction_mut()?)
-        .await
-        .map_err(map_sql_error)?;
-    Ok(())
 }
 
 #[cfg(feature = "postgres")]

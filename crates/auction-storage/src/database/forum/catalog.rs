@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use crate::database::storage_error;
 use auction_application::{ForumCatalogPage, MAX_FORUM_CATALOG_PAGES};
 
 /// 所有固定帖身份必须互异且为规范十进制；续页顺序由数组位置表示，不能按 ID 排楼。
@@ -45,11 +46,6 @@ pub(super) fn valid_pages(
 use auction_application::{
     ApplicationError, ForumPublishedLayout, ForumRenderedThread, ForumReplyTopic,
 };
-#[cfg(feature = "postgres")]
-fn storage_error(message: &str) -> ApplicationError {
-    auction_application::RepositoryError::Failed(message.to_owned()).into()
-}
-
 /// 数据库布局只接受冻结闭集，不以当前件数或远端文本推断历史方案。
 #[cfg(feature = "postgres")]
 pub(super) fn parse_layout(

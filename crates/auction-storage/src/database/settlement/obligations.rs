@@ -234,28 +234,13 @@ pub(super) async fn insert_settlement_realtime(
     let stream_key = format!("auction:{auction_id}");
     let event_id = deterministic_uuid(command_id, "settlement-realtime-event", 1);
     let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
-    sqlx::query(
-        r#"INSERT INTO public.realtime_streams (stream_key, updated_at)
-           VALUES ($1, $2)
-           ON CONFLICT (stream_key) DO NOTHING"#,
+    let stream_sequence = crate::database::realtime::allocate_stream_sequence(
+        transaction,
+        &stream_key,
+        Some(occurred_at),
     )
-    .bind(&stream_key)
-    .bind(occurred_at)
-    .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
-    let row = sqlx::query(
-        r#"UPDATE public.realtime_streams
-           SET next_sequence = next_sequence + 1, updated_at = $2
-           WHERE stream_key = $1
-           RETURNING next_sequence - 1 AS stream_sequence"#,
-    )
-    .bind(&stream_key)
-    .bind(occurred_at)
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    let stream_sequence: i64 = row.try_get("stream_sequence").map_err(map_sql_error)?;
     let counts = sqlx::query(
         r#"SELECT
                COUNT(*) FILTER (WHERE status = 'sold')::bigint AS sold_count,

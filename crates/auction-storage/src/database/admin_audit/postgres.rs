@@ -10,12 +10,11 @@ pub(super) async fn list_postgres(
     store: &super::super::PostgresStore,
     request: AdminAuditListRequest,
 ) -> Result<AdminAuditPage, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启 Admin 审计读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("设置 Admin 审计读取隔离级别失败"))?;
+        .map_err(|_| storage_error("开启 Admin 审计读取事务失败"))?;
 
     let offset = request.offset();
     let actor = request.actor.as_deref().filter(|value| !value.is_empty());

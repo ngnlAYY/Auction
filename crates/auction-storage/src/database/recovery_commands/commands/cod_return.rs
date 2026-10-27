@@ -15,11 +15,8 @@ pub(in crate::database::recovery_commands) async fn advance_cod_return_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
-    let mut transaction = pool.begin().await.map_err(map_sql_error)?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
-        .await
-        .map_err(map_sql_error)?;
+    let mut transaction =
+        pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_sql_error)?;
 
     let Some(candidate) = sqlx::query(
         r#"SELECT recovery.id,

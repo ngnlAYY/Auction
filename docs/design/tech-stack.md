@@ -142,6 +142,15 @@ prometheus-client 需要另审 OpenMetrics 与进程指标兼容，Leptos CSR �
 驱动/Redis 用窄 feature，发布图和静态 all-features 图分别审阅。默认[静态验证](docs/guide/development.md)不执行行为
 测试，运行证据见[状态页](docs/status.md)。
 
+### 2026-10-26 性能复审中的依赖核对
+
+`cargo machete` 仍未发现未使用直接依赖；逐项核对低频直接依赖后只收窄一处 feature：`tracing-subscriber` 关闭默认
+`ansi`，显式保留 `fmt/std/smallvec/tracing-log` 并继续启用 `env-filter/json`。三个角色日志均为 JSON 且显式关闭 ANSI，
+`nu-ansi-term` 因此退出活跃图与锁图，日志格式、过滤器与 OTLP 不变。`async-stream` 只用于 `TrackedPool::fetch_many`
+的借用流，替代方案须依赖 sqlx-core 面向驱动的内部接口或手写自引用生成器，因此保留；Public/Admin WASM 中的
+`url`/`idna` 也由 dioxus-router 直接依赖，移除本项目调用不会减少载荷，保留。Public 可见性等待改用标准库 `poll_fn`，
+不改变 futures-util 在实时流中的使用。本轮未刷新 cargo-audit 公告库，不新增公告结论。
+
 ### 2026-10-15 全依赖审计
 
 以下两节保留当时决策与缓解措施，不是当前构建指南；当前版本见[版本与升级](#版本与升级)。当时覆盖 20 个工作区包、50 项直接依赖、完整锁图、全 feature/全 target

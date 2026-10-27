@@ -15,6 +15,8 @@
   --color-surface-raised: #1d242e;
   --color-border: #2b3442;
   --color-border-strong: #46546a;
+  /* 输入框、选择器等控件边界：对 bg/surface/raised 三层底色均不低于 3:1（WCAG 1.4.11）。 */
+  --color-border-control: #627089;
   --color-text: #e6ebf2;
   --color-text-muted: #93a0b4;
   --color-accent: #d9a441;
@@ -23,7 +25,8 @@
   /* 通用成功状态与 live 状态同色，调用方按语义选用。 */
   --color-success: var(--color-live);
   --color-warning: #d9a441;
-  --color-danger: #e05555;
+  /* 错误文字在 raised 底上仍满足 4.5:1；白字危险按钮使用各 surface 的深红底色。 */
+  --color-danger: #e66262;
   --color-link: #6ea8fe;
   --color-action-primary: var(--color-link);
   --color-overlay: rgb(0 0 0 / 55%);
@@ -215,7 +218,7 @@ button:disabled {
 
 .language-picker__select {
   padding: var(--space-1) var(--space-2);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
@@ -391,6 +394,16 @@ button:disabled {
   }
 }
 
+/* 系统要求更高对比度时只调亮分隔线、控件边界与次要文字；品牌色、布局和密度保持不变。 */
+@media screen and (prefers-contrast: more) {
+  :root {
+    --color-border: #55657d;
+    --color-border-strong: #7a8aa3;
+    --color-border-control: #8d9bb0;
+    --color-text-muted: #b6c0cf;
+  }
+}
+
 /* ===== 通用分页器（Pager 组件） ===== */
 
 .ui-pager {
@@ -446,6 +459,11 @@ button:disabled {
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
+}
+
+.ui-pager__input,
+.ui-pager__select {
+  border-color: var(--color-border-control);
 }
 
 .ui-pager button {
@@ -740,6 +758,7 @@ table {
     --color-surface-raised: #ffffff;
     --color-border: #9aa4b2;
     --color-border-strong: #5b6675;
+    --color-border-control: #5b6675;
     --color-text: #14181f;
     --color-text-muted: #4a5462;
     --color-accent: #8a6410;

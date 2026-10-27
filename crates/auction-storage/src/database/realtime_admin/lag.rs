@@ -14,12 +14,11 @@ pub(super) async fn list_lag_postgres(
     request: RealtimeLagListRequest,
 ) -> Result<RealtimeLagPage, ApplicationError> {
     // consumer 可在读取期间登记新 stream；总数与水位页面共用只读快照。
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启 realtime lag 快照失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("设置 realtime lag 快照失败"))?;
+        .map_err(|_| storage_error("开启 realtime lag 快照失败"))?;
     let stream_prefix = request.stream_prefix.as_deref();
     let consumer_key = request.consumer_key.as_deref();
     let total: i64 = sqlx::query_scalar(

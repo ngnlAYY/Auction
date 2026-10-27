@@ -57,9 +57,9 @@ impl LegacySelfReconciliationReader for DatabaseStore {
         obligation_id: Uuid,
     ) -> FundingFuture<'_, LegacySelfReconciliationTarget> {
         Box::pin(async move {
-            let mut tx = self.postgres_pool().begin().await.map_err(sql_error)?;
-            sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE READ ONLY")
-                .execute(&mut *tx)
+            let mut tx = self
+                .postgres_pool()
+                .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE, READ ONLY")
                 .await
                 .map_err(sql_error)?;
             let (_, target) = read::snapshot(&mut tx, obligation_id).await?;

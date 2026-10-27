@@ -18,7 +18,6 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
 use futures_util::FutureExt;
 use ipnet::IpNet;
 use tracing::Instrument;
@@ -333,12 +332,7 @@ fn finish_response(mut response: Response, request_id: &str) -> Response {
         headers.insert(REQUEST_ID_HEADER, value);
     }
     super::security::apply_browser_security_headers(headers);
-    if !headers.contains_key(header::DATE) {
-        let date = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
-        if let Ok(value) = HeaderValue::from_str(&date) {
-            headers.insert(header::DATE, value);
-        }
-    }
+    // `Date` 由 Hyper 的 HTTP/1 与 HTTP/2 编码器按秒缓存后统一补齐，这里不再逐响应格式化。
     super::countdown::apply_security_headers(&mut response);
     response
 }

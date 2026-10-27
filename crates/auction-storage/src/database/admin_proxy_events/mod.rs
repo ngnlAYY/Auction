@@ -1,6 +1,7 @@
 //! 代理授权事件的安全投影；兼容历史 authorization 命令名，不直接暴露账本 payload。
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 #[cfg(feature = "postgres")]
 use auction_application::{
     AdminProxyEvent, AdminProxyEventCursor, UNKNOWN_ADMIN_PROXY_EVENT_TOTAL,
@@ -36,12 +37,11 @@ async fn list_postgres(
     use sqlx::Row;
     use uuid::Uuid;
 
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启 Admin 代理历史读取事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("设置 Admin 代理历史隔离级别失败"))?;
+        .map_err(|_| storage_error("开启 Admin 代理历史读取事务失败"))?;
 
     let visible = sqlx::query("SELECT id FROM public.lots WHERE id = $1")
         .bind(request.lot_id.as_uuid())
@@ -236,8 +236,4 @@ async fn list_postgres(
         return Err(storage_error("Admin 代理历史存储返回不变量失败"));
     }
     Ok(Some(page))
-}
-
-fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(auction_application::RepositoryError::Failed(message.to_owned()))
 }

@@ -103,6 +103,11 @@ pub trait ScheduledRoundStore: Send + Sync {
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ScheduledRoundClaim>>;
 
+    /// 返回严格晚于 `now` 的最早阶段到期或退避租约结束时刻，供 Worker 提前唤醒；
+    /// 这只是唤醒提示，是否可领取仍由 `claim_due` 的锁内谓词决定。
+    fn next_claimable_at(&self, now: DateTime<Utc>)
+    -> ApplicationFuture<'_, Option<DateTime<Utc>>>;
+
     fn complete(
         &self,
         claim: ScheduledRoundClaim,

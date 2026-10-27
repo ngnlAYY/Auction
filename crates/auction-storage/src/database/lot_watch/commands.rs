@@ -17,11 +17,7 @@ impl LotWatchPort for DatabaseStore {
                 return Err(LotWatchError::Invalid);
             }
             let Self::Postgres(store) = self;
-            let mut transaction = store.pool().begin().await.map_err(sql_error)?;
-            sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-                .execute(&mut *transaction)
-                .await
-                .map_err(sql_error)?;
+            let mut transaction = store.pool().begin_read_snapshot().await.map_err(sql_error)?;
             let visible: bool = sqlx::query_scalar(
                 "SELECT EXISTS (SELECT 1 FROM public.auctions a
                 JOIN public.worlds w ON w.id = a.world_id

@@ -3,7 +3,6 @@
 
 use auction_application::{
     ApplicationFuture, RealtimeConsumerBatch, RealtimeConsumerRequest, RealtimeConsumerStore,
-    RealtimeStreamStore,
 };
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -30,32 +29,9 @@ use failure::{record_failure_postgres, resolve_failure_postgres};
 #[cfg(feature = "postgres")]
 use read::read_postgres;
 #[cfg(feature = "postgres")]
-use stream::list_streams_postgres;
+use stream::list_pending_streams_postgres;
 
-impl RealtimeStreamStore for DatabaseStore {
-    fn list_stream_keys(
-        &self,
-        prefix: String,
-        after: String,
-        limit: u16,
-    ) -> ApplicationFuture<'_, Vec<String>> {
-        Box::pin(async move {
-            stream::validate_stream_directory_query(&prefix, &after, limit)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    let mut connection = store
-                        .pool()
-                        .acquire()
-                        .await
-                        .map_err(|_| storage_error("打开 PostgreSQL 实时 stream 连接失败"))?;
-                    list_streams_postgres(&mut connection, &prefix, &after, limit).await
-                }
-            }
-        })
-    }
-}
-
+// stream 目录只由持锁 `RealtimeConsumerOwnership` 实现；连接池入口不提供目录扫描，避免 relay 绕过互斥 session。
 impl RealtimeConsumerStore for DatabaseStore {
     fn read_batch(
         &self,

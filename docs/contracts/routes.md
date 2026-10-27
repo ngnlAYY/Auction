@@ -394,7 +394,9 @@ PostgreSQL + `web-embed` 的 `auction-admin-api`/`auction-server` 初始化模�
 
 ### 公开读取与命令结果
 
-P02 接受可选 `lang`，缺失回退英文；P05 为安全黑名单页码投影。P07 的数字/keyset 分页、P10 world/lot 筛选及 P12 成交统计遵守上文分页契约。P09 保留 v1 preview/live 互斥数组、分类统计、页码及拍卖上下文；P11 只返回当前允许公开的 lot；P13/P14 返回补偿池批次、余额守恒摘要、opaque keyset cursor 与单场账本页，从同一 Serializable 快照读取。
+P02 接受可选 `lang`，缺失回退英文；P05 为安全黑名单页码投影。P07 的数字/keyset 分页、P10 world/lot 筛选及 P12 成交统计遵守上文分页契约。P09 保留 v1 preview/live 互斥数组、分类统计、页码及拍卖上下文；P11 只返回当前允许公开的 lot；P13/P14 返回补偿池批次、余额守恒摘要、opaque keyset cursor 与单场账本页，从同一只读一致快照读取。
+P05、P07、P09–P14 及 P16/P17 均使用 Repeatable Read 只读事务：同一响应的计数、页与投影来自单一快照，读取不持有 SSI 谓词锁，
+不会与 Serializable 竞价、结算写入互相放大序列化冲突；写入正确性仍由写事务的锁与 Serializable 保证。
 P13 的全局 `balance` 是所有 world 当前 `settlement_pools.balance` 的合计，`updated_at` 为池更新时间最大值；
 各批次的 opening/closing 仍是原场次冻结摘要，不拿最近某个世界的结算余额冒充全局当前余额。
 

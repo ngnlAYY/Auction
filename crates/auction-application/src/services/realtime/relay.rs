@@ -70,7 +70,7 @@ impl RealtimeRelay {
         Ok(Self { stream_store, consumer_store, sink, config })
     }
 
-    /// 按有界分页扫描 stream 目录；失败事件会留在当前游标前等待重试，不会跳过历史。
+    /// 按有界分页扫描仍有待转发事件的 stream；失败事件会留在当前游标前等待重试，不会跳过历史。
     pub fn run_once(&self, now: DateTime<Utc>) -> crate::ApplicationFuture<'_, RealtimeRelayBatch> {
         Box::pin(async move {
             if now.timestamp_micros() == 0 {
@@ -81,7 +81,8 @@ impl RealtimeRelay {
             loop {
                 let streams = self
                     .stream_store
-                    .list_stream_keys(
+                    .list_pending_stream_keys(
+                        self.config.consumer_key.clone(),
                         self.config.stream_prefix.clone(),
                         after_stream.clone(),
                         self.config.stream_batch_size,

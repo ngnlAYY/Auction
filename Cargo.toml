@@ -140,7 +140,15 @@ opentelemetry-otlp = { version = "0.33.1", default-features = false, features = 
 # 自有有界批处理器直接使用 Tokio；不启用 SDK 自带的实验性异步批处理器与 runtime 适配。
 opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["trace"] }
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+# 日志只输出 JSON 且显式关闭 ANSI；不启用默认 `ansi`，其余默认能力（fmt/std/smallvec/tracing-log）显式保留。
+tracing-subscriber = { version = "0.3.23", default-features = false, features = [
+    "env-filter",
+    "fmt",
+    "json",
+    "smallvec",
+    "std",
+    "tracing-log",
+] }
 tracing-opentelemetry = "0.34.0"
 tower = { version = "0.5.3", features = ["util"] }
 # 指标只导出 Prometheus 文本；保留进程 collector，使用 plain_model，避免二进制 protobuf 编码依赖。

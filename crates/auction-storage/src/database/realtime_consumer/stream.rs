@@ -20,21 +20,28 @@ pub(super) fn validate_stream_directory_query(
     Ok(())
 }
 
+/// 只列出头部序号超过该 consumer 游标的 stream。`next_sequence - 1` 由所有事件追加路径在
+/// 同一事务内持锁推进，是 stream 的权威头部；缺失游标按 0 处理，与批量读取一致。
 #[cfg(feature = "postgres")]
-pub(super) async fn list_streams_postgres(
+pub(super) async fn list_pending_streams_postgres(
     connection: &mut sqlx::PgConnection,
+    consumer_key: &str,
     prefix: &str,
     after: &str,
     limit: u16,
 ) -> Result<Vec<String>, ApplicationError> {
     let pattern = format!("{prefix}%");
     sqlx::query_scalar(
-        "SELECT stream_key
-         FROM public.realtime_streams
-         WHERE stream_key LIKE $1 AND stream_key > $2
-         ORDER BY stream_key ASC
-         LIMIT $3",
+        "SELECT stream.stream_key
+         FROM public.realtime_streams AS stream
+         LEFT JOIN public.realtime_consumer_offsets AS offset_row
+           ON offset_row.consumer_key = $1 AND offset_row.stream_key = stream.stream_key
+         WHERE stream.stream_key LIKE $2 AND stream.stream_key > $3
+           AND stream.next_sequence - 1 > COALESCE(offset_row.last_sequence, 0)
+         ORDER BY stream.stream_key ASC
+         LIMIT $4",
     )
+    .bind(consumer_key)
     .bind(pattern)
     .bind(after)
     .bind(i64::from(limit))

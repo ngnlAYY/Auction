@@ -16,8 +16,7 @@ pub(super) async fn execute(
     command: &RepairDraftSoftCloseCommand,
 ) -> Result<DraftSoftCloseRepairResult, Failure> {
     let hash = command.request_hash()?.as_bytes();
-    let mut transaction = store.pool().begin().await?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE").execute(&mut *transaction).await?;
+    let mut transaction = store.pool().begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     let stored = sqlx::query(
         "SELECT command_kind, aggregate_id, request_hash, result_code, result_payload
          FROM public.auction_commands WHERE command_id = $1",

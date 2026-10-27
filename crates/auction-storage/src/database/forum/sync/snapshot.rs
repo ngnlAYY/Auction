@@ -20,12 +20,11 @@ pub(super) async fn load_snapshot_postgres(
     store: &PostgresStore,
     claim: &ForumSyncClaim,
 ) -> Result<ForumAuctionSnapshot, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启论坛同步快照事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ")
         .await
-        .map_err(|_| storage_error("设置论坛同步快照隔离级别失败"))?;
+        .map_err(|_| storage_error("开启论坛同步快照事务失败"))?;
     let authorized = sqlx::query(
         "SELECT 1
          FROM public.auction_forum_sync AS sync
@@ -68,12 +67,11 @@ pub(super) async fn load_current_snapshot_postgres(
     store: &PostgresStore,
     auction_id: AuctionId,
 ) -> Result<ForumAuctionSnapshot, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启论坛刷新快照事务失败"))?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-        .execute(&mut *transaction)
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ")
         .await
-        .map_err(|_| storage_error("设置论坛刷新快照隔离级别失败"))?;
+        .map_err(|_| storage_error("开启论坛刷新快照事务失败"))?;
     let snapshot = read_snapshot(&mut transaction, auction_id).await?;
     transaction.commit().await.map_err(|_| storage_error("提交论坛刷新快照事务失败"))?;
     if snapshot.auction_id != auction_id || snapshot.sequence <= 0 || snapshot.lots.is_empty() {

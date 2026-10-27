@@ -363,7 +363,8 @@ Caddy 保持原运行用户，在它的 systemd drop-in 设置 `SupplementaryGro
 
 `[realtime].consumer_key` 是稳定非敏感标识，多 Public 实例必须不同。PostgreSQL session advisory lock 拒绝重复 owner；连接失效
 须停止消费并重启实例，详见[Public 故障边界](apps/auction-public-api/README.md#持锁-relay-与故障边界)。其余字段限制批次、轮询和单连接
-缓冲；满缓冲淘汰慢连接，客户端须 catch-up。
+缓冲；满缓冲淘汰慢连接，客户端须 catch-up。每轮只列出头部序号超过本 consumer 游标的 stream，已追平的历史场次不再逐个读取，
+轮询开销随待转发 stream 而非历史场次总数增长；失败事件不推进游标，仍按原节奏重试。
 
 ## 论坛与邮件
 
@@ -401,7 +402,8 @@ PM：PM 成功始终要求完整冻结内容、recipient/sender 与 Sent MSID �
 ## Worker 循环预算
 
 顶层生命周期、慢速代理和结算默认 60 秒周期、5 秒抖动、各阶段批次 100、单项 30 秒；主循环默认并发 8，示例使用同值，阶段
-失败不跳过后续阶段。fulfillment/recovery 独立循环默认立即执行后等待 60 秒加抖动，批次 100、并发 8、lease 60 秒、单项 30 秒；
+失败不跳过后续阶段。周期是最长等待：三者存在严格未来的到期或重试时刻时，主循环经只读提示在该时刻提前唤醒（不叠加抖动），
+因此开拍、最终阶段、慢速代理与结算不再最多延后一个周期；已过期仍未领取的事项和提示失败仍按原周期重试。fulfillment/recovery 独立循环默认立即执行后等待 60 秒加抖动，批次 100、并发 8、lease 60 秒、单项 30 秒；
 其中等待买家支付 COD、卖家领取货款的 MM 证据读取共享一个默认 300 秒的绝对时间窗口，由
 `worker.fulfillment.evidence_poll_seconds` 配置，不受 `operations.worker.managed` 覆盖；窗口内新增待追踪邮件在下一窗口统一读取。
 

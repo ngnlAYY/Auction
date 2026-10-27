@@ -29,30 +29,19 @@ macro_rules! run_reconcile_transaction {
         let mut last_error = None;
         'retry: {
             for attempt in 0..SERIALIZABLE_RETRY_ATTEMPTS {
-                let mut $transaction = match $pool.begin().await {
-                Ok(transaction) => transaction,
-                Err(error) => {
-                    if is_serialization_conflict(&error)
-                        && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
-                    {
-                        last_error = Some(error);
-                        continue;
-                    }
-                    return Err(map_storage_error(error));
-                }
-                };
-                if let Err(error) = sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-                    .execute(&mut *$transaction)
-                    .await
-                {
-                    if is_serialization_conflict(&error)
-                        && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
-                    {
-                        last_error = Some(error);
-                        continue;
-                    }
-                    return Err(map_storage_error(error));
-                }
+                let mut $transaction =
+                    match $pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await {
+                        Ok(transaction) => transaction,
+                        Err(error) => {
+                            if is_serialization_conflict(&error)
+                                && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
+                            {
+                                last_error = Some(error);
+                                continue;
+                            }
+                            return Err(map_storage_error(error));
+                        }
+                    };
 
                 let operation_result = (async $body).await;
                 match operation_result {

@@ -46,7 +46,7 @@ sample_ratio_ppm = 0
 consumer_key = "public-1"
 # 可选：relay 两次扫描之间的毫秒数，默认 250。
 poll_interval_millis = 250
-# 可选：单轮最多扫描的 stream 数，默认 200。
+# 可选：每页最多列出的待转发 stream 数，默认 200；单轮会继续读取后续页。
 stream_batch_size = 200
 # 可选：单个 stream 单轮最多转发的事件数，默认 200。
 event_batch_size = 200

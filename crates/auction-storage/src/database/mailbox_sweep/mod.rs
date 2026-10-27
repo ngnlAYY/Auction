@@ -3,7 +3,7 @@
 use auction_application::{
     ApplicationFuture, DeliverySendCredentialBinding, DeliverySendExpectation,
     DeliveryTakeExpectation, MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate,
-    MoogleMailboxUnprovenSend, RepositoryError,
+    MoogleMailboxUnprovenSend,
 };
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -16,6 +16,7 @@ use super::delivery_scheduler::{attempts, take_attempts};
 #[cfg(feature = "postgres")]
 use super::settlement_funding as funding;
 use super::{DatabaseStore, TrackedPool};
+use crate::database::storage_error;
 #[cfg(feature = "postgres")]
 use sqlx::Postgres;
 
@@ -620,8 +621,7 @@ async fn persist_transition_once(
     delivery_id: Uuid,
     update: &RecoveryUpdate<'_>,
 ) -> Result<bool, RecoveryError> {
-    let mut tx = pool.begin().await?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE").execute(&mut *tx).await?;
+    let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     // 当前观测 generation→资金→recovery→credential→action→delivery；历史 generation 只作身份。
     match update {
         RecoveryUpdate::Send(_, metadata, _, Some(expectation)) => {
@@ -896,8 +896,4 @@ impl RecoveryError {
             _ => false,
         }
     }
-}
-
-fn storage_error(message: &str) -> auction_application::ApplicationError {
-    RepositoryError::Failed(message.to_owned()).into()
 }

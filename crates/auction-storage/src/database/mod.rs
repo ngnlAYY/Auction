@@ -203,6 +203,8 @@ mod postgres_store;
 #[cfg(feature = "postgres")]
 mod store;
 
+#[cfg(feature = "postgres")]
+pub(crate) use backend::storage_error;
 pub use backend::{DatabaseBackend, StorageError};
 #[cfg(feature = "postgres")]
 pub(crate) use pool::PostgresPoolMetricsSource;
