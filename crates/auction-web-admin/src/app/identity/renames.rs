@@ -181,7 +181,11 @@ pub(super) fn page() -> Element {
                     {t!("admin-renames-name-filter")}
                     input {
                         id: "rename-name",
-                        r#type: "text",
+                        name: "name",
+                        autocomplete: "off",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        r#type: "search",
                         maxlength: "256",
                         value: query_state().name,
                         oninput: move |event| {

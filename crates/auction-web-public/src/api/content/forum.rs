@@ -70,7 +70,7 @@ fn valid_error_code(value: &str) -> bool {
 }
 
 /// 外部链接只接受无用户信息的 HTTPS URL，避免损坏投影把危险 scheme 注入浏览器。
-fn valid_forum_url(value: &str) -> bool {
+pub(super) fn valid_forum_url(value: &str) -> bool {
     Url::parse(value).is_ok_and(|url| {
         url.scheme() == "https"
             && url.host_str().is_some()

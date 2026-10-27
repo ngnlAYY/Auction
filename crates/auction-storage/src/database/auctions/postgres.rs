@@ -52,6 +52,8 @@ pub(super) async fn list(
         )
     };
     // 先确定当前页拍卖，再聚合其 lot；历史页不必为页外场次重复扫描和汇总全部装备。
+    // 聚合本页后一次关联论坛地址与内容证明；v1 禁用关联，不读取论坛正文。
+    // 未对账历史主题不参与 LEFT JOIN；已声明证明的损坏数据留给映射层明确报错。
     let rows = sqlx::query(
         "WITH page_auctions AS MATERIALIZED (
             SELECT a.id
@@ -67,7 +69,7 @@ pub(super) async fn list(
               )
             ORDER BY a.sequence DESC, a.id DESC
             LIMIT $6 OFFSET $7
-         )
+         ), auction_summaries AS (
          SELECT
             a.id,
             a.world_id,
@@ -92,6 +94,15 @@ pub(super) async fn list(
          LEFT JOIN public.lots AS l ON l.auction_id = a.id
          LEFT JOIN public.lot_settlements AS ls ON ls.lot_id = l.id
          GROUP BY a.id
+         )
+         SELECT a.*, f.auction_id AS forum_auction_id,
+                CASE WHEN octet_length(f.thread_url) <= 2048 THEN f.thread_url END AS forum_thread_url,
+                f.content_revision AS forum_content_revision,
+                f.content_synced_at AS forum_content_synced_at
+         FROM auction_summaries AS a
+         LEFT JOIN public.auction_forum_sync AS f
+           ON $8::boolean AND f.auction_id = a.id AND f.status = 'published'
+          AND f.content_revision > 0 AND f.content_synced_at IS NOT NULL
          ORDER BY a.sequence DESC, a.id DESC",
     )
     .bind(&request.status)
@@ -101,6 +112,7 @@ pub(super) async fn list(
     .bind(cursor_id)
     .bind(query_limit)
     .bind(if use_cursor { 0 } else { request.offset })
+    .bind(request.include_forum_thread_url)
     .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取公开拍卖列表失败"))?;

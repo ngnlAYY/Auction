@@ -198,6 +198,8 @@ pub fn page() -> Element {
                             {t!("admin-mail-intake-world")}
                             select {
                                 id: "mail-world",
+                                name: "world",
+                                autocomplete: "off",
                                 class: "admin-mail-world",
                                 value: query_state().world,
                                 onchange: move |event| {
@@ -218,6 +220,8 @@ pub fn page() -> Element {
                             {t!("admin-mail-intake-status")}
                             select {
                                 id: "mail-status",
+                                name: "status",
+                                autocomplete: "off",
                                 class: "admin-mail-state-filter",
                                 value: query_state().status,
                                 onchange: move |event| {
@@ -239,6 +243,8 @@ pub fn page() -> Element {
                             {t!("admin-mail-intake-kind")}
                             select {
                                 id: "mail-kind",
+                                name: "kind",
+                                autocomplete: "off",
                                 class: "admin-mail-kind",
                                 value: query_state().kind,
                                 onchange: move |event| {
@@ -293,6 +299,11 @@ pub fn page() -> Element {
                             label { r#for: "mailbox-key", {t!("admin-mail-mailbox")} }
                             input {
                                 id: "mailbox-key",
+                                name: "mailbox_key",
+                                autocomplete: "off",
+                                autocapitalize: "none",
+                                spellcheck: "false",
+                                enterkeyhint: "search",
                                 maxlength: "256",
                                 required: true,
                                 value: mailbox_key(),

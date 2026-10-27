@@ -112,6 +112,16 @@
   margin-inline-start: auto;
 }
 
+/* 世界与语言、连接与刷新各自成组；设备切换只改变排布，不重建控件。 */
+.public-shell__preferences,
+.public-shell__connection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
 .public-world-switcher {
   display: inline-flex;
   align-items: center;
@@ -808,8 +818,14 @@
 .public-auction-countdown,
 .public-auction-catalog__code,
 .public-auction-catalog__amount {
-  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+.public-auction-catalog__amount,
+.public-history-price,
+.public-account-amount {
+  font-weight: 600;
+  text-align: end;
 }
 
 .public-auction-countdown--urgent,
@@ -1134,8 +1150,7 @@
   margin-block-start: var(--space-4);
 }
 
-.public-history-filter-actions button,
-.public-history-pagination button {
+.public-history-filter-actions button {
   min-block-size: var(--size-target);
   padding: var(--space-2) var(--space-4);
   border: var(--border-width) solid var(--color-border);
@@ -1145,14 +1160,12 @@
   font: inherit;
 }
 
-.public-history-filter-actions button:not(:disabled):focus-visible,
-.public-history-pagination button:not(:disabled):focus-visible {
+.public-history-filter-actions button:not(:disabled):focus-visible {
   border-color: var(--color-accent);
 }
 
 @media (hover: hover) {
-  .public-history-filter-actions button:not(:disabled):hover,
-  .public-history-pagination button:not(:disabled):hover {
+  .public-history-filter-actions button:not(:disabled):hover {
     border-color: var(--color-accent);
   }
 }
@@ -1292,7 +1305,7 @@
 }
 
 .public-history-price {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1322,16 +1335,6 @@
   margin: 0;
   font-size: var(--text-lg);
   font-variant-numeric: tabular-nums;
-}
-
-.public-history-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-block: var(--space-4) var(--space-6);
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
 }
 
 /* ===== 拍卖目录筛选标签 ===== */
@@ -1884,13 +1887,13 @@
   box-shadow: inset var(--space-1) 0 0 var(--color-live);
 }
 
-.public-account-code a,
 .public-account-amount {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
 }
 
 .public-account-code a {
+  font-family: var(--font-mono);
   font-weight: 600;
 }
 
@@ -1963,6 +1966,10 @@
   }
 }
 
+.public-auction-catalog tbody tr:focus-within {
+  background: var(--color-surface-raised);
+}
+
 .public-auction-catalog tbody .public-auction-catalog__leading {
   background: color-mix(in srgb, var(--color-live) 12%, var(--color-surface));
   box-shadow: inset var(--space-1) 0 0 var(--color-live);
@@ -1974,8 +1981,7 @@
   }
 }
 
-.public-auction-catalog__code,
-.public-auction-countdown {
+.public-auction-catalog__code {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
@@ -2106,8 +2112,7 @@
 /* ===== 出价日志 ===== */
 
 .public-auction-bid-log-controls,
-.public-auction-bid-log-toolbar,
-.public-auction-bid-log-pagination {
+.public-auction-bid-log-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2115,7 +2120,7 @@
 }
 
 .public-auction-bid-log-controls,
-.public-auction-bid-log-round-header {
+.public-auction-bid-log-heading {
   margin-block-end: var(--space-4);
 }
 
@@ -2135,11 +2140,56 @@
   background: var(--color-surface-raised);
 }
 
-.public-auction-bid-log-round-header {
+.public-auction-bid-log-heading {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-3);
+}
+
+.public-auction-bid-log-round-header {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.public-auction-bid-log-toolbar {
+  gap: var(--space-2);
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  margin-inline-start: auto;
+}
+
+.public-auction-bid-log-toolbar label {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.public-auction-bid-log-toolbar :is(input, button) {
+  min-inline-size: 0;
+  min-block-size: var(--size-target);
+  max-inline-size: 100%;
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+}
+
+.public-auction-bid-log-toolbar input {
+  flex: 0 1 12rem;
+  inline-size: 12rem;
+}
+
+.public-auction-bid-log-toolbar button {
+  min-inline-size: var(--size-target);
+  cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
 .public-auction-bid-log-round-number {
@@ -2170,8 +2220,7 @@
   color: var(--color-text-muted);
 }
 
-.public-auction-bid-log-empty button,
-.public-auction-bid-log-pagination button {
+.public-auction-bid-log-empty button {
   padding: var(--space-1) var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -2181,20 +2230,12 @@
 
 @media (hover: hover) {
   .public-auction-bid-log-empty button:hover,
-  .public-auction-bid-log-pagination button:hover:not(:disabled) {
+  .public-auction-bid-log-toolbar button:hover:not(:disabled) {
     color: var(--color-accent);
     border-color: var(--color-accent);
   }
 }
 
-.public-auction-bid-log-pagination {
-  margin-block-start: var(--space-3);
-}
-
-.public-auction-bid-log-pagination button:disabled {
-  color: var(--color-text-muted);
-  opacity: 0.6;
-}
 
 .public-auction-bid-log-table-wrap {
   overflow-x: clip;
@@ -2695,6 +2736,7 @@
 
 .public-auction-rounds__links {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
 }
@@ -2705,10 +2747,16 @@
   min-inline-size: 0;
 }
 
+.public-account-login-page > h1 {
+  text-align: center;
+}
+
 .public-account-login-form {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  inline-size: min(100%, 22rem);
+  margin-inline: auto;
   padding: var(--space-5);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
@@ -2725,6 +2773,15 @@
   color: var(--color-text);
   background: var(--color-surface-raised);
   font-family: var(--font-mono);
+}
+
+.public-shell :is(input, select, textarea)[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.public-history-filters label:focus-within > span,
+.public-history-filter-cell:focus-within > legend {
+  color: var(--color-text);
 }
 
 .public-account-login-form input[data-masked="true"]::placeholder {
@@ -2766,6 +2823,8 @@
 
 .public-account-login-hint {
   margin-block: 1em;
+  max-inline-size: 48rem;
+  margin-inline: auto;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
@@ -2881,7 +2940,9 @@
 }
 
 .public-compensation-table .public-compensation-toggle-cell {
+  padding-inline: var(--space-1);
   text-align: center;
+  vertical-align: middle;
 }
 
 .public-compensation-table .public-compensation-number,
@@ -2891,13 +2952,36 @@
 }
 
 .public-compensation-expand {
-  width: 1.75rem;
-  height: 1.75rem;
+  display: inline-grid;
+  place-items: center;
+  inline-size: var(--size-target);
+  block-size: var(--size-target);
+  flex-shrink: 0;
+  padding: 0;
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-sm);
   color: inherit;
   background: var(--color-surface-raised);
+  font-size: var(--text-lg);
+  line-height: 1;
   cursor: pointer;
+}
+
+.public-compensation-expand[aria-expanded="true"] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.public-compensation-expand:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .public-compensation-expand:hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+  }
 }
 
 .public-compensation-details-row > td {

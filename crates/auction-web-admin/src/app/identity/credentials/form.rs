@@ -258,6 +258,8 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                     {t!("admin-credentials-kind")}
                     select {
                         id: "import-kind",
+                        name: "kind",
+                        autocomplete: "off",
                         disabled: busy() || unknown(),
                         value: kind(),
                         onchange: move |event| {
@@ -274,6 +276,8 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                     {t!("admin-credentials-label")}
                     input {
                         id: "import-label",
+                        name: "label",
+                        autocomplete: "off",
                         r#type: "text",
                         disabled: busy() || unknown(),
                         required: true,
@@ -297,6 +301,8 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                     {t!("admin-credentials-world")}
                     select {
                         id: "import-world",
+                        name: "world",
+                        autocomplete: "off",
                         disabled: busy() || unknown(),
                         value: world(),
                         onchange: move |event| {
@@ -315,6 +321,7 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                     {t!("admin-credentials-player-name")}
                     input {
                         id: "import-player-name",
+                        name: "player_name",
                         r#type: "text",
                         disabled: busy() || unknown(),
                         autocomplete: "off",
@@ -343,6 +350,8 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                     {t!("admin-credentials-source")}
                     select {
                         id: "import-source",
+                        name: "source",
+                        autocomplete: "off",
                         disabled: busy() || unknown(),
                         aria_describedby: "import-source-help",
                         value: match source() {
@@ -378,6 +387,7 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                     {t!("admin-credentials-secret")}
                     input {
                         id: "import-secret",
+                        name: "cookie",
                         r#type: "password",
                         autocomplete: "off",
                         autocapitalize: "none",

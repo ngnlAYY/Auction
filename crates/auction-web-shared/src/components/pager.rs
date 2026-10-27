@@ -2,6 +2,7 @@
 //! 支持后端返回总数的稳定分页，也支持只有 `has_more` 的游标兼容投影（跳转范围限制到当前
 //! 已知的下一页）。文案一律由调用方经 props 传入，本 crate 不持有任何 i18n key；DOM class
 //! 保持 `ui-pager*` 契约不变。调用方显式提供每页数量选项时才启用数字页码布局。
+//! 页码导航位于数量和跳页之前；数字组独立换行，响应式样式不复制或重挂载表单。
 
 use dioxus::prelude::*;
 
@@ -93,23 +94,6 @@ pub fn Pager(
         nav {
             class: if numbered { "ui-pager ui-pager--numbered" } else { "ui-pager" },
             aria_label: label,
-            if numbered {
-                if total.is_some() && !total_summary.is_empty() {
-                    span { class: "ui-pager__total", "{total_summary}" }
-                }
-                PageSizePicker {
-                    page_size,
-                    options: page_size_options,
-                    label: page_size_label,
-                    option_label: page_size_option_label,
-                    allow_custom: allow_custom_page_size,
-                    max_page_size,
-                    custom_label: page_size_custom_label,
-                    apply_label: page_size_apply_label,
-                    invalid_label: page_size_invalid_label,
-                    on_change: on_page_size_change,
-                }
-            }
             div { class: "ui-pager__controls",
                 button {
                     r#type: "button",
@@ -123,23 +107,25 @@ pub fn Pager(
                     }
                 }
                 if numbered {
-                    for target in numbered_pages(valid_page, total_pages) {
-                        if let Some(target) = target {
-                            button {
-                                key: "page-{target}",
-                                r#type: "button",
-                                class: "ui-pager__page",
-                                aria_label: status.call((target, total_pages)),
-                                aria_current: if target == valid_page { "page" } else { "false" },
-                                onclick: move |_| {
-                                    if target != valid_page {
-                                        on_page_change.call(target);
-                                    }
-                                },
-                                "{target}"
+                    div { class: "ui-pager__pages",
+                        for target in numbered_pages(valid_page, total_pages) {
+                            if let Some(target) = target {
+                                button {
+                                    key: "page-{target}",
+                                    r#type: "button",
+                                    class: "ui-pager__page",
+                                    aria_label: status.call((target, total_pages)),
+                                    aria_current: if target == valid_page { "page" } else { "false" },
+                                    onclick: move |_| {
+                                        if target != valid_page {
+                                            on_page_change.call(target);
+                                        }
+                                    },
+                                    "{target}"
+                                }
+                            } else {
+                                span { class: "ui-pager__ellipsis", aria_hidden: "true", "…" }
                             }
-                        } else {
-                            span { class: "ui-pager__ellipsis", aria_hidden: "true", "…" }
                         }
                     }
                 }
@@ -158,6 +144,23 @@ pub fn Pager(
                     } else {
                         "{next_label}"
                     }
+                }
+            }
+            if numbered {
+                if total.is_some() && !total_summary.is_empty() {
+                    span { class: "ui-pager__total", "{total_summary}" }
+                }
+                PageSizePicker {
+                    page_size,
+                    options: page_size_options,
+                    label: page_size_label,
+                    option_label: page_size_option_label,
+                    allow_custom: allow_custom_page_size,
+                    max_page_size,
+                    custom_label: page_size_custom_label,
+                    apply_label: page_size_apply_label,
+                    invalid_label: page_size_invalid_label,
+                    on_change: on_page_size_change,
                 }
             }
             form {
@@ -179,6 +182,8 @@ pub fn Pager(
                         max: total_pages.to_string(),
                         step: "1",
                         inputmode: "numeric",
+                        autocomplete: "off",
+                        enterkeyhint: "go",
                         value: jump_page(),
                         oninput: move |event| jump_page.set(event.value()),
                     }

@@ -245,6 +245,7 @@ fn bid_form(input: BidFormInput) -> Element {
                 label { for: amount_id.clone(), {t!("bid-amount-label")} }
                 input {
                     id: amount_id,
+                    name: "amount",
                     r#type: "text",
                     autofocus: true,
                     inputmode: "numeric",
@@ -252,10 +253,18 @@ fn bid_form(input: BidFormInput) -> Element {
                     pattern: "[0-9]*",
                     autocomplete: "off",
                     spellcheck: "false",
-                    aria_describedby: "public-bid-amount-hint public-bid-unit-hint",
+                    aria_invalid: validation().is_some().to_string(),
+                    aria_describedby: if validation().is_some() {
+                        "public-bid-amount-hint public-bid-unit-hint public-bid-error"
+                    } else {
+                        "public-bid-amount-hint public-bid-unit-hint"
+                    },
                     disabled: submitting() || blocked,
                     value: "{amount}",
-                    oninput: move |event| amount.set(event.value()),
+                    oninput: move |event| {
+                        amount.set(event.value());
+                        validation.set(None);
+                    },
                 }
                 {bid_amount_hint(&amount())}
                 p {
@@ -268,7 +277,7 @@ fn bid_form(input: BidFormInput) -> Element {
                 p { class: "action-feedback action-feedback--notice", role: "note", "{blocked_reason}" }
             }
             if let Some(message) = validation() {
-                p { class: "action-feedback action-feedback--error", role: "alert", "{message}" }
+                p { id: "public-bid-error", class: "action-feedback action-feedback--error", role: "alert", "{message}" }
             }
             if let Some(error) = (command.failure)() {
                 p { class: "action-feedback action-feedback--error", role: "alert",

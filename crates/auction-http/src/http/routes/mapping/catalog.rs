@@ -1,6 +1,7 @@
 //! Public 拍卖、标的、装备和游标契约映射。
 
 use super::super::*;
+use auction_contracts::AuctionSummaryV2Response;
 
 pub(crate) fn map_auction_summary(summary: PublicAuctionSummary) -> AuctionSummaryResponse {
     AuctionSummaryResponse {
@@ -19,6 +20,14 @@ pub(crate) fn map_auction_summary(summary: PublicAuctionSummary) -> AuctionSumma
         sold_amount: summary.sold_amount,
         state_version: summary.state_version,
     }
+}
+
+/// 论坛地址只进入 v2 DTO；v1 映射始终序列化原字段集合。
+pub(crate) fn map_auction_summary_v2(
+    mut summary: PublicAuctionSummary,
+) -> AuctionSummaryV2Response {
+    let forum_thread_url = summary.forum_link.take().map(|link| link.into_url());
+    AuctionSummaryV2Response { auction: map_auction_summary(summary), forum_thread_url }
 }
 
 pub(crate) fn map_current_auction(auction: CurrentAuctionSnapshot) -> CurrentAuctionItemResponse {

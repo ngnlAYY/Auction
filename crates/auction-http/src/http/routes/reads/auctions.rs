@@ -1,9 +1,32 @@
 use super::*;
+use auction_contracts::AuctionSummaryV2Response;
 
+/// 保留 v1 字段闭集，已打开的旧页面无需接受新的摘要字段。
 pub(crate) async fn list_auctions(
     State(state): State<PublicApiState>,
     uri: Uri,
 ) -> Result<Json<ApiResponse<AuctionListResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
+    auction_list(state, uri, false, map_auction_summary).await
+}
+
+/// v2 在同一分页读取中附带论坛地址，避免按行发起额外 HTTP 或数据库请求。
+pub(crate) async fn list_auctions_v2(
+    State(state): State<PublicApiState>,
+    uri: Uri,
+) -> Result<
+    Json<ApiResponse<AuctionListResponse<AuctionSummaryV2Response>>>,
+    (StatusCode, Json<ApiErrorResponse>),
+> {
+    auction_list(state, uri, true, map_auction_summary_v2).await
+}
+
+/// 两个版本共享筛选、分页、游标和错误处理，只有投影选择与条目映射不同。
+async fn auction_list<T>(
+    state: PublicApiState,
+    uri: Uri,
+    include_forum_thread_url: bool,
+    map_summary: impl FnMut(PublicAuctionSummary) -> T,
+) -> Result<Json<ApiResponse<AuctionListResponse<T>>>, (StatusCode, Json<ApiErrorResponse>)> {
     let query = parse_query(&uri, &["world", "status", "page", "page_size", "cursor"])
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let world_id = query.get("world").filter(|value| !value.is_empty()).cloned();
@@ -55,6 +78,7 @@ pub(crate) async fn list_auctions(
             limit: page_size,
             offset,
             cursor: cursor.clone(),
+            include_forum_thread_url,
         })
         .await
         .map_err(|_| {
@@ -68,7 +92,7 @@ pub(crate) async fn list_auctions(
         ));
     }
 
-    let response = map_auction_page(result, page, query.get("cursor").cloned());
+    let response = map_auction_page(result, page, query.get("cursor").cloned(), map_summary);
     Ok(Json(ApiResponse::ok("拍卖列表已加载", response)))
 }
 

@@ -25,6 +25,10 @@ PostgreSQL 连接入口独立校验 URI：拒绝缩略形式、fragment、控制
 | [legacy_v28](crates/auction-storage/src/database/legacy_v28) | canonical v28 格式防腐与接管 |
 | [deployment_identity](crates/auction-storage/src/deployment_identity) | 脱敏数据库目标身份与部署校验 |
 
+[auctions](crates/auction-storage/src/database/auctions) 在 P30 的原分页快照与 SELECT 内关联已发布论坛链接及内容证明，
+SQL 限制地址投影字节数，应用层再构造 `PublicForumLink`；不逐行追加查询或加载镜像正文。P07 v1 禁用这项关联，
+历史未对账记录不参与链接关联，场次仍正常返回；声明有证明但地址或证明损坏的记录失败关闭，见[v2 拍卖历史契约](docs/contracts/routes.md#p30-v2-拍卖历史与论坛地址)。
+
 [delivery_scheduler/cadence.rs](crates/auction-storage/src/database/delivery_scheduler/cadence.rs) 与 `000059` 独占七类 Send 起点；
 在原业务锁前锁分组、数据库实时时钟复核，Sending/原审计与高水位同事务提交。领取按超价优先及时间/UUID 排序，
 准备失败不消耗间隔，未知/失败发送不退还间隔；投递负载和历史结果不改写。

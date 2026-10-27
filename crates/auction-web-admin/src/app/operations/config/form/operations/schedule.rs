@@ -53,6 +53,8 @@ fn TimeField(
         label { class: "admin-runtime-field",
             span { "{label}" }
             input { r#type: "time", step: "60", disabled, value,
+                name: path,
+                autocomplete: "off",
                 oninput: move |event: FormEvent| {
                     form.write().set_input(path, event.value());
                     on_dirty.call(());

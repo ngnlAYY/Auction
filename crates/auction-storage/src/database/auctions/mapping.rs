@@ -2,7 +2,7 @@
 
 use auction_application::{
     ApplicationError, CurrentAuctionSnapshot, PublicAuctionListRequest, PublicAuctionSummary,
-    PublicRealtimeAuctionStatus, RepositoryError,
+    PublicForumLink, PublicRealtimeAuctionStatus, RepositoryError,
 };
 #[cfg(feature = "postgres")]
 use sqlx::Row;
@@ -11,8 +11,10 @@ use sqlx::Row;
 pub(super) fn map_postgres_summary(
     row: sqlx::postgres::PgRow,
 ) -> Result<PublicAuctionSummary, ApplicationError> {
+    let auction_id = row.try_get("id").map_err(|_| storage_error("读取公开拍卖标识失败"))?;
+    let forum_link = map_postgres_forum_link(&row, auction_id)?;
     Ok(PublicAuctionSummary {
-        id: row.try_get("id").map_err(|_| storage_error("读取公开拍卖标识失败"))?,
+        id: auction_id,
         world_id: row.try_get("world_id").map_err(|_| storage_error("读取公开拍卖世界失败"))?,
         sequence: row.try_get("sequence").map_err(|_| storage_error("读取公开拍卖序号失败"))?,
         status: row.try_get("status").map_err(|_| storage_error("读取公开拍卖状态失败"))?,
@@ -46,7 +48,31 @@ pub(super) fn map_postgres_summary(
         state_version: row
             .try_get("state_version")
             .map_err(|_| storage_error("读取公开拍卖状态版本失败"))?,
+        forum_link,
     })
+}
+
+/// 未对账历史记录由关联条件省略；已声明内容证明的记录必须构造已校验链接，损坏数据返回错误。
+#[cfg(feature = "postgres")]
+fn map_postgres_forum_link(
+    row: &sqlx::postgres::PgRow,
+    auction_id: uuid::Uuid,
+) -> Result<Option<PublicForumLink>, ApplicationError> {
+    let forum_auction_id: Option<uuid::Uuid> =
+        row.try_get("forum_auction_id").map_err(|_| storage_error("读取公开论坛所属拍卖失败"))?;
+    let Some(forum_auction_id) = forum_auction_id else { return Ok(None) };
+    if forum_auction_id != auction_id {
+        return Err(storage_error("公开论坛所属拍卖不一致"));
+    }
+    let url =
+        row.try_get("forum_thread_url").map_err(|_| storage_error("读取公开拍卖论坛地址失败"))?;
+    let content_revision = row
+        .try_get("forum_content_revision")
+        .map_err(|_| storage_error("读取公开论坛内容版本失败"))?;
+    let content_synced_at = row
+        .try_get("forum_content_synced_at")
+        .map_err(|_| storage_error("读取公开论坛内容同步时间失败"))?;
+    PublicForumLink::new(url, content_revision, content_synced_at).map(Some).map_err(storage_error)
 }
 
 #[cfg(feature = "postgres")]

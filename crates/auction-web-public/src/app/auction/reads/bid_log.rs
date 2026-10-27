@@ -39,25 +39,23 @@ pub(crate) fn bid_log() -> Element {
         Some(Ok(worlds)) => supported_worlds(worlds),
         _ => vec![world_filter()],
     };
-    let auctions = use_resource({
-        let refresh_generation = refresh_generation;
-        move || {
-            let _ = refresh_generation();
-            let world = world_filter();
-            async move {
-                let result = fetch_bid_log_auctions(world.clone()).await;
-                (world, result)
-            }
+    // 生命周期、可见页定时和人工刷新先重读目录；记录请求随后只消费本轮确认的公开场次。
+    let auctions = use_resource(move || {
+        let generation = refresh_generation();
+        let world = world_filter();
+        async move {
+            let result = fetch_bid_log_auctions(world.clone()).await;
+            ((world, generation), result)
         }
     });
 
-    // 世界切换或分享链接指向另一世界时，自动落到该世界最新一场可公开读取的拍卖。
+    // 保留仍可公开读取的历史选择；仅在所选场次不属于本世界目录时纠偏。
     use_effect(move || {
-        let Some((world, Ok(auction_list))) = &*auctions.read_unchecked() else {
+        let Some(((world, generation), Ok(auction_list))) = &*auctions.read_unchecked() else {
             return;
         };
-        // 世界切换期间 Resource 保留旧目录，不能据它纠偏新世界的场次选择。
-        if world != &world_filter() {
+        // 后台刷新保留旧目录用于展示，但它不能纠偏新世界或新生命周期代际的选择。
+        if world != &world_filter() || *generation != refresh_generation() {
             return;
         }
         let selected = selected_auction_id();
@@ -80,35 +78,49 @@ pub(crate) fn bid_log() -> Element {
         }
     });
 
-    let bid_log = use_resource({
-        let refresh_generation = refresh_generation;
-        move || {
-            let _ = refresh_generation();
-            let auction_id = selected_auction_id();
-            let page = page_number();
-            let page_size = page_size();
-            let world = world_filter();
-            let lot_id = lot_filter().trim().to_owned();
-            let lot_id = (!lot_id.is_empty()).then_some(lot_id);
-            let requested = (auction_id.clone(), world.clone(), lot_id.clone(), page, page_size);
-            async move {
-                let result = if auction_id.is_empty() {
-                    Ok(None)
-                } else {
-                    fetch_bid_log_page(auction_id, page, world, lot_id, page_size).await.map(Some)
-                };
-                (requested, result)
-            }
+    let bid_log = use_resource(move || {
+        let auction_id = selected_auction_id();
+        let page = page_number();
+        let page_size = page_size();
+        let world = world_filter();
+        let lot_id = lot_filter().trim().to_owned();
+        let lot_id = (!lot_id.is_empty()).then_some(lot_id);
+        let requested = (auction_id.clone(), world.clone(), lot_id.clone(), page, page_size);
+        // 不直接订阅全局刷新：先确认本轮目录，避免按过期的场次可见性读取记录。
+        // 目录未就绪、失败或已移除该场时不发 GET；查询切换也不能绕过这道门禁。
+        let readable = auctions.read_unchecked().as_ref().is_some_and(
+            |((loaded_world, generation), result)| {
+                loaded_world == &world
+                    && *generation == *refresh_generation.peek()
+                    && result
+                        .as_ref()
+                        .is_ok_and(|rows| rows.iter().any(|auction| auction.id == auction_id))
+            },
+        );
+        async move {
+            let result = if readable {
+                fetch_bid_log_page(auction_id, page, world, lot_id, page_size).await.map(Some)
+            } else {
+                Ok(None)
+            };
+            (requested, result)
         }
     });
-    use_bid_refresh(bid_log, true);
     let auction_snapshot = auctions.read_unchecked();
-    let auction_options = match &*auction_snapshot {
-        Some((world, Ok(auction_list))) if world == &world_filter() => auction_list.as_slice(),
+    let current_auctions = auction_snapshot
+        .as_ref()
+        .filter(|((world, _), _)| world == &world_filter())
+        .map(|(_, result)| result);
+    let auction_options = match current_auctions {
+        Some(Ok(auction_list)) => auction_list.as_slice(),
         _ => &[],
     };
     let selected = selected_auction_id();
     let selected_auction = auction_options.iter().find(|auction| auction.id == selected);
+    let directory_current = auction_snapshot.as_ref().is_some_and(|((world, generation), _)| {
+        world == &world_filter() && *generation == refresh_generation()
+    });
+    use_bid_refresh(bid_log, directory_current && selected_auction.is_some());
     let current_page = page_number();
     let current_lot_filter = lot_filter();
     let on_lot_filter_change = use_callback(move |value: String| {
@@ -130,22 +142,20 @@ pub(crate) fn bid_log() -> Element {
         });
     });
     let bid_log_state = bid_log.read_unchecked();
-    // 同一查询的后台刷新保留完成快照；换世界、场次或 lot 后隐藏旧行和旧分页总数。
+    // 同查询后台刷新保留完成快照；目录确认场次已不可见后，迟到记录也不能恢复旧行和分页。
     let current_result = bid_log_state
         .as_ref()
         .filter(|((auction_id, world, lot_id, page, size), _)| {
-            auction_id == &selected_auction_id()
+            selected_auction.is_some()
+                && auction_id == &selected_auction_id()
                 && world == &world_filter()
                 && lot_id.as_deref().unwrap_or_default() == current_lot_filter.trim()
                 && *page == current_page
                 && *size == page_size()
         })
         .map(|(_, result)| result);
-    let body = match current_result {
-        None => rsx! {
-            p { class: "public-auction-bid-log-empty", role: "status", {t!("data-loading")} }
-        },
-        Some(Err(_)) => rsx! {
+    let body = match (current_auctions, current_result) {
+        (Some(Err(_)), _) | (Some(Ok(_)), Some(Err(_))) => rsx! {
             div { class: "public-auction-empty", role: "alert",
                 p { class: "public-auction-empty__title", {t!("data-error")} }
                 button {
@@ -156,46 +166,46 @@ pub(crate) fn bid_log() -> Element {
                 }
             }
         },
-        Some(Ok(None)) => rsx! {
+        (Some(Ok(auction_list)), _) if auction_list.is_empty() => rsx! {
             div { class: "public-auction-empty", role: "status",
-                p { class: "public-auction-empty__title", {t!("bidlog-no-rounds")} }
+                p { class: "public-auction-empty__title", {t!("data-empty")} }
             }
         },
-        Some(Ok(Some(page)))
-            if !public_page_matches(page.page, page.page_size, current_page, page_size()) =>
+        (Some(Ok(_)), Some(Ok(Some(page))))
+            if public_page_matches(page.page, page.page_size, current_page, page_size()) =>
         {
             rsx! {
-                p { role: "status", {t!("data-loading")} }
+                BidLogTable {
+                    page: page.clone(),
+                    current_page,
+                    world: world_filter(),
+                    lot_filter: current_lot_filter.clone(),
+                    on_page_change: move |next_page: i64| {
+                        // lot 输入可能仍在等待防抖写回；从当前状态提交，不能用旧 URL 丢掉筛选。
+                        let mut next = query_state_signal.peek().clone();
+                        next.page = next_page;
+                        write_public_query(&next, QueryWriteMode::Push);
+                        query_state_signal.set(next);
+                    },
+                    on_page_clamp: move |next_page: i64| {
+                        // 纠偏同样保留尚未防抖写回的 lot 筛选，不建立可返回的无效页条目。
+                        let mut next = query_state_signal.peek().clone();
+                        next.page = next_page;
+                        write_public_query(&next, QueryWriteMode::Replace);
+                        query_state_signal.set(next);
+                    },
+                    on_page_size_change: move |size| {
+                        let mut next = query_state_signal.peek().clone();
+                        next.page_size = super::super::normalize_public_page_size(size);
+                        next.page = 1;
+                        write_public_query(&next, QueryWriteMode::Push);
+                        query_state_signal.set(next);
+                    },
+                }
             }
         }
-        Some(Ok(Some(page))) => rsx! {
-            BidLogTable {
-                page: page.clone(),
-                current_page,
-                world: world_filter(),
-                lot_filter: current_lot_filter.clone(),
-                on_page_change: move |next_page: i64| {
-                    // lot 输入可能仍在等待防抖写回；从当前状态提交，不能用旧 URL 丢掉筛选。
-                    let mut next = query_state_signal.peek().clone();
-                    next.page = next_page;
-                    write_public_query(&next, QueryWriteMode::Push);
-                    query_state_signal.set(next);
-                },
-                on_page_clamp: move |next_page: i64| {
-                    // 纠偏同样保留尚未防抖写回的 lot 筛选，不建立可返回的无效页条目。
-                    let mut next = query_state_signal.peek().clone();
-                    next.page = next_page;
-                    write_public_query(&next, QueryWriteMode::Replace);
-                    query_state_signal.set(next);
-                },
-                on_page_size_change: move |size| {
-                    let mut next = query_state_signal.peek().clone();
-                    next.page_size = super::super::normalize_public_page_size(size);
-                    next.page = 1;
-                    write_public_query(&next, QueryWriteMode::Push);
-                    query_state_signal.set(next);
-                },
-            }
+        _ => rsx! {
+            p { class: "public-auction-bid-log-empty", role: "status", {t!("data-loading")} }
         },
     };
 
@@ -207,6 +217,8 @@ pub(crate) fn bid_log() -> Element {
                     span { {t!("world-label")} }
                     select {
                         id: "public-auction-bid-log-world",
+                        name: "world",
+                        autocomplete: "off",
                         value: world_filter(),
                         disabled: world_options.is_empty(),
                         onchange: move |event| {
@@ -232,6 +244,8 @@ pub(crate) fn bid_log() -> Element {
                     span { {t!("bidlog-round")} }
                     select {
                         id: "public-auction-bid-log-round",
+                        name: "auction",
+                        autocomplete: "off",
                         value: selected,
                         disabled: auction_options.is_empty(),
                         onchange: move |event| {
@@ -256,36 +270,40 @@ pub(crate) fn bid_log() -> Element {
                     }
                 }
             }
-            if let Some(auction) = selected_auction {
-                div { class: "public-auction-bid-log-round-header",
-                    strong { class: "public-auction-bid-log-round-number",
-                        {t!("bidlog-round-number", number: auction.sequence)}
-                    }
-                    span { class: "public-auction-bid-log-round-world",
-                        {t!("bidlog-world", world: super::world_label(&auction.world_id))}
-                    }
-                    span { class: bid_log_status_class(&auction.status),
-                        {bid_log_status_label(&auction.status)}
+            div { class: "public-auction-bid-log-heading",
+                if let Some(auction) = selected_auction {
+                    div { class: "public-auction-bid-log-round-header",
+                        strong { class: "public-auction-bid-log-round-number",
+                            {t!("bidlog-round-number", number: auction.sequence)}
+                        }
+                        span { class: "public-auction-bid-log-round-world",
+                            {t!("bidlog-world", world: super::world_label(&auction.world_id))}
+                        }
+                        span { class: bid_log_status_class(&auction.status),
+                            {bid_log_status_label(&auction.status)}
+                        }
                     }
                 }
-            }
-            div { class: "public-auction-bid-log-toolbar",
-                label { r#for: "public-auction-bid-log-filter", {t!("bidlog-filter-label")} }
-                input {
-                    id: "public-auction-bid-log-filter",
-                    r#type: "search",
-                    enterkeyhint: "search",
-                    autocapitalize: "none",
-                    spellcheck: "false",
-                    value: current_lot_filter.clone(),
-                    placeholder: t!("bidlog-filter-placeholder"),
-                    oninput: move |event| on_lot_filter_change.call(event.value()),
-                }
-                if !current_lot_filter.is_empty() {
-                    button {
-                        r#type: "button",
-                        onclick: move |_| on_lot_filter_change.call(String::new()),
-                        {t!("bidlog-filter-clear")}
+                div { class: "public-auction-bid-log-toolbar",
+                    label { r#for: "public-auction-bid-log-filter", {t!("bidlog-filter-label")} }
+                    input {
+                        id: "public-auction-bid-log-filter",
+                        name: "lot",
+                        autocomplete: "off",
+                        r#type: "search",
+                        enterkeyhint: "search",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        value: current_lot_filter.clone(),
+                        placeholder: t!("bidlog-filter-placeholder"),
+                        oninput: move |event| on_lot_filter_change.call(event.value()),
+                    }
+                    if !current_lot_filter.is_empty() {
+                        button {
+                            r#type: "button",
+                            onclick: move |_| on_lot_filter_change.call(String::new()),
+                            {t!("bidlog-filter-clear")}
+                        }
                     }
                 }
             }

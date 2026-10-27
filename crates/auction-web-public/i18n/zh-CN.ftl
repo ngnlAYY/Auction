@@ -53,6 +53,7 @@ auction-history-total = 成交总额
 auction-history-links = 查看
 auction-history-link-lots = 拍品
 auction-history-link-bidlog = 出价记录
+auction-history-link-forum = 论坛地址
 
 
 filter-label = 按类型筛选拍品
@@ -159,7 +160,7 @@ auction-empty-no-auction-hint = 拍卖每周举行——周五再来看看吧。
 
 
 page-auctions-title = 拍卖历史
-page-auctions-note = 浏览历届拍卖，查看该期拍品或出价记录。
+page-auctions-note = 浏览历届拍卖，查看该期拍品。
 auction-history-empty-title = 暂无拍卖
 auction-history-empty-hint = 拍卖结算后会显示在此。
 page-bidlog-title = 出价记录
@@ -250,7 +251,6 @@ bidlog-filter-label = 按拍品筛选
 bidlog-filter-placeholder = 拍品 ID 或编号
 bidlog-filter-clear = 清除
 bidlog-filter-empty = 没有符合拍品筛选条件的竞价。
-bidlog-no-rounds = 该世界暂无拍卖。
 bidlog-empty = 本届拍卖暂无出价。
 
 history-world = 世界

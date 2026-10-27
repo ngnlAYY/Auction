@@ -1195,6 +1195,7 @@ admin-action-working = 処理中…
 admin-users-loading = ユーザーを読み込んでいます…
 admin-users-filter-name = 名前の前方一致
 admin-users-filter-status = ステータス
+admin-users-filter-apply = ユーザーを検索
 admin-users-status-all = すべて
 admin-users-status-active = 有効
 admin-users-status-blacklisted = ブラックリスト

@@ -44,6 +44,7 @@ pub(super) fn AdminUserTable(
     rsx! {
         form {
             class: "admin-users-filter",
+            autocomplete: "off",
             onsubmit: move |event| {
                 event.prevent_default();
                 on_name_apply.call(name_draft().trim().to_owned());
@@ -53,6 +54,11 @@ pub(super) fn AdminUserTable(
                 {t!("admin-users-filter-name")}
                 input {
                     id: "user-name-filter",
+                    name: "name",
+                    r#type: "search",
+                    autocapitalize: "none",
+                    spellcheck: "false",
+                    enterkeyhint: "search",
                     maxlength: "256",
                     value: name_draft(),
                     oninput: move |event| {
@@ -65,6 +71,7 @@ pub(super) fn AdminUserTable(
                 {t!("admin-users-filter-status")}
                 select {
                     id: "user-status-filter",
+                    name: "status",
                     value: status_filter_value(status),
                     onchange: move |event| {
                         on_status_change.call(parse_status_filter(&event.value()));
@@ -74,6 +81,7 @@ pub(super) fn AdminUserTable(
                     option { value: "blacklisted", {t!("admin-users-status-blacklisted")} }
                 }
             }
+            button { r#type: "submit", class: "admin-btn-secondary", {t!("admin-users-filter-apply")} }
         }
         div { class: "admin-users-table-wrap",
             table { class: "admin-users-table",

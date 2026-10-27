@@ -53,6 +53,7 @@ auction-history-total = 成約合計
 auction-history-links = 表示
 auction-history-link-lots = 出品
 auction-history-link-bidlog = 入札ログ
+auction-history-link-forum = フォーラム
 
 
 filter-label = 種類で出品を絞り込む
@@ -159,7 +160,7 @@ auction-empty-no-auction-hint = オークションは毎週開催されます—
 
 
 page-auctions-title = オークション履歴
-page-auctions-note = 過去のオークションを一覧し、各回の出品や入札ログを開けます。
+page-auctions-note = 過去のオークションを一覧し、各回の出品を確認できます。
 auction-history-empty-title = オークションはまだありません
 auction-history-empty-hint = 精算されたオークションがここに表示されます。
 page-bidlog-title = 入札ログ
@@ -250,7 +251,6 @@ bidlog-filter-label = 出品で絞り込む
 bidlog-filter-placeholder = 出品 ID またはコード
 bidlog-filter-clear = クリア
 bidlog-filter-empty = この出品フィルターに一致する入札はありません。
-bidlog-no-rounds = このワールドにはまだオークションがありません。
 bidlog-empty = このオークションにはまだ入札がありません。
 
 history-world = ワールド

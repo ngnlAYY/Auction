@@ -1134,6 +1134,7 @@ admin-action-working = Working…
 admin-users-loading = Loading users…
 admin-users-filter-name = Name prefix
 admin-users-filter-status = Status
+admin-users-filter-apply = Search users
 admin-users-status-all = All
 admin-users-status-active = Active
 admin-users-status-blacklisted = Blacklisted

@@ -93,6 +93,10 @@ pub(super) fn AdminRulesWorkspace(
                 }
                 input {
                     id: "rules-locale",
+                    name: "locale",
+                    autocomplete: "off",
+                    autocapitalize: "none",
+                    spellcheck: "false",
                     maxlength: "35",
                     placeholder: t!("admin-rules-locale-placeholder"),
                     required: true,
@@ -120,6 +124,7 @@ pub(super) fn AdminRulesWorkspace(
                 class: "admin-rules-default-locale",
                 disabled: true,
                 id: "rules-default-locale",
+                name: "default_locale",
                 value: DEFAULT_RULES_LOCALE,
                 for locale in locales() {
                     option { key: "{locale}", value: "{locale}", "{locale}" }
@@ -198,6 +203,8 @@ pub(super) fn AdminRulesWorkspace(
                             }
                             input {
                                 id: "rules-title-input",
+                                name: "title",
+                                autocomplete: "off",
                                 required: true,
                                 r#type: "text",
                                 value: value.title.clone(),
@@ -220,6 +227,8 @@ pub(super) fn AdminRulesWorkspace(
                             }
                             textarea {
                                 id: "rules-markdown",
+                                name: "markdown",
+                                autocomplete: "off",
                                 spellcheck: "false",
                                 value: value.markdown.clone(),
                                 disabled: frozen(),

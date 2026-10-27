@@ -3,12 +3,39 @@
 //! 推断为本地状态。未接入的后端必须显式报告能力缺失。
 
 use chrono::{DateTime, Utc};
+use url::Url;
 use uuid::Uuid;
 
 use super::ApplicationFuture;
 
 /// Public 论坛同步状态的闭集。
 pub const PUBLIC_FORUM_STATUSES: [&str; 4] = ["pending", "publishing", "published", "failed"];
+
+/// 通过已发布内容证明与地址校验的窄投影；私有字段阻止裸 URL 绕过校验进入公开 DTO。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicForumLink {
+    url: String,
+}
+
+impl PublicForumLink {
+    /// 只接受正内容版本、有效同步时间及有界安全 HTTPS 地址。
+    pub fn new(
+        url: String,
+        content_revision: i64,
+        content_synced_at: Option<DateTime<Utc>>,
+    ) -> Result<Self, &'static str> {
+        validate_forum_content_proof(content_revision, content_synced_at)?;
+        if !valid_forum_url(&url) {
+            return Err("公开论坛主题地址无效");
+        }
+        Ok(Self { url })
+    }
+
+    /// 将已经校验的地址移交 HTTP DTO，不重新分配或规范化原始地址。
+    pub fn into_url(self) -> String {
+        self.url
+    }
+}
 
 /// Public 论坛镜像安全投影。
 /// 已发布正文仍可能包含完整装备 URL，不能因进入只读镜像而恢复明文调试输出。
@@ -70,7 +97,6 @@ impl PublicForumThread {
             || !valid_optional_timestamp(self.content_last_success_at)
             || !valid_optional_timestamp(self.content_last_error_at)
             || !valid_optional_text(self.content_last_error_code.as_deref(), 64)
-            || !valid_optional_text(self.thread_url.as_deref(), 2048)
             || !valid_optional_text(self.title.as_deref(), 512)
             || !valid_optional_multiline_text(self.body.as_deref(), 1_000_000)
         {
@@ -79,17 +105,45 @@ impl PublicForumThread {
         if self.content_last_error_at.is_some() != self.content_last_error_code.is_some() {
             return Err("公开论坛同步错误投影不完整");
         }
-        if self.status == "published"
-            && (self.content_revision <= 0
-                || self.content_synced_at.is_none()
-                || [self.thread_url.as_deref(), self.title.as_deref(), self.body.as_deref()]
-                    .into_iter()
-                    .any(|value| value.is_none_or(str::is_empty)))
-        {
-            return Err("已发布论坛投影缺少内容");
+        if self.status == "published" {
+            let url = self.thread_url.as_deref().ok_or("已发布论坛投影缺少内容")?;
+            if !valid_forum_url(url) {
+                return Err("公开论坛主题地址无效");
+            }
+            validate_forum_content_proof(self.content_revision, self.content_synced_at)?;
+            if [self.title.as_deref(), self.body.as_deref()]
+                .into_iter()
+                .any(|value| value.is_none_or(str::is_empty))
+            {
+                return Err("已发布论坛投影缺少内容");
+            }
+        } else if !self.thread_url.as_deref().is_none_or(valid_forum_url) {
+            return Err("公开论坛同步投影无效");
         }
         Ok(())
     }
+}
+
+/// 历史 published 行可能尚无固定楼层内容证明；不能仅凭状态公开主题地址。
+fn validate_forum_content_proof(
+    content_revision: i64,
+    content_synced_at: Option<DateTime<Utc>>,
+) -> Result<(), &'static str> {
+    if content_revision <= 0 || content_synced_at.is_none_or(|value| value.timestamp_micros() == 0)
+    {
+        return Err("公开论坛内容证明无效");
+    }
+    Ok(())
+}
+
+fn valid_forum_url(value: &str) -> bool {
+    valid_optional_text(Some(value), 2048)
+        && Url::parse(value).is_ok_and(|url| {
+            url.scheme() == "https"
+                && url.host_str().is_some()
+                && url.username().is_empty()
+                && url.password().is_none()
+        })
 }
 
 fn valid_optional_timestamp(value: Option<DateTime<Utc>>) -> bool {

@@ -25,10 +25,20 @@ pub struct AuctionSummaryResponse {
     pub state_version: i64,
 }
 
-/// Public 历史拍卖列表响应。
+/// v2 拍卖摘要：沿用 v1 的平铺字段，论坛地址只在新版本中发布。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct AuctionListResponse {
-    pub auctions: Vec<AuctionSummaryResponse>,
+pub struct AuctionSummaryV2Response {
+    #[serde(flatten)]
+    pub auction: AuctionSummaryResponse,
+    /// 已发布且有内容证明的论坛主题地址；没有主题或尚未对账时省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forum_thread_url: Option<String>,
+}
+
+/// Public 历史拍卖分页信封；默认条目维持 v1 契约，v2 显式选择扩展摘要。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AuctionListResponse<T = AuctionSummaryResponse> {
+    pub auctions: Vec<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<i64>,
     pub page_size: i64,

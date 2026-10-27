@@ -92,6 +92,8 @@ pub(super) fn RuntimeConfigFields(
                             label {
                                 span { {t!("admin-runtime-mailbox-world")} }
                                 select {
+                                    name: "mailboxes-{index}-world",
+                                    autocomplete: "off",
                                     disabled,
                                     value: mailbox.world_id,
                                     onchange: {
@@ -110,6 +112,10 @@ pub(super) fn RuntimeConfigFields(
                                 span { {t!("admin-runtime-mailbox-key")} }
                                 input {
                                     r#type: "text",
+                                    name: "mailboxes-{index}-key",
+                                    autocomplete: "off",
+                                    autocapitalize: "none",
+                                    spellcheck: "false",
                                     disabled,
                                     value: mailbox.mailbox_key,
                                     oninput: {
@@ -279,6 +285,7 @@ fn SwitchField(
         label { class: "admin-runtime-switch",
             input {
                 id: validation::field_id(path),
+                name: path,
                 "data-runtime-label": label.clone(),
                 r#type: "checkbox",
                 disabled,
@@ -308,6 +315,10 @@ fn TextField(
             span { "{label}" }
             input {
                 id: validation::field_id(path),
+                name: path,
+                autocomplete: "off",
+                autocapitalize: "none",
+                spellcheck: "false",
                 "data-runtime-label": label.clone(),
                 r#type: "text",
                 disabled,
@@ -341,6 +352,9 @@ fn NumberField(
             span { "{label}" }
             input {
                 id: validation::field_id(path),
+                name: path,
+                autocomplete: "off",
+                inputmode: "numeric",
                 "data-runtime-number": path,
                 "data-runtime-label": label.clone(),
                 aria_invalid: message.as_ref().map(|_| "true"),
@@ -377,6 +391,10 @@ fn ListField(
             span { "{label}" }
             textarea {
                 id: validation::field_id(path),
+                name: path,
+                autocomplete: "off",
+                autocapitalize: "none",
+                spellcheck: "false",
                 "data-runtime-label": label.clone(),
                 disabled,
                 rows: "3",
@@ -405,6 +423,8 @@ fn TemplateField(
             span { "{label}" }
             textarea {
                 id: validation::field_id(path),
+                name: path,
+                autocomplete: "off",
                 "data-runtime-label": label.clone(),
                 disabled,
                 rows: "4",
@@ -433,6 +453,8 @@ fn SelectField(
             span { "{label}" }
             select {
                 id: validation::field_id(path),
+                name: path,
+                autocomplete: "off",
                 "data-runtime-label": label.clone(),
                 disabled,
                 value,

@@ -316,7 +316,7 @@ pub use equipment_link::{
     PublicEquipmentGameLink, PublicEquipmentLinkResolver, PublicEquipmentLinkSecret,
     PublicEquipmentLinkSecretReader, PublicEquipmentLinkTarget,
 };
-pub use forum::{PUBLIC_FORUM_STATUSES, PublicForumReader, PublicForumThread};
+pub use forum::{PUBLIC_FORUM_STATUSES, PublicForumLink, PublicForumReader, PublicForumThread};
 pub use forum_colors::{
     EquipmentColorDecision, EquipmentColorFacts, EquipmentColorMatch, EquipmentColorRule,
     EquipmentGroup, PEERLESS_COLORS, equipment_color_decision, validate_equipment_color_rules,

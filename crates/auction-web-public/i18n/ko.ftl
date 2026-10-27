@@ -53,6 +53,7 @@ auction-history-total = 낙찰 합계
 auction-history-links = 보기
 auction-history-link-lots = 출품
 auction-history-link-bidlog = 입찰 로그
+auction-history-link-forum = 포럼 주소
 
 
 filter-label = 유형별로 출품 필터링
@@ -159,7 +160,7 @@ auction-empty-no-auction-hint = 경매는 매주 열려요 — 금요일에 다�
 
 
 page-auctions-title = 경매 이력
-page-auctions-note = 지난 경매를 둘러보고 각 회차의 출품 또는 입찰 로그를 여세요.
+page-auctions-note = 지난 경매를 둘러보고 각 회차의 출품을 확인하세요.
 auction-history-empty-title = 아직 경매가 없습니다
 auction-history-empty-hint = 정산된 경매가 여기에 표시됩니다.
 page-bidlog-title = 입찰 로그
@@ -250,7 +251,6 @@ bidlog-filter-label = 품목으로 필터
 bidlog-filter-placeholder = 품목 ID 또는 코드
 bidlog-filter-clear = 지우기
 bidlog-filter-empty = 이 품목 필터와 일치하는 입찰이 없습니다.
-bidlog-no-rounds = 이 월드에는 아직 경매가 없어요.
 bidlog-empty = 이 경매에는 아직 입찰이 없어요.
 
 history-world = 월드

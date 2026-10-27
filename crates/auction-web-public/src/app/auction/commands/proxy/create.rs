@@ -194,6 +194,7 @@ pub(super) fn ProxyCreateForm(
                     label { for: maximum_id.clone(), {t!("proxy-create-maximum-label")} }
                     input {
                         id: maximum_id,
+                        name: "maximum_amount",
                         r#type: "text",
                         autofocus: true,
                         // 代理上限允许 K/M 缩写，手机键盘必须保留字母输入入口。
@@ -202,10 +203,18 @@ pub(super) fn ProxyCreateForm(
                         autocapitalize: "none",
                         autocomplete: "off",
                         spellcheck: "false",
-                        aria_describedby: "public-proxy-amount-hint",
+                        aria_invalid: validation().is_some().to_string(),
+                        aria_describedby: if validation().is_some() {
+                            "public-proxy-amount-hint public-proxy-error"
+                        } else {
+                            "public-proxy-amount-hint"
+                        },
                         disabled: submitting() || blocked,
                         value: "{maximum_amount}",
-                        oninput: move |event| maximum_amount.set(event.value()),
+                        oninput: move |event| {
+                            maximum_amount.set(event.value());
+                            validation.set(None);
+                        },
                     }
                     {amount_hint(
                         &maximum_amount(),
@@ -259,7 +268,7 @@ pub(super) fn ProxyCreateForm(
                     p { class: "action-feedback action-feedback--notice", role: "note", "{blocked_reason}" }
                 }
                 if let Some(message) = validation() {
-                    p { class: "action-feedback action-feedback--error", role: "alert", "{message}" }
+                    p { id: "public-proxy-error", class: "action-feedback action-feedback--error", role: "alert", "{message}" }
                 }
                 if let Some(error) = (command.failure)() {
                     p { class: "action-feedback action-feedback--error", role: "alert",

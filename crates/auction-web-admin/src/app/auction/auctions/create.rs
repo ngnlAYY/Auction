@@ -251,6 +251,8 @@ fn AdminAuctionCreateFields(
                 }
                 select {
                     id: "create-world",
+                    name: "world",
+                    autocomplete: "off",
                     disabled: frozen(),
                     autofocus: true,
                     required: true,
@@ -277,6 +279,9 @@ fn AdminAuctionCreateFields(
                 }
                 input {
                     id: "create-sequence",
+                    name: "sequence",
+                    autocomplete: "off",
+                    inputmode: "numeric",
                     r#type: "number",
                     min: "1",
                     required: true,
@@ -301,6 +306,8 @@ fn AdminAuctionCreateFields(
                 }
                 input {
                     id: "create-preview",
+                    name: "preview_scheduled_at",
+                    autocomplete: "off",
                     r#type: "datetime-local",
                     required: true,
                     disabled: frozen(),
@@ -324,6 +331,8 @@ fn AdminAuctionCreateFields(
                 }
                 input {
                     id: "create-open",
+                    name: "scheduled_open_at",
+                    autocomplete: "off",
                     r#type: "datetime-local",
                     required: true,
                     disabled: frozen(),
@@ -347,6 +356,8 @@ fn AdminAuctionCreateFields(
                 }
                 input {
                     id: "create-end",
+                    name: "scheduled_end_at",
+                    autocomplete: "off",
                     r#type: "datetime-local",
                     required: true,
                     disabled: frozen(),

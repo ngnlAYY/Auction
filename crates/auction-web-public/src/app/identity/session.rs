@@ -39,6 +39,16 @@ pub(super) fn login(return_to: Option<String>) -> Element {
     let mut key = use_signal(String::new);
     let mut result = use_signal(|| None::<LoginState>);
     let mut submitting = use_signal(|| false);
+    let mut key_input = use_signal(|| None::<MountedEvent>);
+    use_effect(move || {
+        if matches!(&*result.read(), Some(LoginState::Failure(_)))
+            && let Some(input) = key_input()
+        {
+            spawn(async move {
+                let _ = input.set_focus(true).await;
+            });
+        }
+    });
     let mut session_resource = use_context::<PublicSessionResource>();
     let registration_accounts = use_resource(|| async move {
         fetch_registration_info().await.map(|info| info.bot_players.join(", "))
@@ -94,6 +104,7 @@ pub(super) fn login(return_to: Option<String>) -> Element {
                 label { for: "public-login-key", {t!("login-key-label")} }
                 input {
                     id: "public-login-key",
+                    name: "login_key",
                     r#type: "password",
                     autocomplete: "current-password",
                     autocapitalize: "none",
@@ -110,7 +121,11 @@ pub(super) fn login(return_to: Option<String>) -> Element {
                     "data-masked": (submitting() || failed).to_string(),
                     disabled: submitting(),
                     value: "{key}",
-                    oninput: move |event| key.set(event.value()),
+                    onmounted: move |event| key_input.set(Some(event)),
+                    oninput: move |event| {
+                        key.set(event.value());
+                        result.set(None);
+                    },
                 }
                 if let Some(LoginState::Failure(error)) = result_snapshot.as_ref() {
                     p { id: "public-login-error", class: "public-account-login-error", role: "alert",
@@ -124,7 +139,8 @@ pub(super) fn login(return_to: Option<String>) -> Element {
                 }
                 button {
                     r#type: "submit",
-                    disabled: submitting() || key.read().trim().is_empty(),
+                    disabled: submitting(),
+                    aria_busy: submitting().to_string(),
                     "data-error": failed.to_string(),
                     if submitting() { {t!("login-working")} } else { {t!("login-submit")} }
                 }

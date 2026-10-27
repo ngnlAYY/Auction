@@ -48,6 +48,9 @@ GET/PUT：两者复用会话、来源/CSRF、限流、strict JSON、JSON 405 与
 [public/registration.rs](crates/auction-http/src/http/public/registration.rs) 拥有 P29 匿名注册说明，仅读取装配根注入的 bot 名单快照，
 不读取配置文件、数据库或游戏凭据。响应直接序列化共享安全 DTO，不逐请求复制名单；方法、缓存与空名单边界见
 [注册提示契约](docs/contracts/routes.md#p29-注册账号提示)。
+[routes/reads/auctions.rs](crates/auction-http/src/http/routes/reads/auctions.rs) 共同拥有 P07 v1 与 P30 v2；筛选、分页、
+游标和错误处理复用同一路径，v2 按请求选择论坛地址投影并映射独立条目 DTO，v1 保留原字段闭集。
+查询次数和页面升级顺序见[v2 拍卖历史契约](docs/contracts/routes.md#p30-v2-拍卖历史与论坛地址)。
 [admin/forum/status.rs](crates/auction-http/src/http/admin/forum/status.rs) 拥有 Admin 认证论坛状态 GET，
 严格空查询、`no-store`、不访远端论坛、不执行恢复授权。
 [admin/runtime_config/taxonomy.rs](crates/auction-http/src/http/admin/runtime_config/taxonomy.rs) 把领域统一装备词典

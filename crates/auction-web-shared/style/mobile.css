@@ -35,23 +35,27 @@
     }
   }
 
-  @media screen and (max-width: 48rem) {
-    .ui-pager,
-    .ui-pager__jump {
-      align-items: stretch;
-    }
-
-    .ui-pager__controls,
-    .ui-pager__jump {
+  @media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
+    /* 导航按 DOM 顺序占首行，轨道按内容宽度靠右；数字组独立换行，两侧按钮保留触控列。 */
+    .ui-pager__controls {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, max-content));
+      justify-content: end;
+      align-items: start;
       inline-size: 100%;
     }
 
-    .ui-pager__controls {
-      justify-content: space-between;
+    .ui-pager--numbered .ui-pager__controls {
+      grid-template-columns: var(--size-target) minmax(0, max-content) var(--size-target);
     }
 
-    .ui-pager--numbered {
-      justify-content: flex-start;
+    .ui-pager__controls > button {
+      inline-size: 100%;
+    }
+
+    .ui-pager__status {
+      align-self: center;
+      text-align: center;
     }
   }
 }

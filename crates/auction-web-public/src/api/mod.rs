@@ -60,7 +60,7 @@ pub(crate) use model::{
     CatalogLevelFilter, CatalogRow, LotEnvelopeRows, PriceHistoryQuery, lot_code_for,
 };
 pub(crate) use queries::{
-    LotDetailFetchError, PriceHistoryFetchError, fetch_auction_list, fetch_auction_page,
+    LotDetailFetchError, PriceHistoryFetchError, fetch_auction_history_page, fetch_auction_list,
     fetch_bid_log_auctions, fetch_bid_log_page, fetch_current_auction, fetch_current_lots,
     fetch_historical_auction, fetch_lot_bid_log, fetch_lot_detail, fetch_price_history,
     fetch_worlds,
@@ -81,6 +81,7 @@ pub(crate) use status::fetch_public_readiness;
 use auction_contracts::ApiResponse;
 pub(crate) use auction_contracts::{
     AuctionListResponse as AuctionListPage, AuctionSummaryResponse as HistoricalAuction,
+    AuctionSummaryV2Response as HistoricalAuctionWithForum,
     CurrentAuctionItemResponse as CurrentAuction, PublicBidLogEntryResponse as BidLogEntry,
     PublicBidLogListResponse as BidLogPage, PublicEquipmentResponse as EquipmentDetail,
     PublicLiveLotResponse as LiveLot, PublicLotDetailItemResponse as LotDetailItem,

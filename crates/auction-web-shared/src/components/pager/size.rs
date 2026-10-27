@@ -18,6 +18,7 @@ pub(super) fn PageSizePicker(
 ) -> Element {
     let mut input = use_signal(|| page_size.to_string());
     let mut touched = use_signal(|| false);
+    let mut input_element = use_signal(|| None::<MountedEvent>);
     let hint_id = use_hook(|| format!("page-size-hint-{}", uuid::Uuid::new_v4()));
     use_effect(use_reactive((&page_size,), move |(size,)| {
         input.set(size.to_string());
@@ -40,6 +41,7 @@ pub(super) fn PageSizePicker(
             select {
                 class: "ui-pager__select",
                 name: "page_size",
+                autocomplete: "off",
                 value: page_size.to_string(),
                 onchange: move |event| {
                     let value = event.value();
@@ -77,6 +79,10 @@ pub(super) fn PageSizePicker(
                     touched.set(true);
                     if let Some(size) = target {
                         on_change.call(size);
+                    } else if let Some(input) = input_element() {
+                        spawn(async move {
+                            let _ = input.set_focus(true).await;
+                        });
                     }
                 },
                 span { id: hint_id.clone(), class: "ui-pager__sr-only", "{invalid_label}" }
@@ -90,6 +96,8 @@ pub(super) fn PageSizePicker(
                         pattern: "[0-9]*[1-9][0-9]*",
                         required: true,
                         autocomplete: "off",
+                        enterkeyhint: "done",
+                        onmounted: move |event| input_element.set(Some(event)),
                         aria_describedby: hint_id,
                         aria_invalid: if invalid { "true" } else { "false" },
                         title: invalid_label.clone(),
@@ -98,7 +106,7 @@ pub(super) fn PageSizePicker(
                         onblur: move |_| touched.set(true),
                     }
                 }
-                button { r#type: "submit", disabled: target.is_none(), "{apply_label}" }
+                button { r#type: "submit", "{apply_label}" }
                 if invalid {
                     span { class: "ui-pager__error", role: "status", "{invalid_label}" }
                 }
