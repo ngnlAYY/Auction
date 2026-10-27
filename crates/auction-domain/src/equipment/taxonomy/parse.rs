@@ -129,12 +129,17 @@ fn preceding_prefix<'a>(value: &'a str, kind: &str) -> Option<&'a str> {
 fn bounded_heavy_identity(value: &str) -> Option<(ResolvedKind, String)> {
     let (leading, slot) = value.rsplit_once(' ')?;
     let (prefix, material) = leading.rsplit_once(' ').unwrap_or(("", leading));
-    let kind = bounded_heavy_kind(&format!("{material} {slot}"))?;
+    let kind = bounded_heavy_kind_parts(material, slot)?;
     Some((kind, prefix.to_owned()))
 }
 
 fn bounded_heavy_kind(value: &str) -> Option<ResolvedKind> {
     let (material, raw_slot) = value.split_once(' ')?;
+    bounded_heavy_kind_parts(material, raw_slot)
+}
+
+// 名称解析已取得两个 token；直接借用，避免为验证重建临时完整名称。
+fn bounded_heavy_kind_parts(material: &str, raw_slot: &str) -> Option<ResolvedKind> {
     let material = ["Chain", "Reactive"]
         .into_iter()
         .find(|candidate| candidate.eq_ignore_ascii_case(material))?;

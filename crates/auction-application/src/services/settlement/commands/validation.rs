@@ -6,10 +6,61 @@ use auction_domain::{
     CommandId, CompetitionPlan, CompetitionTrigger, SettlementAmount, SettlementPlan,
 };
 
-use crate::SettlementSnapshot;
+use crate::{ApplicationError, CommandLedgerError, SettlementSnapshot, SettlementTransactionError};
 
-use super::SettleAuctionCommand;
 use super::obligations::build_obligations;
+use super::{
+    SettleAuctionCommand, settlement_claim_command_id, settlement_complete_command_id,
+    settlement_complete_request_hash, settlement_workflow_id,
+};
+
+/// 校验所有结算账本世代共用的身份与时间形状。
+pub(super) fn validate_command_identity(
+    command: SettleAuctionCommand,
+) -> Result<(), ApplicationError> {
+    if command.command_id.is_nil()
+        || command.claim_command_id.is_nil()
+        || command.workflow_id.is_nil()
+        || command.auction_id.is_nil()
+        || command.command_id == command.claim_command_id
+        || command.workflow_id == command.command_id.as_uuid()
+        || command.workflow_id == command.claim_command_id.as_uuid()
+        || command.due_at.timestamp_nanos_opt().is_none()
+        || command.now.timestamp_nanos_opt().is_none()
+        || command.now < command.due_at
+    {
+        return Err(
+            SettlementTransactionError::Failed("结算命令身份或时间世代无效".to_owned()).into()
+        );
+    }
+    Ok(())
+}
+
+/// 新版完成命令必须与锁内 workflow、领取命令、截止世代和原稳定摘要一致。
+/// 旧版 settlement_complete 使用独立防腐重放，不经过这个门禁。
+pub(super) fn validate_current_settlement_identity(
+    command: SettleAuctionCommand,
+    snapshot: &SettlementSnapshot,
+) -> Result<(), ApplicationError> {
+    validate_command_identity(command)?;
+    let auction_id = command.auction_id.as_uuid();
+    if snapshot.auction_id != command.auction_id
+        || snapshot.workflow_id != Some(command.workflow_id)
+        || snapshot.claim_command_id != Some(command.claim_command_id)
+        || snapshot.due_at != Some(command.due_at)
+        || settlement_workflow_id(auction_id, command.due_at) != Some(command.workflow_id)
+        || settlement_claim_command_id(auction_id, command.due_at) != Some(command.claim_command_id)
+        || settlement_complete_command_id(auction_id, command.due_at) != Some(command.command_id)
+    {
+        return Err(SettlementTransactionError::Conflict.into());
+    }
+    if settlement_complete_request_hash(auction_id, command.workflow_id, command.due_at)?
+        != command.request_hash
+    {
+        return Err(CommandLedgerError::Conflict.into());
+    }
+    Ok(())
+}
 
 /// 从锁内 lot、冻结策略和首次结算资金池重建当前命令结果，拒绝只满足内部守恒但不符合
 /// 当前版本算法的账本 payload。结算后 `snapshot.opening_pool` 已是最新池余额，不能拿它代替

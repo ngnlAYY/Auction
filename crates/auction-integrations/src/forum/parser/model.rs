@@ -1,11 +1,13 @@
 //! 论坛预览解析过程中的内部模型。
 
+use std::fmt;
+
 use auction_application::{AdminForumLot, AdminForumWarning};
 
 pub type CatalogData = (Vec<String>, Vec<AdminForumLot>);
 pub type CatalogParse = (CatalogData, Vec<AdminForumWarning>);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ParsedPost {
     pub(super) id: String,
     /// 论坛 `showuser` 的稳定数字账号键。
@@ -16,11 +18,32 @@ pub struct ParsedPost {
     pub(super) edited: bool,
 }
 
+impl fmt::Debug for ParsedPost {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ParsedPost")
+            .field("author_id_present", &self.author_id.is_some())
+            .field("author_present", &self.author.is_some())
+            .field("text_bytes", &self.text.len())
+            .field("edited", &self.edited)
+            .finish()
+    }
+}
+
 /// 单次 DOM 解析得到的论坛页面事实；不保留原始 HTML、Cookie 或表单 token。
-#[derive(Debug)]
 pub(crate) struct ParsedHtmlPage {
     posts: Vec<ParsedPost>,
     navigation_references: Vec<String>,
+}
+
+impl fmt::Debug for ParsedHtmlPage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ParsedHtmlPage")
+            .field("post_count", &self.posts.len())
+            .field("navigation_reference_count", &self.navigation_references.len())
+            .finish()
+    }
 }
 
 impl ParsedHtmlPage {

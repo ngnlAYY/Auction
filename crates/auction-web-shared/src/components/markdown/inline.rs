@@ -6,8 +6,8 @@ use super::model::Inline;
 /// 超限后把剩余内容按纯文本处理，避免栈耗尽或指数级解析开销。
 const MAX_INLINE_DEPTH: usize = 8;
 
-/// 单个链接最多扫描 1 KiB 标签和 4 KiB 目标；超限按文本处理，不截断正文。
-/// 固定窗口避免大量未闭合 `[` / `<http://` 对同一长后缀反复全量搜索。
+/// 单个链接最多接受 1 KiB 标签和 4 KiB 目标；超限按文本处理，不截断正文。
+/// 记住下一个闭合符的位置，避免大量未闭合 `[` / `<http://` 重复扫描重叠窗口。
 const MAX_LINK_LABEL_BYTES: usize = 1024;
 const MAX_LINK_TARGET_BYTES: usize = 4096;
 
@@ -24,6 +24,7 @@ fn parse_inline_at(value: &str, depth: usize) -> Vec<Inline> {
     let mut nodes = Vec::new();
     let mut text = String::new();
     let mut index = 0;
+    let mut delimiters = LinkDelimiters::default();
 
     while index < value.len() {
         let rest = &value[index..];
@@ -35,7 +36,7 @@ fn parse_inline_at(value: &str, depth: usize) -> Vec<Inline> {
             continue;
         }
 
-        if let Some((label, target, consumed)) = bracket_link(rest, true)
+        if let Some((label, target, consumed)) = bracket_link(value, index, true, &mut delimiters)
             && let Some(source) = safe_link_target(target)
         {
             flush_text(&mut nodes, &mut text);
@@ -44,7 +45,7 @@ fn parse_inline_at(value: &str, depth: usize) -> Vec<Inline> {
             continue;
         }
 
-        if let Some((label, target, consumed)) = bracket_link(rest, false)
+        if let Some((label, target, consumed)) = bracket_link(value, index, false, &mut delimiters)
             && let Some(target) = safe_link_target(target)
         {
             flush_text(&mut nodes, &mut text);
@@ -87,15 +88,16 @@ fn parse_inline_at(value: &str, depth: usize) -> Vec<Inline> {
         }
 
         if (rest.starts_with("<http://") || rest.starts_with("<https://"))
-            && let Some(close) = bounded_prefix(rest, MAX_LINK_TARGET_BYTES + 2).find('>')
-            && let Some(target) = safe_link_target(&rest[1..close])
+            && let Some(close) = next_delimiter(value, index + 1, ">", &mut delimiters.autolink)
+            && close - index - 1 <= MAX_LINK_TARGET_BYTES
+            && let Some(target) = safe_link_target(&value[index + 1..close])
         {
             flush_text(&mut nodes, &mut text);
             nodes.push(Inline::Link {
-                label: vec![Inline::Text(rest[1..close].to_owned())],
+                label: vec![Inline::Text(value[index + 1..close].to_owned())],
                 target,
             });
-            index += close + 1;
+            index = close + 1;
             continue;
         }
 
@@ -124,30 +126,56 @@ impl InlineKind {
     }
 }
 
-fn bracket_link(value: &str, image: bool) -> Option<(&str, &str, usize)> {
-    let prefix_length = if image { 2 } else { 1 };
-    if image {
-        if !value.starts_with("![") {
-            return None;
-        }
-    } else if !value.starts_with('[') {
-        return None;
-    }
-    let label_and_close = bounded_prefix(&value[prefix_length..], MAX_LINK_LABEL_BYTES + 2);
-    let close_label = label_and_close.find("](")? + prefix_length;
-    let target_start = close_label + 2;
-    let close_target =
-        bounded_prefix(&value[target_start..], MAX_LINK_TARGET_BYTES + 1).find(')')? + target_start;
-    Some((&value[prefix_length..close_label], &value[target_start..close_target], close_target + 1))
+#[derive(Default)]
+struct LinkDelimiters {
+    label: Option<usize>,
+    target: Option<usize>,
+    autolink: Option<usize>,
 }
 
-/// 只取完整 UTF-8 字符边界；窗口结束处的多字节字符按普通文本留给主循环处理。
-fn bounded_prefix(value: &str, max_bytes: usize) -> &str {
-    let mut end = value.len().min(max_bytes);
-    while !value.is_char_boundary(end) {
-        end -= 1;
+fn bracket_link<'a>(
+    value: &'a str,
+    start: usize,
+    image: bool,
+    delimiters: &mut LinkDelimiters,
+) -> Option<(&'a str, &'a str, usize)> {
+    let rest = &value[start..];
+    let prefix_length = if image { 2 } else { 1 };
+    if image {
+        if !rest.starts_with("![") {
+            return None;
+        }
+    } else if !rest.starts_with('[') {
+        return None;
     }
-    &value[..end]
+    let label_start = start + prefix_length;
+    let close_label = next_delimiter(value, label_start, "](", &mut delimiters.label)?;
+    if close_label - label_start > MAX_LINK_LABEL_BYTES {
+        return None;
+    }
+    let target_start = close_label + 2;
+    let close_target = next_delimiter(value, target_start, ")", &mut delimiters.target)?;
+    if close_target - target_start > MAX_LINK_TARGET_BYTES {
+        return None;
+    }
+    Some((
+        &value[label_start..close_label],
+        &value[target_start..close_target],
+        close_target + 1 - start,
+    ))
+}
+
+/// 主循环只向前移动；缓存的结束位置随起点前进，缺失时以字符串末尾作为哨兵。
+fn next_delimiter(
+    value: &str,
+    start: usize,
+    delimiter: &str,
+    cached: &mut Option<usize>,
+) -> Option<usize> {
+    if (*cached).is_none_or(|position| position < start) {
+        *cached = Some(value[start..].find(delimiter).map_or(value.len(), |offset| start + offset));
+    }
+    (*cached).filter(|position| *position < value.len())
 }
 
 fn safe_link_target(value: &str) -> Option<String> {

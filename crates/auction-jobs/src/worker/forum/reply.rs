@@ -120,7 +120,7 @@ impl ForumReplyRuntime {
         })
     }
 
-    /// 配置固定帖刷新时的原始正文校验；默认关闭，远端身份及写入回执仍须精确匹配。
+    /// 配置正常固定帖刷新的额外正文校验；未知写入始终只读核对。
     pub fn with_post_body_verification(mut self, enabled: bool) -> Self {
         self.verify_post_body = enabled;
         self

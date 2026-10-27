@@ -11,6 +11,7 @@ use wasm_bindgen::{JsCast, closure::Closure};
 
 /// 订阅一条 CSS media query，返回随匹配结果更新的信号。
 /// 首次 effect 同步当前结果，之后经 `change` 监听更新；组件卸载时自动移除监听。
+/// query 变化先移除旧监听；查询不可用时回退 `false`，不会继续报告旧 query 的结果。
 /// effect 执行前与非 WASM 构建（仅静态检查）的初值均为 `false`。
 pub fn use_media_query(_query: String) -> Signal<bool> {
     let matches = use_signal(|| false);
@@ -22,14 +23,18 @@ pub fn use_media_query(_query: String) -> Signal<bool> {
 
         let effect_handle = std::rc::Rc::clone(&handle);
         use_effect(use_reactive((&_query,), move |(query,)| {
+            // 旧 query 的监听必须在所有早退路径前释放，否则失败后仍会推送过期结果。
+            effect_handle.borrow_mut().take();
+            let mut matches = matches;
             let Some(window) = web_sys::window() else {
+                matches.set(false);
                 return;
             };
             let Ok(Some(list)) = window.match_media(&query) else {
+                matches.set(false);
                 return;
             };
 
-            let mut matches = matches;
             matches.set(list.matches());
 
             let callback = Closure::<dyn FnMut(web_sys::MediaQueryListEvent)>::new(

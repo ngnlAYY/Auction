@@ -75,6 +75,13 @@ impl UnitSnapshot {
         self.load_state == "loaded" && self.active_state == "active" && self.main_pid > 0
     }
 
+    /// 对比 systemd 的进程代次；PID 单独比较不能排除重启或 PID 复用。
+    pub(super) fn same_process(&self, other: &Self) -> bool {
+        self.main_pid == other.main_pid
+            && self.invocation_id == other.invocation_id
+            && self.started_monotonic_micros == other.started_monotonic_micros
+    }
+
     pub(super) fn stopped(&self) -> bool {
         self.safely_stopped_for_migration()
     }

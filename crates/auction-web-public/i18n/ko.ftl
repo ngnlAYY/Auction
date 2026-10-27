@@ -160,9 +160,9 @@ auction-empty-no-auction-hint = 경매는 매주 열려요 — 금요일에 다�
 
 
 page-auctions-title = 경매 이력
-page-auctions-note = 지난 경매를 둘러보고 각 회차의 출품을 확인하세요.
-auction-history-empty-title = 아직 경매가 없습니다
-auction-history-empty-hint = 정산된 경매가 여기에 표시됩니다.
+page-auctions-note = 경매를 둘러보고 각 회차의 출품을 확인하세요.
+auction-history-empty-title = 선택한 조건에 맞는 경매가 없습니다
+auction-history-empty-hint = 월드 또는 상태를 변경해 보세요.
 page-bidlog-title = 입찰 로그
 page-history-title = 낙찰가 이력
 page-history-note = 과거 낙찰된 출품을 검색해 장비 시세를 가늠해 보세요.

@@ -1,6 +1,7 @@
 //! 手机菜单及触发按钮；只接收展示状态和事件，不按宽度挂载业务子树。
 
 use super::*;
+use dioxus::html::Key;
 
 #[component]
 pub(crate) fn NavigationToggle(
@@ -16,6 +17,13 @@ pub(crate) fn NavigationToggle(
             aria_expanded: open.to_string(),
             onmounted: move |event| on_mount.call(event),
             onclick: move |_| on_toggle.call(()),
+            onkeydown: move |event| {
+                if open && event.key() == Key::Escape {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    on_toggle.call(());
+                }
+            },
             {t!("nav-label")}
         }
     }

@@ -81,6 +81,8 @@ DTO 只传递服务端结果，匹配逻辑与论坛颜色留在应用/集成层
   保存时必须显式提供 `duration_seconds`（可为 `null`），详见[登录时长契约](docs/contracts/routes.md#p27p28-登录时长)。
 - `AdminIntakeRequest` 的来源 URL、正式/预览装备和补偿账本响应的完整游戏 URL，以及 `PublicForumResponse`
   的镜像正文在 `Debug` 中脱敏；这些字段可能包含装备 key。授权 JSON 输入/输出仍逐字保留原字段，不用脱敏值改写 wire。
+- Admin 论坛预览请求及响应的正文、目录描述和派生身份可能包含原始敏感内容；`Debug` 只保留长度、数量、
+  数值和脱敏标记，包括嵌套投影，JSON 字段及原文保持不变。
 
 ## 命名与依赖边界
 

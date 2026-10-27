@@ -33,7 +33,9 @@ pub(crate) async fn run_loop<C>(
             );
             return;
         };
-        let Ok(schedule_delay) = next_wake_at.signed_duration_since(now).to_std() else {
+        let Some(schedule_delay) =
+            next_wake_at.signed_duration_since(now).to_std().ok().filter(|delay| !delay.is_zero())
+        else {
             tracing::error!(
                 world_id = %runtime.world_id,
                 mailbox_key = %runtime.mailbox_key,
@@ -82,9 +84,7 @@ async fn run_cycle<C>(
 where
     C: Clock + 'static,
 {
-    if !runtime.validate() {
-        return Err(WorkerError::InvalidMailPollConfiguration);
-    }
+    // 启动时已校验完整配置；下一次触发时间在每轮调度时重新计算。
     if worker.control.is_draining() {
         return Ok(());
     }
@@ -126,23 +126,40 @@ where
         .checked_add(runtime.config.lease_duration)
         .ok_or(WorkerError::InvalidMailPollConfiguration)?;
     // 一个 runtime 只拥有一个 mailbox 状态；领取上限固定为一，避免让未来异常数据形成预领取队列。
-    let claims = runtime
-        .store
-        .claim_due(
+    // 领取超时或回执迟到时不读取远端；可能已提交的 claim 按原租约自然恢复。
+    let claims = match tokio::time::timeout_at(
+        lease_deadline,
+        runtime.store.claim_due(
             runtime.mailbox_key.clone(),
             worker.worker_id.clone(),
             now,
             lease_until,
             1,
             force,
-        )
-        .await?;
+        ),
+    )
+    .await
+    {
+        Ok(Ok(claims)) if tokio::time::Instant::now() < lease_deadline => claims,
+        Ok(Ok(_)) | Err(_) => {
+            tracing::warn!(
+                mailbox_key = %runtime.mailbox_key,
+                "MoogleMail 邮箱领取未在租约截止前确认；保留可能已提交的 claim"
+            );
+            return Ok(WorkerResult::Error);
+        }
+        Ok(Err(error)) => return Err(error.into()),
+    };
     if claims.is_empty() {
         return Ok(WorkerResult::Success);
     }
 
     let mut iteration_result = WorkerResult::Success;
     for claim in claims {
+        // 领取可能跨过 drain；不伪造失败或释放，原邮箱租约到期后恢复。
+        if worker.control.is_draining() {
+            break;
+        }
         let context = MailPollProcessContext {
             store: Arc::clone(&runtime.store),
             gateway: Arc::clone(&runtime.gateway),

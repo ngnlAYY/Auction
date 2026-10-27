@@ -43,7 +43,7 @@ impl AdminForumPreviewCommand {
 }
 
 /// 解析后的论坛拍品行。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AdminForumLot {
     pub code: String,
     pub category: String,
@@ -55,16 +55,41 @@ pub struct AdminForumLot {
     pub current_price: Option<i64>,
 }
 
+impl fmt::Debug for AdminForumLot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AdminForumLot")
+            .field("description_bytes", &self.description.len())
+            .field("seller_present", &self.seller.is_some())
+            .field("start_price", &self.start_price)
+            .field("material", &self.material)
+            .field("current_bidder_present", &self.current_bidder.is_some())
+            .field("current_price", &self.current_price)
+            .finish()
+    }
+}
+
 /// 解析后的论坛目录。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AdminForumCatalog {
     pub categories: Vec<String>,
     pub lots: Vec<AdminForumLot>,
     pub warnings: Vec<AdminForumWarning>,
 }
 
+impl fmt::Debug for AdminForumCatalog {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AdminForumCatalog")
+            .field("category_count", &self.categories.len())
+            .field("lot_count", &self.lots.len())
+            .field("warning_count", &self.warnings.len())
+            .finish()
+    }
+}
+
 /// 解析后的论坛帖子。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AdminForumPost {
     pub id: String,
     pub author_id: Option<String>,
@@ -73,7 +98,19 @@ pub struct AdminForumPost {
     pub edited: bool,
 }
 
-#[derive(Debug, Clone)]
+impl fmt::Debug for AdminForumPost {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AdminForumPost")
+            .field("author_id_present", &self.author_id.is_some())
+            .field("author_present", &self.author.is_some())
+            .field("text_bytes", &self.text.len())
+            .field("edited", &self.edited)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct AdminForumCommand {
     pub line: usize,
     pub text: String,
@@ -86,8 +123,24 @@ pub struct AdminForumCommand {
     pub notify: Option<String>,
 }
 
+impl fmt::Debug for AdminForumCommand {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AdminForumCommand")
+            .field("line", &self.line)
+            .field("text_bytes", &self.text.len())
+            .field("actor_present", &self.actor.is_some())
+            .field("lot_count", &self.lot_codes.len())
+            .field("amount", &self.amount)
+            .field("proxy_present", &self.proxy.is_some())
+            .field("proxy_lower", &self.proxy_lower)
+            .field("notify_present", &self.notify.is_some())
+            .finish()
+    }
+}
+
 /// 解析后的帖子命令集合。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AdminForumBidPost {
     pub post: AdminForumPost,
     pub commands: Vec<AdminForumCommand>,
@@ -95,8 +148,20 @@ pub struct AdminForumBidPost {
     pub ignored: bool,
 }
 
+impl fmt::Debug for AdminForumBidPost {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AdminForumBidPost")
+            .field("post", &self.post)
+            .field("command_count", &self.commands.len())
+            .field("warning_count", &self.warnings.len())
+            .field("ignored", &self.ignored)
+            .finish()
+    }
+}
+
 /// 解析警告；文本只保留有界的原始行，便于管理员定位问题。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AdminForumWarning {
     pub line: usize,
     pub code: String,
@@ -105,7 +170,18 @@ pub struct AdminForumWarning {
     pub post_id: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+impl fmt::Debug for AdminForumWarning {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AdminForumWarning")
+            .field("line", &self.line)
+            .field("text_bytes", &self.text.as_ref().map(String::len))
+            .field("post_id_present", &self.post_id.is_some())
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct AdminForumPreviewResult {
     /// 目录首帖的远端稳定 post ID；Admin HTTP 契约无需暴露该内部写入证明。
     pub catalog_post_id: String,
@@ -114,6 +190,19 @@ pub struct AdminForumPreviewResult {
     pub catalog: AdminForumCatalog,
     pub posts: Vec<AdminForumBidPost>,
     pub warnings: Vec<AdminForumWarning>,
+}
+
+// 论坛输入可能含装备 URL 和 key；调试输出只展示结构与长度，不输出任何原始文本。
+impl fmt::Debug for AdminForumPreviewResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AdminForumPreviewResult")
+            .field("catalog_post_text_bytes", &self.catalog_post_text.len())
+            .field("catalog", &self.catalog)
+            .field("post_count", &self.posts.len())
+            .field("warning_count", &self.warnings.len())
+            .finish()
+    }
 }
 
 impl AdminForumPreviewResult {

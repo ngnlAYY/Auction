@@ -202,6 +202,9 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
             if reason == "lot_watch_pm_stopped" {
                 return Err(anyhow::anyhow!("lot watch PM worker stopped; worker restart required"));
             }
+            if reason == "persistent_worker_stopped" {
+                return Err(anyhow::anyhow!("persistent worker stopped; worker restart required"));
+            }
             // 即使所有在途任务正常结束也须非零退出，由进程管理器获取新 owner/generation。
             Err(anyhow::anyhow!("credential runtime ownership revoked; worker restart required"))
         }

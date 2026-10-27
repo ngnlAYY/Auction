@@ -117,6 +117,9 @@ Admin realtime replay 在追加替代事件的同一事务复用 consumer 恢复
 bidding、lifecycle、admin 拆分；旧竞价账本重放仍在一致快照中取得冻结策略、授权版本和转换历史，不重新执行当前状态
 门禁。竞价及关键生命周期（含 `final → settling` 领取）使用 Serializable、明确行锁，最多三次尝试（含首次）；
 普通队列领取可按 owner 使用 Read Committed 加锁。只重试已分类的序列化冲突/死锁，未知提交不能盲目重放。
+生命周期最终阶段和结算恢复策略解码使用有界时长转换；损坏快照超出时长范围时返回错误，不触发进程 panic。
+结算锁内及历史只读快照投影已冻结的 workflow、领取命令和 due 世代，历史空值保留；稳定身份由应用层统一派生。
+只读旧结算核验复用应用层的完成请求摘要；旧 `settlement_complete` 账本仍按原历史格式单独核验。
 命令、告警、用户及通知写入借用原请求摘要绑定 `bytea`；信封文本与 replay JSON 同样借用已持有数据，
 不另建参数 Vec 或深克隆 JSON，摘要、编码、幂等比较及事务边界不变。
 邮件入队/激活、投递收口、履约与 Recovery 的摘要参数同样绑定固定字节切片；可空摘要先保存在栈上，
@@ -198,12 +201,14 @@ Preview/Open 轮次不聚合未使用的 lot 截止；Final 仍读取已 Open �
 `bid_log/postgres.rs` 的明细及 total 均保留同一命令内的普通出价和即时代理回应，不因后续代理事实而隐藏触发报价。
 原命令白名单、拍卖/world 可见性、五字段 keyset 排序和分页边界不变；结果仍只含公开金额、玩家和来源，
 不读取或暴露代理秘密上限。`valid` 只标识当前领先投影，完整事实不会因不再领先而从历史中删除。
+Admin 代理历史编号页与总数共用 Serializable 快照；仅 cursor 页多读取一条确定 `has_more`，编号页不生成游标。
 公开黑名单、Admin 邮件入站/delivery 及 realtime failure/lag 的计数与当前页共用 Repeatable Read 只读事务，
 避免并发状态变化造成同一响应的总数与列表不一致；筛选、排序、空页总数和分页上限保持原契约。
 Public/Admin 拍卖列表与 Public 补偿批次先物化当前页拍卖 ID，再汇总该页 lot 或账本；
 total 与全局补偿余额仍覆盖原完整范围，原排序、游标、无 lot 场次及金额 fallback 保持，不增加索引或迁移。
 Realtime dashboard 的全量 lag 聚合、有界明细与 failure 水位共用同一只读一致快照；健康和总积压使用全量值，
 不能从排序前 200 条明细推断全局无积压，wire 字段见[Dashboard 契约](docs/contracts/routes.md#dashboard-与-readiness)。
+Public realtime 回放按实际读取行数预留事件空间；空页不按请求上限分配，原序号推进与 refetch 门禁不变。
 账户页只对当前页授权批量读取完整转换历史和最近代理竞价，详情共用同一归属查询；转换按授权/序号排列，
 最近竞价仍以同用户/lot 的下一 usage 创建时间截断，缺失或不连续转换继续失败关闭。页校验直接移交结果，不复制整页。
 授权历史以 `updated_at DESC, lot_id, authorization_id` 形成严格全序，时间和 lot 相同也有唯一分页尾键。
@@ -215,12 +220,14 @@ Public 的 `DatabaseStore::public_lot_reader` 接受启动时冻结的装备标�
 计算量随本场装备数量增长；无这些条件时保留原 SQL 统计和分页。None 等级不补零；预览、当前及历史某场目录一致，
 详情不应用列表筛选。不增加持久字段或迁移，装备事实、金额及竞价语义不变。
 完整装备映射借用原 attributes JSON 解码，不复制整棵临时 Value；筛选仍消费窄身份投影，严格校验和原始属性保留不变。
+正式详情与 HTTP 映射共用摘要持有的原始属性，避免复制 JSON；详情属性仍由应用层校验并按原契约输出。
 公开页直接移交拍卖 projection，不复制其字符串；装备平均 roll 在原属性顺序中累计，不另建 roll 列表，
 保留原浮点初值、逐项值、空集合和舍入语义。
 [auctions/countdown.rs](crates/auction-storage/src/database/auctions/countdown.rs) 用单条 SQL 读取同场公开时间及数据库
 时钟，不加载装备、凭据或论坛正文，不公开草稿、取消场次或被遮蔽的预览，无需新增表和迁移。Public 拍卖、竞价日志、
 成交历史与补偿批次的游标查询仅对额外探测行使用饱和加法，不截断请求数量（见[分页契约](docs/contracts/routes.md#public-分页世界与金额)）。
 `price_history/postgres/numbered.rs` 在同一 Serializable 快照内按完整筛选集计算统计和服务端排序分页；
+两种分页只从装备 JSON 投影等级，缺失、非整数或负数等级仍为空，避免传输和解析未使用的属性与统计。
 编号页与 cursor 共用名称字面包含词条及 `ILIKE ALL`：空白或逗号分隔的缩写逐词 AND，仍转义 `%`、`_` 与反斜杠。
 排序仅接受时间、价格升降序，价格相同后沿用时间、场次、内部 lot 顺序与 UUID 保持稳定。
 中位数选中间一至两笔价格后按 `numeric` 求均值，`median_exact` 返回规范十进制字符串，旧 `median` 显式半数取偶保留整数兼容口径；
@@ -286,6 +293,8 @@ Preview/Live/Final/Settling，以及尚未完成终态证明的 Settled/Cancelle
 取消只刷新已持久化有效主题，不新建主题、不导入新竞价；全部固定帖确认后停止轮询。
 `forum/reply/fixed_posts.rs` 以 auction 共享锁核对已渲染的 settled/cancelled 版本与无 pending，再按 sync
 lease/fencing/revision CAS 收口；部分进度不会写终态标记，`forum/reply/queries.rs` 的竞价资格仍仅 live/final。
+内容 claim 过期重领时，在同一锁内将错误投影设为 `write_unknown`；新 token 与 fencing 同事务提交，
+不能把可能已经外写的旧任务当作普通重试。纯读取中断也会保守进入只读对账。
 `forum/reply/queries.rs` 从既有命令账本投影 `last_error_code` 与有界详情，不回填历史。
 论坛标题候选有界、去重且不含当前标题；状态来自权威快照而非日期，不改变公开或命令 wire。
 论坛领取可按 Worker 首轮水位重新领取旧凭据失败和未知写入，但不领取

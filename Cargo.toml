@@ -72,7 +72,8 @@ httpdate = "1.0.3"
 http-body-util = "0.1.5"
 ipnet = "2.12.2"
 mime = "0.3.17"
-reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
+# 外部客户端共享 rustls；JSON 由实际使用的 Worker control 单独启用。
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
 # 只使用 HTML/CSS 库 API 与解析错误，不引入默认 CLI 的 getopts 依赖。
 scraper = { version = "0.27.0", default-features = false, features = ["errors"] }
 rust-embed = { version = "8.13.0", features = ["mime-guess"] }
@@ -136,11 +137,8 @@ opentelemetry-otlp = { version = "0.33.1", default-features = false, features = 
     "reqwest-client",
     "trace",
 ] }
-opentelemetry_sdk = { version = "0.33.1", default-features = false, features = [
-    "experimental_trace_batch_span_processor_with_async_runtime",
-    "rt-tokio",
-    "trace",
-] }
+# 自有有界批处理器直接使用 Tokio；不启用 SDK 自带的实验性异步批处理器与 runtime 适配。
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 tracing-opentelemetry = "0.34.0"

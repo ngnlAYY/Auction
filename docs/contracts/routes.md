@@ -88,7 +88,7 @@ Public 浏览器的已认证写请求（P06 PUT/DELETE、P18–P20、P24、P26�
 Admin 冷启动在认证等待前恢复原路径的 query，显式筛选/数量、未知 query、hash 与 Router history state 保留；
 这不增加浏览器注册路径或 API 权限。登录 return 只接受受限站内路径，网络路径、反斜线和登录自循环回退首页。
 
-缓存：Public 普通公开读取（含 P15 forum）为 `no-cache`；P14 补偿流水、P21 `/forum/sync-status`、events/session/lot 列表与详情/账户/竞价/代理/标记及全部 Admin 业务接口为 `no-store`，错误响应沿用相同策略；浏览器路由入口、直接 `index.html` 和 HTML 资源为 `no-store`；直接静态文件中只有 `assets/` 非 HTML 指纹资源使用一年 `immutable`，`wasm/*.js`、`*.wasm`、稳定别名 `/favicon.ico` 和其他稳定文件名使用 `no-cache`、`Last-Modified` 与 `If-Modified-Since`；未知 404/静态 405/产物缺失 503 均为 `no-store`。
+缓存：Public 普通公开读取为 `no-cache`；P14 补偿流水、P15 论坛镜像、P21 `/forum/sync-status`、events/session/lot 列表与详情/账户/竞价/代理/标记及全部 Admin 业务接口为 `no-store`，错误响应沿用相同策略；浏览器路由入口、直接 `index.html` 和 HTML 资源为 `no-store`；直接静态文件中只有 `assets/` 非 HTML 指纹资源使用一年 `immutable`，`wasm/*.js`、`*.wasm`、稳定别名 `/favicon.ico` 和其他稳定文件名使用 `no-cache`、`Last-Modified` 与 `If-Modified-Since`；未知 404/静态 405/产物缺失 503 均为 `no-store`。
 
 正式 Public/Admin 边界另统一发送 `CDN-Cache-Control` 与 `Cloudflare-CDN-Cache-Control`：默认 `no-store`，包括所有 API（即使浏览器策略为 `no-cache`）、登录、管理/私有数据、探针、错误和 WebSocket 握手；仅精确静态 handler 的私有响应标记允许 CDN 沿用该资源的缓存策略，不能凭路径后缀或 API 的 `public` 头放行。未自行声明浏览器缓存策略的边界错误等响应补 `Cache-Control: no-store`。首次设置静态入口也固定 CDN `no-store`，不纳入正式站点 CDN 白名单；边缘必须尊重源站头，不能配置 Cache Everything/强制 Edge TTL，静态白名单与上线限制见[运维契约](ops/README.md#cloudflare-整站代理)。
 
@@ -110,7 +110,7 @@ Admin 冷启动在认证等待前恢复原路径的 query，显式筛选/数量�
 | P12 | GET | /api/v1/price-history | 公开；成交事实仅由 PostgreSQL 完整档提供 | 200 | 400, 501, 503/504 |
 | P13 | GET | /api/v1/compensation-pool | 公开 | 200 | 400, 501, 503/504 |
 | P14 | GET | /api/v1/compensation-pool/{auction_id}/movements | 公开；完整装备 URL；响应 `no-store` | 200 | 400, 404, 501, 503/504 |
-| P15 | GET | /api/v1/auctions/{auction_id}/forum | 公开 | 200 | 400, 404, 501, 503/504 |
+| P15 | GET | /api/v1/auctions/{auction_id}/forum | 公开；论坛镜像正文可能包含完整装备 URL；`no-store` | 200 | 400, 404, 501, 503/504 |
 | P16 | GET | /api/v1/me/bids | Public session | 200 | 400, 401, 503/504 |
 | P17 | GET | /api/v1/lots/{lot_id}/proxy-authorizations/mine | Public session | 200 | 400, 401, 404, 503/504 |
 | P18 | POST | /api/v1/lots/{lot_id}/proxy-authorizations | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |

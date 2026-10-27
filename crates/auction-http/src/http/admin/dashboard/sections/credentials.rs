@@ -18,24 +18,22 @@ pub(crate) fn map_credentials(
     dashboard_worlds: &[AdminCredentialWorld],
 ) -> AdminDashboardSectionResponse {
     let observed_at = timestamp(snapshot.observed_at);
-    let active_count = snapshot.scopes.iter().map(|scope| scope.active_count).sum::<i64>();
-    let invalid_count = snapshot.scopes.iter().map(|scope| scope.invalid_count).sum::<i64>();
+    let has_active = snapshot.scopes.iter().any(|scope| scope.active_count > 0);
+    let has_invalid = snapshot.scopes.iter().any(|scope| scope.invalid_count > 0);
     let restart_required = credential_restart_required(&snapshot, process);
-    let availability_worlds = if dashboard_worlds.is_empty() {
-        [AdminCredentialWorld::Main, AdminCredentialWorld::Isekai]
-            .into_iter()
-            .filter(|world| {
-                snapshot.scopes.iter().any(|scope| {
+    let default_worlds = [AdminCredentialWorld::Main, AdminCredentialWorld::Isekai];
+    let availability_worlds =
+        if dashboard_worlds.is_empty() { &default_worlds[..] } else { dashboard_worlds };
+    let mail_availability = availability_worlds
+        .iter()
+        .copied()
+        .filter(|world| {
+            !dashboard_worlds.is_empty()
+                || snapshot.scopes.iter().any(|scope| {
                     scope.kind == AdminCredentialKind::MailCookie
                         && (scope.world == *world || scope.world == AdminCredentialWorld::Shared)
                 })
-            })
-            .collect::<Vec<_>>()
-    } else {
-        dashboard_worlds.to_vec()
-    };
-    let mail_availability = availability_worlds
-        .into_iter()
+        })
         .map(|world| mail_availability(&snapshot, world, restart_required))
         .collect::<Vec<_>>();
     let mail_ready = if dashboard_worlds.is_empty() {
@@ -43,13 +41,11 @@ pub(crate) fn map_credentials(
     } else {
         dashboard_worlds.iter().copied().all(|world| mail_world_ready(&snapshot, world))
     };
-    let status =
-        if !mail_ready || active_count == 0 || invalid_count > 0 || restart_required != Some(false)
-        {
-            DashboardStatus::Degraded
-        } else {
-            DashboardStatus::Ok
-        };
+    let status = if !mail_ready || !has_active || has_invalid || restart_required != Some(false) {
+        DashboardStatus::Degraded
+    } else {
+        DashboardStatus::Ok
+    };
     AdminDashboardSectionResponse {
         status: status.as_str().to_owned(),
         observed_at: Some(observed_at.clone()),

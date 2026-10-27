@@ -37,15 +37,11 @@ pub(super) fn missing_rules_document(locale: String) -> AdminRules {
     }
 }
 
-pub(super) fn draft_signature(draft: &AdminRulesCandidate) -> String {
-    format!("{}\u{1f}{}\u{1f}{}", draft.locale, draft.title, draft.markdown)
-}
-
 pub(super) fn valid_locale(value: &str) -> bool {
     let value = value.trim();
     !value.is_empty()
         && value.len() <= 35
         && !value.starts_with('-')
         && !value.ends_with('-')
-        && value.chars().all(|character| character.is_alphanumeric() || character == '-')
+        && value.chars().all(|character| character.is_ascii_alphanumeric() || character == '-')
 }

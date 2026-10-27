@@ -6,8 +6,9 @@ use auction_config::{AppConfig, HttpListenMode};
 use std::{
     fs,
     net::SocketAddr,
-    os::unix::fs::MetadataExt,
+    os::unix::fs::{FileTypeExt, MetadataExt},
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 pub(super) struct RolePlan {
@@ -171,8 +172,46 @@ pub(super) async fn ensure_available(plans: &[RolePlan]) -> anyhow::Result<()> {
                     .context("role listener already in use")?;
             }
             Endpoint::Unix(path) => {
-                if tokio::net::UnixStream::connect(path).await.is_ok() {
-                    bail!("role socket is already active: {}", path.display());
+                let metadata = match fs::symlink_metadata(path) {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error).context("inspect role socket"),
+                };
+                // 与角色绑定器保持一致：只允许当前服务账号拥有的 socket 进入 stale 检查。
+                // SAFETY：geteuid 只读取当前进程的有效 UID。
+                if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() }
+                {
+                    bail!("unsafe role socket path: {}", path.display());
+                }
+                match tokio::time::timeout(
+                    Duration::from_millis(100),
+                    tokio::net::UnixStream::connect(path),
+                )
+                .await
+                {
+                    Ok(Ok(_stream)) => bail!("role socket is already active: {}", path.display()),
+                    Ok(Err(error))
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+                        ) =>
+                    {
+                        // 连接失败后重新核对 inode；路径已消失可以继续，替换则失败关闭。
+                        match fs::symlink_metadata(path) {
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(error) => return Err(error).context("reinspect role socket"),
+                            Ok(current)
+                                if current.file_type().is_socket()
+                                    && current.uid() == metadata.uid()
+                                    && current.dev() == metadata.dev()
+                                    && current.ino() == metadata.ino() => {}
+                            Ok(_) => {
+                                bail!("role socket changed during preflight: {}", path.display())
+                            }
+                        }
+                    }
+                    Ok(Err(error)) => return Err(error).context("cannot verify role socket"),
+                    Err(_) => bail!("role socket probe timed out: {}", path.display()),
                 }
                 // 不清理任何路径；stale socket 仍由对应角色的安全 listener owner 处理。
             }

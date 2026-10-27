@@ -1,15 +1,13 @@
 //! 规则草稿编辑、校验和发布 workspace。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::{Dialog, Time, legacy_t as t};
 use dioxus::prelude::*;
-
-use auction_web_shared::Time;
 
 use crate::api::{AdminRules, AdminRulesCandidate, publish_admin_rules, validate_admin_rules};
 use crate::app::surface::pending::{PendingCommands, set_if_alive};
 
-use super::helpers::{DEFAULT_RULES_LOCALE, draft_signature, notice_text, valid_locale};
-use super::model::RuleNotice;
+use super::helpers::{DEFAULT_RULES_LOCALE, notice_text, valid_locale};
+use super::model::{RuleNotice, RulesBaseline, RulesTransition};
 use super::preview::AdminRulesPreview;
 
 /// 展示规则编辑器，并确保只有最近一次已校验草稿可以发布。
@@ -17,51 +15,105 @@ use super::preview::AdminRulesPreview;
 pub(super) fn AdminRulesWorkspace(
     document: AdminRules,
     target: String,
-    locales: Signal<Vec<String>>,
-    new_locale: Signal<String>,
-    target_signal: Signal<String>,
-    draft: Signal<Option<AdminRulesCandidate>>,
-    checked_signature: Signal<String>,
-    notice: Signal<Option<RuleNotice>>,
+    mut locales: Signal<Vec<String>>,
+    mut new_locale: Signal<String>,
+    mut target_signal: Signal<String>,
+    mut draft: Signal<Option<AdminRulesCandidate>>,
+    mut checked_candidate: Signal<Option<AdminRulesCandidate>>,
+    mut baseline: Signal<Option<RulesBaseline>>,
+    mut notice: Signal<Option<RuleNotice>>,
     busy: Signal<bool>,
-    reload_generation: Signal<u64>,
+    mut reload_generation: Signal<u64>,
+    pending: PendingCommands,
+    dirty: Memo<bool>,
 ) -> Element {
-    let pending = use_context::<PendingCommands>();
     let frozen = move || busy() || pending.contains("rules");
+    let mut transition_confirmation = use_signal(|| None::<RulesTransition>);
     let current_draft = draft()
         .or_else(|| (document.revision == 0).then(|| super::helpers::to_draft(&document, &target)));
-    let signature = current_draft.as_ref().map(draft_signature).unwrap_or_default();
-    let base_draft = super::helpers::to_draft(&document, &target);
-    let dirty = current_draft
-        .as_ref()
-        .is_some_and(|value| draft_signature(value) != draft_signature(&base_draft));
-    let can_publish = !frozen() && dirty && checked_signature() == signature;
+    let conflict = baseline.read().as_ref().is_none_or(|base| !base.matches_document(&document));
+    let can_publish = !frozen()
+        && !conflict
+        && dirty()
+        && checked_candidate.read().as_ref() == current_draft.as_ref();
+
+    // 修改目标或重载只在用户确认丢弃后执行；校验和已提交命令仍共用原门禁。
+    let apply_transition = use_callback(move |transition: RulesTransition| {
+        if frozen() {
+            return;
+        }
+        match transition {
+            RulesTransition::Select { locale, add } => {
+                if locale == *target_signal.peek() {
+                    if add {
+                        new_locale.set(String::new());
+                    }
+                    transition_confirmation.set(None);
+                    return;
+                }
+                if add {
+                    if !locales.peek().iter().any(|existing| existing == &locale) {
+                        locales.write().push(locale.clone());
+                    }
+                    new_locale.set(String::new());
+                }
+                draft.set(None);
+                baseline.set(None);
+                checked_candidate.set(None);
+                notice.set(None);
+                transition_confirmation.set(None);
+                target_signal.set(locale);
+            }
+            RulesTransition::Reload => {
+                draft.set(None);
+                baseline.set(None);
+                checked_candidate.set(None);
+                notice.set(None);
+                transition_confirmation.set(None);
+                reload_generation.set(reload_generation().saturating_add(1));
+            }
+        }
+    });
+    let request_transition = use_callback(move |transition: RulesTransition| {
+        if frozen() {
+            return;
+        }
+        // 添加当前语言不切换目标，也不能清空当前草稿。
+        let same_target = match &transition {
+            RulesTransition::Select { locale, .. } => locale == &*target_signal.peek(),
+            RulesTransition::Reload => false,
+        };
+        if same_target {
+            apply_transition.call(transition);
+        } else if match (draft.peek().as_ref(), baseline.peek().as_ref()) {
+            (Some(candidate), Some(base)) => !base.matches_candidate(candidate),
+            (Some(_), None) => true,
+            (None, _) => false,
+        } {
+            transition_confirmation.set(Some(transition));
+        } else {
+            apply_transition.call(transition);
+        }
+    });
 
     rsx! {
         Fragment {
             div {
                 class: "admin-rules-tabs",
-                role: "tablist",
+                role: "group",
                 aria_label: t!("admin-rules-languages"),
                 for locale in locales() {
                     button {
                         key: "{locale}",
                         r#type: "button",
-                        role: "tab",
-                        aria_selected: (locale == target).to_string(),
+                        aria_pressed: (locale == target).to_string(),
                         disabled: frozen(),
                         onclick: {
-                            let current_target = target.clone();
                             let next_locale = locale.clone();
-                            move |_| {
-                                if frozen() || next_locale.as_str() == current_target.as_str() {
-                                    return;
-                                }
-                                draft.set(None);
-                                checked_signature.set(String::new());
-                                notice.set(None);
-                                target_signal.set(next_locale.clone());
-                            }
+                            move |_| request_transition.call(RulesTransition::Select {
+                                locale: next_locale.clone(),
+                                add: false,
+                            })
                         },
                         "{locale}"
                     }
@@ -76,16 +128,7 @@ pub(super) fn AdminRulesWorkspace(
                     if frozen() || !valid_locale(&next_locale) {
                         return;
                     }
-                    if !locales().iter().any(|locale| locale == &next_locale) {
-                        let mut next_locales = locales();
-                        next_locales.push(next_locale.clone());
-                        locales.set(next_locales);
-                    }
-                    new_locale.set(String::new());
-                    draft.set(None);
-                    checked_signature.set(String::new());
-                    notice.set(None);
-                    target_signal.set(next_locale);
+                    request_transition.call(RulesTransition::Select { locale: next_locale, add: true });
                 },
                 label {
                     r#for: "rules-locale",
@@ -98,6 +141,7 @@ pub(super) fn AdminRulesWorkspace(
                     autocapitalize: "none",
                     spellcheck: "false",
                     maxlength: "35",
+                    aria_describedby: "rules-locale-help",
                     placeholder: t!("admin-rules-locale-placeholder"),
                     required: true,
                     r#type: "text",
@@ -112,6 +156,7 @@ pub(super) fn AdminRulesWorkspace(
                     disabled: frozen() || !valid_locale(&new_locale()),
                     {t!("admin-rules-add")}
                 }
+                p { id: "rules-locale-help", class: "admin-panel__note admin-rules-add__help", {t!("admin-rules-locale-help")} }
             }
 
             label {
@@ -143,6 +188,9 @@ pub(super) fn AdminRulesWorkspace(
                     Time { value: document.published_at.clone() }
                 }
             }
+            if conflict {
+                p { class: "admin-rules-error", role: "alert", {t!("admin-rules-draft-conflict")} }
+            }
 
             if let Some(value) = current_draft {
                 form {
@@ -151,14 +199,16 @@ pub(super) fn AdminRulesWorkspace(
                         let candidate = value.clone();
                         move |event| {
                             event.prevent_default();
-                            if frozen() || candidate.title.trim().is_empty() {
+                            if frozen() || conflict || candidate.title.trim().is_empty()
+                                || draft.peek().as_ref() != Some(&candidate)
+                            {
                                 return;
                             }
                             let mut busy = busy;
                             let mut draft = draft;
-                            let mut checked_signature = checked_signature;
+                            let mut checked_candidate = checked_candidate;
                             let mut notice = notice;
-                            let requested_signature = draft_signature(&candidate);
+                            let requested_candidate = candidate.clone();
                             let locale = candidate.locale.clone();
                             let title = candidate.title.clone();
                             let markdown = candidate.markdown.clone();
@@ -169,16 +219,14 @@ pub(super) fn AdminRulesWorkspace(
                                 let result = validate_admin_rules(locale.clone(), title, markdown).await;
                                 // 校验只可回写发起时的语言与草稿，不能覆盖已切换的编辑目标。
                                 if target_signal() != locale
-                                    || draft().as_ref().is_some_and(|current| {
-                                        draft_signature(current) != requested_signature
-                                    })
+                                    || draft.peek().as_ref() != Some(&requested_candidate)
                                 {
                                     busy.set(false);
                                     return;
                                 }
                                 match result {
                                     Ok(normalized) => {
-                                        checked_signature.set(draft_signature(&normalized));
+                                        checked_candidate.set(Some(normalized.clone()));
                                         draft.set(Some(normalized));
                                         notice.set(Some(RuleNotice::Validated));
                                     }
@@ -210,13 +258,18 @@ pub(super) fn AdminRulesWorkspace(
                                 value: value.title.clone(),
                                 disabled: frozen(),
                                 oninput: {
-                                    let input_value = value.clone();
+                                    let input_locale = target.clone();
                                     move |event| {
-                                        if frozen() { return; }
-                                        let mut next = input_value.clone();
-                                        next.title = event.value();
-                                        draft.set(Some(next));
-                                        checked_signature.set(String::new());
+                                        if frozen() || *target_signal.peek() != input_locale { return; }
+                                        let mut current = draft.write();
+                                        let candidate = current.get_or_insert_with(|| AdminRulesCandidate {
+                                            locale: input_locale.clone(),
+                                            title: String::new(),
+                                            markdown: String::new(),
+                                        });
+                                        candidate.title = event.value();
+                                        drop(current);
+                                        checked_candidate.set(None);
                                         notice.set(None);
                                     }
                                 },
@@ -233,13 +286,18 @@ pub(super) fn AdminRulesWorkspace(
                                 value: value.markdown.clone(),
                                 disabled: frozen(),
                                 oninput: {
-                                    let input_value = value.clone();
+                                    let input_locale = target.clone();
                                     move |event| {
-                                        if frozen() { return; }
-                                        let mut next = input_value.clone();
-                                        next.markdown = event.value();
-                                        draft.set(Some(next));
-                                        checked_signature.set(String::new());
+                                        if frozen() || *target_signal.peek() != input_locale { return; }
+                                        let mut current = draft.write();
+                                        let candidate = current.get_or_insert_with(|| AdminRulesCandidate {
+                                            locale: input_locale.clone(),
+                                            title: String::new(),
+                                            markdown: String::new(),
+                                        });
+                                        candidate.markdown = event.value();
+                                        drop(current);
+                                        checked_candidate.set(None);
                                         notice.set(None);
                                     }
                                 },
@@ -270,18 +328,12 @@ pub(super) fn AdminRulesWorkspace(
                         button {
                             r#type: "button",
                             disabled: frozen(),
-                            onclick: move |_| {
-                                if frozen() { return; }
-                                draft.set(None);
-                                checked_signature.set(String::new());
-                                notice.set(None);
-                                reload_generation.set(reload_generation().saturating_add(1));
-                            },
+                            onclick: move |_| request_transition.call(RulesTransition::Reload),
                             {t!("admin-rules-reload")}
                         }
                         button {
                             r#type: "submit",
-                            disabled: frozen() || value.title.trim().is_empty(),
+                            disabled: frozen() || conflict || value.title.trim().is_empty(),
                             if busy() { {t!("admin-action-working")} } else { {t!("admin-rules-validate")} }
                         }
                         button {
@@ -290,10 +342,11 @@ pub(super) fn AdminRulesWorkspace(
                             onclick: {
                                 let publish_value = value.clone();
                                 move |_| {
-                                    let signature = draft_signature(&publish_value);
                                     if frozen()
+                                        || conflict
                                         || target_signal() != publish_value.locale
-                                        || checked_signature() != signature
+                                        || checked_candidate.peek().as_ref() != Some(&publish_value)
+                                        || draft.peek().as_ref() != Some(&publish_value)
                                     {
                                         return;
                                     }
@@ -317,7 +370,12 @@ pub(super) fn AdminRulesWorkspace(
                                                 .map_err(|error| error.code)
                                             }
                                         },
-                                        move |_| set_if_alive(notice, Some(RuleNotice::Published)),
+                                        move |_| {
+                                            set_if_alive(draft, None);
+                                            set_if_alive(baseline, None);
+                                            set_if_alive(checked_candidate, None);
+                                            set_if_alive(notice, Some(RuleNotice::Published));
+                                        },
                                         move |code| {
                                             set_if_alive(notice, Some(RuleNotice::ActionError(code)));
                                         },
@@ -325,6 +383,37 @@ pub(super) fn AdminRulesWorkspace(
                                 }
                             },
                             if document.revision == 0 { {t!("admin-rules-create")} } else { {t!("admin-rules-publish")} }
+                        }
+                    }
+                }
+            }
+            if let Some(transition) = transition_confirmation() {
+                Dialog {
+                    title: t!("admin-rules-discard-title"),
+                    close_label: t!("admin-runtime-keep-editing"),
+                    on_close: move |_| transition_confirmation.set(None),
+                    match &transition {
+                        RulesTransition::Select { locale, .. } => rsx! {
+                            p { {t!("admin-rules-discard-switch-detail", locale: locale.clone())} }
+                        },
+                        RulesTransition::Reload => rsx! {
+                            p { {t!("admin-rules-discard-reload-detail")} }
+                        },
+                    }
+                    div { class: "admin-shell__dialog-actions",
+                        button {
+                            class: "admin-btn-secondary",
+                            r#type: "button",
+                            autofocus: true,
+                            onclick: move |_| transition_confirmation.set(None),
+                            {t!("admin-runtime-keep-editing")}
+                        }
+                        button {
+                            class: "admin-btn-danger",
+                            r#type: "button",
+                            disabled: frozen(),
+                            onclick: move |_| apply_transition.call(transition.clone()),
+                            {t!("admin-rules-discard-confirm")}
                         }
                     }
                 }

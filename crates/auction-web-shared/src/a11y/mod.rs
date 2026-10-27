@@ -166,7 +166,14 @@ pub fn use_dialog_focus_trap(_lock_background_scroll: bool) {
                     let at_last = active
                         .as_ref()
                         .is_some_and(|element| element.is_same_node(Some(last.as_ref())));
-                    if inside && !(event.shift_key() && at_first || !event.shift_key() && at_last) {
+                    // busy 结束后焦点可能仍在 tabindex=-1 的面板上，反向 Tab 应从末项进入。
+                    let at_panel = active
+                        .as_ref()
+                        .is_some_and(|element| element.is_same_node(Some(dialog.as_ref())));
+                    if inside
+                        && !at_panel
+                        && !(event.shift_key() && at_first || !event.shift_key() && at_last)
+                    {
                         return;
                     }
                     event.prevent_default();

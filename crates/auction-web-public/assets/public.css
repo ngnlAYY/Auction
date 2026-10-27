@@ -641,72 +641,11 @@
   color: var(--color-text-muted);
 }
 
-/* ===== 拍卖历史查看控件 ===== */
-
-.public-auction-history-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-  margin-block-end: var(--space-4);
-}
-
-.public-auction-history-controls label {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-}
-
-.public-auction-history-controls select {
-  min-block-size: var(--size-target);
-  padding: var(--space-1) var(--space-2);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-  background: var(--color-surface-raised);
-}
-
-.public-auction-history-controls select:focus-visible {
-  border-color: var(--color-accent);
-}
-
-@media (hover: hover) {
-  .public-auction-history-controls select:hover {
-    border-color: var(--color-accent);
-  }
-}
-
 .public-auction-history-intro {
   margin: 0 0 var(--space-4);
   color: var(--color-text-muted);
 }
 
-.public-auction-history-round {
-  font-weight: 600;
-}
-
-.public-auction-history-status {
-  margin-inline-start: var(--space-2);
-  padding-inline: var(--space-2);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  background: var(--color-surface-raised);
-  font-size: var(--text-sm);
-  font-weight: 500;
-}
-
-.public-auction-history-status--live,
-.public-auction-history-status--final {
-  color: var(--color-live);
-}
-
-.public-auction-history-links {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
 
 /* ===== 拍卖轮次 / 状态徽标 / 倒计时 / 摘要 ===== */
 
@@ -2325,18 +2264,20 @@
 
 .public-auction-catalog__actions-list {
   display: inline-flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
+  max-inline-size: 100%;
   gap: var(--space-1);
 }
 
 .public-auction-catalog__leading-reason {
-  flex: 0 0 auto;
+  flex: 1 1 100%;
   min-inline-size: 0;
-  max-inline-size: 18rem;
+  max-inline-size: 100%;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* 左半列容纳等宽出价、代理，右半列容纳标记；三按钮及间距占满操作列，文字在按钮内适配窄屏。 */
@@ -2642,13 +2583,9 @@
 
 /* ===== 轮次列表 ===== */
 
-.public-auction-rounds__intro {
-  margin: 0 0 var(--space-4);
-  color: var(--color-text-muted);
-}
-
 .public-auction-rounds__controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   margin-block-end: var(--space-4);
@@ -2656,6 +2593,7 @@
 
 .public-auction-rounds__controls label {
   display: inline-flex;
+  min-inline-size: 0;
   align-items: center;
   gap: var(--space-2);
   color: var(--color-text-muted);
@@ -2663,11 +2601,23 @@
 }
 
 .public-auction-rounds__controls select {
+  min-inline-size: 0;
+  max-inline-size: 100%;
   padding: var(--space-1) var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
+}
+
+.public-auction-rounds__controls select:focus-visible {
+  border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .public-auction-rounds__controls select:hover {
+    border-color: var(--color-accent);
+  }
 }
 
 .public-auction-rounds__table {
@@ -2738,7 +2688,10 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  min-inline-size: 0;
   gap: var(--space-3);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* ===== 登录页 ===== */

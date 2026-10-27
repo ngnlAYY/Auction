@@ -157,8 +157,10 @@ verify_payload_files
 
 mkdir -p "$stable_root"
 payload_next=$(mktemp "$stable_root/PAYLOAD-SHA256.next.XXXXXX")
+web_build_info_next=
 cleanup() {
-  rm -f "$payload_next"
+  rm -f -- "$payload_next"
+  if [[ -n "$web_build_info_next" ]]; then rm -f -- "$web_build_info_next"; fi
 }
 trap cleanup EXIT
 
@@ -183,7 +185,14 @@ printf '%s\n' \
   > "$payload_root/$marker_name"
 install -m 0644 "$payload_next" "$payload_manifest"
 
-# 复用标记最后写入：中断后留下的半成品 payload 没有匹配标记，下次仍会重建。
+# rust-embed 会保留资源 mtime；统一时间和权限使相同 payload 的二进制元数据可复核。
+# 归一化必须先于复用标记，避免中断后的 payload 被误用。
+find "$payload_root" -type f -exec chmod 0644 {} +
+find "$payload_root" -type d -exec chmod 0755 {} +
+find "$payload_root" -exec touch -d "@$source_epoch" {} +
+chmod 0644 "$payload_manifest"
+touch -d "@$source_epoch" "$payload_manifest"
+
 # 独立 web-build 也必须复核输入，不能把构建期间的源码或工具变化标记成可复用的旧快照。
 if [[ $(web_inputs_fingerprint "$surface") != "$source_identity" ||
   $(build_env_fingerprint) != "$build_environment" ]]; then
@@ -191,6 +200,9 @@ if [[ $(web_inputs_fingerprint "$surface") != "$source_identity" ||
   exit 1
 fi
 
+# 复用标记最后写入：中断后留下的半成品 payload 没有匹配标记，下次仍会重建。
+# 标记先在同目录完成写入、权限和时间设置，再原子发布；中断不能留下可复用的半成品。
+web_build_info_next=$(mktemp "$stable_root/WEB-BUILD-INFO.next.XXXXXX")
 printf '%s\n' \
   'schema=auction-web-build/1' \
   "surface=$surface" \
@@ -199,15 +211,11 @@ printf '%s\n' \
   "rustc_version=$rustc_version" \
   "source_fingerprint=$source_identity" \
   "build_env_sha256=$build_environment" \
-  > "$web_build_info"
-chmod 0644 "$web_build_info"
-
-# rust-embed 会保留资源 mtime；统一时间和权限使相同 payload 的二进制元数据可复核。
-find "$payload_root" -type f -exec chmod 0644 {} +
-find "$payload_root" -type d -exec chmod 0755 {} +
-find "$payload_root" -exec touch -d "@$source_epoch" {} +
-chmod 0644 "$payload_manifest"
-touch -d "@$source_epoch" "$payload_manifest" "$web_build_info" "$stable_root"
+  > "$web_build_info_next"
+chmod 0644 "$web_build_info_next"
+touch -d "@$source_epoch" "$web_build_info_next"
+mv -f -- "$web_build_info_next" "$web_build_info"
+touch -d "@$source_epoch" "$stable_root"
 
 printf '%s Web 发布 payload 已生成：sha256=%s files=%s\n' \
   "$surface" \

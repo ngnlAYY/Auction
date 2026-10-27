@@ -185,11 +185,11 @@ impl MoogleMailSender {
         request: MoogleMailSendRequest,
         baseline: Option<MoogleMailSentBaseline>,
     ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
-        let mut equipment_write_started = false;
+        let mut write_started = false;
         let outcome = self
-            .send_verified(cookie, &request, baseline, &mut equipment_write_started)
+            .send_verified(cookie, &request, baseline, &mut write_started)
             .await
-            .map_err(|error| preserve_write_unknown(error, equipment_write_started));
+            .map_err(|error| preserve_write_unknown(error, write_started));
         let failed = !matches!(outcome, Ok(MoogleMailSendOutcome::Sent(_)));
         if failed
             && !outcome
@@ -209,7 +209,7 @@ impl MoogleMailSender {
         cookie: &MoogleMailCookie,
         request: &MoogleMailSendRequest,
         baseline: Option<MoogleMailSentBaseline>,
-        equipment_write_started: &mut bool,
+        write_started: &mut bool,
     ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
         if !request.validate() {
             return Err(write_error(
@@ -246,8 +246,8 @@ impl MoogleMailSender {
             Err(_) => return Ok(MoogleMailSendOutcome::PreflightUnproven { dirty }),
         };
 
-        self.prepare_equipment(cookie, request, equipment_write_started).await?;
-        if *equipment_write_started {
+        self.prepare_equipment(cookie, request, write_started).await?;
+        if *write_started {
             // Armory 写入可能使先前 compose token 失效；重新证明空草稿后才暂存任何资产。
             let refreshed = self.client.get(&compose, cookie).await?;
             let parsed =
@@ -275,6 +275,8 @@ impl MoogleMailSender {
                         )
                     })?;
             let response = self.client.post(&compose, cookie, form).await?;
+            // 后续请求即使尚未发出，已暂存的资产也不能作为未写入处理。
+            *write_started = true;
             state = self
                 .client
                 .diagnose_parse(
@@ -290,7 +292,7 @@ impl MoogleMailSender {
                     ),
                 )
                 .await
-                .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachAdd))?;
+                .map_err(|error| staged_proof_error(error, MoogleMailOperation::AttachAdd))?;
         }
 
         for (index, equipment_id) in request.equipment_ids.iter().enumerate() {
@@ -298,6 +300,7 @@ impl MoogleMailSender {
                 MoogleMailForm::attach_equipment(state.token(), &request.message, equipment_id)
                     .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachAdd))?;
             let response = self.client.post(&compose, cookie, form).await?;
+            *write_started = true;
             state = self
                 .client
                 .diagnose_parse(
@@ -313,13 +316,14 @@ impl MoogleMailSender {
                     ),
                 )
                 .await
-                .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachAdd))?;
+                .map_err(|error| staged_proof_error(error, MoogleMailOperation::AttachAdd))?;
         }
 
         if request.cod > 0 {
             let form = MoogleMailForm::attach_cod(state.token(), &request.message, request.cod)
                 .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachCod))?;
             let response = self.client.post(&compose, cookie, form).await?;
+            *write_started = true;
             state = self
                 .client
                 .diagnose_parse(
@@ -335,7 +339,7 @@ impl MoogleMailSender {
                     ),
                 )
                 .await
-                .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachCod))?;
+                .map_err(|error| staged_proof_error(error, MoogleMailOperation::AttachCod))?;
         }
 
         let assets_staged =
@@ -352,16 +356,9 @@ impl MoogleMailSender {
             }
         })?;
         let response = self.client.post(&compose, cookie, form).await?;
-        if let Some(failure) = self
-            .client
-            .diagnose_parse(
-                &compose,
-                &response,
-                self.parser.classify_send_response_failure(&response, request.world),
-            )
-            .await
-            .ok()
-            .flatten()
+        let (failure, confirmation) = self.parser.inspect_send_response(&response, request.world);
+        if let Some(failure) =
+            self.client.diagnose_parse(&compose, &response, failure).await.ok().flatten()
         {
             return Ok(match failure {
                 MoogleMailSendResponseFailure::RecipientNotFound { returned_mail_id } => {
@@ -375,16 +372,8 @@ impl MoogleMailSender {
                 }
             });
         }
-        let confirmation_hint = self
-            .client
-            .diagnose_parse(
-                &compose,
-                &response,
-                self.parser.prove_send_completed(&response, request.world),
-            )
-            .await
-            .ok()
-            .flatten();
+        let confirmation_hint =
+            self.client.diagnose_parse(&compose, &response, confirmation).await.ok().flatten();
         let proof = async {
             let external_mail_id = self
                 .verify_new_sent(request, cookie, &baseline.seen, confirmation_hint.as_deref())
@@ -430,6 +419,14 @@ fn write_error(
     category: MoogleMailErrorCategory,
 ) -> MoogleMailError {
     MoogleMailError::new(operation, world, category, false)
+}
+
+fn staged_proof_error(
+    mut error: MoogleMailError,
+    operation: MoogleMailOperation,
+) -> MoogleMailError {
+    error.operation = operation;
+    preserve_write_unknown(error, true)
 }
 
 /// 已发生外写后，读失败或后续写前失败都不能重新变成可安全重发；保留失效类别和原证据。

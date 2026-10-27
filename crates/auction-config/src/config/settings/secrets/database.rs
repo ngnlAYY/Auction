@@ -1,6 +1,6 @@
 //! PostgreSQL 独立连接字段到进程内部敏感 URL 的唯一转换边界。
 
-use std::{fmt, net::IpAddr};
+use std::{borrow::Cow, fmt, net::IpAddr};
 
 use serde::{Deserialize, Serialize};
 use url::{Host, Url};
@@ -54,9 +54,9 @@ impl PostgresConnectionConfig {
         url.set_port(Some(self.port))
             .map_err(|_| ConfigError::InvalidDatabaseConfig("database.port"))?;
         // URL 的 userinfo setter 保留已有百分号；先保护原文中的 %，防止 SQLx 多解释一层转义。
-        url.set_username(&self.username.replace('%', "%25"))
+        url.set_username(&escape_userinfo(&self.username))
             .map_err(|_| ConfigError::InvalidDatabaseConfig("database.username"))?;
-        url.set_password(Some(&self.password.replace('%', "%25")))
+        url.set_password(Some(&escape_userinfo(&self.password)))
             .map_err(|_| ConfigError::InvalidDatabaseConfig("database.password"))?;
         url.path_segments_mut()
             .map_err(|_| ConfigError::InvalidDatabaseConfig("database.name"))?
@@ -70,6 +70,11 @@ impl fmt::Debug for PostgresConnectionConfig {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("PostgresConnectionConfig([REDACTED])")
     }
+}
+
+/// 未含百分号的凭据直接借用，避免生成无用的敏感字符串副本。
+fn escape_userinfo(value: &str) -> Cow<'_, str> {
+    if value.contains('%') { Cow::Owned(value.replace('%', "%25")) } else { Cow::Borrowed(value) }
 }
 
 /// 兼容旧 URL，但禁止两个来源并存，避免静默连接到非预期数据库。
@@ -129,6 +134,10 @@ fn explicit_database_url(value: String) -> Result<String, ConfigError> {
 
 /// URL 解析会容忍坏转义，查询解码还会替换非法 UTF-8；在此拒绝，避免目标被静默改写。
 fn valid_url_encoding(value: &str) -> bool {
+    // 原文已经是 UTF-8；没有转义时直接检查控制字符，不复制完整连接串。
+    if !value.as_bytes().contains(&b'%') {
+        return !value.chars().any(char::is_control);
+    }
     let mut bytes = value.bytes();
     let mut decoded = Vec::with_capacity(value.len());
     while let Some(byte) = bytes.next() {

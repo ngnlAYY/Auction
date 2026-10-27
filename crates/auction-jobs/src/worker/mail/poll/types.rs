@@ -225,13 +225,14 @@ impl MailPollRuntime {
         self.wakeup.notify_one();
     }
 
-    pub(super) fn validate(&self) -> bool {
+    pub(in crate::worker::runtime) fn validate(&self) -> bool {
+        let now = Utc::now();
         matches!(self.world_id.as_str(), "main" | "isekai")
             && !self.mailbox_key.is_empty()
             && self.mailbox_key == self.mailbox_key.trim()
             && self.mailbox_key.len() <= 256
             && !self.mailbox_key.chars().any(char::is_control)
-            && self.schedule.next_after(Utc::now()).is_some()
+            && self.schedule.next_after(now).is_some_and(|next| next > now)
             && self.config.validate()
     }
 

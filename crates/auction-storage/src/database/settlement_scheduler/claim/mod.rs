@@ -1,6 +1,9 @@
 //! PostgreSQL 结算 workflow 的 due claim 与租约写入。
 
-use auction_application::SettlementWorkClaim;
+use auction_application::{
+    SettlementWorkClaim, settlement_claim_command_id, settlement_complete_command_id,
+    settlement_workflow_id,
+};
 use auction_domain::AuctionId;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -19,7 +22,7 @@ mod ids;
 mod locking;
 
 use evidence::{insert_settlement_claim_audit, insert_settlement_claim_event};
-use ids::{claim_command_id, request_hash, settlement_command_id, workflow_id};
+use ids::request_hash;
 use locking::lock_initial_lots;
 
 const CLAIM_TRANSACTION_ATTEMPTS: usize = 3;
@@ -185,9 +188,9 @@ async fn claim_transaction(
         }
         let (workflow, claim_command, attempt_count, is_initial, completion_only) =
             if status == "final" {
-                let workflow = workflow_id(auction_uuid, due_at)
+                let workflow = settlement_workflow_id(auction_uuid, due_at)
                     .ok_or_else(|| repository_error_owned("结算 workflow 时间世代无效"))?;
-                let claim_command = claim_command_id(auction_uuid, due_at)
+                let claim_command = settlement_claim_command_id(auction_uuid, due_at)
                     .ok_or_else(|| repository_error_owned("结算领取命令时间世代无效"))?;
                 let previous_attempt_count: i32 =
                     row.try_get("settlement_attempt_count").map_err(map_storage_error)?;
@@ -241,9 +244,9 @@ async fn claim_transaction(
                     row.try_get("settlement_claim_command_id").map_err(map_storage_error)?;
                 let claim_command_uuid = claim_command_uuid
                     .ok_or_else(|| repository_error_owned("结算领取命令标识缺失"))?;
-                let expected_workflow = workflow_id(auction_uuid, due_at)
+                let expected_workflow = settlement_workflow_id(auction_uuid, due_at)
                     .ok_or_else(|| repository_error_owned("结算 workflow 时间世代无效"))?;
-                let expected_claim_command = claim_command_id(auction_uuid, due_at)
+                let expected_claim_command = settlement_claim_command_id(auction_uuid, due_at)
                     .ok_or_else(|| repository_error_owned("结算领取命令时间世代无效"))?;
                 if workflow != expected_workflow
                     || claim_command_uuid != expected_claim_command.as_uuid()
@@ -351,7 +354,7 @@ async fn claim_transaction(
         if updated.rows_affected() != 1 {
             return Err(repository_error_owned("结算 workflow 领取时状态已变化"));
         }
-        let settlement_command_id = settlement_command_id(auction_uuid, due_at)
+        let settlement_command_id = settlement_complete_command_id(auction_uuid, due_at)
             .ok_or_else(|| repository_error_owned("结算完成命令时间世代无效"))?;
         if is_initial {
             let next_state_version = previous_state_version

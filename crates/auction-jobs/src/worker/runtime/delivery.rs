@@ -58,6 +58,8 @@ where
             break;
         }
 
+        // 领取可能已提交但回执丢失；本地只等待原 lease，不主动释放未知结果。
+        let claim_deadline = tokio::time::Instant::now() + worker.delivery.lease_duration;
         let now = worker.clock.now();
         let Some(lease_until) = now.checked_add_signed(delivery_lease) else {
             claim_error =
@@ -66,8 +68,9 @@ where
                 )));
             break;
         };
-        let mut claims = match delivery_store
-            .claim_due(
+        let mut claims = match tokio::time::timeout_at(
+            claim_deadline,
+            delivery_store.claim_due(
                 worker.worker_id.clone(),
                 now,
                 lease_until,
@@ -84,11 +87,20 @@ where
                         .collect(),
                 },
                 1,
-            )
-            .await
+            ),
+        )
+        .await
         {
-            Ok(claims) => claims,
-            Err(error) => {
+            Ok(Ok(claims)) if tokio::time::Instant::now() < claim_deadline => claims,
+            Ok(Ok(_)) | Err(_) => {
+                claim_error = Some(ApplicationError::Repository(
+                    auction_application::RepositoryError::Failed(
+                        "delivery claim 未在租约截止前确认".to_owned(),
+                    ),
+                ));
+                break;
+            }
+            Ok(Err(error)) => {
                 claim_error = Some(error);
                 break;
             }
@@ -96,6 +108,19 @@ where
         let Some(claim) = claims.pop() else {
             break;
         };
+        // 领取等待可能跨过 drain；尚未准备或进入 sending 的 claim 可以按原 fence 安全释放。
+        if worker.control.is_draining() {
+            let released = release_unstarted_delivery(
+                delivery_store.as_ref(),
+                worker.clock.as_ref(),
+                worker.delivery,
+                &claim,
+                WorkerResult::Success,
+            )
+            .await;
+            merge_worker_result(&mut delivery_result, released.worker_result);
+            break;
+        }
         if !delivery_transport.available(&claim) {
             let release = tokio::time::timeout(
                 worker.delivery.finalize_timeout,
@@ -136,6 +161,7 @@ where
             Arc::clone(delivery_transport),
             Arc::clone(&worker.clock),
             worker.delivery,
+            worker.control.clone(),
             claim,
         ));
     }
@@ -224,11 +250,23 @@ async fn process_delivery_claim<C>(
     delivery_transport: Arc<dyn DeliveryTransport>,
     clock: Arc<C>,
     config: DeliveryWorkerRuntimeConfig,
+    control: WorkerControlHandle,
     claim: DeliveryWorkClaim,
 ) -> DeliveryTaskResult
 where
     C: Clock + 'static,
 {
+    // 领取后派生的任务可能尚未获得调度；首次 poll 前再次确认 drain。
+    if control.is_draining() {
+        return release_unstarted_delivery(
+            delivery_store.as_ref(),
+            clock.as_ref(),
+            config,
+            &claim,
+            WorkerResult::Success,
+        )
+        .await;
+    }
     let mut lease = match DeliveryLease::new(&claim, clock.as_ref(), config) {
         Ok(lease) => lease,
         Err(failure_code) => {

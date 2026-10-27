@@ -3,7 +3,7 @@
 use super::super::*;
 
 /// PostgreSQL outbox 中版本化的 MoogleMail payload。
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct MailDeliveryPayload {
     pub(crate) schema_version: u8,

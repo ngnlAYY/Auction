@@ -89,7 +89,7 @@ async fn list_postgres(
     let has_more = rows_len_is_more(request.page_size, &rows);
     transaction.commit().await.map_err(|_| storage_error("提交实时事件快照失败"))?;
 
-    let mut events = Vec::with_capacity(request.page_size as usize);
+    let mut events = Vec::with_capacity(rows.len().min(request.page_size as usize));
     let mut refetch_required = false;
     let mut previous_sequence = request.after;
     for (index, row) in rows.into_iter().enumerate() {

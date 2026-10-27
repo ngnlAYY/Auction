@@ -11,7 +11,7 @@ Dioxus 纯客户端渲染的管理端 SPA，拥有管理认证、查询、命令
 | --- | --- |
 | [src/app/surface](crates/auction-web-admin/src/app/surface) | 路由、认证外壳与会话内状态 |
 | [src/app/surface/pagination](crates/auction-web-admin/src/app/surface/pagination) | 每表数量 URL、本地偏好、共享 Pager 译文与请求身份门禁 |
-| [src/app/surface/pending](crates/auction-web-admin/src/app/surface/pending) | 当前路由已提交命令的稀疏宿主、累计未知结果与原样重试区 |
+| [src/app/surface/pending](crates/auction-web-admin/src/app/surface/pending) | 页面或认证外壳的已提交命令稀疏宿主、累计未知结果与原样重试区 |
 | [src/app/surface/auth/navigation](crates/auction-web-admin/src/app/surface/auth/navigation) | `desktop.rs` 常驻侧栏、`mobile.rs` 折叠菜单与按钮；共享唯一入口清单，不持有会话、草稿或请求 |
 | [src/api/pagination](crates/auction-web-admin/src/api/pagination) | 显式分页请求的安全乘法与既有服务端边界校验 |
 | [runtime_config/taxonomy.rs](crates/auction-web-admin/src/api/operations/runtime_config/taxonomy.rs) | 服务端装备词典投影的界限、唯一性及引用完整性校验 |
@@ -51,6 +51,13 @@ Runtime 非敏感草稿和稳定重试命令保留在当前认证外壳内，站
 确认清单展示同一候选的实际清空差异，不放宽服务器的 TCP/Unix 互斥约束。
 认证身份代数通过真实 keyed iterator 销毁旧 Scope，不只修改静态组件 key；新身份重新提供 actor/CSRF context。
 拍卖路由、录入 world、报告、代理历史、入站详情及邮箱反馈各按实际状态 owner 隔离，页级未决宿主不随展示切换销毁。
+规则草稿、已校验候选及已提交发布命令由当前认证外壳持有，站内切页和浏览器前进/后退保留；明确丢弃、成功发布或
+身份变化时清除。重进规则页先读取当前语言的权威版本，只有 locale、revision 和标题/正文均与草稿基线相符时才允许继续校验发布；
+不一致时保留草稿并提示先处理未决命令、复制所需内容，再确认丢弃并重载。未知发布结果始终只允许原命令重试。
+发布成功后自动重读当前语言；读取结果同时匹配语言与重读世代，完成快照落地后保留发布成功提示。
+切换或新增语言、重新加载会先确认丢弃未发布修改，取消保留原草稿；新增当前语言不会清空草稿。
+语言标签只接受服务端支持的 ASCII 字母、数字及连字符。编辑字段时就地更新草稿，避免每次击键构造多份 Markdown 签名。
+有未保存规则草稿时，刷新或关闭请求浏览器原生确认；草稿不写浏览器持久化存储，移动端强制关闭不保证触发确认。
 
 业务表格与 Markdown 预览均为 100% 容器宽度、独立完整百分比列宽，窄屏保留表头/行，禁止横向滚动或卡片化；
 长文本通过共享提示/浮层查看（比例见[列宽登记](docs/design/table-layouts.md)）。已有分页列表统一复用共享 Pager 的
@@ -63,8 +70,10 @@ lot、delivery、用户、凭据、入站邮件、改名和审计表直接排序
 结算页面先借用目录、结算与 recovery 完整快照核对请求身份，再向子组件交付结果，避免每次重绘先复制一份完整报告。
 请求只订阅服务器筛选与分页身份，当前页排序不重发 GET；Outbox 的事件、失败与 lag 分区分别订阅各自查询。
 更改轮询间隔不立即刷新无关列表，显式刷新和命令成功刷新仍保留。
+入站邮件详情按钮的完整 ID 在可访问名称、提示及详情中；结算装备全文查看和外链使用独立控件，避免嵌套交互截获点击。
 
-手机竖屏与 64rem 内的触控横屏使用顶部折叠导航，切换路由自动收起；导航内按 Escape 返回触发按钮。
+手机竖屏与 64rem 内的触控横屏使用顶部折叠导航，切换路由自动收起；导航内按 Escape 返回触发按钮，触发按钮上按 Escape 也可收起。
+导航按当前路由声明 `aria-current`，筛选和分页 query 不影响当前页面标记。
 桌面/手机导航由独立 Rust 纯展示模块输出，CSS 只显示适用导航；手机控制区只有一个 `admin-primary-navigation` ID。
 两种展示不持有 `Outlet`、认证 epoch、读取资源或业务事件工厂；主区、配置草稿、页级未决命令、登录及设置表单始终只有一份，
 改宽度不切换业务组件树、不引入第二次 API 读取，也不自动关闭未知命令。
@@ -76,7 +85,8 @@ lot、delivery、用户、凭据、入站邮件、改名和审计表直接排序
 业务表始终保持完整行列与百分比列宽；凭据、Realtime 动作布局放在单元格内部，不把 `td` 改为 flex。
 复选项和诊断展开入口使用整行触控区域，长文本继续使用共享键盘/触控全文查看。
 
-拍卖、lot、用户、凭据、投递、邮件关联任务、Recovery、业务世界启停、改名回滚、规则和 replay 在稳定宿主安装未决操作区；runtime 未决命令与草稿同属认证外壳。
+拍卖、lot、用户、凭据、投递、邮件关联任务、Recovery、业务世界启停、改名回滚、规则和 replay 在稳定宿主安装未决操作区；
+规则与 runtime 未决命令及草稿同属认证外壳。
 已提交意图冻结完整负载、原 UUID 和版本，任务不随行、弹窗或邮件详情卸载取消；不把关闭展示解释为取消服务器请求。
 同实体未决期间禁止新意图，成功移除，从未未知的明确拒绝才可显式关闭；后续 401/429 不能解除累计未知。
 创建用户的 generated/manual Key 请求均保留原输入工厂供重试，成功 Key 直接交稳定页面，仅驻留内存并须安全交付，

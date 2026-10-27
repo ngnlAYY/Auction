@@ -33,7 +33,14 @@ pub(crate) fn history() -> Element {
             page: query.page.max(1),
         }
     });
-    // 草稿筛选输入以已应用查询为初值；地址栏变化（含前进/后退恢复）时经 effect 重新同步。
+    // 草稿只随实际筛选条件恢复；翻页与排序不应覆盖尚未提交的输入或字段错误。
+    let applied_filters = use_memo(move || {
+        let mut filters = applied_query();
+        filters.sort.clear();
+        filters.page = 1;
+        filters
+    });
+    // 筛选草稿以已应用查询为初值，筛选条件变化（含前进/后退恢复）时经 effect 同步。
     let initial = applied_query.peek().clone();
     let mut world_filter = use_signal(|| initial.world.clone().unwrap_or_else(|| "all".to_owned()));
     let mut name_filter = use_signal(|| initial.name.clone().unwrap_or_default());
@@ -64,7 +71,7 @@ pub(crate) fn history() -> Element {
     });
     let mut filter_error = use_signal(|| initial_error);
     use_effect(move || {
-        let applied = applied_query();
+        let applied = applied_filters();
         world_filter.set(applied.world.clone().unwrap_or_else(|| "all".to_owned()));
         name_filter.set(applied.name.clone().unwrap_or_default());
         let (from_month, from_year) = history_date_parts(applied.from.as_deref());

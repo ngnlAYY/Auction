@@ -97,9 +97,9 @@ impl ForumRemoteError {
     }
 }
 
-/// 单次论坛内容扫描的远端写入进度；仅记录是否存在尚未确认的 POST。
-/// 传输适配器在预读、限速和凭据校验全部完成、即将发送 POST 时标记。调用方必须取得精确帖子回执；
-/// 启用正文校验时还须经 [`forum_post_bodies_match`] 确认原始正文。该对象不替代持久化的未知结果门禁。
+/// 单次论坛内容扫描的远端写入进度；记录已发送但尚未本地收口的 POST。
+/// 传输适配器在预读、限速和凭据校验全部完成、即将发送 POST 时标记。远端证明及本地
+/// 镜像事务均确认后才解除；进程崩溃仍依靠持久 claim 的过期恢复门禁。
 #[derive(Debug, Clone, Default)]
 pub struct ForumWriteProgress {
     unconfirmed: Arc<AtomicBool>,
@@ -111,12 +111,12 @@ impl ForumWriteProgress {
         self.unconfirmed.store(true, Ordering::Release);
     }
 
-    /// 已取得精确帖子回执及配置要求的正文证明，解除本轮这一笔写入的未知标记。
+    /// 已取得远端证明且本地镜像事务已确认，解除本轮写入标记。
     pub fn confirm_write(&self) {
         self.unconfirmed.store(false, Ordering::Release);
     }
 
-    /// 返回本轮是否已经发送过尚未通过所选确认策略的 POST。
+    /// 返回本轮是否已经发送过尚未完成本地收口的 POST。
     pub fn has_unconfirmed_write(&self) -> bool {
         self.unconfirmed.load(Ordering::Acquire)
     }
@@ -414,7 +414,7 @@ pub trait ForumSyncRecoveryPort: Send + Sync {
 
 /// 论坛远程发布/读取端口；实现必须自行处理固定 origin、限速和认证边界。
 pub trait ForumPublisher: Send + Sync {
-    /// 在一次版面读取内按 1 至 9 个去重精确标题查找唯一主题；多个匹配身份必须失败关闭。
+    /// 在一次版面读取内按 1 至 23 个去重精确标题查找唯一主题；多个匹配身份必须失败关闭。
     /// 未知写入恢复只能调用该只读方法，不能隐式创建主题或逐标题重复请求。
     fn find_topic_by_titles(
         &self,

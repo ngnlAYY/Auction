@@ -110,6 +110,9 @@ Recovery 每封退件由 storage 在同一事务追加唯一消费事实、增�
 
 [services/settlement](crates/auction-application/src/services/settlement) 拥有结算与履约用例，重放必须用冻结策略、
 资金池、lot 事实和义务验证原结果；历史账本通过独立防腐入口重建只读结果，缺失证据不回退到写入。
+首次结算在计算前校验锁内 workflow、领取命令和截止世代，并核对从拍卖与截止派生的稳定身份及完成请求摘要；
+新版账本重放也复核这些身份和摘要。派生与摘要由应用层统一提供给 storage/Worker，字节沿用旧 Worker 算法；
+历史已结算记录可缺少这些字段，旧 `settlement_complete` 仍走原有只读防腐与权威事实对账。
 旧 Go `settlement_complete` 摘要时间按 `RFC3339Nano` 去除小数尾零；同时只读兼容早期 Rust `AutoSi` 补零摘要，
 不改写旧账本或重新结算。内部证据摘要仍使用原小写十六进制字节，固定 32 字节摘要只分配一次编码缓冲。
 新结算与新旧账本重放均按 lot 建立借用索引，避免明细、事实及代理关闭快照逐项全表扫描；
@@ -190,6 +193,7 @@ Admin 重签 key 直接移交密文信封，并在等待存储前销毁本地候
 首条规则只命中单边词缀时，名称中找不到对应片段仍按论坛纯文本回退归为融合；等级 0 与论坛快照一致视为未知。
 Public lot 查询允许装备分组、等级上限、无等级显示与类型组合筛选；`PublicLotListRequest::matches_level` 拥有包含式上限
 及无等级独立判断，不能把 None 当零级。应用投影为预览、正式摘要和详情携带同一分组，列表验证复核全部筛选归属。
+正式 lot 详情仅由摘要装备投影持有一份属性 JSON；应用校验对象形状，HTTP 消费时移交原值，列表仍不输出属性。
 
 [ports/auction/queries](crates/auction-application/src/ports/auction/queries) 定义拍卖、lot、竞价/价格历史及账户安全投影，
 [ports/public](crates/auction-application/src/ports/public) 定义规则、黑名单、补偿与装备链接等读取端口；
@@ -197,12 +201,17 @@ Public lot 查询允许装备分组、等级上限、无等级显示与类型组
 `AuctionReader` 读取时绑定公开可见性及数据库时钟。Public 指定列表接受正 `i64` 数量并保留 offset 防护
 （见[分页契约](docs/contracts/routes.md#public-分页世界与金额)）；规则缓存只接收有效可重建快照，miss、损坏、过期或
 后端失败均回源；GET 或损坏快照删除失败后，本次读取不再回填，避免权威读取成功后重复消耗故障缓存等待预算。
+规则读取与发布失效不互锁：旧数据库快照可能在发布后的成功失效之后回填，旧内容最多保留至该次回填的 TTL 到期；
+不能将发布后失效视为立即一致性保证。
 完整装备 URL 仅能移交已授权的 HTTP DTO 或论坛渲染边界。Admin 装备录入把来源读取、key 加密和持锁写入分成窄端口，
 来源/策略拒绝发生在写事务前。
 成交价格历史的 `PublicPriceHistorySort` 限定时间、价格的升降序，旧 cursor 仅支持默认时间倒序；
 名称按 Unicode 空白或英文逗号拆成最多八个词条，各词按字面包含并以 AND 组合，不要求相邻或依输入顺序出现；
 完整筛选集统计的可选 `median_exact` 用规范十进制字符串保存整数或半个 Credit，应用与 HTTP 共同校验
 安全范围、最低/最高价区间及旧整数中位数的一致性，不通过浮点重算金额。
+Admin 改名历史分页校验对整个请求只进行一次 Unicode 小写转换；记录匹配仍按原有小写子串语义判断。
+Admin 论坛预览的应用投影保留原解析字段供授权调用方使用；`Debug` 只输出长度、数量及数值标记，
+不输出任何来源文本、玩家名、post ID 或可能包含装备 key 的 URL。
 
 [ports/forum](crates/auction-application/src/ports/forum) 区分公开镜像、外部同步与回帖命令，真实处理楼层不能由 post ID
 或内容版本推算；`ForumTopicPublication` 区分真实创建回执与找到既有主题，Admin 状态读取复用公开安全投影端口而不获得

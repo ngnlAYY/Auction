@@ -10,11 +10,13 @@ pub(crate) fn AdminAuthenticatedShell(
     mut reload_generation: Signal<u64>,
     readiness: AdminReadinessState,
     session_confirmed: bool,
+    redirecting: bool,
     on_logout: EventHandler<()>,
 ) -> Element {
     // 旧凭据表的 importedBy 列由当前登录操作者合成，不扩散到凭据 DTO 或数据库投影。
     use_context_provider(|| session.clone());
     super::super::config::use_config_draft();
+    super::super::rules::use_rules_draft();
     // 外壳持有唯一的秒级共享时钟；需要每秒刷新的子树（如拍卖列表倒计时）通过
     // `use_second_tick` 订阅同一个 interval，不再各自起定时器。
     use_second_ticker();
@@ -124,7 +126,9 @@ pub(crate) fn AdminAuthenticatedShell(
                     fieldset {
                         disabled: !session_confirmed,
                         style: "display: contents;",
-                        Outlet::<Route> {}
+                        if !redirecting {
+                            Outlet::<Route> {}
+                        }
                     }
                 }
             }

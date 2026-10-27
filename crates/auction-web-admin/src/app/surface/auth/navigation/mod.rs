@@ -25,8 +25,10 @@ fn NavigationLinks(current_route: Route) -> Element {
             (Route::RulesContent {}, t!("page-rules-content-title")),
             (Route::Audit {}, t!("nav-audit")),
         ] {
+            // Link 默认比较完整 URL；分页和筛选 query 存在时仍按路由标记当前页面。
             Link {
                 class: if current_route == route { "admin-shell__nav-link--active" } else { "" },
+                aria_current: if current_route == route { "page" } else { "false" },
                 to: route,
                 "{label}"
             }

@@ -60,8 +60,13 @@ async fn list_postgres(
         }
         Some(AdminProxyEventCursor::Start) | None => None,
     };
-    let query_limit =
-        request.limit.checked_add(1).ok_or_else(|| storage_error("Admin 代理历史页大小溢出"))?;
+    // 编号页返回 total；仅游标页需要额外读取一行判断是否存在下一页。
+    let use_cursor = request.cursor.is_some();
+    let query_limit = if use_cursor {
+        request.limit.checked_add(1).ok_or_else(|| storage_error("Admin 代理历史页大小溢出"))?
+    } else {
+        request.limit
+    };
     let rows = sqlx::query(
         "SELECT
             command.command_id,
@@ -118,8 +123,8 @@ async fn list_postgres(
     .await
     .map_err(|_| storage_error("读取 Admin 代理历史命令账本失败"))?;
 
-    let has_more = rows.len() > request.limit as usize;
-    let mut entries = Vec::with_capacity(request.limit as usize);
+    let has_more = use_cursor && rows.len() > request.limit as usize;
+    let mut entries = Vec::with_capacity(rows.len().min(request.limit as usize));
 
     for (index, row) in rows.into_iter().enumerate() {
         if index >= request.limit as usize {

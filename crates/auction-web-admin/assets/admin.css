@@ -1337,6 +1337,11 @@
   margin-block-end: var(--space-4);
 }
 
+.admin-rules-add__help {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 .admin-rules-add input {
   inline-size: 9rem;
   padding: var(--admin-native-input-block) var(--admin-native-input-inline);
@@ -1350,7 +1355,7 @@
   margin-block-end: var(--space-3);
 }
 
-.admin-rules-tabs button[aria-selected="true"] {
+.admin-rules-tabs button[aria-pressed="true"] {
   border-color: var(--color-accent);
   color: var(--color-accent);
   font-weight: 700;
@@ -2921,6 +2926,12 @@
   border-block-end: var(--border-width) solid var(--color-border);
   text-align: left;
   vertical-align: top;
+}
+
+.admin-settlement-equipment-link {
+  display: block;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
 }
 
 .admin-settlement__table-wrap th {

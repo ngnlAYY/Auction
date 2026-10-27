@@ -445,7 +445,7 @@ async fn refresh_fixed_posts(
                 return Ok(());
             }
             let updated_at = clock.now();
-            return runtime
+            runtime
                 .store
                 .record_fixed_posts_progress(
                     topic,
@@ -454,13 +454,17 @@ async fn refresh_fixed_posts(
                     processed_through_post_number_i32,
                     updated_at,
                 )
-                .await;
+                .await?;
+            write_progress.confirm_write();
+            return Ok(());
         }
         let (updated_at, next_scan_at) = completed_scan_times(clock, poll_interval)?;
-        return runtime
+        runtime
             .store
             .finish_topic_scan(topic, processed_through_post_number_i32, updated_at, next_scan_at)
-            .await;
+            .await?;
+        write_progress.confirm_write();
+        return Ok(());
     }
     if catalog_changed && !reconciliation_only && confirmed_terminal_version.is_none() {
         reconcile_or_edit_fixed_post(
@@ -489,7 +493,7 @@ async fn refresh_fixed_posts(
     }
     let updated_at = clock.now();
     if !scan_completed {
-        return runtime
+        runtime
             .store
             .record_fixed_posts_progress(
                 topic,
@@ -498,7 +502,9 @@ async fn refresh_fixed_posts(
                 processed_through_post_number_i32,
                 updated_at,
             )
-            .await;
+            .await?;
+        write_progress.confirm_write();
+        return Ok(());
     }
     let next_scan_at = next_scan_at(updated_at, poll_interval)?;
     runtime
@@ -511,7 +517,9 @@ async fn refresh_fixed_posts(
             updated_at,
             next_scan_at,
         )
-        .await
+        .await?;
+    write_progress.confirm_write();
+    Ok(())
 }
 
 async fn reconcile_or_edit_fixed_post(
@@ -522,7 +530,9 @@ async fn reconcile_or_edit_fixed_post(
     expected: ForumRenderedPost,
     write_progress: &ForumWriteProgress,
 ) -> Result<(), ApplicationError> {
-    if runtime.verify_post_body {
+    // 未知写入始终只读核对，即使日常正文回读被关闭也不能凭帖子身份放行。
+    if runtime.verify_post_body || topic.content_last_error_code.as_deref() == Some("write_unknown")
+    {
         let current = runtime
             .writer
             .read_post(topic.world, topic.thread_id.clone(), post_id.to_owned())
@@ -562,7 +572,6 @@ async fn reconcile_or_edit_fixed_post(
             );
         }
     }
-    write_progress.confirm_write();
     Ok(())
 }
 

@@ -3,7 +3,7 @@
 use super::super::*;
 
 /// send payload 中只保存 owner UUID 的装备 secret 引用。
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SettlementEquipmentSecretReference {
     pub(crate) kind: String,
@@ -11,7 +11,7 @@ pub(crate) struct SettlementEquipmentSecretReference {
 }
 
 /// 旧版 BuildPayload 生成的 send 线协议。
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SettlementSendWirePayload {
     pub(crate) schema_version: u8,
@@ -25,7 +25,7 @@ pub(crate) struct SettlementSendWirePayload {
 }
 
 /// 仅用于识别并隔离历史记录的 return 线协议，禁止重新发送。
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SettlementReturnWirePayload {
     pub(crate) schema_version: u8,
@@ -35,7 +35,6 @@ pub(crate) struct SettlementReturnWirePayload {
 }
 
 /// 完成严格 wire 校验后供 transport 使用的安全投影。
-#[derive(Debug)]
 pub(crate) struct SettlementDeliveryPayload {
     pub(crate) operation: String,
     pub(crate) template: String,

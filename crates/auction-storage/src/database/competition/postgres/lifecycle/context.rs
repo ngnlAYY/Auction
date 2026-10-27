@@ -95,7 +95,7 @@ pub(super) async fn load_lifecycle_context_postgres(
         scheduled_open_at: row.try_get("scheduled_open_at").map_err(map_sql_error)?,
         preview_opened_at: row.try_get("preview_opened_at").map_err(map_sql_error)?,
         policy_scheduled_end_at: row.try_get("policy_scheduled_end_at").map_err(map_sql_error)?,
-        policy_final_phase_lead: Duration::seconds(final_phase_lead_seconds),
+        policy_final_phase_lead: duration(final_phase_lead_seconds, "最终阶段领先时间无效")?,
         policy_settlement: crate::database::settlement_policy::decode(
             &row.try_get::<Value, _>("policy_snapshot").map_err(map_sql_error)?,
         )

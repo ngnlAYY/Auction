@@ -5,12 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[package.metadata.cargo-machete]
+# OTLP 在上游内部调用 reqwest；本 crate 显式启用其 rustls feature，避免依赖装配根的 feature 合并。
+ignored = ["reqwest"]
+
 [dependencies]
 chrono.workspace = true
 opentelemetry.workspace = true
 opentelemetry-otlp.workspace = true
 opentelemetry_sdk.workspace = true
 prometheus.workspace = true
+reqwest.workspace = true
 rustls.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

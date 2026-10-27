@@ -15,7 +15,7 @@ use crate::{
 
 use super::SettleAuctionCommand;
 use super::obligations::build_obligations;
-use super::validation::validate_settlement_plan;
+use super::validation::{validate_command_identity, validate_settlement_plan};
 
 const LEGACY_SETTLEMENT_ACTOR: &str = "auction-worker";
 
@@ -238,23 +238,6 @@ impl LegacySettlementResult {
             }
         }) == Some(self.obligation_count)
     }
-}
-
-fn validate_command_identity(command: SettleAuctionCommand) -> Result<(), ApplicationError> {
-    if command.command_id.is_nil()
-        || command.claim_command_id.is_nil()
-        || command.workflow_id.is_nil()
-        || command.auction_id.is_nil()
-        || command.command_id == command.claim_command_id
-        || command.workflow_id == command.command_id.as_uuid()
-        || command.workflow_id == command.claim_command_id.as_uuid()
-        || command.due_at.timestamp_nanos_opt().is_none()
-        || command.now.timestamp_nanos_opt().is_none()
-        || command.now < command.due_at
-    {
-        return Err(failed("结算命令身份或时间世代无效"));
-    }
-    Ok(())
 }
 
 fn legacy_complete_hash(

@@ -67,9 +67,9 @@
         min-block-size: 100dvh;
         margin-inline: auto;
         align-content: start;
-        padding: 1rem 1.5rem;
+        padding: 1rem 0.75rem;
         padding-block: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-bottom, 0px));
-        padding-inline: max(1.5rem, env(safe-area-inset-left, 0px)) max(1.5rem, env(safe-area-inset-right, 0px));
+        padding-inline: max(0.75rem, env(safe-area-inset-left, 0px)) max(0.75rem, env(safe-area-inset-right, 0px));
         overflow: hidden;
         background: #0e1116;
         pointer-events: none;
@@ -144,13 +144,6 @@
         to {
           opacity: 1;
           visibility: visible;
-        }
-      }
-
-      @media (max-width: 48rem) {
-        .app-boot {
-          inline-size: 100%;
-          padding-inline: max(0.75rem, env(safe-area-inset-left, 0px)) max(0.75rem, env(safe-area-inset-right, 0px));
         }
       }
 

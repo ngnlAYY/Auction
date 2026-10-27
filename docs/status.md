@@ -35,6 +35,59 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-26 全仓审计后的审查复核
+
+结算 Worker 将锁内身份冲突与命令账本摘要冲突统一记录为 `settlement_mismatch`，沿用原有持久退避；
+规则编辑器的读取结果同时绑定语言与重读世代，发布成功后的权威快照不会清除成功提示。结算契约按非负
+税费 `T` 修正 v1/v2 买方公式；玩家指南改用已发布并同步完成的论坛主题描述。
+论坛镜像加密仍属尚未实施的设计，不代表现有数据库或历史副本已完成保护。
+
+更正：用户明确游戏装备直链及其中的装备 key 一直公开，不属于隐私数据；上述镜像加密要求撤销。
+
+复核后 `CARGO_BUILD_JOBS=2 just verify` 通过，覆盖仓库策略、格式、工作区已有目标、独立 feature、
+Clippy 和双端 WASM 检查；Rust 1.94.1 的 `cargo check --locked --workspace --all-targets --all-features` 通过。
+`CARGO_BUILD_JOBS=2 bash ci/release/web-bundle.sh admin` 重新构建 Admin 正式资源，
+payload SHA-256 为 `076cf7cf353663db4a46c773ceecc776c3f391514d32ae08ae2c8665221a1413`，共 9 个文件。
+本次未执行数据库、浏览器或外部服务行为验证，也未部署。
+
+### 2026-10-26 全仓源码、依赖与双端界面审计
+
+基线为干净的 `2b220ebe`。本轮按领域与应用、PostgreSQL、外部集成、Worker、HTTP、配置与运维、Public/Admin/shared Web、
+依赖与 CI 的 owner 审读关键调用链、注释、已有测试和正式文档。结构与源码审读不是逐行形式证明，也不等于生产验收。
+
+- 结算首次执行及新版账本重放复核锁内 workflow、claim、due 世代、稳定命令身份与请求摘要；旧版账本仍按历史路径核验。
+  Public 详情转移唯一装备属性值，避免重复复制，领域和查询路径移除部分临时集合与重复转换。
+- Worker 在领取返回后复核停机状态；未开始处理的 delivery 使用原 claim/token/fence 释放，邮件轮询未处理 claim
+  等待租约恢复。外部邮件发送保留未知结果与原回执、Sent 证明边界。
+- HTTP 对论坛镜像 P15 加 `no-store`，修复限流并发时钟倒退、Unix 锁文件校验顺序和实时事件公平性；
+  管理仪表盘校验凭据快照。用户选择保留论坛游戏直链；论坛正文的本地明文持久化仍未修复，见[源码缺口](docs/status.md#源码核对发现的实现缺口)。
+  更正：用户明确游戏装备直链及装备 key 一直公开，论坛镜像明文不属于隐私缺口。
+- 已发布主题的内容 claim 过期重领时持久标记 `write_unknown`；远端 POST 的进度直到本地正文证明提交后才清除。
+  未知回帖写入不受日常正文校验开关影响，先只读逐帖核对当前目标，不一致继续阻断重发。
+- MoogleMail 装备脚本按遮罩后的括号栈定位目标字段所在对象，避免把外层 JavaScript 函数体误当作 JSON；
+  严格字段、重复值和正文／脚本一致性校验保留。
+- 总控持有迁移独占锁，合并服务预检 Unix socket；分体启动在 readiness 和回执前核对进程身份。
+- Public 恢复历史场次世界与状态筛选，保留原拍品、出价记录及论坛入口；Admin 规则草稿与未决发布命令保存在认证会话内，
+  重新进入时比较权威语言、版本和内容，冲突时保留草稿并禁止校验／发布；整页离开使用原生提示。
+  双端和共享组件修正表格嵌套交互、手机导航、弹窗焦点和文本提示，五语言及对应设计说明同步。
+- 依赖调整集中在 feature 边界：SDK 不启用未使用的实验性批处理，Worker 显式启用 reqwest JSON，
+  observability 显式启用其独立 HTTPS 依赖；受控 dx 的 Zstandard 依赖锁升级至修复版本。
+  应用和工具锁的公告范围及剩余匹配见[工具审计](ci/tools/README.md#2026-10-26-zstandard-公告)和
+  [技术栈](docs/design/tech-stack.md)。已有行为测试未删除。
+
+附件及论坛恢复修正后，Rust 1.99.0 下最终 `CARGO_BUILD_JOBS=2 just verify` 通过，覆盖仓库策略、格式、工作区已有目标编译、
+独立 feature、Clippy `-D warnings` 及双端 WASM 检查；Rust 1.94.1 的 `cargo check --locked --workspace --all-targets --all-features`
+也通过。首轮门禁发现的 Public 字符串所有权和 Admin WASM trait 导入错误已修复。
+`cargo machete --with-metadata` 未发现未使用直接依赖；受控发布和审计工具回执验证通过。
+`bash -n` 与 `shellcheck -x` 覆盖本轮触及的检查、Web 构建及工具脚本。一次性核对 45 份 Markdown 中可识别的
+仓库内路径与标题锚点，未发现缺失；复杂 Markdown 语法不在该脚本覆盖内。
+主动 LSP 诊断未完成：当前 `rust-analyzer` 启动失败；Cargo 结果不替代 PostgreSQL 或浏览器运行验证。
+
+论坛加密方案审阅及后续附件解析修正之前，`CARGO_BUILD_JOBS=2 just web-build` 使用新 dx 构建双端正式资源成功；
+Public payload SHA-256 为 `553a22e14e08a651fa213bccb9dafbae3f3ee43d1c4e42979743b3d2e5d53b7d`，
+Admin 为 `0ee5b6c76146f9217c6b0c7ae2840d56829491e672f98a47ce3146ecc4b1ca58`，各 9 个文件。
+该次构建不证明浏览器交互、数据库并发、真实论坛或邮件行为；未执行行为测试、服务启动或部署。
+
 ### 2026-10-26 统一分页右对齐
 
 owner 为 `auction-web-shared::style`，Public 与 Admin 共用。`base.css` 将分页容器及折行数字组右对齐；
@@ -2548,6 +2601,16 @@ SQL 静态扫描覆盖 39 份迁移、737 个 Rust SQL 候选；两份受限执�
 Rust/Cargo `1.98.0`、just `1.58.0` 下 `just verify`（当时 51 份文档）与差异检查退出 0。修复门禁发现的借用、错误映射和 feature 编译问题后重跑，未执行行为测试、发布、浏览器、服务、数据库或迁移。29 项报告问题、论坛 DTO 附项及三份追加迁移属于该轮；历史流拍 Return、资产冲突、错误归档 Credits 和旧排期来源仍须独立核对，见[邮件资产核对](ops/mail/diagnostics.md#历史资产处置核对)。
 
 ## 源码核对发现的实现缺口
+2026-10-26 源码审计发现论坛目录正文存在装备 key 的本地明文持久化问题：渲染器将完整游戏装备 URL 写入首帖及续页，
+`auction_forum_sync.body` 和 `auction_forum_catalog_pages.body` 保存这些正文，P15/A46 也可返回首帖。用户已明确选择保留
+论坛游戏直链，并允许论坛、P15 和认证后的 A46 按[I-05a](docs/contracts/invariants.md#i-05a-admin-装备录入的敏感边界和原子集合)返回该链接；
+本地数据库镜像仍须加密保护。P15 本轮增加 `no-store`，不能消除数据库、既有论坛帖或历史备份中的明文。
+固定楼层、未知写入和历史记录的[加密与转换设计](docs/contracts/schema.md#论坛镜像加密与历史转换设计尚未实现)已登记；
+当前尚未实现该设计，也未检查或清理实际数据库、远端论坛和备份。
+
+更正：用户明确游戏装备直链及其中的装备 key 一直公开，不属于隐私数据。上述隐私风险判断及为此提出的论坛镜像加密要求撤销；
+固定楼层身份、正文对账和未知外写处理仍按现有契约执行。
+
 以下为历史源码修复及未验收边界。2026-10-14 全仓审计的 18 项（11 项 P1、7 项 P2）已在源码范围修复，不等于行为验收：
 
 | 审计项 | 修复 owner 与范围 |

@@ -78,13 +78,18 @@ impl DeliveryWorkerRuntimeConfig {
             && self.concurrency > 0
             && self.concurrency <= self.batch_limit
             && !self.poll_interval.is_zero()
+            && self.poll_interval <= std::time::Duration::from_secs(86_400)
             && self.jitter <= std::time::Duration::from_secs(86_400)
             && !self.lease_duration.is_zero()
+            && self.lease_duration <= std::time::Duration::from_secs(86_400)
             && !self.renew_interval.is_zero()
             && self.renew_interval < self.lease_duration
             && !self.request_timeout.is_zero()
+            && self.request_timeout <= std::time::Duration::from_secs(86_400)
             && self.sending_grace > self.request_timeout
+            && self.sending_grace <= std::time::Duration::from_secs(86_400)
             && !self.finalize_timeout.is_zero()
+            && self.finalize_timeout <= std::time::Duration::from_secs(300)
     }
 }
 

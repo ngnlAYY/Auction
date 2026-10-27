@@ -65,7 +65,8 @@ pub(crate) async fn get(
         ));
     }
     let mut headers = HeaderMap::new();
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    // 论坛首帖可能包含完整装备 URL，浏览器和共享缓存均不得保存响应。
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok((headers, Json(ApiResponse::ok("论坛拍卖帖子同步状态已加载", map_thread(thread)))))
 }
 

@@ -113,6 +113,9 @@ where
     if !worker.recovery.validate() {
         return Err(WorkerError::InvalidRecoveryConfiguration);
     }
+    if worker.mail_polls.iter().any(|runtime| !runtime.validate()) {
+        return Err(WorkerError::InvalidMailPollConfiguration);
+    }
     if !worker.forum.validate()
         || worker
             .forum_sync
@@ -228,28 +231,10 @@ where
             .spawn(realtime_consumer::run_loop(Arc::clone(&worker), drain_sender.subscribe()));
     }
 
-    loop {
+    let fatal_error = loop {
         tokio::select! {
             biased;
-            () = &mut shutdown => {
-                worker.control.mark_draining();
-                let _ = drain_sender.send(true);
-                // 单组错误不能提前 drop 其他在途 owner；共享装配根的总排空截止时间，
-                // 按原顺序等待所有组之后再返回首个错误，不为每组重置预算。
-                let results = [
-                    drain_delivery_tasks(&mut delivery_cycles).await,
-                    drain_worker_tasks(&mut delivery_wakeup_tasks, "delivery wakeup").await,
-                    drain_worker_tasks(&mut operations_alert_tasks, "operations alert").await,
-                    drain_worker_tasks(&mut auction_tasks, "auction").await,
-                    drain_worker_tasks(&mut fulfillment_tasks, "fulfillment").await,
-                    drain_worker_tasks(&mut recovery_tasks, "recovery").await,
-                    drain_worker_tasks(&mut mail_poll_tasks, "MoogleMail").await,
-                    drain_worker_tasks(&mut forum_tasks, "forum").await,
-                    drain_worker_tasks(&mut realtime_tasks, "realtime").await,
-                ];
-                tracing::info!(worker_id = %worker.worker_id, "auction worker stopping");
-                return results.into_iter().find_map(Result::err).map_or(Ok(()), Err);
-            }
+            () = &mut shutdown => break None,
             _ = &mut delivery_sleep, if delivery_enabled && delivery_cycles.is_empty() =>
             {
                 worker.metrics.observe_schedule_delay(
@@ -267,10 +252,7 @@ where
                     Some(Ok(Err(error))) => {
                         tracing::warn!(error = %error, "delivery worker cycle failed; retrying after poll delay");
                     }
-                    Some(Err(error)) => {
-                        worker.control.mark_degraded();
-                        return Err(WorkerError::DeliveryTaskJoin(error));
-                    }
+                    Some(Err(error)) => break Some(WorkerError::DeliveryTaskJoin(error)),
                     None => {}
                 }
                 let wait = if std::mem::take(&mut delivery_wake_pending) {
@@ -283,8 +265,7 @@ where
             }
             result = delivery_wakeup_tasks.join_next(), if !delivery_wakeup_tasks.is_empty() => {
                 if let Some(Err(error)) = result {
-                    worker.control.mark_degraded();
-                    return Err(WorkerError::DeliveryTaskJoin(error));
+                    break Some(WorkerError::DeliveryTaskJoin(error));
                 }
             }
             _ = delivery_wakeup.notified(), if delivery_enabled => {
@@ -297,52 +278,52 @@ where
                 }
             }
             result = operations_alert_tasks.join_next(), if !operations_alert_tasks.is_empty() => {
-                worker.control.mark_degraded();
                 match result {
-                    Some(Err(error)) => return Err(WorkerError::OperationsAlertTaskJoin(error)),
-                    Some(Ok(())) | None => return Err(WorkerError::OperationsAlertTaskExited),
+                    Some(Err(error)) => break Some(WorkerError::OperationsAlertTaskJoin(error)),
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::OperationsAlertTaskExited),
                 }
             }
             result = auction_tasks.join_next(), if !auction_tasks.is_empty() => {
-                worker.control.mark_degraded();
                 match result {
-                    Some(Err(error)) => return Err(WorkerError::AuctionTaskJoin(error)),
-                    Some(Ok(())) | None => return Err(WorkerError::AuctionTaskExited),
+                    Some(Err(error)) => break Some(WorkerError::AuctionTaskJoin(error)),
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::AuctionTaskExited),
                 }
             }
             result = fulfillment_tasks.join_next(), if !fulfillment_tasks.is_empty() => {
-                worker.control.mark_degraded();
                 match result {
-                    Some(Err(error)) => return Err(WorkerError::FulfillmentTaskJoin(error)),
-                    Some(Ok(())) | None => return Err(WorkerError::FulfillmentTaskExited),
+                    Some(Err(error)) => break Some(WorkerError::FulfillmentTaskJoin(error)),
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::FulfillmentTaskExited),
                 }
             }
             result = recovery_tasks.join_next(), if !recovery_tasks.is_empty() => {
-                worker.control.mark_degraded();
                 match result {
-                    Some(Err(error)) => return Err(WorkerError::RecoveryTaskJoin(error)),
-                    Some(Ok(())) | None => return Err(WorkerError::RecoveryTaskExited),
+                    Some(Err(error)) => break Some(WorkerError::RecoveryTaskJoin(error)),
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::RecoveryTaskExited),
                 }
             }
             result = mail_poll_tasks.join_next(), if !mail_poll_tasks.is_empty() => {
-                worker.control.mark_degraded();
                 match result {
-                    Some(Err(error)) => return Err(WorkerError::MailPollTaskJoin(error)),
-                    Some(Ok(())) | None => return Err(WorkerError::MailPollTaskExited),
+                    Some(Err(error)) => break Some(WorkerError::MailPollTaskJoin(error)),
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::MailPollTaskExited),
                 }
             }
             result = forum_tasks.join_next(), if !forum_tasks.is_empty() => {
-                worker.control.mark_degraded();
                 match result {
-                    Some(Err(error)) => return Err(WorkerError::ForumTaskJoin(error)),
-                    Some(Ok(())) | None => return Err(WorkerError::ForumTaskExited),
+                    Some(Err(error)) => break Some(WorkerError::ForumTaskJoin(error)),
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::ForumTaskExited),
                 }
             }
             result = realtime_tasks.join_next(), if !realtime_tasks.is_empty() => {
-                worker.control.mark_degraded();
                 match result {
-                    Some(Err(error)) => return Err(WorkerError::RealtimeTaskJoin(error)),
-                    Some(Ok(())) | None => return Err(WorkerError::RealtimeTaskExited),
+                    Some(Err(error)) => break Some(WorkerError::RealtimeTaskJoin(error)),
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::RealtimeTaskExited),
                 }
             }
             _ = &mut poll_wakeup_wait => {
@@ -354,5 +335,44 @@ where
                 poll_wakeup_wait = Box::pin(poll_wakeup.notified());
             }
         }
+    };
+
+    if fatal_error.is_some() {
+        // 先通知装配根启动共享截止与 PM drain，再等待任何在途组。
+        worker.control.report_fatal();
+    } else {
+        worker.control.mark_draining();
     }
+    let _ = drain_sender.send(true);
+    let drain = async {
+        // 单组错误不能提前 drop 其他在途 owner；所有组共享同一总排空截止。
+        let results = [
+            drain_delivery_tasks(&mut delivery_cycles).await,
+            drain_worker_tasks(&mut delivery_wakeup_tasks, "delivery wakeup").await,
+            drain_worker_tasks(&mut operations_alert_tasks, "operations alert").await,
+            drain_worker_tasks(&mut auction_tasks, "auction").await,
+            drain_worker_tasks(&mut fulfillment_tasks, "fulfillment").await,
+            drain_worker_tasks(&mut recovery_tasks, "recovery").await,
+            drain_worker_tasks(&mut mail_poll_tasks, "MoogleMail").await,
+            drain_worker_tasks(&mut forum_tasks, "forum").await,
+            drain_worker_tasks(&mut realtime_tasks, "realtime").await,
+        ];
+        results.into_iter().find_map(Result::err).map_or(Ok(()), Err)
+    };
+    let result = if let Some(error) = fatal_error {
+        // 独立调用方可能没有装配根监督；致命故障也不得无界等待。
+        match tokio::time::timeout(std::time::Duration::from_secs(10), drain).await {
+            Ok(Ok(())) => {}
+            Ok(Err(drain_error)) => {
+                tracing::warn!(error = %drain_error, "another worker task failed while draining");
+            }
+            Err(_) => tracing::warn!("fatal worker drain exceeded 10 seconds"),
+        }
+        Err(error)
+    } else {
+        // 正常停止仍由装配根统一施加总预算和二次信号。
+        drain.await
+    };
+    tracing::info!(worker_id = %worker.worker_id, "auction worker stopping");
+    result
 }

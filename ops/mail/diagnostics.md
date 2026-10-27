@@ -117,8 +117,8 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 
 完整 `MailMessage` 首次写入 `inbound_mail` 时生成脱敏审查投影。列表增加可空 `sender`/`subject` 及 `has_message_display`，
 详情才返回 `message_display`；snapshot 固定 schema/redaction version，正文最多 64 KiB、JSON 最多 128 KiB、附件外部 ID 最多
-1000 条，Credits/COD 保留为非负数；装备 key、URL key 片段、认证邮件正文和认证相关敏感内容均隐藏。该投影是非权威展示
-数据，不参与入站幂等或 cursor，普通 replay 不会补写历史 NULL。
+1000 条，Credits/COD 保留为非负数；装备 key 虽是公开游戏链接的一部分，现有审查投影仍隐藏装备 key 和 URL key 片段，
+也隐藏认证邮件正文及认证相关敏感内容。该投影是非权威展示数据，不参与入站幂等或 cursor，普通 replay 不会补写历史 NULL。
 
 历史回填只接受认证的 `parsed_message` 诊断证据，并要求 world、mailbox、external mail ID 和 content digest 精确匹配，再以
 CAS 和追加审计写入；相同幂等身份但内容不同必须冲突，没有匹配证据的历史邮件显示未留存。回填不会把证据变成业务权威事实。

@@ -463,6 +463,12 @@
     min-block-size: var(--size-target);
   }
 
+  .admin-settlement-equipment-link {
+    display: flex;
+    min-block-size: var(--size-target);
+    align-items: center;
+  }
+
   .admin-audit-filter__advanced summary,
   .admin-realtime-disclosure summary,
   .admin-mail-polling > summary,

@@ -45,8 +45,8 @@ pub struct MoogleMailAttachment {
 }
 
 /// 通过摘要与详情双重校验后的 typed 邮件 envelope。
-/// 该类型不保存 HTML、mmtoken 或 Cookie，但正文和装备 key 仍属于敏感的短生命周期数据，
-/// 只能在应用处理完成后尽快丢弃或调用 `clear_secrets`。
+/// 该类型不保存 HTML、mmtoken 或 Cookie；邮件正文可能包含敏感内容，装备 key 属于公开游戏链接。
+/// 两者仍按现有短生命周期处理，在应用处理完成后尽快丢弃或调用 `clear_secrets`。
 #[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailMessage {
     pub external_mail_id: String,

@@ -33,6 +33,9 @@ just release-check --single-binary
 用户登录/外部凭据密钥、拍卖策略及 control 路径只要求 Admin/Worker 一致。Admin 已配置的 `worker_config_file` 须绑定实际 Worker 角色文件。
 Worker control 须启用并允许 supervisor UID，监听地址不得冲突；Public/Admin 端口默认 8090/8091，
 可选 1–65535 且不同、固定 loopback，须自行同步代理并核对端口/权限。字段见[配置手册](ops/config/README.md)。
+Unix 入口预检只接受不存在的路径，或由当前服务账号拥有且连接明确拒绝的旧 socket；探测期间路径消失也可继续。
+活动连接、非 socket、属主不符、其他连接错误、100 毫秒探测超时或旧 socket 被替换均阻止启动和首次空库初始化。
+预检不删除路径，绑定器仍重新核验并处理旧 socket；预检完成后仍须保持目录稳定。
 私有运行目录为配置目录同级的 `.<配置目录名>.server`（0700），含 `control.sock` 和 `owner.lock`；
 使用当前服务账号 UID/组，不创建系统账号，也不要移动、删除或替换目录绕过锁——同库只能由同主机、
 同服务账号管理这一组进程，不能同时运行分体或远端实例。

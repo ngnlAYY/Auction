@@ -72,8 +72,8 @@ pub(crate) fn validate_entries(
     Ok(())
 }
 
-pub(crate) fn equipment_level(attributes: Value) -> Option<i64> {
-    attributes.get("level").and_then(Value::as_i64).filter(|level| *level >= 0)
+pub(crate) fn equipment_level(level: Value) -> Option<i64> {
+    level.as_i64().filter(|level| *level >= 0)
 }
 
 pub(crate) fn validate_stats(

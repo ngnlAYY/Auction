@@ -17,7 +17,7 @@
 | Tokio | 声明 ~1.53.3，锁定 1.53.3 | 官方 1.53.x LTS，后续只接收该分支补丁 |
 | HTTP | Axum 0.8.9、Hyper、hyper-util、Tower | 共用连接栈，Public/Admin 路由分离 |
 | 浏览器 | Dioxus 0.7.10 | 纯 CSR，禁 fullstack/server |
-| Web 构建工具 | dx CLI 0.7.10，独立 TLS 修复锁 | 固定源码包重建、禁自动下载；配套工具及 SHA-256 由[工具 owner](ci/tools/README.md)维护 |
+| Web 构建工具 | dx CLI 0.7.10，独立 TLS／Zstandard 修复锁 | 固定源码包重建、禁自动下载；配套工具及 SHA-256 由[工具 owner](ci/tools/README.md)维护 |
 | 编译缓存工具 | sccache 0.18.0，独立 TLS 修复锁 | 固定源码包重建，只启用本地/GHA；安装回执和二进制身份进入 `BUILD-INFO` |
 | CI Actions | checkout 7.0.1、rust-cache 2.9.2、cache 6.1.0、upload-artifact 7.0.2、github-script 9.0.0 | 固定完整提交 SHA；权限、缓存与下载保留边界由 [CI 说明](ci/README.md)拥有 |
 | 国际化 | dioxus-i18n 0.6.0、unic-langid 0.9.6 | Fluent 编译期内嵌，五语言键一致 |
@@ -40,6 +40,9 @@ Cargo.lock，也不代表活动驱动或运行支持。升级逐项核对 MSRV�
 [RUSTSEC-2026-0386](https://rustsec.org/advisories/RUSTSEC-2026-0386.html)；另更新可兼容的 yanked 依赖。
 上述工具更新不改变应用 Tokio 或启用新的运行能力。应用与工具的公告结果必须分开表述，剩余风险及重建前提见
 [构建工具审计](ci/tools/README.md#上游公告与实际使用范围)。
+
+2026-10-26 dx 独立锁升级至 `zstd-safe 8.2.0` 等修复版本；应用锁和 sccache 锁不因此改变。
+完整工具锁仍命中其他公告，feature 图与受控调用路径的限制见[工具审计](ci/tools/README.md#2026-10-26-zstandard-公告)。
 
 ## 编译优化边界
 
@@ -76,9 +79,16 @@ Axum 未启用无人消费的 `original-uri` feature：HTTP owner 直接使用�
 并插入 `OriginalUri` 扩展。此裁剪只减少启用能力，不减少锁图包数；`futures-util` 默认宏仍被 OTel/Dioxus
 实际使用，保留原声明，避免无收益的 feature 改写。
 
+`reqwest` 共用 `rustls-no-provider`，只有 Worker control 显式启用 JSON；integrations 不使用该 feature。
+OTLP 的 `reqwest-client` 本身不启用 TLS，`auction-observability` 因此显式声明同一工作区 `reqwest`，
+使独立图也启用 rustls；调用仍由 OTLP 上游执行，`cargo-machete` 只对该 feature-only 依赖作精确忽略。
+继续安装 ring provider，不启用上游 `reqwest-rustls` 会引入的 aws-lc，也不改变 exporter 的超时和重试策略。
+
 直接 `tungstenite` 使用 0.29.0，与 Axum 0.8.9 经 `tokio-tungstenite` 引入的实际类型一致。
 不能单独升至另一个 minor 后仍以其 `Error` downcast：Rust 会将它们视为不同类型，导致超限帧丢失约定的 1009 关闭响应。
 本次移除未被其他路径使用的 0.30.0 锁条目；未启用的 Dioxus 可选旧分支不因此获得运行支持。
+全工作区原生 feature 图另含 Dioxus devtools 引入的 Tungstenite 0.28；独立 Public WASM 图不包含该版本，
+它不参与 Axum 错误类型匹配。两套 Base64 与 SHA-2 来自直接依赖及 Axum/SQLx 传递约束，不能仅为消除重复强行合并。
 
 ## 浏览器与国际化
 
@@ -89,6 +99,10 @@ fullstack 路径上的 gloo-net 0.6.0 / gloo-utils 0.2.0，当前活跃依赖树
 `chrono` 的 `clock` feature 只由 `auction-config` 为旧标准 cron 的 `Local` 时区启用；共享图保留 `now/serde/std`。
 独立 Public/Admin WASM 图不再启用 `iana-time-zone`，UTC 时钟与既有浏览器时间格式不变；原生 cron 的本地时区仍保留。
 这属于能力裁剪，不移除根锁中后端仍需要的包，也不声称已测得 WASM 体积或执行速度收益。
+共享层显式声明自身使用的 `web-sys` 事件、节点和 MutationRecord feature；`MouseEvent` 不再依赖 Dioxus 顺带启用。
+这些 feature 属于编译边界，不表示引入新浏览器 API 或测得体积变化。
+独立 Public/Admin WASM 依赖图保留 Dioxus/Manganis 的两代 `const-serialize`、Dioxus 相关路径的两代 `rustc-hash`
+以及过程宏使用的不同 `syn` 主版本；这些传递版本遵循上游约束，不强制跨版本替换，也不据此推断最终载荷大小。
 资源隔离、`web-embed`/API-only 与缺页 503 见[架构](docs/design/architecture.md#浏览器实时与制品)。
 
 ## SQL 与事务
@@ -115,8 +129,9 @@ token 摘要，hmac 0.13 配合 sha2 0.11，升级只适配 KeyInit/摘要格式
 不更换 registry、进程/池/tracing collector 或业务 recorder 窄接口；指标名、label、bucket 和 `/metrics` 媒体类型契约
 不变。这只移除指标库的二进制编码依赖，不关闭 OTLP/HTTP-proto tracing，也不移除其独立的 prost 编码栈。Tokio 1.53.x
 的[上游 LTS 政策](https://github.com/tokio-rs/tokio/)将支持期列至 2027 年 9 月；OpenTelemetry API/SDK/OTLP 配套锁定
-0.33.1，tracing-opentelemetry 为 0.34.0，不启用新的实验能力或更换自有有界批处理器。OTLP 显式关闭 0.33 新增的默认
-重试，保留一次导出、失败计数和原预算，请求体保护及配置边界见
+0.33.1，tracing-opentelemetry 为 0.34.0。自有有界批处理器直接使用 Tokio，SDK 仅显式启用 `trace`，
+不启用未使用的实验性异步批处理器和 SDK Tokio runtime。SQLx 仍可引入 `tokio-stream`，不据此宣称整个锁图消除该包。
+OTLP 显式关闭 0.33 新增的默认重试，保留一次导出、失败计数和原预算，请求体保护及配置边界见
 [observability owner](crates/auction-observability/README.md#实现布局与-tracing)。
 
 ## 依赖与交付纪律

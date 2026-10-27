@@ -85,8 +85,8 @@ pub(crate) fn LiveCatalogActions(
     } else {
         String::new()
     };
-    // 领先由装备高亮表达；禁用按钮仍通过隐藏说明保留可访问的原因。
-    let visually_hide_leading_reason = can_bid && (effective_leading || limit_reached);
+    // 领先由装备高亮表达；超过金额上限时必须显示说明，让无法出价的原因可见。
+    let visually_hide_leading_reason = can_bid && effective_leading && !limit_reached;
     let action_reason_id = format!("public-auction-action-reason-{lot_id}");
     let input = CommandDialogInput {
         lot_id: lot_id.clone(),

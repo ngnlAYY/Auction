@@ -102,12 +102,12 @@ pub(crate) async fn get(
     let credentials = async {
         match state.credential_health() {
             Some(port) => match port.health().await {
-                Ok(credentials) => sections::map_credentials(
+                Ok(credentials) if credentials.validate() => sections::map_credentials(
                     credentials,
                     &snapshot.process,
                     state.dashboard_worlds(),
                 ),
-                Err(_) => sections::unknown_section_with_code("source_unavailable"),
+                Ok(_) | Err(_) => sections::unknown_section_with_code("source_unavailable"),
             },
             None => sections::unknown_section_with_code("source_unavailable"),
         }

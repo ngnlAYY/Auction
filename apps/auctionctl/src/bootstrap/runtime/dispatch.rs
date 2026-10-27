@@ -391,6 +391,18 @@ async fn migrate(controller: SystemdControllerArgs) -> anyhow::Result<()> {
 pub(super) async fn migrate_config(config: &AppConfig) -> anyhow::Result<()> {
     #[cfg(unix)]
     let _managed_guard = managed::guard(config)?;
+    migrate_config_inner(config).await
+}
+
+#[cfg(unix)]
+pub(super) async fn migrate_managed_config(config: &AppConfig) -> anyhow::Result<()> {
+    // 合并部署必须拿到现有锁；目录在预检后消失时不能退回分体部署的无锁路径。
+    let _managed_guard =
+        managed::guard(config)?.context("not an initialized managed deployment")?;
+    migrate_config_inner(config).await
+}
+
+async fn migrate_config_inner(config: &AppConfig) -> anyhow::Result<()> {
     let database_url = config.database_url().context("database_url is required for migration")?;
 
     #[cfg(feature = "postgres")]

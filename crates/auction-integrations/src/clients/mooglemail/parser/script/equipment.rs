@@ -16,17 +16,9 @@ pub(crate) fn equipment_keys(
         let Some(masked) = executable_javascript(&source) else {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         };
-        // 每个附件 ID 只扫描一次脚本；候选后仍有目标字段等价于起点不晚于最后一次命中。
-        // 保留原始严格 JSON 校验，避免对每个左花括号重复扫描整个脚本尾部。
-        let Some(last_property) =
-            wanted.iter().filter_map(|id| last_json_property(&source, id)).max()
-        else {
-            continue;
-        };
-        for (start, _) in masked.match_indices('{') {
-            if start > last_property {
-                break;
-            }
+        // 只解析目标字段所属的最内层对象；外层 JavaScript 函数体不是 JSON。
+        // 目标位置按遮罩后的括号栈定位，字段和对象仍由严格 JSON 解码器验证。
+        for start in equipment_root_candidates(&source, &masked, wanted) {
             let candidate = &source[start..];
             let (found, saw_wanted) = decode_equipment_root(candidate, wanted)
                 .map_err(|_| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
@@ -102,25 +94,46 @@ pub(crate) fn body_equipment_keys(
     Ok(keys)
 }
 
-fn last_json_property(source: &str, name: &str) -> Option<usize> {
-    let needle = format!("\"{name}\"");
-    let mut found = None;
-    let mut offset = 0;
-    while offset < source.len() {
-        let Some(relative) = source[offset..].find(&needle) else {
-            break;
-        };
-        let start = offset + relative;
-        let mut index = start + needle.len();
-        while source.as_bytes().get(index).is_some_and(|byte| byte.is_ascii_whitespace()) {
-            index += 1;
+fn equipment_root_candidates(source: &str, masked: &str, wanted: &HashSet<String>) -> Vec<usize> {
+    let source_bytes = source.as_bytes();
+    let masked_bytes = masked.as_bytes();
+    let mut open_braces = Vec::new();
+    let mut candidates = Vec::new();
+    for (start, masked_byte) in masked_bytes.iter().copied().enumerate() {
+        match masked_byte {
+            b'{' => open_braces.push(start),
+            b'}' => {
+                open_braces.pop();
+            }
+            _ if source_bytes[start] == b'"' => {
+                let mut end = start + 1;
+                while source_bytes.get(end).is_some_and(u8::is_ascii_digit) {
+                    end += 1;
+                }
+                if end == start + 1 || source_bytes.get(end) != Some(&b'"') {
+                    continue;
+                }
+                let Some(id) = source.get(start + 1..end) else { continue };
+                if !wanted.contains(id) {
+                    continue;
+                }
+                let mut colon = end + 1;
+                while source_bytes.get(colon).is_some_and(u8::is_ascii_whitespace) {
+                    colon += 1;
+                }
+                // 字符串和注释内的伪字段，其冒号也会被遮罩。
+                if masked_bytes.get(colon) == Some(&b':')
+                    && let Some(&object_start) = open_braces.last()
+                {
+                    candidates.push(object_start);
+                }
+            }
+            _ => {}
         }
-        if source.as_bytes().get(index) == Some(&b':') {
-            found = Some(start);
-        }
-        offset = index;
     }
-    found
+    candidates.sort_unstable();
+    candidates.dedup();
+    candidates
 }
 
 pub(crate) fn decode_equipment_root(

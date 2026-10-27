@@ -61,11 +61,11 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         .route("/api/v1/auctions/current", get(current_auction))
         .route("/api/v1/auctions/{auction_id}/bid-log", get(list_bid_log))
         .route("/api/v1/price-history", get(list_price_history))
-        .route("/api/v1/auctions/{auction_id}/forum", get(forum::get))
         .route_layer(middleware::from_fn(response_cache::no_cache));
     let no_store_routes = Router::<PublicApiState>::new()
         .route("/api/v1/registration-info", get(registration::get))
         .route("/api/v1/forum/sync-status", get(forum::sync_status))
+        .route("/api/v1/auctions/{auction_id}/forum", get(forum::get))
         // 动态图片显式提供 HEAD；其余 JSON GET 不隐式扩展方法闭集。
         .route(
             "/api/v1/auctions/{auction_id}/countdown/{timer}",

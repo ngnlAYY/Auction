@@ -53,11 +53,26 @@ pub(super) fn use_table_hints() {
             );
             let observer_active = Rc::clone(&active);
             let observer_callback =
-                Closure::<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>::new(move |_, _| {
-                    if let Some(active) = observer_active.borrow().as_ref() {
-                        refresh_hint(active);
-                    }
-                });
+                Closure::<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>::new(
+                    move |records: js_sys::Array, _observer: web_sys::MutationObserver| {
+                        let active = observer_active.borrow().clone();
+                        let Some(active) = active else { return };
+                        if !active.is_connected() {
+                            observer_active.borrow_mut().take();
+                            return;
+                        }
+                        // 无关节点（例如其他行的秒级倒计时）变化时不读取当前单元格的 innerText。
+                        if records.iter().any(|record| {
+                            record
+                                .dyn_into::<web_sys::MutationRecord>()
+                                .ok()
+                                .and_then(|record| record.target())
+                                .is_none_or(|target| active.contains(Some(&target)))
+                        }) {
+                            refresh_hint(&active);
+                        }
+                    },
+                );
             let Ok(observer) =
                 web_sys::MutationObserver::new(observer_callback.as_ref().unchecked_ref())
             else {

@@ -39,7 +39,10 @@ pub(super) async fn claim_published_topics_postgres(
         "SELECT sync.auction_id, auction.world_id, sync.thread_id,
                 sync.catalog_post_id, sync.system_log_post_id,
                 sync.title, sync.body, sync.system_log_body, sync.content_revision,
-                sync.processed_through_post_number, sync.content_last_error_code, sync.catalog_page_count, sync.catalog_layout
+                sync.processed_through_post_number,
+                CASE WHEN sync.content_claim_token IS NOT NULL THEN 'write_unknown'
+                     ELSE sync.content_last_error_code END AS content_last_error_code,
+                sync.catalog_page_count, sync.catalog_layout
          FROM public.auction_forum_sync AS sync
          JOIN public.auctions AS auction ON auction.id = sync.auction_id
          WHERE sync.status = 'published'
@@ -110,9 +113,14 @@ pub(super) async fn claim_published_topics_postgres(
             super::super::catalog::read_pages(&mut transaction, auction_id, catalog_page_count)
                 .await?;
         let content_claim_token = Uuid::new_v4();
+        // 旧 claim 已过期但可能在外部 POST 后崩溃；重新领取时同事务固定未知门禁。
         let claimed = sqlx::query(
             "UPDATE public.auction_forum_sync
-             SET content_claim_token = $2,
+             SET content_last_error_at = CASE WHEN content_claim_token IS NOT NULL
+                     THEN GREATEST(content_last_error_at, $6) ELSE content_last_error_at END,
+                 content_last_error_code = CASE WHEN content_claim_token IS NOT NULL
+                     THEN 'write_unknown' ELSE content_last_error_code END,
+                 content_claim_token = $2,
                  content_claim_owner = $3,
                  content_claim_fencing = content_claim_fencing + 1,
                  content_lease_expires_at = $4
@@ -126,6 +134,7 @@ pub(super) async fn claim_published_topics_postgres(
         .bind(worker_id)
         .bind(lease_until)
         .bind(content_revision)
+        .bind(now)
         .fetch_optional(&mut *transaction)
         .await
         .map_err(|_| storage_error("写入论坛固定楼层内容租约失败"))?;

@@ -353,6 +353,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "prometheus",
+ "reqwest 0.13.5",
  "rustls",
  "serde_json",
  "thiserror 2.0.21",
@@ -3234,8 +3235,6 @@ dependencies = [
  "portable-atomic",
  "rand 0.9.5",
  "thiserror 2.0.21",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]

@@ -105,12 +105,11 @@ pub(in crate::database::lots) async fn detail_postgres(
                 .map_err(|_| storage_error("读取 PostgreSQL 正式装备标识失败"))?,
         );
         let summary = map_postgres_live(row, &projection.world_id, colors)?;
-        let attributes = summary.equipment.attributes.clone();
         PublicLotDetail {
             equipment_id,
             projection,
             preview: None,
-            live: Some(PublicLiveLotDetail { summary, equipment_attributes: attributes }),
+            live: Some(PublicLiveLotDetail { summary }),
         }
     };
     detail.validate(lot_id).map_err(storage_error)?;

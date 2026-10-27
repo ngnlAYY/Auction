@@ -160,16 +160,19 @@ pub(super) async fn ensure_fixed_layout(
         if post_id == catalog_post_id || reply_ids.contains(&post_id) {
             return Err(fixed_layout_error("fixed_layout_conflict", written));
         }
-        reconcile_or_update_fixed_post(
-            writer.as_ref(),
-            world,
-            &published.thread_id,
-            &post_id,
-            None,
-            body.clone(),
-            FixedPostPolicy { write_confirmed: written, ..policy },
-        )
-        .await?;
+        // 关闭正文校验且本轮已有回执时，原校验路径直接成功，无需再复制整页正文。
+        if verify_post_body || !written {
+            reconcile_or_update_fixed_post(
+                writer.as_ref(),
+                world,
+                &published.thread_id,
+                &post_id,
+                None,
+                body.clone(),
+                FixedPostPolicy { write_confirmed: written, ..policy },
+            )
+            .await?;
+        }
         reply_ids.push(post_id);
     }
     let system_log_post_id =

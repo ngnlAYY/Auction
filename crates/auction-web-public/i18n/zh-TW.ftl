@@ -160,9 +160,9 @@ auction-empty-no-auction-hint = 拍賣每週舉行——週五再回來看看吧
 
 
 page-auctions-title = 拍賣歷史
-page-auctions-note = 瀏覽歷屆拍賣，查看該期拍品。
-auction-history-empty-title = 尚無拍賣
-auction-history-empty-hint = 拍賣結算後會顯示於此。
+page-auctions-note = 瀏覽拍賣並查看各期拍品。
+auction-history-empty-title = 沒有符合篩選條件的拍賣
+auction-history-empty-hint = 可嘗試切換世界或狀態。
 page-bidlog-title = 出價紀錄
 page-history-title = 歷史成交價
 page-history-note = 查詢本站已成交拍品，為買賣估價提供參考。
