@@ -81,9 +81,17 @@ where
     while processed < capacity && !worker.control.is_draining() {
         let wave_limit = usize::from(worker.auction.concurrency).min(capacity - processed);
         let wave_limit = u16::try_from(wave_limit).unwrap_or(worker.auction.concurrency);
-        let now = match worker.schedule.database_now().await {
-            Ok(now) => now,
-            Err(error) => {
+        // 数据库时间读取、领取与任务排队共用预算，避免领取前的查询挂住整个 Auction 循环。
+        let item_deadline = tokio::time::Instant::now() + worker.auction.item_timeout;
+        let now = match tokio::time::timeout_at(item_deadline, worker.schedule.database_now()).await
+        {
+            Ok(Ok(now)) if tokio::time::Instant::now() < item_deadline => now,
+            Ok(Ok(_)) | Err(_) => {
+                tracing::warn!("读取拍卖生命周期数据库时间超时");
+                phase_result = WorkerResult::Error;
+                break;
+            }
+            Ok(Err(error)) => {
                 tracing::warn!(error = %error, "读取拍卖生命周期数据库时间失败");
                 phase_result = WorkerResult::Error;
                 break;
@@ -97,8 +105,6 @@ where
         if worker.control.is_draining() {
             break;
         }
-        // 截止在领取前冻结；spawn 到首次 poll 的排队时间也消耗同一预算。
-        let item_deadline = tokio::time::Instant::now() + worker.auction.item_timeout;
         let claims = match tokio::time::timeout_at(
             item_deadline,
             worker.schedule.claim_due(worker.worker_id.clone(), now, lease_until, wave_limit),

@@ -41,7 +41,7 @@ pub(crate) async fn list(
         return *response;
     }
 
-    let query = match super::parse_query(
+    let mut query = match super::parse_query(
         &uri,
         &[
             "actor",
@@ -89,7 +89,7 @@ pub(crate) async fn list(
 
     let has_before_time = query.contains_key("before_time");
     let has_before_id = query.contains_key("before_id");
-    let raw_cursor = query.get("cursor").cloned();
+    let raw_cursor = query.remove("cursor");
     if page.is_some() && (raw_cursor.is_some() || has_before_time || has_before_id)
         || raw_cursor.is_some() && (has_before_time || has_before_id)
         || has_before_time != has_before_id
@@ -119,13 +119,13 @@ pub(crate) async fn list(
     };
 
     let request = AdminAuditListRequest {
-        actor: optional_text(&query, "actor"),
-        actor_type: optional_text(&query, "actor_type"),
-        action: optional_text(&query, "action"),
-        entity: optional_text(&query, "entity"),
-        source: optional_text(&query, "source"),
-        result: optional_text(&query, "result"),
-        request_id: optional_text(&query, "request_id"),
+        actor: optional_text(&mut query, "actor"),
+        actor_type: optional_text(&mut query, "actor_type"),
+        action: optional_text(&mut query, "action"),
+        entity: optional_text(&mut query, "entity"),
+        source: optional_text(&mut query, "source"),
+        result: optional_text(&mut query, "result"),
+        request_id: optional_text(&mut query, "request_id"),
         occurred_from: match parse_optional_time(&query, "occurred_from") {
             Ok(value) => value,
             Err(()) => return invalid_query(),
@@ -174,8 +174,11 @@ pub(crate) async fn list(
         .into_response()
 }
 
-fn optional_text(query: &std::collections::BTreeMap<&str, String>, key: &str) -> Option<String> {
-    query.get(key).filter(|value| !value.trim().is_empty()).cloned()
+fn optional_text(
+    query: &mut std::collections::BTreeMap<&str, String>,
+    key: &str,
+) -> Option<String> {
+    query.remove(key).filter(|value| !value.trim().is_empty())
 }
 
 fn parse_optional_time(

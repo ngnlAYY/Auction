@@ -1,6 +1,6 @@
 //! 固定楼层的顺序建立与 exact post 对账；不能覆盖抢楼或借重试移动系统日志。
 
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use auction_application::{
     ApplicationError, ForumPostWriter, ForumPublishedLayout, ForumPublishedThread,
@@ -109,10 +109,10 @@ pub(super) async fn ensure_fixed_layout(
         &published.thread_id,
         &catalog_post_id,
         Some(ForumTopicMetadata {
-            title: Some(catalog.title.clone()),
-            description: Some(catalog.description.clone()),
+            title: Some(catalog.title),
+            description: Some(catalog.description),
         }),
-        ForumRenderedPost { body: catalog.body },
+        Cow::Owned(ForumRenderedPost { body: catalog.body }),
         policy,
     )
     .await?;
@@ -168,7 +168,7 @@ pub(super) async fn ensure_fixed_layout(
                 &published.thread_id,
                 &post_id,
                 None,
-                body.clone(),
+                Cow::Borrowed(body),
                 FixedPostPolicy { write_confirmed: written, ..policy },
             )
             .await?;
@@ -195,13 +195,14 @@ struct FixedPostPolicy<'a> {
 }
 
 /// 已有远端布局证明后，按配置核对正文；任何内容更新仍须本轮人工授权。
+/// 续页与日志先借用正文；只有确需编辑才取得所有权，已匹配或拒绝写入时不复制整页。
 async fn reconcile_or_update_fixed_post(
     writer: &dyn ForumPostWriter,
     world: auction_domain::SettlementWorld,
     thread_id: &str,
     post_id: &str,
     metadata: Option<ForumTopicMetadata>,
-    expected: ForumRenderedPost,
+    expected: Cow<'_, ForumRenderedPost>,
     policy: FixedPostPolicy<'_>,
 ) -> Result<(), ApplicationError> {
     if policy.verify_body {
@@ -227,7 +228,7 @@ async fn reconcile_or_update_fixed_post(
             thread_id.to_owned(),
             post_id.to_owned(),
             metadata,
-            expected,
+            expected.into_owned(),
             policy.write_progress.clone(),
         )
         .await?;

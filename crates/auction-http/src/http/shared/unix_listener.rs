@@ -11,6 +11,7 @@ use std::{
     io,
     net::SocketAddr,
     os::unix::{
+        ffi::OsStrExt,
         fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt},
         io::AsRawFd,
     },
@@ -277,7 +278,8 @@ fn secure_bound_socket(path: &Path, group_id: u32, identity: FileIdentity) -> io
     if socket_identity(path)? != identity {
         return Err(invalid("Unix listener socket 身份已变化，拒绝修改权限"));
     }
-    let encoded = CString::new(path.to_string_lossy().as_bytes())
+    // Unix 路径可以包含非 UTF-8 字节；不能用显示替换字符把 chown 指向另一个文件。
+    let encoded = CString::new(path.as_os_str().as_bytes())
         .map_err(|_| invalid("Unix listener socket 路径包含非法字符"))?;
     // SAFETY: encoded 是已校验路径的 NUL 结尾副本；geteuid/gid 使用当前进程和已解析组。
     let result = unsafe { libc::chown(encoded.as_ptr(), libc::geteuid(), group_id) };

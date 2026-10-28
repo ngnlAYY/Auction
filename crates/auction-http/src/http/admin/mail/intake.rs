@@ -38,7 +38,7 @@ pub(crate) async fn list_intakes(
     if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    let query = match parse_query(
+    let mut query = match parse_query(
         &uri,
         &[
             "mailbox_key",
@@ -91,11 +91,11 @@ pub(crate) async fn list_intakes(
         }
     };
     let request = AdminMailIntakeFilter {
-        mailbox_key: query.get("mailbox_key").cloned(),
-        world_id: query.get("world_id").cloned(),
-        kind: query.get("kind").cloned(),
-        status: query.get("status").cloned(),
-        decision: query.get("decision").cloned(),
+        mailbox_key: query.remove("mailbox_key"),
+        world_id: query.remove("world_id"),
+        kind: query.remove("kind"),
+        status: query.remove("status"),
+        decision: query.remove("decision"),
         received_from,
         received_to,
         page,

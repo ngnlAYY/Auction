@@ -29,7 +29,7 @@ pub(crate) async fn list(
     if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    let query = match parse_query(&uri, &["name", "status", "page", "page_size"]) {
+    let mut query = match parse_query(&uri, &["name", "status", "page", "page_size"]) {
         Ok(query) if query.values().all(|value| !value.is_empty()) => query,
         _ => return common::invalid_query(),
     };
@@ -52,12 +52,8 @@ pub(crate) async fn list(
             None => return common::invalid_query(),
         },
     };
-    let request = AdminUserListRequest {
-        name: query.get("name").filter(|value| !value.is_empty()).cloned(),
-        status,
-        limit: page_size,
-        offset,
-    };
+    let request =
+        AdminUserListRequest { name: query.remove("name"), status, limit: page_size, offset };
     let Some(port) = state.admin_users() else {
         return common::feature_unavailable();
     };

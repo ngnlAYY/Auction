@@ -36,7 +36,7 @@ poll_interval_seconds = 60
 batch_limit = 100
 # 可选：每轮完成后附加的随机抖动上限秒数，范围 0-86400，默认 5；0 表示关闭抖动。
 jitter_seconds = 5
-# 可选：单个生命周期或结算任务的总处理超时秒数，必须小于由轮询间隔派生的 claim lease，默认 30。
+# 可选：单次周计划 bootstrap 或单个生命周期/结算任务的总超时秒数，默认 30；生命周期包含数据库时间读取、领取和处理，必须小于由轮询间隔派生的 claim lease。
 item_timeout_seconds = 30
 # 可选：Recovery 各阶段依赖暂不可用时的持久化重试间隔，范围 1-86400 秒，默认 60。
 recovery_retry_delay_seconds = 60

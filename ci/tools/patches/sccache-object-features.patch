@@ -1,0 +1,11 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -334,5 +334,7 @@
+ [dependencies.object]
+ version = "0.37"
+-
++default-features = false
++features = ["read", "std"]
++
+ [dependencies.opendal]
+ version = "0.58.1"

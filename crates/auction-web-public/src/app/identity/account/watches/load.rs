@@ -8,7 +8,7 @@ use crate::api::{
 };
 
 /// 当前场次及其完整公开标记结果；总数由真实匹配行数产生。
-#[derive(Clone, PartialEq)]
+#[derive(PartialEq)]
 pub(super) struct WatchedAuction {
     pub(super) auction: CurrentAuction,
     pub(super) rows: Vec<CatalogRow>,

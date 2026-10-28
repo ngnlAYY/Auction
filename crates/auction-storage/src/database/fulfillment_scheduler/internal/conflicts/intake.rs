@@ -7,7 +7,7 @@ use serde::Deserialize;
 use super::{
     AssetConflictTarget, AttachmentPayload, FundingError, Postgres, Row, Transaction, Uuid,
 };
-use super::{sql_error, valid_attachment_origin};
+use super::{sql_error, unique_attachment_ids, valid_attachment_origin};
 
 /// 调用方已持有业务行锁并验证同会话新鲜正向库存；仅返回本标的可精确闭合的历史投递。
 pub(super) async fn closed_source_history(
@@ -78,7 +78,11 @@ pub(super) async fn closed_source_history(
             metadata["external_mail_id"] == mid
                 && metadata["expected_credits"] == 0
                 && metadata["expected_cod"] == 0
-                && metadata["expected_attachment_ids"] == serde_json::json!(payload.attachment_ids)
+                && metadata["expected_attachment_ids"].as_array().is_some_and(|ids| {
+                    ids.iter()
+                        .map(serde_json::Value::as_str)
+                        .eq(payload.attachment_ids.iter().map(|id| Some(id.as_str())))
+                })
                 && metadata.get("outcome_unknown").is_none_or(|value| value == false)
         }
         // 历史 unknown 的最终只读恢复证明仍保留原错误字段，精确恢复 MID/引用才闭合。
@@ -190,11 +194,11 @@ fn source_payload(
         && payload.user_key_user_id.is_none()
         && !payload.attachment_ids.is_empty()
         && payload.attachment_ids.len() <= 1000
-        && payload.attachment_ids.iter().enumerate().all(|(index, eid)| {
-            eid.len() <= 32
-                && auction_application::valid_external_positive_id(eid)
-                && !payload.attachment_ids[..index].contains(eid)
-        })
+        && payload
+            .attachment_ids
+            .iter()
+            .all(|eid| eid.len() <= 32 && auction_application::valid_external_positive_id(eid))
+        && unique_attachment_ids(&payload.attachment_ids)
         && payload.attachment_ids.iter().any(|eid| eid == target.external_equipment_id)
         && valid_attachment_origin(&payload, "mail_intake", origin_id, command_id, false))
     .then_some(payload)

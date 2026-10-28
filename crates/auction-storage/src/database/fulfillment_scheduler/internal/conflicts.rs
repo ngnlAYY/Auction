@@ -1,6 +1,6 @@
 //! 排除同 EID/world 的全部本系统占用，关联不全失败关闭；不替旧 unknown 洗白。
 
-use std::sync::LazyLock;
+use std::{collections::HashSet, sync::LazyLock};
 
 use super::sql_error;
 use auction_application::{FundingError, SettlementFulfillmentClaim};
@@ -307,13 +307,13 @@ fn unrelated_attachment_payload(
         || payload.credits < 0
         || payload.cod < 0
         || payload.attachment_ids.len() > 1000
-        || payload.attachment_ids.iter().enumerate().any(|(index, eid)| {
+        || payload.attachment_ids.iter().any(|eid| {
             eid.is_empty()
                 || eid.len() > 32
                 || !eid.bytes().all(|byte| byte.is_ascii_digit())
                 || eid.bytes().all(|byte| byte == b'0')
-                || payload.attachment_ids[..index].contains(eid)
         })
+        || !unique_attachment_ids(&payload.attachment_ids)
         || !valid_attachment_origin(&payload, origin, origin_id, command_id, forum_notice_owner)
     {
         return false;
@@ -452,6 +452,12 @@ fn valid_notification(payload: &AttachmentPayload, origin: &str) -> bool {
         ) => no_key,
         _ => false,
     }
+}
+
+// 调用方先验证数量及单项格式；去重仍按原字符串，不合并带前导零的不同历史身份。
+fn unique_attachment_ids(ids: &[String]) -> bool {
+    let mut seen = HashSet::with_capacity(ids.len());
+    ids.iter().all(|id| seen.insert(id.as_str()))
 }
 
 fn valid_line(value: &str, max_bytes: usize) -> bool {

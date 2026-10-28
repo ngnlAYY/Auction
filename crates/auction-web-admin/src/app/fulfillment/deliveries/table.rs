@@ -231,19 +231,21 @@ pub(super) fn DeliveryRow(
     }
 }
 
-/// 控制 delivery 列表分页。
+/// 控制 delivery 列表分页；只传分页标量，不为分页复制或保留整页投递记录。
 #[component]
 pub(super) fn DeliveryPager(
-    page: DeliveryPage,
+    page: i64,
+    page_size: i64,
+    total: i64,
     pagination: crate::app::surface::pagination::AdminPagination,
     on_page_change: EventHandler<i64>,
 ) -> Element {
     rsx! {
         crate::app::surface::pagination::AdminPager {
             pagination,
-            page: page.pagination.page,
-            page_size: page.pagination.page_size,
-            total: Some(page.pagination.total),
+            page,
+            page_size,
+            total: Some(total),
             label: t!("delivery-pagination"),
             previous_label: t!("admin-pagination-previous"),
             status: move |(page, pages): (i64, i64)| {

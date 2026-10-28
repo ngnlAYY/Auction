@@ -1,9 +1,6 @@
 //! 结算履约外部证据的稳定摘要。
 
-use crate::{
-    ApplicationError, RequestHash, SettlementFulfillmentBalanceEvidence,
-    SettlementFulfillmentClaim, SettlementFulfillmentSentEvidence,
-};
+use crate::{ApplicationError, RequestHash, SettlementFulfillmentSentEvidence};
 use serde::Serialize;
 
 /// 旧版 `fulfillmentProofDigest` 的 evidence 载荷。
@@ -42,52 +39,28 @@ struct LegacyFulfillmentProof<'a> {
     evidence: LegacyFulfillmentEvidence<'a>,
 }
 
-/// 以 Sent/Balance 观察结果生成不可变 proof digest，供后续审计和状态推进绑定。
+/// 按旧版 Sent 载荷生成不可变摘要；claim、Balance 和观察时间不属于该摘要协议。
 pub(super) fn proof_digest(
-    _claim: &SettlementFulfillmentClaim,
     delivery_id: uuid::Uuid,
     sent: &SettlementFulfillmentSentEvidence,
-    _balance: Option<&SettlementFulfillmentBalanceEvidence>,
 ) -> Result<[u8; 32], ApplicationError> {
-    // 保留新版调用方的参数形状，但旧版摘要没有 obligation、Balance 或观察时间字段。
-    legacy_proof_digest("mooglemail_sent_collected", delivery_id, Some(sent))
-}
-
-fn legacy_proof_digest(
-    kind: &str,
-    delivery_id: uuid::Uuid,
-    sent: Option<&SettlementFulfillmentSentEvidence>,
-) -> Result<[u8; 32], ApplicationError> {
-    let mut equipment_ids: Vec<&str> = sent
-        .into_iter()
-        .flat_map(|value| value.remaining_equipment_ids.iter().map(String::as_str))
-        .collect();
+    let mut equipment_ids: Vec<&str> =
+        sent.remaining_equipment_ids.iter().map(String::as_str).collect();
     // 只排序借用的 ID，保留旧版字符串排序和重复项，不复制 evidence 或改变输入顺序。
     equipment_ids.sort_unstable();
 
-    let evidence = sent
-        .map(|value| LegacyFulfillmentEvidence {
-            external_id: (!value.external_mail_id.is_empty())
-                .then_some(value.external_mail_id.as_str()),
-            world: Some(value.world.as_str()),
-            subject: (!value.subject.is_empty()).then_some(value.subject.as_str()),
-            remaining_credits: (value.remaining_credits != 0).then_some(value.remaining_credits),
-            cod_pending: (value.cod_pending != 0).then_some(value.cod_pending),
-            equipment_ids: (!equipment_ids.is_empty()).then_some(equipment_ids),
-            collected: value.collected.then_some(true),
-        })
-        .unwrap_or(LegacyFulfillmentEvidence {
-            external_id: None,
-            world: None,
-            subject: None,
-            remaining_credits: None,
-            cod_pending: None,
-            equipment_ids: None,
-            collected: None,
-        });
+    let evidence = LegacyFulfillmentEvidence {
+        external_id: (!sent.external_mail_id.is_empty()).then_some(sent.external_mail_id.as_str()),
+        world: Some(sent.world.as_str()),
+        subject: (!sent.subject.is_empty()).then_some(sent.subject.as_str()),
+        remaining_credits: (sent.remaining_credits != 0).then_some(sent.remaining_credits),
+        cod_pending: (sent.cod_pending != 0).then_some(sent.cod_pending),
+        equipment_ids: (!equipment_ids.is_empty()).then_some(equipment_ids),
+        collected: sent.collected.then_some(true),
+    };
     let payload = LegacyFulfillmentProof {
         schema_version: 1,
-        kind,
+        kind: "mooglemail_sent_collected",
         delivery_id: delivery_id.to_string(),
         status: "succeeded",
         evidence,

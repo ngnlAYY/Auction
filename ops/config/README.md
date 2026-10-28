@@ -411,6 +411,10 @@ PM：PM 成功始终要求完整冻结内容、recipient/sender 与 Sent MSID �
 其中等待买家支付 COD、卖家领取货款的 MM 证据读取共享一个默认 300 秒的绝对时间窗口，由
 `worker.fulfillment.evidence_poll_seconds` 配置，不受 `operations.worker.managed` 覆盖；窗口内新增待追踪邮件在下一窗口统一读取。
 
+每次周计划 bootstrap 的数据库时间、世界/轮次读取和邮箱暂停/恢复共用 `worker.item_timeout_seconds` 总预算；
+生命周期的数据库时间、领取及任务处理也共用该单项绝对截止。迟到回执不启动下一次写入，超时不会跳过后续 Auction 阶段；
+下轮通过冻结轮次、邮箱版本和原命令账本恢复可能已提交的结果，不补造失败事实或更换业务身份。
+
 PostgreSQL delivery 独立控制领取、续租、发送与终态确认；续租间隔小于 lease，sending grace 大于完整请求超时，默认
 timeout/grace 为 180/300 秒，启用 MM 时 timeout 大于两倍 fetch budget。实际并发取配置与 transport 上限较小者，MM compose
 账号状态固定上限 1。论坛和邮件每种 Cookie 全局最多一条 active，由 session advisory lock 保证 Worker owner；更换或失效后重启

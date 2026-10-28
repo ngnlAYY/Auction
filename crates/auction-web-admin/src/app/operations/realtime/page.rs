@@ -193,7 +193,9 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             rsx! {
                 RealtimeEventPager {
                     pagination: event_pagination,
-                    page: event_page.clone(),
+                    page: event_page.pagination.page,
+                    page_size: event_page.pagination.page_size,
+                    total: event_page.pagination.total,
                     on_page_change: move |next_page| {
                         let mut next = query_state();
                         next.event_page = next_page;
@@ -242,7 +244,9 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             rsx! {
                 RealtimeFailurePager {
                     pagination: failure_pagination,
-                    page: failure_page.clone(),
+                    page: failure_page.pagination.page,
+                    page_size: failure_page.pagination.page_size,
+                    total: failure_page.pagination.total,
                     on_page_change: move |next_page| {
                         let mut next = query_state();
                         next.failure_page = next_page;
@@ -277,7 +281,9 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                 RealtimeLagTable { page: lag_page.clone() }
                 RealtimeLagPager {
                     pagination: lag_pagination,
-                    page: lag_page.clone(),
+                    page: lag_page.pagination.page,
+                    page_size: lag_page.pagination.page_size,
+                    total: lag_page.pagination.total,
                     on_page_change: move |next_page| {
                         let mut next = query_state();
                         next.lag_page = next_page;

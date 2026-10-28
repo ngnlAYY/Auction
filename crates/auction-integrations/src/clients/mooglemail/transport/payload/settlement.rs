@@ -17,8 +17,7 @@ pub(crate) fn decode_settlement_payload(
         || claim.delivery_id.is_nil()
         || !valid_line(&claim.recipient, 256, false)
         || !canonical_uuid(&claim.origin_id)
-        || serde_json::to_vec(&claim.payload)
-            .map_or(true, |value| value.len() > MAXIMUM_PAYLOAD_BYTES)
+        || !valid_payload_size(&claim.payload)
     {
         return Err(invalid_payload());
     }
@@ -33,6 +32,24 @@ pub(crate) fn decode_settlement_payload(
         "return" => decode_return_payload(claim),
         _ => Err(invalid_payload()),
     }
+}
+
+fn valid_payload_size(payload: &serde_json::Value) -> bool {
+    // 按原紧凑 JSON 编码逐块扣减预算，不为大小校验复制整份载荷；超限立即停止。
+    struct RemainingBytes(usize);
+
+    impl std::io::Write for RemainingBytes {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.checked_sub(bytes.len()).ok_or(std::io::ErrorKind::WriteZero)?;
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    serde_json::to_writer(RemainingBytes(MAXIMUM_PAYLOAD_BYTES), payload).is_ok()
 }
 
 fn decode_send_payload(

@@ -140,6 +140,8 @@ Sent 正文摘要复用换行规范化的分配后截短尾部空白，不再生
 闭集、默认正文与占位符校验复用 `AdminRuntimeMailTemplatesConfig`，本 crate 只拥有渲染与发送上限。
 `MoogleMailWorld` 与领域 `SettlementWorld` 通过 `From` 双向转换，网关与装配根不再手写世界映射。
 邮件与结算 delivery 直接借用 claim 的 JSON 反序列化到各自 wire 类型，不先深复制整棵 JSON；字段闭集和全部业务校验保留。
+结算载荷的 64 KiB 上限按原紧凑 JSON 编码逐块计数，超限即停止；大小校验不再分配完整序列化副本，
+转义、UTF-8 字节计数、边界包含关系及错误分类保持不变。
 
 [transport/payload/settlement/pricing.rs](crates/auction-integrations/src/clients/mooglemail/transport/payload/settlement/pricing.rs)
 校验买家装备 COD 的完整价格变量并格式化千分位金额、带符号百分比与适用的奖池抵扣；旧三变量载荷仅省略价格明细，
@@ -299,6 +301,8 @@ Character Equipment 的唯一 `let uid`、[论坛目标资料](crates/auction-in
 session 的既有列表/详情解析，精确匹配 MID/world/收件人/主题及可选可信 sent_at。Armory 仅接纳七类 organize 的完整
 计数、同 world/MAIN_URL/action、正常非 disabled 且 id/value/行 handler 同一 EID 的正向行，还须同 session 干净 compose。
 organize 表单省略或留空 `action` 时按当前固定 world/category 请求 URL 解析；显式地址仍须同源、同 world 且四项 query 完全匹配。
+UID 与 MAIN_URL 声明的关键字边界按 UTF-8 字符裁剪；脚本中的多字节字符不能触发字节切片 panic，
+非法关键字、重复声明及嵌套作用域仍失败关闭。系统 UID 脚本按文本片段直接追加，不保留每节点的中间字符串。
 准备、限速、所有 GET/body 和提交共享不超过 30 秒的绝对预算并保留一秒提交余量；内部提交只接受数据库 active
 ID/version 与持久 generation，配置 Cookie 或旧 owner 明确 Unsupported。
 内部租约的 owner 检查前后均复核原绝对截止；即使检查 future 立即完成，也不能接受已过期租约。

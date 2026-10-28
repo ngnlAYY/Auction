@@ -541,7 +541,7 @@ impl PostgresCompetitionTransaction {
         &mut self,
         auction_id: AuctionId,
         command_id: CommandId,
-        plan: SettlementPlan,
+        plan: &SettlementPlan,
         proxy_closure_plans: Vec<CompetitionPlan>,
         recovery_policy: RecoveryPolicy,
         occurred_at: DateTime<Utc>,
@@ -553,7 +553,7 @@ impl PostgresCompetitionTransaction {
         for obligation in &plan.obligations {
             obligation.validate().map_err(|_| invalid("结算义务校验失败"))?;
         }
-        validate_proxy_closure_plans(command_id, &plan, &proxy_closure_plans)?;
+        validate_proxy_closure_plans(command_id, plan, &proxy_closure_plans)?;
 
         let (world_id, auction_state_version) = {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
@@ -606,7 +606,7 @@ impl PostgresCompetitionTransaction {
                 .await
                 .map_err(map_competition_error)?;
         }
-        close_settlement_lots(self, auction_id, &plan, occurred_at).await?;
+        close_settlement_lots(self, auction_id, plan, occurred_at).await?;
 
         {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
@@ -655,17 +655,17 @@ impl PostgresCompetitionTransaction {
             .map_err(map_sql_error)?;
         }
 
-        insert_lot_settlements(self, &plan).await?;
-        insert_compensation_ledger(self, command_id, &plan, occurred_at).await?;
-        insert_obligations(self, &plan, occurred_at).await?;
-        insert_recoveries(self, auction_id, &plan, recovery_policy, occurred_at).await?;
+        insert_lot_settlements(self, plan).await?;
+        insert_compensation_ledger(self, command_id, plan, occurred_at).await?;
+        insert_obligations(self, plan, occurred_at).await?;
+        insert_recoveries(self, auction_id, plan, recovery_policy, occurred_at).await?;
         insert_settlement_audit(
             self,
             auction_id,
             command_id,
             current_pool_version,
             closing_pool_version,
-            &plan,
+            plan,
             occurred_at,
         )
         .await?;
@@ -696,7 +696,7 @@ impl PostgresCompetitionTransaction {
             }
         }
 
-        insert_settlement_realtime(self, auction_id, command_id, next_version, &plan, occurred_at)
+        insert_settlement_realtime(self, auction_id, command_id, next_version, plan, occurred_at)
             .await
     }
 }

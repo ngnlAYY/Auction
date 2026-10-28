@@ -2,6 +2,7 @@
 
 use std::{
     net::{IpAddr, SocketAddr},
+    sync::Arc,
     time::Duration,
 };
 
@@ -67,7 +68,7 @@ impl FirstRunPolicy {
 }
 
 pub(super) async fn enforce(
-    State(policy): State<FirstRunPolicy>,
+    State(policy): State<Arc<FirstRunPolicy>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     request: Request,
     next: Next,

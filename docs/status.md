@@ -35,6 +35,46 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-27 结算借用、分页纠偏与工具依赖裁剪
+
+基线为干净的 `7599e9d4`。按八个 owner 切片并行审查全部 20 个工作区包，清单覆盖 1,431 份 Rust 源码、
+49 份 Markdown、64 份追加迁移及构建/部署配置；全范围风险扫描后深读关键路径，并由主审复核接口、摘要、
+异步交接与依赖图。没有把未确认的候选强行改成新抽象或新业务策略。
+
+| owner | 修改及保护的边界 |
+| --- | --- |
+| application / storage | 结算写入借用已校验计划，移除完整明细/义务的深复制；履约摘要删除未用参数、纯转发层和不可达空 Sent 分支，原序列化字段顺序、空值省略、重复装备及 Go 转义保持 |
+| storage | 最多 1000 项附件由前缀重复扫描改为借用集合判重，预期 O(N²) → O(N)，增加有界 O(N) 引用集合；Take 证明直接比较 JSON 数组，预锁查询不收集丢弃的行，原 SQL、锁序、快照及金额保持 |
+| integrations | 修复身份脚本前缀含多字节字符时的非法 UTF-8 切片 panic；结算 payload 用有界 writer 计算紧凑 JSON 字节数，省去整份序列化缓冲，64 KiB 上限及协议拒绝语义不变 |
+| jobs | 周计划 bootstrap 复用既有单项总预算，生命周期数据库时间、领取和执行共用绝对截止；回执交接及邮箱版本重试复核同一截止，迟到结果不授权新写入，可能已提交结果仍按冻结身份恢复；固定帖对账按需取得正文所有权 |
+| HTTP / setup | Admin 查询字符串直接转移到应用请求，保留返回投影复核；Unix socket 权限操作使用原始路径字节，避免有损 UTF-8 转换指向错误路径；设置策略共享只读 Arc，逐请求来源/令牌门禁保持 |
+| config | 无 runtime 覆盖时复用已校验 HTTP 安全配置，避免第二次 Origin/CIDR 解析；备用主配置和实际 runtime 投影仍分别校验，原错误优先级保持 |
+| Public Web | 当期标记完整结果以 Rc 共享，只借用当前十行；总数收缩含归零时保留纠偏宿主并传原请求页码，避免数据恢复后跳回旧页 |
+| Admin Web | runtime GET 结果绑定刷新世代，只有当前 Ready 快照可装配草稿/编辑器；六类分页组件只接收页码、数量、总数，不复制整页记录，草稿、未决命令与页面身份保持 |
+| CI / dependencies | sccache 的 object 关闭未调用的 compression，显式保留 read/std；固定哈希补丁进入配方身份，独立锁移除 ruzstd 与 twox-hash，GNU 活跃图 298 → 296，应用锁及缓存格式不变 |
+
+相关模块 README/DESIGN、架构、配置预算与示例、技术栈和运维说明同步；运维中重复的逐轮精简说明收敛到当前升级流程，
+历史验证记录保留。12 个已有测试覆盖不同边界，8 个测试模块与基线逐字一致，保留且未执行。64 份历史迁移、
+应用 Cargo.lock 和 21 份应用 Cargo 清单保持；50 项直接外部依赖均有用途，未为减少数量重写协议或强并上游版本。
+
+Rust 1.99.0 下 `CARGO_BUILD_JOBS=2 just verify` 通过，覆盖仓库/布局/配置/i18n/装备契约、格式、工作区全部已有目标、
+独立 PostgreSQL/Redis feature、Clippy `-D warnings` 及两端 WASM；Rust 1.94.1 下
+`CARGO_BUILD_JOBS=2 cargo +1.94.1 check --locked --workspace --all-targets --all-features` 通过。
+全部 CI shell 的语法与 ShellCheck warning 门禁、Actions actionlint、`cargo machete` 和 `git diff --check` 通过；
+49 份 Markdown 的 1,468 处本地引用已核对路径与标题锚点，修改后的语义另与源码和调用方对照。
+五个原生程序及双端 WASM 的实际 normal/build 图无第二数据库驱动、native-tls/OpenSSL、Dioxus fullstack/server，原生图无 Web crate。
+
+四份锁使用独立干净 RustSec 快照 `99670cfc0bc574433034b75876a4b791ccaa2efb`（1,380 条公告），
+以受控 cargo-audit 0.22.2 执行 `--deny warnings`。应用及 cargo-audit 零漏洞/警告；最终 sccache 完整锁
+由 5 项漏洞匹配降至 4 项，仍有 9 项警告；dx 仍为 13 项漏洞匹配、11 项警告。两份工具锁审计仍失败，
+未设置忽略项；受限调用路径、补丁及最终 audit/release 工具构建与回执证据见
+[工具 owner](ci/tools/README.md#object-压缩依赖裁剪)。
+
+本轮仅源码审计、静态验证和构建工具重建，不运行行为测试、数据库、浏览器、真实外部服务或性能基准，
+不构建应用发布制品、不迁移或部署。复杂度、复制和分配变化来自源码推导，实际吞吐、延迟和内存收益尚未测量；
+SQL 行锁/取消、Worker 迟到交接及浏览器草稿/分页的运行证据仍需按[默认范围](docs/guide/development.md#默认检查)另行开展。
+同版升级边界见[运维说明](ops/README.md#读取快照与实时分发优化升级)，未将上述修复描述为生产验收。
+
 ### 2026-10-27 批量写入、读取快照与依赖收敛
 
 基线为干净的 `49e0370c`。按 owner 并行盘点全部 20 个工作区包、1,431 份 Rust 源码、49 份 Markdown、

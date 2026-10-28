@@ -50,7 +50,8 @@ recipe_fingerprint() {
 		else
 			sha256sum ci/tools/locks/dioxus-cli.Cargo.lock ci/tools/locks/sccache.Cargo.lock
 			sha256sum ci/tools/patches/dioxus-cli-controlled-tools.patch \
-				ci/tools/patches/sccache-zstd.patch ci/tools/patches/sccache-cache-permissions.patch
+				ci/tools/patches/sccache-zstd.patch ci/tools/patches/sccache-cache-permissions.patch \
+				ci/tools/patches/sccache-object-features.patch
 		fi
 		rustc --version --verbose
 		printf '%s\n' "$target_triple" "$profile" 'dx:disable-telemetry,no-downloads;sccache:gha;cargo-audit:lockfile-only'
@@ -112,9 +113,11 @@ prepare_source() {
 		patch_sha256s=(6d27b8a443065017e3734a9f30ea63a5adaa3bd4ffa6a332e20d81e3420fc00e)
 		;;
 	sccache)
-		source_patches=(ci/tools/patches/sccache-zstd.patch ci/tools/patches/sccache-cache-permissions.patch)
+		source_patches=(ci/tools/patches/sccache-zstd.patch ci/tools/patches/sccache-cache-permissions.patch
+			ci/tools/patches/sccache-object-features.patch)
 		patch_sha256s=(6e991aab616fe71817ff9c401dcd393992c4587b55e4ec208804864abb33f2f4
-			5849df23e64bb01f9980f855a33b947031552cd219f7042d53aadac85e5403a6)
+			5849df23e64bb01f9980f855a33b947031552cd219f7042d53aadac85e5403a6
+			8750b194884284ebf7b636ce2a2b5e6821c985e96e8d30398ecf9d6113f5c856)
 		;;
 	esac
 	for index in "${!source_patches[@]}"; do

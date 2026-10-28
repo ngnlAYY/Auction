@@ -309,16 +309,18 @@ fn submit_credential(
 
 #[component]
 pub fn CredentialPager(
-    page: AdminCredentialPage,
+    page: i64,
+    page_size: i64,
+    total: i64,
     pagination: AdminPagination,
     on_page_change: EventHandler<i64>,
 ) -> Element {
     rsx! {
         Pager {
             pagination,
-            page: page.page,
-            page_size: page.page_size,
-            total: Some(page.total),
+            page,
+            page_size,
+            total: Some(total),
             label: t!("page-credentials-title"),
             previous_label: t!("admin-pagination-previous"),
             status: move |(page, pages): (i64, i64)| {

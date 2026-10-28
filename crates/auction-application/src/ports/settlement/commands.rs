@@ -142,11 +142,12 @@ pub trait SettlementTransaction: Send {
         occurred_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), SettlementTransactionError>> + Send;
 
+    /// 借用已校验计划写入同一事务；用例保留原计划作为结果，不复制完整明细与义务。
     fn apply_settlement(
         &mut self,
         auction_id: AuctionId,
         command_id: auction_domain::CommandId,
-        plan: SettlementPlan,
+        plan: &SettlementPlan,
         proxy_closure_plans: Vec<CompetitionPlan>,
         recovery_policy: RecoveryPolicy,
         occurred_at: DateTime<Utc>,

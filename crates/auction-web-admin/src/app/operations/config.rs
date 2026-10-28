@@ -74,14 +74,22 @@ pub(super) fn page() -> Element {
     let mut update_confirm_open = use_signal(|| false);
     let mut reload_confirm_open = use_signal(|| false);
     let config = use_resource(move || {
-        let _ = refresh();
-        fetch_admin_runtime_config()
+        let generation = refresh();
+        async move { (generation, fetch_admin_runtime_config().await) }
     });
 
-    // 只有服务端快照变化时才初始化表单，不能在普通输入重绘时覆盖用户草稿。
+    // 重读期间 Resource 保留旧值；只有本轮完成快照能装配草稿，不能恢复已丢弃的旧基线。
     use_effect(move || {
+        let generation = refresh();
+        if config.state().cloned() != UseResourceState::Ready {
+            return;
+        }
         let snapshot = config.read_unchecked();
-        if let Some(Ok(value)) = snapshot.as_ref() {
+        let Some((loaded_generation, result)) = snapshot.as_ref() else { return };
+        if *loaded_generation != generation {
+            return;
+        }
+        if let Ok(value) = result {
             // 未决命令保留提交时的配置与基线，读取不能改变重试或确认的负载。
             if command.peek().is_some() && baseline.peek().is_some() {
                 form_ready.set(true);
@@ -145,7 +153,16 @@ pub(super) fn page() -> Element {
         refresh.set(refresh().saturating_add(1));
     };
 
-    let content = match &*config.read_unchecked() {
+    let snapshot = config.read_unchecked();
+    let current = if config.state().cloned() == UseResourceState::Ready {
+        snapshot
+            .as_ref()
+            .filter(|(generation, _)| *generation == refresh())
+            .map(|(_, result)| result)
+    } else {
+        None
+    };
+    let content = match current {
         None => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Loading,

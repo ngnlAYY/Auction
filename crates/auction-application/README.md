@@ -140,6 +140,8 @@ Recovery 每封退件由 storage 在同一事务追加唯一消费事实、增�
 新结算与新旧账本重放均按 lot 建立借用索引，避免明细、事实及代理关闭快照逐项全表扫描；
 义务构造不复制整份计划，生成与校验共用逐条生成器；校验仅保留一条临时义务，不再建立第二份完整列表。
 仍按锁内事实顺序生成稳定自然键，并完整校验重复 lot、金额总计、义务全部字段及前置关系；错误继续先完成事实查找再报告义务不匹配。
+`SettlementTransaction::apply_settlement` 只读借用原计划，用例返回同一份明细与义务，省去写入前的整份深复制；
+账本编码、存储校验、代理关闭、金额写入和追加事实仍沿用原 Serializable 事务及顺序。
 旧结算义务统计借用闭集种类名及账本字段，不为每条义务重新分配字符串；计数溢出、重复种类与完整重放对账仍严格拒绝。
 履约激活继续沿用同一 claim 的 token/fencing，租约存在期间不写 `next_attempt_at`；紧接的
 reconcile 释放 claim 时原子写入下次追踪时间。COD、carrier 与卖家货款对齐共享五分钟窗口，
@@ -153,6 +155,8 @@ payload、稳定身份及摘要不得包含装备 secret，派发世界与装备
 履约 intent 在栈内编码一次规范小写 UUID，统一核对所有义务的 reference；不通过宽松 UUID 解析接受其他拼写或改变 canonical 摘要。
 履约证明的装备 ID 只排序借用列表，保留重复项和旧字典序；证明与激活摘要复用 Go JSON 兼容摘要入口，
 无需复制装备 ID 字符串或另建转义后的完整 JSON 缓冲，字段顺序、空值省略及 SHA-256 字节保持原义。
+Sent 摘要入口只接收原 delivery ID 与 Sent 事实；claim、Balance 和观察时间从未参与旧摘要，
+不保留忽略参数或不可达的空 Sent 分支。收件人、金额、领取状态与观察时间仍先由履约用例严格校验。
 
 [ports/settlement/internal](crates/auction-application/src/ports/settlement/internal) 与履约服务的 `internal.rs`、
 `collected.rs`、`refund.rs` 拥有新 pending 的真实身份分支、内部满足、外部 COD 资金化及原合法退款用途授权：

@@ -231,7 +231,7 @@ where
                         .apply_settlement(
                             command.auction_id,
                             command.command_id,
-                            plan.clone(),
+                            &plan,
                             proxy_closure_plans,
                             snapshot.recovery_policy,
                             command.now,

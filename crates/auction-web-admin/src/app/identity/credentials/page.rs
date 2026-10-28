@@ -96,7 +96,9 @@ pub fn page() -> Element {
                         on_delete: open_delete,
                     }
                     CredentialPager {
-                        page: page.clone(),
+                        page: page.page,
+                        page_size: page.page_size,
+                        total: page.total,
                         pagination,
                         on_page_change: move |next_page| {
                             let mut next = query_state();

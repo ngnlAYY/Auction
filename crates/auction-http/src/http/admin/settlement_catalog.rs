@@ -38,7 +38,7 @@ pub(crate) async fn list(
         return *response;
     }
 
-    let query = match parse_query(&uri, &["world_id", "sequence", "page", "page_size"]) {
+    let mut query = match parse_query(&uri, &["world_id", "sequence", "page", "page_size"]) {
         Ok(query) => query,
         Err(_) => return invalid_query(),
     };
@@ -58,7 +58,7 @@ pub(crate) async fn list(
         Some(offset) if offset <= MAX_SETTLEMENT_CATALOG_OFFSET => offset,
         _ => return invalid_query(),
     };
-    let world_id = query.get("world_id").cloned();
+    let world_id = query.remove("world_id");
     let sequence = match query.get("sequence") {
         Some(value) => match value.parse::<i64>() {
             Ok(sequence) if sequence > 0 => Some(sequence),
