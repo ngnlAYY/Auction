@@ -2929,10 +2929,29 @@
   vertical-align: top;
 }
 
+/* 装备名链接最多显示两行，超出直接省略；覆盖共享表格单元格的单行 nowrap，title 保留全文。 */
 .admin-settlement-equipment-link {
-  display: block;
+  display: -webkit-box;
   max-inline-size: 100%;
+  overflow: hidden;
+  white-space: normal;
   overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* 成对字段上下两行共用一列，每行仍沿用共享单行截断；下行降为次要层级，表头与单元格一一对应。 */
+.admin-settlement__table-wrap .admin-settlement__line {
+  display: block;
+}
+
+.admin-settlement__line--secondary {
+  color: var(--color-text-muted);
+}
+
+.admin-settlement__table-wrap th .admin-settlement__line--secondary {
+  font-weight: 400;
 }
 
 .admin-settlement__table-wrap th {

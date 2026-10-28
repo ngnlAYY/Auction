@@ -3,6 +3,11 @@
 
 @layer mobile {
   @media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
+    /* 桌面紧凑控件在手机和触控横屏恢复 44px 触控目标。 */
+    :root {
+      --size-control-compact: var(--size-target);
+    }
+
     body {
       font-size: 1rem;
     }
@@ -12,8 +17,9 @@
       font-size: 1rem;
     }
 
+    /* 字段默认 44px；分页器、筛选栏等紧凑容器可设置 --field-min-block-size 统一降低其后代字段高度。 */
     html body :is(input, select):not([type="checkbox"]):not([type="radio"]) {
-      min-block-size: var(--size-target);
+      min-block-size: var(--field-min-block-size, var(--size-target));
     }
 
     .ui-dialog {
@@ -36,26 +42,47 @@
   }
 
   @media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
-    /* 导航按 DOM 顺序占首行，轨道按内容宽度靠右；数字组独立换行，两侧按钮保留触控列。 */
-    .ui-pager__controls {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, max-content));
-      justify-content: end;
-      align-items: start;
-      inline-size: 100%;
+    /* 手机分页与 PC 一样单行：‹ 当前页±1 › · 总数 · 每页数量。整行控件取 32px 才能在 360px
+       级屏幕放下；自定义数量与跳页只在 PC 提供，手机按 DOM 顺序隐藏，不复制或重挂载表单。 */
+    .ui-pager {
+      --size-control-compact: 2rem;
+      --field-min-block-size: var(--size-control-compact);
+      flex-wrap: nowrap;
+      justify-content: space-between;
+      gap: var(--space-2);
     }
 
-    .ui-pager--numbered .ui-pager__controls {
-      grid-template-columns: var(--size-target) minmax(0, max-content) var(--size-target);
+    .ui-pager__controls,
+    .ui-pager__pages {
+      flex: none;
+      flex-wrap: nowrap;
+      gap: var(--space-1);
     }
 
-    .ui-pager__controls > button {
-      inline-size: 100%;
+    /* 页码窗口相邻项始终是数字页；只保留当前页及前后各一页，首尾页与省略号由前后按钮逐页到达。 */
+    .ui-pager__pages > :not([aria-current="page"], :has(+ [aria-current="page"]), [aria-current="page"] + *) {
+      display: none;
     }
 
-    .ui-pager__status {
-      align-self: center;
-      text-align: center;
+    .ui-pager__page {
+      padding: 0;
+    }
+
+    .ui-pager__total {
+      flex: 0 1 auto;
+      min-inline-size: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .ui-pager__size {
+      flex: none;
+    }
+
+    .ui-pager__custom,
+    .ui-pager__jump {
+      display: none;
     }
   }
 }

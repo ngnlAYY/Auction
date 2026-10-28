@@ -1,4 +1,4 @@
-//! 手机导航、原生装备类型选择和账户章节折叠入口；不持有查询、草稿或命令。
+//! 手机导航、原生装备分组/类型选择和账户章节折叠入口；不持有查询、草稿或命令。
 
 use super::*;
 
@@ -75,6 +75,26 @@ pub(crate) fn CategoryFilter(
                 option { value: "all", {t!("filter-all")}, " ({counts[0]})" }
                 for (index, (category, _)) in CATALOG_CATEGORIES.into_iter().enumerate() {
                     option { value: category, {catalog_category_label(category)}, " ({counts[index + 1]})" }
+                }
+            }
+        }
+    }
+}
+
+/// 手机装备分组与类型同为原生选择器；与桌面分组标签消费同一当前值和回调，不持有筛选状态。
+#[component]
+pub(crate) fn EquipmentGroupFilter(active: String, on_change: EventHandler<String>) -> Element {
+    rsx! {
+        label { class: "public-catalog-category-picker public-mobile", r#for: "public-catalog-equipment-group",
+            span { {t!("equipment-group")} }
+            select {
+                id: "public-catalog-equipment-group",
+                name: "equipment_group",
+                value: active,
+                onchange: move |event| on_change.call(event.value()),
+                option { value: "all", {t!("filter-all")} }
+                for equipment_group in ["rare", "fusion"] {
+                    option { value: equipment_group, {equipment_group_label(equipment_group)} }
                 }
             }
         }

@@ -338,7 +338,6 @@ admin-settlement-report-title = { $world } 第 { $sequence } 場結算報告
 admin-settlement-lot = 拍品
 admin-settlement-lot-id = 編號 ID
 admin-settlement-equipment = 裝備
-admin-settlement-open-equipment = 查看裝備
 admin-settlement-open-equipment-label = 查看裝備：{ $equipment }
 admin-settlement-seller = 賣家
 admin-settlement-winner = 得主

@@ -8,21 +8,35 @@
     display: none;
   }
 
+  /* 分组与类型筛选栏在手机使用 36px 紧凑控件，字段字号仍为 16px 以免聚焦缩放。 */
+  .public-auction-group-toolbar,
+  .public-auction-type-toolbar {
+    --size-control-compact: 2.25rem;
+    --field-min-block-size: var(--size-control-compact);
+  }
+
+  /* 装备分组与类型同为原生选择器，标签与选择框同排，省去独立标签行。 */
   .public-catalog-category-picker {
     display: grid;
     grid-area: 1 / 1;
-    gap: var(--space-1);
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2);
     min-inline-size: 0;
     margin: 0;
     color: var(--color-text-muted);
     font-size: var(--text-sm);
   }
 
+  .public-auction-group-toolbar > .public-catalog-category-picker {
+    flex: 1 1 100%;
+  }
+
   .public-catalog-category-picker select {
     inline-size: 100%;
     min-inline-size: 0;
-    min-block-size: var(--size-target);
-    padding: var(--space-2);
+    min-block-size: var(--size-control-compact);
+    padding: 0 var(--space-2);
     border: var(--border-width) solid var(--color-border-control);
     border-radius: var(--radius-sm);
     color: var(--color-text);
@@ -37,17 +51,7 @@
   }
 
   .public-auction-type-toolbar > .public-catalog-columns__toggle {
-    align-self: end;
-  }
-
-  .public-auction-group-toolbar > .public-auction-filter {
-    inline-size: 100%;
-    gap: var(--space-2);
-    margin: 0;
-  }
-
-  .public-auction-group-toolbar .public-auction-filter__label {
-    flex-basis: auto;
+    align-self: center;
   }
 
   .public-catalog-level-filter {
@@ -82,9 +86,10 @@
     min-block-size: var(--size-target);
   }
 
-  .public-session-preference fieldset,
-  .public-outbid-preference fieldset {
-    padding: var(--space-2);
+  .public-account-preferences > section,
+  .public-account-bids-page > .public-account-section,
+  .public-account-activity > section {
+    padding: var(--space-3);
   }
 
   .public-session-preference__choices,
@@ -177,6 +182,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: var(--space-2);
+    padding-block: max(var(--space-2), var(--safe-area-top)) var(--space-2);
     padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
   }
 
@@ -186,16 +192,36 @@
   }
 
   .public-shell__logo {
+    align-self: center;
     min-inline-size: 0;
     margin-inline-end: 0;
-    overflow-wrap: anywhere;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
+  /* 手机导航开关显示为 44px 方形图标；按钮文字保留为可访问名称，仅以字号 0 视觉隐藏。 */
   .public-shell__nav-toggle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    inline-size: var(--size-target);
     min-inline-size: var(--size-target);
+    padding: 0;
+    font-size: 0;
+  }
+
+  /* 第一条声明是不支持替代文本语法时的回退；第二条把生成图标对读屏隐藏，避免与按钮名称重复。 */
+  .public-shell__nav-toggle::before {
+    content: "☰";
+    content: "☰" / "";
+    font-size: 1.25rem;
+    line-height: 1;
+  }
+
+  .public-shell__nav-toggle[aria-expanded="true"]::before {
+    content: "✕";
+    content: "✕" / "";
   }
 
   .public-shell__nav {
@@ -219,7 +245,7 @@
     overflow-wrap: anywhere;
   }
 
-  /* 世界和语言同行；连接、刷新及账户按内容换行，视觉和键盘顺序一致。 */
+  /* 世界和语言同行；连接整体与会话各占下一行一半，最小内容放不下时整组换行，视觉和键盘顺序一致。 */
   .public-shell__controls {
     display: flex;
     grid-column: 1 / -1;
@@ -266,61 +292,37 @@
     max-inline-size: 100%;
   }
 
+  /* 连接整体与会话区各占第三行一半，和上一行世界/语言两栏对齐。 */
   .public-shell__connection {
-    flex: 1 1 12rem;
-    gap: var(--space-2);
+    flex: 1 1 0;
   }
 
   .public-connection-badge {
-    flex: 1 1 6rem;
     min-block-size: var(--size-target);
-    padding: var(--space-1) 0;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    overflow-wrap: anywhere;
+    padding: 0 var(--space-2);
   }
 
   .public-connection-refresh {
-    flex: 0 1 auto;
-    min-inline-size: var(--size-target);
-    white-space: normal;
-    overflow-wrap: anywhere;
+    padding-inline: var(--space-2);
   }
 
   .public-connection-refresh__error {
-    flex-basis: 100%;
     overflow-wrap: anywhere;
   }
 
   .public-account-session-menu {
-    flex: 1 1 9rem;
-    justify-content: flex-end;
-    gap: var(--space-2);
-  }
-
-  .public-account-session-menu > :is(a, button) {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-inline-size: var(--size-target);
-    min-block-size: var(--size-target);
-    padding-inline: var(--space-2);
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-
-  .public-account-session-menu > .public-account-session-name {
     flex: 1 1 0;
-    min-inline-size: 0;
-    justify-content: start;
-    padding-inline-start: 0;
+  }
+
+  /* 手机半栏宽度有限，用户名取消桌面的最大宽度，由所属半栏约束并省略。 */
+  .public-account-session-menu > .public-account-session-name {
+    max-inline-size: none;
   }
 
   .public-account-session-menu > :is([role="status"], [role="alert"]),
   .public-account-session-error {
     position: static;
-    flex-basis: 100%;
+    grid-column: 1 / -1;
     inline-size: 100%;
     max-inline-size: 100%;
     overflow-wrap: anywhere;
@@ -652,7 +654,7 @@
   }
 
   .public-catalog-level-filter input[type="text"] {
-    min-block-size: var(--size-target);
+    min-block-size: var(--size-control-compact);
     font-size: 1rem;
   }
 

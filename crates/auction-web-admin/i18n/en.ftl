@@ -277,7 +277,6 @@ admin-settlement-report-title = Settlement report · { $world } #{ $sequence }
 admin-settlement-lot = Lot
 admin-settlement-lot-id = Lot ID
 admin-settlement-equipment = Equipment
-admin-settlement-open-equipment = View equipment
 admin-settlement-open-equipment-label = View equipment: { $equipment }
 admin-settlement-seller = Seller
 admin-settlement-winner = Winner

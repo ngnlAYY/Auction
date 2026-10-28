@@ -61,6 +61,8 @@
   --space-5: 1.5rem;
   --space-6: 2rem;
   --size-target: 2.75rem;
+  /* 分页器与页头等高频辅助控件的桌面紧凑高度；触控断点在 mobile.css 恢复为 --size-target。 */
+  --size-control-compact: 1.75rem;
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
@@ -448,17 +450,19 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/* 桌面使用紧凑高度与小字号；触控断点经 --size-control-compact 恢复 44px，字段字号由 mobile.css 提升到 16px。 */
 .ui-pager button,
 .ui-pager__input,
 .ui-pager__select {
-  min-inline-size: var(--size-target);
-  min-block-size: var(--size-target);
+  min-inline-size: var(--size-control-compact);
+  min-block-size: var(--size-control-compact);
   max-inline-size: 100%;
-  padding: var(--space-1) var(--space-2);
+  padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
+  font-size: var(--text-sm);
 }
 
 .ui-pager__input,
@@ -493,14 +497,9 @@ button:disabled {
 }
 
 .ui-pager__input {
-  flex: 0 1 5rem;
-  inline-size: 5rem;
+  flex: 0 1 4rem;
+  inline-size: 4rem;
   font-variant-numeric: tabular-nums;
-}
-
-.ui-pager__input,
-.ui-pager__select {
-  font-size: 1rem;
 }
 
 

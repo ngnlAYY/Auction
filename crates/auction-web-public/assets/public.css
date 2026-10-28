@@ -103,12 +103,13 @@
   border-block-end: calc(2 * var(--border-width)) solid var(--color-accent);
 }
 
+/* 页头辅助控件统一使用紧凑高度与小字号；触控断点经 --size-control-compact 恢复 44px。 */
 .public-shell__controls {
   display: flex;
   min-inline-size: 0;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-3);
   margin-inline-start: auto;
 }
 
@@ -138,12 +139,20 @@
 }
 
 .public-world-switcher select {
-  padding: var(--space-1) var(--space-2);
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
-  font-size: inherit;
+  font-size: var(--text-sm);
+}
+
+/* 语言选择器由共享层拥有，Admin 同样使用；只在 Public 页头内收紧尺寸。 */
+.public-shell__preferences .language-picker__select {
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
 }
 
 .public-world-switcher select:focus-visible {
@@ -161,7 +170,8 @@
   align-items: center;
   gap: var(--space-1);
   min-inline-size: 0;
-  padding: var(--space-1) var(--space-3);
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-full);
   background: var(--color-surface-raised);
@@ -197,8 +207,8 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-1);
-  min-block-size: var(--size-target);
-  padding: var(--space-1) var(--space-3);
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
@@ -243,21 +253,68 @@
   }
 }
 
+/* 连接状态与刷新组成一个整体：容器内两者等宽各占一半，状态保留圆角胶囊框、刷新保留按钮框；
+   未渲染刷新时状态独占整宽，刷新失败提示另起整行。等宽列在内容取宽时取两者较宽者，不裁切文案。 */
+.public-shell__connection {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.public-shell__connection:has(> .public-connection-refresh) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.public-shell__connection > .public-connection-badge,
+.public-shell__connection > .public-connection-refresh {
+  justify-content: center;
+  min-inline-size: 0;
+}
+
+.public-shell__connection > .public-connection-refresh__error {
+  grid-column: 1 / -1;
+}
+
+/* 会话区与连接区同样是左右各半的整体：链接/按钮等宽分栏，加载与错误提示另起整行。 */
 .public-account-session-menu {
-  display: inline-flex;
+  display: inline-grid;
   position: relative;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: var(--space-2);
   min-inline-size: 0;
   max-inline-size: 100%;
-  flex-wrap: wrap;
+  font-size: var(--text-sm);
+}
+
+.public-account-session-menu > :is([role="status"], [role="alert"]) {
+  grid-column: 1 / -1;
+}
+
+.public-account-session-menu > :is(a, button) {
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-4);
+  justify-content: center;
+  min-inline-size: 0;
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+}
+
+/* “我的出价”等普通会话链接与刷新按钮同为描边按钮，使两半外观一致。 */
+.public-account-session-menu > a:not(.public-account-session-login, .public-account-session-name) {
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
 }
 
 .public-account-session-login {
   display: inline-flex;
   align-items: center;
-  min-block-size: var(--size-target);
-  padding: var(--space-1) var(--space-3);
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-accent);
   border-radius: var(--radius-sm);
   color: var(--color-accent);
@@ -277,20 +334,26 @@
   }
 }
 
-.public-account-session-name {
-  min-inline-size: 0;
-  overflow-wrap: anywhere;
+/* 用户名在所属半栏内单行省略，不逐字折行；完整名称在账户页可见。 */
+.public-account-session-menu > .public-account-session-name {
+  display: block;
+  max-inline-size: 10rem;
+  overflow: hidden;
   color: var(--color-text);
   font-weight: 600;
+  line-height: var(--size-control-compact);
+  text-align: center;
+  text-overflow: ellipsis;
 }
 
 .public-account-session-logout {
-  min-block-size: var(--size-target);
-  padding: var(--space-1) var(--space-3);
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   background: transparent;
+  font-size: var(--text-sm);
 }
 
 .public-account-session-logout:focus-visible {
@@ -1348,9 +1411,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--space-1) var(--space-4);
   min-inline-size: 0;
-  margin-block-end: var(--space-3);
+  margin-block-end: var(--space-2);
 }
 
 .public-auction-group-toolbar > .public-auction-filter {
@@ -1378,9 +1441,10 @@
   flex-wrap: wrap;
 }
 
+/* 桌面与筛选标签同为紧凑行高；触控断点经 --size-control-compact 恢复 44px。 */
 .public-catalog-level-filter__maximum,
 .public-catalog-level-filter__unleveled {
-  min-block-size: var(--size-target);
+  min-block-size: var(--size-control-compact);
   margin: 0;
 }
 
@@ -1425,9 +1489,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) fit-content(35%);
   align-items: start;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-inline-size: 0;
-  margin-block-end: var(--space-3);
+  margin-block-end: var(--space-2);
 }
 
 .public-auction-type-toolbar > .public-auction-filter {
@@ -1437,11 +1501,11 @@
   margin: 0;
 }
 
-/* 标签与右侧按钮共享首行高度；类型选项仍可在左侧内部换行。 */
+/* 标签与右侧按钮共享紧凑首行高度；类型选项仍可在左侧内部换行。 */
 .public-auction-type-toolbar .public-auction-filter__label {
   display: inline-flex;
   align-items: center;
-  min-block-size: var(--size-target);
+  min-block-size: var(--size-control-compact);
 }
 
 .public-auction-type-toolbar > .public-catalog-columns__toggle {
@@ -1451,6 +1515,7 @@
   margin: 0;
 }
 
+/* 与页头按钮同为紧凑矩形；覆盖历史筛选共用按钮规则的 44px 高度与大内距。 */
 .public-catalog-columns__toggle {
   display: inline-flex;
   flex: 0 1 auto;
@@ -1458,8 +1523,11 @@
   justify-content: center;
   min-inline-size: 0;
   max-inline-size: 40%;
+  min-block-size: var(--size-control-compact);
   margin-inline-start: auto;
-  border-radius: var(--radius-md);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
   white-space: normal;
   overflow-wrap: anywhere;
 }
@@ -1469,17 +1537,21 @@
   color: var(--color-accent);
 }
 
-/* 列设置只压缩留白和网格，不缩减原生复选框及按钮的 44px 点击区域。 */
+/* 列设置在桌面使用紧凑行高和顺排选项；触控断点经 --size-control-compact 恢复 44px 点击区域。 */
 .public-catalog-columns {
   min-inline-size: 0;
-  padding: var(--space-2);
-  margin-block: 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  margin-block: 0 var(--space-2);
 }
 
 .public-catalog-columns__header {
   flex-wrap: wrap;
   gap: var(--space-1) var(--space-2);
   margin-block-end: var(--space-1);
+}
+
+.public-catalog-columns__header strong {
+  font-size: var(--text-sm);
 }
 
 .public-catalog-columns__actions {
@@ -1493,9 +1565,10 @@
 
 .public-catalog-columns__close,
 .public-catalog-columns__reset {
-  min-inline-size: var(--size-target);
+  min-inline-size: var(--size-control-compact);
   max-inline-size: 100%;
-  padding-inline: var(--space-2);
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-2);
   font-size: var(--text-sm);
   white-space: normal;
   overflow-wrap: anywhere;
@@ -1507,10 +1580,11 @@
   font-size: var(--text-sm);
 }
 
+/* 选项按内容宽度顺排，宽屏通常一行放下，不再拉伸成等宽网格。 */
 .public-catalog-columns__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
-  gap: var(--space-1) var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-4);
 }
 
 .public-catalog-columns__option {
@@ -1518,7 +1592,7 @@
   align-items: center;
   gap: var(--space-1);
   min-inline-size: 0;
-  min-block-size: var(--size-target);
+  min-block-size: var(--size-control-compact);
   font-size: var(--text-sm);
   cursor: pointer;
 }
@@ -1552,29 +1626,45 @@
 
 /* ===== 账户区（登录引导 / 账户表格） ===== */
 
+/* 卡片之间的行列间距统一由 --account-gap 控制，桌面断点在 desktop.css 放大。 */
+.public-account-bids-page {
+  --account-gap: var(--space-3);
+}
+
 .public-account-bids-page > h1 {
   margin: 0 0 var(--space-2);
 }
 
+/* 并排的两张卡片拉伸为同高；列比例由 desktop.css 拥有。 */
 .public-account-preferences,
 .public-account-activity {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  align-items: start;
-  gap: var(--space-3);
+  align-items: stretch;
+  gap: var(--account-gap);
   min-inline-size: 0;
-  margin-block-end: var(--space-4);
+  margin-block-end: var(--account-gap);
 }
 
+/* 偏好、标记、出价和代理五个顶层分区共用同一卡片外观；世界子分区不再嵌套卡片。 */
 .public-account-preferences > section,
+.public-account-bids-page > .public-account-section,
 .public-account-activity > section {
   min-inline-size: 0;
-  margin-block-end: 0;
+  margin: 0;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.public-account-bids-page > .public-account-section {
+  margin-block-end: var(--account-gap);
 }
 
 .public-account-navigation {
   min-inline-size: 0;
-  margin-block-end: var(--space-3);
+  margin-block-end: var(--account-gap);
   border-block-end: var(--border-width) solid var(--color-border);
 }
 
@@ -1593,20 +1683,26 @@
   margin-block-end: var(--space-4);
 }
 
+/* 卡片外框由所属 section 承担；fieldset 只保留原生分组语义，legend 与其他分区 h2 同为卡片标题。 */
 .public-session-preference fieldset,
 .public-outbid-preference fieldset {
   min-inline-size: 0;
   margin: 0;
-  padding: var(--space-3);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
+  padding: 0;
+  border: 0;
 }
 
 .public-session-preference legend,
 .public-outbid-preference legend {
-  font-size: var(--text-base);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  font-size: var(--text-lg);
   font-weight: var(--font-weight-strong);
+}
+
+.public-session-preference legend + *,
+.public-outbid-preference legend + * {
+  margin-block-start: 0;
 }
 
 .public-session-preference p,
@@ -1636,7 +1732,7 @@
 .public-outbid-preference label {
   display: inline-flex;
   align-items: center;
-  min-block-size: var(--size-target);
+  min-block-size: var(--size-control-compact);
   cursor: pointer;
 }
 
@@ -1645,15 +1741,17 @@
   accent-color: var(--color-accent);
 }
 
+/* 桌面使用紧凑控件；触控断点经 --size-control-compact 恢复 44px。 */
 .public-session-preference button,
 .public-outbid-preference button {
-  min-block-size: var(--size-target);
-  padding: var(--space-2) var(--space-3);
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
   font: inherit;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -1703,8 +1801,8 @@
 .public-session-preference__field select {
   inline-size: 100%;
   min-inline-size: 0;
-  min-block-size: var(--size-target);
-  padding: var(--space-2) var(--space-3);
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
@@ -1727,7 +1825,7 @@
 }
 
 .public-account-section h2 {
-  margin: 0 0 var(--space-2);
+  margin: 0 0 var(--space-3);
   font-size: var(--text-lg);
 }
 
@@ -1738,6 +1836,12 @@
 
 .public-account-section .public-account-section:last-child {
   margin-block-end: 0;
+}
+
+/* 同一卡片内的多个世界以分隔线区分，不嵌套边框。 */
+.public-account-section .public-account-section + .public-account-section {
+  padding-block-start: var(--space-3);
+  border-block-start: var(--border-width) solid var(--color-border);
 }
 
 .public-account-empty {
@@ -1788,11 +1892,9 @@
   }
 }
 
+/* 表格已位于账户卡片内，不再叠加第二层边框和底色。 */
 .public-account-table-wrap {
   overflow-x: clip;
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
 }
 
 .public-account-table {

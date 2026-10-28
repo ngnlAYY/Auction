@@ -463,10 +463,9 @@
     min-block-size: var(--size-target);
   }
 
+  /* 只补触控高度，不改 display，避免破坏装备名的两行截断。 */
   .admin-settlement-equipment-link {
-    display: flex;
     min-block-size: var(--size-target);
-    align-items: center;
   }
 
   .admin-audit-filter__advanced summary,
