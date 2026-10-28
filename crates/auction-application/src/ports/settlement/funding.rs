@@ -66,28 +66,6 @@ pub enum FundingDeliveryOutcome {
     Unknown,
 }
 
-/// 返还必须由发送owner在同session验证精确delivery和金额。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FundingReturnKind {
-    DefinitelyNotExecuted,
-    ReturnedAndReceived,
-}
-
-/// 安全证明投影；普通 failed 不是该证明。
-#[derive(Debug)]
-pub struct FundingReturnProof {
-    pub kind: FundingReturnKind,
-    pub delivery_id: Uuid,
-    pub amount: i64,
-    pub proof_reference: String,
-    /// 同一真实账号身份始终必需；record_only无需为了返还读取余额。
-    pub binding: crate::MailAccountEvidenceBinding,
-    /// strict_cash必填，record_only必须省略；精确未执行/退回证明本身仍必需。
-    pub cash: Option<crate::VerifiedMainCashObservation>,
-    pub observed_at: chrono::DateTime<chrono::Utc>,
-    pub digest: [u8; 32],
-}
-
 /// 同一排他session精确Sent-collected的安全实收绑定；不接受Balance替代。
 #[derive(Debug)]
 pub struct FundingCollectedReceipt<'a> {
@@ -129,7 +107,7 @@ pub struct FundingReconciliationCommand {
 impl FundingReconciliationCommand {
     /// 精确确认绑定UID、版本、两类额度和预览；声明不替代远端事实。
     pub fn confirmation(&self) -> String {
-        let digest: String = self.preview_digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        let digest = crate::ports::lower_hex(&self.preview_digest);
         format!(
             "RECONCILE BOT FUNDS {} {} {} {} {}",
             self.expected_uid,

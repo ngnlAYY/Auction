@@ -4,6 +4,8 @@
 use super::advance::DueRecoveryRow;
 #[cfg(feature = "postgres")]
 use super::*;
+#[cfg(feature = "postgres")]
+pub(super) use auction_domain::valid_text as valid_recovery_text;
 
 pub(super) fn valid_failure_code(value: &str) -> bool {
     !value.is_empty()
@@ -31,14 +33,6 @@ pub(super) fn request_hash_from_optional(
 pub(super) fn valid_external_reference(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 512
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
-}
-
-#[cfg(feature = "postgres")]
-pub(super) fn valid_recovery_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
         && value == value.trim()
         && !value.chars().any(char::is_control)
 }

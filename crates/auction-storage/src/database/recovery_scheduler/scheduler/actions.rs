@@ -34,11 +34,7 @@ impl From<auction_application::RepositoryError> for RecoveryActionTransactionErr
 #[cfg(feature = "postgres")]
 impl RecoveryActionTransactionError {
     fn is_retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::Storage(sqlx::Error::Database(error))
-                if matches!(error.code().as_deref(), Some("40001" | "40P01"))
-        )
+        matches!(self, Self::Storage(error) if crate::database::is_serialization_conflict(error))
     }
 
     fn into_repository_error(self) -> auction_application::RepositoryError {

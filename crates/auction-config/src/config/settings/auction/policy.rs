@@ -65,16 +65,11 @@ impl AuctionConfig {
             Duration::try_seconds(seconds)
                 .ok_or(ConfigError::InvalidAuctionConfig("策略秒数超出可表示范围"))
         };
-        let settlement_mode = match self.settlement.mode.as_str() {
-            "legacy_zero_v0" => SettlementMode::LegacyZeroV0,
-            "hold_curve_v1" => SettlementMode::HoldCurveV1,
-            "hold_curve_v2" => SettlementMode::HoldCurveV2,
-            _ => {
-                return Err(ConfigError::InvalidAuctionConfig(
-                    "settlement.mode 只能是 legacy_zero_v0、hold_curve_v1 或 hold_curve_v2",
-                ));
-            }
-        };
+        let settlement_mode = SettlementMode::from_name(&self.settlement.mode).ok_or(
+            ConfigError::InvalidAuctionConfig(
+                "settlement.mode 只能是 legacy_zero_v0、hold_curve_v1 或 hold_curve_v2",
+            ),
+        )?;
         let recovery_mode = match self.settlement.recovery.mode.as_str() {
             "remind_v1" => RecoveryMode::RemindV1,
             _ => {

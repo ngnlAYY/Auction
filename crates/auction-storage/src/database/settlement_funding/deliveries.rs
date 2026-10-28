@@ -1,7 +1,7 @@
 //! 全部现金Send统一资金门；准备/租约/外部first-poll仍由delivery owner拥有。
 
 use super::{ledger::*, *};
-use auction_application::{FundingDeliveryOutcome, FundingReturnKind, FundingReturnProof};
+use auction_application::FundingDeliveryOutcome;
 
 /// 精确可信origin映射，不从任意metadata授予资金权限；generic无映射明确延期。
 pub async fn reserve_funded_delivery(
@@ -187,89 +187,4 @@ pub async fn finish_funded_delivery(
     sqlx::query("UPDATE public.settlement_funding_allocations SET state=$1,state_version=state_version+1 WHERE id=$2")
         .bind(state).bind(row.try_get::<Uuid,_>("id").map_err(storage)?).execute(&mut **tx).await.map_err(storage)?;
     state_entry(tx, account, delivery_id, &row, state).await
-}
-
-/// 只有精确未执行或真实退回到账才能返还；不得用admin failed或余额变化代替证明。
-pub async fn return_funded_delivery(
-    tx: &mut Transaction<'_, Postgres>,
-    account: &LockedFundingAccount,
-    command: &FundingMutation,
-    delivery_id: Uuid,
-    proof: &FundingReturnProof,
-) -> Result<(), FundingError> {
-    if replay(tx, account, command, "return", delivery_id).await? {
-        return Ok(());
-    }
-    if proof.digest == [0; 32]
-        || proof.amount <= 0
-        || proof.delivery_id != delivery_id
-        || !proof.binding.validate()
-        || proof.binding.authenticated_uid != account.uid()
-        || proof.binding.world != auction_domain::SettlementWorld::Main
-        || if account.records_only() {
-            proof.cash.is_some()
-        } else {
-            proof.cash.as_ref().is_none_or(|cash| {
-                !proof.binding.same_account(&cash.binding)
-                    || cash.binding.world != auction_domain::SettlementWorld::Main
-            })
-        }
-        || proof.proof_reference.is_empty()
-        || proof.proof_reference.len() > 256
-        || proof.proof_reference.trim() != proof.proof_reference
-        || proof.proof_reference.chars().any(char::is_control)
-    {
-        return Err(FundingError::Invalid);
-    }
-    let fresh:bool=sqlx::query_scalar("SELECT $1 BETWEEN clock_timestamp()-interval '30 seconds' AND clock_timestamp() AND $2 BETWEEN clock_timestamp()-interval '30 seconds' AND clock_timestamp()")
-        .bind(proof.observed_at).bind(proof.binding.observed_at).fetch_one(&mut **tx).await.map_err(storage)?;
-    if !fresh {
-        return Err(FundingError::Unproven);
-    }
-    let row = sqlx::query("SELECT id,amount,state FROM public.settlement_funding_allocations WHERE uid=$1 AND delivery_id=$2 FOR UPDATE")
-        .bind(account.uid()).bind(delivery_id).fetch_one(&mut **tx).await.map_err(storage)?;
-    let state: String = row.try_get("state").map_err(storage)?;
-    let amount: i64 = row.try_get("amount").map_err(storage)?;
-    let id: Uuid = row.try_get("id").map_err(storage)?;
-    if amount != proof.amount
-        || state == "available"
-        || (proof.kind == FundingReturnKind::DefinitelyNotExecuted && state == "spent")
-    {
-        return Err(FundingError::Conflict);
-    }
-    // 返还恢复原用途，不授权再投资，也不删除原delivery关联用于阻止同一source二次返还。
-    sqlx::query("UPDATE public.settlement_funding_allocations SET state='available',state_version=state_version+1 WHERE id=$1")
-        .bind(id).execute(&mut **tx).await.map_err(storage)?;
-    let local:i64=sqlx::query_scalar("SELECT COALESCE(sum(amount),0)::bigint FROM public.settlement_funding_allocations WHERE uid=$1 AND state<>'spent'")
-        .bind(account.uid()).fetch_one(&mut **tx).await.map_err(storage)?;
-    if let Some(cash) = &proof.cash {
-        let fresh: bool = sqlx::query_scalar(
-            "SELECT $1 BETWEEN clock_timestamp()-interval '30 seconds' AND clock_timestamp()",
-        )
-        .bind(cash.observed_at)
-        .fetch_one(&mut **tx)
-        .await
-        .map_err(storage)?;
-        if !fresh || local > cash.credits {
-            return Err(FundingError::Unproven);
-        }
-    }
-    let evidence = serde_json::json!({"kind":match proof.kind {FundingReturnKind::DefinitelyNotExecuted=>"definitely_not_executed",FundingReturnKind::ReturnedAndReceived=>"returned_and_received"},
-        "reference":proof.proof_reference,"amount":amount,"observed_at":proof.observed_at,
-        "uid":proof.binding.authenticated_uid,"credential_id":proof.binding.credential_id,
-        "credential_version":proof.binding.credential_version,"runtime_generation":proof.binding.runtime.generation,
-        "cash_credits":proof.cash.as_ref().map(|cash|cash.credits),"cash_observed_at":proof.cash.as_ref().map(|cash|cash.observed_at),
-        "cash_digest":proof.cash.as_ref().map(|cash|cash.digest),"accounting_mode":if account.records_only(){"record_only"}else{"strict_cash"}});
-    sqlx::query("INSERT INTO public.settlement_funding_returns(delivery_id,command_id,proof_digest,evidence) VALUES($1,$2,$3,$4)")
-        .bind(delivery_id).bind(command.command_id).bind(proof.digest.as_slice()).bind(evidence).execute(&mut **tx).await.map_err(storage)?;
-    let proof_command =
-        FundingMutation { command_id: command.command_id, request_digest: proof.digest };
-    entry(
-        tx,
-        account.uid(),
-        &proof_command,
-        FundingEntry { debit: Some(id), credit: Some(id), source: None, amount, kind: "return" },
-    )
-    .await?;
-    complete(tx, account, command, "return", delivery_id).await
 }

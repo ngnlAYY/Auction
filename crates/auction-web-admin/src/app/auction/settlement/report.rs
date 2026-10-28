@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 
 use auction_web_shared::{
     AsyncState, AsyncStateKind, Time, TruncatedText, format_credit_amount as format_amount,
-    format_held_duration,
+    format_held_duration, format_ppm,
 };
 
 use crate::api::{
@@ -15,7 +15,7 @@ use crate::app::surface::AdminActionFeedback;
 use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination, use_admin_pagination};
 
 use super::RecoveryConfirmationDraft;
-use super::helpers::{format_ppm, page_count, page_slice, price_adjustment_label};
+use super::helpers::{page_count, page_slice, price_adjustment_label};
 use super::recovery::AdminRecoveryTable;
 
 #[component]

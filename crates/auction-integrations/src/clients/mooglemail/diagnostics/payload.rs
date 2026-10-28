@@ -197,7 +197,7 @@ pub fn parsed_message(message: &MailMessage) -> Result<SensitiveBytes, MailDiagn
         attachments: Vec::with_capacity(message.attachments.len()),
         returnable: message.returnable,
         claimable: message.claimable,
-        content_digest: super::crypto::hex(message.content_digest),
+        content_digest: auction_application::lower_hex(&message.content_digest),
     };
     // EquipmentKey 的公开格式化会脱敏，只在此短生命周期加密边界内读取真实字节。
     for attachment in &message.attachments {

@@ -27,10 +27,7 @@ async fn refresh_postgres(
     pool: &super::TrackedPool<sqlx::Postgres>,
     update: &RecoveryHealthUpdate,
 ) -> Result<(), ApplicationError> {
-    let world = match update.world {
-        auction_domain::SettlementWorld::Main => "main",
-        auction_domain::SettlementWorld::Isekai => "isekai",
-    };
+    let world = update.world.as_str();
     let row = sqlx::query(
         r#"WITH recovery_stats AS (
                SELECT

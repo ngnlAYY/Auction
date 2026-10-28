@@ -111,17 +111,6 @@ impl Default for SettlementPolicy {
 }
 
 impl SettlementPolicy {
-    /// 返回迁移前拍卖使用的零调整策略。
-    pub fn legacy_zero() -> Self {
-        Self {
-            version: 0,
-            mode: SettlementMode::LegacyZeroV0,
-            compensation_pool_enabled: false,
-            isekai_carrier_credit: 1,
-            anchors: Vec::new(),
-        }
-    }
-
     /// 校验版本、模式和锚点曲线的规范化形状。
     pub fn validate(&self) -> Result<(), DomainError> {
         match self.mode {
@@ -177,12 +166,6 @@ impl SettlementPolicy {
             ));
         }
         Ok(())
-    }
-
-    /// 按旧系统的整数 half-away-from-zero 规则插值调整比例。
-    pub fn interpolate_adjustment(&self, hold_ppm: i64) -> Result<i64, DomainError> {
-        self.validate()?;
-        self.interpolate_validated(hold_ppm)
     }
 
     /// 仅供已完整校验策略的结算计算调用；保留原整数取整，不重复扫描全部锚点。

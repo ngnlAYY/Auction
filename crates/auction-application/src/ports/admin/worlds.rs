@@ -6,7 +6,7 @@ use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
 
-use auction_domain::CommandId;
+use auction_domain::{CommandId, valid_text};
 
 use super::{ApplicationFuture, CompetitionTransactionError, RequestHash, WorldSnapshot};
 
@@ -121,11 +121,4 @@ pub enum AdminWorldError {
 /// 生成 world-scoped 的共享命令账本聚合标识。
 pub fn admin_world_aggregate_id(world_id: &str) -> Uuid {
     Uuid::new_v5(&Uuid::NAMESPACE_URL, format!("auction/admin-world/{world_id}").as_bytes())
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

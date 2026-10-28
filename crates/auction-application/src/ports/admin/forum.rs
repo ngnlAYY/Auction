@@ -4,6 +4,7 @@
 
 use std::fmt;
 
+use auction_domain::valid_text;
 use thiserror::Error;
 
 use super::ApplicationFuture;
@@ -253,11 +254,4 @@ pub trait AdminForumPreviewPort: Send + Sync {
         &self,
         command: AdminForumPreviewCommand,
     ) -> ApplicationFuture<'_, AdminForumPreviewResult>;
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

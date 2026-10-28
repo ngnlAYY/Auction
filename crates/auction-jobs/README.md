@@ -21,7 +21,8 @@
 
 ## 源码布局
 
-`lib.rs` 只负责导出，`worker/` 按业务 owner 拆分；`runtime/model.rs` 持有端口/参数，`runtime/runner.rs` 组合循环、
+`lib.rs` 只负责导出，`worker/` 按业务 owner 拆分；`runtime/model.rs` 持有端口/参数，`runtime/config.rs` 以共用的
+批量/轮询/租约边界谓词二次校验各循环配置（Recovery 复用 Fulfillment 的同形运行边界），`runtime/runner.rs` 组合循环、
 drain 与任务退出，`runtime/delivery/lease.rs` 统一准备、交接与发送的有界续租；
 `runtime/delivery/wakeup.rs` 经窄端口接收提交后提示、重连后补扫描并合并唤醒，退出跟随 drain。control 协议、handler、Unix server
 和 Admin client 独立放在 `control/transport/`，调度器通过 `WorkerControlHandle` 接入状态与唤醒。
@@ -49,7 +50,7 @@ drain 与任务退出，`runtime/delivery/lease.rs` 统一准备、交接与发�
 持久化 runner 在启动任何循环前先轮询停止 future；装配期间已到达的停止请求直接进入 drain，不先派生任务再补停机通知。
 邮箱配置在启动时校验一次；各轮只计算下一触发时刻，非严格未来时刻立即停止该邮箱循环，避免零间隔忙等。
 
-`run_persistent_until_shutdown` 消费持久化轮次；领取后冻结 owner、精确租约与 state_version。周拍卖只在配置
+`run_persistent_with_settlement_until_shutdown` 消费持久化轮次；领取后冻结 owner、精确租约与 state_version。周拍卖只在配置
 allowlist、runtime 开关和数据库 enabled world 的交集中新建，已有轮次按冻结事实执行，配置变更不以旧命令 ID 重发
 新负载；结算使用持久化 claim 的 due_at，不以实际领取延迟改变业务时间。慢速代理扫描候选后交竞价事务重新校验，
 过期 generation 安全跳过。唤醒提示由调度、慢速代理与结算各自的 storage owner 只读计算，生命周期与慢速代理以数据库时钟、

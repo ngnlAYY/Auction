@@ -1,7 +1,6 @@
 //! 论坛回帖竞价命令账本的幂等开始与完成写入。
 
 #[cfg(feature = "postgres")]
-use auction_application::forum_world_name;
 #[cfg(feature = "postgres")]
 use auction_application::{
     ApplicationError, ForumBidCommandRecord, ForumCommandStart, ForumCommandStatus,
@@ -44,7 +43,7 @@ pub(super) async fn begin_command_postgres(
     )
     .bind(record.command_id)
     .bind(record.auction_id.as_uuid())
-    .bind(forum_world_name(record.world))
+    .bind(record.world.as_str())
     .bind(&record.thread_id)
     .bind(&record.post_id)
     .bind(record.post_number)
@@ -117,7 +116,7 @@ pub(super) async fn begin_command_postgres(
         row.try_get("status").map_err(|_| storage_error("读取论坛命令状态失败"))?;
     // post_id 与原业务负载决定身份；全主题重新编号不是负载变化，不能阻断已完成命令。
     let same = existing_auction_id == record.auction_id.as_uuid()
-        && existing_world == forum_world_name(record.world)
+        && existing_world == record.world.as_str()
         && existing_thread_id == record.thread_id
         && existing_post_id == record.post_id
         && existing_line_number == record.line_number

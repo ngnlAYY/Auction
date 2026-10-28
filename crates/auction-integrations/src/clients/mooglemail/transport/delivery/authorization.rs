@@ -7,7 +7,6 @@ use auction_application::{
     InternalEvidenceFuture, InternalEvidenceLease, InternalEvidencePurpose,
     InternalEvidenceRequest, PreparedSettlementInternalEvidence,
 };
-use auction_domain::SettlementWorld;
 
 use super::*;
 use crate::clients::mooglemail::MoogleMailGateway;
@@ -125,10 +124,7 @@ impl MoogleMailDeliveryTransport {
                 claim_fencing: claim.fencing_version,
                 request_hash: claim.request_hash,
             },
-            world: match world {
-                MoogleMailWorld::Main => SettlementWorld::Main,
-                MoogleMailWorld::Isekai => SettlementWorld::Isekai,
-            },
+            world: world.into(),
             equipment: None,
             observe_main_cash: policy.observes_cash(),
             deadline,

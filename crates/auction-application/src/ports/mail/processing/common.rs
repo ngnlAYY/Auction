@@ -1,3 +1,4 @@
+pub(super) use auction_domain::valid_text;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -38,13 +39,6 @@ pub enum MailProcessingError {
 
 pub(super) fn decimal_identity(value: &str) -> bool {
     !value.is_empty() && value.len() <= 64 && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-pub(super) fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 pub(super) fn clear_string(value: &mut String) {

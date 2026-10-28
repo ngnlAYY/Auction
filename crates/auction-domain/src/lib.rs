@@ -7,20 +7,22 @@ mod errors;
 mod identity;
 mod proxy;
 mod settlement;
+mod stable_name;
+mod text;
 mod watch;
 
 pub use watch::{LotLeadership, LotWatchChannel};
 
 pub use auction::{Auction, AuctionStatus};
 pub use bidding::{
-    AcceptedBid, AuctionRules, BidAmount, BidDecision, BidMechanism, CREDIT_GRID, CompetitionPlan,
+    AcceptedBid, AuctionRules, BidAmount, BidMechanism, CREDIT_GRID, CompetitionPlan,
     CompetitionTrigger, CompetitionTriggerKind, DEFAULT_BID_INCREMENT_PPM, DEFAULT_CANCEL_CUTOFF,
     DEFAULT_FINAL_PHASE_LEAD, DEFAULT_PROXY_MAX_OUTBID_USES, DEFAULT_PROXY_SLOW_INTERVAL,
     DEFAULT_SOFT_CLOSE_EXTENSION, DEFAULT_SOFT_CLOSE_WINDOW, DEFAULT_START_PRICE, LotBidState,
     MAX_BID_AMOUNT, PROXY_LAST_INCREMENT,
 };
 pub use equipment::{
-    EquipmentKey, EquipmentKeyEnvelope, EquipmentKeyEnvelopeError, EquipmentKeyError,
+    EquipmentKey, EquipmentKeyEnvelope, EquipmentKeyEnvelopeError, EquipmentKeyError, valid_key_id,
 };
 pub use errors::DomainError;
 pub use identity::{
@@ -39,3 +41,4 @@ pub use settlement::{
     SettlementWorld, floor_ppm, funding_reconciliation_capacity, proportional_floor,
     validate_settlement_price_breakdown, validate_settlement_price_breakdown_for_mode,
 };
+pub use text::{valid_positive_decimal, valid_text};

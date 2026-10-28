@@ -12,9 +12,10 @@ Public 竞价与 Admin 管理状态留在各 surface，本 crate 不依赖存储
 | [src/components](crates/auction-web-shared/src/components) | 表格、分页、弹窗、状态、时间与安全 Markdown |
 | [src/commands](crates/auction-web-shared/src/commands)、[src/query](crates/auction-web-shared/src/query) | 确认命令与 URL 状态 |
 | [src/transport](crates/auction-web-shared/src/transport)、[src/errors](crates/auction-web-shared/src/errors) | 同源传输与通用错误分类 |
-| [src/i18n](crates/auction-web-shared/src/i18n)、[src/format](crates/auction-web-shared/src/format) | 语言偏好、时间与金额展示 |
+| [src/i18n](crates/auction-web-shared/src/i18n)、[src/format](crates/auction-web-shared/src/format) | 语言偏好、时间、金额与 ppm 百分比展示 |
 | [src/a11y](crates/auction-web-shared/src/a11y)、[src/bootstrap](crates/auction-web-shared/src/bootstrap) | 焦点、背景滚动与首屏门禁 |
-| [src/clock](crates/auction-web-shared/src/clock)、[src/media](crates/auction-web-shared/src/media) | 共享时钟、媒体查询与可见视口 |
+| [src/clock](crates/auction-web-shared/src/clock)、[src/media](crates/auction-web-shared/src/media) | 共享时钟与可见视口 |
+| [src/visibility](crates/auction-web-shared/src/visibility) | 页面可见性感知等待与分片睡眠，供 Public 外壳和 Admin 自动轮询共用 |
 | [style/base.css](crates/auction-web-shared/style/base.css)、[style/mobile.css](crates/auction-web-shared/style/mobile.css) | 共享设计变量／组件与独立移动规则 |
 
 ## 设计变量与组件
@@ -73,7 +74,10 @@ busy 结束后若焦点仍在面板，Tab 与 Shift+Tab 分别进入首项和末
 供软键盘出现或缩放时的弹窗布局使用；卸载恢复原样式并移除监听，缺少 API 时使用 vh/dvh 回退。
 尺寸与偏移按数值比较，仅变化项才格式化并写入 CSS；重复 scroll/resize 通知不再分配四份字符串或读取四次 CSS 属性。
 原值恢复使用固定四项数组，监听失败与卸载均保持原有清理边界。该优化没有运行时吞吐或移动浏览器测量结论。
-`use_media_query` 在查询变化时先移除旧监听；浏览器查询不可用时返回 `false`，不会残留旧查询状态。
+断点结构切换只由 CSS `@media` 承担；无人消费的 `matchMedia` hook 已移除，`web-sys` 不再启用 MediaQueryList 相关 feature。
+`PageVisibility` 由持有者安装一次 `visibilitychange` 监听，恢复可见时先执行调用方回调再唤醒等待者；每个等待 future
+只登记一个 Waker 槽位，取消立即注销。`sleep_while_visible` 按 1 秒分片计时，隐藏时挂起剩余时长且最后一片后再复核可见性；
+非浏览器目标的安装与清理均为无操作，供静态检查编译。
 
 ## 传输与错误
 

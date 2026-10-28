@@ -43,7 +43,7 @@ pub(in crate::database::competition) async fn insert_audit_for_bid(
         "bid_id": bid.id.as_uuid(),
         "command_id": bid.command_id.as_uuid(),
         "amount": bid.amount.value(),
-        "mechanism": bid_mechanism(bid.mechanism),
+        "mechanism": bid.mechanism.as_str(),
         "state_version": bid.state_version,
     });
     let transaction = transaction.transaction_mut()?;
@@ -74,7 +74,7 @@ pub(in crate::database::competition) async fn insert_audit_for_proxy_changes(
         let metadata = json!({
             "command_id": command_id.as_uuid(),
             "authorization_id": transition.authorization_id.as_uuid(),
-            "transition_kind": proxy_transition_kind(transition.kind),
+            "transition_kind": transition.kind.as_str(),
             "state_version": transition.state_version,
         });
         let transaction = transaction.transaction_mut()?;

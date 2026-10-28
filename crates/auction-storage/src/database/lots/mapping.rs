@@ -4,6 +4,7 @@
 
 use super::*;
 pub(super) use crate::database::storage_error;
+pub(super) use auction_domain::valid_text as public_text;
 
 // 数据库列名映射在此集中收口；参数分别对应公开契约字段，拆成临时结构会让行映射跨越适配器边界。
 #[allow(clippy::too_many_arguments)]
@@ -287,13 +288,6 @@ fn parse_stored_equipment<'de>(
         return Err(storage_error("公开装备属性字段无效"));
     }
     Ok(stored)
-}
-
-pub(super) fn public_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 fn public_equipment_roll(base: f64, range: EquipmentQualityRange) -> f64 {

@@ -5,10 +5,7 @@ use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 pub(super) fn sql_error(error: sqlx::Error) -> CompetitionTransactionError {
-    if error
-        .as_database_error()
-        .is_some_and(|error| matches!(error.code().as_deref(), Some("40001" | "40P01")))
-    {
+    if crate::database::is_serialization_conflict(&error) {
         CompetitionTransactionError::SerializationConflict
     } else {
         CompetitionTransactionError::Failed("装备标记持久化失败".to_owned())

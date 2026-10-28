@@ -136,31 +136,6 @@ impl MoogleMailCredentialSet {
         )
     }
 
-    /// 从带 scope 的数据库单凭据建立由当前 Worker 独占的集合。
-    pub fn from_owned_runtime_cookies_with_scopes(
-        cookies: Vec<(Uuid, Option<MoogleMailWorld>, MoogleMailCookie)>,
-        invalidator: Arc<dyn AdminCredentialRuntimeWriter>,
-        ownership: Arc<dyn AdminCredentialRuntimeOwnership>,
-    ) -> Result<Self, MoogleMailError> {
-        Self::from_candidates(
-            cookies
-                .into_iter()
-                .map(|(persistent_id, world, cookie)| MoogleMailCredentialCandidate {
-                    key: Uuid::new_v4(),
-                    persistent_id: Some(persistent_id),
-                    state_version: None,
-                    player_name: None,
-                    world,
-                    cookie,
-                    operation_lock: Arc::new(AsyncMutex::new(())),
-                })
-                .collect(),
-            Some(invalidator),
-            Some(ownership),
-            false,
-        )
-    }
-
     /// 从当前凭据版本及预期名称建立集合；不据此创建任何远端身份证明。
     pub fn from_runtime_credentials(
         credentials: Vec<MoogleMailRuntimeCredential>,

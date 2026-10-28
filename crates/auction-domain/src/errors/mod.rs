@@ -28,9 +28,6 @@ pub enum DomainError {
     #[error("auction is past its effective deadline")]
     AuctionClosed,
 
-    #[error("auction cancellation is inside the cutoff window")]
-    CancellationCutoff,
-
     #[error("invalid auction cancellation metadata")]
     InvalidCancellationMetadata,
 

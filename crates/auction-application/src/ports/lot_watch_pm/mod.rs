@@ -7,10 +7,7 @@ use uuid::Uuid;
 
 /// 与 users 身份约束一致的规范论坛数字 ID，不按显示名投递。
 pub fn valid_forum_pm_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 32
-        && !value.starts_with('0')
-        && value.bytes().all(|b| b.is_ascii_digit())
+    auction_domain::valid_positive_decimal(value, 32)
 }
 
 /// 冻结内容摘要，独立于当前账号偏好。

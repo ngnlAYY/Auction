@@ -17,9 +17,7 @@ pub use account::{
     LockedFundingAccount, check_funding_cash, check_funding_evidence,
     funding_requires_authorization, lock_funded_delivery_account, lock_funding_account,
 };
-pub use deliveries::{
-    finish_funded_delivery, reserve_funded_delivery, return_funded_delivery, start_funded_delivery,
-};
+pub use deliveries::{finish_funded_delivery, reserve_funded_delivery, start_funded_delivery};
 pub use obligations::{
     fund_collected_payment, fund_internal_purchase, refund_funded_purchase, retain_funded_seller,
 };
@@ -30,8 +28,7 @@ use uuid::Uuid;
 
 /// SQL失败仅暴露安全分类；事务owner负责重试40001/40P01并保留原命令。
 fn storage(error: sqlx::Error) -> FundingError {
-    if matches!(&error, sqlx::Error::Database(database) if matches!(database.code().as_deref(),Some("40001"|"40P01")))
-    {
+    if crate::database::is_serialization_conflict(&error) {
         FundingError::SerializationConflict
     } else {
         FundingError::Storage

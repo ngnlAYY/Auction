@@ -22,8 +22,8 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 
 | owner | 拥有的事实或边界 | 实现说明 |
 | --- | --- | --- |
-| auction-domain | 金额、标识、竞价计划、代理转换、拍卖状态、结算守恒及统一装备分类/命名词典 | [README](crates/auction-domain/README.md) |
-| auction-application | 用例、事务编排、命令幂等与窄端口，论坛标色与公开装备分组的共用判定 | [README](crates/auction-application/README.md) |
+| auction-domain | 金额、标识、竞价计划、代理转换、拍卖状态、结算守恒、统一装备分类/命名词典，闭集枚举稳定名称与规范文本/十进制 ID 不变量 | [README](crates/auction-domain/README.md) |
+| auction-application | 用例、事务编排、命令幂等与窄端口，论坛标色与公开装备分组的共用判定，MoogleMail 通知模板闭集与跨层共用校验规则 | [README](crates/auction-application/README.md) |
 | auction-contracts | REST/实时 DTO、错误、分页与版本 | [README](crates/auction-contracts/README.md) |
 | auction-storage | PostgreSQL SQL、连接池、锁、账本与追加迁移；公开目录在同一快照中按应用分组判定筛选、统计及分页 | [README](crates/auction-storage/README.md) |
 | auction-cache | 可重建数据的 disabled/Redis 适配器 | [README](crates/auction-cache/README.md) |
@@ -32,7 +32,7 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 | auction-http | 两个 surface 的路由、安全边界、TCP/Unix 绑定、静态响应与 CDN 缓存门禁 | [README](crates/auction-http/README.md) |
 | auction-web-public | Public 页面、路由、API 消费、实时恢复与译文；装备分组在类型筛选上方，标签消费服务端结果 | [README](crates/auction-web-public/README.md) |
 | auction-web-admin | 管理页面、命令交互、API 消费、论坛只读状态刷新与正文诊断、装备词典 DTO 的候选筛选与原生复选框交互（`config/form/equipment_colors/`）、入站诊断代码的展示说明与译文 | [README](crates/auction-web-admin/README.md) |
-| auction-web-shared | 无业务偏向的组件、传输、格式化、语言与设计变量 | [README](crates/auction-web-shared/README.md) |
+| auction-web-shared | 无业务偏向的组件、传输、格式化、页面可见性等待、语言与设计变量 | [README](crates/auction-web-shared/README.md) |
 | auction-config | TOML、默认值、校验、cron 与 runtime 文件适配 | [README](crates/auction-config/README.md) |
 | auction-observability | tracing、metrics、健康与心跳安全投影 | [README](crates/auction-observability/README.md) |
 | auction-process | 终止信号、有界 drain 与任务守卫 | [README](crates/auction-process/README.md) |
@@ -56,6 +56,10 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
   `auction-storage::database::lots::postgres::selection` 拥有同一读取快照内的轻量身份扫描、组合筛选计数及当前页 ID 选择，
   不复制匹配规则到 SQL。HTTP 严格映射可选查询、保持响应字段不变；Web 的 `surface/catalog/filters.rs` 独占分组/等级表单，
   `board/data.rs` 绑定查询快照身份，`api/model.rs` 仅解析浏览器查询及校验返回归属；无新持久化能力或迁移阶段。
+- 跨层共用规则：闭集枚举持久化名称（`auction-domain::stable_name`）、规范单行文本与正十进制外部 ID（`auction-domain::text`）、
+  MoogleMail 通知模板闭集及占位符（`auction-application` 的 `runtime_config/mail_templates.rs`）、PostgreSQL 可重试冲突谓词
+  （`auction-storage::database::is_serialization_conflict`）与页面可见性等待（`auction-web-shared::visibility`）各只有一份实现；
+  HTTP wire 映射与浏览器严格解码仍由各自 owner 显式维护，不直接复用持久化名称。
 - 草稿软截止：`auction-application::draft_soft_close` 拥有修正规则与窄端口，
   `auction-storage::database::draft_soft_close` 独占一致快照检查、Serializable/CAS、原命令账本及追加审计，
   `auctionctl` 只装配命令，不在迁移中批量更正旧场次。

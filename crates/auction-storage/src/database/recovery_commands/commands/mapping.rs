@@ -49,8 +49,7 @@ pub(super) fn map_insert_error(error: sqlx::Error) -> RecoveryCommandError {
 
 #[cfg(feature = "postgres")]
 pub(super) fn map_sql_error(error: sqlx::Error) -> RecoveryCommandError {
-    if matches!(&error, sqlx::Error::Database(database) if matches!(database.code().as_deref(), Some("40001" | "40P01")))
-    {
+    if crate::database::is_serialization_conflict(&error) {
         RecoveryCommandError::SerializationConflict
     } else {
         RecoveryCommandError::Failed("PostgreSQL recovery 确认事务失败".to_owned())

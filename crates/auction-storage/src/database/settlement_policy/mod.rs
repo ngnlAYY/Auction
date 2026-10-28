@@ -16,12 +16,7 @@ struct StoredSettlementPolicy {
 
 /// 冻结快照、履约和收款证明共用的模式闭集，不把未知标签降级为历史算法。
 pub(super) fn decode_mode(mode: &str) -> Result<SettlementMode, &'static str> {
-    match mode {
-        "legacy_zero_v0" => Ok(SettlementMode::LegacyZeroV0),
-        "hold_curve_v1" => Ok(SettlementMode::HoldCurveV1),
-        "hold_curve_v2" => Ok(SettlementMode::HoldCurveV2),
-        _ => Err("结算策略模式未知"),
-    }
+    SettlementMode::from_name(mode).ok_or("结算策略模式未知")
 }
 
 pub(super) fn decode(snapshot: &Value) -> Result<SettlementPolicy, &'static str> {

@@ -1,6 +1,7 @@
 //! Admin 装备录入的共享字段边界和错误分类。
 
 use super::*;
+pub(crate) use auction_domain::valid_text;
 
 /// Admin 手工装备录入策略。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -51,13 +52,6 @@ pub fn aggregate_id(world_id: &str) -> Uuid {
 
 pub(crate) fn decimal_identity(value: &str) -> bool {
     !value.is_empty() && value.len() <= 64 && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-pub(crate) fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 pub(crate) fn valid_optional_text(value: &str, maximum: usize) -> bool {

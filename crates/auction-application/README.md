@@ -79,6 +79,7 @@ Admin 创建与改期统一要求 `preview < open < end`；两小时只是邮箱
 必须拒绝，创建时间也取锁后时刻。已接受命令在这组锁与时间门禁之前重放，不受当前世界状态或新模板影响。
 竞价资格最多涉及出价人和当前代理两个用户，使用栈内有序去重集合维持原 UUID 加锁顺序；
 资格冻结至多生成一个前置计划，仍先冻结再应用竞价，不改变锁后计时及事务原子性。
+`CompetitionTransaction::apply_plan` 与 `apply_slow_proxy_plan` 只读借用计划，用例返回同一份计划，不再为响应逐笔复制。
 
 新拍卖的 recovery 快照显式冻结 `cod_return_limit`，创建、自动 bootstrap 和后继共用同一模板序列化；
 旧快照缺字段时仍按三次处理，不回写已有场次或已接受结果。普通出价的事实 ID 数量与领域规划共同使用有效
@@ -100,6 +101,19 @@ Serializable 锁内重放/CAS，同值新命令仍推进 fence；超价通知身
 生成 PM 冻结内容/缺收件人事实；[ports/lot_watch_pm](crates/auction-application/src/ports/lot_watch_pm) 定义持久任务端口；
 [ports/forum/pm.rs](crates/auction-application/src/ports/forum/pm.rs) 定义只读 prepare、一次性 prepared.send 与原 sender
 Sent 对账，不能重寄未知写入。
+
+## 跨层共用规则
+
+以下规则只在本 crate 声明一份，配置、存储与外部适配器调用同一实现，不再各自维护副本：
+
+- [runtime_config/mail_templates.rs](crates/auction-application/src/ports/admin/runtime_config/mail_templates.rs) 拥有 14 个
+  MoogleMail 通知模板的字段闭集、默认英文正文与占位符规则；Admin runtime 文档、Worker TOML 与 Worker 启动快照共用
+  `AdminRuntimeMailTemplatesConfig::validate`，错误消息稳定且不回显正文。
+- [core/encoding.rs](crates/auction-application/src/ports/core/encoding.rs) 的 `lower_hex` 统一摘要、指纹与人工确认短语的
+  固定两位小写十六进制编码，一次分配、逐字节结果不变。
+- `valid_notification_body`（冻结通知摘要）、`valid_allowlist_host`/`valid_allowlist_path_prefix`（装备来源 allowlist）与
+  `valid_listener_group`（Unix 监听属组）分别供入队/存储重放/发送前校验及部署配置复用。
+- 闭集枚举名称与规范文本不变量归 [auction-domain](crates/auction-domain/README.md)，本 crate 只调用不复制。
 
 ## 结算与恢复端口
 

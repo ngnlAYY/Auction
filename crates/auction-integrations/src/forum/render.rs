@@ -14,9 +14,9 @@ use auction_application::{
     ForumCurrentBidSource, ForumLotSnapshot, ForumRenderError, ForumRenderedPost,
     ForumRenderedThread, ForumRenderer, ForumSystemLogEntry, MAX_FORUM_CATALOG_LOTS,
     MAX_FORUM_RECONCILIATION_TITLES, PEERLESS_COLORS, PublicEquipmentGameLink,
-    equipment_color_decision, forum_catalog_page_marker, forum_world_name,
+    equipment_color_decision, forum_catalog_page_marker,
 };
-use auction_domain::{AuctionId, AuctionStatus, SettlementWorld};
+use auction_domain::{AuctionId, AuctionStatus, SettlementWorld, valid_text};
 use sha2::{Digest, Sha256};
 use url::Url;
 
@@ -27,14 +27,7 @@ const MAX_BODY_BYTES: usize = 65_531;
 const FORUM_SEPARATOR: &str =
     "=========================================================================================";
 
-/// 将同一数据库快照稳定渲染为经典论坛拍卖主题。
-pub fn render_auction_thread(
-    snapshot: ForumAuctionSnapshot,
-    equipment_links: Vec<PublicEquipmentGameLink>,
-) -> Result<ForumRenderedThread, ForumRenderError> {
-    render_auction_thread_with_colors(snapshot, equipment_links, &[])
-}
-
+/// 将同一数据库快照按已冻结标色规则稳定渲染为经典论坛拍卖主题。
 fn render_auction_thread_with_colors(
     snapshot: ForumAuctionSnapshot,
     equipment_links: Vec<PublicEquipmentGameLink>,
@@ -113,7 +106,7 @@ fn render_auction_thread_with_colors(
     reconciliation_titles.push(format!(
         "[Auction] HV#{} {} {:02x}{:02x}{:02x}{:02x}",
         snapshot.sequence,
-        forum_world_name(snapshot.world),
+        snapshot.world.as_str(),
         digest[0],
         digest[1],
         digest[2],
@@ -163,7 +156,7 @@ fn render_auction_thread_with_colors(
     // 论坛回读会删除开列表前、外层闭列表后的换行；直接生成其稳定形状，避免放宽正文比较。
     body.push_str(FORUM_SEPARATOR);
     body.push_str("[list]\n[*][b]World:[/b] ");
-    body.push_str(forum_world_name(snapshot.world));
+    body.push_str(snapshot.world.as_str());
     body.push('\n');
     writeln!(
         &mut body,
@@ -485,11 +478,7 @@ fn write_catalog_navigation(body: &mut String, page_count: usize) -> Result<(), 
 }
 
 fn valid_forum_post_id(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    !bytes.is_empty()
-        && bytes.len() <= 32
-        && bytes[0] != b'0'
-        && bytes.iter().all(u8::is_ascii_digit)
+    auction_domain::valid_positive_decimal(value, 32)
 }
 
 fn valid_lot(lot: &ForumLotSnapshot) -> bool {
@@ -537,13 +526,6 @@ fn valid_primary_attribute_initials(value: &str) -> bool {
 
 fn valid_optional_text(value: &str, maximum: usize) -> bool {
     value.is_empty() || valid_text(value, maximum)
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 fn valid_public_url(value: &str) -> bool {

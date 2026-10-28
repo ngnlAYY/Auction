@@ -37,8 +37,7 @@ impl LegacyBotSellerCommand {
 
     /// 精确确认仅授权该义务、UID、版本及预览，不代替同会话证据。
     pub fn confirmation(&self) -> String {
-        let digest: String =
-            self.expected_digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        let digest = crate::ports::lower_hex(&self.expected_digest);
         format!(
             "CLAIM LEGACY BOT SELLER {} {} {} {}",
             self.obligation_id, self.expected_uid, self.expected_state_version, digest

@@ -37,72 +37,19 @@ pub(super) fn parse_settlement_policy(
 pub(super) fn settlement_world(
     value: String,
 ) -> Result<SettlementWorld, SettlementTransactionError> {
-    match value.as_str() {
-        "main" => Ok(SettlementWorld::Main),
-        "isekai" => Ok(SettlementWorld::Isekai),
-        _ => Err(invalid("世界标识不支持结算")),
-    }
-}
-
-pub(super) fn settlement_world_name(world: SettlementWorld) -> &'static str {
-    match world {
-        SettlementWorld::Main => "main",
-        SettlementWorld::Isekai => "isekai",
-    }
-}
-
-pub(super) fn settlement_mode(mode: SettlementMode) -> &'static str {
-    match mode {
-        SettlementMode::LegacyZeroV0 => "legacy_zero_v0",
-        SettlementMode::HoldCurveV1 => "hold_curve_v1",
-        SettlementMode::HoldCurveV2 => "hold_curve_v2",
-    }
+    SettlementWorld::from_name(&value).ok_or_else(|| invalid("世界标识不支持结算"))
 }
 
 pub(super) fn parse_settlement_mode(
     value: String,
 ) -> Result<SettlementMode, SettlementTransactionError> {
-    match value.as_str() {
-        "legacy_zero_v0" => Ok(SettlementMode::LegacyZeroV0),
-        "hold_curve_v1" => Ok(SettlementMode::HoldCurveV1),
-        "hold_curve_v2" => Ok(SettlementMode::HoldCurveV2),
-        _ => Err(invalid("结算摘要策略模式未知")),
-    }
-}
-
-pub(super) fn obligation_kind(kind: SettlementObligationKind) -> &'static str {
-    match kind {
-        SettlementObligationKind::WinnerEquipmentCod => "winner_equipment_cod",
-        SettlementObligationKind::WinnerPaymentCarrierCod => "winner_payment_carrier_cod",
-        SettlementObligationKind::WinnerEquipmentHandoff => "winner_equipment_handoff",
-        SettlementObligationKind::SellerPayout => "seller_payout",
-        SettlementObligationKind::BuyerRefund => "buyer_refund",
-        SettlementObligationKind::UnsoldReturn => "unsold_return",
-        SettlementObligationKind::WithdrawnReturn => "withdrawn_return",
-    }
+    SettlementMode::from_name(&value).ok_or_else(|| invalid("结算摘要策略模式未知"))
 }
 
 pub(super) fn parse_obligation_kind(
     value: String,
 ) -> Result<SettlementObligationKind, SettlementTransactionError> {
-    match value.as_str() {
-        "winner_equipment_cod" => Ok(SettlementObligationKind::WinnerEquipmentCod),
-        "winner_payment_carrier_cod" => Ok(SettlementObligationKind::WinnerPaymentCarrierCod),
-        "winner_equipment_handoff" => Ok(SettlementObligationKind::WinnerEquipmentHandoff),
-        "seller_payout" => Ok(SettlementObligationKind::SellerPayout),
-        "buyer_refund" => Ok(SettlementObligationKind::BuyerRefund),
-        "unsold_return" => Ok(SettlementObligationKind::UnsoldReturn),
-        "withdrawn_return" => Ok(SettlementObligationKind::WithdrawnReturn),
-        _ => Err(invalid("结算义务种类未知")),
-    }
-}
-
-pub(super) fn obligation_state(state: SettlementObligationState) -> &'static str {
-    match state {
-        SettlementObligationState::Ready => "ready",
-        SettlementObligationState::Blocked => "blocked",
-        SettlementObligationState::Contingent => "contingent",
-    }
+    SettlementObligationKind::from_name(&value).ok_or_else(|| invalid("结算义务种类未知"))
 }
 
 pub(super) fn json_u32(

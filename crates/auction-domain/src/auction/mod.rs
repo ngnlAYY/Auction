@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{AuctionId, AuctionRules, DomainError};
+use crate::{AuctionId, DomainError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuctionStatus {
@@ -75,82 +75,6 @@ impl Auction {
         })
     }
 
-    /// 为拍卖建立不可变的名义结束时间和当前有效结束时间。
-    pub fn schedule_end(
-        &mut self,
-        scheduled_end_at: DateTime<Utc>,
-        now: DateTime<Utc>,
-    ) -> Result<(), DomainError> {
-        if !matches!(self.status, AuctionStatus::Draft | AuctionStatus::Preview) {
-            return Err(DomainError::InvalidSchedule("当前状态不允许设置结束时间"));
-        }
-        if scheduled_end_at <= now {
-            return Err(DomainError::InvalidSchedule("结束时间必须晚于当前时间"));
-        }
-        if self.scheduled_end_at.is_some() {
-            return Err(DomainError::InvalidSchedule("名义结束时间只能设置一次"));
-        }
-
-        self.bump_version()?;
-        self.scheduled_end_at = Some(scheduled_end_at);
-        self.effective_end_at = Some(scheduled_end_at);
-        self.updated_at = now;
-        Ok(())
-    }
-
-    /// 记录领域层已经计算出的软截止延长结果。
-    pub fn apply_effective_end(
-        &mut self,
-        effective_end_at: DateTime<Utc>,
-        now: DateTime<Utc>,
-    ) -> Result<(), DomainError> {
-        if !matches!(self.status, AuctionStatus::Live | AuctionStatus::Final) {
-            return Err(DomainError::InvalidSchedule("当前状态不允许延长结束时间"));
-        }
-        let current_end =
-            self.effective_end_at.ok_or(DomainError::InvalidSchedule("拍卖尚未设置结束时间"))?;
-        if effective_end_at <= current_end {
-            return Err(DomainError::InvalidSchedule("有效结束时间只能向后延长"));
-        }
-
-        self.bump_version()?;
-        self.effective_end_at = Some(effective_end_at);
-        self.updated_at = now;
-        Ok(())
-    }
-
-    /// 按规则检查取消截止点，不在聚合外复制边界判断。
-    pub fn cancel_with_rules(
-        &mut self,
-        now: DateTime<Utc>,
-        rules: AuctionRules,
-    ) -> Result<(), DomainError> {
-        let scheduled_end_at = self
-            .scheduled_end_at
-            .ok_or(DomainError::InvalidSchedule("拍卖尚未设置名义结束时间"))?;
-        if !rules.can_cancel(scheduled_end_at, now)? {
-            return Err(DomainError::CancellationCutoff);
-        }
-
-        self.cancel(now)
-    }
-
-    /// 按规则取消并记录管理端要求的原因与操作者；原因属于审计事实，不能在存储层静默补造。
-    pub fn cancel_with_rules_and_metadata(
-        &mut self,
-        now: DateTime<Utc>,
-        rules: AuctionRules,
-        reason: impl Into<String>,
-        actor: impl Into<String>,
-    ) -> Result<(), DomainError> {
-        let (reason, actor) = Self::validate_cancellation_metadata(reason, actor)?;
-        self.cancel_with_rules(now, rules)?;
-        self.cancelled_at = Some(now);
-        self.cancelled_reason = Some(reason);
-        self.cancelled_by = Some(actor);
-        Ok(())
-    }
-
     pub fn preview(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
         self.transition(AuctionStatus::Preview, now)
     }
@@ -160,8 +84,7 @@ impl Auction {
     }
 
     /// 原子冻结结束时间并从预览进入开拍状态，只推进一次聚合版本。
-    /// 旧系统把 lot 激活、结束时间冻结和拍卖开拍视为一个事务事实；该方法避免先调用
-    /// `schedule_end` 再迁移状态而产生两个无法对应单条命令的版本。
+    /// 旧系统把 lot 激活、结束时间冻结和拍卖开拍视为一个事务事实，不能拆成两个版本。
     pub fn open(
         &mut self,
         scheduled_end_at: DateTime<Utc>,

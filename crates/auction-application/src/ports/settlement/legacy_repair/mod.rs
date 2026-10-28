@@ -49,10 +49,7 @@ pub struct LegacySelfReconciliationTarget {
 impl LegacySelfReconciliationTarget {
     /// 供装配根选择原世界网关，不引入领域 crate 的额外依赖。
     pub const fn world_name(&self) -> &'static str {
-        match self.world {
-            SettlementWorld::Main => "main",
-            SettlementWorld::Isekai => "isekai",
-        }
+        self.world.as_str()
     }
 }
 
@@ -103,8 +100,7 @@ impl LegacySelfReconciliationCommand {
 
     /// 精确人工确认同时绑定义务、UID、原版本和原快照摘要。
     pub fn confirmation(&self) -> String {
-        let digest: String =
-            self.target.snapshot_digest.iter().map(|b| format!("{b:02x}")).collect();
+        let digest = crate::ports::lower_hex(&self.target.snapshot_digest);
         format!(
             "REPAIR LEGACY SELF SEND {} {} {} {}",
             self.target.obligation_id,

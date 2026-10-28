@@ -38,7 +38,8 @@ pub(crate) async fn execute(
             Err(error) => return Err(error.into_delivery_error()),
         }
     }
-    unreachable!("Delivery Admin SERIALIZABLE 重试次数已由上界保证");
+    // 循环的最后一次尝试总会返回；这里只为未来改动留下失败关闭的出口，不以 panic 终止请求。
+    Err(DeliveryAdminError::Unavailable)
 }
 
 async fn execute_transaction(

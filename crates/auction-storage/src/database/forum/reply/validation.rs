@@ -4,6 +4,7 @@ pub(super) use crate::database::storage_error;
 use auction_application::{ApplicationError, ForumBidCommandRecord};
 #[cfg(feature = "postgres")]
 use auction_domain::SettlementWorld;
+pub(super) use auction_domain::valid_text;
 
 pub(super) const MAX_REPLY_BATCH_SIZE: u16 = 100;
 pub(super) const MAX_PLAYER_NAME_BYTES: usize = 256;
@@ -31,24 +32,11 @@ pub(super) fn valid_command_record(record: &ForumBidCommandRecord) -> bool {
         && record.amount >= 0
 }
 
-pub(super) fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
-}
-
 pub(super) fn valid_optional_text(value: &str, maximum: usize) -> bool {
     value.is_empty() || valid_text(value, maximum)
 }
 
-pub(super) fn valid_decimal_id(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value.as_bytes()[0].is_ascii_digit()
-        && value.as_bytes()[0] != b'0'
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
+pub(super) use super::super::sync::validation::valid_decimal_id;
 
 #[cfg(feature = "postgres")]
 pub(super) fn parse_world(value: &str) -> Result<SettlementWorld, ApplicationError> {

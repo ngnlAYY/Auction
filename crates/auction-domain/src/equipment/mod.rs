@@ -4,6 +4,7 @@
 
 use std::fmt;
 
+use crate::text::valid_text;
 use serde::ser::Serializer;
 use thiserror::Error;
 
@@ -169,17 +170,11 @@ pub enum EquipmentKeyEnvelopeError {
     InvalidShape,
 }
 
-fn valid_key_id(value: &str) -> bool {
+/// 数据加密 key 标识：1 至 64 字节，字母数字开头，其后可含 `.`、`_`、`-`；装备与通用信封共用。
+pub fn valid_key_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
         && value.bytes().enumerate().all(|(index, byte)| {
             byte.is_ascii_alphanumeric() || (index > 0 && matches!(byte, b'.' | b'_' | b'-'))
         })
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

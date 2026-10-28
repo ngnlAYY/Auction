@@ -6,7 +6,7 @@ use auction_application::{
     AuctionLifecycleResult, AuctionLifecycleWriteSummary, CompetitionTransactionError,
 };
 use auction_domain::{
-    AuctionStatus, BidMechanism, ProxyMode, ProxyStatus, ProxyTerminalReason, ProxyTransitionKind,
+    AuctionStatus, ProxyMode, ProxyStatus, ProxyTerminalReason, ProxyTransitionKind,
 };
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -99,7 +99,7 @@ pub(crate) fn lifecycle_parent_audit_record(
                 "auction.cancel",
                 json!({
                     "auction_id": command.auction_id.as_uuid().to_string(),
-                    "previous_status": auction_status_name(context.auction.status),
+                    "previous_status": context.auction.status.as_str(),
                     "state_version": result.state_version,
                     "reason": reason,
                     "return_obligation_count": write_summary.return_obligation_count,
@@ -136,7 +136,7 @@ pub(crate) fn lifecycle_parent_audit_record(
                 "auction.early_settlement",
                 json!({
                     "auction_id": command.auction_id.as_uuid().to_string(),
-                    "previous_status": auction_status_name(context.auction.status),
+                    "previous_status": context.auction.status.as_str(),
                     "state_version": result.state_version,
                     "effective_end_at": effective_end_at,
                     "reason": reason,
@@ -227,7 +227,7 @@ pub(crate) fn final_proxy_audit_record(
                 "leader_id": uuid_bytes(bid.bidder_id.as_uuid()),
                 "effective_end": bid.effective_end_at,
                 "accepted_state_version": bid.state_version,
-                "mechanism": bid_mechanism(bid.mechanism),
+                "mechanism": bid.mechanism.as_str(),
             })
         })
         .collect::<Vec<_>>();
@@ -241,7 +241,7 @@ pub(crate) fn final_proxy_audit_record(
         .map_or_else(|| Value::String("0001-01-01T00:00:00Z".to_owned()), |value| json!(value));
     let mut metadata = json!({
         "authorization_id": uuid_bytes(state.id.as_uuid()),
-        "mode": proxy_mode(state.mode),
+        "mode": state.mode.as_str(),
         "status": status,
         "state_version": state.state_version,
         "final_lot": {
@@ -317,34 +317,8 @@ fn append_request_id(
     Ok(metadata)
 }
 
-const fn auction_status_name(status: AuctionStatus) -> &'static str {
-    match status {
-        AuctionStatus::Draft => "draft",
-        AuctionStatus::Preview => "preview",
-        AuctionStatus::Live => "live",
-        AuctionStatus::Final => "final",
-        AuctionStatus::Settling => "settling",
-        AuctionStatus::Settled => "settled",
-        AuctionStatus::Cancelled => "cancelled",
-    }
-}
-
 fn uuid_bytes(id: Uuid) -> [u8; 16] {
     *id.as_bytes()
-}
-
-const fn bid_mechanism(mechanism: BidMechanism) -> &'static str {
-    match mechanism {
-        BidMechanism::Ordinary => "ordinary",
-        BidMechanism::Proxy => "proxy",
-    }
-}
-
-const fn proxy_mode(mode: ProxyMode) -> &'static str {
-    match mode {
-        ProxyMode::Fast => "fast",
-        ProxyMode::Slow => "slow",
-    }
 }
 
 fn invalid_audit(message: &'static str) -> CompetitionTransactionError {

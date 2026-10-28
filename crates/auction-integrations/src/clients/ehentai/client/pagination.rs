@@ -164,13 +164,7 @@ fn canonical_page_offset(value: &str) -> Option<u64> {
     if value == "0" {
         return Some(0);
     }
-    (!value.is_empty()
-        && value.len() <= 20
-        && value.as_bytes()[0].is_ascii_digit()
-        && value.as_bytes()[0] != b'0'
-        && value.bytes().all(|byte| byte.is_ascii_digit()))
-    .then(|| value.parse().ok())
-    .flatten()
+    auction_domain::valid_positive_decimal(value, 20).then(|| value.parse().ok()).flatten()
 }
 
 fn validate_target_offset(

@@ -41,8 +41,9 @@ pub(crate) async fn create_postgres(
     .execute(&mut *transaction)
     .await
     .map_err(map_admin_write_error)?;
-    insert_envelope_postgres(&mut transaction, write.user_id, &write.key.envelope, write.now)
-        .await?;
+    upsert_login_key_envelope(&mut transaction, write.user_id, &write.key.envelope, write.now)
+        .await
+        .map_err(map_storage_error)?;
     let user = load_user_postgres_tx(&mut transaction, write.user_id).await?;
     let result = AdminUserCommandResult { user, response_envelope: write.key.response_envelope };
     insert_command_postgres(

@@ -2,7 +2,7 @@
 
 use std::sync::LazyLock;
 
-use super::{sql_error, validation::world};
+use super::sql_error;
 use auction_application::{FundingError, SettlementFulfillmentClaim};
 use futures_util::TryStreamExt;
 use serde::Deserialize;
@@ -94,7 +94,7 @@ async fn exclude_conflicts(
            JOIN public.equipment e ON e.id=o.equipment_id
            WHERE e.external_equipment_id=$1 AND e.world_id=$2
              AND a.execution_state<>'satisfied')"
-    ).bind(c.external_equipment_id).bind(world(c.equipment_world)).bind(c.obligation_id.as_uuid())
+    ).bind(c.external_equipment_id).bind(c.equipment_world.as_str()).bind(c.obligation_id.as_uuid())
         .bind(c.lot_id.as_uuid()).bind(recovered_handoff).fetch_one(&mut **tx).await.map_err(sql_error)?;
     if conflict {
         return Err(FundingError::Unproven);
@@ -241,7 +241,7 @@ async fn exclude_conflicts(
     // 替换值仅来自已审查的编译期 SQL 常量，不插入业务文本。
     let outgoing: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(OUTGOING_QUERY.as_str()))
         .bind(c.external_equipment_id)
-        .bind(world(c.equipment_world))
+        .bind(c.equipment_world.as_str())
         .bind(recovered_handoff)
         .bind(&unrelated_attachments)
         .fetch_one(&mut **tx)
@@ -342,7 +342,7 @@ fn unrelated_attachment_payload(
     };
     // attachment_ids是外部EID，不是equipment UUID；按十进制值比较，兼容既有数字字符串。
     valid_operation
-        && (payload.world != world(claim.equipment_world)
+        && (payload.world != claim.equipment_world.as_str()
             || !payload.attachment_ids.iter().any(|eid| {
                 eid.trim_start_matches('0') == claim.external_equipment_id.trim_start_matches('0')
             }))
@@ -408,12 +408,7 @@ fn valid_notification(payload: &AttachmentPayload, origin: &str) -> bool {
         return payload.template.as_deref() == Some(expected.0)
             && code == Some(expected.1)
             && no_key
-            && payload.body.as_deref().is_some_and(|body| {
-                !body.is_empty()
-                    && body.len() <= (16 << 10)
-                    && body == body.trim()
-                    && !body.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
-            });
+            && auction_application::valid_notification_body(payload.body.as_deref());
     }
     if payload.body.is_some() {
         return false;

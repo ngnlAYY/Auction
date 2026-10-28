@@ -5,7 +5,7 @@ mod parser;
 mod render;
 
 pub use auction_application::ForumRenderError;
-pub use render::{ForumThreadRenderer, render_auction_thread};
+pub use render::ForumThreadRenderer;
 
 use auction_application::{
     AdminForumPreviewCommand, AdminForumPreviewError, AdminForumPreviewPort,
@@ -21,18 +21,6 @@ impl ForumPreviewAdapter {
     /// 建立不持有网络或数据库状态的解析器。
     pub const fn new() -> Self {
         Self
-    }
-
-    /// 解析已读取的论坛主题 HTML，并复用 Admin 预览的契约校验。
-    /// 外部网关只负责受限读取和认证；帖子语义仍由本适配器统一解释，避免远程读取路径
-    /// 与本地预览路径产生两套命令语法或安全边界。
-    pub fn parse_html_document(
-        &self,
-        input: &str,
-    ) -> Result<AdminForumPreviewResult, AdminForumPreviewError> {
-        let result = parse_html(input).map_err(|_| AdminForumPreviewError::ParseFailed)?;
-        result.validate()?;
-        Ok(result)
     }
 
     /// 按论坛页码顺序合并一个主题的全部 HTML 页面，再统一解析目录和出价命令。

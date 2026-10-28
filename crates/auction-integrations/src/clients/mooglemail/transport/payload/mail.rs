@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 
 use super::super::*;
+use auction_application::valid_notification_body;
 
 pub(crate) fn decode_payload(
     claim: &DeliveryWorkClaim,

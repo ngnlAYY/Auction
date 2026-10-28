@@ -142,6 +142,15 @@ prometheus-client 需要另审 OpenMetrics 与进程指标兼容，Leptos CSR �
 驱动/Redis 用窄 feature，发布图和静态 all-features 图分别审阅。默认[静态验证](docs/guide/development.md)不执行行为
 测试，运行证据见[状态页](docs/status.md)。
 
+### 2026-10-27 冗余与死代码复审中的依赖核对
+
+`cargo machete` 仍未发现未使用直接依赖，本轮没有删除或新增直接依赖，也未改变版本与锁图。随无人调用的 `use_media_query`
+删除，`auction-web-shared` 不再启用 `web-sys` 的 `MediaQueryList`/`MediaQueryListEvent` feature；断点切换继续只由 CSS 承担。
+`auction-integrations` 删除无人调用的 `build_http_client`，rustls/ring provider 安装仍由实际发起请求的适配器负责，
+TLS 与 reqwest feature 不变。锁图中 Base64/SHA-2（SQLx）、Tungstenite 0.28（Dioxus devtools）、darling 0.20（croner 的
+derive_builder）等重复版本仍来自上游约束，沿用上文不强制合并的决定；`async-stream` 理由同下节，保留。
+本轮未刷新 cargo-audit 公告库，不新增公告结论。
+
 ### 2026-10-26 性能复审中的依赖核对
 
 `cargo machete` 仍未发现未使用直接依赖；逐项核对低频直接依赖后只收窄一处 feature：`tracing-subscriber` 关闭默认

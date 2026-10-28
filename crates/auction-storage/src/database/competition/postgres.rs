@@ -14,9 +14,9 @@ use auction_application::{
     TransactionIsolation, TransactionPolicy, TransactionRunner, WorldSnapshot,
 };
 use auction_domain::{
-    AcceptedBid, Auction, AuctionId, AuctionRules, AuctionStatus, BidAmount, BidMechanism,
-    CompetitionPlan, LotBidState, LotId, ProxyAuthorization, ProxyAuthorizationId, ProxyMode,
-    ProxyStatus, ProxyTerminalReason, UserId, deterministic_uuid,
+    AcceptedBid, Auction, AuctionId, AuctionRules, AuctionStatus, BidAmount, CompetitionPlan,
+    LotBidState, LotId, ProxyAuthorization, ProxyAuthorizationId, ProxyMode, ProxyStatus,
+    ProxyTerminalReason, UserId, deterministic_uuid,
 };
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use serde_json::{Value, json};
@@ -185,7 +185,7 @@ impl CompetitionTransaction for PostgresCompetitionTransaction {
 
     fn apply_plan(
         &mut self,
-        plan: CompetitionPlan,
+        plan: &CompetitionPlan,
         audit: Option<CompetitionCommandAuditContext>,
         occurred_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
@@ -194,7 +194,7 @@ impl CompetitionTransaction for PostgresCompetitionTransaction {
 
     fn apply_slow_proxy_plan(
         &mut self,
-        plan: CompetitionPlan,
+        plan: &CompetitionPlan,
         context: SlowProxyExecutionContext,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
         async move { self.apply_slow_proxy_plan_inner(plan, context).await }

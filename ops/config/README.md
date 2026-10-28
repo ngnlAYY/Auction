@@ -198,7 +198,8 @@ Admin「参数配置 → 邮件调度、发送与处理 → 按业务分类的�
 ### 邮件正文模板
 
 `mail_templates` 保持既有 14 个配置键，默认正文使用分段英文，字段与完整正文见
-[runtime 示例](ops/config/examples/runtime/admin.toml)。已有文件中显式填写的模板继续使用原文；升级不会自动覆盖自定义内容。
+[runtime 示例](ops/config/examples/runtime/admin.toml)。Worker `[worker.mooglemail.mail_templates]` 与 runtime `[mail_templates]`
+共用同一字段闭集、默认正文与占位符校验（唯一 owner 为[应用层](crates/auction-application/README.md#跨层共用规则)）。已有文件中显式填写的模板继续使用原文；升级不会自动覆盖自定义内容。
 采用新正文时须在管理页保存模板并重启 Worker，使新的邮件渲染使用更新后的启动快照；同时重启管理端可同步其加载快照。
 发送正文上限按变量展开后的最终 UTF-8 字节数计算，最多 64 KiB，重复占位符同样计入；
 渲染器在追加前拒绝超限，不截断正文，也不改变已冻结投递。

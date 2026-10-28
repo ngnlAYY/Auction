@@ -29,14 +29,14 @@ pub(super) async fn before_credentials(
         sqlx::query(query)
             .bind(claim.auction_id.as_uuid())
             .bind(&claim.external_equipment_id)
-            .bind(super::validation::world(claim.equipment_world))
+            .bind(claim.equipment_world.as_str())
             .execute(&mut **tx)
             .await
             .map_err(sql_error)?;
     }
     sqlx::query("SELECT id FROM public.equipment WHERE id=$1 OR (external_equipment_id=$2 AND world_id=$3) ORDER BY id FOR UPDATE")
         .bind(claim.equipment_id.as_uuid()).bind(&claim.external_equipment_id)
-        .bind(super::validation::world(claim.equipment_world)).execute(&mut **tx).await.map_err(sql_error)?;
+        .bind(claim.equipment_world.as_str()).execute(&mut **tx).await.map_err(sql_error)?;
     Ok(())
 }
 
@@ -52,10 +52,10 @@ pub(super) async fn after_credentials(
         .map_err(sql_error)?;
     sqlx::query("SELECT o.id FROM public.settlement_obligations o WHERE o.auction_id=$1 OR o.equipment_id IN (SELECT id FROM public.equipment WHERE external_equipment_id=$2 AND world_id=$3) ORDER BY o.id FOR UPDATE")
         .bind(claim.auction_id.as_uuid()).bind(&claim.external_equipment_id)
-        .bind(super::validation::world(claim.equipment_world)).execute(&mut **tx).await.map_err(sql_error)?;
+        .bind(claim.equipment_world.as_str()).execute(&mut **tx).await.map_err(sql_error)?;
     sqlx::query("SELECT a.id FROM public.settlement_recovery_actions a JOIN public.settlement_recoveries r ON r.id=a.recovery_id WHERE r.auction_id=$1 OR r.lot_id IN (SELECT o.lot_id FROM public.settlement_obligations o JOIN public.equipment e ON e.id=o.equipment_id WHERE e.external_equipment_id=$2 AND e.world_id=$3) ORDER BY a.id FOR UPDATE OF a")
         .bind(claim.auction_id.as_uuid()).bind(&claim.external_equipment_id)
-        .bind(super::validation::world(claim.equipment_world)).execute(&mut **tx).await.map_err(sql_error)?;
+        .bind(claim.equipment_world.as_str()).execute(&mut **tx).await.map_err(sql_error)?;
     // 只锁当前投递及同 EID/world 的显式资产引用/owner 关联，历史通知不占行锁。
     // 上限包含一条溢出探针；超过上限整事务拒绝，绝不截断后声称已排除冲突。
     // 未知 schema/孤儿仍由 conflicts 的完整谓词读失败关闭；Serializable 的 SIREAD
@@ -92,7 +92,7 @@ pub(super) async fn after_credentials(
     let deliveries = sqlx::query_scalar::<_, uuid::Uuid>(sqlx::AssertSqlSafe(QUERY.as_str()))
         .bind(claim.delivery_id)
         .bind(&claim.external_equipment_id)
-        .bind(super::validation::world(claim.equipment_world))
+        .bind(claim.equipment_world.as_str())
         .fetch_all(&mut **tx)
         .await
         .map_err(sql_error)?;
@@ -101,6 +101,6 @@ pub(super) async fn after_credentials(
     }
     sqlx::query("SELECT f.obligation_id FROM public.settlement_obligation_fulfillments f JOIN public.settlement_obligations o ON o.id=f.obligation_id WHERE o.auction_id=$1 OR o.equipment_id IN (SELECT id FROM public.equipment WHERE external_equipment_id=$2 AND world_id=$3) ORDER BY f.obligation_id FOR UPDATE OF f")
         .bind(claim.auction_id.as_uuid()).bind(&claim.external_equipment_id)
-        .bind(super::validation::world(claim.equipment_world)).execute(&mut **tx).await.map_err(sql_error)?;
+        .bind(claim.equipment_world.as_str()).execute(&mut **tx).await.map_err(sql_error)?;
     Ok(())
 }

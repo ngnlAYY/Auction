@@ -3,6 +3,7 @@
 use scraper::Selector;
 
 use super::EquipmentParseError;
+pub(super) use auction_domain::valid_text;
 
 pub(super) fn selector(raw: &str) -> Result<Selector, EquipmentParseError> {
     Selector::parse(raw).map_err(|_| EquipmentParseError::PageStructure)
@@ -18,11 +19,4 @@ pub(super) fn normalize_text(value: impl AsRef<str>) -> String {
         normalized.push_str(word);
     }
     normalized
-}
-
-pub(super) fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

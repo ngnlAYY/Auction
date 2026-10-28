@@ -199,7 +199,9 @@ async fn apply_mutation_postgres(
             .execute(&mut **transaction)
             .await
             .map_err(map_admin_write_error)?;
-            insert_envelope_postgres(transaction, id, &key.envelope, now).await?;
+            upsert_login_key_envelope(transaction, id, &key.envelope, now)
+                .await
+                .map_err(map_storage_error)?;
         }
         AdminUserMutationAction::Blacklist => {
             if before.status == AdminUserStatus::Blacklisted {

@@ -62,8 +62,8 @@ pub(super) fn build_processor_and_delivery(
             let login_keys: Arc<dyn MailLoginKeyReader> =
                 Arc::new(MoogleMailLoginKeyReader::new(Arc::clone(store), user_data_key));
             let notification_templates =
-                MoogleMailNotificationTemplates::from_values(mail_config.mail_templates.values())
-                    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+                MoogleMailNotificationTemplates::from_config(&mail_config.mail_templates)
+                    .map_err(anyhow::Error::msg)?;
             let delivery_transport = MoogleMailDeliveryTransport::with_templates(
                 client.clone(),
                 credentials.clone(),

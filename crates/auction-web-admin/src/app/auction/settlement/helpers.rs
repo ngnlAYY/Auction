@@ -36,26 +36,6 @@ pub(super) fn recovery_action_summary(actions: &[AdminRecoveryAction]) -> String
         .join(" · ")
 }
 
-pub(super) fn format_ppm(value: i32, show_positive_sign: bool) -> String {
-    let absolute = i64::from(value).abs();
-    let whole = absolute / 10_000;
-    let fraction = absolute % 10_000;
-    let number = if fraction == 0 {
-        whole.to_string()
-    } else {
-        let fraction = format!("{fraction:04}").trim_end_matches('0').to_owned();
-        format!("{whole}.{fraction}")
-    };
-    let sign = if value < 0 {
-        "−"
-    } else if value > 0 && show_positive_sign {
-        "+"
-    } else {
-        ""
-    };
-    format!("{sign}{number}%")
-}
-
 pub(super) fn price_adjustment_label(lot: &AdminSettlementLot) -> String {
     match lot.adjustment_ppm.cmp(&0) {
         std::cmp::Ordering::Greater => t!(

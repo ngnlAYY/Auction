@@ -22,7 +22,7 @@ pub(super) async fn claim_due_postgres(
     let available_worlds = available_worlds
         .iter()
         .copied()
-        .map(auction_application::forum_world_name)
+        .map(auction_domain::SettlementWorld::as_str)
         .collect::<Vec<_>>();
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启论坛同步领取事务失败"))?;

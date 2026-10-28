@@ -1,7 +1,7 @@
 //! Worker 各业务循环的运行时边界配置；二次校验保护装配根与运行时之间的窄接口，
 //! 拒绝无效租约、并发或轮询参数。
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use auction_application::{AdminMailPort, AuctionPolicyTemplate};
 
@@ -42,17 +42,39 @@ impl AuctionScheduleRuntimeConfig {
     }
 }
 
+/// 轮询、抖动、租约与重试类时长的统一上限。
+const MAX_INTERVAL: Duration = Duration::from_secs(86_400);
+
+/// 批量领取类循环共用的批量、并发、轮询与抖动边界。
+fn valid_claim_loop(
+    batch_limit: u16,
+    concurrency: u16,
+    poll_interval: Duration,
+    jitter: Duration,
+) -> bool {
+    (1..=1000).contains(&batch_limit)
+        && (1..=batch_limit).contains(&concurrency)
+        && !poll_interval.is_zero()
+        && poll_interval <= MAX_INTERVAL
+        && jitter <= MAX_INTERVAL
+}
+
+/// 非零且不超过统一上限的时长。
+fn bounded(value: Duration) -> bool {
+    !value.is_zero() && value <= MAX_INTERVAL
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct DeliveryWorkerRuntimeConfig {
     pub batch_limit: u16,
     pub concurrency: u16,
-    pub poll_interval: std::time::Duration,
-    pub jitter: std::time::Duration,
-    pub lease_duration: std::time::Duration,
-    pub renew_interval: std::time::Duration,
-    pub sending_grace: std::time::Duration,
-    pub request_timeout: std::time::Duration,
-    pub finalize_timeout: std::time::Duration,
+    pub poll_interval: Duration,
+    pub jitter: Duration,
+    pub lease_duration: Duration,
+    pub renew_interval: Duration,
+    pub sending_grace: Duration,
+    pub request_timeout: Duration,
+    pub finalize_timeout: Duration,
 }
 
 impl Default for DeliveryWorkerRuntimeConfig {
@@ -60,36 +82,28 @@ impl Default for DeliveryWorkerRuntimeConfig {
         Self {
             batch_limit: 100,
             concurrency: 8,
-            poll_interval: std::time::Duration::from_secs(60),
-            jitter: std::time::Duration::from_secs(5),
-            lease_duration: std::time::Duration::from_secs(60),
-            renew_interval: std::time::Duration::from_secs(10),
-            sending_grace: std::time::Duration::from_secs(120),
-            request_timeout: std::time::Duration::from_secs(30),
-            finalize_timeout: std::time::Duration::from_secs(5),
+            poll_interval: Duration::from_secs(60),
+            jitter: Duration::from_secs(5),
+            lease_duration: Duration::from_secs(60),
+            renew_interval: Duration::from_secs(10),
+            sending_grace: Duration::from_secs(120),
+            request_timeout: Duration::from_secs(30),
+            finalize_timeout: Duration::from_secs(5),
         }
     }
 }
 
 impl DeliveryWorkerRuntimeConfig {
     pub(super) fn validate(self) -> bool {
-        self.batch_limit > 0
-            && self.batch_limit <= 1000
-            && self.concurrency > 0
-            && self.concurrency <= self.batch_limit
-            && !self.poll_interval.is_zero()
-            && self.poll_interval <= std::time::Duration::from_secs(86_400)
-            && self.jitter <= std::time::Duration::from_secs(86_400)
-            && !self.lease_duration.is_zero()
-            && self.lease_duration <= std::time::Duration::from_secs(86_400)
+        valid_claim_loop(self.batch_limit, self.concurrency, self.poll_interval, self.jitter)
+            && bounded(self.lease_duration)
             && !self.renew_interval.is_zero()
             && self.renew_interval < self.lease_duration
-            && !self.request_timeout.is_zero()
-            && self.request_timeout <= std::time::Duration::from_secs(86_400)
+            && bounded(self.request_timeout)
             && self.sending_grace > self.request_timeout
-            && self.sending_grace <= std::time::Duration::from_secs(86_400)
+            && self.sending_grace <= MAX_INTERVAL
             && !self.finalize_timeout.is_zero()
-            && self.finalize_timeout <= std::time::Duration::from_secs(300)
+            && self.finalize_timeout <= Duration::from_secs(300)
     }
 }
 
@@ -98,10 +112,10 @@ impl DeliveryWorkerRuntimeConfig {
 pub struct AuctionWorkerRuntimeConfig {
     pub batch_limit: u16,
     pub concurrency: u16,
-    pub poll_interval: std::time::Duration,
-    pub jitter: std::time::Duration,
-    pub lease_duration: std::time::Duration,
-    pub item_timeout: std::time::Duration,
+    pub poll_interval: Duration,
+    pub jitter: Duration,
+    pub lease_duration: Duration,
+    pub item_timeout: Duration,
 }
 
 impl Default for AuctionWorkerRuntimeConfig {
@@ -109,23 +123,18 @@ impl Default for AuctionWorkerRuntimeConfig {
         Self {
             batch_limit: 100,
             concurrency: 8,
-            poll_interval: std::time::Duration::from_secs(60),
-            jitter: std::time::Duration::from_secs(5),
-            lease_duration: std::time::Duration::from_secs(180),
-            item_timeout: std::time::Duration::from_secs(30),
+            poll_interval: Duration::from_secs(60),
+            jitter: Duration::from_secs(5),
+            lease_duration: Duration::from_secs(180),
+            item_timeout: Duration::from_secs(30),
         }
     }
 }
 
 impl AuctionWorkerRuntimeConfig {
     pub(super) fn validate(self) -> bool {
-        self.batch_limit > 0
-            && self.batch_limit <= 1000
-            && self.concurrency > 0
-            && self.concurrency <= self.batch_limit
-            && !self.poll_interval.is_zero()
-            && self.poll_interval <= std::time::Duration::from_secs(86_400)
-            && self.jitter <= std::time::Duration::from_secs(86_400)
+        // 生命周期租约只要求非零，不套用统一上限，保持既有配置边界。
+        valid_claim_loop(self.batch_limit, self.concurrency, self.poll_interval, self.jitter)
             && !self.lease_duration.is_zero()
             && !self.item_timeout.is_zero()
             && self.item_timeout < self.lease_duration
@@ -135,114 +144,62 @@ impl AuctionWorkerRuntimeConfig {
 /// Forum 主题发布与回帖导入 owner 的独立运行边界。
 #[derive(Debug, Clone, Copy)]
 pub struct ForumWorkerRuntimeConfig {
-    pub poll_interval: std::time::Duration,
-    pub jitter: std::time::Duration,
-    pub lease_duration: std::time::Duration,
+    pub poll_interval: Duration,
+    pub jitter: Duration,
+    pub lease_duration: Duration,
 }
 
 impl Default for ForumWorkerRuntimeConfig {
     fn default() -> Self {
         Self {
-            poll_interval: std::time::Duration::from_secs(300),
-            jitter: std::time::Duration::from_secs(5),
-            lease_duration: std::time::Duration::from_secs(300),
+            poll_interval: Duration::from_secs(300),
+            jitter: Duration::from_secs(5),
+            lease_duration: Duration::from_secs(300),
         }
     }
 }
 
 impl ForumWorkerRuntimeConfig {
     pub(super) fn validate(self) -> bool {
-        !self.poll_interval.is_zero()
-            && self.poll_interval <= std::time::Duration::from_secs(86_400)
-            && self.jitter <= std::time::Duration::from_secs(86_400)
-            && !self.lease_duration.is_zero()
-            && self.lease_duration <= std::time::Duration::from_secs(86_400)
+        bounded(self.poll_interval) && self.jitter <= MAX_INTERVAL && bounded(self.lease_duration)
     }
 }
 
-/// Fulfillment loop 已经由配置层校验的独立运行边界。
+/// Fulfillment 与 Recovery loop 共用的已校验运行边界；两者字段、默认值与校验完全一致。
 #[derive(Debug, Clone, Copy)]
 pub struct FulfillmentWorkerRuntimeConfig {
     pub batch_limit: u16,
     pub concurrency: u16,
-    pub poll_interval: std::time::Duration,
-    pub jitter: std::time::Duration,
-    pub lease_duration: std::time::Duration,
-    pub item_timeout: std::time::Duration,
-    pub retry_delay: std::time::Duration,
+    pub poll_interval: Duration,
+    pub jitter: Duration,
+    pub lease_duration: Duration,
+    pub item_timeout: Duration,
+    pub retry_delay: Duration,
 }
+
+/// Recovery loop 复用 Fulfillment 的运行边界。
+pub type RecoveryWorkerRuntimeConfig = FulfillmentWorkerRuntimeConfig;
 
 impl Default for FulfillmentWorkerRuntimeConfig {
     fn default() -> Self {
         Self {
             batch_limit: 100,
             concurrency: 8,
-            poll_interval: std::time::Duration::from_secs(60),
-            jitter: std::time::Duration::from_secs(5),
-            lease_duration: std::time::Duration::from_secs(60),
-            item_timeout: std::time::Duration::from_secs(30),
-            retry_delay: std::time::Duration::from_secs(60),
+            poll_interval: Duration::from_secs(60),
+            jitter: Duration::from_secs(5),
+            lease_duration: Duration::from_secs(60),
+            item_timeout: Duration::from_secs(30),
+            retry_delay: Duration::from_secs(60),
         }
     }
 }
 
 impl FulfillmentWorkerRuntimeConfig {
     pub(super) fn validate(self) -> bool {
-        self.batch_limit > 0
-            && self.batch_limit <= 1000
-            && self.concurrency > 0
-            && self.concurrency <= self.batch_limit
-            && !self.poll_interval.is_zero()
-            && self.poll_interval <= std::time::Duration::from_secs(86_400)
-            && self.jitter <= std::time::Duration::from_secs(86_400)
-            && !self.lease_duration.is_zero()
-            && self.lease_duration <= std::time::Duration::from_secs(86_400)
+        valid_claim_loop(self.batch_limit, self.concurrency, self.poll_interval, self.jitter)
+            && bounded(self.lease_duration)
             && !self.item_timeout.is_zero()
             && self.item_timeout < self.lease_duration
-            && !self.retry_delay.is_zero()
-            && self.retry_delay <= std::time::Duration::from_secs(86_400)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct RecoveryWorkerRuntimeConfig {
-    pub batch_limit: u16,
-    pub concurrency: u16,
-    pub poll_interval: std::time::Duration,
-    pub jitter: std::time::Duration,
-    pub lease_duration: std::time::Duration,
-    pub item_timeout: std::time::Duration,
-    pub retry_delay: std::time::Duration,
-}
-
-impl Default for RecoveryWorkerRuntimeConfig {
-    fn default() -> Self {
-        Self {
-            batch_limit: 100,
-            concurrency: 8,
-            poll_interval: std::time::Duration::from_secs(60),
-            jitter: std::time::Duration::from_secs(5),
-            lease_duration: std::time::Duration::from_secs(60),
-            item_timeout: std::time::Duration::from_secs(30),
-            retry_delay: std::time::Duration::from_secs(60),
-        }
-    }
-}
-
-impl RecoveryWorkerRuntimeConfig {
-    pub(super) fn validate(self) -> bool {
-        self.batch_limit > 0
-            && self.batch_limit <= 1000
-            && self.concurrency > 0
-            && self.concurrency <= self.batch_limit
-            && !self.poll_interval.is_zero()
-            && self.poll_interval <= std::time::Duration::from_secs(86_400)
-            && self.jitter <= std::time::Duration::from_secs(86_400)
-            && !self.lease_duration.is_zero()
-            && self.lease_duration <= std::time::Duration::from_secs(86_400)
-            && !self.item_timeout.is_zero()
-            && self.item_timeout < self.lease_duration
-            && !self.retry_delay.is_zero()
-            && self.retry_delay <= std::time::Duration::from_secs(86_400)
+            && bounded(self.retry_delay)
     }
 }

@@ -17,10 +17,7 @@ use super::DatabaseStore;
 pub(crate) use proof::{TRUSTED_DELIVERY_PREDICATE, legacy_self_uid};
 
 fn sql_error(error: sqlx::Error) -> FundingError {
-    if error
-        .as_database_error()
-        .is_some_and(|e| matches!(e.code().as_deref(), Some("40001" | "40P01")))
-    {
+    if crate::database::is_serialization_conflict(&error) {
         FundingError::SerializationConflict
     } else {
         FundingError::Storage

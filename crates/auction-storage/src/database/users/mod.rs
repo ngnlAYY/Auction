@@ -13,6 +13,8 @@ use super::DatabaseStore;
 use crate::database::storage_error;
 
 mod admin;
+#[cfg(feature = "postgres")]
+mod envelope;
 mod mail;
 
 impl PublicLoginAuthenticator for DatabaseStore {

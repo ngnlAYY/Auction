@@ -12,7 +12,6 @@ use auction_application::{
     ForumRenderer, ForumReplyStore, ForumTopicReader, ForumWriteProgress, LowerProxyCommand,
     MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryOrigin,
     MailNotificationTemplate, PlaceBidCommand, PublicEquipmentLinkResolver, RequestHash,
-    forum_world_name,
 };
 use auction_domain::{BidAmount, CommandId, ProxyMode};
 use chrono::Duration;

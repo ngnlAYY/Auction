@@ -7,7 +7,7 @@ use auction_domain::{
     AuctionRules, BidAmount, DEFAULT_BID_INCREMENT_PPM, DEFAULT_CANCEL_CUTOFF,
     DEFAULT_FINAL_PHASE_LEAD, DEFAULT_PROXY_MAX_OUTBID_USES, DEFAULT_PROXY_SLOW_INTERVAL,
     DEFAULT_SOFT_CLOSE_EXTENSION, DEFAULT_SOFT_CLOSE_WINDOW, DEFAULT_START_PRICE, DomainError,
-    ProxyMode, RecoveryMode, RecoveryPolicy, SettlementMode, SettlementPolicy,
+    ProxyMode, RecoveryPolicy, SettlementPolicy,
 };
 use chrono::{DateTime, Duration, Utc};
 use serde_json::{Value, json};
@@ -66,11 +66,8 @@ impl Default for AuctionPolicyTemplate {
 impl AuctionPolicyTemplate {
     /// 将模板中当前已接入竞价领域的字段转换为规则快照。
     pub fn auction_rules(&self) -> Result<AuctionRules, DomainError> {
-        let proxy_default_mode = match self.proxy_default_mode.as_str() {
-            "fast" => ProxyMode::Fast,
-            "slow" => ProxyMode::Slow,
-            _ => return Err(DomainError::InvalidRules("代理默认模式无效")),
-        };
+        let proxy_default_mode = ProxyMode::from_name(&self.proxy_default_mode)
+            .ok_or(DomainError::InvalidRules("代理默认模式无效"))?;
         let rules = AuctionRules {
             default_start_price: BidAmount::new(self.start_price)?,
             bid_increment_ppm: self.bid_increment_ppm,
@@ -131,32 +128,18 @@ impl AuctionPolicyTemplate {
             "scheduled_end_at": scheduled_end_at.to_rfc3339(),
             "settlement": {
                 "version": self.settlement.version,
-                "mode": settlement_mode_name(self.settlement.mode),
+                "mode": self.settlement.mode.as_str(),
                 "compensation_pool_enabled": self.settlement.compensation_pool_enabled,
                 "isekai_carrier_credit": self.settlement.isekai_carrier_credit,
                 "anchors": self.settlement.anchors,
             },
             "recovery": {
                 "version": self.recovery.version,
-                "mode": recovery_mode_name(self.recovery.mode),
+                "mode": self.recovery.mode.as_str(),
                 "payment_timeout_seconds": self.recovery.payment_timeout.num_seconds(),
                 "reminder_limit": self.recovery.reminder_limit,
                 "cod_return_limit": self.recovery.cod_return_limit,
             },
         })
-    }
-}
-
-fn settlement_mode_name(mode: SettlementMode) -> &'static str {
-    match mode {
-        SettlementMode::LegacyZeroV0 => "legacy_zero_v0",
-        SettlementMode::HoldCurveV1 => "hold_curve_v1",
-        SettlementMode::HoldCurveV2 => "hold_curve_v2",
-    }
-}
-
-fn recovery_mode_name(mode: RecoveryMode) -> &'static str {
-    match mode {
-        RecoveryMode::RemindV1 => "remind_v1",
     }
 }

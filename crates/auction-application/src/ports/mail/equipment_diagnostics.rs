@@ -2,6 +2,7 @@
 
 use std::{future::Future, pin::Pin};
 
+use auction_domain::valid_text as safe_text;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -267,13 +268,6 @@ impl PendingMailEquipmentDiagnostic {
 
 fn equipment_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 64 && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn safe_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 fn safe_error_code(value: &str) -> bool {

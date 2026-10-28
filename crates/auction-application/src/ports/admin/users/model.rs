@@ -125,11 +125,7 @@ impl AdminUser {
 }
 
 fn valid_forum_account_id(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    !bytes.is_empty()
-        && bytes.len() <= 32
-        && bytes[0] != b'0'
-        && bytes.iter().all(u8::is_ascii_digit)
+    auction_domain::valid_positive_decimal(value, 32)
 }
 
 /// Admin 用户列表中展示的黑名单历史安全投影。

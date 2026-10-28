@@ -38,11 +38,7 @@ enum ClaimError {
 
 impl ClaimError {
     fn is_retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::Sqlx(sqlx::Error::Database(database))
-                if matches!(database.code().as_deref(), Some("40001" | "40P01"))
-        )
+        matches!(self, Self::Sqlx(error) if crate::database::is_serialization_conflict(error))
     }
 
     fn into_repository(self) -> auction_application::RepositoryError {
@@ -79,7 +75,8 @@ pub(super) async fn claim_postgres(
             Err(error) => return Err(error.into_repository()),
         }
     }
-    unreachable!("结算领取事务重试循环已由上界保证结束")
+    // 循环的最后一次尝试总会返回；这里只为未来改动留下失败关闭的出口，不以 panic 终止 Worker。
+    Err(repository_failure("结算领取事务重试次数耗尽"))
 }
 
 async fn claim_transaction(

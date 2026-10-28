@@ -117,10 +117,12 @@ impl MoogleMailDeliveryTransport {
         if !preflight_proven {
             return Err(preflight_unproven(operation));
         }
-        let form = match operation {
-            MoogleMailOperation::ReturnMessage => MoogleMailForm::return_message(state.token()),
-            MoogleMailOperation::Take => MoogleMailForm::take(state.token()),
-            _ => unreachable!("validated MoogleMail action operation"),
+        // 预检只放行 Return 与 Take；其余操作已在上方失败关闭。
+        let returning = operation == MoogleMailOperation::ReturnMessage;
+        let form = if returning {
+            MoogleMailForm::return_message(state.token())
+        } else {
+            MoogleMailForm::take(state.token())
         };
         let form = form.map_err(|error| transport_error(error, false))?;
         let response = match self.client.post(&target, session.cookie(), form).await {
@@ -131,12 +133,10 @@ impl MoogleMailDeliveryTransport {
             }
             Err(error) => return Err(transport_error(error, true)),
         };
-        let proof = match operation {
-            MoogleMailOperation::ReturnMessage => {
-                self.parser.prove_return_completed(&state, &response, world, external_mail_id)
-            }
-            MoogleMailOperation::Take => self.parser.prove_take_completed(&state, &response, world),
-            _ => unreachable!("validated MoogleMail action operation"),
+        let proof = if returning {
+            self.parser.prove_return_completed(&state, &response, world, external_mail_id)
+        } else {
+            self.parser.prove_take_completed(&state, &response, world)
         };
         self.client
             .diagnose_parse(&target, &response, proof)

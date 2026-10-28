@@ -239,9 +239,7 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
 #[cfg(feature = "postgres")]
 fn map_sql_error(error: sqlx::Error) -> AdminRulesTransactionError {
     match &error {
-        sqlx::Error::Database(database_error)
-            if matches!(database_error.code().as_deref(), Some("40001" | "40P01")) =>
-        {
+        _ if crate::database::is_serialization_conflict(&error) => {
             AdminRulesTransactionError::SerializationConflict
         }
         sqlx::Error::Database(database_error)

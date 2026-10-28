@@ -3,10 +3,9 @@
 use auction_domain::SettlementWorld;
 use chrono::{DateTime, Utc};
 
-use super::{
-    MailAccountEvidenceBinding,
-    model::{facts_digest, hex_digest},
-};
+use crate::ports::lower_hex;
+
+use super::{MailAccountEvidenceBinding, model::facts_digest};
 
 /// 来自已证明成功 delivery 的精确目标，不接受以本次读值反填“预期”。
 /// 旧成功记录未保存远端 sent_at 时传 None，禁止用 sending_at/当前时钟冒充。
@@ -50,7 +49,7 @@ impl VerifiedMailSentCollectionObservation {
     pub fn compute_digest(&self) -> [u8; 32] {
         let mut facts = vec![
             "same_session_exact_sent_collected_v1".to_owned(),
-            hex_digest(self.binding.digest),
+            lower_hex(&self.binding.digest),
             self.external_mail_id.clone(),
             self.recipient.clone(),
             self.subject.clone(),

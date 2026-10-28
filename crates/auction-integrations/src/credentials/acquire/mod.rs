@@ -56,27 +56,6 @@ impl CredentialAcquirer {
         Self::from_endpoint(key, endpoint)
     }
 
-    /// 仅供显式隔离协议验证；只接受字面回环 IP，不能通过 DNS 或管理 API 选择远端目标。
-    pub fn for_loopback(key: Arc<DataKey>, endpoint: Url) -> Result<Self, ApplicationError> {
-        let loopback = match endpoint.host() {
-            Some(url::Host::Ipv4(address)) => address == std::net::Ipv4Addr::LOCALHOST,
-            Some(url::Host::Ipv6(address)) => address.is_loopback(),
-            _ => false,
-        };
-        if !loopback
-            || !matches!(endpoint.scheme(), "http" | "https")
-            || !endpoint.username().is_empty()
-            || endpoint.password().is_some()
-            || endpoint.path() != "/"
-            || endpoint.query().is_some()
-            || endpoint.fragment().is_some()
-            || endpoint.port() == Some(0)
-        {
-            return Err(unavailable());
-        }
-        Self::from_endpoint(key, endpoint)
-    }
-
     fn from_endpoint(key: Arc<DataKey>, endpoint: Url) -> Result<Self, ApplicationError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let client = Client::builder()

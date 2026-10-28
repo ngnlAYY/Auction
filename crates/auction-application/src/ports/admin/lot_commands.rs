@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use auction_domain::{AuctionId, CommandId, LotId};
+use auction_domain::{AuctionId, CommandId, LotId, valid_text};
 
 use super::{
     AdminLotSummary, ApplicationFuture, CompetitionTransactionError, RequestHash, StoredCommand,
@@ -156,11 +156,4 @@ pub trait AdminLotUpdateTransaction: Send {
 pub enum AdminLotUpdateError {
     #[error("后台 lot 修改命令无效")]
     InvalidCommand,
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

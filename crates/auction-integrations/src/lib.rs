@@ -7,7 +7,7 @@ mod equipment;
 mod forum;
 mod login_key;
 
-pub use clients::{build_http_client, ehentai, mooglemail};
+pub use clients::{ehentai, mooglemail};
 pub use credentials::{CredentialAcquirer, CredentialSealer, CredentialVerifier};
 pub use cryptobox::{
     DataKey, EquipmentKeyOpener, EquipmentKeyOpenerError, EquipmentKeySealer,
@@ -17,7 +17,5 @@ pub use equipment::{
     EquipmentGameLinkResolver, EquipmentSourceAdapter, EquipmentSourceConfigurationError,
     EquipmentSourcePolicy, build_equipment_http_client,
 };
-pub use forum::{
-    ForumPreviewAdapter, ForumRenderError, ForumThreadRenderer, render_auction_thread,
-};
+pub use forum::{ForumPreviewAdapter, ForumRenderError, ForumThreadRenderer};
 pub use login_key::{LoginKeyCryptoError, MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader};

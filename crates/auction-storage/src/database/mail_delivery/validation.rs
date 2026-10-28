@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use auction_application::{
     ApplicationError, MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin,
-    RepositoryError,
+    RepositoryError, valid_notification_body,
 };
 use uuid::Uuid;
 
@@ -239,15 +239,4 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
         }
     }
     Ok(())
-}
-
-fn valid_notification_body(value: Option<&str>) -> bool {
-    value.is_some_and(|value| {
-        !value.is_empty()
-            && value.len() <= (16 << 10)
-            && value == value.trim()
-            && !value
-                .chars()
-                .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
-    })
 }

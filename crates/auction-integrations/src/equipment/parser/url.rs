@@ -63,34 +63,6 @@ fn equipment_url_sentence_punctuation(character: char) -> bool {
     matches!(character, '.' | ',' | ';' | '!' | '?' | '。' | '，' | '；' | '！' | '？')
 }
 
-pub(crate) fn valid_dns_name(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 253
-        && value == value.to_ascii_lowercase()
-        && value.parse::<std::net::IpAddr>().is_err()
-        && value.split('.').all(|label| {
-            !label.is_empty()
-                && label.len() <= 63
-                && !label.starts_with('-')
-                && !label.ends_with('-')
-                && label
-                    .chars()
-                    .all(|character| character.is_ascii_alphanumeric() || character == '-')
-        })
-}
-
-pub(crate) fn valid_path_prefix(value: &str) -> bool {
-    !value.is_empty()
-        && value.starts_with('/')
-        && value.ends_with('/')
-        && value == value.trim()
-        && !value.contains("//")
-        && !value
-            .chars()
-            .any(|character| character.is_control() || matches!(character, '?' | '#' | '%' | '\\'))
-        && value.split('/').all(|segment| segment != "." && segment != "..")
-}
-
 fn valid_decimal_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 32 && value.bytes().all(|byte| byte.is_ascii_digit())
 }

@@ -3,6 +3,8 @@
 use super::common::*;
 
 use super::*;
+#[cfg(feature = "postgres")]
+pub(super) use auction_domain::valid_text;
 
 #[cfg(feature = "postgres")]
 pub(super) fn parse_command(
@@ -281,12 +283,4 @@ pub(super) fn world_from_scope(
     let prefix = format!("{}:", kind.scope_prefix());
     let world = scope.strip_prefix(&prefix)?;
     AdminCredentialWorld::parse(world)
-}
-
-#[cfg(feature = "postgres")]
-pub(super) fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

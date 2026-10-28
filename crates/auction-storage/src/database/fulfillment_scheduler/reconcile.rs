@@ -15,15 +15,6 @@ enum ReconcileTransactionError {
 }
 
 #[cfg(feature = "postgres")]
-fn is_serialization_conflict(error: &sqlx::Error) -> bool {
-    matches!(
-        error,
-        sqlx::Error::Database(database)
-            if matches!(database.code().as_deref(), Some("40001" | "40P01"))
-    )
-}
-
-#[cfg(feature = "postgres")]
 macro_rules! run_reconcile_transaction {
     ($pool:expr, $transaction:ident, $body:block) => {{
         let mut last_error = None;
@@ -33,7 +24,7 @@ macro_rules! run_reconcile_transaction {
                     match $pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await {
                         Ok(transaction) => transaction,
                         Err(error) => {
-                            if is_serialization_conflict(&error)
+                            if crate::database::is_serialization_conflict(&error)
                                 && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
                             {
                                 last_error = Some(error);
@@ -48,7 +39,7 @@ macro_rules! run_reconcile_transaction {
                     Ok(value) => match $transaction.commit().await {
                         Ok(()) => break 'retry Ok(value),
                         Err(error) => {
-                            if is_serialization_conflict(&error)
+                            if crate::database::is_serialization_conflict(&error)
                                 && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
                             {
                                 last_error = Some(error);
@@ -66,7 +57,7 @@ macro_rules! run_reconcile_transaction {
                     }
                     Err(ReconcileTransactionError::Repository(error)) => return Err(error),
                     Err(ReconcileTransactionError::Storage(error)) => {
-                        if is_serialization_conflict(&error)
+                        if crate::database::is_serialization_conflict(&error)
                             && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
                         {
                             last_error = Some(error);

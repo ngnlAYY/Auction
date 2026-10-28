@@ -887,10 +887,7 @@ impl From<crate::MailEvidenceTransactionError> for RecoveryError {
 impl RecoveryError {
     fn retryable(&self) -> bool {
         match self {
-            Self::Sqlx(error) => error
-                .as_database_error()
-                .and_then(|error| error.code())
-                .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01")),
+            Self::Sqlx(error) => crate::database::is_serialization_conflict(error),
             Self::Funding(auction_application::FundingError::SerializationConflict) => true,
             Self::Evidence(error) => error.is_serialization_conflict(),
             _ => false,

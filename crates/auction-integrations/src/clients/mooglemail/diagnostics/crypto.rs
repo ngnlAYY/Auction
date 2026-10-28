@@ -87,12 +87,3 @@ pub fn aad(header: &[u8]) -> Vec<u8> {
     output.extend_from_slice(header);
     output
 }
-
-pub fn hex(bytes: impl AsRef<[u8]>) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    bytes
-        .as_ref()
-        .iter()
-        .flat_map(|b| [DIGITS[(b >> 4) as usize] as char, DIGITS[(b & 15) as usize] as char])
-        .collect()
-}

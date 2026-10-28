@@ -35,7 +35,7 @@ pub(in crate::database::competition) async fn insert_realtime_event(
         "effective_end": format_public_time_wire(bid.effective_end_at),
         "state_version": bid.state_version,
         "fact_index": bid.fact_index,
-        "mechanism": bid_mechanism_name(bid.mechanism),
+        "mechanism": bid.mechanism.as_str(),
     });
     let sequence =
         crate::database::realtime::allocate_stream_sequence(transaction, &stream_key, None)

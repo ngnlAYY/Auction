@@ -12,10 +12,7 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 fn sql_error(error: sqlx::Error) -> LotWatchError {
-    if error
-        .as_database_error()
-        .is_some_and(|error| matches!(error.code().as_deref(), Some("40001" | "40P01")))
-    {
+    if crate::database::is_serialization_conflict(&error) {
         auction_application::CompetitionTransactionError::SerializationConflict.into()
     } else {
         LotWatchError::Unavailable

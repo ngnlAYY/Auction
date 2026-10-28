@@ -56,14 +56,18 @@ pub(super) async fn fail_postgres(
     for attempt in 1..=FAILURE_TRANSACTION_ATTEMPTS {
         match fail_transaction(pool, claim, failure_code).await {
             Ok(()) => return Ok(()),
-            Err(error) if retryable(&error) && attempt < FAILURE_TRANSACTION_ATTEMPTS => {
+            Err(error)
+                if crate::database::is_serialization_conflict(&error)
+                    && attempt < FAILURE_TRANSACTION_ATTEMPTS =>
+            {
                 // 必须从 BEGIN 开始重放整笔失败进度与审计事务，不能单独重试其中一条写入。
                 sqlx::__rt::sleep(FAILURE_RETRY_BASE_DELAY.saturating_mul(attempt as u32)).await;
             }
             Err(error) => return Err(map_storage_error(error)),
         }
     }
-    unreachable!("结算失败事务重试循环已由上界保证结束")
+    // 循环的最后一次尝试总会返回；这里只为未来改动留下失败关闭的出口，不以 panic 终止 Worker。
+    Err(repository_error_owned("结算失败事务重试次数耗尽"))
 }
 
 async fn fail_transaction(
@@ -155,12 +159,4 @@ async fn fail_transaction(
     .await
     .record_audit_failure()?;
     transaction.commit().await
-}
-
-fn retryable(error: &sqlx::Error) -> bool {
-    matches!(
-        error,
-        sqlx::Error::Database(database)
-            if matches!(database.code().as_deref(), Some("40001" | "40P01"))
-    )
 }

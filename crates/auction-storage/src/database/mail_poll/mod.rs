@@ -7,6 +7,7 @@ use auction_application::{
     MAX_MAIL_POLL_FAILURE_CODE_BYTES, MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MailPollBatch,
     MailPollClaim, MailPollCompletion, MailPollReadJournal, MailPollReadSummary, MailPollStore,
 };
+use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 
 use super::DatabaseStore;
@@ -265,11 +266,4 @@ impl MailPollStore for DatabaseStore {
             }
         })
     }
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

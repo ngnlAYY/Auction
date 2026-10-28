@@ -289,11 +289,7 @@ pub(super) fn valid_form_field(name: &str, value: &str) -> bool {
 }
 
 pub(super) fn valid_topic_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 32
-        && value.as_bytes()[0].is_ascii_digit()
-        && value.as_bytes()[0] != b'0'
-        && value.bytes().all(|byte| byte.is_ascii_digit())
+    auction_domain::valid_positive_decimal(value, 32)
 }
 
 pub(super) fn valid_post_id(value: &str) -> bool {
@@ -397,9 +393,10 @@ pub(super) fn build_forum_http_client() -> Result<Client, reqwest::Error> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn fixed_post_form_accepts_identical_duplicate_offset_fields() {
-        let html = r#"
+    /// 论坛编辑表单的最小真实结构；只替换第二个 `st` 字段值。
+    fn edit_form_with_second_offset(offset: &str) -> String {
+        format!(
+            r#"
             <form action="index.php" method="post">
               <input type="hidden" name="st" value="0">
               <input type="hidden" name="act" value="Post">
@@ -408,10 +405,14 @@ mod tests {
               <input type="hidden" name="CODE" value="09">
               <input type="hidden" name="t" value="300433">
               <input type="hidden" name="p" value="6956800">
-              <input type="hidden" name="st" value="0">
+              <input type="hidden" name="st" value="{offset}">
               <textarea name="Post">System log</textarea>
             </form>
-        "#;
+        "#
+        )
+    }
+
+    fn parse_edit_form(html: &str) -> Option<Vec<(String, String)>> {
         let document = Html::parse_document(html);
         let form = document
             .select(
@@ -419,8 +420,7 @@ mod tests {
             )
             .next()
             .unwrap_or_else(|| panic!("表单应存在"));
-
-        let values = fixed_post_form_values(
+        fixed_post_form_values(
             form,
             hidden_input_selector()
                 .unwrap_or_else(|error| panic!("隐藏字段 selector 应合法: {error:?}")),
@@ -430,47 +430,18 @@ mod tests {
             "300433",
             Some("6956800"),
         )
-        .unwrap_or_else(|| panic!("论坛生成的相同重复 st 应可接受"));
+    }
+
+    #[test]
+    fn fixed_post_form_accepts_identical_duplicate_offset_fields() {
+        let values = parse_edit_form(&edit_form_with_second_offset("0"))
+            .unwrap_or_else(|| panic!("论坛生成的相同重复 st 应可接受"));
 
         assert_eq!(single_value_for(&values, "st"), Some("0"));
     }
 
     #[test]
     fn fixed_post_form_rejects_conflicting_duplicate_offset_fields() {
-        let html = r#"
-            <form action="index.php" method="post">
-              <input type="hidden" name="st" value="0">
-              <input type="hidden" name="act" value="Post">
-              <input type="hidden" name="f" value="4">
-              <input type="hidden" name="auth_key" value="0123456789abcdef0123456789abcdef">
-              <input type="hidden" name="CODE" value="09">
-              <input type="hidden" name="t" value="300433">
-              <input type="hidden" name="p" value="6956800">
-              <input type="hidden" name="st" value="20">
-              <textarea name="Post">System log</textarea>
-            </form>
-        "#;
-        let document = Html::parse_document(html);
-        let form = document
-            .select(
-                form_selector().unwrap_or_else(|error| panic!("表单 selector 应合法: {error:?}")),
-            )
-            .next()
-            .unwrap_or_else(|| panic!("表单应存在"));
-
-        assert!(
-            fixed_post_form_values(
-                form,
-                hidden_input_selector()
-                    .unwrap_or_else(|error| panic!("隐藏字段 selector 应合法: {error:?}")),
-                post_body_selector()
-                    .unwrap_or_else(|error| panic!("正文 selector 应合法: {error:?}")),
-                "09",
-                4,
-                "300433",
-                Some("6956800"),
-            )
-            .is_none()
-        );
+        assert!(parse_edit_form(&edit_form_with_second_offset("20")).is_none());
     }
 }

@@ -344,7 +344,7 @@ fn check_config(role: Role) -> anyhow::Result<()> {
             "mooglemail_worlds": mooglemail_world_ids,
             "mooglemail_sender_allowlist_entry_count": mooglemail_sender_allowlist_entry_count,
             "mooglemail_equipment_filter_enabled": config.worker.mooglemail.equipment_filter.enabled,
-            "mooglemail_mail_template_count": config.worker.mooglemail.mail_templates.values().len(),
+            "mooglemail_mail_template_count": config.worker.mooglemail.mail_templates.entries().len(),
         },
         "realtime": {
             "consumer_key": config.realtime.consumer_key,

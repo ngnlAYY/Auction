@@ -1,4 +1,4 @@
-//! 浏览器端共用的金额展示格式。
+//! 浏览器端共用的金额与比例展示格式。
 
 /// 使用精确的 K/M/B 单位展示 credit 金额，不对出价金额取近似值。
 /// 该函数只负责本地展示，不参与金额解析、校验或任何服务端业务判断。
@@ -61,4 +61,25 @@ pub fn format_held_duration(nanos: i64) -> String {
     } else {
         format!("{seconds}s")
     }
+}
+
+/// 将百万分比（ppm）展示为去除尾零的百分比，例如 `12_500` 显示为 `1.25%`；负值使用减号 `−`。
+pub fn format_ppm(value: i32, show_positive_sign: bool) -> String {
+    let absolute = i64::from(value).abs();
+    let whole = absolute / 10_000;
+    let fraction = absolute % 10_000;
+    let number = if fraction == 0 {
+        whole.to_string()
+    } else {
+        let fraction = format!("{fraction:04}").trim_end_matches('0').to_owned();
+        format!("{whole}.{fraction}")
+    };
+    let sign = if value < 0 {
+        "−"
+    } else if value > 0 && show_positive_sign {
+        "+"
+    } else {
+        ""
+    };
+    format!("{sign}{number}%")
 }

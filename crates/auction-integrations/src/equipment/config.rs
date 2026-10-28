@@ -81,10 +81,11 @@ impl EquipmentSourcePolicy {
             || self.allowlist_enabled
                 && (self.allowed_hosts.is_empty() || self.allowed_path_prefixes.is_empty())
             || self.allowed_hosts.iter().enumerate().any(|(index, host)| {
-                !super::parser::valid_dns_name(host) || self.allowed_hosts[..index].contains(host)
+                !auction_application::valid_allowlist_host(host)
+                    || self.allowed_hosts[..index].contains(host)
             })
             || self.allowed_path_prefixes.iter().enumerate().any(|(index, prefix)| {
-                !super::parser::valid_path_prefix(prefix)
+                !auction_application::valid_allowlist_path_prefix(prefix)
                     || self.allowed_path_prefixes[..index].contains(prefix)
             })
         {

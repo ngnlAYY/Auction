@@ -218,9 +218,10 @@ pub trait CompetitionTransaction: Send {
         lot_id: LotId,
     ) -> impl Future<Output = Result<u32, CompetitionTransactionError>> + Send;
 
+    /// 原子应用竞价计划；计划只读借用，调用方无需为返回结果复制整份计划。
     fn apply_plan(
         &mut self,
-        plan: CompetitionPlan,
+        plan: &CompetitionPlan,
         audit: Option<CompetitionCommandAuditContext>,
         occurred_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
@@ -228,7 +229,7 @@ pub trait CompetitionTransaction: Send {
     /// 原子应用慢速代理计划，并写入 Auction-BF 稳定的 Worker 审计语义。
     fn apply_slow_proxy_plan(
         &mut self,
-        plan: CompetitionPlan,
+        plan: &CompetitionPlan,
         context: SlowProxyExecutionContext,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
 }

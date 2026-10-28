@@ -7,6 +7,8 @@ use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::ports::lower_hex;
+
 use super::{INTERNAL_EVIDENCE_PROTOCOL, valid_external_positive_id};
 
 /// 持久全局 mail_cookie generation；仅支持 sticky 撤销的 owner 可以提供。
@@ -96,7 +98,7 @@ impl InternalEvidencePurpose {
                     delivery_id.to_string(),
                     claim_token.to_string(),
                     claim_fencing.to_string(),
-                    hex_digest(request_hash.as_bytes()),
+                    lower_hex(&request_hash.as_bytes()),
                 ])
             }
             Self::FundingReconciliation { command_id, expected_account_version } => {
@@ -203,11 +205,7 @@ impl MailAccountEvidenceBinding {
             self.runtime.generation.to_string(),
             self.authenticated_uid.clone(),
             self.player_name.clone(),
-            match self.world {
-                SettlementWorld::Main => "main",
-                SettlementWorld::Isekai => "isekai",
-            }
-            .to_owned(),
+            self.world.as_str().to_owned(),
             self.observed_at.to_rfc3339(),
         ])
     }
@@ -238,7 +236,7 @@ impl VerifiedMailEquipmentPresence {
     pub fn compute_digest(&self) -> [u8; 32] {
         facts_digest(&[
             "organize_presence_clean_compose_v1".to_owned(),
-            hex_digest(self.binding.digest),
+            lower_hex(&self.binding.digest),
             self.equipment_id.to_string(),
             self.external_equipment_id.clone(),
             self.category.clone(),
@@ -261,7 +259,7 @@ impl VerifiedMainCashObservation {
     pub fn compute_digest(&self) -> [u8; 32] {
         facts_digest(&[
             "main_credits_observation_clean_compose_v1".to_owned(),
-            hex_digest(self.binding.digest),
+            lower_hex(&self.binding.digest),
             self.credits.to_string(),
             self.observed_at.to_rfc3339(),
         ])
@@ -288,11 +286,11 @@ impl SettlementInternalEvidenceSnapshot {
         facts_digest(&[
             INTERNAL_EVIDENCE_PROTOCOL.to_owned(),
             self.operation_id.to_string(),
-            hex_digest(self.purpose.digest()),
-            hex_digest(self.identity.digest),
-            self.equipment.as_ref().map(|value| hex_digest(value.digest)).unwrap_or_default(),
-            self.main_cash.as_ref().map(|value| hex_digest(value.digest)).unwrap_or_default(),
-            self.sent_collection.as_ref().map(|value| hex_digest(value.digest)).unwrap_or_default(),
+            lower_hex(&self.purpose.digest()),
+            lower_hex(&self.identity.digest),
+            self.equipment.as_ref().map(|value| lower_hex(&value.digest)).unwrap_or_default(),
+            self.main_cash.as_ref().map(|value| lower_hex(&value.digest)).unwrap_or_default(),
+            self.sent_collection.as_ref().map(|value| lower_hex(&value.digest)).unwrap_or_default(),
             self.observed_from.to_rfc3339(),
             self.expires_at.to_rfc3339(),
         ])
@@ -364,14 +362,4 @@ pub(super) fn facts_digest(fields: &[String]) -> [u8; 32] {
         hash.update(field.as_bytes());
     }
     hash.finalize().into()
-}
-
-pub(super) fn hex_digest(value: [u8; 32]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(64);
-    for byte in value {
-        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    encoded
 }

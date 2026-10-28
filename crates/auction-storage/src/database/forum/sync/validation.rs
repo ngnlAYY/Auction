@@ -7,6 +7,7 @@ use auction_application::{
 };
 #[cfg(feature = "postgres")]
 use auction_domain::SettlementWorld;
+pub(super) use auction_domain::valid_text;
 
 pub(super) const MAX_CLAIM_BATCH_SIZE: u16 = 100;
 pub(super) const MAX_WORKER_ID_BYTES: usize = 256;
@@ -87,28 +88,14 @@ pub(super) fn valid_layout(published: &ForumPublishedLayout) -> bool {
         )
 }
 
-pub(super) fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
-}
-
-fn valid_decimal_id(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value.as_bytes()[0].is_ascii_digit()
-        && value.as_bytes()[0] != b'0'
-        && value.bytes().all(|byte| byte.is_ascii_digit())
+/// 论坛帖子、主题与账号的正十进制 ID，拒绝前导零；sync 与 reply 共用。
+pub(in crate::database::forum) fn valid_decimal_id(value: &str, maximum: usize) -> bool {
+    auction_domain::valid_positive_decimal(value, maximum)
 }
 
 #[cfg(feature = "postgres")]
 pub(super) fn parse_world(value: &str) -> Result<SettlementWorld, ApplicationError> {
-    match value {
-        "main" => Ok(SettlementWorld::Main),
-        "isekai" => Ok(SettlementWorld::Isekai),
-        _ => Err(storage_error("论坛快照世界不在闭集内")),
-    }
+    SettlementWorld::from_name(value).ok_or_else(|| storage_error("论坛快照世界不在闭集内"))
 }
 
 #[cfg(feature = "postgres")]

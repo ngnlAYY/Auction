@@ -64,10 +64,6 @@ impl AppConfig {
         self.secrets.equipment_data_key.as_ref().map(SecretString::expose_secret)
     }
 
-    pub fn equipment_data_key_configured(&self) -> bool {
-        self.equipment_data_key_id().is_some() && self.equipment_data_key().is_some()
-    }
-
     /// 返回用户登录 key 加密使用的数据密钥标识；只允许密钥装配根读取。
     pub fn user_login_data_key_id(&self) -> Option<&str> {
         self.secrets.user_login_data_key_id.as_ref().map(SecretString::expose_secret)
@@ -76,10 +72,6 @@ impl AppConfig {
     /// 返回用户登录 key 加密使用的数据密钥材料；调用方不得输出或持久化副本。
     pub fn user_login_data_key(&self) -> Option<&str> {
         self.secrets.user_login_data_key.as_ref().map(SecretString::expose_secret)
-    }
-
-    pub fn user_login_data_key_configured(&self) -> bool {
-        self.user_login_data_key_id().is_some() && self.user_login_data_key().is_some()
     }
 
     /// 返回外部凭据加密使用的数据密钥标识；只允许凭据装配根读取。

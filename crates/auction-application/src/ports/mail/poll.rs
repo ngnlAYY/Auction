@@ -3,6 +3,7 @@
 //! mmtoken、装备 key 和邮件正文不进入持久化对象；业务分类或外部发送必须在更窄的应用端口中
 //! 另行完成。
 
+use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
@@ -211,13 +212,6 @@ pub trait MailPollStore: Send + Sync {
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, AdminMailPollState>;
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {

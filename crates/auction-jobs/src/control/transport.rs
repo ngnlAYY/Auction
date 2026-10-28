@@ -273,12 +273,6 @@ impl WorkerControlHandle {
         );
     }
 
-    pub fn mark_degraded(&self) {
-        self.inner
-            .state
-            .fetch_or(CONTROL_STARTED | CONTROL_DEGRADED, std::sync::atomic::Ordering::AcqRel);
-    }
-
     /// 记录论坛循环最近一轮健康状态；成功轮次可以恢复该依赖造成的降级。
     pub fn mark_forum_cycle(&self, healthy: bool) {
         // 与其他原子更新点一致，MSRV 1.94.1 仍须使用 fetch_update。
