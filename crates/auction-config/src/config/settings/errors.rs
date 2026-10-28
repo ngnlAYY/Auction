@@ -144,6 +144,9 @@ pub enum ConfigError {
     #[error("invalid realtime configuration: {0}")]
     InvalidRealtimeConfig(&'static str),
 
+    #[error("log_filter 表达式无效；配置值已脱敏")]
+    InvalidLogFilter,
+
     #[error("invalid tracing configuration: {0}")]
     InvalidTracingConfig(&'static str),
 

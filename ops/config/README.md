@@ -35,6 +35,9 @@
 loader 先固定角色文件的绝对位置，再以其目录解析相对引用，包括默认发现和相对的配置选择器；不支持逐项环境变量覆盖。
 示例占位值不能用于生产，每个示例赋值字段前必须紧邻中文“可选/必填”注释，由 `bash ci/checks/check.sh config` 检查。
 
+公共文件可选 `log_filter` 在 loader 中使用与 tracing 初始化相同的 `EnvFilter` 解析器校验；
+`check-config` 和部署预检会提前拒绝非法表达式，错误只返回字段提示。省略时仍使用角色默认过滤器，合法表达式原样保留。
+
 Admin 可选 `worker_config_file` 指向本部署的 Worker 非敏感角色 TOML，相对路径仍以 Admin 文件目录解析。
 它只用于冻结邮件启用状态及 mail/delivery 预算，不读取 Worker 的 `common_file` 或 `secrets_file`；
 引用文件必须与 Admin 使用同一实际 runtime 文件，不允许嵌套 `worker_config_file`。首次设置与 Admin 示例默认引用

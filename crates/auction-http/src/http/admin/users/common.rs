@@ -1,3 +1,4 @@
+pub(super) use super::super::parse_canonical_uuid;
 use auction_application::{AdminUserError, ApplicationError};
 use auction_contracts::ApiErrorResponseWithData;
 use axum::{
@@ -5,7 +6,6 @@ use axum::{
     http::{StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use uuid::Uuid;
 
 /// 校验 Admin 用户写入共同使用的查询字符串边界。
 pub(super) fn mutation_boundary(uri: &Uri) -> Option<Response> {
@@ -45,12 +45,6 @@ pub(super) fn invalid_user_command() -> Response {
 
 pub(super) fn invalid_rename_command() -> Response {
     invalid_request("invalid_rename_command", "改名回滚参数无效")
-}
-
-/// 按旧 v1 闭集解析小写、规范且非零的 UUID 文本。
-pub(super) fn parse_canonical_uuid(value: &str) -> Option<Uuid> {
-    let id = Uuid::parse_str(value).ok()?;
-    (!id.is_nil() && id.to_string() == value).then_some(id)
 }
 
 pub(super) fn invalid_request(code: &'static str, message: &'static str) -> Response {

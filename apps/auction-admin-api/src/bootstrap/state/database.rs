@@ -136,41 +136,7 @@ pub(super) async fn configure_state(
     let security = config::configure_security(config)?;
     let worker_control = config::configure_worker_control(config);
     let Some(database_url) = config.database_url() else {
-        let forum_preview: Arc<dyn AdminForumPreviewPort> = Arc::new(ForumPreviewAdapter::new());
-        return Ok((
-            AdminApiState::new(
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                Some(forum_preview),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                worker_control,
-                security,
-            )
-            .with_dashboard_worlds(config::configured_dashboard_worlds(config))
-            .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config)),
-            None,
-        ));
+        return Ok((super::fallback::empty_state(config, security, worker_control), None));
     };
     let store =
         Arc::new(DatabaseStore::connect(database_url).await.context("connect admin database")?);

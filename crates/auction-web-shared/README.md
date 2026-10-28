@@ -56,6 +56,7 @@ CSS 只隐藏其余页码与省略号，首尾页由前后按钮逐页到达；�
 busy 结束后若焦点仍在面板，Tab 与 Shift+Tab 分别进入首项和末项。
 焦点循环、恢复与滚动锁由外壳 hook 统一处理；`TruncatedText` 支持悬停、键盘/触控固定与选择，
 不复制输入或弹窗正文到 title。原生事件回调必须恢复 Dioxus Runtime/Scope，延迟任务和监听随卸载清理。
+Tab 循环扫描只保留首尾两个可聚焦控件，Rust 侧额外存储为 O(1)；控件筛选、DOM 顺序与空面板回退保持一致。
 按钮或链接内的 `TruncatedText` 须设置 `focusable=false`；此时内联浮层也不加入 Tab 顺序，避免嵌套焦点。
 截断文本的 compact/medium/wide 档位只是展示上限，同时不得超过所在容器宽度；窄屏仍保留完整内容提示。
 

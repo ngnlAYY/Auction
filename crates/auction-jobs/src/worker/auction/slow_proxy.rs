@@ -49,7 +49,11 @@ where
         for due in wave.iter().copied() {
             let commands = Arc::clone(commands);
             let item_timeout = worker.auction.item_timeout;
+            let control = worker.control.clone();
             tasks.spawn(async move {
+                if control.is_draining() {
+                    return WorkerResult::Success;
+                }
                 match tokio::time::timeout(item_timeout, execute_candidate(commands, due)).await {
                     Ok(result) => result,
                     Err(_) => {

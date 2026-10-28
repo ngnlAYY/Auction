@@ -83,6 +83,7 @@ Recovery 拉黑仍按历史 claim 时间保存稳定命令、证明与审计；�
 （见[用户快照时间修复升级](ops/README.md#用户快照时间修复升级)）。
 MM 注册对已有用户名的大小写修正与换绑一样，在同一事务追加 `user_game_identity_history`；
 仅重签 key 而名称不变不生成虚假改名历史，已接受命令重放也不重复追加。
+Admin 修改论坛账号时，映射行锁查询完整执行但不收集随后丢弃的行集；原 advisory lock、映射 → 用户锁序与事务边界不变。
 Admin 用户列表只对当前页 UUID 批量读取黑名单历史，每人仍保留完整次数及按时间/ID 倒序的最近十条；
 列表、计数和历史保持同一 Serializable 快照，不逐用户另取连接或查询。
 
@@ -120,6 +121,7 @@ Admin realtime replay 在追加替代事件的同一事务复用 consumer 恢复
 bidding、lifecycle、admin 拆分；旧竞价账本重放仍在一致快照中取得冻结策略、授权版本和转换历史，不重新执行当前状态
 门禁。竞价及关键生命周期（含 `final → settling` 领取）使用 Serializable、明确行锁，最多三次尝试（含首次）；
 普通队列领取可按 owner 使用 Read Committed 加锁。只重试已分类的序列化冲突/死锁，未知提交不能盲目重放。
+草稿软截止修正的轮次锁同样完整执行后丢弃行，不为纯加锁查询建立临时行集；world → round → auction 锁序保持不变。
 生命周期最终阶段和结算恢复策略解码使用有界时长转换；损坏快照超出时长范围时返回错误，不触发进程 panic。
 结算锁内及历史只读快照投影已冻结的 workflow、领取命令和 due 世代，历史空值保留；稳定身份由应用层统一派生。
 只读旧结算核验复用应用层的完成请求摘要；旧 `settlement_complete` 账本仍按原历史格式单独核验。
@@ -162,6 +164,12 @@ PM 载荷借用已读取的 JSON 解码，避免复制正文；完整重编码�
 同 MID 重复登记须身份一致，不能覆盖旧值。队列按持久序号返回最早前缀；`poll::commit` 在入站事实、命令账本和 cursor 的
 同一事务删除完成前缀，失败、取消、租约丢失和未完成后缀均保留。更改 allowlist 或 mailbox/world 后遇旧待读项时失败关闭，
 不由启动或迁移丢弃队列。查询使用运行时绑定 SQL，无新增 SQLx 宏离线元数据。
+登记使用固定 `UNNEST ... WITH ORDINALITY`，在 `INSERT SELECT` 中按输入位置排序，再由默认 identity 生成持久序号；
+最多 1000 条摘要的登记写入由 N 次 SQL 往返减为 1 次，四个有界参数数组仅借用文本并复制时间值。
+旧 MID 冲突只校验 world、发件人、主题和时间，不改原摘要或序号；受影响行数不足整批数量时在提交前失败并回滚整批。
+序列在冲突或回滚时仍可留下空洞，恢复前缀只依赖相对顺序，不要求序号连续。取号与冲突语义依据
+[PostgreSQL 18 INSERT](https://www.postgresql.org/docs/18/sql-insert.html)及
+[序列规则](https://www.postgresql.org/docs/18/functions-sequence.html)核对；该批量路径目前仅有源码及静态检查证据，尚无数据库运行证据。
 轮询续租和失败退避先取得邮箱行锁，再用 `clock_timestamp()` 校验实时租约；入站提交的最终 cursor CAS
 也使用实时数据库时间，不能用调用前时间或事务起始时间完成已过期租约。token、owner、版本和暂停快照规则不变。
 入站 `received_at` 的幂等比较采用 PostgreSQL 微秒精度，接受合法亚微秒输入的自读结果；
@@ -246,6 +254,7 @@ Public 的 `DatabaseStore::public_lot_reader` 接受启动时冻结的装备标�
 中位数选中间一至两笔价格后按 `numeric` 求均值，`median_exact` 返回规范十进制字符串，旧 `median` 显式半数取偶保留整数兼容口径；
 不先相加 bigint、不经浮点数，旧 cursor 继续固定时间倒序。
 Admin 读取不为补全投影临时写入；邮件展示和诊断 sidecar 均非权威数据，不参与幂等、完成证明或 cursor。
+邮件展示的显式历史回填借用已序列化的 JSON 绑定 SQL，不为一次更新复制整棵展示树；身份、摘要、CAS 和追加审计保持原样。
 `operations_alert/snapshot/reads.rs` 的履约待处理水位与 Worker 领取的业务状态一致，只计 `ready` 义务的
 `pending/prepared/enqueued` 阶段；最老积压按这批义务及独立的未终结 `blocked` 义务计算。
 `contingent` 退款保持未触发事实，不进入待处理与积压年龄；`blocked/failed/manual_reconcile` 保持各自计数，

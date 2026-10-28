@@ -9,6 +9,7 @@ use super::common::{
     visible_confirmation_text,
 };
 use super::*;
+use crate::clients::mooglemail::parser::optional_unique_element;
 
 impl MoogleMailParser {
     /// 解析最终发送响应的成功提示，并尽可能提取远端邮件 ID。
@@ -75,14 +76,14 @@ fn prove_send_completed(
     world: MoogleMailWorld,
 ) -> Result<Option<String>, MoogleMailError> {
     let confirmation_selector = selector("#mmail_fin", world)?;
-    let confirmations = parsed.select(&confirmation_selector).collect::<Vec<_>>();
-    if confirmations.len() > 1 {
-        return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
-    }
-    if confirmations.len() == 1 {
-        let phrase = visible_confirmation_text(confirmations[0], world)?;
+    if let Some(confirmation) = optional_unique_element(
+        parsed.select(&confirmation_selector),
+        MoogleMailOperation::Compose,
+        world,
+    )? {
+        let phrase = visible_confirmation_text(confirmation, world)?;
         if phrase.to_ascii_lowercase().contains("message has been sent")
-            || is_css_send_confirmation(confirmations[0])
+            || is_css_send_confirmation(confirmation)
         {
             return Ok(response_mail_id(source));
         }
@@ -97,8 +98,9 @@ fn classify_send_response_failure(
 ) -> Result<Option<MoogleMailSendResponseFailure>, MoogleMailError> {
     let body_selector = selector("body", world)?;
     let confirmation_selector = selector("#mmail_fin", world)?;
-    let bodies = parsed.select(&body_selector).collect::<Vec<_>>();
-    if bodies.len() != 1 || parsed.select(&confirmation_selector).next().is_some() {
+    if parsed.select(&body_selector).take(2).count() != 1
+        || parsed.select(&confirmation_selector).next().is_some()
+    {
         return Ok(None);
     }
     // 所有拒绝提示都只采信系统消息，不把装备名称或其他可控可见文字当作拒绝证明。

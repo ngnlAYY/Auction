@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 #[cfg(feature = "postgres")]
 mod database;
-#[cfg(not(feature = "postgres"))]
 mod fallback;
 #[cfg(feature = "postgres")]
 mod heartbeat;

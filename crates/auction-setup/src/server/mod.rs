@@ -207,7 +207,7 @@ fn authorize(
     state: &FirstRunState,
     headers: &HeaderMap,
 ) -> Result<(), (StatusCode, Json<SetupErrorResponse>)> {
-    let provided = headers.get("x-setup-token").and_then(|value| value.to_str().ok()).unwrap_or("");
+    let provided = access::single_header(headers, "x-setup-token").ok().flatten().unwrap_or("");
     if provided.len() != state.token.len()
         || !bool::from(provided.as_bytes().ct_eq(state.token.as_bytes()))
     {

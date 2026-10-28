@@ -14,7 +14,7 @@ use crate::clients::mooglemail::{
     forms::valid_body,
     parser::{
         canonical_mail_body, direct_element_children, extract_equipment_id, normalize_text,
-        parse_canonical_credits, parse_credits_text,
+        optional_unique_element, parse_canonical_credits, parse_credits_text, unique_element,
     },
 };
 
@@ -81,17 +81,10 @@ fn parse_compose_state(
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let form_selector = selector("form#mailform", world)?;
-    let forms = parsed.select(&form_selector).collect::<Vec<_>>();
-    if forms.len() != 1 {
-        return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
-    }
-    let form = forms[0];
+    let form = unique_element(parsed.select(&form_selector), MoogleMailOperation::Compose, world)?;
     let token_selector = selector("input[name='mmtoken']", world)?;
-    let tokens = form.select(&token_selector).collect::<Vec<_>>();
-    if tokens.len() != 1 {
-        return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
-    }
-    let token_value = tokens[0]
+    let token = unique_element(form.select(&token_selector), MoogleMailOperation::Compose, world)?;
+    let token_value = token
         .value()
         .attr("value")
         .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
@@ -105,11 +98,9 @@ fn parse_compose_state(
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let body_selector = selector("textarea[name='message_body']", world)?;
-    let bodies = form.select(&body_selector).collect::<Vec<_>>();
-    if bodies.len() != 1 {
-        return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
-    }
-    let body = bodies[0].text().collect::<String>();
+    let body = unique_element(form.select(&body_selector), MoogleMailOperation::Compose, world)?
+        .text()
+        .collect::<String>();
     if !valid_body(&body) {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
@@ -141,15 +132,16 @@ fn parse_compose_assets(
     let info_selector = selector("#mmail_attachinfo", world)?;
     let count_selector = selector("#mmail_attachcount", world)?;
     let cod_selector = selector("#newcod", world)?;
-    let lists = document.select(&list_selector).collect::<Vec<_>>();
-    let infos = document.select(&info_selector).count();
-    let count_boxes = document.select(&count_selector).collect::<Vec<_>>();
-    let cod_fields = document.select(&cod_selector).collect::<Vec<_>>();
-    if lists.len() > 1 || infos > 1 || count_boxes.len() > 1 || cod_fields.len() > 1 {
+    let operation = MoogleMailOperation::Compose;
+    let list = optional_unique_element(document.select(&list_selector), operation, world)?;
+    let infos = document.select(&info_selector).take(2).count();
+    let count_box = optional_unique_element(document.select(&count_selector), operation, world)?;
+    let cod_field = optional_unique_element(document.select(&cod_selector), operation, world)?;
+    if infos > 1 {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    if lists.is_empty() {
-        if infos != 1 || !count_boxes.is_empty() || !cod_fields.is_empty() {
+    let Some(list) = list else {
+        if infos != 1 || count_box.is_some() || cod_field.is_some() {
             return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
         return Ok(ComposeAssets {
@@ -158,16 +150,14 @@ fn parse_compose_assets(
             cod: Some(0),
             attachment_count: 0,
         });
-    }
+    };
 
-    let entries = direct_element_children(lists[0]);
+    let entries = direct_element_children(list);
     if entries.is_empty() || entries.len() > MAX_COMPOSE_ATTACHMENTS {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let list_text = normalize_text(lists[0].text().collect::<String>());
-    let child_text = normalize_text(
-        entries.iter().map(|entry| entry.text().collect::<String>()).collect::<String>(),
-    );
+    let list_text = normalize_text(list.text().collect::<String>());
+    let child_text = normalize_text(entries.iter().flat_map(|entry| entry.text()).collect());
     if list_text != child_text {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
@@ -176,24 +166,19 @@ fn parse_compose_assets(
     let mut seen_equipment_ids = HashSet::new();
     let mut credits = 0_i64;
     for entry in &entries {
-        let mut hooks = Vec::new();
-        if entry.value().attr("onmouseover").is_some() {
-            hooks.push(*entry);
-        }
-        hooks.extend(entry.select(&hook_selector));
+        let hooks = entry
+            .value()
+            .attr("onmouseover")
+            .map(|_| *entry)
+            .into_iter()
+            .chain(entry.select(&hook_selector));
+        let hook = optional_unique_element(hooks, operation, world)?;
         let text = normalize_text(entry.text().collect::<String>());
-        if hooks.is_empty() {
-            let amount = parse_credits_text(&text)
-                .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
-            if credits != 0 {
+        if let Some(hook) = hook {
+            if normalize_text(hook.text().collect::<String>()) != text {
                 return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
             }
-            credits = amount;
-        } else {
-            if hooks.len() != 1 || normalize_text(hooks[0].text().collect::<String>()) != text {
-                return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
-            }
-            let script = hooks[0]
+            let script = hook
                 .value()
                 .attr("onmouseover")
                 .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
@@ -203,12 +188,19 @@ fn parse_compose_assets(
                 return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
             }
             equipment_ids.push(equipment_id);
+        } else {
+            let amount = parse_credits_text(&text)
+                .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
+            if credits != 0 {
+                return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
+            }
+            credits = amount;
         }
     }
 
     let mut cod = None;
-    if let Some(count_box) = count_boxes.first() {
-        let text = attachment_count_text(*count_box)
+    if let Some(count_box) = count_box {
+        let text = attachment_count_text(count_box)
             .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
         let (count, count_cod) = parse_attachment_count(&text)
             .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
@@ -217,7 +209,7 @@ fn parse_compose_assets(
         }
         cod = count_cod;
     }
-    if let Some(cod_field) = cod_fields.first() {
+    if let Some(cod_field) = cod_field {
         let raw = cod_field
             .value()
             .attr("value")

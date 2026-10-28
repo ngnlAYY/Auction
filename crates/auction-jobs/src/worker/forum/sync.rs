@@ -145,6 +145,10 @@ where
         let Some(claim) = claims.pop() else {
             break;
         };
+        // 领取回执跨过 drain 时尚未外呼；保留原 claim，不能在停机阶段开始发布主题。
+        if worker.control.is_draining() {
+            break;
+        }
         processed += 1;
         if let Err(error) =
             process_claim(runtime, Arc::clone(&worker.clock), claim, item_deadline).await

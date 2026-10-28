@@ -6,7 +6,7 @@ use scraper::{ElementRef, Html, Node, Selector};
 
 use super::*;
 use crate::clients::mooglemail::parser::{
-    direct_element_children, normalize_text, parse_canonical_credits,
+    direct_element_children, normalize_text, parse_canonical_credits, unique_element,
 };
 
 pub(super) fn input_value(
@@ -15,11 +15,8 @@ pub(super) fn input_value(
     world: MoogleMailWorld,
 ) -> Result<String, MoogleMailError> {
     let selector = selector(&format!("input[name='{name}']"), world)?;
-    let fields = form.select(&selector).collect::<Vec<_>>();
-    if fields.len() != 1 {
-        return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
-    }
-    Ok(fields[0].value().attr("value").unwrap_or_default().to_owned())
+    let field = unique_element(form.select(&selector), MoogleMailOperation::Compose, world)?;
+    Ok(field.value().attr("value").unwrap_or_default().to_owned())
 }
 
 pub(super) fn parse_attachment_count(value: &str) -> Option<(usize, Option<i64>)> {

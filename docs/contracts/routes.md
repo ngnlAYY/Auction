@@ -356,9 +356,12 @@ Public 浏览器仅在已认证且当前拍卖为 `live`/`final` 时启用 P04�
 
 PostgreSQL + `web-embed` 的 `auction-admin-api`/`auction-server` 初始化模式默认监听 `127.0.0.1:8091`，正式 Admin 不挂载这些入口。分体 Admin 仅在默认配置不存在且未设置 `AUCTION_CONFIG_FILE` 时无参数进入；已有目录、悬空链接仍算已有配置，元数据错误、显式配置缺失或解析失败均阻止启动。合并入口按 `--config-dir`（默认 `auction-config`）判断，拒绝已设置的 `AUCTION_CONFIG_FILE`。分体保存后退出；合并入口只有在明确确认并关闭设置服务后才初始化专用空库、启动角色；普通启动不隐式迁移。
 
-静态资源可匿名读取，三个 API 每次须携带终端输出的 64 字符十六进制 `x-setup-token`。正文上限 8 KiB，DTO 拒绝未知字段，令牌/非阻塞操作门禁先于正文。HTTP/1 请求头预算 5 秒，正文与异步处理合计 10 秒，超时 504 `request_timeout`。停止接收后最多排空 10 秒，超时或再次信号取消连接；合并入口只接受无终止信号的确定 Completed，无法确认终态时失败关闭。
+静态资源可匿名读取，三个 API 每次须携带终端输出的 64 字符十六进制 `x-setup-token`；令牌头重复或不可解码时返回 403 `setup_auth`。正文上限 8 KiB，DTO 拒绝未知字段，令牌/非阻塞操作门禁先于正文。HTTP/1 请求头预算 5 秒，正文与异步处理合计 10 秒，超时 504 `request_timeout`。停止接收后最多排空 10 秒，超时或再次信号取消连接；合并入口只接受无终止信号的确定 Completed，无法确认终态时失败关闭。
 
 合并入口通过 `--allow-remote-setup`、`--setup-origin` 和 `--setup-proxy-ip` 明确允许远程 HTTPS 代理，非 loopback 监听无此授权失败。HTTP 门禁检查 TCP peer、精确 Host、HTTPS 转发头与写请求 Origin；本机模式也检查 loopback peer 与 Host/Origin，失败返回 403 `setup_origin`。所有应用响应（含拒绝、框架错误和超时）统一设置 `Cache-Control: no-store`、`Referrer-Policy: no-referrer`，复用正式表面的 CSP（含 `frame-ancestors 'none'`）、`X-Frame-Options: DENY`、`nosniff` 与浏览器能力限制，保持 Dioxus WASM/解释器和内联样式所需策略，不放宽 Origin 或令牌门禁。
+
+Host、Origin 及远程模式的 `x-forwarded-proto` 只接受单个可解码头值，重复或畸形值按 `setup_origin` 拒绝。
+本机模式可省略 Origin；不可解码的已提供值不能按“未提供”放行。
 成功响应新增布尔 `initialize_and_start`，默认分体 false、合并 true，旧客户端可忽略。配置 DTO 新增可省略的 `confirm_initialize`（默认 false）；合并 `complete` 要求 true，否则 400 `setup_confirmation_required`，网页只在用户主动勾选专用空库及启动授权后发送 true；`completed` 只表示配置已落盘，不声称数据库初始化或三个角色已就绪。
 
 `verify` 无请求体，只校验令牌和完成状态，不连接数据库、写文件、消费令牌或建立免鉴权会话。三个 API 鉴权后共用操作锁，覆盖校验、数据库等待与目录发布；竞争为 409 `setup_busy`，完成后 409 `setup_completed`。目录已发布但持久化无法确认时进入终态 500 `setup_outcome_unknown`，不再读库/写配置，须停止进程并核对目录；输入、连接及发布前明确失败仍可重试。

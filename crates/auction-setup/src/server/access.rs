@@ -7,7 +7,7 @@ use std::{
 
 use axum::{
     extract::{ConnectInfo, Request, State},
-    http::{HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -90,16 +90,20 @@ pub(super) async fn enforce(
 fn permitted(
     policy: &FirstRunPolicy,
     peer: SocketAddr,
-    headers: &axum::http::HeaderMap,
+    headers: &HeaderMap,
     method: &axum::http::Method,
 ) -> bool {
-    let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+    let header = |name: &str| single_header(headers, name).ok().flatten();
+    // 本地允许省略 Origin，但畸形值或重复头不能被折叠成“未提供”。
+    let Ok(origin) = single_header(headers, "origin") else {
+        return false;
+    };
     if let Some(remote) = &policy.remote {
         peer.ip() == remote.proxy_ip
             && header("x-forwarded-proto") == Some("https")
             && header("host") == remote.origin.strip_prefix("https://")
             && (matches!(*method, axum::http::Method::GET | axum::http::Method::HEAD)
-                || header("origin") == Some(remote.origin.as_str()))
+                || origin == Some(remote.origin.as_str()))
     } else {
         // 本地模式也绑定 Host，防止任意域名解析到 loopback 后读取初始化页面。
         let default_port = policy.listen.port() == 80;
@@ -116,7 +120,7 @@ fn permitted(
                     if default_port { host.strip_suffix(":80").unwrap_or(host) } else { host };
                 host == address || host == localhost
             })
-            && header("origin").is_none_or(|origin| {
+            && origin.is_none_or(|origin| {
                 let origin = if default_port {
                     origin.strip_suffix(":80").unwrap_or(origin)
                 } else {
@@ -125,4 +129,16 @@ fn permitted(
                 origin == format!("http://{address}") || origin == format!("http://{localhost}")
             })
     }
+}
+
+/// 区分缺失与非法安全头；代理证明和令牌均不能接受歧义的首值。
+pub(super) fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a str>, ()> {
+    let mut values = headers.get_all(name).iter();
+    let Some(value) = values.next() else {
+        return Ok(None);
+    };
+    if values.next().is_some() {
+        return Err(());
+    }
+    value.to_str().map(Some).map_err(|_| ())
 }

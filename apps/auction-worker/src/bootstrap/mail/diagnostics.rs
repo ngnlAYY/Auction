@@ -107,18 +107,16 @@ impl MailDiagnosticRecorder for LoggedMailDiagnostics {
         prepared: PreparedMailEvidence,
         outcome: MailDiagnosticOutcome,
     ) -> MailDiagnosticFuture<'_, MailDiagnosticReceipt> {
-        let context = prepared.context().clone();
         let mut guard = RetentionReportGuard {
-            context: context.clone(),
+            context: prepared.context().clone(),
             outcome: outcome.clone(),
             evidence_id: Some(prepared.evidence_id()),
             reported: false,
         };
-        let retained = self.archive.retain(prepared, outcome.clone());
+        let retained = self.archive.retain(prepared, outcome);
         Box::pin(async move {
             let result = retained.await;
-            guard.complete();
-            report(&context, &outcome, &result);
+            guard.complete(&result);
             result
         })
     }
@@ -136,11 +134,10 @@ impl MailDiagnosticRecorder for LoggedMailDiagnostics {
             evidence_id: None,
             reported: false,
         };
-        let retained = self.archive.retain_response(context.clone(), status, body, outcome.clone());
+        let retained = self.archive.retain_response(context, status, body, outcome);
         Box::pin(async move {
             let result = retained.await;
-            guard.complete();
-            report(&context, &outcome, &result);
+            guard.complete(&result);
             result
         })
     }
@@ -156,8 +153,10 @@ struct RetentionReportGuard {
 }
 
 impl RetentionReportGuard {
-    fn complete(&mut self) {
+    fn complete(&mut self, result: &Result<MailDiagnosticReceipt, MailDiagnosticError>) {
         self.reported = true;
+        // 完成与取消共用同一份安全元数据，避免仅为正常日志再保留一组字符串副本。
+        report(&self.context, &self.outcome, result);
     }
 }
 

@@ -1,15 +1,9 @@
+pub(crate) use super::super::parse_canonical_uuid;
 use auction_application::{ApplicationError, CommandLedgerError, CompetitionTransactionError};
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use uuid::Uuid;
-
-/// 按旧 v1 拍卖命令闭集解析规范小写、非零 UUID。
-pub(crate) fn parse_canonical_uuid(value: &str) -> Option<Uuid> {
-    let id = Uuid::parse_str(value).ok()?;
-    (!id.is_nil() && id.to_string() == value).then_some(id)
-}
 
 pub(crate) fn invalid_create_command() -> Response {
     super::api_error(StatusCode::BAD_REQUEST, "invalid_auction_command", "后台拍卖创建参数无效")

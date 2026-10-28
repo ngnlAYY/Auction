@@ -187,15 +187,7 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         reason = &mut runtime_failure => {
             tracing::error!(reason, "worker drain started");
             let _ = shutdown_sender.send(());
-            let drained = match wait_for_drain(&mut signals, DEFAULT_DRAIN_TIMEOUT, &mut worker).await {
-                Ok(DrainOutcome::Completed(result)) => result,
-                Ok(DrainOutcome::TimedOut) => Err(anyhow::anyhow!("worker drain exceeded 10 seconds")),
-                Ok(DrainOutcome::Interrupted(signal)) => {
-                    Err(anyhow::anyhow!("worker drain interrupted by {signal}"))
-                }
-                Err(error) => Err(error).context("wait for worker drain"),
-            };
-            drained.context("drain worker after runtime failure")?;
+            drain_worker(&mut signals, &mut worker).await.context("drain worker after runtime failure")?;
             if reason == "control_server_stopped" {
                 return Err(anyhow::anyhow!("worker control server stopped; worker restart required"));
             }
@@ -212,22 +204,28 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
             let signal = signal.context("receive worker shutdown signal")?;
             tracing::info!(signal = %signal, "worker drain started");
             let _ = shutdown_sender.send(());
-            match wait_for_drain(&mut signals, DEFAULT_DRAIN_TIMEOUT, &mut worker).await {
-                Ok(DrainOutcome::Completed(result)) => result,
-                Ok(DrainOutcome::TimedOut) => {
-                    Err(anyhow::anyhow!("worker drain exceeded 10 seconds"))
-                }
-                Ok(DrainOutcome::Interrupted(signal)) => {
-                    Err(anyhow::anyhow!("worker drain interrupted by {signal}"))
-                }
-                Err(error) => Err(error).context("wait for worker drain"),
-            }
+            drain_worker(&mut signals, &mut worker).await
         }
     };
     if result.is_ok() {
         tracing::info!("worker stopped");
     }
     result
+}
+
+/// 信号与运行时故障共用排空预算及错误映射；具体任务仍由原有 future 和守卫拥有。
+async fn drain_worker(
+    signals: &mut TerminationSignals,
+    worker: impl std::future::Future<Output = anyhow::Result<()>>,
+) -> anyhow::Result<()> {
+    match wait_for_drain(signals, DEFAULT_DRAIN_TIMEOUT, worker).await {
+        Ok(DrainOutcome::Completed(result)) => result,
+        Ok(DrainOutcome::TimedOut) => Err(anyhow::anyhow!("worker drain exceeded 10 seconds")),
+        Ok(DrainOutcome::Interrupted(signal)) => {
+            Err(anyhow::anyhow!("worker drain interrupted by {signal}"))
+        }
+        Err(error) => Err(error).context("wait for worker drain"),
+    }
 }
 
 async fn shutdown_tracing(telemetry: TracingRuntime) {

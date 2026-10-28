@@ -35,6 +35,45 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-27 批量持久化与边界复核
+
+基线为干净的 `155e158d`。按 owner 并行审查 20 个工作区包，清单包含 1,431 份 Rust 文件、49 份 Markdown、
+64 份追加迁移；主审交叉复核关键调用链、依赖图、构建脚本及文档契约。以下改动保持现有业务金额、幂等摘要及历史迁移。
+
+| owner | 发现与修改 |
+| --- | --- |
+| application | 结算事实索引同时记录明细是否消费，省去第二个判重集合；到期校验用最大结束时间省去重复扫描；黑名单中文次数理由识别不再构造临时字符串 |
+| storage | 待读邮件按输入顺序批量登记，写入 SQL 往返从 N 次降至 1 次；保留原 claim 锁、身份冲突整批回滚与实时租约复核。纯加锁查询不收集无用行，展示回填借用 JSON |
+| integrations / jobs | 邮件可选/必需唯一节点共用最多两个匹配的校验，减少临时节点和字符串集合；Delivery 仅在收件人缺失时构造排除项；领取或任务排队跨过 drain 后不再开始新命令 |
+| HTTP / setup | 严格 UUID 和 JSON 媒体类型校验收敛，生命周期响应转移已有字符串；设置服务拒绝重复/不可解码的安全头，非法 Origin 不再按缺失放行，沿用既有错误码 |
+| Web | 普通出价响应绑定请求 lot，v1/v2 拍卖列表绑定请求页码和数量；属性只校验一次。词典借用排序判重由最坏 `O(N²·L)` 降至 `O(N log N·L)`；焦点循环的 Rust 额外句柄存储由 `O(N)` 降至 `O(1)` |
+| config / apps | loader 提前拒绝初始化解析器不接受的日志过滤表达式，错误脱敏；Admin 空状态、Worker 排空共用装配/错误映射，邮件留证日志少持有一份元数据副本 |
+| CI | 发布指纹补齐 Cargo 编译器/包装器别名和增量覆盖；sccache 别名绑定受控工具，工具构建清除这些应用环境覆盖，防止错误复用或污染独立配方 |
+
+未确认需要修改的 domain、contracts、cache、observability 及历史迁移保留原实现；process 仅更正过期模块注释。
+12 个已有测试覆盖不同契约，未发现可直接删除的完全重复项，保留且不运行。50 项直接外部依赖均有用途，
+`cargo machete` 未发现未使用项；本轮不新增程序库，四份锁图及依赖版本保持不变。
+
+应用及三个工具锁共用独立、干净的 RustSec 快照 `99670cfc0bc574433034b75876a4b791ccaa2efb`（1,380 条公告），
+以受控 cargo-audit 0.22.2 执行 `--deny warnings`：应用 535 个条目与 cargo-audit 锁均零漏洞、零警告；
+dx 为 13 项漏洞匹配、11 项警告，sccache 为 7 项、17 项，完整工具锁审计仍失败，未设置忽略项。
+工具配方修改后已重建两档工具并通过安装回执校验，版本及受控调用范围见[工具说明](ci/tools/README.md#上游公告与实际使用范围)。
+
+Rust 1.99.0 下最终 `CARGO_BUILD_JOBS=2 just verify` 通过，覆盖策略/布局/配置/i18n/装备契约、格式、工作区全部已有目标、
+独立 PostgreSQL/Redis feature、Clippy `-D warnings` 和双端 WASM；Rust 1.94.1 下
+`CARGO_BUILD_JOBS=2 cargo +1.94.1 check --locked --workspace --all-targets --all-features` 通过。
+全部 CI shell 的语法/ShellCheck warning 检查、Actions actionlint、`cargo machete` 与 `git diff --check` 通过。
+五个原生程序和双端 WASM 的实际 normal/build 依赖图无第二数据库驱动、native-tls/OpenSSL、Dioxus fullstack/server，
+原生图无 Web crate。49 份 Markdown 的 1,464 处本地引用已核对路径与标题锚点，相关契约另作源码对照。
+
+本轮不运行行为测试、服务、数据库/浏览器验证或性能基准，不构建应用发布制品或部署。复杂度、SQL 次数和分配变化
+来自源码分析；批量取号、冲突/取消与 drain 交接的运行验证仍按[默认范围](docs/guide/development.md#默认检查)另行授权。
+同版升级前提见[运维说明](ops/README.md#读取快照与实时分发优化升级)。
+
+评估后保留的候选：结算快照仍逐 lot 加载竞价状态和锁定有效代理，批量化须守住代理锁序与异常数据的错误顺序；
+HTTP 总连接配额与 HTTP/2 头部预算需要独立容量策略；预览目录逐行分类绑定需要明确历史可选字段兼容。
+这些候选及上一轮排序索引建议不通过任意默认值、修改历史数据或放宽校验直接实现。
+
 ### 2026-10-27 全仓精简与资源生命周期复核
 
 基线为干净的 `c1781d68`。经用户授权按 owner 并行审查全部 20 个工作区包，建立 1,430 份 Rust 源码、49 份 Markdown、

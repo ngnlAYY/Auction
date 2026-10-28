@@ -173,15 +173,24 @@ pub(crate) fn direct_element_children(element: ElementRef<'_>) -> Vec<ElementRef
 
 /// 只读取前两个匹配节点，保持唯一性校验而不为异常页面收集全部重复节点。
 pub(crate) fn unique_element<'a>(
-    mut elements: impl Iterator<Item = ElementRef<'a>>,
+    elements: impl Iterator<Item = ElementRef<'a>>,
     operation: MoogleMailOperation,
     world: MoogleMailWorld,
 ) -> Result<ElementRef<'a>, MoogleMailError> {
-    let element = elements.next().ok_or_else(|| protocol(operation, world))?;
+    optional_unique_element(elements, operation, world)?.ok_or_else(|| protocol(operation, world))
+}
+
+/// 可选协议节点允许缺失，但第二个匹配即失败；不收集异常页面的全部重复节点。
+pub(crate) fn optional_unique_element<'a>(
+    mut elements: impl Iterator<Item = ElementRef<'a>>,
+    operation: MoogleMailOperation,
+    world: MoogleMailWorld,
+) -> Result<Option<ElementRef<'a>>, MoogleMailError> {
+    let Some(element) = elements.next() else { return Ok(None) };
     if elements.next().is_some() {
         return Err(protocol(operation, world));
     }
-    Ok(element)
+    Ok(Some(element))
 }
 
 /// 解码 HentaiVerse 固定标签使用的受限 CSS 字形结构。
