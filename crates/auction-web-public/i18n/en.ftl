@@ -195,7 +195,6 @@ compensation-adjustment = Adjustment rate
 compensation-held-time = Total held time
 compensation-discount = Discount demand
 compensation-equipment = Equipment
-compensation-equation = { $opening } + { $income } = { $outflow } + { $closing }
 compensation-expand = Show movements for auction #{ $sequence }
 compensation-collapse = Hide movements for auction #{ $sequence }
 compensation-kind-opening = Opening

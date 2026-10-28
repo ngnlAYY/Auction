@@ -194,7 +194,6 @@ compensation-adjustment = 调整比例
 compensation-held-time = 总时间
 compensation-discount = 折扣需求
 compensation-equipment = 装备
-compensation-equation = { $opening } + { $income } = { $outflow } + { $closing }
 compensation-expand = 展开第 { $sequence } 期拍卖流水
 compensation-collapse = 收起第 { $sequence } 期拍卖流水
 compensation-kind-opening = 期初

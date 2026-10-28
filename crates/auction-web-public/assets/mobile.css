@@ -439,8 +439,13 @@
     min-inline-size: 0;
   }
 
+  .public-compensation-expand {
+    min-inline-size: var(--size-target);
+    min-block-size: var(--size-target);
+  }
 
-  /* 复用同一业务表和本地化字段名；空流水仍保留汇总末行的手机布局。 */
+
+  /* 复用同一业务表和本地化字段名；空流水也保持手机卡片布局与可访问表头。 */
   .public-shell :is(div, section):has(> table > tbody > tr > [data-label], > table.public-compensation-movement-table) {
     border: 0;
     border-radius: 0;
@@ -542,7 +547,7 @@
     margin-block-end: calc(var(--space-1) / 2);
   }
 
-  /* 展开入口作为卡片首行：说明与方形按钮分居两端，不再拉伸图标。 */
+  /* 展开入口沿用历史分组控件；手机保留整行说明与 44px 图标触控区域。 */
   .public-shell .public-compensation-table > tbody > tr > .public-compensation-toggle-cell {
     display: flex;
     align-items: center;
@@ -567,15 +572,6 @@
     border-inline-start: 2px solid var(--color-accent);
   }
 
-  .public-compensation-movement-table > tfoot > tr {
-    display: block;
-    margin-block-start: var(--space-3);
-  }
-
-  .public-compensation-equation .shared-truncated-text {
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
 }
 
 /* ===== 响应式：拍品详情与论坛移动端布局 ===== */

@@ -170,15 +170,22 @@
   align-items: center;
   gap: var(--space-1);
   min-inline-size: 0;
+  max-inline-size: 100%;
   min-block-size: var(--size-control-compact);
   padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-full);
   background: var(--color-surface-raised);
   font-size: var(--text-sm);
-  /* 状态文案（如 en "Manual refresh required"）较长时不 nowrap：仅在头部空间不足
-     溢出的情况下折行，正常宽度下与单行渲染一致。 */
-  white-space: normal;
+  white-space: nowrap;
+}
+
+/* 文字独立收缩，窄栏只显示单行省略号，保留状态圆点与完整可访问名称。 */
+.public-connection-badge__label {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .public-connection-badge::before {
@@ -914,11 +921,11 @@
 }
 
 .public-history-search-region {
-  font-size: var(--text-base);
+  font-size: var(--text-sm);
 }
 
 .public-history-filters {
-  margin-block-end: var(--space-4);
+  margin-block-end: var(--space-3);
 }
 
 .public-history-filters fieldset {
@@ -929,7 +936,7 @@
 }
 
 .public-history-filters legend {
-  margin-block-end: var(--space-3);
+  margin-block-end: var(--space-2);
   color: var(--color-text);
   font-weight: var(--font-weight-strong);
 }
@@ -938,7 +945,7 @@
   display: grid;
   grid-template-columns: minmax(7.5rem, 10rem) minmax(15rem, 1fr) auto;
   align-items: end;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .public-history-primary-filters > label,
@@ -956,9 +963,9 @@
 .public-history-filter-cell input,
 .public-history-filter-cell select {
   inline-size: 100%;
-  min-block-size: var(--size-target);
+  min-block-size: var(--size-control-compact);
   box-sizing: border-box;
-  padding: var(--space-1) var(--space-2);
+  padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
@@ -1005,6 +1012,14 @@
   font: inherit;
 }
 
+/* 搜索、显示设置与分页使用同一紧凑高度；触控断点自动恢复 44px。 */
+.public-history-filter-toolbar button,
+.public-history-settings-close {
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+}
+
 .public-history-filter-toolbar button:not(:disabled):focus-visible,
 .public-history-settings-close:focus-visible,
 .public-catalog-columns__toggle:focus-visible,
@@ -1028,8 +1043,6 @@
   align-items: center;
   gap: var(--space-2);
   min-inline-size: 0;
-  padding: var(--space-2) var(--space-4) !important;
-  border-radius: var(--radius-md) !important;
   /* en 长文案在极窄屏下允许折行（按钮内直接文本节点无法用 text-overflow 截断）；
      正常宽度下与 nowrap 渲染一致，仅在溢出时生效。 */
   white-space: normal;
@@ -1063,7 +1076,7 @@
 }
 
 .public-history-settings-close {
-  min-inline-size: var(--size-target);
+  min-inline-size: var(--size-control-compact);
   padding: 0;
   color: var(--color-text-muted);
   background: transparent;
@@ -1073,7 +1086,7 @@
 .public-history-settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .public-history-filter-cell {
@@ -1129,9 +1142,9 @@
 .public-history-filter-grid input,
 .public-history-filter-grid select {
   inline-size: 100%;
-  min-block-size: var(--size-target);
+  min-block-size: var(--size-control-compact);
   box-sizing: border-box;
-  padding: var(--space-1) var(--space-2);
+  padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text);
@@ -1156,17 +1169,18 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-2);
-  margin-block-start: var(--space-4);
+  margin-block-start: var(--space-3);
 }
 
 .public-history-filter-actions button {
-  min-block-size: var(--size-target);
-  padding: var(--space-2) var(--space-4);
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
   font: inherit;
+  font-size: var(--text-sm);
 }
 
 .public-history-filter-actions button:not(:disabled):focus-visible {
@@ -1180,7 +1194,7 @@
 }
 
 .public-history-filter-toolbar .public-history-filter-actions__apply {
-  padding: var(--space-1) var(--space-4);
+  padding: 0 var(--space-3);
   color: var(--color-accent-contrast);
   border-color: var(--color-accent);
   background: var(--color-accent);
@@ -1208,7 +1222,9 @@
   font-size: var(--text-base);
 }
 
-.public-history-table-wrap {
+.public-history-table-wrap,
+.public-compensation-table-wrap,
+.public-compensation-movement-wrap {
   overflow-x: clip;
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
@@ -1224,9 +1240,9 @@
 .public-history-view-controls {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3);
+  gap: var(--space-2);
   inline-size: min(100%, 36rem);
-  margin-block-start: var(--space-4);
+  margin-block-start: var(--space-3);
 }
 
 .public-history-results-scope {
@@ -2965,17 +2981,20 @@
 }
 
 .public-compensation-balance {
-  min-inline-size: 13rem;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  justify-self: start;
   display: grid;
   gap: var(--space-1);
-  padding: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface-raised);
+  font-size: var(--text-sm);
 }
 
 .public-compensation-balance strong {
-  font-size: var(--text-xl);
+  font-size: var(--text-lg);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2989,6 +3008,7 @@
 .public-compensation-movement-table {
   inline-size: 100%;
   border-collapse: collapse;
+  font-size: var(--text-base);
 }
 
 .public-compensation-table th,
@@ -3001,8 +3021,15 @@
   white-space: nowrap;
 }
 
+.public-compensation-table thead th,
+.public-compensation-movement-table thead th {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
 .public-compensation-table .public-compensation-toggle-cell {
-  padding-inline: var(--space-1);
+  padding-inline: calc(var(--space-1) / 2);
   text-align: center;
   vertical-align: middle;
 }
@@ -3013,37 +3040,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 复用历史分组的无边框展开控件，只将图标在专属列中居中。 */
 .public-compensation-expand {
-  display: inline-grid;
-  place-items: center;
-  inline-size: var(--size-target);
-  block-size: var(--size-target);
-  flex-shrink: 0;
-  padding: 0;
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: inherit;
-  background: var(--color-surface-raised);
-  font-size: var(--text-lg);
-  line-height: 1;
-  cursor: pointer;
-}
-
-.public-compensation-expand[aria-expanded="true"] {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
-.public-compensation-expand:focus-visible {
-  outline: 2px solid var(--color-link);
-  outline-offset: 2px;
-}
-
-@media (hover: hover) {
-  .public-compensation-expand:hover {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
-  }
+  display: inline-flex;
+  justify-content: center;
+  inline-size: auto;
+  min-inline-size: 1.5rem;
 }
 
 .public-compensation-details-row > td {
@@ -3056,15 +3058,6 @@
   background: var(--color-surface);
 }
 
-.public-compensation-equation {
-  background: var(--color-surface-raised);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.public-compensation-equation .shared-truncated-text {
-  --truncated-text-max-inline-size: 100%;
-}
 
 .public-compensation-income {
   color: var(--color-live);

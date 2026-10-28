@@ -194,7 +194,6 @@ compensation-adjustment = 조정 비율
 compensation-held-time = 총 보유 시간
 compensation-discount = 할인 수요
 compensation-equipment = 장비
-compensation-equation = { $opening } + { $income } = { $outflow } + { $closing }
 compensation-expand = 경매 #{ $sequence } 흐름 보기
 compensation-collapse = 경매 #{ $sequence } 흐름 숨기기
 compensation-kind-opening = 기초

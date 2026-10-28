@@ -67,10 +67,12 @@ transport、凭据、mailbox identity 和全局启用仍由 Worker 部署配置�
 ## 拍卖邮件起拍价
 
 未写 `start` 的装备默认 50,000 Credits，可由 `[worker.mooglemail].start_price` 覆盖，独立于公共经济模板。
-一条 `start amount` 应用于全部装备，逐件形式为同一行的 `<equipment-url> start amount`，旧跨行三元组仍兼容；
-普通说明、空行、Attachment 块、URL 包裹/句末标点和空白后的 `#` 注释不改变默认价。金额支持正整数、
-规范千分位及精确整数 Credits 的 `k`/`m` 小数（如 `1.5k`）；缺金额、误写 `start=10k`/`start:10k`/`start10k`、
-零负值、溢出、重复定价、未知 ID 或 key 不匹配均拒绝，`starting`/`starter` 等普通说明不是定价指令，不能退回默认价。
+一条独立的 `start amount` 指令应用于全部装备，金额可放在紧接的下一行；指令只提取关键字和金额，
+随信附加的 Attachment 说明块、其它说明行及空白后的 `#` 注释不计入定价字段，原正文和幂等摘要保持。
+逐件形式为 `<equipment-url> start amount`，旧跨行三元组仍兼容，未指定的附件使用默认价；URL 包裹和句末标点保持兼容。
+金额支持正整数、规范千分位及精确整数 Credits 的 `k`/`m` 小数（如 `1.5k`）。明确指令的缺金额、
+误写 `start=10k`/`start:10k`/`start10k`、零负值、溢出、重复或混合定价、未知 ID 或 key 不匹配均拒绝；
+`starting`/`starter` 等普通说明不是定价指令。
 
 ## 撤拍装备寄回
 

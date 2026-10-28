@@ -97,20 +97,6 @@ pub(super) fn resolve_start_price_plan(
     if !tokens.iter().enumerate().any(|(index, _)| is_explicit_start_token(&tokens, index)) {
         return Ok(prices);
     }
-    let maximum_fields = attachments
-        .len()
-        .checked_mul(3)
-        .ok_or_else(|| {
-            pricing_failure(
-                INVALID,
-                "invalid_field_count",
-                body,
-                token_count,
-                None,
-                attachment_count,
-            )
-        })?
-        .max(2);
     // 网页复制的 Attachment 说明不能改变指令字段计数；明确的 URL/start 指令允许跨行，
     // 但其余显式 start 形态仍须失败，避免一条合法指令掩盖另一条畸形指令。
     let mut consumed = vec![false; tokens.len()];
@@ -161,21 +147,55 @@ pub(super) fn resolve_start_price_plan(
     let (fields, field_indices, has_explicit_directive) = if !explicit_fields.is_empty() {
         (explicit_fields, explicit_indices, true)
     } else {
-        let mut fields = Vec::with_capacity(maximum_fields);
-        let mut field_indices = Vec::with_capacity(maximum_fields);
-        for token in &tokens {
-            if fields.len() == maximum_fields {
+        // 统一起拍价只消费独立的 start/金额指令，附件说明和其它说明行仍保留在原正文中。
+        // 扫描完整分词列表，避免合法指令掩盖后续重复、混合或畸形的 start。
+        let mut fields = Vec::with_capacity(2);
+        let mut field_indices = Vec::with_capacity(2);
+        for (index, token) in tokens.iter().enumerate() {
+            if !is_explicit_start_token(&tokens, index) {
+                continue;
+            }
+            let detail_code = if !token.value.eq_ignore_ascii_case("start") {
+                Some("invalid_amount")
+            } else if !fields.is_empty() {
+                Some("mixed_pricing_directives")
+            } else if !token.is_line_start {
+                Some("invalid_field_count")
+            } else {
+                None
+            };
+            if let Some(detail_code) = detail_code {
                 return Err(pricing_failure(
                     INVALID,
-                    "too_many_fields",
+                    detail_code,
                     body,
                     token_count,
                     Some(token.index),
                     attachment_count,
                 ));
             }
-            fields.push(token.value);
-            field_indices.push(token.index);
+            let amount = tokens.get(index + 1).ok_or_else(|| {
+                pricing_failure(
+                    INVALID,
+                    "invalid_amount",
+                    body,
+                    token_count,
+                    Some(token.index + 1),
+                    attachment_count,
+                )
+            })?;
+            if !amount.is_line_end {
+                return Err(pricing_failure(
+                    INVALID,
+                    "invalid_field_count",
+                    body,
+                    token_count,
+                    Some(amount.index + 1),
+                    attachment_count,
+                ));
+            }
+            fields.extend([token.value, amount.value]);
+            field_indices.extend([token.index, amount.index]);
         }
         (fields, field_indices, false)
     };

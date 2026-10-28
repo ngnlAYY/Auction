@@ -43,7 +43,7 @@ Public 竞价与 Admin 管理状态留在各 surface，本 crate 不依赖存储
 输入通过 `aria-describedby` 关联规则说明，仍按 ASCII 正整数和调用方上限校验。
 分页视觉由 `style/base.css` 与 `style/mobile.css` 单独拥有，surface 通用表单规则须排除 `.ui-pager` 后代。
 导航在 DOM 首位，随后是权威总数、数量选择、自定义数量与跳页；分页整体右对齐，桌面横排或折行后各行仍靠右。
-桌面按钮、输入和选择框使用 `--size-control-compact`（28px）高度与共享小号字，跳页输入宽 4rem。
+桌面按钮与输入使用 `--size-control-compact`（28px）高度，数量选择框为 24px 高、左右各 4px 内边距，保留原生选项宽度和共享小号字；跳页输入宽 4rem。
 手机与触控横屏的分页与 PC 一样单行：‹ 当前页及前后各一页 › · 权威总数 · 每页数量；控件高 32px（容器内覆盖
 `--size-control-compact` 与 `--field-min-block-size`），选择框仍为 16px 字号。页码窗口中当前页的相邻项始终是数字页，
 CSS 只隐藏其余页码与省略号，首尾页由前后按钮逐页到达；总数空间不足时单行省略。自定义数量与跳页只在 PC 提供，

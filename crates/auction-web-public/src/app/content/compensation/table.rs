@@ -42,7 +42,7 @@ pub(super) fn CompensationPoolTable(
             } else {
                 div { class: "public-compensation-table-wrap ui-table--fit",
                     table { class: "public-compensation-table",
-                        auction_web_shared::TableColumns { layout: "public-compensation", widths: vec![8, 6, 8, 9, 13, 15, 13, 9, 19] }
+                        auction_web_shared::TableColumns { layout: "public-compensation", widths: vec![4, 6, 8, 10, 14, 15, 14, 10, 19] }
                         thead {
                             tr {
                                 th { scope: "col", class: "public-compensation-toggle-cell", aria_label: t!("compensation-details") }
@@ -111,7 +111,7 @@ fn CompensationRoundRow(
         tr { class: "public-compensation-round",
             td { class: "public-compensation-toggle-cell", "data-label": t!("compensation-details"),
                 button {
-                    class: "public-compensation-expand",
+                    class: "public-history-group-toggle public-compensation-expand",
                     r#type: "button",
                     aria_controls: details_id.clone(),
                     aria_expanded: open.to_string(),
