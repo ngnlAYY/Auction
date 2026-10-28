@@ -9,9 +9,7 @@ use super::{
     send_get, valid_uuid,
 };
 
-// 本地 Strict 镜像已删除：contracts 的 `AdminSettlementCatalogResponse`（含 entry 与
-// pagination）已带 `deny_unknown_fields`，字段集与旧闭集 decoder 一致；本文件只保留排序、
-// 去重与筛选回显等跨字段谓词。
+// contracts DTO 拒绝未知字段；此处补充排序、去重与筛选回显等跨字段校验。
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AdminSettlementCatalogEntry {
@@ -80,46 +78,47 @@ fn decode_catalog(
 
     let mut auction_ids = HashSet::with_capacity(data.auctions.len());
     let mut periods = HashSet::with_capacity(data.auctions.len());
-    let mut previous_key: Option<CatalogOrderKey> = None;
+    let mut previous_key: Option<CatalogOrderKey<'_>> = None;
+    // 校验阶段借用完整响应中的文本，成功后再转移字段，避免去重和排序键逐行复制字符串。
+    for entry in &data.auctions {
+        let settled_at = parse_admin_time(&entry.settled_at)
+            .filter(|value| value.is_finite())
+            .ok_or("settlement_catalog_time")?;
+        if !valid_uuid(&entry.auction_id)
+            || !matches!(entry.world_id.as_str(), "main" | "isekai")
+            || entry.sequence <= 0
+            || entry.sequence > MAX_JSON_SAFE_INTEGER
+            || world_id != "all" && entry.world_id != world_id
+            || sequence.is_some_and(|value| entry.sequence != value)
+            || !auction_ids.insert(entry.auction_id.as_str())
+            || !periods.insert((entry.world_id.as_str(), entry.sequence))
+        {
+            return Err("settlement_catalog_entry");
+        }
+        let key = CatalogOrderKey {
+            settled_at,
+            world_id: &entry.world_id,
+            sequence: entry.sequence,
+            auction_id: &entry.auction_id,
+        };
+        if previous_key
+            .as_ref()
+            .is_some_and(|previous| !catalog_order_valid(previous, &key, world_id != "all"))
+        {
+            return Err("settlement_catalog_order");
+        }
+        previous_key = Some(key);
+    }
     let auctions = data
         .auctions
         .into_iter()
-        .map(|entry| {
-            let settled_at = parse_admin_time(&entry.settled_at)
-                .filter(|value| value.is_finite())
-                .ok_or("settlement_catalog_time")?;
-            if !valid_uuid(&entry.auction_id)
-                || !matches!(entry.world_id.as_str(), "main" | "isekai")
-                || entry.sequence <= 0
-                || entry.sequence > MAX_JSON_SAFE_INTEGER
-                || world_id != "all" && entry.world_id != world_id
-                || sequence.is_some_and(|value| entry.sequence != value)
-                || !auction_ids.insert(entry.auction_id.clone())
-                || !periods.insert((entry.world_id.clone(), entry.sequence))
-            {
-                return Err("settlement_catalog_entry");
-            }
-            let key = CatalogOrderKey {
-                settled_at,
-                world_id: entry.world_id.clone(),
-                sequence: entry.sequence,
-                auction_id: entry.auction_id.clone(),
-            };
-            if previous_key
-                .as_ref()
-                .is_some_and(|previous| !catalog_order_valid(previous, &key, world_id != "all"))
-            {
-                return Err("settlement_catalog_order");
-            }
-            previous_key = Some(key);
-            Ok(AdminSettlementCatalogEntry {
-                auction_id: entry.auction_id,
-                world_id: entry.world_id,
-                sequence: entry.sequence,
-                settled_at: entry.settled_at,
-            })
+        .map(|entry| AdminSettlementCatalogEntry {
+            auction_id: entry.auction_id,
+            world_id: entry.world_id,
+            sequence: entry.sequence,
+            settled_at: entry.settled_at,
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect();
 
     Ok(AdminSettlementCatalogPage {
         auctions,
@@ -129,16 +128,16 @@ fn decode_catalog(
     })
 }
 
-struct CatalogOrderKey {
+struct CatalogOrderKey<'a> {
     settled_at: f64,
-    world_id: String,
+    world_id: &'a str,
     sequence: i64,
-    auction_id: String,
+    auction_id: &'a str,
 }
 
 fn catalog_order_valid(
-    previous: &CatalogOrderKey,
-    current: &CatalogOrderKey,
+    previous: &CatalogOrderKey<'_>,
+    current: &CatalogOrderKey<'_>,
     single_world: bool,
 ) -> bool {
     if single_world && previous.sequence != current.sequence {

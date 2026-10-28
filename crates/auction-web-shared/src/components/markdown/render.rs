@@ -78,12 +78,16 @@ fn table_column_weights(headers: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>]) -> V
         .iter()
         .enumerate()
         .map(|(index, header)| {
-            let mut lengths = rows
-                .iter()
-                .take(32)
-                .filter_map(|row| row.get(index))
-                .map(|nodes| visible_units(nodes))
-                .collect::<Vec<_>>();
+            // 采样最多 32 行，固定栈缓冲避免每列分配临时 Vec。
+            let mut samples = [0_u16; 32];
+            let mut count = 0;
+            for (sample_index, nodes) in
+                rows.iter().take(samples.len()).filter_map(|row| row.get(index)).enumerate()
+            {
+                samples[sample_index] = visible_units(nodes);
+                count = sample_index + 1;
+            }
+            let lengths = &mut samples[..count];
             lengths.sort_unstable();
             let typical = lengths.get(lengths.len() * 3 / 4).copied().unwrap_or(0);
             visible_units(header).max(typical).clamp(8, 48)

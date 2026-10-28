@@ -72,6 +72,8 @@ Prometheus 只启用 `process`，关闭默认 `protobuf` 并使用上游 `plain_
 tracing 丢弃与导出失败 counter 以原子水位领取快照增量，并行 scrape 不会重复累计同一次失败；
 指标名称和 counter 类型保持不变。
 连接池与 tracing counter 均以原子最大值领取快照增量，过时快照不回退累计水位。
+固定业务事件在初始化时缓存 counter/histogram 共享句柄，逐笔记录直接按闭集枚举寻址，省去重复的 label
+哈希、指标表读锁和句柄克隆；编译期核对枚举顺序，完整零值序列、名称、label、bucket 与并发累计语义保持不变。
 
 ## 维护与验证
 

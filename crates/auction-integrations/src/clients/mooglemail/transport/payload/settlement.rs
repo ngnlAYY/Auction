@@ -38,8 +38,8 @@ pub(crate) fn decode_settlement_payload(
 fn decode_send_payload(
     claim: &DeliveryWorkClaim,
 ) -> Result<(SettlementDeliveryPayload, MoogleMailWorld), DeliveryTransportError> {
-    let mut payload: SettlementSendWirePayload =
-        serde_json::from_value(claim.payload.clone()).map_err(|_| invalid_payload())?;
+    let mut payload =
+        SettlementSendWirePayload::deserialize(&claim.payload).map_err(|_| invalid_payload())?;
     let world = MoogleMailWorld::parse(&payload.world).ok_or_else(invalid_payload)?;
     if payload.schema_version != SCHEMA_VERSION
         || payload.operation != "send"
@@ -69,8 +69,8 @@ fn decode_send_payload(
 fn decode_return_payload(
     claim: &DeliveryWorkClaim,
 ) -> Result<(SettlementDeliveryPayload, MoogleMailWorld), DeliveryTransportError> {
-    let payload: SettlementReturnWirePayload =
-        serde_json::from_value(claim.payload.clone()).map_err(|_| invalid_payload())?;
+    let payload =
+        SettlementReturnWirePayload::deserialize(&claim.payload).map_err(|_| invalid_payload())?;
     let world = MoogleMailWorld::parse(&payload.world).ok_or_else(invalid_payload)?;
     if payload.schema_version != SCHEMA_VERSION
         || payload.operation != "return"

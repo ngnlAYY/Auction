@@ -29,9 +29,11 @@ CLI 只装配配置、应用/存储端口和受控外部工具，不能绕过领
 规则、论坛、结算、预检和备份分工（`lot_watch_pm.rs` 只装配安全列表/持久只读核对请求）；`runtime/postgres/artifacts/`
 负责 PostgreSQL 环境、文件、manifest/hash、子进程和 stdin 输入，其 `filesystem/parents.rs` 验证灾备文件目录链与属主；
 `runtime/managed.rs` 拥有合并部署迁移锁，`runtime/mail_diagnostics/` 拥有邮件证据命令。
+`deployment_control/systemd/process.rs` 拥有 systemctl 同步执行的非阻塞双管道读取、截止时刻和直接子进程回收。
 
 当前格式/v28 备份 manifest 与 systemd 启动回执均在同一已打开描述符上校验普通文件及权限，
 并以既有 64 KiB 上限加一个检测字节限量读取；规则导入同样按既有正文上限加单个 UTF-8 BOM 限量读取。
+部署控制锁也在已校验的同一描述符上收紧权限，不重新通过路径修改文件。
 这些读取拒绝符号链接和特殊文件，文件并发增长也不能绕过内存预算；不把 metadata 的读取前长度当作最终上限。
 灾备摘要与 fsync 也复用拒绝 symlink、非阻塞的同一描述符校验，FIFO 不会阻塞在普通 open。
 当前格式和 v28 manifest 的摘要绑定本次实际解析的原始字节，不在 archive 校验后重开路径；
@@ -177,8 +179,12 @@ Public 与 Admin 的 Unix listener 都不得复用已启用 Worker control 的 s
 unit，由 `--systemctl`、`--state-dir`、`--worker-unit`、`--admin-unit`、`--public-unit` 覆盖；start/restart
 默认配置目录 `/etc/auction`，每角色 readiness 预算 30 秒（1–300 秒可调）。锁、unit 环境绑定、1 秒单次探针
 与回执见[systemd 手册](ops/README.md#systemd-服务与顺序控制)。
-systemctl stdout 在读取阶段限制为 64 KiB，超限立即终止并回收直接子进程；stderr 由一个临时读取线程并发排空，
-只保留 2 KiB 诊断前缀。单行诊断按 UTF-8 字节预算截断，不因中文字符超过上限；未新增总墙钟 timeout。
+systemctl 保持同步调用，状态查询最多 5 秒，启停命令最多 60 秒（示例 unit 的 `TimeoutStopSec` 为 45 秒）；
+readiness 探针前后的状态查询另受该角色剩余预算约束。两个非阻塞管道交替读取，stdout 限制为 64 KiB，
+stderr 持续排空但只保留 2 KiB 诊断前缀，单行诊断按 UTF-8 字节预算截断。超时、读取失败或 stdout 超限均关闭管道、
+强制终止直接子进程，并额外用最多 5 秒确认回收；回收失败也明确报错，不等待读取线程或继承管道的其他进程。
+超时错误不输出已捕获的配置或诊断正文，不解释为成功、不自动重试；systemd 已接收的 job 可能仍在执行，须重新核对状态。
+启动失败仍按原流程停止本次启动集合；停止或状态查询失败继续阻断后续迁移，不以终止 systemctl 证明 unit 已停止。
 Readiness 只接受 512 字节预算内完整 CRLF 结尾的 HTTP/1.0 或 HTTP/1.1 `200` 状态行；
 半行后 EOF、仅 LF、超长未终止行都失败关闭。分片响应只扫描新增字节，不反复搜索已读前缀。
 探测前后核对同一 systemd `MainPID`、`InvocationID` 和单调启动时间，发布 started/adopted 回执前再次核对

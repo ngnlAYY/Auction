@@ -54,7 +54,7 @@ pub(super) fn parse_blocks(markdown: &str) -> Vec<MarkdownBlock> {
             && trimmed.contains('|')
             && is_table_separator(lines[index + 1].trim())
         {
-            let headers = split_table_row(trimmed).into_iter().map(parse_inline).collect();
+            let headers = split_table_row(trimmed).map(parse_inline).collect();
             index += 2;
             let mut rows = Vec::new();
             while index < lines.len() {
@@ -62,7 +62,7 @@ pub(super) fn parse_blocks(markdown: &str) -> Vec<MarkdownBlock> {
                 if row.is_empty() || !row.contains('|') {
                     break;
                 }
-                rows.push(split_table_row(row).into_iter().map(parse_inline).collect());
+                rows.push(split_table_row(row).map(parse_inline).collect());
                 index += 1;
             }
             blocks.push(MarkdownBlock::Table { headers, rows });
@@ -181,19 +181,17 @@ fn is_rule(value: &str) -> bool {
 }
 
 fn is_table_separator(value: &str) -> bool {
-    let cells = split_table_row(value);
-    !cells.is_empty()
-        && cells.iter().all(|cell| {
-            let cell = cell.trim();
-            cell.len() >= 3 && cell.chars().all(|character| character == '-' || character == ':')
-        })
+    // split 即使对空文本也产生一个单元格；空行仍由长度校验拒绝。
+    split_table_row(value).all(|cell| {
+        cell.len() >= 3 && cell.chars().all(|character| character == '-' || character == ':')
+    })
 }
 
-fn split_table_row(value: &str) -> Vec<&str> {
+fn split_table_row(value: &str) -> impl Iterator<Item = &str> {
     let value = value.trim();
     let value = value.strip_prefix('|').unwrap_or(value);
     let value = value.strip_suffix('|').unwrap_or(value);
-    value.split('|').map(str::trim).collect()
+    value.split('|').map(str::trim)
 }
 
 fn unordered_item(value: &str) -> Option<&str> {

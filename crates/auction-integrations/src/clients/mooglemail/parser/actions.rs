@@ -26,30 +26,26 @@ impl MoogleMailParser {
         let form_selector = selector("form#mailform", MoogleMailOperation::Detail, summary.world)?;
         let panes_selector =
             selector("#mmail_attachpanes", MoogleMailOperation::Detail, summary.world)?;
-        let envelopes = document.select(&envelope_selector).collect::<Vec<_>>();
-        let forms = document.select(&form_selector).collect::<Vec<_>>();
-        let panes = document.select(&panes_selector).collect::<Vec<_>>();
-        if envelopes.len() != 1 || forms.len() != 1 || panes.len() != 1 {
-            return Err(detail_error(summary.world, MoogleMailErrorCategory::ProtocolDrift));
-        }
-        if envelopes[0].select(&form_selector).count() != 1
-            || envelopes[0].select(&panes_selector).count() != 1
+        let operation = MoogleMailOperation::Detail;
+        let envelope =
+            unique_element(document.select(&envelope_selector), operation, summary.world)?;
+        let form = unique_element(document.select(&form_selector), operation, summary.world)?;
+        unique_element(document.select(&panes_selector), operation, summary.world)?;
+        if envelope.select(&form_selector).take(2).count() != 1
+            || envelope.select(&panes_selector).take(2).count() != 1
         {
             return Err(detail_error(summary.world, MoogleMailErrorCategory::ProtocolDrift));
         }
         // 列表显示名可能被服务端截断，不能据此拒绝详情中的完整发件人或重建业务身份。
-        let fields = parse_detail_fields(forms[0], summary.world)?;
+        let fields = parse_detail_fields(form, summary.world)?;
         let textarea_selector = selector("textarea", MoogleMailOperation::Detail, summary.world)?;
-        let textareas = forms[0].select(&textarea_selector).collect::<Vec<_>>();
-        if textareas.len() != 1 {
-            return Err(detail_error(summary.world, MoogleMailErrorCategory::ProtocolDrift));
-        }
-        let body = textareas[0].text().collect::<String>();
+        let textarea = unique_element(form.select(&textarea_selector), operation, summary.world)?;
+        let body = textarea.text().collect::<String>();
         if !valid_message_body(&body) {
             return Err(detail_error(summary.world, MoogleMailErrorCategory::ProtocolDrift));
         }
         let assets = parse_detail_assets(&document, &body, summary.world)?;
-        let (returnable, claimable) = parse_detail_actions(envelopes[0], summary.world)?;
+        let (returnable, claimable) = parse_detail_actions(envelope, summary.world)?;
         let has_assets = !assets.attachments.is_empty() || assets.credits > 0;
         if claimable != has_assets {
             return Err(detail_error(summary.world, MoogleMailErrorCategory::ProtocolDrift));
@@ -92,29 +88,24 @@ impl MoogleMailParser {
         let envelope_selector = selector("#mmail_outer", MoogleMailOperation::Detail, world)?;
         let form_selector = selector("form#mailform", MoogleMailOperation::Detail, world)?;
         let panes_selector = selector("#mmail_attachpanes", MoogleMailOperation::Detail, world)?;
-        let envelopes = document.select(&envelope_selector).collect::<Vec<_>>();
-        let forms = document.select(&form_selector).collect::<Vec<_>>();
-        let panes = document.select(&panes_selector).collect::<Vec<_>>();
-        if envelopes.len() != 1
-            || forms.len() != 1
-            || panes.len() != 1
-            || envelopes[0].select(&form_selector).count() != 1
-            || envelopes[0].select(&panes_selector).count() != 1
+        let operation = MoogleMailOperation::Detail;
+        let envelope = unique_element(document.select(&envelope_selector), operation, world)?;
+        let form = unique_element(document.select(&form_selector), operation, world)?;
+        unique_element(document.select(&panes_selector), operation, world)?;
+        if envelope.select(&form_selector).take(2).count() != 1
+            || envelope.select(&panes_selector).take(2).count() != 1
         {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
-        let fields = parse_detail_fields(forms[0], world)?;
+        let fields = parse_detail_fields(form, world)?;
         let textarea_selector = selector("textarea", MoogleMailOperation::Detail, world)?;
-        let textareas = forms[0].select(&textarea_selector).collect::<Vec<_>>();
-        if textareas.len() != 1 {
-            return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
-        }
-        let body = textareas[0].text().collect::<String>();
+        let textarea = unique_element(form.select(&textarea_selector), operation, world)?;
+        let body = textarea.text().collect::<String>();
         if !valid_message_body(&body) {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
         let assets = parse_detail_asset_manifest(&document, world)?;
-        let (returnable, claimable) = parse_detail_actions(envelopes[0], world)?;
+        let (returnable, claimable) = parse_detail_actions(envelope, world)?;
         let has_assets = !assets.equipment_ids.is_empty() || assets.credits > 0;
         if claimable != has_assets {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));

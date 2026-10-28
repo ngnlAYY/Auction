@@ -158,7 +158,7 @@ pub(super) async fn satisfy_postgres(
         )
         .bind(&proof.kind)
         .bind(&proof.reference)
-        .bind(proof.digest.to_vec())
+        .bind(proof.digest.as_slice())
         .bind(proof.observed_at)
         .bind(claim.obligation_id.as_uuid())
         .bind(fulfillment_state_name(claim.state))

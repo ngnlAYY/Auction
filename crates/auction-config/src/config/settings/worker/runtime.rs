@@ -8,23 +8,20 @@ use super::mooglemail::{
 
 /// 将 Admin 管理的旧版业务区块投影到 Worker 的 MoogleMail 启动快照。
 /// transport endpoint、凭据来源和全局 `enabled` 仍由 Worker 主配置拥有；调度可由 operations/mail
-/// 独立接管。此处的共享 runtime
-/// 只决定旧版管理页实际可写的 world、发件人、装备过滤和通知模板。邮箱标识优先沿用主配置
-/// 中同 world 的值，避免一次运营更新意外切换 durable cursor。
+/// 独立接管。转移已校验 runtime 的 world、发件人、装备过滤和通知模板，避免复制后立即丢弃原文档。
+/// 邮箱标识优先沿用主配置中同 world 的值，避免一次运营更新意外切换 durable cursor。
 pub(in crate::config::settings) fn apply_runtime_document(
     config: &mut MoogleMailWorkerConfig,
-    document: &AdminRuntimeDocument,
+    document: AdminRuntimeDocument,
 ) {
-    let (Some(worlds), Some(equipment_filter), Some(mail_templates)) = (
-        document.worlds.as_ref(),
-        document.equipment_filter.as_ref(),
-        document.mail_templates.as_ref(),
-    ) else {
+    let (Some(worlds), Some(equipment_filter), Some(mail_templates)) =
+        (document.worlds, document.equipment_filter, document.mail_templates)
+    else {
         return;
     };
 
     let mut enabled_worlds = Vec::with_capacity(2);
-    for (world_id, runtime) in [("main", &worlds.main), ("isekai", &worlds.isekai)] {
+    for (world_id, runtime) in [("main", worlds.main), ("isekai", worlds.isekai)] {
         if !runtime.enabled {
             continue;
         }
@@ -43,7 +40,7 @@ pub(in crate::config::settings) fn apply_runtime_document(
         enabled_worlds.push(MoogleMailWorldConfig {
             world_id: world_id.to_owned(),
             mailbox_key,
-            sender_allowlist: runtime.sender_allowlist.clone(),
+            sender_allowlist: runtime.sender_allowlist,
             sender_allowlist_disabled: runtime.sender_allowlist_disabled,
         });
     }
@@ -64,16 +61,16 @@ pub(in crate::config::settings) fn apply_runtime_document(
         qualities: if equipment_filter.qualities.is_empty() {
             auction_application::default_accepted_qualities()
         } else {
-            equipment_filter.qualities.clone()
+            equipment_filter.qualities
         },
-        prefixes: equipment_filter.prefixes.clone(),
-        suffixes: equipment_filter.suffixes.clone(),
-        categories: equipment_filter.categories.clone(),
-        equipment_types: equipment_filter.equipment_types.clone(),
+        prefixes: equipment_filter.prefixes,
+        suffixes: equipment_filter.suffixes,
+        categories: equipment_filter.categories,
+        equipment_types: equipment_filter.equipment_types,
         level_min: equipment_filter.level.min,
         level_max: equipment_filter.level.max,
     };
-    config.mail_templates = mail_templates.clone();
+    config.mail_templates = mail_templates;
 }
 
 /// 将 Admin runtime 的论坛装备标色规则投影到 Worker 论坛启动快照。

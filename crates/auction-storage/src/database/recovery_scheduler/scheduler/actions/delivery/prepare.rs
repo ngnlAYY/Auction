@@ -16,13 +16,16 @@ pub(crate) async fn link_action_postgres(
         .state_version
         .checked_add(1)
         .ok_or_else(|| repository_error("recovery action 状态版本溢出"))?;
-    let claim_snapshot = claim.clone();
-    let request_digest = request_hash.as_bytes().to_vec();
+    // 重试只捕获固定身份与 fence，避免复制收件人、附件和诊断等完整 claim。
+    let action_id = claim.action_id;
+    let recovery_id = claim.recovery_id;
+    let expected_state_version = claim.state_version;
+    let claim_token = claim.claim_token;
+    let fencing_version = claim.fencing_version;
+    let request_digest = request_hash.as_bytes();
     run_serializable_action_transaction(pool, move |transaction| {
-        let claim = claim_snapshot.clone();
-        let request_digest = request_digest.clone();
         Box::pin(async move {
-            lock_action(transaction, claim.action_id.as_uuid()).await?;
+            lock_action(transaction, action_id.as_uuid()).await?;
             let result = sqlx::query(
                 r#"UPDATE public.settlement_recovery_actions
                    SET execution_state = 'prepared',
@@ -44,12 +47,12 @@ pub(crate) async fn link_action_postgres(
             )
             .bind(delivery_id)
             .bind(command_id.as_uuid())
-            .bind(&request_digest)
-            .bind(claim.action_id.as_uuid())
-            .bind(claim.recovery_id.as_uuid())
-            .bind(claim.state_version)
-            .bind(claim.claim_token)
-            .bind(claim.fencing_version)
+            .bind(request_digest.as_slice())
+            .bind(action_id.as_uuid())
+            .bind(recovery_id.as_uuid())
+            .bind(expected_state_version)
+            .bind(claim_token)
+            .bind(fencing_version)
             .execute(&mut **transaction)
             .await
             .map_err(RecoveryActionTransactionError::from)?;
@@ -65,7 +68,7 @@ pub(crate) async fn link_action_postgres(
                    WHERE id = $1
                    FOR UPDATE"#,
             )
-            .bind(claim.action_id.as_uuid())
+            .bind(action_id.as_uuid())
             .fetch_optional(&mut **transaction)
             .await
             .map_err(RecoveryActionTransactionError::from)?
@@ -86,11 +89,11 @@ pub(crate) async fn link_action_postgres(
                 current.try_get("prepare_command_id").map_err(map_storage_error)?;
             let current_digest: Option<Vec<u8>> =
                 current.try_get("prepare_request_digest").map_err(map_storage_error)?;
-            if current_recovery_id == claim.recovery_id.as_uuid()
+            if current_recovery_id == recovery_id.as_uuid()
                 && current_state == "prepared"
                 && current_state_version == state_version
-                && current_claim_token == Some(claim.claim_token)
-                && current_fencing == claim.fencing_version
+                && current_claim_token == Some(claim_token)
+                && current_fencing == fencing_version
                 && current_delivery_id == Some(delivery_id)
                 && current_command_id == Some(command_id.as_uuid())
                 && current_digest.as_deref() == Some(request_digest.as_slice())
@@ -108,20 +111,6 @@ pub(crate) async fn link_action_postgres(
     })
     .await?;
     Ok(RecoveryActionClaim {
-        action_id: claim.action_id,
-        recovery_id: claim.recovery_id,
-        kind: claim.kind.clone(),
-        world_id: claim.world_id.clone(),
-        buyer_user_id: claim.buyer_user_id,
-        recipient: claim.recipient.clone(),
-        recipient_eligible: claim.recipient_eligible,
-        recipient_state_version: claim.recipient_state_version,
-        payment_reference: claim.payment_reference.clone(),
-        source_external_mail_id: claim.source_external_mail_id.clone(),
-        expected_credits: claim.expected_credits,
-        expected_cod: claim.expected_cod,
-        expected_attachment_ids: claim.expected_attachment_ids.clone(),
-        reason: claim.reason.clone(),
         execution_state: "prepared".to_owned(),
         delivery_id: Some(delivery_id),
         prepare_command_id: Some(command_id),
@@ -129,12 +118,6 @@ pub(crate) async fn link_action_postgres(
         activate_command_id: None,
         activate_request_hash: None,
         state_version,
-        claim_token: claim.claim_token,
-        lease_until: claim.lease_until,
-        fencing_version: claim.fencing_version,
-        retry_count: claim.retry_count,
-        worker_id: claim.worker_id.clone(),
-        claimed_at: claim.claimed_at,
-        created_at: claim.created_at,
+        ..claim.clone()
     })
 }

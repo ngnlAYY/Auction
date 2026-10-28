@@ -33,8 +33,9 @@ Admin 可选 `worker_config_file` 由配置 owner 有界读取非敏感 Worker �
 不加载 Worker 的 common/secrets，引用须与 Admin runtime 同源。候选按真实启动快照及 managed 覆盖验证，
 缺少可证明基值时明确拒绝，规则及升级步骤见[配置手册](ops/config/README.md#文件职责)。
 
-各角色仍独立加载并校验其文件快照，不缓存跨次文件内容。Admin 在窄投影完成后接管已解析 runtime 文档，不再复制
-完整文档；Worker 的 world 投影只借用部署邮箱标识，避免为查找邮箱复制发件人名单。
+各角色仍独立加载并校验其文件快照，不缓存跨次文件内容。Admin 在窄投影完成后接管已解析 runtime 文档；
+Public/Worker 直接转移 bot 名单，Worker 在其他投影完成后消费该文档，转移发件人名单、装备过滤列表与邮件模板。
+Worker 的 world 投影只借用部署邮箱标识，避免为查找邮箱复制发件人名单。
 告警 world 成员检查同样只借用世界标识，不为成员判断克隆邮箱、发件人名单或排序。
 Admin dashboard、Worker 周排期/恢复健康与 CLI 的 world/mailbox 查询复用 `configured_mailboxes` 借用迭代器，
 与完整 world 配置共用唯一稳定分组，不分配临时列表；完整发件人名单仅在邮件业务确实需要持有时复制。

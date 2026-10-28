@@ -29,6 +29,8 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
 取消排队请求不会预占未来时间槽。用户正文中的“登录”等文字不能作为凭据失效证明；战斗状态也只识别真实
 `battle_main` DOM 节点，不接受正文或脚本中的同名文字。HTML 解析使用 scraper 0.27 / selectors 0.38，
 关闭默认 CLI feature 但保留 `errors`，仅使用库 API，不以手写解析器替代协议边界。
+邮件列表、详情与 Take 空详情的唯一节点检查最多读取两个匹配；列表行、列的临时索引只保留协议上限及一个
+超限哨兵，异常重复节点不再生成完整临时集合。分页 query 按四个固定字段借用校验，重复、未知及缺失字段仍拒绝。
 装备 HTML 的六个固定选择器由 `LazyLock` 在进程内编译一次；只缓存选择器及其编译失败，页面正文和字段仍逐次解析校验。
 邮件和装备请求的登录页判断沿 DOM 深度维护隐藏状态，拒绝提示也沿同一原则提取可见文本；深层嵌套不再逐节点重扫祖先。
 被 `script`、`style`、`noscript` 或 `textarea` 包围的内容仍不能作为登录失效或发送拒绝证据。
@@ -133,6 +135,7 @@ Sent 正文摘要复用换行规范化的分配后截短尾部空白，不再生
 超限不截断、不发送部分内容。Worker 启动快照 `MoogleMailNotificationTemplates::from_config` 直接持有应用层模板结构，
 闭集、默认正文与占位符校验复用 `AdminRuntimeMailTemplatesConfig`，本 crate 只拥有渲染与发送上限。
 `MoogleMailWorld` 与领域 `SettlementWorld` 通过 `From` 双向转换，网关与装配根不再手写世界映射。
+邮件与结算 delivery 直接借用 claim 的 JSON 反序列化到各自 wire 类型，不先深复制整棵 JSON；字段闭集和全部业务校验保留。
 
 [transport/payload/settlement/pricing.rs](crates/auction-integrations/src/clients/mooglemail/transport/payload/settlement/pricing.rs)
 校验买家装备 COD 的完整价格变量并格式化千分位金额、带符号百分比与适用的奖池抵扣；旧三变量载荷仅省略价格明细，

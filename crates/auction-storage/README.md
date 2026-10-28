@@ -125,7 +125,7 @@ bidding、lifecycle、admin 拆分；旧竞价账本重放仍在一致快照中�
 只读旧结算核验复用应用层的完成请求摘要；旧 `settlement_complete` 账本仍按原历史格式单独核验。
 命令、告警、用户及通知写入借用原请求摘要绑定 `bytea`；信封文本与 replay JSON 同样借用已持有数据，
 不另建参数 Vec 或深克隆 JSON，摘要、编码、幂等比较及事务边界不变。
-邮件入队/激活、投递收口、履约与 Recovery 的摘要参数同样绑定固定字节切片；可空摘要先保存在栈上，
+邮件入队/激活、投递收口、履约、旧版自持修复与 Recovery 的摘要参数同样绑定固定字节切片；可空摘要先保存在栈上，
 保持 SQL `NULL`、原 bytea 编码及严格身份比较，不为绑定单独分配或复制临时 Vec。
 Admin 规则、邮箱管理、Recovery 命令及周轮次 bootstrap 的已有重试边界也按 `40001`/`40P01` 识别明确中止，
 保持原最多三次整事务尝试；唯一约束、未知提交及普通连接失败不因此重试。全部重试判断共用
@@ -216,6 +216,8 @@ Public/Admin 拍卖列表与 Public 补偿批次先物化当前页拍卖 ID，�
 total 与全局补偿余额仍覆盖原完整范围，原排序、游标、无 lot 场次及金额 fallback 保持，不增加索引或迁移。
 Realtime dashboard 的全量 lag 聚合、有界明细与 failure 水位共用同一只读一致快照；健康和总积压使用全量值，
 不能从排序前 200 条明细推断全局无积压，wire 字段见[Dashboard 契约](docs/contracts/routes.md#dashboard-与-readiness)。
+Admin realtime 事件页使用 `NOT MATERIALIZED` 合并无副作用的筛选 CTE，使计数与当前页可分别规划，
+避免把全部匹配元数据物化后再排序；仍在同一 SQL 语句快照内保留空页总数及安全投影，映射只建立一份结果集合。
 Public realtime 回放按实际读取行数预留事件空间；空页不按请求上限分配，原序号推进与 refetch 门禁不变。
 竞价、生命周期、录入、结算与恢复追加公开事件时共用 [realtime/sequence.rs](crates/auction-storage/src/database/realtime/sequence.rs)：
 单条 `ON CONFLICT DO UPDATE ... RETURNING` 补建 stream、持行锁递增 `next_sequence` 并返回本次序号，与原三段语句取得同一锁；
@@ -349,6 +351,8 @@ Recovery action 终态先锁父 case 再锁 action，确认路径按 UUID 预锁
 `lock_recovery_delivery_retry_scope` / `lock_recovery_delivery_retry_actions` 两阶段锁，只用于无 allocation 的
 RetryFailed/ReconcileRetry，SQLSTATE 原样交 runner。源码静态结果见[状态页](docs/status.md)，迁移、SQL 执行、并发与
 大库锁成本仍需独立运行证据。
+Recovery action 关联及激活投递的重试只捕获固定身份、版本、fence 与栈上摘要，返回时复用原 claim 的其余字段，
+不为每次尝试复制收件人、附件和诊断文本。退件证据直接借用持有的 JSON 严格解码，保留未知字段、金额及附件校验。
 
 `000051` 追加 `settlement_recovery_return_consumptions`，以退件 `return_mail_id` 全局唯一地保存消费事实，
 禁止更新或删除；记录、计数和后续 action 在同一 Serializable 事务提交。重寄清空 recovery 当前指针仍排除旧邮件，

@@ -149,6 +149,10 @@ layer，未使用 `MetricsLayer`。锁文件仅删除该包到 `smallvec` 的依
 smallvec。`opentelemetry-otlp/http-proto` 自身会启用 metrics，因此没有宣称移除整套 OTel metrics feature。Prometheus
 采集、日志归一化、trace exporter 与 TLS 保持原配置。直接依赖用途和工具独立锁的最新检查见[状态页](docs/status.md)。
 
+同日后续全仓复核确认直接依赖均有实际用途；cache 清单删除重复的 Tokio `sync/time` 声明，继续继承工作区同名
+feature，生效能力与 535 个锁条目保持不变。重复版本由原生发布图和双端 WASM 图分别审阅，保留上游不兼容版本约束。
+该轮未增加程序库、升级版本或更改工具锁；应用与工具的公告结果见[本轮记录](docs/status.md#2026-10-27-全仓精简与资源生命周期复核)。
+
 ### 2026-10-27 全仓性能与依赖复核
 
 再次核对工作区直接依赖、重复版本、独立 Public WASM 图及三角色/合并服务的真实发布 feature 图；`cargo machete`

@@ -50,6 +50,8 @@ HV UID 读取论坛目标资料，预期名称为 `None` 仍自动远端核验�
 绑定、精确 EID 正向存在及 Main cash observation；`prepare_internal_evidence_with_sent` 在同一上下文追加精确 Sent 领取
 观察，纳入完整摘要、时间门禁与同 session 锁序。opaque prepared 保留同 session/独占 guard，提交作用域未确定结束就
 取消或销毁会 sticky 撤销 owner；请求 purpose 区分结算 claim、投递 claim、资金运维命令，同一绝对预算最多 30 秒。
+证据摘要按原顺序直接消费借用字段；协议常量、已有身份与 Sent 装备列表不再复制成临时字符串或列表，
+长度前缀、数字/时间编码及摘要字节保持不变。
 
 ## 卖方全额结算
 

@@ -5,16 +5,20 @@ use std::{
     collections::BTreeMap,
     ffi::OsStr,
     fs,
-    io::{self, Read},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::{Child, Command, Output, Stdio},
+    process::{Command, Output, Stdio},
+    time::{Duration, Instant},
 };
 
 use anyhow::Context;
 
+mod process;
+
 const MAX_SYSTEMCTL_OUTPUT_BYTES: usize = 64 * 1024;
 const MAX_SYSTEMCTL_DIAGNOSTIC_BYTES: usize = 2_048;
+const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
+const MUTATION_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(super) const START_ORDER: [ManagedRole; 3] =
     [ManagedRole::Worker, ManagedRole::Admin, ManagedRole::Public];
@@ -136,6 +140,15 @@ impl SystemdClient {
     }
 
     pub(super) fn snapshot(&self, role: ManagedRole) -> anyhow::Result<UnitSnapshot> {
+        self.snapshot_until(role, Instant::now() + SNAPSHOT_TIMEOUT)
+    }
+
+    /// readiness 前后查询共用剩余预算；单次查询仍不得超过五秒。
+    pub(super) fn snapshot_until(
+        &self,
+        role: ManagedRole,
+        deadline: Instant,
+    ) -> anyhow::Result<UnitSnapshot> {
         let unit = self.unit(role);
         let output = self.output(
             "读取 systemd unit 状态",
@@ -156,13 +169,18 @@ impl SystemdClient {
                 OsStr::new("--property=DynamicUser"),
                 OsStr::new(unit),
             ],
+            deadline.min(Instant::now() + SNAPSHOT_TIMEOUT),
         )?;
         parse_snapshot(&output.stdout).with_context(|| format!("解析 {unit} 状态失败"))
     }
 
     pub(super) fn start_unit(&self, role: ManagedRole) -> anyhow::Result<()> {
         let unit = self.unit(role);
-        self.output("启动 systemd unit", [OsStr::new("start"), OsStr::new(unit)])?;
+        self.output(
+            "启动 systemd unit",
+            [OsStr::new("start"), OsStr::new(unit)],
+            Instant::now() + MUTATION_TIMEOUT,
+        )?;
         println!("role={} unit={} action=start-requested", role.name(), unit);
         Ok(())
     }
@@ -177,7 +195,11 @@ impl SystemdClient {
         if before.load_state != "loaded" {
             anyhow::bail!("{} unit 未装载：{}", role.name(), unit)
         }
-        self.output("停止 systemd unit", [OsStr::new("stop"), OsStr::new(unit)])?;
+        self.output(
+            "停止 systemd unit",
+            [OsStr::new("stop"), OsStr::new(unit)],
+            Instant::now() + MUTATION_TIMEOUT,
+        )?;
         let after = self.snapshot(role)?;
         if !after.stopped() {
             anyhow::bail!(
@@ -205,11 +227,14 @@ impl SystemdClient {
         }
     }
 
-    fn output<I, S>(&self, label: &str, arguments: I) -> anyhow::Result<Output>
+    fn output<I, S>(&self, label: &str, arguments: I, deadline: Instant) -> anyhow::Result<Output>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        if Instant::now() >= deadline {
+            anyhow::bail!("{label}：systemctl 执行预算已耗尽");
+        }
         let child = Command::new(&self.executable)
             .arg("--no-pager")
             .arg("--no-ask-password")
@@ -219,8 +244,8 @@ impl SystemdClient {
             .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("{label}：无法执行 {}", self.executable.display()))?;
-        let output =
-            capture_output(child).with_context(|| format!("{label}：读取 systemctl 输出失败"))?;
+        let output = process::capture_output(child, deadline)
+            .with_context(|| format!("{label}：执行 systemctl 失败"))?;
         if output.status.success() {
             return Ok(output);
         }
@@ -232,51 +257,6 @@ impl SystemdClient {
             if diagnostic.is_empty() { "systemctl 未提供诊断" } else { &diagnostic },
         )
     }
-}
-
-/// stdout 在读取时限量；stderr 并发排空但只保留诊断前缀，避免双管道互相阻塞。
-/// 超限或读取失败必须先杀死并回收子进程，再等待诊断读取线程结束。
-fn capture_output(mut child: Child) -> anyhow::Result<Output> {
-    let result = (|| {
-        let stdout = child.stdout.take().context("systemctl stdout pipe is missing")?;
-        let stderr = child.stderr.take().context("systemctl stderr pipe is missing")?;
-        std::thread::scope(|scope| {
-            let diagnostic = std::thread::Builder::new().spawn_scoped(scope, move || {
-                let mut stderr = stderr;
-                let mut bytes = Vec::with_capacity(MAX_SYSTEMCTL_DIAGNOSTIC_BYTES);
-                stderr
-                    .by_ref()
-                    .take(MAX_SYSTEMCTL_DIAGNOSTIC_BYTES as u64)
-                    .read_to_end(&mut bytes)?;
-                io::copy(&mut stderr, &mut io::sink())?;
-                Ok::<_, io::Error>(bytes)
-            })?;
-            let stdout = (|| {
-                let mut bytes = Vec::new();
-                stdout.take(MAX_SYSTEMCTL_OUTPUT_BYTES as u64 + 1).read_to_end(&mut bytes)?;
-                if bytes.len() > MAX_SYSTEMCTL_OUTPUT_BYTES {
-                    anyhow::bail!("systemctl 输出超过 64 KiB 上限");
-                }
-                Ok::<_, anyhow::Error>(bytes)
-            })();
-            if stdout.is_err() {
-                let _ = child.kill();
-            }
-            let status = child.wait();
-            if status.is_err() {
-                let _ = child.kill();
-            }
-            let stderr = diagnostic
-                .join()
-                .map_err(|_| anyhow::anyhow!("systemctl diagnostic reader panicked"))?;
-            Ok(Output { status: status?, stdout: stdout?, stderr: stderr? })
-        })
-    })();
-    if result.is_err() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-    result
 }
 
 fn validate_systemctl(path: &Path) -> anyhow::Result<PathBuf> {

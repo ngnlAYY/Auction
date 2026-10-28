@@ -17,8 +17,8 @@ pub(crate) fn decode_payload(
     {
         return Err(invalid_payload());
     }
-    let payload: MailDeliveryPayload =
-        serde_json::from_value(claim.payload.clone()).map_err(|_| invalid_payload())?;
+    let payload =
+        MailDeliveryPayload::deserialize(&claim.payload).map_err(|_| invalid_payload())?;
     if payload.schema_version != SCHEMA_VERSION
         || !valid_line(&payload.world, 16, false)
         || !valid_line(&payload.external_mail_id, 256, false)
