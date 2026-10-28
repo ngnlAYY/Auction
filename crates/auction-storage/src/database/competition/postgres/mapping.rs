@@ -12,17 +12,6 @@ pub(crate) fn plan_command_id(
         .ok_or_else(|| invalid_state("竞价计划没有可审计的命令标识"))
 }
 
-pub(crate) fn terminal_reason(
-    plan: &CompetitionPlan,
-    authorization_id: ProxyAuthorizationId,
-) -> Option<ProxyTerminalReason> {
-    plan.proxy_transitions
-        .iter()
-        .rev()
-        .find(|transition| transition.authorization_id == authorization_id)
-        .and_then(|transition| transition.reason)
-}
-
 pub(crate) fn proxy_from_row(
     row: sqlx::postgres::PgRow,
 ) -> Result<ProxyAuthorization, CompetitionTransactionError> {

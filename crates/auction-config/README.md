@@ -36,6 +36,8 @@ Admin 可选 `worker_config_file` 由配置 owner 有界读取非敏感 Worker �
 各角色仍独立加载并校验其文件快照，不缓存跨次文件内容。Admin 在窄投影完成后接管已解析 runtime 文档，不再复制
 完整文档；Worker 的 world 投影只借用部署邮箱标识，避免为查找邮箱复制发件人名单。
 告警 world 成员检查同样只借用世界标识，不为成员判断克隆邮箱、发件人名单或排序。
+Admin dashboard、Worker 周排期/恢复健康与 CLI 的 world/mailbox 查询复用 `configured_mailboxes` 借用迭代器，
+与完整 world 配置共用唯一稳定分组，不分配临时列表；完整发件人名单仅在邮件业务确实需要持有时复制。
 Worker `mail_templates` 直接使用应用层 `AdminRuntimeMailTemplatesConfig`：TOML 字段闭集、默认正文与占位符校验和
 Admin runtime 同源，runtime 投影整体替换模板而不逐字段复制；结算模式与世界名称经领域稳定名称表解析，
 Unix 监听属组复用应用层 `valid_listener_group`，配置层不再保留第二份规则。

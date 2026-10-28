@@ -142,6 +142,16 @@ prometheus-client 需要另审 OpenMetrics 与进程指标兼容，Leptos CSR �
 驱动/Redis 用窄 feature，发布图和静态 all-features 图分别审阅。默认[静态验证](docs/guide/development.md)不执行行为
 测试，运行证据见[状态页](docs/status.md)。
 
+### 2026-10-27 全仓性能与依赖复核
+
+再次核对工作区直接依赖、重复版本、独立 Public WASM 图及三角色/合并服务的真实发布 feature 图；`cargo machete`
+未发现未使用直接依赖。本轮优化使用标准库和现有依赖，不增加、删除或升级依赖，Cargo 清单与锁图保持不变。
+已有跨版本传递约束与 feature-only 的 OTLP TLS 依赖仍有用途，不以重写协议或上游内部 API 换取包数下降。
+发布隔离门禁已改为检查实际的 PostgreSQL、Redis 与 Web feature，避免默认图漏掉条件依赖。
+
+受控 cargo-audit 刷新 1,380 条 RustSec 公告后，应用锁图为零漏洞、零警告；构建工具仍分别保留完整锁审计结果，
+见[工具公告复核](ci/tools/README.md#2026-10-27-公告复核)。这些结论来自本次锁图审计，不替代运行验证。
+
 ### 2026-10-27 冗余与死代码复审中的依赖核对
 
 `cargo machete` 仍未发现未使用直接依赖，本轮没有删除或新增直接依赖，也未改变版本与锁图。随无人调用的 `use_media_query`

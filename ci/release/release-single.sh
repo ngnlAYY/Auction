@@ -28,7 +28,7 @@ verify_single_artifacts() {
 		assert_binary_excludes "$root/bin/auctionctl" "$marker" 'Single auctionctl'
 	done
 	# 先收集完整依赖图，不能让 grep -q 的提前关闭与 pipefail 掩盖违规。
-	server_tree=$(cargo tree --locked -e normal,build -p auction-server --features postgres,web-embed)
+	server_tree=$(cargo tree --locked -e normal,build -p auction-server --no-default-features --features "${single_features:?}")
 	if grep -Fq 'auctionctl v' <<<"$server_tree"; then
 		printf 'auction-server 不得依赖 auctionctl\n' >&2
 		return 1

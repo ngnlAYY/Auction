@@ -294,6 +294,9 @@ fn build_provider(
         || config.queue_capacity == 0
         || config.max_export_batch_size == 0
         || config.max_export_batch_size > config.queue_capacity
+        || config.batch_timeout.is_zero()
+        || config.export_timeout.is_zero()
+        || config.shutdown_timeout.is_zero()
     {
         return Err(InitError { message: "tracing exporter configuration is invalid".to_owned() });
     }

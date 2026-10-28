@@ -291,9 +291,14 @@ impl MoogleMailClient {
                 )
             }
         };
+        let capacity = response
+            .content_length()
+            .and_then(|length| usize::try_from(length).ok())
+            .unwrap_or_default()
+            .min(self.maximum_response_bytes);
         time::timeout(self.request_timeout, async {
-            // 失败或超时取消时清理半截正文；诊断只允许保留完整且未超限的响应。
-            let mut body = SensitiveBytes(Vec::new());
+            // 有界预留减少敏感正文扩容复制；失败或取消清理半截正文，诊断仅保留完整响应。
+            let mut body = SensitiveBytes(Vec::with_capacity(capacity));
             while let Some(chunk) = response.chunk().await.map_err(|_| read_error())? {
                 if body.0.len().saturating_add(chunk.len()) > self.maximum_response_bytes {
                     return Err(if write_started {

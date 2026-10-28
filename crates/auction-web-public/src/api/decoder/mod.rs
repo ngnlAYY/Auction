@@ -252,7 +252,9 @@ fn time_value(value: Option<&Value>) -> Option<f64> {
 
 fn uuid(value: &str) -> bool {
     Uuid::parse_str(value).is_ok_and(|id| {
-        id.to_string() == value
+        // 列表与实时帧逐字段校验规范形式；栈缓冲避免为每个 UUID 创建临时字符串。
+        let mut buffer = Uuid::encode_buffer();
+        id.hyphenated().encode_lower(&mut buffer) == value
             && !id.is_nil()
             && (1..=5).contains(&id.get_version_num())
             && id.get_variant() == Variant::RFC4122

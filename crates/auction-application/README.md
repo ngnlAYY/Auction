@@ -111,6 +111,8 @@ Sent 对账，不能重寄未知写入。
   `AdminRuntimeMailTemplatesConfig::validate`，错误消息稳定且不回显正文。
 - [core/encoding.rs](crates/auction-application/src/ports/core/encoding.rs) 的 `lower_hex` 统一摘要、指纹与人工确认短语的
   固定两位小写十六进制编码，一次分配、逐字节结果不变。
+  crate 内 Go JSON 分段转义同时供账本摘要和履约 canonical 字节复用；转义表只维护一份，
+  摘要直接消费借用片段，canonical 输出按连续片段复制，均保持旧编码字节。
 - `valid_notification_body`（冻结通知摘要）、`valid_allowlist_host`/`valid_allowlist_path_prefix`（装备来源 allowlist）与
   `valid_listener_group`（Unix 监听属组）分别供入队/存储重放/发送前校验及部署配置复用。
 - 闭集枚举名称与规范文本不变量归 [auction-domain](crates/auction-domain/README.md)，本 crate 只调用不复制。
@@ -142,6 +144,8 @@ payload、稳定身份及摘要不得包含装备 secret，派发世界与装备
 重算。精确旧三/八变量的 prepared/enqueued 快照沿用原 canonical 字节与摘要；显式 v2 九变量形状及兼容边界见
 [交付载荷契约](docs/contracts/schema.md#结算恢复与交付)。
 履约 intent 在栈内编码一次规范小写 UUID，统一核对所有义务的 reference；不通过宽松 UUID 解析接受其他拼写或改变 canonical 摘要。
+履约证明的装备 ID 只排序借用列表，保留重复项和旧字典序；证明与激活摘要复用 Go JSON 兼容摘要入口，
+无需复制装备 ID 字符串或另建转义后的完整 JSON 缓冲，字段顺序、空值省略及 SHA-256 字节保持原义。
 
 [ports/settlement/internal](crates/auction-application/src/ports/settlement/internal) 与履约服务的 `internal.rs`、
 `collected.rs`、`refund.rs` 拥有新 pending 的真实身份分支、内部满足、外部 COD 资金化及原合法退款用途授权：
@@ -330,6 +334,7 @@ Admin 录入命令中的完整装备 URL、论坛镜像正文和邮箱 compose �
 每条已校验事件直接移交 sink，只保留确认所需的 ID/序号，
 避免复制完整 JSON payload。sink 失败不推进游标，sink 成功但游标提交失败仍按原 at-least-once 规则重投。
 公开事件注册表按每个字段一次查找同时拒绝缺失与 `null`；完整字段集合、类型、金额范围和流身份校验不变。
+公开事件的 UUID 使用栈缓冲比较，仍要求规范小写拼写，并拒绝 nil 与非既有版本/variant。
 
 ## 冻结策略与事务约束
 

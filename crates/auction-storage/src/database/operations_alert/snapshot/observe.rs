@@ -80,23 +80,28 @@ pub(crate) async fn observe_postgres(
         .fetch_all(&mut *transaction)
         .await
         .map_err(|_| storage_error("读取 operations alert 当前 signal 失败"))?;
+        let mut resolved = Vec::new();
         for row in active_rows {
             let fingerprint: Vec<u8> = row
                 .try_get("fingerprint")
                 .map_err(|_| storage_error("读取 operations alert fingerprint 失败"))?;
             if !fingerprints.contains(fingerprint.as_slice()) {
-                sqlx::query(
-                    "UPDATE public.operations_alert_signals
-                     SET active = false, resolved_at = $2, next_notify_at = NULL,
-                         state_version = state_version + 1
-                     WHERE fingerprint = $1 AND active",
-                )
-                .bind(fingerprint)
-                .bind(command.now)
-                .execute(&mut *transaction)
-                .await
-                .map_err(|_| storage_error("关闭已恢复 operations alert signal 失败"))?;
+                resolved.push(fingerprint);
             }
+        }
+        if !resolved.is_empty() {
+            // 沿用上方完整来源锁集；批量关闭只减少往返，每条 signal 仍各推进一次版本。
+            sqlx::query(
+                "UPDATE public.operations_alert_signals
+                 SET active = false, resolved_at = $2, next_notify_at = NULL,
+                     state_version = state_version + 1
+                 WHERE fingerprint = ANY($1::bytea[]) AND active",
+            )
+            .bind(&resolved)
+            .bind(command.now)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| storage_error("关闭已恢复 operations alert signal 失败"))?;
         }
     }
 

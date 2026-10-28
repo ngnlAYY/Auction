@@ -113,6 +113,7 @@ Admin realtime replay 在追加替代事件的同一事务复用 consumer 恢复
 
 竞价按 world → auction → lot 加锁：只读 world/auction 使用共享行锁，lot、活动代理、参与者资格和账本保留排他锁，
 生命周期使用对应排他锁；取得锁后读取数据库时间，同一计划的代理、领先时间、截止、审计及接受事实共用该时刻。
+代理写入一次建立授权到最后转换原因的查找表，批量关闭不再为每个状态重扫全部转换；最后原因为空时仍保留空值。
 竞价、生命周期和创建拍卖的命令组合器不再注入未使用的应用时钟；这些服务仅依赖事务锁后的数据库时间。
 规则发布仍保留实际使用的 `Clock`，不改变其审计时间来源。
 命令账本、状态、审计和 realtime/outbox 同事务提交，Preview/Open/Final 与轮次完成标记也原子写入。`competition/postgres/` 按
@@ -152,6 +153,7 @@ sending 先锁 lot 再锁 delivery 并复核；取消/重新领先使旧资格�
 `lot_watch/preference.rs` 只锁 user 做独立偏好 CAS。[lot_watch_pm](crates/auction-storage/src/database/lot_watch_pm) 独占
 PM claim、lot→任务 sending fence、原 sender 对账和 CLI 安全投影：`000042` 保留旧 MM payload/digest，PM 缺 UID 明确
 suppressed 且不回退 MM；sending 永不回 pending，过期 sending 只转 manual_reconcile。
+PM 载荷借用已读取的 JSON 解码，避免复制正文；完整重编码、字段身份及摘要核验仍在发送前执行。
 
 ## 持久调度与慢速代理
 
@@ -246,6 +248,7 @@ Admin 读取不为补全投影临时写入；邮件展示和诊断 sidecar 均�
 `pending/prepared/enqueued` 阶段；最老积压按这批义务及独立的未终结 `blocked` 义务计算。
 `contingent` 退款保持未触发事实，不进入待处理与积压年龄；`blocked/failed/manual_reconcile` 保持各自计数，
 Dashboard 与 operations alert 共用该投影，字段契约见[Dashboard 与 readiness](docs/contracts/routes.md#dashboard-与-readiness)。
+告警恢复先锁定并校验来源的完整 active 集合，再用一次 UPDATE 关闭已恢复指纹，每条仍独立推进版本；来源不可用时保留历史告警。
 Delivery 告警、内部履约冲突/锁定、资金分类及旧履约证明查询只在首次调用时组合固定 SQL，后续复用不可变文本；
 每次仍读取当前事务事实并取得原锁集合，不缓存水位/资格、不放宽 `TRUSTED_DELIVERY_PREDICATE`，也不拼接业务输入。
 结算报告在同一 Serializable 快照内读取汇总与明细，序列化冲突最多尝试三次；明细排除不参与结算的
@@ -394,7 +397,9 @@ delivery 锁之前按持久 allocation 关联早锁原账户，孤儿/歧义失�
 实时 `sent_exact_payload_v1`，或经过不可变尝试和唯一 MID 绑定核验的 `sent_recovered_frozen_v1`；旧 reference
 恢复证明不改标、不新增来源，开户前时间边界、完整原载荷和 prepare/activate 绑定保持不变。
 资金预览仅对严格解码且零 Credits、零 COD、无附件的纯通知排除资金未知阻塞，保留通知本身的人工核对状态。
-该分类流式读取历史载荷，只保留通过原闭集解码器的 UUID；不省略任何候选，也不把正文整批保存在内存。
+该分类先在 SQL 按 Send、零 Credits、零 COD、空附件筛出必要候选，再流式执行原闭集解码，只保留通过校验的 UUID；
+四个条件字段均为无 default/alias 的非可空必填项，历史 `origin_id` 的 `delivery-notice` 后缀继续由原 owner 校验。
+原闭集校验与 UUID 顺序保持不变，不把正文整批保存在内存。
 
 ## 后端选择、连接池与验证
 

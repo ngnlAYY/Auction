@@ -68,7 +68,13 @@ impl EhentaiClient {
                 EhentaiError::response_too_large(operation)
             });
         }
-        let mut body = Vec::new();
+        // 只按已受上限约束的长度预留，减少正常分页响应的扩容复制；逐块门禁仍是最终边界。
+        let capacity = response
+            .content_length()
+            .and_then(|length| usize::try_from(length).ok())
+            .unwrap_or_default()
+            .min(self.maximum_response_bytes);
+        let mut body = Vec::with_capacity(capacity);
         while let Some(chunk) = response.chunk().await.map_err(|_| {
             if write_started {
                 EhentaiError::write_unknown(operation)

@@ -160,7 +160,10 @@ release.sh 在构建前冻结构建输入（apps、crates、migrations、配置�
 各阶段同时复查输入和环境摘要；范围外的文档修改不触发原生重建。核验实际二进制标记、对端资源缺失与 Worker 依赖，
 再校验白名单、权限、统一时间、两次相同 archive、内外哈希和依赖摘要；tar 流直接压缩，不落盘未压缩副本。
 文件指纹批量读取 metadata/SHA-256，避免逐文件启动两个进程；NUL 路径、权限、删除及符号链接身份仍参与摘要。
+归档内 `SHA256SUMS` 同样按排序后的 NUL 路径批量生成，保持原清单顺序和格式，减少逐文件进程创建。
 `verify_build_info` 统一拥有复用和阶段复核，feature 与二进制完整性另行检查，不重复紧接扫描同一输入。
+依赖隔离检查使用实际发布图：三角色启用 `postgres,cache-redis`，Public/Admin 另启用 `web-embed`，合并服务复用
+同一 `single_features`。默认无数据库图不再代替发布图，避免遗漏条件依赖；API-only 对照仍只启用 PostgreSQL。
 构建与装包各自在子进程退出时清理本次候选目录；失败不删除旧制品或 Cargo 增量缓存。
 正式 package 要求干净工作树。分体包为 Public、Admin、Worker、
 auctionctl，仅两端内嵌各自页面；`--single-binary` 先通过分体门禁，再核对 server 双 payload 和独立无 Web 的

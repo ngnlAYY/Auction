@@ -8,6 +8,8 @@ use uuid::Uuid;
 
 use auction_domain::CommandId;
 
+use super::core_encoding::for_each_legacy_go_json_segment;
+
 /// 幂等账本使用的固定 SHA-256 请求摘要。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RequestHash([u8; 32]);
@@ -40,31 +42,7 @@ impl RequestHash {
         let encoded = serde_json::to_vec(value)?;
         // 未转义片段直接送入摘要，避免为兼容转义再分配、扩容并复制整份 JSON。
         let mut digest = Sha256::new();
-        let mut start = 0;
-        let mut index = 0;
-        while index < encoded.len() {
-            let replacement = match encoded[index] {
-                b'<' => Some((br"\u003c".as_slice(), 1)),
-                b'>' => Some((br"\u003e".as_slice(), 1)),
-                b'&' => Some((br"\u0026".as_slice(), 1)),
-                0xe2 if encoded.get(index..index + 3) == Some([0xe2, 0x80, 0xa8].as_slice()) => {
-                    Some((br"\u2028".as_slice(), 3))
-                }
-                0xe2 if encoded.get(index..index + 3) == Some([0xe2, 0x80, 0xa9].as_slice()) => {
-                    Some((br"\u2029".as_slice(), 3))
-                }
-                _ => None,
-            };
-            if let Some((replacement, consumed)) = replacement {
-                digest.update(&encoded[start..index]);
-                digest.update(replacement);
-                index += consumed;
-                start = index;
-            } else {
-                index += 1;
-            }
-        }
-        digest.update(&encoded[start..]);
+        for_each_legacy_go_json_segment(&encoded, |segment| digest.update(segment));
         let digest = digest.finalize();
         let mut bytes = [0_u8; 32];
         bytes.copy_from_slice(&digest);

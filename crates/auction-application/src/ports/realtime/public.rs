@@ -268,7 +268,10 @@ fn valid_public_uuid(value: Uuid) -> bool {
 }
 
 fn valid_public_uuid_string(value: &str) -> bool {
-    Uuid::parse_str(value).is_ok_and(|uuid| uuid.to_string() == value && valid_public_uuid(uuid))
+    Uuid::parse_str(value).is_ok_and(|uuid| {
+        let mut buffer = Uuid::encode_buffer();
+        uuid.hyphenated().encode_lower(&mut buffer) == value && valid_public_uuid(uuid)
+    })
 }
 
 fn valid_uuid_value(value: Option<&Value>) -> bool {

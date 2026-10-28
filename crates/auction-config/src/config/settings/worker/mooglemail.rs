@@ -184,17 +184,46 @@ impl Default for MoogleMailWorkerConfig {
 }
 
 impl MoogleMailWorkerConfig {
+    /// 借用已配置世界与邮箱标识，沿用 `main`、`isekai` 排序，不复制发件人名单。
+    pub fn configured_mailboxes(&self) -> impl Iterator<Item = (&str, &str)> + Clone {
+        self.ordered_world_settings().map(|(world_id, mailbox_key, _, _)| (world_id, mailbox_key))
+    }
+
     /// 返回按 `main`、`isekai` 稳定排序的全部已配置世界。
     pub fn configured_worlds(&self) -> Vec<MoogleMailWorldConfig> {
-        let mut worlds = Vec::with_capacity(1 + self.additional_worlds.len());
-        worlds.push(MoogleMailWorldConfig {
-            world_id: self.world_id.clone(),
-            mailbox_key: self.mailbox_key.clone(),
-            sender_allowlist: self.sender_allowlist.clone(),
-            sender_allowlist_disabled: self.sender_allowlist_disabled,
-        });
-        worlds.extend(self.additional_worlds.iter().cloned());
-        worlds.sort_by_key(|world| if world.world_id == "main" { 0 } else { 1 });
+        self.ordered_world_settings()
+            .map(|(world_id, mailbox_key, sender_allowlist, sender_allowlist_disabled)| {
+                MoogleMailWorldConfig {
+                    world_id: world_id.to_owned(),
+                    mailbox_key: mailbox_key.to_owned(),
+                    sender_allowlist: sender_allowlist.to_owned(),
+                    sender_allowlist_disabled,
+                }
+            })
+            .collect()
+    }
+
+    /// 两种投影共用稳定分组：main 优先，其余保持原序；借用遍历不分配临时列表。
+    fn ordered_world_settings(
+        &self,
+    ) -> impl Iterator<Item = (&str, &str, &[String], bool)> + Clone {
+        let worlds = std::iter::once((
+            self.world_id.as_str(),
+            self.mailbox_key.as_str(),
+            self.sender_allowlist.as_slice(),
+            self.sender_allowlist_disabled,
+        ))
+        .chain(self.additional_worlds.iter().map(|world| {
+            (
+                world.world_id.as_str(),
+                world.mailbox_key.as_str(),
+                world.sender_allowlist.as_slice(),
+                world.sender_allowlist_disabled,
+            )
+        }));
         worlds
+            .clone()
+            .filter(|(world_id, ..)| *world_id == "main")
+            .chain(worlds.filter(|(world_id, ..)| *world_id != "main"))
     }
 }

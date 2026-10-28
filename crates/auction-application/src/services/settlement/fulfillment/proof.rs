@@ -1,13 +1,10 @@
 //! 结算履约外部证据的稳定摘要。
 
 use crate::{
-    ApplicationError, SettlementFulfillmentBalanceEvidence, SettlementFulfillmentClaim,
-    SettlementFulfillmentSentEvidence,
+    ApplicationError, RequestHash, SettlementFulfillmentBalanceEvidence,
+    SettlementFulfillmentClaim, SettlementFulfillmentSentEvidence,
 };
 use serde::Serialize;
-use sha2::{Digest, Sha256};
-
-use super::canonical::to_go_json_bytes;
 
 /// 旧版 `fulfillmentProofDigest` 的 evidence 载荷。
 /// 字段顺序和 `omitempty` 语义必须保持与 Go 的 `encoding/json` 一致；因此这里不复用
@@ -25,7 +22,7 @@ struct LegacyFulfillmentEvidence<'a> {
     #[serde(rename = "cod_pending", skip_serializing_if = "Option::is_none")]
     cod_pending: Option<i64>,
     #[serde(rename = "equipment_ids", skip_serializing_if = "Option::is_none")]
-    equipment_ids: Option<Vec<String>>,
+    equipment_ids: Option<Vec<&'a str>>,
     #[serde(rename = "collected", skip_serializing_if = "Option::is_none")]
     collected: Option<bool>,
 }
@@ -61,10 +58,12 @@ fn legacy_proof_digest(
     delivery_id: uuid::Uuid,
     sent: Option<&SettlementFulfillmentSentEvidence>,
 ) -> Result<[u8; 32], ApplicationError> {
-    let mut equipment_ids =
-        sent.map(|value| value.remaining_equipment_ids.clone()).unwrap_or_default();
-    // 旧版 CanonicalIDs 是复制后按字符串排序；不能直接信任 evidence 的输入顺序。
-    equipment_ids.sort();
+    let mut equipment_ids: Vec<&str> = sent
+        .into_iter()
+        .flat_map(|value| value.remaining_equipment_ids.iter().map(String::as_str))
+        .collect();
+    // 只排序借用的 ID，保留旧版字符串排序和重复项，不复制 evidence 或改变输入顺序。
+    equipment_ids.sort_unstable();
 
     let evidence = sent
         .map(|value| LegacyFulfillmentEvidence {
@@ -74,7 +73,7 @@ fn legacy_proof_digest(
             subject: (!value.subject.is_empty()).then_some(value.subject.as_str()),
             remaining_credits: (value.remaining_credits != 0).then_some(value.remaining_credits),
             cod_pending: (value.cod_pending != 0).then_some(value.cod_pending),
-            equipment_ids: (!equipment_ids.is_empty()).then_some(equipment_ids.clone()),
+            equipment_ids: (!equipment_ids.is_empty()).then_some(equipment_ids),
             collected: value.collected.then_some(true),
         })
         .unwrap_or(LegacyFulfillmentEvidence {
@@ -93,7 +92,5 @@ fn legacy_proof_digest(
         status: "succeeded",
         evidence,
     };
-    let encoded = to_go_json_bytes(&payload)?;
-    let digest = Sha256::digest(encoded);
-    Ok(digest.into())
+    Ok(RequestHash::from_legacy_go_json(&payload)?.as_bytes())
 }

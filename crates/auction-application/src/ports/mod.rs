@@ -301,6 +301,7 @@ pub use core_competition::{
     CompetitionSnapshot, CompetitionTransaction, CompetitionTransactionError, ProxyUsageContext,
     SlowProxyExecutionContext, TransactionFailure, TransactionFuture, TransactionRunner,
 };
+pub(crate) use core_encoding::for_each_legacy_go_json_segment;
 pub use core_encoding::lower_hex;
 pub use core_ledger::{CommandLedger, CommandLedgerError, RequestHash, StoredCommand};
 pub use core_policy::{TransactionIsolation, TransactionPolicy, TransactionPolicyError};

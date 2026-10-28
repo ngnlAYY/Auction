@@ -171,17 +171,10 @@ fn increment_counter<C>(counter: &C, last: &AtomicU64, current: u64, divisor: f6
 where
     C: CounterIncrement,
 {
-    loop {
-        let previous = last.load(Ordering::Relaxed);
-        if current <= previous {
-            return;
-        }
-        let delta = current - previous;
-        if last.compare_exchange(previous, current, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-            // 这里需要通过具体 counter 类型增加；由下面的 trait 适配器统一处理浮点与整数。
-            counter_increment(counter, delta, divisor);
-            return;
-        }
+    // 原子领取尚未累计的增量；过时快照和并发 scrape 都不能回退水位或重复计数。
+    let previous = last.fetch_max(current, Ordering::Relaxed);
+    if current > previous {
+        counter.increment(current - previous, divisor);
     }
 }
 
@@ -199,11 +192,4 @@ impl CounterIncrement for Counter {
     fn increment(&self, delta: u64, divisor: f64) {
         self.inc_by(delta as f64 / divisor);
     }
-}
-
-fn counter_increment<C>(counter: &C, delta: u64, divisor: f64)
-where
-    C: CounterIncrement,
-{
-    counter.increment(delta, divisor);
 }

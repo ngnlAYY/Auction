@@ -33,10 +33,17 @@ pub(super) async fn repaired_deliveries(
 pub(super) async fn assetless_notifications(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<Vec<Uuid>, FundingError> {
-    // 完整分类仍逐条校验闭集载荷，只保留匹配 UUID，不把历史正文整批加载到内存。
+    // 这四个字段在 AttachmentPayload 中均为无 default/alias 的必填字段，SQL 只筛必要条件；
+    // 历史 origin_id 后缀仍由完整闭集解码后的 owner 校验，不把字段缺失当成零资产，
+    // 也不把历史正文整批加载到内存。
     let mut rows = sqlx::query(
         "SELECT id,origin_id,command_id,payload FROM public.deliveries
-         WHERE origin_kind='mail_intake' ORDER BY id",
+         WHERE origin_kind='mail_intake'
+           AND payload->>'operation'='send'
+           AND payload->'credits'='0'::jsonb
+           AND payload->'cod'='0'::jsonb
+           AND payload->'attachment_ids'='[]'::jsonb
+         ORDER BY id",
     )
     .fetch(&mut **tx);
     let mut ids = Vec::new();

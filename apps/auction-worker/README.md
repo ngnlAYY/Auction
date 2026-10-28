@@ -39,6 +39,7 @@ control 或独立 PM 任务提前退出、panic 或取消立即撤销 readiness�
 
 持久化装配结束后先检查已到达的停止请求，再决定是否启动周期心跳与 PM；停止 future 只消费一次，主循环保持立即 drain。
 竞价与生命周期适配器直接使用事务内数据库时间，不再装配未使用的时钟；邮件、履约与调度仍保留各自实际使用的时钟。
+周排期和恢复健康只借用已配置 world/mailbox 的窄投影，不复制邮件发件人名单；世界顺序和邮箱标识保持不变。
 
 `persistent.rs` 在装配时创建同一 `MailPollProgressTracker`，经 `mail/runtime.rs` 的 `MailPollRuntimePorts`
 同时注入 gateway、轮询任务与 control。它只保存有界进程观测，不能授权或恢复业务；协议和旧端降级见
