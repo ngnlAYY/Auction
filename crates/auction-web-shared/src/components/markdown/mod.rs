@@ -45,6 +45,17 @@ pub fn without_leading_title(markdown: &str) -> String {
     if !is_title {
         return markdown.to_owned();
     }
-    let rest = lines.collect::<Vec<_>>().join("\n");
-    rest.strip_prefix('\n').unwrap_or(&rest).to_owned()
+    // 保留 lines() 的 CRLF 归一化与末尾换行处理，只跳过标题后的第一条空行。
+    let mut lines = lines.peekable();
+    if lines.peek() == Some(&"") {
+        lines.next();
+    }
+    let mut rest = String::new();
+    for (index, line) in lines.enumerate() {
+        if index > 0 {
+            rest.push('\n');
+        }
+        rest.push_str(line);
+    }
+    rest
 }

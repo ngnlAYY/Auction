@@ -20,7 +20,7 @@ pub(super) fn plan_ordinary_bid(
 ) -> Result<CompetitionPlan, DomainError> {
     let CompetitionTrigger::OrdinaryBid { command_id, actor_id, amount, bid_ids, now } = trigger
     else {
-        unreachable!("竞价触发器种类已在外层匹配");
+        return Err(DomainError::InvalidBidState("竞价触发器与规划器不一致"));
     };
     if actor_id.is_nil() {
         return Err(DomainError::InvalidBidState("普通出价缺少有效参与者"));

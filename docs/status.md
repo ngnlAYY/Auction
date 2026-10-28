@@ -35,6 +35,41 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-27 最新源码、注释、文档与依赖复审
+
+基线为干净的 `5274cb78`。按 20 个工作区包建立清单，对 1,430 份 Rust 源码进行重复实现、panic、集合扫描和异步任务
+站点检查，并沿 CodeGraph 调用关系复核候选；另核对清单/锁图、构建脚本、迁移契约和 49 份 Markdown 的引用。
+这是全仓静态扫描与重点调用链审读，运行证据按下文单独记录。
+
+| owner | 本轮改动及边界 |
+| --- | --- |
+| application | 邮件过滤与标色配置列表改用集合判重，期望复杂度由 `O(N²)` 降为 `O(N)`；规范文本复用领域校验，ASCII 大小写、Unicode 原文及错误边界不变，删除过期空策略注释 |
+| domain | 六处规划器触发器不匹配的 `unreachable!` 改为 `InvalidBidState`，正常分派与竞价计算不变 |
+| integrations | 六个装备 HTML 固定选择器改为进程内惰性编译并借用；每次仍完整解析页面和校验属性，不缓存正文 |
+| storage | 恢复预检从一批完整迁移历史生成摘要，相关 SQL 由三次减为一次，保留完整成功前缀/checksum 门禁与只读快照；竞价日志逐页归一化筛选词，代理降额审计免临时向量 |
+| shared / Admin Web | 去标题处理移除中间行向量及正文副本；Admin 提交编号截取直接借用末尾八个 Unicode 字符，原展示和换行处理不变 |
+| observability | 关闭 tracing-opentelemetry 未用的默认 metrics 桥接，显式保留 tracing-log；锁图只删除一条 smallvec 依赖边，版本及包数不变 |
+
+HTTP/JSON、配置字段、迁移、金额和状态机契约保持；相关模块 README 与技术栈同步。12 个已有测试分别覆盖领域迁移、
+后端 URL、论坛解析/回执/分页/表单及诊断，未发现可直接删除的重复断言，本轮保留且不执行。
+直接依赖未发现可安全删除的未使用项；不为去重强制替换 SQLx、Dioxus 等上游的跨版本依赖。OTLP http-proto 仍会传递启用
+OTel metrics，不能将局部 feature 精简写成整个 metrics 依赖消失。
+
+Rust 1.99.0 下 `CARGO_BUILD_JOBS=2 just verify` 通过：仓库/布局/配置/i18n/装备契约门禁、格式、工作区全部已有目标、
+独立 PostgreSQL/Redis feature、Clippy `-D warnings` 与 Public/Admin WASM。Rust 1.94.1 的
+`CARGO_BUILD_JOBS=2 cargo +1.94.1 check --locked --workspace --all-targets --all-features` 通过。
+`cargo machete`、全部 CI shell 的 ShellCheck warning 检查及 `git diff --check` 通过；49 份 Markdown 的仓库内引用
+已核对。三角色与合并服务的实际发布 feature 图均仅启用 tracing-opentelemetry 的 tracing-log，未引入 Web 代码、
+第二数据库驱动或 native-tls/OpenSSL 运行库。
+
+受控 cargo-audit 0.22.2 回执校验通过，刷新至 RustSec 提交 `99670cfc0bc574433034b75876a4b791ccaa2efb`
+（1,380 条公告），最终应用锁 535 个包为零漏洞、零警告；同快照下 cargo-audit 独立锁通过，dx 完整锁仍有
+13 项漏洞匹配/11 项警告，sccache 仍有 7 项/17 项。工具锁未修改，未设置忽略项；现有受限调用路径及待升级事项见
+[工具审计](ci/tools/README.md#上游公告与实际使用范围)。
+
+本轮未新增或运行行为测试、数据库/浏览器验证、性能基准或部署，未重建发布制品。复杂度、SQL 次数和分配变化来自源码
+分析；吞吐、延迟与内存收益待代表性负载量测。
+
 ### 2026-10-27 全仓性能、稳定性与依赖复核
 
 基线为干净的 `b82a7a6b`，本次修改尚未提交。经用户授权按 20 个工作区包的 owner 并行审查源码、注释、已有测试、

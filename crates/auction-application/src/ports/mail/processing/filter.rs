@@ -1,3 +1,8 @@
+//! 邮件装备准入策略及其配置边界。
+
+use std::collections::HashSet;
+
+use auction_domain::valid_text;
 use serde_json::Value;
 
 use super::super::AdminIntakeSourceSnapshot;
@@ -74,19 +79,13 @@ impl MailEquipmentFilter {
             if list.len() > 256 {
                 return Err(MailProcessingError::InvalidConfiguration);
             }
-            for (index, value) in list.iter().enumerate() {
-                if value.is_empty()
-                    || value.len() > 128
-                    || value != value.trim()
-                    || value.chars().any(char::is_control)
-                    || list[..index].iter().any(|previous| previous == value)
-                {
+            let mut seen = HashSet::with_capacity(list.len());
+            for value in list {
+                if !valid_text(value, 128) || !seen.insert(value.as_str()) {
                     return Err(MailProcessingError::InvalidConfiguration);
                 }
             }
         }
-        // 品质门槛始终存在（空列表也回退默认 L/P），因此不再需要“至少一个过滤条件”
-        // 的空策略检查；保留上面的循环只为校验其它 token 列表。
         Ok(())
     }
 

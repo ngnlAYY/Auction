@@ -24,7 +24,9 @@ Admin 可由 runtime 覆盖，应用装配只传入敏感 TOML 中的 OTLP heade
 装配根收口业务资源后调用刷新和关闭。
 
 追踪使用 OpenTelemetry API/SDK/OTLP 0.33.1 与 tracing-opentelemetry 0.34.0，保留自有有界队列、丢弃/失败计数
-和关闭预算。OTLP builder 显式使用 `RetryPolicy::disabled()`，不接受 0.33 默认新增的三次重试；保留上游默认
+和关闭预算。tracing-opentelemetry 只启用 `tracing-log`，不编译未装配的 `MetricsLayer`；
+OTLP 的 `http-proto` 仍传递启用 OTel metrics feature，应用指标继续由 Prometheus 导出。
+OTLP builder 显式使用 `RetryPolicy::disabled()`，不接受 0.33 默认新增的三次重试；保留上游默认
 64 MiB 请求体上限（编码及压缩后），超限计入导出失败，不影响业务命令。未启用 gRPC 或 OTel 内部日志。
 上游 HTTP builder 会合并环境导出头，`auction-config` 在启用 tracing 时拒绝这类环境注入，装配根只传入
 校验后的 TOML 配置（见[配置边界](ops/config/README.md#文件职责)）。

@@ -91,7 +91,7 @@ pub(super) fn plan_create_proxy(
         now,
     } = trigger
     else {
-        unreachable!("竞价触发器种类已在外层匹配");
+        return Err(DomainError::InvalidBidState("竞价触发器与规划器不一致"));
     };
     validate_create_proxy_policy(rules, auction_status, mode)?;
     let expected_sequence =
@@ -204,7 +204,7 @@ pub(super) fn plan_lower_proxy(
     let CompetitionTrigger::LowerProxy { command_id, actor_id, authorization_id, new_maximum, now } =
         trigger
     else {
-        unreachable!("竞价触发器种类已在外层匹配");
+        return Err(DomainError::InvalidBidState("竞价触发器与规划器不一致"));
     };
     let active = validate_lower_proxy_target(active, actor_id, authorization_id)?;
     if new_maximum >= active.maximum_amount {
@@ -254,7 +254,7 @@ pub(super) fn plan_slow_due(
         now,
     } = trigger
     else {
-        unreachable!("竞价触发器种类已在外层匹配");
+        return Err(DomainError::InvalidBidState("竞价触发器与规划器不一致"));
     };
     let Some(active) = active else {
         return Err(DomainError::InvalidBidState("慢速代理已不存在"));
@@ -301,7 +301,7 @@ pub(super) fn plan_final_proxy(
 ) -> Result<CompetitionPlan, DomainError> {
     let CompetitionTrigger::FinalProxy { command_id, authorization_id, bid_ids, now } = trigger
     else {
-        unreachable!("竞价触发器种类已在外层匹配");
+        return Err(DomainError::InvalidBidState("竞价触发器与规划器不一致"));
     };
     let Some(active) = active else {
         return Err(DomainError::InvalidBidState("慢速代理已不存在"));
@@ -357,7 +357,7 @@ pub(super) fn plan_terminal_proxy(
         | CompetitionTrigger::CloseProxy { command_id, authorization_id, now } => {
             (command_id, authorization_id, now)
         }
-        _ => unreachable!("代理终态触发器种类已在外层匹配"),
+        _ => return Err(DomainError::InvalidBidState("代理终态触发器与规划器不一致")),
     };
     let Some(active) = active else {
         return Err(DomainError::InvalidProxyTransition { from: next_status, to: next_status });

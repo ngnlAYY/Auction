@@ -144,7 +144,7 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 
 | owner | 关键职责 |
 | --- | --- |
-| domain | `CompetitionPlan`、竞价事实/代理转换/快照一致性、失败原子性、Fast/Slow/Final 共用反超计算 |
+| domain | `CompetitionPlan`、竞价事实/代理转换/快照一致性、失败原子性、Fast/Slow/Final 共用反超计算；内部触发器不匹配返回领域错误 |
 | application | 锁内用例顺序；`legacy_ledger` 与 `slow_replay` 校验历史结果与请求的绑定 |
 | storage | 后端锁模型、锁后 `occurred_at`、资格/会话一致性、generation/due fence；扫描在 LIMIT 前排除已截止 lot |
 
