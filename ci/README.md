@@ -25,7 +25,8 @@
 | RustSec 公告 / 未用依赖 | 无 recipe，直接调用 check.sh | dependency-audit / dependency-unused；不属于默认本地 verify |
 | 页面与发布 | web-build / build-api / build-release / build-single / release-check | 不由 check.sh 执行，见上方专用脚本 |
 
-check.sh 无参数仍执行五项策略门禁（all），支持一次传入多项；Cargo 检查使用 `--locked`，默认图、独立
+check.sh 无参数仍执行五项策略门禁（all），支持一次传入多项；repository 同时检查 `Cargo.lock` 已跟踪且未被忽略。
+Cargo 检查使用 `--locked`，默认图、独立
 PostgreSQL/Redis 图、all-features Clippy 和两端 WASM 分别核验。`ci/release/release.sh source-fingerprint` 只输出
 源码身份指纹，供 CI 缓存键与人工核对复用判定。MSRV job 单独用 1.94.1 编译全工作区/all-targets/all-features，
 不代表长期支持或业务验收。依赖 job 固定 cargo-audit 0.22.2、cargo-machete 0.9.2，audit 联网读取 RustSec，
@@ -82,8 +83,8 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
   `ACTIONS_RESULTS_URL`、`ACTIONS_RUNTIME_TOKEN`；`RUSTC_WRAPPER` 会写入 `BUILD-INFO`，与未启用包装器的产物不会互用。
 - artifacts 另按源码身份指纹缓存 `target/dist/artifacts` 与 `target/dx`（rust-cache 保存时会清掉非 Cargo 目录），
   并以 `release-artifacts-` 前缀回退：只改构建输入范围外的文档时，也能拿到上次产物与 dx 增量目录，
-  键来自 `bash ci/release/release.sh source-fingerprint`；命中即 `BUILD-INFO` 一致，前缀命中的旧目录仍由
-  `release.sh` 按构建输入复核，不满足就重建，不会把过期二进制当结果。
+  键来自 `bash ci/release/release.sh source-fingerprint`；恢复后仍复核 `BUILD-INFO` 与制品摘要，前缀命中的旧目录也由
+  `release.sh` 按同一门禁检查，不满足就重建。
 - security-audit 对无 TLS 依赖的 cargo-machete 保留固定版本安装；cargo-audit 改用 audit 档独立锁重建。
   `actions/cache` 分别保存 `target/audit-tools` 与 `target/build-tools`，按脚本/锁图/工具链身份分键，恢复后验证
   配方身份与全部二进制哈希；仅回执无效或缓存缺失时安装 CMake、pkg-config、OpenSSL 等源码构建依赖。
@@ -164,6 +165,10 @@ release.sh 在构建前冻结构建输入（apps、crates、migrations、配置�
 文件指纹批量读取 metadata/SHA-256，避免逐文件启动两个进程；NUL 路径、权限、删除及符号链接身份仍参与摘要。
 归档内 `SHA256SUMS` 同样按排序后的 NUL 路径批量生成，保持原清单顺序和格式，减少逐文件进程创建。
 `verify_build_info` 统一拥有复用和阶段复核，feature 与二进制完整性另行检查，不重复紧接扫描同一输入。
+API-only、embedded、single 共用 `build_variant`：目录发布前生成 `SHA256SUMS`，绑定 `BUILD-INFO`、本变体全部二进制，
+以及嵌入变体的四份 Web 清单/标记。复用和独立制品校验按固定白名单重算完整摘要，不执行缓存清单中的路径；缺少摘要的
+旧缓存或字节不符的制品触发重建。该清单只属于 `target/dist/artifacts/{api,embedded,single}/`，不追加到归档白名单；
+归档与外层发布目录继续分别生成现有 `SHA256SUMS`，保持包内路径、`RELEASE-MANIFEST.v1` 和校验格式。
 依赖隔离检查使用实际发布图：三角色启用 `postgres,cache-redis`，Public/Admin 另启用 `web-embed`，合并服务复用
 同一 `single_features`。默认无数据库图不再代替发布图，避免遗漏条件依赖；API-only 对照仍只启用 PostgreSQL。
 构建与装包各自在子进程退出时清理本次候选目录；失败不删除旧制品或 Cargo 增量缓存。

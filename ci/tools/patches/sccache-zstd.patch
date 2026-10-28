@@ -1,0 +1,9 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -465,4 +465,4 @@
+ [dependencies.zstd]
+-version = "0.13"
+-
++version = "0.14.3"
++
+ [dev-dependencies.assert_cmd]

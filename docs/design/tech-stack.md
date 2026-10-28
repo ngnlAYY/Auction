@@ -18,7 +18,7 @@
 | HTTP | Axum 0.8.9、Hyper、hyper-util、Tower | 共用连接栈，Public/Admin 路由分离 |
 | 浏览器 | Dioxus 0.7.10 | 纯 CSR，禁 fullstack/server |
 | Web 构建工具 | dx CLI 0.7.10，独立 TLS／Zstandard 修复锁 | 固定源码包重建、禁自动下载；配套工具及 SHA-256 由[工具 owner](ci/tools/README.md)维护 |
-| 编译缓存工具 | sccache 0.18.0，独立 TLS 修复锁 | 固定源码包重建，只启用本地/GHA；安装回执和二进制身份进入 `BUILD-INFO` |
+| 编译缓存工具 | sccache 0.18.0，独立 TLS／Zstandard 修复锁 | 固定源码包及最小清单补丁重建，只启用本地/GHA；安装回执和二进制身份进入 `BUILD-INFO` |
 | CI Actions | checkout 7.0.1、rust-cache 2.9.2、cache 6.1.0、upload-artifact 7.0.2、github-script 9.0.0 | 固定完整提交 SHA；权限、缓存与下载保留边界由 [CI 说明](ci/README.md)拥有 |
 | 国际化 | dioxus-i18n 0.6.0、unic-langid 0.9.6 | Fluent 编译期内嵌，五语言键一致 |
 | 数据库 | SQLx 0.9.0、PostgreSQL | 显式 postgres feature、SQL、事务与行锁 |
@@ -142,49 +142,23 @@ prometheus-client 需要另审 OpenMetrics 与进程指标兼容，Leptos CSR �
 驱动/Redis 用窄 feature，发布图和静态 all-features 图分别审阅。默认[静态验证](docs/guide/development.md)不执行行为
 测试，运行证据见[状态页](docs/status.md)。
 
-2026-10-27 的[批量持久化与边界复核](docs/status.md#2026-10-27-批量持久化与边界复核)再次核对 50 项直接外部依赖、
-五个原生程序和双端 WASM 的实际依赖图，未发现可安全删除的库；应用 535 个锁条目及三个独立工具锁均未改变。
-优化使用标准库和已有 SQL/HTML 解析能力。发布身份和工具配方补齐 Cargo 环境别名，避免环境变化仍复用旧制品；
-细节归[CI owner](ci/README.md#发布边界)，公告结果归[工具 owner](ci/tools/README.md#2026-10-27-公告复核)。
+### 当前依赖裁剪与复核
 
-### 2026-10-27 最新源码复审中的 feature 精简
+2026-10-27 再次核对 50 项直接外部依赖、五个原生发布图和双端 WASM 图，`cargo machete` 未发现未用直接依赖；
+应用 535 项锁条目保持不变。已有裁剪按能力归纳如下，历史检查证据保留在[状态页](docs/status.md)：
 
-核对上游锁定源码与实际装配后，`tracing-opentelemetry` 关闭默认 feature，仅保留 `tracing-log`；本项目只装配 trace
-layer，未使用 `MetricsLayer`。锁文件仅删除该包到 `smallvec` 的依赖边，包版本、checksum 与包数不变；其他依赖仍使用
-smallvec。`opentelemetry-otlp/http-proto` 自身会启用 metrics，因此没有宣称移除整套 OTel metrics feature。Prometheus
-采集、日志归一化、trace exporter 与 TLS 保持原配置。直接依赖用途和工具独立锁的最新检查见[状态页](docs/status.md)。
+- `tracing-opentelemetry` 只启用 `tracing-log`，不装配 `MetricsLayer`；OTLP 的 `http-proto` 仍会启用其 metrics。
+- `tracing-subscriber` 关闭无人使用的 ANSI，显式保留 JSON、过滤器及原其余默认能力，`nu-ansi-term` 已退出应用锁图。
+- cache 不重复声明工作区已启用的 Tokio `sync/time`；Web 不再启用已删除媒体查询 hook 的 `MediaQueryList`/`MediaQueryListEvent`。
+- `async-stream` 保留 SQLx 借用流；Base64/SHA-2、Tungstenite、darling 等重复版本遵循上游约束；OTLP 的 reqwest 仍负责 TLS。
+  Public/Admin 的 `url/idna` 也由路由依赖，删本项目调用不会消除这些包。
 
-同日后续全仓复核确认直接依赖均有实际用途；cache 清单删除重复的 Tokio `sync/time` 声明，继续继承工作区同名
-feature，生效能力与 535 个锁条目保持不变。重复版本由原生发布图和双端 WASM 图分别审阅，保留上游不兼容版本约束。
-该轮未增加程序库、升级版本或更改工具锁；应用与工具的公告结果见[本轮记录](docs/status.md#2026-10-27-全仓精简与资源生命周期复核)。
+本轮受控 cargo-audit 关闭未使用的二进制扫描，GNU 活跃图从 302 减至 293 个包，保留锁文件 RustSec/yanked 审计。
+sccache 通过固定哈希的最小清单补丁采用 Zstandard 修复版本，独立锁仅更新 zstd/zstd-safe/zstd-sys 三项；应用依赖不变。
+本次公告快照、实际可达图、剩余风险及工具回执由[工具 owner](ci/tools/README.md#同日并行审计锁文件扫描与-sccache-zstandard-修复)维护。
 
-### 2026-10-27 全仓性能与依赖复核
-
-再次核对工作区直接依赖、重复版本、独立 Public WASM 图及三角色/合并服务的真实发布 feature 图；`cargo machete`
-未发现未使用直接依赖。本轮优化使用标准库和现有依赖，不增加、删除或升级依赖，Cargo 清单与锁图保持不变。
-已有跨版本传递约束与 feature-only 的 OTLP TLS 依赖仍有用途，不以重写协议或上游内部 API 换取包数下降。
-发布隔离门禁已改为检查实际的 PostgreSQL、Redis 与 Web feature，避免默认图漏掉条件依赖。
-
-受控 cargo-audit 刷新 1,380 条 RustSec 公告后，应用锁图为零漏洞、零警告；构建工具仍分别保留完整锁审计结果，
-见[工具公告复核](ci/tools/README.md#2026-10-27-公告复核)。这些结论来自本次锁图审计，不替代运行验证。
-
-### 2026-10-27 冗余与死代码复审中的依赖核对
-
-`cargo machete` 仍未发现未使用直接依赖，本轮没有删除或新增直接依赖，也未改变版本与锁图。随无人调用的 `use_media_query`
-删除，`auction-web-shared` 不再启用 `web-sys` 的 `MediaQueryList`/`MediaQueryListEvent` feature；断点切换继续只由 CSS 承担。
-`auction-integrations` 删除无人调用的 `build_http_client`，rustls/ring provider 安装仍由实际发起请求的适配器负责，
-TLS 与 reqwest feature 不变。锁图中 Base64/SHA-2（SQLx）、Tungstenite 0.28（Dioxus devtools）、darling 0.20（croner 的
-derive_builder）等重复版本仍来自上游约束，沿用上文不强制合并的决定；`async-stream` 理由同下节，保留。
-本轮未刷新 cargo-audit 公告库，不新增公告结论。
-
-### 2026-10-26 性能复审中的依赖核对
-
-`cargo machete` 仍未发现未使用直接依赖；逐项核对低频直接依赖后只收窄一处 feature：`tracing-subscriber` 关闭默认
-`ansi`，显式保留 `fmt/std/smallvec/tracing-log` 并继续启用 `env-filter/json`。三个角色日志均为 JSON 且显式关闭 ANSI，
-`nu-ansi-term` 因此退出活跃图与锁图，日志格式、过滤器与 OTLP 不变。`async-stream` 只用于 `TrackedPool::fetch_many`
-的借用流，替代方案须依赖 sqlx-core 面向驱动的内部接口或手写自引用生成器，因此保留；Public/Admin WASM 中的
-`url`/`idna` 也由 dioxus-router 直接依赖，移除本项目调用不会减少载荷，保留。Public 可见性等待改用标准库 `poll_fn`，
-不改变 futures-util 在实时流中的使用。本轮未刷新 cargo-audit 公告库，不新增公告结论。
+发布身份覆盖 Cargo 环境别名与配置；API-only、内嵌和合并变体另按固定白名单验证完整制品摘要，
+归档契约及边界见[CI owner](ci/README.md#发布边界)。默认验证范围与历史结果仍归[状态页](docs/status.md)。
 
 ### 2026-10-15 全依赖审计
 

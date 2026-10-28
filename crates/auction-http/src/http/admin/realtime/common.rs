@@ -9,7 +9,7 @@ use axum::{
 };
 use uuid::Uuid;
 
-pub(crate) fn parse_page(query: &BTreeMap<String, String>) -> Result<(i64, i64, i64), ()> {
+pub(crate) fn parse_page(query: &BTreeMap<&str, String>) -> Result<(i64, i64, i64), ()> {
     let page = super::parse_positive_i64(query.get("page"), 1, None)?;
     let page_size =
         super::parse_positive_i64(query.get("page_size"), 50, Some(MAX_REALTIME_ADMIN_PAGE_SIZE))?;

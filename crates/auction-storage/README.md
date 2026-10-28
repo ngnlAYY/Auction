@@ -202,6 +202,17 @@ Preview/Open 轮次不聚合未使用的 lot 截止；Final 仍读取已 Open �
 | 论坛、凭据与告警 | `forum/`、`credentials/`、`operations_alert/` |
 | 规则、审计与 readiness 水位 | `rules/`、`admin_audit/`、`health/`、`audit_health/` |
 
+`settlement/facts.rs` 将 `lot_settlements` 按原计划顺序分成每批至多 256 行的参数化 INSERT，
+明细 INSERT 执行次数由 N 次减至 ⌈N/256⌉ 次，每批最多 2560 个绑定参数；额外构建内存仅随批量增长。
+计划校验、代理关闭、逐 lot 状态/价格核对、池 CAS、结算摘要、明细、账本、义务、恢复及审计/事件的先后顺序保持，
+全部共用原 Serializable 事务，任何约束或后续写入失败均返回错误并回滚。账本税费/补偿顺序保持原逐条追加。
+结算收口统计利用活动授权的 `bid_proxy_authorizations_one_active_lot_idx` 部分唯一索引保证每 lot 至多一条匹配，
+用普通 COUNT 代替三组 DISTINCT 聚合；撤回 lot 的残留活动代理仍阻断提交。
+`operations_alert/claims/create.rs` 在正文前缀已校验 1–64 项后一次写入批次条目，最多 320 个绑定参数，
+保留原 ordinal、fingerprint 和版本；delivery、batch、items、审计的事务顺序保持，明细写入由最多 64 次降至 1 次。
+完整的 256 行结算批次复用固定预处理语句；可变尾批和告警批次不进入连接预处理缓存。
+执行次数来自源码调用数，协议往返、实际耗时及并发行为尚未测量；上述改动不增加表、迁移或程序库。
+
 公开补偿池的 `balance` 是全部世界 `settlement_pools.balance` 的当前合计，`updated_at` 是资金池最近更新时间；
 批次列表继续展示不可变结算摘要，不能用“最后结算的某一世界余额”冒充全局余额，不改写任何历史结算或账本。
 
@@ -215,9 +226,10 @@ Preview/Open 轮次不聚合未使用的 lot 截止；Final 仍读取已 Open �
 `bid_log/postgres.rs` 的明细及 total 均保留同一命令内的普通出价和即时代理回应，不因后续代理事实而隐藏触发报价。
 原命令白名单、拍卖/world 可见性、五字段 keyset 排序和分页边界不变；结果仍只含公开金额、玩家和来源，
 不读取或暴露代理秘密上限。`valid` 只标识当前领先投影，完整事实不会因不再领先而从历史中删除。
-Admin 代理历史编号页与总数共用 Serializable 快照；仅 cursor 页多读取一条确定 `has_more`，编号页不生成游标。
+Admin 代理历史编号页与总数共用只读一致快照；仅 cursor 页多读取一条确定 `has_more`，编号页不生成游标。
 公开黑名单、目录列表与详情、竞价日志、成交历史、账户、补偿池，以及 Admin 邮件入站/delivery 和 realtime failure/lag
-的计数与当前页共用 Repeatable Read 只读事务，避免并发状态变化造成同一响应的总数与列表不一致；只读快照不持有 SSI
+的计数与当前页，以及 Admin 拍卖/lot/审计/改名/代理历史、结算目录和 recovery 报告，均共用 Repeatable Read 只读事务，
+避免并发状态变化造成同一响应的总数、列表和关联投影不一致；只读快照不持有 SSI
 谓词锁，高频公开读取不会放大 Serializable 竞价与结算事务的序列化冲突，自身也不会因 40001 失败。筛选、排序、
 空页总数和分页上限保持原契约。
 Public/Admin 拍卖列表与 Public 补偿批次先物化当前页拍卖 ID，再汇总该页 lot 或账本；

@@ -29,13 +29,17 @@ pub(super) async fn load(user_id: &str, world: &str) -> Result<Option<WatchedAuc
         .watches
         .iter()
         .filter(|watch| watch.watched)
-        .map(|watch| watch.lot_id.clone())
+        .map(|watch| watch.lot_id.as_str())
         .collect::<BTreeSet<_>>();
     // 未标记时不读取任何装备目录，场次和账号集合仍在返回前重新核对。
     let rows =
         if watched.is_empty() { Vec::new() } else { load_catalog(&auction, &watched).await? };
-    let current = fetch_current_auction(world.to_owned()).await.map_err(|_| ())?;
-    let current_watches = fetch_lot_watches(user_id, &auction.id).await.map_err(|_| ())?;
+    let (current, current_watches) = futures_util::join!(
+        fetch_current_auction(world.to_owned()),
+        fetch_lot_watches(user_id, &auction.id),
+    );
+    let current = current.map_err(|_| ())?;
+    let current_watches = current_watches.map_err(|_| ())?;
     if current.as_ref() != Some(&auction) || watch_versions(&current_watches) != expected {
         return Err(());
     }
@@ -44,17 +48,17 @@ pub(super) async fn load(user_id: &str, world: &str) -> Result<Option<WatchedAuc
 
 fn watch_versions(
     watches: &auction_contracts::PublicLotWatchesResponse,
-) -> BTreeMap<String, (bool, i64)> {
+) -> BTreeMap<&str, (bool, i64)> {
     watches
         .watches
         .iter()
-        .map(|watch| (watch.lot_id.clone(), (watch.watched, watch.version)))
+        .map(|watch| (watch.lot_id.as_str(), (watch.watched, watch.version)))
         .collect()
 }
 
 async fn load_catalog(
     auction: &CurrentAuction,
-    watched: &BTreeSet<String>,
+    watched: &BTreeSet<&str>,
 ) -> Result<Vec<CatalogRow>, ()> {
     let mut page_number = 1_i64;
     let mut expected_total = None;
@@ -96,7 +100,7 @@ async fn load_catalog(
             if !seen.insert(row.lot_id.clone()) {
                 return Err(());
             }
-            if watched.contains(&row.lot_id) {
+            if watched.contains(row.lot_id.as_str()) {
                 result.push(row);
             }
         }

@@ -416,13 +416,16 @@ A01 使用 Basic Auth、CSRF 和持久化会话。Admin 每次装配数据库会
 
 | 接口 | 读取或写入契约 |
 | --- | --- |
-| 拍卖列表（A03 GET） | `world_id`/`status` 筛选、有界页码；生命周期与 lot 数量来自同一 Serializable 快照 |
+| 拍卖列表（A03 GET） | `world_id`/`status` 筛选、有界页码；生命周期与 lot 数量来自同一 Repeatable Read 只读快照 |
 | 创建（A03 POST） | 零版本 fence；同事务锁 world/intake target，写策略快照、命令账本、审计与 `auction.created` |
 | 录入（A04） | URL/canonical JSON 录入，固定 HTTPS 来源、key 密文及 Serializable 原子写入；只返回拍卖/投稿/lot/装备安全事实和分类内 `lot_number`/`equipment_category` |
 | 拍品列表（A06） | 同快照读取拍卖/lot/装备/投稿，body 固定 `auction/lots/pagination`；外部录入能力通过 `X-Auction-Capability-Manual-Intake` 头提供 |
 | 代理历史（A15） | 页码/opaque cursor 代理历史，包含创建、降额与黑名单子命令的 `frozen` 转换；冻结不伪装成 bid |
 | 报告（A07/A08） | 一致结算/恢复安全报告，lot 带 `equipment_category`；A07 拍卖字段闭集不含 `scheduled_end_at`/`effective_end_at`，lot 提供权威 `listed_price`、`hold_ppm`、带符号 `adjustment_ppm` |
-| 结算目录（A42） | 仅列 `settled` 且有 `settled_at` 的拍卖；可选 `world_id`/`sequence` 与有界 `page/page_size`，count 与页同 Serializable 快照 |
+| 结算目录（A42） | 仅列 `settled` 且有 `settled_at` 的拍卖；可选 `world_id`/`sequence` 与有界 `page/page_size`，count 与页同 Repeatable Read 只读快照 |
+
+Admin 拍卖、lot、审计、改名、代理历史、结算目录和 recovery 报告统一使用 Repeatable Read 只读快照，
+同一响应的计数、明细及关联投影保持一致；竞价、生命周期与结算写入仍使用原 Serializable 及行锁边界。
 
 A04 的 `equipment_source.require_tradeable` 默认关闭，允许手工 Soulbound；开启后在事务前限制可交易装备，不改变 MoogleMail 过滤，也不回传来源 URL/canonical 正文/key。A07 的 `adjustment_ppm` 正为税费/惩罚、负为折扣，页面不从税额反推持有比例；报告序列化冲突/死锁最多尝试 3 次（含首次）。已结算报告排除未参与结算的 `withdrawn` 标的，其余标的缺少结算明细仍明确失败；累计领先时长从同一快照中的追加竞价事实计算。A42 指定世界按期号降序，否则按结算时间、世界、期号、UUID 稳定排序；结算页用第一页首项作为默认最新一期，再按 UUID 读报告。
 

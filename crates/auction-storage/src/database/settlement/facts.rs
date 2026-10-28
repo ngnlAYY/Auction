@@ -2,6 +2,8 @@
 
 use super::*;
 
+const LOT_SETTLEMENT_BATCH_SIZE: usize = 256;
+
 struct CompensationLedgerEntry<'a> {
     command_id: CommandId,
     sequence: i32,
@@ -45,13 +47,13 @@ pub(super) async fn close_settlement_lots(
 
     let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
     // 撤回记录不属于结算明细，但它们残留的活动代理同样必须阻止结算提交。
-    // 只关联仍活动的授权，沿用其部分索引；终态历史不能放大 lot 汇总的中间结果。
+    // 活动授权的部分唯一索引保证每个 lot 至多匹配一行，计数无需 DISTINCT 排序或去重。
     let counts = sqlx::query(
         r#"SELECT
-               COUNT(DISTINCT l.id)
+               COUNT(*)
                    FILTER (WHERE l.status <> 'withdrawn')::bigint AS lot_count,
-               COUNT(DISTINCT l.id) FILTER (WHERE l.status = 'live')::bigint AS live_count,
-               COUNT(DISTINCT p.authorization_id)::bigint AS active_proxy_count
+               COUNT(*) FILTER (WHERE l.status = 'live')::bigint AS live_count,
+               COUNT(p.authorization_id)::bigint AS active_proxy_count
            FROM public.lots AS l
            LEFT JOIN public.bid_proxy_authorizations AS p
              ON p.lot_id = l.id AND p.status IN ('active', 'final_fast')
@@ -80,29 +82,35 @@ pub(super) async fn insert_lot_settlements(
     transaction: &mut PostgresCompetitionTransaction,
     plan: &SettlementPlan,
 ) -> Result<(), SettlementTransactionError> {
-    for line in &plan.lines {
+    // 每批最多 2560 个参数；有界批量减少持有结算锁期间的往返，不拆分原 Serializable 事务。
+    for lines in plan.lines.chunks(LOT_SETTLEMENT_BATCH_SIZE) {
         let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
-        sqlx::query(
+        let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             r#"INSERT INTO public.lot_settlements
                    (lot_id, end_price, listed_price, buyer_amount, seller_amount,
-                    tax_amount, compensation_amount, hold_ppm, adjustment_ppm, adjustment_metadata)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#,
-        )
-        .bind(line.lot_id.as_uuid())
-        .bind(line.end_price.value())
-        .bind(line.listed_price.value())
-        .bind(line.buyer_amount.value())
-        .bind(line.seller_amount.value())
-        .bind(line.tax_amount.value())
-        .bind(line.compensation_amount.value())
-        .bind(line.hold_ppm)
-        .bind(line.adjustment_ppm)
-        // 旧版 adjustment metadata 是只允许 `policy` 的严格闭集；策略版本属于结算摘要，
-        // 不能扩散进 lot metadata，否则旧版/新版严格报告解码器都会拒绝正常结算事实。
-        .bind(json!({ "policy": plan.policy_mode.as_str() }))
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?;
+                    tax_amount, compensation_amount, hold_ppm, adjustment_ppm, adjustment_metadata) "#,
+        );
+        // metadata 沿用只含 policy 的历史闭集；所有业务值只通过参数绑定进入 SQL。
+        query.push_values(lines, |mut values, line| {
+            values
+                .push_bind(line.lot_id.as_uuid())
+                .push_bind(line.end_price.value())
+                .push_bind(line.listed_price.value())
+                .push_bind(line.buyer_amount.value())
+                .push_bind(line.seller_amount.value())
+                .push_bind(line.tax_amount.value())
+                .push_bind(line.compensation_amount.value())
+                .push_bind(line.hold_ppm)
+                .push_bind(line.adjustment_ppm)
+                .push_bind(json!({ "policy": plan.policy_mode.as_str() }));
+        });
+        // 完整批次复用一个固定语句形状；可变尾批不挤占连接的预处理语句缓存。
+        query
+            .build()
+            .persistent(lines.len() == LOT_SETTLEMENT_BATCH_SIZE)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_sql_error)?;
     }
     Ok(())
 }

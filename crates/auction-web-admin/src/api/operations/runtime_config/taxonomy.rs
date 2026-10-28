@@ -68,7 +68,7 @@ fn valid_affixes(values: &[String]) -> bool {
     valid_names(values.iter().map(String::as_str), 256, 128, true)
 }
 
-fn valid_names<'a>(
+pub(super) fn valid_names<'a>(
     values: impl Iterator<Item = &'a str>,
     maximum: usize,
     maximum_bytes: usize,

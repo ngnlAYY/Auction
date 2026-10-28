@@ -70,12 +70,7 @@ impl BidAmount {
         if increment <= 0 {
             return Err(DomainError::InvalidAmount { value: increment });
         }
-        let candidate = self.0 as i128 + increment as i128;
-        if candidate > i64::MAX as i128 {
-            return Err(DomainError::AmountOverflow);
-        }
-        let value = i64::try_from(candidate).map_err(|_| DomainError::AmountOverflow)?;
-        Self::from_persisted_positive(value)
+        self.0.checked_add(increment).map(Self).ok_or(DomainError::AmountOverflow)
     }
 }
 

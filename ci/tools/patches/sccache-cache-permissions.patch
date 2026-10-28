@@ -1,0 +1,12 @@
+--- a/src/cache/cache_io.rs
++++ b/src/cache/cache_io.rs
+@@ -108,7 +108,8 @@
+         if file.compression() != CompressionMethod::Stored {
+             bail!(DecompressionFailure);
+         }
+-        let mode = file.unix_mode();
++        // 缓存只恢复普通 rwx 位，不能传播归档内的 SUID/SGID/sticky 位。
++        let mode = file.unix_mode().map(|mode| mode & 0o777);
+         zstd::stream::copy_decode(file, to).or(Err(DecompressionFailure))?;
+         Ok(mode)
+     }

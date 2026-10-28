@@ -174,12 +174,12 @@ pub(crate) async fn list(
         .into_response()
 }
 
-fn optional_text(query: &std::collections::BTreeMap<String, String>, key: &str) -> Option<String> {
+fn optional_text(query: &std::collections::BTreeMap<&str, String>, key: &str) -> Option<String> {
     query.get(key).filter(|value| !value.trim().is_empty()).cloned()
 }
 
 fn parse_optional_time(
-    query: &std::collections::BTreeMap<String, String>,
+    query: &std::collections::BTreeMap<&str, String>,
     key: &str,
 ) -> Result<Option<DateTime<Utc>>, ()> {
     let Some(value) = query.get(key) else {

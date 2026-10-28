@@ -12,7 +12,7 @@ pub(super) async fn list_postgres(
 ) -> Result<AdminAuditPage, ApplicationError> {
     let mut transaction = store
         .pool()
-        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        .begin_read_snapshot()
         .await
         .map_err(|_| storage_error("开启 Admin 审计读取事务失败"))?;
 

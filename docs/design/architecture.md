@@ -65,6 +65,7 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
   页面可见性监听器由 shared 层的 RAII 守卫卸载，回调不反向持有监听器；各 surface 继续决定恢复可见后的刷新策略。
   固定业务指标由 observability 在初始化时绑定共享句柄，业务调用方不持有 Prometheus 注册表或动态 label。
   HTTP 的规范 UUID 和旧 v1 JSON 媒体类型校验分别复用单一谓词；各路由继续拥有鉴权顺序、错误外壳和兼容输入范围。
+  结算义务的生成与逐条比对共用 application 构造流程；storage 仅在原事务内有界批量写入明细，纯读取复用只读快照入口。
   配置 loader 在返回成功前校验公共日志过滤表达式，observability 仍独占 subscriber 初始化。
 - 草稿软截止：`auction-application::draft_soft_close` 拥有修正规则与窄端口，
   `auction-storage::database::draft_soft_close` 独占一致快照检查、Serializable/CAS、原命令账本及追加审计，

@@ -20,8 +20,10 @@ impl WorkerControlClient {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let client = reqwest::Client::builder()
             .unix_socket(socket_path)
+            .no_proxy()
             .timeout(request_timeout)
             .redirect(Policy::none())
+            .retry(reqwest::retry::never())
             .build()
             .map_err(|error| WorkerControlServerError::Io(std::io::Error::other(error)))?;
         Ok(Self { client })

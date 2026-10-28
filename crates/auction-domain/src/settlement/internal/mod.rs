@@ -16,13 +16,14 @@ impl InternalSettlementAction {
     /// 撤拍返还与流拍返还在收件人即本 bot 时都直接留存；外部收件人仍走寄回投递。
     pub const fn for_kind(kind: SettlementObligationKind) -> Option<Self> {
         match kind {
-            SettlementObligationKind::UnsoldReturn => Some(Self::KeepUnsold),
+            SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
+                Some(Self::KeepUnsold)
+            }
             SettlementObligationKind::WinnerEquipmentCod
             | SettlementObligationKind::WinnerPaymentCarrierCod => Some(Self::Purchase),
             SettlementObligationKind::WinnerEquipmentHandoff => Some(Self::Handoff),
             SettlementObligationKind::SellerPayout => Some(Self::RetainSeller),
             SettlementObligationKind::BuyerRefund => Some(Self::Refund),
-            SettlementObligationKind::WithdrawnReturn => Some(Self::KeepUnsold),
         }
     }
 
@@ -56,15 +57,7 @@ impl InternalSettlementAction {
             SettlementObligationKind::SellerPayout | SettlementObligationKind::BuyerRefund => {
                 matches!(dispatch, SettlementWorld::Main) && amount > 0 && carrier == 0
             }
-            SettlementObligationKind::UnsoldReturn => {
-                matches!(
-                    (dispatch, equipment),
-                    (SettlementWorld::Main, SettlementWorld::Main)
-                        | (SettlementWorld::Isekai, SettlementWorld::Isekai)
-                ) && amount == 0
-                    && carrier == 0
-            }
-            SettlementObligationKind::WithdrawnReturn => {
+            SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
                 matches!(
                     (dispatch, equipment),
                     (SettlementWorld::Main, SettlementWorld::Main)

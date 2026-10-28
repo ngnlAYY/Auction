@@ -72,10 +72,6 @@ impl AuctionRules {
             return Err(DomainError::InvalidRules("金额或时间边界无效"));
         }
 
-        if !matches!(self.proxy_default_mode, ProxyMode::Fast | ProxyMode::Slow) {
-            return Err(DomainError::InvalidRules("代理默认模式无效"));
-        }
-
         Ok(())
     }
 

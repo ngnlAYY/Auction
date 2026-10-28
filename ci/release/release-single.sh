@@ -11,6 +11,7 @@ verify_single_artifacts() {
 	# 合并包不会跳过分体资源隔离证明。
 	verify_artifacts
 	local root=${single_artifact_root:?} embedded=${embedded_artifact_root:?}
+	verify_artifact_checksums "$root" single
 	verify_build_info "$root" single
 	local public_sha admin_sha binary marker server_tree
 	public_sha=$(verify_web_root public)

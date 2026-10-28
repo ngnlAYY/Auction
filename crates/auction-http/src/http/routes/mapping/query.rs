@@ -22,15 +22,20 @@ pub(crate) fn request_id(headers: &HeaderMap) -> Option<String> {
     boundary::request_id(headers)
 }
 
-pub(crate) fn parse_query(uri: &Uri, allowed: &[&str]) -> Result<BTreeMap<String, String>, ()> {
+pub(crate) fn parse_query<'a>(
+    uri: &Uri,
+    allowed: &[&'a str],
+) -> Result<BTreeMap<&'a str, String>, ()> {
     let mut values = BTreeMap::new();
     let Some(query) = uri.query() else {
         return Ok(values);
     };
     for (key, value) in form_urlencoded::parse(query.as_bytes()) {
-        if !allowed.iter().any(|allowed_key| *allowed_key == key)
-            || values.insert(key.into_owned(), value.into_owned()).is_some()
-        {
+        // 键只可能来自路由闭集，直接借用允许项；解码及重复键判断仍按原文进行。
+        let Some(&key) = allowed.iter().find(|allowed_key| **allowed_key == key) else {
+            return Err(());
+        };
+        if values.insert(key, value.into_owned()).is_some() {
             return Err(());
         }
     }

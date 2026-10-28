@@ -258,26 +258,9 @@ mod persistent;
 mod skeleton;
 
 #[cfg(feature = "postgres")]
-async fn run_worker(
-    config: &AppConfig,
-    tracing_health: Arc<dyn TracingHealthReader>,
-    metrics: Arc<ProcessMetrics>,
-    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
-    shutdown: ShutdownFuture,
-) -> anyhow::Result<()> {
-    persistent::run_worker(config, tracing_health, metrics, runtime_failure, shutdown).await
-}
-
+use persistent::run_worker;
 #[cfg(not(feature = "postgres"))]
-async fn run_worker(
-    config: &AppConfig,
-    tracing_health: Arc<dyn TracingHealthReader>,
-    metrics: Arc<ProcessMetrics>,
-    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
-    shutdown: ShutdownFuture,
-) -> anyhow::Result<()> {
-    skeleton::run_worker(config, tracing_health, metrics, runtime_failure, shutdown).await
-}
+use skeleton::run_worker;
 
 fn configure_cache(config: &AppConfig) -> anyhow::Result<CacheStore> {
     match config.cache.backend {
