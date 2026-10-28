@@ -1,15 +1,37 @@
 //! 装备页面的 HTML 结构和属性提取；不推断名称语义、装备大类或交易资格。
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::LazyLock};
 
-use scraper::{ElementRef, Html};
+use scraper::{ElementRef, Html, Selector};
 
 use super::super::model::EquipmentStat;
 use super::{
     EquipmentParseError,
-    common::{normalize_text, selector, valid_text},
+    common::{normalize_text, valid_text},
     stats::normalize_stat_value,
 };
+
+struct EquipmentSelectors {
+    panel: Selector,
+    children: Selector,
+    header: Selector,
+    equipment: Selector,
+    main: Selector,
+    rows: Selector,
+}
+
+// 选择器来自固定源码；每进程只编译一次，错误仍按页面结构错误返回，不缓存外部正文。
+static SELECTORS: LazyLock<Result<EquipmentSelectors, ()>> = LazyLock::new(|| {
+    let parse = |value| Selector::parse(value).map_err(|_| ());
+    Ok(EquipmentSelectors {
+        panel: parse("div.showequip")?,
+        children: parse("div.showequip > div")?,
+        header: parse(".eqt")?,
+        equipment: parse(".eq")?,
+        main: parse(".eq > div")?,
+        rows: parse(".ex > div, .ep > div")?,
+    })
+});
 
 /// HTML 提供的原始字段，身份语义与 header 状态由独立模块校验。
 pub(super) struct EquipmentPageFields {
@@ -23,45 +45,42 @@ pub(super) fn extract_equipment_page(
 ) -> Result<EquipmentPageFields, EquipmentParseError> {
     let document = std::str::from_utf8(body).map_err(|_| EquipmentParseError::PageStructure)?;
     let document = Html::parse_document(document);
-    let panel_selector = selector("div.showequip")?;
-    let mut panels = document.select(&panel_selector);
+    let selectors = SELECTORS.as_ref().map_err(|_| EquipmentParseError::PageStructure)?;
+    let mut panels = document.select(&selectors.panel);
     let panel = panels.next().ok_or(EquipmentParseError::PageStructure)?;
     if panels.next().is_some() {
         return Err(EquipmentParseError::PageStructure);
     }
-    let child_selector = selector("div.showequip > div")?;
-    let mut children = panel.select(&child_selector);
+    let mut children = panel.select(&selectors.children);
     let name_element = children.next().ok_or(EquipmentParseError::PageStructure)?;
     let details = children.next().ok_or(EquipmentParseError::PageStructure)?;
     let name = normalize_text(name_element.text().collect::<String>());
     if !valid_text(&name, 512) {
         return Err(EquipmentParseError::InvalidName);
     }
-    let header_selector = selector(".eqt")?;
-    let mut headers = details.select(&header_selector);
+    let mut headers = details.select(&selectors.header);
     let header = headers.next().ok_or(EquipmentParseError::PageStructure)?;
     if headers.next().is_some() {
         return Err(EquipmentParseError::PageStructure);
     }
     let header = normalize_text(header.text().collect::<String>());
-    let stats = parse_stats(details)?;
+    let stats = parse_stats(details, selectors)?;
     Ok(EquipmentPageFields { name, header, stats })
 }
 
 fn parse_stats(
     panel: ElementRef<'_>,
+    selectors: &EquipmentSelectors,
 ) -> Result<BTreeMap<String, EquipmentStat>, EquipmentParseError> {
-    let equipment_selector = selector(".eq")?;
     if !panel.value().classes().any(|class| class == "eq")
-        && panel.select(&equipment_selector).next().is_none()
+        && panel.select(&selectors.equipment).next().is_none()
     {
         return Err(EquipmentParseError::PageStructure);
     }
     let mut stats = BTreeMap::new();
     // 主属性只允许来自 `.eq` 的直接子项；`.ex`/`.ep` 内的 title 属于分组属性，必须由
     // 下方行解析器处理，否则会把 `Attack Accuracy +32.16` 误当成值在前的主属性。
-    let main_selector = selector(".eq > div")?;
-    for element in panel.select(&main_selector) {
+    for element in panel.select(&selectors.main) {
         if element.value().classes().any(|class| matches!(class, "ex" | "ep")) {
             continue;
         }
@@ -76,8 +95,7 @@ fn parse_stats(
         let (name, value) = parse_main_stat(&text).ok_or(EquipmentParseError::InvalidAttributes)?;
         insert_stat(&mut stats, name, value, Some(base))?;
     }
-    let row_selector = selector(".ex > div, .ep > div")?;
-    for row in panel.select(&row_selector) {
+    for row in panel.select(&selectors.rows) {
         let mut elements = row.children().filter_map(ElementRef::wrap);
         let name_element = elements.next();
         let value_element = elements.next();

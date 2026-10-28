@@ -1,6 +1,11 @@
 //! 论坛装备名称标色与公开页装备分组共用的规则；不参与价格、资格或结算。
 
-use auction_domain::equipment::taxonomy::{armor_material_category, suffix_matches};
+use std::collections::HashSet;
+
+use auction_domain::{
+    equipment::taxonomy::{armor_material_category, suffix_matches},
+    valid_text,
+};
 
 /// 一条按顺序匹配的论坛装备标色规则。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,13 +192,9 @@ pub fn validate_equipment_color_rules(rules: &[EquipmentColorRule]) -> Result<()
             return Err(format!("equipment_colors.rules[{index}] 前后缀列表过长"));
         }
         for values in [&rule.prefixes, &rule.suffixes] {
-            for (value_index, value) in values.iter().enumerate() {
-                if value.is_empty()
-                    || value.len() > 128
-                    || value != value.trim()
-                    || value.chars().any(char::is_control)
-                    || values[..value_index].iter().any(|previous| previous == value)
-                {
+            let mut seen = HashSet::with_capacity(values.len());
+            for value in values {
+                if !valid_text(value, 128) || !seen.insert(value.as_str()) {
                     return Err(format!("equipment_colors.rules[{index}] 前后缀条目重复或无效"));
                 }
             }
@@ -241,17 +242,13 @@ fn equipment_type_matches(single: &str, values: &[String], category: &str, actua
 // 接受历史自定义名称，不把 Admin 候选词表变成采集白名单；保存值须已去首尾空白，
 // 大小写不敏感的重复条目会产生同一匹配，统一拒绝，避免文档与执行语义分叉。
 fn valid_selection(single: &str, values: &[String]) -> bool {
-    let valid_text = |value: &str| {
-        value.len() <= 64 && value == value.trim() && !value.chars().any(char::is_control)
-    };
-    valid_text(single)
-        && (single.is_empty() || values.is_empty())
-        && values.len() <= 256
-        && values.iter().enumerate().all(|(index, value)| {
-            !value.is_empty()
-                && valid_text(value)
-                && !values[..index].iter().any(|previous| previous.eq_ignore_ascii_case(value))
-        })
+    if (!single.is_empty() && (!valid_text(single, 64) || !values.is_empty())) || values.len() > 256
+    {
+        return false;
+    }
+    // 仅折叠 ASCII，与匹配器一致；不把不同的 Unicode 自定义名称合并。
+    let mut seen = HashSet::with_capacity(values.len());
+    values.iter().all(|value| valid_text(value, 64) && seen.insert(value.to_ascii_lowercase()))
 }
 
 fn valid_hex_color(value: &str) -> bool {

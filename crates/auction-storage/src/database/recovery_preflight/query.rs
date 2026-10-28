@@ -48,51 +48,36 @@ pub(super) async fn read_schema_identity(
 pub(super) async fn read_migration_inventory(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<PostgresMigrationInventory, RecoveryPreflightError> {
-    let summary = sqlx::query(
-        "SELECT COUNT(*)::bigint AS migration_count,
-                COALESCE(MAX(version), 0)::bigint AS latest_version,
-                COALESCE(BOOL_AND(success), true) AS all_success
-         FROM public._sqlx_migrations",
-    )
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(|source| query_error("migration_summary", source))?;
-    let latest_description = sqlx::query_scalar::<_, String>(
-        "SELECT description
-         FROM public._sqlx_migrations
-         ORDER BY version DESC
-         LIMIT 1",
-    )
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(|source| query_error("migration_description", source))?;
-    let migration_count: i64 = summary
-        .try_get("migration_count")
-        .map_err(|source| query_error("migration_summary", source))?;
-    let latest_version: i64 = summary
-        .try_get("latest_version")
-        .map_err(|source| query_error("migration_summary", source))?;
-    let all_success: bool = summary
-        .try_get("all_success")
-        .map_err(|source| query_error("migration_summary", source))?;
     let rows = sqlx::query(
-        "SELECT version, success, checksum FROM public._sqlx_migrations ORDER BY version",
+        "SELECT version, description, success, checksum FROM public._sqlx_migrations ORDER BY version",
     )
     .fetch_all(&mut **transaction)
     .await
     .map_err(|source| query_error("migration_identity", source))?;
+    let latest_version = rows
+        .last()
+        .map_or(Ok(0_i64), |row| row.try_get("version"))
+        .map_err(|source| query_error("migration_summary", source))?;
     // preflight 同时用于备份与恢复后验；缺项、额外版本或未知 checksum 必须阻断成功回执。
     if !super::super::migrations::postgres_history_matches(&rows, latest_version) {
         return Err(RecoveryPreflightError::MigrationHistoryInvalid);
     }
+    // 完整前缀校验已逐行确认 success；摘要直接取同一批历史，不再发起两次重复查询。
+    let migration_count =
+        i64::try_from(rows.len()).map_err(|_| RecoveryPreflightError::MigrationHistoryInvalid)?;
+    let latest_description = rows
+        .last()
+        .map(|row| row.try_get("description"))
+        .transpose()
+        .map_err(|source| query_error("migration_description", source))?;
     let expected_version = super::super::postgres_expected_migration_version();
     Ok(PostgresMigrationInventory {
         migration_count,
         latest_version,
         latest_description,
-        all_success,
+        all_success: true,
         expected_version,
-        current: all_success && latest_version == expected_version,
+        current: latest_version == expected_version,
     })
 }
 

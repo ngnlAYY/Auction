@@ -142,6 +142,13 @@ prometheus-client 需要另审 OpenMetrics 与进程指标兼容，Leptos CSR �
 驱动/Redis 用窄 feature，发布图和静态 all-features 图分别审阅。默认[静态验证](docs/guide/development.md)不执行行为
 测试，运行证据见[状态页](docs/status.md)。
 
+### 2026-10-27 最新源码复审中的 feature 精简
+
+核对上游锁定源码与实际装配后，`tracing-opentelemetry` 关闭默认 feature，仅保留 `tracing-log`；本项目只装配 trace
+layer，未使用 `MetricsLayer`。锁文件仅删除该包到 `smallvec` 的依赖边，包版本、checksum 与包数不变；其他依赖仍使用
+smallvec。`opentelemetry-otlp/http-proto` 自身会启用 metrics，因此没有宣称移除整套 OTel metrics feature。Prometheus
+采集、日志归一化、trace exporter 与 TLS 保持原配置。直接依赖用途和工具独立锁的最新检查见[状态页](docs/status.md)。
+
 ### 2026-10-27 全仓性能与依赖复核
 
 再次核对工作区直接依赖、重复版本、独立 Public WASM 图及三角色/合并服务的真实发布 feature 图；`cargo machete`

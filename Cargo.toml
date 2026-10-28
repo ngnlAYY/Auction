@@ -149,7 +149,8 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
     "std",
     "tracing-log",
 ] }
-tracing-opentelemetry = "0.34.0"
+# 可选：只装配 trace layer；指标由 Prometheus 拥有，保留日志归一化而不编译未使用的 MetricsLayer。
+tracing-opentelemetry = { version = "0.34.0", default-features = false, features = ["tracing-log"] }
 tower = { version = "0.5.3", features = ["util"] }
 # 指标只导出 Prometheus 文本；保留进程 collector，使用 plain_model，避免二进制 protobuf 编码依赖。
 prometheus = { version = "0.14.0", default-features = false, features = ["process"] }

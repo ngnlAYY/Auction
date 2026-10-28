@@ -47,8 +47,10 @@ pub(super) fn submission_id_display(value: &str) -> String {
         .last()
         .map(|(index, _)| index);
     let suffix = suffix_start.map(|index| &value[index..]);
-    let fallback =
-        || value.chars().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect::<String>();
+    let fallback = || {
+        let start = value.char_indices().rev().nth(7).map_or(0, |(index, _)| index);
+        value[start..].to_owned()
+    };
     let display = suffix
         .map(|suffix| suffix.trim_start_matches('0'))
         .filter(|suffix| !suffix.is_empty())

@@ -145,18 +145,15 @@ fn lower_proxy_record(
     authorization_id: auction_domain::ProxyAuthorizationId,
     new_maximum: auction_domain::BidAmount,
 ) -> Result<CompetitionCommandAuditRecord, CompetitionTransactionError> {
-    let matching = plan
-        .proxy_transitions
-        .iter()
-        .filter(|transition| {
-            transition.authorization_id == authorization_id
-                && transition.kind == ProxyTransitionKind::Lowered
-        })
-        .collect::<Vec<_>>();
+    let mut matching = plan.proxy_transitions.iter().filter(|transition| {
+        transition.authorization_id == authorization_id
+            && transition.kind == ProxyTransitionKind::Lowered
+    });
+    let transition = matching.next();
     let state = plan.proxy_states.iter().find(|state| state.id == authorization_id);
     if !plan.public_bids.is_empty()
-        || matching.len() != 1
-        || matching[0].new_maximum != new_maximum
+        || transition.is_none_or(|transition| transition.new_maximum != new_maximum)
+        || matching.next().is_some()
         || state.is_none_or(|state| {
             state.user_id != context.actor_id
                 || state.maximum_amount != new_maximum

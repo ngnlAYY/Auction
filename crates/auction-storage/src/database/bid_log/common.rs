@@ -4,6 +4,7 @@ pub(super) use crate::database::storage_error;
 use auction_application::{
     ApplicationError, PublicBidLogCursor, PublicBidLogEntry, PublicBidLogListRequest,
 };
+use auction_domain::valid_positive_decimal;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -36,15 +37,16 @@ pub(super) fn validate_entries(
     entries: &[PublicBidLogEntry],
     request: &PublicBidLogListRequest,
 ) -> Result<(), ApplicationError> {
+    let needle = request.lot_code.as_deref().map(str::to_ascii_lowercase);
     for entry in entries {
         if entry.id.is_nil()
             || entry.auction_id != request.auction_id
             || entry.lot_id.is_nil()
             || request.lot_id.is_some_and(|lot_id| entry.lot_id != lot_id)
-            || request.lot_code.as_deref().is_some_and(|needle| {
-                !lot_code(&entry.equipment_category, entry.lot_number)
-                    .to_ascii_lowercase()
-                    .contains(&needle.to_ascii_lowercase())
+            || needle.as_deref().is_some_and(|needle| {
+                let mut code = lot_code(&entry.equipment_category, entry.lot_number);
+                code.make_ascii_lowercase();
+                !code.contains(needle)
             })
             || entry.lot_number <= 0
             || entry.amount <= 0
@@ -80,7 +82,7 @@ fn lot_code(category: &str, lot_number: i64) -> String {
 fn valid_source(entry: &PublicBidLogEntry) -> bool {
     let forum_ids = match (entry.source_thread_id.as_deref(), entry.source_post_id.as_deref()) {
         (Some(thread_id), Some(post_id)) => {
-            canonical_forum_id(thread_id) && canonical_forum_id(post_id)
+            valid_positive_decimal(thread_id, 32) && valid_positive_decimal(post_id, 32)
         }
         (None, None) => false,
         _ => return false,
@@ -97,11 +99,4 @@ fn valid_source(entry: &PublicBidLogEntry) -> bool {
         }
         _ => false,
     }
-}
-
-fn canonical_forum_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 32
-        && !value.starts_with('0')
-        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
