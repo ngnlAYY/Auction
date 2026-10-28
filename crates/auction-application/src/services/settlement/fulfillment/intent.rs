@@ -252,8 +252,7 @@ pub(super) fn activation_request_hash(
         prepare_request_digest: prepare_request_hash.as_bytes(),
         expected_status: "prepared",
     };
-    let encoded = to_go_json_bytes(&activation)?;
-    Ok(RequestHash::new(Sha256::digest(encoded).into()))
+    Ok(RequestHash::from_legacy_go_json(&activation)?)
 }
 
 fn stable_fulfillment_id(namespace: &str, obligation_id: SettlementId) -> Uuid {

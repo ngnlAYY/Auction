@@ -17,9 +17,8 @@ pub(crate) async fn bootstrap_mail_credentials(world: &str, label: &str) -> anyh
     if !config
         .worker
         .mooglemail
-        .configured_worlds()
-        .iter()
-        .any(|configured| configured.world_id == world)
+        .configured_mailboxes()
+        .any(|(configured_world, _)| configured_world == world)
     {
         anyhow::bail!("bootstrap mail world 必须已在 Worker 配置中启用");
     }

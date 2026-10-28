@@ -429,9 +429,7 @@ fn AuctionHeaderCountdown(
     is_live_presentation: bool,
     status: String,
 ) -> Element {
-    let tick = use_second_tick();
-    let _ = tick();
-    let countdown = countdown_display(&scheduled_ends_at, estimated_now());
+    let countdown = use_countdown_display(scheduled_ends_at.clone());
     rsx! {
         p { class: "public-auction-round__end",
             if is_live_presentation {

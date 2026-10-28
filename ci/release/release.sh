@@ -26,8 +26,9 @@ api_only_admin_root="$repository_root/target/dist/api-only-assets/admin"
 assets_missing_message="web assets are not included in this binary; run \`just build-release\`"
 # 发布 feature 的唯一来源：可部署制品含 Redis；API-only 对照只留 PostgreSQL。
 api_only_features='postgres'
-embedded_features='postgres,cache-redis,auction-public-api/web-embed,auction-admin-api/web-embed'
-single_features='postgres,cache-redis,auction-server/web-embed'
+runtime_features='postgres,cache-redis'
+embedded_features="$runtime_features,auction-public-api/web-embed,auction-admin-api/web-embed"
+single_features="$runtime_features,auction-server/web-embed"
 export single_features
 
 binaries=(
@@ -340,9 +341,10 @@ verify_build_info() {
 
 verify_dependency_boundaries() {
 	local worker_tree public_tree admin_tree
-	worker_tree=$(cargo tree --locked -e normal,build -p auction-worker)
-	public_tree=$(cargo tree --locked -e normal,build -p auction-public-api)
-	admin_tree=$(cargo tree --locked -e normal,build -p auction-admin-api)
+	# 依赖边界必须覆盖实际发布 feature，默认无数据库图会漏查条件依赖。
+	worker_tree=$(cargo tree --locked -e normal,build -p auction-worker --no-default-features --features "$runtime_features")
+	public_tree=$(cargo tree --locked -e normal,build -p auction-public-api --no-default-features --features "$runtime_features,web-embed")
+	admin_tree=$(cargo tree --locked -e normal,build -p auction-admin-api --no-default-features --features "$runtime_features,web-embed")
 	if grep -Eq 'auction-web-(public|admin|shared)' <<<"$worker_tree"; then
 		printf 'Worker 依赖图不得包含浏览器 crate\n' >&2
 		return 1
@@ -735,11 +737,9 @@ package_release() (
 
 	(
 		cd "$package_root"
-		printf '%s\n' "${release_targets[@]}" |
-			LC_ALL=C sort |
-			while IFS= read -r target; do
-				printf '%s  %s\n' "$(sha256_file "$target")" "$target"
-			done
+		printf '%s\0' "${release_targets[@]}" |
+			LC_ALL=C sort -z |
+			xargs -0 -r sha256sum
 	) >"$package_root/SHA256SUMS"
 	chmod 0644 "$package_root/SHA256SUMS"
 	register_generated_file SHA256SUMS 644

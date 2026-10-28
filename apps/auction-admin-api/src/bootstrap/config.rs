@@ -54,9 +54,8 @@ pub(super) fn configured_dashboard_mailboxes(config: &AppConfig) -> Vec<(String,
     config
         .worker
         .mooglemail
-        .configured_worlds()
-        .into_iter()
-        .map(|world| (world.world_id, world.mailbox_key))
+        .configured_mailboxes()
+        .map(|(world_id, mailbox_key)| (world_id.to_owned(), mailbox_key.to_owned()))
         .collect()
 }
 

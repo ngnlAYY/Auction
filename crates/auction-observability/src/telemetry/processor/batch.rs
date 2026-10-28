@@ -278,7 +278,9 @@ where
     if batch.is_empty() {
         return Ok(());
     }
-    let spans = std::mem::take(batch);
+    // exporter 取得整批所有权；下一批仍预留同一上限，避免每轮从零开始逐级扩容。
+    let next_batch = Vec::with_capacity(batch.capacity());
+    let spans = std::mem::replace(batch, next_batch);
     let exporter = exporter.lock().await;
     exporter.export(spans).await
 }

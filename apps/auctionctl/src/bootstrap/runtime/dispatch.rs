@@ -286,11 +286,15 @@ fn check_config(role: Role) -> anyhow::Result<()> {
     let listener_group = listener
         .filter(|listener| listener.mode == HttpListenMode::Unix)
         .map(|listener| listener.group.as_str());
-    let mooglemail_worlds = config.worker.mooglemail.configured_worlds();
+    let mail_config = &config.worker.mooglemail;
     let mooglemail_world_ids =
-        mooglemail_worlds.iter().map(|world| world.world_id.as_str()).collect::<Vec<_>>();
-    let mooglemail_sender_allowlist_entry_count =
-        mooglemail_worlds.iter().map(|world| world.sender_allowlist.len()).sum::<usize>();
+        mail_config.configured_mailboxes().map(|(world_id, _)| world_id).collect::<Vec<_>>();
+    let mooglemail_sender_allowlist_entry_count = mail_config.sender_allowlist.len()
+        + mail_config
+            .additional_worlds
+            .iter()
+            .map(|world| world.sender_allowlist.len())
+            .sum::<usize>();
     let session = match config.session {
         auction_config::RoleSessionConfig::Public(session) => serde_json::json!({
             "max_public_sessions": session.max_public_sessions,

@@ -213,9 +213,8 @@ pub(super) async fn run_worker(
         config
             .worker
             .mooglemail
-            .configured_worlds()
-            .into_iter()
-            .filter_map(|world| SettlementWorld::from_name(&world.world_id))
+            .configured_mailboxes()
+            .filter_map(|(world_id, _)| SettlementWorld::from_name(world_id))
             .collect()
     } else {
         vec![SettlementWorld::Main, SettlementWorld::Isekai]
@@ -450,19 +449,21 @@ fn configure_schedule_runtime(
             .map(|value| value.hour() as u16 * 60 + value.minute() as u16)
             .map_err(|_| anyhow::anyhow!("auction.schedule 时间配置无效"))
     };
-    let runtime_worlds =
-        config.worker.mooglemail.configured_worlds().into_iter().collect::<Vec<_>>();
+    let runtime_mailboxes = config.worker.mooglemail.configured_mailboxes();
     let worlds = schedule
         .worlds
         .iter()
         .filter(|world_id| {
-            runtime_worlds.iter().any(|world| world.world_id.as_str() == world_id.as_str())
+            runtime_mailboxes
+                .clone()
+                .any(|(configured_world, _)| configured_world == world_id.as_str())
         })
         .cloned()
         .collect::<Vec<_>>();
     anyhow::ensure!(!worlds.is_empty(), "auction.schedule.worlds 与 runtime 启用世界没有交集");
-    let mailboxes =
-        runtime_worlds.into_iter().map(|world| (world.world_id, world.mailbox_key)).collect();
+    let mailboxes = runtime_mailboxes
+        .map(|(world_id, mailbox_key)| (world_id.to_owned(), mailbox_key.to_owned()))
+        .collect();
     Ok(Some(auction_jobs::AuctionScheduleRuntimeConfig {
         enabled: true,
         timezone: schedule.timezone.clone(),

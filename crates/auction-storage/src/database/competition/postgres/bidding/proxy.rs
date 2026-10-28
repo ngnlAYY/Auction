@@ -1,6 +1,6 @@
 //! PostgreSQL 代理授权快照、状态转换和历史写入。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::super::mapping::*;
 use super::super::*;
@@ -19,6 +19,12 @@ pub(in crate::database::competition) async fn apply_proxy_changes(
         })
         .map(|transition| transition.authorization_id)
         .collect();
+    // 同一授权只保留最后一条转换的原因（含 None），避免批量关闭时逐状态反向重扫转换。
+    let terminal_reasons: HashMap<_, _> = plan
+        .proxy_transitions
+        .iter()
+        .map(|transition| (transition.authorization_id, transition.reason))
+        .collect();
 
     for state in &plan.proxy_states {
         if created_ids.contains(&state.id) {
@@ -28,7 +34,7 @@ pub(in crate::database::competition) async fn apply_proxy_changes(
             .state_version
             .checked_sub(1)
             .ok_or_else(|| invalid_state("代理快照缺少前一版本"))?;
-        let reason = terminal_reason(plan, state.id);
+        let reason = terminal_reasons.get(&state.id).copied().flatten();
         let transaction = transaction.transaction_mut()?;
         let result = sqlx::query(
             r#"UPDATE public.bid_proxy_authorizations
@@ -58,7 +64,7 @@ pub(in crate::database::competition) async fn apply_proxy_changes(
         if !created_ids.contains(&state.id) {
             continue;
         }
-        let reason = terminal_reason(plan, state.id);
+        let reason = terminal_reasons.get(&state.id).copied().flatten();
         let transaction = transaction.transaction_mut()?;
         sqlx::query(
             r#"INSERT INTO public.bid_proxy_authorizations

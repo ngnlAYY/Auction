@@ -245,9 +245,7 @@ pub(crate) fn LiveLotDetailView(
 /// lot 详情的结束倒计时。秒级节拍只在本叶子组件内订阅，详情页其余部分不随秒针重渲染。
 #[component]
 fn LotDetailCountdown(ends_at: String) -> Element {
-    let tick = use_second_tick();
-    let _ = tick();
-    let countdown = countdown_display(&ends_at, estimated_now());
+    let countdown = use_countdown_display(ends_at.clone());
     rsx! {
         time { datetime: ends_at.clone(), class: countdown_class(&countdown), "{countdown.label}" }
     }

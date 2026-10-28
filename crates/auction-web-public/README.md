@@ -22,6 +22,7 @@ Dioxus 纯客户端渲染的公开端 SPA，拥有公开读取、竞价交互、
 `main.rs` 为薄启动入口，`app/` 与 `api/` 按同一业务 owner 分组；`auction/watches/` 拥有整场装备标记读取、原生命令按钮
 及账号隔离缓存（对应传输在 `api/auction/watches.rs`），`app/identity/watch_preference.rs` 与
 `api/identity/watch_preference.rs` 拥有账号竞价警告渠道表单与严格解码，账户页以用户 UUID 隔离宿主。
+公开响应与实时帧的 UUID 规范形式在栈缓冲中核对，保留非零、版本与 RFC4122 variant 校验，避免逐字段临时字符串分配。
 `app/identity/account/watches/` 拥有当期标记列表的只读组合、账号/世界隔离、完整目录读取与本地分页展示。
 `api/identity/registration.rs` 只在登录页读取 P29 的配置账号安全投影，`app/identity/session.rs` 将名单作为纯文本
 插入五语注册提示；不把示例账号或完整运行配置编入 WASM，展示与失败边界见[Public 设计](crates/auction-web-public/DESIGN.md#6-竞价与代理交互)。
@@ -203,7 +204,8 @@ GET 当前状态，离开/重载先 GET、不自动重放，待定命令不写�
 偏好只影响已标记装备的后续反超警告（每领先周期一次，不影响结算/COD），保存成功不保证可送达；论坛 PM 需已绑定的
 论坛账号，不可投递不会自动改发 MM。当前世界选择只提供 enabled world；历史 URL 可显示已关闭世界的只读选中项，
 历史筛选仍可访问已关闭世界的 settled 事实；
-倒计时通过 HTTP Date 估算服务端时钟，仅用于展示。
+倒计时通过 HTTP Date 估算服务端时钟，仅用于展示。目录、页头及详情复用同一倒计时 hook，
+仅在截止文本变化时解析 RFC3339；秒针仍重新读取校时结果并生成当前语言文案，隐藏目录剩余时间时释放订阅。
 
 登录时长：`/me#login-duration` 的 [session_preference](crates/auction-web-public/src/app/identity/session_preference) 拥有原生永久/
 自定义表单、分钟/小时/天精确换算和账号隔离的命令宿主；默认永久，具体范围见[登录时长契约](docs/contracts/routes.md#p27p28-登录时长)。

@@ -60,6 +60,8 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
   MoogleMail 通知模板闭集及占位符（`auction-application` 的 `runtime_config/mail_templates.rs`）、PostgreSQL 可重试冲突谓词
   （`auction-storage::database::is_serialization_conflict`）与页面可见性等待（`auction-web-shared::visibility`）各只有一份实现；
   HTTP wire 映射与浏览器严格解码仍由各自 owner 显式维护，不直接复用持久化名称。
+  旧版 Go JSON 转义由应用层 `ports/core/encoding.rs` 统一按片段输出，命令摘要和履约 canonical 分别消费；
+  兼容字段顺序及历史字节仍由对应命令/证明 owner 拥有。
 - 草稿软截止：`auction-application::draft_soft_close` 拥有修正规则与窄端口，
   `auction-storage::database::draft_soft_close` 独占一致快照检查、Serializable/CAS、原命令账本及追加审计，
   `auctionctl` 只装配命令，不在迁移中批量更正旧场次。

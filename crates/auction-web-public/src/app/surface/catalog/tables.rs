@@ -126,7 +126,7 @@ pub(crate) fn LiveCatalogTable(
     authenticated: bool,
     viewer_player_id: Option<String>,
 ) -> Element {
-    // 语义化 colgroup 分配完整百分比宽度；窄屏仍保留表头与行列，不切换为卡片。
+    // colgroup 分配完整百分比宽度；窄屏由 CSS 将同一行列 DOM 展示为字段卡片。
     let (layout, column_layout) = if show_actions {
         ("public-catalog-live", CatalogLayout::Live)
     } else {
@@ -224,9 +224,7 @@ pub(crate) fn PreviewCatalogTable(
 /// 不随秒针重渲染，只有真正显示倒计时的单元格每秒重算。
 #[component]
 fn LiveRowCountdown(remaining: String) -> Element {
-    let tick = use_second_tick();
-    let _ = tick();
-    let countdown = countdown_display(&remaining, estimated_now());
+    let countdown = use_countdown_display(remaining);
     rsx! {
         span { class: countdown_class(&countdown), "{countdown.label}" }
     }

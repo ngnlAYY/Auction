@@ -244,8 +244,18 @@ pub(crate) struct CountdownDisplay {
     pub(crate) empty: bool,
 }
 
-pub(crate) fn countdown_display(ends_at: &str, now: DateTime<Utc>) -> CountdownDisplay {
-    let Some(end) = DateTime::parse_from_rfc3339(ends_at).ok() else {
+/// 截止文本变化时才重新解析；秒针和语言变化仍即时更新显示，不缓存服务端校时结果。
+pub(crate) fn use_countdown_display(ends_at: String) -> CountdownDisplay {
+    let end = use_memo(use_reactive((&ends_at,), |(ends_at,)| {
+        DateTime::parse_from_rfc3339(&ends_at).ok().map(|value| value.with_timezone(&Utc))
+    }));
+    let tick = use_second_tick();
+    let _ = tick();
+    countdown_display(end(), estimated_now())
+}
+
+fn countdown_display(end: Option<DateTime<Utc>>, now: DateTime<Utc>) -> CountdownDisplay {
+    let Some(end) = end else {
         return CountdownDisplay {
             label: t!("value-empty"),
             urgent: false,
@@ -253,7 +263,7 @@ pub(crate) fn countdown_display(ends_at: &str, now: DateTime<Utc>) -> CountdownD
             empty: true,
         };
     };
-    let remaining_seconds = (end.with_timezone(&Utc) - now).num_seconds();
+    let remaining_seconds = (end - now).num_seconds();
     if remaining_seconds <= 0 {
         return CountdownDisplay {
             label: t!("auction-countdown-expired"),

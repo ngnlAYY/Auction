@@ -8,6 +8,7 @@ use auction_application::{
     ForumPmMessage, ForumPmReceipt, LotWatchError, LotWatchFuture, LotWatchPmClaim,
     LotWatchPmClaimRequest, LotWatchPmWorkStore, forum_pm_digest, valid_forum_pm_id,
 };
+use serde::Deserialize;
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
@@ -44,7 +45,7 @@ impl LotWatchPmWorkStore for DatabaseStore {
 fn message(row: &sqlx::postgres::PgRow) -> Result<ForumPmMessage, LotWatchError> {
     let payload: serde_json::Value = row.try_get("payload").map_err(sql_error)?;
     let message: ForumPmMessage =
-        serde_json::from_value(payload.clone()).map_err(|_| LotWatchError::Unavailable)?;
+        ForumPmMessage::deserialize(&payload).map_err(|_| LotWatchError::Unavailable)?;
     let digest: Vec<u8> = row.try_get("request_digest").map_err(sql_error)?;
     let recipient: Option<String> = row.try_get("recipient").map_err(sql_error)?;
     let id: Uuid = row.try_get("notification_id").map_err(sql_error)?;
