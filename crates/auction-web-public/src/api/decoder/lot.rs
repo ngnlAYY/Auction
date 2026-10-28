@@ -31,10 +31,16 @@ pub(crate) async fn decode_lot_detail(
     decode_success(response, |value| valid_lot_detail(value, auction_id, lot_id)).await
 }
 
-pub(crate) async fn decode_bid_command(response: Response) -> Result<BidResult, String> {
-    decode_success::<PlaceBidResponse, _>(response, valid_bid_command)
-        .await
-        .map(|response| response.bid)
+/// 先完成严格解码，再核对命令目标；错 lot 的成功响应仍属于未知结果。
+pub(crate) async fn decode_bid_command(
+    response: Response,
+    lot_id: &str,
+) -> Result<BidResult, String> {
+    let result = decode_success::<PlaceBidResponse, _>(response, valid_bid_command).await?.bid;
+    if result.lot_id != lot_id {
+        return Err("invalid_response".to_owned());
+    }
+    Ok(result)
 }
 
 pub(crate) async fn decode_create_proxy_command(
@@ -367,7 +373,6 @@ fn valid_equipment(value: Option<&Value>, full: bool) -> bool {
         && optional_finite(value, "avg_roll")
         && game_url(value.get("game_equipment_url"))
         && (!full || optional_attributes(value, "attributes"))
-        && (!full || value.get("attributes").is_none() || valid_attributes(value.get("attributes")))
 }
 
 fn valid_equipment_group(value: Option<&Value>) -> bool {

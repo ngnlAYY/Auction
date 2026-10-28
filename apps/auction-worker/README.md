@@ -27,6 +27,7 @@ Worker 不监听业务写入 HTTP，不创建第二套拍卖状态机。应用�
 `with_cash_evidence_gateway`，PM sender 与只读资料 reader 仅 `forum.enabled` 时装配
 （见[外部适配器](crates/auction-integrations/README.md)）。SIGINT/SIGTERM 将 control 标记为 draining、停止新 claim，
 在途任务沿原租约和结果证明路径收口；10 秒 drain 后停止心跳，第二次信号强制收口，最后按配置限时刷新 tracing exporter。
+信号与运行时故障共用 `drain_worker` 的预算和错误映射；故障路径继续保留原故障上下文和非零退出语义。
 control 只有一个停机接收者，通知保留到接收者开始等待，覆盖启动后立即停机的窗口，不依赖任务先被调度。
 邮件或论坛 owner 永久失效时，监督任务在一秒观察周期内通知装配根，沿用同一 10 秒排空上限并非零退出，由 systemd 等进程管理器
 重建 Worker。监督只读取已取得 owner 的已知失效状态；关闭功能或无 active 凭据时不启动对应监督，不增加数据库探测。失效后的新外呼继续
@@ -44,6 +45,8 @@ control 或独立 PM 任务提前退出、panic 或取消立即撤销 readiness�
 `persistent.rs` 在装配时创建同一 `MailPollProgressTracker`，经 `mail/runtime.rs` 的 `MailPollRuntimePorts`
 同时注入 gateway、轮询任务与 control。它只保存有界进程观测，不能授权或恢复业务；协议和旧端降级见
 [邮件诊断契约](docs/contracts/routes.md#邮件审查与轮询)，本次诊断不新增配置或迁移。
+邮件留证的完成日志和取消日志共用守卫持有的一份安全 context/outcome，避免为两种互斥结果重复复制字符串；
+留证 future 首次 poll 前被丢弃时仍报告未确认完成，日志字段、回执与归档载荷沿用既有契约。
 
 ## 部署配置与 runtime
 

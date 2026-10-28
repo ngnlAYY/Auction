@@ -220,7 +220,11 @@ async fn fetch_auction_page(
     let world = world_id.as_deref().filter(|world| !world.is_empty() && *world != "all");
     let response =
         auction_page_response("/api/v1/auctions", world, &status, page, page_size).await?;
-    decoder::decode_auction_list(response, world, &status).await
+    bind_auction_page(
+        decoder::decode_auction_list(response, world, &status).await?,
+        page,
+        page_size,
+    )
 }
 
 /// 历史页用 v2 一次取得本页摘要与论坛地址，不按行加载完整论坛镜像。
@@ -233,7 +237,23 @@ pub(crate) async fn fetch_auction_history_page(
     let world = world_id.as_deref().filter(|world| !world.is_empty() && *world != "all");
     let response =
         auction_page_response("/api/v2/auctions", world, &status, page, page_size).await?;
-    decoder::decode_auction_list_v2(response, world, &status).await
+    bind_auction_page(
+        decoder::decode_auction_list_v2(response, world, &status).await?,
+        page,
+        page_size,
+    )
+}
+
+/// 页面和跨页查找共用请求身份校验；先完成严格解码，不能把错页响应拼进目录。
+fn bind_auction_page<T>(
+    response: AuctionListPage<T>,
+    page: i64,
+    page_size: i64,
+) -> Result<AuctionListPage<T>, String> {
+    if response.page != Some(page) || response.page_size != page_size {
+        return Err("invalid_response".to_owned());
+    }
+    Ok(response)
 }
 
 async fn auction_page_response(

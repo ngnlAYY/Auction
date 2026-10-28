@@ -153,8 +153,10 @@ payload 复用只在本脚本内生效：本 surface、`auction-web-shared`、`a
 归一化或身份复核失败时不能将半成品作为可复用 payload。
 只改契约源码也会使双端 WASM 缓存失效，保证新后端内嵌同版 DTO 浏览器。
 原生与 WASM 共用环境摘要，覆盖 `CARGO_PROFILE_*`（包括 `CARGO_PROFILE_WASM_RELEASE_*`）、rustflags、
-目标 linker/target、rustc 包装器、C/C++ 编译器与 flags、受控工具字节身份，以及 Cargo 逐层读取的当前目录、
-父目录和 `CARGO_HOME` 配置文件。只写入摘要，不把配置或环境原文写入清单；旧摘要自动失效。
+目标 linker/target、rustc 编译器与包装器（含 `CARGO_BUILD_RUSTC*` 配置环境别名）、增量覆盖
+（`CARGO_INCREMENTAL` / `CARGO_BUILD_INCREMENTAL`）、C/C++ 编译器与 flags、受控工具字节身份，以及 Cargo 逐层读取的当前目录、
+父目录和 `CARGO_HOME` 配置文件。包装器的两类环境入口都绑定受控 sccache 和同一 daemon 身份。
+只写入摘要，不把配置或环境原文写入清单；旧摘要自动失效。
 只修改上述输入范围外的原生源码或文档不会重跑 WASM；输入目录中的 README 仍参与摘要，不按扩展名排除。
 release.sh 在构建前冻结构建输入（apps、crates、migrations、配置示例、保留策略、清单、`.cargo` 与发布工具），
 各阶段同时复查输入和环境摘要；范围外的文档修改不触发原生重建。核验实际二进制标记、对端资源缺失与 Worker 依赖，

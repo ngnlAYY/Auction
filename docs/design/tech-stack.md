@@ -142,6 +142,11 @@ prometheus-client 需要另审 OpenMetrics 与进程指标兼容，Leptos CSR �
 驱动/Redis 用窄 feature，发布图和静态 all-features 图分别审阅。默认[静态验证](docs/guide/development.md)不执行行为
 测试，运行证据见[状态页](docs/status.md)。
 
+2026-10-27 的[批量持久化与边界复核](docs/status.md#2026-10-27-批量持久化与边界复核)再次核对 50 项直接外部依赖、
+五个原生程序和双端 WASM 的实际依赖图，未发现可安全删除的库；应用 535 个锁条目及三个独立工具锁均未改变。
+优化使用标准库和已有 SQL/HTML 解析能力。发布身份和工具配方补齐 Cargo 环境别名，避免环境变化仍复用旧制品；
+细节归[CI owner](ci/README.md#发布边界)，公告结果归[工具 owner](ci/tools/README.md#2026-10-27-公告复核)。
+
 ### 2026-10-27 最新源码复审中的 feature 精简
 
 核对上游锁定源码与实际装配后，`tracing-opentelemetry` 关闭默认 feature，仅保留 `tracing-log`；本项目只装配 trace

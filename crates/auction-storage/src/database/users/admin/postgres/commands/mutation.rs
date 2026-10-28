@@ -304,7 +304,7 @@ async fn lock_forum_identity_ownership_postgres(
          FOR UPDATE",
     )
     .bind(user_id)
-    .fetch_all(&mut **transaction)
+    .execute(&mut **transaction)
     .await
     .map_err(map_storage_error)?;
     Ok(())

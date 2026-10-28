@@ -79,7 +79,8 @@ GET/PUT：两者复用会话、来源/CSRF、限流、strict JSON、JSON 405 与
 Admin mutation 守卫按限流 → Origin → CSRF → 会话执行。竞价、标记、警告渠道、生命周期和世界启停通过
 `decode_after_guard` 在守卫及 query/path 校验后读取正文；其余已挂载 `strict_json::enforce` 的旧路由仍先经过
 正文中间件，再进入 handler 守卫。不能混写成全站统一的正文顺序，也不能为减少解析次数改变原有错误优先级。
-两条严格 JSON 路径均保留路由大小上限、单值与 DTO 字段闭集。
+两条严格 JSON 路径均保留路由大小上限、单值与 DTO 字段闭集；recovery 复用同一媒体类型谓词，
+仍按首个 `Content-Type` 判断 `application/json`，保留参数支持及 `+json` 拒绝语义。
 守卫后的正文读取直接复用未超限的单个非空 `Bytes` 帧，多帧才合并；不再为小请求预分配整条路由上限，
 也不复制仅用于确认超限的额外字节。等于上限时仍继续观察 EOF 或下一非空帧，流错误及既有 400/413 优先级不变。
 TCP peer 直接注入每次请求的扩展，不为每条连接重新给整张路由表装配 middleware；
@@ -87,7 +88,8 @@ Unix 连接仍不注入伪造地址，原可信代理解析、5 秒请求头预�
 可信 XFF 倒序借用头和地址段选择客户端，不建立整链 Vec；找到候选后仍校验完整左侧链，
 任一非法段整体回退，全部受信时仍取最左地址。未消费的 Axum `OriginalUri` 扩展不再启用。
 限流窗口与最近访问时间在取得互斥锁后读取单调时钟，按实际账本更新顺序维护淘汰次序。
-Public 规范 UUID 在栈缓冲中格式化后比较；实时目标复用同一非零、小写和规范形式校验。
+Public 与原本要求规范 UUID 的 Admin 拍卖、生命周期、用户及论坛路径共用栈缓冲，统一校验非零、小写且规范的 UUID；
+其余 Admin 路径保留各自的旧解析语义。
 Public 竞价、代理、标记、警告渠道和注销在 Cookie 认证后核对可选 `x-auction-expected-user-id`；规范非零 UUID
 与当前身份不符返回 409 `session_changed`，无效或重复头返回 400 `invalid_expected_user_id`。省略该头保留旧 v1，读取路由行为不变。
 P25/P26 共用路由的方法拒绝响应始终声明 `Allow: GET, PUT`；HEAD 仍返回 405，不能由单一 GET builder
@@ -113,7 +115,8 @@ Unix listener 的组名解析使用 `getgrnam_r` 和调用内独占缓冲，避�
   健康状态直接判断是否存在 active/invalid，避免跨 scope 计数求和溢出；世界投影直接借用配置或默认数组。
 - Runtime 保存与 Worker 唤醒接受结果不表示配置已热加载或远端任务完成。
 - 响应映射接管已持有的数据：dashboard recovery 不复制完整快照，代理摘要只为 wire 要求的嵌套 bid 副本复制文本，
-  结算报告的批次去重借用分类文本。旧 realtime replay 的派生 UUID 直接在原命名空间前缀后序列化 JSON，
+  生命周期响应转移世界名和取消元数据，结算报告的批次去重借用分类文本。
+  旧 realtime replay 的派生 UUID 直接在原命名空间前缀后序列化 JSON，
   不暂存第二份序列化缓冲区；命名空间、字段顺序和幂等输入不变。
 
 Public 装备目录、详情和补偿流水先校验本次读取投影，再把旧链接转移到解析目标，避免逐行复制后丢弃。

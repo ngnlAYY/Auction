@@ -93,7 +93,8 @@ where
                 break;
             }
         };
-        if claims.is_empty() {
+        // 领取回执跨过 drain 时尚未执行应用命令，保留原 claim 等待租约恢复。
+        if claims.is_empty() || worker.control.is_draining() {
             break;
         }
         let exhausted = claims.len() < usize::from(wave_limit);
@@ -105,7 +106,11 @@ where
             let commands = Arc::clone(commands);
             let clock = Arc::clone(&worker.clock);
             let metrics = Arc::clone(&worker.metrics);
+            let control = worker.control.clone();
             tasks.spawn(async move {
+                if control.is_draining() {
+                    return WorkerResult::Success;
+                }
                 let obligation_id = claim.obligation_id;
                 if tokio::time::Instant::now() >= item_deadline {
                     tracing::warn!(%obligation_id, "fulfillment item expired before execution");

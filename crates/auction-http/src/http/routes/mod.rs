@@ -161,16 +161,18 @@ use uuid::Uuid;
 
 /// 解析旧 Public v1 使用的规范小写、非零 UUID。
 pub(crate) fn parse_public_uuid(value: &str) -> Result<Uuid, ()> {
-    let id = Uuid::parse_str(value).map_err(|_| ())?;
+    parse_canonical_uuid(value).ok_or(())
+}
+
+/// Public 与严格 Admin 路由共用规范 UUID 校验；格式化只使用栈缓冲。
+pub(crate) fn parse_canonical_uuid(value: &str) -> Option<Uuid> {
+    let id = Uuid::parse_str(value).ok()?;
     if id.is_nil() {
-        return Err(());
+        return None;
     }
     let mut buffer = Uuid::encode_buffer();
     let canonical: &str = id.hyphenated().encode_lower(&mut buffer);
-    if canonical != value {
-        return Err(());
-    }
-    Ok(id)
+    (canonical == value).then_some(id)
 }
 
 pub use boundary::HttpBoundary;

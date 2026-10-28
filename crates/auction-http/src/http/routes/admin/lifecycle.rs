@@ -134,7 +134,7 @@ pub(crate) async fn execute_admin_lifecycle(
         Ok(result) => result,
         Err(error) => return map_admin_lifecycle_error(action, error),
     };
-    let Some(auction) = result.auction.as_ref() else {
+    let Some(auction) = result.auction else {
         return internal_error();
     };
     if result.command_id.as_uuid() != command_uuid
@@ -153,7 +153,7 @@ pub(crate) async fn execute_admin_lifecycle(
     let data = AdminAuctionLifecycleResponse {
         auction: AdminAuctionCommandResponse {
             id: auction_uuid.to_string(),
-            world_id: auction.world_id.clone(),
+            world_id: auction.world_id,
             sequence: auction.sequence,
             status: admin_auction_status_name(auction.status).to_owned(),
             preview_scheduled_at: timestamp(auction.preview_scheduled_at),
@@ -165,8 +165,8 @@ pub(crate) async fn execute_admin_lifecycle(
             final_phase_at: auction.final_phase_at.map(timestamp),
             settled_at: auction.settled_at.map(timestamp),
             cancelled_at: auction.cancelled_at.map(timestamp),
-            cancelled_reason: auction.cancelled_reason.clone(),
-            cancelled_by: auction.cancelled_by.clone(),
+            cancelled_reason: auction.cancelled_reason,
+            cancelled_by: auction.cancelled_by,
             state_version,
             created_at: timestamp(auction.created_at),
             updated_at: timestamp(auction.updated_at),
@@ -180,11 +180,6 @@ pub(crate) async fn execute_admin_lifecycle(
         AuctionLifecycleAction::EarlySettlement => "后台拍卖已提前进入结算队列",
     };
     (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok(message, data))).into_response()
-}
-
-fn parse_canonical_uuid(value: &str) -> Option<Uuid> {
-    let id = Uuid::parse_str(value).ok()?;
-    (!id.is_nil() && id.to_string() == value).then_some(id)
 }
 
 fn invalid_lifecycle_command(action: AuctionLifecycleAction) -> Response {

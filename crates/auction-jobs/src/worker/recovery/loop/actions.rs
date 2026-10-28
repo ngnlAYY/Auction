@@ -77,6 +77,10 @@ pub(super) async fn process_actions<C>(
                     break;
                 }
             };
+            // 领取及任务调度都可能跨过 drain；未执行的 action 沿原租约恢复，不伪造失败。
+            if worker.control.is_draining() {
+                break;
+            }
             remaining = remaining.saturating_sub(1);
             count = count.saturating_add(1);
             if claim.retry_count > 0 {
@@ -88,7 +92,11 @@ pub(super) async fn process_actions<C>(
             let delivery = worker.recovery_delivery.clone();
             let blacklister = worker.recovery_blacklister.clone();
             let clock = Arc::clone(&worker.clock);
+            let control = worker.control.clone();
             tasks.spawn(async move {
+                if control.is_draining() {
+                    return WorkerResult::Success;
+                }
                 let action_id = claim.action_id;
                 if tokio::time::Instant::now() >= item_deadline {
                     tracing::warn!(%action_id, "recovery action expired before execution");

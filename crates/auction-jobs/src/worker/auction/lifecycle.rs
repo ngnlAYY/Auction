@@ -117,7 +117,8 @@ where
                 break;
             }
         };
-        if claims.is_empty() {
+        // 领取等待可能跨过 drain；未开始的 claim 保留原租约，恢复时沿用持久命令身份。
+        if claims.is_empty() || worker.control.is_draining() {
             break;
         }
         let exhausted = claims.len() < usize::from(wave_limit);
@@ -128,7 +129,11 @@ where
             let schedule = Arc::clone(&worker.schedule);
             let lifecycle = Arc::clone(&worker.lifecycle);
             let clock = Arc::clone(&worker.clock);
+            let control = worker.control.clone();
             tasks.spawn(async move {
+                if control.is_draining() {
+                    return WorkerResult::Success;
+                }
                 let round_id = claim.round_id;
                 if tokio::time::Instant::now() >= item_deadline {
                     tracing::warn!(%round_id, "auction lifecycle item expired before execution");
@@ -202,7 +207,7 @@ where
                 break;
             }
         };
-        if claims.is_empty() {
+        if claims.is_empty() || worker.control.is_draining() {
             break;
         }
         let exhausted = claims.len() < usize::from(wave_limit);
@@ -213,7 +218,11 @@ where
             let store = Arc::clone(store);
             let commands = Arc::clone(commands);
             let clock = Arc::clone(&worker.clock);
+            let control = worker.control.clone();
             tasks.spawn(async move {
+                if control.is_draining() {
+                    return WorkerResult::Success;
+                }
                 let workflow_id = claim.workflow_id;
                 if tokio::time::Instant::now() >= item_deadline {
                     tracing::warn!(%workflow_id, "auction settlement item expired before execution");

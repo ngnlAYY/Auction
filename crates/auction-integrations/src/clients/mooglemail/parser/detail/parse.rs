@@ -172,9 +172,7 @@ pub(crate) fn parse_attachment_manifest(
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let list_text = normalize_text(list.text().collect::<String>());
-    let child_text = normalize_text(
-        entries.iter().map(|entry| entry.text().collect::<String>()).collect::<String>(),
-    );
+    let child_text = normalize_text(entries.iter().flat_map(|entry| entry.text()).collect());
     if list_text != child_text {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
@@ -183,22 +181,22 @@ pub(crate) fn parse_attachment_manifest(
     let mut seen = HashSet::new();
     let mut credits = 0_i64;
     for entry in &entries {
-        let mut hooks = entry.select(&onmouseover_selector).collect::<Vec<_>>();
-        if entry.value().attr("onmouseover").is_some() {
-            hooks.insert(0, *entry);
-        }
+        let hooks = entry
+            .value()
+            .attr("onmouseover")
+            .map(|_| *entry)
+            .into_iter()
+            .chain(entry.select(&onmouseover_selector));
+        let hook = optional_unique_element(hooks, MoogleMailOperation::Detail, world)?;
         let text = normalize_text(entry.text().collect::<String>());
-        if !hooks.is_empty() {
-            if hooks.len() != 1 {
-                return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
-            }
-            let script = hooks[0]
+        if let Some(hook) = hook {
+            let script = hook
                 .value()
                 .attr("onmouseover")
                 .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
             let equipment_id = extract_equipment_id(script)
                 .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
-            if normalize_text(hooks[0].text().collect::<String>()) != text
+            if normalize_text(hook.text().collect::<String>()) != text
                 || !seen.insert(equipment_id.clone())
             {
                 return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));

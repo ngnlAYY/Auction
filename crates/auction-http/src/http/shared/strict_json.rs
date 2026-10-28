@@ -112,7 +112,7 @@ pub(crate) async fn decode_after_guard<T>(
 where
     T: DeserializeOwned,
 {
-    if !application_json(headers.get(header::CONTENT_TYPE)) {
+    if !application_json(headers) {
         return Err(Box::new(error(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "unsupported_media_type",
@@ -213,7 +213,7 @@ pub(crate) async fn enforce(
     if !policy.applies_to(request.method()) {
         return next.run(request).await;
     }
-    if !application_json(request.headers().get(header::CONTENT_TYPE)) {
+    if !application_json(request.headers()) {
         return error(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "unsupported_media_type",
@@ -248,8 +248,10 @@ pub(crate) async fn enforce(
     next.run(Request::from_parts(parts, Body::from(bytes))).await
 }
 
-fn application_json(value: Option<&axum::http::HeaderValue>) -> bool {
-    let Some(value) = value.and_then(|value| value.to_str().ok()) else {
+/// 沿用旧 v1 对首个 Content-Type 的媒体类型校验，不扩展到 `+json` 子类型。
+pub(crate) fn application_json(headers: &HeaderMap) -> bool {
+    let Some(value) = headers.get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok())
+    else {
         return false;
     };
     let Ok(media_type) = value.parse::<mime::Mime>() else {

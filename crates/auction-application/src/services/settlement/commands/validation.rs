@@ -1,6 +1,6 @@
 //! 结算到期世代与活动代理关闭计划的校验。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use auction_domain::{
     CommandId, CompetitionPlan, CompetitionTrigger, SettlementAmount, SettlementPlan,
@@ -119,26 +119,23 @@ pub(super) fn validate_settlement_plan(
 
     let mut facts_by_id = HashMap::with_capacity(snapshot.facts.len());
     for fact in &snapshot.facts {
-        if facts_by_id.insert(fact.lot_id, fact).is_some() {
+        if facts_by_id.insert(fact.lot_id, Some(fact)).is_some() {
             return Err(auction_domain::DomainError::InvalidSettlementFacts(
                 "结算事实包含重复 lot",
             ));
         }
     }
 
-    let mut line_ids = HashSet::with_capacity(plan.lines.len());
     let mut tax_total = SettlementAmount::zero();
     let mut discount_demand = SettlementAmount::zero();
     let mut compensation_total = SettlementAmount::zero();
     for line in &plan.lines {
-        if !line_ids.insert(line.lot_id) {
-            return Err(auction_domain::DomainError::InvalidSettlementFacts(
-                "结算明细包含重复 lot",
-            ));
-        }
+        // 同一索引保留已消费的键：None 仍能区分重复 lot 与未知 lot，无需另建判重集合。
         let fact = facts_by_id
-            .get(&line.lot_id)
-            .ok_or(auction_domain::DomainError::InvalidSettlementFacts("结算明细包含未知 lot"))?;
+            .get_mut(&line.lot_id)
+            .ok_or(auction_domain::DomainError::InvalidSettlementFacts("结算明细包含未知 lot"))?
+            .take()
+            .ok_or(auction_domain::DomainError::InvalidSettlementFacts("结算明细包含重复 lot"))?;
         if line.end_price != fact.end_price.unwrap_or_else(SettlementAmount::zero) {
             return Err(auction_domain::DomainError::InvalidSettlementFacts(
                 "结算明细成交价与锁内事实不一致",
@@ -178,11 +175,11 @@ pub(super) fn validate_settlement_due(
         .map(|fact| fact.effective_end_at)
         .max()
         .ok_or(auction_domain::DomainError::InvalidSettlementFacts("结算不能缺少 lot 事实"))?;
+    // latest_end == due_at <= now 已覆盖全场，不再逐件重复扫描截止时间。
     if command.due_at.timestamp_nanos_opt().is_none()
         || command.now.timestamp_nanos_opt().is_none()
         || command.now < command.due_at
         || latest_end != command.due_at
-        || snapshot.facts.iter().any(|fact| fact.effective_end_at > command.now)
     {
         return Err(auction_domain::DomainError::InvalidSettlementFacts(
             "结算到期世代与锁内 lot 结束时间不一致",

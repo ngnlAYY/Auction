@@ -60,7 +60,9 @@ pub(crate) async fn place_bid(
         return Err(read_command_error(response).await);
     }
     let status = response.status();
-    decoder::decode_bid_command(response).await.map_err(|_| CommandError::invalid_response(status))
+    decoder::decode_bid_command(response, &lot_id)
+        .await
+        .map_err(|_| CommandError::invalid_response(status))
 }
 
 /// 创建代理授权并解码旧契约要求的完整命令投影。

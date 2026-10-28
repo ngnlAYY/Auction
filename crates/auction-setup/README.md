@@ -19,7 +19,9 @@ PostgreSQL 单机首次部署的独立 HTTP 服务：一次性 `/setup` 页面�
 只有目标配置目录明确不存在才启动，已有或损坏配置不降级为设置页。默认仅 loopback，远程合并设置必须显式配置
 精确 HTTPS origin 与受信代理 IP，不信任任意转发头；正式 Admin 不注册设置接口。verify、validate、complete 每次都
 校验 `x-setup-token` 后取得同一非阻塞操作锁，竞争返回 `setup_busy`；verify 无请求体、不消费令牌。全部响应附加
-`no-store` 与共享安全头，请求头预算 5 秒、正文与异步处理合计 10 秒（表单与 DTO 见[初始化契约](docs/contracts/routes.md#首次部署初始化)）。
+`no-store` 与共享安全头，HTTP/1 请求头预算 5 秒、正文与异步处理合计 10 秒（表单与 DTO 见[初始化契约](docs/contracts/routes.md#首次部署初始化)）。
+Host、Origin、远程代理协议证明及设置令牌只接受单个可解码头值；本地可省略 Origin，畸形或重复值返回
+既有 `setup_origin`，令牌畸形或重复返回 `setup_auth`，不能按首值或“未提供”放行。
 本地 HTTP listener 使用端口 80 时，Host/Origin 的省略默认端口与显式 `:80` 等价；
 非默认端口、非 loopback peer 及远程 HTTPS 代理仍执行原精确门禁。
 

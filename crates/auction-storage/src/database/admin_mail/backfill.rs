@@ -100,7 +100,7 @@ impl DatabaseStore {
                 )
                 .bind(&input.sender)
                 .bind(&input.subject)
-                .bind(Json(expected.clone()))
+                .bind(Json(&expected))
                 .bind(intake_id)
                 .execute(&mut *transaction)
                 .await

@@ -13,7 +13,7 @@ use axum::{
 
 use super::super::{
     AdminApiState, admin_session_guard, api_error, authenticated_admin_session, no_store_headers,
-    parse_query, timestamp,
+    parse_canonical_uuid, parse_query, timestamp,
 };
 
 async fn authorize(
@@ -77,12 +77,9 @@ pub(crate) async fn get(
     if let Err(response) = authorize(&state, &headers, address, &uri).await {
         return *response;
     }
-    let auction_id = match uuid::Uuid::parse_str(&auction_id) {
-        Ok(value) if !value.is_nil() && value.hyphenated().to_string() == auction_id => value,
-        _ => {
-            return api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效")
-                .into_response();
-        }
+    let Some(auction_id) = parse_canonical_uuid(&auction_id) else {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效")
+            .into_response();
     };
     let Some(reader) = state.forum_reader() else {
         return unavailable();

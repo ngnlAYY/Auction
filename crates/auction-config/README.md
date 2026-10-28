@@ -29,6 +29,9 @@ common、runtime 候选与首次设置内嵌模板同步；升级不覆盖文件
 角色、公共及普通敏感 TOML 各限 4 MiB；`config/reader.rs` 在同一描述符检查普通文件并有界读取，Unix 以
 `O_NONBLOCK` 打开，避免 FIFO 在类型检查前阻塞。普通配置继续允许部署侧 symlink；默认发现只有明确 `NotFound`
 才使用内置默认值，目录、断链和访问错误均失败关闭，不能当成“没有配置”。
+公共 `log_filter` 在其余配置校验完成后使用与进程初始化相同的 `EnvFilter::try_new` 检查语法，
+使配置预检提前拒绝原本会在 tracing 初始化失败的表达式；错误固定脱敏，不回显输入或底层解析原因。
+省略时继续使用角色默认过滤器；显式值沿用该解析器的接受范围，不额外限制长度、空白或空串。
 Admin 可选 `worker_config_file` 由配置 owner 有界读取非敏感 Worker 文件，仅冻结邮件启用状态及跨组预算；
 不加载 Worker 的 common/secrets，引用须与 Admin runtime 同源。候选按真实启动快照及 managed 覆盖验证，
 缺少可证明基值时明确拒绝，规则及升级步骤见[配置手册](ops/config/README.md#文件职责)。

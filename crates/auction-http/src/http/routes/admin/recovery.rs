@@ -24,7 +24,7 @@ pub(crate) async fn admin_confirm_recovery(
         return api_error(StatusCode::BAD_REQUEST, "invalid_query", "恢复确认不接受查询参数")
             .into_response();
     }
-    if !application_json(&headers) {
+    if !strict_json::application_json(&headers) {
         return api_error(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "unsupported_media_type",
@@ -105,17 +105,4 @@ pub(crate) async fn admin_confirm_recovery(
     let data = AdminRecoveryConfirmationResponse { recovery: map_recovery_confirmation(result) };
     (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("恢复确认已提交", data)))
         .into_response()
-}
-
-fn application_json(headers: &HeaderMap) -> bool {
-    let Some(value) = headers.get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok())
-    else {
-        return false;
-    };
-    let Ok(media_type) = value.parse::<mime::Mime>() else {
-        return false;
-    };
-    media_type.type_() == mime::APPLICATION
-        && media_type.subtype() == mime::JSON
-        && media_type.suffix().is_none()
 }

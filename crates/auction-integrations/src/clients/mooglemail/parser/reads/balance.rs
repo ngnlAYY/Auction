@@ -20,12 +20,13 @@ impl MoogleMailParser {
         }
         let document = Html::parse_document(source);
         let networth_selector = selector("#networth", MoogleMailOperation::Balance, world)?;
-        let networth = document.select(&networth_selector).collect::<Vec<_>>();
-        if networth.len() != 1 {
-            return Err(protocol(MoogleMailOperation::Balance, world));
-        }
+        let networth = unique_element(
+            document.select(&networth_selector),
+            MoogleMailOperation::Balance,
+            world,
+        )?;
         let visible_credits =
-            parse_networth_credits(&normalize_text(networth[0].text().collect::<String>()));
+            parse_networth_credits(&normalize_text(networth.text().collect::<String>()));
         let script = script_text(&document, world, MoogleMailOperation::Balance)?;
         let executable = executable_javascript(&script)
             .ok_or_else(|| protocol(MoogleMailOperation::Balance, world))?;

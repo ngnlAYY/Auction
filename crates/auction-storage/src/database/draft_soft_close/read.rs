@@ -24,7 +24,7 @@ pub(super) async fn lock_target(
     }
     sqlx::query("SELECT id FROM public.scheduled_rounds WHERE auction_id = $1 FOR UPDATE")
         .bind(auction_id)
-        .fetch_all(&mut **transaction)
+        .execute(&mut **transaction)
         .await?;
     sqlx::query("SELECT id FROM public.auctions WHERE id = $1 FOR UPDATE")
         .bind(auction_id)

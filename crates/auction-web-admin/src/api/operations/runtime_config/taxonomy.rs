@@ -76,13 +76,18 @@ fn valid_names<'a>(
 ) -> bool {
     let mut seen = Vec::<&str>::new();
     for value in values {
-        if seen.len() == maximum
-            || !valid_text(value, maximum_bytes, false)
-            || seen.iter().any(|previous| previous.eq_ignore_ascii_case(value))
-        {
+        if seen.len() == maximum || !valid_text(value, maximum_bytes, false) {
             return false;
         }
         seen.push(value);
     }
-    allow_empty || !seen.is_empty()
+    // 只排序借用，不复制名称正文；ASCII 折叠与 eq_ignore_ascii_case 的判等一致。
+    // 词典及各装备的词缀列表均走此处，避免逐项扫描产生平方比较次数。
+    seen.sort_unstable_by(|left, right| {
+        left.bytes()
+            .map(|byte| byte.to_ascii_lowercase())
+            .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
+    });
+    (allow_empty || !seen.is_empty())
+        && seen.windows(2).all(|pair| !pair[0].eq_ignore_ascii_case(pair[1]))
 }

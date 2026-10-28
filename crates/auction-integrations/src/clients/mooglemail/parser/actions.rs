@@ -212,29 +212,30 @@ fn returned_receipt_matches(
     let form_selector = selector("form#mailform", MoogleMailOperation::ReturnMessage, world)?;
     let panes_selector = selector("#mmail_attachpanes", MoogleMailOperation::ReturnMessage, world)?;
     let textarea_selector = selector("textarea", MoogleMailOperation::ReturnMessage, world)?;
-    let envelopes = document.select(&envelope_selector).collect::<Vec<_>>();
-    let forms = document.select(&form_selector).collect::<Vec<_>>();
-    let panes = document.select(&panes_selector).collect::<Vec<_>>();
-    if envelopes.len() != 1
-        || forms.len() != 1
-        || panes.len() != 1
-        || envelopes[0].select(&form_selector).count() != 1
-        || envelopes[0].select(&panes_selector).count() != 1
+    let operation = MoogleMailOperation::ReturnMessage;
+    let (Ok(envelope), Ok(form), Ok(_)) = (
+        unique_element(document.select(&envelope_selector), operation, world),
+        unique_element(document.select(&form_selector), operation, world),
+        unique_element(document.select(&panes_selector), operation, world),
+    ) else {
+        return Ok(false);
+    };
+    if envelope.select(&form_selector).take(2).count() != 1
+        || envelope.select(&panes_selector).take(2).count() != 1
     {
         return Ok(false);
     }
     parse_token(document, world)?;
-    let fields = parse_detail_fields(forms[0], world)?;
-    let textareas = forms[0].select(&textarea_selector).collect::<Vec<_>>();
-    if textareas.len() != 1 {
+    let fields = parse_detail_fields(form, world)?;
+    let Ok(textarea) = unique_element(form.select(&textarea_selector), operation, world) else {
         return Ok(false);
-    }
-    let body = textareas[0].text().collect::<String>();
+    };
+    let body = textarea.text().collect::<String>();
     if !valid_message_body(&body) {
         return Ok(false);
     }
     let assets = parse_detail_asset_manifest(document, world)?;
-    let (returnable, claimable) = parse_detail_actions(envelopes[0], world)?;
+    let (returnable, claimable) = parse_detail_actions(envelope, world)?;
     // 退信证明只比较原资产和正文，不复制装备 ID 或整段可能含密钥的正文。
     let mut actual_equipment_ids = assets.equipment_ids.iter().collect::<Vec<_>>();
     let mut expected_equipment_ids = before.equipment_ids.iter().collect::<Vec<_>>();

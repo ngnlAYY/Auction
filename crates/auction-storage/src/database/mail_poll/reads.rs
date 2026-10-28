@@ -55,34 +55,42 @@ pub(super) async fn stage(
     world_id: &str,
     summaries: &[MailPollReadSummary],
 ) -> Result<(), ApplicationError> {
+    // 入口已校验批次上限及 MID 唯一性；数组只借用原摘要，固定 SQL 不随批次大小膨胀。
+    let external_mail_ids =
+        summaries.iter().map(|summary| summary.external_mail_id.as_str()).collect::<Vec<_>>();
+    let senders = summaries.iter().map(|summary| summary.sender.as_str()).collect::<Vec<_>>();
+    let subjects = summaries.iter().map(|summary| summary.subject.as_str()).collect::<Vec<_>>();
+    let received_at = summaries.iter().map(|summary| summary.received_at).collect::<Vec<_>>();
     let mut transaction =
         pool.begin().await.map_err(|_| storage_error("开启 MoogleMail 待读登记事务失败"))?;
     lock_claim(&mut transaction, claim, world_id).await?;
-    for summary in summaries {
-        // 冲突时只校验原身份，绝不覆盖第一次 GET 前已提交的恢复依据。
-        let verified = sqlx::query(
-            "INSERT INTO public.mail_poll_pending_reads
-                (mailbox_key, world_id, external_mail_id, sender, subject, received_at)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (mailbox_key, external_mail_id) DO UPDATE
-             SET external_mail_id = EXCLUDED.external_mail_id
-             WHERE mail_poll_pending_reads.world_id = EXCLUDED.world_id
-               AND mail_poll_pending_reads.sender = EXCLUDED.sender
-               AND mail_poll_pending_reads.subject = EXCLUDED.subject
-               AND mail_poll_pending_reads.received_at = EXCLUDED.received_at",
-        )
-        .bind(&claim.mailbox_key)
-        .bind(world_id)
-        .bind(&summary.external_mail_id)
-        .bind(&summary.sender)
-        .bind(&summary.subject)
-        .bind(summary.received_at)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|_| storage_error("登记 MoogleMail 待读身份失败"))?;
-        if verified.rows_affected() != 1 {
-            return Err(storage_error("MoogleMail 待读身份冲突"));
-        }
+    // 按原列表位置分配 read_sequence，恢复仍读取同一完成前缀；冲突只校验原身份，
+    // 不覆盖第一次 GET 前已提交的依据。任一项不匹配即回滚整批，不能提交其余项。
+    let verified = sqlx::query(
+        "INSERT INTO public.mail_poll_pending_reads
+            (mailbox_key, world_id, external_mail_id, sender, subject, received_at)
+         SELECT $1, $2, summary.external_mail_id, summary.sender, summary.subject, summary.received_at
+         FROM UNNEST($3::text[], $4::text[], $5::text[], $6::timestamptz[])
+             WITH ORDINALITY AS summary(external_mail_id, sender, subject, received_at, position)
+         ORDER BY summary.position
+         ON CONFLICT (mailbox_key, external_mail_id) DO UPDATE
+         SET external_mail_id = EXCLUDED.external_mail_id
+         WHERE mail_poll_pending_reads.world_id = EXCLUDED.world_id
+           AND mail_poll_pending_reads.sender = EXCLUDED.sender
+           AND mail_poll_pending_reads.subject = EXCLUDED.subject
+           AND mail_poll_pending_reads.received_at = EXCLUDED.received_at",
+    )
+    .bind(&claim.mailbox_key)
+    .bind(world_id)
+    .bind(&external_mail_ids)
+    .bind(&senders)
+    .bind(&subjects)
+    .bind(&received_at)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| storage_error("登记 MoogleMail 待读身份失败"))?;
+    if verified.rows_affected() != summaries.len() as u64 {
+        return Err(storage_error("MoogleMail 待读身份冲突"));
     }
     check_live_claim(&mut transaction, claim).await?;
     transaction.commit().await.map_err(|_| storage_error("提交 MoogleMail 待读登记失败"))

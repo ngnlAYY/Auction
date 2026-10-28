@@ -7,7 +7,7 @@ configure_build_tools() {
 	local tools_identity repository_identity name uses_sccache=false
 	tools_identity=$(bash ci/tools/bootstrap.sh identity release) || return 1
 	export PATH="$PWD/target/build-tools/bin:$PATH" NO_DOWNLOADS=1
-	for name in RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER; do
+	for name in RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_RUSTC_WRAPPER CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER; do
 		if [[ ${!name-} == sccache || ${!name-} == */sccache ]]; then
 			printf -v "$name" '%s' "$PWD/target/build-tools/bin/sccache"
 			export "${name?}"
@@ -80,9 +80,10 @@ build_env_fingerprint() {
 			directory=$(dirname "$directory")
 		done
 		path_fingerprint "${CARGO_HOME:-$HOME/.cargo}/config" "${CARGO_HOME:-$HOME/.cargo}/config.toml" || return 1
+		# Cargo 的配置环境别名同样能替换编译器/包装器或覆盖 profile 的增量策略。
 		while IFS= read -r name; do
 			case "$name" in
-			CARGO_PROFILE_* | CARGO_BUILD_RUSTFLAGS | CARGO_ENCODED_RUSTFLAGS | CARGO_BUILD_TARGET | CARGO_TARGET_*_RUSTFLAGS | CARGO_TARGET_*_LINKER | RUSTDOCFLAGS | RUSTFLAGS | RUSTC | RUSTC_WRAPPER | RUSTC_WORKSPACE_WRAPPER | SCCACHE_SERVER_UDS | CC | CC_* | CXX | CXX_* | AR | AR_* | CFLAGS | CFLAGS_* | CXXFLAGS | CXXFLAGS_* | HOST_CC | HOST_CXX | HOST_AR | HOST_CFLAGS | HOST_CXXFLAGS | TARGET_CC | TARGET_CXX | TARGET_AR | TARGET_CFLAGS | TARGET_CXXFLAGS)
+			CARGO_PROFILE_* | CARGO_BUILD_RUSTC | CARGO_BUILD_RUSTC_WRAPPER | CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER | CARGO_BUILD_INCREMENTAL | CARGO_INCREMENTAL | CARGO_BUILD_RUSTFLAGS | CARGO_ENCODED_RUSTFLAGS | CARGO_BUILD_TARGET | CARGO_TARGET_*_RUSTFLAGS | CARGO_TARGET_*_LINKER | RUSTDOCFLAGS | RUSTFLAGS | RUSTC | RUSTC_WRAPPER | RUSTC_WORKSPACE_WRAPPER | SCCACHE_SERVER_UDS | CC | CC_* | CXX | CXX_* | AR | AR_* | CFLAGS | CFLAGS_* | CXXFLAGS | CXXFLAGS_* | HOST_CC | HOST_CXX | HOST_AR | HOST_CFLAGS | HOST_CXXFLAGS | TARGET_CC | TARGET_CXX | TARGET_AR | TARGET_CFLAGS | TARGET_CXXFLAGS)
 				printf '%s\0%s\0' "$name" "${!name-}"
 				;;
 			esac

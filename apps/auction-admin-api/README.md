@@ -20,6 +20,8 @@
 管理变更走版本化 REST、认证/CSRF 与审计边界，凭据、密钥和数据库内部模型不得进入浏览器 DTO。
 `bootstrap/service.rs` 拥有 tracing 与 HTTP 生命周期，`state.rs` 装配数据库/端口/心跳，
 `config.rs` 映射缓存、Worker control、安全和 dashboard 范围，`listener.rs` 绑定监听器。
+`state/fallback.rs` 共用无数据库时的端口装配，默认制品与 PostgreSQL 制品缺省数据库时使用同一预览及 dashboard 投影；
+各路径仍先校验安全设置，再按原顺序检查数据库 feature，缺省数据库不建立会话或持久化命令端口。
 dashboard 的 world/邮箱范围共用借用迭代器，仅在最终持有邮箱标识时复制字符串；保留 runtime 优先与已启用 Worker 回退。
 `first_run.rs` 在正式 loader 前选择模式：内嵌 PostgreSQL Web 制品只在无默认配置且未显式设置
 `AUCTION_CONFIG_FILE` 时自动开放 loopback 设置页，也可显式执行 `setup --output-dir <绝对路径>`；

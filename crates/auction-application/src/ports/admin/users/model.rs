@@ -15,20 +15,17 @@ pub const RECOVERY_BUYER_BLACKLIST_LEGACY_PUBLIC_REASON: &str = "反复退回COD
 /// 默认三次退回时的买家黑名单公开原因。
 pub const RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON: &str = "连续三次退回COD邮件";
 
+// 生成与识别共用同一闭集；识别旧账本原因时不逐次格式化临时字符串。
+const RECOVERY_RETURN_COUNT_NUMERALS: [&str; 10] =
+    ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+
 /// 按 recovery 冻结的 COD 退回上限生成可展示的拉黑原因。
 pub fn recovery_buyer_blacklist_reason(return_count: u32) -> String {
-    let numeral = match return_count {
-        1 => "一",
-        2 => "二",
-        3 => "三",
-        4 => "四",
-        5 => "五",
-        6 => "六",
-        7 => "七",
-        8 => "八",
-        9 => "九",
-        10 => "十",
-        _ => return format!("连续{return_count}次退回COD邮件"),
+    let Some(numeral) = return_count
+        .checked_sub(1)
+        .and_then(|index| RECOVERY_RETURN_COUNT_NUMERALS.get(index as usize))
+    else {
+        return format!("连续{return_count}次退回COD邮件");
     };
     format!("连续{numeral}次退回COD邮件")
 }
@@ -36,7 +33,10 @@ pub fn recovery_buyer_blacklist_reason(return_count: u32) -> String {
 /// 只接受 recovery 生成的中文次数理由或旧版固定原因。
 pub fn is_recovery_buyer_blacklist_reason(value: &str) -> bool {
     value == RECOVERY_BUYER_BLACKLIST_LEGACY_PUBLIC_REASON
-        || (1..=10).any(|count| value == recovery_buyer_blacklist_reason(count))
+        || value
+            .strip_prefix("连续")
+            .and_then(|value| value.strip_suffix("次退回COD邮件"))
+            .is_some_and(|numeral| RECOVERY_RETURN_COUNT_NUMERALS.contains(&numeral))
 }
 /// recovery 代 Users owner 写入黑名单时使用的固定 actor。
 pub const RECOVERY_BUYER_BLACKLIST_ACTOR: &str = "auction-recovery";

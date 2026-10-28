@@ -181,6 +181,10 @@ where
             // 不读取或编辑远端主题，也不把可能已提交的 claim 释放成新一轮工作。
             return Err(WorkerError::ForumTopicProcessingFailed);
         }
+        // 尚未读取远端或导入命令，drain 后保留原租约等待恢复，不清除历史未知写入门禁。
+        if worker.control.is_draining() {
+            break;
+        }
         if !seen_auctions.insert(topic.auction_id) {
             // 同一轮不重复读取远端主题；释放刚领取的重复 claim 后等待下一次 poll。
             let scanned_at = worker.clock.now();

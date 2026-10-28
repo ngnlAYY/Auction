@@ -135,7 +135,9 @@ pub fn use_dialog_focus_trap(_lock_background_scroll: bool) {
                     let Ok(nodes) = dialog.query_selector_all(FOCUSABLE_SELECTOR) else {
                         return;
                     };
-                    let mut controls = Vec::new();
+                    // 焦点循环只用首尾控件，保持原筛选顺序但不收集全部 DOM 句柄。
+                    let mut first = None;
+                    let mut last = None;
                     for index in 0..nodes.length() {
                         let Some(node) = nodes.item(index) else {
                             continue;
@@ -146,9 +148,12 @@ pub fn use_dialog_focus_trap(_lock_background_scroll: bool) {
                         if !is_focusable(&control) {
                             continue;
                         }
-                        controls.push(control);
+                        if first.is_none() {
+                            first = Some(control.clone());
+                        }
+                        last = Some(control);
                     }
-                    let (Some(first), Some(last)) = (controls.first(), controls.last()) else {
+                    let (Some(first), Some(last)) = (first, last) else {
                         // busy 弹窗可能没有任何可 Tab 子控件，焦点必须留在面板而非背景。
                         event.prevent_default();
                         if let Ok(panel) = dialog.dyn_into::<web_sys::HtmlElement>() {

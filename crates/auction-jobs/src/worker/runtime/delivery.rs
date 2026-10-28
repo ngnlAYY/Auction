@@ -232,17 +232,6 @@ impl DeliveryTaskResult {
     fn completed(worker_result: WorkerResult) -> Self {
         Self { worker_result, skipped_recipient: None, deferred_world: None }
     }
-
-    fn recipient_not_found(worker_result: WorkerResult, world: &str, recipient: &str) -> Self {
-        Self {
-            worker_result,
-            deferred_world: None,
-            skipped_recipient: Some((
-                world.trim().to_ascii_lowercase(),
-                recipient.trim().to_ascii_lowercase(),
-            )),
-        }
-    }
 }
 
 async fn process_delivery_claim<C>(
@@ -407,9 +396,6 @@ where
         .await;
     }
     let delivery_id = claim.delivery_id;
-    let recipient = claim.recipient.clone();
-    let recipient_world =
-        claim.payload.get("world").and_then(serde_json::Value::as_str).map(str::to_owned);
     let result = result.and_then(normalize_delivery_send_result);
     match result {
         Ok(result) => {
@@ -432,6 +418,14 @@ where
             }
         }
         Err(error) => {
+            // 只有确定的收件人缺失才需要批次排除项；成功和其它失败不复制收件人/world。
+            let skipped_recipient = if error.failure_code == "recipient_not_found" {
+                claim.payload.get("world").and_then(serde_json::Value::as_str).map(|world| {
+                    (world.trim().to_ascii_lowercase(), claim.recipient.trim().to_ascii_lowercase())
+                })
+            } else {
+                None
+            };
             let failure_code = error.failure_code.clone();
             let worker_result = match tokio::time::timeout(
                 config.finalize_timeout,
@@ -450,13 +444,7 @@ where
                     WorkerResult::Error
                 }
             };
-            if failure_code == "recipient_not_found"
-                && let Some(world) = recipient_world.as_deref()
-            {
-                DeliveryTaskResult::recipient_not_found(worker_result, world, &recipient)
-            } else {
-                DeliveryTaskResult::completed(worker_result)
-            }
+            DeliveryTaskResult { worker_result, skipped_recipient, deferred_world: None }
         }
     }
 }

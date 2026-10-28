@@ -55,6 +55,10 @@ dx 编译期关闭自动下载，Web 入口同时设 `NO_DOWNLOADS=1`；补丁�
 
 ## 身份与缓存
 
+工具源码构建清除应用的 profile、rustflags、编译器/包装器及增量覆盖环境变量，包括 Cargo 的
+`CARGO_BUILD_RUSTC*`、`CARGO_BUILD_INCREMENTAL` 别名与 `CARGO_INCREMENTAL`，避免环境别名绕过独立构建配方。
+发布制品的复用指纹则显式绑定这些输入，见[CI 构建身份](ci/README.md#发布边界)。
+
 `target/build-tools/` 与 `target/audit-tools/` 各自包含 `bin/`、`lib/`、`BUILD-INFO` 和 `SHA256SUMS`。
 回执绑定安装脚本、固定源码补丁、独立锁图、Rust 工具链、目标及精确文件清单；缓存恢复后重新验证每个二进制的内容。
 安装开始冻结配方，完成时再次核对配方及实际源码锁；编译期间有变化则保留增量缓存并拒绝签发回执。
@@ -167,3 +171,7 @@ feature 图及源码调用路径；版本匹配不能单独证明实际入口可
 （1,380 条公告），应用和三个工具锁共用该快照执行 `--deny warnings`：应用与 cargo-audit 均为零漏洞、零警告；
 dx 仍为 13 项漏洞匹配、11 项警告，sccache 仍为 7 项漏洞匹配、17 项警告。四份锁文件未调整，工具公告未设忽略项；
 受影响 API、平台和现有受控调用范围继续见上两节。本轮只刷新审计记录，未重建工具或执行发布。
+
+同日后续[边界复核](docs/status.md#2026-10-27-批量持久化与边界复核)在独立干净快照重跑四锁，结果不变。
+补齐 Cargo 环境别名隔离后，audit/release 两档工具已重建并通过回执校验；工具版本和锁图保持原样，
+cargo-audit 的 21 条上游 future-incompatible 警告及 sccache 的 1 条 dead-code 警告仍保留，未执行应用发布。
