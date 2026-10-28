@@ -63,7 +63,7 @@ pub struct DataKey {
 impl DataKey {
     /// 从敏感 TOML 中的标识和标准 Base64 材料建立 AES-256 数据密钥。
     pub fn from_base64(id: &str, encoded: &str) -> Result<Self, EquipmentKeySealerError> {
-        if !valid_key_id(id) {
+        if !auction_domain::valid_key_id(id) {
             return Err(EquipmentKeySealerError::InvalidKeyId);
         }
         let mut material =
@@ -73,7 +73,8 @@ impl DataKey {
             return Err(EquipmentKeySealerError::InvalidDataKey);
         }
         let key = hmac::Key::new(hmac::HMAC_SHA256, &material);
-        let fingerprint = hex_encode(hmac::sign(&key, DATA_KEY_FINGERPRINT_DOMAIN).as_ref());
+        let fingerprint =
+            auction_application::lower_hex(hmac::sign(&key, DATA_KEY_FINGERPRINT_DOMAIN).as_ref());
         Ok(Self { id: id.to_owned(), fingerprint, material })
     }
 
@@ -272,14 +273,6 @@ impl fmt::Display for EquipmentKeyOpener {
     }
 }
 
-fn valid_key_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 64
-        && value.bytes().enumerate().all(|(index, byte)| {
-            byte.is_ascii_alphanumeric() || (index > 0 && matches!(byte, b'.' | b'_' | b'-'))
-        })
-}
-
 fn valid_associated_data(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 256
@@ -293,15 +286,5 @@ fn fingerprint(data_key: &DataKey, plaintext: &[u8]) -> String {
     let mut context = hmac::Context::with_key(&hmac_key);
     context.update(SECRET_FINGERPRINT_DOMAIN);
     context.update(plaintext);
-    hex_encode(context.sign().as_ref())
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(HEX[(byte >> 4) as usize] as char);
-        output.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    output
+    auction_application::lower_hex(context.sign().as_ref())
 }

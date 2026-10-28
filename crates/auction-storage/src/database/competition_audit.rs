@@ -3,7 +3,7 @@
 use auction_application::{
     CompetitionCommandAuditContext, CompetitionCommandAuditKind, CompetitionTransactionError,
 };
-use auction_domain::{BidMechanism, CompetitionPlan, ProxyMode, ProxyTransitionKind};
+use auction_domain::{BidMechanism, CompetitionPlan, ProxyTransitionKind};
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -76,7 +76,7 @@ fn place_bid_record(
                 "leader_id": uuid_bytes(bid.bidder_id.as_uuid()),
                 "effective_end": bid.effective_end_at,
                 "accepted_state_version": bid.state_version,
-                "mechanism": bid_mechanism(bid.mechanism),
+                "mechanism": bid.mechanism.as_str(),
             })
         })
         .collect::<Vec<_>>();
@@ -132,7 +132,7 @@ fn create_proxy_record(
         metadata: json!({
             "authorization_id": state.id.as_uuid().to_string(),
             "lot_id": state.lot_id.as_uuid().to_string(),
-            "mode": proxy_mode(state.mode),
+            "mode": state.mode.as_str(),
             "usage_number": state.usage_number,
             "public_fact_count": plan.public_bids.len(),
         }),
@@ -183,20 +183,6 @@ fn lower_proxy_record(
 
 fn uuid_bytes(id: Uuid) -> [u8; 16] {
     *id.as_bytes()
-}
-
-const fn bid_mechanism(mechanism: BidMechanism) -> &'static str {
-    match mechanism {
-        BidMechanism::Ordinary => "ordinary",
-        BidMechanism::Proxy => "proxy",
-    }
-}
-
-const fn proxy_mode(mode: ProxyMode) -> &'static str {
-    match mode {
-        ProxyMode::Fast => "fast",
-        ProxyMode::Slow => "slow",
-    }
 }
 
 fn invalid_audit(message: &'static str) -> CompetitionTransactionError {

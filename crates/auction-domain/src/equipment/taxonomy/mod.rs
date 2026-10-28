@@ -8,9 +8,7 @@ mod catalog;
 mod model;
 mod parse;
 
-pub use affixes::{
-    classify_prefix, classify_suffix, prefixes_for_kind, suffix_matches, suffixes_for_kind,
-};
+pub use affixes::{prefixes_for_kind, suffix_matches, suffixes_for_kind};
 pub use catalog::{armor_material_category, categories, kinds, materials, qualities};
 pub use model::{
     AffixCompatibility, CategoryEntry, EquipmentCategory, EquipmentIdentity, EquipmentSlot,

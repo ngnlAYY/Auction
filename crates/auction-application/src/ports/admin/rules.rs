@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use auction_domain::CommandId;
+use auction_domain::{CommandId, valid_text};
 
 use super::{
     ApplicationFuture, RequestHash, TransactionFuture, TransactionPolicy, TransactionPolicyError,
@@ -250,13 +250,6 @@ fn valid_locale(value: &str) -> bool {
         && !value.starts_with('-')
         && !value.ends_with('-')
         && value.chars().all(|character| character == '-' || character.is_ascii_alphanumeric())
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]

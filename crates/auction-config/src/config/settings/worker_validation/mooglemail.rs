@@ -121,7 +121,10 @@ pub(crate) fn validate_mooglemail_worker(
         ));
     }
     validate_mooglemail_equipment_filter(&config.equipment_filter)?;
-    validate_mooglemail_notification_templates(&config.mail_templates)?;
+    config
+        .mail_templates
+        .validate()
+        .map_err(|(_key, error)| ConfigError::InvalidMoogleMailConfig(error.message()))?;
     let mut worlds = BTreeSet::new();
     worlds.insert(config.world_id.as_str());
     for world in &config.additional_worlds {
@@ -216,129 +219,6 @@ pub(crate) fn validate_mooglemail_equipment_filter(
         }
     }
     // 品质门槛始终存在（空列表也回退默认 L/P），因此不再要求其它过滤维度。
-    Ok(())
-}
-
-pub(crate) fn validate_mooglemail_notification_templates(
-    config: &MoogleMailNotificationTemplatesConfig,
-) -> Result<(), ConfigError> {
-    let templates = [
-        ("auction_assets_rejected", config.auction_assets_rejected.as_str(), &[][..], &[][..]),
-        ("auction_no_attachments", config.auction_no_attachments.as_str(), &[][..], &[][..]),
-        (
-            "auction_equipment_rejected",
-            config.auction_equipment_rejected.as_str(),
-            &[][..],
-            &["reason_code", "reason_text", "next_steps", "mail_reference"][..],
-        ),
-        ("user_assets_rejected", config.user_assets_rejected.as_str(), &[][..], &[][..]),
-        (
-            "register_key",
-            config.register_key.as_str(),
-            &["login_key", "username"][..],
-            &["login_key", "username"][..],
-        ),
-        (
-            "register_result",
-            config.register_result.as_str(),
-            &["result_code"][..],
-            &["result_code", "username"][..],
-        ),
-        (
-            "rebind_result",
-            config.rebind_result.as_str(),
-            &["result_code"][..],
-            &["result_code", "username"][..],
-        ),
-        (
-            "settlement_winner_equipment_cod",
-            config.settlement_winner_equipment_cod.as_str(),
-            &["item_name", "amount", "reference"][..],
-            &["item_name", "amount", "reference", "price_breakdown"][..],
-        ),
-        (
-            "settlement_payment_carrier",
-            config.settlement_payment_carrier.as_str(),
-            &["amount", "reference"][..],
-            &["amount", "reference"][..],
-        ),
-        (
-            "settlement_payment_reminder",
-            config.settlement_payment_reminder.as_str(),
-            &["reference"][..],
-            &["reference"][..],
-        ),
-        (
-            "settlement_equipment_handoff",
-            config.settlement_equipment_handoff.as_str(),
-            &["item_name", "reference"][..],
-            &["item_name", "reference"][..],
-        ),
-        (
-            "settlement_seller_payout",
-            config.settlement_seller_payout.as_str(),
-            &["amount", "reference"][..],
-            &["amount", "reference"][..],
-        ),
-        (
-            "settlement_buyer_refund",
-            config.settlement_buyer_refund.as_str(),
-            &["amount", "reference"][..],
-            &["amount", "reference"][..],
-        ),
-        ("operations_alert", config.operations_alert.as_str(), &["summary"][..], &["summary"][..]),
-    ];
-    for (_name, value, required, allowed) in templates {
-        validate_mooglemail_template_body(value, required, allowed)?;
-    }
-    // 保留旧自定义正文的原因码，也允许新正文用可读原因替代；至少展示其中一种原因。
-    if !config.auction_equipment_rejected.contains("{reason_code}")
-        && !config.auction_equipment_rejected.contains("{reason_text}")
-    {
-        return Err(ConfigError::InvalidMoogleMailConfig(
-            "mail_templates.auction_equipment_rejected 必须包含 reason_code 或 reason_text",
-        ));
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_mooglemail_template_body(
-    value: &str,
-    required: &[&str],
-    allowed: &[&str],
-) -> Result<(), ConfigError> {
-    if value.is_empty()
-        || value != value.trim()
-        || value.len() > 64 * 1024
-        || value
-            .chars()
-            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
-    {
-        return Err(ConfigError::InvalidMoogleMailConfig("mail_templates 正文格式无效"));
-    }
-    let mut cursor = 0;
-    let mut seen = BTreeSet::new();
-    while let Some(relative_start) = value[cursor..].find('{') {
-        let start = cursor + relative_start;
-        if value[cursor..start].contains('}') {
-            return Err(ConfigError::InvalidMoogleMailConfig("mail_templates 占位符未闭合"));
-        }
-        let relative_end = value[start + 1..]
-            .find('}')
-            .ok_or(ConfigError::InvalidMoogleMailConfig("mail_templates 占位符未闭合"))?;
-        let end = start + 1 + relative_end;
-        let placeholder = &value[start + 1..end];
-        if !allowed.contains(&placeholder) {
-            return Err(ConfigError::InvalidMoogleMailConfig("mail_templates 含有未知占位符"));
-        }
-        seen.insert(placeholder);
-        cursor = end + 1;
-    }
-    if value[cursor..].contains('}')
-        || required.iter().any(|placeholder| !seen.contains(placeholder))
-    {
-        return Err(ConfigError::InvalidMoogleMailConfig("mail_templates 缺少必需占位符"));
-    }
     Ok(())
 }
 

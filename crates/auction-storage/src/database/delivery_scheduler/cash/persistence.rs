@@ -104,7 +104,7 @@ fn binding_metadata(
         "credential_id": binding.credential_id, "credential_version": binding.credential_version,
         "runtime_scope": auction_application::MAIL_RUNTIME_SCOPE, "generation": binding.runtime.generation,
         "uid": binding.authenticated_uid, "player_name": binding.player_name,
-        "world": match binding.world { auction_domain::SettlementWorld::Main => "main", auction_domain::SettlementWorld::Isekai => "isekai" },
+        "world": binding.world.as_str(),
         "observed_at": binding.observed_at, "protocol_version": binding.protocol_version,
         "digest": binding.digest,
     })

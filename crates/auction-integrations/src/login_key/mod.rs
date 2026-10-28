@@ -227,7 +227,7 @@ fn fingerprint(data_key: &DataKey, plaintext: &[u8]) -> String {
     context.update(LOGIN_KEY_FINGERPRINT_DOMAIN);
     context.update(&[0]);
     context.update(plaintext);
-    hex_encode(context.sign().as_ref())
+    auction_application::lower_hex(context.sign().as_ref())
 }
 
 fn seal(
@@ -301,16 +301,6 @@ fn open(
 
 fn login_key_aad(user_id: Uuid) -> String {
     format!("auction/user-login-key/v1/{user_id}/key")
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(HEX[(byte >> 4) as usize] as char);
-        output.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    output
 }
 
 fn crypto_error(error: LoginKeyCryptoError) -> ApplicationError {

@@ -1,6 +1,7 @@
 //! PostgreSQL Users/MoogleMail 适配器装配；命令写入、幂等读取和安全行映射由子模块拥有。
 
 use super::*;
+use crate::database::users::envelope::upsert_login_key_envelope;
 
 #[path = "postgres/commands.rs"]
 mod commands;

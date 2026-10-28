@@ -102,6 +102,19 @@ pub struct MailDeliveryCommand {
     pub notification_body: Option<String>,
 }
 
+/// 已冻结通知摘要（operations alert、lot watch）的格式：非空、无首尾空白、不超过 16 KiB，
+/// 控制字符只允许换行与制表；入队、存储重放核对与发送前校验共用同一规则。
+pub fn valid_notification_body(value: Option<&str>) -> bool {
+    value.is_some_and(|value| {
+        !value.is_empty()
+            && value.len() <= (16 << 10)
+            && value == value.trim()
+            && !value
+                .chars()
+                .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    })
+}
+
 /// MoogleMail delivery 入队后的安全结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MailDeliveryResult {

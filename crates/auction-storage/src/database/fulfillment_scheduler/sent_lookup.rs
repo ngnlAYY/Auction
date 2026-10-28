@@ -58,15 +58,11 @@ async fn read_postgres(
     .await
     .map_err(|_| repository_error("读取撤拍 Sent 核对目标失败"))?
     .ok_or_else(|| repository_error("撤拍 Sent 目标不存在或冻结条件不满足"))?;
-    let world = match row
-        .try_get::<String, _>("world_id")
-        .map_err(|_| repository_error("读取撤拍 Sent 世界失败"))?
-        .as_str()
-    {
-        "main" => SettlementWorld::Main,
-        "isekai" => SettlementWorld::Isekai,
-        _ => return Err(repository_error("撤拍 Sent 世界无效")),
-    };
+    let world = SettlementWorld::from_name(
+        &row.try_get::<String, _>("world_id")
+            .map_err(|_| repository_error("读取撤拍 Sent 世界失败"))?,
+    )
+    .ok_or_else(|| repository_error("撤拍 Sent 世界无效"))?;
     let recipient: String = row
         .try_get("recipient_game_identity")
         .map_err(|_| repository_error("读取撤拍 Sent 收件人失败"))?;

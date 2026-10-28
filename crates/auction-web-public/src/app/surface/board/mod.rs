@@ -6,11 +6,11 @@ mod data;
 mod navigation;
 mod realtime;
 mod refresh;
-mod visibility;
 mod world;
 
 use super::*;
 
+pub(crate) use auction_web_shared::{PageVisibility, sleep_while_visible};
 pub(crate) use data::AuctionData;
 pub(crate) use navigation::preview_history_switch;
 pub(crate) use realtime::{
@@ -19,7 +19,6 @@ pub(crate) use realtime::{
     public_connection_class, public_connection_state, public_connection_state_name,
 };
 pub(crate) use refresh::{PublicBidRefresh, use_bid_refresh};
-pub(crate) use visibility::{PageVisibility, sleep_while_visible};
 pub(crate) use world::{WorldPicker, supported_worlds, world_label};
 
 #[component]

@@ -86,7 +86,7 @@ pub(super) async fn process_notification(
             origin: MailDeliveryOrigin::MailIntake,
             origin_id: external_mail_id.clone(),
             operation: MailDeliveryOperation::Send,
-            world_id: forum_world_name(topic.world).to_owned(),
+            world_id: topic.world.as_str().to_owned(),
             external_mail_id,
             recipient: bidder.player_name.clone(),
             template: Some(MailNotificationTemplate::ForumAuctionNotice),

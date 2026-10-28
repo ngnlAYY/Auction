@@ -46,7 +46,7 @@ bid_increment_ppm = 50000
 soft_close_window_seconds = 900
 # 可选：候选截止为出价接受时刻加本秒数，默认 900，仅允许向后延长。
 soft_close_extension_seconds = 900
-# 可选：取消截止窗口秒数，默认 86400。
+# 可选：取消截止窗口秒数，默认 86400；仅随策略冻结，当前取消只允许开拍前。
 cancel_cutoff_seconds = 86400
 # 可选：是否启用代理竞价，默认 true。
 proxy_enabled = true

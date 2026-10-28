@@ -2,13 +2,6 @@
 
 use super::*;
 
-pub(crate) fn bid_mechanism_name(mechanism: BidMechanism) -> &'static str {
-    match mechanism {
-        BidMechanism::Ordinary => "ordinary",
-        BidMechanism::Proxy => "proxy",
-    }
-}
-
 pub(crate) fn plan_command_id(
     plan: &CompetitionPlan,
 ) -> Result<auction_domain::CommandId, CompetitionTransactionError> {
@@ -149,68 +142,13 @@ pub(crate) fn policy_u32(value: i64, label: &str) -> Result<u32, CompetitionTran
 }
 
 pub(crate) fn parse_proxy_mode(value: String) -> Result<ProxyMode, CompetitionTransactionError> {
-    match value.as_str() {
-        "fast" => Ok(ProxyMode::Fast),
-        "slow" => Ok(ProxyMode::Slow),
-        _ => Err(invalid_state("数据库代理模式无效")),
-    }
+    ProxyMode::from_name(&value).ok_or_else(|| invalid_state("数据库代理模式无效"))
 }
 
 pub(crate) fn parse_proxy_status(
     value: String,
 ) -> Result<ProxyStatus, CompetitionTransactionError> {
-    match value.as_str() {
-        "active" => Ok(ProxyStatus::Active),
-        "final_fast" => Ok(ProxyStatus::FinalFast),
-        "exhausted" => Ok(ProxyStatus::Exhausted),
-        "frozen" => Ok(ProxyStatus::Frozen),
-        "closed" => Ok(ProxyStatus::Closed),
-        _ => Err(invalid_state("数据库代理状态无效")),
-    }
-}
-
-pub(crate) fn proxy_mode(mode: ProxyMode) -> &'static str {
-    match mode {
-        ProxyMode::Fast => "fast",
-        ProxyMode::Slow => "slow",
-    }
-}
-
-pub(crate) fn proxy_status(status: ProxyStatus) -> &'static str {
-    match status {
-        ProxyStatus::Active => "active",
-        ProxyStatus::FinalFast => "final_fast",
-        ProxyStatus::Exhausted => "exhausted",
-        ProxyStatus::Frozen => "frozen",
-        ProxyStatus::Closed => "closed",
-    }
-}
-
-pub(crate) fn proxy_terminal_reason(reason: ProxyTerminalReason) -> &'static str {
-    match reason {
-        ProxyTerminalReason::StrictlyDefeated => "strictly_defeated",
-        ProxyTerminalReason::RankedBelow => "ranked_below",
-        ProxyTerminalReason::EligibilityLost => "eligibility_lost",
-        ProxyTerminalReason::CompetitionClosed => "competition_closed",
-    }
-}
-
-pub(crate) fn proxy_transition_kind(kind: auction_domain::ProxyTransitionKind) -> &'static str {
-    match kind {
-        auction_domain::ProxyTransitionKind::Created => "created",
-        auction_domain::ProxyTransitionKind::Lowered => "lowered",
-        auction_domain::ProxyTransitionKind::FinalFast => "final_fast",
-        auction_domain::ProxyTransitionKind::Exhausted => "exhausted",
-        auction_domain::ProxyTransitionKind::Frozen => "frozen",
-        auction_domain::ProxyTransitionKind::Closed => "closed",
-    }
-}
-
-pub(crate) fn bid_mechanism(mechanism: BidMechanism) -> &'static str {
-    match mechanism {
-        BidMechanism::Ordinary => "ordinary",
-        BidMechanism::Proxy => "proxy",
-    }
+    ProxyStatus::from_name(&value).ok_or_else(|| invalid_state("数据库代理状态无效"))
 }
 
 /// 事务隔离级别随 `BEGIN` 一并声明；各事务 runner 共用此映射，不再单独发送 `SET TRANSACTION`。
@@ -222,21 +160,13 @@ pub(crate) const fn begin_statement(isolation: TransactionIsolation) -> &'static
 }
 
 pub(crate) fn map_sql_error(error: sqlx::Error) -> CompetitionTransactionError {
-    if is_serialization_error(&error) {
+    if crate::database::is_serialization_conflict(&error) {
         CompetitionTransactionError::SerializationConflict
     } else if is_unique_error(&error) {
         CompetitionTransactionError::Conflict
     } else {
         CompetitionTransactionError::Failed("PostgreSQL 竞价事务操作失败".to_owned())
     }
-}
-
-pub(crate) fn is_serialization_error(error: &sqlx::Error) -> bool {
-    matches!(
-        error,
-        sqlx::Error::Database(database_error)
-            if matches!(database_error.code().as_deref(), Some("40001" | "40P01"))
-    )
 }
 
 pub(crate) fn is_unique_error(error: &sqlx::Error) -> bool {
@@ -254,14 +184,5 @@ pub(crate) fn invalid_state(message: &str) -> CompetitionTransactionError {
 pub(crate) fn parse_auction_status(
     value: String,
 ) -> Result<AuctionStatus, CompetitionTransactionError> {
-    match value.as_str() {
-        "draft" => Ok(AuctionStatus::Draft),
-        "preview" => Ok(AuctionStatus::Preview),
-        "live" => Ok(AuctionStatus::Live),
-        "final" => Ok(AuctionStatus::Final),
-        "settling" => Ok(AuctionStatus::Settling),
-        "settled" => Ok(AuctionStatus::Settled),
-        "cancelled" => Ok(AuctionStatus::Cancelled),
-        _ => Err(invalid_state("拍卖状态不在允许集合内")),
-    }
+    AuctionStatus::from_name(&value).ok_or_else(|| invalid_state("拍卖状态不在允许集合内"))
 }

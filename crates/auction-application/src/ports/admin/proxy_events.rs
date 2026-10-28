@@ -5,7 +5,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use auction_domain::LotId;
+use auction_domain::{LotId, valid_text};
 
 use super::ApplicationFuture;
 
@@ -138,11 +138,4 @@ pub trait AdminProxyEventReader: Send + Sync {
         &self,
         request: AdminProxyEventListRequest,
     ) -> ApplicationFuture<'_, Option<AdminProxyEventPage>>;
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

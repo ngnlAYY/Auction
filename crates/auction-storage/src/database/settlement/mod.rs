@@ -9,8 +9,7 @@ use auction_application::{
 use auction_domain::{
     AuctionId, CommandId, CompetitionPlan, ProxyStatus, RecoveryPolicy, SettlementAmount,
     SettlementFact, SettlementLine, SettlementMode, SettlementObligation, SettlementObligationKind,
-    SettlementObligationState, SettlementPlan, SettlementPolicy, SettlementWorld,
-    deterministic_uuid,
+    SettlementPlan, SettlementPolicy, SettlementWorld, deterministic_uuid,
 };
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};

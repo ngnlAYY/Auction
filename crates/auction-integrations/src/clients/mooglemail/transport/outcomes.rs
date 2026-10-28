@@ -291,17 +291,6 @@ pub(crate) fn login_key_error(error: ApplicationError) -> DeliveryTransportError
     }
 }
 
-pub(crate) fn valid_notification_body(value: Option<&str>) -> bool {
-    value.is_some_and(|value| {
-        !value.is_empty()
-            && value.len() <= (16 << 10)
-            && value == value.trim()
-            && !value
-                .chars()
-                .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
-    })
-}
-
 pub(crate) fn transport_error(error: MoogleMailError, after_write: bool) -> DeliveryTransportError {
     let write_started = after_write || error.write_started();
     let outcome_unknown = write_started || error.category != MoogleMailErrorCategory::Configuration;

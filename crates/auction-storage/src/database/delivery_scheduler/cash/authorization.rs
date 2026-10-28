@@ -90,10 +90,7 @@ pub(super) async fn authorize(
     }
     crate::lock_mail_runtime_generation(tx, &evidence.identity.runtime).await?;
     // 持久world code字典序；Main现金与Isekai身份只共享账号，不能搬用世界事实。
-    let world = match evidence.identity.world {
-        auction_domain::SettlementWorld::Main => "main",
-        auction_domain::SettlementWorld::Isekai => "isekai",
-    };
+    let world = evidence.identity.world.as_str();
     if claim.payload.get("world").and_then(serde_json::Value::as_str) != Some(world) {
         return Err(FenceError::Rejected);
     }

@@ -1,26 +1,38 @@
-//! Public 页面可见性共享状态：隐藏期间轮询与实时重连退避挂起而非重置，恢复可见后继续。
+//! 页面可见性共享原语：隐藏期间轮询与重连退避挂起而非重置，恢复可见后继续。
+//! Public 外壳与 Admin 自动轮询共用；是否在恢复可见时补偿刷新由调用方回调决定。
 
-use super::*;
 use std::{
-    rc::Weak,
+    cell::{Cell, RefCell},
+    rc::{Rc, Weak},
     task::{Poll, Waker},
 };
+
+use gloo_timers::future::TimeoutFuture;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::{JsCast, closure::Closure};
 
 type WakerSlot = RefCell<Option<Waker>>;
 type WakerRegistry = RefCell<Vec<Weak<WakerSlot>>>;
 
-/// 页面可见性；`visibilitychange` 监听器更新内部状态并唤醒挂起的轮询/退避等待者。
-/// 内部是 `Rc` 共享状态，克隆体与原体看到同一份可见性，供 router 轮询与实时 owner 共用。
+/// 页面可见性；`visibilitychange` 监听器更新内部状态并唤醒挂起的等待者。
+/// 内部是 `Rc` 共享状态，克隆体与原体看到同一份可见性，供同一页面的多个循环共用。
 #[derive(Clone)]
-pub(crate) struct PageVisibility {
+pub struct PageVisibility {
     hidden: Rc<Cell<bool>>,
     wakers: Rc<WakerRegistry>,
     #[cfg(target_arch = "wasm32")]
     listener: Rc<RefCell<Option<PageVisibilityListener>>>,
 }
 
+impl Default for PageVisibility {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PageVisibility {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             hidden: Rc::new(Cell::new(false)),
             wakers: Rc::new(RefCell::new(Vec::new())),
@@ -29,15 +41,15 @@ impl PageVisibility {
         }
     }
 
-    /// 同步读取可见性，供已使用共享秒针的边界提醒跳过隐藏页；不建立额外监听或定时器。
-    pub(crate) fn is_visible(&self) -> bool {
+    /// 同步读取可见性；不建立额外监听或定时器。
+    pub fn is_visible(&self) -> bool {
         !self.hidden.get()
     }
 
-    /// 安装 `visibilitychange` 监听（仅浏览器目标）；恢复可见时先执行 `on_visible`
-    /// 补偿一次权威重读，再唤醒所有挂起的轮询/退避。与 PublicShell 同寿命，只安装一次。
+    /// 安装 `visibilitychange` 监听（仅浏览器目标）；恢复可见时先执行 `on_visible`，
+    /// 再唤醒所有挂起的等待。与持有者同寿命，重复调用只安装一次。
     #[cfg(target_arch = "wasm32")]
-    pub(crate) fn install(&self, mut on_visible: impl FnMut() + 'static) {
+    pub fn install(&self, mut on_visible: impl FnMut() + 'static) {
         if self.listener.borrow().is_some() {
             return;
         }
@@ -63,9 +75,13 @@ impl PageVisibility {
         *self.listener.borrow_mut() = Some(PageVisibilityListener { document, callback });
     }
 
-    /// 卸载 `visibilitychange` 监听，确保 PublicShell 销毁后不保留浏览器回调。
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn cleanup(&self) {
+    /// 非浏览器目标没有隐藏事件，安装是无操作。
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn install(&self, _on_visible: impl FnMut() + 'static) {}
+
+    /// 卸载 `visibilitychange` 监听，避免路由反复挂载时监听器累积。
+    pub fn cleanup(&self) {
+        #[cfg(target_arch = "wasm32")]
         if let Some(listener) = self.listener.borrow_mut().take() {
             let _ = listener.document.remove_event_listener_with_callback(
                 "visibilitychange",
@@ -90,7 +106,7 @@ impl PageVisibility {
     }
 
     /// 页面隐藏时挂起直到恢复可见；当前已可见时立即返回，不改变既有计时节奏。
-    pub(crate) async fn wait_until_visible(&self) {
+    pub async fn wait_until_visible(&self) {
         if !self.hidden.get() {
             return;
         }
@@ -142,15 +158,9 @@ struct PageVisibilityListener {
     callback: Closure<dyn FnMut()>,
 }
 
-impl Default for PageVisibility {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// 分片睡眠：隐藏时挂起剩余时长（不重置计时），恢复可见后继续走完剩余分片。
 /// 浏览器会大幅节流隐藏页面的定时器，事件驱动的可见性等待比单纯拉长 setTimeout 更可靠。
-pub(crate) async fn sleep_while_visible(visibility: &PageVisibility, delay_millis: u32) {
+pub async fn sleep_while_visible(visibility: &PageVisibility, delay_millis: u32) {
     /// 睡眠分片粒度：足够细以便在隐藏时尽快转入事件驱动挂起，又不会引入明显唤醒开销。
     const SLEEP_SLICE_MILLIS: u32 = 1_000;
     let mut remaining = delay_millis;

@@ -117,11 +117,6 @@ impl<T: 'static> QueryState<T> {
     pub fn replace(&mut self, value: T) {
         self.set(value, QueryWriteMode::Replace);
     }
-
-    /// 只更新状态信号、不写地址栏（用于从地址栏恢复等内部路径）。
-    pub fn set_silently(&mut self, value: T) {
-        self.state.set(value);
-    }
 }
 
 /// 挂载与 URL query 双向同步的状态。

@@ -128,10 +128,11 @@ pub use ports::{
     MailPollCompletion, MailPollIntake, MailPollProgressFailure, MailPollProgressObserver,
     MailPollProgressOutcome, MailPollProgressSnapshot, MailPollProgressStage, MailPollReadJournal,
     MailPollReadSummary, MailPollStore, MailProcessingAttempt, MailProcessingDecision,
-    MailProcessingError, MailProcessingFuture, MailProcessor, MailUserCommandKind, MailUserPort,
-    MailUserRebindCommand, MailUserRegisterCommand, MailUserRegisterWrite, MailUserResult,
-    MailUserResultCode, MailUserStore, OperationsAlertBatchClaim, OperationsAlertBatchItem,
-    OperationsAlertClaimRequest, OperationsAlertDeliverySnapshot, OperationsAlertDeliveryStatus,
+    MailProcessingError, MailProcessingFuture, MailProcessor, MailTemplateError,
+    MailUserCommandKind, MailUserPort, MailUserRebindCommand, MailUserRegisterCommand,
+    MailUserRegisterWrite, MailUserResult, MailUserResultCode, MailUserStore,
+    OperationsAlertBatchClaim, OperationsAlertBatchItem, OperationsAlertClaimRequest,
+    OperationsAlertDeliverySnapshot, OperationsAlertDeliveryStatus,
     OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
     OperationsAlertFulfillmentSnapshot, OperationsAlertHealth, OperationsAlertKind,
     OperationsAlertObserveCommand, OperationsAlertPolicy, OperationsAlertProcessSnapshot,
@@ -207,9 +208,10 @@ pub use ports::{
     canonical_settlement_fulfillment_subject, canonical_summary, canonical_summary_prefix,
     credential_scope, credential_secret_hash, default_accepted_qualities, evaluate_snapshot,
     format_public_time_wire, forum_catalog_marker, forum_catalog_page_marker,
-    forum_post_bodies_match, forum_system_log_marker, forum_world_name,
-    is_recovery_buyer_blacklist_reason, is_safe_mail_poll_id, is_stale_slow_proxy_error,
-    mail_auction_aggregate_id, recovery_buyer_blacklist_reason, request_hash,
+    forum_post_bodies_match, forum_system_log_marker, is_recovery_buyer_blacklist_reason,
+    is_safe_mail_poll_id, is_stale_slow_proxy_error, lower_hex, mail_auction_aggregate_id,
+    recovery_buyer_blacklist_reason, request_hash, valid_allowlist_host,
+    valid_allowlist_path_prefix, valid_listener_group, valid_notification_body,
 };
 pub use ports::{
     AdminCredentialCheckObservation, AdminCredentialCheckPort, AdminCredentialCheckRecord,
@@ -231,7 +233,7 @@ pub use ports::{
     FundingCommitOutcome, FundingDeliveryOutcome, FundingError, FundingFuture, FundingMutation,
     FundingPolicy, FundingPolicyReader, FundingPreview, FundingReconciliationCommand,
     FundingReconciliationReader, FundingReconciliationResult, FundingReconciliationWriter,
-    FundingRecordOnlyCommand, FundingRecordOnlyStore, FundingReturnKind, FundingReturnProof,
+    FundingRecordOnlyCommand, FundingRecordOnlyStore,
 };
 pub use ports::{
     LegacySelfReconciliationAction, LegacySelfReconciliationCommand,

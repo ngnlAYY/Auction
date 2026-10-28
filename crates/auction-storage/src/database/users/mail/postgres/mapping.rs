@@ -39,36 +39,6 @@ pub(super) async fn forum_only_identity(
     .map_err(map_storage_error)
 }
 
-pub(super) async fn insert_login_key_envelope(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    user_id: Uuid,
-    envelope: &MailLoginKeyEnvelope,
-    now: DateTime<Utc>,
-) -> Result<(), ApplicationError> {
-    sqlx::query(
-        "INSERT INTO public.user_login_key_envelopes
-            (user_id, ciphertext, nonce, encryption_key_id, fingerprint, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $6)
-         ON CONFLICT (user_id) DO UPDATE
-         SET ciphertext = EXCLUDED.ciphertext,
-             nonce = EXCLUDED.nonce,
-             encryption_key_id = EXCLUDED.encryption_key_id,
-             fingerprint = EXCLUDED.fingerprint,
-             updated_at = GREATEST(user_login_key_envelopes.created_at,
-                                   user_login_key_envelopes.updated_at, EXCLUDED.updated_at)",
-    )
-    .bind(user_id)
-    .bind(envelope.ciphertext())
-    .bind(envelope.nonce())
-    .bind(envelope.encryption_key_id())
-    .bind(envelope.fingerprint())
-    .bind(now)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_storage_error)?;
-    Ok(())
-}
-
 pub(super) async fn persist_user_mail_result(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     command_id: CommandId,

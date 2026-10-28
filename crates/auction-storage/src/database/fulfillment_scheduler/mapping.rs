@@ -223,11 +223,7 @@ pub(super) fn request_hash_from_optional(
 pub(super) fn settlement_world(
     value: String,
 ) -> Result<SettlementWorld, auction_application::RepositoryError> {
-    match value.as_str() {
-        "main" => Ok(SettlementWorld::Main),
-        "isekai" => Ok(SettlementWorld::Isekai),
-        _ => Err(repository_error_owned("结算履约世界标识无效")),
-    }
+    SettlementWorld::from_name(&value).ok_or_else(|| repository_error_owned("结算履约世界标识无效"))
 }
 
 #[cfg(feature = "postgres")]
@@ -266,16 +262,8 @@ pub(super) fn fulfillment_delivery_status(
 pub(super) fn obligation_kind(
     value: String,
 ) -> Result<SettlementObligationKind, auction_application::RepositoryError> {
-    match value.as_str() {
-        "winner_equipment_cod" => Ok(SettlementObligationKind::WinnerEquipmentCod),
-        "winner_payment_carrier_cod" => Ok(SettlementObligationKind::WinnerPaymentCarrierCod),
-        "winner_equipment_handoff" => Ok(SettlementObligationKind::WinnerEquipmentHandoff),
-        "seller_payout" => Ok(SettlementObligationKind::SellerPayout),
-        "buyer_refund" => Ok(SettlementObligationKind::BuyerRefund),
-        "unsold_return" => Ok(SettlementObligationKind::UnsoldReturn),
-        "withdrawn_return" => Ok(SettlementObligationKind::WithdrawnReturn),
-        _ => Err(repository_error_owned("结算履约义务种类无效")),
-    }
+    SettlementObligationKind::from_name(&value)
+        .ok_or_else(|| repository_error_owned("结算履约义务种类无效"))
 }
 
 pub(super) fn bounded_text(value: String, max_chars: usize) -> String {

@@ -13,4 +13,4 @@ pub(super) use header::EquipmentLevel;
 pub(super) use identity::parse_identity;
 pub(super) use page::parse_equipment_page;
 pub(super) use stats::normalize_stat_value;
-pub(super) use url::{parse_equipment_url, valid_dns_name, valid_path_prefix};
+pub(super) use url::parse_equipment_url;

@@ -35,5 +35,5 @@ pub(super) fn valid_identifier(value: &str) -> bool {
 }
 
 pub(super) fn sha256_hex(value: &[u8]) -> String {
-    Sha256::digest(value).iter().map(|byte| format!("{byte:02x}")).collect()
+    auction_application::lower_hex(&Sha256::digest(value))
 }

@@ -58,13 +58,7 @@ impl PostgresReportError {
     }
 
     fn retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::Database {
-                source: sqlx::Error::Database(database),
-                ..
-            } if matches!(database.code().as_deref(), Some("40001" | "40P01"))
-        )
+        matches!(self, Self::Database { source, .. } if crate::database::is_serialization_conflict(source))
     }
 
     fn into_application(self) -> ApplicationError {

@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use auction_domain::{AuctionId, CommandId};
+use auction_domain::{AuctionId, CommandId, valid_text};
 use chrono::{DateTime, Utc};
 
 use super::{
@@ -78,13 +78,6 @@ pub trait AdminAuctionCreateTransaction: Send {
         command: AdminCreateAuctionCommand,
         result: AdminAuctionSummary,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 fn valid_time(value: DateTime<Utc>) -> bool {

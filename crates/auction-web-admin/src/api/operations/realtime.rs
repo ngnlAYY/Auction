@@ -471,10 +471,7 @@ fn decode_replay(data: StrictReplayData, requested_schema: i32) -> Result<(), &'
 fn decode_pagination(
     value: StrictPagination,
 ) -> Result<AdminRealtimePaginationResponse, &'static str> {
-    if !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.page)
-        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.page_size)
-        || !valid_count(value.total)
-    {
+    if !crate::api::pagination::valid_response(value.page, value.page_size, value.total) {
         return Err("realtime_pagination");
     }
     Ok(AdminRealtimePaginationResponse {

@@ -14,7 +14,7 @@ use auction_application::{
     RecoveryBuyerBlacklister, RequestHash,
 };
 #[cfg(feature = "postgres")]
-use auction_domain::{CommandId, deterministic_uuid};
+use auction_domain::{CommandId, deterministic_uuid, valid_text};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -214,19 +214,8 @@ fn valid_key_write(write: &AdminUserKeyWrite) -> bool {
         })
 }
 
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
-}
-
 fn valid_forum_account_id(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    !bytes.is_empty()
-        && bytes.len() <= 32
-        && bytes[0] != b'0'
-        && bytes.iter().all(u8::is_ascii_digit)
+    auction_domain::valid_positive_decimal(value, 32)
 }
 
 fn valid_time(value: DateTime<Utc>) -> bool {

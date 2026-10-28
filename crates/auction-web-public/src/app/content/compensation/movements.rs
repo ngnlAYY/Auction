@@ -1,7 +1,7 @@
 //! Public 补偿流水详情及其金额/类型展示。
 
 use super::*;
-use auction_web_shared::{TruncatedText, format_held_duration};
+use auction_web_shared::{TruncatedText, format_held_duration, format_ppm};
 
 #[component]
 pub(super) fn CompensationMovementDetails(
@@ -173,24 +173,4 @@ fn compensation_kind_label(kind: &str) -> String {
         "closing" => t!("compensation-kind-closing"),
         _ => kind.to_owned(),
     }
-}
-
-fn format_ppm(value: i32, show_positive_sign: bool) -> String {
-    let absolute = i64::from(value).abs();
-    let whole = absolute / 10_000;
-    let fraction = absolute % 10_000;
-    let number = if fraction == 0 {
-        whole.to_string()
-    } else {
-        let fraction = format!("{fraction:04}").trim_end_matches('0').to_owned();
-        format!("{whole}.{fraction}")
-    };
-    let sign = if value < 0 {
-        "−"
-    } else if value > 0 && show_positive_sign {
-        "+"
-    } else {
-        ""
-    };
-    format!("{sign}{number}%")
 }

@@ -1,5 +1,6 @@
 //! Admin Mail owner 共享常量、聚合标识和字段校验。
 
+pub(super) use auction_domain::valid_text;
 use uuid::Uuid;
 
 /// Admin 邮箱标识允许的最大字节数。
@@ -31,13 +32,6 @@ pub(super) fn valid_kind(value: Option<&str>) -> bool {
 pub(super) fn valid_status(value: Option<&str>) -> bool {
     value
         .is_none_or(|value| value.is_empty() || matches!(value, "accepted" | "rejected" | "failed"))
-}
-
-pub(super) fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 pub(super) fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {

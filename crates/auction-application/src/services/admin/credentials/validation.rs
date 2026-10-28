@@ -1,5 +1,7 @@
 //! Admin 凭据命令的字段边界校验。
 
+use auction_domain::valid_text;
+
 use crate::{
     AdminCredentialDeleteCommand, AdminCredentialError, AdminCredentialImportCommand,
     AdminCredentialRenameCommand, AdminCredentialStatusCommand, ApplicationError,
@@ -69,11 +71,4 @@ pub(super) fn validate_delete(
 
 pub(super) fn next_version(current: i64) -> Result<i64, ApplicationError> {
     current.checked_add(1).ok_or(AdminCredentialError::InvalidRequest.into())
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

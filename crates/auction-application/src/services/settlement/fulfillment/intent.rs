@@ -3,8 +3,7 @@
 use std::collections::BTreeMap;
 
 use auction_domain::{
-    CommandId, SettlementId, SettlementMode, SettlementObligationKind, SettlementWorld,
-    legacy_natural_key_uuid,
+    CommandId, SettlementId, SettlementMode, SettlementObligationKind, legacy_natural_key_uuid,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -56,7 +55,7 @@ pub(super) fn build_delivery_intent(
         obligation_id: claim.obligation_id.as_uuid(),
         kind: claim.kind,
         operation: claim.operation.as_str(),
-        world: settlement_world_name(claim.world),
+        world: claim.world.as_str(),
         recipient: claim.recipient.clone(),
         template: "",
         reference: String::new(),
@@ -267,11 +266,4 @@ fn valid_payload_line(value: &str, maximum: usize, allow_empty: bool) -> bool {
         && value.len() <= maximum
         && value == value.trim()
         && !value.chars().any(char::is_control)
-}
-
-pub(super) fn settlement_world_name(world: SettlementWorld) -> &'static str {
-    match world {
-        SettlementWorld::Main => "main",
-        SettlementWorld::Isekai => "isekai",
-    }
 }

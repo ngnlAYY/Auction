@@ -99,7 +99,7 @@ pub(super) async fn insert_lot_settlements(
         .bind(line.adjustment_ppm)
         // 旧版 adjustment metadata 是只允许 `policy` 的严格闭集；策略版本属于结算摘要，
         // 不能扩散进 lot metadata，否则旧版/新版严格报告解码器都会拒绝正常结算事实。
-        .bind(json!({ "policy": settlement_mode(plan.policy_mode) }))
+        .bind(json!({ "policy": plan.policy_mode.as_str() }))
         .execute(&mut **transaction)
         .await
         .map_err(map_sql_error)?;

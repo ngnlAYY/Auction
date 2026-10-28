@@ -69,7 +69,7 @@ pub(super) async fn apply_final_proxy_plans_postgres(
         let audit = final_proxy_audit_record(command, auction.updated_at, &proxy_plan)?;
         transaction.insert_command_inner(proxy_plan.command).await?;
         transaction
-            .apply_public_command_plan_inner(proxy_plan.competition, None, auction.updated_at)
+            .apply_public_command_plan_inner(&proxy_plan.competition, None, auction.updated_at)
             .await?;
         insert_lifecycle_audit(transaction, audit).await?;
     }

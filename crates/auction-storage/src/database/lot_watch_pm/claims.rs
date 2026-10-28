@@ -20,7 +20,7 @@ pub(super) async fn claim(
         .available_worlds
         .iter()
         .copied()
-        .map(auction_application::forum_world_name)
+        .map(auction_domain::SettlementWorld::as_str)
         .collect::<Vec<_>>();
     let DatabaseStore::Postgres(store) = store;
     let mut tx = store.pool().begin().await.map_err(sql_error)?;

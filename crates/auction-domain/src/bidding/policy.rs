@@ -105,73 +105,6 @@ impl AuctionRules {
         }
         current_price.checked_add(self.minimum_increment)
     }
-
-    /// 校验一笔出价并计算软截止后的有效结束时间。
-    pub fn validate_bid(
-        self,
-        state: LotBidState,
-        bidder_id: UserId,
-        amount: BidAmount,
-        now: DateTime<Utc>,
-    ) -> Result<BidDecision, DomainError> {
-        self.validate()?;
-        state.validate()?;
-        if !amount.is_valid_bid_input() {
-            return Err(DomainError::InvalidAmount { value: amount.value() });
-        }
-        if bidder_id.is_nil() {
-            return Err(DomainError::InvalidBidState("出价人标识不能是 nil UUID"));
-        }
-        if now.timestamp_nanos_opt().is_none() {
-            return Err(DomainError::InvalidBidState("当前时间超出可表示范围"));
-        }
-        if now > state.effective_end_at {
-            return Err(DomainError::AuctionClosed);
-        }
-
-        // 此入口校验参与者提交的出价；历史代理领先标记不能放宽普通出价的经济增量。
-        let proxy_last = false;
-        let minimum_price = self.next_minimum_bid(
-            Some(state.start_price),
-            state.current_price,
-            state.material,
-            proxy_last,
-        )?;
-        if amount < minimum_price {
-            return Err(DomainError::BidTooLow { minimum: minimum_price });
-        }
-
-        let mut effective_end_at = state.effective_end_at;
-        let mut extended = false;
-        let soft_close_start = state
-            .effective_end_at
-            .checked_sub_signed(self.soft_close_window)
-            .ok_or(DomainError::InvalidSchedule("软截止窗口超出时间范围"))?;
-        if self.soft_close_window > Duration::zero() && now >= soft_close_start {
-            let candidate = now
-                .checked_add_signed(self.soft_close_extension)
-                .ok_or(DomainError::InvalidSchedule("软截止延长超出时间范围"))?;
-            if candidate > effective_end_at {
-                effective_end_at = candidate;
-                extended = true;
-            }
-        }
-
-        Ok(BidDecision { minimum_price, accepted_price: amount, effective_end_at, extended })
-    }
-
-    /// 判断当前时刻是否仍在取消截止点之前；恰好到达截止点时不可取消。
-    pub fn can_cancel(
-        self,
-        scheduled_end_at: DateTime<Utc>,
-        now: DateTime<Utc>,
-    ) -> Result<bool, DomainError> {
-        self.validate()?;
-        let cutoff_at = scheduled_end_at
-            .checked_sub_signed(self.cancel_cutoff)
-            .ok_or(DomainError::InvalidSchedule("取消截止超出时间范围"))?;
-        Ok(now < cutoff_at)
-    }
 }
 
 /// 锁内读取到的最小竞价状态，不包含数据库或 HTTP 细节。
@@ -233,15 +166,6 @@ impl LotBidState {
 
         Ok(())
     }
-}
-
-/// 出价规则计算结果，供应用层在同一事务内写入事实。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BidDecision {
-    pub minimum_price: BidAmount,
-    pub accepted_price: BidAmount,
-    pub effective_end_at: DateTime<Utc>,
-    pub extended: bool,
 }
 
 fn ppm_minimum(current_price: BidAmount, bid_increment_ppm: i64) -> Result<BidAmount, DomainError> {

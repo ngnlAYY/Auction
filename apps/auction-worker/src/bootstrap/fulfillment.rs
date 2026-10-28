@@ -35,7 +35,7 @@ fn fulfillment_gateway(
     world: SettlementWorld,
     unavailable_detail: &'static str,
 ) -> Result<(MoogleMailWorld, Arc<MoogleMailGateway>), ApplicationError> {
-    let world = mooglemail_world(world)?;
+    let world = MoogleMailWorld::from(world);
     let gateway = gateways
         .get(&world)
         .cloned()
@@ -86,7 +86,7 @@ impl SettlementFulfillmentEvidenceReader for MoogleMailFulfillmentEvidenceReader
                 .map_err(mooglemail_evidence_error)?;
             Ok(SettlementFulfillmentSentEvidence {
                 external_mail_id: snapshot.external_mail_id,
-                world: settlement_world(snapshot.world),
+                world: snapshot.world.into(),
                 recipient: snapshot.recipient,
                 subject: snapshot.subject,
                 remaining_credits: snapshot.remaining_credits,
@@ -117,7 +117,7 @@ impl SettlementFulfillmentEvidenceReader for MoogleMailFulfillmentEvidenceReader
                 .await
                 .map_err(mooglemail_evidence_error)?;
             Ok(SettlementFulfillmentBalanceEvidence {
-                world: settlement_world(snapshot.world),
+                world: snapshot.world.into(),
                 credits: snapshot.credits,
                 observed_at: snapshot.observed_at,
             })
@@ -165,22 +165,6 @@ impl SettlementFulfillmentEvidenceReader for UnavailableFulfillmentEvidenceReade
                 "MoogleMail Balance evidence reader unavailable",
             ))
         })
-    }
-}
-
-#[cfg(feature = "postgres")]
-fn mooglemail_world(world: SettlementWorld) -> Result<MoogleMailWorld, ApplicationError> {
-    Ok(match world {
-        SettlementWorld::Main => MoogleMailWorld::Main,
-        SettlementWorld::Isekai => MoogleMailWorld::Isekai,
-    })
-}
-
-#[cfg(feature = "postgres")]
-fn settlement_world(world: MoogleMailWorld) -> SettlementWorld {
-    match world {
-        MoogleMailWorld::Main => SettlementWorld::Main,
-        MoogleMailWorld::Isekai => SettlementWorld::Isekai,
     }
 }
 

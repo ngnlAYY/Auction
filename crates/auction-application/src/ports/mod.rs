@@ -48,6 +48,8 @@ mod compensation;
 mod core_clock;
 #[path = "core/competition.rs"]
 mod core_competition;
+#[path = "core/encoding.rs"]
+mod core_encoding;
 #[path = "core/ledger.rs"]
 mod core_ledger;
 #[path = "core/policy.rs"]
@@ -247,7 +249,8 @@ pub use admin_runtime_config::{
     AdminRuntimeSecurityConfig, AdminRuntimeSessionConfig, AdminRuntimeSnapshot,
     AdminRuntimeStoredCommand, AdminRuntimeTracingConfig, AdminRuntimeUpdateCommand,
     AdminRuntimeWorkerConfig, AdminRuntimeWorkerControlConfig, AdminRuntimeWorldConfig,
-    AdminRuntimeWorldsConfig, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
+    AdminRuntimeWorldsConfig, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES, MailTemplateError,
+    valid_allowlist_host, valid_allowlist_path_prefix, valid_listener_group,
 };
 pub use admin_settlement_catalog::{
     MAX_SETTLEMENT_CATALOG_OFFSET, MAX_SETTLEMENT_CATALOG_PAGE_SIZE, SettlementCatalogEntry,
@@ -298,6 +301,7 @@ pub use core_competition::{
     CompetitionSnapshot, CompetitionTransaction, CompetitionTransactionError, ProxyUsageContext,
     SlowProxyExecutionContext, TransactionFailure, TransactionFuture, TransactionRunner,
 };
+pub use core_encoding::lower_hex;
 pub use core_ledger::{CommandLedger, CommandLedgerError, RequestHash, StoredCommand};
 pub use core_policy::{TransactionIsolation, TransactionPolicy, TransactionPolicyError};
 pub use core_repository::{AuctionRepository, RepositoryError};
@@ -336,7 +340,7 @@ pub use forum_sync::{
     ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
     MAX_FORUM_CATALOG_LOTS, MAX_FORUM_CATALOG_PAGES, MAX_FORUM_RECONCILIATION_TITLES,
     MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_catalog_marker, forum_catalog_page_marker,
-    forum_post_bodies_match, forum_system_log_marker, forum_world_name,
+    forum_post_bodies_match, forum_system_log_marker,
 };
 pub use fulfillment::{
     SettlementDeliveryPreparation, SettlementFulfillmentActivationResult,
@@ -386,7 +390,7 @@ pub use mail_processing::{
     MailDeliveryOrigin, MailDeliveryResult, MailEquipmentAttachment, MailEquipmentFilter,
     MailEquipmentReader, MailMessage, MailNotificationTemplate, MailProcessingAttempt,
     MailProcessingDecision, MailProcessingError, MailProcessingFuture, MailProcessor,
-    default_accepted_qualities, mail_auction_aggregate_id,
+    default_accepted_qualities, mail_auction_aggregate_id, valid_notification_body,
 };
 pub use operations_alert::{
     MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES,

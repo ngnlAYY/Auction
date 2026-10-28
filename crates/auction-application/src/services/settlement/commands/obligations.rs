@@ -53,7 +53,7 @@ pub(super) fn build_obligations(
             SettlementWorld::Main => SettlementObligationKind::WinnerEquipmentCod,
             SettlementWorld::Isekai => SettlementObligationKind::WinnerPaymentCarrierCod,
         };
-        let payment_id = obligation_id(snapshot.auction_id, fact.lot_id, kind_name(payment_kind));
+        let payment_id = obligation_id(snapshot.auction_id, fact.lot_id, payment_kind.as_str());
         obligations.push(SettlementObligation {
             id: payment_id,
             auction_id: snapshot.auction_id,
@@ -153,16 +153,4 @@ fn obligation_id(auction_id: AuctionId, lot_id: auction_domain::LotId, kind: &st
         "auction.settlement-obligation.v1",
         &[auction_uuid.as_bytes(), lot_uuid.as_bytes(), kind.as_bytes()],
     ))
-}
-
-fn kind_name(kind: SettlementObligationKind) -> &'static str {
-    match kind {
-        SettlementObligationKind::WinnerEquipmentCod => "winner_equipment_cod",
-        SettlementObligationKind::WinnerPaymentCarrierCod => "winner_payment_carrier_cod",
-        SettlementObligationKind::WinnerEquipmentHandoff => "winner_equipment_handoff",
-        SettlementObligationKind::SellerPayout => "seller_payout",
-        SettlementObligationKind::BuyerRefund => "buyer_refund",
-        SettlementObligationKind::UnsoldReturn => "unsold_return",
-        SettlementObligationKind::WithdrawnReturn => "withdrawn_return",
-    }
 }

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use auction_domain::{SettlementMode, SettlementObligationKind, SettlementPlan};
+use auction_domain::{SettlementObligationKind, SettlementPlan};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -130,7 +130,7 @@ pub(super) fn replay_legacy_settlement(
         || persisted.state_version != snapshot.auction_state_version
         || result.auction_id != uuid_bytes(command.auction_id.as_uuid())
         || result.policy_version != i64::from(persisted.policy_version)
-        || result.policy_mode != settlement_mode_name(persisted.policy_mode)
+        || result.policy_mode != persisted.policy_mode.as_str()
         || result.pool_enabled != persisted.pool_enabled
         || result.opening_pool_balance != persisted.opening_pool.value()
         || result.closing_pool_balance != persisted.closing_pool.value()
@@ -231,7 +231,7 @@ impl LegacySettlementResult {
             return false;
         }
         self.obligation_kind_counts.iter().try_fold(0_i64, |total, (kind, count)| {
-            if *count <= 0 || !valid_obligation_kind(kind) {
+            if *count <= 0 || SettlementObligationKind::from_name(kind).is_none() {
                 None
             } else {
                 total.checked_add(*count)
@@ -265,9 +265,7 @@ fn persisted_counts(
 ) -> Result<BTreeMap<&'static str, u64>, ApplicationError> {
     let mut mapped = BTreeMap::new();
     for entry in counts {
-        if entry.count == 0
-            || mapped.insert(obligation_kind_name(entry.kind), entry.count).is_some()
-        {
+        if entry.count == 0 || mapped.insert(entry.kind.as_str(), entry.count).is_some() {
             return Err(failed("权威结算义务数量投影无效"));
         }
     }
@@ -282,7 +280,7 @@ fn generated_counts(
 ) -> Result<BTreeMap<&'static str, u64>, ApplicationError> {
     let mut counts = BTreeMap::new();
     for obligation in &plan.obligations {
-        let count = counts.entry(obligation_kind_name(obligation.kind)).or_insert(0_u64);
+        let count = counts.entry(obligation.kind.as_str()).or_insert(0_u64);
         *count = count.checked_add(1).ok_or_else(|| failed("结算义务数量溢出"))?;
     }
     Ok(counts)
@@ -292,7 +290,7 @@ fn legacy_counts(counts: &BTreeMap<String, i64>) -> Result<BTreeMap<&str, u64>, 
     counts
         .iter()
         .map(|(kind, count)| {
-            if !valid_obligation_kind(kind) {
+            if SettlementObligationKind::from_name(kind).is_none() {
                 return Err(failed("旧版结算义务种类未知"));
             }
             u64::try_from(*count)
@@ -302,39 +300,6 @@ fn legacy_counts(counts: &BTreeMap<String, i64>) -> Result<BTreeMap<&str, u64>, 
                 .ok_or_else(|| failed("旧版结算义务数量无效"))
         })
         .collect()
-}
-
-fn settlement_mode_name(mode: SettlementMode) -> &'static str {
-    match mode {
-        SettlementMode::LegacyZeroV0 => "legacy_zero_v0",
-        SettlementMode::HoldCurveV1 => "hold_curve_v1",
-        SettlementMode::HoldCurveV2 => "hold_curve_v2",
-    }
-}
-
-fn obligation_kind_name(kind: SettlementObligationKind) -> &'static str {
-    match kind {
-        SettlementObligationKind::WinnerEquipmentCod => "winner_equipment_cod",
-        SettlementObligationKind::WinnerPaymentCarrierCod => "winner_payment_carrier_cod",
-        SettlementObligationKind::WinnerEquipmentHandoff => "winner_equipment_handoff",
-        SettlementObligationKind::SellerPayout => "seller_payout",
-        SettlementObligationKind::BuyerRefund => "buyer_refund",
-        SettlementObligationKind::UnsoldReturn => "unsold_return",
-        SettlementObligationKind::WithdrawnReturn => "withdrawn_return",
-    }
-}
-
-fn valid_obligation_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "winner_equipment_cod"
-            | "winner_payment_carrier_cod"
-            | "winner_equipment_handoff"
-            | "seller_payout"
-            | "buyer_refund"
-            | "unsold_return"
-            | "withdrawn_return"
-    )
 }
 
 fn uuid_bytes(value: Uuid) -> [u8; 16] {

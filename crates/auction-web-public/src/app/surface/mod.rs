@@ -55,7 +55,6 @@ pub(crate) use session::{initial_login_return_location, login_href_for_current_l
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,

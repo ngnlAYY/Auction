@@ -6,7 +6,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use auction_domain::{AuctionId, EquipmentId, LotId, ProxyAuthorizationId, SubmissionId, UserId};
+use auction_domain::{
+    AuctionId, EquipmentId, LotId, ProxyAuthorizationId, SubmissionId, UserId, valid_text,
+};
 
 use super::{ApplicationFuture, SettlementAuctionSnapshot};
 
@@ -167,13 +169,6 @@ pub trait AdminLotReader: Send + Sync {
         &self,
         request: AdminLotListRequest,
     ) -> ApplicationFuture<'_, Option<AdminLotPage>>;
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {

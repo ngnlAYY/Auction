@@ -67,10 +67,18 @@ impl MoogleMailGateway {
         request: &InternalEvidenceRequest,
     ) -> Result<SettlementInternalEvidenceSnapshot, Error> {
         if !request.validate() {
-            return Err(at(Stage::Request, mail_world(request.world), Error::InvalidRequest));
+            return Err(at(
+                Stage::Request,
+                MoogleMailWorld::from(request.world),
+                Error::InvalidRequest,
+            ));
         }
         if !self.credentials.owns_session(session) {
-            return Err(at(Stage::SessionOwnership, mail_world(request.world), Error::Unsupported));
+            return Err(at(
+                Stage::SessionOwnership,
+                MoogleMailWorld::from(request.world),
+                Error::Unsupported,
+            ));
         }
         let deadline = request
             .deadline
@@ -85,7 +93,7 @@ impl MoogleMailGateway {
             let remaining = deadline.saturating_duration_since(Instant::now());
             let expires_at = observed_from
                 + chrono::Duration::from_std(remaining).map_err(|_| Error::Expired)?;
-            let world = mail_world(request.world);
+            let world = MoogleMailWorld::from(request.world);
             session
                 .check_internal_current(read_deadline)
                 .await
@@ -94,7 +102,7 @@ impl MoogleMailGateway {
             self.require_clean_compose(session, world).await?;
             let mut equipment = None;
             if let Some(target) = &request.equipment {
-                let equipment_world = mail_world(target.world);
+                let equipment_world = MoogleMailWorld::from(target.world);
                 let binding = if equipment_world == world {
                     identity.clone()
                 } else {
@@ -217,7 +225,7 @@ impl MoogleMailGateway {
             Ok(snapshot)
         })
         .await
-        .map_err(|_| at(Stage::Deadline, mail_world(request.world), Error::Expired))?
+        .map_err(|_| at(Stage::Deadline, MoogleMailWorld::from(request.world), Error::Expired))?
     }
 
     pub(crate) async fn read_identity_in_session(
@@ -266,7 +274,7 @@ impl MoogleMailGateway {
             runtime,
             authenticated_uid: uid,
             player_name: profile.player_name,
-            world: settlement_world(world),
+            world: world.into(),
             observed_at: Utc::now(),
             protocol_version: INTERNAL_EVIDENCE_PROTOCOL,
             digest: [0; 32],
@@ -340,7 +348,11 @@ impl SettlementInternalEvidenceReader for MoogleMailGateway {
     ) -> InternalEvidenceFuture<'_, PreparedSettlementInternalEvidence> {
         Box::pin(async move {
             if !request.validate() {
-                return Err(at(Stage::Request, mail_world(request.world), Error::InvalidRequest));
+                return Err(at(
+                    Stage::Request,
+                    MoogleMailWorld::from(request.world),
+                    Error::InvalidRequest,
+                ));
             }
             request.deadline = auction_application::internal_evidence_deadline(request.deadline)
                 .min(Instant::now() + self.config.fetch_budget.min(Duration::from_secs(30)));
@@ -348,17 +360,28 @@ impl SettlementInternalEvidenceReader for MoogleMailGateway {
             tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
                 let session = self
                     .credentials
-                    .begin_exclusive(mail_world(request.world), MoogleMailOperation::Identity)
+                    .begin_exclusive(
+                        MoogleMailWorld::from(request.world),
+                        MoogleMailOperation::Identity,
+                    )
                     .await
                     .map_err(|error| {
-                        at(Stage::SessionAcquire, mail_world(request.world), map_read_error(error))
+                        at(
+                            Stage::SessionAcquire,
+                            MoogleMailWorld::from(request.world),
+                            map_read_error(error),
+                        )
                     })?;
                 let snapshot = self.read_internal_evidence_in_session(&session, &request).await?;
                 PreparedSettlementInternalEvidence::new(snapshot, Box::new(session), deadline)
-                    .map_err(|error| at(Stage::SnapshotGuard, mail_world(request.world), error))
+                    .map_err(|error| {
+                        at(Stage::SnapshotGuard, MoogleMailWorld::from(request.world), error)
+                    })
             })
             .await
-            .map_err(|_| at(Stage::Deadline, mail_world(request.world), Error::Expired))?
+            .map_err(|_| {
+                at(Stage::Deadline, MoogleMailWorld::from(request.world), Error::Expired)
+            })?
         })
     }
 }
@@ -374,20 +397,6 @@ impl InternalEvidenceLease for MoogleMailCredentialSession {
 
     fn revoke(&self) {
         self.revoke_internal_owner();
-    }
-}
-
-pub(super) fn mail_world(world: SettlementWorld) -> MoogleMailWorld {
-    match world {
-        SettlementWorld::Main => MoogleMailWorld::Main,
-        SettlementWorld::Isekai => MoogleMailWorld::Isekai,
-    }
-}
-
-fn settlement_world(world: MoogleMailWorld) -> SettlementWorld {
-    match world {
-        MoogleMailWorld::Main => SettlementWorld::Main,
-        MoogleMailWorld::Isekai => SettlementWorld::Isekai,
     }
 }
 

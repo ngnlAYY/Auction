@@ -18,9 +18,7 @@ pub enum MailEvidenceTransactionError {
 impl MailEvidenceTransactionError {
     /// 只允许整事务对 40001/40P01 做有界重试；重试仍复核证据/claim 实时时效。
     pub fn is_serialization_conflict(&self) -> bool {
-        matches!(self, Self::Sqlx(error) if error.as_database_error()
-            .and_then(|error| error.code())
-            .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01")))
+        matches!(self, Self::Sqlx(error) if crate::database::is_serialization_conflict(error))
     }
 
     /// 仅在存储重试/回滚分类已完成后转换为应用错误，禁止提前丢失 SQLSTATE。

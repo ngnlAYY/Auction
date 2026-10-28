@@ -215,9 +215,6 @@ pub(super) async fn process_topic(
     let outcomes =
         runtime.store.command_outcomes(topic.auction_id, topic.thread_id.clone()).await?;
     for outcome in outcomes {
-        if outcome.status == ForumCommandStatus::Applied {
-            continue;
-        }
         let persisted_post_number =
             outcome.post_number.and_then(|value| usize::try_from(value).ok());
         let current_post_number = post_numbers.get(outcome.post_id.as_str()).copied();
@@ -237,7 +234,8 @@ pub(super) async fn process_topic(
                 outcome.error_code.as_deref(),
                 outcome.safe_detail.as_deref(),
             ),
-            ForumCommandStatus::Applied => unreachable!("已在上方排除 applied 状态"),
+            // 已应用命令不产生系统日志条目。
+            ForumCommandStatus::Applied => continue,
         };
         let message = clean_system_message(&format!(
             "{} {}: {}",

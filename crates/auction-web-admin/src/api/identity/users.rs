@@ -431,10 +431,7 @@ fn decode_blacklist_history(
 fn decode_pagination(
     value: StrictUserPagination,
 ) -> Result<AdminUserPaginationResponse, &'static str> {
-    if !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.page)
-        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.page_size)
-        || !(0..=MAX_JSON_SAFE_INTEGER).contains(&value.total)
-    {
+    if !crate::api::pagination::valid_response(value.page, value.page_size, value.total) {
         return Err("pagination");
     }
     Ok(AdminUserPaginationResponse {

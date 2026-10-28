@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use auction_domain::EquipmentId;
+use auction_domain::valid_text as public_text;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
@@ -512,13 +513,6 @@ fn category_value(value: &str) -> &'static str {
         "hea" => "Heavy",
         _ => "",
     }
-}
-
-fn public_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 fn valid_primary_attribute_initials(value: &str) -> bool {

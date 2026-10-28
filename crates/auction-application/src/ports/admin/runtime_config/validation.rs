@@ -4,8 +4,7 @@ use ipnet::IpNet;
 
 use super::{
     business::{
-        AdminRuntimeEquipmentFilterConfig, AdminRuntimeMailTemplatesConfig,
-        AdminRuntimeWorldConfig, AdminRuntimeWorldsConfig,
+        AdminRuntimeEquipmentFilterConfig, AdminRuntimeWorldConfig, AdminRuntimeWorldsConfig,
     },
     document::{
         AdminRuntimeDashboardMailbox, AdminRuntimeDocument, AdminRuntimeEquipmentSourceConfig,
@@ -14,6 +13,7 @@ use super::{
     },
     errors::AdminRuntimeConfigError,
 };
+pub(super) use auction_domain::valid_text;
 
 pub(super) fn validate_business_config(
     document: &AdminRuntimeDocument,
@@ -23,7 +23,9 @@ pub(super) fn validate_business_config(
         (Some(worlds), Some(equipment_filter), Some(mail_templates)) => {
             validate_worlds(worlds)?;
             validate_runtime_equipment_filter(equipment_filter)?;
-            validate_runtime_mail_templates(mail_templates)
+            mail_templates.validate().map_err(|(_key, error)| {
+                AdminRuntimeConfigError::InvalidDocument(error.message().to_owned())
+            })
         }
         _ => Err(AdminRuntimeConfigError::InvalidDocument(
             "worlds、equipment_filter 与 mail_templates 必须同时配置".to_owned(),
@@ -99,121 +101,6 @@ fn validate_runtime_equipment_filter(
     Ok(())
 }
 
-fn validate_runtime_mail_templates(
-    config: &AdminRuntimeMailTemplatesConfig,
-) -> Result<(), AdminRuntimeConfigError> {
-    let templates = [
-        (config.auction_assets_rejected.as_str(), &[][..], &[][..]),
-        (config.auction_no_attachments.as_str(), &[][..], &[][..]),
-        (
-            config.auction_equipment_rejected.as_str(),
-            &[][..],
-            &["reason_code", "reason_text", "next_steps", "mail_reference"][..],
-        ),
-        (config.user_assets_rejected.as_str(), &[][..], &[][..]),
-        (
-            config.register_key.as_str(),
-            &["login_key", "username"][..],
-            &["login_key", "username"][..],
-        ),
-        (config.register_result.as_str(), &["result_code"][..], &["result_code", "username"][..]),
-        (config.rebind_result.as_str(), &["result_code"][..], &["result_code", "username"][..]),
-        (
-            config.settlement_winner_equipment_cod.as_str(),
-            &["item_name", "amount", "reference"][..],
-            &["item_name", "amount", "reference", "price_breakdown"][..],
-        ),
-        (
-            config.settlement_payment_carrier.as_str(),
-            &["amount", "reference"][..],
-            &["amount", "reference"][..],
-        ),
-        (config.settlement_payment_reminder.as_str(), &["reference"][..], &["reference"][..]),
-        (
-            config.settlement_equipment_handoff.as_str(),
-            &["item_name", "reference"][..],
-            &["item_name", "reference"][..],
-        ),
-        (
-            config.settlement_seller_payout.as_str(),
-            &["amount", "reference"][..],
-            &["amount", "reference"][..],
-        ),
-        (
-            config.settlement_buyer_refund.as_str(),
-            &["amount", "reference"][..],
-            &["amount", "reference"][..],
-        ),
-        (config.operations_alert.as_str(), &["summary"][..], &["summary"][..]),
-    ];
-    for (value, required, allowed) in templates {
-        validate_runtime_template_body(value, required, allowed)?;
-    }
-    // 保留旧自定义正文的原因码，也允许新正文用可读原因替代；至少展示其中一种原因。
-    if !config.auction_equipment_rejected.contains("{reason_code}")
-        && !config.auction_equipment_rejected.contains("{reason_text}")
-    {
-        return Err(AdminRuntimeConfigError::InvalidDocument(
-            "mail_templates.auction_equipment_rejected 必须包含 reason_code 或 reason_text"
-                .to_owned(),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_runtime_template_body(
-    value: &str,
-    required: &[&str],
-    allowed: &[&str],
-) -> Result<(), AdminRuntimeConfigError> {
-    if value.is_empty()
-        || value != value.trim()
-        || value.len() > 64 * 1024
-        || value
-            .chars()
-            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
-    {
-        return Err(AdminRuntimeConfigError::InvalidDocument(
-            "mail_templates 正文格式无效".to_owned(),
-        ));
-    }
-    let mut cursor = 0;
-    let mut seen = Vec::new();
-    while let Some(relative_start) = value[cursor..].find('{') {
-        let start = cursor + relative_start;
-        if value[cursor..start].contains('}') {
-            return Err(AdminRuntimeConfigError::InvalidDocument(
-                "mail_templates 占位符未闭合".to_owned(),
-            ));
-        }
-        let relative_end = value[start + 1..].find('}').ok_or_else(|| {
-            AdminRuntimeConfigError::InvalidDocument("mail_templates 占位符未闭合".to_owned())
-        })?;
-        let end = start + 1 + relative_end;
-        let placeholder = &value[start + 1..end];
-        if !allowed.contains(&placeholder) {
-            return Err(AdminRuntimeConfigError::InvalidDocument(
-                "mail_templates 含有未知占位符".to_owned(),
-            ));
-        }
-        if !seen.contains(&placeholder) {
-            seen.push(placeholder);
-        }
-        cursor = end + 1;
-    }
-    if value[cursor..].contains('}') {
-        return Err(AdminRuntimeConfigError::InvalidDocument(
-            "mail_templates 占位符未闭合".to_owned(),
-        ));
-    }
-    if required.iter().any(|placeholder| !seen.contains(placeholder)) {
-        return Err(AdminRuntimeConfigError::InvalidDocument(
-            "mail_templates 缺少必需占位符".to_owned(),
-        ));
-    }
-    Ok(())
-}
-
 fn valid_runtime_identity(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -252,7 +139,7 @@ pub(super) fn validate_listener(
         }
         AdminRuntimeListenMode::Unix => {
             if !config.address.is_empty()
-                || !valid_group_name(&config.group)
+                || !valid_listener_group(&config.group)
                 || validate_unix_path(&config.runtime_directory, "listener.runtime_directory")
                     .is_err()
                 || validate_unix_path(&config.socket_path, "listener.socket_path").is_err()
@@ -307,15 +194,12 @@ pub(super) fn validate_equipment_source(
             "equipment_source 边界无效".to_owned(),
         ));
     }
-    if config
-        .allowed_hosts
-        .iter()
-        .enumerate()
-        .any(|(index, host)| !valid_dns_name(host) || config.allowed_hosts[..index].contains(host))
-        || config.allowed_path_prefixes.iter().enumerate().any(|(index, prefix)| {
-            !valid_path_prefix(prefix) || config.allowed_path_prefixes[..index].contains(prefix)
-        })
-    {
+    if config.allowed_hosts.iter().enumerate().any(|(index, host)| {
+        !valid_allowlist_host(host) || config.allowed_hosts[..index].contains(host)
+    }) || config.allowed_path_prefixes.iter().enumerate().any(|(index, prefix)| {
+        !valid_allowlist_path_prefix(prefix)
+            || config.allowed_path_prefixes[..index].contains(prefix)
+    }) {
         return Err(AdminRuntimeConfigError::InvalidDocument(
             "equipment_source allowlist 格式无效".to_owned(),
         ));
@@ -408,7 +292,9 @@ pub(super) fn validate_unix_path(value: &str, field: &str) -> Result<(), AdminRu
     Ok(())
 }
 
-pub(super) fn valid_group_name(value: &str) -> bool {
+/// Unix 监听 socket 的属组名：1 至 64 字节，字母数字开头，其后只含字母数字与 `._-`；
+/// Admin runtime 与部署配置共用。
+pub fn valid_listener_group(value: &str) -> bool {
     let mut characters = value.chars();
     let Some(first) = characters.next() else {
         return false;
@@ -417,13 +303,6 @@ pub(super) fn valid_group_name(value: &str) -> bool {
         && first.is_ascii_alphanumeric()
         && characters
             .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
-}
-
-pub(super) fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 pub(super) fn valid_fingerprint(value: &str) -> bool {
@@ -444,7 +323,8 @@ pub(super) fn valid_unknown_category(value: &str) -> bool {
     )
 }
 
-fn valid_dns_name(value: &str) -> bool {
+/// 装备来源 allowlist 的主机名：小写 DNS 名称，拒绝 IP 字面量；Admin runtime 与 Worker 适配器共用。
+pub fn valid_allowlist_host(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 253
         && value == value.to_ascii_lowercase()
@@ -460,7 +340,8 @@ fn valid_dns_name(value: &str) -> bool {
         })
 }
 
-fn valid_path_prefix(value: &str) -> bool {
+/// 装备来源 allowlist 的路径前缀：`/` 开头结尾，拒绝点段、查询、片段与转义。
+pub fn valid_allowlist_path_prefix(value: &str) -> bool {
     !value.is_empty()
         && value.starts_with('/')
         && value.ends_with('/')
@@ -503,10 +384,10 @@ fn valid_origin(value: &str) -> bool {
                     .is_some_and(|port| !port.is_empty() && port.parse::<u16>().is_ok()));
     }
     let Some((hostname, port)) = authority.rsplit_once(':') else {
-        return valid_dns_name(authority);
+        return valid_allowlist_host(authority);
     };
     !hostname.contains(':')
-        && (valid_dns_name(hostname) || hostname.parse::<std::net::IpAddr>().is_ok())
+        && (valid_allowlist_host(hostname) || hostname.parse::<std::net::IpAddr>().is_ok())
         && !port.is_empty()
         && port.parse::<u16>().is_ok()
 }

@@ -110,7 +110,6 @@ pub(crate) fn map_admin_lifecycle_error(
         .into_response(),
         ApplicationError::Domain(DomainError::InvalidTransition { .. })
         | ApplicationError::Domain(DomainError::InvalidSchedule(_))
-        | ApplicationError::Domain(DomainError::CancellationCutoff)
         | ApplicationError::Domain(DomainError::InvalidCancellationMetadata)
         | ApplicationError::CompetitionTransaction(CompetitionTransactionError::Conflict)
         | ApplicationError::CompetitionTransaction(CompetitionTransactionError::InvalidState) => {

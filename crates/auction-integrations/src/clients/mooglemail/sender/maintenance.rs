@@ -186,28 +186,11 @@ impl MoogleMailSender {
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
     ) -> Result<Vec<MoogleMailSentListEntry>, MoogleMailError> {
-        self.scan_sent_summaries_with_freshness(cookie, world, false).await
-    }
-
-    /// 显式请求屏障后的完整 Sent 观测，供需要排除先前在途读取的恢复调用使用。
-    pub async fn scan_sent_summaries_fresh(
-        &self,
-        cookie: &MoogleMailCookie,
-        world: MoogleMailWorld,
-    ) -> Result<Vec<MoogleMailSentListEntry>, MoogleMailError> {
-        self.scan_sent_summaries_with_freshness(cookie, world, true).await
-    }
-
-    async fn scan_sent_summaries_with_freshness(
-        &self,
-        cookie: &MoogleMailCookie,
-        world: MoogleMailWorld,
-        fresh: bool,
-    ) -> Result<Vec<MoogleMailSentListEntry>, MoogleMailError> {
         let deadline = Instant::now()
             .checked_add(self.verification_budget)
             .ok_or_else(|| proof::scan_timeout(world))?;
-        let round = self.client.read_round(cookie, world, fresh)?;
+        // 维护扫描允许复用共享读取轮次，不强制新的请求屏障。
+        let round = self.client.read_round(cookie, world, false)?;
         let list = timeout_at(
             deadline,
             self.client.observe_sent_list(cookie, &round, self.verification_pages),

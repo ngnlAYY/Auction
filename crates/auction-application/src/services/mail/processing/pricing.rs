@@ -1,6 +1,7 @@
 //! MoogleMail 起拍价指令与装备身份解析。
 
 use super::*;
+pub(super) use auction_domain::valid_text;
 
 /// 起拍价解析失败时用于审计的安全诊断；只允许固定代码和数字上下文。
 #[derive(Debug, Clone, Copy)]
@@ -443,11 +444,4 @@ fn parse_ascii_amount_digits(value: &str) -> Option<i128> {
 
 pub(super) fn decimal_identity(value: &str) -> bool {
     !value.is_empty() && value.len() <= 64 && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-pub(super) fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

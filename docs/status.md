@@ -35,6 +35,35 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-27 全仓冗余代码、死代码与依赖复审
+
+基线为干净的 `ab1402f1`，本轮改动尚未提交。按逐函数体去重扫描、无引用公共 API 扫描、panic 站点扫描与热路径审读
+处理；Rust 源码净减约 1,700 行，行为测试未新增或执行。
+
+- 单一 owner 收敛：14 个 MoogleMail 通知模板的字段、默认英文正文与占位符校验原在应用、配置与集成各一份，现由
+  应用层 `runtime_config/mail_templates.rs` 唯一拥有，Worker TOML 与启动快照直接复用；闭集枚举（拍卖状态、竞价机制、
+  代理模式/状态/终态原因/转换、结算模式/义务种类/状态、世界）约 40 处手写名称映射收敛为领域 `stable_name` 宏表；
+  35 份相同的规范文本校验、10 份正十进制 ID 校验、12 份小写十六进制编码、约 23 处 `40001`/`40P01` 判断、
+  两份 `user_login_key_envelopes` 写入 SQL 以及 Public/Admin 两份页面可见性等待各收敛为一处。名称、错误分类、
+  SQL 与 wire 字节保持不变；HTTP 对外映射（如代理 `FinalFast` 投影为 `active`）仍独立维护。
+- 删除确认无调用的公共项：`AuctionRules::validate_bid`/`BidDecision`（与竞价计划重复）、`Auction::schedule_end`/
+  `apply_effective_end`、`SettlementPolicy::legacy_zero`/`interpolate_adjustment`、两个未用 DTO、两个配置访问器、
+  `build_http_client`、`render_auction_thread`、`parse_html_document`、`scan_sent_summaries_fresh`、两个凭据集合构造器、
+  `run_persistent_until_shutdown`、`mark_degraded`、装备词典的两个字符串分类包装、`use_media_query` 与 `set_silently`。
+  经用户批准，同样无调用的开拍后取消截止判断（`cancel_with_rules*`、`AuctionRules::can_cancel` 与
+  `DomainError::CancellationCutoff`）、论坛账号获取的 `for_loopback` 隔离入口，以及资金返还原语 `return_funded_delivery`
+  与 `FundingReturnProof`/`FundingReturnKind` 一并删除；`cancel_cutoff` 仍随策略冻结，`settlement_funding_returns`
+  表与迁移不变，契约说明见[不变量](docs/contracts/invariants.md)与[schema](docs/contracts/schema.md)。
+- 竞价热路径：事务端口 `apply_plan`/`apply_slow_proxy_plan` 改为借用计划，每笔已接受竞价不再复制整份计划。
+- 稳定性：存储重试循环兜底、Delivery Admin 重试、MoogleMail Return/Take 动作及论坛系统日志中的 6 处
+  `unreachable!` 改为失败关闭的错误或显式分支，不改变正常路径结果。
+- 两组论坛协议回归测试抽取重复的 HTML/客户端装配，断言与覆盖不变；依赖结论见
+  [技术栈](docs/design/tech-stack.md#2026-10-27-冗余与死代码复审中的依赖核对)。
+
+Rust 1.99.0 下 `just verify` 通过，覆盖仓库策略、格式、工作区已有目标、独立 feature、Clippy `-D warnings` 与双端 WASM
+检查；Rust 1.94.1 的 `cargo check --locked --workspace --all-targets --all-features` 通过，`cargo machete` 未发现未使用直接依赖。
+未重建 Web payload，未执行数据库、浏览器、并发负载或外部服务行为验证，也未部署。
+
 ### 2026-10-27 Worker 到期唤醒、事务入口收敛与规则阅读行宽
 
 在上一条记录的同一未提交工作树上，按用户授权继续处理三项遗留：

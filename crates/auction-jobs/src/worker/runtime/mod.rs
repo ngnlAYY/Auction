@@ -75,10 +75,7 @@ mod settlement;
 pub use config::*;
 pub use error::WorkerError;
 pub use model::PersistentWorker;
-pub use runner::{
-    run_persistent_until_shutdown, run_persistent_with_settlement_until_shutdown,
-    run_until_shutdown,
-};
+pub use runner::{run_persistent_with_settlement_until_shutdown, run_until_shutdown};
 
 use common::{
     bind_worker_metric_modes, drain_delivery_tasks, drain_worker_tasks, merge_worker_result,

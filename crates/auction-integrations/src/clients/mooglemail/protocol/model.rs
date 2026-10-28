@@ -47,6 +47,25 @@ impl MoogleMailWorld {
     }
 }
 
+/// 结算世界与 MoogleMail 世界是同一闭集的两种表示，双向转换不会失败。
+impl From<auction_domain::SettlementWorld> for MoogleMailWorld {
+    fn from(world: auction_domain::SettlementWorld) -> Self {
+        match world {
+            auction_domain::SettlementWorld::Main => Self::Main,
+            auction_domain::SettlementWorld::Isekai => Self::Isekai,
+        }
+    }
+}
+
+impl From<MoogleMailWorld> for auction_domain::SettlementWorld {
+    fn from(world: MoogleMailWorld) -> Self {
+        match world {
+            MoogleMailWorld::Main => Self::Main,
+            MoogleMailWorld::Isekai => Self::Isekai,
+        }
+    }
+}
+
 impl fmt::Display for MoogleMailWorld {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())

@@ -38,7 +38,9 @@ impl DraftSoftClosePort for DatabaseStore {
                     for attempt in 0..3 {
                         match write::execute(store, &command).await {
                             Ok(result) => return Ok(result),
-                            Err(Failure::Sql(error)) if retryable(&error) => {
+                            Err(Failure::Sql(error))
+                                if crate::database::is_serialization_conflict(&error) =>
+                            {
                                 if attempt == 2 {
                                     return Err(DraftSoftCloseError::RetryExhausted);
                                 }
@@ -95,10 +97,4 @@ impl Failure {
             Self::Sql(_) => DraftSoftCloseError::Storage,
         }
     }
-}
-
-fn retryable(error: &sqlx::Error) -> bool {
-    error
-        .as_database_error()
-        .is_some_and(|error| matches!(error.code().as_deref(), Some("40001" | "40P01")))
 }

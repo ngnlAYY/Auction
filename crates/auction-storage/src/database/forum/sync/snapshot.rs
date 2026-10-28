@@ -2,7 +2,7 @@
 
 use auction_application::{
     ApplicationError, ForumAuctionSnapshot, ForumCurrentBidSource, ForumLotSnapshot,
-    ForumSyncClaim, PublicEquipment, PublicEquipmentLinkTarget, forum_world_name,
+    ForumSyncClaim, PublicEquipment, PublicEquipmentLinkTarget,
 };
 use auction_domain::{AuctionId, AuctionStatus, EquipmentId, SettlementWorld};
 use chrono::{DateTime, Utc};
@@ -302,7 +302,7 @@ async fn read_snapshot(
             equipment_link_target: PublicEquipmentLinkTarget {
                 lot_id,
                 equipment_id: EquipmentId::from_uuid(equipment_id),
-                world_id: forum_world_name(world).to_owned(),
+                world_id: world.as_str().to_owned(),
                 projected_game_equipment_url: projected_game_equipment_url(
                     world,
                     &external_equipment_id,
@@ -330,7 +330,7 @@ async fn read_snapshot(
 }
 
 fn public_auction_path(world: SettlementWorld, auction_id: Uuid) -> String {
-    let world_name = forum_world_name(world);
+    let world_name = world.as_str();
     if world_name == "main" {
         format!("/?auction={auction_id}")
     } else {

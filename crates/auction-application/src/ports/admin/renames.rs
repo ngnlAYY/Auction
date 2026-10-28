@@ -2,6 +2,7 @@
 //! 改名记录是追加式身份事实。这里仅暴露安全投影和有界分页；回滚由 Users owner 的
 //! 幂等命令和状态版本 fence 负责，避免在读取端重复状态迁移。
 
+use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -106,13 +107,6 @@ pub trait AdminRenameReader: Send + Sync {
 
 fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {
     value.is_none_or(|value| value.is_empty() || valid_text(value, maximum))
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 fn valid_time(value: DateTime<Utc>) -> bool {

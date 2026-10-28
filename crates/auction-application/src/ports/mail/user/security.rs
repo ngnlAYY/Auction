@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use auction_domain::valid_text as valid_secret_text;
 use base64::Engine as _;
 use sha2::{Digest, Sha256};
 
@@ -172,11 +173,4 @@ impl fmt::Debug for MailLoginKeyIssue {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("[REDACTED]")
     }
-}
-
-fn valid_secret_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

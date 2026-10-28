@@ -2,20 +2,6 @@
 
 use super::*;
 
-/// lot 列表与详情共用的公开拍卖上下文。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct PublicLotProjectionResponse {
-    pub auction_id: String,
-    pub auction_status: String,
-    pub projection_kind: String,
-    pub presentation_mode: String,
-    pub bidding_open: bool,
-    pub opens_at: String,
-    pub preview_revision: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub final_restriction: Option<PublicFinalRestrictionResponse>,
-}
-
 /// 终阶段代理限制的公开契约。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicFinalRestrictionResponse {

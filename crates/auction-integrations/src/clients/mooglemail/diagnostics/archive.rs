@@ -148,7 +148,7 @@ impl MoogleMailDiagnosticArchive {
     ) -> Result<PreparedMailEvidence, MailDiagnosticError> {
         let context_wire = payload::context(&context)?;
         let id = Uuid::new_v4();
-        let digest = crypto::hex(Sha256::digest(&body.0));
+        let digest = auction_application::lower_hex(&Sha256::digest(&body.0));
         let header = payload::PublicHeader {
             version: payload::FORMAT_VERSION,
             evidence_id: id,
@@ -334,7 +334,9 @@ fn authenticated_header(header: &payload::PublicHeader) -> Result<Vec<u8>, MailD
 }
 
 fn verify_payload(header: &payload::PublicHeader, body: &[u8]) -> Result<(), MailDiagnosticError> {
-    if body.len() != header.payload_bytes || crypto::hex(Sha256::digest(body)) != header.sha256 {
+    if body.len() != header.payload_bytes
+        || auction_application::lower_hex(&Sha256::digest(body)) != header.sha256
+    {
         return Err(MailDiagnosticError::Authentication);
     }
     Ok(())

@@ -23,11 +23,11 @@ pub(super) async fn insert_obligations(
         .bind(obligation.id.as_uuid())
         .bind(obligation.auction_id.as_uuid())
         .bind(obligation.lot_id.as_uuid())
-        .bind(settlement_world_name(obligation.world))
+        .bind(obligation.world.as_str())
         .bind(obligation.origin_command_id.as_uuid())
         .bind(i32_version(obligation.policy_version, "义务策略版本")?)
-        .bind(obligation_kind(obligation.kind))
-        .bind(obligation_state(obligation.state))
+        .bind(obligation.kind.as_str())
+        .bind(obligation.state.as_str())
         .bind(i64_version(obligation.state_version, "义务状态版本")?)
         .bind(obligation.recipient_user_id.map(|id| id.as_uuid()))
         .bind(&obligation.recipient_game_identity)
@@ -55,7 +55,7 @@ pub(super) async fn insert_obligations(
                VALUES ($1, 'pending', $2, 'send', $3, $3)"#,
         )
         .bind(obligation.id.as_uuid())
-        .bind(settlement_world_name(dispatch_world))
+        .bind(dispatch_world.as_str())
         .bind(occurred_at)
         .execute(&mut **transaction)
         .await
@@ -87,9 +87,7 @@ pub(super) async fn insert_recoveries(
     // 每个付款只查同 lot 的冻结义务，避免持有结算锁时反复全表扫描计划。
     let mut obligations = BTreeMap::new();
     for obligation in &plan.obligations {
-        obligations
-            .entry((obligation.lot_id, obligation_kind(obligation.kind)))
-            .or_insert(obligation);
+        obligations.entry((obligation.lot_id, obligation.kind.as_str())).or_insert(obligation);
     }
 
     for payment in plan.obligations.iter().filter(|obligation| {
@@ -143,7 +141,7 @@ pub(super) async fn insert_recoveries(
         .bind(recovery_id.as_uuid())
         .bind(auction_id.as_uuid())
         .bind(payment.lot_id.as_uuid())
-        .bind(settlement_world_name(recovery_world))
+        .bind(recovery_world.as_str())
         .bind(payment.equipment_id.as_uuid())
         .bind(winner_user_id.as_uuid())
         .bind(payment.id.as_uuid())
@@ -167,7 +165,7 @@ fn find_obligation<'a>(
     lot_id: auction_domain::LotId,
     kind: SettlementObligationKind,
 ) -> Option<&'a SettlementObligation> {
-    obligations.get(&(lot_id, obligation_kind(kind))).copied()
+    obligations.get(&(lot_id, kind.as_str())).copied()
 }
 
 pub(super) async fn insert_settlement_audit(
@@ -184,8 +182,7 @@ pub(super) async fn insert_settlement_audit(
         plan.lines.len().checked_sub(sold_count).ok_or_else(|| invalid("结算审计 lot 数量无效"))?;
     let mut obligation_kind_counts = BTreeMap::new();
     for obligation in &plan.obligations {
-        let count =
-            obligation_kind_counts.entry(obligation_kind(obligation.kind)).or_insert(0_usize);
+        let count = obligation_kind_counts.entry(obligation.kind.as_str()).or_insert(0_usize);
         *count = count.checked_add(1).ok_or_else(|| invalid("结算审计义务数量溢出"))?;
     }
     let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
@@ -202,7 +199,7 @@ pub(super) async fn insert_settlement_audit(
     .bind(json!({
         "auction_id": auction_id.to_string(),
         "policy_version": plan.policy_version,
-        "policy_mode": settlement_mode(plan.policy_mode),
+        "policy_mode": plan.policy_mode.as_str(),
         "pool_enabled": plan.compensation_pool_enabled,
         "opening_pool_balance": plan.opening_pool.value(),
         "closing_pool_balance": plan.closing_pool.value(),

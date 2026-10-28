@@ -32,10 +32,7 @@ impl DeliveryAdminTransactionError {
         let Self::Sqlx(error) = self else {
             return false;
         };
-        error
-            .as_database_error()
-            .and_then(|database_error| database_error.code())
-            .is_some_and(|code| code == "40001" || code == "40P01")
+        crate::database::is_serialization_conflict(error)
     }
 
     /// 在离开存储层时只暴露稳定的 Delivery Admin 错误分类。

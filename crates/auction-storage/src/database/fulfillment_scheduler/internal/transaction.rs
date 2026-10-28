@@ -230,7 +230,7 @@ async fn validate_collected(
     ).bind(delivery.id).bind(c.obligation_id.as_uuid()).bind(&c.recipient).bind(&delivery.payload)
         .bind(c.prepare_command_id.map(|id| id.as_uuid())).bind(prepare_digest.as_ref().map(|value| value.as_slice()))
         .bind(c.activate_command_id.map(|id| id.as_uuid())).bind(activate_digest.as_ref().map(|value| value.as_slice()))
-        .bind(format!("mooglemail:{}:send:{}",validation::world(c.world),sent.external_mail_id))
+        .bind(format!("mooglemail:{}:send:{}",c.world.as_str(),sent.external_mail_id))
         .fetch_one(&mut **tx).await.map_err(sql_error)?;
     if !proven {
         return Err(FundingError::Unproven);

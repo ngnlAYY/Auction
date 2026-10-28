@@ -42,10 +42,3 @@ pub struct LowerProxyAuthorizationRequest {
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub maximum_amount: i64,
 }
-
-/// 状态命令的最小确认数据，供前端区分接受、重放和冲突。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct CommandAcknowledgement {
-    pub command_id: Uuid,
-    pub result_code: String,
-}

@@ -36,11 +36,7 @@ impl From<auction_application::RepositoryError> for DeliveryTransactionError {
 impl DeliveryTransactionError {
     fn is_retryable(&self) -> bool {
         matches!(self, Self::Funding(auction_application::FundingError::SerializationConflict))
-            || matches!(
-                self,
-                Self::Sqlx(sqlx::Error::Database(error))
-                    if matches!(error.code().as_deref(), Some("40001" | "40P01"))
-            )
+            || matches!(self, Self::Sqlx(error) if crate::database::is_serialization_conflict(error))
     }
 
     fn into_repository_error(self) -> auction_application::RepositoryError {

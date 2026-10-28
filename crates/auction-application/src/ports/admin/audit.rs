@@ -2,6 +2,7 @@
 //! 这里表达旧系统的两种只读查询形状：带时间/ID 稳定边界的 keyset 游标，以及带总数的数字
 //! 分页。metadata 只允许安全的 JSON 对象，数据库行和原始 SQL 不跨过这个端口。
 
+use auction_domain::valid_text as valid_record_text;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -169,13 +170,6 @@ fn valid_filter_text(value: Option<&str>, maximum: usize) -> bool {
                 && value == value.trim()
                 && !value.chars().any(char::is_control)
     })
-}
-
-fn valid_record_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 fn valid_record_text_option(value: Option<&str>, maximum: usize) -> bool {

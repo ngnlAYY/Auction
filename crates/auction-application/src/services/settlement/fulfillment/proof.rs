@@ -8,7 +8,6 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use super::canonical::to_go_json_bytes;
-use super::intent::settlement_world_name;
 
 /// 旧版 `fulfillmentProofDigest` 的 evidence 载荷。
 /// 字段顺序和 `omitempty` 语义必须保持与 Go 的 `encoding/json` 一致；因此这里不复用
@@ -71,7 +70,7 @@ fn legacy_proof_digest(
         .map(|value| LegacyFulfillmentEvidence {
             external_id: (!value.external_mail_id.is_empty())
                 .then_some(value.external_mail_id.as_str()),
-            world: Some(settlement_world_name(value.world)),
+            world: Some(value.world.as_str()),
             subject: (!value.subject.is_empty()).then_some(value.subject.as_str()),
             remaining_credits: (value.remaining_credits != 0).then_some(value.remaining_credits),
             cod_pending: (value.cod_pending != 0).then_some(value.cod_pending),

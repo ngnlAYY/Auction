@@ -10,7 +10,6 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
 
 | 入口 | 职责 |
 | --- | --- |
-| [src/clients/http.rs](crates/auction-integrations/src/clients/http.rs) | 统一 reqwest/rustls 客户端 |
 | [src/clients/ehentai](crates/auction-integrations/src/clients/ehentai) | 论坛认证、受限请求、主题/固定帖协议 |
 | [src/clients/ehentai/client/pm](crates/auction-integrations/src/clients/ehentai/client/pm) | PM 新鲜表单准备、单次发送与同账号 Sent 精确证明 |
 | [src/clients/mooglemail](crates/auction-integrations/src/clients/mooglemail) | 邮件读取、动作/发送证明与加密诊断 |
@@ -128,7 +127,9 @@ Sent 正文摘要复用换行规范化的分配后截短尾部空白，不再生
 投递及其远端证明负责。模板键仍为 14 项；买家 COD 价格明细只使用应用层冻结的结算事实，金额与幂等身份保持原义。
 完整占位符与升级方式见[邮件正文模板](ops/config/README.md#邮件正文模板)。
 模板按展开后的 UTF-8 字节数，在每段追加前执行发送正文上限；重复占位符不会先构造超大正文再拒绝，
-超限不截断、不发送部分内容。
+超限不截断、不发送部分内容。Worker 启动快照 `MoogleMailNotificationTemplates::from_config` 直接持有应用层模板结构，
+闭集、默认正文与占位符校验复用 `AdminRuntimeMailTemplatesConfig`，本 crate 只拥有渲染与发送上限。
+`MoogleMailWorld` 与领域 `SettlementWorld` 通过 `From` 双向转换，网关与装配根不再手写世界映射。
 
 [transport/payload/settlement/pricing.rs](crates/auction-integrations/src/clients/mooglemail/transport/payload/settlement/pricing.rs)
 校验买家装备 COD 的完整价格变量并格式化千分位金额、带符号百分比与适用的奖池抵扣；旧三变量载荷仅省略价格明细，
@@ -202,7 +203,7 @@ Admin A32 的 [credentials/acquire](crates/auction-integrations/src/credentials/
 新鲜表单、一次 POST、共享认证字段的控制台正向证明；固定 HTTPS 目标，无代理、重定向、自动重试或远端业务写入。
 游戏只保留 `ipb_member_id`/`ipb_pass_hash`，论坛保留校验后的完整 header；密码仅在短时内存，命令摘要使用独立域 HMAC。
 进程单并发、取消后仍冷却、响应大小及绝对预算见 [A32 契约](docs/contracts/routes.md#外部凭据)；
-显式 `for_loopback` 仅供隔离协议验证，不由管理 API 或部署配置选择。自有敏感缓冲尽力清零，不承诺清理 reqwest/DOM 内部副本。
+论坛账号获取只连接固定生产 endpoint，不提供回环或可配置目标入口。自有敏感缓冲尽力清零，不承诺清理 reqwest/DOM 内部副本。
 全新论坛会话的表单 action 与认证导航可能携带短时 `s`：提交保留唯一合法 session 参数，
 控制台个人链接允许唯一 `showuser` 与可选合法 `s`，仍拒绝重复或额外参数；不记录这些短时 URL。
 

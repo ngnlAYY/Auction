@@ -494,11 +494,3 @@ pub struct ForumSystemLogEntry {
     pub message: String,
     pub ignored: bool,
 }
-
-/// 将领域世界转换为旧论坛契约使用的稳定名称。
-pub const fn forum_world_name(world: SettlementWorld) -> &'static str {
-    match world {
-        SettlementWorld::Main => "main",
-        SettlementWorld::Isekai => "isekai",
-    }
-}

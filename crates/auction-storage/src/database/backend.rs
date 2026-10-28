@@ -43,6 +43,16 @@ pub(crate) fn storage_error(message: &str) -> auction_application::ApplicationEr
     auction_application::RepositoryError::Failed(message.to_owned()).into()
 }
 
+/// PostgreSQL 明确中止、可由事务 owner 有界重试的冲突：序列化失败（40001）与死锁（40P01）。
+/// 全部重试判断共用此谓词，避免各模块手写 SQLSTATE 闭集漂移。
+#[cfg(feature = "postgres")]
+pub(crate) fn is_serialization_conflict(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .and_then(|database| database.code())
+        .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01"))
+}
+
 /// 不向驱动传入会被容忍或有损解码的 URI，错误只报告固定分类。
 fn valid_url_encoding(value: &str) -> bool {
     let mut bytes = value.bytes();

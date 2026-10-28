@@ -51,7 +51,7 @@ pub(crate) fn validate_http_listener(config: &HttpListenerConfig) -> Result<(), 
         }
         HttpListenMode::Unix => {
             if !config.address.is_empty()
-                || !valid_listener_group(&config.group)
+                || !auction_application::valid_listener_group(&config.group)
                 || !valid_listener_path(&config.runtime_directory)
                 || !valid_listener_path(&config.socket_path)
                 || Path::new(&config.socket_path).parent()
@@ -75,15 +75,4 @@ pub(crate) fn valid_listener_path(value: &str) -> bool {
         && !value.contains("//")
         && !value.chars().any(char::is_control)
         && !value.split('/').any(|segment| segment == "." || segment == "..")
-}
-
-pub(crate) fn valid_listener_group(value: &str) -> bool {
-    let mut characters = value.chars();
-    let Some(first) = characters.next() else {
-        return false;
-    };
-    value.len() <= 64
-        && first.is_ascii_alphanumeric()
-        && characters
-            .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
 }

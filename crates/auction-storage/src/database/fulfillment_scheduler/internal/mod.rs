@@ -177,11 +177,7 @@ pub(super) async fn lock_legacy(
 
 #[cfg(feature = "postgres")]
 fn sql_error(error: sqlx::Error) -> FundingError {
-    if error
-        .as_database_error()
-        .and_then(|e| e.code())
-        .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01"))
-    {
+    if crate::database::is_serialization_conflict(&error) {
         FundingError::SerializationConflict
     } else {
         FundingError::Storage

@@ -18,7 +18,7 @@ pub struct FundingRecordOnlyCommand {
 impl FundingRecordOnlyCommand {
     /// 精确确认仅初始化该UID及冻结责任投影，不宣称任何现金实际可用。
     pub fn confirmation(&self) -> String {
-        let digest: String = self.preview_digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        let digest = crate::ports::lower_hex(&self.preview_digest);
         format!(
             "INITIALIZE RECORD ONLY BOT FUNDS {} {} {}",
             self.expected_uid, self.expected_version, digest

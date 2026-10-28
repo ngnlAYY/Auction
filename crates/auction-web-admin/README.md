@@ -13,7 +13,7 @@ Dioxus 纯客户端渲染的管理端 SPA，拥有管理认证、查询、命令
 | [src/app/surface/pagination](crates/auction-web-admin/src/app/surface/pagination) | 每表数量 URL、本地偏好、共享 Pager 译文与请求身份门禁 |
 | [src/app/surface/pending](crates/auction-web-admin/src/app/surface/pending) | 页面或认证外壳的已提交命令稀疏宿主、累计未知结果与原样重试区 |
 | [src/app/surface/auth/navigation](crates/auction-web-admin/src/app/surface/auth/navigation) | `desktop.rs` 常驻侧栏、`mobile.rs` 折叠菜单与按钮；共享唯一入口清单，不持有会话、草稿或请求 |
-| [src/api/pagination](crates/auction-web-admin/src/api/pagination) | 显式分页请求的安全乘法与既有服务端边界校验 |
+| [src/api/pagination](crates/auction-web-admin/src/api/pagination) | 显式分页请求的安全乘法、既有服务端边界及响应分页三元组校验 |
 | [runtime_config/taxonomy.rs](crates/auction-web-admin/src/api/operations/runtime_config/taxonomy.rs) | 服务端装备词典投影的界限、唯一性及引用完整性校验 |
 | [src/app/auction](crates/auction-web-admin/src/app/auction) | 拍卖、lot、录入、结算/恢复页面 |
 | [src/app/identity](crates/auction-web-admin/src/app/identity) | Users、改名与凭据管理 |
@@ -213,13 +213,13 @@ CSRF 复核失败触发同一会话重查并暂时禁写，不因暂时网络错
 Basic Auth 只用于登录交换，后续使用独立会话/CSRF Cookie；站内 return 地址受限，登录后 replace 返回。业务 401 触发
 统一会话复核，只有会话接口确认未认证才回登录；会话 touch 按服务端时间重新安排，绝对过期仍由服务端决定，Admin 重启
 后旧会话失效。弹窗焦点、背景滚动与焦点恢复由共享层处理，页面任务和监听跟随宿主卸载。Gloo 只启用 HTTP/JSON，
-不继承 Public 的 WebSocket feature；可见性等待使用 `std::future::poll_fn`。首屏超过 15 秒仅提示慢加载，
+不继承 Public 的 WebSocket feature；可见性等待与分片睡眠复用共享层 `PageVisibility`/`sleep_while_visible`。首屏超过 15 秒仅提示慢加载，
 真实 WASM panic 才标记运行异常；服务端数据密钥不进入浏览器。
 会话刷新显式依赖检查代数及两个截止字段，定时器不复制 actor/CSRF；固定绝对截止仍须在截止后复核。
 站内 return 保留合法 query/hash，但拒绝网络路径、反斜线和返回登录自身，非法输入回到首页。
 Dashboard 与 Realtime 修改自动轮询间隔或关闭轮询时，先取消旧的页面任务，再按新间隔从头计时；隐藏暂停与恢复后
-继续剩余分片的策略不变，取消失效循环不取消当前已发出的数据请求。隐藏等待每个 Future 只登记一个 Waker，
-重新 poll 只更新它；完成或取消立即注销，快速重新隐藏可再次登记，不等待下一次可见性事件清理旧任务。
+继续剩余分片的策略不变，取消失效循环不取消当前已发出的数据请求；Waker 登记与注销语义见
+[共享层](crates/auction-web-shared/README.md#命令与浏览器状态)。
 会话与用户 Key 的浏览器镜像保留 `Debug` trait，但调试格式遮蔽 CSRF token 和一次性登录 Key，
 避免绕过 contracts 的脱敏边界；这不是已发生日志泄露的证明。
 

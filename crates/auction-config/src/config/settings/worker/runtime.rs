@@ -3,8 +3,7 @@ use auction_application::AdminRuntimeDocument;
 use super::forum::ForumSyncWorkerConfig;
 
 use super::mooglemail::{
-    MoogleMailEquipmentFilterConfig, MoogleMailNotificationTemplatesConfig, MoogleMailWorkerConfig,
-    MoogleMailWorldConfig,
+    MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig, MoogleMailWorldConfig,
 };
 
 /// 将 Admin 管理的旧版业务区块投影到 Worker 的 MoogleMail 启动快照。
@@ -74,22 +73,7 @@ pub(in crate::config::settings) fn apply_runtime_document(
         level_min: equipment_filter.level.min,
         level_max: equipment_filter.level.max,
     };
-    config.mail_templates = MoogleMailNotificationTemplatesConfig {
-        auction_assets_rejected: mail_templates.auction_assets_rejected.clone(),
-        auction_no_attachments: mail_templates.auction_no_attachments.clone(),
-        auction_equipment_rejected: mail_templates.auction_equipment_rejected.clone(),
-        user_assets_rejected: mail_templates.user_assets_rejected.clone(),
-        register_key: mail_templates.register_key.clone(),
-        register_result: mail_templates.register_result.clone(),
-        rebind_result: mail_templates.rebind_result.clone(),
-        settlement_winner_equipment_cod: mail_templates.settlement_winner_equipment_cod.clone(),
-        settlement_payment_carrier: mail_templates.settlement_payment_carrier.clone(),
-        settlement_payment_reminder: mail_templates.settlement_payment_reminder.clone(),
-        settlement_equipment_handoff: mail_templates.settlement_equipment_handoff.clone(),
-        settlement_seller_payout: mail_templates.settlement_seller_payout.clone(),
-        settlement_buyer_refund: mail_templates.settlement_buyer_refund.clone(),
-        operations_alert: mail_templates.operations_alert.clone(),
-    };
+    config.mail_templates = mail_templates.clone();
 }
 
 /// 将 Admin runtime 的论坛装备标色规则投影到 Worker 论坛启动快照。

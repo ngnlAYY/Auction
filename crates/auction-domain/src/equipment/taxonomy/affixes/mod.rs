@@ -52,15 +52,6 @@ pub fn suffixes_for_kind(kind: &str) -> Vec<&'static str> {
     .unwrap_or_default()
 }
 
-/// 对前缀作推荐或历史识别，未知文本仍由名称解析器原样保留。
-pub fn classify_prefix(kind: &str, value: &str) -> AffixCompatibility {
-    if value.is_empty() {
-        return AffixCompatibility::Empty;
-    }
-    with_known_kind(kind, |kind| classify_known_prefix(kind, value))
-        .unwrap_or(AffixCompatibility::Unclassified)
-}
-
 /// 名称解析已识别种类，直接复用其规范名称和大类，不再解析或分配推荐集合。
 pub(super) fn classify_resolved_prefix(kind: &ResolvedKind, value: &str) -> AffixCompatibility {
     classify_known_prefix(kind.into(), value)
@@ -98,15 +89,6 @@ fn classify_known_prefix(kind: AffixKind<'_>, value: &str) -> AffixCompatibility
             Some(EquipmentCategory::OneHanded | EquipmentCategory::TwoHanded | EquipmentCategory::Staff)
         ) && ["Astral", "Quintessential"].iter().any(|candidate| candidate.eq_ignore_ascii_case(value));
     if legacy { AffixCompatibility::Legacy } else { AffixCompatibility::Unclassified }
-}
-
-/// 对后缀作推荐或历史识别；可选的 the 只参与比较，不改写原字段。
-pub fn classify_suffix(kind: &str, value: &str) -> AffixCompatibility {
-    if value.is_empty() {
-        return AffixCompatibility::Empty;
-    }
-    with_known_kind(kind, |kind| classify_known_suffix(kind, value))
-        .unwrap_or(AffixCompatibility::Unclassified)
 }
 
 /// 与前缀相同，沿用本次名称识别结果和借用的静态推荐集合。

@@ -1,5 +1,7 @@
 //! Admin Users 命令字段与动作闭集校验。
 
+use auction_domain::valid_text;
+
 use crate::{
     AdminRenameRevertCommand, AdminUserCreateCommand, AdminUserError, AdminUserKeyMode,
     AdminUserMutationAction, AdminUserMutationCommand, ApplicationError,
@@ -75,17 +77,6 @@ pub(crate) fn validate_revert(command: &AdminRenameRevertCommand) -> Result<(), 
     Ok(())
 }
 
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
-}
-
 fn valid_forum_account_id(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    !bytes.is_empty()
-        && bytes.len() <= 32
-        && bytes[0] != b'0'
-        && bytes.iter().all(u8::is_ascii_digit)
+    auction_domain::valid_positive_decimal(value, 32)
 }

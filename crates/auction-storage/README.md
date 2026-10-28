@@ -62,7 +62,8 @@ Sending、节奏起点和原审计同事务提交。正常成功和维护恢复�
 
 ## 用户身份与消费 owner
 
-[users](crates/auction-storage/src/database/users) 在写锁内复核注册信封绑定的 UUID；论坛数字账号是稳定身份，
+[users](crates/auction-storage/src/database/users) 在写锁内复核注册信封绑定的 UUID；`users/envelope` 是
+`user_login_key_envelopes` 唯一的写入 SQL，Admin 签发与 MoogleMail 注册/重绑在各自事务内调用并映射本模块错误；论坛数字账号是稳定身份，
 `username` 只是可变显示名和 MM 收件人，二者不能互换。[sessions](crates/auction-storage/src/database/sessions) 保存会话
 摘要：Admin 启动撤销旧 Admin 会话，Public key 撤销/重签与旧会话永久撤销同事务提交，只读 inspect 不刷新过期时间。
 Admin 启动、轮换及注销和 Public 注销的撤销时间至少为该会话创建时间，时钟回拨不妨碍永久撤销。
@@ -126,7 +127,9 @@ bidding、lifecycle、admin 拆分；旧竞价账本重放仍在一致快照中�
 邮件入队/激活、投递收口、履约与 Recovery 的摘要参数同样绑定固定字节切片；可空摘要先保存在栈上，
 保持 SQL `NULL`、原 bytea 编码及严格身份比较，不为绑定单独分配或复制临时 Vec。
 Admin 规则、邮箱管理、Recovery 命令及周轮次 bootstrap 的已有重试边界也按 `40001`/`40P01` 识别明确中止，
-保持原最多三次整事务尝试；唯一约束、未知提交及普通连接失败不因此重试。
+保持原最多三次整事务尝试；唯一约束、未知提交及普通连接失败不因此重试。全部重试判断共用
+`database::is_serialization_conflict`，不再在各模块手写 SQLSTATE 闭集；重试循环的兜底出口返回仓储错误，不以 panic 结束。
+持久化列使用的拍卖/竞价/代理/结算闭集名称来自领域 `as_str`/`from_name`，存储只映射自身错误分类。
 规则发布仅允许 `expected_revision = 0` 新建；非零版本只更新匹配旧版本的既有语言文档，缺失时返回当前版本 0，
 不通过 UPSERT 创建跳号文档，失败不提交规则、命令账本或审计。
 Admin 新建拍卖先由 `lock_admin_auction_creation` 完成原 world → intake target 锁前缀，再由应用层读取数据库

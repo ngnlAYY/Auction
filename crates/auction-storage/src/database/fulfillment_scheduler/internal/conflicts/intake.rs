@@ -7,7 +7,7 @@ use serde::Deserialize;
 use super::{
     AssetConflictTarget, AttachmentPayload, FundingError, Postgres, Row, Transaction, Uuid,
 };
-use super::{sql_error, valid_attachment_origin, world};
+use super::{sql_error, valid_attachment_origin};
 
 /// 调用方已持有业务行锁并验证同会话新鲜正向库存；仅返回本标的可精确闭合的历史投递。
 pub(super) async fn closed_source_history(
@@ -51,7 +51,7 @@ pub(super) async fn closed_source_history(
     .bind(target.obligation_id.as_uuid())
     .bind(target.lot_id.as_uuid())
     .bind(target.external_equipment_id)
-    .bind(world(target.equipment_world))
+    .bind(target.equipment_world.as_str())
     .fetch_optional(&mut **tx)
     .await
     .map_err(sql_error)?;
@@ -102,7 +102,7 @@ pub(super) async fn closed_source_history(
         || count.as_u64().and_then(|count| usize::try_from(count).ok())
             != Some(payload.attachment_ids.len())
         || reference.as_deref()
-            != Some(format!("mooglemail:{}:take:{mid}", world(target.equipment_world)).as_str())
+            != Some(format!("mooglemail:{}:take:{mid}", target.equipment_world.as_str()).as_str())
     {
         return Ok(Vec::new());
     }
@@ -133,7 +133,7 @@ pub(super) async fn closed_source_history(
                WHERE attachment=$1)",
     )
     .bind(target.external_equipment_id)
-    .bind(world(target.equipment_world))
+    .bind(target.equipment_world.as_str())
     .bind(completed_at)
     .bind(&recipient)
     .fetch(&mut **tx);
@@ -157,7 +157,7 @@ pub(super) async fn closed_source_history(
             && metadata.get("outcome_unknown").is_none_or(|value| value == false)
             && reference.as_deref()
                 == Some(
-                    format!("mooglemail:{}:return:{mid}", world(target.equipment_world)).as_str(),
+                    format!("mooglemail:{}:return:{mid}", target.equipment_world.as_str()).as_str(),
                 )
         {
             closed.push(id);
@@ -177,7 +177,7 @@ fn source_payload(
 ) -> Option<AttachmentPayload> {
     let payload = AttachmentPayload::deserialize(value).ok()?;
     (payload.schema_version == 1
-        && payload.world == world(target.equipment_world)
+        && payload.world == target.equipment_world.as_str()
         && payload.operation == operation
         && payload.external_mail_id == mid
         && auction_application::valid_external_positive_id(mid)

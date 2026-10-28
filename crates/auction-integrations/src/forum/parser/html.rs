@@ -78,11 +78,7 @@ pub(super) fn extract_html_page(input: &str) -> Result<ParsedHtmlPage, ()> {
 }
 
 pub(super) fn canonical_post_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 32
-        && value.as_bytes()[0].is_ascii_digit()
-        && value.as_bytes()[0] != b'0'
-        && value.bytes().all(|byte| byte.is_ascii_digit())
+    auction_domain::valid_positive_decimal(value, 32)
 }
 
 fn post_was_edited(element: ElementRef<'_>) -> bool {

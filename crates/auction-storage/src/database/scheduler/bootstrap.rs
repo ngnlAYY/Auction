@@ -30,7 +30,7 @@ pub(super) async fn ensure_postgres(
         match ensure_postgres_once(pool, request.clone()).await {
             Ok(snapshot) => return Ok(snapshot),
             Err(PostgresBootstrapError::Storage(error))
-                if is_serialization_error(&error) && attempt < 2 =>
+                if crate::database::is_serialization_conflict(&error) && attempt < 2 =>
             {
                 continue;
             }
@@ -52,11 +52,6 @@ impl From<auction_application::RepositoryError> for PostgresBootstrapError {
     fn from(error: auction_application::RepositoryError) -> Self {
         Self::Repository(error)
     }
-}
-
-#[cfg(feature = "postgres")]
-fn is_serialization_error(error: &sqlx::Error) -> bool {
-    matches!(error, sqlx::Error::Database(database) if matches!(database.code().as_deref(), Some("40001" | "40P01")))
 }
 
 #[cfg(feature = "postgres")]

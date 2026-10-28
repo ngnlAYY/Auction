@@ -9,10 +9,7 @@ use auction_application::{
 };
 use chrono::Utc;
 
-use super::{
-    internal::{mail_world, map_read_error},
-    *,
-};
+use super::{internal::map_read_error, *};
 use crate::clients::mooglemail::parser::subject_is_list_projection;
 
 impl MoogleMailGateway {
@@ -30,7 +27,10 @@ impl MoogleMailGateway {
         tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
             let session = self
                 .credentials
-                .begin_exclusive(mail_world(request.world), MoogleMailOperation::Identity)
+                .begin_exclusive(
+                    MoogleMailWorld::from(request.world),
+                    MoogleMailOperation::Identity,
+                )
                 .await
                 .map_err(map_read_error)?;
             let mut snapshot = self.read_internal_evidence_in_session(&session, &request).await?;
@@ -73,7 +73,7 @@ impl MoogleMailGateway {
             return Err(Error::Expired);
         }
         tokio::time::timeout_at(tokio::time::Instant::from_std(read_deadline), async {
-            let world = mail_world(target.world);
+            let world = MoogleMailWorld::from(target.world);
             let (credential_id, version, runtime, _) =
                 session.internal_credential_binding(world)?;
             if identity.credential_id != credential_id

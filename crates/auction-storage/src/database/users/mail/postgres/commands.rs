@@ -59,13 +59,14 @@ pub(crate) async fn register_postgres(
             .execute(&mut *transaction)
             .await
             .map_err(map_storage_error)?;
-            insert_login_key_envelope(
+            upsert_login_key_envelope(
                 &mut transaction,
                 write.user_id,
                 &write.envelope,
                 write.command.now,
             )
-            .await?;
+            .await
+            .map_err(map_storage_error)?;
             MailUserResult { user_id: Some(write.user_id), code: MailUserResultCode::Registered }
         }
         [row] => {
@@ -142,13 +143,14 @@ pub(crate) async fn register_postgres(
                         .execute(&mut *transaction)
                         .await
                         .map_err(map_storage_error)?;
-                        insert_login_key_envelope(
+                        upsert_login_key_envelope(
                             &mut transaction,
                             user.id,
                             &write.envelope,
                             write.command.now,
                         )
-                        .await?;
+                        .await
+                        .map_err(map_storage_error)?;
                     }
                     if forum_only_identity(&mut transaction, user.id).await? {
                         sqlx::query(

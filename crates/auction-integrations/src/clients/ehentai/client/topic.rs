@@ -548,6 +548,17 @@ fn consistent_post_proof(
 mod tests {
     use super::*;
 
+    /// 按固定生产论坛配置解析编辑回执，返回两份证明一致时的帖子身份。
+    fn acknowledged_post(html: &[u8]) -> Option<ForumPublishedPost> {
+        let config = EhentaiClientConfig::production()
+            .unwrap_or_else(|error| panic!("固定论坛配置应合法: {error:?}"));
+        let client = EhentaiClient::with_config(config)
+            .unwrap_or_else(|error| panic!("安全论坛客户端应可构造: {error:?}"));
+        let base = Url::parse("https://forums.e-hentai.org/index.php")
+            .unwrap_or_else(|error| panic!("固定论坛地址应合法: {error:?}"));
+        client.post_from_acknowledgement_page(&base, html, 4, "300433", EhentaiOperation::EditPost)
+    }
+
     #[test]
     fn fixed_post_acknowledgement_requires_matching_meta_and_link_proof() {
         let html = br#"
@@ -562,16 +573,9 @@ mod tests {
               </body>
             </html>
         "#;
-        let config = EhentaiClientConfig::production()
-            .unwrap_or_else(|error| panic!("固定论坛配置应合法: {error:?}"));
-        let client = EhentaiClient::with_config(config)
-            .unwrap_or_else(|error| panic!("安全论坛客户端应可构造: {error:?}"));
-        let base = Url::parse("https://forums.e-hentai.org/index.php")
-            .unwrap_or_else(|error| panic!("固定论坛地址应合法: {error:?}"));
 
-        let proof = client
-            .post_from_acknowledgement_page(&base, html, 4, "300433", EhentaiOperation::EditPost)
-            .unwrap_or_else(|| panic!("两份一致回执应证明固定帖子身份"));
+        let proof =
+            acknowledged_post(html).unwrap_or_else(|| panic!("两份一致回执应证明固定帖子身份"));
 
         assert_eq!(proof.thread_id, "300433");
         assert_eq!(proof.post_id, "6956800");
@@ -590,23 +594,7 @@ mod tests {
               </body>
             </html>
         "#;
-        let config = EhentaiClientConfig::production()
-            .unwrap_or_else(|error| panic!("固定论坛配置应合法: {error:?}"));
-        let client = EhentaiClient::with_config(config)
-            .unwrap_or_else(|error| panic!("安全论坛客户端应可构造: {error:?}"));
-        let base = Url::parse("https://forums.e-hentai.org/index.php")
-            .unwrap_or_else(|error| panic!("固定论坛地址应合法: {error:?}"));
 
-        assert!(
-            client
-                .post_from_acknowledgement_page(
-                    &base,
-                    html,
-                    4,
-                    "300433",
-                    EhentaiOperation::EditPost,
-                )
-                .is_none()
-        );
+        assert!(acknowledged_post(html).is_none());
     }
 }

@@ -17,6 +17,8 @@
 | [src/equipment](crates/auction-domain/src/equipment) | 装备标识与分类 |
 | [src/equipment/taxonomy](crates/auction-domain/src/equipment/taxonomy) | 统一装备语义词典、来源修订、纯名称解析及词缀推荐关系 |
 | [src/identity](crates/auction-domain/src/identity)、[src/errors](crates/auction-domain/src/errors) | 类型化 UUID 与领域错误 |
+| [src/stable_name](crates/auction-domain/src/stable_name) | 拍卖、竞价、代理与结算闭集枚举的唯一稳定名称表（`as_str`/`from_name`） |
+| [src/text](crates/auction-domain/src/text) | 跨层共用的规范单行文本与正十进制外部 ID 不变量 |
 
 ## 职责与实现边界
 
@@ -38,6 +40,9 @@ Dioxus、SQLx、reqwest、环境读取或日志初始化，依赖限于领域安
   结算总额不截断。普通出价达到历史代理的有效上限 `min(maximum_amount, 1B)` 时，Fast/Slow 均立即追加原代理的
   同价事实，保持已有代理优先；领域规划与应用事实数量共同使用 `BidAmount::bid_ceiling()`，不改写原授权金额。
 - 代理降额只能降低上限并推进版本，保持原模式和状态；`FinalFast → FinalFast` 不得退回普通活动状态。
+- 闭集枚举（拍卖状态、竞价机制、代理模式/状态/终态原因/转换、结算模式/义务种类/状态、世界）的持久化与配置名称
+  只在 `stable_name` 声明一份表，正反映射由同一宏生成；应用、存储与配置不再各自手写 `match`，已发布名称不可改名。
+  HTTP wire 映射仍由 HTTP owner 显式维护（如代理 `FinalFast` 对外投影为 `active`）。
 - 结算明细校验金额守恒与税/补偿互斥；`WinnerPaymentCarrierCod` 的派发世界固定为 `main`。
 - 结算义务的用户 UUID 与游戏身份按原字段互斥；已提供的 nil UUID、空白或未规范化的另一身份不得被当作缺失。
 - `validate_settlement_price_breakdown` 按冻结费率校验展示金额的整数取整、加价/折扣及奖池上限，供履约与邮件边界复用；不读取现行策略。
@@ -48,7 +53,7 @@ Dioxus、SQLx、reqwest、环境读取或日志初始化，依赖限于领域安
   `validate_settlement_price_breakdown_for_mode` 按显式冻结模式校验账单，旧模式的校验不放宽。
   明细按冻结模式校验完整金额矩阵，保留整数取整、旧比例补偿封顶与 `B+C=S+T` 守恒。
 - 批量结算先完整校验冻结策略，再复用模块内事实与插值内核；锚点通过二分定位，
-  对 N 条 lot、M 个锚点的曲线处理由 `O(N×M)` 降为 `O(M+N log M)`。公共校验和插值入口仍严格校验，
+  对 N 条 lot、M 个锚点的曲线处理由 `O(N×M)` 降为 `O(M+N log M)`。公共校验入口仍严格校验，
   legacy zero、锚点边界、正负 half-away-from-zero、金额溢出及完整计划守恒语义不变。
 
 ### 装备语义词典
@@ -78,8 +83,9 @@ Magnificent 及其他兼容品质保留可缺词缀的识别规则。
 
 完整种类的名称匹配顺序仅初始化排序一次；同长度词条仍保留原词典顺序。名称解析中的词缀分类直接复用
 已识别的种类与大类，借用静态推荐片段，不重新识别种类或分配推荐列表；对外候选 API 仍返回原顺序的 `Vec`。
-字符串分类 API 只为确证完整种类、有限重甲语法或十二个可选材质建立上下文；未知种类的非空词缀统一标为
-`Unclassified`，不再仅凭金属词条推定 `Legacy`。这些优化不改变名称字段、自由词缀文本、推荐内容或收件政策。
+词缀推荐/历史分类只在名称解析识别出种类后进行；字符串候选 API（`prefixes_for_kind`/`suffixes_for_kind`）只为
+确证完整种类、有限重甲语法或十二个可选材质建立上下文，未知种类返回空候选。这些优化不改变名称字段、自由词缀文本、
+推荐内容或收件政策。
 页面大类标签直接比较借用 token，不建立小写、替换或拼接副本；
 保留 Unicode 空白、连字符/下划线、ASCII 大小写兼容及额外 token 拒绝。
 有限重甲名称解析直接借用已拆分的材质与部位 token，不额外拼接临时字符串；成功结果仍使用相同的规范种类名。

@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -8,9 +6,10 @@ use crate::ports::RequestHash;
 use super::{
     business::{
         AdminRuntimeEquipmentColorsConfig, AdminRuntimeEquipmentFilterConfig,
-        AdminRuntimeMailTemplatesConfig, AdminRuntimeWorldsConfig,
+        AdminRuntimeWorldsConfig,
     },
     errors::AdminRuntimeConfigError,
+    mail_templates::AdminRuntimeMailTemplatesConfig,
     operations::AdminRuntimeOperationsConfig,
     validation::{
         valid_fingerprint, validate_bot_players, validate_business_config,
@@ -369,14 +368,7 @@ impl AdminRuntimeDocument {
     pub fn fingerprint(&self) -> String {
         let encoded = serde_json::to_vec(self).unwrap_or_default();
         let digest = Sha256::digest(encoded);
-        let mut fingerprint = String::with_capacity(7 + 64);
-        fingerprint.push_str("sha256:");
-        // digest 0.11 的数组不实现 LowerHex；逐字节保留原有固定 64 位小写十六进制。
-        // 写入 String 不会返回格式错误，也不为每个字节分配临时字符串。
-        for byte in digest {
-            let _ = write!(fingerprint, "{byte:02x}");
-        }
-        fingerprint
+        format!("sha256:{}", crate::ports::lower_hex(&digest))
     }
 
     /// 计算版本化的 durable 命令请求摘要。

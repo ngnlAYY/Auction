@@ -21,7 +21,7 @@ pub(in crate::database::competition) async fn insert_bid(
     .bind(bid.lot_id.as_uuid())
     .bind(bid.bidder_id.as_uuid())
     .bind(bid.amount.value())
-    .bind(bid_mechanism(bid.mechanism))
+    .bind(bid.mechanism.as_str())
     .bind(bid.effective_end_at)
     .bind(i64_version(bid.state_version, "竞价状态版本")?)
     .bind(occurred_at)

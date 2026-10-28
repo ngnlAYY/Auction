@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use auction_domain::{AuctionId, CommandId};
+use auction_domain::{AuctionId, CommandId, valid_text};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -121,11 +121,4 @@ pub trait AdminAuctionScheduleTransaction: Send {
 
 fn valid_optional_time(value: Option<DateTime<Utc>>) -> bool {
     value.is_none_or(|value| value.timestamp_micros() != 0)
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

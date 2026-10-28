@@ -1,6 +1,6 @@
 //! 论坛稳定数字账号与可变 MM 玩家名称的 Users-owner 解析。
 
-use auction_application::{ApplicationError, ForumBidderIdentity, forum_world_name};
+use auction_application::{ApplicationError, ForumBidderIdentity};
 use auction_domain::{SettlementWorld, UserId};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -25,7 +25,7 @@ pub(super) async fn resolve_bidder_postgres(
     {
         return Err(ApplicationError::ForumIdentityRejected("论坛账号数字 ID 或玩家名称无效"));
     }
-    let world_id = forum_world_name(world);
+    let world_id = world.as_str();
     let mut transaction = store
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")

@@ -181,19 +181,9 @@ fn fingerprint(data_key: &DataKey, kind: AdminCredentialKind, secret: &[u8]) -> 
     let mut context = hmac::Context::with_key(&key);
     context.update(domain);
     context.update(secret);
-    hex_encode(context.sign().as_ref())
+    auction_application::lower_hex(context.sign().as_ref())
 }
 
 fn crypto_error() -> ApplicationError {
     ApplicationError::AdminCredential(AdminCredentialError::CryptoUnavailable)
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(HEX[(byte >> 4) as usize] as char);
-        output.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    output
 }

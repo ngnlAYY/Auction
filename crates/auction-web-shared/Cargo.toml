@@ -20,7 +20,7 @@ url.workspace = true
 uuid.workspace = true
 # 语言偏好持久化与 <html lang> 同步需要 Storage/Element；同时补齐 dioxus-web 0.7.10
 # 漏声明的 Location feature，详见根 Cargo.toml 说明。
-web-sys = { workspace = true, features = ["console", "CssStyleDeclaration", "Document", "DomRect", "DomRectList", "Element", "Event", "EventTarget", "FocusEvent", "HtmlElement", "KeyboardEvent", "MediaQueryList", "MediaQueryListEvent", "MouseEvent", "MutationObserver", "MutationObserverInit", "MutationRecord", "Node", "NodeList", "ResizeObserver", "Storage", "VisualViewport", "Window"] }
+web-sys = { workspace = true, features = ["console", "CssStyleDeclaration", "Document", "DomRect", "DomRectList", "Element", "Event", "EventTarget", "FocusEvent", "HtmlElement", "KeyboardEvent", "MouseEvent", "MutationObserver", "MutationObserverInit", "MutationRecord", "Node", "NodeList", "ResizeObserver", "Storage", "VisualViewport", "Window"] }
 wasm-bindgen.workspace = true
 
 [lints]

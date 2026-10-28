@@ -22,8 +22,7 @@ use super::authorization::{
 use super::evidence::validate_sent_evidence;
 use super::intent::{
     activation_request_hash, build_canonical_delivery, build_delivery_intent,
-    settlement_world_name, stable_activate_command_id, stable_delivery_id,
-    stable_prepare_command_id,
+    stable_activate_command_id, stable_delivery_id, stable_prepare_command_id,
 };
 use super::model::SettlementDeliveryIntent;
 use super::proof::proof_digest;
@@ -634,6 +633,6 @@ fn fulfillment_reference_suffix(
     world: auction_domain::SettlementWorld,
     operation: SettlementFulfillmentOperation,
 ) -> Option<&str> {
-    let prefix = format!("mooglemail:{}:{}:", settlement_world_name(world), operation.as_str());
+    let prefix = format!("mooglemail:{}:{}:", world.as_str(), operation.as_str());
     reference.strip_prefix(&prefix).filter(|value| !value.is_empty() && *value == value.trim())
 }

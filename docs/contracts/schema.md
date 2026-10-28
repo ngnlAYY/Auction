@@ -55,7 +55,7 @@
 | settlement_funding_allocations | application settlement funding / storage settlement_funding | 资金用途与外发占用；unknown 不按 TTL 或人工 failed 自动释放，全部现金发送复用同一门禁 |
 | settlement_funding_scope | application settlement funding / storage settlement_funding | 固定 mail_cookie 资金 scope，串行化账户启用与无证据 legacy 发送门 |
 | settlement_funding_receipts / settlement_funding_lots | application settlement funding / storage settlement_funding | 精确收款和 payment/delivery/UID+MID 唯一绑定、lot 来源与互斥用途，不回填旧 collected |
-| settlement_funding_returns | application settlement funding / storage settlement_funding | 每 delivery 唯一精确返还证据；本轮未开放人工返还入口 |
+| settlement_funding_returns | application settlement funding / storage settlement_funding | 每 delivery 唯一精确返还证据；当前没有返还入口或写入路径，仅占用检查读取，新增入口前须重新冻结证明契约 |
 | settlement_internal_commands | application settlement fulfillment / storage fulfillment_scheduler | 独立非敏感完整证明与稳定命令账本；obligation/action 唯一，原义务满足、资金、审计和直接依赖解除同事务 |
 | settlement_legacy_self_reconciliations | application settlement legacy repair / storage settlement_legacy_repair | `000053` 单笔显式自寄核验、真实 UID/库存证据、原投递及履约版本快照与结果，只追加；恢复付款准备不表示付款成功 |
 | settlement_legacy_bot_seller_claims | application settlement funding / storage settlement_funding/legacy | `000054` 旧实收责任逐标的唯一认领；精确 Sent-collected 及账户策略核对后将既有隔离责任转为卖家留存，不再次发行 B |

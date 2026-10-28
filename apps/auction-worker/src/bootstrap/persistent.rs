@@ -215,11 +215,7 @@ pub(super) async fn run_worker(
             .mooglemail
             .configured_worlds()
             .into_iter()
-            .filter_map(|world| match world.world_id.as_str() {
-                "main" => Some(SettlementWorld::Main),
-                "isekai" => Some(SettlementWorld::Isekai),
-                _ => None,
-            })
+            .filter_map(|world| SettlementWorld::from_name(&world.world_id))
             .collect()
     } else {
         vec![SettlementWorld::Main, SettlementWorld::Isekai]

@@ -5,27 +5,8 @@ use auction_application::{
     FundingError, InternalEvidencePurpose, SettlementInternalCommand,
     SettlementInternalEvidenceSnapshot,
 };
-use auction_domain::{InternalSettlementAction, SettlementObligationKind, SettlementWorld};
+use auction_domain::{InternalSettlementAction, SettlementObligationKind};
 use sqlx::{Postgres, Row, Transaction};
-
-pub(super) const fn world(world: SettlementWorld) -> &'static str {
-    match world {
-        SettlementWorld::Main => "main",
-        SettlementWorld::Isekai => "isekai",
-    }
-}
-
-pub(super) const fn kind(kind: SettlementObligationKind) -> &'static str {
-    match kind {
-        SettlementObligationKind::WinnerEquipmentCod => "winner_equipment_cod",
-        SettlementObligationKind::WinnerPaymentCarrierCod => "winner_payment_carrier_cod",
-        SettlementObligationKind::WinnerEquipmentHandoff => "winner_equipment_handoff",
-        SettlementObligationKind::SellerPayout => "seller_payout",
-        SettlementObligationKind::BuyerRefund => "buyer_refund",
-        SettlementObligationKind::UnsoldReturn => "unsold_return",
-        SettlementObligationKind::WithdrawnReturn => "withdrawn_return",
-    }
-}
 
 pub(super) async fn validate(
     tx: &mut Transaction<'_, Postgres>,
@@ -79,12 +60,12 @@ pub(super) async fn validate(
            AND f.activate_request_digest IS NOT DISTINCT FROM $25
            AND f.proof_kind IS NULL)"
     ).bind(c.obligation_id.as_uuid()).bind(c.auction_id.as_uuid()).bind(c.lot_id.as_uuid())
-        .bind(c.origin_command_id.as_uuid()).bind(kind(c.kind)).bind(c.amount).bind(i64::from(c.carrier_credit))
-        .bind(c.equipment_id.as_uuid()).bind(&c.external_equipment_id).bind(world(c.equipment_world))
+        .bind(c.origin_command_id.as_uuid()).bind(c.kind.as_str()).bind(c.amount).bind(i64::from(c.carrier_credit))
+        .bind(c.equipment_id.as_uuid()).bind(&c.external_equipment_id).bind(c.equipment_world.as_str())
         .bind(c.recipient_user_id).bind(c.prerequisite_id.map(|id| id.as_uuid()))
         .bind(if collected { "enqueued" } else { "pending" })
         .bind(i64::try_from(c.state_version).map_err(|_| FundingError::Invalid)?)
-        .bind(c.claim_token).bind(c.claim_fencing).bind(world(c.world)).bind(c.delivery_id)
+        .bind(c.claim_token).bind(c.claim_fencing).bind(c.world.as_str()).bind(c.delivery_id)
         .bind(&c.recipient).bind(c.prepare_command_id.map(|id| id.as_uuid()))
         .bind(c.activate_command_id.map(|id| id.as_uuid())).bind(c.submission_id.map(|id| id.as_uuid()))
         .bind(c.lease_until)

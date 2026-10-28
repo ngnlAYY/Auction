@@ -36,10 +36,7 @@ impl From<MailEvidenceTransactionError> for FenceError {
 impl FenceError {
     fn retryable(&self) -> bool {
         match self {
-            Self::Sqlx(error) => error
-                .as_database_error()
-                .and_then(|error| error.code())
-                .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01")),
+            Self::Sqlx(error) => crate::database::is_serialization_conflict(error),
             Self::Funding(FundingError::SerializationConflict) => true,
             Self::Evidence(error) => error.is_serialization_conflict(),
             _ => false,
@@ -174,12 +171,7 @@ async fn run_transaction(
                     }
                     return Ok(outcome);
                 }
-                Err(ref error)
-                    if error
-                        .as_database_error()
-                        .and_then(|error| error.code())
-                        .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01")) =>
-                {
+                Err(ref error) if crate::database::is_serialization_conflict(error) => {
                     // PostgreSQL明确中止的冲突可重试；普通连接/提交错误必须撤销owner。
                     if attempt == 2 {
                         return Ok(DeliveryFenceOutcome::Deferred);

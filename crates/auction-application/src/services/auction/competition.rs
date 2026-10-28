@@ -100,7 +100,7 @@ impl CreateProxyCommand {
         legacy_competition_request_hash(&LegacyCreateProxyRequest {
             lot_id: *lot_id.as_uuid().as_bytes(),
             user_id: *bidder_id.as_uuid().as_bytes(),
-            mode: proxy_mode_name(mode),
+            mode: mode.as_str(),
             maximum_amount: maximum_amount.value(),
         })
     }
@@ -294,13 +294,6 @@ where
     RequestHash::from_legacy_go_json(value)
 }
 
-const fn proxy_mode_name(mode: ProxyMode) -> &'static str {
-    match mode {
-        ProxyMode::Fast => "fast",
-        ProxyMode::Slow => "slow",
-    }
-}
-
 /// 竞价用例服务，只编排端口和纯领域规划器；命令时刻只从锁后的事务端口读取。
 pub struct CompetitionService<R> {
     repository: Arc<R>,
@@ -433,7 +426,7 @@ where
                         .await?;
                     transaction
                         .apply_slow_proxy_plan(
-                            plan.clone(),
+                            &plan,
                             SlowProxyExecutionContext {
                                 authorization_id: command.authorization_id,
                                 generation: command.generation,
@@ -635,9 +628,9 @@ where
                         })
                         .await?;
                     if let Some(prerequisite) = prerequisite_plan {
-                        transaction.apply_plan(prerequisite, None, now).await?;
+                        transaction.apply_plan(&prerequisite, None, now).await?;
                     }
-                    transaction.apply_plan(plan.clone(), Some(audit), now).await?;
+                    transaction.apply_plan(&plan, Some(audit), now).await?;
                     let effective_end_at =
                         CompetitionWireTimestamp::from_utc(plan.final_lot.effective_end_at);
                     Ok(CompetitionCommandOutcome { plan, proxy, effective_end_at })

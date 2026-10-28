@@ -602,7 +602,7 @@ impl PostgresCompetitionTransaction {
 
         // 代理终态、lot 成交/流拍状态与金额事实必须在同一 Serializable 事务内提交。
         for closure_plan in proxy_closure_plans {
-            self.apply_plan_inner(closure_plan, None, occurred_at)
+            self.apply_plan_inner(&closure_plan, None, occurred_at)
                 .await
                 .map_err(map_competition_error)?;
         }
@@ -640,7 +640,7 @@ impl PostgresCompetitionTransaction {
             .bind(auction_id.as_uuid())
             .bind(command_id.as_uuid())
             .bind(i32_version(plan.policy_version, "结算策略版本")?)
-            .bind(settlement_mode(plan.policy_mode))
+            .bind(plan.policy_mode.as_str())
             .bind(plan.compensation_pool_enabled)
             .bind(plan.opening_pool.value())
             .bind(plan.closing_pool.value())
