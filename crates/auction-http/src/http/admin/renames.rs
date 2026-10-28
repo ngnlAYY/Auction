@@ -37,7 +37,7 @@ pub(crate) async fn list(
         return *response;
     }
 
-    let query = match super::parse_query(&uri, &["user_id", "name", "page", "page_size"]) {
+    let mut query = match super::parse_query(&uri, &["user_id", "name", "page", "page_size"]) {
         Ok(query) => query,
         Err(_) => return invalid_query(),
     };
@@ -66,7 +66,7 @@ pub(crate) async fn list(
     };
     let request = AdminRenameListRequest {
         user_id,
-        name: query.get("name").filter(|value| !value.is_empty()).cloned(),
+        name: query.remove("name").filter(|value| !value.is_empty()),
         limit: page_size,
         offset,
     };

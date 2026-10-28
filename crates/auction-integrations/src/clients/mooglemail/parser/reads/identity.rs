@@ -25,7 +25,7 @@ impl MoogleMailParser {
             .ok_or_else(|| protocol(operation, world))?;
         let mut server_script = String::new();
         for node in document.select(&selector("#mainpane > script:not([src])", operation, world)?) {
-            server_script.push_str(&node.text().collect::<String>());
+            server_script.extend(node.text());
             server_script.push('\n');
         }
         if declaration_value(&server_script, "uid", &["let"]) != Some(declaration) {
@@ -129,10 +129,13 @@ fn declaration_value<'a>(source: &'a str, name: &str, keywords: &[&str]) -> Opti
         if found.is_some() {
             return None;
         }
-        let before = masked[..start].trim_end();
+        let before = preceding;
+        // 关键字前可能是多字节字符；按字符裁掉 ASCII 关键字，不能把字符起点加一当作切片边界。
         let keyword_start = before
-            .rfind(|character: char| !character.is_ascii_alphanumeric() && character != '_')
-            .map_or(0, |index| index + 1);
+            .trim_end_matches(|character: char| {
+                character.is_ascii_alphanumeric() || character == '_'
+            })
+            .len();
         if !keywords.contains(&&before[keyword_start..]) {
             return None;
         }

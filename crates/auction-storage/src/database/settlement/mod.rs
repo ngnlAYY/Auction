@@ -121,7 +121,7 @@ impl SettlementTransaction for PostgresCompetitionTransaction {
         &mut self,
         auction_id: AuctionId,
         command_id: CommandId,
-        plan: SettlementPlan,
+        plan: &SettlementPlan,
         proxy_closure_plans: Vec<CompetitionPlan>,
         recovery_policy: RecoveryPolicy,
         occurred_at: DateTime<Utc>,

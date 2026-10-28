@@ -41,7 +41,7 @@ pub struct FirstRunServerOptions {
 struct FirstRunState {
     options: FirstRunServerOptions,
     token: String,
-    policy: FirstRunPolicy,
+    policy: Arc<FirstRunPolicy>,
     operation: Mutex<SetupOperation>,
 }
 
@@ -78,6 +78,7 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
     policy: FirstRunPolicy,
 ) -> Result<FirstRunOutcome, &'static str> {
     policy.validate()?;
+    let policy = Arc::new(policy);
     let signals = auction_process::TerminationSignals::subscribe()
         .map_err(|_| "cannot subscribe setup termination signals")?;
     match fs::symlink_metadata(&options.output_dir) {
@@ -92,7 +93,7 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
     let state = Arc::new(FirstRunState {
         options,
         token,
-        policy: policy.clone(),
+        policy: Arc::clone(&policy),
         operation: Mutex::new(SetupOperation {
             status: SetupStatus::Pending,
             shutdown: Some(shutdown_sender),
@@ -104,7 +105,7 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
         .route("/api/v1/setup/complete", post(complete))
         .fallback(auction_http::serve_admin_setup_asset::<A>)
         .layer(DefaultBodyLimit::max(8 * 1024))
-        .layer(axum::middleware::from_fn_with_state(policy.clone(), access::enforce))
+        .layer(axum::middleware::from_fn_with_state(Arc::clone(&policy), access::enforce))
         .with_state(Arc::clone(&state));
 
     let origin = policy

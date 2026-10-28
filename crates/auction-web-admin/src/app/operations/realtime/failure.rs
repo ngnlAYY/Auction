@@ -125,16 +125,18 @@ fn compact_realtime_id(value: &str) -> String {
 /// 控制 failure 列表分页。
 #[component]
 pub(super) fn RealtimeFailurePager(
-    page: RealtimeFailurePage,
+    page: i64,
+    page_size: i64,
+    total: i64,
     pagination: AdminPagination,
     on_page_change: EventHandler<i64>,
 ) -> Element {
     rsx! {
         Pager {
             pagination,
-            page: page.pagination.page,
-            page_size: page.pagination.page_size,
-            total: Some(page.pagination.total),
+            page,
+            page_size,
+            total: Some(total),
             label: t!("realtime-failure-title"),
             previous_label: t!("admin-pagination-previous"),
             status: move |(page, pages): (i64, i64)| {

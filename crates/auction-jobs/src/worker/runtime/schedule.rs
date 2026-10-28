@@ -14,11 +14,30 @@ use super::{PersistentWorker, WorkerResult};
 
 const MAIL_PAUSE_LEAD: Duration = Duration::hours(2);
 
+/// 周计划的读取、幂等 bootstrap 与邮箱对账共用一次预算，不阻塞后续生命周期与结算阶段。
 pub(crate) async fn run_schedule_bootstrap<C>(worker: &PersistentWorker<C>) -> WorkerResult
 where
     C: Clock + 'static,
 {
-    if worker.control.is_draining() {
+    let deadline = tokio::time::Instant::now() + worker.auction.item_timeout;
+    match tokio::time::timeout_at(deadline, run_schedule_bootstrap_inner(worker, deadline)).await {
+        Ok(result) if tokio::time::Instant::now() < deadline => result,
+        Ok(_) | Err(_) => {
+            // 提交可能已发生；下轮读取冻结轮次和邮箱版本恢复，不补造失败事实或新命令身份。
+            tracing::warn!("auction weekly schedule bootstrap timed out");
+            WorkerResult::Error
+        }
+    }
+}
+
+async fn run_schedule_bootstrap_inner<C>(
+    worker: &PersistentWorker<C>,
+    deadline: tokio::time::Instant,
+) -> WorkerResult
+where
+    C: Clock + 'static,
+{
+    if worker.control.is_draining() || tokio::time::Instant::now() >= deadline {
         return WorkerResult::Success;
     }
     let Some(config) = worker.schedule_runtime.as_ref() else {
@@ -32,7 +51,7 @@ where
         tracing::warn!("读取周计划数据库时间失败");
         return WorkerResult::Error;
     };
-    if worker.control.is_draining() {
+    if worker.control.is_draining() || tokio::time::Instant::now() >= deadline {
         return WorkerResult::Success;
     }
     let Ok(generation) = generation(config, now) else {
@@ -43,6 +62,9 @@ where
         tracing::error!("周计划缺少数据库业务世界读取端口");
         return WorkerResult::Error;
     };
+    if worker.control.is_draining() || tokio::time::Instant::now() >= deadline {
+        return WorkerResult::Success;
+    }
     let worlds = match world_reader.list_worlds().await {
         Ok(worlds) => worlds,
         Err(error) => {
@@ -53,7 +75,7 @@ where
 
     let mut result = WorkerResult::Success;
     for world_id in &config.worlds {
-        if worker.control.is_draining() {
+        if worker.control.is_draining() || tokio::time::Instant::now() >= deadline {
             break;
         }
         let Some(world) = worlds.iter().find(|world| world.id.as_str() == world_id.as_str()) else {
@@ -71,7 +93,9 @@ where
             continue;
         }
         let snapshot =
-            match load_or_bootstrap_round(worker, config, world_id, &generation, now).await {
+            match load_or_bootstrap_round(worker, config, world_id, &generation, now, deadline)
+                .await
+            {
                 Ok(Some(snapshot)) => snapshot,
                 Ok(None) => continue,
                 Err(error) => {
@@ -80,16 +104,8 @@ where
                     continue;
                 }
             };
-        if let Err(error) = reconcile_mail(
-            config,
-            &worker.control,
-            &snapshot,
-            world_id,
-            snapshot.local_week,
-            snapshot.open_due_at,
-            now,
-        )
-        .await
+        if let Err(error) =
+            reconcile_mail(config, &worker.control, &snapshot, world_id, now, deadline).await
         {
             tracing::warn!(world_id, error = %error, "MoogleMail 周计划暂停/恢复对账失败");
             result = WorkerResult::Error;
@@ -104,6 +120,7 @@ async fn load_or_bootstrap_round<C>(
     world_id: &str,
     generation: &Generation,
     now: DateTime<Utc>,
+    deadline: tokio::time::Instant,
 ) -> Result<Option<ScheduledRoundSnapshot>, ApplicationError>
 where
     C: Clock + 'static,
@@ -112,8 +129,8 @@ where
     // 即使新配置的预览窗口尚未到达，也必须按既有轮次的时间继续对账邮箱暂停/恢复。
     let existing =
         worker.schedule.find_current_round(world_id.to_owned(), generation.local_week).await?;
-    // 冻结事实读取可能跨过 drain；此时不能再创建新轮次或开启邮箱状态命令。
-    if worker.control.is_draining() {
+    // 冻结事实回执不能越过 drain 或原截止后再授权创建；timeout 可能先 poll 出迟到回执。
+    if worker.control.is_draining() || tokio::time::Instant::now() >= deadline {
         return Ok(None);
     }
     let snapshot = if let Some(snapshot) = existing {
@@ -136,6 +153,9 @@ where
             schedule_source: generation.schedule_source.clone(),
         }
         .into_bootstrap()?;
+        if worker.control.is_draining() || tokio::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
         // 只在尚无轮次时发起创建；并发创建仍由存储层的锁、摘要和既有一致性检查保护。
         worker.schedule.ensure_current_round(request).await?
     };
@@ -229,9 +249,8 @@ async fn reconcile_mail(
     control: &crate::WorkerControlHandle,
     snapshot: &ScheduledRoundSnapshot,
     world_id: &str,
-    local_week: NaiveDate,
-    open_due_at: DateTime<Utc>,
     now: DateTime<Utc>,
+    deadline: tokio::time::Instant,
 ) -> Result<(), auction_application::ApplicationError> {
     let Some(mail) = config.mail.as_ref() else {
         return Ok(());
@@ -247,11 +266,11 @@ async fn reconcile_mail(
     let desired = if snapshot.active
         && snapshot.preview_completed_at.is_some()
         && snapshot.open_completed_at.is_none()
-        && now >= open_due_at - MAIL_PAUSE_LEAD
+        && now >= snapshot.open_due_at - MAIL_PAUSE_LEAD
     {
         Some(true)
     } else if (!snapshot.active && snapshot.preview_completed_at.is_some())
-        || (snapshot.active && snapshot.open_completed_at.is_some() && now >= open_due_at)
+        || (snapshot.active && snapshot.open_completed_at.is_some() && now >= snapshot.open_due_at)
     {
         // 取消/错过的轮次已经不再要求暂停；不能把本周邮箱永久留在 Preview 的暂停状态。
         Some(false)
@@ -259,7 +278,7 @@ async fn reconcile_mail(
         None
     };
     let Some(desired) = desired else { return Ok(()) };
-    let identity = identities(world_id, local_week);
+    let identity = identities(world_id, snapshot.local_week);
     let base_command_id =
         if desired { identity.pause_command_id } else { identity.resume_command_id };
     #[derive(Serialize)]
@@ -269,13 +288,16 @@ async fn reconcile_mail(
         expected_state_version: i64,
     }
     for _ in 0..3 {
-        if control.is_draining() {
+        if control.is_draining() || tokio::time::Instant::now() >= deadline {
             return Ok(());
         }
         let state =
             mail.poll_state(AdminMailPollStateRequest { mailbox_key: mailbox_key.clone() }).await?;
-        // 状态读取与版本冲突重试均可能跨过 drain；已提交命令不回滚，未开始的写入停止。
-        if control.is_draining() || state.paused == desired {
+        // 状态读取与版本冲突重试均可能跨过 drain/截止；已提交命令不回滚，未开始的写入停止。
+        if control.is_draining()
+            || tokio::time::Instant::now() >= deadline
+            || state.paused == desired
+        {
             return Ok(());
         }
         // 同一观测版本保持稳定；Admin 改动后的新版本必须使用新命令，不能重放本周旧结果。
@@ -293,6 +315,9 @@ async fn reconcile_mail(
                 expected_state_version: state.state_version,
             },
         )?;
+        if control.is_draining() || tokio::time::Instant::now() >= deadline {
+            return Ok(());
+        }
         match mail
             .set_polling_paused(AdminMailPollingCommand {
                 command_id,

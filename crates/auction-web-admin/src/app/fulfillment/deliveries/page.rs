@@ -139,10 +139,11 @@ pub fn page() -> Element {
         }
     };
 
-    let (page, load_error) = match &*deliveries.read_unchecked() {
+    let snapshot = deliveries.read_unchecked();
+    let (page, load_error) = match snapshot.as_ref() {
         None => (None, None),
         Some(Err(error)) => (None, Some(admin_api_error_message(error))),
-        Some(Ok(page)) => (Some(page.clone()), None),
+        Some(Ok(page)) => (Some(page), None),
     };
     let pending = pending_dialog();
     let draft = reconcile_draft();
@@ -167,9 +168,9 @@ pub fn page() -> Element {
                     on_status_change.push(next);
                 },
             }
-            if let Some(page) = page.clone() {
+            if let Some(page) = page {
                 DeliveryTable {
-                    page,
+                    page: page.clone(),
                     sort: query_state().sort.clone(),
                     direction: query_state().direction,
                     on_sort_change: move |(sort, direction)| {
@@ -216,7 +217,9 @@ pub fn page() -> Element {
             }
             if let Some(page) = page {
                 DeliveryPager {
-                    page,
+                    page: page.pagination.page,
+                    page_size: page.pagination.page_size,
+                    total: page.pagination.total,
                     pagination,
                     on_page_change: move |next_page| {
                         let mut next = query_state();

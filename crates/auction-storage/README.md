@@ -206,6 +206,8 @@ Preview/Open 轮次不聚合未使用的 lot 截止；Final 仍读取已 Open �
 明细 INSERT 执行次数由 N 次减至 ⌈N/256⌉ 次，每批最多 2560 个绑定参数；额外构建内存仅随批量增长。
 计划校验、代理关闭、逐 lot 状态/价格核对、池 CAS、结算摘要、明细、账本、义务、恢复及审计/事件的先后顺序保持，
 全部共用原 Serializable 事务，任何约束或后续写入失败均返回错误并回滚。账本税费/补偿顺序保持原逐条追加。
+`settlement/mod.rs` 与 `settlement/transaction.rs` 借用应用层原 `SettlementPlan`，落库不再要求复制完整明细与义务；
+后续命令结果仍消费同一计划，校验、写入顺序、金额和事务边界保持不变。
 结算收口统计利用活动授权的 `bid_proxy_authorizations_one_active_lot_idx` 部分唯一索引保证每 lot 至多一条匹配，
 用普通 COUNT 代替三组 DISTINCT 聚合；撤回 lot 的残留活动代理仍阻断提交。
 `operations_alert/claims/create.rs` 在正文前缀已校验 1–64 项后一次写入批次条目，最多 320 个绑定参数，
@@ -353,6 +355,9 @@ lease/fencing/revision CAS 收口；部分进度不会写终态标记，`forum/r
   Serializable SIREAD 保留幻行保护，既有 world/资产业务锁及三次冲突重试不变。
 - 资产冲突的普通投递分类和已闭合入站退回历史逐行读取完整载荷，只累计通过原闭集证明的 UUID；
   不整批保存正文或附件，也不先复制 JSON 树再解码。所有候选、未知 schema 的失败关闭及原事务快照保持不变。
+  两处至多 1000 项的附件去重使用借用字符串的集合，原前缀重扫的 O(n²) 比较变为预期 O(n)，临时空间 O(n)；
+  长度及格式门禁先行，仍按原字符串判重，不合并带前导零的不同身份。Take 证明直接逐项比对借用的 JSON 数组，
+  不为比较重新构造附件 JSON；数组类型、长度、顺序和每个字符串必须全部一致。
 - UnsoldReturn/WithdrawnReturn 均不套成交资金图；已证明的同标的来源 Take 按同一闭集规则闭合，
   不放宽未知历史、其它标的或其它装备的冲突防线。
 - 复核当前用户版本、有效 claim token/fencing/state_version 及数据库实时时效；新 pending 必须从未准备、激活或关联
@@ -372,6 +377,8 @@ Recovery action 终态先锁父 case 再锁 action，确认路径按 UUID 预锁
 `lock_recovery_delivery_retry_scope` / `lock_recovery_delivery_retry_actions` 两阶段锁，只用于无 allocation 的
 RetryFailed/ReconcileRetry，SQLSTATE 原样交 runner。源码静态结果见[状态页](docs/status.md)，迁移、SQL 执行、并发与
 大库锁成本仍需独立运行证据。
+确认预锁完整执行原有序 `SELECT ... FOR UPDATE`，直接丢弃未使用的行，不再建立临时结果 Vec；
+后续状态读取、缺失行处理、锁集合及锁序保持不变。
 Recovery action 关联及激活投递的重试只捕获固定身份、版本、fence 与栈上摘要，返回时复用原 claim 的其余字段，
 不为每次尝试复制收件人、附件和诊断文本。退件证据直接借用持有的 JSON 严格解码，保留未知字段、金额及附件校验。
 

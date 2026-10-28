@@ -70,16 +70,18 @@ pub(super) fn RealtimeEventTable(page: RealtimeEventPage) -> Element {
 /// 控制事件元数据列表分页。
 #[component]
 pub(super) fn RealtimeEventPager(
-    page: RealtimeEventPage,
+    page: i64,
+    page_size: i64,
+    total: i64,
     pagination: AdminPagination,
     on_page_change: EventHandler<i64>,
 ) -> Element {
     rsx! {
         Pager {
             pagination,
-            page: page.pagination.page,
-            page_size: page.pagination.page_size,
-            total: Some(page.pagination.total),
+            page,
+            page_size,
+            total: Some(total),
             label: t!("realtime-event-title"),
             previous_label: t!("admin-pagination-previous"),
             status: move |(page, pages): (i64, i64)| {

@@ -63,16 +63,18 @@ pub(super) fn RealtimeLagTable(page: RealtimeLagPage) -> Element {
 /// 控制 lag 列表分页并把页码交回页面状态。
 #[component]
 pub(super) fn RealtimeLagPager(
-    page: RealtimeLagPage,
+    page: i64,
+    page_size: i64,
+    total: i64,
     pagination: AdminPagination,
     on_page_change: EventHandler<i64>,
 ) -> Element {
     rsx! {
         Pager {
             pagination,
-            page: page.pagination.page,
-            page_size: page.pagination.page_size,
-            total: Some(page.pagination.total),
+            page,
+            page_size,
+            total: Some(total),
             label: t!("realtime-lag-title"),
             previous_label: t!("admin-pagination-previous"),
             status: move |(page, pages): (i64, i64)| {

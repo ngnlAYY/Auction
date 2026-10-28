@@ -132,10 +132,10 @@ pub(in crate::database::recovery_commands) async fn validate_obligations(
         return Err(RecoveryCommandError::NotConfirmable);
     }
 
-    // payment/handoff/refund/seller按同一UUID序先锁全体execution，不能按业务顺序反锁。
+    // 按同一 UUID 序锁全体 execution；完整执行但不收集未使用的行，不能按业务顺序反锁。
     let ids: Vec<Uuid> = obligations.keys().copied().collect();
     sqlx::query("SELECT obligation_id FROM public.settlement_obligation_fulfillments WHERE obligation_id=ANY($1) ORDER BY obligation_id FOR UPDATE")
-        .bind(ids).fetch_all(&mut **transaction).await.map_err(map_sql_error)?;
+        .bind(ids).execute(&mut **transaction).await.map_err(map_sql_error)?;
     let payment_state = lock_fulfillment_state(transaction, payment.id).await?;
     match action {
         RecoveryConfirmationAction::Reclaimed => {

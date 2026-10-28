@@ -25,7 +25,7 @@ OpenSSL 开发文件、patch 以及 curl/tar/coreutils；两档在 CI 中分别�
 | --- | --- |
 | rustup 1.29.2 | `rustup.sh` 固定官方 x86_64 GNU 安装器 SHA-256；更新旧版本并保留已安装 Rust 工具链 |
 | dx 0.7.10 | 固定 crates.io 源码包及补丁 SHA-256，使用 `locks/dioxus-cli.Cargo.lock`；开启 `disable-telemetry,no-downloads` |
-| sccache 0.18.0 | 固定 crates.io 源码包、Zstandard/缓存权限补丁及 SHA-256，使用 `locks/sccache.Cargo.lock`；只启用 GHA 后端及默认本地缓存 |
+| sccache 0.18.0 | 固定 crates.io 源码包、Zstandard/缓存权限/object feature 补丁及 SHA-256，使用 `locks/sccache.Cargo.lock`；只启用 GHA 后端及默认本地缓存 |
 | cargo-audit 0.22.2 | 固定 crates.io 源码包 SHA-256，使用 `locks/cargo-audit.Cargo.lock`；关闭默认 feature，只保留实际使用的锁文件审计 |
 | esbuild 0.27.3 | 固定 dx 预期的 npm Linux x64 包与 SHA-256；只用于打包 |
 | wasm-bindgen 0.2.129 | 固定与应用锁图一致的官方 musl 包与 SHA-256 |
@@ -87,7 +87,6 @@ dx/sccache 的完整发布锁仍有跨不兼容版本的公告与维护警告，
 | sccache 的 jsonwebtoken 9.2.0，GHSA-h395-gr6q-cpjc | 由关闭的 dist-server feature 启用，`--no-default-features --features gha` 的 GNU 依赖图不编入它 |
 | sccache 的 rsa 0.9.10，RUSTSEC-2023-0071 | 仍在 GHA 的传递依赖图，但实际认证使用 bearer 和预签名 SAS；不调用 RSA 私钥签名/解密，缺少 Marvin 所需私钥操作 |
 | sccache 的 scc 2.1.0，RUSTSEC-2026-0205 | 由测试依赖 serial_test 引入，不在本次 release 普通依赖图中 |
-| sccache 的 ruzstd 0.8.1，RUSTSEC-2026-0344 | object 只读取静态库归档的原始成员用于哈希，未调用压缩节解码；缓存解压另用 zstd |
 | sccache 的 zip 0.6.6，RUSTSEC-2026-0368/0369 | 按编译器预期键读取，写入普通临时文件后放到编译器指定路径；不调用归档 extract，也不创建归档提供的符号链接 |
 | sccache 的 zip 0.6.6，RUSTSEC-2026-0367 | 正常写入限制在 `0o777`；本仓库补丁让自定义读取也先掩码 `unix_mode`，阻止缓存恢复 SUID/SGID/sticky。版本仍匹配公告，继续以非 root 用户构建并使用受控缓存，升级时重新核对 |
 
@@ -216,3 +215,25 @@ rwx 位，不依赖 ZIP 提取函数，不消除 zip 0.6.6 在完整锁/活跃�
 audit/release 两档已按最终脚本、补丁和锁图串行重建，每次最多两个 Cargo 编译任务；冻结配方、源码锁比对、安装回执及
 两档独立 verify 均通过。cargo-audit 保留 17 条上游 future-incompatible 编译警告，sccache 保留 1 条上游 dead-code
 编译警告；这些不计入上表的 RustSec 警告。本轮未运行应用发布构建、功能流程或行为测试。
+
+### object 压缩依赖裁剪
+
+后续全仓审计核对 sccache 0.18.0 的全部 `object` 调用：仅 `src/util.rs` 使用 `ArchiveFile`、
+`MachOFatFile32/64`，按归档成员名称与原始字节计算摘要，不解压目标文件节。固定的
+[object 0.37.1 feature](https://docs.rs/crate/object/0.37.1/features) 将 `compression` 独立于 `read`；
+`ArchiveMember::data` 直接读取成员的原始字节。通过
+[受控补丁](ci/tools/patches/sccache-object-features.patch)关闭默认 feature，显式保留 `read/std`，
+后者保留既有错误类型和标准库能力；补丁 SHA-256 参与来源校验及构建配方身份。
+
+Cargo 重新解析后，独立锁只删除 `ruzstd 0.8.1`、`twox-hash 2.1.1` 和 `object` 的压缩依赖边：
+完整锁 532 → 530，GNU 普通/构建图 298 → 296。其余包版本不变；`flate2` 仍由其他用途引入，
+缓存自己的 `zstd::stream` 编解码、原始归档哈希顺序、缓存格式与权限掩码保持不变，应用锁不变。
+
+本次独立拉取的 RustSec 仍为 `99670cfc0bc574433034b75876a4b791ccaa2efb`、1,380 条公告。
+同快照、`--deny warnings` 下最终 sccache 完整锁由 5 项漏洞匹配降至 4 项，警告仍为 9 项；
+剩余 RSA、ZIP 及维护/yanked 警告仍使审计失败，未设置忽略项。应用和 cargo-audit 锁继续零漏洞/警告，
+dx 完整锁仍为 13 项漏洞匹配、11 项警告；它们的锁字节未变，历史审计数字保留为当时记录。
+
+最终 audit/release 两档已重新构建并通过各自安装回执校验，sccache/dx 版本命令正常返回；
+固定哈希补丁以零模糊匹配应用，构建使用 `--locked`。cargo-audit 仍有 17 条上游宏兼容警告，
+sccache 仍有 1 条上游 dead-code 警告。上述证据不包含应用发布、运行流程或缓存性能基准。

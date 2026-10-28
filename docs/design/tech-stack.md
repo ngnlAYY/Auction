@@ -153,9 +153,11 @@ prometheus-client 需要另审 OpenMetrics 与进程指标兼容，Leptos CSR �
 - `async-stream` 保留 SQLx 借用流；Base64/SHA-2、Tungstenite、darling 等重复版本遵循上游约束；OTLP 的 reqwest 仍负责 TLS。
   Public/Admin 的 `url/idna` 也由路由依赖，删本项目调用不会消除这些包。
 
-本轮受控 cargo-audit 关闭未使用的二进制扫描，GNU 活跃图从 302 减至 293 个包，保留锁文件 RustSec/yanked 审计。
-sccache 通过固定哈希的最小清单补丁采用 Zstandard 修复版本，独立锁仅更新 zstd/zstd-safe/zstd-sys 三项；应用依赖不变。
-本次公告快照、实际可达图、剩余风险及工具回执由[工具 owner](ci/tools/README.md#同日并行审计锁文件扫描与-sccache-zstandard-修复)维护。
+受控 cargo-audit 关闭未使用的二进制扫描，GNU 活跃图从 302 减至 293 个包，保留锁文件 RustSec/yanked 审计。
+sccache 已采用 Zstandard 修复版本，并通过固定哈希的[object feature 补丁](ci/tools/patches/sccache-object-features.patch)
+关闭未调用的压缩节解码，只保留 `read/std`；独立锁移除 `ruzstd` 和 `twox-hash`，GNU 活跃图从 298 减至 296，
+原始归档成员哈希、缓存 Zstandard 编解码及应用依赖保持。当前公告、剩余风险及工具回执由
+[工具 owner](ci/tools/README.md#object-压缩依赖裁剪)维护。
 
 发布身份覆盖 Cargo 环境别名与配置；API-only、内嵌和合并变体另按固定白名单验证完整制品摘要，
 归档契约及边界见[CI owner](ci/README.md#发布边界)。默认验证范围与历史结果仍归[状态页](docs/status.md)。

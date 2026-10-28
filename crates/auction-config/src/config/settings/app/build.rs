@@ -180,10 +180,12 @@ impl AppConfig {
         let admin_uses_unix = role == Role::Admin
             && listener.as_ref().is_some_and(|listener| listener.mode == HttpListenMode::Unix);
         let listen_addr = if admin_uses_unix { None } else { effective_listen_addr };
-        let mut http_security =
-            admin_runtime.as_ref().map(runtime_http_security).unwrap_or(http_security);
-        resolve_http_security_origins(&mut http_security, listen_addr)?;
-        validate_http_security(&http_security)?;
+        // 没有 runtime 覆盖时沿用已校验的主配置，避免再次解析同一组 Origin 和 CIDR。
+        if let Some(runtime) = &admin_runtime {
+            http_security = runtime_http_security(runtime);
+            resolve_http_security_origins(&mut http_security, listen_addr)?;
+            validate_http_security(&http_security)?;
+        }
         let public_uses_unix = role == Role::Public
             && listener.as_ref().is_some_and(|listener| listener.mode == HttpListenMode::Unix);
         if http_security.trusted_unix_proxy && !admin_uses_unix && !public_uses_unix {

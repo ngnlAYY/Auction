@@ -35,7 +35,7 @@ pub(crate) async fn list(
         return *response;
     }
 
-    let query = match parse_query(&uri, &["world_id", "status", "page", "page_size"]) {
+    let mut query = match parse_query(&uri, &["world_id", "status", "page", "page_size"]) {
         Ok(query) => query,
         Err(_) => {
             return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
@@ -68,8 +68,8 @@ pub(crate) async fn list(
         }
     };
     let request = AdminAuctionListRequest {
-        world_id: query.get("world_id").cloned(),
-        status: query.get("status").cloned(),
+        world_id: query.remove("world_id"),
+        status: query.remove("status"),
         limit: page_size,
         offset,
     };

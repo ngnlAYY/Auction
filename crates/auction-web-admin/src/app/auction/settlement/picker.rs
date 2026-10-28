@@ -113,7 +113,9 @@ pub(super) fn AdminSettlementPicker(
 
 #[component]
 pub(super) fn AdminSettlementCatalogPager(
-    page: AdminSettlementCatalogPage,
+    page: i64,
+    page_size: i64,
+    total: i64,
     pagination: AdminPagination,
     world_filter: Signal<String>,
     mut requested_sequence: Signal<Option<i64>>,
@@ -129,9 +131,9 @@ pub(super) fn AdminSettlementCatalogPager(
     rsx! {
         Pager {
             pagination,
-            page: page.page.max(1),
-            page_size: page.page_size.max(1),
-            total: Some(page.total),
+            page: page.max(1),
+            page_size: page_size.max(1),
+            total: Some(total),
             label: t!("admin-settlement-auction-pagination"),
             previous_label: t!("admin-pagination-previous"),
             status: move |(page, pages): (i64, i64)| {

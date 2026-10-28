@@ -65,7 +65,8 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
   页面可见性监听器由 shared 层的 RAII 守卫卸载，回调不反向持有监听器；各 surface 继续决定恢复可见后的刷新策略。
   固定业务指标由 observability 在初始化时绑定共享句柄，业务调用方不持有 Prometheus 注册表或动态 label。
   HTTP 的规范 UUID 和旧 v1 JSON 媒体类型校验分别复用单一谓词；各路由继续拥有鉴权顺序、错误外壳和兼容输入范围。
-  结算义务的生成与逐条比对共用 application 构造流程；storage 仅在原事务内有界批量写入明细，纯读取复用只读快照入口。
+  结算义务的生成与逐条比对共用 application 构造流程；storage 借用已校验计划，在原事务内有界批量写入明细，
+  用例直接返回原计划；纯读取复用只读快照入口。
   配置 loader 在返回成功前校验公共日志过滤表达式，observability 仍独占 subscriber 初始化。
 - 草稿软截止：`auction-application::draft_soft_close` 拥有修正规则与窄端口，
   `auction-storage::database::draft_soft_close` 独占一致快照检查、Serializable/CAS、原命令账本及追加审计，
@@ -166,8 +167,9 @@ fence 与只读对账；`000042` 的账号偏好 SQL 由 storage 独占，旧 wa
 Worker 只负责持久调度、重试与执行时机；due、游标、attempt、lease、fencing 及命令结果由数据库持有，Final 与调度
 完成 fence 同事务提交，`scheduled_rounds.schedule_snapshot` 固定自动排期的本地时区来源。Auction 主循环以轮询间隔为
 最长等待，按 scheduler、slow proxy 与 settlement storage owner 的只读到期提示在严格未来的到期时刻提前唤醒；
-提示不是调度事实，丢失或失败只退回原轮询。关闭世界阻止新场次、不取消
-已有履约/恢复，drain 后各 owner 停止领取。实际取得的邮件或论坛 credential owner 永久失效时，装配根触发有界 drain 并
+提示不是调度事实，丢失或失败只退回原轮询。周计划 bootstrap 复用原单项预算，生命周期的数据库时间读取纳入领取前
+绝对截止；迟到回执不授权下一次创建或邮箱写入，可能已提交的结果由冻结轮次、版本和原账本恢复。关闭世界阻止新场次、
+不取消已有履约/恢复，drain 后各 owner 停止领取。实际取得的邮件或论坛 credential owner 永久失效时，装配根触发有界 drain 并
 非零退出，由进程管理器重建。外部副作用只在本地提交后执行：入站详情 GET 前按有效租约保存邮件摘要，
 崩溃后优先按持久 MID 恢复；完整发件人及 allowlist 判定只采信详情，列表显示名仅保留快照兼容。
 详情未获白名单授权时保留待读项并阻断后续处理；按连续前缀提交完成证明、cursor 并移除对应待读项，

@@ -3,6 +3,8 @@
 mod load;
 mod table;
 
+use std::rc::Rc;
+
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
@@ -96,7 +98,7 @@ fn WorldWatches(user_id: String, world: String) -> Element {
             if !current_identity_matches(session, &user_id) {
                 result = Err(());
             }
-            result
+            result.map(|watched| watched.map(Rc::new))
         }
     });
     // 此列表不展示价格或领先者；竞价通知不改变这四列，生命周期/标记变更仍通过全局修订重读。

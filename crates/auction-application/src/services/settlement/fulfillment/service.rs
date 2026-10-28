@@ -485,7 +485,7 @@ impl SettlementFulfillmentService {
         let proof = SettlementFulfillmentProof {
             kind: "mooglemail_sent_collected".to_owned(),
             reference: remote_id.to_owned(),
-            digest: proof_digest(&claim, delivery_id, &sent, None)?,
+            digest: proof_digest(delivery_id, &sent)?,
             observed_at: sent.observed_at,
         };
         if matches!(

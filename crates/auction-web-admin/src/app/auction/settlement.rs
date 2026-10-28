@@ -295,7 +295,7 @@ pub(super) fn page() -> Element {
             && load.page == current_catalog_page
             && load.page_size == catalog_page_size()
     });
-    let catalog_data = current_catalog.and_then(|load| load.result.as_ref().ok()).cloned();
+    let catalog_data = current_catalog.and_then(|load| load.result.as_ref().ok());
     let selected_on_page = catalog_data
         .as_ref()
         .and_then(|page| find_requested_entry(page, &selected, desired_sequence))
@@ -311,7 +311,7 @@ pub(super) fn page() -> Element {
             .and_then(|page| find_requested_entry(page, &selected, desired_sequence))
             .cloned()
     });
-    let mut picker_catalog = catalog_data.clone();
+    let mut picker_catalog = catalog_data.cloned();
     if let (Some(page), Some(entry)) = (&mut picker_catalog, selected_entry.as_ref())
         && !page.auctions.iter().any(|candidate| candidate.auction_id == entry.auction_id)
     {
@@ -414,7 +414,9 @@ pub(super) fn page() -> Element {
                     }
                     if let Some(page) = catalog_data {
                         AdminSettlementCatalogPager {
-                            page,
+                            page: page.page,
+                            page_size: page.page_size,
+                            total: page.total,
                             pagination: catalog_pagination,
                             world_filter,
                             requested_sequence,
