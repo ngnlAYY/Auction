@@ -47,22 +47,24 @@ pub struct VerifiedMailSentCollectionObservation {
 impl VerifiedMailSentCollectionObservation {
     /// 固定协议的领取状态与同账号绑定摘要；无邮件正文、Cookie 或臆测的原金额。
     pub fn compute_digest(&self) -> [u8; 32] {
-        let mut facts = vec![
-            "same_session_exact_sent_collected_v1".to_owned(),
-            lower_hex(&self.binding.digest),
-            self.external_mail_id.clone(),
-            self.recipient.clone(),
-            self.subject.clone(),
-            self.sent_at.to_rfc3339(),
-            self.observed_at.to_rfc3339(),
-            self.remaining_credits.to_string(),
-            self.cod_pending.to_string(),
-            self.collected.to_string(),
-            // 有效证明只允许空列表；规范摘要仍覆盖所有字段，不丢弃无效输入的区别。
-            self.remaining_equipment_ids.len().to_string(),
-        ];
-        facts.extend(self.remaining_equipment_ids.iter().cloned());
-        facts_digest(&facts)
+        // 直接串联借用字段；有效证明只允许空列表，摘要仍覆盖无效输入的完整列表。
+        facts_digest(
+            [
+                "same_session_exact_sent_collected_v1",
+                &lower_hex(&self.binding.digest),
+                &self.external_mail_id,
+                &self.recipient,
+                &self.subject,
+                &self.sent_at.to_rfc3339(),
+                &self.observed_at.to_rfc3339(),
+                &self.remaining_credits.to_string(),
+                &self.cod_pending.to_string(),
+                &self.collected.to_string(),
+                &self.remaining_equipment_ids.len().to_string(),
+            ]
+            .into_iter()
+            .chain(self.remaining_equipment_ids.iter().map(String::as_str)),
+        )
     }
 
     /// 只接纳明确全部领取；原资金化授权还须锁验成功 payload 和唯一义务来源。

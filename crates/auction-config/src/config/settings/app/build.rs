@@ -28,7 +28,7 @@ impl AppConfig {
             secrets_path.as_deref().map(load_secret_file).transpose()?.unwrap_or_default();
         let secrets = AppSecrets::from_file(secret_file)?;
 
-        let runtime_document =
+        let mut runtime_document =
             runtime_config_path.as_deref().map(load_admin_runtime_file).transpose()?;
         let equipment_colors = runtime_document
             .as_ref()
@@ -37,7 +37,10 @@ impl AppConfig {
             .unwrap_or_default();
         // Public 注册提示和 Worker 履约只保留名单投影，不持有完整 Admin runtime 文档。
         let bot_players = if matches!(role, Role::Public | Role::Worker) {
-            runtime_document.as_ref().map(|runtime| runtime.bot_players.clone()).unwrap_or_default()
+            runtime_document
+                .as_mut()
+                .map(|runtime| std::mem::take(&mut runtime.bot_players))
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -50,10 +53,10 @@ impl AppConfig {
             apply_runtime_operations(&mut auction, &mut worker, role, runtime);
         }
         if role == Role::Worker
-            && let Some(runtime) = &runtime_document
+            && let Some(runtime) = runtime_document.take()
         {
+            apply_equipment_colors(&mut worker.forum, &runtime);
             apply_runtime_document(&mut worker.mooglemail, runtime);
-            apply_equipment_colors(&mut worker.forum, runtime);
         }
         // 投影完成后转移完整文档，避免 Admin 启动时复制全部模板、名单和规则。
         let admin_runtime = if role == Role::Admin { runtime_document } else { None };

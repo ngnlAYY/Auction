@@ -35,6 +35,47 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-27 全仓精简与资源生命周期复核
+
+基线为干净的 `c1781d68`。经用户授权按 owner 并行审查全部 20 个工作区包，建立 1,430 份 Rust 源码、49 份 Markdown、
+64 份追加迁移及构建/配置清单，结合全仓静态扫描和 CodeGraph 对重点调用链复核。各模块的修改、契约及检查结果如下。
+
+| owner | 本轮修改与保护的边界 |
+| --- | --- |
+| domain / application | 结算纳秒时窗全场计算一次；内部证据摘要直接消费借用字段，Sent 不再复制装备 ID 列表；金额公式、事实校验顺序、摘要字段顺序及字节编码保持 |
+| storage | Recovery 重试只捕获身份、版本、fence 与固定摘要；退件证据借用 JSON 解码，八处摘要绑定不再分配临时 Vec；Serializable、锁序、幂等比较及原子写入集合保持 |
+| storage | Admin realtime 元数据的无副作用 CTE 使用 `NOT MATERIALIZED`，避免双引用强制物化全部匹配行；页与计数仍在同一语句快照，空页 total 和安全投影保持 |
+| integrations / jobs | 邮件唯一节点校验最多读取两个匹配，行列索引保留协议上限及超限哨兵；分页 query 使用四个字段槽位，delivery 借用 JSON 解码；外部身份、资产、协议闭集及未知外写保护保持 |
+| shared / Admin Web | 消除可见性监听器的内部引用环并增加 RAII 卸载；邮件关联校验由预期 `O(N×M)` 降至 `O(N+M)`，结算目录每行省去四次字符串复制；Markdown 使用借用迭代和固定采样缓冲，删除两层纯转发函数 |
+| config / apps | 转移已校验 runtime 的名单、过滤与模板，Admin dashboard 使用借用投影；部署锁通过已打开文件描述符收紧权限，避免再次按路径定位 |
+| auctionctl | systemctl 双管道改为非阻塞交替读取，查询最多 5 秒、启停最多 60 秒，异常再用最多 5 秒确认直接子进程回收；readiness 查询共用角色剩余预算，停止失败仍阻断迁移 |
+| observability | 初始化时缓存固定业务指标句柄，逐笔记录省去标签哈希、读锁及 Arc 克隆；OTLP 健康包装直接借用自身；指标名称、零值、label、bucket 及导出结果分类保持 |
+
+HTTP、Public、Worker、首次设置、进程原语、契约和迁移均纳入审查；没有确认需要修改的模块保留原实现。根 README、
+架构、技术栈、运维与相关模块文档同步，部署仍沿用[同版升级流程](ops/README.md#读取快照与实时分发优化升级)。
+12 个已有测试未发现重复或失效，保留且不执行。直接依赖均有实际用途，仅删除 cache 重复声明的 Tokio `sync/time`
+feature；生效图和 Cargo.lock 保持不变，不强行合并上游跨版本依赖。
+
+受控 cargo-audit 0.22.2 回执校验通过，独立获取干净 RustSec 快照，仍为提交 `99670cfc0bc574433034b75876a4b791ccaa2efb`
+（1,380 条公告）；四份锁在同一快照执行 `--deny warnings`。应用 535 个条目与 cargo-audit 独立锁均为零漏洞、零警告；
+dx 仍有 13 项漏洞匹配、11 项警告，sccache 仍有 7 项漏洞匹配、17 项警告，完整锁审计失败，受控调用范围见
+[工具公告记录](ci/tools/README.md#上游公告与实际使用范围)。工具锁、公告忽略项及安装回执均未修改。
+
+Rust 1.99.0 下 `CARGO_BUILD_JOBS=2 just verify` 通过，覆盖仓库/布局/配置/i18n/装备契约、格式、工作区全部已有目标、
+独立 PostgreSQL/Redis feature、Clippy `-D warnings` 及 Public/Admin WASM。`cargo machete`、全部 CI shell 的 ShellCheck
+warning 门禁、Actions 的 actionlint 和 `git diff --check` 通过；三角色、auctionctl、合并服务与双端 WASM 的实际依赖图
+分别核对，原生图无 Web crate，全部图均未引入第二数据库驱动、native-tls/OpenSSL 或 Dioxus fullstack/server。
+Rust 1.94.1 下 `CARGO_BUILD_JOBS=2 cargo +1.94.1 check --locked --workspace --all-targets --all-features` 通过。
+49 份 Markdown 的 1,454 处仓库内引用已静态核对，无缺失路径或标题锚点；修改后的契约与 owner 说明另作人工复核。
+
+本轮未运行行为测试、数据库/浏览器验证、性能基准或部署。算法复杂度及分配减少由源码推导，实际吞吐、延迟与内存
+收益留待代表性负载量测。[Admin 审计日志](crates/auction-storage/src/database/admin_audit/postgres.rs)按
+`(occurred_at DESC, id DESC)` 全局分页、[realtime failures](crates/auction-storage/src/database/realtime_admin/failures.rs)
+的 `(failed_at DESC, id DESC)`、[无邮箱筛选入站列表](crates/auction-storage/src/database/admin_mail/reads.rs)
+及[全状态 delivery 列表](crates/auction-storage/src/database/delivery_admin/reads.rs)尚缺对应全局时间排序索引。
+先以代表性数据对首屏、时间范围、深 OFFSET 与 keyset 取得执行计划，再决定追加迁移及其写入成本；完整计数仍需
+独立评估，本轮不改已发布迁移。
+
 ### 2026-10-27 最新源码、注释、文档与依赖复审
 
 基线为干净的 `5274cb78`。按 20 个工作区包建立清单，对 1,430 份 Rust 源码进行重复实现、panic、集合扫描和异步任务

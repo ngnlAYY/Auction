@@ -62,6 +62,8 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
   HTTP wire 映射与浏览器严格解码仍由各自 owner 显式维护，不直接复用持久化名称。
   旧版 Go JSON 转义由应用层 `ports/core/encoding.rs` 统一按片段输出，命令摘要和履约 canonical 分别消费；
   兼容字段顺序及历史字节仍由对应命令/证明 owner 拥有。
+  页面可见性监听器由 shared 层的 RAII 守卫卸载，回调不反向持有监听器；各 surface 继续决定恢复可见后的刷新策略。
+  固定业务指标由 observability 在初始化时绑定共享句柄，业务调用方不持有 Prometheus 注册表或动态 label。
 - 草稿软截止：`auction-application::draft_soft_close` 拥有修正规则与窄端口，
   `auction-storage::database::draft_soft_close` 独占一致快照检查、Serializable/CAS、原命令账本及追加审计，
   `auctionctl` 只装配命令，不在迁移中批量更正旧场次。
@@ -264,6 +266,8 @@ drain，第二次信号或超时强制收口，再完成心跳和有界 tracing 
 
 分体 HTTP 共享运行根由 tmpfiles 独立预建，Worker 的 RuntimeDirectory 只拥有控制 socket 子目录；
 角色重启不得清理其他角色的 HTTP socket 或实例锁，安装和旧模板切换见[部署手册](ops/README.md#systemd-服务与顺序控制)。
+`auctionctl` 的 `deployment_control/systemd/process.rs` 拥有同步命令的有界双管道读取和直接子进程回收；
+unit 状态、跨角色顺序及迁移门禁仍由原 systemd/controller owner 持有，执行超时不构成停止证明。
 
 分体单角色停止预算 45 秒，总控及合并 unit 均为 155 秒；两种模式不得混用同一数据库，本机文件锁不证明跨主机隔离。备份、恢复、
 重建、v28 接管均为独立受控命令，不进入自动启动；一次性部署码保护独立设置页，只有合并模式的额外确认才授权专用空库

@@ -127,6 +127,7 @@ async fn apply(
     let result = resolve_fulfillment(tx, command, evidence).await?;
     original["target"] = serde_json::to_value(target).map_err(|_| FundingError::Invalid)?;
     let evidence_json = evidence_summary(evidence);
+    let request_digest = command.request_digest()?;
     sqlx::query(
         "INSERT INTO public.settlement_legacy_self_reconciliations
          (command_id,delivery_id,obligation_id,action,request_digest,uid,expected_delivery_fencing,
@@ -134,9 +135,9 @@ async fn apply(
           evidence_digest,evidence,result,actor_id,reason)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)"
     ).bind(command.command_id).bind(target.delivery_id).bind(target.obligation_id).bind(target.action.as_str())
-        .bind(command.request_digest()?.to_vec()).bind(&command.expected_uid).bind(target.expected_delivery_fencing)
-        .bind(target.expected_fulfillment_version).bind(target.expected_obligation_version).bind(target.snapshot_digest.to_vec())
-        .bind(original).bind(evidence.digest.to_vec()).bind(evidence_json).bind(serde_json::to_value(&result).map_err(|_| FundingError::Invalid)?)
+        .bind(request_digest.as_slice()).bind(&command.expected_uid).bind(target.expected_delivery_fencing)
+        .bind(target.expected_fulfillment_version).bind(target.expected_obligation_version).bind(target.snapshot_digest.as_slice())
+        .bind(original).bind(evidence.digest.as_slice()).bind(evidence_json).bind(serde_json::to_value(&result).map_err(|_| FundingError::Invalid)?)
         .bind(&command.actor).bind(&command.reason).execute(&mut **tx).await.map_err(sql_error)?;
     let metadata = json!({"command_id":command.command_id,"delivery_id":target.delivery_id,
         "obligation_id":target.obligation_id,"action":target.action.as_str(),"uid":command.expected_uid,
@@ -198,7 +199,7 @@ async fn resolve_fulfillment(
     .bind(state)
     .bind(keep)
     .bind(command.command_id.to_string())
-    .bind(evidence.digest.to_vec())
+    .bind(evidence.digest.as_slice())
     .bind(evidence.observed_from)
     .fetch_one(&mut **tx)
     .await

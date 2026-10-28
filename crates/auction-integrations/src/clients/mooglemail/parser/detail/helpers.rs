@@ -45,18 +45,18 @@ pub(crate) fn parse_terminal_empty_detail(
         .map_err(|_| action_proof_error(operation, world))?;
     let buttons_selector = selector("#mmail_showbuttons", operation, world)
         .map_err(|_| action_proof_error(operation, world))?;
-    let envelopes = document.select(&envelope_selector).collect::<Vec<_>>();
-    let forms = document.select(&form_selector).collect::<Vec<_>>();
-    let panes = document.select(&panes_selector).collect::<Vec<_>>();
-    let buttons = document.select(&buttons_selector).collect::<Vec<_>>();
-    if envelopes.len() != 1
-        || forms.len() != 1
-        || document.select(&all_form_selector).count() != 1
-        || panes.len() != 1
-        || buttons.len() != 1
-        || envelopes[0].select(&form_selector).count() != 1
-        || envelopes[0].select(&panes_selector).count() != 1
-        || envelopes[0].select(&buttons_selector).count() != 1
+    let envelope = unique_element(document.select(&envelope_selector), operation, world)
+        .map_err(|_| action_proof_error(operation, world))?;
+    let form = unique_element(document.select(&form_selector), operation, world)
+        .map_err(|_| action_proof_error(operation, world))?;
+    unique_element(document.select(&panes_selector), operation, world)
+        .map_err(|_| action_proof_error(operation, world))?;
+    unique_element(document.select(&buttons_selector), operation, world)
+        .map_err(|_| action_proof_error(operation, world))?;
+    if document.select(&all_form_selector).take(2).count() != 1
+        || envelope.select(&form_selector).take(2).count() != 1
+        || envelope.select(&panes_selector).take(2).count() != 1
+        || envelope.select(&buttons_selector).take(2).count() != 1
     {
         return Err(action_proof_error(operation, world));
     }
@@ -97,15 +97,13 @@ pub(crate) fn parse_terminal_empty_detail(
         }
     }
 
-    let fields = parse_detail_fields_for(forms[0], world, operation)
+    let fields = parse_detail_fields_for(form, world, operation)
         .map_err(|_| action_proof_error(operation, world))?;
     let textarea_selector =
         selector("textarea", operation, world).map_err(|_| action_proof_error(operation, world))?;
-    let textareas = forms[0].select(&textarea_selector).collect::<Vec<_>>();
-    if textareas.len() != 1 {
-        return Err(action_proof_error(operation, world));
-    }
-    let body = textareas[0].text().collect::<String>();
+    let textarea = unique_element(form.select(&textarea_selector), operation, world)
+        .map_err(|_| action_proof_error(operation, world))?;
+    let body = textarea.text().collect::<String>();
     if !valid_message_body(&body) {
         return Err(action_proof_error(operation, world));
     }

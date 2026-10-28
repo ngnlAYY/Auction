@@ -53,11 +53,8 @@ pub(crate) fn parse_next_page(
     operation: MoogleMailOperation,
 ) -> Result<bool, MoogleMailError> {
     let pager_selector = selector("#mmail_pager", operation, world)?;
-    let pagers = document.select(&pager_selector).collect::<Vec<_>>();
-    if pagers.len() != 1 {
-        return Err(protocol(operation, world));
-    }
-    let controls = direct_children(pagers[0], "div");
+    let pager = unique_element(document.select(&pager_selector), operation, world)?;
+    let controls = direct_children(pager, "div");
     if controls.len() != 2 {
         return Err(protocol(operation, world));
     }
@@ -126,23 +123,27 @@ pub(crate) fn valid_next_page_href(
     {
         return false;
     }
-    let pairs = parsed.query_pairs().collect::<Vec<_>>();
-    if pairs.len() != 4 {
-        return false;
-    }
-    let mut values = HashMap::with_capacity(4);
-    for (key, value) in pairs {
-        if values.insert(key.into_owned(), value.into_owned()).is_some() {
+    // 闭集字段按槽位借用，重复或未知字段立即拒绝，不复制整份 query 到集合。
+    let mut values = [const { None }; 4];
+    for (key, value) in parsed.query_pairs() {
+        let index = match key.as_ref() {
+            "s" => 0,
+            "ss" => 1,
+            "filter" => 2,
+            "page" => 3,
+            _ => return false,
+        };
+        if values[index].replace(value).is_some() {
             return false;
         }
     }
-    values.get("s").map(String::as_str) == Some("Bazaar")
-        && values.get("ss").map(String::as_str) == Some("mm")
-        && values.get("filter").is_some_and(|value| match filter {
-            "inbox" => matches!(value.as_str(), "inbox" | "Inbox"),
-            "sent" => matches!(value.as_str(), "sent" | "Sent Mail"),
-            "Read Mail" => matches!(value.as_str(), "read" | "Read Mail"),
+    values[0].as_deref() == Some("Bazaar")
+        && values[1].as_deref() == Some("mm")
+        && values[2].as_deref().is_some_and(|value| match filter {
+            "inbox" => matches!(value, "inbox" | "Inbox"),
+            "sent" => matches!(value, "sent" | "Sent Mail"),
+            "Read Mail" => matches!(value, "read" | "Read Mail"),
             _ => false,
         })
-        && values.get("page").and_then(|value| value.parse::<usize>().ok()) == Some(expected_page)
+        && values[3].as_deref().and_then(|value| value.parse::<usize>().ok()) == Some(expected_page)
 }

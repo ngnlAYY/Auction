@@ -383,7 +383,9 @@ fn decode_delivery_command(
 }
 
 fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
-    let id = valid_uuid(&value.id).then_some(value.id.clone()).ok_or(())?;
+    if !valid_uuid(&value.id) {
+        return Err(());
+    }
     let created_at = parse_delivery_time(&value.created_at).ok_or(())?;
     let updated_at = parse_delivery_time(&value.updated_at).ok_or(())?;
     let lease_expires_at = parse_optional_delivery_time(value.lease_expires_at.as_ref())?;
@@ -456,7 +458,7 @@ fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
     }
 
     Ok(Delivery {
-        id,
+        id: value.id,
         origin_kind: value.origin_kind,
         origin_id: value.origin_id,
         recipient: value.recipient,
@@ -745,14 +747,6 @@ impl DeliveryAction {
 
 /// 读取指定状态和页码的 delivery 安全投影；状态筛选改变时回到第一页。
 pub(crate) async fn fetch_deliveries(
-    status: String,
-    page: i64,
-    page_size: i64,
-) -> Result<DeliveryPage, String> {
-    fetch_deliveries_with_size(status, page, page_size).await
-}
-
-async fn fetch_deliveries_with_size(
     status: String,
     page: i64,
     page_size: i64,

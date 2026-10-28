@@ -17,8 +17,9 @@ pub(super) async fn list_events_postgres(
     request: RealtimeEventListRequest,
 ) -> Result<RealtimeEventPage, ApplicationError> {
     // payload 与内部来源字段不进入 SELECT，从 SQL 投影上保证 Admin 端无法误返回它们。
+    // 页与计数分别规划，避免双重引用让全量元数据物化后再排序；两者仍属于同一语句快照。
     let rows = sqlx::query(
-        "WITH filtered AS (
+        "WITH filtered AS NOT MATERIALIZED (
              SELECT event_id, stream_key, stream_sequence, kind, schema_version, created_at
              FROM public.realtime_events
              WHERE stream_key = COALESCE($1::text, stream_key)
@@ -51,11 +52,8 @@ pub(super) async fn list_events_postgres(
         .map_err(|_| storage_error("读取 PostgreSQL realtime 事件总数失败"))?;
     let entries = rows
         .into_iter()
-        .map(event_from_postgres_page_row)
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+        .filter_map(|row| event_from_postgres_page_row(row).transpose())
+        .collect::<Result<Vec<_>, _>>()?;
     validate_event_page(&entries, total, &request)?;
     Ok(RealtimeEventPage { entries, total, limit: request.limit, offset: request.offset })
 }

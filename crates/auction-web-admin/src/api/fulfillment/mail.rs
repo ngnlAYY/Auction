@@ -124,14 +124,6 @@ pub(crate) async fn fetch_mail_intakes(
     page: i64,
     page_size: i64,
 ) -> Result<AdminMailIntakePage, String> {
-    fetch_mail_intakes_with_size(query, page, page_size).await
-}
-
-async fn fetch_mail_intakes_with_size(
-    query: AdminMailIntakeQuery,
-    page: i64,
-    page_size: i64,
-) -> Result<AdminMailIntakePage, String> {
     super::pagination::validate(page, page_size, 100, i64::from(i32::MAX))?;
     let mut url = format!("/api/v1/admin/mail/intake?page={page}&page_size={page_size}");
     append_query(&mut url, "mailbox_key", &query.mailbox_key);
@@ -384,14 +376,19 @@ fn decode_mail_intake_detail(
 
 /// 关联任务只接受本封邮件列出的唯一 delivery；重试仍由服务端状态版本最终裁决。
 fn decode_mail_deliveries(value: &AdminMailIntakeDetail) -> Result<(), &'static str> {
-    let mut seen = std::collections::HashSet::new();
     if value.deliveries.len() > value.metadata.delivery_ids.len() {
         return Err("mail_deliveries");
     }
+    // 借用声明的 ID 并逐项消费，同时检查关联范围和重复项，避免每个任务重扫整份列表。
+    let mut remaining = value
+        .metadata
+        .delivery_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::HashSet<_>>();
     for delivery in &value.deliveries {
         if !valid_uuid(&delivery.id)
-            || !seen.insert(&delivery.id)
-            || !value.metadata.delivery_ids.contains(&delivery.id)
+            || !remaining.remove(delivery.id.as_str())
             || !matches!(delivery.operation.as_str(), "send" | "return" | "take")
             || !valid_safe_text(&delivery.recipient, 512)
             || !super::valid_status(&delivery.status)

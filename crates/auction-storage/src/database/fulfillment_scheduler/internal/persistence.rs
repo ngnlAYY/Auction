@@ -117,7 +117,7 @@ pub(super) async fn satisfy(
     .bind(c.claim.obligation_id.as_uuid())
     .bind(kind)
     .bind(reference)
-    .bind(digest.to_vec())
+    .bind(digest.as_slice())
     .bind(observed)
     .bind(if external.is_some() { "enqueued" } else { "pending" })
     .bind(i64::try_from(c.claim.state_version).map_err(|_| FundingError::Invalid)?)
@@ -179,7 +179,7 @@ pub(super) async fn complete(
     });
     sqlx::query("INSERT INTO public.settlement_internal_commands(command_id,obligation_id,action,request_digest,uid,evidence_digest,evidence) VALUES($1,$2,$3,$4,$5,$6,$7)")
         .bind(c.command_id).bind(c.claim.obligation_id.as_uuid()).bind(if external_refund { "external_refund" } else if collected { "collected" } else { "internal" })
-        .bind(c.request_digest.to_vec()).bind(&e.identity.authenticated_uid).bind(e.digest.to_vec()).bind(evidence)
+        .bind(c.request_digest.as_slice()).bind(&e.identity.authenticated_uid).bind(e.digest.as_slice()).bind(evidence)
         .execute(&mut **tx).await.map_err(sql_error)?;
     sqlx::query("INSERT INTO public.audit_records(id,occurred_at,actor_type,actor_id,action,entity_type,entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'system','auction-fulfillment',$2,'settlement_obligation',$3,'success','worker',$4)")
         .bind(c.command_id).bind(if external_refund { "auction.fulfillment.refund_funded" } else if collected { "auction.fulfillment.collected_funded" } else { "auction.fulfillment.internally_satisfied" })

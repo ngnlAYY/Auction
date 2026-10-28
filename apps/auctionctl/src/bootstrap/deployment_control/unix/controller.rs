@@ -62,7 +62,7 @@ impl Controller {
             anyhow::bail!("部署控制锁必须是单链接普通文件")
         }
         if metadata.permissions().mode() & 0o777 != 0o600 {
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            file.set_permissions(fs::Permissions::from_mode(0o600))
                 .context("收紧部署控制锁权限失败")?;
         }
         // 非阻塞文件锁只协调 auctionctl 控制操作；systemd 仍拥有 unit 自身的事务锁。
@@ -272,7 +272,7 @@ impl Controller {
             .checked_add(startup_timeout)
             .ok_or_else(|| anyhow::anyhow!("startup timeout 溢出"))?;
         loop {
-            let snapshot = self.snapshot(plan.role)?;
+            let snapshot = self.systemd.snapshot_until(plan.role, deadline)?;
             if snapshot.load_state != "loaded" {
                 anyhow::bail!("{} unit 不再处于 loaded 状态", plan.role.name())
             }
@@ -285,7 +285,7 @@ impl Controller {
             }
             if snapshot.running() && readiness_probe(&plan.probe, deadline).await {
                 // 探针前后的 systemd 进程身份必须一致；仅 PID 不能区分重启或复用。
-                let current = self.snapshot(plan.role)?;
+                let current = self.systemd.snapshot_until(plan.role, deadline)?;
                 if !current.running() || !snapshot.same_process(&current) {
                     anyhow::bail!("{} unit 在 readiness 探测期间退出或重启", plan.role.name());
                 }

@@ -20,12 +20,10 @@ impl MoogleMailParser {
         }
         let document = Html::parse_document(source);
         let table_selector = selector("table#mmail_list", MoogleMailOperation::Sent, world)?;
-        let tables = document.select(&table_selector).collect::<Vec<_>>();
-        if tables.len() != 1 {
-            return Err(protocol(MoogleMailOperation::Sent, world));
-        }
+        let table =
+            unique_element(document.select(&table_selector), MoogleMailOperation::Sent, world)?;
         let row_selector = selector("tr", MoogleMailOperation::Sent, world)?;
-        let rows = tables[0].select(&row_selector).collect::<Vec<_>>();
+        let rows = table.select(&row_selector).take(MAX_SENT_ROWS_PER_PAGE + 2).collect::<Vec<_>>();
         if rows.is_empty() || rows.len().saturating_sub(1) > MAX_SENT_ROWS_PER_PAGE {
             return Err(protocol(MoogleMailOperation::Sent, world));
         }
@@ -38,8 +36,8 @@ impl MoogleMailParser {
         let mut summaries = Vec::with_capacity(rows.len().saturating_sub(1));
         let mut empty_row = false;
         for row in rows.iter().skip(1) {
-            let cells = row.select(&cell_selector).collect::<Vec<_>>();
-            let is_empty = row.select(&empty_selector).count() == 1;
+            let cells = row.select(&cell_selector).take(5).collect::<Vec<_>>();
+            let is_empty = row.select(&empty_selector).take(2).count() == 1;
             if is_empty {
                 if cells.len() != 1 || empty_row || !summaries.is_empty() {
                     return Err(protocol(MoogleMailOperation::Sent, world));

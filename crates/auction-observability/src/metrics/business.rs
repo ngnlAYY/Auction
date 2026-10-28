@@ -2,14 +2,14 @@
 
 use std::sync::Arc;
 
-use prometheus::{CounterVec, HistogramOpts, HistogramVec, Opts, Registry};
+use prometheus::{Counter, CounterVec, Histogram, HistogramOpts, HistogramVec, Opts, Registry};
 
 use super::types::{BusinessEvent, BusinessOutcome, BusinessRecorder, MetricsError};
 
 /// Prometheus 业务指标的固定 label 适配器。
 pub(super) struct PrometheusBusinessRecorder {
-    events: CounterVec,
-    durations: HistogramVec,
+    events: [[Counter; BusinessOutcome::ALL.len()]; BusinessEvent::ALL.len()],
+    durations: [Histogram; BusinessEvent::ALL.len()],
 }
 
 impl PrometheusBusinessRecorder {
@@ -32,26 +32,40 @@ impl PrometheusBusinessRecorder {
         )
         .map_err(MetricsError::Registry)?;
 
-        // 预先建立闭集的零值，确保 scrape 在业务尚未发生时也能看到完整指标族。
-        for event in BusinessEvent::ALL {
-            durations.with_label_values(&[event.label()]);
-            for outcome in BusinessOutcome::ALL {
-                events.with_label_values(&[event.label(), outcome.label()]);
-            }
-        }
-        registry.register(Box::new(events.clone())).map_err(MetricsError::Registry)?;
-        registry.register(Box::new(durations.clone())).map_err(MetricsError::Registry)?;
+        // 保留完整闭集零值并缓存共享句柄；逐笔记录不再重复 label 哈希、读锁和 Arc 克隆。
+        let event_handles = BusinessEvent::ALL.map(|event| {
+            BusinessOutcome::ALL
+                .map(|outcome| events.with_label_values(&[event.label(), outcome.label()]))
+        });
+        let duration_handles =
+            BusinessEvent::ALL.map(|event| durations.with_label_values(&[event.label()]));
+        registry.register(Box::new(events)).map_err(MetricsError::Registry)?;
+        registry.register(Box::new(durations)).map_err(MetricsError::Registry)?;
 
-        Ok(Arc::new(Self { events, durations }))
+        Ok(Arc::new(Self { events: event_handles, durations: duration_handles }))
     }
 }
 
 impl BusinessRecorder for PrometheusBusinessRecorder {
     fn observe(&self, event: BusinessEvent, outcome: BusinessOutcome) {
-        self.events.with_label_values(&[event.label(), outcome.label()]).inc();
+        self.events[event as usize][outcome as usize].inc();
     }
 
     fn observe_duration(&self, event: BusinessEvent, duration: std::time::Duration) {
-        self.durations.with_label_values(&[event.label()]).observe(duration.as_secs_f64());
+        self.durations[event as usize].observe(duration.as_secs_f64());
     }
 }
+
+// 缓存按枚举判别值寻址；闭集顺序在编译期核对，新增或重排变体时不能静默串写指标。
+const _: () = {
+    let mut index = 0;
+    while index < BusinessEvent::ALL.len() {
+        assert!(BusinessEvent::ALL[index] as usize == index);
+        index += 1;
+    }
+    index = 0;
+    while index < BusinessOutcome::ALL.len() {
+        assert!(BusinessOutcome::ALL[index] as usize == index);
+        index += 1;
+    }
+};

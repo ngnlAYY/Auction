@@ -14,15 +14,9 @@ pub(crate) fn parse_token_for_operation(
 ) -> Result<MoogleMailToken, MoogleMailError> {
     let form_selector = selector("form#mailform", operation, world)?;
     let token_selector = selector("input[name='mmtoken']", operation, world)?;
-    let forms = document.select(&form_selector).collect::<Vec<_>>();
-    if forms.len() != 1 {
-        return Err(detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift));
-    }
-    let inputs = forms[0].select(&token_selector).collect::<Vec<_>>();
-    if inputs.len() != 1 {
-        return Err(detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift));
-    }
-    let value = inputs[0].value().attr("value").ok_or_else(|| {
+    let form = unique_element(document.select(&form_selector), operation, world)?;
+    let input = unique_element(form.select(&token_selector), operation, world)?;
+    let value = input.value().attr("value").ok_or_else(|| {
         detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift)
     })?;
     MoogleMailToken::new(value)
@@ -34,7 +28,7 @@ pub(crate) fn has_result_message(
     world: MoogleMailWorld,
 ) -> Result<bool, MoogleMailError> {
     let selector = selector("#messagebox_inner", MoogleMailOperation::Detail, world)?;
-    let boxes = document.select(&selector).collect::<Vec<_>>();
+    let boxes = document.select(&selector).take(2).collect::<Vec<_>>();
     if boxes.len() > 1 {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
@@ -60,12 +54,9 @@ pub(crate) fn parse_detail_fields_for(
     let row_selector = selector("tr", operation, world)?;
     let div_selector = selector("div", operation, world)?;
     let input_selector = selector("input", operation, world)?;
-    let lefts = form.select(&left_selector).collect::<Vec<_>>();
-    if lefts.len() != 1 {
-        return Err(detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift));
-    }
+    let left = unique_element(form.select(&left_selector), operation, world)?;
     let mut values = [None; 3];
-    for row in lefts[0].select(&row_selector) {
+    for row in left.select(&row_selector) {
         let label = row.select(&div_selector).next().map(detail_field_label).unwrap_or_default();
         let index = match label.as_str() {
             "To" => 0,
@@ -135,10 +126,8 @@ pub(crate) fn parse_detail_asset_manifest(
 ) -> Result<DetailAssetManifest, MoogleMailError> {
     let panes_selector = selector("#mmail_attachpanes", MoogleMailOperation::Detail, world)?;
     let list_selector = selector("#mmail_attachlist", MoogleMailOperation::Detail, world)?;
-    let panes = document.select(&panes_selector).collect::<Vec<_>>();
-    if panes.len() != 1 {
-        return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
-    }
+    let pane =
+        unique_element(document.select(&panes_selector), MoogleMailOperation::Detail, world)?;
     let script = script_text(document, world, MoogleMailOperation::Detail)?;
     let executable = executable_javascript(&script)
         .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
@@ -154,8 +143,8 @@ pub(crate) fn parse_detail_asset_manifest(
     if !(0..=MAX_ATTACHMENT_ENTRIES as i64).contains(&count) || cod < 0 || !valid_state {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let all_lists = document.select(&list_selector).collect::<Vec<_>>();
-    let nested_lists = panes[0].select(&list_selector).collect::<Vec<_>>();
+    let all_lists = document.select(&list_selector).take(2).collect::<Vec<_>>();
+    let nested_lists = pane.select(&list_selector).take(2).collect::<Vec<_>>();
     if all_lists.len() != nested_lists.len() || nested_lists.len() > 1 {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }

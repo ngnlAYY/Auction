@@ -84,53 +84,51 @@ impl InternalEvidencePurpose {
     fn digest(&self) -> [u8; 32] {
         match self {
             Self::SettlementClaim { obligation_id, claim_token, claim_fencing, state_version } => {
-                facts_digest(&[
-                    "settlement_claim".to_owned(),
-                    obligation_id.to_string(),
-                    claim_token.to_string(),
-                    claim_fencing.to_string(),
-                    state_version.to_string(),
+                facts_digest([
+                    "settlement_claim",
+                    &obligation_id.to_string(),
+                    &claim_token.to_string(),
+                    &claim_fencing.to_string(),
+                    &state_version.to_string(),
                 ])
             }
             Self::DeliveryClaim { delivery_id, claim_token, claim_fencing, request_hash } => {
-                facts_digest(&[
-                    "delivery_claim".to_owned(),
-                    delivery_id.to_string(),
-                    claim_token.to_string(),
-                    claim_fencing.to_string(),
-                    lower_hex(&request_hash.as_bytes()),
+                facts_digest([
+                    "delivery_claim",
+                    &delivery_id.to_string(),
+                    &claim_token.to_string(),
+                    &claim_fencing.to_string(),
+                    &lower_hex(&request_hash.as_bytes()),
                 ])
             }
-            Self::FundingReconciliation { command_id, expected_account_version } => {
-                facts_digest(&[
-                    "funding_reconciliation".to_owned(),
-                    command_id.to_string(),
-                    expected_account_version.to_string(),
-                ])
-            }
+            Self::FundingReconciliation { command_id, expected_account_version } => facts_digest([
+                "funding_reconciliation",
+                &command_id.to_string(),
+                &expected_account_version.to_string(),
+            ]),
             Self::FundingRecordOnlyInitialization { command_id, expected_account_version } => {
-                facts_digest(&[
-                    "funding_record_only_initialization".to_owned(),
-                    command_id.to_string(),
-                    expected_account_version.to_string(),
+                facts_digest([
+                    "funding_record_only_initialization",
+                    &command_id.to_string(),
+                    &expected_account_version.to_string(),
                 ])
             }
             Self::LegacySelfReconciliation {
                 command_id,
                 obligation_id,
                 expected_fulfillment_version,
-            } => facts_digest(&[
-                "legacy_self_reconciliation".to_owned(),
-                command_id.to_string(),
-                obligation_id.to_string(),
-                expected_fulfillment_version.to_string(),
+            } => facts_digest([
+                "legacy_self_reconciliation",
+                &command_id.to_string(),
+                &obligation_id.to_string(),
+                &expected_fulfillment_version.to_string(),
             ]),
             Self::LegacyBotSeller { command_id, obligation_id, expected_state_version } => {
-                facts_digest(&[
-                    "legacy_bot_seller".to_owned(),
-                    command_id.to_string(),
-                    obligation_id.to_string(),
-                    expected_state_version.to_string(),
+                facts_digest([
+                    "legacy_bot_seller",
+                    &command_id.to_string(),
+                    &obligation_id.to_string(),
+                    &expected_state_version.to_string(),
                 ])
             }
         }
@@ -197,16 +195,16 @@ impl MailAccountEvidenceBinding {
 
     /// 只散列规范化非敏感事实，不散列 Cookie、token 或整页。
     pub fn compute_digest(&self) -> [u8; 32] {
-        facts_digest(&[
-            self.protocol_version.to_owned(),
-            self.credential_id.to_string(),
-            self.credential_version.to_string(),
-            super::MAIL_RUNTIME_SCOPE.to_owned(),
-            self.runtime.generation.to_string(),
-            self.authenticated_uid.clone(),
-            self.player_name.clone(),
-            self.world.as_str().to_owned(),
-            self.observed_at.to_rfc3339(),
+        facts_digest([
+            self.protocol_version,
+            &self.credential_id.to_string(),
+            &self.credential_version.to_string(),
+            super::MAIL_RUNTIME_SCOPE,
+            &self.runtime.generation.to_string(),
+            &self.authenticated_uid,
+            &self.player_name,
+            self.world.as_str(),
+            &self.observed_at.to_rfc3339(),
         ])
     }
 
@@ -234,13 +232,13 @@ pub struct VerifiedMailEquipmentPresence {
 impl VerifiedMailEquipmentPresence {
     /// 散列精确装备与同 session 身份，不包含装备 key。
     pub fn compute_digest(&self) -> [u8; 32] {
-        facts_digest(&[
-            "organize_presence_clean_compose_v1".to_owned(),
-            lower_hex(&self.binding.digest),
-            self.equipment_id.to_string(),
-            self.external_equipment_id.clone(),
-            self.category.clone(),
-            self.observed_at.to_rfc3339(),
+        facts_digest([
+            "organize_presence_clean_compose_v1",
+            &lower_hex(&self.binding.digest),
+            &self.equipment_id.to_string(),
+            &self.external_equipment_id,
+            &self.category,
+            &self.observed_at.to_rfc3339(),
         ])
     }
 }
@@ -257,11 +255,11 @@ pub struct VerifiedMainCashObservation {
 impl VerifiedMainCashObservation {
     /// 余额是观察事实，不将其命名或散列为自由资金。
     pub fn compute_digest(&self) -> [u8; 32] {
-        facts_digest(&[
-            "main_credits_observation_clean_compose_v1".to_owned(),
-            lower_hex(&self.binding.digest),
-            self.credits.to_string(),
-            self.observed_at.to_rfc3339(),
+        facts_digest([
+            "main_credits_observation_clean_compose_v1",
+            &lower_hex(&self.binding.digest),
+            &self.credits.to_string(),
+            &self.observed_at.to_rfc3339(),
         ])
     }
 }
@@ -283,16 +281,20 @@ pub struct SettlementInternalEvidenceSnapshot {
 impl SettlementInternalEvidenceSnapshot {
     /// 绑定完整 purpose、证据摘要与唯一时窗，不采用可变 Debug 文本。
     pub fn compute_digest(&self) -> [u8; 32] {
-        facts_digest(&[
-            INTERNAL_EVIDENCE_PROTOCOL.to_owned(),
-            self.operation_id.to_string(),
-            lower_hex(&self.purpose.digest()),
-            lower_hex(&self.identity.digest),
-            self.equipment.as_ref().map(|value| lower_hex(&value.digest)).unwrap_or_default(),
-            self.main_cash.as_ref().map(|value| lower_hex(&value.digest)).unwrap_or_default(),
-            self.sent_collection.as_ref().map(|value| lower_hex(&value.digest)).unwrap_or_default(),
-            self.observed_from.to_rfc3339(),
-            self.expires_at.to_rfc3339(),
+        facts_digest([
+            INTERNAL_EVIDENCE_PROTOCOL,
+            &self.operation_id.to_string(),
+            &lower_hex(&self.purpose.digest()),
+            &lower_hex(&self.identity.digest),
+            &self.equipment.as_ref().map(|value| lower_hex(&value.digest)).unwrap_or_default(),
+            &self.main_cash.as_ref().map(|value| lower_hex(&value.digest)).unwrap_or_default(),
+            &self
+                .sent_collection
+                .as_ref()
+                .map(|value| lower_hex(&value.digest))
+                .unwrap_or_default(),
+            &self.observed_from.to_rfc3339(),
+            &self.expires_at.to_rfc3339(),
         ])
     }
 
@@ -355,7 +357,7 @@ impl SettlementInternalEvidenceSnapshot {
 }
 
 /// 长度前缀防止不同字段拼接产生同一规范化输入。
-pub(super) fn facts_digest(fields: &[String]) -> [u8; 32] {
+pub(super) fn facts_digest<'a>(fields: impl IntoIterator<Item = &'a str>) -> [u8; 32] {
     let mut hash = Sha256::new();
     for field in fields {
         hash.update((field.len() as u64).to_be_bytes());

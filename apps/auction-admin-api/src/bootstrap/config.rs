@@ -26,37 +26,29 @@ pub(super) fn configure_worker_control(config: &AppConfig) -> Option<Arc<dyn Wor
 /// 将 Admin runtime 声明的 Worker world 配置投影到 dashboard；未声明时不强制假设 world。
 pub(super) fn configured_dashboard_worlds(config: &AppConfig) -> Vec<AdminCredentialWorld> {
     configured_dashboard_mailboxes(config)
-        .into_iter()
-        .filter_map(|(world_id, _)| AdminCredentialWorld::parse(&world_id))
+        .filter_map(|(world_id, _)| AdminCredentialWorld::parse(world_id))
         .collect()
 }
 
 /// 将 Admin runtime 声明的邮箱标识投影到 Admin dashboard，保留自定义 mailbox_key 语义。
 pub(super) fn configured_dashboard_mailbox_keys(config: &AppConfig) -> Vec<String> {
-    configured_dashboard_mailboxes(config).into_iter().map(|(_, mailbox_key)| mailbox_key).collect()
+    configured_dashboard_mailboxes(config).map(|(_, mailbox_key)| mailbox_key.to_owned()).collect()
 }
 
-/// 返回 Admin runtime 明确声明的 dashboard 邮箱范围；兼容程序化装配时的 Worker 配置投影。
-pub(super) fn configured_dashboard_mailboxes(config: &AppConfig) -> Vec<(String, String)> {
-    if let Some(runtime) = config.admin_runtime.as_ref()
-        && !runtime.dashboard_mailboxes.is_empty()
-    {
-        return runtime
-            .dashboard_mailboxes
-            .iter()
-            .map(|mailbox| (mailbox.world_id.clone(), mailbox.mailbox_key.clone()))
-            .collect();
-    }
-    if !config.worker.mooglemail.enabled {
-        return Vec::new();
-    }
-
-    config
-        .worker
-        .mooglemail
-        .configured_mailboxes()
-        .map(|(world_id, mailbox_key)| (world_id.to_owned(), mailbox_key.to_owned()))
-        .collect()
+/// 借用 Admin runtime 的 dashboard 邮箱范围；未声明时仅回退已启用的 Worker 配置。
+fn configured_dashboard_mailboxes(config: &AppConfig) -> impl Iterator<Item = (&str, &str)> {
+    let runtime_mailboxes = config
+        .admin_runtime
+        .as_ref()
+        .map(|runtime| runtime.dashboard_mailboxes.as_slice())
+        .filter(|mailboxes| !mailboxes.is_empty());
+    let worker_mailboxes = (runtime_mailboxes.is_none() && config.worker.mooglemail.enabled)
+        .then_some(&config.worker.mooglemail);
+    runtime_mailboxes
+        .into_iter()
+        .flatten()
+        .map(|mailbox| (mailbox.world_id.as_str(), mailbox.mailbox_key.as_str()))
+        .chain(worker_mailboxes.into_iter().flat_map(|mail| mail.configured_mailboxes()))
 }
 
 #[cfg(feature = "postgres")]

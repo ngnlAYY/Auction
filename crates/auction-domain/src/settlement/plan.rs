@@ -44,6 +44,11 @@ impl SettlementPlan {
         let mut lines = Vec::with_capacity(facts.len());
         let mut tax_total = SettlementAmount::zero();
         let mut discount_demand = SettlementAmount::zero();
+        // 全场复用同一纳秒时窗；无效时间仍在获胜事实处按原顺序失败。
+        let planned_nanos = scheduled_end_at
+            .timestamp_nanos_opt()
+            .zip(scheduled_open_at.timestamp_nanos_opt())
+            .map(|(end, start)| i128::from(end) - i128::from(start));
 
         for fact in facts {
             fact.validate_shape()?;
@@ -64,8 +69,7 @@ impl SettlementPlan {
 
             let hold_ppm = if policy.mode != SettlementMode::LegacyZeroV0 {
                 calculate_hold_ppm(
-                    scheduled_open_at,
-                    scheduled_end_at,
+                    planned_nanos,
                     fact.leader_held_nanos
                         .ok_or(DomainError::InvalidSettlementFacts("获胜事实缺少累计领先时长"))?,
                 )?
@@ -221,18 +225,12 @@ pub fn proportional_floor(
 }
 
 fn calculate_hold_ppm(
-    scheduled_open_at: DateTime<Utc>,
-    scheduled_end_at: DateTime<Utc>,
+    planned_nanos: Option<i128>,
     leader_held_nanos: i64,
 ) -> Result<i64, DomainError> {
-    if scheduled_end_at <= scheduled_open_at
-        || leader_held_nanos < 0
-        || scheduled_end_at.timestamp_nanos_opt().is_none()
-        || scheduled_open_at.timestamp_nanos_opt().is_none()
-    {
-        return Err(DomainError::InvalidSettlementFacts("累计持有时长事实无效"));
-    }
-    let planned = timestamp_nanos(scheduled_end_at) - timestamp_nanos(scheduled_open_at);
+    let planned = planned_nanos
+        .filter(|_| leader_held_nanos >= 0)
+        .ok_or(DomainError::InvalidSettlementFacts("累计持有时长事实无效"))?;
     if planned <= 0 {
         return Err(DomainError::InvalidSettlementFacts("持有时长比例无效"));
     }
@@ -241,8 +239,4 @@ fn calculate_hold_ppm(
     }
     let value = i128::from(leader_held_nanos) * i128::from(SETTLEMENT_PPM) / planned;
     i64::try_from(value).map_err(|_| DomainError::SettlementAmountOverflow)
-}
-
-fn timestamp_nanos(value: DateTime<Utc>) -> i128 {
-    i128::from(value.timestamp()) * 1_000_000_000 + i128::from(value.timestamp_subsec_nanos())
 }

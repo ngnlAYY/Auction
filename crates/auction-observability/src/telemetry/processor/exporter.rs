@@ -1,6 +1,6 @@
 //! OTLP exporter 的安全健康结果包装。
 
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use opentelemetry_sdk::{
     Resource,
@@ -21,19 +21,15 @@ impl<E> SdkSpanExporter for HealthSpanExporter<E>
 where
     E: SdkSpanExporter,
 {
-    fn export(&self, batch: Vec<SpanData>) -> impl Future<Output = OTelSdkResult> + Send {
-        let health = Arc::clone(&self.health);
-        let export = self.exporter.export(batch);
-        async move {
-            match export.await {
-                Ok(()) => {
-                    health.record_success();
-                    Ok(())
-                }
-                Err(error) => {
-                    health.record_failure(FailureCode::Transport);
-                    Err(error)
-                }
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+        match self.exporter.export(batch).await {
+            Ok(()) => {
+                self.health.record_success();
+                Ok(())
+            }
+            Err(error) => {
+                self.health.record_failure(FailureCode::Transport);
+                Err(error)
             }
         }
     }

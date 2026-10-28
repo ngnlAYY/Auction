@@ -58,14 +58,16 @@ impl PageVisibility {
         };
         // 安装前先同步一次当前状态：监听器登记前页面可能已经是隐藏的。
         self.hidden.set(document.hidden());
-        let state = self.clone();
+        // 回调只持有状态，不能反向持有保存自身的 listener，否则最后一个外部持有者释放后仍成环。
+        let hidden_state = Rc::clone(&self.hidden);
+        let wakers = Rc::clone(&self.wakers);
         let callback_document = document.clone();
         let callback = Closure::<dyn FnMut()>::new(move || {
             let hidden = callback_document.hidden();
-            state.hidden.set(hidden);
+            hidden_state.set(hidden);
             if !hidden {
                 on_visible();
-                state.wake_waiters();
+                wake_waiters(&wakers);
             }
         });
         let _ = document.add_event_listener_with_callback(
@@ -82,27 +84,7 @@ impl PageVisibility {
     /// 卸载 `visibilitychange` 监听，避免路由反复挂载时监听器累积。
     pub fn cleanup(&self) {
         #[cfg(target_arch = "wasm32")]
-        if let Some(listener) = self.listener.borrow_mut().take() {
-            let _ = listener.document.remove_event_listener_with_callback(
-                "visibilitychange",
-                listener.callback.as_ref().unchecked_ref(),
-            );
-        }
-    }
-
-    // 仅 visibilitychange 监听器（wasm）会主动唤醒；非浏览器目标没有隐藏事件。
-    #[cfg(target_arch = "wasm32")]
-    fn wake_waiters(&self) {
-        // 先释放列表借用，再调用可能重新注册等待者的运行时回调。
-        let waiters = std::mem::take(&mut *self.wakers.borrow_mut());
-        for waiter in waiters {
-            if let Some(slot) = waiter.upgrade() {
-                let waker = slot.borrow_mut().take();
-                if let Some(waker) = waker {
-                    waker.wake();
-                }
-            }
-        }
+        drop(self.listener.borrow_mut().take());
     }
 
     /// 页面隐藏时挂起直到恢复可见；当前已可见时立即返回，不改变既有计时节奏。
@@ -156,6 +138,30 @@ impl Drop for VisibilityWaiter<'_> {
 struct PageVisibilityListener {
     document: web_sys::Document,
     callback: Closure<dyn FnMut()>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for PageVisibilityListener {
+    fn drop(&mut self) {
+        let _ = self.document.remove_event_listener_with_callback(
+            "visibilitychange",
+            self.callback.as_ref().unchecked_ref(),
+        );
+    }
+}
+
+// 先释放列表借用，再调用可能重新注册等待者的运行时回调。
+#[cfg(target_arch = "wasm32")]
+fn wake_waiters(wakers: &WakerRegistry) {
+    let waiters = std::mem::take(&mut *wakers.borrow_mut());
+    for waiter in waiters {
+        if let Some(slot) = waiter.upgrade() {
+            let waker = slot.borrow_mut().take();
+            if let Some(waker) = waker {
+                waker.wake();
+            }
+        }
+    }
 }
 
 /// 分片睡眠：隐藏时挂起剩余时长（不重置计时），恢复可见后继续走完剩余分片。

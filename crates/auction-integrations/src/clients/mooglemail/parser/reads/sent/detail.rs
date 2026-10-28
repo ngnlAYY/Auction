@@ -36,14 +36,12 @@ impl MoogleMailParser {
         let envelope_selector = selector("#mmail_outer", operation, summary.world)?;
         let form_selector = selector("form#mailform", operation, summary.world)?;
         let panes_selector = selector("#mmail_attachpanes", operation, summary.world)?;
-        let envelopes = document.select(&envelope_selector).collect::<Vec<_>>();
-        let forms = document.select(&form_selector).collect::<Vec<_>>();
-        let panes = document.select(&panes_selector).collect::<Vec<_>>();
-        if envelopes.len() != 1
-            || forms.len() != 1
-            || panes.len() != 1
-            || envelopes[0].select(&form_selector).count() != 1
-            || envelopes[0].select(&panes_selector).count() != 1
+        let envelope =
+            unique_element(document.select(&envelope_selector), operation, summary.world)?;
+        let form = unique_element(document.select(&form_selector), operation, summary.world)?;
+        let pane = unique_element(document.select(&panes_selector), operation, summary.world)?;
+        if envelope.select(&form_selector).take(2).count() != 1
+            || envelope.select(&panes_selector).take(2).count() != 1
         {
             return Err(detail_error_for(
                 operation,
@@ -51,7 +49,7 @@ impl MoogleMailParser {
                 MoogleMailErrorCategory::ProtocolDrift,
             ));
         }
-        let fields = parse_detail_fields_for(forms[0], summary.world, operation)?;
+        let fields = parse_detail_fields_for(form, summary.world, operation)?;
         // 列表页标题会被服务端截断；详情必须保留完整标题，列表标题只能作为前缀匹配。
         if !fields.recipient.eq_ignore_ascii_case(&summary.recipient)
             || !subject_is_list_projection(&summary.subject, &fields.subject)
@@ -64,15 +62,8 @@ impl MoogleMailParser {
         }
 
         let textarea_selector = selector("textarea", operation, summary.world)?;
-        let textareas = forms[0].select(&textarea_selector).collect::<Vec<_>>();
-        if textareas.len() != 1 {
-            return Err(detail_error_for(
-                operation,
-                summary.world,
-                MoogleMailErrorCategory::ProtocolDrift,
-            ));
-        }
-        let mut body = textareas[0].text().collect::<String>();
+        let textarea = unique_element(form.select(&textarea_selector), operation, summary.world)?;
+        let mut body = textarea.text().collect::<String>();
         if !valid_message_body(&body) {
             clear_sent_body(&mut body);
             return Err(detail_error_for(
@@ -116,8 +107,8 @@ impl MoogleMailParser {
         };
 
         let list_selector = selector("#mmail_attachlist", operation, summary.world)?;
-        let all_lists = document.select(&list_selector).collect::<Vec<_>>();
-        let nested_lists = panes[0].select(&list_selector).collect::<Vec<_>>();
+        let all_lists = document.select(&list_selector).take(2).collect::<Vec<_>>();
+        let nested_lists = pane.select(&list_selector).take(2).collect::<Vec<_>>();
         if all_lists.len() != nested_lists.len() || nested_lists.len() > 1 {
             return Err(detail_error_for(
                 operation,
@@ -145,7 +136,7 @@ impl MoogleMailParser {
             ));
         }
         let current_cod_selector = selector("#mmail_currentcod", operation, summary.world)?;
-        let current_cod = document.select(&current_cod_selector).collect::<Vec<_>>();
+        let current_cod = document.select(&current_cod_selector).take(2).collect::<Vec<_>>();
         if current_cod.len() > 1
             || current_cod.first().is_some_and(|element| {
                 parse_current_cod(&normalize_text(element.text().collect::<String>())) != Some(cod)

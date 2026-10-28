@@ -1,5 +1,7 @@
 #[cfg(feature = "postgres")]
 use super::*;
+#[cfg(feature = "postgres")]
+use serde::Deserialize;
 
 #[cfg(feature = "postgres")]
 pub(crate) async fn record_return_postgres(
@@ -76,7 +78,7 @@ pub(crate) async fn record_return_postgres(
         return Err(repository_error("recovery 退回邮件持久化事实无效"));
     }
 
-    let metadata: RecoveryReturnMetadata = serde_json::from_value(row.return_metadata.clone())
+    let metadata = RecoveryReturnMetadata::deserialize(&row.return_metadata)
         .map_err(|_| repository_error("recovery 退回邮件 metadata 不是严格的证据对象"))?;
     validate_recovery_return_metadata(&metadata)?;
     if metadata.obligation_id != row.returned_obligation_id.to_string() {

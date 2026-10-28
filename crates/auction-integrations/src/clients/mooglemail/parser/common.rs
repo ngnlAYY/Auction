@@ -171,6 +171,19 @@ pub(crate) fn direct_element_children(element: ElementRef<'_>) -> Vec<ElementRef
     element.children().filter_map(ElementRef::wrap).collect()
 }
 
+/// 只读取前两个匹配节点，保持唯一性校验而不为异常页面收集全部重复节点。
+pub(crate) fn unique_element<'a>(
+    mut elements: impl Iterator<Item = ElementRef<'a>>,
+    operation: MoogleMailOperation,
+    world: MoogleMailWorld,
+) -> Result<ElementRef<'a>, MoogleMailError> {
+    let element = elements.next().ok_or_else(|| protocol(operation, world))?;
+    if elements.next().is_some() {
+        return Err(protocol(operation, world));
+    }
+    Ok(element)
+}
+
 /// 解码 HentaiVerse 固定标签使用的受限 CSS 字形结构。
 /// 字形只允许作为指定 wrapper 的直接空 `div` 子元素出现；`c3x` 表示单个小写字母，
 /// 详情标签额外要求一个结尾 `c2m` 冒号。调用方仍须把结果与自己的固定闭集逐字核对。
