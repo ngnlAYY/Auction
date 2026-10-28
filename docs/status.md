@@ -35,6 +35,37 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-28 邮件统一起拍价与 Public 控件密度修复
+
+云端只读日志与入站投影确认，单件装备的 `start 30k`、`start 470k`、`start 2M`、`start 2m`
+被随信附加的 Attachment 说明扩展为 13/14 个字段，触发 `start_price_invalid / too_many_fields`。
+两封最新原始加密留证已离线认证并与入站内容摘要一致；云端 R33 与修复前源码使用相同的定价分支。
+
+- `auction-application` 的统一定价分支只提取独立 start/金额指令，仍扫描全部明确指令，拒绝重复、混合、
+  畸形关键字及非法金额。逐件 URL 的附件 ID/key 校验保持；原正文、内容摘要、已完成邮件决定、退件和通知任务不改写。
+- `auction-web-public` 的补偿表复用历史表容器与表头，展开按钮复用 `public-history-group-toggle`；
+  展开列由 8% 改为 4%、两侧各 2px，释放的宽度分给金额列。桌面按钮 24px、行高由 61px 降为 41px，手机保持 44px 触控区域。
+  内嵌结算计算式及对应样式、五语键移除，真实流水和独立分页保持；余额卡按内容收紧，实测约 229×111px → 202×89px。
+- Public 等待拍卖等连接状态保持单行省略，状态圆点、完整无障碍文本与悬停提示保留；历史成交价搜索、筛选和显示字段
+  使用 28px 桌面高度及 13px 字号，手机字段继续为 44px/16px。共享 `ui-pager__select` 桌面实测 98×28px → 90×24px，
+  左右内边距 8px → 4px；手机仍为 32px/16px，Public/Admin 共用该规则。
+
+最终 `CARGO_BUILD_JOBS=2 just verify` 通过，覆盖策略、格式、工作区已有目标、独立 feature、Clippy 与双端 WASM。
+双端正式 Web 构建通过，Public 最终 payload SHA-256 为
+`cf397e081281c47dfe1b2fcaea27881df1d0cf47b41739d01417e53e942035cd`，Admin 为
+`fd37028cc1bf39a992999c94c43fd2be39aa969aa72dbf4dde99ce540454ddf6`。
+
+临时原生诊断直接包含生产定价模块并使用真实领域/应用类型，36 项均通过：四份合法云端正文得到预期价格，
+冒号写法仍拒绝，并覆盖多附件、默认价、CR/LF、Unicode 空白、注释、跨行、URL 身份、重复/混合、零负值、溢出及非整数 Credits。
+诊断源码和可执行文件已移除，没有新增永久测试。Chromium 加载本轮实际 WASM/CSS，并读取现有本机 API；
+核对 1440/800/375px 补偿布局、展开/收起与流水翻页，320px 五语状态文字均为单行且无横向溢出。
+历史成交价的真实只读搜索、桌面/手机字段及分页尺寸也已核对，未替换 API 响应或注入示例业务行。
+
+本轮只修改源码/文档及构建制品，未更新本地或云端运行程序，未重放邮件、发送通知、修改业务数据或执行迁移。
+云端旧拒收与通知未知结果仍须保留原事实；源码修复不等于旧邮件已经重新接收。证据与截图位于
+`target/operations-evidence/start-price-compensation-fix-20261028/`，原始诊断索引位于
+`target/operations-evidence/start-price-diagnosis-20261028/evidence.json`。
+
 ### 2026-10-27 结算借用、分页纠偏与工具依赖裁剪
 
 基线为干净的 `7599e9d4`。按八个 owner 切片并行审查全部 20 个工作区包，清单覆盖 1,431 份 Rust 源码、

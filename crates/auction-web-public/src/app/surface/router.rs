@@ -380,6 +380,7 @@ pub(crate) fn PublicShell() -> Element {
     };
     let connection_label =
         if inactive { connection_message.clone() } else { t!("realtime-connection-label") };
+    let connection_title = connection_message.clone();
     let can_manual_refresh =
         matches!(connection_state, PublicConnectionState::Degraded | PublicConnectionState::Manual);
 
@@ -439,7 +440,8 @@ pub(crate) fn PublicShell() -> Element {
                             "data-state": connection_state_name,
                             role: "status",
                             aria_label: connection_label,
-                            {connection_message}
+                            title: connection_title,
+                            span { class: "public-connection-badge__label", {connection_message} }
                         }
                         if can_manual_refresh || inactive {
                             button {

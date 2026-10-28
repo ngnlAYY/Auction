@@ -12,13 +12,6 @@ pub(super) fn CompensationMovementDetails(
     on_movement_page_size_change: EventHandler<i64>,
     on_retry_movements: EventHandler<()>,
 ) -> Element {
-    let equation = t!(
-        "compensation-equation",
-        opening: format_amount(round.opening_balance),
-        income: format_amount(round.tax_income),
-        outflow: format_amount(round.compensation_out),
-        closing: format_amount(round.closing_balance)
-    );
     rsx! {
         section { class: "public-compensation-movements", aria_labelledby: "compensation-movements-title",
             h2 { id: "compensation-movements-title", class: "public-visually-hidden",
@@ -57,14 +50,6 @@ pub(super) fn CompensationMovementDetails(
                                 // 期初、期末账本事实仍由 API 分页；页面只展示真实收支，避免重复占位行。
                                 for movement in page.movements.into_iter().filter(|movement| !matches!(movement.kind.as_str(), "opening" | "closing")) {
                                     CompensationMovementRow { movement, world_id: round.world_id.clone() }
-                                }
-                            }
-                            tfoot {
-                                tr {
-                                    td { colspan: 8, class: "public-compensation-equation",
-                                        // 使用整期权威汇总，每一页都固定保留同一跨列末行。
-                                        TruncatedText { value: equation, size: "wide", portal: true }
-                                    }
                                 }
                             }
                         }

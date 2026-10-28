@@ -194,7 +194,6 @@ compensation-adjustment = 調整率
 compensation-held-time = 合計保有時間
 compensation-discount = 割引需要
 compensation-equipment = 装備
-compensation-equation = { $opening } + { $income } = { $outflow } + { $closing }
 compensation-expand = オークション #{ $sequence } の明細を表示
 compensation-collapse = オークション #{ $sequence } の明細を非表示
 compensation-kind-opening = 期首

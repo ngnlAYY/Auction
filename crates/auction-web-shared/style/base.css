@@ -502,6 +502,13 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+/* 数量选择器按原生选项宽度收紧，桌面略低于导航按钮；手机仍由字段规则保留 32px。 */
+.ui-pager__select {
+  min-inline-size: 0;
+  min-block-size: 1.5rem;
+  padding-inline: var(--space-1);
+}
+
 
 .ui-pager__total,
 .ui-pager__ellipsis {
