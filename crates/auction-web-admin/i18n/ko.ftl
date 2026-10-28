@@ -338,7 +338,6 @@ admin-settlement-report-title = 정산 보고서 · { $world } #{ $sequence }
 admin-settlement-lot = 품목
 admin-settlement-lot-id = 번호 ID
 admin-settlement-equipment = 장비
-admin-settlement-open-equipment = 장비 보기
 admin-settlement-open-equipment-label = 장비 보기: { $equipment }
 admin-settlement-seller = 판매자
 admin-settlement-winner = 낙찰자

@@ -45,22 +45,38 @@ pub(super) fn AdminSettlementReportView(
         div { class: "admin-settlement__table-wrap",
             table { class: "admin-shell__table admin-auction-table",
                     caption { class: "admin-visually-hidden", {t!("page-settlement-title")} }
-                    auction_web_shared::TableColumns { layout: "admin-settlement", widths: vec![5, 16, 6, 5, 8, 7, 7, 7, 7, 8, 7, 8, 9] }
+                    auction_web_shared::TableColumns { layout: "admin-settlement", widths: vec![7, 20, 11, 9, 10, 10, 13, 9, 11] }
                     thead {
                         tr {
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-lot-id")} }
                             th { scope: "col", {t!("admin-settlement-equipment")} }
-                            th { scope: "col", {t!("admin-settlement-seller")} }
-                            th { scope: "col", {t!("admin-settlement-winner")} }
+                            th { scope: "col",
+                                {stacked_pair(
+                                    rsx! { {t!("admin-settlement-seller")} },
+                                    rsx! { {t!("admin-settlement-winner")} },
+                                )}
+                            }
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-final-price")} }
-                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-hold")} }
-                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-adjustment")} }
+                            th { class: "admin-auction-num", scope: "col",
+                                {stacked_pair(
+                                    rsx! { {t!("admin-settlement-hold")} },
+                                    rsx! { {t!("admin-settlement-adjustment")} },
+                                )}
+                            }
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-held-time")} }
-                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-discount-penalty")} }
-                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-listed-price")} }
+                            th { class: "admin-auction-num", scope: "col",
+                                {stacked_pair(
+                                    rsx! { {t!("admin-settlement-discount-penalty")} },
+                                    rsx! { {t!("admin-settlement-listed-price")} },
+                                )}
+                            }
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-compensation")} }
-                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-buyer")} }
-                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-seller-amount")} }
+                            th { class: "admin-auction-num", scope: "col",
+                                {stacked_pair(
+                                    rsx! { {t!("admin-settlement-buyer")} },
+                                    rsx! { {t!("admin-settlement-seller-amount")} },
+                                )}
+                            }
                         }
                     }
                     tbody {
@@ -113,28 +129,54 @@ fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
         tr {
             td { class: "admin-auction-num", "{lot_code}" }
             td {
-                TruncatedText { value: equipment_name.clone(), portal: true }
+                // 装备名本身即游戏装备链接，最多两行、超出由 CSS 截断；DOM 与 title 保留全文，
+                // 读屏名称以可见装备名为主体并说明跳转动作。API 层已拒绝无效装备 URL。
                 a {
                     class: "admin-settlement-equipment-link",
                     href: equipment_url,
                     target: "_blank",
                     rel: "noopener noreferrer",
-                    aria_label: t!("admin-settlement-open-equipment-label", equipment: equipment_name),
-                    {t!("admin-settlement-open-equipment")}
+                    title: equipment_name.clone(),
+                    aria_label: t!("admin-settlement-open-equipment-label", equipment: equipment_name.clone()),
+                    "{equipment_name}"
                 }
             }
-            td { TruncatedText { value: seller } }
-            td { TruncatedText { value: winner } }
+            td {
+                {stacked_pair(
+                    rsx! { TruncatedText { value: seller } },
+                    rsx! { TruncatedText { value: winner } },
+                )}
+            }
             td { class: "admin-auction-num", {format_amount(lot.final_price)} }
-            td { class: "admin-auction-num", "{hold_share}" }
-            td { class: "admin-auction-num", "{adjustment_rate}" }
+            td { class: "admin-auction-num",
+                {stacked_pair(rsx! { "{hold_share}" }, rsx! { "{adjustment_rate}" })}
+            }
             td { class: "admin-auction-num", "{held_time}" }
-            td { class: "admin-auction-num", "{price_adjustment}" }
-            td { class: "admin-auction-num", {format_amount(lot.listed_price)} }
+            td { class: "admin-auction-num",
+                {stacked_pair(
+                    rsx! { "{price_adjustment}" },
+                    rsx! { {format_amount(lot.listed_price)} },
+                )}
+            }
             td { class: "admin-auction-num", {format_amount(lot.compensation_amount)} }
-            td { class: "admin-auction-num", {format_amount(lot.buyer_amount)} }
-            td { class: "admin-auction-num", {format_amount(lot.seller_amount)} }
+            td { class: "admin-auction-num",
+                {stacked_pair(
+                    rsx! { {format_amount(lot.buyer_amount)} },
+                    rsx! { {format_amount(lot.seller_amount)} },
+                )}
+            }
         }
+    }
+}
+
+/// 相邻两个字段共用一列：上行是原顺序中的前一字段，下行是后一字段，表头与单元格同构。
+/// 十三个字段单行至少需要约 1400px，合并成对字段后桌面报告卡内可完整显示金额与比例；
+/// 视觉隐藏的分隔符让读屏把两项读作独立值，而不是拼成一个词。
+fn stacked_pair(primary: Element, secondary: Element) -> Element {
+    rsx! {
+        span { class: "admin-settlement__line", {primary} }
+        span { class: "admin-visually-hidden", " / " }
+        span { class: "admin-settlement__line admin-settlement__line--secondary", {secondary} }
     }
 }
 

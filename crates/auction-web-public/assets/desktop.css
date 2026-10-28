@@ -26,6 +26,12 @@
     margin-block-end: var(--space-3);
   }
 
+  /* 本层优先于 surface 层：工具栏内的筛选导航须在此显式清零，否则多出 12px 底部留白。 */
+  .public-auction-group-toolbar > .public-auction-filter,
+  .public-auction-type-toolbar > .public-auction-filter {
+    margin-block-end: 0;
+  }
+
   .public-auction-filter__tab {
     gap: var(--space-1);
     padding: calc(var(--space-1) / 2) var(--space-2);
@@ -180,8 +186,13 @@
     font-size: var(--text-base);
   }
 
+  /* 偏好与出价/代理两行共用 2:3 网格，列边缘对齐；内容较多的登录时长和代理位于右侧宽列。 */
+  .public-account-bids-page {
+    --account-gap: var(--space-4);
+  }
+
   .public-account-preferences {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   }
 
   .public-account-table {
@@ -197,7 +208,6 @@
 @media screen and (min-width: 80rem) {
   .public-account-activity {
     grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-    gap: var(--space-4);
   }
 }
 

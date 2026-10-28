@@ -43,7 +43,8 @@ pub(crate) fn CatalogGroupFilters(
 
     rsx! {
         div { class: "public-auction-group-toolbar",
-            nav { class: "public-auction-filter", aria_label: t!("filter-equipment-group-label"),
+            // 桌面分组标签与手机原生选择器由 CSS 二选一，共用当前分组与回调。
+            nav { class: "public-auction-filter public-desktop", aria_label: t!("filter-equipment-group-label"),
                 span { class: "public-auction-filter__label", {t!("equipment-group")} }
                 for equipment_group in ["all", "rare", "fusion"] {
                     button {
@@ -55,6 +56,10 @@ pub(crate) fn CatalogGroupFilters(
                         else { {equipment_group_label(equipment_group)} }
                     }
                 }
+            }
+            presentation::mobile::EquipmentGroupFilter {
+                active: active_equipment_group.clone(),
+                on_change: on_equipment_group_change,
             }
             form {
                 class: "public-catalog-level-filter",

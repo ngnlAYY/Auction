@@ -338,7 +338,6 @@ admin-settlement-report-title = 精算レポート · { $world } #{ $sequence }
 admin-settlement-lot = 出品
 admin-settlement-lot-id = 番号 ID
 admin-settlement-equipment = 装備
-admin-settlement-open-equipment = 装備を見る
 admin-settlement-open-equipment-label = 装備を見る：{ $equipment }
 admin-settlement-seller = 出品者
 admin-settlement-winner = 落札者
