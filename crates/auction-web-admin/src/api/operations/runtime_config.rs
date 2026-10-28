@@ -11,14 +11,12 @@ pub(crate) use auction_contracts::AdminRuntimeConfigResponse as AdminRuntimeConf
 use auction_contracts::{AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest};
 use gloo_net::http::Request;
 use serde_json::{Map, Value};
+use std::collections::HashSet;
 
 use super::{
     AdminApiFailure, ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_request_error,
     invalid_response_error, response_failure, send_get, send_request,
 };
-
-// 本地 Strict 镜像已删除：contracts 的 `AdminRuntimeConfigResponse` 已带
-// `deny_unknown_fields`；`document` 的深度结构与模板谓词仍由下方校验函数承担。
 
 /// Runtime 配置请求失败时保留 HTTP 状态，页面可区分 fingerprint 冲突和普通错误。
 pub(crate) type AdminRuntimeConfigApiError = AdminApiFailure;
@@ -257,16 +255,8 @@ fn valid_color_selection(singular: &str, plural: Option<&Value>) -> bool {
     let Some(values) = plural.as_array() else { return false };
     values.len() <= 256
         && (values.is_empty() || singular.is_empty())
-        && values.iter().enumerate().all(|(index, value)| {
-            value.as_str().is_some_and(|text| {
-                valid_text(text, 64, false)
-                    && values[..index].iter().all(|previous| {
-                        previous
-                            .as_str()
-                            .is_some_and(|previous| !previous.eq_ignore_ascii_case(text))
-                    })
-            })
-        })
+        && values.iter().all(Value::is_string)
+        && taxonomy::valid_names(values.iter().filter_map(Value::as_str), 256, 64, true)
 }
 
 fn valid_hex_color(value: &str) -> bool {
@@ -625,14 +615,16 @@ fn valid_string_list(
     let Some(values) = value.as_array() else {
         return false;
     };
-    values.len() <= maximum_count
-        && values.iter().enumerate().all(|(index, value)| {
-            value.as_str().is_some_and(|text| {
-                valid_text(text, maximum_bytes, false)
-                    && (!unique
-                        || values[..index].iter().all(|previous| previous.as_str() != Some(text)))
-            })
+    if values.len() > maximum_count {
+        return false;
+    }
+    // 借用名称建立索引，不复制配置正文；唯一性校验不再逐项重扫前缀。
+    let mut seen = HashSet::new();
+    values.iter().all(|value| {
+        value.as_str().is_some_and(|text| {
+            valid_text(text, maximum_bytes, false) && (!unique || seen.insert(text))
         })
+    })
 }
 
 fn valid_text(value: &str, maximum_bytes: usize, allow_empty: bool) -> bool {

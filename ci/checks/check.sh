@@ -95,7 +95,7 @@ check_layout() {
 check_repository_contracts() {
 	local file failures=""
 
-	for file in AGENTS.md .gitignore .editorconfig README.md; do
+	for file in AGENTS.md .gitignore .editorconfig README.md Cargo.lock; do
 		if ! git ls-files --error-unmatch "$file" >/dev/null 2>&1; then
 			failures+="$file 未纳入版本控制"$'\n'
 		elif git check-ignore --no-index -q "$file"; then

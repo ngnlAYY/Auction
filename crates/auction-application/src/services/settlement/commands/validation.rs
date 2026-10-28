@@ -8,7 +8,7 @@ use auction_domain::{
 
 use crate::{ApplicationError, CommandLedgerError, SettlementSnapshot, SettlementTransactionError};
 
-use super::obligations::build_obligations;
+use super::obligations::{build_obligations, validate_obligations};
 use super::{
     SettleAuctionCommand, settlement_claim_command_id, settlement_complete_command_id,
     settlement_complete_request_hash, settlement_workflow_id,
@@ -155,13 +155,7 @@ pub(super) fn validate_settlement_plan(
         ));
     }
 
-    let expected = build_obligations(command_id, snapshot, plan)?;
-    if expected != plan.obligations {
-        return Err(auction_domain::DomainError::InvalidSettlementFacts(
-            "结算义务与锁内事实或自然键不一致",
-        ));
-    }
-    Ok(())
+    validate_obligations(command_id, snapshot, plan)
 }
 
 /// 在写入任何金额事实前验证 scheduler 冻结的 due generation，防止软截止延期后过早结算。

@@ -23,6 +23,10 @@
 `deserialize_required_option` 保留“字段必填、值可为 null”；`deserialize_null_default` 保留旧 Go 标量 null 到零值的映射，
 缺失仍由各字段原有 `default` 控制。错误类型、未知字段拒绝及序列化形状不变，业务校验与错误分类仍归应用/HTTP。
 
+Admin 邮件列表、摘要、分页及触发响应由 `dto/admin/mail.rs` 唯一声明，浏览器直接解码这些 DTO，
+保持允许兼容扩展的边界；轮询状态的旧浏览器边界允许扩展，而 `AdminMailPollingResponse` 使用字段闭集，
+该处继续保留本地适配。详情与 metadata 使用闭集 DTO，业务值域和请求身份由浏览器 API 层复核。
+
 ## DTO 布局与消费方
 
 [dto/public/watch.rs](crates/auction-contracts/src/contracts/dto/public/watch.rs) 定义装备标记的完整集合、CAS 请求和

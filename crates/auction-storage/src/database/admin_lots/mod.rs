@@ -39,7 +39,7 @@ async fn list_postgres(
 
     let mut transaction = store
         .pool()
-        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        .begin_read_snapshot()
         .await
         .map_err(|_| storage_error("开启 Admin lot 读取事务失败"))?;
 

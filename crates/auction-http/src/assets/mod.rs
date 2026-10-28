@@ -1,11 +1,7 @@
 //! 前端静态产物内嵌、显式浏览器路由与 404 分派。
-//! Public 与 Admin 的装配根分别提供自己的 `RustEmbed` 类型；本 crate 只实现通用静态响应和
-//! surface 路由规则，因此任一部署制品都无法从这里引用另一端资源。
-//! `allow_missing = true` 是必需的。`rust-embed` 默认在目标目录不存在时**编译期报错**，
-//! 而前端产物由独立的 `dx bundle` 生成；没有这个属性，首次克隆仓库、CI 静态检查或只改后端
-//! 的构建都会因为缺少产物而无法编译。批准的浏览器路由在缺失产物时以 503 明确报告，不 panic。
-//! `folder` 的相对路径由 `rust-embed` 按声明资源类型的装配根 `CARGO_MANIFEST_DIR` 解析。
-//! release 构建把产物烘进二进制，dev 构建从磁盘读取，因此本地改前端不必重编后端。
+//! 两个装配根各自提供 `RustEmbed` 类型，资源目录相对其 `CARGO_MANIFEST_DIR`，互不引用。
+//! 必须保留 `allow_missing = true`，让未运行 `dx bundle` 的工作区仍可编译；缺失页面返回 503。
+//! release 内嵌资源，dev 从磁盘读取；本 crate 仅拥有通用响应和 surface 路由规则。
 
 mod routes;
 

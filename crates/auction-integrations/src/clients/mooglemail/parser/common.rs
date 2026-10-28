@@ -1,5 +1,10 @@
 use super::*;
 
+/// 未转义 JSON 文本直接借用响应；转义文本由解码器分配，目标字段再按需取得所有权。
+#[derive(serde::Deserialize)]
+#[serde(transparent)]
+pub(crate) struct JsonText<'a>(#[serde(borrow)] pub(crate) std::borrow::Cow<'a, str>);
+
 /// Sent/Inbox 列表按 35 字节截断标题；多字节截断点会被页面替换成 U+FFFD，
 /// 也可能追加省略号。详情标题只需以“可证明的前缀”开头。
 pub(crate) fn subject_is_list_projection(list_subject: &str, detail_subject: &str) -> bool {

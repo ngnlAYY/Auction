@@ -16,6 +16,35 @@ pub(super) fn build_obligations(
     plan: &SettlementPlan,
 ) -> Result<Vec<SettlementObligation>, auction_domain::DomainError> {
     let mut obligations = Vec::new();
+    for_each_obligation(command_id, snapshot, plan, |obligation| obligations.push(obligation))?;
+    Ok(obligations)
+}
+
+/// 逐条重建并比较义务，保持自然键、顺序及全部字段校验，不保留第二份完整列表。
+pub(super) fn validate_obligations(
+    command_id: CommandId,
+    snapshot: &SettlementSnapshot,
+    plan: &SettlementPlan,
+) -> Result<(), auction_domain::DomainError> {
+    let mut actual = plan.obligations.iter();
+    let mut matches = true;
+    for_each_obligation(command_id, snapshot, plan, |expected| {
+        matches &= actual.next() == Some(&expected);
+    })?;
+    if !matches || actual.next().is_some() {
+        return Err(auction_domain::DomainError::InvalidSettlementFacts(
+            "结算义务与锁内事实或自然键不一致",
+        ));
+    }
+    Ok(())
+}
+
+fn for_each_obligation(
+    command_id: CommandId,
+    snapshot: &SettlementSnapshot,
+    plan: &SettlementPlan,
+    mut consume: impl FnMut(SettlementObligation),
+) -> Result<(), auction_domain::DomainError> {
     // 只索引借用的明细；输出仍严格沿用锁内事实顺序，不能依赖 HashMap 迭代顺序。
     let mut lines_by_id = HashMap::with_capacity(plan.lines.len());
     for line in &plan.lines {
@@ -28,7 +57,7 @@ pub(super) fn build_obligations(
             .ok_or(auction_domain::DomainError::InvalidSettlementFacts("结算明细缺少对应 lot"))?;
 
         let Some(winner_id) = fact.leader_id else {
-            obligations.push(SettlementObligation {
+            consume(SettlementObligation {
                 id: obligation_id(snapshot.auction_id, fact.lot_id, "unsold_return"),
                 auction_id: snapshot.auction_id,
                 lot_id: fact.lot_id,
@@ -54,7 +83,7 @@ pub(super) fn build_obligations(
             SettlementWorld::Isekai => SettlementObligationKind::WinnerPaymentCarrierCod,
         };
         let payment_id = obligation_id(snapshot.auction_id, fact.lot_id, payment_kind.as_str());
-        obligations.push(SettlementObligation {
+        consume(SettlementObligation {
             id: payment_id,
             auction_id: snapshot.auction_id,
             lot_id: fact.lot_id,
@@ -81,7 +110,7 @@ pub(super) fn build_obligations(
         let seller_prerequisite = if fact.world == SettlementWorld::Isekai {
             let handoff_id =
                 obligation_id(snapshot.auction_id, fact.lot_id, "winner_equipment_handoff");
-            obligations.push(SettlementObligation {
+            consume(SettlementObligation {
                 id: handoff_id,
                 auction_id: snapshot.auction_id,
                 lot_id: fact.lot_id,
@@ -104,7 +133,7 @@ pub(super) fn build_obligations(
             payment_id
         };
 
-        obligations.push(SettlementObligation {
+        consume(SettlementObligation {
             id: obligation_id(snapshot.auction_id, fact.lot_id, "seller_payout"),
             auction_id: snapshot.auction_id,
             lot_id: fact.lot_id,
@@ -123,7 +152,7 @@ pub(super) fn build_obligations(
             prerequisite_id: Some(seller_prerequisite),
         });
 
-        obligations.push(SettlementObligation {
+        consume(SettlementObligation {
             id: obligation_id(snapshot.auction_id, fact.lot_id, "buyer_refund"),
             auction_id: snapshot.auction_id,
             lot_id: fact.lot_id,
@@ -143,7 +172,7 @@ pub(super) fn build_obligations(
         });
     }
 
-    Ok(obligations)
+    Ok(())
 }
 
 fn obligation_id(auction_id: AuctionId, lot_id: auction_domain::LotId, kind: &str) -> SettlementId {

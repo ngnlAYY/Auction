@@ -5,6 +5,8 @@ use auction_application::{ForumPmSender, LotWatchPmClaimRequest, LotWatchPmWorkS
 use std::{sync::Arc, time::Duration};
 use tokio::sync::watch;
 
+use super::runtime::wait_until_or_shutdown;
+
 /// 不依赖 MM 开关；总工作预算严格短于论坛租约，不并发批量发送。
 #[derive(Clone)]
 pub struct LotWatchPmRuntime {
@@ -86,16 +88,17 @@ impl LotWatchPmRuntime {
                     ),
                 }
             }
-            // 只使用非敏感随机 UUID 派生有限 jitter，不改变数据库领取权威。
+            // 保留 PM 既有毫秒离散、上界不含 max 的抖动；仅复用停机等待门禁。
             let max = self.jitter.as_millis().min(u128::from(u64::MAX)) as u64;
             let jitter = if max == 0 {
                 0
             } else {
                 (uuid::Uuid::new_v4().as_u128() % u128::from(max)) as u64
             };
-            tokio::select! {
-                _ = tokio::time::sleep(self.poll_interval.saturating_add(Duration::from_millis(jitter))) => {},
-                result = drain.changed() => { if result.is_err() || *drain.borrow() { break; } }
+            let deadline = tokio::time::Instant::now()
+                + self.poll_interval.saturating_add(Duration::from_millis(jitter));
+            if wait_until_or_shutdown(&mut drain, deadline).await {
+                break;
             }
         }
     }

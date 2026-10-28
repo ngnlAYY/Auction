@@ -275,20 +275,21 @@ impl RateLimiter {
         }
         if entries.len() >= self.max_entries {
             // 窗口已过期的记录与缺失记录等价（下次访问会重置），可整批移除而不改变限流结果；
-            // 满表时一次清理即可摊还后续新地址的插入，只有全部活跃时才逐个淘汰最久未见者。
-            entries.retain(|_, value| now.duration_since(value.started) < self.window);
-        }
-        if entries.len() >= self.max_entries
-            && let Some(oldest) = entries
-                .iter()
-                .min_by(|(left_address, left), (right_address, right)| {
-                    left.last_seen
-                        .cmp(&right.last_seen)
-                        .then_with(|| left_address.cmp(right_address))
-                })
-                .map(|(address, _)| *address)
-        {
-            entries.remove(&oldest);
+            // 同一次遍历记录最久未见者，全部活跃时不再二次扫描满表。时间相同时仍按 IP 排序。
+            let mut oldest: Option<(Instant, IpAddr)> = None;
+            entries.retain(|address, value| {
+                if now.duration_since(value.started) >= self.window {
+                    return false;
+                }
+                let candidate = (value.last_seen, *address);
+                oldest = Some(oldest.map_or(candidate, |previous| previous.min(candidate)));
+                true
+            });
+            if entries.len() >= self.max_entries
+                && let Some((_, address)) = oldest
+            {
+                entries.remove(&address);
+            }
         }
         entries.insert(address, RateWindow { started: now, last_seen: now, count: 1 });
         None

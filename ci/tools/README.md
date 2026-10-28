@@ -25,8 +25,8 @@ OpenSSL 开发文件、patch 以及 curl/tar/coreutils；两档在 CI 中分别�
 | --- | --- |
 | rustup 1.29.2 | `rustup.sh` 固定官方 x86_64 GNU 安装器 SHA-256；更新旧版本并保留已安装 Rust 工具链 |
 | dx 0.7.10 | 固定 crates.io 源码包及补丁 SHA-256，使用 `locks/dioxus-cli.Cargo.lock`；开启 `disable-telemetry,no-downloads` |
-| sccache 0.18.0 | 固定 crates.io 源码包 SHA-256，使用 `locks/sccache.Cargo.lock`；只启用 GHA 后端及默认本地缓存 |
-| cargo-audit 0.22.2 | 固定 crates.io 源码包 SHA-256，使用 `locks/cargo-audit.Cargo.lock`；保留默认的 binary-scanning 能力 |
+| sccache 0.18.0 | 固定 crates.io 源码包、Zstandard/缓存权限补丁及 SHA-256，使用 `locks/sccache.Cargo.lock`；只启用 GHA 后端及默认本地缓存 |
+| cargo-audit 0.22.2 | 固定 crates.io 源码包 SHA-256，使用 `locks/cargo-audit.Cargo.lock`；关闭默认 feature，只保留实际使用的锁文件审计 |
 | esbuild 0.27.3 | 固定 dx 预期的 npm Linux x64 包与 SHA-256；只用于打包 |
 | wasm-bindgen 0.2.129 | 固定与应用锁图一致的官方 musl 包与 SHA-256 |
 | wasm-opt 129 | 固定 Binaryen 官方 Linux 包与 SHA-256；只提取已静态链接 Binaryen 的 wasm-opt |
@@ -89,7 +89,7 @@ dx/sccache 的完整发布锁仍有跨不兼容版本的公告与维护警告，
 | sccache 的 scc 2.1.0，RUSTSEC-2026-0205 | 由测试依赖 serial_test 引入，不在本次 release 普通依赖图中 |
 | sccache 的 ruzstd 0.8.1，RUSTSEC-2026-0344 | object 只读取静态库归档的原始成员用于哈希，未调用压缩节解码；缓存解压另用 zstd |
 | sccache 的 zip 0.6.6，RUSTSEC-2026-0368/0369 | 按编译器预期键读取，写入普通临时文件后放到编译器指定路径；不调用归档 extract，也不创建归档提供的符号链接 |
-| sccache 的 zip 0.6.6，RUSTSEC-2026-0367 | 正常写入将权限限制在 `0o777`，自定义读取仍会原样恢复 `unix_mode`；伪造缓存加高权限恢复可保留 SUID/SGID。当前本机及 CI 以非 root 用户构建并使用受控缓存，后续须保持此条件，升级时重新核对 |
+| sccache 的 zip 0.6.6，RUSTSEC-2026-0367 | 正常写入限制在 `0o777`；本仓库补丁让自定义读取也先掩码 `unix_mode`，阻止缓存恢复 SUID/SGID/sticky。版本仍匹配公告，继续以非 root 用户构建并使用受控缓存，升级时重新核对 |
 
 公告可从 [RustSec 数据库](https://rustsec.org/advisories/)及对应上游 security advisory 核对；构建工具升级需重新检查
 上述调用边界。维护停止和 yanked 提示仍作为上游工具后续升级事项保留，不加入应用审计忽略列表。
@@ -175,3 +175,44 @@ dx 仍为 13 项漏洞匹配、11 项警告，sccache 仍为 7 项漏洞匹配�
 同日后续[边界复核](docs/status.md#2026-10-27-批量持久化与边界复核)在独立干净快照重跑四锁，结果不变。
 补齐 Cargo 环境别名隔离后，audit/release 两档工具已重建并通过回执校验；工具版本和锁图保持原样，
 cargo-audit 的 21 条上游 future-incompatible 警告及 sccache 的 1 条 dead-code 警告仍保留，未执行应用发布。
+
+### 同日并行审计：锁文件扫描与 sccache Zstandard 修复
+
+重新从上游拉取独立 RustSec 工作树，仍为提交 `99670cfc0bc574433034b75876a4b791ccaa2efb`、1,380 条公告；
+四份完整锁均使用同一快照、`--deny warnings` 和默认 yanked 检查，无忽略项。另从锁定源码重建 Linux GNU 普通/构建图，
+dx 采用 `disable-telemetry,no-downloads`、sccache 采用 `gha`，均关闭默认 feature；不把测试和其他平台包算入活跃图。
+
+| 锁图 | 完整锁条目 | 完整锁漏洞 / 警告 | GNU 活跃包 | 活跃图漏洞 / 警告 |
+| --- | ---: | ---: | ---: | ---: |
+| Auction 应用 | 535 | 0 / 0 | 五个程序及双端 WASM 分别核对 | 0 / 0 |
+| cargo-audit | 405 | 0 / 0 | 293 | 0 / 0 |
+| dx | 810 | 13 / 11 | 641 | 13 / 10 |
+| sccache 修复前 | 532 | 7 / 17 | 298 | 7 / 10 |
+| sccache 修复后 | 532 | 5 / 9 | 298 | 5 / 2 |
+
+活跃图数字是完整锁报告与实际包/版本集合的交集，仍包含所用命令未调用的 API；不按公告数量推断可利用性。
+dx 的 `instant` 警告未启用；sccache 的 `buf_redux/multipart/paste/safemem/twoway` 警告及测试依赖 `scc` 的
+unsound/yanked 警告未启用。修复后 sccache 的两项活跃警告来自 bincode 与 number_prefix 的维护状态。
+
+`cargo-audit` 仅用于 Cargo.lock，关闭未使用的
+[`binary-scanning`](https://docs.rs/crate/cargo-audit/0.22.2/features)，GNU 图从 302 减至 293 个包，移出
+auditable-extract/info/serde、binfarce、object 0.39、quitters、topological-sort 和两代 wasmparser。
+RustSec/yanked 审计和全部警告门禁保留，完整独立锁仍保留可选包。
+
+sccache 上游清单限制 `zstd ^0.13`，本入口通过固定哈希、零模糊匹配的
+[清单补丁](ci/tools/patches/sccache-zstd.patch)改用 0.14.3；独立锁仅替换 zstd、zstd-safe、zstd-sys 三项，
+分别锁至 0.14.3、8.2.0、2.1.2。其余包和全部 feature 不变，包含 legacy 支持。缓存路径仅调用
+`stream::copy_encode/copy_decode`，两版接口及包装实现一致，保持 Stored ZIP 内的 Zstandard 流和原压缩等级配置。
+完整锁消除 RUSTSEC-2026-0403、0410 及八项 Zstandard unsound 匹配；0410 原限 wasm32，本工具只编译 GNU x86_64。
+
+另以[缓存权限补丁](ci/tools/patches/sccache-cache-permissions.patch)将 `get_object` 返回的 `unix_mode` 限制为
+`0o777`；所有缓存恢复经此入口取得权限，避免把伪造条目的高权限位传给 `set_permissions`。此边界缓解保留普通文件的
+rwx 位，不依赖 ZIP 提取函数，不消除 zip 0.6.6 在完整锁/活跃图中的公告匹配。
+
+剩余 dx 的 13 项和 sccache 的 5 项漏洞匹配均仍在实际工具图中：dx 的 XML、自更新/安装器 ZIP、模板 Git、CSS rkyv，
+以及两工具的 object/ruzstd 路径限制见上文；sccache 仍保留 RSA 与 ZIP。修复版本跨越上游约束或尚无修复，
+本轮未强改这些 API，也未忽略公告；工具须继续以非 root 用户和受控缓存运行。
+
+audit/release 两档已按最终脚本、补丁和锁图串行重建，每次最多两个 Cargo 编译任务；冻结配方、源码锁比对、安装回执及
+两档独立 verify 均通过。cargo-audit 保留 17 条上游 future-incompatible 编译警告，sccache 保留 1 条上游 dead-code
+编译警告；这些不计入上表的 RustSec 警告。本轮未运行应用发布构建、功能流程或行为测试。

@@ -49,10 +49,11 @@ recipe_fingerprint() {
 			sha256sum ci/tools/locks/cargo-audit.Cargo.lock
 		else
 			sha256sum ci/tools/locks/dioxus-cli.Cargo.lock ci/tools/locks/sccache.Cargo.lock
-			sha256sum ci/tools/patches/dioxus-cli-controlled-tools.patch
+			sha256sum ci/tools/patches/dioxus-cli-controlled-tools.patch \
+				ci/tools/patches/sccache-zstd.patch ci/tools/patches/sccache-cache-permissions.patch
 		fi
 		rustc --version --verbose
-		printf '%s\n' "$target_triple" "$profile" 'dx:disable-telemetry,no-downloads;sccache:gha;cargo-audit:binary-scanning'
+		printf '%s\n' "$target_triple" "$profile" 'dx:disable-telemetry,no-downloads;sccache:gha;cargo-audit:lockfile-only'
 	} | sha256sum | awk '{print $1}'
 }
 
@@ -94,6 +95,8 @@ download_verified() {
 
 prepare_source() {
 	local package=$1 version=$2 digest=$3
+	local index
+	local source_patches=() patch_sha256s=()
 	local archive="$work_root/$package-$version.crate"
 	local source_root="$work_root/$package-$version"
 	download_verified "https://static.crates.io/crates/$package/$package-$version.crate" "$digest" "$archive"
@@ -103,12 +106,23 @@ prepare_source() {
 	# crates.io 的发布包是独立包，在本仓库 target 下构建时隔离父工作区。
 	printf '\n[workspace]\n' >>"$source_root/Cargo.toml"
 	cp "ci/tools/locks/$package.Cargo.lock" "$source_root/Cargo.lock"
-	if [[ "$package" == dioxus-cli ]]; then
+	case "$package" in
+	dioxus-cli)
+		source_patches=(ci/tools/patches/dioxus-cli-controlled-tools.patch)
+		patch_sha256s=(6d27b8a443065017e3734a9f30ea63a5adaa3bd4ffa6a332e20d81e3420fc00e)
+		;;
+	sccache)
+		source_patches=(ci/tools/patches/sccache-zstd.patch ci/tools/patches/sccache-cache-permissions.patch)
+		patch_sha256s=(6e991aab616fe71817ff9c401dcd393992c4587b55e4ec208804864abb33f2f4
+			5849df23e64bb01f9980f855a33b947031552cd219f7042d53aadac85e5403a6)
+		;;
+	esac
+	for index in "${!source_patches[@]}"; do
 		# 固定原始 crate 和补丁双重身份；零模糊匹配，来源漂移即停止。
-		printf '%s  %s\n' 6d27b8a443065017e3734a9f30ea63a5adaa3bd4ffa6a332e20d81e3420fc00e \
-			ci/tools/patches/dioxus-cli-controlled-tools.patch | sha256sum --check --status || fail 'dx 补丁身份不匹配'
-		patch --batch --forward --fuzz=0 --strip=1 --directory "$source_root" <ci/tools/patches/dioxus-cli-controlled-tools.patch
-	fi
+		printf '%s  %s\n' "${patch_sha256s[$index]}" "${source_patches[$index]}" |
+			sha256sum --check --status || fail "$package 补丁身份不匹配"
+		patch --batch --forward --fuzz=0 --strip=1 --directory "$source_root" <"${source_patches[$index]}"
+	done
 }
 
 build_tool() (
@@ -148,7 +162,8 @@ install_tools() {
 
 	if [[ "$profile" == audit ]]; then
 		prepare_source cargo-audit 0.22.2 700c2b240f7fd330c24b675fe429f73a5b676531fcc6300400b2b67f155ba12a
-		build_tool cargo-audit 0.22.2 cargo-audit binary-scanning
+		# 只审计 Cargo.lock，不编译未使用的 ELF/PE/WASM 二进制扫描器。
+		build_tool cargo-audit 0.22.2 cargo-audit ''
 	else
 		prepare_source dioxus-cli 0.7.10 1fcb6578719380a2094f115bbbde340c59b65d2bf1987b8ddbbb9834db6716e6
 		build_tool dioxus-cli 0.7.10 dx disable-telemetry,no-downloads

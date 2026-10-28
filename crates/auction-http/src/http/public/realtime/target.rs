@@ -31,7 +31,7 @@ impl RealtimeTarget {
     }
 }
 
-pub(super) fn parse_http_target(query: &BTreeMap<String, String>) -> Result<RealtimeTarget, ()> {
+pub(super) fn parse_http_target(query: &BTreeMap<&str, String>) -> Result<RealtimeTarget, ()> {
     match (query.get("auction_id"), query.get("scope")) {
         (Some(auction_id), None) => parse_auction_id(auction_id).map(RealtimeTarget::Auction),
         (None, Some(scope)) if scope == "auctions" => Ok(RealtimeTarget::Discovery),
@@ -39,9 +39,7 @@ pub(super) fn parse_http_target(query: &BTreeMap<String, String>) -> Result<Real
     }
 }
 
-pub(super) fn parse_websocket_target(
-    query: &BTreeMap<String, String>,
-) -> Result<RealtimeTarget, ()> {
+pub(super) fn parse_websocket_target(query: &BTreeMap<&str, String>) -> Result<RealtimeTarget, ()> {
     if query.len() != 1 {
         return Err(());
     }

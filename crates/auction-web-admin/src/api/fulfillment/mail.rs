@@ -4,7 +4,7 @@
 
 use auction_contracts::{
     AdminMailDisplayResponse, AdminMailEquipmentDiagnosticResponse,
-    AdminMailIntakeMetadataResponse, AdminMailPaginationResponse, AdminMailPollTriggerRequest,
+    AdminMailIntakeMetadataResponse, AdminMailPollTriggerRequest, AdminMailPollTriggerResponse,
     AdminMailPollingRequest,
 };
 pub(crate) use auction_contracts::{
@@ -27,13 +27,8 @@ use super::{
     valid_admin_time, valid_safe_text, valid_trimmed_text, valid_uuid,
 };
 
-/// 旧 Mail decoder 允许非破坏性扩展字段；所有旧字段及新详情的固定 metadata 仍逐项校验。
-/// 保留镜像的理由：contracts 的 `AdminMailStateResponse`/`AdminMailIntakeSummaryResponse`/
-/// `AdminMailIntakeListResponse`/`AdminMailPollTriggerResponse` 对应同一 wire，但旧契约允许
-/// 服务端增加扩展字段，这些 DTO 不能加 `deny_unknown_fields`；镜像继续要求旧字段显式存在。
-/// 同步义务：上述 DTO 字段集变化时必须同步本镜像；下方构造 DTO 的穷举字段列表会在编译期
-/// 捕捉漂移。详情与 metadata 的 wire 是闭集，已由 contracts 的 `AdminMailIntakeDetailResponse`
-/// 与 `AdminMailIntakeMetadataResponse` 承担，不再保留本地镜像。
+/// 轮询路径沿用允许扩展字段的旧边界，与 contracts 中闭集的 polling DTO 分开解码。
+/// 列表、摘要、分页和触发结果的字段及扩展语义均与 contracts 一致，直接复用其 DTO。
 #[derive(Debug, Deserialize)]
 struct StrictMailState {
     polling: StrictMailPolling,
@@ -50,41 +45,6 @@ struct StrictMailPolling {
     updated_at: String,
     #[serde(default)]
     diagnostics: Option<auction_contracts::AdminMailPollingDiagnosticsResponse>,
-}
-
-#[derive(Debug, Deserialize)]
-struct StrictMailIntake {
-    decision_code: String,
-    external_mail_id: String,
-    has_message_display: bool,
-    id: String,
-    kind: String,
-    mailbox_key: String,
-    processed_at: String,
-    received_at: String,
-    sender: Option<String>,
-    status: String,
-    subject: Option<String>,
-    world_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct StrictMailPagination {
-    page: i64,
-    page_size: i64,
-    total: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct StrictMailIntakePage {
-    intakes: Vec<StrictMailIntake>,
-    pagination: StrictMailPagination,
-}
-
-#[derive(Debug, Deserialize)]
-struct StrictMailTrigger {
-    command_id: String,
-    pollers: i64,
 }
 
 fn encode_query(value: &str) -> String {
@@ -137,7 +97,7 @@ pub(crate) async fn fetch_mail_intakes(
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<StrictMailIntakePage> =
+    let payload: ApiResponse<AdminMailIntakePage> =
         response.json().await.map_err(invalid_response_error)?;
     decode_mail_intake_page(payload.data, &query, page, page_size).map_err(invalid_response_error)
 }
@@ -225,7 +185,7 @@ pub(crate) async fn trigger_mail_poll(command_id: Uuid) -> Result<i64, AdminApiF
     if !response.ok() {
         return Err(response_failure(response).await);
     }
-    let payload: ApiResponse<StrictMailTrigger> = response
+    let payload: ApiResponse<AdminMailPollTriggerResponse> = response
         .json()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
@@ -267,12 +227,12 @@ fn decode_mail_state(data: StrictMailState) -> Result<AdminMailPolling, &'static
 }
 
 fn decode_mail_intake_page(
-    data: StrictMailIntakePage,
+    data: AdminMailIntakePage,
     query: &AdminMailIntakeQuery,
     requested_page: i64,
     requested_page_size: i64,
 ) -> Result<AdminMailIntakePage, &'static str> {
-    let pagination = data.pagination;
+    let pagination = &data.pagination;
     if !(1..=MAX_JSON_SAFE_INTEGER).contains(&pagination.page)
         || pagination.page != requested_page
         || pagination.page_size != requested_page_size
@@ -283,11 +243,12 @@ fn decode_mail_intake_page(
     {
         return Err("mail_pagination");
     }
-    let intakes =
-        data.intakes.into_iter().map(decode_mail_intake).collect::<Result<Vec<_>, _>>()?;
+    if !data.intakes.iter().all(valid_mail_intake) {
+        return Err("mail_intake");
+    }
     let received_from = optional_query_time(&query.received_from)?;
     let received_to = optional_query_time(&query.received_to)?;
-    if intakes.iter().any(|intake| {
+    if data.intakes.iter().any(|intake| {
         (!query.mailbox_key.is_empty() && intake.mailbox_key != query.mailbox_key)
             || (!query.world_id.is_empty() && intake.world_id != query.world_id)
             || (!query.kind.is_empty() && intake.kind != query.kind)
@@ -300,32 +261,7 @@ fn decode_mail_intake_page(
     }) {
         return Err("mail_filter");
     }
-    Ok(AdminMailIntakePage {
-        intakes,
-        pagination: AdminMailPaginationResponse {
-            page: pagination.page,
-            page_size: pagination.page_size,
-            total: pagination.total,
-        },
-    })
-}
-
-fn decode_mail_intake(value: StrictMailIntake) -> Result<AdminMailIntake, &'static str> {
-    let intake = AdminMailIntake {
-        id: value.id,
-        mailbox_key: value.mailbox_key,
-        external_mail_id: value.external_mail_id,
-        has_message_display: value.has_message_display,
-        world_id: value.world_id,
-        kind: value.kind,
-        status: value.status,
-        decision_code: value.decision_code,
-        received_at: value.received_at,
-        processed_at: value.processed_at,
-        sender: value.sender,
-        subject: value.subject,
-    };
-    valid_mail_intake(&intake).then_some(intake).ok_or("mail_intake")
+    Ok(data)
 }
 
 /// 摘要字段的共享值域谓词；详情路径复用同一校验，保证两个端点的旧字段语义一致。

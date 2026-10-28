@@ -8,7 +8,7 @@ pub(crate) use commands::use_watch_command_owner;
 pub(crate) use control::LotWatchButton;
 
 use super::{PublicSessionResource, login_href_for_current_location};
-use crate::api::{CommandError, fetch_lot_watches, set_lot_watch};
+use crate::api::{CommandError, PublicSession, fetch_lot_watches, set_lot_watch};
 use auction_contracts::{PublicLotWatchesResponse, PublicSetLotWatchRequest};
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
@@ -86,11 +86,12 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
             let auction_id = auction_id.clone();
             async move {
                 let result = if let Some(user_id) = user_id {
-                    if current_user(session).as_deref() != Some(&user_id) {
+                    // 身份前后复核不订阅会话期限；同账号续期不能反复取消整场集合读取。
+                    if current_user(&session.peek()) != Some(user_id.as_str()) {
                         return LoadedWatches { revision: requested_revision, result: Ok(None) };
                     }
                     let result = fetch_lot_watches(&user_id, &auction_id).await;
-                    if current_user(session).as_deref() != Some(&user_id) {
+                    if current_user(&session.peek()) != Some(user_id.as_str()) {
                         return LoadedWatches { revision: requested_revision, result: Ok(None) };
                     }
                     result.map(|page| {
@@ -141,20 +142,20 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
     }
 }
 
-fn current_user(session: PublicSessionResource) -> Option<String> {
-    session.read().as_ref().and_then(|snapshot| {
+fn current_user(snapshot: &Option<Result<Option<PublicSession>, String>>) -> Option<&str> {
+    snapshot.as_ref().and_then(|snapshot| {
         snapshot
             .as_ref()
             .ok()
             .and_then(|identity| identity.as_ref())
             .filter(|identity| identity.authenticated)
-            .map(|identity| identity.user_id.clone())
+            .map(|identity| identity.user_id.as_str())
     })
 }
 
 impl WatchContext {
     fn identity_matches(&self) -> bool {
-        self.user_id.is_some() && current_user(self.session) == self.user_id
+        self.user_id.is_some() && current_user(&self.session.read()) == self.user_id.as_deref()
     }
 
     fn ready(&self) -> bool {

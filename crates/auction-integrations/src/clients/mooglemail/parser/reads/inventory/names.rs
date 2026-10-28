@@ -1,7 +1,5 @@
 //! 只解码原生装备元数据的命名 JSON 字面量，不执行脚本或从其它对象猜测名称。
 
-use std::borrow::Cow;
-
 use serde::de::DeserializeSeed;
 
 use super::*;
@@ -112,11 +110,6 @@ fn object_assignment<'a>(
     None
 }
 
-/// 常见未转义 JSON 字段直接借用响应，避免为库存中每个非目标 EID 分配字符串。
-#[derive(serde::Deserialize)]
-#[serde(transparent)]
-struct JsonKey<'a>(#[serde(borrow)] Cow<'a, str>);
-
 struct EquipmentNames<'a, 'b> {
     wanted: &'a HashSet<&'b str>,
     names: &'a mut HashMap<String, String>,
@@ -145,7 +138,7 @@ impl<'de> Visitor<'de> for EquipmentNames<'_, '_> {
         A: MapAccess<'de>,
     {
         let mut seen = HashSet::new();
-        while let Some(JsonKey(eid)) = map.next_key::<JsonKey<'de>>()? {
+        while let Some(JsonText(eid)) = map.next_key::<JsonText<'de>>()? {
             if seen.contains(eid.as_ref()) {
                 return Err(de::Error::custom("重复装备元数据 EID"));
             }
@@ -189,7 +182,7 @@ impl<'de> Visitor<'de> for DisplayNameVisitor {
     {
         let mut name = None;
         let mut seen = HashSet::new();
-        while let Some(JsonKey(field)) = map.next_key::<JsonKey<'de>>()? {
+        while let Some(JsonText(field)) = map.next_key::<JsonText<'de>>()? {
             if seen.contains(field.as_ref()) {
                 return Err(de::Error::custom("重复装备元数据字段"));
             }

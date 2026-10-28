@@ -43,7 +43,7 @@ pub(super) async fn drain_worker_tasks(
 }
 
 /// 等待下一轮 deadline；收到 drain 后立即跳过休眠，且不再领取新工作。
-pub(super) async fn wait_until_or_shutdown(
+pub(in crate::worker) async fn wait_until_or_shutdown(
     shutdown: &mut tokio::sync::watch::Receiver<bool>,
     deadline: tokio::time::Instant,
 ) -> bool {

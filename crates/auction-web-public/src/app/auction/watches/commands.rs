@@ -83,7 +83,7 @@ impl WatchCommandOwner {
                 }
                 None => {
                     if *self.session.state().read() != UseResourceState::Ready
-                        || current_user(self.session).as_deref() != Some(&user_id)
+                        || current_user(&self.session.read()) != Some(user_id.as_str())
                     {
                         return;
                     }

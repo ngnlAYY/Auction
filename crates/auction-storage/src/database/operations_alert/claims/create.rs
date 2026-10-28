@@ -225,26 +225,30 @@ pub(crate) async fn claim_postgres(
     .bind(claim_token)
     .bind(request.now)
     .bind(request.lease_until)
-    .bind(i32::try_from(items.len()).map_err(|_| OperationsAlertError::Invalid)? as i32)
+    .bind(i32::try_from(items.len()).map_err(|_| OperationsAlertError::Invalid)?)
     .bind(body_digest.as_slice())
     .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("写入 operations alert 批次失败"))?;
-    for item in &items {
-        sqlx::query(
-            "INSERT INTO public.operations_alert_batch_items
-                (batch_id, fingerprint, signal_version, ordinal, rendered_summary)
-             VALUES ($1, $2, $3, $4, $5)",
-        )
-        .bind(batch_id)
-        .bind(item.fingerprint.as_slice())
-        .bind(item.signal_version)
-        .bind(item.ordinal)
-        .bind(&item.summary)
+    // 正文前缀已保证 1–64 项，最多 320 个参数；与 batch/delivery 同事务追加。
+    let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+        "INSERT INTO public.operations_alert_batch_items
+            (batch_id, fingerprint, signal_version, ordinal, rendered_summary) ",
+    );
+    query.push_values(&items, |mut values, item| {
+        values
+            .push_bind(batch_id)
+            .push_bind(item.fingerprint.as_slice())
+            .push_bind(item.signal_version)
+            .push_bind(item.ordinal)
+            .push_bind(&item.summary);
+    });
+    query
+        .build()
+        .persistent(false)
         .execute(&mut *transaction)
         .await
         .map_err(|_| storage_error("写入 operations alert 批次条目失败"))?;
-    }
     let request_id = command_id.to_string();
     append_delivery_audit(
         &mut transaction,

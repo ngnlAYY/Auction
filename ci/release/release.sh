@@ -99,6 +99,37 @@ replace_generated_directory() {
 	rm -rf "$backup"
 }
 
+# 从固定白名单重算摘要，不执行缓存清单提供的路径；字节损坏必须使复用失效。
+artifact_checksums() (
+	local root=$1 variant=$2 path
+	local files=(BUILD-INFO) selected_binaries=("${binaries[@]}")
+	case "$variant" in
+	api-only | embedded) ;;
+	single) selected_binaries=(auction-server auctionctl) ;;
+	*) return 2 ;;
+	esac
+	for path in "${selected_binaries[@]}"; do files+=("bin/$path"); done
+	if [[ "$variant" != api-only ]]; then
+		files+=(WEB-PUBLIC-SHA256 WEB-ADMIN-SHA256 WEB-PUBLIC-MANIFEST.v1 WEB-ADMIN-MANIFEST.v1)
+	fi
+	cd "$root" || return 1
+	for path in "${files[@]}"; do
+		[[ -f "$path" && ! -L "$path" ]] || return 1
+	done
+	printf '%s\0' "${files[@]}" | LC_ALL=C sort -z | xargs -0 -r sha256sum
+)
+
+verify_artifact_checksums() {
+	local root=$1 variant=$2 actual expected
+	[[ -f "$root/SHA256SUMS" && ! -L "$root/SHA256SUMS" ]] || return 1
+	actual=$(artifact_checksums "$root" "$variant") || return 1
+	expected=$(cat "$root/SHA256SUMS") || return 1
+	if [[ "$actual" != "$expected" ]]; then
+		printf '发布制品摘要不一致，请重新构建：%s\n' "$root" >&2
+		return 1
+	fi
+}
+
 # 复用判定：构建输入、锁图、feature 和制品完整性全部一致才返回成功。
 # 复用不重建 Web payload；payload 由 web-bundle 按自身输入指纹复用，构建输入一致即
 # 二进制与嵌入资源一致，因此可直接作为同一来源的产物。
@@ -110,6 +141,7 @@ artifacts_reusable() {
 	if [[ ! -d "$artifact_directory" || -L "$artifact_directory" || ! -f "$info" || -L "$info" ]]; then
 		return 1
 	fi
+	verify_artifact_checksums "$artifact_directory" "$variant" || return 1
 	verify_build_info "$artifact_directory" "$variant" >/dev/null || return 1
 	if [[ $(read_build_info "$info" features) != "$features" ]]; then
 		printf '%s 已记 feature 与当前配方不同，重新构建：%s\n' "$variant" "$artifact_directory" >&2
@@ -209,6 +241,8 @@ build_variant() (
 	fi
 
 	verify_build_info "$next" "$variant"
+	artifact_checksums "$next" "$variant" >"$next/SHA256SUMS"
+	chmod 0644 "$next/SHA256SUMS"
 	replace_generated_directory "$next" "$artifact_directory"
 	printf '%s 发布二进制已生成：%s\n' "$variant" "$artifact_directory"
 )
@@ -364,6 +398,8 @@ verify_artifacts() {
 		printf 'API-only 固定空资源目录不得存在\n' >&2
 		return 1
 	fi
+	verify_artifact_checksums "$api_artifact_root" api-only
+	verify_artifact_checksums "$embedded_artifact_root" embedded
 	verify_build_info "$api_artifact_root" api-only
 	verify_build_info "$embedded_artifact_root" embedded
 

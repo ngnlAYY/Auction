@@ -160,13 +160,13 @@ impl<'de> Visitor<'de> for EquipmentRootVisitor<'_> {
         A: MapAccess<'de>,
     {
         let mut keys = HashMap::new();
-        while let Some(name) = map.next_key::<String>()? {
-            if self.wanted.contains(&name) {
-                if keys.contains_key(&name) {
+        while let Some(JsonText(name)) = map.next_key::<JsonText<'de>>()? {
+            if self.wanted.contains(name.as_ref()) {
+                if keys.contains_key(name.as_ref()) {
                     return Err(de::Error::custom("重复装备 JSON 字段"));
                 }
                 let item = map.next_value::<EquipmentJsonItem>()?;
-                keys.insert(name, item.0);
+                keys.insert(name.into_owned(), item.0);
             } else {
                 map.next_value::<IgnoredAny>()?;
             }
@@ -192,15 +192,16 @@ impl<'de> Visitor<'de> for EquipmentJsonItemVisitor {
         A: MapAccess<'de>,
     {
         let mut key = None;
-        while let Some(name) = map.next_key::<String>()? {
+        while let Some(JsonText(name)) = map.next_key::<JsonText<'de>>()? {
             if name == "k" {
                 if key.is_some() {
                     return Err(de::Error::custom("重复装备 key 字段"));
                 }
-                let value = map.next_value::<String>()?;
-                let parsed = MoogleMailEquipmentKey::new(&value)
-                    .ok_or_else(|| de::Error::custom("装备 key 格式无效"))?;
-                key = Some(parsed);
+                let JsonText(value) = map.next_value::<JsonText<'de>>()?;
+                key = Some(
+                    MoogleMailEquipmentKey::new(&value)
+                        .ok_or_else(|| de::Error::custom("装备 key 格式无效"))?,
+                );
             } else {
                 map.next_value::<IgnoredAny>()?;
             }

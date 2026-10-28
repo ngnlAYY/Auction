@@ -41,7 +41,7 @@ pub(super) fn finalize_plan(
             .effective_end_at
             .checked_sub_signed(rules.soft_close_window)
             .ok_or(DomainError::InvalidSchedule("软截止窗口超出时间范围"))?;
-        // 零窗口关闭软截止；截止等值仍可接受出价，但不能因此重新开启延期。
+        // 显式零窗口在截止等值时也不延期；非零窗口继续沿用冻结规则取较晚截止。
         if rules.soft_close_window > Duration::zero() && now >= soft_close_start {
             let candidate = now
                 .checked_add_signed(rules.soft_close_extension)

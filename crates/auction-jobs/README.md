@@ -146,6 +146,8 @@ PM 的 prepare 只能 GET，持久 sending fence 明确提交才消费 prepared.
 claim/prepare/fence/send/finish 且严格小于 lease，drain 停止新领取、主进程 drain 结束后 abort 剩余任务。
 单项单调截止在领取前冻结，并在每个阶段回执后复核；迟到的 sending 成功回执不授权首次 poll Send，保留原 sending 对账。
 PM 存储接口按整秒领取；总预算与实际截取后的整秒租约比较，不能使用小数秒余量延长外呼。
+PM 保留既有毫秒离散抖动：`max` 为 jitter 的整毫秒数（上限 `u64::MAX`），取值 `[0, max)`，不足一毫秒时为零。
+只复用 Worker 的 drain 等待门禁，等待前复核停止值，停机通知已到达时立即结束；构造参数边界沿用原约束。
 同步、回帖及 PM 共用唯一 gateway 的实际 world 可用性，数据库在 LIMIT 前过滤不可用世界；
 PM 的来源世界从通知关联拍卖读取，不改冻结消息或摘要，shared 凭据仍允许两世界。
 各循环默认值、预算及有效并发见[配置手册](ops/config/README.md#worker-循环预算)。
@@ -155,7 +157,8 @@ PM 的来源世界从通知关联拍卖读取，不改冻结消息或摘要，sh
 只经 UDS 提供 live、ready、status、`/metrics`、只读邮件进度和全局邮件唤醒，不启动第二个指标监听器。socket 位于受信 runtime 目录，
 持 `0600` 实例锁，只清理已证明失效且 inode 未变的旧 socket；新 socket 固定配置 group 与 `0660`，连接须通过显式
 UID/GID allowlist，并受请求/响应大小与处理预算限制。Admin client 逐块限制 JSON 响应为 64 KiB，
-缺少 Content-Length 的响应也不能先完整缓冲再验限。唤醒使用有界内存 replay window，只表示已接受，
+禁用环境代理、自动重定向和协议层重试；缺少 Content-Length 的响应也不能先完整缓冲再验限。
+唤醒使用有界内存 replay window，只表示已接受，
 让已装配 poller 执行一轮，不能代替 `mail_poll_state` 的持久化游标、租约或业务完成证明。
 进程启动、降级原因与 drain 使用同一原子状态；论坛健康恢复只清除自身原因，不能覆盖其他任务故障，
 `status.ready` 和 `status.state` 来自同一快照。group 名称使用调用独占缓冲的可重入 NSS 查询，避免并发查询覆盖 GID；

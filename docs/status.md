@@ -35,6 +35,45 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-27 批量写入、读取快照与依赖收敛
+
+基线为干净的 `49e0370c`。按 owner 并行盘点全部 20 个工作区包、1,431 份 Rust 源码、49 份 Markdown、
+64 份追加迁移及构建配置，结合风险模式扫描、CodeGraph 调用链和主审交叉复核落实以下修改。
+
+| owner | 修改与保护的边界 |
+| --- | --- |
+| domain / application | 正金额加法直接使用 checked_add；删除闭集枚举恒假检查、合并相同返还分支。结算义务生成和校验共用逐条构造流程，省去第二份完整列表，保持顺序、自然键、全字段比对与生成错误优先级 |
+| storage | 结算明细 INSERT 调用数由 N 降至 ⌈N/256⌉；告警批次条目由最多 64 次降至 1 次。仍共用原事务、校验、锁和追加事实顺序；活动代理部分唯一索引允许移除冗余 DISTINCT |
+| storage | Admin 拍卖、lot、审计、改名、代理历史、结算目录及 recovery 报告复用 Repeatable Read 只读快照，计数、页和关联投影同源；关键写入保留 Serializable |
+| HTTP / Worker | 查询键借用路由允许列表；限流满表清理和最久未访问项选择合并为一次扫描，原解码、判重与确定性淘汰规则保持。Worker 用条件导入替代两份纯转发异步包装，精简资源说明注释 |
+| integrations / jobs | 邮件 JSON 文本共用借用解码，保留整页脚本及协议校验；PM 复用 drain 等待门禁，原抖动精度和范围保持。UDS control 显式关闭环境代理及传输自动重试 |
+| Web / contracts | Public 三状态目录最多并发三路读取，标记索引借用 ID，账号续期不再取消同身份标记读取；Admin 配置判重降为预期 O(N) 或 O(N log N)，删除四个等价邮件 DTO 镜像，保留原字段及值域校验 |
+| CI / dependencies | 发布缓存增加固定文件白名单的 SHA-256 完整性校验；仓库策略纳入 Cargo.lock。cargo-audit 关闭未使用的 binary-scanning，GNU 活跃图 302 → 293；sccache 通过固定哈希补丁及独立锁升级 Zstandard 三项，缓存恢复只保留普通 rwx 权限位；补丁纳入原有构建配方身份 |
+
+主审复核撤回了会跳过原解析校验或改变 DOM 移除观察语义的候选。配置、首次设置、进程原语、可观测性及缓存也已
+纳入盘点和重点审读，未确认需要修改的实现保留。12 个已有测试覆盖不同边界，8 个测试模块与基线逐字一致；本轮保留且不执行。
+应用的 50 项直接外部依赖均有用途，应用 Cargo.lock 与全部历史迁移不变；技术栈将重复的近期依赖说明收敛为当前能力摘要。
+
+四份完整锁以独立、干净的 RustSec 快照 `99670cfc0bc574433034b75876a4b791ccaa2efb`（1,380 条公告）执行
+`--deny warnings`，不加忽略项。应用与 cargo-audit 零漏洞、零警告；sccache 完整锁由 7 项漏洞匹配/17 项警告降至
+5/9，dx 保持 13/11，两份完整工具锁审计仍失败。活跃图、受限 API、剩余上游约束及受控工具构建证据归
+[工具 owner](ci/tools/README.md#同日并行审计锁文件扫描与-sccache-zstandard-修复)。
+
+Rust 1.99.0 下 `CARGO_BUILD_JOBS=2 just verify` 通过，覆盖仓库/布局/配置/i18n/装备契约、格式、工作区全部已有目标、
+独立 PostgreSQL/Redis feature、Clippy `-D warnings` 和双端 WASM；Rust 1.94.1 下
+`CARGO_BUILD_JOBS=2 cargo +1.94.1 check --locked --workspace --all-targets --all-features` 通过。
+全部 CI shell 的语法/ShellCheck warning 检查、Actions actionlint、`cargo machete` 和 `git diff --check` 通过；
+49 份 Markdown 的 1,466 处本地引用已核对路径与标题锚点，修改后的契约另作源码对照。
+五个原生程序和双端 WASM 的实际依赖图已核对隔离边界；四份审计锁的摘要与当前文件一致，RustSec 工作树干净且提交匹配。
+audit/release 两档工具已从最终脚本、补丁和锁图重建，主审独立核验两档安装回执通过；上游编译警告见工具说明。
+
+本轮只做静态审计、编译与文档核对，不运行行为测试、服务、数据库、浏览器或性能基准，不构建应用发布制品或部署。
+SQL 调用数、复杂度与分配变化来自源码分析，实际吞吐和延迟尚未测量；部署继续沿用
+[同版升级边界](ops/README.md#读取快照与实时分发优化升级)。
+
+后续候选仍包括结算逐 lot 的锁内快照装配、大历史资金投影聚合、Redis 单值读取预算，以及需要服务端接口配合的
+历史场次/标记目录扫描；这些项涉及锁序、历史数据或读取契约，保留现有行为及相应边界。
+
 ### 2026-10-27 批量持久化与边界复核
 
 基线为干净的 `155e158d`。按 owner 并行审查 20 个工作区包，清单包含 1,431 份 Rust 文件、49 份 Markdown、
@@ -205,7 +244,7 @@ Rust 1.94.1 的 `CARGO_BUILD_JOBS=2 cargo +1.94.1 check --locked --workspace --a
 - 稳定性：存储重试循环兜底、Delivery Admin 重试、MoogleMail Return/Take 动作及论坛系统日志中的 6 处
   `unreachable!` 改为失败关闭的错误或显式分支，不改变正常路径结果。
 - 两组论坛协议回归测试抽取重复的 HTML/客户端装配，断言与覆盖不变；依赖结论见
-  [技术栈](docs/design/tech-stack.md#2026-10-27-冗余与死代码复审中的依赖核对)。
+  [技术栈](docs/design/tech-stack.md#当前依赖裁剪与复核)。
 
 Rust 1.99.0 下 `just verify` 通过，覆盖仓库策略、格式、工作区已有目标、独立 feature、Clippy `-D warnings` 与双端 WASM
 检查；Rust 1.94.1 的 `cargo check --locked --workspace --all-targets --all-features` 通过，`cargo machete` 未发现未使用直接依赖。
@@ -244,7 +283,7 @@ Worker 循环、依赖图与双端样式审读调用链和正式文档；源码�
 - 限流满表时先整批移除已过期窗口；`Date` 头交由 Hyper 统一生成；36 份相同的 `storage_error` 收敛为一处，
   并删除无人装配且会使用空标色规则的 `PublicLotReader for DatabaseStore`；Admin 各表格调用处重复的“仅当前页排序”
   与“错误可页内重试”注释共 20 行删除，约束仍由共享 `app/sort.rs` 与组件文档说明。
-- `tracing-subscriber` 关闭未使用的 `ansi`，`nu-ansi-term` 退出锁图；其余依赖核对结论见[技术栈](docs/design/tech-stack.md#2026-10-26-性能复审中的依赖核对)。
+- `tracing-subscriber` 关闭未使用的 `ansi`，`nu-ansi-term` 退出锁图；其余依赖核对结论见[技术栈](docs/design/tech-stack.md#当前依赖裁剪与复核)。
 - 共享样式新增对三层底色均不低于 3:1 的控件边界色，Public 输入/选择器、分页与语言选择改用该色；
   错误文字在 raised 底上提升至不低于 4.5:1，Admin 错误横幅改用深红底，并增加 `prefers-contrast: more` 适配；
   注册提示与数据库名说明改用本地化引号，少量物理 CSS 属性改为逻辑属性。已有行为测试未删除或新增。

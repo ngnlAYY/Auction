@@ -45,7 +45,7 @@ async fn postgres_report(
 
     let mut transaction = store
         .pool()
-        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        .begin_read_snapshot()
         .await
         .map_err(|_| storage_error("打开 recovery 报告快照失败"))?;
 

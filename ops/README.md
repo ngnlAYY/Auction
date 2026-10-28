@@ -199,6 +199,8 @@ just package
 分体归档 `target/dist/package/` 仅含四程序、配置示例、systemd/Caddy/tmpfiles 模板、恢复文档、retention policy、依赖摘要和 payload
 清单；包内 SHA256SUMS 绑定全部批准文件，外层清单绑定 archive/依赖摘要。不含数据库、Cookie、.keyenv 或运行数据；解包后向
 PostgreSQL 五字段敏感模板注入真实值。API-only 无 Web 资源；内嵌档 Public/Admin 仅含各自 payload，Worker/auctionctl 无页面。
+API-only、内嵌和合并变体的中间制品目录另有 `SHA256SUMS`，覆盖构建信息、全部程序及适用的 Web 清单/标记；
+复用或装包前重算摘要，缺失或不符时须重建。该缓存清单不进入归档，包内与外层校验仍使用各自的既有清单。
 源码身份须构建前冻结、各阶段复查；正式 package 拒绝脏树，`--allow-dirty` 仅供受控本地取证，不是上线批准。归档保留
 `systemd/README.md` 作为指向 `docs/DEPLOYMENT.md` 的导航，安装说明只维护本页；完整发布门禁见[CI 说明](ci/README.md#发布边界)。
 
