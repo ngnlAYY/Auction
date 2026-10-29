@@ -55,23 +55,32 @@ sccache 独立锁图另将 `ctutils` 从 0.4.2 更新至 0.4.4，应用根锁同
 dx 编译期关闭自动下载，Web 入口同时设 `NO_DOWNLOADS=1`；补丁让 esbuild 和 wasm-opt 的所有查询/执行入口优先
 受控 PATH，忽略历史下载缓存。wasm-bindgen 原有入口已遵守此顺序；缺配套工具时明确失败。配套下载先校验归档哈希再解包，
 不用旧 dx 自身的 TLS 下载器。源码工具采用独立 GNU release profile、最多两个编译任务，并清除继承的 CPU、wrapper
-和 profile 参数；不改变 Auction 原生/WASM 的 Fat LTO、单代码生成单元或 CPU 基线。
+和 profile 环境覆盖；文件配置中的本机链接器等设置继续生效并纳入配方身份，两类 rustc wrapper 显式禁用。
+不改变 Auction 原生/WASM 的 Fat LTO、单代码生成单元或 CPU 基线。
 
 ## 身份与缓存
 
 工具源码构建清除应用的 profile、rustflags、编译器/包装器及增量覆盖环境变量，包括 Cargo 的
 `CARGO_BUILD_RUSTC*`、`CARGO_BUILD_INCREMENTAL` 别名与 `CARGO_INCREMENTAL`，避免环境别名绕过独立构建配方。
+清除后显式设置空 `RUSTC_WRAPPER` / `RUSTC_WORKSPACE_WRAPPER`，防止 Cargo 从用户文件配置重新启用包装器。
+Cargo 文件配置不因独立 `--manifest-path` 而隔离；保留其中的 clang/mold 等本机设置，由
+`ci/release/build-identity.sh::cargo_config_fingerprint` 统一扫描调用目录、父目录及 `CARGO_HOME` 的
+`config` / `config.toml`。工具配方绑定该共享实现及配置摘要（含路径、权限、链接目标内容与缺失状态），
+配置变化会使旧回执失效；开始与完成时都核对，原文不写入回执。此处不保证与另一台主机逐字节重现工具。
 发布制品的复用指纹则显式绑定这些输入，见[CI 构建身份](ci/README.md#发布边界)。
 
 `target/build-tools/` 与 `target/audit-tools/` 各自包含 `bin/`、`lib/`、`BUILD-INFO` 和 `SHA256SUMS`。
-回执绑定安装脚本、固定源码补丁、独立锁图、Rust 工具链、目标及精确文件清单；缓存恢复后重新验证每个二进制的内容。
+回执绑定安装及共享身份脚本、Cargo 配置摘要、固定源码补丁、独立锁图、Rust 工具链、目标及精确文件清单；缓存恢复后重新验证每个二进制的内容。
 安装开始冻结配方，完成时再次核对配方及实际源码锁；编译期间有变化则保留增量缓存并拒绝签发回执。
 脚本、补丁、锁图或编译器变化会重建，工具安装目录采用临时目录完成后整体替换。
+配方内每次文件摘要与编译器查询都显式检查退出状态；回执验证先成功取得完整配方摘要，再比较已记录身份。
+这也适用于 `if verify_install` 会禁用函数内部 `errexit` 的调用路径，避免缺失输入被末尾成功命令掩盖。
+该脚本变更仍会使旧回执失效，须按当前配方重新安装，不能只重写回执。
 
 `bootstrap.sh fingerprint <档位>` 输出配方身份；`identity` 先验证已装工具再输出配方及二进制身份。release 的
 identity 加入应用 `BUILD-INFO` 和 Web `WEB-BUILD-INFO` 的构建环境摘要，工具配方（`bootstrap.sh`、`rustup.sh`、`locks/`、
 `patches/`）同时纳入构建输入指纹，修复后的同版本工具不会复用旧工具产物；本目录说明与 `blaze.sh` 不影响产物身份。发布/Web 共用 `configure_build_tools`；只接受环境变量启用的 sccache，
-Cargo 配置文件中的包装器用空 `RUSTC_WRAPPER` 覆盖；启用 sccache 时固定其路径，并按
+对应环境入口均未指定时，Cargo 文件中的两类包装器分别用空 `RUSTC_WRAPPER` / `RUSTC_WORKSPACE_WRAPPER` 覆盖；启用 sccache 时固定其路径，并按
 用户、仓库和工具身份配置 Linux 抽象 Unix socket，隔离默认端口上的旧 daemon。CI 的 sccache GHA 前缀为
 `auction-tls-20261022`，隔离修复前的缓存对象。
 
@@ -242,3 +251,23 @@ dx 完整锁仍为 13 项漏洞匹配、11 项警告；它们的锁字节未变�
 最终 audit/release 两档已重新构建并通过各自安装回执校验，sccache/dx 版本命令正常返回；
 固定哈希补丁以零模糊匹配应用，构建使用 `--locked`。cargo-audit 仍有 17 条上游宏兼容警告，
 sccache 仍有 1 条上游 dead-code 警告。上述证据不包含应用发布、运行流程或缓存性能基准。
+
+### 2026-10-29 四锁复审
+
+使用按本轮完整配方安装的 cargo-audit 0.22.2，在独立 RustSec 快照
+`40f5be6fb12ed93fc591bf4ab23b7d793b3f2239`（1,381 条公告）对四份锁执行 `--deny warnings`，不设置忽略项。
+
+| 锁图 | 条目 | 漏洞匹配项 | 警告 | 结果 |
+| --- | ---: | ---: | ---: | --- |
+| Auction 应用 | 535 | 0 | 0 | 通过 |
+| cargo-audit | 405 | 0 | 0 | 通过 |
+| dx | 810 | 13 | 11 | 失败 |
+| sccache | 530 | 4 | 9 | 失败 |
+
+剩余匹配与上次复审相同：dx 为 gix-date、quick-xml、rkyv、ruzstd、zip；sccache 为 RSA 与 ZIP。
+修复版本跨越上游当前约束，RSA 尚无已发布修复；本轮没有强制替换工具内部 API、删除用途所需依赖或放宽审计门禁。
+完整锁同时包含其他平台、未启用功能与测试依赖，实际受限路径继续按上文审查，不能将用途限制写成零风险。
+应用 20 个包、50 项直接外部依赖及五个 GNU 程序/双端 WASM 图未发现可安全删除的依赖；四份锁保持不变。
+原始工具报告在 `target/audits/source-audit-20261029/`，源码、静态门禁及工具构建证据见[本轮状态](docs/status.md#2026-10-29-全仓复审与配置身份修复)。
+本轮 audit/release 两档均按最终脚本、共享身份逻辑与当前 Cargo 配置重新构建，安装器的开始/结束配方、源码锁及二进制回执
+核对全部通过；cargo-audit 的 17 条上游宏兼容警告和 sccache 的一条 dead-code 警告仍保留。没有运行应用发布或缓存性能测试。

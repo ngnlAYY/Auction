@@ -54,7 +54,9 @@ for required in cargo date diff dx find git gzip install sha256sum sort stat tar
 done
 
 worktree_state() {
-	if [[ -z $(git status --porcelain=v1 --untracked-files=all --ignore-submodules=none) ]]; then
+	local status
+	status=$(git status --porcelain=v1 --untracked-files=all --ignore-submodules=none) || return 1
+	if [[ -z "$status" ]]; then
 		printf 'clean\n'
 	else
 		printf 'dirty\n'
@@ -63,11 +65,14 @@ worktree_state() {
 
 write_build_info() {
 	local destination=$1 variant=$2 features=$3
-	local commit state fingerprint lock_sha
-	commit=$(git rev-parse --verify 'HEAD^{commit}')
-	state=$(worktree_state)
-	fingerprint=$(source_fingerprint)
-	lock_sha=$(sha256_file Cargo.lock)
+	local commit state fingerprint lock_sha inputs_sha environment_sha
+	commit=$(git rev-parse --verify 'HEAD^{commit}') || return 1
+	state=$(worktree_state) || return 1
+	fingerprint=$(source_fingerprint) || return 1
+	lock_sha=$(sha256_file Cargo.lock) || return 1
+	# printf 的成功不能覆盖命令替换的失败；所有身份读取成功后才写入回执。
+	inputs_sha=$(build_inputs_fingerprint) || return 1
+	environment_sha=$(build_env_fingerprint) || return 1
 	printf '%s\n' \
 		'schema=auction-release-build/1' \
 		"variant=$variant" \
@@ -76,8 +81,8 @@ write_build_info() {
 		"source_fingerprint=$fingerprint" \
 		"cargo_lock_sha256=$lock_sha" \
 		"features=$features" \
-		"build_inputs_sha256=$(build_inputs_fingerprint)" \
-		"build_env_sha256=$(build_env_fingerprint)" \
+		"build_inputs_sha256=$inputs_sha" \
+		"build_env_sha256=$environment_sha" \
 		>"$destination"
 	chmod 0644 "$destination"
 }
@@ -279,15 +284,17 @@ verify_build_info() {
 		printf '缺少发布构建信息：%s\n' "$info" >&2
 		return 1
 	fi
-	local current_lock
-	current_lock=$(sha256_file Cargo.lock)
+	local current_lock current_inputs current_environment
+	current_lock=$(sha256_file Cargo.lock) || return 1
+	current_inputs=$(build_inputs_fingerprint) || return 1
+	current_environment=$(build_env_fingerprint) || return 1
 	# source_commit/source_fingerprint 只记录构建当时的来源；复用判定以构建输入为准，
 	# 因此“旧提交构建、文档已更新”的制品仍可发布，但代码或迁移变动必然触发重建。
 	if [[ $(read_build_info "$info" schema) != auction-release-build/1 ||
 	$(read_build_info "$info" variant) != "$expected_variant" ||
-	$(read_build_info "$info" build_inputs_sha256) != "$(build_inputs_fingerprint)" ||
+	$(read_build_info "$info" build_inputs_sha256) != "$current_inputs" ||
 	$(read_build_info "$info" cargo_lock_sha256) != "$current_lock" ||
-	$(read_build_info "$info" build_env_sha256) != "$(build_env_fingerprint)" ]]; then
+	$(read_build_info "$info" build_env_sha256) != "$current_environment" ]]; then
 		printf '发布构建信息与当前构建输入不一致，请重新构建：%s\n' "$root" >&2
 		return 1
 	fi
@@ -745,7 +752,10 @@ package_release() (
 	local archive="$temporary_root/$package_name.tar.gz"
 	create_archive "$temporary_root" "$package_name" "$first_archive" "$epoch"
 	create_archive "$temporary_root" "$package_name" "$archive" "$epoch"
-	if [[ $(sha256_file "$first_archive") != $(sha256_file "$archive") ]]; then
+	local first_archive_sha archive_sha
+	first_archive_sha=$(sha256_file "$first_archive") || return 1
+	archive_sha=$(sha256_file "$archive") || return 1
+	if [[ "$first_archive_sha" != "$archive_sha" ]]; then
 		printf '同一白名单的两次 release archive 不一致\n' >&2
 		return 1
 	fi
@@ -758,13 +768,14 @@ package_release() (
 	install -m 0644 "$temporary_root/DEPENDENCIES.md" "$publish_next/DEPENDENCIES.md"
 	(
 		cd "$publish_next"
-		printf '%s  %s\n' "$(sha256_file DEPENDENCIES.md)" DEPENDENCIES.md
-		printf '%s  %s\n' "$(sha256_file "$package_name.tar.gz")" "$package_name.tar.gz"
+		sha256sum DEPENDENCIES.md "$package_name.tar.gz"
 	) >"$publish_next/SHA256SUMS"
 	chmod 0644 "$publish_next/SHA256SUMS"
 	# 文档与配置也属于源码身份；装包期间发生变化时保留上一份发布目录，拒绝发布混合快照。
-	if [[ $(git rev-parse --verify 'HEAD^{commit}') != "$commit" ||
-	$(source_fingerprint) != "$fingerprint" ]]; then
+	local final_commit final_fingerprint
+	final_commit=$(git rev-parse --verify 'HEAD^{commit}') || return 1
+	final_fingerprint=$(source_fingerprint) || return 1
+	if [[ "$final_commit" != "$commit" || "$final_fingerprint" != "$fingerprint" ]]; then
 		printf '装包期间源码发生变化，请重新构建并装包\n' >&2
 		return 1
 	fi

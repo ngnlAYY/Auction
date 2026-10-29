@@ -58,6 +58,7 @@ FIFO 不会阻塞启动。独立 loader 保留合法符号链接；部署预检�
 生成器在私有临时目录复用模板，固定敏感文件 0600、非敏感文件 0640（不依赖 umask），经三角色 loader 校验后原子发布；
 生成配置信任本机代理，启用 Worker control 并绑定服务 UID，不含 `.keyenv`、部署码、首次确认值或临时代理策略。
 首次生成的 `worker.forum.public_base_url` 使用已校验的 Public origin，论坛链接不会沿用模板域名。
+周排期与 `early_bird` 候选作为完整配置组校验并序列化，生成器不会用模板值覆盖调用方的早鸟配置；网页首次设置仍默认关闭早鸟期。
 [合并服务](apps/auction-server/README.md#首次启动)复用此格式，以当前账号组/UID 管理配置目录同级的私有 control 目录；仅网页明确
 确认后初始化专用空库，`--config-dir` 与 `AUCTION_CONFIG_FILE` 互斥。
 
@@ -87,6 +88,7 @@ host/port，不从环境补齐目标。
 该默认端口，不重写原文凭据编码。普通角色与直接存储连接都不使用 `PGHOST`、`PGPORT`、`PGDATABASE` 补齐目标；用户名、
 密码、pgpass、IPv6、socket 和 TLS 参数保留原驱动语义。
 普通连接在首次 SQLx 解析前拒绝未知查询键，错误只返回固定分类，不回显键值或驱动原始解析错误；
+CLI 的 libpq 备份/恢复适配同样不回显未知键，防止错放的凭据片段进入命令输出。
 允许当前驱动支持的 host/db/凭据、TLS 别名、statement-cache-capacity、application_name 及合法 `options`/`options[name]`。
 strict 部署身份仍禁止 options，避免同库目标被附加会话选项重解释；此区别不放宽任何未知参数。
 
@@ -146,8 +148,8 @@ runtime 保存与启动共用 listener、精确规范 HTTP(S) Origin、tracing e
 普通读取和无相关接管的旧启动也不因缺少引用失败。
 
 升级已使用 runtime 的部署时，在 `public.toml` 顶层补充与 Admin/Worker 相同的 `runtime_config_file` 引用；Public 完整校验文件，
-只保留装备规则与注册提示账号的窄投影，不接管 Admin listener、安全、会话或 Worker `operations`。分体及合并预检要求三角色引用同一文件且规则
-快照一致，或三角色全部省略。全部省略时使用空规则，Peerless 仍归稀有，其余归融合。
+只保留装备规则与注册提示账号的窄投影，不接管 Admin listener、安全、会话或 Worker `operations`。分体及合并预检要求三角色引用同一文件，
+且装备规则与 `bot_players` 名单快照均一致，或三角色全部省略；路径相同不能替代内容核对。全部省略时使用空规则和空名单，Peerless 仍归稀有，其余归融合。
 规则保存后协调重启 Public 和 Worker，使公开页分组与之后生成的论坛帖子使用同版规则；已发布帖子在后续实际同步前保留原内容。
 
 | 配置组 | 责任与生效范围 | 重启范围 |
@@ -292,10 +294,11 @@ OTLP headers 的名称和值先按严格百分号编码解码，再检查 HTTP t
   当前早鸟场次。同一 world 至多一场处于 preview/live/final/settling（既有唯一索引），前一场软截止延长或结算未完成时，
   下一场预览延后重试（退避上限 15 分钟）。
 - 收件品质：参与 world 的投稿邮件收件时间落在 `[赛季开始, 赛季开始 + window_days)` 时改用 `qualities`，空数组表示不限品质；
-  其余筛选维度不变，窗口外仍使用 `equipment_filter.qualities`。
+  其余筛选维度不变，窗口外仍使用 `equipment_filter.qualities`。窗口独立于具体场次校验：夏令时换时使某场
+  preview/open/end 不严格递增时，该场次仍拒绝建立，但不会使整季收件窗口消失或回退为常规品质。
 - 赛季前停收：`pause_intake_before_season = true` 时，首场早鸟草稿建立后（通常是赛季前最后一场周场开拍时）到赛季开始前暂停该
-  world 收件轮询；赛季开始后、首场预览前恢复，首场预览后沿用开拍前两小时暂停。停收期间的邮件恢复后才处理，收件时间早于窗口，
-  使用常规品质。
+  world 收件轮询；赛季开始后、首场预览前恢复，首场预览后沿用开拍前两小时暂停。已建立轮次以冻结预览时刻及预览完成事实
+  为准，配置模板的较晚预览时间不得解除既有暂停。停收期间的邮件恢复后才处理，收件时间早于窗口时使用常规品质。
 - 生效：保存后重启 Admin 与 Worker，只影响此后新建的后继与 bootstrap，已冻结轮次不改写。须在赛季前最后一场周场开拍之前启用，
   链路才会把它的后继排为首场早鸟；时机、更新延迟和空场处理见[早鸟期运维](ops/README.md#赛季早鸟期)。
 

@@ -7,35 +7,35 @@ use super::super::*;
 pub(crate) fn validate_auction(config: &AuctionConfig) -> Result<(), ConfigError> {
     let policy = config.policy()?;
     if config.schedule.enabled {
-        config.schedule.validate()?;
+        validate_schedule(&config.schedule)?;
     }
-    // 早鸟期即使未启用也完整校验，保证候选随时可以启用；启用时必须依附已启用的周排期。
-    config
-        .schedule
+    validate_early_bird(&config.schedule)?;
+    policy.validate().map_err(|_| ConfigError::InvalidAuctionConfig("经济、结算或恢复字段边界无效"))
+}
+
+impl AuctionScheduleConfig {
+    /// 校验周计划与早鸟期，即使暂未启用也可检查候选；首次设置与正式 loader 共用同一规则。
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        validate_schedule(self)?;
+        validate_early_bird(self)
+    }
+}
+
+fn validate_early_bird(schedule: &AuctionScheduleConfig) -> Result<(), ConfigError> {
+    // 早鸟期即使未启用也完整校验；启用时必须依附已启用的周排期及其世界。
+    schedule
         .early_bird
         .validate()
         .map_err(|_| ConfigError::InvalidAuctionConfig("auction.schedule.early_bird 字段无效"))?;
-    if config.schedule.early_bird.enabled
-        && (!config.schedule.enabled
-            || config
-                .schedule
-                .early_bird
-                .worlds
-                .iter()
-                .any(|world| !config.schedule.worlds.contains(world)))
+    if schedule.early_bird.enabled
+        && (!schedule.enabled
+            || schedule.early_bird.worlds.iter().any(|world| !schedule.worlds.contains(world)))
     {
         return Err(ConfigError::InvalidAuctionConfig(
             "auction.schedule.early_bird 启用时须启用 auction.schedule，且早鸟世界须包含在排期世界内",
         ));
     }
-    policy.validate().map_err(|_| ConfigError::InvalidAuctionConfig("经济、结算或恢复字段边界无效"))
-}
-
-impl AuctionScheduleConfig {
-    /// 校验本地周计划，即使暂未启用也可检查候选；首次设置与正式 loader 共用同一规则。
-    pub fn validate(&self) -> Result<(), ConfigError> {
-        validate_schedule(self)
-    }
+    Ok(())
 }
 
 fn validate_schedule(schedule: &AuctionScheduleConfig) -> Result<(), ConfigError> {

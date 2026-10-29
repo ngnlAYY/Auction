@@ -138,7 +138,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: target/audit-tools
-          key: audit-tools-linux-${{ hashFiles('ci/tools/bootstrap.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
+          key: audit-tools-linux-${{ hashFiles('ci/tools/bootstrap.sh', 'ci/release/build-identity.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
           restore-keys: |
             audit-tools-linux-
       - name: Check audit tool receipt
@@ -239,7 +239,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: target/build-tools
-          key: release-tools-linux-${{ hashFiles('ci/tools/bootstrap.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
+          key: release-tools-linux-${{ hashFiles('ci/tools/bootstrap.sh', 'ci/release/build-identity.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
           restore-keys: |
             release-tools-linux-
       - name: Check release tool receipt

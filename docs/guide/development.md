@@ -87,6 +87,28 @@ bash ci/checks/check.sh dependency-audit dependency-unused
 漏洞及全部警告均阻断，不设置公告忽略项；cargo-machete 检查未用直接依赖，不代替 feature、可达性或许可评审。
 历史结果见[状态页](docs/status.md)。
 
+应用锁不覆盖构建工具；需要复审四份锁时，用同一独立 RustSec 快照，首个命令更新公告，后续固定该快照。
+先完成上述受控 audit 工具安装与回执验证，再执行：
+
+```bash
+audit_status=0
+audit_fetch=()
+for lock in Cargo.lock ci/tools/locks/*.Cargo.lock; do
+  if cargo audit --deny warnings --db target/rustsec-audit-db "${audit_fetch[@]}" --file "$lock"; then
+    printf '%s: exit=0\n' "$lock"
+  else
+    result=$?
+    printf '%s: exit=%s\n' "$lock" "$result"
+    audit_status=1
+  fi
+  audit_fetch=(--no-fetch)
+done
+test "$audit_status" -eq 0
+```
+
+每份报告和退出码分别保留；工具锁的未启用或跨平台公告仍是完整锁审计结果，须另对照实际普通/构建依赖图，
+不得用受限调用路径或历史通过记录代替本次审计，也不因首份失败跳过剩余锁。
+
 ## 选择制品 feature
 
 | 目标 | feature | 条件 |
@@ -138,7 +160,8 @@ Web 使用 `wasm-release`；dx 的 esbuild 仅供构建，不增加 Node/npm 运
 仅修改这些范围外的文档不会重跑原生 Fat LTO；Web payload 按 surface、共享层、契约、工具链版本及同一构建环境摘要独立复用，
 修改 `CARGO_PROFILE_WASM_RELEASE_*`、rustflags 或 Cargo 配置会重新构建页面。本机可选
 `RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache`（sccache 0.18.0）。
-发布入口只接受环境变量启用的 sccache，用户全局 `build.rustc-wrapper` 会被空 `RUSTC_WRAPPER` 覆盖；
+发布入口只接受环境变量启用的 sccache；对应环境入口均未指定时，用户配置中的 `build.rustc-wrapper` 与
+`build.rustc-workspace-wrapper` 分别由空 `RUSTC_WRAPPER` / `RUSTC_WORKSPACE_WRAPPER` 覆盖；
 发布入口将 sccache 解析为受控二进制，并按用户、工作区和工具身份选择独立 Unix socket，
 避免连接旧 daemon；不停止其他构建的进程，不改变 feature、资源隔离或归档契约。复用判定、指纹实现、
 资源隔离与 `--allow-dirty` 限制归[CI 说明](ci/README.md#发布边界)及[发布手册](ops/README.md#发布制品)；

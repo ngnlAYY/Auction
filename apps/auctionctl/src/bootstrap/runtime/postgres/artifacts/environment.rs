@@ -96,8 +96,9 @@ impl PostgresCommandEnvironment {
                 "ssl" if value == "true" => {
                     variables.push(("PGSSLMODE".to_owned(), "require".to_owned()));
                 }
+                // 未知键同样来自敏感 URL，可能是错放的凭据片段，不能回显。
                 _ => anyhow::bail!(
-                    "database_url query parameter is not supported by the backup adapter: {key}"
+                    "database_url query parameter is not supported by the backup adapter"
                 ),
             }
         }

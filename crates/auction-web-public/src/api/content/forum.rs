@@ -82,7 +82,8 @@ pub(super) fn valid_forum_url(value: &str) -> bool {
 /// 旧 Web 只接受小写 canonical、RFC 4122 variant 且版本为 1 至 5 的 UUID。
 fn valid_legacy_uuid(value: &str) -> bool {
     Uuid::parse_str(value).is_ok_and(|id| {
-        id.hyphenated().to_string() == value
+        let mut buffer = Uuid::encode_buffer();
+        id.hyphenated().encode_lower(&mut buffer) == value
             && matches!(id.get_version_num(), 1..=5)
             && id.get_variant() == Variant::RFC4122
     })

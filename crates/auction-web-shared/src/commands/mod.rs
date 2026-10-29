@@ -65,14 +65,17 @@ impl<P: Clone + 'static, E: 'static> ConfirmCommand<P, E> {
         {
             return pending.clone();
         }
-        let command_id = match (self.frozen)() {
-            Some((current, command_id)) if current == signature => command_id,
-            _ => {
-                let command_id = Uuid::new_v4();
-                self.frozen.set(Some((signature, command_id)));
-                command_id
-            }
-        };
+        let frozen_id = self
+            .frozen
+            .peek()
+            .as_ref()
+            .filter(|(current, _)| current == &signature)
+            .map(|(_, command_id)| *command_id);
+        let command_id = frozen_id.unwrap_or_else(|| {
+            let command_id = Uuid::new_v4();
+            self.frozen.set(Some((signature, command_id)));
+            command_id
+        });
         let pending = build(command_id);
         self.command.set(Some(pending.clone()));
         self.confirmation.set(Some(pending.clone()));

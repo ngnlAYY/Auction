@@ -20,7 +20,7 @@ impl AdminLotUpdateTransaction for PostgresCompetitionTransaction {
         &mut self,
         command: StoredCommand,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
-        async move { self.insert_command_inner(command).await }
+        async move { self.insert_command_inner(&command).await }
     }
 
     fn load_admin_lot_for_update(
@@ -36,8 +36,7 @@ impl AdminLotUpdateTransaction for PostgresCompetitionTransaction {
         command: &AdminLotUpdateCommand,
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<AdminLotSummary, CompetitionTransactionError>> + Send {
-        let command = command.clone();
-        async move { update_admin_lot_inner(self, &command, now).await }
+        async move { update_admin_lot_inner(self, command, now).await }
     }
 
     fn advance_admin_preview_revision(
@@ -82,9 +81,7 @@ impl AdminLotUpdateTransaction for PostgresCompetitionTransaction {
         snapshot: &AdminLotUpdateSnapshot,
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
-        let command = command.clone();
-        let snapshot = snapshot.clone();
-        async move { insert_withdrawn_return_obligation_inner(self, &command, &snapshot, now).await }
+        async move { insert_withdrawn_return_obligation_inner(self, command, snapshot, now).await }
     }
 
     fn append_admin_lot_record(
@@ -95,13 +92,11 @@ impl AdminLotUpdateTransaction for PostgresCompetitionTransaction {
         auction_state_version: i64,
         preview_revision: i64,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
-        let command = command.clone();
-        let result = result.clone();
         async move {
             append_admin_lot_record_inner(
                 self,
-                &command,
-                &result,
+                command,
+                result,
                 changed,
                 auction_state_version,
                 preview_revision,

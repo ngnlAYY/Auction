@@ -49,7 +49,6 @@ pub(super) fn resolve_start_price_plan(
     default_price: i64,
 ) -> Result<Vec<i64>, PricingFailure> {
     const INVALID: &str = "start_price_invalid";
-    const MISSING: &str = "start_price_missing";
     const DUPLICATE: &str = "start_price_duplicate";
     const IDENTITY_MISMATCH: &str = "start_price_identity_mismatch";
     const NOT_FOUND: &str = "start_price_attachment_not_found";
@@ -144,8 +143,8 @@ pub(super) fn resolve_start_price_plan(
             }
         }
     }
-    let (fields, field_indices, has_explicit_directive) = if !explicit_fields.is_empty() {
-        (explicit_fields, explicit_indices, true)
+    let (fields, field_indices) = if !explicit_fields.is_empty() {
+        (explicit_fields, explicit_indices)
     } else {
         // 统一起拍价只消费独立的 start/金额指令，附件说明和其它说明行仍保留在原正文中。
         // 扫描完整分词列表，避免合法指令掩盖后续重复、混合或畸形的 start。
@@ -197,7 +196,7 @@ pub(super) fn resolve_start_price_plan(
             fields.extend([token.value, amount.value]);
             field_indices.extend([token.index, amount.index]);
         }
-        (fields, field_indices, false)
+        (fields, field_indices)
     };
     if fields.len() == 2 && fields[0].eq_ignore_ascii_case("start") {
         let price = parse_start_price_amount(fields[1]).ok_or_else(|| {
@@ -295,16 +294,6 @@ pub(super) fn resolve_start_price_plan(
             )
         })?;
         seen[target] = true;
-    }
-    if !has_explicit_directive && seen.iter().any(|found| !found) {
-        return Err(pricing_failure(
-            MISSING,
-            "missing_attachment_directive",
-            body,
-            token_count,
-            None,
-            attachment_count,
-        ));
     }
     Ok(prices)
 }

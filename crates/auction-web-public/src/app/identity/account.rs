@@ -93,14 +93,14 @@ fn AccountPreferenceScope(user_id: String) -> Element {
 #[component]
 fn AccountReadScope(user_id: String) -> Element {
     rsx! {
-        watches::CurrentWatches { user_id }
-        AuthenticatedAccountData {}
+        watches::CurrentWatches { user_id: user_id.clone() }
+        AuthenticatedAccountData { user_id }
     }
 }
 
 /// 只有共享 session 已确认认证后才挂载受保护列表资源，对齐旧版请求序列。
 #[component]
-fn AuthenticatedAccountData() -> Element {
+fn AuthenticatedAccountData(user_id: String) -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
     let mut account_reload_generation = use_signal(|| 0_u64);
     // 竞价与代理页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
@@ -112,8 +112,9 @@ fn AuthenticatedAccountData() -> Element {
         let _ = refresh_generation();
         let _ = account_reload_generation();
         let requested = (bid_page(), proxy_page());
+        let user_id = user_id.clone();
         async move {
-            let result = fetch_my_bids(requested.0, requested.1).await;
+            let result = fetch_my_bids(&user_id, requested.0, requested.1).await;
             (requested, result)
         }
     });

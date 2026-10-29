@@ -22,6 +22,7 @@ impl MoogleMailSender {
             .checked_add(self.verification_budget)
             .ok_or_else(|| scan_timeout(world))?;
         let round = self.client.read_round(cookie, world, true)?;
+        check_deadline(deadline, world)?;
         let list = timeout_at(
             deadline,
             self.client.observe_sent_list(cookie, &round, self.verification_pages),
@@ -57,12 +58,14 @@ impl MoogleMailSender {
         expected_equipment.sort_unstable();
         // POST 的完成/取消屏障之外再建立 fresh 轮次，绝不接受发送前或发送中的观测。
         let round = self.client.read_round(cookie, world, true)?;
+        check_deadline(deadline, world)?;
         let list = timeout_at(
             deadline,
             self.client.observe_sent_list(cookie, &round, self.verification_pages),
         )
         .await
         .map_err(|_| scan_timeout(world))??;
+        check_deadline(deadline, world)?;
         if !list.complete {
             return Err(self.scan_page_limit(world, "after_send", list.summaries.len()));
         }
@@ -73,18 +76,23 @@ impl MoogleMailSender {
                 && summary.recipient.eq_ignore_ascii_case(&request.message.recipient)
                 && subject_is_list_projection(&summary.subject, &request.message.subject)
         }) {
+            // 列表解析或候选过滤可能耗尽预算；过期 timeout 的首次 poll 也不能派发新详情读取。
+            check_deadline(deadline, world)?;
             let target = self.client.sent_detail(world, &summary.external_mail_id)?;
             let detail = timeout_at(deadline, self.client.get_in_round(&target, cookie, &round))
                 .await
                 .map_err(|_| scan_timeout(world))??;
-            let proof = self
-                .client
-                .diagnose_parse(
+            check_deadline(deadline, world)?;
+            let proof = timeout_at(
+                deadline,
+                self.client.diagnose_parse(
                     &target,
                     &detail,
                     self.parser.parse_sent_content_proof(&detail, summary),
-                )
-                .await?;
+                ),
+            )
+            .await
+            .map_err(|_| scan_timeout(world))??;
             check_deadline(deadline, world)?;
             if proof.body_digest != expected_body {
                 if response_mail_id == Some(proof.external_mail_id.as_str()) {
@@ -105,7 +113,10 @@ impl MoogleMailSender {
             }
             verified = Some(proof.external_mail_id);
         }
-        self.client.check_read_round(cookie, &round).await?;
+        check_deadline(deadline, world)?;
+        timeout_at(deadline, self.client.check_read_round(cookie, &round))
+            .await
+            .map_err(|_| scan_timeout(world))??;
         check_deadline(deadline, world)?;
         verified
             .filter(|mail_id| response_mail_id.is_none_or(|hint| hint == mail_id))

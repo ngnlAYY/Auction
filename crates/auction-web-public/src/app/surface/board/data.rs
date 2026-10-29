@@ -66,7 +66,7 @@ pub(crate) fn AuctionData(
     use_effect(move || {
         let _ = tick();
         let now = estimated_now();
-        if *opening_refresh_key.peek() != Some(opening_key.clone()) {
+        if opening_refresh_key.peek().as_deref() != Some(opening_key.as_str()) {
             opening_refresh_key.set(Some(opening_key.clone()));
             opening_refreshed.set(false);
         }

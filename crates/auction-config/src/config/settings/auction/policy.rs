@@ -1,7 +1,7 @@
 //! 拍卖创建时冻结的经济、结算和恢复策略配置。
 
 use chrono::Duration;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::super::ConfigError;
 use auction_application::{
@@ -25,7 +25,7 @@ pub struct AuctionConfig {
 }
 
 /// 使用 IANA 时区表达的本地周拍卖时间表。
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuctionScheduleConfig {
     /// 是否启用 Worker 周计划；省略时关闭，避免开发数据库自动建轮次。

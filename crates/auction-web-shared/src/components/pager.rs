@@ -194,19 +194,24 @@ pub fn Pager(
     }
 }
 
-/// 最多生成七个页码/省略项；不按总页数分配内存，也不把省略号变成不可预期的跳页动作。
-fn numbered_pages(page: i64, total_pages: i64) -> Vec<Option<i64>> {
-    if total_pages <= 7 {
-        return (1..=total_pages).map(Some).collect();
-    }
-    if page <= 4 {
-        return (1..=5).map(Some).chain([None, Some(total_pages)]).collect();
-    }
-    if page >= total_pages - 3 {
-        return [Some(1), None]
-            .into_iter()
-            .chain((total_pages - 4..=total_pages).map(Some))
-            .collect();
-    }
-    vec![Some(1), None, Some(page - 1), Some(page), Some(page + 1), None, Some(total_pages)]
+/// 最多生成七个页码/省略项；固定栈缓冲不分配临时 Vec，省略号仍不可点击。
+fn numbered_pages(page: i64, total_pages: i64) -> impl Iterator<Item = Option<i64>> {
+    let pages = if total_pages <= 7 {
+        [Some(1), Some(2), Some(3), Some(4), Some(5), Some(6), Some(7)]
+    } else if page <= 4 {
+        [Some(1), Some(2), Some(3), Some(4), Some(5), None, Some(total_pages)]
+    } else if page >= total_pages - 3 {
+        [
+            Some(1),
+            None,
+            Some(total_pages - 4),
+            Some(total_pages - 3),
+            Some(total_pages - 2),
+            Some(total_pages - 1),
+            Some(total_pages),
+        ]
+    } else {
+        [Some(1), None, Some(page - 1), Some(page), Some(page + 1), None, Some(total_pages)]
+    };
+    pages.into_iter().take(total_pages.clamp(0, 7) as usize)
 }

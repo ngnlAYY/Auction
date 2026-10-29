@@ -57,8 +57,14 @@ pub(super) fn field(path: &str) -> Option<&str> {
 
 /// 把区块（缺省时为默认区块）投影为输入框文本；列表按行展示。
 pub(super) fn inputs(document: &Value) -> Result<Vec<(&'static str, String)>, ()> {
-    let defaults = default_block();
-    let source = block(document).unwrap_or(&defaults);
+    let defaults;
+    let source = match block(document) {
+        Some(source) => source,
+        None => {
+            defaults = default_block();
+            &defaults
+        }
+    };
     let mut inputs = Vec::new();
     for path in TEXT_FIELDS {
         let value = source.get(field(path).ok_or(())?).and_then(Value::as_str).ok_or(())?;
@@ -88,8 +94,14 @@ pub(super) fn inputs(document: &Value) -> Result<Vec<(&'static str, String)>, ()
 /// 开关字段在区块缺省时读取默认值，避免把默认开启的暂停收件显示为关闭。
 pub(super) fn boolean(document: &Value, path: &str) -> Option<bool> {
     let name = field(path)?;
-    let defaults = default_block();
-    block(document).unwrap_or(&defaults).get(name)?.as_bool()
+    match block(document) {
+        Some(source) => source.get(name)?.as_bool(),
+        None => match name {
+            "enabled" => Some(false),
+            "pause_intake_before_season" => Some(true),
+            _ => None,
+        },
+    }
 }
 
 /// 确保文档存在早鸟区块；缺省时写入默认区块后再由调用方覆盖具体字段。

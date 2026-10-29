@@ -51,14 +51,15 @@ pub(super) fn history_groups(rows: Vec<PriceHistoryEntry>, grouping: &str) -> Ve
     let mut groups = Vec::<HistoryGroup>::new();
     for row in rows {
         let label = match grouping {
-            "equipment" => row.equipment_name.clone(),
-            "buyer" => row.buyer_name.clone(),
-            "seller" => row.seller_name.clone(),
-            _ => String::new(),
+            "equipment" => row.equipment_name.as_str(),
+            "buyer" => row.buyer_name.as_str(),
+            "seller" => row.seller_name.as_str(),
+            _ => "",
         };
-        if let Some(index) = positions.get(&label) {
+        if let Some(index) = positions.get(label) {
             groups[*index].rows.push(row);
         } else {
+            let label = label.to_owned();
             positions.insert(label.clone(), groups.len());
             groups.push(HistoryGroup { key: row.lot_id.clone(), label, rows: vec![row] });
         }

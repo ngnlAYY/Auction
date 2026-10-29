@@ -111,7 +111,10 @@ fn exact_fields(value: &Value, fields: &[&str]) -> bool {
 }
 
 fn valid_uuid(value: &str) -> bool {
-    Uuid::parse_str(value).is_ok_and(|id| id.to_string() == value && !id.is_nil())
+    Uuid::parse_str(value).is_ok_and(|id| {
+        let mut buffer = Uuid::encode_buffer();
+        id.hyphenated().encode_lower(&mut buffer) == value && !id.is_nil()
+    })
 }
 
 fn failure(code: &str, status: u16) -> CommandError {

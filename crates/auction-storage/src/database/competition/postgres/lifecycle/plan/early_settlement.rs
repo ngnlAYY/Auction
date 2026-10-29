@@ -12,7 +12,7 @@ pub(super) async fn apply_early_settlement_plan_postgres(
     transaction: &mut PostgresCompetitionTransaction,
     command: &AuctionLifecycleCommand,
     auction: &Auction,
-    proxy_plans: Vec<auction_application::AuctionFinalProxyPlan>,
+    proxy_plans: &[auction_application::AuctionFinalProxyPlan],
     effective_end_at: DateTime<Utc>,
 ) -> Result<(), CompetitionTransactionError> {
     // 不放宽 auctions 的结束时间 shape：原始计划留在 policy_snapshot，

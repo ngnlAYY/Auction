@@ -259,17 +259,13 @@ impl AuctionEarlyBirdCalendar {
         self.applies_to(world_id)
             && self
                 .seasons_around(at)
-                .iter()
                 .any(|season| season.window_start <= at && at < season.window_end)
     }
 
     /// 常规周时段 `[预览, 计划结束)` 与早鸟覆盖期 `[窗口开始, 覆盖结束)` 重叠时由早鸟场次替代。
     pub fn suppresses(&self, world_id: &str, times: &AuctionScheduleTimes) -> bool {
         self.applies_to(world_id)
-            && self
-                .seasons_around(times.preview_due_at)
-                .iter()
-                .any(|season| overlaps(season, times))
+            && self.seasons_around(times.preview_due_at).any(|season| overlaps(&season, times))
     }
 
     /// 预览不早于 `floor` 的最早早鸟场次；世界不参与或附近没有赛季时返回 `None`。
@@ -326,7 +322,7 @@ impl AuctionEarlyBirdCalendar {
         if !self.applies_to(world_id) {
             return None;
         }
-        self.seasons_around(now).into_iter().find(|season| season.window_start > now)
+        self.seasons_around(now).find(|season| season.window_start > now)
     }
 
     fn session_count(&self) -> u32 {
@@ -340,30 +336,37 @@ impl AuctionEarlyBirdCalendar {
             .checked_add_signed(Duration::days(i64::from(self.window_days)))
             .ok_or(DomainError::InvalidSchedule("早鸟窗口结束时间超出范围"))?;
         let window_end = resolve_local(self.timezone, end_local)?;
-        let last = self.session(season, self.session_count())?;
+        // 收件窗口与覆盖期只依赖赛季边界和末场结束时间；某场预览/开拍碰到 DST
+        // 非法顺序时，session() 仍拒绝物化，但不能把整个赛季误判为普通收件期。
+        let last_day =
+            self.session_days.last().ok_or(DomainError::InvalidSchedule("早鸟场次为空"))?;
+        let last_end_local = season
+            .and_time(self.open_time)
+            .checked_add_signed(Duration::days(i64::from(*last_day) - 1))
+            .and_then(|open| open.checked_add_signed(self.live))
+            .ok_or(DomainError::InvalidSchedule("早鸟结束时间超出范围"))?;
+        let last_end = resolve_local(self.timezone, last_end_local)?;
         Ok(AuctionEarlyBirdSeason {
             season,
             window_start,
             window_end,
-            coverage_end: window_end.max(last.times.scheduled_end_at),
+            coverage_end: window_end.max(last_end),
         })
     }
 
-    /// 返回 `at` 所在本地年份前后各一年的赛季，按窗口开始排序；无法表示的日期直接跳过。
-    fn seasons_around(&self, at: DateTime<Utc>) -> Vec<AuctionEarlyBirdSeason> {
+    /// 按本地年份和已排序月日逐个生成前后各一年的赛季，无法表示的日期仍跳过。
+    /// 查询首个命中后停止，不为每封收件或每个周候选分配并排序完整赛季列表。
+    fn seasons_around(
+        &self,
+        at: DateTime<Utc>,
+    ) -> impl Iterator<Item = AuctionEarlyBirdSeason> + '_ {
         let year = at.with_timezone(&self.timezone).year();
-        let mut seasons = Vec::with_capacity(self.season_starts.len() * 3);
-        for candidate_year in year.saturating_sub(1)..=year.saturating_add(1) {
-            for (month, day) in &self.season_starts {
-                if let Some(date) = NaiveDate::from_ymd_opt(candidate_year, *month, *day)
-                    && let Ok(season) = self.season(date)
-                {
-                    seasons.push(season);
-                }
-            }
-        }
-        seasons.sort_by_key(|season| season.window_start);
-        seasons
+        (year.saturating_sub(1)..=year.saturating_add(1)).flat_map(move |candidate_year| {
+            self.season_starts.iter().filter_map(move |(month, day)| {
+                let date = NaiveDate::from_ymd_opt(candidate_year, *month, *day)?;
+                self.season(date).ok()
+            })
+        })
     }
 }
 
@@ -390,7 +393,10 @@ fn parse_season_starts(values: &[String]) -> Option<Vec<(u32, u32)>> {
     let mut parsed = Vec::with_capacity(values.len());
     for value in values {
         let bytes = value.as_bytes();
-        if bytes.len() != 5 || bytes[2] != b'-' {
+        if bytes.len() != 5
+            || bytes[2] != b'-'
+            || !bytes[..2].iter().chain(&bytes[3..]).all(u8::is_ascii_digit)
+        {
             return None;
         }
         let month = value.get(0..2)?.parse::<u32>().ok()?;

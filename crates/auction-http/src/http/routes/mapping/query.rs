@@ -112,7 +112,7 @@ pub(crate) fn parse_history_name_terms(value: Option<&String>) -> Result<Vec<Str
 }
 
 pub(crate) fn parse_optional_history_text(
-    value: Option<&String>,
+    value: Option<String>,
     maximum: usize,
 ) -> Result<Option<String>, ()> {
     let Some(value) = value else {
@@ -124,7 +124,7 @@ pub(crate) fn parse_optional_history_text(
     if value.len() > maximum || value.chars().any(char::is_control) {
         return Err(());
     }
-    Ok(Some(value.clone()))
+    Ok(Some(value))
 }
 
 pub(crate) fn parse_history_date(
@@ -157,14 +157,15 @@ pub(crate) fn parse_history_price(value: Option<&String>) -> Result<Option<i64>,
     let Some(value) = value else {
         return Ok(None);
     };
-    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-        return if value.is_empty() { Ok(None) } else { Err(()) };
+    if value.is_empty() {
+        return Ok(None);
     }
-    let parsed = value.parse::<u64>().map_err(|_| ())?;
-    if parsed > i64::MAX as u64 || parsed.to_string() != *value {
+    if !value.bytes().all(|byte| byte.is_ascii_digit())
+        || (value.len() > 1 && value.starts_with('0'))
+    {
         return Err(());
     }
-    Ok(Some(parsed as i64))
+    value.parse::<i64>().map(Some).map_err(|_| ())
 }
 
 pub(crate) fn not_found_error() -> (StatusCode, Json<ApiErrorResponse>) {

@@ -22,6 +22,7 @@ pub(crate) fn LiveCatalogActions(
     show_proxy_summary: bool,
 ) -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
+    let user_id = use_context::<commands::PublicCommandIdentity>().0;
     let mut dialog = use_context::<CommandDialogContext>().0;
     let active_action = use_memo(use_reactive((&lot_id,), move |(lot_id,)| {
         dialog.read().as_ref().filter(|input| input.lot_id == lot_id).map(|input| input.action)
@@ -41,11 +42,12 @@ pub(crate) fn LiveCatalogActions(
                 let _ = refresh_generation();
             }
             async move {
-                if authenticated && proxy_view_active {
-                    fetch_my_proxy(lot_id).await
+                let result = if authenticated && !user_id.is_nil() && proxy_view_active {
+                    fetch_my_proxy(&user_id.to_string(), lot_id.clone()).await
                 } else {
                     Ok(None)
-                }
+                };
+                (lot_id, result)
             }
         },
     ));
@@ -54,7 +56,13 @@ pub(crate) fn LiveCatalogActions(
         authenticated && (show_proxy_summary || active_action() == Some(CatalogAction::Proxy)),
     );
     let proxy_snapshot = (*proxy_state.state().read() == UseResourceState::Ready)
-        .then(|| proxy_state.read_unchecked().clone())
+        .then(|| {
+            proxy_state
+                .read()
+                .as_ref()
+                .filter(|(requested_lot, _)| requested_lot == &lot_id)
+                .map(|(_, result)| result.clone())
+        })
         .flatten();
     let active_proxy = match proxy_snapshot.as_ref() {
         Some(Ok(Some(proxy))) if proxy.status == "active" => Some(proxy),

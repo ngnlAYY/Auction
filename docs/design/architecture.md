@@ -155,6 +155,9 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 | application | 锁内用例顺序；`legacy_ledger` 与 `slow_replay` 校验历史结果与请求的绑定 |
 | storage | 后端锁模型、锁后 `occurred_at`、资格/会话一致性、generation/due fence；扫描在 LIMIT 前排除已截止 lot |
 
+生命周期用例把同一份 `AuctionLifecyclePlan` 借给 storage，Final/提前结算继续借用其中的代理计划；落库与账本
+校验不复制整场事实或命令载荷。生命周期状态、代理事实、审计及命令账本仍在原事务内提交，所有权调整不改变锁序。
+
 生命周期、结算和恢复共用应用入口，人工提前开放/结算默认关闭，金额守恒、连续领先时间、录入目标及追加更正见
 [不变量契约](docs/contracts/invariants.md)；`000044` 由 storage/Users owner 追加时间顺序约束与有证据的审计更正，
 见[数据库契约](docs/contracts/schema.md#追加迁移与历史事实)。装备标记由 application lot-watch owner 定义用例与窄
@@ -200,8 +203,8 @@ application 定分页端口，integrations 负责渲染/解析，jobs 负责顺�
 
 ## 配置与数据保护
 
-三角色共享非敏感公共 TOML，分别引用敏感文件，Admin/Worker 可共享 runtime。runtime 保存由 `auction-config` 使用文件
-锁、fingerprint、持久命令账本与原子替换，替换后回读或账本确认失败须向前恢复，生效须重启，Admin 恢复结果未知或需人工
+三角色共享非敏感公共 TOML，分别引用敏感文件；使用 runtime 时，三角色须同源且装备规则、bot 名单快照一致。
+runtime 保存由 `auction-config` 使用文件锁、fingerprint、持久命令账本与原子替换，替换后回读或账本确认失败须向前恢复，生效须重启，Admin 恢复结果未知或需人工
 核对时停止启动；数据库 `worlds.enabled` 与仅控制邮件入站的 runtime world 开关分离，字段与恢复流程见
 [配置说明](ops/config/README.md)。
 角色/common/secrets 的读取预算与普通文件门禁由 `auction-config::config::reader` 统一拥有；runtime 启动和管理

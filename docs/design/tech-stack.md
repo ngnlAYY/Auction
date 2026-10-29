@@ -157,6 +157,13 @@ prometheus-client 需要另审 OpenMetrics 与进程指标兼容，Leptos CSR �
 - `async-stream` 保留 SQLx 借用流；Base64/SHA-2、Tungstenite、darling 等重复版本遵循上游约束；OTLP 的 reqwest 仍负责 TLS。
   Public/Admin 的 `url/idna` 也由路由依赖，删本项目调用不会消除这些包。
 
+2026-10-29 复核全部 20 个工作区包与 50 项直接外部依赖的源码引用，未发现可由当前证据安全移除的直接依赖；
+本轮不改清单、feature 或锁，应用完整锁仍为 535 项。`cargo tree --locked --offline -e normal,build` 按包/版本去重后，
+Linux GNU 发布图（含 PostgreSQL/Redis，Web 角色另含 web-embed）分别为 Public 290、Admin 292、Worker 281、
+合并服务 306、auctionctl 282；Public/Admin 的独立 WASM 图为 175/176，图变化均为 0。
+两个 WASM 图均未引入 Axum、reqwest、SQLx、storage、integrations 或 iana-time-zone；重复版本仍由上游依赖约束拥有。
+这些是离线解析和源码证据，不替代 cargo-machete、RustSec、编译或实际产物大小检查。
+
 受控 cargo-audit 关闭未使用的二进制扫描，GNU 活跃图从 302 减至 293 个包，保留锁文件 RustSec/yanked 审计。
 sccache 已采用 Zstandard 修复版本，并通过固定哈希的[object feature 补丁](ci/tools/patches/sccache-object-features.patch)
 关闭未调用的压缩节解码，只保留 `read/std`；独立锁移除 `ruzstd` 和 `twox-hash`，GNU 活跃图从 298 减至 296，

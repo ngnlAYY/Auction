@@ -4,6 +4,8 @@ set -euo pipefail
 
 repository_root=$(git rev-parse --show-toplevel)
 cd "$repository_root"
+# 仅加载共用身份函数；不调用发布工具选择，避免工具安装依赖既有工具回执。
+source ci/release/build-identity.sh
 profile=${2:-release}
 case "$profile" in
 release) tools_root="$repository_root/target/build-tools" ;;
@@ -44,29 +46,32 @@ check_tls_lock() {
 
 recipe_fingerprint() {
 	{
-		sha256sum ci/tools/bootstrap.sh rust-toolchain.toml
+		sha256sum ci/tools/bootstrap.sh ci/release/build-identity.sh rust-toolchain.toml || return 1
+		cargo_config_fingerprint || return 1
 		if [[ "$profile" == audit ]]; then
-			sha256sum ci/tools/locks/cargo-audit.Cargo.lock
+			sha256sum ci/tools/locks/cargo-audit.Cargo.lock || return 1
 		else
-			sha256sum ci/tools/locks/dioxus-cli.Cargo.lock ci/tools/locks/sccache.Cargo.lock
+			sha256sum ci/tools/locks/dioxus-cli.Cargo.lock ci/tools/locks/sccache.Cargo.lock || return 1
 			sha256sum ci/tools/patches/dioxus-cli-controlled-tools.patch \
 				ci/tools/patches/sccache-zstd.patch ci/tools/patches/sccache-cache-permissions.patch \
-				ci/tools/patches/sccache-object-features.patch
+				ci/tools/patches/sccache-object-features.patch || return 1
 		fi
-		rustc --version --verbose
+		rustc --version --verbose || return 1
 		printf '%s\n' "$target_triple" "$profile" 'dx:disable-telemetry,no-downloads;sccache:gha;cargo-audit:lockfile-only'
 	} | sha256sum | awk '{print $1}'
 }
 
 verify_install() {
 	local install_root=${1:-$tools_root}
-	local receipt="$install_root/BUILD-INFO" name
+	local receipt="$install_root/BUILD-INFO" name recipe
 	local binaries=(dx sccache esbuild wasm-bindgen wasm-opt)
 	if [[ "$profile" == audit ]]; then binaries=(cargo-audit); fi
 	[[ -f "$receipt" && ! -L "$receipt" && -f "$install_root/SHA256SUMS" ]] || return 1
 	[[ $(sed -n 's/^schema=//p' "$receipt") == auction-build-tools/1 ]] || return 1
 	[[ $(sed -n 's/^profile=//p' "$receipt") == "$profile" ]] || return 1
-	[[ $(sed -n 's/^recipe_sha256=//p' "$receipt") == "$(recipe_fingerprint)" ]] || return 1
+	# 条件调用会禁用 errexit，必须先检查指纹命令成功，不能比较失败后留下的部分摘要。
+	recipe=$(recipe_fingerprint) || return 1
+	[[ $(sed -n 's/^recipe_sha256=//p' "$receipt") == "$recipe" ]] || return 1
 	for name in "${binaries[@]}"; do
 		[[ -f "$install_root/bin/$name" && ! -L "$install_root/bin/$name" && -x "$install_root/bin/$name" ]] || return 1
 	done
@@ -130,7 +135,7 @@ prepare_source() {
 
 build_tool() (
 	local package=$1 version=$2 binary=$3 features=$4 name
-	# 工具采用独立 profile，不能继承应用的 CPU/profile/wrapper 参数或把自身套入 sccache。
+	# 清除应用的环境覆盖；保留并绑定 Cargo 文件配置中的本机链接器等设置，包装器单独禁用。
 	while IFS= read -r name; do
 		case "$name" in
 		CARGO_PROFILE_* | CARGO_BUILD_RUSTC | CARGO_BUILD_RUSTC_WRAPPER | CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER | CARGO_BUILD_INCREMENTAL | CARGO_INCREMENTAL | CARGO_BUILD_RUSTFLAGS | CARGO_ENCODED_RUSTFLAGS | CARGO_BUILD_TARGET | CARGO_TARGET_*_RUSTFLAGS | CARGO_TARGET_*_LINKER | RUSTFLAGS | RUSTC | RUSTC_WRAPPER | RUSTC_WORKSPACE_WRAPPER)
@@ -138,6 +143,8 @@ build_tool() (
 			;;
 		esac
 	done < <(compgen -e)
+	# unset 会重新启用 Cargo 配置中的 wrapper；空值才能禁止全局两类包装器。
+	export RUSTC_WRAPPER='' RUSTC_WORKSPACE_WRAPPER=''
 	export CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_STRIP=symbols
 	export CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
 	# 发布包源身份固定为上游提交，不能误读父 Auction 仓库的 .git。

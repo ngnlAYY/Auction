@@ -187,20 +187,9 @@ impl FirstRunConfig {
         let mut common = template(include_str!("../../../../ops/config/examples/common.toml"))?;
         common["log_filter"] = Value::String(self.log_filter.clone());
         common["metrics"]["enabled"] = Value::Boolean(self.metrics_enabled);
-        common["auction"]["schedule"]["enabled"] = Value::Boolean(self.schedule.enabled);
-        for (key, value) in [
-            ("timezone", &self.schedule.timezone),
-            ("preview_day", &self.schedule.preview_day),
-            ("preview_time", &self.schedule.preview_time),
-            ("open_day", &self.schedule.open_day),
-            ("open_time", &self.schedule.open_time),
-            ("nominal_end_day", &self.schedule.nominal_end_day),
-            ("nominal_end_time", &self.schedule.nominal_end_time),
-        ] {
-            common["auction"]["schedule"][key] = Value::String(value.clone());
-        }
-        common["auction"]["schedule"]["worlds"] =
-            Value::Array(self.schedule.worlds.iter().cloned().map(Value::String).collect());
+        // 整组序列化，避免新增排期字段（包括早鸟期）被示例默认值静默替换。
+        common["auction"]["schedule"] =
+            Value::try_from(&self.schedule).map_err(|_| FirstRunError::InvalidConfig)?;
         common["auction"]["economics"]["start_price"] = Value::Integer(self.start_price);
         write_toml(directory.join("common.toml"), &common, 0o640)?;
 

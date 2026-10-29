@@ -153,7 +153,7 @@ pub(crate) async fn authenticated_public_identity(
     }
 }
 
-/// Public 账号写操作在当前 Cookie 认证后核对确认宿主，读取路由保持旧行为。
+/// Public 账号写操作在当前 Cookie 认证后核对确认宿主。
 pub(crate) async fn authenticated_public_mutation_identity(
     state: &PublicApiState,
     headers: &HeaderMap,
@@ -184,7 +184,7 @@ pub(crate) async fn authenticated_public_competition_identity(
     }
 }
 
-/// 可选身份前置条件与本次 Cookie 在同一请求内核对，阻止旧标签页把命令提交给新账号。
+/// 可选身份前置条件与当前 Cookie 核对，防止旧页面读取或操作切换后的账号。
 /// 未提供请求头的旧客户端维持原 v1 语义；此条件不取代会话、Origin 或命令资格校验。
 pub(crate) fn check_public_expected_user(
     headers: &HeaderMap,

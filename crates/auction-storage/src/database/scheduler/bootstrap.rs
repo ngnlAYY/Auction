@@ -27,7 +27,7 @@ pub(super) async fn ensure_postgres(
 ) -> Result<ScheduledRoundSnapshot, auction_application::RepositoryError> {
     validate_request(&request)?;
     for attempt in 0..3_u8 {
-        match ensure_postgres_once(pool, request.clone()).await {
+        match ensure_postgres_once(pool, &request).await {
             Ok(snapshot) => return Ok(snapshot),
             Err(PostgresBootstrapError::Storage(error))
                 if crate::database::is_serialization_conflict(&error) && attempt < 2 =>
@@ -57,7 +57,7 @@ impl From<auction_application::RepositoryError> for PostgresBootstrapError {
 #[cfg(feature = "postgres")]
 async fn ensure_postgres_once(
     pool: &TrackedPool<Postgres>,
-    request: ScheduledRoundBootstrap,
+    request: &ScheduledRoundBootstrap,
 ) -> Result<ScheduledRoundSnapshot, PostgresBootstrapError> {
     let mut transaction = pool
         .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
@@ -79,26 +79,35 @@ async fn ensure_postgres_once(
         .fetch_one(&mut *transaction)
         .await
         .map_err(PostgresBootstrapError::Storage)?;
-    // 常规周按 world/local_week 定位，早鸟场次按 world/slot_key 定位，两类键互不匹配。
-    if let Some(row) = sqlx::query(
-        "SELECT id, world_id, local_week, slot_key, auction_id, status, preview_due_at,
-                open_due_at, scheduled_end_at, create_command_id, preview_completed_at,
-                open_completed_at, schedule_snapshot
-         FROM public.scheduled_rounds
-         WHERE world_id = $1
-           AND CASE WHEN $3::text IS NULL THEN slot_key IS NULL AND local_week = $2
-                    ELSE slot_key = $3 END
-         FOR UPDATE",
-    )
-    .bind(&request.world_id)
-    .bind(request.local_week)
-    .bind(request.slot_key.as_deref())
-    .fetch_optional(&mut *transaction)
-    .await
-    .map_err(PostgresBootstrapError::Storage)?
+    // 分开两种身份谓词，让预处理通用计划也能识别 000065 的部分索引条件。
+    let existing = if let Some(slot_key) = request.slot_key.as_deref() {
+        sqlx::query(
+            "SELECT id, world_id, local_week, slot_key, auction_id, status, preview_due_at,
+                    open_due_at, scheduled_end_at, create_command_id, preview_completed_at,
+                    open_completed_at, schedule_snapshot
+             FROM public.scheduled_rounds
+             WHERE world_id = $1 AND slot_key = $2
+             FOR UPDATE",
+        )
+        .bind(&request.world_id)
+        .bind(slot_key)
+    } else {
+        sqlx::query(
+            "SELECT id, world_id, local_week, slot_key, auction_id, status, preview_due_at,
+                    open_due_at, scheduled_end_at, create_command_id, preview_completed_at,
+                    open_completed_at, schedule_snapshot
+             FROM public.scheduled_rounds
+             WHERE world_id = $1 AND local_week = $2 AND slot_key IS NULL
+             FOR UPDATE",
+        )
+        .bind(&request.world_id)
+        .bind(request.local_week)
+    };
+    if let Some(row) =
+        existing.fetch_optional(&mut *transaction).await.map_err(PostgresBootstrapError::Storage)?
     {
         let result = snapshot_postgres(&row)?;
-        verify_existing(&result, &request)?;
+        verify_existing(&result, request)?;
         if let Some(source) = row
             .try_get::<Option<serde_json::Value>, _>("schedule_snapshot")
             .map_err(map_storage_error)?
@@ -178,7 +187,7 @@ async fn ensure_postgres_once(
         .await
         .map_err(PostgresBootstrapError::Storage)?;
     }
-    insert_command_postgres(&mut transaction, &request, missed, db_now).await?;
+    insert_command_postgres(&mut transaction, request, missed, db_now).await?;
     sqlx::query(
         "INSERT INTO public.scheduled_rounds
             (id, world_id, local_week, auction_id, status, preview_due_at, open_due_at,
@@ -204,15 +213,15 @@ async fn ensure_postgres_once(
     .execute(&mut *transaction)
     .await
     .map_err(PostgresBootstrapError::Storage)?;
-    append_audit_postgres(&mut transaction, &request, missed, db_now).await?;
+    append_audit_postgres(&mut transaction, request, missed, db_now).await?;
     transaction.commit().await.map_err(PostgresBootstrapError::Storage)?;
     Ok(ScheduledRoundSnapshot {
         round_id: request.round_id,
         auction_id: (!missed).then_some(request.auction_id),
         active: !missed,
-        world_id: request.world_id,
+        world_id: request.world_id.clone(),
         local_week: request.local_week,
-        slot_key: request.slot_key,
+        slot_key: request.slot_key.clone(),
         preview_due_at: request.preview_due_at,
         open_due_at: request.open_due_at,
         scheduled_end_at: request.scheduled_end_at,
@@ -320,7 +329,6 @@ fn verify_existing(
         || snapshot.scheduled_end_at != request.scheduled_end_at
         || snapshot.create_command_id != request.create_command_id.as_uuid()
         || snapshot.active != snapshot.auction_id.is_some()
-        || (!snapshot.active && snapshot.auction_id.is_some())
         || (snapshot.active && snapshot.auction_id != Some(request.auction_id))
     {
         return Err(repository_error_owned("周计划稳定 identity 冲突"));

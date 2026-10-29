@@ -68,7 +68,7 @@ impl PostgresCompetitionTransaction {
 
     pub(crate) async fn insert_command_inner(
         &mut self,
-        command: StoredCommand,
+        command: &StoredCommand,
     ) -> Result<(), CompetitionTransactionError> {
         command.validate().map_err(CompetitionTransactionError::from)?;
         let payload: Value =
@@ -101,7 +101,7 @@ impl PostgresCompetitionTransaction {
                 "命令冲突后无法读取已有账本记录".to_owned(),
             ));
         };
-        if existing == command {
+        if &existing == command {
             Ok(())
         } else {
             Err(CompetitionTransactionError::CommandLedger(CommandLedgerError::Conflict))

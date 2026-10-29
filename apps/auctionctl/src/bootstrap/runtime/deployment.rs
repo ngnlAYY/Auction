@@ -274,6 +274,11 @@ fn validate_runtime_topology(
             anyhow::bail!("Public、Admin 与 Worker 加载的装备分组与论坛标色规则不一致");
         }
     }
+    let admin_bot_players =
+        admin.admin_runtime.as_ref().map(|runtime| runtime.bot_players.as_slice()).unwrap_or(&[]);
+    if public.bot_players != worker.bot_players || public.bot_players != admin_bot_players {
+        anyhow::bail!("Public、Admin 与 Worker 加载的 bot_players 名单快照不一致");
+    }
     if admin.auction != worker.auction {
         anyhow::bail!("Admin 与 Worker 的有效拍卖默认策略或排期不一致");
     }

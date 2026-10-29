@@ -62,6 +62,9 @@ Sending、节奏起点和原审计同事务提交。正常成功和维护恢复�
 `000065` 由 scheduler 与生命周期后继写入 `scheduled_rounds.slot_key`：常规周轮次保持 NULL 并按 world/local_week 唯一，
 赛季早鸟轮次按 world/slot_key 唯一，且键与 `schedule_snapshot.early_bird` 同时出现；bootstrap 按两类键分别定位，
 早鸟场次的 preview/open 命令身份改由时段键派生。同 world 至多一场 preview/live/final/settling 仍由 `auctions_one_active_world_idx` 保证。
+bootstrap 对两类身份使用独立固定 SQL，显式保留常规周的 `slot_key IS NULL` 与早鸟的键等值条件，
+使预处理通用计划可识别对应部分索引；不通过参数化 CASE 隐藏索引谓词。整事务重试借用原请求，
+不重复复制策略和排期来源，仅新轮次返回投影复制所需身份字符串；已有冻结事实、锁序和三次重试上限不变。
 升级与 owner 见[对象契约](docs/contracts/schema.md#结算恢复与交付)。
 
 ## 用户身份与消费 owner
@@ -127,6 +130,9 @@ bidding、lifecycle、admin 拆分；旧竞价账本重放仍在一致快照中�
 普通队列领取可按 owner 使用 Read Committed 加锁。只重试已分类的序列化冲突/死锁，未知提交不能盲目重放。
 草稿软截止修正的轮次锁同样完整执行后丢弃行，不为纯加锁查询建立临时行集；world → round → auction 锁序保持不变。
 生命周期最终阶段和结算恢复策略解码使用有界时长转换；损坏快照超出时长范围时返回错误，不触发进程 panic。
+生命周期写入借用应用层原 `AuctionLifecyclePlan`，Final/提前结算直接遍历借用的代理子计划，
+命令账本 helper 也借用原命令；不复制整场代理状态、转换、竞价事实及结果载荷。Admin lot 事务适配器
+同样借用命令、锁内快照与结果，不再仅为跨 async 边界复制它们。金额、CAS、账本重放、审计及写入顺序保持不变。
 结算锁内及历史只读快照投影已冻结的 workflow、领取命令和 due 世代，历史空值保留；稳定身份由应用层统一派生。
 只读旧结算核验复用应用层的完成请求摘要；旧 `settlement_complete` 账本仍按原历史格式单独核验。
 命令、告警、用户及通知写入借用原请求摘要绑定 `bytea`；信封文本与 replay JSON 同样借用已持有数据，
