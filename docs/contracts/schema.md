@@ -36,6 +36,7 @@
 | 发送尝试证明：PostgreSQL `000061` | 新增只追加的发送尝试摘要与唯一远端 MID 绑定；实际渲染摘要与 Sending 同事务保存，覆盖所有出站来源 | 不回填旧发送内容、账号身份或成功结果；缺少旧证明仍人工核对，不因共享读取而重发 |
 | 投递引用索引：PostgreSQL `000062` | 为非空 `deliveries.external_reference` 建立非唯一部分索引，供 delivery_scheduler 绑定 MID 前检查旧成功行 | 不回填引用、不删除重复历史、不授予发送成功；原 Serializable 谓词检查及唯一 MID 绑定继续生效 |
 | Take 原账号证明：PostgreSQL `000063` | 新增只追加的 Take 尝试绑定，保存原命令/摘要、world/MID、sending_at 与可用的持久凭据 ID/version/generation | 不复制原 payload 资产、不回填旧账号；历史缺绑定或配置 Cookie 无持久身份时，不自动确认未知 Take 或重排 |
+| 早鸟场次身份：PostgreSQL `000065` | `scheduled_rounds` 增加可空 `slot_key`（`early-bird:YYYY-MM-DD:N`），且必须与 `schedule_snapshot.early_bird` 同时出现；world/local_week 唯一改为只约束 `slot_key IS NULL` 的常规周轮次，早鸟轮次按 world/slot_key 唯一 | 既有轮次全部保持常规周身份、不回填；常规周 preview/open 命令继续由 world/week 派生，早鸟场次改由 world/slot_key 派生 |
 
 `000064` 由 settlement owner 扩展 `auctions.policy_snapshot`、`auction_settlements` 与 `lot_settlements` 的闭集约束，
 允许 `hold_curve_v2/version=2`；不新增表，不更新旧快照、价格、义务、投递、奖池余额或历史账本。
@@ -128,7 +129,7 @@ A32 使用 `credential_keys` 与 `credential_admin_commands`，后者到凭据�
 | bid_proxy_authorization_transitions | auction-domain + auction-application：auction | 代理授权追加式迁移记录 |
 | bid_proxy_outbid_uses | auction-domain + auction-application：auction | 代理出价次数和上限 |
 | bid_proxy_attempts | auction-domain + auction-application：auction | 代理尝试历史与失败分类 |
-| scheduled_rounds | auction-application + auction-jobs：auction-lifecycle | 持久化预览/开拍/Final phase 调度游标、租约、完成 fence、尝试次数和失败状态；Open 时为后继 Draft 建立下一轮 |
+| scheduled_rounds | auction-application + auction-jobs：auction-lifecycle | 持久化预览/开拍/Final phase 调度游标、租约、完成 fence、尝试次数和失败状态；Open 时为后继 Draft 建立下一轮；常规周按 world/local_week、赛季早鸟场次按 world/slot_key 唯一 |
 | auction_intake_targets | auction-application：auction-intake | 世界级拍品录入目标，并与该世界唯一 Draft 或 Preview 当前录入场次保持延迟一致性 |
 | auction_submissions | auction-application：auction-intake | `mail/admin` 来源闭集及拍品来源关联；Admin URL/JSON 适配器种类只进入来源引用和命令摘要 |
 | equipment_secrets | auction-application：keymanagement | 标的敏感来源密文 |

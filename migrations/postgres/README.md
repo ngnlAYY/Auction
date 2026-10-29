@@ -82,10 +82,11 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 | [000062_delivery_reference_index.up.sql](migrations/postgres/000062_delivery_reference_index.up.sql) | 非空外部引用的非唯一部分索引，加速绑定 Sent MID 前的历史碰撞核对，不改变旧行或证明规则 |
 | [000063_delivery_take_expectations.up.sql](migrations/postgres/000063_delivery_take_expectations.up.sql) | Take 原命令/MID/凭据尝试的只追加绑定；旧无原账号证明的未知动作不自动恢复或重排 |
 | [000064_seller_full_settlement.up.sql](migrations/postgres/000064_seller_full_settlement.up.sql) | 扩展既有拍卖/结算 CHECK 支持 v2 卖方全额及奖池同比缩放优惠；不更改任何历史经济事实 |
+| [000065_early_bird_schedule_slots.up.sql](migrations/postgres/000065_early_bird_schedule_slots.up.sql) | 赛季早鸟场次的 `slot_key`；常规周轮次仍按 world/local_week 唯一，早鸟轮次按 world/slot_key 唯一；不回填既有轮次 |
 
 ## 原则与基线
 
-当前 `000001`–`000064` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
+当前 `000001`–`000065` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
 是只读兼容视图，权威写入进入授权与转换历史表。执行门禁见[执行边界](migrations/postgres/README.md#执行边界)，对象归属见[数据库契约](docs/contracts/schema.md)。
 
 ## 追加迁移语义
@@ -131,6 +132,7 @@ prepared/enqueued/unknown 改成内部成功。迁移前可验证备份并停止
 但未知结果留在人工核对；不同账号的“邮件不存在”不能关闭原任务。
 
 `000064` 仅扩展新策略及金额矩阵约束，不更新旧拍卖、结算、义务、投递、余额或追加账本。
+`000065` 只为调度轮次增加早鸟时段键并拆分唯一约束，既有轮次保持常规周身份，升级门禁见[赛季早鸟期](ops/README.md#赛季早鸟期)。
 历史 v1 仍要求卖方金额等于列示价；带 v2 policy 标记的新行必须按成交价全额结给卖方，
 奖池实分优惠介于零与一份名义基础折扣之间；精确同比缩放及尾差由领域和锁内命令重放校验。
 升级先备份并停稳全部旧 writer，同版 `auctionctl` 执行后成套更新角色；现有草稿不自动切换策略，详见

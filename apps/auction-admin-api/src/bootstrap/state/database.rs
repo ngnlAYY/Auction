@@ -313,12 +313,15 @@ pub(super) async fn configure_state(
         config.admin_runtime.as_ref().is_some_and(|runtime| runtime.allow_manual_early_open),
         config.admin_runtime.as_ref().is_some_and(|runtime| runtime.allow_manual_early_settlement),
     );
-    let lifecycle: Arc<dyn AuctionLifecycleCommandPort> =
-        Arc::new(DatabaseAuctionLifecycleCommands::new(
+    // 人工开拍与 Worker 开拍必须用同一排期日历计算后继，避免早鸟场次身份分叉。
+    let lifecycle: Arc<dyn AuctionLifecycleCommandPort> = Arc::new(
+        DatabaseAuctionLifecycleCommands::new(
             lifecycle_store,
             lifecycle_policy,
             config.auction.policy()?,
-        ));
+        )
+        .with_schedule_calendar(config.auction.schedule_calendar()?),
+    );
     // 创建和排期共用无可变状态的适配器，避免重复构造同一策略快照。
     let auction_commands =
         Arc::new(DatabaseAdminAuctionCommands::new(auction_create_store, config.auction.policy()?));

@@ -1,9 +1,12 @@
-//! 自动周排期参数编辑控件。
+//! 自动周排期与赛季早鸟期参数编辑控件。
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use super::{ListField, ManagedSection, RuntimeConfigForm, SelectField, SwitchField, TextField};
+use super::{
+    ListField, ManagedSection, NumberField, RuntimeConfigForm, RuntimeGroup, SelectField,
+    SwitchField, TextField,
+};
 
 #[component]
 pub(super) fn ScheduleFields(
@@ -23,6 +26,35 @@ pub(super) fn ScheduleFields(
                 SelectField { form, disabled, path: "operations.schedule.nominal_end_day", label: t!("admin-runtime-op-nominal-end-day"), options: weekday_options(), on_dirty }
                 TimeField { form, disabled, path: "operations.schedule.nominal_end_time", label: t!("admin-runtime-op-nominal-end-time"), on_dirty }
                 ListField { form, disabled, path: "operations.schedule.worlds", label: t!("admin-runtime-op-worlds"), on_dirty }
+            }
+            EarlyBirdFields { form, disabled, on_dirty }
+        }
+    }
+}
+
+/// 赛季早鸟期：窗口内替代常规周场、使用单独品质并在赛季前暂停收件。
+#[component]
+fn EarlyBirdFields(
+    form: Signal<RuntimeConfigForm>,
+    disabled: bool,
+    on_dirty: EventHandler<()>,
+) -> Element {
+    rsx! {
+        RuntimeGroup { title: t!("admin-runtime-op-early-bird"),
+            p { class: "admin-runtime-section-note", {t!("admin-runtime-op-early-bird-note")} }
+            div { class: "admin-runtime-field-grid",
+                SwitchField { form, disabled, path: "operations.schedule.early_bird.enabled", label: t!("admin-runtime-op-enabled"), on_dirty }
+                TextField { form, disabled, path: "operations.schedule.early_bird.timezone", label: t!("admin-runtime-op-timezone"), on_dirty }
+                ListField { form, disabled, path: "operations.schedule.early_bird.worlds", label: t!("admin-runtime-op-worlds"), on_dirty }
+                ListField { form, disabled, path: "operations.schedule.early_bird.season_starts", label: t!("admin-runtime-op-early-bird-season-starts"), on_dirty }
+                TimeField { form, disabled, path: "operations.schedule.early_bird.season_start_time", label: t!("admin-runtime-op-early-bird-season-start-time"), on_dirty }
+                NumberField { form, disabled, path: "operations.schedule.early_bird.window_days", label: t!("admin-runtime-op-early-bird-window-days"), minimum: "1", maximum: "31", on_dirty }
+                ListField { form, disabled, path: "operations.schedule.early_bird.session_days", label: t!("admin-runtime-op-early-bird-session-days"), on_dirty }
+                TimeField { form, disabled, path: "operations.schedule.early_bird.open_time", label: t!("admin-runtime-op-open-time"), on_dirty }
+                NumberField { form, disabled, path: "operations.schedule.early_bird.preview_lead_minutes", label: t!("admin-runtime-op-early-bird-preview-lead"), minimum: "120", maximum: "10080", on_dirty }
+                NumberField { form, disabled, path: "operations.schedule.early_bird.live_minutes", label: t!("admin-runtime-op-early-bird-live-minutes"), minimum: "1", maximum: "10080", on_dirty }
+                ListField { form, disabled, path: "operations.schedule.early_bird.qualities", label: t!("admin-runtime-op-early-bird-qualities"), on_dirty }
+                SwitchField { form, disabled, path: "operations.schedule.early_bird.pause_intake_before_season", label: t!("admin-runtime-op-early-bird-pause-intake"), on_dirty }
             }
         }
     }

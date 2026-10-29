@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, rc::Rc};
 use auction_contracts::{AdminRuntimeConfigResponse, EquipmentTaxonomyDto};
 use serde_json::{Map, Number, Value};
 
-use super::operational_fields;
+use super::{early_bird, operational_fields};
 
 const TEXT_FIELDS: &[&str] = &[
     "listener.address",
@@ -154,6 +154,10 @@ impl RuntimeConfigForm {
             let value = nested_value(document, path).and_then(Value::as_i64).ok_or(())?;
             inputs.insert((*path).to_owned(), value.to_string());
         }
+        // 旧文档缺省早鸟区块时按默认值展示；未改动不会写回，保持原指纹。
+        for (path, value) in early_bird::inputs(document)? {
+            inputs.insert(path.to_owned(), value);
+        }
         let mailboxes = nested_value(document, "dashboard_mailboxes")
             .and_then(Value::as_array)
             .ok_or(())?
@@ -298,10 +302,20 @@ impl RuntimeConfigForm {
     }
 
     pub(super) fn boolean(&self, path: &str) -> bool {
+        if let Some(value) = early_bird::boolean(&self.document, path) {
+            return value;
+        }
         nested_value(&self.document, path).and_then(Value::as_bool).unwrap_or(false)
     }
 
     pub(super) fn set_boolean(&mut self, path: &str, value: bool) {
+        if let Some(name) = early_bird::field(path) {
+            // 区块缺省时先补默认区块，切换开关即视为开始编辑早鸟期。
+            if let Ok(block) = early_bird::ensure_block(&mut self.document) {
+                block.insert(name.to_owned(), Value::Bool(value));
+            }
+            return;
+        }
         let _ = set_nested_value(&mut self.document, path, Value::Bool(value));
     }
 
@@ -453,6 +467,26 @@ impl RuntimeConfigForm {
         for path in SIGNED_NUMBER_FIELDS {
             let value = self.required_input(path)?.parse::<i64>().map_err(|_| ())?;
             set_nested_value(&mut document, path, Value::Number(Number::from(value)))?;
+        }
+        if self.edits_field(early_bird::ROOT) {
+            let defaults = early_bird::inputs(&Value::Null)?;
+            let changed =
+                defaults.iter().any(|(path, value)| self.inputs.get(*path) != Some(value));
+            // 已有区块或输入偏离默认值时才写入完整区块；未触碰的旧文档保持原样。
+            if early_bird::block(&document).is_some() || changed {
+                let mut values = Vec::new();
+                for path in early_bird::input_paths() {
+                    let name = early_bird::field(path).ok_or(())?;
+                    values.push((
+                        name.to_owned(),
+                        early_bird::submitted_value(path, &self.required_input(path)?)?,
+                    ));
+                }
+                let block = early_bird::ensure_block(&mut document)?;
+                for (name, value) in values {
+                    block.insert(name, value);
+                }
+            }
         }
         let mailboxes = self
             .mailboxes

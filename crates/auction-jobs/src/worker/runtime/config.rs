@@ -3,7 +3,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use auction_application::{AdminMailPort, AuctionPolicyTemplate};
+use auction_application::{AdminMailPort, AuctionEarlyBirdCalendar, AuctionPolicyTemplate};
 
 /// 每周拍卖轮次生成所需的已解析配置。
 #[derive(Clone)]
@@ -19,6 +19,8 @@ pub struct AuctionScheduleRuntimeConfig {
     pub end_minute: u16,
     pub worlds: Vec<String>,
     pub policy: AuctionPolicyTemplate,
+    /// 已启用的赛季早鸟日历；替代被覆盖的周时段并控制赛季前收件暂停。
+    pub early_bird: Option<AuctionEarlyBirdCalendar>,
     /// Mail owner 由装配根注入；调度器只通过窄端口改变暂停状态。
     pub mail: Option<Arc<dyn AdminMailPort>>,
     pub mailboxes: Vec<(String, String)>,

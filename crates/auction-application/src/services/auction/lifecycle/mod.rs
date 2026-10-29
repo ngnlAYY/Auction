@@ -17,8 +17,8 @@ use crate::{
     AuctionLifecycleCommandPort, AuctionLifecycleContext, AuctionLifecycleEffect,
     AuctionLifecyclePlan, AuctionLifecyclePolicy, AuctionLifecycleResult, AuctionLifecycleSnapshot,
     AuctionLifecycleTransaction, AuctionPolicyTemplate, AuctionPreviewSuccessorPlan,
-    CommandLedgerError, CompetitionTransaction, CompetitionTransactionError, RequestHash,
-    StoredCommand, TransactionPolicy, TransactionRunner,
+    AuctionScheduleCalendar, CommandLedgerError, CompetitionTransaction,
+    CompetitionTransactionError, RequestHash, StoredCommand, TransactionPolicy, TransactionRunner,
 };
 
 mod plan;
@@ -32,6 +32,8 @@ pub struct AuctionLifecycleService<R> {
     repository: Arc<R>,
     policy: AuctionLifecyclePolicy,
     successor_policy: AuctionPolicyTemplate,
+    /// 启动期有效的周排期与早鸟日历；缺失时后继保持冻结来源的七天规则。
+    schedule_calendar: Option<AuctionScheduleCalendar>,
 }
 
 impl<R> AuctionLifecycleService<R>
@@ -45,7 +47,13 @@ where
         policy: AuctionLifecyclePolicy,
         successor_policy: AuctionPolicyTemplate,
     ) -> Self {
-        Self { repository, policy, successor_policy }
+        Self { repository, policy, successor_policy, schedule_calendar: None }
+    }
+
+    /// 注入启动期有效的排期日历；只影响此后新建的后继，不改写已冻结轮次。
+    pub fn with_schedule_calendar(mut self, calendar: Option<AuctionScheduleCalendar>) -> Self {
+        self.schedule_calendar = calendar;
+        self
     }
 
     /// 在 Serializable 事务中查重、锁定聚合、应用领域迁移并追加账本记录。
@@ -66,6 +74,7 @@ where
             .run(TransactionPolicy::serializable(), |transaction| {
                 let command = command.clone();
                 let successor_policy = self.successor_policy.clone();
+                let schedule_calendar = self.schedule_calendar.clone();
                 Box::pin(async move {
                     let command_kind = command.action.command_kind();
                     if let Some(stored) = transaction.find_command(command.command_id).await? {
@@ -128,9 +137,15 @@ where
                     {
                         return Err(CompetitionTransactionError::StaleState.into());
                     }
-                    let plan =
-                        lifecycle_plan(transaction, &command, &context, policy, &successor_policy)
-                            .await?;
+                    let plan = lifecycle_plan(
+                        transaction,
+                        &command,
+                        &context,
+                        policy,
+                        &successor_policy,
+                        schedule_calendar.as_ref(),
+                    )
+                    .await?;
                     let result = lifecycle_result(&command, &context, &plan)?;
                     let stored = StoredCommand {
                         command_id: command.command_id,

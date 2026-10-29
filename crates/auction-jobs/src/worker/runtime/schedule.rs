@@ -1,13 +1,13 @@
-//! 每周拍卖轮次 bootstrap 与 MoogleMail 暂停/恢复对账。
+//! 每周拍卖轮次与赛季早鸟场次 bootstrap，以及 MoogleMail 暂停/恢复对账。
 
 use auction_application::{
     AdminMailPollStateRequest, AdminMailPollingCommand, AdminMailTransactionError,
-    ApplicationError, AuctionPolicyTemplate, AuctionScheduleSource, Clock, RequestHash,
-    ScheduledRoundBootstrap, ScheduledRoundSnapshot,
+    ApplicationError, AuctionEarlyBirdCalendar, AuctionPolicyTemplate, AuctionScheduleSlot,
+    AuctionScheduleSource, AuctionWeeklySchedule, Clock, RequestHash, ScheduledRoundBootstrap,
+    ScheduledRoundSnapshot,
 };
 use auction_domain::{AuctionId, CommandId, legacy_natural_key_uuid};
-use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc};
-use chrono_tz::Tz;
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Serialize;
 
 use super::{PersistentWorker, WorkerResult};
@@ -92,20 +92,59 @@ where
             tracing::debug!(world_id, "业务世界已关闭，跳过当前周拍卖 bootstrap");
             continue;
         }
-        let snapshot =
-            match load_or_bootstrap_round(worker, config, world_id, &generation, now, deadline)
-                .await
-            {
-                Ok(Some(snapshot)) => snapshot,
-                Ok(None) => continue,
-                Err(error) => {
-                    tracing::warn!(world_id, error = %error, "当前周拍卖轮次 bootstrap 失败");
-                    result = WorkerResult::Error;
-                    continue;
+        let early_bird =
+            config.early_bird.as_ref().filter(|calendar| calendar.applies_to(world_id));
+        // 本周常规时段被早鸟覆盖期替代时改维护当前早鸟场次；全部场次结束后本周不再建轮次。
+        let target = match early_bird {
+            Some(calendar) if calendar.suppresses(world_id, &generation.times) => {
+                match calendar.current_session(world_id, &generation.times, now) {
+                    Ok(slot) => slot,
+                    Err(error) => {
+                        tracing::error!(world_id, error = %error, "计算当前早鸟场次失败");
+                        result = WorkerResult::Error;
+                        continue;
+                    }
                 }
-            };
+            }
+            _ => Some(generation.clone()),
+        };
+        let snapshot = match target.as_ref() {
+            Some(slot) => {
+                match load_or_bootstrap_round(worker, config, world_id, slot, now, deadline).await {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => {
+                        tracing::warn!(world_id, error = %error, "当前拍卖轮次 bootstrap 失败");
+                        result = WorkerResult::Error;
+                        continue;
+                    }
+                }
+            }
+            None => None,
+        };
+        let gate = match early_bird {
+            Some(calendar) => {
+                match early_bird_intake_gate(worker, calendar, world_id, target.as_ref(), now).await
+                {
+                    Ok(gate) => gate,
+                    Err(error) => {
+                        tracing::warn!(world_id, error = %error, "早鸟期赛季前收件门禁读取失败");
+                        result = WorkerResult::Error;
+                        continue;
+                    }
+                }
+            }
+            None => None,
+        };
+        let desired = match (&gate, snapshot.as_ref()) {
+            (Some(gate), _) => Some(gate.clone()),
+            (None, Some(snapshot)) => round_mail_gate(snapshot, now),
+            (None, None) => None,
+        };
+        let Some(desired) = desired else {
+            continue;
+        };
         if let Err(error) =
-            reconcile_mail(config, &worker.control, &snapshot, world_id, now, deadline).await
+            reconcile_mail(config, &worker.control, &desired, world_id, deadline).await
         {
             tracing::warn!(world_id, error = %error, "MoogleMail 周计划暂停/恢复对账失败");
             result = WorkerResult::Error;
@@ -114,11 +153,78 @@ where
     result
 }
 
+/// 一次邮箱暂停/恢复期望；身份片段用于派生稳定命令 ID。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MailGate {
+    paused: bool,
+    round_identity: String,
+}
+
+/// 赛季会清空异世界资产：首场早鸟草稿建立后至赛季开始前暂停收件，赛季开始后、首场预览前恢复。
+/// 该门禁优先于前一轮次的恢复期望；其余时段沿用轮次自身的开拍前暂停规则。
+async fn early_bird_intake_gate<C>(
+    worker: &PersistentWorker<C>,
+    calendar: &AuctionEarlyBirdCalendar,
+    world_id: &str,
+    target: Option<&AuctionScheduleSlot>,
+    now: DateTime<Utc>,
+) -> Result<Option<MailGate>, ApplicationError>
+where
+    C: Clock + 'static,
+{
+    if !calendar.pauses_intake_before_season() {
+        return Ok(None);
+    }
+    // 赛季已开始且当前维护的是首场草稿：恢复收件，让玩家在首场预览前投稿新赛季装备。
+    if let Some(slot) = target
+        && let Some(key) = slot.source.early_bird
+        && key.session == 1
+        && now < slot.times.preview_due_at
+        && now >= calendar.season_of(key)?.window_start
+    {
+        return Ok(Some(MailGate { paused: false, round_identity: key.key() }));
+    }
+    // 下一赛季的首场草稿已由后继或 bootstrap 建立、赛季尚未开始：暂停收件。
+    let Some(season) = calendar.upcoming_season(world_id, now) else {
+        return Ok(None);
+    };
+    let Some(slot_key) = calendar.session(season.season, 1)?.slot_key() else {
+        return Ok(None);
+    };
+    let round = worker.schedule.find_slot_round(world_id.to_owned(), slot_key.clone()).await?;
+    Ok(round
+        .filter(|round| round.active && round.preview_completed_at.is_none())
+        .map(|_| MailGate { paused: true, round_identity: slot_key }))
+}
+
+/// 轮次自身的邮箱期望：Preview 后开拍前两小时暂停，开拍或取消/错过后恢复。
+fn round_mail_gate(snapshot: &ScheduledRoundSnapshot, now: DateTime<Utc>) -> Option<MailGate> {
+    let paused = if snapshot.active
+        && snapshot.preview_completed_at.is_some()
+        && snapshot.open_completed_at.is_none()
+        && now >= snapshot.open_due_at - MAIL_PAUSE_LEAD
+    {
+        true
+    } else if (!snapshot.active && snapshot.preview_completed_at.is_some())
+        || (snapshot.active && snapshot.open_completed_at.is_some() && now >= snapshot.open_due_at)
+    {
+        // 取消/错过的轮次已经不再要求暂停；不能把本周邮箱永久留在 Preview 的暂停状态。
+        false
+    } else {
+        return None;
+    };
+    Some(MailGate { paused, round_identity: round_identity(snapshot) })
+}
+
+fn round_identity(snapshot: &ScheduledRoundSnapshot) -> String {
+    snapshot.slot_key.clone().unwrap_or_else(|| snapshot.local_week.format("%Y-%m-%d").to_string())
+}
+
 async fn load_or_bootstrap_round<C>(
     worker: &PersistentWorker<C>,
     config: &super::AuctionScheduleRuntimeConfig,
     world_id: &str,
-    generation: &Generation,
+    generation: &AuctionScheduleSlot,
     now: DateTime<Utc>,
     deadline: tokio::time::Instant,
 ) -> Result<Option<ScheduledRoundSnapshot>, ApplicationError>
@@ -127,8 +233,15 @@ where
 {
     // 先读冻结事实，避免新经济模板或排期被当成旧 command_id 的另一份创建负载。
     // 即使新配置的预览窗口尚未到达，也必须按既有轮次的时间继续对账邮箱暂停/恢复。
-    let existing =
-        worker.schedule.find_current_round(world_id.to_owned(), generation.local_week).await?;
+    let slot_key = generation.slot_key();
+    let existing = match &slot_key {
+        Some(slot_key) => {
+            worker.schedule.find_slot_round(world_id.to_owned(), slot_key.clone()).await?
+        }
+        None => {
+            worker.schedule.find_current_round(world_id.to_owned(), generation.local_week).await?
+        }
+    };
     // 冻结事实回执不能越过 drain 或原截止后再授权创建；timeout 可能先 poll 出迟到回执。
     if worker.control.is_draining() || tokio::time::Instant::now() >= deadline {
         return Ok(None);
@@ -136,21 +249,23 @@ where
     let snapshot = if let Some(snapshot) = existing {
         snapshot
     } else {
-        if now < generation.preview_due_at && now < generation.open_due_at - MAIL_PAUSE_LEAD {
+        let times = &generation.times;
+        if now < times.preview_due_at && now < times.open_due_at - MAIL_PAUSE_LEAD {
             return Ok(None);
         }
-        let identity = identities(world_id, generation.local_week);
+        let identity = identities(world_id, &generation.identity_key());
         let request = BootstrapRequest {
             round_id: identity.round_id,
             auction_id: identity.auction_id,
             create_command_id: identity.create_command_id,
             world_id: world_id.to_owned(),
             local_week: generation.local_week,
-            preview_due_at: generation.preview_due_at,
-            open_due_at: generation.open_due_at,
-            scheduled_end_at: generation.scheduled_end_at,
+            slot_key: slot_key.clone(),
+            preview_due_at: times.preview_due_at,
+            open_due_at: times.open_due_at,
+            scheduled_end_at: times.scheduled_end_at,
             policy: config.policy.clone(),
-            schedule_source: generation.schedule_source.clone(),
+            schedule_source: generation.source.clone(),
         }
         .into_bootstrap()?;
         if worker.control.is_draining() || tokio::time::Instant::now() >= deadline {
@@ -161,6 +276,7 @@ where
     };
     if snapshot.world_id != world_id
         || snapshot.local_week != generation.local_week
+        || snapshot.slot_key != slot_key
         // 已登记的 Admin 首期/后继拥有自己的稳定 ID，不能用自动 bootstrap 的 ID 反向拒绝。
         || snapshot.round_id.is_nil()
         || snapshot.create_command_id.is_nil()
@@ -182,6 +298,7 @@ struct BootstrapRequest {
     create_command_id: CommandId,
     world_id: String,
     local_week: NaiveDate,
+    slot_key: Option<String>,
     preview_due_at: DateTime<Utc>,
     open_due_at: DateTime<Utc>,
     scheduled_end_at: DateTime<Utc>,
@@ -199,6 +316,7 @@ impl BootstrapRequest {
             create_command_id,
             world_id,
             local_week,
+            slot_key,
             preview_due_at,
             open_due_at,
             scheduled_end_at,
@@ -234,6 +352,7 @@ impl BootstrapRequest {
             create_command_id,
             world_id,
             local_week,
+            slot_key,
             preview_due_at,
             open_due_at,
             scheduled_end_at,
@@ -247,9 +366,8 @@ impl BootstrapRequest {
 async fn reconcile_mail(
     config: &super::AuctionScheduleRuntimeConfig,
     control: &crate::WorkerControlHandle,
-    snapshot: &ScheduledRoundSnapshot,
+    gate: &MailGate,
     world_id: &str,
-    now: DateTime<Utc>,
     deadline: tokio::time::Instant,
 ) -> Result<(), auction_application::ApplicationError> {
     let Some(mail) = config.mail.as_ref() else {
@@ -263,22 +381,8 @@ async fn reconcile_mail(
     else {
         return Ok(());
     };
-    let desired = if snapshot.active
-        && snapshot.preview_completed_at.is_some()
-        && snapshot.open_completed_at.is_none()
-        && now >= snapshot.open_due_at - MAIL_PAUSE_LEAD
-    {
-        Some(true)
-    } else if (!snapshot.active && snapshot.preview_completed_at.is_some())
-        || (snapshot.active && snapshot.open_completed_at.is_some() && now >= snapshot.open_due_at)
-    {
-        // 取消/错过的轮次已经不再要求暂停；不能把本周邮箱永久留在 Preview 的暂停状态。
-        Some(false)
-    } else {
-        None
-    };
-    let Some(desired) = desired else { return Ok(()) };
-    let identity = identities(world_id, snapshot.local_week);
+    let desired = gate.paused;
+    let identity = identities(world_id, &gate.round_identity);
     let base_command_id =
         if desired { identity.pause_command_id } else { identity.resume_command_id };
     #[derive(Serialize)]
@@ -342,42 +446,19 @@ async fn reconcile_mail(
     ))
 }
 
+/// 当前本地周的常规周时段；与早鸟日历、开拍后继共用同一周计划投影。
 fn generation(
     config: &super::AuctionScheduleRuntimeConfig,
     now: DateTime<Utc>,
-) -> Result<Generation, ()> {
-    let timezone: Tz = config.timezone.parse().map_err(|_| ())?;
-    let local = now.with_timezone(&timezone);
-    let week_start =
-        local.date_naive() - Duration::days(i64::from(local.weekday().num_days_from_monday()));
-    let local_at = |weekday: u8, minute: u16| {
-        let date = week_start.checked_add_signed(Duration::days(i64::from(weekday))).ok_or(())?;
-        let time =
-            NaiveTime::from_num_seconds_from_midnight_opt(u32::from(minute) * 60, 0).ok_or(())?;
-        Ok::<_, ()>(NaiveDateTime::new(date, time))
-    };
-    let schedule_source = AuctionScheduleSource {
-        timezone: config.timezone.clone(),
-        preview_local: local_at(config.preview_weekday, config.preview_minute)?,
-        open_local: local_at(config.open_weekday, config.open_minute)?,
-        end_local: local_at(config.end_weekday, config.end_minute)?,
-    };
-    let times = schedule_source.resolve().map_err(|_| ())?;
-    Ok(Generation {
-        local_week: week_start,
-        preview_due_at: times.preview_due_at,
-        open_due_at: times.open_due_at,
-        scheduled_end_at: times.scheduled_end_at,
-        schedule_source,
-    })
-}
-
-struct Generation {
-    schedule_source: AuctionScheduleSource,
-    local_week: NaiveDate,
-    preview_due_at: DateTime<Utc>,
-    open_due_at: DateTime<Utc>,
-    scheduled_end_at: DateTime<Utc>,
+) -> Result<AuctionScheduleSlot, ()> {
+    let weekly = AuctionWeeklySchedule::new(
+        &config.timezone,
+        (config.preview_weekday, config.preview_minute),
+        (config.open_weekday, config.open_minute),
+        (config.end_weekday, config.end_minute),
+    )
+    .map_err(|_| ())?;
+    weekly.slot(weekly.week_start(now)).map_err(|_| ())
 }
 
 struct Identities {
@@ -388,12 +469,12 @@ struct Identities {
     resume_command_id: CommandId,
 }
 
-fn identities(world_id: &str, local_week: NaiveDate) -> Identities {
-    let week = local_week.format("%Y-%m-%d").to_string();
+/// 常规周以 `YYYY-MM-DD` 为身份片段，早鸟场次以时段键为身份片段；与开拍后继的派生算法一致。
+fn identities(world_id: &str, round_identity: &str) -> Identities {
     let id = |kind: &str| {
         legacy_natural_key_uuid(
             "auction-schedule",
-            &[kind.as_bytes(), world_id.as_bytes(), week.as_bytes()],
+            &[kind.as_bytes(), world_id.as_bytes(), round_identity.as_bytes()],
         )
     };
     Identities {

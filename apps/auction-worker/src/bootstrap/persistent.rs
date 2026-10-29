@@ -56,12 +56,14 @@ pub(super) async fn run_worker(
     let worker_id = format!("auction-worker-{}", Uuid::new_v4());
     let schedule: Arc<dyn ScheduledRoundStore> = store.clone();
     let lifecycle_store = Arc::clone(&store);
-    let lifecycle: Arc<dyn AuctionLifecycleCommandPort> =
-        Arc::new(DatabaseAuctionLifecycleCommands::new(
+    let lifecycle: Arc<dyn AuctionLifecycleCommandPort> = Arc::new(
+        DatabaseAuctionLifecycleCommands::new(
             lifecycle_store,
             AuctionLifecyclePolicy::default(),
             config.auction.policy()?,
-        ));
+        )
+        .with_schedule_calendar(config.auction.schedule_calendar()?),
+    );
     let slow_proxy_due: Arc<dyn SlowProxyDueReader> = store.clone();
     let slow_proxy_commands: Arc<dyn SlowProxyCommandPort> =
         Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store)));
@@ -464,6 +466,9 @@ fn configure_schedule_runtime(
     let mailboxes = runtime_mailboxes
         .map(|(world_id, mailbox_key)| (world_id.to_owned(), mailbox_key.to_owned()))
         .collect();
+    // 与生命周期后继共用同一配置投影，保证 bootstrap 与开拍事务计算出同一早鸟时段。
+    let early_bird =
+        config.auction.schedule_calendar()?.and_then(|calendar| calendar.early_bird().cloned());
     Ok(Some(auction_jobs::AuctionScheduleRuntimeConfig {
         enabled: true,
         timezone: schedule.timezone.clone(),
@@ -475,6 +480,7 @@ fn configure_schedule_runtime(
         end_minute: parse_clock(&schedule.nominal_end_time)?,
         worlds,
         policy: config.auction.policy()?,
+        early_bird,
         mail,
         mailboxes,
     }))

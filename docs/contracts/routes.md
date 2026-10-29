@@ -591,7 +591,7 @@ Admin 表单把旧单值恢复成一个已选项，保存多选时清空相应�
 
 ### Runtime 六组接管
 
-runtime 文档提供可选 `operations`，响应投影补齐六组候选参数：`economics`（后续新拍卖底价、增幅、软截止、取消与代理策略）、`schedule`（自动周排期）、`forum`（论坛开关与有界轮询）、`alerts`（告警阈值、通知目标与批次边界）、`worker`（生命周期、投递、履约、恢复循环的吞吐与重试）、`mail`（邮件 cron、读取批量/分页、HTTP 与批次处理预算、租约续期、读取/处理尝试和退避）。每组 `managed` 默认 `false`（沿用公共/角色 TOML），只有设为 `true` 才在对应进程重启时覆盖该组字段；首次 GET 的候选值不代表未接入 runtime 的 Worker 当前配置。
+runtime 文档提供可选 `operations`，响应投影补齐六组候选参数：`economics`（后续新拍卖底价、增幅、软截止、取消与代理策略）、`schedule`（自动周排期及可选赛季早鸟期）、`forum`（论坛开关与有界轮询）、`alerts`（告警阈值、通知目标与批次边界）、`worker`（生命周期、投递、履约、恢复循环的吞吐与重试）、`mail`（邮件 cron、读取批量/分页、HTTP 与批次处理预算、租约续期、读取/处理尝试和退避）。每组 `managed` 默认 `false`（沿用公共/角色 TOML），只有设为 `true` 才在对应进程重启时覆盖该组字段；首次 GET 的候选值不代表未接入 runtime 的 Worker 当前配置。
 严格候选校验覆盖金额网格及 1B 底价上限、周时间顺序、分页请求预算、并发/批量、租约/超时、告警冷却与收件人；邮件 cron 校验复用 Worker 配置解析器并要求存在未来触发时刻，无效候选在新命令写入账本前拒绝。`mail` 完整字段、单位、默认值和范围见 `ops/config/examples/runtime/admin.toml`：读取与处理超时必须大于 HTTP 超时，续租周期必须小于租约，退避上限不能小于基础退避，`mail.batch_timeout_seconds` 范围 1–86400 秒且至少为 `fetch_timeout_seconds + item_timeout_seconds`，省略时 600 秒并以省略序列化保留旧 fingerprint，Admin 闭集 decoder 和表单接受缺省值；
 该预算覆盖一轮拉取及业务处理，可在重试耗尽前结束，完成前缀与其 cursor 由 Worker 原子提交。缺少整个 `operations` 或其中 `mail` 的旧物理文件和 durable 候选保持原指纹，显式 `mail:null` 被拒绝；物化只发生在浏览器投影，不改写历史命令，API envelope、命令摘要版本和 `restart_required` 语义不变，不增加热加载路径。保存中断后 pending 命令与旧文件指纹一致时继续完成同一候选，不永久占用唯一未完成命令槽；若启动恢复补写了文件，启动校验要求重新加载恢复后的配置，未证明的冲突仍需人工核对。
 
@@ -601,6 +601,14 @@ runtime 文档提供可选 `operations`，响应投影补齐六组候选参数�
 含非零值的新文档须使用支持此字段的同版程序。间隔指同类 Send 进入持久 sending 的最小间距，不是轮询周期，
 Main/Isekai 共用；未接管仍继承部署配置。Admin 原生数字表单与五语说明、服务端校验和保存后重启 Worker 的要求保持一致。
 分组映射及优先级见[发送节奏](ops/config/README.md#邮件业务发送间隔)，不新增路由或顶层响应字段。
+
+`operations.schedule.early_bird` 是可选闭集对象，十二个字段为 `enabled`、`timezone`、`worlds`、`season_starts`、
+`season_start_time`、`window_days`、`session_days`、`open_time`、`preview_lead_minutes`、`live_minutes`、`qualities`、
+`pause_intake_before_season`；缺省等同未启用，省略序列化保持旧 fingerprint 与命令重放，显式 null 或未知键拒绝。
+服务端复用公共配置的同一校验：`preview_lead_minutes` 120–10080、`live_minutes` 1–10080、`window_days` 1–31，`session_days`
+严格递增且不超过窗口，首场预览不早于赛季开始、相邻场次不重叠、相邻赛季间隔容纳覆盖期；启用时周排期须启用且早鸟世界在
+排期世界内。错误定位为 `operations.schedule.early_bird.<字段>`。Admin 表单区块缺省时按默认值展示，未改动不写回；
+字段语义见[赛季早鸟期](ops/config/README.md#赛季早鸟期)，不新增路由或顶层响应字段。
 
 ### 数据库业务世界
 

@@ -44,6 +44,8 @@ pub(super) fn apply_runtime_operations(
             nominal_end_day: candidate.nominal_end_day.clone(),
             nominal_end_time: candidate.nominal_end_time.clone(),
             worlds: candidate.worlds.clone(),
+            // 接管时整组排期都由 runtime 决定；省略早鸟区块即未启用，不回退部署值。
+            early_bird: candidate.early_bird.clone().unwrap_or_default(),
         };
     }
     if role == Role::Worker {

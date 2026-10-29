@@ -244,6 +244,8 @@ fn config(state: &FirstRunState, request: SetupRequest) -> FirstRunConfig {
             nominal_end_time: request.schedule.nominal_end_time,
             // 首次表单不开放 world 或 runtime 接管；沿用 main、isekai 的部署默认值。
             worlds: vec!["main".to_owned(), "isekai".to_owned()],
+            // 首次设置不开放早鸟期；保持默认关闭，后续在公共配置或 runtime 中启用。
+            early_bird: Default::default(),
         },
         start_price: request.start_price,
         log_filter: request.log_filter,

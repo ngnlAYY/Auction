@@ -9,10 +9,15 @@ pub(crate) fn bounded_text(value: String, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 
+/// 轮次在 world 内的身份片段：早鸟场次用时段键，常规周沿用 `YYYY-MM-DD`。
+pub(crate) fn round_identity(local_week: NaiveDate, slot_key: Option<&str>) -> String {
+    slot_key.map_or_else(|| local_week.format("%Y-%m-%d").to_string(), str::to_owned)
+}
+
 pub(crate) fn command_id(
     create_command_id: Uuid,
     world_id: &str,
-    local_week: NaiveDate,
+    round_identity: &str,
     phase: ScheduledRoundPhase,
 ) -> CommandId {
     let legacy_kind = match phase {
@@ -21,10 +26,10 @@ pub(crate) fn command_id(
         ScheduledRoundPhase::Final => None,
     };
     if let Some(kind) = legacy_kind {
-        let week = local_week.format("%Y-%m-%d").to_string();
+        // 常规周保持旧版 world/week 命令身份；同周多场的早鸟场次改用时段键，避免命令 ID 冲突。
         return CommandId::from_uuid(legacy_natural_key_uuid(
             "auction-schedule",
-            &[kind.as_bytes(), world_id.as_bytes(), week.as_bytes()],
+            &[kind.as_bytes(), world_id.as_bytes(), round_identity.as_bytes()],
         ));
     }
 

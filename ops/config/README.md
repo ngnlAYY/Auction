@@ -157,7 +157,7 @@ runtime 保存与启动共用 listener、精确规范 HTTP(S) Origin、tracing e
 | `equipment_colors` | Admin 管理、Public 装备分组与 Worker 论坛标色启动快照 | Public、Worker |
 | `bot_players` | Admin 管理、Public 注册提示及 Worker 内部履约收件人名单快照 | Public、Worker |
 | `operations.economics` | 后续新拍卖的冻结经济模板 | Admin、Worker |
-| `operations.schedule` | 后续周排期的时区/星期/时间/world | Admin、Worker |
+| `operations.schedule` | 后续周排期的时区/星期/时间/world 及可选赛季早鸟期 | Admin、Worker |
 | `operations.forum` | 论坛开关、批量、分页和请求/任务预算 | Worker |
 | `operations.alerts` | 告警开关、阈值、冷却、重试和收件人 | Worker |
 | `operations.worker` | 生命周期、delivery、fulfillment、recovery 预算 | Worker |
@@ -277,6 +277,27 @@ OTLP headers 的名称和值先按严格百分号编码解码，再检查 HTTP t
 [显式修正命令](apps/auctionctl/README.md#草稿软截止显式修正)，逐个指定目标并确认；进行中、已发布或已结算场次不追溯、
 不自动重开，不批量改库。周排期默认关闭，内置 UTC 周四 22:00 预览、周五 00:00 开拍、周六 12:00 结束，可显式覆盖。
 邮件默认起拍价独立，见[Worker 定价说明](apps/auction-worker/README.md#拍卖邮件起拍价)。
+
+### 赛季早鸟期
+
+`[auction.schedule.early_bird]`（runtime 接管排期时为 `[operations.schedule.early_bird]`）在赛季更新后的早鸟期内加开场次。
+默认关闭；启用要求周排期已启用、早鸟世界包含在排期世界内，Admin/Worker 有效拍卖配置一致（部署预检整组比较）。
+默认值对应异世界每年 `05-01`、`11-01` UTC 09:00 起 7 天，窗口第 1/3/5/7 天 16:00 预览、18:00 开拍、竞价 24 小时，共 4 场。
+
+- 场次：第 N 天按 `open_time` 开拍，预览提前 `preview_lead_minutes`（至少 120，与开拍前两小时暂停收件一致），计划结束为开拍加
+  `live_minutes`。首场预览不得早于赛季开始，下一场预览不得早于上一场计划结束，相邻赛季开始间隔须容纳完整覆盖期，否则加载失败。
+- 替代周场：常规周时段 `[预览, 计划结束)` 与覆盖期 `[赛季开始, max(窗口结束, 末场计划结束))` 重叠时不再建立；早鸟场次之后从
+  下一个不重叠周时段恢复，按启动期有效周计划计算。
+- 后继：开拍事务选取预览不早于本场计划结束的最早早鸟场次或周时段建立下一期草稿；当周时段被替代时 Worker bootstrap 改为确保
+  当前早鸟场次。同一 world 至多一场处于 preview/live/final/settling（既有唯一索引），前一场软截止延长或结算未完成时，
+  下一场预览延后重试（退避上限 15 分钟）。
+- 收件品质：参与 world 的投稿邮件收件时间落在 `[赛季开始, 赛季开始 + window_days)` 时改用 `qualities`，空数组表示不限品质；
+  其余筛选维度不变，窗口外仍使用 `equipment_filter.qualities`。
+- 赛季前停收：`pause_intake_before_season = true` 时，首场早鸟草稿建立后（通常是赛季前最后一场周场开拍时）到赛季开始前暂停该
+  world 收件轮询；赛季开始后、首场预览前恢复，首场预览后沿用开拍前两小时暂停。停收期间的邮件恢复后才处理，收件时间早于窗口，
+  使用常规品质。
+- 生效：保存后重启 Admin 与 Worker，只影响此后新建的后继与 bootstrap，已冻结轮次不改写。须在赛季前最后一场周场开拍之前启用，
+  链路才会把它的后继排为首场早鸟；时机、更新延迟和空场处理见[早鸟期运维](ops/README.md#赛季早鸟期)。
 
 ## HTTP listener 与安全
 

@@ -12,7 +12,7 @@ use sqlx::Postgres;
 use sqlx::Row;
 
 use super::mapping::{
-    command_id, map_storage_error, phase_from_completion, repository_error_owned,
+    command_id, map_storage_error, phase_from_completion, repository_error_owned, round_identity,
 };
 use crate::database::TrackedPool;
 
@@ -28,7 +28,7 @@ pub(super) async fn postgres(
     // Preview/Open 不消费 lot 截止；只为已 Open 的 Live 轮次执行 Final 到期聚合。
     let rows = sqlx::query(
         "SELECT round.id, round.auction_id, round.create_command_id,
-                round.world_id, round.local_week,
+                round.world_id, round.local_week, round.slot_key,
                 round.preview_completed_at, round.open_completed_at, round.attempt_count,
                 round.state_version
          FROM public.scheduled_rounds AS round
@@ -83,6 +83,7 @@ pub(super) async fn postgres(
             row.try_get("create_command_id").map_err(map_storage_error)?;
         let world_id: String = row.try_get("world_id").map_err(map_storage_error)?;
         let local_week: NaiveDate = row.try_get("local_week").map_err(map_storage_error)?;
+        let slot_key: Option<String> = row.try_get("slot_key").map_err(map_storage_error)?;
         let preview_completed_at: Option<DateTime<Utc>> =
             row.try_get("preview_completed_at").map_err(map_storage_error)?;
         let open_completed_at: Option<DateTime<Utc>> =
@@ -130,7 +131,12 @@ pub(super) async fn postgres(
             round_id,
             auction_id,
             phase,
-            command_id: command_id(create_command_id, &world_id, local_week, phase),
+            command_id: command_id(
+                create_command_id,
+                &world_id,
+                &round_identity(local_week, slot_key.as_deref()),
+                phase,
+            ),
             worker_id: worker_id.to_owned(),
             lease_until,
             state_version,

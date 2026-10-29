@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# 构建身份字段的唯一实现；由 release.sh 与 web-bundle.sh 在仓库根目录 source。
-# 调用方负责先 cd 到仓库根，并自行决定何时冻结身份，避免两个脚本对同一份源码给出不同指纹。
+# release.sh 与 web-bundle.sh 共用的函数库，在仓库根目录 source：工具选择、构建身份指纹、
+# BUILD-INFO 读取及 Web payload 门禁。调用方自行决定何时冻结身份，两个入口对同一源码给出同一指纹。
 
 # 发布与 Web 共用工具选择；按工具字节身份隔离 sccache daemon，避免新客户端连接旧进程。
 configure_build_tools() {
 	local tools_identity repository_identity name uses_sccache=false
 	tools_identity=$(bash ci/tools/bootstrap.sh identity release) || return 1
 	export PATH="$PWD/target/build-tools/bin:$PATH" NO_DOWNLOADS=1
+	# 发布只接受环境变量启用的 sccache 并换成受控版本；Cargo 配置文件（如用户全局
+	# build.rustc-wrapper）中的包装器未经回执校验，环境未指定时用空值显式覆盖。
+	if [[ -z ${RUSTC_WRAPPER+set} && -z ${CARGO_BUILD_RUSTC_WRAPPER+set} ]]; then
+		export RUSTC_WRAPPER=
+	fi
 	for name in RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_RUSTC_WRAPPER CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER; do
 		if [[ ${!name-} == sccache || ${!name-} == */sccache ]]; then
 			printf -v "$name" '%s' "$PWD/target/build-tools/bin/sccache"
@@ -62,6 +67,107 @@ source_fingerprint() {
 read_build_info() {
 	local file=$1 key=$2
 	awk -F= -v wanted="$key" '$1 == wanted { print substr($0, length($1) + 2); exit }' "$file"
+}
+
+sha256_file() {
+	sha256sum "$1" | awk '{print $1}'
+}
+
+# 两个 Web surface 的包名、页面标题与对端；闭集之外失败。
+web_surface_package() {
+	case "$1" in
+	public) printf 'auction-web-public\n' ;;
+	admin) printf 'auction-web-admin\n' ;;
+	*) return 2 ;;
+	esac
+}
+
+web_surface_title() {
+	case "$1" in
+	public) printf 'Auction 公开站点\n' ;;
+	admin) printf 'Auction 管理站点\n' ;;
+	*) return 2 ;;
+	esac
+}
+
+web_other_surface() {
+	case "$1" in
+	public) printf 'admin\n' ;;
+	admin) printf 'public\n' ;;
+	*) return 2 ;;
+	esac
+}
+
+# Web payload 只允许普通文件与目录；符号链接可能让后续 chmod/touch 越出 payload。
+web_payload_tree_is_plain() {
+	local root=$1
+	[[ -z $(find "$root" -type l -print -quit) && -z $(find "$root" ! -type f ! -type d -print -quit) ]]
+}
+
+# payload 文件摘要清单（不含内嵌标记），按路径排序；生成与复核共用同一算法。
+web_payload_checksums() (
+	cd "$1" || return 1
+	find . -type f ! -name auction-web-manifest.v1 -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum
+)
+
+# Web payload 完整门禁：入口与本 surface 标题、跨 surface 隔离、普通文件、内嵌标记、固定清单及唯一一组
+# JS/WASM。成功时输出 payload 哈希；web-bundle 的新建/复用与 release 的制品核对共用同一判定。
+verify_web_payload() {
+	local surface=$1 stable_root=$2
+	local root="$stable_root/public" other title other_title marker manifest marker_sha actual_sha file
+	other=$(web_other_surface "$surface") || return 2
+	title=$(web_surface_title "$surface")
+	other_title=$(web_surface_title "$other")
+	marker="$root/auction-web-manifest.v1"
+	manifest="$stable_root/PAYLOAD-SHA256"
+
+	for file in "$root/index.html" "$marker" "$manifest"; do
+		if [[ ! -f "$file" || -L "$file" ]]; then
+			printf '%s Web payload 缺少普通文件：%s\n' "$surface" "$file" >&2
+			return 1
+		fi
+	done
+	if ! web_payload_tree_is_plain "$root"; then
+		printf '%s Web payload 含符号链接或特殊文件\n' "$surface" >&2
+		return 1
+	fi
+	if ! grep -Fq "<title>$title</title>" "$root/index.html" || grep -Fq "$other_title" "$root/index.html"; then
+		printf '%s Web 入口混入错误 surface 标题\n' "$surface" >&2
+		return 1
+	fi
+	if grep -Fq "auction-web-$other" < <(find "$root" -type f -print); then
+		printf '%s Web payload 混入 %s 文件\n' "$surface" "$other" >&2
+		return 1
+	fi
+
+	marker_sha=$(read_build_info "$marker" payload_sha256)
+	if [[ $(read_build_info "$marker" schema) != auction-web-assets/1 ||
+	$(read_build_info "$marker" surface) != "$surface" ||
+	$(read_build_info "$marker" profile) != wasm-release ||
+	! "$marker_sha" =~ ^[0-9a-f]{64}$ ]]; then
+		printf '%s Web 制品标记无效\n' "$surface" >&2
+		return 1
+	fi
+	# 每次都重算清单：标记与清单必须互相印证，缓存内容不能自证可信。
+	if ! cmp -s "$manifest" <(web_payload_checksums "$root"); then
+		printf '%s Web payload 与固定清单不一致\n' "$surface" >&2
+		return 1
+	fi
+	actual_sha=$(sha256_file "$manifest")
+	if [[ "$actual_sha" != "$marker_sha" ]]; then
+		printf '%s Web payload 哈希与内嵌标记不一致\n' "$surface" >&2
+		return 1
+	fi
+
+	local wasm_count js_count
+	wasm_count=$(find "$root" -type f -name "auction-web-${surface}_bg*.wasm" | wc -l)
+	js_count=$(find "$root" -type f -name "auction-web-${surface}-*.js" | wc -l)
+	if [[ "$wasm_count" -ne 1 || "$js_count" -ne 1 ]]; then
+		printf '%s Web payload 必须且只能包含一组优化 JS/WASM：js=%s wasm=%s\n' \
+			"$surface" "$js_count" "$wasm_count" >&2
+		return 1
+	fi
+	printf '%s\n' "$marker_sha"
 }
 
 # 原生制品与 Web payload 共用构建环境指纹；profile、工具包装器及目标参数变化都必须失效缓存。

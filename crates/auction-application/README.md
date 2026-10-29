@@ -76,7 +76,11 @@ Admin/Worker 生命周期；取得权威锁后才读取命令时刻，同一计�
 `slow_replay.rs` 严格校验。自动周排期来源由
 [ports/scheduling/source.rs](crates/auction-application/src/ports/scheduling/source.rs) 冻结，后继按本地周及既有 DST
 规则计算，无来源的历史轮次保持 UTC 周期；Admin/Worker 向生命周期服务注入启动时有效的 `AuctionPolicyTemplate`，
-新后继冻结该模板，旧快照和已接受命令不重写。`draft_soft_close` 只对显式指定、从未发布的合格草稿修正 60/60 为
+新后继冻结该模板，旧快照和已接受命令不重写。
+[ports/scheduling/early_bird.rs](crates/auction-application/src/ports/scheduling/early_bird.rs) 拥有公共与 runtime 共用的赛季早鸟
+配置、校验及窗口/场次计算，[ports/scheduling/calendar.rs](crates/auction-application/src/ports/scheduling/calendar.rs) 组合周计划与早鸟
+日历；生命周期服务可注入该日历，被早鸟覆盖期替代的周时段顺延，较早的早鸟场次优先，已冻结轮次不改写。
+邮件装备筛选按冻结收件时间判定早鸟窗口，窗口内改用早鸟品质列表（空表示不限）。`draft_soft_close` 只对显式指定、从未发布的合格草稿修正 60/60 为
 900/900，默认检查只读，执行需稳定命令、版本及精确确认（门禁见[CLI](apps/auctionctl/README.md#草稿软截止显式修正)）。
 Admin 创建与改期统一要求 `preview < open < end`；两小时只是邮箱暂停提前量，不作为已登记轮次的最小预览窗口。
 首次 Admin 创建先按 world → intake target 取得原有业务锁，再读取数据库实时钟并校验预览计划；等锁跨过预览时间

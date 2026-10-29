@@ -58,6 +58,10 @@ Sending、节奏起点和原审计同事务提交。正常成功和维护恢复�
 只替换 CHECK，不修改旧快照、结算、奖池余额、义务、投递或账本；v2 实分优惠可为零且不超过一份名义基础折扣。
 履约及资金收款边界从同一事务的冻结明细和 policy 模式重建账单，v2 显式九变量仅抵扣实分基础优惠；
 旧三/八变量摘要、完整 Sent、命令、generation 与现金用途校验保持不变。
+
+`000065` 由 scheduler 与生命周期后继写入 `scheduled_rounds.slot_key`：常规周轮次保持 NULL 并按 world/local_week 唯一，
+赛季早鸟轮次按 world/slot_key 唯一，且键与 `schedule_snapshot.early_bird` 同时出现；bootstrap 按两类键分别定位，
+早鸟场次的 preview/open 命令身份改由时段键派生。同 world 至多一场 preview/live/final/settling 仍由 `auctions_one_active_world_idx` 保证。
 升级与 owner 见[对象契约](docs/contracts/schema.md#结算恢复与交付)。
 
 ## 用户身份与消费 owner

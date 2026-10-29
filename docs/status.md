@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | HTTP 与页面 | Public/Admin feature API 及浏览器入口见[路由口径](docs/contracts/routes.md#基线与统计口径) | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
-| 迁移 | PostgreSQL 64 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 65 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -34,6 +34,95 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 各记录只覆盖注明的工作树与验证范围，不代表运行验收。下文 `verify全绿` 沿用记录当时的完整 `just verify` 结果；历史文档份数不是当前自动检查项，也不证明链接或语义正确。当前静态门禁及独立检查范围见[开发指南](docs/guide/development.md#默认检查)，历史命令和失败结果保持原样。
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
+
+### 2026-10-28 发布脚本精简与本机编译加速
+
+`build-identity.sh` 收拢 Web payload 完整门禁、surface 元数据与 `sha256_file`，`web-bundle.sh` 的新建/复用与
+`release.sh` 的制品核对共用同一判定；`release.sh` 并入原 `release-single.sh`，标记断言与装包清单改为表驱动，
+子命令参数统一校验，命令行接口不变。发布与 Web 入口只接受环境变量启用的受控 sccache，用户全局
+`build.rustc-wrapper` 由空 `RUSTC_WRAPPER` 覆盖。本机另按用户要求写入 `~/.cargo/config.toml`（sccache + clang
+`--ld-path` mold），只改变编译速度，不改变 profile 或 CPU 基线。
+
+`bash -n`、ShellCheck 与 repository/layout/config/i18n 门禁通过。`release-check --allow-dirty` 端到端完成 API-only、
+双端 Web、嵌入四程序、资源隔离与确定性装包；首次运行因构建期间修改了 `ci/tools/README.md` 被输入复核拒绝，
+未改输入重跑后通过。二次运行 Web 与两档原生制品均命中复用，新包文件清单及权限与 R34 正式包一致，发布二进制由
+mold 链接、未经系统 sccache。验证包保留在 `target/dist/package.refactor-verify-20261028/`，`target/dist/package/`
+已还原为 R34 包（SHA-256 `c71fb549…b944`）。未运行行为测试、服务或部署。
+
+### 2026-10-28 赛季早鸟期排期与收件品质
+
+按用户要求为异世界赛季更新新增可配置早鸟期，默认关闭；启用后默认每年 `05-01`、`11-01` UTC 09:00 起 7 天，窗口第
+1/3/5/7 天 16:00 预览、18:00 开拍、竞价 24 小时。与覆盖期重叠的常规周场由早鸟场次替代，结束后按周计划恢复；窗口内收件
+时间的投稿改用独立品质列表（默认不限品质）；首场早鸟草稿建立后到赛季开始前暂停该 world 收件轮询，赛季开始后恢复。
+owner 为 application `ports/scheduling/{early_bird,calendar}.rs`、生命周期后继与邮件筛选，storage scheduler/lifecycle 及追加迁移
+`000065_early_bird_schedule_slots`，jobs bootstrap 与邮箱门禁，config/runtime 投影和 Admin 运行参数页五语字段；
+语义见[早鸟期配置](ops/config/README.md#赛季早鸟期)，升级门禁见[早鸟期运维](ops/README.md#赛季早鸟期)。
+
+`cargo fmt --all` 后 `bash ci/checks/check.sh all fmt check feature lint wasm` 与
+`bash ci/checks/check.sh repository layout config i18n` 均退出 0。未新增或运行行为测试，未在任何数据库执行 `000065`，
+未启动服务、验证页面、真实邮箱或赛季时间线。迁移按 PostgreSQL 默认名删除 `000003` 的
+`scheduled_rounds_world_id_local_week_key`，执行前须在隔离库核对约束名；同 world 单场活动仍由既有
+`auctions_one_active_world_idx` 保证，前一场未结算时下一场预览按退避重试。
+
+### 2026-10-28 Blaze 本地开发试验候选
+
+按用户要求复用本机已安装的 `blaze 0.20261027.0 (49ca152)` 与 `blaze-2026-10-27`，新增
+`ci/tools/blaze.sh` / `just blaze` 显式入口。build/test 使用 `--locked`，daemon、函数缓存和编译输出隔离于
+`target/blaze/`；普通 Cargo 未全局接管，默认 verify、固定 Rust/MSRV、Web 与正式发布依赖保持不变。
+工具 owner 为 `ci/tools`，使用边界见[开发指南](docs/guide/development.md#blaze-本地试验)。
+
+实际核对结果：
+
+| 范围 | 结果 |
+| --- | --- |
+| `auction-domain` 既有两个领域测试 | 编译阶段退出 101，测试未运行；libtest 引用的 `__RUST_STD_INTERNAL_VAL` 缺少 rustc 符号 |
+| `auctionctl` 默认 feature 原生编译 | 11 个可达函数因 `__RUST_STD_INTERNAL_VAL` / `MIN` 可写静态量缺少符号而被拒绝，退出 101，无新 CLI 产物 |
+| 独立临时程序调用真实 `BidAmount` | 首次编译 15.32 秒，正数、信用网格、历史非整千金额、上限及价格封顶断言通过 |
+| 修改临时程序函数后重新构建 | Blaze 报告 0.15 秒；worker 编译 1 个函数、复用 35 个，实际输出从 30000 变为 470000，断言继续通过 |
+| 固定 Rust 1.99.0 对照 | 最终临时程序构建报告 0.14 秒，输出同为 470000，断言通过 |
+
+上述小程序只证明受支持路径的增量替换和结果；没有证明 Auction 完整后端兼容或实际加速收益。第一次临时源码放在
+`target/` 下，Blaze 报告增量成功但运行旧结果；按该版本 `WatchedFile::immutable` 源码确认，路径包含 `target`
+的普通源码被排除监视。该次耗时作废，移到独立临时目录后才取得上表有效证据。
+
+`bash -n`、ShellCheck 及 repository/layout/config/i18n/equipment-contract/fmt 静态门禁通过；
+`just verify` dry-run 仍解析到原检查命令，release 参数在实验入口被拒绝并返回 2。
+本轮未修改业务 Rust、依赖锁、运行配置或数据库，没有启动 Public/Admin/Worker、访问外部业务服务或验证 Dioxus 页面。
+未以 Blaze 替代完整 `just verify`，也未重新运行全工作区编译或既有行为测试；两项既有领域测试仅尝试构建且被阻断。
+试验 daemon 已停止，临时源码和诊断程序已删除；编译器身份、原始 worker 日志、最终诊断源码文本及回执保留在
+`target/blaze/evidence-20261028.json`。当前候选受上述编译器兼容问题阻断，不宣称可用于完整后端日常快速编译。
+
+### 2026-10-28 云端 R34 发布与受控迁移
+
+在下方邮件统一起拍价与 Public 控件修复完成后，按用户授权将干净提交
+`5c99692225ed0ffa0dcdcf6054a2f68574a08d6f` 发布到云端 R34。`auction-application` 的定价解析、
+`auction-web-public` 页面及共享分页样式随同版 Public、Admin、Worker、auctionctl 四程序上线。
+`CARGO_BUILD_JOBS=2 just release-check` 通过，包含 API-only/embedded 隔离、资源边界及正式封包门禁；
+发布包 SHA-256 为 `c71fb549319bb5940dbf624b7104ca7306e7efe99bc32a5bd979ff8c7245b944`。
+
+切换在 12:24 UTC 完成。先保留旧程序、配置和 systemd 定义，确认 Worker 正常 drain，
+再由旧 CLI 导出数据库恢复点、新 CLI 离线验证。三角色停止时实际执行新 `auctionctl migrate`，
+返回成功；目标库从 schema 64 保持为 64，待执行及新增迁移均为 0，64 份已发布迁移 SHA384 全部一致。
+停机窗口前后 88 张表的完整清单、行数及逐表摘要一致，配置内容与权限、unit、tmpfiles 和 runtime 锁身份保持。
+备份 archive/manifest 已另复制到本机私有目录并核对摘要，文件权限 0600、目录 0700。
+
+启动按 Worker → Admin → Public 完成，三项 readiness 均为 200，四程序磁盘及运行进程摘要匹配发布计划。
+Public/Admin Unix 源站各 10 项、公网 Public 9 项非 HTML 资源全部返回 200 且 SHA-256 匹配封存包。
+首页字节在源站核对；公网 HTML 沿用已记录的 Cloudflare 改写边界，不以其字节差异判为旧制品。
+部署后 20 分钟复核保持同一 PID/InvocationID、零重启，启动以来完整日志计数为零 error、零 warning。
+
+运行后新增 3 条服务心跳；其余变化已对照停机备份作只读字段核对，并将 `timestamptz` 统一到 UTC 后比较：
+Admin 按既有启动契约撤销 1 条旧会话；邮件运行 generation 从 81 增至 82；轮询时间/版本、告警与恢复健康时间刷新；
+1 条原已重试的履约任务推进 fencing、版本、重试计数和下次尝试时间。上述表无增删行，执行状态、投递绑定、
+错误码及余额未变。原 3 条人工核对投递与 3 场拍卖策略摘要保持，不把运行元数据推进描述为数据库全表静止。
+
+本次运行核验覆盖发布、恢复点、迁移、readiness、HTTP 资源及受保护事实；没有额外执行业务或浏览器用例，
+没有人为重放旧拒收邮件或重发通知。Admin 重启后需重新登录，Public 已打开页面需刷新以加载新资源。
+本次未更新本地运行服务；下方源码阶段尚未部署的历史记录保留。
+
+本机汇总：`target/dist/mail-pricing-ui-20261028-ops-r34/DEPLOYMENT-SUMMARY.json`；
+其 `operations/` 保存发布计划、上传/切换/后验/稳定性回执、规范化字段核对及备份复制回执。
+云端操作归档为 `backups/mail-pricing-ui-20261028-r34/`，数据库恢复点另置 root 私有目录。
 
 ### 2026-10-28 邮件统一起拍价与 Public 控件密度修复
 

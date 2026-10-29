@@ -4,6 +4,7 @@ use chrono::Timelike;
 use serde::{Deserialize, Serialize};
 
 use super::{AdminRuntimeConfigError, invalid, require};
+use crate::AuctionEarlyBirdConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -24,6 +25,9 @@ pub struct AdminRuntimeScheduleConfig {
     pub nominal_end_time: String,
     /// 排期 world 候选；运行时仍需与数据库权威启用状态取交集。
     pub worlds: Vec<String>,
+    /// 赛季早鸟期；省略时保持升级前文件和命令账本的序列化指纹，等同未启用。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub early_bird: Option<AuctionEarlyBirdConfig>,
 }
 
 impl Default for AdminRuntimeScheduleConfig {
@@ -39,6 +43,7 @@ impl Default for AdminRuntimeScheduleConfig {
             nominal_end_day: "Saturday".to_owned(),
             nominal_end_time: "12:00".to_owned(),
             worlds: vec!["main".to_owned(), "isekai".to_owned()],
+            early_bird: None,
         }
     }
 }
@@ -59,7 +64,20 @@ impl AdminRuntimeScheduleConfig {
             .ok_or_else(|| invalid("schedule.open_time"))?;
         let end = week_minute(&self.nominal_end_day, &self.nominal_end_time)
             .ok_or_else(|| invalid("schedule.nominal_end_time"))?;
-        require(preview + 120 <= open && open < end, "schedule")
+        require(preview + 120 <= open && open < end, "schedule")?;
+        if let Some(early_bird) = &self.early_bird {
+            early_bird
+                .validate()
+                .map_err(|field| invalid(&format!("schedule.early_bird.{field}")))?;
+            // 早鸟期依附周排期：启用时周排期必须启用，早鸟世界必须在排期世界内才有 bootstrap。
+            require(
+                !early_bird.enabled
+                    || (self.enabled
+                        && early_bird.worlds.iter().all(|world| self.worlds.contains(world))),
+                "schedule.early_bird.enabled",
+            )?;
+        }
+        Ok(())
     }
 }
 

@@ -9,9 +9,9 @@ use auction_application::{
     AdminRulesReader, AdminRulesRequest, AdminUpdateAuctionScheduleCommand, AdminWorldPort,
     AdminWorldSetEnabledCommand, ApplicationFuture, AuctionLifecycleCommand,
     AuctionLifecycleCommandPort, AuctionLifecyclePolicy, AuctionLifecycleResult,
-    AuctionLifecycleService, AuctionPolicyTemplate, Clock, CompetitionCommandOutcome,
-    CompetitionCommandPort, CompetitionService, CreateProxyCommand, ExecuteSlowProxyCommand,
-    LowerProxyCommand, PlaceBidCommand, SlowProxyCommandPort,
+    AuctionLifecycleService, AuctionPolicyTemplate, AuctionScheduleCalendar, Clock,
+    CompetitionCommandOutcome, CompetitionCommandPort, CompetitionService, CreateProxyCommand,
+    ExecuteSlowProxyCommand, LowerProxyCommand, PlaceBidCommand, SlowProxyCommandPort,
 };
 #[cfg(feature = "postgres")]
 use auction_application::{
@@ -164,6 +164,7 @@ pub struct DatabaseAuctionLifecycleCommands {
     store: Arc<DatabaseStore>,
     policy: AuctionLifecyclePolicy,
     successor_policy: AuctionPolicyTemplate,
+    schedule_calendar: Option<AuctionScheduleCalendar>,
 }
 
 impl DatabaseAuctionLifecycleCommands {
@@ -173,7 +174,13 @@ impl DatabaseAuctionLifecycleCommands {
         policy: AuctionLifecyclePolicy,
         successor_policy: AuctionPolicyTemplate,
     ) -> Self {
-        Self { store, policy, successor_policy }
+        Self { store, policy, successor_policy, schedule_calendar: None }
+    }
+
+    /// 注入启动期有效的周排期与早鸟日历；Admin 与 Worker 必须使用同一配置投影。
+    pub fn with_schedule_calendar(mut self, calendar: Option<AuctionScheduleCalendar>) -> Self {
+        self.schedule_calendar = calendar;
+        self
     }
 }
 
@@ -193,6 +200,7 @@ impl AuctionLifecycleCommandPort for DatabaseAuctionLifecycleCommands {
         let store = Arc::clone(&self.store);
         let policy = self.policy;
         let successor_policy = self.successor_policy.clone();
+        let schedule_calendar = self.schedule_calendar.clone();
         Box::pin(async move {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
@@ -201,7 +209,8 @@ impl AuctionLifecycleCommandPort for DatabaseAuctionLifecycleCommands {
                         Arc::new(store.clone()),
                         policy,
                         successor_policy,
-                    );
+                    )
+                    .with_schedule_calendar(schedule_calendar);
                     service.execute(command).await
                 }
             }

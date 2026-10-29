@@ -5,6 +5,8 @@
 
 #[path = "config/draft.rs"]
 mod draft;
+#[path = "config/early_bird.rs"]
+mod early_bird;
 #[path = "config/form.rs"]
 mod form;
 #[path = "config/model.rs"]

@@ -9,6 +9,25 @@ pub(crate) fn validate_auction(config: &AuctionConfig) -> Result<(), ConfigError
     if config.schedule.enabled {
         config.schedule.validate()?;
     }
+    // 早鸟期即使未启用也完整校验，保证候选随时可以启用；启用时必须依附已启用的周排期。
+    config
+        .schedule
+        .early_bird
+        .validate()
+        .map_err(|_| ConfigError::InvalidAuctionConfig("auction.schedule.early_bird 字段无效"))?;
+    if config.schedule.early_bird.enabled
+        && (!config.schedule.enabled
+            || config
+                .schedule
+                .early_bird
+                .worlds
+                .iter()
+                .any(|world| !config.schedule.worlds.contains(world)))
+    {
+        return Err(ConfigError::InvalidAuctionConfig(
+            "auction.schedule.early_bird 启用时须启用 auction.schedule，且早鸟世界须包含在排期世界内",
+        ));
+    }
     policy.validate().map_err(|_| ConfigError::InvalidAuctionConfig("经济、结算或恢复字段边界无效"))
 }
 
