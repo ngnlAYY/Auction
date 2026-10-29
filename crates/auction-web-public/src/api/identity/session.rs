@@ -270,7 +270,8 @@ fn valid_session_fields(
 
 fn valid_legacy_uuid(value: &str) -> bool {
     Uuid::parse_str(value).is_ok_and(|id| {
-        id.to_string() == value
+        let mut buffer = Uuid::encode_buffer();
+        id.hyphenated().encode_lower(&mut buffer) == value
             && (1..=5).contains(&id.get_version_num())
             && id.get_variant() == Variant::RFC4122
     })

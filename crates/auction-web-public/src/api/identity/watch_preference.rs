@@ -52,8 +52,10 @@ async fn decode(
     .await
     .map_err(|_| failure("invalid_response", status))?;
     if result.user_id != user_id
-        || !Uuid::parse_str(&result.user_id)
-            .is_ok_and(|id| !id.is_nil() && id.to_string() == result.user_id)
+        || !Uuid::parse_str(&result.user_id).is_ok_and(|id| {
+            let mut buffer = Uuid::encode_buffer();
+            !id.is_nil() && id.hyphenated().encode_lower(&mut buffer) == result.user_id.as_str()
+        })
         || !matches!(result.channel.as_str(), "mm" | "pm")
         || command.is_some_and(|command| {
             result.channel != command.channel || result.version <= command.expected_version

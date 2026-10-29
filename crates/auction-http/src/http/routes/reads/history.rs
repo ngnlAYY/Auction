@@ -8,24 +8,24 @@ pub(crate) async fn list_bid_log(
 ) -> Result<Json<ApiResponse<PublicBidLogListResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
     let auction_id = parse_public_uuid(&auction_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
-    let query = parse_query(&uri, &["world", "lot", "page", "page_size", "cursor"])
+    let mut query = parse_query(&uri, &["world", "lot", "page", "page_size", "cursor"])
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let world_id = match query.get("world") {
+    let world_id = match query.remove("world") {
         None => None,
         Some(world) if world.is_empty() || world.len() > 64 || world != world.trim() => {
             return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
         }
-        Some(world) => Some(world.clone()),
+        Some(world) => Some(world),
     };
-    let (lot_id, lot_code) = match query.get("lot") {
+    let (lot_id, lot_code) = match query.remove("lot") {
         None => (None, None),
         Some(lot) if lot.is_empty() => {
             return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
         }
-        Some(lot) => match parse_public_uuid(lot) {
+        Some(lot) => match parse_public_uuid(&lot) {
             Ok(lot_id) => (Some(lot_id), None),
             Err(_) if lot.len() <= 32 && lot.bytes().all(|byte| byte.is_ascii_alphanumeric()) => {
-                (None, Some(lot.clone()))
+                (None, Some(lot))
             }
             Err(_) => {
                 return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
@@ -36,7 +36,7 @@ pub(crate) async fn list_bid_log(
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let page_size = parse_positive_i64(query.get("page_size"), 20, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let cursor_raw = query.get("cursor").cloned();
+    let cursor_raw = query.remove("cursor");
     let cursor = cursor_raw
         .as_deref()
         .map(decode_public_bid_log_cursor)
@@ -103,7 +103,7 @@ pub(crate) async fn list_price_history(
     uri: Uri,
 ) -> Result<Json<ApiResponse<PublicPriceHistoryListResponse>>, (StatusCode, Json<ApiErrorResponse>)>
 {
-    let query = parse_query(
+    let mut query = parse_query(
         &uri,
         &[
             "name",
@@ -123,7 +123,7 @@ pub(crate) async fn list_price_history(
     .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let name_terms = parse_history_name_terms(query.get("name"))
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let world_id = parse_optional_history_text(query.get("world"), 64)
+    let world_id = parse_optional_history_text(query.remove("world"), 64)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let closed_from = parse_history_date(query.get("from"), false)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
@@ -133,9 +133,9 @@ pub(crate) async fn list_price_history(
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let maximum_price = parse_history_price(query.get("max_price"))
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let buyer = parse_optional_history_text(query.get("buyer"), 256)
+    let buyer = parse_optional_history_text(query.remove("buyer"), 256)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let seller = parse_optional_history_text(query.get("seller"), 256)
+    let seller = parse_optional_history_text(query.remove("seller"), 256)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let sort = match query.get("sort").map(String::as_str) {
         None | Some("closed_desc") => PublicPriceHistorySort::ClosedDesc,
@@ -148,7 +148,7 @@ pub(crate) async fn list_price_history(
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let page_size = parse_positive_i64(query.get("page_size"), 50, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let cursor_raw = query.get("cursor").cloned();
+    let cursor_raw = query.remove("cursor");
     let cursor = cursor_raw
         .as_deref()
         .map(decode_public_price_history_cursor)

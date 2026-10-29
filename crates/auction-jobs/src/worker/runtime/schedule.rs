@@ -121,9 +121,20 @@ where
             }
             None => None,
         };
+        if worker.control.is_draining() || tokio::time::Instant::now() >= deadline {
+            break;
+        }
         let gate = match early_bird {
             Some(calendar) => {
-                match early_bird_intake_gate(worker, calendar, world_id, target.as_ref(), now).await
+                match early_bird_intake_gate(
+                    worker,
+                    calendar,
+                    world_id,
+                    target.as_ref(),
+                    snapshot.as_ref(),
+                    now,
+                )
+                .await
                 {
                     Ok(gate) => gate,
                     Err(error) => {
@@ -135,8 +146,8 @@ where
             }
             None => None,
         };
-        let desired = match (&gate, snapshot.as_ref()) {
-            (Some(gate), _) => Some(gate.clone()),
+        let desired = match (gate, snapshot.as_ref()) {
+            (Some(gate), _) => Some(gate),
             (None, Some(snapshot)) => round_mail_gate(snapshot, now),
             (None, None) => None,
         };
@@ -167,6 +178,7 @@ async fn early_bird_intake_gate<C>(
     calendar: &AuctionEarlyBirdCalendar,
     world_id: &str,
     target: Option<&AuctionScheduleSlot>,
+    snapshot: Option<&ScheduledRoundSnapshot>,
     now: DateTime<Utc>,
 ) -> Result<Option<MailGate>, ApplicationError>
 where
@@ -176,10 +188,12 @@ where
         return Ok(None);
     }
     // 赛季已开始且当前维护的是首场草稿：恢复收件，让玩家在首场预览前投稿新赛季装备。
+    // 已有轮次以冻结预览时间及完成事实为准，不能用重算模板恢复已进入开拍前暂停的邮箱。
     if let Some(slot) = target
         && let Some(key) = slot.source.early_bird
         && key.session == 1
-        && now < slot.times.preview_due_at
+        && snapshot.is_none_or(|round| round.preview_completed_at.is_none())
+        && now < snapshot.map_or(slot.times.preview_due_at, |round| round.preview_due_at)
         && now >= calendar.season_of(key)?.window_start
     {
         return Ok(Some(MailGate { paused: false, round_identity: key.key() }));

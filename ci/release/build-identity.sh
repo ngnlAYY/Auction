@@ -7,10 +7,13 @@ configure_build_tools() {
 	local tools_identity repository_identity name uses_sccache=false
 	tools_identity=$(bash ci/tools/bootstrap.sh identity release) || return 1
 	export PATH="$PWD/target/build-tools/bin:$PATH" NO_DOWNLOADS=1
-	# 发布只接受环境变量启用的 sccache 并换成受控版本；Cargo 配置文件（如用户全局
-	# build.rustc-wrapper）中的包装器未经回执校验，环境未指定时用空值显式覆盖。
+	# 发布只接受环境变量启用的 sccache 并换成受控版本；Cargo 文件中的两类包装器
+	# 未经回执校验，各自的环境入口均未指定时用空值显式覆盖。
 	if [[ -z ${RUSTC_WRAPPER+set} && -z ${CARGO_BUILD_RUSTC_WRAPPER+set} ]]; then
 		export RUSTC_WRAPPER=
+	fi
+	if [[ -z ${RUSTC_WORKSPACE_WRAPPER+set} && -z ${CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER+set} ]]; then
+		export RUSTC_WORKSPACE_WRAPPER=
 	fi
 	for name in RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_RUSTC_WRAPPER CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER; do
 		if [[ ${!name-} == sccache || ${!name-} == */sccache ]]; then
@@ -55,8 +58,10 @@ fingerprint_file_list() (
 
 # 源码身份覆盖已跟踪与未忽略的新文件，以及删除和 mode 变化；敏感忽略文件不进入。
 source_fingerprint() {
+	local commit
+	commit=$(git rev-parse --verify 'HEAD^{commit}') || return 1
 	{
-		printf 'head\0%s\0' "$(git rev-parse --verify 'HEAD^{commit}')"
+		printf 'head\0%s\0' "$commit"
 		git status --porcelain=v1 -z --untracked-files=all --ignore-submodules=none || return 1
 		git ls-files -z --cached --others --exclude-standard |
 			LC_ALL=C sort -zu | fingerprint_file_list || return 1
@@ -170,22 +175,29 @@ verify_web_payload() {
 	printf '%s\n' "$marker_sha"
 }
 
+# Cargo 按调用目录、父目录与 CARGO_HOME 合并配置；应用与工具复用同一文件身份算法。
+# 只输出摘要，保留链接目标和缺失路径身份，不把用户配置原文写入回执。
+cargo_config_fingerprint() {
+	local directory=$PWD
+	{
+		while :; do
+			path_fingerprint "$directory/.cargo/config" "$directory/.cargo/config.toml" || return 1
+			[[ "$directory" == / ]] && break
+			directory=$(dirname "$directory") || return 1
+		done
+		path_fingerprint "${CARGO_HOME:-$HOME/.cargo}/config" "${CARGO_HOME:-$HOME/.cargo}/config.toml" || return 1
+	} | sha256sum | awk '{print $1}'
+}
+
 # 原生制品与 Web payload 共用构建环境指纹；profile、工具包装器及目标参数变化都必须失效缓存。
 # 名称和值用 NUL 分隔后只输出摘要，避免分隔符歧义，也不把环境原文写进制品元数据。
 build_env_fingerprint() {
-	local name tools_identity directory
+	local name tools_identity
 	# 同版本工具修复后字节也会改变；工具回执参与输入身份，避免复用旧工具生成的制品。
 	tools_identity=$(bash ci/tools/bootstrap.sh identity release) || return 1
 	{
 		printf 'auction-build-tools\0%s\0' "$tools_identity"
-		# Cargo 合并当前目录、父目录和 CARGO_HOME 配置；只记录摘要，不泄露文件内容。
-		directory=$PWD
-		while :; do
-			path_fingerprint "$directory/.cargo/config" "$directory/.cargo/config.toml" || return 1
-			[[ "$directory" == / ]] && break
-			directory=$(dirname "$directory")
-		done
-		path_fingerprint "${CARGO_HOME:-$HOME/.cargo}/config" "${CARGO_HOME:-$HOME/.cargo}/config.toml" || return 1
+		cargo_config_fingerprint || return 1
 		# Cargo 的配置环境别名同样能替换编译器/包装器或覆盖 profile 的增量策略。
 		while IFS= read -r name; do
 			case "$name" in

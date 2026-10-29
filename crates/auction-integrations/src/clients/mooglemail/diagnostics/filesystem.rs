@@ -51,16 +51,18 @@ pub(super) fn persist(
 ) -> Result<(), MailDiagnosticError> {
     validate_config(config)?;
     payload::validate_header(header, header.evidence_id)?;
-    let mut encoded = serde_json::to_vec(header).map_err(|_| MailDiagnosticError::Serialization)?;
+    let mut encoded =
+        serde_json::to_string(header).map_err(|_| MailDiagnosticError::Serialization)?;
     if encoded.len() > MAX_HEADER_BYTES || ciphertext.len() > MAX_CIPHERTEXT_BYTES {
         return Err(MailDiagnosticError::PayloadTooLarge);
     }
-    encoded.push(b'\n');
-    encoded.extend_from_slice(BASE64.encode(ciphertext).as_bytes());
+    encoded.push('\n');
+    // 直接追加到最终文件缓冲，避免先分配并复制整份 Base64 密文；文件字节格式保持不变。
+    BASE64.encode_string(ciphertext, &mut encoded);
     if encoded.len() > MAX_FILE_BYTES || encoded.len() as u64 > config.maximum_total_bytes {
         return Err(MailDiagnosticError::Capacity);
     }
-    platform::persist(config, header.evidence_id, &encoded)
+    platform::persist(config, header.evidence_id, encoded.as_bytes())
 }
 
 pub(super) fn read(

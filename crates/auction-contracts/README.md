@@ -76,8 +76,8 @@ DTO 只传递服务端结果，匹配逻辑与论坛颜色留在应用/集成层
   `AdminRuntimeConfigResponse` 区分候选、fingerprint 与重启要求，`managed` 不表示热加载。
 - `MAX_PUBLIC_BID_AMOUNT` 供浏览器即时反馈，最终金额校验仍由领域层完成；`PublicForumResponse` 的楼层水位与
   P21 布尔开关相互独立，未知开关通过错误表达而非默认 false。
-- `PUBLIC_EXPECTED_USER_ID_HEADER` 统一 Public 写操作的可选身份前置条件名称；HTTP 核对当前 Cookie 身份，
-  浏览器冻结确认宿主的用户，具体适用动作与错误码见[请求边界](docs/contracts/routes.md#请求边界)。
+- `PUBLIC_EXPECTED_USER_ID_HEADER` 统一 Public 账户读取及写操作的可选身份前置条件名称；HTTP 核对当前 Cookie 身份，
+  浏览器绑定读取页面或确认宿主的用户，具体适用动作与错误码见[请求边界](docs/contracts/routes.md#请求边界)。
 - `PublicLoginRequest`、`AdminSessionResponse` 和 `AdminUserMutationResponse` 保留原 JSON 与 `Debug` 能力，
   但调试输出隐藏登录 key、CSRF token 和生成 key，不改变授权请求/响应的实际字段。
 - `PublicLoginResponse`、`PublicSessionCurrentResponse` 的截止字段为必填可空值，成对 `null` 表示永久，不用虚构远期时间；

@@ -118,14 +118,15 @@ fn valid_economics(value: &Value) -> bool {
 }
 
 fn valid_schedule(value: &Value) -> bool {
-    // 早鸟区块可省略；出现时单独按闭集校验，其余排期字段仍保持原有精确集合。
-    if let Some(early_bird) = value.get("early_bird") {
-        let Some(mut object) = value.as_object().cloned() else {
+    // 早鸟区块可省略；直接校验借用字段，不复制整份排期后递归移除可选区块。
+    let nested: &[&str] = if let Some(early_bird) = value.get("early_bird") {
+        if !valid_early_bird(early_bird) {
             return false;
-        };
-        object.remove("early_bird");
-        return valid_early_bird(early_bird) && valid_schedule(&Value::Object(object));
-    }
+        }
+        &["worlds", "early_bird"]
+    } else {
+        &["worlds"]
+    };
     if !valid_scalars(
         value,
         &["managed", "enabled"],
@@ -139,7 +140,7 @@ fn valid_schedule(value: &Value) -> bool {
             ("nominal_end_time", false),
         ],
         &[],
-        &["worlds"],
+        nested,
     ) {
         return false;
     }
@@ -343,17 +344,12 @@ fn valid_scalars(
     numbers: &[(&str, u64, u64)],
     nested: &[&str],
 ) -> bool {
-    let keys = booleans
-        .iter()
-        .copied()
-        .chain(strings.iter().map(|(name, _)| *name))
-        .chain(numbers.iter().map(|(name, _, _)| *name))
-        .chain(nested.iter().copied())
-        .collect::<Vec<_>>();
-    let Some(object) = exact_object(value, &keys) else {
+    let Some(object) = value.as_object() else {
         return false;
     };
-    booleans.iter().all(|name| bool_field(object, name).is_some())
+    object.len() == booleans.len() + strings.len() + numbers.len() + nested.len()
+        && nested.iter().all(|name| object.contains_key(*name))
+        && booleans.iter().all(|name| bool_field(object, name).is_some())
         && strings.iter().all(|(name, empty)| {
             string_field(object, name).is_some_and(|value| valid_text(value, 256, *empty))
         })

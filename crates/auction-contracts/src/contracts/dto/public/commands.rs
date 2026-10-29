@@ -6,7 +6,7 @@ use super::*;
 /// 浏览器用于即时反馈的 1B 出价上限；新命令仍由领域层校验，HTTP 编译门禁保证两者一致。
 pub const MAX_PUBLIC_BID_AMOUNT: i64 = 1_000_000_000;
 
-/// Public 浏览器写操作绑定确认时的用户；旧 v1 客户端可以省略此请求头。
+/// Public 账号读取及写操作绑定页面用户；旧 v1 客户端可以省略此请求头。
 pub const PUBLIC_EXPECTED_USER_ID_HEADER: &str = "x-auction-expected-user-id";
 
 /// Public 普通竞价请求。命令 ID 必须由调用方生成并在重试中保持不变。

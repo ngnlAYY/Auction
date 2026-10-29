@@ -81,10 +81,9 @@ impl AuctionWeeklySchedule {
                 .position(|candidate| *candidate == day)
                 .and_then(|day| u8::try_from(day).ok())
                 .ok_or(DomainError::InvalidSchedule("周排期星期无效"))?;
-            let time = (time.len() == 5)
-                .then(|| NaiveTime::parse_from_str(time, "%H:%M").ok())
-                .flatten()
-                .ok_or(DomainError::InvalidSchedule("周排期钟点无效"))?;
+            // 部署配置沿用 Chrono 的既有钟点解析范围，投影不得另加补零限制。
+            let time = NaiveTime::parse_from_str(time, "%H:%M")
+                .map_err(|_| DomainError::InvalidSchedule("周排期钟点无效"))?;
             let minute = u16::try_from(time.hour() * 60 + time.minute())
                 .map_err(|_| DomainError::InvalidSchedule("周排期钟点无效"))?;
             Ok::<_, DomainError>((day, minute))

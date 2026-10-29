@@ -9,7 +9,7 @@ pub(super) async fn apply_final_plan_postgres(
     transaction: &mut PostgresCompetitionTransaction,
     command: &AuctionLifecycleCommand,
     auction: &Auction,
-    proxy_plans: Vec<auction_application::AuctionFinalProxyPlan>,
+    proxy_plans: &[auction_application::AuctionFinalProxyPlan],
     effective_end_at: Option<DateTime<Utc>>,
 ) -> Result<(), CompetitionTransactionError> {
     // 名义与有效截止必须同步收紧：保留 effective >= scheduled 不变量，原始计划留在不可变
@@ -60,14 +60,14 @@ pub(super) async fn apply_final_proxy_plans_postgres(
     transaction: &mut PostgresCompetitionTransaction,
     command: &AuctionLifecycleCommand,
     auction: &Auction,
-    proxy_plans: Vec<auction_application::AuctionFinalProxyPlan>,
+    proxy_plans: &[auction_application::AuctionFinalProxyPlan],
 ) -> Result<(), CompetitionTransactionError> {
     for proxy_plan in proxy_plans {
         if proxy_plan.command.aggregate_id != proxy_plan.competition.final_lot.lot_id.as_uuid() {
             return Err(invalid_state("最终阶段代理子命令与 lot 计划不一致"));
         }
-        let audit = final_proxy_audit_record(command, auction.updated_at, &proxy_plan)?;
-        transaction.insert_command_inner(proxy_plan.command).await?;
+        let audit = final_proxy_audit_record(command, auction.updated_at, proxy_plan)?;
+        transaction.insert_command_inner(&proxy_plan.command).await?;
         transaction
             .apply_public_command_plan_inner(&proxy_plan.competition, None, auction.updated_at)
             .await?;

@@ -80,14 +80,19 @@ Admin/Worker 生命周期；取得权威锁后才读取命令时刻，同一计�
 [ports/scheduling/early_bird.rs](crates/auction-application/src/ports/scheduling/early_bird.rs) 拥有公共与 runtime 共用的赛季早鸟
 配置、校验及窗口/场次计算，[ports/scheduling/calendar.rs](crates/auction-application/src/ports/scheduling/calendar.rs) 组合周计划与早鸟
 日历；生命周期服务可注入该日历，被早鸟覆盖期替代的周时段顺延，较早的早鸟场次优先，已冻结轮次不改写。
+周钟点投影沿用部署配置的 Chrono 解析范围，不因补零格式差异在装配时拒绝已通过 loader 的配置；早鸟赛季月日仍严格要求 `MM-DD`。
+赛季查询按已排序月日惰性遍历本地年前后各一年，不创建并排序临时赛季列表；收件窗口与覆盖期仅依赖赛季开始、窗口结束和末场结束时间。
+具体场次的预览/开拍因 DST 形成非法顺序时，该场次仍拒绝物化，但不能因此把整季收件误判成普通品质期；跨年与半开窗口边界保持。
 邮件装备筛选按冻结收件时间判定早鸟窗口，窗口内改用早鸟品质列表（空表示不限）。`draft_soft_close` 只对显式指定、从未发布的合格草稿修正 60/60 为
 900/900，默认检查只读，执行需稳定命令、版本及精确确认（门禁见[CLI](apps/auctionctl/README.md#草稿软截止显式修正)）。
+统一 `start amount` 在进入逐件指令处理前已返回；逐件 URL 指令允许未指定附件沿用默认价，删除不可达的“缺少附件指令”分支，原正文与请求摘要不改。
 Admin 创建与改期统一要求 `preview < open < end`；两小时只是邮箱暂停提前量，不作为已登记轮次的最小预览窗口。
 首次 Admin 创建先按 world → intake target 取得原有业务锁，再读取数据库实时钟并校验预览计划；等锁跨过预览时间
 必须拒绝，创建时间也取锁后时刻。已接受命令在这组锁与时间门禁之前重放，不受当前世界状态或新模板影响。
 竞价资格最多涉及出价人和当前代理两个用户，使用栈内有序去重集合维持原 UUID 加锁顺序；
 资格冻结至多生成一个前置计划，仍先冻结再应用竞价，不改变锁后计时及事务原子性。
 `CompetitionTransaction::apply_plan` 与 `apply_slow_proxy_plan` 只读借用计划，用例返回同一份计划，不再为响应逐笔复制。
+生命周期写入同样借用完整计划，随后追加审计继续使用原计划；Final/EarlySettlement 不再复制全场代理计划和命令载荷。
 
 新拍卖的 recovery 快照显式冻结 `cod_return_limit`，创建、自动 bootstrap 和后继共用同一模板序列化；
 旧快照缺字段时仍按三次处理，不回写已有场次或已接受结果。普通出价的事实 ID 数量与领域规划共同使用有效

@@ -74,9 +74,10 @@ Public/Admin 统一 boundary 只接受 1 至 64 字节的 ASCII 字母数字/`-_
 
 客户端地址只在 TCP peer 命中配置的规范 CIDR，或 Public/Admin Unix listener 显式启用可信上游时解析 `X-Forwarded-For`；非法链整体丢弃，Unix 连接不伪造 TCP peer，Unix 信任开关不放宽真实 TCP peer，地址链从右向左跳过受信代理。`CF-Connecting-IP`、`Forwarded`、`X-Forwarded-Proto` 不用于推导客户端地址、Origin 或 Secure Cookie；Cloudflare 经 Caddy 清洗为可信 XFF 后交给应用，见[部署约束](ops/README.md#cloudflare-整站代理)。CSP 只允许同源脚本及 WASM 编译，内联样式例外仅用于 Dioxus 首屏防闪样式和组件 style 属性。登录/变更限流器按该地址工作，最多保留 4096 项并确定性淘汰最久未访问项。
 
-Public 浏览器的已认证写请求（P06 PUT/DELETE、P18–P20、P24、P26、P28）携带可选 `X-Auction-Expected-User-Id`，
-值为确认操作所属用户的规范非零 UUID。HTTP 仍只从当前 Cookie 获取权威身份；认证成功后、执行写命令前核对该前置条件，
-不匹配返回 `409 session_changed`，非法或重复头返回 `400 invalid_expected_user_id`，均不执行写入。
+Public 浏览器的账户读取（P16/P17）及已认证写请求（P06 PUT/DELETE、P18–P20、P24、P26、P28）携带可选
+`X-Auction-Expected-User-Id`，值为页面或确认操作所属用户的规范非零 UUID。HTTP 只从当前 Cookie 获取权威身份，
+认证成功后核对该前置条件；P16/P17 在 query/path 校验及账户查询前核对，避免跨标签页换号后把新账号结果交给旧页面。
+不匹配返回 `409 session_changed`，非法或重复头返回 `400 invalid_expected_user_id`，不继续账户查询或写入。
 未提供该头的既有 v1 客户端保持原身份门禁语义。浏览器登录、退出或保存登录时长只广播随机通知值，
 其他标签页收到通知或页面恢复可见时重新读取会话；业务 401 或 `session_changed` 也触发重读，换号后销毁旧用户的确认状态与命令宿主。
 
@@ -111,8 +112,8 @@ Admin 冷启动在认证等待前恢复原路径的 query，显式筛选/数量�
 | P13 | GET | /api/v1/compensation-pool | 公开 | 200 | 400, 501, 503/504 |
 | P14 | GET | /api/v1/compensation-pool/{auction_id}/movements | 公开；完整装备 URL；响应 `no-store` | 200 | 400, 404, 501, 503/504 |
 | P15 | GET | /api/v1/auctions/{auction_id}/forum | 公开；论坛镜像正文可能包含完整装备 URL；`no-store` | 200 | 400, 404, 501, 503/504 |
-| P16 | GET | /api/v1/me/bids | Public session | 200 | 400, 401, 503/504 |
-| P17 | GET | /api/v1/lots/{lot_id}/proxy-authorizations/mine | Public session | 200 | 400, 401, 404, 503/504 |
+| P16 | GET | /api/v1/me/bids | Public session；可选预期用户身份 | 200 | 400, 401, 409, 503/504 |
+| P17 | GET | /api/v1/lots/{lot_id}/proxy-authorizations/mine | Public session；可选预期用户身份 | 200 | 400, 401, 404, 409, 503/504 |
 | P18 | POST | /api/v1/lots/{lot_id}/proxy-authorizations | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |
 | P19 | POST | /api/v1/lots/{lot_id}/proxy-authorizations/{authorization_id}/lower | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |
 | P20 | POST | /api/v1/lots/{lot_id}/bids | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |

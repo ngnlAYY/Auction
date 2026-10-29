@@ -141,7 +141,7 @@ impl LotWatchTransaction for PostgresCompetitionTransaction {
     }
 
     async fn store_watch_command(&mut self, command: StoredCommand) -> Result<(), LotWatchError> {
-        self.insert_command_inner(command).await.map_err(|error| match error {
+        self.insert_command_inner(&command).await.map_err(|error| match error {
             CompetitionTransactionError::CommandLedger(
                 auction_application::CommandLedgerError::Conflict,
             ) => LotWatchError::Conflict,

@@ -48,7 +48,9 @@ pub(super) fn parse_catalog(input: &str) -> Result<CatalogParse, ()> {
         if !lot_set.insert(code.clone()) {
             return Err(());
         }
-        let start_price = match custom_start_price(description) {
+        // ASCII 小写不改变 UTF-8 字节边界；字段探测共用一份副本，展示仍切取原文。
+        let lower_description = description.to_ascii_lowercase();
+        let start_price = match custom_start_price(&lower_description) {
             Some(Ok(value)) => value,
             Some(Err(())) => {
                 warnings.push(super::helpers::warning(
@@ -62,14 +64,15 @@ pub(super) fn parse_catalog(input: &str) -> Result<CatalogParse, ()> {
             }
             None => DEFAULT_START_PRICE,
         };
-        let (seller, current_bidder, current_price) = seller_and_bid(description);
+        let (seller, current_bidder, current_price) =
+            seller_and_bid(description, &lower_description);
         lots.push(AdminForumLot {
             code,
             category: category.to_owned(),
             description: description.to_owned(),
             seller,
             start_price,
-            material: is_material(description),
+            material: is_material(&lower_description),
             current_bidder,
             current_price,
         });
@@ -95,8 +98,7 @@ fn category_heading(value: &str) -> Option<&'static str> {
     }
 }
 
-fn custom_start_price(description: &str) -> Option<Result<i64, ()>> {
-    let lower = description.to_ascii_lowercase();
+fn custom_start_price(lower: &str) -> Option<Result<i64, ()>> {
     let start = lower.find("start")?;
     let tail = lower[start + "start".len()..].trim_start();
     let tail = tail.strip_prefix(':')?.trim_start();
@@ -108,8 +110,7 @@ fn custom_start_price(description: &str) -> Option<Result<i64, ()>> {
     Some(parse_catalog_amount(token))
 }
 
-fn seller_and_bid(description: &str) -> (Option<String>, Option<String>, Option<i64>) {
-    let lower = description.to_ascii_lowercase();
+fn seller_and_bid(description: &str, lower: &str) -> (Option<String>, Option<String>, Option<i64>) {
     let Some(start) = lower.find("(seller:") else {
         return (None, None, None);
     };
@@ -120,16 +121,16 @@ fn seller_and_bid(description: &str) -> (Option<String>, Option<String>, Option<
     let end = content_start + end_offset;
     let seller = description[content_start..end].trim().to_owned();
     let tail = description[end + 1..].trim();
-    let lower_tail = tail.to_ascii_lowercase();
+    let lower_tail = lower[end + 1..].trim();
     if let Some(current_start) = lower_tail.find("| current:") {
         let current = tail[current_start + "| current:".len()..].trim_start();
+        let lower_current = lower_tail[current_start + "| current:".len()..].trim_start();
         let amount = current
             .split_whitespace()
             .next()
             .map(|value| value.trim_matches(|character: char| matches!(character, ',' | ';')))
             .and_then(|value| parse_catalog_amount(value).ok());
-        let bidder = current
-            .to_ascii_lowercase()
+        let bidder = lower_current
             .find(" by ")
             .map(|start| {
                 let bidder = current[start + " by ".len()..]
@@ -213,8 +214,7 @@ fn strip_bid_source_suffix(value: &str) -> &str {
     if matches!(annotation, "proxy" | "代理") || forum_floor { bidder.trim_end() } else { value }
 }
 
-fn is_material(description: &str) -> bool {
-    let lower = description.to_ascii_lowercase();
+fn is_material(lower: &str) -> bool {
     lower.contains("[mat]")
         || lower
             .split(|character: char| !character.is_ascii_alphanumeric())

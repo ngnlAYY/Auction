@@ -1,7 +1,5 @@
 //! Admin realtime 运维页面状态与 replay 对话框。
 
-use std::rc::Rc;
-
 use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
 
@@ -138,19 +136,12 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let mut refresh_query = query.clone();
     let mut poll_query = query.clone();
     let mut state_query = query.clone();
-    // 五个资源快照收敛进 memo（Rc 共享）：仅对应资源结果变化时才深克隆整页数据，
-    // 其他信号驱动的普通重渲染只复制 Rc 指针。
-    let event_state = use_memo(move || Rc::new(events.read_unchecked().clone()));
-    let event_overview_state = use_memo(move || Rc::new(event_overview.read_unchecked().clone()));
-    let lag_state = use_memo(move || Rc::new(lag.read_unchecked().clone()));
-    let failure_state = use_memo(move || Rc::new(failures.read_unchecked().clone()));
-    let unresolved_failure_state =
-        use_memo(move || Rc::new(unresolved_failures.read_unchecked().clone()));
-    let event_state = event_state();
-    let event_overview_state = event_overview_state();
-    let lag_state = lag_state();
-    let failure_state = failure_state();
-    let unresolved_failure_state = unresolved_failure_state();
+    // 直接借用已完成快照；表格取得所需投影，统计与分页不再保留额外整页副本。
+    let event_state = events.read_unchecked();
+    let event_overview_state = event_overview.read_unchecked();
+    let lag_state = lag.read_unchecked();
+    let failure_state = failures.read_unchecked();
+    let unresolved_failure_state = unresolved_failures.read_unchecked();
     let lag_page = (*lag_state).as_ref().and_then(|result| result.as_ref().ok());
     let unresolved_failure_page =
         (*unresolved_failure_state).as_ref().and_then(|result| result.as_ref().ok());

@@ -81,7 +81,7 @@ impl LotWatchPmOperations for DatabaseStore {
                     let row = sqlx::query("SELECT q.notification_id,n.lot_id,q.status,q.fencing_version,q.sender_forum_account_id,q.failure_code,q.sending_at,q.completed_at,q.reconcile_requested_at FROM public.lot_watch_pm_deliveries q JOIN public.lot_watch_notifications n ON n.id=q.notification_id WHERE q.notification_id=$1")
                         .bind(command.notification_id).fetch_one(&mut **tx).await.map_err(sql_error)?;
                     let result = snapshot(&row)?;
-                    transaction.insert_command_inner(StoredCommand { command_id:command.command_id,command_kind:KIND.to_owned(),aggregate_id:command.notification_id,request_hash:hash,result_code:"ok".to_owned(),result_payload:serde_json::to_vec(&result).map_err(|_| LotWatchError::Unavailable)? }).await.map_err(|error| match error {
+                    transaction.insert_command_inner(&StoredCommand { command_id:command.command_id,command_kind:KIND.to_owned(),aggregate_id:command.notification_id,request_hash:hash,result_code:"ok".to_owned(),result_payload:serde_json::to_vec(&result).map_err(|_| LotWatchError::Unavailable)? }).await.map_err(|error| match error {
                         auction_application::CompetitionTransactionError::CommandLedger(auction_application::CommandLedgerError::Conflict) => LotWatchError::Conflict,
                         error => error.into(),
                     })?;

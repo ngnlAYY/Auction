@@ -118,8 +118,10 @@ touch -d "@$source_epoch" "$payload_manifest"
 
 # 新 payload 与复用走同一完整门禁，并复核构建期间输入未变，不能把中途变化标记成旧快照。
 verify_web_payload "$surface" "$stable_root" >/dev/null
-if [[ $(web_inputs_fingerprint "$surface") != "$source_identity" ||
-$(build_env_fingerprint) != "$build_environment" ]]; then
+current_source_identity=$(web_inputs_fingerprint "$surface")
+current_build_environment=$(build_env_fingerprint)
+if [[ "$current_source_identity" != "$source_identity" ||
+"$current_build_environment" != "$build_environment" ]]; then
 	printf '%s Web 构建期间输入发生变化，请重新构建\n' "$surface" >&2
 	exit 1
 fi

@@ -156,8 +156,7 @@ where
                         result_payload: serde_json::to_vec(&result)?,
                     };
                     transaction.insert_command(stored).await?;
-                    let write_summary =
-                        transaction.apply_lifecycle_plan(&command, plan.clone()).await?;
+                    let write_summary = transaction.apply_lifecycle_plan(&command, &plan).await?;
                     transaction
                         .append_lifecycle_record(&command, &context, &plan, &result, write_summary)
                         .await?;

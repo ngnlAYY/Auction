@@ -27,11 +27,10 @@ impl AuctionLifecycleTransaction for PostgresCompetitionTransaction {
     fn apply_lifecycle_plan(
         &mut self,
         command: &AuctionLifecycleCommand,
-        plan: AuctionLifecyclePlan,
+        plan: &AuctionLifecyclePlan,
     ) -> impl Future<Output = Result<AuctionLifecycleWriteSummary, CompetitionTransactionError>> + Send
     {
-        let command = command.clone();
-        async move { apply_lifecycle_plan_postgres(self, &command, plan).await }
+        async move { apply_lifecycle_plan_postgres(self, command, plan).await }
     }
 
     fn list_final_lot_ids_for_update(

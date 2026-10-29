@@ -89,8 +89,8 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
   键来自 `bash ci/release/release.sh source-fingerprint`；恢复后仍复核 `BUILD-INFO` 与制品摘要，前缀命中的旧目录也由
   `release.sh` 按同一门禁检查，不满足就重建。
 - security-audit 对无 TLS 依赖的 cargo-machete 保留固定版本安装；cargo-audit 改用 audit 档独立锁重建。
-  `actions/cache` 分别保存 `target/audit-tools` 与 `target/build-tools`，只按 `bootstrap.sh`、锁图、补丁与工具链分键，
-  并以前缀回退；`ci/tools` 的说明或其他脚本变化不再触发约 21 分钟的工具重建。恢复后验证
+  `actions/cache` 分别保存 `target/audit-tools` 与 `target/build-tools`，按 `bootstrap.sh`、共享 `build-identity.sh`、
+  锁图、补丁与工具链分键，并以前缀回退；说明文档不触发工具重建。恢复后验证包含有效 Cargo 配置摘要的
   配方身份与全部二进制哈希；仅回执无效或缓存缺失时安装 CMake、pkg-config、OpenSSL 等源码构建依赖。
   不能仅凭缓存键命中跳过回执验证，也不跳过随后联网公告审计。
 - 缓存缺失不改变检查范围，命中后仍执行全部静态检查及审计，RustSec 仍联网更新，不缓存“通过”结论；release Cargo
@@ -165,8 +165,11 @@ payload 复用只在本脚本内生效：本 surface、`auction-web-shared`、`a
 目标 linker/target、rustc 编译器与包装器（含 `CARGO_BUILD_RUSTC*` 配置环境别名）、增量覆盖
 （`CARGO_INCREMENTAL` / `CARGO_BUILD_INCREMENTAL`）、C/C++ 编译器与 flags、受控工具字节身份，以及 Cargo 逐层读取的当前目录、
 父目录和 `CARGO_HOME` 配置文件。包装器的两类环境入口都绑定受控 sccache 和同一 daemon 身份；Cargo 配置文件中的
-`build.rustc-wrapper`（例如用户全局 sccache）未经回执校验，环境未指定包装器时发布与 Web 入口显式置空 `RUSTC_WRAPPER`。
+`build.rustc-wrapper` / `build.rustc-workspace-wrapper` 未经回执校验；对应的两种环境入口均未指定时，
+发布与 Web 入口分别置空 `RUSTC_WRAPPER` / `RUSTC_WORKSPACE_WRAPPER`。
 只写入摘要，不把配置或环境原文写入清单；旧摘要自动失效。
+工具 bootstrap 复用同一 Cargo 配置文件指纹，保留配置中的本机链接器等设置，但显式置空两类 rustc wrapper；
+配置摘要与共享身份实现都进入工具配方，不能仅凭同版本工具或旧回执跳过配置变化。
 只修改上述输入范围外的原生源码或文档不会重跑 WASM；输入目录中的 README 仍参与摘要，不按扩展名排除。
 release.sh 在构建前冻结构建输入（apps、crates、migrations、配置示例、保留策略、清单、`.cargo` 与发布工具），
 各阶段同时复查输入和环境摘要；范围外的文档修改不触发原生重建。核验实际二进制标记、对端资源缺失与 Worker 依赖，
@@ -174,6 +177,9 @@ release.sh 在构建前冻结构建输入（apps、crates、migrations、配置�
 文件指纹批量读取 metadata/SHA-256，避免逐文件启动两个进程；NUL 路径、权限、删除及符号链接身份仍参与摘要。
 归档内 `SHA256SUMS` 同样按排序后的 NUL 路径批量生成，保持原清单顺序和格式，减少逐文件进程创建。
 `verify_build_info` 统一拥有复用和阶段复核，feature 与二进制完整性另行检查，不重复紧接扫描同一输入。
+指纹读取显式传播 Git、文件摘要与编译器查询的失败：不能让 `printf` 的成功覆盖命令替换失败，也不能在
+`if`/`[[ ... ]]` 的复用比较中接纳失败后输出的部分摘要。源码、锁图和环境身份全部读取成功后才写入或比较回执；
+归档双次摘要分别确认成功，外层清单由一次 `sha256sum` 直接生成。输入范围、摘要格式及原有复用条件保持。
 API-only、embedded、single 共用 `build_variant`：目录发布前生成 `SHA256SUMS`，绑定 `BUILD-INFO`、本变体全部二进制，
 以及嵌入变体的四份 Web 清单/标记。复用和独立制品校验按固定白名单重算完整摘要，不执行缓存清单中的路径；缺少摘要的
 旧缓存或字节不符的制品触发重建。该清单只属于 `target/dist/artifacts/{api,embedded,single}/`，不追加到归档白名单；

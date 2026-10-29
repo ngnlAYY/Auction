@@ -10,6 +10,9 @@ pub(crate) async fn list_my_bids(
         Ok(identity) => identity,
         Err(response) => return *response,
     };
+    if let Err(response) = check_public_expected_user(&headers, identity.user_id) {
+        return *response;
+    }
     let query = match parse_query(&uri, &["page", "page_size", "bid_page", "proxy_page"]) {
         Ok(query) => query,
         Err(_) => {
@@ -117,6 +120,9 @@ pub(crate) async fn get_my_proxy_authorization(
         Ok(identity) => identity,
         Err(response) => return *response,
     };
+    if let Err(response) = check_public_expected_user(&headers, identity.user_id) {
+        return *response;
+    }
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return api_error(StatusCode::BAD_REQUEST, "invalid_query", "代理授权查询不接受查询参数")
             .into_response();

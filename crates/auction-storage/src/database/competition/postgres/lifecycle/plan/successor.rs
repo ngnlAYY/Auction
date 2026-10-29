@@ -59,7 +59,7 @@ pub(super) async fn insert_successor_postgres(
     }
 
     transaction
-        .insert_command_inner(StoredCommand {
+        .insert_command_inner(&StoredCommand {
             command_id: successor.create_command_id,
             command_kind: "scheduled_auction_create".to_owned(),
             aggregate_id: successor.auction_id.as_uuid(),

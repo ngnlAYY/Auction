@@ -136,7 +136,7 @@ impl CompetitionTransaction for PostgresCompetitionTransaction {
         &mut self,
         command: StoredCommand,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
-        async move { self.insert_command_inner(command).await }
+        async move { self.insert_command_inner(&command).await }
     }
 
     fn current_time(

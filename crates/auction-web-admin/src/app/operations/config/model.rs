@@ -430,7 +430,11 @@ impl RuntimeConfigForm {
             if !self.edits_field(path) {
                 continue;
             }
-            set_nested_value(&mut document, path, Value::String(self.required_input(path)?))?;
+            set_nested_value(
+                &mut document,
+                path,
+                Value::String(self.required_input(path)?.to_owned()),
+            )?;
         }
         for path in LIST_FIELDS.iter().chain(operational_fields::LIST_FIELDS) {
             if !self.edits_field(path) {
@@ -469,22 +473,19 @@ impl RuntimeConfigForm {
             set_nested_value(&mut document, path, Value::Number(Number::from(value)))?;
         }
         if self.edits_field(early_bird::ROOT) {
-            let defaults = early_bird::inputs(&Value::Null)?;
-            let changed =
-                defaults.iter().any(|(path, value)| self.inputs.get(*path) != Some(value));
-            // 已有区块或输入偏离默认值时才写入完整区块；未触碰的旧文档保持原样。
-            if early_bird::block(&document).is_some() || changed {
-                let mut values = Vec::new();
+            // 已有区块直接读取输入；只有旧文档缺省时才生成默认值判断是否需要补写。
+            let changed = early_bird::block(&document).is_some()
+                || early_bird::inputs(&Value::Null)?
+                    .iter()
+                    .any(|(path, value)| self.inputs.get(*path) != Some(value));
+            if changed {
+                let block = early_bird::ensure_block(&mut document)?;
                 for path in early_bird::input_paths() {
                     let name = early_bird::field(path).ok_or(())?;
-                    values.push((
+                    block.insert(
                         name.to_owned(),
-                        early_bird::submitted_value(path, &self.required_input(path)?)?,
-                    ));
-                }
-                let block = early_bird::ensure_block(&mut document)?;
-                for (name, value) in values {
-                    block.insert(name, value);
+                        early_bird::submitted_value(path, self.required_input(path)?)?,
+                    );
                 }
             }
         }
@@ -557,8 +558,8 @@ impl RuntimeConfigForm {
         serde_json::to_string(&self.to_document()?).map_err(|_| ())
     }
 
-    fn required_input(&self, path: &str) -> Result<String, ()> {
-        self.inputs.get(path).cloned().ok_or(())
+    fn required_input(&self, path: &str) -> Result<&str, ()> {
+        self.inputs.get(path).map(String::as_str).ok_or(())
     }
 
     /// 未接管的分组既不提交草稿输入，也不参与本地字段错误摘要。

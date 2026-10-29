@@ -239,11 +239,11 @@ pub trait AuctionLifecycleTransaction: Send {
         auction_id: AuctionId,
     ) -> impl Future<Output = Result<Option<AuctionLifecycleContext>, CompetitionTransactionError>> + Send;
 
-    /// 在已锁定上下文所在事务内原子应用生命周期、副作用和版本 fence。
+    /// 在已锁定上下文所在事务内借用计划，原子应用生命周期、副作用和版本 fence。
     fn apply_lifecycle_plan(
         &mut self,
         command: &AuctionLifecycleCommand,
-        plan: AuctionLifecyclePlan,
+        plan: &AuctionLifecyclePlan,
     ) -> impl Future<Output = Result<AuctionLifecycleWriteSummary, CompetitionTransactionError>> + Send;
 
     /// 按稳定 lot 顺序锁定并返回 final phase 需要检查的竞价单元。

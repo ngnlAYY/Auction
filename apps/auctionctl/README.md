@@ -156,7 +156,7 @@ self-send 对已核实自持的流拍装备追加留存事实；成交自寄明�
 
 `deployment-check` 只读三角色及其公共、runtime、敏感文件，核对同一公共文件/数据库目标、listener 冲突，
 三角色的装备数据密钥，以及 Admin/Worker 的 control socket、用户登录/外部凭据密钥和有效拍卖/结算模板与排期；
-Admin 已配置的 `worker_config_file` 必须指向实际 Worker 角色文件。三角色必须引用同一 runtime 文件且装备规则快照一致，
+Admin 已配置的 `worker_config_file` 必须指向实际 Worker 角色文件。三角色必须引用同一 runtime 文件，且装备规则与 `bot_players` 名单快照一致，
 或全部省略 runtime。默认报告权限警告，生产使用 `--strict-permissions`，配置目录和文件均不得是
 符号链接；命令不连接数据库、迁移、启动服务或访问外部服务。目标比较复用 SQLx 解析并允许不同数据库账号，
 PostgreSQL 显式提供 host、非零 port 和库名，允许受支持的 host/hostaddr/port/dbname 覆盖及 Unix socket，
@@ -326,6 +326,7 @@ verified backup；只有明确可丢弃的一次性数据库可改用 `--allow-u
 连接串、Cookie、密钥不进入参数、日志或回执。灾备文件使用受信私有目录、新路径与不可覆盖发布，文件和父目录
 同步后才报告成功，mutation 前也同步恢复证据，不支持同步时失败关闭。破坏性操作必须按独立手册精确确认目标和
 恢复点，不加入普通启动、迁移、unit 或开发脚本；未知结果不能推断为未执行，也不能盲目重试 DROP。
+备份/恢复共用的 libpq 连接适配器拒绝未知 URL 查询参数时只返回固定错误，不回显可能含错放凭据的参数名。
 
 ## 维护与验证
 

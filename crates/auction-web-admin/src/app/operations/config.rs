@@ -204,12 +204,14 @@ pub(super) fn page() -> Element {
         }
         Some(Ok(snapshot)) => {
             let current_fingerprint = fingerprint().unwrap_or_else(|| snapshot.fingerprint.clone());
-            let candidate_signature = form.read().signature().ok();
+            // 编辑已清除校验签名时，不能保存，也无需为每次按键重建并序列化整个候选文档。
             let can_update = !frozen()
                 && dirty()
-                && candidate_signature
-                    .as_deref()
-                    .is_some_and(|signature| signature == checked_signature());
+                && !checked_signature.read().is_empty()
+                && form
+                    .read()
+                    .signature()
+                    .is_ok_and(|signature| signature == *checked_signature.read());
             let enabled_worlds = ["main", "isekai"]
                 .into_iter()
                 .filter(|world| form.read().boolean(&format!("worlds.{world}.enabled")))
