@@ -218,13 +218,16 @@ path_fingerprint() {
 	} | sha256sum | awk '{print $1}'
 }
 
+# 受控工具的配方文件；ci/tools 下的说明文档与本地试验入口不影响产物，不参与身份。
+tool_recipe_inputs=(ci/tools/bootstrap.sh ci/tools/rustup.sh ci/tools/locks ci/tools/patches)
+
 # 应用发布与封存复用同一份输入范围；工具配方也属于产物身份。
 build_inputs_fingerprint() {
 	path_fingerprint \
 		apps crates migrations \
 		ops/config/examples \
 		ops/deploy/retention-policy.v1.json \
-		Cargo.toml Cargo.lock rust-toolchain.toml .cargo ci/release ci/tools
+		Cargo.toml Cargo.lock rust-toolchain.toml .cargo ci/release "${tool_recipe_inputs[@]}"
 }
 
 # Web payload 与封存复用同一份输入范围，surface 严格闭集。
@@ -234,5 +237,5 @@ web_inputs_fingerprint() {
 	path_fingerprint \
 		Cargo.toml Cargo.lock rust-toolchain.toml .cargo \
 		"crates/auction-web-$surface" crates/auction-web-shared crates/auction-contracts \
-		ci/release/web-bundle.sh ci/release/build-identity.sh ci/tools
+		ci/release/web-bundle.sh ci/release/build-identity.sh "${tool_recipe_inputs[@]}"
 }

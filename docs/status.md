@@ -35,6 +35,20 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-29 Actions 依赖门禁修复与编译提速
+
+运行 `40824989877` 的 security-audit 因 `cargo-machete` 报告 `auction-jobs` 未使用 `chrono-tz` 失败（周排期改由
+application `AuctionWeeklySchedule` 计算后遗留），artifacts 随之跳过；已删除该依赖并更新锁图。
+同时核对到三处 rust-cache 的 `save-if` 自 10-17 起写成字面字符串，rust-cache 只把 `"true"` 视为保存，verify/msrv
+每次 `No cache found` 冷编译；已改为 `${{ }}` 表达式。工具缓存键改为只绑定 bootstrap 配方、锁图、补丁与工具链并以前缀
+回退，恢复后仍由安装回执校验；发布与 Web 输入指纹只纳入 `ci/tools` 的配方文件。API-only 对照只构建 Public/Admin，
+省去两次 Fat LTO；artifacts 与三项检查并行，新增 publish 在全部检查成功后复核摘要并上传正式制品。
+
+本地 `cargo machete`、ShellCheck、actionlint 通过。本机 `target/` 在 10-28 22:40 至 22:56 之间被整体清空，
+仓库脚本、git hook 与本轮命令均无删除操作，原因未查明；上一条记录中的 R34 包副本、验证包和受控发布工具均已不在本机，
+云端部署与归档不受影响。
+因此本轮发布门禁以 Actions 运行为准，本地未重跑 `release-check`。
+
 ### 2026-10-28 发布脚本精简与本机编译加速
 
 `build-identity.sh` 收拢 Web payload 完整门禁、surface 元数据与 `sha256_file`，`web-bundle.sh` 的新建/复用与

@@ -34,6 +34,12 @@ binaries=(
 	auction-worker
 	auctionctl
 )
+# API-only 是不发布的资源隔离对照，只需两个 Web surface；Worker/CLI 的无页面证明由嵌入档与依赖图门禁承担，
+# 省去两次 Fat LTO 链接。
+api_only_binaries=(
+	auction-public-api
+	auction-admin-api
+)
 
 require_command() {
 	local command_name=$1
@@ -97,7 +103,8 @@ artifact_checksums() (
 	local root=$1 variant=$2 path
 	local files=(BUILD-INFO) selected_binaries=("${binaries[@]}")
 	case "$variant" in
-	api-only | embedded) ;;
+	api-only) selected_binaries=("${api_only_binaries[@]}") ;;
+	embedded) ;;
 	single) selected_binaries=(auction-server auctionctl) ;;
 	*) return 2 ;;
 	esac
@@ -329,22 +336,19 @@ verify_artifacts() {
 		return 1
 	fi
 
-	local variant binary path
-	for variant in api embedded; do
-		for binary in "${binaries[@]}"; do
-			path="$artifact_root/$variant/bin/$binary"
-			if [[ ! -f "$path" || -L "$path" || ! -s "$path" || ! -x "$path" ]]; then
-				printf '发布二进制无效：%s\n' "$path" >&2
-				return 1
-			fi
-		done
+	local binary path
+	for path in "${api_only_binaries[@]/#/$api_artifact_root/bin/}" "${binaries[@]/#/$embedded_artifact_root/bin/}"; do
+		if [[ ! -f "$path" || -L "$path" || ! -s "$path" || ! -x "$path" ]]; then
+			printf '发布二进制无效：%s\n' "$path" >&2
+			return 1
+		fi
 	done
 
 	# 每个 surface 的标记是页面标题加 payload 哈希；资源只能出现在对应的嵌入二进制里。
 	local public_markers=('Auction 公开站点' "$public_web_sha")
 	local admin_markers=('Auction 管理站点' "$admin_web_sha")
 	local api="$api_artifact_root/bin" embedded="$embedded_artifact_root/bin"
-	for binary in "${binaries[@]}"; do
+	for binary in "${api_only_binaries[@]}"; do
 		assert_binary_markers excludes "$api/$binary" "API-only $binary" "${public_markers[@]}" "${admin_markers[@]}"
 	done
 	assert_binary_markers contains "$api/auction-public-api" 'API-only Public' "$assets_missing_message"
@@ -787,7 +791,7 @@ release_check() {
 			;;
 		esac
 	done
-	build_variant api-only "$api_build_root" "$api_artifact_root" "$api_only_features"
+	build_variant api-only "$api_build_root" "$api_artifact_root" "$api_only_features" "${api_only_binaries[@]}"
 	build_variant embedded "$embedded_build_root" "$embedded_artifact_root" "$embedded_features"
 	if [[ "$single" == true ]]; then build_single; fi
 	package_release "$@"
@@ -813,7 +817,7 @@ build-api | build-embedded | build-single | verify-single | verify-artifacts | s
 		exit 2
 	fi
 	case "$command_name" in
-	build-api) build_variant api-only "$api_build_root" "$api_artifact_root" "$api_only_features" ;;
+	build-api) build_variant api-only "$api_build_root" "$api_artifact_root" "$api_only_features" "${api_only_binaries[@]}" ;;
 	# 在同一源码身份约束内重建双端 Web 和 native 制品。
 	build-embedded) build_variant embedded "$embedded_build_root" "$embedded_artifact_root" "$embedded_features" ;;
 	build-single) build_single ;;
