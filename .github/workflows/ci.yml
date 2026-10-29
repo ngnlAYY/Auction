@@ -99,6 +99,7 @@ jobs:
           targets: wasm32-unknown-unknown
       # rust-cache v2.9.2；自动键隔离 job、平台、工具链和依赖图。
       # 非 PR 事件才写缓存：PR 缓存作用域与合并结果不同，全写会挤占同一仓库额度。
+      # save-if 必须写成 ${{ }} 表达式；字面字符串不等于 "true"，会让缓存永远不保存。
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
@@ -106,7 +107,7 @@ jobs:
           cache-workspace-crates: "true"
           cache-on-failure: "true"
           cache-bin: "false"
-          save-if: github.event_name != 'pull_request'
+          save-if: ${{ github.event_name != 'pull_request' }}
       # docs 已完成格式和策略门禁；此处不重复执行，不运行测试。
       - run: bash ci/checks/check.sh check feature lint wasm
 
@@ -131,11 +132,15 @@ jobs:
           key: cargo-audit-tls-20261022-machete-0.9.2
           cache-bin: "true"
           cache-on-failure: "true"
+      # 键只绑定 bootstrap 配方、锁图、补丁与工具链；文档或其他脚本变化不触发重建。
+      # 前缀回退恢复的旧工具仍须通过下一步回执校验，不一致时照常重建。
       - name: Restore patched audit binary
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: target/audit-tools
-          key: audit-tools-linux-${{ hashFiles('ci/tools/*.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
+          key: audit-tools-linux-${{ hashFiles('ci/tools/bootstrap.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
+          restore-keys: |
+            audit-tools-linux-
       - name: Check audit tool receipt
         id: audit-tools
         run: |
@@ -190,13 +195,14 @@ jobs:
           cache-workspace-crates: "true"
           cache-on-failure: "true"
           cache-bin: "false"
-          save-if: github.event_name != 'pull_request'
+          save-if: ${{ github.event_name != 'pull_request' }}
       - run: >-
           cargo +1.94.1 check --locked --workspace --all-targets --all-features
 
   artifacts:
-    needs: [docs, verify, security-audit, msrv]
-    # PR 和普通分支不做昂贵的完整发布构建；手动触发仍须通过全部检查。
+    # 只依赖 docs，与 verify/security-audit/msrv 并行；正式制品由 publish 在全部检查通过后上传。
+    needs: docs
+    # PR 和普通分支不做昂贵的完整发布构建。
     if: >-
       needs.docs.outputs.run-checks == 'true' &&
       (github.event_name == 'workflow_dispatch' ||
@@ -227,13 +233,15 @@ jobs:
           cache-workspace-crates: "true"
           cache-on-failure: "true"
           cache-bin: "false"
-          save-if: github.event_name != 'pull_request'
-      # 独立源码锁图修复工具自身的证书库；缓存键和安装回执共同绑定脚本、锁图及二进制。
+          save-if: ${{ github.event_name != 'pull_request' }}
+      # 独立源码锁图修复工具自身的证书库；缓存键只绑定配方，前缀回退后由安装回执逐字节校验。
       - name: Restore patched release tools
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: target/build-tools
-          key: release-tools-linux-${{ hashFiles('ci/tools/*.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
+          key: release-tools-linux-${{ hashFiles('ci/tools/bootstrap.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
+          restore-keys: |
+            release-tools-linux-
       - name: Check release tool receipt
         id: release-tools
         run: |
@@ -301,16 +309,50 @@ jobs:
             unset SCCACHE_GHA_ENABLED SCCACHE_GHA_VERSION
           fi
           bash ci/release/release.sh release-check
-      # upload-artifact v7.0.2；tar 保留 bin 执行权限，外层不重复压缩。
-      - name: Upload Linux binaries and checksums
-        id: upload
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      # 候选包只供本次运行的 publish 使用，保留 1 天；检查未全部通过时不会出现正式制品。
+      - name: Upload release candidate
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: auction-linux-x86_64-${{ github.sha }}-${{ github.run_attempt }}
+          name: release-candidate-${{ github.sha }}-${{ github.run_attempt }}
           path: |
             target/dist/package/*.tar.gz
             target/dist/package/SHA256SUMS
             target/dist/package/DEPENDENCIES.md
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  publish:
+    needs: [docs, verify, security-audit, msrv, artifacts]
+    # 条件同 artifacts；未写状态函数时隐含 success()，任一检查失败都不发布。
+    if: >-
+      needs.docs.outputs.run-checks == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' &&
+        github.ref == format('refs/heads/{0}',
+                             github.event.repository.default_branch)))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Download release candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          path: package
+      # 重新核对候选包摘要，避免把传输损坏的文件发布为正式制品。
+      - name: Verify release candidate checksums
+        working-directory: package
+        run: sha256sum --check --strict SHA256SUMS
+      # tar 保留 bin 执行权限，外层不重复压缩。
+      - name: Upload Linux binaries and checksums
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: auction-linux-x86_64-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            package/*.tar.gz
+            package/SHA256SUMS
+            package/DEPENDENCIES.md
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

@@ -69,8 +69,8 @@ dx 编译期关闭自动下载，Web 入口同时设 `NO_DOWNLOADS=1`；补丁�
 脚本、补丁、锁图或编译器变化会重建，工具安装目录采用临时目录完成后整体替换。
 
 `bootstrap.sh fingerprint <档位>` 输出配方身份；`identity` 先验证已装工具再输出配方及二进制身份。release 的
-identity 加入应用 `BUILD-INFO` 和 Web `WEB-BUILD-INFO` 的构建环境摘要，`ci/tools/` 同时纳入构建输入指纹，
-修复后的同版本工具不会复用旧工具产物。发布/Web 共用 `configure_build_tools`；只接受环境变量启用的 sccache，
+identity 加入应用 `BUILD-INFO` 和 Web `WEB-BUILD-INFO` 的构建环境摘要，工具配方（`bootstrap.sh`、`rustup.sh`、`locks/`、
+`patches/`）同时纳入构建输入指纹，修复后的同版本工具不会复用旧工具产物；本目录说明与 `blaze.sh` 不影响产物身份。发布/Web 共用 `configure_build_tools`；只接受环境变量启用的 sccache，
 Cargo 配置文件中的包装器用空 `RUSTC_WRAPPER` 覆盖；启用 sccache 时固定其路径，并按
 用户、仓库和工具身份配置 Linux 抽象 Unix socket，隔离默认端口上的旧 daemon。CI 的 sccache GHA 前缀为
 `auction-tls-20261022`，隔离修复前的缓存对象。

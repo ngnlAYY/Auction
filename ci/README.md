@@ -54,13 +54,14 @@ PostgreSQL/Redis 图、all-features Clippy 和两端 WASM 分别核验。`ci/rel
 | verify | docs 通过且本轮需检查 | 工作区、独立 feature、Clippy 和双端 WASM 编译，不重复格式/策略检查 |
 | security-audit | 同上 | 固定版本工具安装与完整依赖审计 |
 | msrv | 同上 | 独立 MSRV 编译，与 verify/security-audit 并行 |
-| artifacts | 上述四项通过；默认分支 push 或手动运行 | 完整通用分体包构建、归档校验及上传 |
+| artifacts | docs 通过；默认分支 push 或手动运行 | 与三项检查并行完成通用分体包构建、归档校验，上传仅保留 1 天的候选包 |
+| publish | 上述五项全部成功 | 下载候选包并复核摘要，以正式名称上传并写入下载说明；任一检查失败都不发布 |
 
 非默认分支 push 仅在 GitHub API 确认**同仓库、同源提交**已有开放 PR 时跳过重复检查，改由 PR 事件检查合并结果；
 API 查询失败会阻断，尚无 PR、PR 元数据未更新、默认分支、标签和手动运行不走该分支。PR 元数据只授予 docs job
 `pull-requests: read`，其他 job 仅 `contents: read`，checkout 不持久化凭据。并发组按工作流、事件类型及完整
 ref/PR 编号隔离，同组新运行取消旧运行，手动任务不被自动 push 取消，不同 fork 的同名分支互不影响；所有 job
-均有超时，完整构建最多 90 分钟。保留 docs、verify、security-audit、msrv 检查名并新增 artifacts（原
+均有超时，完整构建最多 90 分钟。保留 docs、verify、security-audit、msrv、artifacts 检查名并新增 publish（原
 Documentation 工作流已合并），分支保护若绑定旧工作流名须核对 required check。
 
 ## Runner 依赖与缓存
@@ -77,7 +78,8 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
   verify/MSRV 另设 `CARGO_PROFILE_DEV_DEBUG=0`，省去静态检查不需要的调试数据；rust-cache 自身关闭增量编译，
   不重复生成随后会被缓存清理的 incremental 目录。本地仍保留 dev 增量编译及行号回溯。
 - verify、msrv、artifacts 的 `save-if` 要求事件不是 `pull_request`：PR 缓存作用域是合并结果，写入后主分支无法复用且挤占
-  额度；PR 仍完整恢复缓存并执行全部检查，`cache-on-failure` 保留。
+  额度；PR 仍完整恢复缓存并执行全部检查，`cache-on-failure` 保留。该输入必须写成 `${{ ... }}` 表达式：
+  2026-10-17 至 10-29 曾写成字面字符串，rust-cache 只把 `"true"` 视为保存，期间三个 job 都没有保存编译缓存。
 - 只有 artifacts 启用修复后的 sccache 0.18.0；与 dx 0.7.10 一起从固定源码包和独立锁图重建，避免旧官方二进制
   的证书库残留。编译对象写入 Actions 缓存服务，额外前缀 `auction-tls-20261022` 隔离修复前的对象；
   凭据只存在于 action 上下文，由 `actions/github-script` 输出到 step outputs 并仅赋给构建步骤的
@@ -87,7 +89,8 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
   键来自 `bash ci/release/release.sh source-fingerprint`；恢复后仍复核 `BUILD-INFO` 与制品摘要，前缀命中的旧目录也由
   `release.sh` 按同一门禁检查，不满足就重建。
 - security-audit 对无 TLS 依赖的 cargo-machete 保留固定版本安装；cargo-audit 改用 audit 档独立锁重建。
-  `actions/cache` 分别保存 `target/audit-tools` 与 `target/build-tools`，按脚本/锁图/工具链身份分键，恢复后验证
+  `actions/cache` 分别保存 `target/audit-tools` 与 `target/build-tools`，只按 `bootstrap.sh`、锁图、补丁与工具链分键，
+  并以前缀回退；`ci/tools` 的说明或其他脚本变化不再触发约 21 分钟的工具重建。恢复后验证
   配方身份与全部二进制哈希；仅回执无效或缓存缺失时安装 CMake、pkg-config、OpenSSL 等源码构建依赖。
   不能仅凭缓存键命中跳过回执验证，也不跳过随后联网公告审计。
 - 缓存缺失不改变检查范围，命中后仍执行全部静态检查及审计，RustSec 仍联网更新，不缓存“通过”结论；release Cargo
@@ -97,8 +100,10 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
 
 ## 下载 Actions 制品
 
-默认分支 push 或手动运行通过检查后，artifacts job 调用既有 `bash ci/release/release.sh release-check`，重建双端
-页面、API-only 对照及 embedded 四程序，执行资源隔离、源码身份和确定性归档门禁，再上传结果；源码身份、锁图、feature
+默认分支 push 或手动运行时，artifacts job 与检查并行调用既有 `bash ci/release/release.sh release-check`，重建双端
+页面、只含 Public/Admin 的 API-only 对照及 embedded 四程序，执行资源隔离、源码身份和确定性归档门禁；全部检查通过后由
+publish 上传正式结果。API-only 不发布，Worker/auctionctl 的无页面证明由 embedded 标记与依赖图门禁承担，因此省去两次
+Fat LTO 链接；源码身份、锁图、feature
 与构建环境（`RUSTFLAGS`、`RUSTC_WRAPPER`、`CARGO_PROFILE_*`）同既有 `BUILD-INFO` 一致时复用制品并跳过页面重建。
 不另建构建参数或归档白名单；feature 沿用 release.sh 的 PostgreSQL、Redis（`cache-redis`）和双端 web-embed，
 API-only 对照制品仍只启用 PostgreSQL。本机可选 `RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache` 前缀复用同一脚本；

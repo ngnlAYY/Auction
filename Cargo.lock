@@ -331,7 +331,6 @@ dependencies = [
  "auction-observability",
  "axum",
  "chrono",
- "chrono-tz",
  "libc",
  "reqwest 0.13.5",
  "rustls",
