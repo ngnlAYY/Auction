@@ -118,6 +118,14 @@ fn valid_economics(value: &Value) -> bool {
 }
 
 fn valid_schedule(value: &Value) -> bool {
+    // 早鸟区块可省略；出现时单独按闭集校验，其余排期字段仍保持原有精确集合。
+    if let Some(early_bird) = value.get("early_bird") {
+        let Some(mut object) = value.as_object().cloned() else {
+            return false;
+        };
+        object.remove("early_bird");
+        return valid_early_bird(early_bird) && valid_schedule(&Value::Object(object));
+    }
     if !valid_scalars(
         value,
         &["managed", "enabled"],
@@ -154,6 +162,35 @@ fn valid_schedule(value: &Value) -> bool {
                 )
             )
         })
+}
+
+fn valid_early_bird(value: &Value) -> bool {
+    if !valid_scalars(
+        value,
+        &["enabled", "pause_intake_before_season"],
+        &[("timezone", false), ("season_start_time", false), ("open_time", false)],
+        &[
+            ("window_days", 1, 31),
+            ("preview_lead_minutes", 120, 10_080),
+            ("live_minutes", 1, 10_080),
+        ],
+        &["worlds", "season_starts", "session_days", "qualities"],
+    ) {
+        return false;
+    }
+    valid_string_list(&value["worlds"], 2, 16, true)
+        && value["worlds"].as_array().is_some_and(|worlds| {
+            !worlds.is_empty()
+                && worlds.iter().all(|world| matches!(world.as_str(), Some("main" | "isekai")))
+        })
+        && valid_string_list(&value["season_starts"], 12, 5, true)
+        && value["season_starts"].as_array().is_some_and(|starts| !starts.is_empty())
+        && value["session_days"].as_array().is_some_and(|days| {
+            !days.is_empty()
+                && days.len() <= 31
+                && days.iter().all(|day| day.as_u64().is_some_and(|day| (1..=31).contains(&day)))
+        })
+        && valid_string_list(&value["qualities"], 256, 128, true)
 }
 
 fn valid_forum(value: &Value) -> bool {

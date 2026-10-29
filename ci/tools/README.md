@@ -6,6 +6,10 @@
 cargo-audit 或 rustup；更新应用依赖后仍须分别处理这些工具。脚本只在 Linux x86_64 工作，生成文件进入
 `target/`，不修改 Auction 业务源码或用户全局工具配置。上游工具的最小源码补丁集中在 `patches/`，随固定源码与锁图审阅。
 
+可选的 [blaze.sh](ci/tools/blaze.sh) 只调用机器已安装的 Blaze，提供独立本地开发试验入口；不属于下面的
+release/audit 安装档，不安装、更新或全局启用编译器。使用与当前兼容限制由
+[开发指南](docs/guide/development.md#blaze-本地试验)维护。
+
 ## 安装与验证
 
 ```bash
@@ -66,7 +70,8 @@ dx 编译期关闭自动下载，Web 入口同时设 `NO_DOWNLOADS=1`；补丁�
 
 `bootstrap.sh fingerprint <档位>` 输出配方身份；`identity` 先验证已装工具再输出配方及二进制身份。release 的
 identity 加入应用 `BUILD-INFO` 和 Web `WEB-BUILD-INFO` 的构建环境摘要，`ci/tools/` 同时纳入构建输入指纹，
-修复后的同版本工具不会复用旧工具产物。发布/Web 共用 `configure_build_tools`；启用 sccache 时固定其路径，并按
+修复后的同版本工具不会复用旧工具产物。发布/Web 共用 `configure_build_tools`；只接受环境变量启用的 sccache，
+Cargo 配置文件中的包装器用空 `RUSTC_WRAPPER` 覆盖；启用 sccache 时固定其路径，并按
 用户、仓库和工具身份配置 Linux 抽象 Unix socket，隔离默认端口上的旧 daemon。CI 的 sccache GHA 前缀为
 `auction-tls-20261022`，隔离修复前的缓存对象。
 

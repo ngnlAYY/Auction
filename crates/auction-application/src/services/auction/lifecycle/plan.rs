@@ -6,6 +6,7 @@ pub(super) async fn lifecycle_plan<T>(
     context: &AuctionLifecycleContext,
     policy: AuctionLifecyclePolicy,
     successor_policy: &AuctionPolicyTemplate,
+    calendar: Option<&AuctionScheduleCalendar>,
 ) -> Result<AuctionLifecyclePlan, ApplicationError>
 where
     T: CompetitionTransaction + AuctionLifecycleTransaction,
@@ -58,7 +59,7 @@ where
             auction.open(context.policy_scheduled_end_at, now)?;
             AuctionLifecycleEffect::Open {
                 manual_override,
-                successor: successor_plan(context, successor_policy)?,
+                successor: successor_plan(context, successor_policy, calendar, now)?,
             }
         }
         crate::AuctionLifecycleAction::Cancel => {
@@ -67,7 +68,7 @@ where
                 .clone()
                 .unwrap_or_else(|| "Worker lifecycle cancellation".to_owned());
             let successor = (auction.status == auction_domain::AuctionStatus::Preview)
-                .then(|| successor_plan(context, successor_policy))
+                .then(|| successor_plan(context, successor_policy, calendar, now))
                 .transpose()?;
             auction.cancel_before_open_with_metadata(
                 now,

@@ -126,6 +126,7 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 | 投递外部引用索引 | `000062` 由 storage/delivery_scheduler 为非空 `deliveries.external_reference` 增加非唯一部分索引；加速新 MID 绑定前的历史碰撞查询，不改变 Serializable、唯一绑定或历史投递事实 |
 | 卖方全额结算 | `000064` 只扩展既有拍卖/结算表约束；domain 的 `hold_curve_v2` 保证卖方等于成交价，奖池仅承担买方基础优惠，不足按全场权重同比缩减、逐件取整留池，零预算无优惠仍结算；旧快照与账本不改 |
 | Take 原账号恢复证明 | `000063` 由 application/delivery 定义冻结 Take 身份，integrations 在 fence 前固定同一凭据会话，storage/delivery_scheduler 只追加原尝试；mailbox_sweep 同时核对原账号、当前 generation 与候选 fence，旧缺绑定任务保留人工核对 |
+| 赛季早鸟期 | `000065` 由 scheduler 与 lifecycle successor 写入 `scheduled_rounds.slot_key`；application 的 `ports/scheduling` 持有早鸟配置校验与周/早鸟组合日历，config 投影给 Admin/Worker 生命周期、jobs bootstrap 与邮件品质筛选；同 world 单场活动仍由既有唯一索引保证 |
 
 以上为源码能力，运行与独立复审状态见[状态页](docs/status.md)，输入、成功与缺失状态由
 [HTTP 契约](docs/contracts/routes.md)拥有；新增持久化能力先登记范围与 owner，再更新
@@ -165,7 +166,8 @@ fence 与只读对账；`000042` 的账号偏好 SQL 由 storage 独占，旧 wa
 ## Worker 与外部副作用
 
 Worker 只负责持久调度、重试与执行时机；due、游标、attempt、lease、fencing 及命令结果由数据库持有，Final 与调度
-完成 fence 同事务提交，`scheduled_rounds.schedule_snapshot` 固定自动排期的本地时区来源。Auction 主循环以轮询间隔为
+完成 fence 同事务提交，`scheduled_rounds.schedule_snapshot` 固定自动排期的本地时区来源，早鸟场次另带时段身份。
+周计划与赛季早鸟日历只决定尚未建立的下一轮：开拍后继与 bootstrap 共用同一投影和身份算法，已冻结轮次不随配置改写。Auction 主循环以轮询间隔为
 最长等待，按 scheduler、slow proxy 与 settlement storage owner 的只读到期提示在严格未来的到期时刻提前唤醒；
 提示不是调度事实，丢失或失败只退回原轮询。周计划 bootstrap 复用原单项预算，生命周期的数据库时间读取纳入领取前
 绝对截止；迟到回执不授权下一次创建或邮箱写入，可能已提交的结果由冻结轮次、版本和原账本恢复。关闭世界阻止新场次、

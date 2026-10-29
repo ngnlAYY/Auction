@@ -127,8 +127,8 @@ verify_post_body = false
 credential_world = "shared"
 # 可选：固定论坛 endpoint；省略时使用生产 endpoint，测试时可使用回环 HTTP。
 # endpoint = "https://forums.e-hentai.org"
-# 可选：公开端 HTTPS origin；默认省略且不显示 Auction address，配置后以可点击 BBCode 展示当期拍卖 URL。
-public_base_url = "https://auction.ngnl.host"
+# 可选：公开端 HTTPS origin；省略时不显示 Auction address，配置后以可点击 BBCode 展示当期拍卖 URL；首次设置按 Public origin 改写。
+public_base_url = "https://auction.example.invalid"
 # 可选：是否使用旧版测试板块 4；生产环境必须为 false。
 test_board_mode = false
 # 可选：主世界拍卖帖板块 ID；默认 77（WTS）。
@@ -231,7 +231,8 @@ retention_days = 7
 # 可选：诊断归档总字节上限，范围 16 MiB-1 GiB，默认 268435456（256 MiB）。
 maximum_total_bytes = 268435456
 
-# 可选区块：拍卖邮件装备过滤；默认关闭。来源仍必须标记为可交易。
+# 可选区块：拍卖邮件装备过滤；默认关闭，来源仍必须标记为可交易。runtime 同时提供 worlds、equipment_filter、mail_templates 时，
+# 本区块、本区块后的 mail_templates 以及上方 world/发件人设置均由 runtime 覆盖，本示例组合下以 runtime/admin.toml 为准。
 [worker.mooglemail.equipment_filter]
 # 可选：是否启用前后缀、分类、类型和等级过滤；品质门槛始终启用，默认 false。
 enabled = false

@@ -90,6 +90,11 @@ pub(super) fn build_processor_and_delivery(
                             equipment_types: mail_config.equipment_filter.equipment_types.clone(),
                             level_min: mail_config.equipment_filter.level_min,
                             level_max: mail_config.equipment_filter.level_max,
+                            // 早鸟窗口内的投稿改用早鸟品质；与排期共用同一配置投影。
+                            early_bird: config
+                                .auction
+                                .schedule_calendar()?
+                                .and_then(|calendar| calendar.early_bird().cloned()),
                         },
                     },
                     equipment,

@@ -4,7 +4,9 @@ use chrono::Duration;
 use serde::Deserialize;
 
 use super::super::ConfigError;
-use auction_application::AuctionPolicyTemplate;
+use auction_application::{
+    AuctionEarlyBirdConfig, AuctionPolicyTemplate, AuctionScheduleCalendar, AuctionWeeklySchedule,
+};
 use auction_domain::{
     AdjustmentAnchor, DEFAULT_COD_RETURN_LIMIT, RecoveryMode, RecoveryPolicy, SettlementMode,
     SettlementPolicy,
@@ -39,6 +41,8 @@ pub struct AuctionScheduleConfig {
     pub nominal_end_time: String,
     /// 参与周计划的 world；省略时使用 main 和 isekai。
     pub worlds: Vec<String>,
+    /// 赛季早鸟期：窗口内替代常规周场、单独收件品质并在赛季前暂停收件；默认关闭。
+    pub early_bird: AuctionEarlyBirdConfig,
 }
 
 impl Default for AuctionScheduleConfig {
@@ -53,11 +57,32 @@ impl Default for AuctionScheduleConfig {
             nominal_end_day: "Saturday".to_owned(),
             nominal_end_time: "12:00".to_owned(),
             worlds: vec!["main".to_owned(), "isekai".to_owned()],
+            early_bird: AuctionEarlyBirdConfig::default(),
         }
     }
 }
 
 impl AuctionConfig {
+    /// 周排期启用时返回 Admin/Worker 共用的排期日历；早鸟期仅在其自身也启用时加入。
+    /// 调用方须先完成配置校验；这里仍独立失败关闭，避免装配根拿到半解析的日历。
+    pub fn schedule_calendar(&self) -> Result<Option<AuctionScheduleCalendar>, ConfigError> {
+        let schedule = &self.schedule;
+        if !schedule.enabled {
+            return Ok(None);
+        }
+        let weekly = AuctionWeeklySchedule::from_names(
+            &schedule.timezone,
+            (&schedule.preview_day, &schedule.preview_time),
+            (&schedule.open_day, &schedule.open_time),
+            (&schedule.nominal_end_day, &schedule.nominal_end_time),
+        )
+        .map_err(|_| ConfigError::InvalidAuctionConfig("auction.schedule 时间配置无效"))?;
+        let early_bird = schedule.early_bird.active_calendar().map_err(|_| {
+            ConfigError::InvalidAuctionConfig("auction.schedule.early_bird 字段无效")
+        })?;
+        Ok(Some(AuctionScheduleCalendar::new(weekly, early_bird)))
+    }
+
     /// 将 TOML 设置转换为应用层策略模板；模式不在闭集或秒数超出 chrono 范围时返回配置错误。
     pub fn policy(&self) -> Result<AuctionPolicyTemplate, ConfigError> {
         // 此公开转换也可能在主配置校验之前调用，模式和时间转换都必须独立失败关闭。

@@ -1,7 +1,7 @@
 //! 持久化周排期的 IANA 时区与原始本地钟点来源。
 
 use auction_domain::DomainError;
-use chrono::{DateTime, Duration, NaiveDateTime, Offset, TimeZone, Utc};
+use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +13,24 @@ pub struct AuctionScheduleSource {
     pub preview_local: NaiveDateTime,
     pub open_local: NaiveDateTime,
     pub end_local: NaiveDateTime,
+    /// 赛季早鸟场次的稳定身份；常规周轮次省略，保持升级前快照与请求摘要的序列化不变。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub early_bird: Option<AuctionEarlyBirdSlot>,
+}
+
+/// 赛季早鸟场次身份：赛季开始的本地日期与配置中的 1 起始场次序号。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuctionEarlyBirdSlot {
+    pub season: NaiveDate,
+    pub session: u32,
+}
+
+impl AuctionEarlyBirdSlot {
+    /// 轮次唯一键与稳定 UUID 的身份片段，格式 `early-bird:YYYY-MM-DD:N`。
+    pub fn key(&self) -> String {
+        format!("early-bird:{}:{}", self.season.format("%Y-%m-%d"), self.session)
+    }
 }
 
 /// 排期来源解析出的三个 UTC 时间；仅供首次物化和后继生成，不覆盖已冻结轮次。
@@ -44,10 +62,19 @@ impl AuctionScheduleSource {
     }
 
     /// 按本地日历推进七天，使跨 DST 的后继保持同一墙上钟点。
+    /// 早鸟场次不是周循环，拒绝推进，后继由排期日历另行计算。
     pub fn next_week(&self) -> Result<Self, DomainError> {
+        if self.early_bird.is_some() {
+            return Err(DomainError::InvalidSchedule("早鸟场次不能按周推进"));
+        }
+        self.shifted_local_days(7)
+    }
+
+    /// 保留原时区与本地钟点整体顺延若干天，并去除早鸟身份；仅用于没有日历时的兜底后继。
+    pub fn shifted_local_days(&self, days: i64) -> Result<Self, DomainError> {
         let next = |value: NaiveDateTime| {
             value
-                .checked_add_signed(Duration::days(7))
+                .checked_add_signed(Duration::days(days))
                 .ok_or(DomainError::InvalidSchedule("下一期本地时间超出范围"))
         };
         let source = Self {
@@ -55,6 +82,7 @@ impl AuctionScheduleSource {
             preview_local: next(self.preview_local)?,
             open_local: next(self.open_local)?,
             end_local: next(self.end_local)?,
+            early_bird: None,
         };
         source.resolve()?;
         Ok(source)
@@ -86,7 +114,11 @@ impl AuctionScheduleSource {
     }
 }
 
-fn resolve_local(timezone: Tz, local: NaiveDateTime) -> Result<DateTime<Utc>, DomainError> {
+/// 本地墙上时间转 UTC；排期日历与冻结来源共用同一 DST 规则。
+pub(super) fn resolve_local(
+    timezone: Tz,
+    local: NaiveDateTime,
+) -> Result<DateTime<Utc>, DomainError> {
     if let Some(value) = timezone.from_local_datetime(&local).earliest() {
         return Ok(value.with_timezone(&Utc));
     }

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# 发布唯一入口：API-only 对照、双端嵌入、可选合并服务的构建与门禁，以及确定性装包。
+# 子命令见文件末尾；复用、身份与 Web payload 门禁来自 build-identity.sh。
 
 set -euo pipefail
 
@@ -12,14 +14,10 @@ configure_build_tools
 artifact_root="$repository_root/target/dist/artifacts"
 api_artifact_root="$artifact_root/api"
 embedded_artifact_root="$artifact_root/embedded"
+single_artifact_root="$artifact_root/single"
 api_build_root="$repository_root/target/dist/build/api"
 embedded_build_root="$repository_root/target/dist/build/embedded"
-single_artifact_root="$artifact_root/single"
-# 合并变体只声明函数，底层构建及归档门禁仍由本脚本拥有。
-# 以下两项只由被 source 的 release-single.sh 消费，导出以消除静态未使用告警。
 single_build_root="$repository_root/target/dist/build/single"
-export single_build_root
-source ci/release/release-single.sh
 package_output_root="$repository_root/target/dist/package"
 api_only_public_root="$repository_root/target/dist/api-only-assets/public"
 api_only_admin_root="$repository_root/target/dist/api-only-assets/admin"
@@ -29,7 +27,6 @@ api_only_features='postgres'
 runtime_features='postgres,cache-redis'
 embedded_features="$runtime_features,auction-public-api/web-embed,auction-admin-api/web-embed"
 single_features="$runtime_features,auction-server/web-embed"
-export single_features
 
 binaries=(
 	auction-public-api
@@ -49,10 +46,6 @@ require_command() {
 for required in cargo date diff dx find git gzip install sha256sum sort stat tar; do
 	require_command "$required"
 done
-
-sha256_file() {
-	sha256sum "$1" | awk '{print $1}'
-}
 
 worktree_state() {
 	if [[ -z $(git status --porcelain=v1 --untracked-files=all --ignore-submodules=none) ]]; then
@@ -198,8 +191,8 @@ build_variant() (
 		bash ci/release/web-bundle.sh public
 		verify_build_info "$next" "$variant"
 		bash ci/release/web-bundle.sh admin
-		verify_web_root public >/dev/null
-		verify_web_root admin >/dev/null
+		web_payload_sha public >/dev/null
+		web_payload_sha admin >/dev/null
 	fi
 	verify_build_info "$next" "$variant"
 
@@ -247,109 +240,29 @@ build_variant() (
 	printf '%s 发布二进制已生成：%s\n' "$variant" "$artifact_directory"
 )
 
-verify_web_root() {
-	local surface=$1 package other expected_title other_title
-	case "$surface" in
-	public)
-		package=auction-web-public
-		other='admin'
-		expected_title='Auction 公开站点'
-		other_title='Auction 管理站点'
-		;;
-	admin)
-		package=auction-web-admin
-		other='public'
-		expected_title='Auction 管理站点'
-		other_title='Auction 公开站点'
-		;;
-	*)
-		printf '未知 Web surface：%s\n' "$surface" >&2
-		return 2
-		;;
-	esac
+# 已构建的稳定 Web payload 通过完整门禁后输出其哈希。
+web_payload_sha() {
+	local package
+	package=$(web_surface_package "$1") || return 2
+	verify_web_payload "$1" "$repository_root/target/dx/build/$package/web"
+}
 
-	local stable_root="$repository_root/target/dx/build/$package/web"
-	local root="$stable_root/public"
-	local marker="$root/auction-web-manifest.v1"
-	local expected_payload="$stable_root/PAYLOAD-SHA256"
-	local actual_payload marker_surface marker_profile marker_sha actual_sha wasm_count js_count
-
-	for required_file in "$root/index.html" "$marker" "$expected_payload"; do
-		if [[ ! -f "$required_file" || -L "$required_file" ]]; then
-			printf '%s Web payload 缺少普通文件：%s\n' "$surface" "$required_file" >&2
+# contains 要求每个标记都出现，excludes 要求每个标记都缺席；用于证明 Web 资源只进入对应二进制。
+assert_binary_markers() {
+	local mode=$1 binary=$2 label=$3 marker found
+	shift 3
+	for marker in "$@"; do
+		found=false
+		if LC_ALL=C grep -aFq -- "$marker" "$binary"; then found=true; fi
+		if [[ "$mode" == contains && "$found" == false ]]; then
+			printf '%s 缺少内嵌标记：%s\n' "$label" "$marker" >&2
+			return 1
+		fi
+		if [[ "$mode" == excludes && "$found" == true ]]; then
+			printf '%s 意外包含禁用标记：%s\n' "$label" "$marker" >&2
 			return 1
 		fi
 	done
-	if [[ -n $(find "$root" -type l -print -quit) ]] ||
-		[[ -n $(find "$root" ! -type f ! -type d -print -quit) ]]; then
-		printf '%s Web payload 含符号链接或特殊文件\n' "$surface" >&2
-		return 1
-	fi
-	if ! grep -Fq "<title>$expected_title</title>" "$root/index.html" ||
-		grep -Fq "$other_title" "$root/index.html"; then
-		printf '%s Web 入口混入错误 surface 标题\n' "$surface" >&2
-		return 1
-	fi
-	if grep -Fq "auction-web-$other" < <(find "$root" -type f -print); then
-		printf '%s Web payload 混入 %s 文件\n' "$surface" "$other" >&2
-		return 1
-	fi
-
-	marker_surface=$(read_build_info "$marker" surface)
-	marker_profile=$(read_build_info "$marker" profile)
-	marker_sha=$(read_build_info "$marker" payload_sha256)
-	if [[ $(read_build_info "$marker" schema) != auction-web-assets/1 ||
-	"$marker_surface" != "$surface" ||
-	"$marker_profile" != wasm-release ||
-	! "$marker_sha" =~ ^[0-9a-f]{64}$ ]]; then
-		printf '%s Web 制品标记无效\n' "$surface" >&2
-		return 1
-	fi
-
-	actual_payload=$(mktemp)
-	(
-		cd "$root"
-		find . -type f ! -name auction-web-manifest.v1 -print0 |
-			LC_ALL=C sort -z |
-			xargs -0 -r sha256sum
-	) >"$actual_payload"
-	if ! cmp -s "$expected_payload" "$actual_payload"; then
-		rm -f "$actual_payload"
-		printf '%s Web payload 与固定清单不一致\n' "$surface" >&2
-		return 1
-	fi
-	actual_sha=$(sha256_file "$actual_payload")
-	rm -f "$actual_payload"
-	if [[ "$actual_sha" != "$marker_sha" ]]; then
-		printf '%s Web payload 哈希与内嵌标记不一致\n' "$surface" >&2
-		return 1
-	fi
-
-	wasm_count=$(find "$root" -type f -name "auction-web-${surface}_bg*.wasm" | wc -l | tr -d ' ')
-	js_count=$(find "$root" -type f -name "auction-web-${surface}-*.js" | wc -l | tr -d ' ')
-	if [[ "$wasm_count" != 1 || "$js_count" != 1 ]]; then
-		printf '%s Web payload 必须且只能包含一组优化 JS/WASM：js=%s wasm=%s\n' \
-			"$surface" "$js_count" "$wasm_count" >&2
-		return 1
-	fi
-
-	printf '%s\n' "$marker_sha"
-}
-
-assert_binary_contains() {
-	local binary=$1 marker=$2 label=$3
-	if ! LC_ALL=C grep -aFq "$marker" "$binary"; then
-		printf '%s 缺少内嵌标记：%s\n' "$label" "$marker" >&2
-		return 1
-	fi
-}
-
-assert_binary_excludes() {
-	local binary=$1 marker=$2 label=$3
-	if LC_ALL=C grep -aFq "$marker" "$binary"; then
-		printf '%s 意外包含禁用标记：%s\n' "$label" "$marker" >&2
-		return 1
-	fi
 }
 
 verify_build_info() {
@@ -404,8 +317,8 @@ verify_artifacts() {
 	verify_build_info "$embedded_artifact_root" embedded
 
 	local public_web_sha admin_web_sha
-	public_web_sha=$(verify_web_root public)
-	admin_web_sha=$(verify_web_root admin)
+	public_web_sha=$(web_payload_sha public)
+	admin_web_sha=$(web_payload_sha admin)
 	if [[ "$public_web_sha" == "$admin_web_sha" ]]; then
 		printf 'Public/Admin Web payload 哈希不得相同\n' >&2
 		return 1
@@ -416,7 +329,7 @@ verify_artifacts() {
 		return 1
 	fi
 
-	local variant binary path label
+	local variant binary path
 	for variant in api embedded; do
 		for binary in "${binaries[@]}"; do
 			path="$artifact_root/$variant/bin/$binary"
@@ -427,30 +340,21 @@ verify_artifacts() {
 		done
 	done
 
+	# 每个 surface 的标记是页面标题加 payload 哈希；资源只能出现在对应的嵌入二进制里。
+	local public_markers=('Auction 公开站点' "$public_web_sha")
+	local admin_markers=('Auction 管理站点' "$admin_web_sha")
+	local api="$api_artifact_root/bin" embedded="$embedded_artifact_root/bin"
 	for binary in "${binaries[@]}"; do
-		label="API-only $binary"
-		assert_binary_excludes "$api_artifact_root/bin/$binary" 'Auction 公开站点' "$label"
-		assert_binary_excludes "$api_artifact_root/bin/$binary" 'Auction 管理站点' "$label"
-		assert_binary_excludes "$api_artifact_root/bin/$binary" "$public_web_sha" "$label"
-		assert_binary_excludes "$api_artifact_root/bin/$binary" "$admin_web_sha" "$label"
+		assert_binary_markers excludes "$api/$binary" "API-only $binary" "${public_markers[@]}" "${admin_markers[@]}"
 	done
-	assert_binary_contains "$api_artifact_root/bin/auction-public-api" "$assets_missing_message" 'API-only Public'
-	assert_binary_contains "$api_artifact_root/bin/auction-admin-api" "$assets_missing_message" 'API-only Admin'
-
-	assert_binary_contains "$embedded_artifact_root/bin/auction-public-api" 'Auction 公开站点' 'Embedded Public'
-	assert_binary_contains "$embedded_artifact_root/bin/auction-public-api" "$public_web_sha" 'Embedded Public'
-	assert_binary_excludes "$embedded_artifact_root/bin/auction-public-api" 'Auction 管理站点' 'Embedded Public'
-	assert_binary_excludes "$embedded_artifact_root/bin/auction-public-api" "$admin_web_sha" 'Embedded Public'
-	assert_binary_contains "$embedded_artifact_root/bin/auction-admin-api" 'Auction 管理站点' 'Embedded Admin'
-	assert_binary_contains "$embedded_artifact_root/bin/auction-admin-api" "$admin_web_sha" 'Embedded Admin'
-	assert_binary_excludes "$embedded_artifact_root/bin/auction-admin-api" 'Auction 公开站点' 'Embedded Admin'
-	assert_binary_excludes "$embedded_artifact_root/bin/auction-admin-api" "$public_web_sha" 'Embedded Admin'
+	assert_binary_markers contains "$api/auction-public-api" 'API-only Public' "$assets_missing_message"
+	assert_binary_markers contains "$api/auction-admin-api" 'API-only Admin' "$assets_missing_message"
+	assert_binary_markers contains "$embedded/auction-public-api" 'Embedded Public' "${public_markers[@]}"
+	assert_binary_markers excludes "$embedded/auction-public-api" 'Embedded Public' "${admin_markers[@]}"
+	assert_binary_markers contains "$embedded/auction-admin-api" 'Embedded Admin' "${admin_markers[@]}"
+	assert_binary_markers excludes "$embedded/auction-admin-api" 'Embedded Admin' "${public_markers[@]}"
 	for binary in auction-worker auctionctl; do
-		label="Embedded $binary"
-		assert_binary_excludes "$embedded_artifact_root/bin/$binary" 'Auction 公开站点' "$label"
-		assert_binary_excludes "$embedded_artifact_root/bin/$binary" 'Auction 管理站点' "$label"
-		assert_binary_excludes "$embedded_artifact_root/bin/$binary" "$public_web_sha" "$label"
-		assert_binary_excludes "$embedded_artifact_root/bin/$binary" "$admin_web_sha" "$label"
+		assert_binary_markers excludes "$embedded/$binary" "Embedded $binary" "${public_markers[@]}" "${admin_markers[@]}"
 	done
 
 	if cmp -s \
@@ -465,6 +369,42 @@ verify_artifacts() {
 
 	verify_dependency_boundaries
 	printf 'API-only、双 surface 嵌入资源、缺失资源 503 标记与 Worker 依赖边界门禁通过。\n'
+}
+
+# 可选合并服务：在分体制品与资源隔离证明通过后，构建 auction-server 与独立 auctionctl。
+build_single() {
+	verify_artifacts
+	build_variant single "$single_build_root" "$single_artifact_root" "$single_features" \
+		auction-server auctionctl
+}
+
+verify_single_artifacts() {
+	# 合并包不会跳过分体资源隔离证明。
+	verify_artifacts
+	verify_artifact_checksums "$single_artifact_root" single
+	verify_build_info "$single_artifact_root" single
+	local public_sha admin_sha binary server_tree
+	public_sha=$(web_payload_sha public)
+	admin_sha=$(web_payload_sha admin)
+	for binary in auction-server auctionctl; do
+		if [[ ! -s "$single_artifact_root/bin/$binary" || ! -x "$single_artifact_root/bin/$binary" ||
+		-L "$single_artifact_root/bin/$binary" ]]; then
+			printf '合并发布二进制无效：%s\n' "$binary" >&2
+			return 1
+		fi
+	done
+	cmp "$single_artifact_root/WEB-PUBLIC-MANIFEST.v1" "$embedded_artifact_root/WEB-PUBLIC-MANIFEST.v1"
+	cmp "$single_artifact_root/WEB-ADMIN-MANIFEST.v1" "$embedded_artifact_root/WEB-ADMIN-MANIFEST.v1"
+	local markers=('Auction 公开站点' 'Auction 管理站点' "$public_sha" "$admin_sha")
+	assert_binary_markers contains "$single_artifact_root/bin/auction-server" 'Single server' "${markers[@]}"
+	assert_binary_markers excludes "$single_artifact_root/bin/auctionctl" 'Single auctionctl' "${markers[@]}"
+	# 先收集完整依赖图，不能让 grep -q 的提前关闭与 pipefail 掩盖违规。
+	server_tree=$(cargo tree --locked -e normal,build -p auction-server --no-default-features --features "$single_features")
+	if grep -Fq 'auctionctl v' <<<"$server_tree"; then
+		printf 'auction-server 不得依赖 auctionctl\n' >&2
+		return 1
+	fi
+	printf '合并制品双 surface、独立 auctionctl 与分体隔离门禁通过。\n'
 }
 
 workspace_version() {
@@ -540,6 +480,16 @@ install_release_file() {
 	install -m "$mode" "$source" "$package_root/$target"
 	release_targets+=("$target")
 	release_modes+=("$mode")
+}
+
+# 批量安装“源路径|归档路径|权限”三元组；用竖线分隔，仓库绝对路径含空白也不会被拆开。
+install_release_files() {
+	local package_root=$1 entry source target mode
+	shift
+	for entry in "$@"; do
+		IFS='|' read -r source target mode <<<"$entry"
+		install_release_file "$source" "$target" "$mode" "$package_root"
+	done
 }
 
 register_generated_file() {
@@ -717,37 +667,40 @@ package_release() (
 		-e 's|](ops/deploy/LEGACY_V28_ADOPTION\.md|](LEGACY_V28_ADOPTION.md|g' \
 		-e 's|](ops/deploy/retention-policy\.v1\.json|](../retention-policy.v1.json|g' \
 		"$package_root/docs/DEPLOYMENT.md"
-	install_release_file ops/deploy/RECOVERY.md docs/RECOVERY.md 644 "$package_root"
-	install_release_file ops/deploy/LEGACY_V28_ADOPTION.md docs/LEGACY_V28_ADOPTION.md 644 "$package_root"
-	install_release_file ops/deploy/retention-policy.v1.json retention-policy.v1.json 644 "$package_root"
-	install_release_file ops/deploy/caddy/Caddyfile caddy/Caddyfile 644 "$package_root"
 	# 仓库合并安装说明，但保持归档内既有文档路径、权限及白名单。
 	printf '# systemd 服务与顺序控制\n\n见[部署手册](../docs/DEPLOYMENT.md#systemd-服务与顺序控制)。\n' \
 		>"$temporary_root/SYSTEMD.md"
-	install_release_file "$temporary_root/SYSTEMD.md" systemd/README.md 644 "$package_root"
+	install_release_files "$package_root" \
+		"ops/deploy/RECOVERY.md|docs/RECOVERY.md|644" \
+		"ops/deploy/LEGACY_V28_ADOPTION.md|docs/LEGACY_V28_ADOPTION.md|644" \
+		"ops/deploy/retention-policy.v1.json|retention-policy.v1.json|644" \
+		"ops/deploy/caddy/Caddyfile|caddy/Caddyfile|644" \
+		"$temporary_root/SYSTEMD.md|systemd/README.md|644" \
+		"ops/config/README.md|config/README.md|644" \
+		"ops/config/examples/common.toml|config/examples/common.toml|640" \
+		"ops/config/examples/public.toml|config/examples/public.toml|640" \
+		"ops/config/examples/admin.toml|config/examples/admin.toml|640" \
+		"ops/config/examples/worker.toml|config/examples/worker.toml|640" \
+		"ops/config/examples/runtime/admin.toml|config/examples/runtime/admin.toml|640" \
+		"ops/config/examples/secrets.toml|config/examples/secrets.toml.example|600" \
+		"ops/config/examples/secrets/postgres-rebuild.toml|config/examples/secrets/postgres-rebuild.toml.example|600" \
+		"$embedded_artifact_root/WEB-PUBLIC-SHA256|docs/WEB-PUBLIC-SHA256|644" \
+		"$embedded_artifact_root/WEB-ADMIN-SHA256|docs/WEB-ADMIN-SHA256|644" \
+		"$embedded_artifact_root/WEB-PUBLIC-MANIFEST.v1|docs/WEB-PUBLIC-MANIFEST.v1|644" \
+		"$embedded_artifact_root/WEB-ADMIN-MANIFEST.v1|docs/WEB-ADMIN-MANIFEST.v1|644"
 	if [[ "$single_binary" == true ]]; then
-		install_release_file ops/deploy/systemd/auction-server.service.example systemd/auction-server.service.example 644 "$package_root"
-		install_release_file apps/auction-server/README.md docs/SINGLE-SERVER.md 644 "$package_root"
-		install_release_file ops/deploy/caddy/setup.Caddyfile.example caddy/setup.Caddyfile.example 644 "$package_root"
+		install_release_files "$package_root" \
+			"ops/deploy/systemd/auction-server.service.example|systemd/auction-server.service.example|644" \
+			"apps/auction-server/README.md|docs/SINGLE-SERVER.md|644" \
+			"ops/deploy/caddy/setup.Caddyfile.example|caddy/setup.Caddyfile.example|644"
 	else
-		install_release_file ops/deploy/systemd/auction-public-api.service.example systemd/auction-public-api.service.example 644 "$package_root"
-		install_release_file ops/deploy/systemd/auction-admin-api.service.example systemd/auction-admin-api.service.example 644 "$package_root"
-		install_release_file ops/deploy/systemd/auction-worker.service.example systemd/auction-worker.service.example 644 "$package_root"
-		install_release_file ops/deploy/systemd/auction-stack.service.example systemd/auction-stack.service.example 644 "$package_root"
-		install_release_file ops/deploy/tmpfiles/hv-auction.conf.example tmpfiles/hv-auction.conf.example 644 "$package_root"
+		install_release_files "$package_root" \
+			"ops/deploy/systemd/auction-public-api.service.example|systemd/auction-public-api.service.example|644" \
+			"ops/deploy/systemd/auction-admin-api.service.example|systemd/auction-admin-api.service.example|644" \
+			"ops/deploy/systemd/auction-worker.service.example|systemd/auction-worker.service.example|644" \
+			"ops/deploy/systemd/auction-stack.service.example|systemd/auction-stack.service.example|644" \
+			"ops/deploy/tmpfiles/hv-auction.conf.example|tmpfiles/hv-auction.conf.example|644"
 	fi
-	install_release_file ops/config/README.md config/README.md 644 "$package_root"
-	install_release_file ops/config/examples/common.toml config/examples/common.toml 640 "$package_root"
-	install_release_file ops/config/examples/public.toml config/examples/public.toml 640 "$package_root"
-	install_release_file ops/config/examples/admin.toml config/examples/admin.toml 640 "$package_root"
-	install_release_file ops/config/examples/worker.toml config/examples/worker.toml 640 "$package_root"
-	install_release_file ops/config/examples/runtime/admin.toml config/examples/runtime/admin.toml 640 "$package_root"
-	install_release_file ops/config/examples/secrets.toml config/examples/secrets.toml.example 600 "$package_root"
-	install_release_file ops/config/examples/secrets/postgres-rebuild.toml config/examples/secrets/postgres-rebuild.toml.example 600 "$package_root"
-	install_release_file "$embedded_artifact_root/WEB-PUBLIC-SHA256" docs/WEB-PUBLIC-SHA256 644 "$package_root"
-	install_release_file "$embedded_artifact_root/WEB-ADMIN-SHA256" docs/WEB-ADMIN-SHA256 644 "$package_root"
-	install_release_file "$embedded_artifact_root/WEB-PUBLIC-MANIFEST.v1" docs/WEB-PUBLIC-MANIFEST.v1 644 "$package_root"
-	install_release_file "$embedded_artifact_root/WEB-ADMIN-MANIFEST.v1" docs/WEB-ADMIN-MANIFEST.v1 644 "$package_root"
 
 	write_dependencies \
 		"$temporary_root/DEPENDENCIES.md" \
@@ -821,66 +774,57 @@ package_release() (
 	printf 'publication_sha256=%s\n' "$(sha256_file "$package_output_root/SHA256SUMS")"
 )
 
-case "${1:-}" in
-release-check)
-	shift
-	release_check "$@"
-	;;
-build-single)
-	[[ $# -eq 1 ]] || exit 2
-	build_single
-	;;
-verify-single)
-	[[ $# -eq 1 ]] || exit 2
-	verify_single_artifacts
-	;;
-build-api)
-	if [[ $# -ne 1 ]]; then
-		printf 'build-api 不接受额外参数\n' >&2
-		exit 2
-	fi
+# 完整发布：先校验参数，不能在拼写错误时先启动大规模构建。
+release_check() {
+	local single=false argument
+	for argument in "$@"; do
+		case "$argument" in
+		--single-binary) single=true ;;
+		--allow-dirty) ;;
+		*)
+			printf '未知发布参数：%s\n' "$argument" >&2
+			return 2
+			;;
+		esac
+	done
 	build_variant api-only "$api_build_root" "$api_artifact_root" "$api_only_features"
-	;;
-build-embedded)
-	if [[ $# -ne 1 ]]; then
-		printf 'build-embedded 不接受额外参数\n' >&2
-		exit 2
-	fi
-	# build_variant 在同一源码身份约束内重建双端 Web 和 native 制品。
-	build_variant \
-		embedded \
-		"$embedded_build_root" \
-		"$embedded_artifact_root" \
-		"$embedded_features"
-	;;
-verify-artifacts)
-	if [[ $# -ne 1 ]]; then
-		printf 'verify-artifacts 不接受额外参数\n' >&2
-		exit 2
-	fi
-	verify_artifacts
-	;;
-# 只输出源码身份指纹，供 CI 用作制品缓存键或人工核对复用判定；不读写产物目录。
-source-fingerprint)
-	if [[ $# -ne 1 ]]; then
-		printf 'source-fingerprint 不接受额外参数\n' >&2
-		exit 2
-	fi
-	source_fingerprint
-	;;
-package)
-	shift
+	build_variant embedded "$embedded_build_root" "$embedded_artifact_root" "$embedded_features"
+	if [[ "$single" == true ]]; then build_single; fi
 	package_release "$@"
-	;;
-*)
+}
+
+usage() {
 	printf '%s\n' \
 		'用法：ci/release/release.sh release-check [--single-binary] [--allow-dirty]' \
+		'      ci/release/release.sh package [--single-binary] [--allow-dirty]' \
+		'      ci/release/release.sh build-api | build-embedded | verify-artifacts' \
 		'      ci/release/release.sh build-single | verify-single' \
-		'      ci/release/release.sh build-api' \
-		'      ci/release/release.sh build-embedded' \
-		'      ci/release/release.sh verify-artifacts' \
-		'      ci/release/release.sh source-fingerprint' \
-		'      ci/release/release.sh package [--allow-dirty]' >&2
+		'      ci/release/release.sh source-fingerprint' >&2
+}
+
+command_name=${1:-}
+if [[ $# -gt 0 ]]; then shift; fi
+case "$command_name" in
+release-check) release_check "$@" ;;
+package) package_release "$@" ;;
+build-api | build-embedded | build-single | verify-single | verify-artifacts | source-fingerprint)
+	if [[ $# -ne 0 ]]; then
+		printf '%s 不接受额外参数\n' "$command_name" >&2
+		exit 2
+	fi
+	case "$command_name" in
+	build-api) build_variant api-only "$api_build_root" "$api_artifact_root" "$api_only_features" ;;
+	# 在同一源码身份约束内重建双端 Web 和 native 制品。
+	build-embedded) build_variant embedded "$embedded_build_root" "$embedded_artifact_root" "$embedded_features" ;;
+	build-single) build_single ;;
+	verify-single) verify_single_artifacts ;;
+	verify-artifacts) verify_artifacts ;;
+	# 只输出源码身份指纹，供 CI 用作制品缓存键或人工核对复用判定；不读写产物目录。
+	source-fingerprint) source_fingerprint ;;
+	esac
+	;;
+*)
+	usage
 	exit 2
 	;;
 esac

@@ -207,7 +207,11 @@ where
                     pending_equipment_diagnostic,
                 );
             }
-            let rejection_reason = self.equipment_filter.evaluate(&snapshot);
+            let rejection_reason = self.equipment_filter.evaluate_received(
+                &snapshot,
+                &message.world_id,
+                message.received_at,
+            );
             if !rejection_reason.is_empty() {
                 snapshot.clear_secret();
                 let result = if message.returnable {

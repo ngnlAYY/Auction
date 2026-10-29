@@ -36,6 +36,33 @@ nominal_end_time = "12:00"
 # 可选：参与周计划的 world，默认 main 和 isekai。
 worlds = ["main", "isekai"]
 
+# 可选区块：赛季早鸟期；仅在 [auction.schedule] 启用时生效，窗口内由早鸟场次替代重叠的常规周场。
+[auction.schedule.early_bird]
+# 可选：是否启用早鸟期，默认 false；启用时 auction.schedule.enabled 必须为 true。
+enabled = false
+# 可选：赛季开始与场次钟点使用的 IANA 时区，默认 UTC。
+timezone = "UTC"
+# 可选：参与早鸟期的 world，须包含在 auction.schedule.worlds 中，默认 ["isekai"]。
+worlds = ["isekai"]
+# 可选：每年赛季开始的月-日（MM-DD），1-12 项且不接受 02-29，默认 ["05-01", "11-01"]。
+season_starts = ["05-01", "11-01"]
+# 可选：赛季开始的本地钟点（HH:MM），早鸟窗口与收件品质从此刻起算，默认 09:00。
+season_start_time = "09:00"
+# 可选：早鸟窗口天数，范围 1-31，默认 7。
+window_days = 7
+# 可选：窗口内开拍的第几天，从 1 起严格递增且不超过 window_days，默认 [1, 3, 5, 7]。
+session_days = [1, 3, 5, 7]
+# 可选：每个开拍日的本地开拍钟点（HH:MM），默认 18:00；首场预览不得早于赛季开始。
+open_time = "18:00"
+# 可选：预览早于开拍的分钟数，范围 120-10080，默认 120。
+preview_lead_minutes = 120
+# 可选：开拍到计划结束的分钟数，范围 1-10080，默认 1440；下一场预览不得早于上一场计划结束。
+live_minutes = 1440
+# 可选：窗口内收到的投稿接受的品质；空数组表示不限品质，默认 []。
+qualities = []
+# 可选：首场早鸟草稿建立后至赛季开始前是否暂停该 world 收件轮询，默认 true。
+pause_intake_before_season = true
+
 # 可选区块：创建拍卖时冻结的经济、结算和恢复策略；省略时使用内置默认值。
 [auction.economics]
 # 可选：默认起始价，必须为正且按 1000 Credits 网格对齐，默认 1000。
@@ -59,6 +86,7 @@ proxy_max_outbid_uses = 3
 # 可选：进入 final phase 前的领先秒数，范围 1-604800，默认 900（15 分钟）。
 final_phase_lead_seconds = 900
 
+# 可选区块：新拍卖的结算版本、模式、补偿池和领先时长曲线；创建拍卖时冻结，已有场次不随修改变化。
 [auction.settlement]
 # 可选：新拍卖结算策略版本，支持 0 或 2，默认 2；旧版本 1 仅供冻结场次读取。
 version = 2
@@ -82,6 +110,7 @@ anchors = [
   { hold_ppm = 1000000, adjustment_ppm = -20000 },
 ]
 
+# 可选区块：结算后付款超时、提醒与 COD 退回的恢复策略；创建拍卖时冻结，省略时使用内置默认值。
 [auction.settlement.recovery]
 # 可选：恢复策略版本，当前只支持 1。
 version = 1

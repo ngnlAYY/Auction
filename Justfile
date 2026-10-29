@@ -28,6 +28,11 @@ lint:
 wasm-check:
     @bash ci/checks/check.sh wasm
 
+# 显式本地 Blaze 试验，参数逐项转发；不进入 verify 或发布依赖。
+[positional-arguments]
+blaze +args:
+    @bash ci/tools/blaze.sh "$@"
+
 # 删除全部编译产物与本地缓存；target/ 由 cargo 与发布脚本共同拥有。
 clean:
     cargo clean

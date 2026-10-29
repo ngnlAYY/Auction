@@ -17,6 +17,54 @@ OpenSSL 开发文件、patch 和 curl/tar/coreutils。版本、MSRV 和 profile 
 GNU x86_64 的默认工具链已使用随 Rust 提供的 LLD，无需全局 linker/rustflags 覆盖；参数与限制见
 [编译优化边界](docs/design/tech-stack.md#编译优化边界)。
 
+## 本机编译加速
+
+可选的用户级 `~/.cargo/config.toml` 只加速编译，不进入仓库，也不改变 profile、LTO、CGU 或目标 CPU：
+
+```toml
+[build]
+rustc-wrapper = "/usr/bin/sccache"
+
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=--ld-path=/usr/bin/mold"]
+```
+
+sccache 只缓存依赖 crate，开启增量编译的工作区 crate 与需要链接的二进制不进入缓存。clang 的 `--ld-path`
+优先于 `-fuse-ld`，既覆盖 Rust 1.90+ 默认的自带 lld，也兼容不认识 `-C linker-features` 的旧工具链。
+新增或修改 rustflags 会使已有依赖全部重新编译。发布与 Web 入口忽略配置文件中的包装器，需要缓存时以
+`RUSTC_WRAPPER=sccache` 显式启用受控版本；mold 链接器配置仍会生效并计入 `BUILD-INFO`。
+
+## Blaze 本地试验
+
+Blaze 仅作为原生 Rust 本地开发编译的可选候选，入口为 `just blaze`，由
+[blaze.sh](ci/tools/blaze.sh) 调用机器上已安装的 `blaze`，不自动安装、升级或执行全局 `enable`。
+它不进入 `just verify`、Web 打包或发布配方；项目固定 Rust、MSRV、Clippy 与 WASM 门禁仍是最终判断。
+
+```bash
+# 查看本仓库独立 daemon 与缓存状态。
+just blaze status
+# 尝试编译原生开发程序；不启动服务。
+just blaze build -p auctionctl
+# 显式运行选定的既有纯领域测试；不属于默认静态检查。
+just blaze test -p auction-domain --lib
+# 只停止本仓库试验 daemon，不停止其他项目的 Blaze。
+just blaze stop
+```
+
+参数逐项转发，build/test 强制携带 `--locked`；发布 profile、显式 target、target-dir 及 `--config` 覆盖被拒绝。
+产物固定在 `target/blaze/build/`，函数缓存为 `target/blaze/cache/`；临时覆盖 `XDG_RUNTIME_DIR` 将 daemon 放在
+`target/blaze/runtime/`，同时复用用户已安装的 Blaze 工具链。设置只对本次进程树有效，普通 Cargo 与已安装服务不变。
+默认编译并发为 2，可通过 `CARGO_BUILD_JOBS` 显式调整；worker 内存回收沿用 Blaze 设置，不能当作构建过程的硬内存上限。
+`test` 固定 `BLAZE_TESTS=all`，不复用测试通过缓存；编译失败保留原始退出码，不自动回退 Cargo。
+试验源码应位于正常源码目录或独立临时目录，不能放在 `target/` 下：已核对版本将路径中包含 `target` 的普通源码
+视作不可变文件，可能报告构建成功却继续运行旧代码。`target/blaze/` 只用于产物、缓存和证据，增量验收须实际运行核对新结果。
+
+当前已核对 `blaze 0.20261027.0 (49ca152)` / `blaze-2026-10-27`。该版本编译 `auctionctl` 和领域测试框架时，
+因标准库可写静态量 `__RUST_STD_INTERNAL_VAL` / `MIN` 缺少符号而退出 101；测试尚未执行，不能把入口存在视为
+后端开发编译已经可用。该版本也尚未验证本项目 Dioxus 打包。后续版本须重新核对真实程序、测试及函数修改后的结果，
+实测记录见[状态页](docs/status.md)。诊断中不要修改业务代码或关闭检查来迁就编译器；需要继续开发时显式使用原 Cargo 命令。
+
 ## 默认检查
 
 ```bash
@@ -90,6 +138,7 @@ Web 使用 `wasm-release`；dx 的 esbuild 仅供构建，不增加 Node/npm 运
 仅修改这些范围外的文档不会重跑原生 Fat LTO；Web payload 按 surface、共享层、契约、工具链版本及同一构建环境摘要独立复用，
 修改 `CARGO_PROFILE_WASM_RELEASE_*`、rustflags 或 Cargo 配置会重新构建页面。本机可选
 `RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache`（sccache 0.18.0）。
+发布入口只接受环境变量启用的 sccache，用户全局 `build.rustc-wrapper` 会被空 `RUSTC_WRAPPER` 覆盖；
 发布入口将 sccache 解析为受控二进制，并按用户、工作区和工具身份选择独立 Unix socket，
 避免连接旧 daemon；不停止其他构建的进程，不改变 feature、资源隔离或归档契约。复用判定、指纹实现、
 资源隔离与 `--allow-dirty` 限制归[CI 说明](ci/README.md#发布边界)及[发布手册](ops/README.md#发布制品)；

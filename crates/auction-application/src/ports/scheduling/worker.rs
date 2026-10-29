@@ -41,9 +41,10 @@ pub struct ScheduledRoundClaim {
     pub attempt_count: u32,
 }
 
-/// 当前本地周应存在的持久化轮次及其冻结策略。
-/// `round_id`、`auction_id` 和 `create_command_id` 必须由 world/local_week 的旧版稳定算法
-/// 派生；数据库适配器负责在一个事务内幂等建立拍卖、intake target、命令账本和轮次事实。
+/// 当前本地周或早鸟场次应存在的持久化轮次及其冻结策略。
+/// `round_id`、`auction_id` 和 `create_command_id` 必须由 world/local_week（早鸟场次为
+/// world/slot_key）的旧版稳定算法派生；数据库适配器负责在一个事务内幂等建立拍卖、
+/// intake target、命令账本和轮次事实。
 #[derive(Debug, Clone)]
 pub struct ScheduledRoundBootstrap {
     pub round_id: Uuid,
@@ -51,6 +52,8 @@ pub struct ScheduledRoundBootstrap {
     pub create_command_id: CommandId,
     pub world_id: String,
     pub local_week: chrono::NaiveDate,
+    /// 早鸟场次键；常规周轮次为 `None`，并继续受 world/local_week 唯一约束。
+    pub slot_key: Option<String>,
     pub preview_due_at: DateTime<Utc>,
     pub open_due_at: DateTime<Utc>,
     pub scheduled_end_at: DateTime<Utc>,
@@ -68,6 +71,8 @@ pub struct ScheduledRoundSnapshot {
     pub active: bool,
     pub world_id: String,
     pub local_week: chrono::NaiveDate,
+    /// 早鸟场次键；常规周轮次为 `None`。
+    pub slot_key: Option<String>,
     pub preview_due_at: DateTime<Utc>,
     pub open_due_at: DateTime<Utc>,
     pub scheduled_end_at: DateTime<Utc>,
@@ -82,11 +87,18 @@ pub trait ScheduledRoundStore: Send + Sync {
     /// 返回数据库权威当前时间；周身份和 due 判断不得使用进程本地时钟。
     fn database_now(&self) -> ApplicationFuture<'_, DateTime<Utc>>;
 
-    /// 只读获取已冻结的本地周轮次；配置变化不能作为重发旧创建命令或改写既有策略的理由。
+    /// 只读获取已冻结的常规本地周轮次；配置变化不能作为重发旧创建命令或改写既有策略的理由。
     fn find_current_round(
         &self,
         world_id: String,
         local_week: chrono::NaiveDate,
+    ) -> ApplicationFuture<'_, Option<ScheduledRoundSnapshot>>;
+
+    /// 只读获取已冻结的早鸟场次轮次；与常规周轮次的查找键互不重叠。
+    fn find_slot_round(
+        &self,
+        world_id: String,
+        slot_key: String,
     ) -> ApplicationFuture<'_, Option<ScheduledRoundSnapshot>>;
 
     /// 幂等确保当前本地周轮次；若窗口已结束则只建立 missed 轮次，不创建过期拍卖。

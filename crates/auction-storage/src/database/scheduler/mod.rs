@@ -44,6 +44,24 @@ impl ScheduledRoundStore for DatabaseStore {
         })
     }
 
+    fn find_slot_round(
+        &self,
+        world_id: String,
+        slot_key: String,
+    ) -> auction_application::ApplicationFuture<
+        '_,
+        Option<auction_application::ScheduledRoundSnapshot>,
+    > {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => lookup::slot_postgres(store.pool(), &world_id, &slot_key)
+                    .await
+                    .map_err(ApplicationError::from),
+            }
+        })
+    }
+
     fn ensure_current_round(
         &self,
         request: auction_application::ScheduledRoundBootstrap,

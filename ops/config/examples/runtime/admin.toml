@@ -278,6 +278,9 @@ nominal_end_time = "12:00"
 # 可选：排期世界；省略时为 ["main","isekai"]。
 worlds = ["main","isekai"]
 
+# 可选区块 [operations.schedule.early_bird]：赛季早鸟期，仅在 managed = true 时接管；省略等同未启用并保持旧指纹。
+# 十二个字段、默认值与校验规则同公共 common.toml 的 [auction.schedule.early_bird]，需要时整块复制后改表头。
+
 # 可选区块：论坛同步；managed 为 true 时才覆盖本组部署参数。
 [operations.forum]
 # 可选：是否由管理页覆盖论坛同步参数，默认关闭；省略时为 false。

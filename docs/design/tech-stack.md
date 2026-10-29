@@ -58,10 +58,14 @@ Cargo.lock，也不代表活动驱动或运行支持。升级逐项核对 MSRV�
 | 通用 CPU | Linux x86_64 目标默认基线 | 不启用 `native`、架构专属指令、全局 fast-math 或 `panic=abort` |
 
 本地与 Actions 使用的 Rust 1.99.0、MSRV 1.94.1 均已包含 GNU x86_64 的默认 LLD，
-无需再安装系统 linker 或添加全局 `-fuse-ld=lld`；依据见
+仓库无需安装系统 linker 或提交 `-fuse-ld` 配置；开发机可在用户级 Cargo 配置改用 mold 加速链接，不改变优化结果。依据见
 [Rust 1.90 发布说明](https://blog.rust-lang.org/2025/09/18/Rust-1.90.0/)。
 调试信息取舍沿用 [Cargo 构建性能指南](https://doc.rust-lang.org/cargo/guide/build-performance.html)，
 不改变优化级别、断言、溢出检查或 panic 语义。没有代表性业务负载，不用 Thin LTO 替换现有生产档来换取未经量化的运行时取舍。
+
+Blaze 作为显式本地试验候选，复用外部安装并隔离到 `target/blaze/`，不改变上述工具链或 profile。
+当前编译器存在标准库符号兼容阻断，不能替代固定 Rust 的检查、Clippy、WASM 或正式发布；
+入口和边界见[开发指南](docs/guide/development.md#blaze-本地试验)，实测结果归[状态页](docs/status.md)。
 
 [AMD 定向候选](ops/build/README.md)仅叠加已审阅的目标 CPUID 与构建并发；没有代表性业务负载时，不启用 PGO/BOLT、
 不宣称“最佳性能”，历史领域微基准不能证明新版服务吞吐/p99（验证范围见[状态页](docs/status.md)）。Rust 1.99 将

@@ -9,10 +9,10 @@
 | [check.sh](ci/checks/check.sh) | 本地和 CI 共用的策略、Cargo 与依赖检查命令 |
 | [equipment-contract.sh](ci/checks/equipment-contract.sh) | 只读比对装备来源错误码枚举、最新 SQL 约束、Admin 解码及五语言说明 |
 | [web-bundle.sh](ci/release/web-bundle.sh) | 按 Public/Admin 构建 WASM，生成固定权限、mtime 和 payload 哈希；输入未变时复用既有 payload |
-| [release.sh](ci/release/release.sh) | API-only / 内嵌档构建、资源隔离、身份校验和确定性归档 |
-| [release-single.sh](ci/release/release-single.sh) | 由 release.sh 加载的合并服务变体，复用分体门禁；不是独立执行入口 |
-| [build-identity.sh](ci/release/build-identity.sh) | 被 release.sh 与 web-bundle.sh 加载的源码身份、路径输入指纹和 `BUILD-INFO` 字段读取；只有一份实现 |
+| [release.sh](ci/release/release.sh) | 发布唯一入口：API-only / 内嵌档及可选合并服务的构建、资源隔离、身份校验和确定性归档 |
+| [build-identity.sh](ci/release/build-identity.sh) | 被 release.sh 与 web-bundle.sh 加载的工具选择、源码身份、路径输入指纹、`BUILD-INFO` 读取及 Web payload 门禁；只有一份实现 |
 | [tools/](ci/tools/README.md) | rustup 安全自举；dx/sccache/cargo-audit 独立锁图重建、配套工具校验与安装回执 |
+| [blaze.sh](ci/tools/blaze.sh) | 显式本地开发试验入口，复用已安装 Blaze 并隔离 daemon、缓存和产物；兼容状态见[开发指南](docs/guide/development.md#blaze-本地试验) |
 
 ## 本地与 CI 入口
 
@@ -24,6 +24,7 @@
 | 格式 / 编译 / 独立 feature / Clippy / WASM | fmt / check / feature-check / lint / wasm-check | fmt / check / feature / lint / wasm；合称 rust |
 | RustSec 公告 / 未用依赖 | 无 recipe，直接调用 check.sh | dependency-audit / dependency-unused；不属于默认本地 verify |
 | 页面与发布 | web-build / build-api / build-release / build-single / release-check | 不由 check.sh 执行，见上方专用脚本 |
+| Blaze 本地候选 | `just blaze build/test/status/stop` | 不由 check.sh 执行，不加入 CI 或发布依赖 |
 
 check.sh 无参数仍执行五项策略门禁（all），支持一次传入多项；repository 同时检查 `Cargo.lock` 已跟踪且未被忽略。
 Cargo 检查使用 `--locked`，默认图、独立
@@ -101,8 +102,9 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
 与构建环境（`RUSTFLAGS`、`RUSTC_WRAPPER`、`CARGO_PROFILE_*`）同既有 `BUILD-INFO` 一致时复用制品并跳过页面重建。
 不另建构建参数或归档白名单；feature 沿用 release.sh 的 PostgreSQL、Redis（`cache-redis`）和双端 web-embed，
 API-only 对照制品仍只启用 PostgreSQL。本机可选 `RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache` 前缀复用同一脚本；
-包装器身份进入 `BUILD-INFO`，条件不同不会混用。GNU x86_64 已由固定 Rust 工具链默认使用 LLD，
-不另装系统 linker 或设置全局 `-fuse-ld=lld`。CI 只对 artifacts 启用 sccache。
+包装器身份进入 `BUILD-INFO`，条件不同不会混用。GNU x86_64 已由固定 Rust 工具链默认使用 LLD，仓库不提交链接器配置；
+本机用户级 Cargo 配置可改用 mold 加速链接，链接器只排布已优化代码，配置文件摘要同样进入 `BUILD-INFO`。
+CI 只对 artifacts 启用 sccache。
 PR、非默认分支和标签的自动运行只检查、不发布制品。在 GitHub 的 **Actions → auction-build → 对应运行 → Artifacts** 下载
 `auction-linux-x86_64-<commit>-<attempt>`（私有库需相应仓库权限），包内含 `.tar.gz`、外层 `SHA256SUMS` 和
 `DEPENDENCIES.md`，先校验清单再解包；tar 内的 `auction-rust-<version>-<commit>/bin/` 包含且仅包含：
@@ -141,6 +143,7 @@ Linux 均兼容。构建、上传不启动程序、不连接业务数据库、�
 | `target/sccache/` | 可选本地 sccache 缓存，经 `SCCACHE_DIR=target/sccache` 启用 |
 | `target/build-tools/`、`target/audit-tools/` | 两档受控工具、依赖锁身份及二进制哈希回执，由 tools/bootstrap.sh 拥有 |
 | `target/secure-build-tools/` | 工具源码包、独立源码解包与 Cargo 编译中间目录 |
+| `target/blaze/{build,cache,runtime}/` | 可选 Blaze 开发产物、函数缓存与独立 daemon；由 tools/blaze.sh 拥有，不进入发布包 |
 
 缓存判定读 `BUILD-INFO`，不读目录名或时间戳；删除 `target/dist/` 只损失复用，不影响正确性。
 
@@ -156,7 +159,8 @@ payload 复用只在本脚本内生效：本 surface、`auction-web-shared`、`a
 原生与 WASM 共用环境摘要，覆盖 `CARGO_PROFILE_*`（包括 `CARGO_PROFILE_WASM_RELEASE_*`）、rustflags、
 目标 linker/target、rustc 编译器与包装器（含 `CARGO_BUILD_RUSTC*` 配置环境别名）、增量覆盖
 （`CARGO_INCREMENTAL` / `CARGO_BUILD_INCREMENTAL`）、C/C++ 编译器与 flags、受控工具字节身份，以及 Cargo 逐层读取的当前目录、
-父目录和 `CARGO_HOME` 配置文件。包装器的两类环境入口都绑定受控 sccache 和同一 daemon 身份。
+父目录和 `CARGO_HOME` 配置文件。包装器的两类环境入口都绑定受控 sccache 和同一 daemon 身份；Cargo 配置文件中的
+`build.rustc-wrapper`（例如用户全局 sccache）未经回执校验，环境未指定包装器时发布与 Web 入口显式置空 `RUSTC_WRAPPER`。
 只写入摘要，不把配置或环境原文写入清单；旧摘要自动失效。
 只修改上述输入范围外的原生源码或文档不会重跑 WASM；输入目录中的 README 仍参与摘要，不按扩展名排除。
 release.sh 在构建前冻结构建输入（apps、crates、migrations、配置示例、保留策略、清单、`.cargo` 与发布工具），

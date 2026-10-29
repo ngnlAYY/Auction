@@ -106,6 +106,8 @@ mod mail_diagnostics;
 #[path = "mail/equipment_diagnostics.rs"]
 mod mail_equipment_diagnostics;
 pub use mail_equipment_diagnostics::*;
+#[path = "scheduling/early_bird.rs"]
+mod early_bird_schedule;
 #[path = "mail/display.rs"]
 mod mail_display;
 #[path = "mail/maintenance.rs"]
@@ -138,6 +140,8 @@ mod recovery_scheduler;
 mod recurring_schedule;
 #[path = "public/rules.rs"]
 mod rules;
+#[path = "scheduling/calendar.rs"]
+mod schedule_calendar;
 #[path = "scheduling/source.rs"]
 mod schedule_source;
 #[path = "scheduling/worker.rs"]
@@ -493,7 +497,11 @@ pub use worker_control::{
     WorkerControlTrigger,
 };
 
-pub use schedule_source::{AuctionScheduleSource, AuctionScheduleTimes};
+pub use early_bird_schedule::{
+    AuctionEarlyBirdCalendar, AuctionEarlyBirdConfig, AuctionEarlyBirdSeason,
+};
+pub use schedule_calendar::{AuctionScheduleCalendar, AuctionScheduleSlot, AuctionWeeklySchedule};
+pub use schedule_source::{AuctionEarlyBirdSlot, AuctionScheduleSource, AuctionScheduleTimes};
 
 #[path = "public/watch.rs"]
 mod lot_watch;

@@ -1,4 +1,4 @@
-//! 每周拍卖轮次的数据库时间、幂等 bootstrap 和安全投影。
+//! 每周拍卖轮次与赛季早鸟轮次的数据库时间、幂等 bootstrap 和安全投影。
 
 use auction_application::{ScheduledRoundBootstrap, ScheduledRoundSnapshot};
 use chrono::{DateTime, Datelike, Utc};
@@ -79,14 +79,20 @@ async fn ensure_postgres_once(
         .fetch_one(&mut *transaction)
         .await
         .map_err(PostgresBootstrapError::Storage)?;
+    // 常规周按 world/local_week 定位，早鸟场次按 world/slot_key 定位，两类键互不匹配。
     if let Some(row) = sqlx::query(
-        "SELECT id, world_id, local_week, auction_id, status, preview_due_at, open_due_at,
-                scheduled_end_at, create_command_id, preview_completed_at, open_completed_at,
-                schedule_snapshot
-         FROM public.scheduled_rounds WHERE world_id = $1 AND local_week = $2 FOR UPDATE",
+        "SELECT id, world_id, local_week, slot_key, auction_id, status, preview_due_at,
+                open_due_at, scheduled_end_at, create_command_id, preview_completed_at,
+                open_completed_at, schedule_snapshot
+         FROM public.scheduled_rounds
+         WHERE world_id = $1
+           AND CASE WHEN $3::text IS NULL THEN slot_key IS NULL AND local_week = $2
+                    ELSE slot_key = $3 END
+         FOR UPDATE",
     )
     .bind(&request.world_id)
     .bind(request.local_week)
+    .bind(request.slot_key.as_deref())
     .fetch_optional(&mut *transaction)
     .await
     .map_err(PostgresBootstrapError::Storage)?
@@ -176,8 +182,9 @@ async fn ensure_postgres_once(
     sqlx::query(
         "INSERT INTO public.scheduled_rounds
             (id, world_id, local_week, auction_id, status, preview_due_at, open_due_at,
-             scheduled_end_at, create_command_id, created_at, updated_at, schedule_snapshot)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11)",
+             scheduled_end_at, create_command_id, created_at, updated_at, schedule_snapshot,
+             slot_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12)",
     )
     .bind(request.round_id)
     .bind(&request.world_id)
@@ -193,6 +200,7 @@ async fn ensure_postgres_once(
         serde_json::to_value(&request.schedule_source)
             .map_err(|_| repository_error_owned("周计划来源无法编码"))?,
     )
+    .bind(request.slot_key.as_deref())
     .execute(&mut *transaction)
     .await
     .map_err(PostgresBootstrapError::Storage)?;
@@ -204,6 +212,7 @@ async fn ensure_postgres_once(
         active: !missed,
         world_id: request.world_id,
         local_week: request.local_week,
+        slot_key: request.slot_key,
         preview_due_at: request.preview_due_at,
         open_due_at: request.open_due_at,
         scheduled_end_at: request.scheduled_end_at,
@@ -228,13 +237,16 @@ async fn insert_command_postgres(
     .bind(request.create_command_id.as_uuid())
     .bind(request.round_id)
     .bind(request.request_hash.as_bytes())
-    .bind(json!({
-        "round_id": request.round_id,
-        "auction_id": (!missed).then_some(request.auction_id.as_uuid()),
-        "world_id": request.world_id,
-        "local_week": request.local_week,
-        "missed": missed,
-    }))
+    .bind(with_slot_key(
+        json!({
+            "round_id": request.round_id,
+            "auction_id": (!missed).then_some(request.auction_id.as_uuid()),
+            "world_id": request.world_id,
+            "local_week": request.local_week,
+            "missed": missed,
+        }),
+        request.slot_key.as_deref(),
+    ))
     .bind(now)
     .execute(&mut **transaction)
     .await
@@ -258,7 +270,10 @@ async fn append_audit_postgres(
     .bind(Uuid::new_v4())
     .bind(now)
     .bind(request.round_id.to_string())
-    .bind(json!({"world_id": request.world_id, "local_week": request.local_week, "missed": missed}))
+    .bind(with_slot_key(
+        json!({"world_id": request.world_id, "local_week": request.local_week, "missed": missed}),
+        request.slot_key.as_deref(),
+    ))
     .execute(&mut **transaction)
     .await
     .map_err(PostgresBootstrapError::Storage)?;
@@ -276,6 +291,8 @@ fn validate_request(
         || request.preview_due_at >= request.open_due_at
         || request.open_due_at >= request.scheduled_end_at
         || request.request_hash.as_bytes() == [0; 32]
+        || request.slot_key.as_deref().is_some_and(|key| !valid_slot_key(key))
+        || request.slot_key != request.schedule_source.early_bird.map(|slot| slot.key())
     {
         return Err(repository_error_owned("周计划 bootstrap 参数无效"));
     }
@@ -297,6 +314,7 @@ fn verify_existing(
     if snapshot.round_id != request.round_id
         || snapshot.world_id != request.world_id
         || snapshot.local_week != request.local_week
+        || snapshot.slot_key != request.slot_key
         || snapshot.preview_due_at != request.preview_due_at
         || snapshot.open_due_at != request.open_due_at
         || snapshot.scheduled_end_at != request.scheduled_end_at
@@ -324,6 +342,7 @@ pub(super) fn snapshot_postgres(
         active,
         world_id: row.try_get("world_id").map_err(map_storage_error)?,
         local_week: row.try_get("local_week").map_err(map_storage_error)?,
+        slot_key: row.try_get("slot_key").map_err(map_storage_error)?,
         preview_due_at: row.try_get("preview_due_at").map_err(map_storage_error)?,
         open_due_at: row.try_get("open_due_at").map_err(map_storage_error)?,
         scheduled_end_at: row.try_get("scheduled_end_at").map_err(map_storage_error)?,
@@ -331,6 +350,30 @@ pub(super) fn snapshot_postgres(
         preview_completed_at: row.try_get("preview_completed_at").map_err(map_storage_error)?,
         open_completed_at: row.try_get("open_completed_at").map_err(map_storage_error)?,
     })
+}
+
+/// 早鸟时段键形状：`early-bird:YYYY-MM-DD:N`，N 为 1–99；与数据库 CHECK 一致。
+pub(super) fn valid_slot_key(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix("early-bird:") else {
+        return false;
+    };
+    let Some((date, session)) = rest.split_once(':') else {
+        return false;
+    };
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok()
+        && date.len() == 10
+        && !session.is_empty()
+        && session.len() <= 2
+        && !session.starts_with('0')
+        && session.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// 早鸟轮次在命令结果与审计元数据中追加时段键；常规周保持原有字段集合。
+fn with_slot_key(mut value: serde_json::Value, slot_key: Option<&str>) -> serde_json::Value {
+    if let (Some(slot_key), Some(object)) = (slot_key, value.as_object_mut()) {
+        object.insert("slot_key".to_owned(), serde_json::Value::String(slot_key.to_owned()));
+    }
+    value
 }
 
 fn scheduled_round_active(status: String) -> Result<bool, auction_application::RepositoryError> {
