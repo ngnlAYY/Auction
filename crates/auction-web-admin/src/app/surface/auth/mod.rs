@@ -9,7 +9,8 @@ use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 
 use auction_web_shared::{
-    LanguagePicker, use_app_boot_ready, use_dialog_focus_trap, use_route_focus, use_second_ticker,
+    LanguagePicker, ThemePicker, use_app_boot_ready, use_dialog_focus_trap, use_route_focus,
+    use_second_ticker,
 };
 
 use crate::api::{

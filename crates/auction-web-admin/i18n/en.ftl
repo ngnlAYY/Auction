@@ -136,6 +136,9 @@ setup-password-mismatch = The admin passwords do not match.
 setup-origins-conflict = Public and Admin origins must be different.
 
 language-label = Language
+theme-label = Theme
+theme-dark = Dark
+theme-light = Light
 skip = Skip to main content
 
 nav-label = Admin sections

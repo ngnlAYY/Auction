@@ -88,6 +88,8 @@ pub(crate) fn App() -> Element {
             .with_fallback(DEFAULT_PUBLIC_LOCALE)
     });
     use_locale_effects(i18n);
+    // 首次渲染前恢复 hv.theme，应用显示时已是目标主题。
+    use_theme_effects();
 
     rsx! {
         BaseStylesheet {}
@@ -432,6 +434,11 @@ pub(crate) fn PublicShell() -> Element {
                         LanguagePicker {
                             label: t!("language-label"),
                             default_locale: "en",
+                        }
+                        ThemePicker {
+                            label: t!("theme-label"),
+                            dark_label: t!("theme-dark"),
+                            light_label: t!("theme-light"),
                         }
                     }
                     div { class: "public-shell__connection",

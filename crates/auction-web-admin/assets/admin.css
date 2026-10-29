@@ -52,6 +52,21 @@
   --admin-radius-button: 0.35rem;
   --admin-radius-input: 1px;
 }
+
+/* 浅色主题下的 admin 专属 token：位于 surface 层，必须在这里覆盖，base 的 foundation 层覆盖不到。
+   输入框边框 #747474 / #858585 与危险按钮在浅色底上仍满足 3:1 与 4.5:1，沿用原值。 */
+:root[data-theme="light"] {
+  --color-input-bg: #ffffff;
+  --color-status-ok: #17733a;
+  --color-status-warn: #895b00;
+  --color-status-error: #c22b2b;
+  --color-border-subtle: #e4e9ef;
+  --color-bg-muted: #f1f4f8;
+  --color-status-ok-muted: rgb(23 115 58 / 12%);
+  --color-status-warn-muted: rgb(137 91 0 / 12%);
+  --color-status-error-muted: rgb(194 43 43 / 12%);
+  --color-accent-muted: rgb(137 91 0 / 12%);
+}
 .admin-shell {
   display: flex;
   min-block-size: 100vh;

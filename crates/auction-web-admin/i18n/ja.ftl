@@ -135,6 +135,9 @@ setup-password-mismatch = 管理者パスワードが一致しません。
 setup-origins-conflict = 公開サイトと管理サイトの Origin は異なる値にしてください。
 
 language-label = 言語
+theme-label = テーマ
+theme-dark = ダーク
+theme-light = ライト
 skip = メインコンテンツへ移動
 
 nav-label = 管理メニュー

@@ -3,6 +3,9 @@
 
 app-title = HV-Auction
 language-label = Language
+theme-label = Theme
+theme-dark = Dark
+theme-light = Light
 skip = Skip to main content
 value-empty = —
 

@@ -63,7 +63,7 @@ use unic_langid::langid;
 use auction_web_shared::{
     BaseStylesheet,
     i18n::{DEFAULT_ADMIN_LOCALE, initial_language},
-    use_locale_effects,
+    use_locale_effects, use_theme_effects,
 };
 
 pub(super) use command::{run_admin_action, run_admin_feedback_action};
@@ -98,6 +98,8 @@ fn App() -> Element {
             .with_fallback(DEFAULT_ADMIN_LOCALE)
     });
     use_locale_effects(i18n);
+    // 首次渲染前恢复 hv.theme；登录、首次设置与正式页面共享同一主题。
+    use_theme_effects();
 
     rsx! {
         BaseStylesheet {}

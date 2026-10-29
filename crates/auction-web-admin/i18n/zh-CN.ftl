@@ -136,6 +136,9 @@ setup-origins-conflict = 公开站点与管理站点的 Origin 必须不同。
 # Fluent 消息 ID 不允许包含点号，旧系统的 `nav.home` 一类键统一改为 `nav-home`。
 
 language-label = 语言
+theme-label = 主题
+theme-dark = 深色
+theme-light = 浅色
 skip = 跳转到主要内容
 
 nav-label = 后台功能

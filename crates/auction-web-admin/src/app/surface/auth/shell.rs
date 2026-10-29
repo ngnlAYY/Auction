@@ -59,6 +59,11 @@ pub(crate) fn AdminAuthenticatedShell(
                         label: t!("language-label"),
                         default_locale: "zh-CN",
                     }
+                    ThemePicker {
+                        label: t!("theme-label"),
+                        dark_label: t!("theme-dark"),
+                        light_label: t!("theme-light"),
+                    }
                     button {
                         class: "admin-shell__logout",
                         r#type: "button",

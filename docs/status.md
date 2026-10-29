@@ -35,6 +35,16 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-29 主题切换与浅色主题
+
+按用户要求为 Public 与 Admin 新增主题切换和浅色主题。共享层 `theme/` 拥有 `hv.theme` 偏好（`dark` 默认 / `light`）、
+`<html data-theme>` 与 `theme-color` 同步及原生 select 切换器；Public 页头、Admin 页头与首次设置页放置切换器，
+文案同步两端各五语言。base.css 以 `:root[data-theme="light"]` 只重写颜色与阴影 token，高对比度模式另有浅色规则，
+打印规则提升到同等优先级以保持白底纸面；Admin surface 层另行覆盖自有颜色 token。浅色候选色按 WCAG 公式核对：
+正文、链接、状态文字对三层底色及 12%/16% 着色底不低于 4.5:1，控件边界不低于 3:1。默认深色及启动骨架不变。
+
+`just verify`（含双端 WASM 与 Clippy）与 i18n 门禁通过。未启动服务或在浏览器中查看页面，浅色主题的实际观感待验收。
+
 ### 2026-10-29 Actions 依赖门禁修复与编译提速
 
 运行 `40824989877` 的 security-audit 因 `cargo-machete` 报告 `auction-jobs` 未使用 `chrono-tz` 失败（周排期改由

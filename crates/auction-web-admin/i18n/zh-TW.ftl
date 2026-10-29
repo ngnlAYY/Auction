@@ -135,6 +135,9 @@ setup-password-mismatch = 兩次輸入的管理員密碼不一致。
 setup-origins-conflict = 公開站點與管理站點的 Origin 必須不同。
 
 language-label = 語言
+theme-label = 主題
+theme-dark = 深色
+theme-light = 淺色
 skip = 跳至主要內容
 
 nav-label = 後台功能
