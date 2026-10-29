@@ -227,7 +227,7 @@ CDN 保存全部响应（仅精确静态 handler 可放行），部署规则不�
 ## 浏览器、实时与制品
 
 Public/Admin 是分离的 Dioxus CSR SPA，各有路由、译文、产物和 HTTP 资源类型，共享层仅提供基础能力，设计见
-[Public](crates/auction-web-public/DESIGN.md) 和 [Admin](crates/auction-web-admin/DESIGN.md)；五语言与 `hv.lang` 保持
+[Public](crates/auction-web-public/DESIGN.md) 和 [Admin](crates/auction-web-admin/DESIGN.md)；五语言与 `hv.lang`、主题偏好 `hv.theme` 保持
 稳定，列宽/截断/窄屏结构见[表格契约](docs/design/table-layouts.md)。Public `surface/pagination/` 拥有列表数量、译文、
 URL 更新与 `preferences.rs` 本地偏好；shared `Pager`/`components/pager/size.rs` 拥有统一分页结构和页码限制，共享 CSS 独占双端分页样式。
 Public `surface/catalog/columns/` 独占装备目录列身份、默认权重、显隐控件和浏览器偏好；仅改变展示，

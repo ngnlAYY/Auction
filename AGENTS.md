@@ -180,6 +180,7 @@
 - 所有界面文案经本 surface 的 `dioxus-i18n` / `i18n/*.ftl`，不得组件硬编码。支持 `en/zh-CN/zh-TW/ja/ko`，
   Public 默认 `en`，Admin 默认 `zh-CN`；新增消息同步五份，缺键会 panic。Fluent ID 用连字符，不能含点号。
 - 偏好键固定 `hv.lang`，非法值退回对应默认语言；共享层只持有语言集合、持久化和 `<html lang>` 同步。
+  主题偏好键固定 `hv.theme`，只接受 `dark`（默认）/`light`，共享层同步 `<html data-theme>`；配色只经设计 token 覆盖，组件不写颜色。
 - 业务表占容器 100%，组件按内容/时间/动作独立定义完整百分比列宽；Markdown 按内容权重计算，见[表格契约](docs/design/table-layouts.md)。
   Public 窄屏业务表复用同一 DOM 显示字段卡片，表头供辅助技术读取；桌面、打印、Admin 及 Markdown 保持表格。不用固定最小宽度或横向滚动，长文本提供全文提示，复杂文本支持键盘/触控查看。
 - 保持既有 CSS、结构与视觉契约；样式或静态产物完成不等于业务验收。

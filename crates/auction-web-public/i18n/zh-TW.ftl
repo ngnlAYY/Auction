@@ -2,6 +2,9 @@
 
 app-title = HV-Auction
 language-label = 語言
+theme-label = 主題
+theme-dark = 深色
+theme-light = 淺色
 skip = 跳到主要內容
 value-empty = —
 

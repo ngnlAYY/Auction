@@ -245,7 +245,7 @@
     overflow-wrap: anywhere;
   }
 
-  /* 世界和语言同行；连接整体与会话各占下一行一半，最小内容放不下时整组换行，视觉和键盘顺序一致。 */
+  /* 世界、语言和主题同行三等分；连接整体与会话各占下一行一半，最小内容放不下时整组换行，视觉和键盘顺序一致。 */
   .public-shell__controls {
     display: flex;
     grid-column: 1 / -1;
@@ -263,7 +263,7 @@
 
   .public-shell__preferences {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     flex-basis: 100%;
     gap: var(--space-2);
     inline-size: 100%;
@@ -286,7 +286,7 @@
     white-space: nowrap;
   }
 
-  .public-shell__preferences :is(select, .language-picker) {
+  .public-shell__preferences :is(select, .language-picker, .theme-picker) {
     inline-size: 100%;
     min-inline-size: 0;
     max-inline-size: 100%;

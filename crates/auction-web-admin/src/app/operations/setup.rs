@@ -9,7 +9,7 @@ mod form;
 #[path = "setup/validation.rs"]
 mod validation;
 
-use auction_web_shared::{LanguagePicker, legacy_t as t, use_app_boot_ready};
+use auction_web_shared::{LanguagePicker, ThemePicker, legacy_t as t, use_app_boot_ready};
 use dioxus::prelude::*;
 
 use self::{draft::SetupDraft, form::ConfigurationForm};
@@ -32,6 +32,11 @@ pub(super) fn page() -> Element {
         main { class: "admin-setup", aria_labelledby: "admin-setup-title",
             div { class: if verified() { "admin-setup__card" } else { "admin-setup__card admin-setup__card--access" },
                 LanguagePicker { label: t!("language-label"), default_locale: "zh-CN" }
+                ThemePicker {
+                    label: t!("theme-label"),
+                    dark_label: t!("theme-dark"),
+                    light_label: t!("theme-light"),
+                }
                 h1 { id: "admin-setup-title", {t!("setup-title")} }
                 if !verified() {
                     p { class: "admin-panel__note", {t!("setup-intro")} }

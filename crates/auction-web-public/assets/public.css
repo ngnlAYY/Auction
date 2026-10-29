@@ -148,8 +148,8 @@
   font-size: var(--text-sm);
 }
 
-/* 语言选择器由共享层拥有，Admin 同样使用；只在 Public 页头内收紧尺寸。 */
-.public-shell__preferences .language-picker__select {
+/* 语言与主题选择器由共享层拥有，Admin 同样使用；只在 Public 页头内收紧尺寸。 */
+.public-shell__preferences :is(.language-picker__select, .theme-picker__select) {
   min-block-size: var(--size-control-compact);
   padding: 0 var(--space-2);
   font-size: var(--text-sm);

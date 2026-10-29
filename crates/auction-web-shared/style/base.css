@@ -74,6 +74,29 @@
   --visual-viewport-top: 0px;
 }
 
+/* 浅色主题（<html data-theme="light">，由 ThemePicker 切换）：只重写颜色与阴影 token，布局、密度与
+   组件结构不变。正文、链接与状态文字对 bg/surface/raised 均不低于 4.5:1，控件边界不低于 3:1（WCAG AA）。 */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #f6f8fa;
+  --color-surface: #ffffff;
+  --color-surface-raised: #eef1f5;
+  --color-border: #d1d9e0;
+  --color-border-strong: #9aa6b4;
+  --color-border-control: #6e7781;
+  --color-text: #1f2328;
+  --color-text-muted: #57606a;
+  --color-accent: #895b00;
+  --color-accent-contrast: #ffffff;
+  --color-live: #17733a;
+  --color-warning: #895b00;
+  --color-danger: #c22b2b;
+  --color-link: #0a5ac2;
+  --color-overlay: rgb(31 35 40 / 45%);
+  --shadow-1: 0 1px 2px rgb(31 35 40 / 12%);
+  --shadow-2: 0 4px 12px rgb(31 35 40 / 14%);
+}
+
 @supports (height: 100dvh) {
   :root {
     --visual-viewport-height: 100dvh;
@@ -199,13 +222,16 @@ button:disabled {
   outline-offset: calc(2 * var(--border-width));
 }
 
-.language-picker {
+/* 语言与主题切换器共用同一外观；两者都是带视觉隐藏标签的原生 select。 */
+.language-picker,
+.theme-picker {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
 }
 
-.language-picker__label {
+.language-picker__label,
+.theme-picker__label {
   position: absolute;
   inline-size: 1px;
   block-size: 1px;
@@ -218,7 +244,8 @@ button:disabled {
   white-space: nowrap;
 }
 
-.language-picker__select {
+.language-picker__select,
+.theme-picker__select {
   padding: var(--space-1) var(--space-2);
   border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
@@ -228,7 +255,9 @@ button:disabled {
 }
 
 .language-picker__select:hover,
-.language-picker__select:focus-visible {
+.language-picker__select:focus-visible,
+.theme-picker__select:hover,
+.theme-picker__select:focus-visible {
   border-color: var(--color-accent);
 }
 
@@ -403,6 +432,14 @@ button:disabled {
     --color-border-strong: #7a8aa3;
     --color-border-control: #8d9bb0;
     --color-text-muted: #b6c0cf;
+  }
+
+  /* 浅色主题方向相反：加深分隔线、控件边界与次要文字。 */
+  :root[data-theme="light"] {
+    --color-border: #8c959f;
+    --color-border-strong: #6e7781;
+    --color-border-control: #57606a;
+    --color-text-muted: #424a53;
   }
 }
 
@@ -757,7 +794,9 @@ table {
    内容）；表格容器放开溢出以免打印裁切，保持既有表头与行列结构；表行避免跨页断裂。 */
 
 @media print {
-  :root {
+  /* 同时匹配带主题属性的根元素：优先级与浅色主题相同，靠更靠后的位置胜出，任一主题打印都是白底纸面。 */
+  :root,
+  :root[data-theme] {
     color-scheme: light;
     --color-bg: #ffffff;
     --color-surface: #ffffff;

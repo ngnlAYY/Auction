@@ -127,6 +127,15 @@ Public 校时。CSRF/Basic Auth 由 Admin 构造请求，不能在共享层变�
 动态译文的最外层 Fluent 隔离符在已拥有的 `String` 中原地移除，不再分配第二份整段文本；嵌套隔离符及无配对
 结束符的处理保持原有规则，译文内容与五语言选择行为不变。
 
+## 主题选择
+
+`theme/` 拥有深色（默认）与浅色两套主题，偏好键固定 `hv.theme`，只接受 `dark`/`light`，缺失、非法或存储不可用时
+使用深色。`use_theme_effects` 由两端根组件调用，首次渲染即写入 `<html data-theme>` 与 `<meta name="theme-color">`，
+应用显示前已是目标主题；`ThemePicker` 与语言切换器同样使用原生 select，文案由 surface 翻译后传入。
+浅色 token 只在 base.css 的 `:root[data-theme="light"]` 重写颜色与阴影，正文、链接、状态文字对三层底色不低于 4.5:1，
+控件边界不低于 3:1；高对比度模式和打印另有对应规则，任一主题打印都使用白底纸面。surface 层自有颜色 token 须在本端
+样式中提供浅色值。静态启动骨架无法在 WASM 就绪前读取偏好（CSP 禁止内联脚本），始终以深色显示。
+
 ## 维护与验证
 
 ```bash
