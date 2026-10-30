@@ -129,18 +129,14 @@ impl EhentaiClient {
         Ok(target)
     }
 
-    pub(super) fn board_for_world(
-        &self,
-        world: SettlementWorld,
-        _operation: EhentaiOperation,
-    ) -> Result<i32, EhentaiError> {
+    pub(super) fn board_for_world(&self, world: SettlementWorld) -> i32 {
         if self.test_board_mode {
-            return Ok(TEST_BOARD_ID);
+            return TEST_BOARD_ID;
         }
-        Ok(match world {
+        match world {
             SettlementWorld::Main => self.main_board_id,
             SettlementWorld::Isekai => self.isekai_board_id,
-        })
+        }
     }
 
     pub(super) fn valid_for(&self) -> bool {

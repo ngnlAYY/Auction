@@ -77,18 +77,14 @@ impl PublicCompensationMovement {
             || self.leader_held_nanos.is_some();
         let valid_lot = self.lot_id.is_some_and(|value| !value.is_nil())
             && self.lot_number.is_some_and(|value| value > 0)
-            && self.equipment_name.as_deref().is_some_and(|value| {
-                !value.is_empty()
-                    && value.len() <= 256
-                    && value == value.trim()
-                    && !value.chars().any(char::is_control)
-            })
-            && self.equipment_category.as_deref().is_some_and(|value| {
-                !value.is_empty()
-                    && value.len() <= 64
-                    && value == value.trim()
-                    && !value.chars().any(char::is_control)
-            })
+            && self
+                .equipment_name
+                .as_deref()
+                .is_some_and(|value| auction_domain::valid_text(value, 256))
+            && self
+                .equipment_category
+                .as_deref()
+                .is_some_and(|value| auction_domain::valid_text(value, 64))
             && self.equipment_id.is_some_and(|value| !value.is_nil())
             && self.projected_game_equipment_url.as_deref().is_some_and(|value| {
                 ["https://hentaiverse.org/equip/", "https://hentaiverse.org/isekai/equip/"]

@@ -17,11 +17,7 @@ pub(super) fn query_error(stage: &'static str, source: sqlx::Error) -> Retention
 }
 
 pub(super) fn validate_database_name(value: &str) -> Result<(), RetentionInventoryError> {
-    if value.is_empty()
-        || value.trim() != value
-        || value.len() > 63
-        || value.chars().any(char::is_control)
-    {
+    if !crate::database::valid_confirmed_database_name(value) {
         return Err(RetentionInventoryError::InvalidDatabaseName);
     }
     Ok(())

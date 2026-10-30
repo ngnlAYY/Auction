@@ -4,12 +4,12 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
 use crate::api::{AdminSettlementCatalogEntry, AdminSettlementCatalogPage};
-use crate::app::surface::{AdminActionFeedback, format_admin_time};
+use crate::app::surface::{AdminActionFeedback, admin_world_label, format_admin_time};
 
 use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
 
-use super::RecoveryConfirmationDraft;
 use super::query::{SettlementQuery, push_settlement_query};
+use super::{RecoveryConfirmationDraft, reset_detail_state};
 
 #[component]
 pub(super) fn AdminSettlementPicker(
@@ -45,7 +45,7 @@ pub(super) fn AdminSettlementPicker(
                         requested_sequence.set(None);
                         selected_auction_id.set(String::new());
                         catalog_page.set(1);
-                        reset_report_state(
+                        reset_detail_state(
                             lot_page,
                             recovery_page,
                             confirmation,
@@ -80,7 +80,7 @@ pub(super) fn AdminSettlementPicker(
                         };
                         selected_auction_id.set(selected.auction_id.clone());
                         requested_sequence.set(Some(selected.sequence));
-                        reset_report_state(
+                        reset_detail_state(
                             lot_page,
                             recovery_page,
                             confirmation,
@@ -156,7 +156,7 @@ pub(super) fn AdminSettlementCatalogPager(
                 catalog_page.set(next_page);
                 requested_sequence.set(None);
                 selected_auction_id.set(String::new());
-                reset_report_state(
+                reset_detail_state(
                     lot_page,
                     recovery_page,
                     confirmation,
@@ -174,35 +174,11 @@ pub(super) fn AdminSettlementCatalogPager(
     }
 }
 
-fn reset_report_state(
-    mut lot_page: Signal<i64>,
-    mut recovery_page: Signal<i64>,
-    mut confirmation: Signal<Option<RecoveryConfirmationDraft>>,
-    mut reason: Signal<String>,
-    mut action_feedback: Signal<Option<AdminActionFeedback>>,
-    mut selection_generation: Signal<u64>,
-) {
-    lot_page.set(1);
-    recovery_page.set(1);
-    confirmation.set(None);
-    reason.set(String::new());
-    action_feedback.set(None);
-    selection_generation.set(selection_generation().saturating_add(1));
-}
-
 fn period_option_label(entry: &AdminSettlementCatalogEntry) -> String {
     t!(
         "admin-settlement-period-option",
-        world: world_label(&entry.world_id),
+        world: admin_world_label(&entry.world_id),
         sequence: entry.sequence,
         settled_at: format_admin_time(&entry.settled_at)
     )
-}
-
-fn world_label(world_id: &str) -> String {
-    match world_id {
-        "main" => t!("admin-runtime-world-main"),
-        "isekai" => t!("admin-runtime-world-isekai"),
-        _ => world_id.to_owned(),
-    }
 }

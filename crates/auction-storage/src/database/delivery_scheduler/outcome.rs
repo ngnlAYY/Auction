@@ -311,10 +311,7 @@ fn verified_sent_result(claim: &DeliveryWorkClaim, result: &DeliverySendResult) 
     let Some(mail_id) = result.external_reference.strip_prefix(&prefix) else {
         return false;
     };
-    !mail_id.is_empty()
-        && mail_id.len() <= 256
-        && mail_id == mail_id.trim()
-        && !mail_id.chars().any(char::is_control)
+    auction_domain::valid_text(mail_id, 256)
         && result.result_metadata.get("operation").and_then(serde_json::Value::as_str)
             == Some("send")
         && result

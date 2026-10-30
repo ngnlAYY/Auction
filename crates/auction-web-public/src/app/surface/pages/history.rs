@@ -231,7 +231,7 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuctionWithForum>) -> Elem
                                             {status_label}
                                         }
                                     }
-                                    td { "data-label": t!("auction-history-world"), "{auction_world_label(&auction.world_id)}" }
+                                    td { "data-label": t!("auction-history-world"), "{world_label(&auction.world_id)}" }
                                     td { "data-label": t!("auction-history-ended"), Time { value: ended.clone() } }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-lots"), "{auction.lot_count}" }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-sold"), "{auction.sold_count}" }

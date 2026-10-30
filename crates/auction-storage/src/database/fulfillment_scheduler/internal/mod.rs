@@ -8,6 +8,9 @@ use auction_application::{
 
 #[cfg(feature = "postgres")]
 use auction_application::FundingError;
+// 资金错误映射由 settlement_funding 唯一拥有；子模块与履约投递经此路径复用。
+#[cfg(feature = "postgres")]
+pub(super) use crate::database::settlement_funding::{evidence_error, storage as sql_error};
 
 #[cfg(feature = "postgres")]
 mod conflicts;
@@ -173,21 +176,4 @@ pub(super) async fn lock_legacy(
         }
     }
     Ok(protected)
-}
-
-#[cfg(feature = "postgres")]
-fn sql_error(error: sqlx::Error) -> FundingError {
-    if crate::database::is_serialization_conflict(&error) {
-        FundingError::SerializationConflict
-    } else {
-        FundingError::Storage
-    }
-}
-
-#[cfg(feature = "postgres")]
-pub(super) fn evidence_error(error: crate::MailEvidenceTransactionError) -> FundingError {
-    match error {
-        crate::MailEvidenceTransactionError::Sqlx(error) => sql_error(error),
-        crate::MailEvidenceTransactionError::Rejected(_) => FundingError::Unproven,
-    }
 }

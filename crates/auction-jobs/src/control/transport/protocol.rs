@@ -122,10 +122,7 @@ pub(super) fn request_id(headers: &HeaderMap) -> Result<String, ()> {
     let Ok(value) = value.to_str() else {
         return Err(());
     };
-    if value.is_empty()
-        || value.len() > 64
-        || value != value.trim()
-        || value.chars().any(char::is_control)
+    if !auction_domain::valid_text(value, 64)
         || !value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))

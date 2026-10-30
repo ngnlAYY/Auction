@@ -8,10 +8,7 @@ use super::*;
 pub(super) use auction_domain::valid_text as valid_recovery_text;
 
 pub(super) fn valid_failure_code(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
+    auction_domain::valid_text(value, 128)
 }
 
 #[cfg(feature = "postgres")]
@@ -31,10 +28,7 @@ pub(super) fn request_hash_from_optional(
 
 #[cfg(feature = "postgres")]
 pub(super) fn valid_external_reference(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 512
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
+    auction_domain::valid_text(value, 512)
 }
 
 #[cfg(feature = "postgres")]

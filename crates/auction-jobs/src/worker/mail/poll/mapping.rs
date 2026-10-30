@@ -20,12 +20,7 @@ pub(super) fn valid_page(
     page.mailbox_key == claim.mailbox_key
         && page.world_id == world_id
         && page.messages.len() <= usize::from(batch_size)
-        && page.next_cursor.as_deref().is_none_or(|value| {
-            !value.is_empty()
-                && value.len() <= 256
-                && value == value.trim()
-                && !value.chars().any(char::is_control)
-        })
+        && page.next_cursor.as_deref().is_none_or(|value| auction_domain::valid_text(value, 256))
         && if page.messages.is_empty() {
             page.next_cursor.as_deref() == claim.cursor_value.as_deref()
         } else {

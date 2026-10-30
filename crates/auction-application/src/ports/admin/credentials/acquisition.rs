@@ -17,10 +17,7 @@ impl AdminCredentialLogin {
     /// 校验登录字段，保留密码原文；错误不能包含账号或密码。
     pub fn new(username: String, password: String) -> Result<Self, AdminCredentialError> {
         let password = AdminCredentialSecret::new(password)?;
-        if username.is_empty()
-            || username.len() > 256
-            || username != username.trim()
-            || username.chars().any(char::is_control)
+        if !auction_domain::valid_text(&username, 256)
             || password.as_bytes().len() > 4096
             || password.as_bytes().iter().any(u8::is_ascii_control)
         {

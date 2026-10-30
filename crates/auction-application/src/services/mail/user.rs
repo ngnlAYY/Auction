@@ -139,8 +139,5 @@ fn validate_rebind_command(command: &MailUserRebindCommand) -> Result<(), Applic
 }
 
 fn valid_identity(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 256
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
+    auction_domain::valid_text(value, 256)
 }

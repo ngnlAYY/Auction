@@ -148,8 +148,7 @@ pub(super) async fn health_postgres(
         if scope_row.updated_at != updated_at {
             scope_row.updated_at = match (scope_row.updated_at, updated_at) {
                 (Some(previous), Some(current)) => Some(previous.max(current)),
-                (None, current) => current,
-                (current, None) => current,
+                (None, current) | (current, None) => current,
             };
         }
         add_health_count(scope_row, status, count)?;

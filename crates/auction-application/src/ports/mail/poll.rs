@@ -215,10 +215,5 @@ pub trait MailPollStore: Send + Sync {
 }
 
 fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {
-    value.is_none_or(|value| {
-        value.is_empty()
-            || (value.len() <= maximum
-                && value == value.trim()
-                && !value.chars().any(char::is_control))
-    })
+    value.is_none_or(|value| value.is_empty() || auction_domain::valid_text(value, maximum))
 }

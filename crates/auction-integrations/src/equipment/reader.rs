@@ -498,7 +498,7 @@ impl EquipmentSourceAdapter {
         }
     }
 
-    async fn read_json_inner(
+    fn read_json_inner(
         &self,
         world_id: String,
         input: CanonicalEquipment,
@@ -511,7 +511,7 @@ impl EquipmentSourceAdapter {
             .map_err(|reason| diagnostics::source_parse_error("canonical_json", reason))?;
         let key = EquipmentKey::new(&input.key).map_err(|_| AdminIntakeError::InvalidSource)?;
         let fingerprint = canonical_fingerprint(&world_id, &facts)?;
-        let attributes = facts.attributes()?;
+        let attributes = facts.attributes();
         Ok(AdminIntakeSourceSnapshot {
             adapter: "manual-json-v1".to_owned(),
             source_fingerprint: fingerprint,
@@ -544,7 +544,7 @@ impl AdminIntakeSourceReader for EquipmentSourceAdapter {
         equipment: CanonicalEquipment,
     ) -> ApplicationFuture<'_, AdminIntakeSourceSnapshot> {
         Box::pin(async move {
-            self.read_json_inner(world_id, equipment).await.map_err(ApplicationError::from)
+            self.read_json_inner(world_id, equipment).map_err(ApplicationError::from)
         })
     }
 }
@@ -604,7 +604,7 @@ fn facts_to_snapshot(
     facts: EquipmentFacts,
     key: EquipmentKey,
 ) -> Result<AdminIntakeSourceSnapshot, AdminIntakeError> {
-    let attributes = facts.attributes()?;
+    let attributes = facts.attributes();
     let mut fingerprint_input = Vec::new();
     fingerprint_input.extend_from_slice(b"hentaiverse-equipment-v1\0");
     fingerprint_input.extend_from_slice(world_id.as_bytes());

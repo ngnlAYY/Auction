@@ -4,6 +4,7 @@ use std::{collections::HashSet, sync::LazyLock};
 
 use super::sql_error;
 use auction_application::{FundingError, SettlementFulfillmentClaim};
+use auction_domain::valid_text as valid_line;
 use futures_util::TryStreamExt;
 use serde::Deserialize;
 use sqlx::{Postgres, Row, Transaction};
@@ -458,13 +459,6 @@ fn valid_notification(payload: &AttachmentPayload, origin: &str) -> bool {
 fn unique_attachment_ids(ids: &[String]) -> bool {
     let mut seen = HashSet::with_capacity(ids.len());
     ids.iter().all(|id| seen.insert(id.as_str()))
-}
-
-fn valid_line(value: &str, max_bytes: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= max_bytes
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }
 
 fn canonical_uuid(value: &str) -> bool {

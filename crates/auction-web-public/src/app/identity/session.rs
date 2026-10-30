@@ -289,8 +289,7 @@ pub(super) fn SessionMenu() -> Element {
                 },
             }}
             if let Some(error) = logout_error() {
-                // 登出失败必须给明眼用户可见的反馈（此前仅 visually-hidden 公告，
-                // 只有读屏用户能感知），复用 crate 内既有的错误展示样式。
+                // 登出失败必须有可见反馈，不能只留给读屏用户；复用 crate 内既有的错误展示样式。
                 span { class: "action-feedback action-feedback--error", role: "alert",
                     {match error.as_str() {
                         "session_lock_unavailable" => t!("session-lock-unavailable"),

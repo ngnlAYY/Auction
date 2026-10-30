@@ -270,7 +270,7 @@ impl EhentaiClient {
         {
             return Err(EhentaiError::configuration(operation));
         }
-        let board_id = self.board_for_world(world, operation)?;
+        let board_id = self.board_for_world(world);
         let board_value = board_id.to_string();
         let board_url = self.index_url(&[("showforum", board_value.as_str())], operation)?;
         let (body, _) = self.get_page(operation, board_url.clone(), None, cookie).await?;
@@ -290,7 +290,7 @@ impl EhentaiClient {
         if !self.valid_for() || !valid_cookie(cookie) || !valid_topic_id(thread_id) {
             return Err(EhentaiError::configuration(operation));
         }
-        let board_id = self.board_for_world(world, operation)?;
+        let board_id = self.board_for_world(world);
         if board_id <= 0 {
             return Err(EhentaiError::configuration(operation));
         }
@@ -350,7 +350,7 @@ impl EhentaiClient {
         {
             return Err(EhentaiError::configuration(operation));
         }
-        let board_id = self.board_for_world(world, operation)?;
+        let board_id = self.board_for_world(world);
         let form = self.load_reply_form(board_id, thread_id, cookie).await?;
         self.submit_fixed_post(form, board_id, thread_id, None, body, cookie).await
     }
@@ -381,7 +381,7 @@ impl EhentaiClient {
         {
             return Err(EhentaiError::configuration(operation));
         }
-        let board_id = self.board_for_world(world, operation)?;
+        let board_id = self.board_for_world(world);
         let form = self.load_edit_form(board_id, thread_id, post_id, cookie).await?;
         if metadata
             .is_some_and(|metadata| metadata.title.is_some() || metadata.description.is_some())
@@ -421,7 +421,7 @@ impl EhentaiClient {
         {
             return Err(EhentaiError::configuration(operation));
         }
-        let board_id = self.board_for_world(world, operation)?;
+        let board_id = self.board_for_world(world);
         let form = self.load_edit_form(board_id, thread_id, post_id, cookie).await?;
         let body = ForumRenderedPost { body: form.body };
         if !valid_rendered_post(&body) {

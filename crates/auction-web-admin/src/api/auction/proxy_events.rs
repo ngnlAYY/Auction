@@ -10,8 +10,8 @@ use super::{
     valid_admin_time, valid_trimmed_text, valid_uuid,
 };
 
-// 本地 Strict 镜像已删除：contracts 的 `AdminProxyEventListResponse`（含 event 与混合分页）
-// 已带 `deny_unknown_fields`；本文件只保留跨字段谓词（usage 不超过授权序号、请求回显等）
+// 结构闭集由 contracts 的 `AdminProxyEventListResponse`（含 event 与混合分页，
+// `deny_unknown_fields`）负责；本文件只保留跨字段谓词（usage 不超过授权序号、请求回显等）
 // 以及页码模式下游标字段必须为空的组合校验。
 
 pub(crate) async fn fetch_admin_proxy_events(

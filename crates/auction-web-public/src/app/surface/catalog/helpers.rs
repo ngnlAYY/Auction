@@ -4,7 +4,7 @@ use super::*;
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 
 /// 按分类把目录行分组。返回行下标而非克隆行：调用方持有的行向量全程以 Rc 共享，
-/// 分组不再产生第二层逐字段克隆。
+/// 分组不逐字段复制。
 pub(crate) fn grouped_catalog_rows(
     rows: &[CatalogRow],
     active: &str,
@@ -144,14 +144,6 @@ pub(crate) fn historical_auction_status_label(status: &str) -> String {
         "final" => t!("auction-history-status-final"),
         "settled" => t!("auction-history-status-settled"),
         _ => auction_status_label(status),
-    }
-}
-
-pub(crate) fn auction_world_label(world: &str) -> String {
-    match world {
-        "main" => t!("auction-world-main"),
-        "isekai" => t!("auction-world-isekai"),
-        _ => world.to_owned(),
     }
 }
 

@@ -73,9 +73,7 @@ pub(super) fn map_error(error: ApplicationError) -> Response {
                 .into_response()
         }
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
-        ApplicationError::AdminUser(
-            AdminUserError::KeyUnavailable | AdminUserError::StoredResultCorrupt,
-        ) => dependency_unavailable(),
+        // 密钥不可用、结果损坏及其余依赖错误统一返回依赖不可用。
         _ => dependency_unavailable(),
     }
 }

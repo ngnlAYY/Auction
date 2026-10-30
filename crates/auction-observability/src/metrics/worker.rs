@@ -136,14 +136,13 @@ impl WorkerRecorder for PrometheusWorkerRecorder {
     ) {
         self.iterations.with_label_values(&[loop_kind.label(), result.label()]).inc();
         self.durations.with_label_values(&[loop_kind.label()]).observe(duration.as_secs_f64());
-        if let Some(event) = business_event_for_worker(loop_kind) {
-            let outcome = match result {
-                WorkerResult::Success => BusinessOutcome::Success,
-                WorkerResult::Error | WorkerResult::Canceled => BusinessOutcome::Error,
-            };
-            self.business.observe(event, outcome);
-            self.business.observe_duration(event, duration);
-        }
+        let event = business_event_for_worker(loop_kind);
+        let outcome = match result {
+            WorkerResult::Success => BusinessOutcome::Success,
+            WorkerResult::Error | WorkerResult::Canceled => BusinessOutcome::Error,
+        };
+        self.business.observe(event, outcome);
+        self.business.observe_duration(event, duration);
     }
 
     fn observe_batch(&self, loop_kind: WorkerLoop, items: usize, capacity: usize) {
@@ -179,18 +178,18 @@ impl WorkerRecorder for PrometheusWorkerRecorder {
     }
 }
 
-fn business_event_for_worker(loop_kind: WorkerLoop) -> Option<BusinessEvent> {
+fn business_event_for_worker(loop_kind: WorkerLoop) -> BusinessEvent {
     match loop_kind {
-        WorkerLoop::MailMain | WorkerLoop::MailIsekai => Some(BusinessEvent::MailIntake),
-        WorkerLoop::Delivery => Some(BusinessEvent::MailDelivery),
-        WorkerLoop::Auction => Some(BusinessEvent::AuctionLifecycle),
-        WorkerLoop::AuctionFulfillment => Some(BusinessEvent::Fulfillment),
-        WorkerLoop::AuctionRecovery => Some(BusinessEvent::Recovery),
-        WorkerLoop::Forum => Some(BusinessEvent::ForumSync),
-        WorkerLoop::Realtime => Some(BusinessEvent::Realtime),
+        WorkerLoop::MailMain | WorkerLoop::MailIsekai => BusinessEvent::MailIntake,
+        WorkerLoop::Delivery => BusinessEvent::MailDelivery,
+        WorkerLoop::Auction => BusinessEvent::AuctionLifecycle,
+        WorkerLoop::AuctionFulfillment => BusinessEvent::Fulfillment,
+        WorkerLoop::AuctionRecovery => BusinessEvent::Recovery,
+        WorkerLoop::Forum => BusinessEvent::ForumSync,
+        WorkerLoop::Realtime => BusinessEvent::Realtime,
         WorkerLoop::OperationsAlertScan
         | WorkerLoop::OperationsAlertDispatch
-        | WorkerLoop::OperationsAlertReconcile => Some(BusinessEvent::OperationsAlert),
+        | WorkerLoop::OperationsAlertReconcile => BusinessEvent::OperationsAlert,
     }
 }
 

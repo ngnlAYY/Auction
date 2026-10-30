@@ -67,9 +67,7 @@ impl LegacySelfReconciliationCommand {
     /// 验证调用身份、版本和目标形状；数据库仍会重新锁定并核对完整预览。
     pub fn validate(&self) -> Result<(), FundingError> {
         let target = &self.target;
-        let valid_text = |s: &str, max| {
-            !s.is_empty() && s.len() <= max && s == s.trim() && !s.chars().any(char::is_control)
-        };
+        let valid_text = auction_domain::valid_text;
         if self.command_id.is_nil()
             || !valid_text(&self.actor, 128)
             || !valid_text(&self.reason, 512)

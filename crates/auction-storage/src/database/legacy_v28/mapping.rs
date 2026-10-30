@@ -7,11 +7,7 @@ pub(super) fn query_error(stage: &'static str, source: sqlx::Error) -> PostgresL
 }
 
 pub(super) fn validate_database_name(value: &str) -> Result<(), PostgresLegacyV28Error> {
-    if value.is_empty()
-        || value.trim() != value
-        || value.len() > 63
-        || value.chars().any(char::is_control)
-    {
+    if !crate::database::valid_confirmed_database_name(value) {
         return Err(PostgresLegacyV28Error::InvalidDatabaseName);
     }
     Ok(())

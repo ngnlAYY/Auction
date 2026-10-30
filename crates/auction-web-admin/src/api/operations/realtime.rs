@@ -249,7 +249,7 @@ fn resolved_from_legacy_state(state: &str) -> Option<bool> {
     match state {
         "dead_letter" => Some(false),
         "completed" => Some(true),
-        "" | "pending" | "retry" => None,
+        // 空值、pending、retry 与未知值都不筛选。
         _ => None,
     }
 }

@@ -37,7 +37,7 @@ pub(crate) struct RealtimePage {
 const SEEN_REALTIME_LIMIT: usize = 256;
 
 /// 有界防重集合：HashSet 提供 O(1) 成员判断，VecDeque 记录插入顺序用于先进先出淘汰，
-/// 维持 256 条上限语义。取代原先「每接受一条 bid 都整体 clone 去重 Vec」的事务写法。
+/// 维持 256 条上限语义；接受新 bid 时原地更新，不复制整个集合。
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SeenSet {
     order: VecDeque<String>,
@@ -286,8 +286,7 @@ impl RealtimeCache {
             return EventMerge::Gap;
         }
 
-        // 校验全部通过后才写入状态：与原先「先克隆 seen、确认无误再写回」的事务语义
-        // 一致，Gap 路径不会污染防重集合。
+        // 校验全部通过后才写入状态，Gap 路径不会污染防重集合。
         let _ = self.seen.remember(event.event_id.clone());
         if let Some(evicted) = self.seen_facts.remember(bid_id.to_owned()) {
             self.fact_identities.remove(&evicted);

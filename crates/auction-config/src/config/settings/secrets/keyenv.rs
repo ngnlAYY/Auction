@@ -104,9 +104,5 @@ fn parse_mooglemail_keyenv_value(raw_value: &str) -> Option<String> {
         }
         raw_value
     };
-    (!value.is_empty()
-        && value.len() <= 4096
-        && value == value.trim()
-        && !value.chars().any(char::is_control))
-    .then(|| value.to_owned())
+    auction_domain::valid_text(value, 4096).then(|| value.to_owned())
 }

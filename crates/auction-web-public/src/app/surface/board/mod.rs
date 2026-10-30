@@ -33,7 +33,7 @@ pub(crate) fn AuctionPage() -> Element {
     redirect_public_alias("/")
 }
 
-/// 拍卖看板；首屏从同源 Public API 读取当前拍卖，不再渲染迁移阶段示例数据。
+/// 拍卖看板；首屏从同源 Public API 读取当前拍卖，不渲染示例数据。
 #[component]
 pub(crate) fn AuctionBoard() -> Element {
     let selected_world = use_context::<Signal<String>>();

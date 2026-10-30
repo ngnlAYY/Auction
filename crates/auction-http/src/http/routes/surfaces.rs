@@ -17,7 +17,7 @@ where
         Router::<PublicApiState>::new()
             .route("/health", get(health))
             .route("/api/v1/health", get(health))
-            .route("/health/live", get(health::public_health_live))
+            .route("/health/live", get(health::health_live))
             .route("/health/ready", get(health::public_health_ready))
             .route("/metrics", get(metrics::public)),
     )
@@ -37,7 +37,7 @@ where
         Router::<AdminApiState>::new()
             .route("/health", get(health))
             .route("/api/v1/health", get(health))
-            .route("/health/live", get(health::admin_health_live))
+            .route("/health/live", get(health::health_live))
             .route("/health/ready", get(health::admin_health_ready))
             .route("/metrics", get(metrics::admin)),
     )

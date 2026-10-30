@@ -78,7 +78,7 @@ async fn observe_action_in_transaction(
         "manual_reconcile" if failure_code.as_deref().is_some_and(valid_failure_code) => {
             manual_outcome("recovery_outcome_unknown")
         }
-        "failed" | "manual_reconcile" => manual_outcome("recovery_delivery_conflict"),
+        // 缺少合法失败码的 failed/manual_reconcile 与未知状态都转人工核对。
         _ => manual_outcome("recovery_delivery_conflict"),
     };
 

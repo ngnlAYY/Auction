@@ -133,8 +133,5 @@ pub(super) fn valid_external_equipment_id(value: &str) -> bool {
 }
 
 pub(super) fn valid_external_mail_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 256
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
+    auction_domain::valid_text(value, 256)
 }

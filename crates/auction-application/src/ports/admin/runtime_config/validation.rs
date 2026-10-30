@@ -102,10 +102,7 @@ fn validate_runtime_equipment_filter(
 }
 
 fn valid_runtime_identity(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
+    auction_domain::valid_text(value, 128)
 }
 
 fn valid_runtime_token(value: &str) -> bool {

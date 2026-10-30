@@ -205,7 +205,13 @@ mod store;
 
 pub use backend::{DatabaseBackend, StorageError};
 #[cfg(feature = "postgres")]
-pub(crate) use backend::{is_serialization_conflict, storage_error};
+pub(crate) use backend::{
+    is_serialization_conflict, lock_command_id, set_read_only_limits, storage_error,
+};
+#[cfg(feature = "postgres")]
+pub(crate) use backend::{
+    quote_identifier, valid_confirmed_database_name, valid_ddl_database_name,
+};
 #[cfg(feature = "postgres")]
 pub(crate) use pool::PostgresPoolMetricsSource;
 #[cfg(feature = "postgres")]

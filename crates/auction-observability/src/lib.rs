@@ -17,6 +17,6 @@ pub use metrics::{
     WorkerRecorder, WorkerResult, WorkerRetryKind, noop_worker_recorder,
 };
 pub use telemetry::{
-    InitError, ShutdownError, TracingConfig, TracingRuntime, attach_remote_trace_context, init,
+    InitError, ShutdownError, TracingConfig, TracingRuntime, attach_remote_trace_context,
     init_json_stderr, init_with_config,
 };

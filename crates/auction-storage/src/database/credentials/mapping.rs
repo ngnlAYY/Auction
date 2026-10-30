@@ -159,12 +159,7 @@ pub(super) async fn lock_command(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     command_id: Uuid,
 ) -> Result<(), ApplicationError> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
-        .bind(command_id.to_string())
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_storage_error)?;
-    Ok(())
+    crate::database::lock_command_id(transaction, command_id).await.map_err(map_storage_error)
 }
 
 #[cfg(feature = "postgres")]

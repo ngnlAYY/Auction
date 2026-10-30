@@ -24,10 +24,9 @@ use super::{
 // 导入须容纳服务端 10 秒论坛获取及原子写入；不延长其他 API 请求，也不自动重试。
 const CREDENTIAL_IMPORT_TIMEOUT_MILLIS: u32 = 20_000;
 
-// 本地 Strict 镜像已删除：contracts 的 `AdminCredentialResponse`（`rotated_at` 保持必填
-// nullable 语义）、`AdminCredentialListResponse`/`AdminCredentialMutationResponse`/
-// `AdminCredentialDeleteResponse` 均已带 `deny_unknown_fields`；本文件只保留筛选回显、
-// restart_required 与版本递增等跨字段谓词。
+// 结构闭集由 contracts 的 `AdminCredentialResponse`（`rotated_at` 保持必填 nullable 语义）、
+// `AdminCredentialListResponse`/`AdminCredentialMutationResponse`/`AdminCredentialDeleteResponse`
+//（均为 `deny_unknown_fields`）负责；本文件只保留筛选回显、restart_required 与版本递增等跨字段谓词。
 
 /// 凭据列表页的浏览器展示投影；分页字段在这里展平，wire 形状仍由 contracts 拥有。
 #[derive(Debug, Clone, PartialEq)]

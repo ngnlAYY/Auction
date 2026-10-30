@@ -27,7 +27,8 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 /// SQL失败仅暴露安全分类；事务owner负责重试40001/40P01并保留原命令。
-fn storage(error: sqlx::Error) -> FundingError {
+/// 旧自寄修复与内部履约复用同一映射，不另建副本。
+pub(crate) fn storage(error: sqlx::Error) -> FundingError {
     if crate::database::is_serialization_conflict(&error) {
         FundingError::SerializationConflict
     } else {
@@ -35,8 +36,8 @@ fn storage(error: sqlx::Error) -> FundingError {
     }
 }
 
-/// A的SQLx错误先按SQLSTATE分类，业务拒绝才映射Unproven。
-fn evidence_error(error: crate::MailEvidenceTransactionError) -> FundingError {
+/// 证据事务的SQLx错误先按SQLSTATE分类，业务拒绝才映射Unproven。
+pub(crate) fn evidence_error(error: crate::MailEvidenceTransactionError) -> FundingError {
     match error {
         crate::MailEvidenceTransactionError::Sqlx(error) => storage(error),
         crate::MailEvidenceTransactionError::Rejected(_) => FundingError::Unproven,

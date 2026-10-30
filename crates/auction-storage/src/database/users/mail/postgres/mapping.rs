@@ -140,12 +140,7 @@ pub(super) async fn lock_command(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     command_id: CommandId,
 ) -> Result<(), ApplicationError> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
-        .bind(command_id.to_string())
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_storage_error)?;
-    Ok(())
+    crate::database::lock_command_id(transaction, command_id).await.map_err(map_storage_error)
 }
 
 pub(super) fn validate_register_write(
@@ -179,10 +174,7 @@ pub(super) fn validate_rebind_command(
 }
 
 pub(super) fn valid_identity(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 256
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
+    auction_domain::valid_text(value, 256)
 }
 
 pub(super) fn map_storage_error(error: sqlx::Error) -> ApplicationError {

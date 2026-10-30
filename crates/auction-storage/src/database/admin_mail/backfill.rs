@@ -1,6 +1,7 @@
 //! PostgreSQL MoogleMail 展示投影的安全历史回填。
 
 use auction_application::{AdminMailError, ApplicationError, MailDisplaySnapshot};
+use auction_domain::valid_text as valid_header_text;
 use serde_json::Value;
 use sqlx::{Row, types::Json};
 use uuid::Uuid;
@@ -144,11 +145,4 @@ impl DatabaseStore {
             .map_err(|_| mapping::storage_error("提交邮件展示回填事务失败"))?;
         Ok(MailDisplayBackfillResult { intake_id, updated })
     }
-}
-
-fn valid_header_text(value: &str, maximum_bytes: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum_bytes
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
 }

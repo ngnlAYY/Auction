@@ -57,8 +57,10 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
   不复制匹配规则到 SQL。HTTP 严格映射可选查询、保持响应字段不变；Web 的 `surface/catalog/filters.rs` 独占分组/等级表单，
   `board/data.rs` 绑定查询快照身份，`api/model.rs` 仅解析浏览器查询及校验返回归属；无新持久化能力或迁移阶段。
 - 跨层共用规则：闭集枚举持久化名称（`auction-domain::stable_name`）、规范单行文本与正十进制外部 ID（`auction-domain::text`）、
-  MoogleMail 通知模板闭集及占位符（`auction-application` 的 `runtime_config/mail_templates.rs`）、PostgreSQL 可重试冲突谓词
-  （`auction-storage::database::is_serialization_conflict`）与页面可见性等待（`auction-web-shared::visibility`）各只有一份实现；
+  MoogleMail 通知模板闭集及占位符（`auction-application` 的 `runtime_config/mail_templates.rs`）、PostgreSQL 可重试冲突谓词、
+  命令 ID advisory 锁键、运维库名谓词与只读快照上限（均在 `auction-storage::database::backend`）、资金 SQL/证据错误映射
+  （`auction-storage::database::settlement_funding`）、页面可见性等待（`auction-web-shared::visibility`）与 popstate 位置版本
+  （`auction-web-shared::query::use_popstate_revision`）各只有一份实现；
   HTTP wire 映射与浏览器严格解码仍由各自 owner 显式维护，不直接复用持久化名称。
   旧版 Go JSON 转义由应用层 `ports/core/encoding.rs` 统一按片段输出，命令摘要和履约 canonical 分别消费；
   兼容字段顺序及历史字节仍由对应命令/证明 owner 拥有。

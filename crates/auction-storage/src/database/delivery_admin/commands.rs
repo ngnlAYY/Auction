@@ -277,12 +277,9 @@ async fn lock_command(
     transaction: &mut PostgresDeliveryAdminTransaction,
     command_id: Uuid,
 ) -> Result<(), DeliveryAdminTransactionError> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
-        .bind(command_id.to_string())
-        .execute(transaction.connection()?)
+    crate::database::lock_command_id(transaction.connection()?, command_id)
         .await
-        .map_err(DeliveryAdminTransactionError::Sqlx)?;
-    Ok(())
+        .map_err(DeliveryAdminTransactionError::Sqlx)
 }
 
 /// 唯一冲突后只从新事务读取已提交账本，避免返回当前已回滚事务中的临时结果。

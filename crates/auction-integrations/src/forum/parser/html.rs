@@ -21,10 +21,7 @@ static LINK_SELECTOR: LazyLock<Result<Selector, ()>> =
 fn cached_selector(
     cache: &'static LazyLock<Result<Selector, ()>>,
 ) -> Result<&'static Selector, ()> {
-    match LazyLock::force(cache) {
-        Ok(selector) => Ok(selector),
-        Err(()) => Err(()),
-    }
+    LazyLock::force(cache).as_ref().map_err(|_| ())
 }
 
 pub fn parse_html(input: &str) -> Result<super::AdminForumPreviewResult, ()> {
