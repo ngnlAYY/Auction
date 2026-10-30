@@ -4,12 +4,6 @@ use std::collections::HashSet;
 
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SettlementSnapshotMode {
-    ForUpdate,
-    ReadOnlySettled,
-}
-
 impl PostgresCompetitionTransaction {
     pub(super) async fn insert_settlement_command(
         &mut self,
@@ -54,27 +48,9 @@ impl PostgresCompetitionTransaction {
         &mut self,
         auction_id: AuctionId,
     ) -> Result<SettlementSnapshot, SettlementTransactionError> {
-        self.load_settlement_snapshot(auction_id, SettlementSnapshotMode::ForUpdate).await
-    }
-
-    /// 在调用方已经建立的只读事务中加载 settled 权威快照，不获取行锁也不允许 settling 写路径。
-    pub(crate) async fn load_settled_snapshot_read_only(
-        &mut self,
-        auction_id: AuctionId,
-    ) -> Result<SettlementSnapshot, SettlementTransactionError> {
-        self.load_settlement_snapshot(auction_id, SettlementSnapshotMode::ReadOnlySettled).await
-    }
-
-    async fn load_settlement_snapshot(
-        &mut self,
-        auction_id: AuctionId,
-        mode: SettlementSnapshotMode,
-    ) -> Result<SettlementSnapshot, SettlementTransactionError> {
         let auction_row = {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
-            let query = match mode {
-                SettlementSnapshotMode::ForUpdate => {
-                    r#"SELECT
+            let query = r#"SELECT
                        a.world_id,
                        a.status,
                        a.state_version AS auction_state_version,
@@ -91,28 +67,7 @@ impl PostgresCompetitionTransaction {
                    FROM public.auctions AS a
                    INNER JOIN public.settlement_pools AS p ON p.world_id = a.world_id
                    WHERE a.id = $1 AND a.status IN ('settling', 'settled')
-                   FOR UPDATE OF a, p"#
-                }
-                SettlementSnapshotMode::ReadOnlySettled => {
-                    r#"SELECT
-                       a.world_id,
-                       a.status,
-                       a.state_version AS auction_state_version,
-                       a.scheduled_open_at,
-                       a.scheduled_end_at,
-                       a.settled_at,
-                       a.settlement_workflow_id,
-                       a.settlement_claim_command_id,
-                       a.settlement_due_at,
-                       a.settlement_complete_command_id,
-                       a.policy_snapshot,
-                       p.balance AS opening_pool,
-                       p.state_version AS opening_pool_version
-                   FROM public.auctions AS a
-                   INNER JOIN public.settlement_pools AS p ON p.world_id = a.world_id
-                   WHERE a.id = $1 AND a.status = 'settled'"#
-                }
-            };
+                   FOR UPDATE OF a, p"#;
             sqlx::query(query)
                 .bind(auction_id.as_uuid())
                 .fetch_optional(&mut **transaction)
@@ -148,9 +103,7 @@ impl PostgresCompetitionTransaction {
 
         let rows = {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
-            let query = match mode {
-                SettlementSnapshotMode::ForUpdate => {
-                    r#"SELECT
+            let query = r#"SELECT
                        l.id,
                        l.current_price,
                        l.leader_user_id,
@@ -181,29 +134,7 @@ impl PostgresCompetitionTransaction {
                      AND (($2 = 'settling' AND l.status = 'live')
                        OR ($2 = 'settled' AND l.status IN ('sold', 'unsold')))
                    ORDER BY l.lot_number, l.id
-                   FOR UPDATE OF l"#
-                }
-                SettlementSnapshotMode::ReadOnlySettled => {
-                    r#"SELECT
-                       l.id,
-                       l.current_price,
-                       l.leader_user_id,
-                       l.leader_since,
-                       l.effective_end_at,
-                       l.equipment_id,
-                       l.submission_id,
-                       l.effective_end_at AS fact_end_at,
-                       submission.seller
-                   FROM public.lots AS l
-                   INNER JOIN public.auctions AS a ON a.id = l.auction_id
-                   LEFT JOIN public.auction_submissions AS submission
-                       ON submission.id = l.submission_id
-                   WHERE l.auction_id = $1
-                     AND (($2 = 'settling' AND l.status = 'live')
-                       OR ($2 = 'settled' AND l.status IN ('sold', 'unsold')))
-                   ORDER BY l.lot_number, l.id"#
-                }
-            };
+                   FOR UPDATE OF l"#;
             sqlx::query(query)
                 .bind(auction_id.as_uuid())
                 .bind(&auction_status)
@@ -232,25 +163,13 @@ impl PostgresCompetitionTransaction {
                 .map_err(map_sql_error)?
                 .ok_or_else(|| invalid("结算 lot 缺少卖方身份"))?;
             let fact_end_at: DateTime<Utc> = row.try_get("fact_end_at").map_err(map_sql_error)?;
-            // 新结算按追加式 bid 事实累计领先；旧场次只读核验沿用冻结时的最终连续区间，
-            // 避免用新语义重算历史 hold_ppm 让既有结算证明失配。
-            let leader_held_nanos = match leader_id {
-                Some(_) if mode == SettlementSnapshotMode::ReadOnlySettled => {
-                    let leader_since: Option<DateTime<Utc>> =
-                        row.try_get("leader_since").map_err(map_sql_error)?;
-                    leader_since
-                        .and_then(|since| {
-                            fact_end_at.signed_duration_since(since).num_nanoseconds()
-                        })
-                        .filter(|held| *held >= 0)
-                }
-                Some(_) => Some(
+            let leader_held_nanos = leader_id
+                .map(|_| {
                     row.try_get::<Option<i64>, _>("leader_held_nanos")
                         .map_err(map_sql_error)?
-                        .ok_or_else(|| invalid("累计领先时长无效"))?,
-                ),
-                None => None,
-            };
+                        .ok_or_else(|| invalid("累计领先时长无效"))
+                })
+                .transpose()?;
             let fact = SettlementFact {
                 lot_id,
                 world,
@@ -293,7 +212,6 @@ impl PostgresCompetitionTransaction {
                         .try_get::<Option<Uuid>, _>("settlement_complete_command_id")
                         .map_err(map_sql_error)?
                         .map(CommandId::from_uuid),
-                    mode,
                 )
                 .await?,
             )
@@ -328,29 +246,16 @@ impl PostgresCompetitionTransaction {
         auction_state_version: u64,
         auction_settled_at: Option<DateTime<Utc>>,
         workflow_complete_command_id: Option<CommandId>,
-        mode: SettlementSnapshotMode,
     ) -> Result<PersistedSettlement, SettlementTransactionError> {
         let summary = {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
-            let query = match mode {
-                SettlementSnapshotMode::ForUpdate => {
-                    r#"SELECT command_id, policy_version, policy_mode, pool_enabled,
+            let query = r#"SELECT command_id, policy_version, policy_mode, pool_enabled,
                           opening_pool_balance, closing_pool_balance, opening_pool_version,
                           closing_pool_version, tax_total, discount_demand, compensation_total,
                           settled_at
                    FROM public.auction_settlements
                    WHERE auction_id = $1
-                   FOR UPDATE"#
-                }
-                SettlementSnapshotMode::ReadOnlySettled => {
-                    r#"SELECT command_id, policy_version, policy_mode, pool_enabled,
-                          opening_pool_balance, closing_pool_balance, opening_pool_version,
-                          closing_pool_version, tax_total, discount_demand, compensation_total,
-                          settled_at
-                   FROM public.auction_settlements
-                   WHERE auction_id = $1"#
-                }
-            };
+                   FOR UPDATE"#;
             sqlx::query(query)
                 .bind(auction_id.as_uuid())
                 .fetch_optional(&mut **transaction)
@@ -395,9 +300,7 @@ impl PostgresCompetitionTransaction {
 
         let line_rows = {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
-            let query = match mode {
-                SettlementSnapshotMode::ForUpdate => {
-                    r#"SELECT settlement.lot_id, settlement.end_price, settlement.listed_price,
+            let query = r#"SELECT settlement.lot_id, settlement.end_price, settlement.listed_price,
                           settlement.buyer_amount, settlement.seller_amount,
                           settlement.tax_amount, settlement.compensation_amount,
                           settlement.hold_ppm, settlement.adjustment_ppm,
@@ -406,20 +309,7 @@ impl PostgresCompetitionTransaction {
                    INNER JOIN public.lots AS lot ON lot.id = settlement.lot_id
                    WHERE lot.auction_id = $1
                    ORDER BY lot.lot_number, lot.id
-                   FOR UPDATE OF settlement"#
-                }
-                SettlementSnapshotMode::ReadOnlySettled => {
-                    r#"SELECT settlement.lot_id, settlement.end_price, settlement.listed_price,
-                          settlement.buyer_amount, settlement.seller_amount,
-                          settlement.tax_amount, settlement.compensation_amount,
-                          settlement.hold_ppm, settlement.adjustment_ppm,
-                          lot.status
-                   FROM public.lot_settlements AS settlement
-                   INNER JOIN public.lots AS lot ON lot.id = settlement.lot_id
-                   WHERE lot.auction_id = $1
-                   ORDER BY lot.lot_number, lot.id"#
-                }
-            };
+                   FOR UPDATE OF settlement"#;
             sqlx::query(query)
                 .bind(auction_id.as_uuid())
                 .fetch_all(&mut **transaction)

@@ -250,7 +250,7 @@ proxy_enabled = true
 proxy_default_mode = "fast"
 # 可选：慢速代理间隔（秒），范围 1-604800；省略时为 600。
 proxy_slow_interval_seconds = 600
-# 可选：被超价使用次数上限（0 为不限），范围 0-1000；省略时为 3。
+# 可选：同一用户在同一 lot 可设置代理授权的次数上限（0 为不限），范围 0-1000；省略时为 3。
 proxy_max_outbid_uses = 3
 # 可选：最终阶段提前量（秒），范围 1-604800；省略时为 900。
 final_phase_lead_seconds = 900

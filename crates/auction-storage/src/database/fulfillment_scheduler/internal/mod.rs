@@ -26,7 +26,7 @@ mod transaction;
 mod validation;
 
 #[cfg(feature = "postgres")]
-pub(crate) use conflicts::{assetless_mail_notification, exclude_legacy_self_asset_conflicts};
+pub(crate) use conflicts::assetless_mail_notification;
 
 impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
     fn legacy_self_reconciliation_uid(
@@ -42,12 +42,12 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
                         store.pool().begin().await.map_err(|_| {
                             super::mapping::repository_error("旧自寄修复证明不可用")
                         })?;
-                    let result = crate::database::settlement_legacy_repair::legacy_self_uid(
-                        &mut tx,
-                        obligation_id,
-                    )
-                    .await
-                    .map_err(|_| super::mapping::repository_error("旧自寄修复证明不匹配"))?;
+                    let result =
+                        crate::database::legacy_self_proof::legacy_self_uid(&mut tx, obligation_id)
+                            .await
+                            .map_err(|_| {
+                                super::mapping::repository_error("旧自寄修复证明不匹配")
+                            })?;
                     tx.commit()
                         .await
                         .map_err(|_| super::mapping::repository_error("旧自寄修复证明读取失败"))?;

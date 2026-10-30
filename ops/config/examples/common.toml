@@ -81,7 +81,7 @@ proxy_enabled = true
 proxy_default_mode = "fast"
 # 可选：slow 代理尝试间隔秒数，默认 600。
 proxy_slow_interval_seconds = 600
-# 可选：单个代理授权允许的 outbid 使用次数，默认 3；0 表示不限制。
+# 可选：同一用户在同一 lot 可设置代理授权的次数（代理被超越后可重新设置），默认 3；0 表示不限制。
 proxy_max_outbid_uses = 3
 # 可选：进入 final phase 前的领先秒数，范围 1-604800，默认 900（15 分钟）。
 final_phase_lead_seconds = 900

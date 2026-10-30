@@ -10,39 +10,18 @@ impl PostgresCompetitionTransaction {
         &mut self,
         command_id: auction_domain::CommandId,
     ) -> Result<Option<StoredCommand>, CompetitionTransactionError> {
-        self.find_command_with_lock(command_id, true).await
-    }
-
-    /// 在调用方已建立的一致只读快照中读取命令账本，不请求 PostgreSQL 行锁。
-    pub(crate) async fn find_command_read_only_inner(
-        &mut self,
-        command_id: auction_domain::CommandId,
-    ) -> Result<Option<StoredCommand>, CompetitionTransactionError> {
-        self.find_command_with_lock(command_id, false).await
-    }
-
-    async fn find_command_with_lock(
-        &mut self,
-        command_id: auction_domain::CommandId,
-        for_update: bool,
-    ) -> Result<Option<StoredCommand>, CompetitionTransactionError> {
         let row = {
             let transaction = self.transaction_mut()?;
-            let query = if for_update {
+            sqlx::query(
                 r#"SELECT command_kind, aggregate_id, request_hash, result_code, result_payload
                    FROM public.auction_commands
                    WHERE command_id = $1
-                   FOR UPDATE"#
-            } else {
-                r#"SELECT command_kind, aggregate_id, request_hash, result_code, result_payload
-                   FROM public.auction_commands
-                   WHERE command_id = $1"#
-            };
-            sqlx::query(query)
-                .bind(command_id.as_uuid())
-                .fetch_optional(&mut **transaction)
-                .await
-                .map_err(map_sql_error)?
+                   FOR UPDATE"#,
+            )
+            .bind(command_id.as_uuid())
+            .fetch_optional(&mut **transaction)
+            .await
+            .map_err(map_sql_error)?
         };
 
         let Some(row) = row else {

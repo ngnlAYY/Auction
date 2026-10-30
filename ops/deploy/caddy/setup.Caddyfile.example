@@ -1,0 +1,10 @@
+# 仅在首次设置期间临时启用：通过 HTTPS 远程访问 auction-server 的设置页。
+# auction-server 需同时带 --allow-remote-setup --setup-origin https://setup.example.com
+# --setup-proxy-ip 127.0.0.1；设置完成后立即删除此站点，再安装正式业务 Caddyfile。
+# 不要把 8091 直接暴露到公网。
+setup.example.com {
+	reverse_proxy 127.0.0.1:8091 {
+		header_up Host setup.example.com
+		header_up X-Forwarded-Proto https
+	}
+}

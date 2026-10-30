@@ -34,29 +34,6 @@ pub(super) async fn exclude_asset_conflicts(
     exclude_conflicts(tx, &target, None).await
 }
 
-/// 专用修复先核验原 manual 身份及完整新鲜库存，再在同一事务忽略这一条被处置的旧投递。
-pub(crate) async fn exclude_legacy_self_asset_conflicts(
-    tx: &mut Transaction<'_, Postgres>,
-    target: &auction_application::LegacySelfReconciliationTarget,
-    lot_id: uuid::Uuid,
-) -> Result<(), FundingError> {
-    let asset = AssetConflictTarget {
-        kind: match target.action {
-            auction_application::LegacySelfReconciliationAction::KeepUnsold => {
-                auction_domain::SettlementObligationKind::UnsoldReturn
-            }
-            auction_application::LegacySelfReconciliationAction::ReopenPayment => {
-                auction_domain::SettlementObligationKind::WinnerEquipmentCod
-            }
-        },
-        obligation_id: auction_domain::SettlementId::from_uuid(target.obligation_id),
-        lot_id: auction_domain::LotId::from_uuid(lot_id),
-        external_equipment_id: &target.external_equipment_id,
-        equipment_world: target.world,
-    };
-    exclude_conflicts(tx, &asset, Some(target.delivery_id)).await
-}
-
 async fn exclude_conflicts(
     tx: &mut Transaction<'_, Postgres>,
     c: &AssetConflictTarget<'_>,
@@ -237,7 +214,7 @@ async fn exclude_conflicts(
                WHERE a.delivery_id=d.id AND a.execution_state='satisfied' AND a.proof_digest IS NOT NULL)
            AND NOT EXISTS(SELECT 1 FROM public.settlement_legacy_self_reconciliations r
                WHERE /* trusted_legacy_self */))".replace("/* trusted_legacy_self */",
-                   crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE)
+                   crate::database::legacy_self_proof::TRUSTED_DELIVERY_PREDICATE)
     });
     // 替换值仅来自已审查的编译期 SQL 常量，不插入业务文本。
     let outgoing: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(OUTGOING_QUERY.as_str()))

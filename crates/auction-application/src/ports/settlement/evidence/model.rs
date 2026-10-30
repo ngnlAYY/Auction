@@ -41,16 +41,6 @@ pub enum InternalEvidencePurpose {
         command_id: Uuid,
         expected_account_version: u64,
     },
-    LegacySelfReconciliation {
-        command_id: Uuid,
-        obligation_id: Uuid,
-        expected_fulfillment_version: i64,
-    },
-    LegacyBotSeller {
-        command_id: Uuid,
-        obligation_id: Uuid,
-        expected_state_version: u64,
-    },
 }
 
 impl InternalEvidencePurpose {
@@ -68,16 +58,6 @@ impl InternalEvidencePurpose {
             }
             Self::FundingReconciliation { command_id, .. }
             | Self::FundingRecordOnlyInitialization { command_id, .. } => !command_id.is_nil(),
-            Self::LegacySelfReconciliation {
-                command_id,
-                obligation_id,
-                expected_fulfillment_version,
-            } => {
-                !command_id.is_nil() && !obligation_id.is_nil() && *expected_fulfillment_version > 0
-            }
-            Self::LegacyBotSeller { command_id, obligation_id, expected_state_version } => {
-                !command_id.is_nil() && !obligation_id.is_nil() && *expected_state_version > 0
-            }
         }
     }
 
@@ -111,24 +91,6 @@ impl InternalEvidencePurpose {
                     "funding_record_only_initialization",
                     &command_id.to_string(),
                     &expected_account_version.to_string(),
-                ])
-            }
-            Self::LegacySelfReconciliation {
-                command_id,
-                obligation_id,
-                expected_fulfillment_version,
-            } => facts_digest([
-                "legacy_self_reconciliation",
-                &command_id.to_string(),
-                &obligation_id.to_string(),
-                &expected_fulfillment_version.to_string(),
-            ]),
-            Self::LegacyBotSeller { command_id, obligation_id, expected_state_version } => {
-                facts_digest([
-                    "legacy_bot_seller",
-                    &command_id.to_string(),
-                    &obligation_id.to_string(),
-                    &expected_state_version.to_string(),
                 ])
             }
         }

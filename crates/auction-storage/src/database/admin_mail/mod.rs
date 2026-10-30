@@ -33,10 +33,6 @@ use crate::database::audit_health::AuditWriteResult as _;
 use super::DatabaseStore;
 
 #[cfg(feature = "postgres")]
-mod backfill;
-#[cfg(feature = "postgres")]
-pub use backfill::{MailDisplayBackfillInput, MailDisplayBackfillResult};
-#[cfg(feature = "postgres")]
 mod mapping;
 #[cfg(feature = "postgres")]
 mod reads;

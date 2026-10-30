@@ -14,8 +14,6 @@ mod admin_intake;
 #[cfg(feature = "postgres")]
 mod admin_mail;
 #[cfg(feature = "postgres")]
-pub use admin_mail::{MailDisplayBackfillInput, MailDisplayBackfillResult};
-#[cfg(feature = "postgres")]
 mod audit_health;
 #[cfg(feature = "postgres")]
 mod bootstrap;
@@ -28,8 +26,6 @@ pub use initialization::{FirstDatabaseInitializationError, initialize_empty_post
 mod competition;
 #[cfg(feature = "postgres")]
 mod competition_audit;
-#[cfg(feature = "postgres")]
-mod legacy_v28;
 #[cfg(feature = "postgres")]
 mod lifecycle_audit;
 #[cfg(feature = "postgres")]
@@ -62,11 +58,6 @@ pub use bootstrap::{
 };
 #[cfg(feature = "postgres")]
 pub use competition::PostgresCompetitionTransaction;
-#[cfg(feature = "postgres")]
-pub use legacy_v28::{
-    LEGACY_V28_MIGRATION_VERSION, POSTGRES_LEGACY_V28_PREFLIGHT_FORMAT, PostgresLegacyV28Adoption,
-    PostgresLegacyV28Error, PostgresLegacyV28Preflight,
-};
 #[cfg(feature = "postgres")]
 pub use rebuild::{
     POSTGRES_REBUILD_PREFLIGHT_FORMAT, PostgresDatabaseRebuildGuard, PostgresRebuildError,
@@ -128,8 +119,6 @@ mod delivery_audit;
 #[cfg(feature = "postgres")]
 mod delivery_scheduler;
 #[cfg(feature = "postgres")]
-mod draft_soft_close;
-#[cfg(feature = "postgres")]
 mod equipment_secrets;
 #[cfg(feature = "postgres")]
 mod forum;
@@ -146,6 +135,8 @@ mod lots;
 #[cfg(feature = "postgres")]
 pub use lots::DatabasePublicLotReader;
 #[cfg(feature = "postgres")]
+mod legacy_self_proof;
+#[cfg(feature = "postgres")]
 mod operations_alert;
 #[cfg(feature = "postgres")]
 mod price_history;
@@ -157,8 +148,6 @@ mod realtime;
 mod realtime_admin;
 #[cfg(feature = "postgres")]
 mod realtime_consumer;
-#[cfg(feature = "postgres")]
-mod settlement_legacy_repair;
 #[cfg(feature = "postgres")]
 pub use realtime_consumer::{RealtimeConsumerOwnership, RealtimeConsumerOwnershipError};
 #[cfg(feature = "postgres")]

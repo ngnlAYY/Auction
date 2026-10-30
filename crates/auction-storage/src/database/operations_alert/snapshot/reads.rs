@@ -106,7 +106,7 @@ async fn delivery_snapshot(
          FROM public.deliveries d"#
             .replace(
                 "/* trusted_legacy_self */",
-                crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE,
+                crate::database::legacy_self_proof::TRUSTED_DELIVERY_PREDICATE,
             )
     });
     let row = sqlx::query(sqlx::AssertSqlSafe(QUERY.as_str()))

@@ -94,7 +94,7 @@ async fn apply(
     validation::validate(tx, command, evidence, proof.is_some(), external_refund).await?;
     if proof.is_none()
         && !external_refund
-        && crate::database::settlement_legacy_repair::legacy_self_uid(
+        && crate::database::legacy_self_proof::legacy_self_uid(
             tx,
             command.claim.obligation_id.as_uuid(),
         )

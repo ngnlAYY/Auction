@@ -79,9 +79,6 @@ pub use forum_profile::*;
 #[path = "settlement/evidence/mod.rs"]
 mod settlement_evidence;
 pub use settlement_evidence::*;
-#[path = "settlement/legacy_repair/mod.rs"]
-mod settlement_legacy_repair;
-pub use settlement_legacy_repair::*;
 #[path = "forum/pm.rs"]
 mod forum_pm;
 pub use forum_pm::*;
@@ -477,9 +474,9 @@ pub use sessions::{
     PublicSessionRecord, PublicSessionStore,
 };
 pub use settlement::{
-    LegacySettlementVerification, LegacySettlementVerificationPort, PersistedSettlement,
-    PersistedSettlementObligationCount, SettlementSnapshot, SettlementTransaction,
-    SettlementTransactionError, SettlementTransactionFailure, SettlementTransactionRunner,
+    PersistedSettlement, PersistedSettlementObligationCount, SettlementSnapshot,
+    SettlementTransaction, SettlementTransactionError, SettlementTransactionFailure,
+    SettlementTransactionRunner,
 };
 pub use settlement_report::{
     SettlementAdjustment, SettlementAuctionSnapshot, SettlementLotReport, SettlementReport,
