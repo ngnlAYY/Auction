@@ -54,9 +54,9 @@ build-release:
 
 # 可选合并服务；先保留分体制品与资源隔离证明。
 build-single: build-api build-release
-    # 构建 auction-server 与独立 auctionctl。
+    # 构建 auction-server 与独立 auction-cli。
     @bash ci/release/release.sh build-single
-    # 核对双 surface payload 与独立 auctionctl。
+    # 核对双 surface payload 与独立 auction-cli。
     @bash ci/release/release.sh verify-single
 
 # 核对 API-only/嵌入式制品、依赖边界与资源隔离。
@@ -83,10 +83,14 @@ run-admin:
 run-worker:
     cargo run -p auction-worker --features postgres
 
-# 用内嵌迁移执行受控升级，普通启动不隐式迁移。
-db-migrate:
-    cargo run -p auctionctl --features postgres -- migrate
+# 本地开发库执行内嵌迁移；普通启动不隐式迁移，本地不经 systemd 停机门禁。
+db-migrate config_dir="ops/config":
+    cargo run -p auction-cli --features postgres -- --config-dir {{config_dir}} db migrate --no-systemd
 
-# 校验指定角色的 TOML 配置，默认 public。
-check-config role="public":
-    cargo run -p auctionctl -- check-config {{role}}
+# 输出指定角色的有效配置安全投影，默认 public。
+config-show role="public" config_dir="ops/config":
+    cargo run -p auction-cli -- --config-dir {{config_dir}} config show {{role}}
+
+# 联合检查三角色配置；生产门禁另加 --strict。
+config-check config_dir="ops/config":
+    cargo run -p auction-cli --features postgres -- --config-dir {{config_dir}} config check

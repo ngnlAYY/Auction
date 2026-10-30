@@ -69,7 +69,7 @@ async fn prepare(
         )
         .await
         .context("首次初始化超时；保留配置与数据库现场，普通重启不会重试迁移")?
-        .context("首次初始化失败；保留配置，核对数据库后通过受控 auctionctl 运维恢复")?;
+        .context("首次初始化失败；保留配置，核对数据库后用 auction-cli 的 db 命令受控恢复")?;
     }
     // 空库、部分迁移或待升级 schema 不允许先启动 Worker；只读就绪校验不能隐式迁移。
     use auction_application::ProcessReadinessPort;
@@ -82,7 +82,7 @@ async fn prepare(
     };
     tokio::time::timeout(std::time::Duration::from_secs(30), ready).await
         .context("database readiness timeout")?
-        .context("database schema is not ready; stop the server and explicitly run auctionctl migrate-managed")?;
+        .context("数据库 schema 未就绪；停止 auction-server 后以同一服务账号执行 auction-cli --config-dir <配置目录> db migrate")?;
     Ok(plans)
 }
 

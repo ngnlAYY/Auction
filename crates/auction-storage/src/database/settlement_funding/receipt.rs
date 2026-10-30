@@ -12,28 +12,6 @@ pub(super) async fn validate_receipt(
     payment: Uuid,
     buyer: i64,
 ) -> Result<(), FundingError> {
-    validate_receipt_boundary(tx, account, receipt, payment, buyer, false).await
-}
-
-/// 开户前已收款只能重认既有隔离责任；复用原付款精确协议，不创建第二个收款来源。
-pub(super) async fn validate_legacy_receipt(
-    tx: &mut Transaction<'_, Postgres>,
-    account: &LockedFundingAccount,
-    receipt: &FundingCollectedReceipt<'_>,
-    payment: Uuid,
-    buyer: i64,
-) -> Result<(), FundingError> {
-    validate_receipt_boundary(tx, account, receipt, payment, buyer, true).await
-}
-
-async fn validate_receipt_boundary(
-    tx: &mut Transaction<'_, Postgres>,
-    account: &LockedFundingAccount,
-    receipt: &FundingCollectedReceipt<'_>,
-    payment: Uuid,
-    buyer: i64,
-    legacy: bool,
-) -> Result<(), FundingError> {
     let evidence = receipt.evidence;
     let sent = evidence.sent_collection.as_ref().ok_or(FundingError::Unproven)?;
     let cash = evidence.main_cash.as_ref();
@@ -79,16 +57,13 @@ async fn validate_receipt_boundary(
           AND d.command_id=f.prepare_command_id AND d.request_digest=f.prepare_request_digest
           AND d.activation_command_id=f.activate_command_id
           AND d.activation_request_digest=f.activate_request_digest
-          AND (($5 AND d.sending_at <= (SELECT min(created_at) FROM public.settlement_funding_sources
-                             WHERE uid=$4 AND kind=$6))
-            OR (NOT $5 AND d.sending_at > (SELECT max(created_at) FROM public.settlement_funding_sources
-                             WHERE uid=$4 AND kind=$6)))"#,
+          AND d.sending_at > (SELECT max(created_at) FROM public.settlement_funding_sources
+                             WHERE uid=$4 AND kind=$5)"#,
     )
     .bind(payment)
     .bind(receipt.delivery_id)
     .bind(&sent.external_mail_id)
     .bind(account.uid())
-    .bind(legacy)
     .bind(if account.records_only() {"record_opening"} else {"reconciliation"})
     .fetch_optional(&mut **tx)
     .await
@@ -143,15 +118,12 @@ async fn validate_receipt_boundary(
         && metadata["sent_verified"] == true
         && metadata["settlement_obligation_id"] == payment.to_string())
         || row.try_get::<bool, _>("frozen_sent_proven").map_err(storage)?;
-    // 新恢复证明必须关联不可变发送尝试及唯一 MID，不能只凭 proof 标签资金化。
-    // 旧 reference 恢复仍仅限开户前责任；两者均不代替本次同账号已收款联合证据。
-    let recovered = legacy
-        && legacy_recovered_proof(&metadata, &sent.external_mail_id, &sent.recipient, cod, carrier);
+    // 恢复证明必须关联不可变发送尝试及唯一 MID，不能只凭 proof 标签资金化，也不代替本次同账号已收款联合证据。
     if payload != expected
         || metadata["operation"] != "send"
         || metadata["template"] != template
         || metadata["external_reference_proven"] != true
-        || !(exact || recovered)
+        || !exact
     {
         return Err(FundingError::Unproven);
     }
@@ -212,37 +184,6 @@ fn append_frozen_pricing(
     variables["adjusted_price"] = adjusted_price.to_string().into();
     variables["pool_credit"] = pool_credit.to_string().into();
     Ok(())
-}
-
-/// 原维护恢复的闭集事实：恢复时可以尚未付款，本次收款仍由 opaque Sent 证明。
-fn legacy_recovered_proof(
-    metadata: &serde_json::Value,
-    mid: &str,
-    recipient: &str,
-    cod: i64,
-    carrier: i64,
-) -> bool {
-    let Some(collected) = metadata["collected"].as_bool() else {
-        return false;
-    };
-    let (pending, credits, equipment_count) =
-        if collected { (0, 0, 0) } else { (cod, carrier, i64::from(carrier == 0)) };
-    let sweep = &metadata["mailbox_sweep"];
-    let observed = |value: &serde_json::Value| {
-        value.as_str().is_some_and(|value| chrono::DateTime::parse_from_rfc3339(value).is_ok())
-    };
-    metadata["proof"] == "sent_recovered_reference_v1"
-        && metadata["sent_recovered"] == true
-        && metadata["recovered_mid"] == mid
-        && metadata["recipient"] == recipient
-        && metadata["cod_pending"] == pending
-        && observed(&metadata["observed_at"])
-        && sweep["mid"] == mid
-        && sweep["collected"] == collected
-        && sweep["cod_pending"] == pending
-        && sweep["remaining_credits"] == credits
-        && sweep["remaining_equipment_count"] == equipment_count
-        && observed(&sweep["observed_at"])
 }
 
 pub(super) async fn store_receipt(

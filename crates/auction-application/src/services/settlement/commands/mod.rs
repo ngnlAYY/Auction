@@ -9,9 +9,8 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    ApplicationError, ApplicationFuture, LegacySettlementVerification, RequestHash,
-    SettlementSnapshot, SettlementTransaction, SettlementTransactionRunner, StoredCommand,
-    TransactionPolicy,
+    ApplicationError, ApplicationFuture, RequestHash, SettlementTransaction,
+    SettlementTransactionRunner, StoredCommand, TransactionPolicy,
 };
 
 mod legacy;
@@ -24,59 +23,6 @@ use validation::{
     plan_proxy_closures, validate_current_settlement_identity, validate_replayed_settlement_plan,
     validate_settlement_due, validate_settlement_plan,
 };
-
-/// 在已经取得一致只读快照后，严格核验旧版 complete 账本并返回脱敏摘要。
-/// 调用方必须从同一数据库事务提供账本与结算快照。本函数没有“账本缺失则结算”的分支，
-/// 因而不能被误用来补写 completion fence 或生成新的结算事实。
-pub fn verify_legacy_settlement_replay(
-    command: SettleAuctionCommand,
-    stored: StoredCommand,
-    snapshot: SettlementSnapshot,
-) -> Result<LegacySettlementVerification, ApplicationError> {
-    if snapshot.auction_id != command.auction_id || stored.command_kind != "settlement_complete" {
-        return Err(legacy_verification_failed("只读核验只接受旧版已完成结算账本"));
-    }
-    let replay = classify_stored_settlement(&stored, command)?;
-    let StoredSettlementReplay::Legacy(result) = replay else {
-        return Err(legacy_verification_failed("只读核验拒绝新版结算账本"));
-    };
-    let plan = replay_legacy_settlement(command, &snapshot, result)?;
-    let persisted = snapshot
-        .persisted_settlement
-        .as_ref()
-        .ok_or_else(|| legacy_verification_failed("只读核验缺少权威结算事实"))?;
-    let obligation_count = persisted
-        .obligation_counts
-        .iter()
-        .try_fold(0_u64, |total, entry| total.checked_add(entry.count))
-        .ok_or_else(|| legacy_verification_failed("只读核验义务数量溢出"))?;
-    let line_count = u64::try_from(plan.lines.len())
-        .map_err(|_| legacy_verification_failed("只读核验结算行数溢出"))?;
-    let persisted_line_count = u64::try_from(persisted.lines.len())
-        .map_err(|_| legacy_verification_failed("只读核验权威结算行数溢出"))?;
-    let planned_obligation_count = u64::try_from(plan.obligations.len())
-        .map_err(|_| legacy_verification_failed("只读核验计划义务数量溢出"))?;
-    if line_count != persisted_line_count || obligation_count != planned_obligation_count {
-        return Err(legacy_verification_failed("只读核验计划数量与权威事实不一致"));
-    }
-
-    Ok(LegacySettlementVerification {
-        auction_id: command.auction_id.as_uuid(),
-        workflow_id: command.workflow_id,
-        claim_command_id: command.claim_command_id.as_uuid(),
-        complete_command_id: command.command_id.as_uuid(),
-        due_at: command.due_at,
-        state_version: persisted.state_version,
-        sold_count: persisted.sold_count,
-        unsold_count: persisted.unsold_count,
-        obligation_count,
-        line_count,
-    })
-}
-
-fn legacy_verification_failed(message: &str) -> ApplicationError {
-    crate::SettlementTransactionError::Failed(message.to_owned()).into()
-}
 
 /// 请求一次拍卖结算。结算命令必须拥有稳定 ID，Worker 重试只能重放同一命令。
 #[derive(Debug, Clone, Copy)]

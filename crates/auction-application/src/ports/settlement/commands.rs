@@ -10,36 +10,9 @@ use auction_domain::{
 };
 
 use super::{
-    ApplicationFuture, CommandLedgerError, CompetitionSnapshot, StoredCommand, TransactionFuture,
-    TransactionPolicy, TransactionPolicyError,
+    CommandLedgerError, CompetitionSnapshot, StoredCommand, TransactionFuture, TransactionPolicy,
+    TransactionPolicyError,
 };
-
-/// 旧版已完成结算账本与当前权威事实只读核验后的安全摘要。
-/// 该结果不包含用户、装备、义务正文或命令 payload；运维表面只能据此确认旧账本已被严格
-/// 对账，不能把它当作新的结算命令结果再次持久化。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LegacySettlementVerification {
-    pub auction_id: Uuid,
-    pub workflow_id: Uuid,
-    pub claim_command_id: Uuid,
-    pub complete_command_id: Uuid,
-    pub due_at: DateTime<Utc>,
-    pub state_version: u64,
-    pub sold_count: u64,
-    pub unsold_count: u64,
-    pub obligation_count: u64,
-    pub line_count: u64,
-}
-
-/// 旧版已完成结算账本的只读核验入口。
-/// 实现必须要求已有 `settlement_complete/OK` 账本并在同一只读快照中对账，缺失账本时不得
-/// 退化为通用 `settle`，也不得清空 completion fence 或追加任何事实。
-pub trait LegacySettlementVerificationPort: Send + Sync {
-    fn verify_legacy_settlement(
-        &self,
-        auction_id: Uuid,
-    ) -> ApplicationFuture<'_, LegacySettlementVerification>;
-}
 
 /// 已结算拍卖中按义务种类聚合的权威数量。
 #[derive(Debug, Clone, PartialEq, Eq)]

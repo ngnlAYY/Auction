@@ -1,0 +1,37 @@
+# 分体部署的顺序控制 unit：开机或手动 start 时预检、迁移并按 Worker → Admin → Public 启动，
+# stop 时反序停止。以 root 运行以调用 systemctl；Worker control 的 allowed_peer_uids 须包含 0，
+# 否则无法探测 Worker readiness。三个角色 unit 不要单独 enable，由本 unit 统一编排。
+[Unit]
+Description=Auction ordered deployment controller (auction-cli service)
+After=network-online.target systemd-tmpfiles-setup.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/auction
+UMask=0077
+# 部署控制锁目录；auction-cli 也会在缺失时以 0700 创建。
+StateDirectory=auction/deployment
+StateDirectoryMode=0700
+ExecStart=/opt/auction/bin/auction-cli --config-dir /etc/auction service start --startup-timeout-seconds 30
+ExecStop=/opt/auction/bin/auction-cli --config-dir /etc/auction service stop
+# 迁移加三个角色各 30 秒 readiness，另留 systemctl 往返余量。
+TimeoutStartSec=180
+# 三个角色依次停止最多 3 × 45 秒（各 unit 的 TimeoutStopSec），另留收口余量。
+TimeoutStopSec=155
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/etc/auction /opt/auction
+ReadWritePaths=/var/lib/auction
+
+[Install]
+WantedBy=multi-user.target

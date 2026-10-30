@@ -80,7 +80,7 @@ pub(crate) struct PostgresMaintenanceSecretFile {
 }
 
 /// 独立 PostgreSQL 维护敏感 TOML 的脱敏结果。
-/// 该类型只允许 `auctionctl postgres-rebuild` 在维护窗口短暂使用，不能并入 Public/Admin/Worker
+/// 该类型只允许 `auction-cli` 的建库与重建命令在维护窗口短暂使用，不能并入 Public/Admin/Worker
 /// 常驻配置，也不会实现序列化或暴露在 `Debug` 输出中。
 #[derive(Clone)]
 pub struct PostgresMaintenanceSecrets {

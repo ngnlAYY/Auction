@@ -1,6 +1,5 @@
 //! 用例、窄端口和事务边界。
 
-pub mod draft_soft_close;
 mod errors;
 mod ports;
 mod services;
@@ -95,19 +94,19 @@ pub use ports::{
     ForumReplyTopic, ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort, ForumSyncStore,
     ForumSystemLogEntry, ForumTopicMetadata, ForumTopicPublication, ForumTopicReader,
     ForumWriteProgress, ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
-    LegacySettlementVerification, LegacySettlementVerificationPort, MAX_ADMIN_AUCTION_OFFSET,
-    MAX_ADMIN_AUCTION_PAGE_SIZE, MAX_ADMIN_AUDIT_OFFSET, MAX_ADMIN_AUDIT_PAGE_SIZE,
-    MAX_ADMIN_CREDENTIAL_OFFSET, MAX_ADMIN_CREDENTIAL_PAGE_SIZE, MAX_ADMIN_CREDENTIAL_SECRET_BYTES,
-    MAX_ADMIN_FORUM_PREVIEW_BYTES, MAX_ADMIN_LOT_OFFSET, MAX_ADMIN_LOT_PAGE_SIZE,
-    MAX_ADMIN_MAIL_DECISION_BYTES, MAX_ADMIN_MAIL_OFFSET, MAX_ADMIN_MAIL_PAGE_SIZE,
-    MAX_ADMIN_MAIL_POLLER_COUNT, MAX_ADMIN_MAILBOX_KEY_BYTES, MAX_ADMIN_PROXY_EVENT_OFFSET,
-    MAX_ADMIN_PROXY_EVENT_PAGE_SIZE, MAX_ADMIN_RENAME_OFFSET, MAX_ADMIN_RENAME_PAGE_SIZE,
-    MAX_ADMIN_RUNTIME_DOCUMENT_BYTES, MAX_ADMIN_USER_OFFSET, MAX_ADMIN_USER_PAGE_SIZE,
-    MAX_DELIVERY_ADMIN_OFFSET, MAX_DELIVERY_ADMIN_PAGE_SIZE, MAX_DELIVERY_COD,
-    MAX_FORUM_CATALOG_LOTS, MAX_FORUM_CATALOG_PAGES, MAX_FORUM_RECONCILIATION_TITLES,
-    MAX_FORUM_SYNC_RECOVERY_ITEMS, MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES,
-    MAX_MAIL_POLL_FAILURE_CODE_BYTES, MAX_MAIL_POLL_FAILURE_DETAIL_BYTES,
-    MAX_MAIL_PROGRESS_POLLERS, MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES,
+    MAX_ADMIN_AUCTION_OFFSET, MAX_ADMIN_AUCTION_PAGE_SIZE, MAX_ADMIN_AUDIT_OFFSET,
+    MAX_ADMIN_AUDIT_PAGE_SIZE, MAX_ADMIN_CREDENTIAL_OFFSET, MAX_ADMIN_CREDENTIAL_PAGE_SIZE,
+    MAX_ADMIN_CREDENTIAL_SECRET_BYTES, MAX_ADMIN_FORUM_PREVIEW_BYTES, MAX_ADMIN_LOT_OFFSET,
+    MAX_ADMIN_LOT_PAGE_SIZE, MAX_ADMIN_MAIL_DECISION_BYTES, MAX_ADMIN_MAIL_OFFSET,
+    MAX_ADMIN_MAIL_PAGE_SIZE, MAX_ADMIN_MAIL_POLLER_COUNT, MAX_ADMIN_MAILBOX_KEY_BYTES,
+    MAX_ADMIN_PROXY_EVENT_OFFSET, MAX_ADMIN_PROXY_EVENT_PAGE_SIZE, MAX_ADMIN_RENAME_OFFSET,
+    MAX_ADMIN_RENAME_PAGE_SIZE, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES, MAX_ADMIN_USER_OFFSET,
+    MAX_ADMIN_USER_PAGE_SIZE, MAX_DELIVERY_ADMIN_OFFSET, MAX_DELIVERY_ADMIN_PAGE_SIZE,
+    MAX_DELIVERY_COD, MAX_FORUM_CATALOG_LOTS, MAX_FORUM_CATALOG_PAGES,
+    MAX_FORUM_RECONCILIATION_TITLES, MAX_FORUM_SYNC_RECOVERY_ITEMS, MAX_MAIL_POLL_BATCH_SIZE,
+    MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,
+    MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MAX_MAIL_PROGRESS_POLLERS,
+    MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES,
     MAX_OPERATIONS_ALERT_SIGNALS, MAX_PUBLIC_ACCOUNT_OFFSET, MAX_PUBLIC_ACCOUNT_PAGE_SIZE,
     MAX_PUBLIC_BID_LOG_OFFSET, MAX_PUBLIC_BLACKLIST_OFFSET, MAX_PUBLIC_COMPENSATION_OFFSET,
     MAX_PUBLIC_EVENT_PAGE_SIZE, MAX_PUBLIC_HISTORY_NAME_TERMS, MAX_PUBLIC_LOT_OFFSET,
@@ -238,11 +237,6 @@ pub use ports::{
     FundingRecordOnlyCommand, FundingRecordOnlyStore,
 };
 pub use ports::{
-    LegacySelfReconciliationAction, LegacySelfReconciliationCommand,
-    LegacySelfReconciliationOutcome, LegacySelfReconciliationReader,
-    LegacySelfReconciliationResult, LegacySelfReconciliationTarget, LegacySelfReconciliationWriter,
-};
-pub use ports::{
     MailPlayerIdentityProofSource, VerifiedMailPlayerIdentity, valid_credential_player_name,
     valid_mail_player_name,
 };
@@ -264,7 +258,7 @@ pub use services::{
     SettleAuctionCommand, SettlementCommandPort, SettlementFulfillmentService, SettlementService,
     public_rules_cache_key, settlement_claim_command_id, settlement_complete_command_id,
     settlement_complete_request_hash, settlement_workflow_id, validate_admin_actor,
-    validate_admin_secret, verify_legacy_settlement_replay,
+    validate_admin_secret,
 };
 
 pub use ports::{
@@ -297,8 +291,4 @@ pub use services::{MailboxMaintenanceReport, MailboxMaintenanceService};
 pub use ports::{
     EquipmentColorDecision, EquipmentColorFacts, EquipmentColorMatch, EquipmentColorRule,
     EquipmentGroup, PEERLESS_COLORS, equipment_color_decision, validate_equipment_color_rules,
-};
-pub use ports::{
-    LegacyBotSellerCommand, LegacyBotSellerCommitOutcome, LegacyBotSellerPreview,
-    LegacyBotSellerResult, LegacyBotSellerStore,
 };

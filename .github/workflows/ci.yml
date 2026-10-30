@@ -364,7 +364,7 @@ jobs:
             printf '## Linux x86_64 完整制品\n\n'
             printf '[下载四程序及校验清单](%s)\n\n' "$ARTIFACT_URL"
             printf '%s\n' '解开外层下载包后，用 SHA256SUMS 校验 tar.gz。'
-            printf '%s\n' 'tar 包的 bin/ 含 Public、Admin、Worker、auctionctl。'
+            printf '%s\n' 'tar 包的 bin/ 含 Public、Admin、Worker 与 auction-cli。'
             printf '%s\n' 'Public/Admin 已内嵌页面；不是 Ryzen 专用包。'
             printf '%s\n' '制品保留 14 天；仅完成静态门禁，不代表运行验收。'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -4,16 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::{future::Future, pin::Pin};
 use uuid::Uuid;
 
-#[path = "funding/legacy.rs"]
-mod legacy;
 #[path = "funding/policy.rs"]
 mod policy;
 #[path = "funding/record_only.rs"]
 mod record_only;
-pub use legacy::{
-    LegacyBotSellerCommand, LegacyBotSellerCommitOutcome, LegacyBotSellerPreview,
-    LegacyBotSellerResult, LegacyBotSellerStore,
-};
 pub use policy::{FundingAccountingMode, FundingPolicy, FundingPolicyReader};
 pub use record_only::{FundingRecordOnlyCommand, FundingRecordOnlyStore};
 

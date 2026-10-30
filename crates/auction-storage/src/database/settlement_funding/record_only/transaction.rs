@@ -166,7 +166,7 @@ async fn apply(
         "observed_from":e.observed_from,"expires_at":e.expires_at,"digest":e.digest});
     let metadata = json!({"command_id":command.command_id,"accounting_mode":"record_only","policy_version":1,
         "source_id":source,"recorded_liabilities":preview.isolated_liabilities,"preview_digest":preview.digest,"evidence_digest":e.digest,
-        "executor":"auctionctl"});
+        "executor":"auction-cli"});
     sqlx::query("INSERT INTO public.settlement_funding_commands(command_id,uid,action,target_id,request_digest,result,\"authorization\") VALUES($1,$2,'record_only_init',$1,$3,$4,$5)")
         .bind(command.command_id).bind(&command.expected_uid).bind(mutation.request_digest.as_slice())
         .bind(serde_json::to_value(&result).map_err(invalid)?)

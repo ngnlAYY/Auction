@@ -32,7 +32,7 @@ binaries=(
 	auction-public-api
 	auction-admin-api
 	auction-worker
-	auctionctl
+	auction-cli
 )
 # API-only 是不发布的资源隔离对照，只需两个 Web surface；Worker/CLI 的无页面证明由嵌入档与依赖图门禁承担，
 # 省去两次 Fat LTO 链接。
@@ -110,7 +110,7 @@ artifact_checksums() (
 	case "$variant" in
 	api-only) selected_binaries=("${api_only_binaries[@]}") ;;
 	embedded) ;;
-	single) selected_binaries=(auction-server auctionctl) ;;
+	single) selected_binaries=(auction-server auction-cli) ;;
 	*) return 2 ;;
 	esac
 	for path in "${selected_binaries[@]}"; do files+=("bin/$path"); done
@@ -364,7 +364,7 @@ verify_artifacts() {
 	assert_binary_markers excludes "$embedded/auction-public-api" 'Embedded Public' "${admin_markers[@]}"
 	assert_binary_markers contains "$embedded/auction-admin-api" 'Embedded Admin' "${admin_markers[@]}"
 	assert_binary_markers excludes "$embedded/auction-admin-api" 'Embedded Admin' "${public_markers[@]}"
-	for binary in auction-worker auctionctl; do
+	for binary in auction-worker auction-cli; do
 		assert_binary_markers excludes "$embedded/$binary" "Embedded $binary" "${public_markers[@]}" "${admin_markers[@]}"
 	done
 
@@ -382,11 +382,11 @@ verify_artifacts() {
 	printf 'API-only、双 surface 嵌入资源、缺失资源 503 标记与 Worker 依赖边界门禁通过。\n'
 }
 
-# 可选合并服务：在分体制品与资源隔离证明通过后，构建 auction-server 与独立 auctionctl。
+# 可选合并服务：在分体制品与资源隔离证明通过后，构建 auction-server 与独立 auction-cli。
 build_single() {
 	verify_artifacts
 	build_variant single "$single_build_root" "$single_artifact_root" "$single_features" \
-		auction-server auctionctl
+		auction-server auction-cli
 }
 
 verify_single_artifacts() {
@@ -397,7 +397,7 @@ verify_single_artifacts() {
 	local public_sha admin_sha binary server_tree
 	public_sha=$(web_payload_sha public)
 	admin_sha=$(web_payload_sha admin)
-	for binary in auction-server auctionctl; do
+	for binary in auction-server auction-cli; do
 		if [[ ! -s "$single_artifact_root/bin/$binary" || ! -x "$single_artifact_root/bin/$binary" ||
 		-L "$single_artifact_root/bin/$binary" ]]; then
 			printf '合并发布二进制无效：%s\n' "$binary" >&2
@@ -408,14 +408,14 @@ verify_single_artifacts() {
 	cmp "$single_artifact_root/WEB-ADMIN-MANIFEST.v1" "$embedded_artifact_root/WEB-ADMIN-MANIFEST.v1"
 	local markers=('Auction 公开站点' 'Auction 管理站点' "$public_sha" "$admin_sha")
 	assert_binary_markers contains "$single_artifact_root/bin/auction-server" 'Single server' "${markers[@]}"
-	assert_binary_markers excludes "$single_artifact_root/bin/auctionctl" 'Single auctionctl' "${markers[@]}"
+	assert_binary_markers excludes "$single_artifact_root/bin/auction-cli" 'Single auction-cli' "${markers[@]}"
 	# 先收集完整依赖图，不能让 grep -q 的提前关闭与 pipefail 掩盖违规。
 	server_tree=$(cargo tree --locked -e normal,build -p auction-server --no-default-features --features "$single_features")
-	if grep -Fq 'auctionctl v' <<<"$server_tree"; then
-		printf 'auction-server 不得依赖 auctionctl\n' >&2
+	if grep -Fq 'auction-cli v' <<<"$server_tree"; then
+		printf 'auction-server 不得依赖 auction-cli\n' >&2
 		return 1
 	fi
-	printf '合并制品双 surface、独立 auctionctl 与分体隔离门禁通过。\n'
+	printf '合并制品双 surface、独立 auction-cli 与分体隔离门禁通过。\n'
 }
 
 workspace_version() {
@@ -624,7 +624,7 @@ package_release() (
 	if [[ "$single_binary" == true ]]; then
 		verify_single_artifacts
 		selected_root="$single_artifact_root"
-		selected_binaries=(auction-server auctionctl)
+		selected_binaries=(auction-server auction-cli)
 		package_output_root="$repository_root/target/dist/package-single"
 		variant_suffix=-single
 	else
@@ -668,22 +668,12 @@ package_release() (
 	done
 
 	install_release_file ops/README.md docs/DEPLOYMENT.md 644 "$package_root"
-	# 源文档使用仓库根相对链接；装包时只把已有模板与恢复文件映射到归档布局，保留标题锚点。
-	sed -i \
-		-e 's|](ops/deploy/systemd/|](../systemd/|g' \
-		-e 's|](ops/deploy/tmpfiles/|](../tmpfiles/|g' \
-		-e 's|](ops/deploy/caddy/|](../caddy/|g' \
-		-e 's|](ops/config/|](../config/|g' \
-		-e 's|](ops/deploy/RECOVERY\.md|](RECOVERY.md|g' \
-		-e 's|](ops/deploy/LEGACY_V28_ADOPTION\.md|](LEGACY_V28_ADOPTION.md|g' \
-		-e 's|](ops/deploy/retention-policy\.v1\.json|](../retention-policy.v1.json|g' \
-		"$package_root/docs/DEPLOYMENT.md"
 	# 仓库合并安装说明，但保持归档内既有文档路径、权限及白名单。
 	printf '# systemd 服务与顺序控制\n\n见[部署手册](../docs/DEPLOYMENT.md#systemd-服务与顺序控制)。\n' \
 		>"$temporary_root/SYSTEMD.md"
 	install_release_files "$package_root" \
 		"ops/deploy/RECOVERY.md|docs/RECOVERY.md|644" \
-		"ops/deploy/LEGACY_V28_ADOPTION.md|docs/LEGACY_V28_ADOPTION.md|644" \
+		"apps/auction-cli/README.md|docs/CLI.md|644" \
 		"ops/deploy/retention-policy.v1.json|retention-policy.v1.json|644" \
 		"ops/deploy/caddy/Caddyfile|caddy/Caddyfile|644" \
 		"$temporary_root/SYSTEMD.md|systemd/README.md|644" \
@@ -712,6 +702,22 @@ package_release() (
 			"ops/deploy/systemd/auction-stack.service.example|systemd/auction-stack.service.example|644" \
 			"ops/deploy/tmpfiles/hv-auction.conf.example|tmpfiles/hv-auction.conf.example|644"
 	fi
+	# 源文档使用以仓库根为起点的相对链接；装包时只把指向已打包模板、配置、恢复手册与 CLI 说明的链接
+	# 映射到归档布局，保留标题锚点，其余仓库文档链接保持原样。
+	local packaged_docs=("$package_root/docs/DEPLOYMENT.md" "$package_root/docs/RECOVERY.md" "$package_root/docs/CLI.md")
+	if [[ "$single_binary" == true ]]; then
+		packaged_docs+=("$package_root/docs/SINGLE-SERVER.md")
+	fi
+	sed -i \
+		-e 's|](ops/deploy/systemd\([/)]\)|](../systemd\1|g' \
+		-e 's|](ops/deploy/tmpfiles\([/)]\)|](../tmpfiles\1|g' \
+		-e 's|](ops/deploy/caddy/|](../caddy/|g' \
+		-e 's|](ops/config/|](../config/|g' \
+		-e 's|](ops/deploy/RECOVERY\.md|](RECOVERY.md|g' \
+		-e 's|](ops/deploy/retention-policy\.v1\.json|](../retention-policy.v1.json|g' \
+		-e 's|](ops/README\.md|](DEPLOYMENT.md|g' \
+		-e 's|](apps/auction-cli/README\.md|](CLI.md|g' \
+		"${packaged_docs[@]}"
 
 	write_dependencies \
 		"$temporary_root/DEPENDENCIES.md" \

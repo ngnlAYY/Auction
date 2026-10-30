@@ -5,7 +5,6 @@ mod cash_gate;
 mod classification;
 mod deliveries;
 mod ledger;
-mod legacy;
 mod obligations;
 mod policy;
 mod preview;
@@ -27,7 +26,7 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 /// SQL失败仅暴露安全分类；事务owner负责重试40001/40P01并保留原命令。
-/// 旧自寄修复与内部履约复用同一映射，不另建副本。
+/// 历史自寄修复证明与内部履约复用同一映射，不另建副本。
 pub(crate) fn storage(error: sqlx::Error) -> FundingError {
     if crate::database::is_serialization_conflict(&error) {
         FundingError::SerializationConflict
@@ -55,9 +54,8 @@ pub(crate) async fn lock_funding_worlds(
     lock_rows(tx, "SELECT id FROM public.worlds ORDER BY id FOR UPDATE").await
 }
 
-/// 低频全局资金命令在资金账户之后锁定完整财务责任集合，防跨 lot 重复认领。对账、旧实收接管、
-/// 仅记账初始化与旧自寄修复共用这一份顺序，凭据锁固定在 equipment 与 users 之间，各入口不能漂移成
-/// 相反锁序；修复路径也不会把当前 manual 行改成可被外发领取的任务。
+/// 低频全局资金命令在资金账户之后锁定完整财务责任集合，防跨 lot 重复认领。现金对账与仅记账
+/// 初始化共用这一份顺序，凭据锁固定在 equipment 与 users 之间，各入口不能漂移成相反锁序。
 pub(crate) async fn lock_funding_liabilities(
     tx: &mut Transaction<'_, Postgres>,
     evidence: &SettlementInternalEvidenceSnapshot,

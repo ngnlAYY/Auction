@@ -79,7 +79,7 @@ pub(super) async fn after_credentials(
                      @> jsonb_build_array(jsonb_build_object('id',e.id::text)))))))
          ORDER BY d.id LIMIT 257 FOR UPDATE OF d"
         .replace("/* trusted_legacy_self */",
-            crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE)
+            crate::database::legacy_self_proof::TRUSTED_DELIVERY_PREDICATE)
     });
     let deliveries = sqlx::query_scalar::<_, uuid::Uuid>(sqlx::AssertSqlSafe(QUERY.as_str()))
         .bind(claim.delivery_id)

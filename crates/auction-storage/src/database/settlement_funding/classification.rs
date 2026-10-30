@@ -18,7 +18,7 @@ pub(super) async fn repaired_deliveries(
         WHERE r.uid=$1 AND (/* trusted_legacy_self */) ORDER BY d.id"
             .replace(
                 "/* trusted_legacy_self */",
-                crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE,
+                crate::database::legacy_self_proof::TRUSTED_DELIVERY_PREDICATE,
             )
     });
     // 替换只来自已审查的编译期常量，不拼接UID、业务载荷或管理员文本。

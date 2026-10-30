@@ -1,0 +1,5 @@
+# 分体部署的共享运行根；以 root:root、0644 安装为 /etc/tmpfiles.d/hv-auction.conf。
+# Public/Admin 的 Unix listener 与锁文件位于此目录；反向代理只需组遍历权限，不得授予写权限。
+# 不设置 age：只创建并调整根目录，不清理其中的 socket 或实例锁。
+# Worker unit 只通过 RuntimeDirectory 管理 /run/hv-auction/worker，不得接管共享根。
+d /run/hv-auction 0750 auction auction - -
