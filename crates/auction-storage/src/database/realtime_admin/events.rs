@@ -114,15 +114,9 @@ fn validate_event_page(
     let mut previous: Option<(&DateTime<Utc>, Uuid)> = None;
     for entry in entries {
         if entry.event_id.is_nil()
-            || entry.stream_key.is_empty()
-            || entry.stream_key != entry.stream_key.trim()
-            || entry.stream_key.len() > 256
-            || entry.stream_key.chars().any(char::is_control)
+            || !auction_domain::valid_text(&entry.stream_key, 256)
             || entry.stream_sequence <= 0
-            || entry.kind.is_empty()
-            || entry.kind != entry.kind.trim()
-            || entry.kind.len() > 128
-            || entry.kind.chars().any(char::is_control)
+            || !auction_domain::valid_text(&entry.kind, 128)
             || entry.schema_version <= 0
             || entry.created_at.timestamp_nanos_opt().is_none()
             || request

@@ -33,10 +33,7 @@ impl RepairDraftSoftCloseCommand {
             || self.command_id.is_nil()
             || self.expected_version <= 0
             || self.expected_version == i64::MAX
-            || self.actor.is_empty()
-            || self.actor.len() > 128
-            || self.actor != self.actor.trim()
-            || self.actor.chars().any(char::is_control)
+            || !auction_domain::valid_text(&self.actor, 128)
             || self.confirmation != format!("REPAIR DRAFT SOFT CLOSE {}", self.auction_id)
         {
             return Err(DraftSoftCloseError::InvalidRequest);

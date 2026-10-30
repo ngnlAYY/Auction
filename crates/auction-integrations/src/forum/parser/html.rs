@@ -96,7 +96,7 @@ fn render_post_text(element: ElementRef<'_>) -> String {
     });
     let mut source = String::new();
     let mut previous_block = None;
-    // 深度优先遍历中每个元素只入栈、出栈一次；深层 BBCode 不再为每个节点重扫祖先链。
+    // 深度优先遍历中每个元素只入栈、出栈一次；深层 BBCode 无需为每个节点重扫祖先链。
     let mut ancestors = Vec::new();
     for node in element.descendants() {
         let parent = node.parent().map(|parent| parent.id());
@@ -232,11 +232,7 @@ fn forum_account_id_from_href(href: &str) -> Option<String> {
 }
 
 fn canonical_forum_account_id(value: String) -> Option<String> {
-    (value.len() <= 32
-        && value.as_bytes().first().is_some_and(u8::is_ascii_digit)
-        && value.as_bytes().first() != Some(&b'0')
-        && value.bytes().all(|byte| byte.is_ascii_digit()))
-    .then_some(value)
+    auction_domain::valid_positive_decimal(&value, 32).then_some(value)
 }
 
 #[cfg(test)]

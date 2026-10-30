@@ -1,3 +1,4 @@
+use auction_application::AdminRuntimeDeliveryConfig;
 use serde::Deserialize;
 
 /// Delivery outbox 的独立领取、续租与外部调用边界。
@@ -24,18 +25,25 @@ pub struct DeliveryWorkerConfig {
     pub finalize_timeout_seconds: u64,
 }
 
+/// 部署 TOML 省略字段时与 runtime 接管模板使用同一组默认值，由 application 的 runtime 模型唯一持有。
 impl Default for DeliveryWorkerConfig {
     fn default() -> Self {
+        Self::from(&AdminRuntimeDeliveryConfig::default())
+    }
+}
+
+impl From<&AdminRuntimeDeliveryConfig> for DeliveryWorkerConfig {
+    fn from(delivery: &AdminRuntimeDeliveryConfig) -> Self {
         Self {
-            batch_limit: 100,
-            concurrency: 8,
-            poll_interval_seconds: 60,
-            jitter_seconds: 5,
-            lease_duration_seconds: 60,
-            renew_interval_seconds: 10,
-            sending_grace_seconds: 300,
-            request_timeout_seconds: 180,
-            finalize_timeout_seconds: 5,
+            batch_limit: delivery.batch_limit,
+            concurrency: delivery.concurrency,
+            poll_interval_seconds: delivery.poll_interval_seconds,
+            jitter_seconds: delivery.jitter_seconds,
+            lease_duration_seconds: delivery.lease_duration_seconds,
+            renew_interval_seconds: delivery.renew_interval_seconds,
+            sending_grace_seconds: delivery.sending_grace_seconds,
+            request_timeout_seconds: delivery.request_timeout_seconds,
+            finalize_timeout_seconds: delivery.finalize_timeout_seconds,
         }
     }
 }

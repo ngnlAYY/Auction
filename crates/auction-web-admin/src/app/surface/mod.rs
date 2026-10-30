@@ -10,9 +10,7 @@
 mod auctions;
 #[path = "../operations/audit.rs"]
 mod audit;
-#[path = "auth/mod.rs"]
 mod auth;
-#[path = "command.rs"]
 mod command;
 #[path = "../operations/config.rs"]
 mod config;
@@ -45,7 +43,6 @@ mod rules;
 mod settlement;
 #[path = "../operations/setup.rs"]
 mod setup;
-#[path = "shared.rs"]
 mod shared;
 #[path = "../sort.rs"]
 mod sort;

@@ -5,11 +5,8 @@
 // 子处理器沿用路由层的契约、状态和边界辅助函数；先在本模块引入，再由子模块按需使用。
 use super::*;
 
-#[path = "account.rs"]
 mod account;
-#[path = "competition/mod.rs"]
 mod competition;
-#[path = "session.rs"]
 mod session;
 mod session_preference;
 mod watch;

@@ -379,21 +379,6 @@
   opacity: 0.6;
 }
 
-.public-account-session-error {
-  position: absolute;
-  inset-block-start: calc(100% + var(--space-2));
-  inset-inline-end: 0;
-  z-index: 2;
-  inline-size: max-content;
-  max-inline-size: min(18rem, 80vw);
-  padding: var(--space-2) var(--space-3);
-  border-inline-start: 3px solid var(--color-danger);
-  color: var(--color-danger);
-  background: var(--color-surface-raised);
-  box-shadow: var(--shadow-1);
-  font-size: var(--text-sm);
-}
-
 .public-shell__content {
   inline-size: 100%;
   min-inline-size: 0;
@@ -723,8 +708,7 @@
   color: var(--color-text-muted);
 }
 
-
-/* ===== 拍卖轮次 / 状态徽标 / 倒计时 / 摘要 ===== */
+/* ===== 拍卖轮次 / 状态徽标 / 倒计时 ===== */
 
 .public-auction-round {
   display: flex;
@@ -750,7 +734,6 @@
 
 .public-auction-round__world,
 .public-auction-round__end time,
-.public-auction-summary p,
 .public-auction-page__status {
   color: var(--color-text-muted);
 }
@@ -844,7 +827,6 @@
   text-align: end;
 }
 
-.public-auction-countdown--urgent,
 .public-auction-countdown--closing {
   color: var(--color-warning);
   font-weight: var(--font-weight-strong);
@@ -853,62 +835,6 @@
 .public-auction-countdown--expired {
   color: var(--color-warning);
   font-style: italic;
-}
-
-.public-auction-summary {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-4);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-}
-
-.public-auction-summary h2 {
-  margin-block-end: var(--space-2);
-}
-
-.public-auction-summary p {
-  margin: 0;
-}
-
-.public-auction-summary__note {
-  max-inline-size: 36rem;
-  margin-block-start: var(--space-3) !important;
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-}
-
-.public-auction-summary__eyebrow {
-  margin-block-end: var(--space-2) !important;
-  color: var(--color-accent) !important;
-  font-size: var(--text-sm);
-}
-
-.public-auction-preview-stats {
-  display: grid;
-  gap: var(--space-2);
-  min-inline-size: 9rem;
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.public-auction-preview-stats div {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--space-2);
-}
-
-.public-auction-preview-stats dt {
-  color: var(--color-text-muted);
-}
-
-.public-auction-preview-stats dd {
-  margin: 0;
-  font-family: var(--font-mono);
-  text-align: end;
 }
 
 /* ===== 历史筛选（主筛选 / 设置面板 / 筛选网格） ===== */
@@ -1975,14 +1901,6 @@
   font-size: var(--text-lg);
 }
 
-.public-auction-category__header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2) var(--space-3);
-}
-
 .public-auction-category__code {
   color: var(--color-text-muted);
   font-family: var(--font-mono);
@@ -2260,8 +2178,7 @@
   font-weight: 600;
 }
 
-.public-auction-bid-log-round-world,
-.public-auction-bid-log-range {
+.public-auction-bid-log-round-world {
   color: var(--color-text-muted);
 }
 
@@ -2299,7 +2216,6 @@
     border-color: var(--color-accent);
   }
 }
-
 
 .public-auction-bid-log-table-wrap {
   overflow-x: clip;
@@ -2442,19 +2358,6 @@
 
 .public-shell .public-auction-catalog td.public-auction-catalog__actions .public-auction-catalog__actions-list > a {
   grid-column: 1 / -1;
-}
-
-.public-auction-catalog__inline-form {
-  display: grid;
-  gap: var(--space-2);
-  inline-size: min(24rem, 100%);
-  margin-block-start: var(--space-2);
-  padding-block-start: var(--space-2);
-  border-block-start: var(--border-width) solid var(--color-border);
-}
-
-.public-auction-catalog__inline-form > button {
-  justify-self: start;
 }
 
 /* 仅操作栏直属按钮拥有此样式；行内挂载的弹窗按钮由各自表单控制。 */
@@ -3057,7 +2960,6 @@
   padding: var(--space-3) var(--space-4);
   background: var(--color-surface);
 }
-
 
 .public-compensation-income {
   color: var(--color-live);

@@ -9,17 +9,11 @@ use auction_application::{
 use auction_domain::AuctionId;
 use uuid::Uuid;
 
-#[path = "catalog.rs"]
 mod catalog;
-#[path = "commands.rs"]
 mod commands;
-#[path = "helpers.rs"]
 mod helpers;
-#[path = "html.rs"]
 mod html;
-#[path = "model.rs"]
 mod model;
-#[path = "text.rs"]
 mod text;
 
 pub(super) use html::parse_html;
@@ -53,7 +47,7 @@ pub(crate) fn parse_html_pages(pages: Vec<ParsedHtmlPage>) -> Result<AdminForumP
     for page in pages {
         for post in page.into_posts() {
             if !html::canonical_post_id(&post.id)
-                // canonical 数字 ID 严格递增已经排除全部重复，不再复制 ID 维护第二个集合。
+                // canonical 数字 ID 严格递增已经排除全部重复，无需复制 ID 维护第二个集合。
                 || posts
                     .last()
                     .is_some_and(|previous| !decimal_id_precedes(&previous.id, &post.id))
@@ -141,7 +135,7 @@ fn parse_thread_with_identity(
         posts: Vec::with_capacity(posts.len().saturating_sub(1)),
         warnings: catalog_warnings,
     };
-    // 完整目录只建一次借用索引；每条命令不再线性扫描全部拍品。
+    // 完整目录只建一次借用索引；每条命令无需线性扫描全部拍品。
     let lot_codes = result.catalog.lots.iter().map(|lot| lot.code.as_str()).collect();
     for post in posts.into_iter().skip(1) {
         let (parsed, warnings) = commands::parse_bid_post(post, &lot_codes);

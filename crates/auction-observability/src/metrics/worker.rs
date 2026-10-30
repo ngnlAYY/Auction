@@ -168,14 +168,6 @@ impl WorkerRecorder for PrometheusWorkerRecorder {
     fn observe_schedule_delay(&self, loop_kind: WorkerLoop, delay: std::time::Duration) {
         self.schedule_delay.with_label_values(&[loop_kind.label()]).observe(delay.as_secs_f64());
     }
-
-    fn observe_business(&self, event: BusinessEvent, outcome: BusinessOutcome) {
-        self.business.observe(event, outcome);
-    }
-
-    fn observe_business_duration(&self, event: BusinessEvent, duration: std::time::Duration) {
-        self.business.observe_duration(event, duration);
-    }
 }
 
 fn business_event_for_worker(loop_kind: WorkerLoop) -> BusinessEvent {

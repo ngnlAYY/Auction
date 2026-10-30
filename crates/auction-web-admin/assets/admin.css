@@ -199,7 +199,6 @@
   background: var(--color-surface-raised);
 }
 
-
 .admin-login-page {
   padding-block: var(--safe-area-top) var(--safe-area-bottom);
   padding-inline: var(--safe-area-left) var(--safe-area-right);
@@ -211,7 +210,7 @@
   inline-size: auto;
   max-inline-size: 22rem;
   padding: 0 var(--space-4);
-  margin: var(--admin-space-login, 4rem) auto;
+  margin: 4rem auto;
 }
 
 .admin-login-card h1 {
@@ -355,10 +354,6 @@
   margin-block: var(--space-4);
 }
 
-.admin-panel__note--error {
-  color: var(--color-status-error);
-}
-
 .admin-mail-page {
   position: relative;
   display: block;
@@ -367,24 +362,6 @@
 .admin-mail-page > h1 {
   margin: 0 0 var(--space-4);
   font-size: var(--admin-text-title);
-}
-
-.admin-mail-controls {
-  align-items: flex-end;
-  margin-block: 0 var(--space-4);
-}
-
-.admin-mail-controls label {
-  display: grid;
-  gap: var(--admin-space-label);
-  min-inline-size: min(100%, 20rem);
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-label);
-}
-
-.admin-mail-controls input {
-  box-sizing: border-box;
-  inline-size: min(100%, 20rem);
 }
 
 .admin-mail-filters {
@@ -413,14 +390,6 @@
 .admin-mail-state-filter,
 .admin-mail-kind {
   inline-size: 6.75rem;
-}
-
-.admin-mail-badge {
-  display: inline-block;
-  padding: var(--admin-space-tiny) var(--admin-space-table-block);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-round);
-  font-size: var(--admin-text-small);
 }
 
 .admin-mail-table {
@@ -721,26 +690,6 @@
   color: var(--color-text);
 }
 
-.admin-realtime-empty {
-  margin: 0;
-  padding: var(--space-4);
-  border: var(--border-width) dashed var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  background: var(--color-surface);
-}
-
-.admin-realtime-pager {
-  align-items: center;
-  justify-content: flex-end;
-  margin-block: var(--space-3) 0;
-}
-
-.admin-realtime-pager span {
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-note);
-}
-
 .admin-mail-detail {
   margin-block-start: var(--space-5);
   padding-block-start: var(--space-4);
@@ -875,8 +824,7 @@
   overflow-wrap: anywhere;
 }
 
-.admin-panel__actions label,
-.admin-runtime-config__label {
+.admin-panel__actions label {
   display: grid;
   gap: var(--space-1);
   min-inline-size: 11rem;
@@ -891,10 +839,6 @@
 
 .admin-config-intro {
   margin-block: 0 var(--space-4);
-}
-
-.admin-config-status {
-  overflow-wrap: anywhere;
 }
 
 .admin-config-facts {
@@ -1300,12 +1244,6 @@
   color: var(--color-status-warn);
 }
 
-
-.admin-panel__wide-field {
-  flex: 1 1 100%;
-}
-
-.admin-panel__wide-field textarea,
 .admin-rules-fields textarea {
   inline-size: 100%;
 }
@@ -1458,7 +1396,6 @@
   margin-block-start: 0;
 }
 
-
 .admin-rules-preview > :last-child {
   margin-block-end: 0;
 }
@@ -1524,36 +1461,6 @@
 }
 
 /* 拍卖表保留旧版基线；lot 列表在同一变量体系内强化信息层级和响应式阅读。 */
-.admin-auctions__filters {
-  align-items: flex-end;
-  gap: var(--space-2);
-  margin-block: 0 var(--space-4);
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
-.admin-auctions__filters label {
-  display: flex;
-  min-inline-size: 0;
-  flex-direction: column;
-  gap: var(--admin-space-label);
-  color: var(--color-text);
-  font-size: var(--admin-text-label);
-}
-
-.admin-auctions__world-filter select {
-  inline-size: 4.625rem;
-}
-
-.admin-auctions__status-filter select {
-  inline-size: 8rem;
-}
-
-.admin-auctions__create-opener {
-  margin-inline-start: auto;
-}
-
 .admin-auction-lot-table {
   table-layout: fixed;
 }
@@ -1603,15 +1510,6 @@
   font-size: var(--admin-text-small);
   line-height: 1.3;
   white-space: nowrap;
-}
-
-.admin-auctions__pager {
-  align-items: center;
-}
-
-.admin-auctions__pager span {
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-note);
 }
 
 /* 拍卖页的录入表单沿用旧版的五列布局；JSON 编辑器单独占满一行。 */
@@ -1683,30 +1581,20 @@
   font-size: var(--text-lg);
 }
 
-
 @media (hover: hover) {
-  .admin-delivery__row:hover,
   .admin-credentials__row:hover,
-  .admin-users__row:hover,
-  .admin-renames__row:hover,
   .admin-realtime__row:hover {
     background: var(--color-surface);
   }
 }
 
 /* 键盘遍历行内操作时提供与悬停相同的记录定位，危险与当前状态仍由文字标明。 */
-:is(.admin-auctions__row, .admin-lots__row, .admin-delivery__row,
-    .admin-credentials__row, .admin-users__row, .admin-renames__row,
-    .admin-realtime__row, .admin-mail__row, .admin-settlement__row,
-    .admin-settlement__recovery-row):focus-within {
+:is(.admin-auctions__row, .admin-lots__row, .admin-credentials__row,
+    .admin-realtime__row, .admin-mail__row):focus-within {
   background: var(--color-surface);
 }
 
-.admin-delivery__status,
-.admin-credentials__status,
-.admin-users__status,
-.admin-users__key-status,
-.admin-renames__status {
+.admin-credentials__status {
   display: inline-block;
   padding: var(--admin-space-tiny) var(--admin-space-table-block);
   border: var(--border-width) solid var(--color-border);
@@ -1716,35 +1604,19 @@
   line-height: 1.3;
 }
 
-.admin-delivery__status--succeeded,
-.admin-delivery__status--active,
-.admin-credentials__status--active,
-.admin-users__status--active,
-.admin-users__key-status--active,
-.admin-renames__status--reverted {
+.admin-credentials__status--active {
   border-color: var(--color-status-ok);
   color: var(--color-status-ok);
 }
 
-.admin-delivery__status--pending,
-.admin-credentials__status--disabled,
-.admin-renames__status--pending {
+.admin-credentials__status--disabled {
   border-color: var(--color-status-warn);
   color: var(--color-status-warn);
 }
 
-.admin-delivery__status--failed,
-.admin-delivery__status--manual,
-.admin-credentials__status--invalid,
-.admin-users__status--blacklisted,
-.admin-users__key-status--revoked {
+.admin-credentials__status--invalid {
   border-color: var(--color-status-error);
   color: var(--color-status-error);
-}
-
-.admin-delivery__number {
-  text-align: start;
-  font-variant-numeric: tabular-nums;
 }
 
 .admin-realtime__status {
@@ -1776,7 +1648,6 @@
   white-space: nowrap;
 }
 
-.admin-delivery__actions,
 .admin-credentials__row-actions,
 .admin-realtime__actions {
   display: flex;
@@ -1921,29 +1792,9 @@
   gap: var(--space-2);
 }
 
-
 .admin-audit-metadata {
   max-inline-size: 24rem;
   overflow-wrap: anywhere;
-}
-
-.admin-settlement__stage {
-  display: inline-block;
-  padding: var(--admin-space-tiny) var(--admin-space-table-block);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-round);
-  font-size: var(--admin-text-small);
-  line-height: 1.3;
-}
-
-.admin-settlement__stage--completed {
-  border-color: var(--color-status-ok);
-  color: var(--color-status-ok);
-}
-
-.admin-settlement__stage--attention {
-  border-color: var(--color-status-warn);
-  color: var(--color-status-warn);
 }
 
 .admin-delivery-page {
@@ -2046,44 +1897,6 @@
   border: 0;
 }
 
-.admin-delivery__pager {
-  align-items: center;
-  justify-content: flex-end;
-  margin-block: var(--space-3) 0;
-}
-
-.admin-delivery__pager span {
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-note);
-}
-
-.admin-status-page__probes {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3);
-  margin-block: var(--space-5);
-}
-
-.admin-status-page__probe {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  border: var(--border-width) solid var(--color-border);
-  background: var(--color-surface);
-}
-
-.admin-status-page__probe h2 {
-  margin: 0;
-  font-size: var(--text-base);
-  font-weight: 600;
-}
-
-.admin-status-page__actions {
-  margin-block-end: 0;
-}
-
 .admin-quick-links {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
@@ -2127,16 +1940,6 @@
 .admin-quick-link__icon--settlement,
 .admin-quick-link__icon--status {
   border-radius: 2px;
-}
-
-.admin-quick-link__copy {
-  display: grid;
-  gap: var(--space-1);
-}
-
-.admin-quick-link__copy small {
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-label);
 }
 
 .admin-dashboard-shortcuts {
@@ -2411,27 +2214,6 @@
   padding: var(--space-1) var(--space-2);
 }
 
-.admin-users__heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-  margin-block-end: var(--space-4);
-}
-
-.admin-users__heading h1 {
-  margin: 0;
-  font-size: var(--admin-text-title);
-}
-
-.admin-users__create-grid label {
-  min-inline-size: 12rem;
-}
-
-.admin-users__create-opener {
-  margin: 0;
-}
-
 .admin-users-secret {
   display: grid;
   gap: var(--space-2);
@@ -2442,60 +2224,6 @@
   overflow-wrap: anywhere;
   color: var(--color-text);
   background: var(--color-bg);
-}
-
-.admin-users__row-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.admin-users__feedback {
-  color: var(--color-success);
-  font-size: var(--admin-text-label);
-}
-
-.admin-users__history {
-  max-inline-size: 18rem;
-}
-
-.admin-users__history summary {
-  max-inline-size: 18rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.admin-users__history ol {
-  display: grid;
-  gap: var(--space-2);
-  margin: var(--space-2) 0 0;
-  padding-inline-start: var(--space-5);
-}
-
-.admin-users__history li span,
-.admin-users__history li time,
-.admin-users__history p {
-  display: block;
-  overflow-wrap: anywhere;
-}
-
-.admin-users__history li time,
-.admin-users__history p,
-.admin-users__history-empty {
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-note);
-}
-
-.admin-users__history p {
-  margin-block: var(--space-2) 0;
-}
-
-.admin-credentials__filters {
-  padding: 0;
-  border: 0;
-  background: transparent;
 }
 
 .admin-credentials-page > h1 {
@@ -2558,75 +2286,6 @@
   font-weight: 600;
 }
 
-.admin-credentials-table-wrap + .admin-shell__status {
-  margin-block-start: 1em;
-}
-
-.admin-credentials__filters h2 {
-  margin-block: 0 var(--space-2);
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-label);
-  font-weight: 600;
-}
-
-.admin-credentials__filters .admin-panel__actions {
-  align-items: end;
-  margin-block: 0;
-}
-
-.admin-credentials__import {
-  display: block;
-  inline-size: min(100%, 32rem);
-  margin-block: 0 var(--space-5);
-}
-
-.admin-credentials__import h2 {
-  margin-block: 0 var(--space-2);
-}
-
-.admin-credentials__import .admin-panel__note {
-  margin-block-end: var(--space-3);
-}
-
-.admin-credentials__create-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--admin-space-table-inline);
-}
-
-.admin-credentials__create-form label {
-  display: flex;
-  flex-direction: column;
-  gap: var(--admin-space-label);
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-note);
-}
-
-.admin-credentials__create-form input,
-.admin-credentials__create-form select {
-  padding: var(--admin-space-control) var(--space-2);
-}
-
-.admin-credentials__create-form button {
-  align-self: flex-start;
-  margin-block-start: var(--space-2);
-}
-
-.admin-credentials__list {
-  display: block;
-}
-
-.admin-credentials__pager {
-  align-items: center;
-  justify-content: flex-end;
-  margin-block: var(--space-3) 0;
-}
-
-.admin-credentials__pager span {
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-note);
-}
-
 .admin-credentials__row-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2646,8 +2305,6 @@
   color: var(--color-danger);
 }
 
-.admin-credentials__dialog-row,
-.admin-credentials__dialog-row > td,
 .admin-credentials-dialog-row,
 .admin-credentials-dialog-row > td {
   block-size: 0;
@@ -2810,10 +2467,6 @@
   color: var(--color-text-muted);
 }
 
-.admin-auction-page .admin-auction-empty {
-  margin-block-start: 1em;
-}
-
 .admin-auction-error {
   color: var(--color-status-error);
   font-size: var(--admin-text-note);
@@ -2901,30 +2554,6 @@
   resize: vertical;
 }
 
-
-.admin-settlement__pager {
-  align-items: center;
-  margin-block: var(--space-3);
-}
-
-.admin-settlement__pager span {
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-note);
-}
-
-.admin-settlement__report,
-.admin-settlement__summary,
-.admin-settlement__recovery {
-  margin-block-start: var(--space-6);
-}
-
-.admin-settlement__report h2,
-.admin-settlement__summary h2,
-.admin-settlement__recovery h2 {
-  margin-block: 0 var(--space-3);
-  font-size: var(--text-lg);
-}
-
 .admin-settlement__table-wrap {
   max-inline-size: 100%;
   overflow-x: clip;
@@ -2980,62 +2609,11 @@
   }
 }
 
-@media (hover: hover) {
-  .admin-settlement__recovery-row:hover {
-    background: var(--color-surface);
-  }
-}
-
-.admin-settlement__stage--active {
-  border-color: var(--color-status-info, var(--color-border));
-  color: var(--color-status-info, var(--color-text));
-}
-
-.admin-settlement__amount {
-  font-variant-numeric: tabular-nums;
-}
-
-.admin-settlement__cards {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-  margin-block-end: var(--space-5);
-}
-
-.admin-settlement__metric {
-  min-inline-size: calc(var(--space-6) * 4);
-  padding: var(--space-3) var(--space-4);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-.admin-settlement__metric strong {
-  font-size: var(--text-xl);
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-
-.admin-settlement__metric span {
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-label);
-}
-
 .admin-settlement__table-wrap td small {
   display: block;
   margin-block-start: var(--space-1);
   color: var(--color-text-muted);
   font-size: var(--admin-text-small);
-}
-
-.admin-settlement__commands {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
-.admin-lots__back {
-  margin: 0 0 var(--space-4);
-  color: var(--color-text-muted);
 }
 
 .admin-lots__slow-schedule {
@@ -3051,30 +2629,8 @@
   gap: var(--space-2);
 }
 
-.admin-lots__proxy-table-wrap {
-  max-inline-size: 100%;
-  overflow-x: clip;
-}
-
-.admin-lots__proxy-table {
-  inline-size: 100%;
-  border-collapse: collapse;
-  font-size: var(--admin-text-table);
-}
-
-.admin-lots__proxy-table td {
-  padding: var(--admin-space-table-block) var(--admin-space-table-inline);
-  border-block-end: var(--border-width) solid var(--color-border);
-  text-align: left;
-  vertical-align: top;
-}
-
-.admin-lots__dialog-row,
-.admin-lots__dialog-row > td,
 .admin-auction-dialog-row,
-.admin-auction-dialog-row > td,
-.admin-renames__dialog-row,
-.admin-renames__dialog-row > td {
+.admin-auction-dialog-row > td {
   block-size: 0;
   padding: 0;
   border: 0;
@@ -3090,16 +2646,6 @@
   display: block;
 }
 
-.admin-settlement__amount {
-  font-variant-numeric: tabular-nums;
-}
-
-@media (hover: hover) {
-  .admin-settlement__row:hover {
-    background: var(--color-surface);
-  }
-}
-
 .admin-realtime-dialog label {
   margin-block-start: var(--space-3);
 }
@@ -3107,10 +2653,6 @@
 .admin-realtime-dialog .admin-panel__actions {
   margin-block-start: var(--space-4);
 }
-
-
-
-
 
 /* 旧版 Dashboard 的卡片、状态徽章和动作区视觉契约。 */
 .admin-dashboard-page {
@@ -3204,8 +2746,6 @@
 .admin-dashboard-panel .admin-dashboard-cards--timestamps {
   grid-template-columns: minmax(0, 1fr);
 }
-
-
 
 .admin-dashboard-card {
   display: grid;
@@ -3354,7 +2894,6 @@
   font-size: var(--text-base);
 }
 
-
 /* 管理拍品列表使用独立的高密度数据表层级；其它 Admin 表格暂不受影响。 */
 .admin-auction-lot-table-wrap {
   border: var(--border-width) solid var(--color-border);
@@ -3484,7 +3023,6 @@
   text-align: start;
 }
 
-
 /* 审计日志保留高密度事实表，同时为长标识和窄屏建立独立的信息层级。 */
 .admin-audit-table-wrap {
   border: var(--border-width) solid var(--color-border);
@@ -3605,7 +3143,6 @@
   max-inline-size: none;
   color: var(--color-text-muted);
 }
-
 
 /* 业务世界是数据库即时开关；与下方重启生效的 Worker 入站 TOML 明确分区。 */
 .admin-business-worlds {
@@ -3736,11 +3273,9 @@
   background: var(--color-input-bg);
 }
 
-
 .admin-settlement-layout__report .admin-auction-report:first-of-type {
   margin-block-start: 0;
 }
-
 
 /* 表头排序触发按钮：占满表头单元格，箭头只做视觉指示（aria-hidden）。 */
 .admin-sort-trigger {
@@ -3891,9 +3426,6 @@
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-
-
-
 
 /* 未决区只展示一次；布局变化不复制冻结工厂，也不替换命令 UUID。 */
 .admin-pending {

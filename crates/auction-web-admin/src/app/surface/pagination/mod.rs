@@ -101,7 +101,7 @@ where
     })
 }
 
-/// 保留表格原有标签，统一注入数字页码、数量文案、上限与偏好写入。
+/// 保留表格原有标签，统一注入翻页/跳页文案、数字页码、数量文案、上限与偏好写入。
 #[component]
 pub(crate) fn AdminPager(
     pagination: AdminPagination,
@@ -110,11 +110,6 @@ pub(crate) fn AdminPager(
     total: Option<i64>,
     #[props(default)] has_more: bool,
     label: String,
-    previous_label: String,
-    status: Callback<(i64, i64), String>,
-    next_label: String,
-    jump_label: String,
-    jump_button_label: String,
     on_page_change: EventHandler<i64>,
     /// 本地报告页码不写历史；数量选择自行创建历史项。
     #[props(default)]
@@ -132,7 +127,12 @@ pub(crate) fn AdminPager(
             page, page_size, total, has_more,
             max_page,
             max_page_size: maximum,
-            label, previous_label, status, next_label, jump_label, jump_button_label,
+            label,
+            previous_label: t!("admin-pagination-previous"),
+            status: Callback::new(|(page, pages): (i64, i64)| t!("admin-pagination-status", page: page, pages: pages)),
+            next_label: t!("admin-pagination-next"),
+            jump_label: t!("admin-pagination-input"),
+            jump_button_label: t!("admin-pagination-go"),
             total_summary: total.map(|count| t!("admin-pagination-total", count: count.to_string())).unwrap_or_default(),
             page_size_options: vec![10, 20, 50, 100],
             page_size_label: t!("admin-pagination-size"),

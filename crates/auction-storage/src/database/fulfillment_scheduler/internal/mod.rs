@@ -159,7 +159,7 @@ pub(super) async fn lock_legacy(
     } else if custody.is_some() {
         return Err(FundingError::Invalid);
     }
-    locks::worlds(tx).await?;
+    crate::database::settlement_funding::lock_funding_worlds(tx).await?;
     let protected = crate::settlement_funding::funding_requires_authorization(tx).await?;
     locks::before_credentials(tx, claim).await?;
     if let Some((evidence, _)) = custody {

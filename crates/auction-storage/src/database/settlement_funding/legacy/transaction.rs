@@ -118,23 +118,13 @@ async fn apply(
         .await
         .map_err(evidence_error)?;
     // 与开户和普通履约使用同一个锁前缀；低频修复锁完整责任集合，防跨lot重复认领。
-    lock_rows(tx, "SELECT id FROM public.worlds ORDER BY id FOR UPDATE").await?;
+    lock_funding_worlds(tx).await?;
     let account =
         lock_funding_account(tx, &command.expected_uid).await?.ok_or(FundingError::Unavailable)?;
     if !account.ready() {
         return Err(FundingError::Unavailable);
     }
-    lock_rows(tx, "SELECT id FROM public.auctions ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.settlement_recoveries ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.lots ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.equipment ORDER BY id FOR UPDATE").await?;
-    crate::lock_mail_evidence_credentials(tx, evidence).await.map_err(evidence_error)?;
-    lock_rows(tx, "SELECT id FROM public.users ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.settlement_obligations ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.settlement_recovery_actions ORDER BY id FOR UPDATE")
-        .await?;
-    lock_rows(tx, "SELECT id FROM public.deliveries ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx,"SELECT obligation_id FROM public.settlement_obligation_fulfillments ORDER BY obligation_id FOR UPDATE").await?;
+    lock_funding_liabilities(tx, evidence).await?;
     if let Some(result) = replay(tx, command).await? {
         return Ok(Some(result));
     }
@@ -190,12 +180,4 @@ async fn apply(
         request_digest: command.request_digest()?,
     };
     super::record::retain(tx, &account, &mutation, command, &target, evidence).await.map(Some)
-}
-
-async fn lock_rows(
-    tx: &mut Transaction<'_, Postgres>,
-    query: &'static str,
-) -> Result<(), FundingError> {
-    sqlx::query(query).execute(&mut **tx).await.map_err(storage)?;
-    Ok(())
 }

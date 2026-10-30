@@ -100,23 +100,6 @@
     overflow: visible;
   }
 
-  .admin-users__heading {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .admin-users__heading .admin-users__create-opener {
-    align-self: flex-start;
-  }
-
-  .admin-auctions__create-opener {
-    margin-inline-start: 0;
-  }
-
-  .admin-auctions__table-wrap {
-    inline-size: 100%;
-  }
-
   .admin-auctions__actions {
     align-items: flex-start;
     flex-direction: column;
@@ -132,19 +115,6 @@
   }
 }
 @media screen and (max-width: 48rem) {
-  .admin-status-page__probes {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .admin-mail-controls {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .admin-mail-controls label,
-  .admin-mail-controls input {
-    inline-size: 100%;
-  }
 
   .admin-mail-polling {
     position: static;
@@ -153,16 +123,6 @@
 
   .admin-mail-search {
     grid-template-columns: 1fr;
-  }
-
-  .admin-credentials__filters .admin-panel__actions {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .admin-credentials__filters label,
-  .admin-credentials__filters select {
-    inline-size: 100%;
   }
 
   .admin-realtime-section__header {
@@ -261,9 +221,7 @@
     gap: var(--space-3);
   }
 
-  .admin-panel__actions label,
-  .admin-runtime-config__label,
-  .admin-users__create-grid label {
+  .admin-panel__actions label {
     min-inline-size: 0;
     max-inline-size: 100%;
   }
@@ -278,16 +236,14 @@
 
   .admin-users-filter label,
   .admin-users-renames-filter label,
-  .admin-delivery-filter label,
-  .admin-auctions__filters label {
+  .admin-delivery-filter label {
     min-inline-size: 0;
     flex: 1 1 10rem;
   }
 
   .admin-users-filter :is(input, select),
   .admin-users-renames-filter input,
-  .admin-delivery-filter select,
-  .admin-auctions__filters select {
+  .admin-delivery-filter select {
     inline-size: 100%;
     min-inline-size: 0;
   }

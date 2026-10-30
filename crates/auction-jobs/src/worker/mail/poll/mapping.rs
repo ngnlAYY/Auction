@@ -28,11 +28,8 @@ pub(super) fn valid_page(
                 == page.messages.last().map(|message| message.external_mail_id.as_str())
         }
         && page.messages.iter().all(|message| {
-            !message.external_mail_id.is_empty()
-                // 任意成功前缀的末封邮件都可能成为 cursor，必须满足持久化游标的长度边界。
-                && message.external_mail_id.len() <= 256
-                && message.external_mail_id == message.external_mail_id.trim()
-                && !message.external_mail_id.chars().any(char::is_control)
+            // 任意成功前缀的末封邮件都可能成为 cursor，必须满足持久化游标的长度边界。
+            auction_domain::valid_text(&message.external_mail_id, 256)
                 && message.world_id == world_id
                 && message.subject.len() <= 512
                 && !message.subject.chars().any(char::is_control)

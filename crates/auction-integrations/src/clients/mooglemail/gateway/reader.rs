@@ -41,10 +41,7 @@ impl MoogleMailGateway {
             return Err(configuration(MoogleMailWorld::Main));
         }
         for (index, sender) in config.sender_allowlist.iter().enumerate() {
-            if sender.is_empty()
-                || sender != sender.trim()
-                || sender.len() > 256
-                || sender.chars().any(char::is_control)
+            if !auction_domain::valid_text(sender, 256)
                 || config.sender_allowlist[..index]
                     .iter()
                     .any(|previous| previous.eq_ignore_ascii_case(sender))

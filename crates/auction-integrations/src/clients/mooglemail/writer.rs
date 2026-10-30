@@ -7,13 +7,9 @@ use super::{
     protocol::{valid_decimal_id, valid_line},
 };
 
-#[path = "writer/common.rs"]
 mod common;
-#[path = "writer/compose.rs"]
 mod compose;
-#[path = "writer/model.rs"]
 mod model;
-#[path = "writer/response.rs"]
 mod response;
 
 pub use model::{MoogleMailComposeState, MoogleMailSendResponseFailure};

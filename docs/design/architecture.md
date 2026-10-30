@@ -58,17 +58,20 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
   `board/data.rs` 绑定查询快照身份，`api/model.rs` 仅解析浏览器查询及校验返回归属；无新持久化能力或迁移阶段。
 - 跨层共用规则：闭集枚举持久化名称（`auction-domain::stable_name`）、规范单行文本与正十进制外部 ID（`auction-domain::text`）、
   MoogleMail 通知模板闭集及占位符（`auction-application` 的 `runtime_config/mail_templates.rs`）、PostgreSQL 可重试冲突谓词、
-  命令 ID advisory 锁键、运维库名谓词与只读快照上限（均在 `auction-storage::database::backend`）、资金 SQL/证据错误映射
-  （`auction-storage::database::settlement_funding`）、页面可见性等待（`auction-web-shared::visibility`）与 popstate 位置版本
-  （`auction-web-shared::query::use_popstate_revision`）各只有一份实现；
+  命令 ID advisory 锁键、运维库名谓词与只读快照上限（均在 `auction-storage::database::backend`）、资金 SQL/证据错误映射及
+  全局资金锁序（`auction-storage::database::settlement_funding` 的 `lock_funding_worlds`/`lock_funding_liabilities`）、
+  页面可见性等待（`auction-web-shared::visibility`）、popstate 位置版本（`auction-web-shared::query::use_popstate_revision`）
+  与两端旧版浏览器 UUID 格式（`auction-web-shared::validation::is_legacy_uuid`）各只有一份实现；部署 TOML 的
+  HTTP 安全、投递与恢复 Worker 默认值经 config 的 `From` 转换取自 application runtime 模型，不另存数字；
   HTTP wire 映射与浏览器严格解码仍由各自 owner 显式维护，不直接复用持久化名称。
   旧版 Go JSON 转义由应用层 `ports/core/encoding.rs` 统一按片段输出，命令摘要和履约 canonical 分别消费；
   兼容字段顺序及历史字节仍由对应命令/证明 owner 拥有。
   页面可见性监听器由 shared 层的 RAII 守卫卸载，回调不反向持有监听器；各 surface 继续决定恢复可见后的刷新策略。
   固定业务指标由 observability 在初始化时绑定共享句柄，业务调用方不持有 Prometheus 注册表或动态 label。
   HTTP 的规范 UUID 和旧 v1 JSON 媒体类型校验分别复用单一谓词；各路由继续拥有鉴权顺序、错误外壳和兼容输入范围。
-  结算义务的生成与逐条比对共用 application 构造流程；storage 借用已校验计划，在原事务内有界批量写入明细，
-  用例直接返回原计划；纯读取复用只读快照入口。
+  结算义务的生成与逐条比对共用 application 构造流程；storage 借用已校验计划，在原事务内用一条语句关闭全部 lot，
+  并以每批至多 256 行写入明细、补偿账本、义务/履约及 recovery，锁序与写入先后不变；用例直接返回原计划；
+  纯读取复用只读快照入口。
   配置 loader 在返回成功前校验公共日志过滤表达式，observability 仍独占 subscriber 初始化。
 - 草稿软截止：`auction-application::draft_soft_close` 拥有修正规则与窄端口，
   `auction-storage::database::draft_soft_close` 独占一致快照检查、Serializable/CAS、原命令账本及追加审计，

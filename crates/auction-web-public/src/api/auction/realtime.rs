@@ -486,7 +486,7 @@ where
             }
         };
         let Message::Text(message) = message else {
-            // 二进制帧不再直接终止订阅：按毒帧计数，连续超限才断开重连。
+            // 二进制帧不直接终止订阅：按毒帧计数，连续超限才断开重连。
             consecutive_bad_frames += 1;
             if consecutive_bad_frames >= MAX_CONSECUTIVE_BAD_FRAMES {
                 return Err(RealtimeError::transient("实时 WebSocket 连续返回不支持的二进制帧"));

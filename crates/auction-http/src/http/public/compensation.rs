@@ -324,7 +324,7 @@ fn decode_cursor(raw: &str) -> Result<PublicCompensationCursor, ()> {
     if raw == "start" {
         return Ok(PublicCompensationCursor::Start);
     }
-    // 固定 26 字节只接受 35 个无填充字符；严格引擎校验规范尾位，不再分配解码/重编码副本。
+    // 固定 26 字节只接受 35 个无填充字符；严格引擎校验规范尾位，无需分配解码/重编码副本。
     if raw.len() != 35 {
         return Err(());
     }

@@ -192,10 +192,7 @@ impl OperationsAlertTarget {
     /// 校验 world 和收件人边界；收件人不会进入 signal fingerprint。
     pub fn validate(&self) -> Result<(), OperationsAlertError> {
         if !matches!(self.world_id.as_str(), "main" | "isekai")
-            || self.recipient.is_empty()
-            || self.recipient != self.recipient.trim()
-            || self.recipient.len() > 256
-            || self.recipient.chars().any(char::is_control)
+            || !auction_domain::valid_text(&self.recipient, 256)
         {
             return Err(OperationsAlertError::Invalid);
         }

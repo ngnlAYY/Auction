@@ -135,13 +135,6 @@ pub(super) fn AdminSettlementCatalogPager(
             page_size: page_size.max(1),
             total: Some(total),
             label: t!("admin-settlement-auction-pagination"),
-            previous_label: t!("admin-pagination-previous"),
-            status: move |(page, pages): (i64, i64)| {
-                t!("admin-pagination-status", page: page, pages: pages)
-            },
-            next_label: t!("admin-pagination-next"),
-            jump_label: t!("admin-pagination-input"),
-            jump_button_label: t!("admin-pagination-go"),
             on_size_reset: move |_| {
                 // 数量只重置目录页；保持选定场次、两个报告分页及未结束的命令上下文。
                 catalog_page.set(1);

@@ -2,13 +2,9 @@
 //! 事件元数据、lag/failure 读取、replay 命令、安全投影映射和共享分页/错误边界分别由
 //! 子模块拥有；本模块只保留路由可见的稳定处理器出口。
 
-#[path = "common.rs"]
 mod common;
-#[path = "mapping.rs"]
 mod mapping;
-#[path = "reads.rs"]
 mod reads;
-#[path = "replay.rs"]
 mod replay;
 
 pub(super) use super::{

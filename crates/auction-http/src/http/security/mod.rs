@@ -275,7 +275,7 @@ impl RateLimiter {
         }
         if entries.len() >= self.max_entries {
             // 窗口已过期的记录与缺失记录等价（下次访问会重置），可整批移除而不改变限流结果；
-            // 同一次遍历记录最久未见者，全部活跃时不再二次扫描满表。时间相同时仍按 IP 排序。
+            // 同一次遍历记录最久未见者，全部活跃时无需二次扫描满表。时间相同时仍按 IP 排序。
             let mut oldest: Option<(Instant, IpAddr)> = None;
             entries.retain(|address, value| {
                 if now.duration_since(value.started) >= self.window {

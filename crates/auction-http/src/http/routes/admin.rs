@@ -2,13 +2,9 @@
 //! 各组处理器保留在同一 Admin surface 的稳定导出下；具体会话、生命周期、报告和恢复确认
 //! 逻辑分别由子模块拥有。
 
-#[path = "admin/lifecycle.rs"]
 mod lifecycle;
-#[path = "admin/recovery.rs"]
 mod recovery;
-#[path = "admin/reports.rs"]
 mod reports;
-#[path = "admin/session.rs"]
 mod session;
 
 pub(crate) const ADMIN_SESSION_COOKIE: &str = "auction_admin_session";

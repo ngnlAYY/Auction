@@ -119,11 +119,7 @@ pub(crate) fn validate_metrics_listener(
 }
 
 pub(crate) fn validate_realtime(config: &RealtimeConfig) -> Result<(), ConfigError> {
-    if config.consumer_key.trim().is_empty()
-        || config.consumer_key != config.consumer_key.trim()
-        || config.consumer_key.len() > 128
-        || config.consumer_key.chars().any(char::is_control)
-    {
+    if !auction_domain::valid_text(&config.consumer_key, 128) {
         return Err(ConfigError::InvalidRealtimeConfig(
             "consumer_key 必须是 1 至 128 字节的无控制字符标识",
         ));

@@ -151,12 +151,7 @@ fn valid_optional_timestamp(value: Option<DateTime<Utc>>) -> bool {
 }
 
 fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {
-    value.is_none_or(|value| {
-        !value.is_empty()
-            && value == value.trim()
-            && value.len() <= maximum
-            && !value.chars().any(char::is_control)
-    })
+    value.is_none_or(|value| auction_domain::valid_text(value, maximum))
 }
 
 fn valid_optional_multiline_text(value: Option<&str>, maximum: usize) -> bool {

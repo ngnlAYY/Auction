@@ -2,11 +2,8 @@
 
 use std::fmt::Write;
 
-#[path = "render/countdown.rs"]
 mod countdown;
-#[path = "render/log.rs"]
 mod log;
-#[path = "render/settlement.rs"]
 mod settlement;
 
 use auction_application::{

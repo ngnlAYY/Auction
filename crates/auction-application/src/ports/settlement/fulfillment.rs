@@ -382,27 +382,13 @@ pub trait SettlementFulfillmentStore: Send + Sync {
 
 /// 结算履约用例端口；Worker 只负责调度，不自己拼接或写入 delivery payload。
 pub trait SettlementFulfillmentCommandPort: Send + Sync {
-    /// 新版 Worker 使用此入口；旧实现仍明确执行原外部准备，不改变已有测试/适配器签名。
+    /// 准备下一阶段：外部履约返回 delivery 准备结果，已由内部证明满足的义务返回无 delivery 结果。
     fn prepare_next(
         &self,
         claim: SettlementFulfillmentClaim,
         prepared_at: DateTime<Utc>,
         retry_delay: Duration,
-    ) -> ApplicationFuture<'_, crate::SettlementFulfillmentPreparationOutcome> {
-        Box::pin(async move {
-            self.prepare(claim, prepared_at, retry_delay)
-                .await
-                .map(Box::new)
-                .map(crate::SettlementFulfillmentPreparationOutcome::External)
-        })
-    }
-
-    fn prepare(
-        &self,
-        claim: SettlementFulfillmentClaim,
-        prepared_at: DateTime<Utc>,
-        retry_delay: Duration,
-    ) -> ApplicationFuture<'_, SettlementFulfillmentPhaseResult<SettlementFulfillmentResult>>;
+    ) -> ApplicationFuture<'_, crate::SettlementFulfillmentPreparationOutcome>;
 
     fn activate(
         &self,

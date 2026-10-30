@@ -6,10 +6,10 @@
 //! `lot`（lot 目录/详情与竞价命令）、`account`（我的竞价与代理授权）；本文件只保留共享
 //! envelope 解码与基础谓词原语。
 
+use auction_web_shared::is_legacy_uuid as uuid;
 use gloo_net::http::Response;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
-use uuid::{Uuid, Variant};
 
 #[cfg(not(target_arch = "wasm32"))]
 use chrono::DateTime;
@@ -248,17 +248,6 @@ fn time_value(value: Option<&Value>) -> Option<f64> {
     string(value)
         .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|value| value.timestamp_millis() as f64)
-}
-
-fn uuid(value: &str) -> bool {
-    Uuid::parse_str(value).is_ok_and(|id| {
-        // 列表与实时帧逐字段校验规范形式；栈缓冲避免为每个 UUID 创建临时字符串。
-        let mut buffer = Uuid::encode_buffer();
-        id.hyphenated().encode_lower(&mut buffer) == value
-            && !id.is_nil()
-            && (1..=5).contains(&id.get_version_num())
-            && id.get_variant() == Variant::RFC4122
-    })
 }
 
 #[cfg(target_arch = "wasm32")]

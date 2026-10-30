@@ -76,7 +76,7 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
     let mut start_price = use_signal(String::new);
     let mut player_id = use_signal(String::new);
     let mut result = use_signal(|| None::<AdminIntakeResult>);
-    // 服务端返回的错误码；输入层校验错误由各字段信号承担，不再走整页提示。
+    // 服务端返回的错误码；输入层校验错误由各字段信号承担，不走整页提示。
     let mut failure = use_signal(|| None::<String>);
     let mut field_errors = use_signal(IntakeFieldErrors::default);
     let empty_value = t!("value-empty");

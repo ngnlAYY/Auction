@@ -5,7 +5,6 @@ use dioxus::prelude::*;
 
 use auction_web_shared::TruncatedText;
 
-use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
 use auction_web_shared::{AsyncState, AsyncStateKind, Time};
 
 use crate::api::{RealtimeFailure, RealtimeFailurePage};
@@ -119,33 +118,5 @@ fn compact_realtime_id(value: &str) -> String {
     } else {
         let start = value.char_indices().rev().nth(7).map_or(0, |(index, _)| index);
         value[start..].to_owned()
-    }
-}
-
-/// 控制 failure 列表分页。
-#[component]
-pub(super) fn RealtimeFailurePager(
-    page: i64,
-    page_size: i64,
-    total: i64,
-    pagination: AdminPagination,
-    on_page_change: EventHandler<i64>,
-) -> Element {
-    rsx! {
-        Pager {
-            pagination,
-            page,
-            page_size,
-            total: Some(total),
-            label: t!("realtime-failure-title"),
-            previous_label: t!("admin-pagination-previous"),
-            status: move |(page, pages): (i64, i64)| {
-                t!("admin-pagination-status", page: page, pages: pages)
-            },
-            next_label: t!("admin-pagination-next"),
-            jump_label: t!("admin-pagination-input"),
-            jump_button_label: t!("admin-pagination-go"),
-            on_page_change,
-        }
     }
 }

@@ -232,8 +232,6 @@ pub trait WorkerRecorder: Send + Sync {
     fn observe_batch(&self, loop_kind: WorkerLoop, items: usize, capacity: usize);
     fn observe_retry(&self, loop_kind: WorkerLoop, retry_kind: WorkerRetryKind);
     fn observe_schedule_delay(&self, loop_kind: WorkerLoop, delay: std::time::Duration);
-    fn observe_business(&self, _event: BusinessEvent, _outcome: BusinessOutcome) {}
-    fn observe_business_duration(&self, _event: BusinessEvent, _duration: std::time::Duration) {}
 }
 
 #[derive(Debug, Default)]

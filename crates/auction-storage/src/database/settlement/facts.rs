@@ -2,16 +2,14 @@
 
 use super::*;
 
-const LOT_SETTLEMENT_BATCH_SIZE: usize = 256;
-
-struct CompensationLedgerEntry<'a> {
-    command_id: CommandId,
+/// 已校验的补偿池账本条目；ID、序号和余额在任何写入前全部算好。
+struct CompensationLedgerEntry {
+    id: Uuid,
     sequence: i32,
-    movement_kind: &'a str,
+    movement_kind: &'static str,
     amount: i64,
-    balance_after: i128,
+    balance_after: i64,
     lot_id: Option<auction_domain::LotId>,
-    occurred_at: DateTime<Utc>,
 }
 
 /// 把仍为 live 的 lot 按结算明细关闭；价格、领先者和状态必须与锁内计划保持一致。
@@ -21,31 +19,39 @@ pub(super) async fn close_settlement_lots(
     plan: &SettlementPlan,
     occurred_at: DateTime<Utc>,
 ) -> Result<(), SettlementTransactionError> {
-    for line in &plan.lines {
-        let next_status = if line.end_price.value() == 0 { "unsold" } else { "sold" };
-        let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
-        let updated = sqlx::query(
-            r#"UPDATE public.lots
-               SET status = $3, slow_authorization_id = NULL, slow_due_at = NULL,
-                   state_version = state_version + 1, updated_at = $5
-               WHERE id = $1 AND auction_id = $2 AND status = 'live'
-                 AND (($3 = 'sold' AND leader_user_id IS NOT NULL AND current_price = $4)
-                   OR ($3 = 'unsold' AND leader_user_id IS NULL))"#,
-        )
-        .bind(line.lot_id.as_uuid())
-        .bind(auction_id.as_uuid())
-        .bind(next_status)
-        .bind(line.end_price.value())
-        .bind(occurred_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?;
-        if updated.rows_affected() != 1 {
-            return Err(invalid("结算 lot 状态、领先者或价格与领域计划不一致"));
-        }
+    let lot_ids: Vec<Uuid> = plan.lines.iter().map(|line| line.lot_id.as_uuid()).collect();
+    let next_statuses: Vec<&str> = plan
+        .lines
+        .iter()
+        .map(|line| if line.end_price.value() == 0 { "unsold" } else { "sold" })
+        .collect();
+    let end_prices: Vec<i64> = plan.lines.iter().map(|line| line.end_price.value()).collect();
+    let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
+    // 结算快照已按 lot_number 锁定全部 lot，单条语句不改变锁序；任一行的状态、领先者或价格
+    // 与计划不符都会使更新行数小于明细数，整笔事务失败，计划中的重复 lot 同样无法凑足行数。
+    let updated = sqlx::query(
+        r#"UPDATE public.lots AS lot
+           SET status = planned.next_status, slow_authorization_id = NULL, slow_due_at = NULL,
+               state_version = lot.state_version + 1, updated_at = $5
+           FROM UNNEST($1::uuid[], $2::text[], $3::bigint[])
+               AS planned(lot_id, next_status, end_price)
+           WHERE lot.id = planned.lot_id AND lot.auction_id = $4 AND lot.status = 'live'
+             AND ((planned.next_status = 'sold' AND lot.leader_user_id IS NOT NULL
+                   AND lot.current_price = planned.end_price)
+               OR (planned.next_status = 'unsold' AND lot.leader_user_id IS NULL))"#,
+    )
+    .bind(&lot_ids)
+    .bind(&next_statuses)
+    .bind(&end_prices)
+    .bind(auction_id.as_uuid())
+    .bind(occurred_at)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    if updated.rows_affected() != plan.lines.len() as u64 {
+        return Err(invalid("结算 lot 状态、领先者或价格与领域计划不一致"));
     }
 
-    let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
     // 撤回记录不属于结算明细，但它们残留的活动代理同样必须阻止结算提交。
     // 活动授权的部分唯一索引保证每个 lot 至多匹配一行，计数无需 DISTINCT 排序或去重。
     let counts = sqlx::query(
@@ -83,7 +89,7 @@ pub(super) async fn insert_lot_settlements(
     plan: &SettlementPlan,
 ) -> Result<(), SettlementTransactionError> {
     // 每批最多 2560 个参数；有界批量减少持有结算锁期间的往返，不拆分原 Serializable 事务。
-    for lines in plan.lines.chunks(LOT_SETTLEMENT_BATCH_SIZE) {
+    for lines in plan.lines.chunks(SETTLEMENT_BATCH_SIZE) {
         let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
         let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             r#"INSERT INTO public.lot_settlements
@@ -104,13 +110,7 @@ pub(super) async fn insert_lot_settlements(
                 .push_bind(line.adjustment_ppm)
                 .push_bind(json!({ "policy": plan.policy_mode.as_str() }));
         });
-        // 完整批次复用一个固定语句形状；可变尾批不挤占连接的预处理语句缓存。
-        query
-            .build()
-            .persistent(lines.len() == LOT_SETTLEMENT_BATCH_SIZE)
-            .execute(&mut **transaction)
-            .await
-            .map_err(map_sql_error)?;
+        execute_settlement_batch(transaction, query, lines.len()).await?;
     }
     Ok(())
 }
@@ -121,117 +121,96 @@ pub(super) async fn insert_compensation_ledger(
     plan: &SettlementPlan,
     occurred_at: DateTime<Utc>,
 ) -> Result<(), SettlementTransactionError> {
-    let mut sequence: i32 = 1;
-    let mut balance = plan.opening_pool.value() as i128;
-    insert_ledger_entry(
-        transaction,
-        CompensationLedgerEntry {
-            command_id,
-            sequence,
-            movement_kind: "opening",
-            amount: plan.opening_pool.value(),
-            balance_after: balance,
-            lot_id: None,
-            occurred_at,
-        },
-    )
-    .await?;
-    sequence += 1;
-
-    if plan.compensation_pool_enabled {
-        // 旧版账本先追加全部税费，再追加全部补偿；顺序本身属于可审计事实。
-        for line in &plan.lines {
-            if line.tax_amount.value() > 0 {
-                balance = balance
-                    .checked_add(i128::from(line.tax_amount.value()))
-                    .ok_or_else(|| invalid("补偿池账本余额溢出"))?;
-                insert_ledger_entry(
-                    transaction,
-                    CompensationLedgerEntry {
-                        command_id,
-                        sequence,
-                        movement_kind: "tax",
-                        amount: line.tax_amount.value(),
-                        balance_after: balance,
-                        lot_id: Some(line.lot_id),
-                        occurred_at,
-                    },
-                )
-                .await?;
-                sequence += 1;
-            }
-        }
-        for line in &plan.lines {
-            if line.compensation_amount.value() > 0 {
-                balance = balance
-                    .checked_sub(i128::from(line.compensation_amount.value()))
-                    .ok_or_else(|| invalid("补偿池账本余额下溢"))?;
-                insert_ledger_entry(
-                    transaction,
-                    CompensationLedgerEntry {
-                        command_id,
-                        sequence,
-                        movement_kind: "compensation",
-                        amount: -line.compensation_amount.value(),
-                        balance_after: balance,
-                        lot_id: Some(line.lot_id),
-                        occurred_at,
-                    },
-                )
-                .await?;
-                sequence += 1;
-            }
-        }
+    let entries = compensation_ledger_entries(command_id, plan)?;
+    // 每批最多 2048 个参数；auction_id 仍取自同事务命令账本，缺失账本时由 NOT NULL 约束拒绝。
+    for entries in entries.chunks(SETTLEMENT_BATCH_SIZE) {
+        let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
+        let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+            r#"INSERT INTO public.compensation_ledger
+                   (id, auction_id, lot_id, entry_sequence, movement_kind, amount, balance_after,
+                    created_at) "#,
+        );
+        query.push_values(entries, |mut values, entry| {
+            values
+                .push_bind(entry.id)
+                .push("(SELECT aggregate_id FROM public.auction_commands WHERE command_id = ")
+                .push_bind_unseparated(command_id.as_uuid())
+                .push_unseparated(")")
+                .push_bind(entry.lot_id.map(|id| id.as_uuid()))
+                .push_bind(entry.sequence)
+                .push_bind(entry.movement_kind)
+                .push_bind(entry.amount)
+                .push_bind(entry.balance_after)
+                .push_bind(occurred_at);
+        });
+        execute_settlement_batch(transaction, query, entries.len()).await?;
     }
-
-    let closing = i128::from(plan.closing_pool.value());
-    if balance != closing {
-        return Err(invalid("补偿池账本与结算计划不一致"));
-    }
-    insert_ledger_entry(
-        transaction,
-        CompensationLedgerEntry {
-            command_id,
-            sequence,
-            movement_kind: "closing",
-            amount: 0,
-            balance_after: balance,
-            lot_id: None,
-            occurred_at,
-        },
-    )
-    .await
+    Ok(())
 }
 
-async fn insert_ledger_entry(
-    transaction: &mut PostgresCompetitionTransaction,
-    entry: CompensationLedgerEntry<'_>,
+/// 按旧版顺序构造期初、全部税费、全部补偿和期末条目；顺序与连续序号本身属于可审计事实。
+fn compensation_ledger_entries(
+    command_id: CommandId,
+    plan: &SettlementPlan,
+) -> Result<Vec<CompensationLedgerEntry>, SettlementTransactionError> {
+    let movement_capacity = if plan.compensation_pool_enabled { plan.lines.len() * 2 } else { 0 };
+    let mut entries = Vec::with_capacity(movement_capacity + 2);
+    let mut balance = i128::from(plan.opening_pool.value());
+    push_ledger_entry(
+        &mut entries,
+        command_id,
+        "opening",
+        plan.opening_pool.value(),
+        balance,
+        None,
+    )?;
+
+    if plan.compensation_pool_enabled {
+        for line in plan.lines.iter().filter(|line| line.tax_amount.value() > 0) {
+            balance = balance
+                .checked_add(i128::from(line.tax_amount.value()))
+                .ok_or_else(|| invalid("补偿池账本余额溢出"))?;
+            let amount = line.tax_amount.value();
+            push_ledger_entry(&mut entries, command_id, "tax", amount, balance, Some(line.lot_id))?;
+        }
+        for line in plan.lines.iter().filter(|line| line.compensation_amount.value() > 0) {
+            balance = balance
+                .checked_sub(i128::from(line.compensation_amount.value()))
+                .ok_or_else(|| invalid("补偿池账本余额下溢"))?;
+            let amount = -line.compensation_amount.value();
+            let lot_id = Some(line.lot_id);
+            push_ledger_entry(&mut entries, command_id, "compensation", amount, balance, lot_id)?;
+        }
+    }
+
+    if balance != i128::from(plan.closing_pool.value()) {
+        return Err(invalid("补偿池账本与结算计划不一致"));
+    }
+    push_ledger_entry(&mut entries, command_id, "closing", 0, balance, None)?;
+    Ok(entries)
+}
+
+fn push_ledger_entry(
+    entries: &mut Vec<CompensationLedgerEntry>,
+    command_id: CommandId,
+    movement_kind: &'static str,
+    amount: i64,
+    balance_after: i128,
+    lot_id: Option<auction_domain::LotId>,
 ) -> Result<(), SettlementTransactionError> {
-    let balance_after =
-        i64::try_from(entry.balance_after).map_err(|_| invalid("补偿池账本余额溢出"))?;
+    let balance_after = i64::try_from(balance_after).map_err(|_| invalid("补偿池账本余额溢出"))?;
     if balance_after < 0 {
         return Err(invalid("补偿池账本余额不能为负"));
     }
-    let id =
-        deterministic_uuid(entry.command_id, &format!("settlement-ledger:{}", entry.sequence), 1);
-    let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
-    sqlx::query(
-        r#"INSERT INTO public.compensation_ledger
-               (id, auction_id, lot_id, entry_sequence, movement_kind, amount, balance_after,
-                created_at)
-           VALUES ($1, (SELECT aggregate_id FROM public.auction_commands WHERE command_id = $2),
-                   $3, $4, $5, $6, $7, $8)"#,
-    )
-    .bind(id)
-    .bind(entry.command_id.as_uuid())
-    .bind(entry.lot_id.map(|id| id.as_uuid()))
-    .bind(entry.sequence)
-    .bind(entry.movement_kind)
-    .bind(entry.amount)
-    .bind(balance_after)
-    .bind(entry.occurred_at)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
+    let sequence =
+        i32::try_from(entries.len() + 1).map_err(|_| invalid("补偿池账本序号超出数据库范围"))?;
+    entries.push(CompensationLedgerEntry {
+        id: deterministic_uuid(command_id, &format!("settlement-ledger:{sequence}"), 1),
+        sequence,
+        movement_kind,
+        amount,
+        balance_after,
+        lot_id,
+    });
     Ok(())
 }

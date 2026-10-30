@@ -77,10 +77,7 @@ impl MailPollProgressSnapshot {
             self.stage,
             MailPollProgressStage::ReadingDetail | MailPollProgressStage::Processing
         );
-        !self.mailbox_key.is_empty()
-            && self.mailbox_key.len() <= 256
-            && self.mailbox_key == self.mailbox_key.trim()
-            && !self.mailbox_key.chars().any(char::is_control)
+        auction_domain::valid_text(&self.mailbox_key, 256)
             && matches!(self.world_id.as_str(), "main" | "isekai")
             && self.updated_at.timestamp_nanos_opt().is_some()
             && self.updated_at <= observed_at

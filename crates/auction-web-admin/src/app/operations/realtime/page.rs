@@ -10,11 +10,11 @@ use crate::api::{
 
 use super::super::poll::{AutoPollControls, use_auto_poll};
 use super::super::query::use_realtime_query_state;
-use super::event::{RealtimeEventPager, RealtimeEventTable};
-use super::failure::{RealtimeFailurePager, RealtimeFailureTable};
+use super::event::RealtimeEventTable;
+use super::failure::RealtimeFailureTable;
 use super::filters::{RealtimeEventFilters, RealtimeFailureFilters};
-use super::lag::{RealtimeLagPager, RealtimeLagTable};
-use crate::app::surface::pagination::{use_admin_page, use_admin_pagination};
+use super::lag::RealtimeLagTable;
+use crate::app::surface::pagination::{AdminPager, use_admin_page, use_admin_pagination};
 use crate::app::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
 use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
@@ -136,7 +136,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let mut refresh_query = query.clone();
     let mut poll_query = query.clone();
     let mut state_query = query.clone();
-    // 直接借用已完成快照；表格取得所需投影，统计与分页不再保留额外整页副本。
+    // 直接借用已完成快照；表格取得所需投影，统计与分页不保留额外整页副本。
     let event_state = events.read_unchecked();
     let event_overview_state = event_overview.read_unchecked();
     let lag_state = lag.read_unchecked();
@@ -182,11 +182,12 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         Some(Ok(event_page)) => {
             let mut on_page_change = query.clone();
             rsx! {
-                RealtimeEventPager {
+                AdminPager {
                     pagination: event_pagination,
                     page: event_page.pagination.page,
                     page_size: event_page.pagination.page_size,
-                    total: event_page.pagination.total,
+                    total: Some(event_page.pagination.total),
+                    label: t!("realtime-event-title"),
                     on_page_change: move |next_page| {
                         let mut next = query_state();
                         next.event_page = next_page;
@@ -233,11 +234,12 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         Some(Ok(failure_page)) => {
             let mut on_page_change = query.clone();
             rsx! {
-                RealtimeFailurePager {
+                AdminPager {
                     pagination: failure_pagination,
                     page: failure_page.pagination.page,
                     page_size: failure_page.pagination.page_size,
-                    total: failure_page.pagination.total,
+                    total: Some(failure_page.pagination.total),
+                    label: t!("realtime-failure-title"),
                     on_page_change: move |next_page| {
                         let mut next = query_state();
                         next.failure_page = next_page;
@@ -270,11 +272,12 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             let mut on_page_change = query.clone();
             rsx! {
                 RealtimeLagTable { page: lag_page.clone() }
-                RealtimeLagPager {
+                AdminPager {
                     pagination: lag_pagination,
                     page: lag_page.pagination.page,
                     page_size: lag_page.pagination.page_size,
-                    total: lag_page.pagination.total,
+                    total: Some(lag_page.pagination.total),
+                    label: t!("realtime-lag-title"),
                     on_page_change: move |next_page| {
                         let mut next = query_state();
                         next.lag_page = next_page;

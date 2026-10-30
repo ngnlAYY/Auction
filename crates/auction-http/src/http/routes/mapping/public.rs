@@ -78,10 +78,7 @@ fn forum_post_url(entry: &PublicBidLogEntry) -> Option<String> {
 }
 
 fn canonical_forum_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 32
-        && !value.starts_with('0')
-        && value.bytes().all(|byte| byte.is_ascii_digit())
+    auction_domain::valid_positive_decimal(value, 32)
 }
 
 pub(crate) fn map_owned_bid(bid: PublicMyBid) -> PublicOwnedBidResponse {

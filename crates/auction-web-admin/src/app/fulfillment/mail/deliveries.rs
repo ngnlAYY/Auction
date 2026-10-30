@@ -137,13 +137,6 @@ pub(super) fn MailDeliveriesPanel(
                     page_size,
                     total: Some(total),
                     label: t!("admin-mail-deliveries-title"),
-                    previous_label: t!("admin-pagination-previous"),
-                    status: move |(page, pages): (i64, i64)| {
-                        t!("admin-pagination-status", page: page, pages: pages)
-                    },
-                    next_label: t!("admin-pagination-next"),
-                    jump_label: t!("admin-pagination-input"),
-                    jump_button_label: t!("admin-pagination-go"),
                     on_page_change: move |next| page.set(next),
             }
             if let Some(delivery) = pending() {

@@ -97,7 +97,7 @@ pub(crate) struct CatalogRow {
 
 /// 将稳定 lot wire 契约转换为页面表格所需的展示行。
 pub(crate) trait LotEnvelopeRows {
-    /// 移出列表负载，只保留分页与拍卖元数据；目录快照不再同时持有两份装备字符串。
+    /// 移出列表负载，只保留分页与拍卖元数据；目录快照只持有一份装备字符串。
     fn take_rows(&mut self) -> Vec<CatalogRow>;
 }
 

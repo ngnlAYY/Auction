@@ -162,10 +162,7 @@ pub(in crate::database) async fn bind_sent(
     has_expectation: bool,
 ) -> Result<bool, sqlx::Error> {
     if !matches!(world_id, "main" | "isekai")
-        || external_mail_id.is_empty()
-        || external_mail_id.len() > 64
-        || external_mail_id.starts_with('0')
-        || !external_mail_id.bytes().all(|byte| byte.is_ascii_digit())
+        || !auction_domain::valid_positive_decimal(external_mail_id, 64)
         || fencing_version <= 0
     {
         return Ok(false);

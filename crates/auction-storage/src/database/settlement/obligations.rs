@@ -4,64 +4,104 @@ use std::collections::BTreeMap;
 
 use super::*;
 
+/// 已完成数据库整数换算的义务行，写入前一次性校验全部版本。
+struct ObligationRow<'a> {
+    obligation: &'a SettlementObligation,
+    policy_version: i32,
+    state_version: i64,
+}
+
 pub(super) async fn insert_obligations(
     transaction: &mut PostgresCompetitionTransaction,
     plan: &SettlementPlan,
     occurred_at: DateTime<Utc>,
 ) -> Result<(), SettlementTransactionError> {
-    for obligation in &plan.obligations {
+    let rows = plan
+        .obligations
+        .iter()
+        .map(|obligation| {
+            Ok(ObligationRow {
+                obligation,
+                policy_version: i32_version(obligation.policy_version, "义务策略版本")?,
+                state_version: i64_version(obligation.state_version, "义务状态版本")?,
+            })
+        })
+        .collect::<Result<Vec<_>, SettlementTransactionError>>()?;
+    // 前置义务外键为 DEFERRABLE，批内顺序不影响校验；履约行在同批义务写入后插入，满足即时外键。
+    for rows in rows.chunks(SETTLEMENT_BATCH_SIZE) {
         let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
-        sqlx::query(
+        let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             r#"INSERT INTO public.settlement_obligations
                    (id, auction_id, lot_id, world_id, origin_command_id, policy_version,
                     obligation_kind, business_state, state_version, recipient_user_id,
                     recipient_game_identity, amount, carrier_credit, equipment_id, submission_id,
-                    prerequisite_obligation_id, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''),
-                       $12, $13, $14, $15, $16, $17, $17)"#,
-        )
-        .bind(obligation.id.as_uuid())
-        .bind(obligation.auction_id.as_uuid())
-        .bind(obligation.lot_id.as_uuid())
-        .bind(obligation.world.as_str())
-        .bind(obligation.origin_command_id.as_uuid())
-        .bind(i32_version(obligation.policy_version, "义务策略版本")?)
-        .bind(obligation.kind.as_str())
-        .bind(obligation.state.as_str())
-        .bind(i64_version(obligation.state_version, "义务状态版本")?)
-        .bind(obligation.recipient_user_id.map(|id| id.as_uuid()))
-        .bind(&obligation.recipient_game_identity)
-        .bind(obligation.amount.value())
-        .bind(i64::from(obligation.carrier_credit))
-        .bind(obligation.equipment_id.as_uuid())
-        .bind(obligation.submission_id.map(|id| id.as_uuid()))
-        .bind(obligation.prerequisite_id.map(|id| id.as_uuid()))
-        .bind(occurred_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?;
+                    prerequisite_obligation_id, created_at, updated_at) "#,
+        );
+        query.push_values(rows, |mut values, row| {
+            let obligation = row.obligation;
+            values
+                .push_bind(obligation.id.as_uuid())
+                .push_bind(obligation.auction_id.as_uuid())
+                .push_bind(obligation.lot_id.as_uuid())
+                .push_bind(obligation.world.as_str())
+                .push_bind(obligation.origin_command_id.as_uuid())
+                .push_bind(row.policy_version)
+                .push_bind(obligation.kind.as_str())
+                .push_bind(obligation.state.as_str())
+                .push_bind(row.state_version)
+                .push_bind(obligation.recipient_user_id.map(|id| id.as_uuid()))
+                .push("NULLIF(")
+                .push_bind_unseparated(obligation.recipient_game_identity.as_str())
+                .push_unseparated(", '')")
+                .push_bind(obligation.amount.value())
+                .push_bind(i64::from(obligation.carrier_credit))
+                .push_bind(obligation.equipment_id.as_uuid())
+                .push_bind(obligation.submission_id.map(|id| id.as_uuid()))
+                .push_bind(obligation.prerequisite_id.map(|id| id.as_uuid()))
+                .push_bind(occurred_at)
+                .push_bind(occurred_at);
+        });
+        execute_settlement_batch(transaction, query, rows.len()).await?;
 
         // 投稿装备已经由入库流程领取；流拍与撤拍均须逐件发送库存装备，不能 Return 原邮件。
-        let dispatch_world = match obligation.kind {
-            SettlementObligationKind::WinnerPaymentCarrierCod
-            | SettlementObligationKind::SellerPayout
-            | SettlementObligationKind::BuyerRefund => SettlementWorld::Main,
-            _ => obligation.world,
-        };
-        sqlx::query(
+        let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             r#"INSERT INTO public.settlement_obligation_fulfillments
                    (obligation_id, execution_state, dispatch_world, delivery_operation,
-                    created_at, updated_at)
-               VALUES ($1, 'pending', $2, 'send', $3, $3)"#,
-        )
-        .bind(obligation.id.as_uuid())
-        .bind(dispatch_world.as_str())
-        .bind(occurred_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?;
+                    created_at, updated_at) "#,
+        );
+        query.push_values(rows, |mut values, row| {
+            values
+                .push_bind(row.obligation.id.as_uuid())
+                .push("'pending'")
+                .push_bind(dispatch_world(row.obligation).as_str())
+                .push("'send'")
+                .push_bind(occurred_at)
+                .push_bind(occurred_at);
+        });
+        execute_settlement_batch(transaction, query, rows.len()).await?;
     }
     Ok(())
+}
+
+/// 主世界承担付款、卖方结款与买方退款；其余义务沿用冻结计划中的世界。
+fn dispatch_world(obligation: &SettlementObligation) -> SettlementWorld {
+    match obligation.kind {
+        SettlementObligationKind::WinnerPaymentCarrierCod
+        | SettlementObligationKind::SellerPayout
+        | SettlementObligationKind::BuyerRefund => SettlementWorld::Main,
+        _ => obligation.world,
+    }
+}
+
+/// 已解析关联义务的 recovery case 行；任何缺失关联都在写入前失败。
+struct RecoveryRow<'a> {
+    id: auction_domain::SettlementId,
+    payment: &'a SettlementObligation,
+    winner_user_id: auction_domain::UserId,
+    world: SettlementWorld,
+    equipment_obligation_id: Option<auction_domain::SettlementId>,
+    seller_payout_obligation_id: auction_domain::SettlementId,
+    buyer_refund_obligation_id: auction_domain::SettlementId,
 }
 
 /// 为每个有获胜者的 lot 建立 recovery case。
@@ -83,13 +123,55 @@ pub(super) async fn insert_recoveries(
         .ok()
         .filter(|limit| (1..=10).contains(limit))
         .ok_or_else(|| invalid("恢复 COD 退回上限超出数据库范围"))?;
+    let policy_version = i32_version(recovery_policy.version, "恢复策略版本")?;
+    let rows = recovery_rows(auction_id, plan)?;
+    for rows in rows.chunks(SETTLEMENT_BATCH_SIZE) {
+        let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
+        let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+            r#"INSERT INTO public.settlement_recoveries
+                   (id, auction_id, lot_id, world_id, equipment_id, winner_user_id,
+                    payment_obligation_id, equipment_obligation_id, seller_payout_obligation_id,
+                    buyer_refund_obligation_id, policy_version, payment_deadline_at,
+                    reminder_limit, cod_return_limit, stage, state_version, created_at, updated_at) "#,
+        );
+        query.push_values(rows, |mut values, row| {
+            values
+                .push_bind(row.id.as_uuid())
+                .push_bind(auction_id.as_uuid())
+                .push_bind(row.payment.lot_id.as_uuid())
+                .push_bind(row.world.as_str())
+                .push_bind(row.payment.equipment_id.as_uuid())
+                .push_bind(row.winner_user_id.as_uuid())
+                .push_bind(row.payment.id.as_uuid())
+                .push_bind(row.equipment_obligation_id.map(|id| id.as_uuid()))
+                .push_bind(row.seller_payout_obligation_id.as_uuid())
+                .push_bind(row.buyer_refund_obligation_id.as_uuid())
+                .push_bind(policy_version)
+                .push_bind(payment_deadline_at)
+                .push_bind(reminder_limit)
+                .push_bind(cod_return_limit)
+                .push("'awaiting_payment'")
+                .push("1")
+                .push_bind(occurred_at)
+                .push_bind(occurred_at);
+        });
+        execute_settlement_batch(transaction, query, rows.len()).await?;
+    }
+    Ok(())
+}
+
+/// 按计划中的付款义务顺序解析 recovery 关联；每个付款只查同 lot 的冻结义务，避免反复扫描计划。
+fn recovery_rows(
+    auction_id: AuctionId,
+    plan: &SettlementPlan,
+) -> Result<Vec<RecoveryRow<'_>>, SettlementTransactionError> {
     let auction_uuid = auction_id.as_uuid();
-    // 每个付款只查同 lot 的冻结义务，避免持有结算锁时反复全表扫描计划。
     let mut obligations = BTreeMap::new();
     for obligation in &plan.obligations {
         obligations.entry((obligation.lot_id, obligation.kind.as_str())).or_insert(obligation);
     }
 
+    let mut rows = Vec::new();
     for payment in plan.obligations.iter().filter(|obligation| {
         matches!(
             obligation.kind,
@@ -105,7 +187,7 @@ pub(super) async fn insert_recoveries(
         let buyer_refund =
             find_obligation(&obligations, payment.lot_id, SettlementObligationKind::BuyerRefund)
                 .ok_or_else(|| invalid("结算恢复缺少买方退款义务"))?;
-        let (recovery_world, equipment_obligation_id) = match payment.kind {
+        let (world, equipment_obligation_id) = match payment.kind {
             SettlementObligationKind::WinnerEquipmentCod => (SettlementWorld::Main, None),
             SettlementObligationKind::WinnerPaymentCarrierCod => (
                 SettlementWorld::Isekai,
@@ -122,42 +204,20 @@ pub(super) async fn insert_recoveries(
             _ => return Err(invalid("结算恢复付款义务种类无效")),
         };
         let lot_uuid = payment.lot_id.as_uuid();
-        let recovery_id =
-            auction_domain::SettlementId::from_uuid(auction_domain::legacy_natural_key_uuid(
+        rows.push(RecoveryRow {
+            id: auction_domain::SettlementId::from_uuid(auction_domain::legacy_natural_key_uuid(
                 "auction.recovery.case.v1",
                 &[auction_uuid.as_bytes(), lot_uuid.as_bytes()],
-            ));
-
-        let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
-        sqlx::query(
-            r#"INSERT INTO public.settlement_recoveries
-                   (id, auction_id, lot_id, world_id, equipment_id, winner_user_id,
-                    payment_obligation_id, equipment_obligation_id, seller_payout_obligation_id,
-                    buyer_refund_obligation_id, policy_version, payment_deadline_at,
-                    reminder_limit, cod_return_limit, stage, state_version, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                       $13, $14, 'awaiting_payment', 1, $15, $15)"#,
-        )
-        .bind(recovery_id.as_uuid())
-        .bind(auction_id.as_uuid())
-        .bind(payment.lot_id.as_uuid())
-        .bind(recovery_world.as_str())
-        .bind(payment.equipment_id.as_uuid())
-        .bind(winner_user_id.as_uuid())
-        .bind(payment.id.as_uuid())
-        .bind(equipment_obligation_id.map(|id| id.as_uuid()))
-        .bind(seller_payout.id.as_uuid())
-        .bind(buyer_refund.id.as_uuid())
-        .bind(i32_version(recovery_policy.version, "恢复策略版本")?)
-        .bind(payment_deadline_at)
-        .bind(reminder_limit)
-        .bind(cod_return_limit)
-        .bind(occurred_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?;
+            )),
+            payment,
+            winner_user_id,
+            world,
+            equipment_obligation_id,
+            seller_payout_obligation_id: seller_payout.id,
+            buyer_refund_obligation_id: buyer_refund.id,
+        });
     }
-    Ok(())
+    Ok(rows)
 }
 
 fn find_obligation<'a>(

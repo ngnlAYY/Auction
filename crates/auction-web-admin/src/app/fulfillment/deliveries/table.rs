@@ -230,35 +230,6 @@ pub(super) fn DeliveryRow(
         }
     }
 }
-
-/// 控制 delivery 列表分页；只传分页标量，不为分页复制或保留整页投递记录。
-#[component]
-pub(super) fn DeliveryPager(
-    page: i64,
-    page_size: i64,
-    total: i64,
-    pagination: crate::app::surface::pagination::AdminPagination,
-    on_page_change: EventHandler<i64>,
-) -> Element {
-    rsx! {
-        crate::app::surface::pagination::AdminPager {
-            pagination,
-            page,
-            page_size,
-            total: Some(total),
-            label: t!("delivery-pagination"),
-            previous_label: t!("admin-pagination-previous"),
-            status: move |(page, pages): (i64, i64)| {
-                t!("admin-pagination-status", page: page, pages: pages)
-            },
-            next_label: t!("admin-pagination-next"),
-            jump_label: t!("admin-pagination-input"),
-            jump_button_label: t!("admin-pagination-go"),
-            on_page_change,
-        }
-    }
-}
-
 /// 对当前页 delivery 行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
 /// 到付金额缺省（None）在升序时排在最前。
 fn sort_deliveries(deliveries: &mut [Delivery], column: &str, direction: SortDirection) {

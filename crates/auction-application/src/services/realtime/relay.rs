@@ -26,10 +26,7 @@ pub struct RealtimeRelayConfig {
 impl RealtimeRelayConfig {
     /// 校验 relay 的稳定命名和批次边界。
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.consumer_key.trim().is_empty()
-            || self.consumer_key != self.consumer_key.trim()
-            || self.consumer_key.len() > 128
-            || self.consumer_key.chars().any(char::is_control)
+        if !auction_domain::valid_text(&self.consumer_key, 128)
             || self.stream_prefix != "auction:"
             || self.stream_batch_size == 0
             || self.stream_batch_size > 200
@@ -242,10 +239,7 @@ fn validate_stream_page(
 ) -> Result<(), ApplicationError> {
     let mut previous = after;
     for stream in streams {
-        if stream.len() > 255
-            || stream.trim().is_empty()
-            || stream != stream.trim()
-            || stream.chars().any(char::is_control)
+        if !auction_domain::valid_text(stream, 255)
             || !stream.starts_with(prefix)
             || stream.as_str() <= previous
         {
@@ -257,14 +251,8 @@ fn validate_stream_page(
 }
 
 fn safe_sink_error(failure_code: &str, safe_detail: &str) -> (String, String) {
-    let valid_code = !failure_code.trim().is_empty()
-        && failure_code == failure_code.trim()
-        && failure_code.len() <= 128
-        && !failure_code.chars().any(char::is_control);
-    let valid_detail = !safe_detail.trim().is_empty()
-        && safe_detail == safe_detail.trim()
-        && safe_detail.len() <= 2_048
-        && !safe_detail.chars().any(char::is_control);
+    let valid_code = auction_domain::valid_text(failure_code, 128);
+    let valid_detail = auction_domain::valid_text(safe_detail, 2_048);
     if valid_code && valid_detail {
         (failure_code.to_owned(), safe_detail.to_owned())
     } else {

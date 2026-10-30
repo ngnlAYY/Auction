@@ -47,6 +47,8 @@ Admin runtime 同源，runtime 投影整体替换模板而不逐字段复制；�
 Unix 监听属组复用应用层 `valid_listener_group`，配置层不再保留第二份规则。
 没有 Admin runtime 覆盖时复用已完成的 HTTP 安全校验，不重复解析同一组 Origin/CIDR；有覆盖时仍先校验主配置
 fallback，再独立校验最终投影，保留原错误优先级与 Unix proxy、metrics 的有效 listener 门禁。
+`HttpSecurityConfig`、`DeliveryWorkerConfig`、`RecoveryWorkerConfig` 各以 `From<&AdminRuntime…>` 完成 runtime
+投影，部署 TOML 省略字段时的 `Default` 也经同一转换取自应用层 runtime 模型的默认值，两处不再各维护一份数字。
 
 `FirstRunConfig::write_to` 只向明确不存在的目标发布：私有临时目录中生成文件、固定非敏感 `0640`/敏感 `0600`，
 复用三角色 loader 与正式 runtime 校验后同步目录，以 Linux `RENAME_NOREPLACE` 发布并同步父目录。发布前只清理
@@ -111,8 +113,8 @@ guard 取消后由 RAII 释放，锁文件不逐次删除。锁文件须由有�
 打开时拒绝 symlink。Unix runtime 文件固定为 0640；三角色启动和管理读取共用同一描述符的文件类型、权限及
 4 MiB 预算校验，拒绝 symlink/FIFO，实际最多读入上限加一字节。管理读写另要求文件由当前有效 UID 拥有；
 只读角色装配不拿运维进程 UID 代替服务账号，root 部署命令仍按实际 unit `User` 校验目标服务 owner。
-替换先写临时文件并固定权限，一次文件 fsync 后才 rename，再同步目录；替换或恢复后的回读/校验失败统一返回
-`OutcomeUnknown`，保留当前文件供账本恢复，不能解释为未写入。写前错误分类不变。首次设置与敏感配置复用
+替换先写临时文件并固定权限，一次文件 fsync 后才 rename，再同步目录；替换后的回读/校验失败统一返回
+`OutcomeUnknown`，保留当前文件供账本向前恢复，不能解释为未写入；文件 store 不提供回写旧文档的接口。写前错误分类不变。首次设置与敏感配置复用
 application 会话凭据校验，拒绝生成不可登录的配置。
 runtime 的保存验证和启动使用同一 listener、HTTP 安全/规范 Origin、metrics、session、tracing 投影及部署校验。
 Admin 装配传入 OTLP headers 是否存在的非敏感上下文；仍有 headers 时不能保存关闭 tracing 的候选，须先移除敏感字段并重启。

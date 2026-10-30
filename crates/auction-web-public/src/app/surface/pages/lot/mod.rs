@@ -6,13 +6,13 @@ mod detail;
 mod equipment;
 mod history;
 
-pub(crate) use detail::{LiveLotDetailView, LotDetailBack, LotDetailHeader, PreviewLotDetailView};
+pub(crate) use detail::{LiveLotDetailView, PreviewLotDetailView};
 pub(crate) use equipment::{EquipmentCard, EquipmentCardData};
 pub(crate) use history::BidHistoryTable;
 
 #[component]
 pub(crate) fn LotDetail(lot_code: String) -> Element {
-    if !is_public_lot_id(&lot_code) {
+    if !auction_web_shared::is_legacy_uuid(&lot_code) {
         return rsx! { LotMissing {} };
     }
     // Router 会复用详情路由组件；目标 UUID 改变时销毁旧读取与命令宿主。
@@ -24,21 +24,6 @@ pub(crate) fn LotDetail(lot_code: String) -> Element {
             }
         }
     }
-}
-
-/// 旧版浏览器只接受小写、带连字符、RFC 4122 variant 且版本为 1 至 5 的 UUID。
-fn is_public_lot_id(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 36
-        && bytes.iter().enumerate().all(|(index, byte)| {
-            if matches!(index, 8 | 13 | 18 | 23) {
-                *byte == b'-'
-            } else {
-                byte.is_ascii_digit() || matches!(*byte, b'a'..=b'f')
-            }
-        })
-        && matches!(bytes[14], b'1'..=b'5')
-        && matches!(bytes[19], b'8' | b'9' | b'a' | b'b')
 }
 
 #[component]

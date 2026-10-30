@@ -422,7 +422,7 @@ pub(crate) fn AuctionData(
 }
 
 /// 拍卖头部的开场/结束倒计时。秒级节拍只在本叶子组件内订阅：顶层 [`AuctionData`]
-/// 不再持有每秒变化的时钟信号，目录子树不随秒针重渲染。
+/// 不持有每秒变化的时钟信号，目录子树不随秒针重渲染。
 #[component]
 fn AuctionHeaderCountdown(
     scheduled_ends_at: String,

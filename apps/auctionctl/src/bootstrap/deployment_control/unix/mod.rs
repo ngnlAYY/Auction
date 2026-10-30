@@ -4,13 +4,9 @@ use std::{path::PathBuf, time::Duration};
 
 use super::ControllerOptions;
 
-#[path = "controller.rs"]
 mod controller;
-#[path = "lifecycle.rs"]
 mod lifecycle;
-#[path = "model.rs"]
 mod model;
-#[path = "validation.rs"]
 mod validation;
 
 /// 独立数据库维护持有的部署锁，生命周期覆盖 migration 或 bootstrap。

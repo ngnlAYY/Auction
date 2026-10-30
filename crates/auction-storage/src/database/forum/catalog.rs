@@ -15,12 +15,7 @@ pub(super) fn valid_page_ids<'a>(
     for post_id in
         std::iter::once(first_post_id).chain(std::iter::once(system_post_id)).chain(continuation)
     {
-        if post_id.is_empty()
-            || post_id.len() > 32
-            || post_id.starts_with('0')
-            || !post_id.bytes().all(|byte| byte.is_ascii_digit())
-            || !seen.insert(post_id)
-        {
+        if !auction_domain::valid_positive_decimal(post_id, 32) || !seen.insert(post_id) {
             return false;
         }
     }

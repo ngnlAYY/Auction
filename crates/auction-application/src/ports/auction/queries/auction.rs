@@ -74,10 +74,7 @@ impl CurrentAuctionSnapshot {
     /// `FinalRestriction` 和 ForumSync 结果不属于当前快照，因此不在这里推断。
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.id.is_nil()
-            || self.world_id.is_empty()
-            || self.world_id.len() > 64
-            || self.world_id != self.world_id.trim()
-            || self.world_id.chars().any(char::is_control)
+            || !auction_domain::valid_text(&self.world_id, 64)
             || self.sequence <= 0
             || is_go_zero_time(self.opens_at)
             || self.preview_revision < 0

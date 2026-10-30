@@ -36,12 +36,6 @@ pub trait AdminRuntimeFileStore: Send + Sync {
         guard: &'a Self::WorkflowGuard,
     ) -> ApplicationFuture<'a, AdminRuntimeSnapshot>;
 
-    fn replace(
-        &self,
-        expected_fingerprint: String,
-        document: AdminRuntimeDocument,
-    ) -> ApplicationFuture<'_, AdminRuntimeReplacement>;
-
     /// 在调用方已经持有 workflow guard 时替换文件，避免递归获取文件锁。
     fn replace_locked<'a>(
         &'a self,
@@ -49,8 +43,6 @@ pub trait AdminRuntimeFileStore: Send + Sync {
         expected_fingerprint: String,
         document: AdminRuntimeDocument,
     ) -> ApplicationFuture<'a, AdminRuntimeReplacement>;
-
-    fn restore(&self, replacement: AdminRuntimeReplacement) -> ApplicationFuture<'_, ()>;
 }
 
 pub trait AdminRuntimeCommandStore: Send + Sync {

@@ -23,9 +23,9 @@ pub use ownership::{RealtimeConsumerOwnership, RealtimeConsumerOwnershipError};
 use acknowledgement::acknowledge_postgres;
 use common::{storage_error, validate_cursor_keys, validate_event_position, validate_failure_text};
 #[cfg(feature = "postgres")]
-pub(super) use failure::resolve_failure_postgres_tx;
+use failure::record_failure_postgres;
 #[cfg(feature = "postgres")]
-use failure::{record_failure_postgres, resolve_failure_postgres};
+pub(super) use failure::resolve_failure_postgres_tx;
 #[cfg(feature = "postgres")]
 use read::read_postgres;
 #[cfg(feature = "postgres")]
@@ -113,43 +113,6 @@ impl RealtimeConsumerStore for DatabaseStore {
                         &failure_code,
                         &safe_detail,
                         failed_at,
-                    )
-                    .await
-                }
-            }
-        })
-    }
-
-    fn resolve_failure_after_replay(
-        &self,
-        consumer_key: String,
-        stream_key: String,
-        event_id: Uuid,
-        replay_event_id: Uuid,
-        resolved_at: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, ()> {
-        Box::pin(async move {
-            validate_cursor_keys(&consumer_key, &stream_key)?;
-            validate_event_position(event_id, 1)?;
-            validate_event_position(replay_event_id, 1)?;
-            if event_id == replay_event_id {
-                return Err(storage_error("实时事件不能引用自身作为重放事件"));
-            }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    let mut connection = store
-                        .pool()
-                        .acquire()
-                        .await
-                        .map_err(|_| storage_error("打开 PostgreSQL 实时重放连接失败"))?;
-                    resolve_failure_postgres(
-                        &mut connection,
-                        &consumer_key,
-                        &stream_key,
-                        event_id,
-                        replay_event_id,
-                        resolved_at,
                     )
                     .await
                 }

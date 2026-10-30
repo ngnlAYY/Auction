@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use super::{
     AdminApiFailure, ApiResponse, fetch_csrf_token, invalid_request_error, invalid_response_error,
-    response_error, response_failure, send_get, send_request,
+    response_error, response_failure, send_get, send_request, valid_uuid,
 };
 
 /// 读取指定原拍卖的 recovery 报告。
@@ -180,24 +180,6 @@ fn valid_optional_uuid_pair(left: Option<&str>, right: Option<&str>) -> bool {
         (Some(left), Some(right)) => valid_uuid(left) && valid_uuid(right),
         _ => false,
     }
-}
-
-/// 与旧 `decode.ts::isUUID` 一致：只接受小写规范形式、v1-v5 及 RFC variant。
-fn valid_uuid(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    if bytes.len() != 36
-        || bytes[8] != b'-'
-        || bytes[13] != b'-'
-        || bytes[18] != b'-'
-        || bytes[23] != b'-'
-        || !matches!(bytes[14], b'1'..=b'5')
-        || !matches!(bytes[19], b'8' | b'9' | b'a' | b'b')
-    {
-        return false;
-    }
-    bytes.iter().enumerate().all(|(index, byte)| {
-        matches!(index, 8 | 13 | 18 | 23) || byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')
-    })
 }
 
 /// 浏览器端使用 JS `Date.parse`，精确保留旧 decoder 接受的时间范围。

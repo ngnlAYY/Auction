@@ -3,7 +3,6 @@
 use auction_web_shared::{TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
 
-use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
 use auction_web_shared::{AsyncState, AsyncStateKind, Time};
 
 use crate::api::RealtimeEventPage;
@@ -63,34 +62,6 @@ pub(super) fn RealtimeEventTable(page: RealtimeEventPage) -> Element {
                 title: t!("realtime-event-empty"),
                 detail: "",
             }
-        }
-    }
-}
-
-/// 控制事件元数据列表分页。
-#[component]
-pub(super) fn RealtimeEventPager(
-    page: i64,
-    page_size: i64,
-    total: i64,
-    pagination: AdminPagination,
-    on_page_change: EventHandler<i64>,
-) -> Element {
-    rsx! {
-        Pager {
-            pagination,
-            page,
-            page_size,
-            total: Some(total),
-            label: t!("realtime-event-title"),
-            previous_label: t!("admin-pagination-previous"),
-            status: move |(page, pages): (i64, i64)| {
-                t!("admin-pagination-status", page: page, pages: pages)
-            },
-            next_label: t!("admin-pagination-next"),
-            jump_label: t!("admin-pagination-input"),
-            jump_button_label: t!("admin-pagination-go"),
-            on_page_change,
         }
     }
 }

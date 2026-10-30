@@ -131,13 +131,6 @@ pub(super) fn AdminLotTable(
                     page_size: page.pagination.page_size,
                     total: Some(page.pagination.total),
                     label: t!("admin-lots-pagination"),
-                    previous_label: t!("admin-pagination-previous"),
-                    status: move |(page, pages): (i64, i64)| {
-                        t!("admin-pagination-status", page: page, pages: pages)
-                    },
-                    next_label: t!("admin-pagination-next"),
-                    jump_label: t!("admin-pagination-input"),
-                    jump_button_label: t!("admin-pagination-go"),
                     on_page_change,
                 }
             }

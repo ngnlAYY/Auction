@@ -76,11 +76,7 @@ pub(super) fn retry_delay(
 }
 
 pub(super) fn safe_failure_code(value: &str) -> String {
-    if !value.is_empty()
-        && value == value.trim()
-        && value.len() <= 128
-        && !value.chars().any(char::is_control)
-    {
+    if auction_domain::valid_text(value, 128) {
         value.to_owned()
     } else {
         "gateway_failed".to_owned()
@@ -88,11 +84,7 @@ pub(super) fn safe_failure_code(value: &str) -> String {
 }
 
 pub(super) fn safe_failure_detail(value: &str) -> String {
-    if !value.is_empty()
-        && value == value.trim()
-        && value.len() <= 512
-        && !value.chars().any(char::is_control)
-    {
+    if auction_domain::valid_text(value, 512) {
         value.to_owned()
     } else {
         "MoogleMail gateway 返回了无效的安全错误分类".to_owned()

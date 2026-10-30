@@ -2,23 +2,14 @@
 
 use super::*;
 
-#[path = "worker_validation/auction.rs"]
 mod auction;
-#[path = "worker_validation/common.rs"]
 mod common;
-#[path = "worker_validation/control.rs"]
 mod control;
-#[path = "worker_validation/delivery.rs"]
 mod delivery;
-#[path = "worker_validation/forum.rs"]
 mod forum;
-#[path = "worker_validation/fulfillment.rs"]
 mod fulfillment;
-#[path = "worker_validation/mooglemail.rs"]
 mod mooglemail;
-#[path = "worker_validation/operations.rs"]
 mod operations;
-#[path = "worker_validation/recovery.rs"]
 mod recovery;
 
 pub(super) use auction::validate_auction_worker;

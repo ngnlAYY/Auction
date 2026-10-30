@@ -39,28 +39,7 @@ impl PublicAccountReader for DatabaseStore {
             }
             match self {
                 #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    proxy_postgres(store, lot_id, user_id, None).await
-                }
-            }
-        })
-    }
-
-    fn public_user_proxy_by_id(
-        &self,
-        lot_id: Uuid,
-        authorization_id: Uuid,
-        user_id: Uuid,
-    ) -> ApplicationFuture<'_, Option<PublicOwnedProxy>> {
-        Box::pin(async move {
-            if lot_id.is_nil() || authorization_id.is_nil() || user_id.is_nil() {
-                return Err(storage_error("公开账户历史代理查询标识无效"));
-            }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    proxy_postgres(store, lot_id, user_id, Some(authorization_id)).await
-                }
+                DatabaseStore::Postgres(store) => proxy_postgres(store, lot_id, user_id).await,
             }
         })
     }

@@ -260,11 +260,8 @@ fn valid_name(name: &str) -> bool {
 fn valid_auth_value(index: usize, value: &str) -> bool {
     match index {
         0 => {
-            !value.is_empty()
-                && value.len() <= 20
-                && !value.starts_with('0')
-                && value.bytes().all(|byte| byte.is_ascii_digit())
-                && value.parse::<u64>().is_ok_and(|value| value > 0)
+            // 20 位十进制可能超过 u64，规范文本之外仍需解析确认范围。
+            auction_domain::valid_positive_decimal(value, 20) && value.parse::<u64>().is_ok()
         }
         1 | 2 => value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()),
         3 => matches!(value, "0" | "1"),

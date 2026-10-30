@@ -22,4 +22,4 @@ pub(super) use helpers::{
     credential_kind_label, credential_status_class, credential_status_label, credential_world_label,
 };
 pub(super) use page::page;
-pub(super) use table::{CredentialPager, CredentialTable};
+pub(super) use table::CredentialTable;

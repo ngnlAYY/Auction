@@ -141,17 +141,7 @@ fn apply_worker(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsCo
     worker.jitter_seconds = candidate.jitter_seconds;
     worker.item_timeout_seconds = candidate.item_timeout_seconds;
     worker.recovery_retry_delay_seconds = candidate.recovery_retry_delay_seconds;
-    worker.delivery = DeliveryWorkerConfig {
-        batch_limit: candidate.delivery.batch_limit,
-        concurrency: candidate.delivery.concurrency,
-        poll_interval_seconds: candidate.delivery.poll_interval_seconds,
-        jitter_seconds: candidate.delivery.jitter_seconds,
-        lease_duration_seconds: candidate.delivery.lease_duration_seconds,
-        renew_interval_seconds: candidate.delivery.renew_interval_seconds,
-        sending_grace_seconds: candidate.delivery.sending_grace_seconds,
-        request_timeout_seconds: candidate.delivery.request_timeout_seconds,
-        finalize_timeout_seconds: candidate.delivery.finalize_timeout_seconds,
-    };
+    worker.delivery = DeliveryWorkerConfig::from(&candidate.delivery);
     worker.fulfillment = FulfillmentWorkerConfig {
         batch_limit: candidate.fulfillment.batch_limit,
         concurrency: candidate.fulfillment.concurrency,
@@ -163,15 +153,5 @@ fn apply_worker(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsCo
         // COD 领取轮询仍由部署 worker.toml 拥有，runtime 覆盖不改这个节奏。
         evidence_poll_seconds: worker.fulfillment.evidence_poll_seconds,
     };
-    worker.recovery = RecoveryWorkerConfig {
-        batch_limit: candidate.recovery.batch_limit,
-        concurrency: candidate.recovery.concurrency,
-        poll_interval_seconds: candidate.recovery.poll_interval_seconds,
-        jitter_seconds: candidate.recovery.jitter_seconds,
-        lease_duration_seconds: candidate.recovery.lease_duration_seconds,
-        item_timeout_seconds: candidate.recovery.item_timeout_seconds,
-        low_balance_threshold: candidate.recovery.low_balance_threshold,
-        health_refresh_interval_seconds: candidate.recovery.health_refresh_interval_seconds,
-        evidence_stale_after_seconds: candidate.recovery.evidence_stale_after_seconds,
-    };
+    worker.recovery = RecoveryWorkerConfig::from(&candidate.recovery);
 }

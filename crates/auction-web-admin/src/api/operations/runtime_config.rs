@@ -618,7 +618,7 @@ fn valid_string_list(
     if values.len() > maximum_count {
         return false;
     }
-    // 借用名称建立索引，不复制配置正文；唯一性校验不再逐项重扫前缀。
+    // 借用名称建立索引，不复制配置正文；唯一性校验按索引一次完成，无需逐项重扫前缀。
     let mut seen = HashSet::new();
     values.iter().all(|value| {
         value.as_str().is_some_and(|text| {

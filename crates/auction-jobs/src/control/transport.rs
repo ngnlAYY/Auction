@@ -36,13 +36,9 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 use tokio::sync::Notify;
 use uuid::Uuid;
-#[path = "transport/client.rs"]
 mod client;
-#[path = "transport/handlers.rs"]
 mod handlers;
-#[path = "transport/protocol.rs"]
 mod protocol;
-#[path = "transport/server/mod.rs"]
 mod server;
 
 use client::*;
@@ -351,10 +347,7 @@ impl WorkerControlHandle {
     }
 
     fn trigger_poll(&self, command: TriggerPollCommand) -> Result<TriggerPollResult, TriggerError> {
-        if command.command_id.is_empty()
-            || command.command_id.len() > 64
-            || command.command_id != command.command_id.trim()
-            || command.command_id.chars().any(char::is_control)
+        if !auction_domain::valid_text(&command.command_id, 64)
             || Uuid::parse_str(&command.command_id).is_err()
         {
             return Err(TriggerError::InvalidCommand);

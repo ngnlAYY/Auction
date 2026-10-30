@@ -131,38 +131,4 @@ impl RealtimeConsumerStore for RealtimeConsumerOwnership {
             }
         })
     }
-
-    fn resolve_failure_after_replay(
-        &self,
-        consumer_key: String,
-        stream_key: String,
-        event_id: Uuid,
-        replay_event_id: Uuid,
-        resolved_at: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, ()> {
-        Box::pin(async move {
-            validate_cursor_keys(&consumer_key, &stream_key)?;
-            self.validate_owner(&consumer_key)?;
-            validate_event_position(event_id, 1)?;
-            validate_event_position(replay_event_id, 1)?;
-            if event_id == replay_event_id {
-                return Err(storage_error("实时事件不能引用自身作为重放事件"));
-            }
-            match &self.backend {
-                #[cfg(feature = "postgres")]
-                OwnedRealtimeBackend::Postgres(connection) => {
-                    let mut connection = connection.lock().await;
-                    super::resolve_failure_postgres(
-                        &mut connection,
-                        &consumer_key,
-                        &stream_key,
-                        event_id,
-                        replay_event_id,
-                        resolved_at,
-                    )
-                    .await
-                }
-            }
-        })
-    }
 }

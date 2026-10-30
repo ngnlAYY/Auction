@@ -2,7 +2,6 @@
 
 use chrono::DateTime;
 use url::Url;
-use uuid::{Uuid, Variant};
 
 pub(crate) use auction_contracts::PublicForumResponse as ForumThread;
 use auction_contracts::PublicForumSyncStatusResponse;
@@ -38,7 +37,7 @@ pub(crate) async fn fetch_forum_thread(auction_id: String) -> Result<ForumThread
 /// 恢复旧浏览器的严格语义边界，避免形状正确但内容损坏的论坛投影进入页面。
 fn valid_forum_thread(thread: &ForumThread, auction_id: &str) -> bool {
     thread.auction_id == auction_id
-        && valid_legacy_uuid(&thread.auction_id)
+        && auction_web_shared::is_legacy_uuid(&thread.auction_id)
         && thread.source_revision >= 0
         && thread.content_revision >= 0
         && thread.processed_through_post_number >= 2
@@ -76,15 +75,5 @@ pub(super) fn valid_forum_url(value: &str) -> bool {
             && url.host_str().is_some()
             && url.username().is_empty()
             && url.password().is_none()
-    })
-}
-
-/// 旧 Web 只接受小写 canonical、RFC 4122 variant 且版本为 1 至 5 的 UUID。
-fn valid_legacy_uuid(value: &str) -> bool {
-    Uuid::parse_str(value).is_ok_and(|id| {
-        let mut buffer = Uuid::encode_buffer();
-        id.hyphenated().encode_lower(&mut buffer) == value
-            && matches!(id.get_version_num(), 1..=5)
-            && id.get_variant() == Variant::RFC4122
     })
 }

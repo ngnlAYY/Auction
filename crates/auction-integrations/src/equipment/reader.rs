@@ -40,9 +40,7 @@ use super::{
     parser::{EquipmentParseError, parse_equipment_page, parse_equipment_url},
 };
 
-#[path = "reader/diagnostics.rs"]
 mod diagnostics;
-#[path = "reader/fetch.rs"]
 mod fetch;
 
 type DiagnosticReporter =
