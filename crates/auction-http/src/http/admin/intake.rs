@@ -236,12 +236,7 @@ fn map_error(error: ApplicationError) -> Response {
             "该装备已存在于拍卖系统；请勿重复录入",
         )
         .into_response(),
-        ApplicationError::AdminIntake(AdminIntakeError::KeyUnavailable)
-        | ApplicationError::AdminIntake(AdminIntakeError::StoredResultCorrupt)
-        | ApplicationError::Serialization(_) => temporarily_unavailable(),
-        ApplicationError::CompetitionTransaction(CompetitionTransactionError::Conflict) => {
-            temporarily_unavailable()
-        }
+        // 密钥不可用、结果损坏、序列化及并发冲突等其余错误统一返回暂不可用。
         _ => temporarily_unavailable(),
     }
 }

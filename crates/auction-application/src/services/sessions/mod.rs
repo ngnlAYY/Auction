@@ -64,7 +64,7 @@ impl PublicSessionPort for PublicSessionService {
                 return Err(SessionError::InvalidIdentity.into());
             }
 
-            let (token, token_hash) = generate_token()?;
+            let (token, token_hash) = generate_token();
             let stored = self
                 .store
                 .create_public(
@@ -189,9 +189,9 @@ impl AdminSessionPort for AdminSessionService {
                 return Err(SessionError::InvalidCredentials.into());
             }
 
-            let (token, token_hash) = generate_token()?;
+            let (token, token_hash) = generate_token();
             let token_hash = self.scoped_token_hash(token_hash);
-            let (csrf_token, csrf_hash) = generate_token()?;
+            let (csrf_token, csrf_hash) = generate_token();
             let (expires_at, absolute_expires_at) =
                 session_expiration_window(now, self.config.idle_ttl, self.config.absolute_ttl)?;
             let identity = self
@@ -316,25 +316,21 @@ fn validate_login_identity(identity: &PublicLoginIdentity) -> Result<(), Applica
         let Some(reason) = identity.public_reason.as_deref() else {
             return Err(SessionError::InvalidCredentials.into());
         };
-        if reason.is_empty()
-            || reason.len() > 1024
-            || reason != reason.trim()
-            || reason.chars().any(char::is_control)
-        {
+        if !auction_domain::valid_text(reason, 1024) {
             return Err(SessionError::InvalidCredentials.into());
         }
     }
     Ok(())
 }
 
-fn generate_token() -> Result<(String, [u8; 32]), ApplicationError> {
+fn generate_token() -> (String, [u8; 32]) {
     let first = Uuid::new_v4();
     let second = Uuid::new_v4();
     let mut bytes = [0_u8; 32];
     bytes[..16].copy_from_slice(first.as_bytes());
     bytes[16..].copy_from_slice(second.as_bytes());
     let token = URL_SAFE_NO_PAD.encode(bytes);
-    Ok((token, Sha256::digest(bytes).into()))
+    (token, Sha256::digest(bytes).into())
 }
 
 fn hash_token(raw_token: &str) -> Result<[u8; 32], ApplicationError> {

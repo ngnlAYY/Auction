@@ -13,8 +13,8 @@ use super::{
     valid_trimmed_text,
 };
 
-// 本地 Strict 镜像已删除：contracts 的 `AdminRulesResponse` 与 `AdminRulesCandidateResponse`
-// 已带 `deny_unknown_fields`；本文件只保留 locale/title/发布时间等值域谓词与请求回显校验。
+// 结构闭集由 contracts 的 `AdminRulesResponse` 与 `AdminRulesCandidateResponse`
+//（`deny_unknown_fields`）负责；本文件只保留 locale/title/发布时间等值域谓词与请求回显校验。
 
 /// Admin 规则请求失败时保留 HTTP 状态，页面可以把版本冲突和普通网络错误区分开。
 pub(crate) type AdminRulesApiError = AdminApiFailure;

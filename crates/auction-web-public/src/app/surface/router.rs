@@ -232,38 +232,9 @@ pub(crate) fn PublicShell() -> Element {
     use_context_provider(move || current_auction_context);
     use_context_provider(move || page_visibility);
 
-    #[cfg(target_arch = "wasm32")]
-    let popstate_guard = use_hook(|| Rc::new(RefCell::new(None::<PublicPopstateGuard>)));
-    #[cfg(target_arch = "wasm32")]
-    {
-        let cleanup_guard = popstate_guard.clone();
-        use_drop(move || {
-            if let Some(guard) = cleanup_guard.borrow_mut().take() {
-                guard.cleanup();
-            }
-        });
-    }
-    #[cfg(target_arch = "wasm32")]
-    use_effect({
-        let mut location_generation = location_generation;
-        let guard = popstate_guard.clone();
-        move || {
-            if guard.borrow().is_some() {
-                return;
-            }
-            let Some(window) = web_sys::window() else {
-                return;
-            };
-            let callback = Closure::<dyn FnMut()>::new(move || {
-                // world 键的恢复已由 query hook 承担；这里只保留查询驱动页面（拍卖看板的
-                // 历史/首页切换）需要的位置版本递增。
-                location_generation.set(location_generation().saturating_add(1));
-            });
-            let _ = window
-                .add_event_listener_with_callback("popstate", callback.as_ref().unchecked_ref());
-            *guard.borrow_mut() = Some(PublicPopstateGuard { window, callback });
-        }
-    });
+    // world 键的恢复已由 query hook 承担；这里只为查询驱动页面（拍卖看板的历史/首页切换）
+    // 递增位置版本。
+    auction_web_shared::use_popstate_revision(location_generation);
     let readiness_state = match &*readiness.read_unchecked() {
         None => PublicReadinessState::Checking,
         Some(Ok(true)) => PublicReadinessState::Ready,
@@ -496,22 +467,6 @@ pub(crate) fn PublicShell() -> Element {
                 Outlet::<Route> {}
             }
         }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-struct PublicPopstateGuard {
-    window: web_sys::Window,
-    callback: Closure<dyn FnMut()>,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl PublicPopstateGuard {
-    fn cleanup(self) {
-        let _ = self.window.remove_event_listener_with_callback(
-            "popstate",
-            self.callback.as_ref().unchecked_ref(),
-        );
     }
 }
 

@@ -27,7 +27,10 @@ pub use bootstrap::{install_panic_hook, use_app_boot_ready};
 pub use clock::{SecondTicker, use_second_tick, use_second_ticker};
 pub use commands::{ConfirmCommand, use_confirm_command};
 pub use errors::{BaseErrorKind, base_api_error_message, classify_base_error};
-pub use query::{QueryState, QueryWriteMode, read_query_pairs, use_query_state, write_query_pairs};
+pub use query::{
+    QueryState, QueryWriteMode, read_query_pairs, use_popstate_revision, use_query_state,
+    write_query_pairs,
+};
 pub use transport::{
     BrowserLock, BrowserLockError, DEFAULT_REQUEST_TIMEOUT_MILLIS, TransportError, send_get,
     send_get_observed, send_request, send_request_observed, send_request_with_timeout,

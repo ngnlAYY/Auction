@@ -13,7 +13,7 @@ use crate::api::{
 };
 
 use super::pagination::use_admin_pagination;
-use super::{AdminActionFeedback, admin_api_error_message};
+use super::{AdminActionFeedback, admin_api_error_message, admin_world_label};
 use crate::app::surface::pending::{
     PendingCommandPanel, use_pending_command_gate, use_pending_commands_with_gate,
 };
@@ -367,7 +367,7 @@ pub(super) fn page() -> Element {
         |entry| {
             t!(
                 "admin-settlement-report-title",
-                world: world_label(&entry.world_id),
+                world: admin_world_label(&entry.world_id),
                 sequence: entry.sequence
             )
         },
@@ -533,12 +533,4 @@ fn report_matches_selection(
             && report.auction.sequence == selected.sequence
             && report.auction.status == "settled"
     })
-}
-
-fn world_label(world_id: &str) -> String {
-    match world_id {
-        "main" => t!("admin-runtime-world-main"),
-        "isekai" => t!("admin-runtime-world-isekai"),
-        _ => world_id.to_owned(),
-    }
 }

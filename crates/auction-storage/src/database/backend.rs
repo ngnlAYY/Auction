@@ -1,4 +1,4 @@
-//! 数据库后端枚举与统一存储错误。
+//! 数据库后端枚举、统一存储错误与多个 owner 共用的 PostgreSQL 规则（冲突谓词、命令锁、运维库名与只读快照上限）。
 
 use std::fmt;
 
@@ -51,6 +51,63 @@ pub(crate) fn is_serialization_conflict(error: &sqlx::Error) -> bool {
         .as_database_error()
         .and_then(|database| database.code())
         .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01"))
+}
+
+/// 以命令 ID 取事务级 advisory 锁，串行化同一幂等身份的并发入口；锁随事务结束释放。
+/// 各命令 owner 共用这一键空间（规范 UUID 文本经 `hashtextextended(_, 0)`），不得各自改写哈希或种子。
+#[cfg(feature = "postgres")]
+pub(crate) async fn lock_command_id(
+    connection: &mut sqlx::PgConnection,
+    command_id: impl Into<uuid::Uuid>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(command_id.into().to_string())
+        .execute(connection)
+        .await
+        .map(drop)
+}
+
+/// 运维确认库名的共同边界：非空、无首尾空白与控制字符，且不超过 PostgreSQL 63 字节标识符上限。
+/// 只用于和数据库实际名称比对；需拼入 DDL 的名称改用 [`valid_ddl_database_name`]。
+#[cfg(feature = "postgres")]
+pub(crate) fn valid_confirmed_database_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 63
+        && value.trim() == value
+        && !value.chars().any(char::is_control)
+}
+
+/// 创建或重建目标库时拼入 DDL 的库名，额外限定为 ASCII 字母数字与 `_-.`。
+#[cfg(feature = "postgres")]
+pub(crate) fn valid_ddl_database_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 63
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+}
+
+/// 以双引号包裹并转义内嵌双引号，使库名、owner 与 tablespace 作为单个 PostgreSQL 标识符拼入 DDL。
+#[cfg(feature = "postgres")]
+pub(crate) fn quote_identifier(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+/// 为 `begin_read_snapshot` 开启的运维只读快照设置语句与锁等待上限（5s/1s）；
+/// 恢复预检与保留盘点共用同一阈值。失败时返回对应设置名，由调用方映射为自身错误。
+#[cfg(feature = "postgres")]
+pub(crate) async fn set_read_only_limits(
+    connection: &mut sqlx::PgConnection,
+) -> Result<(), (&'static str, sqlx::Error)> {
+    sqlx::query("SET LOCAL statement_timeout = '5s'")
+        .execute(&mut *connection)
+        .await
+        .map_err(|source| ("statement_timeout", source))?;
+    sqlx::query("SET LOCAL lock_timeout = '1s'")
+        .execute(connection)
+        .await
+        .map_err(|source| ("lock_timeout", source))?;
+    Ok(())
 }
 
 /// 不向驱动传入会被容忍或有损解码的 URI，错误只报告固定分类。

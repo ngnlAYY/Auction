@@ -65,7 +65,7 @@ use url::form_urlencoded;
 #[cfg(target_arch = "wasm32")]
 use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen::{JsCast, JsValue, closure::Closure};
+use wasm_bindgen::{JsCast, JsValue};
 
 use crate::api::{
     AuctionListPage, CatalogRow, CurrentAuction, HistoricalAuction, LotDetailFetchError,
@@ -97,9 +97,8 @@ pub(crate) type PublicReadinessResource = Resource<Result<bool, String>>;
 /// Public 外壳按世界读取的当前拍卖快照；结果携带请求世界，切换期间不得消费旧世界缓存。
 pub(crate) type CurrentAuctionResource = Resource<(String, Result<Option<CurrentAuction>, String>)>;
 
-/// 会话资源快照的统一展示投影。
-/// 看板、lot 详情和外壳头部原先各自重复同一段四元解构；认证、就绪、错误与查看者身份
-/// 按同一规则派生，匿名/未就绪/错误一律失败关闭。
+/// 会话资源快照的统一展示投影，看板、lot 详情和外壳头部共用。
+/// 认证、就绪、错误与查看者身份按同一规则派生，匿名/未就绪/错误一律失败关闭。
 #[derive(Clone)]
 pub(crate) struct PublicSessionView {
     pub(crate) pending: bool,

@@ -57,7 +57,7 @@ impl MoogleMailLoginKeyIssuer {
         Self { data_key, random: SystemRandom::new() }
     }
 
-    async fn issue_now(&self, user_id: Uuid) -> Result<MailLoginKeyIssue, ApplicationError> {
+    fn issue_now(&self, user_id: Uuid) -> Result<MailLoginKeyIssue, ApplicationError> {
         let issue = self.generate_admin_now(user_id)?;
         let public_key_hash = issue.key.public_key_hash();
         Ok(MailLoginKeyIssue { public_key_hash, envelope: issue.envelope })
@@ -111,7 +111,7 @@ impl MoogleMailLoginKeyIssuer {
 
 impl MailLoginKeyIssuer for MoogleMailLoginKeyIssuer {
     fn issue(&self, user_id: Uuid) -> ApplicationFuture<'_, MailLoginKeyIssue> {
-        Box::pin(async move { self.issue_now(user_id).await })
+        Box::pin(async move { self.issue_now(user_id) })
     }
 }
 
@@ -145,10 +145,10 @@ where
             return Err(MailProcessingError::InvalidLoginKey.into());
         }
         let envelope = self.source.load_login_key_envelope(user_id).await?;
-        self.open_envelope_now(user_id, envelope).await
+        self.open_envelope_now(user_id, envelope)
     }
 
-    async fn open_envelope_now(
+    fn open_envelope_now(
         &self,
         user_id: Uuid,
         envelope: MailLoginKeyEnvelope,
@@ -203,7 +203,7 @@ where
         user_id: Uuid,
         envelope: MailLoginKeyEnvelope,
     ) -> ApplicationFuture<'_, MailLoginKey> {
-        Box::pin(async move { self.open_envelope_now(user_id, envelope).await })
+        Box::pin(async move { self.open_envelope_now(user_id, envelope) })
     }
 }
 

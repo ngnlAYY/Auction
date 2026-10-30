@@ -6,8 +6,7 @@ use dioxus::prelude::*;
 use crate::api::{CurrentAuction, ForumThread, fetch_forum_sync_enabled, fetch_forum_thread};
 
 use super::{
-    CurrentAuctionResource, PageVisibility, auction_world_label, format_auction_time,
-    sleep_while_visible,
+    CurrentAuctionResource, PageVisibility, format_auction_time, sleep_while_visible, world_label,
 };
 
 /// 先读取独立的开关投影，明确启用后才挂载当前拍卖的论坛进度。
@@ -164,7 +163,7 @@ fn ForumAuctionHeading(auction: CurrentAuction) -> Element {
                 p { class: "public-forum-card__world",
                     {t!("forum-world")}
                     ": "
-                    "{auction_world_label(&auction.world)}"
+                    "{world_label(&auction.world)}"
                 }
             }
         }

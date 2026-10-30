@@ -219,25 +219,24 @@ fn normalize_request_id(headers: &mut HeaderMap) -> Result<String, String> {
     let first = values.next();
     let duplicate = values.next().is_some();
     let request_id = match (first, duplicate) {
-        (None, false) => generated_request_id(),
+        (None, false) => Some(generated_request_id()),
         (Some(value), false) => {
             value.to_str().ok().filter(|value| valid_request_id(value)).map(str::to_owned)
         }
         _ => None,
     };
     let Some(request_id) = request_id else {
-        return Err(generated_request_id().unwrap_or_else(|| "request-id-unavailable".to_owned()));
+        return Err(generated_request_id());
     };
-    let value = HeaderValue::from_str(&request_id).map_err(|_| {
-        generated_request_id().unwrap_or_else(|| "request-id-unavailable".to_owned())
-    })?;
+    // 合法值只含 ASCII 字母数字与 `-_.`，必然是有效头值。
+    let value = HeaderValue::from_str(&request_id).map_err(|_| generated_request_id())?;
     headers.insert(REQUEST_ID_HEADER, value);
     Ok(request_id)
 }
 
-fn generated_request_id() -> Option<String> {
-    let value = Uuid::new_v4().simple().to_string();
-    valid_request_id(&value).then_some(value)
+/// 32 位小写十六进制 UUID 恒满足 `valid_request_id`，无需再次扫描或回退占位值。
+fn generated_request_id() -> String {
+    Uuid::new_v4().simple().to_string()
 }
 
 fn valid_request_id(value: &str) -> bool {

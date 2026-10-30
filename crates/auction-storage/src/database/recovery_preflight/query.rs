@@ -5,19 +5,13 @@ use sqlx::Row;
 
 use super::{PostgresMigrationInventory, PostgresSchemaIdentity, RecoveryPreflightError};
 
-/// 为调用方以 `begin_read_snapshot` 开启的只读快照设置语句与锁等待上限。
+/// 共享运维只读快照上限，失败映射为本模块错误。
 pub(super) async fn set_read_only_limits(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<(), RecoveryPreflightError> {
-    sqlx::query("SET LOCAL statement_timeout = '5s'")
-        .execute(&mut **transaction)
+    crate::database::set_read_only_limits(transaction)
         .await
-        .map_err(|source| query_error("statement_timeout", source))?;
-    sqlx::query("SET LOCAL lock_timeout = '1s'")
-        .execute(&mut **transaction)
-        .await
-        .map_err(|source| query_error("lock_timeout", source))?;
-    Ok(())
+        .map_err(|(stage, source)| query_error(stage, source))
 }
 
 pub(super) async fn read_schema_identity(
@@ -86,11 +80,7 @@ pub(super) fn query_error(stage: &'static str, source: sqlx::Error) -> RecoveryP
 }
 
 pub(super) fn validate_database_name(value: &str) -> Result<(), RecoveryPreflightError> {
-    if value.is_empty()
-        || value.trim() != value
-        || value.len() > 63
-        || value.chars().any(char::is_control)
-    {
+    if !crate::database::valid_confirmed_database_name(value) {
         return Err(RecoveryPreflightError::InvalidDatabaseName);
     }
     Ok(())

@@ -1,4 +1,5 @@
 use super::model::{LocaleProvider, PostgresRebuildError, TargetDatabaseDefinition};
+pub(super) use crate::database::quote_identifier;
 
 pub(super) fn create_database_sql(
     database_name: &str,
@@ -56,22 +57,12 @@ pub(super) fn create_database_sql(
     Ok(sql)
 }
 
-pub(super) fn quote_identifier(value: &str) -> String {
-    format!("\"{}\"", value.replace('"', "\"\""))
-}
-
 fn quote_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
 pub(super) fn validate_database_name(value: &str) -> Result<(), PostgresRebuildError> {
-    if value.is_empty()
-        || value.len() > 63
-        || value.trim() != value
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
-    {
+    if !crate::database::valid_ddl_database_name(value) {
         return Err(PostgresRebuildError::InvalidDatabaseName);
     }
     Ok(())

@@ -15,9 +15,9 @@ use super::{
     response_error, send_get, send_request, valid_admin_time, valid_trimmed_text, valid_uuid,
 };
 
-// 本地 Strict 镜像已删除：contracts 的 `AdminLotResponse`/`AdminLotListResponse`/
-// `AdminLotUpdateResponse` 已带 `deny_unknown_fields` 与必填 nullable 语义；本文件只保留
-// 跨字段业务谓词（slow 字段组合、submission 字段组合等）。
+// 结构闭集由 contracts 的 `AdminLotResponse`/`AdminLotListResponse`/`AdminLotUpdateResponse`
+//（`deny_unknown_fields` 与必填 nullable 语义）负责；本文件只保留跨字段业务谓词
+//（slow 字段组合、submission 字段组合等）。
 
 /// lot 页的浏览器本地模型；响应 body 保持旧 v1 闭集，额外能力只从非破坏性响应头读取。
 #[derive(Debug, Clone, PartialEq)]

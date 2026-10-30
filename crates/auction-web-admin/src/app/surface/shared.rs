@@ -14,6 +14,15 @@ pub fn format_admin_time(value: &str) -> String {
     format_localized_time_for_language(value, &i18n().language().to_string())
 }
 
+/// 业务世界的当前语言展示名；结算目录、选择器与世界开关共用，未知值按原文显示。
+pub fn admin_world_label(world_id: &str) -> String {
+    match world_id {
+        "main" => t!("admin-runtime-world-main"),
+        "isekai" => t!("admin-runtime-world-isekai"),
+        _ => world_id.to_owned(),
+    }
+}
+
 /// 将 Admin API 的稳定错误码映射为当前语言的可操作提示。
 /// 未识别的服务端扩展码只能落入通用兜底；底层 HTTP 正文、数据库错误和浏览器异常不会直接
 /// 展示。这样既恢复旧版 `errorKey(error)` 行为，也避免把服务端自然语言当成跨语言契约。

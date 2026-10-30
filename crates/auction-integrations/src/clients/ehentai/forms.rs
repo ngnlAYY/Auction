@@ -22,10 +22,7 @@ static LOGIN_FIELD_SELECTOR: LazyLock<Result<Selector, ()>> =
 fn cached_selector(
     cache: &'static LazyLock<Result<Selector, ()>>,
 ) -> Result<&'static Selector, ()> {
-    match LazyLock::force(cache) {
-        Ok(selector) => Ok(selector),
-        Err(()) => Err(()),
-    }
+    LazyLock::force(cache).as_ref().map_err(|_| ())
 }
 
 pub(super) fn form_selector() -> Result<&'static Selector, ()> {

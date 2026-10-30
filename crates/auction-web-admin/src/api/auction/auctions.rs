@@ -20,9 +20,9 @@ use super::{
     valid_uuid,
 };
 
-// 旧 Admin 列表和生命周期命令共用同一拍卖 decoder；contracts 侧的 `AdminAuctionResponse`
-// 与 `AdminAuctionCommandResponse` 已带 `deny_unknown_fields` 与必填 nullable 语义，本文件
-// 不再保留本地 Strict 镜像，只保留跨字段业务谓词。
+// 旧 Admin 列表和生命周期命令共用同一拍卖 decoder；结构闭集由 contracts 的
+// `AdminAuctionResponse` 与 `AdminAuctionCommandResponse`（`deny_unknown_fields` 与必填
+// nullable 语义）负责，本文件只保留跨字段业务谓词。
 
 pub(crate) async fn fetch_admin_auctions(
     world_id: String,

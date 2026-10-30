@@ -336,7 +336,7 @@ pub(crate) fn AuctionData(
                             id: "auction-title",
                             {t!("auction-header-title", number: auction.number)}
                         }
-                        span { class: "public-auction-round__world", "{auction_world_label(&auction.world)}" }
+                        span { class: "public-auction-round__world", "{world_label(&auction.world)}" }
                         span {
                             class: "public-auction-round__status public-auction-round__status--{auction_status_class(&auction.status)}",
                             "{status_label}"

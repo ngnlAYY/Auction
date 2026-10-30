@@ -134,8 +134,8 @@ pub(crate) fn parse_page_time(
     operation: MoogleMailOperation,
     world: MoogleMailWorld,
 ) -> Result<DateTime<Utc>, MoogleMailError> {
-    // 游戏页面按 UTC 直接展示邮件时间（2026-10-18 实测：本地 05:14Z 发出的邮件显示 05:14）。
-    // 旧实现按 HVT-8 换算，把当天邮件整体推到 +8 小时，已停用。
+    // 游戏页面按 UTC 直接展示邮件时间（2026-10-18 实测：本地 05:14Z 发出的邮件显示 05:14），
+    // 不能再按 HVT-8 换算，否则当天邮件整体偏移 +8 小时。
     let naive = NaiveDateTime::parse_from_str(value, INBOX_TIME_FORMAT)
         .map_err(|_| protocol(operation, world))?;
     Ok(naive.and_utc())

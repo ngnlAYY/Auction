@@ -22,8 +22,8 @@ pub(crate) struct AdminBusinessWorld {
     pub policy_revision: i64,
 }
 
-// 本地 Strict 镜像已删除：contracts 的 `AdminWorldResponse`/`AdminWorldListResponse`/
-// `AdminWorldSetEnabledResponse` 已带 `deny_unknown_fields`；本文件只保留世界枚举、
+// 结构闭集由 contracts 的 `AdminWorldResponse`/`AdminWorldListResponse`/
+// `AdminWorldSetEnabledResponse`（`deny_unknown_fields`）负责；本文件只保留世界枚举、
 // 数量与排序等跨字段谓词。
 
 /// 读取数据库权威的业务世界状态；它与重启生效的 Worker 入站配置保持独立。

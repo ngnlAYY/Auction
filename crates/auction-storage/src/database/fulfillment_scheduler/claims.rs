@@ -352,9 +352,8 @@ pub(super) fn map_claim(
         .map_err(ClaimMappingError::Execution)?
         .as_deref()
     {
-        None => false,
+        None | Some("false") => false,
         Some("true") => true,
-        Some("false") => false,
         Some(_) => {
             return Err(ClaimMappingError::Execution(repository_error_owned(
                 "结算履约外部引用证明标记无效",

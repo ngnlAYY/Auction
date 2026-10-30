@@ -150,35 +150,54 @@ pub fn use_query_state<T: Clone + PartialEq + 'static>(
                 }
             }
         });
-        let guard = use_hook(|| Rc::new(RefCell::new(None::<PopstateGuard>)));
-        let cleanup_guard = Rc::clone(&guard);
-        use_drop(move || {
-            if let Some(guard) = cleanup_guard.borrow_mut().take() {
-                guard.cleanup();
-            }
-        });
-        let effect_guard = Rc::clone(&guard);
-        use_effect(move || {
-            // 只安装一次监听；effect 重跑（本 hook 无响应式依赖，不会重跑）时守卫已存在。
-            if effect_guard.borrow().is_some() {
-                return;
-            }
-            let Some(window) = web_sys::window() else {
-                return;
-            };
-            let callback = Closure::<dyn FnMut()>::new(move || {
-                on_popstate.call(());
-            });
-            if window
-                .add_event_listener_with_callback("popstate", callback.as_ref().unchecked_ref())
-                .is_ok()
-            {
-                effect_guard.replace(Some(PopstateGuard { window, callback }));
-            }
-        });
+        use_popstate_listener(on_popstate);
     }
 
     QueryState { state, keys, serialize }
+}
+
+/// 浏览器前进/后退时递增调用方持有的位置版本；组件卸载时移除监听。
+/// surface 只按版本变化重读自身状态，本 hook 不解析地址，也不接管路由。非 WASM 构建为空操作。
+pub fn use_popstate_revision(revision: Signal<u64>) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut revision = revision;
+        use_popstate_listener(use_callback(move |()| {
+            revision.set(revision().saturating_add(1));
+        }));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = revision;
+}
+
+/// 每个组件只安装一次 popstate 监听，卸载时由守卫移除；回调经 `Callback` 恢复创建组件的 Scope。
+#[cfg(target_arch = "wasm32")]
+fn use_popstate_listener(on_popstate: Callback<()>) {
+    let guard = use_hook(|| Rc::new(RefCell::new(None::<PopstateGuard>)));
+    let cleanup_guard = Rc::clone(&guard);
+    use_drop(move || {
+        if let Some(guard) = cleanup_guard.borrow_mut().take() {
+            guard.cleanup();
+        }
+    });
+    use_effect(move || {
+        // 只安装一次监听；effect 无响应式依赖，不会重跑，守卫存在即返回。
+        if guard.borrow().is_some() {
+            return;
+        }
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let callback = Closure::<dyn FnMut()>::new(move || {
+            on_popstate.call(());
+        });
+        if window
+            .add_event_listener_with_callback("popstate", callback.as_ref().unchecked_ref())
+            .is_ok()
+        {
+            guard.replace(Some(PopstateGuard { window, callback }));
+        }
+    });
 }
 
 /// popstate 监听的生命周期守卫：组件卸载时移除监听并释放闭包。

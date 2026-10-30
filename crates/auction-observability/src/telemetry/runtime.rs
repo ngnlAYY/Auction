@@ -106,11 +106,6 @@ impl TracingRuntime {
     }
 }
 
-/// 初始化 JSON tracing subscriber，不启用 OTLP exporter。
-pub fn init(service: &str, configured_filter: Option<&str>) -> Result<(), InitError> {
-    init_with_config(service, "unknown", "unknown", configured_filter, None, None).map(|_| ())
-}
-
 /// 安装仅写 stderr 的 JSON subscriber，不启用 OTLP，也不读取环境过滤器。
 /// 调用方显式选择安全 target；事件不附加父 span 字段，避免污染结构化命令输出或夹带上下文。
 pub fn init_json_stderr(configured_filter: &str) -> Result<(), InitError> {

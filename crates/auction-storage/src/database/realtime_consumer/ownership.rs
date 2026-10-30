@@ -33,11 +33,7 @@ impl DatabaseStore {
         &self,
         consumer_key: &str,
     ) -> Result<RealtimeConsumerOwnership, RealtimeConsumerOwnershipError> {
-        if consumer_key.is_empty()
-            || consumer_key.len() > 128
-            || consumer_key != consumer_key.trim()
-            || consumer_key.chars().any(char::is_control)
-        {
+        if !auction_domain::valid_text(consumer_key, 128) {
             return Err(RealtimeConsumerOwnershipError::InvalidKey);
         }
         match self {

@@ -29,8 +29,8 @@ pub(super) struct EquipmentStat {
 }
 
 impl EquipmentFacts {
-    pub(super) fn attributes(&self) -> Result<serde_json::Value, AdminIntakeError> {
-        Ok(serde_json::json!({
+    pub(super) fn attributes(&self) -> serde_json::Value {
+        serde_json::json!({
             "type": self.base_name,
             "quality": self.quality,
             "prefix": self.prefix,
@@ -38,7 +38,7 @@ impl EquipmentFacts {
             "level": self.level.legacy_level(),
             "tradeable": self.tradeable,
             "stats": self.stats,
-        }))
+        })
     }
 }
 

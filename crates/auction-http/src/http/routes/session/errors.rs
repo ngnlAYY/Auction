@@ -81,8 +81,7 @@ pub(crate) fn map_admin_session_error(error: ApplicationError) -> Response {
                 .into_response()
         }
         ApplicationError::Session(SessionError::Unauthenticated) => authentication_error(),
-        ApplicationError::Session(SessionError::InvalidConfiguration)
-        | ApplicationError::Session(SessionError::TokenGeneration) => session_unavailable(),
+        // 配置无效、令牌生成失败及其余错误统一返回会话不可用。
         _ => session_unavailable(),
     }
 }

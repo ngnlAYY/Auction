@@ -75,7 +75,9 @@ Tab 循环扫描只保留首尾两个可聚焦控件，Rust 侧额外存储为 O
 提交中或累计未知时不能由迟到编辑替换负载，也不能重复提交。任务归创建 hook 的稳定 owner，
 结果未知只重放冻结请求，后续认证/限流拒绝不解除未知。宿主位置由各 surface 决定，数据读取分支卸载不能冒充用户取消。
 冻结签名比较借用原字符串，只复制已存在的 UUID；不因确认或重试额外分配一份签名。
-`use_query_state` 只读写声明的 query 键，popstate 经同一解析器恢复；共享时钟和监听均绑定所属组件生命期。
+`use_query_state` 只读写声明的 query 键，popstate 经同一解析器恢复；`use_popstate_revision` 为只需感知前进/后退的
+页面递增调用方持有的位置版本（Public 外壳与 Admin 结算筛选共用），两者共享同一个按组件生命期移除的监听实现。
+共享时钟和监听均绑定所属组件生命期。
 `BaseStylesheet` 安装 `media/viewport.rs` 的 VisualViewport 监听，将宽高及偏移投影到 CSS 变量，
 供软键盘出现或缩放时的弹窗布局使用；卸载恢复原样式并移除监听，缺少 API 时使用 vh/dvh 回退。
 尺寸与偏移按数值比较，仅变化项才格式化并写入 CSS；重复 scroll/resize 通知不再分配四份字符串或读取四次 CSS 属性。

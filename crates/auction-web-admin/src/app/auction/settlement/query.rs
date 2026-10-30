@@ -7,19 +7,15 @@
 //! canonical 化（auction 与 sequence 必须成对、空目录页钳制到末页、解析失败保留地址显式
 //! 报错）。这些「读-改-写 + 跨 signal 复位 + 服务端事实纠偏」语义超出通用 hook 的单一状态
 //! 模型，整体迁移会重写整页 signal 管线并需要重新验证异步守卫，因此保留本模块的三件套
-//! API（read + push/replace + location revision），仅把底层地址栏读写收敛到
-//! `auction_web_shared::query` 的 `read_query_pairs` / `write_query_pairs`。
-
-#[cfg(target_arch = "wasm32")]
-use std::{cell::RefCell, rc::Rc};
+//! API（read + push/replace + location revision），底层地址栏读写与 popstate 监听复用
+//! `auction_web_shared::query` 的 `read_query_pairs` / `write_query_pairs` / `use_popstate_revision`。
 
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::{JsCast, closure::Closure};
-
-use auction_web_shared::{QueryWriteMode, read_query_pairs, write_query_pairs};
+use auction_web_shared::{
+    QueryWriteMode, read_query_pairs, use_popstate_revision, write_query_pairs,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SettlementQuery {
@@ -115,50 +111,6 @@ fn settlement_query_pairs(query: &SettlementQuery) -> Vec<(String, String)> {
 /// 监听同一路径的浏览器返回/前进，确保筛选状态不会与地址栏分离。
 pub(super) fn use_settlement_location_revision() -> Signal<u64> {
     let revision = use_signal(|| 0_u64);
-    #[cfg(target_arch = "wasm32")]
-    {
-        let guard = use_hook(|| Rc::new(RefCell::new(None::<SettlementPopstateGuard>)));
-        let cleanup_guard = Rc::clone(&guard);
-        use_drop(move || {
-            if let Some(guard) = cleanup_guard.borrow_mut().take() {
-                guard.cleanup();
-            }
-        });
-        let effect_guard = Rc::clone(&guard);
-        use_effect(move || {
-            if effect_guard.borrow().is_some() {
-                return;
-            }
-            let Some(window) = web_sys::window() else {
-                return;
-            };
-            let mut revision = revision;
-            let callback = Closure::<dyn FnMut()>::new(move || {
-                revision.set(revision().saturating_add(1));
-            });
-            if window
-                .add_event_listener_with_callback("popstate", callback.as_ref().unchecked_ref())
-                .is_ok()
-            {
-                effect_guard.replace(Some(SettlementPopstateGuard { window, callback }));
-            }
-        });
-    }
+    use_popstate_revision(revision);
     revision
-}
-
-#[cfg(target_arch = "wasm32")]
-struct SettlementPopstateGuard {
-    window: web_sys::Window,
-    callback: Closure<dyn FnMut()>,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl SettlementPopstateGuard {
-    fn cleanup(self) {
-        let _ = self.window.remove_event_listener_with_callback(
-            "popstate",
-            self.callback.as_ref().unchecked_ref(),
-        );
-    }
 }

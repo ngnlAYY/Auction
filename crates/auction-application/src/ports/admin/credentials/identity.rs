@@ -51,10 +51,7 @@ impl VerifiedMailPlayerIdentity {
 
 /// 完整游戏玩家名称按原文保留，禁止首尾空白、控制字符和超长值。
 pub fn valid_mail_player_name(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 256
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
+    auction_domain::valid_text(value, 256)
 }
 
 /// 只有邮件 Cookie 可以声明预期名称；空值必须显式使用 None。

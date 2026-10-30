@@ -146,7 +146,7 @@ where
                         schedule_calendar.as_ref(),
                     )
                     .await?;
-                    let result = lifecycle_result(&command, &context, &plan)?;
+                    let result = lifecycle_result(&command, &context, &plan);
                     let stored = StoredCommand {
                         command_id: command.command_id,
                         command_kind: command.action.command_kind().to_owned(),
@@ -171,7 +171,7 @@ fn lifecycle_result(
     command: &AuctionLifecycleCommand,
     context: &AuctionLifecycleContext,
     plan: &AuctionLifecyclePlan,
-) -> Result<AuctionLifecycleResult, ApplicationError> {
+) -> AuctionLifecycleResult {
     let auction = &plan.auction;
     let mut snapshot = snapshot_from_context(context);
     snapshot.id = AuctionId::from_uuid(auction.id.as_uuid());
@@ -207,14 +207,14 @@ fn lifecycle_result(
         }
     }
 
-    Ok(AuctionLifecycleResult {
+    AuctionLifecycleResult {
         command_id: command.command_id,
         auction_id: AuctionId::from_uuid(auction.id.as_uuid()),
         status: auction.status,
         state_version: auction.state_version,
         updated_at: auction.updated_at,
         auction: Some(snapshot),
-    })
+    }
 }
 
 fn snapshot_from_context(context: &AuctionLifecycleContext) -> AuctionLifecycleSnapshot {

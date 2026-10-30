@@ -13,23 +13,9 @@ use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use super::DatabaseStore;
+use super::settlement_funding::{evidence_error, storage as sql_error};
 
 pub(crate) use proof::{TRUSTED_DELIVERY_PREDICATE, legacy_self_uid};
-
-fn sql_error(error: sqlx::Error) -> FundingError {
-    if crate::database::is_serialization_conflict(&error) {
-        FundingError::SerializationConflict
-    } else {
-        FundingError::Storage
-    }
-}
-
-fn evidence_error(error: crate::MailEvidenceTransactionError) -> FundingError {
-    match error {
-        crate::MailEvidenceTransactionError::Sqlx(error) => sql_error(error),
-        crate::MailEvidenceTransactionError::Rejected(_) => FundingError::Unproven,
-    }
-}
 
 impl LegacySelfReconciliationReader for DatabaseStore {
     fn legacy_self_command_target(

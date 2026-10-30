@@ -9,7 +9,7 @@ use crate::api::{
 
 use auction_web_shared::{AsyncState, AsyncStateKind, Dialog};
 
-use super::super::admin_api_error_message;
+use super::super::{admin_api_error_message, admin_world_label};
 use crate::app::surface::pending::{
     PendingCommandPanel, PendingCommands, set_if_alive, use_pending_command_gate,
     use_pending_commands_with_gate,
@@ -87,9 +87,9 @@ pub(super) fn AdminBusinessWorlds() -> Element {
                     if let Some(code) = &current.error_code {
                         {admin_api_error_message(code)}
                     } else if current.enabled {
-                        {t!("admin-business-world-enabled-success", world: world_label(&current.world_id))}
+                        {t!("admin-business-world-enabled-success", world: admin_world_label(&current.world_id))}
                     } else {
-                        {t!("admin-business-world-disabled-success", world: world_label(&current.world_id))}
+                        {t!("admin-business-world-disabled-success", world: admin_world_label(&current.world_id))}
                     }
                 }
             }
@@ -106,7 +106,7 @@ fn BusinessWorldCard(
     let pending = use_context::<PendingCommands>();
     let target_enabled = !world.enabled;
     let world_id = world.id.clone();
-    let world_name = world_label(&world.id);
+    let world_name = admin_world_label(&world.id);
     let action_busy = pending.is_busy(&world.id);
     let blocked = pending.any_busy() || pending.contains(&world.id);
     let availability = availability_label(&world.availability);
@@ -255,14 +255,6 @@ fn BusinessWorldCard(
                 }
             }
         }
-    }
-}
-
-fn world_label(world_id: &str) -> String {
-    match world_id {
-        "main" => t!("admin-runtime-world-main"),
-        "isekai" => t!("admin-runtime-world-isekai"),
-        _ => world_id.to_owned(),
     }
 }
 

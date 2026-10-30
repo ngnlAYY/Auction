@@ -11,9 +11,9 @@ use super::{
     response_error, send_request, valid_trimmed_text,
 };
 
-// 本地 Strict 镜像已删除：contracts 的 `AdminIntakeResponse` 已带 `deny_unknown_fields`
-// 且 `equipment_level` 保持旧 decoder 的必填 nullable 语义；标识字段直接以 `Uuid` 解码
-//（接受 RFC 4122 全版本，不再限制 v1-v5 小写形式），其余值域谓词保留在下方校验函数。
+// 结构闭集由 contracts 的 `AdminIntakeResponse`（`deny_unknown_fields`，`equipment_level`
+// 保持旧 decoder 的必填 nullable 语义）负责；标识字段直接以 `Uuid` 解码（接受 RFC 4122
+// 全版本），其余值域谓词保留在下方校验函数。
 
 /// 提交 URL 或 canonical JSON 装备来源，并返回新建 lot 的安全投影。
 /// `command_id` 由表单按同一输入保持不变，网络失败后的重试不会创建第二条 intake。

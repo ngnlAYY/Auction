@@ -35,6 +35,42 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-29 全仓 owner 收敛、冗余精简与依赖复核
+
+基于干净提交 `3f7f8901`，以全仓 Clippy 扩展 lint（perf/冗余类 40 余项）、跨文件函数体指纹、pub 项引用计数和
+规范文本谓词正则扫描定位问题，再逐项人工核对 owner 与语义；这是源码审计与静态验证，不是业务或生产验收。
+
+- **owner 漂移**：架构登记 `auction-domain::text` 唯一拥有规范单行文本规则，但 application、config、jobs、storage
+  仍有 19 处手写副本及 2 处允许空值的变体，已改为调用 `valid_text`，字节上限与错误分类逐项保持；
+  `auctionctl` 不直接依赖 domain，其 PostgreSQL 参数校验保留本地实现。
+  storage 新增共享 `backend.rs` 规则：命令 ID advisory 锁键（原 4 份）、运维确认库名（3 份）与 DDL 库名（2 份）谓词、
+  标识符转义（2 份）和恢复预检/保留盘点的只读快照 5s/1s 上限（2 份）；`settlement_funding` 的资金 SQL/证据错误映射
+  成为唯一实现，旧自寄修复与内部履约不再各留副本。锁键 SQL、隔离级别、锁序与错误分类不变，无新迁移。
+- **Web 共享层**：`auction-web-shared::query` 抽出唯一 popstate 监听生命周期并新增 `use_popstate_revision`，Public 外壳与
+  Admin 结算筛选删除各自的监听守卫；Admin 三处同键世界名合并到 `surface/shared.rs`，结算选择器复用父模块重置；
+  Public 两份同键世界名合并。译文键、DOM、路由与 query 语义不变。
+- **遗留包装与死代码**：删除无调用的 `auction_observability::init`；会话令牌生成、生命周期结果、装备属性、论坛板块与
+  Worker 业务事件映射去掉永不失败的 `Result`/`Option`；登录 key 签发/解密与 canonical 装备读取去掉无 await 的 `async`；
+  HTTP 边界生成的请求 ID 不再自检并回退不可达占位值；两端相同的 live 探针合并、ready 探针共用判定；
+  5 处与通配分支相同的显式 match 分支并入通配、2 处相同分支合并，`cached_selector` 冗余 match 改为一行。
+- **注释**：15 处“已删除/取代原先/旧实现”式变更叙述改为描述当前行为与理由；历史证据与契约说明不删。
+
+评估后未改动（附理由）：秘密缓冲 `fill(0)` 实测 rustc 1.99 `opt-level=3` 仍在 dealloc 前保留 memset，不做无证据的
+55 处改写；`async-stream` 承担 sqlx 未公开的自引用流，替代需 unsafe 或缓冲全量行；四个装配根的 `configure_cache`
+跨独立程序且 cache/config 互不依赖；`TruncatedText` 每实例 ResizeObserver 与 window resize 监听在断点改字号时仍有用途，
+改为全局注册表需浏览器验证；限流表满时的单次全表扫描上限 4096 项且只作用于三类限流器；Web 与后端、config 与
+observability 之间的同形谓词属于各自 owner 的独立边界，按架构保留。
+
+依赖复核：`cargo machete` 改动前后均无未用依赖；普通图重复版本（base64、sha2、tungstenite、syn 等）均来自 sqlx、
+dioxus-devtools、chrono-tz 等上游，不能在本仓库消除；hyper `http2`（WebSocket over HTTP/2 CONNECT）与 toml 序列化
+均有实际调用，未删依赖或 feature。12 个既有测试覆盖状态机、协议与解析边界，未发现可证实冗余，全部保留。
+
+Rust 1.99.0 下 `just verify` 完整通过（仓库/布局/配置/i18n/装备契约、格式、工作区全部已有目标、独立 PostgreSQL/Redis
+feature、Clippy `-D warnings` 与两端 WASM）；Rust 1.94.1 下 `cargo +1.94.1 check --locked --workspace --all-targets
+--all-features` 通过；`cargo machete` 通过。49 份受版本控制文档共核对 1,493 个本地链接（557 个带锚点），无缺失。
+本轮未新增或运行行为测试、浏览器/服务、数据库或外部协议流程，未执行迁移、发布、部署、提交或推送；
+性能结论限于减少的重复实现、分配与状态机层，未做负载或浏览器测量。
+
 ### 2026-10-29 全仓复审与配置身份修复
 
 基于干净提交 `e3e6e306`，按 owner 并行复审 20 个工作区包、CI/发布脚本及现有设计、契约和运维文档。

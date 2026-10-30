@@ -142,6 +142,10 @@ bidding、lifecycle、admin 拆分；旧竞价账本重放仍在一致快照中�
 Admin 规则、邮箱管理、Recovery 命令及周轮次 bootstrap 的已有重试边界也按 `40001`/`40P01` 识别明确中止，
 保持原最多三次整事务尝试；唯一约束、未知提交及普通连接失败不因此重试。全部重试判断共用
 `database::is_serialization_conflict`，不再在各模块手写 SQLSTATE 闭集；重试循环的兜底出口返回仓储错误，不以 panic 结束。
+同一 `database/backend.rs` 还拥有命令 ID 的事务级 advisory 锁键（`lock_command_id`，凭据、用户、邮件用户与投递管理共用）、
+运维确认/DDL 库名谓词与标识符转义，以及恢复预检和保留盘点共用的只读快照 5s/1s 上限；各 owner 只把失败映射为自身错误。
+资金账本 `settlement_funding` 拥有 SQL/证据错误到 `FundingError` 的唯一映射，旧自寄修复与内部履约直接复用。
+规范单行文本校验统一调用 `auction_domain::valid_text`，存储层不再保留手写副本。
 持久化列使用的拍卖/竞价/代理/结算闭集名称来自领域 `as_str`/`from_name`，存储只映射自身错误分类。
 规则发布仅允许 `expected_revision = 0` 新建；非零版本只更新匹配旧版本的既有语言文档，缺失时返回当前版本 0，
 不通过 UPSERT 创建跳号文档，失败不提交规则、命令账本或审计。
