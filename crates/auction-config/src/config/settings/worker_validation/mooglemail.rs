@@ -148,11 +148,7 @@ pub(crate) fn validate_mooglemail_worker(
 }
 
 pub(crate) fn valid_mooglemail_endpoint(value: &str) -> bool {
-    if value.is_empty()
-        || value != value.trim()
-        || value.len() > 2048
-        || value.chars().any(char::is_control)
-    {
+    if !auction_domain::valid_text(value, 2048) {
         return false;
     }
     let Ok(endpoint) = Url::parse(value) else {

@@ -77,10 +77,7 @@ impl PublicCompensationRound {
     /// 校验补偿池守恒方程和公开字段。
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.auction_id.is_nil()
-            || self.world_id.is_empty()
-            || self.world_id != self.world_id.trim()
-            || self.world_id.len() > 64
-            || self.world_id.chars().any(char::is_control)
+            || !auction_domain::valid_text(&self.world_id, 64)
             || self.auction_sequence <= 0
             || self.opening_balance < 0
             || self.tax_income < 0

@@ -47,7 +47,6 @@ mod recovery;
 mod recovery_actions;
 #[path = "../recovery/health.rs"]
 mod recovery_health;
-#[path = "schedule.rs"]
 mod schedule;
 
 pub use forum_reply::{ForumReplyPorts, ForumReplyRuntime};

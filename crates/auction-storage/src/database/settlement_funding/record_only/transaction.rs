@@ -92,7 +92,7 @@ async fn apply(
         return Err(FundingError::Unproven);
     }
     crate::lock_mail_runtime_generation(tx, &e.identity.runtime).await.map_err(evidence_error)?;
-    lock_rows(tx, "SELECT id FROM public.worlds ORDER BY id FOR UPDATE").await?;
+    lock_funding_worlds(tx).await?;
     if lock_funding_account(tx, &command.expected_uid).await?.is_some() {
         return Err(FundingError::Conflict);
     }
@@ -105,17 +105,7 @@ async fn apply(
     if any_account {
         return Err(FundingError::Conflict);
     }
-    lock_rows(tx, "SELECT id FROM public.auctions ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.settlement_recoveries ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.lots ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.equipment ORDER BY id FOR UPDATE").await?;
-    crate::lock_mail_evidence_credentials(tx, e).await.map_err(evidence_error)?;
-    lock_rows(tx, "SELECT id FROM public.users ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.settlement_obligations ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.settlement_recovery_actions ORDER BY id FOR UPDATE")
-        .await?;
-    lock_rows(tx, "SELECT id FROM public.deliveries ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx,"SELECT obligation_id FROM public.settlement_obligation_fulfillments ORDER BY obligation_id FOR UPDATE").await?;
+    lock_funding_liabilities(tx, e).await?;
     if let Some(result) = replay(tx, command).await? {
         return Ok(result);
     }
@@ -188,12 +178,4 @@ async fn apply(
         .execute(&mut **tx).await.map_err(storage)?;
     crate::validate_mail_evidence_time(tx, e).await.map_err(evidence_error)?;
     Ok(result)
-}
-
-async fn lock_rows(
-    tx: &mut Transaction<'_, Postgres>,
-    query: &'static str,
-) -> Result<(), FundingError> {
-    sqlx::query(query).execute(&mut **tx).await.map_err(storage)?;
-    Ok(())
 }

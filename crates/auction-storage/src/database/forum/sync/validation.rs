@@ -39,10 +39,7 @@ pub(super) fn valid_claim(claim: &ForumSyncClaim) -> bool {
 }
 
 pub(super) fn valid_rendered(rendered: &ForumRenderedThread) -> bool {
-    !rendered.title.is_empty()
-        && rendered.title == rendered.title.trim()
-        && rendered.title.len() <= MAX_RENDERED_TITLE_BYTES
-        && !rendered.title.chars().any(char::is_control)
+    auction_domain::valid_text(&rendered.title, MAX_RENDERED_TITLE_BYTES)
         && valid_text(&rendered.description, MAX_RENDERED_DESCRIPTION_BYTES)
         && rendered.reconciliation_titles.len()
             <= auction_application::MAX_FORUM_RECONCILIATION_TITLES

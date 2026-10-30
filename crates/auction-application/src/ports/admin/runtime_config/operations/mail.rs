@@ -99,13 +99,7 @@ impl Default for AdminRuntimeMailConfig {
 impl AdminRuntimeMailConfig {
     pub(super) fn validate(&self) -> Result<(), AdminRuntimeConfigError> {
         require(self.send_intervals.is_valid(), "mail.send_intervals")?;
-        require(
-            !self.schedule.is_empty()
-                && self.schedule.len() <= 256
-                && self.schedule == self.schedule.trim()
-                && !self.schedule.chars().any(char::is_control),
-            "mail.schedule",
-        )?;
+        require(auction_domain::valid_text(&self.schedule, 256), "mail.schedule")?;
         require(
             (1..=8 * 1024 * 1024).contains(&self.maximum_response_bytes),
             "mail.maximum_response_bytes",

@@ -12,6 +12,7 @@ Public 竞价与 Admin 管理状态留在各 surface，本 crate 不依赖存储
 | [src/components](crates/auction-web-shared/src/components) | 表格、分页、弹窗、状态、时间与安全 Markdown |
 | [src/commands](crates/auction-web-shared/src/commands)、[src/query](crates/auction-web-shared/src/query) | 确认命令与 URL 状态 |
 | [src/transport](crates/auction-web-shared/src/transport)、[src/errors](crates/auction-web-shared/src/errors) | 同源传输与通用错误分类 |
+| [src/validation](crates/auction-web-shared/src/validation) | 两端 DTO 解码与路由参数共用的 wire 格式谓词（`is_legacy_uuid`） |
 | [src/i18n](crates/auction-web-shared/src/i18n)、[src/format](crates/auction-web-shared/src/format) | 语言偏好、时间、金额与 ppm 百分比展示 |
 | [src/a11y](crates/auction-web-shared/src/a11y)、[src/bootstrap](crates/auction-web-shared/src/bootstrap) | 焦点、背景滚动与首屏门禁 |
 | [src/clock](crates/auction-web-shared/src/clock)、[src/media](crates/auction-web-shared/src/media) | 共享时钟与可见视口 |
@@ -51,6 +52,9 @@ CSS 只隐藏其余页码与省略号，首尾页由前后按钮逐页到达；�
 手机以 CSS 隐藏原表单，不复制或重挂载、不重置未提交草稿。当前页使用金色配深色正文及 `aria-current="page"`；
 不裁切分页内容或建立横向滚动，不用 CSS 重排 Tab 顺序。
 移动布局只改变 CSS，`has_more`、`max_page`、渲染期钳制、`on_page_clamp` 与账户单页隐藏时保留宿主的语义不变。
+
+`is_legacy_uuid` 是两端唯一的旧版浏览器 UUID 规则：36 字节小写连字符形式、版本 1–5、RFC 4122 variant，
+逐字节判断、不解析不分配，nil 因版本为 0 被拒绝；不限版本的宽松 UUID 校验由所需的 surface 自行保留。
 
 `AsyncState` 区分加载、空态和错误的可访问播报；`Dialog` 只拥有外壳与关闭语义（点击背景保持打开，busy 时关闭
 入口禁用且 Escape 不冒泡到背景），面板保留 `tabindex="-1"`，没有可用子控件时接管焦点与 Tab 循环；

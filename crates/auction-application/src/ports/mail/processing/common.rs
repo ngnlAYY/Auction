@@ -11,8 +11,6 @@ pub enum MailProcessingError {
     InvalidConfiguration,
     #[error("MoogleMail 邮件无法安全退回或领取")]
     UnsafeDisposition,
-    #[error("MoogleMail 装备来源不可信")]
-    InvalidEquipment,
     #[error("MoogleMail owner 返回结果无效")]
     OwnerResultInvalid,
     #[error("MoogleMail 业务决定无效")]

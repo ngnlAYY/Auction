@@ -13,9 +13,7 @@ use super::{
     record_settlement_failure,
 };
 
-#[path = "slow_proxy.rs"]
 mod slow_proxy;
-#[path = "wakeup.rs"]
 mod wakeup;
 
 const SETTLEMENT_FAILURE_RECORD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);

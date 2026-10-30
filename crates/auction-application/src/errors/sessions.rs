@@ -15,10 +15,6 @@ pub enum SessionError {
     AccountInactive { public_reason: Option<String> },
     #[error("并发公开会话达到上限")]
     SessionLimit,
-    #[error("会话 token 格式无效")]
-    InvalidToken,
-    #[error("会话 token 生成失败")]
-    TokenGeneration,
     #[error("会话配置无效")]
     InvalidConfiguration,
     #[error("公开登录身份无效")]

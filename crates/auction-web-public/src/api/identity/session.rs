@@ -10,7 +10,6 @@ use auction_contracts::{PublicLoginRequest, PublicLoginResponse};
 use dioxus::{core::Runtime, prelude::*};
 use gloo_net::http::{Request, Response};
 use serde_json::Value;
-use uuid::{Uuid, Variant};
 
 use super::{TransportError, decoder, send_get, send_request};
 
@@ -51,7 +50,8 @@ pub(super) fn notify_public_session_change(invalidate: bool) {
     if let Some(storage) =
         web_sys::window().and_then(|window| window.local_storage().ok().flatten())
     {
-        let _ = storage.set_item(PUBLIC_SESSION_CHANGE_STORAGE_KEY, &Uuid::new_v4().to_string());
+        let _ =
+            storage.set_item(PUBLIC_SESSION_CHANGE_STORAGE_KEY, &uuid::Uuid::new_v4().to_string());
     }
 }
 
@@ -144,7 +144,7 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
             .map_err(|_| TransportError::Network(None))
     })
     .await
-    // 结构化传输错误直接映射为稳定 transport code，不再比较中文字符串。
+    // 结构化传输错误直接映射为稳定 transport code，不依赖中文文案比较。
     .map_err(|error| PublicSessionApiError::local(error.code()))?;
     if !response.ok() {
         return Err(parse_api_error(response).await);
@@ -260,21 +260,12 @@ fn valid_session_fields(
     expires_at: Option<&str>,
     absolute_expires_at: Option<&str>,
 ) -> bool {
-    valid_legacy_uuid(user_id)
+    auction_web_shared::is_legacy_uuid(user_id)
         && !username.is_empty()
         && username == username.trim()
         && username.len() <= 256
         && !username.chars().any(char::is_control)
         && valid_session_deadlines(expires_at, absolute_expires_at)
-}
-
-fn valid_legacy_uuid(value: &str) -> bool {
-    Uuid::parse_str(value).is_ok_and(|id| {
-        let mut buffer = Uuid::encode_buffer();
-        id.hyphenated().encode_lower(&mut buffer) == value
-            && (1..=5).contains(&id.get_version_num())
-            && id.get_variant() == Variant::RFC4122
-    })
 }
 
 /// 永久会话必须同时为空；有限会话只接受完整 RFC3339 且截止不得晚于绝对截止。

@@ -9,10 +9,7 @@ pub(crate) fn valid_opaque_id(value: &str) -> bool {
 }
 
 pub(crate) fn valid_line(value: &str, maximum: usize, allow_empty: bool) -> bool {
-    (allow_empty || !value.is_empty())
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
+    (allow_empty && value.is_empty()) || auction_domain::valid_text(value, maximum)
 }
 
 pub(crate) fn valid_decimal_id(value: &str) -> bool {
@@ -23,12 +20,9 @@ pub(crate) fn valid_hex_key(value: &str) -> bool {
     value.len() == 10 && value.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit())
 }
 
+/// 换行同属控制字符，规范单行文本规则已拒绝 CR/LF 头注入。
 pub(super) fn valid_secret(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.bytes().any(|byte| byte == b'\r' || byte == b'\n')
-        && !value.chars().any(char::is_control)
+    auction_domain::valid_text(value, maximum)
 }
 
 pub(super) fn valid_endpoint(endpoint: &Url) -> bool {

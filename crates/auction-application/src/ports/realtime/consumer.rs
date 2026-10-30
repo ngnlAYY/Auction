@@ -26,14 +26,8 @@ pub struct RealtimeConsumerRequest {
 impl RealtimeConsumerRequest {
     /// 校验持久化游标的命名和批量边界。
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.consumer_key.trim().is_empty()
-            || self.consumer_key != self.consumer_key.trim()
-            || self.consumer_key.len() > 128
-            || self.consumer_key.chars().any(char::is_control)
-            || self.stream_key.trim().is_empty()
-            || self.stream_key != self.stream_key.trim()
-            || self.stream_key.len() > 255
-            || self.stream_key.chars().any(char::is_control)
+        if !auction_domain::valid_text(&self.consumer_key, 128)
+            || !auction_domain::valid_text(&self.stream_key, 255)
             || self.batch_size == 0
             || self.batch_size > MAX_REALTIME_CONSUMER_BATCH_SIZE
         {
@@ -85,18 +79,6 @@ pub trait RealtimeConsumerStore: Send + Sync {
         failure_code: String,
         safe_detail: String,
         failed_at: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, ()>;
-
-    /// 在确认替代事件已经追加到同一 stream 后，显式越过原失败事件。
-    /// 原事件仍保留；游标只越过原事件的序号，随后仍按 stream 顺序消费替代事件及其间的
-    /// 其他事件，避免通过重放偷偷重排历史序列。
-    fn resolve_failure_after_replay(
-        &self,
-        consumer_key: String,
-        stream_key: String,
-        event_id: Uuid,
-        replay_event_id: Uuid,
-        resolved_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 }
 

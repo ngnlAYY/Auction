@@ -558,25 +558,6 @@ impl SettlementFulfillmentCommandPort for SettlementFulfillmentService {
         Box::pin(async move { self.prepare_classified(claim, prepared_at, retry_delay).await })
     }
 
-    fn prepare(
-        &self,
-        claim: SettlementFulfillmentClaim,
-        prepared_at: DateTime<Utc>,
-        retry_delay: Duration,
-    ) -> ApplicationFuture<'_, SettlementFulfillmentPhaseResult<SettlementFulfillmentResult>> {
-        Box::pin(async move {
-            match self.prepare_classified(claim, prepared_at, retry_delay).await? {
-                crate::SettlementFulfillmentPreparationOutcome::External(result) => Ok(*result),
-                crate::SettlementFulfillmentPreparationOutcome::InternallySatisfied { .. } => {
-                    // 旧调用者没有无 delivery 成功类型，明确拒绝伪造身份；新版 Worker 使用 prepare_next。
-                    Err(repository_error(
-                        "义务已内部满足，请使用 prepare_next 读取无 delivery 结果",
-                    ))
-                }
-            }
-        })
-    }
-
     fn activate(
         &self,
         claim: SettlementFulfillmentClaim,

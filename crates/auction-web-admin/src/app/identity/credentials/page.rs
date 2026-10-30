@@ -9,8 +9,8 @@ use crate::api::{AdminCredential, delete_admin_credential, fetch_admin_credentia
 
 use super::super::query::use_page_query_state;
 use super::super::{AdminActionFeedback, admin_api_error_message};
-use super::{CredentialCreateForm, CredentialDeleteDialog, CredentialPager, CredentialTable};
-use crate::app::surface::pagination::{use_admin_page, use_admin_pagination};
+use super::{CredentialCreateForm, CredentialDeleteDialog, CredentialTable};
+use crate::app::surface::pagination::{AdminPager, use_admin_page, use_admin_pagination};
 use crate::app::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
 
 /// 加载并展示 Admin 凭据管理页面。
@@ -95,11 +95,12 @@ pub fn page() -> Element {
                         },
                         on_delete: open_delete,
                     }
-                    CredentialPager {
+                    AdminPager {
                         page: page.page,
                         page_size: page.page_size,
-                        total: page.total,
+                        total: Some(page.total),
                         pagination,
+                        label: t!("page-credentials-title"),
                         on_page_change: move |next_page| {
                             let mut next = query_state();
                             next.page = next_page;

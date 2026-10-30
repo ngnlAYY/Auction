@@ -3,11 +3,8 @@
 use super::*;
 use crate::database::users::envelope::upsert_login_key_envelope;
 
-#[path = "postgres/commands.rs"]
 mod commands;
-#[path = "postgres/mapping.rs"]
 mod mapping;
-#[path = "postgres/reads.rs"]
 mod reads;
 
 pub(super) use commands::{rebind_postgres, register_postgres};

@@ -261,8 +261,5 @@ fn stable_fulfillment_id(namespace: &str, obligation_id: SettlementId) -> Uuid {
 }
 
 fn valid_payload_line(value: &str, maximum: usize, allow_empty: bool) -> bool {
-    (allow_empty || !value.is_empty())
-        && value.len() <= maximum
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
+    (allow_empty && value.is_empty()) || auction_domain::valid_text(value, maximum)
 }

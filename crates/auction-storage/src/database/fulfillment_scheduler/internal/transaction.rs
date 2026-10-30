@@ -83,7 +83,7 @@ async fn apply(
     crate::lock_mail_runtime_generation(tx, &evidence.identity.runtime)
         .await
         .map_err(evidence_error)?;
-    locks::worlds(tx).await?;
+    crate::database::settlement_funding::lock_funding_worlds(tx).await?;
     let account =
         settlement_funding::lock_funding_account(tx, &evidence.identity.authenticated_uid).await?;
     // 有其他受保护账号时，不允许把错账号降级为legacy。

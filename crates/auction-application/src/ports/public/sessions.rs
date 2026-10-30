@@ -14,7 +14,7 @@ pub struct PublicSessionConfig {
 }
 
 impl PublicSessionConfig {
-    /// 并发上限必须为正，不再以部署配置控制 Public 登录期限。
+    /// 并发上限必须为正；Public 登录期限由账号偏好决定，不由部署配置控制。
     pub fn validate(self) -> Result<(), SessionError> {
         if self.max_public_sessions == 0 {
             return Err(SessionError::InvalidConfiguration);

@@ -92,12 +92,6 @@ pub enum ConfigError {
     #[error("credential data key requires both credential_data_key_id and credential_data_key")]
     InvalidCredentialDataKeyConfiguration,
 
-    #[error("worker concurrency must be greater than zero")]
-    InvalidWorkerConcurrency,
-
-    #[error("worker poll interval must be greater than zero")]
-    InvalidWorkerPollInterval,
-
     #[error("worker recovery retry delay must be between 1 and 86400 seconds")]
     InvalidWorkerRecoveryRetryDelay,
 

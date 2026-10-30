@@ -1,4 +1,4 @@
-//! Realtime consumer failure 的 replay 收口；连接入口保留 owner 原物理会话，事务入口供 Admin 原子追加复用。
+//! Realtime consumer failure 的 replay 收口；事务入口供 Admin 在同一事务内原子追加替代事件并越过原失败。
 
 use auction_application::ApplicationError;
 use chrono::{DateTime, Utc};
@@ -6,40 +6,6 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use super::super::common::storage_error;
-#[cfg(feature = "postgres")]
-use sqlx::Connection;
-
-#[cfg(feature = "postgres")]
-pub(crate) async fn resolve_failure_postgres(
-    connection: &mut sqlx::PgConnection,
-    consumer_key: &str,
-    stream_key: &str,
-    event_id: Uuid,
-    replay_event_id: Uuid,
-    resolved_at: DateTime<Utc>,
-) -> Result<(), ApplicationError> {
-    let mut transaction =
-        connection.begin().await.map_err(|_| storage_error("打开 PostgreSQL 实时重放事务失败"))?;
-    let result = resolve_failure_postgres_tx(
-        &mut transaction,
-        consumer_key,
-        stream_key,
-        event_id,
-        replay_event_id,
-        resolved_at,
-    )
-    .await;
-    match result {
-        Ok(()) => transaction
-            .commit()
-            .await
-            .map_err(|_| storage_error("提交 PostgreSQL 实时重放事务失败")),
-        Err(error) => {
-            let _ = transaction.rollback().await;
-            Err(error)
-        }
-    }
-}
 
 /// 复用调用方事务，先锁 failure 再锁对应 consumer 游标；只越过原事件，不跳到替代事件。
 /// 重复绑定同一 replay 仍复核游标边界，可收口旧版仅标记 resolved、未推进游标的窗口。

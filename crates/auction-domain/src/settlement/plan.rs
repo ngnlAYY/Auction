@@ -115,7 +115,7 @@ impl SettlementPlan {
             && discount_demand.value() > 0
             && available_pool.value() > 0
         {
-            // 折扣已由明细中的成交价和挂牌价完整表达，不再保留逐 lot 的平行临时数组。
+            // 折扣已由明细中的成交价和挂牌价完整表达，无需逐 lot 的平行临时数组。
             for line in &mut lines {
                 let discount = line.end_price.checked_sub(line.listed_price)?;
                 if discount.value() == 0 {

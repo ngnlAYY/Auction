@@ -370,10 +370,7 @@ pub(super) fn valid_slot_key(value: &str) -> bool {
     };
     chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok()
         && date.len() == 10
-        && !session.is_empty()
-        && session.len() <= 2
-        && !session.starts_with('0')
-        && session.bytes().all(|byte| byte.is_ascii_digit())
+        && auction_domain::valid_positive_decimal(session, 2)
 }
 
 /// 早鸟轮次在命令结果与审计元数据中追加时段键；常规周保持原有字段集合。

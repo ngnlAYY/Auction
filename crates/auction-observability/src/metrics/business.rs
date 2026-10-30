@@ -32,7 +32,7 @@ impl PrometheusBusinessRecorder {
         )
         .map_err(MetricsError::Registry)?;
 
-        // 保留完整闭集零值并缓存共享句柄；逐笔记录不再重复 label 哈希、读锁和 Arc 克隆。
+        // 保留完整闭集零值并缓存共享句柄；逐笔记录无需 label 哈希、读锁或 Arc 克隆。
         let event_handles = BusinessEvent::ALL.map(|event| {
             BusinessOutcome::ALL
                 .map(|outcome| events.with_label_values(&[event.label(), outcome.label()]))

@@ -16,8 +16,8 @@ use super::helpers::is_mail_disposition_conflict;
 use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
 };
-use super::table::{DeliveryPager, DeliveryTable};
-use crate::app::surface::pagination::{use_admin_page, use_admin_pagination};
+use super::table::DeliveryTable;
+use crate::app::surface::pagination::{AdminPager, use_admin_page, use_admin_pagination};
 
 /// 加载 delivery 安全投影并编排带 fencing 的操作员动作。
 pub fn page() -> Element {
@@ -216,11 +216,12 @@ pub fn page() -> Element {
                 }
             }
             if let Some(page) = page {
-                DeliveryPager {
+                AdminPager {
                     page: page.pagination.page,
                     page_size: page.pagination.page_size,
-                    total: page.pagination.total,
+                    total: Some(page.pagination.total),
                     pagination,
+                    label: t!("delivery-pagination"),
                     on_page_change: move |next_page| {
                         let mut next = query_state();
                         next.page = next_page;

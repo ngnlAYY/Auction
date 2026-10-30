@@ -18,7 +18,6 @@ use chrono::Utc;
 use super::super::protocol::MoogleMailInventoryCategory;
 use super::*;
 
-#[path = "internal/diagnostics.rs"]
 mod diagnostics;
 use diagnostics::{EvidenceStage as Stage, at};
 

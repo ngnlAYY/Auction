@@ -40,17 +40,7 @@ pub(crate) fn load_admin_runtime_file(path: &Path) -> Result<AdminRuntimeDocumen
 
 /// 将 Admin runtime 的 HTTP 部分投影为公共进程配置；不携带运行时密文。
 pub(crate) fn runtime_http_security(document: &AdminRuntimeDocument) -> HttpSecurityConfig {
-    HttpSecurityConfig {
-        allowed_origins: document.security.allowed_origins.clone(),
-        allowed_origins_enabled: document.security.allowed_origins_enabled,
-        login_rate_limit: document.security.login_rate_limit,
-        mutation_rate_limit: document.security.mutation_rate_limit,
-        rate_limit_window_seconds: document.security.rate_limit_window_seconds,
-        cookie_secure: document.security.cookie_secure,
-        request_timeout_seconds: document.security.request_timeout_seconds,
-        trusted_proxy_cidrs: document.security.trusted_proxy_cidrs.clone(),
-        trusted_unix_proxy: document.security.trusted_unix_proxy,
-    }
+    HttpSecurityConfig::from(&document.security)
 }
 
 /// 将 Admin runtime 的 session 部分投影为公共进程配置。

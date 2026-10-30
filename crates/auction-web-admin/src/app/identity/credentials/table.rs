@@ -5,7 +5,6 @@ use std::cmp::Ordering;
 use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
 
-use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 
 use crate::api::{AdminCredential, AdminCredentialPage, AdminSession, mutate_admin_credential};
@@ -306,34 +305,6 @@ fn submit_credential(
     }
     accepted
 }
-
-#[component]
-pub fn CredentialPager(
-    page: i64,
-    page_size: i64,
-    total: i64,
-    pagination: AdminPagination,
-    on_page_change: EventHandler<i64>,
-) -> Element {
-    rsx! {
-        Pager {
-            pagination,
-            page,
-            page_size,
-            total: Some(total),
-            label: t!("page-credentials-title"),
-            previous_label: t!("admin-pagination-previous"),
-            status: move |(page, pages): (i64, i64)| {
-                t!("admin-pagination-status", page: page, pages: pages)
-            },
-            next_label: t!("admin-pagination-next"),
-            jump_label: t!("admin-pagination-input"),
-            jump_button_label: t!("admin-pagination-go"),
-            on_page_change,
-        }
-    }
-}
-
 /// 对当前页凭据行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
 /// 轮换时间缺省（None）在升序时排在最前；checked 保留为旧 URL 排序键。
 fn sort_credentials(credentials: &mut [AdminCredential], column: &str, direction: SortDirection) {

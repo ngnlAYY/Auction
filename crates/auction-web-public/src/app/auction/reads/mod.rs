@@ -17,7 +17,6 @@ use super::{
 };
 
 mod bid_log;
-#[path = "history/mod.rs"]
 mod history;
 
 pub(crate) use bid_log::bid_log;

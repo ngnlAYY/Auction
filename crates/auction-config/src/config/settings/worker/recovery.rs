@@ -1,3 +1,4 @@
+use auction_application::AdminRuntimeRecoveryConfig;
 use serde::Deserialize;
 
 /// Recovery Worker 的独立调度和批次边界。
@@ -26,18 +27,25 @@ pub struct RecoveryWorkerConfig {
     pub evidence_stale_after_seconds: u64,
 }
 
+/// 部署 TOML 省略字段时与 runtime 接管模板使用同一组默认值，由 application 的 runtime 模型唯一持有。
 impl Default for RecoveryWorkerConfig {
     fn default() -> Self {
+        Self::from(&AdminRuntimeRecoveryConfig::default())
+    }
+}
+
+impl From<&AdminRuntimeRecoveryConfig> for RecoveryWorkerConfig {
+    fn from(recovery: &AdminRuntimeRecoveryConfig) -> Self {
         Self {
-            batch_limit: 100,
-            concurrency: 8,
-            poll_interval_seconds: 60,
-            jitter_seconds: 5,
-            lease_duration_seconds: 60,
-            item_timeout_seconds: 30,
-            low_balance_threshold: 100,
-            health_refresh_interval_seconds: 60,
-            evidence_stale_after_seconds: 300,
+            batch_limit: recovery.batch_limit,
+            concurrency: recovery.concurrency,
+            poll_interval_seconds: recovery.poll_interval_seconds,
+            jitter_seconds: recovery.jitter_seconds,
+            lease_duration_seconds: recovery.lease_duration_seconds,
+            item_timeout_seconds: recovery.item_timeout_seconds,
+            low_balance_threshold: recovery.low_balance_threshold,
+            health_refresh_interval_seconds: recovery.health_refresh_interval_seconds,
+            evidence_stale_after_seconds: recovery.evidence_stale_after_seconds,
         }
     }
 }

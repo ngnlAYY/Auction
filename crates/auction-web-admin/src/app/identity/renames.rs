@@ -152,13 +152,6 @@ pub(super) fn page() -> Element {
                 page_size: page.page_size,
                 total: Some(page.total),
                 label: t!("page-renames-title"),
-                previous_label: t!("admin-pagination-previous"),
-                status: move |(page, pages): (i64, i64)| {
-                    t!("admin-pagination-status", page: page, pages: pages)
-                },
-                next_label: t!("admin-pagination-next"),
-                jump_label: t!("admin-pagination-input"),
-                jump_button_label: t!("admin-pagination-go"),
                 on_page_change: move |next_page| {
                     let mut next = query_state();
                     next.page = next_page;

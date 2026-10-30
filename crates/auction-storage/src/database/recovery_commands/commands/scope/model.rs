@@ -89,6 +89,4 @@ pub(in crate::database::recovery_commands) struct RelistResult {
 pub(in crate::database::recovery_commands) struct AuctionLock {
     pub(in crate::database::recovery_commands) world_id: String,
     pub(in crate::database::recovery_commands) status: String,
-    #[allow(dead_code)]
-    pub(in crate::database::recovery_commands) state_version: i64,
 }

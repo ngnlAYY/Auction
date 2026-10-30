@@ -55,7 +55,7 @@ pub fn AsyncState(
         format!("async-state-title-{}", NEXT_ASYNC_STATE_ID.fetch_add(1, Ordering::Relaxed))
     });
     let class = format!("ui-async-state ui-async-state--{}", kind.modifier());
-    // role="alert" 已隐含 assertive 的 aria-live，不再重复声明，避免部分阅读器双报。
+    // role="alert" 已隐含 assertive 的 aria-live，无需重复声明，避免部分阅读器双报。
     let aria_live = if kind == AsyncStateKind::Error { None } else { Some("polite") };
     let retry = retry_label.zip(on_retry);
 

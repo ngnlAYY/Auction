@@ -319,15 +319,13 @@
     max-inline-size: none;
   }
 
-  .public-account-session-menu > :is([role="status"], [role="alert"]),
-  .public-account-session-error {
+  .public-account-session-menu > :is([role="status"], [role="alert"]) {
     position: static;
     grid-column: 1 / -1;
     inline-size: 100%;
     max-inline-size: 100%;
     overflow-wrap: anywhere;
   }
-
 
   .public-auction-round__end {
     flex-wrap: wrap;
@@ -359,7 +357,6 @@
     padding-inline: var(--space-1);
   }
 
-
   .public-auction-catalog__action-controls > .public-auction-catalog__actions-list {
     grid-column: 1 / -1;
   }
@@ -372,14 +369,6 @@
     flex: 1 1 0;
     min-inline-size: 0;
     overflow-wrap: anywhere;
-  }
-
-  .public-auction-summary {
-    flex-direction: column;
-  }
-
-  .public-auction-preview-stats {
-    inline-size: 100%;
   }
 
   .public-history-filter-grid {
@@ -421,7 +410,6 @@
     overflow-wrap: anywhere;
   }
 
-
   .public-account-login-form,
   .public-account-login-prompt {
     padding: var(--space-4);
@@ -443,7 +431,6 @@
     min-inline-size: var(--size-target);
     min-block-size: var(--size-target);
   }
-
 
   /* 复用同一业务表和本地化字段名；空流水也保持手机卡片布局与可访问表头。 */
   .public-shell :is(div, section):has(> table > tbody > tr > [data-label], > table.public-compensation-movement-table) {

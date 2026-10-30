@@ -1,4 +1,5 @@
-//! 统一前缀与同 EID 的业务锁；外部观察在调用本模块之前已完成。
+//! 同 EID 的业务锁；world 锁前缀由 `settlement_funding::lock_funding_worlds` 统一拥有，
+//! 外部观察在调用本模块之前已完成。
 //! 仅加锁的查询完整执行但不收集行；需要检查数量的 delivery 冲突探针仍保留有界结果。
 
 use std::sync::LazyLock;
@@ -6,15 +7,6 @@ use std::sync::LazyLock;
 use super::sql_error;
 use auction_application::{FundingError, SettlementFulfillmentClaim};
 use sqlx::{Postgres, Transaction};
-
-pub(super) async fn worlds(tx: &mut Transaction<'_, Postgres>) -> Result<(), FundingError> {
-    // 与资金对账使用相同持久 code 排序；跨世界不拆事务。
-    sqlx::query("SELECT id FROM public.worlds ORDER BY id FOR UPDATE")
-        .execute(&mut **tx)
-        .await
-        .map_err(sql_error)?;
-    Ok(())
-}
 
 pub(super) async fn before_credentials(
     tx: &mut Transaction<'_, Postgres>,

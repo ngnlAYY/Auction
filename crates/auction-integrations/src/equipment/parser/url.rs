@@ -13,11 +13,8 @@ pub(crate) fn parse_equipment_url(
     raw_url: &str,
 ) -> Result<(Url, String, String), AdminIntakeError> {
     if !matches!(world_id, "main" | "isekai")
-        || raw_url.is_empty()
-        || raw_url != raw_url.trim()
-        || raw_url.len() > 2048
+        || !auction_domain::valid_text(raw_url, 2048)
         || raw_url.contains('\\')
-        || raw_url.chars().any(char::is_control)
     {
         return Err(AdminIntakeError::InvalidCommand);
     }

@@ -59,9 +59,7 @@ pub enum AdminRuntimeCommandState {
 /// runtime 文件完成替换后、数据库命令尚未最终提交时的安全替换事实。
 #[derive(Debug, Clone)]
 pub struct AdminRuntimeReplacement {
-    pub old_document: AdminRuntimeDocument,
     pub old_fingerprint: String,
-    pub new_document: AdminRuntimeDocument,
     pub new_fingerprint: String,
 }
 

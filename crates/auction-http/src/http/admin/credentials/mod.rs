@@ -3,13 +3,9 @@
 //! 可见的稳定处理器出口和跨子模块使用的 HTTP 辅助导入。
 
 mod check;
-#[path = "commands.rs"]
 mod commands;
-#[path = "common.rs"]
 mod common;
-#[path = "list.rs"]
 mod list;
-#[path = "mapping.rs"]
 mod mapping;
 
 pub(super) use super::{

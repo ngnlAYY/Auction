@@ -60,14 +60,8 @@ impl fmt::Debug for MoogleMailSentLookupRequest {
 
 impl MoogleMailSentLookupRequest {
     pub fn validate(&self, configured_pages: usize) -> bool {
-        self.recipient.len() <= 256
-            && self.recipient == self.recipient.trim()
-            && !self.recipient.is_empty()
-            && !self.recipient.chars().any(char::is_control)
-            && self.subject.len() <= 512
-            && self.subject == self.subject.trim()
-            && !self.subject.is_empty()
-            && !self.subject.chars().any(char::is_control)
+        auction_domain::valid_text(&self.recipient, 256)
+            && auction_domain::valid_text(&self.subject, 512)
             && !self.external_equipment_id.is_empty()
             && self.external_equipment_id.len() <= 32
             && self.external_equipment_id.bytes().all(|byte| byte.is_ascii_digit())

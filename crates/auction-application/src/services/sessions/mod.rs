@@ -279,12 +279,7 @@ fn validate_login_key(key: &[u8]) -> Result<(), ApplicationError> {
 /// 校验配置与正式登录共同使用的 Admin 账号边界；错误不包含账号内容。
 pub fn validate_admin_actor(actor: &str) -> Result<(), ApplicationError> {
     // Basic Auth 以首个冒号分隔账号与口令；带冒号的账号无法由 HTTP 登录入口表达。
-    if actor.is_empty()
-        || actor.contains(':')
-        || actor.len() > 256
-        || actor != actor.trim()
-        || actor.chars().any(char::is_control)
-    {
+    if !auction_domain::valid_text(actor, 256) || actor.contains(':') {
         return Err(SessionError::InvalidCredentials.into());
     }
     Ok(())
@@ -305,10 +300,7 @@ fn is_valid_admin_secret(secret: &[u8]) -> bool {
 fn validate_login_identity(identity: &PublicLoginIdentity) -> Result<(), ApplicationError> {
     if identity.user_id.is_nil()
         || identity.user_state_version <= 0
-        || identity.username.is_empty()
-        || identity.username.len() > 256
-        || identity.username != identity.username.trim()
-        || identity.username.chars().any(char::is_control)
+        || !auction_domain::valid_text(&identity.username, 256)
     {
         return Err(SessionError::InvalidIdentity.into());
     }

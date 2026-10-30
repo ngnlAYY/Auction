@@ -20,18 +20,33 @@ use crate::database::audit_health::AuditWriteResult as _;
 use crate::database::competition::begin_statement;
 
 use super::{PostgresCompetitionTransaction, PostgresStore};
-#[path = "facts.rs"]
 mod facts;
-#[path = "mapping.rs"]
 mod mapping;
-#[path = "obligations.rs"]
 mod obligations;
-#[path = "transaction.rs"]
 mod transaction;
 
 use facts::*;
 use mapping::*;
 use obligations::*;
+
+/// 结算批量 INSERT 每条语句的最大行数；最宽的义务行也远低于 PostgreSQL 65535 个参数上限。
+const SETTLEMENT_BATCH_SIZE: usize = 256;
+
+/// 在原 Serializable 事务内执行一个结算批次，减少持有结算锁期间的往返。完整批次复用固定语句形状，
+/// 可变尾批不挤占连接的预处理语句缓存。
+async fn execute_settlement_batch(
+    transaction: &mut sqlx::Transaction<'static, sqlx::Postgres>,
+    mut query: sqlx::QueryBuilder<sqlx::Postgres>,
+    rows: usize,
+) -> Result<(), SettlementTransactionError> {
+    query
+        .build()
+        .persistent(rows == SETTLEMENT_BATCH_SIZE)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?;
+    Ok(())
+}
 
 /// PostgreSQL 结算事务 runner。结算与竞价都使用 Serializable，但锁集合和落表步骤保持独立。
 #[allow(clippy::manual_async_fn)]

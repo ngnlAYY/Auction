@@ -247,9 +247,7 @@ impl TomlRuntimeFileStore {
             ));
         }
         Ok(AdminRuntimeReplacement {
-            old_document: current.document,
             old_fingerprint: current.fingerprint,
-            new_document: updated.document,
             new_fingerprint: updated.fingerprint,
         })
     }
@@ -305,17 +303,6 @@ impl AdminRuntimeFileStore for TomlRuntimeFileStore {
         })
     }
 
-    fn replace(
-        &self,
-        expected_fingerprint: String,
-        document: AdminRuntimeDocument,
-    ) -> ApplicationFuture<'_, AdminRuntimeReplacement> {
-        Box::pin(async move {
-            self.with_lock(|| self.replace_unlocked(expected_fingerprint, document))
-                .map_err(map_file_error)
-        })
-    }
-
     fn replace_locked<'a>(
         &'a self,
         guard: &'a Self::WorkflowGuard,
@@ -325,28 +312,6 @@ impl AdminRuntimeFileStore for TomlRuntimeFileStore {
         Box::pin(async move {
             self.ensure_workflow_guard(guard).map_err(map_file_error)?;
             self.replace_unlocked(expected_fingerprint, document).map_err(map_file_error)
-        })
-    }
-
-    fn restore(&self, replacement: AdminRuntimeReplacement) -> ApplicationFuture<'_, ()> {
-        Box::pin(async move {
-            self.with_lock(|| {
-                let current = self.read_snapshot()?;
-                if current.fingerprint != replacement.new_fingerprint {
-                    return Err(RuntimeFileStoreError::Conflict);
-                }
-                self.atomic_write(&replacement.old_document)?;
-                let restored = self
-                    .read_snapshot()
-                    .map_err(|error| RuntimeFileStoreError::OutcomeUnknown(error.to_string()))?;
-                if restored.fingerprint != replacement.old_fingerprint {
-                    return Err(RuntimeFileStoreError::OutcomeUnknown(
-                        "恢复后 fingerprint 不匹配".to_owned(),
-                    ));
-                }
-                Ok(())
-            })
-            .map_err(map_file_error)
         })
     }
 }

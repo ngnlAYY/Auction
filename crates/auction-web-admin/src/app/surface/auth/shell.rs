@@ -18,7 +18,7 @@ pub(crate) fn AdminAuthenticatedShell(
     super::super::config::use_config_draft();
     super::super::rules::use_rules_draft();
     // 外壳持有唯一的秒级共享时钟；需要每秒刷新的子树（如拍卖列表倒计时）通过
-    // `use_second_tick` 订阅同一个 interval，不再各自起定时器。
+    // `use_second_tick` 订阅同一个 interval，各处不另起定时器。
     use_second_ticker();
     let mut navigation_open = use_signal(|| false);
     let mut navigation_toggle = use_signal(|| None::<Rc<MountedData>>);

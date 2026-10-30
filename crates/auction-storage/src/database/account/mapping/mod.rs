@@ -2,11 +2,8 @@
 
 use super::*;
 
-#[path = "bids.rs"]
 mod bids;
-#[path = "common.rs"]
 mod common;
-#[path = "proxy.rs"]
 mod proxy;
 
 pub(super) use bids::*;

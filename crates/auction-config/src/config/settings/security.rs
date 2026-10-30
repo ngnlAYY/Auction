@@ -1,5 +1,7 @@
 //! HTTP 安全和会话配置模型。
 
+use auction_application::AdminRuntimeSecurityConfig;
+
 use super::*;
 
 /// 浏览器写请求和公开会话使用的非敏感 HTTP 安全策略。
@@ -28,18 +30,26 @@ pub struct HttpSecurityConfig {
     pub trusted_unix_proxy: bool,
 }
 
+/// 部署 TOML 省略字段时与 runtime 文档使用同一组默认值，由 application 的 runtime 模型唯一持有。
 impl Default for HttpSecurityConfig {
     fn default() -> Self {
+        Self::from(&AdminRuntimeSecurityConfig::default())
+    }
+}
+
+/// 将 Admin runtime 的 HTTP 部分投影为公共进程配置；不携带运行时密文。
+impl From<&AdminRuntimeSecurityConfig> for HttpSecurityConfig {
+    fn from(security: &AdminRuntimeSecurityConfig) -> Self {
         Self {
-            allowed_origins: Vec::new(),
-            allowed_origins_enabled: true,
-            login_rate_limit: 10,
-            mutation_rate_limit: 60,
-            rate_limit_window_seconds: 60,
-            cookie_secure: false,
-            request_timeout_seconds: 15,
-            trusted_proxy_cidrs: Vec::new(),
-            trusted_unix_proxy: false,
+            allowed_origins: security.allowed_origins.clone(),
+            allowed_origins_enabled: security.allowed_origins_enabled,
+            login_rate_limit: security.login_rate_limit,
+            mutation_rate_limit: security.mutation_rate_limit,
+            rate_limit_window_seconds: security.rate_limit_window_seconds,
+            cookie_secure: security.cookie_secure,
+            request_timeout_seconds: security.request_timeout_seconds,
+            trusted_proxy_cidrs: security.trusted_proxy_cidrs.clone(),
+            trusted_unix_proxy: security.trusted_unix_proxy,
         }
     }
 }

@@ -144,8 +144,11 @@ Admin 规则、邮箱管理、Recovery 命令及周轮次 bootstrap 的已有重
 `database::is_serialization_conflict`，不再在各模块手写 SQLSTATE 闭集；重试循环的兜底出口返回仓储错误，不以 panic 结束。
 同一 `database/backend.rs` 还拥有命令 ID 的事务级 advisory 锁键（`lock_command_id`，凭据、用户、邮件用户与投递管理共用）、
 运维确认/DDL 库名谓词与标识符转义，以及恢复预检和保留盘点共用的只读快照 5s/1s 上限；各 owner 只把失败映射为自身错误。
-资金账本 `settlement_funding` 拥有 SQL/证据错误到 `FundingError` 的唯一映射，旧自寄修复与内部履约直接复用。
-规范单行文本校验统一调用 `auction_domain::valid_text`，存储层不再保留手写副本。
+资金账本 `settlement_funding` 拥有 SQL/证据错误到 `FundingError` 的唯一映射，旧自寄修复与内部履约直接复用；
+它同样唯一拥有全局资金锁序：`lock_funding_worlds` 为资金与内部履约共用的 world 前缀，`lock_funding_liabilities`
+为对账、旧实收接管、仅记账初始化与旧自寄修复共用的完整责任集合（auctions → recoveries → lots → equipment →
+凭据 → users → obligations → recovery actions → deliveries → fulfillments），各入口不再各自维护锁列表。
+规范单行文本与正十进制外部 ID 分别调用 `auction_domain::valid_text`、`valid_positive_decimal`，存储层不保留手写副本。
 持久化列使用的拍卖/竞价/代理/结算闭集名称来自领域 `as_str`/`from_name`，存储只映射自身错误分类。
 规则发布仅允许 `expected_revision = 0` 新建；非零版本只更新匹配旧版本的既有语言文档，缺失时返回当前版本 0，
 不通过 UPSERT 创建跳号文档，失败不提交规则、命令账本或审计。
@@ -216,17 +219,24 @@ Preview/Open 轮次不聚合未使用的 lot 截止；Final 仍读取已 Open �
 | 论坛、凭据与告警 | `forum/`、`credentials/`、`operations_alert/` |
 | 规则、审计与 readiness 水位 | `rules/`、`admin_audit/`、`health/`、`audit_health/` |
 
-`settlement/facts.rs` 将 `lot_settlements` 按原计划顺序分成每批至多 256 行的参数化 INSERT，
-明细 INSERT 执行次数由 N 次减至 ⌈N/256⌉ 次，每批最多 2560 个绑定参数；额外构建内存仅随批量增长。
-计划校验、代理关闭、逐 lot 状态/价格核对、池 CAS、结算摘要、明细、账本、义务、恢复及审计/事件的先后顺序保持，
-全部共用原 Serializable 事务，任何约束或后续写入失败均返回错误并回滚。账本税费/补偿顺序保持原逐条追加。
+结算写入在原 Serializable 事务内批量执行（N 为 lot 数，M 为义务数，R 为 recovery 数）：
+`settlement/facts.rs` 用一条 `UNNEST` UPDATE 关闭全部 lot，逐行条件仍核对 live 状态、领先者与成交价，
+更新行数不等于明细数即失败（N → 1）；`lot_settlements` 与补偿账本按原顺序每批至多 256 行参数化 INSERT
+（明细 N → ⌈N/256⌉，账本最多 2N+2 → ⌈(2N+2)/256⌉）。账本先在内存中按旧版顺序生成期初、全部税费、全部补偿
+和期末条目并完成余额溢出/非负/期末一致校验，连续序号与确定性 ID 不变，`auction_id` 仍取自同事务命令账本。
+`settlement/obligations.rs` 每批先写义务、再写对应履约行（2M → 2⌈M/256⌉），前置义务外键为 DEFERRABLE，
+履约外键在同批义务之后满足；recovery 先解析全部关联义务再批量写入（R → ⌈R/256⌉）。
+结算快照已按 `lot_number` 锁定全部 lot，批量语句不改变锁序；最宽的义务批次为 4608 个绑定参数。
+计划校验、代理关闭、池 CAS、结算摘要、明细、账本、义务、恢复及审计/事件的先后顺序保持，
+任何约束或后续写入失败均返回错误并回滚。
 `settlement/mod.rs` 与 `settlement/transaction.rs` 借用应用层原 `SettlementPlan`，落库不再要求复制完整明细与义务；
 后续命令结果仍消费同一计划，校验、写入顺序、金额和事务边界保持不变。
 结算收口统计利用活动授权的 `bid_proxy_authorizations_one_active_lot_idx` 部分唯一索引保证每 lot 至多一条匹配，
 用普通 COUNT 代替三组 DISTINCT 聚合；撤回 lot 的残留活动代理仍阻断提交。
 `operations_alert/claims/create.rs` 在正文前缀已校验 1–64 项后一次写入批次条目，最多 320 个绑定参数，
 保留原 ordinal、fingerprint 和版本；delivery、batch、items、审计的事务顺序保持，明细写入由最多 64 次降至 1 次。
-完整的 256 行结算批次复用固定预处理语句；可变尾批和告警批次不进入连接预处理缓存。
+完整的 256 行结算批次经 `settlement/mod.rs` 的 `execute_settlement_batch` 复用固定预处理语句；可变尾批和告警批次
+不进入连接预处理缓存。
 执行次数来自源码调用数，协议往返、实际耗时及并发行为尚未测量；上述改动不增加表、迁移或程序库。
 
 公开补偿池的 `balance` 是全部世界 `settlement_pools.balance` 的当前合计，`updated_at` 是资金池最近更新时间；

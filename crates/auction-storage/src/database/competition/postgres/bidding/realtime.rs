@@ -6,7 +6,7 @@ use super::super::mapping::*;
 use super::super::*;
 
 /// 追加一条 `lot.bid_accepted`。计划已校验全部事实都属于 `final_lot`，拍卖归属经调用方持有的
-/// `auction_id` 缓存只读取一次；后续事实持有 stream 行锁时不再重复查询。
+/// `auction_id` 缓存只读取一次；后续事实持有 stream 行锁时无需重复查询。
 pub(in crate::database::competition) async fn insert_realtime_event(
     transaction: &mut PostgresCompetitionTransaction,
     auction_id: &mut Option<Uuid>,

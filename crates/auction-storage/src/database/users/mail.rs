@@ -20,7 +20,6 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
-#[path = "mail/postgres.rs"]
 mod postgres;
 
 use super::DatabaseStore;

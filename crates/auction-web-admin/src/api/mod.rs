@@ -480,18 +480,7 @@ fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
     })
 }
 
-pub(crate) fn valid_uuid(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 36
-        && [8, 13, 18, 23].into_iter().all(|index| bytes[index] == b'-')
-        && bytes.iter().enumerate().all(|(index, byte)| {
-            matches!(index, 8 | 13 | 18 | 23)
-                || byte.is_ascii_digit()
-                || (b'a'..=b'f').contains(byte)
-        })
-        && (b'1'..=b'5').contains(&bytes[14])
-        && matches!(bytes[19], b'8'..=b'9' | b'a'..=b'b')
-}
+pub(crate) use auction_web_shared::is_legacy_uuid as valid_uuid;
 
 fn parse_delivery_time(value: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value).ok().map(|value| value.with_timezone(&Utc))

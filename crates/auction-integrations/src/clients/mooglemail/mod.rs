@@ -7,11 +7,9 @@ mod diagnostics;
 mod error;
 mod forms;
 mod gateway;
-#[path = "parser/mod.rs"]
 mod parser;
 mod protocol;
 mod sender;
-#[path = "transport/mod.rs"]
 mod transport;
 mod writer;
 

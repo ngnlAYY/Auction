@@ -41,10 +41,7 @@ impl DeliverySendExpectation {
     pub fn validate(&self) -> bool {
         matches!(self.world_id.as_str(), "main" | "isekai")
             && crate::valid_mail_player_name(&self.recipient)
-            && !self.subject.is_empty()
-            && self.subject.len() <= 512
-            && self.subject == self.subject.trim()
-            && !self.subject.chars().any(char::is_control)
+            && auction_domain::valid_text(&self.subject, 512)
             && self.body_digest != [0; 32]
             && (0..=crate::MAX_DELIVERY_COD).contains(&self.credits)
             && (0..=crate::MAX_DELIVERY_COD).contains(&self.cod)
@@ -69,10 +66,7 @@ impl DeliveryTakeExpectation {
     /// MID 保持规范正十进制文本，不收窄为数据库整数或推断跨账号唯一。
     pub fn validate(&self) -> bool {
         matches!(self.world_id.as_str(), "main" | "isekai")
-            && !self.external_mail_id.is_empty()
-            && self.external_mail_id.len() <= 64
-            && !self.external_mail_id.starts_with('0')
-            && self.external_mail_id.bytes().all(|byte| byte.is_ascii_digit())
+            && auction_domain::valid_positive_decimal(&self.external_mail_id, 64)
             && self.credential.as_ref().is_none_or(DeliverySendCredentialBinding::validate)
     }
 }

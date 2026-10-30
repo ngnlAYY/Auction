@@ -133,10 +133,7 @@ impl OperationsAlertSignal {
     pub fn validate(&self) -> Result<(), OperationsAlertError> {
         if self.count < 0
             || self.age_seconds < 0
-            || self.scope.is_empty()
-            || self.scope.len() > 128
-            || self.scope != self.scope.trim()
-            || self.scope.chars().any(char::is_control)
+            || !auction_domain::valid_text(&self.scope, 128)
             || self.fingerprint != signal_fingerprint(self.kind, &self.scope)
             || !valid_signal_identity(self.kind, &self.scope, self.source)
         {
@@ -185,11 +182,7 @@ impl OperationsAlertSignal {
                 format!("{} 恢复证据过期 {} 秒", self.scope, self.age_seconds)
             }
         };
-        if summary.is_empty()
-            || summary != summary.trim()
-            || summary.len() > 512
-            || summary.chars().any(char::is_control)
-        {
+        if !auction_domain::valid_text(&summary, 512) {
             return Err(OperationsAlertError::Invalid);
         }
         Ok(summary)

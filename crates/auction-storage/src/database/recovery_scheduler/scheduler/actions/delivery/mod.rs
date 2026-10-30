@@ -5,13 +5,10 @@
 use super::*;
 
 #[cfg(feature = "postgres")]
-#[path = "activation.rs"]
 mod activation;
 #[cfg(feature = "postgres")]
-#[path = "observation.rs"]
 mod observation;
 #[cfg(feature = "postgres")]
-#[path = "prepare.rs"]
 mod prepare;
 
 #[cfg(feature = "postgres")]

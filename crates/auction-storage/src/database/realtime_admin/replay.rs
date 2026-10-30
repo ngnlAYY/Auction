@@ -7,7 +7,6 @@ use serde_json::Value;
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
-#[path = "replay/postgres.rs"]
 mod postgres;
 
 #[cfg(feature = "postgres")]

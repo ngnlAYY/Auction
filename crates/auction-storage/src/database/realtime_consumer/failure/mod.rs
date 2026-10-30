@@ -6,6 +6,4 @@ mod resolve;
 #[cfg(feature = "postgres")]
 pub(super) use record::record_failure_postgres;
 #[cfg(feature = "postgres")]
-pub(super) use resolve::resolve_failure_postgres;
-#[cfg(feature = "postgres")]
 pub(crate) use resolve::resolve_failure_postgres_tx;

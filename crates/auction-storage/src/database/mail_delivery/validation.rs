@@ -11,10 +11,7 @@ use uuid::Uuid;
 pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), ApplicationError> {
     if command.command_id.is_nil()
         || command.request_hash.as_bytes() == [0; 32]
-        || command.origin_id.is_empty()
-        || command.origin_id != command.origin_id.trim()
-        || command.origin_id.len() > 512
-        || command.origin_id.chars().any(char::is_control)
+        || !auction_domain::valid_text(&command.origin_id, 512)
         || !matches!(command.world_id.as_str(), "main" | "isekai")
         || command.external_mail_id.is_empty()
         || command.external_mail_id != command.external_mail_id.trim()

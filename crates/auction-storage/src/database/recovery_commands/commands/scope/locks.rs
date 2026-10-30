@@ -45,18 +45,15 @@ pub(in crate::database::recovery_commands) async fn lock_auction(
     transaction: &mut Transaction<'_, Postgres>,
     auction_id: Uuid,
 ) -> Result<AuctionLock, RecoveryCommandError> {
-    let row = sqlx::query(
-        "SELECT world_id, status, state_version FROM public.auctions WHERE id = $1 FOR UPDATE",
-    )
-    .bind(auction_id)
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?
-    .ok_or(RecoveryCommandError::NotFound)?;
+    let row = sqlx::query("SELECT world_id, status FROM public.auctions WHERE id = $1 FOR UPDATE")
+        .bind(auction_id)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?
+        .ok_or(RecoveryCommandError::NotFound)?;
     Ok(AuctionLock {
         world_id: row.try_get("world_id").map_err(map_sql_error)?,
         status: row.try_get("status").map_err(map_sql_error)?,
-        state_version: row.try_get("state_version").map_err(map_sql_error)?,
     })
 }
 

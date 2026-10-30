@@ -294,12 +294,7 @@ pub trait RealtimeAdminPort: Send + Sync {
 }
 
 fn valid_optional_text(value: Option<&str>, max_len: usize) -> bool {
-    value.is_none_or(|value| {
-        !value.is_empty()
-            && value == value.trim()
-            && value.len() <= max_len
-            && !value.chars().any(char::is_control)
-    })
+    value.is_none_or(|value| auction_domain::valid_text(value, max_len))
 }
 
 fn valid_required_text(value: &str, max_len: usize) -> bool {

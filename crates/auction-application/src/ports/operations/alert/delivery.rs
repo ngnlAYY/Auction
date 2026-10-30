@@ -116,10 +116,7 @@ impl OperationsAlertBatchClaim {
                 || item.signal_version <= 0
                 || i32::try_from(index).ok().and_then(|index| index.checked_add(1))
                     != Some(item.ordinal)
-                || item.summary.is_empty()
-                || item.summary.len() > 512
-                || item.summary != item.summary.trim()
-                || item.summary.chars().any(char::is_control)
+                || !auction_domain::valid_text(&item.summary, 512)
             {
                 return Err(OperationsAlertError::StoredResultCorrupt);
             }

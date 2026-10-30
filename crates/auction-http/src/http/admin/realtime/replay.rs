@@ -143,7 +143,7 @@ fn legacy_replay_command_id(
 ) -> Result<Uuid, serde_json::Error> {
     let input = LegacyReplayCommandIdInput { failure_id, schema_version, public_payload };
     let mut name = b"auction/http/admin/realtime/replay/v1/".to_vec();
-    // 直接追加紧凑 JSON，保留原 UUID 输入字节，不再暂存并复制整份 payload。
+    // 直接追加紧凑 JSON，保留原 UUID 输入字节，无需暂存并复制整份 payload。
     serde_json::to_writer(&mut name, &input)?;
     Ok(Uuid::new_v5(&Uuid::NAMESPACE_URL, &name))
 }

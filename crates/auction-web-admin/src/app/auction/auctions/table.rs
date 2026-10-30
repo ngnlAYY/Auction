@@ -31,8 +31,8 @@ pub(super) fn AdminAuctionTable(
     on_sort_change: EventHandler<(String, SortDirection)>,
     reload_generation: Signal<u64>,
 ) -> Element {
-    // 秒级时钟订阅已下沉到行内的就绪单元格与动作单元格（见 row.rs/dialog.rs）：
-    // 整表（筛选、表头、分页）不再随秒针重渲染，只有真正依赖当前时间的叶子组件每秒重算。
+    // 秒级时钟订阅位于行内的就绪单元格与动作单元格（见 row.rs/dialog.rs）：
+    // 整表（筛选、表头、分页）不随秒针重渲染，只有真正依赖当前时间的叶子组件每秒重算。
     let notice = use_signal(|| None::<AdminAuctionNotice>);
     let owner = use_context::<PendingCommands>();
     let intake_busy = owner.is_busy(&format!("intake:{world}"));
@@ -141,13 +141,6 @@ pub(super) fn AdminAuctionTable(
                     page_size: page_info.page_size,
                     total: Some(page_info.total),
                     label: t!("admin-auctions-pagination"),
-                    previous_label: t!("admin-pagination-previous"),
-                    status: move |(page, pages): (i64, i64)| {
-                        t!("admin-pagination-status", page: page, pages: pages)
-                    },
-                    next_label: t!("admin-pagination-next"),
-                    jump_label: t!("admin-pagination-input"),
-                    jump_button_label: t!("admin-pagination-go"),
                     on_page_change: move |next_page| {
                         on_query_change
                             .call(AuctionsQuery {

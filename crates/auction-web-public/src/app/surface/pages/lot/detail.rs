@@ -53,7 +53,7 @@ pub(crate) fn LiveLotDetailView(
     let connection_state = realtime_state();
     let connection_state_name = live_connection_state_name(connection_state);
     let connection_message = realtime::live_connection_message(connection_state);
-    // 倒计时的秒针订阅已下沉到 LotDetailCountdown 叶子组件，本组件不再持有每秒变化
+    // 倒计时的秒针订阅位于 LotDetailCountdown 叶子组件，本组件不持有每秒变化
     // 的时钟信号，详情页其余部分（竞价历史、操作面板）不随秒针重渲染。
     let mut refresh_generation = use_context::<Signal<u64>>();
     let session = use_context::<PublicSessionResource>();
@@ -252,7 +252,7 @@ fn LotDetailCountdown(ends_at: String) -> Element {
 }
 
 #[component]
-pub(crate) fn LotDetailBack(href: String) -> Element {
+fn LotDetailBack(href: String) -> Element {
     rsx! {
         p { class: "public-auction-lot__back",
             Link { to: href, "← ", {t!("lot-back-to-auction")} }
@@ -261,7 +261,7 @@ pub(crate) fn LotDetailBack(href: String) -> Element {
 }
 
 #[component]
-pub(crate) fn LotDetailHeader(code: String, seller: String, status: String) -> Element {
+fn LotDetailHeader(code: String, seller: String, status: String) -> Element {
     rsx! {
         header { class: "public-auction-lot__header",
             h1 { id: "lot-detail-title", "{code}" }

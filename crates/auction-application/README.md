@@ -170,7 +170,8 @@ Sent 摘要入口只接收原 delivery ID 与 Sent 事实；claim、Balance 和�
 [ports/settlement/internal](crates/auction-application/src/ports/settlement/internal) 与履约服务的 `internal.rs`、
 `collected.rs`、`refund.rs` 拥有新 pending 的真实身份分支、内部满足、外部 COD 资金化及原合法退款用途授权：
 `with_internal_fulfillment` 注入数据库窄端口和同一 opaque evidence reader，缺装配/证据/资金明确持久延期；
-`prepare_next` 返回独立 `InternallySatisfied`（无 delivery ID），原 prepare/activate/reconcile 与旧 claim 字段保留。
+`prepare_next` 返回外部准备结果或独立 `InternallySatisfied`（无 delivery ID）；端口只提供 `prepare_next`、
+`activate`、`reconcile` 三个阶段入口，旧 claim 字段保留。
 只处理未准备且无旧资产冲突的新 pending；原稳定命令先重放，guard 跨完整事务及有界重试，未知提交撤销 owner、不换 ID。
 非法 claim、命令构造或 canonical intent 在新 pending 路径持久化为 `manual_reconcile`，不依赖租约过期反复重领。
 enqueued 对账只复核收件用户 UUID；原地址取 delivery 快照，改名不重定向已发送邮件，也不推翻精确实收证明。

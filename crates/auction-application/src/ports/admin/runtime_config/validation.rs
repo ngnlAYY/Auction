@@ -97,7 +97,7 @@ fn validate_runtime_equipment_filter(
             }
         }
     }
-    // 品质门槛始终存在（空列表也回退默认 L/P），因此不再要求其它过滤维度。
+    // 品质门槛始终存在（空列表也回退默认 L/P），因此无需其它过滤维度。
     Ok(())
 }
 
@@ -275,12 +275,9 @@ pub(super) fn validate_tracing(
 }
 
 pub(super) fn validate_unix_path(value: &str, field: &str) -> Result<(), AdminRuntimeConfigError> {
-    if value.is_empty()
-        || value.len() > 512
+    if !auction_domain::valid_text(value, 512)
         || !value.starts_with('/')
         || value == "/"
-        || value != value.trim()
-        || value.chars().any(char::is_control)
         || value.contains("//")
         || value.split('/').any(|segment| segment == "." || segment == "..")
     {

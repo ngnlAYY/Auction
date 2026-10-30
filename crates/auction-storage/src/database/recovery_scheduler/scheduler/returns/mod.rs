@@ -15,15 +15,10 @@ use model::{
 #[cfg(feature = "postgres")]
 use validation::{expected_recovery_return, validate_recovery_return_metadata};
 
-#[path = "action.rs"]
 mod action;
-#[path = "mapping.rs"]
 mod mapping;
-#[path = "model.rs"]
 mod model;
-#[path = "record.rs"]
 mod record;
-#[path = "validation.rs"]
 mod validation;
 
 #[cfg(feature = "postgres")]

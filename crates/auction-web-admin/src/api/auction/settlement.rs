@@ -22,7 +22,7 @@ use super::{
 /// 服务端增加扩展字段，不能加 `deny_unknown_fields`，因此这里保留开放式镜像继续要求旧字段
 /// 显式存在并逐项校验。同步义务：上述 DTO 字段集变化时必须同步本镜像；下方构造 DTO 的穷举
 /// 字段列表会在编译期捕捉漂移。内嵌 auction 已由 contracts 的闭集 `AdminAuctionResponse`
-/// 承担，不再镜像。
+/// 承担，无需镜像。
 #[derive(Debug, Deserialize)]
 struct StrictSettlementReport {
     auction: auction_contracts::AdminAuctionResponse,

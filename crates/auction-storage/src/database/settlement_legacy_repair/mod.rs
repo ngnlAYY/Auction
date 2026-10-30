@@ -74,12 +74,3 @@ impl LegacySelfReconciliationWriter for DatabaseStore {
         Box::pin(write::run(self.postgres_pool(), command, evidence))
     }
 }
-
-/// 低频修复与资金对账使用相同全局行锁顺序，不把当前 manual 行改成可被外发领取的任务。
-async fn lock_rows(
-    tx: &mut Transaction<'_, Postgres>,
-    query: &'static str,
-) -> Result<(), FundingError> {
-    sqlx::query(query).execute(&mut **tx).await.map_err(sql_error)?;
-    Ok(())
-}

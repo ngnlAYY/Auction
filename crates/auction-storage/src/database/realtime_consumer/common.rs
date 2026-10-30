@@ -32,14 +32,8 @@ pub(super) fn validate_failure_text(
     failure_code: &str,
     safe_detail: &str,
 ) -> Result<(), ApplicationError> {
-    if failure_code.trim().is_empty()
-        || failure_code != failure_code.trim()
-        || failure_code.len() > 128
-        || failure_code.chars().any(char::is_control)
-        || safe_detail.trim().is_empty()
-        || safe_detail != safe_detail.trim()
-        || safe_detail.len() > 2_048
-        || safe_detail.chars().any(char::is_control)
+    if !auction_domain::valid_text(failure_code, 128)
+        || !auction_domain::valid_text(safe_detail, 2_048)
     {
         return Err(storage_error("实时消费失败分类或安全说明无效"));
     }

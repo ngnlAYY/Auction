@@ -152,12 +152,4 @@ pub trait PublicAccountReader: Send + Sync {
         lot_id: Uuid,
         user_id: Uuid,
     ) -> ApplicationFuture<'_, Option<PublicOwnedProxy>>;
-
-    /// 按授权身份读取历史代理投影，供命令重放时避免被后续重入授权遮蔽。
-    fn public_user_proxy_by_id(
-        &self,
-        lot_id: Uuid,
-        authorization_id: Uuid,
-        user_id: Uuid,
-    ) -> ApplicationFuture<'_, Option<PublicOwnedProxy>>;
 }

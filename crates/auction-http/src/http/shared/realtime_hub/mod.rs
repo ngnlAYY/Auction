@@ -201,12 +201,7 @@ impl RealtimeEventSink for RealtimeHubSink {
 }
 
 fn validate_stream_key(stream_key: &str) -> Result<(), &'static str> {
-    if stream_key.trim().is_empty()
-        || stream_key != stream_key.trim()
-        || stream_key.len() > 255
-        || stream_key.chars().any(char::is_control)
-        || !stream_key.starts_with("auction:")
-    {
+    if !auction_domain::valid_text(stream_key, 255) || !stream_key.starts_with("auction:") {
         return Err("实时订阅 stream 无效");
     }
     Ok(())

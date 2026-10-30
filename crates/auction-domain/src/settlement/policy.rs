@@ -151,7 +151,7 @@ impl SettlementPolicy {
     }
 
     /// 校验新拍卖模板；保留历史结构校验范围，避免改变已结算记录的读取与重放。
-    /// 保留既有折扣严格小于 50% 的保守模板上限；本次移除额外优惠不顺带扩大可配置范围。
+    /// 保留既有折扣严格小于 50% 的保守模板上限；不随 v2 仅保留基础优惠而扩大可配置范围。
     /// v2 足额时只抵扣一份基础优惠，仍要求 COD 付款为正。
     pub fn validate_for_new_auction(&self) -> Result<(), DomainError> {
         self.validate()?;

@@ -164,6 +164,13 @@ Linux GNU 发布图（含 PostgreSQL/Redis，Web 角色另含 web-embed）分别
 两个 WASM 图均未引入 Axum、reqwest、SQLx、storage、integrations 或 iana-time-zone；重复版本仍由上游依赖约束拥有。
 这些是离线解析和源码证据，不替代 cargo-machete、RustSec、编译或实际产物大小检查。
 
+同日基于 `2571f2c1` 的源码精简轮次未改清单、feature 或锁；复算 Public 290、Worker 281 与双端 WASM 175/176，
+与上段一致，`cargo machete` 仍无未用依赖。全 feature 普通/构建图的重复版本逐项追溯至上游：Base64 0.22 来自
+Axum 与 SQLx core，SHA-2 0.10 来自 SQLx core 与 Dioxus 路由宏，Tungstenite 0.28 来自 Dioxus devtools，phf 0.12 来自
+chrono-tz（scraper 用 0.13），rand 0.9 来自 OpenTelemetry SDK 与 Tungstenite（SQLx PostgreSQL 用 0.10）。Base64/SHA-2
+是本仓库直接选用的 0.23/0.11 与上游旧版并存，按既有决定不为去重降级；其余为上游之间的版本差，本仓库无可收敛项。
+新增的 Web 共享 UUID 格式谓词逐字节实现，不引入依赖。
+
 受控 cargo-audit 关闭未使用的二进制扫描，GNU 活跃图从 302 减至 293 个包，保留锁文件 RustSec/yanked 审计。
 sccache 已采用 Zstandard 修复版本，并通过固定哈希的[object feature 补丁](ci/tools/patches/sccache-object-features.patch)
 关闭未调用的压缩节解码，只保留 `read/std`；独立锁移除 `ruzstd` 和 `twox-hash`，GNU 活跃图从 298 减至 296，

@@ -4,13 +4,9 @@
 
 use super::*;
 
-#[path = "auctions.rs"]
 mod auctions;
-#[path = "history.rs"]
 mod history;
-#[path = "lots.rs"]
 mod lots;
-#[path = "world.rs"]
 mod world;
 
 pub(crate) use auctions::{current_auction, list_auctions, list_auctions_v2};

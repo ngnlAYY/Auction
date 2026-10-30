@@ -2,17 +2,11 @@
 //! 轮询状态、入站安全投影、状态命令和 Worker 唤醒分别由子模块拥有；共享错误映射与
 //! HTTP 边界集中在 `common.rs`，本模块只保留稳定处理器出口。
 
-#[path = "commands.rs"]
 mod commands;
-#[path = "common.rs"]
 mod common;
-#[path = "diagnostics.rs"]
 mod diagnostics;
-#[path = "intake.rs"]
 mod intake;
-#[path = "state.rs"]
 mod state;
-#[path = "trigger.rs"]
 mod trigger;
 
 pub(super) use super::{

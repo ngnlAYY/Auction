@@ -35,6 +35,47 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-29 结算批量写入、资金锁序收敛与死代码清理
+
+基于干净提交 `2571f2c1`，以 SQL 循环往返扫描、trait 方法/枚举变体/公开项零引用统计、Fluent 键与 CSS 类引用比对、
+`#[path]` 解析位置推导及规范文本谓词精确匹配定位问题，再逐项人工核对 owner 与语义；这是源码审计与静态验证，
+不是业务或生产验收。
+
+- **结算写入**：storage 在原 Serializable 事务内用一条 `UNNEST` UPDATE 关闭全部 lot（N → 1，行数不等于明细数即失败），
+  补偿账本、义务/履约、recovery 改为每批至多 256 行（账本 2N+2 → ⌈(2N+2)/256⌉、义务与履约 2M → 2⌈M/256⌉、
+  recovery R → ⌈R/256⌉）。账本先在内存生成并校验余额，序号、确定性 ID、`auction_id` 账本守卫、锁序与写入先后不变。
+- **资金锁序**：对账、旧实收接管、仅记账初始化与旧自寄修复的四份完整责任集合锁列表及四个 `lock_rows` 副本，
+  合并为 `settlement_funding::lock_funding_liabilities`；内部履约的 world 前缀改用同一 `lock_funding_worlds`。锁序不变。
+- **死代码**：删除无调用者的 `SettlementFulfillmentCommandPort::prepare`（`prepare_next` 改为必需方法）、runtime 文件
+  store 的 `replace`/`restore` 及仅为回滚保存的两份完整文档字段、`public_user_proxy_by_id` 与其 SQL 分支、
+  `resolve_failure_after_replay` 与连接级包装、`WorkerRecorder` 两个业务观测方法；5 个从未构造或匹配的错误变体；
+  `#[allow]` 掩盖的 Public 页面未用再导出及 recovery `AuctionLock.state_version` 字段与 SELECT 列。
+- **owner 收敛**：application、config、http、integrations、jobs、storage 中 53 处与 `auction_domain::valid_text`
+  或 `valid_positive_decimal` 严格等价的手写条件改为调用唯一实现（`valid_secret` 额外的 CR/LF 检查已被控制字符规则覆盖）；
+  两端 6 份同义 UUID 校验收敛为 `auction-web-shared::validation::is_legacy_uuid`，Public 不限版本的宽松校验保留。
+  config 的 HTTP 安全、投递与恢复 Worker 默认值改经 `From<&AdminRuntime…>` 取自 application runtime 模型。
+- **冗余精简**：113 处等于默认解析位置的 `#[path]` 删除（自顶向下推导经 `#[path]` 加载文件的 mod.rs 式解析，
+  另 411 处重命名或必需映射保留）；Admin 15 处分页重复传入的翻页/跳页文案收进 `AdminPager`，删除 5 个纯转发分页组件；
+  两端 24 条五语种未用 Fluent 消息及约 640 行不匹配任何元素的旧 BEM CSS 规则删除；约 30 处“不再/旧实现/本次移除”式
+  变更叙述注释改为描述当前行为。
+
+评估后未改动（附理由）：竞价快照的锁后取时与活动代理读取受锁序和“锁后计时”不变量约束；`bids` 有逐行连续性触发器，
+每命令 1–2 条事实不批量化；结算调度、轮次等 claim 循环逐行校验账本且批次小；取消与入站邮件为低频小批量；
+装配根之间的 tracing/cache 映射跨独立程序，config 与 observability 互不依赖；`cached_selector` 与 `safe_sink_error`
+各为 4–10 行且回退文案不同；12 个既有测试覆盖不同协议与状态机边界，未发现可证实冗余，全部保留且未执行。
+
+依赖复核：50 项直接外部依赖、Cargo 清单与应用锁（535 项）不变，改动前后 `cargo machete` 均无未用依赖。
+全 feature 普通/构建图的重复版本逐项追溯：Base64 0.22 来自 Axum/SQLx、SHA-2 0.10 来自 SQLx/Dioxus 路由宏，
+与本仓库直接选用的 0.23/0.11 并存，按既有决定不为去重降级；Tungstenite 0.28（Dioxus devtools）、phf 0.12（chrono-tz）、
+rand 0.9（OpenTelemetry SDK/Tungstenite）是上游之间的版本差，本仓库无法消除；`async-stream` 仍承担 SQLx 借用流。
+新增 shared 校验不引入依赖，完整说明见[技术栈](docs/design/tech-stack.md#当前依赖裁剪与复核)。
+
+Rust 1.99.0 下 `just verify` 完整通过（仓库/布局/配置/i18n/装备契约、格式、工作区全部已有目标、独立 PostgreSQL/Redis
+feature、Clippy `-D warnings` 与两端 WASM）；Rust 1.94.1 下 `cargo +1.94.1 check --locked --workspace --all-targets
+--all-features` 通过。本轮未新增或运行行为测试、浏览器/服务、数据库或外部
+协议流程，未执行迁移、发布、部署、提交或推送；SQL 往返次数来自源码调用数，未做 PostgreSQL EXPLAIN、负载或浏览器测量。
+无新增表、迁移、路由、事件或配置字段；CSS 与译文删除只影响无引用项，内嵌 Web 资源需按既有流程重新构建。
+
 ### 2026-10-29 全仓 owner 收敛、冗余精简与依赖复核
 
 基于干净提交 `3f7f8901`，以全仓 Clippy 扩展 lint（perf/冗余类 40 余项）、跨文件函数体指纹、pub 项引用计数和

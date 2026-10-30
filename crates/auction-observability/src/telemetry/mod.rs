@@ -2,7 +2,6 @@
 
 mod config;
 mod health;
-#[path = "processor/mod.rs"]
 mod processor;
 mod runtime;
 

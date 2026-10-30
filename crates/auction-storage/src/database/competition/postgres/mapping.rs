@@ -140,7 +140,7 @@ pub(crate) fn parse_proxy_status(
     ProxyStatus::from_name(&value).ok_or_else(|| invalid_state("数据库代理状态无效"))
 }
 
-/// 事务隔离级别随 `BEGIN` 一并声明；各事务 runner 共用此映射，不再单独发送 `SET TRANSACTION`。
+/// 事务隔离级别随 `BEGIN` 一并声明；各事务 runner 共用此映射，无需单独发送 `SET TRANSACTION`。
 pub(crate) const fn begin_statement(isolation: TransactionIsolation) -> &'static str {
     match isolation {
         TransactionIsolation::Serializable => "BEGIN ISOLATION LEVEL SERIALIZABLE",

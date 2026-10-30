@@ -67,12 +67,9 @@ pub(crate) fn validate_http_listener(config: &HttpListenerConfig) -> Result<(), 
 }
 
 pub(crate) fn valid_listener_path(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 512
+    auction_domain::valid_text(value, 512)
         && value.starts_with('/')
         && value != "/"
-        && value == value.trim()
         && !value.contains("//")
-        && !value.chars().any(char::is_control)
         && !value.split('/').any(|segment| segment == "." || segment == "..")
 }

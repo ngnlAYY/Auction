@@ -6,15 +6,10 @@ use super::*;
 const MAX_HARD_PAGES: usize = 100;
 const MAX_FETCH_LIMIT: usize = 1000;
 
-#[path = "gateway/credentials.rs"]
 mod credentials;
-#[path = "gateway/internal.rs"]
 mod internal;
-#[path = "gateway/model.rs"]
 mod model;
-#[path = "gateway/reader.rs"]
 mod reader;
-#[path = "gateway/sent_evidence.rs"]
 mod sent_evidence;
 
 pub(crate) use credentials::MoogleMailCredentialSession;

@@ -97,7 +97,7 @@ async fn apply(
         .await
         .map_err(evidence_error)?;
     // 完整对账是低频全局操作，按统一顺序锁完整财务责任集合而不是抽样。
-    lock_rows(tx, "SELECT id FROM public.worlds ORDER BY id FOR UPDATE").await?;
+    lock_funding_worlds(tx).await?;
     let account = lock_funding_account(tx, &command.expected_uid).await?;
     if account.as_ref().is_some_and(LockedFundingAccount::records_only) {
         return Err(FundingError::Conflict);
@@ -111,17 +111,7 @@ async fn apply(
     if account.as_ref().map_or(0, LockedFundingAccount::version) != command.expected_version {
         return Err(FundingError::Conflict);
     }
-    lock_rows(tx, "SELECT id FROM public.auctions ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.settlement_recoveries ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.lots ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.equipment ORDER BY id FOR UPDATE").await?;
-    crate::lock_mail_evidence_credentials(tx, evidence).await.map_err(evidence_error)?;
-    lock_rows(tx, "SELECT id FROM public.users ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.settlement_obligations ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx, "SELECT id FROM public.settlement_recovery_actions ORDER BY id FOR UPDATE")
-        .await?;
-    lock_rows(tx, "SELECT id FROM public.deliveries ORDER BY id FOR UPDATE").await?;
-    lock_rows(tx,"SELECT obligation_id FROM public.settlement_obligation_fulfillments ORDER BY obligation_id FOR UPDATE").await?;
+    lock_funding_liabilities(tx, evidence).await?;
     let preview = super::preview::snapshot(tx, &command.expected_uid).await?;
     if preview.digest != command.preview_digest
         || preview.account_version != command.expected_version
@@ -233,14 +223,5 @@ async fn record_result(
     sqlx::query("INSERT INTO public.settlement_funding_commands(command_id,uid,action,target_id,request_digest,result,\"authorization\") VALUES($1,$2,'reconcile',$1,$3,$4,$5)")
         .bind(command.command_id).bind(&command.expected_uid).bind(command_digest(command)?.as_slice())
         .bind(serde_json::to_value(result).map_err(invalid)?).bind(authorization).execute(&mut **tx).await.map_err(storage)?;
-    Ok(())
-}
-
-async fn lock_rows(
-    tx: &mut Transaction<'_, Postgres>,
-    query: &'static str,
-) -> Result<(), FundingError> {
-    // 只需完成有序加锁，不保留随后丢弃的全表行集；execute 仍完整执行 SELECT。
-    sqlx::query(query).execute(&mut **tx).await.map_err(storage)?;
     Ok(())
 }
