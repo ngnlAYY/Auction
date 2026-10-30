@@ -308,6 +308,13 @@ jobs:
           else
             unset SCCACHE_GHA_ENABLED SCCACHE_GHA_VERSION
           fi
+          # 复用发布入口的工具校验与 daemon 地址；缓存启动失败不能阻断真实编译。
+          source ci/release/build-identity.sh
+          configure_build_tools
+          if ! sccache rustc -vV >/dev/null; then
+            printf '::warning::sccache 缓存不可用，禁用包装器并继续发布构建。\n'
+            export RUSTC_WRAPPER=
+          fi
           bash ci/release/release.sh release-check
       # 候选包只供本次运行的 publish 使用，保留 1 天；检查未全部通过时不会出现正式制品。
       - name: Upload release candidate
