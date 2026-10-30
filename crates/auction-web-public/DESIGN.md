@@ -1,0 +1,95 @@
+# Public 前端设计约定
+
+[文档导航](docs/README.md) · [模块说明](crates/auction-web-public/README.md) · [共享层](crates/auction-web-shared/README.md) · [Admin 设计](crates/auction-web-admin/DESIGN.md)
+
+本页记录公开站点的界面与交互约定。Public 面向浏览者、竞买人与查看结果的卖家：首要任务是找到装备、看懂价格与截止时间、明确确认出价，并在网络恢复后重新取得权威状态。它不提供任何管理入口（凭据、Worker、审计、配置）。
+
+## 职责划分
+
+| 位置 | 拥有 |
+| --- | --- |
+| `crates/auction-web-public/src/app/` | 页面、交互与命令宿主 |
+| `crates/auction-web-public/src/api/` | 同源 HTTP、响应解码、实时连接与会话 |
+| `crates/auction-web-public/assets/public.css` | 设备无关的组件样式（`@layer surface`） |
+| `crates/auction-web-public/assets/desktop.css` | 桌面紧凑密度（`@layer desktop`，`width > 64rem`） |
+| `crates/auction-web-public/assets/mobile.css` | 手机与触控布局（`@layer mobile`） |
+| `crates/auction-web-public/i18n/` | 五种语言文案 |
+| `auction-web-shared` | 设计 token、reset、通用组件与浏览器机制 |
+
+Public 不导入 Admin 的页面、样式或 `admin-*` 选择器；共享层只提供通用机制，业务字段、列宽、竞价状态与文案留在本端。
+
+## 视觉基底
+
+- 默认深色、紧凑、以数据为主；颜色、字体栈、字号、间距、圆角、层级与触控尺寸全部引用共享 [`crates/auction-web-shared/style/base.css`](crates/auction-web-shared/style/base.css) 的 token，不使用 webfont。
+- 主要 token：背景 `--color-bg #0e1116`、容器 `--color-surface #161b22`、抬升层 `--color-raised #1d242e`、文字 `#e6ebf2`、次要文字 `#93a0b4`、品牌强调（金）`--color-accent #d9a441`、进行中 `--color-live #3fb96f`、危险 `--color-danger #e66262`、链接 `#6ea8fe`。
+- 页头可切换浅色主题（`:root[data-theme="light"]` 只改写 token，布局与密度不变），偏好保存于 `hv.theme`。启动页因 CSP 不能运行内联脚本，静态骨架始终为深色，WASM 就绪后再应用主题。
+- 对比度目标 WCAG AA：正文 4.5:1，控件边界与图形 3:1。表单控件边界用 `--color-border-control`，表格与卡片分隔线用低对比 `--color-border`，悬停与焦点切换为金色。
+- 状态颜色必须同时配有文字，不能只靠颜色区分（如分组“稀有/融合”、轮次徽标、连接状态）。
+- 金额、倒计时与统计数字使用等宽数字特性对齐。
+
+## CSS 分层与断点
+
+三个样式文件都以 `@layer foundation, surface, desktop, mobile;` 开头，与共享层同序，避免 head 中标签顺序不确定时互相覆盖。
+
+| 条件 | 布局 |
+| --- | --- |
+| `screen and (width > 64rem)` | 桌面紧凑密度：页头与筛选控件使用 `--size-control-compact`（1.75rem）、小号字 |
+| `screen and (max-width: 48rem)`，或 `max-width: 64rem` 且 `pointer: coarse` | 手机布局：触控目标 `--size-target`（2.75rem），输入字号至少 16px 防止聚焦缩放 |
+| `screen and (min-width: 80rem)` | 账户页出价与代理列表并排（2:3） |
+| `print` | 隐藏导航与交互控件，保留规则、黑名单与补偿等内容 |
+
+断点切换只由 CSS 完成。[`crates/auction-web-public/src/app/surface/presentation/desktop.rs`](crates/auction-web-public/src/app/surface/presentation/desktop.rs) 与 [`crates/auction-web-public/src/app/surface/presentation/mobile.rs`](crates/auction-web-public/src/app/surface/presentation/mobile.rs) 提供两端各自的导航与筛选控件，用 CSS 隐藏非当前设备的那一份；业务表格、表单草稿、会话与世界选择、数据读取与命令宿主只有一份，调整窗口不会重新挂载、重新请求或丢失已确认/进行中/结果未知的命令。
+
+## 外壳
+
+```text
+品牌 / 主导航                世界 · 语言 · 主题 · 连接状态 + 刷新 · 会话
+──────────────────────────────────────────────────────────────
+页面摘要 → 筛选与上下文 → 目录 / 详情 / 账户 / 内容 → 分页与操作反馈
+```
+
+- 当前导航项带可见标记与 `aria-current`；世界与身份始终可辨认，避免在不清楚当前世界或账号时出价。
+- 连接状态与刷新、会话链接与按钮各自组成左右等宽的整体；状态文字单行省略，保留状态圆点与完整可访问名称。
+- 手机上主导航折叠为菜单（`aria-expanded`，Escape 收起并把焦点还给入口），页头按“品牌与菜单 / 世界·语言·主题 / 连接·会话”三行排列。
+- 正文占满可用宽度，左右留白并避让安全区；规则与服务说明的长文段落限制在约 70ch 阅读行宽，表格与代码块仍占满容器。
+
+## 目录与表格
+
+- 当前拍卖目录先按“装备分组：全部/稀有/融合”，再按“装备类型：全部/七类装备”筛选；同行提供“等级上限”与“显示无等级装备”。筛选条件写入 URL（`equipment_group`、`category`、`max_level`、`include_unleveled`，默认值省略），变化时回到第 1 页。统计与过滤都由服务端完成，前端不根据本页数据推断全局结果。
+- 类型行右侧的“显示列”面板按布局选择可见列，偏好保存在 `hv.public.catalog-columns.v1`；隐藏后按剩余列的原权重归一化到 100%，至少保留一列。列显隐不改变 URL、请求或命令状态——隐藏操作列不会卸载命令宿主。
+- 桌面表格保持 100% 容器宽度与按列的百分比宽度；手机把同一行重排为卡片，字段标签来自五语 `data-label`，原生表头视觉隐藏但仍供辅助技术读取。不使用横向滚动或固定最小宽度。
+- 长名称、时间与金额自然折行；装备链接只使用后端提供的安全字段，空链接不伪造入口。
+
+## 分页
+
+所有主列表（目录、往期拍卖、出价日志、详情竞价历史、成交历史、黑名单、补偿池）共用共享分页器：前后按钮与有界页码窗口、总数、每页数量（预设 10/20/50/100 与自定义正整数）、跳页。页码与 `page_size` 写入 URL，URL 显式值优先；用户主动修改的每页数量保存到 `hv.public.page-size`。补偿池展开的流水独立使用 `movement_page`、`movement_page_size` 与 `hv.public.movement-page-size`。没有权威总数时不伪造总数。
+
+## 成交历史
+
+- 搜索区是页面顶部独立的全宽容器；没有已提交的筛选时不加载结果。
+- 名称筛选按空白或英文逗号拆分，所有片段按字面包含匹配（最多 8 个词）；买家/卖家按完整玩家名精确匹配，不区分大小写。
+- 金额输入支持 C/K/M 单位；非法值保留原文供修正并阻止请求。
+- `history_sort` 对完整结果排序（默认时间降序）；`history_group` 只改变本页的分组展示（逐条/装备名/买家/卖家），不触发新的查询。统计中位数优先使用服务端的精确值。
+
+## 竞价、代理与标记
+
+- **出价**：输入以 K（1000 credits）为单位的纯数字，默认值为下一口价向上取整，上限为 `MAX_PUBLIC_BID_AMOUNT`。提交前进入确认视图显示金额，确认后才发送。
+- **代理**：创建时选择上限（允许 K/M 缩写，所以手机保留字母键盘）与 Fast/Slow 模式；服务端不允许 Slow 时该选项禁用并说明原因。已有代理只能降低上限，下限由服务端投影给出（等待中的代理以下一口价为下限，否则以当前价为下限）。
+- **标记**：整场标记集合一次读取，所有行共用，不逐行请求。
+- **两阶段确认与重试**：所有命令通过共享 `ConfirmCommand` 状态机执行“准备 → 确认 → 提交”。同一输入重试复用同一 `command_id`；网络结果不确定时保持“结果未知”，只允许原样重试或显式放弃，不会生成新命令。提交中弹窗禁止通过 Escape、遮罩或关闭按钮退出，避免丢失成功反馈与后续刷新。
+- 匿名用户看到的是“登录后出价/登录后标记”链接，带安全的 `return_to` 回到原位置。
+- 竞价状态、领先关系、代理能力与禁止原因全部来自服务端投影，前端不复制竞价或代理状态机。
+
+## 实时与刷新
+
+登录用户的看板通过 WebSocket 接收事件，断线后按指数退避（1 秒起步、30 秒封顶、带抖动）重连并用事件回放补齐；连续快速失败或未登录时进入手动刷新模式。页面隐藏时暂停轮询与重连。收到事件后对受影响的资源做 100ms 合并的有界重读。连接状态在页头可见，用户随时可以手动刷新。
+
+## 会话
+
+会话 Cookie 为 HttpOnly，由后端签发。跨标签页通过 `localStorage` 的 `hv.public.session-revision` 广播登录状态变化，并用 Web Lock `hv.public.session-cookie` 串行化会话 Cookie 的变更。账户页提供登录时长与竞价提醒渠道两项偏好。
+
+## 无障碍
+
+- 所有交互使用原生元素（按钮、链接、select、fieldset/legend、label），DOM 顺序与键盘顺序和视觉顺序一致。
+- 错误提示通过 `aria-describedby` 关联到对应输入；弹窗与浮层可用 Escape 关闭并恢复入口焦点。
+- 尊重 `prefers-reduced-motion`；`hover` 效果只在 `(hover: hover)` 设备上启用。
