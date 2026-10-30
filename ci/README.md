@@ -48,6 +48,8 @@ bash ci/checks/check.sh <检查项>...
 
 缓存：Rust 编译缓存按作业与工具链隔离，PR 不写缓存；发布产物与 `target/dx` 以源码身份指纹为键单独缓存；受控工具以配方（bootstrap 脚本、锁文件、补丁、工具链）为键缓存，命中后仍以安装回执逐字节校验。
 
+发布构建开始前，使用与发布入口相同的受控 sccache 和 daemon 地址执行 `sccache rustc -vV`。缓存服务启动失败（例如 GitHub 缓存存储返回 `503 ServerBusy`）时，步骤发出 warning 并清空 `RUSTC_WRAPPER`，由 rustc 直接完成后续构建；实际编译错误与发布门禁失败仍使作业失败。受控工具回执校验在探测前执行，校验失败直接终止。sccache 0.18.0 的 `SCCACHE_IGNORE_SERVER_IO_ERROR` 不覆盖启动失败，因此不能替代此探测。
+
 ## 发布：`ci/release/release.sh`
 
 ```bash
