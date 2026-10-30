@@ -9,8 +9,3 @@ target/
 .env
 .env.*
 .tmp/
-
-/ops/config/**/*.local.toml
-/ops/config/**/*.secret.toml
-
-CLAUDE.md
