@@ -186,7 +186,7 @@ fn feedback(state: &PreferenceState) -> Option<String> {
         return Some(t!("session-duration-validation"));
     }
     let error = state.error.as_ref()?;
-    Some(if error.status == 409 {
+    Some(if error.status == 409 && error.code == "session_preference_conflict" {
         t!("session-duration-conflict")
     } else if state.pending_uncertain {
         t!("session-duration-unknown")

@@ -12,35 +12,25 @@ pub(crate) struct DatabaseTarget {
 }
 
 impl DatabaseTarget {
-    /// 与配置 loader 相同的查询覆盖语义：`host`、`port`、`dbname`、`user` 优先于 URI 成分。
+    /// 复用实际 SQLx 解析选项，避免 CLI 对 host/hostaddr 顺序和 socket 优先级另作解释。
     pub(crate) fn parse(url: &str) -> anyhow::Result<Self> {
-        let invalid = || anyhow::anyhow!("数据库连接参数无效");
-        let parsed = url::Url::parse(url).map_err(|_| invalid())?;
-        let mut host = match parsed.host() {
-            Some(url::Host::Ipv6(address)) => address.to_string(),
-            Some(_) => decode_component(parsed.host_str().unwrap_or_default())?,
-            None => String::new(),
+        let options = auction_storage::postgres_connect_options(url)
+            .map_err(|_| anyhow::anyhow!("数据库连接参数无效"))?;
+        let host = if let Some(socket) = options.get_socket() {
+            socket.to_str().context("数据库 socket 路径不是 UTF-8")?.to_owned()
+        } else {
+            options.get_host().to_owned()
         };
-        let mut port = parsed.port().unwrap_or(5432);
-        let mut database = decode_component(parsed.path().trim_start_matches('/'))?;
-        let mut username = decode_component(parsed.username())?;
-        let mut host_address = None;
-        for (key, value) in parsed.query_pairs() {
-            match key.as_ref() {
-                "host" => host = value.into_owned(),
-                "hostaddr" => host_address = Some(value.into_owned()),
-                "port" => port = value.parse().map_err(|_| invalid())?,
-                "dbname" => database = value.into_owned(),
-                "user" => username = value.into_owned(),
-                _ => {}
-            }
-        }
-        // 只给出 hostaddr 时以它作为目标身份；同时给出时 host 保留给 TLS 校验与 passfile 匹配。
-        if host.is_empty() {
-            host = host_address.unwrap_or_default();
-        }
-        if host.is_empty() || port == 0 || database.is_empty() || database.contains('/') {
-            return Err(invalid());
+        let port = options.get_port();
+        let database = options.get_database().unwrap_or_default().to_owned();
+        let username = options.get_username().to_owned();
+        if host.is_empty()
+            || port == 0
+            || database.is_empty()
+            || database.contains('/')
+            || [&host, &database, &username].iter().any(|value| value.chars().any(char::is_control))
+        {
+            anyhow::bail!("数据库连接参数无效");
         }
         Ok(Self { host, port, database, username })
     }
@@ -53,9 +43,18 @@ impl DatabaseTarget {
         Ok(())
     }
 
-    /// 维护连接必须指向同一 PostgreSQL 实例（同主机、同端口）。
+    /// 维护连接必须指向同一 PostgreSQL 实例；Unix socket 路径区分大小写。
     pub(crate) fn require_same_endpoint(&self, other: &Self) -> anyhow::Result<()> {
-        if !self.host.eq_ignore_ascii_case(&other.host) || self.port != other.port {
+        let same_host = if self.host.starts_with('/') || other.host.starts_with('/') {
+            self.host == other.host
+        } else if let (Ok(left), Ok(right)) =
+            (self.host.parse::<std::net::IpAddr>(), other.host.parse::<std::net::IpAddr>())
+        {
+            left == right
+        } else {
+            self.host.eq_ignore_ascii_case(&other.host)
+        };
+        if !same_host || self.port != other.port {
             anyhow::bail!("维护凭据与应用数据库必须指向同一 PostgreSQL 主机与端口");
         }
         Ok(())

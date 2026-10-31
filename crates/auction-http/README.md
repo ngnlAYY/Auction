@@ -37,6 +37,8 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 
 Admin 写守卫先检查限流、Origin 与 CSRF，再读取权威会话；CSRF Cookie 的重复项、空值和畸形 Cookie 仍拒绝。已核对的 CSRF 值在同一请求中复用，避免再次扫描并复制 Cookie。Basic 登录复用解码缓冲区承载密码，Public 拍卖筛选和游标直接转移已解码字符串；这些优化不改变认证顺序、请求分类或响应字段。
 
+WebSocket 每连接的发送队列有界。队列满时 Hub 淘汰发送端，连接下一次接收即丢弃积压事件并以 `1013` 关闭，避免逐帧发送旧缓冲而长期占用连接配额；配额仍在升级任务真正结束时归还。
+
 ## 浏览器资源
 
 `web-embed` 构建中，资源来自 `dx bundle` 产物；API-only 构建使用固定的空资源目录。除精确存在的静态资源外，只有 [`crates/auction-http/src/assets/routes.rs`](src/assets/routes.rs) 中登记的浏览器路径（Public 参数路径 `/lots/{lot_code}`、Admin 参数路径 `/auctions/{auction_id}/lots`）返回 `index.html`，未知路径为 404；资源缺失时页面路由返回 503 与提示文本。新增或删除页面时须同时修改前端 `Route` 枚举、该清单与[路由文档](../../docs/contracts/routes.md)。

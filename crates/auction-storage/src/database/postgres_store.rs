@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// PostgreSQL 适配器边界。核心竞价事务已经在子模块中实现，其他仓储按迁移 owner 逐片接入。
+/// PostgreSQL 适配器共享状态；连接池供各功能 owner 的仓储和事务实现复用。
 #[cfg(feature = "postgres")]
 #[derive(Debug, Clone)]
 pub struct PostgresStore {

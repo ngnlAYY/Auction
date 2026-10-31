@@ -47,7 +47,6 @@ struct RecoveryConfirmationDraft {
     lot_code: String,
 }
 
-#[derive(Clone)]
 struct CatalogLoad {
     world_id: String,
     page: i64,
@@ -55,7 +54,6 @@ struct CatalogLoad {
     result: Result<AdminSettlementCatalogPage, String>,
 }
 
-#[derive(Clone)]
 struct CatalogLookupLoad {
     world_id: String,
     sequence: Option<i64>,
@@ -175,7 +173,8 @@ pub(super) fn page() -> Element {
 
     // 每个筛选页都以服务端稳定排序的第一项为默认值；第一页因此始终选择最后结算的一期。
     use_effect(move || {
-        let Some(load) = catalog.read().as_ref().cloned() else {
+        let catalog_state = catalog.read();
+        let Some(load) = catalog_state.as_ref() else {
             return;
         };
         let current_world = world_filter();
@@ -186,7 +185,7 @@ pub(super) fn page() -> Element {
         {
             return;
         }
-        let Ok(page) = load.result else {
+        let Ok(page) = &load.result else {
             return;
         };
         if page.auctions.is_empty() && page.total > 0 && current_page > 1 {
@@ -213,17 +212,18 @@ pub(super) fn page() -> Element {
 
         let current_id = selected_auction_id();
         let desired_sequence = requested_sequence();
-        let selected_on_page = find_requested_entry(&page, &current_id, desired_sequence).cloned();
+        let selected_on_page = find_requested_entry(page, &current_id, desired_sequence).cloned();
         let selected_from_lookup = if selected_on_page.is_none() && desired_sequence.is_some() {
-            let Some(load) = catalog_lookup.read().as_ref().cloned() else {
+            let lookup_state = catalog_lookup.read();
+            let Some(load) = lookup_state.as_ref() else {
                 return;
             };
             if load.world_id != current_world || load.sequence != desired_sequence {
                 return;
             }
-            match load.result {
+            match &load.result {
                 Ok(Some(page)) => {
-                    find_requested_entry(&page, &current_id, desired_sequence).cloned()
+                    find_requested_entry(page, &current_id, desired_sequence).cloned()
                 }
                 Ok(None) => None,
                 // 解析失败时保留地址中的选择并展示错误，不能静默改成最新一期。

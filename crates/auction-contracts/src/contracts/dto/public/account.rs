@@ -220,8 +220,7 @@ pub struct PublicSetSessionPreferenceRequest {
     pub expected_version: i64,
 }
 
-/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；服务端两条路径都只
-/// 序列化本 DTO，收紧只影响反序列化；调试输出隐藏 CSRF token，不影响授权响应字段。
+/// Admin 会话响应；调试输出隐藏 CSRF token，授权响应保留原字段。
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminSessionResponse {
@@ -273,7 +272,6 @@ pub struct PublicRulesResponse {
 }
 
 /// Admin 规则文档安全响应；包含发布者，但不包含数据库内部模型。
-/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；只收紧反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminRulesResponse {
@@ -295,7 +293,6 @@ pub struct AdminRulesCandidateResponse {
 }
 
 /// Admin runtime 配置安全响应；更新成功仍明确要求重启才能让进程读取新文档。
-/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；只收紧反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminRuntimeConfigResponse {

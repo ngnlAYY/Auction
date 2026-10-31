@@ -22,7 +22,8 @@ DTO 只描述线上形状，不含业务规则；从应用投影到 DTO 的映�
 - 健康探针：`/health/live`、`/health/ready` 返回 `{"code","message","data":{"live"|"ready": bool}}`；`/health` 与 `/api/v1/health` 直接返回 `{"service","status","version"}`，版本来自运行进程自身。首次设置也使用独立的 `SetupResponse` / `SetupErrorResponse`，不套业务 API 外壳。
 - 时间统一为 RFC 3339 字符串；金额为整数 Credits；标识为规范小写 UUID 字符串。
 - 部分字段为兼容旧版 Go 服务保留了“必须出现但可为 null”或“null 视为零值”的反序列化语义，相关辅助函数在 [`crates/auction-contracts/src/contracts/dto/shared.rs`](src/contracts/dto/shared.rs) 中显式标注，新增字段不要随意放宽。
-- 含秘密的请求（登录 key、凭据 Cookie、Admin 口令）在 `Debug` 中显示为 `[REDACTED]`。
+- 标有 `deny_unknown_fields` 的 DTO 在浏览器解码时拒绝额外字段；该约束不改变服务端序列化的字段集合。
+- 提供 `Debug` 的敏感 DTO 会隐藏登录 key、凭据 Cookie、Admin 口令及 CSRF token；首次设置凭据请求不实现 `Debug`。
 
 ## 变更规则
 

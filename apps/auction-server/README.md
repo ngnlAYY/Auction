@@ -34,7 +34,7 @@ auction-server --config-dir /var/lib/auction/config
 
 ## 运行与退出
 
-- 任一子进程意外退出，supervisor 立即停止其余角色并以非零状态退出——不在进程内自动重启。
+- 任一子进程意外退出，supervisor 立即停止其余角色并以非零状态退出——不在进程内自动重启。启动或监管失败后若关闭也失败，错误链同时保留原始失败与关闭错误，便于判断是否仍需人工回收角色。
 - 收到 SIGTERM/SIGINT 时按 Public → Admin → Worker 反序发送 SIGTERM 并等待，总预算 135 秒（每角色 10 秒排空 + tracing 刷新）；第二次信号优先强制结束，就绪与退出回执均须在各自原截止前确认，迟到回执按超时处理。
 
 ## systemd

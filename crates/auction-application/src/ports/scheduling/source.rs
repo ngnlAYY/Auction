@@ -1,7 +1,7 @@
 //! 持久化周排期的 IANA 时区与原始本地钟点来源。
 
-use auction_domain::DomainError;
-use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Offset, TimeZone, Utc};
+use auction_domain::{DomainError, RECOVERY_V2_PAYMENT_TIMEOUT};
+use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
@@ -117,8 +117,34 @@ impl AuctionScheduleSource {
             source.end_local = updated.scheduled_end_at.with_timezone(&timezone).naive_local();
         }
         source.resolve()?;
+        // 改期不得保留旧赛季身份却把付款窗口推过换季；使用命令的实际 UTC 截止。
+        validate_pre_season_payment_deadline(
+            timezone,
+            source.early_bird,
+            updated.scheduled_end_at,
+        )?;
         Ok(source)
     }
+}
+
+/// 新场次物化和 Admin 改期共用付款边界；读取冻结来源本身不改变其历史解释。
+pub(super) fn validate_pre_season_payment_deadline(
+    timezone: Tz,
+    early_bird: Option<AuctionEarlyBirdSlot>,
+    scheduled_end_at: DateTime<Utc>,
+) -> Result<(), DomainError> {
+    let Some(slot) = early_bird.filter(AuctionEarlyBirdSlot::is_pre_season) else {
+        return Ok(());
+    };
+    // 付款期限是固定的 UTC 时长；DST 前跳可能使本地分钟校验通过的期限跨过换季边界。
+    let payment_due_at = scheduled_end_at
+        .checked_add_signed(RECOVERY_V2_PAYMENT_TIMEOUT)
+        .ok_or(DomainError::InvalidSchedule("赛季前付款截止时间超出范围"))?;
+    let reset_at = resolve_local(timezone, slot.season.and_time(NaiveTime::MIN))?;
+    if payment_due_at >= reset_at {
+        return Err(DomainError::InvalidSchedule("赛季前付款截止不得到达换季日"));
+    }
+    Ok(())
 }
 
 /// 本地墙上时间转 UTC；排期日历与冻结来源共用同一 DST 规则。

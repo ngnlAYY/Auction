@@ -102,21 +102,19 @@ impl MailEquipmentFilter {
 
     /// 按邮件世界和收件时间选择品质门槛：早鸟窗口内用早鸟品质，其余用常规品质。
     /// 收件时间来自外部邮件的冻结事实，同一封邮件重放时得到相同结果。
-    pub fn evaluate_received(
+    pub(crate) fn received_qualities(
         &self,
-        snapshot: &AdminIntakeSourceSnapshot,
         world_id: &str,
         received_at: DateTime<Utc>,
-    ) -> &'static str {
-        let early_bird = self
-            .early_bird
+    ) -> Option<&[String]> {
+        self.early_bird
             .as_ref()
             .filter(|calendar| calendar.window_contains(world_id, received_at))
-            .map(AuctionEarlyBirdCalendar::qualities);
-        self.evaluate_with(snapshot, early_bird)
+            .map(AuctionEarlyBirdCalendar::qualities)
     }
 
-    fn evaluate_with(
+    /// 复用已选定的早鸟品质，逐件保留可交易性、属性和附加维度的原拒绝顺序。
+    pub(crate) fn evaluate_with(
         &self,
         snapshot: &AdminIntakeSourceSnapshot,
         early_bird_qualities: Option<&[String]>,

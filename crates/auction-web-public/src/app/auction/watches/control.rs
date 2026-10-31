@@ -43,7 +43,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
     let busy = pending.as_ref().is_some_and(|pending| pending.busy);
     let error = pending.as_ref().and_then(|pending| pending.error.as_ref());
     let uncertain = pending.as_ref().is_some_and(|pending| pending.uncertain);
-    let conflict = error.is_some_and(|error| error.status == 409);
+    let conflict = error.is_some_and(|error| error.status == 409 && error.code == "watch_conflict");
     let error_message = if uncertain {
         t!("watch-unknown")
     } else if conflict {

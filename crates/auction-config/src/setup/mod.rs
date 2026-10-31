@@ -7,7 +7,7 @@ use std::{
     io::{ErrorKind, Write},
     os::unix::{
         ffi::OsStrExt,
-        fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
+        fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
     },
     path::{Path, PathBuf},
 };
@@ -137,7 +137,15 @@ impl FirstRunConfig {
         self.validate()?;
         ensure_destination_absent(destination)?;
         let parent = destination.parent().ok_or(FirstRunError::InvalidInput)?;
-        if !parent.is_dir() || parent.is_symlink() {
+        let metadata = fs::symlink_metadata(parent).map_err(|_| FirstRunError::Io)?;
+        // 临时目录含数据库口令与 Admin 凭据；父目录若可被他人改写，0700 也无法防止
+        // 同级临时名称被替换，后续写入或发布就可能落到另一个目录。
+        // SAFETY：geteuid 只读取当前进程的有效 UID。
+        let owner_uid = unsafe { libc::geteuid() };
+        if !metadata.is_dir()
+            || metadata.mode() & 0o022 != 0
+            || (metadata.uid() != owner_uid && metadata.uid() != 0)
+        {
             return Err(FirstRunError::InvalidInput);
         }
         let temporary = parent.join(format!(".auction-first-run-{}", Uuid::new_v4().simple()));

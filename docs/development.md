@@ -61,7 +61,7 @@ chmod 600 "$dir/secrets.toml"; chmod 640 "$dir/runtime/admin.toml"
 openssl rand -base64 32
 ```
 
-也可以选择首次设置向导生成整套配置（需要 `postgres,web-embed` 构建），替代上面的手工创建步骤：先令 `dir` 指向一个尚不存在的目录，再运行 `cargo run --locked -p auction-admin-api --features postgres,web-embed -- setup --output-dir "$dir"`。
+也可以选择首次设置向导生成整套配置（需要 `postgres,web-embed` 构建），替代上面的手工创建步骤：先令 `dir` 指向一个尚不存在的目录，并预先建立符合[首次设置权限要求](../ops/config/README.md#示例与首次设置)的直接父目录，再运行 `cargo run --locked -p auction-admin-api --features postgres,web-embed -- setup --output-dir "$dir"`。
 
 检查配置：
 
@@ -105,7 +105,7 @@ AUCTION_CONFIG_FILE=$dir/public.toml just run-public
 
 ## 测试
 
-仓库只有少量单元测试；默认门禁与 CI 只做格式、编译与静态分析，不运行测试。需要时可手动运行单个 crate 的测试，例如：
+默认门禁与 CI 只做格式、编译与静态分析，不运行测试。明确需要行为验证时，可按所涉及的业务边界选择单个 crate，例如：
 
 ```bash
 cargo test --locked -p auction-domain --lib
@@ -116,7 +116,7 @@ cargo test --locked -p auction-domain --lib
 ## 数据库变更
 
 1. 在 [`migrations/postgres/`](../migrations/postgres) 新增迁移文件 `NNNNNN_<名称>.up.sql`（编号连续），见[迁移说明](../migrations/postgres/README.md)。
-2. 新表加入 [`ops/deploy/retention-policy.v1.json`](../ops/deploy/retention-policy.v1.json) 并更新 `database_schema_version`。
+2. 每次新增迁移都把 [`ops/deploy/retention-policy.v1.json`](../ops/deploy/retention-policy.v1.json) 的 `database_schema_version` 更新为新的最高版本；新增表还须加入对应数据族。
 3. 同步 [数据库契约](contracts/database.md)。
 
 ## 接口变更

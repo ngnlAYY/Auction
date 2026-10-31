@@ -116,6 +116,9 @@ where
 
         let attachments = std::mem::take(&mut message.attachments);
         let mut items = Vec::with_capacity(attachments.len());
+        // 同封邮件的世界与收件时间固定；只解析一次赛季窗口，逐件仍按原顺序验证装备。
+        let received_qualities =
+            self.equipment_filter.received_qualities(&message.world_id, message.received_at);
         for (index, attachment) in attachments.into_iter().enumerate() {
             let external_equipment_id = attachment.external_equipment_id.clone();
             let context = MailEquipmentDiagnosticContext {
@@ -210,11 +213,8 @@ where
                     pending_equipment_diagnostic,
                 );
             }
-            let rejection_reason = self.equipment_filter.evaluate_received(
-                &snapshot,
-                &message.world_id,
-                message.received_at,
-            );
+            let rejection_reason =
+                self.equipment_filter.evaluate_with(&snapshot, received_qualities);
             if !rejection_reason.is_empty() {
                 snapshot.clear_secret();
                 let result = if message.returnable {

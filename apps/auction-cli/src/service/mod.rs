@@ -5,7 +5,7 @@ use std::{
     net::TcpListener,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::Path,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use anyhow::Context;
@@ -208,36 +208,43 @@ async fn wait_ready(
     timeout: Duration,
 ) -> anyhow::Result<UnitState> {
     let (endpoint, path) = endpoint(deployment, role)?;
-    let deadline = Instant::now() + timeout;
-    loop {
-        let state = systemctl.show(role).await?;
-        if state.active_state == "failed" {
-            anyhow::bail!(
-                "{} 启动失败；请查看 systemctl status {} 与 journalctl",
-                role.name(),
-                systemctl.unit(role)
-            );
-        }
-        if state.running() && probe::ready(&endpoint, path).await {
-            // 探测前后进程身份必须一致，否则可能是重启后的另一个实例。
-            let current = systemctl.show(role).await?;
-            if current.running()
-                && current.main_pid == state.main_pid
-                && current.invocation_id == state.invocation_id
-            {
-                progress(format_args!("{} 已就绪（MainPID {}）", role.name(), current.main_pid));
-                return Ok(current);
+    let deadline = tokio::time::Instant::now() + timeout;
+    // 同一预算覆盖状态查询、readiness 请求、身份复核和轮询等待；慢查询不能越过截止后报成功。
+    let observe = async {
+        loop {
+            let state = systemctl.show(role).await?;
+            if state.active_state == "failed" {
+                anyhow::bail!(
+                    "{} 启动失败；请查看 systemctl status {} 与 journalctl",
+                    role.name(),
+                    systemctl.unit(role)
+                );
             }
+            if state.running() && probe::ready(&endpoint, path).await {
+                // 探测前后进程身份必须一致，否则可能是重启后的另一个实例。
+                let current = systemctl.show(role).await?;
+                if current.running()
+                    && current.main_pid == state.main_pid
+                    && current.invocation_id == state.invocation_id
+                {
+                    return Ok(current);
+                }
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
         }
-        if Instant::now() >= deadline {
-            anyhow::bail!(
-                "{} 未在 {} 秒内通过 readiness；请查看 journalctl -u {}",
-                role.name(),
-                timeout.as_secs(),
-                systemctl.unit(role)
-            );
+    };
+    match tokio::time::timeout_at(deadline, observe).await {
+        Ok(result) if tokio::time::Instant::now() < deadline => {
+            let current = result?;
+            progress(format_args!("{} 已就绪（MainPID {}）", role.name(), current.main_pid));
+            Ok(current)
         }
-        tokio::time::sleep(POLL_INTERVAL).await;
+        _ => anyhow::bail!(
+            "{} 未在 {} 秒内通过 readiness；请查看 journalctl -u {}",
+            role.name(),
+            timeout.as_secs(),
+            systemctl.unit(role)
+        ),
     }
 }
 

@@ -241,19 +241,27 @@ fn render_auction_thread_with_colors(
             colored_equipment_name(&lot, colors)
         )
         .map_err(|_| ForumRenderError::BodyTooLarge)?;
-        let mut equipment_facts = Vec::with_capacity(3);
-        if let Some(level) = lot.equipment_level {
-            equipment_facts.push(format!("Lv.{level}"));
-        }
-        if let Some(initials) = lot.primary_attribute_initials.as_deref() {
-            equipment_facts.push(initials.to_owned());
-        }
-        if let Some(avg_roll_tenths) = lot.avg_roll_tenths {
-            equipment_facts.push(format!("Ave: {}", format_roll(avg_roll_tenths)));
-        }
-        if !equipment_facts.is_empty() {
-            write!(&mut body, " ({})", equipment_facts.join(", "))
-                .map_err(|_| ForumRenderError::BodyTooLarge)?;
+        // 装备事实直接追加到最终帖子，避免每件装备分配字段 Vec、临时字符串和 join 副本。
+        if lot.equipment_level.is_some()
+            || lot.primary_attribute_initials.is_some()
+            || lot.avg_roll_tenths.is_some()
+        {
+            body.push_str(" (");
+            let mut separator = "";
+            if let Some(level) = lot.equipment_level {
+                write!(&mut body, "Lv.{level}").map_err(|_| ForumRenderError::BodyTooLarge)?;
+                separator = ", ";
+            }
+            if let Some(initials) = lot.primary_attribute_initials.as_deref() {
+                body.push_str(separator);
+                body.push_str(initials);
+                separator = ", ";
+            }
+            if let Some(tenths) = lot.avg_roll_tenths {
+                write!(&mut body, "{separator}Ave: {}.{:01}%", tenths / 10, tenths % 10)
+                    .map_err(|_| ForumRenderError::BodyTooLarge)?;
+            }
+            body.push(')');
         }
         // seller/start/current 的纯文本标签由论坛目录回读解析器消费，必须保持稳定。
         write!(
@@ -607,8 +615,4 @@ fn format_credits(value: i64) -> String {
         return format!("{}k", value / THOUSAND);
     }
     value.to_string()
-}
-
-fn format_roll(tenths: i64) -> String {
-    format!("{}.{:01}%", tenths / 10, tenths % 10)
 }

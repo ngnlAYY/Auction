@@ -36,7 +36,7 @@ bash ci/tools/bootstrap.sh identity release           # 校验回执后输出工
 
 ## 依赖审计状态（2026-10-31）
 
-使用受控 cargo-audit 0.22.2 对完整锁文件执行 `audit --deny warnings`；RustSec 公告库提交为 `2295466c4e9df26647fd67d8fa1c705ac2fc7f81`。下表按包版本计数，包含锁图中的可选及其他平台依赖，不代表每项都能由实际构建路径触发。
+使用受控 cargo-audit 0.22.2 对完整锁文件执行 `audit --deny warnings`；本轮重新获取公告库，提交仍为 `2295466c4e9df26647fd67d8fa1c705ac2fc7f81`。下表按包版本计数，包含锁图中的可选及其他平台依赖，不代表每项都能由实际构建路径触发。
 
 | 锁文件 | 漏洞匹配 | 警告 | 结果 |
 | --- | --- | --- | --- |
@@ -49,6 +49,7 @@ Dioxus CLI 的 `libz-sys` 已从 1.1.28 单项升级到 1.1.31，消除 [RUSTSEC
 
 剩余漏洞涉及 Dioxus CLI 的 `gix-date`、两个版本的 `quick-xml`、`rkyv`、`ruzstd` 和两个版本的 `zip`，以及 sccache 的 `rsa` 与 `zip`。已公布修复版多数跨越当前依赖的兼容范围，RSA 公告尚无修复版；本轮未强行跨版本替换或忽略公告。警告另含未维护、健全性问题，以及 sccache 锁中的已撤回 `scc 2.1.0`。工具安装回执通过只证明来源与配方一致，不表示上述安全审计通过。
 
+直接依赖另经 `cargo machete` 检查，未发现未使用项；Public/Admin 的实际 WASM 依赖图不含后端 crate，`auction-setup` 关闭所有 feature 时无传递依赖。当前仍有上游分别要求不同版本的传递依赖；不为减少锁文件条目而跨不兼容版本替换。
 
 ## rustup.sh
 

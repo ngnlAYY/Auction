@@ -114,7 +114,8 @@ pub(super) fn fixed_post_form_values(
     let board = board_id.to_string();
     let post_target_matches = match post_id {
         Some(wanted) => single_value_for(&values, "p") == Some(wanted),
-        None => single_value_for(&values, "p").is_none(),
+        // 缺失与冲突重复不能共用 None：回复表单只允许完全没有帖子写入目标。
+        None => !values.iter().any(|(name, _)| name == "p"),
     };
     if single_value_for(&values, "act") != Some("Post")
         || single_value_for(&values, "CODE") != Some(expected_code)

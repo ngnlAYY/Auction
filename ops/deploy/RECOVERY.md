@@ -48,7 +48,7 @@ auction-cli --config-dir /etc/auction db rebuild --database auction \
   --backup-manifest /var/backups/auction/auction-<时间>.dump.manifest
 ```
 
-演练会持锁检查：维护库为 `postgres`、PostgreSQL 18 可写主节点、目标允许连接且非模板、无自定义 ACL 或库级设置、UTF8 编码、维护角色为 superuser 或“目标 owner + CREATEDB”、零活动会话、无预备事务、无活动逻辑复制槽与订阅；并再次校验备份。通过后执行：
+演练先校验备份的 manifest、archive 摘要与目录，并要求备份 schema 版本不高于当前 `auction-cli` 支持的版本；此版本门禁在任何 DROP/CREATE 前执行，离线 `backup verify` 通过本身不代表当前工具支持恢复该版本。随后持锁检查：维护库为 `postgres`、PostgreSQL 18 可写主节点、目标允许连接且非模板、无自定义 ACL 或库级设置、UTF8 编码、维护角色为 superuser 或“目标 owner + CREATEDB”、零活动会话、无预备事务、无活动逻辑复制槽与订阅。通过后执行：
 
 ```bash
 auction-cli --config-dir /etc/auction db rebuild --database auction \

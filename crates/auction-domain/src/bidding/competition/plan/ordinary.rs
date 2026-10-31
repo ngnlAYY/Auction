@@ -47,12 +47,14 @@ pub(super) fn plan_ordinary_bid(
     let mut transitions = Vec::new();
     let mut proxy_states = Vec::new();
     let mut active_proxy_id = active.as_ref().map(|proxy| proxy.id);
-    let mut drafts = vec![BidDraft {
+    // 一次普通出价至多追加一次代理反超；固定两格避免为临时草稿分配或扩容。
+    let mut drafts = [BidDraft {
         bid_id: *bid_ids.first().ok_or(DomainError::InvalidBidState("普通出价缺少事实标识"))?,
         bidder_id: actor_id,
         amount,
         mechanism: BidMechanism::Ordinary,
-    }];
+    }; 2];
+    let mut draft_count = 1;
 
     if let Some(active) = active {
         // 历史授权仍保留原上限；普通出价触及有效上限时，Slow 也立即同价守位。
@@ -69,32 +71,32 @@ pub(super) fn plan_ordinary_bid(
             let bid_id = *bid_ids
                 .get(1)
                 .ok_or(DomainError::InvalidBidState("代理反超缺少第二条事实标识"))?;
-            drafts.push(BidDraft {
+            drafts[1] = BidDraft {
                 bid_id,
                 bidder_id: active.user_id,
                 amount,
                 mechanism: BidMechanism::Proxy,
-            });
+            };
+            draft_count = 2;
         } else if active.mode == ProxyMode::Fast {
             let response = proxy_response_amount(rules, final_state, amount, maximum)?;
             let bid_id = *bid_ids
                 .get(1)
                 .ok_or(DomainError::InvalidBidState("快速代理缺少第二条事实标识"))?;
-            drafts.push(BidDraft {
+            drafts[1] = BidDraft {
                 bid_id,
                 bidder_id: active.user_id,
                 amount: response,
                 mechanism: BidMechanism::Proxy,
-            });
+            };
+            draft_count = 2;
         } else {
             if final_state.slow_authorization_id.is_none() {
                 final_state = schedule_slow_proxy(rules, final_state, active.id, now)?;
             }
         }
-    } else if bid_ids.len() != 1 {
-        return Err(DomainError::InvalidBidState("普通出价事实数量不正确"));
     }
-    if bid_ids.len() != drafts.len() {
+    if bid_ids.len() != draft_count {
         return Err(DomainError::InvalidBidState("普通出价事实数量不正确"));
     }
 
@@ -103,7 +105,7 @@ pub(super) fn plan_ordinary_bid(
         final_state,
         command_id,
         now,
-        &drafts,
+        &drafts[..draft_count],
         ProxyPlanOutput { transitions, states: proxy_states, active_proxy_id },
     )
 }

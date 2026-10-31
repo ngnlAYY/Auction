@@ -127,8 +127,9 @@ impl WatchCommandOwner {
                     context.refresh.set(next);
                 }
                 Err(error) => {
-                    // 只有成功或明确 409 可解除未知状态；429 等拒绝只描述本次重试。
-                    let uncertain = error.status != 409 && (uncertain || error.outcome_uncertain());
+                    // 只有路由的明确冲突码能解除未知；裸 409 或损坏响应仍须原样重试。
+                    let uncertain = !(error.status == 409 && error.code == "watch_conflict")
+                        && (uncertain || error.outcome_uncertain());
                     context.commands.write().insert(
                         lot_id,
                         WatchCommand {

@@ -40,6 +40,8 @@
 
 持久化业务命令通常带客户端生成的 `command_id`（UUID）。服务端以“命令种类 + 聚合 + 请求摘要”记账：同一 ID 同一请求重放原结果；同一 ID 不同请求返回 `409 command_conflict`（部分 owner 使用专属冲突码）。客户端在结果不确定（超时、断网）时必须用**同一 ID 与同一请求体**重试。多数业务命令还要求携带服务端投影给出的期望版本（`expected_version`、`expected_state_version`、`expected_fencing_version`），版本不匹配时返回 409，需重新读取后再决定。登录、退出、空 PUT 会话同步、规则/runtime 候选校验、论坛预览、凭据在线校验与首次设置不使用该命令外壳；realtime 重放兼容省略 ID，由服务端按请求确定生成稳定 ID。
 
+浏览器解除“结果未知”必须依据该路由可识别的确定响应，不能只依据 HTTP 409。标记、提醒渠道偏好与登录时长偏好的确定冲突分别为 `409 watch_conflict`、`409 watch_preference_conflict`、`409 session_preference_conflict`；无法解码或不符合该路由契约的 409 不解除此前累计的未知状态，仍须保留原命令与请求重试。
+
 ### 缓存头
 
 公开目录类读取（世界、规则、黑名单、补偿池汇总、拍卖列表、当前拍卖、竞价日志、价格历史）返回 `Cache-Control: no-cache`；含会话、装备 key 或命令结果的响应以及全部 Admin 接口返回 `no-store`。
@@ -149,12 +151,12 @@
 | GET | `/api/v1/admin/auctions/{auction_id}/lots` | lot 列表（`page`、`page_size`）；响应头 `x-auction-capability-manual-intake` 声明手工录入是否可用 |
 | PATCH | `/api/v1/admin/lots/{lot_id}` | 草稿 lot：`withdraw` 撤下或 `set_start_price` 修改起拍价 |
 | GET | `/api/v1/admin/lots/{lot_id}/proxy-events` | 代理事件历史（`page`、`page_size`、`cursor`） |
-| POST | `/api/v1/admin/worlds/{world_id}/auction-intake/items` | 手工录入装备到该世界的草稿场次 |
+| POST | `/api/v1/admin/worlds/{world_id}/auction-intake/items` | 手工录入装备到该世界当前接收投稿的 Draft 或 Preview 场次；无接收目标或尚未到冻结的最早收件时刻时返回 `409 auction_intake_unavailable` |
 | POST | `/api/v1/admin/auction-forum/preview` | 论坛主题预览渲染 |
 | GET | `/api/v1/admin/forum/sync-status` | 论坛同步状态 |
-| GET | `/api/v1/admin/auctions/{auction_id}/forum` | 该场论坛主题与诊断 |
+| GET | `/api/v1/admin/auctions/{auction_id}/forum` | 该场论坛主题与诊断的本地安全投影；刷新不请求论坛，也不触发或授权重写 |
 | GET | `/api/v1/admin/auctions/{auction_id}/settlement-report` | 结算报告 |
-| GET | `/api/v1/admin/auctions/{auction_id}/recovery-report` | 恢复报告 |
+| GET | `/api/v1/admin/auctions/{auction_id}/recovery-report` | 恢复报告，含 `payment_deadline_at`、`blocking_code` 与 `allowed_commands`；旧赛季装备的永久重列阻断对外映射为 `recovery_relist_unavailable` |
 | GET | `/api/v1/admin/settlement-catalog` | 已结算场次目录（`world_id`、`sequence`、`page`、`page_size`） |
 | POST | `/api/v1/admin/recoveries/{recovery_id}/confirm` | 人工确认恢复动作（带期望版本与原因） |
 | GET | `/api/v1/admin/mail` | 邮箱轮询状态（`mailbox_key`、`include_diagnostics`） |

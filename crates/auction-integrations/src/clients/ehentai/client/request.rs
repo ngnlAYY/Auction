@@ -43,8 +43,10 @@ impl EhentaiClient {
             .map_err(|_| EhentaiError::remote_temporary(operation, false))?;
         let status = response.status();
         let location = response.headers().get(header::LOCATION).cloned();
-        let body = self.read_response_with_budget(response, operation, false, budget).await?;
-        if is_session_expired(status, location.as_ref(), &body) {
+        let mut body = SensitiveResponseBody(
+            self.read_response_with_budget(response, operation, false, budget).await?,
+        );
+        if is_session_expired(status, location.as_ref(), &body.0) {
             return Err(EhentaiError::session_expired(operation));
         }
         if status == StatusCode::TOO_MANY_REQUESTS {
@@ -54,18 +56,17 @@ impl EhentaiClient {
             return Err(EhentaiError::remote_temporary(operation, false));
         }
         if status == StatusCode::FORBIDDEN {
-            return Err(classify_forbidden(operation, &body));
+            return Err(classify_forbidden(operation, &body.0));
         }
         if !status.is_success() {
             return Err(EhentaiError::protocol(operation, false));
         }
-        if location.is_some() || !body_looks_like_html(&body) {
+        if location.is_some() || !body_looks_like_html(&body.0) {
             return Err(EhentaiError::protocol(operation, false));
         }
-        if !cookie.is_active() {
-            return Err(EhentaiError::credential(operation));
-        }
-        Ok((body, status))
+        // 等待正文时 owner 可能已失效；只有完成复核的原 session 才能交付本次读取。
+        self.check_ownership(cookie).await.map_err(|_| EhentaiError::credential(operation))?;
+        Ok((std::mem::take(&mut body.0), status))
     }
 
     pub(super) async fn read_response(
@@ -214,7 +215,7 @@ impl EhentaiClient {
 }
 
 // 超限、网络失败和取消都清理已收取的部分正文；完整响应才移交协议解析器。
-struct SensitiveResponseBody(Vec<u8>);
+pub(super) struct SensitiveResponseBody(pub(super) Vec<u8>);
 
 impl Drop for SensitiveResponseBody {
     fn drop(&mut self) {
@@ -223,15 +224,17 @@ impl Drop for SensitiveResponseBody {
 }
 
 fn classify_forbidden(operation: EhentaiOperation, body: &[u8]) -> EhentaiError {
-    let evidence = String::from_utf8_lossy(body).to_ascii_lowercase();
-    if ["cloudflare", "cf-ray", "attention required", "just a moment"]
+    // HTTP 错误页只匹配 ASCII 协议标记，不复制或转码整页敏感正文。
+    let contains =
+        |marker: &[u8]| body.windows(marker.len()).any(|value| value.eq_ignore_ascii_case(marker));
+    if [b"cloudflare".as_slice(), b"cf-ray", b"attention required", b"just a moment"]
         .iter()
-        .any(|marker| evidence.contains(marker))
+        .any(|marker| contains(marker))
     {
         EhentaiError::cloudflare(operation)
-    } else if ["topic is locked", "topic is closed", "cannot reply", "cannot edit"]
+    } else if [b"topic is locked".as_slice(), b"topic is closed", b"cannot reply", b"cannot edit"]
         .iter()
-        .any(|marker| evidence.contains(marker))
+        .any(|marker| contains(marker))
     {
         EhentaiError::topic_locked(operation)
     } else {

@@ -24,6 +24,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 | `PostgresDatabaseRebuildGuard` | 持锁预检与 DROP/CREATE 同定义空库（`auction-cli db rebuild`） |
 | `PostgresStore::collect_recovery_preflight` / `collect_retention_inventory` | 只读恢复预检与保留盘点 |
 | `strict_deployment_database_identity` | 不连接数据库比较部署目标（主机/socket、端口、库名），拒绝隐式目标与 `options` |
+| `postgres_connect_options` | `postgres` feature 下供连接装配与 CLI 目标/libpq 投影共用的 SQLx 选项解析；固定默认端口，保留驱动的 host/hostaddr 查询顺序与 socket 优先级，不连接数据库，错误脱敏 |
 | `postgres_expected_migration_version` | 当前二进制内嵌的最高迁移版本 |
 
 ## 实现约定
@@ -37,6 +38,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 - **只读快照**：报表与运维读取使用可重复读只读事务，运维快照设置 5 秒语句与 1 秒锁等待上限。
 - **Public 会话活动**：普通活动不延长期限，`last_activity_at` 按 60 秒节流写入；需要活动写入时，在语句完成后复用独立只读查询重新认证。行锁等待可能跨过期限或撤销，仅靠等待前的物化快照或 `UPDATE WHERE clock_timestamp()` 不能证明等待后的身份仍有效；无需活动写入的快路保持单条查询且不写会话行。
 - **邮件入库编号**：持有原 world/目标拍卖锁，在同一 Serializable 事务中按分类聚合已有编号，同时归并全局 lot 序号；空场次仍从 1 开始，分类编号各自递增，溢出和损坏分类快照继续失败关闭。
+- **赛季收件边界**：新场次冻结的 `intake_opens_at` 同时约束锁后数据库实时钟和邮件原始 `received_at`；任一早于边界都返回 `IntakeClosed`，延迟轮询不能把旧赛季邮件加入新赛季。等于边界允许继续，历史 NULL 不增加限制；已持久接受命令仍先重放原决定。Admin 录入复核锁后当前时刻；恢复重列在既有 world/auction/recovery 等锁和证明复核后取 `clock_timestamp()`，不能使用事务开始时间或 Worker 选候选时的旧时刻替代换季判断。旧赛季识别同时保留原场次开拍和原始投稿收件事实，以二者较早时刻为起点，避免改期开拍绕过换季阻断。
 - **错误**：对外只返回固定分类文本，不携带 SQL、连接串或驱动原文。
 - **连接目标**：连接前固定显式端口（省略为 5432），拒绝未知查询参数；IPv6 主机名去括号后重新匹配 pgpass。
 

@@ -86,7 +86,7 @@ auction-cli --config-dir /etc/auction service stop
 | `--systemctl` | `/usr/bin/systemctl` |
 | `--state-dir`（部署控制锁目录） | `/var/lib/auction/deployment` |
 | `--worker-unit` / `--admin-unit` / `--public-unit` | `auction-worker.service` / `auction-admin-api.service` / `auction-public-api.service` |
-| `start/restart --startup-timeout-seconds` | 每角色 30 秒，范围 1–300 |
+| `start/restart --startup-timeout-seconds` | 每角色 readiness 的完整预算（状态查询、探测、进程身份复核及轮询等待），默认 30 秒，范围 1–300；`systemctl start` 本身另有 90 秒上限 |
 
 - **start**：取得部署锁（`<state-dir>/deployment-control.lock`，目录不存在时以 0700 创建）→ `config check --strict` → 核对三个 unit 均已装载、`Environment=AUCTION_CONFIG_FILE` 与 `--config-dir` 中的角色文件是同一文件、Admin runtime 文件与父目录归 Admin unit 的固定 `User` 所有（不接受 `DynamicUser`）→ 三角色全部运行时只按顺序复核 readiness 并返回 `already_running`；部分运行或处于转换状态则拒绝 → 检查 TCP 监听端口可绑定 → 执行迁移 → 按 Worker → Admin → Public 逐个 `systemctl start`，等待 unit 为 active 且应用 readiness 返回 HTTP 200，探测前后 `MainPID` 与 `InvocationID` 不变。任一角色失败时反序停止本次启动的全部 unit；已提交的迁移不会回退。
 - **readiness**：Public/Admin 探测 `GET /health/ready`（TCP 或 Unix socket），Worker 探测 control socket 的 `GET /v1/health/ready`。Worker control 只接受 `allowed_peer_uids/gids` 中的调用者，**以 root 运行 `service` 时须把 `0` 加入 `allowed_peer_uids`**，否则 Worker 永远无法判定就绪；因此 `service start` 也要求启用 `[worker.control]`。
@@ -126,7 +126,7 @@ auction-cli db migrate
 auction-cli db create --database auction --maintenance-secrets /etc/auction/maintenance/postgres.toml
 ```
 
-首次部署时用独立维护凭据创建应用数据库：`--database` 须与 Worker 配置的库名一致，owner 为 Worker 配置中的数据库账号。维护凭据文件（模板见 `ops/config/examples/secrets/postgres-rebuild.toml`）使用 `[database]` 五字段，也兼容与之互斥的 `database_url`；维护库名固定为 `postgres`，主机与端口须与应用库相同。文件必须是规范化绝对路径、非符号链接、单硬链接、归当前账号所有且仅 owner 可读，父目录禁止 group/other 写入。
+首次部署时用独立维护凭据创建应用数据库：`--database` 须与 Worker 配置的库名一致，owner 为 Worker 配置中的数据库账号。维护凭据文件（模板见 `ops/config/examples/secrets/postgres-rebuild.toml`）使用 `[database]` 五字段，也兼容与之互斥的 `database_url`；维护库名固定为 `postgres`，主机与端口须与应用库相同。目标提取复用实际 SQLx 连接选项：`hostaddr` 按查询顺序覆盖 TCP host，已指定的 Unix socket 优先于后续 TCP host；socket 路径区分大小写，IP 地址按规范化地址比较。文件必须是规范化绝对路径、非符号链接、单硬链接、归当前账号所有且仅 owner 可读，父目录禁止 group/other 写入。
 
 命令取得集群级 advisory lock，要求连接可写主节点；目标不存在时校验维护角色具备 `CREATEDB`（或 superuser）、应用角色存在且可被指派为 owner，然后 `CREATE DATABASE` 并用应用账号回连验证。目标已存在时只校验 owner 与应用连接，返回 `already_exists`。本命令不迁移、不修改已有库，随后需执行 `db migrate`。
 
@@ -157,7 +157,7 @@ auction-cli db rebuild --database auction \
   --execute --confirm 'REBUILD auction' --receipt /var/backups/auction/rebuild-20261030.json
 ```
 
-- 必须提供已通过校验的 `--backup-manifest`，或用 `--ephemeral` 明确声明目标是可丢弃的一次性库（此时确认短语为 `EPHEMERAL <库名>`）。`--mode empty-for-restore` 强制要求备份，只建立空库等待 `backup restore`；`--mode fresh-schema`（默认）建库后立即执行全部迁移。
+- 必须提供已通过校验的 `--backup-manifest`，或用 `--ephemeral` 明确声明目标是可丢弃的一次性库（此时确认短语为 `EPHEMERAL <库名>`）。`--mode empty-for-restore` 强制要求备份，并在 DROP 前复用 `backup restore` 的版本门禁，拒绝高于当前二进制支持版本的备份；通过后只建立空库等待恢复。`--mode fresh-schema`（默认）建库后立即执行全部迁移。
 - 维护连接取得与建库相同的 advisory lock，并要求：维护库为 `postgres`、PostgreSQL 主版本 18、可写主节点、目标允许连接且非模板、无自定义 ACL 或库级设置、UTF8 编码、维护角色为 superuser 或“目标 owner + CREATEDB”、目标零活动会话、无预备事务、无活动逻辑复制槽与订阅。
 - 执行时在 DROP 前复核恢复点与目标身份，以原 owner、编码、locale provider、tablespace 与连接上限 `DROP DATABASE … WITH (FORCE)` 后 `CREATE DATABASE … TEMPLATE template0`。
 - 一旦进入 DROP，无论成败都写入 `--receipt`，记录 `database_dropped`/`database_recreated`（`null` 表示远端结果未知）。未知结果不能推断为未执行，禁止盲目重试 DROP；保持全部角色停止并人工核对。
@@ -172,7 +172,7 @@ auction-cli backup restore --manifest /var/backups/auction/auction-20261030.dump
   --receipt /var/backups/auction/restore-20261030.json
 ```
 
-- 依赖部署环境 `PATH` 中的 `pg_dump`/`pg_restore`，主版本不得低于服务器（PostgreSQL 18）。连接参数由配置的连接串推导为 libpq 环境变量；继承的 `PG*` 环境全部清除，口令只写入 0600 临时 passfile 并在命令结束后删除，从不进入进程参数。连接串只能含 `host`、`hostaddr`、`port`、`dbname`、`user`、`password`、`sslmode`、`sslrootcert`、`sslcert`、`sslkey`、`application_name`，`options` 与未知参数被拒绝。
+- 依赖部署环境 `PATH` 中的 `pg_dump`/`pg_restore`，主版本不得低于服务器（PostgreSQL 18）。连接参数投影复用实际 SQLx 连接选项的有效 host/socket、port、database 与 user；仅传最终 `PGHOST`，不独立保留 `PGHOSTADDR`，避免预检与外部工具因查询覆盖规则不同而连接不同实例。继承的连接相关 `PG*` 环境全部清除，显式口令只写入 0600 临时 passfile 并在命令结束后删除，从不进入进程参数；TLS 与显式口令仍从敏感配置提取，不承诺与 SQLx 的全部环境默认值或隐式凭据来源一致。连接串只能含 `host`、`hostaddr`、`port`、`dbname`、`user`、`password`、`sslmode`、`sslrootcert`、`sslcert`、`sslkey`、`application_name`（另兼容 SQLx 的 TLS 别名与 `statement-cache-capacity`），`options` 与未知参数被拒绝。
 - `create`：`--output` 必须以 `.dump` 结尾，文件名不得含反斜杠、控制字符或首尾空白，archive 与同目录 `<archive>.manifest` 均不得已存在。备份源须有 Auction schema 身份与完整迁移历史；`pg_dump --format=custom --no-owner --no-privileges` 写入临时文件，经 `pg_restore --list` 解析并同步 archive 文件后以硬链接无覆盖发布，随后同步父目录并写入 manifest；备份前后 schema 版本不一致则丢弃 archive。
 - manifest 格式为 `auction-postgres-backup.v1`，记录 archive 文件名、archive SHA-256、库名 SHA-256、schema 版本与创建时间；此前运维工具生成的同格式备份可直接校验与恢复。
 - `verify`：不连接数据库，校验 manifest 字段闭集、库名摘要、archive SHA-256 与 archive 目录。

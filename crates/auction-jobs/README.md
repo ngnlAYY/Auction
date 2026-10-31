@@ -24,6 +24,8 @@ Worker 的调度运行时与本地控制面：把应用层的持久化端口编�
 
 每个循环使用 `batch_limit`、`concurrency`、`poll_interval`、`jitter`、`lease_duration`、`item_timeout` 等边界（来自 `[worker.*]` 配置，可由 runtime 接管）。收到停止信号后不再领取新任务，在途任务在有界时间内排空；常驻任务意外退出会把 control 标记为 draining 并触发进程以非零状态退出，由进程管理器重启。
 
+拍卖到期提示按读取时的时钟转换为单调截止，查询与网络等待消耗原有等待预算；最后休眠不会把这段耗时再次加回。提示失败仍按常规轮询恢复，实际领取继续依赖数据库事实、租约与命令幂等。
+
 ## Worker control
 
 `[worker.control]` 默认关闭。显式启用后，Worker 在 Unix socket 上提供 HTTP/JSON 控制面（协议版本 `v1`）：

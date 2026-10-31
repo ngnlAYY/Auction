@@ -82,22 +82,25 @@ impl Libpq {
         if parsed.fragment().is_some() {
             return Err(invalid());
         }
-        let target = crate::database::DatabaseTarget::parse(url)?;
-        target.require_database(database)?;
+        let options = auction_storage::postgres_connect_options(url).map_err(|_| invalid())?;
+        if options.get_database() != Some(database) {
+            anyhow::bail!("--database 与 Worker 配置中的数据库名不一致");
+        }
+        if database.contains('/') || database.chars().any(char::is_control) {
+            return Err(invalid());
+        }
         let mut variables = vec![
-            ("PGDATABASE", target.database.clone()),
-            ("PGPORT", target.port.to_string()),
+            ("PGDATABASE", database.to_owned()),
+            ("PGPORT", options.get_port().to_string()),
             ("PGCONNECT_TIMEOUT", "10".to_owned()),
             ("PGCLIENTENCODING", "UTF8".to_owned()),
             ("PGAPPNAME", "auction-cli".to_owned()),
         ];
         let mut password = parsed.password().map(decode_component).transpose()?;
         for (key, value) in parsed.query_pairs() {
-            let value = value.into_owned();
             match key.as_ref() {
-                "host" | "port" | "dbname" | "user" | "statement-cache-capacity" => {}
-                "hostaddr" => variables.push(("PGHOSTADDR", value)),
-                "password" => password = Some(value),
+                "host" | "hostaddr" | "port" | "dbname" | "user" | "statement-cache-capacity" => {}
+                "password" => password = Some(value.into_owned()),
                 "sslmode" | "ssl-mode" => {
                     let mode = value.to_ascii_lowercase();
                     if !matches!(
@@ -109,23 +112,29 @@ impl Libpq {
                     variables.push(("PGSSLMODE", mode));
                 }
                 "sslrootcert" | "ssl-root-cert" | "ssl-ca" => {
-                    variables.push(("PGSSLROOTCERT", value))
+                    variables.push(("PGSSLROOTCERT", value.into_owned()))
                 }
-                "sslcert" | "ssl-cert" => variables.push(("PGSSLCERT", value)),
-                "sslkey" | "ssl-key" => variables.push(("PGSSLKEY", value)),
+                "sslcert" | "ssl-cert" => variables.push(("PGSSLCERT", value.into_owned())),
+                "sslkey" | "ssl-key" => variables.push(("PGSSLKEY", value.into_owned())),
                 "application_name" => {}
                 _ => return Err(invalid()),
             }
         }
-        variables.push(("PGHOST", target.host.clone()));
-        if !target.username.is_empty() {
-            variables.push(("PGUSER", target.username.clone()));
+        // SQLx 的 hostaddr 按查询顺序覆盖 TCP host，且不会清除先前指定的 Unix socket。
+        // 只传最终 PGHOST，不保留 libpq 独立的 PGHOSTADDR，连接目标与 TLS 主机名均跟随 SQLx。
+        let host = if let Some(socket) = options.get_socket() {
+            socket.to_str().context("数据库 socket 路径不是 UTF-8")?
+        } else {
+            options.get_host()
+        };
+        let username = options.get_username();
+        if host.is_empty() || username.is_empty() || username.chars().any(char::is_control) {
+            return Err(invalid());
         }
+        variables.push(("PGHOST", host.to_owned()));
+        variables.push(("PGUSER", username.to_owned()));
         let passfile = match password {
-            Some(password) if !target.username.is_empty() => {
-                Some(Passfile::create(&target.database, &target.username, &password)?)
-            }
-            Some(_) => anyhow::bail!("提供口令时连接参数必须包含数据库账号"),
+            Some(password) => Some(Passfile::create(database, username, &password)?),
             None => None,
         };
         Ok(Self { variables, passfile })
