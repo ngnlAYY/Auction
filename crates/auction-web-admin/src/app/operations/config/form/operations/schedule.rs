@@ -32,7 +32,7 @@ pub(super) fn ScheduleFields(
     }
 }
 
-/// 赛季早鸟期：窗口内替代常规周场、使用单独品质并在赛季前暂停收件。
+/// 赛季早鸟期：赛季前场次与窗口内场次替代重叠的常规周场、使用单独品质并在赛季前暂停收件。
 #[component]
 fn EarlyBirdFields(
     form: Signal<RuntimeConfigForm>,
@@ -53,6 +53,8 @@ fn EarlyBirdFields(
                 TimeField { form, disabled, path: "operations.schedule.early_bird.open_time", label: t!("admin-runtime-op-open-time"), on_dirty }
                 NumberField { form, disabled, path: "operations.schedule.early_bird.preview_lead_minutes", label: t!("admin-runtime-op-early-bird-preview-lead"), minimum: "120", maximum: "10080", on_dirty }
                 NumberField { form, disabled, path: "operations.schedule.early_bird.live_minutes", label: t!("admin-runtime-op-early-bird-live-minutes"), minimum: "1", maximum: "10080", on_dirty }
+                SwitchField { form, disabled, path: "operations.schedule.early_bird.pre_season_session", label: t!("admin-runtime-op-early-bird-pre-season"), on_dirty }
+                NumberField { form, disabled, path: "operations.schedule.early_bird.pre_season_days_before", label: t!("admin-runtime-op-early-bird-pre-season-days"), minimum: "1", maximum: "31", on_dirty }
                 ListField { form, disabled, path: "operations.schedule.early_bird.qualities", label: t!("admin-runtime-op-early-bird-qualities"), on_dirty }
                 SwitchField { form, disabled, path: "operations.schedule.early_bird.pause_intake_before_season", label: t!("admin-runtime-op-early-bird-pause-intake"), on_dirty }
             }

@@ -1,4 +1,5 @@
 //! 赛季早鸟期表单字段。旧 runtime 文档可省略整个区块：未改动时不写入，保持文件与命令账本指纹；
+//! 服务端对取默认值的赛季前场次字段不做序列化，区块内缺省的字段同样按默认值展示。
 //! 字段默认值与服务端 `AuctionEarlyBirdConfig::default()` 一致，完整规则仍由服务端校验。
 
 use serde_json::{Map, Number, Value, json};
@@ -25,6 +26,7 @@ pub(super) const NUMBER_FIELDS: &[&str] = &[
     "operations.schedule.early_bird.window_days",
     "operations.schedule.early_bird.preview_lead_minutes",
     "operations.schedule.early_bird.live_minutes",
+    "operations.schedule.early_bird.pre_season_days_before",
 ];
 
 /// 与服务端默认值一致的完整区块。
@@ -40,6 +42,8 @@ pub(super) fn default_block() -> Value {
         "open_time": "18:00",
         "preview_lead_minutes": 120,
         "live_minutes": 1440,
+        "pre_season_session": true,
+        "pre_season_days_before": 3,
         "qualities": [],
         "pause_intake_before_season": true
     })
@@ -55,28 +59,26 @@ pub(super) fn field(path: &str) -> Option<&str> {
     path.strip_prefix(ROOT)?.strip_prefix('.')
 }
 
-/// 把区块（缺省时为默认区块）投影为输入框文本；列表按行展示。
+/// 把区块（缺省时为默认区块）投影为输入框文本；列表按行展示，区块内缺省的字段取默认值。
 pub(super) fn inputs(document: &Value) -> Result<Vec<(&'static str, String)>, ()> {
-    let defaults;
-    let source = match block(document) {
-        Some(source) => source,
-        None => {
-            defaults = default_block();
-            &defaults
-        }
+    let defaults = default_block();
+    let source = block(document);
+    let value = |path: &str| {
+        let name = field(path)?;
+        source.and_then(|source| source.get(name)).or_else(|| defaults.get(name))
     };
     let mut inputs = Vec::new();
     for path in TEXT_FIELDS {
-        let value = source.get(field(path).ok_or(())?).and_then(Value::as_str).ok_or(())?;
+        let value = value(path).and_then(Value::as_str).ok_or(())?;
         inputs.push((*path, value.to_owned()));
     }
     for path in LIST_FIELDS {
-        let values = source.get(field(path).ok_or(())?).and_then(Value::as_array).ok_or(())?;
+        let values = value(path).and_then(Value::as_array).ok_or(())?;
         let lines = values.iter().map(Value::as_str).collect::<Option<Vec<_>>>().ok_or(())?;
         inputs.push((*path, lines.join("\n")));
     }
     for path in NUMBER_LIST_FIELDS {
-        let values = source.get(field(path).ok_or(())?).and_then(Value::as_array).ok_or(())?;
+        let values = value(path).and_then(Value::as_array).ok_or(())?;
         let lines = values
             .iter()
             .map(|value| value.as_u64().map(|number| number.to_string()))
@@ -85,23 +87,19 @@ pub(super) fn inputs(document: &Value) -> Result<Vec<(&'static str, String)>, ()
         inputs.push((*path, lines.join("\n")));
     }
     for path in NUMBER_FIELDS {
-        let value = source.get(field(path).ok_or(())?).and_then(Value::as_u64).ok_or(())?;
+        let value = value(path).and_then(Value::as_u64).ok_or(())?;
         inputs.push((*path, value.to_string()));
     }
     Ok(inputs)
 }
 
-/// 开关字段在区块缺省时读取默认值，避免把默认开启的暂停收件显示为关闭。
+/// 开关字段在区块或字段缺省时读取默认值，避免把默认开启的暂停收件、赛季前场次显示为关闭。
 pub(super) fn boolean(document: &Value, path: &str) -> Option<bool> {
     let name = field(path)?;
-    match block(document) {
-        Some(source) => source.get(name)?.as_bool(),
-        None => match name {
-            "enabled" => Some(false),
-            "pause_intake_before_season" => Some(true),
-            _ => None,
-        },
-    }
+    block(document)
+        .and_then(|source| source.get(name))
+        .and_then(Value::as_bool)
+        .or_else(|| default_block().get(name).and_then(Value::as_bool))
 }
 
 /// 确保文档存在早鸟区块；缺省时写入默认区块后再由调用方覆盖具体字段。

@@ -18,7 +18,7 @@ pub struct AuctionScheduleSource {
     pub early_bird: Option<AuctionEarlyBirdSlot>,
 }
 
-/// 赛季早鸟场次身份：赛季开始的本地日期与配置中的 1 起始场次序号。
+/// 赛季早鸟场次身份：赛季开始的本地日期与场次序号（0 为赛季前场次，1 起为窗口内场次）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuctionEarlyBirdSlot {

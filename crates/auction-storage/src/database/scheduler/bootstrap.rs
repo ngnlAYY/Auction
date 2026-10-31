@@ -360,7 +360,7 @@ pub(super) fn snapshot_postgres(
     })
 }
 
-/// 早鸟时段键形状：`early-bird:YYYY-MM-DD:N`，N 为 1–99；与数据库 CHECK 一致。
+/// 早鸟时段键形状：`early-bird:YYYY-MM-DD:N`，N 为 0（赛季前场次）或 1–99；与数据库 CHECK 一致。
 pub(super) fn valid_slot_key(value: &str) -> bool {
     let Some(rest) = value.strip_prefix("early-bird:") else {
         return false;
@@ -370,7 +370,7 @@ pub(super) fn valid_slot_key(value: &str) -> bool {
     };
     chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok()
         && date.len() == 10
-        && auction_domain::valid_positive_decimal(session, 2)
+        && (session == "0" || auction_domain::valid_positive_decimal(session, 2))
 }
 
 /// 早鸟轮次在命令结果与审计元数据中追加时段键；常规周保持原有字段集合。
