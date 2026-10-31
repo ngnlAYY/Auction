@@ -143,11 +143,6 @@ pub(crate) fn AuctionBoard() -> Element {
                 AuctionData {
                     auction: auction.clone(),
                     historical,
-                    authoritative: if historical {
-                        *historical_current.state().read() == UseResourceState::Ready
-                    } else {
-                        *current_auction.state().read() == UseResourceState::Ready
-                    },
                     boot_prerequisites_ready,
                 }
             }

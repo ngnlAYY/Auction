@@ -34,7 +34,6 @@ struct CatalogSnapshot {
 pub(crate) fn AuctionData(
     auction: CurrentAuction,
     historical: bool,
-    authoritative: bool,
     boot_prerequisites_ready: bool,
 ) -> Element {
     // 开场检查只在 effect 中读取共享秒针；倒计时由叶子组件订阅，目录不随每秒重渲染。
@@ -307,8 +306,9 @@ pub(crate) fn AuctionData(
                     page_total: page.total,
                     page_size,
                     has_more,
-                    can_bid: authoritative
-                        && *lots.state().read() == UseResourceState::Ready
+                    // 可出价只看当前展示的已对齐快照：后台重读（定时轮询、竞价失效）期间保留旧值，
+                    // 按钮不随请求往返消失再出现；上下文切换或阶段不一致时快照不对齐，仍失败关闭。
+                    can_bid: ready_snapshot.is_some()
                         && is_live_presentation
                         && auction.bidding_open,
                     allow_slow: auction.status == "live",

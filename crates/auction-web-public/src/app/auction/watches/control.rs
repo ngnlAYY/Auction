@@ -27,14 +27,19 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
     }
 
     let authoritative = context.authoritative(&lot_id);
-    let watched = authoritative.map(|(watched, _)| watched).unwrap_or_else(|| {
+    let pending = context.commands.read().get(&lot_id).cloned();
+    // 成功提交后等待重读期间显示提交的目标状态，避免标签先回落到旧值再翻转。
+    let settled = pending
+        .as_ref()
+        .filter(|pending| pending.awaiting_refresh.is_some())
+        .map(|pending| pending.payload.watched);
+    let watched = settled.or(authoritative.map(|(watched, _)| watched)).unwrap_or_else(|| {
         context
             .cached
             .read()
             .as_ref()
             .is_some_and(|page| page.get(&lot_id).is_some_and(|(watched, _)| *watched))
     });
-    let pending = context.commands.read().get(&lot_id).cloned();
     let busy = pending.as_ref().is_some_and(|pending| pending.busy);
     let error = pending.as_ref().and_then(|pending| pending.error.as_ref());
     let uncertain = pending.as_ref().is_some_and(|pending| pending.uncertain);

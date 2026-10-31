@@ -141,8 +141,8 @@ fn ValidLotDetail(lot_id: String) -> Element {
                     LiveLotDetailView {
                         auction_id: page.auction_id.clone(),
                         auction_status: page.auction_status.clone(),
-                        bidding_open: page.bidding_open
-                            && *detail.state().read() == UseResourceState::Ready,
+                        // 重读期间沿用同一 lot 的上一份权威详情，避免竞价通知让操作按钮闪烁。
+                        bidding_open: page.bidding_open,
                         lot: lot.clone(),
                     }
                 }

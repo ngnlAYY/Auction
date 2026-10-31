@@ -22,6 +22,8 @@ struct WatchCommand {
     // 同一命令的未知结果累计保留；后续前置拒绝不能证明早先请求未提交。
     uncertain: bool,
     error: Option<CommandError>,
+    /// 成功后等待的整场重读修订号；读到包含本次结果的集合前锁住该 lot，不用旧版本发起 CAS。
+    awaiting_refresh: Option<u64>,
 }
 
 #[derive(Clone, Copy)]
@@ -49,7 +51,6 @@ struct WatchContext {
     user_id: Option<String>,
     auction_id: String,
     session: PublicSessionResource,
-    refresh: Signal<u64>,
     revision: Signal<u64>,
     resource: Resource<LoadedWatches>,
     cached: Signal<Option<Rc<WatchSnapshot>>>,
@@ -76,7 +77,7 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
     let mut cached = use_signal(|| {
         user_id.as_deref().and_then(|user| cache::load(user, &auction_id)).map(watch_snapshot)
     });
-    let commands = use_context::<Signal<BTreeMap<String, WatchCommand>>>();
+    let mut commands = use_context::<Signal<BTreeMap<String, WatchCommand>>>();
     // 只跟随可读身份的变化：会话故障恢复后立即补读，同账号续期不重启整场请求。
     let readable = use_memo({
         let user_id = user_id.clone();
@@ -118,16 +119,35 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
             }
         }
     });
-    let context = WatchContext {
-        user_id,
-        auction_id,
-        session,
-        refresh,
-        revision,
-        resource,
-        cached,
-        commands,
-    };
+    // 成功命令要等包含其结果的整场重读成功后才解锁对应 lot；只处理本场条目。
+    let settled_auction_id = auction_id.clone();
+    use_effect(move || {
+        let Some(loaded_refresh) = resource
+            .read()
+            .as_ref()
+            .filter(|loaded| matches!(&loaded.result, Ok(Some(_))))
+            .map(|loaded| loaded.revision.0)
+        else {
+            return;
+        };
+        let settled: Vec<String> = commands
+            .read()
+            .iter()
+            .filter(|(_, command)| {
+                command.auction_id == settled_auction_id
+                    && command.awaiting_refresh.is_some_and(|target| target <= loaded_refresh)
+            })
+            .map(|(lot_id, _)| lot_id.clone())
+            .collect();
+        if !settled.is_empty() {
+            let mut commands = commands.write();
+            for lot_id in settled {
+                commands.remove(&lot_id);
+            }
+        }
+    });
+    let context =
+        WatchContext { user_id, auction_id, session, revision, resource, cached, commands };
     use_context_provider(|| context.clone());
     let authenticated = context.identity_matches();
     let ready = context.ready();
@@ -169,17 +189,17 @@ impl WatchContext {
         self.user_id.is_some() && current_user(&self.session.read()) == self.user_id.as_deref()
     }
 
+    /// 本作用域最近一次成功的服务器集合可用；全局定时或竞价触发的后台重读期间沿用它，
+    /// 按钮不随请求往返闪烁。本地失效（重试、手动刷新）仍须等重读完成。
     fn ready(&self) -> bool {
         self.identity_matches()
-            && *self.session.state().read() == UseResourceState::Ready
-            && *self.resource.state().read() == UseResourceState::Ready
             && self.resource.read().as_ref().is_some_and(|loaded| {
-                loaded.revision == ((self.refresh)(), (self.revision)())
-                    && matches!(&loaded.result, Ok(Some(_)))
+                loaded.revision.1 == (self.revision)() && matches!(&loaded.result, Ok(Some(_)))
             })
     }
 
-    /// 只有完整且当前的服务器集合才产生 CAS 版本；缓存绝不进入此分支。
+    /// 只有服务器集合才产生 CAS 版本，缓存绝不进入此分支；刚提交成功的 lot 由命令条目单独锁住，
+    /// 其他 lot 的版本在后台重读期间不变，过期时由服务端 409 失败关闭。
     fn authoritative(&self, lot_id: &str) -> Option<(bool, i64)> {
         if !self.ready() {
             return None;
