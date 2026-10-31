@@ -177,6 +177,9 @@ pub struct AuctionPreviewSuccessorPlan {
     pub preview_due_at: DateTime<Utc>,
     pub open_due_at: DateTime<Utc>,
     pub scheduled_end_at: DateTime<Utc>,
+    /// 新草稿最早接收装备的时刻；早鸟窗口内场次为赛季开始，其余为 `None`。
+    /// 由冻结的排期来源与日历确定性派生，随拍卖冻结，不参与创建请求摘要。
+    pub intake_opens_at: Option<DateTime<Utc>>,
 }
 
 /// Final phase 中单个活动代理的幂等子命令与纯领域竞价计划。

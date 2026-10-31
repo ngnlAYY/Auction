@@ -24,9 +24,9 @@ pub(super) async fn insert_successor_postgres(
                  scheduled_open_at, default_start_price, soft_close_window_seconds,
                  soft_close_extension_seconds, cancel_cutoff_seconds,
                  proxy_slow_interval_seconds, policy_snapshot, predecessor_auction_id,
-                 created_at, updated_at)
+                 intake_opens_at, created_at, updated_at)
              SELECT $1, current.world_id, $2, $3, 'draft', $4, $5,
-                    $6, $7, $8, $9, $10, $11, current.id, $12, $12
+                    $6, $7, $8, $9, $10, $11, current.id, $15, $12, $12
              FROM public.auctions AS current
              WHERE current.id = $13 AND current.status = $14
              RETURNING world_id, state_version"#,
@@ -45,6 +45,8 @@ pub(super) async fn insert_successor_postgres(
         .bind(auction.updated_at)
         .bind(auction.id.as_uuid())
         .bind(current_status)
+        // 早鸟窗口内场次在赛季开始前拒收装备；收件、Admin 录入与重挂都在锁内核对该时刻。
+        .bind(successor.intake_opens_at)
         .fetch_optional(&mut **transaction)
         .await
         .map_err(map_sql_error)?

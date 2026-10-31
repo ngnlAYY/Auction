@@ -136,6 +136,9 @@ pub enum CompetitionTransactionError {
     Conflict,
     #[error("当前世界没有可接收拍品的草稿场次")]
     AdminIntakeUnavailable,
+    /// 收件目标在赛季开始前拒收装备：赛季前最后一场开拍后，旧赛季装备不能进入新赛季场次。
+    #[error("赛季开始前已停止接收装备")]
+    IntakeClosed,
     #[error("Admin 录入卖家当前处于黑名单")]
     AdminIntakeSellerBlacklisted,
     #[error("Admin 录入装备已经存在")]

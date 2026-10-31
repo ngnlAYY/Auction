@@ -108,6 +108,7 @@ pub(super) fn map_competition_error(
         | auction_application::CompetitionTransactionError::BidderIneligible
         | auction_application::CompetitionTransactionError::StaleSlowProxy
         | auction_application::CompetitionTransactionError::AdminIntakeUnavailable
+        | auction_application::CompetitionTransactionError::IntakeClosed
         | auction_application::CompetitionTransactionError::AdminIntakeSellerBlacklisted
         | auction_application::CompetitionTransactionError::AdminIntakeEquipmentConflict => {
             SettlementTransactionError::Failed("竞价事务中的管理状态不允许当前结算操作".to_owned())

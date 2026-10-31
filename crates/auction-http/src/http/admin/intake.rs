@@ -220,6 +220,15 @@ fn map_error(error: ApplicationError) -> Response {
             "当前世界没有可接收拍品的草稿场次；请先创建草稿场次",
         )
         .into_response(),
+        // 沿用既有错误码，Admin 端按“无可接收场次”提示；说明文字指出赛季开始前停止收件。
+        ApplicationError::CompetitionTransaction(CompetitionTransactionError::IntakeClosed) => {
+            super::api_error(
+                StatusCode::CONFLICT,
+                "auction_intake_unavailable",
+                "赛季开始前已停止接收装备；新赛季开始后再录入",
+            )
+            .into_response()
+        }
         ApplicationError::CompetitionTransaction(
             CompetitionTransactionError::AdminIntakeSellerBlacklisted,
         ) => super::api_error(

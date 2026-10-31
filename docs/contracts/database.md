@@ -28,7 +28,7 @@
 
 | 表 | 内容 |
 | --- | --- |
-| `auctions` | 场次：世界、期号、状态、冻结的规则与结算策略快照、计划/有效截止、`state_version`。身份字段（世界、期号等）由触发器禁止修改 |
+| `auctions` | 场次：世界、期号、状态、冻结的规则与结算策略快照、计划/有效截止、`state_version`、早鸟窗口内场次的最早收件时刻 `intake_opens_at`（赛季开始，也是旧赛季装备不能重列的边界）。身份字段（世界、期号等）由触发器禁止修改 |
 | `lots` | lot：装备、编号、状态（pending/live/sold/unsold/withdrawn）、起拍价、当前价、领先者、有效截止、慢速代理到期、`state_version` |
 | `equipment` | 装备公开属性（世界内按外部装备 ID 唯一） |
 | `equipment_secrets` | 加密保存的装备 key（`equipment_data_key` 信封） |

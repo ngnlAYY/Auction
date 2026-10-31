@@ -691,6 +691,7 @@ admin-mail-reason-price-missing = The explicit pricing instructions do not cover
 admin-mail-reason-price-duplicate = The same attachment has more than one start-price instruction
 admin-mail-reason-price-identity = The equipment reference in the pricing instruction does not match the attachment
 admin-mail-reason-price-attachment = The equipment named in the pricing instruction is not attached
+admin-mail-reason-season-intake-closed = Intake is closed before the season starts: the final auction before the reset has opened, so the whole mail was returned
 admin-mail-category-configuration = Equipment-reader configuration or request context is invalid
 admin-mail-category-credential-unavailable = No usable game credential was available for this world
 admin-mail-category-session-expired = The remote game session was reported as expired

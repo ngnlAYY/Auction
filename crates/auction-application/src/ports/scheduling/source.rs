@@ -27,6 +27,11 @@ pub struct AuctionEarlyBirdSlot {
 }
 
 impl AuctionEarlyBirdSlot {
+    /// 是否为赛季前场次（序号 0）；它冻结 24 小时付款期限的恢复策略。
+    pub fn is_pre_season(&self) -> bool {
+        self.session == 0
+    }
+
     /// 轮次唯一键与稳定 UUID 的身份片段，格式 `early-bird:YYYY-MM-DD:N`。
     pub fn key(&self) -> String {
         format!("early-bird:{}:{}", self.season.format("%Y-%m-%d"), self.session)

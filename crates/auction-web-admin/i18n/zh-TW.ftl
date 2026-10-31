@@ -750,6 +750,7 @@ admin-mail-reason-price-missing = 明確定價指令未涵蓋所需附件
 admin-mail-reason-price-duplicate = 同一附件被重複指定起拍價
 admin-mail-reason-price-identity = 定價指令中的裝備身分與實際附件不一致
 admin-mail-reason-price-attachment = 定價指令引用的裝備不在附件中
+admin-mail-reason-season-intake-closed = 賽季開始前停止收件：換季前最後一場已開拍，整封退回
 admin-mail-category-configuration = 裝備讀取設定或請求內容無效
 admin-mail-category-credential-unavailable = 目前世界沒有可用的遊戲憑證
 admin-mail-category-session-expired = 遠端回報遊戲登入狀態已失效

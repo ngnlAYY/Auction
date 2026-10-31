@@ -2,7 +2,7 @@
 //! 只做纯计算，不访问数据库或读取进程配置；common.toml 与 Admin runtime 共用同一 DTO 和校验，
 //! 避免两处维护不同的时序规则。
 
-use auction_domain::{DomainError, valid_text};
+use auction_domain::{DomainError, RECOVERY_V2_PAYMENT_TIMEOUT, valid_text};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, Timelike, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,8 @@ pub struct AuctionEarlyBirdConfig {
     #[serde(skip_serializing_if = "is_true")]
     pub pre_season_session: bool,
     /// 赛季前场次在赛季开始日前第几天开拍（1-31），默认 3；钟点、预览提前量与竞价时长沿用
-    /// `open_time`、`preview_lead_minutes`、`live_minutes`，且须在赛季开始日本地 00:00 前计划结束。
+    /// `open_time`、`preview_lead_minutes`、`live_minutes`。该场冻结 24 小时付款期限，计划结束后的
+    /// 付款截止须早于赛季开始日本地 00:00。
     #[serde(skip_serializing_if = "is_default_pre_season_days_before")]
     pub pre_season_days_before: u32,
     /// 窗口内收到的投稿接受的品质；空数组表示不限品质，默认空。
@@ -155,8 +156,9 @@ impl AuctionEarlyBirdConfig {
         // 赛季前场次相对赛季开始的预览偏移（负数）；未安排时覆盖期从赛季开始起算。
         let pre_season_preview = if self.pre_season_session {
             let open = -i64::from(self.pre_season_days_before) * MINUTES_PER_DAY + open_minute;
-            // 赛季开始日当天异世界关服换季，赛季前场次必须在当天本地 00:00 前计划结束。
-            if open + live > 0 {
+            // 赛季开始日当天异世界关服换季：计划结束后再过 24 小时付款期限，仍须早于当天本地 00:00，
+            // 让付款与交付赶在装备清空前完成。
+            if open + live + RECOVERY_V2_PAYMENT_TIMEOUT.num_minutes() > 0 {
                 return Err("pre_season_days_before");
             }
             open - lead - start_minute
@@ -259,6 +261,18 @@ impl AuctionEarlyBirdCalendar {
         let local_week =
             open_date - Duration::days(i64::from(open_date.weekday().num_days_from_monday()));
         Ok(AuctionScheduleSlot { source, times, local_week })
+    }
+
+    /// 场次冻结的最早收件时刻：窗口内场次在赛季开始前不接收任何装备（赛季前最后一场开拍后
+    /// 即建立首场草稿，旧赛季装备不能借此进入新赛季）；赛季前场次返回 `None`。
+    pub fn intake_opens_at(
+        &self,
+        slot: AuctionEarlyBirdSlot,
+    ) -> Result<Option<DateTime<Utc>>, DomainError> {
+        if slot.is_pre_season() {
+            return Ok(None);
+        }
+        Ok(Some(self.season(slot.season)?.window_start))
     }
 
     /// 返回早鸟场次所属赛季。

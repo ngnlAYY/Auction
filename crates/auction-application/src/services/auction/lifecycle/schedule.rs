@@ -18,14 +18,28 @@ pub(super) fn successor_plan(
     policy.validate()?;
     let next = next_slot(context, calendar, now)?;
     let NextSlot { local_week, source: schedule_source, times } = next;
+    let early_bird_slot = schedule_source.as_ref().and_then(|source| source.early_bird);
+    // 赛季前场次冻结 24 小时付款期限的 v2 恢复策略；其余场次沿用模板。
+    let pre_season_policy;
+    let policy = if early_bird_slot.is_some_and(|slot| slot.is_pre_season()) {
+        pre_season_policy = policy.for_pre_season();
+        &pre_season_policy
+    } else {
+        policy
+    };
+    // 窗口内早鸟场次在赛季开始前拒收装备；日历缺失时来源不会带早鸟身份。
+    let intake_opens_at = match (
+        early_bird_slot,
+        calendar.and_then(|calendar| calendar.early_bird_for(&context.world_id)),
+    ) {
+        (Some(slot), Some(early_bird)) => early_bird.intake_opens_at(slot)?,
+        _ => None,
+    };
     let sequence =
         context.sequence.checked_add(1).ok_or_else(|| lifecycle_state("下一期拍卖序号溢出"))?;
     let local_week_text = local_week.format("%Y-%m-%d").to_string();
     // 常规周继续以 world/local_week 派生身份；早鸟场次以时段键派生，允许同周多场。
-    let identity = schedule_source
-        .as_ref()
-        .and_then(|source| source.early_bird)
-        .map_or_else(|| local_week_text.clone(), |slot| slot.key());
+    let identity = early_bird_slot.map_or_else(|| local_week_text.clone(), |slot| slot.key());
     let round_id = schedule_id("round", &context.world_id, &identity);
     let auction_id = AuctionId::from_uuid(schedule_id("auction", &context.world_id, &identity));
     let create_command_id =
@@ -72,6 +86,7 @@ pub(super) fn successor_plan(
         preview_due_at: times.preview_due_at,
         open_due_at: times.open_due_at,
         scheduled_end_at: times.scheduled_end_at,
+        intake_opens_at,
     })
 }
 

@@ -27,11 +27,17 @@ pub const DEFAULT_COD_RETURN_LIMIT: u32 = 3;
 /// COD 退回次数的最大可配置上限。
 pub const MAX_COD_RETURN_LIMIT: u32 = 10;
 
+/// 恢复策略 v1 的付款期限：七天。
+const RECOVERY_V1_PAYMENT_TIMEOUT: Duration = Duration::days(7);
+/// 恢复策略 v2 的付款期限：24 小时，供赛季前场次在 isekai 关服换季前完成付款与交付。
+pub const RECOVERY_V2_PAYMENT_TIMEOUT: Duration = Duration::hours(24);
+
 fn default_cod_return_limit() -> u32 {
     DEFAULT_COD_RETURN_LIMIT
 }
 
-/// 随拍卖策略一起冻结的恢复参数。
+/// 随拍卖策略一起冻结的恢复参数。版本决定付款期限：v1 为七天，v2 为 24 小时；
+/// 两者的提醒规则相同（remind_v1，到期提醒一次）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryPolicy {
     pub version: u32,
@@ -48,7 +54,7 @@ impl Default for RecoveryPolicy {
         Self {
             version: 1,
             mode: RecoveryMode::RemindV1,
-            payment_timeout: Duration::days(7),
+            payment_timeout: RECOVERY_V1_PAYMENT_TIMEOUT,
             reminder_limit: 1,
             cod_return_limit: DEFAULT_COD_RETURN_LIMIT,
         }
@@ -56,11 +62,21 @@ impl Default for RecoveryPolicy {
 }
 
 impl RecoveryPolicy {
-    /// 严格校验七天、单次提醒与可配置的 COD 退回上限。
+    /// 赛季前场次使用的 v2 策略：付款期限改为 24 小时，保留模板的 COD 退回上限。
+    /// 改变付款截止的计算结果必须以新版本表达，不能把 v1 的七天改写成其他值。
+    pub fn pre_season(self) -> Self {
+        Self { version: 2, payment_timeout: RECOVERY_V2_PAYMENT_TIMEOUT, ..self }
+    }
+
+    /// 严格校验版本与付款期限的对应关系、单次提醒与可配置的 COD 退回上限。
     pub fn validate(self) -> Result<(), DomainError> {
-        if self.version != 1
-            || self.mode != RecoveryMode::RemindV1
-            || self.payment_timeout != Duration::days(7)
+        let payment_timeout = match self.version {
+            1 => RECOVERY_V1_PAYMENT_TIMEOUT,
+            2 => RECOVERY_V2_PAYMENT_TIMEOUT,
+            _ => return Err(DomainError::InvalidSettlementPolicy("恢复策略版本或参数未知")),
+        };
+        if self.mode != RecoveryMode::RemindV1
+            || self.payment_timeout != payment_timeout
             || self.reminder_limit != 1
             || !(1..=MAX_COD_RETURN_LIMIT).contains(&self.cod_return_limit)
         {
