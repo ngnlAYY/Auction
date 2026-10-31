@@ -142,5 +142,3 @@ just verify     # bash ci/checks/check.sh all fmt check feature lint wasm
 3. 接入存储/外部适配、HTTP、前端与 Worker；不复制状态机，不绕过 owner。
 4. 同步契约、模块 README 与运维文档，执行适用的静态门禁。
 5. 用户明确要求后才进行隔离环境、真实外部服务或上线前的行为验证，并记录范围与限制。
-
-源码定位时，仓库存在 `.codegraph/` 则优先使用 `codegraph_explore` 或 `codegraph explore`。每次交付说明涉及的模块、外部契约与实际验证范围，不以“能编译”宣称验收。
