@@ -99,6 +99,7 @@ impl WatchCommandOwner {
                 busy: true,
                 uncertain,
                 error: None,
+                awaiting_refresh: None,
             },
         );
         let mut context = self.clone();
@@ -109,9 +110,20 @@ impl WatchCommandOwner {
             }
             match result {
                 Ok(_) => {
-                    context.commands.write().remove(&lot_id);
                     // 命令重放可能返回旧版本；始终重读集合，绝不直接覆盖权威状态。
+                    // 重读完成前保留条目锁住该 lot，界面先显示本次提交的目标状态。
                     let next = context.refresh.peek().saturating_add(1);
+                    context.commands.write().insert(
+                        lot_id,
+                        WatchCommand {
+                            auction_id,
+                            payload,
+                            busy: false,
+                            uncertain: false,
+                            error: None,
+                            awaiting_refresh: Some(next),
+                        },
+                    );
                     context.refresh.set(next);
                 }
                 Err(error) => {
@@ -125,6 +137,7 @@ impl WatchCommandOwner {
                             busy: false,
                             uncertain,
                             error: Some(error),
+                            awaiting_refresh: None,
                         },
                     );
                 }
