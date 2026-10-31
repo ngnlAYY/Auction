@@ -1,10 +1,12 @@
 # 论坛同步与回帖竞价
 
-[文档导航](docs/README.md) · [业务规则](docs/business-rules.md) · [邮件流程](docs/guide/mail-flows.md) · [玩家指南](docs/guide/player-guide.md)
+[文档导航](../README.md) · [业务规则](../business-rules.md) · [邮件流程](mail-flows.md) · [玩家指南](player-guide.md)
 
 Worker 可以把每场拍卖同步到 E-Hentai 论坛（`forums.e-hentai.org`），并把玩家在主题下的回帖导入为出价。论坛只是外部投影与输入渠道：拍卖状态、价格与资格永远以数据库为准，论坛帖子内容由权威快照渲染。
 
 ## 启用
+
+论坛同步默认关闭；启用示例：
 
 ```toml
 [worker.forum]
@@ -16,11 +18,11 @@ isekai_board_id = 90             # isekai 世界拍卖板块
 poll_interval_seconds = 300
 ```
 
-需要论坛 Cookie：数据库中的 active 论坛凭据（需要 `credential_data_key`，在 Admin “Cookie 池”或 `auction-cli credential import --kind forum` 录入），或敏感配置 `ehentai_cookie`。同一时刻只有一个 Worker 持有论坛 Cookie 的运行时所有权。完整参数见 `ops/config/examples/worker.toml` 的 `[worker.forum]`。
+需要 `equipment_data_key` 解析目录装备链接，并提供论坛 Cookie。配置完整的 `credential_data_key` 时只读取数据库中适用 scope 的 active 论坛凭据（在 Admin “Cookie 池”或 `auction-cli credential import --kind forum` 录入），不回退配置 Cookie；未配置该密钥时使用敏感配置 `ehentai_cookie`。同一时刻只有一个 Worker 持有论坛 Cookie 的运行时所有权。完整参数见 `ops/config/examples/worker.toml` 的 `[worker.forum]`。
 
 ## 主题结构
 
-拍卖**首次进入 Live** 时建立同步任务（Worker 重启不会为历史拍卖补帖）。Worker 在对应板块发布主题，并依次建立固定楼层：
+Worker 为扫描时处于 Live 且没有同步记录的场次建立任务；重启不会为已经进入 Final 或终态、且从未建立任务的历史场次补帖，既有任务则继续按持久状态恢复。Worker 在对应板块发布主题，并依次建立固定楼层：
 
 1. **首帖**：场次标题、截止时间（配置 `public_base_url` 时嵌入本站倒计时 SVG 图片 `/api/v1/auctions/{id}/countdown/{timer}`，否则以时间列表兜底）、本站链接与目录第一页。
 2. **目录续页**：lot 较多时的后续目录页，按连续楼层排列。
@@ -36,18 +38,20 @@ poll_interval_seconds = 300
 
 ```text
 <lot 代码> [<lot 代码> …] <金额>
-<lot 代码> <金额> notify [mm|pm]
-<lot 代码> notify [mm|pm]
+<lot 代码> [<lot 代码> …] <金额> notify [mm|pm]
+<lot 代码> [<lot 代码> …] notify [mm|pm]
 ```
 
 - **lot 代码**：三字母分类前缀 + 编号，例如 `One01`、`Two03`、`Sta02`、`Shd01`、`Clo05`、`Lig02`、`Hea01`（分别对应单手、双手、法杖、盾牌、布甲、轻甲、重甲）。大小写与 `-` 不敏感，可加方括号，如 `[one-01]`。
-- **金额**：纯数字或带 `k`/`m` 后缀（如 `250k`、`1.5m`），必须是 1,000 Credits 的整数倍。
-- **notify**：请求发送通知。`mm` 为 MoogleMail；论坛私信通知目前不可用，写 `pm` 只会在系统日志中提示；不写模式表示两者都要，实际只发送 MoogleMail。
+- **金额**：纯数字或带 `k`/`m` 后缀（如 `250k`、`1.5m`），必须是正的 1,000 Credits 整数倍且不超过 1,000,000,000；不支持千位逗号。
+- **notify**：请求发送本条命令对应的拍品通知。`mm` 为 MoogleMail，需要同时启用邮件能力；论坛回帖的 `notify pm` 目前不可用，只会在系统日志中提示。不写模式表示两者都要，实际至多发送 MoogleMail。该语法不等同于网站装备标记的持续超价提醒，后者可使用独立 PM 队列（见下文）。
 - 一行中出现多余的词、未知的 lot 代码或非法金额时，该行被拒绝并记录在系统日志中。
-- **代理命令不支持**：以 `proxy` 开头的行被静默忽略，代理只能在网站设置。`start`、`cancel` 等管理命令也不被接受。
-- **编辑过的帖子不会产生任何出价**——要修改出价请发新回帖。
+- **代理命令不支持**：`<lot 代码> proxy …` 行被静默忽略，代理只能在网站设置。行首直接写 `proxy` 不符合语法；`<lot 代码> start`、`<lot 代码> cancel` 虽可解析，但导入时跳过，不执行管理动作。
+- **编辑过的帖子不会产生新命令，也不会撤销此前已接受的出价**——修改时请发新回帖，并先核对原结果。
 
 回帖出价与网站出价走同一套竞价规则（最低加价、软截止、领先者不能自加价等），并带稳定的命令 ID（由主题、帖子、行号、lot 代码派生），重复扫描不会重复出价。
+
+同一行列出多个 lot 时，语法先整行校验，再分别提交每件的出价；某件因最低价、截止或资格被拒绝，不会回滚该行其他已接受的出价。
 
 ## 身份
 
@@ -57,7 +61,7 @@ poll_interval_seconds = 300
 
 ## 写入安全
 
-- 发布或编辑帖子的远端结果无法确认时（超时、响应异常），Worker 不会盲目重发：先按精确标题只读查找主题；仍无法证明时停在 `write_authorization_required`，需运维用 `auction-cli forum authorize-retry` 显式授权下一次创建尝试（见 [auction-cli](apps/auction-cli/README.md#论坛写入恢复)）。
+- 创建主题结果无法确认时（超时、响应异常），Worker 先按精确标题只读查找主题；仍无法证明时停在 `write_authorization_required`，需运维用 `auction-cli forum authorize-retry` 显式授权下一次创建或固定楼层补写尝试（见 [auction-cli](../../apps/auction-cli/README.md#论坛写入恢复)）。已有固定帖的未知编辑结果则按原主题/帖子身份与预期正文只读核对；不能仅凭帖子存在就认定新正文已写入，也不会盲目重发。
 - 主题扫描页数有上限（`maximum_topic_pages`，默认 10），超过时明确失败而不是跳过出价。
 - `test_board_mode` 只用于测试板块，生产必须为 false。
 

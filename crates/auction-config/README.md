@@ -1,6 +1,6 @@
 # auction-config
 
-[文档导航](docs/README.md) · [配置参考](ops/config/README.md) · [示例配置](ops/config/examples)
+[文档导航](../../docs/README.md) · [配置参考](../../ops/config/README.md) · [示例配置](../../ops/config/examples)
 
 TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文件、Admin runtime 文件与维护凭据，以及首次部署的配置生成。所有配置错误都在进程启动前失败，错误只给出路径与字段提示，绝不回显秘密值。
 
@@ -8,7 +8,7 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 
 | 接口 | 用途 |
 | --- | --- |
-| `AppConfig::load(role)` | 读取 `AUCTION_CONFIG_FILE`；未设置时尝试 `ops/config/<role>.toml`（相对当前目录）；都不存在时使用内置默认值 |
+| `AppConfig::load(role)` | 读取 `AUCTION_CONFIG_FILE`；未设置时尝试运行目录下的 `ops/config/<role>.toml`（不是仓库模板）；不存在时使用内置默认值。Admin 的 `auction-config/admin.toml` 发现与首次设置由 Admin 装配根另行处理 |
 | `AppConfig::load_from_path(role, path)` | 从显式路径加载（`auction-server`、`auction-cli` 使用） |
 | `AppConfig` 字段 | 已合并、已校验的非敏感配置：listener、metrics、tracing、realtime、cache、auction、worker、http_security、session、路径、`admin_runtime`、装备规则与 `bot_players` 投影 |
 | `AppConfig` getter | 敏感值只经显式 getter 暴露：`database_url()`、`redis_url()`、`admin_actor()/admin_secret()`、三组数据密钥、Cookie、`tracing_headers()`；`Debug` 输出已脱敏 |
@@ -24,14 +24,14 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 1. 固定角色文件的绝对路径，按角色解析（Public 的 `[session]` 只接受 `max_public_sessions`，旧的时长字段被拒绝）。
 2. 以角色文件所在目录解析 `common_file`、`secrets_file`、`runtime_config_file`、`worker_config_file`（仅 Admin）等相对路径，读取公共文件（闭集，拒绝角色字段混入）。
 3. 读取敏感文件：`[database]` 五字段或兼容的 `database_url`（二者互斥）、Redis URL、Cookie、OTLP headers、Admin 凭据、三组数据密钥（标识与材料必须成对）。
-4. 读取并完整校验 runtime 文件：Admin/Worker 应用 `[operations.*]` 中 `managed = true` 的分组覆盖；Worker 另外投影邮件世界、过滤、模板与论坛标色；Public 与 Worker 只保留 `bot_players` 名单与装备规则投影。
+4. 读取并完整校验 runtime 文件：Admin/Worker 应用 `[operations.*]` 中 `managed = true` 的分组覆盖；Worker 再投影邮件世界、过滤、模板与论坛标色。Public 只保留 `bot_players` 名单与装备规则；Worker 投影完成后也不保留完整 Admin runtime 文档。
 5. 解析 listener（Admin runtime 的 listener、安全、会话、metrics、tracing 优先于角色文件），按角色校验全部区块与跨字段约束（预算关系、超时与租约、启用条件等）。
 
-文件读取统一限 4 MiB，在同一文件描述符上检查普通文件类型（FIFO 不会阻塞）。runtime 文件额外要求父目录非符号链接且禁止 group/other 写入、文件精确 `0640`；维护凭据要求规范化绝对路径、单硬链接、当前账号所有且仅 owner 可读。
+角色、公共与普通敏感文件统一限 4 MiB，在同一文件描述符上检查普通文件类型（FIFO 不会阻塞）。runtime 文件也限 4 MiB，额外要求父目录非符号链接且禁止 group/other 写入、文件精确 `0640`；维护凭据限 64 KiB，要求规范化绝对路径、单硬链接、当前账号所有且仅 owner 可读。
 
 ## 主要约束
 
-- **数据库**：连接必须显式给出主机（或 socket）、库名与非零端口；省略端口固定为 5432，不继承 `PGPORT` 等环境变量。账号口令按原文填写，loader 负责 URL 编码。
+- **数据库**：`[database]` 五字段要求显式主机、非零端口、账号、口令与库名，账号口令按原文填写，由 loader 负责 URL 编码；兼容的 `database_url` 必须显式指定主机（或 socket）与库名，省略端口时固定为 5432，不继承 `PGPORT` 等环境变量。
 - **Redis**：`cache.backend = "redis"` 时必须提供 `redis_url`。
 - **tracing**：启用时须有 endpoint 与非零采样率；进程环境中存在 `OTEL_EXPORTER_OTLP_HEADERS` 或 `OTEL_EXPORTER_OTLP_TRACES_HEADERS` 时拒绝启动，导出头只能来自敏感文件。
 - **Worker**：启用 MoogleMail 时必须有凭据来源（数据库凭据所需的 `credential_data_key`、`.keyenv` 或 `mooglemail_cookie`）以及 `user_login_data_key`；启用论坛时必须有 `ehentai_cookie` 或 `credential_data_key`；启用运维告警时须配置收件人、告警 world 必须在已启用的 MoogleMail 世界内，且 Worker 运行时要求 MoogleMail 投递可用。

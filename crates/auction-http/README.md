@@ -1,6 +1,6 @@
 # auction-http
 
-[文档导航](docs/README.md) · [HTTP 路由](docs/contracts/routes.md) · [实时事件](docs/contracts/realtime.md)
+[文档导航](../../docs/README.md) · [HTTP 路由](../../docs/contracts/routes.md) · [实时事件](../../docs/contracts/realtime.md)
 
 Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会话 Cookie 与 CSRF、origin allowlist、进程内速率限制、浏览器安全头、DTO 映射、WebSocket 实时 Hub、内嵌浏览器资源与 SPA 路由、健康探针与 Prometheus 端点，以及 TCP/Unix listener 的连接服务。业务能力全部通过应用端口注入（`PublicApiState`、`AdminApiState`），端口缺失时对应接口返回明确的能力不可用错误，不伪造空数据。
 
@@ -18,12 +18,12 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 
 ## 请求边界
 
-- **请求 ID**：读取或生成 `x-request-id`，错误响应回带。
+- **请求 ID**：读取或生成 `x-request-id` 并始终在响应头回传，非法或重复输入拒绝；常规 handler 错误的 JSON `request_id` 字段可能为 null。
 - **客户端地址**：只有来自 `trusted_proxy_cidrs` 的 TCP 对端或启用 `trusted_unix_proxy` 的 Unix 上游，才采信 `X-Forwarded-For`；限流按真实客户端地址计数。
 - **origin**：启用 allowlist 时，状态变更请求必须携带精确匹配的 `Origin`；WebSocket 升级必须且只能携带一个可信 Origin。
 - **限流**：固定窗口、按地址计数，登录、状态变更与 realtime 连接尝试使用独立账本；超限返回 `429`、`code = "rate_limited"` 与 `Retry-After` 头。
 - **超时**：普通请求与 WebSocket 升级前握手受 `request_timeout_seconds` 限制，不限制升级后的连接寿命。
-- **严格解析**：旧 v1 写接口拒绝未知字段与非 JSON 内容类型；部分旧路由对 HTTP 方法严格匹配。
+- **严格解析**：JSON 写接口拒绝未知字段与非 JSON 内容类型；空 PUT 会话同步、Basic 登录等遵循各自协议。Public/Admin 业务路由严格匹配方法，JSON GET 不隐式接受 HEAD，倒计时显式支持 GET/HEAD；健康、指标与静态资源由各自 owner 定义方法语义。
 - **安全头**：`X-Frame-Options: DENY`、内容类型嗅探禁止、来源策略与 CSP（为 Dioxus WASM 放行 `wasm-unsafe-eval` 与内联样式）；响应缓存策略按路由冻结（`no-store`/`no-cache`）。
 
 ## 会话
@@ -37,7 +37,7 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 
 ## 浏览器资源
 
-`web-embed` 构建中，资源来自 `dx bundle` 产物；API-only 构建使用固定的空资源目录。只有 [`crates/auction-http/src/assets/routes.rs`](crates/auction-http/src/assets/routes.rs) 中登记的浏览器路径（以及带参数的 `/lots/{id}`、`/auctions/{id}` 等）返回 `index.html`，未知路径为 404；资源缺失时页面路由返回 503 与提示文本。新增或删除页面时须同时修改前端 `Route` 枚举、该清单与[路由文档](docs/contracts/routes.md)。
+`web-embed` 构建中，资源来自 `dx bundle` 产物；API-only 构建使用固定的空资源目录。除精确存在的静态资源外，只有 [`crates/auction-http/src/assets/routes.rs`](src/assets/routes.rs) 中登记的浏览器路径（Public 参数路径 `/lots/{lot_code}`、Admin 参数路径 `/auctions/{auction_id}/lots`）返回 `index.html`，未知路径为 404；资源缺失时页面路由返回 503 与提示文本。新增或删除页面时须同时修改前端 `Route` 枚举、该清单与[路由文档](../../docs/contracts/routes.md)。
 
 ## 健康与指标
 

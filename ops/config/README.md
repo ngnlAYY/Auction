@@ -1,8 +1,8 @@
 # 配置参考
 
-[文档导航](docs/README.md) · [运维手册](ops/README.md) · [示例](ops/config/examples) · [auction-config](crates/auction-config/README.md)
+[文档导航](../../docs/README.md) · [运维手册](../README.md) · [示例](examples) · [auction-config](../../crates/auction-config/README.md)
 
-所有运行配置都是 TOML。字段的权威说明是 [`ops/config/examples/`](ops/config/examples) 中每个字段上方的中文注释（标明“可选/必填”、默认值与范围）；本页说明文件结构、加载规则与各区块的用途。
+所有运行配置都是 TOML。字段的权威说明是 [`ops/config/examples/`](examples) 中每个字段上方的中文注释（标明“可选/必填”、默认值与范围）；本页说明文件结构、加载规则与各区块的用途。
 
 ## 文件结构
 
@@ -26,9 +26,9 @@
 
 ### 加载规则
 
-- 角色文件路径：环境变量 `AUCTION_CONFIG_FILE`；未设置时依次尝试当前目录下的 `ops/config/<角色>.toml`（Admin 另会尝试 `auction-config/admin.toml`）。`auction-server` 与 `auction-cli` 使用 `--config-dir` 指定目录，不读取该环境变量。
+- 角色文件路径：Public/Worker 的 `AppConfig::load` 先读取 `AUCTION_CONFIG_FILE`，未设置时尝试当前目录下的 `ops/config/<角色>.toml`，不存在则构造内置默认配置；正式装配仍要求数据库等依赖齐备。Admin 入口另会尝试 `auction-config/admin.toml`，仍不存在才进入首次设置。这些是运行时发现路径，仓库模板位于 `ops/config/examples/`。`auction-server` 与 `auction-cli` 使用 `--config-dir` 指定目录，不用该环境变量选择配置；`auction-server` 检测到它会拒绝启动。
 - 除 `AUCTION_CONFIG_FILE` 外不存在任何环境变量覆盖；任何字段都只能写在文件中。
-- 所有错误都在启动前失败，错误信息只包含路径与字段，绝不回显秘密值。文件大小上限 4 MiB。
+- 所有配置解析与校验错误都在启动前失败，错误不回显秘密值。角色、公共、普通敏感与 runtime 文件大小上限为 4 MiB；独立维护凭据另限 64 KiB。
 - 三个角色必须引用同一个 `common_file`，并且同时引用同一个 `runtime_config_file`（或全部省略）；三角色数据库目标必须相同。`auction-cli config check` 会联合检查这些一致性。
 
 ## 敏感文件（`secrets.toml`）
@@ -46,7 +46,7 @@
 
 三组数据密钥都是 32 字节随机数的标准 Base64（`openssl rand -base64 32`），标识与材料必须成对，三组不能复用。密钥缺失时对应能力不可用（接口返回能力不可用，Worker 相关功能拒绝启用）。
 
-文件必须只有 owner 可访问（0600）。建库/重建用的维护凭据是另一个只含 `[database]` 的独立文件（模板 `ops/config/examples/secrets/postgres-rebuild.toml`，`name` 固定为 `postgres`），只供 `auction-cli db create/rebuild` 使用，常驻进程不引用。
+文件必须只有 owner 可访问（建议 0600）。建库/重建用的维护凭据是另一份独立文件（模板 `ops/config/examples/secrets/postgres-rebuild.toml`），使用 `[database]` 五字段或与之互斥的兼容 `database_url`，目标库固定为 `postgres`；只供 `auction-cli db create/rebuild` 使用，常驻进程不引用。`admin_actor`、密钥、Cookie 与 OTLP headers 等根字段须写在 `[database]` 表之前，避免被 TOML 解释为数据库字段。
 
 ## common.toml
 
@@ -61,7 +61,7 @@
 | `[auction.settlement]` | 新场次的结算策略：版本与模式（`hold_curve_v2` 或 `legacy_zero_v0`）、补偿池、isekai 载体 Credits、领先时长曲线锚点 |
 | `[auction.settlement.recovery]` | 恢复策略：付款期限、提醒次数、COD 退回上限 |
 
-`[auction.*]` 的取值在**创建场次时冻结**，修改只影响之后创建的场次。业务含义见[业务规则](docs/business-rules.md)与[结算与履约](docs/guide/settlement.md)。
+经济、结算与恢复策略在**创建场次时冻结**，修改模板只影响之后创建的场次；排期控制后续计划与早鸟收件窗口，不改写已创建场次的时间与策略快照。业务含义见[业务规则](../../docs/business-rules.md)与[结算与履约](../../docs/guide/settlement.md)。
 
 ## 角色文件
 
@@ -95,7 +95,7 @@ Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、metrics �
 | `[[worker.mooglemail.additional_worlds]]` | 额外世界的邮箱（独立游标、租约与白名单） |
 | `[worker.operations_alert]` | 运维告警：开关、收件人与世界、扫描间隔、批次窗口、冷却、各类积压阈值 |
 
-所有循环必须满足“单项超时 < 租约”等预算关系，loader 会校验。启用外部功能时的依赖条件：
+各循环的预算关系按其工作方式分别校验，例如 fulfillment/recovery 的单项超时必须小于租约，delivery 依靠续租允许发送请求跨越初始租约，MoogleMail 则另校验读取、处理与整批预算。不能把所有循环都按“请求超时 < 租约”配置。启用外部功能时的依赖条件：
 
 - MoogleMail：需要凭据来源（数据库凭据 + `credential_data_key`，或 `keyenv_file`，或 `mooglemail_cookie`）以及 `user_login_data_key`。
 - 论坛：需要 `ehentai_cookie` 或 `credential_data_key`。
@@ -128,8 +128,8 @@ runtime 文件让运营人员在 Admin “参数配置”页修改部分参数�
 | `schedule` | 周排期与早鸟期（`[auction.schedule]`） | 重启 Admin 与 Worker |
 | `forum` | 论坛同步参数 | 重启 Worker |
 | `alerts` | 运维告警参数 | 重启 Worker |
-| `worker`（含 `delivery`/`fulfillment`/`recovery`） | Worker 各循环的调度边界 | 重启 Worker |
-| `mail`（含 `send_intervals`） | 邮件轮询计划与请求边界、发送间隔（不包含全局开关、凭据与邮箱身份） | 重启 Worker |
+| `worker`（含 `delivery`/`fulfillment`/`recovery`） | Worker 各循环的调度边界；不覆盖 `worker.fulfillment.evidence_poll_seconds` | 重启 Worker |
+| `mail`（含 `send_intervals`） | 邮件轮询计划与请求边界、发送间隔；不包含全局开关、endpoint、凭据、邮箱身份与诊断归档路径 | 重启 Worker |
 
 启用接管时，`config check` 还会核对 Admin 与 Worker 得到的有效模板与排期一致。
 
@@ -153,7 +153,7 @@ runtime 文件让运营人员在 Admin “参数配置”页修改部分参数�
 | runtime 文件 | 恰好 0640；父目录不能被 group/other 写入、不能是符号链接 |
 | 维护凭据 | 规范化绝对路径、非符号链接、单硬链接、归当前账号且仅 owner 可读 |
 
-`auction-cli config check` 在非严格模式下把权限问题列为警告，`--strict` 视为错误；生产部署必须通过严格检查。
+`auction-cli config check` 在非严格模式下把普通文件和敏感文件的权限问题列为警告，`--strict` 视为错误；runtime 文件及父目录的权限由 loader 强制检查，维护凭据也有独立的强制检查，不受此开关放宽。生产部署必须通过严格检查。
 
 ## 示例与首次设置
 

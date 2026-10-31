@@ -9,7 +9,7 @@
 - HentaiVerse 装备拍卖系统：Public 竞价站点、Admin 管理后台，以及处理生命周期、结算履约、MoogleMail、论坛与告警的 Worker。
 - Public、Admin、Worker 独立部署；`auction-cli` 负责配置检查、部署编排、迁移、备份恢复与业务运维；可选的 `auction-server` 在单主机上监管三个角色子进程。
 - 原生程序仅支持 Linux x86_64（装配根在其他平台编译期报错）；浏览器包编译到 `wasm32-unknown-unknown`。通用制品不使用 `target-cpu=native`。
-- 全部代码为 Rust；浏览器是 Dioxus CSR，WASM 由后端内嵌。PostgreSQL 18 是唯一数据库后端，Redis 只作可丢弃缓存。
+- 应用代码为 Rust；CI 与发布工具使用 Shell 等脚本。浏览器是 Dioxus CSR，WASM 由后端内嵌。PostgreSQL 18 是唯一数据库后端，Redis 只作可丢弃缓存。
 - 普通启动从不隐式迁移。迁移只经 `auction-cli db migrate`、`auction-cli service start/restart`（停机门禁后）与合并部署首次初始化（网页明确确认后的专用空库）执行。
 
 ## 仓库结构
@@ -81,7 +81,7 @@
 
 - 注释与文档使用中文；协议、API、SQL 关键字与必须匹配的字符串保留原文。
 - 模块用 `//!` 说明职责，公共类型、函数与端口用 `///`；复杂分支用 `//` 解释原因、不变量、锁/幂等、兼容、安全或性能取舍。不写复述代码的注释，删除过期注释。
-- 文档中的链接与仓库路径一律使用以仓库根为起点的相对路径（如 `docs/contracts/routes.md`、`crates/auction-http/src/assets/routes.rs`），不使用 `./`、`../` 或以当前文件为起点的写法。每项事实只在一个 owner 文档中详细描述，其他地方摘要并链接。
+- Markdown 链接目标按当前文档所在目录计算相对路径，必要时使用 `../`，确保 GitHub 与本地渲染可直接点击；同页锚点使用 `#标题锚点`。正文与链接显示文字中的仓库文件路径仍以仓库根为起点（如 `docs/contracts/routes.md`、`crates/auction-http/src/assets/routes.rs`）。每项事实只在一个 owner 文档中详细描述，其他地方摘要并链接。
 - 路由、状态码、字段、事件、配置、迁移或制品变化时，同步对应的 README 与契约文档（[路由](docs/contracts/routes.md)、[实时事件](docs/contracts/realtime.md)、[数据库](docs/contracts/database.md)、[配置](ops/config/README.md)）。文档没有自动链接检查，移动或重命名时人工核对引用与锚点。
 
 ## 代码风格

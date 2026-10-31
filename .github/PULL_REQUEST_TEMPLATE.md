@@ -4,10 +4,10 @@
 
 ## 契约影响
 
-- [ ] 路由 / 事件 / DTO / 配置字段 / 迁移：无变化，或已同步对应文档（routes、realtime、database、ops/config）
+- [ ] 路由 / 事件 / DTO / 配置字段 / 迁移：无变化，或已同步对应文档（`docs/contracts/routes.md`、`docs/contracts/realtime.md`、`docs/contracts/database.md`、`ops/config/README.md`）
 - [ ] 领域不变量（幂等、锁、审计、事件、结算、外部写入）：未放宽，或已在说明中写明
 - [ ] 新迁移只追加，并已同步保留政策与数据库契约
-- [ ] 文档使用中文；链接与仓库路径以仓库根为起点（不写 `./`、`../`）；移动或重命名文件时已核对引用与锚点
+- [ ] 文档使用中文；Markdown 链接相对当前文档目录，正文仓库路径以仓库根为起点；移动或重命名文件时已核对引用与锚点
 
 ## 验证
 

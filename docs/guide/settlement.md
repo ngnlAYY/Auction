@@ -1,6 +1,6 @@
 # 结算与履约
 
-[文档导航](docs/README.md) · [业务规则](docs/business-rules.md) · [邮件流程](docs/guide/mail-flows.md) · [auction-domain](crates/auction-domain/README.md)
+[文档导航](../README.md) · [业务规则](../business-rules.md) · [邮件流程](mail-flows.md) · [auction-domain](../../crates/auction-domain/README.md)
 
 一场拍卖从“所有 lot 截止”到“钱货两清”经过四个阶段：**结算计算**（一次事务算出所有金额与义务）→ **履约**（把义务变成邮件并取得证据）→ **投递**（outbox 发信）→ **恢复**（付款超时、拒收等异常）。每一步都持久化、可重放，外部结果不确定时停下转人工，绝不猜测。
 
@@ -10,7 +10,7 @@ Worker 认领处于 Final 且所有 lot 有效截止都已过去的场次，在�
 
 ### 金额（HoldCurveV2，新场次默认）
 
-1. **领先比例** `hold_ppm`：获胜者在“开拍 → 计划结束”时长中累计领先的比例（百万分比，最高 1,000,000）。
+1. **领先比例** `hold_ppm`：获胜者累计领先时长除以“计划开拍 → 计划结束”时长（百万分比，最高 1,000,000）。累计领先从竞价事实计算到 lot 的有效截止，包含软截止延长期；分母仍使用计划时窗。
 2. **调整比例** `adjustment_ppm`：在锚点曲线上线性插值。默认锚点：
 
    | 领先比例 | 0% | 5% | 10% | 15% | 20% | 25% | 30% | 40% | ≥50% |
@@ -21,14 +21,14 @@ Worker 认领处于 Final 且所有 lot 有效截止都已过去的场次，在�
 4. **补偿分配**：可用额 = 期初补偿池余额 + 本场附加费合计；每件的补偿 = `floor(可用额 × 本件需求 / 总需求)`，不超过本件需求，尾差留在池中。
 5. 结果：**卖方所得 = 成交价**；**买方实付 = 成交价 + 附加费 − 补偿**；期末池 = 可用额 − 已分配补偿。恒等式 `买方实付 + 补偿 = 卖方所得 + 税费` 在每件上成立。
 
-流拍 lot 的所有金额为 0。历史场次若冻结的是 `HoldCurveV1`（只读）或 `LegacyZeroV0`（无曲线、无补偿池），始终按原策略读取与重放，不补算差额。补偿池每个世界独立，公开站点“补偿池”页展示各场流水。
+流拍 lot 的所有金额为 0。历史场次若冻结的是 `HoldCurveV1`（历史卖方让利算法，仅供既有快照继续结算、读取与重放）或 `LegacyZeroV0`（无曲线、无补偿池），始终按原策略计算，不补算差额。补偿池每个世界独立，公开站点“补偿池”页展示各场流水。
 
 ### 义务
 
 | 义务 | 来源世界 | 执行方式 | 前置 |
 | --- | --- | --- | --- |
 | `WinnerEquipmentCod` | main | 在 main 把装备以 COD（金额 = 买方实付）寄给买方 | — |
-| `WinnerPaymentCarrierCod` | isekai | 在 main 寄 1 Credit 载体并以 COD 收取买方实付 | — |
+| `WinnerPaymentCarrierCod` | isekai | 在 main 寄 1 Credit 载体，COD 面额 = 买方实付 +1 Credit，买方净支付仍为实付金额 | — |
 | `WinnerEquipmentHandoff` | isekai | 在 isekai 把装备寄给买方 | 载体 COD 已收款 |
 | `SellerPayout` | 两者 | 在 main 向卖方支付成交价 | 买方已付款 |
 | `BuyerRefund` | 两者 | 需要时向买方退款（`Contingent`，默认不执行） | 恢复流程激活 |
@@ -49,9 +49,9 @@ Worker 的“结算履约”循环领取可执行义务，按 `pending → prepa
 
 满足（`satisfied`）后解除依赖它的义务（例如买方付款后 `SellerPayout` 变为 ready）。证据不一致或结果未知时转 `manual_reconcile`，在 Admin“结算报表”中处理。
 
-结算相关邮件主题带义务 ID，例如 `auction equipment delivery [<义务 UUID>]`、`auction payment request [<义务 UUID>]`。买方拒收或 COD 过期被退回时，退件回到 Bot 收件箱，邮件处理器据主题识别为对应义务的退件证据（见[邮件流程](docs/guide/mail-flows.md#结算退件)）。
+结算相关邮件主题带义务 ID，例如 `auction equipment delivery [<义务 UUID>]`、`auction payment request [<义务 UUID>]`。买方拒收或 COD 过期被退回时，退件回到 Bot 收件箱，邮件处理器据主题识别为对应义务的退件证据（见[邮件流程](mail-flows.md#结算退件)）。
 
-COD 邮件正文包含价格明细（成交价、附加费或补偿、应付金额）。各类邮件正文模板可在 `[worker.mooglemail.mail_templates]`（或 runtime 文件）中定制。
+新建的 main 装备 COD 邮件正文包含价格明细（成交价、附加费或补偿、应付金额）；isekai 载体付款邮件展示含载体 Credit 的 COD 面额。各类邮件正文模板可在 `[worker.mooglemail.mail_templates]`（或 runtime 文件）中定制，已冻结的旧投递保留原载荷。
 
 ## 3. 投递（outbox）
 
@@ -65,7 +65,7 @@ prepared → pending → claimed → sending → succeeded
 
 - 领取带租约与 fencing 版本；进入 `sending` 前写入发送尝试摘要，发送后把远端邮件 ID 绑定到投递（唯一）。
 - 同类邮件按 `[worker.mooglemail.send_intervals]` 控制发送起点的最小间隔；同一账号的远端写入串行。
-- **结果未知时不重发**：进程崩溃、超时或远端响应异常导致无法确认是否寄出时，投递转为 `manual_reconcile`，邮箱维护循环会尝试在 Sent 中精确找回该邮件；仍无法证明时由 Admin 在“投递队列”中人工对账（确认成功、确认失败或授权重试）。
+- **结果未知时不自动重发**：发送阶段的超时、崩溃或远端响应异常无法证明寄出结果时，投递转为 `manual_reconcile`；过期的 `sending` 租约也先转入该状态。邮箱维护循环会尝试用原发送尝试冻结的完整期望在 Sent 中精确找回邮件。找不到不代表未发送；Admin 可记录失败或明确授权重试，但主动 Send 不允许仅凭手填远端引用执行“确认成功”，成功须由匹配的 Sent 证据恢复。
 - 新的可发送投递写入时触发 `pg_notify`，投递循环立即被唤醒。
 
 ## 4. 恢复（付款超时与拒收）
@@ -74,13 +74,13 @@ prepared → pending → claimed → sending → succeeded
 
 | 规则 | 默认 |
 | --- | --- |
-| 付款期限 | 7 天 |
+| 付款期限 | 从结算建立恢复记录起算 7 天；main COD 收回重寄后重新起算 |
 | 逾期提醒 | 1 次（邮件提醒买方） |
 | COD 退回上限 `cod_return_limit` | 3（可配 1–10） |
 
-- 付款前 COD 被退回：第 1 至 `limit − 1` 次退回时，系统收回装备并重新寄出原 COD（金额与装备不变）；第 `limit` 次退回时，为卖家建立撤拍退回义务把装备寄回，原 COD 与卖方货款按失败收口，并拉黑买家。每封退件只计数一次。
-- 恢复阶段：`awaiting_payment` → `payment_overdue` →（退件时）`reclaiming` → `relist_pending` / `refunding` → `completed`。
-- Admin 可在结算报表中以版本约束确认恢复结果（`reclaimed`、`cancelled`、`equipment_recovered`），系统据此重新上架装备或执行退款；所有确认都带原因并写入审计。
+- main 装备 COD 在付款前退回：第 1 至 `limit − 1` 次退回时，系统取得收回装备的动作证明后重新寄出原 COD（金额与装备不变）；第 `limit` 次退回时，为卖家建立撤拍退回义务，原 COD 与卖方货款按失败收口，并拉黑买家。每封退件只计数一次。
+- isekai 载体 COD 退回时先收回载体；已经付款但交付装备被退回时先取得装备收回证明。Admin 分别通过 `cancelled` 或 `equipment_recovered` 确认后重列到该世界的草稿接收场次，后者还激活买方退款；没有草稿目标时保持 `relist_pending`。main 的 `reclaimed` 也只在对应收回证明与义务状态允许时可确认。
+- 恢复并非单一路径：未付时为 `awaiting_payment`，到期转 `payment_overdue` 并创建一次提醒；main 收款后可完成，isekai 收款后先进入 `delivering_equipment`，交付满足后完成。退件可转 `reclaiming`，经收回、确认后进入 `relist_pending`、`refunding` 或 `completed`。Admin 确认必须携带原因、稳定命令 ID 与当前状态版本，所有动作写入审计。
 
 ## Bot 内部履约与资金账户
 
@@ -94,7 +94,7 @@ prepared → pending → claimed → sending → succeeded
 | `SellerPayout` | 卖方货款留存（RetainSeller） | 否 | 是 |
 | `BuyerRefund` | 退款（Refund） | 是 | 是 |
 
-“收件人是 Bot”通过 MoogleMail 联合身份证明（Bot 账号 UID）判定。内部动作只选择原义务的执行方式，不重算冻结金额，也不创建新的责任；装备持有在付款前与 isekai 交接时各自重新证明。
+内部身份分支使用当前远端账号 UID、玩家名称与联合证据，并核对配置的 Bot 名称；配置名称不能替代最终的同账号证明。联合证据需要 MoogleMail 与论坛目标资料读取能力，当前 Worker 仅在启用论坛时装配后者。内部动作只选择原义务的执行方式，不重算冻结金额，也不创建新的责任；装备持有在付款前与 isekai 交接时各自重新证明。
 
 ### 资金账户
 
@@ -107,7 +107,7 @@ prepared → pending → claimed → sending → succeeded
 
 账户未建立、未对账、已冻结或资金不足时，相关内部履约保持等待，不会退化为外部邮件。
 
-建立与对账步骤（必须先停止 Worker，命令会临时取得与 Worker 相同的凭据所有权）：
+建立与对账步骤（只读 `preview` 不访问远端；执行开户或对账写入前必须停止 Worker，写入命令会取得与 Worker 相同的邮件/论坛凭据所有权）：
 
 1. `auction-cli funds preview --uid <UID>`：只读查看账户状态、责任投影、阻断项、`preview_digest` 与确认短语模板。
 2. 选择模式：
@@ -115,7 +115,7 @@ prepared → pending → claimed → sending → succeeded
    - 真实现金：`funds reconcile`，声明 `--proprietary-credits`、`--compensation-credits`、`--dedicated-account` 与确认短语。
 3. 输出 `committed` / `replayed` 才算完成；`outcome_unknown` 时用同一命令 ID 与参数重新执行以核对，不要换 ID。
 
-参数细节见 [auction-cli](apps/auction-cli/README.md#bot-资金)。
+参数细节见 [auction-cli](../../apps/auction-cli/README.md#bot-资金)。
 
 ## 运维入口
 

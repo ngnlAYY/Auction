@@ -1,16 +1,16 @@
 # auction-cli
 
-[文档导航](docs/README.md) · [部署运维](ops/README.md) · [配置参考](ops/config/README.md) · [备份与恢复](ops/deploy/RECOVERY.md)
+[文档导航](../../docs/README.md) · [部署运维](../../ops/README.md) · [配置参考](../../ops/config/README.md) · [备份与恢复](../../ops/deploy/RECOVERY.md)
 
 Auction 的运维命令行：配置与部署预检、分体 systemd 部署的顺序启停、数据库迁移/建库/备份恢复/重建，以及凭据、规则、论坛、装备 PM、邮件证据和 Bot 资金等显式运维入口。
 
-它只装配既有的配置 loader、应用端口与存储实现，不绕过领域规则、幂等账本或追加式审计；普通服务启动不会隐式迁移、备份或删库，这些动作只能经本工具显式执行。参数的权威说明是 `auction-cli <命令> --help`。
+它只装配既有的配置 loader、应用端口与存储实现，不绕过领域规则、幂等账本或追加式审计；普通服务启动不会隐式迁移、备份或删库。显式维护使用本工具；合并部署另允许在首次设置网页确认后初始化专用空库。参数的权威说明是 `auction-cli <命令> --help`。
 
 ## 构建
 
 | feature | 作用 |
 | --- | --- |
-| （默认无） | 只有 `config show` 与 `service status/stop` 可用；其余命令明确报错 |
+| （默认无） | 可用 `config show/check` 与 `service status/stop`；数据库、备份、业务命令和 `service start/restart` 明确报错 |
 | `postgres` | 数据库、备份恢复与全部业务运维命令 |
 | `cache-redis` | 隐含 `postgres`；规则导入后失效 Redis 中的 Public 规则缓存 |
 
@@ -18,13 +18,13 @@ Auction 的运维命令行：配置与部署预检、分体 systemd 部署的顺
 cargo build --release -p auction-cli --features postgres,cache-redis
 ```
 
-发布包中的 `bin/auction-cli` 已按上述 feature 构建（见[发布流程](ci/README.md)）。仅支持 Linux x86_64。
+发布包中的 `bin/auction-cli` 已按上述 feature 构建（见[发布流程](../../ci/README.md)）。仅支持 Linux x86_64。
 
 ## 通用约定
 
 - **配置目录**：全局参数 `--config-dir <DIR>`（默认 `/etc/auction`）指向含 `public.toml`、`admin.toml`、`worker.toml` 的目录，分体部署与合并部署（`auction-server` 的 `--config-dir`）使用同一布局。相对路径按当前目录解析。
 - **数据库来源**：数据库、凭据、邮件与资金命令统一读取 `worker.toml` 及其敏感文件中的 `[database]`；三角色指向同一数据库由 `config check` 保证。连接串、口令、Cookie 与数据密钥不会出现在参数、输出或日志中。
-- **输出**：结构化结果以单个 JSON 文档写入 stdout；进度与诊断写入 stderr，前缀 `[auction-cli]`。脚本应依据退出码与 JSON 判断结果，不要解析错误文本。
+- **输出**：成功的结构化结果以单个 JSON 文档写入 stdout；进度与诊断写入 stderr，进度前缀 `[auction-cli]`，顶层错误前缀 `auction-cli:`。失败可能没有 JSON，或已先输出状态 JSON；脚本应结合退出码判断结果，不要解析错误文本。
 - **文件权限**：进程以 `umask 077` 运行；证据、回执、备份与 manifest 以 `create_new` + `0600` 写入，父目录须为非符号链接、禁止 group/other 写入，已存在的目标一律拒绝覆盖，并在报告成功前同步文件与父目录。
 
 ### 退出码
@@ -49,7 +49,7 @@ cargo build --release -p auction-cli --features postgres,cache-redis
 | `rules` | `import` | 写入 |
 | `forum` | `recovery`、`authorize-retry` | authorize-retry 写入 |
 | `pm` | `list`、`reconcile` | reconcile 写入 |
-| `mail` | `export-evidence`、`inspect-sent` | 只写本地证据文件 |
+| `mail` | `export-evidence`、`inspect-sent` | 导出只读本地归档；Sent 核查还读取数据库与远端邮件，结果写入本地文件 |
 | `funds` | `preview`、`open-record-only`、`reconcile` | 后两者写入 |
 
 ## 配置检查
@@ -65,14 +65,14 @@ auction-cli --config-dir /etc/auction config check --strict
 
 - 三个角色文件、`common_file`、`secrets_file`、`runtime_config_file` 均为非符号链接普通文件；三角色引用同一 `common_file`，并同时引用同一 `runtime_config_file` 或全部省略。
 - 三角色数据库为同一 PostgreSQL 目标（主机/端口/库名，拒绝隐式目标、未知参数与 `options`），`equipment_data_key` 标识与材料一致。
-- Admin 与 Worker 的有效拍卖模板/排期、Worker control socket、`user_login_data_key`、`credential_data_key` 一致；Admin 的 `worker_config_file` 指向本目录的 `worker.toml`。
+- Admin 与 Worker 的有效拍卖模板/排期、Worker control socket、`user_login_data_key`、`credential_data_key` 一致；Admin 若配置 `worker_config_file`，必须指向本目录的 `worker.toml`。
 - 三角色加载到的装备规则与 `bot_players` 名单一致（runtime 文件被并发替换时会失败，稳定后重试）。
 - Public/Admin 监听不使用端口 0、互不重叠，Unix listener 不复用 Worker control socket。
-- 权限：配置目录、角色/公共文件禁止 group/other 写入；敏感文件仅 owner 可访问；runtime 文件为 `0640` 且父目录禁止他人写入。非严格模式只在 JSON 的 `warnings` 中报告，`--strict` 直接失败——生产部署门禁必须使用 `--strict`。
+- 权限：配置目录、角色/公共文件禁止 group/other 写入；敏感文件仅 owner 可访问。这类检查在非严格模式的 JSON `warnings` 中报告，`--strict` 直接失败。runtime 文件必须为 `0640` 且父目录禁止他人写入，否则 loader 即拒绝，非严格模式也无法绕过；生产部署门禁必须使用 `--strict`。
 
 ## 分体部署编排
 
-`service` 只用于分体 systemd 部署（三个角色各自一个 unit）。合并部署（`auction-server`）由 supervisor 自行编排，`service` 发现该配置目录存在 `owner.lock` 时拒绝执行。
+`service` 只用于分体 systemd 部署（三个角色各自一个 unit）。合并部署（`auction-server`）由 supervisor 自行编排；`service start/restart` 发现该配置目录对应的 `owner.lock` 时拒绝执行。`status/stop` 仍查询或停止所指定的分体 unit，不能用于管理 supervisor。
 
 ```bash
 auction-cli --config-dir /etc/auction service status
@@ -86,6 +86,7 @@ auction-cli --config-dir /etc/auction service stop
 | `--systemctl` | `/usr/bin/systemctl` |
 | `--state-dir`（部署控制锁目录） | `/var/lib/auction/deployment` |
 | `--worker-unit` / `--admin-unit` / `--public-unit` | `auction-worker.service` / `auction-admin-api.service` / `auction-public-api.service` |
+| `start/restart --startup-timeout-seconds` | 每角色 30 秒，范围 1–300 |
 
 - **start**：取得部署锁（`<state-dir>/deployment-control.lock`，目录不存在时以 0700 创建）→ `config check --strict` → 核对三个 unit 均已装载、`Environment=AUCTION_CONFIG_FILE` 与 `--config-dir` 中的角色文件是同一文件、Admin runtime 文件与父目录归 Admin unit 的固定 `User` 所有（不接受 `DynamicUser`）→ 三角色全部运行时只按顺序复核 readiness 并返回 `already_running`；部分运行或处于转换状态则拒绝 → 检查 TCP 监听端口可绑定 → 执行迁移 → 按 Worker → Admin → Public 逐个 `systemctl start`，等待 unit 为 active 且应用 readiness 返回 HTTP 200，探测前后 `MainPID` 与 `InvocationID` 不变。任一角色失败时反序停止本次启动的全部 unit；已提交的迁移不会回退。
 - **readiness**：Public/Admin 探测 `GET /health/ready`（TCP 或 Unix socket），Worker 探测 control socket 的 `GET /v1/health/ready`。Worker control 只接受 `allowed_peer_uids/gids` 中的调用者，**以 root 运行 `service` 时须把 `0` 加入 `allowed_peer_uids`**，否则 Worker 永远无法判定就绪；因此 `service start` 也要求启用 `[worker.control]`。
@@ -94,7 +95,7 @@ auction-cli --config-dir /etc/auction service stop
 - **status**：不取锁、不要求严格权限；输出每个 unit 的 `load_state/active_state/sub_state/main_pid` 与 readiness，任一角色未就绪即以 4 退出。配置无法加载时仍报告 systemd 状态，并在 `config_error` 中给出原因。
 - systemctl 调用均有超时（查询 10 秒、启动 90 秒、停止 120 秒）；超时只终止 systemctl 客户端，已提交给 systemd 的 job 可能仍在执行，须重新查看状态。
 
-[`ops/deploy/systemd/auction-stack.service.example`](ops/deploy/systemd/auction-stack.service.example) 把 `service start/stop` 包装为 oneshot unit，用于开机按顺序拉起。
+[`ops/deploy/systemd/auction-stack.service.example`](../../ops/deploy/systemd/auction-stack.service.example) 把 `service start/stop` 包装为 oneshot unit，用于开机按顺序拉起。
 
 ## 停机门禁
 
@@ -125,7 +126,7 @@ auction-cli db migrate
 auction-cli db create --database auction --maintenance-secrets /etc/auction/maintenance/postgres.toml
 ```
 
-首次部署时用独立维护凭据创建应用数据库：`--database` 须与 Worker 配置的库名一致，owner 为 Worker 配置中的数据库账号。维护凭据文件（模板见 `ops/config/examples/secrets/postgres-rebuild.toml`）只含 `[database]`，`name` 固定为 `postgres`，主机与端口须与应用库相同；文件必须是规范化绝对路径、非符号链接、单硬链接、归当前账号所有且仅 owner 可读，父目录禁止 group/other 写入。
+首次部署时用独立维护凭据创建应用数据库：`--database` 须与 Worker 配置的库名一致，owner 为 Worker 配置中的数据库账号。维护凭据文件（模板见 `ops/config/examples/secrets/postgres-rebuild.toml`）使用 `[database]` 五字段，也兼容与之互斥的 `database_url`；维护库名固定为 `postgres`，主机与端口须与应用库相同。文件必须是规范化绝对路径、非符号链接、单硬链接、归当前账号所有且仅 owner 可读，父目录禁止 group/other 写入。
 
 命令取得集群级 advisory lock，要求连接可写主节点；目标不存在时校验维护角色具备 `CREATEDB`（或 superuser）、应用角色存在且可被指派为 owner，然后 `CREATE DATABASE` 并用应用账号回连验证。目标已存在时只校验 owner 与应用连接，返回 `already_exists`。本命令不迁移、不修改已有库，随后需执行 `db migrate`。
 
@@ -139,7 +140,7 @@ auction-cli db inventory --database auction --output /var/backups/auction/invent
 两者都在只读、可重复读事务中执行，`--database` 必须与连接实际的 `current_database()` 一致，完整证据写入 `--output`，stdout 只给摘要。
 
 - `preflight`：报告是否可写主节点、其他会话数、用户对象数、schema 身份与迁移历史；`restore_preflight_passed=true` 只表示“空库、无其他连接、可写主节点”，不代表任何备份可用。
-- `inventory`：读取迁移/schema 身份、public 关系规模与外键、realtime 水位，并对照编译期内嵌的[保留政策](ops/deploy/retention-policy.v1.json)输出各数据族统计与政策 SHA-256。`eligibility_assessed`/`eligibility_authorized` 恒为 false，结果不授权任何归档或删除。政策的 `database_schema_version` 必须等于当前最高迁移版本，新增迁移时须同步审阅该政策。
+- `inventory`：读取迁移/schema 身份、public 关系规模与外键、realtime 水位，并对照编译期内嵌的[保留政策](../../ops/deploy/retention-policy.v1.json)输出各数据族统计与政策 SHA-256。`eligibility_assessed`/`eligibility_authorized` 恒为 false，结果不授权任何归档或删除。政策的 `database_schema_version` 必须等于当前最高迁移版本，新增迁移时须同步审阅该政策。
 
 ### 破坏性重建
 
@@ -178,7 +179,7 @@ auction-cli backup restore --manifest /var/backups/auction/auction-20261030.dump
 - `restore`：通过停机门禁；备份 schema 版本不得高于当前二进制；目标必须是同名空库（零其他会话、可写主节点、无用户对象、无 schema 身份与迁移历史，可先用 `db rebuild --mode empty-for-restore` 准备）。恢复前再次校验恢复点，以 `pg_restore --single-transaction --exit-on-error --no-owner --no-privileges` 执行，完成后核对 schema 身份与迁移版本等于备份版本，再写入 `auction-postgres-restore.v1` 回执。恢复较旧备份后按提示执行 `db migrate`。
 - 恢复不保留对象 owner 与权限（以应用账号为 owner 的空库恢复后即归应用账号所有）。
 
-完整的灾备流程见[备份与恢复手册](ops/deploy/RECOVERY.md)。
+完整的灾备流程见[备份与恢复手册](../../ops/deploy/RECOVERY.md)。
 
 ## 业务运维
 
@@ -241,7 +242,7 @@ auction-cli funds reconcile --uid <UID> --command-id <UUID> --actor ops --expect
   --confirm 'RECONCILE BOT FUNDS <UID> <V> <P> <C> <HEX>'
 ```
 
-Bot 内部履约（买卖双方之一是 Bot 自己时不经邮件外发）需要一个资金账户，见[结算与履约](docs/guide/settlement.md#bot-内部履约与资金账户)。
+Bot 内部履约（买卖双方之一是 Bot 自己时不经邮件外发）需要一个资金账户，见[结算与履约](../../docs/guide/settlement.md#bot-内部履约与资金账户)。
 
 - `preview` 只读数据库，输出账户版本、责任投影、阻断项、`preview_digest`、能否开 record_only 账户，以及两种写入的确认短语模板；不访问远端，不代表任何可用额度。
 - `open-record-only`：全局尚无资金账户时，建立只记账（`record_only`）账户——系统记录结算责任与真实收款，不读取余额、不以 Bot 现金限制个人消费。已有账户不能用此命令切换模式。
