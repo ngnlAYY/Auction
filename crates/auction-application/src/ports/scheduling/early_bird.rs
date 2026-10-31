@@ -1,4 +1,4 @@
-//! 赛季早鸟期配置与日历：窗口、场次时段、常规周场替代及收件品质时间窗。
+//! 赛季早鸟期配置与日历：赛季前场次、窗口、场次时段、常规周场替代及收件品质时间窗。
 //! 只做纯计算，不访问数据库或读取进程配置；common.toml 与 Admin runtime 共用同一 DTO 和校验，
 //! 避免两处维护不同的时序规则。
 
@@ -12,7 +12,7 @@ use super::schedule_source::{
     AuctionEarlyBirdSlot, AuctionScheduleSource, AuctionScheduleTimes, resolve_local,
 };
 
-/// 早鸟窗口与场次日的最大天数。
+/// 早鸟窗口、场次日与赛季前场次提前天数的最大天数。
 pub const MAX_EARLY_BIRD_DAYS: u32 = 31;
 /// 预览提前量下限；与 Worker 开拍前两小时暂停收件邮箱的门禁一致。
 pub const MIN_EARLY_BIRD_PREVIEW_LEAD_MINUTES: u32 = 120;
@@ -20,6 +20,8 @@ pub const MIN_EARLY_BIRD_PREVIEW_LEAD_MINUTES: u32 = 120;
 pub const MAX_EARLY_BIRD_MINUTES: u32 = 7 * 24 * 60;
 
 const MINUTES_PER_DAY: i64 = 24 * 60;
+/// 赛季前场次默认在赛季开始日前第 3 天开拍。
+const DEFAULT_PRE_SEASON_DAYS_BEFORE: u32 = 3;
 
 /// 赛季早鸟期配置；所有字段可省略，未启用时完整校验但不改变排期、后继与收件品质。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +47,15 @@ pub struct AuctionEarlyBirdConfig {
     pub preview_lead_minutes: u32,
     /// 开拍到计划结束的分钟数，默认 1440。
     pub live_minutes: u32,
+    /// 是否在赛季开始日前安排赛季前场次，默认 true。异世界在赛季开始日关服换季，
+    /// 该场是旧赛季关服前的最后一场，与之重叠的常规周场由它替代。
+    /// 默认值不参与序列化，保持升级前 runtime 文件和命令账本的指纹。
+    #[serde(skip_serializing_if = "is_true")]
+    pub pre_season_session: bool,
+    /// 赛季前场次在赛季开始日前第几天开拍（1-31），默认 3；钟点、预览提前量与竞价时长沿用
+    /// `open_time`、`preview_lead_minutes`、`live_minutes`，且须在赛季开始日本地 00:00 前计划结束。
+    #[serde(skip_serializing_if = "is_default_pre_season_days_before")]
+    pub pre_season_days_before: u32,
     /// 窗口内收到的投稿接受的品质；空数组表示不限品质，默认空。
     pub qualities: Vec<String>,
     /// 首场早鸟草稿建立后至赛季开始前是否暂停该世界的收件轮询，默认 true。
@@ -64,6 +75,8 @@ impl Default for AuctionEarlyBirdConfig {
             open_time: "18:00".to_owned(),
             preview_lead_minutes: 120,
             live_minutes: 24 * 60,
+            pre_season_session: true,
+            pre_season_days_before: DEFAULT_PRE_SEASON_DAYS_BEFORE,
             qualities: Vec::new(),
             pause_intake_before_season: true,
         }
@@ -115,6 +128,9 @@ impl AuctionEarlyBirdConfig {
         if !(1..=MAX_EARLY_BIRD_MINUTES).contains(&self.live_minutes) {
             return Err("live_minutes");
         }
+        if !(1..=MAX_EARLY_BIRD_DAYS).contains(&self.pre_season_days_before) {
+            return Err("pre_season_days_before");
+        }
         validate_qualities(&self.qualities).ok_or("qualities")?;
 
         // 时序按本地分钟校验；DST 造成的个别小时偏差由开拍前的同世界竞价门禁兜底。
@@ -136,10 +152,22 @@ impl AuctionEarlyBirdConfig {
         {
             return Err("live_minutes");
         }
+        // 赛季前场次相对赛季开始的预览偏移（负数）；未安排时覆盖期从赛季开始起算。
+        let pre_season_preview = if self.pre_season_session {
+            let open = -i64::from(self.pre_season_days_before) * MINUTES_PER_DAY + open_minute;
+            // 赛季开始日当天异世界关服换季，赛季前场次必须在当天本地 00:00 前计划结束。
+            if open + live > 0 {
+                return Err("pre_season_days_before");
+            }
+            open - lead - start_minute
+        } else {
+            0
+        };
         let last_day = self.session_days[self.session_days.len() - 1];
         let coverage =
             (i64::from(self.window_days) * MINUTES_PER_DAY).max(open_offset(last_day) + live);
-        validate_season_gaps(&season_starts, coverage).ok_or("season_starts")?;
+        validate_season_gaps(&season_starts, coverage - pre_season_preview)
+            .ok_or("season_starts")?;
 
         Ok(AuctionEarlyBirdCalendar {
             timezone_name: self.timezone.clone(),
@@ -152,17 +180,20 @@ impl AuctionEarlyBirdConfig {
             open_time,
             preview_lead: Duration::minutes(lead),
             live: Duration::minutes(live),
+            pre_season_days_before: self.pre_season_session.then_some(self.pre_season_days_before),
             qualities: self.qualities.clone(),
             pause_intake_before_season: self.pause_intake_before_season,
         })
     }
 }
 
-/// 一个赛季的早鸟窗口及其覆盖期（窗口结束与末场计划结束中较晚者）。
+/// 一个赛季的早鸟窗口及其覆盖期：从赛季前场次预览（未安排时为窗口开始）起，
+/// 至窗口结束与末场计划结束中较晚者。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuctionEarlyBirdSeason {
     /// 赛季开始的本地日期，也是早鸟场次身份的一部分。
     pub season: NaiveDate,
+    pub coverage_start: DateTime<Utc>,
     pub window_start: DateTime<Utc>,
     pub window_end: DateTime<Utc>,
     pub coverage_end: DateTime<Utc>,
@@ -181,6 +212,8 @@ pub struct AuctionEarlyBirdCalendar {
     open_time: NaiveTime,
     preview_lead: Duration,
     live: Duration,
+    /// 赛季前场次距赛季开始日的天数；未安排时为 `None`。
+    pre_season_days_before: Option<u32>,
     qualities: Vec<String>,
     pause_intake_before_season: bool,
 }
@@ -201,23 +234,13 @@ impl AuctionEarlyBirdCalendar {
         self.pause_intake_before_season
     }
 
-    /// 按 1 起始序号计算某赛季的早鸟场次时段。
+    /// 计算某赛季的早鸟场次时段：序号 0 为赛季前场次，1 起为窗口内场次。
     pub fn session(
         &self,
         season: NaiveDate,
         session: u32,
     ) -> Result<AuctionScheduleSlot, DomainError> {
-        let index = usize::try_from(session)
-            .ok()
-            .and_then(|session| session.checked_sub(1))
-            .ok_or(DomainError::InvalidSchedule("早鸟场次序号无效"))?;
-        let day = *self
-            .session_days
-            .get(index)
-            .ok_or(DomainError::InvalidSchedule("早鸟场次序号无效"))?;
-        let open_date = season
-            .checked_add_signed(Duration::days(i64::from(day) - 1))
-            .ok_or(DomainError::InvalidSchedule("早鸟场次日期超出范围"))?;
+        let open_date = self.open_date(season, session)?;
         let open_local = open_date.and_time(self.open_time);
         let preview_local = open_local
             .checked_sub_signed(self.preview_lead)
@@ -246,12 +269,13 @@ impl AuctionEarlyBirdCalendar {
         self.season(slot.season)
     }
 
-    /// 某赛季的全部早鸟场次，按开拍顺序排列。
+    /// 某赛季的全部早鸟场次（含赛季前场次），按开拍顺序排列。
     pub fn sessions(
         &self,
         season: &AuctionEarlyBirdSeason,
     ) -> Result<Vec<AuctionScheduleSlot>, DomainError> {
-        (1..=self.session_count()).map(|session| self.session(season.season, session)).collect()
+        let first = if self.pre_season_days_before.is_some() { 0 } else { 1 };
+        (first..=self.session_count()).map(|session| self.session(season.season, session)).collect()
     }
 
     /// `at` 是否位于该世界某赛季的早鸟窗口 `[开始, 开始 + window_days)` 内。
@@ -262,7 +286,7 @@ impl AuctionEarlyBirdCalendar {
                 .any(|season| season.window_start <= at && at < season.window_end)
     }
 
-    /// 常规周时段 `[预览, 计划结束)` 与早鸟覆盖期 `[窗口开始, 覆盖结束)` 重叠时由早鸟场次替代。
+    /// 常规周时段 `[预览, 计划结束)` 与早鸟覆盖期 `[覆盖开始, 覆盖结束)` 重叠时由早鸟场次替代。
     pub fn suppresses(&self, world_id: &str, times: &AuctionScheduleTimes) -> bool {
         self.applies_to(world_id)
             && self.seasons_around(times.preview_due_at).any(|season| overlaps(&season, times))
@@ -329,6 +353,24 @@ impl AuctionEarlyBirdCalendar {
         u32::try_from(self.session_days.len()).unwrap_or(u32::MAX)
     }
 
+    /// 场次开拍的本地日期；序号 0 仅在安排赛季前场次时有效。
+    fn open_date(&self, season: NaiveDate, session: u32) -> Result<NaiveDate, DomainError> {
+        let invalid = DomainError::InvalidSchedule("早鸟场次序号无效");
+        let offset = match session.checked_sub(1) {
+            None => -i64::from(self.pre_season_days_before.ok_or(invalid)?),
+            Some(index) => {
+                let day = usize::try_from(index)
+                    .ok()
+                    .and_then(|index| self.session_days.get(index))
+                    .ok_or(invalid)?;
+                i64::from(*day) - 1
+            }
+        };
+        season
+            .checked_add_signed(Duration::days(offset))
+            .ok_or(DomainError::InvalidSchedule("早鸟场次日期超出范围"))
+    }
+
     fn season(&self, season: NaiveDate) -> Result<AuctionEarlyBirdSeason, DomainError> {
         let start_local = season.and_time(self.season_start);
         let window_start = resolve_local(self.timezone, start_local)?;
@@ -336,7 +378,7 @@ impl AuctionEarlyBirdCalendar {
             .checked_add_signed(Duration::days(i64::from(self.window_days)))
             .ok_or(DomainError::InvalidSchedule("早鸟窗口结束时间超出范围"))?;
         let window_end = resolve_local(self.timezone, end_local)?;
-        // 收件窗口与覆盖期只依赖赛季边界和末场结束时间；某场预览/开拍碰到 DST
+        // 收件窗口与覆盖期只依赖赛季边界、赛季前场次预览和末场结束时间；某场预览/开拍碰到 DST
         // 非法顺序时，session() 仍拒绝物化，但不能把整个赛季误判为普通收件期。
         let last_day =
             self.session_days.last().ok_or(DomainError::InvalidSchedule("早鸟场次为空"))?;
@@ -346,8 +388,21 @@ impl AuctionEarlyBirdCalendar {
             .and_then(|open| open.checked_add_signed(self.live))
             .ok_or(DomainError::InvalidSchedule("早鸟结束时间超出范围"))?;
         let last_end = resolve_local(self.timezone, last_end_local)?;
+        // 覆盖期从赛季前场次预览起算，让与它重叠的常规周场被替代；DST 偏差不得晚于窗口开始。
+        let coverage_start = match self.pre_season_days_before {
+            Some(_) => {
+                let preview_local = self
+                    .open_date(season, 0)?
+                    .and_time(self.open_time)
+                    .checked_sub_signed(self.preview_lead)
+                    .ok_or(DomainError::InvalidSchedule("早鸟预览时间超出范围"))?;
+                resolve_local(self.timezone, preview_local)?.min(window_start)
+            }
+            None => window_start,
+        };
         Ok(AuctionEarlyBirdSeason {
             season,
+            coverage_start,
             window_start,
             window_end,
             coverage_end: window_end.max(last_end),
@@ -371,7 +426,15 @@ impl AuctionEarlyBirdCalendar {
 }
 
 fn overlaps(season: &AuctionEarlyBirdSeason, times: &AuctionScheduleTimes) -> bool {
-    times.preview_due_at < season.coverage_end && season.window_start < times.scheduled_end_at
+    times.preview_due_at < season.coverage_end && season.coverage_start < times.scheduled_end_at
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+fn is_default_pre_season_days_before(value: &u32) -> bool {
+    *value == DEFAULT_PRE_SEASON_DAYS_BEFORE
 }
 
 fn parse_clock(value: &str) -> Option<NaiveTime> {
