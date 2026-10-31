@@ -4,10 +4,13 @@ use super::super::commands::{auction_request_hash, decision, stable_command_id};
 use super::super::pricing::resolve_start_price_plan;
 use super::*;
 use crate::{
-    AdminIntakeError, MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext,
-    MailEquipmentDiagnosticStage, MailEquipmentEvidenceStatus, MailEquipmentObservation,
-    MailEquipmentReadOutcome,
+    AdminIntakeError, CompetitionTransactionError, MailEquipmentDiagnosticCategory,
+    MailEquipmentDiagnosticContext, MailEquipmentDiagnosticStage, MailEquipmentEvidenceStatus,
+    MailEquipmentObservation, MailEquipmentReadOutcome,
 };
+
+/// 收件目标在赛季开始前拒收装备时的退回原因码；回信说明由 MoogleMail 适配器按同一闭集渲染。
+const SEASON_INTAKE_CLOSED: &str = "season_intake_closed";
 
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
 where
@@ -251,7 +254,7 @@ where
         let aggregate_id = mail_auction_aggregate_id(&message.world_id);
         let command_id = stable_command_id(&message, AUCTION_OPERATION);
         let request_hash = auction_request_hash(&message, aggregate_id, &items)?;
-        let result = self
+        let result = match self
             .auctions
             .ingest_mail(MailAuctionIntakeCommand {
                 command_id,
@@ -266,7 +269,25 @@ where
                 items,
                 now: self.clock.now().max(now),
             })
-            .await?;
+            .await
+        {
+            Ok(result) => result,
+            // 赛季前最后一场开拍后至新赛季开始，收件目标拒收装备；整封退回，不收取附件。
+            Err(ApplicationError::CompetitionTransaction(
+                CompetitionTransactionError::IntakeClosed,
+            )) => {
+                return self
+                    .reject_with_return_and_notice(
+                        &message,
+                        attachment_ids,
+                        MailNotificationTemplate::AuctionEquipmentRejected,
+                        "auction_equipment_rejected",
+                        SEASON_INTAKE_CLOSED,
+                    )
+                    .await;
+            }
+            Err(error) => return Err(error),
+        };
         self.finish_accepted_auction(&message, result, attachment_ids).await
     }
 

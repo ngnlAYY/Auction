@@ -67,6 +67,12 @@ pub(crate) fn equipment_rejection_copy(code: &str) -> Option<(&'static str, &'st
             "The equipment attributes could not be verified.",
             "Please contact the auction operator with the original mail reference before resubmitting.",
         ),
+        "season_intake_closed" => (
+            "Submissions are closed until the new isekai season starts.",
+            "The final auction before the season reset has already opened, and equipment from\n\
+             the current season would be cleared by the reset.\n\
+             After the new season starts, resend new-season equipment with the subject \"auction\".",
+        ),
         "tradeable_required" => (
             "Only tradable equipment can be submitted.",
             "After the equipment is returned, remove any non-tradable items\n\

@@ -142,12 +142,22 @@ pub(in crate::database::recovery_commands) async fn advance_relist_postgres_once
     )
     .await?;
     if relist.auction_id.is_none() && relist.lot_id.is_none() {
-        let retry_at = now.checked_add_signed(retry_after).ok_or_else(|| {
-            RecoveryCommandError::Failed("recovery relist 重试时间溢出".to_owned())
-        })?;
-        let next_state_version =
+        let next_state_version = if let Some(blocking_code) = relist.blocking_code {
+            block_recovery_relist(
+                &mut transaction,
+                &recovery,
+                relist.resolution,
+                blocking_code,
+                now,
+            )
+            .await?
+        } else {
+            let retry_at = now.checked_add_signed(retry_after).ok_or_else(|| {
+                RecoveryCommandError::Failed("recovery relist 重试时间溢出".to_owned())
+            })?;
             defer_recovery_relist(&mut transaction, &recovery, relist.resolution, retry_at, now)
-                .await?;
+                .await?
+        };
         transaction.commit().await.map_err(map_sql_error)?;
         return Ok(Some(RecoveryResolutionAdvance {
             recovery_id: recovery.id.into(),

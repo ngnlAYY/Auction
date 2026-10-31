@@ -60,7 +60,8 @@ pub(super) async fn add_mail_auction_intake_inner(
                   auction.sequence,
                   auction.status,
                   auction.state_version,
-                  auction.preview_revision
+                  auction.preview_revision,
+                  auction.intake_opens_at
            FROM public.auction_intake_targets AS target
            INNER JOIN public.auctions AS auction ON auction.id = target.auction_id
            WHERE target.world_id = $1
@@ -79,6 +80,8 @@ pub(super) async fn add_mail_auction_intake_inner(
     let current_state_version: i64 = target.try_get("state_version").map_err(map_sql_error)?;
     let current_preview_revision: i64 =
         target.try_get("preview_revision").map_err(map_sql_error)?;
+    let intake_opens_at: Option<DateTime<Utc>> =
+        target.try_get("intake_opens_at").map_err(map_sql_error)?;
     if auction_world_id != write.world_id
         || auction_sequence <= 0
         || !matches!(auction_status.as_str(), "draft" | "preview")
@@ -95,6 +98,10 @@ pub(super) async fn add_mail_auction_intake_inner(
         .fetch_one(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
+    // 赛季前最后一场开拍后，目标是新赛季早鸟草稿；赛季开始前锁内拒收，旧赛季装备不能入场。
+    if intake_opens_at.is_some_and(|opens_at| now < opens_at) {
+        return Err(CompetitionTransactionError::IntakeClosed);
+    }
 
     // 只规范化身份比较，不改邮件发件人原文、来源事实或已接受命令的摘要。
     let player_status = sqlx::query_scalar::<_, String>(

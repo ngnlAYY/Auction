@@ -3,6 +3,10 @@
 #[cfg(feature = "postgres")]
 use super::*;
 
+/// 旧赛季装备在赛季开始后不能重挂的阻断码；Admin 报表经防腐层显示为 `recovery_relist_unavailable`。
+#[cfg(feature = "postgres")]
+const RELIST_SEASON_CLOSED: &str = "relist_season_closed";
+
 #[cfg(feature = "postgres")]
 pub(super) async fn relist_recovery(
     transaction: &mut Transaction<'_, Postgres>,
@@ -13,6 +17,34 @@ pub(super) async fn relist_recovery(
     action: RecoveryConfirmationAction,
     now: DateTime<Utc>,
 ) -> Result<RelistResult, RecoveryCommandError> {
+    // 原成交场次开拍之后已有赛季开始（早鸟场次冻结的收件起点）：装备属于旧赛季，
+    // 已随 isekai 换季清空，永不重挂到新赛季场次。
+    let season_closed: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM public.auctions AS boundary
+               INNER JOIN public.auctions AS sold ON sold.id = $2
+               WHERE boundary.world_id = $1
+                 AND boundary.intake_opens_at > sold.scheduled_open_at
+                 AND boundary.intake_opens_at <= $3
+           )"#,
+    )
+    .bind(&recovery.world_id)
+    .bind(recovery.auction_id)
+    .bind(now)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    if season_closed {
+        return Ok(RelistResult {
+            stage: "relist_pending",
+            resolution: action.as_str(),
+            auction_id: None,
+            lot_id: None,
+            blocking_code: Some(RELIST_SEASON_CLOSED),
+        });
+    }
+    // 赛季开始前的新赛季草稿不接收装备，按“暂无可重挂目标”保留持久化退避。
     let row = sqlx::query(
         r#"SELECT auction.id, auction.preview_revision, auction.state_version
            FROM public.auction_intake_targets AS target
@@ -21,9 +53,11 @@ pub(super) async fn relist_recovery(
               AND auction.world_id = target.world_id
               AND auction.status = 'draft'
            WHERE target.world_id = $1 AND target.target_status = 'draft'
+             AND (auction.intake_opens_at IS NULL OR auction.intake_opens_at <= $2)
            FOR UPDATE OF target, auction"#,
     )
     .bind(&recovery.world_id)
+    .bind(now)
     .fetch_optional(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
@@ -33,6 +67,7 @@ pub(super) async fn relist_recovery(
             resolution: action.as_str(),
             auction_id: None,
             lot_id: None,
+            blocking_code: None,
         });
     };
 
@@ -137,6 +172,7 @@ pub(super) async fn relist_recovery(
         resolution: action.as_str(),
         auction_id: Some(target_id),
         lot_id: Some(relisted_lot_id),
+        blocking_code: None,
     })
 }
 
@@ -186,7 +222,8 @@ pub(super) async fn update_recovery(
     now: DateTime<Utc>,
 ) -> Result<i64, RecoveryCommandError> {
     let completed_at = (relist.stage == "completed").then_some(now);
-    let next_attempt_at = if relist.stage == "relist_pending" {
+    // 永久阻断的重挂不再安排自动重试，等待 Admin 按阻断码处理。
+    let next_attempt_at = if relist.stage == "relist_pending" && relist.blocking_code.is_none() {
         Some(now.checked_add_signed(ChronoDuration::minutes(1)).ok_or_else(|| {
             RecoveryCommandError::Failed("recovery relist 重试时间溢出".to_owned())
         })?)
@@ -196,7 +233,8 @@ pub(super) async fn update_recovery(
     let row = sqlx::query(
         r#"UPDATE public.settlement_recoveries
            SET stage = $1, resolution = $2, relisted_auction_id = $3, relisted_lot_id = $4,
-               next_attempt_at = $5, completed_at = $6, state_version = $7, updated_at = $8
+               next_attempt_at = $5, completed_at = $6, state_version = $7, updated_at = $8,
+               blocking_code = COALESCE($11, blocking_code)
            WHERE id = $9 AND stage = 'reclaiming' AND resolution IS NULL
              AND state_version = $10 AND relisted_auction_id IS NULL AND relisted_lot_id IS NULL
            RETURNING state_version"#,
@@ -211,6 +249,7 @@ pub(super) async fn update_recovery(
     .bind(now)
     .bind(recovery.id)
     .bind(recovery.state_version)
+    .bind(relist.blocking_code)
     .fetch_optional(&mut **transaction)
     .await
     .map_err(map_sql_error)?

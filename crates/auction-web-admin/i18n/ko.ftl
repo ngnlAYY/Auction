@@ -750,6 +750,7 @@ admin-mail-reason-price-missing = 명시한 가격 지시문이 필요한 첨부
 admin-mail-reason-price-duplicate = 같은 첨부품의 시작가가 중복 지정되었습니다
 admin-mail-reason-price-identity = 가격 지시문의 장비 참조가 실제 첨부품과 일치하지 않습니다
 admin-mail-reason-price-attachment = 가격 지시문에서 참조한 장비가 첨부되어 있지 않습니다
+admin-mail-reason-season-intake-closed = 시즌 시작 전 접수 중지: 시즌 전환 전 마지막 회차가 시작되어 메일 전체를 반송했습니다
 admin-mail-category-configuration = 장비 읽기 설정 또는 요청 정보가 올바르지 않습니다
 admin-mail-category-credential-unavailable = 현재 월드에서 사용할 수 있는 게임 인증 정보가 없습니다
 admin-mail-category-session-expired = 게임 서버에서 로그인 세션 만료가 확인되었습니다

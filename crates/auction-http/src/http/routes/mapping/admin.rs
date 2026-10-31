@@ -350,6 +350,8 @@ fn map_recovery_error_code(
         "recovery_evidence_mismatch" => Ok(PublicRecoveryErrorCode::EvidenceMismatch),
         "recovery_outcome_unknown" => Ok(PublicRecoveryErrorCode::OutcomeUnknown),
         "recovery_relist_unavailable" => Ok(PublicRecoveryErrorCode::RelistUnavailable),
+        // 旧赛季装备已随 isekai 换季清空，属于永久不能重挂。
+        "relist_season_closed" => Ok(PublicRecoveryErrorCode::RelistUnavailable),
         "evidence_mismatch" => Ok(PublicRecoveryErrorCode::EvidenceMismatch),
         // 成功页但远端引用不能证明的旧语义是 outcome_unknown，不能伪装成已观察到的证据缺失。
         "delivery_reference_mismatch"

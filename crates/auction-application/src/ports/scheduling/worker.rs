@@ -61,6 +61,8 @@ pub struct ScheduledRoundBootstrap {
     pub policy: AuctionPolicyTemplate,
     /// 新轮次必须冻结原始 IANA 本地计划，后继不按 UTC 固定时长推算。
     pub schedule_source: super::AuctionScheduleSource,
+    /// 新拍卖最早接收装备的时刻；语义与开拍后继一致，不参与请求摘要。
+    pub intake_opens_at: Option<DateTime<Utc>>,
 }
 
 /// 周计划 ensure 后返回的安全投影，供调度器决定 Mail owner 的暂停/恢复期望。

@@ -50,6 +50,44 @@ pub(in crate::database::recovery_commands) async fn defer_recovery_relist(
     state_version.try_get("state_version").map_err(map_sql_error)
 }
 
+/// 永久不能重挂（旧赛季装备）时写入阻断码并退出自动重试；阶段保持 `relist_pending`。
+#[cfg(feature = "postgres")]
+pub(in crate::database::recovery_commands) async fn block_recovery_relist(
+    transaction: &mut Transaction<'_, Postgres>,
+    recovery: &RecoveryRow,
+    resolution: &str,
+    blocking_code: &str,
+    now: DateTime<Utc>,
+) -> Result<i64, RecoveryCommandError> {
+    let state_version = sqlx::query(
+        r#"UPDATE public.settlement_recoveries
+           SET blocking_code = $1,
+               next_attempt_at = NULL,
+               state_version = state_version + 1,
+               updated_at = $2
+           WHERE id = $3
+             AND stage = 'relist_pending'
+             AND state_version = $4
+             AND resolution = $5
+             AND custody_proof_kind IS NOT NULL
+             AND relisted_auction_id IS NULL
+             AND relisted_lot_id IS NULL
+             AND blocking_code IS NULL
+             AND manual_reconcile_delivery_id IS NULL
+           RETURNING state_version"#,
+    )
+    .bind(blocking_code)
+    .bind(now)
+    .bind(recovery.id)
+    .bind(recovery.state_version)
+    .bind(resolution)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?
+    .ok_or(RecoveryCommandError::StaleState)?;
+    state_version.try_get("state_version").map_err(map_sql_error)
+}
+
 #[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn complete_recovery_relist(
     transaction: &mut Transaction<'_, Postgres>,

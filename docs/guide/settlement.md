@@ -30,7 +30,7 @@ Worker 认领处于 Final 且所有 lot 有效截止都已过去的场次，在�
 | `WinnerEquipmentCod` | main | 在 main 把装备以 COD（金额 = 买方实付）寄给买方 | — |
 | `WinnerPaymentCarrierCod` | isekai | 在 main 寄 1 Credit 载体，COD 面额 = 买方实付 +1 Credit，买方净支付仍为实付金额 | — |
 | `WinnerEquipmentHandoff` | isekai | 在 isekai 把装备寄给买方 | 载体 COD 已收款 |
-| `SellerPayout` | 两者 | 在 main 向卖方支付成交价 | 买方已付款 |
+| `SellerPayout` | 两者 | 在 main 向卖方支付成交价 | main：买方已付款（装备 COD 已收款）；isekai：装备已交付（`WinnerEquipmentHandoff` 已满足） |
 | `BuyerRefund` | 两者 | 需要时向买方退款（`Contingent`，默认不执行） | 恢复流程激活 |
 | `UnsoldReturn` | 两者 | 流拍装备寄回卖方（在装备所在世界） | — |
 | `WithdrawnReturn` | 两者 | 撤拍装备寄回卖方 | — |
@@ -47,7 +47,7 @@ Worker 的“结算履约”循环领取可执行义务，按 `pending → prepa
 | activate | 激活投递，交给投递循环发送（enqueued） |
 | reconcile | 读取 Bot 账号的 Sent 记录（必要时还有余额）取得证据：COD 类义务要求 Sent 中该邮件已被收取（collected）才算满足；普通寄送要求精确匹配的 Sent 记录 |
 
-满足（`satisfied`）后解除依赖它的义务（例如买方付款后 `SellerPayout` 变为 ready）。证据不一致或结果未知时转 `manual_reconcile`，在 Admin“结算报表”中处理。
+满足（`satisfied`）后解除依赖它的义务（例如 main 买方付款后、isekai 装备交付完成后，`SellerPayout` 变为 ready）。证据不一致或结果未知时转 `manual_reconcile`，在 Admin“结算报表”中处理。
 
 结算相关邮件主题带义务 ID，例如 `auction equipment delivery [<义务 UUID>]`、`auction payment request [<义务 UUID>]`。买方拒收或 COD 过期被退回时，退件回到 Bot 收件箱，邮件处理器据主题识别为对应义务的退件证据（见[邮件流程](mail-flows.md#结算退件)）。
 
@@ -70,16 +70,17 @@ prepared → pending → claimed → sending → succeeded
 
 ## 4. 恢复（付款超时与拒收）
 
-每个已售 lot 在结算时建立恢复记录，冻结恢复策略（`RemindV1`）：
+每个已售 lot 在结算时建立恢复记录，冻结恢复策略（`RemindV1`，版本决定付款期限）：
 
 | 规则 | 默认 |
 | --- | --- |
-| 付款期限 | 从结算建立恢复记录起算 7 天；main COD 收回重寄后重新起算 |
+| 付款期限 | 从结算建立恢复记录起算：v1 为 7 天；赛季前场次冻结 v2，为 24 小时。main COD 收回重寄后按冻结版本重新起算 |
 | 逾期提醒 | 1 次（邮件提醒买方） |
 | COD 退回上限 `cod_return_limit` | 3（可配 1–10） |
 
 - main 装备 COD 在付款前退回：第 1 至 `limit − 1` 次退回时，系统取得收回装备的动作证明后重新寄出原 COD（金额与装备不变）；第 `limit` 次退回时，为卖家建立撤拍退回义务，原 COD 与卖方货款按失败收口，并拉黑买家。每封退件只计数一次。
 - isekai 载体 COD 退回时先收回载体；已经付款但交付装备被退回时先取得装备收回证明。Admin 分别通过 `cancelled` 或 `equipment_recovered` 确认后重列到该世界的草稿接收场次，后者还激活买方退款；没有草稿目标时保持 `relist_pending`。main 的 `reclaimed` 也只在对应收回证明与义务状态允许时可确认。
+- 赛季换季限制（参与早鸟期的世界）：赛季开始前的新赛季草稿不接收重列，保持 `relist_pending` 并按持久化退避重试；原成交场次开拍后已经历赛季开始的旧赛季装备永不重列，记录阻断码 `relist_season_closed`（报表显示为 `recovery_relist_unavailable`），停在 `relist_pending` 且不再自动重试，由 Admin 人工处理。
 - 恢复并非单一路径：未付时为 `awaiting_payment`，到期转 `payment_overdue` 并创建一次提醒；main 收款后可完成，isekai 收款后先进入 `delivering_equipment`，交付满足后完成。退件可转 `reclaiming`，经收回、确认后进入 `relist_pending`、`refunding` 或 `completed`。Admin 确认必须携带原因、稳定命令 ID 与当前状态版本，所有动作写入审计。
 
 ## Bot 内部履约与资金账户

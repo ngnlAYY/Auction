@@ -269,6 +269,17 @@ where
             return Ok(None);
         }
         let identity = identities(world_id, &generation.identity_key());
+        // 与开拍后继同一规则：赛季前场次冻结 v2 恢复策略，窗口内场次冻结赛季开始为收件起点。
+        let early_bird_slot = generation.source.early_bird;
+        let policy = if early_bird_slot.is_some_and(|slot| slot.is_pre_season()) {
+            config.policy.for_pre_season()
+        } else {
+            config.policy.clone()
+        };
+        let intake_opens_at = match (early_bird_slot, config.early_bird.as_ref()) {
+            (Some(slot), Some(calendar)) => calendar.intake_opens_at(slot)?,
+            _ => None,
+        };
         let request = BootstrapRequest {
             round_id: identity.round_id,
             auction_id: identity.auction_id,
@@ -279,8 +290,9 @@ where
             preview_due_at: times.preview_due_at,
             open_due_at: times.open_due_at,
             scheduled_end_at: times.scheduled_end_at,
-            policy: config.policy.clone(),
+            policy,
             schedule_source: generation.source.clone(),
+            intake_opens_at,
         }
         .into_bootstrap()?;
         if worker.control.is_draining() || tokio::time::Instant::now() >= deadline {
@@ -319,6 +331,7 @@ struct BootstrapRequest {
     scheduled_end_at: DateTime<Utc>,
     policy: AuctionPolicyTemplate,
     schedule_source: AuctionScheduleSource,
+    intake_opens_at: Option<DateTime<Utc>>,
 }
 
 impl BootstrapRequest {
@@ -337,6 +350,7 @@ impl BootstrapRequest {
             scheduled_end_at,
             policy,
             schedule_source,
+            intake_opens_at,
         } = self;
         #[derive(Serialize)]
         struct IdentityRequest<'a> {
@@ -374,6 +388,7 @@ impl BootstrapRequest {
             request_hash,
             policy,
             schedule_source,
+            intake_opens_at,
         })
     }
 }

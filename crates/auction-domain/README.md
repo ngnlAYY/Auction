@@ -83,7 +83,7 @@ Draft ──► Preview ──► Live ──► Final ──► Settling ──
 
 义务状态 `Ready`/`Blocked`/`Contingent` 只表达交给投递前的业务状态；`validate` 按种类约束世界、收款人（用户或游戏身份二选一）、金额与前置关系。
 
-恢复策略 `RecoveryPolicy`（`RemindV1`）固定 7 天付款超时、1 次提醒，COD 被退回的次数上限默认 3、可配 1–10。
+恢复策略 `RecoveryPolicy`（`RemindV1`）按版本固定付款超时：v1 为 7 天，v2（赛季前场次）为 24 小时；均为 1 次提醒，COD 被退回的次数上限默认 3、可配 1–10。
 
 ## 资金与内部履约
 

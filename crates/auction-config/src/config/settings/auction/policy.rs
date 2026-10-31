@@ -231,7 +231,7 @@ pub struct AuctionAdjustmentAnchorConfig {
     pub adjustment_ppm: i64,
 }
 
-/// 恢复策略配置；当前领域仅接受七天、一次提醒的 remind_v1。
+/// 恢复策略配置；领域只接受一次提醒的 remind_v1，版本 1 为七天、版本 2 为 24 小时付款期限。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuctionRecoveryPolicyConfig {
@@ -239,7 +239,7 @@ pub struct AuctionRecoveryPolicyConfig {
     pub version: u32,
     /// 恢复模式；当前只能是 remind_v1。
     pub mode: String,
-    /// 付款超时秒数；当前默认七天。
+    /// 付款超时秒数；须与版本对应，默认七天。
     pub payment_timeout_seconds: i64,
     /// 提醒次数；当前默认一次。
     pub reminder_limit: u32,

@@ -83,6 +83,8 @@ pub(in crate::database::recovery_commands) struct RelistResult {
     pub(in crate::database::recovery_commands) resolution: &'static str,
     pub(in crate::database::recovery_commands) auction_id: Option<Uuid>,
     pub(in crate::database::recovery_commands) lot_id: Option<Uuid>,
+    /// 永久不能重挂时的阻断码；停在 `relist_pending` 并退出自动重试，交由 Admin 人工处理。
+    pub(in crate::database::recovery_commands) blocking_code: Option<&'static str>,
 }
 
 #[cfg(feature = "postgres")]

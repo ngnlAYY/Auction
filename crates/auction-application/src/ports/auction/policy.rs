@@ -89,6 +89,11 @@ impl AuctionPolicyTemplate {
         Ok(rules)
     }
 
+    /// 赛季前场次冻结的模板：恢复策略换成 24 小时付款期限的 v2，其余字段与当前模板一致。
+    pub fn for_pre_season(&self) -> Self {
+        Self { recovery: self.recovery.pre_season(), ..self.clone() }
+    }
+
     /// 校验配置闭集和结算/恢复策略，防止未识别参数进入不可变快照。
     pub fn validate(&self) -> Result<(), DomainError> {
         self.auction_rules()?;

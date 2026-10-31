@@ -691,6 +691,7 @@ admin-mail-reason-price-missing = 显式定价指令未覆盖所需附件
 admin-mail-reason-price-duplicate = 同一附件被重复指定起拍价
 admin-mail-reason-price-identity = 定价指令中的装备身份与实际附件不一致
 admin-mail-reason-price-attachment = 定价指令引用的装备不在附件中
+admin-mail-reason-season-intake-closed = 赛季开始前停止收件：换季前最后一场已开拍，整封退回
 admin-mail-category-configuration = 装备读取配置或请求上下文无效
 admin-mail-category-credential-unavailable = 当前世界没有可用的游戏凭据
 admin-mail-category-session-expired = 远端返回游戏登录态已失效

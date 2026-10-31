@@ -165,6 +165,7 @@ impl ApplicationError {
                 CompetitionTransactionError::NotFound
                 | CompetitionTransactionError::Conflict
                 | CompetitionTransactionError::AdminIntakeUnavailable
+                | CompetitionTransactionError::IntakeClosed
                 | CompetitionTransactionError::AdminIntakeSellerBlacklisted
                 | CompetitionTransactionError::AdminIntakeEquipmentConflict
                 | CompetitionTransactionError::StaleState

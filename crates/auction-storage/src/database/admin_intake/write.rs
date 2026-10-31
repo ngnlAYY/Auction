@@ -54,7 +54,8 @@ pub(super) async fn add_admin_intake_inner(
                   auction.sequence,
                   auction.status,
                   auction.state_version,
-                  auction.preview_revision
+                  auction.preview_revision,
+                  auction.intake_opens_at
            FROM public.auction_intake_targets AS target
            INNER JOIN public.auctions AS auction ON auction.id = target.auction_id
            WHERE target.world_id = $1
@@ -73,6 +74,8 @@ pub(super) async fn add_admin_intake_inner(
     let current_state_version: i64 = target.try_get("state_version").map_err(map_sql_error)?;
     let current_preview_revision: i64 =
         target.try_get("preview_revision").map_err(map_sql_error)?;
+    let intake_opens_at: Option<DateTime<Utc>> =
+        target.try_get("intake_opens_at").map_err(map_sql_error)?;
     if auction_world_id != write.world_id
         || auction_sequence <= 0
         || !matches!(auction_status.as_str(), "draft" | "preview")
@@ -88,6 +91,10 @@ pub(super) async fn add_admin_intake_inner(
         .fetch_one(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
+    // 与邮件收件同一规则：新赛季早鸟草稿在赛季开始前不接收任何装备。
+    if intake_opens_at.is_some_and(|opens_at| now < opens_at) {
+        return Err(CompetitionTransactionError::IntakeClosed);
+    }
 
     // 用户名按 Users 唯一身份口径匹配并锁定真实行；展示原文与命令摘要不做大小写改写。
     let player_status = sqlx::query_scalar::<_, String>(

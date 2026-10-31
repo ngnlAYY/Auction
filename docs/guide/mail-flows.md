@@ -35,7 +35,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
    - 品质在接收列表内（默认 Legendary、Peerless；早鸟窗口内使用早鸟品质列表）；
    - 启用过滤时检查前缀、后缀、分类、类型与等级范围。
    任一件不合格 → **整封**退回，并回信说明原因（`auction_equipment_rejected`）。装备页面暂时读不到等非确定错误不会退回，而是留待重试。
-5. 全部通过 → 在一个事务内把装备加入该世界当前接收投稿的场次（Draft 或 Preview），保存加密的装备 key，然后投递一个“收取附件”操作把装备收入 Bot 账号。
+5. 全部通过 → 在一个事务内把装备加入该世界当前接收投稿的场次（Draft 或 Preview），保存加密的装备 key，然后投递一个“收取附件”操作把装备收入 Bot 账号。若该场次是尚未到赛季开始的新赛季早鸟草稿（赛季前最后一场已开拍），事务拒收 → **整封**退回并回信说明（`auction_equipment_rejected`，原因 `season_intake_closed`），不收取附件。
 
 被拒绝的装备读取会留下加密诊断证据（默认保留 7 天），可用 `auction-cli mail export-evidence` 导出。
 

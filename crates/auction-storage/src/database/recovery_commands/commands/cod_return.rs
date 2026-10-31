@@ -280,11 +280,15 @@ async fn resend_cod(
     .ok_or(RecoveryCommandError::InvalidStoredResult)?;
     let _ = fulfillment;
 
-    // 当前已冻结的 recovery v1 唯一付款窗口为七天；已延长的绝对截止不再参与计算。
+    // 按 recovery 冻结的版本重新起算付款窗口：v1 七天，v2（赛季前场次）24 小时；
+    // 已延长的绝对截止不再参与计算。
     let next_state_version: i64 = sqlx::query_scalar(
         r#"UPDATE public.settlement_recoveries
            SET stage = 'awaiting_payment',
-               payment_deadline_at = $2 + interval '604800 seconds',
+               payment_deadline_at = $2 + CASE policy_version
+                   WHEN 2 THEN interval '86400 seconds'
+                   ELSE interval '604800 seconds'
+               END,
                reminder_count = 0,
                return_mail_id = NULL,
                return_external_mail_id = NULL,
@@ -299,7 +303,7 @@ async fn resend_cod(
            WHERE id = $1
              AND stage = 'reclaiming'
              AND state_version = $3
-             AND policy_version = 1
+             AND policy_version IN (1, 2)
            RETURNING state_version"#,
     )
     .bind(recovery_id)
