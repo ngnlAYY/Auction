@@ -29,6 +29,15 @@ impl MoogleMailParser {
         parse_compose_state(document, world)
     }
 
+    /// 联合证据复用完成世界证明的 DOM，仍执行与普通 compose 读取相同的结构校验。
+    pub(crate) fn parse_compose_document(
+        &self,
+        document: &Html,
+        world: MoogleMailWorld,
+    ) -> Result<MoogleMailComposeState, MoogleMailError> {
+        parse_compose_document(document, world)
+    }
+
     /// 证明一次附加或设置 CoD POST 后页面状态与预期完全一致。
     pub fn prove_staged_compose(
         &self,
@@ -77,7 +86,14 @@ fn parse_compose_state(
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let parsed = Html::parse_document(source);
-    if has_visible_result_message(&parsed, world)? {
+    parse_compose_document(&parsed, world)
+}
+
+fn parse_compose_document(
+    parsed: &Html,
+    world: MoogleMailWorld,
+) -> Result<MoogleMailComposeState, MoogleMailError> {
+    if has_visible_result_message(parsed, world)? {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let form_selector = selector("form#mailform", world)?;
@@ -104,7 +120,7 @@ fn parse_compose_state(
     if !valid_body(&body) {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let assets = parse_compose_assets(&parsed, world)?;
+    let assets = parse_compose_assets(parsed, world)?;
     Ok(MoogleMailComposeState {
         token,
         recipient,

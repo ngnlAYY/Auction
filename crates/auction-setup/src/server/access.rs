@@ -122,12 +122,15 @@ fn permitted(
                 host == address || host == localhost
             })
             && origin.is_none_or(|origin| {
+                let Some(origin) = origin.strip_prefix("http://") else {
+                    return false;
+                };
                 let origin = if default_port {
                     origin.strip_suffix(":80").unwrap_or(origin)
                 } else {
                     origin
                 };
-                origin == format!("http://{address}") || origin == format!("http://{localhost}")
+                origin == address || origin == localhost
             })
     }
 }

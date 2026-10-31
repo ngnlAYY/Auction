@@ -27,19 +27,18 @@ async fn auction_list<T>(
     include_forum_thread_url: bool,
     map_summary: impl FnMut(PublicAuctionSummary) -> T,
 ) -> Result<Json<ApiResponse<AuctionListResponse<T>>>, (StatusCode, Json<ApiErrorResponse>)> {
-    let query = parse_query(&uri, &["world", "status", "page", "page_size", "cursor"])
+    let mut query = parse_query(&uri, &["world", "status", "page", "page_size", "cursor"])
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let world_id = query.get("world").filter(|value| !value.is_empty()).cloned();
+    let world_id = query.remove("world").filter(|value| !value.is_empty());
     if world_id.as_deref().is_some_and(|world| world.len() > 64 || world != world.trim()) {
         return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
     }
 
     let status = query
-        .get("status")
+        .remove("status")
         .filter(|value| !value.is_empty())
-        .map(String::as_str)
-        .unwrap_or("settled");
-    if !matches!(status, "live" | "final" | "settled") {
+        .unwrap_or_else(|| "settled".to_owned());
+    if !matches!(status.as_str(), "live" | "final" | "settled") {
         return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
     }
 
@@ -47,9 +46,10 @@ async fn auction_list<T>(
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let page_size = parse_positive_i64(query.get("page_size"), 20, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let cursor = query
-        .get("cursor")
-        .map(|raw| decode_public_cursor(raw))
+    let raw_cursor = query.remove("cursor");
+    let cursor = raw_cursor
+        .as_deref()
+        .map(decode_public_cursor)
         .transpose()
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     if cursor.is_some() && page != 1 {
@@ -74,7 +74,7 @@ async fn auction_list<T>(
     let result = reader
         .list_public_auctions(PublicAuctionListRequest {
             world_id,
-            status: status.to_owned(),
+            status,
             limit: page_size,
             offset,
             cursor,
@@ -92,7 +92,7 @@ async fn auction_list<T>(
         ));
     }
 
-    let response = map_auction_page(result, page, query.get("cursor").cloned(), map_summary);
+    let response = map_auction_page(result, page, raw_cursor, map_summary);
     Ok(Json(ApiResponse::ok("拍卖列表已加载", response)))
 }
 
@@ -100,12 +100,11 @@ pub(crate) async fn current_auction(
     State(state): State<PublicApiState>,
     uri: Uri,
 ) -> Result<Json<ApiResponse<CurrentAuctionResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
-    let query = parse_query(&uri, &["world"])
+    let mut query = parse_query(&uri, &["world"])
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let world_id = query
-        .get("world")
+        .remove("world")
         .filter(|value| !value.is_empty())
-        .cloned()
         .unwrap_or_else(|| "main".to_owned());
     if world_id.len() > 64 || world_id != world_id.trim() {
         return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));

@@ -28,7 +28,7 @@ pub(super) fn finalize_plan(
     mut state: LotBidState,
     command_id: CommandId,
     now: DateTime<Utc>,
-    drafts: Vec<BidDraft>,
+    drafts: &[BidDraft],
     proxy_output: ProxyPlanOutput,
 ) -> Result<CompetitionPlan, DomainError> {
     if !drafts.is_empty() && now > state.effective_end_at {
@@ -55,7 +55,7 @@ pub(super) fn finalize_plan(
     state.effective_end_at = expected_end;
 
     let mut public_bids = Vec::with_capacity(drafts.len());
-    for (index, draft) in drafts.into_iter().enumerate() {
+    for (index, draft) in drafts.iter().enumerate() {
         // 仅约束将要写入的新事实；历史读取和幂等重放仍逐字保留原金额。
         if draft.amount.value() > MAX_BID_AMOUNT {
             return Err(DomainError::InvalidAmount { value: draft.amount.value() });

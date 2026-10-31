@@ -34,15 +34,16 @@ impl MoogleMailParser {
         Ok(declaration.to_owned())
     }
 
-    /// 现金和 compose 也必须在各自请求世界中观察到一致 MAIN_URL。
-    pub(crate) fn verify_evidence_world(
+    /// 同一 DOM 完成世界证明后交给现金或 compose 解析，避免重复解析原始正文。
+    pub(crate) fn evidence_document(
         &self,
         bytes: &[u8],
         world: MoogleMailWorld,
         operation: MoogleMailOperation,
-    ) -> Result<(), MoogleMailError> {
+    ) -> Result<Html, MoogleMailError> {
         let document = trusted_document(bytes, world, operation)?;
-        verify_main_url(&document, world, operation)
+        verify_main_url(&document, world, operation)?;
+        Ok(document)
     }
 }
 

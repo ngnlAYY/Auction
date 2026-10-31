@@ -72,9 +72,11 @@ impl AuctionScheduleSource {
 
     /// 保留原时区与本地钟点整体顺延若干天，并去除早鸟身份；仅用于没有日历时的兜底后继。
     pub fn shifted_local_days(&self, days: i64) -> Result<Self, DomainError> {
+        let shift = Duration::try_days(days)
+            .ok_or(DomainError::InvalidSchedule("下一期本地时间超出范围"))?;
         let next = |value: NaiveDateTime| {
             value
-                .checked_add_signed(Duration::days(days))
+                .checked_add_signed(shift)
                 .ok_or(DomainError::InvalidSchedule("下一期本地时间超出范围"))
         };
         let source = Self {

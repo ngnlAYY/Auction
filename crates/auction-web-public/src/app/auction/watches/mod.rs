@@ -77,16 +77,27 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
         user_id.as_deref().and_then(|user| cache::load(user, &auction_id)).map(watch_snapshot)
     });
     let commands = use_context::<Signal<BTreeMap<String, WatchCommand>>>();
+    // 只跟随可读身份的变化：会话故障恢复后立即补读，同账号续期不重启整场请求。
+    let readable = use_memo({
+        let user_id = user_id.clone();
+        move || {
+            user_id.as_deref().is_some_and(|user_id| current_user(&session.read()) == Some(user_id))
+        }
+    });
     let resource = use_resource({
         let user_id = user_id.clone();
         let auction_id = auction_id.clone();
         move || {
             let requested_revision = (refresh(), revision());
+            let readable = readable();
             let user_id = user_id.clone();
             let auction_id = auction_id.clone();
             async move {
+                if !readable {
+                    return LoadedWatches { revision: requested_revision, result: Ok(None) };
+                }
                 let result = if let Some(user_id) = user_id {
-                    // 身份前后复核不订阅会话期限；同账号续期不能反复取消整场集合读取。
+                    // 请求前后复核身份，不能把会话切换期间的响应写入当前缓存。
                     if current_user(&session.peek()) != Some(user_id.as_str()) {
                         return LoadedWatches { revision: requested_revision, result: Ok(None) };
                     }

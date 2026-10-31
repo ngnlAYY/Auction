@@ -26,7 +26,7 @@ bash ci/checks/check.sh <检查项>...
 | `all` | 以上五项 |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
-| `feature` | `auction-storage`（仅 `postgres`）与 `auction-cache`（仅 `redis`）的最小 feature 图 |
+| `feature` | `auction-storage`（仅 `postgres`）、`auction-cache`（仅 `redis`），以及 `auction-setup` 的空默认图与 `postgres` 完整图 |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |
 | `wasm` | 两个前端编译到 `wasm32-unknown-unknown` |
 | `rust` | `fmt check feature lint wasm` |
@@ -72,7 +72,7 @@ bash ci/release/release.sh source-fingerprint
 
 ### 门禁
 
-- **页面 payload**：先用 `ci/release/web-bundle.sh` 构建两端 payload，校验入口页标题（“Auction 公开站点” / “Auction 管理站点”）、跨端隔离、只含普通文件与唯一一组 JS/WASM、payload 清单与哈希。
+- **页面 payload**：先用 `ci/release/web-bundle.sh` 构建两端 payload，校验入口页标题（“Auction 公开站点” / “Auction 管理站点”）、跨端隔离、只含普通文件与唯一一组 JS/WASM、payload 清单与哈希。目录遍历或摘要生成失败即拒绝复用，不把失败留下的部分输出当作有效清单。
 - **二进制标记**：Public 只含 Public payload 的标记与哈希，Admin 只含 Admin 的，Worker 与 auction-cli 不含任何页面标记；API-only 二进制含“资源缺失”提示而不含 payload。
 - **依赖边界**（`cargo tree`）：Worker 不依赖任何前端 crate；Public 不依赖 Admin 前端；Admin 不依赖 Public 前端；`auction-server` 不依赖 `auction-cli`。
 - **BUILD-INFO 与校验和**：每个制品目录记录源码身份、工具链、feature 与文件摘要。复用判定比较构建输入与环境指纹、锁文件、feature 和制品摘要；仅仓库提交或不在构建输入范围内的文档变化，不必重新编译。

@@ -1,7 +1,7 @@
 //! E-Hentai HTTP 客户端与论坛协议事务；固定 origin、限流、响应大小边界、
 //! 主题创建/读取和 POST 后的 write-unknown 栅栏集中在此，表单与判定辅助在 forms.rs。
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, sync::atomic::AtomicUsize};
 
 use super::forms::{
     PostForm, TopicForm, body_looks_like_html, build_forum_http_client, clean_line, cookie_header,
@@ -306,6 +306,7 @@ impl EhentaiClient {
         let mut remaining = targets.into_iter().skip(1).collect::<VecDeque<_>>();
         let mut pages = Vec::with_capacity(expected_pages);
         let mut total_bytes = html.len();
+        drop(html);
         pages.push((0_u64, first_page));
         let mut reads = tokio::task::JoinSet::new();
         let read_context = TopicPageReadContext {
@@ -315,6 +316,8 @@ impl EhentaiClient {
             thread_id: thread_id.to_owned(),
             known_maximum_offset: maximum_offset,
             referer: target,
+            // 在逐块读取时共享剩余额度，不能等并发整页下载、解析后才发现超限。
+            remaining_bytes: Arc::new(AtomicUsize::new(HARD_MAXIMUM_TOPIC_BYTES - total_bytes)),
         };
         spawn_topic_page_reads(&mut reads, &mut remaining, &read_context);
         while let Some(read) = reads.join_next().await {
@@ -439,6 +442,7 @@ struct TopicPageReadContext {
     thread_id: String,
     known_maximum_offset: u64,
     referer: Url,
+    remaining_bytes: Arc<AtomicUsize>,
 }
 
 async fn read_topic_page(
@@ -449,7 +453,13 @@ async fn read_topic_page(
     let identity_target = page_target.clone();
     let (body, _) = context
         .client
-        .get_page(context.operation, page_target, Some(&context.referer), &context.cookie)
+        .get_page_with_budget(
+            context.operation,
+            page_target,
+            Some(&context.referer),
+            &context.cookie,
+            Some(&context.remaining_bytes),
+        )
         .await?;
     let html =
         String::from_utf8(body).map_err(|_| EhentaiError::protocol(context.operation, false))?;

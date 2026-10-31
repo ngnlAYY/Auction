@@ -98,13 +98,22 @@ pub(crate) async fn authenticated_admin_session(
     state: &AdminApiState,
     headers: &HeaderMap,
 ) -> Result<(String, AdminSessionIdentity), Box<Response>> {
+    authenticated_admin_session_with_csrf(state, headers, None).await
+}
+
+// 写守卫复用已经解析并核对请求头的 CSRF Cookie，保持 session 能力及 token 的错误顺序。
+async fn authenticated_admin_session_with_csrf(
+    state: &AdminApiState,
+    headers: &HeaderMap,
+    raw_csrf: Option<String>,
+) -> Result<(String, AdminSessionIdentity), Box<Response>> {
     let Some(session) = state.session() else {
         return Err(Box::new(session_unavailable()));
     };
     let Some(raw_token) = read_admin_cookie(headers, ADMIN_SESSION_COOKIE) else {
         return Err(Box::new(authentication_error()));
     };
-    let Some(raw_csrf) = read_admin_cookie(headers, ADMIN_CSRF_COOKIE) else {
+    let Some(raw_csrf) = raw_csrf.or_else(|| read_admin_cookie(headers, ADMIN_CSRF_COOKIE)) else {
         return Err(Box::new(authentication_error()));
     };
     match session.current(raw_token, raw_csrf.clone(), Utc::now()).await {
@@ -133,7 +142,7 @@ pub(crate) async fn authenticated_admin_mutation(
             api_error(StatusCode::FORBIDDEN, "csrf_invalid", "CSRF 校验失败").into_response(),
         ));
     }
-    authenticated_admin_session(state, headers).await
+    authenticated_admin_session_with_csrf(state, headers, Some(raw_csrf)).await
 }
 
 pub(crate) async fn authenticated_public_identity(

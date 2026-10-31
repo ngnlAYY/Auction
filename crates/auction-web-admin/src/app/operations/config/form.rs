@@ -280,7 +280,8 @@ fn SwitchField(
     label: String,
     on_dirty: EventHandler<()>,
 ) -> Element {
-    let checked = form.read().boolean(path);
+    // 整份草稿会随每次输入变化；只让当前字段值的变化触发控件重绘。
+    let checked = use_memo(use_reactive((&path,), move |(path,)| form.read().boolean(path)));
     rsx! {
         label { class: "admin-runtime-switch",
             input {
@@ -289,7 +290,7 @@ fn SwitchField(
                 "data-runtime-label": label.clone(),
                 r#type: "checkbox",
                 disabled,
-                checked,
+                checked: checked(),
                 onchange: move |event: FormEvent| {
                     form.write().set_boolean(path, event.checked());
                     on_dirty.call(());
@@ -309,7 +310,7 @@ fn TextField(
     label: String,
     on_dirty: EventHandler<()>,
 ) -> Element {
-    let value = form.read().input(path);
+    let value = use_memo(use_reactive((&path,), move |(path,)| form.read().input(path)));
     rsx! {
         label { class: "admin-runtime-field",
             span { "{label}" }
@@ -322,7 +323,7 @@ fn TextField(
                 "data-runtime-label": label.clone(),
                 r#type: "text",
                 disabled,
-                value,
+                value: value(),
                 oninput: move |event: FormEvent| {
                     form.write().set_input(path, event.value());
                     on_dirty.call(());
@@ -342,7 +343,7 @@ fn NumberField(
     maximum: &'static str,
     on_dirty: EventHandler<()>,
 ) -> Element {
-    let value = form.read().input(path);
+    let value = use_memo(use_reactive((&path,), move |(path,)| form.read().input(path)));
     let issues = use_context::<FormIssues>();
     let message =
         issues.0.read().iter().find(|issue| issue.path == path).map(|issue| issue.message.clone());
@@ -364,7 +365,7 @@ fn NumberField(
                 min: minimum,
                 max: maximum,
                 step: "1",
-                value,
+                value: value(),
                 oninput: move |event: FormEvent| {
                     form.write().set_input(path, event.value());
                     on_dirty.call(());
@@ -385,7 +386,7 @@ fn ListField(
     label: String,
     on_dirty: EventHandler<()>,
 ) -> Element {
-    let value = form.read().input(path);
+    let value = use_memo(use_reactive((&path,), move |(path,)| form.read().input(path)));
     rsx! {
         label { class: "admin-runtime-field admin-runtime-field--list",
             span { "{label}" }
@@ -398,7 +399,7 @@ fn ListField(
                 "data-runtime-label": label.clone(),
                 disabled,
                 rows: "3",
-                value,
+                value: value(),
                 oninput: move |event: FormEvent| {
                     form.write().set_input(path, event.value());
                     on_dirty.call(());
@@ -417,7 +418,7 @@ fn TemplateField(
     label: String,
     on_dirty: EventHandler<()>,
 ) -> Element {
-    let value = form.read().input(path);
+    let value = use_memo(use_reactive((&path,), move |(path,)| form.read().input(path)));
     rsx! {
         label { class: "admin-runtime-field admin-runtime-field--template",
             span { "{label}" }
@@ -428,7 +429,7 @@ fn TemplateField(
                 "data-runtime-label": label.clone(),
                 disabled,
                 rows: "4",
-                value,
+                value: value(),
                 oninput: move |event: FormEvent| {
                     form.write().set_input(path, event.value());
                     on_dirty.call(());
@@ -447,7 +448,7 @@ fn SelectField(
     options: Vec<(String, String)>,
     on_dirty: EventHandler<()>,
 ) -> Element {
-    let value = form.read().input(path);
+    let value = use_memo(use_reactive((&path,), move |(path,)| form.read().input(path)));
     rsx! {
         label { class: "admin-runtime-field",
             span { "{label}" }
@@ -457,7 +458,7 @@ fn SelectField(
                 autocomplete: "off",
                 "data-runtime-label": label.clone(),
                 disabled,
-                value,
+                value: value(),
                 onchange: move |event: FormEvent| {
                     form.write().set_input(path, event.value());
                     on_dirty.call(());

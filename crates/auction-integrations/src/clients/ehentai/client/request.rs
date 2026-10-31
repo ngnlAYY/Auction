@@ -1,5 +1,7 @@
 //! E-Hentai HTTP 请求、响应边界和固定 origin 校验。
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use super::*;
 
 impl EhentaiClient {
@@ -9,6 +11,17 @@ impl EhentaiClient {
         target: Url,
         referer: Option<&Url>,
         cookie: &EhentaiCookie,
+    ) -> Result<(Vec<u8>, StatusCode), EhentaiError> {
+        self.get_page_with_budget(operation, target, referer, cookie, None).await
+    }
+
+    pub(super) async fn get_page_with_budget(
+        &self,
+        operation: EhentaiOperation,
+        target: Url,
+        referer: Option<&Url>,
+        cookie: &EhentaiCookie,
+        budget: Option<&AtomicUsize>,
     ) -> Result<(Vec<u8>, StatusCode), EhentaiError> {
         self.wait_rate(operation).await?;
         let mut request = self
@@ -20,6 +33,9 @@ impl EhentaiClient {
             request = request.header(header::REFERER, referer.as_str());
         }
         self.check_ownership(cookie).await.map_err(|_| EhentaiError::credential(operation))?;
+        if budget.is_some_and(|budget| budget.load(Ordering::Relaxed) == 0) {
+            return Err(EhentaiError::response_too_large(operation));
+        }
         let response = request
             .timeout(self.request_timeout)
             .send()
@@ -27,7 +43,7 @@ impl EhentaiClient {
             .map_err(|_| EhentaiError::remote_temporary(operation, false))?;
         let status = response.status();
         let location = response.headers().get(header::LOCATION).cloned();
-        let body = self.read_response(response, operation, false).await?;
+        let body = self.read_response_with_budget(response, operation, false, budget).await?;
         if is_session_expired(status, location.as_ref(), &body) {
             return Err(EhentaiError::session_expired(operation));
         }
@@ -54,14 +70,24 @@ impl EhentaiClient {
 
     pub(super) async fn read_response(
         &self,
-        mut response: Response,
+        response: Response,
         operation: EhentaiOperation,
         write_started: bool,
     ) -> Result<Vec<u8>, EhentaiError> {
-        if response
-            .content_length()
-            .is_some_and(|length| length > self.maximum_response_bytes as u64)
-        {
+        self.read_response_with_budget(response, operation, write_started, None).await
+    }
+
+    async fn read_response_with_budget(
+        &self,
+        mut response: Response,
+        operation: EhentaiOperation,
+        write_started: bool,
+        budget: Option<&AtomicUsize>,
+    ) -> Result<Vec<u8>, EhentaiError> {
+        if response.content_length().is_some_and(|length| {
+            length > self.maximum_response_bytes as u64
+                || budget.is_some_and(|budget| length > budget.load(Ordering::Relaxed) as u64)
+        }) {
             return Err(if write_started {
                 EhentaiError::write_unknown(operation)
             } else {
@@ -74,7 +100,7 @@ impl EhentaiClient {
             .and_then(|length| usize::try_from(length).ok())
             .unwrap_or_default()
             .min(self.maximum_response_bytes);
-        let mut body = Vec::with_capacity(capacity);
+        let mut body = SensitiveResponseBody(Vec::with_capacity(capacity));
         while let Some(chunk) = response.chunk().await.map_err(|_| {
             if write_started {
                 EhentaiError::write_unknown(operation)
@@ -82,16 +108,35 @@ impl EhentaiClient {
                 EhentaiError::remote_temporary(operation, false)
             }
         })? {
-            if body.len().saturating_add(chunk.len()) > self.maximum_response_bytes {
+            if body.0.len().saturating_add(chunk.len()) > self.maximum_response_bytes
+                || budget.is_some_and(|budget| {
+                    // MSRV 尚未稳定 try_update，而新工具链已弃用 fetch_update；用同一 CAS 语义扣减。
+                    let mut remaining = budget.load(Ordering::Relaxed);
+                    loop {
+                        let Some(next) = remaining.checked_sub(chunk.len()) else {
+                            return true;
+                        };
+                        match budget.compare_exchange_weak(
+                            remaining,
+                            next,
+                            Ordering::Relaxed,
+                            Ordering::Relaxed,
+                        ) {
+                            Ok(_) => return false,
+                            Err(current) => remaining = current,
+                        }
+                    }
+                })
+            {
                 return Err(if write_started {
                     EhentaiError::write_unknown(operation)
                 } else {
                     EhentaiError::response_too_large(operation)
                 });
             }
-            body.extend_from_slice(&chunk);
+            body.0.extend_from_slice(&chunk);
         }
-        Ok(body)
+        Ok(std::mem::take(&mut body.0))
     }
 
     pub(super) fn resolve_same_origin(
@@ -165,6 +210,15 @@ impl EhentaiClient {
         };
         *next = next_deadline;
         Ok(())
+    }
+}
+
+// 超限、网络失败和取消都清理已收取的部分正文；完整响应才移交协议解析器。
+struct SensitiveResponseBody(Vec<u8>);
+
+impl Drop for SensitiveResponseBody {
+    fn drop(&mut self) {
+        self.0.fill(0);
     }
 }
 

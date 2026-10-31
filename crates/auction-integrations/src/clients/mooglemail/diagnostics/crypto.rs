@@ -25,18 +25,19 @@ pub fn seal(
             .map_err(|_| MailDiagnosticError::Encryption)?,
     );
     let sealed_len = plaintext.len() + aead::AES_256_GCM.tag_len();
-    let mut output = Vec::with_capacity(NONCE + sealed_len);
-    output.extend_from_slice(&nonce);
-    let mut plain = SensitiveBytes(Vec::with_capacity(sealed_len));
-    plain.0.extend_from_slice(plaintext);
-    aead.seal_in_place_append_tag(
-        aead::Nonce::assume_unique_for_key(nonce),
-        aead::Aad::from(aad),
-        &mut plain.0,
-    )
-    .map_err(|_| MailDiagnosticError::Encryption)?;
-    output.extend_from_slice(&plain.0);
-    Ok(output)
+    // 在最终信封的正文区原地加密，避免另建并复制整份密文；出错仍清理明文缓冲。
+    let mut output = SensitiveBytes(Vec::with_capacity(NONCE + sealed_len));
+    output.0.extend_from_slice(&nonce);
+    output.0.extend_from_slice(plaintext);
+    let tag = aead
+        .seal_in_place_separate_tag(
+            aead::Nonce::assume_unique_for_key(nonce),
+            aead::Aad::from(aad),
+            &mut output.0[NONCE..],
+        )
+        .map_err(|_| MailDiagnosticError::Encryption)?;
+    output.0.extend_from_slice(tag.as_ref());
+    Ok(std::mem::take(&mut output.0))
 }
 
 pub fn open(

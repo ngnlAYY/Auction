@@ -22,8 +22,9 @@ pub(super) async fn run(
 ) -> anyhow::Result<()> {
     let mut children = Vec::new();
     let result = tokio::select! {
+        biased;
+        signal = signals.recv() => signal.map(|_| ()).map_err(anyhow::Error::from),
         result = start_and_watch(&plans, &ownership, &mut children, startup) => result,
-        signal = signals.recv() => signal.map(|_| ()).map_err(anyhow::Error::from)
     };
     let stopped = stop(&mut children, &mut signals).await;
     // 所有角色都完成回收尝试后才释放父进程的锁；未退出子进程仍持有继承的 owner.lock。
@@ -74,7 +75,9 @@ async fn start_and_watch(
         let deadline = Instant::now() + startup;
         loop {
             ensure_running(children)?;
-            if timeout_at(deadline, probe::ready(plan)).await.unwrap_or(false) {
+            if timeout_at(deadline, probe::ready(plan)).await.unwrap_or(false)
+                && Instant::now() < deadline
+            {
                 ensure_running(children)?;
                 eprintln!("role={} ready", plan.role.name());
                 break;
@@ -126,8 +129,11 @@ async fn stop(children: &mut [RoleChild], signals: &mut TerminationSignals) -> a
         Ok::<_, std::io::Error>(())
     };
     let complete = tokio::select! {
-        result = timeout_at(deadline, graceful) => matches!(result, Ok(Ok(()))),
+        biased;
         _ = signals.recv() => false,
+        result = timeout_at(deadline, graceful) => {
+            matches!(result, Ok(Ok(()))) && Instant::now() < deadline
+        },
     };
     if !complete {
         for child in children.iter_mut().rev() {

@@ -23,6 +23,12 @@ pub(super) struct EquipmentFetchSuccess {
     pub(super) elapsed_millis: Option<u64>,
 }
 
+impl Drop for EquipmentFetchSuccess {
+    fn drop(&mut self) {
+        self.body.fill(0);
+    }
+}
+
 pub(super) struct SensitiveResponseBody(pub(super) Vec<u8>);
 
 impl Drop for SensitiveResponseBody {

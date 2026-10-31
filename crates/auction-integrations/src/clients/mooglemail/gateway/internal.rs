@@ -177,8 +177,9 @@ impl MoogleMailGateway {
                     .read_session_document(session, &target)
                     .await
                     .map_err(|error| at(Stage::CashGet, MoogleMailWorld::Main, error))?;
-                self.parser
-                    .verify_evidence_world(
+                let document = self
+                    .parser
+                    .evidence_document(
                         &document,
                         MoogleMailWorld::Main,
                         MoogleMailOperation::Balance,
@@ -189,7 +190,7 @@ impl MoogleMailGateway {
                 let observed_at = Utc::now();
                 let balance = self
                     .parser
-                    .parse_balance(&document, MoogleMailWorld::Main, observed_at)
+                    .parse_balance_document(&document, MoogleMailWorld::Main, observed_at)
                     .map_err(|error| {
                         at(Stage::CashParse, MoogleMailWorld::Main, map_read_error(error))
                     })?;
@@ -298,12 +299,13 @@ impl MoogleMailGateway {
             .read_session_document(session, &target)
             .await
             .map_err(|error| at(Stage::ComposeGet, world, error))?;
-        self.parser
-            .verify_evidence_world(&document, world, MoogleMailOperation::Compose)
+        let document = self
+            .parser
+            .evidence_document(&document, world, MoogleMailOperation::Compose)
             .map_err(|error| at(Stage::ComposeWorld, world, map_read_error(error)))?;
         if !self
             .parser
-            .parse_compose_state(&document, world)
+            .parse_compose_document(&document, world)
             .map_err(|error| at(Stage::ComposeParse, world, map_read_error(error)))?
             .is_clean()
         {

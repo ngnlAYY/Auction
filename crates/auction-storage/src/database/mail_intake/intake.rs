@@ -122,16 +122,9 @@ pub(super) async fn add_mail_auction_intake_inner(
         return Err(CompetitionTransactionError::Conflict);
     }
 
-    let maximum_lot_number = sqlx::query_scalar::<_, Option<i32>>(
-        "SELECT MAX(lot_number) FROM public.lots WHERE auction_id = $1",
-    )
-    .bind(auction_id)
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?
-    .unwrap_or(0);
     let category_rows = sqlx::query(
-        "SELECT category_key, MAX(category_number)::integer AS maximum_category_number
+        "SELECT category_key, MAX(category_number)::integer AS maximum_category_number,
+                MAX(lot_number)::integer AS maximum_lot_number
          FROM public.lots
          WHERE auction_id = $1
          GROUP BY category_key",
@@ -140,10 +133,17 @@ pub(super) async fn add_mail_auction_intake_inner(
     .fetch_all(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
+    // 分类聚合已经扫描当前场次；同时归并全局序号，避免再往返执行一次 MAX 查询。
+    let mut maximum_lot_number: Option<i32> = None;
     let mut category_numbers = BTreeMap::<String, i32>::new();
     for row in category_rows {
         let category: String = row.try_get("category_key").map_err(map_sql_error)?;
         let maximum: i32 = row.try_get("maximum_category_number").map_err(map_sql_error)?;
+        let category_lot_maximum: i32 = row.try_get("maximum_lot_number").map_err(map_sql_error)?;
+        maximum_lot_number = Some(
+            maximum_lot_number
+                .map_or(category_lot_maximum, |maximum| maximum.max(category_lot_maximum)),
+        );
         if category.is_empty()
             || maximum <= 0
             || category_numbers.insert(category, maximum).is_some()
@@ -151,6 +151,7 @@ pub(super) async fn add_mail_auction_intake_inner(
             return Err(failed("MoogleMail 分类编号快照无效"));
         }
     }
+    let maximum_lot_number = maximum_lot_number.unwrap_or(0);
     let next_state_version = current_state_version
         .checked_add(1)
         .ok_or_else(|| failed("MoogleMail 拍卖状态版本溢出"))?;

@@ -16,7 +16,7 @@ fmt:
 check:
     @bash ci/checks/check.sh check
 
-# 分别验证 PostgreSQL 与 Redis 的最小 feature 图。
+# 分别验证 PostgreSQL、Redis，以及首次设置的空默认图和完整 feature 图。
 feature-check:
     @bash ci/checks/check.sh feature
 
@@ -73,24 +73,27 @@ package *args:
 
 # 本地启动 Public，内嵌页面走 PostgreSQL。
 run-public:
-    cargo run -p auction-public-api --features postgres,web-embed
+    cargo run --locked -p auction-public-api --features postgres,web-embed
 
 # 本地启动 Admin，内嵌页面走 PostgreSQL。
 run-admin:
-    cargo run -p auction-admin-api --features postgres,web-embed
+    cargo run --locked -p auction-admin-api --features postgres,web-embed
 
 # 本地启动 Worker，不内嵌页面。
 run-worker:
-    cargo run -p auction-worker --features postgres
+    cargo run --locked -p auction-worker --features postgres
 
 # 本地开发库执行内嵌迁移；普通启动不隐式迁移，本地不经 systemd 停机门禁。
+[positional-arguments]
 db-migrate config_dir="ops/config":
-    cargo run -p auction-cli --features postgres -- --config-dir {{config_dir}} db migrate --no-systemd
+    cargo run --locked -p auction-cli --features postgres -- --config-dir "$1" db migrate --no-systemd
 
 # 输出指定角色的有效配置安全投影，默认 public。
+[positional-arguments]
 config-show role="public" config_dir="ops/config":
-    cargo run -p auction-cli -- --config-dir {{config_dir}} config show {{role}}
+    cargo run --locked -p auction-cli -- --config-dir "$2" config show "$1"
 
 # 联合检查三角色配置；生产门禁另加 --strict。
+[positional-arguments]
 config-check config_dir="ops/config":
-    cargo run -p auction-cli --features postgres -- --config-dir {{config_dir}} config check
+    cargo run --locked -p auction-cli --features postgres -- --config-dir "$1" config check

@@ -9,6 +9,7 @@
 - 登录表单以 HTTP Basic 方式把 actor 与 secret 提交到 `POST /api/v1/admin/session`；二者来自 Admin 敏感配置的 `admin_actor` / `admin_secret`（未配置时 Admin 无法登录）。
 - 成功后服务端下发 HttpOnly 会话 Cookie 与 CSRF Cookie，并在会话 DTO 中返回 CSRF token；前端使用 DTO 中的 token。已认证的业务写入及退出在 `x-csrf-token` 头回传该值；登录和首次部署使用各自的认证路径。
 - 外壳同时读取 `/health/ready`：未就绪时显示降级状态。会话被确认前不允许提交写命令；临时会话重读失败保留原草稿与未决命令并撤回写许可，确认身份（actor 或 CSRF token）变化时销毁整棵已认证页面状态。
+- 仪表盘自动轮询只在上一快照请求完成后触发；手动刷新或命令刚触发的读取不会被下一个轮询节拍取消。轮询仍按所选间隔唤醒，跳过忙碌节拍，不积压补发。
 
 ## 页面
 
@@ -43,6 +44,8 @@
 
 列表读取绑定筛选、实体、页码与每页数量，旧请求快照只供同查询后台刷新展示。共享分页器的数量预设为 10/20/50/100，支持端点上限内的自定义正整数；URL 显式数量优先于各表的独立本地偏好，手机隐藏自定义数量与跳页输入。数量变化回到对应列表首页，不清空未决命令。
 
+分页请求的刷新代数与展示身份分开订阅：同查询开始后台刷新时保留当前快照，避免仅因刷新代数变化就复制并深比较整页结果；切换筛选、实体或数量仍立即隐藏旧查询数据。配置标量控件只订阅各自路径的派生值，值未改变的控件不因草稿信号变化而重绘；服务端校验、fingerprint 与冻结请求的规则保持一致。
+
 ## 结构
 
 | 路径 | 内容 |
@@ -60,7 +63,7 @@
 ## 构建
 
 ```bash
-cargo check -p auction-web-admin --target wasm32-unknown-unknown
+cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
 bash ci/release/web-bundle.sh admin
 ```
 

@@ -12,7 +12,7 @@
 | 数据库 | PostgreSQL 18（运行与运维命令需要；静态检查不需要） |
 | 页面构建 | 受控的 `dx`（Dioxus CLI 0.7）、`wasm-bindgen`、`wasm-opt`，由 `bash ci/tools/bootstrap.sh install` 安装到 `target/build-tools`，见 [`ci/tools/README.md`](../ci/tools/README.md) |
 
-直接调用负责依赖解析的 Cargo 命令时加 `--locked`；CI 检查与发布构建已固定该参数。如需本机编译加速（sccache、mold 等），只在用户级 `~/.cargo/config.toml` 中配置，不改仓库 profile。
+直接调用负责依赖解析的 Cargo 命令时加 `--locked`；本地 Justfile 入口、CI 检查与发布构建已固定该参数。本地配置命令通过独立参数传递目录，包含空格的路径须在调用 `just` 时加引号。如需本机编译加速（sccache、mold 等），只在用户级 `~/.cargo/config.toml` 中配置，不改仓库 profile。
 
 ## 常用命令
 
@@ -25,7 +25,7 @@ just fmt             # 只检查格式
 just lint            # clippy -D warnings（all-features）
 just wasm-check      # 编译两个浏览器包
 just web-build       # 构建 Public/Admin 页面 payload（需要受控 dx）
-just run-public      # cargo run -p auction-public-api --features postgres,web-embed
+just run-public      # cargo run --locked -p auction-public-api --features postgres,web-embed
 just run-admin
 just run-worker
 ```

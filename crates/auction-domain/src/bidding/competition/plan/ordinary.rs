@@ -103,7 +103,7 @@ pub(super) fn plan_ordinary_bid(
         final_state,
         command_id,
         now,
-        drafts,
+        &drafts,
         ProxyPlanOutput { transitions, states: proxy_states, active_proxy_id },
     )
 }

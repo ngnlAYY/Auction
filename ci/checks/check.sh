@@ -225,6 +225,8 @@ run_checks() {
 		feature)
 			cargo check --locked -p auction-storage --all-targets --no-default-features --features postgres
 			cargo check --locked -p auction-cache --all-targets --no-default-features --features redis
+			cargo check --locked -p auction-setup --all-targets --no-default-features
+			cargo check --locked -p auction-setup --all-targets --no-default-features --features postgres
 			;;
 		lint) cargo clippy --locked --workspace --all-targets --all-features -- -D warnings ;;
 		wasm)

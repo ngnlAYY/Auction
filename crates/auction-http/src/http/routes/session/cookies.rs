@@ -16,11 +16,12 @@ pub(crate) fn read_admin_basic_auth(headers: &HeaderMap) -> Option<(String, Vec<
     if !scheme.eq_ignore_ascii_case("Basic") || encoded.is_empty() {
         return None;
     }
-    let decoded = STANDARD.decode(encoded).ok()?;
+    let mut decoded = STANDARD.decode(encoded).ok()?;
     let separator = decoded.iter().position(|byte| *byte == b':')?;
     let actor = std::str::from_utf8(&decoded[..separator]).ok()?.to_owned();
-    let secret = decoded.get(separator + 1..)?.to_vec();
-    Some((actor, secret))
+    // 密码原位前移并复用解码缓冲区，避免再分配第二个秘密缓冲区。
+    drop(decoded.drain(..=separator));
+    Some((actor, decoded))
 }
 
 pub(crate) fn read_admin_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -43,10 +44,10 @@ fn read_cookie(headers: &HeaderMap, name: &str, skip_empty_pairs: bool) -> Optio
             if found.is_some() || cookie_value.is_empty() {
                 return None;
             }
-            found = Some(cookie_value.to_owned());
+            found = Some(cookie_value);
         }
     }
-    found
+    found.map(str::to_owned)
 }
 
 pub(crate) fn valid_admin_csrf_header(headers: &HeaderMap, cookie: &str) -> bool {

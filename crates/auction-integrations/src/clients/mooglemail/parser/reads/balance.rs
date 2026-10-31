@@ -10,15 +10,21 @@ impl MoogleMailParser {
         world: MoogleMailWorld,
         observed_at: DateTime<Utc>,
     ) -> Result<MoogleMailBalanceSnapshot, MoogleMailError> {
+        let document =
+            super::identity::trusted_document(document, world, MoogleMailOperation::Balance)?;
+        self.parse_balance_document(&document, world, observed_at)
+    }
+
+    /// 联合证据复用已完成世界证明的 DOM，余额本身仍须通过完整结构校验。
+    pub(crate) fn parse_balance_document(
+        &self,
+        document: &Html,
+        world: MoogleMailWorld,
+        observed_at: DateTime<Utc>,
+    ) -> Result<MoogleMailBalanceSnapshot, MoogleMailError> {
         if observed_at.timestamp_nanos_opt().is_none() {
             return Err(protocol(MoogleMailOperation::Balance, world));
         }
-        let source =
-            str::from_utf8(document).map_err(|_| protocol(MoogleMailOperation::Balance, world))?;
-        if source.trim().is_empty() {
-            return Err(protocol(MoogleMailOperation::Balance, world));
-        }
-        let document = Html::parse_document(source);
         let networth_selector = selector("#networth", MoogleMailOperation::Balance, world)?;
         let networth = unique_element(
             document.select(&networth_selector),
@@ -27,7 +33,7 @@ impl MoogleMailParser {
         )?;
         let visible_credits =
             parse_networth_credits(&normalize_text(networth.text().collect::<String>()));
-        let script = script_text(&document, world, MoogleMailOperation::Balance)?;
+        let script = script_text(document, world, MoogleMailOperation::Balance)?;
         let executable = executable_javascript(&script)
             .ok_or_else(|| protocol(MoogleMailOperation::Balance, world))?;
         let script_credits = required_script_value(&executable, "current_credits");
