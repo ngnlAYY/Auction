@@ -17,7 +17,7 @@
 
 ```bash
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml auction-worker
-cargo run -p auction-worker --features postgres   # 本地开发；优先读取本地角色文件 ops/config/worker.toml
+cargo run --locked -p auction-worker --features postgres   # 本地开发；优先读取本地角色文件 ops/config/worker.toml
 ```
 
 `ops/config/worker.toml` 是运行时默认查找路径，需由部署者准备；仓库模板位于 [`ops/config/examples/worker.toml`](../../ops/config/examples/worker.toml)，不要把模板中的联调配置直接当作已配置的部署环境。

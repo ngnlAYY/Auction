@@ -7,7 +7,7 @@
 | 接口 | 说明 |
 | --- | --- |
 | `TerminationSignals` | 在装配依赖之前订阅 SIGINT 与 SIGTERM，订阅失败即阻断启动；可连续 `recv`，用于识别“排空期间的第二次信号” |
-| `wait_for_drain(signals, timeout, drain)` | 等待 drain 完成、第二次终止信号或超时三者之一，返回 `DrainOutcome::{Completed, TimedOut, Interrupted}` |
+| `wait_for_drain(signals, timeout, drain)` | 等待 drain 完成、第二次终止信号或超时三者之一；信号与超时优先，完成回执复核原截止，返回 `DrainOutcome::{Completed, TimedOut, Interrupted}` |
 | `DEFAULT_DRAIN_TIMEOUT` | 默认排空上限 10 秒 |
 | `TaskGuard` | tokio 任务的 abort-on-drop 守卫：drain 被超时或二次信号取消时不会留下脱离的后台任务 |
 

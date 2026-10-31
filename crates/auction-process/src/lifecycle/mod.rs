@@ -114,9 +114,16 @@ where
     tokio::pin!(deadline);
     tokio::select! {
         biased;
-        result = &mut drain => Ok(DrainOutcome::Completed(result)),
         signal = signals.recv() => Ok(DrainOutcome::Interrupted(signal?)),
         () = &mut deadline => Ok(DrainOutcome::TimedOut),
+        result = &mut drain => {
+            // 单次 poll 或调度延迟可能跨过截止；迟到完成不能把超时报告成正常排空。
+            if tokio::time::Instant::now() >= deadline.deadline() {
+                Ok(DrainOutcome::TimedOut)
+            } else {
+                Ok(DrainOutcome::Completed(result))
+            }
+        },
     }
 }
 

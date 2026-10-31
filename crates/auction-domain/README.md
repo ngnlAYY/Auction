@@ -45,7 +45,7 @@ Draft ──► Preview ──► Live ──► Final ──► Settling ──
 - 普通出价超过代理有效上限时代理耗尽（`Exhausted`）；恰好等于上限时 Fast 与 Slow 都立即以同价守位（同价事实只允许代理内部产生）。创建代理的上限须达到普通最低出价；与已有代理竞争时按上限高低、同上限按授权先后决定胜者，当前价取较低上限 +1000 并受胜者上限约束。
 - 拍卖进入 Final 阶段（Worker 在最早的 lot 有效截止前 `final_phase_lead`、默认 15 分钟时推进；Admin 手动推进时把截止设为当前时刻加该提前量）时，尚未到期且持有人资格有效的 Slow 代理转为 `FinalFast`，已有 Fast 保持原模式，失去资格的活动代理冻结。授权状态闭集包括 `Active`、`FinalFast`、`Exhausted`、`Frozen`、`Closed`。
 - 同一用户在同一 lot 累计设置代理的次数（被超越后可重新设置）受 `proxy_max_outbid_uses` 限制（默认 3，0 为不限）；重新设置时新上限必须高于上一份。
-- 一次命令产生的公开出价、代理转换、代理快照与最终 lot 投影构成一个 `CompetitionPlan`，必须原子写入。
+- 一次命令产生的公开出价、代理转换、代理快照与最终 lot 投影构成一个 `CompetitionPlan`，必须原子写入。创建代理、Slow 到期与 Final 反超的单条竞价草稿在栈上准备，最终公开事实仍由计划持有。
 
 ## 结算计算
 

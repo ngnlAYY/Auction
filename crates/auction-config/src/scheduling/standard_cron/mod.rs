@@ -13,10 +13,10 @@ use fields::{FieldBounds, MONTH_NAMES, WEEKDAY_NAMES, parse_field};
 const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
 const SIGNED_DURATION_LIMIT: u128 = 1_u128 << 63;
 
-/// 与旧版 `cron.ParseStandard` 对齐的五字段 cron 调度。
-/// 支持标准 minute/hour/day-of-month/month/day-of-week 字段、英文月份与星期缩写、旧版描述符、
+/// 保留旧版 `cron.ParseStandard` 输入语法的五字段 cron 调度。
+/// 支持标准 minute/hour/day-of-month/month/day-of-week 字段、英文月份与星期缩写、描述符、
 /// `@every` Go duration，以及 `TZ=` / `CRON_TZ=` IANA 时区前缀。未声明时区时沿用进程本地
-/// 时区；对外只暴露 UTC 触发时刻。
+/// 时区；日历触发及夏令时选择由 croner 持有，对外只暴露 UTC 触发时刻。
 #[derive(Debug, Clone)]
 pub struct StandardCronSchedule {
     kind: StandardCronKind,
@@ -45,7 +45,7 @@ pub enum StandardCronScheduleError {
 }
 
 impl StandardCronSchedule {
-    /// 解析旧版接受的标准五字段 cron、描述符和时区前缀。
+    /// 解析兼容的标准五字段 cron、描述符和时区前缀，不承诺外部实现的日历触发语义。
     pub fn parse(value: &str) -> Result<Self, StandardCronScheduleError> {
         let (timezone, expression) = split_timezone(value)?;
         let kind = match expression {

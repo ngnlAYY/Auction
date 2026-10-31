@@ -90,13 +90,15 @@ where
             async move { (identity, size, future.await) }
         }
     });
+    // reload 只驱动请求；同一身份开始重读时不再复制并深比较整页旧结果。
+    let requested = use_memo(move || (request(), pagination.size()));
     use_memo(move || {
-        let identity = request();
-        let size = pagination.size();
+        let requested = requested.read();
+        let (identity, size) = &*requested;
         resource
             .read()
             .as_ref()
-            .filter(|(loaded, loaded_size, _)| *loaded == identity && *loaded_size == size)
+            .filter(|(loaded, loaded_size, _)| loaded == identity && loaded_size == size)
             .map(|(_, _, result)| result.clone())
     })
 }

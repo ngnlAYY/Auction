@@ -209,8 +209,11 @@ pub(crate) fn require_config_binding(
         .config_file
         .as_deref()
         .with_context(|| format!("{} unit 未设置 Environment=AUCTION_CONFIG_FILE", role.name()))?;
-    let same = std::fs::canonicalize(configured).ok() == std::fs::canonicalize(expected).ok();
-    if !same {
+    let configured = std::fs::canonicalize(configured)
+        .with_context(|| format!("解析 {} unit 的 AUCTION_CONFIG_FILE 失败", role.name()))?;
+    let expected = std::fs::canonicalize(expected)
+        .with_context(|| format!("解析 {} 预检角色文件失败", role.name()))?;
+    if configured != expected {
         anyhow::bail!(
             "{} unit 的 AUCTION_CONFIG_FILE（{}）与 --config-dir 中的角色文件（{}）不一致",
             role.name(),

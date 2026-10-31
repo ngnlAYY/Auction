@@ -46,10 +46,7 @@ pub(crate) async fn acquire(
         return Ok(MaintenanceGuard { _locks: Vec::new(), mode: "unmanaged" });
     }
     let systemctl = Systemctl::new(&args.units)?;
-    let mut locks = Vec::new();
-    if args.units.state_dir.is_dir() {
-        locks.push(files::lock_file(&args.units.state_dir.join(DEPLOYMENT_LOCK), DEPLOYMENT_BUSY)?);
-    }
+    let locks = vec![deployment_lock(&args.units)?];
     let mut running = Vec::new();
     for role in ManagedRole::START_ORDER {
         let state = systemctl.show(role).await?;

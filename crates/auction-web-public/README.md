@@ -30,6 +30,8 @@
 - 竞价、代理与标记命令带稳定命令 ID；网络结果不确定时保留原负载供“原样重试”，不会生成新命令。
 - 会话 Cookie 由后端以 HttpOnly 下发；跨标签页通过 `storage` 事件触发权威身份重读，Cookie 写入共用原生 Web Lock。会话读取、Cookie 同步与身份变更的边界见 [设计约定](DESIGN.md#会话)。
 - 列表响应绑定世界、场次、筛选、页码与每页数量等完整请求身份；切换查询时不把旧资源快照当作新结果，同一查询的后台重读可保留已完成展示。
+- 整场标记集合按可读用户身份订阅会话变化：身份读取短暂失败后恢复时立即补读，同账号期限更新不重启集合请求；展示缓存不提供命令 CAS 版本，未知命令仍由页面宿主保留。
+- 首次恢复被 Router 规范化的查询参数时，同时保留 URL 片段与 `history.state`；历史价格的平铺展示直接接管当前页行缓冲，分组展示只索引本页，不读取其他分页。
 
 ## 本地偏好
 
@@ -52,7 +54,7 @@
 ## 构建
 
 ```bash
-cargo check -p auction-web-public --target wasm32-unknown-unknown   # 编译检查
+cargo check --locked -p auction-web-public --target wasm32-unknown-unknown   # 编译检查
 bash ci/release/web-bundle.sh public                               # 生成发布 payload（需要受控工具 dx）
 ```
 

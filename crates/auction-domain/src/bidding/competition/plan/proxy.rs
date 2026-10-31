@@ -179,7 +179,7 @@ pub(super) fn plan_create_proxy(
     if bid_ids.len() != 1 {
         return Err(DomainError::InvalidBidState("代理创建事实数量不正确"));
     }
-    let drafts = vec![BidDraft {
+    let drafts = [BidDraft {
         bid_id: bid_ids[0],
         bidder_id: winner_user_id,
         amount,
@@ -190,7 +190,7 @@ pub(super) fn plan_create_proxy(
         final_state,
         command_id,
         now,
-        drafts,
+        &drafts,
         ProxyPlanOutput { transitions, states: proxy_states, active_proxy_id },
     )
 }
@@ -230,7 +230,7 @@ pub(super) fn plan_lower_proxy(
         state,
         command_id,
         now,
-        Vec::new(),
+        &[],
         ProxyPlanOutput {
             transitions: vec![transition],
             states: vec![after],
@@ -279,7 +279,7 @@ pub(super) fn plan_slow_due(
         final_state,
         command_id,
         now,
-        vec![BidDraft {
+        &[BidDraft {
             bid_id: bid_ids[0],
             bidder_id: active.user_id,
             amount,
@@ -312,7 +312,7 @@ pub(super) fn plan_final_proxy(
     let mut after = active;
     let transition = after.promote_to_final_fast(command_id)?;
     let mut final_state = state;
-    let mut drafts = Vec::new();
+    let mut draft = None;
     if final_state.slow_authorization_id == Some(active.id) {
         let current = final_state
             .current_price
@@ -322,7 +322,7 @@ pub(super) fn plan_final_proxy(
             return Err(DomainError::InvalidBidState("最终阶段代理事实数量不正确"));
         }
         final_state = clear_slow_schedule(final_state)?;
-        drafts.push(BidDraft {
+        draft = Some(BidDraft {
             bid_id: bid_ids[0],
             bidder_id: active.user_id,
             amount,
@@ -336,7 +336,7 @@ pub(super) fn plan_final_proxy(
         final_state,
         command_id,
         now,
-        drafts,
+        draft.as_slice(),
         ProxyPlanOutput {
             transitions: vec![transition],
             states: vec![after],
@@ -382,7 +382,7 @@ pub(super) fn plan_terminal_proxy(
         final_state,
         command_id,
         now,
-        Vec::new(),
+        &[],
         ProxyPlanOutput {
             transitions: vec![transition],
             states: vec![after],

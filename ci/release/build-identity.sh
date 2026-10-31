@@ -105,8 +105,9 @@ web_other_surface() {
 
 # Web payload 只允许普通文件与目录；符号链接可能让后续 chmod/touch 越出 payload。
 web_payload_tree_is_plain() {
-	local root=$1
-	[[ -z $(find "$root" -type l -print -quit) && -z $(find "$root" ! -type f ! -type d -print -quit) ]]
+	local root=$1 invalid
+	invalid=$(find "$root" ! -type f ! -type d -print -quit) || return 1
+	[[ -z "$invalid" ]]
 }
 
 # payload 文件摘要清单（不含内嵌标记），按路径排序；生成与复核共用同一算法。
@@ -117,7 +118,7 @@ web_payload_checksums() (
 
 # Web payload 完整门禁：入口与本 surface 标题、跨 surface 隔离、普通文件、内嵌标记、固定清单及唯一一组
 # JS/WASM。成功时输出 payload 哈希；web-bundle 的新建/复用与 release 的制品核对共用同一判定。
-verify_web_payload() {
+verify_web_payload() (
 	local surface=$1 stable_root=$2
 	local root="$stable_root/public" other title other_title marker manifest marker_sha actual_sha file
 	other=$(web_other_surface "$surface") || return 2
@@ -153,12 +154,15 @@ verify_web_payload() {
 		printf '%s Web 制品标记无效\n' "$surface" >&2
 		return 1
 	fi
-	# 每次都重算清单：标记与清单必须互相印证，缓存内容不能自证可信。
-	if ! cmp -s "$manifest" <(web_payload_checksums "$root"); then
+	# 显式检查清单生成的退出码；进程替换失败可能留下仍与缓存相等的不完整输出。
+	local checksums
+	checksums=$(mktemp) || return 1
+	trap 'rm -f -- "$checksums"' EXIT
+	if ! web_payload_checksums "$root" >"$checksums" || ! cmp -s "$manifest" "$checksums"; then
 		printf '%s Web payload 与固定清单不一致\n' "$surface" >&2
 		return 1
 	fi
-	actual_sha=$(sha256_file "$manifest")
+	actual_sha=$(sha256_file "$manifest") || return 1
 	if [[ "$actual_sha" != "$marker_sha" ]]; then
 		printf '%s Web payload 哈希与内嵌标记不一致\n' "$surface" >&2
 		return 1
@@ -173,7 +177,7 @@ verify_web_payload() {
 		return 1
 	fi
 	printf '%s\n' "$marker_sha"
-}
+)
 
 # Cargo 按调用目录、父目录与 CARGO_HOME 合并配置；应用与工具复用同一文件身份算法。
 # 只输出摘要，保留链接目标和缺失路径身份，不把用户配置原文写入回执。

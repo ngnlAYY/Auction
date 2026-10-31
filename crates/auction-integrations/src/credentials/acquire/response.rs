@@ -47,7 +47,12 @@ pub(super) async fn read(
             value.set_sensitive(true);
         }
     }
-    let mut body = SecretBuffer(Vec::new());
+    let capacity = response
+        .content_length()
+        .and_then(|length| usize::try_from(length).ok())
+        .unwrap_or_default()
+        .min(MAXIMUM_RESPONSE_BYTES);
+    let mut body = SecretBuffer(Vec::with_capacity(capacity));
     while let Some(chunk) = response.chunk().await.map_err(|_| unavailable())? {
         if body.0.len().saturating_add(chunk.len()) > MAXIMUM_RESPONSE_BYTES {
             return Err(unavailable());

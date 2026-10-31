@@ -1,4 +1,4 @@
-//! PostgreSQL Admin recovery 报告读取适配器；在单个 Serializable 快照内读取 case、action 和
+//! PostgreSQL Admin recovery 报告读取适配器；在单个可重复读只读快照内读取 case、action 和
 //! lot/equipment 展示字段，claim token、lease、request digest、外部 payload 不跨应用端口。
 
 use auction_application::{

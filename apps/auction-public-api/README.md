@@ -16,7 +16,7 @@
 
 ```bash
 AUCTION_CONFIG_FILE=/etc/auction/public.toml auction-public-api
-cargo run -p auction-public-api --features postgres,web-embed   # 需先准备默认运行配置 ops/config/public.toml
+cargo run --locked -p auction-public-api --features postgres,web-embed   # 需先准备默认运行配置 ops/config/public.toml
 ```
 
 1. 按 `AUCTION_CONFIG_FILE` 或 `ops/config/public.toml` 加载并校验配置（见 [auction-config](../../crates/auction-config/README.md)）；后者是相对工作目录的默认运行配置位置，仓库模板在 [`ops/config/examples/`](../../ops/config/examples)，不会自动生成该文件。`auction-server` 以显式路径调用 `run_from_path`。

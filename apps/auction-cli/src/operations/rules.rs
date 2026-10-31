@@ -1,13 +1,7 @@
 //! 规则目录首次导入：先完整读取五种语言并核对数据库现状，任何已发布的不同正文都在写入前拒绝；
 //! 缺失的语言以稳定派生的命令 ID 发布，部分完成后用同一批次 ID 重试即可续上。
 
-use std::{
-    fs::{self, OpenOptions},
-    io::Read,
-    os::unix::fs::OpenOptionsExt,
-    path::Path,
-    sync::Arc,
-};
+use std::{fs, path::Path, sync::Arc};
 
 use anyhow::Context;
 use auction_application::{
@@ -25,7 +19,7 @@ use uuid::Uuid;
 use crate::app::print_json;
 use crate::cli::RulesCommand;
 use crate::deployment::ConfigDir;
-use crate::support::text;
+use crate::support::{files, text};
 
 /// 与 Admin 发布接口相同的请求种类，保证同一正文在两个入口得到同一请求摘要。
 const REQUEST_KIND: &str = "admin_rules_publish";
@@ -62,13 +56,17 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: RulesCommand) -> anyhow
         .collect::<anyhow::Result<Vec<_>>>()?;
 
     let (config, store) = super::worker_store(config_dir).await?;
-    let cache = match config.cache.backend {
-        CacheBackend::Disabled => CacheStore::disabled(),
-        CacheBackend::Redis => CacheStore::redis(config.redis_url().context("缺少 redis_url")?)
-            .context("连接 Redis 失败")?,
-    };
-    let rules = DatabaseAdminRulesCommands::new(Arc::clone(&store), Arc::new(super::SystemClock));
-    let result = import(&rules, &cache, sources, command_id, &actor).await;
+    let result = async {
+        let cache = match config.cache.backend {
+            CacheBackend::Disabled => CacheStore::disabled(),
+            CacheBackend::Redis => CacheStore::redis(config.redis_url().context("缺少 redis_url")?)
+                .context("连接 Redis 失败")?,
+        };
+        let rules =
+            DatabaseAdminRulesCommands::new(Arc::clone(&store), Arc::new(super::SystemClock));
+        import(&rules, &cache, sources, command_id, &actor).await
+    }
+    .await;
     store.postgres_pool().close().await;
     let (documents, cache_failures) = result?;
     print_json(&serde_json::json!({
@@ -158,20 +156,9 @@ async fn import(
 /// 读取 `<locale>.md`：去掉开头单个 BOM，首个非空行去掉前导 `#` 作为标题，正文规范化后校验。
 fn load_source(directory: &Path, locale: &str) -> anyhow::Result<RulesSource> {
     let path = directory.join(format!("{locale}.md"));
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
-        .open(&path)
-        .with_context(|| format!("打开 {locale}.md 失败"))?;
-    if !file.metadata()?.is_file() {
-        anyhow::bail!("{locale}.md 必须是非符号链接的普通文件");
-    }
     let limit = (MAX_RULE_MARKDOWN_BYTES + BOM_BYTES) as u64;
-    let mut bytes = Vec::new();
-    file.take(limit + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > limit {
-        anyhow::bail!("{locale}.md 超过允许大小");
-    }
+    let bytes =
+        files::read_bounded(&path, limit).with_context(|| format!("读取 {locale}.md 失败"))?;
     let mut markdown =
         String::from_utf8(bytes).with_context(|| format!("{locale}.md 不是 UTF-8"))?;
     if markdown.starts_with('\u{feff}') {

@@ -305,8 +305,11 @@ pub(super) fn clean_line(value: &str) -> String {
 }
 
 pub(super) fn body_looks_like_html(body: &[u8]) -> bool {
-    let text = String::from_utf8_lossy(body).to_ascii_lowercase();
-    text.contains("<html") || text.contains("<form") || text.contains("<body")
+    body.windows(5).any(|token| {
+        token.eq_ignore_ascii_case(b"<html")
+            || token.eq_ignore_ascii_case(b"<form")
+            || token.eq_ignore_ascii_case(b"<body")
+    })
 }
 
 pub(super) fn is_session_expired(

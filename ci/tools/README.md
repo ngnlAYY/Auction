@@ -34,6 +34,22 @@ bash ci/tools/bootstrap.sh identity release           # 校验回执后输出工
 
 发布入口（`ci/release/release.sh`、`ci/release/web-bundle.sh`）会把 `target/build-tools/bin` 放到 `PATH` 前部并设置 `NO_DOWNLOADS=1`，dx 不会在构建时自行下载工具。
 
+## 依赖审计状态（2026-10-31）
+
+使用受控 cargo-audit 0.22.2 对完整锁文件执行 `audit --deny warnings`；RustSec 公告库提交为 `2295466c4e9df26647fd67d8fa1c705ac2fc7f81`。下表按包版本计数，包含锁图中的可选及其他平台依赖，不代表每项都能由实际构建路径触发。
+
+| 锁文件 | 漏洞匹配 | 警告 | 结果 |
+| --- | --- | --- | --- |
+| 应用 `Cargo.lock` | 0 | 0 | 通过 |
+| `ci/tools/locks/cargo-audit.Cargo.lock` | 0 | 0 | 通过 |
+| `ci/tools/locks/dioxus-cli.Cargo.lock` | 13 | 11 | 未通过 |
+| `ci/tools/locks/sccache.Cargo.lock` | 4 | 9 | 未通过 |
+
+Dioxus CLI 的 `libz-sys` 已从 1.1.28 单项升级到 1.1.31，消除 [RUSTSEC-2026-0418](https://rustsec.org/advisories/RUSTSEC-2026-0418.html) 匹配；其他依赖版本不变。原锁中的 `cc 1.2.61` 未满足公告所述 `cc >= 1.6.0` 触发条件，本次升级不能作为既有缓存已泄露环境变量的证据。
+
+剩余漏洞涉及 Dioxus CLI 的 `gix-date`、两个版本的 `quick-xml`、`rkyv`、`ruzstd` 和两个版本的 `zip`，以及 sccache 的 `rsa` 与 `zip`。已公布修复版多数跨越当前依赖的兼容范围，RSA 公告尚无修复版；本轮未强行跨版本替换或忽略公告。警告另含未维护、健全性问题，以及 sccache 锁中的已撤回 `scc 2.1.0`。工具安装回执通过只证明来源与配方一致，不表示上述安全审计通过。
+
+
 ## rustup.sh
 
 ```bash

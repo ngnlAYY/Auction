@@ -33,7 +33,12 @@ pub(super) fn page() -> Element {
     let query = use_dashboard_query_state();
     let query_state = query.state;
     let poll_seconds = use_memo(move || query_state().poll_seconds);
-    use_auto_poll(poll_seconds, move || refresh.set(refresh().saturating_add(1)));
+    use_auto_poll(poll_seconds, move || {
+        // 手动刷新或命令刚触发的 GET 仍在进行时，轮询不能取消它并重新计时。
+        if dashboard.state().cloned() == UseResourceState::Ready {
+            refresh.set(refresh().saturating_add(1));
+        }
+    });
     let mut poll_query = query.clone();
     let readiness = use_context::<AdminReadinessResource>();
     // 默认管理首页的聚合快照无论成功或失败，只要已有结果就一次性揭示真实页面。

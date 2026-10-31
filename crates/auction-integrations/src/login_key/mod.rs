@@ -1,6 +1,6 @@
-//! 用户登录 key 的签发、Admin 手工封装与 Worker 专用解密；Users owner 只见 SHA-256
-//! 摘要与 AES-256-GCM 信封，AAD 绑定用户 UUID、指纹绑定用途，只有 Delivery transport
-//! 在发送瞬间解密。
+//! 用户登录 key 的签发、Admin 手工封装与受控解密；Users owner 只见 SHA-256
+//! 摘要与 AES-256-GCM 信封，AAD 绑定用户 UUID、指纹绑定用途。Delivery 在发送时
+//! 解密，Admin 创建/签发命令及其幂等重放通过专用 opener 返回生成的 key。
 //! Admin 手工 key 保留旧版 32–256 字节闭集，Worker 解密只接受系统签发的 canonical Base64URL。
 
 use std::{fmt, sync::Arc};

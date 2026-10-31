@@ -28,29 +28,34 @@ const BUDGET: Duration = Duration::from_secs(30);
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: FundsCommand) -> anyhow::Result<()> {
     let (config, store) = super::worker_store(config_dir).await?;
-    let result = match command {
-        FundsCommand::Preview { uid } => preview(&store, uid).await,
-        FundsCommand::OpenRecordOnly { write } => open_record_only(&config, &store, write).await,
-        FundsCommand::Reconcile {
-            write,
-            proprietary_credits,
-            compensation_credits,
-            dedicated_account,
-        } => {
-            let command = FundingReconciliationCommand {
-                command_id: text::command_id(write.command_id, "--command-id")?,
-                actor: text::actor(&write.actor)?.to_owned(),
-                expected_uid: write.uid,
-                expected_version: write.expected_version,
-                preview_digest: text::sha256_hex(&write.preview_digest)?,
+    let result = async {
+        match command {
+            FundsCommand::Preview { uid } => preview(&store, uid).await,
+            FundsCommand::OpenRecordOnly { write } => {
+                open_record_only(&config, &store, write).await
+            }
+            FundsCommand::Reconcile {
+                write,
                 proprietary_credits,
                 compensation_credits,
-                confirm: write.confirm,
-                dedicated_account_no_external_liabilities: dedicated_account,
-            };
-            reconcile(&config, &store, command).await
+                dedicated_account,
+            } => {
+                let command = FundingReconciliationCommand {
+                    command_id: text::command_id(write.command_id, "--command-id")?,
+                    actor: text::actor(&write.actor)?.to_owned(),
+                    expected_uid: write.uid,
+                    expected_version: write.expected_version,
+                    preview_digest: text::sha256_hex(&write.preview_digest)?,
+                    proprietary_credits,
+                    compensation_credits,
+                    confirm: write.confirm,
+                    dedicated_account_no_external_liabilities: dedicated_account,
+                };
+                reconcile(&config, &store, command).await
+            }
         }
-    };
+    }
+    .await;
     store.postgres_pool().close().await;
     result
 }

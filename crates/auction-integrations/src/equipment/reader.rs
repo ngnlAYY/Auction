@@ -137,8 +137,9 @@ impl EquipmentSourceAdapter {
         let (target, equipment_id, key) =
             parse_equipment_url(&self.endpoint, &self.policy, &world_id, &equipment_url)?;
         let world = MoogleMailWorld::parse(&world_id).ok_or(AdminIntakeError::InvalidCommand)?;
-        let body = self.fetch_document_for_world(world, target).await?;
-        let facts = parse_equipment_page(&body, &equipment_id)
+        let body =
+            fetch::SensitiveResponseBody(self.fetch_document_for_world(world, target).await?);
+        let facts = parse_equipment_page(&body.0, &equipment_id)
             .map_err(|reason| diagnostics::source_parse_error("html", reason))?;
         let key = EquipmentKey::new(&key).map_err(|_| AdminIntakeError::InvalidSource)?;
         facts_to_snapshot(&world_id, facts, key)
@@ -176,8 +177,9 @@ impl EquipmentSourceAdapter {
             .map_err(|_| AdminIntakeError::SourceUnavailable)?;
         match self.fetch_document_attempt(target, Some(session.cookie())).await {
             Ok(body) => {
+                let mut body = fetch::SensitiveResponseBody(body);
                 session.check_current().await.map_err(|_| AdminIntakeError::SourceUnavailable)?;
-                Ok(body)
+                Ok(std::mem::take(&mut body.0))
             }
             Err(EquipmentFetchError::Intake(error)) => Err(error),
             Err(EquipmentFetchError::SessionExpired) => {
@@ -205,7 +207,7 @@ impl EquipmentSourceAdapter {
         cookie: Option<&MoogleMailCookie>,
     ) -> Result<Vec<u8>, EquipmentFetchError> {
         match self.fetch_document_once_observed(target, cookie, None).await {
-            Ok(body) => Ok(body.body),
+            Ok(mut body) => Ok(std::mem::take(&mut body.body)),
             Err(EquipmentFetchError::SessionExpired) => Err(EquipmentFetchError::SessionExpired),
             Err(EquipmentFetchError::Observed(failure))
                 if failure.category == MailEquipmentDiagnosticCategory::SessionExpired =>
@@ -415,7 +417,7 @@ impl EquipmentSourceAdapter {
             }
         };
         let result = self.fetch_document_for_world_observed(world, target).await;
-        let fetched = match result {
+        let mut fetched = match result {
             Ok(fetched) => fetched,
             Err(mut failure) => {
                 let body = std::mem::take(&mut failure.body);
@@ -446,7 +448,7 @@ impl EquipmentSourceAdapter {
         };
         let response_status = Some(fetched.status);
         let response_elapsed = fetched.elapsed_millis;
-        let body = fetched.body;
+        let body = std::mem::take(&mut fetched.body);
         let equipment_id = context.external_equipment_id.clone();
         let parsed = parse_equipment_page(&body, &equipment_id);
         let owned_body = body;

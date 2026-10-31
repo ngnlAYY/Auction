@@ -135,7 +135,7 @@ pub(crate) struct UnitArgs {
     /// systemctl 可执行文件的绝对路径。
     #[arg(long, value_name = "PATH", default_value = "/usr/bin/systemctl")]
     pub(crate) systemctl: PathBuf,
-    /// 部署控制锁所在的私有状态目录；不存在时由 service 命令以 0700 创建。
+    /// 部署控制锁所在的私有状态目录；不存在时由 service 或分体维护命令以 0700 创建。
     #[arg(long, value_name = "DIR", default_value = "/var/lib/auction/deployment")]
     pub(crate) state_dir: PathBuf,
     /// Worker systemd unit。

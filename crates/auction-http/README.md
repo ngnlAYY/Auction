@@ -20,7 +20,7 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 
 - **请求 ID**：读取或生成 `x-request-id` 并始终在响应头回传，非法或重复输入拒绝；常规 handler 错误的 JSON `request_id` 字段可能为 null。
 - **客户端地址**：只有来自 `trusted_proxy_cidrs` 的 TCP 对端或启用 `trusted_unix_proxy` 的 Unix 上游，才采信 `X-Forwarded-For`；限流按真实客户端地址计数。
-- **origin**：启用 allowlist 时，状态变更请求必须携带精确匹配的 `Origin`；WebSocket 升级必须且只能携带一个可信 Origin。
+- **origin**：启用 allowlist 时，普通状态变更请求允许省略 `Origin`；一旦提供，必须是唯一且精确匹配的值。WebSocket 升级必须且只能携带一个可信 Origin。
 - **限流**：固定窗口、按地址计数，登录、状态变更与 realtime 连接尝试使用独立账本；超限返回 `429`、`code = "rate_limited"` 与 `Retry-After` 头。
 - **超时**：普通请求与 WebSocket 升级前握手受 `request_timeout_seconds` 限制，不限制升级后的连接寿命。
 - **严格解析**：JSON 写接口拒绝未知字段与非 JSON 内容类型；空 PUT 会话同步、Basic 登录等遵循各自协议。Public/Admin 业务路由严格匹配方法，JSON GET 不隐式接受 HEAD，倒计时显式支持 GET/HEAD；健康、指标与静态资源由各自 owner 定义方法语义。
@@ -34,6 +34,8 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 | Admin | `auction_admin_session` + `auction_admin_csrf` | 写操作须在 `x-csrf-token` 头回传 CSRF token |
 
 `cookie_secure = true` 时 Cookie 带 `Secure`，生产 HTTPS 必须开启。
+
+Admin 写守卫先检查限流、Origin 与 CSRF，再读取权威会话；CSRF Cookie 的重复项、空值和畸形 Cookie 仍拒绝。已核对的 CSRF 值在同一请求中复用，避免再次扫描并复制 Cookie。Basic 登录复用解码缓冲区承载密码，Public 拍卖筛选和游标直接转移已解码字符串；这些优化不改变认证顺序、请求分类或响应字段。
 
 ## 浏览器资源
 

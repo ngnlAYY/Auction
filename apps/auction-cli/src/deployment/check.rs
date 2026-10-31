@@ -81,24 +81,24 @@ pub(crate) fn check(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<Depl
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         anyhow::bail!("配置目录必须是非符号链接目录：{}", directory.display());
     }
-    permissions.not_writable_by_others(directory, "配置目录")?;
+    permissions.not_writable_by_others(directory, "配置目录", &metadata)?;
 
     let mut configs = Vec::with_capacity(3);
     let mut paths = Vec::with_capacity(3);
     for role in [Role::Public, Role::Admin, Role::Worker] {
         let path = config_dir.role_path(role);
-        regular_file(&path, "角色配置")?;
-        permissions.not_writable_by_others(&path, "角色配置")?;
+        let metadata = regular_file(&path, "角色配置")?;
+        permissions.not_writable_by_others(&path, "角色配置", &metadata)?;
         let config = config_dir.load(role)?;
         let common = config.common_config_path.as_deref().context("角色配置缺少 common_file")?;
-        regular_file(common, "公共配置")?;
-        permissions.not_writable_by_others(common, "公共配置")?;
+        let metadata = regular_file(common, "公共配置")?;
+        permissions.not_writable_by_others(common, "公共配置", &metadata)?;
         let secrets = config.secrets_path.as_deref().context("角色配置缺少 secrets_file")?;
-        regular_file(secrets, "敏感配置")?;
-        permissions.owner_only(secrets)?;
+        let metadata = regular_file(secrets, "敏感配置")?;
+        permissions.owner_only(secrets, &metadata)?;
         if let Some(runtime) = config.runtime_config_path.as_deref() {
-            regular_file(runtime, "runtime 配置")?;
-            permissions.runtime(runtime)?;
+            let metadata = regular_file(runtime, "runtime 配置")?;
+            permissions.runtime(runtime, &metadata)?;
         }
         let url =
             config.database_url().with_context(|| format!("{} 配置缺少数据库连接", role.name()))?;
@@ -236,13 +236,13 @@ fn canonical(path: Option<&Path>) -> anyhow::Result<Option<PathBuf>> {
     .transpose()
 }
 
-fn regular_file(path: &Path, kind: &str) -> anyhow::Result<()> {
+fn regular_file(path: &Path, kind: &str) -> anyhow::Result<fs::Metadata> {
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("读取{kind}失败：{}", path.display()))?;
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         anyhow::bail!("{kind}必须是非符号链接的普通文件：{}", path.display());
     }
-    Ok(())
+    Ok(metadata)
 }
 
 struct Permissions {
@@ -259,16 +259,13 @@ impl Permissions {
         Ok(())
     }
 
-    fn mode(path: &Path) -> anyhow::Result<u32> {
-        Ok(fs::symlink_metadata(path)
-            .with_context(|| format!("读取权限失败：{}", path.display()))?
-            .permissions()
-            .mode()
-            & 0o777)
-    }
-
-    fn not_writable_by_others(&mut self, path: &Path, kind: &str) -> anyhow::Result<()> {
-        let mode = Self::mode(path)?;
+    fn not_writable_by_others(
+        &mut self,
+        path: &Path,
+        kind: &str,
+        metadata: &fs::Metadata,
+    ) -> anyhow::Result<()> {
+        let mode = metadata.permissions().mode() & 0o777;
         if mode & 0o022 != 0 {
             self.report(format!(
                 "{kind}不得允许 group/other 写入（{mode:o}）：{}",
@@ -278,8 +275,8 @@ impl Permissions {
         Ok(())
     }
 
-    fn owner_only(&mut self, path: &Path) -> anyhow::Result<()> {
-        let mode = Self::mode(path)?;
+    fn owner_only(&mut self, path: &Path, metadata: &fs::Metadata) -> anyhow::Result<()> {
+        let mode = metadata.permissions().mode() & 0o777;
         if mode & 0o077 != 0 {
             self.report(format!("敏感配置必须仅 owner 可访问（{mode:o}）：{}", path.display()))?;
         }
@@ -287,15 +284,15 @@ impl Permissions {
     }
 
     /// Admin 以原子替换保存 runtime，文件须为 0640 且父目录不得允许他人写入。
-    fn runtime(&mut self, path: &Path) -> anyhow::Result<()> {
+    fn runtime(&mut self, path: &Path, file_metadata: &fs::Metadata) -> anyhow::Result<()> {
         let parent = path.parent().context("runtime 配置缺少父目录")?;
         let metadata = fs::symlink_metadata(parent)
             .with_context(|| format!("读取 runtime 父目录失败：{}", parent.display()))?;
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
             anyhow::bail!("runtime 配置父目录必须是非符号链接目录：{}", parent.display());
         }
-        self.not_writable_by_others(parent, "runtime 配置父目录")?;
-        let mode = Self::mode(path)?;
+        self.not_writable_by_others(parent, "runtime 配置父目录", &metadata)?;
+        let mode = file_metadata.permissions().mode() & 0o777;
         if mode != 0o640 {
             self.report(format!("runtime 配置必须使用 0640 权限（{mode:o}）：{}", path.display()))?;
         }

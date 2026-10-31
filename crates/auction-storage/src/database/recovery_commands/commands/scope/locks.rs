@@ -159,21 +159,26 @@ pub(in crate::database::recovery_commands) async fn lock_obligations(
         ids.push(id);
     }
     ids.sort_unstable();
+    ids.dedup();
 
+    // 与原逐 ID 加锁保持相同 UUID 顺序；一条查询锁齐完整集合，缺失任何义务都失败关闭。
+    let rows = sqlx::query(
+        r#"SELECT id, auction_id, lot_id, world_id, obligation_kind, business_state,
+                  equipment_id, amount, recipient_user_id, recipient_game_identity
+           FROM public.settlement_obligations
+           WHERE id = ANY($1)
+           ORDER BY id
+           FOR UPDATE"#,
+    )
+    .bind(&ids)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    if rows.len() != ids.len() {
+        return Err(RecoveryCommandError::NotConfirmable);
+    }
     let mut obligations = BTreeMap::new();
-    for id in ids {
-        let row = sqlx::query(
-            r#"SELECT id, auction_id, lot_id, world_id, obligation_kind, business_state,
-                      equipment_id, amount, recipient_user_id, recipient_game_identity
-               FROM public.settlement_obligations
-               WHERE id = $1
-               FOR UPDATE"#,
-        )
-        .bind(id)
-        .fetch_optional(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?
-        .ok_or(RecoveryCommandError::NotConfirmable)?;
+    for (id, row) in ids.into_iter().zip(rows) {
         let obligation = ObligationRow {
             id: row.try_get("id").map_err(map_sql_error)?,
             auction_id: row.try_get("auction_id").map_err(map_sql_error)?,

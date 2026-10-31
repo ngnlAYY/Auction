@@ -534,7 +534,7 @@ pub(super) fn valid_public_base_url(value: &str) -> bool {
     };
     (parsed.scheme() == "https"
         || (parsed.scheme() == "http"
-            && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1"))))
+            && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))))
         && parsed.host_str().is_some()
         && parsed.username().is_empty()
         && parsed.password().is_none()

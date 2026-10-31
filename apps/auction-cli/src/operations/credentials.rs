@@ -18,19 +18,22 @@ use crate::support::text;
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: CredentialCommand) -> anyhow::Result<()> {
     let (config, store) = super::worker_store(config_dir).await?;
-    let (key_id, key_material) = config
-        .credential_data_key_id()
-        .zip(config.credential_data_key())
-        .context("敏感配置缺少 credential_data_key_id/credential_data_key")?;
-    let data_key = Arc::new(
-        DataKey::from_base64(key_id, key_material)
-            .map_err(|_| anyhow::anyhow!("credential 数据密钥格式无效"))?,
-    );
-    let sealer = Arc::new(CredentialSealer::new(Arc::clone(&data_key)));
-    let acquirer =
-        Arc::new(CredentialAcquirer::production(data_key).context("初始化凭据获取客户端失败")?);
-    let service = AdminCredentialService::new(Arc::clone(&store), sealer, acquirer);
-    let result = execute(&service, command).await;
+    let result = async {
+        let (key_id, key_material) = config
+            .credential_data_key_id()
+            .zip(config.credential_data_key())
+            .context("敏感配置缺少 credential_data_key_id/credential_data_key")?;
+        let data_key = Arc::new(
+            DataKey::from_base64(key_id, key_material)
+                .map_err(|_| anyhow::anyhow!("credential 数据密钥格式无效"))?,
+        );
+        let sealer = Arc::new(CredentialSealer::new(Arc::clone(&data_key)));
+        let acquirer =
+            Arc::new(CredentialAcquirer::production(data_key).context("初始化凭据获取客户端失败")?);
+        let service = AdminCredentialService::new(Arc::clone(&store), sealer, acquirer);
+        execute(&service, command).await
+    }
+    .await;
     store.postgres_pool().close().await;
     result
 }

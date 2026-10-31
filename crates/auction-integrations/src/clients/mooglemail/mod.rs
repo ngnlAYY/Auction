@@ -1,5 +1,5 @@
-//! HentaiVerse MoogleMail 的受限读取与写入适配器；解析后只返回不含原始 HTML 的 typed
-//! envelope，页面 token 与 Cookie 不进入返回值。
+//! HentaiVerse MoogleMail 的受限读取与写入适配器；解析后返回 typed envelope，
+//! 页面 token 只供受控写入使用，Cookie 与 token 不进入业务 DTO 或日志。
 //! 应用层仍需自行完成邮件分类、幂等入库和业务命令编排。
 
 mod client;

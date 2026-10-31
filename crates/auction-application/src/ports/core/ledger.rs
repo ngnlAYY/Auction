@@ -1,4 +1,4 @@
-use std::future::Future;
+use std::{future::Future, io};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -64,8 +64,23 @@ impl RequestHash {
             request: &'a T,
         }
 
-        let payload = serde_json::to_vec(&Envelope { command_kind, aggregate_id, request })?;
-        Ok(Self::from_canonical_bytes(&payload))
+        // 沿用同一 JSON serializer 与字段顺序，直接散列输出，避免完整请求缓冲区。
+        let mut writer = RequestHashWriter(Sha256::new());
+        serde_json::to_writer(&mut writer, &Envelope { command_kind, aggregate_id, request })?;
+        Ok(Self::new(writer.0.finalize().into()))
+    }
+}
+
+struct RequestHashWriter(Sha256);
+
+impl io::Write for RequestHashWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 

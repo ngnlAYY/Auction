@@ -1,4 +1,4 @@
-//! 装备 key 的加密信封适配器；唯一接触数据密钥材料的实现，应用层只得到密文信封，明文
+//! 数据密钥与装备 key 的加密信封适配器；应用层只得到密文信封，明文
 //! key 用后由领域值对象清零。
 
 use std::fmt;
@@ -57,7 +57,7 @@ pub enum EquipmentKeyOpenerError {
 pub struct DataKey {
     id: String,
     fingerprint: String,
-    material: Vec<u8>,
+    material: [u8; DATA_KEY_LENGTH],
 }
 
 impl DataKey {
@@ -66,9 +66,12 @@ impl DataKey {
         if !auction_domain::valid_key_id(id) {
             return Err(EquipmentKeySealerError::InvalidKeyId);
         }
-        let mut material =
-            BASE64.decode(encoded).map_err(|_| EquipmentKeySealerError::InvalidDataKey)?;
-        if material.len() != DATA_KEY_LENGTH {
+        // 固定输出容量，畸形或过长配置不能先分配与输入等大的秘密缓冲。
+        let mut material = [0_u8; DATA_KEY_LENGTH];
+        if !BASE64
+            .decode_slice(encoded, &mut material)
+            .is_ok_and(|length| length == DATA_KEY_LENGTH)
+        {
             material.fill(0);
             return Err(EquipmentKeySealerError::InvalidDataKey);
         }
@@ -102,7 +105,6 @@ impl DataKey {
 impl Drop for DataKey {
     fn drop(&mut self) {
         self.material.fill(0);
-        self.material.clear();
     }
 }
 

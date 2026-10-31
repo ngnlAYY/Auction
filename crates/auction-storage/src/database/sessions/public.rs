@@ -146,7 +146,8 @@ pub(super) async fn touch_postgres(
     let row = sqlx::query(
         "WITH current_session AS MATERIALIZED (
             SELECT session.token_hash, session.user_id, account.username,
-                   session.expires_at, session.absolute_expires_at
+                   session.expires_at, session.absolute_expires_at,
+                   (session.last_activity_at < $1 - interval '60 seconds') AS activity_due
             FROM public.public_sessions AS session
             JOIN public.users AS account ON account.id = session.user_id
             WHERE session.token_hash = $2 AND session.revoked_at IS NULL
@@ -162,7 +163,8 @@ pub(super) async fn touch_postgres(
               AND session.revoked_at IS NULL
               AND session.last_activity_at < $1 - interval '60 seconds'
          )
-         SELECT user_id, username, expires_at, absolute_expires_at FROM current_session",
+         SELECT user_id, username, expires_at, absolute_expires_at, activity_due
+         FROM current_session",
     )
     .bind(now)
     .bind(token_hash.as_slice())
@@ -172,6 +174,11 @@ pub(super) async fn touch_postgres(
     let Some(row) = row else {
         return Err(SessionError::Unauthenticated.into());
     };
+    // 活动 UPDATE 可能等待行锁；仅持锁未改行时 PostgreSQL 不保证重新评估 WHERE。
+    // 用新语句的快照和实时钟复核期限/撤销，不能把等待前物化的身份作为认证结果。
+    if row.try_get::<bool, _>("activity_due").map_err(map_sql_error)? {
+        return inspect_postgres(store, token_hash, now).await;
+    }
     map_identity(&row)
 }
 

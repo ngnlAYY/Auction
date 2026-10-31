@@ -75,8 +75,14 @@ async fn create(config_dir: &ConfigDir, database: &str, output: &Path) -> anyhow
     let archive_name = output
         .file_name()
         .and_then(|name| name.to_str())
-        .filter(|name| name.ends_with(".dump") && !name.starts_with('.'))
-        .context("--output 必须是以 .dump 结尾的文件名")?;
+        .filter(|name| {
+            name.ends_with(".dump")
+                && !name.starts_with('.')
+                && name.trim() == *name
+                && !name.contains('\\')
+                && !name.chars().any(char::is_control)
+        })
+        .context("--output 必须是不含控制字符、反斜杠或首尾空白的 .dump 文件名")?;
     let manifest_path = output.with_file_name(manifest_file_name(archive_name));
     files::require_private_target(output)?;
     files::require_private_target(&manifest_path)?;
@@ -98,6 +104,7 @@ async fn create(config_dir: &ConfigDir, database: &str, output: &Path) -> anyhow
             if after != before {
                 anyhow::bail!("备份期间 schema 版本从 {before} 变为 {after}，archive 已丢弃");
             }
+            files::open_regular(&temporary)?.sync_all().context("同步 archive 失败")?;
             // 硬链接发布不会覆盖同名文件；成功后删除临时名。
             std::fs::hard_link(&temporary, output)
                 .with_context(|| format!("发布 archive 失败：{}", output.display()))?;

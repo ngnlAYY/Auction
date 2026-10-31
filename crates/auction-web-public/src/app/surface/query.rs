@@ -182,11 +182,12 @@ pub(crate) fn read_public_query() -> PublicBoardQuery {
             && let Some(initial) = try_consume_context::<InitialPublicLocation>()
             && let Some(initial_search) = initial.search_for(&pathname)
         {
-            // Router 只拥有 pathname；恢复原 query 时沿用它建立的 history.state，避免破坏
-            // Dioxus 的滚动位置记录，也不额外增加浏览器历史条目。
+            // 恢复原 query 时保留当前片段与 Router 的 history.state，避免破坏锚点和滚动位置，
+            // 也不额外增加浏览器历史条目。
             if let Ok(history) = window.history() {
                 let state = history.state().unwrap_or(JsValue::NULL);
-                let url = format!("{pathname}{initial_search}");
+                let hash = window.location().hash().unwrap_or_default();
+                let url = format!("{pathname}{initial_search}{hash}");
                 if history.replace_state_with_url(&state, "", Some(&url)).is_ok() {
                     search = initial_search;
                 }
