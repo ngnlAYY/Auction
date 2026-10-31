@@ -54,7 +54,7 @@ usermod -aG auction-worker-control auction
    ```
 
 3. **生成配置**，二选一：
-   - 首次设置向导：`sudo -u auction /opt/auction/bin/auction-admin-api setup --output-dir /var/lib/auction/new-config --control-group auction-worker-control`。在 stderr 中取得设置地址（默认 `127.0.0.1:8091`）与一次性令牌，经 SSH 隧道（`ssh -L 8091:127.0.0.1:8091 <主机>`）在浏览器完成表单。生成后把目录内容移入 `/etc/auction/` 并按上表调整属主与权限。
+   - 首次设置向导：先以 root 执行 `install -d -o auction -g auction -m 0750 /var/lib/auction`，确保目标目录的直接父目录已存在且符合[生成权限要求](config/README.md#示例与首次设置)；再运行 `sudo -u auction /opt/auction/bin/auction-admin-api setup --output-dir /var/lib/auction/new-config --control-group auction-worker-control`，其中 `new-config` 须尚不存在。在 stderr 中取得设置地址（默认 `127.0.0.1:8091`）与一次性令牌，经 SSH 隧道（`ssh -L 8091:127.0.0.1:8091 <主机>`）在浏览器完成表单。生成后把目录内容移入 `/etc/auction/` 并按上表调整属主与权限。
    - 手工：以 [`ops/config/examples/`](config/examples) 为模板编写，字段说明见[配置参考](config/README.md)。
 
 4. **补齐关键配置**：
@@ -105,7 +105,7 @@ usermod -aG auction-worker-control auction
 
 角色 unit 都设 `TimeoutStopSec=45s`（10 秒排空 + tracing 刷新余量）与一组 systemd 加固选项（`ProtectSystem=strict`、`NoNewPrivileges` 等）。
 
-**为什么用 `auction-cli service` 编排**：systemd 的 `After=` 只保证“进程已启动”，不保证“已就绪”。`auction-cli service start` 在每个角色启动后等待其 readiness（Worker 为 control socket 的 `/v1/health/ready`，Admin/Public 为 `/health/ready`，且期间 `MainPID`/`InvocationID` 不变）才启动下一个；任何一步失败都会反序停止本次启动的 unit。它还在启动前执行严格配置检查与数据库迁移。详见 [auction-cli](../apps/auction-cli/README.md#分体部署编排)。
+**为什么用 `auction-cli service` 编排**：systemd 的 `After=` 只保证“进程已启动”，不保证“已就绪”。`auction-cli service start` 在每个角色启动后等待其 readiness（Worker 为 control socket 的 `/v1/health/ready`，Admin/Public 为 `/health/ready`，且期间 `MainPID`/`InvocationID` 不变）才启动下一个；单角色 readiness 的完整超时预算覆盖 unit 状态查询、探测、身份复核与轮询等待，`systemctl start` 自身另有 90 秒上限。任何一步失败都会反序停止本次启动的 unit。它还在启动前执行严格配置检查与数据库迁移。详见 [auction-cli](../apps/auction-cli/README.md#分体部署编排)。
 
 常用操作：
 
@@ -188,9 +188,9 @@ Public/Worker 在 `common.toml` 设置 `[metrics] enabled = true`；Admin 配置
 | 任务 | 做法 |
 | --- | --- |
 | 更换外部 Cookie | Admin “Cookie 池”录入新凭据并停用旧凭据（每种 kind 同时只能一个 active），或 `auction-cli credential import`；然后重启 Worker（分体部署用 `service restart`） |
-| 暂停/恢复收件 | Admin 仪表盘或“收件审核”页；也可立即触发一次轮询 |
+| 暂停/恢复收件 | Admin 仪表盘或“收件审核”页；也可立即触发一次轮询。恢复轮询不绕过场次冻结的赛季收件门禁，见[赛季排期](../docs/business-rules.md#赛季早鸟期auctionscheduleearly_bird) |
 | 结果未知的投递 | Admin “投递队列”按动作与证据人工对账；主动 Send 禁止仅凭外部引用人工确认成功，须由冻结的精确 Sent 证明恢复。确认失败或授权重试前核对远端实际结果，未找到 Sent 不证明未发送 |
-| 恢复确认 | Admin “结算报表”中确认 `reclaimed` / `cancelled` / `equipment_recovered` |
+| 恢复确认 | Admin “结算报表”中确认 `reclaimed` / `cancelled` / `equipment_recovered`；付款截止与跨赛季重列限制见[恢复规则](../docs/guide/settlement.md#4-恢复付款超时与拒收) |
 | 论坛写入未知 | `auction-cli forum recovery` 查看，必要时 `forum authorize-retry` |
 | 论坛私信对账 | `auction-cli pm list` / `pm reconcile` |
 | 规则发布 | Admin “规则内容”页，或 `auction-cli rules import` |

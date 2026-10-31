@@ -129,6 +129,9 @@ pub(in crate::database::recovery_commands) async fn advance_relist_postgres_once
     let actions = lock_actions(&mut transaction, recovery.id).await?;
     let selected_action = validate_actions(&recovery, &actions, action)?;
     validate_custody_evidence(&recovery, selected_action)?;
+    // 入参仅用于挑选已到期候选；重挂许可与新状态时间必须取所有权锁取得后的数据库实时时钟。
+    // 已持久化的 action/custody 证明原样复核，不以此时钟改写外部收回事实。
+    let now = database_now(&mut transaction).await?;
 
     let command_id = scheduled_relist_command_id(recovery.id);
     let relist = relist_recovery(

@@ -7,7 +7,6 @@ use chrono::Utc;
 
 use crate::app::{print_json, progress};
 use crate::cli::BackupCommand;
-use crate::database::DatabaseTarget;
 use crate::deployment::ConfigDir;
 use crate::support::files;
 
@@ -23,6 +22,20 @@ pub(crate) struct VerifiedBackup {
     pub(crate) manifest: BackupManifest,
     pub(crate) archive: PathBuf,
     pub(crate) manifest_sha256: String,
+}
+
+impl VerifiedBackup {
+    /// 恢复与为恢复准备空库共用版本门禁，不能删库后才发现当前工具无法装载恢复点。
+    pub(crate) fn require_supported_schema(&self) -> anyhow::Result<()> {
+        let expected = auction_storage::postgres_expected_migration_version();
+        if self.manifest.schema_version > expected {
+            anyhow::bail!(
+                "备份 schema 版本 {} 高于当前二进制支持的 {expected}；请使用对应版本的 auction-cli",
+                self.manifest.schema_version
+            );
+        }
+        Ok(())
+    }
 }
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: BackupCommand) -> anyhow::Result<()> {
@@ -89,7 +102,6 @@ async fn create(config_dir: &ConfigDir, database: &str, output: &Path) -> anyhow
 
     let config = config_dir.load_worker()?;
     let url = config.database_url().context("Worker 配置缺少数据库连接")?;
-    DatabaseTarget::parse(url)?.require_database(database)?;
     let environment = libpq::Libpq::from_url(url, database)?;
     let store = crate::database::connect(url).await?;
     let result: anyhow::Result<BackupManifest> = async {

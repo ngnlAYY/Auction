@@ -149,9 +149,15 @@ pub struct RealtimeSubscription {
 }
 
 impl RealtimeSubscription {
-    /// 等待下一个已提交、已校验并编码的 v1 事件帧；通道关闭表示连接应当结束。
+    /// 等待下一个已提交、已校验并编码的 v1 事件帧；淘汰后不再排空旧缓冲。
     pub async fn recv(&mut self) -> Option<Utf8Bytes> {
-        self.receiver.recv().await
+        // 满队列淘汰只会丢弃 sender；mpsc 默认仍先交付全部积压帧，可能让慢连接长期
+        // 占用配额。关闭前后都复核，令等待中的接收也在淘汰后直接进入 1013 关闭路径。
+        if self.receiver.is_closed() {
+            return None;
+        }
+        let frame = self.receiver.recv().await;
+        if self.receiver.is_closed() { None } else { frame }
     }
 }
 

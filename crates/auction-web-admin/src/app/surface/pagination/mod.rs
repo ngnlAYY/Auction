@@ -78,6 +78,20 @@ where
     T: Clone + PartialEq + 'static,
     F: Future<Output = Result<T, String>> + 'static,
 {
+    use_admin_page_with_state(pagination, request, fetch).0
+}
+
+/// 额外返回读取状态，供自动轮询跳过仍在进行的请求；展示身份与快照复用规则保持一致。
+pub(crate) fn use_admin_page_with_state<Q, T, F>(
+    pagination: AdminPagination,
+    request: impl Fn() -> Q + 'static,
+    fetch: impl Fn(Q, i64) -> F + 'static,
+) -> (Memo<Option<Result<T, String>>>, ReadSignal<UseResourceState>)
+where
+    Q: Clone + PartialEq + 'static,
+    T: Clone + PartialEq + 'static,
+    F: Future<Output = Result<T, String>> + 'static,
+{
     let request = use_hook(|| Rc::new(request));
     let fetch = use_hook(|| Rc::new(fetch));
     let resource = use_resource({
@@ -92,7 +106,7 @@ where
     });
     // reload 只驱动请求；同一身份开始重读时不再复制并深比较整页旧结果。
     let requested = use_memo(move || (request(), pagination.size()));
-    use_memo(move || {
+    let result = use_memo(move || {
         let requested = requested.read();
         let (identity, size) = &*requested;
         resource
@@ -100,7 +114,8 @@ where
             .as_ref()
             .filter(|(loaded, loaded_size, _)| loaded == identity && loaded_size == size)
             .map(|(_, _, result)| result.clone())
-    })
+    });
+    (result, resource.state())
 }
 
 /// 保留表格原有标签，统一注入翻页/跳页文案、数字页码、数量文案、上限与偏好写入。

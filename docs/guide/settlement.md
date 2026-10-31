@@ -70,17 +70,19 @@ prepared → pending → claimed → sending → succeeded
 
 ## 4. 恢复（付款超时与拒收）
 
-每个已售 lot 在结算时建立恢复记录，冻结恢复策略（`RemindV1`，版本决定付款期限）：
+每个已售 lot 在结算时依据场次已冻结的恢复策略建立恢复记录（`RemindV1`，版本决定付款期限）；升级不改写既有场次或恢复记录：
 
 | 规则 | 默认 |
 | --- | --- |
-| 付款期限 | 从结算建立恢复记录起算：v1 为 7 天；赛季前场次冻结 v2，为 24 小时。main COD 收回重寄后按冻结版本重新起算 |
+| 付款期限 | 从结算建立恢复记录起算：v1 为 7 天；自动排期的赛季前场次冻结 v2，为 24 小时。main COD 收回重寄后按冻结版本重新起算 |
 | 逾期提醒 | 1 次（邮件提醒买方） |
 | COD 退回上限 `cod_return_limit` | 3（可配 1–10） |
 
+付款期限到达只创建提醒并进入 `payment_overdue`，不会仅凭逾期自动取消成交、退回装备或拉黑买家。实际截止以恢复报告的 `payment_deadline_at` 为准；赛季前场次的配置时序校验使用计划结束时间，软截止或延迟结算后仍从实际建立恢复记录起算完整 24 小时。
+
 - main 装备 COD 在付款前退回：第 1 至 `limit − 1` 次退回时，系统取得收回装备的动作证明后重新寄出原 COD（金额与装备不变）；第 `limit` 次退回时，为卖家建立撤拍退回义务，原 COD 与卖方货款按失败收口，并拉黑买家。每封退件只计数一次。
 - isekai 载体 COD 退回时先收回载体；已经付款但交付装备被退回时先取得装备收回证明。Admin 分别通过 `cancelled` 或 `equipment_recovered` 确认后重列到该世界的草稿接收场次，后者还激活买方退款；没有草稿目标时保持 `relist_pending`。main 的 `reclaimed` 也只在对应收回证明与义务状态允许时可确认。
-- 赛季换季限制（参与早鸟期的世界）：赛季开始前的新赛季草稿不接收重列，保持 `relist_pending` 并按持久化退避重试；原成交场次开拍后已经历赛季开始的旧赛季装备永不重列，记录阻断码 `relist_season_closed`（报表显示为 `recovery_relist_unavailable`），停在 `relist_pending` 且不再自动重试，由 Admin 人工处理。
+- 赛季换季限制（参与早鸟期的世界）：赛季开始前的新赛季草稿不接收重列，保持 `relist_pending` 并按持久化退避重试；原始投稿收件或成交场次开拍后已经历赛季开始的旧赛季装备永不重列，记录阻断码 `relist_season_closed`（报表显示为 `recovery_relist_unavailable`），停在 `relist_pending` 且不再自动重试，由 Admin 人工处理。判断沿用不可变的原始投稿收件事实，修改场次排期不会把旧装备变为新赛季资产；只使用已冻结且非 NULL 的赛季边界，不回填历史场次。
 - 恢复并非单一路径：未付时为 `awaiting_payment`，到期转 `payment_overdue` 并创建一次提醒；main 收款后可完成，isekai 收款后先进入 `delivering_equipment`，交付满足后完成。退件可转 `reclaiming`，经收回、确认后进入 `relist_pending`、`refunding` 或 `completed`。Admin 确认必须携带原因、稳定命令 ID 与当前状态版本，所有动作写入审计。
 
 ## Bot 内部履约与资金账户

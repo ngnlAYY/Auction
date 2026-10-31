@@ -2,7 +2,7 @@
 
 [文档导航](../README.md) · [迁移](../../migrations/postgres/README.md) · [auction-storage](../../crates/auction-storage/README.md) · [保留政策](../../ops/deploy/retention-policy.v1.json)
 
-唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前 65 个、88 张应用表，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
+唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前 68 个、88 张应用表，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
 
 ## schema 身份与版本
 
@@ -28,7 +28,7 @@
 
 | 表 | 内容 |
 | --- | --- |
-| `auctions` | 场次：世界、期号、状态、冻结的规则与结算策略快照、计划/有效截止、`state_version`、早鸟窗口内场次的最早收件时刻 `intake_opens_at`（赛季开始，也是旧赛季装备不能重列的边界）。身份字段（世界、期号等）由触发器禁止修改 |
+| `auctions` | 场次：世界、期号、状态、冻结的经济/结算/恢复策略快照、计划/有效截止、`state_version`、早鸟窗口内场次的最早收件时刻 `intake_opens_at`（赛季开始，也是旧赛季装备不能重列的边界；迁移前的场次保持 NULL，不回填）。身份字段（世界、期号等）由触发器禁止修改 |
 | `lots` | lot：装备、编号、状态（pending/live/sold/unsold/withdrawn）、起拍价、当前价、领先者、有效截止、慢速代理到期、`state_version` |
 | `equipment` | 装备公开属性（世界内按外部装备 ID 唯一） |
 | `equipment_secrets` | 加密保存的装备 key（`equipment_data_key` 信封） |
@@ -113,6 +113,6 @@
 ## 变更规则
 
 1. 新增表、列、约束或索引只能新增迁移文件（编号连续），见[迁移说明](../../migrations/postgres/README.md)。
-2. 新增表必须加入[保留政策](../../ops/deploy/retention-policy.v1.json)的某个数据族，并把 `database_schema_version` 更新为新的最高版本（否则 `db inventory` 拒绝运行，发布身份也会变化）。
+2. 每次新增迁移都把[保留政策](../../ops/deploy/retention-policy.v1.json)的 `database_schema_version` 更新为新的最高版本（否则 `db inventory` 拒绝运行，发布身份也会变化）；新增表还须加入对应数据族。
 3. 同步更新本页的表分组。
 4. 迁移须能在生产数据上安全执行：不得静默改写历史事实；需要修复数据时只修复有确凿证据的部分，其余保留原状并交给人工核对。

@@ -59,7 +59,7 @@
 | `[auction.schedule.early_bird]` | 赛季早鸟期：赛季开始日期与时间、窗口天数、开拍日、开拍钟点、预览提前量、竞价时长、赛季前场次、窗口内品质、赛季前暂停收件 |
 | `[auction.economics]` | 新场次的经济规则：默认起拍价、加价比例、软截止窗口与延长、代理开关/默认模式/慢速间隔/设置次数上限、Final 提前量 |
 | `[auction.settlement]` | 新场次的结算策略：版本与模式（`hold_curve_v2` 或 `legacy_zero_v0`）、补偿池、isekai 载体 Credits、领先时长曲线锚点 |
-| `[auction.settlement.recovery]` | 恢复策略：付款期限、提醒次数、COD 退回上限 |
+| `[auction.settlement.recovery]` | 恢复策略：v1 固定 7 天、v2 固定 24 小时，`payment_timeout_seconds` 必须与版本对应；提醒次数固定 1，COD 退回上限可配。自动排期的赛季前场次覆盖为 v2 |
 
 经济、结算与恢复策略在**创建场次时冻结**，修改模板只影响之后创建的场次；排期控制后续计划与早鸟收件窗口，不改写已创建场次的时间与策略快照。业务含义见[业务规则](../../docs/business-rules.md)与[结算与履约](../../docs/guide/settlement.md)。
 
@@ -162,3 +162,5 @@ runtime 文件让运营人员在 Admin “参数配置”页修改部分参数�
 - 每个赋值字段上方必须紧邻含“可选”或“必填”的中文注释（`ci/checks/check.sh config` 检查）。
 - 修改示例后，向导生成的三角色配置必须仍能通过 loader 校验。
 - 示例中的值仅用于演示；`allowed_peer_*`、origin、密钥等必须按实际部署填写。
+
+首次设置的目标配置目录必须尚不存在；其直接父目录须预先建立，为真实目录（非符号链接），归当前运行账号或 root 所有，且禁止 group/other 写入。这是生成器的强制门禁，不受 `config check --strict` 控制。不能直接把目标放在 `/tmp` 下；如需临时生成，先在其中建立归运行账号所有、权限 0700 的私有父目录，再把目标放在该私有目录内。

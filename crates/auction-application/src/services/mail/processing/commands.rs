@@ -121,7 +121,7 @@ pub(super) fn auction_request_hash(
         seller: &'a str,
         received_at: DateTime<Utc>,
         content_digest: [u8; 32],
-        items: Vec<Item<'a>>,
+        items: Items<'a>,
     }
     #[derive(Serialize)]
     struct Item<'a> {
@@ -133,18 +133,25 @@ pub(super) fn auction_request_hash(
         source_fingerprint: [u8; 32],
         start_price: i64,
     }
-    let items = items
-        .iter()
-        .map(|item| Item {
-            external_equipment_id: &item.external_equipment_id,
-            name: &item.name,
-            category: &item.category,
-            level: item.level,
-            attributes: &item.attributes,
-            source_fingerprint: item.source_fingerprint,
-            start_price: item.start_price,
-        })
-        .collect();
+    // 保留原数组顺序和 Item 字段编码，借用逐项投影，不为摘要再分配整封附件列表。
+    struct Items<'a>(&'a [crate::MailAuctionItem]);
+
+    impl Serialize for Items<'_> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            serializer.collect_seq(self.0.iter().map(|item| Item {
+                external_equipment_id: &item.external_equipment_id,
+                name: &item.name,
+                category: &item.category,
+                level: item.level,
+                attributes: &item.attributes,
+                source_fingerprint: item.source_fingerprint,
+                start_price: item.start_price,
+            }))
+        }
+    }
     Ok(crate::RequestHash::from_request(
         "mail_auction_intake",
         aggregate_id,
@@ -155,7 +162,7 @@ pub(super) fn auction_request_hash(
             seller: &message.sender,
             received_at: message.received_at,
             content_digest: message.content_digest,
-            items,
+            items: Items(items),
         },
     )?)
 }

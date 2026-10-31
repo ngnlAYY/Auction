@@ -144,8 +144,9 @@ impl PreferenceOwner {
                 Err(error) => {
                     let mut state = owner.state.write();
                     state.busy = false;
-                    // 后续重试被前置拒绝不能证明首次未提交；只有明确冲突或成功解除累计未知。
-                    state.pending_uncertain = error.status != 409
+                    // 只有路由的明确冲突码能否定本命令；裸 409 或损坏响应不能抹掉首次未知。
+                    state.pending_uncertain = !(error.status == 409
+                        && error.code == "session_preference_conflict")
                         && (state.pending_uncertain || error.outcome_uncertain());
                     if !state.pending_uncertain
                         && matches!(

@@ -148,11 +148,12 @@ impl EhentaiClient {
             response.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(
                 |v| v.split(';').next().is_some_and(|v| v.trim().eq_ignore_ascii_case("text/html")),
             );
-        let body = self
-            .read_response(response, EhentaiOperation::CheckSession, false)
-            .await
-            .map_err(map_error)?;
-        if is_session_expired(status, location.as_ref(), &body) {
+        let mut body = request::SensitiveResponseBody(
+            self.read_response(response, EhentaiOperation::CheckSession, false)
+                .await
+                .map_err(map_error)?,
+        );
+        if is_session_expired(status, location.as_ref(), &body.0) {
             return Err(ForumPmError::Authentication);
         }
         if status == StatusCode::TOO_MANY_REQUESTS {
@@ -161,10 +162,13 @@ impl EhentaiClient {
         if !status.is_success() || location.is_some() || !html {
             return Err(ForumPmError::Protocol);
         }
-        if !cookie.is_active() {
-            return Err(ForumPmError::Unavailable);
-        }
-        String::from_utf8(body).map_err(|_| ForumPmError::Protocol)
+        // 正文等待和读后 owner 复核都由清理守卫覆盖；失锁响应不能继续作为凭据证明。
+        self.check_ownership(cookie).await.map_err(|_| ForumPmError::Unavailable)?;
+        String::from_utf8(std::mem::take(&mut body.0)).map_err(|error| {
+            let mut bytes = error.into_bytes();
+            bytes.fill(0);
+            ForumPmError::Protocol
+        })
     }
 
     async fn submit_pm(&self, form: &PmForm, cookie: &EhentaiCookie) -> Result<(), ForumPmError> {

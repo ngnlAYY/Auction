@@ -29,7 +29,13 @@ pub(super) async fn run(
     let stopped = stop(&mut children, &mut signals).await;
     // 所有角色都完成回收尝试后才释放父进程的锁；未退出子进程仍持有继承的 owner.lock。
     drop(ownership);
-    result.and(stopped)
+    match (result, stopped) {
+        (Err(error), Err(stop_error)) => {
+            Err(error.context(format!("角色关闭也失败：{stop_error:#}")))
+        }
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Ok(()), Ok(())) => Ok(()),
+    }
 }
 
 async fn start_and_watch(

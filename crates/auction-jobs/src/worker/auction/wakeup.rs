@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use auction_application::Clock;
 use chrono::{DateTime, Utc};
+use tokio::time::Instant;
 
 use super::super::PersistentWorker;
 
@@ -35,6 +36,8 @@ where
     C: Clock + 'static,
 {
     // 每类提示都以其领取所用的时钟计算：生命周期与慢速代理用数据库时钟，结算沿用进程时钟。
+    // 提示须锚定读取时刻；后续查询和网络等待不能在最终 sleep 时重新获得一遍等待时长。
+    let database_observed_at = Instant::now();
     let database_now = match worker.schedule.database_now().await {
         Ok(now) => Some(now),
         Err(error) => {
@@ -45,17 +48,21 @@ where
     let mut wait = None;
     if let Some(now) = database_now {
         let lifecycle = hint(worker.schedule.next_claimable_at(now).await, "lifecycle");
-        wait = shorter(wait, until(now, lifecycle));
+        wait = shorter(wait, until(now, database_observed_at, lifecycle));
         if let Some(reader) = &worker.slow_proxy_due {
             let slow_proxy = hint(reader.next_slow_proxy_due_at(now).await, "slow_proxy");
-            wait = shorter(wait, until(now, slow_proxy));
+            wait = shorter(wait, until(now, database_observed_at, slow_proxy));
         }
     }
     if let Some(store) = &worker.settlement_store {
+        let observed_at = Instant::now();
         let now = worker.clock.now();
-        wait = shorter(wait, until(now, hint(store.next_claimable_at(now).await, "settlement")));
+        wait = shorter(
+            wait,
+            until(now, observed_at, hint(store.next_claimable_at(now).await, "settlement")),
+        );
     }
-    wait
+    wait.map(|deadline| deadline.saturating_duration_since(Instant::now()))
 }
 
 fn hint(
@@ -69,11 +76,12 @@ fn hint(
 }
 
 /// 只接受严格晚于参考时刻的到期；无法表示为标准时长的值按无提示处理。
-fn until(now: DateTime<Utc>, due: Option<DateTime<Utc>>) -> Option<Duration> {
-    due.filter(|due| *due > now).and_then(|due| (due - now).to_std().ok())
+fn until(now: DateTime<Utc>, observed_at: Instant, due: Option<DateTime<Utc>>) -> Option<Instant> {
+    let delay = due.filter(|due| *due > now).and_then(|due| (due - now).to_std().ok())?;
+    observed_at.checked_add(delay)
 }
 
-fn shorter(left: Option<Duration>, right: Option<Duration>) -> Option<Duration> {
+fn shorter(left: Option<Instant>, right: Option<Instant>) -> Option<Instant> {
     match (left, right) {
         (Some(left), Some(right)) => Some(left.min(right)),
         (left, right) => left.or(right),

@@ -25,11 +25,7 @@ pub struct AdminSettlementAuctionResponse {
     pub updated_at: String,
 }
 
-/// Admin 拍卖列表的能力声明。
-/// 能力只表示对应命令路由已经存在；未声明的扩展命令仍保持明确的未迁移响应，不会由能力
-/// 字段推断出额外的业务 owner。
-/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐：wire 冻结后服务端字段集
-/// 不变，收紧只影响反序列化，不影响序列化输出。
+/// Admin 拍卖命令能力；仅表示对应路由存在，不能据此扩大业务授权。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminAuctionCapabilitiesResponse {

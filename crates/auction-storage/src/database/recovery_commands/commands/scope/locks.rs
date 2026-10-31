@@ -263,7 +263,8 @@ pub(in crate::database::recovery_commands) async fn lock_fulfillment_state(
 pub(in crate::database::recovery_commands) async fn database_now(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> Result<DateTime<Utc>, RecoveryCommandError> {
-    sqlx::query_scalar("SELECT CURRENT_TIMESTAMP")
+    // world/recovery 等锁等待可能跨过换季边界；事务起始时间不能作为重挂许可依据。
+    sqlx::query_scalar("SELECT clock_timestamp()")
         .fetch_one(&mut **transaction)
         .await
         .map_err(map_sql_error)

@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 
-use crate::api::{AdminCredential, AdminCredentialPage, AdminSession, mutate_admin_credential};
+use crate::api::{AdminCredential, AdminCredentialPage, mutate_admin_credential};
 use crate::app::surface::AdminActionFeedback;
 use crate::app::surface::pending::{PendingCommands, set_if_alive};
 use crate::app::surface::sort::{SortDirection, SortableTh, directed};
@@ -26,7 +26,6 @@ pub fn CredentialTable(
     on_sort_change: EventHandler<(String, SortDirection)>,
     on_delete: EventHandler<AdminCredential>,
 ) -> Element {
-    let session = use_context::<AdminSession>();
     let is_empty = page.credentials.is_empty();
     let mut credentials = page.credentials;
     sort_credentials(&mut credentials, &sort, direction);
@@ -85,7 +84,6 @@ pub fn CredentialTable(
                         CredentialRow {
                             key: "{credential.id}",
                             credential,
-                            imported_by: session.actor.clone(),
                             on_delete,
                         }
                     }
@@ -105,7 +103,6 @@ pub fn CredentialTable(
 #[component]
 pub fn CredentialRow(
     credential: AdminCredential,
-    imported_by: String,
     on_delete: EventHandler<AdminCredential>,
 ) -> Element {
     let mut rename_value = use_signal(|| credential.label.clone());
@@ -149,9 +146,8 @@ pub fn CredentialRow(
                 }
             }
             td { "data-label": t!("admin-credentials-last-used"), {t!("value-empty")} }
-            td { "data-label": t!("admin-credentials-imported-by"),
-                TruncatedText { value: imported_by }
-            }
+            // 安全 DTO 不含导入者，当前登录 actor 不能代替历史操作事实。
+            td { "data-label": t!("admin-credentials-imported-by"), {t!("value-empty")} }
             td {
                 "data-label": t!("admin-credentials-actions"),
                 aria_describedby: feedback().is_some().then_some(feedback_id.clone()),

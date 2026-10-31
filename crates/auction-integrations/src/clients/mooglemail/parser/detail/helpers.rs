@@ -157,8 +157,11 @@ pub(crate) fn canonical_mail_body(body: &str) -> String {
     canonical
 }
 
-/// 计算 Sent/发送证明共用的正文 canonical digest；临时 canonical 文本在返回前清零。
+/// 计算 Sent/发送证明共用的正文 canonical digest；LF 正文只借用，临时规范文本用后清零。
 pub(crate) fn canonical_mail_body_digest(body: &str) -> [u8; 32] {
+    if !body.contains("\r\n") {
+        return Sha256::digest(body.trim_end_matches([' ', '\t', '\n']).as_bytes()).into();
+    }
     let mut canonical = canonical_mail_body(body);
     let digest = Sha256::digest(canonical.as_bytes());
     let mut output = [0_u8; 32];

@@ -10,7 +10,7 @@ PostgreSQL 首次部署的一次性设置服务：在没有任何配置时提供
 
 1. 启动时目标配置目录必须不存在，绑定监听（默认 `127.0.0.1:8091`），并在 stderr 打印设置页地址与一次性设置令牌。
 2. 浏览器以 `x-setup-token` 头携带令牌调用 `POST /api/v1/setup/verify`、`/validate`、`/complete`；令牌常量时间比较，三个接口共用一个非阻塞操作锁，并发请求返回 `setup_busy`。请求体上限 8 KiB，单请求 10 秒超时。
-3. `validate` 与 `complete` 校验表单并在 8 秒内试连预先建立的数据库；这里只验证连通性，连接池随即关闭，不证明库为空或 schema 已就绪。`complete` 调用 `auction-config` 的 `FirstRunConfig` 以示例为模板生成配置：非敏感文件 `0640`、敏感文件 `0600`，先在同级私有临时目录写好并经三角色 loader 校验，再以 `renameat2(RENAME_NOREPLACE)` 原子发布，已存在目录绝不覆盖。
+3. `validate` 与 `complete` 校验表单并在 8 秒内试连预先建立的数据库；这里只验证连通性，连接池随即关闭，不证明库为空或 schema 已就绪。`complete` 调用 `auction-config` 的 `FirstRunConfig` 以示例为模板生成配置：目标的直接父目录须已存在、为非符号链接、归当前账号或 root 所有且禁止 group/other 写入；非敏感文件 `0640`、敏感文件 `0600`，先在同级私有临时目录写好并经三角色 loader 校验，再以 `renameat2(RENAME_NOREPLACE)` 原子发布，已存在目录绝不覆盖。
 4. 生成的配置启用 Worker control（组与 UID 由入口提供；Admin 默认组为 `auction-worker-control`、UID 为运行账号，合并入口使用运行账号的组与 UID）、信任本机代理 `127.0.0.1/32`、论坛公开地址取 Public origin；不生成 `.keyenv`、三组数据密钥或外部 Cookie，这些需在设置完成后补充。
 5. 发布结果无法确认（目录可能已出现）时进入 `OutcomeUnknown`，禁止继续，须人工检查。
 

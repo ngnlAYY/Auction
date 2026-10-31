@@ -14,7 +14,9 @@ use super::event::RealtimeEventTable;
 use super::failure::RealtimeFailureTable;
 use super::filters::{RealtimeEventFilters, RealtimeFailureFilters};
 use super::lag::RealtimeLagTable;
-use crate::app::surface::pagination::{AdminPager, use_admin_page, use_admin_pagination};
+use crate::app::surface::pagination::{
+    AdminPager, use_admin_page_with_state, use_admin_pagination,
+};
 use crate::app::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
 use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
@@ -41,14 +43,6 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     // 筛选组件本地）、replay 对话框与负载输入是瞬态，不入 URL。
     let query = use_realtime_query_state();
     let query_state = query.state;
-    // 自动轮询开关与间隔入 URL（`poll` 键），默认关闭；页面隐藏时轮询挂起。
-    // 轮询只重取三个分区的当前视图数据，不重置分页、不写地址栏。
-    let poll_seconds = use_memo(move || query_state.read().poll_seconds);
-    use_auto_poll(poll_seconds, move || {
-        event_refresh.set(event_refresh().saturating_add(1));
-        lag_refresh.set(lag_refresh().saturating_add(1));
-        failure_refresh.set(failure_refresh().saturating_add(1));
-    });
     let event_pagination =
         use_admin_pagination("realtime-events", &["event_page_size"], Some(200), 1_000_000);
     let failure_pagination =
@@ -71,7 +65,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             current.failure_state.clone(),
         )
     });
-    let events = use_admin_page(
+    let (events, events_status) = use_admin_page_with_state(
         event_pagination.clone(),
         move || {
             let _ = event_refresh();
@@ -83,7 +77,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         let _ = event_refresh();
         fetch_realtime_event_total()
     });
-    let lag = use_admin_page(
+    let (lag, lag_status) = use_admin_page_with_state(
         lag_pagination.clone(),
         move || {
             let _ = lag_refresh();
@@ -91,7 +85,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         },
         |page, size| fetch_realtime_lag_page(page, String::new(), String::new(), size),
     );
-    let failures = use_admin_page(
+    let (failures, failures_status) = use_admin_page_with_state(
         failure_pagination.clone(),
         move || {
             let _ = failure_refresh();
@@ -111,6 +105,23 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             "dead_letter".to_owned(),
             10,
         )
+    });
+    // 各分区只在自己的读取（含配套计数）完成后轮询；慢请求不能被下一节拍取消。
+    let poll_seconds = use_memo(move || query_state.read().poll_seconds);
+    use_auto_poll(poll_seconds, move || {
+        if events_status.cloned() == UseResourceState::Ready
+            && event_overview.state().cloned() == UseResourceState::Ready
+        {
+            event_refresh.set(event_refresh().saturating_add(1));
+        }
+        if lag_status.cloned() == UseResourceState::Ready {
+            lag_refresh.set(lag_refresh().saturating_add(1));
+        }
+        if failures_status.cloned() == UseResourceState::Ready
+            && unresolved_failures.state().cloned() == UseResourceState::Ready
+        {
+            failure_refresh.set(failure_refresh().saturating_add(1));
+        }
     });
 
     let mut load_events_query = query.clone();

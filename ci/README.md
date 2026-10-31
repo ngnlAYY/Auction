@@ -75,7 +75,7 @@ bash ci/release/release.sh source-fingerprint
 - **页面 payload**：先用 `ci/release/web-bundle.sh` 构建两端 payload，校验入口页标题（“Auction 公开站点” / “Auction 管理站点”）、跨端隔离、只含普通文件与唯一一组 JS/WASM、payload 清单与哈希。目录遍历或摘要生成失败即拒绝复用，不把失败留下的部分输出当作有效清单。
 - **二进制标记**：Public 只含 Public payload 的标记与哈希，Admin 只含 Admin 的，Worker 与 auction-cli 不含任何页面标记；API-only 二进制含“资源缺失”提示而不含 payload。
 - **依赖边界**（`cargo tree`）：Worker 不依赖任何前端 crate；Public 不依赖 Admin 前端；Admin 不依赖 Public 前端；`auction-server` 不依赖 `auction-cli`。
-- **BUILD-INFO 与校验和**：每个制品目录记录源码身份、工具链、feature 与文件摘要。复用判定比较构建输入与环境指纹、锁文件、feature 和制品摘要；仅仓库提交或不在构建输入范围内的文档变化，不必重新编译。
+- **BUILD-INFO 与校验和**：每个制品目录记录源码身份、构建输入与环境指纹、feature 和文件摘要；工具链经受控工具身份绑定。复用判定比较这些指纹、锁文件、feature 和制品摘要；仅仓库提交或不在构建输入范围内的文档变化，不必重新编译。
 - **装包**：文件白名单与权限固定（程序 755、文档 644、配置示例 640、敏感示例 600），禁止符号链接、日志与真实敏感文件名；归档确定性生成（固定排序、mtime、owner），解包复核后输出 `SHA256SUMS` 与 `DEPENDENCIES.md`。正式发布要求干净工作树（`--allow-dirty` 只用于本地证据，包名带 `-dirty`）。
 
 发布包名为 `auction-rust-<版本>-<提交前 12 位>[-single][-dirty].tar.gz`，内容见[运维手册](../ops/README.md#部署形态)。仓库 Markdown 链接相对各文档目录；装包时按同一文件安装清单重定位全部已打包文档（含 `config/README.md`），保留标题锚点，并映射敏感模板的 `.toml.example` 文件名。已打包的目标使用包内相对链接；未打包的源码、其他变体模板和文档链接到本次源码提交的 GitHub 页面，需要联网浏览。
@@ -99,4 +99,4 @@ bash ci/release/web-bundle.sh admin
 
 ### 构建身份：`ci/release/build-identity.sh`
 
-`ci/release/release.sh` 与 `ci/release/web-bundle.sh` 共用：选择受控工具（`target/build-tools/bin` 优先、`NO_DOWNLOADS=1`、Cargo 配置中的 rustc 包装器被显式清空，只接受环境变量指定的受控 sccache）、计算源码身份指纹（已跟踪与未忽略的新文件、删除与 mode 变化）、读取 BUILD-INFO、校验 Web payload。
+`ci/release/release.sh` 与 `ci/release/web-bundle.sh` 共用：选择受控工具（`target/build-tools/bin` 优先、`NO_DOWNLOADS=1`）、计算源码身份指纹（已跟踪与未忽略的新文件、删除与 mode 变化）、读取 BUILD-INFO、校验 Web payload。未通过环境变量指定时，显式清空 Cargo 配置中的两类 rustc 包装器；环境变量指定的 `sccache` 替换为受控版本，其他显式包装器保留并计入构建环境指纹。

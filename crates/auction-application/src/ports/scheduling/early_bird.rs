@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use super::schedule_calendar::AuctionScheduleSlot;
 use super::schedule_source::{
     AuctionEarlyBirdSlot, AuctionScheduleSource, AuctionScheduleTimes, resolve_local,
+    validate_pre_season_payment_deadline,
 };
 
 /// 早鸟窗口、场次日与赛季前场次提前天数的最大天数。
@@ -158,7 +159,7 @@ impl AuctionEarlyBirdConfig {
             let open = -i64::from(self.pre_season_days_before) * MINUTES_PER_DAY + open_minute;
             // 赛季开始日当天异世界关服换季：计划结束后再过 24 小时付款期限，仍须早于当天本地 00:00，
             // 让付款与交付赶在装备清空前完成。
-            if open + live + RECOVERY_V2_PAYMENT_TIMEOUT.num_minutes() > 0 {
+            if open + live + RECOVERY_V2_PAYMENT_TIMEOUT.num_minutes() >= 0 {
                 return Err("pre_season_days_before");
             }
             open - lead - start_minute
@@ -258,6 +259,11 @@ impl AuctionEarlyBirdCalendar {
             early_bird: Some(AuctionEarlyBirdSlot { season, session }),
         };
         let times = source.resolve()?;
+        validate_pre_season_payment_deadline(
+            self.timezone,
+            source.early_bird,
+            times.scheduled_end_at,
+        )?;
         let local_week =
             open_date - Duration::days(i64::from(open_date.weekday().num_days_from_monday()));
         Ok(AuctionScheduleSlot { source, times, local_week })
@@ -283,13 +289,13 @@ impl AuctionEarlyBirdCalendar {
         self.season(slot.season)
     }
 
-    /// 某赛季的全部早鸟场次（含赛季前场次），按开拍顺序排列。
-    pub fn sessions(
+    /// 按开拍顺序逐场物化；首个命中后不生成其余场次，当前候选无效仍失败关闭。
+    fn sessions(
         &self,
-        season: &AuctionEarlyBirdSeason,
-    ) -> Result<Vec<AuctionScheduleSlot>, DomainError> {
+        season: NaiveDate,
+    ) -> impl Iterator<Item = Result<AuctionScheduleSlot, DomainError>> + '_ {
         let first = if self.pre_season_days_before.is_some() { 0 } else { 1 };
-        (first..=self.session_count()).map(|session| self.session(season.season, session)).collect()
+        (first..=self.session_count()).map(move |session| self.session(season, session))
     }
 
     /// `at` 是否位于该世界某赛季的早鸟窗口 `[开始, 开始 + window_days)` 内。
@@ -319,7 +325,8 @@ impl AuctionEarlyBirdCalendar {
             if season.coverage_end <= floor {
                 continue;
             }
-            for slot in self.sessions(&season)? {
+            for slot in self.sessions(season.season) {
+                let slot = slot?;
                 if slot.times.preview_due_at >= floor {
                     return Ok(Some(slot));
                 }
@@ -342,7 +349,8 @@ impl AuctionEarlyBirdCalendar {
             if !overlaps(&season, weekly) {
                 continue;
             }
-            for slot in self.sessions(&season)? {
+            for slot in self.sessions(season.season) {
+                let slot = slot?;
                 if slot.times.scheduled_end_at > now {
                     return Ok(Some(slot));
                 }

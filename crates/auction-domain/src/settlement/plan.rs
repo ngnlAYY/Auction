@@ -150,15 +150,25 @@ impl SettlementPlan {
             lines,
             obligations: Vec::new(),
         };
-        plan.validate(policy)?;
+        plan.validate_with_validated_policy(policy)?;
         Ok(plan)
     }
 
     /// 校验结算计划的策略快照、明细守恒、义务和资金池边界。
     pub fn validate(&self, policy: &SettlementPolicy) -> Result<(), DomainError> {
         policy.validate()?;
+        self.validate_with_validated_policy(policy)
+    }
+
+    /// 批量计算已校验冻结曲线；结果自检复用该前置，避免再次扫描全部锚点。
+    fn validate_with_validated_policy(&self, policy: &SettlementPolicy) -> Result<(), DomainError> {
+        let available_pool = if self.compensation_pool_enabled {
+            self.opening_pool.checked_add(self.tax_total)?
+        } else {
+            self.opening_pool
+        };
         let expected_closing_pool = if self.compensation_pool_enabled {
-            self.opening_pool.checked_add(self.tax_total)?.checked_sub(self.compensation_total)?
+            available_pool.checked_sub(self.compensation_total)?
         } else {
             self.opening_pool
         };
@@ -176,12 +186,8 @@ impl SettlementPlan {
             if policy.mode == SettlementMode::HoldCurveV2 {
                 let discount = line.end_price.checked_sub(line.listed_price)?;
                 let expected = if self.discount_demand.value() > 0 {
-                    proportional_floor(
-                        self.opening_pool.checked_add(self.tax_total)?,
-                        discount,
-                        self.discount_demand,
-                    )?
-                    .min(discount)
+                    proportional_floor(available_pool, discount, self.discount_demand)?
+                        .min(discount)
                 } else {
                     SettlementAmount::zero()
                 };

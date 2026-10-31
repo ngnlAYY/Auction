@@ -123,8 +123,9 @@ impl PreferenceOwner {
                 Err(error) => {
                     let mut state = owner.state.write();
                     state.busy = false;
-                    // 重试被前置拒绝不证明首次未提交；仅明确冲突或成功可解除累计未知状态。
-                    state.pending_uncertain = error.status != 409
+                    // 只有路由的明确冲突码能否定本命令；裸 409 或损坏响应不能抹掉首次未知。
+                    state.pending_uncertain = !(error.status == 409
+                        && error.code == "watch_preference_conflict")
                         && (state.pending_uncertain || error.outcome_uncertain());
                     state.error = Some(error);
                 }
@@ -152,7 +153,11 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
     let uncertain = snapshot.pending_uncertain;
     let message = if !pending {
         t!("outbid-load-error")
-    } else if snapshot.error.as_ref().is_some_and(|error| error.status == 409) {
+    } else if snapshot
+        .error
+        .as_ref()
+        .is_some_and(|error| error.status == 409 && error.code == "watch_preference_conflict")
+    {
         t!("outbid-conflict")
     } else if uncertain {
         t!("outbid-unknown")

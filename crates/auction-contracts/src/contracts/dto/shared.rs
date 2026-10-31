@@ -46,9 +46,7 @@ impl<T> ApiResponse<T> {
     }
 }
 
-/// `service` 与 `version` 都由调用方传入：`env!("CARGO_PKG_VERSION")` 在本 crate 内展开只会
-/// 得到 `auction-contracts` 自己的版本，而运维需要的是运行进程的版本。当前工作区版本统一，
-/// 两者取值恰好相同，但语义不同——独立发布版本后差异就会显现。
+/// `service` 与 `version` 由装配根传入，避免探针误用本契约 crate 的进程身份与版本。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct HealthResponse {
     pub service: String,

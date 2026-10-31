@@ -25,6 +25,7 @@ fn parse_inline_at(value: &str, depth: usize) -> Vec<Inline> {
     let mut text = String::new();
     let mut index = 0;
     let mut delimiters = LinkDelimiters::default();
+    let mut emphasis_closers = [None; 5];
 
     while index < value.len() {
         let rest = &value[index..];
@@ -55,21 +56,26 @@ fn parse_inline_at(value: &str, depth: usize) -> Vec<Inline> {
         }
 
         let mut handled = false;
-        for (marker, kind) in [
+        for (marker_index, (marker, kind)) in [
             ("**", InlineKind::Strong),
             ("__", InlineKind::Strong),
             ("~~", InlineKind::Strike),
             ("*", InlineKind::Emphasis),
             ("_", InlineKind::Emphasis),
-        ] {
-            if let Some(inner) = rest.strip_prefix(marker)
-                && let Some(close) = inner.find(marker)
-                && close > 0
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let inner_start = index + marker.len();
+            if rest.starts_with(marker)
+                && let Some(close) =
+                    next_delimiter(value, inner_start, marker, &mut emphasis_closers[marker_index])
+                && close > inner_start
             {
                 flush_text(&mut nodes, &mut text);
-                let nested = parse_inline_at(&inner[..close], depth + 1);
+                let nested = parse_inline_at(&value[inner_start..close], depth + 1);
                 nodes.push(kind.build(nested));
-                index += marker.len() + close + marker.len();
+                index = close + marker.len();
                 handled = true;
                 break;
             }

@@ -23,8 +23,9 @@ pub struct DeploymentDatabaseIdentityError(&'static str);
 
 /// 连接前拒绝未知查询参数，并要求 URI 明确提供 host/socket 和库名。
 /// 省略端口固定为 5432，不继承 PGPORT；凭据、Unix socket 和 TLS 仍由 SQLx 解析。
+/// CLI 预检与 libpq 参数投影也复用此入口，确保 host/hostaddr 顺序和 Unix socket 优先级一致。
 #[cfg(feature = "postgres")]
-pub(crate) fn postgres_connect_options(
+pub fn postgres_connect_options(
     database_url: &str,
 ) -> Result<sqlx::postgres::PgConnectOptions, sqlx::Error> {
     let port = explicit_postgres_port(database_url)?;

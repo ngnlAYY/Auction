@@ -65,7 +65,9 @@ impl MoogleMailParser {
             || expected_equipment_ids.windows(2).any(|pair| pair[0] == pair[1])
             || state.recipient != message.recipient
             || state.subject != message.subject
-            || canonical_mail_body(&state.body) != canonical_mail_body(&message.body)
+            // 常见 LF 正文逐字相同时无需为每次附件暂存复制两份正文；不同才规范化核对。
+            || (state.body != message.body
+                && canonical_mail_body(&state.body) != canonical_mail_body(&message.body))
             || state.credits != expected_credits
             || actual_equipment_ids != expected_equipment_ids
             || state.cod != Some(expected_cod)

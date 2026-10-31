@@ -65,6 +65,11 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
         Some(manifest) => Some(crate::backup::verify_pair(manifest, options.database).await?),
         None => None,
     };
+    if options.mode == RebuildModeArg::EmptyForRestore
+        && let Some(backup) = &backup
+    {
+        backup.require_supported_schema()?;
+    }
     let mut rebuild =
         PostgresDatabaseRebuildGuard::connect(secrets.database_url(), options.database)
             .await

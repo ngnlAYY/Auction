@@ -10,7 +10,6 @@ use chrono::Utc;
 use super::{libpq::Libpq, verify_pair};
 use crate::app::{print_json, progress};
 use crate::cli::MaintenanceArgs;
-use crate::database::DatabaseTarget;
 use crate::deployment::ConfigDir;
 use crate::support::files;
 
@@ -30,18 +29,11 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
         files::require_private_target(receipt)?;
     }
     let verified = verify_pair(options.manifest, options.database).await?;
-    let expected = auction_storage::postgres_expected_migration_version();
-    if verified.manifest.schema_version > expected {
-        anyhow::bail!(
-            "备份 schema 版本 {} 高于当前二进制支持的 {expected}；请使用对应版本的 auction-cli",
-            verified.manifest.schema_version
-        );
-    }
+    verified.require_supported_schema()?;
     let guard =
         crate::service::acquire_maintenance(options.config_dir, options.maintenance).await?;
     let config = options.config_dir.load_worker()?;
     let url = config.database_url().context("Worker 配置缺少数据库连接")?;
-    DatabaseTarget::parse(url)?.require_database(options.database)?;
     let environment = Libpq::from_url(url, options.database)?;
 
     let store = crate::database::connect(url).await?;

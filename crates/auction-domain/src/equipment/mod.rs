@@ -25,7 +25,7 @@ pub enum EquipmentKeyError {
 /// 该类型不实现 `Clone`，并在销毁时尽力清零内部字节。任何日志、调试输出和 JSON
 /// 序列化都只能得到 `[REDACTED]`。
 pub struct EquipmentKey {
-    bytes: Vec<u8>,
+    bytes: Option<[u8; EQUIPMENT_KEY_LENGTH]>,
 }
 
 impl EquipmentKey {
@@ -34,28 +34,31 @@ impl EquipmentKey {
         if raw.len() != EQUIPMENT_KEY_LENGTH || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(EquipmentKeyError::InvalidFormat);
         }
-        Ok(Self { bytes: raw.to_ascii_lowercase().into_bytes() })
+        let mut bytes = [0; EQUIPMENT_KEY_LENGTH];
+        bytes.copy_from_slice(raw.as_bytes());
+        bytes.make_ascii_lowercase();
+        Ok(Self { bytes: Some(bytes) })
     }
 
     /// 在不转移所有权的同步回调中短暂暴露 key 字节。
     pub fn with_bytes<T>(&self, callback: impl FnOnce(&[u8]) -> T) -> Result<T, EquipmentKeyError> {
-        if self.bytes.len() != EQUIPMENT_KEY_LENGTH {
-            return Err(EquipmentKeyError::InvalidFormat);
-        }
-        Ok(callback(&self.bytes))
+        let bytes = self.bytes.as_ref().ok_or(EquipmentKeyError::InvalidFormat)?;
+        Ok(callback(bytes))
     }
 
     /// 尽力清零并丢弃内部 key。
     pub fn clear(&mut self) {
-        self.bytes.fill(0);
-        self.bytes.clear();
+        if let Some(bytes) = &mut self.bytes {
+            bytes.fill(0);
+        }
+        self.bytes = None;
     }
 
     /// 为同一条有界、幂等命令建立一次短生命周期副本。
     /// 该入口只供调用方在明确的进程内重试边界中使用；类型仍不实现 `Clone`，避免装备 key
     /// 被容器、DTO 或日志辅助结构无意复制。原值和副本销毁时都会独立清零各自缓冲区。
     pub fn duplicate_for_retry(&self) -> Self {
-        Self { bytes: self.bytes.clone() }
+        Self { bytes: self.bytes }
     }
 }
 

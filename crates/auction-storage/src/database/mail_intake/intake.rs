@@ -98,8 +98,8 @@ pub(super) async fn add_mail_auction_intake_inner(
         .fetch_one(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
-    // 赛季前最后一场开拍后，目标是新赛季早鸟草稿；赛季开始前锁内拒收，旧赛季装备不能入场。
-    if intake_opens_at.is_some_and(|opens_at| now < opens_at) {
+    // 锁后已到新赛季也不能接受旧赛季收件；延迟轮询或处理重试不得绕过冻结的收件下界。
+    if intake_opens_at.is_some_and(|opens_at| now < opens_at || write.received_at < opens_at) {
         return Err(CompetitionTransactionError::IntakeClosed);
     }
 

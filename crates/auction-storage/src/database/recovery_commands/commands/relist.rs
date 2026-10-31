@@ -17,21 +17,24 @@ pub(super) async fn relist_recovery(
     action: RecoveryConfirmationAction,
     now: DateTime<Utc>,
 ) -> Result<RelistResult, RecoveryCommandError> {
-    // 原成交场次开拍之后已有赛季开始（早鸟场次冻结的收件起点）：装备属于旧赛季，
-    // 已随 isekai 换季清空，永不重挂到新赛季场次。
+    // 原始收件或成交场次开拍后已跨过赛季边界的装备永不重挂。
+    // 收件事实不可变，避免普通场次被改期到新赛季后把旧装备误认成新赛季资产。
     let season_closed: bool = sqlx::query_scalar(
         r#"SELECT EXISTS (
                SELECT 1
                FROM public.auctions AS boundary
                INNER JOIN public.auctions AS sold ON sold.id = $2
+               INNER JOIN public.auction_submissions AS submission ON submission.id = $4
                WHERE boundary.world_id = $1
-                 AND boundary.intake_opens_at > sold.scheduled_open_at
+                 AND boundary.intake_opens_at
+                     > LEAST(sold.scheduled_open_at, submission.received_at)
                  AND boundary.intake_opens_at <= $3
            )"#,
     )
     .bind(&recovery.world_id)
     .bind(recovery.auction_id)
     .bind(now)
+    .bind(original_lot.submission_id)
     .fetch_one(&mut **transaction)
     .await
     .map_err(map_sql_error)?;

@@ -12,7 +12,7 @@
 4. **不静默改写历史事实。** 修复数据时只修复有确凿证据的部分（例如能由追加式事实重建的投影），无法证明的保持原样并留给人工核对；需要前置条件时在迁移内检查并以明确的错误终止（`RAISE EXCEPTION`），而不是猜测。
 5. **并发安全**：修改被运行中进程写入的表时，先 `LOCK TABLE … IN SHARE ROW EXCLUSIVE MODE` 等方式阻止并发写，再检查与改写。迁移本身只在停机门禁下执行。
 6. **约束在数据库层强制**：状态闭集、金额范围、互斥字段、只追加（触发器）等规则写成 CHECK、唯一约束或触发器，不只依赖应用代码。
-7. **同步更新**：新表加入 [保留政策](../../ops/deploy/retention-policy.v1.json) 的数据族，并把 `database_schema_version` 改为新的最高版本（否则 `auction-cli db inventory` 拒绝运行）；同步[数据库契约](../../docs/contracts/database.md)。
+7. **同步更新**：每次新增迁移都把[保留政策](../../ops/deploy/retention-policy.v1.json)的 `database_schema_version` 更新为新的最高版本（否则 `auction-cli db inventory` 拒绝运行）；新增表还须加入对应数据族；同步[数据库契约](../../docs/contracts/database.md)。
 8. **部署顺序**：迁移若要求旧 Worker 先停止（例如新增发送证明字段），在文件注释中写明；分体部署的 `service restart` 与合并部署的停服迁移都满足这一点。
 
 ## 执行兼容层

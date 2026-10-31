@@ -25,7 +25,7 @@ pub(super) fn AdminSettlementPicker(
     mut action_feedback: Signal<Option<AdminActionFeedback>>,
     mut selection_generation: Signal<u64>,
 ) -> Element {
-    let entries = catalog.as_ref().map(|page| page.auctions.clone()).unwrap_or_default();
+    let entries = catalog.map(|page| page.auctions).unwrap_or_default();
     let selection_entries = entries.clone();
     let period_disabled = entries.is_empty();
 
