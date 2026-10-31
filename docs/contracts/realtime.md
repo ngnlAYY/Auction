@@ -1,6 +1,6 @@
 # 实时事件契约
 
-[文档导航](docs/README.md) · [HTTP 路由](docs/contracts/routes.md) · [数据库](docs/contracts/database.md)
+[文档导航](../README.md) · [HTTP 路由](routes.md) · [数据库](database.md)
 
 公开站点的实时更新建立在**持久化事件流**之上：业务事务在提交状态变化的同时向 `realtime_events` 追加事件；Public 进程的 relay 轮询事件表并推送给本进程的 WebSocket 连接；浏览器断线后用 HTTP 回放补齐。事件只是“某处发生了变化”的通知，页面收到后重读权威接口，不根据事件负载推导竞价结果。
 
@@ -48,7 +48,7 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 
 ## 事件注册表
 
-负载必须**恰好**包含下表字段（多一个、少一个或为 null 都视为不合法）。整数都在 JavaScript 安全整数范围内。
+负载必须**恰好**包含下表字段（多一个、少一个或为 null 都视为不合法），并通过类型、范围与闭集校验。整数都在 JavaScript 安全整数范围内；UUID 必须是规范小写、非 nil 的 RFC 4122 v1–v5；状态版本、期号与出价等正数字段不能为 0。权威注册表及取值约束见 [`crates/auction-application/src/ports/realtime/public.rs`](../../crates/auction-application/src/ports/realtime/public.rs)。
 
 | kind | 版本 | 负载字段 |
 | --- | --- | --- |
@@ -105,4 +105,4 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 1. 建立 WebSocket，缓冲到达的帧。
 2. 用最后确认的游标调用 `GET /api/v1/events` 补齐（`has_more` 时翻页），再按 `stream_sequence` 合并缓冲帧，以 `event_id` 去重。
 3. 发现序列跳号或 `refetch_required` 时重新读取权威快照并重新补齐。
-4. 断线后指数退避重连（Public 前端：1 秒起步、翻倍至 30 秒、带随机抖动）；页面隐藏时暂停。
+4. 断线后指数退避重连（Public 前端：基数 1 秒起步、翻倍至 30 秒，实际等待取基数的 1/2 至 1 倍）；连接存活 30 秒后重置失败计数，连续 8 次快速失败转为手动刷新。页面隐藏时暂停重连退避与后台轮询，已建立的 WebSocket 不因隐藏而主动关闭。

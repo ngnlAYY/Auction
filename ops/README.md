@@ -1,8 +1,8 @@
 # 运维手册
 
-[文档导航](docs/README.md) · [配置参考](ops/config/README.md) · [备份与恢复](ops/deploy/RECOVERY.md) · [auction-cli](apps/auction-cli/README.md) · [架构](docs/architecture.md)
+[文档导航](../docs/README.md) · [配置参考](config/README.md) · [备份与恢复](deploy/RECOVERY.md) · [auction-cli](../apps/auction-cli/README.md) · [架构](../docs/architecture.md)
 
-本手册覆盖生产部署、启停编排、升级、反向代理、监控与日常运维。所有运维动作都通过 `auction-cli` 或 systemd 完成；服务进程自身从不隐式迁移、备份或删库。
+本手册覆盖生产部署、启停编排、升级、反向代理、监控与日常运维。常规运维通过 `auction-cli` 或 systemd 完成；普通服务启动从不隐式迁移、备份或删库。合并部署的首次设置在网页明确确认后，可由 `auction-server` 初始化预先建立的专用空库。
 
 ## 部署形态
 
@@ -13,7 +13,7 @@
 
 两种形态共用同一配置布局与同一个 `auction-cli`，但不能同时用于同一套配置。
 
-发布包（`auction-rust-<版本>-<提交前 12 位>[-single].tar.gz`）包含 `bin/`（分体包：三个角色程序 + `auction-cli`；合并包：`auction-server` + `auction-cli`）、`docs/`（本手册、恢复手册、CLI 说明）、`systemd/`、`tmpfiles/`、`caddy/` 示例、`config/examples/` 与保留政策（以上均为发布包内的路径）。用与发布包一同提供的 `SHA256SUMS` 校验下载。
+发布包（`auction-rust-<版本>-<提交前 12 位>[-single].tar.gz`）包含 `bin/`（分体包：三个角色程序 + `auction-cli`；合并包：`auction-server` + `auction-cli`）、`docs/`（部署、恢复、CLI 说明与 Web 资源摘要）、`systemd/`、`caddy/`、`config/examples/` 与 `retention-policy.v1.json`；分体包另含 `tmpfiles/`，合并包另含首次设置代理示例与单文件说明（以上均为发布包内的路径）。敏感模板以 `secrets.toml.example`、`secrets/postgres-rebuild.toml.example` 命名，须复制为配置引用的实际文件名。用发布包内的 `SHA256SUMS` 校验解压后的文件。
 
 ## 目录与账号
 
@@ -36,9 +36,9 @@ groupadd --system auction-worker-control
 usermod -aG auction-worker-control auction
 ```
 
-`auction-cli config check --strict` 会检查上述权限：配置目录与普通配置文件不能被 group/other 写入，敏感文件只能 owner 访问，runtime 文件必须恰好 0640 且父目录禁止他人写入，Admin runtime 文件归 Admin unit 的 `User` 所有。
+`auction-cli config check --strict` 检查配置目录与普通配置文件不能被 group/other 写入、敏感文件只能 owner 访问；runtime 文件在 loader 阶段就必须恰好 0640 且父目录禁止他人写入。`service start/restart` 还会核对 runtime 文件与父目录归 Admin unit 的固定 `User` 所有。
 
-> 生产环境中 `/etc` 对服务只读（`ProtectSystem=strict`），Worker 的邮件诊断归档默认目录（Worker 配置旁的 `mail-diagnostics/`）不可写。请把 `[worker.mooglemail.diagnostics] directory` 设为 `/var/lib/auction/mail-diagnostics` 这类可写的私有目录，或在 runtime 文件中设置。
+> 生产环境中 `/etc` 对服务只读（`ProtectSystem=strict`），Worker 的邮件诊断归档默认目录（Worker 配置旁的 `mail-diagnostics/`）不可写。请在 `worker.toml` 把 `[worker.mooglemail.diagnostics] directory` 设为 `/var/lib/auction/mail-diagnostics` 这类可写的私有目录；runtime 配置不接管此路径。
 
 ## 首次部署
 
@@ -46,7 +46,7 @@ usermod -aG auction-worker-control auction
 
 1. **安装程序**：解压发布包，把 `bin/*` 安装到 `/opt/auction/bin/`。
 
-2. **准备数据库**（PostgreSQL 18）：建立应用角色与专用数据库。可以手工 `CREATE ROLE … LOGIN PASSWORD …` / `CREATE DATABASE auction OWNER auction`，也可以先写好配置，再用维护凭据：
+2. **准备数据库账号与数据库**（PostgreSQL 18）：先建立应用角色；可手工 `CREATE ROLE … LOGIN PASSWORD …` / `CREATE DATABASE auction OWNER auction` 准备数据库，也可先按下一步手工写好配置，再用维护凭据创建缺失的库（`db create` 不创建应用角色，也不迁移）。首次设置向导会试连数据库，使用向导时须预先建好库：
 
    ```bash
    auction-cli --config-dir /etc/auction db create --database auction \
@@ -55,15 +55,15 @@ usermod -aG auction-worker-control auction
 
 3. **生成配置**，二选一：
    - 首次设置向导：`sudo -u auction /opt/auction/bin/auction-admin-api setup --output-dir /var/lib/auction/new-config --control-group auction-worker-control`。在 stderr 中取得设置地址（默认 `127.0.0.1:8091`）与一次性令牌，经 SSH 隧道（`ssh -L 8091:127.0.0.1:8091 <主机>`）在浏览器完成表单。生成后把目录内容移入 `/etc/auction/` 并按上表调整属主与权限。
-   - 手工：以 [`ops/config/examples/`](ops/config/examples) 为模板编写，字段说明见[配置参考](ops/config/README.md)。
+   - 手工：以 [`ops/config/examples/`](config/examples) 为模板编写，字段说明见[配置参考](config/README.md)。
 
 4. **补齐关键配置**：
    - `secrets.toml`：`[database]`、`admin_actor`/`admin_secret`、三组数据密钥（`openssl rand -base64 32`，每组独立）。
    - `worker.toml`：`[worker.control] enabled = true`；`allowed_peer_uids` 须包含运行 Admin 的账号 UID，并且**包含 0**（`auction-stack.service` 以 root 运行 `auction-cli service`，需要探测 Worker 就绪）。
-   - Public/Admin 的 `[http_security]`：`allowed_origins` 设为对外 HTTPS origin，`cookie_secure = true`；反向代理在本机时 `trusted_proxy_cidrs = ["127.0.0.1/32"]`。
+   - Public 的 `[http_security]` 与 Admin runtime 的 `[security]`：`allowed_origins` 设为对外 HTTPS origin，`cookie_secure = true`；反向代理在本机时 `trusted_proxy_cidrs = ["127.0.0.1/32"]`。Admin 角色文件的 fallback 安全配置也须合法；配置了 runtime 时以 runtime 为生效源。
    - 每个 Public 实例使用唯一的 `realtime.consumer_key`。
 
-5. **安装运行时目录与 unit**（在解压后的发布包根目录执行；模板在仓库中位于 [`ops/deploy/tmpfiles/`](ops/deploy/tmpfiles) 与 [`ops/deploy/systemd/`](ops/deploy/systemd)）：
+5. **安装运行时目录与 unit**（在解压后的发布包根目录执行；模板在仓库中位于 [`ops/deploy/tmpfiles/`](deploy/tmpfiles) 与 [`ops/deploy/systemd/`](deploy/systemd)）：
 
    ```bash
    install -m 0644 tmpfiles/hv-auction.conf.example /etc/tmpfiles.d/hv-auction.conf
@@ -86,9 +86,9 @@ usermod -aG auction-worker-control auction
 ### 合并部署
 
 1. 安装 `auction-server` 与 `auction-cli`，建立 `auction` 账号，预先建立专用的**空**数据库与应用角色。
-2. 把发布包中的 `systemd/auction-server.service.example`（仓库中为 [`ops/deploy/systemd/auction-server.service.example`](ops/deploy/systemd/auction-server.service.example)）安装为 `/etc/systemd/system/auction-server.service`（配置目录 `/var/lib/auction/config`，运行目录 `/var/lib/auction/.config.server`），`systemctl enable --now auction-server`。
+2. 把发布包中的 `systemd/auction-server.service.example`（仓库中为 [`ops/deploy/systemd/auction-server.service.example`](deploy/systemd/auction-server.service.example)）安装为 `/etc/systemd/system/auction-server.service`（配置目录 `/var/lib/auction/config`，运行目录 `/var/lib/auction/.config.server`），`systemctl enable --now auction-server`。
 3. 配置目录不存在时进入首次设置：在 `journalctl -u auction-server` 中取得令牌，经 SSH 隧道访问 `http://127.0.0.1:8091/setup`，填写表单并确认“初始化并启动”。服务保存配置、把空库初始化到当前 schema，然后依次启动三个角色。
-   - 无法使用 SSH 隧道时，可临时用发布包中的 `caddy/setup.Caddyfile.example`（仓库中为 [`ops/deploy/caddy/setup.Caddyfile.example`](ops/deploy/caddy/setup.Caddyfile.example)）反代，并给 `auction-server` 加 `--allow-remote-setup --setup-origin https://<域名> --setup-proxy-ip 127.0.0.1`；完成后立即删除临时站点与参数。
+   - 无法使用 SSH 隧道时，可临时用发布包中的 `caddy/setup.Caddyfile.example`（仓库中为 [`ops/deploy/caddy/setup.Caddyfile.example`](deploy/caddy/setup.Caddyfile.example)）反代，并给 `auction-server` 加 `--allow-remote-setup --setup-origin https://<域名> --setup-proxy-ip 127.0.0.1`；完成后立即删除临时站点与参数。
 4. 补齐外部凭据与功能开关后 `systemctl restart auction-server`。
 
 初始化失败或结果未知时服务不会自动重试（unit 为 `Restart=no`）：保留配置与数据库现场，核对后用 `auction-cli db` 系列命令恢复。
@@ -105,7 +105,7 @@ usermod -aG auction-worker-control auction
 
 角色 unit 都设 `TimeoutStopSec=45s`（10 秒排空 + tracing 刷新余量）与一组 systemd 加固选项（`ProtectSystem=strict`、`NoNewPrivileges` 等）。
 
-**为什么用 `auction-cli service` 编排**：systemd 的 `After=` 只保证“进程已启动”，不保证“已就绪”。`auction-cli service start` 在每个角色启动后等待其 readiness（Worker 为 control socket 的 `/v1/health/ready`，Admin/Public 为 `/health/ready`，且期间 `MainPID`/`InvocationID` 不变）才启动下一个；任何一步失败都会反序停止本次启动的 unit。它还在启动前执行严格配置检查与数据库迁移。详见 [auction-cli](apps/auction-cli/README.md#分体部署编排)。
+**为什么用 `auction-cli service` 编排**：systemd 的 `After=` 只保证“进程已启动”，不保证“已就绪”。`auction-cli service start` 在每个角色启动后等待其 readiness（Worker 为 control socket 的 `/v1/health/ready`，Admin/Public 为 `/health/ready`，且期间 `MainPID`/`InvocationID` 不变）才启动下一个；任何一步失败都会反序停止本次启动的 unit。它还在启动前执行严格配置检查与数据库迁移。详见 [auction-cli](../apps/auction-cli/README.md#分体部署编排)。
 
 常用操作：
 
@@ -117,9 +117,9 @@ systemctl stop auction-stack.service                     # 按 Public → Admin 
 
 注意：
 
-- 因为 `Requires=`，单独 `systemctl restart auction-worker` 会连带重启 Admin 与 Public，且不经过就绪门控与迁移。需要整体重启时使用 `auction-cli service restart`。
+- 三个角色 unit 的 `Requires=`/`After=` 不提供应用 readiness 编排；单独重启 Worker 可能影响依赖角色的运行状态。需要整体重启时使用 `auction-cli service restart`。
 - Worker 在凭据所有权失效、control 服务停止等运行时故障时以非零状态退出，由 `Restart=on-failure` 拉起。
-- 迁移、建库、重建与恢复要求三个 unit 全部停止（或使用合并部署的 owner 锁），见[停机门禁](apps/auction-cli/README.md#停机门禁)。
+- 迁移、建库、重建与恢复要求三个 unit 全部停止（或使用合并部署的 owner 锁），见[停机门禁](../apps/auction-cli/README.md#停机门禁)。
 
 ## 升级
 
@@ -135,11 +135,11 @@ systemctl stop auction-stack.service                     # 按 Public → Admin 
 
 合并部署：`systemctl stop auction-server` → 备份 → 安装新程序 → 以服务账号执行 `sudo -u auction auction-cli --config-dir /var/lib/auction/config db migrate` → `systemctl start auction-server`。
 
-**回退**：迁移只向前。旧程序遇到更高的 schema 版本不会就绪，所以已迁移后的回退只能是“旧程序 + 恢复升级前的备份”，见[备份与恢复](ops/deploy/RECOVERY.md)。
+**回退**：迁移只向前。旧程序遇到更高的 schema 版本不会就绪，所以已迁移后的回退只能是“旧程序 + 恢复升级前的备份”，见[备份与恢复](deploy/RECOVERY.md)。
 
 ## 反向代理
 
-[`ops/deploy/caddy/Caddyfile`](ops/deploy/caddy/Caddyfile) 是 Public 与 Admin 两个站点的模板：
+[`ops/deploy/caddy/Caddyfile`](deploy/caddy/Caddyfile) 是 Public 与 Admin 两个站点的模板：
 
 - 自动 HTTPS；WebSocket（`/api/v1/ws`）由 `reverse_proxy` 直接透传。
 - 对公网屏蔽 `/metrics`（返回 404）；只压缩 `/assets/*` 等静态资源。
@@ -161,7 +161,7 @@ systemctl stop auction-stack.service                     # 按 Public → Admin 
 
 ### 指标
 
-在 `common.toml` 设置 `[metrics] enabled = true` 后：Public/Admin 在各自 listener 上提供 `/metrics`（listener 必须是 loopback TCP 或 Unix socket），Worker 在 control socket 上提供 `/metrics`。指标族见 [auction-observability](crates/auction-observability/README.md#指标)。建议关注：
+Public/Worker 在 `common.toml` 设置 `[metrics] enabled = true`；Admin 配置了 runtime 文件时，以 runtime 的 `[metrics]` 为准。Public/Admin 在各自 listener 上提供 `/metrics`（listener 必须是 loopback TCP 或 Unix socket），Worker 在启用的 control socket 上提供 `/metrics`。指标族见 [auction-observability](../crates/auction-observability/README.md#指标)。建议关注：
 
 - Worker 循环迭代与调度延迟、批次饱和、重试次数；
 - 数据库连接池等待与空池次数；
@@ -189,19 +189,19 @@ systemctl stop auction-stack.service                     # 按 Public → Admin 
 | --- | --- |
 | 更换外部 Cookie | Admin “Cookie 池”录入新凭据并停用旧凭据（每种 kind 同时只能一个 active），或 `auction-cli credential import`；然后重启 Worker（分体部署用 `service restart`） |
 | 暂停/恢复收件 | Admin 仪表盘或“收件审核”页；也可立即触发一次轮询 |
-| 结果未知的投递 | Admin “投递队列”人工对账：确认成功、确认失败或授权重试 |
+| 结果未知的投递 | Admin “投递队列”按动作与证据人工对账；主动 Send 禁止仅凭外部引用人工确认成功，须由冻结的精确 Sent 证明恢复。确认失败或授权重试前核对远端实际结果，未找到 Sent 不证明未发送 |
 | 恢复确认 | Admin “结算报表”中确认 `reclaimed` / `cancelled` / `equipment_recovered` |
 | 论坛写入未知 | `auction-cli forum recovery` 查看，必要时 `forum authorize-retry` |
 | 论坛私信对账 | `auction-cli pm list` / `pm reconcile` |
 | 规则发布 | Admin “规则内容”页，或 `auction-cli rules import` |
 | 修改运行参数 | Admin “参数配置”页（校验后原子写入 runtime 文件），随后重启相关角色生效 |
-| Bot 资金账户 | 停止 Worker 后用 `auction-cli funds`，见[结算与履约](docs/guide/settlement.md#bot-内部履约与资金账户) |
+| Bot 资金账户 | `auction-cli funds preview` 可在线只读执行；开户或现金对账写入前须先停止 Worker，见[结算与履约](../docs/guide/settlement.md#bot-内部履约与资金账户) |
 | 导出邮件诊断证据 | `auction-cli mail export-evidence <evidence-id> --output <文件>` |
 | 数据保留盘点 | `auction-cli db inventory`（只统计，不授权删除） |
 
 ## 备份与恢复
 
-定期执行 `auction-cli backup create` 并把 archive 与 manifest 复制到异地；恢复、重建与演练流程见[备份与恢复手册](ops/deploy/RECOVERY.md)。
+定期执行 `auction-cli backup create` 并把 archive 与 manifest 复制到异地；恢复、重建与演练流程见[备份与恢复手册](deploy/RECOVERY.md)。
 
 ## 故障排查
 

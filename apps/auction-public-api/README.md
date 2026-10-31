@@ -1,6 +1,6 @@
 # auction-public-api
 
-[文档导航](docs/README.md) · [HTTP 路由](docs/contracts/routes.md) · [实时事件](docs/contracts/realtime.md) · [配置参考](ops/config/README.md)
+[文档导航](../../docs/README.md) · [HTTP 路由](../../docs/contracts/routes.md) · [实时事件](../../docs/contracts/realtime.md) · [配置参考](../../ops/config/README.md)
 
 公开站点的 HTTP 进程：提供玩家读接口、竞价/代理/标记命令、登录会话、WebSocket 实时推送，并在 `web-embed` 构建中同源提供 Public 浏览器页面。本 crate 只做装配——读取配置、连接数据库、把存储适配器注入 `auction-http` 的 `PublicApiState`，业务规则在应用层与领域层。
 
@@ -16,14 +16,14 @@
 
 ```bash
 AUCTION_CONFIG_FILE=/etc/auction/public.toml auction-public-api
-cargo run -p auction-public-api --features postgres,web-embed   # 本地开发（读取 ops/config/public.toml）
+cargo run -p auction-public-api --features postgres,web-embed   # 需先准备默认运行配置 ops/config/public.toml
 ```
 
-1. 按 `AUCTION_CONFIG_FILE` 或 `ops/config/public.toml` 加载并校验配置（见 [auction-config](crates/auction-config/README.md)）；`auction-server` 以显式路径调用 `run_from_path`。
+1. 按 `AUCTION_CONFIG_FILE` 或 `ops/config/public.toml` 加载并校验配置（见 [auction-config](../../crates/auction-config/README.md)）；后者是相对工作目录的默认运行配置位置，仓库模板在 [`ops/config/examples/`](../../ops/config/examples)，不会自动生成该文件。`auction-server` 以显式路径调用 `run_from_path`。
 2. 初始化 JSON 日志、可选 OTLP tracing 与 Prometheus 注册表，订阅 SIGINT/SIGTERM。
 3. 绑定 listener：TCP（默认 `127.0.0.1:8090`）或 Linux Unix socket（受信运行目录 + 实例锁 `.public-api-listener.lock`）。
-4. 有数据库时：连接池、心跳发布（10 秒一次，TTL 30 秒）、按 `realtime.consumer_key` 取得 realtime consumer 所有权（PostgreSQL session advisory lock，重复 key 的第二个实例启动失败），装配读端口、竞价命令、会话、标记与 realtime Hub。没有数据库时所有业务端口为空，接口返回“能力不可用”，不伪造数据。
-5. 启动 realtime relay：每 `poll_interval_millis`（默认 250ms）扫描 `auction:` 前缀的事件流，转发给本进程的 WebSocket 连接并持久化消费游标。
+4. 有数据库时：连接池、心跳发布（10 秒一次，TTL 30 秒）、按 `realtime.consumer_key` 取得 realtime consumer 所有权（PostgreSQL session advisory lock，重复 key 的第二个实例启动失败），装配读端口、竞价命令、会话、标记与 realtime Hub；装备真实链接解析仅在配置 `equipment_data_key` 时装配，缺少该能力时涉及装备链接的非空目录/详情返回 503。没有数据库时数据库业务端口为空；健康、内嵌页面及配置注入的注册 Bot 名单仍可提供，readiness 为未就绪。
+5. 有数据库时启动 realtime relay：每 `poll_interval_millis`（默认 250ms）扫描 `auction:` 前缀的事件流，转发给本进程的 WebSocket 连接并持久化消费游标。
 
 ## 就绪与退出
 
@@ -36,4 +36,4 @@ cargo run -p auction-public-api --features postgres,web-embed   # 本地开发�
 
 ## 部署
 
-分体部署的 unit 示例见 [`ops/deploy/systemd/auction-public-api.service.example`](ops/deploy/systemd/auction-public-api.service.example)，启动顺序与运维流程见[运维手册](ops/README.md)。
+分体部署的 unit 示例见 [`ops/deploy/systemd/auction-public-api.service.example`](../../ops/deploy/systemd/auction-public-api.service.example)，启动顺序与运维流程见[运维手册](../../ops/README.md)。

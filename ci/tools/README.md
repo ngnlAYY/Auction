@@ -1,6 +1,6 @@
 # 构建工具
 
-[文档导航](docs/README.md) · [CI 与发布](ci/README.md) · [开发指南](docs/development.md)
+[文档导航](../../docs/README.md) · [CI 与发布](../README.md) · [开发指南](../../docs/development.md)
 
 发布与审计用到的工具（Dioxus CLI、sccache、wasm-bindgen、wasm-opt、cargo-audit）不使用机器上任意版本，而是由本目录的脚本从固定来源、固定版本、独立锁文件构建或下载，并写入安装回执；发布入口在每次运行前校验回执。
 

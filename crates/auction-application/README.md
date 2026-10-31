@@ -1,8 +1,8 @@
 # auction-application
 
-[文档导航](docs/README.md) · [架构](docs/architecture.md) · [业务规则](docs/business-rules.md)
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [业务规则](../../docs/business-rules.md)
 
-用例层：定义窄端口（trait）、命令与安全投影，编排领域规则与事务边界。它不认识 PostgreSQL、HTTP、MoogleMail 或 E-Hentai 的具体实现——这些由 `auction-storage`、`auction-http`、`auction-integrations`、`auction-jobs` 作为适配器实现端口，四个应用二进制在装配根把它们接起来。
+用例层：定义窄端口（trait）、命令与安全投影，编排领域规则与事务边界。它不认识 PostgreSQL、HTTP、MoogleMail 或 E-Hentai 的具体实现——这些由 `auction-storage`、`auction-http`、`auction-integrations`、`auction-jobs` 作为适配器实现端口，`apps/` 中各程序按角色在装配根组合所需能力。
 
 依赖：`auction-domain` 与少量通用库（serde、sha2/hmac、chrono-tz、url 等），不依赖 tokio 运行时。
 
@@ -10,27 +10,27 @@
 
 | 路径 | 内容 |
 | --- | --- |
-| [`crates/auction-application/src/ports/`](crates/auction-application/src/ports) | 端口与值对象：每个功能 owner 一个子模块，由 [`crates/auction-application/src/lib.rs`](crates/auction-application/src/lib.rs) 统一导出 |
-| [`crates/auction-application/src/services/`](crates/auction-application/src/services) | 用例服务：组合端口完成一个业务动作 |
-| [`crates/auction-application/src/errors/`](crates/auction-application/src/errors) | `ApplicationError` 及各 owner 的低基数错误 |
+| [`crates/auction-application/src/ports/`](src/ports) | 端口与值对象：每个功能 owner 一个子模块，由 [`crates/auction-application/src/lib.rs`](src/lib.rs) 统一导出 |
+| [`crates/auction-application/src/services/`](src/services) | 用例服务：组合端口完成一个业务动作 |
+| [`crates/auction-application/src/errors/`](src/errors) | `ApplicationError` 及各 owner 的低基数错误 |
 
 ### 端口分组
 
 | 分组 | 主要内容 |
 | --- | --- |
-| [`crates/auction-application/src/ports/core/`](crates/auction-application/src/ports/core) | `Clock`、`CommandLedger`/`RequestHash`/`StoredCommand`（幂等账本）、事务策略、仓储错误、稳定编码（小写十六进制、旧版 Go JSON 兼容摘要） |
-| [`crates/auction-application/src/ports/auction/`](crates/auction-application/src/ports/auction) | 公开查询、竞价命令、生命周期、慢速代理到期、冻结的策略模板 |
-| [`crates/auction-application/src/ports/scheduling/`](crates/auction-application/src/ports/scheduling) | 周排期、赛季早鸟日历、IANA 时区来源、Worker 排期 bootstrap |
-| [`crates/auction-application/src/ports/public/`](crates/auction-application/src/ports/public) | 规则、黑名单、补偿池、装备链接、会话与登录时长偏好、装备标记与提醒偏好、读模型缓存 |
-| [`crates/auction-application/src/ports/admin/`](crates/auction-application/src/ports/admin) | 拍卖创建/排期/列表、lot 修改、装备录入、论坛预览、邮件状态、规则、runtime 配置、凭据、用户、世界启停、审计、改名历史、结算目录 |
-| [`crates/auction-application/src/ports/mail/`](crates/auction-application/src/ports/mail) | 轮询持久化、业务处理、注册/换绑、诊断证据、装备读取诊断、邮箱维护、展示投影 |
-| [`crates/auction-application/src/ports/delivery/`](crates/auction-application/src/ports/delivery) | 投递 outbox Worker、发送节奏分组、Send/Take 期望冻结、Admin 投递操作 |
-| [`crates/auction-application/src/ports/settlement/`](crates/auction-application/src/ports/settlement) | 结算命令、Worker 调度、履约、联合远端证据、资金、内部履约、报表 |
-| [`crates/auction-application/src/ports/recovery/`](crates/auction-application/src/ports/recovery) | 付款超时恢复的调度、命令、健康与报表 |
-| [`crates/auction-application/src/ports/forum/`](crates/auction-application/src/ports/forum) | 论坛主题同步、回帖导入、Public 镜像、装备标色规则、论坛私信、目标资料 |
-| [`crates/auction-application/src/ports/lot_watch_pm/`](crates/auction-application/src/ports/lot_watch_pm) | 装备超价提醒私信的独立队列与人工对账 |
-| [`crates/auction-application/src/ports/realtime/`](crates/auction-application/src/ports/realtime) | Public 回放、Worker 消费、Admin 运维 |
-| [`crates/auction-application/src/ports/operations/`](crates/auction-application/src/ports/operations) | 运维告警、进程 readiness、Worker control 状态 |
+| [`crates/auction-application/src/ports/core/`](src/ports/core) | `Clock`、`CommandLedger`/`RequestHash`/`StoredCommand`（幂等账本）、事务策略、仓储错误、稳定编码（小写十六进制、旧版 Go JSON 兼容摘要） |
+| [`crates/auction-application/src/ports/auction/`](src/ports/auction) | 公开查询、竞价命令、生命周期、慢速代理到期、冻结的策略模板 |
+| [`crates/auction-application/src/ports/scheduling/`](src/ports/scheduling) | 周排期、赛季早鸟日历、IANA 时区来源、Worker 排期 bootstrap |
+| [`crates/auction-application/src/ports/public/`](src/ports/public) | 规则、黑名单、补偿池、装备链接、会话与登录时长偏好、装备标记与提醒偏好、读模型缓存 |
+| [`crates/auction-application/src/ports/admin/`](src/ports/admin) | 拍卖创建/排期/列表、lot 修改、装备录入、论坛预览、邮件状态、规则、runtime 配置、凭据、用户、世界启停、审计、改名历史、结算目录 |
+| [`crates/auction-application/src/ports/mail/`](src/ports/mail) | 轮询持久化、业务处理、注册/换绑、诊断证据、装备读取诊断、邮箱维护、展示投影 |
+| [`crates/auction-application/src/ports/delivery/`](src/ports/delivery) | 投递 outbox Worker、发送节奏分组、Send/Take 期望冻结、Admin 投递操作 |
+| [`crates/auction-application/src/ports/settlement/`](src/ports/settlement) | 结算命令、Worker 调度、履约、联合远端证据、资金、内部履约、报表 |
+| [`crates/auction-application/src/ports/recovery/`](src/ports/recovery) | 付款超时恢复的调度、命令、健康与报表 |
+| [`crates/auction-application/src/ports/forum/`](src/ports/forum) | 论坛主题同步、回帖导入、Public 镜像、装备标色规则、论坛私信、目标资料 |
+| [`crates/auction-application/src/ports/lot_watch_pm/`](src/ports/lot_watch_pm) | 装备超价提醒私信的独立队列与人工对账 |
+| [`crates/auction-application/src/ports/realtime/`](src/ports/realtime) | Public 回放、Worker 消费、Admin 运维 |
+| [`crates/auction-application/src/ports/operations/`](src/ports/operations) | 运维告警、进程 readiness、Worker control 状态 |
 
 ### 主要服务
 
@@ -49,10 +49,10 @@
 
 ## 横切约定
 
-- **幂等账本**：所有写命令带稳定 `command_id` 与 `RequestHash`（命令种类 + 聚合 ID + 请求 DTO 的 SHA-256）。同 ID 同摘要重放原结果，同 ID 不同摘要返回冲突。兼容旧系统的摘要统一经 `RequestHash::from_legacy_go_json` 等入口计算。
+- **幂等账本**：竞价、生命周期及其他要求幂等重放的业务命令携带稳定 `command_id` 与 `RequestHash`（命令种类 + 聚合 ID + 请求 DTO 的 SHA-256）。同 ID 同摘要重放原结果，同 ID 不同摘要返回冲突。兼容旧系统的摘要统一经 `RequestHash::from_legacy_go_json` 等入口计算；登录、会话校验等端口使用各自的会话契约。
 - **事务边界**：一个用例的状态变化、命令结果、追加式审计与 realtime 事件在同一事务提交；端口要求的隔离级别与重试（40001/40P01 有界重试）由存储实现负责。
 - **时间**：通过 `Clock` 注入；领域规划不读取系统时间。
-- **敏感值**：Cookie、装备 key、登录 key 等只经专用值对象短暂暴露（不实现 `Clone`/明文 `Debug`，丢弃时清零）；端口返回的投影不含秘密。
+- **敏感值**：Cookie、装备 key、登录 key 等经专用值对象受控暴露，并对明文调试输出与丢弃清理设定边界；普通查询投影不含秘密。显式的凭据命令、Admin key 签发结果与投递端口可携带专用秘密类型，不能把这些类型直接映射为普通查询 DTO。
 - **错误**：`ApplicationError` 区分能力缺失（`CapabilityUnavailable`，HTTP 层通常映射为 `501 feature_not_supported`）、领域错误、仓储错误与各 owner 的闭集错误；错误文本不回显输入中的秘密。
 
 ## 会话

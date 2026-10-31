@@ -1,6 +1,6 @@
 # auction-process
 
-[文档导航](docs/README.md) · [架构](docs/architecture.md)
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md)
 
 原生进程与首次设置服务共用的生命周期原语，只依赖 tokio。
 

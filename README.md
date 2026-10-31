@@ -24,11 +24,11 @@ HentaiVerse 装备拍卖服务的全 Rust 实现：玩家在网站或 E-Hentai �
 | --- | --- | --- |
 | [auction-public-api](apps/auction-public-api/README.md) | 公开 API、竞价命令、会话、WebSocket 推送与公开页面 | `127.0.0.1:8090` |
 | [auction-admin-api](apps/auction-admin-api/README.md) | 管理 API、管理后台页面、首次设置 | `127.0.0.1:8091` |
-| [auction-worker](apps/auction-worker/README.md) | 生命周期、结算、履约、投递、邮件、论坛、恢复与告警 | 仅 Unix control socket |
+| [auction-worker](apps/auction-worker/README.md) | 生命周期、结算、履约、投递、邮件、论坛、恢复与告警 | 可选 Unix control socket（默认关闭） |
 | [auction-server](apps/auction-server/README.md) | 可选：单文件监管三个角色子进程 | 同 Public/Admin |
 | [auction-cli](apps/auction-cli/README.md) | 配置检查、部署编排、迁移、备份恢复与业务运维 | — |
 
-普通启动从不隐式迁移数据库；迁移、备份、恢复与重建都通过 `auction-cli` 显式执行。
+普通启动从不隐式迁移数据库；升级迁移、备份、恢复与重建通过 `auction-cli` 显式执行。合并部署另有首次设置例外：网页明确确认后，`auction-server` 初始化专用空库；常规重启不会重试迁移。
 
 ## 仓库结构
 
@@ -47,8 +47,8 @@ HentaiVerse 装备拍卖服务的全 Rust 实现：玩家在网站或 E-Hentai �
 
 ```bash
 just verify            # 默认验证：策略门禁、fmt、check、feature、clippy、wasm（不运行测试）
-just web-build         # 构建两端页面 payload（需要受控 dx，见 ci/tools）
-just run-public        # 本地运行（postgres + web-embed），Admin/Worker 同理
+just web-build         # 构建两端页面 payload（需要受控 dx，见 ci/tools/README.md）
+just run-public        # postgres + web-embed；run-admin 同理，run-worker 只启用 postgres
 just db-migrate <配置目录>
 just build-release     # 完整发布制品（Fat LTO，较慢）
 just release-check     # 构建、门禁与装包
@@ -58,4 +58,4 @@ just release-check     # 构建、门禁与装包
 
 ## 发布
 
-默认分支推送（或手动触发）且全部检查通过后，CI 产出发布包：`bin/` 中包含 Public、Admin、Worker 与 `auction-cli`（内嵌页面），附部署文档、systemd/tmpfiles/Caddy 模板与配置示例，以及 `SHA256SUMS`。合并部署包（`auction-server` + `auction-cli`）用 `just release-check --single-binary` 构建。详见 [CI 与发布](ci/README.md)。
+默认分支推送（或手动触发）且全部检查通过后，CI 产出发布包：`bin/` 中包含 Public、Admin、Worker 与 `auction-cli`，其中仅 Public/Admin 内嵌页面；另附部署文档、systemd/tmpfiles/Caddy 模板与配置示例，以及 `SHA256SUMS`。合并部署包（`auction-server` + `auction-cli`）用 `just release-check --single-binary` 构建。详见 [CI 与发布](ci/README.md)。

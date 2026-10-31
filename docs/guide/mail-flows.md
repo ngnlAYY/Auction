@@ -1,15 +1,15 @@
 # MoogleMail 邮件流程
 
-[文档导航](docs/README.md) · [业务规则](docs/business-rules.md) · [结算与履约](docs/guide/settlement.md) · [auction-integrations](crates/auction-integrations/README.md)
+[文档导航](../README.md) · [业务规则](../business-rules.md) · [结算与履约](settlement.md) · [auction-integrations](../../crates/auction-integrations/README.md)
 
 Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注册与换绑请求，Bot 寄出登录 key、回执、结算邮件与提醒。所有入站邮件都经持久化游标逐封处理；所有出站邮件都经 outbox 投递，结果不确定时转人工对账而不是重发。
 
 ## 收件轮询
 
 - Worker 为每个启用的世界维护一个邮箱（`mailbox_key`，如 `mooglemail:main`），按 cron 计划（默认每 5 分钟，带抖动）读取收件箱，领取邮箱租约后逐封处理并推进持久游标。
-- 只读取发件人白名单（`sender_allowlist`）中玩家的邮件详情；未显式关闭白名单（`sender_allowlist_disabled = true`）时，名单外的邮件不处理、保留在队列中，游标不越过它。生产环境应配置白名单或明确关闭。
+- 发件人白名单（`sender_allowlist`）按详情中的完整名称、不区分大小写核验，不能用列表截断名称提前授权。名单为空且未显式关闭（`sender_allowlist_disabled = true`）时拒绝拉取；名单非空时会读取详情后再核验，名单外邮件保留在待读队列中，游标不越过它。生产环境应配置白名单或明确关闭。
 - 每封邮件以“邮箱 + 远端邮件 ID”记入 `inbound_mail`，重复读取不会重复处理；已接受的投稿在重试时恢复原决定，不因远端页面变化改判。
-- Admin 可在“仪表盘”或“收件审核”页暂停/恢复某个邮箱，或立即触发一次轮询（经 Worker control）。排期在开拍前 2 小时自动暂停对应世界、开拍后恢复。
+- Admin 可在“仪表盘”或“收件审核”页暂停/恢复某个邮箱，或立即触发一次轮询（经 Worker control）。启用自动排期时，轮次进入预览后从计划开拍前 2 小时起暂停对应世界，实际开拍后恢复；取消或错过已预览的轮次也会解除排期暂停。
 
 ## 主题路由
 
@@ -50,6 +50,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 
 - 金额可写纯数字、`k`（千）或 `m`（百万）后缀，后缀形式允许小数（如 `1.5m`），也允许千位逗号（`1,500,000`）；结果必须为正整数。
 - 逐件指令可以夹在说明文字中、可跨行；`#` 开头（或空白后的 `#`）是注释。统一指令与逐件指令不能混用，同一件不能重复指定，链接对应的装备必须在附件中。
+- 统一指令前后可保留普通说明、网页复制的 Attachment 清单与分隔线；这些内容不会计入指令字段。但重复、混合或畸形的明确 `start` 仍会整封拒绝，例如 `start:200k`、`start=200k`。未逐件指定的附件保留默认价。
 
 ## 注册与换绑
 
@@ -62,11 +63,11 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 
 ## 结算退件
 
-结算寄出的 COD 或装备邮件被收件人拒收（或过期）退回时，主题仍带原义务 ID。处理器只把它记录为退件证据（义务 ID、Credits、COD、附件），由恢复流程在后续事务中决定收回装备、重寄 COD 或寄回卖家，见[结算与履约](docs/guide/settlement.md#4-恢复付款超时与拒收)。
+结算寄出的 COD 或装备邮件被收件人拒收（或过期）退回时，主题仍带原义务 ID。处理器只把它记录为退件证据（义务 ID、Credits、COD、附件），由恢复流程在后续事务中决定收回装备、重寄 COD 或寄回卖家，见[结算与履约](settlement.md#4-恢复付款超时与拒收)。
 
 ## 出站邮件
 
-所有出站邮件先写入 outbox，由投递循环发送（详见[结算与履约](docs/guide/settlement.md#3-投递outbox)）。常见类型：
+所有出站邮件先写入 outbox，由投递循环发送（详见[结算与履约](settlement.md#3-投递outbox)）。常见类型：
 
 | 类别（发送间隔配置键） | 邮件 |
 | --- | --- |
@@ -82,13 +83,19 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 - 正文模板可在 `[worker.mooglemail.mail_templates]` 或 runtime 文件中定制；模板只能使用规定的占位符（如 `{login_key}`、`{amount}`、`{reference}`），未知键或非法正文在 Worker 启动时被拒绝。
 - 同一时刻只有一个 Worker 持有邮件 Cookie 的运行时所有权；对同一账号的远端写入串行执行。
 
+## 资产动作证明
+
+- 投稿的 Take 与整封 Return 都先冻结原邮件身份与资产期望，执行前重新核对；Take 只有在响应证明原邮件身份一致、资产归零且领取回执匹配时才算成功。
+- Return 需要绑定原发件人、收件人、主题、正文及完整资产的 `[RTS]` 回执。详情 GET 本身就会把邮件从仅含未读项的 Inbox 移走，因此 Inbox 中找不到邮件不能证明退回成功。
+- Send 需要从发送前 Sent 基线之外找到新邮件，精确匹配冻结的收件人、主题、正文与完整资产，并再次证明 compose 已干净；成功提示或 HTTP 200 本身不足以证明完成。进入远端写入后无法取得确定证明时，保留未知结果转人工对账，不自动重复执行。
+
 ## 邮箱维护
 
 Worker 周期运行邮箱维护：观察 compose 草稿与 Sent 列表，为结果未知的投递寻找精确匹配的 Sent 证据（主题、正文摘要、世界、收件人与完整附件），并在精确匹配后受控丢弃残留草稿。找不到 Sent 不等于未发送——未知的发送永不自动重试，最终由 Admin 人工对账。
 
 ## 凭据
 
-Worker 使用的 MoogleMail Cookie 来自（按优先级）数据库中的 active 邮件凭据（需要 `credential_data_key`）、本地 `.keyenv`（联调用）或敏感配置 `mooglemail_cookie`。凭据可在 Admin “Cookie 池”页或用 `auction-cli credential import` 录入；全库同时只能有一个 active 邮件凭据，录入或切换后需重启 Worker。
+配置了完整的 `credential_data_key` 时，Worker 只从数据库读取适用世界或 shared scope 的 active 邮件凭据，不再回退 `.keyenv` 或敏感配置；没有该密钥时，先使用显式 `keyenv_file`，未配置才使用 `mooglemail_cookie`。凭据可在 Admin “Cookie 池”页或用 `auction-cli credential import` 录入；全库同时只能有一个 active 邮件凭据，录入或切换后需重启 Worker。
 
 ## Admin 与 CLI 入口
 

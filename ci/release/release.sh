@@ -478,6 +478,7 @@ write_dependencies() {
 	chmod 0644 "$destination"
 }
 
+release_sources=()
 release_targets=()
 release_modes=()
 
@@ -489,6 +490,7 @@ install_release_file() {
 	fi
 	mkdir -p "$package_root/$(dirname "$target")"
 	install -m "$mode" "$source" "$package_root/$target"
+	release_sources+=("$source")
 	release_targets+=("$target")
 	release_modes+=("$mode")
 }
@@ -503,7 +505,93 @@ install_release_files() {
 	done
 }
 
+# 按同一装包清单重定位文档链接；只改目标地址，源码引用文字、文件权限与制品白名单保持不变。
+rewrite_packaged_doc_links() {
+	local package_root=$1 commit=$2 index
+	local mapping=()
+	for index in "${!release_sources[@]}"; do
+		mapping+=("${release_sources[$index]}" "${release_targets[$index]}")
+	done
+	perl - "$repository_root" "$package_root" "$commit" "${mapping[@]}" <<'PERL'
+use strict;
+use warnings;
+use Cwd qw(abs_path);
+use File::Basename qw(dirname);
+use File::Spec::Unix;
+
+my ($repository, $package, $commit, @mapping) = @ARGV;
+$repository = abs_path($repository);
+$package = abs_path($package);
+my (%destinations, @documents);
+while (@mapping) {
+    my ($source, $target) = splice(@mapping, 0, 2);
+    # 生成文件已有包内链接；绝对路径的构建产物不是仓库文档。
+    next if $source eq '' || $source =~ m{^/};
+    push @documents, [$source, $target] if $source =~ /\.md$/;
+    my $resolved = abs_path("$repository/$source") // die "装包源文件不存在：$source\n";
+    $destinations{$resolved}{$target} = 1;
+    # 目录只有唯一落点才可映射；例如不同变体未打包的模板目录仍转向源码。
+    while (($source = dirname($source)) ne '.') {
+        $target = dirname($target);
+        $destinations{abs_path("$repository/$source")}{$target} = 1;
+    }
+}
+
+sub rewrite_link {
+    my ($link, $source, $target) = @_;
+    return $link if $link =~ m{^(?:[A-Za-z][A-Za-z0-9+.-]*:|//|#)};
+    my ($path, $suffix) = split /(?=[?#])/, $link, 2;
+    return $link if !defined($path) || $path eq '';
+    $suffix //= '';
+    $path =~ s/%([0-9a-fA-F]{2})/chr(hex($1))/ge;
+    my $resolved = abs_path("$repository/" . dirname($source) . "/$path");
+    # abs_path 可返回尚不存在的末级路径，仍须单独确认目标存在。
+    die "文档链接目标不存在：$source -> $link\n" unless defined($resolved) && -e $resolved;
+    die "文档链接越出仓库：$source -> $link\n"
+        unless $resolved eq $repository || index($resolved, "$repository/") == 0;
+    my @targets = keys %{$destinations{$resolved} // {}};
+    my ($destination, $prefix);
+    if (@targets == 1) {
+        $destination = File::Spec::Unix->abs2rel(
+            "$package/$targets[0]", dirname("$package/$target"));
+        $prefix = '';
+    } else {
+        $destination = File::Spec::Unix->abs2rel($resolved, $repository);
+        my $kind = -d $resolved ? 'tree' : 'blob';
+        $prefix = "https://github.com/ngnlAYY/Auction/$kind/$commit/";
+    }
+    $destination =~ s{([^A-Za-z0-9._~/\-])}{sprintf('%%%02X', ord($1))}ge;
+    return "$prefix$destination$suffix";
+}
+
+for my $document (@documents) {
+    my ($source, $target) = @$document;
+    open my $input, '<:raw', "$package/$target" or die "$target: $!\n";
+    my @lines = <$input>;
+    close $input or die "$target: $!\n";
+    my $fence = '';
+    for my $line (@lines) {
+        if ($line =~ /^\s{0,3}(`{3,}|~{3,})/) {
+            my $marker = substr($1, 0, 1);
+            $fence = $fence eq '' ? $marker : ($fence eq $marker ? '' : $fence);
+            next;
+        }
+        next if $fence ne '';
+        # 跳过行内代码；反引号位于链接显示文字内时仍由整个链接分支处理。
+        $line =~ s{`+[^`\n]*`+(*SKIP)(*F)|(\[[^\]\n]*\]\()([^\s()]+)(\))}
+            {$1 . rewrite_link($2, $source, $target) . $3}ge;
+        $line =~ s{^(\s{0,3}\[[^\]\n]+\]:\s*<?)([^\s>]+)(>?)}
+            {$1 . rewrite_link($2, $source, $target) . $3}e;
+    }
+    open my $output, '>:raw', "$package/$target" or die "$target: $!\n";
+    print {$output} @lines or die "$target: $!\n";
+    close $output or die "$target: $!\n";
+}
+PERL
+}
+
 register_generated_file() {
+	release_sources+=("")
 	release_targets+=("$1")
 	release_modes+=("$2")
 }
@@ -619,6 +707,7 @@ package_release() (
 			;;
 		esac
 	done
+	require_command perl
 	local selected_root="$embedded_artifact_root" selected_binaries=("${binaries[@]}")
 	local package_output_root="$package_output_root" variant_suffix=
 	if [[ "$single_binary" == true ]]; then
@@ -656,6 +745,7 @@ package_release() (
 	package_root="$temporary_root/$package_name"
 	mkdir -p "$package_root"
 
+	release_sources=()
 	release_targets=()
 	release_modes=()
 	local binary
@@ -702,22 +792,8 @@ package_release() (
 			"ops/deploy/systemd/auction-stack.service.example|systemd/auction-stack.service.example|644" \
 			"ops/deploy/tmpfiles/hv-auction.conf.example|tmpfiles/hv-auction.conf.example|644"
 	fi
-	# 源文档使用以仓库根为起点的相对链接；装包时只把指向已打包模板、配置、恢复手册与 CLI 说明的链接
-	# 映射到归档布局，保留标题锚点，其余仓库文档链接保持原样。
-	local packaged_docs=("$package_root/docs/DEPLOYMENT.md" "$package_root/docs/RECOVERY.md" "$package_root/docs/CLI.md")
-	if [[ "$single_binary" == true ]]; then
-		packaged_docs+=("$package_root/docs/SINGLE-SERVER.md")
-	fi
-	sed -i \
-		-e 's|](ops/deploy/systemd\([/)]\)|](../systemd\1|g' \
-		-e 's|](ops/deploy/tmpfiles\([/)]\)|](../tmpfiles\1|g' \
-		-e 's|](ops/deploy/caddy/|](../caddy/|g' \
-		-e 's|](ops/config/|](../config/|g' \
-		-e 's|](ops/deploy/RECOVERY\.md|](RECOVERY.md|g' \
-		-e 's|](ops/deploy/retention-policy\.v1\.json|](../retention-policy.v1.json|g' \
-		-e 's|](ops/README\.md|](DEPLOYMENT.md|g' \
-		-e 's|](apps/auction-cli/README\.md|](CLI.md|g' \
-		"${packaged_docs[@]}"
+	# 全部仓库文档（含 config/README.md）按安装映射重写；敏感示例的 .example 后缀也来自清单。
+	rewrite_packaged_doc_links "$package_root" "$commit"
 
 	write_dependencies \
 		"$temporary_root/DEPENDENCIES.md" \

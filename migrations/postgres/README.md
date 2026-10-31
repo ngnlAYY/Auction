@@ -1,6 +1,6 @@
 # PostgreSQL 迁移
 
-[文档导航](docs/README.md) · [数据库契约](docs/contracts/database.md) · [auction-storage](crates/auction-storage/README.md)
+[文档导航](../../docs/README.md) · [数据库契约](../../docs/contracts/database.md) · [auction-storage](../../crates/auction-storage/README.md)
 
 本目录是 Auction schema 的唯一定义。迁移文件在编译期由 `sqlx::migrate!` 内嵌进各二进制，并由 `auction-cli db migrate`（或 `service start/restart`、合并部署首次初始化）在 SQLx 迁移锁内执行。目标数据库为 PostgreSQL 18。
 
@@ -12,12 +12,12 @@
 4. **不静默改写历史事实。** 修复数据时只修复有确凿证据的部分（例如能由追加式事实重建的投影），无法证明的保持原样并留给人工核对；需要前置条件时在迁移内检查并以明确的错误终止（`RAISE EXCEPTION`），而不是猜测。
 5. **并发安全**：修改被运行中进程写入的表时，先 `LOCK TABLE … IN SHARE ROW EXCLUSIVE MODE` 等方式阻止并发写，再检查与改写。迁移本身只在停机门禁下执行。
 6. **约束在数据库层强制**：状态闭集、金额范围、互斥字段、只追加（触发器）等规则写成 CHECK、唯一约束或触发器，不只依赖应用代码。
-7. **同步更新**：新表加入 [保留政策](ops/deploy/retention-policy.v1.json) 的数据族，并把 `database_schema_version` 改为新的最高版本（否则 `auction-cli db inventory` 拒绝运行）；同步[数据库契约](docs/contracts/database.md)。
+7. **同步更新**：新表加入 [保留政策](../../ops/deploy/retention-policy.v1.json) 的数据族，并把 `database_schema_version` 改为新的最高版本（否则 `auction-cli db inventory` 拒绝运行）；同步[数据库契约](../../docs/contracts/database.md)。
 8. **部署顺序**：迁移若要求旧 Worker 先停止（例如新增发送证明字段），在文件注释中写明；分体部署的 `service restart` 与合并部署的停服迁移都满足这一点。
 
 ## 执行兼容层
 
-少数早期迁移的原文在新版 PostgreSQL 或新的执行环境下需要微调。[`crates/auction-storage/src/database/migrations/`](crates/auction-storage/src/database/migrations) 为它们提供“执行视图”：保留文件原 checksum，只在执行时对固定版本做限定替换（例如给保留字别名改名、先立即执行延迟约束）。已经用早期修正版执行过的数据库按记录的 checksum 匹配；其他任何差异都按版本不匹配失败。
+少数早期迁移的原文在新版 PostgreSQL 或新的执行环境下需要微调。[`crates/auction-storage/src/database/migrations/`](../../crates/auction-storage/src/database/migrations) 为它们提供“执行视图”：保留文件原 checksum，只对固定描述、原片段与出现次数做限定替换：`000005`/`000015` 给保留字别名改名，`000044` 在修改用户时间戳前立即执行排队的延迟约束，`000047` 为保留字列名 `authorization` 加引号。仅 `000005`/`000015` 额外接受已经部署的固定别名修正版 SHA-384；`000044`/`000047` 仍只接受原文件 checksum，其他差异均失败关闭。
 
 ## 索引
 

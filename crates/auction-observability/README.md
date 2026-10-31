@@ -1,6 +1,6 @@
 # auction-observability
 
-[文档导航](docs/README.md) · [运维手册](ops/README.md#监控与日志)
+[文档导航](../../docs/README.md) · [运维手册](../../ops/README.md#监控与日志)
 
 日志、指标、tracing 与服务心跳。三个角色进程在启动时由装配根初始化，本 crate 不读配置文件、不监听端口——`/metrics` 路由由 `auction-http`（Public/Admin）与 `auction-jobs`（Worker control）挂载。
 
@@ -14,7 +14,7 @@
 
 ## 指标
 
-`ProcessMetrics` 为每个进程建立独立的 Prometheus 注册表，以 `service`/`role`/`version` 等固定 label 区分进程：
+`ProcessMetrics` 为每个启用指标的进程建立独立的 Prometheus 注册表；`auction_process_info` 使用 `service`/`role`/`version` label，业务和 Worker 指标使用各自的固定闭集 label。关闭指标时不注册 collector，记录器为 no-op：
 
 | 指标族 | 说明 |
 | --- | --- |
@@ -23,14 +23,14 @@
 | `auction_worker_loop_iterations_total`、`auction_worker_loop_iteration_duration_seconds`、`auction_worker_schedule_delay_seconds` | Worker 各循环的轮次、耗时与调度延迟 |
 | `auction_worker_batch_items_total`、`auction_worker_batch_capacity_total`、`auction_worker_batch_saturated_total` | 批次利用率与饱和次数 |
 | `auction_worker_retry_attempts_total`、`auction_worker_retry_mode_bound` | 重试次数与重试模式 |
-| `auction_<role>_pool_*` | 数据库连接池大小、空闲、获取次数与等待时长、空池等待与取消次数 |
+| `auction_postgres_pool_*` | PostgreSQL 连接池大小、空闲、获取次数与等待时长、空池等待与取消次数 |
 | `auction_tracing_*` | tracing 是否启用、导出失败/丢弃 span、最近成功/失败时间、是否降级 |
 
 指标在配置中默认关闭；Public/Admin 只有在 loopback TCP 或 Unix listener 上才允许开启，避免直接暴露到公网。反向代理示例对公网屏蔽 `/metrics`。
 
 ## 心跳与健康
 
-`HeartbeatPublisher` 让三个角色每 10 秒向数据库写入心跳（TTL 30 秒），内容包括角色、实例 ID、版本、启动时间、readiness、tracing 健康与审计写入失败计数；停止时发布 stopping。`HealthService` 汇总心跳供 Admin 仪表盘展示各进程状态，过期心跳不能证明进程就绪。
+`HeartbeatPublisher` 构造并发布安全心跳，周期由三个角色的装配根调度：每 10 秒写入数据库，TTL 30 秒。内容包括角色、实例 ID、版本、启动时间、readiness、tracing 健康与审计写入失败计数；停止时发布 stopping。`HealthService` 汇总心跳供 Admin 仪表盘展示各进程状态，过期心跳不能证明进程就绪。
 
 ## 源码结构
 

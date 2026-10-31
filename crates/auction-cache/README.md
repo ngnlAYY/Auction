@@ -1,6 +1,6 @@
 # auction-cache
 
-[文档导航](docs/README.md) · [配置参考](ops/config/README.md#缓存)
+[文档导航](../../docs/README.md) · [配置参考](../../ops/config/README.md#缓存)
 
 可选的读模型缓存。缓存不是事实来源：竞价、幂等账本、审计、outbox 与 Worker 游标全部在 PostgreSQL；缓存只保存可随时回源重建的读取投影（目前是 Public 规则文档）。
 

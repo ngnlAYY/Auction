@@ -1,8 +1,8 @@
 # auction-server
 
-[文档导航](docs/README.md) · [运维手册](ops/README.md) · [首次设置](crates/auction-setup/README.md)
+[文档导航](../../docs/README.md) · [运维手册](../../ops/README.md) · [首次设置](../../crates/auction-setup/README.md)
 
-单文件合并部署：一个可执行文件、一个 systemd unit，在本机以子进程监管 Worker、Admin、Public 三个角色。适合单主机、小规模部署；分体部署（三个 unit + `auction-cli service` 编排）见[运维手册](ops/README.md)。两种方式不能同时用于同一套配置。
+单文件合并部署：一个可执行文件、一个 systemd unit，在本机以子进程监管 Worker、Admin、Public 三个角色。适合单主机、小规模部署；分体部署（三个 unit + `auction-cli service` 编排）见[运维手册](../../ops/README.md)。两种方式不能同时用于同一套配置。
 
 需要 `postgres` 与 `web-embed` feature（发布脚本的 single 变体：`just build-single`）。
 
@@ -39,8 +39,8 @@ auction-server --config-dir /var/lib/auction/config
 
 ## systemd
 
-示例 [`ops/deploy/systemd/auction-server.service.example`](ops/deploy/systemd/auction-server.service.example)：`StateDirectory=auction` 承载配置目录与运行目录，`KillMode=mixed`（信号只发给 supervisor），`TimeoutStopSec=155s`，`Restart=no`——首次初始化或迁移失败需要人工核对，不用自动重启掩盖。
+示例 [`ops/deploy/systemd/auction-server.service.example`](../../ops/deploy/systemd/auction-server.service.example)：`StateDirectory=auction` 承载配置目录与运行目录，`KillMode=mixed`（信号只发给 supervisor），`TimeoutStopSec=155s`，`Restart=no`——首次初始化或迁移失败需要人工核对，不用自动重启掩盖。
 
 ## 日常运维
 
-合并部署同样使用 `auction-cli`，但 `service` 子命令只适用于分体部署。数据库迁移、备份与恢复等需要独占数据库的操作必须先停止 `auction-server`（`auction-cli` 检测到 `owner.lock` 被持有时会拒绝执行）。详见 [auction-cli](apps/auction-cli/README.md)。
+合并部署同样使用 `auction-cli`，但 `service` 子命令只适用于分体部署。数据库迁移、建库、恢复与重建必须先停止 `auction-server`，再以同一服务账号执行（`auction-cli` 通过 `owner.lock` 取得独占停机证明）；备份创建可在运行时执行，离线备份校验也不要求停服。详见 [auction-cli](../auction-cli/README.md)。
