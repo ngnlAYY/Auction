@@ -1,4 +1,4 @@
-//! Public 补偿池批次表格和展开行。
+//! Public 补偿池各世界余额、批次表格和展开行。
 
 use super::*;
 
@@ -6,15 +6,15 @@ use super::*;
 pub(super) fn CompensationPoolTable(
     page: CompensationPoolPage,
     selected_auction_id: String,
-    movements: Option<Result<Option<CompensationMovementPage>, String>>,
+    lots: Option<Result<Option<CompensationLotPage>, String>>,
     on_page_change: EventHandler<i64>,
     on_page_clamp: EventHandler<i64>,
     on_page_size_change: EventHandler<i64>,
     on_select_round: EventHandler<String>,
-    on_movement_page_change: EventHandler<i64>,
-    on_movement_page_clamp: EventHandler<i64>,
-    on_movement_page_size_change: EventHandler<i64>,
-    on_retry_movements: EventHandler<()>,
+    on_lot_page_change: EventHandler<i64>,
+    on_lot_page_clamp: EventHandler<i64>,
+    on_lot_page_size_change: EventHandler<i64>,
+    on_retry_lots: EventHandler<()>,
 ) -> Element {
     let page_size = page.page_size.max(1);
     rsx! {
@@ -23,15 +23,19 @@ pub(super) fn CompensationPoolTable(
                 div {
                     h1 { id: "compensation-pool-title", {t!("page-compensation-pool-title")} }
                     p { class: "public-compensation-intro", {t!("page-compensation-pool-note")} }
+                    p { class: "public-compensation-intro", {t!("compensation-formula")} }
                 }
-                div { class: "public-compensation-balance", aria_label: t!("compensation-balance"),
-                    span { {t!("compensation-balance")} }
-                    strong { "{format_amount(page.balance)}" }
-                    if let Some(updated_at) = page.updated_at.clone() {
-                        small {
-                            time {
-                                datetime: updated_at.clone(),
-                                {t!("compensation-updated", date: format_auction_time(&updated_at))}
+                // 各世界补偿池独立结算，逐个展示余额，不再合计成一个数字。
+                div { class: "public-compensation-pools", aria_label: t!("compensation-balance"),
+                    for pool in page.pools.iter() {
+                        div { key: "{pool.world_id}", class: "public-compensation-balance",
+                            span { {t!("compensation-world-balance", world: world_label(&pool.world_id))} }
+                            strong { "{format_amount(pool.balance)}" }
+                            small {
+                                time {
+                                    datetime: pool.updated_at.clone(),
+                                    {t!("compensation-updated", date: format_auction_time(&pool.updated_at))}
+                                }
                             }
                         }
                     }
@@ -42,7 +46,7 @@ pub(super) fn CompensationPoolTable(
             } else {
                 div { class: "public-compensation-table-wrap ui-table--fit",
                     table { class: "public-compensation-table",
-                        auction_web_shared::TableColumns { layout: "public-compensation", widths: vec![4, 6, 8, 10, 14, 15, 14, 10, 19] }
+                        auction_web_shared::TableColumns { layout: "public-compensation", widths: vec![4, 6, 7, 10, 10, 10, 10, 7, 10, 9, 17] }
                         thead {
                             tr {
                                 th { scope: "col", class: "public-compensation-toggle-cell", aria_label: t!("compensation-details") }
@@ -52,7 +56,9 @@ pub(super) fn CompensationPoolTable(
                                 th { scope: "col", class: "public-compensation-number", {t!("compensation-tax")} }
                                 th { scope: "col", class: "public-compensation-number", {t!("compensation-discount")} }
                                 th { scope: "col", class: "public-compensation-number", {t!("compensation-out")} }
+                                th { scope: "col", class: "public-compensation-number", {t!("compensation-coverage")} }
                                 th { scope: "col", class: "public-compensation-number", {t!("compensation-closing")} }
+                                th { scope: "col", class: "public-compensation-number", {t!("compensation-reversal")} }
                                 th { scope: "col", {t!("compensation-settled")} }
                             }
                         }
@@ -60,18 +66,18 @@ pub(super) fn CompensationPoolTable(
                             for round in page.rounds {
                                 {
                                     let open = selected_auction_id == round.auction_id;
-                                    // 只有展开行消费流水；不能给每个折叠批次复制完整流水页。
-                                    let movements = if open { movements.clone() } else { None };
+                                    // 只有展开行消费明细；不能给每个折叠批次复制完整明细页。
+                                    let lots = if open { lots.clone() } else { None };
                                     rsx! {
                                         CompensationRoundRow {
                                             round,
                                             open,
-                                            movements,
+                                            lots,
                                             on_select_round,
-                                            on_movement_page_change,
-                                            on_movement_page_clamp,
-                                            on_movement_page_size_change,
-                                            on_retry_movements,
+                                            on_lot_page_change,
+                                            on_lot_page_clamp,
+                                            on_lot_page_size_change,
+                                            on_retry_lots,
                                         }
                                     }
                                 }
@@ -98,15 +104,24 @@ pub(super) fn CompensationPoolTable(
 fn CompensationRoundRow(
     round: CompensationRound,
     open: bool,
-    movements: Option<Result<Option<CompensationMovementPage>, String>>,
+    lots: Option<Result<Option<CompensationLotPage>, String>>,
     on_select_round: EventHandler<String>,
-    on_movement_page_change: EventHandler<i64>,
-    on_movement_page_clamp: EventHandler<i64>,
-    on_movement_page_size_change: EventHandler<i64>,
-    on_retry_movements: EventHandler<()>,
+    on_lot_page_change: EventHandler<i64>,
+    on_lot_page_clamp: EventHandler<i64>,
+    on_lot_page_size_change: EventHandler<i64>,
+    on_retry_lots: EventHandler<()>,
 ) -> Element {
     let details_id = format!("compensation-details-{}", round.auction_id);
     let auction_id = round.auction_id.clone();
+    let reversal = if round.reversal_count > 0 {
+        t!(
+            "compensation-reversal-summary",
+            amount: signed_amount(round.reversal_amount),
+            count: round.reversal_count
+        )
+    } else {
+        "—".to_owned()
+    };
     rsx! {
         tr { class: "public-compensation-round",
             td { class: "public-compensation-toggle-cell", "data-label": t!("compensation-details"),
@@ -130,21 +145,25 @@ fn CompensationRoundRow(
             td { class: "public-compensation-number", "data-label": t!("compensation-tax"), "{format_amount(round.tax_income)}" }
             td { class: "public-compensation-number", "data-label": t!("compensation-discount"), "{format_amount(round.discount_demand)}" }
             td { class: "public-compensation-number", "data-label": t!("compensation-out"), "{format_amount(round.compensation_out)}" }
+            td { class: "public-compensation-number", "data-label": t!("compensation-coverage"),
+                "{coverage_label(round.compensation_out, round.discount_demand)}"
+            }
             td { class: "public-compensation-number public-compensation-closing", "data-label": t!("compensation-closing"), "{format_amount(round.closing_balance)}" }
+            td { class: "public-compensation-number", "data-label": t!("compensation-reversal"), "{reversal}" }
             td { "data-label": t!("compensation-settled"),
                 Time { value: round.settled_at.clone() }
             }
         }
         if open {
             tr { id: details_id.clone(), class: "public-compensation-details-row",
-                td { colspan: 9,
-                    CompensationMovementDetails {
+                td { colspan: 11,
+                    CompensationLotDetails {
                         round: round.clone(),
-                        movements,
-                        on_movement_page_change,
-                        on_movement_page_clamp,
-                        on_movement_page_size_change,
-                        on_retry_movements,
+                        lots,
+                        on_lot_page_change,
+                        on_lot_page_clamp,
+                        on_lot_page_size_change,
+                        on_retry_lots,
                     }
                 }
             }

@@ -1,14 +1,21 @@
 //! Public 补偿池与结算账本读取端口。
-//! 补偿池只公开已经提交的结算事实。游标、余额守恒和 movement 的 lot 投影在应用边界
-//! 校验，存储适配器不得把内部结算计划或未提交的中间状态直接暴露给 HTTP。
+//! 补偿池只公开已经提交的结算事实与成交撤销冲正。游标、余额守恒、逐件结算明细和
+//! movement 的 lot 投影在应用边界校验，存储适配器不得把内部结算计划或未提交的中间状态
+//! 直接暴露给 HTTP。
 
+use auction_domain::SettlementMode;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::ApplicationFuture;
 
+mod lot;
 mod movement;
 
+pub use lot::{
+    PublicCompensationLot, PublicCompensationLotPage, PublicCompensationLotRequest,
+    PublicCompensationLotReversal,
+};
 pub use movement::{
     PublicCompensationMovement, PublicCompensationMovementKind, PublicCompensationMovementPage,
     PublicCompensationMovementRequest,
@@ -17,7 +24,7 @@ pub use movement::{
 /// Public 补偿池编号页的默认大小。
 pub const DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE: i64 = 25;
 
-/// Public 补偿账本页的默认大小。
+/// Public 补偿账本页与逐件结算明细页的默认大小。
 pub const DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE: i64 = 50;
 
 /// Public 补偿池允许的最大 legacy offset。
@@ -64,12 +71,18 @@ pub struct PublicCompensationRound {
     pub auction_id: Uuid,
     pub world_id: String,
     pub auction_sequence: i64,
+    /// 该场冻结的结算算法；决定附加费、优惠与补偿的计算方式。
+    pub policy_mode: SettlementMode,
     pub opening_balance: i64,
     pub tax_income: i64,
     pub discount_demand: i64,
     pub compensation_out: i64,
     pub closing_balance: i64,
     pub movement_count: i64,
+    /// 本场成交随后被撤销而写入的冲正笔数。
+    pub reversal_count: i64,
+    /// 本场冲正对池余额的带符号净变化（退回补偿减去冲回附加费）。
+    pub reversal_amount: i64,
     pub settled_at: DateTime<Utc>,
 }
 
@@ -86,6 +99,10 @@ impl PublicCompensationRound {
             || self.closing_balance < 0
             || self.movement_count < 2
             || self.movement_count > i64::from(i32::MAX)
+            || self.reversal_count < 0
+            || (self.reversal_count == 0 && self.reversal_amount != 0)
+            || (self.policy_mode == SettlementMode::LegacyZeroV0
+                && (self.tax_income != 0 || self.compensation_out != 0 || self.reversal_count != 0))
             || self.settled_at.timestamp_micros() == 0
         {
             return Err("公开补偿池批次无效");
@@ -101,12 +118,35 @@ impl PublicCompensationRound {
     }
 }
 
+/// 单个世界补偿池的当前状态；各世界资金池相互独立。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicCompensationPool {
+    pub world_id: String,
+    pub balance: i64,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl PublicCompensationPool {
+    /// 校验世界标识、非负余额与已提交更新时间。
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !auction_domain::valid_text(&self.world_id, 64)
+            || self.balance < 0
+            || self.updated_at.timestamp_micros() == 0
+        {
+            return Err("公开补偿池世界余额无效");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicCompensationPage {
     pub entries: Vec<PublicCompensationRound>,
-    /// 所有世界权威补偿池的当前余额合计，与批次页及分页范围无关。
+    /// 各世界补偿池的当前状态，与批次页及分页范围无关。
+    pub pools: Vec<PublicCompensationPool>,
+    /// 所有世界补偿池当前余额合计；保留旧契约字段，必须等于 `pools` 余额之和。
     pub balance: i64,
-    /// 各世界权威资金池最近一次已提交更新时间的最大值。
+    /// 各世界补偿池最近一次已提交更新时间的最大值。
     pub updated_at: Option<DateTime<Utc>>,
     pub total: Option<i64>,
     pub limit: i64,
@@ -133,6 +173,19 @@ impl PublicCompensationPage {
         for entry in &self.entries {
             entry.validate()?;
         }
+        let mut balance = 0_i64;
+        for (index, pool) in self.pools.iter().enumerate() {
+            pool.validate()?;
+            if self.pools[..index].iter().any(|other| other.world_id == pool.world_id) {
+                return Err("公开补偿池世界重复");
+            }
+            balance = balance.checked_add(pool.balance).ok_or("公开补偿池余额溢出")?;
+        }
+        if balance != self.balance
+            || self.updated_at != self.pools.iter().map(|pool| pool.updated_at).max()
+        {
+            return Err("公开补偿池世界余额与合计不一致");
+        }
         if let Some(PublicCompensationCursor::Boundary { sequence, id }) = self.next_cursor.as_ref()
             && (*sequence <= 0 || id.is_nil())
         {
@@ -153,4 +206,23 @@ pub trait PublicCompensationReader: Send + Sync {
         auction_id: Uuid,
         request: PublicCompensationMovementRequest,
     ) -> ApplicationFuture<'_, Option<PublicCompensationMovementPage>>;
+
+    /// 读取单场已售 lot 的逐件结算明细与冲正；场次不存在或未结算时返回 `None`。
+    fn list_public_compensation_lots(
+        &self,
+        auction_id: Uuid,
+        request: PublicCompensationLotRequest,
+    ) -> ApplicationFuture<'_, Option<PublicCompensationLotPage>>;
+}
+
+/// 校验 main/isekai 权威装备 URL 前缀投影；完整链接由解析器另行核对。
+fn valid_projected_equipment_url(value: &str) -> bool {
+    ["https://hentaiverse.org/equip/", "https://hentaiverse.org/isekai/equip/"]
+        .iter()
+        .find_map(|prefix| value.strip_prefix(prefix))
+        .is_some_and(|external_id| {
+            !external_id.is_empty()
+                && external_id.len() <= 32
+                && external_id.bytes().all(|byte| byte.is_ascii_digit())
+        })
 }

@@ -1,11 +1,11 @@
-//! Public 补偿池页面装配。
+//! Public 补偿池页面装配：各世界余额、场次批次与逐件结算明细。
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
 use crate::api::{
-    CompensationMovementPage, CompensationPoolPage, CompensationRound,
-    fetch_compensation_movements, fetch_compensation_pool, lot_code_for,
+    CompensationLotPage, CompensationPoolPage, CompensationRound, fetch_compensation_lots,
+    fetch_compensation_pool, lot_code_for,
 };
 
 use super::{
@@ -14,13 +14,13 @@ use super::{
     update_public_query_state, use_public_query_state, world_label,
 };
 
-mod movements;
+mod lots;
 mod table;
 
-use movements::CompensationMovementDetails;
+use lots::CompensationLotDetails;
 use table::CompensationPoolTable;
 
-/// 批次与展开流水使用各自的页码/数量；世界、批次与流水身份均通过 URL 恢复。
+/// 批次与展开明细使用各自的页码/数量；批次与明细分页均通过 URL 恢复。
 pub(super) fn pool_page() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
     let query_state = use_public_query_state();
@@ -42,7 +42,7 @@ pub(super) fn pool_page() -> Element {
             }
         }
     });
-    let movements = use_resource({
+    let lots = use_resource({
         let refresh_generation = refresh_generation;
         move || {
             let _ = refresh_generation();
@@ -53,15 +53,15 @@ pub(super) fn pool_page() -> Element {
                 let result = if auction_id.is_empty() {
                     Ok(None)
                 } else {
-                    fetch_compensation_movements(auction_id.clone(), page, page_size)
-                        .await
-                        .and_then(|page| {
+                    fetch_compensation_lots(auction_id.clone(), page, page_size).await.and_then(
+                        |page| {
                             if page.round.auction_id == auction_id {
                                 Ok(Some(page))
                             } else {
                                 Err("invalid_response".to_owned())
                             }
-                        })
+                        },
+                    )
                 };
                 (auction_id, page, page_size, result)
             }
@@ -101,8 +101,8 @@ pub(super) fn pool_page() -> Element {
         }
         Some(Ok(page)) => {
             // 只保留同一轮次及同一分页请求的快照，避免旧数据触发新页码纠偏。
-            let movement_state =
-                movements.read_unchecked().as_ref().and_then(|(auction_id, page, size, result)| {
+            let lot_state =
+                lots.read_unchecked().as_ref().and_then(|(auction_id, page, size, result)| {
                     (auction_id == &selected_auction_id()
                         && *page == movement_page()
                         && *size == movement_page_size())
@@ -112,7 +112,7 @@ pub(super) fn pool_page() -> Element {
                 CompensationPoolTable {
                     page: page.clone(),
                     selected_auction_id: selected_auction_id(),
-                    movements: movement_state,
+                    lots: lot_state,
                     on_page_change: move |next_page: i64| {
                         update_public_query_state(
                             query_state_signal,
@@ -158,21 +158,21 @@ pub(super) fn pool_page() -> Element {
                             QueryWriteMode::Push,
                         );
                     },
-                    on_movement_page_change: move |next_page: i64| {
+                    on_lot_page_change: move |next_page: i64| {
                         update_public_query_state(
                             query_state_signal,
                             |query| query.movement_page = next_page.max(1),
                             QueryWriteMode::Push,
                         );
                     },
-                    on_movement_page_clamp: move |next_page: i64| {
+                    on_lot_page_clamp: move |next_page: i64| {
                         update_public_query_state(
                             query_state_signal,
                             |query| query.movement_page = next_page.max(1),
                             QueryWriteMode::Replace,
                         );
                     },
-                    on_movement_page_size_change: move |size| {
+                    on_lot_page_size_change: move |size| {
                         update_public_query_state(
                             query_state_signal,
                             |query| {
@@ -182,11 +182,41 @@ pub(super) fn pool_page() -> Element {
                             QueryWriteMode::Push,
                         );
                     },
-                    on_retry_movements: move |_| {
+                    on_retry_lots: move |_| {
                         refresh_generation.set(refresh_generation().saturating_add(1));
                     },
                 }
             }
         }
+    }
+}
+
+/// 以补偿池视角带符号展示金额：流入为 `+`，流出为 `−`。
+fn signed_amount(amount: i64) -> String {
+    if amount > 0 {
+        format!("+{}", format_amount(amount))
+    } else if amount < 0 {
+        format!("−{}", format_amount(amount.saturating_abs()))
+    } else {
+        format_amount(0)
+    }
+}
+
+/// 实际兑付率：补偿支出占名义折扣需求的比例，精确到 0.01%；没有需求时不适用。
+fn coverage_label(compensation_out: i64, discount_demand: i64) -> String {
+    if discount_demand <= 0 {
+        return "—".to_owned();
+    }
+    let ppm = i128::from(compensation_out.max(0)) * 1_000_000 / i128::from(discount_demand);
+    let ppm = i32::try_from(ppm.min(1_000_000) / 100 * 100).unwrap_or(1_000_000);
+    auction_web_shared::format_ppm(ppm, false)
+}
+
+fn policy_label(policy_mode: &str) -> String {
+    match policy_mode {
+        "legacy_zero_v0" => t!("compensation-policy-legacy-zero-v0"),
+        "hold_curve_v1" => t!("compensation-policy-hold-curve-v1"),
+        "hold_curve_v2" => t!("compensation-policy-hold-curve-v2"),
+        _ => policy_mode.to_owned(),
     }
 }

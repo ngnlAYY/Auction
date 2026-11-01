@@ -68,6 +68,8 @@ Draft ──► Preview ──► Live ──► Final ──► Settling ──
 
 流拍 lot 的明细金额全部为 0。
 
+成交被恢复流程撤销时，`CompensationReversal::calculate`（规则 v1）先把补偿退回池中，再冲回 `min(附加费, 当前余额 + 补偿)` 的附加费；余额永不为负，未冲回部分只在余额耗尽时出现。冲正是新事实，不改写原明细或冻结策略；改变冲正结果必须新增规则版本。
+
 ## 结算义务
 
 `SettlementObligationKind` 是后续履约的闭集：

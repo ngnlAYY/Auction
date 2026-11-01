@@ -17,7 +17,7 @@
 | `/me`、`/account` | 我的：当前标记、出价与代理，登录时长设置，竞价提醒渠道 |
 | `/rules` | 规则文档（Markdown，五种语言） |
 | `/blacklist` | 黑名单 |
-| `/compensation-pool`、`/compensation` | 补偿池余额与各场流水 |
+| `/compensation-pool`、`/compensation` | 各世界补偿池余额、各场收支与逐件结算明细（含成交撤销冲正） |
 | `/forum` | 论坛同步摘要 |
 | `/status` | 服务说明 |
 

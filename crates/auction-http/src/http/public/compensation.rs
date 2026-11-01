@@ -1,18 +1,20 @@
 //! Public 补偿池 HTTP 适配器。
-//! 这里仅处理旧版分页/游标契约与应用投影映射；补偿守恒和账本完整性由应用端口及
+//! 这里仅处理旧版分页/游标契约与应用投影映射；补偿守恒、逐件结算与冲正一致性由应用端口及
 //! PostgreSQL 快照读取边界负责。
 
 use auction_application::{
     ApplicationError, DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE,
     DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE, MAX_PUBLIC_COMPENSATION_OFFSET,
-    PublicCompensationCursor, PublicCompensationListRequest, PublicCompensationMovement,
+    PublicCompensationCursor, PublicCompensationListRequest, PublicCompensationLot,
+    PublicCompensationLotPage, PublicCompensationLotRequest, PublicCompensationMovement,
     PublicCompensationMovementPage, PublicCompensationMovementRequest, PublicCompensationPage,
-    PublicCompensationRound, PublicEquipmentLinkTarget,
+    PublicCompensationPool, PublicCompensationRound, PublicEquipmentLinkTarget,
 };
 use auction_contracts::{
-    ApiErrorResponse, ApiResponse, PublicCompensationMovementPageResponse,
-    PublicCompensationMovementResponse, PublicCompensationResponse,
-    PublicCompensationRoundResponse,
+    ApiErrorResponse, ApiResponse, PublicCompensationLotPageResponse,
+    PublicCompensationLotResponse, PublicCompensationLotReversalResponse,
+    PublicCompensationMovementPageResponse, PublicCompensationMovementResponse,
+    PublicCompensationPoolResponse, PublicCompensationResponse, PublicCompensationRoundResponse,
 };
 use axum::{
     Json,
@@ -105,24 +107,7 @@ pub(crate) async fn movements(
     (HeaderMap, Json<ApiResponse<PublicCompensationMovementPageResponse>>),
     (StatusCode, Json<ApiErrorResponse>),
 > {
-    let auction_id = parse_public_uuid(&auction_id)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
-    let query = parse_query(&uri, &["page", "page_size"])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let page = parse_positive_i64(query.get("page"), 1, None)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
-    let page_size = parse_positive_i64(
-        query.get("page_size"),
-        DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE,
-        None,
-    )
-    .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
-    let offset = page
-        .checked_sub(1)
-        .and_then(|value| value.checked_mul(page_size))
-        .filter(|value| *value <= MAX_PUBLIC_COMPENSATION_OFFSET)
-        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
-
+    let RoundPage { auction_id, page, page_size, offset } = parse_round_page(&auction_id, &uri)?;
     let Some(reader) = state.compensation() else {
         return Err(api_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -162,6 +147,104 @@ pub(crate) async fn movements(
     ))
 }
 
+/// 读取单场已结算拍卖的逐件结算明细与成交撤销冲正。
+pub(crate) async fn lots(
+    State(state): State<PublicApiState>,
+    Path(auction_id): Path<String>,
+    uri: Uri,
+) -> Result<
+    (HeaderMap, Json<ApiResponse<PublicCompensationLotPageResponse>>),
+    (StatusCode, Json<ApiErrorResponse>),
+> {
+    let RoundPage { auction_id, page, page_size, offset } = parse_round_page(&auction_id, &uri)?;
+    let Some(reader) = state.compensation() else {
+        return Err(api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "逐件结算明细暂不可用",
+        ));
+    };
+    let result = reader
+        .list_public_compensation_lots(
+            auction_id,
+            PublicCompensationLotRequest { limit: page_size, offset },
+        )
+        .await
+        .map_err(map_reader_error)?;
+    let Some(mut result) = result else {
+        return Err(not_found_error());
+    };
+    if result.round.auction_id != auction_id
+        || result.limit != page_size
+        || result.offset != offset
+        || result.validate().is_err()
+    {
+        return Err(api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "逐件结算明细返回数据无效",
+        ));
+    }
+
+    // 投影已经校验，只供解析器核对；直接转移，避免逐行复制后再丢弃。
+    let world_id = result.round.world_id.clone();
+    let targets = result
+        .entries
+        .iter_mut()
+        .map(|lot| PublicEquipmentLinkTarget {
+            lot_id: lot.lot_id,
+            equipment_id: lot.equipment_id,
+            world_id: world_id.clone(),
+            projected_game_equipment_url: std::mem::take(&mut lot.projected_game_equipment_url),
+        })
+        .collect::<Vec<_>>();
+    let equipment_urls = resolve_equipment_urls(&state, targets).await?;
+    let mut headers = HeaderMap::new();
+    // 明细含完整装备 key，与补偿流水一致，禁止浏览器或中间缓存保存。
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    let lots = map_lot_page(result, page, &equipment_urls).ok_or_else(|| {
+        api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "逐件结算明细返回数据无效",
+        )
+    })?;
+    Ok((headers, Json(ApiResponse::ok("逐件结算明细已加载", lots))))
+}
+
+/// 单场明细共用的拍卖 ID 与编号分页参数。
+struct RoundPage {
+    auction_id: Uuid,
+    page: i64,
+    page_size: i64,
+    offset: i64,
+}
+
+/// 解析单场明细共用的拍卖 ID 与编号分页参数。
+fn parse_round_page(
+    auction_id: &str,
+    uri: &Uri,
+) -> Result<RoundPage, (StatusCode, Json<ApiErrorResponse>)> {
+    let auction_id = parse_public_uuid(auction_id)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
+    let query = parse_query(uri, &["page", "page_size"])
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let page = parse_positive_i64(query.get("page"), 1, None)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
+    let page_size = parse_positive_i64(
+        query.get("page_size"),
+        DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE,
+        None,
+    )
+    .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
+    let offset = page
+        .checked_sub(1)
+        .and_then(|value| value.checked_mul(page_size))
+        .filter(|value| *value <= MAX_PUBLIC_COMPENSATION_OFFSET)
+        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
+    Ok(RoundPage { auction_id, page, page_size, offset })
+}
+
 fn valid_pool_page(
     page: &PublicCompensationPage,
     page_size: i64,
@@ -187,6 +270,7 @@ fn map_pool_page(
     PublicCompensationResponse {
         balance: page.balance,
         updated_at: page.updated_at.map(public_timestamp),
+        pools: page.pools.into_iter().map(map_pool).collect(),
         rounds: page.entries.into_iter().map(map_round).collect(),
         page: (!cursor).then_some(page_number),
         page_size: page.limit,
@@ -215,6 +299,14 @@ async fn resolve_movement_equipment_urls(
             })
         })
         .collect::<Vec<_>>();
+    resolve_equipment_urls(state, targets).await
+}
+
+/// 经权威解析器把不含 key 的装备投影换成完整游戏链接；数量不符时失败关闭。
+async fn resolve_equipment_urls(
+    state: &PublicApiState,
+    targets: Vec<PublicEquipmentLinkTarget>,
+) -> Result<std::collections::HashMap<Uuid, String>, (StatusCode, Json<ApiErrorResponse>)> {
     if targets.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
@@ -222,7 +314,7 @@ async fn resolve_movement_equipment_urls(
         return Err(api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",
-            "补偿账本返回数据无效",
+            "补偿池返回数据无效",
         ));
     }
     let Some(resolver) = state.equipment_links() else {
@@ -239,7 +331,7 @@ async fn resolve_movement_equipment_urls(
         return Err(api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",
-            "补偿账本返回数据无效",
+            "补偿池返回数据无效",
         ));
     }
     Ok(targets
@@ -270,18 +362,81 @@ fn map_movement_page(
     }
 }
 
+fn map_pool(pool: PublicCompensationPool) -> PublicCompensationPoolResponse {
+    PublicCompensationPoolResponse {
+        world_id: pool.world_id,
+        balance: pool.balance,
+        updated_at: public_timestamp(pool.updated_at),
+    }
+}
+
 fn map_round(round: PublicCompensationRound) -> PublicCompensationRoundResponse {
     PublicCompensationRoundResponse {
         auction_id: round.auction_id.to_string(),
         world_id: round.world_id,
         auction_sequence: round.auction_sequence,
+        policy_mode: round.policy_mode.as_str().to_owned(),
         opening_balance: round.opening_balance,
         tax_income: round.tax_income,
         discount_demand: round.discount_demand,
         compensation_out: round.compensation_out,
         closing_balance: round.closing_balance,
         movement_count: round.movement_count,
+        reversal_count: round.reversal_count,
+        reversal_amount: round.reversal_amount,
         settled_at: public_timestamp(round.settled_at),
+    }
+}
+
+/// 每件都必须取得完整装备链接；缺失时返回 `None` 由调用方失败关闭。
+fn map_lot_page(
+    page: PublicCompensationLotPage,
+    page_number: i64,
+    equipment_urls: &std::collections::HashMap<Uuid, String>,
+) -> Option<PublicCompensationLotPageResponse> {
+    let lots = page
+        .entries
+        .into_iter()
+        .map(|lot| {
+            let url = equipment_urls.get(&lot.lot_id).cloned()?;
+            Some(map_lot(lot, url))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(PublicCompensationLotPageResponse {
+        round: map_round(page.round),
+        lots,
+        total: page.total,
+        page: page_number,
+        page_size: page.limit,
+    })
+}
+
+fn map_lot(
+    lot: PublicCompensationLot,
+    game_equipment_url: String,
+) -> PublicCompensationLotResponse {
+    PublicCompensationLotResponse {
+        lot_id: lot.lot_id.to_string(),
+        lot_number: lot.lot_number,
+        equipment_name: lot.equipment_name,
+        equipment_category: lot.equipment_category,
+        game_equipment_url,
+        end_price: lot.end_price,
+        hold_ppm: lot.hold_ppm,
+        adjustment_ppm: lot.adjustment_ppm,
+        leader_held_nanos: lot.leader_held_nanos,
+        tax_amount: lot.tax_amount,
+        discount_amount: lot.discount_amount,
+        compensation_amount: lot.compensation_amount,
+        buyer_amount: lot.buyer_amount,
+        seller_amount: lot.seller_amount,
+        voided: lot.voided,
+        reversal: lot.reversal.map(|reversal| PublicCompensationLotReversalResponse {
+            amount: reversal.amount,
+            tax_shortfall: reversal.tax_shortfall,
+            balance_after: reversal.balance_after,
+            reversed_at: public_timestamp(reversal.created_at),
+        }),
     }
 }
 

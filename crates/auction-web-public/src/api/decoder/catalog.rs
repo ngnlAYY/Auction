@@ -3,7 +3,7 @@
 use super::*;
 use auction_contracts::{
     AuctionListResponse, AuctionSummaryV2Response, CurrentAuctionResponse,
-    PublicBidLogListResponse, PublicBlacklistResponse, PublicCompensationMovementPageResponse,
+    PublicBidLogListResponse, PublicBlacklistResponse, PublicCompensationLotPageResponse,
     PublicCompensationResponse, PublicPriceHistoryListResponse, PublicRulesResponse,
     WorldsResponse,
 };
@@ -73,11 +73,11 @@ pub(crate) async fn decode_compensation_pool(
     decode_success(response, valid_compensation_pool).await
 }
 
-/// 解码单场补偿池 movement 编号页。
-pub(crate) async fn decode_compensation_movements(
+/// 解码单场逐件结算明细编号页。
+pub(crate) async fn decode_compensation_lots(
     response: Response,
-) -> Result<PublicCompensationMovementPageResponse, String> {
-    decode_success(response, valid_compensation_movements).await
+) -> Result<PublicCompensationLotPageResponse, String> {
+    decode_success(response, valid_compensation_lots).await
 }
 
 fn valid_worlds(value: &Value) -> bool {
@@ -425,30 +425,42 @@ fn valid_blacklist_page(value: &Value) -> bool {
 
 fn valid_compensation_pool(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    if !valid_numbered_page(value)
-        || !nonnegative(value.get("balance"))
-        || !value
+    let Some(pools) = value.get("pools").and_then(Value::as_array) else { return false };
+    let mut balance = Some(0_i64);
+    for pool in pools {
+        let Some(pool) = object(pool) else { return false };
+        if !account_nonempty(pool.get("world_id"))
+            || !nonnegative(pool.get("balance"))
+            || !time(pool.get("updated_at"))
+        {
+            return false;
+        }
+        balance =
+            balance.zip(int(pool.get("balance"))).and_then(|(sum, value)| sum.checked_add(value));
+    }
+    valid_numbered_page(value)
+        && nonnegative(value.get("balance"))
+        // 合计只为旧契约保留，必须与各世界余额之和一致；没有补偿池时不存在更新时间。
+        && balance.is_some_and(|sum| int(value.get("balance")) == Some(sum))
+        && if pools.is_empty() {
+            value.get("updated_at") == Some(&Value::Null)
+        } else {
+            time(value.get("updated_at"))
+        }
+        && value
             .get("rounds")
             .and_then(Value::as_array)
             .is_some_and(|rounds| rounds.iter().all(valid_compensation_round))
-    {
-        return false;
-    }
-    match int(value.get("total")) {
-        Some(0) => value.get("updated_at") == Some(&Value::Null),
-        Some(_) => time(value.get("updated_at")),
-        None => false,
-    }
 }
 
-fn valid_compensation_movements(value: &Value) -> bool {
+fn valid_compensation_lots(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
     valid_numbered_page(value)
         && valid_compensation_round(value.get("round").unwrap_or(&Value::Null))
         && value
-            .get("movements")
+            .get("lots")
             .and_then(Value::as_array)
-            .is_some_and(|movements| movements.iter().all(valid_compensation_movement))
+            .is_some_and(|lots| lots.iter().all(valid_compensation_lot))
 }
 
 fn valid_compensation_round(value: &Value) -> bool {
@@ -456,37 +468,49 @@ fn valid_compensation_round(value: &Value) -> bool {
     uuid(string(value.get("auction_id")).unwrap_or_default())
         && account_nonempty(value.get("world_id"))
         && positive(value.get("auction_sequence"))
+        && matches!(
+            string(value.get("policy_mode")),
+            Some("legacy_zero_v0" | "hold_curve_v1" | "hold_curve_v2")
+        )
         && nonnegative(value.get("opening_balance"))
         && nonnegative(value.get("tax_income"))
         && nonnegative(value.get("discount_demand"))
         && nonnegative(value.get("compensation_out"))
         && nonnegative(value.get("closing_balance"))
         && nonnegative(value.get("movement_count"))
+        && nonnegative(value.get("reversal_count"))
+        && int(value.get("reversal_amount")).is_some()
         && time(value.get("settled_at"))
 }
 
-fn valid_compensation_movement(value: &Value) -> bool {
+fn valid_compensation_lot(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    positive(value.get("sequence"))
-        && optional_uuid(value, "lot_id")
-        && optional_positive(value, "lot_number")
-        && optional_account_nonempty(value, "equipment_name")
-        && optional_account_nonempty(value, "equipment_category")
-        // 流水返回完整 ID/key 链接，复用目录校验；字段可省略，但不接受目录兼容的空串。
-        && value
-            .get("game_equipment_url")
-            .is_none_or(|url| nonempty(Some(url)) && game_url(Some(url)))
-        && value.get("hold_ppm").is_none_or(|amount| {
-            int(Some(amount)).is_some_and(|value| (0..=1_000_000).contains(&value))
+    uuid(string(value.get("lot_id")).unwrap_or_default())
+        && positive(value.get("lot_number"))
+        && account_nonempty(value.get("equipment_name"))
+        && account_nonempty(value.get("equipment_category"))
+        // 明细返回完整 ID/key 链接，复用目录校验，但不接受目录兼容的空串。
+        && nonempty(value.get("game_equipment_url"))
+        && game_url(value.get("game_equipment_url"))
+        && positive(value.get("end_price"))
+        && int(value.get("hold_ppm")).is_some_and(|value| (0..=1_000_000).contains(&value))
+        && int(value.get("adjustment_ppm"))
+            .is_some_and(|value| (-1_000_000..=1_000_000).contains(&value))
+        && nonnegative(value.get("leader_held_nanos"))
+        && nonnegative(value.get("tax_amount"))
+        && nonnegative(value.get("discount_amount"))
+        && nonnegative(value.get("compensation_amount"))
+        && nonnegative(value.get("buyer_amount"))
+        && nonnegative(value.get("seller_amount"))
+        && value.get("voided").is_some_and(Value::is_boolean)
+        && value.get("reversal").is_none_or(|reversal| {
+            object(reversal).is_some_and(|reversal| {
+                int(reversal.get("amount")).is_some()
+                    && nonnegative(reversal.get("tax_shortfall"))
+                    && nonnegative(reversal.get("balance_after"))
+                    && time(reversal.get("reversed_at"))
+            })
         })
-        && value.get("adjustment_ppm").is_none_or(|amount| {
-            int(Some(amount)).is_some_and(|value| (-1_000_000..=1_000_000).contains(&value))
-        })
-        && optional_nonnegative(value, "leader_held_nanos")
-        && matches!(string(value.get("kind")), Some("opening" | "tax" | "compensation" | "closing"))
-        && int(value.get("amount")).is_some()
-        && nonnegative(value.get("balance_after"))
-        && time(value.get("created_at"))
 }
 
 fn valid_numbered_page(value: &Map<String, Value>) -> bool {

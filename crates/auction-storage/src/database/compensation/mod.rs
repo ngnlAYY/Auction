@@ -1,10 +1,11 @@
-//! 从 PostgreSQL 结算事实读取补偿池；不能以空集合掩盖读取失败。
+//! 从 PostgreSQL 结算事实与冲正事实读取补偿池；不能以空集合掩盖读取失败。
 
 #[cfg(feature = "postgres")]
 mod postgres;
 
 use auction_application::{
-    ApplicationFuture, PublicCompensationListRequest, PublicCompensationMovementPage,
+    ApplicationFuture, PublicCompensationListRequest, PublicCompensationLotPage,
+    PublicCompensationLotRequest, PublicCompensationMovementPage,
     PublicCompensationMovementRequest, PublicCompensationPage, PublicCompensationReader,
 };
 use uuid::Uuid;
@@ -41,6 +42,23 @@ impl PublicCompensationReader for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     postgres::movements(store, auction_id, request).await
                 }
+            }
+        })
+    }
+
+    fn list_public_compensation_lots(
+        &self,
+        auction_id: Uuid,
+        request: PublicCompensationLotRequest,
+    ) -> ApplicationFuture<'_, Option<PublicCompensationLotPage>> {
+        Box::pin(async move {
+            if auction_id.is_nil() {
+                return Err(storage_error("公开逐件结算拍卖标识无效"));
+            }
+            request.validate().map_err(storage_error)?;
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => postgres::lots(store, auction_id, request).await,
             }
         })
     }

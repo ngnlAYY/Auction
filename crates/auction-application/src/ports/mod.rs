@@ -292,9 +292,10 @@ pub use commands::{
 pub use compensation::{
     DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE, DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE,
     MAX_PUBLIC_COMPENSATION_OFFSET, PublicCompensationCursor, PublicCompensationListRequest,
-    PublicCompensationMovement, PublicCompensationMovementKind, PublicCompensationMovementPage,
-    PublicCompensationMovementRequest, PublicCompensationPage, PublicCompensationReader,
-    PublicCompensationRound,
+    PublicCompensationLot, PublicCompensationLotPage, PublicCompensationLotRequest,
+    PublicCompensationLotReversal, PublicCompensationMovement, PublicCompensationMovementKind,
+    PublicCompensationMovementPage, PublicCompensationMovementRequest, PublicCompensationPage,
+    PublicCompensationPool, PublicCompensationReader, PublicCompensationRound,
 };
 pub use core_clock::Clock;
 pub use core_competition::{

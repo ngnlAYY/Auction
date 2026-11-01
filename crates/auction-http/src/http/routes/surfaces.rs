@@ -107,6 +107,7 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         )
         // P09/P11/P14 投影含完整装备 key，必须禁止浏览器和共享缓存持久化响应。
         .route("/api/v1/compensation-pool/{auction_id}/movements", get(compensation::movements))
+        .route("/api/v1/compensation-pool/{auction_id}/lots", get(compensation::lots))
         .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
         .route("/api/v1/lots/{lot_id}", get(lot_detail))
         .route("/api/v1/lots/{lot_id}/proxy-authorizations/mine", get(get_my_proxy_authorization))

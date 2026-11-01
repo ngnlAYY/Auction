@@ -86,16 +86,10 @@ impl PublicCompensationMovement {
                 .as_deref()
                 .is_some_and(|value| auction_domain::valid_text(value, 64))
             && self.equipment_id.is_some_and(|value| !value.is_nil())
-            && self.projected_game_equipment_url.as_deref().is_some_and(|value| {
-                ["https://hentaiverse.org/equip/", "https://hentaiverse.org/isekai/equip/"]
-                    .iter()
-                    .find_map(|prefix| value.strip_prefix(prefix))
-                    .is_some_and(|external_id| {
-                        !external_id.is_empty()
-                            && external_id.len() <= 32
-                            && external_id.bytes().all(|byte| byte.is_ascii_digit())
-                    })
-            })
+            && self
+                .projected_game_equipment_url
+                .as_deref()
+                .is_some_and(valid_projected_equipment_url)
             && self.hold_ppm.is_some_and(|value| (0..=1_000_000).contains(&value))
             && self.adjustment_ppm.is_some_and(|value| (-1_000_000..=1_000_000).contains(&value))
             && self.leader_held_nanos.is_some_and(|value| value >= 0);

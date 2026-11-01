@@ -34,6 +34,10 @@ pub(in crate::database::recovery_commands) async fn confirm_postgres_once(
     }
 
     let scope = load_recovery_scope(&mut transaction, command.recovery_id.as_uuid()).await?;
+    // 确认必然落定 resolution 并冲正补偿池；先锁池再锁世界，与结算的锁顺序一致。
+    crate::database::compensation_reversal::lock_world_pool(&mut transaction, &scope.world_id)
+        .await
+        .map_err(map_reversal_error)?;
     lock_world(&mut transaction, &scope.world_id).await?;
     let auction = lock_auction(&mut transaction, scope.auction_id).await?;
     if auction.world_id != scope.world_id || auction.status != "settled" {
@@ -89,6 +93,11 @@ pub(in crate::database::recovery_commands) async fn confirm_postgres_once(
     if updated_state_version != next_state_version {
         return Err(RecoveryCommandError::StaleState);
     }
+    // resolution 由 NULL 首次落定即表示成交撤销；补偿池冲正必须与之同事务提交，
+    // 不能留下“已撤销但池中仍计入附加费/补偿”的中间状态。
+    crate::database::compensation_reversal::reverse_voided_sale(&mut transaction, recovery.id, now)
+        .await
+        .map_err(map_reversal_error)?;
 
     let result = RecoveryConfirmationResult {
         recovery_id: recovery.id.into(),

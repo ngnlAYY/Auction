@@ -1,7 +1,8 @@
 //! 未付款 COD 被退回后的重发与三次退回收口。
 //!
 //! 第 1、2 次退回：把原 COD 投递重置为 pending 并重新排队履约，沿用原金额与装备；
-//! 第 3 次退回：为卖家建立 withdrawn_return 义务把装备寄回，并把原 COD 与卖家收款按失败收口。
+//! 第 3 次退回：为卖家建立 withdrawn_return 义务把装备寄回，并把原 COD 与卖家收款按失败收口；
+//! 成交随之撤销，同事务冲正补偿池。
 
 #[cfg(feature = "postgres")]
 use super::*;
@@ -12,6 +13,21 @@ use crate::database::delivery_audit::{
 
 #[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn advance_cod_return_postgres(
+    pool: &crate::database::TrackedPool<Postgres>,
+    now: DateTime<Utc>,
+) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
+    // 退回卖家时要锁世界补偿池，可能与同世界结算发生序列化冲突；冲突有界重试。
+    for attempt in 0..3_u8 {
+        match advance_cod_return_postgres_once(pool, now).await {
+            Err(RecoveryCommandError::SerializationConflict) if attempt < 2 => continue,
+            result => return result,
+        }
+    }
+    Err(RecoveryCommandError::SerializationConflict)
+}
+
+#[cfg(feature = "postgres")]
+async fn advance_cod_return_postgres_once(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
@@ -345,6 +361,10 @@ async fn return_to_seller(
         lot_id,
         equipment_id,
     } = context;
+    // 收口会冲正 main 补偿池；先锁池，再写入经外键引用 worlds 的义务，与结算锁顺序一致。
+    crate::database::compensation_reversal::lock_world_pool(transaction, "main")
+        .await
+        .map_err(map_reversal_error)?;
     let obligation_id = legacy_natural_key_uuid(
         "auction.recovery.cod-return.seller-return.v1",
         &[recovery_id.as_bytes()],
@@ -436,6 +456,10 @@ async fn return_to_seller(
     .await
     .map_err(map_sql_error)?
     .ok_or(RecoveryCommandError::StaleState)?;
+    // 买方始终未付款且装备已退回卖家，成交撤销；补偿池冲正与 resolution 落定同事务提交。
+    crate::database::compensation_reversal::reverse_voided_sale(transaction, recovery_id, now)
+        .await
+        .map_err(map_reversal_error)?;
 
     Ok((
         "completed".to_owned(),
