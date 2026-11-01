@@ -80,6 +80,8 @@ mod commands;
 #[cfg(feature = "postgres")]
 mod compensation;
 #[cfg(feature = "postgres")]
+mod compensation_reversal;
+#[cfg(feature = "postgres")]
 mod credentials;
 #[cfg(feature = "postgres")]
 pub use commands::{

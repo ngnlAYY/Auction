@@ -2883,6 +2883,14 @@
   color: var(--color-text-muted);
 }
 
+/* 各世界补偿池独立结算，余额卡片并排展示，窄屏时自动换行。 */
+.public-compensation-pools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
 .public-compensation-balance {
   min-inline-size: 0;
   max-inline-size: 100%;
@@ -2976,6 +2984,17 @@
 
 .public-compensation-movement-table small {
   display: none;
+}
+
+.public-compensation-summary {
+  margin-block: 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* 成交已撤销的 lot 弱化展示，冲正列仍保持可读。 */
+.public-compensation-voided > td {
+  color: var(--color-text-muted);
 }
 
 /* ===== Public 拍卖空状态 ===== */

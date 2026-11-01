@@ -52,8 +52,8 @@ pub(crate) use commands::{
     place_bid,
 };
 pub(crate) use compensation::{
-    CompensationMovement, CompensationMovementPage, CompensationPoolPage, CompensationRound,
-    fetch_compensation_movements, fetch_compensation_pool,
+    CompensationLot, CompensationLotPage, CompensationPoolPage, CompensationRound,
+    fetch_compensation_lots, fetch_compensation_pool,
 };
 pub(crate) use forum::{ForumThread, fetch_forum_sync_enabled, fetch_forum_thread};
 pub(crate) use model::{

@@ -23,7 +23,7 @@ mod realtime;
 pub(crate) use account::{decode_my_bids, decode_my_proxy};
 pub(crate) use catalog::{
     decode_auction_list, decode_auction_list_v2, decode_bid_log_page, decode_blacklist,
-    decode_compensation_movements, decode_compensation_pool, decode_current_auction,
+    decode_compensation_lots, decode_compensation_pool, decode_current_auction,
     decode_price_history_page, decode_rules, decode_worlds,
 };
 pub(crate) use lot::{
@@ -110,18 +110,6 @@ fn optional_nonempty(value: &Map<String, Value>, key: &str) -> bool {
 
 fn optional_nonnegative(value: &Map<String, Value>, key: &str) -> bool {
     value.get(key).is_none() || nonnegative(value.get(key))
-}
-
-fn optional_positive(value: &Map<String, Value>, key: &str) -> bool {
-    value.get(key).is_none() || positive(value.get(key))
-}
-
-fn optional_uuid(value: &Map<String, Value>, key: &str) -> bool {
-    value.get(key).is_none() || uuid(string(value.get(key)).unwrap_or_default())
-}
-
-fn optional_account_nonempty(value: &Map<String, Value>, key: &str) -> bool {
-    value.get(key).is_none() || account_nonempty(value.get(key))
 }
 
 fn optional_time(value: &Map<String, Value>, key: &str) -> bool {

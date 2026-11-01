@@ -55,3 +55,17 @@ pub(super) fn map_sql_error(error: sqlx::Error) -> RecoveryCommandError {
         RecoveryCommandError::Failed("PostgreSQL recovery 确认事务失败".to_owned())
     }
 }
+
+/// 补偿池冲正失败时保留序列化冲突的可重试语义；其余持久化事实不一致一律失败关闭。
+#[cfg(feature = "postgres")]
+pub(super) fn map_reversal_error(
+    error: crate::database::compensation_reversal::CompensationReversalError,
+) -> RecoveryCommandError {
+    use crate::database::compensation_reversal::CompensationReversalError;
+    match error {
+        CompensationReversalError::Database(error) => map_sql_error(error),
+        CompensationReversalError::Invalid(message) => {
+            RecoveryCommandError::Failed(format!("补偿池冲正失败：{message}"))
+        }
+    }
+}

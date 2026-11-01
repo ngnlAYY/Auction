@@ -21,7 +21,35 @@ Worker 认领处于 Final 且所有 lot 有效截止都已过去的场次，在�
 4. **补偿分配**：可用额 = 期初补偿池余额 + 本场附加费合计；每件的补偿 = `floor(可用额 × 本件需求 / 总需求)`，不超过本件需求，尾差留在池中。
 5. 结果：**卖方所得 = 成交价**；**买方实付 = 成交价 + 附加费 − 补偿**；期末池 = 可用额 − 已分配补偿。恒等式 `买方实付 + 补偿 = 卖方所得 + 税费` 在每件上成立。
 
-流拍 lot 的所有金额为 0。历史场次若冻结的是 `HoldCurveV1`（历史卖方让利算法，仅供既有快照继续结算、读取与重放）或 `LegacyZeroV0`（无曲线、无补偿池），始终按原策略计算，不补算差额。补偿池每个世界独立，公开站点“补偿池”页展示各场流水。
+流拍 lot 的所有金额为 0。历史场次若冻结的是 `HoldCurveV1`（历史卖方让利算法，仅供既有快照继续结算、读取与重放）或 `LegacyZeroV0`（无曲线、无补偿池），始终按原策略计算，不补算差额。补偿池每个世界独立（均以 main Credits 计），只由结算与下述冲正改变余额。
+
+### 成交撤销冲正（规则 v1）
+
+结算按权责发生制把附加费计入补偿池、把补偿从池中支出。成交随后被撤销时，这两笔金额都不会兑现，必须冲回。恢复记录的 `resolution` 由空首次落定即视为成交撤销：
+
+| resolution | 场景 |
+| --- | --- |
+| `returned_after_three_cod_returns` | main 装备 COD 达到退回上限，装备退回卖家 |
+| `reclaimed` | main 收回装备后确认重列 |
+| `cancelled` | isekai 载体 COD 未付款被退回，确认取消并重列 |
+| `equipment_recovered` | isekai 已付款但交付被退回，收回装备并向买方全额退款 |
+
+在 `resolution` 落定的同一 Serializable 事务内，锁定该世界补偿池并按冻结的 lot 结算金额冲正：
+
+1. 先把该件的补偿全额退回池中：`可用 = 当前余额 + 补偿`；
+2. 再冲回附加费：`冲回 = min(附加费, 可用)`，`期末 = 可用 − 冲回`。余额永不为负；冲回不足的部分（`附加费 − 冲回`）只在余额耗尽时出现，记录在冲正事实中并公开展示，不向后续场次追讨。
+
+冲正写入只追加的 `compensation_pool_reversals`（每个恢复记录、每个 lot 最多一条），同时推进池的 `state_version` 并写审计 `auction.compensation.reverse`。原 `lot_settlements`、`auction_settlements`、`compensation_ledger` 与冻结策略都不改写；这三张表与冲正表由触发器禁止 UPDATE/DELETE。附加费与补偿都为 0（含 `LegacyZeroV0`）时不写冲正。升级到迁移 000070 之前已经撤销的成交不补冲，公开页把它们标为“已撤销（未冲正）”。
+
+### 公开透明
+
+公开站点“补偿池”页（[路由契约](../contracts/routes.md#目录与内容)）展示：
+
+- 每个世界补偿池的当前余额与更新时间（不再只给合计）；
+- 各场批次：结算策略、期初、税收、折扣需求、补偿支出、实际兑付率（补偿支出 ÷ 折扣需求）、期末与本场冲正净额；
+- 展开场次后的逐件明细：成交价、领先比例与时长、调整比例、税收、名义折扣需求、实得补偿、买家实付、卖家所得与冲正（含未冲回金额）。玩家可据此复算上面的公式。
+
+`/api/v1/compensation-pool/{auction_id}/movements` 继续提供逐笔账本（含 `balance_after` 余额链），供第三方核对。
 
 ### 义务
 
@@ -83,6 +111,7 @@ prepared → pending → claimed → sending → succeeded
 - main 装备 COD 在付款前退回：第 1 至 `limit − 1` 次退回时，系统取得收回装备的动作证明后重新寄出原 COD（金额与装备不变）；第 `limit` 次退回时，为卖家建立撤拍退回义务，原 COD 与卖方货款按失败收口，并拉黑买家。每封退件只计数一次。
 - isekai 载体 COD 退回时先收回载体；已经付款但交付装备被退回时先取得装备收回证明。Admin 分别通过 `cancelled` 或 `equipment_recovered` 确认后重列到该世界的草稿接收场次，后者还激活买方退款；没有草稿目标时保持 `relist_pending`。main 的 `reclaimed` 也只在对应收回证明与义务状态允许时可确认。
 - 赛季换季限制（参与早鸟期的世界）：赛季开始前的新赛季草稿不接收重列，保持 `relist_pending` 并按持久化退避重试；原始投稿收件或成交场次开拍后已经历赛季开始的旧赛季装备永不重列，记录阻断码 `relist_season_closed`（报表显示为 `recovery_relist_unavailable`），停在 `relist_pending` 且不再自动重试，由 Admin 人工处理。判断沿用不可变的原始投稿收件事实，修改场次排期不会把旧装备变为新赛季资产；只使用已冻结且非 NULL 的赛季边界，不回填历史场次。
+- 上述任一路径首次落定 `resolution`（成交撤销）时，同事务按[成交撤销冲正](#成交撤销冲正规则-v1)回滚补偿池。
 - 恢复并非单一路径：未付时为 `awaiting_payment`，到期转 `payment_overdue` 并创建一次提醒；main 收款后可完成，isekai 收款后先进入 `delivering_equipment`，交付满足后完成。退件可转 `reclaiming`，经收回、确认后进入 `relist_pending`、`refunding` 或 `completed`。Admin 确认必须携带原因、稳定命令 ID 与当前状态版本，所有动作写入审计。
 
 ## Bot 内部履约与资金账户
