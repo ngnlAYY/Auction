@@ -1,10 +1,11 @@
-//! Public 补偿池批次、各世界余额查询，以及单场批次摘要的共享读取。
+//! Public 补偿池批次、当前余额查询，以及单场批次摘要的共享读取。
 
 use auction_application::{
     ApplicationError, PublicCompensationCursor, PublicCompensationListRequest,
-    PublicCompensationPage, PublicCompensationPool, PublicCompensationRound,
+    PublicCompensationPage, PublicCompensationRound,
 };
 use auction_domain::SettlementMode;
+use chrono::{DateTime, Utc};
 use sqlx::postgres::PgRow;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
@@ -169,40 +170,18 @@ pub(crate) async fn list(
         )
     };
 
-    // 各世界补偿池独立结算；逐个公开余额，合计字段只为旧契约保留。
-    let pools = sqlx::query(
-        "SELECT pool.world_id, pool.balance, pool.updated_at
-         FROM public.settlement_pools AS pool
-         JOIN public.worlds AS world ON world.id = pool.world_id
-         ORDER BY pool.world_id <> 'main', pool.world_id",
-    )
-    .fetch_all(&mut *transaction)
-    .await
-    .map_err(|_| storage_error("读取公开补偿池余额失败"))?
-    .into_iter()
-    .map(|row| {
-        Ok(PublicCompensationPool {
-            world_id: row
-                .try_get("world_id")
-                .map_err(|_| storage_error("读取公开补偿池世界字段失败"))?,
-            balance: row
-                .try_get("balance")
-                .map_err(|_| storage_error("读取公开补偿池余额字段失败"))?,
-            updated_at: row
-                .try_get("updated_at")
-                .map_err(|_| storage_error("读取公开补偿池更新时间失败"))?,
-        })
-    })
-    .collect::<Result<Vec<_>, ApplicationError>>()?;
-    let balance = pools
-        .iter()
-        .try_fold(0_i64, |total, pool| total.checked_add(pool.balance))
-        .ok_or_else(|| storage_error("公开补偿池余额合计溢出"))?;
-    let updated_at = pools.iter().map(|pool| pool.updated_at).max();
+    // 两个世界共用一个补偿池；单行缺失说明 schema 不完整，读取失败关闭。
+    let state = sqlx::query("SELECT balance, updated_at FROM public.compensation_pool")
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(|_| storage_error("读取公开补偿池余额失败"))?;
+    let balance: i64 =
+        state.try_get("balance").map_err(|_| storage_error("读取公开补偿池余额字段失败"))?;
+    let updated_at: DateTime<Utc> =
+        state.try_get("updated_at").map_err(|_| storage_error("读取公开补偿池更新时间失败"))?;
 
     let page = PublicCompensationPage {
         entries,
-        pools,
         balance,
         updated_at,
         total,

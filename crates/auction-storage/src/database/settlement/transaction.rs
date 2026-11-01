@@ -65,7 +65,7 @@ impl PostgresCompetitionTransaction {
                        p.balance AS opening_pool,
                        p.state_version AS opening_pool_version
                    FROM public.auctions AS a
-                   INNER JOIN public.settlement_pools AS p ON p.world_id = a.world_id
+                   CROSS JOIN public.compensation_pool AS p
                    WHERE a.id = $1 AND a.status IN ('settling', 'settled')
                    FOR UPDATE OF a, p"#;
             sqlx::query(query)
@@ -445,10 +445,10 @@ impl PostgresCompetitionTransaction {
         }
         validate_proxy_closure_plans(command_id, plan, &proxy_closure_plans)?;
 
-        let (world_id, auction_state_version) = {
+        let auction_state_version = {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
             let row = sqlx::query(
-                r#"SELECT world_id, state_version
+                r#"SELECT state_version
                    FROM public.auctions
                    WHERE id = $1 AND status = 'settling'
                    FOR UPDATE"#,
@@ -458,23 +458,19 @@ impl PostgresCompetitionTransaction {
             .await
             .map_err(map_sql_error)?
             .ok_or(SettlementTransactionError::NotFound)?;
-            (
-                row.try_get::<String, _>("world_id").map_err(map_sql_error)?,
-                positive_u64(
-                    row.try_get::<i64, _>("state_version").map_err(map_sql_error)?,
-                    "拍卖状态版本",
-                )?,
-            )
+            positive_u64(
+                row.try_get::<i64, _>("state_version").map_err(map_sql_error)?,
+                "拍卖状态版本",
+            )?
         };
+        // 两个世界共用一个以 main Credits 计的补偿池；各世界结算在这一行上串行。
         let current_pool_version = {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
             let row = sqlx::query(
                 r#"SELECT balance, state_version
-                   FROM public.settlement_pools
-                   WHERE world_id = $1
+                   FROM public.compensation_pool
                    FOR UPDATE"#,
             )
-            .bind(&world_id)
             .fetch_one(&mut **transaction)
             .await
             .map_err(map_sql_error)?;
@@ -502,11 +498,10 @@ impl PostgresCompetitionTransaction {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
             if plan.compensation_pool_enabled {
                 let result = sqlx::query(
-                    r#"UPDATE public.settlement_pools
-                       SET balance = $2, state_version = $3, updated_at = $6
-                       WHERE world_id = $1 AND balance = $4 AND state_version = $5"#,
+                    r#"UPDATE public.compensation_pool
+                       SET balance = $1, state_version = $2, updated_at = $5
+                       WHERE balance = $3 AND state_version = $4"#,
                 )
-                .bind(&world_id)
                 .bind(plan.closing_pool.value())
                 .bind(i64_version(closing_pool_version, "结算池状态版本")?)
                 .bind(plan.opening_pool.value())

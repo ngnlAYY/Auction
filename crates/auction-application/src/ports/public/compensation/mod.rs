@@ -118,36 +118,13 @@ impl PublicCompensationRound {
     }
 }
 
-/// 单个世界补偿池的当前状态；各世界资金池相互独立。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublicCompensationPool {
-    pub world_id: String,
-    pub balance: i64,
-    pub updated_at: DateTime<Utc>,
-}
-
-impl PublicCompensationPool {
-    /// 校验世界标识、非负余额与已提交更新时间。
-    pub fn validate(&self) -> Result<(), &'static str> {
-        if !auction_domain::valid_text(&self.world_id, 64)
-            || self.balance < 0
-            || self.updated_at.timestamp_micros() == 0
-        {
-            return Err("公开补偿池世界余额无效");
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicCompensationPage {
     pub entries: Vec<PublicCompensationRound>,
-    /// 各世界补偿池的当前状态，与批次页及分页范围无关。
-    pub pools: Vec<PublicCompensationPool>,
-    /// 所有世界补偿池当前余额合计；保留旧契约字段，必须等于 `pools` 余额之和。
+    /// 两个世界共用的补偿池（main Credits）当前余额，与批次页及分页范围无关。
     pub balance: i64,
-    /// 各世界补偿池最近一次已提交更新时间的最大值。
-    pub updated_at: Option<DateTime<Utc>>,
+    /// 补偿池最近一次已提交更新时间；补偿池单行始终存在。
+    pub updated_at: DateTime<Utc>,
     pub total: Option<i64>,
     pub limit: i64,
     pub offset: i64,
@@ -166,25 +143,12 @@ impl PublicCompensationPage {
             || entry_count > self.limit
             || self.total.is_some_and(|total| total < 0 || total < entry_count)
             || self.next_cursor.is_some() != self.has_more
-            || self.updated_at.is_some_and(|value| value.timestamp_micros() == 0)
+            || self.updated_at.timestamp_micros() == 0
         {
             return Err("公开补偿池页无效");
         }
         for entry in &self.entries {
             entry.validate()?;
-        }
-        let mut balance = 0_i64;
-        for (index, pool) in self.pools.iter().enumerate() {
-            pool.validate()?;
-            if self.pools[..index].iter().any(|other| other.world_id == pool.world_id) {
-                return Err("公开补偿池世界重复");
-            }
-            balance = balance.checked_add(pool.balance).ok_or("公开补偿池余额溢出")?;
-        }
-        if balance != self.balance
-            || self.updated_at != self.pools.iter().map(|pool| pool.updated_at).max()
-        {
-            return Err("公开补偿池世界余额与合计不一致");
         }
         if let Some(PublicCompensationCursor::Boundary { sequence, id }) = self.next_cursor.as_ref()
             && (*sequence <= 0 || id.is_nil())

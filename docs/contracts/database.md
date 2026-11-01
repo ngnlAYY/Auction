@@ -68,7 +68,8 @@
 | 表 | 内容 |
 | --- | --- |
 | `auction_settlements`、`lot_settlements` | 场次与 lot 的结算结果（成交价、买方实付、卖方所得、税费、补偿） |
-| `settlement_pools`、`compensation_ledger` | 各世界补偿池与只追加流水 |
+| `compensation_pool`、`compensation_ledger` | 两个世界共用的补偿池（单行，main Credits）与只追加流水 |
+| `settlement_pools` | 迁移 000071 合并前各世界补偿池的期末余额与版本（触发器冻结，只作证据） |
 | `compensation_pool_reversals` | 成交撤销后的补偿池冲正（每个恢复记录最多一条，与 `resolution` 落定同事务写入） |
 | `settlement_obligations` | 结算义务（种类闭集、世界、收款人、金额、前置义务、业务状态） |
 | `settlement_obligation_fulfillments` | 义务履约执行与证据 |

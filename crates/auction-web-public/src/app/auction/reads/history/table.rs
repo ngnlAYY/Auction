@@ -78,7 +78,7 @@ fn PriceHistoryGroupPanel(
                 button { r#type: "button", class: "public-history-group-toggle",
                     aria_expanded: expanded().to_string(),
                     onclick: move |_| expanded.set(!expanded()),
-                    span { aria_hidden: "true", if expanded() { "−" } else { "+" } }
+                    span { class: "public-chevron", aria_hidden: "true" }
                     TruncatedText { value: label.clone(), size: "wide", focusable: false, portal: true }
                     span { class: "public-history-group-count", {t!("history-group-count", count: count)} }
                 }

@@ -85,7 +85,9 @@ pub(super) async fn snapshot(
       SELECT s.auction_id,a.world_id,s.opening_pool_balance,s.closing_pool_balance,s.tax_total,s.compensation_total,s.settled_at
       FROM public.auction_settlements s JOIN public.auctions a ON a.id=s.auction_id
     ) x"#).await?;
-    let pools = array(tx,"SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY world_id),'[]') FROM public.settlement_pools p").await?;
+    let pools =
+        array(tx, "SELECT COALESCE(jsonb_agg(to_jsonb(p)),'[]') FROM public.compensation_pool p")
+            .await?;
     let all_accounts = array(tx,"SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY uid),'[]') FROM public.settlement_funding_accounts a").await?;
     let allocations = array(tx,"SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY uid,id),'[]') FROM public.settlement_funding_allocations a").await?;
     let repaired = super::classification::repaired_deliveries(tx, uid).await?;

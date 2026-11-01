@@ -12,20 +12,10 @@ pub(super) fn CompensationLotDetails(
     on_lot_page_size_change: EventHandler<i64>,
     on_retry_lots: EventHandler<()>,
 ) -> Element {
-    // 可用额 = 期初余额 + 本场税收；与兑付率一起给出逐件补偿的复算输入。
-    let available = round.opening_balance.saturating_add(round.tax_income);
     rsx! {
         section { class: "public-compensation-movements", aria_labelledby: "compensation-lots-title",
             h2 { id: "compensation-lots-title", class: "public-visually-hidden",
                 {t!("compensation-lots")}
-            }
-            p { class: "public-compensation-summary",
-                {t!(
-                    "compensation-round-summary",
-                    policy: policy_label(&round.policy_mode),
-                    available: format_amount(available),
-                    coverage: coverage_label(round.compensation_out, round.discount_demand)
-                )}
             }
             match lots {
                 None => rsx! { p { class: "public-auction-page__status", role: "status", {t!("data-loading")} } },
@@ -40,68 +30,96 @@ pub(super) fn CompensationLotDetails(
                     }
                 },
                 Some(Ok(None)) => rsx! { p { class: "public-auction-page__status", {t!("data-empty")} } },
-                Some(Ok(Some(page))) => rsx! {
-                    if page.lots.is_empty() {
-                        p { class: "public-auction-page__status", {t!("data-empty")} }
-                    } else {
-                        div { class: "public-compensation-movement-wrap ui-table--fit",
-                            table { class: "public-compensation-movement-table",
-                                auction_web_shared::TableColumns { layout: "public-compensation-lots", widths: vec![6, 20, 6, 6, 8, 8, 7, 7, 7, 8, 8, 9] }
-                                thead {
-                                    tr {
-                                        th { {t!("compensation-lot")} }
-                                        th { {t!("compensation-equipment")} }
-                                        th { class: "public-compensation-number", {t!("compensation-hold")} }
-                                        th { class: "public-compensation-number", {t!("compensation-adjustment")} }
-                                        th { class: "public-compensation-number", {t!("compensation-held-time")} }
-                                        th { class: "public-compensation-number", {t!("compensation-end-price")} }
-                                        th { class: "public-compensation-number", {t!("compensation-kind-tax")} }
-                                        th { class: "public-compensation-number", {t!("compensation-discount")} }
-                                        th { class: "public-compensation-number", {t!("compensation-kind-compensation")} }
-                                        th { class: "public-compensation-number", {t!("compensation-buyer-amount")} }
-                                        th { class: "public-compensation-number", {t!("compensation-seller-amount")} }
-                                        th { class: "public-compensation-number", {t!("compensation-reversal")} }
+                Some(Ok(Some(page))) => {
+                    // 冲正列默认隐藏，只有本页存在已撤销成交（含未冲正）时才显示。
+                    let show_reversal =
+                        page.lots.iter().any(|lot| lot.voided || lot.reversal.is_some());
+                    rsx! {
+                        if page.lots.is_empty() {
+                            p { class: "public-auction-page__status", {t!("data-empty")} }
+                        } else {
+                            div { class: "public-compensation-movement-wrap ui-table--fit",
+                                table { class: "public-compensation-movement-table",
+                                    auction_web_shared::TableColumns { layout: "public-compensation-lots", widths: lot_column_widths(show_reversal) }
+                                    thead {
+                                        tr {
+                                            th { {t!("compensation-lot")} }
+                                            th { {t!("compensation-equipment")} }
+                                            th { {t!("compensation-world")} }
+                                            th { class: "public-compensation-number", {t!("compensation-hold")} }
+                                            th { class: "public-compensation-number", {t!("compensation-adjustment")} }
+                                            th { class: "public-compensation-number", {t!("compensation-held-time")} }
+                                            th { class: "public-compensation-kind-cell", {t!("compensation-kind")} }
+                                            th { class: "public-compensation-number", {t!("compensation-amount")} }
+                                            th { class: "public-compensation-number", {t!("compensation-end-price")} }
+                                            th { class: "public-compensation-number", {t!("compensation-buyer-amount")} }
+                                            th { class: "public-compensation-number", {t!("compensation-seller-amount")} }
+                                            if show_reversal {
+                                                th { class: "public-compensation-number", {t!("compensation-reversal")} }
+                                            }
+                                        }
                                     }
-                                }
-                                tbody {
-                                    for lot in page.lots {
-                                        CompensationLotRow { lot, world_id: round.world_id.clone() }
+                                    tbody {
+                                        for lot in page.lots {
+                                            CompensationLotRow { lot, world_id: round.world_id.clone(), show_reversal }
+                                        }
                                     }
                                 }
                             }
                         }
+                        PublicPager {
+                            page: page.page,
+                            page_size: page.page_size,
+                            total: Some(page.total),
+                            has_more: false,
+                            label: t!("compensation-lots"),
+                            movement: true,
+                            on_page_change: on_lot_page_change,
+                            on_page_clamp: on_lot_page_clamp,
+                            on_page_size_change: on_lot_page_size_change,
+                        }
                     }
-                    PublicPager {
-                        page: page.page,
-                        page_size: page.page_size,
-                        total: Some(page.total),
-                        has_more: false,
-                        label: t!("compensation-lots"),
-                        movement: true,
-                        on_page_change: on_lot_page_change,
-                        on_page_clamp: on_lot_page_clamp,
-                        on_page_size_change: on_lot_page_size_change,
-                    }
-                },
+                }
             }
         }
     }
 }
 
 #[component]
-fn CompensationLotRow(lot: crate::api::CompensationLot, world_id: String) -> Element {
+fn CompensationLotRow(
+    lot: crate::api::CompensationLot,
+    world_id: String,
+    show_reversal: bool,
+) -> Element {
     let lot_code = lot_code_for(&lot.equipment_category, i64::from(lot.lot_number));
     let equipment = format!("{}({})", lot.equipment_name, lot.equipment_category);
-    let tax = (lot.tax_amount > 0).then(|| format_amount(lot.tax_amount));
-    let discount = (lot.discount_amount > 0).then(|| format_amount(lot.discount_amount));
-    // 有优惠需求时即使补偿为零也显示 0，让池余额不足的情况可见。
-    let compensation = (lot.compensation_amount > 0 || lot.discount_amount > 0)
-        .then(|| format_amount(lot.compensation_amount));
+    // 一件成交要么缴纳税收入池，要么从池中获得补偿，用“类型”一列区分；金额按池的视角带符号，
+    // 税收流入为 `+`、补偿流出为 `−`。有折扣需求时即使补偿为零也显示，让池余额不足可见，
+    // 名义折扣需求放进提示供复算。
+    let (kind, kind_class, amount, amount_class, amount_title) = if lot.tax_amount > 0 {
+        (
+            Some(t!("compensation-kind-tax")),
+            "public-compensation-kind public-compensation-kind--tax",
+            signed_amount(lot.tax_amount),
+            "public-compensation-income",
+            None,
+        )
+    } else if lot.compensation_amount > 0 || lot.discount_amount > 0 {
+        (
+            Some(t!("compensation-kind-compensation")),
+            "public-compensation-kind public-compensation-kind--compensation",
+            signed_amount(-lot.compensation_amount),
+            "public-compensation-outflow",
+            Some(t!("compensation-discount-title", amount: credits(lot.discount_amount))),
+        )
+    } else {
+        (None, "", "—".to_owned(), "", None)
+    };
     let reversal = match lot.reversal.as_ref() {
         Some(reversal) if reversal.tax_shortfall > 0 => t!(
             "compensation-reversal-shortfall",
             amount: signed_amount(reversal.amount),
-            shortfall: format_amount(reversal.tax_shortfall)
+            shortfall: credits(reversal.tax_shortfall)
         ),
         Some(reversal) => signed_amount(reversal.amount),
         None if lot.voided => t!("compensation-voided-unreversed"),
@@ -111,7 +129,7 @@ fn CompensationLotRow(lot: crate::api::CompensationLot, world_id: String) -> Ele
         t!(
             "compensation-reversal-detail",
             date: format_auction_time(&reversal.reversed_at),
-            balance: format_amount(reversal.balance_after)
+            balance: credits(reversal.balance_after)
         )
     });
     rsx! {
@@ -134,6 +152,7 @@ fn CompensationLotRow(lot: crate::api::CompensationLot, world_id: String) -> Ele
                     TruncatedText { value: equipment.clone(), size: "wide", focusable: false, portal: true }
                 }
             }
+            td { "data-label": t!("compensation-world"), "{world_label(&world_id)}" }
             td { class: "public-compensation-number", "data-label": t!("compensation-hold"),
                 {format_ppm(lot.hold_ppm, false)}
             }
@@ -143,35 +162,61 @@ fn CompensationLotRow(lot: crate::api::CompensationLot, world_id: String) -> Ele
             td { class: "public-compensation-number", "data-label": t!("compensation-held-time"),
                 {format_held_duration(lot.leader_held_nanos)}
             }
+            td { class: "public-compensation-kind-cell", "data-label": t!("compensation-kind"),
+                if let Some(kind) = kind {
+                    span { class: kind_class, title: kind.clone(), "{kind}" }
+                } else {
+                    "—"
+                }
+            }
+            td { class: "public-compensation-number", "data-label": t!("compensation-amount"),
+                span { class: amount_class, title: amount_title, "{amount}" }
+            }
             td { class: "public-compensation-number", "data-label": t!("compensation-end-price"),
-                "{format_amount(lot.end_price)}"
-            }
-            td { class: "public-compensation-number", "data-label": t!("compensation-kind-tax"),
-                if let Some(tax) = tax {
-                    span { class: "public-compensation-income", "{tax}" }
-                } else {
-                    "—"
-                }
-            }
-            td { class: "public-compensation-number", "data-label": t!("compensation-discount"),
-                {discount.unwrap_or_else(|| "—".to_owned())}
-            }
-            td { class: "public-compensation-number", "data-label": t!("compensation-kind-compensation"),
-                if let Some(compensation) = compensation {
-                    span { class: "public-compensation-outflow", "{compensation}" }
-                } else {
-                    "—"
-                }
+                "{credits(lot.end_price)}"
             }
             td { class: "public-compensation-number", "data-label": t!("compensation-buyer-amount"),
-                "{format_amount(lot.buyer_amount)}"
+                CompensationParty { amount: lot.buyer_amount, name: lot.buyer_name.clone(), strong: true }
             }
             td { class: "public-compensation-number", "data-label": t!("compensation-seller-amount"),
-                "{format_amount(lot.seller_amount)}"
+                CompensationParty { amount: lot.seller_amount, name: lot.seller_name.clone(), strong: false }
             }
-            td { class: "public-compensation-number", "data-label": t!("compensation-reversal"),
-                span { title: reversal_title, "{reversal}" }
+            if show_reversal {
+                td { class: "public-compensation-number", "data-label": t!("compensation-reversal"),
+                    span { title: reversal_title, "{reversal}" }
+                }
             }
         }
+    }
+}
+
+/// 买家实付/卖家所得格：金额始终完整显示，后接括号内的玩家名；名字过长时截断并提供完整值提示。
+/// 没有投稿记录的历史 lot 卖家为 `—`，此时不显示括号。
+#[component]
+fn CompensationParty(amount: i64, name: String, strong: bool) -> Element {
+    rsx! {
+        span { class: "public-compensation-party",
+            if strong {
+                strong { "{credits(amount)}" }
+            } else {
+                span { "{credits(amount)}" }
+            }
+            if name != "—" {
+                span { class: "public-compensation-party__name",
+                    TruncatedText { value: name, size: "compact", focusable: false, portal: true }
+                }
+            }
+        }
+    }
+}
+
+/// 逐件明细列宽（千分比）。数字列按窄桌面（表宽约 1000px、小号字）下最长完整值实测预留，
+/// 类型列容纳英文 “Compensation” 标签；买家实付/卖家所得在金额之外留出玩家名空间。
+/// 装备名与玩家名取剩余宽度，是仅有的允许截断的内容。
+fn lot_column_widths(show_reversal: bool) -> Vec<u16> {
+    if show_reversal {
+        vec![51, 89, 50, 75, 77, 87, 109, 80, 90, 118, 110, 64]
+    } else {
+        vec![51, 113, 50, 75, 77, 87, 109, 80, 90, 138, 130]
     }
 }

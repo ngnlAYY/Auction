@@ -16,7 +16,7 @@ pub(in crate::database::recovery_commands) async fn advance_cod_return_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
-    // 退回卖家时要锁世界补偿池，可能与同世界结算发生序列化冲突；冲突有界重试。
+    // 退回卖家时要锁补偿池，可能与任一世界的结算发生序列化冲突；冲突有界重试。
     for attempt in 0..3_u8 {
         match advance_cod_return_postgres_once(pool, now).await {
             Err(RecoveryCommandError::SerializationConflict) if attempt < 2 => continue,
@@ -361,8 +361,8 @@ async fn return_to_seller(
         lot_id,
         equipment_id,
     } = context;
-    // 收口会冲正 main 补偿池；先锁池，再写入经外键引用 worlds 的义务，与结算锁顺序一致。
-    crate::database::compensation_reversal::lock_world_pool(transaction, "main")
+    // 收口会冲正补偿池；先锁池，再写入经外键引用 worlds 的义务，与结算锁顺序一致。
+    crate::database::compensation_reversal::lock_pool(transaction)
         .await
         .map_err(map_reversal_error)?;
     let obligation_id = legacy_natural_key_uuid(

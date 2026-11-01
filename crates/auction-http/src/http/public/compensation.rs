@@ -8,13 +8,13 @@ use auction_application::{
     PublicCompensationCursor, PublicCompensationListRequest, PublicCompensationLot,
     PublicCompensationLotPage, PublicCompensationLotRequest, PublicCompensationMovement,
     PublicCompensationMovementPage, PublicCompensationMovementRequest, PublicCompensationPage,
-    PublicCompensationPool, PublicCompensationRound, PublicEquipmentLinkTarget,
+    PublicCompensationRound, PublicEquipmentLinkTarget,
 };
 use auction_contracts::{
     ApiErrorResponse, ApiResponse, PublicCompensationLotPageResponse,
     PublicCompensationLotResponse, PublicCompensationLotReversalResponse,
     PublicCompensationMovementPageResponse, PublicCompensationMovementResponse,
-    PublicCompensationPoolResponse, PublicCompensationResponse, PublicCompensationRoundResponse,
+    PublicCompensationResponse, PublicCompensationRoundResponse,
 };
 use axum::{
     Json,
@@ -269,8 +269,7 @@ fn map_pool_page(
     let cursor = raw_cursor.is_some();
     PublicCompensationResponse {
         balance: page.balance,
-        updated_at: page.updated_at.map(public_timestamp),
-        pools: page.pools.into_iter().map(map_pool).collect(),
+        updated_at: public_timestamp(page.updated_at),
         rounds: page.entries.into_iter().map(map_round).collect(),
         page: (!cursor).then_some(page_number),
         page_size: page.limit,
@@ -362,14 +361,6 @@ fn map_movement_page(
     }
 }
 
-fn map_pool(pool: PublicCompensationPool) -> PublicCompensationPoolResponse {
-    PublicCompensationPoolResponse {
-        world_id: pool.world_id,
-        balance: pool.balance,
-        updated_at: public_timestamp(pool.updated_at),
-    }
-}
-
 fn map_round(round: PublicCompensationRound) -> PublicCompensationRoundResponse {
     PublicCompensationRoundResponse {
         auction_id: round.auction_id.to_string(),
@@ -430,6 +421,8 @@ fn map_lot(
         compensation_amount: lot.compensation_amount,
         buyer_amount: lot.buyer_amount,
         seller_amount: lot.seller_amount,
+        buyer_name: lot.buyer_name,
+        seller_name: lot.seller_name,
         voided: lot.voided,
         reversal: lot.reversal.map(|reversal| PublicCompensationLotReversalResponse {
             amount: reversal.amount,

@@ -194,8 +194,39 @@
     font-size: var(--text-sm);
   }
 
+  /* 出价记录的拍品筛选与页内其他筛选控件同高。 */
+  .public-auction-bid-log-toolbar :is(input, button) {
+    min-block-size: var(--size-control-compact);
+    padding-block: 0;
+    font-size: var(--text-sm);
+  }
+
+  /* 补偿池两张表只截断装备名；数字列靠紧凑字号与留白容纳完整金额。 */
+  .public-compensation-table :is(th, td) {
+    padding-inline: var(--space-2);
+  }
+
+  .public-compensation-movement-table {
+    font-size: var(--text-sm);
+  }
+
+  .public-compensation-movement-table :is(th, td) {
+    padding: var(--space-1) var(--space-2);
+  }
+
   .public-account-table :is(th, td) {
     padding: var(--space-1) var(--space-2);
+  }
+}
+
+/* 窄桌面（64–90rem）进一步收紧补偿池表格，千万级金额与结算时间仍完整显示。 */
+@media screen and (width > 64rem) and (width <= 90rem) {
+  .public-compensation-table {
+    font-size: var(--text-sm);
+  }
+
+  .public-compensation-movement-table :is(th, td) {
+    padding-inline: var(--space-1);
   }
 }
 

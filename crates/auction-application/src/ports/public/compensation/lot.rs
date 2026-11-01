@@ -40,6 +40,10 @@ pub struct PublicCompensationLot {
     pub compensation_amount: i64,
     pub buyer_amount: i64,
     pub seller_amount: i64,
+    /// 买家当前玩家名，与成交历史同一口径。
+    pub buyer_name: String,
+    /// 投稿卖家名；没有投稿记录的历史 lot 为 `—`，与成交历史同一口径。
+    pub seller_name: String,
     /// 成交是否已被恢复流程撤销；升级前撤销的成交可能没有冲正事实。
     pub voided: bool,
     pub reversal: Option<PublicCompensationLotReversal>,
@@ -64,6 +68,8 @@ impl PublicCompensationLot {
             || self.compensation_amount < 0
             || self.buyer_amount < 0
             || self.seller_amount < 0
+            || !auction_domain::valid_text(&self.buyer_name, 256)
+            || !auction_domain::valid_text(&self.seller_name, 256)
         {
             return Err("公开逐件结算明细无效");
         }

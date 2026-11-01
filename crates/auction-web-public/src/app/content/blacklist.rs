@@ -112,16 +112,19 @@ fn BlacklistTable(
                     }
                 }
             }
-            PublicPager {
-                page: page.page,
-                page_size: page.page_size,
-                total: Some(page.total),
-                has_more: false,
-                label: t!("page-blacklist-title"),
-                max_offset: i64::from(i32::MAX),
-                on_page_change,
-                on_page_clamp,
-                on_page_size_change,
+            // 没有任何记录时分页器只会显示“共 0 条”，不渲染；有记录但页码越界时仍需它纠偏。
+            if page.total > 0 {
+                PublicPager {
+                    page: page.page,
+                    page_size: page.page_size,
+                    total: Some(page.total),
+                    has_more: false,
+                    label: t!("page-blacklist-title"),
+                    max_offset: i64::from(i32::MAX),
+                    on_page_change,
+                    on_page_clamp,
+                    on_page_size_change,
+                }
             }
         }
     }

@@ -23,14 +23,6 @@ pub struct PublicCompensationRoundResponse {
     pub settled_at: String,
 }
 
-/// 单个世界补偿池的当前状态。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct PublicCompensationPoolResponse {
-    pub world_id: String,
-    pub balance: i64,
-    pub updated_at: String,
-}
-
 /// Public 补偿池账本 movement 的稳定响应。
 /// 完整游戏装备 URL 的 key 只允许进入 wire，调试输出始终脱敏。
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
@@ -82,10 +74,10 @@ impl std::fmt::Debug for PublicCompensationMovementResponse {
 /// Public 补偿池批次列表响应；编号页与 cursor 页字段互斥。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicCompensationResponse {
-    /// 各世界补偿池余额合计；各池独立结算，按世界的余额见 `pools`。
+    /// 两个世界共用的补偿池（main Credits）当前余额。
     pub balance: i64,
-    pub updated_at: Option<String>,
-    pub pools: Vec<PublicCompensationPoolResponse>,
+    /// 补偿池最近一次已提交更新时间。
+    pub updated_at: String,
     pub rounds: Vec<PublicCompensationRoundResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<i64>,
@@ -139,6 +131,10 @@ pub struct PublicCompensationLotResponse {
     pub compensation_amount: i64,
     pub buyer_amount: i64,
     pub seller_amount: i64,
+    /// 买家玩家名，与成交历史同一口径。
+    pub buyer_name: String,
+    /// 卖家玩家名；没有投稿记录的历史 lot 为 `—`。
+    pub seller_name: String,
     /// 成交是否已被撤销；升级前撤销的成交可能没有冲正。
     pub voided: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -163,6 +159,8 @@ impl std::fmt::Debug for PublicCompensationLotResponse {
             .field("compensation_amount", &self.compensation_amount)
             .field("buyer_amount", &self.buyer_amount)
             .field("seller_amount", &self.seller_amount)
+            .field("buyer_name", &self.buyer_name)
+            .field("seller_name", &self.seller_name)
             .field("voided", &self.voided)
             .field("reversal", &self.reversal)
             .finish()

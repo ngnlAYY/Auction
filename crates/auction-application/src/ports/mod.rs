@@ -295,7 +295,7 @@ pub use compensation::{
     PublicCompensationLot, PublicCompensationLotPage, PublicCompensationLotRequest,
     PublicCompensationLotReversal, PublicCompensationMovement, PublicCompensationMovementKind,
     PublicCompensationMovementPage, PublicCompensationMovementRequest, PublicCompensationPage,
-    PublicCompensationPool, PublicCompensationReader, PublicCompensationRound,
+    PublicCompensationReader, PublicCompensationRound,
 };
 pub use core_clock::Clock;
 pub use core_competition::{
