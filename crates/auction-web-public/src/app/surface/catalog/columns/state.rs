@@ -39,7 +39,7 @@ impl CatalogLayout {
         match self {
             Self::Live => &[
                 (Code, 6),
-                (Item, 18),
+                (Item, 23),
                 (Group, 4),
                 (AverageRoll, 5),
                 (Level, 4),
@@ -50,7 +50,7 @@ impl CatalogLayout {
                 (Leader, 6),
                 (Remaining, 7),
                 (Status, 6),
-                (Actions, 18),
+                (Actions, 13),
             ],
             Self::Settled => &[
                 (Code, 7),
