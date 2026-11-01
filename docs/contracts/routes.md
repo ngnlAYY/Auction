@@ -66,9 +66,9 @@
 | GET | `/api/v1/worlds` | — | 已启用的世界列表 |
 | GET | `/api/v1/rules` | — | `lang`：规则文档（en、zh-CN、zh-TW、ja、ko） |
 | GET | `/api/v1/blacklist` | — | `page`、`page_size` |
-| GET | `/api/v1/compensation-pool` | — | `page`、`page_size`、`cursor`：已结算场次的补偿池批次（含结算策略与冲正净额）与各世界余额 `pools` |
+| GET | `/api/v1/compensation-pool` | — | `page`、`page_size`、`cursor`：已结算场次的补偿池批次（含结算策略与冲正净额），以及两个世界共用补偿池的当前余额 `balance` 与更新时间 `updated_at` |
 | GET | `/api/v1/compensation-pool/{auction_id}/movements` | — | `page`、`page_size`：单场补偿账本流水 |
-| GET | `/api/v1/compensation-pool/{auction_id}/lots` | — | `page`、`page_size`：单场已售 lot 的逐件结算明细（成交价、比例、税收、折扣需求、补偿、实付/所得）与成交撤销冲正 |
+| GET | `/api/v1/compensation-pool/{auction_id}/lots` | — | `page`、`page_size`：单场已售 lot 的逐件结算明细（成交价、比例、税收、折扣需求、补偿、实付/所得、买家 `buyer_name` 与卖家 `seller_name`，取名口径同成交历史）与成交撤销冲正 |
 | GET | `/api/v1/auctions` | — | `world`、`status`、`page`、`page_size`、`cursor` |
 | GET | `/api/v2/auctions` | — | 同上，另含每场的论坛主题地址 |
 | GET | `/api/v1/auctions/current` | — | `world`：当前（预览/进行中）场次 |

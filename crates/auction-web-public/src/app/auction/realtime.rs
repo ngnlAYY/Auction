@@ -32,7 +32,7 @@ pub(crate) fn public_connection_message(state: PublicConnectionState) -> String 
 pub(super) fn page() -> Element {
     rsx! {
         section { class: "public-status-page", aria_labelledby: "public-status-title",
-            h2 { id: "public-status-title", {t!("page-status-title")} }
+            h1 { id: "public-status-title", {t!("page-status-title")} }
             p { {t!("page-status-note")} }
         }
     }

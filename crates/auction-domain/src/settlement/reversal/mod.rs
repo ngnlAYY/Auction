@@ -9,7 +9,7 @@ use crate::{DomainError, SettlementAmount};
 /// 当前冲正规则版本。
 pub const COMPENSATION_REVERSAL_RULE_VERSION: u32 = 1;
 
-/// 一次成交撤销对所属世界补偿池的冲正结果。
+/// 一次成交撤销对补偿池的冲正结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompensationReversal {
     /// 冲正前的池余额。

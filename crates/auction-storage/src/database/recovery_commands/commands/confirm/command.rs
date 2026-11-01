@@ -35,7 +35,7 @@ pub(in crate::database::recovery_commands) async fn confirm_postgres_once(
 
     let scope = load_recovery_scope(&mut transaction, command.recovery_id.as_uuid()).await?;
     // 确认必然落定 resolution 并冲正补偿池；先锁池再锁世界，与结算的锁顺序一致。
-    crate::database::compensation_reversal::lock_world_pool(&mut transaction, &scope.world_id)
+    crate::database::compensation_reversal::lock_pool(&mut transaction)
         .await
         .map_err(map_reversal_error)?;
     lock_world(&mut transaction, &scope.world_id).await?;

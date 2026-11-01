@@ -3,7 +3,8 @@
 //! 只由恢复流程在 `resolution` 首次落定的同一 Serializable 事务内调用：此时成交已确定撤销
 //! （买方未付款、装备退回卖家或已付款后退款），原结算计入池中的附加费与从池中支出的补偿
 //! 都不会兑现。冲正金额由领域规则计算，这里负责锁池、版本 CAS、追加冲正事实与审计；
-//! 原结算明细、补偿账本与冻结策略保持不变。
+//! 原结算明细、补偿账本与冻结策略保持不变。两个世界共用一个以 main Credits 计的补偿池，
+//! 合并前结算的成交也冲正到这个池。
 
 use auction_domain::{
     COMPENSATION_REVERSAL_RULE_VERSION, CompensationReversal, SettlementAmount,
@@ -29,17 +30,15 @@ impl From<sqlx::Error> for CompensationReversalError {
     }
 }
 
-/// 预先锁定世界补偿池。结算先锁池、后经外键对 `worlds` 取 KEY SHARE；恢复事务必须在锁
-/// `worlds` 或写入引用它的义务之前先锁池，保持同一顺序，避免与同世界结算互相等待。
-pub(crate) async fn lock_world_pool(
+/// 预先锁定补偿池。结算先锁池、后经外键对 `worlds` 取 KEY SHARE；恢复事务必须在锁
+/// `worlds` 或写入引用它的义务之前先锁池，保持同一顺序，避免与任一世界的结算互相等待。
+pub(crate) async fn lock_pool(
     connection: &mut PgConnection,
-    world_id: &str,
 ) -> Result<(), CompensationReversalError> {
-    sqlx::query("SELECT world_id FROM public.settlement_pools WHERE world_id = $1 FOR UPDATE")
-        .bind(world_id)
+    sqlx::query("SELECT singleton FROM public.compensation_pool FOR UPDATE")
         .fetch_optional(&mut *connection)
         .await?
-        .ok_or(CompensationReversalError::Invalid("世界补偿池不存在"))?;
+        .ok_or(CompensationReversalError::Invalid("补偿池不存在"))?;
     Ok(())
 }
 
@@ -88,11 +87,9 @@ pub(crate) async fn reverse_voided_sale(
 
     let pool = sqlx::query(
         r#"SELECT balance, state_version
-           FROM public.settlement_pools
-           WHERE world_id = $1
+           FROM public.compensation_pool
            FOR UPDATE"#,
     )
-    .bind(&world_id)
     .fetch_one(&mut *connection)
     .await?;
     let opening_balance = amount(pool.try_get("balance")?)?;
@@ -107,11 +104,10 @@ pub(crate) async fn reverse_voided_sale(
         .ok_or(CompensationReversalError::Invalid("补偿池状态版本溢出"))?;
 
     let updated = sqlx::query(
-        r#"UPDATE public.settlement_pools
-           SET balance = $2, state_version = $3, updated_at = $4
-           WHERE world_id = $1 AND balance = $5 AND state_version = $6"#,
+        r#"UPDATE public.compensation_pool
+           SET balance = $1, state_version = $2, updated_at = $3
+           WHERE balance = $4 AND state_version = $5"#,
     )
-    .bind(&world_id)
     .bind(reversal.closing_balance.value())
     .bind(closing_version)
     .bind(occurred_at)

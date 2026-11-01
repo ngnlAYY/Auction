@@ -1,6 +1,6 @@
-//! Public 补偿池页面装配：各世界余额、场次批次与逐件结算明细。
+//! Public 补偿池页面装配：余额、场次批次与逐件结算明细。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::{format_credit_amount_full, legacy_t as t};
 use dioxus::prelude::*;
 
 use crate::api::{
@@ -9,9 +9,9 @@ use crate::api::{
 };
 
 use super::{
-    AsyncState, AsyncStateKind, PublicPager, QueryWriteMode, Time, format_amount,
-    format_auction_time, normalize_public_page_size, public_page_matches,
-    update_public_query_state, use_public_query_state, world_label,
+    AsyncState, AsyncStateKind, PublicPager, QueryWriteMode, Time, format_auction_time,
+    normalize_public_page_size, public_page_matches, update_public_query_state,
+    use_public_query_state, world_label,
 };
 
 mod lots;
@@ -191,14 +191,19 @@ pub(super) fn pool_page() -> Element {
     }
 }
 
+/// 补偿池页面统一展示精确金额，不把整千值缩写为 K/M，避免同一列混用单位影响复算。
+fn credits(amount: i64) -> String {
+    format!("{}c", format_credit_amount_full(amount))
+}
+
 /// 以补偿池视角带符号展示金额：流入为 `+`，流出为 `−`。
 fn signed_amount(amount: i64) -> String {
     if amount > 0 {
-        format!("+{}", format_amount(amount))
+        format!("+{}", credits(amount))
     } else if amount < 0 {
-        format!("−{}", format_amount(amount.saturating_abs()))
+        format!("−{}", credits(amount.saturating_abs()))
     } else {
-        format_amount(0)
+        credits(0)
     }
 }
 
@@ -210,13 +215,4 @@ fn coverage_label(compensation_out: i64, discount_demand: i64) -> String {
     let ppm = i128::from(compensation_out.max(0)) * 1_000_000 / i128::from(discount_demand);
     let ppm = i32::try_from(ppm.min(1_000_000) / 100 * 100).unwrap_or(1_000_000);
     auction_web_shared::format_ppm(ppm, false)
-}
-
-fn policy_label(policy_mode: &str) -> String {
-    match policy_mode {
-        "legacy_zero_v0" => t!("compensation-policy-legacy-zero-v0"),
-        "hold_curve_v1" => t!("compensation-policy-hold-curve-v1"),
-        "hold_curve_v2" => t!("compensation-policy-hold-curve-v2"),
-        _ => policy_mode.to_owned(),
-    }
 }

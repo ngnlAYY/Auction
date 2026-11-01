@@ -157,22 +157,26 @@ pub(crate) fn EquipmentCard(
                                 th { scope: "col", {t!("equipment-stat-roll")} }
                             }
                         }
+                        // 四列都很短，手机上保持表格而不是逐行卡片；不带 data-label 即不进入通用卡片布局。
                         tbody {
                             for (name, stat) in equipment.stats.iter().skip(stats_start).take(stats_page_size as usize) {
                                 tr {
-                                    th { scope: "row", "data-label": t!("equipment-stat-name"),
+                                    th { scope: "row",
                                         TruncatedText { value: name.clone(), size: "compact", portal: true }
                                     }
-                                    td { "data-label": t!("equipment-stat-value"),
+                                    td {
                                         TruncatedText { value: stat.value.clone(), size: "compact", portal: true }
                                     }
-                                    td { "data-label": t!("equipment-stat-base"), {stat.base.map(|value| format!("{value:.2}")).unwrap_or_else(|| t!("value-empty"))} }
-                                    td { "data-label": t!("equipment-stat-roll"), {stat.roll.map(|value| format!("{value:.1}%")).unwrap_or_else(|| t!("value-empty"))} }
+                                    td { {stat.base.map(|value| format!("{value:.2}")).unwrap_or_else(|| t!("value-empty"))} }
+                                    td { {stat.roll.map(|value| format!("{value:.1}%")).unwrap_or_else(|| t!("value-empty"))} }
                                 }
                             }
                         }
                     }
                 }
+            }
+            // 属性通常不足一页，只有一页时不显示分页器。
+            if stats_total > stats_page_size {
                 Pager {
                     page: current_stats_page,
                     page_size: stats_page_size,

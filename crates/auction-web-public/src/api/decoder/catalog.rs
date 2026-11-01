@@ -425,28 +425,10 @@ fn valid_blacklist_page(value: &Value) -> bool {
 
 fn valid_compensation_pool(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    let Some(pools) = value.get("pools").and_then(Value::as_array) else { return false };
-    let mut balance = Some(0_i64);
-    for pool in pools {
-        let Some(pool) = object(pool) else { return false };
-        if !account_nonempty(pool.get("world_id"))
-            || !nonnegative(pool.get("balance"))
-            || !time(pool.get("updated_at"))
-        {
-            return false;
-        }
-        balance =
-            balance.zip(int(pool.get("balance"))).and_then(|(sum, value)| sum.checked_add(value));
-    }
+    // 两个世界共用一个补偿池，单行始终存在，因此余额与更新时间都必须给出。
     valid_numbered_page(value)
         && nonnegative(value.get("balance"))
-        // 合计只为旧契约保留，必须与各世界余额之和一致；没有补偿池时不存在更新时间。
-        && balance.is_some_and(|sum| int(value.get("balance")) == Some(sum))
-        && if pools.is_empty() {
-            value.get("updated_at") == Some(&Value::Null)
-        } else {
-            time(value.get("updated_at"))
-        }
+        && time(value.get("updated_at"))
         && value
             .get("rounds")
             .and_then(Value::as_array)
@@ -502,6 +484,8 @@ fn valid_compensation_lot(value: &Value) -> bool {
         && nonnegative(value.get("compensation_amount"))
         && nonnegative(value.get("buyer_amount"))
         && nonnegative(value.get("seller_amount"))
+        && account_nonempty(value.get("buyer_name"))
+        && account_nonempty(value.get("seller_name"))
         && value.get("voided").is_some_and(Value::is_boolean)
         && value.get("reversal").is_none_or(|reversal| {
             object(reversal).is_some_and(|reversal| {

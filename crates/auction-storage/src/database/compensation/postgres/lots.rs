@@ -58,6 +58,8 @@ pub(crate) async fn lots(
             settlement.compensation_amount,
             settlement.buyer_amount,
             settlement.seller_amount,
+            COALESCE(buyer.username, '—')::text AS buyer_name,
+            COALESCE(submission.seller, '—')::text AS seller_name,
             ",
         leader_held_nanos!(),
         " AS leader_held_nanos,
@@ -69,6 +71,8 @@ pub(crate) async fn lots(
          FROM public.lots AS lot
          JOIN public.lot_settlements AS settlement ON settlement.lot_id = lot.id
          JOIN public.equipment AS equipment ON equipment.id = lot.equipment_id
+         LEFT JOIN public.users AS buyer ON buyer.id = lot.leader_user_id
+         LEFT JOIN public.auction_submissions AS submission ON submission.id = lot.submission_id
          LEFT JOIN public.settlement_recoveries AS recovery
            ON recovery.auction_id = lot.auction_id AND recovery.lot_id = lot.id
          LEFT JOIN public.compensation_pool_reversals AS reversal ON reversal.lot_id = lot.id
@@ -162,6 +166,10 @@ fn map_lot(row: &PgRow) -> Result<PublicCompensationLot, ApplicationError> {
         seller_amount: row
             .try_get("seller_amount")
             .map_err(|_| storage_error("读取逐件结算卖家所得失败"))?,
+        buyer_name: row.try_get("buyer_name").map_err(|_| storage_error("读取逐件结算买家失败"))?,
+        seller_name: row
+            .try_get("seller_name")
+            .map_err(|_| storage_error("读取逐件结算卖家失败"))?,
         voided: row.try_get("voided").map_err(|_| storage_error("读取逐件结算撤销状态失败"))?,
         reversal,
     })

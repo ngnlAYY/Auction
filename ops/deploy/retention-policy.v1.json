@@ -3,7 +3,7 @@
   "format": "auction-retention-policy.v1",
   "policy_id": "auction-retention-policy",
   "version": 1,
-  "database_schema_version": 70,
+  "database_schema_version": 71,
   "authority": "repository-conservative-default",
   "inventory_authorizes_mutation": false,
   "families": [
@@ -138,6 +138,7 @@
       "candidate_class": "none",
       "mutation_authorized": false,
       "tables": [
+        "compensation_pool",
         "settlement_pools",
         "auction_settlements",
         "lot_settlements",

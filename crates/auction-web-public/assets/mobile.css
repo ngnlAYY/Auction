@@ -419,12 +419,13 @@
     min-inline-size: 0;
   }
 
-  .public-compensation-heading {
-    display: grid;
+  .public-compensation-overview {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .public-compensation-balance {
-    min-inline-size: 0;
+  /* 桌面的选中行底色作用于单元格；卡片布局下会把每个字段变成色块，这里清除。 */
+  .public-shell .public-compensation-round > td {
+    background: transparent;
   }
 
   .public-compensation-expand {
@@ -534,6 +535,40 @@
     margin-block-end: calc(var(--space-1) / 2);
   }
 
+  /* 出价记录卡片同样压缩字段留白；通用卡片规则含 :has()，这里多一层类名才能覆盖。 */
+  .public-shell .public-auction-bid-log-table-wrap .public-auction-bid-log-table > tbody {
+    gap: var(--space-2);
+  }
+
+  .public-shell .public-auction-bid-log-table-wrap .public-auction-bid-log-table > tbody > tr {
+    gap: var(--space-1) var(--space-2);
+  }
+
+  .public-shell .public-auction-bid-log-table-wrap .public-auction-bid-log-table > tbody > tr > td {
+    padding-block: 0;
+  }
+
+  .public-shell .public-auction-bid-log-table-wrap .public-auction-bid-log-table > tbody > tr > [data-label]::before {
+    margin-block-end: calc(var(--space-1) / 2);
+  }
+
+  /* 逐件明细卡片字段多，同样压缩留白；通用卡片规则含 :has()，这里多一层类名才能覆盖。 */
+  .public-shell .public-compensation-movements .public-compensation-movement-table > tbody {
+    gap: var(--space-2);
+  }
+
+  .public-shell .public-compensation-movements .public-compensation-movement-table > tbody > tr {
+    gap: var(--space-1) var(--space-2);
+  }
+
+  .public-shell .public-compensation-movements .public-compensation-movement-table > tbody > tr > td {
+    padding-block: 0;
+  }
+
+  .public-shell .public-compensation-movements .public-compensation-movement-table > tbody > tr > [data-label]::before {
+    margin-block-end: calc(var(--space-1) / 2);
+  }
+
   /* 展开入口沿用历史分组控件；手机保留整行说明与 44px 图标触控区域。 */
   .public-shell .public-compensation-table > tbody > tr > .public-compensation-toggle-cell {
     display: flex;
@@ -605,6 +640,15 @@
   .public-auction-lot__bidding dl {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     overflow-wrap: anywhere;
+  }
+
+  /* 属性表在手机上保持四列表格：缩小字号与留白，基础值与 roll 不被截断。 */
+  .public-auction-equipment__stats {
+    font-size: var(--text-sm);
+  }
+
+  .public-auction-equipment__stats :is(th, td) {
+    padding: var(--space-1);
   }
 
   .public-auction-equipment,
