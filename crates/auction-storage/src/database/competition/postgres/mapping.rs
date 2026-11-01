@@ -68,6 +68,10 @@ pub(crate) fn auction_rules_from_row(
     row: &PgRow,
 ) -> Result<AuctionRules, CompetitionTransactionError> {
     let rules = AuctionRules {
+        bidding_version: policy_u32(
+            row.try_get("policy_bidding_version").map_err(map_sql_error)?,
+            "竞价策略版本",
+        )?,
         default_start_price: bid_amount(row, "default_start_price", "拍卖默认起始价")?,
         bid_increment_ppm: row.try_get("policy_bid_increment_ppm").map_err(map_sql_error)?,
         minimum_increment: row.try_get("policy_minimum_increment").map_err(map_sql_error)?,

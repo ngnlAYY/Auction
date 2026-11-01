@@ -77,6 +77,10 @@ impl PostgresCompetitionTransaction {
                     locked_auction.soft_close_extension_seconds,
                     locked_auction.cancel_cutoff_seconds,
                     locked_auction.proxy_slow_interval_seconds,
+                    CASE locked_auction.policy_snapshot ->> 'schema_version'
+                        WHEN '4' THEN 1
+                        WHEN '5' THEN (locked_auction.policy_snapshot ->> 'bidding_version')::bigint
+                    END AS policy_bidding_version,
                     COALESCE((locked_auction.policy_snapshot ->> 'bid_increment_ppm')::bigint, 0)
                         AS policy_bid_increment_ppm,
                     COALESCE((locked_auction.policy_snapshot ->> 'minimum_increment')::bigint, 30000)
@@ -146,6 +150,10 @@ impl PostgresCompetitionTransaction {
                     a.default_start_price, a.soft_close_window_seconds,
                     a.soft_close_extension_seconds, a.cancel_cutoff_seconds,
                     a.proxy_slow_interval_seconds,
+                    CASE a.policy_snapshot ->> 'schema_version'
+                        WHEN '4' THEN 1
+                        WHEN '5' THEN (a.policy_snapshot ->> 'bidding_version')::bigint
+                    END AS policy_bidding_version,
                     COALESCE((a.policy_snapshot ->> 'bid_increment_ppm')::bigint, 0)
                         AS policy_bid_increment_ppm,
                     COALESCE((a.policy_snapshot ->> 'minimum_increment')::bigint, 30000)

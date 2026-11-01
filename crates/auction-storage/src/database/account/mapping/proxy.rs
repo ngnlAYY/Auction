@@ -22,6 +22,11 @@ pub(in crate::database::account) fn map_postgres_proxy_base(
         usage_number: get_pg(&row, "usage_number", "读取 PostgreSQL 代理使用序号失败")?,
         quota_used: get_pg(&row, "quota_used", "读取 PostgreSQL 代理 quota 使用量失败")?,
         quota_limit: get_pg(&row, "quota_limit", "读取 PostgreSQL 代理 quota 上限失败")?,
+        policy_bidding_version: get_pg(
+            &row,
+            "policy_bidding_version",
+            "读取 PostgreSQL 代理竞价策略版本失败",
+        )?,
         policy_bid_increment_ppm: get_pg(
             &row,
             "policy_bid_increment_ppm",
@@ -204,9 +209,13 @@ pub(in crate::database::account) fn derive_capabilities(
     if base.maximum_amount < current.value() {
         return Err(storage_error("账户代理上限低于当前合法绑定金额"));
     }
-    // 等待中的代理降额仍须保留自动反超的 +1000 绑定；不能继续降额不代表授权损坏。
+    // 等待中的代理降额仍受完整下一口约束；原上限已不足时保留上限反击能力，但不再允许降额。
     let binding = if waiting {
         let rules = AuctionRules {
+            bidding_version: base
+                .policy_bidding_version
+                .try_into()
+                .map_err(|_| storage_error("账户代理竞价策略版本无效"))?,
             bid_increment_ppm: base.policy_bid_increment_ppm,
             minimum_increment: base.policy_minimum_increment,
             ..AuctionRules::default()

@@ -22,6 +22,9 @@ pub const DEFAULT_PROXY_SLOW_INTERVAL: Duration = Duration::minutes(10);
 /// 一场拍卖的不可变经济和时间规则快照。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuctionRules {
+    /// v1 保留既有代理增量；v2 统一最低价，自动代理可用尽上限但必须严格反超。
+    #[serde(default = "legacy_bidding_version")]
+    pub bidding_version: u32,
     pub default_start_price: BidAmount,
     pub bid_increment_ppm: i64,
     pub minimum_increment: i64,
@@ -38,6 +41,7 @@ pub struct AuctionRules {
 impl Default for AuctionRules {
     fn default() -> Self {
         Self {
+            bidding_version: 2,
             default_start_price: BidAmount::from_validated(DEFAULT_START_PRICE),
             bid_increment_ppm: DEFAULT_BID_INCREMENT_PPM,
             minimum_increment: 0,
@@ -56,7 +60,8 @@ impl Default for AuctionRules {
 impl AuctionRules {
     /// 校验规则快照，防止无效配置进入竞价计算。
     pub fn validate(self) -> Result<(), DomainError> {
-        if self.default_start_price.value() <= 0
+        if !matches!(self.bidding_version, 1 | 2)
+            || self.default_start_price.value() <= 0
             || !self.default_start_price.is_credit_grid_aligned()
             || !(0..=1_000_000).contains(&self.bid_increment_ppm)
             || self.minimum_increment < 0
@@ -80,7 +85,7 @@ impl AuctionRules {
         lot_start_price.unwrap_or(self.default_start_price)
     }
 
-    /// 计算下一次最低出价；`proxy_last` 仅供自动代理反超使用，不代表当前领先事实的机制。
+    /// 计算下一次最低出价；只有冻结的 v1 策略保留自动代理的固定增量。
     pub fn next_minimum_bid(
         self,
         lot_start_price: Option<BidAmount>,
@@ -93,7 +98,7 @@ impl AuctionRules {
             return Ok(self.starting_price(lot_start_price));
         };
 
-        if proxy_last {
+        if self.bidding_version == 1 && proxy_last {
             return current_price.checked_add(PROXY_LAST_INCREMENT);
         }
         if self.bid_increment_ppm > 0 {
@@ -101,6 +106,10 @@ impl AuctionRules {
         }
         current_price.checked_add(self.minimum_increment)
     }
+}
+
+fn legacy_bidding_version() -> u32 {
+    1
 }
 
 /// 锁内读取到的最小竞价状态，不包含数据库或 HTTP 细节。

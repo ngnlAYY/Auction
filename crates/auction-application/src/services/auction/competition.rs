@@ -224,17 +224,19 @@ impl CompetitionCommand {
     ) -> Result<CompetitionTrigger, DomainError> {
         match self {
             Self::PlaceBid(command) => {
-                let fact_count = snapshot.active_proxy.map_or(1, |active| {
-                    // 与领域规划共用有效上限，保证历史超额 Slow 在上限同价守位时有两条事实。
+                let fact_count = if let Some(active) = snapshot.active_proxy {
                     let maximum = active.maximum_amount.bid_ceiling();
-                    if command.amount <= maximum
-                        && (command.amount == maximum || active.mode == ProxyMode::Fast)
-                    {
-                        2
+                    let can_respond = if snapshot.rules.bidding_version == 1 {
+                        command.amount <= maximum
                     } else {
-                        1
-                    }
-                });
+                        command.amount < maximum
+                    };
+                    let immediate = active.mode == ProxyMode::Fast
+                        || (snapshot.rules.bidding_version == 1 && command.amount == maximum);
+                    1 + u32::from(can_respond && immediate)
+                } else {
+                    1
+                };
                 Ok(CompetitionTrigger::OrdinaryBid {
                     command_id: command.command_id,
                     actor_id: command.bidder_id,

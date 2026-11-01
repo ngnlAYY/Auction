@@ -32,7 +32,7 @@ pub(super) fn plan_ordinary_bid(
         return Err(DomainError::ActiveProxyExists);
     }
 
-    // 普通出价沿用完整经济增量；固定 +1000 只用于代理自动反超，不能由历史领先机制放宽。
+    // 普通出价始终使用完整增量；自动代理的上限出价例外只在反击草稿中生效。
     let minimum = rules.next_minimum_bid(
         Some(state.start_price),
         state.current_price,
@@ -53,33 +53,31 @@ pub(super) fn plan_ordinary_bid(
         bidder_id: actor_id,
         amount,
         mechanism: BidMechanism::Ordinary,
+        proxy_maximum: None,
     }; 2];
     let mut draft_count = 1;
 
     if let Some(active) = active {
-        // 历史授权仍保留原上限；普通出价触及有效上限时，Slow 也立即同价守位。
         let maximum = active.maximum_amount.bid_ceiling();
-        if amount > maximum {
+        let legacy_tie = rules.bidding_version == 1 && amount == maximum;
+        let response = if amount > maximum {
+            None
+        } else if legacy_tie {
+            Some(amount)
+        } else {
+            proxy_response_amount(rules, final_state, amount, maximum)?
+        };
+        if response.is_none() {
             let (after, transition) =
                 exhaust_proxy(active, command_id, ProxyTerminalReason::StrictlyDefeated)?;
             final_state = clear_slow_schedule(final_state)?;
             transitions.push(transition);
             proxy_states.push(after);
             active_proxy_id = None;
-        } else if amount == maximum {
+        } else if let Some(response) = response
+            && (active.mode == ProxyMode::Fast || legacy_tie)
+        {
             final_state = clear_slow_schedule(final_state)?;
-            let bid_id = *bid_ids
-                .get(1)
-                .ok_or(DomainError::InvalidBidState("代理反超缺少第二条事实标识"))?;
-            drafts[1] = BidDraft {
-                bid_id,
-                bidder_id: active.user_id,
-                amount,
-                mechanism: BidMechanism::Proxy,
-            };
-            draft_count = 2;
-        } else if active.mode == ProxyMode::Fast {
-            let response = proxy_response_amount(rules, final_state, amount, maximum)?;
             let bid_id = *bid_ids
                 .get(1)
                 .ok_or(DomainError::InvalidBidState("快速代理缺少第二条事实标识"))?;
@@ -88,6 +86,7 @@ pub(super) fn plan_ordinary_bid(
                 bidder_id: active.user_id,
                 amount: response,
                 mechanism: BidMechanism::Proxy,
+                proxy_maximum: Some(active.maximum_amount),
             };
             draft_count = 2;
         } else {

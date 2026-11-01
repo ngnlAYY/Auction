@@ -135,6 +135,8 @@ systemctl stop auction-stack.service                     # 按 Public → Admin 
 
 合并部署：`systemctl stop auction-server` → 备份 → 安装新程序 → 以服务账号执行 `sudo -u auction auction-cli --config-dir /var/lib/auction/config db migrate` → `systemctl start auction-server`。
 
+迁移 `000069` 后新建场次使用统一加价与代理上限出价规则；升级前已经创建的场次（包括草稿与预览）继续原竞价策略，不自动切换。必须停止全部旧角色、备份、迁移后同版启动；不能让旧 Public/Worker 忽略新快照版本继续写入。场次快照约束见[数据库契约](../docs/contracts/database.md#拍卖与竞价)。
+
 **回退**：迁移只向前。旧程序遇到更高的 schema 版本不会就绪，所以已迁移后的回退只能是“旧程序 + 恢复升级前的备份”，见[备份与恢复](deploy/RECOVERY.md)。
 
 ## 反向代理
