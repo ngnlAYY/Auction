@@ -15,6 +15,8 @@ pub(super) struct BidDraft {
     pub(super) bidder_id: crate::UserId,
     pub(super) amount: BidAmount,
     pub(super) mechanism: BidMechanism,
+    /// 仅供锁内核验上限出价，不进入公开事实或命令结果。
+    pub(super) proxy_maximum: Option<BidAmount>,
 }
 
 pub(super) struct ProxyPlanOutput {
@@ -60,17 +62,36 @@ pub(super) fn finalize_plan(
         if draft.amount.value() > MAX_BID_AMOUNT {
             return Err(DomainError::InvalidAmount { value: draft.amount.value() });
         }
+        let proxy_maximum = match (draft.mechanism, draft.proxy_maximum) {
+            (BidMechanism::Ordinary, None) => None,
+            (BidMechanism::Proxy, Some(maximum)) if draft.amount <= maximum.bid_ceiling() => {
+                Some(maximum.bid_ceiling())
+            }
+            _ => return Err(DomainError::InvalidBidState("竞价草稿与代理上限不一致")),
+        };
         let fact_index = u32::try_from(index)
             .ok()
             .and_then(|index| index.checked_add(1))
             .ok_or(DomainError::InvalidBidState("公开竞价事实序号溢出"))?;
+        // v2 逐笔核验完整最低价；仅自动代理恰好用尽授权上限时允许不足完整增量。
+        if rules.bidding_version == 2 {
+            let minimum = rules.next_minimum_bid(
+                Some(state.start_price),
+                state.current_price,
+                state.material,
+                false,
+            )?;
+            let capped_proxy = state.current_price.is_some() && proxy_maximum == Some(draft.amount);
+            if draft.amount < minimum && !capped_proxy {
+                return Err(DomainError::BidTooLow { minimum });
+            }
+        }
         let previous = state.current_price.unwrap_or(state.start_price);
-        // 没有历史竞价时，起拍价就是允许写入的第一口；已有当前价后，只有代理内部
-        // 竞争产生的同价事实可以维持旧版顺序，普通竞价仍必须严格抬价。
+        // 上限出价仍须严格反超；同价事实只保留给冻结的 v1 规则。
         if draft.amount < previous
             || (draft.amount == previous
                 && state.current_price.is_some()
-                && draft.mechanism != BidMechanism::Proxy)
+                && (rules.bidding_version == 2 || draft.mechanism != BidMechanism::Proxy))
         {
             return Err(DomainError::BidTooLow { minimum: previous });
         }
@@ -104,22 +125,25 @@ pub(super) fn finalize_plan(
     })
 }
 
-/// Fast、SlowDue 和 Final 共用 +1000 反超计算，保留历史金额余数与 1B 同价收口规则。
+/// 按冻结策略计算反击并截到授权上限；v2 只有无法严格反超时才返回耗尽信号。
 pub(super) fn proxy_response_amount(
     rules: AuctionRules,
     state: LotBidState,
     current: BidAmount,
     maximum: BidAmount,
-) -> Result<BidAmount, DomainError> {
-    let response = rules
-        .next_minimum_bid(Some(state.start_price), Some(current), state.material, true)?
-        .min(maximum)
-        .bid_ceiling();
+) -> Result<Option<BidAmount>, DomainError> {
+    let minimum =
+        rules.next_minimum_bid(Some(state.start_price), Some(current), state.material, true)?;
+    let maximum = maximum.bid_ceiling();
+    let response = minimum.min(maximum);
+    if rules.bidding_version == 2 {
+        return Ok((response > current).then_some(response));
+    }
     // 历史授权可高于现行上限；不能继续抬价，也不能让代理在上限以下无故同价反超。
     if response < current || (response == current && current.value() != MAX_BID_AMOUNT) {
         return Err(DomainError::InvalidBidState("代理无法产生更高出价"));
     }
-    Ok(response)
+    Ok(Some(response))
 }
 
 pub(super) fn schedule_slow_proxy(

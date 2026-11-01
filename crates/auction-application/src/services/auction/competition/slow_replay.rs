@@ -10,7 +10,7 @@ use crate::{ApplicationError, CompetitionTransactionError, ExecuteSlowProxyComma
 
 use super::legacy_ledger::deterministic_id;
 
-/// 接受一次代理反超或资格丧失冻结，拒绝仅内部自洽却属于其他命令的计划。
+/// 接受代理反超、资格冻结或无法严格反超时的耗尽，拒绝属于其他命令的计划。
 pub(super) fn validate(
     command: &ExecuteSlowProxyCommand,
     plan: &CompetitionPlan,
@@ -36,15 +36,23 @@ pub(super) fn validate(
                 && plan.proxy_states.is_empty()
         }
         [] => {
-            // 资格冻结不产生竞价，但必须留下当前授权的唯一冻结转换和终态快照。
+            // 无竞价的终态必须留下当前授权的唯一转换；不能把无效果计划当成已执行。
             match (plan.proxy_transitions.as_slice(), plan.proxy_states.as_slice()) {
                 ([transition], [state]) => {
                     plan.active_proxy_id.is_none()
                         && state.id == command.authorization_id
                         && transition.authorization_id == command.authorization_id
                         && transition.command_id == command.command_id
-                        && transition.kind == ProxyTransitionKind::Frozen
-                        && transition.reason == Some(ProxyTerminalReason::EligibilityLost)
+                        && matches!(
+                            (transition.kind, transition.reason),
+                            (
+                                ProxyTransitionKind::Frozen,
+                                Some(ProxyTerminalReason::EligibilityLost)
+                            ) | (
+                                ProxyTransitionKind::Exhausted,
+                                Some(ProxyTerminalReason::StrictlyDefeated)
+                            )
+                        )
                         && transition.old_status == Some(ProxyStatus::Active)
                         && transition.old_mode == Some(ProxyMode::Slow)
                 }

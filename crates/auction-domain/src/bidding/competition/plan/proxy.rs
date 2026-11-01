@@ -138,7 +138,7 @@ pub(super) fn plan_create_proxy(
     let mut final_state = state;
     final_state.last_proxy_sequence = authorization_sequence;
 
-    let (transitions, proxy_states, active_proxy_id, amount, winner_user_id) =
+    let (transitions, proxy_states, active_proxy_id, amount, winner_user_id, winner_maximum) =
         if let Some(active) = active {
             let candidate_wins = maximum_amount > active.maximum_amount
                 || (maximum_amount == active.maximum_amount
@@ -170,10 +170,24 @@ pub(super) fn plan_create_proxy(
             if candidate_wins {
                 proxy_states.push(created);
             }
-            (transitions, proxy_states, Some(winner_proxy_id), price, winner_user_id)
+            (
+                transitions,
+                proxy_states,
+                Some(winner_proxy_id),
+                price,
+                winner_user_id,
+                winner_maximum,
+            )
         } else {
             final_state = clear_slow_schedule(final_state)?;
-            (vec![creation_transition], vec![created], Some(created.id), minimum, created.user_id)
+            (
+                vec![creation_transition],
+                vec![created],
+                Some(created.id),
+                minimum,
+                created.user_id,
+                created.maximum_amount,
+            )
         };
 
     if bid_ids.len() != 1 {
@@ -184,6 +198,7 @@ pub(super) fn plan_create_proxy(
         bidder_id: winner_user_id,
         amount,
         mechanism: BidMechanism::Proxy,
+        proxy_maximum: Some(winner_maximum),
     }];
     finalize_plan(
         rules,
@@ -269,7 +284,9 @@ pub(super) fn plan_slow_due(
         return Err(DomainError::InvalidBidState("慢速代理调度已经过期"));
     }
     let current = state.current_price.ok_or(DomainError::InvalidBidState("慢速代理缺少当前价"))?;
-    let amount = proxy_response_amount(rules, state, current, active.maximum_amount)?;
+    let Some(amount) = proxy_response_amount(rules, state, current, active.maximum_amount)? else {
+        return exhaust_waiting_proxy(rules, state, active, command_id, now);
+    };
     if bid_ids.len() != 1 {
         return Err(DomainError::InvalidBidState("慢速代理事实数量不正确"));
     }
@@ -284,6 +301,7 @@ pub(super) fn plan_slow_due(
             bidder_id: active.user_id,
             amount,
             mechanism: BidMechanism::Proxy,
+            proxy_maximum: Some(active.maximum_amount),
         }],
         ProxyPlanOutput {
             transitions: Vec::new(),
@@ -309,15 +327,18 @@ pub(super) fn plan_final_proxy(
     if active.mode != ProxyMode::Slow || authorization_id != active.id {
         return Err(DomainError::InvalidBidState("只有慢速代理可以进入 final fast"));
     }
-    let mut after = active;
-    let transition = after.promote_to_final_fast(command_id)?;
+    // 先确认最低价或上限价能严格反超，再推进 Final；否则只追加耗尽事实。
     let mut final_state = state;
     let mut draft = None;
     if final_state.slow_authorization_id == Some(active.id) {
         let current = final_state
             .current_price
             .ok_or(DomainError::InvalidBidState("最终阶段代理缺少当前价"))?;
-        let amount = proxy_response_amount(rules, final_state, current, active.maximum_amount)?;
+        let Some(amount) =
+            proxy_response_amount(rules, final_state, current, active.maximum_amount)?
+        else {
+            return exhaust_waiting_proxy(rules, final_state, active, command_id, now);
+        };
         if bid_ids.len() != 1 {
             return Err(DomainError::InvalidBidState("最终阶段代理事实数量不正确"));
         }
@@ -327,10 +348,13 @@ pub(super) fn plan_final_proxy(
             bidder_id: active.user_id,
             amount,
             mechanism: BidMechanism::Proxy,
+            proxy_maximum: Some(active.maximum_amount),
         });
     } else if !bid_ids.is_empty() {
         return Err(DomainError::InvalidBidState("无慢速调度时不应产生最终阶段事实"));
     }
+    let mut after = active;
+    let transition = after.promote_to_final_fast(command_id)?;
     finalize_plan(
         rules,
         final_state,
@@ -380,6 +404,29 @@ pub(super) fn plan_terminal_proxy(
     finalize_plan(
         rules,
         final_state,
+        command_id,
+        now,
+        &[],
+        ProxyPlanOutput {
+            transitions: vec![transition],
+            states: vec![after],
+            active_proxy_id: None,
+        },
+    )
+}
+
+fn exhaust_waiting_proxy(
+    rules: AuctionRules,
+    state: LotBidState,
+    active: ProxyAuthorization,
+    command_id: crate::CommandId,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<CompetitionPlan, DomainError> {
+    let (after, transition) =
+        exhaust_proxy(active, command_id, ProxyTerminalReason::StrictlyDefeated)?;
+    finalize_plan(
+        rules,
+        clear_slow_schedule(state)?,
         command_id,
         now,
         &[],

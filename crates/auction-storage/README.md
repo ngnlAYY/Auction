@@ -32,6 +32,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 - **事务**：竞价、关键生命周期等命令在 Serializable 事务内完成，序列化失败（40001）与死锁（40P01）由命令 owner 有界重试（`is_serialization_conflict` 是统一判定）。运行期 claim、进度及部分账本写入使用默认隔离事务，并按各自 owner 取行锁或校验租约/fencing；不能把所有写入都视为 Serializable。同一幂等命令 ID 通过事务级 advisory 锁协调（`lock_command_id` 共用键空间）。
 - **幂等账本**：各 owner 的命令表保存命令 ID、请求摘要与结果；同 ID 同摘要重放原结果，异摘要冲突。
 - **追加式事实**：竞价、代理转换、黑名单历史、审计与投递尝试证明等由触发器拒绝改写；结算账本按 owner 追加。改名保留原名称证据，撤销时更新 `reverted_at`，不能把整张改名表视为不可更新。审计 `INSERT` 失败会让整个事务回滚，进程内另记失败计数，使 readiness 失败。
+- **冻结竞价策略**：锁内快照和账户代理降额能力按同一场次策略版本解码，未知版本失败关闭；公开普通最低价继续使用领域计算。新旧策略与追加迁移边界见[数据库契约](../../docs/contracts/database.md#拍卖与竞价)。
 - **租约与 fencing**：Worker 的拍卖调度、结算、履约、投递、恢复、邮件轮询、论坛同步、告警批次都以“claim + 租约 + fencing 版本”推进，过期租约可被重新领取，发送中的外部写入以 fencing 防止重复。
 - **恢复义务锁**：人工确认 recovery 时，用单条 `ANY` 查询按 UUID 升序锁定该 case 的 3～4 条义务，保持既有 owner 锁序；返回集合必须完整，且逐条核对拍卖、lot、世界和装备身份后才能推进，缺失义务继续拒绝确认。
 - **运行时独占**：外部 Cookie 的运行时 owner（邮件、论坛各一）和 Public realtime consumer 以 PostgreSQL session advisory lock 实现，连接断开即失去所有权；所有权失效后持有方必须退出。

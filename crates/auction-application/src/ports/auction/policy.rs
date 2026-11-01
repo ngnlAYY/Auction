@@ -69,6 +69,7 @@ impl AuctionPolicyTemplate {
         let proxy_default_mode = ProxyMode::from_name(&self.proxy_default_mode)
             .ok_or(DomainError::InvalidRules("代理默认模式无效"))?;
         let rules = AuctionRules {
+            bidding_version: 2,
             default_start_price: BidAmount::new(self.start_price)?,
             bid_increment_ppm: self.bid_increment_ppm,
             minimum_increment: if self.bid_increment_ppm == 0 {
@@ -110,12 +111,13 @@ impl AuctionPolicyTemplate {
         Ok(())
     }
 
-    /// 生成旧版 schema v4 兼容的 JSON 快照。
+    /// 生成 schema v5 快照，显式冻结统一最低出价的竞价策略 v2。
     /// `cancel_cutoff` 不写入当前快照 JSON，因为现有 schema 仍由 auctions 遗留列承载；创建
     /// 事务会用同一模板同时写入该列，保证生命周期读取和快照来源一致。
     pub fn snapshot(&self, scheduled_end_at: DateTime<Utc>) -> Value {
         json!({
-            "schema_version": 4,
+            "schema_version": 5,
+            "bidding_version": 2,
             "start_price": self.start_price,
             "bid_increment_ppm": self.bid_increment_ppm,
             "minimum_increment": if self.bid_increment_ppm == 0 {

@@ -81,6 +81,10 @@ pub(super) async fn list_postgres(
                 WHERE quota.lot_id = p.lot_id AND quota.user_id = p.user_id
             )::bigint AS quota_used,
             COALESCE((a.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint, 0) AS quota_limit,
+            CASE a.policy_snapshot ->> 'schema_version'
+                WHEN '4' THEN 1
+                WHEN '5' THEN (a.policy_snapshot ->> 'bidding_version')::bigint
+            END AS policy_bidding_version,
             (a.policy_snapshot ->> 'bid_increment_ppm')::bigint AS policy_bid_increment_ppm,
             (a.policy_snapshot ->> 'minimum_increment')::bigint AS policy_minimum_increment,
             p.mode,
@@ -175,6 +179,10 @@ pub(super) async fn proxy_postgres(
                 WHERE quota.lot_id = p.lot_id AND quota.user_id = p.user_id
             )::bigint AS quota_used,
             COALESCE((a.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint, 0) AS quota_limit,
+            CASE a.policy_snapshot ->> 'schema_version'
+                WHEN '4' THEN 1
+                WHEN '5' THEN (a.policy_snapshot ->> 'bidding_version')::bigint
+            END AS policy_bidding_version,
             (a.policy_snapshot ->> 'bid_increment_ppm')::bigint AS policy_bid_increment_ppm,
             (a.policy_snapshot ->> 'minimum_increment')::bigint AS policy_minimum_increment,
             p.mode,
