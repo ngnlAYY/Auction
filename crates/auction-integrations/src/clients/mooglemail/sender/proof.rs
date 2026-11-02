@@ -19,6 +19,12 @@ impl MoogleMailSender {
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
     ) -> Result<MoogleMailSentBaseline, MoogleMailError> {
+        // 上一次发送后的完整扫描已覆盖当时的全部 Sent；复用只省一次全量读取，
+        // 候选仍逐封重新证明，过期或换凭据时实时退回完整扫描。
+        if let Some(seen) = self.cached_sent_baseline(cookie, world) {
+            tracing::debug!(%world, mails = seen.len(), "MoogleMail 复用已证明的 Sent 基线");
+            return Ok(MoogleMailSentBaseline { world, seen });
+        }
         let deadline = Instant::now()
             .checked_add(self.verification_budget)
             .ok_or_else(|| scan_timeout(world))?;
@@ -35,8 +41,11 @@ impl MoogleMailSender {
             // 未扫描到尾页不能排除同标题旧邮件；此时尚未执行任何 POST。
             return Err(self.scan_page_limit(world, "baseline", list.summaries.len()));
         }
-        let seen = list.summaries.iter().map(|summary| summary.external_mail_id.clone()).collect();
+        let seen: HashSet<String> =
+            list.summaries.iter().map(|summary| summary.external_mail_id.clone()).collect();
         check_deadline(deadline, world)?;
+        // 本次扫描已完整；即使随后 fence 中止，这份排除集仍可用于下一次基线与候选过滤。
+        self.remember_sent_baseline(cookie, world, seen.clone());
         Ok(MoogleMailSentBaseline { world, seen })
     }
 
@@ -60,14 +69,15 @@ impl MoogleMailSender {
         // POST 的完成/取消屏障之外再建立 fresh 轮次，绝不接受发送前或发送中的观测。
         let round = self.client.read_round(cookie, world, true)?;
         check_deadline(deadline, world)?;
+        // 只需枚举比基线边界更新的前缀；更旧的邮件全部在基线中，已被排除。
         let list = timeout_at(
             deadline,
-            self.client.observe_sent_list(cookie, &round, self.verification_pages),
+            self.client.observe_sent_prefix(cookie, &round, self.verification_pages, baseline),
         )
         .await
         .map_err(|_| scan_timeout(world))??;
         check_deadline(deadline, world)?;
-        if !list.complete {
+        if !list.bounded {
             return Err(self.scan_page_limit(world, "after_send", list.summaries.len()));
         }
         let mut verified: Option<String> = None;
@@ -119,9 +129,15 @@ impl MoogleMailSender {
             .await
             .map_err(|_| scan_timeout(world))??;
         check_deadline(deadline, world)?;
-        verified
+        let verified = verified
             .filter(|mail_id| response_mail_id.is_none_or(|hint| hint == mail_id))
-            .ok_or_else(|| verification_unavailable(world))
+            .ok_or_else(|| verification_unavailable(world))?;
+        // 基线是捕获时的完整集合；前缀枚举到的都是更晚创建且已被证明的邮件，
+        // 两者并集仍是当前时刻的完整集合，可作为下一次发送的排除集。
+        let mut next_baseline = baseline.clone();
+        next_baseline.extend(list.summaries.iter().map(|summary| summary.external_mail_id.clone()));
+        self.remember_sent_baseline(cookie, world, next_baseline);
+        Ok(verified)
     }
 
     /// 只输出计数与闭集阶段；不把 MID、收件人、正文或凭据带入普通日志。

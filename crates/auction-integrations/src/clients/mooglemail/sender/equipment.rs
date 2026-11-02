@@ -24,9 +24,52 @@ impl MoogleMailSender {
         }
         let mut located: HashMap<_, _> =
             request.equipment_ids.iter().map(|id| (id.as_str(), false)).collect();
-        let mut inventories = Vec::with_capacity(MoogleMailInventoryCategory::ALL.len());
-        // 扫描完整七类，不能发现首个匹配后就写入，否则会漏掉跨分类的重复身份。
-        for category in MoogleMailInventoryCategory::ALL {
+        let mut inventories = Vec::new();
+        let all = MoogleMailInventoryCategory::ALL;
+        // 冻结装备名已确定 Armory 分类时只读这一类；提示不参与身份或资格证明，
+        // 未覆盖全部目标时回退完整七类，保持跨分类重复身份检测。
+        let hinted = request.category.map(|category| [category]);
+        let categories: &[MoogleMailInventoryCategory] =
+            hinted.as_ref().map_or(&all, |single| single.as_slice());
+        self.scan_equipment_categories(cookie, request, categories, &mut located, &mut inventories)
+            .await?;
+        if located.values().any(|found| !found) && request.category.is_some() {
+            located = request.equipment_ids.iter().map(|id| (id.as_str(), false)).collect();
+            inventories.clear();
+            self.scan_equipment_categories(cookie, request, &all, &mut located, &mut inventories)
+                .await?;
+        }
+        if located.values().any(|found| !found) {
+            return Err(write_error(
+                request.world,
+                MoogleMailOperation::Inventory,
+                MoogleMailErrorCategory::NotObserved,
+            ));
+        }
+        for (category, discovered) in inventories {
+            if discovered
+                .equipment
+                .iter()
+                .all(|equipment| !equipment.stored && !equipment.protected && !equipment.locked)
+            {
+                continue;
+            }
+            self.prepare_equipment_category(cookie, request, category, discovered, write_started)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// 逐类读取库存并把全部目标定位到唯一分类；任何目标重复出现都会失败关闭。
+    async fn scan_equipment_categories<'a>(
+        &self,
+        cookie: &MoogleMailCookie,
+        request: &'a MoogleMailSendRequest,
+        categories: &[MoogleMailInventoryCategory],
+        located: &mut HashMap<&'a str, bool>,
+        inventories: &mut Vec<(MoogleMailInventoryCategory, MoogleMailInventoryPreparation)>,
+    ) -> Result<(), MoogleMailError> {
+        for &category in categories {
             let state = self
                 .read_inventory_preparation(cookie, request, category, |state| {
                     state.equipment.iter().all(|equipment| {
@@ -46,24 +89,6 @@ impl MoogleMailSender {
             if !state.equipment.is_empty() {
                 inventories.push((category, state));
             }
-        }
-        if located.values().any(|found| !found) {
-            return Err(write_error(
-                request.world,
-                MoogleMailOperation::Inventory,
-                MoogleMailErrorCategory::NotObserved,
-            ));
-        }
-        for (category, discovered) in inventories {
-            if discovered
-                .equipment
-                .iter()
-                .all(|equipment| !equipment.stored && !equipment.protected && !equipment.locked)
-            {
-                continue;
-            }
-            self.prepare_equipment_category(cookie, request, category, discovered, write_started)
-                .await?;
         }
         Ok(())
     }

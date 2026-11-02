@@ -24,6 +24,13 @@ pub(crate) struct MoogleMailSentList {
     _bytes: OwnedSemaphorePermit,
 }
 
+/// 只枚举比基线边界更新的 Sent 前缀；`bounded` 表示更旧的邮件全部已在基线中。
+pub(crate) struct MoogleMailSentPrefix {
+    pub(crate) summaries: Vec<MoogleMailSentSummary>,
+    pub(crate) bounded: bool,
+    _bytes: OwnedSemaphorePermit,
+}
+
 pub(crate) struct MoogleMailIncomingList {
     pub(crate) summaries: Vec<MoogleMailSummary>,
     pub(crate) complete: bool,
@@ -100,6 +107,77 @@ impl MoogleMailClient {
             .await?;
         self.check_read_round(cookie, round).await?;
         Ok(Arc::clone(list))
+    }
+
+    /// 从最新页向下扫描，直到越过基线边界或末页。
+    ///
+    /// 列表按 `sent_at` 降序（实测连续 60 行不递增）；任一基线邮件 R 在捕获基线时已存在，
+    /// 之后创建的邮件必然排在 R 之前，因此读到第一行比 R 更旧时即可停止。同分钟并列的行
+    /// 全部读完才停止，避免并列顺序丢失新邮件。结果不写入轮次缓存，仍受页数、字节与
+    /// 读取屏障约束。
+    pub(crate) async fn observe_sent_prefix(
+        &self,
+        cookie: &MoogleMailCookie,
+        round: &MoogleMailReadRound,
+        maximum_pages: usize,
+        baseline: &HashSet<String>,
+    ) -> Result<Arc<MoogleMailSentPrefix>, MoogleMailError> {
+        let world = round.key.world;
+        self.check_read_round(cookie, round).await?;
+        validate_pages(maximum_pages, world)?;
+        let mut summaries = Vec::new();
+        let mut seen = HashSet::new();
+        let mut bytes = self.retain_list_bytes(0, world)?;
+        let mut boundary = None;
+        let mut bounded = false;
+        for page in 0..maximum_pages {
+            let target = self.sent_page(world, page)?;
+            let document = self.get_in_round(&target, cookie, round).await?;
+            let parsed = self
+                .diagnose_parse(
+                    &target,
+                    &document,
+                    MoogleMailParser.scan_sent_page(&document, world, page, &mut seen),
+                )
+                .await?;
+            let previous_capacity = summaries.capacity();
+            let payload_bytes = parsed
+                .summaries
+                .iter()
+                .map(|summary| {
+                    summary.external_mail_id.capacity()
+                        + summary.recipient.capacity()
+                        + summary.subject.capacity()
+                })
+                .sum::<usize>();
+            let mut stopped = false;
+            for summary in parsed.summaries {
+                if boundary.is_some_and(|stop_at| summary.sent_at < stop_at) {
+                    stopped = true;
+                    break;
+                }
+                if boundary.is_none() && baseline.contains(&summary.external_mail_id) {
+                    boundary = Some(summary.sent_at);
+                }
+                summaries.push(summary);
+            }
+            bytes.merge(self.retain_list_bytes(
+                payload_bytes
+                    + (summaries.capacity() - previous_capacity)
+                        * size_of::<MoogleMailSentSummary>(),
+                world,
+            )?);
+            if stopped {
+                bounded = true;
+                break;
+            }
+            if !parsed.has_next_page {
+                bounded = true;
+                break;
+            }
+        }
+        self.check_read_round(cookie, round).await?;
+        Ok(Arc::new(MoogleMailSentPrefix { summaries, bounded, _bytes: bytes }))
     }
 
     /// Read Mail 只返回历史摘要；新入站业务必须来自 Inbox 窗口或既有持久待读账本。

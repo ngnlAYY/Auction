@@ -1,6 +1,11 @@
 //! MoogleMail 分步写入与发送后 Sent 完成证明。
 
-use std::{collections::HashSet, fmt, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 mod equipment;
 mod maintenance;
@@ -15,11 +20,14 @@ pub use maintenance::{
 
 use super::{
     MoogleMailClient, MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailForm,
-    MoogleMailMessageFields, MoogleMailOperation, MoogleMailParser, MoogleMailSendResponseFailure,
-    MoogleMailWorld, protocol::valid_decimal_id,
+    MoogleMailInventoryCategory, MoogleMailMessageFields, MoogleMailOperation, MoogleMailParser,
+    MoogleMailSendResponseFailure, MoogleMailWorld, protocol::valid_decimal_id,
 };
 
 const MAX_SEND_ATTACHMENTS: usize = 1000;
+
+/// 已证明 Sent 基线的复用窗口。过期只会退回完整扫描，不改变任何证明。
+const SENT_BASELINE_REUSE_WINDOW: Duration = Duration::from_secs(600);
 
 /// 一封待发送 MoogleMail 的业务无关输入。
 #[derive(Clone, PartialEq, Eq)]
@@ -30,6 +38,8 @@ pub struct MoogleMailSendRequest {
     /// 要设置的 CoD 数量；零表示不设置 CoD。
     pub cod: i64,
     pub equipment_ids: Vec<String>,
+    /// Armory 读取提示；只减少无效页面读取，未命中或无法识别时回退完整七类扫描。
+    pub category: Option<MoogleMailInventoryCategory>,
 }
 
 impl MoogleMailSendRequest {
@@ -53,6 +63,7 @@ impl fmt::Debug for MoogleMailSendRequest {
             .field("credits", &self.credits)
             .field("cod", &self.cod)
             .field("equipment_count", &self.equipment_ids.len())
+            .field("category", &self.category)
             .finish()
     }
 }
@@ -86,6 +97,14 @@ pub struct MoogleMailSender {
     parser: MoogleMailParser,
     verification_pages: usize,
     verification_budget: Duration,
+    /// 最近一次已完整证明的 Sent 摘要；只作排除集，缺失条目最多增加候选详情读取。
+    sent_baselines: Arc<Mutex<HashMap<MoogleMailWorld, CachedSentBaseline>>>,
+}
+
+struct CachedSentBaseline {
+    credential: uuid::Uuid,
+    seen: HashSet<String>,
+    captured: Instant,
 }
 
 impl MoogleMailSender {
@@ -96,6 +115,7 @@ impl MoogleMailSender {
             parser: MoogleMailParser,
             verification_pages: 100,
             verification_budget: Duration::from_secs(30),
+            sent_baselines: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -116,6 +136,45 @@ impl MoogleMailSender {
         self.verification_pages = maximum_pages;
         self.verification_budget = budget;
         Ok(self)
+    }
+
+    /// 复用最近一次完整证明的 Sent 摘要；凭据不同或超过窗口时必须重新扫描。
+    /// 基线只是排除集：缺失条目最多增加候选详情读取，绝不放行未经验证的正文或资产。
+    pub(crate) fn cached_sent_baseline(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+    ) -> Option<HashSet<String>> {
+        let cache = self.sent_baselines.lock().ok()?;
+        let entry = cache.get(&world)?;
+        (entry.credential == cookie.observation_key()
+            && entry.captured.elapsed() <= SENT_BASELINE_REUSE_WINDOW)
+            .then(|| entry.seen.clone())
+    }
+
+    /// 只由发送后完整扫描成功路径写入；失败、未知结果或换凭据都必须丢弃旧基线。
+    pub(crate) fn remember_sent_baseline(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        seen: HashSet<String>,
+    ) {
+        if let Ok(mut cache) = self.sent_baselines.lock() {
+            cache.insert(
+                world,
+                CachedSentBaseline {
+                    credential: cookie.observation_key(),
+                    seen,
+                    captured: Instant::now(),
+                },
+            );
+        }
+    }
+
+    pub(crate) fn forget_sent_baseline(&self, world: MoogleMailWorld) {
+        if let Ok(mut cache) = self.sent_baselines.lock() {
+            cache.remove(&world);
+        }
     }
 
     /// 在持久 sending fence 前只读检查 compose；调用方须持有直到 send 完成的同一凭据 guard。
@@ -196,6 +255,8 @@ impl MoogleMailSender {
                 .as_ref()
                 .is_err_and(|error| error.category == MoogleMailErrorCategory::SessionExpired)
         {
+            // 写入结果未知时 Sent 可能已变化，旧基线不能再作为下一次的排除集。
+            self.forget_sent_baseline(request.world);
             self.diagnose_after_failure(cookie, request.world, &request).await;
         }
         outcome
