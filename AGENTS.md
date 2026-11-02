@@ -123,7 +123,7 @@
 默认只做格式、编译与静态分析：
 
 ```bash
-just verify     # bash ci/checks/check.sh all fmt check feature lint wasm
+just verify     # bash ci/checks/check.sh all fmt check feature dependency-versions lint wasm
 ```
 
 除非用户明确要求，不新增或执行单元、集成、端到端、浏览器测试或手工冒烟；已有测试保留，不删除。启动服务、访问健康接口或走功能流程属于行为验证，不是默认门禁。需要行为验证时先说明范围与成本，数据库相关验证必须使用真实 PostgreSQL 18。

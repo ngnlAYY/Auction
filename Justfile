@@ -6,7 +6,7 @@ default:
 
 # 唯一默认验证入口：策略门禁 → 格式 → 编译/独立 feature/Clippy/WASM，不运行测试。
 verify:
-    @bash ci/checks/check.sh all fmt check feature lint wasm
+    @bash ci/checks/check.sh all fmt check feature dependency-versions lint wasm
 
 # 只检查 rustfmt 格式，不写文件。
 fmt:
