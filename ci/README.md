@@ -28,7 +28,7 @@ bash ci/checks/check.sh <检查项>...
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `feature` | `auction-storage`（仅 `postgres`）、`auction-cache`（仅 `redis`），以及 `auction-setup` 的空默认图与 `postgres` 完整图 |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |
-| `wasm` | 两个前端编译到 `wasm32-unknown-unknown` |
+| `wasm` | 以 `wasm32-unknown-unknown` 目标运行 `cargo clippy -D warnings`：Public（连同 `auction-web-shared`、`auction-contracts`）与 Admin 分开检查，各自保留独立 feature 图；`cfg(target_arch = "wasm32")` 代码只在此项被 lint |
 | `rust` | `fmt check feature lint wasm` |
 | `dependency-audit` | `cargo audit --deny warnings`（需要受控 cargo-audit，联网读取 RustSec） |
 | `dependency-unused` | `cargo machete`（0.9.2） |

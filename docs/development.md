@@ -23,7 +23,7 @@ just                 # 列出全部入口
 just verify          # 默认验证：策略门禁 → fmt → check → feature → clippy → wasm（不运行测试）
 just fmt             # 只检查格式
 just lint            # clippy -D warnings（all-features）
-just wasm-check      # 编译两个浏览器包
+just wasm-check      # wasm32 目标 Clippy 检查两个浏览器包（-D warnings）
 just web-build       # 构建 Public/Admin 页面 payload（需要受控 dx）
 just run-public      # cargo run --locked -p auction-public-api --features postgres,web-embed
 just run-admin
