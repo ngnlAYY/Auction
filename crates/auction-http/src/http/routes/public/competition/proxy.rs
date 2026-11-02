@@ -11,21 +11,11 @@ pub(crate) async fn create_proxy_authorization(
 ) -> Response {
     let (parts, body) = request.into_parts();
     let headers = parts.headers;
-    let uri = parts.uri;
-    if let Some(response) = session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    let identity = match authenticated_public_competition_identity(&state, &headers).await {
-        Ok(identity) => identity,
-        Err(response) => return *response,
-    };
-    if uri.query().is_some_and(|query| !query.is_empty()) {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
-    }
-    let Ok(lot_uuid) = parse_public_uuid(&lot_id) else {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")
-            .into_response();
-    };
+    let (identity, lot_uuid) =
+        match super::command_entry(&state, &headers, address, &parts.uri, &lot_id).await {
+            Ok(entry) => entry,
+            Err(response) => return *response,
+        };
     let input: CreateProxyAuthorizationRequest =
         match strict_json::decode_after_guard(&headers, body, 4 << 10).await {
             Ok(input) => input,
@@ -40,8 +30,8 @@ pub(crate) async fn create_proxy_authorization(
             .into_response();
     }
     let mode = match input.mode.as_str() {
-        "fast" => Some(ProxyMode::Fast),
-        "slow" => Some(ProxyMode::Slow),
+        "fast" => ProxyMode::Fast,
+        "slow" => ProxyMode::Slow,
         _ => {
             return api_error(StatusCode::BAD_REQUEST, "invalid_proxy_mode", "代理模式无效")
                 .into_response();
@@ -70,46 +60,27 @@ pub(crate) async fn create_proxy_authorization(
     let command_id = CommandId::from_uuid(command_uuid);
     let lot_id = LotId::from_uuid(lot_uuid);
     let bidder_id = UserId::from_uuid(identity.user_id);
-    let Some(mode_value) = mode else {
-        return internal_error();
-    };
-    let request_hash = match CreateProxyCommand::legacy_request_hash(
-        lot_id,
-        bidder_id,
-        mode_value,
-        maximum_amount,
-    ) {
-        Ok(request_hash) => request_hash,
-        Err(_) => return internal_error(),
-    };
+    let request_hash =
+        match CreateProxyCommand::legacy_request_hash(lot_id, bidder_id, mode, maximum_amount) {
+            Ok(request_hash) => request_hash,
+            Err(_) => return internal_error(),
+        };
     let command = CreateProxyCommand {
         command_id,
         lot_id,
         bidder_id,
         maximum_amount,
-        mode,
+        mode: Some(mode),
         request_hash,
         request_id: request_id(&headers),
     };
-    let command_started = Instant::now();
-    let outcome = match commands.create_proxy(command).await {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            observe_public_business(
-                &state,
-                BusinessEvent::Proxy,
-                business_outcome_for_competition_error(&error),
-                command_started,
-            );
-            return map_competition_error(error);
-        }
-    };
-    observe_public_business(
-        &state,
-        BusinessEvent::Proxy,
-        BusinessOutcome::Success,
-        command_started,
-    );
+    let outcome =
+        match super::observed_command(&state, BusinessEvent::Proxy, commands.create_proxy(command))
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(response) => return *response,
+        };
     let effective_end_at = outcome.effective_end_at;
     let plan = outcome.plan;
     let Some(proxy) = outcome.proxy else {
@@ -139,21 +110,11 @@ pub(crate) async fn lower_proxy_authorization(
 ) -> Response {
     let (parts, body) = request.into_parts();
     let headers = parts.headers;
-    let uri = parts.uri;
-    if let Some(response) = session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    let identity = match authenticated_public_competition_identity(&state, &headers).await {
-        Ok(identity) => identity,
-        Err(response) => return *response,
-    };
-    if uri.query().is_some_and(|query| !query.is_empty()) {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
-    }
-    let Ok(lot_uuid) = parse_public_uuid(&lot_id) else {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")
-            .into_response();
-    };
+    let (identity, lot_uuid) =
+        match super::command_entry(&state, &headers, address, &parts.uri, &lot_id).await {
+            Ok(entry) => entry,
+            Err(response) => return *response,
+        };
     let Ok(authorization_uuid) = parse_public_uuid(&authorization_id) else {
         return api_error(StatusCode::BAD_REQUEST, "invalid_authorization_id", "代理授权 ID 无效")
             .into_response();
@@ -213,25 +174,13 @@ pub(crate) async fn lower_proxy_authorization(
         request_hash,
         request_id: request_id(&headers),
     };
-    let command_started = Instant::now();
-    let outcome = match commands.lower_proxy(command).await {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            observe_public_business(
-                &state,
-                BusinessEvent::Proxy,
-                business_outcome_for_competition_error(&error),
-                command_started,
-            );
-            return map_competition_error(error);
-        }
-    };
-    observe_public_business(
-        &state,
-        BusinessEvent::Proxy,
-        BusinessOutcome::Success,
-        command_started,
-    );
+    let outcome =
+        match super::observed_command(&state, BusinessEvent::Proxy, commands.lower_proxy(command))
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(response) => return *response,
+        };
     let effective_end_at = outcome.effective_end_at;
     let plan = outcome.plan;
     let Some(proxy) = outcome.proxy else {

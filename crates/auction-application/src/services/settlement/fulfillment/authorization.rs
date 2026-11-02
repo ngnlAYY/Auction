@@ -9,8 +9,8 @@ use crate::{
     ApplicationError, Clock, FundingPolicy, InternalEquipmentTarget, InternalEvidencePurpose,
     InternalEvidenceRequest, PreparedSettlementInternalEvidence, SettlementFulfillmentClaim,
     SettlementFulfillmentCustodyReader, SettlementFulfillmentEvidenceReader,
-    SettlementFulfillmentOperation, SettlementFulfillmentRecipientReader,
-    SettlementFulfillmentState, SettlementFulfillmentStore,
+    SettlementFulfillmentOperation, SettlementFulfillmentPhaseResult,
+    SettlementFulfillmentRecipientReader, SettlementFulfillmentState, SettlementFulfillmentStore,
 };
 
 use super::evidence::validate_balance_evidence;
@@ -23,6 +23,24 @@ pub(super) enum AuthorizationResult<T> {
     Authorized(T),
     Deferred { obligation_id: auction_domain::SettlementId, failure_code: &'static str },
     ManualReconcile { obligation_id: auction_domain::SettlementId, failure_code: &'static str },
+}
+
+impl<T> AuthorizationResult<T> {
+    /// 授权成功时取出事实；已持久化的等待/人工态转换为任一阶段的同名结果。
+    pub(super) fn into_phase<R>(self) -> Result<T, SettlementFulfillmentPhaseResult<R>> {
+        match self {
+            Self::Authorized(value) => Ok(value),
+            Self::Deferred { obligation_id, failure_code } => {
+                Err(SettlementFulfillmentPhaseResult::Deferred { obligation_id, failure_code })
+            }
+            Self::ManualReconcile { obligation_id, failure_code } => {
+                Err(SettlementFulfillmentPhaseResult::ManualReconcile {
+                    obligation_id,
+                    failure_code,
+                })
+            }
+        }
+    }
 }
 
 /// pending/prepared 每次推进都复核收件人和退款 custody；现金观察遵守持久资金策略。

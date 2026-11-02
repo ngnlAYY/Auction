@@ -16,7 +16,7 @@ mod returns;
 
 use actions::process_actions;
 use cases::advance_cases;
-use common::observe_phase;
+use common::{observe_phase, run_phase};
 use health::refresh_health;
 use resolutions::{advance_cod_returns, advance_relists, complete_refunds};
 use returns::record_returns;

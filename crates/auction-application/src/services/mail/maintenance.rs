@@ -324,20 +324,7 @@ impl MailboxMaintenanceService {
         }) {
             return Ok(step);
         }
-        self.store
-            .record_sent_observation(
-                candidate.delivery_id,
-                candidate.fencing_version,
-                json!({
-                    "observed_at": self.clock.now(),
-                    "mid": state.external_mail_id,
-                    "collected": state.collected,
-                    "cod_pending": state.cod_pending,
-                    "remaining_credits": state.remaining_credits,
-                    "remaining_equipment_count": state.remaining_equipment_ids.len(),
-                }),
-            )
-            .await?;
+        self.record_observation(candidate, &state).await?;
         step.observed = true;
         step.recovered = self
             .store
@@ -392,20 +379,7 @@ impl MailboxMaintenanceService {
         {
             return Ok(step);
         }
-        self.store
-            .record_sent_observation(
-                candidate.delivery_id,
-                candidate.fencing_version,
-                json!({
-                    "observed_at": self.clock.now(),
-                    "mid": state.external_mail_id,
-                    "collected": state.collected,
-                    "cod_pending": state.cod_pending,
-                    "remaining_credits": state.remaining_credits,
-                    "remaining_equipment_count": state.remaining_equipment_ids.len(),
-                }),
-            )
-            .await?;
+        self.record_observation(candidate, &state).await?;
         step.observed = true;
         if !recovered_state_matches(candidate, &state) {
             return Ok(step);
@@ -487,20 +461,7 @@ impl MailboxMaintenanceService {
         {
             return Ok(step);
         }
-        self.store
-            .record_sent_observation(
-                candidate.delivery_id,
-                candidate.fencing_version,
-                json!({
-                    "observed_at": self.clock.now(),
-                    "mid": state.external_mail_id,
-                    "collected": state.collected,
-                    "cod_pending": state.cod_pending,
-                    "remaining_credits": state.remaining_credits,
-                    "remaining_equipment_count": state.remaining_equipment_ids.len(),
-                }),
-            )
-            .await?;
+        self.record_observation(candidate, &state).await?;
         step.observed = true;
         step.recovered = self
             .store
@@ -635,6 +596,28 @@ impl MailboxMaintenanceService {
             )
             .await?;
         Ok(RecoveryStep { requeued, ..RecoveryStep::default() })
+    }
+
+    /// 记录 Sent 详情的观测快照；恢复证明是否成立由调用方随后判定。
+    async fn record_observation(
+        &self,
+        candidate: &MoogleMailboxUnprovenSend,
+        state: &MoogleMailboxSentState,
+    ) -> Result<(), ApplicationError> {
+        self.store
+            .record_sent_observation(
+                candidate.delivery_id,
+                candidate.fencing_version,
+                json!({
+                    "observed_at": self.clock.now(),
+                    "mid": state.external_mail_id,
+                    "collected": state.collected,
+                    "cod_pending": state.cod_pending,
+                    "remaining_credits": state.remaining_credits,
+                    "remaining_equipment_count": state.remaining_equipment_ids.len(),
+                }),
+            )
+            .await
     }
 
     async fn sent_state(

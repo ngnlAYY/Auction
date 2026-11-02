@@ -1,9 +1,49 @@
-//! Recovery 阶段结果合并与批次指标。
+//! Recovery 阶段的逐项推进模板、结果合并与批次指标。
 
-use auction_application::Clock;
+use auction_application::{ApplicationFuture, Clock};
 use auction_observability::{WorkerLoop, WorkerResult};
+use chrono::{DateTime, Utc};
 
 use super::PersistentWorker;
+
+/// 逐项推进一个到期阶段：每项独立超时，排空、无到期项、首个失败或超时都结束本阶段；
+/// 成功条目交给 `record` 记录，阶段结果并入批次并按成功批次计量。
+pub(super) async fn run_phase<'a, C, T>(
+    worker: &PersistentWorker<C>,
+    batch_result: &mut WorkerResult,
+    phase: &'static str,
+    next_due: impl Fn(DateTime<Utc>) -> ApplicationFuture<'a, Option<T>>,
+    record: impl Fn(&T),
+) where
+    C: Clock + 'static,
+{
+    let mut count = 0_usize;
+    let mut phase_result = WorkerResult::Success;
+    for _ in 0..worker.recovery.batch_limit {
+        if worker.control.is_draining() {
+            break;
+        }
+        match tokio::time::timeout(worker.recovery.item_timeout, next_due(worker.clock.now())).await
+        {
+            Ok(Ok(Some(item))) => {
+                count = count.saturating_add(1);
+                record(&item);
+            }
+            Ok(Ok(None)) => break,
+            Ok(Err(error)) => {
+                tracing::warn!(error = %error, "recovery {phase} phase failed");
+                phase_result = WorkerResult::Error;
+                break;
+            }
+            Err(_) => {
+                tracing::warn!("recovery {phase} item timed out");
+                phase_result = WorkerResult::Error;
+                break;
+            }
+        }
+    }
+    observe_phase(worker, batch_result, phase_result, count);
+}
 
 pub(super) fn observe_phase<C>(
     worker: &PersistentWorker<C>,

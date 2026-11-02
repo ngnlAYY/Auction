@@ -137,15 +137,53 @@ pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> 
     }
 }
 
+/// 预览行与正式行共用的装备属性单元格（分组、平均 roll、等级、主属性、卖家）；列偏好只隐藏单元格。
 #[component]
-pub(crate) fn PreviewCatalogRow(row: CatalogRow, visibility: CatalogVisibility) -> Element {
-    let status_label = lot_status_label(&row.status);
-    let status_class = lot_status_class(&row.status);
+pub(crate) fn CatalogEquipmentCells(row: CatalogRow, visibility: CatalogVisibility) -> Element {
     let level = row.level.map(|value| value.to_string()).unwrap_or_else(|| t!("value-empty"));
     let primary_attribute_initials =
         row.primary_attribute_initials.clone().unwrap_or_else(|| t!("value-empty"));
     let avg_roll = row.avg_roll.map(|value| format!("{value:.1}%"));
     let seller = row.seller_name.clone();
+    rsx! {
+        td { hidden: !visibility.contains(CatalogColumn::Group), "data-label": t!("catalog-group"),
+            TruncatedText {
+                value: equipment_group_label(&row.equipment_group),
+                portal: true,
+                legacy_dom: true,
+            }
+        }
+        td {
+            hidden: !visibility.contains(CatalogColumn::AverageRoll),
+            class: "public-auction-catalog__avg-roll public-auction-catalog__number",
+            "data-label": t!("equipment-avg-roll"),
+            if let Some(avg_roll) = avg_roll {
+                "{avg_roll}"
+            } else {
+                span { class: "public-auction-catalog__none", {t!("value-empty")} }
+            }
+        }
+        td { hidden: !visibility.contains(CatalogColumn::Level), "data-label": t!("catalog-level"), "{level}" }
+        td {
+            hidden: !visibility.contains(CatalogColumn::Attributes),
+            class: "public-auction-catalog__primary-attributes",
+            "data-label": t!("catalog-primary-attributes"),
+            "{primary_attribute_initials}"
+        }
+        td { hidden: !visibility.contains(CatalogColumn::Seller), "data-label": t!("catalog-seller"),
+            TruncatedText {
+                value: seller,
+                portal: true,
+                legacy_dom: true,
+            }
+        }
+    }
+}
+
+#[component]
+pub(crate) fn PreviewCatalogRow(row: CatalogRow, visibility: CatalogVisibility) -> Element {
+    let status_label = lot_status_label(&row.status);
+    let status_class = lot_status_class(&row.status);
     let start_price = format_amount(row.start_price);
 
     rsx! {
@@ -163,37 +201,7 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow, visibility: CatalogVisibility) 
                     game_equipment_url: row.game_equipment_url.clone(),
                 }
             }
-            td { hidden: !visibility.contains(CatalogColumn::Group), "data-label": t!("catalog-group"),
-                TruncatedText {
-                    value: equipment_group_label(&row.equipment_group),
-                    portal: true,
-                    legacy_dom: true,
-                }
-            }
-            td {
-                hidden: !visibility.contains(CatalogColumn::AverageRoll),
-                class: "public-auction-catalog__avg-roll public-auction-catalog__number",
-                "data-label": t!("equipment-avg-roll"),
-                if let Some(avg_roll) = avg_roll {
-                    "{avg_roll}"
-                } else {
-                    span { class: "public-auction-catalog__none", {t!("value-empty")} }
-                }
-            }
-            td { hidden: !visibility.contains(CatalogColumn::Level), "data-label": t!("catalog-level"), "{level}" }
-            td {
-                hidden: !visibility.contains(CatalogColumn::Attributes),
-                class: "public-auction-catalog__primary-attributes",
-                "data-label": t!("catalog-primary-attributes"),
-                "{primary_attribute_initials}"
-            }
-            td { hidden: !visibility.contains(CatalogColumn::Seller), "data-label": t!("catalog-seller"),
-                TruncatedText {
-                    value: seller,
-                    portal: true,
-                    legacy_dom: true,
-                }
-            }
+            CatalogEquipmentCells { row: row.clone(), visibility }
             td {
                 hidden: !visibility.contains(CatalogColumn::Price),
                 class: "public-auction-catalog__amount public-auction-catalog__number",

@@ -5,11 +5,10 @@
 use std::net::SocketAddr;
 
 use auction_application::{
-    AdminLotListRequest, AdminLotPage, AdminLotSummary, ApplicationError, SettlementAuctionSnapshot,
+    AdminAuctionSummary, AdminLotListRequest, AdminLotPage, AdminLotSummary, ApplicationError,
 };
 use auction_contracts::{
-    AdminAuctionResponse, AdminLotListResponse, AdminLotPaginationResponse, AdminLotResponse,
-    ApiResponse,
+    AdminLotListResponse, AdminLotPaginationResponse, AdminLotResponse, ApiResponse,
 };
 use axum::{
     Json,
@@ -98,7 +97,11 @@ pub(crate) async fn list(
         Json(ApiResponse::ok(
             "后台 lot 列表已加载",
             AdminLotListResponse {
-                auction: map_auction(result.auction, total),
+                auction: super::admin_auctions::map_auction(AdminAuctionSummary {
+                    auction: result.auction,
+                    scheduled_ends_at: None,
+                    lot_count: total,
+                }),
                 lots: result.entries.into_iter().map(map_lot).collect(),
                 pagination: AdminLotPaginationResponse { page, page_size, total },
             },
@@ -120,31 +123,6 @@ fn valid_page(page: &AdminLotPage, request: AdminLotListRequest) -> bool {
             || (page.auction.cancelled_at.is_none()
                 && page.auction.cancelled_by.is_none()
                 && page.auction.cancelled_reason.is_none()))
-}
-
-fn map_auction(auction: SettlementAuctionSnapshot, lot_count: i64) -> AdminAuctionResponse {
-    AdminAuctionResponse {
-        id: auction.id.to_string(),
-        world_id: auction.world_id,
-        sequence: auction.sequence,
-        status: auction.status,
-        preview_scheduled_at: super::timestamp(auction.preview_scheduled_at),
-        scheduled_open_at: super::timestamp(auction.scheduled_open_at),
-        preview_opened_at: auction.preview_opened_at.map(super::timestamp),
-        preview_manual_open: auction.preview_manual_open,
-        preview_revision: auction.preview_revision,
-        opened_at: auction.opened_at.map(super::timestamp),
-        final_phase_at: auction.final_phase_at.map(super::timestamp),
-        settled_at: auction.settled_at.map(super::timestamp),
-        cancelled_at: auction.cancelled_at.map(super::timestamp),
-        cancelled_reason: auction.cancelled_reason,
-        cancelled_by: auction.cancelled_by,
-        state_version: auction.state_version,
-        scheduled_ends_at: None,
-        lot_count: Some(lot_count),
-        created_at: super::timestamp(auction.created_at),
-        updated_at: super::timestamp(auction.updated_at),
-    }
 }
 
 pub(super) fn map_lot(lot: AdminLotSummary) -> AdminLotResponse {
