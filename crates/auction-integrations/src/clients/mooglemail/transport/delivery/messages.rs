@@ -4,7 +4,7 @@ use super::*;
 
 use auction_application::{DeliverySendCredentialBinding, DeliverySendExpectation};
 
-use crate::clients::mooglemail::parser::canonical_mail_body_digest;
+use crate::clients::mooglemail::{MoogleMailInventoryCategory, parser::canonical_mail_body_digest};
 
 /// 正文只留在消耗式 future；摘要和资产身份从这份实际请求生成，不能在 fence 后重建。
 pub(super) struct RenderedMoogleMailSend {
@@ -75,6 +75,15 @@ impl MoogleMailDeliveryTransport {
             render_settlement(&payload, &self.templates).ok_or_else(invalid_payload)?;
         let equipment_ids =
             self.resolve_settlement_equipment(&payload.equipment_secret_refs).await?;
+        // 冻结装备名的域大类只用于减少 Armory 页面读取；名称不识别时不提示。
+        let category = if equipment_ids.is_empty() {
+            None
+        } else {
+            payload
+                .variables
+                .get("item_name")
+                .and_then(|name| MoogleMailInventoryCategory::hint_from_name(name))
+        };
         Ok(RenderedMoogleMailSend {
             request: MoogleMailSendRequest {
                 world,
@@ -86,6 +95,7 @@ impl MoogleMailDeliveryTransport {
                 credits: payload.credits,
                 cod: payload.cod,
                 equipment_ids,
+                category,
             },
             template: payload.template,
             settlement_obligation_id: payload.variables.remove("reference"),
@@ -142,6 +152,7 @@ impl MoogleMailDeliveryTransport {
                 credits: 0,
                 cod: 0,
                 equipment_ids: Vec::new(),
+                category: None,
             },
             template,
             settlement_obligation_id: None,

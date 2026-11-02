@@ -37,6 +37,7 @@ fn request() -> MoogleMailSendRequest {
         credits: 0,
         cod: 0,
         equipment_ids: vec!["314".to_owned()],
+        category: None,
     }
 }
 
