@@ -44,14 +44,13 @@ impl MoogleMailUrlBuilder {
         Ok(target)
     }
 
-    /// Read Mail 使用远端真实页签值，不映射为 Inbox 或详情请求。
+    /// Read Mail 使用远端真实页签值 `filter=read`；`Read Mail` 会被服务端回退成 Inbox。
     pub(crate) fn read_mail_page(
         &self,
         world: MoogleMailWorld,
         page: usize,
     ) -> Result<MoogleMailTarget, MoogleMailError> {
-        let mut target =
-            self.moogle_mail(world, MoogleMailOperation::ReadMail, "Read Mail", None)?;
+        let mut target = self.moogle_mail(world, MoogleMailOperation::ReadMail, "read", None)?;
         if page > 0 {
             target.url.query_pairs_mut().append_pair("page", &page.to_string());
         }

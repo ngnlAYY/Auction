@@ -53,7 +53,8 @@ pub(crate) fn parse_terminal_empty_detail(
         .map_err(|_| action_proof_error(operation, world))?;
     unique_element(document.select(&buttons_selector), operation, world)
         .map_err(|_| action_proof_error(operation, world))?;
-    if document.select(&all_form_selector).take(2).count() != 1
+    // 侧栏 stamina 的 `#recoverform` 出现在每个真实页面上，表单唯一性只能在 envelope 内核对。
+    if envelope.select(&all_form_selector).take(2).count() != 1
         || envelope.select(&form_selector).take(2).count() != 1
         || envelope.select(&panes_selector).take(2).count() != 1
         || envelope.select(&buttons_selector).take(2).count() != 1
@@ -61,6 +62,7 @@ pub(crate) fn parse_terminal_empty_detail(
         return Err(action_proof_error(operation, world));
     }
 
+    // 导航栏与提示区不属于邮件状态；只在邮件 envelope 内核对剩余动作与资产。
     let onclick_selector = selector("[onclick]", operation, world)
         .map_err(|_| action_proof_error(operation, world))?;
     let asset_selector =
@@ -68,9 +70,12 @@ pub(crate) fn parse_terminal_empty_detail(
             .map_err(|_| action_proof_error(operation, world))?;
     let equipment_selector = selector("[onmouseover]", operation, world)
         .map_err(|_| action_proof_error(operation, world))?;
-    if document.select(&onclick_selector).next().is_some()
-        || document.select(&asset_selector).next().is_some()
-        || document.select(&equipment_selector).next().is_some()
+    if envelope.select(&asset_selector).next().is_some()
+        || envelope.select(&equipment_selector).next().is_some()
+        || envelope.select(&onclick_selector).any(|action| {
+            // 空终态页唯一允许的剩余动作是“回复”：它只打开 compose，不触碰邮件与资产。
+            !is_reply_action(action.value().attr("onclick").unwrap_or_default(), world)
+        })
     {
         return Err(action_proof_error(operation, world));
     }
@@ -108,6 +113,46 @@ pub(crate) fn parse_terminal_empty_detail(
         return Err(action_proof_error(operation, world));
     }
     Ok((fields, body))
+}
+
+/// 空终态页允许唯一的 reply 按钮：它只打开 compose，不改变邮件状态。
+/// 只接受同源、同世界、字段闭集为 `s/ss/reply/filter` 且值为 `Bazaar/mm/<数字>/new` 的
+/// `document.location` 赋值；其它脚本动作仍整体失败。
+fn is_reply_action(value: &str, world: MoogleMailWorld) -> bool {
+    let compact = value.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    let Some(literal) = compact
+        .strip_prefix("document.location=")
+        .and_then(|rest| rest.strip_prefix('\''))
+        .and_then(|rest| rest.strip_suffix('\''))
+    else {
+        return false;
+    };
+    let Ok(url) = Url::parse(literal) else { return false };
+    if url.scheme() != "https"
+        || url.host_str() != Some("hentaiverse.org")
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || url.path() != world.path()
+    {
+        return false;
+    }
+    let mut seen = 0_u8;
+    for (key, value) in url.query_pairs() {
+        let bit = match key.as_ref() {
+            "s" if value == "Bazaar" => 1,
+            "ss" if value == "mm" => 2,
+            "filter" if value == "new" => 4,
+            "reply" if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) => 8,
+            _ => return false,
+        };
+        if seen & bit != 0 {
+            return false;
+        }
+        seen |= bit;
+    }
+    seen == 0b1111
 }
 
 /// 脚本的字符串、注释和不完整赋值中出现协议标记时仍拒绝，避免漏掉属性索引或模板插值。

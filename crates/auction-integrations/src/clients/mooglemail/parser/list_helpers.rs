@@ -142,7 +142,7 @@ pub(crate) fn valid_next_page_href(
         && values[2].as_deref().is_some_and(|value| match filter {
             "inbox" => matches!(value, "inbox" | "Inbox"),
             "sent" => matches!(value, "sent" | "Sent Mail"),
-            "Read Mail" => matches!(value, "read" | "Read Mail"),
+            "read" => value == "read",
             _ => false,
         })
         && values[3].as_deref().and_then(|value| value.parse::<usize>().ok()) == Some(expected_page)
