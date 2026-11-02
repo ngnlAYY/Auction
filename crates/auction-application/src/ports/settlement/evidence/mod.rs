@@ -63,7 +63,9 @@ pub fn valid_external_positive_id(value: &str) -> bool {
 /// 内部证据（含按 MID 回扫 Sent 页）的绝对预算上限。
 /// 必须小于 fulfillment claim 租约与 Worker item timeout；旧的 30 秒会在
 /// 目标邮件位于 Sent 第 13 页时耗尽，导致 reconcile 被取消且不持久化 Deferred。
-pub const INTERNAL_EVIDENCE_BUDGET: std::time::Duration = std::time::Duration::from_secs(90);
+pub const INTERNAL_EVIDENCE_MAX_AGE_SECONDS: i64 = 90;
+pub const INTERNAL_EVIDENCE_BUDGET: std::time::Duration =
+    std::time::Duration::from_secs(INTERNAL_EVIDENCE_MAX_AGE_SECONDS as u64);
 
 /// 固定预算上限；排队、限速、所有 GET/body 以及提交共享此截止点。
 pub fn internal_evidence_deadline(requested: Instant) -> Instant {

@@ -66,7 +66,9 @@ impl MoogleMailGateway {
             return Err(Error::InvalidRequest);
         }
         let now = Utc::now();
-        if identity.observed_at > now || now - identity.observed_at > chrono::Duration::seconds(30)
+        if identity.observed_at > now
+            || now - identity.observed_at
+                > chrono::Duration::seconds(auction_application::INTERNAL_EVIDENCE_MAX_AGE_SECONDS)
         {
             return Err(Error::Expired);
         }
@@ -125,7 +127,10 @@ impl MoogleMailGateway {
             session.check_internal_current(read_deadline).await?;
             let observed_at = Utc::now();
             if identity.observed_at > observed_at
-                || observed_at - identity.observed_at > chrono::Duration::seconds(30)
+                || observed_at - identity.observed_at
+                    > chrono::Duration::seconds(
+                        auction_application::INTERNAL_EVIDENCE_MAX_AGE_SECONDS,
+                    )
             {
                 return Err(Error::Expired);
             }

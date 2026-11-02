@@ -229,13 +229,14 @@ pub use ports::{
 };
 pub use ports::{
     ForumTargetProfileEvidence, ForumTargetProfileReader, INTERNAL_EVIDENCE_BUDGET,
-    INTERNAL_EVIDENCE_PROTOCOL, InternalEquipmentTarget, InternalEvidenceCommitGuard,
-    InternalEvidenceError, InternalEvidenceFuture, InternalEvidenceLease, InternalEvidencePurpose,
-    InternalEvidenceRequest, InternalSentCollectionTarget, MAIL_RUNTIME_SCOPE,
-    MailAccountEvidenceBinding, MailRuntimeBinding, PreparedSettlementInternalEvidence,
-    SettlementInternalEvidenceReader, SettlementInternalEvidenceSnapshot,
-    VerifiedMailEquipmentPresence, VerifiedMailSentCollectionObservation,
-    VerifiedMainCashObservation, internal_evidence_deadline, valid_external_positive_id,
+    INTERNAL_EVIDENCE_MAX_AGE_SECONDS, INTERNAL_EVIDENCE_PROTOCOL, InternalEquipmentTarget,
+    InternalEvidenceCommitGuard, InternalEvidenceError, InternalEvidenceFuture,
+    InternalEvidenceLease, InternalEvidencePurpose, InternalEvidenceRequest,
+    InternalSentCollectionTarget, MAIL_RUNTIME_SCOPE, MailAccountEvidenceBinding,
+    MailRuntimeBinding, PreparedSettlementInternalEvidence, SettlementInternalEvidenceReader,
+    SettlementInternalEvidenceSnapshot, VerifiedMailEquipmentPresence,
+    VerifiedMailSentCollectionObservation, VerifiedMainCashObservation, internal_evidence_deadline,
+    valid_external_positive_id,
 };
 pub use ports::{
     FundingAccountingMode, FundingCashGate, FundingCashGateProvider, FundingCollectedReceipt,
