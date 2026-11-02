@@ -2,8 +2,8 @@
 
 use super::{SettlementFulfillmentService, validation::repository_error};
 use crate::{
-    ApplicationError, InternalEquipmentTarget, InternalEvidencePurpose, InternalEvidenceRequest,
-    SettlementFulfillmentClaim, SettlementFulfillmentPhaseResult,
+    ApplicationError, INTERNAL_EVIDENCE_BUDGET, InternalEquipmentTarget, InternalEvidencePurpose,
+    InternalEvidenceRequest, SettlementFulfillmentClaim, SettlementFulfillmentPhaseResult,
     SettlementFulfillmentPreparationOutcome as Outcome, SettlementFulfillmentState,
     SettlementInternalCommand, SettlementInternalCommitOutcome, SettlementInternalEvidenceReader,
     SettlementInternalFulfillmentStore,
@@ -233,7 +233,7 @@ pub(super) fn evidence_request(
     let budget = (claim.lease_until - now)
         .to_std()
         .map_err(|_| repository_error("履约租约已过期"))?
-        .min(std::time::Duration::from_secs(30));
+        .min(INTERNAL_EVIDENCE_BUDGET);
     if budget <= std::time::Duration::from_secs(1) {
         return Err(repository_error("履约证据预算不足"));
     }

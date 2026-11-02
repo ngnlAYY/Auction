@@ -212,7 +212,10 @@ fn fulfillment_budget(
     claim: &SettlementFulfillmentClaim,
     now: DateTime<Utc>,
 ) -> std::time::Duration {
-    (claim.lease_until - now).to_std().unwrap_or_default().min(std::time::Duration::from_secs(30))
+    (claim.lease_until - now)
+        .to_std()
+        .unwrap_or_default()
+        .min(auction_application::INTERNAL_EVIDENCE_BUDGET)
 }
 
 async fn bounded_fulfillment<T>(
