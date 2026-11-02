@@ -230,8 +230,10 @@ run_checks() {
 			;;
 		lint) cargo clippy --locked --workspace --all-targets --all-features -- -D warnings ;;
 		wasm)
-			cargo check --locked -p auction-web-public --target wasm32-unknown-unknown
-			cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
+			# cfg(target_arch = "wasm32") 代码只在该目标下编译，宿主 lint 覆盖不到；两端分开调用以保留各自的 feature 图。
+			cargo clippy --locked --target wasm32-unknown-unknown \
+				-p auction-web-public -p auction-web-shared -p auction-contracts -- -D warnings
+			cargo clippy --locked --target wasm32-unknown-unknown -p auction-web-admin -- -D warnings
 			;;
 		dependency-audit) cargo audit --deny warnings ;;
 		dependency-unused) cargo machete ;;

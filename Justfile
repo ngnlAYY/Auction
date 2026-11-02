@@ -24,7 +24,7 @@ feature-check:
 lint:
     @bash ci/checks/check.sh lint
 
-# 编译 Public/Admin 两个浏览器目标，不产出发布 payload。
+# 以 wasm32 Clippy 检查 Public/Admin 浏览器目标及共享层，警告即失败；不产出发布 payload。
 wasm-check:
     @bash ci/checks/check.sh wasm
 
