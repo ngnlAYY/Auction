@@ -47,6 +47,12 @@ pub(super) fn map_insert_error(error: sqlx::Error) -> RecoveryCommandError {
     map_sql_error(error)
 }
 
+/// 只有结构化序列化冲突/死锁允许整事务重试；其余失败原样返回。
+#[cfg(feature = "postgres")]
+pub(super) fn is_conflict(error: &RecoveryCommandError) -> bool {
+    matches!(error, RecoveryCommandError::SerializationConflict)
+}
+
 #[cfg(feature = "postgres")]
 pub(super) fn map_sql_error(error: sqlx::Error) -> RecoveryCommandError {
     if crate::database::is_serialization_conflict(&error) {

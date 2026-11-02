@@ -2,7 +2,7 @@
 //!
 //! 快照更新时间以已存创建/更新时间为下界；旧时间高水位不能导致新管理命令产出非法投影。
 
-use auction_application::{CompetitionTransactionError, TransactionFailure, TransactionPolicy};
+use auction_application::{TransactionFailure, TransactionPolicy};
 
 use super::super::mapping::*;
 use super::super::reads::{load_command_postgres_tx, load_user_postgres_tx};
@@ -15,16 +15,12 @@ pub(crate) async fn mutate_postgres(
 ) -> Result<AdminUserCommandResult, ApplicationError> {
     validate_mutation_write(&write)?;
     // 重试不重新生成 key 或命令身份，只在结构化序列化冲突/死锁时重跑完整事务。
-    let max_attempts = TransactionPolicy::serializable().max_attempts;
-    for attempt in 0..max_attempts {
-        match mutate_postgres_once(store, &write).await {
-            Err(error) if error.is_serialization_conflict() && attempt + 1 < max_attempts => {
-                continue;
-            }
-            result => return result,
-        }
-    }
-    Err(CompetitionTransactionError::SerializationConflict.into())
+    crate::database::retry_conflicts(
+        usize::from(TransactionPolicy::serializable().max_attempts),
+        ApplicationError::is_serialization_conflict,
+        || mutate_postgres_once(store, &write),
+    )
+    .await
 }
 
 async fn mutate_postgres_once(

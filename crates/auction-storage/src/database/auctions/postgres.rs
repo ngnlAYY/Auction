@@ -146,22 +146,10 @@ pub(super) async fn current(
     store: &PostgresStore,
     world_id: &str,
 ) -> Result<Option<CurrentAuctionSnapshot>, ApplicationError> {
-    let row = sqlx::query(
-        "SELECT
-            a.id,
-            a.world_id,
-            a.sequence,
-            a.status,
-            a.scheduled_open_at,
-            MAX(l.effective_end_at) FILTER (WHERE l.status IN ('live', 'sold', 'unsold'))
-                AS scheduled_ends_at,
-            a.preview_revision,
-            CASE
-                WHEN a.status = 'preview' AND CURRENT_TIMESTAMP < a.scheduled_open_at THEN 'preview'
-                WHEN a.status = 'preview' THEN 'opening'
-                ELSE 'live'
-            END AS presentation_mode,
-            (a.status IN ('live', 'final')) AS bidding_open
+    let row = sqlx::query(concat!(
+        "SELECT ",
+        super::public_auction_projection_sql!("l"),
+        "
          FROM public.auctions AS a
          INNER JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
          LEFT JOIN public.lots AS l ON l.auction_id = a.id
@@ -172,8 +160,8 @@ pub(super) async fn current(
             CASE WHEN a.status IN ('live', 'final', 'settling') THEN 0 ELSE 1 END,
             a.sequence DESC,
             a.id DESC
-         LIMIT 1",
-    )
+         LIMIT 1"
+    ))
     .bind(world_id)
     .fetch_optional(store.pool())
     .await
@@ -186,39 +174,21 @@ pub(super) async fn realtime_status(
     store: &PostgresStore,
     auction_id: Uuid,
 ) -> Result<Option<PublicRealtimeAuctionStatus>, ApplicationError> {
-    let row = sqlx::query(
-        "SELECT
-             a.id,
-             a.world_id,
-             a.sequence,
-             a.status,
-             a.scheduled_open_at,
-             MAX(l.effective_end_at) FILTER (WHERE l.status IN ('live', 'sold', 'unsold'))
-                 AS scheduled_ends_at,
-             a.preview_revision,
-             CASE
-                 WHEN a.status = 'preview' AND CURRENT_TIMESTAMP < a.scheduled_open_at THEN 'preview'
-                 WHEN a.status = 'preview' THEN 'opening'
-                 ELSE 'live'
-             END AS presentation_mode,
-             (a.status IN ('live', 'final')) AS bidding_open
+    let row = sqlx::query(concat!(
+        "SELECT ",
+        super::public_auction_projection_sql!("l"),
+        "
          FROM public.auctions AS a
          INNER JOIN public.worlds AS w ON w.id = a.world_id
          LEFT JOIN public.lots AS l ON l.auction_id = a.id
          WHERE a.id = $1
            AND (w.enabled OR a.status = 'settled')
            AND a.status IN ('preview', 'live', 'final', 'settling', 'settled')
-           AND (
-               a.status <> 'preview'
-               OR NOT EXISTS (
-                   SELECT 1
-                   FROM public.auctions AS active
-                   WHERE active.world_id = a.world_id
-                     AND active.status IN ('live', 'final', 'settling')
-               )
-           )
-         GROUP BY a.id",
-    )
+           AND ",
+        super::preview_visibility_sql!(),
+        "
+         GROUP BY a.id"
+    ))
     .bind(auction_id)
     .fetch_optional(store.pool())
     .await

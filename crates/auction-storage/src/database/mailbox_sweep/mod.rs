@@ -499,14 +499,13 @@ async fn begin_compose_discard(
     expectation: Option<&DeliverySendExpectation>,
 ) -> Result<bool, auction_application::ApplicationError> {
     // 一次性尝试不是远端成功证明；仅明确中止的冲突可以重试，不重放未知提交。
-    for attempt in 0..3 {
-        match recovery::begin_discard_once(pool, delivery_id, fencing_version, expectation).await {
-            Ok(changed) => return Ok(changed),
-            Err(error) if error.retryable() && attempt < 2 => continue,
-            Err(_) => return Err(storage_error("MoogleMail 草稿丢弃围栏提交未确认")),
-        }
-    }
-    Err(storage_error("MoogleMail 草稿丢弃围栏重试已耗尽"))
+    crate::database::retry_conflicts(
+        crate::database::SERIALIZABLE_ATTEMPTS,
+        RecoveryError::retryable,
+        || recovery::begin_discard_once(pool, delivery_id, fencing_version, expectation),
+    )
+    .await
+    .map_err(|_| storage_error("MoogleMail 草稿丢弃围栏提交未确认"))
 }
 
 #[cfg(feature = "postgres")]
@@ -607,14 +606,13 @@ async fn persist_transition(
     delivery_id: Uuid,
     update: RecoveryUpdate<'_>,
 ) -> Result<bool, auction_application::ApplicationError> {
-    for attempt in 0..3 {
-        match persist_transition_once(pool, delivery_id, &update).await {
-            Ok(changed) => return Ok(changed),
-            Err(error) if error.retryable() && attempt < 2 => continue,
-            Err(_) => return Err(storage_error("MoogleMail 恢复事务未确定提交，请核对原投递")),
-        }
-    }
-    Err(storage_error("MoogleMail 恢复事务重试已耗尽"))
+    crate::database::retry_conflicts(
+        crate::database::SERIALIZABLE_ATTEMPTS,
+        RecoveryError::retryable,
+        || persist_transition_once(pool, delivery_id, &update),
+    )
+    .await
+    .map_err(|_| storage_error("MoogleMail 恢复事务未确定提交，请核对原投递"))
 }
 
 #[cfg(feature = "postgres")]

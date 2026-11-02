@@ -6,6 +6,58 @@ use futures_util::TryStreamExt;
 
 use super::*;
 
+/// 代理授权公开投影的共同列与可见性条件；分页与单 lot 读取只追加各自的过滤、排序和数量限制。
+#[cfg(feature = "postgres")]
+macro_rules! proxy_projection_sql {
+    ($tail:literal) => {
+        concat!(
+            "SELECT
+            p.authorization_id,
+            l.auction_id,
+            p.lot_id,
+            p.user_id,
+            l.category_number AS lot_number,
+            p.authorization_sequence,
+            p.usage_number,
+            (
+                SELECT count(*)
+                FROM public.bid_proxy_authorizations AS quota
+                WHERE quota.lot_id = p.lot_id AND quota.user_id = p.user_id
+            )::bigint AS quota_used,
+            COALESCE((a.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint, 0) AS quota_limit,
+            CASE a.policy_snapshot ->> 'schema_version'
+                WHEN '4' THEN 1
+                WHEN '5' THEN (a.policy_snapshot ->> 'bidding_version')::bigint
+            END AS policy_bidding_version,
+            (a.policy_snapshot ->> 'bid_increment_ppm')::bigint AS policy_bid_increment_ppm,
+            (a.policy_snapshot ->> 'minimum_increment')::bigint AS policy_minimum_increment,
+            p.mode,
+            p.maximum_amount,
+            p.status AS proxy_status,
+            p.terminal_reason,
+            p.state_version,
+            p.created_at,
+            p.updated_at,
+            e.name AS equipment_name,
+            e.category AS equipment_category,
+            l.start_price,
+            l.current_price,
+            l.material,
+            l.leader_user_id,
+            l.slow_authorization_id
+         FROM public.bid_proxy_authorizations AS p
+         JOIN public.lots AS l ON l.id = p.lot_id
+         JOIN public.auctions AS a ON a.id = l.auction_id
+         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
+         JOIN public.equipment AS e ON e.id = l.equipment_id
+         WHERE a.status IN ('live', 'final', 'settling', 'settled')
+           AND l.status IN ('live', 'sold', 'unsold')
+           AND ",
+            $tail
+        )
+    };
+}
+
 #[cfg(feature = "postgres")]
 pub(super) async fn list_postgres(
     store: &super::PostgresStore,
@@ -66,52 +118,11 @@ pub(super) async fn list_postgres(
     .await
     .map_err(|_| storage_error("统计 PostgreSQL 用户竞价失败"))?;
 
-    let proxy_rows = sqlx::query(
-        "SELECT
-            p.authorization_id,
-            l.auction_id,
-            p.lot_id,
-            p.user_id,
-            l.category_number AS lot_number,
-            p.authorization_sequence,
-            p.usage_number,
-            (
-                SELECT count(*)
-                FROM public.bid_proxy_authorizations AS quota
-                WHERE quota.lot_id = p.lot_id AND quota.user_id = p.user_id
-            )::bigint AS quota_used,
-            COALESCE((a.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint, 0) AS quota_limit,
-            CASE a.policy_snapshot ->> 'schema_version'
-                WHEN '4' THEN 1
-                WHEN '5' THEN (a.policy_snapshot ->> 'bidding_version')::bigint
-            END AS policy_bidding_version,
-            (a.policy_snapshot ->> 'bid_increment_ppm')::bigint AS policy_bid_increment_ppm,
-            (a.policy_snapshot ->> 'minimum_increment')::bigint AS policy_minimum_increment,
-            p.mode,
-            p.maximum_amount,
-            p.status AS proxy_status,
-            p.terminal_reason,
-            p.state_version,
-            p.created_at,
-            p.updated_at,
-            e.name AS equipment_name,
-            e.category AS equipment_category,
-            l.start_price,
-            l.current_price,
-            l.material,
-            l.leader_user_id,
-            l.slow_authorization_id
-         FROM public.bid_proxy_authorizations AS p
-         JOIN public.lots AS l ON l.id = p.lot_id
-         JOIN public.auctions AS a ON a.id = l.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
-         JOIN public.equipment AS e ON e.id = l.equipment_id
-         WHERE p.user_id = $1
-           AND a.status IN ('live', 'final', 'settling', 'settled')
-           AND l.status IN ('live', 'sold', 'unsold')
+    let proxy_rows = sqlx::query(proxy_projection_sql!(
+        "p.user_id = $1
          ORDER BY p.updated_at DESC, p.lot_id, p.authorization_id
-         LIMIT $2 OFFSET $3",
-    )
+         LIMIT $2 OFFSET $3"
+    ))
     .bind(user_id)
     .bind(request.proxies.limit)
     .bind(request.proxies.offset)
@@ -163,59 +174,16 @@ pub(super) async fn proxy_postgres(
         .begin_read_snapshot()
         .await
         .map_err(|_| storage_error("开启 PostgreSQL 用户代理读取事务失败"))?;
-    let row = {
-        sqlx::query(
-            "SELECT
-            p.authorization_id,
-            l.auction_id,
-            p.lot_id,
-            p.user_id,
-            l.category_number AS lot_number,
-            p.authorization_sequence,
-            p.usage_number,
-            (
-                SELECT count(*)
-                FROM public.bid_proxy_authorizations AS quota
-                WHERE quota.lot_id = p.lot_id AND quota.user_id = p.user_id
-            )::bigint AS quota_used,
-            COALESCE((a.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint, 0) AS quota_limit,
-            CASE a.policy_snapshot ->> 'schema_version'
-                WHEN '4' THEN 1
-                WHEN '5' THEN (a.policy_snapshot ->> 'bidding_version')::bigint
-            END AS policy_bidding_version,
-            (a.policy_snapshot ->> 'bid_increment_ppm')::bigint AS policy_bid_increment_ppm,
-            (a.policy_snapshot ->> 'minimum_increment')::bigint AS policy_minimum_increment,
-            p.mode,
-            p.maximum_amount,
-            p.status AS proxy_status,
-            p.terminal_reason,
-            p.state_version,
-            p.created_at,
-            p.updated_at,
-            e.name AS equipment_name,
-            e.category AS equipment_category,
-            l.start_price,
-            l.current_price,
-            l.material,
-            l.leader_user_id,
-            l.slow_authorization_id
-         FROM public.bid_proxy_authorizations AS p
-         JOIN public.lots AS l ON l.id = p.lot_id
-         JOIN public.auctions AS a ON a.id = l.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
-         JOIN public.equipment AS e ON e.id = l.equipment_id
-         WHERE p.lot_id = $1 AND p.user_id = $2
-           AND a.status IN ('live', 'final', 'settling', 'settled')
-           AND l.status IN ('live', 'sold', 'unsold')
+    let row = sqlx::query(proxy_projection_sql!(
+        "p.lot_id = $1 AND p.user_id = $2
          ORDER BY p.usage_number DESC
-         LIMIT 1",
-        )
-        .bind(lot_id)
-        .bind(user_id)
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(|_| storage_error("读取 PostgreSQL 用户代理失败"))?
-    };
+         LIMIT 1"
+    ))
+    .bind(lot_id)
+    .bind(user_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| storage_error("读取 PostgreSQL 用户代理失败"))?;
     let Some(row) = row else {
         transaction
             .commit()

@@ -27,30 +27,13 @@ pub(super) async fn list(
     // 执行完整过滤联表。装备等级只为当前页读取，空页通过统计行保留 total/stats。
     // 中位数先选中间一至两笔再按 numeric 求均值，不将 bigint 价格转为浮点或先整数求和。
     // 旧整数 median 显式半数取偶，保留原 float8 转 bigint 的数值口径。
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         "WITH matching_lots AS MATERIALIZED (
             SELECT l.id AS lot_id, l.current_price AS price, l.effective_end_at AS closed_at,
                    a.sequence AS auction_sequence, l.lot_number AS ordering_lot_number
-            FROM public.lots AS l
-            JOIN public.auctions AS a ON a.id = l.auction_id
-            JOIN public.worlds AS w ON w.id = a.world_id
-            JOIN public.equipment AS e ON e.id = l.equipment_id
-            JOIN public.users AS buyer ON buyer.id = l.leader_user_id
-            LEFT JOIN public.auction_submissions AS submission ON submission.id = l.submission_id
-            JOIN public.lot_settlements AS ls ON ls.lot_id = l.id
-            JOIN public.auction_settlements AS settlement ON settlement.auction_id = a.id
-            WHERE a.status = 'settled'
-              AND l.status = 'sold'
-              AND l.leader_user_id IS NOT NULL
-              AND ($1::text[] IS NULL OR e.name ILIKE ALL($1::text[]))
-              AND ($2::text IS NULL OR a.world_id = $2)
-              AND ($3::timestamptz IS NULL OR l.effective_end_at >= $3)
-              AND ($4::timestamptz IS NULL OR l.effective_end_at < $4)
-              AND ($5::bigint IS NULL OR l.current_price >= $5)
-              AND ($6::bigint IS NULL OR l.current_price <= $6)
-              AND ($7::text IS NULL OR lower(buyer.username) = lower($7))
-              AND ($8::text IS NULL OR lower(submission.seller) = lower($8))
-         ), ranked_prices AS (
+            ",
+        price_history_scope_sql!(),
+        "), ranked_prices AS (
             SELECT price,
                    row_number() OVER (ORDER BY price, lot_id) AS price_rank,
                    count(*) OVER () AS sample_count
@@ -100,8 +83,8 @@ pub(super) async fn list(
                   CASE WHEN $11::text = 'price_desc' THEN page_lots.price END DESC,
                   CASE WHEN $11::text = 'price_asc' THEN page_lots.price END ASC,
                   page_lots.closed_at DESC, page_lots.auction_sequence DESC,
-                  page_lots.ordering_lot_number, page_lots.lot_id",
-    )
+                  page_lots.ordering_lot_number, page_lots.lot_id"
+    ))
     .bind(history_name_patterns(&request))
     .bind(request.world_id.as_deref())
     .bind(request.closed_from)

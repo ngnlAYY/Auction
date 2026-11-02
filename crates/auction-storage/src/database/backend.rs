@@ -53,6 +53,31 @@ pub(crate) fn is_serialization_conflict(error: &sqlx::Error) -> bool {
         .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01"))
 }
 
+/// 独立 Serializable 写事务的默认总尝试次数，与竞价 `TransactionPolicy::serializable()` 一致。
+#[cfg(feature = "postgres")]
+pub(crate) const SERIALIZABLE_ATTEMPTS: usize = 3;
+
+/// 整事务有界重试：每次调用 `operation` 都必须开启新事务；只有 `retryable` 认定的明确中止才重跑，
+/// 其他错误与最后一次结果原样交给调用方映射。重试不重建命令身份、事件 ID 或证据时间，
+/// 结果未知的提交也不能被判定为可重试。
+#[cfg(feature = "postgres")]
+pub(crate) async fn retry_conflicts<T, E, F>(
+    attempts: usize,
+    retryable: impl Fn(&E) -> bool,
+    mut operation: impl FnMut() -> F,
+) -> Result<T, E>
+where
+    F: std::future::Future<Output = Result<T, E>>,
+{
+    let mut attempt = 1;
+    loop {
+        match operation().await {
+            Err(error) if attempt < attempts && retryable(&error) => attempt += 1,
+            result => return result,
+        }
+    }
+}
+
 /// 以命令 ID 取事务级 advisory 锁，串行化同一幂等身份的并发入口；锁随事务结束释放。
 /// 各命令 owner 共用这一键空间（规范 UUID 文本经 `hashtextextended(_, 0)`），不得各自改写哈希或种子。
 #[cfg(feature = "postgres")]

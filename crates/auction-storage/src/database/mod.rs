@@ -29,6 +29,8 @@ mod competition_audit;
 #[cfg(feature = "postgres")]
 mod equipment_loss;
 #[cfg(feature = "postgres")]
+mod intake_target;
+#[cfg(feature = "postgres")]
 mod lifecycle_audit;
 #[cfg(feature = "postgres")]
 mod mail_delivery;
@@ -201,7 +203,8 @@ mod store;
 pub use backend::{DatabaseBackend, StorageError};
 #[cfg(feature = "postgres")]
 pub(crate) use backend::{
-    is_serialization_conflict, lock_command_id, set_read_only_limits, storage_error,
+    SERIALIZABLE_ATTEMPTS, is_serialization_conflict, lock_command_id, retry_conflicts,
+    set_read_only_limits, storage_error,
 };
 #[cfg(feature = "postgres")]
 pub(crate) use backend::{

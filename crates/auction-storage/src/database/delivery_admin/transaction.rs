@@ -100,5 +100,5 @@ impl PostgresDeliveryAdminTransaction {
 
 /// 返回与旧版一致的两段重试等待：第一次 10ms，第二次 20ms。
 pub(super) async fn wait_before_retry(attempt: usize) {
-    sqlx::__rt::sleep(Duration::from_millis(10 * (attempt as u64 + 1))).await;
+    tokio::time::sleep(Duration::from_millis(10 * (attempt as u64 + 1))).await;
 }

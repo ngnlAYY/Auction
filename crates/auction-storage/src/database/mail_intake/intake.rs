@@ -1,4 +1,5 @@
 use super::*;
+use crate::database::intake_target;
 
 use std::collections::BTreeMap;
 
@@ -53,53 +54,22 @@ pub(super) async fn add_mail_auction_intake_inner(
         return Err(CompetitionTransactionError::Conflict);
     }
 
-    let target = sqlx::query(
-        r#"SELECT target.auction_id,
-                  target.target_status,
-                  auction.world_id,
-                  auction.sequence,
-                  auction.status,
-                  auction.state_version,
-                  auction.preview_revision,
-                  auction.intake_opens_at
-           FROM public.auction_intake_targets AS target
-           INNER JOIN public.auctions AS auction ON auction.id = target.auction_id
-           WHERE target.world_id = $1
-           FOR UPDATE OF target, auction"#,
-    )
-    .bind(&write.world_id)
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?
-    .ok_or(CompetitionTransactionError::NotFound)?;
-    let auction_id: Uuid = target.try_get("auction_id").map_err(map_sql_error)?;
-    let target_status: String = target.try_get("target_status").map_err(map_sql_error)?;
-    let auction_world_id: String = target.try_get("world_id").map_err(map_sql_error)?;
-    let auction_sequence: i64 = target.try_get("sequence").map_err(map_sql_error)?;
-    let auction_status: String = target.try_get("status").map_err(map_sql_error)?;
-    let current_state_version: i64 = target.try_get("state_version").map_err(map_sql_error)?;
-    let current_preview_revision: i64 =
-        target.try_get("preview_revision").map_err(map_sql_error)?;
-    let intake_opens_at: Option<DateTime<Utc>> =
-        target.try_get("intake_opens_at").map_err(map_sql_error)?;
-    if auction_world_id != write.world_id
-        || auction_sequence <= 0
-        || !matches!(auction_status.as_str(), "draft" | "preview")
-        || target_status != auction_status
-        || current_state_version <= 0
-        || current_preview_revision < 0
-        || write.now < write.received_at
-    {
+    let target = intake_target::lock(transaction, &write.world_id)
+        .await
+        .map_err(map_sql_error)?
+        .ok_or(CompetitionTransactionError::NotFound)?;
+    if !target.is_consistent(&write.world_id) || write.now < write.received_at {
         return Err(CompetitionTransactionError::Conflict);
     }
-    let preview_intake = auction_status == "preview";
+    let auction_id = target.auction_id;
     // 外部读取后可能已切换到新 Draft；聚合时间必须在 world/target/auction 锁取得后生成。
     let now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
         .fetch_one(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
     // 锁后已到新赛季也不能接受旧赛季收件；延迟轮询或处理重试不得绕过冻结的收件下界。
-    if intake_opens_at.is_some_and(|opens_at| now < opens_at || write.received_at < opens_at) {
+    if target.intake_opens_at.is_some_and(|opens_at| now < opens_at || write.received_at < opens_at)
+    {
         return Err(CompetitionTransactionError::IntakeClosed);
     }
 
@@ -159,12 +129,8 @@ pub(super) async fn add_mail_auction_intake_inner(
         }
     }
     let maximum_lot_number = maximum_lot_number.unwrap_or(0);
-    let next_state_version = current_state_version
-        .checked_add(1)
-        .ok_or_else(|| failed("MoogleMail 拍卖状态版本溢出"))?;
-    let next_preview_revision = current_preview_revision
-        .checked_add(1)
-        .ok_or_else(|| failed("MoogleMail 拍卖预览版本溢出"))?;
+    let next_versions = target.next_versions().ok_or_else(|| failed("MoogleMail 拍卖版本溢出"))?;
+    let (next_preview_revision, next_state_version) = next_versions;
 
     sqlx::query(
         r#"INSERT INTO public.auction_submissions
@@ -235,18 +201,12 @@ pub(super) async fn add_mail_auction_intake_inner(
         .await
         .map_err(map_sql_error)?;
 
-        sqlx::query(
-            r#"INSERT INTO public.equipment_secrets
-                (equipment_id, ciphertext, nonce, encryption_key_id, fingerprint, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $6)"#,
+        intake_target::insert_equipment_secret(
+            transaction,
+            item.equipment_id.as_uuid(),
+            &item.key_envelope,
+            now,
         )
-        .bind(item.equipment_id.as_uuid())
-        .bind(item.key_envelope.ciphertext())
-        .bind(item.key_envelope.nonce())
-        .bind(item.key_envelope.encryption_key_id())
-        .bind(item.key_envelope.fingerprint())
-        .bind(now)
-        .execute(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
 
@@ -270,30 +230,13 @@ pub(super) async fn add_mail_auction_intake_inner(
         .map_err(map_sql_error)?;
     }
 
-    let updated = sqlx::query(
-        r#"UPDATE public.auctions
-           SET preview_revision = $1, state_version = $2,
-               updated_at = GREATEST(created_at, updated_at, $3)
-           WHERE id = $4
-             AND status = $7
-             AND preview_revision = $5
-             AND state_version = $6
-           RETURNING state_version"#,
-    )
-    .bind(next_preview_revision)
-    .bind(next_state_version)
-    .bind(now)
-    .bind(auction_id)
-    .bind(current_preview_revision)
-    .bind(current_state_version)
-    .bind(&auction_status)
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    if updated.is_none() {
+    if !intake_target::advance(transaction, &target, next_versions, now)
+        .await
+        .map_err(map_sql_error)?
+    {
         return Err(CompetitionTransactionError::Conflict);
     }
-    if preview_intake {
+    if target.is_preview() {
         let materialized = sqlx::query(
             "INSERT INTO public.auction_preview_items
                 (auction_id, equipment_id, display_order, start_price,
@@ -319,7 +262,7 @@ pub(super) async fn add_mail_auction_intake_inner(
     let lot_ids = write.items.iter().map(|item| item.lot_id).collect::<Vec<_>>();
     let result = MailAuctionIntakeResult {
         auction_id,
-        auction_sequence,
+        auction_sequence: target.auction_sequence,
         auction_state_version: next_state_version,
         preview_revision: next_preview_revision,
         submission_id: write.submission_id,

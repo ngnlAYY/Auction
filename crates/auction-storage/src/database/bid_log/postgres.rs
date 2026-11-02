@@ -9,6 +9,54 @@ use sqlx::Row;
 use super::super::PostgresStore;
 use super::common::{cursor_values, entry_cursor, storage_error, validate_entries};
 
+/// 竞价日志明细与 total 共用的可见性连接；total 必须复用明细的可见性规则，避免页数和游标投影错位。
+macro_rules! bid_log_joins {
+    () => {
+        "FROM public.bids AS b
+         JOIN public.lots AS l ON l.id = b.lot_id
+         JOIN public.auctions AS a ON a.id = l.auction_id
+         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
+         JOIN public.equipment AS e ON e.id = l.equipment_id
+         JOIN public.users AS users ON users.id = b.bidder_user_id
+         JOIN public.auction_commands AS command ON command.command_id = b.command_id
+"
+    };
+}
+
+/// 竞价日志明细与 total 共用的过滤条件，按 $1 拍卖、$2 世界、$3 lot、$4 lot 代码绑定。
+macro_rules! bid_log_filters {
+    () => {
+        "WHERE a.id = $1
+           AND a.status IN ('live', 'final', 'settled')
+           AND l.status IN ('live', 'sold', 'unsold')
+           AND ($2::text IS NULL OR a.world_id = $2)
+           AND ($3::uuid IS NULL OR l.id = $3)
+           AND (
+                $4::text IS NULL
+                OR lower(
+                    CASE e.category
+                        WHEN 'One-Handed' THEN 'One'
+                        WHEN 'Two-Handed' THEN 'Two'
+                        WHEN 'Staff' THEN 'Sta'
+                        WHEN 'Shield' THEN 'Shd'
+                        WHEN 'Cloth' THEN 'Clo'
+                        WHEN 'Light' THEN 'Lig'
+                        WHEN 'Heavy' THEN 'Hea'
+                        ELSE 'Lot'
+                    END || CASE
+                        WHEN l.category_number < 10 THEN '0' || l.category_number::text
+                        ELSE l.category_number::text
+                    END
+                ) LIKE '%' || lower($4) || '%'
+           )
+           AND command.command_kind IN (
+                'place_bid', 'create_proxy', 'create_proxy_authorization',
+                'execute_slow_response', 'final_proxy_transition'
+           )
+"
+    };
+}
+
 pub(super) async fn list_postgres(
     store: &PostgresStore,
     request: PublicBidLogListRequest,
@@ -50,7 +98,7 @@ pub(super) async fn list_postgres(
     }
 
     // 保留每条已接受事实；普通出价及同事务代理回应都公开，避免隐藏触发报价后造成自抬价错觉。
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         "SELECT
             b.id,
             l.auction_id,
@@ -82,73 +130,22 @@ pub(super) async fn list_postgres(
             b.mechanism,
             b.created_at,
             COALESCE(l.leader_user_id = b.bidder_user_id AND l.current_price = b.amount, false)::boolean AS valid
-         FROM public.bids AS b
-         JOIN public.lots AS l ON l.id = b.lot_id
-         JOIN public.auctions AS a ON a.id = l.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
-         JOIN public.equipment AS e ON e.id = l.equipment_id
-         JOIN public.users AS users ON users.id = b.bidder_user_id
-         JOIN public.auction_commands AS command ON command.command_id = b.command_id
-         LEFT JOIN public.auction_forum_bid_commands AS forum_command
+         ",
+        bid_log_joins!(),
+        "         LEFT JOIN public.auction_forum_bid_commands AS forum_command
            ON forum_command.command_id = b.command_id
           AND forum_command.auction_id = a.id
-         WHERE a.id = $1
-           AND a.status IN ('live', 'final', 'settled')
-           AND l.status IN ('live', 'sold', 'unsold')
-           AND ($2::text IS NULL OR a.world_id = $2)
-           AND ($3::uuid IS NULL OR l.id = $3)
-           AND (
-                $4::text IS NULL
-                OR lower(
-                    CASE e.category
-                        WHEN 'One-Handed' THEN 'One'
-                        WHEN 'Two-Handed' THEN 'Two'
-                        WHEN 'Staff' THEN 'Sta'
-                        WHEN 'Shield' THEN 'Shd'
-                        WHEN 'Cloth' THEN 'Clo'
-                        WHEN 'Light' THEN 'Lig'
-                        WHEN 'Heavy' THEN 'Hea'
-                        ELSE 'Lot'
-                    END || CASE
-                        WHEN l.category_number < 10 THEN '0' || l.category_number::text
-                        ELSE l.category_number::text
-                    END
-                ) LIKE '%' || lower($4) || '%'
-           )
-           AND command.command_kind IN (
-                'place_bid', 'create_proxy', 'create_proxy_authorization',
-                'execute_slow_response', 'final_proxy_transition'
-           )
-           AND (
+         ",
+        bid_log_filters!(),
+        "           AND (
                 NOT $5::boolean
-                OR b.created_at < $6
-                OR (
-                    b.created_at = $6
-                    AND b.lot_id < $7
-                )
-                OR (
-                    b.created_at = $6
-                    AND b.lot_id = $7
-                    AND b.accepted_state_version < $8
-                )
-                OR (
-                    b.created_at = $6
-                    AND b.lot_id = $7
-                    AND b.accepted_state_version = $8
-                    AND b.fact_index < $9
-                )
-                OR (
-                    b.created_at = $6
-                    AND b.lot_id = $7
-                    AND b.accepted_state_version = $8
-                    AND b.fact_index = $9
-                    AND b.id < $10
-                )
+                OR (b.created_at, b.lot_id, b.accepted_state_version, b.fact_index, b.id)
+                    < ($6, $7, $8, $9, $10)
            )
          ORDER BY b.created_at DESC, b.lot_id DESC,
                   b.accepted_state_version DESC, b.fact_index DESC, b.id DESC
-         LIMIT $11 OFFSET $12",
-    )
+         LIMIT $11 OFFSET $12"
+    ))
     .bind(request.auction_id)
     .bind(request.world_id.as_deref())
     .bind(request.lot_id)
@@ -177,46 +174,13 @@ pub(super) async fn list_postgres(
     let total = if request.cursor.is_some() {
         None
     } else {
-        // total 必须复用明细的可见性规则，避免页数和游标投影错位。
         Some(
-            sqlx::query_scalar::<_, i64>(
-                "SELECT count(*)
-                 FROM public.bids AS b
-                 JOIN public.lots AS l ON l.id = b.lot_id
-                 JOIN public.auctions AS a ON a.id = l.auction_id
-                 JOIN public.worlds AS w
-                   ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
-                 JOIN public.equipment AS e ON e.id = l.equipment_id
-                 JOIN public.users AS users ON users.id = b.bidder_user_id
-                 JOIN public.auction_commands AS command ON command.command_id = b.command_id
-                 WHERE a.id = $1
-                   AND a.status IN ('live', 'final', 'settled')
-                   AND l.status IN ('live', 'sold', 'unsold')
-                   AND ($2::text IS NULL OR a.world_id = $2)
-                   AND ($3::uuid IS NULL OR l.id = $3)
-                   AND (
-                        $4::text IS NULL
-                        OR lower(
-                            CASE e.category
-                                WHEN 'One-Handed' THEN 'One'
-                                WHEN 'Two-Handed' THEN 'Two'
-                                WHEN 'Staff' THEN 'Sta'
-                                WHEN 'Shield' THEN 'Shd'
-                                WHEN 'Cloth' THEN 'Clo'
-                                WHEN 'Light' THEN 'Lig'
-                                WHEN 'Heavy' THEN 'Hea'
-                                ELSE 'Lot'
-                            END || CASE
-                                WHEN l.category_number < 10 THEN '0' || l.category_number::text
-                                ELSE l.category_number::text
-                            END
-                        ) LIKE '%' || lower($4) || '%'
-                   )
-                   AND command.command_kind IN (
-                        'place_bid', 'create_proxy', 'create_proxy_authorization',
-                        'execute_slow_response', 'final_proxy_transition'
-                   )",
-            )
+            sqlx::query_scalar::<_, i64>(concat!(
+                "SELECT count(*) ",
+                bid_log_joins!(),
+                "         ",
+                bid_log_filters!()
+            ))
             .bind(request.auction_id)
             .bind(request.world_id.as_deref())
             .bind(request.lot_id)

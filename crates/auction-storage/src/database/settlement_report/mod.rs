@@ -36,13 +36,13 @@ async fn postgres_report(
     store: &super::PostgresStore,
     auction_id: AuctionId,
 ) -> Result<Option<SettlementReport>, ApplicationError> {
-    for attempt in 0..3_u8 {
-        match postgres_report_once(store, auction_id).await {
-            Err(error) if error.retryable() && attempt < 2 => continue,
-            result => return result.map_err(PostgresReportError::into_application),
-        }
-    }
-    Err(storage_error("结算报告可序列化快照重试次数耗尽"))
+    crate::database::retry_conflicts(
+        crate::database::SERIALIZABLE_ATTEMPTS,
+        PostgresReportError::retryable,
+        || postgres_report_once(store, auction_id),
+    )
+    .await
+    .map_err(PostgresReportError::into_application)
 }
 
 #[cfg(feature = "postgres")]

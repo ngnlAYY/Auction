@@ -61,7 +61,7 @@ pub(super) async fn fail_postgres(
                     && attempt < FAILURE_TRANSACTION_ATTEMPTS =>
             {
                 // 必须从 BEGIN 开始重放整笔失败进度与审计事务，不能单独重试其中一条写入。
-                sqlx::__rt::sleep(FAILURE_RETRY_BASE_DELAY.saturating_mul(attempt as u32)).await;
+                tokio::time::sleep(FAILURE_RETRY_BASE_DELAY.saturating_mul(attempt as u32)).await;
             }
             Err(error) => return Err(map_storage_error(error)),
         }

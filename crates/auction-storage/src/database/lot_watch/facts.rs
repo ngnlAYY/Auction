@@ -39,24 +39,23 @@ pub(crate) async fn apply_bid(
     occurred_at: DateTime<Utc>,
 ) -> Result<(), CompetitionTransactionError> {
     let lot_id = bid.lot_id.as_uuid();
-    // 迁移之后创建的 lot 懒初始化；当前 lot 尚未写入本事务最终快照。
-    sqlx::query(
-        "INSERT INTO public.lot_watch_leadership (lot_id, leader_user_id, cycle)
-        SELECT id, leader_user_id, state_version FROM public.lots WHERE id = $1
-        ON CONFLICT (lot_id) DO NOTHING",
-    )
-    .bind(lot_id)
-    .execute(&mut **transaction)
-    .await
-    .map_err(sql_error)?;
-    let row = sqlx::query(
-        "SELECT leader_user_id, cycle FROM public.lot_watch_leadership
-        WHERE lot_id = $1 FOR UPDATE",
-    )
-    .bind(lot_id)
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(sql_error)?;
+    let row = match lock_leadership(transaction, lot_id).await? {
+        Some(row) => row,
+        None => {
+            // 迁移之后创建的 lot 懒初始化；当前 lot 尚未写入本事务最终快照。只有首笔竞价多一次
+            // 往返，并发初始化由唯一键与随后的行锁串行化。
+            sqlx::query(
+                "INSERT INTO public.lot_watch_leadership (lot_id, leader_user_id, cycle)
+                SELECT id, leader_user_id, state_version FROM public.lots WHERE id = $1
+                ON CONFLICT (lot_id) DO NOTHING",
+            )
+            .bind(lot_id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(sql_error)?;
+            lock_leadership(transaction, lot_id).await?.ok_or_else(corrupt)?
+        }
+    };
     let leader: Option<Uuid> = row.try_get("leader_user_id").map_err(sql_error)?;
     let cycle: i64 = row.try_get("cycle").map_err(sql_error)?;
     let mut leadership = LotLeadership {
@@ -81,6 +80,20 @@ pub(crate) async fn apply_bid(
         notify(transaction, bid, user_id.as_uuid(), cycle, occurred_at).await?;
     }
     Ok(())
+}
+
+async fn lock_leadership(
+    transaction: &mut Transaction<'_, Postgres>,
+    lot_id: Uuid,
+) -> Result<Option<sqlx::postgres::PgRow>, CompetitionTransactionError> {
+    sqlx::query(
+        "SELECT leader_user_id, cycle FROM public.lot_watch_leadership
+        WHERE lot_id = $1 FOR UPDATE",
+    )
+    .bind(lot_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(sql_error)
 }
 
 async fn notify(

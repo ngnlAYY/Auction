@@ -121,18 +121,13 @@ async fn persist(
     completed_at: DateTime<Utc>,
     terminal: Terminal<'_>,
 ) -> Result<(), auction_application::RepositoryError> {
-    for attempt in 0..3 {
-        match persist_once(pool, claim, completed_at, &terminal).await {
-            Ok(()) => return Ok(()),
-            Err(error) if error.retryable() && attempt < 2 => continue,
-            Err(_) => {
-                return Err(repository_error_owned(
-                    "delivery终态未确定写入，保留资金占用并核对原记录",
-                ));
-            }
-        }
-    }
-    Err(repository_error_owned("delivery终态重试已耗尽"))
+    crate::database::retry_conflicts(
+        crate::database::SERIALIZABLE_ATTEMPTS,
+        OutcomeError::retryable,
+        || persist_once(pool, claim, completed_at, &terminal),
+    )
+    .await
+    .map_err(|_| repository_error_owned("delivery终态未确定写入，保留资金占用并核对原记录"))
 }
 
 async fn persist_once(

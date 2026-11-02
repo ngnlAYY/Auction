@@ -14,6 +14,33 @@ use super::mapping::{
 };
 use crate::database::PostgresStore;
 
+/// 成交价格历史的公开范围与筛选（$1 名称模式、$2 世界、$3/$4 成交时间、$5/$6 价格、$7 买家、
+/// $8 卖家）；游标页与编号页共用，保证两种分页的可见集合一致。
+macro_rules! price_history_scope_sql {
+    () => {
+        "FROM public.lots AS l
+         JOIN public.auctions AS a ON a.id = l.auction_id
+         JOIN public.worlds AS w ON w.id = a.world_id
+         JOIN public.equipment AS e ON e.id = l.equipment_id
+         JOIN public.users AS buyer ON buyer.id = l.leader_user_id
+         LEFT JOIN public.auction_submissions AS submission ON submission.id = l.submission_id
+         JOIN public.lot_settlements AS ls ON ls.lot_id = l.id
+         JOIN public.auction_settlements AS settlement ON settlement.auction_id = a.id
+         WHERE a.status = 'settled'
+           AND l.status = 'sold'
+           AND l.leader_user_id IS NOT NULL
+           AND ($1::text[] IS NULL OR e.name ILIKE ALL($1::text[]))
+           AND ($2::text IS NULL OR a.world_id = $2)
+           AND ($3::timestamptz IS NULL OR l.effective_end_at >= $3)
+           AND ($4::timestamptz IS NULL OR l.effective_end_at < $4)
+           AND ($5::bigint IS NULL OR l.current_price >= $5)
+           AND ($6::bigint IS NULL OR l.current_price <= $6)
+           AND ($7::text IS NULL OR lower(buyer.username) = lower($7))
+           AND ($8::text IS NULL OR lower(submission.seller) = lower($8))
+         "
+    };
+}
+
 mod numbered;
 
 pub(super) async fn list_postgres(
@@ -36,7 +63,7 @@ pub(super) async fn list_postgres(
         .begin_read_snapshot()
         .await
         .map_err(|_| storage_error("开启公开价格历史读取事务失败"))?;
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         "SELECT
             l.id AS lot_id,
             a.id AS auction_id,
@@ -51,26 +78,9 @@ pub(super) async fn list_postgres(
             COALESCE(submission.seller, '—')::text AS seller_name,
             l.current_price AS price,
             l.effective_end_at AS closed_at
-         FROM public.lots AS l
-         JOIN public.auctions AS a ON a.id = l.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id
-         JOIN public.equipment AS e ON e.id = l.equipment_id
-         JOIN public.users AS buyer ON buyer.id = l.leader_user_id
-         LEFT JOIN public.auction_submissions AS submission ON submission.id = l.submission_id
-         JOIN public.lot_settlements AS ls ON ls.lot_id = l.id
-         JOIN public.auction_settlements AS settlement ON settlement.auction_id = a.id
-         WHERE a.status = 'settled'
-           AND l.status = 'sold'
-           AND l.leader_user_id IS NOT NULL
-           AND ($1::text[] IS NULL OR e.name ILIKE ALL($1::text[]))
-           AND ($2::text IS NULL OR a.world_id = $2)
-           AND ($3::timestamptz IS NULL OR l.effective_end_at >= $3)
-           AND ($4::timestamptz IS NULL OR l.effective_end_at < $4)
-           AND ($5::bigint IS NULL OR l.current_price >= $5)
-           AND ($6::bigint IS NULL OR l.current_price <= $6)
-           AND ($7::text IS NULL OR lower(buyer.username) = lower($7))
-           AND ($8::text IS NULL OR lower(submission.seller) = lower($8))
-           AND (
+         ",
+        price_history_scope_sql!(),
+        "AND (
                 NOT $9::boolean
                 OR l.effective_end_at < $10
                 OR (
@@ -85,8 +95,8 @@ pub(super) async fn list_postgres(
                 )
            )
          ORDER BY l.effective_end_at DESC, a.sequence DESC, l.lot_number, l.id
-         LIMIT $14",
-    )
+         LIMIT $14"
+    ))
     .bind(name_patterns)
     .bind(request.world_id.as_deref())
     .bind(request.closed_from)

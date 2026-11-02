@@ -8,13 +8,10 @@ pub(in crate::database::recovery_commands) async fn complete_refund_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
-    for attempt in 0..3_u8 {
-        match complete_refund_postgres_once(pool, now).await {
-            Err(RecoveryCommandError::SerializationConflict) if attempt < 2 => continue,
-            result => return result,
-        }
-    }
-    Err(RecoveryCommandError::SerializationConflict)
+    crate::database::retry_conflicts(crate::database::SERIALIZABLE_ATTEMPTS, is_conflict, || {
+        complete_refund_postgres_once(pool, now)
+    })
+    .await
 }
 
 #[cfg(feature = "postgres")]

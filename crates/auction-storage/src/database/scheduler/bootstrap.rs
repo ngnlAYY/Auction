@@ -26,19 +26,19 @@ pub(super) async fn ensure_postgres(
     request: ScheduledRoundBootstrap,
 ) -> Result<ScheduledRoundSnapshot, auction_application::RepositoryError> {
     validate_request(&request)?;
-    for attempt in 0..3_u8 {
-        match ensure_postgres_once(pool, &request).await {
-            Ok(snapshot) => return Ok(snapshot),
-            Err(PostgresBootstrapError::Storage(error))
-                if crate::database::is_serialization_conflict(&error) && attempt < 2 =>
-            {
-                continue;
-            }
-            Err(PostgresBootstrapError::Storage(error)) => return Err(map_storage_error(error)),
-            Err(PostgresBootstrapError::Repository(error)) => return Err(error),
-        }
-    }
-    Err(repository_error_owned("周计划 bootstrap 序列化重试耗尽"))
+    crate::database::retry_conflicts(
+        crate::database::SERIALIZABLE_ATTEMPTS,
+        |error: &PostgresBootstrapError| {
+            matches!(error, PostgresBootstrapError::Storage(source)
+                if crate::database::is_serialization_conflict(source))
+        },
+        || ensure_postgres_once(pool, &request),
+    )
+    .await
+    .map_err(|error| match error {
+        PostgresBootstrapError::Storage(error) => map_storage_error(error),
+        PostgresBootstrapError::Repository(error) => error,
+    })
 }
 
 #[cfg(feature = "postgres")]
