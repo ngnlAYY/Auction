@@ -180,7 +180,13 @@ impl PublicEquipment {
 
         let mut initials = String::with_capacity(PRIMARY_ATTRIBUTES.len());
         for (attribute_name, initial) in PRIMARY_ATTRIBUTES {
-            if self.stats.keys().any(|stat_name| stat_name.eq_ignore_ascii_case(attribute_name)) {
+            if self.stats.keys().any(|stat_name| {
+                // 新来源保留分组；既有装备快照仍使用未分组名称，不改写历史事实。
+                stat_name
+                    .strip_prefix("Primary Attributes / ")
+                    .unwrap_or(stat_name)
+                    .eq_ignore_ascii_case(attribute_name)
+            }) {
                 initials.push(initial);
             }
         }

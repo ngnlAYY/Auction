@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::clients::mooglemail::parser::{canonical_mail_body_digest, subject_is_list_projection};
+use auction_application::mail_recipient_is_list_projection;
 use tokio::time::{Instant, timeout_at};
 
 /// 同一独占凭据会话内取得的完整 Sent 基线；不可克隆，随 prepared 句柄一次消费。
@@ -73,7 +74,7 @@ impl MoogleMailSender {
         for summary in list.summaries.iter().filter(|summary| {
             !baseline.contains(&summary.external_mail_id)
                 && summary.world == world
-                && summary.recipient.eq_ignore_ascii_case(&request.message.recipient)
+                && mail_recipient_is_list_projection(&summary.recipient, &request.message.recipient)
                 && subject_is_list_projection(&summary.subject, &request.message.subject)
         }) {
             // 列表解析或候选过滤可能耗尽预算；过期 timeout 的首次 poll 也不能派发新详情读取。

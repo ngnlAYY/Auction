@@ -79,6 +79,8 @@ impl fmt::Debug for MoogleMailSentListEntry {
 #[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailSentObservation {
     pub external_mail_id: String,
+    /// 详情页完整收件人；列表投影不能作为最终身份。
+    pub recipient: String,
     pub subject: String,
     pub remaining_credits: i64,
     pub cod_pending: i64,
@@ -93,6 +95,7 @@ impl fmt::Debug for MoogleMailSentObservation {
         formatter
             .debug_struct("MoogleMailSentObservation")
             .field("external_mail_id", &self.external_mail_id)
+            .field("recipient", &"[REDACTED]")
             .field("subject", &"[REDACTED]")
             .field("remaining_credits", &self.remaining_credits)
             .field("cod_pending", &self.cod_pending)
@@ -380,6 +383,7 @@ impl MoogleMailSender {
             self.client.check_read_round(cookie, &round).await?;
             Ok(MoogleMailSentObservation {
                 external_mail_id: proof.external_mail_id,
+                recipient: proof.recipient,
                 subject: proof.subject,
                 remaining_credits: proof.remaining_credits,
                 cod_pending: proof.cod_pending,

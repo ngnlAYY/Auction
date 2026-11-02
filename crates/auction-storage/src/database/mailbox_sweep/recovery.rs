@@ -244,6 +244,31 @@ async fn ambiguous_attempt(
     .await
 }
 
+/// 自动恢复和人工 Sent 证明共用原履约复位；仅恢复正常对账，不满足付款或重发资产。
+pub(in crate::database) async fn resume_settlement_send(
+    tx: &mut Transaction<'_, Postgres>,
+    obligation_id: Uuid,
+    delivery_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let enqueued = sqlx::query(
+        "UPDATE public.settlement_obligation_fulfillments
+         SET execution_state='enqueued',state_version=state_version+1,delivery_id=$2,
+             claim_token=NULL,claimed_at=NULL,claim_expires_at=NULL,
+             next_attempt_at=clock_timestamp(),last_error_code=NULL,completed_at=NULL,
+             updated_at=clock_timestamp()
+         WHERE obligation_id=$1 AND execution_state='manual_reconcile'
+           AND delivery_operation='send' AND delivery_id=$2",
+    )
+    .bind(obligation_id)
+    .bind(delivery_id)
+    .execute(&mut **tx)
+    .await?;
+    if enqueued.rows_affected() != 1 {
+        return Err(sqlx::Error::RowNotFound);
+    }
+    Ok(())
+}
+
 /// 草稿没有发送时间可消歧；全库存在相同未绑定身份时保守拒绝一次性 discard 授权。
 pub(super) async fn begin_discard_once(
     pool: &super::TrackedPool<Postgres>,

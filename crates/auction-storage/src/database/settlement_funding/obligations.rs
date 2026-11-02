@@ -15,10 +15,17 @@ async fn fund_lot(
     command: &FundingMutation,
     lot_id: Uuid,
     receipt: Option<&FundingCollectedReceipt<'_>>,
+    equipment_loss: bool,
 ) -> Result<(), FundingError> {
     let collected = receipt.is_some();
     let cash = receipt.and_then(|receipt| receipt.evidence.main_cash.as_ref());
-    let action = if collected { "collected" } else { "internal_purchase" };
+    let action = if equipment_loss {
+        "operator_equipment_loss"
+    } else if collected {
+        "collected"
+    } else {
+        "internal_purchase"
+    };
     if replay(tx, account, command, action, lot_id).await? {
         return Ok(());
     }
@@ -35,6 +42,10 @@ async fn fund_lot(
     }
     .validate()
     .map_err(invalid)?;
+    if equipment_loss {
+        auction_domain::equipment_loss_funding(split, account.records_only(), true)
+            .map_err(invalid)?;
+    }
     let payment_id: Uuid = row.try_get("payment_id").map_err(storage)?;
     let seller_id: Uuid = row.try_get("seller_id").map_err(storage)?;
     if collected
@@ -47,7 +58,7 @@ async fn fund_lot(
     }
     // lot全局唯一，不因账户/凭据切换重做付款分配。
     sqlx::query("INSERT INTO public.settlement_funding_lots(lot_id,uid,payment_obligation_id,source_kind) VALUES($1,$2,$3,$4)")
-        .bind(lot_id).bind(account.uid()).bind(payment_id).bind(if collected {"collected"} else {"internal"})
+        .bind(lot_id).bind(account.uid()).bind(payment_id).bind(if equipment_loss {"operator_equipment_loss"} else if collected {"collected"} else {"internal"})
         .execute(&mut **tx).await.map_err(storage)?;
     let seller = allocation(tx, account.uid(), "seller", Some(lot_id), Some(seller_id)).await?;
     let tax = allocation(tx, account.uid(), "tax", Some(lot_id), None).await?;
@@ -72,7 +83,11 @@ async fn fund_lot(
         let source = source(
             tx,
             account.uid(),
-            "record_internal_purchase",
+            if equipment_loss {
+                "record_operator_equipment_loss"
+            } else {
+                "record_internal_purchase"
+            },
             payment_id,
             split.buyer.value(),
             &command.request_digest,
@@ -124,7 +139,20 @@ pub async fn fund_internal_purchase(
     command: &FundingMutation,
     lot_id: Uuid,
 ) -> Result<(), FundingError> {
-    fund_lot(tx, account, command, lot_id, None).await
+    fund_lot(tx, account, command, lot_id, None, false).await
+}
+
+/// 已验证装备损失的人工责任；只支持 record_only，不制造 collected receipt。
+pub async fn fund_equipment_loss(
+    tx: &mut Transaction<'_, Postgres>,
+    account: &LockedFundingAccount,
+    command: &FundingMutation,
+    lot_id: Uuid,
+) -> Result<(), FundingError> {
+    if !account.records_only() || !account.ready() {
+        return Err(FundingError::Unavailable);
+    }
+    fund_lot(tx, account, command, lot_id, None, true).await
 }
 
 /// 调用者必须将当前session实收/UID绑定证明与此动作同事务持久化。
@@ -149,7 +177,7 @@ pub async fn fund_collected_payment(
     let command = FundingMutation { command_id: command.command_id, request_digest: digest };
     let lot: Uuid = sqlx::query_scalar("SELECT lot_id FROM public.settlement_obligations WHERE id=$1 AND obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')")
         .bind(payment_obligation_id).fetch_one(&mut **tx).await.map_err(storage)?;
-    fund_lot(tx, account, &command, lot, Some(receipt)).await
+    fund_lot(tx, account, &command, lot, Some(receipt), false).await
 }
 
 /// 原seller用途转换，不新增收入、不自动再投资。

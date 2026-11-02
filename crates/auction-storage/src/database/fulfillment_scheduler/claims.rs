@@ -105,7 +105,7 @@ pub(super) async fn claim_postgres(
                   delivery.payload AS delivery_payload,
                   delivery.external_reference AS delivery_external_reference,
                   delivery.failure_code AS delivery_failure_code,
-                  CASE WHEN delivery.result_metadata ->> 'proof' = 'sent_recovered_frozen_v1'
+                  CASE WHEN delivery.result_metadata ->> 'proof' IN ('sent_recovered_frozen_v1','sent_operator_confirmed_v1')
                     THEN CASE WHEN public.delivery_has_frozen_sent_proof(
                       delivery.id, delivery.result_metadata, delivery.external_reference)
                       THEN 'true' ELSE 'false' END

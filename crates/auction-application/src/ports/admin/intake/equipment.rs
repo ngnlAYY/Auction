@@ -51,6 +51,7 @@ pub struct CanonicalEquipment {
     pub suffix: String,
     pub level: Option<i32>,
     pub tradeable: bool,
+    /// HTML 分组属性使用“分组 / 名称”键；无分组及历史键保持原样。
     pub stats: BTreeMap<String, CanonicalEquipmentStat>,
     #[serde(skip_serializing)]
     pub key: String,

@@ -2,7 +2,7 @@
 
 [文档导航](../../docs/README.md) · [部署运维](../../ops/README.md) · [配置参考](../../ops/config/README.md) · [备份与恢复](../../ops/deploy/RECOVERY.md)
 
-Auction 的运维命令行：配置与部署预检、分体 systemd 部署的顺序启停、数据库迁移/建库/备份恢复/重建，以及凭据、规则、论坛、装备 PM、邮件证据和 Bot 资金等显式运维入口。
+Auction 的运维命令行：配置与部署预检、分体 systemd 部署的顺序启停、数据库迁移/建库/备份恢复/重建，以及凭据、规则、论坛、装备 PM、邮件证据、Bot 资金和结算异常等显式运维入口。
 
 它只装配既有的配置 loader、应用端口与存储实现，不绕过领域规则、幂等账本或追加式审计；普通服务启动不会隐式迁移、备份或删库。显式维护使用本工具；合并部署另允许在首次设置网页确认后初始化专用空库。参数的权威说明是 `auction-cli <命令> --help`。
 
@@ -23,7 +23,7 @@ cargo build --locked --release -p auction-cli --features postgres,cache-redis
 ## 通用约定
 
 - **配置目录**：全局参数 `--config-dir <DIR>`（默认 `/etc/auction`）指向含 `public.toml`、`admin.toml`、`worker.toml` 的目录，分体部署与合并部署（`auction-server` 的 `--config-dir`）使用同一布局。相对路径按当前目录解析。
-- **数据库来源**：数据库、凭据、邮件与资金命令统一读取 `worker.toml` 及其敏感文件中的 `[database]`；三角色指向同一数据库由 `config check` 保证。连接串、口令、Cookie 与数据密钥不会出现在参数、输出或日志中。
+- **数据库来源**：数据库、凭据、邮件、资金与结算命令统一读取 `worker.toml` 及其敏感文件中的 `[database]`；三角色指向同一数据库由 `config check` 保证。连接串、口令、Cookie 与数据密钥不会出现在参数、输出或日志中。
 - **输出**：成功的结构化结果以单个 JSON 文档写入 stdout；进度与诊断写入 stderr，进度前缀 `[auction-cli]`，顶层错误前缀 `auction-cli:`。失败可能没有 JSON，或已先输出状态 JSON；脚本应结合退出码判断结果，不要解析错误文本。
 - **文件权限**：进程以 `umask 077` 运行；证据、回执、备份与 manifest 以 `create_new` + `0600` 写入，父目录须为非符号链接、禁止 group/other 写入，已存在的目标一律拒绝覆盖，并在报告成功前同步文件与父目录。
 
@@ -51,6 +51,7 @@ cargo build --locked --release -p auction-cli --features postgres,cache-redis
 | `pm` | `list`、`reconcile` | reconcile 写入 |
 | `mail` | `export-evidence`、`inspect-sent` | 导出只读本地归档；Sent 核查还读取数据库与远端邮件，结果写入本地文件 |
 | `funds` | `preview`、`open-record-only`、`reconcile` | 后两者写入 |
+| `settlement` | `equipment-loss <LOT_UUID>`、`confirm-sent <DELIVERY_UUID> --evidence <JSON>` | 默认只读；`--execute` 记录相应人工处置或 Sent 证明 |
 
 ## 配置检查
 
@@ -231,6 +232,51 @@ auction-cli mail inspect-sent <obligation-id> --output /secure/sent-<id>.json
 - `export-evidence` 按 Worker 日志中的 `evidence_id` 解密导出 MoogleMail 诊断归档（目录为 `[worker.mooglemail.diagnostics].directory`）。父密钥默认优先 `credential_data_key`、缺失时用 `equipment_data_key`，可用 `--key-source` 指定；轮换密钥后须保留旧密钥才能导出历史证据。不联网、不写数据库。
 - `inspect-sent` 只针对撤拍退回（`withdrawn_return`）义务：读取冻结的收件人、世界与装备，用该世界唯一的 active 邮件凭据只读查询 Sent 中的精确邮件，结果标记 `time_unverified`，`collected` 也不等于已送达证明。不发送、不改变履约状态。
 
+### 装备损失人工收口
+
+```bash
+# 默认只读，不访问游戏或论坛
+auction-cli --config-dir /etc/auction settlement equipment-loss <LOT_UUID>
+
+# 逐字使用 preview 的版本、账户、卖方金额与 confirmation，先替换全部占位值
+auction-cli --config-dir /etc/auction settlement equipment-loss <LOT_UUID> --execute \
+  --command-id <STABLE_COMMAND_UUID> --actor ops --reason '<装备损失原因及人工处置责任>' \
+  --funding-uid <UID> --expected-recovery-version <RECOVERY_V> \
+  --expected-payment-version <PAYMENT_V> --expected-delivery-fencing-version <DELIVERY_V> \
+  --seller-amount <SELLER_AMOUNT> --buyer-compensation-external \
+  --confirm 'RESOLVE EQUIPMENT LOSS <LOT_UUID> <UID> <RECOVERY_V> <PAYMENT_V> <DELIVERY_V> <SELLER_AMOUNT> EXTERNAL BUYER COMPENSATION'
+```
+
+- 默认输出 `outcome=preview`，`preview` 原样序列化应用端口的安全投影，包含 `eligible`、`blockers`、资金 UID、恢复/付款履约/投递版本与冻结买卖方金额。`execution.confirm` 给出逐字确认短语，`execution.argv_template` 给出独立参数数组模板；替换配置目录、稳定命令 UUID、操作者与原因占位值后按参数执行，不要把 JSON 直接交给 shell `eval`。没有可投影的资金 UID 时 `execution=null`；有模板不代表资格通过。
+- 执行必须同时提供示例中的全部参数。缺少 `--execute` 时不得携带执行参数；缺参数、零 UUID、操作者格式错误或确认短语不匹配时在写入前拒绝。全部业务资格、资金模式与状态版本由结算 owner 在事务中校验；CLI 不另查 SQL 或推断 Sent。
+- 本命令仅用于 main 已结算成交、原装备 COD 因库存读取失败而停在人工核对、全部发送尝试明确未开始外写的装备损失。只支持已就绪的 `record_only` 资金账户，`strict_cash` 拒绝执行；账户模式与既有结算金额均不改变。任何外写未知、既有收款或冲突恢复/资产处置都不能靠该命令绕过。
+- `--buyer-compensation-external` 是操作者承担买方线下补偿责任的声明，不能证明线下补偿已支付。原付款以 `operator_equipment_loss_v1` 人工处置证明收口，绝不伪造 Sent、COD 收款或卖方已收款；责任资金沿原冻结结算分配，不记为真实 `collected_payment`。原结算与补偿流水保留，不走成交撤销冲正、重列或拉黑。
+- 成功输出 `outcome=committed`，同一 ID 同参数重放输出 `outcome=replayed`，`result` 包含原付款投递、卖方义务与金额等审计结果。连接或响应错误不能证明未提交：必须原样重放同一命令 ID 与全部参数，不要先用新 preview 的版本替换原请求；同 ID 换参数冲突。
+- 原装备投递永久终结为 `failed/equipment_destroyed`，不能再从 Admin 重试或恢复投递；不再催款或执行该件买方退款。卖方货款只解除阻塞，仍使用原冻结金额，通过正常 `SellerPayout` 履约和真实邮件支付，命令成功不代表卖方已收款。详见[结算与履约](../../docs/guide/settlement.md#装备损失人工处置)。
+
+### Sent 人工证据确认
+
+```bash
+# 只读数据库预览；证据由操作者观察原生 Sent 后准备，不发起游戏请求
+auction-cli --config-dir /etc/auction settlement confirm-sent <DELIVERY_UUID> \
+  --evidence /private/sent-evidence.json
+
+# 逐字使用 preview 的版本、确认短语及要求的接受项
+auction-cli --config-dir /etc/auction settlement confirm-sent <DELIVERY_UUID> \
+  --evidence /private/sent-evidence.json --execute \
+  --command-id <STABLE_COMMAND_UUID> --expected-fencing-version <FENCE> \
+  --actor ops --reason '<原生证据来源及人工关联责任>' \
+  --accept-collected-assets --accept-attempt-history --confirm '<PREVIEW_CONFIRM>'
+```
+
+- 证据只按闭集 `ManualSentEvidence` 解析：`schema_version=1`，`world_id`、`external_mail_id`、`sender_uid`、`sender_name`、`recipient`、`subject`、UTC `sent_minute`/`observed_at`、32 字节数组 `original_body_digest`/`observed_body_digest`、整数 `remaining_credits`/`cod_pending`、字符串数组 `equipment_ids`、布尔 `collected` 和原生 `receipt`。字段全部必填，未知字段拒绝。最多 64 KiB，使用既有有界、非阻塞普通文件读取器，拒绝符号链接、FIFO、设备等特殊文件；不要将凭据放进证据。
+- `equipment_ids` 只记录远端当前实际剩余 EID，已领取时为空；不得将期待 EID 填入观察值。原始正文摘要绑定冻结发送正文，不能用当前模板重渲染；已领取时还须保留游戏追加的原生附件收取/COD 回执。应用端口统一核对冻结期待、发件身份、发送分钟区间、金额、附件与历史尝试。
+- 入口支持 main 结算的单件装备 COD、流拍/撤拍退回，以及原货款已寄出但结果未知的 `seller_payout`。原投递须有冻结发送尝试、处于允许的人工核对状态，且无活跃 claim 或冲突处置。货款只接受实际仍完整附带的正额 Credits、零 COD、空 EID 与空收取回执；原 `seller/unknown` 资金占用及 reserve/unknown 分录必须精确绑定同一账户、lot、义务、投递和金额。默认 `outcome=preview`，`preview.blockers`/`eligible` 表示当前资格；预览不写入或授权重发。
+- 执行参数只能与 `--execute` 同时使用；命令 ID、版本、操作者、原因与 `--confirm` 全部必填。`--accept-collected-assets` 和 `--accept-attempt-history` 只在 preview 要求时加入，示例中的两项不能机械照抄。确认短语绑定投递、版本、MID、类型化证据摘要与两项接受声明，任何内容变化均须重新预览。`execution.argv_template` 是独立参数数组，不得 `eval`。
+- 已收取附件后原 EID 无法再自动证明，接受项记录操作者承担的资产关联责任；旧尝试历史不完整时，另一接受项记录人工关联责任。系统保留全部旧尝试、原结果与审计，追加独立不可变确认，以 `sent_operator_confirmed_v1` 区别于 `sent_exact_payload_v1` 自动精确资产证明，不设置 `sent_verified=true` 冒充自动核验。Admin 仍不能仅凭手填 MID 确认主动 Send 成功。
+- 成功输出 `outcome=committed`，同 ID 同参数重放输出 `outcome=replayed`。响应或连接错误不能证明未提交，必须保持原命令 ID、证据内容、原因、版本、接受项与确认短语重放；不要用新 preview 的版本替换原请求。同 ID 换参冲突。
+- 装备确认只绑定真实 MID、恢复原投递及履约；COD 实收及后续卖方款仍由 Worker 使用真实收取证明与原冻结结算处理。已寄出的货款确认则复用资金 owner，将原 `unknown` 支出记为 `spent`，不创建新付款、收款来源或投递；同命令重放不重复支出。确认均不代表收件人已经领取，领取状态由正常流程继续核验。详见[结算与履约](../../docs/guide/settlement.md#sent-人工证据确认)。
+
 ### Bot 资金
 
 ```bash
@@ -250,7 +296,7 @@ Bot 内部履约（买卖双方之一是 Bot 自己时不经邮件外发）需�
 - 写入都先按原命令 ID 重放；之后在 30 秒共享预算内取得与 Worker 相同的邮件/论坛凭据 owner，用 Main 世界唯一的 active 邮件凭据与论坛凭据完成联合身份、干净草稿（以及 strict 模式的现金）观察，再在同一 opaque guard 内提交。因此**必须先停止 Worker**，并启用 `[worker.forum]` 与 `credential_data_key`。
 - 输出 `committed`/`replayed` 才算完成；`rolled_back` 为确定回滚；`evidence_unavailable` 表示提交前证据未通过；`outcome_unknown` 表示提交阶段结果未知——保留原命令 ID 与全部参数重新执行，以重放核对，不要换 ID 重试。
 
-凭据、规则与资金命令在连接池建立后，将参数校验、客户端或缓存装配与执行错误统一带回连接池关闭路径，退出前显式关闭连接池；规则文件复用证据文件的非阻塞普通文件检查与有界读取。
+凭据、规则与资金命令在连接池建立后，将参数校验、客户端或缓存装配与执行错误统一带回连接池关闭路径；结算损失命令在连接前校验执行声明与确认短语，端口读取、提交、序列化和输出错误也统一带回关闭路径。退出前显式关闭连接池；规则文件复用证据文件的非阻塞普通文件检查与有界读取。
 
 ## 源码结构
 
@@ -263,5 +309,5 @@ Bot 内部履约（买卖双方之一是 Bot 自己时不经邮件外发）需�
 | `apps/auction-cli/src/service/` | systemctl 客户端、readiness 探针、编排与停机门禁 |
 | `apps/auction-cli/src/database/` | 状态、迁移、建库、预检/盘点证据、重建、连接目标解析 |
 | `apps/auction-cli/src/backup/` | manifest、libpq 环境与 passfile、备份/校验/恢复 |
-| `apps/auction-cli/src/operations/` | 凭据、规则、论坛、PM、邮件、资金 |
+| `apps/auction-cli/src/operations/` | 凭据、规则、论坛、PM、邮件、资金与结算异常 |
 | `apps/auction-cli/src/support/` | 私有文件、锁文件与输入校验 |

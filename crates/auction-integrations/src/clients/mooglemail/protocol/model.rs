@@ -303,6 +303,7 @@ pub struct MoogleMailTarget {
     pub(crate) world: MoogleMailWorld,
     pub(crate) url: Url,
     pub(crate) origin: String,
+    pub(crate) inventory_metadata: bool,
 }
 
 impl MoogleMailTarget {

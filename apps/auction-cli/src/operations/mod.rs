@@ -5,6 +5,7 @@ pub(crate) mod forum;
 pub(crate) mod funds;
 pub(crate) mod mail;
 pub(crate) mod rules;
+pub(crate) mod settlement;
 pub(crate) mod watch_pm;
 
 use std::sync::Arc;

@@ -27,6 +27,8 @@ mod competition;
 #[cfg(feature = "postgres")]
 mod competition_audit;
 #[cfg(feature = "postgres")]
+mod equipment_loss;
+#[cfg(feature = "postgres")]
 mod lifecycle_audit;
 #[cfg(feature = "postgres")]
 mod mail_delivery;
@@ -42,6 +44,8 @@ mod migrations;
 mod rebuild;
 #[cfg(feature = "postgres")]
 mod recovery_preflight;
+#[cfg(feature = "postgres")]
+mod sent_confirmation;
 #[cfg(feature = "postgres")]
 mod settlement;
 #[cfg(feature = "postgres")]

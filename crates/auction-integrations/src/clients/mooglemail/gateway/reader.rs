@@ -12,7 +12,7 @@ use super::*;
 use crate::clients::mooglemail::parser::subject_is_list_projection;
 use auction_application::{
     MailPollClaim, MailPollProgressObserver, MailPollProgressStage, MailPollReadJournal,
-    MailPollReadSummary,
+    MailPollReadSummary, mail_recipient_is_list_projection,
 };
 
 type ReadJournalContext<'a> = (&'a dyn MailPollReadJournal, &'a MailPollClaim);
@@ -272,7 +272,7 @@ impl MoogleMailGateway {
         .map_err(|_| fetch_budget_exhausted(request.world))??;
         let mut candidates = Vec::new();
         for summary in list.summaries.iter().filter(|summary| {
-            summary.recipient.eq_ignore_ascii_case(&request.recipient)
+            mail_recipient_is_list_projection(&summary.recipient, &request.recipient)
                 && subject_is_list_projection(&summary.subject, &request.subject)
         }) {
             let detail_target =
@@ -464,7 +464,7 @@ impl MoogleMailGateway {
                 .await?;
             if snapshot.external_mail_id != external_mail_id
                 || snapshot.world != world
-                || !snapshot.recipient.eq_ignore_ascii_case(&summary.recipient)
+                || !mail_recipient_is_list_projection(&summary.recipient, &snapshot.recipient)
                 || !subject_is_list_projection(&summary.subject, &snapshot.subject)
                 || snapshot.sent_at != summary.sent_at
             {

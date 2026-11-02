@@ -44,7 +44,8 @@ fn failure_code(command: &Command) -> u8 {
         | Command::Forum(_)
         | Command::Pm(_)
         | Command::Mail(_)
-        | Command::Funds(_) => EXIT_OPERATION,
+        | Command::Funds(_)
+        | Command::Settlement(_) => EXIT_OPERATION,
     }
 }
 
@@ -77,6 +78,10 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Mail(command) => crate::operations::mail::run(&config_dir, command).await,
         #[cfg(feature = "postgres")]
         Command::Funds(command) => crate::operations::funds::run(&config_dir, command).await,
+        #[cfg(feature = "postgres")]
+        Command::Settlement(command) => {
+            crate::operations::settlement::run(&config_dir, command).await
+        }
         #[cfg(not(feature = "postgres"))]
         Command::Db(_)
         | Command::Backup(_)
@@ -85,7 +90,8 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         | Command::Forum(_)
         | Command::Pm(_)
         | Command::Mail(_)
-        | Command::Funds(_) => {
+        | Command::Funds(_)
+        | Command::Settlement(_) => {
             anyhow::bail!("当前 auction-cli 未编译 postgres feature；数据库与业务运维命令不可用")
         }
     }

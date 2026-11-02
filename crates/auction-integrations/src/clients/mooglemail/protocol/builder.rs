@@ -6,7 +6,10 @@ use super::super::{MoogleMailError, MoogleMailErrorCategory};
 use super::model::{
     MoogleMailEquipmentKey, MoogleMailOperation, MoogleMailTarget, MoogleMailWorld,
 };
-use super::validation::{endpoint_origin, valid_decimal_id, valid_endpoint, valid_opaque_id};
+use super::validation::{
+    endpoint_origin, valid_decimal_id, valid_endpoint, valid_inventory_metadata_path,
+    valid_opaque_id,
+};
 
 /// 只构造批准过的 MoogleMail URL，不接受调用方传入 raw path/query。
 #[derive(Clone)]
@@ -108,6 +111,7 @@ impl MoogleMailUrlBuilder {
             world,
             url,
             origin: self.origin.clone(),
+            inventory_metadata: false,
         })
     }
 
@@ -120,6 +124,7 @@ impl MoogleMailUrlBuilder {
             world,
             url,
             origin: self.origin.clone(),
+            inventory_metadata: false,
         }
     }
 
@@ -140,7 +145,57 @@ impl MoogleMailUrlBuilder {
             world,
             url,
             origin: self.origin.clone(),
+            inventory_metadata: false,
         }
+    }
+
+    /// 原始 src 仅允许同源、同世界的装备名称资源；不跟随 URL 规范化修复路径。
+    pub(crate) fn inventory_metadata(
+        &self,
+        world: MoogleMailWorld,
+        source: &str,
+    ) -> Result<MoogleMailTarget, MoogleMailError> {
+        let invalid = || self.configuration(MoogleMailOperation::Inventory, world);
+        if source.len() > 512
+            || source.bytes().any(|byte| {
+                !byte.is_ascii()
+                    || byte.is_ascii_whitespace()
+                    || byte.is_ascii_control()
+                    || matches!(byte, b'%' | b'\\' | b'?' | b'#' | b'@')
+            })
+        {
+            return Err(invalid());
+        }
+        let path = if source.starts_with('/') {
+            source
+        } else {
+            source
+                .split_once("://")
+                .and_then(|(_, rest)| rest.find('/').map(|index| &rest[index..]))
+                .ok_or_else(invalid)?
+        };
+        if !valid_inventory_metadata_path(world, path) {
+            return Err(invalid());
+        }
+        let url =
+            if source.starts_with('/') { self.endpoint.join(source) } else { Url::parse(source) }
+                .map_err(|_| invalid())?;
+        if url.origin() != self.endpoint.origin()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || url.path() != path
+        {
+            return Err(invalid());
+        }
+        Ok(MoogleMailTarget {
+            operation: MoogleMailOperation::Inventory,
+            world,
+            url,
+            origin: self.origin.clone(),
+            inventory_metadata: true,
+        })
     }
 
     /// Armory 写入仅使用固定 organize 目标，不复用带分类的只读 URL。
@@ -156,6 +211,7 @@ impl MoogleMailUrlBuilder {
             world,
             url,
             origin: self.origin.clone(),
+            inventory_metadata: false,
         }
     }
 
@@ -180,6 +236,7 @@ impl MoogleMailUrlBuilder {
             world,
             url,
             origin: self.origin.clone(),
+            inventory_metadata: false,
         })
     }
 
@@ -199,7 +256,13 @@ impl MoogleMailUrlBuilder {
                 query.append_pair("mid", external_id);
             }
         }
-        Ok(MoogleMailTarget { operation, world, url, origin: self.origin.clone() })
+        Ok(MoogleMailTarget {
+            operation,
+            world,
+            url,
+            origin: self.origin.clone(),
+            inventory_metadata: false,
+        })
     }
 
     fn configuration(

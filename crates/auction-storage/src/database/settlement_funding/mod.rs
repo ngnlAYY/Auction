@@ -18,7 +18,8 @@ pub use account::{
 };
 pub use deliveries::{finish_funded_delivery, reserve_funded_delivery, start_funded_delivery};
 pub use obligations::{
-    fund_collected_payment, fund_internal_purchase, refund_funded_purchase, retain_funded_seller,
+    fund_collected_payment, fund_equipment_loss, fund_internal_purchase, refund_funded_purchase,
+    retain_funded_seller,
 };
 
 use auction_application::{FundingError, FundingMutation, SettlementInternalEvidenceSnapshot};

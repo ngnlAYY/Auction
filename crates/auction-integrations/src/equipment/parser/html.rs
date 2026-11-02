@@ -17,7 +17,7 @@ struct EquipmentSelectors {
     header: Selector,
     equipment: Selector,
     main: Selector,
-    rows: Selector,
+    groups: Selector,
 }
 
 // 选择器来自固定源码；每进程只编译一次，错误仍按页面结构错误返回，不缓存外部正文。
@@ -29,7 +29,7 @@ static SELECTORS: LazyLock<Result<EquipmentSelectors, ()>> = LazyLock::new(|| {
         header: parse(".eqt")?,
         equipment: parse(".eq")?,
         main: parse(".eq > div")?,
-        rows: parse(".ex > div, .ep > div")?,
+        groups: parse(".ex, .ep")?,
     })
 });
 
@@ -95,41 +95,64 @@ fn parse_stats(
         let (name, value) = parse_main_stat(&text).ok_or(EquipmentParseError::InvalidAttributes)?;
         insert_stat(&mut stats, name, value, Some(base))?;
     }
-    for row in panel.select(&selectors.rows) {
-        let mut elements = row.children().filter_map(ElementRef::wrap);
-        let name_element = elements.next();
-        let value_element = elements.next();
-        let title = row.value().attr("title");
-        // 分组内允许纯标题/说明。出现 Base 声明或带符号数值后就是属性行，列丢失必须报错；
-        // 四列及以上也不能丢掉多余结构后伪装成完整快照。
-        if value_element.is_none()
-            && !declares_base(title)
-            && !has_stat_marker(&normalize_text(row.text().collect::<String>()))
-        {
-            continue;
-        }
-        let (Some(name_element), Some(value_element)) = (name_element, value_element) else {
-            return Err(EquipmentParseError::InvalidAttributes);
-        };
-        let unit_element = elements.next();
-        if elements.next().is_some() {
-            return Err(EquipmentParseError::InvalidAttributes);
-        }
-        let name = normalize_text(name_element.text().collect::<String>());
-        let value = normalize_stat_value(&normalize_text(value_element.text().collect::<String>()))
-            .ok_or(EquipmentParseError::InvalidAttributes)?;
-        if let Some(unit_element) = unit_element {
-            let unit = normalize_text(unit_element.text().collect::<String>());
-            if unit != "%" && unit != "x" {
+    for group in panel.select(&selectors.groups) {
+        let mut rows = group.children().filter_map(ElementRef::wrap);
+        let group_name = if group.value().classes().any(|class| class == "ep") {
+            let heading = rows.next().ok_or(EquipmentParseError::InvalidAttributes)?;
+            let name = normalize_text(heading.text().collect::<String>());
+            if heading.children().any(|child| ElementRef::wrap(child).is_some())
+                || !valid_text(&name, 128)
+                || declares_base(heading.value().attr("title"))
+                || has_stat_marker(&name)
+            {
                 return Err(EquipmentParseError::InvalidAttributes);
             }
-        }
-        let base = if declares_base(title) {
-            Some(title.and_then(parse_base).ok_or(EquipmentParseError::InvalidAttributes)?)
+            Some(name)
         } else {
             None
         };
-        insert_stat(&mut stats, name, value, base)?;
+        for row in rows {
+            let mut elements = row.children().filter_map(ElementRef::wrap);
+            let name_element = elements.next();
+            let value_element = elements.next();
+            let title = row.value().attr("title");
+            // 无分组说明可省略；分组标题之后的属性行不能缺列、单位或声明的 Base。
+            if group_name.is_none()
+                && value_element.is_none()
+                && !declares_base(title)
+                && !has_stat_marker(&normalize_text(row.text().collect::<String>()))
+            {
+                continue;
+            }
+            let (Some(name_element), Some(value_element)) = (name_element, value_element) else {
+                return Err(EquipmentParseError::InvalidAttributes);
+            };
+            let unit_element = elements.next();
+            if elements.next().is_some() {
+                return Err(EquipmentParseError::InvalidAttributes);
+            }
+            let name = normalize_text(name_element.text().collect::<String>());
+            let value =
+                normalize_stat_value(&normalize_text(value_element.text().collect::<String>()))
+                    .ok_or(EquipmentParseError::InvalidAttributes)?;
+            if let Some(unit_element) = unit_element {
+                let unit = normalize_text(unit_element.text().collect::<String>());
+                if unit != "%" && unit != "x" {
+                    return Err(EquipmentParseError::InvalidAttributes);
+                }
+            }
+            let base = if declares_base(title) {
+                Some(title.and_then(parse_base).ok_or(EquipmentParseError::InvalidAttributes)?)
+            } else {
+                None
+            };
+            // 元素名在法伤与减伤等分组内可重名；只有同一完整属性键重复才拒绝。
+            let name = match &group_name {
+                Some(group_name) => format!("{group_name} / {name}"),
+                None => name,
+            };
+            insert_stat(&mut stats, name, value, base)?;
+        }
     }
     if stats.is_empty() {
         return Err(EquipmentParseError::InvalidAttributes);

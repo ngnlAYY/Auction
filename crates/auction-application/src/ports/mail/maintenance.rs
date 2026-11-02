@@ -14,6 +14,28 @@ pub type MailboxFuture<'a, T> =
 
 use crate::ApplicationError;
 
+/// Sent 列表收件人仅作候选投影；详情必须另行精确核对完整收件人。
+/// 原生列表可按字节截断，末尾 U+FFFD 或省略号不属于可证明的身份前缀。
+/// 只借用非空前缀，忽略 ASCII 大小写；不分配，也不作 Unicode 大小写折叠。
+pub fn mail_recipient_is_list_projection(list_recipient: &str, full_recipient: &str) -> bool {
+    let mut prefix = list_recipient;
+    loop {
+        let shorter = prefix
+            .strip_suffix('\u{FFFD}')
+            .or_else(|| prefix.strip_suffix('\u{2026}'))
+            .or_else(|| prefix.strip_suffix("..."));
+        match shorter {
+            Some(shorter) => prefix = shorter,
+            None => break,
+        }
+    }
+    !prefix.is_empty()
+        && full_recipient
+            .as_bytes()
+            .get(..prefix.len())
+            .is_some_and(|full_prefix| full_prefix.eq_ignore_ascii_case(prefix.as_bytes()))
+}
+
 /// compose 页当前草稿的只读投影。
 /// 未发送草稿可能包含登录 key；主题和正文不得进入日志或调试输出。
 #[derive(Clone, PartialEq, Eq)]
@@ -67,6 +89,8 @@ pub struct MoogleMailboxSentEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailboxSentState {
     pub external_mail_id: String,
+    /// 详情页完整收件人；列表投影不能代替最终身份。
+    pub recipient: String,
     /// 详情页完整标题；列表标题可能被截断。
     pub subject: String,
     pub collected: bool,

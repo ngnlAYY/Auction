@@ -230,6 +230,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
                     check_observation_session(&session).await?;
                     Ok(MoogleMailboxSentState {
                         external_mail_id: state.external_mail_id,
+                        recipient: state.recipient,
                         subject: state.subject,
                         collected: state.collected,
                         cod_pending: state.cod_pending,

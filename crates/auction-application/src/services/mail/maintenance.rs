@@ -15,7 +15,7 @@ use crate::{
     DeliveryTakeExpectation, MoogleMailboxComposeState, MoogleMailboxDiscard,
     MoogleMailboxEvidenceStore, MoogleMailboxInboxAssets, MoogleMailboxMaintenance,
     MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxSweepCandidate,
-    MoogleMailboxUnprovenSend, RepositoryError,
+    MoogleMailboxUnprovenSend, RepositoryError, mail_recipient_is_list_projection,
 };
 
 /// 单轮最多核对的投递数；达到上限即停止，不越过未处理后缀推进持久游标。
@@ -387,6 +387,7 @@ impl MailboxMaintenanceService {
         };
         // 列表标题被截断，详情完整标题必须再次包含完整 reference。
         if state.external_mail_id != entry.external_mail_id
+            || !state.recipient.eq_ignore_ascii_case(&candidate.recipient)
             || !state.subject.contains(&candidate.reference)
         {
             return Ok(step);
@@ -460,7 +461,7 @@ impl MailboxMaintenanceService {
             }
         };
         let mut hits = entries.iter().filter(|entry| {
-            candidate.recipient.eq_ignore_ascii_case(&entry.recipient)
+            mail_recipient_is_list_projection(&entry.recipient, &candidate.recipient)
                 && notice_subject_matches(&expectation.subject, &entry.subject)
                 // 页面时间仅精确到分钟；不向下取整 fence，不把更早同分钟邮件当作本次发送。
                 // 模板原入站关联由 expectation owner 保证，时间窗本身不是发送身份。
@@ -477,6 +478,7 @@ impl MailboxMaintenanceService {
             return Ok(step);
         };
         if state.external_mail_id != entry.external_mail_id
+            || !state.recipient.eq_ignore_ascii_case(&candidate.recipient)
             || state.subject != expectation.subject
             || state.body_digest != expectation.body_digest
             || state.remaining_credits != 0
@@ -670,7 +672,7 @@ fn frozen_entry_matches(
     now: chrono::DateTime<chrono::Utc>,
 ) -> bool {
     candidate.world_id == expectation.world_id
-        && expectation.recipient.eq_ignore_ascii_case(&entry.recipient)
+        && mail_recipient_is_list_projection(&entry.recipient, &expectation.recipient)
         && notice_subject_matches(&expectation.subject, &entry.subject)
         // 列表时间仅精确到分钟；不能向下取整 fence 或扩大窗口混入先前相同正文。
         && entry.sent_at >= candidate.sending_at
@@ -689,6 +691,7 @@ fn frozen_state_matches(
     // 重启可改变当前 owner generation；原凭据 ID/version 不得改变，当前 generation 由存储锁验。
     expected.credential_id == observed.credential_id
         && expected.credential_version == observed.credential_version
+        && state.recipient.eq_ignore_ascii_case(&expectation.recipient)
         && state.subject == expectation.subject
         && state.body_digest == expectation.body_digest
         && state.cod_pending == expectation.cod
@@ -719,7 +722,8 @@ fn recovered_state_matches(
     candidate: &MoogleMailboxUnprovenSend,
     state: &MoogleMailboxSentState,
 ) -> bool {
-    if state.collected
+    if !state.recipient.eq_ignore_ascii_case(&candidate.recipient)
+        || state.collected
         || state.cod_pending != candidate.cod
         || state.remaining_credits != candidate.credits
         || state.remaining_equipment_ids != candidate.attachment_ids
@@ -760,7 +764,7 @@ fn notice_subject_matches(expected: &str, list_subject: &str) -> bool {
 
 fn sent_matches(candidate: &MoogleMailboxUnprovenSend, entry: &MoogleMailboxSentEntry) -> bool {
     // Sent 列表标题会被服务端截断到固定长度；只比较可证明的 UUID 前缀，完整标题由详情确认。
-    candidate.recipient.eq_ignore_ascii_case(&entry.recipient)
+    mail_recipient_is_list_projection(&entry.recipient, &candidate.recipient)
         && reference_is_subject_projection(&entry.subject, &candidate.reference)
 }
 

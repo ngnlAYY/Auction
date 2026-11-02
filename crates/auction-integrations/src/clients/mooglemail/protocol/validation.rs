@@ -16,6 +16,37 @@ pub(crate) fn valid_decimal_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 32 && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
+/// 先校验原始路径，禁止 URL 解析器消除 traversal 或解码后改变目标。
+pub(super) fn valid_inventory_metadata_path(world: super::MoogleMailWorld, path: &str) -> bool {
+    let prefix = match world {
+        super::MoogleMailWorld::Main => "/dynjs/",
+        super::MoogleMailWorld::Isekai => "/isekai/dynjs/",
+    };
+    let Some(path) = path.strip_prefix(prefix) else {
+        return false;
+    };
+    let mut segments = path.split('/');
+    let (Some(generation), Some(revision), Some(filename)) =
+        (segments.next(), segments.next(), segments.next())
+    else {
+        return false;
+    };
+    if segments.next().is_some()
+        || !valid_decimal_id(generation)
+        || generation.starts_with('0')
+        || revision.is_empty()
+        || revision.len() > 64
+        || !revision.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    {
+        return false;
+    }
+    filename
+        .strip_prefix("equip-")
+        .or_else(|| filename.strip_prefix("eqstore-"))
+        .and_then(|filename| filename.strip_suffix(".js"))
+        .is_some_and(|uid| valid_decimal_id(uid) && !uid.starts_with('0'))
+}
+
 pub(crate) fn valid_hex_key(value: &str) -> bool {
     value.len() == 10 && value.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit())
 }

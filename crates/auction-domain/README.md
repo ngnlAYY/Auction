@@ -94,6 +94,7 @@ Draft ──► Preview ──► Live ──► Final ──► Settling ──
 
 - `FundingAccountKey`、`FundingSplit` 与 `funding_reconciliation_capacity` 描述 Bot 账号真实现金的用途分配：冻结的经济金额不重算，余额观察不等于自有资金。
 - `InternalSettlementAction` 只在买方或卖方是 Bot 自身时选择义务的执行方式（不经邮件外发），不重算金额、不新增责任。
+- `equipment_loss_funding` 只接受 record_only 及显式外部买方补偿责任声明，验证冻结 B+C=S+T；不把人工责任变成 COD 实收，不重算卖家金额。
 
 ## 维护约定
 
