@@ -28,12 +28,13 @@ bash ci/checks/check.sh <检查项>...
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `feature` | `auction-storage`（仅 `postgres`）、`auction-cache`（仅 `redis`），以及 `auction-setup` 的空默认图与 `postgres` 完整图 |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |
+| `dependency-versions` | `auction-server` 正常依赖图只能包含一个 `tungstenite` 版本；Axum 的 WebSocket 错误按版本 downcast，跨版本并存会静默丢失 1009 close 契约 |
 | `wasm` | 以 `wasm32-unknown-unknown` 目标运行 `cargo clippy -D warnings`：Public（连同 `auction-web-shared`、`auction-contracts`）与 Admin 分开检查，各自保留独立 feature 图；`cfg(target_arch = "wasm32")` 代码只在此项被 lint |
-| `rust` | `fmt check feature lint wasm` |
+| `rust` | `fmt check feature dependency-versions lint wasm` |
 | `dependency-audit` | `cargo audit --deny warnings`（需要受控 cargo-audit，联网读取 RustSec） |
 | `dependency-unused` | `cargo machete`（0.9.2） |
 
-`just verify` = `all fmt check feature lint wasm`。默认门禁不运行测试。
+`just verify` = `all fmt check feature dependency-versions lint wasm`。默认门禁不运行测试。
 
 ## GitHub Actions：`.github/workflows/ci.yml`
 

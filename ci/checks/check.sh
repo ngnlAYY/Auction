@@ -210,6 +210,22 @@ check_i18n() {
 	fi
 }
 
+# Axum 的 WebSocket 错误只能按同一 tungstenite 版本 downcast。服务二进制里出现第二个版本时，
+# 编译、Clippy 与其它门禁都不会报错，但 v1 的 1009 close 契约会在运行期静默失效。
+check_dependency_versions() {
+	local versions
+	if ! versions=$(cargo tree -p auction-server -e normal --locked --prefix none); then
+		printf '%s\n' "无法解析 auction-server 的依赖图" >&2
+		return 1
+	fi
+	versions=$(awk '$1 == "tungstenite" { print $2 }' <<<"$versions" | sort -u)
+	if [[ -z "$versions" || $(wc -l <<<"$versions") -ne 1 ]]; then
+		printf '%s\n' "auction-server 的传递依赖必须只包含一个 tungstenite 版本：" >&2
+		printf '%s\n' "${versions:-<未找到>}" >&2
+		return 1
+	fi
+}
+
 # 本地 Justfile 与 CI 共用命令定义，避免编译参数在两处漂移。
 run_checks() {
 	local check
@@ -219,6 +235,7 @@ run_checks() {
 		config) check_config_examples ;;
 		i18n) check_i18n ;;
 		equipment-contract) bash ci/checks/equipment-contract.sh ;;
+		dependency-versions) check_dependency_versions ;;
 		repository) check_repository_contracts ;;
 		fmt) cargo fmt --all -- --check ;;
 		check) cargo check --locked --workspace --all-targets ;;
@@ -238,7 +255,7 @@ run_checks() {
 		dependency-audit) cargo audit --deny warnings ;;
 		dependency-unused) cargo machete ;;
 		all) run_checks repository layout config i18n equipment-contract ;;
-		rust) run_checks fmt check feature lint wasm ;;
+		rust) run_checks fmt check feature dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2
 			return 2
