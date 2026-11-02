@@ -83,6 +83,24 @@ async fn delivery_snapshot(
                 AND NOT EXISTS (
                     SELECT 1 FROM public.settlement_legacy_self_reconciliations r
                     WHERE /* trusted_legacy_self */
+                )
+                -- 已处置终态不再计入，各自以不可变事实为证：关注提醒在开始发送前失去资格的预检退役；
+                -- Admin 对账判失败（命令账本中产出当前 fence 的失败命令）；装备损失处置退役的原投递。
+                -- 结算类人工判失败仍由履约水位的 failed 暴露。
+                AND NOT (origin_kind = 'lot_watch'
+                    AND failure_code = 'lot_watch_invalidated'
+                    AND sending_at IS NULL
+                    AND result_metadata @>
+                        '{"outcome_unknown":false,"preflight_blocked":true,"reason_code":"lot_watch_invalidated"}'::jsonb)
+                AND NOT EXISTS (
+                    SELECT 1 FROM public.delivery_admin_commands admin
+                    WHERE admin.delivery_id = d.id AND admin.command_kind = 'reconcile'
+                      AND admin.result_payload->>'Status' = 'failed'
+                      AND admin.result_payload->'FencingVersion' = to_jsonb(d.fencing_version)
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM public.settlement_equipment_losses loss
+                    WHERE loss.delivery_id = d.id AND d.failure_code = 'equipment_destroyed'
                 )) AS failed,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status = 'manual_reconcile') AS manual_reconcile,
@@ -163,7 +181,11 @@ async fn fulfillment_snapshot(
             COUNT(*) FILTER (WHERE obligation.business_state = 'blocked'
                 AND COALESCE(fulfillment.execution_state, '') NOT IN ('failed', 'satisfied'))
                 AS blocked,
-            COUNT(*) FILTER (WHERE fulfillment.execution_state = 'failed') AS failed,
+            -- 装备损失处置把买方退款终结为操作者线下承担，以不可变损失事实为证，不再计入失败。
+            COUNT(*) FILTER (WHERE fulfillment.execution_state = 'failed'
+                AND NOT (fulfillment.last_error_code = 'operator_external_buyer_compensation'
+                    AND EXISTS (SELECT 1 FROM public.settlement_equipment_losses loss
+                        WHERE loss.refund_obligation_id = obligation.id))) AS failed,
             COUNT(*) FILTER (WHERE fulfillment.execution_state = 'manual_reconcile')
                 AS manual_reconcile,
             MIN(CASE WHEN (obligation.business_state = 'ready'

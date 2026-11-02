@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use auction_domain::SettlementWorld;
 use chrono::{DateTime, Utc};
 
 use crate::{
@@ -60,7 +61,13 @@ impl RecoveryHealthRefreshPort for RecoveryHealthService {
                     .observes_cash(),
                 None => true,
             };
-            for world in self.config.worlds.iter().copied() {
+            // 记账模式不读取任何外部余额，两个结算世界都只投影 not_applicable 并重算积压，
+            // 与是否配置邮箱无关；现金模式只观察已配置邮箱的世界，未配置世界保持未知以便告警。
+            const ALL_WORLDS: [SettlementWorld; 2] =
+                [SettlementWorld::Main, SettlementWorld::Isekai];
+            let worlds: &[SettlementWorld] =
+                if observe_cash { &self.config.worlds } else { &ALL_WORLDS };
+            for world in worlds.iter().copied() {
                 let mut update = RecoveryHealthUpdate {
                     world,
                     balance_credits: None,
