@@ -35,7 +35,7 @@ impl MoogleMailParser {
     ) -> Result<MoogleMailInboxPage, MoogleMailError> {
         let filter = match operation {
             MoogleMailOperation::Inbox => "inbox",
-            MoogleMailOperation::ReadMail => "Read Mail",
+            MoogleMailOperation::ReadMail => "read",
             _ => return Err(protocol(operation, world)),
         };
         let source = str::from_utf8(document).map_err(|_| protocol(operation, world))?;
@@ -134,11 +134,12 @@ impl MoogleMailParser {
         let hidden =
             selector("script, style, noscript, textarea", MoogleMailOperation::Detail, world)?;
         // 只接受完整的邮件缺失提示；其他对象不存在、隐藏正文或残缺详情都不能证明 Take。
+        // 线上提示带 MoogleMail 的语气词（`, kupo!`），旧页面没有；两个完整形态之外不放宽。
         let text = normalize_text(message.text().collect::<String>());
-        if messages.next().is_none()
-            && message.select(&hidden).next().is_none()
-            && text.trim_end_matches('.').eq_ignore_ascii_case("Mail does not exist")
-        {
+        let text = text.trim_end_matches('.');
+        let missing = text.eq_ignore_ascii_case("Mail does not exist")
+            || text.eq_ignore_ascii_case("Mail does not exist, kupo!");
+        if messages.next().is_none() && message.select(&hidden).next().is_none() && missing {
             Ok(None)
         } else {
             Err(error)
