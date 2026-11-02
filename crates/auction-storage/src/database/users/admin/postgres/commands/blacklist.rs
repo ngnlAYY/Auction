@@ -1,6 +1,6 @@
 //! PostgreSQL recovery buyer 黑名单命令。
 
-use auction_application::{CompetitionTransactionError, TransactionFailure, TransactionPolicy};
+use auction_application::{TransactionFailure, TransactionPolicy};
 
 use super::super::mapping::*;
 use super::super::reads::{load_command_postgres_tx, load_user_postgres_tx};
@@ -11,16 +11,12 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
     command: RecoveryBuyerBlacklistCommand,
 ) -> Result<RecoveryBuyerBlacklistResult, ApplicationError> {
     // 与竞价事务共用三次以内的有界策略；每次重试仍借用同一命令、摘要和历史时间。
-    let max_attempts = TransactionPolicy::serializable().max_attempts;
-    for attempt in 0..max_attempts {
-        match ensure_recovery_blacklist_postgres_once(store, &command).await {
-            Err(error) if error.is_serialization_conflict() && attempt + 1 < max_attempts => {
-                continue;
-            }
-            result => return result,
-        }
-    }
-    Err(CompetitionTransactionError::SerializationConflict.into())
+    crate::database::retry_conflicts(
+        usize::from(TransactionPolicy::serializable().max_attempts),
+        ApplicationError::is_serialization_conflict,
+        || ensure_recovery_blacklist_postgres_once(store, &command),
+    )
+    .await
 }
 
 async fn ensure_recovery_blacklist_postgres_once(

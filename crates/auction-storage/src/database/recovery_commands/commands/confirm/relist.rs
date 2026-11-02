@@ -11,13 +11,10 @@ pub(in crate::database::recovery_commands) async fn advance_relist_postgres(
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
     // 与旧 Worker 一致，在 Serializable runner 外生成一次事件 ID，并在重试间保持不变。
     let preview_event_id = Uuid::new_v4();
-    for attempt in 0..3_u8 {
-        match advance_relist_postgres_once(pool, now, retry_after, preview_event_id).await {
-            Err(RecoveryCommandError::SerializationConflict) if attempt < 2 => continue,
-            result => return result,
-        }
-    }
-    Err(RecoveryCommandError::SerializationConflict)
+    crate::database::retry_conflicts(crate::database::SERIALIZABLE_ATTEMPTS, is_conflict, || {
+        advance_relist_postgres_once(pool, now, retry_after, preview_event_id)
+    })
+    .await
 }
 
 #[cfg(feature = "postgres")]

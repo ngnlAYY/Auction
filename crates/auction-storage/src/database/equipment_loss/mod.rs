@@ -88,30 +88,22 @@ impl SettlementEquipmentLossPort for DatabaseStore {
     ) -> ApplicationFuture<'_, EquipmentLossResult> {
         Box::pin(async move {
             command.validate()?;
-            for attempt in 0..3 {
-                let operation = async {
-                    let mut tx = self
-                        .postgres_pool()
-                        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
-                        .await?;
-                    sqlx::query("SET LOCAL transaction_timeout='30s'").execute(&mut *tx).await?;
-                    super::lock_command_id(&mut tx, command.command_id).await?;
-                    if let Some(result) = transaction::replay(&mut tx, &command).await? {
-                        tx.commit().await?;
-                        return Ok(result);
-                    }
-                    let result = transaction::apply(&mut tx, &command).await?;
+            let command = &command;
+            super::retry_conflicts(super::SERIALIZABLE_ATTEMPTS, Error::retryable, || async move {
+                let mut tx =
+                    self.postgres_pool().begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
+                sqlx::query("SET LOCAL transaction_timeout='30s'").execute(&mut *tx).await?;
+                super::lock_command_id(&mut tx, command.command_id).await?;
+                if let Some(result) = transaction::replay(&mut tx, command).await? {
                     tx.commit().await?;
-                    Ok::<_, Error>(result)
+                    return Ok(result);
                 }
-                .await;
-                match operation {
-                    Ok(result) => return Ok(result),
-                    Err(error) if error.retryable() && attempt < 2 => continue,
-                    Err(error) => return Err(error.application()),
-                }
-            }
-            Err(ApplicationError::FulfillmentDependencyUnavailable)
+                let result = transaction::apply(&mut tx, command).await?;
+                tx.commit().await?;
+                Ok::<_, Error>(result)
+            })
+            .await
+            .map_err(Error::application)
         })
     }
 }

@@ -5,9 +5,6 @@ use super::mapping::*;
 use super::*;
 
 #[cfg(feature = "postgres")]
-const SERIALIZABLE_RETRY_ATTEMPTS: usize = 3;
-
-#[cfg(feature = "postgres")]
 enum ReconcileTransactionError {
     Storage(sqlx::Error),
     Repository(auction_application::RepositoryError),
@@ -15,65 +12,46 @@ enum ReconcileTransactionError {
 }
 
 #[cfg(feature = "postgres")]
-macro_rules! run_reconcile_transaction {
-    ($pool:expr, $transaction:ident, $body:block) => {{
-        let mut last_error = None;
-        'retry: {
-            for attempt in 0..SERIALIZABLE_RETRY_ATTEMPTS {
-                let mut $transaction =
-                    match $pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await {
-                        Ok(transaction) => transaction,
-                        Err(error) => {
-                            if crate::database::is_serialization_conflict(&error)
-                                && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
-                            {
-                                last_error = Some(error);
-                                continue;
-                            }
-                            return Err(map_storage_error(error));
-                        }
-                    };
-
-                let operation_result = (async $body).await;
-                match operation_result {
-                    Ok(value) => match $transaction.commit().await {
-                        Ok(()) => break 'retry Ok(value),
-                        Err(error) => {
-                            if crate::database::is_serialization_conflict(&error)
-                                && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
-                            {
-                                last_error = Some(error);
-                                continue;
-                            }
-                            return Err(map_storage_error(error));
-                        }
-                    }
-                    Err(ReconcileTransactionError::Funding(error)) => {
-                        if matches!(error, auction_application::FundingError::SerializationConflict)
-                            && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS {
-                            continue;
-                        }
-                        return Err(repository_error_owned("履约资金保护门不可用"));
-                    }
-                    Err(ReconcileTransactionError::Repository(error)) => return Err(error),
-                    Err(ReconcileTransactionError::Storage(error)) => {
-                        if crate::database::is_serialization_conflict(&error)
-                            && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
-                        {
-                            last_error = Some(error);
-                            continue;
-                        }
-                        return Err(map_storage_error(error));
-                    }
-                }
+impl ReconcileTransactionError {
+    fn retryable(&self) -> bool {
+        match self {
+            Self::Storage(error) => crate::database::is_serialization_conflict(error),
+            Self::Funding(error) => {
+                matches!(error, auction_application::FundingError::SerializationConflict)
             }
-
-            match last_error {
-                Some(error) => Err(map_storage_error(error)),
-                None => Err(repository_error_owned("结算履约 Serializable 重试未返回结果")),
-            }
+            Self::Repository(_) => false,
         }
-    }};
+    }
+
+    fn into_repository(self) -> auction_application::RepositoryError {
+        match self {
+            Self::Storage(error) => map_storage_error(error),
+            Self::Repository(error) => error,
+            Self::Funding(_) => repository_error_owned("履约资金保护门不可用"),
+        }
+    }
+}
+
+/// 每次尝试都开启新的 Serializable 事务执行 `$body`；冲突有界重试，其余错误按分类映射。
+#[cfg(feature = "postgres")]
+macro_rules! run_reconcile_transaction {
+    ($pool:expr, $transaction:ident, $body:block) => {
+        crate::database::retry_conflicts(
+            crate::database::SERIALIZABLE_ATTEMPTS,
+            ReconcileTransactionError::retryable,
+            || async {
+                let mut $transaction = $pool
+                    .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+                    .await
+                    .map_err(ReconcileTransactionError::Storage)?;
+                let value = (async $body).await?;
+                $transaction.commit().await.map_err(ReconcileTransactionError::Storage)?;
+                Ok(value)
+            },
+        )
+        .await
+        .map_err(ReconcileTransactionError::into_repository)
+    };
 }
 
 #[cfg(feature = "postgres")]

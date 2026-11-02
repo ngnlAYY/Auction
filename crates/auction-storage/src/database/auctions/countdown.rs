@@ -12,7 +12,7 @@ pub(super) async fn read(
 ) -> Result<Option<PublicAuctionCountdown>, ApplicationError> {
     // 与公开目录一致：隐藏草稿/取消场次，禁用世界只留 settled 历史，不读 lot、正文或装备 key。
     // 后继预览不能借图片绕过当前活动场次的门禁。
-    let row = sqlx::query(
+    let row = sqlx::query(concat!(
         "SELECT a.id,
                 COALESCE(a.opened_at, a.scheduled_open_at) AS intake_closes_at,
                 CASE WHEN a.status = 'preview' THEN NULL ELSE a.scheduled_end_at END
@@ -23,15 +23,9 @@ pub(super) async fn read(
          WHERE a.id = $1
            AND (w.enabled OR a.status = 'settled')
            AND a.status IN ('preview', 'live', 'final', 'settling', 'settled')
-           AND (
-               a.status <> 'preview'
-               OR NOT EXISTS (
-                   SELECT 1 FROM public.auctions AS active
-                   WHERE active.world_id = a.world_id
-                     AND active.status IN ('live', 'final', 'settling')
-               )
-           )",
-    )
+           AND ",
+        super::preview_visibility_sql!()
+    ))
     .bind(auction_id)
     .fetch_optional(store.pool())
     .await

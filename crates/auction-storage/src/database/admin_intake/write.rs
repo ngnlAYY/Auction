@@ -5,12 +5,12 @@ use auction_application::{
 };
 use chrono::{DateTime, Utc};
 use serde_json::json;
-use sqlx::Row;
 use uuid::Uuid;
 
 use crate::database::competition::{
     PostgresCompetitionTransaction, is_unique_error, map_sql_error,
 };
+use crate::database::intake_target;
 
 use super::failed;
 
@@ -47,52 +47,21 @@ pub(super) async fn add_admin_intake_inner(
         return Err(CompetitionTransactionError::AdminIntakeUnavailable);
     }
 
-    let target = sqlx::query(
-        r#"SELECT target.auction_id,
-                  target.target_status,
-                  auction.world_id,
-                  auction.sequence,
-                  auction.status,
-                  auction.state_version,
-                  auction.preview_revision,
-                  auction.intake_opens_at
-           FROM public.auction_intake_targets AS target
-           INNER JOIN public.auctions AS auction ON auction.id = target.auction_id
-           WHERE target.world_id = $1
-           FOR UPDATE OF target, auction"#,
-    )
-    .bind(&write.world_id)
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?
-    .ok_or(CompetitionTransactionError::AdminIntakeUnavailable)?;
-    let auction_id: Uuid = target.try_get("auction_id").map_err(map_sql_error)?;
-    let target_status: String = target.try_get("target_status").map_err(map_sql_error)?;
-    let auction_world_id: String = target.try_get("world_id").map_err(map_sql_error)?;
-    let auction_sequence: i64 = target.try_get("sequence").map_err(map_sql_error)?;
-    let auction_status: String = target.try_get("status").map_err(map_sql_error)?;
-    let current_state_version: i64 = target.try_get("state_version").map_err(map_sql_error)?;
-    let current_preview_revision: i64 =
-        target.try_get("preview_revision").map_err(map_sql_error)?;
-    let intake_opens_at: Option<DateTime<Utc>> =
-        target.try_get("intake_opens_at").map_err(map_sql_error)?;
-    if auction_world_id != write.world_id
-        || auction_sequence <= 0
-        || !matches!(auction_status.as_str(), "draft" | "preview")
-        || target_status != auction_status
-        || current_state_version <= 0
-        || current_preview_revision < 0
-    {
+    let target = intake_target::lock(transaction, &write.world_id)
+        .await
+        .map_err(map_sql_error)?
+        .ok_or(CompetitionTransactionError::AdminIntakeUnavailable)?;
+    if !target.is_consistent(&write.world_id) {
         return Err(CompetitionTransactionError::InvalidState);
     }
-    let preview_intake = auction_status == "preview";
+    let auction_id = target.auction_id;
     // 目标可能在外部采集或等待 world 锁期间切换；只使用取得当前目标锁后的数据库实时时间。
     let now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
         .fetch_one(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
     // 与邮件收件同一规则：新赛季早鸟草稿在赛季开始前不接收任何装备。
-    if intake_opens_at.is_some_and(|opens_at| now < opens_at) {
+    if target.intake_opens_at.is_some_and(|opens_at| now < opens_at) {
         return Err(CompetitionTransactionError::IntakeClosed);
     }
 
@@ -123,42 +92,32 @@ pub(super) async fn add_admin_intake_inner(
         return Err(CompetitionTransactionError::AdminIntakeEquipmentConflict);
     }
 
-    let maximum_lot_number = sqlx::query_scalar::<_, Option<i32>>(
-        "SELECT MAX(lot_number) FROM public.lots WHERE auction_id = $1",
-    )
-    .bind(auction_id)
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?
-    .unwrap_or(0);
-    let lot_number =
-        maximum_lot_number.checked_add(1).ok_or_else(|| failed("Admin 装备录入 lot 序号溢出"))?;
-    if lot_number <= 0 {
-        return Err(failed("Admin 装备录入 lot 序号无效"));
-    }
-    // `lot_number` 保留场次内不可变全局顺序；用户可见编码在分类内独立递增。
-    let maximum_category_number = sqlx::query_scalar::<_, Option<i32>>(
-        "SELECT MAX(category_number) FROM public.lots
-         WHERE auction_id = $1 AND category_key = $2",
+    // `lot_number` 保留场次内不可变全局顺序；用户可见编码在分类内独立递增，两者一次扫描取得。
+    let (maximum_lot_number, maximum_category_number) = sqlx::query_as::<_, (i32, i32)>(
+        "SELECT COALESCE(MAX(lot_number), 0),
+                COALESCE(MAX(category_number) FILTER (WHERE category_key = $2), 0)
+         FROM public.lots
+         WHERE auction_id = $1",
     )
     .bind(auction_id)
     .bind(&write.equipment_category)
     .fetch_one(&mut **transaction)
     .await
-    .map_err(map_sql_error)?
-    .unwrap_or(0);
+    .map_err(map_sql_error)?;
+    let lot_number =
+        maximum_lot_number.checked_add(1).ok_or_else(|| failed("Admin 装备录入 lot 序号溢出"))?;
+    if lot_number <= 0 {
+        return Err(failed("Admin 装备录入 lot 序号无效"));
+    }
     let category_number = maximum_category_number
         .checked_add(1)
         .ok_or_else(|| failed("Admin 装备录入分类编号溢出"))?;
     if category_number <= 0 {
         return Err(failed("Admin 装备录入分类编号无效"));
     }
-    let next_state_version = current_state_version
-        .checked_add(1)
-        .ok_or_else(|| failed("Admin 装备录入拍卖状态版本溢出"))?;
-    let next_preview_revision = current_preview_revision
-        .checked_add(1)
-        .ok_or_else(|| failed("Admin 装备录入预览版本溢出"))?;
+    let next_versions =
+        target.next_versions().ok_or_else(|| failed("Admin 装备录入拍卖版本溢出"))?;
+    let (next_preview_revision, next_state_version) = next_versions;
 
     sqlx::query(
         r#"INSERT INTO public.equipment
@@ -176,18 +135,12 @@ pub(super) async fn add_admin_intake_inner(
     .await
     .map_err(map_equipment_insert_error)?;
 
-    sqlx::query(
-        r#"INSERT INTO public.equipment_secrets
-            (equipment_id, ciphertext, nonce, encryption_key_id, fingerprint, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $6)"#,
+    intake_target::insert_equipment_secret(
+        transaction,
+        write.candidate_equipment_id.as_uuid(),
+        &write.key_envelope,
+        now,
     )
-    .bind(write.candidate_equipment_id.as_uuid())
-    .bind(write.key_envelope.ciphertext())
-    .bind(write.key_envelope.nonce())
-    .bind(write.key_envelope.encryption_key_id())
-    .bind(write.key_envelope.fingerprint())
-    .bind(now)
-    .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
 
@@ -229,30 +182,13 @@ pub(super) async fn add_admin_intake_inner(
     .await
     .map_err(map_sql_error)?;
 
-    let updated = sqlx::query(
-        r#"UPDATE public.auctions
-           SET preview_revision = $1, state_version = $2,
-               updated_at = GREATEST(created_at, updated_at, $3)
-           WHERE id = $4
-             AND status = $7
-             AND preview_revision = $5
-             AND state_version = $6
-           RETURNING state_version"#,
-    )
-    .bind(next_preview_revision)
-    .bind(next_state_version)
-    .bind(now)
-    .bind(auction_id)
-    .bind(current_preview_revision)
-    .bind(current_state_version)
-    .bind(&auction_status)
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    if updated.is_none() {
+    if !intake_target::advance(transaction, &target, next_versions, now)
+        .await
+        .map_err(map_sql_error)?
+    {
         return Err(CompetitionTransactionError::InvalidState);
     }
-    if preview_intake {
+    if target.is_preview() {
         let materialized = sqlx::query(
             "INSERT INTO public.auction_preview_items
                 (auction_id, equipment_id, display_order, start_price,
@@ -276,7 +212,7 @@ pub(super) async fn add_admin_intake_inner(
 
     let result = AdminIntakeResult {
         auction_id,
-        auction_sequence,
+        auction_sequence: target.auction_sequence,
         auction_state_version: next_state_version,
         preview_revision: next_preview_revision,
         submission_id: write.candidate_submission_id,

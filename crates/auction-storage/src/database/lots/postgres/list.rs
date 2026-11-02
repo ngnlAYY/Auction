@@ -7,6 +7,25 @@ use super::mapping::{
     map_postgres_counts, map_postgres_live, map_postgres_preview, map_postgres_projection,
 };
 
+/// 列表页过滤：$2 分类代码、$5 预筛选 lot 集合，按全局 lot 序号稳定排序后以 $3/$4 分页。
+macro_rules! lot_page_filter_sql {
+    () => {
+        "l.auction_id = $1
+               AND ($2::text IS NULL OR e.category = CASE $2::text
+                   WHEN 'one' THEN 'One-Handed'
+                   WHEN 'two' THEN 'Two-Handed'
+                   WHEN 'sta' THEN 'Staff'
+                   WHEN 'shd' THEN 'Shield'
+                   WHEN 'clo' THEN 'Cloth'
+                   WHEN 'lig' THEN 'Light'
+                   WHEN 'hea' THEN 'Heavy'
+               END)
+               AND ($5::uuid[] IS NULL OR l.id = ANY($5))
+             ORDER BY l.lot_number, l.id
+             LIMIT $3 OFFSET $4"
+    };
+}
+
 #[cfg(feature = "postgres")]
 pub(in crate::database::lots) async fn list_postgres(
     store: &PostgresStore,
@@ -63,105 +82,29 @@ async fn list_postgres_transaction(
         category_counts: counts,
     };
     if page.projection.projection_kind == "preview" {
-        let rows = sqlx::query(
-            "SELECT
-                l.id,
-                l.equipment_id,
-                l.auction_id,
-                l.category_number AS lot_number,
-                l.status,
-                l.start_price,
-                submission.seller AS seller_name,
-                e.external_equipment_id,
-                e.name AS equipment_name,
-                e.category AS equipment_category,
-                e.attributes AS equipment_attributes
-             FROM public.lots AS l
-             JOIN public.auctions AS a ON a.id = l.auction_id
-             JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
-             JOIN public.equipment AS e ON e.id = l.equipment_id
-             JOIN public.auction_submissions AS submission ON submission.id = l.submission_id
-             WHERE l.auction_id = $1
-               AND a.status = 'preview'
-               AND l.status = 'pending'
-               AND ($2::text IS NULL OR e.category = CASE $2::text
-                   WHEN 'one' THEN 'One-Handed'
-                   WHEN 'two' THEN 'Two-Handed'
-                   WHEN 'sta' THEN 'Staff'
-                   WHEN 'shd' THEN 'Shield'
-                   WHEN 'clo' THEN 'Cloth'
-                   WHEN 'lig' THEN 'Light'
-                   WHEN 'hea' THEN 'Heavy'
-               END)
-               AND ($5::uuid[] IS NULL OR l.id = ANY($5))
-             ORDER BY l.lot_number, l.id
-             LIMIT $3 OFFSET $4",
-        )
-        .bind(auction_id)
-        .bind(request.category.as_deref())
-        .bind(request.limit)
-        .bind(query_offset)
-        .bind(page_ids.as_deref())
-        .fetch_all(&mut **transaction)
-        .await
-        .map_err(|_| storage_error("读取 PostgreSQL 预览 lot 列表失败"))?;
+        let rows = sqlx::query(preview_lot_sql!(lot_page_filter_sql!()))
+            .bind(auction_id)
+            .bind(request.category.as_deref())
+            .bind(request.limit)
+            .bind(query_offset)
+            .bind(page_ids.as_deref())
+            .fetch_all(&mut **transaction)
+            .await
+            .map_err(|_| storage_error("读取 PostgreSQL 预览 lot 列表失败"))?;
         page.preview = rows
             .into_iter()
             .map(|row| map_postgres_preview(row, &page.projection.world_id, colors))
             .collect::<Result<_, _>>()?;
     } else {
-        let rows = sqlx::query(
-            "SELECT
-                l.id,
-                l.equipment_id,
-                l.auction_id,
-                l.category_number AS lot_number,
-                l.status,
-                l.start_price,
-                l.current_price,
-                (l.leader_user_id IS NOT NULL)::boolean AS has_leader,
-                l.material,
-                (a.policy_snapshot ->> 'bid_increment_ppm')::bigint AS policy_bid_increment_ppm,
-                (a.policy_snapshot ->> 'minimum_increment')::bigint AS policy_minimum_increment,
-                leader.username AS leader_name,
-                submission.seller AS seller_name,
-                l.effective_end_at,
-                l.state_version,
-                e.external_equipment_id,
-                e.name AS equipment_name,
-                e.category AS equipment_category,
-                e.attributes AS equipment_attributes
-             FROM public.lots AS l
-             JOIN public.auctions AS a ON a.id = l.auction_id
-             JOIN public.worlds AS w
-               ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
-             JOIN public.equipment AS e ON e.id = l.equipment_id
-             LEFT JOIN public.auction_submissions AS submission ON submission.id = l.submission_id
-             LEFT JOIN public.users AS leader ON leader.id = l.leader_user_id
-             WHERE l.auction_id = $1
-               AND ((a.status IN ('live', 'final', 'settling') AND l.status IN ('live', 'sold', 'unsold'))
-                    OR (a.status = 'settled' AND l.status IN ('sold', 'unsold')))
-               AND ($2::text IS NULL OR e.category = CASE $2::text
-                   WHEN 'one' THEN 'One-Handed'
-                   WHEN 'two' THEN 'Two-Handed'
-                   WHEN 'sta' THEN 'Staff'
-                   WHEN 'shd' THEN 'Shield'
-                   WHEN 'clo' THEN 'Cloth'
-                   WHEN 'lig' THEN 'Light'
-                   WHEN 'hea' THEN 'Heavy'
-               END)
-               AND ($5::uuid[] IS NULL OR l.id = ANY($5))
-             ORDER BY l.lot_number, l.id
-             LIMIT $3 OFFSET $4",
-        )
-        .bind(auction_id)
-        .bind(request.category.as_deref())
-        .bind(request.limit)
-        .bind(query_offset)
-        .bind(page_ids.as_deref())
-        .fetch_all(&mut **transaction)
-        .await
-        .map_err(|_| storage_error("读取 PostgreSQL 正式 lot 列表失败"))?;
+        let rows = sqlx::query(live_lot_sql!(lot_page_filter_sql!()))
+            .bind(auction_id)
+            .bind(request.category.as_deref())
+            .bind(request.limit)
+            .bind(query_offset)
+            .bind(page_ids.as_deref())
+            .fetch_all(&mut **transaction)
+            .await
+            .map_err(|_| storage_error("读取 PostgreSQL 正式 lot 列表失败"))?;
         page.live = rows
             .into_iter()
             .map(|row| map_postgres_live(row, &page.projection.world_id, colors))
@@ -177,37 +120,21 @@ async fn postgres_list_projection(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     auction_id: Uuid,
 ) -> Result<Option<PublicAuctionProjection>, ApplicationError> {
-    let row = sqlx::query(
-        "SELECT
-            a.id,
-            a.world_id,
-            a.sequence,
-            a.status,
-            a.scheduled_open_at,
-            MAX(l.effective_end_at) FILTER (WHERE l.status IN ('live', 'sold', 'unsold')) AS scheduled_ends_at,
-            a.preview_revision,
-            CASE
-                WHEN a.status = 'preview' AND CURRENT_TIMESTAMP < a.scheduled_open_at THEN 'preview'
-                WHEN a.status = 'preview' THEN 'opening'
-                ELSE 'live'
-            END AS presentation_mode,
-            (a.status IN ('live', 'final')) AS bidding_open
+    let row = sqlx::query(concat!(
+        "SELECT ",
+        crate::database::auctions::public_auction_projection_sql!("l"),
+        "
          FROM public.auctions AS a
          JOIN public.worlds AS w
            ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          LEFT JOIN public.lots AS l ON l.auction_id = a.id
          WHERE a.id = $1
            AND a.status IN ('preview', 'live', 'final', 'settling', 'settled')
-           AND (
-                a.status IN ('live', 'final', 'settling', 'settled')
-                OR NOT EXISTS (
-                    SELECT 1 FROM public.auctions AS active
-                    WHERE active.world_id = a.world_id
-                      AND active.status IN ('live', 'final', 'settling')
-                )
-           )
-         GROUP BY a.id",
-    )
+           AND ",
+        crate::database::auctions::preview_visibility_sql!(),
+        "
+         GROUP BY a.id"
+    ))
     .bind(auction_id)
     .fetch_optional(&mut **transaction)
     .await

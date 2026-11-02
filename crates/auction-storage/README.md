@@ -29,7 +29,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 
 ## 实现约定
 
-- **事务**：竞价、关键生命周期等命令在 Serializable 事务内完成，序列化失败（40001）与死锁（40P01）由命令 owner 有界重试（`is_serialization_conflict` 是统一判定）。运行期 claim、进度及部分账本写入使用默认隔离事务，并按各自 owner 取行锁或校验租约/fencing；不能把所有写入都视为 Serializable。同一幂等命令 ID 通过事务级 advisory 锁协调（`lock_command_id` 共用键空间）。
+- **事务**：竞价、关键生命周期等命令在 Serializable 事务内完成，序列化失败（40001）与死锁（40P01）由命令 owner 有界重试（`is_serialization_conflict` 是统一判定）。竞价、结算、规则与 Admin 邮件经各自的 `TransactionRunner` 按 `TransactionPolicy` 重试；其余独立 Serializable 写入共用 `retry_conflicts`（默认 `SERIALIZABLE_ATTEMPTS` 次，每次重开事务，只重跑 owner 判定的明确中止，结果未知的提交不重试）。运行期 claim、进度及部分账本写入使用默认隔离事务，并按各自 owner 取行锁或校验租约/fencing；不能把所有写入都视为 Serializable。同一幂等命令 ID 通过事务级 advisory 锁协调（`lock_command_id` 共用键空间）。
 - **幂等账本**：各 owner 的命令表保存命令 ID、请求摘要与结果；同 ID 同摘要重放原结果，异摘要冲突。
 - **追加式事实**：竞价、代理转换、黑名单历史、审计与投递尝试证明等由触发器拒绝改写；结算账本按 owner 追加。改名保留原名称证据，撤销时更新 `reverted_at`，不能把整张改名表视为不可更新。审计 `INSERT` 失败会让整个事务回滚，进程内另记失败计数，使 readiness 失败。
 - **冻结竞价策略**：锁内快照和账户代理降额能力按同一场次策略版本解码，未知版本失败关闭；公开普通最低价继续使用领域计算。新旧策略与追加迁移边界见[数据库契约](../../docs/contracts/database.md#拍卖与竞价)。
@@ -40,6 +40,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 - **运行时独占**：外部 Cookie 的运行时 owner（邮件、论坛各一）和 Public realtime consumer 以 PostgreSQL session advisory lock 实现，连接断开即失去所有权；所有权失效后持有方必须退出。
 - **只读快照**：报表与运维读取使用可重复读只读事务，运维快照设置 5 秒语句与 1 秒锁等待上限。
 - **Public 会话活动**：普通活动不延长期限，`last_activity_at` 按 60 秒节流写入；需要活动写入时，在语句完成后复用独立只读查询重新认证。行锁等待可能跨过期限或撤销，仅靠等待前的物化快照或 `UPDATE WHERE clock_timestamp()` 不能证明等待后的身份仍有效；无需活动写入的快路保持单条查询且不写会话行。
+- **收件目标**：Admin 录入与邮件入库共用 `database/intake_target`：在已持有 world 锁后锁定收件目标与拍卖、校验一致性、按锁定版本 CAS 推进预览修订并写入装备 key；错误分类仍由各自 owner 决定。
 - **邮件入库编号**：持有原 world/目标拍卖锁，在同一 Serializable 事务中按分类聚合已有编号，同时归并全局 lot 序号；空场次仍从 1 开始，分类编号各自递增，溢出和损坏分类快照继续失败关闭。
 - **赛季收件边界**：新场次冻结的 `intake_opens_at` 同时约束锁后数据库实时钟和邮件原始 `received_at`；任一早于边界都返回 `IntakeClosed`，延迟轮询不能把旧赛季邮件加入新赛季。等于边界允许继续，历史 NULL 不增加限制；已持久接受命令仍先重放原决定。Admin 录入复核锁后当前时刻；恢复重列在既有 world/auction/recovery 等锁和证明复核后取 `clock_timestamp()`，不能使用事务开始时间或 Worker 选候选时的旧时刻替代换季判断。旧赛季识别同时保留原场次开拍和原始投稿收件事实，以二者较早时刻为起点，避免改期开拍绕过换季阻断。
 - **错误**：对外只返回固定分类文本，不携带 SQL、连接串或驱动原文。
@@ -60,7 +61,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 | 结算与资金 | [`crates/auction-storage/src/database/settlement/`](src/database/settlement)、[`crates/auction-storage/src/database/settlement_commands/`](src/database/settlement_commands)、[`crates/auction-storage/src/database/settlement_scheduler/`](src/database/settlement_scheduler)、[`crates/auction-storage/src/database/settlement_policy/`](src/database/settlement_policy)、[`crates/auction-storage/src/database/settlement_report/`](src/database/settlement_report)、[`crates/auction-storage/src/database/settlement_catalog/`](src/database/settlement_catalog)、[`crates/auction-storage/src/database/settlement_funding/`](src/database/settlement_funding)、[`crates/auction-storage/src/database/legacy_self_proof/`](src/database/legacy_self_proof)、[`crates/auction-storage/src/database/compensation/`](src/database/compensation)、[`crates/auction-storage/src/database/compensation_reversal/`](src/database/compensation_reversal) |
 | 履约与投递 | [`crates/auction-storage/src/database/fulfillment_scheduler/`](src/database/fulfillment_scheduler)、[`crates/auction-storage/src/database/delivery_scheduler/`](src/database/delivery_scheduler)、[`crates/auction-storage/src/database/mail_delivery/`](src/database/mail_delivery)、[`crates/auction-storage/src/database/delivery_admin/`](src/database/delivery_admin)、[`crates/auction-storage/src/database/delivery_audit/`](src/database/delivery_audit) |
 | 恢复 | [`crates/auction-storage/src/database/recovery_scheduler/`](src/database/recovery_scheduler)、[`crates/auction-storage/src/database/recovery_commands/`](src/database/recovery_commands)、[`crates/auction-storage/src/database/recovery_report/`](src/database/recovery_report)、[`crates/auction-storage/src/database/recovery_health.rs`](src/database/recovery_health.rs) |
-| 邮件 | [`crates/auction-storage/src/database/mail_poll/`](src/database/mail_poll)、[`crates/auction-storage/src/database/mail_intake/`](src/database/mail_intake)、[`crates/auction-storage/src/database/mailbox_sweep/`](src/database/mailbox_sweep)、[`crates/auction-storage/src/database/admin_mail/`](src/database/admin_mail) |
+| 邮件 | [`crates/auction-storage/src/database/mail_poll/`](src/database/mail_poll)、[`crates/auction-storage/src/database/mail_intake/`](src/database/mail_intake)、[`crates/auction-storage/src/database/intake_target/`](src/database/intake_target)、[`crates/auction-storage/src/database/mailbox_sweep/`](src/database/mailbox_sweep)、[`crates/auction-storage/src/database/admin_mail/`](src/database/admin_mail) |
 | 论坛与关注 | [`crates/auction-storage/src/database/forum/`](src/database/forum)、[`crates/auction-storage/src/database/lot_watch/`](src/database/lot_watch)、[`crates/auction-storage/src/database/lot_watch_pm/`](src/database/lot_watch_pm) |
 | 用户与会话 | [`crates/auction-storage/src/database/users/`](src/database/users)、[`crates/auction-storage/src/database/sessions/`](src/database/sessions)、[`crates/auction-storage/src/database/credentials/`](src/database/credentials)、[`crates/auction-storage/src/database/account/`](src/database/account)、[`crates/auction-storage/src/database/blacklist/`](src/database/blacklist)、[`crates/auction-storage/src/database/admin_renames/`](src/database/admin_renames) |
 | Admin 读取 | [`crates/auction-storage/src/database/admin_auctions/`](src/database/admin_auctions)、[`crates/auction-storage/src/database/admin_lots/`](src/database/admin_lots)、[`crates/auction-storage/src/database/admin_audit/`](src/database/admin_audit)、[`crates/auction-storage/src/database/admin_proxy_events/`](src/database/admin_proxy_events)、[`crates/auction-storage/src/database/admin_intake/`](src/database/admin_intake) |
@@ -73,5 +74,5 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 ## 维护约定
 
 - SQL 只出现在本 crate；新增表或约束必须新增迁移文件，并同步[数据库契约](../../docs/contracts/database.md)与[保留政策](../../ops/deploy/retention-policy.v1.json)（`database_schema_version` 须等于最高迁移版本，否则 `db inventory` 拒绝运行）。
-- 动态拼接 SQL 只允许编译期常量片段，业务值一律 `bind`；DDL 标识符经 `quote_identifier`，库名先过 `valid_ddl_database_name`（ASCII 字母数字与 `_-.`）。
+- 动态拼接 SQL 只允许编译期常量片段，业务值一律 `bind`；同一 owner 内多条查询共享的投影或过滤以字面量宏定义，经 `concat!` 组合成静态查询（如 lot 列表/详情、竞价日志、价格历史、账户代理），不在运行时拼接；DDL 标识符经 `quote_identifier`，库名先过 `valid_ddl_database_name`（ASCII 字母数字与 `_-.`）。
 - 新增 `pub` 接口前确认存在调用方，编译器不会对跨 crate 未使用的 `pub` 项告警。

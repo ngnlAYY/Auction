@@ -70,7 +70,7 @@ pub(super) async fn claim_postgres(
             Ok(claims) => return Ok(claims),
             Err(error) if error.is_retryable() && attempt < CLAIM_TRANSACTION_ATTEMPTS => {
                 // 与竞价/结算相同，含首次最多三次；每次从新事务开始，保留有界线性退避。
-                sqlx::__rt::sleep(CLAIM_RETRY_BASE_DELAY.saturating_mul(attempt as u32)).await;
+                tokio::time::sleep(CLAIM_RETRY_BASE_DELAY.saturating_mul(attempt as u32)).await;
             }
             Err(error) => return Err(error.into_repository()),
         }

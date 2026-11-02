@@ -22,15 +22,13 @@ pub(super) async fn reconcile(
     .await
     .map_err(mapping::map_storage_error)?;
     for id in candidates {
-        for attempt in 0..3 {
-            match expire_one(pool, id, now, grace_micros).await {
-                Ok(()) => break,
-                Err(error) if error.retryable() && attempt < 2 => continue,
-                Err(_) => {
-                    return Err(mapping::repository_error_owned("过期delivery资金隔离未确定完成"));
-                }
-            }
-        }
+        crate::database::retry_conflicts(
+            crate::database::SERIALIZABLE_ATTEMPTS,
+            OutcomeError::retryable,
+            || expire_one(pool, id, now, grace_micros),
+        )
+        .await
+        .map_err(|_| mapping::repository_error_owned("过期delivery资金隔离未确定完成"))?;
     }
     Ok(())
 }
