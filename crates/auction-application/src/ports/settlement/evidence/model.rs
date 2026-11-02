@@ -9,7 +9,9 @@ use uuid::Uuid;
 
 use crate::ports::lower_hex;
 
-use super::{INTERNAL_EVIDENCE_PROTOCOL, valid_external_positive_id};
+use super::{
+    INTERNAL_EVIDENCE_MAX_AGE_SECONDS, INTERNAL_EVIDENCE_PROTOCOL, valid_external_positive_id,
+};
 
 /// 持久全局 mail_cookie generation；仅支持 sticky 撤销的 owner 可以提供。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -266,7 +268,8 @@ impl SettlementInternalEvidenceSnapshot {
             && self.purpose.validate()
             && self.identity.validate()
             && self.expires_at > self.observed_from
-            && self.expires_at - self.observed_from <= chrono::Duration::seconds(30)
+            && self.expires_at - self.observed_from
+                <= chrono::Duration::seconds(INTERNAL_EVIDENCE_MAX_AGE_SECONDS)
             && self.equipment.as_ref().is_none_or(|value| {
                 value.binding.validate()
                     && self.identity.same_account(&value.binding)
@@ -298,13 +301,14 @@ impl SettlementInternalEvidenceSnapshot {
             && self.digest == self.compute_digest()
     }
 
-    /// 最早观测到最终提交均受同一个 30 秒窗口约束，禁止未来时间证明。
+    /// 最早观测到最终提交均受同一个证据预算窗口约束，禁止未来时间证明。
     pub fn valid_at(&self, now: DateTime<Utc>) -> bool {
         let valid_time = |time: DateTime<Utc>| time >= self.observed_from && time <= now;
         self.validate()
             && self.observed_from <= now
             && now < self.expires_at
-            && now - self.observed_from <= chrono::Duration::seconds(30)
+            && now - self.observed_from
+                <= chrono::Duration::seconds(INTERNAL_EVIDENCE_MAX_AGE_SECONDS)
             && valid_time(self.identity.observed_at)
             && self.equipment.as_ref().is_none_or(|value| {
                 valid_time(value.observed_at) && valid_time(value.binding.observed_at)
