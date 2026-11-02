@@ -28,6 +28,9 @@ pub enum DeliveryAdminError {
     StoredResultCorrupt,
     #[error("delivery Admin 依赖暂不可用")]
     Unavailable,
+    /// Worker 已在 Sent 中目击同一结算义务的邮件；重试或判失败可能重复付款或误判，须走人工 Sent 证明。
+    #[error("Sent 已出现该结算义务的邮件")]
+    SentSighted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

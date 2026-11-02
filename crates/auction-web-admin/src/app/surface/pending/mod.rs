@@ -279,6 +279,7 @@ pub(crate) fn definite_rejection(code: &str) -> bool {
             | "world_not_found"
             | "invalid_user_command"
             | "invalid_delivery_command"
+            | "delivery_sent_sighted"
             | "invalid_mail_request"
             | "poll_rejected"
             | "invalid_locale"

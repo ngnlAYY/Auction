@@ -133,7 +133,7 @@ fn print_preview(
         "preview": preview,
         "evidence_sha256": digest,
         "execution": { "confirm": confirm, "argv_template": argv },
-        "note": "只读数据库预览；执行事务重新校验资格与版本。人工证明使用 sent_operator_confirmed_v1，不冒充自动精确资产证明；已收取装备及旧尝试关联分别需要显式接受责任。装备确认后的 COD 实收和卖方付款仍走正常管线；完整货款附件确认仅按原资金 owner 结清既有 unknown 支出，不新建付款或投递。领取仍须正常核验。argv_template 是独立参数数组，禁止 eval。",
+        "note": "只读数据库预览；执行事务重新校验资格与版本。人工证明使用 sent_operator_confirmed_v1，不冒充自动精确资产证明；已收取装备或货款及旧尝试关联分别需要显式接受责任；corrects_admin_failure=true 表示以 Sent 证据更正原 Admin 失败结论，原失败命令与审计保留。装备确认后的 COD 实收和卖方付款仍走正常管线；货款确认仅按原资金 owner 结清既有 unknown 支出，不新建付款或投递。领取仍须正常核验。argv_template 是独立参数数组，禁止 eval。",
     }))
 }
 

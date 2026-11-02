@@ -2,8 +2,9 @@
 
 use auction_application::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
+    sent_list_minute_start,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
@@ -135,7 +136,10 @@ pub(super) async fn bind_send(
             .ok_or(RecoveryError::Rejected)?;
         let now: DateTime<Utc> =
             sqlx::query_scalar("SELECT clock_timestamp()").fetch_one(&mut **tx).await?;
-        if sent_at < sending_at
+        // 列表时间只到分钟：开始围栏按分钟起点比较，歧义检查覆盖整分钟；
+        // 同内容、同凭据且时窗与该分钟重叠的任一未绑定尝试都使本次恢复失败关闭。
+        let sent_minute = sent_list_minute_start(sent_at);
+        if sent_at < sent_list_minute_start(sending_at)
             || sent_at > completed_at
             || sent_at > now
             || ambiguous_attempt(
@@ -143,7 +147,7 @@ pub(super) async fn bind_send(
                 delivery_id,
                 sending_fencing_version,
                 expectation,
-                Some(sent_at),
+                Some((sent_minute, sent_minute + TimeDelta::minutes(1))),
             )
             .await?
         {
@@ -200,13 +204,14 @@ pub(super) async fn bind_send(
 }
 
 /// 全库排除相同内容、同凭据且时间重叠的未绑定尝试，不能让批次前缀抢占不唯一的 MID。
-/// 被管理员重试的旧尝试若已失去终态时窗，保守保留开放上界，不猜测远端未发送。
+/// `sent_window` 为列表时间所在的半开分钟区间：开始于区间结束前、且在区间开始时仍未结束的尝试
+/// 都可能产出该邮件。被管理员重试的旧尝试若已失去终态时窗，保守保留开放上界，不猜测远端未发送。
 async fn ambiguous_attempt(
     tx: &mut Transaction<'_, Postgres>,
     delivery_id: Uuid,
     fencing_version: i64,
     expectation: &DeliverySendExpectation,
-    sent_at: Option<DateTime<Utc>>,
+    sent_window: Option<(DateTime<Utc>, DateTime<Utc>)>,
 ) -> Result<bool, sqlx::Error> {
     // 与 Rust eq_ignore_ascii_case 同义，只折叠 ASCII；不能用受 locale 影响的 Unicode lower。
     sqlx::query_scalar(
@@ -227,7 +232,7 @@ async fn ambiguous_attempt(
                AND other.expectation->'credential'->>'credential_version'
                    IS NOT DISTINCT FROM $4::jsonb->'credential'->>'credential_version'
                AND ($5::timestamptz IS NULL OR (
-                   other.sending_at<=$5
+                   other.sending_at<$6
                    AND (delivery.sending_at IS DISTINCT FROM other.sending_at
                         OR delivery.command_id<>other.command_id
                         OR delivery.request_digest<>other.request_digest
@@ -239,16 +244,19 @@ async fn ambiguous_attempt(
     .bind(fencing_version)
     .bind(&expectation.world_id)
     .bind(sqlx::types::Json(expectation))
-    .bind(sent_at)
+    .bind(sent_window.map(|(start, _)| start))
+    .bind(sent_window.map(|(_, end)| end))
     .fetch_one(&mut **tx)
     .await
 }
 
 /// 自动恢复和人工 Sent 证明共用原履约复位；仅恢复正常对账，不满足付款或重发资产。
+/// `from_state` 由调用方按准入固定：结果未知恢复为 `manual_reconcile`，Admin 失败更正为 `failed`。
 pub(in crate::database) async fn resume_settlement_send(
     tx: &mut Transaction<'_, Postgres>,
     obligation_id: Uuid,
     delivery_id: Uuid,
+    from_state: &'static str,
 ) -> Result<(), sqlx::Error> {
     let enqueued = sqlx::query(
         "UPDATE public.settlement_obligation_fulfillments
@@ -256,11 +264,12 @@ pub(in crate::database) async fn resume_settlement_send(
              claim_token=NULL,claimed_at=NULL,claim_expires_at=NULL,
              next_attempt_at=clock_timestamp(),last_error_code=NULL,completed_at=NULL,
              updated_at=clock_timestamp()
-         WHERE obligation_id=$1 AND execution_state='manual_reconcile'
+         WHERE obligation_id=$1 AND execution_state=$3
            AND delivery_operation='send' AND delivery_id=$2",
     )
     .bind(obligation_id)
     .bind(delivery_id)
+    .bind(from_state)
     .execute(&mut **tx)
     .await?;
     if enqueued.rows_affected() != 1 {

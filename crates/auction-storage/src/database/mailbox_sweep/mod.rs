@@ -109,6 +109,37 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
         })
     }
 
+    fn record_sent_sighting<'a>(
+        &'a self,
+        delivery_id: Uuid,
+        fencing_version: i64,
+        external_mail_id: &'a str,
+        observation: Value,
+    ) -> ApplicationFuture<'a, ()> {
+        Box::pin(async move {
+            if delivery_id.is_nil()
+                || fencing_version <= 0
+                || !auction_domain::valid_positive_decimal(external_mail_id, 64)
+                || !observation.is_object()
+            {
+                return Err(storage_error("MoogleMail Sent 目击参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    record_sighting(
+                        store.pool(),
+                        delivery_id,
+                        fencing_version,
+                        external_mail_id,
+                        observation,
+                    )
+                    .await
+                }
+            }
+        })
+    }
+
     fn record_compose_discard<'a>(
         &'a self,
         delivery_id: Uuid,
@@ -582,6 +613,40 @@ async fn record_observation(
     Ok(())
 }
 
+/// 目击只写入仍在人工核对的结算发送，且 MID 未绑定或引用于其他投递；重复写入以最新观察覆盖。
+#[cfg(feature = "postgres")]
+async fn record_sighting(
+    pool: &TrackedPool<Postgres>,
+    delivery_id: Uuid,
+    fencing_version: i64,
+    external_mail_id: &str,
+    observation: Value,
+) -> Result<(), auction_application::ApplicationError> {
+    sqlx::query(
+        "UPDATE public.deliveries AS delivery
+         SET result_metadata = COALESCE(delivery.result_metadata, '{}'::jsonb)
+             || jsonb_build_object('sent_reference_sighting', $3::jsonb)
+         WHERE delivery.id = $1 AND delivery.fencing_version = $2
+           AND delivery.status = 'manual_reconcile' AND delivery.origin_kind = 'settlement'
+           AND delivery.payload->>'operation' = 'send'
+           AND NOT EXISTS (SELECT 1 FROM public.delivery_sent_bindings binding
+               WHERE binding.world_id = COALESCE(delivery.payload->>'world', 'main')
+                 AND binding.external_mail_id = $4 AND binding.delivery_id <> delivery.id)
+           AND NOT EXISTS (SELECT 1 FROM public.deliveries other
+               WHERE other.id <> delivery.id
+                 AND other.external_reference =
+                     'mooglemail:' || COALESCE(delivery.payload->>'world', 'main') || ':send:' || $4)",
+    )
+    .bind(delivery_id)
+    .bind(fencing_version)
+    .bind(observation)
+    .bind(external_mail_id)
+    .execute(pool.raw())
+    .await
+    .map_err(|_| storage_error("MoogleMail Sent 目击写入失败"))?;
+    Ok(())
+}
+
 #[cfg(feature = "postgres")]
 async fn bind_recovered_send(
     pool: &TrackedPool<Postgres>,
@@ -786,7 +851,8 @@ async fn persist_transition_once(
     }
     if origin_kind == "settlement" && matches!(update, RecoveryUpdate::Send(..)) {
         let obligation_id = Uuid::parse_str(&origin_id).map_err(|_| RecoveryError::Rejected)?;
-        recovery::resume_settlement_send(&mut tx, obligation_id, delivery_id).await?;
+        recovery::resume_settlement_send(&mut tx, obligation_id, delivery_id, "manual_reconcile")
+            .await?;
     }
     let resumed_action = if recovery_send {
         super::recovery_commands::resume_after_delivery_proof(&mut tx, delivery_id).await?

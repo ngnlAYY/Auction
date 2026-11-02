@@ -133,6 +133,26 @@ async fn execute_transaction(
     if current.fencing_version != command.expected_fencing_version {
         return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Stale));
     }
+    // Worker 已在完整 Sent 中目击同一结算义务主题时，重试可能重复寄出现金或装备，判失败会
+    // 把已成交误记为未发，两者失败关闭并转人工 Sent 证明；目击只由当前人工核对行的维护写入。
+    if matches!(
+        command.action,
+        DeliveryAdminAction::ReconcileRetry | DeliveryAdminAction::ReconcileFailed
+    ) {
+        let sighted: bool = sqlx::query_scalar(
+            "SELECT COALESCE(result_metadata,'{}'::jsonb) ? 'sent_reference_sighting'
+             FROM public.deliveries
+             WHERE id=$1 AND origin_kind='settlement' AND payload->>'operation'='send'",
+        )
+        .bind(command.delivery_id)
+        .fetch_optional(transaction.connection()?)
+        .await
+        .map_err(DeliveryAdminTransactionError::Sqlx)?
+        .unwrap_or(false);
+        if sighted {
+            return Err(DeliveryAdminError::SentSighted.into());
+        }
+    }
     if command.action == DeliveryAdminAction::ReconcileSucceeded {
         let payload: serde_json::Value =
             row.try_get("payload").map_err(DeliveryAdminTransactionError::Sqlx)?;

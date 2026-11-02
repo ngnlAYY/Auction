@@ -289,6 +289,7 @@ pub use ports::{
     MoogleMailboxInboxAssets, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
     MoogleMailboxNoticeExpectation, MoogleMailboxSentEntry, MoogleMailboxSentState,
     MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend, mail_recipient_is_list_projection,
+    sent_list_minute_start,
 };
 pub use services::{
     LotWatchPmNotification, lot_watch_notification, lot_watch_pm_notification, set_lot_watch,

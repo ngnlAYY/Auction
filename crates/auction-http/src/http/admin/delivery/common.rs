@@ -29,6 +29,12 @@ pub(crate) fn map_delivery_error(error: ApplicationError) -> Response {
             super::api_error(StatusCode::CONFLICT, "stale_delivery_state", "交付状态或版本已变化")
                 .into_response()
         }
+        ApplicationError::DeliveryAdmin(DeliveryAdminError::SentSighted) => super::api_error(
+            StatusCode::CONFLICT,
+            "delivery_sent_sighted",
+            "Sent 已出现该结算义务的邮件，须用人工 Sent 证明收口",
+        )
+        .into_response(),
         ApplicationError::DeliveryAdmin(DeliveryAdminError::CommandConflict) => {
             super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()

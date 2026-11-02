@@ -16,12 +16,15 @@ use crate::{
     MoogleMailboxEvidenceStore, MoogleMailboxInboxAssets, MoogleMailboxMaintenance,
     MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxSweepCandidate,
     MoogleMailboxUnprovenSend, RepositoryError, mail_recipient_is_list_projection,
+    sent_list_minute_start,
 };
 
 /// 单轮最多核对的投递数；达到上限即停止，不越过未处理后缀推进持久游标。
 const RECOVERY_PER_SWEEP: usize = 20;
 /// 相同列表投影过多时保留未知，不读取无界详情或只选择前几个结果冒充唯一性。
 const EXACT_MATCH_CANDIDATES: usize = 32;
+/// 单条结算投递在完整 Sent 中按同主题前缀最多读取的详情数；超出即保守放弃目击。
+const SIGHTING_CANDIDATES: usize = 4;
 /// 单条投递允许的维护重排队次数；达到上限后保留人工核对，防止无限重试。
 const MAX_SWEEP_RETRIES: i64 = 2;
 
@@ -213,15 +216,28 @@ impl MailboxMaintenanceService {
                     let Some(entries) = entries.as_deref() else { continue };
                     recovery_budget -= 1;
                     if let Some(expectation) = candidate.send_expectation.as_ref() {
-                        self.recover_frozen_send(
-                            world_id,
-                            candidate,
-                            expectation,
-                            entries,
-                            candidates,
-                            deadline,
-                        )
-                        .await?
+                        let mut step = self
+                            .recover_frozen_send(
+                                world_id,
+                                candidate,
+                                expectation,
+                                entries,
+                                candidates,
+                                deadline,
+                            )
+                            .await?;
+                        if !step.recovered {
+                            self.sight_settlement_reference(
+                                world_id,
+                                candidate,
+                                expectation,
+                                entries,
+                                deadline,
+                                &mut step,
+                            )
+                            .await?;
+                        }
+                        step
                     } else {
                         match candidate.origin_kind.as_str() {
                             "settlement" => {
@@ -351,6 +367,69 @@ impl MailboxMaintenanceService {
             )
             .await?;
         Ok(step)
+    }
+
+    /// 结算主题带唯一义务 reference；冻结匹配未找回时，在完整 Sent 列表中不限时间寻找同主题邮件。
+    /// 命中只记录目击，供 Admin 阻止重试或判失败并转人工 Sent 证明；目击不构成发送证明，
+    /// 也不推进投递、资金或履约。列表同前缀条目过多时保守放弃，不读取无界详情。
+    async fn sight_settlement_reference(
+        &self,
+        world_id: &str,
+        candidate: &MoogleMailboxUnprovenSend,
+        expectation: &DeliverySendExpectation,
+        entries: &[MoogleMailboxSentEntry],
+        deadline: Instant,
+        step: &mut RecoveryStep,
+    ) -> Result<(), ApplicationError> {
+        if candidate.origin_kind != "settlement"
+            || candidate.reference.is_empty()
+            || !expectation.subject.contains(&candidate.reference)
+        {
+            return Ok(());
+        }
+        let now = self.clock.now();
+        let hits = entries
+            .iter()
+            .filter(|entry| {
+                mail_recipient_is_list_projection(&entry.recipient, &candidate.recipient)
+                    && notice_subject_matches(&expectation.subject, &entry.subject)
+                    && entry.sent_at <= now
+            })
+            .take(SIGHTING_CANDIDATES + 1)
+            .collect::<Vec<_>>();
+        if hits.is_empty() || hits.len() > SIGHTING_CANDIDATES {
+            return Ok(());
+        }
+        for entry in hits {
+            check_deadline(deadline)?;
+            let Some(state) = self.sent_state(world_id, entry, step).await? else {
+                return Ok(());
+            };
+            if state.external_mail_id == entry.external_mail_id
+                && state.recipient.eq_ignore_ascii_case(&candidate.recipient)
+                && state.subject == expectation.subject
+            {
+                return self
+                    .store
+                    .record_sent_sighting(
+                        candidate.delivery_id,
+                        candidate.fencing_version,
+                        &state.external_mail_id,
+                        json!({
+                            "observed_at": now,
+                            "mid": state.external_mail_id,
+                            "sent_at": entry.sent_at,
+                            "sent_time_precision": "minute",
+                            "collected": state.collected,
+                            "cod_pending": state.cod_pending,
+                            "remaining_credits": state.remaining_credits,
+                            "remaining_equipment_count": state.remaining_equipment_ids.len(),
+                        }),
+                    )
+                    .await;
+            }
+        }
+        Ok(())
     }
 
     /// 结算类：标题携带义务 reference，详情必须仍带对应装备或 carrier。
@@ -657,8 +736,9 @@ fn frozen_entry_matches(
     candidate.world_id == expectation.world_id
         && mail_recipient_is_list_projection(&entry.recipient, &expectation.recipient)
         && notice_subject_matches(&expectation.subject, &entry.subject)
-        // 列表时间仅精确到分钟；不能向下取整 fence 或扩大窗口混入先前相同正文。
-        && entry.sent_at >= candidate.sending_at
+        // 列表时间仅精确到分钟，发送通常在开始的同一分钟完成，开始围栏按分钟起点比较。
+        // 同分钟更早的同内容邮件由详情唯一匹配、MID 绑定唯一和存储侧整分钟歧义检查排除。
+        && entry.sent_at >= sent_list_minute_start(candidate.sending_at)
         && entry.sent_at <= candidate.outcome_recorded_at
         && entry.sent_at <= now
 }

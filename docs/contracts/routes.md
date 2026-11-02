@@ -170,7 +170,7 @@
 | GET | `/api/v1/admin/deliveries` | 投递 outbox（`page`、`page_size`、`status`） |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/release` | 释放投递 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/retry` | 重试失败投递 |
-| POST | `/api/v1/admin/deliveries/{delivery_id}/reconcile` | 人工对账结果未知的投递（成功/失败/重试）；主动 Send 禁止仅凭手填外部引用确认成功 |
+| POST | `/api/v1/admin/deliveries/{delivery_id}/reconcile` | 人工对账结果未知的投递（成功/失败/重试）；主动 Send 禁止仅凭手填外部引用确认成功。判失败的 `failure_code` 只接受 `verified_not_sent`、`recipient_invalid`、`no_longer_needed`；Worker 已在 Sent 目击同一结算义务主题时，重试与判失败返回 `409 delivery_sent_sighted` |
 | GET | `/api/v1/admin/realtime/events` | 事件元数据（`stream_key`、`kind`、`page`、`page_size`） |
 | GET | `/api/v1/admin/realtime/lag` | consumer 滞后（`stream_prefix`、`consumer_key`、`page`、`page_size`） |
 | GET | `/api/v1/admin/realtime/failures`、`/api/v1/admin/realtime/failures/{failure_id}` | 转发失败列表（`stream_key`、`consumer_key`、`code`、`resolved`、`page`、`page_size`）/ 单条详情 |
