@@ -21,11 +21,11 @@ pub(crate) fn stored_public_page_size(movement: bool) -> i64 {
     #[cfg(target_arch = "wasm32")]
     {
         let key = if movement { MOVEMENT_PAGE_SIZE_KEY } else { PAGE_SIZE_KEY };
-        return web_sys::window()
+        web_sys::window()
             .and_then(|window| window.local_storage().ok().flatten())
             .and_then(|storage| storage.get_item(key).ok().flatten())
             .and_then(|value| parse_public_page_size(&value))
-            .unwrap_or(DEFAULT_PAGE_SIZE);
+            .unwrap_or(DEFAULT_PAGE_SIZE)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
