@@ -1,7 +1,10 @@
 use std::net::SocketAddr;
 
 use auction_application::{DeliveryAdminAction, DeliveryAdminCommand};
-use auction_contracts::{AdminDeliveryCommandRequest, AdminDeliveryCommandResponse, ApiResponse};
+use auction_contracts::{
+    ADMIN_DELIVERY_RECONCILE_FAILURE_CODES, AdminDeliveryCommandRequest,
+    AdminDeliveryCommandResponse, ApiResponse,
+};
 use axum::{
     Json,
     body::Bytes,
@@ -192,8 +195,12 @@ fn normalize_action_fields(
         DeliveryAdminAction::ReconcileSucceeded => {
             is_trimmed_non_empty(external_reference.as_deref()) && failure_code.is_none()
         }
+        // 新判失败只接受固定原因码，避免无语义自由文本进入投递与履约失败码。
         DeliveryAdminAction::ReconcileFailed => {
-            external_reference.is_none() && is_trimmed_non_empty(failure_code.as_deref())
+            external_reference.is_none()
+                && failure_code
+                    .as_deref()
+                    .is_some_and(|code| ADMIN_DELIVERY_RECONCILE_FAILURE_CODES.contains(&code))
         }
     };
 

@@ -383,6 +383,7 @@ pub use mail_maintenance::{
     MoogleMailboxInboxAssets, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
     MoogleMailboxNoticeExpectation, MoogleMailboxSentEntry, MoogleMailboxSentState,
     MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend, mail_recipient_is_list_projection,
+    sent_list_minute_start,
 };
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,

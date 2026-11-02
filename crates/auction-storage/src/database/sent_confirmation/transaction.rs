@@ -1,4 +1,5 @@
-//! 追加命令事实、唯一 MID 与 succeeded 投递；原始未知结果保持在不可变快照与旧审计中。
+//! 追加命令事实、唯一 MID 与 succeeded 投递；原始未知结果或被更正的 Admin 失败结论保持在
+//! 不可变快照、原命令账本与旧审计中。
 
 use super::*;
 use serde_json::json;
@@ -105,8 +106,10 @@ pub(super) async fn apply(
         .bind(serde_json::to_value(&command.evidence)?).bind(command.accept_collected_assets)
         .bind(command.accept_attempt_history).bind(&snapshot.data).bind(serde_json::to_value(&result)?)
         .execute(&mut **tx).await?;
+    let corrects_admin_failure = p.corrects_admin_failure;
+    let admin_failure_command_id = &snapshot.data["admin_failure"]["command_id"];
     // 不设置 sent_verified；下游只能通过持久 confirmation+attempt+binding 强谓词获得此证明能力。
-    let metadata = json!({
+    let mut metadata = json!({
         "operation":"send", "proof":"sent_operator_confirmed_v1",
         "external_reference_proven":true, "operator_confirmation_id":command.command_id,
         "send_expectation":expected, "sending_fencing_version":snapshot.sending_fencing_version,
@@ -117,13 +120,23 @@ pub(super) async fn apply(
         "sent_time_precision":"minute", "collected":command.evidence.collected,
         "cod_pending":command.evidence.cod_pending,
     });
+    if corrects_admin_failure {
+        metadata["corrected_admin_failure_command_id"] = admin_failure_command_id.clone();
+    }
+    // 状态门与快照准入一致：更正只作用于仍停在原 Admin 失败结论上的行，失败标记随成功移除，
+    // 原结论保留在命令账本、审计与 confirmation 快照中。
     let changed = sqlx::query("UPDATE public.deliveries SET status='succeeded',external_reference=$3,
         failure_code=NULL,completed_at=clock_timestamp(),updated_at=clock_timestamp(),
-        result_metadata=(result_metadata-ARRAY['sent_verified','sent_recovered']::text[]) || $4::jsonb
-        WHERE id=$1 AND fencing_version=$2 AND status='manual_reconcile' AND failure_code='write_unknown'
-          AND external_reference IS NULL AND lease_token IS NULL AND lease_expires_at IS NULL")
+        result_metadata=(result_metadata-CASE WHEN $5 THEN ARRAY['sent_verified','sent_recovered','resolution']
+                                              ELSE ARRAY['sent_verified','sent_recovered'] END::text[]) || $4::jsonb
+        WHERE id=$1 AND fencing_version=$2
+          AND external_reference IS NULL AND lease_token IS NULL AND lease_expires_at IS NULL
+          AND CASE WHEN $5 THEN status='failed'
+                   AND result_metadata->>'resolution'='admin_reconciled_failed'
+              ELSE status='manual_reconcile' AND failure_code='write_unknown' END")
         .bind(command.delivery_id).bind(command.expected_fencing_version)
-        .bind(&result.external_reference).bind(metadata).execute(&mut **tx).await?;
+        .bind(&result.external_reference).bind(metadata).bind(corrects_admin_failure)
+        .execute(&mut **tx).await?;
     if changed.rows_affected() != 1 {
         return Err(Error::Rejected);
     }
@@ -138,8 +151,13 @@ pub(super) async fn apply(
         )
         .await?;
     }
-    super::super::mailbox_sweep::resume_settlement_send(tx, obligation_id, command.delivery_id)
-        .await?;
+    super::super::mailbox_sweep::resume_settlement_send(
+        tx,
+        obligation_id,
+        command.delivery_id,
+        if corrects_admin_failure { "failed" } else { "manual_reconcile" },
+    )
+    .await?;
     sqlx::query("INSERT INTO public.audit_records(id,occurred_at,actor_type,actor_id,action,entity_type,
         entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'admin',$2,'delivery.sent_operator_confirmed',
         'delivery',$3,'success','admin',$4)")
@@ -150,6 +168,12 @@ pub(super) async fn apply(
             "external_reference":result.external_reference,
             "accept_collected_assets":command.accept_collected_assets,
             "accept_attempt_history":command.accept_attempt_history,
+            "corrects_admin_failure":corrects_admin_failure,
+            "admin_failure_command_id":if corrects_admin_failure {
+                admin_failure_command_id.clone()
+            } else {
+                serde_json::Value::Null
+            },
             "proof":"sent_operator_confirmed_v1","executor":"auction-cli",
             "reason":command.reason,
             "collection_funding":if expected.credits > 0 {"already_collected"} else {"normal_worker"},

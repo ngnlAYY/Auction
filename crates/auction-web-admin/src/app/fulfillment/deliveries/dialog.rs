@@ -1,5 +1,6 @@
 //! Delivery release/retry/reconcile 确认对话框。
 
+use auction_contracts::ADMIN_DELIVERY_RECONCILE_FAILURE_CODES;
 use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
 
@@ -136,12 +137,12 @@ pub(super) fn DeliveryDialog(
                         if !send_success_blocked {
                             if draft_action == "failed" {
                                 label { r#for: "delivery-failure-code-{delivery_id}", {t!("delivery-failure-code")} }
-                                input {
+                                // 判失败只提交后端闭集原因码；空占位使未选择时不能提交。
+                                select {
                                     id: "delivery-failure-code-{delivery_id}",
-                                    r#type: "text",
                                     required: true,
                                     value: draft_failure_code.clone(),
-                                    oninput: move |event| {
+                                    onchange: move |event| {
                                         on_draft_change.call(DeliveryReconcileDraft {
                                             delivery_id: failure_delivery_id.clone(),
                                             action: failure_action.clone(),
@@ -149,6 +150,20 @@ pub(super) fn DeliveryDialog(
                                             failure_code: event.value(),
                                         });
                                     },
+                                    option {
+                                        value: "",
+                                        disabled: true,
+                                        selected: draft_failure_code.is_empty(),
+                                        {t!("delivery-failure-code-placeholder")}
+                                    }
+                                    for code in ADMIN_DELIVERY_RECONCILE_FAILURE_CODES {
+                                        option {
+                                            key: "{code}",
+                                            value: code,
+                                            selected: draft_failure_code == code,
+                                            {failure_code_label(code)}
+                                        }
+                                    }
                                 }
                             }
                             DeliveryDialogActions {
@@ -208,5 +223,15 @@ pub(super) fn DeliveryDialogActions(
                 "{confirm_label}"
             }
         }
+    }
+}
+
+/// 闭集失败原因码的界面译文；未知码原样显示，不猜测语义。
+fn failure_code_label(code: &str) -> String {
+    match code {
+        "verified_not_sent" => t!("delivery-failure-code-verified-not-sent"),
+        "recipient_invalid" => t!("delivery-failure-code-recipient-invalid"),
+        "no_longer_needed" => t!("delivery-failure-code-no-longer-needed"),
+        other => other.to_owned(),
     }
 }

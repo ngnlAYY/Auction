@@ -5,7 +5,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, DurationRound, TimeDelta, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -34,6 +34,12 @@ pub fn mail_recipient_is_list_projection(list_recipient: &str, full_recipient: &
             .as_bytes()
             .get(..prefix.len())
             .is_some_and(|full_prefix| full_prefix.eq_ignore_ascii_case(prefix.as_bytes()))
+}
+
+/// Sent 列表时间只精确到分钟；返回发送开始所在分钟的起点，供列表时间与开始围栏比较。
+/// 截断失败时原样返回，退回严格围栏。
+pub fn sent_list_minute_start(value: DateTime<Utc>) -> DateTime<Utc> {
+    value.duration_trunc(TimeDelta::minutes(1)).unwrap_or(value)
 }
 
 /// compose 页当前草稿的只读投影。
@@ -152,7 +158,7 @@ pub struct MoogleMailboxUnprovenSend {
     pub result_code: Option<String>,
     /// 通知类登录 key 所属用户；只以 UUID 引用，明文不落库。
     pub user_key_user_id: Option<Uuid>,
-    /// 发送围栏时间；恢复仅接受此时间之后的有界 Sent 证据，不回退到分钟起点。
+    /// 发送围栏时间；分钟级 Sent 列表按其所在分钟起点比较，同分钟同内容的其他尝试由存储侧排除。
     pub sending_at: DateTime<Utc>,
     /// 原未知结果持久化时间，限定本次发送证据上界，不用任意时钟偏移扩展窗口。
     pub outcome_recorded_at: DateTime<Utc>,
@@ -246,6 +252,16 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         &'a self,
         delivery_id: Uuid,
         fencing_version: i64,
+        observation: Value,
+    ) -> MailboxFuture<'a, ()>;
+
+    /// 记录结算发送在完整 Sent 中任意时间的同主题目击；只阻止 Admin 重试或判失败，
+    /// 不构成发送证明。MID 已绑定或引用于其他投递时不记录。
+    fn record_sent_sighting<'a>(
+        &'a self,
+        delivery_id: Uuid,
+        fencing_version: i64,
+        external_mail_id: &'a str,
         observation: Value,
     ) -> MailboxFuture<'a, ()>;
 

@@ -1,4 +1,7 @@
 //! 原生 Sent 人工观察的显式责任契约；它不是自动精确附件证明。
+//!
+//! 两种准入：结果未知（`manual_reconcile`/`write_unknown`）的发送，以及被 Admin 对账为失败、
+//! 但原生 Sent 证明实际已寄出的发送。后者只追加更正事实，原失败命令与审计保持不变。
 
 use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
@@ -56,7 +59,8 @@ impl ManualSentEvidence {
         Ok(())
     }
 
-    /// 完整现金只能确认未领取的原额附件；装备收取回执仍需命令显式接受缺失 EID 的责任。
+    /// 现金附件未领取时须原额仍在；已领取时只接受与冻结金额一致的原生回执，并由命令显式
+    /// 接受领取责任。装备收取回执同样需命令显式接受缺失 EID 的责任。
     pub fn matches_frozen(&self, expected: &DeliverySendExpectation, item_name: &str) -> bool {
         if !expected.validate()
             || expected.world_id != self.world_id
@@ -67,14 +71,26 @@ impl ManualSentEvidence {
             return false;
         }
         if expected.credits > 0 {
-            return expected.cod == 0
-                && expected.equipment_ids.is_empty()
-                && !self.collected
-                && self.receipt.is_empty()
-                && self.observed_body_digest == self.original_body_digest
-                && self.remaining_credits == expected.credits
-                && self.cod_pending == 0
-                && self.equipment_ids.is_empty();
+            if expected.cod != 0
+                || !expected.equipment_ids.is_empty()
+                || self.cod_pending != 0
+                || !self.equipment_ids.is_empty()
+            {
+                return false;
+            }
+            if !self.collected {
+                return self.receipt.is_empty()
+                    && self.observed_body_digest == self.original_body_digest
+                    && self.remaining_credits == expected.credits;
+            }
+            // 附件现金在发送时已离开账户，领取只改变收件人侧；回执金额必须与冻结金额逐字一致。
+            return self.remaining_credits == 0
+                && self.observed_body_digest != self.original_body_digest
+                && self.receipt
+                    == format!(
+                        "Removed attachment: {} Credits",
+                        grouped_credits(expected.credits)
+                    );
         }
         if expected.credits != 0
             || expected.equipment_ids.len() != 1
@@ -162,6 +178,8 @@ pub struct SentConfirmationPreview {
     pub external_reference: String,
     pub requires_collected_asset_acceptance: bool,
     pub requires_attempt_history_acceptance: bool,
+    /// 目标是被 Admin 对账为失败的投递；确认即以 Sent 证据更正该人工失败结论。
+    pub corrects_admin_failure: bool,
 }
 
 /// 原命令结果永久保存，同 ID 同参重放不重复追加事实。

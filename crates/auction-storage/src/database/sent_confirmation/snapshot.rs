@@ -21,6 +21,11 @@ pub(super) async fn load(
           'lot',to_jsonb(l),'settlement',to_jsonb(s),
           'funding_allocation',(SELECT to_jsonb(x) FROM public.settlement_funding_allocations x WHERE x.delivery_id=d.id),
           'funding_lot',(SELECT to_jsonb(x) FROM public.settlement_funding_lots x WHERE x.lot_id=o.lot_id),
+          'admin_failure',(SELECT jsonb_build_object('command_id',c.command_id,'command_kind',c.command_kind,
+             'status',c.result_payload->'Status','fencing_version',c.result_payload->'FencingVersion',
+             'failure_code',c.result_payload->'FailureCode','created_at',c.created_at)
+             FROM public.delivery_admin_commands c WHERE c.delivery_id=d.id
+             ORDER BY c.created_at DESC,c.command_id DESC LIMIT 1),
           'cash_reservation',EXISTS(
              SELECT 1 FROM public.settlement_funding_allocations x
              JOIN public.settlement_funding_commands reservation ON reservation.command_id=d.id
@@ -48,7 +53,8 @@ pub(super) async fn load(
                  OR (b.world_id=$2 AND b.external_mail_id=$3))
              OR EXISTS(SELECT 1 FROM public.deliveries x WHERE x.id<>d.id AND x.external_reference=$4)
              OR EXISTS(SELECT 1 FROM public.delivery_sent_confirmations x WHERE x.delivery_id=d.id)
-             OR EXISTS(SELECT 1 FROM public.settlement_recovery_actions x WHERE x.recovery_id=r.id)
+             OR EXISTS(SELECT 1 FROM public.settlement_recovery_actions x WHERE x.recovery_id=r.id
+                 AND NOT (x.kind='payment_reminder' AND x.execution_state='satisfied'))
              OR EXISTS(SELECT 1 FROM public.compensation_pool_reversals x WHERE x.lot_id=o.lot_id)
              OR EXISTS(SELECT 1 FROM public.settlement_funding_receipts x WHERE x.delivery_id=d.id)
              OR (o.obligation_kind<>'seller_payout' AND (
@@ -93,6 +99,7 @@ pub(super) async fn load(
         ),
         requires_collected_asset_acceptance: evidence.collected,
         requires_attempt_history_acceptance: false,
+        corrects_admin_failure: false,
     };
     let Some(data) = data else {
         preview.blockers.push("delivery_not_found".into());
@@ -120,6 +127,31 @@ pub(super) async fn load(
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|t| t.with_timezone(&Utc))
     };
+    // 两种互斥准入：发送结果未知，或 Admin 对账判为失败且其后投递再无变化（失败命令的
+    // 结果 fence 与失败码仍等于当前行）。后者只用 Sent 证据追加更正，不改写原失败命令。
+    let write_unknown = d["status"] == "manual_reconcile"
+        && d["failure_code"] == "write_unknown"
+        && d["result_metadata"]["write_started"] == true;
+    let admin_failure = &data["admin_failure"];
+    let admin_failed = d["status"] == "failed"
+        && d["result_metadata"]["resolution"] == "admin_reconciled_failed"
+        && !d["failure_code"].is_null()
+        && admin_failure["command_kind"] == "reconcile"
+        && admin_failure["status"] == "failed"
+        && admin_failure["fencing_version"] == d["fencing_version"]
+        && admin_failure["failure_code"] == d["failure_code"];
+    preview.corrects_admin_failure = admin_failed;
+    // 被判失败的邮件可能出自冻结尝试记录之前的旧尝试；早于当前尝试即须显式接受旧尝试关联。
+    if admin_failed
+        && time(&d["sending_at"]).is_some_and(|start| {
+            evidence
+                .sent_minute
+                .checked_add_signed(chrono::Duration::minutes(1))
+                .is_none_or(|upper| upper <= start)
+        })
+    {
+        preview.requires_attempt_history_acceptance = true;
+    }
     let mut require = |condition: bool, blocker: &str| {
         if !condition {
             preview.blockers.push(blocker.to_owned());
@@ -139,17 +171,21 @@ pub(super) async fn load(
         "unsupported_delivery_scope",
     );
     require(
-        d["status"] == "manual_reconcile"
-            && d["failure_code"] == "write_unknown"
-            && d["result_metadata"]["write_started"] == true
+        (write_unknown || admin_failed)
             && d["external_reference"].is_null()
             && d["lease_token"].is_null()
             && d["lease_expires_at"].is_null()
             && d["result_metadata"]["retired"] != true,
-        "requires_unclaimed_current_write_unknown",
+        "requires_unclaimed_write_unknown_or_admin_failure",
     );
-    require(
+    // Admin 失败对账会把同一失败码写入履约；其余身份与 claim 条件两种准入一致。
+    let fulfillment_state_matches = if admin_failed {
+        f["execution_state"] == "failed" && f["last_error_code"] == d["failure_code"]
+    } else {
         f["execution_state"] == "manual_reconcile"
+    };
+    require(
+        fulfillment_state_matches
             && f["delivery_id"] == d["id"]
             && f["delivery_operation"] == "send"
             && f["dispatch_world"] == "main"
@@ -168,9 +204,10 @@ pub(super) async fn load(
             && o["business_state"] == "ready",
         "fulfillment_identity_or_claim_conflict",
     );
+    // 逾期只表示截止已过并发过提醒，不改变付款或资产事实；提醒以外的恢复动作仍冲突。
     require(
         r.is_null()
-            || (r["stage"] == "awaiting_payment"
+            || (matches!(r["stage"].as_str(), Some("awaiting_payment" | "payment_overdue"))
                 && r["resolution"].is_null()
                 && r["blocking_code"].is_null()
                 && r["manual_reconcile_delivery_id"].is_null()
@@ -202,10 +239,21 @@ pub(super) async fn load(
         }),
         "frozen_credential_retired_or_changed",
     );
+    // 结果未知只认当前尝试时窗；Admin 失败更正从投递激活所在分钟起至失败结论落定，
+    // 邮件唯一性由带义务 reference 的冻结主题、正文摘要与 MID 绑定唯一共同保证。
+    let window_start = if admin_failed {
+        time(&d["activated_at"]).map(auction_application::sent_list_minute_start)
+    } else {
+        time(&d["sending_at"])
+    };
     require(
-        matches!((time(&d["sending_at"]), time(&d["completed_at"])), (Some(start), Some(end))
-        if start <= end && evidence.sent_minute <= end
-            && evidence.sent_minute.checked_add_signed(chrono::Duration::minutes(1)).is_some_and(|upper| upper > start)
+        matches!((window_start, time(&d["sending_at"]), time(&d["completed_at"])), (Some(start), Some(sending), Some(end))
+        if start <= sending && sending <= end && evidence.sent_minute <= end
+            && (if admin_failed {
+                evidence.sent_minute >= start
+            } else {
+                evidence.sent_minute.checked_add_signed(chrono::Duration::minutes(1)).is_some_and(|upper| upper > start)
+            })
             && evidence.observed_at >= end && evidence.observed_at <= now),
         "sent_minute_outside_frozen_window",
     );

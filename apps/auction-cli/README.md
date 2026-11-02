@@ -271,11 +271,11 @@ auction-cli --config-dir /etc/auction settlement confirm-sent <DELIVERY_UUID> \
 
 - 证据只按闭集 `ManualSentEvidence` 解析：`schema_version=1`，`world_id`、`external_mail_id`、`sender_uid`、`sender_name`、`recipient`、`subject`、UTC `sent_minute`/`observed_at`、32 字节数组 `original_body_digest`/`observed_body_digest`、整数 `remaining_credits`/`cod_pending`、字符串数组 `equipment_ids`、布尔 `collected` 和原生 `receipt`。字段全部必填，未知字段拒绝。最多 64 KiB，使用既有有界、非阻塞普通文件读取器，拒绝符号链接、FIFO、设备等特殊文件；不要将凭据放进证据。
 - `equipment_ids` 只记录远端当前实际剩余 EID，已领取时为空；不得将期待 EID 填入观察值。原始正文摘要绑定冻结发送正文，不能用当前模板重渲染；已领取时还须保留游戏追加的原生附件收取/COD 回执。应用端口统一核对冻结期待、发件身份、发送分钟区间、金额、附件与历史尝试。
-- 入口支持 main 结算的单件装备 COD、流拍/撤拍退回，以及原货款已寄出但结果未知的 `seller_payout`。原投递须有冻结发送尝试、处于允许的人工核对状态，且无活跃 claim 或冲突处置。货款只接受实际仍完整附带的正额 Credits、零 COD、空 EID 与空收取回执；原 `seller/unknown` 资金占用及 reserve/unknown 分录必须精确绑定同一账户、lot、义务、投递和金额。默认 `outcome=preview`，`preview.blockers`/`eligible` 表示当前资格；预览不写入或授权重发。
+- 入口支持 main 结算的单件装备 COD、流拍/撤拍退回，以及原货款已寄出的 `seller_payout`。原投递须有冻结发送尝试、处于结果未知的人工核对状态或被 Admin 对账判失败且其后无变化（预览 `corrects_admin_failure=true`），且无活跃 claim 或冲突处置。货款只接受正额 Credits、零 COD 与空 EID：未领取时原额仍在且回执为空，已领取时须带原生 `Removed attachment: <千分位金额> Credits` 回执并加 `--accept-collected-assets`；原 `seller/unknown` 资金占用及 reserve/unknown 分录必须精确绑定同一账户、lot、义务、投递和金额。默认 `outcome=preview`，`preview.blockers`/`eligible` 表示当前资格；预览不写入或授权重发。
 - 执行参数只能与 `--execute` 同时使用；命令 ID、版本、操作者、原因与 `--confirm` 全部必填。`--accept-collected-assets` 和 `--accept-attempt-history` 只在 preview 要求时加入，示例中的两项不能机械照抄。确认短语绑定投递、版本、MID、类型化证据摘要与两项接受声明，任何内容变化均须重新预览。`execution.argv_template` 是独立参数数组，不得 `eval`。
 - 已收取附件后原 EID 无法再自动证明，接受项记录操作者承担的资产关联责任；旧尝试历史不完整时，另一接受项记录人工关联责任。系统保留全部旧尝试、原结果与审计，追加独立不可变确认，以 `sent_operator_confirmed_v1` 区别于 `sent_exact_payload_v1` 自动精确资产证明，不设置 `sent_verified=true` 冒充自动核验。Admin 仍不能仅凭手填 MID 确认主动 Send 成功。
 - 成功输出 `outcome=committed`，同 ID 同参数重放输出 `outcome=replayed`。响应或连接错误不能证明未提交，必须保持原命令 ID、证据内容、原因、版本、接受项与确认短语重放；不要用新 preview 的版本替换原请求。同 ID 换参冲突。
-- 装备确认只绑定真实 MID、恢复原投递及履约；COD 实收及后续卖方款仍由 Worker 使用真实收取证明与原冻结结算处理。已寄出的货款确认则复用资金 owner，将原 `unknown` 支出记为 `spent`，不创建新付款、收款来源或投递；同命令重放不重复支出。确认均不代表收件人已经领取，领取状态由正常流程继续核验。详见[结算与履约](../../docs/guide/settlement.md#sent-人工证据确认)。
+- 装备确认只绑定真实 MID、恢复原投递及履约；COD 实收及后续卖方款仍由 Worker 使用真实收取证明与原冻结结算处理。已寄出的货款确认则复用资金 owner，将原 `unknown` 支出记为 `spent`，不创建新付款、收款来源或投递；同命令重放不重复支出。确认均不代表收件人已经领取，领取状态由正常流程继续核验。更正 Admin 失败结论时原失败命令与审计保留，履约从 failed 恢复正常对账；邮件早于当前尝试时须加 `--accept-attempt-history`。详见[结算与履约](../../docs/guide/settlement.md#sent-人工证据确认)。
 
 ### Bot 资金
 

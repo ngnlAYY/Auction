@@ -51,6 +51,10 @@ pub struct AdminDeliveryPaginationResponse {
     pub total: i64,
 }
 
+/// Admin 对账判失败可选的固定原因码；历史投递与已提交命令上的既有失败码保持原样。
+pub const ADMIN_DELIVERY_RECONCILE_FAILURE_CODES: [&str; 3] =
+    ["verified_not_sent", "recipient_invalid", "no_longer_needed"];
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminDeliveryCommandRequest {
