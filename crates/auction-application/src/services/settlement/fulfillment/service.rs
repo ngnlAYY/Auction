@@ -154,20 +154,10 @@ impl SettlementFulfillmentService {
             &self.funding_policy().await?,
         )
         .await?
+        .into_phase()
         {
-            AuthorizationResult::Authorized(value) => value,
-            AuthorizationResult::Deferred { obligation_id, failure_code } => {
-                return Ok(SettlementFulfillmentPhaseResult::Deferred {
-                    obligation_id,
-                    failure_code,
-                });
-            }
-            AuthorizationResult::ManualReconcile { obligation_id, failure_code } => {
-                return Ok(SettlementFulfillmentPhaseResult::ManualReconcile {
-                    obligation_id,
-                    failure_code,
-                });
-            }
+            Ok(value) => value,
+            Err(result) => return Ok(result),
         };
         if claim.recipient != classified_recipient {
             // 身份分支之后发生改名不能把已证明非bot的旧目标换成新目标直接派发。
@@ -237,20 +227,10 @@ impl SettlementFulfillmentService {
             &self.funding_policy().await?,
         )
         .await?
+        .into_phase()
         {
-            AuthorizationResult::Authorized(value) => value,
-            AuthorizationResult::Deferred { obligation_id, failure_code } => {
-                return Ok(SettlementFulfillmentPhaseResult::Deferred {
-                    obligation_id,
-                    failure_code,
-                });
-            }
-            AuthorizationResult::ManualReconcile { obligation_id, failure_code } => {
-                return Ok(SettlementFulfillmentPhaseResult::ManualReconcile {
-                    obligation_id,
-                    failure_code,
-                });
-            }
+            Ok(value) => value,
+            Err(result) => return Ok(result),
         };
         let (Some(delivery_id), Some(_prepare_command_id), Some(prepare_request_hash)) =
             (claim.delivery_id, claim.prepare_command_id, claim.prepare_request_hash)

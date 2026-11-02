@@ -11,21 +11,11 @@ pub(crate) async fn place_bid(
 ) -> Response {
     let (parts, body) = request.into_parts();
     let headers = parts.headers;
-    let uri = parts.uri;
-    if let Some(response) = session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    let identity = match authenticated_public_competition_identity(&state, &headers).await {
-        Ok(identity) => identity,
-        Err(response) => return *response,
-    };
-    if uri.query().is_some_and(|query| !query.is_empty()) {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
-    }
-    let Ok(lot_uuid) = parse_public_uuid(&lot_id) else {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")
-            .into_response();
-    };
+    let (identity, lot_uuid) =
+        match super::command_entry(&state, &headers, address, &parts.uri, &lot_id).await {
+            Ok(entry) => entry,
+            Err(response) => return *response,
+        };
 
     let input: PlaceBidRequest =
         match strict_json::decode_after_guard(&headers, body, 4 << 10).await {
@@ -73,25 +63,21 @@ pub(crate) async fn place_bid(
         request_hash,
         request_id: request_id(&headers),
     };
-    let command_started = Instant::now();
-    let outcome = match commands.place_bid(command).await {
+    let outcome = match super::observed_command(
+        &state,
+        BusinessEvent::Bid,
+        commands.place_bid(command),
+    )
+    .await
+    {
         Ok(outcome) => outcome,
-        Err(error) => {
-            observe_public_business(
-                &state,
-                BusinessEvent::Bid,
-                business_outcome_for_competition_error(&error),
-                command_started,
-            );
-            return map_competition_error(error);
-        }
+        Err(response) => return *response,
     };
     if outcome.proxy.is_some() {
         return internal_error();
     }
     let effective_end_at = outcome.effective_end_at;
     let plan = outcome.plan;
-    observe_public_business(&state, BusinessEvent::Bid, BusinessOutcome::Success, command_started);
     let Some(current_price) = plan.final_lot.current_price else {
         return internal_error();
     };

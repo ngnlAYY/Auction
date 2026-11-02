@@ -1,10 +1,10 @@
 //! Recovery COD return、relist 与 refund resolution 阶段。
 
-use auction_application::Clock;
+use auction_application::{Clock, RecoveryResolutionAdvance};
 use auction_observability::WorkerResult;
 use chrono::Duration as ChronoDuration;
 
-use super::{PersistentWorker, merge_worker_result, observe_phase};
+use super::{PersistentWorker, merge_worker_result, run_phase};
 
 pub(super) async fn advance_relists<C>(
     worker: &PersistentWorker<C>,
@@ -20,45 +20,14 @@ pub(super) async fn advance_relists<C>(
         merge_worker_result(batch_result, WorkerResult::Error);
         return;
     };
-    let mut count = 0_usize;
-    let mut phase_result = WorkerResult::Success;
-    for _ in 0..worker.recovery.batch_limit {
-        if worker.control.is_draining() {
-            break;
-        }
-        match tokio::time::timeout(
-            worker.recovery.item_timeout,
-            store.advance_due_relist(worker.clock.now(), retry_delay),
-        )
-        .await
-        {
-            Ok(Ok(Some(advance))) => {
-                count = count.saturating_add(1);
-                tracing::info!(
-                    recovery_id = %advance.recovery_id,
-                    stage = %advance.stage,
-                    resolution = ?advance.resolution,
-                    relisted_auction_id = ?advance.relisted_auction_id,
-                    relisted_lot_id = ?advance.relisted_lot_id,
-                    state_version = advance.state_version,
-                    completed = advance.completed,
-                    "recovery relist resolution advanced"
-                );
-            }
-            Ok(Ok(None)) => break,
-            Ok(Err(error)) => {
-                tracing::warn!(error = %error, "recovery relist phase failed");
-                phase_result = WorkerResult::Error;
-                break;
-            }
-            Err(_) => {
-                tracing::warn!("recovery relist item timed out");
-                phase_result = WorkerResult::Error;
-                break;
-            }
-        }
-    }
-    observe_phase(worker, batch_result, phase_result, count);
+    run_phase(
+        worker,
+        batch_result,
+        "relist",
+        |now| store.advance_due_relist(now, retry_delay),
+        |advance| record(advance, "relist"),
+    )
+    .await;
 }
 
 pub(super) async fn complete_refunds<C>(
@@ -70,45 +39,14 @@ pub(super) async fn complete_refunds<C>(
     let Some(store) = &worker.recovery_resolution else {
         return;
     };
-    let mut count = 0_usize;
-    let mut phase_result = WorkerResult::Success;
-    for _ in 0..worker.recovery.batch_limit {
-        if worker.control.is_draining() {
-            break;
-        }
-        match tokio::time::timeout(
-            worker.recovery.item_timeout,
-            store.complete_due_refund(worker.clock.now()),
-        )
-        .await
-        {
-            Ok(Ok(Some(advance))) => {
-                count = count.saturating_add(1);
-                tracing::info!(
-                    recovery_id = %advance.recovery_id,
-                    stage = %advance.stage,
-                    resolution = ?advance.resolution,
-                    relisted_auction_id = ?advance.relisted_auction_id,
-                    relisted_lot_id = ?advance.relisted_lot_id,
-                    state_version = advance.state_version,
-                    completed = advance.completed,
-                    "recovery refund resolution advanced"
-                );
-            }
-            Ok(Ok(None)) => break,
-            Ok(Err(error)) => {
-                tracing::warn!(error = %error, "recovery refund phase failed");
-                phase_result = WorkerResult::Error;
-                break;
-            }
-            Err(_) => {
-                tracing::warn!("recovery refund item timed out");
-                phase_result = WorkerResult::Error;
-                break;
-            }
-        }
-    }
-    observe_phase(worker, batch_result, phase_result, count);
+    run_phase(
+        worker,
+        batch_result,
+        "refund",
+        |now| store.complete_due_refund(now),
+        |advance| record(advance, "refund"),
+    )
+    .await;
 }
 
 pub(super) async fn advance_cod_returns<C>(
@@ -120,41 +58,25 @@ pub(super) async fn advance_cod_returns<C>(
     let Some(store) = &worker.recovery_resolution else {
         return;
     };
-    let mut count = 0_usize;
-    let mut phase_result = WorkerResult::Success;
-    for _ in 0..worker.recovery.batch_limit {
-        if worker.control.is_draining() {
-            break;
-        }
-        match tokio::time::timeout(
-            worker.recovery.item_timeout,
-            store.advance_due_cod_return(worker.clock.now()),
-        )
-        .await
-        {
-            Ok(Ok(Some(advance))) => {
-                count = count.saturating_add(1);
-                tracing::info!(
-                    recovery_id = %advance.recovery_id,
-                    stage = %advance.stage,
-                    resolution = ?advance.resolution,
-                    state_version = advance.state_version,
-                    completed = advance.completed,
-                    "recovery COD return resolution advanced"
-                );
-            }
-            Ok(Ok(None)) => break,
-            Ok(Err(error)) => {
-                tracing::warn!(error = %error, "recovery COD return phase failed");
-                phase_result = WorkerResult::Error;
-                break;
-            }
-            Err(_) => {
-                tracing::warn!("recovery COD return item timed out");
-                phase_result = WorkerResult::Error;
-                break;
-            }
-        }
-    }
-    observe_phase(worker, batch_result, phase_result, count);
+    run_phase(
+        worker,
+        batch_result,
+        "COD return",
+        |now| store.advance_due_cod_return(now),
+        |advance| record(advance, "COD return"),
+    )
+    .await;
+}
+
+fn record(advance: &RecoveryResolutionAdvance, phase: &str) {
+    tracing::info!(
+        recovery_id = %advance.recovery_id,
+        stage = %advance.stage,
+        resolution = ?advance.resolution,
+        relisted_auction_id = ?advance.relisted_auction_id,
+        relisted_lot_id = ?advance.relisted_lot_id,
+        state_version = advance.state_version,
+        completed = advance.completed,
+        "recovery {phase} resolution advanced"
+    );
 }

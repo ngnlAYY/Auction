@@ -117,6 +117,26 @@ async fn inventory_metadata_binds_external_name_before_preparing_equipment() -> 
     Ok(())
 }
 
+/// 拒绝元数据只能是写入前的协议漂移；返回会话 cookie 是否仍有效，由调用方按场景断言。
+async fn reject_metadata(
+    media_type: &str,
+    metadata: &str,
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    let (sender, server) =
+        fixture(inventory_page("Fixture"), media_type, metadata.to_owned()).await?;
+    let cookie = MoogleMailCookie::new("fixture-cookie")?;
+    let result = sender
+        .read_inventory_preparation(&cookie, &request(), MoogleMailInventoryCategory::Cloth, |_| {
+            true
+        })
+        .await;
+    server.await??;
+    assert!(
+        matches!(result, Err(error) if error.category == MoogleMailErrorCategory::ProtocolDrift && !error.write_started())
+    );
+    Ok(cookie.is_active())
+}
+
 #[tokio::test]
 async fn inventory_metadata_rejects_incomplete_or_ambiguous_names() -> TestResult {
     for metadata in [
@@ -128,22 +148,7 @@ async fn inventory_metadata_rejects_incomplete_or_ambiguous_names() -> TestResul
         r#"var dynjs_equip = {"314":{"t":"Fixture"}}; var dynjs_equip = {};"#,
         r#"var dynjs_equip = (() => ({"314":{"t":"Fixture"}}))();"#,
     ] {
-        let (sender, server) =
-            fixture(inventory_page("Fixture"), "text/javascript", metadata.to_owned()).await?;
-        let cookie = MoogleMailCookie::new("fixture-cookie")?;
-        let result = sender
-            .read_inventory_preparation(
-                &cookie,
-                &request(),
-                MoogleMailInventoryCategory::Cloth,
-                |_| true,
-            )
-            .await;
-        server.await??;
-        assert!(
-            matches!(result, Err(error) if error.category == MoogleMailErrorCategory::ProtocolDrift && !error.write_started())
-        );
-        assert!(cookie.is_active());
+        assert!(reject_metadata("text/javascript", metadata).await?);
     }
     Ok(())
 }
@@ -177,21 +182,7 @@ async fn inventory_metadata_rejects_html_responses() -> TestResult {
         ("text/html", r#"var dynjs_equip = {"314":{"t":"Fixture"}};"#),
         ("application/javascript", " \n<html><body>Fixture</body></html>"),
     ] {
-        let (sender, server) =
-            fixture(inventory_page("Fixture"), media_type, metadata.to_owned()).await?;
-        let cookie = MoogleMailCookie::new("fixture-cookie")?;
-        let result = sender
-            .read_inventory_preparation(
-                &cookie,
-                &request(),
-                MoogleMailInventoryCategory::Cloth,
-                |_| true,
-            )
-            .await;
-        server.await??;
-        assert!(
-            matches!(result, Err(error) if error.category == MoogleMailErrorCategory::ProtocolDrift && !error.write_started())
-        );
+        reject_metadata(media_type, metadata).await?;
     }
     Ok(())
 }
