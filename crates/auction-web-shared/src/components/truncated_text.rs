@@ -1,6 +1,8 @@
 //! 长文本截断展示与可操作浮层；悬停、聚焦和点击共享同一份完整文本。
 
 mod interaction;
+#[cfg(target_arch = "wasm32")]
+mod resize;
 
 #[cfg(target_arch = "wasm32")]
 use interaction::PopupListeners;
@@ -25,27 +27,6 @@ struct TooltipPosition {
     width: f64,
     maximum_height: f64,
     placement: &'static str,
-}
-
-#[cfg(target_arch = "wasm32")]
-struct ResizeObserverHandle {
-    observer: web_sys::ResizeObserver,
-    _callback: Closure<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>,
-}
-
-#[cfg(target_arch = "wasm32")]
-struct ResizeMeasureHandle {
-    window: web_sys::Window,
-    callback: Closure<dyn FnMut()>,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl Drop for ResizeMeasureHandle {
-    fn drop(&mut self) {
-        let _ = self
-            .window
-            .remove_event_listener_with_callback("resize", self.callback.as_ref().unchecked_ref());
-    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -88,13 +69,6 @@ impl Drop for TooltipDismissHandle {
                 self.scroll_callback.as_ref().unchecked_ref(),
             );
         }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl Drop for ResizeObserverHandle {
-    fn drop(&mut self) {
-        self.observer.disconnect();
     }
 }
 
@@ -158,13 +132,11 @@ pub fn TruncatedText(
     #[cfg(target_arch = "wasm32")]
     let mut mounted_element = use_signal(|| None::<web_sys::Element>);
     #[cfg(target_arch = "wasm32")]
-    let mut observer_handle = use_signal(|| None::<ResizeObserverHandle>);
-    #[cfg(target_arch = "wasm32")]
-    let mut resize_measure_handle = use_signal(|| None::<ResizeMeasureHandle>);
+    let mut measure_subscription = use_signal(|| None::<resize::MeasureSubscription>);
     #[cfg(target_arch = "wasm32")]
     {
-        let mut cleanup_measure_handle = resize_measure_handle;
-        use_drop(move || cleanup_measure_handle.set(None));
+        let mut cleanup_subscription = measure_subscription;
+        use_drop(move || cleanup_subscription.set(None));
     }
     #[cfg(target_arch = "wasm32")]
     let portal_element = use_signal(|| None::<web_sys::HtmlElement>);
@@ -363,8 +335,9 @@ pub fn TruncatedText(
                         portal_element,
                     );
 
+                    // 元素尺寸与窗口尺寸变化共用全页唯一的监听，只登记本实例的重测回调。
                     let measure_element = element.clone();
-                    let measure_callback = Closure::<dyn FnMut()>::new(move || {
+                    measure_subscription.set(resize::observe(&element, move || {
                         update_truncated_state(
                             &measure_element,
                             *display_differs.peek(),
@@ -372,44 +345,6 @@ pub fn TruncatedText(
                             tooltip_position,
                             portal_element,
                         );
-                    });
-                    let Some(window) = web_sys::window() else {
-                        return;
-                    };
-                    if window
-                        .add_event_listener_with_callback(
-                            "resize",
-                            measure_callback.as_ref().unchecked_ref(),
-                        )
-                        .is_ok()
-                    {
-                        resize_measure_handle.set(Some(ResizeMeasureHandle {
-                            window,
-                            callback: measure_callback,
-                        }));
-                    }
-
-                    let observed_element = element.clone();
-                    let callback = Closure::<
-                        dyn FnMut(js_sys::Array, web_sys::ResizeObserver),
-                    >::new(move |_entries, _observer| {
-                        update_truncated_state(
-                            &observed_element,
-                            *display_differs.peek(),
-                            truncated,
-                            tooltip_position,
-                            portal_element,
-                        );
-                    });
-                    let Ok(observer) = web_sys::ResizeObserver::new(
-                        callback.as_ref().unchecked_ref(),
-                    ) else {
-                        return;
-                    };
-                    observer.observe(&element);
-                    observer_handle.set(Some(ResizeObserverHandle {
-                        observer,
-                        _callback: callback,
                     }));
                 }
                 #[cfg(not(target_arch = "wasm32"))]
