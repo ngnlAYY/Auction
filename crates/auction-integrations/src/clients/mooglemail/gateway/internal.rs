@@ -79,9 +79,10 @@ impl MoogleMailGateway {
                 Error::Unsupported,
             ));
         }
-        let deadline = request
-            .deadline
-            .min(Instant::now() + self.config.fetch_budget.min(Duration::from_secs(30)));
+        let deadline = request.deadline.min(
+            Instant::now()
+                + self.config.fetch_budget.min(auction_application::INTERNAL_EVIDENCE_BUDGET),
+        );
         // 提交预留一秒，不为每次 GET 重置期限；外层预算仍包含 mutex 排队。
         let read_deadline = deadline.checked_sub(Duration::from_secs(1)).ok_or(Error::Expired)?;
         if read_deadline <= Instant::now() {
@@ -356,7 +357,13 @@ impl SettlementInternalEvidenceReader for MoogleMailGateway {
                 ));
             }
             request.deadline = auction_application::internal_evidence_deadline(request.deadline)
-                .min(Instant::now() + self.config.fetch_budget.min(Duration::from_secs(30)));
+                .min(
+                    Instant::now()
+                        + self
+                            .config
+                            .fetch_budget
+                            .min(auction_application::INTERNAL_EVIDENCE_BUDGET),
+                );
             let deadline = request.deadline;
             tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
                 let session = self

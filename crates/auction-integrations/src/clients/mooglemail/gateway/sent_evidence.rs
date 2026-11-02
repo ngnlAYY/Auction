@@ -21,8 +21,10 @@ impl MoogleMailGateway {
         if !request.validate() || !target.validate() {
             return Err(Error::InvalidRequest);
         }
-        request.deadline = auction_application::internal_evidence_deadline(request.deadline)
-            .min(Instant::now() + self.config.fetch_budget.min(Duration::from_secs(30)));
+        request.deadline = auction_application::internal_evidence_deadline(request.deadline).min(
+            Instant::now()
+                + self.config.fetch_budget.min(auction_application::INTERNAL_EVIDENCE_BUDGET),
+        );
         let deadline = request.deadline;
         tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
             let session = self
