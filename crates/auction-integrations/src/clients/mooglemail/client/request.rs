@@ -1,7 +1,8 @@
 //! MoogleMail typed GET/POST 请求与远端结果分类。
 
 use super::security::{
-    is_hentaiverse_battle_response, is_html_content_type, is_session_expired, post_allowed,
+    is_hentaiverse_battle_response, is_html_content_type, is_javascript_content_type,
+    is_session_expired, post_allowed,
 };
 use super::*;
 
@@ -103,12 +104,15 @@ impl MoogleMailClient {
         let status = response.status();
         let location = response.headers().get(header::LOCATION).cloned();
         let is_html = is_html_content_type(response.headers());
+        let is_javascript =
+            target.inventory_metadata && is_javascript_content_type(response.headers());
 
         diagnostic.body =
             Some(self.read_response_body(response, target.operation, target.world, false).await?);
         let body = diagnostic.body.as_deref().ok_or_else(|| self.protocol(target))?;
 
-        if is_session_expired(status, location.as_ref(), body) {
+        // 名称脚本不是 HTML；避免把装备名中的登录或战斗文字当作页面状态。
+        if !is_javascript && is_session_expired(status, location.as_ref(), body) {
             return Err(MoogleMailError::new(
                 target.operation,
                 target.world,
@@ -116,7 +120,7 @@ impl MoogleMailClient {
                 false,
             ));
         }
-        if is_hentaiverse_battle_response(body) {
+        if !is_javascript && is_hentaiverse_battle_response(body) {
             return Err(MoogleMailError::new(
                 target.operation,
                 target.world,
@@ -140,7 +144,18 @@ impl MoogleMailClient {
                 true,
             ));
         }
-        if !status.is_success() || !is_html {
+        if target.inventory_metadata {
+            let script = body.strip_prefix(b"\xef\xbb\xbf").unwrap_or(body);
+            if status != StatusCode::OK
+                || !is_javascript
+                || script
+                    .iter()
+                    .find(|byte| !byte.is_ascii_whitespace())
+                    .is_none_or(|byte| *byte == b'<')
+            {
+                return Err(self.protocol(target));
+            }
+        } else if !status.is_success() || !is_html {
             return Err(self.protocol(target));
         }
         self.check_ownership().await.map_err(|_| {

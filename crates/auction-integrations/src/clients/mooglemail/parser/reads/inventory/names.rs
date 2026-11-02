@@ -4,21 +4,92 @@ use serde::de::DeserializeSeed;
 
 use super::*;
 
+#[derive(Default)]
+pub(super) struct InventoryNames {
+    pub(super) values: HashMap<String, String>,
+    declared: [bool; 2],
+}
+
 pub(super) fn inventory_names(
     document: &Html,
     wanted: &HashSet<&str>,
     world: MoogleMailWorld,
-) -> Result<HashMap<String, String>, MoogleMailError> {
+) -> Result<(InventoryNames, Vec<String>), MoogleMailError> {
     let operation = MoogleMailOperation::Inventory;
     let fail = || protocol(operation, world);
-    let mut names = HashMap::new();
-    let mut declared = [false; 2];
+    let mut names = InventoryNames::default();
+    let mut sources = Vec::new();
     for script in document.select(&selector("script", operation, world)?) {
         let source = script.text().collect::<String>();
-        if !source.contains("dynjs_equip") && !source.contains("dynjs_eqstore") {
+        if let Some(reference) = script.attr("src") {
+            if source.contains("dynjs_equip") || source.contains("dynjs_eqstore") {
+                return Err(fail());
+            }
+            if reference.contains("/dynjs/")
+                || reference.contains("equip-")
+                || reference.contains("eqstore-")
+            {
+                if sources.len() == 2
+                    || sources.iter().any(|existing| existing == reference)
+                    || !script_type(script)
+                {
+                    return Err(fail());
+                }
+                sources.push(reference.to_owned());
+            }
             continue;
         }
-        let masked = executable_javascript(&source).ok_or_else(fail)?;
+        if source.contains("dynjs_equip") || source.contains("dynjs_eqstore") {
+            if !script_type(script) {
+                return Err(fail());
+            }
+            names.include(&source, wanted, world)?;
+        }
+    }
+    Ok((names, sources))
+}
+
+fn script_type(script: ElementRef<'_>) -> bool {
+    script
+        .attr("type")
+        .is_none_or(|value| matches!(value, "" | "text/javascript" | "application/javascript"))
+}
+
+impl InventoryNames {
+    /// 外部脚本必须与当前库存页引用的装备/仓库种类一致，不能执行脚本或合并重复声明。
+    pub(super) fn include_external(
+        &mut self,
+        reference: &str,
+        bytes: &[u8],
+        wanted: &HashSet<&str>,
+        world: MoogleMailWorld,
+    ) -> Result<(), MoogleMailError> {
+        let fail = || protocol(MoogleMailOperation::Inventory, world);
+        let expected =
+            if reference.rsplit('/').next().is_some_and(|name| name.starts_with("equip-")) {
+                0
+            } else {
+                1
+            };
+        let before = self.declared;
+        self.include(str::from_utf8(bytes).map_err(|_| fail())?, wanted, world)?;
+        if before[expected]
+            || !self.declared[expected]
+            || self.declared[1 - expected] != before[1 - expected]
+        {
+            return Err(fail());
+        }
+        Ok(())
+    }
+
+    fn include(
+        &mut self,
+        source: &str,
+        wanted: &HashSet<&str>,
+        world: MoogleMailWorld,
+    ) -> Result<(), MoogleMailError> {
+        let fail = || protocol(MoogleMailOperation::Inventory, world);
+        let masked = executable_javascript(source).ok_or_else(fail)?;
         for (index, variable) in ["dynjs_equip", "dynjs_eqstore"].into_iter().enumerate() {
             for (start, _) in masked.match_indices(variable) {
                 let end = start + variable.len();
@@ -27,25 +98,20 @@ pub(super) fn inventory_names(
                 {
                     continue;
                 }
-                if declared[index]
-                    || script.attr("src").is_some()
-                    || script.attr("type").is_some_and(|value| {
-                        !matches!(value, "" | "text/javascript" | "application/javascript")
-                    })
-                {
+                if self.declared[index] {
                     return Err(fail());
                 }
-                declared[index] = true;
-                let json = object_assignment(&source, &masked, start, end).ok_or_else(fail)?;
+                self.declared[index] = true;
+                let json = object_assignment(source, &masked, start, end).ok_or_else(fail)?;
                 let mut decoder = serde_json::Deserializer::from_str(json);
-                EquipmentNames { wanted, names: &mut names }
+                EquipmentNames { wanted, names: &mut self.values }
                     .deserialize(&mut decoder)
                     .map_err(|_| fail())?;
                 decoder.end().map_err(|_| fail())?;
             }
         }
+        Ok(())
     }
-    Ok(names)
 }
 
 fn identifier(byte: u8) -> bool {

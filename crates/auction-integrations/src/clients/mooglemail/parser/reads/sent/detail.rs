@@ -1,5 +1,7 @@
 //! MoogleMail Sent 详情及正文/附件一致性解析。
 
+use auction_application::mail_recipient_is_list_projection;
+
 use super::super::super::*;
 
 impl MoogleMailParser {
@@ -50,8 +52,8 @@ impl MoogleMailParser {
             ));
         }
         let fields = parse_detail_fields_for(form, summary.world, operation)?;
-        // 列表页标题会被服务端截断；详情必须保留完整标题，列表标题只能作为前缀匹配。
-        if !fields.recipient.eq_ignore_ascii_case(&summary.recipient)
+        // 列表收件人和标题都可能截断；仅用于绑定候选，详情必须保留完整身份。
+        if !mail_recipient_is_list_projection(&summary.recipient, &fields.recipient)
             || !subject_is_list_projection(&summary.subject, &fields.subject)
         {
             return Err(detail_error_for(
@@ -152,7 +154,7 @@ impl MoogleMailParser {
         let proof = MoogleMailSentContentProof {
             external_mail_id: summary.external_mail_id.clone(),
             world: summary.world,
-            recipient: summary.recipient.clone(),
+            recipient: fields.recipient,
             subject: fields.subject,
             body_digest,
             remaining_credits,

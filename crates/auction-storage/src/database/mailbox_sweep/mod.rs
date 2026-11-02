@@ -22,6 +22,8 @@ use sqlx::Postgres;
 
 #[cfg(feature = "postgres")]
 mod recovery;
+#[cfg(feature = "postgres")]
+pub(in crate::database) use recovery::resume_settlement_send;
 
 impl MoogleMailboxEvidenceStore for DatabaseStore {
     fn unproven_sends<'a>(
@@ -786,22 +788,7 @@ async fn persist_transition_once(
     }
     if origin_kind == "settlement" && matches!(update, RecoveryUpdate::Send(..)) {
         let obligation_id = Uuid::parse_str(&origin_id).map_err(|_| RecoveryError::Rejected)?;
-        let enqueued = sqlx::query(
-            "UPDATE public.settlement_obligation_fulfillments
-             SET execution_state='enqueued',state_version=state_version+1,delivery_id=$2,
-                 claim_token=NULL,claimed_at=NULL,claim_expires_at=NULL,
-                 next_attempt_at=clock_timestamp(),last_error_code=NULL,completed_at=NULL,
-                 updated_at=clock_timestamp()
-             WHERE obligation_id=$1 AND execution_state='manual_reconcile'
-               AND delivery_operation='send' AND delivery_id=$2",
-        )
-        .bind(obligation_id)
-        .bind(delivery_id)
-        .execute(&mut *tx)
-        .await?;
-        if enqueued.rows_affected() != 1 {
-            return Err(RecoveryError::Rejected);
-        }
+        recovery::resume_settlement_send(&mut tx, obligation_id, delivery_id).await?;
     }
     let resumed_action = if recovery_send {
         super::recovery_commands::resume_after_delivery_proof(&mut tx, delivery_id).await?

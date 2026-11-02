@@ -64,7 +64,7 @@ Worker 认领处于 Final 且所有 lot 有效截止都已过去的场次，在�
 | `WinnerEquipmentCod` | main | 在 main 把装备以 COD（金额 = 买方实付）寄给买方 | — |
 | `WinnerPaymentCarrierCod` | isekai | 在 main 寄 1 Credit 载体，COD 面额 = 买方实付 +1 Credit，买方净支付仍为实付金额 | — |
 | `WinnerEquipmentHandoff` | isekai | 在 isekai 把装备寄给买方 | 载体 COD 已收款 |
-| `SellerPayout` | 两者 | 在 main 向卖方支付成交价 | main：买方已付款（装备 COD 已收款）；isekai：装备已交付（`WinnerEquipmentHandoff` 已满足） |
+| `SellerPayout` | 两者 | 在 main 向卖方支付原冻结货款 | main：买方已付款（装备 COD 已收款），或通过下述装备损失人工处置承担付款责任；isekai：装备已交付（`WinnerEquipmentHandoff` 已满足） |
 | `BuyerRefund` | 两者 | 需要时向买方退款（`Contingent`，默认不执行） | 恢复流程激活 |
 | `UnsoldReturn` | 两者 | 流拍装备寄回卖方（在装备所在世界） | — |
 | `WithdrawnReturn` | 两者 | 撤拍装备寄回卖方 | — |
@@ -100,6 +100,7 @@ prepared → pending → claimed → sending → succeeded
 - 领取带租约与 fencing 版本；进入 `sending` 前写入发送尝试摘要，发送后把远端邮件 ID 绑定到投递（唯一）。
 - 同类邮件按 `[worker.mooglemail.send_intervals]` 控制发送起点的最小间隔；同一账号的远端写入串行。
 - **结果未知时不自动重发**：发送阶段的超时、崩溃或远端响应异常无法证明寄出结果时，投递转为 `manual_reconcile`；过期的 `sending` 租约也先转入该状态。邮箱维护循环会尝试用原发送尝试冻结的完整期望在 Sent 中精确找回邮件。找不到不代表未发送；Admin 可记录失败或明确授权重试，但主动 Send 不允许仅凭手填远端引用执行“确认成功”，成功须由匹配的 Sent 证据恢复。
+- **修复后恢复投递**：先核对原发送尝试、归档响应及后续处置，不能只凭 `write_started=false` 或 Sent 未命中就批量重发。对仍为 `manual_reconcile` 且已明确授权重试的记录，Admin 对账使用最新 `fencing_version` 与稳定命令 ID 执行 `retry`；同一事务把原投递恢复为 `pending`，把关联失败/人工核对履约恢复为 `enqueued`，并恢复相关恢复流程投影，不另建义务或直接修改数据库。重试命令结果未知时原样重放。
 - 新的可发送投递写入时触发 `pg_notify`，投递循环立即被唤醒。
 
 ## 4. 恢复（付款超时与拒收）
@@ -119,6 +120,26 @@ prepared → pending → claimed → sending → succeeded
 - 赛季换季限制（参与早鸟期的世界）：赛季开始前的新赛季草稿不接收重列，保持 `relist_pending` 并按持久化退避重试；原始投稿收件或成交场次开拍后已经历赛季开始的旧赛季装备永不重列，记录阻断码 `relist_season_closed`（报表显示为 `recovery_relist_unavailable`），停在 `relist_pending` 且不再自动重试，由 Admin 人工处理。判断沿用不可变的原始投稿收件事实，修改场次排期不会把旧装备变为新赛季资产；只使用已冻结且非 NULL 的赛季边界，不回填历史场次。
 - 上述任一路径首次落定 `resolution`（成交撤销）时，同事务按[成交撤销冲正](#成交撤销冲正规则-v1)回滚补偿池。
 - 恢复并非单一路径：未付时为 `awaiting_payment`，到期转 `payment_overdue` 并创建一次提醒；main 收款后可完成，isekai 收款后先进入 `delivering_equipment`，交付满足后完成。退件可转 `reclaiming`，经收回、确认后进入 `relist_pending`、`refunding` 或 `completed`。Admin 确认必须携带原因、稳定命令 ID 与当前状态版本，所有动作写入审计。
+
+### Sent 人工证据确认
+
+当原生 Sent 已证明邮件发出，但附件已领取、历史尝试关联不完整或原生分钟时间不足以通过自动恢复时，运维可使用 `auction-cli settlement confirm-sent <DELIVERY_UUID> --evidence <JSON>` 只读预览；执行须提供稳定命令 ID、当前 fencing 版本、操作者、原因和逐字确认，并按预览要求显式接受已领取资产或旧尝试关联责任。完整证据字段和参数见 [auction-cli](../../apps/auction-cli/README.md#sent-人工证据确认)。命令只读本地证据与数据库，不发起游戏请求，也不重发邮件。
+
+此入口限定 main 结算的单件装备 COD、流拍退回、撤拍退回，以及已有真实收款分配的卖方货款。应用端口匹配原冻结正文、身份、原生发送分钟、金额和附件；装备未领取时资产必须精确匹配，已领取时要求全零当前资产和匹配冻结名称/COD 的原生回执，由操作者显式承担无法再次观察原 EID 的责任。现金仅接受尚未领取的完整正额 Credits、零 COD、无装备、空收取回执及未改变的正文；必须与原冻结卖方金额、原收件人及当前 UID 的原 lot/义务/投递 `seller` 分配完全一致，分配须为 `unknown`，lot 来源须为 `collected` 且用途仍为 `seller`，原预留命令与资金分录必须存在且匹配。历史尝试不删除或改写，旧尝试关联的人工接受独立记录。活跃领取、退休损失投递、已有成功、已返还资金或冲突处置均拒绝。
+
+提交追加不可变人工确认，使用独立 `sent_operator_confirmed_v1`，不冒充 `sent_exact_payload_v1` 或设置自动 `sent_verified`。持久证明必须与冻结尝试、MID 绑定及当前投递一致，单独 metadata 标签不能赋予证明能力。Admin 仅填写远端引用仍不能确认主动 Send 成功。原义务与结算金额保持：装备确认后原履约恢复，由 Worker 继续取得真实收取证明、经资金 owner 记账并放行原冻结卖方货款；现金确认则与自动恢复共用资金 owner，在同一事务把原未知支出分配变为 `spent` 并追加一次原投递的支出分录，再恢复正常履约对账，不创建新付款、资金来源或收款凭据。人工确认不证明收件人已领取；现金金额仍完整附在原已发邮件中。
+
+预览、提交和重放分别输出 `preview`、`committed`、`replayed`。结果未知时保持原命令 ID、证据和全部参数重放核对，不能换 ID 或混入最新预览版本。
+
+### 装备损失人工处置
+
+main 已结算成交的装备在实际寄出前损失时，运维可通过 `auction-cli settlement equipment-loss <LOT_UUID>` 只读预览，再以 `--execute`、稳定命令 ID、操作者、原因、资金账户、三项预期版本、冻结卖方金额与逐字确认记录人工处置。操作步骤与完整参数见 [auction-cli](../../apps/auction-cli/README.md#装备损失人工收口)。资格由结算 owner 在同一 Serializable 事务内校验：原装备 COD 必须停在库存读取失败的人工核对状态，全部尝试都明确未开始外写，且没有既有收款、活跃领取或冲突恢复/资产操作。Sent 中未找到邮件或单条 `write_started=false` 不能替代这些完整约束。
+
+操作者明确声明装备已损失，并承担买方线下补偿责任；这项声明不证明补偿已支付。系统追加独立人工处置事实，以 `operator_equipment_loss_v1` 证明收口原付款履约，不冒充 Sent 邮件或真实 COD 收款。此入口只支持已就绪的 `record_only` 资金账户，拒绝 `strict_cash`；操作者承担的买方金额与既有补偿按原冻结结算分配，不记为真实 `collected_payment`，不改写原结算金额、策略或补偿流水。
+
+命令在同一事务内终结原投递为 `failed/equipment_destroyed`、收口买方退款执行责任与恢复记录，并解除原 `SellerPayout` 的阻塞。恢复 `stage=completed`、`resolution=NULL`：不再催款、退款或重列，不拉黑买家，也不触发成交撤销冲正。原损失投递永久退休，Admin 对账/重试不能将它复活。卖方仍按原冻结金额通过正常履约工作项与真实邮件支付，人工处置成功并不表示卖方已经收款。
+
+默认 JSON 的 `outcome=preview` 只是只读投影；实际提交返回 `committed`，原 ID 同参数重放返回 `replayed`。结果未知时保持命令 ID、原因、账户、版本和金额等全部原参数重放，由命令账本判定；不能换 ID 或将新预览的版本混入原请求。
 
 ## Bot 内部履约与资金账户
 
@@ -164,3 +185,5 @@ prepared → pending → claimed → sending → succeeded
 | Admin 仪表盘 | 履约、投递、恢复积压与告警 |
 | `auction-cli mail inspect-sent` | 只读核对撤拍退回邮件在 Sent 中的状态 |
 | `auction-cli funds …` | Bot 资金账户 |
+| `auction-cli settlement equipment-loss` | 装备实际寄出前损失的只读预览与受审计人工处置 |
+| `auction-cli settlement confirm-sent` | 原生 Sent 人工证据的只读预览与受审计确认 |

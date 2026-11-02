@@ -26,7 +26,7 @@ mod transaction;
 mod validation;
 
 #[cfg(feature = "postgres")]
-pub(crate) use conflicts::assetless_mail_notification;
+pub(crate) use conflicts::{assetless_mail_notification, exclude_equipment_loss_conflicts};
 
 impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
     fn legacy_self_reconciliation_uid(

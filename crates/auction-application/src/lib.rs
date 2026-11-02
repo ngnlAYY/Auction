@@ -221,6 +221,13 @@ pub use ports::{
     AdminCredentialVerifier, credential_check_worlds,
 };
 pub use ports::{
+    DeliverySentConfirmationPort, ManualSentEvidence, SentConfirmationCommand,
+    SentConfirmationPreview, SentConfirmationResult,
+};
+pub use ports::{
+    EquipmentLossCommand, EquipmentLossPreview, EquipmentLossResult, SettlementEquipmentLossPort,
+};
+pub use ports::{
     ForumTargetProfileEvidence, ForumTargetProfileReader, INTERNAL_EVIDENCE_PROTOCOL,
     InternalEquipmentTarget, InternalEvidenceCommitGuard, InternalEvidenceError,
     InternalEvidenceFuture, InternalEvidenceLease, InternalEvidencePurpose,
@@ -281,7 +288,7 @@ pub use ports::{
     MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxEvidenceStore,
     MoogleMailboxInboxAssets, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
     MoogleMailboxNoticeExpectation, MoogleMailboxSentEntry, MoogleMailboxSentState,
-    MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
+    MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend, mail_recipient_is_list_projection,
 };
 pub use services::{
     LotWatchPmNotification, lot_watch_notification, lot_watch_pm_notification, set_lot_watch,

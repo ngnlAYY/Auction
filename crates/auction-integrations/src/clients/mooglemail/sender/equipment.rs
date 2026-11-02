@@ -7,6 +7,10 @@ use crate::clients::mooglemail::{
     parser::MoogleMailInventoryPreparation, protocol::MoogleMailInventoryCategory,
 };
 
+#[cfg(test)]
+#[path = "equipment/tests.rs"]
+mod tests;
+
 impl MoogleMailSender {
     /// 只由 sending fence 后的发送流程调用；所有目标唯一定位后才允许首次 Armory POST。
     pub(super) async fn prepare_equipment(
@@ -135,19 +139,27 @@ impl MoogleMailSender {
     ) -> Result<MoogleMailInventoryPreparation, MoogleMailError> {
         let target = self.client.inventory(request.world, category);
         let document = self.client.get(&target, cookie).await?;
-        let parsed = self
-            .parser
-            .parse_inventory_preparation(&document, request.world, category, &request.equipment_ids)
-            .and_then(|state| {
-                if accepts(&state) {
-                    Ok(state)
-                } else {
-                    Err(MoogleMailError::protocol_drift(
-                        MoogleMailOperation::Inventory,
-                        request.world,
-                    ))
-                }
-            });
+        let pending = self.parser.parse_inventory_preparation(
+            &document,
+            request.world,
+            category,
+            &request.equipment_ids,
+        );
+        let mut pending = self.client.diagnose_parse(&target, &document, pending).await?;
+        // 只读取本页引用的同源元数据；全部正向证明完成前不执行任何 Armory POST。
+        for reference in std::mem::take(&mut pending.metadata_sources) {
+            let metadata_target = self.client.inventory_metadata(request.world, &reference)?;
+            let source = self.client.get(&metadata_target, cookie).await?;
+            let parsed = pending.include_metadata(&reference, &source);
+            self.client.diagnose_parse(&metadata_target, &source, parsed).await?;
+        }
+        let parsed = pending.finish().and_then(|state| {
+            if accepts(&state) {
+                Ok(state)
+            } else {
+                Err(MoogleMailError::protocol_drift(MoogleMailOperation::Inventory, request.world))
+            }
+        });
         self.client.diagnose_parse(&target, &document, parsed).await
     }
 }

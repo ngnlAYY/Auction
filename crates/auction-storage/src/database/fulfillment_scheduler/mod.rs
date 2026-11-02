@@ -31,7 +31,7 @@ mod delivery;
 mod dependencies;
 mod internal;
 #[cfg(feature = "postgres")]
-pub(crate) use internal::assetless_mail_notification;
+pub(crate) use internal::{assetless_mail_notification, exclude_equipment_loss_conflicts};
 mod mapping;
 #[cfg(feature = "postgres")]
 mod reconcile;

@@ -3,6 +3,8 @@
 //! 本文件只提供稳定的领域导出，不承载计算或状态规则。
 
 mod amount;
+mod equipment_loss;
+pub use equipment_loss::equipment_loss_funding;
 mod facts;
 mod funding;
 pub use funding::{FundingAccountKey, FundingSplit, funding_reconciliation_capacity};

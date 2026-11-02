@@ -22,6 +22,17 @@ pub(super) fn is_html_content_type(headers: &header::HeaderMap) -> bool {
         .is_some_and(|value| matches!(value.trim(), "text/html" | "application/xhtml+xml"))
 }
 
+pub(super) fn is_javascript_content_type(headers: &header::HeaderMap) -> bool {
+    headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| {
+            value.trim().eq_ignore_ascii_case("application/javascript")
+                || value.trim().eq_ignore_ascii_case("text/javascript")
+        })
+}
+
 pub(crate) fn is_hentaiverse_login_response(
     status: StatusCode,
     location: Option<&header::HeaderValue>,

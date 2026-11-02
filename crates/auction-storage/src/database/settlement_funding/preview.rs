@@ -94,6 +94,10 @@ pub(super) async fn snapshot(
     let assetless = super::classification::assetless_notifications(tx).await?;
     let mut excluded = super::classification::ids(&repaired);
     excluded.extend(super::classification::ids(&assetless));
+    let losses = crate::database::equipment_loss::trusted_losses(tx, uid).await?;
+    excluded.extend(losses.iter().map(|(_, delivery)| delivery.to_string()));
+    let loss_lots: std::collections::HashSet<String> =
+        losses.iter().map(|(lot, _)| lot.to_string()).collect();
     let mut blockers = Vec::new();
     let mut liabilities = 0i64;
     let mut compensation = 0i64;
@@ -118,6 +122,11 @@ pub(super) async fn snapshot(
             return Err(FundingError::Invalid);
         }
         for field in ["payment_state", "seller_state", "refund_state"] {
+            if field == "refund_state"
+                && loss_lots.contains(lot["lot_id"].as_str().ok_or(FundingError::Storage)?)
+            {
+                continue;
+            }
             if matches!(lot[field].as_str(), Some("failed" | "manual_reconcile"))
                 || lot[field].is_null()
             {
@@ -266,7 +275,8 @@ pub(super) async fn snapshot(
     let facts = json!({"lots":lots,"deliveries":deliveries,"recovery_actions":recovery_actions,"economics":economics,"pools":pools,"accounts":all_accounts,"allocations":allocations,
         "record_only_initialization":{"eligible":record_only_eligible,
             "reason":if record_only_eligible {"no_existing_account"}else{"existing_account_requires_dedicated_transition"}},
-        "verified_legacy_self_deliveries":repaired,"assetless_notification_deliveries":assetless});
+        "verified_legacy_self_deliveries":repaired,"assetless_notification_deliveries":assetless,
+        "verified_equipment_losses":losses});
     let digest = Sha256::digest(
         serde_json::to_vec(&json!({"version":1,"uid":uid,"facts":facts})).map_err(invalid)?,
     )

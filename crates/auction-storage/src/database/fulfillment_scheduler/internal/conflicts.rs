@@ -34,6 +34,24 @@ pub(super) async fn exclude_asset_conflicts(
     exclude_conflicts(tx, &target, None).await
 }
 
+/// 装备损失仅忽略已证明未外写的原投递；其余入库、恢复与出站冲突复用既有门。
+pub(crate) async fn exclude_equipment_loss_conflicts(
+    tx: &mut Transaction<'_, Postgres>,
+    lot_id: Uuid,
+    payment_id: Uuid,
+    external_equipment_id: &str,
+    delivery_id: Uuid,
+) -> Result<(), FundingError> {
+    let target = AssetConflictTarget {
+        kind: auction_domain::SettlementObligationKind::WinnerEquipmentCod,
+        obligation_id: auction_domain::SettlementId::from_uuid(payment_id),
+        lot_id: auction_domain::LotId::from_uuid(lot_id),
+        external_equipment_id,
+        equipment_world: auction_domain::SettlementWorld::Main,
+    };
+    exclude_conflicts(tx, &target, Some(delivery_id)).await
+}
+
 async fn exclude_conflicts(
     tx: &mut Transaction<'_, Postgres>,
     c: &AssetConflictTarget<'_>,

@@ -1,12 +1,55 @@
 //! 发送前只读取目标装备的原生标签状态；凭据与完整响应均不进入调试投影。
 
-use super::names::inventory_names;
+use super::names::{InventoryNames, inventory_names};
 use super::*;
 
 /// 当前完整库存响应中的短期表单 token 和目标装备状态；没有命中不证明可发送。
 pub(crate) struct MoogleMailInventoryPreparation {
     pub(crate) token: MoogleMailToken,
     pub(crate) equipment: Vec<MoogleMailInventoryEquipment>,
+}
+
+/// 只保存已核对的目标标签和元数据引用，不让 HTML DOM 跨过异步读取边界。
+pub(crate) struct MoogleMailInventoryRead<'a> {
+    token: MoogleMailToken,
+    labels: Vec<(String, String)>,
+    names: InventoryNames,
+    wanted: HashSet<&'a str>,
+    world: MoogleMailWorld,
+    pub(crate) metadata_sources: Vec<String>,
+}
+
+impl MoogleMailInventoryRead<'_> {
+    pub(crate) fn include_metadata(
+        &mut self,
+        reference: &str,
+        bytes: &[u8],
+    ) -> Result<(), MoogleMailError> {
+        self.names.include_external(reference, bytes, &self.wanted, self.world)
+    }
+
+    /// 名称和精确标签全部匹配后才产生可供出库/解锁使用的状态。
+    pub(crate) fn finish(self) -> Result<MoogleMailInventoryPreparation, MoogleMailError> {
+        let fail = || protocol(MoogleMailOperation::Inventory, self.world);
+        let equipment = self
+            .labels
+            .into_iter()
+            .map(|(equipment_id, label)| {
+                let name = self.names.values.get(&equipment_id).ok_or_else(fail)?;
+                // t 是实际显示名；名称内的图标不能被当成装备状态。
+                let prefix = label.strip_suffix(name).ok_or_else(fail)?;
+                let flags = status_flags(prefix).ok_or_else(fail)?;
+                Ok(MoogleMailInventoryEquipment {
+                    equipment_id,
+                    stored: flags & STORED != 0,
+                    protected: flags & PROTECTED != 0,
+                    locked: flags & LOCKED != 0,
+                    equipped: flags & EQUIPPED != 0,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(MoogleMailInventoryPreparation { token: self.token, equipment })
+    }
 }
 
 /// 与精确可选 EID 行及其原生名称绑定的状态，不从其它行或页面文字推断。
@@ -21,13 +64,13 @@ pub(crate) struct MoogleMailInventoryEquipment {
 
 impl MoogleMailParser {
     /// 保留完整库存证据，只为请求的 EID 解读状态；调用方仍须证明所有目标均唯一命中。
-    pub(crate) fn parse_inventory_preparation(
+    pub(crate) fn parse_inventory_preparation<'a>(
         &self,
         bytes: &[u8],
         world: MoogleMailWorld,
         category: MoogleMailInventoryCategory,
-        requested_ids: &[String],
-    ) -> Result<MoogleMailInventoryPreparation, MoogleMailError> {
+        requested_ids: &'a [String],
+    ) -> Result<MoogleMailInventoryRead<'a>, MoogleMailError> {
         let operation = MoogleMailOperation::Inventory;
         let fail = || protocol(operation, world);
         let mut wanted = HashSet::with_capacity(requested_ids.len());
@@ -38,23 +81,20 @@ impl MoogleMailParser {
             }
         }
         let document = trusted_document(bytes, world, operation)?;
-        let mut rows = Vec::new();
+        let mut labels = Vec::new();
         let form = self.visit_inventory_rows(&document, world, category, |eid, row, input| {
             if wanted.contains(eid) {
-                rows.push((eid, row, input));
+                labels.push((eid.to_owned(), equipment_label(eid, row, input, world)?));
             }
             Ok(())
         })?;
         let token = preparation_token(&document, form, world)?;
-        let mut equipment = Vec::with_capacity(rows.len());
-        if !rows.is_empty() {
-            let names = inventory_names(&document, &wanted, world)?;
-            for (eid, row, input) in rows {
-                let name = names.get(eid).ok_or_else(fail)?;
-                equipment.push(equipment_state(eid, row, input, name, world)?);
-            }
-        }
-        Ok(MoogleMailInventoryPreparation { token, equipment })
+        let (names, metadata_sources) = if labels.is_empty() {
+            (InventoryNames::default(), Vec::new())
+        } else {
+            inventory_names(&document, &wanted, world)?
+        };
+        Ok(MoogleMailInventoryRead { token, labels, names, wanted, world, metadata_sources })
     }
 }
 
@@ -85,13 +125,12 @@ fn preparation_token(
     token.attr("value").and_then(MoogleMailToken::new).ok_or_else(fail)
 }
 
-fn equipment_state(
+fn equipment_label(
     eid: &str,
     row: ElementRef<'_>,
     input: ElementRef<'_>,
-    name: &str,
     world: MoogleMailWorld,
-) -> Result<MoogleMailInventoryEquipment, MoogleMailError> {
+) -> Result<String, MoogleMailError> {
     let fail = || protocol(MoogleMailOperation::Inventory, world);
     let label = input.parent().and_then(ElementRef::wrap).ok_or_else(fail)?;
     let hook = row.attr("onmouseover").ok_or_else(fail)?.trim();
@@ -114,8 +153,9 @@ fn equipment_state(
     {
         return Err(fail());
     }
-    // 原生 label 的 checkbox 后是唯一文字节点。拒绝嵌套标记，避免隐藏标签伪造状态。
+    // 原生 checkbox 后可有一个无属性、无内容的 span 装饰；只有后续唯一文字节点能声明状态。
     let mut after_input = false;
+    let mut decoration = false;
     let mut label_text: Option<&str> = None;
     for child in label.children() {
         if child.id() == input.id() {
@@ -128,20 +168,21 @@ fn equipment_state(
             } else if !text.trim().is_empty() {
                 return Err(fail());
             }
+        } else if after_input
+            && !decoration
+            && label_text.is_none()
+            && ElementRef::wrap(child).is_some_and(|node| {
+                node.value().name() == "span"
+                    && node.value().attrs().next().is_none()
+                    && node.children().next().is_none()
+            })
+        {
+            decoration = true;
         } else {
             return Err(fail());
         }
     }
-    // t 始终是实际显示名，n 仅为自定义装备保留原名。先移除精确名称，名称内图标不是状态。
-    let prefix = label_text.and_then(|text| text.strip_suffix(name)).ok_or_else(fail)?;
-    let flags = status_flags(prefix).ok_or_else(fail)?;
-    Ok(MoogleMailInventoryEquipment {
-        equipment_id: eid.to_owned(),
-        stored: flags & STORED != 0,
-        protected: flags & PROTECTED != 0,
-        locked: flags & LOCKED != 0,
-        equipped: flags & EQUIPPED != 0,
-    })
+    label_text.map(str::to_owned).ok_or_else(fail)
 }
 
 const EQUIPPED: u8 = 1 << 2;

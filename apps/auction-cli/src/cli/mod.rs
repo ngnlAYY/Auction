@@ -6,6 +6,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 mod database;
 mod operations;
+mod settlement;
 
 #[cfg(feature = "postgres")]
 pub(crate) use database::RebuildModeArg;
@@ -17,6 +18,9 @@ pub(crate) use operations::{
 pub(crate) use operations::{
     CredentialKindArg, CredentialStatusArg, CredentialWorldArg, FundsWriteArgs, KeySourceArg,
 };
+pub(crate) use settlement::SettlementCommand;
+#[cfg(feature = "postgres")]
+pub(crate) use settlement::{ConfirmSentArgs, EquipmentLossArgs};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -24,7 +28,7 @@ pub(crate) use operations::{
     version,
     about = "Auction 运维命令行",
     long_about = "Auction 运维命令行：配置与部署预检、systemd 启停编排、数据库迁移/建库/备份恢复，\
-以及凭据、规则、论坛、装备 PM、邮件证据和 Bot 资金等显式运维入口。\n\
+以及凭据、规则、论坛、装备 PM、邮件证据、Bot 资金和结算异常等显式运维入口。\n\
 结构化结果写入 stdout（JSON），进度与诊断写入 stderr。"
 )]
 pub(crate) struct Cli {
@@ -66,6 +70,9 @@ pub(crate) enum Command {
     /// Bot 资金账户的只读预览、只记账开户与现金对账。
     #[command(subcommand)]
     Funds(FundsCommand),
+    /// 结算异常的只读预览与受审计人工处置。
+    #[command(subcommand)]
+    Settlement(SettlementCommand),
 }
 
 #[derive(Debug, Subcommand)]

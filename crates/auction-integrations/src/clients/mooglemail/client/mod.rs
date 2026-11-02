@@ -233,6 +233,15 @@ impl MoogleMailClient {
         self.builder.inventory(world, category)
     }
 
+    /// 构造同源、同世界的装备名称脚本目标，供现有 typed GET 读取。
+    pub(crate) fn inventory_metadata(
+        &self,
+        world: MoogleMailWorld,
+        source: &str,
+    ) -> Result<MoogleMailTarget, MoogleMailError> {
+        self.builder.inventory_metadata(world, source)
+    }
+
     /// 装备发送准备专用的固定 Armory 写入目标。
     pub(crate) fn inventory_organize(&self, world: MoogleMailWorld) -> MoogleMailTarget {
         self.builder.inventory_organize(world)

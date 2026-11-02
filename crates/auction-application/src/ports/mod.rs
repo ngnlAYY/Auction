@@ -69,6 +69,9 @@ pub use delivery_expectation::{
     DeliveryPreparedExpectation, DeliverySendCredentialBinding, DeliverySendExpectation,
     DeliveryTakeExpectation,
 };
+#[path = "delivery/sent_confirmation.rs"]
+mod sent_confirmation;
+pub use sent_confirmation::*;
 #[path = "public/equipment_link.rs"]
 mod equipment_link;
 #[path = "forum/public.rs"]
@@ -91,6 +94,9 @@ mod forum_sync;
 #[path = "settlement/funding.rs"]
 mod funding;
 pub use funding::*;
+#[path = "settlement/equipment_loss.rs"]
+mod equipment_loss;
+pub use equipment_loss::*;
 #[path = "settlement/fulfillment.rs"]
 mod fulfillment;
 #[path = "settlement/internal/mod.rs"]
@@ -376,7 +382,7 @@ pub use mail_maintenance::{
     MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxEvidenceStore,
     MoogleMailboxInboxAssets, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
     MoogleMailboxNoticeExpectation, MoogleMailboxSentEntry, MoogleMailboxSentState,
-    MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
+    MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend, mail_recipient_is_list_projection,
 };
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,

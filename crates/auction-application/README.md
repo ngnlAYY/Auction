@@ -46,6 +46,8 @@
 | `RealtimeRelay` | Public 进程把持久化事件流转发到 WebSocket Hub |
 | `PublicSessionService` / `AdminSessionService` | 会话签发与校验 |
 | Admin 系列服务 | 凭据、用户、规则、runtime 配置、录入、世界、排期等后台命令 |
+| `SettlementEquipmentLossPort` | 显式人工装备损失 preview/resolve；稳定命令绑定 actor/reason、UID、recovery/payment/delivery 版本和冻结卖家金额，安全投影不输出原载荷；外部买方补偿声明不等于完成回执，详见[数据库契约](../../docs/contracts/database.md#结算资金恢复与投递) |
+| `DeliverySentConfirmationPort` | 正式 CLI 的人工 Sent preview/confirm；v1 观察绑定冻结正文摘要、身份、分钟时窗、金额与实际资产，已收取资产和旧尝试歧义分别显式接受；独立 operator proof 只恢复正常对账，详见[数据库契约](../../docs/contracts/database.md#结算资金恢复与投递) |
 
 ## 横切约定
 
@@ -55,6 +57,7 @@
 - **时间**：通过 `Clock` 注入；领域规划不读取系统时间。排期按本地日历偏移，偏移量或日期溢出返回 `InvalidSchedule`，不因构造时长而 panic。
 - **赛季**：赛季前场次冻结 v2 恢复策略与 24 小时付款期限；配置按本地分钟先校验，具体场次物化和 Admin 改期共用 UTC 付款边界，要求实际计划结束加 24 小时严格早于换季日本地 00:00，防止 DST 前跳或改期突破预算。读取已有冻结来源仍沿用原解析语义，已冻结策略与命令结果不随新模板改写。早鸟查询逐场物化并在首个命中后停止，当前无效候选仍返回错误。同封投稿按冻结的世界与收件时间只选择一次品质列表，附件仍按原顺序逐件读取和验证。
 - **取消与未知提交**：外写只能在持久 sending fence 后开始；内部证据的提交 guard、发送 fence 的取消 guard 在未确认提交或回滚时同步撤销原 owner。未知 Send 保留人工核对，Sent 未命中不能授权重发；已经接受的投稿优先恢复持久事实，不能因重试时远端附件变化改判退回。
+- **Sent 收件人证明**：`mail_recipient_is_list_projection(list, full)` 只用于列表候选筛选，借用非空前缀并忽略 ASCII 大小写，允许列表末尾 U+FFFD、`…` 或 `...` 截断标记；空值和纯标记不匹配。`MoogleMailboxSentState.recipient` 必须来自详情完整收件人；冻结发送、历史结算和通知在记录证据或恢复前都逐字核对该完整身份（仅忽略 ASCII 大小写），不能以共享前缀完成证明。原正文、凭据、金额、附件和唯一性门禁保留；自动恢复时间窗仍从原 `sending_at` 到 `outcome_recorded_at`，不把分钟级 Sent 时间向发送围栏之前扩展。
 - **敏感值**：Cookie、装备 key、登录 key 等经专用值对象受控暴露，并对明文调试输出与丢弃清理设定边界；普通查询投影不含秘密。显式的凭据命令、Admin key 签发结果与投递端口可携带专用秘密类型，不能把这些类型直接映射为普通查询 DTO。
 - **错误**：`ApplicationError` 区分能力缺失（`CapabilityUnavailable`，HTTP 层通常映射为 `501 feature_not_supported`）、领域错误、仓储错误与各 owner 的闭集错误；错误文本不回显输入中的秘密。
 
