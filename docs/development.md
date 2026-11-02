@@ -30,7 +30,7 @@ just run-admin
 just run-worker
 ```
 
-`just verify` 等价于 `bash ci/checks/check.sh all fmt check feature lint wasm`，各项含义见 [`ci/README.md`](../ci/README.md)。提交前至少通过它。
+`just verify` 等价于 `bash ci/checks/check.sh all fmt check feature dependency-versions lint wasm`，各项含义见 [`ci/README.md`](../ci/README.md)。提交前至少通过它。
 
 ## 本地运行
 

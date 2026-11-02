@@ -14,6 +14,10 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: chore(deps)
+    ignore:
+      # Axum 仍传递 tungstenite 0.29；跨版本无法 downcast 1009 close 契约，须与 Axum 同步升级。
+      - dependency-name: "tungstenite"
+        update-types: ["version-update:semver-minor"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
