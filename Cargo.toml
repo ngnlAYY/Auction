@@ -193,3 +193,6 @@ unsafe_op_in_unsafe_fn = "deny"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
+# 可选：生产路径不得因 unwrap/expect panic；测试豁免集中在 clippy.toml。
+unwrap_used = "deny"
+expect_used = "deny"

@@ -1,6 +1,7 @@
 //! 可观测性装配的薄 crate 入口。
 
 mod health;
+mod logging;
 mod metrics;
 mod telemetry;
 
@@ -11,6 +12,7 @@ pub use health::{
     HeartbeatStore, ProcessRole, ProcessSnapshot, ProcessState, ServiceName, TracingHealth,
     TracingHealthReader, TracingStatus,
 };
+pub use logging::RateLimitedLog;
 pub use metrics::{
     AuditFailureClass, AuditFailureKind, AuditFailureObservation, AuditMetricsSnapshot,
     AuditMetricsSource, AuditSqlstateClass, BusinessEvent, BusinessOutcome, BusinessRecorder,
