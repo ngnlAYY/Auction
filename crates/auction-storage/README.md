@@ -46,6 +46,114 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 - **错误**：对外只返回固定分类文本，不携带 SQL、连接串或驱动原文。
 - **连接目标**：连接前固定显式端口（省略为 5432），拒绝未知查询参数；IPv6 主机名去括号后重新匹配 pgpass。
 
+## COD 实收资金化拒绝诊断
+
+日志使用独立 target `auction::settlement::funding_diagnostics`；开关、过滤与 D1 只读核对见[运维手册](../../ops/README.md#d1-诊断)。原错误的 `cause_kind` 定义见[应用错误分类](../auction-application/README.md#资金与内部证据错误)。日志只附加诊断，不改变原判定顺序、锁、Serializable 隔离、三次重试、提交/回滚边界或原错误；不改人工 Sent、失败命令、冻结尝试及追加审计，不触发重发。
+
+### 收据拒绝字典
+
+[`crates/auction-storage/src/database/settlement_funding/receipt/diagnostics.rs`](src/database/settlement_funding/receipt/diagnostics.rs) 的内部 `ReceiptRejection` 是收据与价格拒绝码的唯一枚举；本表是其唯一文档字典。`as_str()` 穷尽匹配固定字面量，所有拒绝位置通过 `reject` 记录分类后返回原 `FundingError`。除注明的原 `Invalid` 和 SQL/解码错误外，业务拒绝仍为 `Unproven`；SQL/解码仍经原资金错误映射。原 `storage_error` 不变。
+
+| 枚举成员 | `safe_kind` | 拒绝位置/含义 |
+| --- | --- | --- |
+| `SentMissing` | `funding_receipt_sent_missing` | 联合证据缺少 Sent |
+| `SnapshotInvalid` | `funding_receipt_snapshot_invalid` | 联合快照结构或摘要校验不通过 |
+| `PaymentMismatch` | `funding_receipt_payment_mismatch` | 收据付款义务不等于冻结付款 |
+| `BuyerMismatch` | `funding_receipt_buyer_mismatch` | 收据买方金额不等于冻结金额 |
+| `SentUidMismatch` | `funding_receipt_sent_uid_mismatch` | Sent 与已锁资金账户身份不等 |
+| `SentWorldMismatch` | `funding_receipt_sent_world_mismatch` | Sent 世界不是 main |
+| `CashUnexpected` | `funding_receipt_cash_unexpected` | record_only 却携带现金证据 |
+| `CashMissing` | `funding_receipt_cash_missing` | strict_cash 缺少现金证据 |
+| `CashWorldMismatch` | `funding_receipt_cash_world_mismatch` | 现金证据世界不是 main |
+| `CashUidMismatch` | `funding_receipt_cash_uid_mismatch` | 现金证据与资金账户身份不等 |
+| `MailIdInvalid` | `funding_receipt_mail_id_invalid` | 邮件标识不是规范正整数 |
+| `EvidenceTimeInvalid` | `funding_receipt_evidence_time_invalid` | 数据库时间下证据未获证明 |
+| `RelationUnproven` | `funding_receipt_relation_unproven` | 授权查询无行，诊断关闭、失败、超时、预算不足或未能进一步分类 |
+| `QueryFailed` | `funding_receipt_query_failed` | 原收据 SQL 执行失败，原因只保留资金错误分类 |
+| `RowDecodeFailed` | `funding_receipt_row_decode_failed` | 原收据行解码失败 |
+| `KindInvalid` | `funding_receipt_kind_invalid` | 义务种类不是两种 COD |
+| `CarrierInvalid` | `funding_receipt_carrier_invalid` | COD 种类对应的 carrier 不是 0 或 1 |
+| `CodOverflow` | `funding_receipt_cod_overflow` | 买方金额加 carrier 溢出，原返回 Invalid |
+| `AmountMismatch` | `funding_receipt_amount_mismatch` | 义务金额与冻结买方金额不等 |
+| `BuyerNonpositive` | `funding_receipt_buyer_nonpositive` | 买方金额非正 |
+| `RecipientMismatch` | `funding_receipt_recipient_mismatch` | Sent 与原投递收件人不等 |
+| `SubjectMismatch` | `funding_receipt_subject_mismatch` | Sent 主题与 canonical 主题不等 |
+| `PayloadMismatch` | `funding_receipt_payload_mismatch` | 原 payload 不等于完整重建值 |
+| `OperationMismatch` | `funding_receipt_operation_mismatch` | metadata 操作不是 send |
+| `TemplateMismatch` | `funding_receipt_template_mismatch` | metadata 模板不符 |
+| `ReferenceUnproven` | `funding_receipt_reference_unproven` | metadata 外部引用未证明 |
+| `SentProofUnproven` | `funding_receipt_sent_proof_unproven` | 旧精确证明与冻结强证明均不成立 |
+| `StoreSentMissing` | `funding_receipt_store_sent_missing` | 持久收据前缺少 Sent |
+| `StoreFailed` | `funding_receipt_store_failed` | 原收据 INSERT 失败 |
+| `ObligationMissing` | `funding_receipt_obligation_missing` | 授权关联的付款义务缺失 |
+| `EquipmentMissing` | `funding_receipt_equipment_missing` | 授权关联的装备缺失 |
+| `FulfillmentMissing` | `funding_receipt_fulfillment_missing` | 授权关联的履约缺失 |
+| `DeliveryMissing` | `funding_receipt_delivery_missing` | 授权关联的投递缺失 |
+| `DeliveryMismatch` | `funding_receipt_delivery_mismatch` | 履约关联投递与收据投递不等 |
+| `FulfillmentStateMismatch` | `funding_receipt_fulfillment_state_mismatch` | 履约尚非 satisfied |
+| `ProofKindMismatch` | `funding_receipt_proof_kind_mismatch` | 履约证明种类不符 |
+| `ProofReferenceMismatch` | `funding_receipt_proof_reference_mismatch` | 履约证明引用不符 |
+| `ProofDigestMissing` | `funding_receipt_proof_digest_missing` | 履约证明摘要缺失 |
+| `DeliveryStateMismatch` | `funding_receipt_delivery_state_mismatch` | 投递尚非 succeeded |
+| `OriginKindMismatch` | `funding_receipt_origin_kind_mismatch` | 投递 origin kind 不是 settlement |
+| `OriginIdMismatch` | `funding_receipt_origin_id_mismatch` | 投递 origin id 与付款义务不等 |
+| `ExternalReferenceMismatch` | `funding_receipt_external_reference_mismatch` | 投递引用不符 |
+| `PrepareCommandMismatch` | `funding_receipt_prepare_command_mismatch` | prepare 命令不等 |
+| `PrepareDigestMismatch` | `funding_receipt_prepare_digest_mismatch` | prepare 摘要不等 |
+| `ActivateCommandMismatch` | `funding_receipt_activate_command_mismatch` | activate 命令不等 |
+| `ActivateDigestMismatch` | `funding_receipt_activate_digest_mismatch` | activate 摘要不等 |
+| `OpeningSourceMissing` | `funding_receipt_opening_source_missing` | record_opening 或 reconciliation 边界来源缺失 |
+| `SendingTimeMissing` | `funding_receipt_sending_time_missing` | 原 sending_at 缺失 |
+| `SendBeforeBoundary` | `funding_receipt_send_before_boundary` | 原 sending_at 未严格晚于资金边界 |
+| `PricingEndPriceMissing` | `funding_pricing_end_price_missing` | 冻结 end_price 缺失 |
+| `PricingEndPriceInvalid` | `funding_pricing_end_price_invalid` | 冻结 end_price 无法构造非负金额 |
+| `PricingListedPriceMissing` | `funding_pricing_listed_price_missing` | 冻结 listed_price 缺失 |
+| `PricingListedPriceInvalid` | `funding_pricing_listed_price_invalid` | 冻结 listed_price 无法构造非负金额 |
+| `PricingBuyerAmountMissing` | `funding_pricing_buyer_amount_missing` | 冻结 buyer_amount 缺失 |
+| `PricingBuyerAmountInvalid` | `funding_pricing_buyer_amount_invalid` | 冻结 buyer_amount 无法构造非负金额 |
+| `PricingSellerAmountMissing` | `funding_pricing_seller_amount_missing` | 冻结 seller_amount 缺失 |
+| `PricingSellerAmountInvalid` | `funding_pricing_seller_amount_invalid` | 冻结 seller_amount 无法构造非负金额 |
+| `PricingTaxAmountMissing` | `funding_pricing_tax_amount_missing` | 冻结 tax_amount 缺失 |
+| `PricingTaxAmountInvalid` | `funding_pricing_tax_amount_invalid` | 冻结 tax_amount 无法构造非负金额 |
+| `PricingCompensationAmountMissing` | `funding_pricing_compensation_amount_missing` | 冻结 compensation_amount 缺失 |
+| `PricingCompensationAmountInvalid` | `funding_pricing_compensation_amount_invalid` | 冻结 compensation_amount 无法构造非负金额 |
+| `PricingRowDecodeFailed` | `funding_pricing_row_decode_failed` | 冻结价格行解码失败 |
+| `PricingHoldMissing` | `funding_pricing_hold_missing` | 冻结 hold_ppm 缺失 |
+| `PricingAdjustmentMissing` | `funding_pricing_adjustment_missing` | 冻结 adjustment_ppm 缺失 |
+| `PricingPoolInvalid` | `funding_pricing_pool_invalid` | 冻结买方奖池金额无效 |
+| `PricingAdjustedOverflow` | `funding_pricing_adjusted_overflow` | adjusted price 加法溢出 |
+| `PricingBuyerMismatch` | `funding_pricing_buyer_mismatch` | 冻结 buyer amount 与本次 buyer 不等 |
+| `PricingHoldInvalid` | `funding_pricing_hold_invalid` | 冻结 hold_ppm 越界 |
+| `PricingModeInvalid` | `funding_pricing_mode_invalid` | 冻结策略模式不能解码 |
+| `PricingLineInvalid` | `funding_pricing_line_invalid` | 冻结结算明细不符合冻结策略 |
+
+`stage` 分为 `receipt_validate`、`receipt_relation`、`receipt_pricing`、`receipt_store`。六个价格字段的缺失与非法金额分别拥有独立成员；旧三变量 payload 的兼容入口与冻结模式默认值保持原样。精确旧 Sent 证明与冻结强证明的 OR 顺序保持不变，不补写 `sent_verified`。
+
+### 授权查询无行的只读诊断
+
+`receipt::validate_receipt` 保留原授权 SELECT；只有该查询无行后才可能调用 `diagnose_relation`。target 的 WARN 未启用时立即返回原泛化类别，不执行额外语句。启用时沿用原证据的绝对 `expires_at`：剩余预算小于一秒就跳过；否则先在同一事务执行 `SET LOCAL statement_timeout = '250ms'`，成功后才执行诊断 SELECT。完整等待服务端结果，不包 tokio 超时、不取消 future，不改原 `transaction_timeout`。
+
+额外 SELECT 在同一事务内执行，LEFT JOIN 原付款、装备、履约、投递与资金来源边界，只返回布尔谓词：关联行存在、投递匹配、satisfied、证明种类/引用/摘要存在、succeeded、origin、external reference、prepare/activate 命令与摘要、资金边界存在、sending_at 存在及严格晚于边界。按固定顺序，仅 `Some(true)` 算通过；FALSE 和 NULL 都记录首个失败谓词。SQL 失败、超时、缺行、解码失败或无法细分时，仍记录 `funding_receipt_relation_unproven`。
+
+诊断 SELECT 不带业务写入或行锁，不 spawn/detach，不参与授权；无论诊断结果如何，调用方都返回原 `FundingError::Unproven`，进入原回滚路径。SET 失败时不再执行 SELECT；SET 或 SELECT 的 SQL 错误（包括 57014 语句超时）会使事务进入中止状态，但不妨碍随后原 ROLLBACK。此分支必回滚，LOCAL 设置随之撤销；避免客户端取消后 sqlx 在回滚时等待未读响应，继而触及事务超时并把原回滚结果变为未知。诊断不能证明提交/回滚结果，也不能直接解释 Worker 的 unpersisted 错误。
+
+### 前置阶段
+
+| owner 与符号 | `stage` | 新增诊断边界 |
+| --- | --- | --- |
+| `fulfillment_scheduler/internal/transaction.rs::run` | `transaction_begin`、`transaction_command`、`transaction_replay`、`transaction_budget`、`transaction_timeout`、`transaction_commit`、`transaction_rollback` | 原事务建立、命令、重放、预算、超时设置及提交/回滚错误；只在 collected 路径记录 |
+| 同文件 `apply` | `runtime_generation`、`world_lock`、`account_lock`、`funding_scope`、`business_lock`、`credentials`、`delivery_lock`、`account_ready`、`funding_evidence`、`funding_deferred`、`satisfy_write`、`receipt_input`、`fund_payment`、`completion` | 每个原阶段独立固定 `collected_*` 类别；原资金门 false 仍为 `Ok(true)`，只在原提交后确认 FundingDeferred |
+| 同文件 `validate_collected` | `collected_proof` | Sent/投递缺失，证明种类、摘要、引用、收件人、世界、义务种类、观察时间、主题及持久发送绑定各自分类 |
+| `fulfillment_scheduler/internal/validation.rs::validate` | `claim_validate` | 冻结形状、快照、观察窗口、operation/world/purpose、原 claim SQL、用户读取、前置证明及最后证据时间；collected 路径才增加日志 |
+| `fulfillment_scheduler/internal/graph.rs::validate_graph` | `graph_validate`、`graph_successors` | 原义务图未证明与后继状态冲突分别分类，查询 SQL 保持原样 |
+| `settlement_funding/account.rs` | `account_verify`、`cash_gate`、`funding_evidence` | 账户事务/ready、模式、现金输入、缺口、在途/未知占用、身份/快照/时效与现金形状；缺口与未知占用均保持原 false |
+| `settlement_funding/obligations.rs::fund_lot` | `fund_lot` | 原重放、行读取、冻结 B/C/S/T、付款证明、lot/分配/source/issue/transfer 写入、发行后覆盖、时效与完成；collected 路径才增加日志 |
+| 同文件 `fund_collected_payment` | `payment_mutation` | 原 Sent 缺失、稳定请求摘要序列化与 lot 查询；原命令摘要与幂等身份不变 |
+
+父 instrument span 仅传递 `obligation_id`、`delivery_id`、`command_id`、闭集 `world`，不跨 await 持有 entered guard。事件只附加 `stage`、`safe_kind`、`cause_kind`、原 `defer_reason` 与已确认的结果类别；不输出 UID、玩家名、地址、主题、MID、正文、payload、metadata、金额、凭据、快照或摘要。
+
+两种持久化 defer reason 仍为原值，白名单与读取契约不变；没有迁移。D1 仍须部署后的分类日志及获批只读证据确认，不因新增诊断而标为已修复。
+
 ## 迁移兼容层
 
 迁移文件位于 [`migrations/postgres/`](../../migrations/postgres)，编译期经 `sqlx::migrate!` 内嵌。[`crates/auction-storage/src/database/migrations/`](src/database/migrations) 为少数历史迁移提供“执行视图”：保留文件原 checksum，只在执行时对固定版本做限定替换（`000005`/`000015` 给保留字别名改名，`000044` 先立即执行延迟约束，`000047` 给保留字列名加引号）。仅 `000005`/`000015` 额外接受已部署的固定别名修正版 checksum；`000044`/`000047` 只接受原文件 checksum，其他差异均失败关闭。已发布的迁移文件永远不能修改。

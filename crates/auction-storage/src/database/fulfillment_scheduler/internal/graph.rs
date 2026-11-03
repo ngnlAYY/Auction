@@ -1,6 +1,7 @@
 //! 资金动作前核对原payment→handoff→seller及互斥refund，禁止借lot选择另一组义务。
 
 use super::sql_error;
+use crate::database::settlement_funding::diagnostics::reject;
 use auction_application::{FundingError, SettlementFulfillmentClaim};
 use auction_domain::SettlementObligationKind;
 use sqlx::{Postgres, Transaction};
@@ -41,9 +42,10 @@ pub(super) async fn validate_graph(
                  AND h.recipient_user_id=r.winner_user_id AND h.prerequisite_obligation_id=p.id
                  AND s.prerequisite_obligation_id=h.id)))"
     ).bind(c.lot_id.as_uuid()).bind(c.auction_id.as_uuid()).bind(c.equipment_id.as_uuid())
-        .bind(c.obligation_id.as_uuid()).fetch_one(&mut **tx).await.map_err(sql_error)?;
+        .bind(c.obligation_id.as_uuid()).fetch_one(&mut **tx).await.map_err(sql_error)
+        .map_err(|error| reject("funding_graph_query_failed", "graph_validate", error))?;
     if !valid {
-        return Err(FundingError::Unproven);
+        return Err(reject("funding_graph_unproven", "graph_validate", FundingError::Unproven));
     }
     if matches!(
         c.kind,
@@ -62,9 +64,14 @@ pub(super) async fn validate_graph(
                AND sf.delivery_id IS NULL AND sf.prepare_command_id IS NULL AND sf.activate_command_id IS NULL
                AND b.business_state='contingent' AND bf.execution_state='pending'
                AND bf.delivery_id IS NULL AND bf.prepare_command_id IS NULL AND bf.activate_command_id IS NULL)"
-        ).bind(c.lot_id.as_uuid()).fetch_one(&mut **tx).await.map_err(sql_error)?;
+        ).bind(c.lot_id.as_uuid()).fetch_one(&mut **tx).await.map_err(sql_error)
+            .map_err(|error| reject("funding_graph_successors_query_failed", "graph_successors", error))?;
         if !successors {
-            return Err(FundingError::Conflict);
+            return Err(reject(
+                "funding_graph_successors_conflict",
+                "graph_successors",
+                FundingError::Conflict,
+            ));
         }
     }
     Ok(())

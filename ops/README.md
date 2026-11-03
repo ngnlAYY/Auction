@@ -191,6 +191,56 @@ Public/Worker 在 `common.toml` 设置 `[metrics] enabled = true`；Admin 配置
 - 日志只包含安全分类与标识（命令 ID、拍卖/lot/义务 ID、错误码），不含连接串、Cookie、密钥、登录 key 或邮件正文。
 - 可选 OTLP/HTTP tracing：在角色文件 `[tracing]` 启用，导出头只能写在敏感文件的 `*_otlp_headers` 中（进程环境中的 `OTEL_EXPORTER_OTLP_*HEADERS` 会导致拒绝启动）。
 
+### D1 诊断
+
+COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagnostics`。默认过滤器 `info,<服务名>=debug` 已包含其 WARN，因此默认开启；显式自定义过滤器若屏蔽该 target，可在 `common.toml` 的现有 `log_filter` 末尾追加 `,auction::settlement::funding_diagnostics=warn`。关闭时追加 `,auction::settlement::funding_diagnostics=off`。例如，以下是开启配置，保留现场其他过滤指令后再追加目标指令：
+
+```toml
+log_filter = "info,auction::settlement::funding_diagnostics=warn"
+```
+
+关闭配置示例：
+
+```toml
+log_filter = "info,auction::settlement::funding_diagnostics=off"
+```
+
+过滤器在初始化时读取，修改后须按原停机门禁重启。关闭 target 同时停用其日志、诊断 span 和授权无行后的额外诊断查询；原 W0.1 Worker 警告与业务流程保持。也可换回旧程序，不涉及迁移或数据回退。
+
+先按 target 收窄，再只输出允许的字段；JSON 日志的义务/投递/命令标识可能位于父 `spans` 或当前 `span`：
+
+```bash
+journalctl -u auction-worker -o cat |
+  jq -c '
+    select(.target == "auction::settlement::funding_diagnostics") |
+    ([.spans[]?, .span?] | add // {}) as $context |
+    {
+      obligation_id: ($context.obligation_id // .fields.obligation_id),
+      delivery_id: ($context.delivery_id // .fields.delivery_id),
+      command_id: ($context.command_id // .fields.command_id),
+      world: ($context.world // .fields.world),
+      stage: .fields.stage,
+      safe_kind: .fields.safe_kind,
+      cause_kind: .fields.cause_kind,
+      defer_reason: .fields.defer_reason,
+      outcome: .fields.outcome
+    }'
+```
+
+对上述投影再用 `jq 'select(.safe_kind == "funding_receipt_send_before_boundary")'` 或 `jq 'select(.stage == "receipt_relation")'` 过滤；关联同一 obligation/delivery/command 的前置拒绝、回滚与 defer 失败。位置分类与 `cause_kind` 见 [Application 错误说明](../crates/auction-application/README.md#资金与内部证据错误)，收据/价格码与辅助 SQL 约束见 [Storage 唯一拒绝字典](../crates/auction-storage/README.md#cod-实收资金化拒绝诊断)，不要复制字典到其他文档。
+
+辅助查询只在原授权 SELECT 无行且 target 开启时执行：同事务、只读、只返回布尔谓词。剩余证据预算小于一秒时跳过，否则先设置事务局部 `statement_timeout='250ms'`，完整等待服务端查询结果，不在客户端取消 future。FALSE/NULL 都不通过；预算不足、SET/查询失败或超时归回原泛化拒绝，始终返回原 `Unproven` 并进入原回滚路径，详细预算与中止事务的回滚语义见 [Storage 说明](../crates/auction-storage/README.md#授权查询无行的只读诊断)。两种原 defer reason、白名单、读取契约与人工证明都不变。
+
+D1 仍待线上分类证据确认。部署后由用户执行只读核对，数据库查询放在只读事务内，仅选必要标识、状态、时间和布尔比较结果：
+
+1. 确认实际 Worker 制品版本、迁移版本，以及同一义务的原 unpersisted 警告与本 target 的日志链。
+2. 核对 payment 的 execution/business state、last_error_code、retry_count、next_attempt_at、版本与租约时间，以及 seller blocked/refund contingent 状态。
+3. 若出现发送边界类别，核对原 sending_at 与账户模式对应的最新 record_opening/reconciliation 时间；只输出来源存在与严格先后比较，不导出 UID 或金额。
+4. 若出现发送证明类别，核对 operator/frozen 强谓词及 confirmation、attempt、binding、审计、原 Admin 失败命令的关联布尔值，不导出正文、payload、metadata、快照或摘要。
+5. 核对稳定内部/资金命令、funding lot、receipt 的存在性，区分重放、业务拒绝、已确认回滚、未确认结果和 defer 持久化失败；预算类结合日志时序核对证据与 claim 窗口。
+
+正常资金拒绝会先回滚再尝试保存 Deferred，不能仅凭拒绝码认定它解释了 unpersisted；还需检查外层超时、早期错误或 defer 失败。确认根因后另行批准修复；不据诊断修改人工 Sent、更正原失败命令或自动重发。
+
 ## 日常运维
 
 | 任务 | 做法 |

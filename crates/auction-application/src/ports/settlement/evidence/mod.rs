@@ -31,6 +31,20 @@ pub enum InternalEvidenceError {
     InvalidRequest,
 }
 
+impl InternalEvidenceError {
+    /// 返回不含秘密与正文的闭集安全分类，不参与重试或证据判定。
+    pub fn safe_kind(&self) -> &'static str {
+        match self {
+            Self::Unsupported => "evidence_unsupported",
+            Self::Unproven => "evidence_unproven",
+            Self::Unavailable => "evidence_unavailable",
+            Self::Expired => "evidence_expired",
+            Self::Revoked => "evidence_revoked",
+            Self::InvalidRequest => "evidence_request_invalid",
+        }
+    }
+}
+
 /// 绝对预算内的只读证据 future。
 pub type InternalEvidenceFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, InternalEvidenceError>> + Send + 'a>>;

@@ -30,6 +30,21 @@ pub enum FundingError {
     Storage,
 }
 
+impl FundingError {
+    /// 返回不含秘密与正文的闭集安全分类，不参与重试或资金判定。
+    pub fn safe_kind(&self) -> &'static str {
+        match self {
+            Self::Invalid => "funding_invalid",
+            Self::Conflict => "funding_conflict",
+            Self::Unavailable => "funding_unavailable",
+            Self::Unproven => "funding_unproven",
+            Self::Unsupported => "funding_unsupported",
+            Self::SerializationConflict => "funding_serialization_conflict",
+            Self::Storage => "funding_storage_error",
+        }
+    }
+}
+
 /// 新窄端口使用独立 future，不扩张旧 delivery trait。
 pub type FundingFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, FundingError>> + Send + 'a>>;
 

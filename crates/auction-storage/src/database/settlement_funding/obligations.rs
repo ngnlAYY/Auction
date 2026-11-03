@@ -18,6 +18,10 @@ async fn fund_lot(
     equipment_loss: bool,
 ) -> Result<(), FundingError> {
     let collected = receipt.is_some();
+    let rejected = |kind, error| {
+        if collected { diagnostics::reject(kind, "fund_lot", error) } else { error }
+    };
+    let decode = |error| rejected("funding_lot_row_decode_failed", storage(error));
     let cash = receipt.and_then(|receipt| receipt.evidence.main_cash.as_ref());
     let action = if equipment_loss {
         "operator_equipment_loss"
@@ -26,47 +30,67 @@ async fn fund_lot(
     } else {
         "internal_purchase"
     };
-    if replay(tx, account, command, action, lot_id).await? {
+    if replay(tx, account, command, action, lot_id)
+        .await
+        .map_err(|error| rejected("funding_lot_replay_failed", error))?
+    {
         return Ok(());
     }
     let row = sqlx::query("SELECT l.buyer_amount,l.compensation_amount,l.seller_amount,l.tax_amount,p.id AS payment_id,s.id AS seller_id,pf.execution_state,pf.proof_kind,pf.proof_digest FROM public.lot_settlements l JOIN public.settlement_obligations p ON p.lot_id=l.lot_id AND p.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod') JOIN public.settlement_obligations s ON s.lot_id=l.lot_id AND s.obligation_kind='seller_payout' JOIN public.settlement_obligation_fulfillments pf ON pf.obligation_id=p.id WHERE l.lot_id=$1")
-        .bind(lot_id).fetch_one(&mut **tx).await.map_err(storage)?;
+        .bind(lot_id).fetch_one(&mut **tx).await.map_err(storage)
+        .map_err(|error| rejected("funding_lot_query_failed", error))?;
     let split = FundingSplit {
-        buyer: SettlementAmount::new(row.try_get("buyer_amount").map_err(storage)?)
-            .map_err(invalid)?,
-        compensation: SettlementAmount::new(row.try_get("compensation_amount").map_err(storage)?)
-            .map_err(invalid)?,
-        seller: SettlementAmount::new(row.try_get("seller_amount").map_err(storage)?)
-            .map_err(invalid)?,
-        tax: SettlementAmount::new(row.try_get("tax_amount").map_err(storage)?).map_err(invalid)?,
+        buyer: SettlementAmount::new(row.try_get("buyer_amount").map_err(decode)?)
+            .map_err(|error| rejected("funding_split_buyer_invalid", invalid(error)))?,
+        compensation: SettlementAmount::new(row.try_get("compensation_amount").map_err(decode)?)
+            .map_err(|error| rejected("funding_split_compensation_invalid", invalid(error)))?,
+        seller: SettlementAmount::new(row.try_get("seller_amount").map_err(decode)?)
+            .map_err(|error| rejected("funding_split_seller_invalid", invalid(error)))?,
+        tax: SettlementAmount::new(row.try_get("tax_amount").map_err(decode)?)
+            .map_err(|error| rejected("funding_split_tax_invalid", invalid(error)))?,
     }
     .validate()
-    .map_err(invalid)?;
+    .map_err(|error| rejected("funding_split_conservation_invalid", invalid(error)))?;
     if equipment_loss {
         auction_domain::equipment_loss_funding(split, account.records_only(), true)
             .map_err(invalid)?;
     }
-    let payment_id: Uuid = row.try_get("payment_id").map_err(storage)?;
-    let seller_id: Uuid = row.try_get("seller_id").map_err(storage)?;
-    if collected
-        && (row.try_get::<String, _>("execution_state").map_err(storage)? != "satisfied"
-            || row.try_get::<Option<String>, _>("proof_kind").map_err(storage)?.as_deref()
-                != Some("mooglemail_sent_collected")
-            || row.try_get::<Option<Vec<u8>>, _>("proof_digest").map_err(storage)?.is_none())
-    {
-        return Err(FundingError::Unproven);
+    let payment_id: Uuid = row.try_get("payment_id").map_err(decode)?;
+    let seller_id: Uuid = row.try_get("seller_id").map_err(decode)?;
+    if collected {
+        if row.try_get::<String, _>("execution_state").map_err(decode)? != "satisfied" {
+            return Err(rejected("funding_lot_payment_unsatisfied", FundingError::Unproven));
+        }
+        if row.try_get::<Option<String>, _>("proof_kind").map_err(decode)?.as_deref()
+            != Some("mooglemail_sent_collected")
+        {
+            return Err(rejected("funding_lot_payment_proof_kind_invalid", FundingError::Unproven));
+        }
+        if row.try_get::<Option<Vec<u8>>, _>("proof_digest").map_err(decode)?.is_none() {
+            return Err(rejected("funding_lot_payment_proof_missing", FundingError::Unproven));
+        }
     }
     // lot全局唯一，不因账户/凭据切换重做付款分配。
     sqlx::query("INSERT INTO public.settlement_funding_lots(lot_id,uid,payment_obligation_id,source_kind) VALUES($1,$2,$3,$4)")
         .bind(lot_id).bind(account.uid()).bind(payment_id).bind(if equipment_loss {"operator_equipment_loss"} else if collected {"collected"} else {"internal"})
-        .execute(&mut **tx).await.map_err(storage)?;
-    let seller = allocation(tx, account.uid(), "seller", Some(lot_id), Some(seller_id)).await?;
-    let tax = allocation(tx, account.uid(), "tax", Some(lot_id), None).await?;
+        .execute(&mut **tx).await.map_err(storage)
+        .map_err(|error| rejected("funding_lot_binding_write_failed", error))?;
+    let seller = allocation(tx, account.uid(), "seller", Some(lot_id), Some(seller_id))
+        .await
+        .map_err(|error| rejected("funding_lot_seller_allocation_failed", error))?;
+    let tax = allocation(tx, account.uid(), "tax", Some(lot_id), None)
+        .await
+        .map_err(|error| rejected("funding_lot_tax_allocation_failed", error))?;
     if collected {
         // 当前同session精确实收绑定由调用方证明；不能用旧collected或Balance单独调用。
-        let receipt = receipt.ok_or(FundingError::Unproven)?;
+        let receipt = receipt
+            .ok_or_else(|| rejected("funding_lot_receipt_missing", FundingError::Unproven))?;
         validate_receipt(tx, account, receipt, payment_id, split.buyer.value()).await?;
-        let sent = receipt.evidence.sent_collection.as_ref().ok_or(FundingError::Unproven)?;
+        let sent = receipt
+            .evidence
+            .sent_collection
+            .as_ref()
+            .ok_or_else(|| rejected("funding_lot_sent_missing", FundingError::Unproven))?;
         let source = source(
             tx,
             account.uid(),
@@ -75,9 +99,12 @@ async fn fund_lot(
             split.buyer.value(),
             &sent.digest,
         )
-        .await?;
+        .await
+        .map_err(|error| rejected("funding_lot_payment_source_failed", error))?;
         store_receipt(tx, source, receipt).await?;
-        issue(tx, account.uid(), command, source, seller, split.buyer.value()).await?;
+        issue(tx, account.uid(), command, source, seller, split.buyer.value())
+            .await
+            .map_err(|error| rejected("funding_lot_payment_issue_failed", error))?;
     } else if account.records_only() {
         // 原lot冻结B的有限会计来源，不读取个人现金，也不创建可任意消费的proprietary预算。
         let source = source(
@@ -109,26 +136,40 @@ async fn fund_lot(
                 split.compensation.value(),
                 &command.request_digest,
             )
-            .await?;
-            issue(tx, account.uid(), command, source, seller, split.compensation.value()).await?;
+            .await
+            .map_err(|error| rejected("funding_lot_compensation_source_failed", error))?;
+            issue(tx, account.uid(), command, source, seller, split.compensation.value())
+                .await
+                .map_err(|error| rejected("funding_lot_compensation_issue_failed", error))?;
         }
     } else {
-        let compensation = allocation(tx, account.uid(), "compensation", None, None).await?;
+        let compensation = allocation(tx, account.uid(), "compensation", None, None)
+            .await
+            .map_err(|error| rejected("funding_lot_compensation_allocation_failed", error))?;
         transfer(tx, account.uid(), command, compensation, seller, split.compensation.value())
-            .await?;
+            .await
+            .map_err(|error| rejected("funding_lot_compensation_transfer_failed", error))?;
     }
-    transfer(tx, account.uid(), command, seller, tax, split.tax.value()).await?;
+    transfer(tx, account.uid(), command, seller, tax, split.tax.value())
+        .await
+        .map_err(|error| rejected("funding_lot_tax_transfer_failed", error))?;
     if let Some(cash) = cash.filter(|_| !account.records_only()) {
         let local:i64=sqlx::query_scalar("SELECT COALESCE(sum(amount),0)::bigint FROM public.settlement_funding_allocations WHERE uid=$1 AND state<>'spent'")
-            .bind(account.uid()).fetch_one(&mut **tx).await.map_err(storage)?;
+            .bind(account.uid()).fetch_one(&mut **tx).await.map_err(storage)
+            .map_err(|error| rejected("funding_lot_coverage_query_failed", error))?;
         if local > cash.credits {
-            return Err(FundingError::Unavailable);
+            return Err(rejected("funding_lot_coverage_insufficient", FundingError::Unavailable));
         }
     }
     if let Some(receipt) = receipt {
-        crate::validate_mail_evidence_time(tx, receipt.evidence).await.map_err(evidence_error)?;
+        crate::validate_mail_evidence_time(tx, receipt.evidence)
+            .await
+            .map_err(evidence_error)
+            .map_err(|error| rejected("funding_lot_final_evidence_failed", error))?;
     }
-    complete(tx, account, command, action, lot_id).await
+    complete(tx, account, command, action, lot_id)
+        .await
+        .map_err(|error| rejected("funding_lot_command_write_failed", error))
 }
 
 /// strict_cash从既有自有/补偿用途转移；record_only按该lot冻结B/C登记有限会计来源。
@@ -156,6 +197,16 @@ pub async fn fund_equipment_loss(
 }
 
 /// 调用者必须将当前session实收/UID绑定证明与此动作同事务持久化。
+#[tracing::instrument(
+    target = "auction::settlement::funding_diagnostics",
+    level = "warn",
+    skip_all,
+    fields(
+        obligation_id = %receipt.payment_obligation_id,
+        delivery_id = %receipt.delivery_id,
+        command_id = %command.command_id
+    )
+)]
 pub async fn fund_collected_payment(
     tx: &mut Transaction<'_, Postgres>,
     account: &LockedFundingAccount,
@@ -163,7 +214,13 @@ pub async fn fund_collected_payment(
     receipt: &FundingCollectedReceipt<'_>,
 ) -> Result<(), FundingError> {
     let payment_obligation_id = receipt.payment_obligation_id;
-    let sent = receipt.evidence.sent_collection.as_ref().ok_or(FundingError::Unproven)?;
+    let sent = receipt.evidence.sent_collection.as_ref().ok_or_else(|| {
+        diagnostics::reject(
+            "collected_payment_sent_missing",
+            "payment_mutation",
+            FundingError::Unproven,
+        )
+    })?;
     // 仅稳定来源字段参与重放；新一轮观测时间/generation不改变原命令负载。
     let digest = Sha256::digest(
         serde_json::to_vec(&serde_json::json!({
@@ -171,12 +228,19 @@ pub async fn fund_collected_payment(
             "payment":payment_obligation_id,"delivery":receipt.delivery_id,
             "mid":sent.external_mail_id,"buyer":receipt.buyer_credits
         }))
-        .map_err(invalid)?,
+        .map_err(|error| {
+            diagnostics::reject(
+                "collected_payment_digest_failed",
+                "payment_mutation",
+                invalid(error),
+            )
+        })?,
     )
     .into();
     let command = FundingMutation { command_id: command.command_id, request_digest: digest };
     let lot: Uuid = sqlx::query_scalar("SELECT lot_id FROM public.settlement_obligations WHERE id=$1 AND obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')")
-        .bind(payment_obligation_id).fetch_one(&mut **tx).await.map_err(storage)?;
+        .bind(payment_obligation_id).fetch_one(&mut **tx).await.map_err(storage)
+        .map_err(|error| diagnostics::reject("collected_payment_lot_query_failed", "payment_mutation", error))?;
     fund_lot(tx, account, &command, lot, Some(receipt), false).await
 }
 
