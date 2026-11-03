@@ -113,6 +113,13 @@ impl PostgresCompetitionTransaction {
         let world_enabled: bool = row.try_get("world_enabled").map_err(map_sql_error)?;
         let auction_status =
             parse_auction_status(row.try_get("auction_status").map_err(map_sql_error)?)?;
+        auction_observability::database_transaction_phase(
+            if auction_status == AuctionStatus::Final {
+                auction_observability::DatabaseTransactionPhase::Final
+            } else {
+                auction_observability::DatabaseTransactionPhase::NonFinal
+            },
+        );
         let lot_status: String = row.try_get("lot_status").map_err(map_sql_error)?;
         let scheduled_open_at: DateTime<Utc> =
             row.try_get("scheduled_open_at").map_err(map_sql_error)?;
@@ -185,6 +192,13 @@ impl PostgresCompetitionTransaction {
             .ok_or_else(|| invalid_state("结算 lot 缺少有效结束时间"))?;
         let auction_status =
             parse_auction_status(row.try_get("auction_status").map_err(map_sql_error)?)?;
+        auction_observability::database_transaction_phase(
+            if auction_status == AuctionStatus::Final {
+                auction_observability::DatabaseTransactionPhase::Final
+            } else {
+                auction_observability::DatabaseTransactionPhase::NonFinal
+            },
+        );
         self.snapshot_from_row(lot_id, row, effective_end_at, auction_status).await
     }
 

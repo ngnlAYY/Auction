@@ -23,7 +23,7 @@ pub(crate) async fn link_action_postgres(
     let claim_token = claim.claim_token;
     let fencing_version = claim.fencing_version;
     let request_digest = request_hash.as_bytes();
-    run_serializable_action_transaction(pool, move |transaction| {
+    super::super::run_serializable_action_transaction(pool, move |transaction| {
         Box::pin(async move {
             lock_action(transaction, action_id.as_uuid()).await?;
             let result = sqlx::query(

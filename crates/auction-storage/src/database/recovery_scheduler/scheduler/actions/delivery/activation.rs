@@ -32,7 +32,7 @@ pub(crate) async fn mark_action_enqueued_postgres(
     let fencing_version = claim.fencing_version;
     let activate_digest = activate_request_hash.as_bytes();
     let prepare_digest = prepare_request_hash.as_bytes();
-    run_serializable_action_transaction(pool, move |transaction| {
+    super::super::run_serializable_action_transaction(pool, move |transaction| {
         Box::pin(async move {
             lock_action(transaction, action_id.as_uuid()).await?;
             let result = sqlx::query(

@@ -54,3 +54,11 @@ cargo run --locked -p auction-public-api --features postgres,web-embed   # 需�
 ## 数据库运行时开关
 
 启动装配注入 TOML 就绪基线并立即读取数据库开关，随后每五秒刷新、单次一秒预算，任务随进程生命周期收口。审计模式使用三角色共享规则；Public/Admin 另接入 HTTP 就绪缓存，Worker 负责到期收口。失败保留原快照及期限，不清零审计累计；本批不热读取其他配置。核对与回退见[运维手册](../../ops/README.md#运行时开关)。
+
+## 数据库连接档位
+
+profiled 模式使用 `auction-public`，本角色 `[database_pool]` 默认物理上限 16。
+长期预留为 1，扣除后至少剩 1 个普通工作连接；服务超时默认关闭。
+超时必须显式填写阈值，W0.14 观察并由用户切换三角色有效 classified 后才启用。
+池与长期会话参数修改需经停机门禁重启，本批不接 W7.7。
+配置与 legacy 回退见[连接分档](../../ops/config/README.md#数据库连接分档)。

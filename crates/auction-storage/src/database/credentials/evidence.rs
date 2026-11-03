@@ -18,7 +18,8 @@ pub enum MailEvidenceTransactionError {
 impl MailEvidenceTransactionError {
     /// 只允许整事务对 40001/40P01 做有界重试；重试仍复核证据/claim 实时时效。
     pub fn is_serialization_conflict(&self) -> bool {
-        matches!(self, Self::Sqlx(error) if crate::database::is_serialization_conflict(error))
+        matches!(self, Self::Sqlx(error)
+            if crate::database::backend::is_serialization_conflict(error))
     }
 
     /// 仅在存储重试/回滚分类已完成后转换为应用错误，禁止提前丢失 SQLSTATE。
@@ -32,6 +33,7 @@ impl MailEvidenceTransactionError {
 
 impl From<sqlx::Error> for MailEvidenceTransactionError {
     fn from(error: sqlx::Error) -> Self {
+        crate::database::backend::observe_transaction_error(&error);
         Self::Sqlx(error)
     }
 }

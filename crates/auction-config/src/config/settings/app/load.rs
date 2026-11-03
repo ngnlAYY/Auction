@@ -28,6 +28,8 @@ impl AppConfig {
                 log_filter: None,
                 metrics: MetricsConfig::default(),
                 readiness: ReadinessConfig::default(),
+                database_profiles: DatabaseProfilesConfig::default(),
+                database_pool: DatabasePoolConfig::default(),
                 tracing: TracingSettings::default(),
                 shutdown: ShutdownFileConfig::default(),
                 realtime: RealtimeConfig::default(),
@@ -83,6 +85,7 @@ impl AppConfig {
     ) -> Result<Self, ConfigError> {
         let FileConfig {
             common_file,
+            database_pool,
             listen_address,
             listener,
             tracing,
@@ -102,7 +105,15 @@ impl AppConfig {
         }
         let common_config_path = resolve_config_path(config_path.as_deref(), common_file);
         let common = load_common_file(&common_config_path)?;
-        let CommonFileConfig { log_filter, metrics, readiness, cache, backup, auction } = common;
+        let CommonFileConfig {
+            log_filter,
+            metrics,
+            readiness,
+            database_profiles,
+            cache,
+            backup,
+            auction,
+        } = common;
         let worker = resolve_worker_paths(config_path.as_deref(), worker);
         let secrets_path = Some(resolve_secrets_path(config_path.as_deref(), secrets_file));
         let runtime_config_path =
@@ -124,6 +135,8 @@ impl AppConfig {
                 log_filter,
                 metrics,
                 readiness,
+                database_profiles,
+                database_pool,
                 tracing,
                 shutdown,
                 realtime,

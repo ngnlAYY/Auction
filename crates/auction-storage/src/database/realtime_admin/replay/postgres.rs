@@ -42,7 +42,7 @@ pub(crate) async fn replay_postgres(
 }
 
 async fn replay_postgres_inner(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command: &RealtimeReplayCommand,
 ) -> Result<RealtimeReplayResult, ApplicationError> {
     let pending_payload = json!({ "status": "pending" });

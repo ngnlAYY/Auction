@@ -1,5 +1,6 @@
 //! 恢复命令的 PostgreSQL 装配；应用规则、幂等、追加事实与审计在同一事务内完成。
 
+use crate::database::TrackedTransaction as Transaction;
 #[cfg(feature = "postgres")]
 use std::collections::BTreeMap;
 
@@ -17,7 +18,7 @@ use chrono::{DateTime, Utc};
 #[cfg(feature = "postgres")]
 use serde_json::{Value, json};
 #[cfg(feature = "postgres")]
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Row};
 #[cfg(feature = "postgres")]
 use uuid::Uuid;
 

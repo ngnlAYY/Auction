@@ -55,6 +55,7 @@ pub(in crate::database::sessions) async fn set_postgres(
 ) -> Result<PublicSessionPreferenceResult, ApplicationError> {
     let request_hash = command.request_hash(token_hash)?;
     store
+        .for_transaction(auction_observability::DatabaseTransactionOwner::PublicIdentity)
         .run(TransactionPolicy::serializable(), |transaction| {
             Box::pin(set_locked(transaction, token_hash, command, request_hash, now))
         })

@@ -37,8 +37,17 @@ pub(super) async fn create_backup(
 ) -> anyhow::Result<BackupManifest> {
     let (archive_name, manifest_path) = targets(output)?;
     let url = config.database_url().context("Worker 配置缺少数据库连接")?;
-    let environment = libpq::Libpq::from_url(url, database)?;
-    let store = crate::database::connect(url).await?;
+    let environment = libpq::Libpq::from_url(
+        url,
+        database,
+        config.database_profiles.mode,
+        auction_storage::DatabaseConnectionPurpose::CliBackup,
+    )?;
+    let store = crate::database::connect(
+        config,
+        auction_storage::DatabaseConnectionPurpose::CliBackupCheck,
+    )
+    .await?;
     let result = async {
         let before = schema_version(&store, database).await?;
         let temporary = TemporaryArchive(

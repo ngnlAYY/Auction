@@ -23,26 +23,33 @@ pub(super) async fn resolve_bidder_postgres(
     external_account_id: &str,
     player_name: &str,
 ) -> Result<ForumBidderIdentity, ApplicationError> {
-    if !valid_decimal_id(external_account_id, MAX_FORUM_ACCOUNT_ID_BYTES)
-        || !valid_text(player_name, MAX_PLAYER_NAME_BYTES)
-    {
-        return Err(ApplicationError::ForumIdentityRejected("论坛账号数字 ID 或玩家名称无效"));
-    }
-    let world_id = world.as_str();
-    let mut transaction = store
+    store
         .pool()
-        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
-        .await
-        .map_err(|error| storage_error_from(error, "开启论坛身份事务失败"))?;
-    // 同一 showuser 在 main/isekai 必须串行决定唯一 Users owner。
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(external_account_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| storage_error_from(error, "锁定论坛账号数字 ID 失败"))?;
+        .observe_transaction(
+            auction_observability::DatabaseTransactionOwner::PublicIdentity,
+            async {
+                if !valid_decimal_id(external_account_id, MAX_FORUM_ACCOUNT_ID_BYTES)
+                    || !valid_text(player_name, MAX_PLAYER_NAME_BYTES)
+                {
+                    return Err(ApplicationError::ForumIdentityRejected(
+                        "论坛账号数字 ID 或玩家名称无效",
+                    ));
+                }
+                let world_id = world.as_str();
+                let mut transaction = store
+                    .pool()
+                    .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+                    .await
+                    .map_err(|error| storage_error_from(error, "开启论坛身份事务失败"))?;
+                // 同一 showuser 在 main/isekai 必须串行决定唯一 Users owner。
+                sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+                    .bind(external_account_id)
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(|error| storage_error_from(error, "锁定论坛账号数字 ID 失败"))?;
 
-    if let Some(row) = sqlx::query(
-        "SELECT identity.id, identity.external_account_id,
+                if let Some(row) = sqlx::query(
+                    "SELECT identity.id, identity.external_account_id,
                 identity.registration_state, identity.status,
                 account.id AS user_id, account.status AS user_status,
                 account.key_status, account.username, account.forum_account_id
@@ -52,117 +59,126 @@ pub(super) async fn resolve_bidder_postgres(
            AND identity.provider = 'ehentai'
            AND identity.external_account_id = $2
          FOR UPDATE OF identity, account",
-    )
-    .bind(world_id)
-    .bind(external_account_id)
-    .fetch_optional(&mut *transaction)
-    .await
-    .map_err(|error| storage_error_from(error, "读取论坛玩家身份失败"))?
-    {
-        let identity_id: Uuid =
-            row.try_get("id").map_err(|error| storage_error_from(error, "读取论坛身份标识失败"))?;
-        let canonical_external_account_id: String = row
-            .try_get("external_account_id")
-            .map_err(|error| storage_error_from(error, "读取论坛账号数字 ID 失败"))?;
-        let registration_state: String = row
-            .try_get("registration_state")
-            .map_err(|error| storage_error_from(error, "读取论坛身份注册状态失败"))?;
-        let identity_status: String = row
-            .try_get("status")
-            .map_err(|error| storage_error_from(error, "读取论坛身份状态失败"))?;
-        let user_id: Uuid = row
-            .try_get("user_id")
-            .map_err(|error| storage_error_from(error, "读取论坛用户标识失败"))?;
-        let user_status: String = row
-            .try_get("user_status")
-            .map_err(|error| storage_error_from(error, "读取论坛用户状态失败"))?;
-        let key_status: String = row
-            .try_get("key_status")
-            .map_err(|error| storage_error_from(error, "读取论坛用户 key 状态失败"))?;
-        let username: String = row
-            .try_get("username")
-            .map_err(|error| storage_error_from(error, "读取论坛玩家名称失败"))?;
-        let forum_account_id: Option<String> = row
-            .try_get("forum_account_id")
-            .map_err(|error| storage_error_from(error, "读取用户论坛账号 ID 失败"))?;
-        if identity_id.is_nil()
-            || user_id.is_nil()
-            || identity_status != "active"
-            || user_status != "active"
-            || !matches!(key_status.as_str(), "active" | "revoked")
-            || !matches!(registration_state.as_str(), "forum_only" | "mm_bound")
-            || canonical_external_account_id != external_account_id
-            || forum_account_id.as_deref().is_some_and(|value| value != external_account_id)
-            || !valid_text(&username, MAX_PLAYER_NAME_BYTES)
-        {
-            return Err(ApplicationError::ForumIdentityRejected(
-                "论坛身份已被阻止或稳定账号归属不一致",
-            ));
-        }
-        update_user_identity(
-            &mut transaction,
-            user_id,
-            world_id,
-            external_account_id,
-            player_name,
-            &username,
-            forum_account_id.as_deref(),
-        )
-        .await?;
-        let next_registration_state =
-            if key_status == "active" { "mm_bound" } else { registration_state.as_str() };
-        sqlx::query(
-            "UPDATE public.forum_bidder_identities
+                )
+                .bind(world_id)
+                .bind(external_account_id)
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(|error| storage_error_from(error, "读取论坛玩家身份失败"))?
+                {
+                    let identity_id: Uuid = row
+                        .try_get("id")
+                        .map_err(|error| storage_error_from(error, "读取论坛身份标识失败"))?;
+                    let canonical_external_account_id: String = row
+                        .try_get("external_account_id")
+                        .map_err(|error| storage_error_from(error, "读取论坛账号数字 ID 失败"))?;
+                    let registration_state: String = row
+                        .try_get("registration_state")
+                        .map_err(|error| storage_error_from(error, "读取论坛身份注册状态失败"))?;
+                    let identity_status: String = row
+                        .try_get("status")
+                        .map_err(|error| storage_error_from(error, "读取论坛身份状态失败"))?;
+                    let user_id: Uuid = row
+                        .try_get("user_id")
+                        .map_err(|error| storage_error_from(error, "读取论坛用户标识失败"))?;
+                    let user_status: String = row
+                        .try_get("user_status")
+                        .map_err(|error| storage_error_from(error, "读取论坛用户状态失败"))?;
+                    let key_status: String = row
+                        .try_get("key_status")
+                        .map_err(|error| storage_error_from(error, "读取论坛用户 key 状态失败"))?;
+                    let username: String = row
+                        .try_get("username")
+                        .map_err(|error| storage_error_from(error, "读取论坛玩家名称失败"))?;
+                    let forum_account_id: Option<String> = row
+                        .try_get("forum_account_id")
+                        .map_err(|error| storage_error_from(error, "读取用户论坛账号 ID 失败"))?;
+                    if identity_id.is_nil()
+                        || user_id.is_nil()
+                        || identity_status != "active"
+                        || user_status != "active"
+                        || !matches!(key_status.as_str(), "active" | "revoked")
+                        || !matches!(registration_state.as_str(), "forum_only" | "mm_bound")
+                        || canonical_external_account_id != external_account_id
+                        || forum_account_id
+                            .as_deref()
+                            .is_some_and(|value| value != external_account_id)
+                        || !valid_text(&username, MAX_PLAYER_NAME_BYTES)
+                    {
+                        return Err(ApplicationError::ForumIdentityRejected(
+                            "论坛身份已被阻止或稳定账号归属不一致",
+                        ));
+                    }
+                    update_user_identity(
+                        &mut transaction,
+                        user_id,
+                        world_id,
+                        external_account_id,
+                        player_name,
+                        &username,
+                        forum_account_id.as_deref(),
+                    )
+                    .await?;
+                    let next_registration_state = if key_status == "active" {
+                        "mm_bound"
+                    } else {
+                        registration_state.as_str()
+                    };
+                    sqlx::query(
+                        "UPDATE public.forum_bidder_identities
              SET display_name = $1,
                  registration_state = $2,
                  updated_at = transaction_timestamp()
              WHERE id = $3
                AND (display_name IS DISTINCT FROM $1
                     OR registration_state IS DISTINCT FROM $2)",
-        )
-        .bind(player_name)
-        .bind(next_registration_state)
-        .bind(identity_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| storage_error_from(error, "更新论坛玩家身份失败"))?;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| storage_error_from(error, "提交论坛身份事务失败"))?;
-        return Ok(ForumBidderIdentity {
-            user_id: UserId::from_uuid(user_id),
-            external_account_id: canonical_external_account_id,
-            player_name: player_name.to_owned(),
-        });
-    }
+                    )
+                    .bind(player_name)
+                    .bind(next_registration_state)
+                    .bind(identity_id)
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(|error| storage_error_from(error, "更新论坛玩家身份失败"))?;
+                    transaction
+                        .commit()
+                        .await
+                        .map_err(|error| storage_error_from(error, "提交论坛身份事务失败"))?;
+                    return Ok(ForumBidderIdentity {
+                        user_id: UserId::from_uuid(user_id),
+                        external_account_id: canonical_external_account_id,
+                        player_name: player_name.to_owned(),
+                    });
+                }
 
-    // 同一数字账号可在两个世界留下映射，但所有映射必须归属同一个用户。
-    let linked_rows = sqlx::query(
-        "SELECT user_id
+                // 同一数字账号可在两个世界留下映射，但所有映射必须归属同一个用户。
+                let linked_rows = sqlx::query(
+                    "SELECT user_id
          FROM public.forum_bidder_identities
          WHERE provider = 'ehentai' AND external_account_id = $1
          FOR UPDATE",
-    )
-    .bind(external_account_id)
-    .fetch_all(&mut *transaction)
-    .await
-    .map_err(|error| storage_error_from(error, "读取论坛账号跨世界归属失败"))?;
-    let mut linked_user_id = None;
-    for row in linked_rows {
-        let user_id: Uuid = row
-            .try_get("user_id")
-            .map_err(|error| storage_error_from(error, "读取论坛账号归属用户失败"))?;
-        if user_id.is_nil()
-            || linked_user_id.is_some_and(|existing_user_id| existing_user_id != user_id)
-        {
-            return Err(ApplicationError::ForumIdentityRejected("论坛账号跨世界归属不一致"));
-        }
-        linked_user_id = Some(user_id);
-    }
+                )
+                .bind(external_account_id)
+                .fetch_all(&mut *transaction)
+                .await
+                .map_err(|error| storage_error_from(error, "读取论坛账号跨世界归属失败"))?;
+                let mut linked_user_id = None;
+                for row in linked_rows {
+                    let user_id: Uuid = row
+                        .try_get("user_id")
+                        .map_err(|error| storage_error_from(error, "读取论坛账号归属用户失败"))?;
+                    if user_id.is_nil()
+                        || linked_user_id
+                            .is_some_and(|existing_user_id| existing_user_id != user_id)
+                    {
+                        return Err(ApplicationError::ForumIdentityRejected(
+                            "论坛账号跨世界归属不一致",
+                        ));
+                    }
+                    linked_user_id = Some(user_id);
+                }
 
-    let rows = sqlx::query(
-        "SELECT account.id, account.status, account.key_status, account.username,
+                let rows = sqlx::query(
+                    "SELECT account.id, account.status, account.key_status, account.username,
                 account.forum_account_id,
                 EXISTS (
                     SELECT 1
@@ -178,116 +194,127 @@ pub(super) async fn resolve_bidder_postgres(
                 OR (account.forum_account_id IS NULL AND lower(account.username) = lower($4))
             ))
          FOR UPDATE OF account",
-    )
-    .bind(linked_user_id)
-    .bind(external_account_id)
-    .bind(world_id)
-    .bind(player_name)
-    .fetch_all(&mut *transaction)
-    .await
-    .map_err(|error| storage_error_from(error, "读取论坛账号对应用户失败"))?;
-    if rows.len() > 1 {
-        return Err(ApplicationError::ForumIdentityRejected(
-            "论坛账号数字 ID 与玩家名称指向不同用户",
-        ));
-    }
+                )
+                .bind(linked_user_id)
+                .bind(external_account_id)
+                .bind(world_id)
+                .bind(player_name)
+                .fetch_all(&mut *transaction)
+                .await
+                .map_err(|error| storage_error_from(error, "读取论坛账号对应用户失败"))?;
+                if rows.len() > 1 {
+                    return Err(ApplicationError::ForumIdentityRejected(
+                        "论坛账号数字 ID 与玩家名称指向不同用户",
+                    ));
+                }
 
-    let (user_id, registration_state) = if let Some(row) = rows.first() {
-        let user_id: Uuid =
-            row.try_get("id").map_err(|error| storage_error_from(error, "读取论坛用户标识失败"))?;
-        let user_status: String = row
-            .try_get("status")
-            .map_err(|error| storage_error_from(error, "读取论坛用户状态失败"))?;
-        let key_status: String = row
-            .try_get("key_status")
-            .map_err(|error| storage_error_from(error, "读取论坛用户 key 状态失败"))?;
-        let username: String = row
-            .try_get("username")
-            .map_err(|error| storage_error_from(error, "读取论坛玩家名称失败"))?;
-        let forum_account_id: Option<String> = row
-            .try_get("forum_account_id")
-            .map_err(|error| storage_error_from(error, "读取用户论坛账号 ID 失败"))?;
-        let has_world_identity: bool = row
-            .try_get("has_world_identity")
-            .map_err(|error| storage_error_from(error, "读取论坛用户现有映射失败"))?;
-        if user_id.is_nil()
-            || user_status != "active"
-            || !matches!(key_status.as_str(), "active" | "revoked")
-            || !valid_text(&username, MAX_PLAYER_NAME_BYTES)
-            || has_world_identity
-            || linked_user_id.is_some_and(|existing_user_id| existing_user_id != user_id)
-            || forum_account_id.as_deref().is_some_and(|value| value != external_account_id)
-            || (key_status == "revoked" && linked_user_id != Some(user_id))
-        {
-            return Err(ApplicationError::ForumIdentityRejected(
-                "论坛玩家对应用户已被阻止或账号归属无法证明",
-            ));
-        }
-        update_user_identity(
-            &mut transaction,
-            user_id,
-            world_id,
-            external_account_id,
-            player_name,
-            &username,
-            forum_account_id.as_deref(),
-        )
-        .await?;
-        let registration_state = if key_status == "active" { "mm_bound" } else { "forum_only" };
-        (user_id, registration_state)
-    } else {
-        if linked_user_id.is_some() {
-            return Err(ApplicationError::ForumIdentityRejected("论坛账号既有归属用户不存在"));
-        }
-        let user_id = Uuid::new_v4();
-        let placeholder_hash = revoked_key_placeholder_hash(world_id, external_account_id);
-        // 论坛证据只建立 revoked 占位 Key；不得自动授予 Public 登录能力。
-        sqlx::query(
-            "INSERT INTO public.users
+                let (user_id, registration_state) = if let Some(row) = rows.first() {
+                    let user_id: Uuid = row
+                        .try_get("id")
+                        .map_err(|error| storage_error_from(error, "读取论坛用户标识失败"))?;
+                    let user_status: String = row
+                        .try_get("status")
+                        .map_err(|error| storage_error_from(error, "读取论坛用户状态失败"))?;
+                    let key_status: String = row
+                        .try_get("key_status")
+                        .map_err(|error| storage_error_from(error, "读取论坛用户 key 状态失败"))?;
+                    let username: String = row
+                        .try_get("username")
+                        .map_err(|error| storage_error_from(error, "读取论坛玩家名称失败"))?;
+                    let forum_account_id: Option<String> = row
+                        .try_get("forum_account_id")
+                        .map_err(|error| storage_error_from(error, "读取用户论坛账号 ID 失败"))?;
+                    let has_world_identity: bool = row
+                        .try_get("has_world_identity")
+                        .map_err(|error| storage_error_from(error, "读取论坛用户现有映射失败"))?;
+                    if user_id.is_nil()
+                        || user_status != "active"
+                        || !matches!(key_status.as_str(), "active" | "revoked")
+                        || !valid_text(&username, MAX_PLAYER_NAME_BYTES)
+                        || has_world_identity
+                        || linked_user_id
+                            .is_some_and(|existing_user_id| existing_user_id != user_id)
+                        || forum_account_id
+                            .as_deref()
+                            .is_some_and(|value| value != external_account_id)
+                        || (key_status == "revoked" && linked_user_id != Some(user_id))
+                    {
+                        return Err(ApplicationError::ForumIdentityRejected(
+                            "论坛玩家对应用户已被阻止或账号归属无法证明",
+                        ));
+                    }
+                    update_user_identity(
+                        &mut transaction,
+                        user_id,
+                        world_id,
+                        external_account_id,
+                        player_name,
+                        &username,
+                        forum_account_id.as_deref(),
+                    )
+                    .await?;
+                    let registration_state =
+                        if key_status == "active" { "mm_bound" } else { "forum_only" };
+                    (user_id, registration_state)
+                } else {
+                    if linked_user_id.is_some() {
+                        return Err(ApplicationError::ForumIdentityRejected(
+                            "论坛账号既有归属用户不存在",
+                        ));
+                    }
+                    let user_id = Uuid::new_v4();
+                    let placeholder_hash =
+                        revoked_key_placeholder_hash(world_id, external_account_id);
+                    // 论坛证据只建立 revoked 占位 Key；不得自动授予 Public 登录能力。
+                    sqlx::query(
+                        "INSERT INTO public.users
                 (id, username, status, public_key_hash, game_player_id, forum_account_id,
                  key_status, state_version, created_at, updated_at)
              VALUES ($1, $2, 'active', $3, $2, $4, 'revoked', 1,
                      transaction_timestamp(), transaction_timestamp())",
-        )
-        .bind(user_id)
-        .bind(player_name)
-        .bind(placeholder_hash)
-        .bind(external_account_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| storage_error_from(error, "创建论坛 forum-only 用户失败"))?;
-        (user_id, "forum_only")
-    };
+                    )
+                    .bind(user_id)
+                    .bind(player_name)
+                    .bind(placeholder_hash)
+                    .bind(external_account_id)
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(|error| storage_error_from(error, "创建论坛 forum-only 用户失败"))?;
+                    (user_id, "forum_only")
+                };
 
-    sqlx::query(
-        "INSERT INTO public.forum_bidder_identities
+                sqlx::query(
+                    "INSERT INTO public.forum_bidder_identities
             (id, world_id, provider, external_account_id, display_name,
              user_id, registration_state, status, created_at, updated_at)
          VALUES ($1, $2, 'ehentai', $3, $4, $5, $6, 'active',
                  transaction_timestamp(), transaction_timestamp())",
-    )
-    .bind(Uuid::new_v4())
-    .bind(world_id)
-    .bind(external_account_id)
-    .bind(player_name)
-    .bind(user_id)
-    .bind(registration_state)
-    .execute(&mut *transaction)
-    .await
-    .map_err(|error| storage_error_from(error, "保存论坛玩家身份失败"))?;
-    transaction
-        .commit()
+                )
+                .bind(Uuid::new_v4())
+                .bind(world_id)
+                .bind(external_account_id)
+                .bind(player_name)
+                .bind(user_id)
+                .bind(registration_state)
+                .execute(&mut *transaction)
+                .await
+                .map_err(|error| storage_error_from(error, "保存论坛玩家身份失败"))?;
+                transaction
+                    .commit()
+                    .await
+                    .map_err(|error| storage_error_from(error, "提交论坛身份事务失败"))?;
+                Ok(ForumBidderIdentity {
+                    user_id: UserId::from_uuid(user_id),
+                    external_account_id: external_account_id.to_owned(),
+                    player_name: player_name.to_owned(),
+                })
+            },
+        )
         .await
-        .map_err(|error| storage_error_from(error, "提交论坛身份事务失败"))?;
-    Ok(ForumBidderIdentity {
-        user_id: UserId::from_uuid(user_id),
-        external_account_id: external_account_id.to_owned(),
-        player_name: player_name.to_owned(),
-    })
 }
 
 async fn update_user_identity(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     user_id: Uuid,
     world_id: &str,
     forum_account_id: &str,

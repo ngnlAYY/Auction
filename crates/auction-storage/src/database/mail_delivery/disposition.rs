@@ -6,7 +6,7 @@ use super::common::{MailDeliveryTransactionError, repository_error};
 
 /// 调用者先持有 world 行锁；已安排的退回不能被后来的拍卖录入或领取覆盖。
 pub(in crate::database) async fn has_return_intent(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     world_id: &str,
     external_mail_id: &str,
 ) -> Result<bool, sqlx::Error> {
@@ -14,7 +14,7 @@ pub(in crate::database) async fn has_return_intent(
 }
 
 pub(super) async fn guard_disposition(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command: &MailDeliveryCommand,
 ) -> Result<(), MailDeliveryTransactionError> {
     if command.origin != MailDeliveryOrigin::MailIntake
@@ -61,7 +61,7 @@ pub(super) async fn guard_disposition(
 }
 
 async fn has_operation(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     world_id: &str,
     external_mail_id: &str,
     operation: &str,

@@ -10,7 +10,6 @@ pub(super) async fn configure_session(
     connection: &mut PgConnection,
 ) -> Result<(), PostgresRebuildError> {
     for (stage, statement) in [
-        ("application_name", "SET application_name = 'auction-cli/db-rebuild'"),
         ("search_path", "SET search_path = pg_catalog"),
         ("standard_conforming_strings", "SET standard_conforming_strings = on"),
         ("statement_timeout", "SET statement_timeout = '30s'"),

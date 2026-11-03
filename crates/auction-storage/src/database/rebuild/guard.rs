@@ -1,4 +1,4 @@
-use sqlx::{AssertSqlSafe, Connection, PgConnection};
+use sqlx::{AssertSqlSafe, PgConnection};
 
 use super::{
     catalog::{collect_state, configure_session, query_error, require_safe_preflight},
@@ -25,17 +25,17 @@ impl PostgresDatabaseRebuildGuard {
     pub async fn connect(
         maintenance_database_url: &str,
         confirmed_database_name: &str,
+        profile: crate::DatabaseConnectionProfile,
     ) -> Result<Self, PostgresRebuildError> {
         validate_database_name(confirmed_database_name)?;
         if matches!(confirmed_database_name, "postgres" | "template0" | "template1") {
             return Err(PostgresRebuildError::ProtectedDatabase);
         }
 
-        let options =
-            crate::deployment_identity::postgres_connect_options(maintenance_database_url)
-                .map_err(PostgresRebuildError::Connect)?;
-        let mut connection =
-            PgConnection::connect_with(&options).await.map_err(PostgresRebuildError::Connect)?;
+        let mut connection = profile
+            .connect(maintenance_database_url)
+            .await
+            .map_err(PostgresRebuildError::Connect)?;
         configure_session(&mut connection).await?;
         let advisory_lock_acquired = sqlx::query_scalar::<_, bool>(
             "SELECT pg_try_advisory_lock(hashtextextended($1 || $2, 0))",

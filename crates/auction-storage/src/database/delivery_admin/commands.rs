@@ -26,20 +26,33 @@ pub(crate) async fn execute(
     pool: &TrackedPool<Postgres>,
     command: &DeliveryAdminCommand,
 ) -> Result<DeliveryAdminResult, DeliveryAdminError> {
-    const MAX_ATTEMPTS: usize = 3;
+    pool.observe_transaction(
+        auction_observability::DatabaseTransactionOwner::DeliveryAdmin,
+        async {
+            const MAX_ATTEMPTS: usize = 3;
 
-    for attempt in 0..MAX_ATTEMPTS {
-        match execute_transaction(pool, command).await {
-            Ok(result) => return Ok(result),
-            Err(error) if error.is_retryable() && attempt + 1 < MAX_ATTEMPTS => {
-                // 每次重试都从新的事务开始；已执行的写入不能在同一事务中继续使用。
-                wait_before_retry(attempt).await;
+            for attempt in 0..MAX_ATTEMPTS {
+                match execute_transaction(pool, command).await {
+                    Ok(result) => return Ok(result),
+                    Err(error) if error.is_retryable() && attempt + 1 < MAX_ATTEMPTS => {
+                        // 每次重试都从新的事务开始；已执行的写入不能在同一事务中继续使用。
+                        wait_before_retry(attempt).await;
+                    }
+                    Err(error) => {
+                        crate::database::observe_retry_exhaustion(
+                            attempt + 1,
+                            MAX_ATTEMPTS,
+                            error.is_retryable(),
+                        );
+                        return Err(error.into_delivery_error());
+                    }
+                }
             }
-            Err(error) => return Err(error.into_delivery_error()),
-        }
-    }
-    // 循环的最后一次尝试总会返回；这里只为未来改动留下失败关闭的出口，不以 panic 终止请求。
-    Err(DeliveryAdminError::Unavailable)
+            // 循环的最后一次尝试总会返回；这里只为未来改动留下失败关闭的出口，不以 panic 终止请求。
+            Err(DeliveryAdminError::Unavailable)
+        },
+    )
+    .await
 }
 
 async fn execute_transaction(

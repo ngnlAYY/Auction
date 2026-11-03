@@ -1,0 +1,143 @@
+//! 显式连接用途与会话初始化；不读取配置，保留目标解析、TLS 与驱动 UTC 启动参数。
+
+use std::time::Duration;
+
+use sqlx::{Connection, PgConnection};
+use thiserror::Error;
+
+mod purpose;
+pub use purpose::DatabaseConnectionPurpose;
+
+/// 启用前由配置 owner 校验且显式填写的服务限界。
+#[derive(Debug, Clone, Copy)]
+pub struct DatabaseConnectionTimeouts {
+    pub acquire_millis: u64,
+    pub statement_millis: u64,
+    pub lock_millis: u64,
+    pub idle_transaction_millis: u64,
+}
+
+/// 装配根选择的连接档位；legacy 不设置名称、hook 或任何会话参数。
+#[derive(Debug, Clone, Copy)]
+pub struct DatabaseConnectionProfile {
+    purpose: Option<DatabaseConnectionPurpose>,
+    max_connections: u32,
+    acquire_millis: u64,
+    timeouts: Option<DatabaseConnectionTimeouts>,
+    maintenance: bool,
+}
+
+impl DatabaseConnectionProfile {
+    /// 完整保留旧池上限、获取时限和会话继承语义。
+    pub const fn legacy() -> Self {
+        Self {
+            purpose: None,
+            max_connections: 16,
+            acquire_millis: 30_000,
+            timeouts: None,
+            maintenance: false,
+        }
+    }
+
+    /// 服务物理上限含长期 owner；关闭限界时仍沿用 30 秒 acquire。
+    pub fn service(
+        purpose: DatabaseConnectionPurpose,
+        max_connections: u32,
+        timeouts: Option<DatabaseConnectionTimeouts>,
+    ) -> Self {
+        Self {
+            purpose: Some(purpose),
+            max_connections,
+            acquire_millis: timeouts.map_or(30_000, |value| value.acquire_millis),
+            timeouts,
+            maintenance: false,
+        }
+    }
+
+    /// 维护档基础 statement_timeout 为零，既有 owner 的局部限界保持有效。
+    pub const fn maintenance(
+        purpose: DatabaseConnectionPurpose,
+        max_connections: u32,
+        acquire_millis: u64,
+    ) -> Self {
+        Self {
+            purpose: Some(purpose),
+            max_connections,
+            acquire_millis,
+            timeouts: None,
+            maintenance: true,
+        }
+    }
+
+    pub(crate) fn pool_options(self) -> sqlx::postgres::PgPoolOptions {
+        let options = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(self.max_connections)
+            .acquire_timeout(Duration::from_millis(self.acquire_millis));
+        if self.purpose.is_none() {
+            return options;
+        }
+        options.after_connect(move |connection, _| Box::pin(self.initialize(connection)))
+    }
+
+    pub(crate) fn connect_options(
+        self,
+        url: &str,
+    ) -> Result<sqlx::postgres::PgConnectOptions, sqlx::Error> {
+        if self.max_connections == 0 || self.acquire_millis == 0 {
+            return Err(sqlx::Error::Configuration(Box::new(InvalidProfile)));
+        }
+        let options = crate::deployment_identity::postgres_connect_options(url)?;
+        Ok(match self.purpose {
+            Some(purpose) => options.application_name(purpose.application_name()),
+            None => options,
+        })
+    }
+
+    /// 直连与池共用初始化；失败会丢弃该连接，不把未完成设置的会话交给 owner。
+    pub(crate) async fn connect(self, url: &str) -> Result<PgConnection, sqlx::Error> {
+        let options = self.connect_options(url)?;
+        let mut connection = PgConnection::connect_with(&options).await?;
+        self.initialize(&mut connection).await?;
+        Ok(connection)
+    }
+
+    async fn initialize(self, connection: &mut PgConnection) -> Result<(), sqlx::Error> {
+        let Some(purpose) = self.purpose else {
+            return Ok(());
+        };
+        // 使用固定 GUC 名与绑定值，一次往返；false 为会话作用域，事务 LOCAL 可临时覆盖。
+        // 关闭服务超时时只设置名称，不以零覆盖服务器原有超时，保护旧继承边界。
+        if let Some(timeouts) = self.timeouts {
+            sqlx::query(
+                "SELECT set_config('application_name', $1, false),
+                        set_config('statement_timeout', $2, false),
+                        set_config('lock_timeout', $3, false),
+                        set_config('idle_in_transaction_session_timeout', $4, false)",
+            )
+            .bind(purpose.application_name())
+            .bind(format!("{}ms", timeouts.statement_millis))
+            .bind(format!("{}ms", timeouts.lock_millis))
+            .bind(format!("{}ms", timeouts.idle_transaction_millis))
+            .execute(connection)
+            .await?;
+        } else if self.maintenance {
+            sqlx::query(
+                "SELECT set_config('application_name', $1, false),
+                        set_config('statement_timeout', '0', false)",
+            )
+            .bind(purpose.application_name())
+            .execute(connection)
+            .await?;
+        } else {
+            sqlx::query("SELECT set_config('application_name', $1, false)")
+                .bind(purpose.application_name())
+                .execute(connection)
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("数据库连接档位无效")]
+struct InvalidProfile;

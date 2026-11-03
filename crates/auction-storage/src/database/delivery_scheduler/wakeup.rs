@@ -3,21 +3,30 @@
 use auction_application::{ApplicationFuture, DeliveryWakeup};
 use sqlx::postgres::PgListener;
 
-struct PostgresDeliveryWakeup(PgListener);
+struct PostgresDeliveryWakeup {
+    listener: PgListener,
+    _guard: Option<auction_observability::DatabaseConnectionGuard>,
+}
 
 pub(super) async fn subscribe(
-    pool: &sqlx::PgPool,
+    pool: &crate::database::TrackedPool<sqlx::Postgres>,
 ) -> Result<Box<dyn DeliveryWakeup>, auction_application::ApplicationError> {
-    let mut listener = PgListener::connect_with(pool).await.map_err(super::map_storage_error)?;
+    let mut listener =
+        PgListener::connect_with(pool.raw()).await.map_err(super::map_storage_error)?;
     listener.listen("auction_delivery_ready").await.map_err(super::map_storage_error)?;
-    Ok(Box::new(PostgresDeliveryWakeup(listener)))
+    Ok(Box::new(PostgresDeliveryWakeup {
+        listener,
+        _guard: pool
+            .recorder()
+            .reserve(auction_observability::DatabaseReservedPurpose::DeliveryListener),
+    }))
 }
 
 impl DeliveryWakeup for PostgresDeliveryWakeup {
     fn wait(&mut self) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             // 断线向上层报告；重建订阅后主动扫描一次，填补重连期间的提示缺口。
-            self.0.try_recv().await.map_err(super::map_storage_error)?;
+            self.listener.try_recv().await.map_err(super::map_storage_error)?;
             Ok(())
         })
     }

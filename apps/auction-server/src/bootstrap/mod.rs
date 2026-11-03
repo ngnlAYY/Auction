@@ -69,7 +69,13 @@ async fn prepare(
         let url = plans[0].config.database_url().context("database configuration is required")?;
         tokio::time::timeout(
             std::time::Duration::from_secs(300),
-            auction_storage::initialize_empty_postgres(url),
+            auction_storage::initialize_empty_postgres(
+                url,
+                database_profile(
+                    &plans[0].config,
+                    auction_storage::DatabaseConnectionPurpose::ServerInitialize,
+                ),
+            ),
         )
         .await
         .context("首次初始化超时；保留配置与数据库现场，普通重启不会重试迁移")?
@@ -79,12 +85,16 @@ async fn prepare(
     use auction_application::ProcessReadinessPort;
     let url = plans[0].config.database_url().context("database configuration is required")?;
     let ready = async {
-        let store = auction_storage::DatabaseStore::connect(url)
-            .await?
-            .with_audit_failure_mode(plans[0].config.readiness.audit_failure_mode)
-            .with_migration_compatibility_mode(
-                plans[0].config.readiness.migration_compatibility_mode,
-            );
+        let store = auction_storage::DatabaseStore::connect(
+            url,
+            database_profile(
+                &plans[0].config,
+                auction_storage::DatabaseConnectionPurpose::ServerPreflight,
+            ),
+        )
+        .await?
+        .with_audit_failure_mode(plans[0].config.readiness.audit_failure_mode)
+        .with_migration_compatibility_mode(plans[0].config.readiness.migration_compatibility_mode);
         let result = store.check().await;
         store.postgres_pool().close().await;
         result.map_err(anyhow::Error::from)
@@ -131,4 +141,19 @@ async fn setup(cli: &Cli, output: &std::path::Path) -> anyhow::Result<()> {
             bail!("first-run outcome unknown; inspect configuration before restarting")
         }
     }
+}
+
+fn database_profile(
+    config: &auction_config::AppConfig,
+    purpose: auction_storage::DatabaseConnectionPurpose,
+) -> auction_storage::DatabaseConnectionProfile {
+    if config.database_profiles.mode == auction_config::DatabaseProfileMode::Legacy {
+        return auction_storage::DatabaseConnectionProfile::legacy();
+    }
+    let maintenance = config.database_profiles.maintenance;
+    auction_storage::DatabaseConnectionProfile::maintenance(
+        purpose,
+        maintenance.max_connections,
+        maintenance.acquire_timeout_millis,
+    )
 }

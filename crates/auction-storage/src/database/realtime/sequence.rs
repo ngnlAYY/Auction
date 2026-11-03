@@ -23,4 +23,10 @@ pub(crate) async fn allocate_stream_sequence(
     .bind(updated_at)
     .fetch_one(connection)
     .await
+    .inspect_err(|error| {
+        crate::database::pool::observe_sql_error(
+            error,
+            auction_observability::DatabaseConflictSite::RealtimeSequence,
+        );
+    })
 }

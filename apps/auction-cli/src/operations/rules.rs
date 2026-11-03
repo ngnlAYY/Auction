@@ -55,7 +55,9 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: RulesCommand) -> anyhow
         .map(|locale| load_source(&directory, locale))
         .collect::<anyhow::Result<Vec<_>>>()?;
 
-    let (config, store) = super::worker_store(config_dir).await?;
+    let (config, store) =
+        super::worker_store(config_dir, auction_storage::DatabaseConnectionPurpose::CliOperations)
+            .await?;
     let result = async {
         let cache = match config.cache.backend {
             CacheBackend::Disabled => CacheStore::disabled(),

@@ -55,7 +55,8 @@ impl LotWatchPmOperations for DatabaseStore {
             let hash = RequestHash::from_request(KIND, command.notification_id, &command)
                 .map_err(|_| LotWatchError::Invalid)?;
             let Self::Postgres(store) = self;
-            store.run(TransactionPolicy::serializable(), |transaction| {
+            store.for_transaction(auction_observability::DatabaseTransactionOwner::PublicWatch)
+    .run(TransactionPolicy::serializable(), |transaction| {
                 let command = command.clone();
                 Box::pin(async move {
                     // 对账只锁队列，不再倒取 lot；此命令没有发送资格。

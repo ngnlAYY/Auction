@@ -8,6 +8,9 @@ use auction_application::{AdminRuntimeMailDeliveryBudget, EquipmentColorRule};
 pub(super) struct FileConfig<Session> {
     /// 必填的公共非敏感 TOML 路径；共享日志、指标、缓存和拍卖策略只从该文件加载。
     pub(super) common_file: PathBuf,
+    /// 可选服务池，默认物理上限 16 且不启用超时。
+    #[serde(default)]
+    pub(super) database_pool: DatabasePoolConfig,
     /// 兼容旧格式的可选监听地址；与 `listener` 同时提供会失败，建议使用完整 listener 区块。
     #[serde(default)]
     pub(super) listen_address: Option<String>,
@@ -84,6 +87,7 @@ pub(super) struct CommonFileConfig {
     /// 进程本地 Prometheus 指标公共默认值；Admin runtime 仍可在重启时覆盖。
     pub(super) metrics: MetricsConfig,
     pub(super) readiness: ReadinessConfig,
+    pub(super) database_profiles: DatabaseProfilesConfig,
     pub(super) cache: CacheConfig,
     /// CLI 专用策略；常驻角色不应用其运维语义。
     pub(super) backup: BackupConfig,
@@ -92,6 +96,7 @@ pub(super) struct CommonFileConfig {
 }
 
 pub(super) struct BuildInput {
+    pub(super) database_pool: DatabasePoolConfig,
     pub(super) config_path: Option<PathBuf>,
     pub(super) common_config_path: Option<PathBuf>,
     pub(super) listen_address: Option<String>,
@@ -99,6 +104,7 @@ pub(super) struct BuildInput {
     pub(super) log_filter: Option<String>,
     pub(super) metrics: MetricsConfig,
     pub(super) readiness: ReadinessConfig,
+    pub(super) database_profiles: DatabaseProfilesConfig,
     pub(super) tracing: TracingSettings,
     pub(super) shutdown: ShutdownFileConfig,
     pub(super) realtime: RealtimeConfig,
@@ -117,6 +123,9 @@ pub(super) struct BuildInput {
 #[derive(Clone)]
 pub struct AppConfig {
     pub role: Role,
+    /// 非敏感数据库分档与本角色服务池；更改须重启。
+    pub database_profiles: DatabaseProfilesConfig,
+    pub database_pool: DatabasePoolConfig,
     /// 解析后的可选监听地址；Worker 通常为 None。
     pub listen_addr: Option<SocketAddr>,
     /// Public/Admin 当前生效的 listener；Worker 始终为 None。Admin runtime 存在时，字段已
@@ -168,6 +177,8 @@ impl fmt::Debug for AppConfig {
         formatter
             .debug_struct("AppConfig")
             .field("role", &self.role)
+            .field("database_profiles", &self.database_profiles)
+            .field("database_pool", &self.database_pool)
             .field("listen_addr", &self.listen_addr)
             .field("listener", &self.listener)
             .field("database_configured", &self.database_url().is_some())

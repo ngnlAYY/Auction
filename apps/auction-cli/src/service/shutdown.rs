@@ -97,7 +97,15 @@ async fn inspect(
     };
     let url =
         worker.database_url().ok_or_else(|| anyhow::anyhow!("停机门禁缺少 Worker 数据库连接"))?;
-    let store = auction_storage::DatabaseStore::connect(url).await.map_err(|error| {
+    let store = auction_storage::DatabaseStore::connect(
+        url,
+        crate::database::profile::resolve(
+            worker,
+            auction_storage::DatabaseConnectionPurpose::CliServiceCheck,
+        ),
+    )
+    .await
+    .map_err(|error| {
         // connect 返回 StorageError；只保留变体分类，不读取连接串或底层驱动错误。
         let kind = match error {
             StorageError::UnsupportedScheme(_) => "unsupported_scheme",

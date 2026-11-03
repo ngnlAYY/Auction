@@ -1,7 +1,8 @@
 //! 七类 Send 的持久起点；仅在 sending fence 同事务消费间隔，准备失败不占用节奏。
 
+use crate::database::TrackedTransaction as Transaction;
 use auction_application::{DeliverySendIntervals, DeliveryWorkClaim};
-use sqlx::{Postgres, Transaction};
+use sqlx::Postgres;
 
 use super::cash::FenceError;
 

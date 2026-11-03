@@ -14,6 +14,7 @@ pub struct PostgresDatabaseBootstrap {
     maintenance_connection: PgConnection,
     database_name: String,
     owner: String,
+    profile: crate::DatabaseConnectionProfile,
 }
 
 impl PostgresDatabaseBootstrap {
@@ -22,13 +23,12 @@ impl PostgresDatabaseBootstrap {
         maintenance_database_url: &str,
         database_name: &str,
         owner: &str,
+        profile: crate::DatabaseConnectionProfile,
     ) -> Result<Self, PostgresDatabaseBootstrapError> {
         sql::validate_database_name(database_name)?;
         sql::validate_owner(owner)?;
-        let options =
-            crate::deployment_identity::postgres_connect_options(maintenance_database_url)
-                .map_err(|_| PostgresDatabaseBootstrapError::MaintenanceConnection)?;
-        let mut maintenance_connection = PgConnection::connect_with(&options)
+        let mut maintenance_connection = profile
+            .connect(maintenance_database_url)
             .await
             .map_err(|_| PostgresDatabaseBootstrapError::MaintenanceConnection)?;
         configure_session(&mut maintenance_connection).await?;
@@ -60,6 +60,7 @@ impl PostgresDatabaseBootstrap {
             maintenance_connection,
             database_name: database_name.to_owned(),
             owner: owner.to_owned(),
+            profile,
         })
     }
 
@@ -85,6 +86,7 @@ impl PostgresDatabaseBootstrap {
                 application_database_url,
                 &self.database_name,
                 &self.owner,
+                self.profile,
             )
             .await?;
             return Ok(PostgresBootstrapResult::AlreadyExists {
@@ -119,8 +121,13 @@ impl PostgresDatabaseBootstrap {
             return Err(PostgresDatabaseBootstrapError::CreatedDatabaseVerification);
         }
 
-        verify_application_connection(application_database_url, &self.database_name, &self.owner)
-            .await?;
+        verify_application_connection(
+            application_database_url,
+            &self.database_name,
+            &self.owner,
+            self.profile,
+        )
+        .await?;
 
         Ok(PostgresBootstrapResult::Created {
             database_name: self.database_name.clone(),
@@ -140,7 +147,6 @@ async fn configure_session(
     connection: &mut PgConnection,
 ) -> Result<(), PostgresDatabaseBootstrapError> {
     for (stage, statement) in [
-        ("application_name", "SET application_name = 'auction-cli/db-create'"),
         ("search_path", "SET search_path = pg_catalog"),
         ("standard_conforming_strings", "SET standard_conforming_strings = on"),
         ("statement_timeout", "SET statement_timeout = '30s'"),
@@ -229,10 +235,10 @@ async fn verify_application_connection(
     application_database_url: &str,
     database_name: &str,
     owner: &str,
+    profile: crate::DatabaseConnectionProfile,
 ) -> Result<(), PostgresDatabaseBootstrapError> {
-    let options = crate::deployment_identity::postgres_connect_options(application_database_url)
-        .map_err(|_| PostgresDatabaseBootstrapError::ApplicationConnection)?;
-    let mut connection = PgConnection::connect_with(&options)
+    let mut connection = profile
+        .connect(application_database_url)
         .await
         .map_err(|_| PostgresDatabaseBootstrapError::ApplicationConnection)?;
     let row = sqlx::query("SELECT current_database()::text, current_user::text")

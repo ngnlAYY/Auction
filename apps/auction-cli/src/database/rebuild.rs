@@ -70,10 +70,13 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     {
         backup.require_supported_schema()?;
     }
-    let mut rebuild =
-        PostgresDatabaseRebuildGuard::connect(secrets.database_url(), options.database)
-            .await
-            .context("重建预检未通过")?;
+    let mut rebuild = PostgresDatabaseRebuildGuard::connect(
+        secrets.database_url(),
+        options.database,
+        super::profile::resolve(&config, auction_storage::DatabaseConnectionPurpose::CliRebuild),
+    )
+    .await
+    .context("重建预检未通过")?;
     let preflight = serde_json::to_value(rebuild.preflight())?;
     let backup_summary = backup.as_ref().map(|backup| {
         json!({
@@ -113,7 +116,7 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
         Ok(result) => {
             receipt["rebuild"] = serde_json::to_value(&result)?;
             if options.mode == RebuildModeArg::FreshSchema {
-                match super::apply_migrations(application_url).await {
+                match super::apply_migrations(&config).await {
                     Ok(report) => {
                         receipt["migration"] = serde_json::to_value(report)?;
                         Ok(())

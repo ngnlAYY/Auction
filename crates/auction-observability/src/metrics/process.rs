@@ -32,6 +32,7 @@ pub struct ProcessMetrics {
     migration_readiness: MigrationReadinessRecorder,
     sent_baseline: Arc<dyn auction_application::SentBaselineObserver>,
     http: HttpRecorder,
+    database: super::DatabaseRecorder,
 }
 
 impl ProcessMetrics {
@@ -146,6 +147,7 @@ impl ProcessMetrics {
         };
         let shutdown = super::shutdown::build(&registry)?;
         let http = HttpRecorder::build(&registry, role)?;
+        let database = super::DatabaseRecorder::build(&registry)?;
         Ok(Self {
             enabled: true,
             registry,
@@ -156,6 +158,7 @@ impl ProcessMetrics {
             sent_baseline,
             shutdown,
             http,
+            database,
         })
     }
 
@@ -171,6 +174,7 @@ impl ProcessMetrics {
             sent_baseline: auction_application::noop_sent_baseline_observer(),
             shutdown: super::shutdown::noop(),
             http: HttpRecorder::default(),
+            database: super::DatabaseRecorder::default(),
         }
     }
 
@@ -226,6 +230,11 @@ impl ProcessMetrics {
     /// 返回 Public/Admin 共用的 HTTP 记录器；关闭指标或其他角色得到 no-op。
     pub fn http(&self) -> HttpRecorder {
         self.http.clone()
+    }
+
+    /// 返回附加数据库观测端口；关闭时不参与业务判定。
+    pub fn database(&self) -> super::DatabaseRecorder {
+        self.database.clone()
     }
 
     /// 注册数据库连接池状态 collector。

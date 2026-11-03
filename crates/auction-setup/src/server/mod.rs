@@ -262,7 +262,17 @@ async fn check_database(
 ) -> Result<(), (StatusCode, Json<SetupErrorResponse>)> {
     let database_url =
         database.connection_url().map_err(|_| error(StatusCode::BAD_REQUEST, "invalid_input"))?;
-    match tokio::time::timeout(Duration::from_secs(8), DatabaseStore::connect(&database_url)).await
+    let maintenance = auction_config::DatabaseProfilesConfig::default().maintenance;
+    let profile = auction_storage::DatabaseConnectionProfile::maintenance(
+        auction_storage::DatabaseConnectionPurpose::SetupCheck,
+        maintenance.max_connections,
+        maintenance.acquire_timeout_millis,
+    );
+    match tokio::time::timeout(
+        Duration::from_secs(8),
+        DatabaseStore::connect(&database_url, profile),
+    )
+    .await
     {
         Ok(Ok(store)) => {
             // 首次空库迁移要求无其他客户端；主动关闭连通性检查池，不遗留后台关闭窗口。

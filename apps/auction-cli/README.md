@@ -411,3 +411,40 @@ set 的绝对 RFC3339 到期与 `--no-expiry` 必须二选一；期限最多六�
 命令返回 `status=database_accepted` 和固定 `accepted`，含义是“数据库已接受”。同 ID 同参重放原结果，即使已经过期或已有新命令也不续期、不覆盖。异参、旧 revision 被拒绝；重新读取后，新的意图使用新 ID。提交结果未知时必须使用原 ID 和全部原参数原样重试，不能换 ID 重发。`--actor` 当前仍是操作者声明，CLI 审计来源在 metadata 中标明 executor/entrypoint；自动 UID/SUDO_USER 追溯尚未接入。
 
 成功退出 0；clap 参数错误退出 2；switch 子命令的配置加载、连接、读取、校验、版本冲突及结果未知均归业务运维命令退出 5。它不使用 service 的退出码 4，也不触发停机。刷新和三角色核对见[运行时开关](../../ops/README.md#运行时开关)。
+
+## 数据库连接用途
+
+CLI 始终显式选择维护用途，读取 Worker 敏感目标不代表使用 Worker 服务档。
+profiled 的池上限默认 4，基础 statement_timeout 为 0；
+建库/重建 30 秒、预检/盘点 5 秒及原证据事务限界保留。
+legacy 使用旧池 16、acquire 30 秒，不显式设置 application_name 或会话参数。
+
+入口与 application_name：
+
+- db status：`auction-cli-status`。
+- db migrate、service start/restart 迁移、fresh-schema 重建后的迁移：
+  `auction-cli-migrate`。
+- db preflight / inventory：`auction-cli-preflight` / `auction-cli-inventory`。
+- backup create / scheduled 的前后 SQL 核对：`auction-cli-backup-check`；
+  外部 pg_dump：`auction-cli-backup`。
+- backup restore 的前后核对及外部 pg_restore：`auction-cli-restore`；
+  预检池先关闭，才执行外部恢复，之后另建核对池。
+- db create / rebuild 的维护库直连：`auction-cli-create` / `auction-cli-rebuild`；
+  建库后置目标库验证复用 create 用途。
+- 凭据、论坛、邮件、资金、结算、规则、PM 和开关运维：`auction-cli-operations`。
+- 停机窗口 inspect：`auction-cli-service-check`。
+- backup verify / pg_restore --list 只读 archive，不连接数据库。
+- 当前没有独立通用 backfill 命令；迁移内回填随 migrate 档执行。
+
+源码同时借出峰值通常为一个池连接；建库为维护库与目标验证直连共 2；
+重建 fresh-schema 为 guard 与迁移连接共 2；备份为 SQL 核对池与 pg_dump 会话重叠。
+funds open-record-only/reconcile 另长期持有邮件与论坛 owner 共 2 个，
+再加一个普通事务，代码借出峰值为 3，默认 4 尚有 1 个余量。
+池内未发现同时借出超过默认 4 的 CLI 路径。
+物理会话保守上限必须另看空闲池：备份/重建可能达到池上限 4 再加独立会话 1，
+该额外会话由 external_reserved_connections 预算覆盖，不能声称总数硬限 4。
+
+`deployment::check`（命令 `config check`）输出 database_budget 表，
+汇总三角色实际上限、长期预留、CLI 并行和外部预留，profiled 超预算失败。
+`config show` 仅增加非敏感配置投影；预算不连接数据库或核实 reserve。
+字段和启用/回退顺序见[配置参考](../../ops/config/README.md#数据库连接分档)。

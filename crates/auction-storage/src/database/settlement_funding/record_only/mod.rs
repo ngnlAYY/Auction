@@ -13,20 +13,26 @@ impl FundingRecordOnlyStore for crate::DatabaseStore {
         &self,
         command: FundingRecordOnlyCommand,
     ) -> FundingFuture<'_, Option<FundingReconciliationResult>> {
-        Box::pin(async move {
-            command.validate()?;
-            let mut tx =
-                self.postgres_pool().begin_with("BEGIN READ ONLY").await.map_err(storage)?;
-            let result = transaction::replay(&mut tx, &command).await?;
-            tx.commit().await.map_err(storage)?;
-            Ok(result)
-        })
+        Box::pin(self.tracked_postgres_pool().observe_transaction(
+            auction_observability::DatabaseTransactionOwner::Funding,
+            async move {
+                command.validate()?;
+                let mut tx = self
+                    .tracked_postgres_pool()
+                    .begin_with("BEGIN READ ONLY")
+                    .await
+                    .map_err(storage)?;
+                let result = transaction::replay(&mut tx, &command).await?;
+                tx.commit().await.map_err(storage)?;
+                Ok(result)
+            },
+        ))
     }
     fn initialize_record_only<'a>(
         &'a self,
         command: &'a FundingRecordOnlyCommand,
         evidence: &'a SettlementInternalEvidenceSnapshot,
     ) -> FundingFuture<'a, FundingCommitOutcome> {
-        Box::pin(transaction::run(self.postgres_pool(), command, evidence))
+        Box::pin(transaction::run(self.tracked_postgres_pool(), command, evidence))
     }
 }

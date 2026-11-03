@@ -5,7 +5,7 @@ pub(super) use crate::database::storage_error;
 
 #[cfg(feature = "postgres")]
 pub(super) async fn rollback_operations_alert(
-    transaction: sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     message: &str,
 ) -> Result<(), ApplicationError> {
     let _ = transaction.rollback().await;

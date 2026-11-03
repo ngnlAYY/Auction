@@ -48,7 +48,7 @@ pub(super) async fn list_lag_postgres(
 /// 有界明细复用调用方快照，避免 dashboard 全量积压与列表观察不同的水位。
 #[cfg(feature = "postgres")]
 pub(super) async fn read_lag_entries_postgres(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     request: &RealtimeLagListRequest,
 ) -> Result<Vec<RealtimeLagSnapshot>, ApplicationError> {
     let rows = sqlx::query(

@@ -1,10 +1,11 @@
 //! 详情读取恢复队列：短事务锁定邮箱租约，GET 前提交摘要；入站提交原子删除完成前缀。
 
+use crate::database::TrackedTransaction as Transaction;
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::{ApplicationError, MailPollClaim, MailPollReadSummary};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Row};
 
 use super::storage_error;
 use crate::database::TrackedPool;

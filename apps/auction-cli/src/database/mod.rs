@@ -10,6 +10,7 @@ use crate::deployment::ConfigDir;
 
 mod create;
 mod evidence;
+pub(crate) mod profile;
 mod rebuild;
 mod target;
 
@@ -21,8 +22,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: DbCommand) -> anyhow::R
         DbCommand::Migrate { maintenance } => {
             let guard = crate::service::acquire_maintenance(config_dir, &maintenance).await?;
             let config = config_dir.load_worker()?;
-            let url = config.database_url().context("Worker 配置缺少数据库连接")?;
-            let report = apply_migrations(url).await?;
+            let report = apply_migrations(&config).await?;
             print_json(&serde_json::json!({ "guard": guard.mode, "migration": report }))
         }
         DbCommand::Create { database, maintenance_secrets, maintenance } => {
@@ -63,8 +63,14 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: DbCommand) -> anyhow::R
 }
 
 /// 连接应用数据库；调用方负责在结束前关闭连接池。
-pub(crate) async fn connect(url: &str) -> anyhow::Result<DatabaseStore> {
-    DatabaseStore::connect(url).await.context("连接 PostgreSQL 失败")
+pub(crate) async fn connect(
+    config: &auction_config::AppConfig,
+    purpose: auction_storage::DatabaseConnectionPurpose,
+) -> anyhow::Result<DatabaseStore> {
+    let url = config.database_url().context("Worker 配置缺少数据库连接")?;
+    DatabaseStore::connect(url, profile::resolve(config, purpose))
+        .await
+        .context("连接 PostgreSQL 失败")
 }
 
 /// 只读读取目标身份与迁移状态；history 不是完整成功前缀时失败。
@@ -86,9 +92,12 @@ pub(crate) struct MigrationReport {
 }
 
 /// 在 SQLx 迁移锁内执行全部待执行迁移；空库会建立完整 schema，未知非空库被拒绝。
-pub(crate) async fn apply_migrations(url: &str) -> anyhow::Result<MigrationReport> {
+pub(crate) async fn apply_migrations(
+    config: &auction_config::AppConfig,
+) -> anyhow::Result<MigrationReport> {
+    let url = config.database_url().context("Worker 配置缺少数据库连接")?;
     let target = DatabaseTarget::parse(url)?;
-    let store = connect(url).await?;
+    let store = connect(config, auction_storage::DatabaseConnectionPurpose::CliMigrate).await?;
     let result = async {
         let before = latest_version(&preflight(&store, &target.database).await?);
         progress(format_args!("迁移 {}：当前版本 {before}", target.database));
@@ -115,7 +124,7 @@ async fn status(config_dir: &ConfigDir) -> anyhow::Result<()> {
     let config = config_dir.load_worker()?;
     let url = config.database_url().context("Worker 配置缺少数据库连接")?;
     let target = DatabaseTarget::parse(url)?;
-    let store = connect(url).await?;
+    let store = connect(&config, auction_storage::DatabaseConnectionPurpose::CliStatus).await?;
     let result = preflight(&store, &target.database).await;
     store.postgres_pool().close().await;
     let preflight = result?;

@@ -9,7 +9,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 pub(super) async fn reclaim_batch(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     row: &sqlx::postgres::PgRow,
     request: &OperationsAlertClaimRequest,
 ) -> Result<Option<OperationsAlertBatchClaim>, ApplicationError> {

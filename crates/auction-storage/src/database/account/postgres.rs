@@ -216,7 +216,7 @@ pub(super) async fn proxy_postgres(
 
 #[cfg(feature = "postgres")]
 async fn load_postgres_transitions(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     authorization_ids: &[Uuid],
 ) -> Result<HashMap<Uuid, Vec<PublicProxyTransition>>, ApplicationError> {
     let mut histories = HashMap::<Uuid, Vec<PublicProxyTransition>>::new();
@@ -257,7 +257,7 @@ async fn load_postgres_transitions(
 
 #[cfg(feature = "postgres")]
 async fn load_postgres_proxy_bids(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     authorization_ids: &[Uuid],
 ) -> Result<HashMap<Uuid, PublicProxyBid>, ApplicationError> {
     let mut bids = HashMap::new();

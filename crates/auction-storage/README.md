@@ -15,7 +15,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 
 | 入口 | 用途 |
 | --- | --- |
-| `DatabaseStore::connect(url)` | 建立连接池（16 连接，带获取追踪与 Prometheus 指标源）；`DatabaseStore` 为大部分端口实现者 |
+| `DatabaseStore::connect(url, profile)` | 显式连接用途与池策略，附带观测 |
 | `DatabaseStore::migrate()` | 在 SQLx 迁移锁内执行内嵌迁移；空库或合法历史才允许，未知非空库拒绝 |
 | `ProcessReadinessPort` | readiness：按迁移模式核对已知历史及兼容后缀，再按审计模式通过门禁，见[迁移就绪](#迁移就绪)与[审计失败与就绪](#审计失败与就绪) |
 | `Database*Commands` | 竞价、生命周期、结算、Admin 拍卖/录入/lot/邮件/规则/runtime/世界等命令组合器 |
@@ -249,3 +249,23 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 ## 运行时开关存储
 
 `database/runtime_switches` 实现最新事实查询和 Read Committed 命令事务，锁序为 command advisory → switch advisory → 最新 revision CAS，事实兼账本、结果与追加审计同事务提交。未知名称在解码之前忽略，已知损坏拒绝刷新；SQL 错误不回显驱动原文。审计指标源、心跳和探针共享 `RuntimeSwitches`，累计分类不重置。数据模型与 compatible 076 见[数据库契约](../../docs/contracts/database.md#运行时行为开关)。
+
+## 连接与观测边界
+
+`profiles::DatabaseConnectionProfile` 由装配根传入，不在存储层读配置。
+默认 profiled：服务池默认 16，维护池默认 4；服务超时默认关闭。
+legacy 完整保留 16/30 秒及会话继承，指标与模式无关。
+名称来自 `DatabaseConnectionPurpose`，池与直连共用会话初始化。
+字段、启用条件与重启回退由[配置参考](../../ops/config/README.md#数据库连接分档)拥有。
+
+`pool::TrackedConnection` 与 `TrackedTransaction` 持有 RAII 观测守卫，
+覆盖 Executor、显式获取、事务和取消；不依赖 after_release。
+raw_pool 仅供原生迁移、LISTEN 与外部关闭边界；资金普通访问也走 TrackedPool。
+所有权连接继续 close_on_drop，指标不能替代 session lock 或重建原会话。
+
+`backend::is_serialization_conflict` 保持纯谓词；
+`observed_serialization_conflict` 在映射前附加窄元数据，返回相同判断。
+`retry_conflicts` 与独立 runner 保留全部原重试次数、等待和返回值。
+耗尽由 owner 原终止分支记录，不能用最后是否返回 Err 推测。
+指标定义见[数据库观测](../auction-observability/README.md#数据库事务与连接观测)。
+保护不变量 2、5、6、9：原事务、持久状态、失败关闭和缓存边界保持。

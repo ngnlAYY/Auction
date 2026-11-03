@@ -7,7 +7,9 @@ use auction_application::{
 use serde_json::json;
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: SwitchCommand) -> anyhow::Result<()> {
-    let (_, store) = super::worker_store(config_dir).await?;
+    let (_, store) =
+        super::worker_store(config_dir, auction_storage::DatabaseConnectionPurpose::CliOperations)
+            .await?;
     let result = async {
         let (name, value, operation, expires_at, write) = match command {
             SwitchCommand::List => {

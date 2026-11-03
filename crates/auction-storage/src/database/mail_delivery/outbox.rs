@@ -32,27 +32,35 @@ async fn insert_postgres(
     command: &MailDeliveryCommand,
     prepared_status: Option<&str>,
 ) -> Result<MailDeliveryResult, RepositoryError> {
-    // 入站录入在 Serializable 快照内读取相反意图，处置事务也必须参与 SSI：
-    // 单独 SELECT FOR UPDATE 无法刷新等待方已建快照。40001 由邮件有界重试重跑整次事务。
-    let begin = if command.origin == MailDeliveryOrigin::MailIntake
-        && command.operation != MailDeliveryOperation::Send
-    {
-        pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+    let owner = if command.origin == MailDeliveryOrigin::MailIntake {
+        auction_observability::DatabaseTransactionOwner::MailIntake
     } else {
-        pool.begin()
+        auction_observability::DatabaseTransactionOwner::DeliveryOutcome
     };
-    let mut transaction = begin.await.map_err(map_storage_error)?;
-    let result = enqueue_in_transaction(&mut transaction, command, prepared_status)
-        .await
-        .map_err(MailDeliveryTransactionError::into_repository)?;
-    transaction.commit().await.map_err(map_storage_error)?;
-    Ok(result)
+    pool.observe_transaction(owner, async {
+        // 入站录入在 Serializable 快照内读取相反意图，处置事务也必须参与 SSI：
+        // 单独 SELECT FOR UPDATE 无法刷新等待方已建快照。40001 由邮件有界重试重跑整次事务。
+        let begin = if command.origin == MailDeliveryOrigin::MailIntake
+            && command.operation != MailDeliveryOperation::Send
+        {
+            pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        } else {
+            pool.begin()
+        };
+        let mut transaction = begin.await.map_err(map_storage_error)?;
+        let result = enqueue_in_transaction(&mut transaction, command, prepared_status)
+            .await
+            .map_err(MailDeliveryTransactionError::into_repository)?;
+        transaction.commit().await.map_err(map_storage_error)?;
+        Ok(result)
+    })
+    .await
 }
 
 /// 由调用方持有权威业务事务；delivery SQL 与审计仍只有本 owner 写入。
 /// SQLx 错误保留到调用方的事务边界，避免提前脱敏吞掉序列化冲突或死锁分类。
 pub(crate) async fn enqueue_in_transaction(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command: &MailDeliveryCommand,
     prepared_status: Option<&str>,
 ) -> Result<MailDeliveryResult, MailDeliveryTransactionError> {

@@ -12,11 +12,10 @@ pub struct FirstDatabaseInitializationError;
 /// 普通启动不会再次调用此入口；恢复或升级需要显式运维授权。
 pub async fn initialize_empty_postgres(
     database_url: &str,
+    profile: crate::DatabaseConnectionProfile,
 ) -> Result<(), FirstDatabaseInitializationError> {
-    let options = crate::deployment_identity::postgres_connect_options(database_url)
-        .map_err(|_| FirstDatabaseInitializationError)?;
     let mut connection =
-        PgConnection::connect_with(&options).await.map_err(|_| FirstDatabaseInitializationError)?;
+        profile.connect(database_url).await.map_err(|_| FirstDatabaseInitializationError)?;
     let result = initialize(&mut connection).await;
     // 关闭专用连接同时释放 session 迁移锁，不把持锁连接放回池。
     let closed = connection.close().await;

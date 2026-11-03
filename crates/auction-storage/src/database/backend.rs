@@ -56,6 +56,7 @@ pub(crate) fn storage_error_from(
 /// SQL 错误的安全投影；只读取 SQLSTATE、约束名和表名，缺失或异常字段均用固定值。
 #[cfg(feature = "postgres")]
 pub(crate) fn sql_error_context(error: &sqlx::Error, context: &'static str) -> String {
+    super::pool::observe_sql_error(error, auction_observability::DatabaseConflictSite::Other);
     let sqlx_kind = sql_error_kind(error);
     let Some(database) = error.as_database_error() else {
         return format!(
@@ -146,6 +147,8 @@ pub(crate) const SERIALIZABLE_ATTEMPTS: usize = 3;
 /// 结果未知的提交也不能被判定为可重试。
 #[cfg(feature = "postgres")]
 pub(crate) async fn retry_conflicts<T, E, F>(
+    pool: &super::TrackedPool<sqlx::Postgres>,
+    owner: auction_observability::DatabaseTransactionOwner,
     attempts: usize,
     retryable: impl Fn(&E) -> bool,
     mut operation: impl FnMut() -> F,
@@ -153,13 +156,22 @@ pub(crate) async fn retry_conflicts<T, E, F>(
 where
     F: std::future::Future<Output = Result<T, E>>,
 {
-    let mut attempt = 1;
-    loop {
-        match operation().await {
-            Err(error) if attempt < attempts && retryable(&error) => attempt += 1,
-            result => return result,
+    pool.observe_transaction(owner, async {
+        let mut attempt = 1;
+        loop {
+            match operation().await {
+                Err(error) if attempt < attempts && retryable(&error) => attempt += 1,
+                result => {
+                    if attempt >= attempts && attempts > 1 && result.as_ref().is_err_and(&retryable)
+                    {
+                        auction_observability::database_transaction_exhausted();
+                    }
+                    return result;
+                }
+            }
         }
-    }
+    })
+    .await
 }
 
 /// 以命令 ID 取事务级 advisory 锁，串行化同一幂等身份的并发入口；锁随事务结束释放。
@@ -280,4 +292,25 @@ pub enum StorageError {
 
     #[error("refusing to migrate an unknown non-empty {backend} database")]
     UnknownDatabase { backend: DatabaseBackend },
+}
+
+/// 映射前保存冲突种类；统计在尝试结束时去重，纯冲突谓词不承担计数副作用。
+#[cfg(feature = "postgres")]
+pub(crate) fn observe_transaction_error(error: &sqlx::Error) {
+    super::pool::observe_sql_error(error, auction_observability::DatabaseConflictSite::Other);
+}
+
+/// 映射前附加元数据后调用纯冲突谓词；不改变旧白名单或布尔结果。
+#[cfg(feature = "postgres")]
+pub(crate) fn observed_serialization_conflict(error: &sqlx::Error) -> bool {
+    observe_transaction_error(error);
+    is_serialization_conflict(error)
+}
+
+/// 只有原 owner 的终止分支确认用尽多次尝试预算时，才记录耗尽。
+#[cfg(feature = "postgres")]
+pub(crate) fn observe_retry_exhaustion(attempt: usize, attempts: usize, retryable: bool) {
+    if attempts > 1 && attempt >= attempts && retryable {
+        auction_observability::database_transaction_exhausted();
+    }
 }

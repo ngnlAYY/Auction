@@ -10,9 +10,13 @@ pub(in crate::database::recovery_commands) async fn confirm_postgres(
 ) -> Result<RecoveryConfirmationResult, RecoveryCommandError> {
     // 旧版在 Serializable runner 外生成事件 ID；同一次请求的三次事务尝试必须复用它。
     let preview_event_id = Uuid::new_v4();
-    crate::database::retry_conflicts(crate::database::SERIALIZABLE_ATTEMPTS, is_conflict, || {
-        confirm_postgres_once(pool, command.clone(), preview_event_id)
-    })
+    crate::database::retry_conflicts(
+        pool,
+        auction_observability::DatabaseTransactionOwner::Recovery,
+        crate::database::SERIALIZABLE_ATTEMPTS,
+        is_conflict,
+        || confirm_postgres_once(pool, command.clone(), preview_event_id),
+    )
     .await
 }
 

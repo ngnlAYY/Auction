@@ -1,5 +1,6 @@
 //! Admin 邮件查询与命令的 PostgreSQL 端口装配。
 
+use crate::database::TrackedTransaction as Transaction;
 use auction_application::{
     AdminMailDashboardSnapshot, AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter,
     AdminMailIntakePage, AdminMailPollState, AdminMailPollStateRequest, AdminMailReader,
@@ -22,7 +23,7 @@ use serde_json::Value;
 #[cfg(feature = "postgres")]
 use sqlx::Row;
 #[cfg(feature = "postgres")]
-use sqlx::{Postgres, Transaction, types::Json};
+use sqlx::{Postgres, types::Json};
 #[cfg(feature = "postgres")]
 use std::future::Future;
 use uuid::Uuid;

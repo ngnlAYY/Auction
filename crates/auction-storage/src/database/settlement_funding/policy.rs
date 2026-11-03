@@ -17,7 +17,7 @@ impl FundingPolicyReader for crate::DatabaseStore {
     fn funding_policy(&self) -> FundingFuture<'_, FundingPolicy> {
         Box::pin(async move {
             let rows=sqlx::query("SELECT uid,accounting_mode,policy_version FROM public.settlement_funding_accounts WHERE accounting_mode='record_only' OR status IN ('ready','frozen') ORDER BY uid")
-                .fetch_all(self.postgres_pool()).await.map_err(storage)?;
+                .fetch_all(self.tracked_postgres_pool()).await.map_err(storage)?;
             let records: Vec<_> = rows
                 .iter()
                 .filter(|row| {

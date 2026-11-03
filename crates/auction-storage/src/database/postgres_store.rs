@@ -6,7 +6,8 @@ use super::*;
 #[cfg(feature = "postgres")]
 #[derive(Debug, Clone)]
 pub struct PostgresStore {
-    pool: TrackedPool<Postgres>,
+    pub(super) pool: TrackedPool<Postgres>,
+    pub(crate) transaction_owner: auction_observability::DatabaseTransactionOwner,
     pub(crate) delivery_send_intervals: auction_application::DeliverySendIntervals,
     pub(crate) runtime_switches: auction_application::RuntimeSwitches,
     pub(crate) migration_compatibility_mode: auction_application::MigrationCompatibilityMode,
@@ -15,12 +16,16 @@ pub struct PostgresStore {
 
 #[cfg(feature = "postgres")]
 impl PostgresStore {
-    pub async fn connect(database_url: &str) -> Result<Self, sqlx::Error> {
-        let options = crate::deployment_identity::postgres_connect_options(database_url)?;
-        let pool = PgPoolOptions::new().max_connections(16).connect_with(options).await?;
+    pub async fn connect(
+        database_url: &str,
+        profile: DatabaseConnectionProfile,
+    ) -> Result<Self, sqlx::Error> {
+        let options = profile.connect_options(database_url)?;
+        let pool = profile.pool_options().connect_with(options).await?;
 
         Ok(Self {
             pool: TrackedPool::new(pool),
+            transaction_owner: auction_observability::DatabaseTransactionOwner::Admin,
             delivery_send_intervals: auction_application::DeliverySendIntervals::default(),
             runtime_switches: auction_application::RuntimeSwitches::default(),
             migration_compatibility_mode: auction_application::MigrationCompatibilityMode::default(
@@ -28,6 +33,13 @@ impl PostgresStore {
             migration_readiness_recorder:
                 auction_observability::MigrationReadinessRecorder::default(),
         })
+    }
+
+    /// 为共享池的命令绑定闭集观测 owner，不修改业务策略或其他 store clone。
+    pub fn for_transaction(&self, owner: auction_observability::DatabaseTransactionOwner) -> Self {
+        let mut store = self.clone();
+        store.transaction_owner = owner;
+        store
     }
 
     pub(crate) fn pool(&self) -> &TrackedPool<Postgres> {

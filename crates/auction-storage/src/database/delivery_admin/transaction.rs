@@ -1,9 +1,10 @@
 //! Delivery Admin PostgreSQL SERIALIZABLE 事务边界与错误分类。
 
+use crate::database::TrackedTransaction as Transaction;
 use std::time::Duration;
 
 use auction_application::DeliveryAdminError;
-use sqlx::{PgConnection, Postgres, Transaction};
+use sqlx::{PgConnection, Postgres};
 
 use crate::database::TrackedPool;
 
@@ -32,7 +33,7 @@ impl DeliveryAdminTransactionError {
         let Self::Sqlx(error) = self else {
             return false;
         };
-        crate::database::is_serialization_conflict(error)
+        crate::database::observed_serialization_conflict(error)
     }
 
     /// 在离开存储层时只暴露稳定的 Delivery Admin 错误分类。

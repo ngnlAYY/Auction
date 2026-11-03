@@ -13,6 +13,9 @@ pub(super) async fn claim_postgres(
     exclusions: &DeliveryClaimExclusions,
     limit: u16,
 ) -> Result<Vec<DeliveryWorkClaim>, auction_application::RepositoryError> {
+    store.pool().observe_transaction(
+        auction_observability::DatabaseTransactionOwner::DeliveryClaim,
+        async {
     let pool = store.pool();
     let intervals = serde_json::to_value(store.delivery_send_intervals)
         .map_err(|_| repository_error_owned("delivery 发送间隔无法序列化"))?;
@@ -205,6 +208,9 @@ pub(super) async fn claim_postgres(
     }
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(claims)
+
+        },
+    ).await
 }
 
 #[cfg(feature = "postgres")]

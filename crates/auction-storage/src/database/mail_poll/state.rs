@@ -114,7 +114,7 @@ pub(crate) async fn renew(
 
 /// 先取得邮箱行锁，后续写入再检查数据库实时时钟，不能用等待锁前的时间复活或完成过期租约。
 pub(super) async fn lock_mailbox(
-    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     mailbox_key: &str,
 ) -> Result<(), ApplicationError> {
     sqlx::query("SELECT mailbox_key FROM public.mail_poll_state WHERE mailbox_key = $1 FOR UPDATE")

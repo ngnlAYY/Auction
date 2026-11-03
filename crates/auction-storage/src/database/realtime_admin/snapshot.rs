@@ -49,7 +49,7 @@ pub(super) async fn dashboard_snapshot_postgres(
 
 #[cfg(feature = "postgres")]
 async fn total_lag_postgres(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<i64, ApplicationError> {
     // SUM(bigint) 使用 numeric 累加，再严格转换为 i64；溢出或任一水位倒退均失败关闭。
     let row = sqlx::query(
@@ -75,7 +75,7 @@ async fn total_lag_postgres(
 
 #[cfg(feature = "postgres")]
 async fn failure_water_postgres(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<RealtimeFailureWater, ApplicationError> {
     let row = sqlx::query(
         "SELECT COUNT(*) AS count,

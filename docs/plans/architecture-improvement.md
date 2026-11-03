@@ -175,7 +175,7 @@
 | D2 | 已提交 | `b2ccb9fd` | 未部署 | W1.0；线上已部署 `92259475`，未包含修复 |
 | D3 | 已提交 | `fa46d605` | 未部署 | W0.12 估计 6–9 周触及 100 页上限；决策 74 提前交付 W1.4 发送基线；默认 `shadow`，须在触顶前观察并由用户切换 `watermark` |
 | D4 | 已决定 | — | — | 决策 14；W1.3、W1.7 随 M2b |
-| D5 | 待量化 | — | — | W0.6 量化后决定是否提前交付 W12.1 |
+| D5 | 待量化 | 量化指标随本提交 | 未部署 | W0.6 的 `auction_db_transaction_*{owner,phase}` 部署并经 W0.10 采集后，以 Final 阶段 `bid`/`proxy`/`slow_proxy` 的耗尽次数决定是否提前交付 W12.1 |
 | D6 | 已决定 | 说明 `6cc3769f` | 未部署 | 决策 15；`docs/guide` 玩家说明已提交（Claude 依代码核实：回帖无发帖时间，`PlaceBidCommand` 按导入时服务端时钟判定），Admin 五语言规则文档由用户发布；W0.12 显示主题最多约 27 楼，远低于页数上限，W1.11 不提前 |
 | D7 | 已提交 | `4ba5abe3` | 未部署 | 决策 32、71、72；W0.14 默认影子模式，切换 `classified` 后生效 |
 | D8 | 已提交 | `4ba5abe3` | 未部署 | 决策 33；W7.11 |
@@ -193,7 +193,8 @@
 | W0.2 | 进行中 | I-A `46eb1c43` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 I）实现、Claude 监督；I-A 覆盖 jobs/application 152 个错误丢弃位点，`auction::diagnostics` 安全记录（52 个 kind、301 对 kind/phase，清单见 `ops/README.md`），持久化 defer reason/失败码不变（用户决定）；I-B（integrations + HTTP）待做 |
 | W0.3 | 已提交 | `46eb1c43` | 未部署 | 同上；`auction_worker_unpersisted_error_total{loop,kind}`，口径为未确认形成持久失败、退避或人工处置（提交结果未知计入），先于日志去重累加；PM 暂归 `forum` loop |
 | W0.10 | 已提交 | `421ee64c` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；`common.toml [metrics]` 三角色可选 loopback 出口（只允许 `127.0.0.1`，示例 19100/19101/19102，省略即关闭），复用 W0.9 `/metrics` 契约，出口故障只降级采集；`ops/monitoring/` 提供 Prometheus、exporter 查询与 unit 示例；待用户按 `ops/README.md` 安装 Prometheus、node_exporter、postgres_exporter 并启用出口后验收；W0.13 随后续批次 |
-| W13.3a | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 N）实现、Claude 监督；release 开启 `overflow-checks`（`wasm-release` 继承，保留 abort），原生装配根与 CLI 安装安全 panic hook（target `auction::panic`，只输出线程、位置与 `&'static str` payload），顶层 JoinError 固定分类；Worker 已有子任务收口新增 `auction_worker_task_panics_total{loop}`，处置与计数不变；逐 owner panic 计次拆为 W13.3b 待用户决定 |
+| W13.3a | 已提交 | `7a532130` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 N）实现、Claude 监督；release 开启 `overflow-checks`（`wasm-release` 继承，保留 abort），原生装配根与 CLI 安装安全 panic hook（target `auction::panic`，只输出线程、位置与 `&'static str` payload），顶层 JoinError 固定分类；Worker 已有子任务收口新增 `auction_worker_task_panics_total{loop}`，处置与计数不变；逐 owner panic 计次拆为 W13.3b 待用户决定 |
+| W0.6 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 K）实现、Claude 监督；`[database_profiles] mode` 默认 `profiled`（`legacy` 为旧路径），服务池 16、维护池 4、固定 `application_name`，`deployment check` 汇总连接预算；服务超时默认关闭，启用须显式填写阈值且以 W0.14 切换 `classified` 为前置（见待决定）；21 个事务 owner 的尝试/冲突/重试/耗尽指标，Worker 循环连接获取与持有指标；切换需重启 |
 | W0.8 | 已提交 | `e78dac4f` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 D）实现、Claude 监督；`storage_error_from`/`sql_error_context` 附加 sqlx 变体、SQLSTATE、约束名、表名；1100 处直接 SQLx 闭包与 13 个具名 mapper 一次改完，`storage:map_err(\|_\|)` 1432 → 330；其余 330 处另定范围 |
 | W7.11 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
 | W7.8a | 已提交 | `3f0a2097` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 F）实现、Claude 监督；迁移 075 建只追加兼容登记表（001–074 缺行即 breaking，075 自身 breaking），`check.sh migration-compatibility` 检查每个新迁移恰好登记一次；`[readiness] migration_compatibility_mode` 默认 `shadow`，回退旧程序前须设为 `compatible`；本版含 breaking 迁移，部署后才能为之后的版本提供回退能力 |

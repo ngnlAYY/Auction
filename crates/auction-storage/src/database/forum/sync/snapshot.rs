@@ -90,7 +90,7 @@ pub(super) async fn load_current_snapshot_postgres(
 }
 
 async fn read_snapshot(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     requested_auction_id: AuctionId,
 ) -> Result<ForumAuctionSnapshot, ApplicationError> {
     use sqlx::Row;

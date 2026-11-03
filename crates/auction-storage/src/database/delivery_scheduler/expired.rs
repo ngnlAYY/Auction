@@ -23,6 +23,8 @@ pub(super) async fn reconcile(
     .map_err(mapping::map_storage_error)?;
     for id in candidates {
         crate::database::retry_conflicts(
+            pool,
+            auction_observability::DatabaseTransactionOwner::DeliveryOutcome,
             crate::database::SERIALIZABLE_ATTEMPTS,
             OutcomeError::retryable,
             || expire_one(pool, id, now, grace_micros),

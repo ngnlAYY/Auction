@@ -1,10 +1,11 @@
 //! readiness 专用迁移兼容判定；恢复、盘点和迁移执行继续使用完整历史的严格校验。
 
+use crate::database::TrackedTransaction as Transaction;
 use std::time::Duration;
 
 use auction_application::{ApplicationError, MigrationCompatibilityMode};
 use auction_observability::MigrationReadinessBranch;
-use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
+use sqlx::{Postgres, Row, postgres::PgRow};
 
 use crate::database::{
     PostgresStore, postgres_expected_migration_version, set_read_only_limits, storage_error,

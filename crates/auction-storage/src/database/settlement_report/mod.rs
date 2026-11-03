@@ -40,6 +40,8 @@ async fn postgres_report(
     auction_id: AuctionId,
 ) -> Result<Option<SettlementReport>, ApplicationError> {
     crate::database::retry_conflicts(
+        store.pool(),
+        auction_observability::DatabaseTransactionOwner::Settlement,
         crate::database::SERIALIZABLE_ATTEMPTS,
         PostgresReportError::retryable,
         || postgres_report_once(store, auction_id),
@@ -61,7 +63,8 @@ impl PostgresReportError {
     }
 
     fn retryable(&self) -> bool {
-        matches!(self, Self::Database { source, .. } if crate::database::is_serialization_conflict(source))
+        matches!(self, Self::Database { source, .. }
+            if crate::database::observed_serialization_conflict(source))
     }
 
     fn into_application(self) -> ApplicationError {

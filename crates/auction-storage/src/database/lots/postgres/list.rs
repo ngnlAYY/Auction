@@ -51,7 +51,7 @@ pub(in crate::database::lots) async fn list_postgres(
 
 #[cfg(feature = "postgres")]
 async fn list_postgres_transaction(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     auction_id: Uuid,
     request: PublicLotListRequest,
     colors: &[EquipmentColorRule],
@@ -123,7 +123,7 @@ async fn list_postgres_transaction(
 
 #[cfg(feature = "postgres")]
 async fn postgres_list_projection(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     auction_id: Uuid,
 ) -> Result<Option<PublicAuctionProjection>, ApplicationError> {
     let row = sqlx::query(concat!(
@@ -150,7 +150,7 @@ async fn postgres_list_projection(
 
 #[cfg(feature = "postgres")]
 async fn postgres_category_counts(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     auction_id: Uuid,
     projection: &PublicAuctionProjection,
 ) -> Result<BTreeMap<String, i64>, ApplicationError> {

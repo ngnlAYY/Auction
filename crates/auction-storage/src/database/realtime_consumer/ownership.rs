@@ -13,7 +13,7 @@ pub struct RealtimeConsumerOwnership {
 
 pub(super) enum OwnedRealtimeBackend {
     #[cfg(feature = "postgres")]
-    Postgres(futures_util::lock::Mutex<sqlx::pool::PoolConnection<sqlx::Postgres>>),
+    Postgres(futures_util::lock::Mutex<crate::database::TrackedConnection<sqlx::Postgres>>),
 }
 
 /// realtime consumer key 互斥获取失败。
@@ -40,8 +40,10 @@ impl DatabaseStore {
             #[cfg(feature = "postgres")]
             DatabaseStore::Postgres(store) => {
                 let mut connection = store
-                    .raw_pool()
-                    .acquire()
+                    .pool()
+                    .acquire_reserved(
+                        auction_observability::DatabaseReservedPurpose::RealtimeOwnership,
+                    )
                     .await
                     .map_err(|_| RealtimeConsumerOwnershipError::Unavailable)?;
                 // 在锁查询前设置：响应到达前取消也必须关闭 session，不能把已持锁连接归池。

@@ -167,3 +167,28 @@ payment_timeout_seconds = 604800
 reminder_limit = 1
 # 可选：同一笔 COD 允许的退回次数，范围 1-10，默认 3；达到上限后装备退回卖家并拉黑买家。
 cod_return_limit = 3
+
+# 可选区块：连接分档；以下修改均需重启，受停机门禁约束。
+[database_profiles]
+# 可选：默认 profiled；legacy 完整恢复旧连接参数，修改需重启。
+mode = "profiled"
+
+# 可选区块：CLI 维护池；不套用服务短超时，保留 owner 局部限界。
+[database_profiles.maintenance]
+# 可选：物理上限默认 4；独立 guard、libpq 会话另计，修改需重启。
+max_connections = 4
+# 可选：获取池连接时限，默认 30000ms，范围 1-120000，修改需重启。
+acquire_timeout_millis = 30000
+
+# 可选区块：部署规划声明；工具不连接数据库验证 reserve。
+[database_profiles.budget]
+# 可选：声明 PostgreSQL 连接总上限，默认 100；修改需重启。
+max_connections = 100
+# 可选：声明 superuser 预留，默认 3，待用户核实线上；修改需重启。
+superuser_reserved_connections = 3
+# 可选：声明其他预留，默认 0，待用户核实线上；修改需重启。
+reserved_connections = 0
+# 可选：预算并行 CLI 数，默认 2；不强制调度，修改需重启。
+max_concurrent_cli = 2
+# 可选：专用直连、备份、exporter、人工预留默认 8；修改需重启。
+external_reserved_connections = 8

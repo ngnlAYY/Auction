@@ -3,7 +3,7 @@ use super::*;
 
 #[cfg(feature = "postgres")]
 pub(super) async fn insert_recovery_action(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     spec: RecoveryActionInsert<'_>,
 ) -> Result<(), auction_application::RepositoryError> {
     let action_id = deterministic_uuid(

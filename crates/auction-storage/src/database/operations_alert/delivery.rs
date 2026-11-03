@@ -11,7 +11,7 @@ use crate::database::delivery_audit::{DeliveryAudit, FAIL, append as append_deli
 
 /// 终结可证明从未激活的告警投递；保持零发送尝试和空执行时间，并原子追加失败审计。
 pub(super) async fn terminalize_prepared_delivery(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     delivery_id: uuid::Uuid,
     now: chrono::DateTime<chrono::Utc>,
     failure_code: &str,
@@ -255,7 +255,7 @@ pub(super) async fn mark_claim_failed_postgres(
 
 /// batch → delivery → signal 锁序不变；持锁后检查实时时钟，避免排队跨过 claim 截止。
 async fn lock_batch(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     batch_id: uuid::Uuid,
 ) -> Result<(), ApplicationError> {
     sqlx::query("SELECT id FROM public.operations_alert_batches WHERE id = $1 FOR UPDATE")

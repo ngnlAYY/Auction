@@ -76,7 +76,12 @@ impl Drop for Passfile {
 
 impl Libpq {
     /// 只接受与 SQLx 共有且外部工具语义一致的参数；未知参数可能是错放的凭据，拒绝且不回显。
-    pub(super) fn from_url(url: &str, database: &str) -> anyhow::Result<Self> {
+    pub(super) fn from_url(
+        url: &str,
+        database: &str,
+        mode: auction_config::DatabaseProfileMode,
+        purpose: auction_storage::DatabaseConnectionPurpose,
+    ) -> anyhow::Result<Self> {
         let invalid = || anyhow::anyhow!("数据库连接参数不适用于备份/恢复工具");
         let parsed = url::Url::parse(url).map_err(|_| invalid())?;
         if parsed.fragment().is_some() {
@@ -94,8 +99,11 @@ impl Libpq {
             ("PGPORT", options.get_port().to_string()),
             ("PGCONNECT_TIMEOUT", "10".to_owned()),
             ("PGCLIENTENCODING", "UTF8".to_owned()),
-            ("PGAPPNAME", "auction-cli".to_owned()),
         ];
+        if mode == auction_config::DatabaseProfileMode::Profiled {
+            variables.push(("PGAPPNAME", purpose.application_name().to_owned()));
+            variables.push(("PGOPTIONS", "-c statement_timeout=0".to_owned()));
+        }
         let mut password = parsed.password().map(decode_component).transpose()?;
         for (key, value) in parsed.query_pairs() {
             match key.as_ref() {

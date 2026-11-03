@@ -46,3 +46,11 @@ auction-server --config-dir /var/lib/auction/config
 合并部署同样使用 `auction-cli`，但 `service` 子命令只适用于分体部署。数据库迁移、建库、恢复与重建必须先停止 `auction-server`，再以同一服务账号执行（`auction-cli` 通过 `owner.lock` 取得独占停机证明）；备份创建可在运行时执行，离线备份校验也不要求停服。详见 [auction-cli](../auction-cli/README.md)。
 
 提高角色排空预算须同步提高 server unit 上限；225 秒覆盖默认 195 秒及三次各 5 秒强制回收和余量。字段与回退见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。
+
+## 数据库连接用途
+
+各角色子进程仍独立建池；supervisor 预检使用 `auction-server-preflight`，
+首次空库初始化使用 `auction-server-initialize`，均显式选择维护档并保留旧外层预算。
+预检池在派生角色前关闭，不作为第四个常驻池。
+legacy 不显式设置连接名称或会话参数；切换仍须停机门禁与重启。
+配置见[连接分档](../../ops/config/README.md#数据库连接分档)。

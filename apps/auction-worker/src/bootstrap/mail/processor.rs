@@ -42,11 +42,14 @@ pub(super) fn build_processor_and_delivery(
             let equipment = Arc::new(equipment);
             let equipment_secrets: Arc<dyn SettlementFulfillmentEquipmentSecretReader> =
                 store.clone();
-            let auctions = Arc::new(MailAuctionIntakeService::new(
-                Arc::new(postgres_store.clone()),
-                sealer,
-                Arc::new(SystemClock),
-            ));
+            let auctions =
+                Arc::new(MailAuctionIntakeService::new(
+                    Arc::new(postgres_store.for_transaction(
+                        auction_observability::DatabaseTransactionOwner::MailIntake,
+                    )),
+                    sealer,
+                    Arc::new(SystemClock),
+                ));
             let deliveries = Arc::clone(store);
             let user_data_key_id = config
                 .user_login_data_key_id()

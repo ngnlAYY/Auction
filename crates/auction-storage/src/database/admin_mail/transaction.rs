@@ -43,39 +43,57 @@ impl AdminMailTransactionRunner for crate::database::PostgresStore {
         E: AdminMailTransactionFailure,
         F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
     {
-        async move {
-            if let Err(error) = TransactionPolicy::new(policy.isolation, policy.max_attempts) {
-                return Err(E::from(error));
-            }
-            for attempt in 0..policy.max_attempts {
-                let transaction =
-                    match self.pool().begin_with(begin_statement(policy.isolation)).await {
-                        Ok(transaction) => transaction,
-                        Err(error) => return Err(E::from(map_sql_error(error))),
-                    };
-                let mut transaction = PostgresMailTransaction::new(transaction);
-                match operation(&mut transaction).await {
-                    Ok(value) => match transaction.commit().await {
-                        Ok(()) => return Ok(value),
+        self.pool().observe_transaction(
+            auction_observability::DatabaseTransactionOwner::Admin,
+            async move {
+                if let Err(error) = TransactionPolicy::new(policy.isolation, policy.max_attempts) {
+                    return Err(E::from(error));
+                }
+                for attempt in 0..policy.max_attempts {
+                    let transaction =
+                        match self.pool().begin_with(begin_statement(policy.isolation)).await {
+                            Ok(transaction) => transaction,
+                            Err(error) => return Err(E::from(map_sql_error(error))),
+                        };
+                    let mut transaction = PostgresMailTransaction::new(transaction);
+                    match operation(&mut transaction).await {
+                        Ok(value) => match transaction.commit().await {
+                            Ok(()) => return Ok(value),
+                            Err(error) => {
+                                if matches!(error, AdminMailTransactionError::SerializationConflict)
+                                    && attempt + 1 < policy.max_attempts
+                                {
+                                    continue;
+                                }
+                                crate::database::observe_retry_exhaustion(
+                                    usize::from(attempt + 1),
+                                    usize::from(policy.max_attempts),
+                                    matches!(
+                                        error,
+                                        AdminMailTransactionError::SerializationConflict
+                                    ),
+                                );
+                                return Err(E::from(error));
+                            }
+                        },
                         Err(error) => {
-                            if matches!(error, AdminMailTransactionError::SerializationConflict)
+                            if error.is_serialization_conflict()
                                 && attempt + 1 < policy.max_attempts
                             {
                                 continue;
                             }
-                            return Err(E::from(error));
+                            crate::database::observe_retry_exhaustion(
+                                usize::from(attempt + 1),
+                                usize::from(policy.max_attempts),
+                                error.is_serialization_conflict(),
+                            );
+                            return Err(error);
                         }
-                    },
-                    Err(error) => {
-                        if error.is_serialization_conflict() && attempt + 1 < policy.max_attempts {
-                            continue;
-                        }
-                        return Err(error);
                     }
                 }
-            }
-            Err(E::from(AdminMailTransactionError::SerializationConflict))
-        }
+                Err(E::from(AdminMailTransactionError::SerializationConflict))
+            },
+        )
     }
 }
 

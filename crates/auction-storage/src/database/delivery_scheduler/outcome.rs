@@ -122,6 +122,8 @@ async fn persist(
     terminal: Terminal<'_>,
 ) -> Result<(), auction_application::RepositoryError> {
     crate::database::retry_conflicts(
+        pool,
+        auction_observability::DatabaseTransactionOwner::DeliveryOutcome,
         crate::database::SERIALIZABLE_ATTEMPTS,
         OutcomeError::retryable,
         || persist_once(pool, claim, completed_at, &terminal),
@@ -289,7 +291,7 @@ impl From<auction_application::FundingError> for OutcomeError {
 impl OutcomeError {
     pub(super) fn retryable(&self) -> bool {
         match self {
-            Self::Sqlx(error) => crate::database::is_serialization_conflict(error),
+            Self::Sqlx(error) => crate::database::observed_serialization_conflict(error),
             Self::Funding(auction_application::FundingError::SerializationConflict) => true,
             _ => false,
         }

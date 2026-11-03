@@ -159,7 +159,7 @@ async fn run_terminal_action_postgres(
         let claim = claim_snapshot.clone();
         let terminal = terminal.clone();
         Box::pin(async move {
-            complete_action_in_transaction(transaction, &claim, &terminal, audit_id).await
+            complete_action_in_transaction(transaction.native(), &claim, &terminal, audit_id).await
         })
     })
     .await

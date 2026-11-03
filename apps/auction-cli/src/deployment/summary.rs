@@ -58,6 +58,23 @@ fn projection(config: &AppConfig) -> anyhow::Result<Value> {
         "database": {
             "configured": backend.is_some(),
             "backend": backend.map(DatabaseBackend::name),
+            "profiles": config.database_profiles,
+            "pool": config.database_pool,
+            "effective_pool_max_connections": if config.database_profiles.mode
+                == auction_config::DatabaseProfileMode::Legacy {
+                16
+            } else {
+                config.database_pool.max_connections
+            },
+            "effective_acquire_timeout_millis": config.database_pool.timeouts()?
+                .map_or(30_000, |value| value.acquire_timeout_millis),
+            "restart_required": true,
+            "application_name": if config.database_profiles.mode
+                == auction_config::DatabaseProfileMode::Legacy {
+                None
+            } else {
+                Some(format!("auction-{}", config.role.name()))
+            },
         },
         "cache": {
             "backend": config.cache.backend.name(),

@@ -8,7 +8,7 @@ use auction_observability::{HeartbeatHealthReader, HeartbeatReadinessFuture, Poo
 #[cfg(feature = "postgres")]
 use sqlx::Row;
 #[cfg(feature = "postgres")]
-use sqlx::{PgPool, Postgres, postgres::PgPoolOptions};
+use sqlx::{PgPool, Postgres};
 #[cfg(feature = "postgres")]
 mod admin_intake;
 #[cfg(feature = "postgres")]
@@ -198,7 +198,16 @@ mod worlds;
 #[cfg(feature = "postgres")]
 mod pool;
 #[cfg(feature = "postgres")]
-pub(crate) use pool::TrackedPool;
+pub use pool::TrackedTransaction;
+#[cfg(feature = "postgres")]
+pub(crate) use pool::{TrackedConnection, TrackedPool};
+
+#[cfg(feature = "postgres")]
+mod profiles;
+#[cfg(feature = "postgres")]
+pub use profiles::{
+    DatabaseConnectionProfile, DatabaseConnectionPurpose, DatabaseConnectionTimeouts,
+};
 
 mod backend;
 #[cfg(feature = "postgres")]
@@ -209,8 +218,9 @@ mod store;
 pub use backend::{DatabaseBackend, StorageError};
 #[cfg(feature = "postgres")]
 pub(crate) use backend::{
-    SERIALIZABLE_ATTEMPTS, is_serialization_conflict, lock_command_id, retry_conflicts,
-    set_read_only_limits, sql_error_context, storage_error, storage_error_from,
+    SERIALIZABLE_ATTEMPTS, lock_command_id, observe_retry_exhaustion,
+    observed_serialization_conflict, retry_conflicts, set_read_only_limits, sql_error_context,
+    storage_error, storage_error_from,
 };
 #[cfg(feature = "postgres")]
 pub(crate) use backend::{

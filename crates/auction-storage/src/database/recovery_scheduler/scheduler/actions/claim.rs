@@ -30,7 +30,7 @@ pub(crate) async fn claim_action_postgres(
 
 #[cfg(feature = "postgres")]
 async fn claim_action_in_transaction(
-    transaction: &mut sqlx::Transaction<'static, Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'static, Postgres>,
     worker_id: String,
     lease_microseconds: i64,
     claim_token: Uuid,
