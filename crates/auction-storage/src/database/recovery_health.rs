@@ -1,6 +1,9 @@
 //! PostgreSQL recovery health 持久化 owner；health 行是带时间戳的安全投影，不是外部余额权威。
 //! 每次刷新同时重算 recovery backlog，避免页面把旧计数与新余额状态拼接成不一致快照。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, ApplicationFuture, RecoveryHealthStore, RecoveryHealthUpdate, RepositoryError,
 };
@@ -83,7 +86,7 @@ async fn refresh_postgres(
     .bind(world)
     .fetch_optional(pool)
     .await
-    .map_err(|_| storage_error("刷新 recovery health 失败"))?;
+    .map_err(|error| storage_error_from(error, "刷新 recovery health 失败"))?;
 
     if row.is_none() {
         return Err(storage_error("recovery health world 行不存在"));

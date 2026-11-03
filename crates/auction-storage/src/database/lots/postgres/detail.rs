@@ -1,5 +1,8 @@
 //! PostgreSQL Public lot 详情查询与当前拍卖投影解析。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use super::super::*;
 use super::mapping::{map_postgres_live, map_postgres_preview_detail, map_postgres_projection};
 
@@ -13,9 +16,12 @@ pub(in crate::database::lots) async fn detail_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启公开 lot 详情事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启公开 lot 详情事务失败"))?;
     let Some(projection) = postgres_detail_projection(&mut transaction, lot_id).await? else {
-        transaction.commit().await.map_err(|_| storage_error("提交公开 lot 详情事务失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交公开 lot 详情事务失败"))?;
         return Ok(None);
     };
     let detail = if projection.projection_kind == "preview" {
@@ -23,14 +29,17 @@ pub(in crate::database::lots) async fn detail_postgres(
             .bind(lot_id)
             .fetch_optional(&mut *transaction)
             .await
-            .map_err(|_| storage_error("读取 PostgreSQL 预览 lot 详情失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 预览 lot 详情失败"))?;
         let Some(row) = row else {
-            transaction.commit().await.map_err(|_| storage_error("提交公开 lot 详情事务失败"))?;
+            transaction
+                .commit()
+                .await
+                .map_err(|error| storage_error_from(error, "提交公开 lot 详情事务失败"))?;
             return Ok(None);
         };
         let equipment_id = EquipmentId::from_uuid(
             row.try_get("equipment_id")
-                .map_err(|_| storage_error("读取 PostgreSQL 预览装备标识失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 预览装备标识失败"))?,
         );
         let world_id = projection.world_id.clone();
         PublicLotDetail {
@@ -44,14 +53,17 @@ pub(in crate::database::lots) async fn detail_postgres(
             .bind(lot_id)
             .fetch_optional(&mut *transaction)
             .await
-            .map_err(|_| storage_error("读取 PostgreSQL 正式 lot 详情失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 正式 lot 详情失败"))?;
         let Some(row) = row else {
-            transaction.commit().await.map_err(|_| storage_error("提交公开 lot 详情事务失败"))?;
+            transaction
+                .commit()
+                .await
+                .map_err(|error| storage_error_from(error, "提交公开 lot 详情事务失败"))?;
             return Ok(None);
         };
         let equipment_id = EquipmentId::from_uuid(
             row.try_get("equipment_id")
-                .map_err(|_| storage_error("读取 PostgreSQL 正式装备标识失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 正式装备标识失败"))?,
         );
         let summary = map_postgres_live(row, &projection.world_id, colors)?;
         PublicLotDetail {
@@ -62,7 +74,10 @@ pub(in crate::database::lots) async fn detail_postgres(
         }
     };
     detail.validate(lot_id).map_err(storage_error)?;
-    transaction.commit().await.map_err(|_| storage_error("提交公开 lot 详情事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交公开 lot 详情事务失败"))?;
     Ok(Some(detail))
 }
 
@@ -94,6 +109,6 @@ async fn postgres_detail_projection(
     .bind(lot_id)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("解析 PostgreSQL lot projection 失败"))?;
+    .map_err(|error| storage_error_from(error, "解析 PostgreSQL lot projection 失败"))?;
     row.map(map_postgres_projection).transpose()
 }

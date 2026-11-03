@@ -1,5 +1,8 @@
 //! Realtime failure 的分页查询、详情读取与安全投影。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, RealtimeFailureListRequest, RealtimeFailurePage, RealtimeFailureSnapshot,
 };
@@ -20,7 +23,7 @@ pub(super) async fn list_failures_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启 realtime failure 快照失败"))?;
+        .map_err(|error| storage_error_from(error, "开启 realtime failure 快照失败"))?;
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*)
          FROM public.realtime_failures AS failure
@@ -36,7 +39,7 @@ pub(super) async fn list_failures_postgres(
     .bind(request.resolved)
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL realtime failure 总数失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime failure 总数失败"))?;
     let rows = sqlx::query(
         "SELECT failure.id, failure.event_id, event.stream_key, failure.consumer_key,
                 failure.failure_code, failure.safe_detail, failure.failed_at,
@@ -58,8 +61,11 @@ pub(super) async fn list_failures_postgres(
     .bind(request.offset)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL realtime failures 失败"))?;
-    transaction.commit().await.map_err(|_| storage_error("提交 realtime failure 快照失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime failures 失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 realtime failure 快照失败"))?;
     let entries = rows.into_iter().map(failure_from_postgres_row).collect::<Result<Vec<_>, _>>()?;
     validate_failure_page(&entries, total, &request)?;
     Ok(RealtimeFailurePage { entries, total, limit: request.limit, offset: request.offset })
@@ -68,28 +74,30 @@ pub(super) async fn list_failures_postgres(
 #[cfg(feature = "postgres")]
 fn failure_from_postgres_row(row: PgRow) -> Result<RealtimeFailureSnapshot, ApplicationError> {
     Ok(RealtimeFailureSnapshot {
-        id: row.try_get("id").map_err(|_| storage_error("读取 PostgreSQL failure ID 失败"))?,
+        id: row
+            .try_get("id")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL failure ID 失败"))?,
         event_id: row
             .try_get("event_id")
-            .map_err(|_| storage_error("读取 PostgreSQL failure event ID 失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL failure event ID 失败"))?,
         stream_key: row
             .try_get("stream_key")
-            .map_err(|_| storage_error("读取 PostgreSQL failure stream 失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL failure stream 失败"))?,
         consumer_key: row
             .try_get("consumer_key")
-            .map_err(|_| storage_error("读取 PostgreSQL failure consumer 失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL failure consumer 失败"))?,
         code: row
             .try_get("failure_code")
-            .map_err(|_| storage_error("读取 PostgreSQL failure code 失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL failure code 失败"))?,
         safe_detail: row
             .try_get("safe_detail")
-            .map_err(|_| storage_error("读取 PostgreSQL failure detail 失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL failure detail 失败"))?,
         failed_at: row
             .try_get("failed_at")
-            .map_err(|_| storage_error("读取 PostgreSQL failure time 失败"))?,
-        resolved_at: row
-            .try_get("resolved_at")
-            .map_err(|_| storage_error("读取 PostgreSQL failure resolved time 失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL failure time 失败"))?,
+        resolved_at: row.try_get("resolved_at").map_err(|error| {
+            storage_error_from(error, "读取 PostgreSQL failure resolved time 失败")
+        })?,
     })
 }
 
@@ -140,6 +148,6 @@ pub(super) async fn get_failure_postgres(
     .bind(failure_id)
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL realtime failure 详情失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime failure 详情失败"))?;
     row.map(failure_from_postgres_row).transpose()
 }

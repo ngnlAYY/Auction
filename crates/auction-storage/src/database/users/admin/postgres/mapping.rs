@@ -134,6 +134,6 @@ pub(super) fn map_storage_error(error: sqlx::Error) -> ApplicationError {
             // 不把可重试冲突降成字符串；事务 owner 负责保留原命令并执行有界重试。
             CompetitionTransactionError::SerializationConflict.into()
         }
-        _ => storage_error("Admin Users 存储操作失败"),
+        _ => crate::database::storage_error_from(error, "Admin Users 存储操作失败"),
     }
 }

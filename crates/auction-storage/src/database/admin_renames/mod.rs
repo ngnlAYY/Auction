@@ -1,5 +1,8 @@
 //! 读取追加式 user_renames 事实，输出安全投影，不修改历史改名证据。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     AdminRenameListRequest, AdminRenamePage, AdminRenameReader, AdminRenameRecord,
     ApplicationError, ApplicationFuture,
@@ -34,7 +37,7 @@ async fn list_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启 Admin 改名历史读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启 Admin 改名历史读取事务失败"))?;
 
     let name = request.name.as_deref().filter(|value| !value.is_empty());
     let total: i64 = sqlx::query_scalar(
@@ -49,7 +52,7 @@ async fn list_postgres(
     .bind(name)
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|_| storage_error("统计 Admin 改名历史失败"))?;
+    .map_err(|error| storage_error_from(error, "统计 Admin 改名历史失败"))?;
 
     let rows = sqlx::query(
         "SELECT rename.id, rename.user_id, usr.state_version AS user_state_version,
@@ -70,32 +73,36 @@ async fn list_postgres(
     .bind(request.offset)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 Admin 改名历史失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 Admin 改名历史失败"))?;
 
     let entries = rows
         .into_iter()
         .map(|row| {
             let record = AdminRenameRecord {
-                id: row.try_get("id").map_err(|_| storage_error("读取改名记录标识失败"))?,
+                id: row
+                    .try_get("id")
+                    .map_err(|error| storage_error_from(error, "读取改名记录标识失败"))?,
                 user_id: row
                     .try_get("user_id")
-                    .map_err(|_| storage_error("读取改名用户标识失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取改名用户标识失败"))?,
                 user_state_version: row
                     .try_get("user_state_version")
-                    .map_err(|_| storage_error("读取改名用户版本失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取改名用户版本失败"))?,
                 previous_username: row
                     .try_get("previous_username")
-                    .map_err(|_| storage_error("读取改名前用户名失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取改名前用户名失败"))?,
                 next_username: row
                     .try_get("next_username")
-                    .map_err(|_| storage_error("读取改名后用户名失败"))?,
-                actor: row.try_get("actor").map_err(|_| storage_error("读取改名 actor 失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取改名后用户名失败"))?,
+                actor: row
+                    .try_get("actor")
+                    .map_err(|error| storage_error_from(error, "读取改名 actor 失败"))?,
                 created_at: row
                     .try_get::<DateTime<Utc>, _>("created_at")
-                    .map_err(|_| storage_error("读取改名时间失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取改名时间失败"))?,
                 reverted_at: row
                     .try_get::<Option<DateTime<Utc>>, _>("reverted_at")
-                    .map_err(|_| storage_error("读取改名回滚时间失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取改名回滚时间失败"))?,
             };
             if record.validate() {
                 Ok(record)
@@ -105,7 +112,10 @@ async fn list_postgres(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    transaction.commit().await.map_err(|_| storage_error("提交 Admin 改名历史读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 Admin 改名历史读取事务失败"))?;
     let page = AdminRenamePage { entries, total, limit: request.limit, offset: request.offset };
     if page.validate(&request) {
         Ok(page)

@@ -1,6 +1,9 @@
 //! 论坛未知写入的只读清单与人工重新写入授权；状态只能从 `write_authorization_required` 推进到
 //! `write_retry_authorized`，账本、状态更新和追加式审计同事务提交，远端 POST 仍由 Worker 执行。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, ForumSyncRecoveryItem, ForumWriteRetryAuthorizationCommand,
     ForumWriteRetryAuthorizationResult,
@@ -39,7 +42,7 @@ pub(super) async fn list(
     .bind(i64::from(limit))
     .fetch_all(store.pool())
     .await
-    .map_err(|_| storage_error("读取论坛未知写入恢复清单失败"))?;
+    .map_err(|error| storage_error_from(error, "读取论坛未知写入恢复清单失败"))?;
 
     rows.into_iter().map(map_item).collect()
 }
@@ -48,10 +51,16 @@ pub(super) async fn authorize(
     store: &PostgresStore,
     command: &ForumWriteRetryAuthorizationCommand,
 ) -> Result<ForumWriteRetryAuthorizationResult, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启论坛写入授权事务失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启论坛写入授权事务失败"))?;
     if let Some(result) = existing_command(&mut transaction, command).await? {
-        transaction.commit().await.map_err(|_| storage_error("提交论坛写入授权重放失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交论坛写入授权重放失败"))?;
         return Ok(result);
     }
 
@@ -64,21 +73,26 @@ pub(super) async fn authorize(
     .bind(command.auction_id)
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|_| storage_error("锁定论坛同步恢复状态失败"))?
+    .map_err(|error| storage_error_from(error, "锁定论坛同步恢复状态失败"))?
     .ok_or_else(|| storage_error("论坛同步恢复状态不存在"))?;
     let status: String =
-        row.try_get("status").map_err(|_| storage_error("读取论坛同步状态失败"))?;
-    let failure_code: Option<String> =
-        row.try_get("last_error_code").map_err(|_| storage_error("读取论坛同步失败码失败"))?;
-    let claim_token: Option<Uuid> =
-        row.try_get("claim_token").map_err(|_| storage_error("读取论坛同步租约失败"))?;
+        row.try_get("status").map_err(|error| storage_error_from(error, "读取论坛同步状态失败"))?;
+    let failure_code: Option<String> = row
+        .try_get("last_error_code")
+        .map_err(|error| storage_error_from(error, "读取论坛同步失败码失败"))?;
+    let claim_token: Option<Uuid> = row
+        .try_get("claim_token")
+        .map_err(|error| storage_error_from(error, "读取论坛同步租约失败"))?;
     if status != "failed"
         || failure_code.as_deref() != Some(AUTHORIZATION_REQUIRED)
         || claim_token.is_some()
     {
         // 并发的同一命令可能在等待行锁期间已经提交；此时仍允许稳定重放原结果。
         if let Some(result) = existing_command(&mut transaction, command).await? {
-            transaction.commit().await.map_err(|_| storage_error("提交论坛写入授权重放失败"))?;
+            transaction
+                .commit()
+                .await
+                .map_err(|error| storage_error_from(error, "提交论坛写入授权重放失败"))?;
             return Ok(result);
         }
         return Err(storage_error("论坛同步当前不处于待人工写入授权状态"));
@@ -102,13 +116,14 @@ pub(super) async fn authorize(
     .bind(AUTHORIZATION_REQUIRED)
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|_| storage_error("推进论坛写入授权状态失败"))?
+    .map_err(|error| storage_error_from(error, "推进论坛写入授权状态失败"))?
     .ok_or_else(|| storage_error("论坛同步写入授权状态已变化"))?;
     let source_revision: i64 = updated
         .try_get("source_revision")
-        .map_err(|_| storage_error("读取论坛写入授权源版本失败"))?;
-    let authorized_at: DateTime<Utc> =
-        updated.try_get("updated_at").map_err(|_| storage_error("读取论坛写入授权时间失败"))?;
+        .map_err(|error| storage_error_from(error, "读取论坛写入授权源版本失败"))?;
+    let authorized_at: DateTime<Utc> = updated
+        .try_get("updated_at")
+        .map_err(|error| storage_error_from(error, "读取论坛写入授权时间失败"))?;
     let result = ForumWriteRetryAuthorizationResult {
         command_id: command.command_id,
         auction_id: command.auction_id,
@@ -131,7 +146,7 @@ pub(super) async fn authorize(
     .bind(payload)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("写入论坛写入授权命令账本失败"))?;
+    .map_err(|error| storage_error_from(error, "写入论坛写入授权命令账本失败"))?;
     if inserted.rows_affected() != 1 {
         return Err(storage_error("论坛写入授权命令发生并发冲突"));
     }
@@ -155,8 +170,11 @@ pub(super) async fn authorize(
     }))
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("追加论坛写入授权审计失败"))?;
-    transaction.commit().await.map_err(|_| storage_error("提交论坛写入授权事务失败"))?;
+    .map_err(|error| storage_error_from(error, "追加论坛写入授权审计失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交论坛写入授权事务失败"))?;
     Ok(result)
 }
 
@@ -172,18 +190,22 @@ async fn existing_command(
     .bind(command.command_id)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取论坛写入授权命令账本失败"))?
+    .map_err(|error| storage_error_from(error, "读取论坛写入授权命令账本失败"))?
     else {
         return Ok(None);
     };
-    let command_kind: String =
-        row.try_get("command_kind").map_err(|_| storage_error("读取论坛写入授权命令类型失败"))?;
-    let request_digest: Vec<u8> =
-        row.try_get("request_digest").map_err(|_| storage_error("读取论坛写入授权命令摘要失败"))?;
-    let auction_id: Uuid =
-        row.try_get("auction_id").map_err(|_| storage_error("读取论坛写入授权拍卖标识失败"))?;
-    let actor_id: String =
-        row.try_get("actor_id").map_err(|_| storage_error("读取论坛写入授权操作者失败"))?;
+    let command_kind: String = row
+        .try_get("command_kind")
+        .map_err(|error| storage_error_from(error, "读取论坛写入授权命令类型失败"))?;
+    let request_digest: Vec<u8> = row
+        .try_get("request_digest")
+        .map_err(|error| storage_error_from(error, "读取论坛写入授权命令摘要失败"))?;
+    let auction_id: Uuid = row
+        .try_get("auction_id")
+        .map_err(|error| storage_error_from(error, "读取论坛写入授权拍卖标识失败"))?;
+    let actor_id: String = row
+        .try_get("actor_id")
+        .map_err(|error| storage_error_from(error, "读取论坛写入授权操作者失败"))?;
     if command_kind != COMMAND_KIND
         || request_digest != command.request_hash.as_bytes()
         || auction_id != command.auction_id
@@ -191,8 +213,9 @@ async fn existing_command(
     {
         return Err(storage_error("论坛写入授权命令 ID 与已有请求冲突"));
     }
-    let payload: Value =
-        row.try_get("result_payload").map_err(|_| storage_error("读取论坛写入授权结果失败"))?;
+    let payload: Value = row
+        .try_get("result_payload")
+        .map_err(|error| storage_error_from(error, "读取论坛写入授权结果失败"))?;
     let result: ForumWriteRetryAuthorizationResult =
         serde_json::from_value(payload).map_err(|_| storage_error("论坛写入授权命令结果损坏"))?;
     if result.command_id != command.command_id || result.auction_id != command.auction_id {
@@ -202,27 +225,30 @@ async fn existing_command(
 }
 
 fn map_item(row: sqlx::postgres::PgRow) -> Result<ForumSyncRecoveryItem, ApplicationError> {
-    let attempt_count: i32 =
-        row.try_get("attempt_count").map_err(|_| storage_error("读取论坛恢复尝试次数失败"))?;
+    let attempt_count: i32 = row
+        .try_get("attempt_count")
+        .map_err(|error| storage_error_from(error, "读取论坛恢复尝试次数失败"))?;
     let item = ForumSyncRecoveryItem {
         auction_id: row
             .try_get("auction_id")
-            .map_err(|_| storage_error("读取论坛恢复拍卖标识失败"))?,
-        status: row.try_get("status").map_err(|_| storage_error("读取论坛恢复状态失败"))?,
+            .map_err(|error| storage_error_from(error, "读取论坛恢复拍卖标识失败"))?,
+        status: row
+            .try_get("status")
+            .map_err(|error| storage_error_from(error, "读取论坛恢复状态失败"))?,
         source_revision: row
             .try_get("source_revision")
-            .map_err(|_| storage_error("读取论坛恢复源版本失败"))?,
+            .map_err(|error| storage_error_from(error, "读取论坛恢复源版本失败"))?,
         attempt_count: u32::try_from(attempt_count)
             .map_err(|_| storage_error("论坛恢复尝试次数无效"))?,
         failure_code: row
             .try_get("failure_code")
-            .map_err(|_| storage_error("读取论坛恢复失败码失败"))?,
+            .map_err(|error| storage_error_from(error, "读取论坛恢复失败码失败"))?,
         next_attempt_at: row
             .try_get("next_attempt_at")
-            .map_err(|_| storage_error("读取论坛恢复下次尝试时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取论坛恢复下次尝试时间失败"))?,
         updated_at: row
             .try_get("updated_at")
-            .map_err(|_| storage_error("读取论坛恢复更新时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取论坛恢复更新时间失败"))?,
     };
     if item.auction_id.is_nil()
         || item.source_revision <= 0

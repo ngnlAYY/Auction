@@ -247,6 +247,9 @@ fn map_sql_error(error: sqlx::Error) -> AdminRulesTransactionError {
         {
             AdminRulesTransactionError::Conflict
         }
-        _ => AdminRulesTransactionError::Failed("PostgreSQL 规则事务操作失败".to_owned()),
+        _ => AdminRulesTransactionError::Failed(crate::database::sql_error_context(
+            &error,
+            "PostgreSQL 规则事务操作失败",
+        )),
     }
 }

@@ -1,5 +1,8 @@
 //! Public 会话的固定期限与永久会话持久化；账号偏好命令独立放在子模块。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, PublicSessionIdentity, PublicSessionPreference, PublicSessionRecord,
     SessionError, TransactionPolicy, TransactionRunner,
@@ -55,8 +58,9 @@ async fn create_locked(
     };
     // 用户行锁一直持有到会话提交；凭据撤销/重签也锁定同一行并永久撤销旧会话。
     // 因此轮换先提交时旧认证不能创建新会话，登录先提交时新会话会被轮换事务撤销。
-    let current_user_version: i64 =
-        user.try_get("state_version").map_err(|_| storage_error("读取 Public 会话认证版本失败"))?;
+    let current_user_version: i64 = user
+        .try_get("state_version")
+        .map_err(|error| storage_error_from(error, "读取 Public 会话认证版本失败"))?;
     if record.authenticated_user_version <= 0
         || record.authenticated_user_version != current_user_version
     {
@@ -99,7 +103,7 @@ async fn create_locked(
         user_id: record.user_id,
         username: user
             .try_get("username")
-            .map_err(|_| storage_error("读取 Public 会话用户名失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Public 会话用户名失败"))?,
         expires_at: session.try_get("expires_at").map_err(map_sql_error)?,
         absolute_expires_at: session.try_get("absolute_expires_at").map_err(map_sql_error)?,
     })
@@ -129,7 +133,7 @@ pub(super) async fn inspect_postgres(
     .bind(now)
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("复核 Public 会话失败"))?
+    .map_err(|error| storage_error_from(error, "复核 Public 会话失败"))?
     .ok_or(SessionError::Unauthenticated)?;
     map_identity(&row)
 }
@@ -170,7 +174,7 @@ pub(super) async fn touch_postgres(
     .bind(token_hash.as_slice())
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("刷新 Public 会话失败"))?;
+    .map_err(|error| storage_error_from(error, "刷新 Public 会话失败"))?;
     let Some(row) = row else {
         return Err(SessionError::Unauthenticated.into());
     };
@@ -197,7 +201,7 @@ pub(super) async fn revoke_postgres(
     .bind(token_hash.as_slice())
     .execute(store.pool())
     .await
-    .map_err(|_| storage_error("撤销 Public 会话失败"))?;
+    .map_err(|error| storage_error_from(error, "撤销 Public 会话失败"))?;
     Ok(())
 }
 

@@ -1,8 +1,9 @@
 //! 世界目录查询适配器。
 
-use auction_application::{
-    ApplicationError, ApplicationFuture, RepositoryError, WorldReader, WorldSnapshot,
-};
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
+use auction_application::{ApplicationError, ApplicationFuture, WorldReader, WorldSnapshot};
 use sqlx::Row;
 
 use super::DatabaseStore;
@@ -29,20 +30,24 @@ async fn list_postgres(
     )
     .fetch_all(store.pool())
     .await
-    .map_err(|_| storage_error())?;
+    .map_err(|error| storage_error_from(error, "读取世界目录失败"))?;
 
     rows.into_iter()
         .map(|row| {
             Ok(WorldSnapshot {
-                id: row.try_get("id").map_err(|_| storage_error())?,
-                enabled: row.try_get("enabled").map_err(|_| storage_error())?,
-                availability: row.try_get("availability").map_err(|_| storage_error())?,
-                policy_revision: row.try_get("policy_revision").map_err(|_| storage_error())?,
+                id: row
+                    .try_get("id")
+                    .map_err(|error| storage_error_from(error, "读取世界目录失败"))?,
+                enabled: row
+                    .try_get("enabled")
+                    .map_err(|error| storage_error_from(error, "读取世界目录失败"))?,
+                availability: row
+                    .try_get("availability")
+                    .map_err(|error| storage_error_from(error, "读取世界目录失败"))?,
+                policy_revision: row
+                    .try_get("policy_revision")
+                    .map_err(|error| storage_error_from(error, "读取世界目录失败"))?,
             })
         })
         .collect()
-}
-
-fn storage_error() -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed("读取世界目录失败".to_owned()))
 }

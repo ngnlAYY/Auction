@@ -1,6 +1,9 @@
 //! Admin 拍卖列表与生命周期只读投影；查询和行映射由 PostgreSQL owner 负责。
 
 #[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
+#[cfg(feature = "postgres")]
 use auction_application::AdminAuctionSummary;
 use auction_application::{
     AdminAuctionListRequest, AdminAuctionPage, AdminAuctionReader, ApplicationError,
@@ -38,7 +41,7 @@ async fn list_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启 Admin 拍卖列表读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启 Admin 拍卖列表读取事务失败"))?;
 
     let total: i64 = sqlx::query_scalar(
         "SELECT count(*)
@@ -50,7 +53,7 @@ async fn list_postgres(
     .bind(request.status.as_deref())
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 Admin 拍卖列表总数失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 Admin 拍卖列表总数失败"))?;
 
     // 计数保持完整筛选集；lot 汇总只处理当前页，避免历史场次越多每页扫描越重。
     let rows = sqlx::query(
@@ -87,7 +90,7 @@ async fn list_postgres(
     .bind(request.offset)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 Admin 拍卖列表失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 Admin 拍卖列表失败"))?;
 
     let entries = rows
         .into_iter()
@@ -95,12 +98,12 @@ async fn list_postgres(
             let auction = map_auction(&row)?;
             let summary = AdminAuctionSummary {
                 auction,
-                scheduled_ends_at: row
-                    .try_get("scheduled_ends_at")
-                    .map_err(|_| storage_error("读取 Admin 拍卖预计结束时间失败"))?,
+                scheduled_ends_at: row.try_get("scheduled_ends_at").map_err(|error| {
+                    storage_error_from(error, "读取 Admin 拍卖预计结束时间失败")
+                })?,
                 lot_count: row
                     .try_get("lot_count")
-                    .map_err(|_| storage_error("读取 Admin 拍卖 lot 数量失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 Admin 拍卖 lot 数量失败"))?,
             };
             if !summary.validate()
                 || request
@@ -115,7 +118,10 @@ async fn list_postgres(
         })
         .collect::<Result<Vec<_>, ApplicationError>>()?;
 
-    transaction.commit().await.map_err(|_| storage_error("提交 Admin 拍卖列表读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 Admin 拍卖列表读取事务失败"))?;
     let page = AdminAuctionPage { entries, total, limit: request.limit, offset: request.offset };
     if !page.validate(request) {
         return Err(storage_error("Admin 拍卖列表存储返回不变量失败"));
@@ -133,58 +139,65 @@ fn map_auction(
 
     Ok(auction_application::SettlementAuctionSnapshot {
         id: AuctionId::from_uuid(
-            row.try_get("id").map_err(|_| storage_error("读取 Admin 拍卖标识失败"))?,
+            row.try_get("id")
+                .map_err(|error| storage_error_from(error, "读取 Admin 拍卖标识失败"))?,
         ),
-        world_id: row.try_get("world_id").map_err(|_| storage_error("读取 Admin 拍卖世界失败"))?,
-        sequence: row.try_get("sequence").map_err(|_| storage_error("读取 Admin 拍卖序号失败"))?,
-        status: row.try_get("status").map_err(|_| storage_error("读取 Admin 拍卖状态失败"))?,
+        world_id: row
+            .try_get("world_id")
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖世界失败"))?,
+        sequence: row
+            .try_get("sequence")
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖序号失败"))?,
+        status: row
+            .try_get("status")
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖状态失败"))?,
         preview_scheduled_at: row
             .try_get::<DateTime<Utc>, _>("preview_scheduled_at")
-            .map_err(|_| storage_error("读取 Admin 拍卖预览计划时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖预览计划时间失败"))?,
         scheduled_open_at: row
             .try_get::<DateTime<Utc>, _>("scheduled_open_at")
-            .map_err(|_| storage_error("读取 Admin 拍卖开放计划时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖开放计划时间失败"))?,
         preview_opened_at: row
             .try_get("preview_opened_at")
-            .map_err(|_| storage_error("读取 Admin 拍卖预览开放时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖预览开放时间失败"))?,
         preview_manual_open: row
             .try_get("preview_manual_open")
-            .map_err(|_| storage_error("读取 Admin 拍卖手动开放标记失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖手动开放标记失败"))?,
         preview_revision: row
             .try_get("preview_revision")
-            .map_err(|_| storage_error("读取 Admin 拍卖预览版本失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖预览版本失败"))?,
         opened_at: row
             .try_get("opened_at")
-            .map_err(|_| storage_error("读取 Admin 拍卖开放时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖开放时间失败"))?,
         final_phase_at: row
             .try_get("final_phase_at")
-            .map_err(|_| storage_error("读取 Admin 拍卖最终阶段时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖最终阶段时间失败"))?,
         settled_at: row
             .try_get("settled_at")
-            .map_err(|_| storage_error("读取 Admin 拍卖结算时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖结算时间失败"))?,
         cancelled_at: row
             .try_get("cancelled_at")
-            .map_err(|_| storage_error("读取 Admin 拍卖取消时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖取消时间失败"))?,
         cancelled_reason: row
             .try_get("cancelled_reason")
-            .map_err(|_| storage_error("读取 Admin 拍卖取消原因失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖取消原因失败"))?,
         cancelled_by: row
             .try_get("cancelled_by")
-            .map_err(|_| storage_error("读取 Admin 拍卖取消操作者失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖取消操作者失败"))?,
         state_version: row
             .try_get("state_version")
-            .map_err(|_| storage_error("读取 Admin 拍卖状态版本失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖状态版本失败"))?,
         scheduled_end_at: row
             .try_get("scheduled_end_at")
-            .map_err(|_| storage_error("读取 Admin 拍卖计划结束时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖计划结束时间失败"))?,
         effective_end_at: row
             .try_get("effective_end_at")
-            .map_err(|_| storage_error("读取 Admin 拍卖有效结束时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖有效结束时间失败"))?,
         created_at: row
             .try_get("created_at")
-            .map_err(|_| storage_error("读取 Admin 拍卖创建时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖创建时间失败"))?,
         updated_at: row
             .try_get("updated_at")
-            .map_err(|_| storage_error("读取 Admin 拍卖更新时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 拍卖更新时间失败"))?,
     })
 }

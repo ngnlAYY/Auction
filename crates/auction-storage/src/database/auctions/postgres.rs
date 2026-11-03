@@ -1,5 +1,8 @@
 //! PostgreSQL 完整档的公开拍卖查询。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, CurrentAuctionSnapshot, PublicAuctionCursor, PublicAuctionListRequest,
     PublicAuctionPage, PublicRealtimeAuctionStatus,
@@ -30,7 +33,7 @@ pub(super) async fn list(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开始公开拍卖列表快照失败"))?;
+        .map_err(|error| storage_error_from(error, "开始公开拍卖列表快照失败"))?;
     let total = if use_cursor {
         None
     } else {
@@ -47,7 +50,7 @@ pub(super) async fn list(
             .bind(request.world_id.as_deref())
             .fetch_one(&mut *transaction)
             .await
-            .map_err(|_| storage_error("读取公开拍卖列表总数失败"))?,
+            .map_err(|error| storage_error_from(error, "读取公开拍卖列表总数失败"))?,
         )
     };
     // 先确定当前页拍卖，再聚合其 lot；历史页不必为页外场次重复扫描和汇总全部装备。
@@ -114,8 +117,11 @@ pub(super) async fn list(
     .bind(request.include_forum_thread_url)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取公开拍卖列表失败"))?;
-    transaction.commit().await.map_err(|_| storage_error("结束公开拍卖列表快照失败"))?;
+    .map_err(|error| storage_error_from(error, "读取公开拍卖列表失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "结束公开拍卖列表快照失败"))?;
     let mut entries = rows.into_iter().map(map_postgres_summary).collect::<Result<Vec<_>, _>>()?;
     let entry_count =
         i64::try_from(entries.len()).map_err(|_| storage_error("公开拍卖页大小溢出"))?;
@@ -165,7 +171,7 @@ pub(super) async fn current(
     .bind(world_id)
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("读取当前公开拍卖失败"))?;
+    .map_err(|error| storage_error_from(error, "读取当前公开拍卖失败"))?;
 
     row.map(map_postgres_current).transpose()
 }
@@ -192,12 +198,12 @@ pub(super) async fn realtime_status(
     .bind(auction_id)
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("读取 Public realtime 拍卖状态失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 Public realtime 拍卖状态失败"))?;
 
     row.map(|row| {
         let status: String = row
             .try_get("status")
-            .map_err(|_| storage_error("读取 Public realtime 拍卖状态失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 Public realtime 拍卖状态失败"))?;
         if status == "settled" {
             return map_realtime_status(&status);
         }

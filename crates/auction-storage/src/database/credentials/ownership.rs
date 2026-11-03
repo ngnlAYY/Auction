@@ -1,5 +1,8 @@
 //! 外部 Cookie 的 Worker 进程生命周期所有权。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use std::{
     fmt,
     sync::atomic::{AtomicBool, Ordering},
@@ -63,9 +66,9 @@ impl AdminCredentialRuntimeOwnership for CredentialRuntimeOwnership {
                 storage_error("外部 Cookie 所有权会话不可用")
             })?;
             sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&mut *connection).await.map_err(
-                |_| {
+                |error| {
                     guard.reason = "probe_failed";
-                    storage_error("外部 Cookie 所有权会话检查失败")
+                    storage_error_from(error, "外部 Cookie 所有权会话检查失败")
                 },
             )?;
             // 并发等待检查可能已经取消或超时；不能由此次成功探测恢复 sticky 失效状态。

@@ -186,5 +186,5 @@ pub(super) fn map_storage_error(error: sqlx::Error) -> ApplicationError {
         }
         _ => "Users MoogleMail 存储操作失败",
     };
-    repository_error(message)
+    crate::database::storage_error_from(error, message)
 }

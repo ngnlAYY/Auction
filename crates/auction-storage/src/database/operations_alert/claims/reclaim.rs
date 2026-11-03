@@ -1,5 +1,8 @@
 //! Operations alert 过期批次的租约回收事务。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use super::super::*;
 use super::mapping::{digest_from_bytes, map_batch_items, request_hash_from_bytes};
 use sqlx::Row;
@@ -10,11 +13,12 @@ pub(super) async fn reclaim_batch(
     row: &sqlx::postgres::PgRow,
     request: &OperationsAlertClaimRequest,
 ) -> Result<Option<OperationsAlertBatchClaim>, ApplicationError> {
-    let batch_id: Uuid =
-        row.try_get("id").map_err(|_| storage_error("读取 operations alert 批次 ID 失败"))?;
+    let batch_id: Uuid = row
+        .try_get("id")
+        .map_err(|error| storage_error_from(error, "读取 operations alert 批次 ID 失败"))?;
     let attempt_count: i32 = row
         .try_get("attempt_count")
-        .map_err(|_| storage_error("读取 operations alert 尝试次数失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 operations alert 尝试次数失败"))?;
     if attempt_count < 1 {
         return Err(storage_error("operations alert 尝试次数无效"));
     }
@@ -30,35 +34,37 @@ pub(super) async fn reclaim_batch(
         .bind(request.now)
         .execute(&mut **transaction)
         .await
-        .map_err(|_| storage_error("写入 operations alert 重试耗尽状态失败"))?;
+        .map_err(|error| storage_error_from(error, "写入 operations alert 重试耗尽状态失败"))?;
         let delivery_id: Uuid = row
             .try_get("delivery_id")
-            .map_err(|_| storage_error("读取 operations alert delivery ID 失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 operations alert delivery ID 失败"))?;
         terminalize_prepared_delivery(transaction, delivery_id, request.now, "retry_exhausted")
             .await?;
         return Ok(None);
     }
     let command_id: Uuid = row
         .try_get("command_id")
-        .map_err(|_| storage_error("读取 operations alert 命令 ID 失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 operations alert 命令 ID 失败"))?;
     let delivery_id: Uuid = row
         .try_get("delivery_id")
-        .map_err(|_| storage_error("读取 operations alert delivery ID 失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 operations alert delivery ID 失败"))?;
     let request_digest: Vec<u8> = row
         .try_get("request_digest")
-        .map_err(|_| storage_error("读取 operations alert 请求摘要失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 operations alert 请求摘要失败"))?;
     let body_digest_value: Vec<u8> = row
         .try_get("body_digest")
-        .map_err(|_| storage_error("读取 operations alert 正文摘要失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 operations alert 正文摘要失败"))?;
     let claim_fencing: i64 = row
         .try_get("claim_fencing")
-        .map_err(|_| storage_error("读取 operations alert fencing 失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 operations alert fencing 失败"))?;
     let delivery_target: Option<(String, serde_json::Value)> =
         sqlx::query_as("SELECT recipient, payload FROM public.deliveries WHERE id = $1")
             .bind(delivery_id)
             .fetch_optional(&mut **transaction)
             .await
-            .map_err(|_| storage_error("读取 operations alert delivery 目标失败"))?;
+            .map_err(|error| {
+                storage_error_from(error, "读取 operations alert delivery 目标失败")
+            })?;
     let (recipient, payload) =
         delivery_target.ok_or_else(|| storage_error("operations alert delivery 不存在"))?;
     let payload_world = payload.get("world").and_then(serde_json::Value::as_str);
@@ -76,7 +82,7 @@ pub(super) async fn reclaim_batch(
         .bind(request.now)
         .execute(&mut **transaction)
         .await
-        .map_err(|_| storage_error("收口 operations alert target 变更批次失败"))?;
+        .map_err(|error| storage_error_from(error, "收口 operations alert target 变更批次失败"))?;
         terminalize_prepared_delivery(transaction, delivery_id, request.now, "dependency_mismatch")
             .await?;
         return Ok(None);
@@ -89,7 +95,7 @@ pub(super) async fn reclaim_batch(
     .bind(batch_id)
     .fetch_all(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取 operations alert 批次条目失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 operations alert 批次条目失败"))?;
     let items = map_batch_items(item_rows)?;
     let summary = canonical_summary(&items, auction_application::MAX_OPERATIONS_ALERT_BODY_BYTES)
         .map_err(ApplicationError::from)?;
@@ -121,7 +127,7 @@ pub(super) async fn reclaim_batch(
     .bind(i32::try_from(next_attempt).map_err(|_| OperationsAlertError::Invalid)?)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| storage_error("更新 operations alert 重试租约失败"))?;
+    .map_err(|error| storage_error_from(error, "更新 operations alert 重试租约失败"))?;
     if updated.rows_affected() != 1 {
         return Err(ApplicationError::OperationsAlert(OperationsAlertError::StaleClaim));
     }

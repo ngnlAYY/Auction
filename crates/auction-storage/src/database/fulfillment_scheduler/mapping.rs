@@ -311,8 +311,11 @@ pub(super) fn repository_error_owned(message: &str) -> auction_application::Repo
 
 #[cfg(feature = "postgres")]
 pub(super) fn map_storage_error(error: sqlx::Error) -> auction_application::RepositoryError {
-    auction_application::RepositoryError::Failed(match error {
-        sqlx::Error::RowNotFound => "结算履约记录不存在".to_owned(),
-        _ => "结算履约数据库操作失败".to_owned(),
-    })
+    let context = match &error {
+        sqlx::Error::RowNotFound => "结算履约记录不存在",
+        _ => "结算履约数据库操作失败",
+    };
+    auction_application::RepositoryError::Failed(crate::database::sql_error_context(
+        &error, context,
+    ))
 }

@@ -158,7 +158,10 @@ pub(crate) fn map_sql_error(error: sqlx::Error) -> CompetitionTransactionError {
     } else if is_unique_error(&error) {
         CompetitionTransactionError::Conflict
     } else {
-        CompetitionTransactionError::Failed("PostgreSQL 竞价事务操作失败".to_owned())
+        CompetitionTransactionError::Failed(crate::database::sql_error_context(
+            &error,
+            "PostgreSQL 竞价事务操作失败",
+        ))
     }
 }
 

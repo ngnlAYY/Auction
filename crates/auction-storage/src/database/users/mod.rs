@@ -2,6 +2,9 @@
 //!
 //! 这里只按公开登录 key 的摘要读取最小身份，不把用户记录、认证材料或管理字段越过应用端口。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, ApplicationFuture, PublicLoginAuthenticator, PublicLoginIdentity,
     SessionError,
@@ -45,31 +48,37 @@ async fn authenticate_postgres(
     .bind(key_hash.as_slice())
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("读取 Public 登录身份失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 Public 登录身份失败"))?;
 
     let Some(row) = row else {
         return Err(SessionError::InvalidCredentials.into());
     };
-    let key_status: String =
-        row.try_get("key_status").map_err(|_| storage_error("读取登录密钥状态失败"))?;
+    let key_status: String = row
+        .try_get("key_status")
+        .map_err(|error| storage_error_from(error, "读取登录密钥状态失败"))?;
     if key_status != "active" {
         return Err(SessionError::InvalidCredentials.into());
     }
-    let status: String = row.try_get("status").map_err(|_| storage_error("读取用户状态失败"))?;
+    let status: String =
+        row.try_get("status").map_err(|error| storage_error_from(error, "读取用户状态失败"))?;
     let active = match status.as_str() {
         "active" => true,
         "blacklisted" => false,
         _ => return Err(storage_error("用户状态不在允许集合内")),
     };
     Ok(PublicLoginIdentity {
-        user_id: row.try_get("id").map_err(|_| storage_error("读取用户标识失败"))?,
+        user_id: row
+            .try_get("id")
+            .map_err(|error| storage_error_from(error, "读取用户标识失败"))?,
         user_state_version: row
             .try_get("state_version")
-            .map_err(|_| storage_error("读取用户认证版本失败"))?,
-        username: row.try_get("username").map_err(|_| storage_error("读取用户名失败"))?,
+            .map_err(|error| storage_error_from(error, "读取用户认证版本失败"))?,
+        username: row
+            .try_get("username")
+            .map_err(|error| storage_error_from(error, "读取用户名失败"))?,
         active,
         public_reason: row
             .try_get("public_reason")
-            .map_err(|_| storage_error("读取公开封禁原因失败"))?,
+            .map_err(|error| storage_error_from(error, "读取公开封禁原因失败"))?,
     })
 }

@@ -1,12 +1,14 @@
 //! Admin 会话的 PostgreSQL 持久化实现。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     AdminSessionIdentity, AdminSessionRecord, ApplicationError, SessionError,
 };
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 
-use super::common::storage_error;
 #[cfg(feature = "postgres")]
 use crate::database::PostgresStore;
 
@@ -24,7 +26,7 @@ pub(super) async fn revoke_all_postgres(
     .bind(now)
     .execute(store.pool())
     .await
-    .map_err(|_| storage_error("撤销启动前的 Admin 会话失败"))?;
+    .map_err(|error| storage_error_from(error, "撤销启动前的 Admin 会话失败"))?;
     Ok(())
 }
 
@@ -37,7 +39,7 @@ pub(super) async fn create_postgres(
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("开始 Admin 会话事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开始 Admin 会话事务失败"))?;
     // 同一 actor 只允许一个未撤销会话；先锁定已有行，再在本事务中轮换旧 token。
     sqlx::query(
         "SELECT actor
@@ -48,7 +50,7 @@ pub(super) async fn create_postgres(
     .bind(&record.actor)
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|_| storage_error("锁定 Admin 会话主体失败"))?;
+    .map_err(|error| storage_error_from(error, "锁定 Admin 会话主体失败"))?;
     sqlx::query(
         "UPDATE public.admin_sessions
          SET revoked_at = GREATEST(created_at, $1)
@@ -58,7 +60,7 @@ pub(super) async fn create_postgres(
     .bind(&record.actor)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("轮换旧 Admin 会话失败"))?;
+    .map_err(|error| storage_error_from(error, "轮换旧 Admin 会话失败"))?;
     sqlx::query(
         "INSERT INTO public.admin_sessions
             (token_hash, actor, csrf_hash, created_at, last_activity_at, expires_at, absolute_expires_at)
@@ -72,8 +74,11 @@ pub(super) async fn create_postgres(
     .bind(record.absolute_expires_at)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("创建 Admin 会话失败"))?;
-    transaction.commit().await.map_err(|_| storage_error("提交 Admin 会话事务失败"))?;
+    .map_err(|error| storage_error_from(error, "创建 Admin 会话失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 Admin 会话事务失败"))?;
     Ok(AdminSessionIdentity {
         actor: record.actor,
         expires_at: record.expires_at,
@@ -111,18 +116,20 @@ pub(super) async fn touch_postgres(
     .bind(csrf_hash.as_slice())
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("刷新 Admin 会话失败"))?;
+    .map_err(|error| storage_error_from(error, "刷新 Admin 会话失败"))?;
     let Some(row) = row else {
         return Err(SessionError::Unauthenticated.into());
     };
     Ok(AdminSessionIdentity {
-        actor: row.try_get("actor").map_err(|_| storage_error("读取 Admin 会话主体失败"))?,
+        actor: row
+            .try_get("actor")
+            .map_err(|error| storage_error_from(error, "读取 Admin 会话主体失败"))?,
         expires_at: row
             .try_get("expires_at")
-            .map_err(|_| storage_error("读取 Admin 会话过期时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 会话过期时间失败"))?,
         absolute_expires_at: row
             .try_get("absolute_expires_at")
-            .map_err(|_| storage_error("读取 Admin 会话绝对过期时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 Admin 会话绝对过期时间失败"))?,
     })
 }
 
@@ -141,6 +148,6 @@ pub(super) async fn revoke_postgres(
     .bind(token_hash.as_slice())
     .execute(store.pool())
     .await
-    .map_err(|_| storage_error("撤销 Admin 会话失败"))?;
+    .map_err(|error| storage_error_from(error, "撤销 Admin 会话失败"))?;
     Ok(())
 }

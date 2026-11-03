@@ -1,8 +1,9 @@
 //! PostgreSQL Admin 邮件轮询状态、dashboard 与入站记录查询。
 
-use super::mapping::{
-    map_intake_delivery, map_intake_summary, map_mail_poller, map_poll_state, storage_error,
-};
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
+use super::mapping::{map_intake_delivery, map_intake_summary, map_mail_poller, map_poll_state};
 use super::*;
 
 pub(super) async fn get_poll_state_postgres(
@@ -17,7 +18,7 @@ pub(super) async fn get_poll_state_postgres(
     .bind(request.mailbox_key)
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 邮件轮询状态失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 邮件轮询状态失败"))?;
     let Some(row) = row else {
         return Err(ApplicationError::AdminMailTransaction(AdminMailTransactionError::NotFound));
     };
@@ -42,7 +43,7 @@ pub(super) async fn dashboard_snapshot_postgres(
     )
     .fetch_all(store.pool())
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 邮件轮询器 dashboard 摘要失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 邮件轮询器 dashboard 摘要失败"))?;
     if rows.len() > MAX_ADMIN_MAIL_POLLER_COUNT {
         return Err(ApplicationError::AdminMail(AdminMailError::InvalidProjection));
     }
@@ -75,7 +76,7 @@ pub(super) async fn list_intakes_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启邮件入站读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启邮件入站读取事务失败"))?;
 
     // 可选空串与省略具有相同筛选语义，不能绑定为 column = ''。
     let mailbox_key = request.mailbox_key.as_deref().filter(|value| !value.is_empty());
@@ -104,7 +105,7 @@ pub(super) async fn list_intakes_postgres(
     .bind(received_to)
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|_| storage_error("统计邮件入站记录失败"))?;
+    .map_err(|error| storage_error_from(error, "统计邮件入站记录失败"))?;
     let rows = sqlx::query(
         "SELECT id, mailbox_key, external_mail_id, world_id, mail_kind, status,
                 decision_code, received_at, processed_at, sender, subject,
@@ -131,10 +132,13 @@ pub(super) async fn list_intakes_postgres(
     .bind(request.offset())
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取邮件入站列表失败"))?;
+    .map_err(|error| storage_error_from(error, "读取邮件入站列表失败"))?;
     let items =
         rows.into_iter().map(|row| map_intake_summary(&row)).collect::<Result<Vec<_>, _>>()?;
-    transaction.commit().await.map_err(|_| storage_error("提交邮件入站读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交邮件入站读取事务失败"))?;
     let page =
         AdminMailIntakePage { items, total, page: request.page, page_size: request.page_size };
     if page.validate(&request) {
@@ -158,13 +162,14 @@ pub(super) async fn get_intake_postgres(
     .bind(intake_id)
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 邮件入站详情失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 邮件入站详情失败"))?;
     let Some(row) = row else {
         return Ok(None);
     };
     let summary = map_intake_summary(&row)?;
-    let decision_metadata: Json<Value> =
-        row.try_get("decision_metadata").map_err(|_| storage_error("读取邮件决定元数据失败"))?;
+    let decision_metadata: Json<Value> = row
+        .try_get("decision_metadata")
+        .map_err(|error| storage_error_from(error, "读取邮件决定元数据失败"))?;
     let metadata = super::mapping::decode_metadata(decision_metadata.0)?;
     if !summary.validate() || !metadata.validate() {
         return Err(ApplicationError::AdminMail(AdminMailError::InvalidProjection));
@@ -203,17 +208,17 @@ pub(super) async fn get_intake_postgres(
         .bind(&summary.external_mail_id)
         .fetch_all(store.pool())
         .await
-        .map_err(|_| storage_error("读取邮件关联 delivery 失败"))?;
+        .map_err(|error| storage_error_from(error, "读取邮件关联 delivery 失败"))?;
         rows.iter().map(map_intake_delivery).collect::<Result<Vec<_>, _>>()?
     };
     let message_display = row
         .try_get::<Option<Json<Value>>, _>("message_display")
-        .map_err(|_| storage_error("读取邮件原始信息失败"))?
+        .map_err(|error| storage_error_from(error, "读取邮件原始信息失败"))?
         .map(|value| super::mapping::decode_message_display(value.0))
         .transpose()?;
     let equipment_diagnostic = row
         .try_get::<Option<Json<Value>>, _>("equipment_diagnostic")
-        .map_err(|_| storage_error("读取邮件装备诊断失败"))?
+        .map_err(|error| storage_error_from(error, "读取邮件装备诊断失败"))?
         .map(|value| super::mapping::decode_equipment_diagnostic(value.0))
         .transpose()?;
     if deliveries.iter().any(|value| !value.validate()) {

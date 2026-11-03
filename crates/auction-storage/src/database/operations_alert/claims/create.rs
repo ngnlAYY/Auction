@@ -1,5 +1,8 @@
 //! Operations alert 新批次的 due claim 事务。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use super::super::*;
 use super::mapping::signal_from_row;
 use super::reclaim::reclaim_batch;
@@ -10,8 +13,10 @@ pub(crate) async fn claim_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
     request: &OperationsAlertClaimRequest,
 ) -> Result<Option<OperationsAlertBatchClaim>, ApplicationError> {
-    let mut transaction =
-        pool.begin().await.map_err(|_| storage_error("开启 operations alert 领取事务失败"))?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启 operations alert 领取事务失败"))?;
 
     let expired_rows = sqlx::query(
         "SELECT id, delivery_id
@@ -24,14 +29,14 @@ pub(crate) async fn claim_postgres(
     .bind(request.now)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 operations alert 过期重试批次失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 operations alert 过期重试批次失败"))?;
     for row in expired_rows {
         let batch_id: Uuid = row
             .try_get("id")
-            .map_err(|_| storage_error("读取 operations alert 过期批次 ID 失败"))?;
-        let delivery_id: Uuid = row
-            .try_get("delivery_id")
-            .map_err(|_| storage_error("读取 operations alert 过期 delivery ID 失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 operations alert 过期批次 ID 失败"))?;
+        let delivery_id: Uuid = row.try_get("delivery_id").map_err(|error| {
+            storage_error_from(error, "读取 operations alert 过期 delivery ID 失败")
+        })?;
         sqlx::query(
             "UPDATE public.operations_alert_batches
              SET status = 'failed', claim_token = NULL, claimed_at = NULL,
@@ -43,7 +48,7 @@ pub(crate) async fn claim_postgres(
         .bind(request.now)
         .execute(&mut *transaction)
         .await
-        .map_err(|_| storage_error("收口 operations alert 过期重试批次失败"))?;
+        .map_err(|error| storage_error_from(error, "收口 operations alert 过期重试批次失败"))?;
         terminalize_prepared_delivery(
             &mut transaction,
             delivery_id,
@@ -72,14 +77,14 @@ pub(crate) async fn claim_postgres(
     )
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 operations alert prepared 孤儿失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 operations alert prepared 孤儿失败"))?;
     for row in orphan_rows {
-        let delivery_id: Uuid = row
-            .try_get("delivery_id")
-            .map_err(|_| storage_error("读取 operations alert 孤儿 delivery ID 失败"))?;
-        let failure_code: String = row
-            .try_get("delivery_error_code")
-            .map_err(|_| storage_error("读取 operations alert 孤儿批次错误码失败"))?;
+        let delivery_id: Uuid = row.try_get("delivery_id").map_err(|error| {
+            storage_error_from(error, "读取 operations alert 孤儿 delivery ID 失败")
+        })?;
+        let failure_code: String = row.try_get("delivery_error_code").map_err(|error| {
+            storage_error_from(error, "读取 operations alert 孤儿批次错误码失败")
+        })?;
         terminalize_prepared_delivery(&mut transaction, delivery_id, request.now, &failure_code)
             .await?;
     }
@@ -98,14 +103,14 @@ pub(crate) async fn claim_postgres(
     .bind(request.now)
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 operations alert 重试批次失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 operations alert 重试批次失败"))?;
     if let Some(row) = reclaim_row
         && let Some(claim) = reclaim_batch(&mut transaction, &row, request).await?
     {
         transaction
             .commit()
             .await
-            .map_err(|_| storage_error("提交 operations alert 重试领取事务失败"))?;
+            .map_err(|error| storage_error_from(error, "提交 operations alert 重试领取事务失败"))?;
         return Ok(Some(claim));
     }
 
@@ -142,12 +147,12 @@ pub(crate) async fn claim_postgres(
     .bind(i64::try_from(request.max_items).map_err(|_| OperationsAlertError::Invalid)?)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 operations alert due signal 失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 operations alert due signal 失败"))?;
     if rows.is_empty() {
         transaction
             .commit()
             .await
-            .map_err(|_| storage_error("提交 operations alert 空领取事务失败"))?;
+            .map_err(|error| storage_error_from(error, "提交 operations alert 空领取事务失败"))?;
         return Ok(None);
     }
 
@@ -156,9 +161,9 @@ pub(crate) async fn claim_postgres(
         let signal = signal_from_row(row)?;
         items.push(OperationsAlertBatchItem {
             fingerprint: signal.fingerprint,
-            signal_version: row
-                .try_get("state_version")
-                .map_err(|_| storage_error("读取 operations alert signal 版本失败"))?,
+            signal_version: row.try_get("state_version").map_err(|error| {
+                storage_error_from(error, "读取 operations alert signal 版本失败")
+            })?,
             ordinal: i32::try_from(index)
                 .ok()
                 .and_then(|index| index.checked_add(1))
@@ -208,7 +213,7 @@ pub(crate) async fn claim_postgres(
     .bind(request.now)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("写入 operations alert delivery 失败"))?;
+    .map_err(|error| storage_error_from(error, "写入 operations alert delivery 失败"))?;
     sqlx::query(
         "INSERT INTO public.operations_alert_batches
             (id, command_id, delivery_id, request_digest, status, claim_token,
@@ -229,7 +234,7 @@ pub(crate) async fn claim_postgres(
     .bind(body_digest.as_slice())
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("写入 operations alert 批次失败"))?;
+    .map_err(|error| storage_error_from(error, "写入 operations alert 批次失败"))?;
     // 正文前缀已保证 1–64 项，最多 320 个参数；与 batch/delivery 同事务追加。
     let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
         "INSERT INTO public.operations_alert_batch_items
@@ -248,7 +253,7 @@ pub(crate) async fn claim_postgres(
         .persistent(false)
         .execute(&mut *transaction)
         .await
-        .map_err(|_| storage_error("写入 operations alert 批次条目失败"))?;
+        .map_err(|error| storage_error_from(error, "写入 operations alert 批次条目失败"))?;
     let request_id = command_id.to_string();
     append_delivery_audit(
         &mut transaction,
@@ -267,8 +272,11 @@ pub(crate) async fn claim_postgres(
         },
     )
     .await
-    .map_err(|_| storage_error("追加 operations alert delivery 准备审计失败"))?;
-    transaction.commit().await.map_err(|_| storage_error("提交 operations alert 领取事务失败"))?;
+    .map_err(|error| storage_error_from(error, "追加 operations alert delivery 准备审计失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 operations alert 领取事务失败"))?;
     Ok(Some(OperationsAlertBatchClaim {
         batch_id,
         command_id,

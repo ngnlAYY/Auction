@@ -1,6 +1,9 @@
 //! 论坛回帖竞价命令账本的幂等开始与完成写入。
 
 #[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
+#[cfg(feature = "postgres")]
 #[cfg(feature = "postgres")]
 use auction_application::{
     ApplicationError, ForumBidCommandRecord, ForumCommandStart, ForumCommandStatus,
@@ -20,8 +23,11 @@ pub(super) async fn begin_command_postgres(
 ) -> Result<ForumCommandStart, ApplicationError> {
     use sqlx::Row;
 
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启论坛命令账本事务失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启论坛命令账本事务失败"))?;
     // 与生命周期锁串行：扫描中并发进入 Settling/Settled 后不创建或重试论坛命令。
     // 竞价应用事务仍独立复核状态；这里不建立第二套状态机。
     let open = sqlx::query_scalar::<_, bool>(
@@ -30,7 +36,7 @@ pub(super) async fn begin_command_postgres(
     .bind(record.auction_id.as_uuid())
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|_| storage_error("锁定论坛命令接收状态失败"))?;
+    .map_err(|error| storage_error_from(error, "锁定论坛命令接收状态失败"))?;
     if !open {
         return Err(storage_error("拍卖已停止接收论坛命令"));
     }
@@ -54,9 +60,12 @@ pub(super) async fn begin_command_postgres(
     .bind(record.amount)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("写入论坛命令账本失败"))?;
+    .map_err(|error| storage_error_from(error, "写入论坛命令账本失败"))?;
     if inserted.rows_affected() == 1 {
-        transaction.commit().await.map_err(|_| storage_error("提交论坛命令账本事务失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交论坛命令账本事务失败"))?;
         return Ok(ForumCommandStart {
             command_id: record.command_id,
             status: ForumCommandStatus::Pending,
@@ -88,32 +97,41 @@ pub(super) async fn begin_command_postgres(
     .bind(&record.command_kind)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取既有论坛命令账本失败"))?;
+    .map_err(|error| storage_error_from(error, "读取既有论坛命令账本失败"))?;
     let [row] = rows.as_slice() else {
         return Err(storage_error("论坛命令账本冲突记录不存在或不唯一"));
     };
-    let existing_command_id: Uuid =
-        row.try_get("command_id").map_err(|_| storage_error("读取论坛命令标识失败"))?;
-    let existing_auction_id: Uuid =
-        row.try_get("auction_id").map_err(|_| storage_error("读取论坛命令拍卖标识失败"))?;
-    let existing_world: String =
-        row.try_get("world_id").map_err(|_| storage_error("读取论坛命令世界失败"))?;
-    let existing_thread_id: String =
-        row.try_get("thread_id").map_err(|_| storage_error("读取论坛命令主题标识失败"))?;
-    let existing_post_id: String =
-        row.try_get("post_id").map_err(|_| storage_error("读取论坛命令帖子标识失败"))?;
-    let existing_line_number: i32 =
-        row.try_get("line_number").map_err(|_| storage_error("读取论坛命令行号失败"))?;
-    let existing_lot_code: String =
-        row.try_get("lot_code").map_err(|_| storage_error("读取论坛命令 lot 编码失败"))?;
-    let existing_actor: String =
-        row.try_get("actor").map_err(|_| storage_error("读取论坛命令操作者失败"))?;
-    let existing_kind: String =
-        row.try_get("command_kind").map_err(|_| storage_error("读取论坛命令类型失败"))?;
+    let existing_command_id: Uuid = row
+        .try_get("command_id")
+        .map_err(|error| storage_error_from(error, "读取论坛命令标识失败"))?;
+    let existing_auction_id: Uuid = row
+        .try_get("auction_id")
+        .map_err(|error| storage_error_from(error, "读取论坛命令拍卖标识失败"))?;
+    let existing_world: String = row
+        .try_get("world_id")
+        .map_err(|error| storage_error_from(error, "读取论坛命令世界失败"))?;
+    let existing_thread_id: String = row
+        .try_get("thread_id")
+        .map_err(|error| storage_error_from(error, "读取论坛命令主题标识失败"))?;
+    let existing_post_id: String = row
+        .try_get("post_id")
+        .map_err(|error| storage_error_from(error, "读取论坛命令帖子标识失败"))?;
+    let existing_line_number: i32 = row
+        .try_get("line_number")
+        .map_err(|error| storage_error_from(error, "读取论坛命令行号失败"))?;
+    let existing_lot_code: String = row
+        .try_get("lot_code")
+        .map_err(|error| storage_error_from(error, "读取论坛命令 lot 编码失败"))?;
+    let existing_actor: String = row
+        .try_get("actor")
+        .map_err(|error| storage_error_from(error, "读取论坛命令操作者失败"))?;
+    let existing_kind: String = row
+        .try_get("command_kind")
+        .map_err(|error| storage_error_from(error, "读取论坛命令类型失败"))?;
     let existing_amount: i64 =
-        row.try_get("amount").map_err(|_| storage_error("读取论坛命令金额失败"))?;
+        row.try_get("amount").map_err(|error| storage_error_from(error, "读取论坛命令金额失败"))?;
     let stored_status: String =
-        row.try_get("status").map_err(|_| storage_error("读取论坛命令状态失败"))?;
+        row.try_get("status").map_err(|error| storage_error_from(error, "读取论坛命令状态失败"))?;
     // post_id 与原业务负载决定身份；全主题重新编号不是负载变化，不能阻断已完成命令。
     let same = existing_auction_id == record.auction_id.as_uuid()
         && existing_world == record.world.as_str()
@@ -138,14 +156,17 @@ pub(super) async fn begin_command_postgres(
             .bind(existing_command_id)
             .execute(&mut *transaction)
             .await
-            .map_err(|_| storage_error("更新论坛命令重试次数失败"))?;
+            .map_err(|error| storage_error_from(error, "更新论坛命令重试次数失败"))?;
             (ForumCommandStatus::Pending, true)
         }
         "applied" => (ForumCommandStatus::Applied, false),
         "rejected" => (ForumCommandStatus::Rejected, false),
         _ => return Err(storage_error("论坛命令账本状态不在闭集内")),
     };
-    transaction.commit().await.map_err(|_| storage_error("提交既有论坛命令账本事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交既有论坛命令账本事务失败"))?;
     Ok(ForumCommandStart { command_id: existing_command_id, status, should_run })
 }
 
@@ -173,7 +194,7 @@ pub(super) async fn finish_command_postgres(
     .bind(safe_detail)
     .execute(store.pool())
     .await
-    .map_err(|_| storage_error("完成论坛命令账本失败"))?;
+    .map_err(|error| storage_error_from(error, "完成论坛命令账本失败"))?;
     if result.rows_affected() == 1 {
         return Ok(());
     }
@@ -182,10 +203,10 @@ pub(super) async fn finish_command_postgres(
             .bind(command_id)
             .fetch_optional(store.pool())
             .await
-            .map_err(|_| storage_error("读取论坛命令完成状态失败"))?
+            .map_err(|error| storage_error_from(error, "读取论坛命令完成状态失败"))?
             .map(|row| row.try_get("status"))
             .transpose()
-            .map_err(|_| storage_error("解析论坛命令完成状态失败"))?;
+            .map_err(|error| storage_error_from(error, "解析论坛命令完成状态失败"))?;
     match current.as_deref() {
         Some(current) if current == status => Ok(()),
         Some(_) => Err(storage_error("论坛命令已由其他状态完成")),

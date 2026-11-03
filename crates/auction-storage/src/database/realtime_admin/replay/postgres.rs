@@ -1,6 +1,9 @@
 //! PostgreSQL realtime failure replay 事务；同事务内锁定 failure 与 stream、追加替代事件，
 //! 仅在连续边界越过所选 consumer 的原事件，收口 failure 并写入审计与命令账本。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, PublicRealtimeEvent, RealtimeAdminError, RealtimeReplayCommand,
     RealtimeReplayResult,
@@ -20,18 +23,17 @@ pub(crate) async fn replay_postgres(
     store: &PostgresStore,
     command: RealtimeReplayCommand,
 ) -> Result<RealtimeReplayResult, ApplicationError> {
-    let mut transaction = store
-        .pool()
-        .begin()
-        .await
-        .map_err(|_| storage_error("打开 PostgreSQL realtime replay 事务失败"))?;
+    let mut transaction =
+        store.pool().begin().await.map_err(|error| {
+            storage_error_from(error, "打开 PostgreSQL realtime replay 事务失败")
+        })?;
     let result = replay_postgres_inner(&mut transaction, &command).await;
     match result {
-        Ok(result) => transaction
-            .commit()
-            .await
-            .map(|_| result)
-            .map_err(|_| storage_error("提交 PostgreSQL realtime replay 事务失败")),
+        Ok(result) => {
+            transaction.commit().await.map(|_| result).map_err(|error| {
+                storage_error_from(error, "提交 PostgreSQL realtime replay 事务失败")
+            })
+        }
         Err(error) => {
             let _ = transaction.rollback().await;
             Err(error)
@@ -58,7 +60,7 @@ async fn replay_postgres_inner(
     .bind(command.created_at)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| storage_error("写入 PostgreSQL realtime replay 命令账本失败"))?;
+    .map_err(|error| storage_error_from(error, "写入 PostgreSQL realtime replay 命令账本失败"))?;
 
     if inserted.rows_affected() == 0 {
         let row = sqlx::query(
@@ -70,17 +72,17 @@ async fn replay_postgres_inner(
         .bind(command.command_id)
         .fetch_optional(&mut **transaction)
         .await
-        .map_err(|_| storage_error("读取 PostgreSQL realtime replay 命令账本失败"))?
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime replay 命令账本失败"))?
         .ok_or_else(|| storage_error("PostgreSQL realtime replay 命令冲突后记录缺失"))?;
         let command_kind: String = row
             .try_get("command_kind")
-            .map_err(|_| storage_error("读取 PostgreSQL replay 命令类型失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL replay 命令类型失败"))?;
         let aggregate_id: Uuid = row
             .try_get("aggregate_id")
-            .map_err(|_| storage_error("读取 PostgreSQL replay 聚合标识失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL replay 聚合标识失败"))?;
         let request_hash: Vec<u8> = row
             .try_get("request_hash")
-            .map_err(|_| storage_error("读取 PostgreSQL replay 请求摘要失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL replay 请求摘要失败"))?;
         if command_kind != REPLAY_COMMAND_KIND
             || aggregate_id != command.failure_id
             || request_hash != command.request_hash.as_bytes()
@@ -89,10 +91,10 @@ async fn replay_postgres_inner(
         }
         let result_code: String = row
             .try_get("result_code")
-            .map_err(|_| storage_error("读取 PostgreSQL replay 结果代码失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL replay 结果代码失败"))?;
         let result_payload: sqlx::types::Json<Value> = row
             .try_get("result_payload")
-            .map_err(|_| storage_error("读取 PostgreSQL replay 结果负载失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL replay 结果负载失败"))?;
         if result_code == "replayed" {
             return replay_result_from_payload(result_payload.0, command.command_id);
         }
@@ -113,60 +115,62 @@ async fn replay_postgres_inner(
     .bind(command.failure_id)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL realtime failure replay 原记录失败"))?
+    .map_err(|error| {
+        storage_error_from(error, "读取 PostgreSQL realtime failure replay 原记录失败")
+    })?
     .ok_or_else(|| admin_error(RealtimeAdminError::NotFound))?;
-    let resolved_at: Option<DateTime<Utc>> = failure
-        .try_get("resolved_at")
-        .map_err(|_| storage_error("读取 PostgreSQL realtime failure 解决时间失败"))?;
-    let existing_replay: Option<Uuid> = failure
-        .try_get("replay_event_id")
-        .map_err(|_| storage_error("读取 PostgreSQL realtime failure replay 引用失败"))?;
+    let resolved_at: Option<DateTime<Utc>> = failure.try_get("resolved_at").map_err(|error| {
+        storage_error_from(error, "读取 PostgreSQL realtime failure 解决时间失败")
+    })?;
+    let existing_replay: Option<Uuid> = failure.try_get("replay_event_id").map_err(|error| {
+        storage_error_from(error, "读取 PostgreSQL realtime failure replay 引用失败")
+    })?;
     if resolved_at.is_some() || existing_replay.is_some() {
         return Err(admin_error(RealtimeAdminError::AlreadyResolved));
     }
-    let consumer_key: String = failure
-        .try_get("consumer_key")
-        .map_err(|_| storage_error("读取 PostgreSQL realtime failure consumer 失败"))?;
+    let consumer_key: String = failure.try_get("consumer_key").map_err(|error| {
+        storage_error_from(error, "读取 PostgreSQL realtime failure consumer 失败")
+    })?;
 
     let original = PublicRealtimeEvent {
-        event_id: failure
-            .try_get("event_id")
-            .map_err(|_| storage_error("读取 PostgreSQL 原 realtime event ID 失败"))?,
-        stream_key: failure
-            .try_get("stream_key")
-            .map_err(|_| storage_error("读取 PostgreSQL 原 realtime stream 失败"))?,
+        event_id: failure.try_get("event_id").map_err(|error| {
+            storage_error_from(error, "读取 PostgreSQL 原 realtime event ID 失败")
+        })?,
+        stream_key: failure.try_get("stream_key").map_err(|error| {
+            storage_error_from(error, "读取 PostgreSQL 原 realtime stream 失败")
+        })?,
         stream_sequence: failure
             .try_get("stream_sequence")
-            .map_err(|_| storage_error("读取 PostgreSQL 原 realtime 序号失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 原 realtime 序号失败"))?,
         kind: failure
             .try_get("kind")
-            .map_err(|_| storage_error("读取 PostgreSQL 原 realtime 类型失败"))?,
-        schema_version: failure
-            .try_get("schema_version")
-            .map_err(|_| storage_error("读取 PostgreSQL 原 realtime schema 失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 原 realtime 类型失败"))?,
+        schema_version: failure.try_get("schema_version").map_err(|error| {
+            storage_error_from(error, "读取 PostgreSQL 原 realtime schema 失败")
+        })?,
         payload: failure
             .try_get::<sqlx::types::Json<Value>, _>("public_payload")
-            .map_err(|_| storage_error("读取 PostgreSQL 原 realtime 负载失败"))?
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 原 realtime 负载失败"))?
             .0,
         created_at: failure
             .try_get("created_at")
-            .map_err(|_| storage_error("读取 PostgreSQL 原 realtime 时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 原 realtime 时间失败"))?,
     };
     if original.validate().is_err() {
         return Err(admin_error(RealtimeAdminError::ReplayMismatch));
     }
     let origin_command_id: Option<Uuid> = failure
         .try_get("origin_command_id")
-        .map_err(|_| storage_error("读取 PostgreSQL 原 realtime 命令引用失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 原 realtime 命令引用失败"))?;
     let origin_bid_id: Option<Uuid> = failure
         .try_get("origin_bid_id")
-        .map_err(|_| storage_error("读取 PostgreSQL 原 realtime bid 引用失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 原 realtime bid 引用失败"))?;
     let origin_fact_index: Option<i32> = failure
         .try_get("origin_fact_index")
-        .map_err(|_| storage_error("读取 PostgreSQL 原 realtime fact 序号失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 原 realtime fact 序号失败"))?;
     let state_version: Option<i64> = failure
         .try_get("state_version")
-        .map_err(|_| storage_error("读取 PostgreSQL 原 realtime 状态版本失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 原 realtime 状态版本失败"))?;
 
     let stream_sequence: i64 = sqlx::query_scalar(
         "SELECT next_sequence
@@ -177,7 +181,7 @@ async fn replay_postgres_inner(
     .bind(&original.stream_key)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("锁定 PostgreSQL realtime stream 失败"))?
+    .map_err(|error| storage_error_from(error, "锁定 PostgreSQL realtime stream 失败"))?
     .ok_or_else(|| storage_error("PostgreSQL realtime stream 不存在"))?;
     if stream_sequence <= original.stream_sequence {
         return Err(admin_error(RealtimeAdminError::ReplayMismatch));
@@ -203,7 +207,7 @@ async fn replay_postgres_inner(
     .bind(&replay.stream_key)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| storage_error("推进 PostgreSQL realtime stream 序号失败"))?;
+    .map_err(|error| storage_error_from(error, "推进 PostgreSQL realtime stream 序号失败"))?;
     sqlx::query(
         "INSERT INTO public.realtime_events
             (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,
@@ -225,7 +229,7 @@ async fn replay_postgres_inner(
     .bind(replay.created_at)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| storage_error("写入 PostgreSQL realtime replay 事件失败"))?;
+    .map_err(|error| storage_error_from(error, "写入 PostgreSQL realtime replay 事件失败"))?;
 
     // 只恢复本 failure 绑定的 consumer；其他 consumer 即便失败于同一原事件，也必须
     // 独立证明自己的连续边界。复用事务入口，不能在这里另开连接或嵌套提交。
@@ -265,7 +269,7 @@ async fn replay_postgres_inner(
     .execute(&mut **transaction)
     .await
     .record_audit_failure()
-    .map_err(|_| storage_error("写入 PostgreSQL realtime replay audit 失败"))?;
+    .map_err(|error| storage_error_from(error, "写入 PostgreSQL realtime replay audit 失败"))?;
 
     let result = RealtimeReplayResult {
         command_id: command.command_id,
@@ -288,7 +292,7 @@ async fn replay_postgres_inner(
     .bind(sqlx::types::Json(result_payload))
     .execute(&mut **transaction)
     .await
-    .map_err(|_| storage_error("更新 PostgreSQL realtime replay 命令结果失败"))?;
+    .map_err(|error| storage_error_from(error, "更新 PostgreSQL realtime replay 命令结果失败"))?;
     if updated.rows_affected() != 1 {
         return Err(storage_error("PostgreSQL realtime replay 命令结果状态异常"));
     }

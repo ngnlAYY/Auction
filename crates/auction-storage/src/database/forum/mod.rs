@@ -5,6 +5,9 @@ mod catalog;
 mod reply;
 mod sync;
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, ApplicationFuture, PublicForumReader, PublicForumThread,
 };
@@ -59,7 +62,7 @@ async fn forum_sync_enabled_postgres(
     )
     .fetch_one(store.pool())
     .await
-    .map_err(|_| storage_error("读取公开论坛同步启用状态失败"))
+    .map_err(|error| storage_error_from(error, "读取公开论坛同步启用状态失败"))
 }
 
 #[cfg(feature = "postgres")]
@@ -81,7 +84,7 @@ async fn forum_postgres(
     .bind(auction_id)
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("读取公开论坛镜像失败"))?;
+    .map_err(|error| storage_error_from(error, "读取公开论坛镜像失败"))?;
     let Some(row) = row else {
         return Ok(None);
     };
@@ -89,35 +92,43 @@ async fn forum_postgres(
     let thread = PublicForumThread {
         auction_id: row
             .try_get("auction_id")
-            .map_err(|_| storage_error("读取公开论坛拍卖标识失败"))?,
-        status: row.try_get("status").map_err(|_| storage_error("读取公开论坛同步状态失败"))?,
+            .map_err(|error| storage_error_from(error, "读取公开论坛拍卖标识失败"))?,
+        status: row
+            .try_get("status")
+            .map_err(|error| storage_error_from(error, "读取公开论坛同步状态失败"))?,
         source_revision: row
             .try_get("source_revision")
-            .map_err(|_| storage_error("读取公开论坛源版本失败"))?,
-        thread_url: row.try_get("thread_url").map_err(|_| storage_error("读取公开论坛链接失败"))?,
-        title: row.try_get("title").map_err(|_| storage_error("读取公开论坛标题失败"))?,
-        body: row.try_get("body").map_err(|_| storage_error("读取公开论坛正文失败"))?,
+            .map_err(|error| storage_error_from(error, "读取公开论坛源版本失败"))?,
+        thread_url: row
+            .try_get("thread_url")
+            .map_err(|error| storage_error_from(error, "读取公开论坛链接失败"))?,
+        title: row
+            .try_get("title")
+            .map_err(|error| storage_error_from(error, "读取公开论坛标题失败"))?,
+        body: row
+            .try_get("body")
+            .map_err(|error| storage_error_from(error, "读取公开论坛正文失败"))?,
         content_revision: row
             .try_get("content_revision")
-            .map_err(|_| storage_error("读取公开论坛内容版本失败"))?,
+            .map_err(|error| storage_error_from(error, "读取公开论坛内容版本失败"))?,
         processed_through_post_number: row
             .try_get("processed_through_post_number")
-            .map_err(|_| storage_error("读取公开论坛处理楼层失败"))?,
+            .map_err(|error| storage_error_from(error, "读取公开论坛处理楼层失败"))?,
         content_synced_at: row
             .try_get("content_synced_at")
-            .map_err(|_| storage_error("读取公开论坛内容同步时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取公开论坛内容同步时间失败"))?,
         content_last_success_at: row
             .try_get("content_last_success_at")
-            .map_err(|_| storage_error("读取公开论坛最近成功时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取公开论坛最近成功时间失败"))?,
         content_last_error_at: row
             .try_get("content_last_error_at")
-            .map_err(|_| storage_error("读取公开论坛最近错误时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取公开论坛最近错误时间失败"))?,
         content_last_error_code: row
             .try_get("content_last_error_code")
-            .map_err(|_| storage_error("读取公开论坛最近错误码失败"))?,
+            .map_err(|error| storage_error_from(error, "读取公开论坛最近错误码失败"))?,
         updated_at: row
             .try_get::<DateTime<Utc>, _>("updated_at")
-            .map_err(|_| storage_error("读取公开论坛更新时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取公开论坛更新时间失败"))?,
     };
     if thread.auction_id != auction_id {
         return Err(storage_error("公开论坛拍卖标识与请求不一致"));

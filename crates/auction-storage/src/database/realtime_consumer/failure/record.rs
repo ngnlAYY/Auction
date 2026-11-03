@@ -1,5 +1,8 @@
 //! Realtime consumer failure 记录事务。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::ApplicationError;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -21,14 +24,14 @@ pub(crate) async fn record_failure_postgres(
     let mut transaction = connection
         .begin()
         .await
-        .map_err(|_| storage_error("打开 PostgreSQL 实时失败记录事务失败"))?;
+        .map_err(|error| storage_error_from(error, "打开 PostgreSQL 实时失败记录事务失败"))?;
     let result = async {
         let event_stream: Option<String> =
             sqlx::query_scalar("SELECT stream_key FROM public.realtime_events WHERE event_id = $1")
                 .bind(event_id)
                 .fetch_optional(&mut *transaction)
                 .await
-                .map_err(|_| storage_error("校验 PostgreSQL 实时失败事件失败"))?;
+                .map_err(|error| storage_error_from(error, "校验 PostgreSQL 实时失败事件失败"))?;
         if event_stream.as_deref() != Some(stream_key) {
             return Err(storage_error("PostgreSQL 实时失败事件不属于指定 stream"));
         }
@@ -50,7 +53,7 @@ pub(crate) async fn record_failure_postgres(
         .bind(failed_at)
         .execute(&mut *transaction)
         .await
-        .map_err(|_| storage_error("写入 PostgreSQL 实时失败记录失败"))?;
+        .map_err(|error| storage_error_from(error, "写入 PostgreSQL 实时失败记录失败"))?;
         Ok::<(), ApplicationError>(())
     }
     .await;
@@ -58,7 +61,7 @@ pub(crate) async fn record_failure_postgres(
         Ok(()) => transaction
             .commit()
             .await
-            .map_err(|_| storage_error("提交 PostgreSQL 实时失败记录事务失败")),
+            .map_err(|error| storage_error_from(error, "提交 PostgreSQL 实时失败记录事务失败")),
         Err(error) => {
             let _ = transaction.rollback().await;
             Err(error)

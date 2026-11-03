@@ -1,5 +1,8 @@
 //! Realtime 事件元数据的安全分页查询。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, RealtimeEventListRequest, RealtimeEventPage, RealtimeEventSnapshot,
 };
@@ -44,12 +47,12 @@ pub(super) async fn list_events_postgres(
     .bind(request.offset)
     .fetch_all(store.pool())
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL realtime 事件元数据失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime 事件元数据失败"))?;
     let total = rows
         .first()
         .ok_or_else(|| storage_error("PostgreSQL realtime 事件摘要缺失"))?
         .try_get("total")
-        .map_err(|_| storage_error("读取 PostgreSQL realtime 事件总数失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime 事件总数失败"))?;
     let entries = rows
         .into_iter()
         .filter_map(|row| event_from_postgres_page_row(row).transpose())
@@ -64,21 +67,22 @@ fn event_from_postgres_page_row(
 ) -> Result<Option<RealtimeEventSnapshot>, ApplicationError> {
     let event_id: Option<Uuid> = row
         .try_get("event_id")
-        .map_err(|_| storage_error("读取 PostgreSQL realtime 事件 ID 失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime 事件 ID 失败"))?;
     let stream_key: Option<String> = row
         .try_get("stream_key")
-        .map_err(|_| storage_error("读取 PostgreSQL realtime 事件流失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime 事件流失败"))?;
     let stream_sequence: Option<i64> = row
         .try_get("stream_sequence")
-        .map_err(|_| storage_error("读取 PostgreSQL realtime 事件序号失败"))?;
-    let kind: Option<String> =
-        row.try_get("kind").map_err(|_| storage_error("读取 PostgreSQL realtime 事件类型失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime 事件序号失败"))?;
+    let kind: Option<String> = row
+        .try_get("kind")
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime 事件类型失败"))?;
     let schema_version: Option<i32> = row
         .try_get("schema_version")
-        .map_err(|_| storage_error("读取 PostgreSQL realtime schema 版本失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime schema 版本失败"))?;
     let created_at: Option<DateTime<Utc>> = row
         .try_get("created_at")
-        .map_err(|_| storage_error("读取 PostgreSQL realtime 事件时间失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime 事件时间失败"))?;
     match (event_id, stream_key, stream_sequence, kind, schema_version, created_at) {
         (None, None, None, None, None, None) => Ok(None),
         (

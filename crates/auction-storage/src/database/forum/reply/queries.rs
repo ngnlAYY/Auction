@@ -1,6 +1,9 @@
 //! 论坛回帖主题、lot、身份和代理的 PostgreSQL 只读查询。
 
 #[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
+#[cfg(feature = "postgres")]
 use auction_application::{
     ApplicationError, ForumActiveProxy, ForumCommandOutcome, ForumCommandStatus, ForumLotTarget,
     ForumReplyTopic,
@@ -33,8 +36,11 @@ pub(super) async fn claim_published_topics_postgres(
         .copied()
         .map(auction_domain::SettlementWorld::as_str)
         .collect::<Vec<_>>();
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启论坛回帖领取事务失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启论坛回帖领取事务失败"))?;
     let rows = sqlx::query(
         "SELECT sync.auction_id, auction.world_id, sync.thread_id,
                 sync.catalog_post_id, sync.system_log_post_id,
@@ -72,43 +78,50 @@ pub(super) async fn claim_published_topics_postgres(
     .bind(&available_worlds)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取已发布论坛主题失败"))?;
+    .map_err(|error| storage_error_from(error, "读取已发布论坛主题失败"))?;
 
     let mut topics = Vec::with_capacity(rows.len());
     for row in rows {
-        let auction_id: Uuid =
-            row.try_get("auction_id").map_err(|_| storage_error("读取论坛回帖拍卖标识失败"))?;
-        let world_id: String =
-            row.try_get("world_id").map_err(|_| storage_error("读取论坛回帖世界失败"))?;
-        let thread_id: String =
-            row.try_get("thread_id").map_err(|_| storage_error("读取论坛回帖主题标识失败"))?;
+        let auction_id: Uuid = row
+            .try_get("auction_id")
+            .map_err(|error| storage_error_from(error, "读取论坛回帖拍卖标识失败"))?;
+        let world_id: String = row
+            .try_get("world_id")
+            .map_err(|error| storage_error_from(error, "读取论坛回帖世界失败"))?;
+        let thread_id: String = row
+            .try_get("thread_id")
+            .map_err(|error| storage_error_from(error, "读取论坛回帖主题标识失败"))?;
         let catalog_post_id: String = row
             .try_get("catalog_post_id")
-            .map_err(|_| storage_error("读取论坛目录帖子标识失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛目录帖子标识失败"))?;
         let system_log_post_id: String = row
             .try_get("system_log_post_id")
-            .map_err(|_| storage_error("读取论坛系统日志帖子标识失败"))?;
-        let title: String =
-            row.try_get("title").map_err(|_| storage_error("读取论坛主题标题失败"))?;
-        let catalog_body: String =
-            row.try_get("body").map_err(|_| storage_error("读取论坛目录正文失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛系统日志帖子标识失败"))?;
+        let title: String = row
+            .try_get("title")
+            .map_err(|error| storage_error_from(error, "读取论坛主题标题失败"))?;
+        let catalog_body: String = row
+            .try_get("body")
+            .map_err(|error| storage_error_from(error, "读取论坛目录正文失败"))?;
         let system_log_body: String = row
             .try_get("system_log_body")
-            .map_err(|_| storage_error("读取论坛系统日志正文失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛系统日志正文失败"))?;
         let content_revision: i64 = row
             .try_get("content_revision")
-            .map_err(|_| storage_error("读取论坛固定楼层版本失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛固定楼层版本失败"))?;
         let processed_through_post_number: i32 = row
             .try_get("processed_through_post_number")
-            .map_err(|_| storage_error("读取论坛已处理楼层失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛已处理楼层失败"))?;
         let content_last_error_code: Option<String> = row
             .try_get("content_last_error_code")
-            .map_err(|_| storage_error("读取论坛固定楼层错误码失败"))?;
-        let layout: String =
-            row.try_get("catalog_layout").map_err(|_| storage_error("读取论坛冻结目录布局失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛固定楼层错误码失败"))?;
+        let layout: String = row
+            .try_get("catalog_layout")
+            .map_err(|error| storage_error_from(error, "读取论坛冻结目录布局失败"))?;
         let catalog_layout = super::super::catalog::parse_layout(&layout)?;
-        let catalog_page_count: i32 =
-            row.try_get("catalog_page_count").map_err(|_| storage_error("读取论坛目录页数失败"))?;
+        let catalog_page_count: i32 = row
+            .try_get("catalog_page_count")
+            .map_err(|error| storage_error_from(error, "读取论坛目录页数失败"))?;
         let catalog_continuation =
             super::super::catalog::read_pages(&mut transaction, auction_id, catalog_page_count)
                 .await?;
@@ -137,13 +150,13 @@ pub(super) async fn claim_published_topics_postgres(
         .bind(now)
         .fetch_optional(&mut *transaction)
         .await
-        .map_err(|_| storage_error("写入论坛固定楼层内容租约失败"))?;
+        .map_err(|error| storage_error_from(error, "写入论坛固定楼层内容租约失败"))?;
         let Some(claimed) = claimed else {
             return Err(storage_error("论坛固定楼层内容租约在事务内变化"));
         };
         let content_claim_fencing: i64 = claimed
             .try_get("content_claim_fencing")
-            .map_err(|_| storage_error("读取论坛固定楼层 fencing 失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛固定楼层 fencing 失败"))?;
         let world = parse_world(&world_id)?;
         if auction_id.is_nil()
             || !valid_decimal_id(&thread_id, MAX_THREAD_ID_BYTES)
@@ -187,7 +200,10 @@ pub(super) async fn claim_published_topics_postgres(
             content_last_error_code,
         });
     }
-    transaction.commit().await.map_err(|_| storage_error("提交论坛回帖领取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交论坛回帖领取事务失败"))?;
     Ok(topics)
 }
 
@@ -202,7 +218,7 @@ pub(super) async fn reply_commands_open_postgres(
     .bind(auction_id.as_uuid())
     .fetch_one(store.pool())
     .await
-    .map_err(|_| storage_error("读取论坛回帖接收状态失败"))
+    .map_err(|error| storage_error_from(error, "读取论坛回帖接收状态失败"))
 }
 
 #[cfg(feature = "postgres")]
@@ -224,43 +240,45 @@ pub(super) async fn command_outcomes_postgres(
     .bind(thread_id)
     .fetch_all(store.pool())
     .await
-    .map_err(|_| storage_error("读取论坛命令处理结果失败"))?;
+    .map_err(|error| storage_error_from(error, "读取论坛命令处理结果失败"))?;
     let mut outcomes = Vec::with_capacity(rows.len());
     for row in rows {
-        let status: String =
-            row.try_get("status").map_err(|_| storage_error("读取论坛命令状态失败"))?;
+        let status: String = row
+            .try_get("status")
+            .map_err(|error| storage_error_from(error, "读取论坛命令状态失败"))?;
         let status = match status.as_str() {
             "pending" => ForumCommandStatus::Pending,
             "applied" => ForumCommandStatus::Applied,
             "rejected" => ForumCommandStatus::Rejected,
             _ => return Err(storage_error("论坛命令状态不在闭集内")),
         };
-        let post_number: Option<i32> =
-            row.try_get("post_number").map_err(|_| storage_error("读取论坛命令楼层号失败"))?;
+        let post_number: Option<i32> = row
+            .try_get("post_number")
+            .map_err(|error| storage_error_from(error, "读取论坛命令楼层号失败"))?;
         if post_number.is_some_and(|value| value < 3) {
             return Err(storage_error("论坛命令楼层号不在用户回复范围内"));
         }
         outcomes.push(ForumCommandOutcome {
             post_id: row
                 .try_get("post_id")
-                .map_err(|_| storage_error("读取论坛命令帖子标识失败"))?,
+                .map_err(|error| storage_error_from(error, "读取论坛命令帖子标识失败"))?,
             post_number,
             line_number: row
                 .try_get("line_number")
-                .map_err(|_| storage_error("读取论坛命令行号失败"))?,
+                .map_err(|error| storage_error_from(error, "读取论坛命令行号失败"))?,
             lot_code: row
                 .try_get("lot_code")
-                .map_err(|_| storage_error("读取论坛命令 lot 编码失败"))?,
+                .map_err(|error| storage_error_from(error, "读取论坛命令 lot 编码失败"))?,
             command_kind: row
                 .try_get("command_kind")
-                .map_err(|_| storage_error("读取论坛命令类型失败"))?,
+                .map_err(|error| storage_error_from(error, "读取论坛命令类型失败"))?,
             status,
             error_code: row
                 .try_get("last_error_code")
-                .map_err(|_| storage_error("读取论坛命令错误码失败"))?,
+                .map_err(|error| storage_error_from(error, "读取论坛命令错误码失败"))?,
             safe_detail: row
                 .try_get("last_error_detail")
-                .map_err(|_| storage_error("读取论坛命令安全详情失败"))?,
+                .map_err(|error| storage_error_from(error, "读取论坛命令安全详情失败"))?,
         });
     }
     Ok(outcomes)
@@ -291,16 +309,19 @@ pub(super) async fn lot_targets_postgres(
     .bind(auction_id.as_uuid())
     .fetch_all(store.pool())
     .await
-    .map_err(|_| storage_error("读取论坛回帖 lot 映射失败"))?;
+    .map_err(|error| storage_error_from(error, "读取论坛回帖 lot 映射失败"))?;
 
     let mut targets = Vec::with_capacity(rows.len());
     for row in rows {
-        let lot_uuid: Uuid =
-            row.try_get("id").map_err(|_| storage_error("读取论坛回帖 lot 标识失败"))?;
-        let lot_number: i32 =
-            row.try_get("lot_number").map_err(|_| storage_error("读取论坛回帖 lot 序号失败"))?;
-        let category: String =
-            row.try_get("category").map_err(|_| storage_error("读取论坛回帖 lot 分类失败"))?;
+        let lot_uuid: Uuid = row
+            .try_get("id")
+            .map_err(|error| storage_error_from(error, "读取论坛回帖 lot 标识失败"))?;
+        let lot_number: i32 = row
+            .try_get("lot_number")
+            .map_err(|error| storage_error_from(error, "读取论坛回帖 lot 序号失败"))?;
+        let category: String = row
+            .try_get("category")
+            .map_err(|error| storage_error_from(error, "读取论坛回帖 lot 分类失败"))?;
         let code = super::super::sync::lot_code(&category, lot_number)?;
         targets.push(ForumLotTarget { code, lot_id: LotId::from_uuid(lot_uuid) });
     }
@@ -332,11 +353,11 @@ pub(super) async fn active_proxy_postgres(
     .bind(user_id.as_uuid())
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("读取论坛活动代理失败"))?;
+    .map_err(|error| storage_error_from(error, "读取论坛活动代理失败"))?;
     row.map(|row| {
         let authorization_id: Uuid = row
             .try_get("authorization_id")
-            .map_err(|_| storage_error("读取论坛活动代理标识失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛活动代理标识失败"))?;
         if authorization_id.is_nil() {
             return Err(storage_error("论坛活动代理标识无效"));
         }

@@ -1,5 +1,8 @@
 //! Admin 凭据列表与命令账本读取。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use super::mapping::*;
 
 use super::*;
@@ -13,7 +16,7 @@ pub(super) async fn list_postgres(
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("开启凭据列表事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启凭据列表事务失败"))?;
 
     let kind = request.kind.map(AdminCredentialKind::as_str);
     let (mail_scope, forum_scope) = world_scopes(request.world, request.kind);
@@ -33,7 +36,7 @@ pub(super) async fn list_postgres(
     .bind(status)
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|_| storage_error("统计 Admin 凭据失败"))?;
+    .map_err(|error| storage_error_from(error, "统计 Admin 凭据失败"))?;
     let rows = sqlx::query(
         "SELECT id, credential_kind, scope, label, player_name, status, state_version,
                 created_at, rotated_at, updated_at
@@ -52,8 +55,11 @@ pub(super) async fn list_postgres(
     .bind(request.offset)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 Admin 凭据列表失败"))?;
-    transaction.commit().await.map_err(|_| storage_error("提交 Admin 凭据列表事务失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 Admin 凭据列表失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 Admin 凭据列表事务失败"))?;
 
     let credentials = rows.iter().map(map_postgres_credential).collect::<Result<Vec<_>, _>>()?;
     let page =
@@ -70,8 +76,11 @@ pub(super) async fn find_command_postgres(
     kind: AdminCredentialCommandKind,
     request_hash: RequestHash,
 ) -> Result<Option<AdminCredentialCommandResult>, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启凭据命令读取事务失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启凭据命令读取事务失败"))?;
     let row = sqlx::query(
         "SELECT command_kind, request_digest, credential_id, result_payload
          FROM public.credential_admin_commands
@@ -83,6 +92,9 @@ pub(super) async fn find_command_postgres(
     .await
     .map_err(map_storage_error)?;
     let result = row.map(|row| parse_command(&row, kind, request_hash)).transpose()?;
-    transaction.commit().await.map_err(|_| storage_error("提交凭据命令读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交凭据命令读取事务失败"))?;
     Ok(result)
 }

@@ -1,6 +1,9 @@
 //! Realtime consumer 游标确认事务；只有 event_id 与 stream/sequence 完全匹配且序号连续才推进游标，
 //! 失败记录的正常确认同事务收口，replay 事件仍由显式恢复流程处理。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::ApplicationError;
 #[cfg(feature = "postgres")]
 use sqlx::Connection;
@@ -15,8 +18,10 @@ pub(super) async fn acknowledge_postgres(
     event_id: Uuid,
     stream_sequence: i64,
 ) -> Result<(), ApplicationError> {
-    let mut transaction =
-        connection.begin().await.map_err(|_| storage_error("打开 PostgreSQL 实时游标事务失败"))?;
+    let mut transaction = connection
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "打开 PostgreSQL 实时游标事务失败"))?;
     let result = acknowledge_postgres_inner(
         &mut transaction,
         consumer_key,
@@ -29,7 +34,7 @@ pub(super) async fn acknowledge_postgres(
         Ok(()) => transaction
             .commit()
             .await
-            .map_err(|_| storage_error("提交 PostgreSQL 实时游标事务失败")),
+            .map_err(|error| storage_error_from(error, "提交 PostgreSQL 实时游标事务失败")),
         Err(error) => {
             let _ = transaction.rollback().await;
             Err(error)
@@ -56,7 +61,7 @@ async fn acknowledge_postgres_inner(
     .bind(event_id)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| storage_error("解决 PostgreSQL 实时消费失败记录失败"))?;
+    .map_err(|error| storage_error_from(error, "解决 PostgreSQL 实时消费失败记录失败"))?;
     let current = sqlx::query_scalar::<_, i64>(
         "SELECT last_sequence
          FROM public.realtime_consumer_offsets
@@ -67,7 +72,7 @@ async fn acknowledge_postgres_inner(
     .bind(stream_key)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("锁定 PostgreSQL 实时消费游标失败"))?
+    .map_err(|error| storage_error_from(error, "锁定 PostgreSQL 实时消费游标失败"))?
     .unwrap_or(0);
     let stored_event_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT event_id
@@ -78,7 +83,7 @@ async fn acknowledge_postgres_inner(
     .bind(stream_sequence)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("校验 PostgreSQL 实时事件序号失败"))?;
+    .map_err(|error| storage_error_from(error, "校验 PostgreSQL 实时事件序号失败"))?;
     if stored_event_id != Some(event_id) {
         return Err(storage_error("PostgreSQL 实时事件不存在或 stream 不匹配"));
     }
@@ -100,7 +105,7 @@ async fn acknowledge_postgres_inner(
         .bind(stream_sequence)
         .execute(&mut **transaction)
         .await
-        .map_err(|_| storage_error("写入 PostgreSQL 实时消费游标失败"))?;
+        .map_err(|error| storage_error_from(error, "写入 PostgreSQL 实时消费游标失败"))?;
     }
     Ok(())
 }

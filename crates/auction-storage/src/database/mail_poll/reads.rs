@@ -1,5 +1,8 @@
 //! 详情读取恢复队列：短事务锁定邮箱租约，GET 前提交摘要；入站提交原子删除完成前缀。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{ApplicationError, MailPollClaim, MailPollReadSummary};
 use sqlx::{Postgres, Row, Transaction};
 
@@ -12,8 +15,10 @@ pub(super) async fn pending(
     world_id: &str,
     limit: u16,
 ) -> Result<Vec<MailPollReadSummary>, ApplicationError> {
-    let mut transaction =
-        pool.begin().await.map_err(|_| storage_error("开启 MoogleMail 待读事务失败"))?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启 MoogleMail 待读事务失败"))?;
     lock_claim(&mut transaction, claim, world_id).await?;
     let rows = sqlx::query(
         "SELECT external_mail_id, world_id, sender, subject, received_at
@@ -26,7 +31,7 @@ pub(super) async fn pending(
     .bind(i64::from(limit))
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 MoogleMail 待读队列失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 MoogleMail 待读队列失败"))?;
     let summaries = rows
         .into_iter()
         .map(|row| {
@@ -40,12 +45,15 @@ pub(super) async fn pending(
             Ok::<_, sqlx::Error>(summary)
         })
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| storage_error("解码 MoogleMail 待读身份失败"))?;
+        .map_err(|error| storage_error_from(error, "解码 MoogleMail 待读身份失败"))?;
     if summaries.iter().any(|summary| !summary.validate()) {
         return Err(storage_error("MoogleMail 待读身份无效"));
     }
     check_live_claim(&mut transaction, claim).await?;
-    transaction.commit().await.map_err(|_| storage_error("提交 MoogleMail 待读事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 MoogleMail 待读事务失败"))?;
     Ok(summaries)
 }
 
@@ -61,8 +69,10 @@ pub(super) async fn stage(
     let senders = summaries.iter().map(|summary| summary.sender.as_str()).collect::<Vec<_>>();
     let subjects = summaries.iter().map(|summary| summary.subject.as_str()).collect::<Vec<_>>();
     let received_at = summaries.iter().map(|summary| summary.received_at).collect::<Vec<_>>();
-    let mut transaction =
-        pool.begin().await.map_err(|_| storage_error("开启 MoogleMail 待读登记事务失败"))?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启 MoogleMail 待读登记事务失败"))?;
     lock_claim(&mut transaction, claim, world_id).await?;
     // 按原列表位置分配 read_sequence，恢复仍读取同一完成前缀；冲突只校验原身份，
     // 不覆盖第一次 GET 前已提交的依据。任一项不匹配即回滚整批，不能提交其余项。
@@ -88,12 +98,15 @@ pub(super) async fn stage(
     .bind(&received_at)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("登记 MoogleMail 待读身份失败"))?;
+    .map_err(|error| storage_error_from(error, "登记 MoogleMail 待读身份失败"))?;
     if verified.rows_affected() != summaries.len() as u64 {
         return Err(storage_error("MoogleMail 待读身份冲突"));
     }
     check_live_claim(&mut transaction, claim).await?;
-    transaction.commit().await.map_err(|_| storage_error("提交 MoogleMail 待读登记失败"))
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 MoogleMail 待读登记失败"))
 }
 
 async fn lock_claim(
@@ -113,7 +126,7 @@ async fn lock_claim(
     .bind(claim.state_version)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取 MoogleMail 待读租约失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 MoogleMail 待读租约失败"))?;
     if valid.is_none() {
         return Err(storage_error("MoogleMail 待读租约已失效"));
     }
@@ -127,7 +140,7 @@ async fn lock_claim(
     .bind(world_id)
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| storage_error("核验 MoogleMail 待读世界失败"))?;
+    .map_err(|error| storage_error_from(error, "核验 MoogleMail 待读世界失败"))?;
     if other_world {
         return Err(storage_error("MoogleMail 待读邮箱世界冲突"));
     }
@@ -149,7 +162,7 @@ async fn check_live_claim(
     .bind(claim.state_version)
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| storage_error("核验 MoogleMail 待读租约失败"))?;
+    .map_err(|error| storage_error_from(error, "核验 MoogleMail 待读租约失败"))?;
     if !valid {
         return Err(storage_error("MoogleMail 待读租约已失效"));
     }
@@ -172,6 +185,6 @@ pub(super) async fn complete_prefix(
     .bind(completed_cursor)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| storage_error("完成 MoogleMail 待读前缀失败"))?;
+    .map_err(|error| storage_error_from(error, "完成 MoogleMail 待读前缀失败"))?;
     Ok(())
 }

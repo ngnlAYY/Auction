@@ -58,7 +58,10 @@ pub(super) fn map_sql_error(error: sqlx::Error) -> RecoveryCommandError {
     if crate::database::is_serialization_conflict(&error) {
         RecoveryCommandError::SerializationConflict
     } else {
-        RecoveryCommandError::Failed("PostgreSQL recovery 确认事务失败".to_owned())
+        RecoveryCommandError::Failed(crate::database::sql_error_context(
+            &error,
+            "PostgreSQL recovery 确认事务失败",
+        ))
     }
 }
 

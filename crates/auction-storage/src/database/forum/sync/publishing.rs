@@ -1,5 +1,8 @@
 //! 论坛主题同步发布确认与失败退避的 PostgreSQL 状态推进。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, ForumPublishedLayout, ForumRenderedPost, ForumRenderedThread, ForumSyncClaim,
 };
@@ -16,8 +19,11 @@ pub(super) async fn publish_postgres(
     published: &ForumPublishedLayout,
     published_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启论坛分页发布证明事务失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启论坛分页发布证明事务失败"))?;
     // 锁等待结束后才检查实时租约，不能凭远端回执的旧时间提交过期 claim。
     sqlx::query(
         "SELECT auction_id FROM public.auction_forum_sync WHERE auction_id = $1 FOR UPDATE",
@@ -25,7 +31,7 @@ pub(super) async fn publish_postgres(
     .bind(claim.auction_id.as_uuid())
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|_| storage_error("锁定论坛发布租约失败"))?;
+    .map_err(|error| storage_error_from(error, "锁定论坛发布租约失败"))?;
     let page_count = (rendered.catalog_continuation.len() + 1) as i32;
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
@@ -77,7 +83,7 @@ pub(super) async fn publish_postgres(
     .bind(page_count)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("写入论坛同步发布证明失败"))?;
+    .map_err(|error| storage_error_from(error, "写入论坛同步发布证明失败"))?;
     if result.rows_affected() != 1 {
         return Err(storage_error("论坛同步发布 claim 或固定楼层身份已失效"));
     }
@@ -88,7 +94,10 @@ pub(super) async fn publish_postgres(
         published,
     )
     .await?;
-    transaction.commit().await.map_err(|_| storage_error("提交论坛分页发布证明失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交论坛分页发布证明失败"))?;
     Ok(())
 }
 
@@ -128,7 +137,7 @@ pub(super) async fn fail_postgres(
     .bind(claim.claimed_at)
     .execute(store.pool())
     .await
-    .map_err(|_| storage_error("写入论坛同步失败退避状态失败"))?;
+    .map_err(|error| storage_error_from(error, "写入论坛同步失败退避状态失败"))?;
     if result.rows_affected() != 1 {
         return Err(storage_error("论坛同步失败 claim 已失效"));
     }

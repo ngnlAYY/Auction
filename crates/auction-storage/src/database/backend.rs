@@ -43,6 +43,90 @@ pub(crate) fn storage_error(message: &str) -> auction_application::ApplicationEr
     auction_application::RepositoryError::Failed(message.to_owned()).into()
 }
 
+/// 仅增强失败诊断；不改变校验、重试或缓存语义，保护不变量 6、7、9。
+/// 原始驱动错误不进入应用错误的正文或 source。
+#[cfg(feature = "postgres")]
+pub(crate) fn storage_error_from(
+    error: sqlx::Error,
+    context: &'static str,
+) -> auction_application::ApplicationError {
+    auction_application::RepositoryError::Failed(sql_error_context(&error, context)).into()
+}
+
+/// SQL 错误的安全投影；只读取 SQLSTATE、约束名和表名，缺失或异常字段均用固定值。
+#[cfg(feature = "postgres")]
+pub(crate) fn sql_error_context(error: &sqlx::Error, context: &'static str) -> String {
+    let sqlx_kind = sql_error_kind(error);
+    let Some(database) = error.as_database_error() else {
+        return format!(
+            "{context} [sqlx_kind={sqlx_kind} sqlstate_class=none sqlstate=none constraint=none table=none]"
+        );
+    };
+    let code = database.code();
+    let (sqlstate_class, sqlstate) = match code.as_deref() {
+        Some(value)
+            if value.len() == 5
+                && value.bytes().all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit()) =>
+        {
+            // 已验证五个 ASCII 字节，按两位类别切片不会切断字符或越界。
+            (&value[..2], value)
+        }
+        Some(_) => ("invalid", "invalid"),
+        None => ("none", "none"),
+    };
+    let constraint = sql_schema_identifier(database.constraint());
+    let table = sql_schema_identifier(database.table());
+    format!(
+        "{context} [sqlx_kind={sqlx_kind} sqlstate_class={sqlstate_class} sqlstate={sqlstate} constraint={constraint} table={table}]"
+    )
+}
+
+/// 不读取任何变体负载；连接、编码、协议和配置错误可能携带秘密。
+#[cfg(feature = "postgres")]
+fn sql_error_kind(error: &sqlx::Error) -> &'static str {
+    match error {
+        sqlx::Error::Configuration(_) => "Configuration",
+        sqlx::Error::InvalidArgument(_) => "InvalidArgument",
+        sqlx::Error::Database(_) => "Database",
+        sqlx::Error::Io(_) => "Io",
+        sqlx::Error::Tls(_) => "Tls",
+        sqlx::Error::Protocol(_) => "Protocol",
+        sqlx::Error::RowNotFound => "RowNotFound",
+        sqlx::Error::TypeNotFound { .. } => "TypeNotFound",
+        sqlx::Error::ColumnIndexOutOfBounds { .. } => "ColumnIndexOutOfBounds",
+        sqlx::Error::ColumnNotFound(_) => "ColumnNotFound",
+        sqlx::Error::ColumnDecode { .. } => "ColumnDecode",
+        sqlx::Error::Encode(_) => "Encode",
+        sqlx::Error::Decode(_) => "Decode",
+        sqlx::Error::AnyDriverError(_) => "AnyDriverError",
+        sqlx::Error::PoolTimedOut => "PoolTimedOut",
+        sqlx::Error::PoolClosed => "PoolClosed",
+        sqlx::Error::WorkerCrashed => "WorkerCrashed",
+        sqlx::Error::Migrate(_) => "Migrate",
+        sqlx::Error::InvalidSavePointStatement => "InvalidSavePointStatement",
+        sqlx::Error::BeginFailed => "BeginFailed",
+        sqlx::Error::ConfigFile(_) => "ConfigFile",
+        _ => "Other",
+    }
+}
+
+/// 当前迁移仅使用静态 ASCII schema 标识；拒绝控制字符、分隔符与超长诊断字段。
+#[cfg(feature = "postgres")]
+fn sql_schema_identifier(value: Option<&str>) -> &str {
+    match value {
+        Some(value)
+            if !value.is_empty()
+                && value.len() <= 63
+                && (value.as_bytes()[0].is_ascii_alphabetic() || value.as_bytes()[0] == b'_')
+                && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_') =>
+        {
+            value
+        }
+        None => "none",
+        Some(_) => "invalid",
+    }
+}
+
 /// PostgreSQL 明确中止、可由事务 owner 有界重试的冲突：序列化失败（40001）与死锁（40P01）。
 /// 全部重试判断共用此谓词，避免各模块手写 SQLSTATE 闭集漂移。
 #[cfg(feature = "postgres")]

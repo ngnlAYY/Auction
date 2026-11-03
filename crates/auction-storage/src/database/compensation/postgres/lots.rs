@@ -1,5 +1,8 @@
 //! Public 单场逐件结算明细与成交撤销冲正查询。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, PublicCompensationLot, PublicCompensationLotPage,
     PublicCompensationLotRequest, PublicCompensationLotReversal,
@@ -22,10 +25,13 @@ pub(crate) async fn lots(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启公开逐件结算读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启公开逐件结算读取事务失败"))?;
 
     let Some(round) = load_round(&mut transaction, auction_id).await? else {
-        transaction.commit().await.map_err(|_| storage_error("提交公开逐件结算空结果事务失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交公开逐件结算空结果事务失败"))?;
         return Ok(None);
     };
 
@@ -38,7 +44,7 @@ pub(crate) async fn lots(
     .bind(auction_id)
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|_| storage_error("统计公开逐件结算明细失败"))?;
+    .map_err(|error| storage_error_from(error, "统计公开逐件结算明细失败"))?;
 
     // 只公开已售 lot；流拍 lot 的全部金额为零，不参与附加费或补偿计算。
     let entries = sqlx::query(concat!(
@@ -85,7 +91,7 @@ pub(crate) async fn lots(
     .bind(request.offset)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取公开逐件结算明细失败"))?
+    .map_err(|error| storage_error_from(error, "读取公开逐件结算明细失败"))?
     .iter()
     .map(map_lot)
     .collect::<Result<Vec<_>, ApplicationError>>()?;
@@ -97,85 +103,101 @@ pub(crate) async fn lots(
         limit: request.limit,
         offset: request.offset,
     };
-    transaction.commit().await.map_err(|_| storage_error("提交公开逐件结算读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交公开逐件结算读取事务失败"))?;
     page.validate().map_err(storage_error)?;
     Ok(Some(page))
 }
 
 fn map_lot(row: &PgRow) -> Result<PublicCompensationLot, ApplicationError> {
-    let world: String =
-        row.try_get("equipment_world_id").map_err(|_| storage_error("读取逐件结算装备世界失败"))?;
+    let world: String = row
+        .try_get("equipment_world_id")
+        .map_err(|error| storage_error_from(error, "读取逐件结算装备世界失败"))?;
     let external_id: String = row
         .try_get("external_equipment_id")
-        .map_err(|_| storage_error("读取逐件结算装备外部标识失败"))?;
+        .map_err(|error| storage_error_from(error, "读取逐件结算装备外部标识失败"))?;
     let projected_game_equipment_url = match world.as_str() {
         "main" => format!("https://hentaiverse.org/equip/{external_id}"),
         "isekai" => format!("https://hentaiverse.org/isekai/equip/{external_id}"),
         _ => return Err(storage_error("逐件结算装备世界不在公开闭集内")),
     };
-    let reversed_at: Option<chrono::DateTime<chrono::Utc>> =
-        row.try_get("reversed_at").map_err(|_| storage_error("读取成交撤销冲正时间失败"))?;
+    let reversed_at: Option<chrono::DateTime<chrono::Utc>> = row
+        .try_get("reversed_at")
+        .map_err(|error| storage_error_from(error, "读取成交撤销冲正时间失败"))?;
     let reversal = reversed_at
         .map(|created_at| {
             Ok::<_, ApplicationError>(PublicCompensationLotReversal {
                 amount: row
                     .try_get("reversal_amount")
-                    .map_err(|_| storage_error("读取成交撤销冲正金额失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取成交撤销冲正金额失败"))?,
                 tax_shortfall: row
                     .try_get("reversal_tax_shortfall")
-                    .map_err(|_| storage_error("读取成交撤销未冲回附加费失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取成交撤销未冲回附加费失败"))?,
                 balance_after: row
                     .try_get("reversal_balance_after")
-                    .map_err(|_| storage_error("读取成交撤销冲正余额失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取成交撤销冲正余额失败"))?,
                 created_at,
             })
         })
         .transpose()?;
     Ok(PublicCompensationLot {
-        lot_id: row.try_get("lot_id").map_err(|_| storage_error("读取逐件结算 lot 标识失败"))?,
+        lot_id: row
+            .try_get("lot_id")
+            .map_err(|error| storage_error_from(error, "读取逐件结算 lot 标识失败"))?,
         lot_number: row
             .try_get("lot_number")
-            .map_err(|_| storage_error("读取逐件结算 lot 序号失败"))?,
+            .map_err(|error| storage_error_from(error, "读取逐件结算 lot 序号失败"))?,
         equipment_name: row
             .try_get("equipment_name")
-            .map_err(|_| storage_error("读取逐件结算装备名称失败"))?,
+            .map_err(|error| storage_error_from(error, "读取逐件结算装备名称失败"))?,
         equipment_category: row
             .try_get("equipment_category")
-            .map_err(|_| storage_error("读取逐件结算装备分类失败"))?,
+            .map_err(|error| storage_error_from(error, "读取逐件结算装备分类失败"))?,
         equipment_id: row
             .try_get::<Uuid, _>("equipment_id")
             .map(auction_domain::EquipmentId::from_uuid)
-            .map_err(|_| storage_error("读取逐件结算装备标识失败"))?,
+            .map_err(|error| storage_error_from(error, "读取逐件结算装备标识失败"))?,
         projected_game_equipment_url,
-        end_price: row.try_get("end_price").map_err(|_| storage_error("读取逐件结算成交价失败"))?,
+        end_price: row
+            .try_get("end_price")
+            .map_err(|error| storage_error_from(error, "读取逐件结算成交价失败"))?,
         hold_ppm: ppm(row, "hold_ppm")?,
         adjustment_ppm: ppm(row, "adjustment_ppm")?,
         leader_held_nanos: row
             .try_get("leader_held_nanos")
-            .map_err(|_| storage_error("读取逐件结算累计领先时长失败"))?,
-        tax_amount: row.try_get("tax_amount").map_err(|_| storage_error("读取逐件结算税收失败"))?,
+            .map_err(|error| storage_error_from(error, "读取逐件结算累计领先时长失败"))?,
+        tax_amount: row
+            .try_get("tax_amount")
+            .map_err(|error| storage_error_from(error, "读取逐件结算税收失败"))?,
         discount_amount: row
             .try_get("discount_amount")
-            .map_err(|_| storage_error("读取逐件结算折扣需求失败"))?,
+            .map_err(|error| storage_error_from(error, "读取逐件结算折扣需求失败"))?,
         compensation_amount: row
             .try_get("compensation_amount")
-            .map_err(|_| storage_error("读取逐件结算补偿失败"))?,
+            .map_err(|error| storage_error_from(error, "读取逐件结算补偿失败"))?,
         buyer_amount: row
             .try_get("buyer_amount")
-            .map_err(|_| storage_error("读取逐件结算买家实付失败"))?,
+            .map_err(|error| storage_error_from(error, "读取逐件结算买家实付失败"))?,
         seller_amount: row
             .try_get("seller_amount")
-            .map_err(|_| storage_error("读取逐件结算卖家所得失败"))?,
-        buyer_name: row.try_get("buyer_name").map_err(|_| storage_error("读取逐件结算买家失败"))?,
+            .map_err(|error| storage_error_from(error, "读取逐件结算卖家所得失败"))?,
+        buyer_name: row
+            .try_get("buyer_name")
+            .map_err(|error| storage_error_from(error, "读取逐件结算买家失败"))?,
         seller_name: row
             .try_get("seller_name")
-            .map_err(|_| storage_error("读取逐件结算卖家失败"))?,
-        voided: row.try_get("voided").map_err(|_| storage_error("读取逐件结算撤销状态失败"))?,
+            .map_err(|error| storage_error_from(error, "读取逐件结算卖家失败"))?,
+        voided: row
+            .try_get("voided")
+            .map_err(|error| storage_error_from(error, "读取逐件结算撤销状态失败"))?,
         reversal,
     })
 }
 
 fn ppm(row: &PgRow, column: &str) -> Result<i32, ApplicationError> {
-    let value: i64 = row.try_get(column).map_err(|_| storage_error("读取逐件结算比例失败"))?;
+    let value: i64 =
+        row.try_get(column).map_err(|error| storage_error_from(error, "读取逐件结算比例失败"))?;
     i32::try_from(value).map_err(|_| storage_error("逐件结算比例超出范围"))
 }

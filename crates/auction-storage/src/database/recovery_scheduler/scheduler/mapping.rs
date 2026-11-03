@@ -56,10 +56,13 @@ pub(super) fn map_due_recovery_row(
 
 #[cfg(feature = "postgres")]
 pub(super) fn map_storage_error(error: sqlx::Error) -> auction_application::RepositoryError {
-    auction_application::RepositoryError::Failed(match error {
+    let context = match &error {
         sqlx::Error::Database(database) if database.code().as_deref() == Some("40001") => {
-            "PostgreSQL recovery Worker 发生序列化冲突".to_owned()
+            "PostgreSQL recovery Worker 发生序列化冲突"
         }
-        _ => "PostgreSQL recovery case 推进失败".to_owned(),
-    })
+        _ => "PostgreSQL recovery case 推进失败",
+    };
+    auction_application::RepositoryError::Failed(crate::database::sql_error_context(
+        &error, context,
+    ))
 }

@@ -1,5 +1,8 @@
 //! PostgreSQL Public 成交价格历史查询与行映射。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, PublicPriceHistoryCursor, PublicPriceHistoryEntry,
     PublicPriceHistoryListRequest, PublicPriceHistoryPage,
@@ -62,7 +65,7 @@ pub(super) async fn list_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启公开价格历史读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启公开价格历史读取事务失败"))?;
     let rows = sqlx::query(concat!(
         "SELECT
             l.id AS lot_id,
@@ -113,7 +116,7 @@ pub(super) async fn list_postgres(
     .bind(query_limit)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 公开价格历史失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 公开价格历史失败"))?;
     let mut entries = rows.into_iter().map(map_postgres_entry).collect::<Result<Vec<_>, _>>()?;
     validate_entries(&entries)?;
     let entry_count =
@@ -123,7 +126,10 @@ pub(super) async fn list_postgres(
         entries.truncate(request.limit as usize);
     }
     let next_cursor = has_more.then(|| entries.last().map(entry_cursor)).flatten();
-    transaction.commit().await.map_err(|_| storage_error("提交公开价格历史读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交公开价格历史读取事务失败"))?;
     Ok(PublicPriceHistoryPage {
         entries,
         total: None,
@@ -140,44 +146,46 @@ fn map_postgres_entry(
 ) -> Result<PublicPriceHistoryEntry, ApplicationError> {
     let level: sqlx::types::Json<Value> = row
         .try_get("equipment_level")
-        .map_err(|_| storage_error("读取 PostgreSQL 历史装备属性失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史装备属性失败"))?;
     Ok(PublicPriceHistoryEntry {
         lot_id: row
             .try_get("lot_id")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史 lot 标识失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史 lot 标识失败"))?,
         auction_id: row
             .try_get("auction_id")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史拍卖标识失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史拍卖标识失败"))?,
         world_id: row
             .try_get("world_id")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史世界标识失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史世界标识失败"))?,
         auction_sequence: row
             .try_get("auction_sequence")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史拍卖序号失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史拍卖序号失败"))?,
         ordering_lot_number: i64::from(
             row.try_get::<i32, _>("ordering_lot_number")
-                .map_err(|_| storage_error("读取 PostgreSQL 历史内部顺序失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史内部顺序失败"))?,
         ),
         lot_number: i64::from(
             row.try_get::<i32, _>("lot_number")
-                .map_err(|_| storage_error("读取 PostgreSQL 历史 lot 序号失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史 lot 序号失败"))?,
         ),
         equipment_name: row
             .try_get("equipment_name")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史装备名称失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史装备名称失败"))?,
         equipment_category: row
             .try_get("equipment_category")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史装备分类失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史装备分类失败"))?,
         equipment_level: equipment_level(level.0),
         buyer_name: row
             .try_get("buyer_name")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史买家名称失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史买家名称失败"))?,
         seller_name: row
             .try_get("seller_name")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史卖家名称失败"))?,
-        price: row.try_get("price").map_err(|_| storage_error("读取 PostgreSQL 历史成交价失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史卖家名称失败"))?,
+        price: row
+            .try_get("price")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史成交价失败"))?,
         closed_at: row
             .try_get::<DateTime<Utc>, _>("closed_at")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史结束时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史结束时间失败"))?,
     })
 }

@@ -1,5 +1,8 @@
 //! Public 与 Admin 规则文档的 PostgreSQL 只读投影。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use super::*;
 use crate::database::storage_error;
 
@@ -45,19 +48,27 @@ async fn get_admin_postgres(
     .bind(locale)
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL Admin 规则文档失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL Admin 规则文档失败"))?;
     row.map(|row| {
         Ok(AdminRulesDocument {
-            locale: row.try_get("locale").map_err(|_| storage_error("读取规则语言失败"))?,
-            revision: row.try_get("revision").map_err(|_| storage_error("读取规则版本失败"))?,
-            title: row.try_get("title").map_err(|_| storage_error("读取规则标题失败"))?,
-            markdown: row.try_get("markdown").map_err(|_| storage_error("读取规则正文失败"))?,
+            locale: row
+                .try_get("locale")
+                .map_err(|error| storage_error_from(error, "读取规则语言失败"))?,
+            revision: row
+                .try_get("revision")
+                .map_err(|error| storage_error_from(error, "读取规则版本失败"))?,
+            title: row
+                .try_get("title")
+                .map_err(|error| storage_error_from(error, "读取规则标题失败"))?,
+            markdown: row
+                .try_get("markdown")
+                .map_err(|error| storage_error_from(error, "读取规则正文失败"))?,
             published_by: row
                 .try_get("published_by")
-                .map_err(|_| storage_error("读取规则发布者失败"))?,
+                .map_err(|error| storage_error_from(error, "读取规则发布者失败"))?,
             published_at: row
                 .try_get("published_at")
-                .map_err(|_| storage_error("读取规则发布时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取规则发布时间失败"))?,
         })
     })
     .transpose()
@@ -76,17 +87,25 @@ async fn get_postgres(
     .bind(locale)
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 规则文档失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 规则文档失败"))?;
 
     row.map(|row| {
         Ok(PublicRulesDocument {
-            locale: row.try_get("locale").map_err(|_| storage_error("读取规则语言失败"))?,
-            revision: row.try_get("revision").map_err(|_| storage_error("读取规则版本失败"))?,
-            title: row.try_get("title").map_err(|_| storage_error("读取规则标题失败"))?,
-            markdown: row.try_get("markdown").map_err(|_| storage_error("读取规则正文失败"))?,
+            locale: row
+                .try_get("locale")
+                .map_err(|error| storage_error_from(error, "读取规则语言失败"))?,
+            revision: row
+                .try_get("revision")
+                .map_err(|error| storage_error_from(error, "读取规则版本失败"))?,
+            title: row
+                .try_get("title")
+                .map_err(|error| storage_error_from(error, "读取规则标题失败"))?,
+            markdown: row
+                .try_get("markdown")
+                .map_err(|error| storage_error_from(error, "读取规则正文失败"))?,
             published_at: row
                 .try_get("published_at")
-                .map_err(|_| storage_error("读取规则发布时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取规则发布时间失败"))?,
         })
     })
     .transpose()

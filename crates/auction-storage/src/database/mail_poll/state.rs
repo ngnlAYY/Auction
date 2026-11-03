@@ -1,5 +1,8 @@
 //! MoogleMail 轮询状态初始化、续租和安全映射。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{AdminMailPollState, ApplicationError, MailPollClaim};
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
@@ -26,7 +29,7 @@ pub(crate) async fn ensure(
     .bind(scheduled_next_at)
     .execute(pool)
     .await
-    .map_err(|_| storage_error("初始化 PostgreSQL MoogleMail 轮询状态失败"))?;
+    .map_err(|error| storage_error_from(error, "初始化 PostgreSQL MoogleMail 轮询状态失败"))?;
 
     // 旧配置可能把持久化水位留在很远的未来。启动时只允许把它向当前 cron 收敛；暂停、
     // 活动 claim 和失败退避仍是权威状态，不能因为进程重启而被跳过。
@@ -54,7 +57,7 @@ pub(crate) async fn ensure(
     .bind(retry_maximum_seconds)
     .execute(pool)
     .await
-    .map_err(|_| storage_error("收敛 PostgreSQL MoogleMail 调度水位失败"))?;
+    .map_err(|error| storage_error_from(error, "收敛 PostgreSQL MoogleMail 调度水位失败"))?;
 
     let row = sqlx::query(
         "SELECT mailbox_key, cursor_value, last_poll_at, next_poll_at,
@@ -64,7 +67,7 @@ pub(crate) async fn ensure(
     .bind(mailbox_key)
     .fetch_one(pool)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL MoogleMail 轮询状态失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL MoogleMail 轮询状态失败"))?;
     map(&row)
 }
 
@@ -74,8 +77,10 @@ pub(crate) async fn renew(
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
 ) -> Result<MailPollClaim, ApplicationError> {
-    let mut transaction =
-        pool.begin().await.map_err(|_| storage_error("开启 MoogleMail 续租事务失败"))?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启 MoogleMail 续租事务失败"))?;
     lock_mailbox(&mut transaction, &claim.mailbox_key).await?;
     // 手动触发可以持有 paused 快照；续租仍必须匹配该快照，避免改变自动调度语义。
     let updated = sqlx::query(
@@ -95,11 +100,14 @@ pub(crate) async fn renew(
     .bind(claim.paused)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("续租 PostgreSQL MoogleMail 轮询状态失败"))?;
+    .map_err(|error| storage_error_from(error, "续租 PostgreSQL MoogleMail 轮询状态失败"))?;
     if updated.rows_affected() != 1 {
         return Err(storage_error("MoogleMail 轮询续租 fence 已失效"));
     }
-    transaction.commit().await.map_err(|_| storage_error("提交 MoogleMail 续租事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 MoogleMail 续租事务失败"))?;
     claim.lease_until = lease_until;
     Ok(claim)
 }
@@ -113,7 +121,7 @@ pub(super) async fn lock_mailbox(
         .bind(mailbox_key)
         .fetch_optional(&mut **transaction)
         .await
-        .map_err(|_| storage_error("锁定 MoogleMail 邮箱租约失败"))?;
+        .map_err(|error| storage_error_from(error, "锁定 MoogleMail 邮箱租约失败"))?;
     Ok(())
 }
 
@@ -121,26 +129,28 @@ pub(crate) fn map(row: &sqlx::postgres::PgRow) -> Result<AdminMailPollState, App
     let state = AdminMailPollState {
         mailbox_key: row
             .try_get("mailbox_key")
-            .map_err(|_| storage_error("读取 MoogleMail 邮箱标识失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 MoogleMail 邮箱标识失败"))?,
         cursor_value: row
             .try_get("cursor_value")
-            .map_err(|_| storage_error("读取 MoogleMail 游标失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 MoogleMail 游标失败"))?,
         last_poll_at: row
             .try_get("last_poll_at")
-            .map_err(|_| storage_error("读取 MoogleMail 上次轮询时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 MoogleMail 上次轮询时间失败"))?,
         next_poll_at: row
             .try_get("next_poll_at")
-            .map_err(|_| storage_error("读取 MoogleMail 下次轮询时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 MoogleMail 下次轮询时间失败"))?,
         consecutive_failures: row
             .try_get("consecutive_failures")
-            .map_err(|_| storage_error("读取 MoogleMail 失败次数失败"))?,
-        paused: row.try_get("paused").map_err(|_| storage_error("读取 MoogleMail 暂停状态失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 MoogleMail 失败次数失败"))?,
+        paused: row
+            .try_get("paused")
+            .map_err(|error| storage_error_from(error, "读取 MoogleMail 暂停状态失败"))?,
         state_version: row
             .try_get("state_version")
-            .map_err(|_| storage_error("读取 MoogleMail 状态版本失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 MoogleMail 状态版本失败"))?,
         updated_at: row
             .try_get("updated_at")
-            .map_err(|_| storage_error("读取 MoogleMail 更新时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 MoogleMail 更新时间失败"))?,
     };
     if state.validate() {
         Ok(state)

@@ -1,6 +1,9 @@
 //! Admin 已结算拍卖选择目录适配器。
 
 #[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
+#[cfg(feature = "postgres")]
 use auction_application::SettlementCatalogEntry;
 use auction_application::{
     ApplicationError, ApplicationFuture, SettlementCatalogPage, SettlementCatalogReader,
@@ -39,7 +42,7 @@ async fn list_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启结算报表目录读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启结算报表目录读取事务失败"))?;
     let total = sqlx::query_scalar::<_, i64>(
         "SELECT count(*)::bigint
          FROM public.auctions AS auction
@@ -52,7 +55,7 @@ async fn list_postgres(
     .bind(request.sequence)
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|_| storage_error("统计结算报表目录失败"))?;
+    .map_err(|error| storage_error_from(error, "统计结算报表目录失败"))?;
     let rows = sqlx::query(
         "SELECT auction.id, auction.world_id, auction.sequence, auction.settled_at
          FROM public.auctions AS auction
@@ -74,27 +77,31 @@ async fn list_postgres(
     .bind(request.offset)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取结算报表目录失败"))?;
+    .map_err(|error| storage_error_from(error, "读取结算报表目录失败"))?;
     let entries = rows
         .into_iter()
         .map(|row| {
             Ok(SettlementCatalogEntry {
                 auction_id: AuctionId::from_uuid(
-                    row.try_get("id").map_err(|_| storage_error("读取结算目录拍卖标识失败"))?,
+                    row.try_get("id")
+                        .map_err(|error| storage_error_from(error, "读取结算目录拍卖标识失败"))?,
                 ),
                 world_id: row
                     .try_get("world_id")
-                    .map_err(|_| storage_error("读取结算目录世界失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取结算目录世界失败"))?,
                 sequence: row
                     .try_get("sequence")
-                    .map_err(|_| storage_error("读取结算目录期号失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取结算目录期号失败"))?,
                 settled_at: row
                     .try_get("settled_at")
-                    .map_err(|_| storage_error("读取结算目录结算时间失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取结算目录结算时间失败"))?,
             })
         })
         .collect::<Result<Vec<_>, ApplicationError>>()?;
-    transaction.commit().await.map_err(|_| storage_error("提交结算报表目录读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交结算报表目录读取事务失败"))?;
     let page =
         SettlementCatalogPage { entries, total, limit: request.limit, offset: request.offset };
     if !page.validate(request) {

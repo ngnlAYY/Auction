@@ -1,5 +1,8 @@
 //! PostgreSQL Admin 审计查询。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use super::*;
 use auction_application::{AdminAuditCursor, AdminAuditRecord};
 use chrono::{DateTime, Utc};
@@ -14,7 +17,7 @@ pub(super) async fn list_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启 Admin 审计读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启 Admin 审计读取事务失败"))?;
 
     let offset = request.offset();
     let actor = request.actor.as_deref().filter(|value| !value.is_empty());
@@ -49,7 +52,7 @@ pub(super) async fn list_postgres(
         .bind(request.occurred_to)
         .fetch_one(&mut *transaction)
         .await
-        .map_err(|_| storage_error("统计 Admin 审计记录失败"))?;
+        .map_err(|error| storage_error_from(error, "统计 Admin 审计记录失败"))?;
         let rows = sqlx::query(
             "SELECT id, occurred_at, actor_type, actor_id, action, entity_type, entity_id,
                     result, request_id, source, metadata
@@ -79,7 +82,7 @@ pub(super) async fn list_postgres(
         .bind(offset)
         .fetch_all(&mut *transaction)
         .await
-        .map_err(|_| storage_error("读取 Admin 审计数字页失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 Admin 审计数字页失败"))?;
         (rows, Some(total), false)
     } else {
         let query_limit = request
@@ -121,7 +124,7 @@ pub(super) async fn list_postgres(
         .bind(query_limit)
         .fetch_all(&mut *transaction)
         .await
-        .map_err(|_| storage_error("读取 Admin 审计 keyset 页面失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 Admin 审计 keyset 页面失败"))?;
         let has_more = rows.len() > request.page_size as usize;
         (rows, None, has_more)
     };
@@ -132,36 +135,38 @@ pub(super) async fn list_postgres(
         .map(|row| {
             let metadata: Json<Value> = row
                 .try_get("metadata")
-                .map_err(|_| storage_error("读取 Admin 审计 metadata 失败"))?;
+                .map_err(|error| storage_error_from(error, "读取 Admin 审计 metadata 失败"))?;
             let record = AdminAuditRecord {
-                id: row.try_get("id").map_err(|_| storage_error("读取 Admin 审计标识失败"))?,
+                id: row
+                    .try_get("id")
+                    .map_err(|error| storage_error_from(error, "读取 Admin 审计标识失败"))?,
                 occurred_at: row
                     .try_get::<DateTime<Utc>, _>("occurred_at")
-                    .map_err(|_| storage_error("读取 Admin 审计时间失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 Admin 审计时间失败"))?,
                 actor_type: row
                     .try_get("actor_type")
-                    .map_err(|_| storage_error("读取 Admin 审计 actor 类型失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 Admin 审计 actor 类型失败"))?,
                 actor_id: row
                     .try_get("actor_id")
-                    .map_err(|_| storage_error("读取 Admin 审计 actor 标识失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 Admin 审计 actor 标识失败"))?,
                 action: row
                     .try_get("action")
-                    .map_err(|_| storage_error("读取 Admin 审计动作失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 Admin 审计动作失败"))?,
                 entity_type: row
                     .try_get("entity_type")
-                    .map_err(|_| storage_error("读取 Admin 审计实体类型失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 Admin 审计实体类型失败"))?,
                 entity_id: row
                     .try_get("entity_id")
-                    .map_err(|_| storage_error("读取 Admin 审计实体标识失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 Admin 审计实体标识失败"))?,
                 result: row
                     .try_get("result")
-                    .map_err(|_| storage_error("读取 Admin 审计结果失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 Admin 审计结果失败"))?,
                 request_id: row
                     .try_get("request_id")
-                    .map_err(|_| storage_error("读取 Admin 审计请求标识失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 Admin 审计请求标识失败"))?,
                 source: row
                     .try_get("source")
-                    .map_err(|_| storage_error("读取 Admin 审计来源失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 Admin 审计来源失败"))?,
                 metadata: metadata.0,
             };
             if record.validate() {
@@ -172,7 +177,10 @@ pub(super) async fn list_postgres(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    transaction.commit().await.map_err(|_| storage_error("提交 Admin 审计读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 Admin 审计读取事务失败"))?;
     let next_cursor = has_more
         .then(|| {
             entries

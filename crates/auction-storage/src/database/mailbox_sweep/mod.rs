@@ -1,5 +1,8 @@
 //! MoogleMail 维护的本地证据与受证明恢复；状态、资金、履约及追加审计同事务提交。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationFuture, DeliverySendCredentialBinding, DeliverySendExpectation,
     DeliveryTakeExpectation, MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate,
@@ -376,7 +379,7 @@ async fn unproven_sends(
     .bind(limit)
     .fetch_all(pool.raw())
     .await
-    .map_err(|_| storage_error("MoogleMail 未证明投递查询失败"))?;
+    .map_err(|error| storage_error_from(error, "MoogleMail 未证明投递查询失败"))?;
     // 不可重建行仍返回轮转身份，避免固定坏前缀永久隐藏后缀。
     Ok(rows
         .into_iter()
@@ -518,7 +521,7 @@ async fn record_sweep_attempt(
     .bind(delivery_id)
     .execute(pool.raw())
     .await
-    .map_err(|_| storage_error("MoogleMail 维护轮转提交未确认"))?;
+    .map_err(|error| storage_error_from(error, "MoogleMail 维护轮转提交未确认"))?;
     Ok(result.rows_affected() == 1)
 }
 
@@ -536,7 +539,7 @@ async fn begin_compose_discard(
         || recovery::begin_discard_once(pool, delivery_id, fencing_version, expectation),
     )
     .await
-    .map_err(|_| storage_error("MoogleMail 草稿丢弃围栏提交未确认"))
+    .map_err(|error| error.into_application_error("MoogleMail 草稿丢弃围栏提交未确认"))
 }
 
 #[cfg(feature = "postgres")]
@@ -609,7 +612,7 @@ async fn record_observation(
     .bind(fencing_version)
     .execute(pool.raw())
     .await
-    .map_err(|_| storage_error("MoogleMail 维护证据写入失败"))?;
+    .map_err(|error| storage_error_from(error, "MoogleMail 维护证据写入失败"))?;
     Ok(())
 }
 
@@ -643,7 +646,7 @@ async fn record_sighting(
     .bind(external_mail_id)
     .execute(pool.raw())
     .await
-    .map_err(|_| storage_error("MoogleMail Sent 目击写入失败"))?;
+    .map_err(|error| storage_error_from(error, "MoogleMail Sent 目击写入失败"))?;
     Ok(())
 }
 
@@ -677,7 +680,7 @@ async fn persist_transition(
         || persist_transition_once(pool, delivery_id, &update),
     )
     .await
-    .map_err(|_| storage_error("MoogleMail 恢复事务未确定提交，请核对原投递"))
+    .map_err(|error| error.into_application_error("MoogleMail 恢复事务未确定提交，请核对原投递"))
 }
 
 #[cfg(feature = "postgres")]
@@ -936,6 +939,21 @@ impl From<crate::MailEvidenceTransactionError> for RecoveryError {
 
 #[cfg(feature = "postgres")]
 impl RecoveryError {
+    /// 仅在整事务重试结束后投影 SQLx 诊断，其他拒绝仍使用原固定原因。
+    fn into_application_error(
+        self,
+        context: &'static str,
+    ) -> auction_application::ApplicationError {
+        match self {
+            Self::Sqlx(error)
+            | Self::Evidence(crate::MailEvidenceTransactionError::Sqlx(error)) => {
+                storage_error_from(error, context)
+            }
+            Self::Funding(_)
+            | Self::Evidence(crate::MailEvidenceTransactionError::Rejected(_))
+            | Self::Rejected => storage_error(context),
+        }
+    }
     fn retryable(&self) -> bool {
         match self {
             Self::Sqlx(error) => crate::database::is_serialization_conflict(error),
