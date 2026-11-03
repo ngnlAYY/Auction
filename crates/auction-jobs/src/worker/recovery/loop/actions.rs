@@ -155,6 +155,7 @@ pub(super) async fn process_actions<C>(
             match result {
                 Ok(action_result) => merge_worker_result(&mut phase_result, action_result),
                 Err(error) => {
+                    diagnostics::observe_task_panic("recovery_dispatch", &error);
                     diagnostics::error(
                         "recovery_dispatch",
                         "item_join",

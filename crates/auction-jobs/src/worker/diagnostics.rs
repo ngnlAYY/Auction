@@ -21,6 +21,16 @@ pub(crate) fn join_kind(_error: &tokio::task::JoinError) -> SafeErrorKind {
     SafeErrorKind::TASK_JOIN
 }
 
+/// 仅增加子任务 panic 观测；原 join 日志与未持久化 task_join 计数仍由调用点负责。
+pub(crate) fn observe_task_panic(kind: &'static str, error: &tokio::task::JoinError) {
+    if error.is_cancelled() || !error.is_panic() {
+        return;
+    }
+    // 指标先于日志过滤和去重；不读取 payload，不形成持久处置或改变合并结果。
+    let _ = CONTEXT.try_with(|context| context.metrics.observe_task_panic(context.loop_kind));
+    self::error(kind, "item_panic", SafeErrorKind::TASK_PANIC, DiagnosticContext::default());
+}
+
 /// 依赖、超时和未确认结果的固定 WARN 入口。
 pub(crate) fn warn(
     kind: &'static str,

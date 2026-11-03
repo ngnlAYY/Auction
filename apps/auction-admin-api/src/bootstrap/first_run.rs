@@ -93,6 +93,9 @@ fn parse_setup(mut args: impl Iterator<Item = OsString>) -> anyhow::Result<Start
 }
 
 pub(super) async fn run(options: SetupOptions) -> anyhow::Result<()> {
+    auction_observability::init_json_stderr("off,auction::panic=error")
+        .context("initialize setup tracing")?;
+    auction_observability::install_safe_panic_hook();
     #[cfg(all(feature = "postgres", feature = "web-embed"))]
     {
         auction_setup::run_first_run::<crate::web_assets::AdminWebAssets>(

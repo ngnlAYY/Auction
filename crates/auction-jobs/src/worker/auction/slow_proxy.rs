@@ -92,6 +92,7 @@ where
             match result {
                 Ok(item_result) => merge_worker_result(&mut phase_result, item_result),
                 Err(error) => {
+                    diagnostics::observe_task_panic("slow_proxy", &error);
                     diagnostics::error(
                         "slow_proxy",
                         "item_join",

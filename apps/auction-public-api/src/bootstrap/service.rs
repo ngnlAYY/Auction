@@ -6,7 +6,9 @@ use std::time::Duration;
 use anyhow::Context;
 use auction_config::{AppConfig, Role};
 use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
-use auction_process::{DrainOutcome, TaskGuard, TerminationSignals, wait_for_drain};
+use auction_process::{
+    DrainOutcome, TaskGuard, TerminationSignals, join_error_kind, wait_for_drain,
+};
 use tokio::sync::oneshot;
 
 use super::{config, listener, metrics, state};
@@ -35,6 +37,7 @@ async fn run_config(config: AppConfig) -> anyhow::Result<()> {
         config.tracing_headers(),
     )
     .context("initialize tracing")?;
+    auction_observability::install_safe_panic_hook();
 
     let mut forced = false;
     let result = run_service(&config, &telemetry, &mut signals, &mut forced).await;
@@ -233,7 +236,8 @@ async fn join_background_task(task: &mut Option<TaskGuard<()>>, name: &'static s
     if let Some(Err(error)) = task.join().await
         && !error.is_cancelled()
     {
-        tracing::warn!(task = name, error = %error, "public background task join failed");
+        let kind = join_error_kind(&error);
+        tracing::warn!(task = name, kind, "public background task join failed");
     }
 }
 
@@ -278,7 +282,10 @@ async fn shutdown_tracing(telemetry: TracingRuntime, signals: &mut TerminationSi
     match result {
         Ok(Ok(())) => {}
         Ok(Err(error)) => tracing::warn!(error = %error, "public tracing shutdown failed"),
-        Err(error) => tracing::warn!(error = %error, "public tracing shutdown task failed"),
+        Err(error) => {
+            let kind = join_error_kind(&error);
+            tracing::warn!(kind, "public tracing shutdown task failed");
+        }
     }
 }
 

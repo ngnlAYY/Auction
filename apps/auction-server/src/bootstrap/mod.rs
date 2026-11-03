@@ -23,6 +23,10 @@ pub(super) async fn run() -> anyhow::Result<()> {
             ChildRole::Public => auction_public_api::run_from_path(path).await,
         };
     }
+    // 子角色在自己的配置日志初始化后安装；父进程只开启安全 panic target。
+    auction_observability::init_json_stderr("off,auction::panic=error")
+        .context("initialize server tracing")?;
+    auction_observability::install_safe_panic_hook();
     if std::env::var_os("AUCTION_CONFIG_FILE").is_some() {
         bail!("auction-server uses --config-dir, not AUCTION_CONFIG_FILE");
     }

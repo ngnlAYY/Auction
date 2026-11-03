@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use auction_process::join_error_kind;
 use opentelemetry::Context;
 use opentelemetry_sdk::{
     Resource,
@@ -292,7 +293,8 @@ where
     match tokio::task::spawn_blocking(move || exporter.blocking_lock().force_flush()).await {
         Ok(result) => result,
         Err(error) => {
-            Err(OTelSdkError::InternalFailure(format!("OTLP exporter flush task failed: {error}")))
+            let kind = join_error_kind(&error);
+            Err(OTelSdkError::InternalFailure(format!("OTLP exporter flush task failed: {kind}")))
         }
     }
 }
@@ -310,8 +312,11 @@ where
     .await
     {
         Ok(result) => result,
-        Err(error) => Err(OTelSdkError::InternalFailure(format!(
-            "OTLP exporter shutdown task failed: {error}"
-        ))),
+        Err(error) => {
+            let kind = join_error_kind(&error);
+            Err(OTelSdkError::InternalFailure(format!(
+                "OTLP exporter shutdown task failed: {kind}"
+            )))
+        }
     }
 }

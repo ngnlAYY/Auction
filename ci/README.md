@@ -89,9 +89,15 @@ bash ci/release/release.sh source-fingerprint
 
 | profile | 设置 |
 | --- | --- |
-| `release`（后端） | `opt-level = 3`、`lto = "fat"`、`codegen-units = 1`、`panic = "unwind"`、不启用增量；不使用 `target-cpu=native` |
-| `wasm-release`（前端） | 继承 release，`opt-level = "z"`、`panic = "abort"` |
+| `release`（后端） | 优化级别 3、fat LTO、单代码生成单元、unwind、溢出检查开启 |
+| `wasm-release`（前端） | 继承溢出检查，优化级别 z、panic 为 abort |
 | `dev` | `debug = "line-tables-only"`（需要完整调试信息时设 `CARGO_PROFILE_DEV_DEBUG=2`） |
+
+release 保持 `panic = "unwind"`，不启用增量或 `target-cpu=native`。
+`overflow-checks = true` 使整数溢出失败关闭，避免静默回绕。
+WASM 继承开启检查，保留 abort，由 `install_panic_hook` 显示错误横幅。
+回退时只恢复 release 的该声明，并重建原生及 WASM 制品。
+`just verify` 不构建 release；该 profile 变更只作静态核对，未作性能结论。
 
 ### Web payload：`ci/release/web-bundle.sh`
 

@@ -16,6 +16,7 @@ use super::types::{
 pub(super) struct PrometheusWorkerRecorder {
     iterations: CounterVec,
     unpersisted_errors: CounterVec,
+    task_panics: CounterVec,
     durations: HistogramVec,
     batch_items: CounterVec,
     batch_capacity: CounterVec,
@@ -47,6 +48,17 @@ impl PrometheusWorkerRecorder {
             &["loop", "kind"],
         )
         .map_err(MetricsError::Registry)?;
+        let task_panics = CounterVec::new(
+            Opts::new(
+                "auction_worker_task_panics_total",
+                "Worker item task panics observed at existing join boundaries.",
+            ),
+            &["loop"],
+        )
+        .map_err(MetricsError::Registry)?;
+        for loop_kind in WorkerLoop::ALL {
+            let _ = task_panics.with_label_values(&[loop_kind.label()]);
+        }
         let durations = HistogramVec::new(
             HistogramOpts::new(
                 "auction_worker_loop_iteration_duration_seconds",
@@ -106,6 +118,7 @@ impl PrometheusWorkerRecorder {
         for collector in [
             Box::new(iterations.clone()) as Box<dyn Collector>,
             Box::new(unpersisted_errors.clone()),
+            Box::new(task_panics.clone()),
             Box::new(durations.clone()),
             Box::new(batch_items.clone()),
             Box::new(batch_capacity.clone()),
@@ -120,6 +133,7 @@ impl PrometheusWorkerRecorder {
         Ok(Arc::new(Self {
             iterations,
             unpersisted_errors,
+            task_panics,
             durations,
             batch_items,
             batch_capacity,
@@ -133,6 +147,10 @@ impl PrometheusWorkerRecorder {
 }
 
 impl WorkerRecorder for PrometheusWorkerRecorder {
+    fn observe_task_panic(&self, loop_kind: WorkerLoop) {
+        self.task_panics.with_label_values(&[loop_kind.label()]).inc();
+    }
+
     fn observe_unpersisted_error(&self, loop_kind: WorkerLoop, kind: SafeErrorKind) {
         self.unpersisted_errors.with_label_values(&[loop_kind.label(), kind.label()]).inc();
     }

@@ -84,7 +84,8 @@ pub(super) async fn join_worker_task(task: &mut Option<TaskGuard<()>>, name: &'s
     if let Some(Err(error)) = task.join().await
         && !error.is_cancelled()
     {
-        tracing::warn!(task = name, error = %error, "worker background task join failed");
+        let kind = join_error_kind(&error);
+        tracing::warn!(task = name, kind, "worker background task join failed");
     }
 }
 

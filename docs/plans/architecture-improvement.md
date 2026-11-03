@@ -129,6 +129,8 @@
 | --- | --- | --- |
 | W12.1 的序号热点方案（提交后由唯一分配者分配 / 事务前按场次排队 / 按 lot 拆分事件流），依 W0.6 的冲突数据选择 | W12.1 | M4 开工前；若 D5 触发提前交付，则在提前交付前 |
 | SLO 目标值（出价 p99 延迟、冲突中止率、实时推送延迟、登录 key 邮件送达延迟、提醒距截止余量、Final 阶段回帖导入延迟），由我按 W0.13 基线提出（决策 56） | W1、W12 的验收 | M1 结束时 |
+| W13.3b 工作项 panic 计次的范围与口径：各 owner 计数语义不一（生命周期领取计次，结算/履约/恢复只在失败路径计次，邮件/论坛/PM/告警分发直接在常驻任务内执行），PM 发送前与论坛内容扫描、论坛竞价命令缺少可复用的人工终态或计数字段，与详情页“迁移：否”冲突；另需三态开关与影子观察（W0.15 在 M2a）。选项：缩小到有可复用字段的 owner 并无迁移交付、允许迁移完整交付，或整体延后到 M2a 与 W0.15 同批 | W13.3b（W13.3a 构建防护与观测已随 M1 交付） | M1 结束时 |
+| W0.6 服务超时启用：`timeouts_enabled` 默认关闭；启用须 W0.14 部署并按决策 72 观察后三角色有效策略为 `classified`，候选值 acquire 2 秒、statement 5 秒、lock 1 秒；`idle_in_transaction_session_timeout` 非 0 时产生的 `25P03` 按决策 71 仍归 unknown、会粘滞阻断，是否启用或扩展白名单另定；预算中的 `superuser_reserved_connections`/`reserved_connections` 待线上只读核实 | W0.6 超时（D5 量化与分档不受阻） | W0.14 切换 `classified` 后 |
 | 外部心跳与告警服务的选型与启用时间（决策 50），以及是否启用 MoogleMail 运维告警（决策 58，启用须先有 Bot 以外的收件角色） | W5.1、W5.6、备份打卡与 W5.5、W5.8 的主动通知；启用前没有任何主动告警，备份失败、Worker 崩溃与整机宕机都不会主动通知 | 无硬性期限 |
 
 ### 用户前置动作
@@ -190,7 +192,8 @@
 | W0.11 | 已提交 | `0a30c5c8` | 未部署 | 同上；`RateLimitedLog` 固定类别 60 秒窗口去重，首个调用点为 delivery 循环失败日志；`log_filter` 加 `auction_observability::log_dedup=off` 可关闭 |
 | W0.2 | 进行中 | I-A `46eb1c43` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 I）实现、Claude 监督；I-A 覆盖 jobs/application 152 个错误丢弃位点，`auction::diagnostics` 安全记录（52 个 kind、301 对 kind/phase，清单见 `ops/README.md`），持久化 defer reason/失败码不变（用户决定）；I-B（integrations + HTTP）待做 |
 | W0.3 | 已提交 | `46eb1c43` | 未部署 | 同上；`auction_worker_unpersisted_error_total{loop,kind}`，口径为未确认形成持久失败、退避或人工处置（提交结果未知计入），先于日志去重累加；PM 暂归 `forum` loop |
-| W0.10 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；`common.toml [metrics]` 三角色可选 loopback 出口（只允许 `127.0.0.1`，示例 19100/19101/19102，省略即关闭），复用 W0.9 `/metrics` 契约，出口故障只降级采集；`ops/monitoring/` 提供 Prometheus、exporter 查询与 unit 示例；待用户按 `ops/README.md` 安装 Prometheus、node_exporter、postgres_exporter 并启用出口后验收；W0.13 随后续批次 |
+| W0.10 | 已提交 | `421ee64c` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；`common.toml [metrics]` 三角色可选 loopback 出口（只允许 `127.0.0.1`，示例 19100/19101/19102，省略即关闭），复用 W0.9 `/metrics` 契约，出口故障只降级采集；`ops/monitoring/` 提供 Prometheus、exporter 查询与 unit 示例；待用户按 `ops/README.md` 安装 Prometheus、node_exporter、postgres_exporter 并启用出口后验收；W0.13 随后续批次 |
+| W13.3a | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 N）实现、Claude 监督；release 开启 `overflow-checks`（`wasm-release` 继承，保留 abort），原生装配根与 CLI 安装安全 panic hook（target `auction::panic`，只输出线程、位置与 `&'static str` payload），顶层 JoinError 固定分类；Worker 已有子任务收口新增 `auction_worker_task_panics_total{loop}`，处置与计数不变；逐 owner panic 计次拆为 W13.3b 待用户决定 |
 | W0.8 | 已提交 | `e78dac4f` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 D）实现、Claude 监督；`storage_error_from`/`sql_error_context` 附加 sqlx 变体、SQLSTATE、约束名、表名；1100 处直接 SQLx 闭包与 13 个具名 mapper 一次改完，`storage:map_err(\|_\|)` 1432 → 330；其余 330 处另定范围 |
 | W7.11 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
 | W7.8a | 已提交 | `3f0a2097` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 F）实现、Claude 监督；迁移 075 建只追加兼容登记表（001–074 缺行即 breaking，075 自身 breaking），`check.sh migration-compatibility` 检查每个新迁移恰好登记一次；`[readiness] migration_compatibility_mode` 默认 `shadow`，回退旧程序前须设为 `compatible`；本版含 breaking 迁移，部署后才能为之后的版本提供回退能力 |

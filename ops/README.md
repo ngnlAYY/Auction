@@ -535,6 +535,52 @@ D1 仍待线上分类证据确认。部署后由用户执行只读核对，数�
 
 服务 owner 回收后仍监听终止信号；tracing 刷新期间再收到信号时，装配根直接非零退出，避免不可取消的刷新线程延迟强退。
 
+### Panic 排障
+
+W13.3a 的 release 开启整数溢出检查，原生保留 `panic = "unwind"`。
+溢出会失败关闭并进入已有 panic 边界，不再静默回绕；
+它不证明业务已回滚，尤其不能据此重发外部写入。
+WASM 继承开启检查，保留 abort，现有 hook 展示静态错误横幅。
+
+先按 `auction::panic` target 定位线程与源码 `file`、`line`、`column`。
+`payload` 只显示静态字符串，格式化 String 或其他类型均为固定占位；
+顶层 join 日志只显示 `panic`、`cancelled` 或 `other`。
+不要求采集完整 payload、凭据或外部响应来排障。
+再查看 `auction_worker_task_panics_total{loop}` 的增量，
+关联 `auction::diagnostics` 的 `phase=item_panic`、`safe_kind=task_panic`。
+该指标按闭集循环预置零值，进程重启归零；
+它只覆盖现有工作项子任务的 join 收口，不是工作项尝试次数。
+原 `auction_worker_unpersisted_error_total` 的 `task_join` 口径保持不变。
+
+生命周期、结算、慢速代理、履约、恢复 action 和 delivery 子项 panic
+仍按原 `Canceled` 等结果合并，所属循环继续运行。
+邮件、论坛、PM、告警叶子直接执行，没有新增 catch_unwind；
+panic 仍退出常驻任务，Worker 随后排空并非零退出。
+分体 Worker 模板由 systemd `Restart=on-failure` 拉起；
+Public/Admin 的 Requires 绑定仍可能传播影响。
+合并 server 当前会停止其余角色，模板 `Restart=no`，需人工核对后恢复。
+
+工作项 panic 计次、封顶和人工阻断尚未实现：W13.3b 待用户决定，
+原因是逐 owner 规则、所需迁移与影子框架超出本批无迁移范围。
+当前恢复语义如下，不应把观测指标当成新的自动处置：
+
+| 工作项 | panic 后的现状 |
+| --- | --- |
+| 生命周期 | 租约到期可重领，领取增加 attempt_count，无封顶 |
+| 结算 | 重领不增加次数，只有显式失败落库才增加 |
+| 履约、恢复 action | 重领不增加 retry_count，显式释放才增加 |
+| delivery | claimed 可重领并计次；sending 到期加 grace 后转人工 |
+| 邮箱轮询 | panic 不增加连续失败数；重启后可重领，成功清零 |
+| 论坛 | 发布领取计次但无封顶；过期 claim 按未知写入对账 |
+| PM | 发送前可重领；sending 到期转人工，只读对账不重寄 |
+| 告警批次 | 已有三次上限，耗尽进入 failed/retry_exhausted |
+
+普通 Public/Admin handler panic 由现有 HTTP 边界捕获，返回 500；
+它不等同于整个角色退出，独立后台任务不在该请求边界内。
+先核对持久状态和原命令结果，再决定人工操作；未知外写绝不自动重发。
+构建回退仅恢复 release 的 overflow-checks 声明，并重建原生与 WASM 制品；
+保留本批安全日志与指标，不改动任何已有工作项状态。
+
 ### SQL 失败诊断
 
 先按既有命令、拍卖、lot 或投递标识关联失败日志。带安全上下文的错误在原中文原因后附加方括号字段：`sqlx_kind` 区分数据库错误与连接池、传输、解码等失败；`sqlstate_class` 为两位类别，`sqlstate` 为五位代码；`constraint`、`table` 可定位迁移中的约束、索引或表。字段规则的唯一说明见 [Storage SQL 错误安全上下文](../crates/auction-storage/README.md#sql-错误安全上下文)。

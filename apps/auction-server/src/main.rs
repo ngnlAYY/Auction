@@ -9,10 +9,22 @@ mod bootstrap;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let result = run().await;
+    result.map_err(|error| match auction_process::task_error_kind(error.as_ref()) {
+        Some(kind) => anyhow::anyhow!("server task failed: {kind}"),
+        None => error,
+    })
+}
+
+async fn run() -> anyhow::Result<()> {
     #[cfg(all(feature = "postgres", target_os = "linux"))]
     {
         bootstrap::run().await
     }
     #[cfg(not(all(feature = "postgres", target_os = "linux")))]
-    anyhow::bail!("auction-server requires Linux and the postgres feature")
+    {
+        auction_observability::init_json_stderr("off,auction::panic=error")?;
+        auction_observability::install_safe_panic_hook();
+        anyhow::bail!("auction-server requires Linux and the postgres feature")
+    }
 }

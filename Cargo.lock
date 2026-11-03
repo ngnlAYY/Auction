@@ -239,6 +239,7 @@ dependencies = [
  "auction-domain",
  "auction-integrations",
  "auction-observability",
+ "auction-process",
  "auction-storage",
  "chrono",
  "clap",
@@ -374,6 +375,7 @@ name = "auction-observability"
 version = "0.1.0"
 dependencies = [
  "auction-application",
+ "auction-process",
  "chrono",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -426,6 +428,7 @@ dependencies = [
  "auction-admin-api",
  "auction-application",
  "auction-config",
+ "auction-observability",
  "auction-process",
  "auction-public-api",
  "auction-setup",

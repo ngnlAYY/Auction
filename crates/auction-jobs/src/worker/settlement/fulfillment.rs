@@ -171,6 +171,7 @@ where
             match result {
                 Ok(item_result) => merge_worker_result(&mut batch_result, item_result),
                 Err(error) => {
+                    diagnostics::observe_task_panic("settlement_fulfillment", &error);
                     diagnostics::error(
                         "settlement_fulfillment",
                         "item_join",

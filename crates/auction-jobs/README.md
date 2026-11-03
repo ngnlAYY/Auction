@@ -49,6 +49,21 @@ socket 由 Worker 在受信运行目录中创建并设为指定组；连接时�
 
 ## 维护约定
 
+W13.3a 只在已有 JoinSet 叶子收口增加 panic 观测：
+生命周期、结算、慢速代理、履约、恢复 action 和 delivery。
+固定 `item_panic` 阶段使用 `SafeErrorKind::TASK_PANIC`，
+并增加 `auction_worker_task_panics_total{loop}`；取消不增加。
+原 join 诊断及 W0.3 的 `task_join` 未持久化计数不变，
+仍按原方式合并 `Canceled` 等结果，不写入失败、退避或人工状态。
+没有新增 catch_unwind，也未改动诊断 scope/inherit 或循环入口。
+
+工作项 panic 计次封顶尚未实现（W13.3b 待定）：
+生命周期领取已计次；结算、履约和恢复 action 重领不计次；
+delivery 的 claimed 可重领，sending 到期加 grace 后转人工，不自动重发；
+告警批次已有三次上限。邮件、论坛、PM、告警直接执行路径 panic
+仍使常驻任务退出并触发 Worker 排空，详见
+[panic 排障](../../ops/README.md#panic-排障)。
+
 - 新循环必须持久化领取与结果，不能用内存队列或“空端口成功”代替；超时与租约必须满足“单项超时 < 租约”。
 - 论坛公开链接只接受无凭据、无路径和无查询的 HTTPS origin，或 `localhost`、`127.0.0.1`、`[::1]` 的回环 HTTP origin；运行时与配置预检使用相同边界。
 - 错误只以安全分类进入日志、指标与 control，不透传数据库、凭据或外部响应正文。
