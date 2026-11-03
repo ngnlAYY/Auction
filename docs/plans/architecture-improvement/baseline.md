@@ -47,3 +47,25 @@
 | 前后端契约 | 契约中 106 处 `deny_unknown_fields`（含响应 DTO），实时事件负载须恰好匹配注册表字段；前后端没有构建号握手，部署后仍打开的旧页面遇到新增字段会解码失败，只能手动刷新 | `crates/auction-contracts/src/contracts`、`docs/contracts/realtime.md` |
 | 模块结构 | 401 处 `#[path]` 让模块树与目录脱钩，333 处 `use super::*`，`auction-application` 平铺导出 838 个符号；存在 947 行的 `crates/auction-storage/src/database/mailbox_sweep/mod.rs` 等大文件；Worker 的 `realtime_consumer` 在装配根恒为 `None`，整条运行路径不可达；`auction_forum_reply_cursors`、`bid_proxy_attempts`、`bid_proxy_outbid_uses`、`settlement_pools` 四张表在 Rust 代码中无引用（`settlement_pools` 按契约只作冻结证据），前三者也没有任何迁移函数写入，迁移 005 的 `bid_proxies` 视图同样无人读取，数据库契约仍把前三者描述为在用 | 源码统计、`apps/auction-worker/src/bootstrap/persistent.rs`、[数据库契约](../../contracts/database.md) |
 | 回归防护 | 非测试代码当前没有 `unwrap()`/`expect()`，但没有 lint 锁定；release profile 未开 `overflow-checks`；`#[path]`、`use super::*` 与错误丢弃的数量没有门禁，可随时回涨；文档没有链接检查 | `Cargo.toml`（`[workspace.lints]`、`[profile.release]`）、`ci/checks/check.sh` |
+
+## W0.12 线上只读核实（2026-11-03）
+
+经用户批准，在线上主机以只读命令、只读事务（`BEGIN READ ONLY … ROLLBACK`，单语句 5 秒超时）核实；未读取敏感 TOML，未发信，未打开任何邮件详情。
+
+| 项 | 结论 | 影响 |
+| --- | --- | --- |
+| 主机资源 | 内存 1.9 GB（可用约 1.4 GB），根分区剩 20 GB | W0.10 本机 Prometheus 与 exporter 偏紧但可行；W10.7 WAL 暂存需监控磁盘 |
+| CDN | Public 与 Admin 站点都在 Cloudflare 后面（`server: cloudflare`、`cf-ray`，域名解析到 Cloudflare 地址） | 按决策 43，W9.5 按 Cloudflare 地址段取真实客户端地址；W0.9 转发头集合补 Cloudflare 头 |
+| 监听方式 | Public、Admin 均为 Unix socket，`trusted_unix_proxy = true`、`trusted_proxy_cidrs = []`；Worker control 为 Unix socket | — |
+| 角色 unit | `auction-test-*`：Public `Requires=` Worker 与 Admin，Admin `Requires=` Worker，均 `Restart=on-failure`、`TimeoutStopSec=45s`；systemd 257 | 30 天内无自动重启记录，`Requires=` 在自动重启时的实际传播未核实（W7.9）；W7.11 部署时 Worker unit 须调至 120 秒 |
+| 停机排空 | 2026-11-02 15:01 停机时 Worker 在 10 秒排空到期后以 `status=1/FAILURE` 退出 | D8 的线上实例，W7.11 修复 |
+| 邮件参数 | 生效值来自 `worker.toml`（runtime `managed = false`）：`maximum_pages = 100`、`fetch_timeout_seconds = 120`、请求间隔 1000 ms、`*/5` cron | D3 的上限即硬上限 100 |
+| Sent 增速 | 系统 10-18 至 11-02 成功发信 375 封（main），结算日 60–80 封；Sent 当前页数待浏览器核实（Bot 账号战斗中） | 估计 6–9 周超过 100 页；决策 74 提前交付 W1.4 发送基线 |
+| Read Mail | 完整已读列表 511 封（W1.0 前的 Worker 日志 `read_observed`） | — |
+| 论坛 | 3 个主题，最多约 27 楼（≥2 页），`maximum_topic_pages = 10` | D6 不需提前交付 W1.11 |
+| 通知与提醒 | 论坛 `notify` 30/90 天 0 次；选 PM 渠道未绑定论坛账号的用户 0 人，`recipient_missing` 抑制 0 条 | D10、D11 目前无实际影响 |
+| 世界与换季 | 库内只有 main 世界 4 个场次（3 已结算、1 草稿），isekai 无场次与义务；runtime 中 isekai 世界关闭 | 换季遗留义务为 0 |
+| PostgreSQL | 18.6，迁移 074，`max_connections = 100`，`shared_buffers = 128MB`，`work_mem = 4MB`，只装 `plpgsql`；库 28 MB，WAL 32 MB；PostgreSQL 与 Redis 只监听本机 | W10.8 需加 `pg_stat_statements`；备份与 WAL 存储压力小 |
+| 指标存储 | 无 Prometheus 或任何 exporter，指标开关全部关闭 | W0.10 需用户安装 |
+| 其他监听 | `19344` 端口由 sing-box 监听在所有网卡 | 留给 W9.6 核查 |
+| 未核实 | HV 是否原样保存非 ASCII 正文（需发信）、普通邮件与 COD 过期退回期限（库内无退回样本）、Sent 页数与 HV 是否自动清理、Read Mail 排序键、邮资（待浏览器只读核实） | 需写操作的项另行批准 |

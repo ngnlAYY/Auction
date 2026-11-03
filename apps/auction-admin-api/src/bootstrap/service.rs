@@ -57,7 +57,7 @@ async fn run_service(
     );
     let shutdown_metrics = metrics.shutdown();
     // 依赖装配可能等待数据库锁或连接；终止信号不能等到开始提供 HTTP 后才被读取。
-    let (bound_listener, state, heartbeat) = tokio::select! {
+    let (bound_listener, state, heartbeat, runtime_switch_task) = tokio::select! {
         biased;
         signal = signals.recv() => {
             let signal = signal.context("receive admin-api startup signal")?;
@@ -65,11 +65,11 @@ async fn run_service(
         }
         result = async {
             let bound_listener = listener::bind(config).await.context("bind admin-api listener")?;
-            let (state, heartbeat) =
+            let (state, heartbeat, runtime_switch_task) =
                 state::configure_state(config, telemetry.health_reader(), Arc::clone(&metrics))
                     .await
                     .context("configure admin-api state")?;
-            Ok::<_, anyhow::Error>((bound_listener, state, heartbeat))
+            Ok::<_, anyhow::Error>((bound_listener, state, heartbeat, runtime_switch_task))
         } => result?,
     };
     let state = state.with_metrics(metrics).with_public_rules_cache(cache.clone());
@@ -112,6 +112,7 @@ async fn run_service(
     } else {
         drop(shutdown_sender);
     }
+    drop(runtime_switch_task);
     abort_heartbeat_task(&heartbeat_task);
     let drain_started = std::time::Instant::now();
     let reason = if signal.is_some() {

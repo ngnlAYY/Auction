@@ -74,7 +74,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 
 unknown 是“未知风险处置，不代表已证明不可重试”。permanent 与 unknown 在 classified 下保持粘滞，不提供清零接口，不写试探审计；修复后受控重启恢复。瞬时失败不锁死 classified readiness，但数据库/schema 当前不可用仍使依赖检查失败，恢复后可重新就绪。
 
-`DatabaseStore::with_audit_failure_mode` 由三角色装配根注入；默认 shadow 沿用全部失败累计门禁并观察新旧差异，legacy 不计算影子，classified 仅投影 permanent + unknown。HTTP、心跳与既有告警共享该模式的 `audit_failure_count`，不改 DTO 或 schema。纯内存审计指标由装配根注册，关闭 exporter 不影响计数；日志仅包含固定类别和 kind，不包含驱动原文。指标字典见 [auction-observability](../auction-observability/README.md#指标)，开关与切换步骤见[配置参考](../../ops/config/README.md#就绪策略)和[运维手册](../../ops/README.md#审计就绪影子观察)。
+`DatabaseStore::with_runtime_switches` 由三角色装配根注入共享快照；默认 shadow 沿用全部失败累计门禁并观察新旧差异，legacy 不计算影子，classified 仅投影 permanent + unknown。HTTP、心跳与既有告警共享该模式的 `audit_failure_count`，不改 DTO 或 schema。纯内存审计指标由装配根注册，关闭 exporter 不影响计数；日志仅包含固定类别和 kind，不包含驱动原文。指标字典见 [auction-observability](../auction-observability/README.md#指标)，开关与切换步骤见[配置参考](../../ops/config/README.md#就绪策略)和[运维手册](../../ops/README.md#审计就绪影子观察)。
 
 ## SQL 错误安全上下文
 
@@ -244,3 +244,8 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 - SQL 只出现在本 crate；新增表或约束必须新增迁移文件，并同步[数据库契约](../../docs/contracts/database.md)与[保留政策](../../ops/deploy/retention-policy.v1.json)（`database_schema_version` 须等于最高迁移版本，否则 `db inventory` 拒绝运行）。
 - 动态拼接 SQL 只允许编译期常量片段，业务值一律 `bind`；同一 owner 内多条查询共享的投影或过滤以字面量宏定义，经 `concat!` 组合成静态查询（如 lot 列表/详情、竞价日志、价格历史、账户代理），不在运行时拼接；DDL 标识符经 `quote_identifier`，库名先过 `valid_ddl_database_name`（ASCII 字母数字与 `_-.`）。
 - 新增 `pub` 接口前确认存在调用方，编译器不会对跨 crate 未使用的 `pub` 项告警。
+
+
+## 运行时开关存储
+
+`database/runtime_switches` 实现最新事实查询和 Read Committed 命令事务，锁序为 command advisory → switch advisory → 最新 revision CAS，事实兼账本、结果与追加审计同事务提交。未知名称在解码之前忽略，已知损坏拒绝刷新；SQL 错误不回显驱动原文。审计指标源、心跳和探针共享 `RuntimeSwitches`，累计分类不重置。数据模型与 compatible 076 见[数据库契约](../../docs/contracts/database.md#运行时行为开关)。

@@ -62,8 +62,8 @@ async fn run_service(
         .context("initialize Prometheus metrics")?,
     );
     let shutdown_metrics = metrics.shutdown();
-    // 订阅信号后也必须轮询启动等待；取消时 listener 与未完成装配一起释放，尚无后台任务。
-    let (listener, state, heartbeat, realtime_relay) = tokio::select! {
+    // 订阅信号后也必须轮询启动等待；取消时 listener 与未完成装配一起释放，已建后台任务由 TaskGuard 回收。
+    let (listener, state, heartbeat, realtime_relay, runtime_switch_task) = tokio::select! {
         biased;
         signal = signals.recv() => {
             let signal = signal.context("receive public-api startup signal")?;
@@ -71,7 +71,7 @@ async fn run_service(
         }
         result = async {
             let listener = listener::bind(config).await?;
-            let (state, heartbeat, realtime_relay) = state::configure_state(
+            let (state, heartbeat, realtime_relay, runtime_switch_task) = state::configure_state(
                 config,
                 telemetry.health_reader(),
                 Arc::clone(&metrics),
@@ -79,7 +79,7 @@ async fn run_service(
             )
             .await
             .context("configure public-api state")?;
-            Ok::<_, anyhow::Error>((listener, state, heartbeat, realtime_relay))
+            Ok::<_, anyhow::Error>((listener, state, heartbeat, realtime_relay, runtime_switch_task))
         } => result?,
     };
     let listener_description = listener.description();
@@ -137,6 +137,7 @@ async fn run_service(
     } else {
         drop(shutdown_sender);
     }
+    drop(runtime_switch_task);
     abort_background_task(&heartbeat_task);
     abort_background_task(&realtime_relay_task);
 

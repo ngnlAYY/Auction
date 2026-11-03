@@ -388,3 +388,26 @@ Bot 内部履约（买卖双方之一是 Bot 自己时不经邮件外发）需�
 | `apps/auction-cli/src/support/` | 私有文件、锁文件与输入校验 |
 
 排空配置和外层预算见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。systemctl 停止前只读取指定的 TimeoutStopUSec 属性，拒绝无限或无法解析的时长；不会把客户端超时视为 unit 已停止。
+
+
+## 运行时开关
+
+`auction-cli --config-dir /etc/auction switch list` 只读返回数据库时间及两个已知名称的最新事实和 revision（未设置为 0），不证明运行进程已应用。set/clear 直接执行在线数据库命令，不停机、不调用 W7.5、不隐式迁移，也不要求先停止 Worker。
+
+```bash
+auction-cli --config-dir /etc/auction switch set readiness_audit_failure_mode classified \
+  --command-id <稳定非零UUID> --expected-revision <list中的版本> \
+  --expires-at 2026-12-01T00:00:00Z --actor <操作者说明> --reason <非敏感原因>
+auction-cli --config-dir /etc/auction switch set readiness_cache_enabled false \
+  --command-id <新的稳定UUID> --expected-revision <list中的版本> \
+  --no-expiry --actor <操作者说明> --reason <非敏感原因>
+auction-cli --config-dir /etc/auction switch clear readiness_audit_failure_mode \
+  --command-id <新的稳定UUID> --expected-revision <list中的版本> \
+  --actor <操作者说明> --reason <非敏感原因>
+```
+
+set 的绝对 RFC3339 到期与 `--no-expiry` 必须二选一；期限最多六位小数、不接受闰秒，与 PostgreSQL 微秒精度一致。审计模式只接受 legacy/shadow/classified，缓存只接受 true/false。clear 不删除历史，只追加事实并回落各进程启动时的 TOML 基线。没有重读文件或重启；修改文件基线仍按原部署流程执行。
+
+命令返回 `status=database_accepted` 和固定 `accepted`，含义是“数据库已接受”。同 ID 同参重放原结果，即使已经过期或已有新命令也不续期、不覆盖。异参、旧 revision 被拒绝；重新读取后，新的意图使用新 ID。提交结果未知时必须使用原 ID 和全部原参数原样重试，不能换 ID 重发。`--actor` 当前仍是操作者声明，CLI 审计来源在 metadata 中标明 executor/entrypoint；自动 UID/SUDO_USER 追溯尚未接入。
+
+成功退出 0；clap 参数错误退出 2；switch 子命令的配置加载、连接、读取、校验、版本冲突及结果未知均归业务运维命令退出 5。它不使用 service 的退出码 4，也不触发停机。刷新和三角色核对见[运行时开关](../../ops/README.md#运行时开关)。

@@ -7,6 +7,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 mod database;
 mod operations;
 mod settlement;
+mod switches;
+pub(crate) use switches::SwitchCommand;
 
 #[cfg(feature = "postgres")]
 pub(crate) use database::RebuildModeArg;
@@ -41,6 +43,9 @@ pub(crate) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// 数据库持久运行时开关，不重启角色。
+    #[command(subcommand)]
+    Switch(SwitchCommand),
     /// 单角色配置的安全投影与三角色部署一致性检查；不连接数据库。
     #[command(subcommand)]
     Config(ConfigCommand),

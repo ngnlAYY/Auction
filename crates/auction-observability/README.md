@@ -95,3 +95,8 @@ Read Mail 日志的 `read_observed` 始终是完整列表数量；观察降频�
 | `crates/auction-observability/src/health/` | 心跳模型、发布器、Admin 仪表盘快照 |
 
 排空指标为 `auction_shutdown_critical_inflight{kind}`、`auction_shutdown_total{role,reason,outcome}` 与 `auction_shutdown_duration_seconds{role,phase}`。所有 label 从编译期枚举产生，不接收业务标识或错误原文。`kind` 为 background/delivery_send/delivery_take/delivery_return/compose_discard/forum/forum_pm（background 不登记围栏交接或外写关键段）；`role` 为 public/admin/worker，`reason` 为 signal/runtime_failure/server_stopped，`outcome` 为 completed/timed_out/interrupted/failed，`phase` 为 critical/drain。inflight 同时包含围栏调用前登记的交接与外写关键段，表示排空需等待的活动数，不表示已获外写授权。活动 drop 只减少 inflight，未确认结果以结构化日志记录，不能作为已落库证明。Worker 关键段等待期间保留 control 指标读取；最后一次指标可能来不及抓取，停止结论同时记录日志。
+
+
+## 运行时开关指标
+
+`auction_runtime_switch_refresh_successes_total{role}` 与 `auction_runtime_switch_refresh_failures_total{role}` 为饱和刷新累计；`auction_runtime_switch_snapshot_age_seconds{role}` 表示最后成功快照年龄，未成功为 -1。`auction_runtime_switch_applied_revision{role,switch}` 是已观察事实版本（未设置为 0）；`auction_runtime_switch_effective_value{role,switch}` 中 bool 为 0/1，审计模式 legacy/shadow/classified 为 0/1/2。Worker 不导出不适用的 HTTP 缓存项。标签只来自 Rust 闭集角色和名称；collector 只读内存，scrape 不查数据库，也不重复累计。角色实际值的到期回落会在 scrape 时重新解析。 exporter 关闭不影响刷新或审计累计。操作见[运行时开关](../../ops/README.md#运行时开关)。

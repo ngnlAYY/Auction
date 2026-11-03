@@ -132,20 +132,35 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<auction_observability::ProcessMetrics>,
-) -> anyhow::Result<(AdminApiState, Option<Arc<HeartbeatPublisher>>)> {
+) -> anyhow::Result<(
+    AdminApiState,
+    Option<Arc<HeartbeatPublisher>>,
+    Option<auction_process::TaskGuard<()>>,
+)> {
     let security = config::configure_security(config)?;
     let worker_control = config::configure_worker_control(config);
     let Some(database_url) = config.database_url() else {
-        return Ok((super::fallback::empty_state(config, security, worker_control), None));
+        return Ok((super::fallback::empty_state(config, security, worker_control), None, None));
     };
+    let switches = auction_application::RuntimeSwitches::new(
+        auction_application::RuntimeSwitchRole::Admin,
+        config.readiness.audit_failure_mode,
+        config.readiness.cache_enabled,
+    );
     let store = Arc::new(
         DatabaseStore::connect(database_url)
             .await
             .context("connect admin database")?
-            .with_audit_failure_mode(config.readiness.audit_failure_mode)
+            .with_runtime_switches(switches.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness()),
     );
+    let runtime_switch_task = auction_process::TaskGuard::new(
+        auction_jobs::start_runtime_switch_refresh(store.clone(), switches.clone()).await,
+    );
+    metrics
+        .register_runtime_switch_metrics(switches.clone())
+        .context("register runtime switch metrics")?;
     metrics
         .register_pool_metrics(store.pool_metrics_source())
         .context("register admin database pool metrics")?;
@@ -376,13 +391,17 @@ pub(super) async fn configure_state(
     .with_settlement_catalog(settlement_catalog)
     .with_dashboard_worlds(config::configured_dashboard_worlds(config))
     .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config))
-    .with_readiness(Arc::new(auction_http::HttpReadinessProbe::new(
-        store,
-        config.readiness.cache_enabled,
-        metrics.readiness(),
-    )));
+    .with_runtime_switches(store.clone(), switches.clone())
+    .with_readiness(Arc::new(
+        auction_http::HttpReadinessProbe::new(
+            store,
+            config.readiness.cache_enabled,
+            metrics.readiness(),
+        )
+        .with_runtime_switches(switches),
+    ));
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "admin heartbeat ready publish failed");
     }
-    Ok((state, Some(heartbeat)))
+    Ok((state, Some(heartbeat), Some(runtime_switch_task)))
 }

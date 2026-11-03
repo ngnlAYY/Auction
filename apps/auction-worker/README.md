@@ -69,3 +69,8 @@ MoogleMail 默认通过 `poll_isolation_enabled = true` 为每个世界独立运
 unit 示例见 [`ops/deploy/systemd/auction-worker.service.example`](../../ops/deploy/systemd/auction-worker.service.example)（`RuntimeDirectory=hv-auction/worker` 管理 control socket 目录）。每个部署只运行一个 Worker 实例。
 
 delivery/PM/discard 在持久围栏调用前登记交接，围栏调用开始即受保护；关闭先赢时不发起围栏，已登记后即使进入排空也继续等待原围栏回执。登记本身不授权外写，只有围栏确认提交才执行外部操作；确认失败或提交未知仍不外写。论坛在已有持久 claim 下的第一个实际 POST 前登记，后续必要 POST 沿用原活动。交接与关键段均阻止排空结束，结果按原端口提交后才 complete。装备准备、Sent/compose 回读和 PM Sent 核对都属于原关键段，告警邮件复用 delivery。未收口 drop 只减少活动计数并记录未知边界，不补写持久状态、不授权重发。既有单项超时、lease 与所有权校验保持原值。配置、unit 120 秒和完整旧路径回退见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。
+
+
+## 数据库运行时开关
+
+启动装配注入 TOML 就绪基线并立即读取数据库开关，随后每五秒刷新、单次一秒预算，任务随进程生命周期收口。审计模式使用三角色共享规则；Public/Admin 另接入 HTTP 就绪缓存，Worker 负责到期收口。失败保留原快照及期限，不清零审计累计；本批不热读取其他配置。核对与回退见[运维手册](../../ops/README.md#运行时开关)。

@@ -30,3 +30,8 @@ DTO 只描述线上形状，不含业务规则；从应用投影到 DTO 的映�
 - 已发布字段不得改名或改变语义；新增字段优先设为可选，并同时更新后端映射与两端页面。
 - 新增或删除路由时同步更新 [路由清单](../../docs/contracts/routes.md)；实时事件的种类与负载变化同步更新 [实时事件](../../docs/contracts/realtime.md)。
 - 本 crate 的任何改动都会触发两端浏览器 payload 重建（发布脚本的 Web 输入指纹包含本 crate）。
+
+
+## 运行时开关只读投影
+
+`RuntimeSwitchListResponse` 分开承载数据库最新意图与 Admin 自身应用状态；`RuntimeSwitchIntentDto` 和 `RuntimeSwitchAppliedDto` 由 HTTP 显式映射。revision 只表示该来源已观察事实，不能当作三角色共同确认。契约见[路由](../../docs/contracts/routes.md#运行时开关只读接口)。

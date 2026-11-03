@@ -10,13 +10,13 @@ enabled = false
 # 可选：Public/Admin 是否拒绝带转发头的指标请求；默认 true，false 回退旧行为，修改需重启；不进入 Admin runtime。
 reject_forwarded_requests = true
 
-# 可选区块：三角色共用的就绪策略；修改后须重启，不由 Admin runtime 覆盖。
+# 可选区块：三角色共用的 TOML 就绪基线；修改文件须重启，审计/缓存行为可由数据库运行时开关覆盖；不由 Admin runtime 覆盖。
 [readiness]
-# 可选：legacy、shadow 或 classified，默认 shadow；影子期保持任一审计失败即未就绪，切换 classified 由用户决定。
+# 可选：legacy、shadow 或 classified，默认 shadow；运行时 readiness_audit_failure_mode 未设置、clear 或过期时使用此基线，切 classified 由用户决定。
 audit_failure_mode = "shadow"
 # 可选：strict、shadow 或 compatible，默认 shadow；换回支持兼容判定的旧程序前须显式设为 compatible，修改需重启。
 migration_compatibility_mode = "shadow"
-# 可选：默认 true；HTTP 最终就绪结果缓存 1 秒、合并并发且检查限时 750ms，false 回到逐次探测。
+# 可选：默认 true；运行时 readiness_cache_enabled 未设置、clear 或过期时使用此基线；HTTP 就绪缓存 1 秒，false 回到逐次探测。
 cache_enabled = true
 
 # 可选区块：可丢弃缓存设置；省略整个区块等同于关闭缓存。

@@ -22,6 +22,10 @@ use super::super::security::AdminHttpSecurity;
 /// 管理命令、查询和会话按 owner 显式分离；缺失端口时只报告依赖不可用，不构造假数据。
 #[derive(Clone, Default)]
 pub struct AdminApiState {
+    runtime_switches: Option<(
+        Arc<dyn auction_application::RuntimeSwitchStore>,
+        auction_application::RuntimeSwitches,
+    )>,
     session: Option<Arc<dyn AdminSessionPort>>,
     lifecycle: Option<Arc<dyn AuctionLifecycleCommandPort>>,
     auction_create: Option<Arc<dyn AdminAuctionCreatePort>>,
@@ -63,6 +67,25 @@ pub struct AdminApiState {
 }
 
 impl AdminApiState {
+    /// 注入数据库意图读取端口和 Admin 自身应用快照，不依赖 runtime 文件。
+    pub fn with_runtime_switches(
+        mut self,
+        store: Arc<dyn auction_application::RuntimeSwitchStore>,
+        switches: auction_application::RuntimeSwitches,
+    ) -> Self {
+        self.runtime_switches = Some((store, switches));
+        self
+    }
+
+    pub(crate) fn runtime_switches(
+        &self,
+    ) -> Option<&(
+        Arc<dyn auction_application::RuntimeSwitchStore>,
+        auction_application::RuntimeSwitches,
+    )> {
+        self.runtime_switches.as_ref()
+    }
+
     /// 建立 Admin state。具体会话和生命周期存储由 Admin 装配根传入。
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -95,6 +118,7 @@ impl AdminApiState {
         security: AdminHttpSecurity,
     ) -> Self {
         Self {
+            runtime_switches: None,
             session,
             lifecycle,
             auction_create,

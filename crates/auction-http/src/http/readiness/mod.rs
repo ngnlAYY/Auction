@@ -24,8 +24,8 @@ type RefreshReceiver = watch::Receiver<Option<CachedResult>>;
 /// 装配根包装完整的角色 readiness；心跳仍直接读取原始端口。
 pub struct HttpReadinessProbe {
     source: Arc<dyn ProcessReadinessPort>,
-    cache_enabled: bool,
-    current: Mutex<Option<RefreshReceiver>>,
+    switches: auction_application::RuntimeSwitches,
+    current: Mutex<Option<(auction_application::RuntimeReadinessPolicy, RefreshReceiver)>>,
     metrics: Arc<dyn ReadinessRecorder>,
 }
 
@@ -36,12 +36,29 @@ impl HttpReadinessProbe {
         cache_enabled: bool,
         metrics: Arc<dyn ReadinessRecorder>,
     ) -> Self {
-        Self { source, cache_enabled, current: Mutex::new(None), metrics }
+        Self {
+            source,
+            switches: auction_application::RuntimeSwitches::new(
+                auction_application::RuntimeSwitchRole::Admin,
+                auction_application::AuditFailureMode::default(),
+                cache_enabled,
+            ),
+            current: Mutex::new(None),
+            metrics,
+        }
     }
 
-    async fn cached_ready(&self) -> bool {
+    /// 与存储、心跳和指标共享动态策略；身份包含最新版本及到期状态。
+    pub fn with_runtime_switches(mut self, switches: auction_application::RuntimeSwitches) -> Self {
+        self.switches = switches;
+        self
+    }
+
+    async fn cached_ready(&self, policy: auction_application::RuntimeReadinessPolicy) -> bool {
         let mut current = self.current.lock().await;
-        if let Some(receiver) = &*current {
+        if let Some((cached_policy, receiver)) = &*current
+            && *cached_policy == policy
+        {
             let cached = *receiver.borrow();
             if let Some(cached) = cached {
                 if cached.completed_at.elapsed() < CACHE_TTL {
@@ -56,7 +73,7 @@ impl HttpReadinessProbe {
             }
         }
         let (sender, receiver) = watch::channel(None);
-        *current = Some(receiver.clone());
+        *current = Some((policy, receiver.clone()));
         self.metrics.cache_request(ReadinessCacheOutcome::Refresh);
         // 守卫在 spawn 前创建：即使任务在首次 poll 前被取消，也会发布失败并结束单飞。
         let completion = RefreshCompletion {
@@ -73,7 +90,8 @@ impl HttpReadinessProbe {
 impl ProcessReadinessPort for HttpReadinessProbe {
     fn check(&self) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            if !self.cache_enabled {
+            let policy = self.switches.readiness_policy();
+            if !policy.cache_enabled {
                 self.metrics.cache_request(ReadinessCacheOutcome::Bypass);
                 let mut observation = CheckObservation::new(Arc::clone(&self.metrics));
                 let result = self.source.check().await;
@@ -85,9 +103,16 @@ impl ProcessReadinessPort for HttpReadinessProbe {
                 } else {
                     ReadinessCheckResult::NotReady
                 };
+                if self.switches.readiness_policy() != policy {
+                    return Err(
+                        RepositoryError::Failed("就绪策略已切换，请重试探针".to_owned()).into()
+                    );
+                }
                 return result;
             }
-            if self.cached_ready().await {
+            // 旧策略任务仅发布到自己的 channel；改变策略或期限后不能复用其缓存或成功结果。
+            let ready = self.cached_ready(policy).await;
+            if ready && self.switches.readiness_policy() == policy {
                 Ok(())
             } else {
                 Err(RepositoryError::Failed("进程 readiness 检查失败".to_owned()).into())

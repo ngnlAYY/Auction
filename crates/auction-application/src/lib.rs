@@ -307,3 +307,11 @@ pub use ports::{
     CriticalWriteKind, ExternalWriteActivity, ExternalWriteActivityFactory,
     ExternalWriteActivityPort, ExternalWriteLifecycle,
 };
+
+pub use ports::{
+    RuntimeReadinessPolicy, RuntimeSwitchCommand, RuntimeSwitchError, RuntimeSwitchEvent,
+    RuntimeSwitchFuture, RuntimeSwitchName, RuntimeSwitchOperation, RuntimeSwitchRead,
+    RuntimeSwitchRole, RuntimeSwitchStatus, RuntimeSwitchStore, RuntimeSwitchView, RuntimeSwitches,
+    audit_label,
+};
+pub use services::RuntimeSwitchRefreshService;

@@ -23,3 +23,6 @@ pub use worker::{
     RecoveryHealthRuntime, RecoveryWorkerRuntimeConfig, WorkerError, mail_world_phase,
     run_persistent_with_settlement_until_shutdown, run_until_shutdown,
 };
+
+mod runtime_switches;
+pub use runtime_switches::start_runtime_switch_refresh;

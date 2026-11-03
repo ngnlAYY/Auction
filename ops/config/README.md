@@ -27,7 +27,7 @@
 ### 加载规则
 
 - 角色文件路径：Public/Worker 的 `AppConfig::load` 先读取 `AUCTION_CONFIG_FILE`，未设置时尝试当前目录下的 `ops/config/<角色>.toml`，不存在则构造内置默认配置；正式装配仍要求数据库等依赖齐备。Admin 入口另会尝试 `auction-config/admin.toml`，仍不存在才进入首次设置。这些是运行时发现路径，仓库模板位于 `ops/config/examples/`。`auction-server` 与 `auction-cli` 使用 `--config-dir` 指定目录，不用该环境变量选择配置；`auction-server` 检测到它会拒绝启动。
-- 除 `AUCTION_CONFIG_FILE` 外不存在任何环境变量覆盖；任何字段都只能写在文件中。
+- 除 `AUCTION_CONFIG_FILE` 外不存在任何环境变量覆盖；部署字段写在文件中。W7.7 的两个闭集行为开关可由数据库事实覆盖 TOML 基线，规则见下文。
 - 所有角色运行配置的解析与校验错误都在启动前失败，错误不回显秘密值。CLI 专用 `[backup]` 的范围和打卡 URL 由 CLI 校验，常驻角色仅解析保留。角色、公共、普通敏感与 runtime 文件大小上限为 4 MiB；独立维护凭据另限 64 KiB。
 - 三个角色必须引用同一个 `common_file`，并且同时引用同一个 `runtime_config_file`（或全部省略）；三角色数据库目标必须相同。`auction-cli config check` 会联合检查这些一致性。
 
@@ -71,7 +71,7 @@
 
 ### 就绪策略
 
-`common.toml [readiness]` 是三角色共同引用的启动快照，全部字段均可省略，不由 Admin runtime 覆盖；修改后必须重启，遵守适用的停机门禁。枚举值非法时拒绝加载，不回显 TOML 原文。W7.7 热开关接入前不会自动热读取。
+`common.toml [readiness]` 是三角色共同引用的启动快照，全部字段均可省略，不由 Admin runtime 覆盖；修改文件基线仍须重启，遵守适用的停机门禁；数据库开关覆盖后续行为，无需重启。枚举值非法时拒绝加载，不回显 TOML 原文。迁移兼容模式仍只在启动时读取。
 
 | 字段 | 默认值 | 语义 |
 | --- | --- | --- |
@@ -81,7 +81,7 @@
 
 瞬时白名单保留决策 32 的 SQLSTATE `40001`、`40P01`、`57014`、`55P03`、整个 `08` 类、sqlx `PoolTimedOut` 及连接通信失败 `Io`，依决策 71 另外加入 `53300`、`57P01`、`57P02`、`57P03`；`57P05`、`25P03/25P04` 仍按未知粘滞阻断。未知错误是未知风险处置，不代表已证明不可重试；与不可重试失败一样保持粘滞，不因后续成功清零。分类只影响健康信号，不扩大事务或外部写入重试范围。完整分类由 [auction-storage](../../crates/auction-storage/README.md#审计失败与就绪) 拥有。
 
-切换到 `classified` 前，影子观察中的差异应只出现在 `transient`（预期差异），`permanent` / `unknown` 无差异；没有样本不能解释为通过。观察结果由用户审阅并决定切换，不自动推进。步骤与指标见[运维手册](../README.md#审计就绪影子观察)。完整回退为 `audit_failure_mode = "legacy"`、`cache_enabled = false` 并受控重启；单独关闭指标或日志不改变就绪计数。
+切换到 `classified` 前，影子观察中的差异应只出现在 `transient`（预期差异），`permanent` / `unknown` 无差异；没有样本不能解释为通过。观察结果由用户审阅并决定切换，不自动推进。步骤与指标见[运维手册](../README.md#审计就绪影子观察)。可经运行时开关覆盖为 `legacy`、`false` 回退；clear 只回到当前进程的 TOML 基线。改文件基线后仍须受控重启；单独关闭指标或日志不改变就绪计数。
 
 迁移模式平时保持 `shadow`，差异只允许为 `compatible_ahead`；同版数据库没有超前样本，不能据零差异宣布超前分支已验证。换回已含 W7.8a 的旧程序前，运维必须显式设置 `migration_compatibility_mode = "compatible"`，按[程序回退](../deploy/RECOVERY.md#程序回退)完成区间核对并受控重启。设置 `strict` 并重启恢复原迁移判定；不回退数据库，也不放宽 CLI 的迁移、备份、恢复或盘点边界。数据库检查自身总预算为 750ms，独立于 HTTP 缓存开关，对 heartbeat/supervisor 也生效。
 
@@ -246,3 +246,9 @@ Worker 新路径在首次停止时关闭入口，立即取消尚未登记交接�
 外层停止上限须大于“普通 + 关键段 + tracing 上限 + 余量”。示例 Public/Admin unit 为 45 秒，Worker 为 120 秒；tracing 合法上限为 30 秒。`auction-server` 从各 RolePlan 派生 `普通 + 关键段 + 30 + 5` 秒并求和，默认 45 + 45 + 105 = 195 秒；server unit 为 225 秒，另覆盖三次各 5 秒强制回收与余量。CLI 每次停止读取有限的 `TimeoutStopUSec`，客户端等待该值再加 10 秒；stack unit 为 330 秒，覆盖三个角色、属性查询与回执余量。提高应用预算须同步提高对应 unit、server 与 stack 上限；新程序不会修改已安装的主机 unit。
 
 服务 owner 回收后仍监听终止信号；tracing 刷新期间再收到信号时，装配根直接非零退出，避免不可取消的刷新线程延迟强退。
+
+## 数据库运行时开关
+
+这是“部署字段来自 TOML”的明确行为覆盖例外，不引入环境变量覆盖，也不扩展 AdminRuntimeDocument。`readiness_audit_failure_mode` 取 legacy/shadow/classified，对应三角色 `[readiness] audit_failure_mode`；`readiness_cache_enabled` 取布尔，对应 Public/Admin `[readiness] cache_enabled`。优先级为最新且未过期的数据库 set → 启动时 TOML 基线；clear、expire、过期或未设置均取基线。修改 TOML 不会改动数据库事实，无期限 override 会继续覆盖。
+
+三角色五秒刷新，单次一秒预算；首次失败保留基线，后续失败保留最后成功快照，但仍按原数据库期限回落。默认基线仍为 shadow/true；切 classified 仍需用户审阅影子样本。切换不清零审计累计；策略版本变化立即使旧 HTTP 就绪缓存失效。Worker control 不使用 HTTP 就绪缓存。`migration_compatibility_mode`、排空预算、邮件隔离和指标转发开关本批继续重启生效；W7.10 的 runtime 文件预算热读取也不在本批范围。操作与 stale 诊断见[运维手册](../README.md#运行时开关)。

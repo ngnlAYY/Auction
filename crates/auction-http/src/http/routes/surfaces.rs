@@ -242,6 +242,10 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 .strict_methods("GET, POST, PUT"),
         )
         .route(
+            "/api/v1/admin/runtime-switches",
+            axum::routing::get(admin_runtime_switches::get).strict_methods("GET"),
+        )
+        .route(
             "/api/v1/admin/config",
             axum::routing::get(admin_runtime_config::get)
                 .put(admin_runtime_config::update)

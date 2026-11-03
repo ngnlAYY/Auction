@@ -34,6 +34,19 @@ pub struct ProcessMetrics {
 }
 
 impl ProcessMetrics {
+    /// 注册同源纯内存开关指标；关闭 exporter 不影响刷新。
+    pub fn register_runtime_switch_metrics(
+        &self,
+        switches: auction_application::RuntimeSwitches,
+    ) -> Result<(), MetricsError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        self.registry
+            .register(Box::new(super::runtime_switches::RuntimeSwitchCollector::new(switches)?))
+            .map_err(MetricsError::Registry)
+    }
+
     /// 装配根注册一次进程审计快照；关闭 exporter 不关闭审计失败计数。
     pub fn register_audit_metrics(
         &self,

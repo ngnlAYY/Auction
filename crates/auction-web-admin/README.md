@@ -71,3 +71,8 @@ bash ci/release/web-bundle.sh admin
 ```
 
 页面标题固定为“Auction 管理站点”，发布门禁据此识别 payload。`ci/release/web-bundle.sh` 验证受控工具后用 `wasm-release` profile 生成 `target/dx/build/auction-web-admin/web/public`，并绑定源码、工具、环境指纹及 payload 清单；完整门禁通过才复用已有产物。随后构建 `auction-admin-api` 的 `web-embed` 制品才能内嵌页面，单独编译 API 不生成 Web payload。前端只依赖契约 DTO 与共享浏览器机制，不启用 Dioxus fullstack/server，也不建立 WebSocket 连接。
+
+
+## 运行时开关卡片
+
+现有 `/config` 页面增加独立认证只读卡片，不受 runtime 文件是否启用影响。它显示数据库意图及 Admin 本地快照，手动刷新后核对年龄；Public/Worker 应用状态经各自指标确认。写入本批使用 CLI，页面无新增 SPA 路由。见[运维手册](../../ops/README.md#运行时开关)。

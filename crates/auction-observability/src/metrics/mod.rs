@@ -25,3 +25,5 @@ pub use migration::{MigrationReadinessBranch, MigrationReadinessRecorder};
 pub use process::ProcessMetrics;
 pub use readiness::{ReadinessCacheOutcome, ReadinessCheckResult, ReadinessRecorder};
 pub use types::*;
+
+mod runtime_switches;

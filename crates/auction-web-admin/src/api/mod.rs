@@ -828,3 +828,6 @@ async fn fetch_csrf_token() -> Result<String, String> {
     }
     Ok(current.csrf_token)
 }
+
+mod runtime_switches;
+pub(crate) use runtime_switches::fetch_runtime_switches;

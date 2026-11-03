@@ -189,8 +189,8 @@ HTTP 缓存的转换时限与异常行为见[路由契约](../docs/contracts/rou
 1. 用户先确保指标已有可采集和查看的路径。Public/Worker 的指标取 common，Admin 若有 runtime 则须同时检查其 metrics 开关；Worker 当前从 control socket 抓取。本项不安装采集服务、不启用外部心跳或运维告警通知。
 2. 保持 shadow 观察。日志 target 为 `auction::storage::audit_health`，只输出 `class`、`sqlstate_class`、固定 `kind`、`blocks_classified_readiness`；最后一项明确指 classified 门禁，shadow 的实际门禁仍会被瞬时累计阻断。需要开启时在既有 `log_filter` 追加 `,auction::storage::audit_health=warn`，关闭追加 `,auction::storage::audit_health=off`；修改过滤器也需重启。
 3. 按下列 PromQL 核对分类、影子差异、阻断状态和 HTTP 检查收敛。差异只允许出现在 transient，permanent/unknown 无差异；观察必须有对应分支样本，无样本不算通过。不得为取样擅自连接生产数据库或制造故障。
-4. 用户审阅证据并决定是否将 common 改为 `audit_failure_mode = "classified"`，按适用的停机门禁受控重启相关角色。不会自动切换；分类必须先于 W0.6 超时启用。classified 下心跳和 Admin 计数只含 permanent + unknown，瞬时完整计数继续在指标与日志中保留。
-5. 回退时设置 `audit_failure_mode = "legacy"`、`cache_enabled = false`，受控重启恢复任一失败即未就绪与逐次探测。不可重试/未知失败修复后也需受控重启，不提供清零接口、不写试探审计。单独禁用 metrics 或过滤日志不影响门禁。
+4. 用户审阅证据后，可按[运行时开关](#运行时开关)将 `readiness_audit_failure_mode` 设置为 `classified`，核对三角色应用后生效；修改 common 基线则仍需受控重启。不会自动切换；分类必须先于 W0.6 超时启用。classified 下心跳和 Admin 计数只含 permanent + unknown，瞬时完整计数继续在指标与日志中保留。
+5. 回退时可在线设置 `readiness_audit_failure_mode=legacy`、`readiness_cache_enabled=false`，恢复任一失败即未就绪与逐次探测；clear 只回落 TOML 基线。不可重试/未知失败修复后也需受控重启，不提供清零接口、不写试探审计。单独禁用 metrics 或过滤日志不影响门禁。
 
 ```promql
 # 当前进程的分类失败累计；包含随后回滚并重试成功的尝试，首次出现的 label 也可直接查看。
@@ -340,3 +340,18 @@ D1 仍待线上分类证据确认。部署后由用户执行只读核对，数�
 `none` 表示驱动未提供该字段，`invalid` 表示诊断字段格式异常；部分触发器错误没有约束名或表名，不能据此认定没有约束拒绝。结合制品/迁移版本、原业务上下文和持久状态排查，不收集驱动 message/detail/hint、SQL、绑定值、连接串或凭据。仅记录 `safe_kind` 的日志仍只有分类，并非每个失败入口都输出增强文本。
 
 SQLSTATE 和错误文本用于定位原因，不能据此自动重试、重发邮件或认定提交已回滚；继续遵循原事务 owner 的类型化判定与未知结果对账流程。本项不新增配置，回退为换回旧制品；日志过滤器不能撤销已经写入日志或失败安全详情的增强文本。
+
+
+## 运行时开关
+
+本批仅开放 `readiness_audit_failure_mode`（三角色）和 `readiness_cache_enabled`（Public/Admin）。通过 `auction-cli switch list` 读取 revision，再用稳定命令 ID、期望版本、actor 与原因执行 set/clear，参数见[CLI 参考](../apps/auction-cli/README.md#运行时开关)。切 classified 前仍须审阅[影子样本](#审计就绪影子观察)，系统不自动推进。
+
+set 以未过期数据库事实覆盖启动时 TOML；clear 或到期只回到基线，基线不一定是 legacy 或 false。若要明确回旧路径，应分别 set legacy/false；若要恢复部署基线，则 clear。无期限覆盖需要显式 `--no-expiry`，会跨进程重启保留；修改 TOML 不会清除它。所有操作均追加事实与审计，期限自动回落不等待 Worker 的 expire 审计收口完成。
+
+三角色启动即读，此后五秒刷新，每次一秒预算；正常切换在下一次成功刷新后供新检查使用。首次失败用基线，之后失败保留最后成功快照，原期限仍生效。Admin `/config` 的独立只读卡片显示数据库最新意图、版本、期限、操作者、原因及 Admin 自己的实际值与快照年龄，不依赖 runtime 文件配置。刷新卡片可比较数据库 revision 和 Admin 已观察 revision；该卡片不能替 Public 或 Worker 作应用确认。
+
+通过三角色各自的受限指标入口核对 `auction_runtime_switch_refresh_successes_total`、`auction_runtime_switch_refresh_failures_total`、`auction_runtime_switch_snapshot_age_seconds`、`auction_runtime_switch_applied_revision` 和 `auction_runtime_switch_effective_value`。年龄为 -1 表示未成功；明显超过两个周期时按 stale 处理，核对进程、数据库连接、076 是否通过正式流程迁移，以及已知名称是否出现损坏值。关闭 exporter 不关闭刷新；没有指标时只能确认数据库意图和 Admin 本身，不能宣布其他角色已应用。日志只记录闭集角色、模式和安全状态，不回显秘密或原因正文。
+
+审计分类累计不会因切换清零；HTTP 缓存绑定策略版本和期限状态，旧策略检查完成后不能回填当前缓存或返回旧成功。Worker control 原有健康口径不在本批统一，Worker 的审计模式应结合心跳及指标核对。
+
+数据库 076 登记 compatible，但首次迁移仍受原停机流程约束；随后切换开关无需重启、不受 W7.5 阻挡。程序回退须使用已含 W7.8a 且显式启用兼容模式的旧程序，按[程序回退](deploy/RECOVERY.md#程序回退)核对超前区间；旧程序会忽略新开关并使用其 TOML。M1 Admin 只读，邮件隔离、指标转发开关留第二批，排空预算及迁移模式仍是启动配置。W1.9 主动暂停尚未实现，不得将本机制视为已暂停外部请求。

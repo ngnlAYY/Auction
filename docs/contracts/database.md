@@ -2,7 +2,7 @@
 
 [文档导航](../README.md) · [迁移](../../migrations/postgres/README.md) · [auction-storage](../../crates/auction-storage/README.md) · [保留政策](../../ops/deploy/retention-policy.v1.json)
 
-唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000075`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
+唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000076`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
 
 ## schema 身份与版本
 
@@ -42,6 +42,7 @@
 | `worlds` | 业务世界（`main`、`isekai`）及启用状态 |
 | `rules_documents`、`rules_admin_commands` | 各语言规则文档与发布命令账本 |
 | `runtime_config_admin_commands` | runtime 配置更新命令账本（文件写入的恢复依据） |
+| `runtime_switch_events` | 行为开关的只追加事实兼命令账本；最新事实解析、期限与重放见下文 |
 
 ### 拍卖与竞价
 
@@ -158,3 +159,17 @@
 2. 每次新增迁移都把[保留政策](../../ops/deploy/retention-policy.v1.json)的 `database_schema_version` 更新为新的最高版本（否则 `db inventory` 拒绝运行，发布身份也会变化）；新增表还须加入对应数据族。
 3. 同步更新本页的表分组。
 4. 迁移须能在生产数据上安全执行：不得静默改写历史事实；需要修复数据时只修复有确凿证据的部分，其余保留原状并交给人工核对。
+
+## 运行时行为开关
+
+迁移 `000076` 纯新增 `runtime_switch_events`，登记 `compatible`：旧程序不读取该表，既有业务约束、审计闭集与冻结事实不变。表的 UPDATE、DELETE、TRUNCATE 都被触发器拒绝，数据族为 `schema_and_configuration`，永久保留且不授权清理。
+
+表按非零 `command_id` 保存版本 1 的 32 字节请求摘要、开关名、每名称递增 `revision`、`expected_revision`、set/clear/expire、布尔或枚举字符串值、UTC 期限、操作者声明、实际入口、原因、审计关联及固定结果。`(switch_name, revision)` 唯一；同一设置最多追加一个 expire。数据库对名称只检查 1–64 字节和 snake_case 格式，应用写入使用 Rust 闭集。本批仅有 `readiness_audit_failure_mode` 与 `readiness_cache_enabled`；后者由 Public/Admin 消费。
+
+读取先取每名称最新事实，再判断该 set 的期限。未设置、clear、expire 或最新 set 已过期均回落本角色启动时的 TOML 基线，绝不从更早事实恢复覆盖。未知名称在值解码之前忽略；已知名称的类型、枚举或结果投影损坏则拒绝整次刷新，保留原成功快照。新增名称须保持旧程序忽略规则；扩展已知名称的取值须另行评估跨版本兼容，不能默认兼容。
+
+写事务为 Read Committed，锁序为共用 command advisory → 带命名空间的 switch advisory → 最新事实版本 CAS；该 owner 不取得拍卖等业务锁。锁后读取最新版本，同事务追加事实、可重放结果与审计。同 ID 同摘要先返回原结果，即使原设置已过期或已有后续命令也不续期、不改写；异摘要冲突。只重试明确中止的 `40001`/`40P01`，最多三次；提交回执未知要求原 ID、原参数重试。CLI 审计使用 `actor_type=admin`、`source=system`，metadata 标注 `entrypoint=cli`、`executor=auction-cli`；`--actor` 是声明，系统 UID 与 SUDO_USER 的追溯仍属后续工作。
+
+三角色启动立即读取、每五秒刷新，单次预算一秒。成功时原子替换完整不可变快照；首次失败用 TOML，后续失败保留最后成功快照及原期限。期限来自数据库时间，进程用查询开始时刻和单调时钟保守推算，不因传输延迟延长期限。Worker 每周期对最新且已到期 set 追加 expire，其命令 UUID 由原 set UUID 与固定 `runtime-switch-expire-v1` 派生；竞争时重新读取，结果未知保持原身份。实际回落不等待 expire 追加成功，原 set 的期限已是持久证据。
+
+此缓存只选择正确的就绪路径，不决定金额、资格、幂等、锁、会话或审计写入。运行时模式只改变审计分类累计的投影，不清零计数；HTTP 缓存绑定策略版本及期限状态，旧版本在途检查不得作为新版本缓存或返回成功。操作步骤见[运行时开关](../../ops/README.md#运行时开关)。
