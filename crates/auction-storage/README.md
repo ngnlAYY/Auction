@@ -17,7 +17,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 | --- | --- |
 | `DatabaseStore::connect(url)` | 建立连接池（16 连接，带获取追踪与 Prometheus 指标源）；`DatabaseStore` 为大部分端口实现者 |
 | `DatabaseStore::migrate()` | 在 SQLx 迁移锁内执行内嵌迁移；空库或合法历史才允许，未知非空库拒绝 |
-| `ProcessReadinessPort` | readiness：迁移历史等于当前二进制期望版本且无审计写入失败 |
+| `ProcessReadinessPort` | readiness：完整迁移历史匹配且按启动模式通过审计失败门禁，见[审计失败与就绪](#审计失败与就绪) |
 | `Database*Commands` | 竞价、生命周期、结算、Admin 拍卖/录入/lot/邮件/规则/runtime/世界等命令组合器 |
 | `initialize_empty_postgres` | 合并部署首次启动：确认专用空库且无其他客户端后在迁移锁内建 schema |
 | `PostgresDatabaseBootstrap` | 维护库连接上的“缺失才创建”建库（`auction-cli db create`） |
@@ -31,7 +31,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 
 - **事务**：竞价、关键生命周期等命令在 Serializable 事务内完成，序列化失败（40001）与死锁（40P01）由命令 owner 有界重试（`is_serialization_conflict` 是统一判定）。竞价、结算、规则与 Admin 邮件经各自的 `TransactionRunner` 按 `TransactionPolicy` 重试；其余独立 Serializable 写入共用 `retry_conflicts`（默认 `SERIALIZABLE_ATTEMPTS` 次，每次重开事务，只重跑 owner 判定的明确中止，结果未知的提交不重试）。运行期 claim、进度及部分账本写入使用默认隔离事务，并按各自 owner 取行锁或校验租约/fencing；不能把所有写入都视为 Serializable。同一幂等命令 ID 通过事务级 advisory 锁协调（`lock_command_id` 共用键空间）。
 - **幂等账本**：各 owner 的命令表保存命令 ID、请求摘要与结果；同 ID 同摘要重放原结果，异摘要冲突。
-- **追加式事实**：竞价、代理转换、黑名单历史、审计与投递尝试证明等由触发器拒绝改写；结算账本按 owner 追加。改名保留原名称证据，撤销时更新 `reverted_at`，不能把整张改名表视为不可更新。审计 `INSERT` 失败会让整个事务回滚，进程内另记失败计数，使 readiness 失败。
+- **追加式事实**：竞价、代理转换、黑名单历史、审计与投递尝试证明等由触发器拒绝改写；结算账本按 owner 追加。改名保留原名称证据，撤销时更新 `reverted_at`，不能把整张改名表视为不可更新。审计 `INSERT` 失败仍传播并让原事务回滚，进程内另记分类失败数，按[审计就绪策略](#审计失败与就绪)决定健康门禁。
 - **冻结竞价策略**：锁内快照和账户代理降额能力按同一场次策略版本解码，未知版本失败关闭；公开普通最低价继续使用领域计算。新旧策略与追加迁移边界见[数据库契约](../../docs/contracts/database.md#拍卖与竞价)。
 - **租约与 fencing**：Worker 的拍卖调度、结算、履约、投递、恢复、邮件轮询、论坛同步、告警批次都以“claim + 租约 + fencing 版本”推进，过期租约可被重新领取，发送中的外部写入以 fencing 防止重复。
 - **恢复义务锁**：人工确认 recovery 时，用单条 `ANY` 查询按 UUID 升序锁定该 case 的 3～4 条义务，保持既有 owner 锁序；返回集合必须完整，且逐条核对拍卖、lot、世界和装备身份后才能推进，缺失义务继续拒绝确认。
@@ -45,6 +45,35 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 - **赛季收件边界**：新场次冻结的 `intake_opens_at` 同时约束锁后数据库实时钟和邮件原始 `received_at`；任一早于边界都返回 `IntakeClosed`，延迟轮询不能把旧赛季邮件加入新赛季。等于边界允许继续，历史 NULL 不增加限制；已持久接受命令仍先重放原决定。Admin 录入复核锁后当前时刻；恢复重列在既有 world/auction/recovery 等锁和证明复核后取 `clock_timestamp()`，不能使用事务开始时间或 Worker 选候选时的旧时刻替代换季判断。旧赛季识别同时保留原场次开拍和原始投稿收件事实，以二者较早时刻为起点，避免改期开拍绕过换季阻断。
 - **错误**：对外只返回固定分类文本，不携带 SQL、连接串或驱动原文。
 - **连接目标**：连接前固定显式端口（省略为 5432），拒绝未知查询参数；IPv6 主机名去括号后重新匹配 pgpass。
+
+## 审计失败与就绪
+
+`database/audit_health` 的 `AuditWriteResult` 仅接受 `Result<T, sqlx::Error>`，在原始审计 SQL 结果上分类，随后原样返回；不改变 `storage_error`、审计调用顺序、事务 owner 的 Serializable 重试、同事务事实/审计/事件或结果未知的处置。计数按失败 SQL 尝试累计，包含后来重试成功的尝试，不等同于已提交事实的审计缺失数量；不捕获未经过 helper 的事务开始或提交错误。
+
+| 原始错误（按表中顺序匹配） | class / kind |
+| --- | --- |
+| `40001` / `40P01` | transient / `serialization_conflict`、`deadlock` |
+| `57014` / `55P03` | transient / `query_canceled`、`lock_unavailable` |
+| 整个 `08` 类（含 `08007`、`08P01`） | transient / `connection_exception`；只放行健康门禁，不允许自动重放结果未知事务 |
+| sqlx `PoolTimedOut` / `Io` | transient / `pool_timed_out`、`connection_io` |
+| `53300`（决策 71） | transient / `connection_capacity` |
+| `57P01`（决策 71） | transient / `server_shutdown` |
+| `57P02`（决策 71） | transient / `server_crash` |
+| `57P03`（决策 71） | transient / `server_starting` |
+| `23` 类 | permanent / `constraint_violation`，包括 `23505`，不扩大冲突重试 |
+| `55000`、`09` / `27` / `P0` 类、`39P01/39P02/39P03` | permanent / `trigger_or_routine_rejected` |
+| `42501` / `28` 类 | permanent / `permission_denied`、`authentication_rejected` |
+| 其他 `42` 类、`3D` / `3F` 类 | permanent / `schema_or_sql_mismatch` |
+| `21` / `22` / `44` 类 | permanent / `invalid_audit_data` |
+| sqlx `Configuration/ConfigFile`、`InvalidArgument` | permanent / `driver_configuration`、`driver_invalid_argument` |
+| sqlx `RowNotFound/TypeNotFound/ColumnIndexOutOfBounds/ColumnNotFound/ColumnDecode/Encode/Decode` | permanent / `driver_data` |
+| sqlx `PoolClosed/WorkerCrashed/InvalidSavePointStatement` | permanent / `driver_state` |
+| sqlx `Tls` / `Protocol` | unknown / `driver_tls`、`driver_protocol` |
+| 未列出的、缺失或非法 SQLSTATE；其他及未来 sqlx 变体（含 `BeginFailed/AnyDriverError/Migrate`） | unknown / `unknown_sqlstate`、`unknown_driver`；依决策 71，`57P05`、`25P03/25P04` 仍按未知粘滞阻断 |
+
+unknown 是“未知风险处置，不代表已证明不可重试”。permanent 与 unknown 在 classified 下保持粘滞，不提供清零接口，不写试探审计；修复后受控重启恢复。瞬时失败不锁死 classified readiness，但数据库/schema 当前不可用仍使依赖检查失败，恢复后可重新就绪。
+
+`DatabaseStore::with_audit_failure_mode` 由三角色装配根注入；默认 shadow 沿用全部失败累计门禁并观察新旧差异，legacy 不计算影子，classified 仅投影 permanent + unknown。HTTP、心跳与既有告警共享该模式的 `audit_failure_count`，不改 DTO 或 schema。纯内存审计指标由装配根注册，关闭 exporter 不影响计数；日志仅包含固定类别和 kind，不包含驱动原文。指标字典见 [auction-observability](../auction-observability/README.md#指标)，开关与切换步骤见[配置参考](../../ops/config/README.md#就绪策略)和[运维手册](../../ops/README.md#审计就绪影子观察)。
 
 ## COD 实收资金化拒绝诊断
 

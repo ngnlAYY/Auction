@@ -51,9 +51,15 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health/live` | 进程存活：`{"code":"live","message":"…","data":{"live":true}}` |
-| GET | `/health/ready` | 就绪：Public 要求数据库与 realtime relay 新鲜；Admin 要求数据库就绪；均要求无审计写入失败。成功为 200 / `ready`，未就绪为 503 / `not_ready` |
+| GET | `/health/ready` | 就绪：Public 要求数据库与 realtime relay 新鲜；Admin 要求数据库就绪；均按审计模式判定。默认 shadow 保持任一审计失败即未就绪，classified 仅由 permanent + unknown 阻断。成功为 200 / `ready`，未就绪为 503 / `not_ready` |
 | GET | `/health`、`/api/v1/health` | 服务名、状态与运行进程版本 |
 | GET | `/metrics` | Prometheus 文本；需启用 metrics，且 listener 为 loopback TCP 或 Unix socket |
+
+默认启用一秒进程缓存与并发单飞，只保存最终就绪布尔值；正负结果均缓存，过期后等待新检查，不继续返回过期成功。检查限时 750ms，超时、异常或刷新任务取消均产生未就绪；请求断开不取消共享刷新。`Cache-Control: no-store` 及 JSON 结构保持不变，缓存不由代理、CDN 或浏览器持有。开关见[就绪策略](../../ops/config/README.md#就绪策略)。
+
+在持续探测、依赖检查可在预算内完成的条件下，缓存额外滞后至多 1 秒；真实条件在上一轮完成后变化，转换预算为 1 + 0.75 = 1.75 秒；变化发生在正在进行的检查中时，保守计入两轮检查，总计至多 2.5 秒，另加调用方探测间隔及调度/网络时间。无请求时没有后台刷新，下次请求才触发；不可重试或未知审计失败保持粘滞，需修复后受控重启。关闭缓存后不承诺这组时限，沿用逐次检查与 HTTP 请求预算。
+
+探针每轮只读 `_sqlx_migrations`，校验完整迁移版本序列、成功状态及允许的 checksum；不读取其他角色心跳。Public relay 条件仍为最近 `max(4 × poll_interval_millis, 5 秒)` 内成功且未标记失败。心跳独立检查，不复用 HTTP 缓存。Worker control `/v1/health/ready` 仍只表示运行/排空状态，不等同于数据库心跳的 readiness。
 
 ## Public API
 

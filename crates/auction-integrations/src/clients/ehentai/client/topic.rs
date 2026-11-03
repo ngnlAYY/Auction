@@ -145,7 +145,10 @@ impl EhentaiClient {
             .body(encoded);
         if let Some(progress) = &self.write_progress {
             // 预读、限速、ownership 和请求构造均已完成；从此处起取消不能证明远端未写入。
-            progress.mark_write_started();
+            // Worker 已持有持久 claim；登记先于 request.send，已登记活动不再被关闭入口截断。
+            if !progress.mark_write_started() {
+                return Err(EhentaiError::credential(operation));
+            }
         }
         let response = request.send().await.map_err(|_| EhentaiError::write_unknown(operation))?;
         let status = response.status();

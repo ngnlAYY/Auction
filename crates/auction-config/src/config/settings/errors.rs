@@ -4,6 +4,8 @@ use super::*;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
+    #[error("shutdown 普通预算须为 1-300 秒，关键段须为 0-300 秒且仅 Worker 可非零")]
+    InvalidShutdownConfig,
     #[error("unknown process role: {0}")]
     UnknownRole(String),
 

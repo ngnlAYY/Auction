@@ -15,6 +15,7 @@ use super::{
 pub struct HealthSummary {
     pub status: HeartbeatStatus,
     pub readiness: bool,
+    /// 各发布进程按模式投影的累计值之和；不用于反推全部瞬时失败数量。
     pub audit_failure_count: i64,
     pub missing_services: Vec<ServiceName>,
 }
@@ -29,6 +30,7 @@ pub struct ProcessState {
     pub started_at: DateTime<Utc>,
     pub status: HeartbeatStatus,
     pub readiness: bool,
+    /// legacy/shadow 为全部失败；classified 仅为阻断就绪的失败。
     pub audit_failure_count: i64,
     pub tracing: TracingHealth,
     pub observed_at: DateTime<Utc>,

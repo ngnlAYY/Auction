@@ -20,8 +20,9 @@ ExecStart=/opt/auction/bin/auction-server --config-dir /var/lib/auction/config
 Restart=no
 # SIGTERM 只发给 supervisor，由它按 Public → Admin → Worker 反序收口子进程。
 KillMode=mixed
-# supervisor 的关闭总预算为 135 秒，另留回收余量。
-TimeoutStopSec=155s
+# 普通 + 关键段 + tracing 上限 + 余量：三角色默认 45 + 45 + 105 = 195 秒。
+# 再留三次强制回收各 5 秒及外层余量，总计 225 秒；提高应用预算须同步提高 unit 上限。
+TimeoutStopSec=225s
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

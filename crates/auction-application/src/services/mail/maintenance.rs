@@ -86,6 +86,16 @@ impl MailboxMaintenanceService {
         world_id: &str,
         deadline: Instant,
     ) -> Result<MailboxMaintenanceReport, ApplicationError> {
+        self.sweep_with_activity(world_id, deadline, &crate::ExternalWriteActivity::default()).await
+    }
+
+    /// 活动从本次 discard 围栏调用前覆盖交接与外写；确认一次性尝试提交后才授权 POST。
+    pub async fn sweep_with_activity(
+        &self,
+        world_id: &str,
+        deadline: Instant,
+        activity: &crate::ExternalWriteActivity,
+    ) -> Result<MailboxMaintenanceReport, ApplicationError> {
         if !matches!(world_id, "main" | "isekai") {
             return Err(repository_error("维护世界无效"));
         }
@@ -124,6 +134,11 @@ impl MailboxMaintenanceService {
         let delivery_id = matched.delivery_id;
         report.matched_delivery = Some(delivery_id);
         check_deadline(deadline)?;
+        // 围栏调用开始即受保护；关闭先赢时不消费一次性尝试，保留原持久状态。
+        // 已登记的数据库往返与后续外写共用排空截止，登记本身不授权 discard。
+        if !activity.enter_critical() {
+            return Ok(report);
+        }
         if !self
             .store
             .begin_compose_discard(
@@ -160,6 +175,7 @@ impl MailboxMaintenanceService {
                     }),
                 )
                 .await?;
+            activity.complete();
         }
         report.compose_clean = outcome == MoogleMailboxDiscard::AlreadyClean || report.discarded;
         Ok(report)

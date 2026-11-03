@@ -20,7 +20,7 @@
 | 文件 | 拥有 |
 | --- | --- |
 | 角色文件 | `common_file`、`secrets_file`（必填，相对路径以角色文件所在目录解析）；可选 `runtime_config_file`；Admin 另有 `worker_config_file`；listener、tracing、HTTP 安全、会话（Public/Admin）、realtime（Public）、`[worker.*]`（Worker） |
-| `common.toml` | `log_filter`、`[metrics]`、`[cache]`、`[auction.*]`（排期、早鸟、经济、结算、恢复策略）、CLI 专用 `[backup]` |
+| `common.toml` | `log_filter`、`[metrics]`、`[readiness]`、`[cache]`、`[auction.*]`（排期、早鸟、经济、结算、恢复策略）、CLI 专用 `[backup]` |
 | `secrets.toml` | 数据库、Redis URL、外部 Cookie、Admin 登录凭据、三组数据密钥、OTLP 导出头、R2 备份令牌与可选打卡地址 |
 | `runtime/admin.toml` | 可由 Admin 后台修改的运行参数（见下文） |
 
@@ -56,6 +56,7 @@
 | --- | --- |
 | `log_filter` | tracing 过滤器（`EnvFilter` 语法），默认 `info,<服务名>=debug` |
 | `[metrics]` | `enabled`：是否提供 `/metrics`；Public/Admin 开启时 listener 必须是 loopback 或 Unix socket |
+| `[readiness]` | 审计失败模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
 | `[cache]` | 见[缓存](#缓存) |
 | `[backup]` | CLI 专用定时备份策略，见[定时备份策略](#定时备份策略) |
 | `[auction.schedule]` | 周排期：时区、预览/开拍/计划结束的星期与时间、参与世界 |
@@ -65,6 +66,19 @@
 | `[auction.settlement.recovery]` | 恢复策略：v1 固定 7 天、v2 固定 24 小时，`payment_timeout_seconds` 必须与版本对应；提醒次数固定 1，COD 退回上限可配。自动排期的赛季前场次覆盖为 v2 |
 
 经济、结算与恢复策略在**创建场次时冻结**，修改模板只影响之后创建的场次；排期控制后续计划与早鸟收件窗口，不改写已创建场次的时间与策略快照。业务含义见[业务规则](../../docs/business-rules.md)与[结算与履约](../../docs/guide/settlement.md)。
+
+### 就绪策略
+
+`common.toml [readiness]` 是三角色共同引用的启动快照，两个字段均可省略，不由 Admin runtime 覆盖；修改后必须重启，遵守适用的停机门禁。枚举值非法时拒绝加载，不回显 TOML 原文。
+
+| 字段 | 默认值 | 语义 |
+| --- | --- | --- |
+| `audit_failure_mode` | `"shadow"` | `legacy`：任一审计失败即粘滞未就绪，不计算影子；`shadow`：沿用旧就绪与全部失败心跳计数，同时比较分类门禁并记录差异；`classified`：只由 permanent + unknown 失败粘滞阻断，心跳 `audit_failure_count` 也只投影这两类累计 |
+| `cache_enabled` | `true` | Public/Admin 最终就绪布尔值在进程内正负均缓存 1 秒，并发共享一次限时 750ms 的检查；`false` 逐次执行原检查，不合并、不应用该 750ms 预算。Worker control 不使用该缓存 |
+
+瞬时白名单保留决策 32 的 SQLSTATE `40001`、`40P01`、`57014`、`55P03`、整个 `08` 类、sqlx `PoolTimedOut` 及连接通信失败 `Io`，依决策 71 另外加入 `53300`、`57P01`、`57P02`、`57P03`；`57P05`、`25P03/25P04` 仍按未知粘滞阻断。未知错误是未知风险处置，不代表已证明不可重试；与不可重试失败一样保持粘滞，不因后续成功清零。分类只影响健康信号，不扩大事务或外部写入重试范围。完整分类由 [auction-storage](../../crates/auction-storage/README.md#审计失败与就绪) 拥有。
+
+切换到 `classified` 前，影子观察中的差异应只出现在 `transient`（预期差异），`permanent` / `unknown` 无差异；没有样本不能解释为通过。观察结果由用户审阅并决定切换，不自动推进。步骤与指标见[运维手册](../README.md#审计就绪影子观察)。完整回退为 `audit_failure_mode = "legacy"`、`cache_enabled = false` 并受控重启；单独关闭指标或日志不改变就绪计数。
 
 ### 定时备份策略
 
@@ -210,3 +224,20 @@ runtime 文件让运营人员在 Admin “参数配置”页修改部分参数�
 - 示例中的值仅用于演示；`allowed_peer_*`、origin、密钥等必须按实际部署填写。
 
 首次设置的目标配置目录必须尚不存在；其直接父目录须预先建立，为真实目录（非符号链接），归当前运行账号或 root 所有，且禁止 group/other 写入。这是生成器的强制门禁，不受 `config check --strict` 控制。不能直接把目标放在 `/tmp` 下；如需临时生成，先在其中建立归运行账号所有、权限 0700 的私有父目录，再把目标放在该私有目录内。
+
+## 排空与停止预算
+
+三个角色各自在非敏感角色 TOML 中拥有 `[shutdown]`；不属于 `common.toml`，不被 Admin runtime 覆盖，没有环境变量覆盖。省略区块或字段时使用角色默认值。
+
+| 字段 | Public/Admin | Worker | 生效 |
+| --- | --- | --- | --- |
+| `drain_timeout_seconds` | 默认 10，范围 1–300 | 默认 10，范围 1–300 | 重启 |
+| `critical_write_timeout_seconds` | 只接受 0，默认 0 | 默认 60，范围 0–300；0 完整选择旧排空路径 | 重启 |
+
+Worker 新路径在首次停止时关闭入口，立即取消尚未登记交接的准备期工作并保留 claim 由租约恢复。delivery Send（含装备出库/解锁、附件和 COD）、Take/Return、discard 和 PM 的围栏调用开始即受保护：调用前登记，已关闭则不发起围栏；登记成功后交接与关键段同样计入活动、阻止排空结束，仍须确认围栏提交才允许外写。论坛在已有持久 claim 下的首个实际 POST 前登记。全部已登记活动共享一次关键段截止，结果按原端口提交后才 complete，其余 drop 只记录未收口。运维告警发送复用 delivery，不启用任何暂缓的告警通道。之后执行普通资源收口。默认最多 60 + 10 秒，既有请求、续租、凭据所有权和证据截止不延长。第二次信号立即强制收口、非零退出并跳过可选 tracing 刷新；预算耗尽同样非零退出，不在关闭路径补写持久结果。
+
+`critical_write_timeout_seconds = 0` 配合 `drain_timeout_seconds = 10` 完整恢复旧排空路径，包括 PM 随主 runner 收口的旧策略；只把 60 改成 10 仍是新路径。切换需要重启，并应遵守维护窗口。换回不识别 `[shutdown]` 的旧二进制时同时恢复旧角色配置，避免未知字段校验失败。
+
+外层停止上限须大于“普通 + 关键段 + tracing 上限 + 余量”。示例 Public/Admin unit 为 45 秒，Worker 为 120 秒；tracing 合法上限为 30 秒。`auction-server` 从各 RolePlan 派生 `普通 + 关键段 + 30 + 5` 秒并求和，默认 45 + 45 + 105 = 195 秒；server unit 为 225 秒，另覆盖三次各 5 秒强制回收与余量。CLI 每次停止读取有限的 `TimeoutStopUSec`，客户端等待该值再加 10 秒；stack unit 为 330 秒，覆盖三个角色、属性查询与回执余量。提高应用预算须同步提高对应 unit、server 与 stack 上限；新程序不会修改已安装的主机 unit。
+
+服务 owner 回收后仍监听终止信号；tracing 刷新期间再收到信号时，装配根直接非零退出，避免不可取消的刷新线程延迟强退。

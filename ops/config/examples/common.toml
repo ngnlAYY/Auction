@@ -8,6 +8,13 @@ log_filter = "info,auction=debug"
 # 可选：是否启用固定指标端点；省略时关闭。
 enabled = false
 
+# 可选区块：三角色共用的就绪策略；修改后须重启，不由 Admin runtime 覆盖。
+[readiness]
+# 可选：legacy、shadow 或 classified，默认 shadow；影子期保持任一审计失败即未就绪，切换 classified 由用户决定。
+audit_failure_mode = "shadow"
+# 可选：默认 true；HTTP 最终就绪结果缓存 1 秒、合并并发且检查限时 750ms，false 回到逐次探测。
+cache_enabled = true
+
 # 可选区块：可丢弃缓存设置；省略整个区块等同于关闭缓存。
 [cache]
 # 可选：缓存后端，可填 disabled 或 redis；省略时为 disabled。

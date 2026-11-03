@@ -105,9 +105,13 @@ usermod -aG auction-worker-control auction
 | `auction-admin-api.service` | `Requires=`/`After=` Worker；附加组 `auction-worker-control` 以访问 control socket；可写 `/etc/auction/runtime` |
 | `auction-public-api.service` | `Requires=`/`After=` Worker 与 Admin |
 | `auction-stack.service` | oneshot、`RemainAfterExit`，以 root 执行 `auction-cli service start/stop`；开机按序拉起 |
-| `auction-server.service` | 合并部署专用；`KillMode=mixed`、`TimeoutStopSec=155s`、`Restart=no` |
+| `auction-server.service` | 合并部署专用；`KillMode=mixed`、`TimeoutStopSec=225s`、`Restart=no` |
 
-角色 unit 都设 `TimeoutStopSec=45s`（10 秒排空 + tracing 刷新余量）与一组 systemd 加固选项（`ProtectSystem=strict`、`NoNewPrivileges` 等）。
+Public/Admin unit 保持 `TimeoutStopSec=45s`，Worker 为 `120s`，stack 为 `330s`；保留原有 systemd 加固选项。外层上限按“普通 + 关键段 + tracing 上限 + 余量”计算，三角色普通预算默认 10 秒，Worker 关键段默认 60 秒，tracing 上限 30 秒。supervisor 从 RolePlan 求和，默认 195 秒，server unit 为 225 秒。提高应用预算须同步提高相应 unit 上限，详见[排空与停止预算](config/README.md#排空与停止预算)。
+
+Worker 停止时立即取消尚未登记交接的准备期工作并保留持久 claim。delivery、PM 和 compose discard 在持久围栏调用前登记，围栏调用开始即受保护；关闭先赢时不发起围栏，登记先赢时围栏往返也计入活动、阻止排空结束。登记本身不授权外写，只有围栏确认提交才继续 POST；确认失败或提交未知仍不执行外写。论坛在已有持久 claim 下的首个实际 POST 前登记，同一活动的后续必要 POST 不因关闭入口被截断。已登记交接与关键段的 owner 继续执行原续租、凭据校验和结果落库，共享一次 60 秒截止，之后普通收口最多 10 秒；仅在既有结果端口确认提交后 complete，其余由 drop 记未收口。60 秒只保证“剩余工作可在预算内完成时落库后退出，否则保持既有未知边界”；不延长请求、lease 或证据寿命。超时和二次信号非零退出，关闭路径不补造失败或人工态；二次信号跳过可选 tracing 刷新。旧路径可通过角色配置 `critical_write_timeout_seconds = 0` 回退，切换需重启。
+
+W7.2 的在途发送门禁尚未实现，当前部署不受其保护。现有 `service stop/restart`、直接 systemctl 停止、主机重启等入口仍可能耗尽关键段预算，届时必须沿既有人工对账或只读证明流程处理，绝不自动重发。
 
 **为什么用 `auction-cli service` 编排**：systemd 的 `After=` 只保证“进程已启动”，不保证“已就绪”。`auction-cli service start` 在每个角色启动后等待其 readiness（Worker 为 control socket 的 `/v1/health/ready`，Admin/Public 为 `/health/ready`，且期间 `MainPID`/`InvocationID` 不变）才启动下一个；单角色 readiness 的完整超时预算覆盖 unit 状态查询、探测、身份复核与轮询等待，`systemctl start` 自身另有 90 秒上限。任何一步失败都会反序停止本次启动的 unit。它还在启动前执行严格配置检查与数据库迁移。详见 [auction-cli](../apps/auction-cli/README.md#分体部署编排)。
 
@@ -161,11 +165,38 @@ systemctl stop auction-stack.service                     # 按 Public → Admin 
 
 | 目标 | 检查 |
 | --- | --- |
-| Public / Admin | `GET /health/live`、`GET /health/ready`（数据库 schema 为当前版本、无审计写入失败；Public 另要求 realtime relay 新鲜） |
+| Public / Admin | `GET /health/live`、`GET /health/ready`（数据库完整迁移身份匹配、审计模式门禁通过；Public 另要求 realtime relay 新鲜；默认一秒进程缓存） |
 | Worker | control socket 的 `GET /v1/health/ready`，例如 `curl --unix-socket /run/hv-auction/worker/control.sock http://localhost/v1/health/ready`（调用者须在 peer allowlist 中） |
 | 全部 | `auction-cli service status`（分体部署） |
 
 三个角色每 10 秒向数据库写入心跳（TTL 30 秒）；Admin 仪表盘汇总各进程状态，过期心跳显示为缺失。
+
+HTTP 缓存的转换时限与异常行为见[路由契约](../docs/contracts/routes.md#健康与指标publicadmin)。心跳不复用 HTTP 缓存。Worker control 仍只检查运行/排空状态，审计失败影响其数据库心跳，不扩展 control 契约。`auction-server` 启动时等待探针，全部启动后只监管子进程退出；systemd 模板没有 HTTP 主动检查，Caddy 模板也未配置主动健康探针，readiness 503 本身不会触发 systemd 重启。
+
+### 审计就绪影子观察
+
+默认 `[readiness] audit_failure_mode = "shadow"`、`cache_enabled = true`。该模式保持旧就绪判定及心跳全部失败累计，同时在数据库检查成功后比对审计门禁。`auction_readiness_shadow_mismatch_total{class}` 按发生差异的底层检查次数累计，不是失败命令数或 HTTP 等待者数；只含瞬时失败且尚无阻断类失败时，旧门禁拒绝、新门禁放行，这是预期差异。完整分类字典见 [auction-storage](../crates/auction-storage/README.md#审计失败与就绪)。
+
+1. 用户先确保指标已有可采集和查看的路径。Public/Worker 的指标取 common，Admin 若有 runtime 则须同时检查其 metrics 开关；Worker 当前从 control socket 抓取。本项不安装采集服务、不启用外部心跳或运维告警通知。
+2. 保持 shadow 观察。日志 target 为 `auction::storage::audit_health`，只输出 `class`、`sqlstate_class`、固定 `kind`、`blocks_classified_readiness`；最后一项明确指 classified 门禁，shadow 的实际门禁仍会被瞬时累计阻断。需要开启时在既有 `log_filter` 追加 `,auction::storage::audit_health=warn`，关闭追加 `,auction::storage::audit_health=off`；修改过滤器也需重启。
+3. 按下列 PromQL 核对分类、影子差异、阻断状态和 HTTP 检查收敛。差异只允许出现在 transient，permanent/unknown 无差异；观察必须有对应分支样本，无样本不算通过。不得为取样擅自连接生产数据库或制造故障。
+4. 用户审阅证据并决定是否将 common 改为 `audit_failure_mode = "classified"`，按适用的停机门禁受控重启相关角色。不会自动切换；分类必须先于 W0.6 超时启用。classified 下心跳和 Admin 计数只含 permanent + unknown，瞬时完整计数继续在指标与日志中保留。
+5. 回退时设置 `audit_failure_mode = "legacy"`、`cache_enabled = false`，受控重启恢复任一失败即未就绪与逐次探测。不可重试/未知失败修复后也需受控重启，不提供清零接口、不写试探审计。单独禁用 metrics 或过滤日志不影响门禁。
+
+```promql
+# 当前进程的分类失败累计；包含随后回滚并重试成功的尝试，首次出现的 label 也可直接查看。
+sum by (instance, class, sqlstate_class, kind) (auction_audit_write_failures_total)
+# 影子期预期差异；后两类必须为零，缺少实际失败样本须另行说明。
+sum by (instance, class) (increase(auction_readiness_shadow_mismatch_total[1h]))
+# 当前模式是否被审计累计阻断。
+auction_audit_readiness_blocked
+# 比较 HTTP 请求与真实底层检查，观察命中、刷新和并发合并。
+sum by (instance, outcome) (rate(auction_readiness_cache_requests_total[5m]))
+sum by (instance, result) (rate(auction_readiness_checks_total[5m]))
+histogram_quantile(0.95, sum by (instance, le) (rate(auction_readiness_check_duration_seconds_bucket[5m])))
+```
+
+已有查询为审计影子比对复用，不双查数据库。新指标不改变事务重试、业务写入与结果未知的处置；在决策 32 的白名单基础上，依决策 71 加入 `53300`（连接数耗尽）、`57P01`（服务器关闭）、`57P02`（崩溃关闭）、`57P03`（尚未就绪），固定 kind 分别为 `connection_capacity`、`server_shutdown`、`server_crash`、`server_starting`。`57P05`、`25P03/25P04` 仍按未知粘滞阻断。依决策 72，默认 shadow 上线，只允许预期 transient 差异，经用户审阅后决定是否切换 classified。
 
 ### 指标
 
@@ -274,3 +305,5 @@ D1 仍待线上分类证据确认。部署后由用户执行只读核对，数�
 | 所有客户端被同一地址限流 | 反向代理地址未加入 `trusted_proxy_cidrs`，服务端把代理当作客户端 |
 | 页面返回 503 | 程序不是 `web-embed` 构建，或内嵌资源缺失 |
 | 投递长时间停在 `manual_reconcile` | 结果未知，需在“投递队列”人工对账；不要直接改数据库。对账返回 `delivery_sent_sighted` 时说明 Sent 已有该结算义务的邮件，改用 `auction-cli settlement confirm-sent` |
+
+服务 owner 回收后仍监听终止信号；tracing 刷新期间再收到信号时，装配根直接非零退出，避免不可取消的刷新线程延迟强退。

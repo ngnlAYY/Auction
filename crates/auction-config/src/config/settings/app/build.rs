@@ -14,7 +14,9 @@ impl AppConfig {
             listener,
             log_filter,
             metrics,
+            readiness,
             tracing,
+            shutdown,
             realtime,
             cache,
             backup,
@@ -27,6 +29,7 @@ impl AppConfig {
             worker_config_path,
             runtime_worker_budget,
         } = input;
+        let shutdown = shutdown.resolve(role)?;
         let secret_file =
             secrets_path.as_deref().map(load_secret_file).transpose()?.unwrap_or_default();
         let secrets = AppSecrets::from_file(secret_file)?;
@@ -211,7 +214,9 @@ impl AppConfig {
             listener,
             log_filter,
             metrics,
+            readiness,
             tracing,
+            shutdown,
             realtime,
             cache,
             backup,

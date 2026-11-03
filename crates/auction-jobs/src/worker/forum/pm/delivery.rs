@@ -7,6 +7,7 @@ pub(super) async fn process(
     request: LotWatchPmClaimRequest,
     drain: &watch::Receiver<bool>,
     deadline: tokio::time::Instant,
+    activity: &auction_application::ExternalWriteActivity,
 ) -> Result<(), LotWatchError> {
     check_deadline(deadline)?;
     let Some(mut claim) = runtime.store.claim(request).await? else {
@@ -30,6 +31,9 @@ pub(super) async fn process(
         return runtime.store.finish(claim, receipt).await;
     }
     if *drain.borrow() {
+        if activity.enabled() {
+            return Ok(());
+        }
         return runtime.store.release_unsent(claim).await;
     }
     let prepared = runtime.sender.prepare(claim.world, &claim.message).await;
@@ -40,11 +44,19 @@ pub(super) async fn process(
         Err(_) => return runtime.store.release_unsent(claim).await,
     };
     if *drain.borrow() {
+        if activity.enabled() {
+            return Ok(());
+        }
         return runtime.store.release_unsent(claim).await;
     }
     let sender = prepared.sender_forum_account_id().to_owned();
     if !valid_forum_pm_id(&sender) {
         return runtime.store.release_unsent(claim).await;
+    }
+    // 围栏调用开始即受保护；关闭先赢时不写 sending，原 claim 由租约恢复。
+    // 登记只防止交接被停机截断，只有 start_sending 确认提交才授权 POST。
+    if !activity.enter_critical() {
+        return Ok(());
     }
     if !runtime.store.start_sending(claim.clone(), sender.clone()).await? {
         return Ok(());
@@ -52,9 +64,12 @@ pub(super) async fn process(
     check_deadline(deadline)?;
     claim.sender = Some(sender);
     // start 提交响应未知直接返回；绝不执行 POST，也绝不释放回 pending。
-    let receipt = if *drain.borrow() { None } else { prepared.send().await.ok() };
+    let receipt =
+        if !activity.enabled() && *drain.borrow() { None } else { prepared.send().await.ok() };
     check_deadline(deadline)?;
-    runtime.store.finish(claim, receipt).await
+    runtime.store.finish(claim, receipt).await?;
+    activity.complete();
+    Ok(())
 }
 
 /// timeout 可能先 poll 出迟到回执；每次阶段交接都复核原截止，过期后只保留持久 claim。

@@ -7,9 +7,7 @@ use std::time::Duration;
 use anyhow::Context;
 use auction_config::{AppConfig, Role};
 use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
-use auction_process::{
-    DEFAULT_DRAIN_TIMEOUT, DrainOutcome, TaskGuard, TerminationSignals, wait_for_drain,
-};
+use auction_process::{DrainOutcome, TaskGuard, TerminationSignals, wait_for_drain};
 use tokio::sync::oneshot;
 
 use super::{config, listener, state};
@@ -20,6 +18,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         None => AppConfig::load(Role::Admin),
     }
     .context("load admin-api configuration")?;
+    let mut signals = TerminationSignals::subscribe().context("subscribe admin-api signals")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
         "auction_admin_api",
@@ -31,13 +30,20 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     )
     .context("initialize tracing")?;
 
-    let result = run_service(&config, &telemetry).await;
-    shutdown_tracing(telemetry).await;
+    let mut forced = false;
+    let result = run_service(&config, &telemetry, &mut signals, &mut forced).await;
+    if !forced {
+        shutdown_tracing(telemetry, &mut signals).await;
+    }
     result
 }
 
-async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::Result<()> {
-    let mut signals = TerminationSignals::subscribe().context("subscribe admin-api signals")?;
+async fn run_service(
+    config: &AppConfig,
+    telemetry: &TracingRuntime,
+    signals: &mut TerminationSignals,
+    forced: &mut bool,
+) -> anyhow::Result<()> {
     let cache = Arc::new(config::configure_cache(config).context("configure admin-api cache")?);
     let metrics = Arc::new(
         ProcessMetrics::new_with_tracing_health(
@@ -49,6 +55,7 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         )
         .context("initialize Prometheus metrics")?,
     );
+    let shutdown_metrics = metrics.shutdown();
     // 依赖装配可能等待数据库锁或连接；终止信号不能等到开始提供 HTTP 后才被读取。
     let (bound_listener, state, heartbeat) = tokio::select! {
         biased;
@@ -105,6 +112,12 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         drop(shutdown_sender);
     }
     abort_heartbeat_task(&heartbeat_task);
+    let drain_started = std::time::Instant::now();
+    let reason = if signal.is_some() {
+        auction_observability::ShutdownReason::Signal
+    } else {
+        auction_observability::ShutdownReason::ServerStopped
+    };
     let drain = async {
         join_heartbeat_task(&mut heartbeat_task).await;
         if let Some(publisher) = heartbeat.as_ref()
@@ -117,13 +130,39 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
             None => server_task.join().await,
         }
     };
-    let result = match wait_for_drain(&mut signals, DEFAULT_DRAIN_TIMEOUT, drain).await {
+    let outcome =
+        wait_for_drain(signals, Duration::from_secs(config.shutdown.drain_timeout_seconds), drain)
+            .await;
+    shutdown_metrics.phase_finished(
+        auction_observability::ShutdownRole::Admin,
+        auction_observability::ShutdownPhase::Drain,
+        drain_started.elapsed(),
+    );
+    let label = match &outcome {
+        Ok(DrainOutcome::Completed(Some(Ok(Ok(()))))) => {
+            auction_observability::ShutdownOutcome::Completed
+        }
+        Ok(DrainOutcome::Completed(_result)) => auction_observability::ShutdownOutcome::Failed,
+        Err(error) => {
+            tracing::warn!(error = %error, "排空信号接收失败");
+            auction_observability::ShutdownOutcome::Failed
+        }
+        Ok(DrainOutcome::TimedOut) => auction_observability::ShutdownOutcome::TimedOut,
+        Ok(DrainOutcome::Interrupted(_)) => auction_observability::ShutdownOutcome::Interrupted,
+    };
+    shutdown_metrics.finished(auction_observability::ShutdownRole::Admin, reason, label);
+    let result = match outcome {
         Ok(DrainOutcome::Completed(result)) => admin_server_result(result),
         Ok(DrainOutcome::TimedOut) => {
+            *forced = true;
             force_admin_tasks(&mut heartbeat_task, &mut server_task).await;
-            Err(anyhow::anyhow!("admin-api drain exceeded 10 seconds"))
+            Err(anyhow::anyhow!(
+                "admin-api drain exceeded {} seconds",
+                config.shutdown.drain_timeout_seconds
+            ))
         }
         Ok(DrainOutcome::Interrupted(signal)) => {
+            *forced = true;
             force_admin_tasks(&mut heartbeat_task, &mut server_task).await;
             Err(anyhow::anyhow!("admin-api drain interrupted by {signal}"))
         }
@@ -176,8 +215,21 @@ fn admin_server_result(
     }
 }
 
-async fn shutdown_tracing(telemetry: TracingRuntime) {
-    match tokio::task::spawn_blocking(move || telemetry.shutdown()).await {
+async fn shutdown_tracing(telemetry: TracingRuntime, signals: &mut TerminationSignals) {
+    let result = tokio::select! {
+        biased;
+        signal = signals.recv() => {
+            // 业务 owner 已完成回收；spawn_blocking 的刷新无法靠丢弃 future 中断。
+            // 二次信号直接结束角色进程，不能让可选 exporter 拖延强制退出。
+            match signal {
+                Ok(signal) => tracing::warn!(signal = %signal, "tracing 刷新被终止信号强制结束"),
+                Err(error) => tracing::warn!(error = %error, "tracing 刷新期间信号接收失败"),
+            }
+            std::process::exit(1);
+        }
+        result = tokio::task::spawn_blocking(move || telemetry.shutdown()) => result,
+    };
+    match result {
         Ok(Ok(())) => {}
         Ok(Err(error)) => tracing::warn!(error = %error, "admin tracing shutdown failed"),
         Err(error) => tracing::warn!(error = %error, "admin tracing shutdown task failed"),

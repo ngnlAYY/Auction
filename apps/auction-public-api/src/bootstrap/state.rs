@@ -177,11 +177,18 @@ pub(super) async fn configure_state(
         ));
     };
 
-    let store =
-        Arc::new(DatabaseStore::connect(database_url).await.context("connect public database")?);
+    let store = Arc::new(
+        DatabaseStore::connect(database_url)
+            .await
+            .context("connect public database")?
+            .with_audit_failure_mode(config.readiness.audit_failure_mode),
+    );
     metrics
         .register_pool_metrics(store.pool_metrics_source())
         .context("register public database pool metrics")?;
+    metrics
+        .register_audit_metrics(store.audit_metrics_source())
+        .context("register public audit metrics")?;
     let poll_interval = Duration::from_millis(config.realtime.poll_interval_millis);
     let relay_health = Arc::new(PublicRealtimeRelayHealth::new(poll_interval));
     let process_health = Arc::new(PublicProcessHealth {
@@ -263,7 +270,11 @@ pub(super) async fn configure_state(
     );
     let realtime_relay =
         Arc::new(ConfiguredRealtimeRelay { relay: realtime_relay, health: relay_health });
-    let readiness: Arc<dyn ProcessReadinessPort> = process_health;
+    let readiness: Arc<dyn ProcessReadinessPort> = Arc::new(auction_http::HttpReadinessProbe::new(
+        process_health,
+        config.readiness.cache_enabled,
+        metrics.readiness(),
+    ));
     let state = PublicApiState::new(
         Some(worlds),
         Some(rules),

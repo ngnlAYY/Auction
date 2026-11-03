@@ -138,11 +138,18 @@ pub(super) async fn configure_state(
     let Some(database_url) = config.database_url() else {
         return Ok((super::fallback::empty_state(config, security, worker_control), None));
     };
-    let store =
-        Arc::new(DatabaseStore::connect(database_url).await.context("connect admin database")?);
+    let store = Arc::new(
+        DatabaseStore::connect(database_url)
+            .await
+            .context("connect admin database")?
+            .with_audit_failure_mode(config.readiness.audit_failure_mode),
+    );
     metrics
         .register_pool_metrics(store.pool_metrics_source())
         .context("register admin database pool metrics")?;
+    metrics
+        .register_audit_metrics(store.audit_metrics_source())
+        .context("register admin audit metrics")?;
     let actor =
         config.admin_actor().context("admin_actor is missing from sensitive configuration")?;
     let secret =
@@ -367,7 +374,11 @@ pub(super) async fn configure_state(
     .with_settlement_catalog(settlement_catalog)
     .with_dashboard_worlds(config::configured_dashboard_worlds(config))
     .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config))
-    .with_readiness(store);
+    .with_readiness(Arc::new(auction_http::HttpReadinessProbe::new(
+        store,
+        config.readiness.cache_enabled,
+        metrics.readiness(),
+    )));
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "admin heartbeat ready publish failed");
     }

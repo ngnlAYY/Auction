@@ -48,6 +48,7 @@ pub struct AdminAuditResponse {
 pub struct AdminDashboardHealthResponse {
     pub status: String,
     pub readiness: bool,
+    /// 累计审计失败；发布进程为 classified 模式时只计阻断就绪的失败。
     pub audit_failure_count: i64,
     pub missing_services: Vec<String>,
 }

@@ -93,15 +93,19 @@ where
     let iteration_started = std::time::Instant::now();
     let result = if runtime.config.poll_isolation_enabled {
         // 新路径只等待收件；维护由 runner 的独立 JoinSet 监督，不改变 claim/证明/提交边界。
-        run_cycle_inner(worker, runtime, force).await
+        worker
+            .write_lifecycle
+            .background(run_cycle_inner(worker, runtime, force))
+            .await
+            .unwrap_or(Ok(WorkerResult::Canceled))
     } else {
         // 旧路径保留每轮三分支 join 与原观察频率；下一轮仍等待最慢分支完成。
         let (_, _, result) = tokio::join!(
-            run_read_observation(runtime),
-            run_maintenance(runtime),
-            run_cycle_inner(worker, runtime, force),
+            worker.write_lifecycle.background(run_read_observation(runtime)),
+            run_maintenance(runtime, &worker.write_lifecycle),
+            worker.write_lifecycle.background(run_cycle_inner(worker, runtime, force)),
         );
-        result
+        result.unwrap_or(Ok(WorkerResult::Canceled))
     };
     let metric_result = match &result {
         Ok(result) => *result,

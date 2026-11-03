@@ -159,6 +159,7 @@
 | --- | --- | --- | --- | --- |
 | 2026-11-03 | 就绪探针瞬时白名单是否扩展到 `53300`（连接数耗尽）、`57P01/57P02/57P03/57P05`（服务器关闭、重启、崩溃恢复、空闲会话超时）、`25P03/25P04`（事务内空闲或事务超时）：这些错误在 PostgreSQL 计划重启（如 W10.8、W10.7）时可能出现，现按未知粘滞阻断，需重启进程恢复（与现状一致，无退步） | W0.14 | W0.14 | 已决定（决策 71），并入 W0.14 |
 | 2026-11-03 | 有意改变判定的工作项（如 W0.14）如何满足交付规范第 3 条“影子差异为零”：W0.14 采用默认 `shadow` 模式，切换条件解释为“差异只出现在预期类别（`transient`），`permanent`/`unknown` 无差异”；请确认该解释是否适用于此类工作项 | W0.14 | 交付规范 | 已决定（决策 72） |
+| 2026-11-03 | Worker control 的 `/v1/health/ready` 只看运行/排空状态，不含数据库迁移与审计失败判定，与 Worker 心跳的就绪口径不一致；是否统一（含 W7.8a 的迁移兼容判定） | W0.14、W7.8a 调研 | W0.14 后续或 W7.9 | 待用户决定 |
 
 ## 7. 进度
 
@@ -172,8 +173,8 @@
 | D4 | 已决定 | — | — | 决策 14；W1.3、W1.7 随 M2b |
 | D5 | 待量化 | — | — | W0.6 量化后决定是否提前交付 W12.1 |
 | D6 | 已决定 | — | — | 决策 15；玩家可见说明随 M1；W0.12 核实主题页数后决定是否提前交付 W1.11 |
-| D7 | 已决定 | — | — | 决策 32；W0.14 随 M1，先于 W0.6 |
-| D8 | 已决定 | — | — | 决策 33；W7.11 随 M1 |
+| D7 | 已提交 | 随本提交 | 未部署 | 决策 32、71、72；W0.14 默认影子模式，切换 `classified` 后生效 |
+| D8 | 已提交 | 随本提交 | 未部署 | 决策 33；W7.11 |
 | D9 | 已决定 | — | — | 决策 62；W14.6 随 M2b |
 | D10 | 已决定 | — | — | 决策 60；W14.4 随 M2b，W0.12 发现滥用则提前单独交付 |
 | D11 | 待处理 | — | — | W14.5 随 M2b |
@@ -181,7 +182,8 @@
 | W0 | 未开始 | — | — | W0.1–W0.14 随 M1；W0.15 随 M2a；W0.16 随 M3 |
 | W0.1 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`ApplicationError::safe_kind()` 闭集分类，首个调用方为履约 reconcile 未持久化错误日志 |
 | W0.7 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；COD 实收资金化各拒绝分支细分为独立 `safe_kind`（target `auction::settlement::funding_diagnostics`），持久化 defer reason 不变、无迁移；部署后按 `ops/README.md` 的 D1 诊断章节收集分类证据 |
-| W0.14 | 进行中 | — | — | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；D7，须先于 W0.6 |
+| W0.14 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；审计失败按 SQLSTATE 分类（决策 32、71），`[readiness] audit_failure_mode` 默认 `shadow`、就绪缓存 1 秒；观察到差异只在 `transient` 类后由用户切换 `classified`（决策 72），W0.6 的超时须在切换后启用 |
+| W7.11 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
 | W1 | 未开始 | — | — | W1.0 为 M1 首项（D2）；W1.10 方案已定（决策 40） |
 | W1.0 | 已提交 | `b2ccb9fd` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；完整 Read Mail 观察降频为每小时、维护独立循环、isekai 相位错峰，回退开关 `poll_isolation_enabled`；待用户部署后按“维护不再超时、`mail-maintenance-*` p95 < 60 秒”验收 |
 | W2 | 未开始 | — | — | 随 M3，排在 W9.9 之后 |
@@ -198,9 +200,9 @@
 | W11 | 未开始 | — | — | W11.4 随 M2a；W11.2 改为偿付能力报告（v11） |
 | W12 | 未开始 | — | — | W12.3 已批准，随 M4；W12.8 随 M4 |
 | W13 | 未开始 | — | — | W13.1–W13.5 全部随 M1；W13.6 随 M6 |
-| W13.1 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 B）实现、Claude 监督；`check.sh ratchet`，基线 `ci/checks/source-ratchet.baseline`（14 项） |
-| W13.4 | 已提交 | 随本提交 | 未部署 | 同上；`check.sh markdown-links` 离线检查相对链接与锚点，现有文档无断链 |
-| W13.5 | 已提交 | 随本提交 | 未部署 | 同上；CI 每周一 04:17 UTC 运行 `security-audit`；发布 tag 审计待 W7.1 |
+| W13.1 | 已提交 | `42bd8477` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 B）实现、Claude 监督；`check.sh ratchet`，基线 `ci/checks/source-ratchet.baseline`（14 项） |
+| W13.4 | 已提交 | `42bd8477` | 未部署 | 同上；`check.sh markdown-links` 离线检查相对链接与锚点，现有文档无断链 |
+| W13.5 | 已提交 | `42bd8477` | 未部署 | 同上；CI 每周一 04:17 UTC 运行 `security-audit`；发布 tag 审计待 W7.1 |
 | W14 | 未开始 | — | — | W14.8、W14.1、W14.2、W14.4–W14.6、W14.9 随 M2b；W14.3 随 M4（决策 64）；W14.7 取消（决策 65）；W14.10 随各项交付；W14.11 随 M2b（决策 67） |
 
 ## 8. 术语

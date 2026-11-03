@@ -35,12 +35,14 @@ auction-server --config-dir /var/lib/auction/config
 ## 运行与退出
 
 - 任一子进程意外退出，supervisor 立即停止其余角色并以非零状态退出——不在进程内自动重启。启动或监管失败后若关闭也失败，错误链同时保留原始失败与关闭错误，便于判断是否仍需人工回收角色。
-- 收到 SIGTERM/SIGINT 时按 Public → Admin → Worker 反序发送 SIGTERM 并等待，总预算 135 秒（每角色 10 秒排空 + tracing 刷新）；第二次信号优先强制结束，就绪与退出回执均须在各自原截止前确认，迟到回执按超时处理。
+- 收到 SIGTERM/SIGINT 时按 Public → Admin → Worker 反序发送 SIGTERM 并等待，总预算由 RolePlan 按每角色“普通 + 关键段 + tracing 上限 30 秒 + 余量 5 秒”求和，默认 195 秒；第二次信号优先强制结束，就绪与退出回执均须在各自原截止前确认，迟到回执按超时处理。
 
 ## systemd
 
-示例 [`ops/deploy/systemd/auction-server.service.example`](../../ops/deploy/systemd/auction-server.service.example)：`StateDirectory=auction` 承载配置目录与运行目录，`KillMode=mixed`（信号只发给 supervisor），`TimeoutStopSec=155s`，`Restart=no`——首次初始化或迁移失败需要人工核对，不用自动重启掩盖。
+示例 [`ops/deploy/systemd/auction-server.service.example`](../../ops/deploy/systemd/auction-server.service.example)：`StateDirectory=auction` 承载配置目录与运行目录，`KillMode=mixed`（信号只发给 supervisor），`TimeoutStopSec=225s`，`Restart=no`——首次初始化或迁移失败需要人工核对，不用自动重启掩盖。
 
 ## 日常运维
 
 合并部署同样使用 `auction-cli`，但 `service` 子命令只适用于分体部署。数据库迁移、建库、恢复与重建必须先停止 `auction-server`，再以同一服务账号执行（`auction-cli` 通过 `owner.lock` 取得独占停机证明）；备份创建可在运行时执行，离线备份校验也不要求停服。详见 [auction-cli](../auction-cli/README.md)。
+
+提高角色排空预算须同步提高 server unit 上限；225 秒覆盖默认 195 秒及三次各 5 秒强制回收和余量。字段与回退见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。
