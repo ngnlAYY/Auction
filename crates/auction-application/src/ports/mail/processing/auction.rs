@@ -1,14 +1,14 @@
 use std::{fmt, future::Future};
 
+use auction_domain::{CommandId, EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use auction_domain::{CommandId, EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
-
 use super::super::{ApplicationFuture, CompetitionTransactionError, RequestHash};
 use super::acceptance::{MailAuctionAcceptance, MailAuctionIntakeLookup};
 use super::common::MailProcessingError;
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 
 /// 单件进入拍卖 owner 的已验证事实和短生命周期 key。
 pub struct MailAuctionItem {
@@ -124,8 +124,16 @@ impl MailAuctionIntakeResult {
             .added_count
             .checked_add(self.existing_count)
             .ok_or(MailProcessingError::OwnerResultInvalid)?;
-        let lot_count = i32::try_from(self.lot_ids.len())
-            .map_err(|_| MailProcessingError::OwnerResultInvalid)?;
+        let lot_count = i32::try_from(self.lot_ids.len()).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                error.diagnostic_kind(),
+                "mail_intake",
+                "convert_lot_count",
+                DiagnosticContext::default(),
+            );
+            MailProcessingError::OwnerResultInvalid
+        })?;
         if total_count != lot_count {
             return Err(MailProcessingError::OwnerResultInvalid);
         }

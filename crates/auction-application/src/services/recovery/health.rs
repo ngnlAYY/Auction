@@ -5,6 +5,7 @@ use std::sync::Arc;
 use auction_domain::SettlementWorld;
 use chrono::{DateTime, Utc};
 
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 use crate::{
     ApplicationError, ApplicationFuture, RecoveryBalanceStatus, RecoveryEvidenceStatus,
     RecoveryHealthConfig, RecoveryHealthRefreshPort, RecoveryHealthStore, RecoveryHealthUpdate,
@@ -53,7 +54,15 @@ impl RecoveryHealthRefreshPort for RecoveryHealthService {
                 Some(reader) => reader
                     .funding_policy()
                     .await
-                    .map_err(|_| {
+                    .map_err(|error| {
+                        record_error(
+                            DiagnosticLevel::Warn,
+                            error.diagnostic_kind(),
+                            "recovery_health",
+                            "read_funding_policy",
+                            DiagnosticContext::default(),
+                        );
+
                         ApplicationError::Repository(RepositoryError::Failed(
                             "recovery health 资金策略暂不可用".to_owned(),
                         ))
@@ -121,7 +130,15 @@ impl RecoveryHealthRefreshPort for RecoveryHealthService {
                     Err(ApplicationError::FulfillmentAccountBusy) => {
                         update.balance_status = RecoveryBalanceStatus::Busy;
                     }
-                    Err(_) => {}
+                    Err(error) => {
+                        record_error(
+                            DiagnosticLevel::Warn,
+                            error.diagnostic_kind(),
+                            "recovery_health",
+                            "read_balance",
+                            DiagnosticContext::default(),
+                        );
+                    }
                 }
 
                 update.validate().map_err(|message| {

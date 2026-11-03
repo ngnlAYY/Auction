@@ -1,12 +1,25 @@
 //! 论坛主题读取、固定楼层校验、身份解析和目录/系统日志刷新。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
 use auction_application::{
     ForumCommandStatus, ForumRenderedPost, ForumSystemLogEntry, ForumTopicMetadata,
     forum_catalog_marker, forum_post_bodies_match, forum_system_log_marker,
 };
 
 use super::*;
+use crate::worker::diagnostics;
 
+#[tracing::instrument(
+
+    skip_all,
+
+    fields(
+
+        auction_id = %topic.auction_id,
+
+    )
+
+)]
 pub(super) async fn process_topic(
     runtime: &ForumReplyRuntime,
     topic: auction_application::ForumReplyTopic,
@@ -97,11 +110,14 @@ pub(super) async fn process_topic(
             {
                 Ok(bidder) => bidder,
                 Err(error @ ApplicationError::ForumIdentityRejected(_)) => {
-                    tracing::warn!(
-                        auction_id = %topic.auction_id,
-                        post_id = %post.post.id,
-                        error = %error,
-                        "论坛帖子玩家名称无法解析为可竞价用户"
+                    diagnostics::warn(
+                        "forum_reply",
+                        "reject_bidder_identity",
+                        error.diagnostic_kind(),
+                        DiagnosticContext {
+                            auction_id: diagnostic_id(&topic.auction_id),
+                            ..Default::default()
+                        },
                     );
                     system_entries.push(runtime_warning(
                         post_number,
@@ -114,11 +130,14 @@ pub(super) async fn process_topic(
                 }
                 Err(error) => {
                     // 只有权威身份拒绝允许跳过；暂时存储失败不能让较晚楼层先接受竞价。
-                    tracing::warn!(
-                        auction_id = %topic.auction_id,
-                        post_id = %post.post.id,
-                        error = %error,
-                        "论坛身份解析暂时失败，停止后续楼层并等待重试"
+                    diagnostics::warn(
+                        "forum_reply",
+                        "resolve_bidder_identity",
+                        error.diagnostic_kind(),
+                        DiagnosticContext {
+                            auction_id: diagnostic_id(&topic.auction_id),
+                            ..Default::default()
+                        },
                     );
                     system_entries.push(runtime_warning(
                         post_number,
@@ -346,8 +365,16 @@ async fn refresh_fixed_posts(
     write_progress: &ForumWriteProgress,
 ) -> Result<(), ApplicationError> {
     let TopicScanProgress { processed_through_post_number, system_entries, scan_completed } = scan;
-    let processed_through_post_number_i32 = i32::try_from(processed_through_post_number)
-        .map_err(|_| repository_error("论坛已处理楼层超出持久化范围"))?;
+    let processed_through_post_number_i32 =
+        i32::try_from(processed_through_post_number).map_err(|error| {
+            diagnostics::warn(
+                "forum_reply",
+                "convert_post_number",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
+            repository_error("论坛已处理楼层超出持久化范围")
+        })?;
     // 这是完整主题快照的派生水位，不是历史命令楼层；删帖或未解决 pending 可使当前边界下降。
     // 存储仍通过内容 revision 和 claim CAS 防止过期扫描覆盖，命令账本的历史楼层不变。
     let mut snapshot = runtime.store.load_current_snapshot(topic.auction_id).await?;

@@ -1,13 +1,18 @@
 //! 资金对账用例：默认只读，显式授权后才取得真实证据和提交guard。
 
+use std::{sync::Arc, time::Instant};
+
+use auction_domain::SettlementWorld;
+
+use crate::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, diagnostic_id, record_error,
+};
 use crate::{
     FundingCashGateProvider, FundingCommitOutcome, FundingError, FundingPreview,
     FundingReconciliationCommand, FundingReconciliationReader, FundingReconciliationResult,
     FundingReconciliationWriter, InternalEvidencePurpose, InternalEvidenceRequest,
     SettlementInternalEvidenceReader,
 };
-use auction_domain::SettlementWorld;
-use std::{sync::Arc, time::Instant};
 
 /// 装配根注入同一个真实evidence reader与完整发送门；不读取配置或调用SQL。
 pub struct FundingReconciliationService {
@@ -58,9 +63,45 @@ impl FundingReconciliationService {
                 deadline,
             })
             .await
-            .map_err(|_| FundingError::Unproven)?;
-        prepared.check_current().await.map_err(|_| FundingError::Unproven)?;
-        let commit = prepared.begin_commit().map_err(|_| FundingError::Unproven)?;
+            .map_err(|error| {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "funding",
+                    "execute_funding",
+                    DiagnosticContext {
+                        command_id: diagnostic_id(&command.command_id),
+                        ..Default::default()
+                    },
+                );
+                FundingError::Unproven
+            })?;
+        prepared.check_current().await.map_err(|error| {
+            record_error(
+                DiagnosticLevel::Warn,
+                error.diagnostic_kind(),
+                "funding",
+                "validate_evidence_freshness",
+                DiagnosticContext {
+                    command_id: diagnostic_id(&command.command_id),
+                    ..Default::default()
+                },
+            );
+            FundingError::Unproven
+        })?;
+        let commit = prepared.begin_commit().map_err(|error| {
+            record_error(
+                DiagnosticLevel::Warn,
+                error.diagnostic_kind(),
+                "funding",
+                "acquire_commit_guard",
+                DiagnosticContext {
+                    command_id: diagnostic_id(&command.command_id),
+                    ..Default::default()
+                },
+            );
+            FundingError::Unproven
+        })?;
         match self.writer.reconcile_funding(&command, commit.snapshot(), gate).await {
             Ok(FundingCommitOutcome::Committed(result)) => {
                 commit.confirm_committed();

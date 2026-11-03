@@ -5,6 +5,13 @@ use std::time::Instant;
 use auction_domain::SettlementObligationKind;
 use chrono::Duration;
 
+use super::evidence::validate_balance_evidence;
+use super::intent::build_delivery_intent;
+use super::model::SettlementDeliveryIntent;
+use super::validation::repository_error;
+use crate::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, diagnostic_id, record_error,
+};
 use crate::{
     ApplicationError, Clock, FundingPolicy, InternalEquipmentTarget, InternalEvidencePurpose,
     InternalEvidenceRequest, PreparedSettlementInternalEvidence, SettlementFulfillmentClaim,
@@ -12,11 +19,6 @@ use crate::{
     SettlementFulfillmentOperation, SettlementFulfillmentPhaseResult,
     SettlementFulfillmentRecipientReader, SettlementFulfillmentState, SettlementFulfillmentStore,
 };
-
-use super::evidence::validate_balance_evidence;
-use super::intent::build_delivery_intent;
-use super::model::SettlementDeliveryIntent;
-use super::validation::repository_error;
 
 /// dependency 授权要么返回可继续使用的事实，要么已经持久化等待/人工态。
 pub(super) enum AuthorizationResult<T> {
@@ -99,6 +101,18 @@ pub(super) async fn authorize_pending_or_prepared(
             .map(|budget| budget.min(std::time::Duration::from_secs(30)))
             .filter(|budget| *budget > std::time::Duration::from_secs(1))
         else {
+            record_error(
+                DiagnosticLevel::Warn,
+                SafeErrorKind::EVIDENCE_EXPIRED,
+                "fulfillment_authorization",
+                "check_custody_budget",
+                DiagnosticContext {
+                    obligation_id: diagnostic_id(&claim.obligation_id),
+                    world: Some(claim.world),
+                    defer_reason: Some("evidence_unavailable"),
+                    ..Default::default()
+                },
+            );
             return defer(
                 store,
                 claim,
@@ -138,7 +152,19 @@ pub(super) async fn authorize_pending_or_prepared(
         };
         let prepared = match custody.read_custody(request).await {
             Ok(prepared) => prepared,
-            Err(_) => {
+            Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment_authorization",
+                    "read_custody",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        ..Default::default()
+                    },
+                );
+
                 return defer(
                     store,
                     claim,
@@ -165,8 +191,36 @@ pub(super) async fn authorize_pending_or_prepared(
         }
         if snapshot.observed_from < claim.claimed_at
             || !snapshot.valid_at(clock.now())
-            || prepared.check_current().await.is_err()
+            || prepared
+                .check_current()
+                .await
+                .inspect_err(|error| {
+                    record_error(
+                        DiagnosticLevel::Warn,
+                        error.diagnostic_kind(),
+                        "fulfillment_authorization",
+                        "validate_custody_freshness",
+                        DiagnosticContext {
+                            obligation_id: diagnostic_id(&claim.obligation_id),
+                            world: Some(claim.world),
+                            ..Default::default()
+                        },
+                    );
+                })
+                .is_err()
         {
+            record_error(
+                DiagnosticLevel::Warn,
+                SafeErrorKind::EVIDENCE_EXPIRED,
+                "fulfillment_authorization",
+                "check_custody_window",
+                DiagnosticContext {
+                    obligation_id: diagnostic_id(&claim.obligation_id),
+                    world: Some(claim.world),
+                    defer_reason: Some("evidence_unavailable"),
+                    ..Default::default()
+                },
+            );
             return defer(
                 store,
                 claim,
@@ -196,7 +250,19 @@ pub(super) async fn authorize_pending_or_prepared(
         let observed_at = clock.now();
         let balance = match evidence.read_balance(claim.world, observed_at).await {
             Ok(balance) => balance,
-            Err(_) => {
+            Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment_authorization",
+                    "read_balance",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        ..Default::default()
+                    },
+                );
+
                 return defer(
                     store,
                     claim,
@@ -277,15 +343,51 @@ async fn resolve_recipient(
         // 旧版把 recipient reader 的身份不一致视为当前依赖不可用；阶段专属的
         // unavailable code 由 pending/prepared 与 enqueued 调用方传入，不能提前 terminalize。
         Err(ApplicationError::FulfillmentDependencyMismatch) => {
+            record_error(
+                DiagnosticLevel::Warn,
+                SafeErrorKind::DEPENDENCY_MISMATCH,
+                "fulfillment_recipient",
+                "validate_dependency",
+                DiagnosticContext {
+                    obligation_id: diagnostic_id(&claim.obligation_id),
+                    world: Some(claim.world),
+                    defer_reason: Some(unavailable_code),
+                    ..Default::default()
+                },
+            );
             return defer(store, claim, retry_delay, unavailable_code, "当前履约收件人暂不可用")
                 .await;
         }
-        Err(_) => {
+        Err(error) => {
+            record_error(
+                DiagnosticLevel::Warn,
+                error.diagnostic_kind(),
+                "fulfillment_recipient",
+                "read_identity",
+                DiagnosticContext {
+                    obligation_id: diagnostic_id(&claim.obligation_id),
+                    world: Some(claim.world),
+                    ..Default::default()
+                },
+            );
+
             return defer(store, claim, retry_delay, unavailable_code, "当前履约收件人暂不可用")
                 .await;
         }
     };
     if snapshot.user_id != user_id {
+        record_error(
+            DiagnosticLevel::Warn,
+            SafeErrorKind::DEPENDENCY_MISMATCH,
+            "fulfillment_recipient",
+            "validate_user",
+            DiagnosticContext {
+                obligation_id: diagnostic_id(&claim.obligation_id),
+                world: Some(claim.world),
+                defer_reason: Some(unavailable_code),
+                ..Default::default()
+            },
+        );
         return defer(store, claim, retry_delay, unavailable_code, "当前履约收件人暂不可用").await;
     }
     if snapshot.user_id.is_nil()
@@ -297,6 +399,18 @@ async fn resolve_recipient(
         return manual(store, claim, "invalid_fulfillment_fact").await;
     }
     if require_eligible && !snapshot.eligible {
+        record_error(
+            DiagnosticLevel::Info,
+            SafeErrorKind::DOMAIN_REJECTED,
+            "fulfillment_recipient",
+            "validate_eligibility",
+            DiagnosticContext {
+                obligation_id: diagnostic_id(&claim.obligation_id),
+                world: Some(claim.world),
+                defer_reason: Some(unavailable_code),
+                ..Default::default()
+            },
+        );
         return defer(
             store,
             claim,

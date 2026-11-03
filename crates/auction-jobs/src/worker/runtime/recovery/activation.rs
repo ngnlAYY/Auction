@@ -1,6 +1,9 @@
 //! Recovery prepared delivery 的激活与 action fence。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticDisposition, DiagnosticError};
+
 use super::*;
+use crate::worker::diagnostics;
 
 pub(in crate::worker::runtime) async fn activate_recovery_action<C>(
     store: Arc<dyn RecoveryWorkStore>,
@@ -21,7 +24,15 @@ where
         {
             Ok(()) => WorkerResult::Success,
             Err(error) => {
-                tracing::error!(error = %error, "recovery prepare identity fence failed");
+                diagnostics::error(
+                    "recovery_activation",
+                    "persist_missing_identity",
+                    error.diagnostic_kind(),
+                    DiagnosticContext {
+                        disposition: Some(DiagnosticDisposition::Unpersisted),
+                        ..Default::default()
+                    },
+                );
                 WorkerResult::Error
             }
         };
@@ -55,14 +66,27 @@ where
     ) {
         Ok(hash) => hash,
         Err(error) => {
-            tracing::error!(error = %error, "recovery delivery activation hash failed");
+            diagnostics::error(
+                "recovery_activation",
+                "hash_activation",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
             return match store
                 .mark_action_manual_reconcile(claim, "recovery_activation_hash_failed".to_owned())
                 .await
             {
                 Ok(()) => WorkerResult::Success,
                 Err(fence_error) => {
-                    tracing::error!(error = %fence_error, "recovery activation hash fence failed");
+                    diagnostics::error(
+                        "recovery_activation",
+                        "persist_hash_failure",
+                        fence_error.diagnostic_kind(),
+                        DiagnosticContext {
+                            disposition: Some(DiagnosticDisposition::Unpersisted),
+                            ..Default::default()
+                        },
+                    );
                     WorkerResult::Error
                 }
             };
@@ -90,7 +114,12 @@ where
             .await;
         }
         Err(error) => {
-            tracing::warn!(error = %error, "recovery delivery activation failed");
+            diagnostics::warn(
+                "recovery_activation",
+                "activate_delivery",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
             return release_recovery_action(
                 store,
                 clock,
@@ -113,7 +142,12 @@ where
     {
         Ok(claim) => claim,
         Err(error) => {
-            tracing::warn!(error = %error, "recovery action activation link failed");
+            diagnostics::warn(
+                "recovery_activation",
+                "persist_enqueued",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
             return release_recovery_action(
                 store,
                 clock,

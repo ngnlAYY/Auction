@@ -6,6 +6,7 @@ use auction_application::Clock;
 use auction_observability::{WorkerLoop, WorkerResult};
 
 use super::{PersistentWorker, merge_worker_result, poll_delay, process_recovery_action};
+use crate::worker::diagnostics;
 
 mod actions;
 mod cases;
@@ -28,29 +29,38 @@ pub(super) async fn run_loop<C>(
 ) where
     C: Clock + 'static,
 {
-    loop {
-        if worker.control.is_draining() {
-            return;
-        }
-        let started = std::time::Instant::now();
-        let result = run_batch(worker.as_ref()).await;
-        if result != WorkerResult::Success {
-            tracing::warn!(
-                "recovery worker batch was not fully processed; retrying after poll delay"
+    let diagnostic_metrics = worker.metrics.clone();
+    let diagnostic_loop = auction_observability::WorkerLoop::AuctionRecovery;
+    let body = async move {
+        loop {
+            if worker.control.is_draining() {
+                return;
+            }
+            let started = std::time::Instant::now();
+            let result = run_batch(worker.as_ref()).await;
+            if result != WorkerResult::Success {
+                tracing::warn!(
+                    "recovery worker batch was not fully processed; retrying after poll delay"
+                );
+            }
+            worker.metrics.observe_iteration(
+                WorkerLoop::AuctionRecovery,
+                result,
+                started.elapsed(),
+            );
+
+            let wait = poll_delay(worker.recovery.poll_interval, worker.recovery.jitter);
+            let scheduled_wake = tokio::time::Instant::now() + wait;
+            if super::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
+                return;
+            }
+            worker.metrics.observe_schedule_delay(
+                WorkerLoop::AuctionRecovery,
+                tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
             );
         }
-        worker.metrics.observe_iteration(WorkerLoop::AuctionRecovery, result, started.elapsed());
-
-        let wait = poll_delay(worker.recovery.poll_interval, worker.recovery.jitter);
-        let scheduled_wake = tokio::time::Instant::now() + wait;
-        if super::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
-            return;
-        }
-        worker.metrics.observe_schedule_delay(
-            WorkerLoop::AuctionRecovery,
-            tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
-        );
-    }
+    };
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
 }
 
 async fn run_batch<C>(worker: &PersistentWorker<C>) -> WorkerResult

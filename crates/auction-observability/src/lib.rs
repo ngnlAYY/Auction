@@ -12,7 +12,7 @@ pub use health::{
     HeartbeatStore, ProcessRole, ProcessSnapshot, ProcessState, ServiceName, TracingHealth,
     TracingHealthReader, TracingStatus,
 };
-pub use logging::RateLimitedLog;
+pub use logging::{DiagnosticLogWindows, RateLimitedLog};
 pub use metrics::{
     AuditFailureClass, AuditFailureKind, AuditFailureObservation, AuditMetricsSnapshot,
     AuditMetricsSource, AuditSqlstateClass, BusinessEvent, BusinessOutcome, BusinessRecorder,

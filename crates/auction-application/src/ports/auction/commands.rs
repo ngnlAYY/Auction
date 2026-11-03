@@ -10,6 +10,7 @@ use auction_domain::{
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 use crate::{ApplicationError, CreateProxyCommand, LowerProxyCommand, PlaceBidCommand};
 
 /// 应用用例异步返回值，允许 HTTP state 持有动态端口而不暴露具体存储类型。
@@ -90,7 +91,16 @@ impl<'de> Deserialize<'de> for CompetitionWireTimestamp {
     {
         let wire = String::deserialize(deserializer)?;
         let instant = DateTime::parse_from_rfc3339(&wire)
-            .map_err(|_| de::Error::custom("旧版竞价时间不是合法 RFC3339"))?
+            .map_err(|error| {
+                record_error(
+                    DiagnosticLevel::Error,
+                    error.diagnostic_kind(),
+                    "competition_timestamp",
+                    "parse_legacy_time",
+                    DiagnosticContext::default(),
+                );
+                de::Error::custom("旧版竞价时间不是合法 RFC3339")
+            })?
             .with_timezone(&Utc);
         Ok(Self { instant, wire })
     }

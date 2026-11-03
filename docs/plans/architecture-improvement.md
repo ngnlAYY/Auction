@@ -171,10 +171,10 @@
 | --- | --- | --- | --- | --- |
 | D1 | 待诊断 | — | — | W0.7 诊断已提交（`0f36d1e8`），待部署后按日志 `safe_kind`/`stage` 与只读核对确认根因；代码阅读的首要嫌疑为原投递 `sending_at` 早于资金初始化/对账边界，另需解释“未持久化错误”的第二层原因 |
 | D2 | 已提交 | `b2ccb9fd` | 未部署 | W1.0；线上已部署 `92259475`，未包含修复 |
-| D3 | 已提交 | 随本提交 | 未部署 | W0.12 估计 6–9 周触及 100 页上限；决策 74 提前交付 W1.4 发送基线；默认 `shadow`，须在触顶前观察并由用户切换 `watermark` |
+| D3 | 已提交 | `fa46d605` | 未部署 | W0.12 估计 6–9 周触及 100 页上限；决策 74 提前交付 W1.4 发送基线；默认 `shadow`，须在触顶前观察并由用户切换 `watermark` |
 | D4 | 已决定 | — | — | 决策 14；W1.3、W1.7 随 M2b |
 | D5 | 待量化 | — | — | W0.6 量化后决定是否提前交付 W12.1 |
-| D6 | 已决定 | 说明随本提交 | 未部署 | 决策 15；`docs/guide` 玩家说明已提交（Claude 依代码核实：回帖无发帖时间，`PlaceBidCommand` 按导入时服务端时钟判定），Admin 五语言规则文档由用户发布；W0.12 显示主题最多约 27 楼，远低于页数上限，W1.11 不提前 |
+| D6 | 已决定 | 说明 `6cc3769f` | 未部署 | 决策 15；`docs/guide` 玩家说明已提交（Claude 依代码核实：回帖无发帖时间，`PlaceBidCommand` 按导入时服务端时钟判定），Admin 五语言规则文档由用户发布；W0.12 显示主题最多约 27 楼，远低于页数上限，W1.11 不提前 |
 | D7 | 已提交 | `4ba5abe3` | 未部署 | 决策 32、71、72；W0.14 默认影子模式，切换 `classified` 后生效 |
 | D8 | 已提交 | `4ba5abe3` | 未部署 | 决策 33；W7.11 |
 | D9 | 已决定 | — | — | 决策 62；W14.6 随 M2b |
@@ -188,13 +188,15 @@
 | W0.12 | 进行中 | 部分 `5e2f455b` | — | 执行者：Claude（经用户批准的线上只读核实）；主机、配置与数据库部分完成，结论见[现状基线](architecture-improvement/baseline.md#w012-线上只读核实2026-11-03)；浏览器部分待 Bot 账号战斗结束 |
 | W0.9 | 已提交 | `57d1748d` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 E）实现、Claude 监督；HTTP 请求量/状态码/延迟、WebSocket 连接、限流拒绝指标；`[metrics] reject_forwarded_requests` 默认 true（带转发头的 `/metrics` 请求返回 404），CDN 头待 W0.12 |
 | W0.11 | 已提交 | `0a30c5c8` | 未部署 | 同上；`RateLimitedLog` 固定类别 60 秒窗口去重，首个调用点为 delivery 循环失败日志；`log_filter` 加 `auction_observability::log_dedup=off` 可关闭 |
+| W0.2 | 进行中 | I-A 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 I）实现、Claude 监督；I-A 覆盖 jobs/application 152 个错误丢弃位点，`auction::diagnostics` 安全记录（52 个 kind、301 对 kind/phase，清单见 `ops/README.md`），持久化 defer reason/失败码不变（用户决定）；I-B（integrations + HTTP）待做 |
+| W0.3 | 已提交 | 随本提交 | 未部署 | 同上；`auction_worker_unpersisted_error_total{loop,kind}`，口径为未确认形成持久失败、退避或人工处置（提交结果未知计入），先于日志去重累加；PM 暂归 `forum` loop |
 | W0.8 | 已提交 | `e78dac4f` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 D）实现、Claude 监督；`storage_error_from`/`sql_error_context` 附加 sqlx 变体、SQLSTATE、约束名、表名；1100 处直接 SQLx 闭包与 13 个具名 mapper 一次改完，`storage:map_err(\|_\|)` 1432 → 330；其余 330 处另定范围 |
 | W7.11 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
 | W7.8a | 已提交 | `3f0a2097` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 F）实现、Claude 监督；迁移 075 建只追加兼容登记表（001–074 缺行即 breaking，075 自身 breaking），`check.sh migration-compatibility` 检查每个新迁移恰好登记一次；`[readiness] migration_compatibility_mode` 默认 `shadow`，回退旧程序前须设为 `compatible`；本版含 breaking 迁移，部署后才能为之后的版本提供回退能力 |
 | W7.7 | 进行中 | 第一批 `5e2f455b` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 H）实现、Claude 监督；第一批：迁移 076 只追加开关事实兼命令账本、三角色 5 秒刷新、`auction-cli switch`、Admin `/config` 只读卡片，接入 `readiness_audit_failure_mode` 与 `readiness_cache_enabled`；第二批（邮件轮询隔离与指标转发拒绝）待做 |
 | W1 | 未开始 | — | — | W1.0 为 M1 首项（D2）；W1.10 方案已定（决策 40） |
 | W1.0 | 已提交 | `b2ccb9fd` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；完整 Read Mail 观察降频为每小时、维护独立循环、isekai 相位错峰，回退开关 `poll_isolation_enabled`；待用户部署后按“维护不再超时、`mail-maintenance-*` p95 < 60 秒”验收 |
-| W1.4（发送基线切片） | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 J）实现、Claude 监督；发送前临时 MID 边界 + 前缀扫描，`[worker.mooglemail] sent_baseline_mode` 默认 `shadow`；切换 `watermark` 前须完成浏览器 MID 语义核实与至少一个完整场次周期的影子观察；常规轮水位与每日校验仍随 M3 |
+| W1.4（发送基线切片） | 已提交 | `fa46d605` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 J）实现、Claude 监督；发送前临时 MID 边界 + 前缀扫描，`[worker.mooglemail] sent_baseline_mode` 默认 `shadow`；切换 `watermark` 前须完成浏览器 MID 语义核实与至少一个完整场次周期的影子观察；常规轮水位与每日校验仍随 M3 |
 | W2 | 未开始 | — | — | 随 M3，排在 W9.9 之后 |
 | W3 | 未开始 | — | — | W3.7 随 M3 先行 |
 | W4 | 未开始 | — | — | 含 W4.5、W4.6，随 M4 |

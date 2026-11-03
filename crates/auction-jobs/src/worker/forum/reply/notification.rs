@@ -1,6 +1,9 @@
 //! 论坛命令的 MoogleMail 通知入队。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
+
 use super::*;
+use crate::worker::diagnostics;
 
 pub(super) async fn process_notification(
     runtime: &ForumReplyRuntime,
@@ -52,7 +55,15 @@ pub(super) async fn process_notification(
     let start = match runtime.store.begin_command(record).await {
         Ok(value) => value,
         Err(error) => {
-            tracing::error!(command_id = %proposed_command_id, error = %error, "论坛通知账本开始失败");
+            diagnostics::error(
+                "forum_notification",
+                "begin_command",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    command_id: diagnostic_id(&proposed_command_id),
+                    ..Default::default()
+                },
+            );
             return Err(error);
         }
     };
@@ -113,7 +124,12 @@ pub(super) async fn process_notification(
             .await?;
         }
         Err(error) if is_retryable(&error) => {
-            tracing::warn!(command_id = %command_id, error = %error, "论坛 MoogleMail 通知暂时未入队，将重试");
+            diagnostics::warn(
+                "forum_notification",
+                "retry_command",
+                error.diagnostic_kind(),
+                DiagnosticContext { command_id: diagnostic_id(&command_id), ..Default::default() },
+            );
             return Err(error);
         }
         Err(error) => {

@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::ApplicationFuture;
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 
 mod lot;
 mod movement;
@@ -135,7 +136,16 @@ pub struct PublicCompensationPage {
 impl PublicCompensationPage {
     /// 校验存储适配器返回的页结构，但保留编号页/cursor 页的 total 差异。
     pub fn validate(&self) -> Result<(), &'static str> {
-        let entry_count = i64::try_from(self.entries.len()).map_err(|_| "公开补偿池页大小溢出")?;
+        let entry_count = i64::try_from(self.entries.len()).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                error.diagnostic_kind(),
+                "compensation_round",
+                "convert_entry_count",
+                DiagnosticContext::default(),
+            );
+            "公开补偿池页大小溢出"
+        })?;
         if self.limit < 1
             || self.offset < 0
             || self.offset > MAX_PUBLIC_COMPENSATION_OFFSET

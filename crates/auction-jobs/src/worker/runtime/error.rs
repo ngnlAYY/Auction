@@ -1,5 +1,7 @@
 //! Worker 调度和各业务循环共享的安全错误分类；底层数据库、凭据和外部响应正文不穿透到控制面。
 
+use auction_application::diagnostics::{DiagnosticError, SafeErrorKind};
+
 use super::*;
 
 /// Worker 调度器错误；数据库或应用错误只通过安全的应用错误分类向上返回。
@@ -69,4 +71,24 @@ pub enum WorkerError {
     },
     #[error(transparent)]
     Application(#[from] ApplicationError),
+}
+
+impl DiagnosticError for WorkerError {
+    fn diagnostic_kind(&self) -> SafeErrorKind {
+        use SafeErrorKind;
+        match self {
+            Self::Application(error) => error.diagnostic_kind(),
+            Self::InvalidAuctionConfiguration
+            | Self::InvalidDeliveryConfiguration
+            | Self::InvalidFulfillmentConfiguration
+            | Self::InvalidRecoveryConfiguration
+            | Self::InvalidWorkerIdentity
+            | Self::InvalidMailPollConfiguration
+            | Self::InvalidForumSyncConfiguration
+            | Self::InvalidForumReplyConfiguration
+            | Self::InvalidForumConfiguration => SafeErrorKind::CONFIGURATION_INVALID,
+            Self::ForumTopicProcessingFailed => SafeErrorKind::REMOTE_REJECTED,
+            _ => SafeErrorKind::TASK_JOIN,
+        }
+    }
 }

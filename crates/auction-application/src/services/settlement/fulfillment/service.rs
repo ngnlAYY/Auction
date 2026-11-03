@@ -5,17 +5,6 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
-use crate::{
-    ApplicationError, ApplicationFuture, Clock, SettlementDeliveryPreparation,
-    SettlementFulfillmentActivationResult, SettlementFulfillmentClaim,
-    SettlementFulfillmentCommandPort, SettlementFulfillmentCustodyReader,
-    SettlementFulfillmentDeliveryStatus, SettlementFulfillmentEvidenceReader,
-    SettlementFulfillmentOperation, SettlementFulfillmentPhaseResult, SettlementFulfillmentProof,
-    SettlementFulfillmentRecipientReader, SettlementFulfillmentReconcileResult,
-    SettlementFulfillmentReconcileStatus, SettlementFulfillmentResult, SettlementFulfillmentState,
-    SettlementFulfillmentStore,
-};
-
 use super::authorization::{
     AuthorizationResult, authorize_enqueued_recipient, authorize_pending_or_prepared,
 };
@@ -27,6 +16,19 @@ use super::intent::{
 use super::model::SettlementDeliveryIntent;
 use super::proof::proof_digest;
 use super::validation::{repository_error, valid_external_mail_id, validate_claim};
+use crate::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, diagnostic_id, record_error,
+};
+use crate::{
+    ApplicationError, ApplicationFuture, Clock, SettlementDeliveryPreparation,
+    SettlementFulfillmentActivationResult, SettlementFulfillmentClaim,
+    SettlementFulfillmentCommandPort, SettlementFulfillmentCustodyReader,
+    SettlementFulfillmentDeliveryStatus, SettlementFulfillmentEvidenceReader,
+    SettlementFulfillmentOperation, SettlementFulfillmentPhaseResult, SettlementFulfillmentProof,
+    SettlementFulfillmentRecipientReader, SettlementFulfillmentReconcileResult,
+    SettlementFulfillmentReconcileStatus, SettlementFulfillmentResult, SettlementFulfillmentState,
+    SettlementFulfillmentStore,
+};
 
 /// 结算履约应用服务。
 /// 服务只把可执行的 `pending` 义务制作为 prepared delivery outbox，不读取密钥、不发 HTTP，
@@ -87,9 +89,16 @@ impl SettlementFulfillmentService {
 
     pub(super) async fn funding_policy(&self) -> Result<crate::FundingPolicy, ApplicationError> {
         match &self.funding_policy_reader {
-            Some(reader) => {
-                reader.funding_policy().await.map_err(|_| repository_error("资金记账策略暂不可用"))
-            }
+            Some(reader) => reader.funding_policy().await.map_err(|error| {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment",
+                    "read_funding_policy",
+                    DiagnosticContext::default(),
+                );
+                repository_error("资金记账策略暂不可用")
+            }),
             None => Ok(crate::FundingPolicy {
                 mode: crate::FundingAccountingMode::StrictCash,
                 expected_uid: None,
@@ -131,6 +140,19 @@ impl SettlementFulfillmentService {
         self.bot_players.iter().any(|bot| bot.eq_ignore_ascii_case(player_name))
     }
 
+    #[tracing::instrument(
+
+        skip_all,
+
+        fields(
+
+            obligation_id = %claim.obligation_id,
+
+            delivery_id = ?claim.delivery_id,
+
+        )
+
+    )]
     pub(super) async fn prepare_external(
         &self,
         claim: SettlementFulfillmentClaim,
@@ -183,11 +205,22 @@ impl SettlementFulfillmentService {
             recipient: claim.recipient.clone(),
             payload: canonical.payload,
         };
-        let guard = custody
-            .as_mut()
-            .map(|prepared| prepared.begin_commit())
-            .transpose()
-            .map_err(|_| ApplicationError::FulfillmentDependencyUnavailable)?;
+        let guard = custody.as_mut().map(|prepared| prepared.begin_commit()).transpose().map_err(
+            |error| {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment",
+                    "acquire_prepare_guard",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        ..Default::default()
+                    },
+                );
+                ApplicationError::FulfillmentDependencyUnavailable
+            },
+        )?;
         let result = self
             .store
             .prepare_delivery(
@@ -203,6 +236,19 @@ impl SettlementFulfillmentService {
         Ok(SettlementFulfillmentPhaseResult::Advanced(result))
     }
 
+    #[tracing::instrument(
+
+        skip_all,
+
+        fields(
+
+            obligation_id = %claim.obligation_id,
+
+            delivery_id = ?claim.delivery_id,
+
+        )
+
+    )]
     async fn activate_now(
         &self,
         claim: SettlementFulfillmentClaim,
@@ -250,11 +296,22 @@ impl SettlementFulfillmentService {
             activation_request_hash(claim.obligation_id, delivery_id, prepare_request_hash)?;
         // 激活继续复用当前 claim；持有租约时 next_attempt_at 必须为空。
         // 下方 reconcile 释放 claim 时再把 COD/货款对齐到共享追踪窗口。
-        let guard = custody
-            .as_mut()
-            .map(|prepared| prepared.begin_commit())
-            .transpose()
-            .map_err(|_| ApplicationError::FulfillmentDependencyUnavailable)?;
+        let guard = custody.as_mut().map(|prepared| prepared.begin_commit()).transpose().map_err(
+            |error| {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment",
+                    "acquire_activation_guard",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        ..Default::default()
+                    },
+                );
+                ApplicationError::FulfillmentDependencyUnavailable
+            },
+        )?;
         let result = self
             .store
             .activate_delivery(
@@ -272,6 +329,19 @@ impl SettlementFulfillmentService {
         Ok(SettlementFulfillmentPhaseResult::Advanced(result))
     }
 
+    #[tracing::instrument(
+
+        skip_all,
+
+        fields(
+
+            obligation_id = %claim.obligation_id,
+
+            delivery_id = ?claim.delivery_id,
+
+        )
+
+    )]
     async fn reconcile_now(
         &self,
         claim: SettlementFulfillmentClaim,
@@ -366,6 +436,18 @@ impl SettlementFulfillmentService {
                     .collection_next_poll(&claim, observed_at)
                     .map(|next| next - observed_at)
                     .unwrap_or(retry_delay);
+                record_error(
+                    DiagnosticLevel::Info,
+                    SafeErrorKind::EVIDENCE_NOT_OBSERVED,
+                    "fulfillment",
+                    "wait_delivery_terminal",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        defer_reason: Some("evidence_not_observed"),
+                        ..Default::default()
+                    },
+                );
                 return self
                     .defer_now(
                         claim,
@@ -415,6 +497,18 @@ impl SettlementFulfillmentService {
         let sent = match self.evidence_reader.read_sent(claim.world, remote_id.to_owned()).await {
             Ok(sent) => sent,
             Err(ApplicationError::FulfillmentEvidenceNotObserved) => {
+                record_error(
+                    DiagnosticLevel::Info,
+                    SafeErrorKind::EVIDENCE_NOT_OBSERVED,
+                    "fulfillment",
+                    "wait_sent_receipt",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        defer_reason: Some("evidence_not_observed"),
+                        ..Default::default()
+                    },
+                );
                 return self
                     .defer_now(
                         claim,
@@ -428,7 +522,19 @@ impl SettlementFulfillmentService {
             Err(ApplicationError::FulfillmentDependencyMismatch) => {
                 return self.manual_reconcile_now(claim, delivery_id, "evidence_mismatch").await;
             }
-            Err(_) => {
+            Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment",
+                    "read_sent_receipt",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        ..Default::default()
+                    },
+                );
+
                 return self
                     .defer_now(
                         claim,
@@ -447,6 +553,18 @@ impl SettlementFulfillmentService {
             return self.manual_reconcile_now(claim, delivery_id, "evidence_mismatch").await;
         }
         if !sent.collected {
+            record_error(
+                DiagnosticLevel::Info,
+                SafeErrorKind::EVIDENCE_NOT_OBSERVED,
+                "fulfillment",
+                "wait_asset_collection",
+                DiagnosticContext {
+                    obligation_id: diagnostic_id(&claim.obligation_id),
+                    world: Some(claim.world),
+                    defer_reason: Some("evidence_not_observed"),
+                    ..Default::default()
+                },
+            );
             // 买家支付 COD、卖家领取货款都只能等对方在游戏内操作；统一对到下一个窗口。
             let poll_delay = self
                 .collection_next_poll(&claim, observed_at)

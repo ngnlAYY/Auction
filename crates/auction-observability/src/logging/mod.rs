@@ -1,5 +1,8 @@
 //! 由调用循环拥有的固定类别日志去重；只保留计时与计数，不保存错误正文。
 
+mod diagnostics;
+pub use diagnostics::DiagnosticLogWindows;
+
 use std::time::Duration;
 
 use tokio::time::Instant;
@@ -14,6 +17,8 @@ pub struct RateLimitedLog {
     target: &'static str,
     kind: &'static str,
     window: Option<LogWindow>,
+    phase: Option<&'static str>,
+    safe_kind: Option<&'static str>,
 }
 
 struct LogWindow {
@@ -25,7 +30,18 @@ impl RateLimitedLog {
     /// 使用固定、无秘密的 target/kind 建立去重键；不得传入错误正文或动态业务标识。
     /// 窗口固定为 60 秒，避免为少数日志引入新的运行配置；汇总统一使用 WARN。
     pub fn new(target: &'static str, kind: &'static str) -> Self {
-        Self { target, kind, window: None }
+        Self { target, kind, window: None, phase: None, safe_kind: None }
+    }
+
+    /// 诊断窗口额外保留固定阶段/安全类别；不保存首条业务标识。
+    fn diagnostic(kind: &'static str, phase: &'static str, safe_kind: &'static str) -> Self {
+        Self {
+            target: "auction::diagnostics",
+            kind,
+            phase: Some(phase),
+            safe_kind: Some(safe_kind),
+            window: None,
+        }
     }
 
     /// 返回是否应输出本次原始日志；调用方的日志级别和安全字段保持不变。
@@ -61,6 +77,16 @@ impl RateLimitedLog {
         self.flush();
     }
 
+    fn deadline(&self) -> Option<Instant> {
+        self.window.as_ref().map(|window| window.ends_at)
+    }
+
+    fn flush_if_due(&mut self) {
+        if self.deadline().is_some_and(|deadline| Instant::now() >= deadline) {
+            self.flush();
+        }
+    }
+
     fn flush(&mut self) {
         let Some(window) = self.window.take().filter(|window| window.suppressed_count > 0) else {
             return;
@@ -71,6 +97,8 @@ impl RateLimitedLog {
             parent: None,
             log_target = self.target,
             kind = self.kind,
+            phase = self.phase,
+            safe_kind = self.safe_kind,
             suppressed_count = window.suppressed_count,
             window_seconds = WINDOW.as_secs(),
             window_complete = Instant::now() >= window.ends_at,

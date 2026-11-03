@@ -2,6 +2,7 @@
 
 use auction_domain::LotWatchChannel;
 
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 use crate::{
     LotWatchError, LotWatchTransaction, RequestHash, SetLotWatchCommand, SetLotWatchResult,
     StoredCommand, TransactionPolicy, TransactionRunner,
@@ -26,8 +27,17 @@ where
     {
         return Err(LotWatchError::Invalid);
     }
-    let hash = RequestHash::from_request(COMMAND_KIND, command.lot_id, &command)
-        .map_err(|_| LotWatchError::Invalid)?;
+    let hash =
+        RequestHash::from_request(COMMAND_KIND, command.lot_id, &command).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Warn,
+                error.diagnostic_kind(),
+                "lot_watch",
+                "hash_request",
+                DiagnosticContext::default(),
+            );
+            LotWatchError::Invalid
+        })?;
     runner
         .run(TransactionPolicy::serializable(), |transaction| {
             let command = command.clone();
@@ -38,7 +48,16 @@ where
                         return Err(LotWatchError::Conflict);
                     }
                     let result: SetLotWatchResult = serde_json::from_slice(&stored.result_payload)
-                        .map_err(|_| LotWatchError::Unavailable)?;
+                        .map_err(|error| {
+                            record_error(
+                                DiagnosticLevel::Warn,
+                                error.diagnostic_kind(),
+                                "lot_watch",
+                                "decode_replay_result",
+                                DiagnosticContext::default(),
+                            );
+                            LotWatchError::Unavailable
+                        })?;
                     if stored.result_code != "ok"
                         || result.user_id != command.user_id
                         || result.auction_id != auction_id
@@ -60,8 +79,16 @@ where
                         aggregate_id: command.lot_id,
                         request_hash: hash,
                         result_code: "ok".to_owned(),
-                        result_payload: serde_json::to_vec(&result)
-                            .map_err(|_| LotWatchError::Unavailable)?,
+                        result_payload: serde_json::to_vec(&result).map_err(|error| {
+                            record_error(
+                                DiagnosticLevel::Warn,
+                                error.diagnostic_kind(),
+                                "lot_watch",
+                                "encode_result",
+                                DiagnosticContext::default(),
+                            );
+                            LotWatchError::Unavailable
+                        })?,
                     })
                     .await?;
                 Ok(result)
@@ -99,7 +126,16 @@ pub fn lot_watch_notification(
         notification_id,
         &(lot_id, user_id, cycle, amount, &world_id, &recipient, &body),
     )
-    .map_err(|_| LotWatchError::Unavailable)?;
+    .map_err(|error| {
+        record_error(
+            DiagnosticLevel::Warn,
+            error.diagnostic_kind(),
+            "lot_watch_mail",
+            "hash_notification",
+            DiagnosticContext::default(),
+        );
+        LotWatchError::Unavailable
+    })?;
     Ok(MailDeliveryCommand {
         command_id: auction_domain::CommandId::from_uuid(notification_id),
         request_hash: hash,

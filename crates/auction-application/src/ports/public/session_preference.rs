@@ -5,6 +5,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 use crate::{PublicSessionIdentity, RequestHash, SessionError};
 
 /// 后续登录采用的账号偏好；独立版本从 1 开始，不改变用户认证版本。
@@ -90,8 +91,16 @@ impl SetPublicSessionPreferenceCommand {
     /// 请求摘要绑定用户、当前会话、完整负载和命令 ID；摘要中不含本次重试时间。
     pub fn request_hash(&self, token_hash: [u8; 32]) -> Result<RequestHash, SessionError> {
         self.validate()?;
-        RequestHash::from_request(Self::KIND, self.user_id, &(self, token_hash))
-            .map_err(|_| SessionError::InvalidPreference)
+        RequestHash::from_request(Self::KIND, self.user_id, &(self, token_hash)).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                error.diagnostic_kind(),
+                "session_preference",
+                "hash_request",
+                DiagnosticContext::default(),
+            );
+            SessionError::InvalidPreference
+        })
     }
 
     /// 在用户锁内完成版本比较并生成新偏好；其他会话不参与本次更新。

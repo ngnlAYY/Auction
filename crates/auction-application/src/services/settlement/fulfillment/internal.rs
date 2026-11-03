@@ -1,6 +1,14 @@
 //! 新 pending 的真实身份分支；opaque 句柄覆盖整个提交，不跨任务释放独占会话。
 
+use std::{sync::Arc, time::Instant};
+
+use auction_domain::InternalSettlementAction;
+use chrono::{DateTime, Duration, Utc};
+
 use super::{SettlementFulfillmentService, validation::repository_error};
+use crate::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, diagnostic_id, record_error,
+};
 use crate::{
     ApplicationError, INTERNAL_EVIDENCE_BUDGET, InternalEquipmentTarget, InternalEvidencePurpose,
     InternalEvidenceRequest, SettlementFulfillmentClaim, SettlementFulfillmentPhaseResult,
@@ -8,9 +16,6 @@ use crate::{
     SettlementInternalCommand, SettlementInternalCommitOutcome, SettlementInternalEvidenceReader,
     SettlementInternalFulfillmentStore,
 };
-use auction_domain::InternalSettlementAction;
-use chrono::{DateTime, Duration, Utc};
-use std::{sync::Arc, time::Instant};
 
 impl SettlementFulfillmentService {
     /// 必须注入原 MoogleMailGateway 与数据库；未装配仅延期，不以缺能力推断非 bot。
@@ -23,6 +28,19 @@ impl SettlementFulfillmentService {
         self
     }
 
+    #[tracing::instrument(
+
+        skip_all,
+
+        fields(
+
+            obligation_id = %claim.obligation_id,
+
+            delivery_id = ?claim.delivery_id,
+
+        )
+
+    )]
     pub(super) async fn prepare_classified(
         &self,
         mut claim: SettlementFulfillmentClaim,
@@ -75,7 +93,25 @@ impl SettlementFulfillmentService {
                     claim.recipient = current.game_identity;
                     Some(current.state_version)
                 }
-                _ => return self.defer_internal(claim, retry_delay, "recipient_unavailable").await,
+                recipient_result => {
+                    let safe_kind = match &recipient_result {
+                        Err(error) => error.diagnostic_kind(),
+                        Ok(_) => SafeErrorKind::DEPENDENCY_MISMATCH,
+                    };
+                    record_error(
+                        DiagnosticLevel::Warn,
+                        safe_kind,
+                        "fulfillment_internal",
+                        "resolve_recipient",
+                        DiagnosticContext {
+                            obligation_id: diagnostic_id(&claim.obligation_id),
+                            world: Some(claim.world),
+                            defer_reason: Some("recipient_unavailable"),
+                            ..Default::default()
+                        },
+                    );
+                    return self.defer_internal(claim, retry_delay, "recipient_unavailable").await;
+                }
             }
         } else {
             None
@@ -87,14 +123,38 @@ impl SettlementFulfillmentService {
         };
         let request = match evidence_request(&command, self.clock.now(), false, false) {
             Ok(request) => request,
-            Err(_) => {
+            Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment_internal",
+                    "build_identity_request",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        ..Default::default()
+                    },
+                );
+
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
             }
         };
         let deadline = request.deadline;
         let identity = match reader.prepare_internal_evidence(request).await {
             Ok(identity) => identity,
-            Err(_) => {
+            Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment_internal",
+                    "read_identity",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        ..Default::default()
+                    },
+                );
+
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
             }
         };
@@ -104,6 +164,18 @@ impl SettlementFulfillmentService {
                     || identity.snapshot().identity.player_name != claim.recipient
             })
         {
+            record_error(
+                DiagnosticLevel::Warn,
+                SafeErrorKind::DEPENDENCY_MISMATCH,
+                "fulfillment_internal",
+                "validate_identity_binding",
+                DiagnosticContext {
+                    obligation_id: diagnostic_id(&claim.obligation_id),
+                    world: Some(claim.world),
+                    defer_reason: Some("internal_evidence_wait"),
+                    ..Default::default()
+                },
+            );
             drop(identity);
             return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
         }
@@ -111,7 +183,24 @@ impl SettlementFulfillmentService {
         if identity.snapshot().identity.player_name != claim.recipient
             && !self.is_configured_bot(&claim.recipient)
         {
-            if identity.check_current().await.is_err() {
+            if identity
+                .check_current()
+                .await
+                .inspect_err(|error| {
+                    record_error(
+                        DiagnosticLevel::Warn,
+                        error.diagnostic_kind(),
+                        "fulfillment_internal",
+                        "validate_identity_freshness",
+                        DiagnosticContext {
+                            obligation_id: diagnostic_id(&claim.obligation_id),
+                            world: Some(claim.world),
+                            ..Default::default()
+                        },
+                    );
+                })
+                .is_err()
+            {
                 drop(identity);
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
             }
@@ -147,14 +236,38 @@ impl SettlementFulfillmentService {
             action.requires_funding() && policy.observes_cash(),
         ) {
             Ok(request) => request,
-            Err(_) => {
+            Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment_internal",
+                    "build_combined_request",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        ..Default::default()
+                    },
+                );
+
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
             }
         };
         request.deadline = request.deadline.min(deadline);
         let mut prepared = match reader.prepare_internal_evidence(request).await {
             Ok(prepared) => prepared,
-            Err(_) => {
+            Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment_internal",
+                    "read_combined_evidence",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        ..Default::default()
+                    },
+                );
+
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
             }
         };
@@ -163,13 +276,53 @@ impl SettlementFulfillmentService {
             || repaired_uid
                 .as_ref()
                 .is_some_and(|uid| prepared.snapshot().identity.authenticated_uid != *uid)
-            || prepared.check_current().await.is_err()
+            || prepared
+                .check_current()
+                .await
+                .inspect_err(|error| {
+                    record_error(
+                        DiagnosticLevel::Warn,
+                        error.diagnostic_kind(),
+                        "fulfillment_internal",
+                        "validate_combined_freshness",
+                        DiagnosticContext {
+                            obligation_id: diagnostic_id(&claim.obligation_id),
+                            world: Some(claim.world),
+                            ..Default::default()
+                        },
+                    );
+                })
+                .is_err()
         {
+            record_error(
+                DiagnosticLevel::Warn,
+                SafeErrorKind::DEPENDENCY_MISMATCH,
+                "fulfillment_internal",
+                "validate_combined_binding",
+                DiagnosticContext {
+                    obligation_id: diagnostic_id(&claim.obligation_id),
+                    world: Some(claim.world),
+                    defer_reason: Some("internal_evidence_wait"),
+                    ..Default::default()
+                },
+            );
             return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
         }
         let guard = match prepared.begin_commit() {
             Ok(guard) => guard,
-            Err(_) => {
+            Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment_internal",
+                    "acquire_commit_guard",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        ..Default::default()
+                    },
+                );
+
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
             }
         };
@@ -179,14 +332,49 @@ impl SettlementFulfillmentService {
                 Ok(Outcome::InternallySatisfied { obligation_id: claim.obligation_id })
             }
             Ok(SettlementInternalCommitOutcome::FundingDeferred) => {
+                record_error(
+                    DiagnosticLevel::Info,
+                    SafeErrorKind::FUNDING_UNAVAILABLE,
+                    "fulfillment_internal",
+                    "defer_funding",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        defer_reason: Some("internal_funds_wait"),
+                        ..Default::default()
+                    },
+                );
                 guard.confirm_committed();
                 self.defer_internal(claim, retry_delay, "internal_funds_wait").await
             }
-            Ok(SettlementInternalCommitOutcome::RolledBack(_)) => {
+            Ok(SettlementInternalCommitOutcome::RolledBack(error)) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment_internal",
+                    "rollback_funding",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        ..Default::default()
+                    },
+                );
                 guard.confirm_rolled_back();
                 self.defer_internal(claim, retry_delay, "internal_proof_or_funds_wait").await
             }
-            Err(_) => {
+            Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment_internal",
+                    "commit_funding",
+                    DiagnosticContext {
+                        obligation_id: diagnostic_id(&claim.obligation_id),
+                        world: Some(claim.world),
+                        ..Default::default()
+                    },
+                );
+
                 // 未确认guard在返回时撤销owner；不改claim，不换命令，不转外发。
                 Err(repository_error("内部履约提交结果未知，须查询原稳定命令"))
             }
@@ -232,7 +420,20 @@ pub(super) fn evidence_request(
     let claim = &command.claim;
     let budget = (claim.lease_until - now)
         .to_std()
-        .map_err(|_| repository_error("履约租约已过期"))?
+        .map_err(|error| {
+            record_error(
+                DiagnosticLevel::Warn,
+                error.diagnostic_kind(),
+                "fulfillment_internal",
+                "convert_evidence_budget",
+                DiagnosticContext {
+                    obligation_id: diagnostic_id(&command.claim.obligation_id),
+                    world: Some(command.claim.world),
+                    ..Default::default()
+                },
+            );
+            repository_error("履约租约已过期")
+        })?
         .min(INTERNAL_EVIDENCE_BUDGET);
     if budget <= std::time::Duration::from_secs(1) {
         return Err(repository_error("履约证据预算不足"));

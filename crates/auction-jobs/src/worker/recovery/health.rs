@@ -1,7 +1,10 @@
 use std::sync::{Arc, Mutex};
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::{ApplicationError, RecoveryHealthRefreshPort, RepositoryError};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+
+use crate::worker::diagnostics;
 
 /// 按独立周期触发 recovery health 刷新的 Worker 运行时。
 /// Worker 主轮询可以比 health 周期更频繁；`next_refresh_at` 在开始远端读取前推进，避免
@@ -37,7 +40,14 @@ impl RecoveryHealthRuntime {
             ))
         })?;
         let should_refresh = {
-            let mut scheduled = self.next_refresh_at.lock().map_err(|_| {
+            let mut scheduled = self.next_refresh_at.lock().map_err(|error| {
+                diagnostics::warn(
+                    "recovery_health",
+                    "lock_schedule",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
+
                 ApplicationError::Repository(RepositoryError::Failed(
                     "recovery health 刷新状态锁损坏".to_owned(),
                 ))

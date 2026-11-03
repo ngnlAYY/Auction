@@ -1,8 +1,10 @@
 //! Sent/Take 恢复与 compose 清理的单次预算边界；复用原应用服务及持久围栏。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_world};
 use auction_observability::WorkerResult;
 
 use super::super::MailPollRuntime;
+use crate::worker::diagnostics;
 
 /// 一次维护只建立一个截止点；超时或取消保留未知外写围栏，不授权自动重发。
 pub(in crate::worker::runtime::mail_poll) async fn run_maintenance(
@@ -25,14 +27,14 @@ pub(in crate::worker::runtime::mail_poll) async fn run_maintenance(
             tracing::info!(
                 world_id = %runtime.world_id,
                 compose_clean = report.compose_clean,
-                compose_error = ?report.compose_error,
+                compose_error_present = report.compose_error.is_some(),
                 compose_matches = report.compose_matches,
                 discarded = report.discarded,
                 matched_delivery = ?report.matched_delivery,
                 sent_candidates = report.sent_candidates,
                 sent_matched = report.sent_matched,
                 sent_state_failed = report.sent_state_failed,
-                sent_state_error = ?report.sent_state_error,
+                sent_state_error_present = report.sent_state_error.is_some(),
                 sent_observed = report.sent_observed,
                 sent_recovered = report.sent_recovered,
                 sweep_requeued = report.sweep_requeued,
@@ -45,26 +47,42 @@ pub(in crate::worker::runtime::mail_poll) async fn run_maintenance(
                 WorkerResult::Success
             }
         }
-        Err(_) => {
-            tracing::warn!(
-                world_id = %runtime.world_id,
-                "MoogleMail 维护总预算耗尽；保留未知外写围栏，不撤销并行 Inbox 处理"
+        Err(error) => {
+            diagnostics::unpersisted_error(
+                "mail_maintenance",
+                "sweep_timeout",
+                diagnostics::timeout_kind(&error),
+                DiagnosticContext {
+                    world: diagnostic_world(&runtime.world_id),
+                    ..Default::default()
+                },
             );
+
             WorkerResult::Error
         }
-        Ok(Err(_)) if tokio::time::Instant::now() >= deadline => {
-            tracing::warn!(
-                world_id = %runtime.world_id,
-                "MoogleMail 维护总预算耗尽；保留未知外写围栏，不撤销并行 Inbox 处理"
+        Ok(Err(error)) if tokio::time::Instant::now() >= deadline => {
+            diagnostics::unpersisted_error(
+                "mail_maintenance",
+                "sweep_deadline",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    world: diagnostic_world(&runtime.world_id),
+                    ..Default::default()
+                },
             );
+
             WorkerResult::Error
         }
         Ok(Err(error)) => {
             // 维护失败不撤销已获证据；原游标、租约和未知状态仍由持久端口恢复。
-            tracing::warn!(
-                error = %error,
-                world_id = %runtime.world_id,
-                "MoogleMail 共享读取维护失败；保留未知外写围栏，不撤销并行 Inbox 处理"
+            diagnostics::unpersisted_error(
+                "mail_maintenance",
+                "sweep_mailbox",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    world: diagnostic_world(&runtime.world_id),
+                    ..Default::default()
+                },
             );
             WorkerResult::Error
         }

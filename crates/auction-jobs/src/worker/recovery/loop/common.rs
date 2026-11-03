@@ -1,17 +1,19 @@
 //! Recovery 阶段的逐项推进模板、结果合并与批次指标。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::{ApplicationFuture, Clock};
 use auction_observability::{WorkerLoop, WorkerResult};
 use chrono::{DateTime, Utc};
 
 use super::PersistentWorker;
+use crate::worker::diagnostics;
 
 /// 逐项推进一个到期阶段：每项独立超时，排空、无到期项、首个失败或超时都结束本阶段；
 /// 成功条目交给 `record` 记录，阶段结果并入批次并按成功批次计量。
 pub(super) async fn run_phase<'a, C, T>(
     worker: &PersistentWorker<C>,
     batch_result: &mut WorkerResult,
-    phase: &'static str,
+    phase: (&'static str, &'static str),
     next_due: impl Fn(DateTime<Utc>) -> ApplicationFuture<'a, Option<T>>,
     record: impl Fn(&T),
 ) where
@@ -31,12 +33,23 @@ pub(super) async fn run_phase<'a, C, T>(
             }
             Ok(Ok(None)) => break,
             Ok(Err(error)) => {
-                tracing::warn!(error = %error, "recovery {phase} phase failed");
+                diagnostics::unpersisted_error(
+                    "recovery_resolution",
+                    phase.0,
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
                 phase_result = WorkerResult::Error;
                 break;
             }
-            Err(_) => {
-                tracing::warn!("recovery {phase} item timed out");
+            Err(error) => {
+                diagnostics::unpersisted_error(
+                    "recovery_resolution",
+                    phase.1,
+                    diagnostics::timeout_kind(&error),
+                    DiagnosticContext::default(),
+                );
+
                 phase_result = WorkerResult::Error;
                 break;
             }

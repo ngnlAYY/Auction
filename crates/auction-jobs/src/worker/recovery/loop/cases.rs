@@ -15,7 +15,7 @@ where
     run_phase(
         worker,
         batch_result,
-        "case",
+        ("advance_case", "advance_case_timeout"),
         |now| store.advance_due_case(now),
         |advance| {
             tracing::info!(

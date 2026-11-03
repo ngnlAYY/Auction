@@ -10,6 +10,10 @@ use std::time::Instant;
 use serde_json::json;
 use uuid::Uuid;
 
+use crate::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, DiagnosticLevel, diagnostic_world,
+    record_error,
+};
 use crate::{
     ApplicationError, Clock, DeliverySendCredentialBinding, DeliverySendExpectation,
     DeliveryTakeExpectation, MoogleMailboxComposeState, MoogleMailboxDiscard,
@@ -114,6 +118,17 @@ impl MailboxMaintenanceService {
         let compose = match self.maintenance.compose(world_id).await {
             Ok(compose) => compose,
             Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "mail_maintenance",
+                    "read_compose",
+                    DiagnosticContext {
+                        world: diagnostic_world(world_id),
+                        disposition: Some(DiagnosticDisposition::Unpersisted),
+                        ..Default::default()
+                    },
+                );
                 report.compose_error = Some(error.to_string());
                 return Ok(report);
             }
@@ -156,6 +171,17 @@ impl MailboxMaintenanceService {
         let outcome = match self.maintenance.discard_compose(world_id, &compose).await {
             Ok(outcome) => outcome,
             Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "mail_maintenance",
+                    "discard_compose",
+                    DiagnosticContext {
+                        world: diagnostic_world(world_id),
+                        disposition: Some(DiagnosticDisposition::Unpersisted),
+                        ..Default::default()
+                    },
+                );
                 report.compose_error = Some(error.to_string());
                 return Ok(report);
             }
@@ -194,7 +220,20 @@ impl MailboxMaintenanceService {
         let (entries, mut state_error) = if needs_sent {
             match self.maintenance.sent_entries(world_id).await {
                 Ok(entries) => (Some(entries), None),
-                Err(error) => (None, Some(error.to_string())),
+                Err(error) => {
+                    record_error(
+                        DiagnosticLevel::Warn,
+                        error.diagnostic_kind(),
+                        "mail_maintenance",
+                        "read_sent_entries",
+                        DiagnosticContext {
+                            world: diagnostic_world(world_id),
+                            disposition: Some(DiagnosticDisposition::Unpersisted),
+                            ..Default::default()
+                        },
+                    );
+                    (None, Some(error.to_string()))
+                }
             }
         } else {
             (None, None)
@@ -522,6 +561,17 @@ impl MailboxMaintenanceService {
             Ok(Some(expectation)) => expectation,
             Ok(None) => return Ok(RecoveryStep::default()),
             Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "mail_maintenance",
+                    "read_notice_expectation",
+                    DiagnosticContext {
+                        world: diagnostic_world(world_id),
+                        disposition: Some(DiagnosticDisposition::Unpersisted),
+                        ..Default::default()
+                    },
+                );
                 return Ok(RecoveryStep {
                     failed: true,
                     error: Some(error.to_string()),
@@ -605,6 +655,17 @@ impl MailboxMaintenanceService {
             match self.maintenance.inbox_assets(world_id, &candidate.inbound_mail_id).await {
                 Ok(value) => value,
                 Err(error) => {
+                    record_error(
+                        DiagnosticLevel::Warn,
+                        error.diagnostic_kind(),
+                        "mail_maintenance",
+                        "read_inbox_assets",
+                        DiagnosticContext {
+                            world: diagnostic_world(world_id),
+                            disposition: Some(DiagnosticDisposition::Unpersisted),
+                            ..Default::default()
+                        },
+                    );
                     return Ok(RecoveryStep {
                         failed: true,
                         error: Some(error.to_string()),
@@ -724,6 +785,17 @@ impl MailboxMaintenanceService {
         match self.maintenance.sent_state(world_id, entry, self.clock.now()).await {
             Ok(state) => Ok(Some(state)),
             Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "mail_maintenance",
+                    "read_sent_state",
+                    DiagnosticContext {
+                        world: diagnostic_world(world_id),
+                        disposition: Some(DiagnosticDisposition::Unpersisted),
+                        ..Default::default()
+                    },
+                );
                 step.failed = true;
                 step.error = Some(error.to_string());
                 Ok(None)

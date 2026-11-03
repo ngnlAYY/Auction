@@ -1,15 +1,15 @@
 use std::{future::Future, pin::Pin};
 
-use chrono::{DateTime, Utc};
-use thiserror::Error;
-
 use auction_domain::{
     AuctionRules, AuctionStatus, BidAmount, CommandId, CompetitionPlan, LotBidState, LotId,
     ProxyAuthorization, ProxyAuthorizationId, ProxyStatus, UserId,
 };
+use chrono::{DateTime, Utc};
+use thiserror::Error;
 
 use super::core_ledger::{CommandLedgerError, StoredCommand};
 use super::core_policy::{TransactionPolicy, TransactionPolicyError};
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 
 /// 竞价命令在锁内读取到的最小聚合快照。
 #[derive(Debug, Clone)]
@@ -58,7 +58,15 @@ impl ProxyUsageContext {
     ) -> Result<Self, CompetitionTransactionError> {
         let mut expected_usage = 1_u64;
         for authorization in history {
-            authorization.validate().map_err(|_| {
+            authorization.validate().map_err(|error| {
+                record_error(
+                    DiagnosticLevel::Error,
+                    error.diagnostic_kind(),
+                    "competition_history",
+                    "validate_authorization",
+                    DiagnosticContext::default(),
+                );
+
                 CompetitionTransactionError::Failed("代理授权历史包含无效快照".to_owned())
             })?;
             if authorization.lot_id != lot_id

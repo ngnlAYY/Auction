@@ -1,6 +1,9 @@
 //! 论坛竞价命令账本、应用命令和完成状态收口。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
+
 use super::*;
+use crate::worker::diagnostics;
 
 pub(super) async fn process_command(
     runtime: &ForumReplyRuntime,
@@ -64,10 +67,14 @@ pub(super) async fn process_command(
     let start = match runtime.store.begin_command(record).await {
         Ok(start) => start,
         Err(error) => {
-            tracing::error!(
-                command_id = %proposed_command_id,
-                error = %error,
-                "论坛命令账本开始失败"
+            diagnostics::error(
+                "forum_reply",
+                "begin_command",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    command_id: diagnostic_id(&proposed_command_id),
+                    ..Default::default()
+                },
             );
             return Err(error);
         }
@@ -101,7 +108,12 @@ pub(super) async fn process_command(
     match result {
         Ok(()) => finish(runtime, command_id, "applied", "", "论坛竞价命令已应用").await?,
         Err(error) if is_retryable(&error) => {
-            tracing::warn!(command_id = %command_id, error = %error, "论坛竞价命令暂时未完成，将重试");
+            diagnostics::warn(
+                "forum_reply",
+                "retry_command",
+                error.diagnostic_kind(),
+                DiagnosticContext { command_id: diagnostic_id(&command_id), ..Default::default() },
+            );
             return Err(error);
         }
         Err(error) => {

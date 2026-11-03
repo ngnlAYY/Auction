@@ -1,9 +1,12 @@
 //! Delivery 准备、fence 交接和发送共用的有界续租；本地截止只收紧持久租约。
 
-use super::*;
-
 use std::time::Duration;
+
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
 use tokio::time::Instant;
+
+use super::*;
+use crate::worker::diagnostics;
 
 /// 以续租请求开始时刻计算保守单调截止；不代替数据库 token/fencing 权威门禁。
 pub(super) struct DeliveryLease {
@@ -57,10 +60,26 @@ impl DeliveryLease {
         {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
-                tracing::error!(error = %error, delivery_id = %claim.delivery_id, "delivery worker lease renewal failed");
+                diagnostics::error(
+                    "delivery",
+                    "lease_renew",
+                    error.diagnostic_kind(),
+                    DiagnosticContext {
+                        delivery_id: diagnostic_id(&claim.delivery_id),
+                        ..Default::default()
+                    },
+                );
                 return Err("lease_renewal");
             }
-            Err(_) => return Err("lease_renewal_timeout"),
+            Err(error) => {
+                diagnostics::warn(
+                    "delivery",
+                    "lease_renew_timeout",
+                    diagnostics::timeout_kind(&error),
+                    DiagnosticContext::default(),
+                );
+                return Err("lease_renewal_timeout");
+            }
         }
         // timeout_at 先 poll 内层 future；单次 poll 或调度延迟可能让成功回执晚于旧截止。
         // 迟到回执不能重建本地 owner 的有效期，也不能授权继续 poll 外部发送。

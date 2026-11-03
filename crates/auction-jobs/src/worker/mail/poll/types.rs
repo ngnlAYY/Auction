@@ -256,7 +256,7 @@ impl MailPollRuntime {
             && self.config.validate()
     }
 
-    pub(super) fn loop_kind(&self) -> WorkerLoop {
+    pub(in crate::worker::runtime) fn loop_kind(&self) -> WorkerLoop {
         if self.world_id == "isekai" { WorkerLoop::MailIsekai } else { WorkerLoop::MailMain }
     }
 }

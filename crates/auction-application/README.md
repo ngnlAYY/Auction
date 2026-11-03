@@ -183,3 +183,36 @@
 ## 运行时开关
 
 `RuntimeSwitchName` 为两项就绪行为绑定值类型与角色；`RuntimeSwitchCommand` 统一稳定摘要、重放输入及 CAS/到期规则。`RuntimeSwitches` 保存完整不可变快照和启动 TOML 基线，`RuntimeSwitchRefreshService` 经窄端口刷新并为到期 set 派生稳定收口命令。先取最新事实，再判期限，不恢复早期覆盖。它不参与资金、资格、幂等、锁或审计写入要求。权威存储和失败规则见[数据库契约](../../docs/contracts/database.md#运行时行为开关)。
+
+## 安全错误记录（I-A）
+
+W0.2 本批覆盖 jobs/application；integrations 与 HTTP 的 I-B 完成前仍为部分完成。
+所有持久化 defer reason、failure_code、命令结果与对外协议保持原值。
+同一函数不同原因用不同日志 kind/phase 和 safe_kind 区分，沿用 W0.7 的回退语义。
+
+诊断入口为 `diagnostics::record_error`，只接收 `SafeErrorKind`、固定级别、
+固定 kind/phase 和 `DiagnosticContext`，不能传入整个错误对象。
+`DiagnosticError` 只投影类型化变体，不读取 Display、Debug、source 或负载文本。
+固定安全类别使用关联常量，如 `SafeErrorKind::TIMEOUT`；`from_label` 仅用于
+既有 `safe_kind()` 字符串进入闭集的边界映射，未知值归为 other。
+
+kind 是简短的用例 owner，例如 `fulfillment_internal`、`mail_maintenance`，
+不包含 crate 或模块路径前缀。phase 是语义步骤，例如 `read_identity`、`acquire_commit_guard`；
+不使用函数名序号，同一 kind/phase 只对应同一种原因。超时与回执过期分别命名。
+完整 owner 清单见[排障方式](../../ops/README.md#安全错误与未持久化指标)。
+禁止把动态错误码、错误正文、URL/query、Cookie、密钥或请求/快照对象作为字段。
+上下文只允许业务 UUID、闭集世界和固定处置元数据；纯转换通过 skip_all 的安全业务 span 继承标识。
+`DiagnosticDisposition` 是处置闭集，当前仅有 `Unpersisted`，日志标签为 unpersisted。
+它只表示未确认持久处置，不创建任何业务事实。
+
+500、内部不变量和持久化处置失败用 ERROR；依赖、超时和未确认结果用 WARN；
+正常证据等待和未启用能力用 INFO/DEBUG。日志目标为 `auction::diagnostics`。
+Worker 的本地 warn/error/info/debug helper 统一字段顺序，`unpersisted_error` 添加处置枚举。
+通过窄 `DiagnosticSink` 在原长期 owner 中复用 60 秒 `RateLimitedLog`。
+指标 observer 先于日志过滤与去重，日志门只缓存固定类别与计数，不保存首条事件或业务标识。
+未安装门时直接输出安全日志；门不可用或容量不足时放行，不影响业务。
+
+`Unpersisted` 只由未确认对应持久处置的最终分支设置，
+不能用返回 Err、WorkerResult::Error 或一般重试错误代替。
+详见[指标口径](../auction-observability/README.md#未持久化错误)
+与[排障方式](../../ops/README.md#安全错误与未持久化指标)。

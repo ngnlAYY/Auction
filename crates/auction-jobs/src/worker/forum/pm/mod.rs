@@ -1,4 +1,8 @@
 //! 独立 PM 调度；共享论坛网关，delivery cadence，每轮最多一次发送及一次只读核对。
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::worker::diagnostics;
+
 mod delivery;
 
 use auction_application::{ForumPmSender, LotWatchPmClaimRequest, LotWatchPmWorkStore};
@@ -16,6 +20,7 @@ pub struct LotWatchPmRuntime {
     jitter: Duration,
     item_timeout: Duration,
     lease_seconds: i64,
+    metrics: Arc<dyn auction_observability::WorkerRecorder>,
     write_lifecycle: auction_application::ExternalWriteLifecycle,
 }
 
@@ -46,6 +51,7 @@ impl LotWatchPmRuntime {
             jitter,
             item_timeout,
             lease_seconds: lease_seconds as i64,
+            metrics: auction_observability::noop_worker_recorder(),
             write_lifecycle: auction_application::ExternalWriteLifecycle::default(),
         })
     }
@@ -59,62 +65,84 @@ impl LotWatchPmRuntime {
         self
     }
 
+    /// 注入同一进程 recorder；PM 使用 Forum 闭集，不新增标签。
+    pub fn with_metrics(mut self, metrics: Arc<dyn auction_observability::WorkerRecorder>) -> Self {
+        self.metrics = metrics;
+        diagnostics::install();
+        self
+    }
+
     /// drain 停止领取；在途工作仅等待到总预算，取消后依赖持久 fence 恢复。
     pub async fn run(self, worker_id: String, mut drain: watch::Receiver<bool>) {
-        loop {
-            if *drain.borrow() {
-                break;
-            }
-            for reconcile in [false, true] {
+        let diagnostic_metrics = self.metrics.clone();
+        let diagnostic_loop = auction_observability::WorkerLoop::Forum;
+        let body = async move {
+            loop {
                 if *drain.borrow() {
                     break;
                 }
-                let available_worlds = [
-                    auction_domain::SettlementWorld::Main,
-                    auction_domain::SettlementWorld::Isekai,
-                ]
-                .into_iter()
-                .filter(|world| self.sender.has_available_forum_credential(*world))
-                .collect();
-                let request = LotWatchPmClaimRequest {
-                    worker_id: worker_id.clone(),
-                    lease_seconds: self.lease_seconds,
-                    reconcile,
-                    available_worlds,
-                };
-                let deadline = tokio::time::Instant::now() + self.item_timeout;
-                let activity =
-                    self.write_lifecycle.activity(auction_application::CriticalWriteKind::ForumPm);
-                let operation = tokio::time::timeout_at(
-                    deadline,
-                    delivery::process(&self, request, &drain, deadline, &activity),
-                );
-                let Some(result) = activity.run(operation).await else {
-                    return;
-                };
-                match result {
-                    Ok(Ok(())) => {}
-                    Ok(Err(_)) => {
-                        tracing::warn!(reconcile, "lot watch PM persistent operation unavailable")
+                for reconcile in [false, true] {
+                    if *drain.borrow() {
+                        break;
                     }
-                    Err(_) => tracing::warn!(
+                    let available_worlds = [
+                        auction_domain::SettlementWorld::Main,
+                        auction_domain::SettlementWorld::Isekai,
+                    ]
+                    .into_iter()
+                    .filter(|world| self.sender.has_available_forum_credential(*world))
+                    .collect();
+                    let request = LotWatchPmClaimRequest {
+                        worker_id: worker_id.clone(),
+                        lease_seconds: self.lease_seconds,
                         reconcile,
-                        "lot watch PM budget expired; lease recovery required"
-                    ),
+                        available_worlds,
+                    };
+                    let deadline = tokio::time::Instant::now() + self.item_timeout;
+                    let activity = self
+                        .write_lifecycle
+                        .activity(auction_application::CriticalWriteKind::ForumPm);
+                    let operation = tokio::time::timeout_at(
+                        deadline,
+                        delivery::process(&self, request, &drain, deadline, &activity),
+                    );
+                    let Some(result) = activity.run(operation).await else {
+                        return;
+                    };
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => {
+                            diagnostics::unpersisted_error(
+                                "forum_pm",
+                                "deliver_notifications",
+                                error.diagnostic_kind(),
+                                DiagnosticContext::default(),
+                            );
+                        }
+                        Err(error) => {
+                            diagnostics::unpersisted_error(
+                                "forum_pm",
+                                "deliver_notifications_timeout",
+                                diagnostics::timeout_kind(&error),
+                                DiagnosticContext::default(),
+                            );
+                        }
+                    }
+                }
+                // 保留 PM 既有毫秒离散、上界不含 max 的抖动；仅复用停机等待门禁。
+                let max = self.jitter.as_millis().min(u128::from(u64::MAX)) as u64;
+                let jitter = if max == 0 {
+                    0
+                } else {
+                    (uuid::Uuid::new_v4().as_u128() % u128::from(max)) as u64
+                };
+                let deadline = tokio::time::Instant::now()
+                    + self.poll_interval.saturating_add(Duration::from_millis(jitter));
+                if wait_until_or_shutdown(&mut drain, deadline).await {
+                    break;
                 }
             }
-            // 保留 PM 既有毫秒离散、上界不含 max 的抖动；仅复用停机等待门禁。
-            let max = self.jitter.as_millis().min(u128::from(u64::MAX)) as u64;
-            let jitter = if max == 0 {
-                0
-            } else {
-                (uuid::Uuid::new_v4().as_u128() % u128::from(max)) as u64
-            };
-            let deadline = tokio::time::Instant::now()
-                + self.poll_interval.saturating_add(Duration::from_millis(jitter));
-            if wait_until_or_shutdown(&mut drain, deadline).await {
-                break;
-            }
-        }
+        };
+        diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
     }
 }

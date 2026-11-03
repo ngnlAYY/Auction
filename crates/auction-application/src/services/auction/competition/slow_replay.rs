@@ -6,16 +6,25 @@ use auction_domain::{
     BidMechanism, CompetitionPlan, ProxyMode, ProxyStatus, ProxyTerminalReason, ProxyTransitionKind,
 };
 
-use crate::{ApplicationError, CompetitionTransactionError, ExecuteSlowProxyCommand};
-
 use super::legacy_ledger::deterministic_id;
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::{ApplicationError, CompetitionTransactionError, ExecuteSlowProxyCommand};
 
 /// 接受代理反超、资格冻结或无法严格反超时的耗尽，拒绝属于其他命令的计划。
 pub(super) fn validate(
     command: &ExecuteSlowProxyCommand,
     plan: &CompetitionPlan,
 ) -> Result<(), ApplicationError> {
-    plan.validate().map_err(|_| invalid_result())?;
+    plan.validate().map_err(|error| {
+        record_error(
+            DiagnosticLevel::Warn,
+            error.diagnostic_kind(),
+            "slow_proxy",
+            "validate_replay_plan",
+            DiagnosticContext::default(),
+        );
+        invalid_result()
+    })?;
     let next_generation = command.generation.checked_add(1).ok_or_else(invalid_result)?;
     if plan.final_lot.lot_id != command.lot_id
         || plan.final_lot.slow_generation != next_generation

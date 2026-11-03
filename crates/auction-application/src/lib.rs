@@ -8,6 +8,7 @@ pub use ports::{
 };
 mod services;
 
+pub use errors::diagnostics;
 pub use errors::{ApplicationError, MailProcessingRetryability, SessionError};
 pub use ports::{
     ADMIN_AUCTION_SCHEDULE_COMMAND_KIND, ADMIN_AUCTION_STATUSES, ADMIN_RUNTIME_DIGEST_VERSION,

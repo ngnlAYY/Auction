@@ -7,6 +7,9 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
+use crate::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, diagnostic_id, record_error,
+};
 use crate::{
     AdminRuntimeAuditRecord, AdminRuntimeCommandState, AdminRuntimeCommandStore,
     AdminRuntimeConfigError, AdminRuntimeConfigPort, AdminRuntimeDocument, AdminRuntimeFileStore,
@@ -214,7 +217,16 @@ where
             // 文件已经替换成功；不能因数据库错误而恢复旧文件。错误可能发生在事务提交
             // 后，恢复旧文件会把 Applied 账本与实际配置永久分离。保留新文件后，若事务
             // 回滚，pending 行会在下一次恢复中重新应用；若已提交，则直接收口。
-            Err(_) => Err(AdminRuntimeConfigError::OutcomeUnknown.into()),
+            Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "admin_runtime_config",
+                    "persist_applied",
+                    DiagnosticContext::default(),
+                );
+                Err(AdminRuntimeConfigError::OutcomeUnknown.into())
+            }
         }
     }
 
@@ -232,8 +244,19 @@ where
         }
         // 当前文件已经证明是候选版本；账本错误的提交结果未知，必须保留 durable intent，
         // 让下一次恢复依据数据库实际状态收口，不能把底层错误伪装成可安全回退的失败。
-        let applied =
-            self.apply_row(&stored).await.map_err(|_| AdminRuntimeConfigError::OutcomeUnknown)?;
+        let applied = self.apply_row(&stored).await.map_err(|error| {
+            record_error(
+                DiagnosticLevel::Warn,
+                error.diagnostic_kind(),
+                "admin_runtime_config",
+                "recover_application",
+                DiagnosticContext {
+                    command_id: diagnostic_id(&stored.command_id),
+                    ..Default::default()
+                },
+            );
+            AdminRuntimeConfigError::OutcomeUnknown
+        })?;
         self.finish_applied(applied)
     }
 

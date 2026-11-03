@@ -1,5 +1,8 @@
 //! 每周拍卖轮次与赛季早鸟场次 bootstrap，以及 MoogleMail 暂停/恢复对账。
 
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind,
+};
 use auction_application::{
     AdminMailPollStateRequest, AdminMailPollingCommand, AdminMailTransactionError,
     ApplicationError, AuctionEarlyBirdCalendar, AuctionPolicyTemplate, AuctionScheduleSlot,
@@ -11,6 +14,7 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Serialize;
 
 use super::{PersistentWorker, WorkerResult};
+use crate::worker::diagnostics;
 
 const MAIL_PAUSE_LEAD: Duration = Duration::hours(2);
 
@@ -22,9 +26,21 @@ where
     let deadline = tokio::time::Instant::now() + worker.auction.item_timeout;
     match tokio::time::timeout_at(deadline, run_schedule_bootstrap_inner(worker, deadline)).await {
         Ok(result) if tokio::time::Instant::now() < deadline => result,
-        Ok(_) | Err(_) => {
+        diagnostic_outcome @ (Ok(_) | Err(..)) => {
+            diagnostics::unpersisted_error(
+                "auction_schedule",
+                if diagnostic_outcome.is_err() { "bootstrap_timeout" } else { "bootstrap_expired" },
+                if diagnostic_outcome.is_err() {
+                    SafeErrorKind::TIMEOUT
+                } else {
+                    SafeErrorKind::LEASE_EXPIRED
+                },
+                DiagnosticContext::default(),
+            );
+            drop(diagnostic_outcome);
+
             // 提交可能已发生；下轮读取冻结轮次和邮箱版本恢复，不补造失败事实或新命令身份。
-            tracing::warn!("auction weekly schedule bootstrap timed out");
+
             WorkerResult::Error
         }
     }
@@ -44,6 +60,7 @@ where
         return WorkerResult::Success;
     };
     if !config.validate() {
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!("auction weekly schedule configuration is invalid");
         return WorkerResult::Error;
     }
@@ -55,10 +72,12 @@ where
         return WorkerResult::Success;
     }
     let Ok(generation) = generation(config, now) else {
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!("生成当前本地周拍卖计划失败");
         return WorkerResult::Error;
     };
     let Some(world_reader) = worker.worlds.as_deref() else {
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!("周计划缺少数据库业务世界读取端口");
         return WorkerResult::Error;
     };
@@ -68,7 +87,12 @@ where
     let worlds = match world_reader.list_worlds().await {
         Ok(worlds) => worlds,
         Err(error) => {
-            tracing::warn!(error = %error, "读取周计划业务世界状态失败");
+            diagnostics::unpersisted_error(
+                "auction_schedule",
+                "read_worlds",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
             return WorkerResult::Error;
         }
     };
@@ -100,7 +124,15 @@ where
                 match calendar.current_session(world_id, &generation.times, now) {
                     Ok(slot) => slot,
                     Err(error) => {
-                        tracing::error!(world_id, error = %error, "计算当前早鸟场次失败");
+                        diagnostics::error(
+                            "auction_schedule",
+                            "resolve_calendar",
+                            error.diagnostic_kind(),
+                            DiagnosticContext {
+                                disposition: Some(DiagnosticDisposition::Unpersisted),
+                                ..Default::default()
+                            },
+                        );
                         result = WorkerResult::Error;
                         continue;
                     }
@@ -113,7 +145,12 @@ where
                 match load_or_bootstrap_round(worker, config, world_id, slot, now, deadline).await {
                     Ok(snapshot) => snapshot,
                     Err(error) => {
-                        tracing::warn!(world_id, error = %error, "当前拍卖轮次 bootstrap 失败");
+                        diagnostics::unpersisted_error(
+                            "auction_schedule",
+                            "load_round",
+                            error.diagnostic_kind(),
+                            DiagnosticContext::default(),
+                        );
                         result = WorkerResult::Error;
                         continue;
                     }
@@ -138,7 +175,12 @@ where
                 {
                     Ok(gate) => gate,
                     Err(error) => {
-                        tracing::warn!(world_id, error = %error, "早鸟期赛季前收件门禁读取失败");
+                        diagnostics::unpersisted_error(
+                            "auction_schedule",
+                            "reconcile_mail_gate",
+                            error.diagnostic_kind(),
+                            DiagnosticContext::default(),
+                        );
                         result = WorkerResult::Error;
                         continue;
                     }
@@ -157,7 +199,12 @@ where
         if let Err(error) =
             reconcile_mail(config, &worker.control, &desired, world_id, deadline).await
         {
-            tracing::warn!(world_id, error = %error, "MoogleMail 周计划暂停/恢复对账失败");
+            diagnostics::unpersisted_error(
+                "auction_schedule",
+                "reconcile_mail",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
             result = WorkerResult::Error;
         }
     }
@@ -487,8 +534,22 @@ fn generation(
         (config.open_weekday, config.open_minute),
         (config.end_weekday, config.end_minute),
     )
-    .map_err(|_| ())?;
-    weekly.slot(weekly.week_start(now)).map_err(|_| ())
+    .map_err(|error| {
+        diagnostics::warn(
+            "auction_schedule",
+            "validate_weekly_schedule",
+            error.diagnostic_kind(),
+            DiagnosticContext::default(),
+        );
+    })?;
+    weekly.slot(weekly.week_start(now)).map_err(|error| {
+        diagnostics::warn(
+            "auction_schedule",
+            "resolve_weekly_slot",
+            error.diagnostic_kind(),
+            DiagnosticContext::default(),
+        );
+    })
 }
 
 struct Identities {

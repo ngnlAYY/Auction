@@ -1,6 +1,8 @@
 //! PM 公开通知内容与缺收件人事实；不包含代理上限、装备密钥或凭据。
-use crate::{ForumPmMessage, LotWatchError, RequestHash, forum_pm_digest, valid_forum_pm_id};
 use uuid::Uuid;
+
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::{ForumPmMessage, LotWatchError, RequestHash, forum_pm_digest, valid_forum_pm_id};
 
 /// 冻结来源：缺失身份用 NULL，而非可发送 message 的虚构数字 ID。
 pub struct LotWatchPmNotification {
@@ -39,8 +41,16 @@ pub fn lot_watch_pm_notification(
             body,
         })?
     } else {
-        RequestHash::from_request("lot_watch_pm", notification_id, &payload)
-            .map_err(|_| LotWatchError::Unavailable)?
+        RequestHash::from_request("lot_watch_pm", notification_id, &payload).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Warn,
+                error.diagnostic_kind(),
+                "lot_watch_pm",
+                "hash_notification",
+                DiagnosticContext::default(),
+            );
+            LotWatchError::Unavailable
+        })?
     };
     Ok(LotWatchPmNotification { notification_id, recipient, payload, digest })
 }

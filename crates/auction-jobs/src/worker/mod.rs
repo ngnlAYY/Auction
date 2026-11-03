@@ -1,6 +1,7 @@
 //! Worker 调度实现的模块边界；运行时按职责拆分在 `runtime/`，各独立 owner
 //! 保留在业务子目录，Worker control 统一由 crate 根的 `control/` 拥有。
 
+pub(crate) mod diagnostics;
 #[path = "forum/pm/mod.rs"]
 mod lot_watch_pm;
 mod runtime;

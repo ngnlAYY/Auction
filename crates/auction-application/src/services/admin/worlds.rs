@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 use crate::{
     ADMIN_WORLD_SET_ENABLED_COMMAND_KIND, AdminWorldError, AdminWorldPort,
     AdminWorldSetEnabledCommand, AdminWorldTransaction, ApplicationError, ApplicationFuture,
@@ -141,8 +142,17 @@ fn replay(
     if stored.result_code != "accepted" {
         return Err(AdminWorldError::StoredResultCorrupt.into());
     }
-    let result: WorldSnapshot = serde_json::from_slice(&stored.result_payload)
-        .map_err(|_| AdminWorldError::StoredResultCorrupt)?;
+    let result: WorldSnapshot =
+        serde_json::from_slice(&stored.result_payload).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Warn,
+                error.diagnostic_kind(),
+                "admin_worlds",
+                "decode_replay_result",
+                DiagnosticContext::default(),
+            );
+            AdminWorldError::StoredResultCorrupt
+        })?;
     if !valid_replay(command, &result) {
         return Err(AdminWorldError::StoredResultCorrupt.into());
     }

@@ -8,14 +8,14 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use super::SettleAuctionCommand;
+use super::obligations::build_obligations;
+use super::validation::{validate_command_identity, validate_settlement_plan};
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 use crate::{
     ApplicationError, CommandLedgerError, PersistedSettlementObligationCount, RequestHash,
     SettlementSnapshot, SettlementTransactionError, StoredCommand,
 };
-
-use super::SettleAuctionCommand;
-use super::obligations::build_obligations;
-use super::validation::{validate_command_identity, validate_settlement_plan};
 
 const LEGACY_SETTLEMENT_ACTOR: &str = "auction-worker";
 
@@ -103,8 +103,17 @@ pub(super) fn classify_stored_settlement(
     if stored.result_code != "OK" {
         return Err(failed("旧版结算命令账本结果分类无效"));
     }
-    let result: LegacySettlementResult = serde_json::from_slice(&stored.result_payload)
-        .map_err(|_| failed("旧版结算命令结果 JSON 损坏"))?;
+    let result: LegacySettlementResult =
+        serde_json::from_slice(&stored.result_payload).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                error.diagnostic_kind(),
+                "settlement_ledger",
+                "decode_legacy_result",
+                DiagnosticContext::default(),
+            );
+            failed("旧版结算命令结果 JSON 损坏")
+        })?;
     if !result.valid_for(command) {
         return Err(failed("旧版结算命令结果语义损坏"));
     }
@@ -162,7 +171,16 @@ pub(super) fn replay_legacy_settlement(
     let generated_counts = generated_counts(&plan)?;
     let sold_count =
         u64::try_from(snapshot.facts.iter().filter(|fact| fact.leader_id.is_some()).count())
-            .map_err(|_| failed("结算成交数量超出安全范围"))?;
+            .map_err(|error| {
+                record_error(
+                    DiagnosticLevel::Error,
+                    error.diagnostic_kind(),
+                    "settlement_ledger",
+                    "convert_sold_count",
+                    DiagnosticContext::default(),
+                );
+                failed("结算成交数量超出安全范围")
+            })?;
     let unsold_count = u64::try_from(snapshot.facts.len())
         .ok()
         .and_then(|total| total.checked_sub(sold_count))

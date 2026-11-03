@@ -1,7 +1,25 @@
 //! 拍卖生命周期与结算轮次 claim 的应用命令执行；状态迁移仍由应用端口拥有。
 
-use super::*;
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind,
+};
 
+use super::*;
+use crate::worker::diagnostics;
+
+#[tracing::instrument(
+
+    skip_all,
+
+    fields(
+
+        round_id = %claim.round_id,
+
+        auction_id = %claim.auction_id,
+
+    )
+
+)]
 pub(super) async fn process_claim<C>(
     schedule: Arc<dyn ScheduledRoundStore>,
     lifecycle: Arc<dyn AuctionLifecycleCommandPort>,
@@ -47,7 +65,15 @@ where
     match lifecycle.execute(command).await {
         Ok(_) => {
             if let Err(error) = schedule.complete(claim, clock.now()).await {
-                tracing::error!(error = %error, "worker failed to persist completed schedule");
+                diagnostics::error(
+                    "auction_lifecycle",
+                    "complete_claim",
+                    error.diagnostic_kind(),
+                    DiagnosticContext {
+                        disposition: Some(DiagnosticDisposition::Unpersisted),
+                        ..Default::default()
+                    },
+                );
                 return WorkerResult::Error;
             }
             WorkerResult::Success
@@ -71,11 +97,20 @@ pub(super) async fn record_failure<C>(
     let now = clock.now();
     let Some(retry_at) = now.checked_add_signed(retry_delay(claim.attempt_count)) else {
         // 不把不可表示的退避时间改写为 now；claim 会在原有 fence 到期后重新变为可领取。
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!(failure_code, "lifecycle retry timestamp overflow; claim remains leased");
         return;
     };
     if let Err(error) = schedule.fail(claim, retry_at, failure_code.to_owned(), safe_detail).await {
-        tracing::error!(error = %error, failure_code, "worker failed to persist retry state");
+        diagnostics::error(
+            "auction_lifecycle",
+            "record_failure",
+            error.diagnostic_kind(),
+            DiagnosticContext {
+                disposition: Some(DiagnosticDisposition::Unpersisted),
+                ..Default::default()
+            },
+        );
     }
 }
 

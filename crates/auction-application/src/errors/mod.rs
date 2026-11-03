@@ -1,3 +1,4 @@
+pub mod diagnostics;
 mod safe_kind;
 mod sessions;
 

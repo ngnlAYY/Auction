@@ -5,6 +5,8 @@ use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Offset, Ti
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+
 /// 一轮排期冻结的本地计划；保留 DST 跳时归一化前的钟点，后继不从 UTC 反推配置。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,10 +51,16 @@ pub struct AuctionScheduleTimes {
 impl AuctionScheduleSource {
     /// 复用旧周计划的歧义时间取较早实例、跳时时间按后续 offset 归一化语义。
     pub fn resolve(&self) -> Result<AuctionScheduleTimes, DomainError> {
-        let timezone: Tz = self
-            .timezone
-            .parse()
-            .map_err(|_| DomainError::InvalidSchedule("周排期时区来源无效"))?;
+        let timezone: Tz = self.timezone.parse().map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                DiagnosticError::diagnostic_kind(&error),
+                "auction_schedule",
+                "parse_timezone",
+                DiagnosticContext::default(),
+            );
+            DomainError::InvalidSchedule("周排期时区来源无效")
+        })?;
         let result = AuctionScheduleTimes {
             preview_due_at: resolve_local(timezone, self.preview_local)?,
             open_due_at: resolve_local(timezone, self.open_local)?,
@@ -102,10 +110,16 @@ impl AuctionScheduleSource {
         updated: AuctionScheduleTimes,
     ) -> Result<Self, DomainError> {
         self.resolve()?;
-        let timezone: Tz = self
-            .timezone
-            .parse()
-            .map_err(|_| DomainError::InvalidSchedule("周排期时区来源无效"))?;
+        let timezone: Tz = self.timezone.parse().map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                DiagnosticError::diagnostic_kind(&error),
+                "auction_schedule",
+                "parse_timezone",
+                DiagnosticContext::default(),
+            );
+            DomainError::InvalidSchedule("周排期时区来源无效")
+        })?;
         let mut source = self.clone();
         if previous.preview_due_at != updated.preview_due_at {
             source.preview_local = updated.preview_due_at.with_timezone(&timezone).naive_local();

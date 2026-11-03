@@ -1,10 +1,15 @@
 //! Delivery outbox 的领取、外部发送、租约续期和终态落库；
 //! 外部结果未知时保留安全失败语义并进入持久化对账，不能凭本地超时推断远端未写入。
 
-use super::*;
-
-use auction_application::{CriticalWriteKind, ExternalWriteActivity};
 use std::collections::HashSet;
+
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
+};
+use auction_application::{CriticalWriteKind, ExternalWriteActivity};
+
+use super::*;
+use crate::worker::diagnostics;
 
 mod lease;
 mod wakeup;
@@ -18,32 +23,216 @@ pub(super) async fn run_delivery_cycle<C>(worker: &PersistentWorker<C>) -> Resul
 where
     C: Clock + 'static,
 {
-    let (Some(delivery_store), Some(delivery_transport)) =
-        (&worker.delivery_store, &worker.delivery_transport)
-    else {
-        return Ok(());
-    };
-    let transport_concurrency = delivery_transport.maximum_concurrency();
-    if transport_concurrency == 0 {
-        return Err(WorkerError::InvalidDeliveryConfiguration);
-    }
-    let effective_concurrency = usize::from(worker.delivery.concurrency.min(transport_concurrency));
-    let delivery_started = std::time::Instant::now();
-    let delivery_lease = ChronoDuration::from_std(worker.delivery.lease_duration)
-        .map_err(|_| WorkerError::InvalidDeliveryConfiguration)?;
-    let mut delivery_count = 0usize;
-    let mut delivery_result = WorkerResult::Success;
-    let mut claim_error: Option<ApplicationError> = None;
-    let mut tasks = JoinSet::new();
-    let mut skipped_recipients = HashSet::new();
-    let mut unavailable_worlds = HashSet::new();
-    let mut unavailable_send_worlds = HashSet::new();
+    let diagnostic_metrics = worker.metrics.clone();
+    let diagnostic_loop = auction_observability::WorkerLoop::Delivery;
+    let body = async move {
+        let (Some(delivery_store), Some(delivery_transport)) =
+            (&worker.delivery_store, &worker.delivery_transport)
+        else {
+            return Ok(());
+        };
+        let transport_concurrency = delivery_transport.maximum_concurrency();
+        if transport_concurrency == 0 {
+            return Err(WorkerError::InvalidDeliveryConfiguration);
+        }
+        let effective_concurrency =
+            usize::from(worker.delivery.concurrency.min(transport_concurrency));
+        let delivery_started = std::time::Instant::now();
+        let delivery_lease = ChronoDuration::from_std(worker.delivery.lease_duration)
+            .map_err(|_| WorkerError::InvalidDeliveryConfiguration)?;
+        let mut delivery_count = 0usize;
+        let mut delivery_result = WorkerResult::Success;
+        let mut claim_error: Option<ApplicationError> = None;
+        let mut tasks = JoinSet::new();
+        let mut skipped_recipients = HashSet::new();
+        let mut unavailable_worlds = HashSet::new();
+        let mut unavailable_send_worlds = HashSet::new();
 
-    while !worker.control.is_draining() {
-        if (tasks.len() >= effective_concurrency
-            || delivery_count >= usize::from(worker.delivery.batch_limit))
-            && let Some(result) = tasks.join_next().await
-        {
+        while !worker.control.is_draining() {
+            if (tasks.len() >= effective_concurrency
+                || delivery_count >= usize::from(worker.delivery.batch_limit))
+                && let Some(result) = tasks.join_next().await
+            {
+                merge_delivery_task_result(
+                    &mut delivery_result,
+                    &mut skipped_recipients,
+                    &mut unavailable_send_worlds,
+                    &mut delivery_count,
+                    result,
+                );
+            }
+
+            if worker.control.is_draining()
+                || delivery_count >= usize::from(worker.delivery.batch_limit)
+            {
+                break;
+            }
+
+            // 领取可能已提交但回执丢失；本地只等待原 lease，不主动释放未知结果。
+            let claim_deadline = tokio::time::Instant::now() + worker.delivery.lease_duration;
+            let now = worker.clock.now();
+            let Some(lease_until) = now.checked_add_signed(delivery_lease) else {
+                claim_error = Some(ApplicationError::Repository(
+                    auction_application::RepositoryError::Failed(
+                        "delivery claim lease 截止时间溢出".to_owned(),
+                    ),
+                ));
+                break;
+            };
+            let mut claims = match worker
+                .write_lifecycle
+                .background(tokio::time::timeout_at(
+                    claim_deadline,
+                    delivery_store.claim_due(
+                        worker.worker_id.clone(),
+                        now,
+                        lease_until,
+                        worker.delivery.sending_grace,
+                        DeliveryClaimExclusions {
+                            unavailable_worlds: unavailable_worlds.iter().cloned().collect(),
+                            unavailable_send_worlds: unavailable_send_worlds
+                                .iter()
+                                .cloned()
+                                .collect(),
+                            recipients: skipped_recipients
+                                .iter()
+                                .map(|(world, recipient)| DeliveryRecipientExclusion {
+                                    world: world.clone(),
+                                    recipient: recipient.clone(),
+                                })
+                                .collect(),
+                        },
+                        1,
+                    ),
+                ))
+                .await
+            {
+                Some(Ok(Ok(claims))) if tokio::time::Instant::now() < claim_deadline => claims,
+                diagnostic_outcome @ (Some(Ok(Ok(_))) | Some(Err(..))) => {
+                    diagnostics::warn(
+                        "delivery",
+                        if matches!(&diagnostic_outcome, Some(Err(..))) {
+                            "claim_wave_timeout"
+                        } else {
+                            "claim_wave_expired"
+                        },
+                        if matches!(&diagnostic_outcome, Some(Err(..))) {
+                            SafeErrorKind::TIMEOUT
+                        } else {
+                            SafeErrorKind::LEASE_EXPIRED
+                        },
+                        DiagnosticContext::default(),
+                    );
+                    drop(diagnostic_outcome);
+
+                    claim_error = Some(ApplicationError::Repository(
+                        auction_application::RepositoryError::Failed(
+                            "delivery claim 未在租约截止前确认".to_owned(),
+                        ),
+                    ));
+                    break;
+                }
+                Some(Ok(Err(error))) => {
+                    claim_error = Some(error);
+                    break;
+                }
+                None => break,
+            };
+            let Some(claim) = claims.pop() else {
+                break;
+            };
+            // 领取等待可能跨过 drain；尚未准备或进入 sending 的 claim 可以按原 fence 安全释放。
+            if worker.control.is_draining() {
+                if worker.write_lifecycle.enabled() {
+                    break;
+                }
+                let released = release_unstarted_delivery(
+                    delivery_store.as_ref(),
+                    worker.clock.as_ref(),
+                    worker.delivery,
+                    &claim,
+                    WorkerResult::Success,
+                    None,
+                )
+                .await;
+                merge_worker_result(&mut delivery_result, released.worker_result);
+                break;
+            }
+            if !delivery_transport.available(&claim) {
+                let release = tokio::time::timeout(
+                    worker.delivery.finalize_timeout,
+                    delivery_store.release(claim.clone(), worker.clock.now()),
+                )
+                .await;
+                match release {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => {
+                        diagnostics::error(
+                            "delivery",
+                            "release_drain_claim",
+                            error.diagnostic_kind(),
+                            DiagnosticContext {
+                                disposition: Some(DiagnosticDisposition::Unpersisted),
+                                delivery_id: diagnostic_id(&claim.delivery_id),
+                                ..Default::default()
+                            },
+                        );
+                        merge_worker_result(&mut delivery_result, WorkerResult::Error);
+                    }
+                    Err(error) => {
+                        diagnostics::unpersisted_error(
+                            "delivery",
+                            "release_drain_claim_timeout",
+                            diagnostics::timeout_kind(&error),
+                            DiagnosticContext {
+                                delivery_id: diagnostic_id(&claim.delivery_id),
+                                ..Default::default()
+                            },
+                        );
+
+                        merge_worker_result(&mut delivery_result, WorkerResult::Error);
+                    }
+                }
+                let world = claim.payload.get("world").and_then(serde_json::Value::as_str);
+                let Some(world @ ("main" | "isekai")) = world else {
+                    // false 只能表示有效世界没有凭据；违约适配器不能令同一 claim 紧密重复领取。
+                    claim_error = Some(ApplicationError::CapabilityUnavailable(
+                        "delivery transport 为无效世界返回了不可用状态",
+                    ));
+                    break;
+                };
+                unavailable_worlds.insert(world.to_owned());
+                // 跳过的世界不消耗可执行批次容量，batch_limit=1 时也能继续处理其他世界。
+                continue;
+            }
+
+            delivery_count += 1;
+            if claim.attempt_count > 1 {
+                worker.metrics.observe_retry(WorkerLoop::Delivery, WorkerRetryKind::Persisted);
+            }
+
+            let kind = match claim.payload.get("operation").and_then(serde_json::Value::as_str) {
+                Some("take") => CriticalWriteKind::DeliveryTake,
+                Some("return") => CriticalWriteKind::DeliveryReturn,
+                _ => CriticalWriteKind::DeliverySend,
+            };
+            let activity = worker.write_lifecycle.activity(kind);
+            let store = Arc::clone(delivery_store);
+            let transport = Arc::clone(delivery_transport);
+            let clock = Arc::clone(&worker.clock);
+            let config = worker.delivery;
+            let control = worker.control.clone();
+            tasks.spawn(diagnostics::inherit(async move {
+                activity
+                    .run(process_delivery_claim(
+                        store, transport, clock, config, control, claim, &activity,
+                    ))
+                    .await
+                    .unwrap_or_else(|| DeliveryTaskResult::completed(WorkerResult::Canceled))
+            }));
+        }
+
+        while let Some(result) = tasks.join_next().await {
             merge_delivery_task_result(
                 &mut delivery_result,
                 &mut skipped_recipients,
@@ -52,166 +241,30 @@ where
                 result,
             );
         }
-
-        if worker.control.is_draining()
-            || delivery_count >= usize::from(worker.delivery.batch_limit)
-        {
-            break;
+        if claim_error.is_none() && delivery_result == WorkerResult::Success {
+            worker.metrics.observe_batch(
+                WorkerLoop::Delivery,
+                delivery_count,
+                usize::from(worker.delivery.batch_limit),
+            );
         }
-
-        // 领取可能已提交但回执丢失；本地只等待原 lease，不主动释放未知结果。
-        let claim_deadline = tokio::time::Instant::now() + worker.delivery.lease_duration;
-        let now = worker.clock.now();
-        let Some(lease_until) = now.checked_add_signed(delivery_lease) else {
-            claim_error =
-                Some(ApplicationError::Repository(auction_application::RepositoryError::Failed(
-                    "delivery claim lease 截止时间溢出".to_owned(),
-                )));
-            break;
-        };
-        let mut claims = match worker
-            .write_lifecycle
-            .background(tokio::time::timeout_at(
-                claim_deadline,
-                delivery_store.claim_due(
-                    worker.worker_id.clone(),
-                    now,
-                    lease_until,
-                    worker.delivery.sending_grace,
-                    DeliveryClaimExclusions {
-                        unavailable_worlds: unavailable_worlds.iter().cloned().collect(),
-                        unavailable_send_worlds: unavailable_send_worlds.iter().cloned().collect(),
-                        recipients: skipped_recipients
-                            .iter()
-                            .map(|(world, recipient)| DeliveryRecipientExclusion {
-                                world: world.clone(),
-                                recipient: recipient.clone(),
-                            })
-                            .collect(),
-                    },
-                    1,
-                ),
-            ))
-            .await
-        {
-            Some(Ok(Ok(claims))) if tokio::time::Instant::now() < claim_deadline => claims,
-            Some(Ok(Ok(_))) | Some(Err(_)) => {
-                claim_error = Some(ApplicationError::Repository(
-                    auction_application::RepositoryError::Failed(
-                        "delivery claim 未在租约截止前确认".to_owned(),
-                    ),
-                ));
-                break;
-            }
-            Some(Ok(Err(error))) => {
-                claim_error = Some(error);
-                break;
-            }
-            None => break,
-        };
-        let Some(claim) = claims.pop() else {
-            break;
-        };
-        // 领取等待可能跨过 drain；尚未准备或进入 sending 的 claim 可以按原 fence 安全释放。
-        if worker.control.is_draining() {
-            if worker.write_lifecycle.enabled() {
-                break;
-            }
-            let released = release_unstarted_delivery(
-                delivery_store.as_ref(),
-                worker.clock.as_ref(),
-                worker.delivery,
-                &claim,
-                WorkerResult::Success,
-            )
-            .await;
-            merge_worker_result(&mut delivery_result, released.worker_result);
-            break;
+        if claim_error.is_some() {
+            merge_worker_result(&mut delivery_result, WorkerResult::Error);
         }
-        if !delivery_transport.available(&claim) {
-            let release = tokio::time::timeout(
-                worker.delivery.finalize_timeout,
-                delivery_store.release(claim.clone(), worker.clock.now()),
-            )
-            .await;
-            match release {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => {
-                    tracing::error!(error = %error, delivery_id = %claim.delivery_id, "delivery worker failed to release unavailable claim");
-                    merge_worker_result(&mut delivery_result, WorkerResult::Error);
-                }
-                Err(_) => {
-                    tracing::error!(delivery_id = %claim.delivery_id, "delivery worker timed out while releasing unavailable claim");
-                    merge_worker_result(&mut delivery_result, WorkerResult::Error);
-                }
-            }
-            let world = claim.payload.get("world").and_then(serde_json::Value::as_str);
-            let Some(world @ ("main" | "isekai")) = world else {
-                // false 只能表示有效世界没有凭据；违约适配器不能令同一 claim 紧密重复领取。
-                claim_error = Some(ApplicationError::CapabilityUnavailable(
-                    "delivery transport 为无效世界返回了不可用状态",
-                ));
-                break;
-            };
-            unavailable_worlds.insert(world.to_owned());
-            // 跳过的世界不消耗可执行批次容量，batch_limit=1 时也能继续处理其他世界。
-            continue;
-        }
-
-        delivery_count += 1;
-        if claim.attempt_count > 1 {
-            worker.metrics.observe_retry(WorkerLoop::Delivery, WorkerRetryKind::Persisted);
-        }
-
-        let kind = match claim.payload.get("operation").and_then(serde_json::Value::as_str) {
-            Some("take") => CriticalWriteKind::DeliveryTake,
-            Some("return") => CriticalWriteKind::DeliveryReturn,
-            _ => CriticalWriteKind::DeliverySend,
-        };
-        let activity = worker.write_lifecycle.activity(kind);
-        let store = Arc::clone(delivery_store);
-        let transport = Arc::clone(delivery_transport);
-        let clock = Arc::clone(&worker.clock);
-        let config = worker.delivery;
-        let control = worker.control.clone();
-        tasks.spawn(async move {
-            activity
-                .run(process_delivery_claim(
-                    store, transport, clock, config, control, claim, &activity,
-                ))
-                .await
-                .unwrap_or_else(|| DeliveryTaskResult::completed(WorkerResult::Canceled))
-        });
-    }
-
-    while let Some(result) = tasks.join_next().await {
-        merge_delivery_task_result(
-            &mut delivery_result,
-            &mut skipped_recipients,
-            &mut unavailable_send_worlds,
-            &mut delivery_count,
-            result,
-        );
-    }
-    if claim_error.is_none() && delivery_result == WorkerResult::Success {
-        worker.metrics.observe_batch(
+        worker.metrics.observe_iteration(
             WorkerLoop::Delivery,
-            delivery_count,
-            usize::from(worker.delivery.batch_limit),
+            delivery_result,
+            delivery_started.elapsed(),
         );
-    }
-    if claim_error.is_some() {
-        merge_worker_result(&mut delivery_result, WorkerResult::Error);
-    }
-    worker.metrics.observe_iteration(
-        WorkerLoop::Delivery,
-        delivery_result,
-        delivery_started.elapsed(),
-    );
-    match claim_error {
-        Some(error) => Err(error.into()),
-        None => Ok(()),
-    }
+        match claim_error {
+            Some(error) => {
+                diagnostics::unpersisted(error.diagnostic_kind());
+                Err(error.into())
+            }
+            None => Ok(()),
+        }
+    };
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
 }
 
 fn merge_delivery_task_result(
@@ -234,7 +287,19 @@ fn merge_delivery_task_result(
             merge_worker_result(delivery_result, result.worker_result);
         }
         Err(error) => {
-            tracing::error!(error = %error, "delivery worker task join failed");
+            diagnostics::error(
+                "delivery",
+                "item_join",
+                diagnostics::join_kind(&error),
+                DiagnosticContext {
+                    disposition: if error.is_cancelled() {
+                        None
+                    } else {
+                        Some(DiagnosticDisposition::Unpersisted)
+                    },
+                    ..Default::default()
+                },
+            );
             *delivery_result = WorkerResult::Canceled;
         }
     }
@@ -252,6 +317,17 @@ impl DeliveryTaskResult {
     }
 }
 
+#[tracing::instrument(
+
+    skip_all,
+
+    fields(
+
+        delivery_id = %claim.delivery_id,
+
+    )
+
+)]
 async fn process_delivery_claim<C>(
     delivery_store: Arc<dyn DeliveryWorkStore>,
     delivery_transport: Arc<dyn DeliveryTransport>,
@@ -275,6 +351,7 @@ where
             config,
             &claim,
             WorkerResult::Success,
+            None,
         )
         .await;
     }
@@ -291,6 +368,7 @@ where
                 config,
                 &claim,
                 WorkerResult::Error,
+                Some(SafeErrorKind::LEASE_EXPIRED),
             )
             .await;
         }
@@ -322,10 +400,16 @@ where
             return DeliveryTaskResult::completed(if matches!(result, Ok(Ok(()))) {
                 WorkerResult::Success
             } else {
+                diagnostics::unpersisted(SafeErrorKind::REPOSITORY_FAILED);
                 WorkerResult::Error
             });
         }
         preparation => {
+            let preflight_kind = if preparation.is_err() {
+                SafeErrorKind::TIMEOUT
+            } else {
+                SafeErrorKind::DEPENDENCY_UNAVAILABLE
+            };
             let failure_code = match preparation {
                 Ok(Err(error)) => error.failure_code,
                 _ => "preflight_timeout".to_owned(),
@@ -340,6 +424,7 @@ where
                 config,
                 &claim,
                 WorkerResult::Success,
+                Some(preflight_kind),
             )
             .await;
         }
@@ -367,6 +452,7 @@ where
             config,
             &claim,
             WorkerResult::Error,
+            Some(SafeErrorKind::DEPENDENCY_UNAVAILABLE),
         )
         .await;
     }
@@ -387,7 +473,10 @@ where
             }
             _ = tokio::time::sleep_until(lease.deadline) => {
                 lease_failed = true;
-                break Err(delivery_gateway_outcome_unknown("lease_expired", "delivery 发送期间 lease 已过期"));
+                break Err(delivery_gateway_outcome_unknown(
+                    "lease_expired",
+                    "delivery 发送期间 lease 已过期",
+                ));
             }
             result = std::future::poll_fn(|context| {
                 // 截止优先；在有效租约内先给操作一次 poll，再处理已到期的续租。
@@ -404,14 +493,26 @@ where
                 let renewal = tokio::time::timeout_at(
                     request_deadline,
                     lease.renew(delivery_store.as_ref(), &claim, clock.as_ref(), config),
-                ).await;
+                )
+                .await;
                 let stage = match renewal {
                     Ok(Ok(())) => continue,
                     Ok(Err(stage)) => stage,
-                    Err(_) => "request_timeout",
+                    Err(error) => {
+                        diagnostics::warn(
+                            "delivery",
+                            "lease_request_timeout",
+                            diagnostics::timeout_kind(&error),
+                            DiagnosticContext::default(),
+                        );
+                        "request_timeout"
+                    }
                 };
                 lease_failed = true;
-                break Err(delivery_gateway_outcome_unknown(stage, "delivery 发送期间 lease 续租失败或超时"));
+                break Err(delivery_gateway_outcome_unknown(
+                    stage,
+                    "delivery 发送期间 lease 续租失败或超时",
+                ));
             }
         }
     };
@@ -427,6 +528,7 @@ where
             config,
             &claim,
             WorkerResult::Error,
+            Some(SafeErrorKind::LEASE_EXPIRED),
         )
         .await;
     }
@@ -449,11 +551,29 @@ where
                     })
                 }
                 Ok(Err(error)) => {
-                    tracing::error!(error = %error, %delivery_id, "delivery worker failed to persist success");
+                    diagnostics::error(
+                        "delivery",
+                        "persist_completion",
+                        error.diagnostic_kind(),
+                        DiagnosticContext {
+                            disposition: Some(DiagnosticDisposition::Unpersisted),
+                            delivery_id: diagnostic_id(&delivery_id),
+                            ..Default::default()
+                        },
+                    );
                     DeliveryTaskResult::completed(WorkerResult::Error)
                 }
-                Err(_) => {
-                    tracing::error!(%delivery_id, "delivery worker timed out while persisting success");
+                Err(error) => {
+                    diagnostics::unpersisted_error(
+                        "delivery",
+                        "persist_completion_timeout",
+                        diagnostics::timeout_kind(&error),
+                        DiagnosticContext {
+                            delivery_id: diagnostic_id(&delivery_id),
+                            ..Default::default()
+                        },
+                    );
+
                     DeliveryTaskResult::completed(WorkerResult::Error)
                 }
             }
@@ -467,7 +587,6 @@ where
             } else {
                 None
             };
-            let failure_code = error.failure_code.clone();
             let worker_result = match tokio::time::timeout(
                 config.finalize_timeout,
                 delivery_store.fail(claim, error, clock.now()),
@@ -479,11 +598,29 @@ where
                     if lease_failed { WorkerResult::Error } else { WorkerResult::Success }
                 }
                 Ok(Err(persist_error)) => {
-                    tracing::error!(error = %persist_error, %delivery_id, %failure_code, "delivery worker failed to persist failure");
+                    diagnostics::error(
+                        "delivery",
+                        "persist_send_failure",
+                        persist_error.diagnostic_kind(),
+                        DiagnosticContext {
+                            disposition: Some(DiagnosticDisposition::Unpersisted),
+                            delivery_id: diagnostic_id(&delivery_id),
+                            ..Default::default()
+                        },
+                    );
                     WorkerResult::Error
                 }
-                Err(_) => {
-                    tracing::error!(%delivery_id, %failure_code, "delivery worker timed out while persisting failure");
+                Err(error) => {
+                    diagnostics::unpersisted_error(
+                        "delivery",
+                        "persist_send_failure_timeout",
+                        diagnostics::timeout_kind(&error),
+                        DiagnosticContext {
+                            delivery_id: diagnostic_id(&delivery_id),
+                            ..Default::default()
+                        },
+                    );
+
                     WorkerResult::Error
                 }
             };
@@ -521,7 +658,10 @@ async fn prepare_delivery<'a, C: Clock>(
                 preparation.as_mut().poll(context)
             }) => return result,
             _ = tokio::time::sleep_until(lease.renew_at) => {
-                lease.renew(store, claim, clock, config).await.map_err(delivery_preparation_error)?;
+                lease
+                    .renew(store, claim, clock, config)
+                    .await
+                    .map_err(delivery_preparation_error)?;
             }
         }
     }
@@ -618,7 +758,18 @@ async fn confirm_delivery_handoff<C: Clock>(
                     _ => None,
                 }
             }
-            Err(_) => Some(false),
+            Err(error) => {
+                diagnostics::warn(
+                    "delivery",
+                    "confirm_fence",
+                    error.diagnostic_kind(),
+                    DiagnosticContext {
+                        delivery_id: diagnostic_id(&claim.delivery_id),
+                        ..Default::default()
+                    },
+                );
+                Some(false)
+            }
         }
     } else {
         match tokio::time::timeout_at(
@@ -655,13 +806,20 @@ async fn release_unstarted_delivery<C: Clock>(
     config: DeliveryWorkerRuntimeConfig,
     claim: &DeliveryWorkClaim,
     worker_result: WorkerResult,
+    unpersisted_cause: Option<SafeErrorKind>,
 ) -> DeliveryTaskResult {
     let released =
         tokio::time::timeout(config.finalize_timeout, store.release(claim.clone(), clock.now()))
             .await;
     let worker_result = match released {
-        Ok(Ok(())) => worker_result,
+        Ok(Ok(())) => {
+            if let Some(kind) = unpersisted_cause {
+                diagnostics::unpersisted(kind);
+            }
+            worker_result
+        }
         _ => {
+            diagnostics::unpersisted(SafeErrorKind::REPOSITORY_FAILED);
             tracing::warn!(delivery_id = %claim.delivery_id, "delivery worker could not confirm unstarted claim release");
             WorkerResult::Error
         }

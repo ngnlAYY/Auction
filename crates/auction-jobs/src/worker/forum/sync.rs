@@ -3,6 +3,9 @@
 
 use std::sync::{Arc, OnceLock};
 
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_id,
+};
 use auction_application::{
     ApplicationError, Clock, ForumCredentialAvailability, ForumPostWriter, ForumPublishedThread,
     ForumPublisher, ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncStore,
@@ -13,6 +16,7 @@ use chrono::Duration;
 use url::Url;
 
 use super::{PersistentWorker, WorkerError};
+use crate::worker::diagnostics;
 
 #[path = "sync/layout.rs"]
 mod layout;
@@ -104,7 +108,15 @@ where
     C: Clock + 'static,
 {
     let lease_duration = Duration::from_std(lease_duration)
-        .map_err(|_| WorkerError::InvalidForumSyncConfiguration)?;
+        .map_err(|_| WorkerError::InvalidForumSyncConfiguration)
+        .inspect_err(|error| {
+            diagnostics::unpersisted_error(
+                "forum_sync",
+                "convert_lease_duration",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
+        })?;
     let mut processed = 0_u16;
     let mut first_error = None;
     while processed < runtime.batch_size && !worker.control.is_draining() {
@@ -116,18 +128,40 @@ where
                 })
                 .collect::<Vec<_>>();
         if available_worlds.is_empty() {
+            diagnostics::unpersisted_error(
+                "forum_sync",
+                "require_credential",
+                SafeErrorKind::CAPABILITY_UNAVAILABLE,
+                DiagnosticContext::default(),
+            );
             first_error.get_or_insert(WorkerError::ForumTopicProcessingFailed);
         }
         // 领取与远端处理共用领取前截止，数据库等待不能重新获得完整处理预算。
         let item_deadline = tokio::time::Instant::now()
             .checked_add(runtime.item_timeout)
-            .ok_or(WorkerError::InvalidForumSyncConfiguration)?;
+            .ok_or(WorkerError::InvalidForumSyncConfiguration)
+            .inspect_err(|error| {
+                diagnostics::unpersisted_error(
+                    "forum_sync",
+                    "check_item_deadline",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
+            })?;
         let now = worker.clock.now();
         let recovery_before = *runtime.startup_recovery_before.get_or_init(|| now);
         let startup_recovery_before = (!available_worlds.is_empty()).then_some(recovery_before);
         let lease_until = now
             .checked_add_signed(lease_duration)
-            .ok_or(WorkerError::InvalidForumSyncConfiguration)?;
+            .ok_or(WorkerError::InvalidForumSyncConfiguration)
+            .inspect_err(|error| {
+                diagnostics::unpersisted_error(
+                    "forum_sync",
+                    "check_lease_deadline",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
+            })?;
         // 只领取即将执行的一条；空世界集合仍初始化 live 投影，但不占租约或发起外呼。
         let claims = worker
             .write_lifecycle
@@ -146,10 +180,25 @@ where
         let Some(claims) = claims else {
             break;
         };
-        let mut claims = claims.map_err(|timeout| {
-            let _elapsed = timeout;
-            WorkerError::ForumTopicProcessingFailed
-        })??;
+        let mut claims = claims
+            .map_err(|timeout| {
+                diagnostics::unpersisted_error(
+                    "forum_sync",
+                    "claim_topic_timeout",
+                    diagnostics::timeout_kind(&timeout),
+                    DiagnosticContext::default(),
+                );
+                let _elapsed = timeout;
+                WorkerError::ForumTopicProcessingFailed
+            })?
+            .inspect_err(|error| {
+                diagnostics::unpersisted_error(
+                    "forum_sync",
+                    "claim_topic",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
+            })?;
         let Some(claim) = claims.pop() else {
             break;
         };
@@ -158,6 +207,7 @@ where
             break;
         }
         processed += 1;
+        let diagnostic_auction_id = claim.auction_id;
         if let Err(error) = process_claim(
             runtime,
             Arc::clone(&worker.clock),
@@ -166,7 +216,19 @@ where
             &worker.write_lifecycle,
         )
         .await
-            && first_error.is_none()
+        .inspect_err(|error| {
+            if !matches!(error, WorkerError::ForumTopicProcessingFailed) {
+                diagnostics::unpersisted_error(
+                    "forum_sync",
+                    "process_claim",
+                    error.diagnostic_kind(),
+                    DiagnosticContext {
+                        auction_id: diagnostic_id(&diagnostic_auction_id),
+                        ..Default::default()
+                    },
+                );
+            }
+        }) && first_error.is_none()
         {
             first_error = Some(error);
         }
@@ -174,6 +236,17 @@ where
     first_error.map_or(Ok(()), Err)
 }
 
+#[tracing::instrument(
+
+    skip_all,
+
+    fields(
+
+        auction_id = %claim.auction_id,
+
+    )
+
+)]
 async fn process_claim<C: Clock + 'static>(
     runtime: &ForumSyncRuntime,
     clock: Arc<C>,
@@ -621,7 +694,14 @@ pub(super) fn resolve_public_url(
     let Some(reference) = reference.filter(|value| !value.trim().is_empty()) else {
         return Ok(None);
     };
-    let base = Url::parse(base_url).map_err(|_| {
+    let base = Url::parse(base_url).map_err(|error| {
+        diagnostics::warn(
+            "forum_sync",
+            "parse_public_base_url",
+            error.diagnostic_kind(),
+            DiagnosticContext::default(),
+        );
+
         ApplicationError::Repository(auction_application::RepositoryError::Failed(
             "论坛公开地址配置无效".to_owned(),
         ))
@@ -635,7 +715,14 @@ pub(super) fn resolve_public_url(
             "论坛公开地址引用无效".to_owned(),
         )));
     }
-    let resolved = base.join(reference).map_err(|_| {
+    let resolved = base.join(reference).map_err(|error| {
+        diagnostics::warn(
+            "forum_sync",
+            "join_public_url",
+            error.diagnostic_kind(),
+            DiagnosticContext::default(),
+        );
+
         ApplicationError::Repository(auction_application::RepositoryError::Failed(
             "论坛公开地址引用无效".to_owned(),
         ))
