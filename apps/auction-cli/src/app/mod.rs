@@ -1,5 +1,6 @@
 //! 命令分派与稳定退出码；错误正文只包含已脱敏的上下文，调用方应依据退出码而非文本判断结果。
 
+use anyhow::Context;
 use clap::Parser;
 
 use crate::cli::{Cli, Command, ConfigCommand};
@@ -20,6 +21,13 @@ const EXIT_SERVICE: u8 = 4;
 /// 业务运维命令失败、被拒绝，或已提交但需要人工处理（如资金冻结）。
 const EXIT_OPERATION: u8 = 5;
 
+// 保留资金证据的两个闭集 target；普通 HTTP/SQL 日志继续关闭。
+const LOG_FILTER: &str = concat!(
+    "off,auction::panic=error,",
+    "auction_integrations::clients::mooglemail::gateway::internal::diagnostics=warn,",
+    "auction_integrations::clients::ehentai::client::profile=warn"
+);
+
 /// 解析参数并执行命令；显式 `--help`/`--version` 由 clap 以 0 退出，非法参数以 2 退出。
 pub(crate) async fn run() -> u8 {
     let cli = Cli::parse();
@@ -27,7 +35,10 @@ pub(crate) async fn run() -> u8 {
     match dispatch(cli).await {
         Ok(()) => EXIT_OK,
         Err(error) => {
-            eprintln!("auction-cli: {error:#}");
+            match auction_process::task_error_kind(error.as_ref()) {
+                Some(kind) => eprintln!("auction-cli: task failed: {kind}"),
+                None => eprintln!("auction-cli: {error:#}"),
+            }
             failure_code
         }
     }
@@ -51,6 +62,8 @@ fn failure_code(command: &Command) -> u8 {
 }
 
 async fn dispatch(cli: Cli) -> anyhow::Result<()> {
+    auction_observability::init_json_stderr(LOG_FILTER).context("初始化命令日志失败")?;
+    auction_observability::install_safe_panic_hook();
     let config_dir = ConfigDir::new(&cli.config_dir)?;
     match cli.command {
         Command::Config(ConfigCommand::Show { role }) => {

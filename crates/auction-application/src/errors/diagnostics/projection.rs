@@ -176,6 +176,9 @@ impl SafeErrorKind {
     /// 固定安全类别：`task_join`。
     pub const TASK_JOIN: Self = Self("task_join");
 
+    /// 固定安全类别：`task_panic`；只作观测，不代表持久化工作项计次。
+    pub const TASK_PANIC: Self = Self("task_panic");
+
     /// 固定安全类别：`timeout`。
     pub const TIMEOUT: Self = Self("timeout");
 
@@ -242,6 +245,7 @@ impl SafeErrorKind {
             "session_error" => Self::SESSION_ERROR,
             "settlement_not_found" => Self::SETTLEMENT_NOT_FOUND,
             "task_join" => Self::TASK_JOIN,
+            "task_panic" => Self::TASK_PANIC,
             "timeout" => Self::TIMEOUT,
             "transaction_policy_invalid" => Self::TRANSACTION_POLICY_INVALID,
             _ => Self::OTHER,

@@ -8,7 +8,25 @@
 
 ## 日志
 
-`init_with_config` 安装 JSON 格式的 `tracing-subscriber`（关闭 ANSI），过滤器取公共配置的 `log_filter`，省略时为 `info,<服务名>=debug`。`init_json_stderr` 只供 `auction-cli` 在资金证据阶段输出闭集诊断日志。日志不得包含连接串、Cookie、密钥、登录 key 或邮件正文；各 owner 只记录安全分类与标识。
+`init_with_config` 安装 JSON 格式的 `tracing-subscriber`（关闭 ANSI），
+过滤器取公共配置的 `log_filter`，省略时为 `info,<服务名>=debug`。
+`init_json_stderr` 供 CLI、server 父进程和 Admin 首次设置使用。
+CLI 保留资金证据的两个闭集诊断 target，并开启安全 panic 日志；
+server 父进程和首次设置只开启安全 panic 日志，不启用 OTLP。
+日志不得包含连接串、Cookie、密钥、登录 key 或邮件正文。
+
+### 原生 panic hook
+
+五个原生装配根在日志初始化后调用 `install_safe_panic_hook`。
+同一进程只安装一次，替换默认 hook，不再次调用可能泄漏负载的旧 hook；
+不捕获 panic，不改变 unwind、abort 或原有退出码。
+结构化 ERROR target 为 `auction::panic`，事件不继承父 span。
+字段只有 `thread_name`、源码位置 `file`/`line`/`column` 和安全 `payload`。
+仅接受 `&'static str` 类型的 payload；`String` 和其他负载统一写为
+`<non-static panic payload redacted>`，不执行其 Display 或 Debug。
+subscriber 未就绪时仅将同样字段写到 stderr，写入失败不触发二次 panic。
+各装配根输出 join 错误时只保留 `panic`、`cancelled` 或 `other`；
+顶层 source 链含 JoinError 时不格式化原错误链，返回签名和退出路径不变。
 
 ### 重复错误去重
 
@@ -45,6 +63,7 @@ I-A 新增 jobs/application 的 `auction::diagnostics` 诊断门，复用 `RateL
 | `auction_worker_batch_items_total`、`auction_worker_batch_capacity_total`、`auction_worker_batch_saturated_total` | 批次利用率与饱和次数 |
 | `auction_worker_retry_attempts_total`、`auction_worker_retry_mode_bound` | 重试次数与重试模式 |
 | `auction_worker_unpersisted_error_total` | 未确认对应持久化失败、退避或人工处置的错误；见[口径](#未持久化错误) |
+| `auction_worker_task_panics_total{loop}` | 现有工作项 join 收口观察到的 panic |
 | `auction_postgres_pool_*` | PostgreSQL 连接池大小、空闲、获取次数与等待时长、空池等待与取消次数 |
 | `auction_tracing_*` | tracing 是否启用、导出失败/丢弃 span、最近成功/失败时间、是否降级 |
 | `auction_audit_write_failures_total{class,sqlstate_class,kind}` | 原始审计 SQL 失败尝试累计，包含回滚后重试成功的尝试；关闭 exporter 不影响底层计数 |
@@ -114,6 +133,22 @@ Worker 的 `ProcessMetrics::sent_baseline` 注入应用层窄观测端口；四�
 
 Read Mail 日志的 `read_observed` 始终是完整列表数量；观察降频只改变采样节奏，失败不输出部分数量。配置与回退见[配置参考](../../ops/config/README.md#mooglemail-收件与维护)。
 
+### 工作项子任务 panic
+
+`auction_worker_task_panics_total{loop}` 使用全部 15 个 `WorkerLoop` label，
+启用指标时预置零值；关闭指标时使用 no-op recorder。
+仅生命周期、结算、慢速代理、履约、恢复 action 和 delivery 叶子 join 增加。
+生命周期、结算、慢速代理归 `auction`；其余归各自循环。
+同一 panic 在日志过滤、去重前增加一次，并产生固定 `item_panic` 诊断，
+安全类别为 `SafeErrorKind::TASK_PANIC`（`task_panic`）。
+正常取消不增加该指标，循环本身 panic 也不冒充工作项子任务 panic。
+
+邮件、论坛、PM、告警叶子没有新增 catch_unwind；
+它们直接执行时的 panic 仍退出常驻任务并触发 Worker 排空。
+这是进程内观测计数，不是持久化工作项尝试次数；
+计次、封顶与人工阻断尚未实现，W13.3b 待用户决定。
+原合并结果、领取、重试和循环退出均不变。
+
 ### 未持久化错误
 
 `auction_worker_unpersisted_error_total{loop,kind}` 统计
@@ -125,6 +160,8 @@ loop 沿用 `WorkerLoop` 闭集；PM 先归入 forum。
 邮件独立维护/观察采用对应阶段 label，旧 join 路径采用原邮件 owner。
 kind 来自 ApplicationError、InternalEvidenceError、FundingError 的 safe_kind 闭集，
 加 timeout、task_join、lease_expired、configuration_invalid、other；未知类别只生成 other。
+子任务 panic 的原 `task_join` 未持久化计数保留，
+新增 `task_panic` 诊断不带 Unpersisted 标记，避免重复累计或改分类。
 固定类别使用 `SafeErrorKind` 关联常量，既有 `safe_kind()` 字符串才经 `from_label` 映射。
 UUID、失败码、日志 kind/phase、正文和远端返回值不得进入 label。
 关闭 metrics 时不注册 collector，no-op recorder 不改变处理结果。

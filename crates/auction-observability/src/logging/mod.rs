@@ -2,6 +2,9 @@
 
 mod diagnostics;
 pub use diagnostics::DiagnosticLogWindows;
+mod panic;
+pub(crate) use panic::PanicSafeJson;
+pub use panic::install_safe_panic_hook;
 
 use std::time::Duration;
 

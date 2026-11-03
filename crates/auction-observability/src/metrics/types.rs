@@ -175,6 +175,25 @@ pub enum WorkerLoop {
 }
 
 impl WorkerLoop {
+    /// 初始化固定循环的零值序列，不接收运行时 label。
+    pub(super) const ALL: [Self; 15] = [
+        Self::MailMain,
+        Self::MailIsekai,
+        Self::MailMaintenanceMain,
+        Self::MailMaintenanceIsekai,
+        Self::MailReadObservationMain,
+        Self::MailReadObservationIsekai,
+        Self::Delivery,
+        Self::Auction,
+        Self::AuctionFulfillment,
+        Self::AuctionRecovery,
+        Self::Forum,
+        Self::Realtime,
+        Self::OperationsAlertScan,
+        Self::OperationsAlertDispatch,
+        Self::OperationsAlertReconcile,
+    ];
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::MailMain => "mail-main",
@@ -235,6 +254,9 @@ impl WorkerRetryKind {
 /// Worker crate 只依赖这组窄操作，不知道 Prometheus 注册表和 exposition 格式；关闭指标
 /// 时使用同一接口的 no-op 实现，避免在业务循环中散落条件分支。
 pub trait WorkerRecorder: Send + Sync {
+    /// 现有工作项子任务在 join 收口时观察到的 panic；不写入持久尝试次数。
+    fn observe_task_panic(&self, loop_kind: WorkerLoop);
+
     /// 没有确认对应持久失败、退避或人工处置的错误；不接收动态 label。
     fn observe_unpersisted_error(&self, loop_kind: WorkerLoop, kind: SafeErrorKind);
 
@@ -254,6 +276,8 @@ pub trait WorkerRecorder: Send + Sync {
 struct NoopWorkerRecorder;
 
 impl WorkerRecorder for NoopWorkerRecorder {
+    fn observe_task_panic(&self, _loop_kind: WorkerLoop) {}
+
     fn observe_unpersisted_error(&self, _loop_kind: WorkerLoop, _kind: SafeErrorKind) {}
 
     fn bind_retry_mode(&self, _loop_kind: WorkerLoop, _retry_kind: WorkerRetryKind) {}

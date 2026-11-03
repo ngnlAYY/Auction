@@ -2,6 +2,8 @@
 
 mod drain;
 pub use drain::{DrainActivity, DrainActivityObserver, DrainCoordinator};
+mod task_error;
+pub use task_error::{join_error_kind, task_error_kind};
 
 use std::{fmt, future::Future, io, time::Duration};
 

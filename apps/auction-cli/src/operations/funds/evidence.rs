@@ -25,12 +25,6 @@ pub(super) async fn build(
     config: &AppConfig,
     store: Arc<DatabaseStore>,
 ) -> anyhow::Result<Arc<dyn SettlementInternalEvidenceReader>> {
-    // 只输出两个闭集诊断 target 的安全阶段日志；其他 HTTP/SQL 日志一律关闭。
-    auction_observability::init_json_stderr(concat!(
-        "off,auction_integrations::clients::mooglemail::gateway::internal::diagnostics=warn,",
-        "auction_integrations::clients::ehentai::client::profile=warn"
-    ))
-    .context("初始化证据阶段日志失败")?;
     if !config.worker.forum.enabled {
         anyhow::bail!("联合身份读取要求 Worker 启用论坛读取能力（[worker.forum].enabled）");
     }

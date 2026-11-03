@@ -4,6 +4,10 @@
 
 原生进程与首次设置服务共用的生命周期原语，只依赖 tokio。
 
+`join_error_kind` 只投影 `panic`、`cancelled`、`other`；
+`task_error_kind` 在顶层输出前只读检查 source 链是否含 JoinError。
+两者均不格式化负载，不改变 TaskGuard 的返回类型、取消或排空行为。
+
 | 接口 | 说明 |
 | --- | --- |
 | `TerminationSignals` | 在装配依赖之前订阅 SIGINT 与 SIGTERM，订阅失败即阻断启动；可连续 `recv`，用于识别“排空期间的第二次信号” |

@@ -170,6 +170,8 @@ lto = "fat"
 codegen-units = 1
 # 可选：保留 Tokio 任务 panic 隔离和 Drop/drain 语义，不为体积改成进程 abort。
 panic = "unwind"
+# 可选：整数溢出失败关闭；回退时单独恢复本声明，并重建原生与 WASM 制品。
+overflow-checks = true
 # 可选：发布禁用增量编译，固定优化条件。
 incremental = false
 
@@ -178,8 +180,8 @@ incremental = false
 inherits = "release"
 # 可选：以下载、解析体积优先，不宣称浏览器计算吞吐最优。
 opt-level = "z"
-# LTO、代码生成单元与增量策略继承 release，不重复声明。
-# 可选：CSR WASM 不依赖后端 panic 展开语义。
+# LTO、代码生成单元、增量策略与开启的溢出检查继承 release，不重复声明。
+# 可选：浏览器保持 abort；install_panic_hook 在 trap 前展示静态错误横幅。
 panic = "abort"
 
 [workspace.lints.rust]

@@ -287,6 +287,7 @@ fn merge_delivery_task_result(
             merge_worker_result(delivery_result, result.worker_result);
         }
         Err(error) => {
+            diagnostics::observe_task_panic("delivery", &error);
             diagnostics::error(
                 "delivery",
                 "item_join",

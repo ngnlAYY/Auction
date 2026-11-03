@@ -357,6 +357,7 @@ async fn merge_tasks(
         match result {
             Ok(item_result) => merge_worker_result(phase_result, item_result),
             Err(error) => {
+                diagnostics::observe_task_panic(kind, &error);
                 diagnostics::error(
                     kind,
                     "item_join",

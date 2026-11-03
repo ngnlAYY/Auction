@@ -20,6 +20,8 @@ use opentelemetry_sdk::{
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
+use crate::logging::PanicSafeJson;
+
 use super::{
     config::{InitError, ShutdownError, TracingConfig},
     health::TracingHealthState,
@@ -146,7 +148,7 @@ pub fn init_with_config(
         }
         let subscriber = tracing_subscriber::registry()
             .with(filter)
-            .with(tracing_subscriber::fmt::layer().json());
+            .with(tracing_subscriber::fmt::layer().json().event_format(PanicSafeJson));
         subscriber.try_init().map_err(|error| InitError { message: error.to_string() })?;
         return Ok(TracingRuntime {
             provider: None,
@@ -162,7 +164,7 @@ pub fn init_with_config(
     let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
     let subscriber = tracing_subscriber::registry()
         .with(filter)
-        .with(tracing_subscriber::fmt::layer().json())
+        .with(tracing_subscriber::fmt::layer().json().event_format(PanicSafeJson))
         .with(telemetry_layer);
     subscriber.try_init().map_err(|error| InitError { message: error.to_string() })?;
 

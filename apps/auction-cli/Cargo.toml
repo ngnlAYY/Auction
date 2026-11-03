@@ -13,7 +13,8 @@ auction-config.workspace = true
 auction-contracts = { workspace = true, optional = true }
 auction-domain = { workspace = true, optional = true }
 auction-integrations = { workspace = true, optional = true }
-auction-observability = { workspace = true, optional = true }
+auction-observability.workspace = true
+auction-process.workspace = true
 auction-storage.workspace = true
 chrono = { workspace = true, optional = true }
 clap.workspace = true
@@ -37,7 +38,6 @@ postgres = [
     "dep:auction-domain",
     "dep:auction-integrations",
     "auction-integrations/backup",
-    "dep:auction-observability",
     "dep:chrono",
     "dep:sha2",
     "dep:url",

@@ -68,7 +68,7 @@ use auction_observability::{
     ProcessRole, ServiceName,
 };
 use auction_observability::{ProcessMetrics, TracingConfig, TracingHealthReader, TracingRuntime};
-use auction_process::{TaskGuard, TerminationSignals};
+use auction_process::{TaskGuard, TerminationSignals, join_error_kind};
 #[cfg(feature = "postgres")]
 use auction_storage::{
     DatabaseAdminMailCommands, DatabaseAuctionLifecycleCommands, DatabaseBackend,
@@ -132,6 +132,7 @@ async fn run_config(config: AppConfig) -> anyhow::Result<()> {
         config.tracing_headers(),
     )
     .context("initialize tracing")?;
+    auction_observability::install_safe_panic_hook();
 
     let mut forced = false;
     let result = run_service(&config, &telemetry, &mut signals, &mut forced).await;
@@ -243,7 +244,10 @@ async fn shutdown_tracing(telemetry: TracingRuntime, signals: &mut TerminationSi
     match result {
         Ok(Ok(())) => {}
         Ok(Err(error)) => tracing::warn!(error = %error, "worker tracing shutdown failed"),
-        Err(error) => tracing::warn!(error = %error, "worker tracing shutdown task failed"),
+        Err(error) => {
+            let kind = join_error_kind(&error);
+            tracing::warn!(kind, "worker tracing shutdown task failed");
+        }
     }
 }
 

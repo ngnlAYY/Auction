@@ -11,6 +11,7 @@ ignored = ["reqwest"]
 
 [dependencies]
 auction-application.workspace = true
+auction-process.workspace = true
 chrono.workspace = true
 opentelemetry.workspace = true
 opentelemetry-otlp.workspace = true

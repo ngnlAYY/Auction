@@ -12,6 +12,7 @@ auction-admin-api = { path = "../auction-admin-api", default-features = false }
 auction-worker = { path = "../auction-worker", default-features = false }
 auction-config.workspace = true
 auction-application.workspace = true
+auction-observability.workspace = true
 auction-process.workspace = true
 auction-setup.workspace = true
 auction-storage.workspace = true
