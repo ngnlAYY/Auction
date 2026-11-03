@@ -3,7 +3,9 @@
 use auction_observability::{HealthError, Heartbeat, HeartbeatCommand, TracingHealth};
 
 use super::super::PostgresStore;
-use super::mapping::{parse_role, parse_service, parse_status, parse_tracing, storage_error};
+use super::mapping::{
+    parse_role, parse_service, parse_status, parse_tracing, storage_error, storage_error_from,
+};
 
 pub(super) async fn publish_postgres(
     store: &PostgresStore,
@@ -80,7 +82,7 @@ pub(super) async fn publish_postgres(
     .bind(Json(&command.details))
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("写入 PostgreSQL 服务心跳失败"))?;
+    .map_err(|error| storage_error_from(error, "写入 PostgreSQL 服务心跳失败"))?;
 
     if returned.is_some() { Ok(()) } else { Err(HealthError::StaleObservation) }
 }
@@ -99,69 +101,72 @@ pub(super) async fn list_postgres(store: &PostgresStore) -> Result<Vec<Heartbeat
     )
     .fetch_all(store.pool())
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 服务心跳失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 服务心跳失败"))?;
 
     rows.into_iter()
         .map(|row| {
             let service_name = parse_service(
-                row.try_get("service_name").map_err(|_| storage_error("读取服务心跳名称失败"))?,
+                row.try_get("service_name")
+                    .map_err(|error| storage_error_from(error, "读取服务心跳名称失败"))?,
             )?;
             let process_role = parse_role(
-                row.try_get("process_role").map_err(|_| storage_error("读取服务心跳职责失败"))?,
+                row.try_get("process_role")
+                    .map_err(|error| storage_error_from(error, "读取服务心跳职责失败"))?,
             )?;
             let status = parse_status(
-                row.try_get("status").map_err(|_| storage_error("读取服务心跳状态失败"))?,
+                row.try_get("status")
+                    .map_err(|error| storage_error_from(error, "读取服务心跳状态失败"))?,
             )?;
             let tracing = TracingHealth {
                 status: parse_tracing(
                     row.try_get("tracing_status")
-                        .map_err(|_| storage_error("读取 tracing 状态失败"))?,
+                        .map_err(|error| storage_error_from(error, "读取 tracing 状态失败"))?,
                 )?,
                 dropped_span_count: row
                     .try_get("tracing_dropped_span_count")
-                    .map_err(|_| storage_error("读取 tracing 丢弃计数失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 tracing 丢弃计数失败"))?,
                 export_failure_count: row
                     .try_get("tracing_export_failure_count")
-                    .map_err(|_| storage_error("读取 tracing 失败计数失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 tracing 失败计数失败"))?,
                 last_success_at: row
                     .try_get("tracing_last_success_at")
-                    .map_err(|_| storage_error("读取 tracing 成功时间失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 tracing 成功时间失败"))?,
                 last_failure_at: row
                     .try_get("tracing_last_failure_at")
-                    .map_err(|_| storage_error("读取 tracing 失败时间失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 tracing 失败时间失败"))?,
                 last_error_code: row
                     .try_get("tracing_last_error_code")
-                    .map_err(|_| storage_error("读取 tracing 错误码失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取 tracing 错误码失败"))?,
             };
             let heartbeat = Heartbeat {
                 service_name,
                 process_role,
                 instance_id: row
                     .try_get("instance_id")
-                    .map_err(|_| storage_error("读取服务心跳实例失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取服务心跳实例失败"))?,
                 version: row
                     .try_get("version")
-                    .map_err(|_| storage_error("读取服务心跳版本失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取服务心跳版本失败"))?,
                 started_at: row
                     .try_get("started_at")
-                    .map_err(|_| storage_error("读取服务心跳启动时间失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取服务心跳启动时间失败"))?,
                 status,
                 readiness: row
                     .try_get("readiness")
-                    .map_err(|_| storage_error("读取服务心跳 readiness 失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取服务心跳 readiness 失败"))?,
                 audit_failure_count: row
                     .try_get("audit_failure_count")
-                    .map_err(|_| storage_error("读取服务心跳审计计数失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取服务心跳审计计数失败"))?,
                 tracing,
                 observation_sequence: row
                     .try_get("observation_sequence")
-                    .map_err(|_| storage_error("读取服务心跳序列失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取服务心跳序列失败"))?,
                 observed_at: row
                     .try_get("observed_at")
-                    .map_err(|_| storage_error("读取服务心跳观察时间失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取服务心跳观察时间失败"))?,
                 expires_at: row
                     .try_get("expires_at")
-                    .map_err(|_| storage_error("读取服务心跳过期时间失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取服务心跳过期时间失败"))?,
             };
             heartbeat
                 .validate()

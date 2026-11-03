@@ -1,5 +1,8 @@
 //! 从 PostgreSQL 结算事实链读取报告；摘要与 lot 明细保持同一快照，不重算历史结果。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, ApplicationFuture, SettlementReport, SettlementReportReader,
 };
@@ -63,7 +66,7 @@ impl PostgresReportError {
 
     fn into_application(self) -> ApplicationError {
         match self {
-            Self::Database { safe_message, .. } => storage_error(safe_message),
+            Self::Database { source, safe_message } => storage_error_from(source, safe_message),
             Self::Application(error) => error,
         }
     }
@@ -142,40 +145,41 @@ async fn postgres_report_once(
         return Ok(None);
     };
 
-    let stored_auction_id: Uuid =
-        row.try_get("auction_id").map_err(|_| storage_error("读取结算报告拍卖标识失败"))?;
+    let stored_auction_id: Uuid = row
+        .try_get("auction_id")
+        .map_err(|error| storage_error_from(error, "读取结算报告拍卖标识失败"))?;
     if stored_auction_id != auction_id.as_uuid() {
         return Err(storage_error("结算报告拍卖标识与请求不一致").into());
     }
 
     let settlement_id: Option<Uuid> = row
         .try_get("settlement_auction_id")
-        .map_err(|_| storage_error("读取结算报告结算标识失败"))?;
+        .map_err(|error| storage_error_from(error, "读取结算报告结算标识失败"))?;
     let settlement = match settlement_id {
         None => None,
         Some(value) if value == stored_auction_id => {
             let settled_at: DateTime<Utc> = row
                 .try_get("settlement_settled_at")
-                .map_err(|_| storage_error("读取结算报告完成时间失败"))?;
+                .map_err(|error| storage_error_from(error, "读取结算报告完成时间失败"))?;
             Some(SettlementSummary {
                 opening_balance: row
                     .try_get("opening_pool_balance")
-                    .map_err(|_| storage_error("读取结算报告期初余额失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取结算报告期初余额失败"))?,
                 tax_income: row
                     .try_get("tax_total")
-                    .map_err(|_| storage_error("读取结算报告税收失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取结算报告税收失败"))?,
                 discount_demand: row
                     .try_get("discount_demand")
-                    .map_err(|_| storage_error("读取结算报告折扣需求失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取结算报告折扣需求失败"))?,
                 compensation_out: row
                     .try_get("compensation_total")
-                    .map_err(|_| storage_error("读取结算报告补偿支出失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取结算报告补偿支出失败"))?,
                 closing_balance: row
                     .try_get("closing_pool_balance")
-                    .map_err(|_| storage_error("读取结算报告期末余额失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取结算报告期末余额失败"))?,
                 movement_count: row
                     .try_get("movement_count")
-                    .map_err(|_| storage_error("读取结算报告账本笔数失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取结算报告账本笔数失败"))?,
                 settled_at,
             })
         }
@@ -233,33 +237,36 @@ async fn postgres_report_once(
 
         rows.into_iter()
             .map(|row| {
-                let lot_id: Uuid =
-                    row.try_get("id").map_err(|_| storage_error("读取结算 lot 标识失败"))?;
+                let lot_id: Uuid = row
+                    .try_get("id")
+                    .map_err(|error| storage_error_from(error, "读取结算 lot 标识失败"))?;
                 let settlement_lot_id: Option<Uuid> = row
                     .try_get("settlement_lot_id")
-                    .map_err(|_| storage_error("读取结算 lot 结算标识失败"))?;
+                    .map_err(|error| storage_error_from(error, "读取结算 lot 结算标识失败"))?;
                 if settlement_lot_id != Some(lot_id) {
                     return Err(storage_error("结算报告缺少 lot 结算事实"));
                 }
                 let buyer_amount: Option<i64> = row
                     .try_get("buyer_amount")
-                    .map_err(|_| storage_error("读取结算买方金额失败"))?;
+                    .map_err(|error| storage_error_from(error, "读取结算买方金额失败"))?;
                 let listed_price: Option<i64> = row
                     .try_get("listed_price")
-                    .map_err(|_| storage_error("读取结算挂牌金额失败"))?;
+                    .map_err(|error| storage_error_from(error, "读取结算挂牌金额失败"))?;
                 let seller_amount: Option<i64> = row
                     .try_get("seller_amount")
-                    .map_err(|_| storage_error("读取结算卖方金额失败"))?;
-                let tax_amount: Option<i64> =
-                    row.try_get("tax_amount").map_err(|_| storage_error("读取结算税额失败"))?;
+                    .map_err(|error| storage_error_from(error, "读取结算卖方金额失败"))?;
+                let tax_amount: Option<i64> = row
+                    .try_get("tax_amount")
+                    .map_err(|error| storage_error_from(error, "读取结算税额失败"))?;
                 let compensation_amount: Option<i64> = row
                     .try_get("compensation_amount")
-                    .map_err(|_| storage_error("读取结算补偿金额失败"))?;
-                let hold_ppm: Option<i64> =
-                    row.try_get("hold_ppm").map_err(|_| storage_error("读取结算持有比例失败"))?;
+                    .map_err(|error| storage_error_from(error, "读取结算补偿金额失败"))?;
+                let hold_ppm: Option<i64> = row
+                    .try_get("hold_ppm")
+                    .map_err(|error| storage_error_from(error, "读取结算持有比例失败"))?;
                 let adjustment_ppm: Option<i64> = row
                     .try_get("adjustment_ppm")
-                    .map_err(|_| storage_error("读取结算调整比例失败"))?;
+                    .map_err(|error| storage_error_from(error, "读取结算调整比例失败"))?;
                 let (
                     Some(listed_price),
                     Some(buyer_amount),
@@ -286,35 +293,40 @@ async fn postgres_report_once(
                     .map_err(|_| storage_error("结算报告调整比例超出支持范围"))?;
                 let leader_held_nanos: i64 = row
                     .try_get("leader_held_nanos")
-                    .map_err(|_| storage_error("读取结算报告累计领先时长失败"))?;
+                    .map_err(|error| storage_error_from(error, "读取结算报告累计领先时长失败"))?;
                 if leader_held_nanos < 0 {
                     return Err(storage_error("结算报告累计领先时长无效"));
                 }
                 let final_price: i64 = row
                     .try_get("final_price")
-                    .map_err(|_| storage_error("读取结算成交金额失败"))?;
-                let adjustment_metadata: serde_json::Value = row
-                    .try_get("adjustment_metadata")
-                    .map_err(|_| storage_error("读取结算 adjustment metadata 失败"))?;
+                    .map_err(|error| storage_error_from(error, "读取结算成交金额失败"))?;
+                let adjustment_metadata: serde_json::Value =
+                    row.try_get("adjustment_metadata").map_err(|error| {
+                        storage_error_from(error, "读取结算 adjustment metadata 失败")
+                    })?;
                 Ok(SettlementLotReport {
                     id: auction_domain::LotId::from_uuid(lot_id),
                     lot_number: row
                         .try_get("lot_number")
-                        .map_err(|_| storage_error("读取结算 lot 序号失败"))?,
+                        .map_err(|error| storage_error_from(error, "读取结算 lot 序号失败"))?,
                     status: row
                         .try_get("status")
-                        .map_err(|_| storage_error("读取结算 lot 状态失败"))?,
+                        .map_err(|error| storage_error_from(error, "读取结算 lot 状态失败"))?,
                     equipment_name: row
                         .try_get("equipment_name")
-                        .map_err(|_| storage_error("读取结算装备名称失败"))?,
+                        .map_err(|error| storage_error_from(error, "读取结算装备名称失败"))?,
                     equipment_category: row
                         .try_get("equipment_category")
-                        .map_err(|_| storage_error("读取结算装备分类失败"))?,
+                        .map_err(|error| storage_error_from(error, "读取结算装备分类失败"))?,
                     external_equipment_id: row
                         .try_get("external_equipment_id")
-                        .map_err(|_| storage_error("读取结算装备外部标识失败"))?,
-                    seller: row.try_get("seller").map_err(|_| storage_error("读取结算卖方失败"))?,
-                    winner: row.try_get("winner").map_err(|_| storage_error("读取结算买方失败"))?,
+                        .map_err(|error| storage_error_from(error, "读取结算装备外部标识失败"))?,
+                    seller: row
+                        .try_get("seller")
+                        .map_err(|error| storage_error_from(error, "读取结算卖方失败"))?,
+                    winner: row
+                        .try_get("winner")
+                        .map_err(|error| storage_error_from(error, "读取结算买方失败"))?,
                     final_price,
                     listed_price,
                     buyer_amount,
@@ -340,57 +352,63 @@ async fn postgres_report_once(
     Ok(Some(SettlementReport {
         auction: SettlementAuctionSnapshot {
             id: auction_id,
-            world_id: row.try_get("world_id").map_err(|_| storage_error("读取结算报告世界失败"))?,
-            sequence: row.try_get("sequence").map_err(|_| storage_error("读取结算报告序号失败"))?,
-            status: row.try_get("status").map_err(|_| storage_error("读取结算报告状态失败"))?,
+            world_id: row
+                .try_get("world_id")
+                .map_err(|error| storage_error_from(error, "读取结算报告世界失败"))?,
+            sequence: row
+                .try_get("sequence")
+                .map_err(|error| storage_error_from(error, "读取结算报告序号失败"))?,
+            status: row
+                .try_get("status")
+                .map_err(|error| storage_error_from(error, "读取结算报告状态失败"))?,
             preview_scheduled_at: row
                 .try_get("preview_scheduled_at")
-                .map_err(|_| storage_error("读取结算报告预览时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告预览时间失败"))?,
             scheduled_open_at: row
                 .try_get("scheduled_open_at")
-                .map_err(|_| storage_error("读取结算报告开拍时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告开拍时间失败"))?,
             preview_opened_at: row
                 .try_get("preview_opened_at")
-                .map_err(|_| storage_error("读取结算报告预览开放时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告预览开放时间失败"))?,
             preview_manual_open: row
                 .try_get("preview_manual_open")
-                .map_err(|_| storage_error("读取结算报告预览方式失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告预览方式失败"))?,
             preview_revision: row
                 .try_get("preview_revision")
-                .map_err(|_| storage_error("读取结算报告预览版本失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告预览版本失败"))?,
             opened_at: row
                 .try_get("opened_at")
-                .map_err(|_| storage_error("读取结算报告开放时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告开放时间失败"))?,
             final_phase_at: row
                 .try_get("final_phase_at")
-                .map_err(|_| storage_error("读取结算报告终阶段时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告终阶段时间失败"))?,
             settled_at: row
                 .try_get("settled_at")
-                .map_err(|_| storage_error("读取结算报告拍卖结算时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告拍卖结算时间失败"))?,
             cancelled_at: row
                 .try_get("cancelled_at")
-                .map_err(|_| storage_error("读取结算报告取消时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告取消时间失败"))?,
             cancelled_reason: row
                 .try_get("cancelled_reason")
-                .map_err(|_| storage_error("读取结算报告取消原因失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告取消原因失败"))?,
             cancelled_by: row
                 .try_get("cancelled_by")
-                .map_err(|_| storage_error("读取结算报告取消人失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告取消人失败"))?,
             state_version: row
                 .try_get("state_version")
-                .map_err(|_| storage_error("读取结算报告状态版本失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告状态版本失败"))?,
             scheduled_end_at: row
                 .try_get("scheduled_end_at")
-                .map_err(|_| storage_error("读取结算报告名义结束时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告名义结束时间失败"))?,
             effective_end_at: row
                 .try_get("effective_end_at")
-                .map_err(|_| storage_error("读取结算报告有效结束时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告有效结束时间失败"))?,
             created_at: row
                 .try_get("created_at")
-                .map_err(|_| storage_error("读取结算报告创建时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告创建时间失败"))?,
             updated_at: row
                 .try_get("updated_at")
-                .map_err(|_| storage_error("读取结算报告更新时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取结算报告更新时间失败"))?,
         },
         settlement,
         lots,

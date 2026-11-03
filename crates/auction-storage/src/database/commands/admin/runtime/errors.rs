@@ -17,12 +17,15 @@ pub(super) fn command_corrupt(message: String) -> ApplicationError {
 
 #[cfg(feature = "postgres")]
 pub(super) fn map_command_sql_error(error: sqlx::Error) -> ApplicationError {
-    match error {
+    match &error {
         sqlx::Error::Database(database_error)
             if database_error.code().as_deref() == Some("23505") =>
         {
             AdminRuntimeCommandError::Conflict.into()
         }
-        _ => command_failed("PostgreSQL runtime 配置命令操作失败"),
+        _ => command_failed(&crate::database::sql_error_context(
+            &error,
+            "PostgreSQL runtime 配置命令操作失败",
+        )),
     }
 }

@@ -1,5 +1,8 @@
 //! Realtime Admin dashboard 的 lag 与 failure 水位快照。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeDashboardSnapshot,
     RealtimeFailureWater, RealtimeLagListRequest,
@@ -19,7 +22,7 @@ pub(super) async fn dashboard_snapshot_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启 realtime dashboard 快照失败"))?;
+        .map_err(|error| storage_error_from(error, "开启 realtime dashboard 快照失败"))?;
     let total_lag = total_lag_postgres(&mut transaction).await?;
     let lags = read_lag_entries_postgres(
         &mut transaction,
@@ -32,7 +35,10 @@ pub(super) async fn dashboard_snapshot_postgres(
     )
     .await?;
     let failure = failure_water_postgres(&mut transaction).await?;
-    transaction.commit().await.map_err(|_| storage_error("提交 realtime dashboard 快照失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 realtime dashboard 快照失败"))?;
     let snapshot = RealtimeDashboardSnapshot { observed_at: Utc::now(), total_lag, lags, failure };
     if snapshot.validate() {
         Ok(snapshot)
@@ -56,14 +62,15 @@ async fn total_lag_postgres(
     )
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL realtime 全量 lag 失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime 全量 lag 失败"))?;
     if !row
         .try_get::<bool, _>("valid")
-        .map_err(|_| storage_error("读取 realtime lag 有效性失败"))?
+        .map_err(|error| storage_error_from(error, "读取 realtime lag 有效性失败"))?
     {
         return Err(storage_error("PostgreSQL realtime lag 水位无效"));
     }
-    row.try_get("total_lag").map_err(|_| storage_error("读取 realtime 全量 lag 数值失败"))
+    row.try_get("total_lag")
+        .map_err(|error| storage_error_from(error, "读取 realtime 全量 lag 数值失败"))
 }
 
 #[cfg(feature = "postgres")]
@@ -85,15 +92,17 @@ async fn failure_water_postgres(
     )
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL realtime failure 水位失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime failure 水位失败"))?;
     let water = RealtimeFailureWater {
-        count: row.try_get("count").map_err(|_| storage_error("读取 realtime failure 数量失败"))?,
+        count: row
+            .try_get("count")
+            .map_err(|error| storage_error_from(error, "读取 realtime failure 数量失败"))?,
         oldest_at: row
             .try_get("oldest_at")
-            .map_err(|_| storage_error("读取 realtime failure 最早时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 realtime failure 最早时间失败"))?,
         latest_code: row
             .try_get("latest_code")
-            .map_err(|_| storage_error("读取 realtime failure 最新代码失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 realtime failure 最新代码失败"))?,
     };
     if water.validate() {
         Ok(water)

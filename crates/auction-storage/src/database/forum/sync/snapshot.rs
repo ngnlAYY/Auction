@@ -1,5 +1,8 @@
 //! 论坛主题同步快照的 PostgreSQL 一致性读取。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, ForumAuctionSnapshot, ForumCurrentBidSource, ForumLotSnapshot,
     ForumSyncClaim, PublicEquipment, PublicEquipmentLinkTarget,
@@ -24,7 +27,7 @@ pub(super) async fn load_snapshot_postgres(
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ")
         .await
-        .map_err(|_| storage_error("开启论坛同步快照事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启论坛同步快照事务失败"))?;
     let authorized = sqlx::query(
         "SELECT 1
          FROM public.auction_forum_sync AS sync
@@ -46,12 +49,15 @@ pub(super) async fn load_snapshot_postgres(
     .bind(claim.source_revision)
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取论坛同步快照租约失败"))?;
+    .map_err(|error| storage_error_from(error, "读取论坛同步快照租约失败"))?;
     if authorized.is_none() {
         return Err(storage_error("论坛同步快照租约已失效"));
     }
     let snapshot = read_snapshot(&mut transaction, claim.auction_id).await?;
-    transaction.commit().await.map_err(|_| storage_error("提交论坛同步快照事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交论坛同步快照事务失败"))?;
     if snapshot.auction_id != claim.auction_id
         || snapshot.state_version != claim.source_revision
         || snapshot.sequence <= 0
@@ -71,9 +77,12 @@ pub(super) async fn load_current_snapshot_postgres(
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ")
         .await
-        .map_err(|_| storage_error("开启论坛刷新快照事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启论坛刷新快照事务失败"))?;
     let snapshot = read_snapshot(&mut transaction, auction_id).await?;
-    transaction.commit().await.map_err(|_| storage_error("提交论坛刷新快照事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交论坛刷新快照事务失败"))?;
     if snapshot.auction_id != auction_id || snapshot.sequence <= 0 || snapshot.lots.is_empty() {
         return Err(storage_error("论坛刷新快照安全投影无效"));
     }
@@ -105,38 +114,42 @@ async fn read_snapshot(
     .bind(requested_auction_id.as_uuid())
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取论坛拍卖快照失败"))?;
+    .map_err(|error| storage_error_from(error, "读取论坛拍卖快照失败"))?;
     let Some(auction_row) = auction_row else {
         return Err(storage_error("论坛拍卖快照不存在"));
     };
-    let auction_id: Uuid =
-        auction_row.try_get("id").map_err(|_| storage_error("读取论坛快照拍卖标识失败"))?;
-    let world_id: String =
-        auction_row.try_get("world_id").map_err(|_| storage_error("读取论坛快照世界失败"))?;
+    let auction_id: Uuid = auction_row
+        .try_get("id")
+        .map_err(|error| storage_error_from(error, "读取论坛快照拍卖标识失败"))?;
+    let world_id: String = auction_row
+        .try_get("world_id")
+        .map_err(|error| storage_error_from(error, "读取论坛快照世界失败"))?;
     let world = parse_world(&world_id)?;
-    let sequence: i64 =
-        auction_row.try_get("sequence").map_err(|_| storage_error("读取论坛快照序号失败"))?;
+    let sequence: i64 = auction_row
+        .try_get("sequence")
+        .map_err(|error| storage_error_from(error, "读取论坛快照序号失败"))?;
     let state_version: i64 = auction_row
         .try_get("state_version")
-        .map_err(|_| storage_error("读取论坛快照状态版本失败"))?;
+        .map_err(|error| storage_error_from(error, "读取论坛快照状态版本失败"))?;
     let scheduled_open_at: DateTime<Utc> = auction_row
         .try_get("scheduled_open_at")
-        .map_err(|_| storage_error("读取论坛快照开启时间失败"))?;
+        .map_err(|error| storage_error_from(error, "读取论坛快照开启时间失败"))?;
     let opened_at: Option<DateTime<Utc>> = auction_row
         .try_get("opened_at")
-        .map_err(|_| storage_error("读取论坛快照实际开启时间失败"))?;
+        .map_err(|error| storage_error_from(error, "读取论坛快照实际开启时间失败"))?;
     let scheduled_end_at: Option<DateTime<Utc>> = auction_row
         .try_get("scheduled_end_at")
-        .map_err(|_| storage_error("读取论坛快照结束时间失败"))?;
+        .map_err(|error| storage_error_from(error, "读取论坛快照结束时间失败"))?;
 
-    let auction_status: String =
-        auction_row.try_get("auction_status").map_err(|_| storage_error("读取论坛拍卖状态失败"))?;
+    let auction_status: String = auction_row
+        .try_get("auction_status")
+        .map_err(|error| storage_error_from(error, "读取论坛拍卖状态失败"))?;
     let state = parse_auction_status(auction_status)
         .map_err(|_| storage_error("论坛拍卖状态不在闭集内"))?;
     let settled = state == AuctionStatus::Settled;
     let settled_auction_id: Option<Uuid> = auction_row
         .try_get("settled_auction_id")
-        .map_err(|_| storage_error("读取论坛结算汇总证明失败"))?;
+        .map_err(|error| storage_error_from(error, "读取论坛结算汇总证明失败"))?;
     if settled && settled_auction_id != Some(auction_id) {
         return Err(storage_error("已结算论坛快照缺少权威结算汇总"));
     }
@@ -204,51 +217,60 @@ async fn read_snapshot(
     .bind(settled)
     .fetch_all(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取论坛快照 lot 失败"))?;
+    .map_err(|error| storage_error_from(error, "读取论坛快照 lot 失败"))?;
     let mut lots = Vec::with_capacity(rows.len());
     for row in rows {
-        let lot_number: i32 =
-            row.try_get("lot_number").map_err(|_| storage_error("读取论坛快照 lot 序号失败"))?;
-        let lot_id: Uuid =
-            row.try_get("lot_id").map_err(|_| storage_error("读取论坛快照 lot 标识失败"))?;
-        let equipment_id: Uuid =
-            row.try_get("equipment_id").map_err(|_| storage_error("读取论坛快照装备标识失败"))?;
+        let lot_number: i32 = row
+            .try_get("lot_number")
+            .map_err(|error| storage_error_from(error, "读取论坛快照 lot 序号失败"))?;
+        let lot_id: Uuid = row
+            .try_get("lot_id")
+            .map_err(|error| storage_error_from(error, "读取论坛快照 lot 标识失败"))?;
+        let equipment_id: Uuid = row
+            .try_get("equipment_id")
+            .map_err(|error| storage_error_from(error, "读取论坛快照装备标识失败"))?;
         let external_equipment_id: String = row
             .try_get("external_equipment_id")
-            .map_err(|_| storage_error("读取论坛快照外部装备标识失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛快照外部装备标识失败"))?;
         let category: String = row
             .try_get("equipment_category")
-            .map_err(|_| storage_error("读取论坛快照装备分类失败"))?;
-        let start_price: i64 =
-            row.try_get("start_price").map_err(|_| storage_error("读取论坛快照起拍价失败"))?;
-        let current_price: Option<i64> =
-            row.try_get("current_price").map_err(|_| storage_error("读取论坛快照当前价失败"))?;
-        let seller_name: Option<String> =
-            row.try_get("seller_name").map_err(|_| storage_error("读取论坛快照卖家失败"))?;
-        let name: String =
-            row.try_get("equipment_name").map_err(|_| storage_error("读取论坛快照装备名称失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛快照装备分类失败"))?;
+        let start_price: i64 = row
+            .try_get("start_price")
+            .map_err(|error| storage_error_from(error, "读取论坛快照起拍价失败"))?;
+        let current_price: Option<i64> = row
+            .try_get("current_price")
+            .map_err(|error| storage_error_from(error, "读取论坛快照当前价失败"))?;
+        let seller_name: Option<String> = row
+            .try_get("seller_name")
+            .map_err(|error| storage_error_from(error, "读取论坛快照卖家失败"))?;
+        let name: String = row
+            .try_get("equipment_name")
+            .map_err(|error| storage_error_from(error, "读取论坛快照装备名称失败"))?;
         let attributes: sqlx::types::Json<serde_json::Value> = row
             .try_get("equipment_attributes")
-            .map_err(|_| storage_error("读取论坛快照装备属性失败"))?;
-        let status: String =
-            row.try_get("status").map_err(|_| storage_error("读取论坛快照 lot 状态失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛快照装备属性失败"))?;
+        let status: String = row
+            .try_get("status")
+            .map_err(|error| storage_error_from(error, "读取论坛快照 lot 状态失败"))?;
         let effective_end_at: Option<DateTime<Utc>> = row
             .try_get("effective_end_at")
-            .map_err(|_| storage_error("读取论坛快照 lot 结束时间失败"))?;
-        let leader_name: Option<String> =
-            row.try_get("leader_name").map_err(|_| storage_error("读取论坛快照竞价者失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛快照 lot 结束时间失败"))?;
+        let leader_name: Option<String> = row
+            .try_get("leader_name")
+            .map_err(|error| storage_error_from(error, "读取论坛快照竞价者失败"))?;
         let current_bid_mechanism: Option<String> = row
             .try_get("current_bid_mechanism")
-            .map_err(|_| storage_error("读取论坛快照竞价来源失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛快照竞价来源失败"))?;
         let current_bid_post_number: Option<i32> = row
             .try_get("current_bid_post_number")
-            .map_err(|_| storage_error("读取论坛快照竞价楼层失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛快照竞价楼层失败"))?;
         let current_bid_thread_id: Option<String> = row
             .try_get("current_bid_thread_id")
-            .map_err(|_| storage_error("读取论坛快照竞价主题失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛快照竞价主题失败"))?;
         let current_bid_post_id: Option<String> = row
             .try_get("current_bid_post_id")
-            .map_err(|_| storage_error("读取论坛快照竞价帖子失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛快照竞价帖子失败"))?;
         let current_bid_source = match current_bid_mechanism.as_deref() {
             Some("proxy") => Some(ForumCurrentBidSource::Proxy),
             Some("ordinary") => {
@@ -312,7 +334,7 @@ async fn read_snapshot(
     }
     let layout: String = auction_row
         .try_get("catalog_layout")
-        .map_err(|_| storage_error("读取论坛冻结目录布局失败"))?;
+        .map_err(|error| storage_error_from(error, "读取论坛冻结目录布局失败"))?;
     let snapshot = ForumAuctionSnapshot {
         catalog_layout: super::super::catalog::parse_layout(&layout)?,
         auction_id: AuctionId::from_uuid(auction_id),

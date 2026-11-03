@@ -1,5 +1,8 @@
 //! Operations alert 各 owner 水位的安全读取。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use super::super::*;
 
 pub(crate) async fn snapshot_postgres(
@@ -130,17 +133,19 @@ async fn delivery_snapshot(
     let row = sqlx::query(sqlx::AssertSqlSafe(QUERY.as_str()))
         .fetch_one(pool)
         .await
-        .map_err(|_| storage_error("读取 operations alert delivery 水位失败"))?;
-    let pending: i64 =
-        row.try_get("pending").map_err(|_| storage_error("读取 delivery 积压计数失败"))?;
-    let failed: i64 =
-        row.try_get("failed").map_err(|_| storage_error("读取 delivery 失败计数失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 operations alert delivery 水位失败"))?;
+    let pending: i64 = row
+        .try_get("pending")
+        .map_err(|error| storage_error_from(error, "读取 delivery 积压计数失败"))?;
+    let failed: i64 = row
+        .try_get("failed")
+        .map_err(|error| storage_error_from(error, "读取 delivery 失败计数失败"))?;
     let manual_reconcile: i64 = row
         .try_get("manual_reconcile")
-        .map_err(|_| storage_error("读取 delivery 人工对账计数失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 delivery 人工对账计数失败"))?;
     let returned_mail_manual_reconcile: i64 = row
         .try_get("returned_mail_manual_reconcile")
-        .map_err(|_| storage_error("读取 MoogleMail 退信人工对账计数失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 MoogleMail 退信人工对账计数失败"))?;
     Ok(OperationsAlertDeliverySnapshot {
         pending,
         failed,
@@ -149,21 +154,22 @@ async fn delivery_snapshot(
         oldest_pending_age_seconds: age_seconds(
             now,
             row.try_get("oldest_pending")
-                .map_err(|_| storage_error("读取 delivery 积压时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 delivery 积压时间失败"))?,
         ),
         oldest_manual_reconcile_age_seconds: age_seconds(
             now,
             row.try_get("oldest_manual")
-                .map_err(|_| storage_error("读取 delivery 人工对账时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 delivery 人工对账时间失败"))?,
         ),
         oldest_returned_mail_age_seconds: age_seconds(
             now,
-            row.try_get("oldest_returned_mail")
-                .map_err(|_| storage_error("读取 MoogleMail 退信人工对账时间失败"))?,
+            row.try_get("oldest_returned_mail").map_err(|error| {
+                storage_error_from(error, "读取 MoogleMail 退信人工对账时间失败")
+            })?,
         ),
         last_update_at: row
             .try_get("last_update")
-            .map_err(|_| storage_error("读取 delivery 更新时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 delivery 更新时间失败"))?,
     })
 }
 
@@ -199,17 +205,24 @@ async fn fulfillment_snapshot(
     )
     .fetch_one(pool)
     .await
-    .map_err(|_| storage_error("读取 operations alert 履约水位失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 operations alert 履约水位失败"))?;
     Ok(OperationsAlertFulfillmentSnapshot {
-        pending: row.try_get("pending").map_err(|_| storage_error("读取履约待处理计数失败"))?,
-        blocked: row.try_get("blocked").map_err(|_| storage_error("读取履约阻塞计数失败"))?,
-        failed: row.try_get("failed").map_err(|_| storage_error("读取履约失败计数失败"))?,
+        pending: row
+            .try_get("pending")
+            .map_err(|error| storage_error_from(error, "读取履约待处理计数失败"))?,
+        blocked: row
+            .try_get("blocked")
+            .map_err(|error| storage_error_from(error, "读取履约阻塞计数失败"))?,
+        failed: row
+            .try_get("failed")
+            .map_err(|error| storage_error_from(error, "读取履约失败计数失败"))?,
         manual_reconcile: row
             .try_get("manual_reconcile")
-            .map_err(|_| storage_error("读取履约人工对账计数失败"))?,
+            .map_err(|error| storage_error_from(error, "读取履约人工对账计数失败"))?,
         oldest_backlog_age_seconds: age_seconds(
             now,
-            row.try_get("oldest_backlog").map_err(|_| storage_error("读取履约积压时间失败"))?,
+            row.try_get("oldest_backlog")
+                .map_err(|error| storage_error_from(error, "读取履约积压时间失败"))?,
         ),
     })
 }
@@ -229,7 +242,7 @@ async fn recovery_snapshot(
     )
     .fetch_all(pool)
     .await
-    .map_err(|_| storage_error("读取 operations alert recovery 水位失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 operations alert recovery 水位失败"))?;
     let mut snapshot = OperationsAlertRecoverySnapshot {
         payment_overdue_count: 0,
         relist_pending_count: 0,
@@ -239,20 +252,21 @@ async fn recovery_snapshot(
         worlds: Vec::with_capacity(rows.len()),
     };
     for row in rows {
-        let world: String =
-            row.try_get("world_id").map_err(|_| storage_error("读取 recovery 世界失败"))?;
+        let world: String = row
+            .try_get("world_id")
+            .map_err(|error| storage_error_from(error, "读取 recovery 世界失败"))?;
         let payment_overdue_count: i64 = row
             .try_get("payment_overdue_count")
-            .map_err(|_| storage_error("读取 recovery 逾期计数失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 recovery 逾期计数失败"))?;
         let relist_pending_count: i64 = row
             .try_get("relist_pending_count")
-            .map_err(|_| storage_error("读取 recovery 重挂计数失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 recovery 重挂计数失败"))?;
         let failed_action_count: i64 = row
             .try_get("failed_action_count")
-            .map_err(|_| storage_error("读取 recovery 失败计数失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 recovery 失败计数失败"))?;
         let manual_reconcile_count: i64 = row
             .try_get("manual_reconcile_count")
-            .map_err(|_| storage_error("读取 recovery 人工对账计数失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 recovery 人工对账计数失败"))?;
         snapshot.payment_overdue_count = snapshot
             .payment_overdue_count
             .checked_add(payment_overdue_count)
@@ -271,28 +285,29 @@ async fn recovery_snapshot(
             .ok_or_else(|| storage_error("recovery 人工对账计数溢出"))?;
         let oldest_overdue_age_seconds: i64 = row
             .try_get("oldest_overdue_age_seconds")
-            .map_err(|_| storage_error("读取 recovery 逾期时间失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 recovery 逾期时间失败"))?;
         snapshot.oldest_overdue_age_seconds =
             snapshot.oldest_overdue_age_seconds.max(oldest_overdue_age_seconds);
         let balance_observed_at: Option<DateTime<Utc>> = row
             .try_get("balance_observed_at")
-            .map_err(|_| storage_error("读取 recovery 余额时间失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 recovery 余额时间失败"))?;
         let evidence_last_success_at: Option<DateTime<Utc>> = row
             .try_get("evidence_last_success_at")
-            .map_err(|_| storage_error("读取 recovery 证据时间失败"))?;
-        let updated_at: DateTime<Utc> =
-            row.try_get("updated_at").map_err(|_| storage_error("读取 recovery 更新时间失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 recovery 证据时间失败"))?;
+        let updated_at: DateTime<Utc> = row
+            .try_get("updated_at")
+            .map_err(|error| storage_error_from(error, "读取 recovery 更新时间失败"))?;
         snapshot.worlds.push(OperationsAlertRecoveryWorld {
             world,
             balance_credits: row
                 .try_get("balance_credits")
-                .map_err(|_| storage_error("读取 recovery 余额失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 余额失败"))?,
             balance_status: row
                 .try_get("balance_status")
-                .map_err(|_| storage_error("读取 recovery 余额状态失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 余额状态失败"))?,
             evidence_status: row
                 .try_get("evidence_status")
-                .map_err(|_| storage_error("读取 recovery 证据状态失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 证据状态失败"))?,
             evidence_age_seconds: age_seconds(now, evidence_last_success_at.or(Some(updated_at))),
             balance_observed_at,
             evidence_last_success_at,

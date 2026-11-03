@@ -26,14 +26,15 @@ impl MailDeliveryTransactionError {
 
 #[cfg(feature = "postgres")]
 pub(super) fn map_storage_error(error: sqlx::Error) -> RepositoryError {
-    RepositoryError::Failed(match error {
+    let context = match &error {
         sqlx::Error::Database(database_error)
             if database_error.code().as_deref() == Some("40001") =>
         {
-            "MoogleMail delivery 事务发生序列化冲突".to_owned()
+            "MoogleMail delivery 事务发生序列化冲突"
         }
-        _ => "MoogleMail delivery outbox 操作失败".to_owned(),
-    })
+        _ => "MoogleMail delivery outbox 操作失败",
+    };
+    RepositoryError::Failed(crate::database::sql_error_context(&error, context))
 }
 
 #[cfg(feature = "postgres")]

@@ -1,5 +1,8 @@
 //! Operations alert signal 观察事务。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use std::collections::HashSet;
 
 use super::super::*;
@@ -13,8 +16,10 @@ pub(crate) async fn observe_postgres(
         .now
         .checked_add_signed(batch_window)
         .ok_or_else(|| storage_error("operations alert 首次通知时间溢出"))?;
-    let mut transaction =
-        pool.begin().await.map_err(|_| storage_error("开启 operations alert 观察事务失败"))?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启 operations alert 观察事务失败"))?;
 
     for observation in &command.observations {
         let mut fingerprints = HashSet::with_capacity(observation.signals.len());
@@ -58,7 +63,7 @@ pub(crate) async fn observe_postgres(
             .bind(signal.age_seconds)
             .fetch_one(&mut *transaction)
             .await
-            .map_err(|_| storage_error("写入 operations alert signal 失败"))?;
+            .map_err(|error| storage_error_from(error, "写入 operations alert signal 失败"))?;
             if state_version <= 0 {
                 return rollback_operations_alert(transaction, "operations alert signal 版本无效")
                     .await;
@@ -79,12 +84,12 @@ pub(crate) async fn observe_postgres(
         .bind(observation.source.as_str())
         .fetch_all(&mut *transaction)
         .await
-        .map_err(|_| storage_error("读取 operations alert 当前 signal 失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 operations alert 当前 signal 失败"))?;
         let mut resolved = Vec::new();
         for row in active_rows {
-            let fingerprint: Vec<u8> = row
-                .try_get("fingerprint")
-                .map_err(|_| storage_error("读取 operations alert fingerprint 失败"))?;
+            let fingerprint: Vec<u8> = row.try_get("fingerprint").map_err(|error| {
+                storage_error_from(error, "读取 operations alert fingerprint 失败")
+            })?;
             if !fingerprints.contains(fingerprint.as_slice()) {
                 resolved.push(fingerprint);
             }
@@ -101,7 +106,9 @@ pub(crate) async fn observe_postgres(
             .bind(command.now)
             .execute(&mut *transaction)
             .await
-            .map_err(|_| storage_error("关闭已恢复 operations alert signal 失败"))?;
+            .map_err(|error| {
+                storage_error_from(error, "关闭已恢复 operations alert signal 失败")
+            })?;
         }
     }
 
@@ -113,10 +120,13 @@ pub(crate) async fn observe_postgres(
     .bind(command.now)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("更新 operations alert 扫描水位失败"))?;
+    .map_err(|error| storage_error_from(error, "更新 operations alert 扫描水位失败"))?;
     if runtime_update.rows_affected() != 1 {
         return rollback_operations_alert(transaction, "operations alert 运行状态未启用").await;
     }
 
-    transaction.commit().await.map_err(|_| storage_error("提交 operations alert 观察事务失败"))
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 operations alert 观察事务失败"))
 }

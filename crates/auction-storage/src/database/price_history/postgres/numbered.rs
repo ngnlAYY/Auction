@@ -1,5 +1,8 @@
 //! PostgreSQL 价格历史编号页：一次筛选同时供给分页和完整统计。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, PublicPriceHistoryListRequest, PublicPriceHistoryPage,
     PublicPriceHistoryStats,
@@ -21,7 +24,7 @@ pub(super) async fn list(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启公开价格历史读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启公开价格历史读取事务失败"))?;
 
     // 编号页仍需返回同一快照内的完整统计；仅物化筛选、排序和金额所需的窄行，避免两次
     // 执行完整过滤联表。装备等级只为当前页读取，空页通过统计行保留 total/stats。
@@ -98,7 +101,7 @@ pub(super) async fn list(
     .bind(request.sort.as_str())
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 公开价格历史编号页失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 公开价格历史编号页失败"))?;
 
     let stats =
         map_stats(rows.first().ok_or_else(|| storage_error("公开价格历史缺少编号页统计"))?)?;
@@ -106,13 +109,16 @@ pub(super) async fn list(
     for row in rows {
         let lot_id: Option<Uuid> = row
             .try_get("lot_id")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史 lot 标识失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史 lot 标识失败"))?;
         if lot_id.is_some() {
             entries.push(map_postgres_entry(row)?);
         }
     }
     validate_entries(&entries)?;
-    transaction.commit().await.map_err(|_| storage_error("提交公开价格历史读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交公开价格历史读取事务失败"))?;
     Ok(PublicPriceHistoryPage {
         entries,
         total: Some(stats.count),
@@ -126,19 +132,21 @@ pub(super) async fn list(
 
 fn map_stats(row: &sqlx::postgres::PgRow) -> Result<PublicPriceHistoryStats, ApplicationError> {
     validate_stats(PublicPriceHistoryStats {
-        count: row.try_get("total").map_err(|_| storage_error("读取 PostgreSQL 历史总数失败"))?,
+        count: row
+            .try_get("total")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史总数失败"))?,
         minimum: row
             .try_get("minimum_price")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史最低价失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史最低价失败"))?,
         maximum: row
             .try_get("maximum_price")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史最高价失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史最高价失败"))?,
         median: row
             .try_get("median_price")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史中位价失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史中位价失败"))?,
         median_exact: Some(
             row.try_get("median_exact")
-                .map_err(|_| storage_error("读取 PostgreSQL 历史精确中位价失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史精确中位价失败"))?,
         ),
     })
 }

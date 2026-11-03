@@ -2,6 +2,9 @@
 //!
 //! delivery 状态和 signal 冷却必须在同一 PostgreSQL 事务中更新，并追加 delivery 审计事实。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use super::*;
 
 use crate::database::delivery_audit::{DeliveryAudit, FAIL, append as append_delivery_audit};
@@ -43,7 +46,7 @@ pub(super) async fn terminalize_prepared_delivery(
     .bind(failure_code)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| storage_error("收口 operations alert prepared delivery 失败"))?;
+    .map_err(|error| storage_error_from(error, "收口 operations alert prepared delivery 失败"))?;
     if updated.rows_affected() == 1 {
         let request_id = delivery_id.to_string();
         append_delivery_audit(
@@ -65,7 +68,9 @@ pub(super) async fn terminalize_prepared_delivery(
             },
         )
         .await
-        .map_err(|_| storage_error("追加 operations alert prepared delivery 收口审计失败"))?;
+        .map_err(|error| {
+            storage_error_from(error, "追加 operations alert prepared delivery 收口审计失败")
+        })?;
     }
     Ok(())
 }
@@ -79,8 +84,10 @@ pub(super) async fn mark_enqueued_postgres(
     let next_notify_at = updated_at
         .checked_add_signed(chrono_duration(cooldown)?)
         .ok_or_else(|| storage_error("operations alert 冷却时间溢出"))?;
-    let mut transaction =
-        pool.begin().await.map_err(|_| storage_error("开启 operations alert 入队确认事务失败"))?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启 operations alert 入队确认事务失败"))?;
     lock_batch(&mut transaction, claim.batch_id).await?;
     let updated = sqlx::query(
         "UPDATE public.operations_alert_batches
@@ -98,7 +105,7 @@ pub(super) async fn mark_enqueued_postgres(
     .bind(updated_at)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("写入 operations alert 入队状态失败"))?;
+    .map_err(|error| storage_error_from(error, "写入 operations alert 入队状态失败"))?;
     if updated.rows_affected() != 1 {
         let _ = transaction.rollback().await;
         return Err(ApplicationError::OperationsAlert(OperationsAlertError::StaleClaim));
@@ -112,7 +119,7 @@ pub(super) async fn mark_enqueued_postgres(
     .bind(updated_at)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("写入 operations alert delivery 待发送状态失败"))?;
+    .map_err(|error| storage_error_from(error, "写入 operations alert delivery 待发送状态失败"))?;
     if delivery_updated.rows_affected() != 1 {
         let _ = transaction.rollback().await;
         return Err(ApplicationError::OperationsAlert(OperationsAlertError::StaleClaim));
@@ -130,7 +137,7 @@ pub(super) async fn mark_enqueued_postgres(
     .bind(next_notify_at)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("写入 operations alert signal 冷却时间失败"))?;
+    .map_err(|error| storage_error_from(error, "写入 operations alert signal 冷却时间失败"))?;
     let request_id = claim.command_id.to_string();
     append_delivery_audit(
         &mut transaction,
@@ -146,8 +153,11 @@ pub(super) async fn mark_enqueued_postgres(
         },
     )
     .await
-    .map_err(|_| storage_error("追加 operations alert delivery 激活审计失败"))?;
-    transaction.commit().await.map_err(|_| storage_error("提交 operations alert 入队确认事务失败"))
+    .map_err(|error| storage_error_from(error, "追加 operations alert delivery 激活审计失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 operations alert 入队确认事务失败"))
 }
 
 #[cfg(feature = "postgres")]
@@ -169,8 +179,10 @@ pub(super) async fn mark_claim_failed_postgres(
                 .ok_or_else(|| storage_error("operations alert 重试时间溢出"))?,
         )
     };
-    let mut transaction =
-        pool.begin().await.map_err(|_| storage_error("开启 operations alert 失败退避事务失败"))?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启 operations alert 失败退避事务失败"))?;
     lock_batch(&mut transaction, claim.batch_id).await?;
     let updated = if terminal {
         let terminal_code = if error_code == OperationsAlertDispatchErrorCode::DependencyMismatch {
@@ -217,7 +229,7 @@ pub(super) async fn mark_claim_failed_postgres(
         .execute(&mut *transaction)
         .await
     }
-    .map_err(|_| storage_error("写入 operations alert 失败退避状态失败"))?;
+    .map_err(|error| storage_error_from(error, "写入 operations alert 失败退避状态失败"))?;
     if updated.rows_affected() != 1 {
         let _ = transaction.rollback().await;
         return Err(ApplicationError::OperationsAlert(OperationsAlertError::StaleClaim));
@@ -235,7 +247,10 @@ pub(super) async fn mark_claim_failed_postgres(
         )
         .await?;
     }
-    transaction.commit().await.map_err(|_| storage_error("提交 operations alert 失败退避事务失败"))
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 operations alert 失败退避事务失败"))
 }
 
 /// batch → delivery → signal 锁序不变；持锁后检查实时时钟，避免排队跨过 claim 截止。
@@ -247,7 +262,7 @@ async fn lock_batch(
         .bind(batch_id)
         .fetch_optional(&mut **transaction)
         .await
-        .map_err(|_| storage_error("锁定 operations alert 批次租约失败"))?;
+        .map_err(|error| storage_error_from(error, "锁定 operations alert 批次租约失败"))?;
     Ok(())
 }
 
@@ -268,21 +283,21 @@ pub(super) async fn list_enqueued_postgres(
     .bind(i64::from(limit))
     .fetch_all(pool)
     .await
-    .map_err(|_| storage_error("读取 operations alert 已入队对账项失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 operations alert 已入队对账项失败"))?;
     rows.into_iter()
         .map(|row| {
-            let status: String = row
-                .try_get("status")
-                .map_err(|_| storage_error("读取 operations alert delivery 状态失败"))?;
+            let status: String = row.try_get("status").map_err(|error| {
+                storage_error_from(error, "读取 operations alert delivery 状态失败")
+            })?;
             let delivery_status = parse_delivery_status(&status)
                 .ok_or_else(|| storage_error("operations alert delivery 终态未知"))?;
             Ok(OperationsAlertEnqueuedBatch {
-                batch_id: row
-                    .try_get("batch_id")
-                    .map_err(|_| storage_error("读取 operations alert 批次 ID 失败"))?,
-                delivery_id: row
-                    .try_get("delivery_id")
-                    .map_err(|_| storage_error("读取 operations alert delivery ID 失败"))?,
+                batch_id: row.try_get("batch_id").map_err(|error| {
+                    storage_error_from(error, "读取 operations alert 批次 ID 失败")
+                })?,
+                delivery_id: row.try_get("delivery_id").map_err(|error| {
+                    storage_error_from(error, "读取 operations alert delivery ID 失败")
+                })?,
                 delivery_status,
             })
         })
@@ -331,7 +346,7 @@ pub(super) async fn mark_terminal_postgres(
     .bind(stored_error)
     .execute(pool)
     .await
-    .map_err(|_| storage_error("写入 operations alert 终态失败"))?;
+    .map_err(|error| storage_error_from(error, "写入 operations alert 终态失败"))?;
     if updated.rows_affected() != 1 {
         return Err(ApplicationError::OperationsAlert(OperationsAlertError::IdentityConflict));
     }

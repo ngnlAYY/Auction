@@ -27,7 +27,6 @@ use crate::database::audit_health::AuditWriteResult as _;
 use sqlx::{postgres::PgRow, types::Json};
 
 use super::DatabaseStore;
-use crate::database::storage_error;
 
 impl AdminUserStore for DatabaseStore {
     fn list(&self, request: AdminUserListRequest) -> ApplicationFuture<'_, AdminUserPage> {

@@ -64,8 +64,11 @@ pub(crate) fn repository_error_owned(message: &str) -> auction_application::Repo
 
 #[cfg(feature = "postgres")]
 pub(crate) fn map_storage_error(error: sqlx::Error) -> auction_application::RepositoryError {
-    auction_application::RepositoryError::Failed(match error {
-        sqlx::Error::RowNotFound => "Worker 调度记录不存在".to_owned(),
-        _ => "Worker 调度数据库操作失败".to_owned(),
-    })
+    let context = match &error {
+        sqlx::Error::RowNotFound => "Worker 调度记录不存在",
+        _ => "Worker 调度数据库操作失败",
+    };
+    auction_application::RepositoryError::Failed(crate::database::sql_error_context(
+        &error, context,
+    ))
 }

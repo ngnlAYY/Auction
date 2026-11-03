@@ -1,6 +1,9 @@
 //! Worker 实时事件消费的持久化适配器；本模块只做应用端口校验和后端分派，stream、事件读取、
 //! 游标确认与 failure 生命周期由具名子模块持有。游标只按 stream 连续序号推进，失败记录不改它。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationFuture, RealtimeConsumerBatch, RealtimeConsumerRequest, RealtimeConsumerStore,
 };
@@ -42,11 +45,9 @@ impl RealtimeConsumerStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let mut connection = store
-                        .pool()
-                        .acquire()
-                        .await
-                        .map_err(|_| storage_error("打开 PostgreSQL 实时消费连接失败"))?;
+                    let mut connection = store.pool().acquire().await.map_err(|error| {
+                        storage_error_from(error, "打开 PostgreSQL 实时消费连接失败")
+                    })?;
                     read_postgres(&mut connection, request).await
                 }
             }
@@ -66,11 +67,9 @@ impl RealtimeConsumerStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let mut connection = store
-                        .pool()
-                        .acquire()
-                        .await
-                        .map_err(|_| storage_error("打开 PostgreSQL 实时游标连接失败"))?;
+                    let mut connection = store.pool().acquire().await.map_err(|error| {
+                        storage_error_from(error, "打开 PostgreSQL 实时游标连接失败")
+                    })?;
                     acknowledge_postgres(
                         &mut connection,
                         &consumer_key,
@@ -100,11 +99,9 @@ impl RealtimeConsumerStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let mut connection = store
-                        .pool()
-                        .acquire()
-                        .await
-                        .map_err(|_| storage_error("打开 PostgreSQL 实时失败记录连接失败"))?;
+                    let mut connection = store.pool().acquire().await.map_err(|error| {
+                        storage_error_from(error, "打开 PostgreSQL 实时失败记录连接失败")
+                    })?;
                     record_failure_postgres(
                         &mut connection,
                         &consumer_key,

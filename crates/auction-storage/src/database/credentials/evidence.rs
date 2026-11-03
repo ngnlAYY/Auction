@@ -24,7 +24,7 @@ impl MailEvidenceTransactionError {
     /// 仅在存储重试/回滚分类已完成后转换为应用错误，禁止提前丢失 SQLSTATE。
     pub fn into_application_error(self) -> ApplicationError {
         match self {
-            Self::Sqlx(_) => storage_error("邮件证据事务不可用"),
+            Self::Sqlx(error) => crate::database::storage_error_from(error, "邮件证据事务不可用"),
             Self::Rejected(reason) => storage_error(reason),
         }
     }

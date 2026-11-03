@@ -1,5 +1,8 @@
 //! 代理授权事件的安全投影；兼容历史 authorization 命令名，不直接暴露账本 payload。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use super::DatabaseStore;
 use crate::database::storage_error;
 #[cfg(feature = "postgres")]
@@ -41,16 +44,19 @@ async fn list_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启 Admin 代理历史读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启 Admin 代理历史读取事务失败"))?;
 
     let visible = sqlx::query("SELECT id FROM public.lots WHERE id = $1")
         .bind(request.lot_id.as_uuid())
         .fetch_optional(&mut *transaction)
         .await
-        .map_err(|_| storage_error("校验 Admin 代理历史 lot 边界失败"))?
+        .map_err(|error| storage_error_from(error, "校验 Admin 代理历史 lot 边界失败"))?
         .is_some();
     if !visible {
-        transaction.commit().await.map_err(|_| storage_error("提交 Admin 代理历史空结果失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交 Admin 代理历史空结果失败"))?;
         return Ok(None);
     }
 
@@ -121,7 +127,7 @@ async fn list_postgres(
     .bind(cursor_boundary.map(|(_, command_id)| command_id))
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 Admin 代理历史命令账本失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 Admin 代理历史命令账本失败"))?;
 
     let has_more = use_cursor && rows.len() > request.limit as usize;
     let mut entries = Vec::with_capacity(rows.len().min(request.limit as usize));
@@ -133,41 +139,43 @@ async fn list_postgres(
 
         let command_id: Uuid = row
             .try_get("command_id")
-            .map_err(|_| storage_error("读取 Admin 代理历史命令标识失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 Admin 代理历史命令标识失败"))?;
         let created_at: DateTime<Utc> = row
             .try_get("created_at")
-            .map_err(|_| storage_error("读取 Admin 代理历史创建时间失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 Admin 代理历史创建时间失败"))?;
         let event = AdminProxyEvent {
             command_id,
             authorization_id: row
                 .try_get("authorization_id")
-                .map_err(|_| storage_error("读取 Admin 代理历史授权标识失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 Admin 代理历史授权标识失败"))?,
             authorization_sequence: row
                 .try_get("authorization_sequence")
-                .map_err(|_| storage_error("读取 Admin 代理历史授权序号失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 Admin 代理历史授权序号失败"))?,
             usage_number: row
                 .try_get("usage_number")
-                .map_err(|_| storage_error("读取 Admin 代理历史使用序号失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 Admin 代理历史使用序号失败"))?,
             lot_id: row
                 .try_get::<Uuid, _>("lot_id")
                 .map(auction_domain::LotId::from_uuid)
-                .map_err(|_| storage_error("读取 Admin 代理历史 lot 标识失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 Admin 代理历史 lot 标识失败"))?,
             user_id: row
                 .try_get("user_id")
-                .map_err(|_| storage_error("读取 Admin 代理历史用户标识失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 Admin 代理历史用户标识失败"))?,
             username: row
                 .try_get("username")
-                .map_err(|_| storage_error("读取 Admin 代理历史用户名失败"))?,
-            mode: row.try_get("mode").map_err(|_| storage_error("读取 Admin 代理历史模式失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 Admin 代理历史用户名失败"))?,
+            mode: row
+                .try_get("mode")
+                .map_err(|error| storage_error_from(error, "读取 Admin 代理历史模式失败"))?,
             maximum_amount: row
                 .try_get("maximum_amount")
-                .map_err(|_| storage_error("读取 Admin 代理历史上限失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 Admin 代理历史上限失败"))?,
             status: row
                 .try_get("status")
-                .map_err(|_| storage_error("读取 Admin 代理历史状态失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 Admin 代理历史状态失败"))?,
             state_version: row
                 .try_get("state_version")
-                .map_err(|_| storage_error("读取 Admin 代理历史状态版本失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 Admin 代理历史状态版本失败"))?,
             created_at,
         };
         if !event.validate(request.lot_id) {
@@ -209,10 +217,13 @@ async fn list_postgres(
         .bind(request.lot_id.as_uuid())
         .fetch_one(&mut *transaction)
         .await
-        .map_err(|_| storage_error("读取 Admin 代理历史总数失败"))?
+        .map_err(|error| storage_error_from(error, "读取 Admin 代理历史总数失败"))?
     };
 
-    transaction.commit().await.map_err(|_| storage_error("提交 Admin 代理历史读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 Admin 代理历史读取事务失败"))?;
 
     let next_cursor = has_more
         .then(|| {

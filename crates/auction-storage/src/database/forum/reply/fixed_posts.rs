@@ -1,5 +1,8 @@
 //! 所有目录页及系统更新楼的同事务正文证明更新。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, ForumRenderedPost, ForumRenderedThread, ForumReplyTopic,
 };
@@ -17,8 +20,11 @@ pub(super) async fn record_fixed_posts_update_postgres(
     updated_at: DateTime<Utc>,
     next_scan_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启论坛分页正文证明事务失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启论坛分页正文证明事务失败"))?;
     lock_terminal_version(&mut transaction, topic).await?;
     lock_content_claim(&mut transaction, topic).await?;
     let result = sqlx::query(
@@ -70,12 +76,15 @@ pub(super) async fn record_fixed_posts_update_postgres(
     .bind(topic.confirmed_terminal_version)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("写入论坛固定楼层正文证明失败"))?;
+    .map_err(|error| storage_error_from(error, "写入论坛固定楼层正文证明失败"))?;
     if result.rows_affected() != 1 {
         return Err(storage_error("论坛固定楼层正文版本已变化"));
     }
     super::super::catalog::update_pages(&mut transaction, topic, catalog).await?;
-    transaction.commit().await.map_err(|_| storage_error("提交论坛分页正文证明失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交论坛分页正文证明失败"))?;
     Ok(())
 }
 
@@ -87,8 +96,11 @@ pub(super) async fn record_fixed_posts_progress_postgres(
     processed_through_post_number: i32,
     updated_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启论坛分页进度事务失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启论坛分页进度事务失败"))?;
     lock_content_claim(&mut transaction, topic).await?;
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
@@ -128,12 +140,15 @@ pub(super) async fn record_fixed_posts_progress_postgres(
     .bind((topic.catalog_continuation.len() + 1) as i32)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("写入论坛固定楼层暂存进度失败"))?;
+    .map_err(|error| storage_error_from(error, "写入论坛固定楼层暂存进度失败"))?;
     if result.rows_affected() != 1 {
         return Err(storage_error("论坛固定楼层暂存进度 claim 已失效"));
     }
     super::super::catalog::update_pages(&mut transaction, topic, catalog).await?;
-    transaction.commit().await.map_err(|_| storage_error("提交论坛分页进度失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交论坛分页进度失败"))?;
     Ok(())
 }
 
@@ -144,8 +159,11 @@ pub(super) async fn finish_topic_scan_postgres(
     scanned_at: DateTime<Utc>,
     next_scan_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启论坛扫描完成事务失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启论坛扫描完成事务失败"))?;
     lock_terminal_version(&mut transaction, topic).await?;
     lock_content_claim(&mut transaction, topic).await?;
     let result = sqlx::query(
@@ -188,11 +206,14 @@ pub(super) async fn finish_topic_scan_postgres(
     .bind(topic.confirmed_terminal_version)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("完成论坛固定楼层扫描失败"))?;
+    .map_err(|error| storage_error_from(error, "完成论坛固定楼层扫描失败"))?;
     if result.rows_affected() != 1 {
         return Err(storage_error("论坛固定楼层扫描 claim 已失效"));
     }
-    transaction.commit().await.map_err(|_| storage_error("提交论坛扫描完成事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交论坛扫描完成事务失败"))?;
     Ok(())
 }
 
@@ -207,7 +228,7 @@ async fn lock_content_claim(
     .bind(topic.auction_id.as_uuid())
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("锁定论坛内容租约失败"))?;
+    .map_err(|error| storage_error_from(error, "锁定论坛内容租约失败"))?;
     Ok(())
 }
 
@@ -228,7 +249,7 @@ async fn lock_terminal_version(
     .bind(version)
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| storage_error("锁定论坛终态版本失败"))?;
+    .map_err(|error| storage_error_from(error, "锁定论坛终态版本失败"))?;
     if !matched {
         return Err(storage_error("论坛终态快照版本已变化"));
     }
@@ -239,7 +260,7 @@ async fn lock_terminal_version(
     .bind(topic.auction_id.as_uuid())
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| storage_error("核对论坛终态 pending 边界失败"))?;
+    .map_err(|error| storage_error_from(error, "核对论坛终态 pending 边界失败"))?;
     if pending {
         return Err(storage_error("论坛终态仍有 pending 命令，不能完成"));
     }
@@ -279,7 +300,7 @@ pub(super) async fn fail_topic_scan_postgres(
     .bind(topic.content_claim_fencing)
     .execute(store.pool())
     .await
-    .map_err(|_| storage_error("记录论坛固定楼层扫描失败状态失败"))?;
+    .map_err(|error| storage_error_from(error, "记录论坛固定楼层扫描失败状态失败"))?;
     if result.rows_affected() != 1 {
         return Err(storage_error("论坛固定楼层扫描失败 claim 已失效"));
     }

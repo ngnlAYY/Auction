@@ -1,5 +1,8 @@
 //! 论坛目录续页的身份校验与 PostgreSQL 镜像持久化；主记录锁和 CAS 由调用方持有。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use std::collections::HashSet;
 
 use crate::database::storage_error;
@@ -71,22 +74,25 @@ pub(super) async fn read_pages(
     .bind(auction_id)
     .fetch_all(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取论坛目录续页失败"))?;
+    .map_err(|error| storage_error_from(error, "读取论坛目录续页失败"))?;
     if rows.len() + 1 != page_count as usize {
         return Err(storage_error("论坛目录续页数量与发布证明不一致"));
     }
     let mut pages = Vec::with_capacity(rows.len());
     for (index, row) in rows.into_iter().enumerate() {
-        let post_number: i32 =
-            row.try_get("post_number").map_err(|_| storage_error("读取论坛目录续页楼层失败"))?;
+        let post_number: i32 = row
+            .try_get("post_number")
+            .map_err(|error| storage_error_from(error, "读取论坛目录续页楼层失败"))?;
         if post_number as usize != index + 2 {
             return Err(storage_error("论坛目录续页楼层不连续"));
         }
         pages.push(ForumCatalogPage {
             post_id: row
                 .try_get("post_id")
-                .map_err(|_| storage_error("读取论坛目录续页身份失败"))?,
-            body: row.try_get("body").map_err(|_| storage_error("读取论坛目录续页正文失败"))?,
+                .map_err(|error| storage_error_from(error, "读取论坛目录续页身份失败"))?,
+            body: row
+                .try_get("body")
+                .map_err(|error| storage_error_from(error, "读取论坛目录续页正文失败"))?,
         });
     }
     Ok(pages)
@@ -118,7 +124,7 @@ pub(super) async fn publish_pages(
         .bind(&page.body)
         .execute(&mut **transaction)
         .await
-        .map_err(|_| storage_error("写入论坛目录续页发布证明失败"))?;
+        .map_err(|error| storage_error_from(error, "写入论坛目录续页发布证明失败"))?;
         if result.rows_affected() != 1 {
             return Err(storage_error("论坛目录续页身份已变化"));
         }
@@ -149,7 +155,7 @@ pub(super) async fn update_pages(
         .bind(&page.body)
         .execute(&mut **transaction)
         .await
-        .map_err(|_| storage_error("更新论坛目录续页正文证明失败"))?;
+        .map_err(|error| storage_error_from(error, "更新论坛目录续页正文证明失败"))?;
         if result.rows_affected() != 1 {
             return Err(storage_error("论坛目录续页身份或楼层已变化"));
         }

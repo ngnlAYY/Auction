@@ -1,5 +1,8 @@
 //! PostgreSQL Public 竞价日志的快照查询与安全行映射。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, PublicBidLogCursor, PublicBidLogEntry, PublicBidLogListRequest,
     PublicBidLogPage,
@@ -77,7 +80,7 @@ pub(super) async fn list_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启公开竞价日志读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启公开竞价日志读取事务失败"))?;
 
     let projection = sqlx::query(
         "SELECT a.id
@@ -91,9 +94,12 @@ pub(super) async fn list_postgres(
     .bind(request.world_id.as_deref())
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取公开竞价日志拍卖 projection 失败"))?;
+    .map_err(|error| storage_error_from(error, "读取公开竞价日志拍卖 projection 失败"))?;
     if projection.is_none() {
-        transaction.commit().await.map_err(|_| storage_error("提交公开竞价日志读取事务失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交公开竞价日志读取事务失败"))?;
         return Ok(None);
     }
 
@@ -160,7 +166,7 @@ pub(super) async fn list_postgres(
     .bind(if request.cursor.is_some() { 0 } else { request.offset })
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 公开竞价日志失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 公开竞价日志失败"))?;
 
     let mut entries = rows.into_iter().map(map_postgres_entry).collect::<Result<Vec<_>, _>>()?;
     validate_entries(&entries, &request)?;
@@ -187,11 +193,14 @@ pub(super) async fn list_postgres(
             .bind(request.lot_code.as_deref())
             .fetch_one(&mut *transaction)
             .await
-            .map_err(|_| storage_error("统计 PostgreSQL 公开竞价日志失败"))?,
+            .map_err(|error| storage_error_from(error, "统计 PostgreSQL 公开竞价日志失败"))?,
         )
     };
     let offset = if request.cursor.is_some() { 0 } else { request.offset };
-    transaction.commit().await.map_err(|_| storage_error("提交公开竞价日志读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交公开竞价日志读取事务失败"))?;
     Ok(Some(PublicBidLogPage {
         entries,
         total,
@@ -204,51 +213,57 @@ pub(super) async fn list_postgres(
 
 fn map_postgres_entry(row: sqlx::postgres::PgRow) -> Result<PublicBidLogEntry, ApplicationError> {
     Ok(PublicBidLogEntry {
-        id: row.try_get("id").map_err(|_| storage_error("读取 PostgreSQL 竞价事实标识失败"))?,
+        id: row
+            .try_get("id")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价事实标识失败"))?,
         auction_id: row
             .try_get("auction_id")
-            .map_err(|_| storage_error("读取 PostgreSQL 竞价拍卖标识失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价拍卖标识失败"))?,
         lot_id: row
             .try_get("lot_id")
-            .map_err(|_| storage_error("读取 PostgreSQL 竞价 lot 标识失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价 lot 标识失败"))?,
         lot_number: i64::from(
             row.try_get::<i32, _>("lot_number")
-                .map_err(|_| storage_error("读取 PostgreSQL 竞价 lot 序号失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价 lot 序号失败"))?,
         ),
-        amount: row.try_get("amount").map_err(|_| storage_error("读取 PostgreSQL 竞价金额失败"))?,
+        amount: row
+            .try_get("amount")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价金额失败"))?,
         equipment_name: row
             .try_get("equipment_name")
-            .map_err(|_| storage_error("读取 PostgreSQL 竞价装备名称失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价装备名称失败"))?,
         equipment_category: row
             .try_get("equipment_category")
-            .map_err(|_| storage_error("读取 PostgreSQL 竞价装备分类失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价装备分类失败"))?,
         bidder_name: row
             .try_get("bidder_name")
-            .map_err(|_| storage_error("读取 PostgreSQL 竞价用户名称失败"))?,
-        source: row.try_get("source").map_err(|_| storage_error("读取 PostgreSQL 竞价来源失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价用户名称失败"))?,
+        source: row
+            .try_get("source")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价来源失败"))?,
         source_post_number: row
             .try_get("source_post_number")
-            .map_err(|_| storage_error("读取 PostgreSQL 论坛竞价楼层号失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 论坛竞价楼层号失败"))?,
         source_thread_id: row
             .try_get("source_thread_id")
-            .map_err(|_| storage_error("读取 PostgreSQL 论坛竞价主题标识失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 论坛竞价主题标识失败"))?,
         source_post_id: row
             .try_get("source_post_id")
-            .map_err(|_| storage_error("读取 PostgreSQL 论坛竞价帖子标识失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 论坛竞价帖子标识失败"))?,
         valid: row
             .try_get("valid")
-            .map_err(|_| storage_error("读取 PostgreSQL 竞价有效标志失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价有效标志失败"))?,
         accepted_state_version: row
             .try_get("accepted_state_version")
-            .map_err(|_| storage_error("读取 PostgreSQL 竞价状态版本失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价状态版本失败"))?,
         fact_index: row
             .try_get("fact_index")
-            .map_err(|_| storage_error("读取 PostgreSQL 竞价事实序号失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价事实序号失败"))?,
         mechanism: row
             .try_get("mechanism")
-            .map_err(|_| storage_error("读取 PostgreSQL 竞价机制失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价机制失败"))?,
         created_at: row
             .try_get("created_at")
-            .map_err(|_| storage_error("读取 PostgreSQL 竞价创建时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价创建时间失败"))?,
     })
 }

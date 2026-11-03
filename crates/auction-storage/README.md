@@ -44,7 +44,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 - **收件目标**：Admin 录入与邮件入库共用 `database/intake_target`：在已持有 world 锁后锁定收件目标与拍卖、校验一致性、按锁定版本 CAS 推进预览修订并写入装备 key；错误分类仍由各自 owner 决定。
 - **邮件入库编号**：持有原 world/目标拍卖锁，在同一 Serializable 事务中按分类聚合已有编号，同时归并全局 lot 序号；空场次仍从 1 开始，分类编号各自递增，溢出和损坏分类快照继续失败关闭。
 - **赛季收件边界**：新场次冻结的 `intake_opens_at` 同时约束锁后数据库实时钟和邮件原始 `received_at`；任一早于边界都返回 `IntakeClosed`，延迟轮询不能把旧赛季邮件加入新赛季。等于边界允许继续，历史 NULL 不增加限制；已持久接受命令仍先重放原决定。Admin 录入复核锁后当前时刻；恢复重列在既有 world/auction/recovery 等锁和证明复核后取 `clock_timestamp()`，不能使用事务开始时间或 Worker 选候选时的旧时刻替代换季判断。旧赛季识别同时保留原场次开拍和原始投稿收件事实，以二者较早时刻为起点，避免改期开拍绕过换季阻断。
-- **错误**：对外只返回固定分类与安全字段，不携带 SQL、连接串或驱动原文；停机时段证据的诊断字段见 [CLI 时段门禁](../../apps/auction-cli/README.md#停机时段门禁)。
+- **错误**：保留原有错误变体，SQL 通用失败仅附加[安全上下文](#sql-错误安全上下文)；停机时段证据的诊断字段见 [CLI 时段门禁](../../apps/auction-cli/README.md#停机时段门禁)；不携带 SQL、连接串或驱动原文。
 - **连接目标**：连接前固定显式端口（省略为 5432），拒绝未知查询参数；IPv6 主机名去括号后重新匹配 pgpass。
 
 ## 审计失败与就绪
@@ -75,6 +75,28 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 unknown 是“未知风险处置，不代表已证明不可重试”。permanent 与 unknown 在 classified 下保持粘滞，不提供清零接口，不写试探审计；修复后受控重启恢复。瞬时失败不锁死 classified readiness，但数据库/schema 当前不可用仍使依赖检查失败，恢复后可重新就绪。
 
 `DatabaseStore::with_audit_failure_mode` 由三角色装配根注入；默认 shadow 沿用全部失败累计门禁并观察新旧差异，legacy 不计算影子，classified 仅投影 permanent + unknown。HTTP、心跳与既有告警共享该模式的 `audit_failure_count`，不改 DTO 或 schema。纯内存审计指标由装配根注册，关闭 exporter 不影响计数；日志仅包含固定类别和 kind，不包含驱动原文。指标字典见 [auction-observability](../auction-observability/README.md#指标)，开关与切换步骤见[配置参考](../../ops/config/README.md#就绪策略)和[运维手册](../../ops/README.md#审计就绪影子观察)。
+
+## SQL 错误安全上下文
+
+[`crates/auction-storage/src/database/backend.rs`](src/database/backend.rs) 的 `storage_error_from` 接收原始 SQLx 错误，返回增强文本的 `ApplicationError::Repository(RepositoryError::Failed(String))`；`sql_error_context` 是字符串投影的唯一实现，供健康错误和具名 SQL mapper 的原有 `Failed(String)` 出口复用。纯校验拒绝、非 SQLx 错误及没有原始错误的 `ok_or_else` 继续使用固定文本。已压缩为其他闭集错误的路径不从文本反推 SQL 原因。
+
+文本保留原中文上下文，按固定顺序附加字段：
+
+```text
+原中文上下文 [sqlx_kind=Database sqlstate_class=23 sqlstate=23505 constraint=credential_keys_one_active_cookie_kind_idx table=credential_keys]
+```
+
+| 字段 | 允许的内容 |
+| --- | --- |
+| `sqlx_kind` | 静态 SQLx 变体名；未知新增变体为 `Other`，不读取变体负载 |
+| `sqlstate_class` / `sqlstate` | SQLSTATE 前两位类别及完整五位代码；代码必须为五个 ASCII 大写字母或数字 |
+| `constraint` / `table` | 驱动返回的 schema 标识，首字节为 ASCII 字母或下划线，后续仅含 ASCII 字母、数字或下划线，长度为 1–63 字节 |
+
+缺失字段为 `none`，格式异常为 `invalid`。非 `Database` 错误只记录变体名，其余字段均为 `none`；例如 `PoolTimedOut`、`Io`、`ColumnDecode` 不携带连接、列值或底层原因。当前迁移中的对象名都是静态 schema 标识，不由业务值生成。PostgreSQL 不保证所有错误都带表名或约束名，现有部分触发器仅指定 SQLSTATE，因此字段缺失不表示约束没有执行。
+
+投影不调用驱动的 `message()`、`detail()`、`hint()`，不格式化原错误的 Display/Debug、不遍历或保留 source，不包含绑定值、SQL 或外部正文。原有类型化 Conflict/SerializationConflict 判定与整事务重试顺序保持；`safe_kind()` 分类保持。错误文本仅供诊断，**不得用于自动重试或重发判定**。失败关闭与秘密隔离保持，缓存不参与错误投影或命令结果（不变量 6、7、9）。
+
+本项不新增日志、影子模式或配置。增强文本可经既有 `%error` 日志和失败安全详情字段输出；只记录 `safe_kind` 或继续压缩错误的路径不会自动显示这些字段。回退为换回旧制品，无 schema 迁移；日志过滤器只能影响后续日志输出，不能撤销已写入日志或持久化详情的增强文本。排障步骤见[运维手册](../../ops/README.md#sql-失败诊断)。
 
 ## COD 实收资金化拒绝诊断
 

@@ -2,6 +2,9 @@
 //! 任务、不提前持锁，已过竞价截止的候选在 LIMIT 前排除，避免 Final 失败时反复占满批次。
 //! 真正执行必须回到 PostgreSQL 竞价 Serializable 事务重新核对全部 fence。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{ApplicationError, ApplicationFuture, SlowProxyDue, SlowProxyDueReader};
 use auction_domain::{LotId, ProxyAuthorizationId};
 use chrono::{DateTime, Utc};
@@ -58,7 +61,7 @@ async fn next_due_postgres(
     .bind(now)
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 慢速代理下次到期失败"))
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 慢速代理下次到期失败"))
 }
 
 #[cfg(feature = "postgres")]
@@ -89,19 +92,24 @@ async fn list_postgres(
     .bind(i64::from(limit))
     .fetch_all(store.pool())
     .await
-    .map_err(|_| storage_error("扫描 PostgreSQL 慢速代理失败"))?;
+    .map_err(|error| storage_error_from(error, "扫描 PostgreSQL 慢速代理失败"))?;
 
     rows.into_iter().map(map_postgres_row).collect()
 }
 
 #[cfg(feature = "postgres")]
 fn map_postgres_row(row: sqlx::postgres::PgRow) -> Result<SlowProxyDue, ApplicationError> {
-    let lot_id: Uuid = row.try_get("lot_id").map_err(|_| storage_error("慢速代理 lot 标识损坏"))?;
-    let authorization_id: Uuid =
-        row.try_get("authorization_id").map_err(|_| storage_error("慢速代理授权标识损坏"))?;
-    let generation: i64 =
-        row.try_get("slow_generation").map_err(|_| storage_error("慢速代理世代损坏"))?;
-    let due_at = row.try_get("due_at").map_err(|_| storage_error("慢速代理到期时间损坏"))?;
+    let lot_id: Uuid = row
+        .try_get("lot_id")
+        .map_err(|error| storage_error_from(error, "慢速代理 lot 标识损坏"))?;
+    let authorization_id: Uuid = row
+        .try_get("authorization_id")
+        .map_err(|error| storage_error_from(error, "慢速代理授权标识损坏"))?;
+    let generation: i64 = row
+        .try_get("slow_generation")
+        .map_err(|error| storage_error_from(error, "慢速代理世代损坏"))?;
+    let due_at =
+        row.try_get("due_at").map_err(|error| storage_error_from(error, "慢速代理到期时间损坏"))?;
     let due = SlowProxyDue {
         lot_id: LotId::from_uuid(lot_id),
         authorization_id: ProxyAuthorizationId::from_uuid(authorization_id),

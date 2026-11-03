@@ -210,7 +210,7 @@ pub use backend::{DatabaseBackend, StorageError};
 #[cfg(feature = "postgres")]
 pub(crate) use backend::{
     SERIALIZABLE_ATTEMPTS, is_serialization_conflict, lock_command_id, retry_conflicts,
-    set_read_only_limits, storage_error,
+    set_read_only_limits, sql_error_context, storage_error, storage_error_from,
 };
 #[cfg(feature = "postgres")]
 pub(crate) use backend::{

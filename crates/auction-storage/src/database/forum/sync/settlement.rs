@@ -1,5 +1,8 @@
 //! 同一论坛快照内核对持久结算与最终 lot 事实；不计算曲线或净支付。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{ApplicationError, ForumLotSettlement};
 use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;
@@ -13,20 +16,27 @@ pub(super) fn project(
     if !settled {
         return Ok(None);
     }
-    let status: String =
-        row.try_get("status").map_err(|_| storage_error("读取结算 lot 状态失败"))?;
-    let end_price: Option<i64> =
-        row.try_get("settlement_end_price").map_err(|_| storage_error("读取持久落锤价失败"))?;
-    let adjustment_ppm: Option<i64> =
-        row.try_get("adjustment_ppm").map_err(|_| storage_error("读取持久结算调整失败"))?;
-    let current_price: Option<i64> =
-        row.try_get("current_price").map_err(|_| storage_error("读取最终领先金额失败"))?;
-    let leader_id: Option<Uuid> =
-        row.try_get("leader_user_id").map_err(|_| storage_error("读取最终赢家标识失败"))?;
-    let leader_name: Option<String> =
-        row.try_get("leader_name").map_err(|_| storage_error("读取最终赢家名称失败"))?;
-    let mechanism: Option<String> =
-        row.try_get("current_bid_mechanism").map_err(|_| storage_error("读取最终竞价来源失败"))?;
+    let status: String = row
+        .try_get("status")
+        .map_err(|error| storage_error_from(error, "读取结算 lot 状态失败"))?;
+    let end_price: Option<i64> = row
+        .try_get("settlement_end_price")
+        .map_err(|error| storage_error_from(error, "读取持久落锤价失败"))?;
+    let adjustment_ppm: Option<i64> = row
+        .try_get("adjustment_ppm")
+        .map_err(|error| storage_error_from(error, "读取持久结算调整失败"))?;
+    let current_price: Option<i64> = row
+        .try_get("current_price")
+        .map_err(|error| storage_error_from(error, "读取最终领先金额失败"))?;
+    let leader_id: Option<Uuid> = row
+        .try_get("leader_user_id")
+        .map_err(|error| storage_error_from(error, "读取最终赢家标识失败"))?;
+    let leader_name: Option<String> = row
+        .try_get("leader_name")
+        .map_err(|error| storage_error_from(error, "读取最终赢家名称失败"))?;
+    let mechanism: Option<String> = row
+        .try_get("current_bid_mechanism")
+        .map_err(|error| storage_error_from(error, "读取最终竞价来源失败"))?;
     let adjustment_ppm = adjustment_ppm
         .filter(|value| (-1_000_000..=1_000_000).contains(value))
         .ok_or_else(|| storage_error("终态快照缺少有效结算调整"))?;
@@ -42,8 +52,9 @@ pub(super) fn project(
     {
         return Err(storage_error("终态落锤价、赢家或来源与持久结算不一致"));
     }
-    let leader_held_nanos: Option<i64> =
-        row.try_get("leader_held_nanos").map_err(|_| storage_error("读取累计领先时长失败"))?;
+    let leader_held_nanos: Option<i64> = row
+        .try_get("leader_held_nanos")
+        .map_err(|error| storage_error_from(error, "读取累计领先时长失败"))?;
     let Some(leader_held_nanos) = leader_held_nanos.filter(|value| *value >= 0) else {
         return Err(storage_error("终态快照缺少有效累计领先时长"));
     };

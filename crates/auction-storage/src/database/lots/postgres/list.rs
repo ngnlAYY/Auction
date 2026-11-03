@@ -1,5 +1,8 @@
 //! PostgreSQL Public lot 列表查询与分类统计。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use std::collections::BTreeMap;
 
 use super::super::*;
@@ -37,9 +40,12 @@ pub(in crate::database::lots) async fn list_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启公开 lot 读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启公开 lot 读取事务失败"))?;
     let page = list_postgres_transaction(&mut transaction, auction_id, request, colors).await?;
-    transaction.commit().await.map_err(|_| storage_error("提交公开 lot 读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交公开 lot 读取事务失败"))?;
     Ok(page)
 }
 
@@ -90,7 +96,7 @@ async fn list_postgres_transaction(
             .bind(page_ids.as_deref())
             .fetch_all(&mut **transaction)
             .await
-            .map_err(|_| storage_error("读取 PostgreSQL 预览 lot 列表失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 预览 lot 列表失败"))?;
         page.preview = rows
             .into_iter()
             .map(|row| map_postgres_preview(row, &page.projection.world_id, colors))
@@ -104,7 +110,7 @@ async fn list_postgres_transaction(
             .bind(page_ids.as_deref())
             .fetch_all(&mut **transaction)
             .await
-            .map_err(|_| storage_error("读取 PostgreSQL 正式 lot 列表失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 正式 lot 列表失败"))?;
         page.live = rows
             .into_iter()
             .map(|row| map_postgres_live(row, &page.projection.world_id, colors))
@@ -138,7 +144,7 @@ async fn postgres_list_projection(
     .bind(auction_id)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL lot projection 失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL lot projection 失败"))?;
     row.map(map_postgres_projection).transpose()
 }
 
@@ -176,6 +182,6 @@ async fn postgres_category_counts(
     .bind(&projection.projection_kind)
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| storage_error("统计 PostgreSQL lot 分类失败"))?;
+    .map_err(|error| storage_error_from(error, "统计 PostgreSQL lot 分类失败"))?;
     map_postgres_counts(row)
 }

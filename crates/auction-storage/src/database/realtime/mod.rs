@@ -1,6 +1,9 @@
 //! Public 持久化实时事件读取适配器；回放只读已提交的 `realtime_events`，不从内存广播器补造消息。
 //! 读取先校验公开边界；历史事件 kind/schema/负载不符注册表时停止续读并返回 `refetch_required`。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, ApplicationFuture, PublicRealtimeEvent, PublicRealtimePage,
     PublicRealtimeReader, PublicRealtimeRequest,
@@ -44,7 +47,7 @@ async fn list_postgres(
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ")
         .await
-        .map_err(|_| storage_error("打开实时事件快照失败"))?;
+        .map_err(|error| storage_error_from(error, "打开实时事件快照失败"))?;
 
     if let Some(auction_id) = request.auction_id {
         let visible = sqlx::query(
@@ -57,10 +60,13 @@ async fn list_postgres(
         .bind(auction_id)
         .fetch_optional(&mut *transaction)
         .await
-        .map_err(|_| storage_error("校验实时事件拍卖边界失败"))?
+        .map_err(|error| storage_error_from(error, "校验实时事件拍卖边界失败"))?
         .is_some();
         if !visible {
-            transaction.commit().await.map_err(|_| storage_error("提交实时事件边界快照失败"))?;
+            transaction
+                .commit()
+                .await
+                .map_err(|error| storage_error_from(error, "提交实时事件边界快照失败"))?;
             return Ok(None);
         }
     }
@@ -89,9 +95,12 @@ async fn list_postgres(
     .bind(limit)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 实时事件失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件失败"))?;
     let has_more = rows_len_is_more(request.page_size, &rows);
-    transaction.commit().await.map_err(|_| storage_error("提交实时事件快照失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交实时事件快照失败"))?;
 
     let mut events = Vec::with_capacity(rows.len().min(request.page_size as usize));
     let mut refetch_required = false;
@@ -102,30 +111,30 @@ async fn list_postgres(
         }
         let public_visible: bool = row
             .try_get("public_visible")
-            .map_err(|_| storage_error("读取 PostgreSQL 实时事件公开边界失败"))?;
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件公开边界失败"))?;
         let event = PublicRealtimeEvent {
             event_id: row
                 .try_get("event_id")
-                .map_err(|_| storage_error("读取 PostgreSQL 实时事件标识失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件标识失败"))?,
             stream_key: row
                 .try_get("stream_key")
-                .map_err(|_| storage_error("读取 PostgreSQL 实时事件流名失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件流名失败"))?,
             stream_sequence: row
                 .try_get("stream_sequence")
-                .map_err(|_| storage_error("读取 PostgreSQL 实时事件序号失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件序号失败"))?,
             kind: row
                 .try_get("kind")
-                .map_err(|_| storage_error("读取 PostgreSQL 实时事件类型失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件类型失败"))?,
             schema_version: row
                 .try_get("schema_version")
-                .map_err(|_| storage_error("读取 PostgreSQL 实时事件版本失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件版本失败"))?,
             payload: row
                 .try_get::<sqlx::types::Json<Value>, _>("public_payload")
-                .map_err(|_| storage_error("读取 PostgreSQL 实时事件负载失败"))?
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件负载失败"))?
                 .0,
             created_at: row
                 .try_get("created_at")
-                .map_err(|_| storage_error("读取 PostgreSQL 实时事件时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件时间失败"))?,
         };
         // 旧版页在缺口或损坏投影后仍扫描当前有界页，并让 next_after 越过原始行；浏览器据此
         // 清空局部事实缓存、刷新权威快照，同时不会在每次重连时重复卡在同一坏行。

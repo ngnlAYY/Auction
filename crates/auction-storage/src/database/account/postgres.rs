@@ -1,5 +1,8 @@
 //! PostgreSQL Public account 读取与代理历史查询；结果映射和公共不变量校验由 mapping 维护。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use std::collections::HashMap;
 
 use futures_util::TryStreamExt;
@@ -68,7 +71,7 @@ pub(super) async fn list_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启 PostgreSQL 账户读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启 PostgreSQL 账户读取事务失败"))?;
 
     let bid_rows = sqlx::query(
         "SELECT
@@ -100,7 +103,7 @@ pub(super) async fn list_postgres(
     .bind(request.bids.offset)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 用户竞价失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 用户竞价失败"))?;
     let bids = bid_rows.into_iter().map(map_postgres_bid).collect::<Result<Vec<_>, _>>()?;
 
     let bid_total = sqlx::query_scalar::<_, i64>(
@@ -116,7 +119,7 @@ pub(super) async fn list_postgres(
     .bind(user_id)
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|_| storage_error("统计 PostgreSQL 用户竞价失败"))?;
+    .map_err(|error| storage_error_from(error, "统计 PostgreSQL 用户竞价失败"))?;
 
     let proxy_rows = sqlx::query(proxy_projection_sql!(
         "p.user_id = $1
@@ -128,7 +131,7 @@ pub(super) async fn list_postgres(
     .bind(request.proxies.offset)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 用户代理历史失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 用户代理历史失败"))?;
 
     let bases =
         proxy_rows.into_iter().map(map_postgres_proxy_base).collect::<Result<Vec<_>, _>>()?;
@@ -156,9 +159,12 @@ pub(super) async fn list_postgres(
     .bind(user_id)
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|_| storage_error("统计 PostgreSQL 用户代理历史失败"))?;
+    .map_err(|error| storage_error_from(error, "统计 PostgreSQL 用户代理历史失败"))?;
 
-    transaction.commit().await.map_err(|_| storage_error("提交 PostgreSQL 账户读取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 PostgreSQL 账户读取事务失败"))?;
     let page = PublicMyBidsPage { bids, proxies, bid_total, proxy_total };
     validate_page(page, request)
 }
@@ -173,7 +179,7 @@ pub(super) async fn proxy_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启 PostgreSQL 用户代理读取事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启 PostgreSQL 用户代理读取事务失败"))?;
     let row = sqlx::query(proxy_projection_sql!(
         "p.lot_id = $1 AND p.user_id = $2
          ORDER BY p.usage_number DESC
@@ -183,12 +189,12 @@ pub(super) async fn proxy_postgres(
     .bind(user_id)
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 用户代理失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 用户代理失败"))?;
     let Some(row) = row else {
         transaction
             .commit()
             .await
-            .map_err(|_| storage_error("提交 PostgreSQL 用户代理事务失败"))?;
+            .map_err(|error| storage_error_from(error, "提交 PostgreSQL 用户代理事务失败"))?;
         return Ok(None);
     };
     let base = map_postgres_proxy_base(row)?;
@@ -201,7 +207,10 @@ pub(super) async fn proxy_postgres(
         .await?
         .remove(&base.authorization_id);
     let proxy = build_proxy(base, transitions, bid)?;
-    transaction.commit().await.map_err(|_| storage_error("提交 PostgreSQL 用户代理事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 PostgreSQL 用户代理事务失败"))?;
     Ok(Some(proxy))
 }
 
@@ -234,8 +243,10 @@ async fn load_postgres_transitions(
     )
     .bind(authorization_ids)
     .fetch(&mut **transaction);
-    while let Some(row) =
-        rows.try_next().await.map_err(|_| storage_error("读取 PostgreSQL 代理转换历史失败"))?
+    while let Some(row) = rows
+        .try_next()
+        .await
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 代理转换历史失败"))?
     {
         let authorization_id =
             get_pg(&row, "authorization_id", "读取 PostgreSQL 代理授权标识失败")?;
@@ -292,8 +303,10 @@ async fn load_postgres_proxy_bids(
     )
     .bind(authorization_ids)
     .fetch(&mut **transaction);
-    while let Some(row) =
-        rows.try_next().await.map_err(|_| storage_error("读取 PostgreSQL 代理最近竞价失败"))?
+    while let Some(row) = rows
+        .try_next()
+        .await
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 代理最近竞价失败"))?
     {
         let authorization_id =
             get_pg(&row, "authorization_id", "读取 PostgreSQL 代理授权标识失败")?;

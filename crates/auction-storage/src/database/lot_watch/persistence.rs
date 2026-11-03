@@ -8,7 +8,10 @@ pub(super) fn sql_error(error: sqlx::Error) -> CompetitionTransactionError {
     if crate::database::is_serialization_conflict(&error) {
         CompetitionTransactionError::SerializationConflict
     } else {
-        CompetitionTransactionError::Failed("装备标记持久化失败".to_owned())
+        CompetitionTransactionError::Failed(crate::database::sql_error_context(
+            &error,
+            "装备标记持久化失败",
+        ))
     }
 }
 

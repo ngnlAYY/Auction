@@ -1,5 +1,8 @@
 //! Admin 凭据导入、修改、删除及其事务流程。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use super::mapping::*;
 
 use super::*;
@@ -14,7 +17,7 @@ pub(super) async fn import_postgres(
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("开启凭据导入事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启凭据导入事务失败"))?;
     lock_command(&mut transaction, write.command_id).await?;
     if let Some(result) = find_command_in_transaction(
         &mut transaction,
@@ -24,7 +27,10 @@ pub(super) async fn import_postgres(
     )
     .await?
     {
-        transaction.commit().await.map_err(|_| storage_error("提交凭据导入重放事务失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交凭据导入重放事务失败"))?;
         return Ok(result);
     }
 
@@ -81,7 +87,10 @@ pub(super) async fn import_postgres(
         write.now,
     )
     .await?;
-    transaction.commit().await.map_err(|_| storage_error("提交凭据导入事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交凭据导入事务失败"))?;
     Ok(result)
 }
 
@@ -95,7 +104,7 @@ pub(super) async fn mutate_postgres(
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("开启凭据修改事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启凭据修改事务失败"))?;
     lock_command(&mut transaction, write.command_id).await?;
     if let Some(result) = find_command_in_transaction(
         &mut transaction,
@@ -105,7 +114,10 @@ pub(super) async fn mutate_postgres(
     )
     .await?
     {
-        transaction.commit().await.map_err(|_| storage_error("提交凭据修改重放事务失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交凭据修改重放事务失败"))?;
         return Ok(result);
     }
     let before = load_credential_for_update(&mut transaction, write.credential_id).await?;
@@ -167,7 +179,10 @@ pub(super) async fn mutate_postgres(
         write.now,
     )
     .await?;
-    transaction.commit().await.map_err(|_| storage_error("提交凭据修改事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交凭据修改事务失败"))?;
     Ok(result)
 }
 
@@ -181,7 +196,7 @@ pub(super) async fn delete_postgres(
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("开启凭据删除事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启凭据删除事务失败"))?;
     lock_command(&mut transaction, write.command_id).await?;
     if let Some(result) = find_command_in_transaction(
         &mut transaction,
@@ -191,7 +206,10 @@ pub(super) async fn delete_postgres(
     )
     .await?
     {
-        transaction.commit().await.map_err(|_| storage_error("提交凭据删除重放事务失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交凭据删除重放事务失败"))?;
         return Ok(result);
     }
     let before = load_credential_for_update(&mut transaction, write.credential_id).await?;
@@ -234,7 +252,10 @@ pub(super) async fn delete_postgres(
         .execute(&mut *transaction)
         .await
         .map_err(map_storage_error)?;
-    transaction.commit().await.map_err(|_| storage_error("提交凭据删除事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交凭据删除事务失败"))?;
     Ok(result)
 }
 

@@ -1,5 +1,8 @@
 //! 装备分组与等级的分页前筛选：只流式扫描身份字段，规则仍由应用层统一判断。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use futures_util::TryStreamExt;
 
 use super::super::*;
@@ -34,15 +37,20 @@ pub(super) async fn select_filtered_page(
     let mut counts = [0_i64; 8];
     let mut matched_count = 0_i64;
     let mut lot_ids = Vec::new();
-    while let Some(row) =
-        rows.try_next().await.map_err(|_| storage_error("读取公开装备分组候选失败"))?
+    while let Some(row) = rows
+        .try_next()
+        .await
+        .map_err(|error| storage_error_from(error, "读取公开装备分组候选失败"))?
     {
-        let name: &str = row.try_get("name").map_err(|_| storage_error("读取分组装备名称失败"))?;
-        let category: &str =
-            row.try_get("category").map_err(|_| storage_error("读取分组装备类型失败"))?;
+        let name: &str = row
+            .try_get("name")
+            .map_err(|error| storage_error_from(error, "读取分组装备名称失败"))?;
+        let category: &str = row
+            .try_get("category")
+            .map_err(|error| storage_error_from(error, "读取分组装备类型失败"))?;
         let attributes: sqlx::types::Json<Value> = row
             .try_get("identity_attributes")
-            .map_err(|_| storage_error("读取分组装备身份失败"))?;
+            .map_err(|error| storage_error_from(error, "读取分组装备身份失败"))?;
         if !matches_equipment_filters(name, category, attributes.0, colors, request)? {
             continue;
         }
@@ -66,7 +74,10 @@ pub(super) async fn select_filtered_page(
             continue;
         }
         if matched_count >= request.offset && (lot_ids.len() as u64) < request.limit as u64 {
-            lot_ids.push(row.try_get("id").map_err(|_| storage_error("读取分组 lot 标识失败"))?);
+            lot_ids.push(
+                row.try_get("id")
+                    .map_err(|error| storage_error_from(error, "读取分组 lot 标识失败"))?,
+            );
         }
         matched_count = increment_count(matched_count)?;
     }

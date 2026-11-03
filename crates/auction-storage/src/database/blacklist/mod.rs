@@ -1,5 +1,8 @@
 //! Public 黑名单查询适配器。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, ApplicationFuture, PublicBlacklistEntry, PublicBlacklistPage,
     PublicBlacklistReader, PublicBlacklistRequest,
@@ -34,7 +37,7 @@ async fn list_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启公开黑名单快照失败"))?;
+        .map_err(|error| storage_error_from(error, "开启公开黑名单快照失败"))?;
     let rows = sqlx::query(
         "SELECT u.username, b.public_reason, b.created_at AS blacklisted_at
          FROM public.user_blacklist AS b
@@ -47,7 +50,7 @@ async fn list_postgres(
     .bind(request.offset)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 公开黑名单失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 公开黑名单失败"))?;
     let total: i64 = sqlx::query_scalar(
         "SELECT count(*)
          FROM public.user_blacklist AS b
@@ -56,8 +59,11 @@ async fn list_postgres(
     )
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|_| storage_error("统计 PostgreSQL 公开黑名单失败"))?;
-    transaction.commit().await.map_err(|_| storage_error("提交公开黑名单快照失败"))?;
+    .map_err(|error| storage_error_from(error, "统计 PostgreSQL 公开黑名单失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交公开黑名单快照失败"))?;
 
     let entries = rows
         .into_iter()
@@ -65,13 +71,13 @@ async fn list_postgres(
             Ok(PublicBlacklistEntry {
                 username: row
                     .try_get("username")
-                    .map_err(|_| storage_error("读取黑名单玩家名称失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取黑名单玩家名称失败"))?,
                 public_reason: row
                     .try_get("public_reason")
-                    .map_err(|_| storage_error("读取黑名单公开原因失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取黑名单公开原因失败"))?,
                 blacklisted_at: row
                     .try_get("blacklisted_at")
-                    .map_err(|_| storage_error("读取黑名单时间失败"))?,
+                    .map_err(|error| storage_error_from(error, "读取黑名单时间失败"))?,
             })
         })
         .collect::<Result<Vec<_>, ApplicationError>>()?;

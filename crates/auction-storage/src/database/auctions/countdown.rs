@@ -1,5 +1,8 @@
 //! 公开倒计时的 PostgreSQL 读取；单条查询绑定时间事实、可见性与数据库时钟。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{ApplicationError, PublicAuctionCountdown};
 use sqlx::Row;
 use uuid::Uuid;
@@ -29,19 +32,21 @@ pub(super) async fn read(
     .bind(auction_id)
     .fetch_optional(store.pool())
     .await
-    .map_err(|_| storage_error("读取公开倒计时失败"))?;
+    .map_err(|error| storage_error_from(error, "读取公开倒计时失败"))?;
     let Some(row) = row else { return Ok(None) };
     let snapshot = PublicAuctionCountdown {
-        auction_id: row.try_get("id").map_err(|_| storage_error("读取倒计时拍卖标识失败"))?,
+        auction_id: row
+            .try_get("id")
+            .map_err(|error| storage_error_from(error, "读取倒计时拍卖标识失败"))?,
         intake_closes_at: row
             .try_get("intake_closes_at")
-            .map_err(|_| storage_error("读取倒计时收件截止失败"))?,
+            .map_err(|error| storage_error_from(error, "读取倒计时收件截止失败"))?,
         scheduled_end_at: row
             .try_get("scheduled_end_at")
-            .map_err(|_| storage_error("读取倒计时计划截止失败"))?,
+            .map_err(|error| storage_error_from(error, "读取倒计时计划截止失败"))?,
         observed_at: row
             .try_get("observed_at")
-            .map_err(|_| storage_error("读取倒计时观测时间失败"))?,
+            .map_err(|error| storage_error_from(error, "读取倒计时观测时间失败"))?,
     };
     snapshot.validate().map_err(storage_error)?;
     Ok(Some(snapshot))

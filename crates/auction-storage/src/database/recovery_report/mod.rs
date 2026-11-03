@@ -1,6 +1,9 @@
 //! PostgreSQL Admin recovery 报告读取适配器；在单个可重复读只读快照内读取 case、action 和
 //! lot/equipment 展示字段，claim token、lease、request digest、外部 payload 不跨应用端口。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, ApplicationFuture, RecoveryReport, RecoveryReportReader,
 };
@@ -47,15 +50,18 @@ async fn postgres_report(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("打开 recovery 报告快照失败"))?;
+        .map_err(|error| storage_error_from(error, "打开 recovery 报告快照失败"))?;
 
     let auction_exists = sqlx::query("SELECT id FROM public.auctions WHERE id = $1")
         .bind(auction_id.as_uuid())
         .fetch_optional(&mut *transaction)
         .await
-        .map_err(|_| storage_error("读取 recovery 报告拍卖失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 recovery 报告拍卖失败"))?;
     if auction_exists.is_none() {
-        transaction.commit().await.map_err(|_| storage_error("提交 recovery 报告快照失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交 recovery 报告快照失败"))?;
         return Ok(None);
     }
 
@@ -91,12 +97,12 @@ async fn postgres_report(
     .bind(auction_id.as_uuid())
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 recovery case 失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 recovery case 失败"))?;
     let recovery_ids = recovery_rows
         .iter()
         .map(|row| row.try_get::<Uuid, _>("id"))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| storage_error("读取 recovery 标识失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 recovery 标识失败"))?;
     let mut actions_by_recovery = HashMap::<Uuid, Vec<RecoveryActionReport>>::new();
     if !recovery_ids.is_empty() {
         // 只读取报告中 case 的动作；流式分组保留各 case 原有 kind/id 顺序，避免逐 case 查询。
@@ -109,53 +115,59 @@ async fn postgres_report(
         )
         .bind(&recovery_ids)
         .fetch(&mut *transaction);
-        while let Some(action_row) =
-            action_rows.try_next().await.map_err(|_| storage_error("读取 recovery action 失败"))?
+        while let Some(action_row) = action_rows
+            .try_next()
+            .await
+            .map_err(|error| storage_error_from(error, "读取 recovery action 失败"))?
         {
-            let recovery_id = action_row
-                .try_get("recovery_id")
-                .map_err(|_| storage_error("读取 recovery action 所属 case 失败"))?;
-            let action = RecoveryActionReport {
-                id: SettlementId::from_uuid(
-                    action_row
-                        .try_get("id")
-                        .map_err(|_| storage_error("读取 recovery action 标识失败"))?,
-                ),
-                kind: action_row
-                    .try_get("kind")
-                    .map_err(|_| storage_error("读取 recovery action 类型失败"))?,
-                state: action_row
-                    .try_get("execution_state")
-                    .map_err(|_| storage_error("读取 recovery action 状态失败"))?,
-                delivery_id: action_row
-                    .try_get::<Option<Uuid>, _>("delivery_id")
-                    .map_err(|_| storage_error("读取 recovery action 投递标识失败"))?
-                    .map(SettlementId::from_uuid),
-                failure_code: action_row
-                    .try_get("last_error_code")
-                    .map_err(|_| storage_error("读取 recovery action 错误码失败"))?,
-                proof_kind: action_row
-                    .try_get("proof_kind")
-                    .map_err(|_| storage_error("读取 recovery action 证明类型失败"))?,
-                proof_observed_at: action_row
-                    .try_get("proof_observed_at")
-                    .map_err(|_| storage_error("读取 recovery action 证明时间失败"))?,
-                updated_at: action_row
-                    .try_get("updated_at")
-                    .map_err(|_| storage_error("读取 recovery action 更新时间失败"))?,
-            };
+            let recovery_id = action_row.try_get("recovery_id").map_err(|error| {
+                storage_error_from(error, "读取 recovery action 所属 case 失败")
+            })?;
+            let action =
+                RecoveryActionReport {
+                    id: SettlementId::from_uuid(action_row.try_get("id").map_err(|error| {
+                        storage_error_from(error, "读取 recovery action 标识失败")
+                    })?),
+                    kind: action_row.try_get("kind").map_err(|error| {
+                        storage_error_from(error, "读取 recovery action 类型失败")
+                    })?,
+                    state: action_row.try_get("execution_state").map_err(|error| {
+                        storage_error_from(error, "读取 recovery action 状态失败")
+                    })?,
+                    delivery_id: action_row
+                        .try_get::<Option<Uuid>, _>("delivery_id")
+                        .map_err(|error| {
+                            storage_error_from(error, "读取 recovery action 投递标识失败")
+                        })?
+                        .map(SettlementId::from_uuid),
+                    failure_code: action_row.try_get("last_error_code").map_err(|error| {
+                        storage_error_from(error, "读取 recovery action 错误码失败")
+                    })?,
+                    proof_kind: action_row.try_get("proof_kind").map_err(|error| {
+                        storage_error_from(error, "读取 recovery action 证明类型失败")
+                    })?,
+                    proof_observed_at: action_row.try_get("proof_observed_at").map_err(
+                        |error| storage_error_from(error, "读取 recovery action 证明时间失败"),
+                    )?,
+                    updated_at: action_row.try_get("updated_at").map_err(|error| {
+                        storage_error_from(error, "读取 recovery action 更新时间失败")
+                    })?,
+                };
             actions_by_recovery.entry(recovery_id).or_default().push(action);
         }
     }
 
     let mut recoveries = Vec::with_capacity(recovery_rows.len());
     for row in recovery_rows {
-        let recovery_id: Uuid =
-            row.try_get("id").map_err(|_| storage_error("读取 recovery 标识失败"))?;
-        let stored_auction_id: Uuid =
-            row.try_get("auction_id").map_err(|_| storage_error("读取 recovery 拍卖标识失败"))?;
-        let stored_lot_id: Uuid =
-            row.try_get("lot_id").map_err(|_| storage_error("读取 recovery lot 标识失败"))?;
+        let recovery_id: Uuid = row
+            .try_get("id")
+            .map_err(|error| storage_error_from(error, "读取 recovery 标识失败"))?;
+        let stored_auction_id: Uuid = row
+            .try_get("auction_id")
+            .map_err(|error| storage_error_from(error, "读取 recovery 拍卖标识失败"))?;
+        let stored_lot_id: Uuid = row
+            .try_get("lot_id")
+            .map_err(|error| storage_error_from(error, "读取 recovery lot 标识失败"))?;
         if stored_auction_id != auction_id.as_uuid() {
             return Err(storage_error("recovery 拍卖标识与报告不一致"));
         }
@@ -168,63 +180,68 @@ async fn postgres_report(
             lot_id: LotId::from_uuid(stored_lot_id),
             lot_number: row
                 .try_get("lot_number")
-                .map_err(|_| storage_error("读取 recovery lot 序号失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery lot 序号失败"))?,
             world_id: row
                 .try_get("world_id")
-                .map_err(|_| storage_error("读取 recovery 世界失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 世界失败"))?,
             equipment_name: row
                 .try_get("equipment_name")
-                .map_err(|_| storage_error("读取 recovery 装备名称失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 装备名称失败"))?,
             equipment_category: row
                 .try_get("equipment_category")
-                .map_err(|_| storage_error("读取 recovery 装备分类失败"))?,
-            stage: row.try_get("stage").map_err(|_| storage_error("读取 recovery 阶段失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 装备分类失败"))?,
+            stage: row
+                .try_get("stage")
+                .map_err(|error| storage_error_from(error, "读取 recovery 阶段失败"))?,
             resolution: row
                 .try_get("resolution")
-                .map_err(|_| storage_error("读取 recovery 结论失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 结论失败"))?,
             state_version: row
                 .try_get("state_version")
-                .map_err(|_| storage_error("读取 recovery 状态版本失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 状态版本失败"))?,
             payment_deadline_at: row
                 .try_get("payment_deadline_at")
-                .map_err(|_| storage_error("读取 recovery 付款截止时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 付款截止时间失败"))?,
             reminder_count: row
                 .try_get("reminder_count")
-                .map_err(|_| storage_error("读取 recovery 提醒次数失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 提醒次数失败"))?,
             reminder_limit: row
                 .try_get("reminder_limit")
-                .map_err(|_| storage_error("读取 recovery 提醒上限失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 提醒上限失败"))?,
             custody_proof_kind: row
                 .try_get("custody_proof_kind")
-                .map_err(|_| storage_error("读取 recovery custody 证明类型失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery custody 证明类型失败"))?,
             custody_proof_observed_at: row
                 .try_get("custody_proof_observed_at")
-                .map_err(|_| storage_error("读取 recovery custody 证明时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery custody 证明时间失败"))?,
             blocking_code: row
                 .try_get("blocking_code")
-                .map_err(|_| storage_error("读取 recovery 阻塞码失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 阻塞码失败"))?,
             manual_reconcile_delivery_id: row
                 .try_get::<Option<Uuid>, _>("manual_reconcile_delivery_id")
-                .map_err(|_| storage_error("读取 recovery 人工对账投递标识失败"))?
+                .map_err(|error| storage_error_from(error, "读取 recovery 人工对账投递标识失败"))?
                 .map(SettlementId::from_uuid),
             relisted_auction_id: row
                 .try_get::<Option<Uuid>, _>("relisted_auction_id")
-                .map_err(|_| storage_error("读取 recovery 重挂牌卖标识失败"))?
+                .map_err(|error| storage_error_from(error, "读取 recovery 重挂牌卖标识失败"))?
                 .map(AuctionId::from_uuid),
             relisted_lot_id: row
                 .try_get::<Option<Uuid>, _>("relisted_lot_id")
-                .map_err(|_| storage_error("读取 recovery 重挂牌 lot 标识失败"))?
+                .map_err(|error| storage_error_from(error, "读取 recovery 重挂牌 lot 标识失败"))?
                 .map(LotId::from_uuid),
             actions,
             allowed_commands: Vec::new(),
             updated_at: row
                 .try_get("updated_at")
-                .map_err(|_| storage_error("读取 recovery 更新时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 recovery 更新时间失败"))?,
         };
         entry.allowed_commands = allowed_recovery_commands(&entry);
         recoveries.push(entry);
     }
 
-    transaction.commit().await.map_err(|_| storage_error("提交 recovery 报告快照失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 recovery 报告快照失败"))?;
     Ok(Some(RecoveryReport { auction_id, recoveries }))
 }

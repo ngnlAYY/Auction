@@ -1,5 +1,8 @@
 //! Realtime stream 目录查询适配器。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::ApplicationError;
 
 use super::common::storage_error;
@@ -47,5 +50,5 @@ pub(super) async fn list_pending_streams_postgres(
     .bind(i64::from(limit))
     .fetch_all(connection)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 实时 stream 目录失败"))
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时 stream 目录失败"))
 }

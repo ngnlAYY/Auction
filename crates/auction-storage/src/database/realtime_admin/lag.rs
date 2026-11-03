@@ -1,5 +1,8 @@
 //! Realtime consumer lag 的分页查询与安全投影。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{
     ApplicationError, RealtimeLagListRequest, RealtimeLagPage, RealtimeLagSnapshot,
 };
@@ -18,7 +21,7 @@ pub(super) async fn list_lag_postgres(
         .pool()
         .begin_read_snapshot()
         .await
-        .map_err(|_| storage_error("开启 realtime lag 快照失败"))?;
+        .map_err(|error| storage_error_from(error, "开启 realtime lag 快照失败"))?;
     let stream_prefix = request.stream_prefix.as_deref();
     let consumer_key = request.consumer_key.as_deref();
     let total: i64 = sqlx::query_scalar(
@@ -32,9 +35,12 @@ pub(super) async fn list_lag_postgres(
     .bind(consumer_key)
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL realtime lag 总数失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime lag 总数失败"))?;
     let entries = read_lag_entries_postgres(&mut transaction, &request).await?;
-    transaction.commit().await.map_err(|_| storage_error("提交 realtime lag 快照失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 realtime lag 快照失败"))?;
     validate_lag_page(&entries, total, &request)?;
     Ok(RealtimeLagPage { entries, total, limit: request.limit, offset: request.offset })
 }
@@ -62,7 +68,7 @@ pub(super) async fn read_lag_entries_postgres(
     .bind(request.offset)
     .fetch_all(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL realtime lag 失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime lag 失败"))?;
     rows.into_iter().map(lag_from_postgres_row).collect()
 }
 
@@ -70,15 +76,16 @@ pub(super) async fn read_lag_entries_postgres(
 fn lag_from_postgres_row(row: PgRow) -> Result<RealtimeLagSnapshot, ApplicationError> {
     let consumer_key: String = row
         .try_get("consumer_key")
-        .map_err(|_| storage_error("读取 PostgreSQL lag consumer 失败"))?;
-    let stream_key: String =
-        row.try_get("stream_key").map_err(|_| storage_error("读取 PostgreSQL lag stream 失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL lag consumer 失败"))?;
+    let stream_key: String = row
+        .try_get("stream_key")
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL lag stream 失败"))?;
     let offset: i64 = row
         .try_get("last_sequence")
-        .map_err(|_| storage_error("读取 PostgreSQL lag offset 失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL lag offset 失败"))?;
     let latest_sequence: i64 = row
         .try_get("latest_sequence")
-        .map_err(|_| storage_error("读取 PostgreSQL lag 最新序号失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL lag 最新序号失败"))?;
     let lag = latest_sequence
         .checked_sub(offset)
         .ok_or_else(|| storage_error("PostgreSQL realtime lag 水位倒退"))?;
@@ -90,7 +97,7 @@ fn lag_from_postgres_row(row: PgRow) -> Result<RealtimeLagSnapshot, ApplicationE
         lag,
         last_advanced_at: Some(
             row.try_get("last_advanced_at")
-                .map_err(|_| storage_error("读取 PostgreSQL lag 更新时间失败"))?,
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL lag 更新时间失败"))?,
         ),
     })
 }

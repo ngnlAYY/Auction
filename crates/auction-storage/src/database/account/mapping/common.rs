@@ -1,3 +1,6 @@
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use super::*;
 pub(in crate::database::account) use crate::database::storage_error;
 
@@ -36,10 +39,10 @@ pub(in crate::database::account) fn validate_account_request(
 pub(in crate::database::account) fn get_pg<T>(
     row: &sqlx::postgres::PgRow,
     column: &str,
-    label: &str,
+    label: &'static str,
 ) -> Result<T, ApplicationError>
 where
     for<'r> T: sqlx::Decode<'r, sqlx::Postgres> + sqlx::Type<sqlx::Postgres>,
 {
-    row.try_get(column).map_err(|_| storage_error(label))
+    row.try_get(column).map_err(|error| storage_error_from(error, label))
 }

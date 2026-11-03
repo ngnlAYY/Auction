@@ -1,5 +1,8 @@
 //! 论坛稳定数字账号与可变 MM 玩家名称的 Users-owner 解析。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{ApplicationError, ForumBidderIdentity};
 use auction_domain::{SettlementWorld, UserId};
 use sha2::{Digest, Sha256};
@@ -10,7 +13,7 @@ use crate::database::audit_health::AuditWriteResult as _;
 
 use super::super::super::PostgresStore;
 use super::validation::{
-    MAX_FORUM_ACCOUNT_ID_BYTES, MAX_PLAYER_NAME_BYTES, storage_error, valid_decimal_id, valid_text,
+    MAX_FORUM_ACCOUNT_ID_BYTES, MAX_PLAYER_NAME_BYTES, valid_decimal_id, valid_text,
 };
 
 /// 按论坛 `showuser` 数字键解析用户；名称变化只更新 MM/展示名，不改变稳定账号归属。
@@ -30,13 +33,13 @@ pub(super) async fn resolve_bidder_postgres(
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
-        .map_err(|_| storage_error("开启论坛身份事务失败"))?;
+        .map_err(|error| storage_error_from(error, "开启论坛身份事务失败"))?;
     // 同一 showuser 在 main/isekai 必须串行决定唯一 Users owner。
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(external_account_id)
         .execute(&mut *transaction)
         .await
-        .map_err(|_| storage_error("锁定论坛账号数字 ID 失败"))?;
+        .map_err(|error| storage_error_from(error, "锁定论坛账号数字 ID 失败"))?;
 
     if let Some(row) = sqlx::query(
         "SELECT identity.id, identity.external_account_id,
@@ -54,29 +57,34 @@ pub(super) async fn resolve_bidder_postgres(
     .bind(external_account_id)
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取论坛玩家身份失败"))?
+    .map_err(|error| storage_error_from(error, "读取论坛玩家身份失败"))?
     {
         let identity_id: Uuid =
-            row.try_get("id").map_err(|_| storage_error("读取论坛身份标识失败"))?;
+            row.try_get("id").map_err(|error| storage_error_from(error, "读取论坛身份标识失败"))?;
         let canonical_external_account_id: String = row
             .try_get("external_account_id")
-            .map_err(|_| storage_error("读取论坛账号数字 ID 失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛账号数字 ID 失败"))?;
         let registration_state: String = row
             .try_get("registration_state")
-            .map_err(|_| storage_error("读取论坛身份注册状态失败"))?;
-        let identity_status: String =
-            row.try_get("status").map_err(|_| storage_error("读取论坛身份状态失败"))?;
-        let user_id: Uuid =
-            row.try_get("user_id").map_err(|_| storage_error("读取论坛用户标识失败"))?;
-        let user_status: String =
-            row.try_get("user_status").map_err(|_| storage_error("读取论坛用户状态失败"))?;
-        let key_status: String =
-            row.try_get("key_status").map_err(|_| storage_error("读取论坛用户 key 状态失败"))?;
-        let username: String =
-            row.try_get("username").map_err(|_| storage_error("读取论坛玩家名称失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛身份注册状态失败"))?;
+        let identity_status: String = row
+            .try_get("status")
+            .map_err(|error| storage_error_from(error, "读取论坛身份状态失败"))?;
+        let user_id: Uuid = row
+            .try_get("user_id")
+            .map_err(|error| storage_error_from(error, "读取论坛用户标识失败"))?;
+        let user_status: String = row
+            .try_get("user_status")
+            .map_err(|error| storage_error_from(error, "读取论坛用户状态失败"))?;
+        let key_status: String = row
+            .try_get("key_status")
+            .map_err(|error| storage_error_from(error, "读取论坛用户 key 状态失败"))?;
+        let username: String = row
+            .try_get("username")
+            .map_err(|error| storage_error_from(error, "读取论坛玩家名称失败"))?;
         let forum_account_id: Option<String> = row
             .try_get("forum_account_id")
-            .map_err(|_| storage_error("读取用户论坛账号 ID 失败"))?;
+            .map_err(|error| storage_error_from(error, "读取用户论坛账号 ID 失败"))?;
         if identity_id.is_nil()
             || user_id.is_nil()
             || identity_status != "active"
@@ -117,8 +125,11 @@ pub(super) async fn resolve_bidder_postgres(
         .bind(identity_id)
         .execute(&mut *transaction)
         .await
-        .map_err(|_| storage_error("更新论坛玩家身份失败"))?;
-        transaction.commit().await.map_err(|_| storage_error("提交论坛身份事务失败"))?;
+        .map_err(|error| storage_error_from(error, "更新论坛玩家身份失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交论坛身份事务失败"))?;
         return Ok(ForumBidderIdentity {
             user_id: UserId::from_uuid(user_id),
             external_account_id: canonical_external_account_id,
@@ -136,11 +147,12 @@ pub(super) async fn resolve_bidder_postgres(
     .bind(external_account_id)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取论坛账号跨世界归属失败"))?;
+    .map_err(|error| storage_error_from(error, "读取论坛账号跨世界归属失败"))?;
     let mut linked_user_id = None;
     for row in linked_rows {
-        let user_id: Uuid =
-            row.try_get("user_id").map_err(|_| storage_error("读取论坛账号归属用户失败"))?;
+        let user_id: Uuid = row
+            .try_get("user_id")
+            .map_err(|error| storage_error_from(error, "读取论坛账号归属用户失败"))?;
         if user_id.is_nil()
             || linked_user_id.is_some_and(|existing_user_id| existing_user_id != user_id)
         {
@@ -173,7 +185,7 @@ pub(super) async fn resolve_bidder_postgres(
     .bind(player_name)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取论坛账号对应用户失败"))?;
+    .map_err(|error| storage_error_from(error, "读取论坛账号对应用户失败"))?;
     if rows.len() > 1 {
         return Err(ApplicationError::ForumIdentityRejected(
             "论坛账号数字 ID 与玩家名称指向不同用户",
@@ -181,19 +193,23 @@ pub(super) async fn resolve_bidder_postgres(
     }
 
     let (user_id, registration_state) = if let Some(row) = rows.first() {
-        let user_id: Uuid = row.try_get("id").map_err(|_| storage_error("读取论坛用户标识失败"))?;
-        let user_status: String =
-            row.try_get("status").map_err(|_| storage_error("读取论坛用户状态失败"))?;
-        let key_status: String =
-            row.try_get("key_status").map_err(|_| storage_error("读取论坛用户 key 状态失败"))?;
-        let username: String =
-            row.try_get("username").map_err(|_| storage_error("读取论坛玩家名称失败"))?;
+        let user_id: Uuid =
+            row.try_get("id").map_err(|error| storage_error_from(error, "读取论坛用户标识失败"))?;
+        let user_status: String = row
+            .try_get("status")
+            .map_err(|error| storage_error_from(error, "读取论坛用户状态失败"))?;
+        let key_status: String = row
+            .try_get("key_status")
+            .map_err(|error| storage_error_from(error, "读取论坛用户 key 状态失败"))?;
+        let username: String = row
+            .try_get("username")
+            .map_err(|error| storage_error_from(error, "读取论坛玩家名称失败"))?;
         let forum_account_id: Option<String> = row
             .try_get("forum_account_id")
-            .map_err(|_| storage_error("读取用户论坛账号 ID 失败"))?;
+            .map_err(|error| storage_error_from(error, "读取用户论坛账号 ID 失败"))?;
         let has_world_identity: bool = row
             .try_get("has_world_identity")
-            .map_err(|_| storage_error("读取论坛用户现有映射失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛用户现有映射失败"))?;
         if user_id.is_nil()
             || user_status != "active"
             || !matches!(key_status.as_str(), "active" | "revoked")
@@ -239,7 +255,7 @@ pub(super) async fn resolve_bidder_postgres(
         .bind(external_account_id)
         .execute(&mut *transaction)
         .await
-        .map_err(|_| storage_error("创建论坛 forum-only 用户失败"))?;
+        .map_err(|error| storage_error_from(error, "创建论坛 forum-only 用户失败"))?;
         (user_id, "forum_only")
     };
 
@@ -258,8 +274,11 @@ pub(super) async fn resolve_bidder_postgres(
     .bind(registration_state)
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("保存论坛玩家身份失败"))?;
-    transaction.commit().await.map_err(|_| storage_error("提交论坛身份事务失败"))?;
+    .map_err(|error| storage_error_from(error, "保存论坛玩家身份失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交论坛身份事务失败"))?;
     Ok(ForumBidderIdentity {
         user_id: UserId::from_uuid(user_id),
         external_account_id: external_account_id.to_owned(),
@@ -297,7 +316,7 @@ async fn update_user_identity(
     .bind(previous_forum_account_id)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| storage_error("追加论坛身份变更历史失败"))?;
+    .map_err(|error| storage_error_from(error, "追加论坛身份变更历史失败"))?;
     sqlx::query(
         "INSERT INTO public.audit_records
             (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id,
@@ -315,7 +334,7 @@ async fn update_user_identity(
     .execute(&mut **transaction)
     .await
     .record_audit_failure()
-    .map_err(|_| storage_error("追加论坛身份审计记录失败"))?;
+    .map_err(|error| storage_error_from(error, "追加论坛身份审计记录失败"))?;
     // 用户快照时间不倒退；旧 MM 记录可能带有偏快的外部时间，不能让后续论坛绑定破坏投影。
     sqlx::query(
         "UPDATE public.users
@@ -339,7 +358,7 @@ async fn update_user_identity(
     .bind(user_id)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| storage_error("同步论坛账号与玩家名称失败"))?;
+    .map_err(|error| storage_error_from(error, "同步论坛账号与玩家名称失败"))?;
     Ok(())
 }
 

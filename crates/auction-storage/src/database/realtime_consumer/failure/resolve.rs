@@ -1,5 +1,8 @@
 //! Realtime consumer failure 的 replay 收口；事务入口供 Admin 在同一事务内原子追加替代事件并越过原失败。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::ApplicationError;
 use chrono::{DateTime, Utc};
 use sqlx::Row;
@@ -30,25 +33,25 @@ pub(crate) async fn resolve_failure_postgres_tx(
     .bind(event_id)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 实时失败记录失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时失败记录失败"))?;
     let Some(failure) = failure else {
         return Err(storage_error("PostgreSQL 实时失败记录不存在"));
     };
     let original_stream: String = failure
         .try_get("stream_key")
-        .map_err(|_| storage_error("读取 PostgreSQL 原实时 stream 失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 原实时 stream 失败"))?;
     let original_sequence: i64 = failure
         .try_get("stream_sequence")
-        .map_err(|_| storage_error("读取 PostgreSQL 原实时序号失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 原实时序号失败"))?;
     if original_stream != stream_key {
         return Err(storage_error("PostgreSQL 原实时事件不属于指定 stream"));
     }
     let existing_replay: Option<Uuid> = failure
         .try_get("replay_event_id")
-        .map_err(|_| storage_error("读取 PostgreSQL 重放事件引用失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 重放事件引用失败"))?;
     let already_resolved: Option<DateTime<Utc>> = failure
         .try_get("resolved_at")
-        .map_err(|_| storage_error("读取 PostgreSQL 失败解决时间失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 失败解决时间失败"))?;
     if existing_replay.is_some_and(|existing_replay| existing_replay != replay_event_id) {
         return Err(storage_error("PostgreSQL 实时失败记录已有其他重放事件"));
     }
@@ -62,17 +65,17 @@ pub(crate) async fn resolve_failure_postgres_tx(
     .bind(replay_event_id)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| storage_error("读取 PostgreSQL 重放事件失败"))?
+    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 重放事件失败"))?
     .ok_or_else(|| storage_error("PostgreSQL 重放事件不存在"))?;
     let replay_stream: String = replay
         .try_get("stream_key")
-        .map_err(|_| storage_error("读取 PostgreSQL 重放 stream 失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 重放 stream 失败"))?;
     let replay_sequence: i64 = replay
         .try_get("stream_sequence")
-        .map_err(|_| storage_error("读取 PostgreSQL 重放序号失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 重放序号失败"))?;
     let replay_of_event_id: Option<Uuid> = replay
         .try_get("replay_of_event_id")
-        .map_err(|_| storage_error("读取 PostgreSQL 重放原事件引用失败"))?;
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 重放原事件引用失败"))?;
     if replay_stream != stream_key
         || replay_sequence <= original_sequence
         || replay_of_event_id != Some(event_id)
@@ -91,7 +94,7 @@ pub(crate) async fn resolve_failure_postgres_tx(
     .bind(stream_key)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| storage_error("初始化 PostgreSQL 重放消费游标失败"))?;
+    .map_err(|error| storage_error_from(error, "初始化 PostgreSQL 重放消费游标失败"))?;
     let current = sqlx::query_scalar::<_, i64>(
         "SELECT last_sequence
          FROM public.realtime_consumer_offsets
@@ -102,7 +105,7 @@ pub(crate) async fn resolve_failure_postgres_tx(
     .bind(stream_key)
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| storage_error("锁定 PostgreSQL 重放消费游标失败"))?;
+    .map_err(|error| storage_error_from(error, "锁定 PostgreSQL 重放消费游标失败"))?;
     let predecessor = original_sequence
         .checked_sub(1)
         .ok_or_else(|| storage_error("PostgreSQL 原实时序号无效"))?;
@@ -120,7 +123,7 @@ pub(crate) async fn resolve_failure_postgres_tx(
         .bind(original_sequence)
         .execute(&mut **transaction)
         .await
-        .map_err(|_| storage_error("推进 PostgreSQL 重放消费游标失败"))?;
+        .map_err(|error| storage_error_from(error, "推进 PostgreSQL 重放消费游标失败"))?;
     }
     sqlx::query(
         "UPDATE public.realtime_failures
@@ -133,6 +136,6 @@ pub(crate) async fn resolve_failure_postgres_tx(
     .bind(replay_event_id)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| storage_error("解决 PostgreSQL 实时重放失败记录失败"))?;
+    .map_err(|error| storage_error_from(error, "解决 PostgreSQL 实时重放失败记录失败"))?;
     Ok(())
 }

@@ -1,5 +1,8 @@
 //! 论坛主题同步任务的 PostgreSQL 领取、租约和 fencing。
 
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
+
 use auction_application::{ApplicationError, ForumSyncClaim};
 use auction_domain::AuctionId;
 use chrono::{DateTime, Utc};
@@ -24,8 +27,11 @@ pub(super) async fn claim_due_postgres(
         .copied()
         .map(auction_domain::SettlementWorld::as_str)
         .collect::<Vec<_>>();
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("开启论坛同步领取事务失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启论坛同步领取事务失败"))?;
     // 旧版只在拍卖首次进入 live 时建立一次主题任务；不能在 Worker 重启后为历史终态拍卖补帖。
     sqlx::query(
         "INSERT INTO public.auction_forum_sync (auction_id, source_revision)
@@ -36,7 +42,7 @@ pub(super) async fn claim_due_postgres(
     )
     .execute(&mut *transaction)
     .await
-    .map_err(|_| storage_error("初始化论坛同步投影失败"))?;
+    .map_err(|error| storage_error_from(error, "初始化论坛同步投影失败"))?;
 
     // 启动水位仅重新领取历史凭据失败或未知写入；原失败码随 claim 传给 Worker，后者只能只读对账。
     // updated_at 越过首轮水位后不再走此分支，避免同一进程热循环；人工授权门禁不在白名单内。
@@ -80,20 +86,22 @@ pub(super) async fn claim_due_postgres(
     .bind(&available_worlds)
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取 due 论坛同步任务失败"))?;
+    .map_err(|error| storage_error_from(error, "读取 due 论坛同步任务失败"))?;
 
     let mut claims = Vec::with_capacity(rows.len());
     for row in rows {
-        let auction_id: Uuid =
-            row.try_get("auction_id").map_err(|_| storage_error("读取论坛同步拍卖标识失败"))?;
-        let source_revision: i64 =
-            row.try_get("state_version").map_err(|_| storage_error("读取论坛同步源版本失败"))?;
+        let auction_id: Uuid = row
+            .try_get("auction_id")
+            .map_err(|error| storage_error_from(error, "读取论坛同步拍卖标识失败"))?;
+        let source_revision: i64 = row
+            .try_get("state_version")
+            .map_err(|error| storage_error_from(error, "读取论坛同步源版本失败"))?;
         let previous_failure_code: Option<String> = row
             .try_get("previous_failure_code")
-            .map_err(|_| storage_error("读取论坛同步前序失败码失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛同步前序失败码失败"))?;
         let existing_thread_id: Option<String> = row
             .try_get("existing_thread_id")
-            .map_err(|_| storage_error("读取论坛同步历史主题标识失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛同步历史主题标识失败"))?;
         if source_revision <= 0 {
             return Err(storage_error("论坛同步源版本无效"));
         }
@@ -122,13 +130,13 @@ pub(super) async fn claim_due_postgres(
         .bind(now)
         .fetch_optional(&mut *transaction)
         .await
-        .map_err(|_| storage_error("写入论坛同步租约失败"))?;
+        .map_err(|error| storage_error_from(error, "写入论坛同步租约失败"))?;
         let Some(updated) = updated else {
             return Err(storage_error("论坛同步租约在事务内发生变化"));
         };
         let claim_fencing: i64 = updated
             .try_get("claim_fencing")
-            .map_err(|_| storage_error("读取论坛同步 fencing 失败"))?;
+            .map_err(|error| storage_error_from(error, "读取论坛同步 fencing 失败"))?;
         if claim_fencing < 1 {
             return Err(storage_error("论坛同步 fencing 无效"));
         }
@@ -144,6 +152,9 @@ pub(super) async fn claim_due_postgres(
             previous_failure_code,
         });
     }
-    transaction.commit().await.map_err(|_| storage_error("提交论坛同步领取事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交论坛同步领取事务失败"))?;
     Ok(claims)
 }
