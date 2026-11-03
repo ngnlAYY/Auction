@@ -1,0 +1,33 @@
+# 专用备份目录须预建为 auction 所有、0700；合并部署把 config-dir 改为 /var/lib/auction/config。
+# 备份在线读取一致性快照，不启动/停止三个角色，也不执行迁移。
+[Unit]
+Description=Auction scheduled PostgreSQL backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=auction
+Group=auction
+WorkingDirectory=/opt/auction
+UMask=0077
+StateDirectory=auction/backup
+StateDirectoryMode=0700
+ExecStart=/opt/auction/bin/auction-cli --config-dir /etc/auction backup scheduled --database auction --output-dir /var/backups/auction/scheduled --state-dir /var/lib/auction/backup
+Restart=no
+# CLI 总预算最多 7200 秒，额外十分钟留给终态同步、单次打卡和进程收口。
+TimeoutStartSec=130min
+TimeoutStopSec=60s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/backups/auction/scheduled /var/lib/auction/backup
+StandardOutput=journal
+StandardError=journal

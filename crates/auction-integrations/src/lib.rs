@@ -1,5 +1,7 @@
 //! 外部服务适配器的薄 crate 入口。
 
+#[cfg(feature = "backup")]
+mod backup;
 mod clients;
 mod credentials;
 mod cryptobox;
@@ -7,6 +9,11 @@ mod equipment;
 mod forum;
 mod login_key;
 
+#[cfg(feature = "backup")]
+pub use backup::{
+    BackupHeartbeatResult, BackupHeartbeatStatus, BackupObject, BackupObjectStatus,
+    BackupStoreError, R2BackupStore, send_backup_heartbeat,
+};
 pub use clients::{ehentai, mooglemail};
 pub use credentials::{CredentialAcquirer, CredentialSealer, CredentialVerifier};
 pub use cryptobox::{

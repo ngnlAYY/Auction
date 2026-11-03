@@ -1,0 +1,15 @@
+# 默认周场 UTC 周五 00:00 开拍、周六 12:00 结束，Final 提前 15 分钟；
+# 默认早鸟（含赛季前场）18:00 结束，全部 lot 截止后结算。因此选择每日 03:15–03:30，
+# 即使 CLI 用满两小时也避开这些默认时段。自定义排期或长时间软截止须另行调整 timer。
+[Unit]
+Description=Auction daily PostgreSQL backup timer
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+RandomizedDelaySec=15min
+AccuracySec=1min
+Unit=auction-backup.service
+
+[Install]
+WantedBy=timers.target

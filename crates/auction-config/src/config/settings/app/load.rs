@@ -30,6 +30,7 @@ impl AppConfig {
                 tracing: TracingSettings::default(),
                 realtime: RealtimeConfig::default(),
                 cache: CacheConfig::default(),
+                backup: BackupConfig::default(),
                 auction: AuctionConfig::default(),
                 worker: WorkerConfig::default(),
                 http_security: None,
@@ -98,7 +99,7 @@ impl AppConfig {
         }
         let common_config_path = resolve_config_path(config_path.as_deref(), common_file);
         let common = load_common_file(&common_config_path)?;
-        let CommonFileConfig { log_filter, metrics, cache, auction } = common;
+        let CommonFileConfig { log_filter, metrics, cache, backup, auction } = common;
         let worker = resolve_worker_paths(config_path.as_deref(), worker);
         let secrets_path = Some(resolve_secrets_path(config_path.as_deref(), secrets_file));
         let runtime_config_path =
@@ -122,6 +123,7 @@ impl AppConfig {
                 tracing,
                 realtime,
                 cache,
+                backup,
                 auction,
                 worker,
                 http_security,

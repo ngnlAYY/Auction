@@ -22,7 +22,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2 = { workspace = true, optional = true }
 # 必填：systemctl/pg_dump 子进程与 readiness 探针的有界读写。
-tokio = { workspace = true, features = ["io-util", "process"] }
+tokio = { workspace = true, features = ["fs", "io-util", "process"] }
 url = { workspace = true, optional = true }
 uuid.workspace = true
 
@@ -36,6 +36,7 @@ postgres = [
     "dep:auction-contracts",
     "dep:auction-domain",
     "dep:auction-integrations",
+    "auction-integrations/backup",
     "dep:auction-observability",
     "dep:chrono",
     "dep:sha2",

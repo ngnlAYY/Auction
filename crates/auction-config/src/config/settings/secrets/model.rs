@@ -16,6 +16,12 @@ pub(crate) struct SecretFileConfig {
     /// 兼容旧 PostgreSQL 连接串；数据库进程按需读取，不能写入主配置。
     pub(crate) database_url: Option<String>,
     pub(crate) redis_url: Option<String>,
+    /// 定时备份成功和失败的可选打卡地址；空字符串表示未配置。
+    pub(crate) backup_heartbeat_success_url: Option<String>,
+    pub(crate) backup_heartbeat_failure_url: Option<String>,
+    /// 只限备份 bucket 的 R2 令牌；不得从环境或实例元数据解析。
+    pub(crate) backup_r2_access_key_id: Option<String>,
+    pub(crate) backup_r2_secret_access_key: Option<String>,
     /// 仅用于明确拒绝已废弃字段，不保留或使用其密钥材料。
     #[serde(rename = "session_signing_key")]
     pub(crate) obsolete_session_signing_key: Option<serde::de::IgnoredAny>,
@@ -132,6 +138,10 @@ impl fmt::Debug for MoogleMailKeyEnv {
 pub(crate) struct AppSecrets {
     pub(crate) database_url: Option<SecretString>,
     pub(crate) redis_url: Option<SecretString>,
+    pub(crate) backup_heartbeat_success_url: Option<SecretString>,
+    pub(crate) backup_heartbeat_failure_url: Option<SecretString>,
+    pub(crate) backup_r2_access_key_id: Option<SecretString>,
+    pub(crate) backup_r2_secret_access_key: Option<SecretString>,
     pub(crate) ehentai_cookie: Option<SecretString>,
     pub(crate) mooglemail_cookie: Option<SecretString>,
     pub(crate) public_otlp_headers: Option<SecretString>,
@@ -173,6 +183,24 @@ impl AppSecrets {
         }
         Ok(Self {
             database_url: resolve_database_url(secret.database, secret.database_url)?,
+            backup_heartbeat_success_url: secret
+                .backup_heartbeat_success_url
+                .filter(|value| !value.is_empty())
+                .map(|value| SecretString::new("backup_heartbeat_success_url", value))
+                .transpose()?,
+            backup_heartbeat_failure_url: secret
+                .backup_heartbeat_failure_url
+                .filter(|value| !value.is_empty())
+                .map(|value| SecretString::new("backup_heartbeat_failure_url", value))
+                .transpose()?,
+            backup_r2_access_key_id: secret
+                .backup_r2_access_key_id
+                .map(|value| SecretString::new("backup_r2_access_key_id", value))
+                .transpose()?,
+            backup_r2_secret_access_key: secret
+                .backup_r2_secret_access_key
+                .map(|value| SecretString::new("backup_r2_secret_access_key", value))
+                .transpose()?,
             redis_url: secret
                 .redis_url
                 .map(|value| SecretString::new("redis_url", value))

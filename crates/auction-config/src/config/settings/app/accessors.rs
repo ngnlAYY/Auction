@@ -4,6 +4,26 @@ use super::super::*;
 use super::model::AppConfig;
 
 impl AppConfig {
+    /// R2 access key 只交给备份传输适配器，不得记录或持久化副本。
+    pub fn backup_r2_access_key_id(&self) -> Option<&str> {
+        self.secrets.backup_r2_access_key_id.as_ref().map(SecretString::expose_secret)
+    }
+
+    /// R2 secret 只交给备份传输适配器，不得记录或持久化副本。
+    pub fn backup_r2_secret_access_key(&self) -> Option<&str> {
+        self.secrets.backup_r2_secret_access_key.as_ref().map(SecretString::expose_secret)
+    }
+
+    /// 返回成功打卡地址；只能交给备份传输适配器，不得记录或持久化。
+    pub fn backup_heartbeat_success_url(&self) -> Option<&str> {
+        self.secrets.backup_heartbeat_success_url.as_ref().map(SecretString::expose_secret)
+    }
+
+    /// 返回失败打卡地址；只能交给备份传输适配器，不得记录或持久化。
+    pub fn backup_heartbeat_failure_url(&self) -> Option<&str> {
+        self.secrets.backup_heartbeat_failure_url.as_ref().map(SecretString::expose_secret)
+    }
+
     /// 返回数据库 URL。调用方不得把返回值写入日志、错误消息或 DTO。
     pub fn database_url(&self) -> Option<&str> {
         self.secrets.database_url.as_ref().map(SecretString::expose_secret)

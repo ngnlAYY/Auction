@@ -20,15 +20,15 @@
 | 文件 | 拥有 |
 | --- | --- |
 | 角色文件 | `common_file`、`secrets_file`（必填，相对路径以角色文件所在目录解析）；可选 `runtime_config_file`；Admin 另有 `worker_config_file`；listener、tracing、HTTP 安全、会话（Public/Admin）、realtime（Public）、`[worker.*]`（Worker） |
-| `common.toml` | `log_filter`、`[metrics]`、`[cache]`、`[auction.*]`（排期、早鸟、经济、结算、恢复策略） |
-| `secrets.toml` | 数据库、Redis URL、外部 Cookie、Admin 登录凭据、三组数据密钥、OTLP 导出头 |
+| `common.toml` | `log_filter`、`[metrics]`、`[cache]`、`[auction.*]`（排期、早鸟、经济、结算、恢复策略）、CLI 专用 `[backup]` |
+| `secrets.toml` | 数据库、Redis URL、外部 Cookie、Admin 登录凭据、三组数据密钥、OTLP 导出头、R2 备份令牌与可选打卡地址 |
 | `runtime/admin.toml` | 可由 Admin 后台修改的运行参数（见下文） |
 
 ### 加载规则
 
 - 角色文件路径：Public/Worker 的 `AppConfig::load` 先读取 `AUCTION_CONFIG_FILE`，未设置时尝试当前目录下的 `ops/config/<角色>.toml`，不存在则构造内置默认配置；正式装配仍要求数据库等依赖齐备。Admin 入口另会尝试 `auction-config/admin.toml`，仍不存在才进入首次设置。这些是运行时发现路径，仓库模板位于 `ops/config/examples/`。`auction-server` 与 `auction-cli` 使用 `--config-dir` 指定目录，不用该环境变量选择配置；`auction-server` 检测到它会拒绝启动。
 - 除 `AUCTION_CONFIG_FILE` 外不存在任何环境变量覆盖；任何字段都只能写在文件中。
-- 所有配置解析与校验错误都在启动前失败，错误不回显秘密值。角色、公共、普通敏感与 runtime 文件大小上限为 4 MiB；独立维护凭据另限 64 KiB。
+- 所有角色运行配置的解析与校验错误都在启动前失败，错误不回显秘密值。CLI 专用 `[backup]` 的范围和打卡 URL 由 CLI 校验，常驻角色仅解析保留。角色、公共、普通敏感与 runtime 文件大小上限为 4 MiB；独立维护凭据另限 64 KiB。
 - 三个角色必须引用同一个 `common_file`，并且同时引用同一个 `runtime_config_file`（或全部省略）；三角色数据库目标必须相同。`auction-cli config check` 会联合检查这些一致性。
 
 ## 敏感文件（`secrets.toml`）
@@ -43,6 +43,8 @@
 | `credential_data_key_id` / `credential_data_key` | 外部 Cookie 加密（凭据管理、Worker 读取数据库凭据、诊断归档） |
 | `mooglemail_cookie`、`ehentai_cookie` | 直接配置的 Cookie（不使用数据库凭据时） |
 | `public_otlp_headers`、`admin_otlp_headers`、`worker_otlp_headers` | 各角色 OTLP 导出头 |
+| `backup_heartbeat_success_url`、`backup_heartbeat_failure_url` | Worker 所引用敏感文件中的可选完整打卡地址；各自默认空，不要求成对。仅接受无 userinfo、无 fragment 的 HTTPS URL，最多 4096 字节且不含控制字符或首尾空白；`config check` 校验且不回显地址 |
+| `backup_r2_access_key_id`、`backup_r2_secret_access_key` | Worker 所引用敏感文件中的 R2 令牌，成对且非空、无控制字符；异机启用时必填，只限目标 bucket 对象读写；见[异机副本](#异机副本) |
 
 三组数据密钥都是 32 字节随机数的标准 Base64（`openssl rand -base64 32`），标识与材料必须成对，三组不能复用。密钥缺失时对应能力不可用（接口返回能力不可用，Worker 相关功能拒绝启用）。
 
@@ -55,6 +57,7 @@
 | `log_filter` | tracing 过滤器（`EnvFilter` 语法），默认 `info,<服务名>=debug` |
 | `[metrics]` | `enabled`：是否提供 `/metrics`；Public/Admin 开启时 listener 必须是 loopback 或 Unix socket |
 | `[cache]` | 见[缓存](#缓存) |
+| `[backup]` | CLI 专用定时备份策略，见[定时备份策略](#定时备份策略) |
 | `[auction.schedule]` | 周排期：时区、预览/开拍/计划结束的星期与时间、参与世界 |
 | `[auction.schedule.early_bird]` | 赛季早鸟期：赛季开始日期与时间、窗口天数、开拍日、开拍钟点、预览提前量、竞价时长、赛季前场次、窗口内品质、赛季前暂停收件 |
 | `[auction.economics]` | 新场次的经济规则：默认起拍价、加价比例、软截止窗口与延长、代理开关/默认模式/慢速间隔/设置次数上限、Final 提前量 |
@@ -62,6 +65,33 @@
 | `[auction.settlement.recovery]` | 恢复策略：v1 固定 7 天、v2 固定 24 小时，`payment_timeout_seconds` 必须与版本对应；提醒次数固定 1，COD 退回上限可配。自动排期的赛季前场次覆盖为 v2 |
 
 经济、结算与恢复策略在**创建场次时冻结**，修改模板只影响之后创建的场次；排期控制后续计划与早鸟收件窗口，不改写已创建场次的时间与策略快照。业务含义见[业务规则](../../docs/business-rules.md)与[结算与履约](../../docs/guide/settlement.md)。
+
+### 定时备份策略
+
+`common.toml [backup]` 全部字段可省略；只有 `backup scheduled` 和 CLI `config check` 消费、校验运维语义，Public/Admin/Worker 不据此启动任务，也不应用这些范围校验。不放进 Admin runtime。启用与回退分别是用户启用与停用 timer，没有额外 enabled 开关；每次 CLI 启动重新读取配置。
+
+| 字段 | 默认值 | 范围 |
+| --- | --- | --- |
+| `local_retention_count` | `7` | `1–365`，本地已完成定时备份份数 |
+| `min_free_bytes` | `1073741824`（1 GiB） | `67108864–1099511627776`（64 MiB–1 TiB） |
+| `min_free_percent` | `10` | `1–50`，与字节水位同时满足 |
+| `timeout_seconds` | `7200` | `60–7200`，自本次启动起的任务预算 |
+
+目录和数据库名仍是 CLI 参数。scheduled 只加载 Worker 及其引用文件，再调用 `validate_backup()`；不依赖 Public/Admin 的联合预检。`config check` 继续联合检查并报告普通 `backup` 参数及 Worker 两个地址的配置标志，`config show` 同样只投影这些安全信息。打卡客户端一次 HTTPS GET，连接三秒、请求五秒，不重试、不使用环境代理、重定向或 Cookie；任何打卡失败不改变备份结果，发送结果只写 stderr/systemd journal，终态回执只保存 `heartbeat_configured`。外部服务按决策暂缓启用，敏感示例保持注释/空值，地址不得进入日志或回执。启用、回执和故障处置见[备份与恢复手册](../deploy/RECOVERY.md#定时备份)。
+
+#### 异机副本
+
+`common.toml [backup.offsite]` 同样只由 CLI 消费，默认关闭；`enabled = false` 在下次 scheduled 生效，暂停加密、上传和旧待上传项的重试，不影响本地备份或角色进程。重新启用后继续原待上传项。启用前必须完成[离线密钥托管与 R2 设置](../deploy/RECOVERY.md#异机副本前置准备)，特别是 daily/monthly 的 bucket lock；CLI 不代替用户检查或修改控制台策略。
+
+| 字段 | 默认值 | 校验 |
+| --- | --- | --- |
+| `enabled` | `false` | 为 true 时下面四项及成对 R2 凭据必填 |
+| `age_recipient` | `""` | age 原生 X25519 公钥，62 字节、小写 `age1` 与 bech32 字符集；加密由主机 age 校验，不提供私钥或口令字段 |
+| `endpoint` | `""` | HTTPS 根地址，无 userinfo、query、fragment 或额外路径 |
+| `bucket` | `""` | 3–63 字节的小写字母、数字或连字符，首尾为字母/数字；拒绝保留名称 |
+| `prefix` | `""` | 最多 512 字节的字母、数字、`-_.` 与 `/`，无首尾斜杠、空段、`.` 段或 `..` |
+
+Worker 引用的敏感 TOML 根字段 `backup_r2_access_key_id` 与 `backup_r2_secret_access_key` 必须成对、非空、不超过 4096 字节，无首尾空白或控制字符；禁用时可以全部省略。它们由 `SecretString` 保存，仅经显式 getter 交给 R2 适配器，不能放在 common、角色或 runtime 文件。公钥、endpoint、bucket 和 prefix 是普通配置。`config check` 校验启用依赖及字段格式，但不执行 age、不连接 R2；`config check` 与 `config show` 对异机字段只输出 enabled 及是否配置，绝不输出字段值、令牌或签名 URL。错误只有字段名与固定原因。轮换令牌不改变待上传身份；更换公钥或目的地后，哈希不匹配的旧项保留并记 pending_destination_changed 告警，新目标正常继续备份。旧任务不能自动改投新目标，需由用户在原配置下处理或将原状态与密文整体隔离保留。
 
 ## 角色文件
 

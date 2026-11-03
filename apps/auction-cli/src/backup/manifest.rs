@@ -1,16 +1,14 @@
 //! 备份 manifest 与摘要：manifest 绑定 archive 文件名、SHA-256、库名摘要与 schema 版本。
 //! 格式名沿用 `auction-postgres-backup.v1`，以前的运维工具生成的备份可直接校验与恢复。
 
-use std::{
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use auction_application::lower_hex;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncReadExt;
 
 use crate::support::files;
 
@@ -71,12 +69,12 @@ pub(crate) fn sha256_bytes(bytes: &[u8]) -> String {
 }
 
 /// 流式计算普通文件摘要；拒绝符号链接与特殊文件。
-pub(super) fn sha256_file(path: &Path) -> anyhow::Result<String> {
-    let mut file = files::open_regular(path)?;
+pub(super) async fn sha256_file(path: &Path) -> anyhow::Result<String> {
+    let mut file = tokio::fs::File::from_std(files::open_regular(path)?);
     let mut digest = Sha256::new();
     let mut buffer = vec![0_u8; 256 * 1024];
     loop {
-        let count = file.read(&mut buffer).context("读取 archive 失败")?;
+        let count = file.read(&mut buffer).await.context("读取 archive 失败")?;
         if count == 0 {
             break;
         }

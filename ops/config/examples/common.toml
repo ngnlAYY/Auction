@@ -1,4 +1,4 @@
-# 三角色共同引用的非敏感配置示例；只拥有跨角色一致的日志、指标、缓存与拍卖策略，其余字段归角色文件或敏感文件。
+# 三角色共同引用的非敏感配置示例；拥有跨角色策略与 CLI 专用备份策略，其余字段归角色文件或敏感文件。
 
 # 可选：tracing 过滤器；省略时使用进程默认过滤器。
 log_filter = "info,auction=debug"
@@ -14,6 +14,30 @@ enabled = false
 backend = "disabled"
 # 可选：Public 规则读模型缓存 TTL 秒数，范围 1-3600，默认 30。
 public_rules_ttl_seconds = 30
+
+# 可选区块：仅由 CLI 的 backup scheduled 消费；省略时取以下默认值，启停由 systemd timer 控制。
+[backup]
+# 可选：本地保留最近多少份已完成定时备份，默认 7，范围 1–365；不清理手动备份。
+local_retention_count = 7
+# 可选：备份文件系统至少剩余的可用字节，默认 1 GiB，范围 64 MiB–1 TiB；不足时失败关闭。
+min_free_bytes = 1073741824
+# 可选：备份文件系统至少剩余的可用百分比，默认 10，范围 1–50；与字节阈值同时满足。
+min_free_percent = 10
+# 可选：本次备份的总预算秒数，默认 7200，范围 60–7200；到期写失败回执，不执行保留点腾挪。
+timeout_seconds = 7200
+
+# 可选区块：异机副本仅由 backup scheduled 消费；启用前须安装 age、托管私钥并配置 R2 bucket lock。
+[backup.offsite]
+# 可选：默认 false；设为 true 后以下四个字段和 Worker 敏感文件中的成对 R2 凭据必填，下一次运行生效。
+enabled = false
+# 可选：默认空，启用时必填；离线生成的 age1 开头 X25519 公钥，服务器不保存私钥或口令。
+age_recipient = ""
+# 可选：默认空，启用时必填；R2 S3 API HTTPS 根地址，不含 userinfo、查询或 fragment。
+endpoint = ""
+# 可选：默认空，启用时必填；预先建立且已配置生命周期与 bucket lock 的 bucket 名。
+bucket = ""
+# 可选：默认空，启用时必填；例如 auction，无首尾斜杠、空段或点段；daily/monthly 由工具追加。
+prefix = ""
 
 # 可选区块：每周自动建立拍卖的时间表；省略时使用同样时间但保持关闭。
 [auction.schedule]

@@ -767,6 +767,8 @@ package_release() (
 		"ops/deploy/retention-policy.v1.json|retention-policy.v1.json|644" \
 		"ops/deploy/caddy/Caddyfile|caddy/Caddyfile|644" \
 		"$temporary_root/SYSTEMD.md|systemd/README.md|644" \
+		"ops/deploy/systemd/auction-backup.service.example|systemd/auction-backup.service.example|644" \
+		"ops/deploy/systemd/auction-backup.timer.example|systemd/auction-backup.timer.example|644" \
 		"ops/config/README.md|config/README.md|644" \
 		"ops/config/examples/common.toml|config/examples/common.toml|640" \
 		"ops/config/examples/public.toml|config/examples/public.toml|640" \

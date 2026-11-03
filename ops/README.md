@@ -15,6 +15,10 @@
 
 发布包（`auction-rust-<版本>-<提交前 12 位>[-single].tar.gz`）包含 `bin/`（分体包：三个角色程序 + `auction-cli`；合并包：`auction-server` + `auction-cli`）、`docs/`（部署、恢复、CLI 说明与 Web 资源摘要）、`systemd/`、`caddy/`、`config/examples/` 与 `retention-policy.v1.json`；分体包另含 `tmpfiles/`，合并包另含首次设置代理示例与单文件说明（以上均为发布包内的路径）。敏感模板以 `secrets.toml.example`、`secrets/postgres-rebuild.toml.example` 命名，须复制为配置引用的实际文件名。用发布包内的 `SHA256SUMS` 校验解压后的文件。
 
+两种发布包均包含 `auction-backup.service.example` 与 `auction-backup.timer.example`；仅由用户按[定时备份](deploy/RECOVERY.md#定时备份)单独安装启用，不随三个角色服务自动开启。
+
+启用异机副本还须安装主机 `age`、离线托管三组数据密钥及 age 私钥，并由用户在 R2 控制台配置限定 bucket 的令牌、生命周期与 bucket lock，见[异机副本前置准备](deploy/RECOVERY.md#异机副本前置准备)。
+
 ## 目录与账号
 
 | 路径 | 内容 | 建议属主与权限 |
@@ -205,7 +209,7 @@ Public/Worker 在 `common.toml` 设置 `[metrics] enabled = true`；Admin 配置
 
 ## 备份与恢复
 
-定期执行 `auction-cli backup create` 并把 archive 与 manifest 复制到异地；恢复、重建与演练流程见[备份与恢复手册](deploy/RECOVERY.md)。
+例行备份使用 `auction-cli backup scheduled` 配合独立 systemd timer，包含磁盘门禁、本地保留和不可变回执；启用、回退与故障处理见[定时备份](deploy/RECOVERY.md#定时备份)。外部打卡暂缓启用，异机加密上传另行交付；当前仍需把 archive 与 manifest 一起复制到异地。升级前确定恢复点继续使用手动 `backup create/verify`。恢复、重建与演练见[备份与恢复手册](deploy/RECOVERY.md)。
 
 ## 故障排查
 
