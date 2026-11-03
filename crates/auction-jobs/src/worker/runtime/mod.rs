@@ -53,7 +53,7 @@ pub use forum_reply::{ForumReplyPorts, ForumReplyRuntime};
 pub use forum_sync::{ForumSyncPorts, ForumSyncRuntime};
 pub use mail_poll::{
     MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
-    MailPollPage, MailPollRuntime, MailPollRuntimeConfig,
+    MailPollPage, MailPollRuntime, MailPollRuntimeConfig, PhasedMailSchedule, mail_world_phase,
 };
 pub use operations_alert::{OperationsAlertRuntime, OperationsAlertRuntimeConfig};
 pub use realtime_consumer::{

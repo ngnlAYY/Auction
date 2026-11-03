@@ -6,7 +6,7 @@ Worker 的调度运行时与本地控制面：把应用层的持久化端口编�
 
 ## 循环
 
-`run_persistent_with_settlement_until_shutdown` 启动持久化运行时，按下表组织循环与阶段。排期 bootstrap、生命周期、慢速代理和结算共享拍卖主循环；邮件维护与 Read Mail 观察在各邮箱周期内和入站处理并发执行，论坛发布与回帖导入共享论坛循环。各阶段保留自己的持久化结果和错误边界。
+`run_persistent_with_settlement_until_shutdown` 启动持久化运行时，按下表组织循环与阶段。排期 bootstrap、生命周期、慢速代理和结算共享拍卖主循环；邮件默认按世界独立运行收件与维护，论坛发布与回帖导入共享论坛循环。各阶段保留自己的持久化结果和错误边界。
 
 | 循环 | 职责 |
 | --- | --- |
@@ -17,12 +17,18 @@ Worker 的调度运行时与本地控制面：把应用层的持久化端口编�
 | 投递 outbox | 领取待发邮件，在 sending fence 内调用 MoogleMail transport，续租并写回终态；结果未知转人工对账 |
 | 恢复 | 付款超时恢复的多阶段动作（提醒、退回、重新上架、退款等），以及余额/证据健康刷新 |
 | 邮件轮询 | 每个世界一个，按 cron 计划读取收件箱、逐封交给业务处理器，推进持久游标；可由 Admin 经 control 手动触发 |
-| 邮箱维护 / Read Mail 观察 | 每个邮箱周期内并发观察 compose 草稿、Sent 与已读邮件列表，受控清理可证明的残留；已读列表只定位既有待读/动作目标，不重新创建历史入站命令 |
+| 邮箱维护 / Read Mail 观察 | 默认每个世界一个独立维护任务，先运行 Sent/Take 恢复与 compose 清理，再按最小间隔观察完整已读列表数量；恢复定位仍由原 reader 按需执行，不重新创建历史入站命令 |
 | 论坛同步 / 回帖 | 发布与刷新拍卖主题、导入回帖中的竞价命令；两阶段错误互相隔离 |
 | 装备 PM | 装备超价提醒的论坛私信队列；由 Worker 装配根独立运行，启用论坛时装配，不依赖邮件开关，停止时立即不再领取 |
 | 运维告警 | 扫描、分发、对账三个独立循环，经 MoogleMail 投递告警邮件 |
 
 每个循环使用 `batch_limit`、`concurrency`、`poll_interval`、`jitter`、`lease_duration`、`item_timeout` 等边界（来自 `[worker.*]` 配置，可由 runtime 接管）。收到停止信号后不再领取新任务，在途任务在有界时间内排空；常驻任务意外退出会把 control 标记为 draining 并触发进程以非零状态退出，由进程管理器重启。
+
+邮件的独立维护任务由 `crates/auction-jobs/src/worker/runtime/runner.rs` 的独立 `JoinSet` 持有，共用 shutdown watch、意外退出监督和总排空截止。每次 `sweep` 与随后到期的纯观察各有一个原 `fetch_timeout` 截止点，阶段内不重置；进入 drain 后不再启动新阶段，在途 `sweep` 保留原 discard 围栏。纯观察首次延后一个间隔，只在 `sweep` 结束后检查，失败也消耗间隔；内存时刻仅减少观察读取，不决定持久任务状态。
+
+收件与维护的日程按同一世界相位平移，再叠加原 jitter；手动 `wakeup` 只唤醒收件。`poll_isolation_enabled = false` 时不启动独立维护任务，恢复原 cron、每轮三分支 join 和原观察频率。维护日程、观察间隔与相位规则见[配置参考](../../ops/config/README.md#mooglemail-收件与维护)，指标口径见[可观测性](../auction-observability/README.md#邮件循环口径)。
+
+世界相位计算与日程平移策略由 [`crates/auction-jobs/src/worker/mail/schedule/mod.rs`](src/worker/mail/schedule/mod.rs) 持有，经 crate 根导出 `mail_world_phase` 与 `PhasedMailSchedule`；Worker 装配根只判断是否启用相位、处理启动错误并注入日程。
 
 拍卖到期提示按读取时的时钟转换为单调截止，查询与网络等待消耗原有等待预算；最后休眠不会把这段耗时再次加回。提示失败仍按常规轮询恢复，实际领取继续依赖数据库事实、租约与命令幂等。
 

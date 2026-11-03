@@ -69,6 +69,23 @@ pub(crate) fn validate_mooglemail_worker(
     if schedule.next_after(Utc::now()).is_none() {
         return Err(ConfigError::InvalidMoogleMailConfig("schedule 必须存在可计算的未来触发时刻"));
     }
+    if let Some(expression) = &config.maintenance_schedule {
+        let schedule = StandardCronSchedule::parse(expression).map_err(|_| {
+            ConfigError::InvalidMoogleMailConfig(
+                "maintenance_schedule 必须是标准五字段 cron、受支持描述符或 @every duration",
+            )
+        })?;
+        if schedule.next_after(Utc::now()).is_none() {
+            return Err(ConfigError::InvalidMoogleMailConfig(
+                "maintenance_schedule 必须存在可计算的未来触发时刻",
+            ));
+        }
+    }
+    if !(60..=86_400).contains(&config.read_mail_observation_interval_seconds) {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "read_mail_observation_interval_seconds 必须位于 60 至 86400",
+        ));
+    }
     if config.jitter_seconds > 86_400 {
         return Err(ConfigError::InvalidMoogleMailConfig("jitter_seconds 必须位于 0 至 86400"));
     }

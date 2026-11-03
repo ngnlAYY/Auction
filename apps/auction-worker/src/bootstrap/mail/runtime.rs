@@ -1,5 +1,7 @@
 //! MoogleMail world gateway、持久化 poll state 和轮询运行时装配。
 
+use auction_jobs::{PhasedMailSchedule, mail_world_phase};
+
 use super::super::*;
 
 struct MoogleMailWorkerGateway {
@@ -12,6 +14,7 @@ struct MoogleMailWorkerGateway {
 pub(super) struct MailPollRuntimePorts {
     pub(super) store: Arc<DatabaseStore>,
     pub(super) schedule: Arc<dyn RecurringSchedule>,
+    pub(super) maintenance_schedule: Arc<dyn RecurringSchedule>,
     pub(super) progress_observer: Arc<dyn auction_application::MailPollProgressObserver>,
 }
 
@@ -23,8 +26,14 @@ pub(super) async fn build_poll_runtimes(
     processor: Arc<dyn MailProcessor>,
     ports: MailPollRuntimePorts,
 ) -> anyhow::Result<(Vec<MailPollRuntime>, HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>)> {
-    let MailPollRuntimePorts { store, schedule, progress_observer } = ports;
+    let MailPollRuntimePorts { store, schedule, maintenance_schedule, progress_observer } = ports;
     let world_configs = mail_config.configured_worlds();
+    let isekai_phase = if mail_config.poll_isolation_enabled && world_configs.len() > 1 {
+        mail_world_phase(schedule.as_ref(), Utc::now())
+            .context("MoogleMail 日程无法计算两个未来触发时刻")?
+    } else {
+        chrono::Duration::zero()
+    };
     let store_port: Arc<dyn MailPollStore> = store.clone();
     let journal: Arc<dyn auction_application::MailPollReadJournal> = store.clone();
     let mut gateways = HashMap::with_capacity(world_configs.len());
@@ -32,6 +41,26 @@ pub(super) async fn build_poll_runtimes(
     for world_config in world_configs {
         let world = MoogleMailWorld::parse(&world_config.world_id)
             .context("MoogleMail world_id must be main or isekai")?;
+        let phase =
+            if world == MoogleMailWorld::Isekai { isekai_phase } else { chrono::Duration::zero() };
+        let (world_schedule, world_maintenance_schedule): (
+            Arc<dyn RecurringSchedule>,
+            Arc<dyn RecurringSchedule>,
+        ) = if mail_config.poll_isolation_enabled {
+            (
+                Arc::new(PhasedMailSchedule::new(Arc::clone(&schedule), phase)),
+                Arc::new(PhasedMailSchedule::new(Arc::clone(&maintenance_schedule), phase)),
+            )
+        } else {
+            // 回退路径保留原日程，不平移，也不使用新维护节奏。
+            (Arc::clone(&schedule), Arc::clone(&schedule))
+        };
+        tracing::info!(
+            world_id = %world_config.world_id,
+            poll_isolation_enabled = mail_config.poll_isolation_enabled,
+            phase_millis = phase.num_milliseconds(),
+            "MoogleMail 世界轮询路径已装配"
+        );
         let mut gateway = MoogleMailGateway::new(
             Arc::clone(&client),
             credentials.clone(),
@@ -50,7 +79,7 @@ pub(super) async fn build_poll_runtimes(
         let gateway = Arc::new(gateway);
         let now = Utc::now();
         let scheduled_next_at =
-            schedule.next_after(now).context("calculate next MoogleMail poll schedule")?;
+            world_schedule.next_after(now).context("calculate next MoogleMail poll schedule")?;
         store_port
             .ensure_state(
                 world_config.mailbox_key.clone(),
@@ -69,8 +98,12 @@ pub(super) async fn build_poll_runtimes(
             Some(Arc::clone(&processor)),
             world_config.world_id,
             world_config.mailbox_key,
-            Arc::clone(&schedule),
+            world_schedule,
             MailPollRuntimeConfig {
+                poll_isolation_enabled: mail_config.poll_isolation_enabled,
+                read_mail_observation_interval: std::time::Duration::from_secs(
+                    mail_config.read_mail_observation_interval_seconds,
+                ),
                 batch_size: mail_config.batch_size,
                 jitter: std::time::Duration::from_secs(mail_config.jitter_seconds),
                 lease_duration: std::time::Duration::from_secs(mail_config.lease_duration_seconds),
@@ -84,6 +117,7 @@ pub(super) async fn build_poll_runtimes(
                 retry_maximum: std::time::Duration::from_secs(mail_config.retry_maximum_seconds),
             },
         )?
+        .with_maintenance_schedule(world_maintenance_schedule)
         .with_progress_observer(Arc::clone(&progress_observer));
         if let Some(recorder) = client.diagnostic_recorder() {
             runtime = runtime.with_diagnostics(recorder);

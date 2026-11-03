@@ -9,10 +9,11 @@ use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
 use chrono::Duration as ChronoDuration;
 
 use super::super::{PersistentWorker, WorkerError, poll_delay};
+use super::maintenance::{run_maintenance, run_read_observation};
 use super::processing::process_claim;
 use super::{MailPollGateway, MailPollRuntime, MailPollRuntimeConfig};
 
-/// 按旧版语义独立运行一个邮箱：等待下一 cron 时刻与 `[0, jitter]` 后轮询，手动触发跳过等待和 due 时间。
+/// 等待已装配日程与 `[0, jitter]` 后轮询；手动触发跳过等待和 due 时间。
 pub(crate) async fn run_loop<C>(
     worker: Arc<PersistentWorker<C>>,
     runtime: MailPollRuntime,
@@ -90,13 +91,18 @@ where
     }
     let loop_kind = runtime.loop_kind();
     let iteration_started = std::time::Instant::now();
-    // 三条 future 各自有界；慢 Read Mail 或 Sent 不延迟入站领取和另一类观察。
-    // 本轮统一持有、取消和排空，不派生无人持有的后台任务。
-    let (_, _, result) = tokio::join!(
-        run_read_observation(runtime),
-        run_maintenance(runtime),
-        run_cycle_inner(worker, runtime, force),
-    );
+    let result = if runtime.config.poll_isolation_enabled {
+        // 新路径只等待收件；维护由 runner 的独立 JoinSet 监督，不改变 claim/证明/提交边界。
+        run_cycle_inner(worker, runtime, force).await
+    } else {
+        // 旧路径保留每轮三分支 join 与原观察频率；下一轮仍等待最慢分支完成。
+        let (_, _, result) = tokio::join!(
+            run_read_observation(runtime),
+            run_maintenance(runtime),
+            run_cycle_inner(worker, runtime, force),
+        );
+        result
+    };
     let metric_result = match &result {
         Ok(result) => *result,
         Err(_) => WorkerResult::Error,
@@ -178,84 +184,6 @@ where
         super::super::merge_worker_result(&mut iteration_result, item_result);
     }
     Ok(iteration_result)
-}
-
-/// Read Mail 的周期观察独立于发送核对；只定位既有待读/动作目标，不创建历史入站命令。
-async fn run_read_observation(runtime: &MailPollRuntime) {
-    let Some(maintenance) = &runtime.maintenance else { return };
-    let deadline = tokio::time::Instant::now() + runtime.config.fetch_timeout;
-    match tokio::time::timeout_at(
-        deadline,
-        maintenance.observe_read_mail(&runtime.world_id, deadline.into_std()),
-    )
-    .await
-    {
-        Ok(Ok(observed)) => tracing::info!(
-            world_id = %runtime.world_id,
-            read_observed = observed,
-            "MoogleMail Read Mail 共享观察完成"
-        ),
-        Ok(Err(error)) => tracing::warn!(
-            world_id = %runtime.world_id,
-            error = %error,
-            "MoogleMail Read Mail 观察失败；不撤销其它页面处理"
-        ),
-        Err(_) => tracing::warn!(
-            world_id = %runtime.world_id,
-            "MoogleMail Read Mail 观察预算耗尽；不撤销其它页面处理"
-        ),
-    }
-}
-
-async fn run_maintenance(runtime: &MailPollRuntime) {
-    let Some(maintenance) = &runtime.maintenance else { return };
-    // 一次维护共用读取预算；等待数据库、凭据排队、列表/详情及 compose/discard 都不得重置截止点。
-    let deadline = tokio::time::Instant::now() + runtime.config.fetch_timeout;
-    let result = tokio::time::timeout_at(
-        deadline,
-        maintenance.sweep(&runtime.world_id, deadline.into_std()),
-    )
-    .await;
-    match result {
-        Ok(Ok(report)) => {
-            tracing::info!(
-                world_id = %runtime.world_id,
-                compose_clean = report.compose_clean,
-                compose_error = ?report.compose_error,
-                compose_matches = report.compose_matches,
-                discarded = report.discarded,
-                matched_delivery = ?report.matched_delivery,
-                sent_candidates = report.sent_candidates,
-                sent_matched = report.sent_matched,
-                sent_state_failed = report.sent_state_failed,
-                sent_state_error = ?report.sent_state_error,
-                sent_observed = report.sent_observed,
-                sent_recovered = report.sent_recovered,
-                sweep_requeued = report.sweep_requeued,
-                "MoogleMail 共享读取维护完成"
-            );
-        }
-        Err(_) => {
-            tracing::warn!(
-                world_id = %runtime.world_id,
-                "MoogleMail 维护总预算耗尽；保留未知外写围栏，不撤销并行 Inbox 处理"
-            );
-        }
-        Ok(Err(_)) if tokio::time::Instant::now() >= deadline => {
-            tracing::warn!(
-                world_id = %runtime.world_id,
-                "MoogleMail 维护总预算耗尽；保留未知外写围栏，不撤销并行 Inbox 处理"
-            );
-        }
-        Ok(Err(error)) => {
-            // 维护失败不阻断收件轮询，也不把读到的部分观察当作成功。
-            tracing::warn!(
-                error = %error,
-                world_id = %runtime.world_id,
-                "MoogleMail 共享读取维护失败；保留未知外写围栏，不撤销并行 Inbox 处理"
-            );
-        }
-    }
 }
 
 pub(super) struct MailPollProcessContext<C> {

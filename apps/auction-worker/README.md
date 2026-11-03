@@ -31,6 +31,8 @@ cargo run --locked -p auction-worker --features postgres   # 本地开发；优�
 5. **外部凭据运行时所有权**：实际装载 MoogleMail 或论坛凭据时，Worker 用 PostgreSQL session advisory lock 取得对应凭据种类的唯一 owner，同一时刻只有一个 Worker 能使用该类凭据；竞争同一 owner 的第二个实例启动失败。每秒检查一次已取得的所有权，一旦失效（例如数据库连接断开）立即触发排空并以非零状态退出，由进程管理器重启后重新竞争。
 6. 启用 `[worker.control]` 时绑定 control socket（见下文），发布心跳，启动全部循环。
 
+MoogleMail 默认通过 `poll_isolation_enabled = true` 为每个世界独立运行收件与维护，维护按自己的日程先执行 `sweep`，再按默认一小时的最小间隔观察完整 Read Mail 列表。省略维护日程时跟随 Admin 托管覆盖后的收件日程；两个世界使用启动时计算的相位平移日程。参数只在 `worker.toml` 中配置，详见[配置参考](../../ops/config/README.md#mooglemail-收件与维护)。设置开关为 `false` 并重启可恢复原三分支 join 路径，重启须遵守部署时段门禁。
+
 ## 外部能力的启用条件
 
 | 能力 | 配置 | 依赖 |
@@ -57,6 +59,7 @@ cargo run --locked -p auction-worker --features postgres   # 本地开发；优�
 ## 退出
 
 - 第一次终止信号：停止领取新任务，在途任务在 10 秒内排空；超时或第二次信号时强制退出。
+- 独立邮箱维护任务同样受运行时监督与排空：停止后不开始新 `sweep` 或 Read Mail 观察，在途阶段保留原总预算与未知外写围栏。
 - 运行时故障（control 服务停止、装备私信循环停止、持久化循环意外退出、凭据所有权失效）同样触发排空，并**总是以非零状态退出**，由 systemd（`Restart=on-failure`）或 `auction-server` 处理重启。已领取但未完成的任务依靠持久租约恢复：过期后可被重新领取，处于发送中的外部写入只读对账，不会因为退出而重复发送。
 
 ## 部署

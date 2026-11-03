@@ -19,7 +19,7 @@ pub use worker::{
     FulfillmentWorkerRuntimeConfig, MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway,
     MailPollGatewayError, MailPollPage, MailPollRuntime, MailPollRuntimeConfig,
     OperationsAlertRuntime, OperationsAlertRuntimeConfig, PersistentRealtimeConsumer,
-    PersistentWorker, RealtimeConsumerConfigError, RealtimeConsumerRunner, RecoveryHealthRuntime,
-    RecoveryWorkerRuntimeConfig, WorkerError, run_persistent_with_settlement_until_shutdown,
-    run_until_shutdown,
+    PersistentWorker, PhasedMailSchedule, RealtimeConsumerConfigError, RealtimeConsumerRunner,
+    RecoveryHealthRuntime, RecoveryWorkerRuntimeConfig, WorkerError, mail_world_phase,
+    run_persistent_with_settlement_until_shutdown, run_until_shutdown,
 };

@@ -28,6 +28,19 @@
 
 指标在配置中默认关闭；Public/Admin 只有在 loopback TCP 或 Unix listener 上才允许开启，避免直接暴露到公网。反向代理示例对公网屏蔽 `/metrics`。
 
+### 邮件循环口径
+
+`poll_isolation_enabled = true` 时，`mail-main`、`mail-isekai` 的轮次耗时只覆盖收件，不包含独立维护和纯观察；关闭开关时仍覆盖原三分支 join，结果沿用收件分支的口径。新路径增加以下固定 `loop` label，均只计 Worker 阶段指标，不映射为 `BusinessEvent::MailIntake`，不增加业务收件事件与耗时：
+
+| label | 计时与结果 |
+| --- | --- |
+| `mail-maintenance-main`、`mail-maintenance-isekai` | 从 `sweep` 开始到返回，包含数据库等待、凭据排队和全部远端操作；超时或 `Err` 为 `error`，`Ok(report)` 含 `compose_error` 或 `sent_state_error` 也为 `error`，其余为 `success` |
+| `mail-read-observation-main`、`mail-read-observation-isekai` | 仅在完整 Read Mail 纯观察实际执行时记录；成功取得完整列表数量为 `success`，超时或错误为 `error` |
+
+在途阶段因排空超时或任务取消而中断时，守卫记录一次 `canceled`；停止后没有开始的阶段不计轮次。维护与观察不绑定内联或持久重试指标。`auction_worker_loop_iteration_duration_seconds` 的有限桶为 `0.01、0.05、0.1、0.25、0.5、1、5、30、60、120、300` 秒，可用于观察维护 p95 是否低于 60 秒；调度延迟从叠加 jitter 后的计划唤醒时刻开始计算。
+
+Read Mail 日志的 `read_observed` 始终是完整列表数量；观察降频只改变采样节奏，失败不输出部分数量。配置与回退见[配置参考](../../ops/config/README.md#mooglemail-收件与维护)。
+
 ## 心跳与健康
 
 `HeartbeatPublisher` 构造并发布安全心跳，周期由三个角色的装配根调度：每 10 秒写入数据库，TTL 30 秒。内容包括角色、实例 ID、版本、启动时间、readiness、tracing 健康与审计写入失败计数；停止时发布 stopping。`HealthService` 汇总心跳供 Admin 仪表盘展示各进程状态，过期心跳不能证明进程就绪。
