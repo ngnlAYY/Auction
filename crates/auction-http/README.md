@@ -57,6 +57,12 @@ WebSocket 每连接的发送队列有界。队列满时 Hub 淘汰发送端，�
 
 部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true；设为 false 并重启 Public/Admin 回到旧访问行为。该字段不进入 Admin runtime 文档；runtime 只覆盖 `metrics.enabled`，保留部署层拒绝策略。listener 限制和 Caddy 的公网 404 规则继续生效，直接采集与 SSH 隧道见[运维手册](../../ops/README.md#指标)。
 
+`serve_metrics` 为三个装配根提供仅含 `/metrics` 的附加 HTTP 适配，
+接收已绑定 TCP listener，复用上述 boundary 和指标渲染函数。
+只持有同一个 `ProcessMetrics`，不引入业务 state、control 或资源路由；
+服务异常返回装配根，按固定类别记录 ERROR 并仅降级采集。
+完整契约见[三角色附加出口](../../docs/contracts/routes.md#三角色附加指标出口loopback-tcp)。
+
 `HttpReadinessProbe` 由装配根包装完整角色判定，默认只缓存最终布尔值一秒并合并并发；每轮限时 750ms，请求断开不取消共享刷新，panic/取消/超时均发布未就绪并结束单飞。正负都缓存，过期后不继续返回旧成功，响应保持 `no-store`。关闭缓存恢复逐次检查与原请求预算；心跳不复用此缓存。转换延迟及模式语义由[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)定义，配置见[就绪策略](../../ops/config/README.md#就绪策略)。
 
 ## 其他

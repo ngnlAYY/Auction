@@ -52,6 +52,18 @@ MoogleMail 默认通过 `poll_isolation_enabled = true` 为每个世界独立运
 
 ## Worker control
 
+独立采集出口由 common 的 `metrics.worker_loopback_listen_address` 选择，
+省略关闭，示例为 `127.0.0.1:19102`；还须 `metrics.enabled = true`。
+该出口独立于 control socket，不需要启用 control 或扩展 peer allowlist，
+只挂载 `/metrics` 并复用本进程注册表和 `auction-http` 的公共指标契约。
+`reject_forwarded_requests` 对新出口生效；control 原授权方式保持不变。
+绑定/服务失败仅记录固定类别 ERROR，不触发业务退出守卫，也不影响 readiness。
+附加任务随进程退出取消，删除地址并按部署窗口重启即恢复原指标路径。
+Worker 装配根依赖 `auction-http`，不引入 Public/Admin 应用或浏览器 crate，
+不启用 `web-embed`，也不装配任何 Web 资源路由。
+配置见[配置参考](../../ops/config/README.md#commontoml)，
+安装与核对见[运维手册](../../ops/README.md#指标)。
+
 `[worker.control]` 默认关闭；启用后 Worker 在 Unix socket（默认 `/run/hv-auction/worker/control.sock`，组 `auction-worker-control`）上提供 `live`/`ready`/`status`、邮件轮询进度、手动触发轮询与 `/metrics`。连接按内核 peer 凭据检查显式配置的 `allowed_peer_uids`/`allowed_peer_gids`。Admin、`auction-cli service` 与 `auction-server` 都通过该 socket 判断 Worker 状态，详见 [auction-jobs](../../crates/auction-jobs/README.md#worker-control)。
 
 `/v1/health/ready` 在 control 已标记 serving 且未进入排空时返回 200；无数据库骨架也会标记 serving，因此 200 不能单独证明持久化任务或外部能力可用，还需核对数据库配置、轮询器与相关能力状态。

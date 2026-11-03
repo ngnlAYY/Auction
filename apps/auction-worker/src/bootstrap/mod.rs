@@ -158,6 +158,7 @@ async fn run_service(
         .context("initialize Prometheus metrics")?,
     );
     let cache = configure_cache(config).context("configure worker cache")?;
+    let _metrics_task = metrics::start(config, Arc::clone(&metrics));
     tracing::info!(
         database_configured = config.database_url().is_some(),
         cache_backend = cache.backend(),
@@ -263,6 +264,7 @@ mod control;
 mod forum;
 mod fulfillment;
 mod mail;
+mod metrics;
 mod operations_alert;
 mod persistent;
 mod skeleton;

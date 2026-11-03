@@ -7,8 +7,14 @@ log_filter = "info,auction=debug"
 [metrics]
 # 可选：是否启用固定指标端点；省略时关闭。
 enabled = false
-# 可选：Public/Admin 是否拒绝带转发头的指标请求；默认 true，false 回退旧行为，修改需重启；不进入 Admin runtime。
+# 可选：默认 true，拒绝业务指标路由及三角色附加出口的转发请求；修改需重启。
 reject_forwarded_requests = true
+# 可选：省略关闭，enabled 为 true 才监听；只接受 127.0.0.1 与非零端口。
+# public_loopback_listen_address = "127.0.0.1:19100"
+# 可选：省略关闭；Admin runtime 只覆盖 enabled，不覆盖此地址或转发拒绝策略。
+# admin_loopback_listen_address = "127.0.0.1:19101"
+# 可选：省略关闭；独立于 Worker control，不需要扩展 peer UID/GID allowlist。
+# worker_loopback_listen_address = "127.0.0.1:19102"
 
 # 可选区块：三角色共用的 TOML 就绪基线；修改文件须重启，审计/缓存行为可由数据库运行时开关覆盖；不由 Admin runtime 覆盖。
 [readiness]

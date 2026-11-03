@@ -1,0 +1,30 @@
+# 用户安装时固定版本，并核对 collector 名称与启动参数。
+# 启动时仅监听 127.0.0.1:9090，保留 15 天；见同目录 unit。
+# 三角色须启用指标并配置对应附加出口；Admin runtime 只覆盖 enabled。
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: auction-public
+    static_configs:
+      - targets: ['127.0.0.1:19100']
+
+  - job_name: auction-admin
+    static_configs:
+      - targets: ['127.0.0.1:19101']
+
+  - job_name: auction-worker
+    static_configs:
+      - targets: ['127.0.0.1:19102']
+
+  - job_name: node
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['127.0.0.1:9100']
+
+  - job_name: postgres
+    scrape_interval: 60s
+    static_configs:
+      - targets: ['127.0.0.1:9187']

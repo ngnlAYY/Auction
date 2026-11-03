@@ -1,0 +1,18 @@
+[Unit]
+Description=Auction Local Node Exporter
+After=network.target
+
+[Service]
+Type=simple
+User=node_exporter
+Group=node_exporter
+# 安装时固定版本并核对 collector 名称与监听参数。
+ExecStart=/usr/local/bin/node_exporter --web.listen-address=127.0.0.1:9100
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+# 保留主机挂载视图，避免私有 mount namespace 改变文件系统观测。
+RestrictAddressFamilies=AF_UNIX AF_INET
+
+[Install]
+WantedBy=multi-user.target

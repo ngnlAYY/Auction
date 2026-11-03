@@ -1,0 +1,24 @@
+[Unit]
+Description=Auction Local PostgreSQL Exporter
+After=network.target
+
+[Service]
+Type=simple
+# 与数据库 auction_metrics 同名的本机账号，优先采用 Unix socket peer。
+User=auction_metrics
+Group=auction_metrics
+EnvironmentFile=/etc/prometheus/postgres-exporter.env
+# 安装时固定版本并核对 collector 名称与监听参数。
+# 扩展查询文件的接入参数依安装版本核对后再加入；此处不猜测 flag。
+# 配置文件候选：/etc/prometheus/postgres-queries.yml，不能仅复制后忘记接入。
+ExecStart=/usr/local/bin/postgres_exporter --web.listen-address=127.0.0.1:9187
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET
+
+[Install]
+WantedBy=multi-user.target

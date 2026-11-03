@@ -2,6 +2,7 @@
 
 mod config;
 mod listener;
+mod metrics;
 mod service;
 mod state;
 

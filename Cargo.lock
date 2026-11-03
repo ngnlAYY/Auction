@@ -547,6 +547,7 @@ dependencies = [
  "auction-cache",
  "auction-config",
  "auction-domain",
+ "auction-http",
  "auction-integrations",
  "auction-jobs",
  "auction-observability",

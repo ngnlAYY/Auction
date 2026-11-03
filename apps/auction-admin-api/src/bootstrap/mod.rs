@@ -3,6 +3,7 @@
 mod config;
 mod first_run;
 mod listener;
+mod metrics;
 mod service;
 mod state;
 

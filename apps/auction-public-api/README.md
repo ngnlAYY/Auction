@@ -32,9 +32,19 @@ cargo run --locked -p auction-public-api --features postgres,web-embed   # 需�
 
 ## 多实例
 
+指标附加地址也必须按实例区分；一个地址只能绑定一个进程。
+
 可以运行多个 Public 实例（例如在负载均衡之后），但每个实例必须使用不同的 `realtime.consumer_key`；WebSocket Hub 是进程内的，每个实例独立消费事件流。登录与写请求的速率限制同样是进程内计数。
 
 ## 部署
+
+`common.toml [metrics] public_loopback_listen_address` 省略即关闭；
+只有有效 `metrics.enabled = true` 且填写地址才开启附加 `/metrics` 出口。
+示例为 `127.0.0.1:19100`，可供 Unix socket 部署直接被 Prometheus 抓取。
+出口只持有同一注册表，复用业务指标契约；绑定/服务失败仅记录固定类别 ERROR，
+不影响业务 readiness。任务随进程退出取消；删除地址并重启可回退。
+校验规则见[配置参考](../../ops/config/README.md#commontoml)，
+采集与安装步骤见[运维手册](../../ops/README.md#指标)。
 
 分体部署的 unit 示例见 [`ops/deploy/systemd/auction-public-api.service.example`](../../ops/deploy/systemd/auction-public-api.service.example)，启动顺序与运维流程见[运维手册](../../ops/README.md)。
 

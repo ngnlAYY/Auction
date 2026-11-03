@@ -1,4 +1,4 @@
-//! Public/Admin 进程本地 Prometheus scrape 路由。
+//! 业务 listener 与三角色附加出口共用的 Prometheus 契约。
 //! 该路由只读取装配根注入的 `ProcessMetrics`，不读取业务 state、数据库或敏感配置；未启用
 //! 指标、带 query 的路径和未注册的变体都 fail closed 为 404。转发请求的访问收紧由全局
 //! boundary 在 request-id 与方法错误之前执行；本模块持有只检查头存在性的判定。
@@ -11,6 +11,10 @@ use axum::{
 };
 
 use super::state::{AdminApiState, PublicApiState};
+
+mod egress;
+
+pub use egress::serve_metrics;
 
 /// Public `/metrics` scrape handler。
 pub(crate) async fn public(

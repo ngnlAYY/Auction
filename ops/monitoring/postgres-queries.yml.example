@@ -1,0 +1,54 @@
+# 安装时固定版本并核对 collector 名称、扩展查询格式及接入参数。
+# 仅在内置 collector 缺项时启用对应查询，保持同一指标单一来源。
+# 不在此补写归档与 autovacuum 查询；先核对安装版本的内置 collector。
+# 仅使用固定聚合，不导出 SQL、PID、用户名、客户端地址或 WAL 文件名。
+auction_pg_wal:
+  query: |
+    SELECT COALESCE(sum(size), 0)::double precision AS bytes
+    FROM pg_catalog.pg_ls_waldir()
+  metrics:
+    - bytes:
+        usage: 'GAUGE'
+        description: 'pg_wal 当前文件总字节数。'
+
+auction_pg_transactions:
+  query: |
+    SELECT count(*)::double precision AS open,
+           count(*) FILTER (
+             WHERE state IN ('idle in transaction', 'idle in transaction (aborted)')
+           )::double precision AS idle,
+           COALESCE(max(EXTRACT(EPOCH FROM statement_timestamp() - xact_start)), 0)
+             ::double precision AS oldest_seconds
+    FROM pg_catalog.pg_stat_activity
+    WHERE datname = current_database()
+      AND backend_type = 'client backend'
+      AND pid <> pg_backend_pid()
+      AND xact_start IS NOT NULL
+  metrics:
+    - open:
+        usage: 'GAUGE'
+        description: '目标库当前未结束事务数，不含本次采集连接。'
+    - idle:
+        usage: 'GAUGE'
+        description: '目标库当前事务内空闲的事务数。'
+    - oldest_seconds:
+        usage: 'GAUGE'
+        description: '目标库最老事务持续秒数；阈值由运维观察后决定。'
+
+auction_pg_lock_wait:
+  query: |
+    SELECT count(*)::double precision AS waiting,
+           COALESCE(max(EXTRACT(EPOCH FROM statement_timestamp() - waitstart)), 0)
+             ::double precision AS oldest_seconds
+    FROM pg_catalog.pg_locks
+    WHERE NOT granted
+      AND (database IS NULL OR database = (
+        SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()
+      ))
+  metrics:
+    - waiting:
+        usage: 'GAUGE'
+        description: '目标库及共享对象当前未授予的锁数量。'
+    - oldest_seconds:
+        usage: 'GAUGE'
+        description: '最老锁等待秒数；waitstart 尚未赋值的锁只计数量。'
