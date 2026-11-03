@@ -66,6 +66,21 @@ WebSocket 只在成功进入 `on_upgrade` 回调后增加当前数和累计数�
 
 只有迁移 shadow 模式出现 strict/compatible 布尔差异时增加 mismatch；预期仅 `compatible_ahead`，其他类别应为零。版本号只在结构化日志，不进入 label；metrics 关闭时记录器为 no-op，日志与失败关闭规则保持。暂沿用 W0.14 命名风格，W0.15 共享框架落地后再统一；不把同版无差异或无样本作为超前分支验收。判定及开关由[数据库契约](../../docs/contracts/database.md#迁移兼容登记与就绪)与[配置参考](../../ops/config/README.md#就绪策略)定义。
 
+### Sent 发送基线局部影子指标
+
+Worker 的 `ProcessMetrics::sent_baseline` 注入应用层窄观测端口；四族均按实际事件累计，scrape 不重复增加。关闭指标或其他角色得到 no-op，不影响证明、日志或失败关闭。W0.15 共享框架尚未落地，暂沿用 W0.14 的局部影子风格。
+
+| 指标 | 口径 |
+| --- | --- |
+| `auction_mooglemail_sent_baseline_shadow_evaluations_total{world,branch}` | 完成可比较的新旧新增 MID 集合及列表投影候选集合评估，包含一致与不一致样本 |
+| `auction_mooglemail_sent_baseline_shadow_mismatch_total{world,class}` | 实际集合差异；`mid_set` 与 `candidate_set` 可在同一评估中各增加一次，正常可比较样本均须为零 |
+| `auction_mooglemail_sent_baseline_shadow_uncomparable_total{world,reason}` | 无法完成等价比较；旧路径超限、超时、窗口变化、拒绝或取消不能计作一致样本 |
+| `auction_mooglemail_sent_baseline_fallback_total{world,phase,reason}` | 在原截止点内尝试完整枚举；失败尝试也计数，不代表发送成功 |
+
+标签全部为闭集并预置零值。`world` 为 `main/isekai`；`branch` 为 `empty/new_minute/same_minute/same_minute_cross_page/no_candidate/multiple_candidates/full_fallback`，按无候选、多候选、完整回退、空边界、分钟分支顺序分类。`phase` 为 `before_send/after_send`。`reason` 为 `invalid_mid/order_violation/page_discontinuity/anchor_missing/anchor_changed/page_limit/timeout/read_unavailable/cache_boundary_delta/boundary_unavailable/scope_changed/response_hint_conflict/canceled`；`canceled` 包括 prepared 未消费或写入被拒，表示没有完成比较，不宣称发生了网络取消。跨页相同 MID/时间重复记 `page_discontinuity` 并尝试完整回退，同一 MID 的时间变化仍属前提失效。缓存捕获窗口与 fresh 顶部不一致记 `cache_boundary_delta`，不冒充候选一致。
+
+日志只输出 world、固定分支/原因/阶段、页数、集合一致布尔值及差集数量，不输出 MID、收件人、主题、正文或凭据。旧路径触顶而水位边界可取得是预期可用性差异；shadow 此时不发送，计不可比较而非通过。观察与切换见[运维手册](../../ops/README.md#sent-发送基线影子观察)。
+
 ### 邮件循环口径
 
 `poll_isolation_enabled = true` 时，`mail-main`、`mail-isekai` 的轮次耗时只覆盖收件，不包含独立维护和纯观察；关闭开关时仍覆盖原三分支 join，结果沿用收件分支的口径。新路径增加以下固定 `loop` label，均只计 Worker 阶段指标，不映射为 `BusinessEvent::MailIntake`，不增加业务收件事件与耗时：

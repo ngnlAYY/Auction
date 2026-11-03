@@ -207,6 +207,24 @@ histogram_quantile(0.95, sum by (instance, le) (rate(auction_readiness_check_dur
 
 已有查询为审计影子比对复用，不双查数据库。新指标不改变事务重试、业务写入与结果未知的处置；在决策 32 的白名单基础上，依决策 71 加入 `53300`（连接数耗尽）、`57P01`（服务器关闭）、`57P02`（崩溃关闭）、`57P03`（尚未就绪），固定 kind 分别为 `connection_capacity`、`server_shutdown`、`server_crash`、`server_starting`。`57P05`、`25P03/25P04` 仍按未知粘滞阻断。依决策 72，默认 shadow 上线，只允许预期 transient 差异，经用户审阅后决定是否切换 classified。
 
+### Sent 发送基线影子观察
+
+W1.4 本切片仅处理发送前基线（D3）。默认 `[worker.mooglemail] sent_baseline_mode = "shadow"`，旧完整排除集唯一裁决，水位分支复用同一读取轮次的页面，比较新增 MID 集合与收件人/标题列表投影候选集合，不执行额外 POST。临时边界随 prepared 句柄一次消费，不新增持久水位表；常规轮 Sent/Read Mail 水位与每日校验留待后续交付。D3 提前切片不以 W6.3 为前置（决策 74），不代表批准测试、浏览器操作或外部访问。
+
+1. 用户先确认 Worker 指标已有采集与查看路径，保持 shadow。按[指标字典](../crates/auction-observability/README.md#sent-发送基线局部影子指标)核对四族，分别查看 world 和 branch 样本；零值或没有样本不能解释为通过。
+2. 另行授权浏览器只读核实：Sent 的 MID 格式、创建顺序是否单调且不复用，首页最新分钟组最大 MID 是否为全箱最大值，跨分钟是否有反例；确认实际每页行数、同分钟并列行顺序与跨页表现。分别查看 main/isekai，并记录 HV 清理、历史回填和换季代次现象。只读 Sent 列表，不打开 Bot Inbox 未读邮件、登录 key 邮件，不为采样发信或删除邮件；有限样本不视为永久协议保证，运行时守卫和失败关闭仍保留。
+3. 安排 7–14 天观察，并至少覆盖一个包含 Final 与结算的完整场次周期；周期更长时顺延。各判定分支有实际样本且非预期差异为零，超时、取消或窗口不一致的样本单列。缺样本分支须补充获准的材料或由用户明确决定例外，不能只凭日历时间切换，也不擅自制造故障。
+4. 正常可比较样本的 MID 与候选集合差异均必须为零。旧完整扫描触顶而水位可取得边界，是预期可用性改善；shadow 仍会阻断发送，因此该次没有发送后对照，必须计不可比较。`cache_boundary_delta` 需调查捕获窗口变化，不能归为 D3 的预期候选差异。`invalid_mid/order_violation/anchor_changed/scope_changed/response_hint_conflict` 等前提异常未解释并排除时不得切换，不能只看 mismatch 为零。
+5. MID 语义核实成立、观察与分支覆盖通过后，由用户决定将 TOML 改为 `watermark` 并受控重启。该字段暂不接入 W7.7 在线开关，重启受 W7.5 部署时段门禁约束。默认 shadow 本身不解除 D3，必须在旧路径页数或预算触顶之前完成切换。
+6. 回退时设置 `full` 并受控重启；完整扫描仍有 100 页上限，触顶后的旧路径只能失败关闭，不保证恢复发送。水位路径写前异常回退完整扫描；写后锚点消失则完整枚举但使用原边界；写后前提失效且没有发送前完整集合则保持未知。所有回退共用原预算、限速与资源限制，找不到 Sent 不等于未发送，绝不自动重发。换回旧二进制前移除其不认识的新配置字段。
+
+```promql
+sum by (instance, world, branch) (increase(auction_mooglemail_sent_baseline_shadow_evaluations_total[24h]))
+sum by (instance, world, class) (increase(auction_mooglemail_sent_baseline_shadow_mismatch_total[24h]))
+sum by (instance, world, reason) (increase(auction_mooglemail_sent_baseline_shadow_uncomparable_total[24h]))
+sum by (instance, world, phase, reason) (increase(auction_mooglemail_sent_baseline_fallback_total[24h]))
+```
+
 ### 指标
 
 Public/Worker 在 `common.toml` 设置 `[metrics] enabled = true`；Admin 配置了 runtime 文件时，enabled 以 runtime 的 `[metrics]` 为准。Public/Admin 在各自 listener 上提供 `/metrics`（listener 必须是 loopback TCP 或 Unix socket），Worker 在启用的 control socket 上提供 `/metrics`。指标族见 [auction-observability](../crates/auction-observability/README.md#指标)。建议关注：

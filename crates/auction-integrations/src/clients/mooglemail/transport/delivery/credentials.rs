@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// 完整 Sent 基线与原独占会话一起跨越持久 fence；基线只允许消费一次。
+/// 完整排除集或临时发送前边界与原独占会话跨越持久 fence；上下文只允许消费一次。
 pub(super) struct PreparedMoogleMailCredentials {
     pub(super) session: MoogleMailCredentialSession,
     pub(super) baseline: Option<MoogleMailSentBaseline>,

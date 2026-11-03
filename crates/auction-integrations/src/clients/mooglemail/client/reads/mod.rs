@@ -17,6 +17,12 @@ use uuid::Uuid;
 use super::*;
 
 mod lists;
+mod sent_boundary;
+mod sent_scope;
+
+pub(crate) use lists::{MoogleMailSentList, MoogleMailSentPrefix};
+pub(crate) use sent_boundary::{SentBoundary, SentBoundaryScan};
+pub(crate) use sent_scope::MoogleMailSentScope;
 
 const MAX_SCOPES: usize = 8;
 const MAX_REQUESTS_PER_ROUND: usize = 512;

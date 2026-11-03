@@ -320,6 +320,7 @@ pub use delivery::{
     DeliverySendResult, DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim,
     DeliveryWorkStore,
 };
+mod sent_baseline;
 pub use delivery_admin::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
     DeliveryAdminPage, DeliveryAdminPort, DeliveryAdminResult, DeliveryAdminSnapshot,
@@ -471,6 +472,10 @@ pub use rules::{
 pub use scheduler::{
     ScheduledRoundBootstrap, ScheduledRoundClaim, ScheduledRoundPhase, ScheduledRoundSnapshot,
     ScheduledRoundStore,
+};
+pub use sent_baseline::{
+    SentBaselineBranch, SentBaselineEvent, SentBaselineMode, SentBaselineObserver,
+    SentBaselinePhase, SentBaselineReason, noop_sent_baseline_observer,
 };
 pub use session_preference::{
     PublicSessionPreference, PublicSessionPreferenceResult, SetPublicSessionPreferenceCommand,

@@ -2,6 +2,10 @@
 
 mod errors;
 mod ports;
+pub use ports::{
+    SentBaselineBranch, SentBaselineEvent, SentBaselineMode, SentBaselineObserver,
+    SentBaselinePhase, SentBaselineReason, noop_sent_baseline_observer,
+};
 mod services;
 
 pub use errors::{ApplicationError, MailProcessingRetryability, SessionError};

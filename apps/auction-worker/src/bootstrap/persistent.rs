@@ -100,6 +100,7 @@ pub(super) async fn run_worker(
         Arc::clone(&store),
         forum_profile_reader,
         Arc::new(mail_progress.clone()),
+        metrics.sent_baseline(),
     )
     .await?;
     let runtime_owners = [

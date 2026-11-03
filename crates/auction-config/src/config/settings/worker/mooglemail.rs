@@ -36,6 +36,8 @@ pub struct MoogleMailWorkerConfig {
     pub request_timeout_seconds: u64,
     pub batch_size: u16,
     pub maximum_pages: usize,
+    /// 发送前基线策略；默认 shadow，切换需重启，不接入在线运行时开关。
+    pub sent_baseline_mode: auction_application::SentBaselineMode,
     /// 每个 world 共用的标准五字段 cron；支持旧版描述符和时区前缀。
     pub schedule: String,
     /// 独立运行收件与维护并错峰两个世界；关闭时恢复每轮三分支并行的旧路径。
@@ -173,6 +175,7 @@ impl Default for MoogleMailWorkerConfig {
             request_timeout_seconds: 15,
             batch_size: 100,
             maximum_pages: 20,
+            sent_baseline_mode: auction_application::SentBaselineMode::Shadow,
             schedule: "*/5 * * * *".to_owned(),
             poll_isolation_enabled: true,
             maintenance_schedule: None,

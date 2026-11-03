@@ -20,7 +20,10 @@ mod reads;
 mod request;
 mod security;
 
-pub(crate) use reads::MoogleMailReadRound;
+pub(crate) use reads::{
+    MoogleMailReadRound, MoogleMailSentList, MoogleMailSentPrefix, MoogleMailSentScope,
+    SentBoundary, SentBoundaryScan,
+};
 pub(crate) use security::is_hentaiverse_login_response;
 use security::{IntervalGate, build_mooglemail_http_client};
 

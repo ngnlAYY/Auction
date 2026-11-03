@@ -257,7 +257,7 @@ impl MoogleMailClient {
         Ok(Arc::clone(list))
     }
 
-    fn retain_list_bytes(
+    pub(super) fn retain_list_bytes(
         &self,
         bytes: usize,
         world: MoogleMailWorld,
@@ -269,7 +269,10 @@ impl MoogleMailClient {
     }
 }
 
-fn validate_pages(maximum_pages: usize, world: MoogleMailWorld) -> Result<(), MoogleMailError> {
+pub(super) fn validate_pages(
+    maximum_pages: usize,
+    world: MoogleMailWorld,
+) -> Result<(), MoogleMailError> {
     if !(1..=100).contains(&maximum_pages) {
         return Err(MoogleMailError::new(
             MoogleMailOperation::Inbox,
