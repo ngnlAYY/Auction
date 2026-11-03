@@ -4,7 +4,7 @@
 
 use super::ApplicationFuture;
 
-/// 审计失败的进程就绪策略；启动时冻结，不改变事务错误或重试规则。
+/// 审计失败的进程就绪策略；TOML 是基线，可经数据库开关选择，不改变事务错误或重试规则。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditFailureMode {

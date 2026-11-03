@@ -188,3 +188,5 @@ pub use state::{AdminApiState, PublicApiState};
 pub use surfaces::{admin_router, public_router};
 #[cfg(target_os = "linux")]
 pub use unix_listener::{UnixHttpListener, UnixListenerOptions};
+
+mod admin_runtime_switches;

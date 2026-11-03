@@ -164,6 +164,7 @@ pub(super) async fn configure_state(
     PublicApiState,
     Option<Arc<HeartbeatPublisher>>,
     Option<Arc<ConfiguredRealtimeRelay>>,
+    Option<auction_process::TaskGuard<()>>,
 )> {
     let security = config::configure_security(config)?;
     let Some(database_url) = config.database_url() else {
@@ -174,17 +175,29 @@ pub(super) async fn configure_state(
             ),
             None,
             None,
+            None,
         ));
     };
 
+    let switches = auction_application::RuntimeSwitches::new(
+        auction_application::RuntimeSwitchRole::Public,
+        config.readiness.audit_failure_mode,
+        config.readiness.cache_enabled,
+    );
     let store = Arc::new(
         DatabaseStore::connect(database_url)
             .await
             .context("connect public database")?
-            .with_audit_failure_mode(config.readiness.audit_failure_mode)
+            .with_runtime_switches(switches.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness()),
     );
+    let runtime_switch_task = auction_process::TaskGuard::new(
+        auction_jobs::start_runtime_switch_refresh(store.clone(), switches.clone()).await,
+    );
+    metrics
+        .register_runtime_switch_metrics(switches.clone())
+        .context("register runtime switch metrics")?;
     metrics
         .register_pool_metrics(store.pool_metrics_source())
         .context("register public database pool metrics")?;
@@ -272,11 +285,14 @@ pub(super) async fn configure_state(
     );
     let realtime_relay =
         Arc::new(ConfiguredRealtimeRelay { relay: realtime_relay, health: relay_health });
-    let readiness: Arc<dyn ProcessReadinessPort> = Arc::new(auction_http::HttpReadinessProbe::new(
-        process_health,
-        config.readiness.cache_enabled,
-        metrics.readiness(),
-    ));
+    let readiness: Arc<dyn ProcessReadinessPort> = Arc::new(
+        auction_http::HttpReadinessProbe::new(
+            process_health,
+            config.readiness.cache_enabled,
+            metrics.readiness(),
+        )
+        .with_runtime_switches(switches),
+    );
     let state = PublicApiState::new(
         Some(worlds),
         Some(rules),
@@ -301,7 +317,7 @@ pub(super) async fn configure_state(
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "public heartbeat ready publish failed");
     }
-    Ok((state, Some(heartbeat), Some(realtime_relay)))
+    Ok((state, Some(heartbeat), Some(realtime_relay), Some(runtime_switch_task)))
 }
 
 #[cfg(not(feature = "postgres"))]
@@ -314,6 +330,7 @@ pub(super) async fn configure_state(
     PublicApiState,
     Option<Arc<auction_observability::HeartbeatPublisher>>,
     Option<Arc<auction_application::RealtimeRelay>>,
+    Option<auction_process::TaskGuard<()>>,
 )> {
     let security = config::configure_security(config)?;
     if config.database_url().is_some() {
@@ -324,6 +341,7 @@ pub(super) async fn configure_state(
             None, None, None, None, None, None, None, None, None, None, None, None, None, None,
             security,
         ),
+        None,
         None,
         None,
     ))

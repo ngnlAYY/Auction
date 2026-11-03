@@ -82,7 +82,7 @@ pub(super) fn is_ready(mode: AuditFailureMode) -> bool {
 }
 
 struct ProcessAuditMetricsSource {
-    mode: AuditFailureMode,
+    switches: auction_application::RuntimeSwitches,
 }
 
 impl AuditMetricsSource for ProcessAuditMetricsSource {
@@ -99,7 +99,8 @@ impl AuditMetricsSource for ProcessAuditMetricsSource {
         }
         AuditMetricsSnapshot {
             failures,
-            readiness_blocked: failure_count(self.mode) > 0,
+            readiness_blocked: failure_count(self.switches.readiness_policy().audit_failure_mode)
+                > 0,
             shadow_mismatches: std::array::from_fn(|index| {
                 SHADOW_MISMATCHES[index].load(Ordering::Relaxed)
             }),
@@ -107,6 +108,8 @@ impl AuditMetricsSource for ProcessAuditMetricsSource {
     }
 }
 
-pub(super) fn metrics_source(mode: AuditFailureMode) -> Arc<dyn AuditMetricsSource> {
-    Arc::new(ProcessAuditMetricsSource { mode })
+pub(super) fn metrics_source(
+    switches: auction_application::RuntimeSwitches,
+) -> Arc<dyn AuditMetricsSource> {
+    Arc::new(ProcessAuditMetricsSource { switches })
 }

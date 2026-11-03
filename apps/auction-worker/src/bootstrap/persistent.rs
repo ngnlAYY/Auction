@@ -44,16 +44,27 @@ pub(super) async fn run_worker(
         run_worker_skeleton(config, metrics, runtime_failure, shutdown).await?;
         return Ok(());
     };
+    let switches = auction_application::RuntimeSwitches::new(
+        auction_application::RuntimeSwitchRole::Worker,
+        config.readiness.audit_failure_mode,
+        config.readiness.cache_enabled,
+    );
     let store = Arc::new(
         DatabaseStore::connect(database_url)
             .await
             .context("connect worker database")?
-            .with_audit_failure_mode(config.readiness.audit_failure_mode)
+            .with_runtime_switches(switches.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness())
             .with_delivery_send_intervals(config.worker.mooglemail.send_intervals)
             .context("configure delivery send intervals")?,
     );
+    let _runtime_switch_task = auction_process::TaskGuard::new(
+        auction_jobs::start_runtime_switch_refresh(store.clone(), switches.clone()).await,
+    );
+    metrics
+        .register_runtime_switch_metrics(switches.clone())
+        .context("register runtime switch metrics")?;
     metrics
         .register_pool_metrics(store.pool_metrics_source())
         .context("register worker database pool metrics")?;

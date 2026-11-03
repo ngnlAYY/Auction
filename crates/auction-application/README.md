@@ -178,3 +178,8 @@
 - 投影与 DTO 的映射放在 `auction-http`，不要让端口类型直接成为对外协议。
 
 `ExternalWriteLifecycle` 与逐工作项活动是无 Tokio 依赖的窄端口，由装配根桥接通用协调器。它只控制进程内取消，不决定持久租约、完成状态或重发资格。delivery/PM/discard 在围栏调用前同步登记，围栏调用开始即受保护；登记不授权外写，仍须确认围栏提交。论坛在已有持久 claim 下的首个实际 POST 前登记。交接与关键段同样计入活动、阻止排空结束，既有结果提交后才 complete；其余释放只由 drop 记为未收口。
+
+
+## 运行时开关
+
+`RuntimeSwitchName` 为两项就绪行为绑定值类型与角色；`RuntimeSwitchCommand` 统一稳定摘要、重放输入及 CAS/到期规则。`RuntimeSwitches` 保存完整不可变快照和启动 TOML 基线，`RuntimeSwitchRefreshService` 经窄端口刷新并为到期 set 派生稳定收口命令。先取最新事实，再判期限，不恢复早期覆盖。它不参与资金、资格、幂等、锁或审计写入要求。权威存储和失败规则见[数据库契约](../../docs/contracts/database.md#运行时行为开关)。

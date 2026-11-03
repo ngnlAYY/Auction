@@ -244,3 +244,6 @@ mod tests {
         assert!(!error.to_string().contains("secret"));
     }
 }
+
+#[cfg(feature = "postgres")]
+mod runtime_switches;

@@ -74,3 +74,8 @@ WebSocket 每连接的发送队列有界。队列满时 Hub 淘汰发送端，�
 | `crates/auction-http/src/http/shared/` | 请求边界、严格 JSON、方法严格性、响应缓存策略、连接服务、Unix listener |
 | `crates/auction-http/src/http/metrics/` | Prometheus scrape 路由 |
 | `crates/auction-http/src/assets/` | 内嵌资源与浏览器路由清单 |
+
+
+## 运行时就绪策略
+
+`HttpReadinessProbe` 使用共享策略身份（revision、覆盖期限状态与有效值）隔离短缓存和单飞任务；策略改变后旧结果不能用于新缓存，等待者也不能返回过期策略的成功。认证只读 `GET /api/v1/admin/runtime-switches` 显式映射数据库意图和 Admin 本地快照，成功及读取失败 no-store，不依赖 runtime 文件。见[路由契约](../../docs/contracts/routes.md#运行时开关只读接口)。

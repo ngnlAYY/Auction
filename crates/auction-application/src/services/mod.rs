@@ -88,3 +88,6 @@ pub use watch_preference::set_lot_watch_preference;
 #[path = "public/watch_notification.rs"]
 mod watch_notification;
 pub use watch_notification::{LotWatchPmNotification, lot_watch_pm_notification};
+
+mod runtime_switches;
+pub use runtime_switches::RuntimeSwitchRefreshService;

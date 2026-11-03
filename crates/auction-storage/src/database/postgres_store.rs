@@ -8,7 +8,7 @@ use super::*;
 pub struct PostgresStore {
     pool: TrackedPool<Postgres>,
     pub(crate) delivery_send_intervals: auction_application::DeliverySendIntervals,
-    pub(crate) audit_failure_mode: auction_application::AuditFailureMode,
+    pub(crate) runtime_switches: auction_application::RuntimeSwitches,
     pub(crate) migration_compatibility_mode: auction_application::MigrationCompatibilityMode,
     pub(crate) migration_readiness_recorder: auction_observability::MigrationReadinessRecorder,
 }
@@ -22,7 +22,7 @@ impl PostgresStore {
         Ok(Self {
             pool: TrackedPool::new(pool),
             delivery_send_intervals: auction_application::DeliverySendIntervals::default(),
-            audit_failure_mode: auction_application::AuditFailureMode::default(),
+            runtime_switches: auction_application::RuntimeSwitches::default(),
             migration_compatibility_mode: auction_application::MigrationCompatibilityMode::default(
             ),
             migration_readiness_recorder:

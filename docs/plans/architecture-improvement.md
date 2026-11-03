@@ -9,7 +9,7 @@
 | 本页 | 目标与原则、执行须知、工作流总览与已知缺陷、里程碑、交付规范、仍待决定与用户前置动作、待办池、进度、术语 |
 | 工作流详情（`docs/plans/architecture-improvement/w00-*.md` 至 `w14-*.md`） | 每个工作流一页：概要（优先级、里程碑、依赖、迁移、估算、关联缺陷与决策）、工作项、关键约束、验收与回退；从[工作流总览](#3-工作流总览)进入 |
 | [现状基线](architecture-improvement/baseline.md) | 制定计划时的代码与运行现状及证据位置 |
-| [决策记录](architecture-improvement/decisions.md) | 用户决策 1–72 与计划版本历史 |
+| [决策记录](architecture-improvement/decisions.md) | 用户决策 1–74 与计划版本历史 |
 
 ## 1. 目标与原则
 
@@ -160,6 +160,8 @@
 | 2026-11-03 | 就绪探针瞬时白名单是否扩展到 `53300`（连接数耗尽）、`57P01/57P02/57P03/57P05`（服务器关闭、重启、崩溃恢复、空闲会话超时）、`25P03/25P04`（事务内空闲或事务超时）：这些错误在 PostgreSQL 计划重启（如 W10.8、W10.7）时可能出现，现按未知粘滞阻断，需重启进程恢复（与现状一致，无退步） | W0.14 | W0.14 | 已决定（决策 71），并入 W0.14 |
 | 2026-11-03 | 有意改变判定的工作项（如 W0.14）如何满足交付规范第 3 条“影子差异为零”：W0.14 采用默认 `shadow` 模式，切换条件解释为“差异只出现在预期类别（`transient`），`permanent`/`unknown` 无差异”；请确认该解释是否适用于此类工作项 | W0.14 | 交付规范 | 已决定（决策 72） |
 | 2026-11-03 | Worker control 的 `/v1/health/ready` 只看运行/排空状态，不含数据库迁移与审计失败判定，与 Worker 心跳的就绪口径不一致；是否统一（含 W7.8a 的迁移兼容判定） | W0.14、W7.8a 调研 | W0.14 后续或 W7.9 | 待用户决定 |
+| 2026-11-03 | W0.9 的 `/metrics` 转发头集合补 Cloudflare 头（`cf-connecting-ip`、`cf-ray`、`true-client-ip`）：W0.12 确认站点在 Cloudflare 后面 | W0.12 | W0.9 后续或 W9.5 | 待用户决定 |
+| 2026-11-03 | 线上 `19344` 端口由 sing-box 监听在所有网卡，与拍卖服务无关但扩大暴露面 | W0.12 | W9.6 | 待用户决定 |
 
 ## 7. 进度
 
@@ -169,7 +171,7 @@
 | --- | --- | --- | --- | --- |
 | D1 | 待诊断 | — | — | W0.7 诊断已提交（`0f36d1e8`），待部署后按日志 `safe_kind`/`stage` 与只读核对确认根因；代码阅读的首要嫌疑为原投递 `sending_at` 早于资金初始化/对账边界，另需解释“未持久化错误”的第二层原因 |
 | D2 | 已提交 | `b2ccb9fd` | 未部署 | W1.0；线上已部署 `92259475`，未包含修复 |
-| D3 | 待核实 | — | — | W0.12 核实后决定是否提前交付 W1.4 发送基线 |
+| D3 | 已决定 | — | — | W0.12 估计 6–9 周触及 100 页上限；决策 74 提前交付 W1.4 发送基线（车道 J） |
 | D4 | 已决定 | — | — | 决策 14；W1.3、W1.7 随 M2b |
 | D5 | 待量化 | — | — | W0.6 量化后决定是否提前交付 W12.1 |
 | D6 | 已决定 | — | — | 决策 15；玩家可见说明随 M1；W0.12 核实主题页数后决定是否提前交付 W1.11 |
@@ -183,11 +185,13 @@
 | W0.1 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`ApplicationError::safe_kind()` 闭集分类，首个调用方为履约 reconcile 未持久化错误日志 |
 | W0.7 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；COD 实收资金化各拒绝分支细分为独立 `safe_kind`（target `auction::settlement::funding_diagnostics`），持久化 defer reason 不变、无迁移；部署后按 `ops/README.md` 的 D1 诊断章节收集分类证据 |
 | W0.14 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；审计失败按 SQLSTATE 分类（决策 32、71），`[readiness] audit_failure_mode` 默认 `shadow`、就绪缓存 1 秒；观察到差异只在 `transient` 类后由用户切换 `classified`（决策 72），W0.6 的超时须在切换后启用 |
+| W0.12 | 进行中 | 随本提交 | — | 执行者：Claude（经用户批准的线上只读核实）；主机、配置与数据库部分完成，结论见[现状基线](architecture-improvement/baseline.md#w012-线上只读核实2026-11-03)；浏览器部分待 Bot 账号战斗结束 |
 | W0.9 | 已提交 | `57d1748d` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 E）实现、Claude 监督；HTTP 请求量/状态码/延迟、WebSocket 连接、限流拒绝指标；`[metrics] reject_forwarded_requests` 默认 true（带转发头的 `/metrics` 请求返回 404），CDN 头待 W0.12 |
 | W0.11 | 已提交 | `0a30c5c8` | 未部署 | 同上；`RateLimitedLog` 固定类别 60 秒窗口去重，首个调用点为 delivery 循环失败日志；`log_filter` 加 `auction_observability::log_dedup=off` 可关闭 |
 | W0.8 | 已提交 | `e78dac4f` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 D）实现、Claude 监督；`storage_error_from`/`sql_error_context` 附加 sqlx 变体、SQLSTATE、约束名、表名；1100 处直接 SQLx 闭包与 13 个具名 mapper 一次改完，`storage:map_err(\|_\|)` 1432 → 330；其余 330 处另定范围 |
 | W7.11 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
-| W7.8a | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 F）实现、Claude 监督；迁移 075 建只追加兼容登记表（001–074 缺行即 breaking，075 自身 breaking），`check.sh migration-compatibility` 检查每个新迁移恰好登记一次；`[readiness] migration_compatibility_mode` 默认 `shadow`，回退旧程序前须设为 `compatible`；本版含 breaking 迁移，部署后才能为之后的版本提供回退能力 |
+| W7.8a | 已提交 | `3f0a2097` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 F）实现、Claude 监督；迁移 075 建只追加兼容登记表（001–074 缺行即 breaking，075 自身 breaking），`check.sh migration-compatibility` 检查每个新迁移恰好登记一次；`[readiness] migration_compatibility_mode` 默认 `shadow`，回退旧程序前须设为 `compatible`；本版含 breaking 迁移，部署后才能为之后的版本提供回退能力 |
+| W7.7 | 进行中 | 第一批随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 H）实现、Claude 监督；第一批：迁移 076 只追加开关事实兼命令账本、三角色 5 秒刷新、`auction-cli switch`、Admin `/config` 只读卡片，接入 `readiness_audit_failure_mode` 与 `readiness_cache_enabled`；第二批（邮件轮询隔离与指标转发拒绝）待做 |
 | W1 | 未开始 | — | — | W1.0 为 M1 首项（D2）；W1.10 方案已定（决策 40） |
 | W1.0 | 已提交 | `b2ccb9fd` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；完整 Read Mail 观察降频为每小时、维护独立循环、isekai 相位错峰，回退开关 `poll_isolation_enabled`；待用户部署后按“维护不再超时、`mail-maintenance-*` p95 < 60 秒”验收 |
 | W2 | 未开始 | — | — | 随 M3，排在 W9.9 之后 |

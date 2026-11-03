@@ -15,6 +15,7 @@ mod model;
 mod operational_fields;
 #[path = "config/review.rs"]
 mod review;
+mod runtime_switches;
 #[path = "config/validation.rs"]
 mod validation;
 #[path = "config/worlds.rs"]
@@ -505,6 +506,7 @@ pub(super) fn page() -> Element {
             h1 { id: "config-title", {t!("page-config-title")} }
             p { class: "admin-config-intro", {t!("admin-runtime-note")} }
             AdminBusinessWorlds {}
+            runtime_switches::RuntimeSwitchCard {}
             h2 { class: "admin-config-page__runtime-title", {t!("admin-runtime-document-title")} }
             PendingCommandPanel { owner: pending, session_scoped: true }
             {content}

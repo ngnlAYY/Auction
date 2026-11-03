@@ -11,6 +11,7 @@ auction-application.workspace = true
 auction-cache.workspace = true
 auction-config.workspace = true
 auction-http.workspace = true
+auction-jobs.workspace = true
 auction-integrations.workspace = true
 auction-storage.workspace = true
 auction-observability.workspace = true

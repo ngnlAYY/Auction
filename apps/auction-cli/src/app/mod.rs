@@ -39,7 +39,8 @@ fn failure_code(command: &Command) -> u8 {
         Command::Config(_) => EXIT_CONFIG,
         Command::Service(_) => EXIT_SERVICE,
         Command::Db(_) | Command::Backup(_) => EXIT_DATABASE,
-        Command::Credential(_)
+        Command::Switch(_)
+        | Command::Credential(_)
         | Command::Rules(_)
         | Command::Forum(_)
         | Command::Pm(_)
@@ -65,6 +66,8 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         #[cfg(feature = "postgres")]
         Command::Backup(command) => crate::backup::run(&config_dir, command).await,
         #[cfg(feature = "postgres")]
+        Command::Switch(command) => crate::operations::switches::run(&config_dir, command).await,
+        #[cfg(feature = "postgres")]
         Command::Credential(command) => {
             crate::operations::credentials::run(&config_dir, command).await
         }
@@ -84,6 +87,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         }
         #[cfg(not(feature = "postgres"))]
         Command::Db(_)
+        | Command::Switch(_)
         | Command::Backup(_)
         | Command::Credential(_)
         | Command::Rules(_)
