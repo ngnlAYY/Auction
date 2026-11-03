@@ -1,5 +1,5 @@
 //! Public 与 Admin 共用的 HTTP 请求边界。
-//! 本模块只处理协议级关联、可信代理、安全响应头、超时、panic 隔离和访问日志。业务认证、
+//! 本模块处理协议级关联、可信代理、指标访问、安全响应头、超时、panic 隔离和访问观测。业务认证、
 //! origin/CSRF 与命令幂等仍由各自 handler 和应用端口负责。
 
 use std::{
@@ -10,6 +10,7 @@ use std::{
 };
 
 use auction_contracts::ApiErrorResponse;
+use auction_observability::{HttpRecorder, METRICS_ROUTE};
 use axum::{
     Json,
     body::Body,
@@ -33,6 +34,8 @@ pub struct HttpBoundary {
     // 策略在启动后只读；middleware 和 surface state 克隆时只共享这一份已校验网段。
     trusted_proxy_cidrs: Arc<[IpNet]>,
     trusted_unix_proxy: bool,
+    metrics: HttpRecorder,
+    reject_forwarded_requests: bool,
 }
 
 impl Default for HttpBoundary {
@@ -41,6 +44,8 @@ impl Default for HttpBoundary {
             request_timeout: Duration::from_secs(15),
             trusted_proxy_cidrs: Arc::default(),
             trusted_unix_proxy: false,
+            metrics: HttpRecorder::default(),
+            reject_forwarded_requests: true,
         }
     }
 }
@@ -66,17 +71,59 @@ impl HttpBoundary {
             }
             networks.push(network);
         }
-        Ok(Self { request_timeout, trusted_proxy_cidrs: networks.into(), trusted_unix_proxy })
+        Ok(Self {
+            request_timeout,
+            trusted_proxy_cidrs: networks.into(),
+            trusted_unix_proxy,
+            ..Self::default()
+        })
+    }
+
+    /// 由装配根注入部署层的指标访问开关；修改需重启，不属于 Admin runtime 文档。
+    pub fn with_metrics_access(mut self, reject_forwarded_requests: bool) -> Self {
+        self.reject_forwarded_requests = reject_forwarded_requests;
+        self
+    }
+
+    pub(crate) fn with_metrics(mut self, metrics: HttpRecorder) -> Self {
+        self.metrics = metrics;
+        self
     }
 }
 
 /// 执行 Public/Admin 共用的协议边界。
 pub(crate) async fn enforce(
     State(boundary): State<HttpBoundary>,
-    mut request: Request,
+    request: Request,
     next: Next,
 ) -> Response {
-    let request_id = match normalize_request_id(request.headers_mut()) {
+    let started = Instant::now();
+    let method = request.method().clone();
+    // 只克隆框架模板的共享句柄；fallback 统一聚合，原始路径与 query 永不进入 label。
+    let route = request.extensions().get::<MatchedPath>().cloned();
+    let response = enforce_request(&boundary, request, next).await;
+    boundary.metrics.observe_request(
+        route.as_ref().map_or("__unmatched__", MatchedPath::as_str),
+        method.as_str(),
+        response.status().as_u16(),
+        started.elapsed(),
+    );
+    response
+}
+
+async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Next) -> Response {
+    let reject_metrics = boundary.reject_forwarded_requests
+        && request.uri().path() == METRICS_ROUTE
+        && super::metrics::has_forwarding_headers(request.headers());
+    let request_id = normalize_request_id(request.headers_mut());
+    // 访问收紧优先于 request-id 400；归一化失败仍只回传新生成的安全关联标识。
+    if reject_metrics {
+        let request_id = match request_id {
+            Ok(request_id) | Err(request_id) => request_id,
+        };
+        return finish_response(StatusCode::NOT_FOUND.into_response(), &request_id);
+    }
+    let request_id = match request_id {
         Ok(request_id) => request_id,
         Err(generated) => {
             return finish_response(
@@ -91,7 +138,7 @@ pub(crate) async fn enforce(
         }
     };
     let peer = request.extensions().get::<ConnectInfo<SocketAddr>>().map(|value| value.0);
-    let client_address = resolve_client_address(peer, request.headers(), &boundary);
+    let client_address = resolve_client_address(peer, request.headers(), boundary);
     request
         .extensions_mut()
         .insert(ConnectInfo(SocketAddr::new(client_address, peer.map_or(0, |value| value.port()))));

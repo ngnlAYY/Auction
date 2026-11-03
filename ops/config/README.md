@@ -55,7 +55,7 @@
 | 区块 | 用途 |
 | --- | --- |
 | `log_filter` | tracing 过滤器（`EnvFilter` 语法），默认 `info,<服务名>=debug` |
-| `[metrics]` | `enabled`：是否提供 `/metrics`；Public/Admin 开启时 listener 必须是 loopback 或 Unix socket |
+| `[metrics]` | `enabled` 默认 false：是否提供 `/metrics`；Public/Admin 开启时 listener 必须是 loopback 或 Unix socket。`reject_forwarded_requests` 默认 true：Public/Admin 拒绝带转发头的指标请求，false 回退旧访问行为，修改需重启 |
 | `[readiness]` | 审计失败模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
 | `[cache]` | 见[缓存](#缓存) |
 | `[backup]` | CLI 专用定时备份策略，见[定时备份策略](#定时备份策略) |
@@ -64,6 +64,8 @@
 | `[auction.economics]` | 新场次的经济规则：默认起拍价、加价比例、软截止窗口与延长、代理开关/默认模式/慢速间隔/设置次数上限、Final 提前量 |
 | `[auction.settlement]` | 新场次的结算策略：版本与模式（`hold_curve_v2` 或 `legacy_zero_v0`）、补偿池、isekai 载体 Credits、领先时长曲线锚点 |
 | `[auction.settlement.recovery]` | 恢复策略：v1 固定 7 天、v2 固定 24 小时，`payment_timeout_seconds` 必须与版本对应；提醒次数固定 1，COD 退回上限可配。自动排期的赛季前场次覆盖为 v2 |
+
+`metrics.reject_forwarded_requests` 仅属于部署层 common 文件，不加入 Admin runtime 文档；Admin runtime 的 `[metrics]` 只覆盖 `enabled`，保留部署层拒绝策略，文档指纹与命令摘要格式保持原契约。拒绝按头存在性执行，覆盖所有方法且优先于 request-id 400；头集合与状态码见[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)，直接采集、SSH 隧道与回退见[运维手册](../README.md#指标)。Worker control 的指标授权不使用此开关。
 
 经济、结算与恢复策略在**创建场次时冻结**，修改模板只影响之后创建的场次；排期控制后续计划与早鸟收件窗口，不改写已创建场次的时间与策略快照。业务含义见[业务规则](../../docs/business-rules.md)与[结算与履约](../../docs/guide/settlement.md)。
 
@@ -119,7 +121,7 @@ Worker 引用的敏感 TOML 根字段 `backup_r2_access_key_id` 与 `backup_r2_s
 | `[tracing]` | OTLP/HTTP 导出：开关、endpoint、批量与超时、队列容量、采样比例（百万分率） |
 | `[realtime]`（Public） | `consumer_key`（每个实例唯一）、轮询间隔、每页流数与事件数、每连接缓冲 |
 
-Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、metrics 与 tracing 以 runtime 文件中的对应区块为准。
+Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、metrics.enabled 与 tracing 以 runtime 文件中的对应区块为准；metrics.reject_forwarded_requests 始终保留部署层 common 的值。
 
 ### Worker
 
@@ -175,7 +177,7 @@ runtime 文件让运营人员在 Admin “参数配置”页修改部分参数�
 | `[mail_templates]` | 出站邮件正文 | 重启 Worker |
 | `[[dashboard_mailboxes]]` | 仪表盘需要核对的世界与邮箱 | 重启 Admin |
 | `[equipment_source]` | Admin 手工录入时读取装备详情：允许的主机与路径、请求边界、是否要求可交易 | 重启 Admin |
-| `[listener]`、`[metrics]`、`[security]`、`[session]`、`[tracing]`、`[worker_control]` | Admin 自身的监听、指标、HTTP 安全、会话、tracing 与 control socket 路径 | 重启 Admin |
+| `[listener]`、`[metrics]`、`[security]`、`[session]`、`[tracing]`、`[worker_control]` | Admin 自身的监听、指标 enabled、HTTP 安全、会话、tracing 与 control socket 路径；指标转发拒绝开关只在 common 文件中配置 | 重启 Admin |
 | `[operations.*]` | 接管部署参数（见下） | 见下 |
 
 ### operations 接管

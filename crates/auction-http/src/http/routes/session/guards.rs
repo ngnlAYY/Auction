@@ -1,5 +1,7 @@
 //! Public/Admin 会话限流、来源检查和身份认证守卫。
 
+use auction_observability::HttpRateLimitKind;
+
 use super::*;
 use super::{
     cookies::{read_admin_cookie, read_public_session_cookie},
@@ -21,6 +23,13 @@ pub(crate) fn session_guard(
         state.security().allow_mutation(address.ip())
     };
     if let Some(retry_after) = retry_after {
+        if let Some(metrics) = state.metrics() {
+            metrics.http().observe_rate_limit_rejection(if login {
+                HttpRateLimitKind::Login
+            } else {
+                HttpRateLimitKind::Mutation
+            });
+        }
         return Some(rate_limited_response(retry_after));
     }
     if check_origin && !state.security().allows_origin(headers) {
@@ -39,6 +48,9 @@ pub(crate) fn realtime_connection_guard(
     address: SocketAddr,
 ) -> Option<Response> {
     if let Some(retry_after) = state.security().allow_realtime_connection(address.ip()) {
+        if let Some(metrics) = state.metrics() {
+            metrics.http().observe_rate_limit_rejection(HttpRateLimitKind::Realtime);
+        }
         return Some(rate_limited_response(retry_after));
     }
     if !state.security().allows_websocket_origin(headers) {
@@ -65,6 +77,13 @@ pub(crate) fn admin_session_guard(
         None
     };
     if let Some(retry_after) = retry_after {
+        if let Some(metrics) = state.metrics() {
+            metrics.http().observe_rate_limit_rejection(if login {
+                HttpRateLimitKind::Login
+            } else {
+                HttpRateLimitKind::Mutation
+            });
+        }
         return Some(rate_limited_response(retry_after));
     }
     if check_origin && !state.security().allows_origin(headers) {

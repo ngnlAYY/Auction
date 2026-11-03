@@ -3,11 +3,20 @@
 use serde::Deserialize;
 
 /// 进程本地 Prometheus 指标导出策略。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MetricsConfig {
     /// 是否注册并暴露固定 `/metrics` scrape endpoint；省略时关闭。
     pub enabled: bool,
+    /// Public/Admin 是否拒绝携带转发头的指标请求；省略时开启，修改需重启。
+    /// 仅由部署配置持有，Admin runtime 只能覆盖 enabled，不得覆盖该安全策略。
+    pub reject_forwarded_requests: bool,
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self { enabled: false, reject_forwarded_requests: true }
+    }
 }
 
 /// Public/Worker 进程的 OTLP/HTTP tracing 非敏感运行参数。

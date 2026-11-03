@@ -202,7 +202,11 @@ impl PublicApiState {
 
     /// 返回与本 state 同源的协议边界，供路由装配时建立全局 middleware。
     pub fn http_boundary(&self) -> HttpBoundary {
-        self.security.boundary()
+        let boundary = self.security.boundary();
+        match &self.metrics {
+            Some(metrics) => boundary.with_metrics(metrics.http()),
+            None => boundary,
+        }
     }
 
     pub(crate) fn worlds(&self) -> Option<&dyn WorldReader> {

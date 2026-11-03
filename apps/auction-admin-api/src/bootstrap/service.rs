@@ -79,7 +79,8 @@ async fn run_service(
     #[cfg(not(feature = "postgres"))]
     let mut heartbeat_task: Option<TaskGuard<()>> = None;
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
-    let boundary = state.http_boundary();
+    let boundary =
+        state.http_boundary().with_metrics_access(config.metrics.reject_forwarded_requests);
     let app = auction_http::admin_router::<crate::web_assets::AdminWebAssets>(
         env!("CARGO_PKG_VERSION"),
         boundary,

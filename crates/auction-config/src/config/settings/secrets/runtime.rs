@@ -100,7 +100,7 @@ pub(crate) fn validate_runtime_startup(document: &AdminRuntimeDocument) -> Resul
     }
     validate_metrics_listener(
         Role::Admin,
-        MetricsConfig { enabled: document.metrics.enabled },
+        MetricsConfig { enabled: document.metrics.enabled, ..MetricsConfig::default() },
         uses_unix,
         listen_addr,
     )?;

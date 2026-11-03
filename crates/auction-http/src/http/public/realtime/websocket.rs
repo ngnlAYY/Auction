@@ -3,6 +3,7 @@
 use std::net::SocketAddr;
 
 use auction_application::PublicRealtimeAuctionStatus;
+use auction_observability::{HttpRecorder, ProcessMetrics};
 use axum::{
     extract::{
         ConnectInfo, State, WebSocketUpgrade,
@@ -136,12 +137,19 @@ pub(crate) async fn websocket(
     };
     let realtime_shutdown = state.realtime_shutdown();
     let session = RealtimeSession::new(session_service, raw_token, identity);
+    let http_metrics = state.metrics().map_or_else(HttpRecorder::default, ProcessMetrics::http);
 
     upgrade
         .max_message_size(MAX_MESSAGE_BYTES)
         .max_frame_size(MAX_MESSAGE_BYTES)
         .on_upgrade(move |socket| {
-            stream_events(socket, subscription, session, discovery_permit, realtime_shutdown)
+            // 升级成功才计数；守卫由 future 持有，未轮询即取消和所有连接退出也会减回。
+            let connection = http_metrics.websocket_connection();
+            async move {
+                let _connection = connection;
+                stream_events(socket, subscription, session, discovery_permit, realtime_shutdown)
+                    .await;
+            }
         })
         .into_response()
 }

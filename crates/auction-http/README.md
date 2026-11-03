@@ -18,13 +18,14 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 
 ## 请求边界
 
-- **请求 ID**：读取或生成 `x-request-id` 并始终在响应头回传，非法或重复输入拒绝；常规 handler 错误的 JSON `request_id` 字段可能为 null。
+- **请求 ID**：读取或生成 `x-request-id` 并始终在响应头回传，非法或重复输入拒绝；指标转发拒绝的 404 优先于 request-id 400，仍回传安全生成的标识；常规 handler 错误的 JSON `request_id` 字段可能为 null。
 - **客户端地址**：只有来自 `trusted_proxy_cidrs` 的 TCP 对端或启用 `trusted_unix_proxy` 的 Unix 上游，才采信 `X-Forwarded-For`；限流按真实客户端地址计数。
 - **origin**：启用 allowlist 时，普通状态变更请求允许省略 `Origin`；一旦提供，必须是唯一且精确匹配的值。WebSocket 升级必须且只能携带一个可信 Origin。
 - **限流**：固定窗口、按地址计数，登录、状态变更与 realtime 连接尝试使用独立账本；超限返回 `429`、`code = "rate_limited"` 与 `Retry-After` 头。
 - **超时**：普通请求与 WebSocket 升级前握手受 `request_timeout_seconds` 限制，不限制升级后的连接寿命。
 - **严格解析**：JSON 写接口拒绝未知字段与非 JSON 内容类型；空 PUT 会话同步、Basic 登录等遵循各自协议。Public/Admin 业务路由严格匹配方法，JSON GET 不隐式接受 HEAD，倒计时显式支持 GET/HEAD；健康、指标与静态资源由各自 owner 定义方法语义。
 - **安全头**：`X-Frame-Options: DENY`、内容类型嗅探禁止、来源策略与 CSP（为 Dioxus WASM 放行 `wasm-unsafe-eval` 与内联样式）；响应缓存策略按路由冻结（`no-store`/`no-cache`）。
+- **指标**：全局边界按路由模板记录响应量、状态码与响应生成耗时，包含健康、指标与资源 fallback；连接与频率拒绝分别在成功升级和 guard 实际拒绝点记录。标签、桶与生命周期见 [auction-observability](../auction-observability/README.md#http-与连接口径)。
 
 ## 会话
 
@@ -50,7 +51,11 @@ WebSocket 每连接的发送队列有界。队列满时 Hub 淘汰发送端，�
 | `/health/live` | 进程存活 |
 | `/health/ready` | Public：数据库与 realtime relay 新鲜；Admin：数据库就绪 |
 | `/health`、`/api/v1/health` | 服务名、状态与运行进程版本 |
-| `/metrics` | Prometheus 文本；需配置启用，且只允许 loopback 或 Unix listener |
+| `/metrics` | 直连 GET/HEAD 的 Prometheus 文本；需启用且 listener 为 loopback 或 Unix；其他方法 405，默认携带转发头的任意方法优先返回空 404 |
+
+`/metrics` 通过 `any(...)` 挂载，由共用处理器显式保留 GET/HEAD 和直连 405，避免框架向转发拒绝追加 `Allow`。默认拒绝 `Forwarded`、全部 `X-Forwarded-*`、`X-Real-IP`、`Via` 的存在，不依赖代理是否可信，也不解析或记录头值；拒绝经 `finish_response` 补安全头与 `no-store`，优先于 request-id 400 和方法错误。CDN 专用来源头待 W0.12 核实后补充。完整边界见[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)。
+
+部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true；设为 false 并重启 Public/Admin 回到旧访问行为。该字段不进入 Admin runtime 文档；runtime 只覆盖 `metrics.enabled`，保留部署层拒绝策略。listener 限制和 Caddy 的公网 404 规则继续生效，直接采集与 SSH 隧道见[运维手册](../../ops/README.md#指标)。
 
 `HttpReadinessProbe` 由装配根包装完整角色判定，默认只缓存最终布尔值一秒并合并并发；每轮限时 750ms，请求断开不取消共享刷新，panic/取消/超时均发布未就绪并结束单飞。正负都缓存，过期后不继续返回旧成功，响应保持 `no-store`。关闭缓存恢复逐次检查与原请求预算；心跳不复用此缓存。转换延迟及模式语义由[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)定义，配置见[就绪策略](../../ops/config/README.md#就绪策略)。
 
