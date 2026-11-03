@@ -3,6 +3,7 @@
 
 use super::*;
 
+use auction_application::{CriticalWriteKind, ExternalWriteActivity};
 use std::collections::HashSet;
 
 mod lease;
@@ -68,31 +69,33 @@ where
                 )));
             break;
         };
-        let mut claims = match tokio::time::timeout_at(
-            claim_deadline,
-            delivery_store.claim_due(
-                worker.worker_id.clone(),
-                now,
-                lease_until,
-                worker.delivery.sending_grace,
-                DeliveryClaimExclusions {
-                    unavailable_worlds: unavailable_worlds.iter().cloned().collect(),
-                    unavailable_send_worlds: unavailable_send_worlds.iter().cloned().collect(),
-                    recipients: skipped_recipients
-                        .iter()
-                        .map(|(world, recipient)| DeliveryRecipientExclusion {
-                            world: world.clone(),
-                            recipient: recipient.clone(),
-                        })
-                        .collect(),
-                },
-                1,
-            ),
-        )
-        .await
+        let mut claims = match worker
+            .write_lifecycle
+            .background(tokio::time::timeout_at(
+                claim_deadline,
+                delivery_store.claim_due(
+                    worker.worker_id.clone(),
+                    now,
+                    lease_until,
+                    worker.delivery.sending_grace,
+                    DeliveryClaimExclusions {
+                        unavailable_worlds: unavailable_worlds.iter().cloned().collect(),
+                        unavailable_send_worlds: unavailable_send_worlds.iter().cloned().collect(),
+                        recipients: skipped_recipients
+                            .iter()
+                            .map(|(world, recipient)| DeliveryRecipientExclusion {
+                                world: world.clone(),
+                                recipient: recipient.clone(),
+                            })
+                            .collect(),
+                    },
+                    1,
+                ),
+            ))
+            .await
         {
-            Ok(Ok(claims)) if tokio::time::Instant::now() < claim_deadline => claims,
-            Ok(Ok(_)) | Err(_) => {
+            Some(Ok(Ok(claims))) if tokio::time::Instant::now() < claim_deadline => claims,
+            Some(Ok(Ok(_))) | Some(Err(_)) => {
                 claim_error = Some(ApplicationError::Repository(
                     auction_application::RepositoryError::Failed(
                         "delivery claim 未在租约截止前确认".to_owned(),
@@ -100,16 +103,20 @@ where
                 ));
                 break;
             }
-            Ok(Err(error)) => {
+            Some(Ok(Err(error))) => {
                 claim_error = Some(error);
                 break;
             }
+            None => break,
         };
         let Some(claim) = claims.pop() else {
             break;
         };
         // 领取等待可能跨过 drain；尚未准备或进入 sending 的 claim 可以按原 fence 安全释放。
         if worker.control.is_draining() {
+            if worker.write_lifecycle.enabled() {
+                break;
+            }
             let released = release_unstarted_delivery(
                 delivery_store.as_ref(),
                 worker.clock.as_ref(),
@@ -156,14 +163,25 @@ where
             worker.metrics.observe_retry(WorkerLoop::Delivery, WorkerRetryKind::Persisted);
         }
 
-        tasks.spawn(process_delivery_claim(
-            Arc::clone(delivery_store),
-            Arc::clone(delivery_transport),
-            Arc::clone(&worker.clock),
-            worker.delivery,
-            worker.control.clone(),
-            claim,
-        ));
+        let kind = match claim.payload.get("operation").and_then(serde_json::Value::as_str) {
+            Some("take") => CriticalWriteKind::DeliveryTake,
+            Some("return") => CriticalWriteKind::DeliveryReturn,
+            _ => CriticalWriteKind::DeliverySend,
+        };
+        let activity = worker.write_lifecycle.activity(kind);
+        let store = Arc::clone(delivery_store);
+        let transport = Arc::clone(delivery_transport);
+        let clock = Arc::clone(&worker.clock);
+        let config = worker.delivery;
+        let control = worker.control.clone();
+        tasks.spawn(async move {
+            activity
+                .run(process_delivery_claim(
+                    store, transport, clock, config, control, claim, &activity,
+                ))
+                .await
+                .unwrap_or_else(|| DeliveryTaskResult::completed(WorkerResult::Canceled))
+        });
     }
 
     while let Some(result) = tasks.join_next().await {
@@ -241,12 +259,16 @@ async fn process_delivery_claim<C>(
     config: DeliveryWorkerRuntimeConfig,
     control: WorkerControlHandle,
     claim: DeliveryWorkClaim,
+    activity: &ExternalWriteActivity,
 ) -> DeliveryTaskResult
 where
     C: Clock + 'static,
 {
     // 领取后派生的任务可能尚未获得调度；首次 poll 前再次确认 drain。
     if control.is_draining() {
+        if activity.enabled() {
+            return DeliveryTaskResult::completed(WorkerResult::Canceled);
+        }
         return release_unstarted_delivery(
             delivery_store.as_ref(),
             clock.as_ref(),
@@ -260,6 +282,9 @@ where
         Ok(lease) => lease,
         Err(failure_code) => {
             tracing::warn!(delivery_id = %claim.delivery_id, %failure_code, "delivery claim has no usable lease");
+            if activity.is_cancelled() || (activity.enabled() && control.is_draining()) {
+                return DeliveryTaskResult::completed(WorkerResult::Canceled);
+            }
             return release_unstarted_delivery(
                 delivery_store.as_ref(),
                 clock.as_ref(),
@@ -306,6 +331,9 @@ where
                 _ => "preflight_timeout".to_owned(),
             };
             tracing::warn!(delivery_id = %claim.delivery_id, %failure_code, "delivery preflight deferred before sending fence");
+            if activity.is_cancelled() || (activity.enabled() && control.is_draining()) {
+                return DeliveryTaskResult::completed(WorkerResult::Canceled);
+            }
             return release_unstarted_delivery(
                 delivery_store.as_ref(),
                 clock.as_ref(),
@@ -325,10 +353,14 @@ where
         &claim,
         &mut lease,
         &mut prepared,
+        activity,
     )
     .await
     {
         drop(prepared);
+        if activity.is_cancelled() || (activity.enabled() && control.is_draining()) {
+            return DeliveryTaskResult::completed(WorkerResult::Canceled);
+        }
         return release_unstarted_delivery(
             delivery_store.as_ref(),
             clock.as_ref(),
@@ -386,6 +418,9 @@ where
     drop(send);
     if !send_polled {
         // fence 后尚未 poll 也可能失去租约；不伪造外部 unknown，sending 本身仍保守隔离。
+        if activity.is_cancelled() || (activity.enabled() && control.is_draining()) {
+            return DeliveryTaskResult::completed(WorkerResult::Canceled);
+        }
         return release_unstarted_delivery(
             delivery_store.as_ref(),
             clock.as_ref(),
@@ -405,8 +440,14 @@ where
             )
             .await
             {
-                Ok(Ok(())) if lease_failed => DeliveryTaskResult::completed(WorkerResult::Error),
-                Ok(Ok(())) => DeliveryTaskResult::completed(WorkerResult::Success),
+                Ok(Ok(())) => {
+                    activity.complete();
+                    DeliveryTaskResult::completed(if lease_failed {
+                        WorkerResult::Error
+                    } else {
+                        WorkerResult::Success
+                    })
+                }
                 Ok(Err(error)) => {
                     tracing::error!(error = %error, %delivery_id, "delivery worker failed to persist success");
                     DeliveryTaskResult::completed(WorkerResult::Error)
@@ -433,8 +474,10 @@ where
             )
             .await
             {
-                Ok(Ok(())) if lease_failed => WorkerResult::Error,
-                Ok(Ok(())) => WorkerResult::Success,
+                Ok(Ok(())) => {
+                    activity.complete();
+                    if lease_failed { WorkerResult::Error } else { WorkerResult::Success }
+                }
                 Ok(Err(persist_error)) => {
                     tracing::error!(error = %persist_error, %delivery_id, %failure_code, "delivery worker failed to persist failure");
                     WorkerResult::Error
@@ -503,6 +546,7 @@ async fn confirm_delivery_handoff<C: Clock>(
     claim: &DeliveryWorkClaim,
     lease: &mut DeliveryLease,
     prepared: &mut auction_application::AuthorizedDeliverySend<'_>,
+    activity: &ExternalWriteActivity,
 ) -> bool {
     // 现金证据只授权 Send；Take 的原账号期待随普通 fence 冻结，不能进入现金授权路径。
     if prepared.evidence_mut().is_some()
@@ -544,6 +588,11 @@ async fn confirm_delivery_handoff<C: Clock>(
     }
     // Send 摘要或 Take 原账号期待与 Sending 同事务落库；只复制枚举内的 Arc，不复制内容。
     let expectation = prepared.expectation().cloned();
+    // 围栏调用前登记交接，与关闭入口同步竞争；已关闭时不发起围栏，保留原 claim。
+    // 已登记的围栏往返也计入排空活动；登记本身不授权外写，仍须确认 Sending 提交。
+    if !activity.enter_critical() {
+        return false;
+    }
     prepared.begin_fence();
     let confirmed = if let Some(evidence) = prepared.evidence_mut() {
         match evidence.begin_commit() {
@@ -595,6 +644,7 @@ async fn confirm_delivery_handoff<C: Clock>(
         tracing::error!(delivery_id = %claim.delivery_id, "delivery worker did not confirm sending fence");
         return false;
     }
+    // Sending 已确定提交；沿用围栏前登记的活动，即使正在排空也继续续租及原发送。
     lease.renew(store, claim, clock, config).await.is_ok()
 }
 

@@ -31,6 +31,7 @@ pub(super) async fn run_worker(
     tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
     runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
+    write_lifecycle: auction_application::ExternalWriteLifecycle,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     let Some(database_url) = config.database_url() else {
@@ -47,12 +48,16 @@ pub(super) async fn run_worker(
         DatabaseStore::connect(database_url)
             .await
             .context("connect worker database")?
+            .with_audit_failure_mode(config.readiness.audit_failure_mode)
             .with_delivery_send_intervals(config.worker.mooglemail.send_intervals)
             .context("configure delivery send intervals")?,
     );
     metrics
         .register_pool_metrics(store.pool_metrics_source())
         .context("register worker database pool metrics")?;
+    metrics
+        .register_audit_metrics(store.audit_metrics_source())
+        .context("register worker audit metrics")?;
     let worker_id = format!("auction-worker-{}", Uuid::new_v4());
     let schedule: Arc<dyn ScheduledRoundStore> = store.clone();
     let lifecycle_store = Arc::clone(&store);
@@ -273,6 +278,7 @@ pub(super) async fn run_worker(
     let auction_poll_interval = std::time::Duration::from_secs(poll_interval_seconds);
     let auction_lease_duration = std::time::Duration::from_secs(lease_duration_seconds);
     let (pm_drain, pm_receiver) = tokio::sync::watch::channel(stopping);
+    let write_lifecycle_for_pm = write_lifecycle.clone();
     let mut pm_task = forum_pm.filter(|_| !stopping).map(|runtime| {
         let worker_id = worker_id.clone();
         let task_exit = WorkerRuntimeTaskExit::new(
@@ -282,7 +288,7 @@ pub(super) async fn run_worker(
         );
         TaskGuard::new(tokio::spawn(async move {
             let _task_exit = task_exit;
-            runtime.run(worker_id, pm_receiver).await;
+            runtime.with_write_lifecycle(write_lifecycle_for_pm).run(worker_id, pm_receiver).await;
         }))
     });
     // 主 shutdown 一经触发即停止 PM 新领取，不等其他循环排空完成。
@@ -396,6 +402,7 @@ pub(super) async fn run_worker(
             control: control.clone(),
             clock: Arc::new(SystemClock),
             worker_id,
+            write_lifecycle: write_lifecycle.clone(),
         },
         shutdown,
     );
@@ -411,12 +418,14 @@ pub(super) async fn run_worker(
     };
     control.mark_draining();
     pm_drain.send_replace(true);
+    // 新路径由外层共享关键段截止等待 PM；零预算保留旧的立即中止。
+    // 两种路径均只按持久租约恢复，绝不因关闭把未知写入改回 pending。
+    if !write_lifecycle.enabled() {
+        abort_worker_task(&pm_task);
+    }
+    join_worker_task(&mut pm_task, "lot watch PM").await;
     abort_worker_task(&credential_owner_task);
     join_worker_task(&mut credential_owner_task, "credential ownership monitor").await;
-    // 主循环已有有界 drain；不再追加论坛长预算。剩余 PM 中止后仅按持久租约恢复，
-    // claimed 可重领，任何 sending 只读对账，绝不因关闭把未知写入回 pending。
-    abort_worker_task(&pm_task);
-    join_worker_task(&mut pm_task, "lot watch PM").await;
     abort_worker_task(&heartbeat_task);
     join_worker_task(&mut heartbeat_task, "worker heartbeat").await;
     if let Err(error) = heartbeat.publish_stopping().await {

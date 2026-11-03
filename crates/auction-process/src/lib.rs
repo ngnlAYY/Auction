@@ -3,6 +3,6 @@
 mod lifecycle;
 
 pub use lifecycle::{
-    DEFAULT_DRAIN_TIMEOUT, DrainOutcome, TaskGuard, TerminationSignal, TerminationSignals,
-    wait_for_drain,
+    DEFAULT_DRAIN_TIMEOUT, DrainActivity, DrainActivityObserver, DrainCoordinator, DrainOutcome,
+    TaskGuard, TerminationSignal, TerminationSignals, wait_for_drain,
 };

@@ -70,7 +70,7 @@ pub use ports::{
     AuctionLifecycleTransaction, AuctionLifecycleWriteSummary, AuctionPolicyTemplate,
     AuctionPreviewSuccessorPlan, AuctionReader, AuctionRepository, AuctionScheduleCalendar,
     AuctionScheduleSlot, AuctionScheduleSource, AuctionScheduleTimes, AuctionWeeklySchedule,
-    AuthorizedDeliveryPreparation, AuthorizedDeliverySend, CanonicalEquipment,
+    AuditFailureMode, AuthorizedDeliveryPreparation, AuthorizedDeliverySend, CanonicalEquipment,
     CanonicalEquipmentStat, Clock, CommandLedger, CommandLedgerError,
     CompetitionCommandAuditContext, CompetitionCommandAuditKind, CompetitionCommandOutcome,
     CompetitionCommandPort, CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome,
@@ -301,4 +301,9 @@ pub use services::{MailboxMaintenanceReport, MailboxMaintenanceService};
 pub use ports::{
     EquipmentColorDecision, EquipmentColorFacts, EquipmentColorMatch, EquipmentColorRule,
     EquipmentGroup, PEERLESS_COLORS, equipment_color_decision, validate_equipment_color_rules,
+};
+
+pub use ports::{
+    CriticalWriteKind, ExternalWriteActivity, ExternalWriteActivityFactory,
+    ExternalWriteActivityPort, ExternalWriteLifecycle,
 };

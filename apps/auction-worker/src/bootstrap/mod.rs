@@ -68,9 +68,7 @@ use auction_observability::{
     ProcessRole, ServiceName,
 };
 use auction_observability::{ProcessMetrics, TracingConfig, TracingHealthReader, TracingRuntime};
-use auction_process::{
-    DEFAULT_DRAIN_TIMEOUT, DrainOutcome, TaskGuard, TerminationSignals, wait_for_drain,
-};
+use auction_process::{TaskGuard, TerminationSignals};
 #[cfg(feature = "postgres")]
 use auction_storage::{
     DatabaseAdminMailCommands, DatabaseAuctionLifecycleCommands, DatabaseBackend,
@@ -120,7 +118,10 @@ pub async fn run_from_path(path: std::path::PathBuf) -> anyhow::Result<()> {
     run_config(config).await
 }
 
+mod shutdown;
+
 async fn run_config(config: AppConfig) -> anyhow::Result<()> {
+    let mut signals = TerminationSignals::subscribe().context("subscribe worker signals")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
         "auction_worker",
@@ -132,13 +133,20 @@ async fn run_config(config: AppConfig) -> anyhow::Result<()> {
     )
     .context("initialize tracing")?;
 
-    let result = run_service(&config, &telemetry).await;
-    shutdown_tracing(telemetry).await;
+    let mut forced = false;
+    let result = run_service(&config, &telemetry, &mut signals, &mut forced).await;
+    if !forced {
+        shutdown_tracing(telemetry, &mut signals).await;
+    }
     result
 }
 
-async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::Result<()> {
-    let mut signals = TerminationSignals::subscribe().context("subscribe worker signals")?;
+async fn run_service(
+    config: &AppConfig,
+    telemetry: &TracingRuntime,
+    signals: &mut TerminationSignals,
+    forced: &mut bool,
+) -> anyhow::Result<()> {
     let metrics = Arc::new(
         ProcessMetrics::new_with_tracing_health(
             config.metrics.enabled,
@@ -157,6 +165,7 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         "worker configured"
     );
 
+    let shutdown_runtime = shutdown::WorkerShutdown::new(config.shutdown, metrics.shutdown());
     let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
     // 首个运行时故障即可触发收口；固定容量避免并发故障排队或阻塞 Drop 路径。
     let (runtime_failure_sender, mut runtime_failure_receiver) =
@@ -166,6 +175,7 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         telemetry.health_reader(),
         Arc::clone(&metrics),
         runtime_failure_sender,
+        shutdown_runtime.lifecycle.clone(),
         Box::pin(async move {
             let _ = shutdown_receiver.await;
         }),
@@ -186,8 +196,9 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         }
         reason = &mut runtime_failure => {
             tracing::error!(reason, "worker drain started");
+            shutdown_runtime.close();
             let _ = shutdown_sender.send(());
-            drain_worker(&mut signals, &mut worker).await.context("drain worker after runtime failure")?;
+            shutdown_runtime.drain(signals, &mut worker, auction_observability::ShutdownReason::RuntimeFailure, forced).await.context("drain worker after runtime failure")?;
             if reason == "control_server_stopped" {
                 return Err(anyhow::anyhow!("worker control server stopped; worker restart required"));
             }
@@ -203,8 +214,9 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         signal = signals.recv() => {
             let signal = signal.context("receive worker shutdown signal")?;
             tracing::info!(signal = %signal, "worker drain started");
+            shutdown_runtime.close();
             let _ = shutdown_sender.send(());
-            drain_worker(&mut signals, &mut worker).await
+            shutdown_runtime.drain(signals, &mut worker, auction_observability::ShutdownReason::Signal, forced).await
         }
     };
     if result.is_ok() {
@@ -213,23 +225,21 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     result
 }
 
-/// 信号与运行时故障共用排空预算及错误映射；具体任务仍由原有 future 和守卫拥有。
-async fn drain_worker(
-    signals: &mut TerminationSignals,
-    worker: impl std::future::Future<Output = anyhow::Result<()>>,
-) -> anyhow::Result<()> {
-    match wait_for_drain(signals, DEFAULT_DRAIN_TIMEOUT, worker).await {
-        Ok(DrainOutcome::Completed(result)) => result,
-        Ok(DrainOutcome::TimedOut) => Err(anyhow::anyhow!("worker drain exceeded 10 seconds")),
-        Ok(DrainOutcome::Interrupted(signal)) => {
-            Err(anyhow::anyhow!("worker drain interrupted by {signal}"))
+async fn shutdown_tracing(telemetry: TracingRuntime, signals: &mut TerminationSignals) {
+    let result = tokio::select! {
+        biased;
+        signal = signals.recv() => {
+            // 业务 owner 已完成回收；spawn_blocking 的刷新无法靠丢弃 future 中断。
+            // 二次信号直接结束角色进程，不能让可选 exporter 拖延强制退出。
+            match signal {
+                Ok(signal) => tracing::warn!(signal = %signal, "tracing 刷新被终止信号强制结束"),
+                Err(error) => tracing::warn!(error = %error, "tracing 刷新期间信号接收失败"),
+            }
+            std::process::exit(1);
         }
-        Err(error) => Err(error).context("wait for worker drain"),
-    }
-}
-
-async fn shutdown_tracing(telemetry: TracingRuntime) {
-    match tokio::task::spawn_blocking(move || telemetry.shutdown()).await {
+        result = tokio::task::spawn_blocking(move || telemetry.shutdown()) => result,
+    };
+    match result {
         Ok(Ok(())) => {}
         Ok(Err(error)) => tracing::warn!(error = %error, "worker tracing shutdown failed"),
         Err(error) => tracing::warn!(error = %error, "worker tracing shutdown task failed"),

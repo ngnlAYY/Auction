@@ -18,8 +18,9 @@ ExecStart=/opt/auction/bin/auction-cli --config-dir /etc/auction service start -
 ExecStop=/opt/auction/bin/auction-cli --config-dir /etc/auction service stop
 # 迁移加三个角色各 30 秒 readiness，另留 systemctl 往返余量。
 TimeoutStartSec=180
-# 三个角色依次停止最多 3 × 45 秒（各 unit 的 TimeoutStopSec），另留收口余量。
-TimeoutStopSec=155
+# 普通 + 关键段 + tracing 上限 + 余量：角色 unit 默认 45 + 45 + 120 = 210 秒。
+# 含 CLI 每角色回执余量、属性查询和最后收口，总预算 330 秒；提高应用预算须同步提高 unit 上限。
+TimeoutStopSec=330s
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

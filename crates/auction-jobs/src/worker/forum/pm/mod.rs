@@ -16,6 +16,7 @@ pub struct LotWatchPmRuntime {
     jitter: Duration,
     item_timeout: Duration,
     lease_seconds: i64,
+    write_lifecycle: auction_application::ExternalWriteLifecycle,
 }
 
 impl LotWatchPmRuntime {
@@ -45,7 +46,17 @@ impl LotWatchPmRuntime {
             jitter,
             item_timeout,
             lease_seconds: lease_seconds as i64,
+            write_lifecycle: auction_application::ExternalWriteLifecycle::default(),
         })
+    }
+
+    /// 注入进程内活动守卫；零预算旧路径不注入。
+    pub fn with_write_lifecycle(
+        mut self,
+        lifecycle: auction_application::ExternalWriteLifecycle,
+    ) -> Self {
+        self.write_lifecycle = lifecycle;
+        self
     }
 
     /// drain 停止领取；在途工作仅等待到总预算，取消后依赖持久 fence 恢复。
@@ -72,12 +83,16 @@ impl LotWatchPmRuntime {
                     available_worlds,
                 };
                 let deadline = tokio::time::Instant::now() + self.item_timeout;
-                match tokio::time::timeout_at(
+                let activity =
+                    self.write_lifecycle.activity(auction_application::CriticalWriteKind::ForumPm);
+                let operation = tokio::time::timeout_at(
                     deadline,
-                    delivery::process(&self, request, &drain, deadline),
-                )
-                .await
-                {
+                    delivery::process(&self, request, &drain, deadline, &activity),
+                );
+                let Some(result) = activity.run(operation).await else {
+                    return;
+                };
+                match result {
                     Ok(Ok(())) => {}
                     Ok(Err(_)) => {
                         tracing::warn!(reconcile, "lot watch PM persistent operation unavailable")

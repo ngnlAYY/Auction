@@ -52,6 +52,8 @@ WebSocket 每连接的发送队列有界。队列满时 Hub 淘汰发送端，�
 | `/health`、`/api/v1/health` | 服务名、状态与运行进程版本 |
 | `/metrics` | Prometheus 文本；需配置启用，且只允许 loopback 或 Unix listener |
 
+`HttpReadinessProbe` 由装配根包装完整角色判定，默认只缓存最终布尔值一秒并合并并发；每轮限时 750ms，请求断开不取消共享刷新，panic/取消/超时均发布未就绪并结束单飞。正负都缓存，过期后不继续返回旧成功，响应保持 `no-store`。关闭缓存恢复逐次检查与原请求预算；心跳不复用此缓存。转换延迟及模式语义由[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)定义，配置见[就绪策略](../../ops/config/README.md#就绪策略)。
+
 ## 其他
 
 - `GET|HEAD /api/v1/auctions/{auction_id}/countdown/{timer}` 输出自托管的论坛倒计时 SVG 图片。

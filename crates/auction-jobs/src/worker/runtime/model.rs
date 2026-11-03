@@ -42,4 +42,6 @@ pub struct PersistentWorker<C> {
     pub control: WorkerControlHandle,
     pub clock: Arc<C>,
     pub worker_id: String,
+    /// 仅控制进程内取消；持久状态仍由原窄端口拥有。
+    pub write_lifecycle: auction_application::ExternalWriteLifecycle,
 }

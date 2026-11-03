@@ -56,12 +56,16 @@ MoogleMail 默认通过 `poll_isolation_enabled = true` 为每个世界独立运
 
 `/v1/health/ready` 在 control 已标记 serving 且未进入排空时返回 200；无数据库骨架也会标记 serving，因此 200 不能单独证明持久化任务或外部能力可用，还需核对数据库配置、轮询器与相关能力状态。
 
+持久化 Worker 从 common 注入[审计就绪策略](../../ops/config/README.md#就绪策略)并注册审计分类指标。该策略影响数据库心跳及其审计计数，不扩展 control 的运行/排空契约；HTTP 缓存不用于 Worker control 或心跳。
+
 ## 退出
 
-- 第一次终止信号：停止领取新任务，在途任务在 10 秒内排空；超时或第二次信号时强制退出。
+- 第一次终止信号：关闭入口，立即取消尚未登记交接的工作且不释放 claim；已登记交接或关键段的 owner 共享一次默认 60 秒截止，之后普通收口默认 10 秒。PM 与主 runner 一起等待，不随主 runner 结束直接 abort。超时或第二次信号强制非零退出，跳过可选 tracing 刷新。
 - 独立邮箱维护任务同样受运行时监督与排空：停止后不开始新 `sweep` 或 Read Mail 观察，在途阶段保留原总预算与未知外写围栏。
 - 运行时故障（control 服务停止、装备私信循环停止、持久化循环意外退出、凭据所有权失效）同样触发排空，并**总是以非零状态退出**，由 systemd（`Restart=on-failure`）或 `auction-server` 处理重启。已领取但未完成的任务依靠持久租约恢复：过期后可被重新领取，处于发送中的外部写入只读对账，不会因为退出而重复发送。
 
 ## 部署
 
 unit 示例见 [`ops/deploy/systemd/auction-worker.service.example`](../../ops/deploy/systemd/auction-worker.service.example)（`RuntimeDirectory=hv-auction/worker` 管理 control socket 目录）。每个部署只运行一个 Worker 实例。
+
+delivery/PM/discard 在持久围栏调用前登记交接，围栏调用开始即受保护；关闭先赢时不发起围栏，已登记后即使进入排空也继续等待原围栏回执。登记本身不授权外写，只有围栏确认提交才执行外部操作；确认失败或提交未知仍不外写。论坛在已有持久 claim 下的第一个实际 POST 前登记，后续必要 POST 沿用原活动。交接与关键段均阻止排空结束，结果按原端口提交后才 complete。装备准备、Sent/compose 回读和 PM Sent 核对都属于原关键段，告警邮件复用 delivery。未收口 drop 只减少活动计数并记录未知边界，不补写持久状态、不授权重发。既有单项超时、lease 与所有权校验保持原值。配置、unit 120 秒和完整旧路径回退见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。

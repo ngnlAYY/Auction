@@ -14,6 +14,7 @@ Environment=AUCTION_CONFIG_FILE=/etc/auction/admin.toml
 ExecStart=/opt/auction/bin/auction-admin-api
 Restart=on-failure
 RestartSec=5s
+# 普通 10 + 关键段 0 + tracing 上限 30 + 余量 5 = 45 秒；提高应用预算须同步提高 unit 上限。
 TimeoutStopSec=45s
 KillSignal=SIGTERM
 UMask=0077

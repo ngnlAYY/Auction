@@ -34,6 +34,7 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 
 ## 主要约束
 
+- **就绪策略**：三角色从 common 加载 `readiness`，默认 `audit_failure_mode = "shadow"`、`cache_enabled = true`；非法模式拒绝，不受 Admin runtime 覆盖，修改须重启。影子观察、切换条件与完整回退见[配置参考](../../ops/config/README.md#就绪策略)。
 - **数据库**：`[database]` 五字段要求显式主机、非零端口、账号、口令与库名，账号口令按原文填写，由 loader 负责 URL 编码；兼容的 `database_url` 必须显式指定主机（或 socket）与库名，省略端口时固定为 5432，不继承 `PGPORT` 等环境变量。
 - **Redis**：`cache.backend = "redis"` 时必须提供 `redis_url`。
 - **备份**：`common.toml [backup]` 本地策略与 `[backup.offsite]` 的启用依赖、字段范围见[配置参考](../../ops/config/README.md#定时备份策略)。三角色仅解析保留；CLI `config check` 与 scheduled 显式校验，异机字段摘要只有是否配置。R2 凭据用 `SecretString` 保存且成对、非空、无控制字符；公钥只做长度、前缀与字符集检查，实际加密由主机 age 完成。错误只有字段名与固定原因。外部打卡仍暂缓启用。
@@ -61,3 +62,5 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 首次设置直接以 `ops/config/examples/` 中的示例为模板（编译期 `include_str!`），因此示例文件同时是生成器的输入：修改示例时须保证首次设置生成的配置仍能通过三角色 loader 校验。示例中每个赋值字段前必须紧邻含“可选/必填”的中文注释（`ci/checks/check.sh config` 检查）。
 
 首次设置发布目录前要求其直接父目录已存在、为非符号链接目录、归当前账号或 root 所有且禁止 group/other 写入；私有临时目录中的口令与 Admin 凭据不能依赖可被其他账号替换的同级名称。目标已存在仍一律拒绝覆盖。
+
+角色 TOML 的 `[shutdown]` 在启动时解析和校验，不受 common 或 runtime 覆盖。普通预算默认 10 秒；Worker 关键段默认 60 秒，Public/Admin 只接受 0。字段、范围、unit 配套及需重启的完整回退见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。

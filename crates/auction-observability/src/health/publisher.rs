@@ -17,12 +17,13 @@ pub trait TracingHealthReader: Send + Sync {
     fn snapshot(&self) -> TracingHealth;
 }
 
-/// 提供心跳每轮所需的真实数据库/schema readiness 与进程内审计失败计数。
+/// 提供真实依赖 readiness 与按启动模式投影的进程内审计失败计数。
 pub trait HeartbeatHealthReader: Send + Sync {
     /// 重新执行一次只读 readiness 检查；不可用或 schema 非 current 时返回 false。
     fn readiness(&self) -> HeartbeatReadinessFuture<'_>;
 
-    /// 返回不包含 SQL、错误原文或业务数据的审计写入失败饱和计数。
+    /// legacy/shadow 返回全部失败；classified 仅返回阻断就绪的 permanent + unknown 累计。
+    /// 返回值不包含 SQL、错误原文或业务数据；成功写入不清零。
     fn audit_failure_count(&self) -> i64;
 }
 
@@ -36,6 +37,7 @@ pub struct HeartbeatCommand {
     pub started_at: DateTime<Utc>,
     pub status: HeartbeatStatus,
     pub readiness: bool,
+    /// legacy/shadow 为全部失败累计；classified 为阻断就绪的失败累计。
     pub audit_failure_count: i64,
     pub tracing: TracingHealth,
     pub observation_sequence: i64,
@@ -202,6 +204,7 @@ pub struct Heartbeat {
     pub started_at: DateTime<Utc>,
     pub status: HeartbeatStatus,
     pub readiness: bool,
+    /// 按发布进程的审计模式投影；classified 仅计 permanent + unknown。
     pub audit_failure_count: i64,
     pub tracing: TracingHealth,
     pub observation_sequence: i64,

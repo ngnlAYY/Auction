@@ -431,7 +431,7 @@ pub use queries::{
     PublicPriceHistoryStats, PublicProxyBid, PublicProxyCapabilities, PublicProxyTransition,
     PublicRealtimeAuctionStatus, WorldReader, WorldSnapshot,
 };
-pub use readiness::ProcessReadinessPort;
+pub use readiness::{AuditFailureMode, ProcessReadinessPort};
 pub use realtime::{
     MAX_PUBLIC_EVENT_PAGE_SIZE, PublicRealtimeEvent, PublicRealtimePage, PublicRealtimeReader,
     PublicRealtimeRequest,
@@ -516,3 +516,6 @@ mod watch_preference;
 pub use watch_preference::*;
 mod lot_watch_pm;
 pub use lot_watch_pm::*;
+
+mod operations;
+pub use operations::*;

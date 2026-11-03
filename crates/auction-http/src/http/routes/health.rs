@@ -18,12 +18,12 @@ pub(super) async fn health_live() -> Json<HealthProbeResponse<HealthLiveData>> {
     })
 }
 
-/// 返回 Public 的依赖 readiness；缺少数据库端口时保持未就绪而不伪造成功。
+/// 返回装配根注入的最终判定（默认一秒缓存）；缺少端口时保持未就绪。
 pub(super) async fn public_health_ready(State(state): State<PublicApiState>) -> Response {
     health_ready_response(probe_ready(state.readiness()).await)
 }
 
-/// 返回 Admin 的依赖 readiness；数据库连接或迁移不完整时使用 503。
+/// 返回 Admin 最终判定；缓存只影响探测新鲜度，不改变 200/503 或 no-store 契约。
 pub(super) async fn admin_health_ready(State(state): State<AdminApiState>) -> Response {
     health_ready_response(probe_ready(state.readiness()).await)
 }

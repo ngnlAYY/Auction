@@ -103,17 +103,33 @@ impl ForumRemoteError {
 #[derive(Debug, Clone, Default)]
 pub struct ForumWriteProgress {
     unconfirmed: Arc<AtomicBool>,
+    activity: crate::ExternalWriteActivity,
 }
 
 impl ForumWriteProgress {
     /// 在实际 POST 发送前标记，供外层超时取消后识别不确定的外部写入。
-    pub fn mark_write_started(&self) {
+    /// Worker 已持有提交确认的持久 claim；首次登记与关闭入口互斥，已登记后沿用原活动，
+    /// 即使正在排空也不截断本工作项的后续必要 POST，直到结果提交后 confirm_write。
+    pub fn mark_write_started(&self) -> bool {
+        if !self.activity.enter_critical() {
+            return false;
+        }
         self.unconfirmed.store(true, Ordering::Release);
+        true
+    }
+
+    /// 由 Worker 为单 claim 注入，不把通用进程协调器带入领域或存储。
+    pub fn with_activity(activity: crate::ExternalWriteActivity) -> Self {
+        Self { unconfirmed: Arc::new(AtomicBool::new(false)), activity }
+    }
+    pub fn is_cancelled(&self) -> bool {
+        self.activity.is_cancelled()
     }
 
     /// 已取得远端证明且本地镜像事务已确认，解除本轮写入标记。
     pub fn confirm_write(&self) {
         self.unconfirmed.store(false, Ordering::Release);
+        self.activity.complete();
     }
 
     /// 返回本轮是否已经发送过尚未完成本地收口的 POST。

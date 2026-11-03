@@ -129,19 +129,27 @@ where
             .checked_add_signed(lease_duration)
             .ok_or(WorkerError::InvalidForumSyncConfiguration)?;
         // 只领取即将执行的一条；空世界集合仍初始化 live 投影，但不占租约或发起外呼。
-        let mut claims = tokio::time::timeout_at(
-            item_deadline,
-            runtime.store.claim_due(
-                worker.worker_id.clone(),
-                now,
-                lease_until,
-                startup_recovery_before,
-                available_worlds,
-                1,
-            ),
-        )
-        .await
-        .map_err(|_| WorkerError::ForumTopicProcessingFailed)??;
+        let claims = worker
+            .write_lifecycle
+            .background(tokio::time::timeout_at(
+                item_deadline,
+                runtime.store.claim_due(
+                    worker.worker_id.clone(),
+                    now,
+                    lease_until,
+                    startup_recovery_before,
+                    available_worlds,
+                    1,
+                ),
+            ))
+            .await;
+        let Some(claims) = claims else {
+            break;
+        };
+        let mut claims = claims.map_err(|timeout| {
+            let _elapsed = timeout;
+            WorkerError::ForumTopicProcessingFailed
+        })??;
         let Some(claim) = claims.pop() else {
             break;
         };
@@ -150,8 +158,14 @@ where
             break;
         }
         processed += 1;
-        if let Err(error) =
-            process_claim(runtime, Arc::clone(&worker.clock), claim, item_deadline).await
+        if let Err(error) = process_claim(
+            runtime,
+            Arc::clone(&worker.clock),
+            claim,
+            item_deadline,
+            &worker.write_lifecycle,
+        )
+        .await
             && first_error.is_none()
         {
             first_error = Some(error);
@@ -160,11 +174,27 @@ where
     first_error.map_or(Ok(()), Err)
 }
 
-async fn process_claim<C>(
+async fn process_claim<C: Clock + 'static>(
     runtime: &ForumSyncRuntime,
     clock: Arc<C>,
     claim: ForumSyncClaim,
     item_deadline: tokio::time::Instant,
+    lifecycle: &auction_application::ExternalWriteLifecycle,
+) -> Result<(), WorkerError> {
+    let activity = lifecycle.activity(auction_application::CriticalWriteKind::Forum);
+    let progress = ForumWriteProgress::with_activity(activity.clone());
+    activity
+        .run(process_claim_attempt(runtime, clock, claim, item_deadline, &progress))
+        .await
+        .unwrap_or(Ok(()))
+}
+
+async fn process_claim_attempt<C>(
+    runtime: &ForumSyncRuntime,
+    clock: Arc<C>,
+    claim: ForumSyncClaim,
+    item_deadline: tokio::time::Instant,
+    write_progress: &ForumWriteProgress,
 ) -> Result<(), WorkerError>
 where
     C: Clock + 'static,
@@ -174,14 +204,13 @@ where
     let failure_clock = Arc::clone(&clock);
     let failure_claim = claim.clone();
     let reconciliation_only = requires_reconciliation(&claim);
-    let write_progress = ForumWriteProgress::default();
     let result = if tokio::time::Instant::now() >= item_deadline {
         // 领取响应已到截止时，不首次 poll 内层任务；仍记录已知未开始外写的安全失败。
         None
     } else {
         tokio::time::timeout_at(
             item_deadline,
-            process_claim_inner(runtime, clock, claim, &write_progress),
+            process_claim_inner(runtime, clock, claim, write_progress),
         )
         .await
         .ok()
@@ -196,6 +225,7 @@ where
                 "topic_processing_timeout"
             };
             record_failure(
+                write_progress,
                 failure_store,
                 failure_clock,
                 failure_claim,
@@ -232,6 +262,7 @@ where
         Ok(snapshot) => snapshot,
         Err(error) => {
             record_failure(
+                write_progress,
                 store,
                 clock,
                 retry_claim,
@@ -250,6 +281,7 @@ where
         Ok(public_url) => public_url,
         Err(error) => {
             record_failure(
+                write_progress,
                 store,
                 clock,
                 retry_claim,
@@ -269,6 +301,7 @@ where
         Ok(links) => links,
         Err(error) => {
             record_failure(
+                write_progress,
                 store,
                 clock,
                 retry_claim,
@@ -283,6 +316,7 @@ where
         Ok(rendered) => rendered,
         Err(error) => {
             record_failure(
+                write_progress,
                 store,
                 clock,
                 retry_claim,
@@ -313,6 +347,7 @@ where
         Ok(rendered) => rendered,
         Err(error) => {
             record_failure(
+                write_progress,
                 store,
                 clock,
                 retry_claim,
@@ -349,14 +384,22 @@ where
                         } else {
                             forum_failure_code(&error)
                         };
-                        record_failure(store, clock, retry_claim, failure_code.to_owned(), error)
-                            .await?;
+                        record_failure(
+                            write_progress,
+                            store,
+                            clock,
+                            retry_claim,
+                            failure_code.to_owned(),
+                            error,
+                        )
+                        .await?;
                         return Err(WorkerError::ForumTopicProcessingFailed);
                     }
                 }
             }
             Ok(None) => {
                 record_failure(
+                    write_progress,
                     store,
                     clock,
                     retry_claim,
@@ -370,7 +413,8 @@ where
             }
             Err(error) => {
                 let failure_code = scoped_failure_code(true, forum_failure_code(&error));
-                record_failure(store, clock, retry_claim, failure_code, error).await?;
+                record_failure(write_progress, store, clock, retry_claim, failure_code, error)
+                    .await?;
                 return Err(WorkerError::ForumTopicProcessingFailed);
             }
         }
@@ -387,7 +431,15 @@ where
                 } else {
                     forum_failure_code(&error)
                 };
-                record_failure(store, clock, retry_claim, failure_code.to_owned(), error).await?;
+                record_failure(
+                    write_progress,
+                    store,
+                    clock,
+                    retry_claim,
+                    failure_code.to_owned(),
+                    error,
+                )
+                .await?;
                 return Err(WorkerError::ForumTopicProcessingFailed);
             }
         }
@@ -428,16 +480,25 @@ where
             } else {
                 scoped_failure_code(true, code)
             };
-            record_failure(store, clock, retry_claim, failure_code, error).await?;
+            record_failure(write_progress, store, clock, retry_claim, failure_code, error).await?;
             return Err(WorkerError::ForumTopicProcessingFailed);
         }
     };
     if let Err(error) =
         store.publish(claim.clone(), rendered, system_log, layout, clock.now()).await
     {
-        record_failure(store, clock, claim, "publish_proof_failed".to_owned(), error).await?;
+        record_failure(
+            write_progress,
+            store,
+            clock,
+            claim,
+            "publish_proof_failed".to_owned(),
+            error,
+        )
+        .await?;
         return Err(WorkerError::ForumTopicProcessingFailed);
     }
+    write_progress.confirm_write();
     Ok(())
 }
 
@@ -453,6 +514,7 @@ async fn find_reconciliation_topic(
 }
 
 async fn record_failure<C>(
+    write_progress: &ForumWriteProgress,
     store: Arc<dyn ForumSyncStore>,
     clock: Arc<C>,
     claim: ForumSyncClaim,
@@ -462,6 +524,9 @@ async fn record_failure<C>(
 where
     C: Clock + 'static,
 {
+    if write_progress.is_cancelled() {
+        return Ok(());
+    }
     let now = clock.now();
     let unscoped_code = failure_code.strip_prefix("reconcile_").unwrap_or(&failure_code);
     let delay = if matches!(unscoped_code, "write_unknown" | "publish_proof_failed") {
@@ -479,7 +544,9 @@ where
         )));
     };
     let safe_detail = bounded_detail(error.to_string());
-    store.fail(claim, retry_at, failure_code, safe_detail).await
+    store.fail(claim, retry_at, failure_code, safe_detail).await?;
+    write_progress.confirm_write();
+    Ok(())
 }
 
 fn forum_failure_code(error: &ApplicationError) -> &'static str {

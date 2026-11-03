@@ -6,6 +6,8 @@
 
 依赖：`auction-domain` 与少量通用库（serde、sha2/hmac、chrono-tz、url 等），不依赖 tokio 运行时。
 
+`ProcessReadinessPort` 只返回有限成功/失败；`AuditFailureMode` 定义 legacy/shadow/classified 启动策略，具体 SQLSTATE 分类、计数由存储适配器拥有，HTTP 缓存由 HTTP 适配器拥有，不改变事务或命令重试规则。配置与语义见[就绪策略](../../ops/config/README.md#就绪策略)。
+
 ## 结构
 
 | 路径 | 内容 |
@@ -174,3 +176,5 @@
 - 新功能先定义端口与值对象，再在适配器 crate 中实现；不要在本 crate 引入 I/O 依赖。
 - 新增命令必须定义稳定的命令种类字符串与请求摘要输入，一经发布不可修改。
 - 投影与 DTO 的映射放在 `auction-http`，不要让端口类型直接成为对外协议。
+
+`ExternalWriteLifecycle` 与逐工作项活动是无 Tokio 依赖的窄端口，由装配根桥接通用协调器。它只控制进程内取消，不决定持久租约、完成状态或重发资格。delivery/PM/discard 在围栏调用前同步登记，围栏调用开始即受保护；登记不授权外写，仍须确认围栏提交。论坛在已有持久 claim 下的首个实际 POST 前登记。交接与关键段同样计入活动、阻止排空结束，既有结果提交后才 complete；其余释放只由 drop 记为未收口。

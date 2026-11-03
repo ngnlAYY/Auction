@@ -8,6 +8,13 @@ secrets_file = "secrets.toml"
 # 可选：与 Admin/Worker 共享同一 runtime 文件；仅投影装备分组规则及登录提示的 bot_players，默认不加载。
 runtime_config_file = "runtime/admin.toml"
 
+# 可选区块：当前角色的启动期排空预算；变更需重启，不由 runtime 覆盖。
+[shutdown]
+# 可选：普通排空秒数，范围 1-300，默认 10；提高时须同步提高 unit 上限。
+drain_timeout_seconds = 10
+# 可选：关键段独立预算，Worker 范围 0-300、默认 60，Public/Admin 只接受 0；Worker 设 0 完整回退旧排空路径。
+critical_write_timeout_seconds = 0
+
 # 可选区块：Public HTTP 监听器；省略整个区块时使用 TCP 127.0.0.1:8090。
 [listener]
 # 可选：TCP 监听地址；TCP 模式使用 host:port，默认 127.0.0.1:8090。

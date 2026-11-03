@@ -14,8 +14,8 @@ use crate::cli::UnitArgs;
 
 const SHOW_TIMEOUT: Duration = Duration::from_secs(10);
 const START_TIMEOUT: Duration = Duration::from_secs(90);
-/// 覆盖示例 unit 的 TimeoutStopSec=45s 及 systemd 的强制收尾。
-const STOP_TIMEOUT: Duration = Duration::from_secs(120);
+/// systemd unit 自己的有限停止预算之外，给客户端回执额外留十秒。
+const STOP_RECEIPT_MARGIN: Duration = Duration::from_secs(10);
 const PROPERTIES: &str =
     "LoadState,ActiveState,SubState,MainPID,InvocationID,User,DynamicUser,Environment";
 
@@ -115,7 +115,16 @@ impl Systemctl {
     }
 
     pub(crate) async fn stop(&self, role: ManagedRole) -> anyhow::Result<()> {
-        self.run(&["stop", "--", self.unit(role)], STOP_TIMEOUT)
+        let value = self
+            .run(
+                &["show", "--property=TimeoutStopUSec", "--value", "--", self.unit(role)],
+                SHOW_TIMEOUT,
+            )
+            .await?;
+        let timeout = stop_timeout(&value)?
+            .checked_add(STOP_RECEIPT_MARGIN)
+            .context("unit stop receipt budget overflow")?;
+        self.run(&["stop", "--", self.unit(role)], timeout)
             .await
             .with_context(|| format!("停止 {} unit 失败", self.unit(role)))
             .map(drop)
@@ -222,4 +231,36 @@ pub(crate) fn require_config_binding(
         );
     }
     Ok(())
+}
+
+/// systemctl 将 USEC 属性格式化为有限时间片（如 1min 30s）；拒绝 infinity 和未知单位。
+/// 只解析单个指定属性，绝不读取或打印其他 unit 配置。
+fn stop_timeout(value: &str) -> anyhow::Result<Duration> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > 128 || value == "infinity" {
+        anyhow::bail!("TimeoutStopUSec 必须是有限时长");
+    }
+    let mut micros = 0_u64;
+    for part in value.split_whitespace() {
+        let split = part.find(|c: char| !c.is_ascii_digit()).unwrap_or(part.len());
+        let (number, unit) = part.split_at(split);
+        let amount: u64 = number.parse().context("解析 TimeoutStopUSec 数值失败")?;
+        let scale = match unit {
+            "" | "us" | "µs" => 1,
+            "ms" => 1_000,
+            "s" => 1_000_000,
+            "min" => 60_000_000,
+            "h" => 3_600_000_000,
+            "d" => 86_400_000_000,
+            _ => anyhow::bail!("TimeoutStopUSec 单位不受支持"),
+        };
+        micros = amount
+            .checked_mul(scale)
+            .and_then(|part| micros.checked_add(part))
+            .context("TimeoutStopUSec 超出可表示范围")?;
+    }
+    if micros == 0 {
+        anyhow::bail!("TimeoutStopUSec 必须大于零");
+    }
+    Ok(Duration::from_micros(micros))
 }

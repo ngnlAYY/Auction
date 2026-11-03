@@ -12,6 +12,7 @@ use tokio::{
 struct RoleChild {
     name: &'static str,
     process: Child,
+    drain_budget: Duration,
 }
 
 pub(super) async fn run(
@@ -77,6 +78,13 @@ async fn start_and_watch(
         children.push(RoleChild {
             name: plan.role.name(),
             process: command.spawn().context("spawn service role")?,
+            // 普通 + 关键段 + tracing 合法上限 + 调度余量；不依赖当前是否启用 exporter。
+            drain_budget: Duration::from_secs(
+                plan.config.shutdown.drain_timeout_seconds
+                    + plan.config.shutdown.critical_write_timeout_seconds
+                    + 30
+                    + 5,
+            ),
         });
         let deadline = Instant::now() + startup;
         loop {
@@ -111,8 +119,9 @@ fn ensure_running(children: &mut [RoleChild]) -> anyhow::Result<()> {
 }
 
 async fn stop(children: &mut [RoleChild], signals: &mut TerminationSignals) -> anyhow::Result<()> {
-    // 每个角色至多 10 秒 drain + 30 秒 tracing；三角色顺序关闭的总预算固定为 135 秒。
-    let deadline = Instant::now() + Duration::from_secs(135);
+    // 三角色反序关闭共享由 RolePlan 派生的预算；默认 45 + 45 + 105 = 195 秒。
+    let budget: Duration = children.iter().map(|child| child.drain_budget).sum();
+    let deadline = Instant::now() + budget;
     let mut failed_status = None;
     let graceful = async {
         for child in children.iter_mut().rev() {

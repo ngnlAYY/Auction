@@ -27,8 +27,8 @@ cargo run --locked -p auction-public-api --features postgres,web-embed   # 需�
 
 ## 就绪与退出
 
-- `/health/ready` 要求数据库就绪（迁移版本等于本二进制期望版本、无审计写入失败）且 realtime relay 在最近 `max(4 × poll_interval_millis, 5 秒)` 内扫描成功。
-- 收到第一次终止信号后：停止接受新连接、关闭已升级的 WebSocket、发布 stopping 心跳，在 10 秒内排空；超时或第二次信号时强制中止并以非零状态退出。
+- `/health/ready` 要求完整迁移历史匹配、审计模式门禁通过，且 realtime relay 在最近 `max(4 × poll_interval_millis, 5 秒)` 内扫描成功。默认 shadow 保持全部审计失败阻断并记录影子差异，最终 HTTP 判定缓存一秒、并发合并；时限见[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)。心跳不复用缓存，开关见[就绪策略](../../ops/config/README.md#就绪策略)。
+- 收到第一次终止信号后：停止接受新连接、关闭已升级的 WebSocket、发布 stopping 心跳，按 `[shutdown].drain_timeout_seconds`（默认 10 秒）排空；超时或第二次信号时强制中止并以非零状态退出。
 
 ## 多实例
 
@@ -37,3 +37,5 @@ cargo run --locked -p auction-public-api --features postgres,web-embed   # 需�
 ## 部署
 
 分体部署的 unit 示例见 [`ops/deploy/systemd/auction-public-api.service.example`](../../ops/deploy/systemd/auction-public-api.service.example)，启动顺序与运维流程见[运维手册](../../ops/README.md)。
+
+本角色关键段预算只接受 0。二次信号强制非零退出并跳过可选 tracing 刷新；示例 unit 保持 45 秒，配置与外层公式见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。

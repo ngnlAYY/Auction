@@ -1,5 +1,8 @@
 //! 操作系统终止信号、有界 drain 与 Tokio 任务所有权。
 
+mod drain;
+pub use drain::{DrainActivity, DrainActivityObserver, DrainCoordinator};
+
 use std::{fmt, future::Future, io, time::Duration};
 
 use tokio::task::{JoinError, JoinHandle};

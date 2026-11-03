@@ -1,11 +1,23 @@
 //! 进程本地 Prometheus 指标的分组入口；实现按进程、业务、池、Worker 与 tracing owner 拆分。
 
+mod audit;
 mod business;
 mod pool;
 mod process;
+mod readiness;
+mod shutdown;
+pub use shutdown::{
+    ShutdownCriticalKind, ShutdownOutcome, ShutdownPhase, ShutdownReason, ShutdownRecorder,
+    ShutdownRole,
+};
 mod tracing;
 mod types;
 mod worker;
 
+pub use audit::{
+    AuditFailureClass, AuditFailureKind, AuditFailureObservation, AuditMetricsSnapshot,
+    AuditMetricsSource, AuditSqlstateClass,
+};
 pub use process::ProcessMetrics;
+pub use readiness::{ReadinessCacheOutcome, ReadinessCheckResult, ReadinessRecorder};
 pub use types::*;

@@ -162,18 +162,26 @@ where
         let lease_until =
             now.checked_add_signed(lease_duration).ok_or(WorkerError::InvalidForumConfiguration)?;
         // 每次只领取即将处理的一场拍卖，避免批量候选在等待前序主题时耗尽内容租约。
-        let mut topics = tokio::time::timeout_at(
-            item_deadline,
-            runtime.store.claim_published_topics(
-                worker.worker_id.clone(),
-                now,
-                lease_until,
-                available_worlds,
-                1,
-            ),
-        )
-        .await
-        .map_err(|_| WorkerError::ForumTopicProcessingFailed)??;
+        let topics = worker
+            .write_lifecycle
+            .background(tokio::time::timeout_at(
+                item_deadline,
+                runtime.store.claim_published_topics(
+                    worker.worker_id.clone(),
+                    now,
+                    lease_until,
+                    available_worlds,
+                    1,
+                ),
+            ))
+            .await;
+        let Some(topics) = topics else {
+            break;
+        };
+        let mut topics = topics.map_err(|timeout| {
+            let _elapsed = timeout;
+            WorkerError::ForumTopicProcessingFailed
+        })??;
         let Some(topic) = topics.pop() else {
             break;
         };
@@ -213,56 +221,65 @@ where
             break;
         }
         processed += 1;
-        let write_progress = ForumWriteProgress::default();
-        match tokio::time::timeout_at(
-            item_deadline,
-            process_topic(
-                runtime,
-                topic.clone(),
-                worker.clock.as_ref(),
-                poll_interval,
-                &write_progress,
-            ),
-        )
-        .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                tracing::warn!(
-                    auction_id = %topic.auction_id,
-                    thread_id = %topic.thread_id,
-                    error = %error,
-                    "论坛回帖主题导入未完成"
-                );
-                record_topic_failure(
+        let activity =
+            worker.write_lifecycle.activity(auction_application::CriticalWriteKind::Forum);
+        let write_progress = ForumWriteProgress::with_activity(activity.clone());
+        let operation = async {
+            match tokio::time::timeout_at(
+                item_deadline,
+                process_topic(
                     runtime,
-                    topic,
-                    worker.clock.now(),
+                    topic.clone(),
+                    worker.clock.as_ref(),
                     poll_interval,
-                    &error,
                     &write_progress,
-                )
-                .await?;
-                topic_failed = true;
+                ),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    tracing::warn!(
+                        auction_id = %topic.auction_id,
+                        thread_id = %topic.thread_id,
+                        error = %error,
+                        "论坛回帖主题导入未完成"
+                    );
+                    record_topic_failure(
+                        runtime,
+                        topic,
+                        worker.clock.now(),
+                        poll_interval,
+                        &error,
+                        &write_progress,
+                    )
+                    .await?;
+                    topic_failed = true;
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        auction_id = %topic.auction_id,
+                        thread_id = %topic.thread_id,
+                        "论坛回帖主题导入超时，保留该主题等待持久化调度重试"
+                    );
+                    record_topic_failure_code(
+                        runtime,
+                        topic,
+                        worker.clock.now(),
+                        poll_interval,
+                        "topic_processing_timeout",
+                        &write_progress,
+                    )
+                    .await?;
+                    topic_failed = true;
+                }
             }
-            Err(_) => {
-                tracing::warn!(
-                    auction_id = %topic.auction_id,
-                    thread_id = %topic.thread_id,
-                    "论坛回帖主题导入超时，保留该主题等待持久化调度重试"
-                );
-                record_topic_failure_code(
-                    runtime,
-                    topic,
-                    worker.clock.now(),
-                    poll_interval,
-                    "topic_processing_timeout",
-                    write_progress.has_unconfirmed_write(),
-                )
-                .await?;
-                topic_failed = true;
-            }
-        }
+            Ok::<(), WorkerError>(())
+        };
+        let Some(result) = activity.run(operation).await else {
+            break;
+        };
+        result?;
     }
     if topic_failed { Err(WorkerError::ForumTopicProcessingFailed) } else { Ok(()) }
 }
@@ -286,7 +303,7 @@ async fn record_topic_failure(
         failed_at,
         poll_interval,
         failure_code,
-        write_progress.has_unconfirmed_write(),
+        write_progress,
     )
     .await
 }
@@ -297,21 +314,23 @@ async fn record_topic_failure_code(
     failed_at: chrono::DateTime<chrono::Utc>,
     poll_interval: chrono::Duration,
     failure_code: &str,
-    unconfirmed_write: bool,
+    write_progress: &ForumWriteProgress,
 ) -> Result<(), WorkerError> {
+    if write_progress.is_cancelled() {
+        return Ok(());
+    }
     // 历史未知写入不能因后续 GET/数据库错误被覆盖成可重试状态，必须等待原有回读证明。
-    let failure_code =
-        if unconfirmed_write || topic.content_last_error_code.as_deref() == Some("write_unknown") {
-            "write_unknown"
-        } else {
-            failure_code
-        };
+    let failure_code = if write_progress.has_unconfirmed_write()
+        || topic.content_last_error_code.as_deref() == Some("write_unknown")
+    {
+        "write_unknown"
+    } else {
+        failure_code
+    };
     let retry_at = failed_at
         .checked_add_signed(poll_interval)
         .ok_or(WorkerError::InvalidForumConfiguration)?;
-    runtime
-        .store
-        .fail_topic_scan(topic, failed_at, retry_at, failure_code.to_owned())
-        .await
-        .map_err(Into::into)
+    runtime.store.fail_topic_scan(topic, failed_at, retry_at, failure_code.to_owned()).await?;
+    write_progress.confirm_write();
+    Ok(())
 }

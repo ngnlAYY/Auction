@@ -12,6 +12,19 @@ pub enum DatabaseStore {
 
 #[cfg(feature = "postgres")]
 impl DatabaseStore {
+    /// 装配根注入同源启动策略；不读取配置，不改变 SQL 错误或事务重试规则。
+    pub fn with_audit_failure_mode(mut self, mode: auction_application::AuditFailureMode) -> Self {
+        let Self::Postgres(store) = &mut self;
+        store.audit_failure_mode = mode;
+        self
+    }
+
+    /// 返回纯内存审计指标源；三角色装配根各注册一次。
+    pub fn audit_metrics_source(&self) -> Arc<dyn auction_observability::AuditMetricsSource> {
+        let Self::Postgres(store) = self;
+        audit_health::metrics_source(store.audit_failure_mode)
+    }
+
     pub async fn connect(database_url: &str) -> Result<Self, StorageError> {
         let backend = DatabaseBackend::from_url(database_url)?;
 
@@ -170,16 +183,18 @@ impl HeartbeatHealthReader for DatabaseStore {
     }
 
     fn audit_failure_count(&self) -> i64 {
-        audit_health::failure_count()
+        let Self::Postgres(store) = self;
+        audit_health::failure_count(store.audit_failure_mode)
     }
 }
 
 #[cfg(feature = "postgres")]
 impl DatabaseStore {
-    /// 复用 HTTP 与 heartbeat 的保守进程 readiness：数据库/schema 正常且没有审计写入失败。
+    /// HTTP 与 heartbeat 共用数据库/schema 证明及模式化审计门禁。
     async fn check_process_readiness(&self) -> Result<(), ()> {
         self.check_database_readiness().await?;
-        if audit_health::failure_count() > 0 {
+        let Self::Postgres(store) = self;
+        if !audit_health::is_ready(store.audit_failure_mode) {
             return Err(());
         }
         Ok(())

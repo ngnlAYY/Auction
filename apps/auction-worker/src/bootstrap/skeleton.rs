@@ -11,6 +11,7 @@ pub(super) async fn run_worker(
     _tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
     runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
+    _write_lifecycle: auction_application::ExternalWriteLifecycle,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     if config.database_url().is_some() {

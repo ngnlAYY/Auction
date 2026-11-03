@@ -95,7 +95,7 @@ auction-cli --config-dir /etc/auction service stop
 - **restart**：先完成与 start 相同的预检（新配置不可用时不停止现有服务），再按 Public → Admin → Worker 停止，随后迁移并顺序启动。
 - **stop**：按 Public → Admin → Worker 逐个停止，并确认每个 unit 已停止后才处理下一个。
 - **status**：不取锁、不要求严格权限；输出每个 unit 的 `load_state/active_state/sub_state/main_pid` 与 readiness，任一角色未就绪即以 4 退出。配置无法加载时仍报告 systemd 状态，并在 `config_error` 中给出原因。
-- systemctl 调用均有超时（查询 10 秒、启动 90 秒、停止 120 秒）；超时只终止 systemctl 客户端，已提交给 systemd 的 job 可能仍在执行，须重新查看状态。
+- systemctl 调用均有超时（查询 10 秒、启动 90 秒、停止为 unit 的有限 `TimeoutStopUSec` + 10 秒）；超时只终止 systemctl 客户端，已提交给 systemd 的 job 可能仍在执行，须重新查看状态。
 
 [`ops/deploy/systemd/auction-stack.service.example`](../../ops/deploy/systemd/auction-stack.service.example) 把 `service start/stop` 包装为 oneshot unit，用于开机按顺序拉起。
 
@@ -360,3 +360,5 @@ Bot 内部履约（买卖双方之一是 Bot 自己时不经邮件外发）需�
 | `apps/auction-cli/src/backup/scheduled/offsite/` | age、同盘暂存、待上传检查点、日/月副本编排与追加完成事实 |
 | `apps/auction-cli/src/operations/` | 凭据、规则、论坛、PM、邮件、资金与结算异常 |
 | `apps/auction-cli/src/support/` | 私有文件、锁文件与输入校验 |
+
+排空配置和外层预算见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。systemctl 停止前只读取指定的 TimeoutStopUSec 属性，拒绝无限或无法解析的时长；不会把客户端超时视为 unit 已停止。

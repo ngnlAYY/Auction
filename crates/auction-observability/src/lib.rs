@@ -12,9 +12,12 @@ pub use health::{
     TracingHealthReader, TracingStatus,
 };
 pub use metrics::{
-    BusinessEvent, BusinessOutcome, BusinessRecorder, METRICS_ROUTE, MetricsError,
-    PoolMetricsBackend, PoolMetricsSnapshot, PoolMetricsSource, ProcessMetrics, WorkerLoop,
-    WorkerRecorder, WorkerResult, WorkerRetryKind, noop_worker_recorder,
+    AuditFailureClass, AuditFailureKind, AuditFailureObservation, AuditMetricsSnapshot,
+    AuditMetricsSource, AuditSqlstateClass, BusinessEvent, BusinessOutcome, BusinessRecorder,
+    METRICS_ROUTE, MetricsError, PoolMetricsBackend, PoolMetricsSnapshot, PoolMetricsSource,
+    ProcessMetrics, ReadinessCacheOutcome, ReadinessCheckResult, ReadinessRecorder,
+    ShutdownCriticalKind, ShutdownOutcome, ShutdownPhase, ShutdownReason, ShutdownRecorder,
+    ShutdownRole, WorkerLoop, WorkerRecorder, WorkerResult, WorkerRetryKind, noop_worker_recorder,
 };
 pub use telemetry::{
     InitError, ShutdownError, TracingConfig, TracingRuntime, attach_remote_trace_context,

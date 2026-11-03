@@ -101,10 +101,13 @@ where
     let delivery_enabled = worker.delivery_store.is_some() && worker.delivery_transport.is_some();
     if delivery_enabled {
         if let Some(store) = &worker.delivery_store {
-            delivery_wakeup_tasks.spawn(delivery::run_delivery_wakeup(
-                Arc::clone(store),
-                Arc::clone(&delivery_wakeup),
-                drain_sender.subscribe(),
+            delivery_wakeup_tasks.spawn(run_background(
+                worker.write_lifecycle.clone(),
+                delivery::run_delivery_wakeup(
+                    Arc::clone(store),
+                    Arc::clone(&delivery_wakeup),
+                    drain_sender.subscribe(),
+                ),
             ));
         }
         let delivery_worker = Arc::clone(&worker);
@@ -119,29 +122,40 @@ where
             OperationsAlertLoopAction::Dispatch,
             OperationsAlertLoopAction::Reconcile,
         ] {
-            operations_alert_tasks.spawn(run_operations_alert_loop(
-                Arc::clone(runtime),
-                Arc::clone(&worker.clock),
-                Arc::clone(&worker.metrics),
-                action,
-                worker.control.clone(),
-                drain_sender.subscribe(),
+            operations_alert_tasks.spawn(run_background(
+                worker.write_lifecycle.clone(),
+                run_operations_alert_loop(
+                    Arc::clone(runtime),
+                    Arc::clone(&worker.clock),
+                    Arc::clone(&worker.metrics),
+                    action,
+                    worker.control.clone(),
+                    drain_sender.subscribe(),
+                ),
             ));
         }
     }
     let mut auction_tasks = JoinSet::new();
-    auction_tasks.spawn(auction::run_loop(Arc::clone(&worker), drain_sender.subscribe()));
+    auction_tasks.spawn(run_background(
+        worker.write_lifecycle.clone(),
+        auction::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
+    ));
     let mut fulfillment_tasks = JoinSet::new();
     if worker.fulfillment_store.is_some() && worker.fulfillment_commands.is_some() {
-        fulfillment_tasks
-            .spawn(fulfillment::run_loop(Arc::clone(&worker), drain_sender.subscribe()));
+        fulfillment_tasks.spawn(run_background(
+            worker.write_lifecycle.clone(),
+            fulfillment::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
+        ));
     }
     let mut recovery_tasks = JoinSet::new();
     if worker.recovery_health.is_some()
         || worker.recovery_store.is_some()
         || worker.recovery_resolution.is_some()
     {
-        recovery_tasks.spawn(recovery::run_loop(Arc::clone(&worker), drain_sender.subscribe()));
+        recovery_tasks.spawn(run_background(
+            worker.write_lifecycle.clone(),
+            recovery::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
+        ));
     }
     let mut mail_poll_tasks = JoinSet::new();
     let mut mail_maintenance_tasks = JoinSet::new();
@@ -165,8 +179,10 @@ where
     }
     let mut realtime_tasks = JoinSet::new();
     if worker.realtime_consumer.is_some() {
-        realtime_tasks
-            .spawn(realtime_consumer::run_loop(Arc::clone(&worker), drain_sender.subscribe()));
+        realtime_tasks.spawn(run_background(
+            worker.write_lifecycle.clone(),
+            realtime_consumer::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
+        ));
     }
 
     let fatal_error = loop {
@@ -305,20 +321,25 @@ where
         ];
         results.into_iter().find_map(Result::err).map_or(Ok(()), Err)
     };
-    let result = if let Some(error) = fatal_error {
-        // 独立调用方可能没有装配根监督；致命故障也不得无界等待。
-        match tokio::time::timeout(std::time::Duration::from_secs(10), drain).await {
-            Ok(Ok(())) => {}
-            Ok(Err(drain_error)) => {
+    // 装配根统一拥有关键段、普通收口与二次信号截止，致命分支不得另建短预算。
+    let drained = drain.await;
+    let result = match fatal_error {
+        Some(error) => {
+            if let Err(drain_error) = drained {
                 tracing::warn!(error = %drain_error, "another worker task failed while draining");
             }
-            Err(_) => tracing::warn!("fatal worker drain exceeded 10 seconds"),
+            Err(error)
         }
-        Err(error)
-    } else {
-        // 正常停止仍由装配根统一施加总预算和二次信号。
-        drain.await
+        None => drained,
     };
     tracing::info!(worker_id = %worker.worker_id, "auction worker stopping");
     result
+}
+
+/// 非外写 owner 在停机时立即释放；取消不产生任何持久失败或释放命令。
+async fn run_background<F: std::future::Future>(
+    lifecycle: auction_application::ExternalWriteLifecycle,
+    future: F,
+) {
+    let _completed = lifecycle.background(future).await;
 }

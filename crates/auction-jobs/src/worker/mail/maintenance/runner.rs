@@ -55,7 +55,7 @@ pub(crate) async fn run_loop<C>(
         );
         let iteration = IterationGuard::new(Arc::clone(&worker.metrics), maintenance_loop);
         // 在途 sweep 沿用原预算排空，避免在 discard POST 中途因停止信号另建重试授权。
-        iteration.finish(run_maintenance(&runtime).await);
+        iteration.finish(run_maintenance(&runtime, &worker.write_lifecycle).await);
 
         if *shutdown.borrow() || worker.control.is_draining() {
             return;
@@ -64,7 +64,13 @@ pub(crate) async fn run_loop<C>(
             // 仅在 sweep 之后检查，实际观察间隔向上取整到维护节奏；失败也消耗这次间隔。
             last_observation = tokio::time::Instant::now();
             let iteration = IterationGuard::new(Arc::clone(&worker.metrics), observation_loop);
-            iteration.finish(run_read_observation(&runtime).await);
+            iteration.finish(
+                worker
+                    .write_lifecycle
+                    .background(run_read_observation(&runtime))
+                    .await
+                    .unwrap_or(auction_observability::WorkerResult::Canceled),
+            );
         }
     }
 }

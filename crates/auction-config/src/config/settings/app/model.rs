@@ -17,6 +17,8 @@ pub(super) struct FileConfig<Session> {
     /// 可选 tracing 区块；Public/Worker 使用，Admin 有 runtime 文件时由 runtime 覆盖。
     #[serde(default)]
     pub(super) tracing: TracingSettings,
+    #[serde(default)]
+    pub(super) shutdown: ShutdownFileConfig,
     /// 可选 Public realtime 区块；省略时使用稳定 consumer 和有界 relay 默认值。
     #[serde(default)]
     pub(super) realtime: RealtimeConfig,
@@ -81,6 +83,7 @@ pub(super) struct CommonFileConfig {
     pub(super) log_filter: Option<String>,
     /// 进程本地 Prometheus 指标公共默认值；Admin runtime 仍可在重启时覆盖。
     pub(super) metrics: MetricsConfig,
+    pub(super) readiness: ReadinessConfig,
     pub(super) cache: CacheConfig,
     /// CLI 专用策略；常驻角色不应用其运维语义。
     pub(super) backup: BackupConfig,
@@ -95,7 +98,9 @@ pub(super) struct BuildInput {
     pub(super) listener: Option<HttpListenerConfig>,
     pub(super) log_filter: Option<String>,
     pub(super) metrics: MetricsConfig,
+    pub(super) readiness: ReadinessConfig,
     pub(super) tracing: TracingSettings,
+    pub(super) shutdown: ShutdownFileConfig,
     pub(super) realtime: RealtimeConfig,
     pub(super) cache: CacheConfig,
     pub(super) backup: BackupConfig,
@@ -119,8 +124,12 @@ pub struct AppConfig {
     pub listener: Option<HttpListenerConfig>,
     pub log_filter: Option<String>,
     pub metrics: MetricsConfig,
+    /// 三角色同源且仅在重启后生效的就绪策略。
+    pub readiness: ReadinessConfig,
     /// 当前角色的 OTLP/HTTP tracing 非敏感参数；Admin runtime 存在时已应用 runtime 覆盖。
     pub tracing: TracingSettings,
+    /// 当前角色的启动期排空预算。
+    pub shutdown: ShutdownSettings,
     /// Public realtime relay 与进程内连接 Hub 策略。
     pub realtime: RealtimeConfig,
     /// 非敏感缓存策略。
@@ -170,7 +179,9 @@ impl fmt::Debug for AppConfig {
             .field("session", &self.session)
             .field("log_filter", &self.log_filter)
             .field("metrics", &self.metrics)
+            .field("readiness", &self.readiness)
             .field("tracing", &self.tracing)
+            .field("shutdown", &self.shutdown)
             .field("realtime", &self.realtime)
             .field("config_path", &self.config_path)
             .field("common_config_path", &self.common_config_path)

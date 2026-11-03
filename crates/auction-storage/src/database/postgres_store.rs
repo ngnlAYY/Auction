@@ -8,6 +8,7 @@ use super::*;
 pub struct PostgresStore {
     pool: TrackedPool<Postgres>,
     pub(crate) delivery_send_intervals: auction_application::DeliverySendIntervals,
+    pub(crate) audit_failure_mode: auction_application::AuditFailureMode,
 }
 
 #[cfg(feature = "postgres")]
@@ -19,6 +20,7 @@ impl PostgresStore {
         Ok(Self {
             pool: TrackedPool::new(pool),
             delivery_send_intervals: auction_application::DeliverySendIntervals::default(),
+            audit_failure_mode: auction_application::AuditFailureMode::default(),
         })
     }
 
