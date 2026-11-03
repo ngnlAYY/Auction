@@ -4,7 +4,7 @@
 
 | 目录 | 内容 |
 | --- | --- |
-| [`ci/checks/`](checks) | 静态门禁：[`ci/checks/check.sh`](checks/check.sh)（策略、格式、编译、lint、审计）与 [`ci/checks/equipment-contract.sh`](checks/equipment-contract.sh) |
+| [`ci/checks/`](checks) | [静态门禁说明](checks/README.md)：[`ci/checks/check.sh`](checks/check.sh)（策略、格式、编译、lint、审计）与对应脚本/基线 |
 | [`ci/release/`](release) | 发布入口 [`ci/release/release.sh`](release/release.sh)、Web payload 构建 [`ci/release/web-bundle.sh`](release/web-bundle.sh)、共用身份函数 [`ci/release/build-identity.sh`](release/build-identity.sh) |
 | [`ci/tools/`](tools) | 受控工具链与构建工具的安装、校验与本地 Blaze 试验入口 |
 
@@ -23,7 +23,10 @@ bash ci/checks/check.sh <检查项>...
 | `config` | `ops/config/examples/**/*.toml` 每个赋值字段（含注释掉的示例字段）前必须紧邻含“可选”或“必填”的注释 |
 | `i18n` | [`crates/auction-web-public/i18n/`](../crates/auction-web-public/i18n) 与 [`crates/auction-web-admin/i18n/`](../crates/auction-web-admin/i18n) 恰好包含 en、ja、ko、zh-CN、zh-TW 五个 `.ftl`；各语言键集合与 `en.ftl` 一致；代码中 `t!("…")` 引用的键必须存在；键名不得含点号、不得重复 |
 | `equipment-contract` | 装备解析诊断原因在 Rust、SQL 约束与 Admin 文案之间的闭集一致 |
-| `all` | 以上五项 |
+| `ratchet` | 源码计数不得超过仓库基线；下降时提示更新，口径与更新方式见[计数棘轮](checks/README.md#源码计数棘轮) |
+| `ratchet-counts` | 仅输出当前 14 项计数，不修改基线；供人工审阅下调 |
+| `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[链接检查](checks/README.md#markdown-相对链接) |
+| `all` | `repository layout config i18n equipment-contract ratchet markdown-links` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `feature` | `auction-storage`（仅 `postgres`）、`auction-cache`（仅 `redis`），以及 `auction-setup` 的空默认图与 `postgres` 完整图 |
@@ -31,7 +34,7 @@ bash ci/checks/check.sh <检查项>...
 | `dependency-versions` | `auction-server` 正常依赖图只能包含一个 `tungstenite` 版本；Axum 的 WebSocket 错误按版本 downcast，跨版本并存会静默丢失 1009 close 契约 |
 | `wasm` | 以 `wasm32-unknown-unknown` 目标运行 `cargo clippy -D warnings`：Public（连同 `auction-web-shared`、`auction-contracts`）与 Admin 分开检查，各自保留独立 feature 图；`cfg(target_arch = "wasm32")` 代码只在此项被 lint |
 | `rust` | `fmt check feature dependency-versions lint wasm` |
-| `dependency-audit` | `cargo audit --deny warnings`（需要受控 cargo-audit，联网读取 RustSec） |
+| `dependency-audit` | `cargo audit --file Cargo.lock --deny warnings`（需要受控 cargo-audit，联网读取 RustSec） |
 | `dependency-unused` | `cargo machete`（0.9.2） |
 
 `just verify` = `all fmt check feature dependency-versions lint wasm`。默认门禁不运行测试。
@@ -41,9 +44,9 @@ bash ci/checks/check.sh <检查项>...
 | 作业 | 触发 | 内容 |
 | --- | --- | --- |
 | `docs` | 所有 push / PR / 手动 | 策略门禁与格式（`ci/checks/check.sh all fmt`）；同一提交已有 PR 时跳过重复的分支 push |
-| `verify` | `docs` 通过后 | `ci/checks/check.sh check feature lint wasm`（工具链 1.99.0） |
-| `security-audit` | `docs` 通过后 | 受控 cargo-audit 的 `dependency-audit` 与 `dependency-unused` |
-| `msrv` | `docs` 通过后 | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` |
+| `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check feature dependency-versions lint wasm`（工具链 1.99.0） |
+| `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | 受控 cargo-audit 的 `dependency-audit`；非定时事件另执行 `dependency-unused`，见[每周依赖审计](checks/README.md#每周依赖审计) |
+| `msrv` | push / PR / 手动，`docs` 通过后 | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` |
 | `artifacts` | 默认分支 push 或手动 | 安装受控发布工具，`ci/release/release.sh release-check` 构建并校验完整发布包，上传候选包（保留 1 天） |
 | `publish` | 以上全部通过 | 复核候选包 SHA-256，上传正式制品（保留 14 天） |
 
