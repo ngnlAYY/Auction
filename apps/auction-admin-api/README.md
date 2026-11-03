@@ -46,7 +46,20 @@ Admin 从 common 注入[审计就绪策略](../../ops/config/README.md#就绪策
 
 ## runtime 配置文件
 
-配置 `runtime_config_file` 后，Admin 是该 runtime 文件的唯一写者（首次设置模板使用 `runtime/admin.toml`）：后台“参数配置”页提交的更新先经服务端校验，再以命令账本 + 原子替换写入。Admin 的 listener、HTTP 安全、会话、metrics、tracing 等设置以 runtime 文件为准；Worker 读取其中由 `managed = true` 接管的分组。文件写入后需要按[运维手册](../../ops/README.md)重启相关角色才会生效；省略此配置时不装配 runtime 编辑端口。
+指标附加出口由 common 的 `metrics.admin_loopback_listen_address` 选择，
+省略关闭，示例为 `127.0.0.1:19101`。只有有效 `metrics.enabled = true` 才监听。
+Admin runtime **只覆盖 enabled**，地址和 `reject_forwarded_requests` 始终来自 common。
+Unix socket 部署可由 Prometheus 直接抓附加出口，复用业务 `/metrics` 契约与注册表。
+绑定/服务失败只记录固定类别 ERROR，不影响 readiness；任务随进程退出取消。
+删除地址并按部署窗口重启即回退。校验见
+[配置参考](../../ops/config/README.md#commontoml)，采集见[运维手册](../../ops/README.md#指标)。
+
+配置 `runtime_config_file` 后，Admin 是该文件唯一写者；首次设置使用
+`runtime/admin.toml`。参数更新经过校验，以命令账本和原子替换写入。
+listener、HTTP 安全、会话、`metrics.enabled`、tracing 以 runtime 为准；
+Worker 读取其中由 `managed = true` 接管的分组。
+文件写入后须按[运维手册](../../ops/README.md)重启对应角色；
+省略 runtime 配置时不装配编辑端口。
 
 ## 退出
 

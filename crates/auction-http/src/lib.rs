@@ -8,7 +8,7 @@ pub use http::{
     AdminApiState, AdminHttpSecurity, HttpBoundary, HttpReadinessProbe, HttpSecurityOptions,
     PublicApiState, PublicHttpSecurity, RealtimeHub, RealtimeHubHealth, RealtimeHubSink,
     RealtimeSubscription, RealtimeSubscriptionError, admin_router, apply_browser_security_headers,
-    public_router, serve_http,
+    public_router, serve_http, serve_metrics,
 };
 
 #[cfg(target_os = "linux")]

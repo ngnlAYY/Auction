@@ -10,7 +10,7 @@ use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{DrainOutcome, TaskGuard, TerminationSignals, wait_for_drain};
 use tokio::sync::oneshot;
 
-use super::{config, listener, state};
+use super::{config, listener, metrics, state};
 
 pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let config = match config_path {
@@ -56,6 +56,7 @@ async fn run_service(
         .context("initialize Prometheus metrics")?,
     );
     let shutdown_metrics = metrics.shutdown();
+    let _metrics_task = metrics::start(config, Arc::clone(&metrics));
     // 依赖装配可能等待数据库锁或连接；终止信号不能等到开始提供 HTTP 后才被读取。
     let (bound_listener, state, heartbeat, runtime_switch_task) = tokio::select! {
         biased;

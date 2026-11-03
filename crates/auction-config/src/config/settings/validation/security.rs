@@ -100,24 +100,6 @@ pub(crate) fn resolve_http_security_origins(
     Ok(())
 }
 
-/// Public/Admin 与旧版保持一致：metrics 只能通过 loopback TCP 或 Unix listener 暴露。
-pub(crate) fn validate_metrics_listener(
-    role: Role,
-    metrics: MetricsConfig,
-    uses_unix_listener: bool,
-    listen_addr: Option<SocketAddr>,
-) -> Result<(), ConfigError> {
-    if !metrics.enabled || role == Role::Worker || uses_unix_listener {
-        return Ok(());
-    }
-    if listen_addr.is_some_and(|address| address.ip().is_loopback()) {
-        return Ok(());
-    }
-    Err(ConfigError::InvalidMetricsConfig(
-        "Public/Admin 启用 metrics 时必须使用 loopback TCP 或 Unix listener",
-    ))
-}
-
 pub(crate) fn validate_realtime(config: &RealtimeConfig) -> Result<(), ConfigError> {
     if !auction_domain::valid_text(&config.consumer_key, 128) {
         return Err(ConfigError::InvalidRealtimeConfig(

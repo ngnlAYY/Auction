@@ -55,7 +55,7 @@
 | 区块 | 用途 |
 | --- | --- |
 | `log_filter` | tracing 过滤器（`EnvFilter` 语法），默认 `info,<服务名>=debug`；追加 `auction_observability::log_dedup=off` 可在重启后关闭已接入调用点的重复错误去重，窗口与汇总语义见 [observability README](../../crates/auction-observability/README.md#重复错误去重) |
-| `[metrics]` | `enabled` 默认 false：是否提供 `/metrics`；Public/Admin 开启时 listener 必须是 loopback 或 Unix socket。`reject_forwarded_requests` 默认 true：Public/Admin 拒绝带转发头的指标请求，false 回退旧访问行为，修改需重启 |
+| `[metrics]` | 进程指标开关、转发拒绝及可选附加出口，见下文 |
 | `[readiness]` | 审计失败模式、迁移兼容模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
 | `[cache]` | 见[缓存](#缓存) |
 | `[backup]` | CLI 专用定时备份策略，见[定时备份策略](#定时备份策略) |
@@ -65,7 +65,37 @@
 | `[auction.settlement]` | 新场次的结算策略：版本与模式（`hold_curve_v2` 或 `legacy_zero_v0`）、补偿池、isekai 载体 Credits、领先时长曲线锚点 |
 | `[auction.settlement.recovery]` | 恢复策略：v1 固定 7 天、v2 固定 24 小时，`payment_timeout_seconds` 必须与版本对应；提醒次数固定 1，COD 退回上限可配。自动排期的赛季前场次覆盖为 v2 |
 
-`metrics.reject_forwarded_requests` 仅属于部署层 common 文件，不加入 Admin runtime 文档；Admin runtime 的 `[metrics]` 只覆盖 `enabled`，保留部署层拒绝策略，文档指纹与命令摘要格式保持原契约。拒绝按头存在性执行，覆盖所有方法且优先于 request-id 400；头集合与状态码见[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)，直接采集、SSH 隧道与回退见[运维手册](../README.md#指标)。Worker control 的指标授权不使用此开关。
+`metrics.enabled` 默认 false。Public/Admin 开启后，业务 listener 必须是
+loopback TCP 或 Unix socket；Worker control 按原 peer 授权提供指标。
+以下部署层可选字段允许 Prometheus 绕过 Unix socket，直接抓取本机出口：
+
+| `[metrics]` 字段 | 默认与作用 |
+| --- | --- |
+| `public_loopback_listen_address` | 省略关闭；Public 附加指标地址 |
+| `admin_loopback_listen_address` | 省略关闭；Admin 附加指标地址 |
+| `worker_loopback_listen_address` | 省略关闭；Worker 附加指标地址 |
+| `reject_forwarded_requests` | 默认 true；业务指标路由及三角色新出口拒绝转发 |
+
+有效 `enabled = true` 且填写本角色地址时才监听；地址只接受数值
+`127.0.0.1` 和非零端口，拒绝主机名、通配地址、其他 IPv4 和 IPv6。
+已填写但未启用的地址也必须合法，三个地址不能重复。
+任一地址都不能与本角色实际业务 TCP listener 冲突，包括通配监听；
+Admin 按 runtime 生效后的 listener 核对。示例端口为 19100/19101/19102。
+
+Admin runtime 的 `[metrics]` **只覆盖 Admin 的 `enabled`**；拒绝策略和三个地址
+始终来自 common，不进入 runtime 文档，不改变指纹或命令摘要。
+Public/Worker 的 `enabled` 仍来自 common。上述字段修改均须重启对应角色。
+
+附加出口只提供 `/metrics`，共享业务指标路由的判定与响应实现；
+Worker 的新出口独立于 control socket，不开放 control/健康/业务路由。
+绑定或服务失败只记录固定类别 ERROR、降级采集，不影响业务 readiness。
+删除对应地址并按部署窗口重启，即恢复原来的指标路径。
+Worker control 的 peer UID/GID 授权不变，也不使用转发拒绝开关。
+
+转发拒绝按头存在性覆盖所有方法，优先于 request-id 400。
+精确头集合、状态码及路径见
+[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)；
+安装、直接采集与 SSH 隧道见[运维手册](../README.md#指标)。
 
 经济、结算与恢复策略在**创建场次时冻结**，修改模板只影响之后创建的场次；排期控制后续计划与早鸟收件窗口，不改写已创建场次的时间与策略快照。业务含义见[业务规则](../../docs/business-rules.md)与[结算与履约](../../docs/guide/settlement.md)。
 
@@ -124,7 +154,8 @@ Worker 引用的敏感 TOML 根字段 `backup_r2_access_key_id` 与 `backup_r2_s
 | `[tracing]` | OTLP/HTTP 导出：开关、endpoint、批量与超时、队列容量、采样比例（百万分率） |
 | `[realtime]`（Public） | `consumer_key`（每个实例唯一）、轮询间隔、每页流数与事件数、每连接缓冲 |
 
-Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、metrics.enabled 与 tracing 以 runtime 文件中的对应区块为准；metrics.reject_forwarded_requests 始终保留部署层 common 的值。
+Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、`metrics.enabled`
+与 tracing 以 runtime 对应区块为准；metrics 的拒绝策略与附加地址始终来自 common。
 
 ### Worker
 

@@ -1,6 +1,10 @@
 //! Metrics、tracing 和 realtime 配置。
 
+use std::net::SocketAddr;
+
 use serde::Deserialize;
+
+use super::Role;
 
 /// 进程本地 Prometheus 指标导出策略。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -8,14 +12,40 @@ use serde::Deserialize;
 pub struct MetricsConfig {
     /// 是否注册并暴露固定 `/metrics` scrape endpoint；省略时关闭。
     pub enabled: bool,
-    /// Public/Admin 是否拒绝携带转发头的指标请求；省略时开启，修改需重启。
+    /// 业务指标路由与三角色附加出口的转发拒绝策略，默认开启。
     /// 仅由部署配置持有，Admin runtime 只能覆盖 enabled，不得覆盖该安全策略。
     pub reject_forwarded_requests: bool,
+    /// Public 附加指标地址；省略即关闭，仅接受 127.0.0.1 与非零端口。
+    pub public_loopback_listen_address: Option<SocketAddr>,
+    /// Admin 附加指标地址；不受 Admin runtime 覆盖。
+    pub admin_loopback_listen_address: Option<SocketAddr>,
+    /// Worker 附加指标地址；独立于 control socket，省略即关闭。
+    pub worker_loopback_listen_address: Option<SocketAddr>,
 }
 
 impl Default for MetricsConfig {
     fn default() -> Self {
-        Self { enabled: false, reject_forwarded_requests: true }
+        Self {
+            enabled: false,
+            reject_forwarded_requests: true,
+            public_loopback_listen_address: None,
+            admin_loopback_listen_address: None,
+            worker_loopback_listen_address: None,
+        }
+    }
+}
+
+impl MetricsConfig {
+    /// 只在有效指标开关开启时选择本角色的附加出口。
+    pub fn loopback_listen_address(self, role: Role) -> Option<SocketAddr> {
+        if !self.enabled {
+            return None;
+        }
+        match role {
+            Role::Public => self.public_loopback_listen_address,
+            Role::Admin => self.admin_loopback_listen_address,
+            Role::Worker => self.worker_loopback_listen_address,
+        }
     }
 }
 

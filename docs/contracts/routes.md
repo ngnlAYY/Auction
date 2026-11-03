@@ -215,6 +215,30 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 
 浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。合并部署的 `complete` 还要求 `confirm_initialize = true`，完成后由监管进程初始化专用空库并启动角色。
 
+## 三角色附加指标出口（loopback TCP）
+
+Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出口；
+只提供 `GET / HEAD /metrics`，不挂载健康、控制、业务或 Web 资源路由。
+地址由 common 的 `[metrics]` 三个 `*_loopback_listen_address` 字段指定，
+省略即关闭；有效 `metrics.enabled = true` 且填写本角色地址才监听。
+仅接受数值 `127.0.0.1` 与非零端口，三个地址不能重复，
+也不能与本角色实际业务 TCP listener 冲突；已填写但未启用也必须合法。
+
+新出口与 Public/Admin 业务 `/metrics` 使用同一 HTTP boundary 和渲染函数：
+默认携带转发头的任意方法返回空 404，不带 `Allow`；拒绝优先于 request-id 400。
+直连 GET/HEAD 返回 Prometheus 文本，HEAD 无正文；带 query 返回 404；
+直连其他方法返回空 405 与 `Allow: GET,HEAD`，编码失败返回 500。
+转发头集合、安全响应头及关联标识沿用
+[Public/Admin 指标契约](#健康与指标publicadmin)。
+新出口未知路径返回 404；请求标识等通用 HTTP 校验仍生效。
+
+三角色新出口均使用 common 的 `reject_forwarded_requests`；
+Admin runtime 仍只覆盖 enabled，不覆盖地址或拒绝策略。
+绑定/服务失败仅以固定类别 ERROR 降级采集，不改变业务 readiness。
+删除对应地址并重启即关闭新出口，原 listener/control 的指标路径保留。
+Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒绝策略。
+示例、安装和 SSH 隧道见[运维手册](../../ops/README.md#指标)。
+
 ## Worker control（Unix socket）
 
 只在 Worker 的 control socket 上提供，按 peer UID/GID allowlist 授权，见 [auction-jobs](../../crates/auction-jobs/README.md#worker-control)。

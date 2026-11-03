@@ -176,6 +176,7 @@ pub(crate) fn parse_canonical_uuid(value: &str) -> Option<Uuid> {
 }
 
 pub use boundary::HttpBoundary;
+pub use metrics::serve_metrics;
 pub use realtime_hub::{
     RealtimeHub, RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription,
     RealtimeSubscriptionError,

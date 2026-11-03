@@ -2,7 +2,9 @@
 
 [文档导航](../../docs/README.md) · [运维手册](../../ops/README.md#监控与日志)
 
-日志、指标、tracing 与服务心跳。三个角色进程在启动时由装配根初始化，本 crate 不读配置文件、不监听端口——`/metrics` 路由由 `auction-http`（Public/Admin）与 `auction-jobs`（Worker control）挂载。
+日志、指标、tracing 与服务心跳；三个角色在启动时由装配根初始化。
+本 crate 不读配置文件、不监听端口。`auction-http` 挂载 Public/Admin
+业务指标路由和三角色附加出口，`auction-jobs` 挂载 Worker control 指标。
 
 ## 日志
 
@@ -54,7 +56,17 @@ I-A 新增 jobs/application 的 `auction::diagnostics` 诊断门，复用 `RateL
 | `auction_readiness_migration_checks_total{branch}` | 实际数据库迁移检查按固定分支累计；不因 HTTP 缓存命中或合并等待者重复累计 |
 | `auction_readiness_migration_shadow_mismatch_total{class}` | 迁移 shadow 新旧判定差异；唯一预期差异为 `compatible_ahead` |
 
-指标在配置中默认关闭；Public/Admin 只有在 loopback TCP 或 Unix listener 上才允许开启，避免直接暴露到公网。反向代理示例对公网屏蔽 `/metrics`；应用默认拒绝携带转发头的指标请求，方法、拒绝优先级与回退见[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)。
+指标默认关闭；Public/Admin 业务 listener 必须是 loopback TCP 或 Unix socket。
+三个装配根可另开默认关闭的 `127.0.0.1` 指标出口，复用本进程同一注册表；
+scrape 只编码内存，不读取数据库或外部服务，不新增业务或高基数 label。
+绑定/服务失败只降级采集，固定类别 ERROR 不改变业务判定或 readiness。
+附加任务随装配根退出取消；Worker control 原授权路径不变。
+
+业务指标路由与附加出口共用转发头拒绝、GET/HEAD、query、404/405 实现。
+反向代理仍屏蔽公网 `/metrics`；完整契约见
+[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)。
+地址、开关及 Admin 覆盖关系见[配置参考](../../ops/config/README.md#commontoml)，
+Prometheus/exporter 安装与采集核对见[运维手册](../../ops/README.md#指标)。
 
 ### HTTP 与连接口径
 

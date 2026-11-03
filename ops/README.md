@@ -227,27 +227,143 @@ sum by (instance, world, phase, reason) (increase(auction_mooglemail_sent_baseli
 
 ### 指标
 
-Public/Worker 在 `common.toml` 设置 `[metrics] enabled = true`；Admin 配置了 runtime 文件时，enabled 以 runtime 的 `[metrics]` 为准。Public/Admin 在各自 listener 上提供 `/metrics`（listener 必须是 loopback TCP 或 Unix socket），Worker 在启用的 control socket 上提供 `/metrics`。指标族见 [auction-observability](../crates/auction-observability/README.md#指标)。建议关注：
+Public/Worker 的 `metrics.enabled` 来自 common；Admin 使用 runtime 文件时，
+只有 Admin 的 enabled 由 runtime 覆盖，附加地址与拒绝策略仍来自 common。
+业务 listener/control 的指标路径保留；Unix socket 部署可另开本机 TCP 出口。
+完整字段与校验见[配置参考](config/README.md#commontoml)，
+指标族见[observability README](../crates/auction-observability/README.md#指标)。
 
-- 按路由模板的 HTTP 请求数、状态码和延迟，已升级 WebSocket 当前/累计数，login/mutation/realtime 频率拒绝；
-- Worker 循环迭代与调度延迟、批次饱和、重试次数；
-- 数据库连接池等待与空池次数；
-- tracing 导出失败或降级；
-- 业务事件计数。
+附加出口只挂载 `/metrics`，使用同一注册表，不提供健康、控制或业务接口。
+三角色新出口与 Public/Admin 原指标入口共享方法、query、转发头拒绝和响应实现；
+默认带识别转发头的任意方法返回空 404，拒绝优先于 request-id 400。
+Worker control 仍按原 UID/GID allowlist 授权。
+精确头集合及状态码见[路由契约](../docs/contracts/routes.md#健康与指标publicadmin)。
+Caddy 的公网 `/metrics` 404 规则继续保留，采集不经过 Caddy 或 Cloudflare。
 
-Public/Admin 默认开启部署层 `common.toml [metrics] reject_forwarded_requests = true`：带转发头的任意方法在应用层返回空 404，优先于 request-id 400，不带 `Allow`，与 Caddy 的公网 404 屏蔽并存。精确头集合与直连方法见[路由契约](../docs/contracts/routes.md#健康与指标publicadmin)。CDN 专用来源头待 W0.12 核实后补充；代理剥除所有识别头时，仅靠应用层头检查无法识别转发，因此必须保留 listener 限制和 Caddy 屏蔽。
+绑定或服务失败只降级采集，不改变 readiness，也不触发 Worker 业务退出守卫。
+查看固定 ERROR 类别 `metrics_bind_failed`、`metrics_serve_failed`、
+`metrics_serve_stopped`；任务随角色退出取消，scrape 不查询数据库或外部服务。
 
-采集器应直接请求本机 loopback `/metrics`；Unix listener 可通过支持 Unix socket 的采集客户端直接访问实际 `listener.socket_path`，不要通过 HTTP 反向代理或附加转发头。以下是 TCP 直连和 SSH 隧道示例，Admin 可改用 8091；`auction-host` 替换为部署主机的 SSH 地址：
+#### Prometheus 与 exporter（用户安装）
 
-```bash
-# 在部署主机直接访问 Public 的 loopback listener。
-curl --fail http://127.0.0.1:8090/metrics
-# 从本机建立隧道；另一终端访问映射端口，不经过 HTTP 代理。
-ssh -N -L 18090:127.0.0.1:8090 auction-host
-curl --fail http://127.0.0.1:18090/metrics
-```
+以下安装、授权、服务启动与核对均由用户执行，仓库静态门禁不代替这些步骤。
+已记录主机内存约 1.9 GB、磁盘余量有限，先保留 15 天；
+观察内存、CPU、磁盘及 TSDB 增速后才考虑调至 30 天。
+若另加空间上限，达到上限可能早于保留期淘汰数据，须单独核对实际覆盖天数。
 
-回退时仅将 common 中的 `metrics.reject_forwarded_requests` 设为 false，并按时段门禁重启 Public/Admin，恢复旧访问行为；runtime 对 enabled 的覆盖不会覆盖此开关。该字段不在 Admin 参数文档中，修改需重启；保留 Caddy 屏蔽和 loopback/Unix 限制。关闭 `metrics.enabled` 可停用指标 collector，所有 HTTP 记录与连接观测守卫成为 no-op。Worker control 继续按 peer UID/GID 授权；新增 loopback 采集出口与指标存储由 W0.10 处理。
+1. **固定版本。** 安装 Prometheus、node_exporter、postgres_exporter，
+   记录来源和版本，核对各自帮助及 collector 名称。
+   本仓库不预设 exporter 版本；监听参数及自定义查询接口按安装版本核对。
+   确认 node 的磁盘、文件系统和内存指标，以及下表 PostgreSQL 覆盖项。
+   模板中的二进制路径默认 `/usr/local/bin/`，按实际安装位置修改。
+2. **账号授权。** 由用户建立无交互系统账号 `prometheus`、`node_exporter`、
+   `auction_metrics`。PostgreSQL 账号由 DBA 执行以下 SQL 创建；
+   示例数据库为 `auction`，须换成实际目标库，不使用应用 owner 或超级用户采集。
+
+   ```sql
+   CREATE ROLE auction_metrics LOGIN
+     NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+     CONNECTION LIMIT 2;
+   GRANT CONNECT ON DATABASE auction TO auction_metrics;
+   GRANT pg_read_all_stats TO auction_metrics;
+   GRANT EXECUTE ON FUNCTION pg_catalog.pg_ls_waldir() TO auction_metrics;
+   ALTER ROLE auction_metrics SET default_transaction_read_only = on;
+   ALTER ROLE auction_metrics SET statement_timeout = '2s';
+   ALTER ROLE auction_metrics SET application_name = 'auction-postgres-exporter';
+   ```
+
+   不授予应用表读写、对象所有权、`pg_read_server_files` 或整个 `pg_monitor`。
+   默认只读参数不代替 ACL。`pg_read_all_stats` 可读取统计详情，查询只导出聚合，
+   不输出 SQL、PID、用户名、客户端地址或 WAL 文件名。
+   禁用需要额外权限的非必需 collector。
+   优先使用本机 Unix socket 的 peer 认证，操作系统用户名与数据库角色同名。
+   由用户检查 `pg_hba.conf` 的匹配顺序，目标库规则可使用：
+
+   ```text
+   local auction auction_metrics peer
+   ```
+
+   若采用密码认证，只放服务的私有凭据文件，不放仓库或命令行。
+3. **配置与 unit。** 从仓库根复制下列模板，并核对二进制路径、用户及权限：
+
+   ```bash
+   install -d -m 0755 /etc/prometheus
+   install -m 0644 ops/monitoring/prometheus.yml.example /etc/prometheus/prometheus.yml
+   install -m 0644 ops/monitoring/postgres-queries.yml.example \
+     /etc/prometheus/postgres-queries.yml
+   install -m 0644 ops/monitoring/prometheus.service.example \
+     /etc/systemd/system/auction-prometheus.service
+   install -m 0644 ops/monitoring/node-exporter.service.example \
+     /etc/systemd/system/auction-node-exporter.service
+   install -m 0644 ops/monitoring/postgres-exporter.service.example \
+     /etc/systemd/system/auction-postgres-exporter.service
+   ```
+
+   为 `/etc/prometheus/postgres-exporter.env` 设置 root owner、
+   `auction_metrics` group 与 0640 权限；按安装版本确认认证输入。
+   支持 `DATA_SOURCE_NAME` 的版本可使用以下非敏感 peer 配置，
+   其中库名与 socket 目录必须替换为实际值：
+
+   ```text
+   DATA_SOURCE_NAME='postgresql:///auction?host=/var/run/postgresql&user=auction_metrics'
+   ```
+
+   自定义查询模板仅补 WAL 字节数、长事务和锁等待聚合。
+   按安装版本启用归档、表统计和 vacuum 进度 collector，
+   将已核实的参数写入对应 unit；模板不猜测这些可选 flag。
+   **复制文件不会自动启用查询**：必须按固定版本的配置接口接入，
+   unit 注释保留了待核对项，不预填未确认的查询 flag。
+   只启用内置 collector 缺失的项，每个指标保留一个来源；
+   若版本不支持该扩展格式，先选择并固定支持所需覆盖项的版本。
+   用安装版本的 `promtool check config` 核对 Prometheus 配置，
+   再由用户执行 `systemctl daemon-reload`，启用三个监控 unit。
+   这些 unit 与 Auction 角色之间没有 Requires 关系。
+4. **启用角色出口。** 在 common 开启 metrics，按需填写三个可选地址：
+   Public `127.0.0.1:19100`、Admin `127.0.0.1:19101`、Worker `127.0.0.1:19102`。
+   配有 Admin runtime 时，另确认其中 `metrics.enabled = true`。
+   按配置检查和部署时段门禁重启对应角色，不修改 Worker control allowlist。
+5. **监听核对。** 用 `ss -ltnp` 检查三个角色出口、9090、9100、9187
+   均只绑定 `127.0.0.1`，没有通配或 IPv6 监听；
+   同时确认原业务 Unix socket/control socket 可用。
+6. **采集核对。** 在部署主机直接请求三个角色及两个 exporter 的 `/metrics`，
+   不附转发头、不经过 HTTP 代理；在 Prometheus 中检查以下五项均为 1：
+
+   ```promql
+   up{job=~"auction-public|auction-admin|auction-worker|node|postgres"}
+   ```
+
+   `up = 1` 只证明 scrape 成功；还须核对 exporter 的数据库采集错误指标与日志，
+   以及下表各项实际存在且持续更新。缺 collector 不能算验收通过。
+7. **资源观察。** 核对监控进程的内存、CPU、磁盘写入、抓取耗时及错误，
+   特别关注文件系统剩余空间、可用内存、TSDB 增速和 PostgreSQL 连接占用。
+   长事务/锁等待查询只返回计数和最老秒数，不能按会话扩张 label。
+8. **SSH 隧道查看。** 在本机执行下列命令，`<host>` 换成部署主机：
+
+   ```bash
+   ssh -N -L 19090:127.0.0.1:9090 <host>
+   ```
+
+   浏览器打开 `http://127.0.0.1:19090`，不要为监控新增公网反向代理。
+
+| 必须核对的 PostgreSQL 指标 | 来源与口径 |
+| --- | --- |
+| 归档 | 内置 collector 读取 `pg_stat_archiver` 的计数及最近成功/失败时间 |
+| WAL 大小 | 内置 collector 或补充 `pg_ls_waldir()` 的 size 总和，单位字节 |
+| autovacuum | 核对 `pg_stat_user_tables` 的 dead tuples、次数和最近时间 |
+| vacuum 进度 | 核对 `pg_stat_progress_vacuum`，允许无在途任务时为空 |
+| 长事务 | 内置或补充查询；未结束数量、事务内空闲数量及最老秒数 |
+| 锁等待 | 内置或补充查询；未授予锁数量及 `waitstart` 最老等待秒数 |
+
+归档尚未启用时，不因没有最近归档时间直接判定失败；
+启用归档后的验收再核对成功/失败计数及时间是否推进。
+查询使用专用监控角色，应用连接池与业务状态不依赖这些指标。
+本批只交付采集路径与安装示例，不启用外部心跳、Webhook 或邮件告警。
+
+回退：删除对应 `*_loopback_listen_address`，按部署窗口重启该角色，
+原业务 listener/control 指标路径保留。关闭有效 `metrics.enabled` 可停用 collector。
+若单独回退转发拒绝，修改 common 的 `reject_forwarded_requests = false`
+并重启对应角色；保留 Caddy 公网屏蔽和监听限制。
+监控服务由用户独立启停，不绑定 Auction readiness。
 
 ### 运维告警
 
