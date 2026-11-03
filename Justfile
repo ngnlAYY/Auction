@@ -4,7 +4,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default:
     @just --list
 
-# 唯一默认验证入口：策略门禁 → 格式 → 编译/独立 feature/Clippy/WASM，不运行测试。
+# 唯一默认验证入口：策略（含源码棘轮与文档链接）→ 格式 → 编译/独立 feature/Clippy/WASM，不运行测试。
 verify:
     @bash ci/checks/check.sh all fmt check feature dependency-versions lint wasm
 

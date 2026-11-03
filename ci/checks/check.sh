@@ -226,6 +226,16 @@ check_dependency_versions() {
 	fi
 }
 
+check_source_ratchet() {
+	rg --files --null apps/*/src crates/*/src -g '*.rs' -g '!**/tests/**' -g '!**/target/**' |
+		perl ci/checks/source-ratchet.pl "$@"
+}
+
+check_markdown_links() {
+	rg --files --hidden --null -g '*.[mM][dD]' -g '!.git' -g '!**/target/**' |
+		perl ci/checks/markdown-links.pl
+}
+
 # 本地 Justfile 与 CI 共用命令定义，避免编译参数在两处漂移。
 run_checks() {
 	local check
@@ -235,6 +245,9 @@ run_checks() {
 		config) check_config_examples ;;
 		i18n) check_i18n ;;
 		equipment-contract) bash ci/checks/equipment-contract.sh ;;
+		ratchet) check_source_ratchet ;;
+		ratchet-counts) check_source_ratchet --counts ;;
+		markdown-links) check_markdown_links ;;
 		dependency-versions) check_dependency_versions ;;
 		repository) check_repository_contracts ;;
 		fmt) cargo fmt --all -- --check ;;
@@ -252,9 +265,9 @@ run_checks() {
 				-p auction-web-public -p auction-web-shared -p auction-contracts -- -D warnings
 			cargo clippy --locked --target wasm32-unknown-unknown -p auction-web-admin -- -D warnings
 			;;
-		dependency-audit) cargo audit --deny warnings ;;
+		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout config i18n equipment-contract ;;
+		all) run_checks repository layout config i18n equipment-contract ratchet markdown-links ;;
 		rust) run_checks fmt check feature dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2
