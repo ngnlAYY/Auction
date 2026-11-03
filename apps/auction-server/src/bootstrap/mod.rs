@@ -75,7 +75,12 @@ async fn prepare(
     use auction_application::ProcessReadinessPort;
     let url = plans[0].config.database_url().context("database configuration is required")?;
     let ready = async {
-        let store = auction_storage::DatabaseStore::connect(url).await?;
+        let store = auction_storage::DatabaseStore::connect(url)
+            .await?
+            .with_audit_failure_mode(plans[0].config.readiness.audit_failure_mode)
+            .with_migration_compatibility_mode(
+                plans[0].config.readiness.migration_compatibility_mode,
+            );
         let result = store.check().await;
         store.postgres_pool().close().await;
         result.map_err(anyhow::Error::from)

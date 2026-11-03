@@ -431,7 +431,7 @@ pub use queries::{
     PublicPriceHistoryStats, PublicProxyBid, PublicProxyCapabilities, PublicProxyTransition,
     PublicRealtimeAuctionStatus, WorldReader, WorldSnapshot,
 };
-pub use readiness::{AuditFailureMode, ProcessReadinessPort};
+pub use readiness::{AuditFailureMode, MigrationCompatibilityMode, ProcessReadinessPort};
 pub use realtime::{
     MAX_PUBLIC_EVENT_PAGE_SIZE, PublicRealtimeEvent, PublicRealtimePage, PublicRealtimeReader,
     PublicRealtimeRequest,

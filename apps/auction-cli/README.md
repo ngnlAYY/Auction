@@ -145,6 +145,8 @@ auction-cli db migrate
 
 `db migrate` 在门禁后执行二进制内嵌的全部追加式迁移（SQLx 迁移锁内），输出迁移前后版本。空库会建立完整 schema；存在未知用户对象的非空库被拒绝；历史 checksum 不匹配、失败记录或缺失版本同样失败。迁移只向前，不提供回滚。
 
+075 起每个新迁移同事务追加兼容登记；readiness 的 compatible 模式不放宽本 CLI 的迁移、preflight、备份或 inventory 版本边界。程序回退时保留能识别当前数据库的新版 CLI，只换回已包含 W7.8a 的旧角色程序，事先显式设置 `migration_compatibility_mode = "compatible"`；不承诺旧 CLI 的 `service start/restart` 能接受未来数据库，也没有自动 rollback 命令。完整步骤见[程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
+
 ### 建库
 
 ```bash

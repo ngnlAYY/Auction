@@ -14,6 +14,8 @@ reject_forwarded_requests = true
 [readiness]
 # 可选：legacy、shadow 或 classified，默认 shadow；影子期保持任一审计失败即未就绪，切换 classified 由用户决定。
 audit_failure_mode = "shadow"
+# 可选：strict、shadow 或 compatible，默认 shadow；换回支持兼容判定的旧程序前须显式设为 compatible，修改需重启。
+migration_compatibility_mode = "shadow"
 # 可选：默认 true；HTTP 最终就绪结果缓存 1 秒、合并并发且检查限时 750ms，false 回到逐次探测。
 cache_enabled = true
 

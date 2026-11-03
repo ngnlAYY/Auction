@@ -12,6 +12,26 @@ pub enum DatabaseStore {
 
 #[cfg(feature = "postgres")]
 impl DatabaseStore {
+    /// 装配根注入迁移就绪模式；只放宽探针，不改变迁移、备份与恢复的严格边界。
+    pub fn with_migration_compatibility_mode(
+        mut self,
+        mode: auction_application::MigrationCompatibilityMode,
+    ) -> Self {
+        let Self::Postgres(store) = &mut self;
+        store.migration_compatibility_mode = mode;
+        self
+    }
+
+    /// 共享进程指标记录器；关闭指标不能改变 schema 判定。
+    pub fn with_migration_readiness_recorder(
+        mut self,
+        recorder: auction_observability::MigrationReadinessRecorder,
+    ) -> Self {
+        let Self::Postgres(store) = &mut self;
+        store.migration_readiness_recorder = recorder;
+        self
+    }
+
     /// 装配根注入同源启动策略；不读取配置，不改变 SQL 错误或事务重试规则。
     pub fn with_audit_failure_mode(mut self, mode: auction_application::AuditFailureMode) -> Self {
         let Self::Postgres(store) = &mut self;
@@ -166,13 +186,7 @@ async fn postgres_compatibility_checksums(
 #[cfg(feature = "postgres")]
 impl ProcessReadinessPort for DatabaseStore {
     fn check(&self) -> auction_application::ApplicationFuture<'_, ()> {
-        Box::pin(async move {
-            self.check_process_readiness().await.map_err(|_| {
-                ApplicationError::Repository(RepositoryError::Failed(
-                    "进程 readiness 检查失败".to_owned(),
-                ))
-            })
-        })
+        Box::pin(self.check_process_readiness())
     }
 }
 
@@ -191,32 +205,20 @@ impl HeartbeatHealthReader for DatabaseStore {
 #[cfg(feature = "postgres")]
 impl DatabaseStore {
     /// HTTP 与 heartbeat 共用数据库/schema 证明及模式化审计门禁。
-    async fn check_process_readiness(&self) -> Result<(), ()> {
+    async fn check_process_readiness(&self) -> Result<(), ApplicationError> {
         self.check_database_readiness().await?;
         let Self::Postgres(store) = self;
         if !audit_health::is_ready(store.audit_failure_mode) {
-            return Err(());
+            return Err(storage_error("审计失败阻断进程 readiness"));
         }
         Ok(())
     }
 
     /// 以只读查询确认连接可用且已应用当前二进制的全部迁移。
-    async fn check_database_readiness(&self) -> Result<(), ()> {
+    async fn check_database_readiness(&self) -> Result<(), ApplicationError> {
         match self {
             #[cfg(feature = "postgres")]
-            Self::Postgres(store) => check_postgres_readiness(store).await,
+            Self::Postgres(store) => migrations::check_postgres_readiness(store).await,
         }
     }
-}
-
-#[cfg(feature = "postgres")]
-async fn check_postgres_readiness(store: &PostgresStore) -> Result<(), ()> {
-    let rows =
-        sqlx::query("SELECT version, success, checksum FROM _sqlx_migrations ORDER BY version ASC")
-            .fetch_all(store.raw_pool())
-            .await
-            .map_err(|_| ())?;
-    migrations::postgres_history_matches(&rows, super::postgres_expected_migration_version())
-        .then_some(())
-        .ok_or(())
 }

@@ -11,7 +11,9 @@ use sqlx::{
 use super::{DatabaseBackend, StorageError};
 
 mod history;
+mod readiness;
 pub(super) use history::postgres_history_matches;
+pub(super) use readiness::check_postgres_readiness;
 
 static POSTGRES_MIGRATOR: Migrator = sqlx::migrate!("../../migrations/postgres");
 

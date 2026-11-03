@@ -160,6 +160,46 @@ journalctl -u auction-backup.service
 | 月标记丢失 | 保留其他状态，下一次遍历 monthly 完成记录；坏记录跳过，首份完整有效记录恢复标记，全部无效则创建新月副本。按 monthly_record_invalid 告警人工查看原坏证据，不删除或伪造完成记录；存储访问错误仍需修复后重试 |
 | 状态或暂存损坏、长期积压 | 保留所有原证据，查看固定错误码、pending 与原运行回执；不要凭新公钥重新生成同名密文。修复存储/网络或增加容量，必要时由用户隔离完整旧任务，关闭异机不会自动删积压 |
 
+## 程序回退
+
+迁移只向前，不执行 down、不删除 `_sqlx_migrations` 或兼容登记。令 `E` 为目标旧程序内嵌的最高迁移版本，`D` 为当前数据库最高版本，只核对本次回退跨越的 `(E,D]` 区间：
+
+| 区间事实 | 可用路径 |
+| --- | --- |
+| `D = E`，完整历史严格匹配 | 按原流程换回同 schema 的旧程序 |
+| `D > E`，已知前缀严格匹配，`E+1…D` 连续成功且逐版本登记 `compatible` | 目标程序已包含 W7.8a，并显式启用 compatible 后，可保留当前数据库换回程序 |
+| 区间含 breaking、缺登记、登记未知、迁移失败或无法确认 | 拒绝直接换回；恢复升级前备份，并执行下述外部历史核对 |
+| `D < E` | 目标程序要求尚未完成的迁移，不能通过兼容开关放行 |
+
+001–074 不回填且缺行即 breaking，075 自身也登记 breaking。兼容能力须先随版本 A 部署，之后版本 B 才能换回 A；不能因此回到尚不含该逻辑的程序。登记表及精确判定由[数据库契约](../../docs/contracts/database.md#迁移兼容登记与就绪)定义。
+
+保留数据库的回退步骤由运维在维护窗口受控执行：
+
+1. 确认目标制品、其内嵌最高版本 E、配置兼容性与可用备份，按[停机时段门禁](../../apps/auction-cli/README.md#停机时段门禁)停止全部角色；合并部署停止 supervisor 并等待子进程退出。
+2. **保留本次升级已迁移到 D 的新版 `auction-cli`，只换角色程序。** 用该 CLI 的 `db status` / `db preflight` 严格核对当前库，要求 `schema_current=true`、没有待执行迁移；工具必须认识当前数据库。不能换回旧 CLI 后假定其 `service restart` 可处理未来版本，也不能用包含额外待迁移版本的工具执行 start。合并部署换回已含 W7.8a 的旧 `auction-server`，另行保留新版 CLI。
+3. 在取得查询授权后，以只读事务逐版核对 `(E,D]` 的成功记录与兼容登记，保存非秘密核对证据。以下示例的 75 必须替换成目标制品 E；结果须恰好覆盖 `E+1…D`，所有 success 为 true、level 为 compatible，不能只筛选 compatible 行或只检查最高版本。
+
+```sql
+BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL statement_timeout = '5s';
+SET LOCAL lock_timeout = '1s';
+SELECT migration.version, migration.success, compatibility.level
+FROM public._sqlx_migrations AS migration
+LEFT JOIN public.schema_migration_compatibility AS compatibility
+  ON compatibility.version = migration.version
+WHERE migration.version > 75
+ORDER BY migration.version;
+ROLLBACK;
+```
+
+4. **换回旧程序前，必须把三角色共用 common 的 `[readiness] migration_compatibility_mode` 显式设为 `"compatible"`。** 默认 shadow 的实际判定仍严格，数据库超前时不会就绪；不是首次部署能力后自动放宽。该字段为启动快照，不由 Admin runtime 覆盖，修改需重启。
+5. 替换角色程序，保留新版 CLI 与当前数据库。分体部署使用该新版 CLI 的 `service start` 按序启动（上一步已确认没有待执行迁移）；合并部署正常启动旧 supervisor，由其注入同一策略作只读启动门禁。核对就绪与既有健康条件。Worker control 自身的运行状态不能替代数据库兼容证明。
+6. 记录制品版本、E/D、区间登记、模式与启动结果。只有部署回与数据库同版的程序后，才将迁移模式恢复 shadow；在旧程序面对超前数据库时恢复 strict/shadow，会按设计撤销就绪。
+
+平时保持迁移 shadow。影子日志 target 为 `auction::storage::migration_readiness`，只输出固定 class、E/D 和两种判定布尔值；指标 `auction_readiness_migration_shadow_mismatch_total{class}` 只允许 `compatible_ahead` 预期差异，分支覆盖见 `auction_readiness_migration_checks_total{branch}`。同版无差异、无样本均不能证明超前分支已经验证；观察与切换由用户审阅，不自动开启 compatible，不擅自制造线上样本。命名暂沿用 W0.14 风格，待 W0.15 统一。
+
+兼容放宽不授权旧 CLI 迁移、备份、恢复或盘点未来 schema；这些能力继续要求其严格认识的完整历史。不提供自动 rollback 命令。只要需要恢复数据库，就继续使用以下完整恢复流程，尤其不能省略备份之后的外部邮件、附件和论坛历史核对。
+
 ## 恢复流程
 
 ### 1. 停止服务
