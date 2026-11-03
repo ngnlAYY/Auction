@@ -763,6 +763,8 @@ package_release() (
 		>"$temporary_root/SYSTEMD.md"
 	install_release_files "$package_root" \
 		"ops/deploy/RECOVERY.md|docs/RECOVERY.md|644" \
+		"ops/deploy/MIGRATION-DRILL.md|docs/MIGRATION-DRILL.md|644" \
+		"ops/deploy/migration-drill-receipt.template.json|docs/migration-drill-receipt.template.json|644" \
 		"apps/auction-cli/README.md|docs/CLI.md|644" \
 		"ops/deploy/retention-policy.v1.json|retention-policy.v1.json|644" \
 		"ops/deploy/caddy/Caddyfile|caddy/Caddyfile|644" \

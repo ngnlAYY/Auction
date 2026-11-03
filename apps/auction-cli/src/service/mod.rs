@@ -17,6 +17,7 @@ use crate::deployment::{ConfigDir, Deployment, Endpoint};
 
 mod guard;
 mod probe;
+mod shutdown;
 mod systemd;
 
 #[cfg(feature = "postgres")]
@@ -39,10 +40,13 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
     let systemctl = Systemctl::new(&args.units)?;
     match args.action {
         ServiceAction::Status => status(config_dir, &systemctl).await,
-        ServiceAction::Stop => {
+        ServiceAction::Stop { shutdown } => {
             let _lock = guard::deployment_lock(&args.units)?;
+            let gate = shutdown::check(config_dir, None, "stop", &shutdown).await?;
             stop_all(&systemctl).await?;
-            print_json(&serde_json::json!({ "action": "stop", "stopped": true }))
+            print_json(&serde_json::json!({
+                "action": "stop", "stopped": true, "shutdown_gate": gate,
+            }))
         }
         ServiceAction::Start { startup_timeout_seconds } => {
             let _lock = guard::deployment_lock(&args.units)?;
@@ -62,14 +66,22 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
             if !states.iter().all(UnitState::stopped) {
                 anyhow::bail!("部分角色正在运行或处于转换状态；请先执行 auction-cli service stop");
             }
-            launch(&systemctl, &deployment, timeout).await
+            launch(&systemctl, &deployment, timeout, None).await
         }
-        ServiceAction::Restart { startup_timeout_seconds } => {
+        ServiceAction::Restart { startup_timeout_seconds, shutdown } => {
             let _lock = guard::deployment_lock(&args.units)?;
             // 先证明新配置与 unit 绑定可用，再停止当前服务。
             let deployment = prepare(config_dir, &systemctl).await?;
+            let gate =
+                shutdown::check(config_dir, Some(&deployment.worker), "restart", &shutdown).await?;
             stop_all(&systemctl).await?;
-            launch(&systemctl, &deployment, Duration::from_secs(startup_timeout_seconds)).await
+            launch(
+                &systemctl,
+                &deployment,
+                Duration::from_secs(startup_timeout_seconds),
+                Some(&gate),
+            )
+            .await
         }
     }
 }
@@ -152,6 +164,7 @@ async fn launch(
     systemctl: &Systemctl,
     deployment: &Deployment,
     timeout: Duration,
+    shutdown_gate: Option<&shutdown::ShutdownGateReport<'_>>,
 ) -> anyhow::Result<()> {
     for role in [ManagedRole::Admin, ManagedRole::Public] {
         if let Ok((Endpoint::Tcp(address), _)) = endpoint(deployment, role) {
@@ -177,9 +190,13 @@ async fn launch(
             Err(error) => return Err(rollback(systemctl, &started, error).await),
         }
     }
-    print_json(&serde_json::json!({
+    let mut report = serde_json::json!({
         "action": "start", "outcome": "started", "migration": migration, "roles": roles,
-    }))
+    });
+    if let Some(gate) = shutdown_gate {
+        report["shutdown_gate"] = serde_json::to_value(gate)?;
+    }
+    print_json(&report)
 }
 
 async fn rollback(

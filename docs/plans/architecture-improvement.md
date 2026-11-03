@@ -167,23 +167,23 @@
 
 | 编号 | 状态 | 提交 | 部署 | 备注 |
 | --- | --- | --- | --- | --- |
-| D1 | 待诊断 | — | — | W0.7 诊断随本提交，待部署后按日志 `safe_kind`/`stage` 与只读核对确认根因；代码阅读的首要嫌疑为原投递 `sending_at` 早于资金初始化/对账边界，另需解释“未持久化错误”的第二层原因 |
+| D1 | 待诊断 | — | — | W0.7 诊断已提交（`0f36d1e8`），待部署后按日志 `safe_kind`/`stage` 与只读核对确认根因；代码阅读的首要嫌疑为原投递 `sending_at` 早于资金初始化/对账边界，另需解释“未持久化错误”的第二层原因 |
 | D2 | 已提交 | `b2ccb9fd` | 未部署 | W1.0；线上已部署 `92259475`，未包含修复 |
 | D3 | 待核实 | — | — | W0.12 核实后决定是否提前交付 W1.4 发送基线 |
 | D4 | 已决定 | — | — | 决策 14；W1.3、W1.7 随 M2b |
 | D5 | 待量化 | — | — | W0.6 量化后决定是否提前交付 W12.1 |
 | D6 | 已决定 | — | — | 决策 15；玩家可见说明随 M1；W0.12 核实主题页数后决定是否提前交付 W1.11 |
-| D7 | 已提交 | 随本提交 | 未部署 | 决策 32、71、72；W0.14 默认影子模式，切换 `classified` 后生效 |
-| D8 | 已提交 | 随本提交 | 未部署 | 决策 33；W7.11 |
+| D7 | 已提交 | `4ba5abe3` | 未部署 | 决策 32、71、72；W0.14 默认影子模式，切换 `classified` 后生效 |
+| D8 | 已提交 | `4ba5abe3` | 未部署 | 决策 33；W7.11 |
 | D9 | 已决定 | — | — | 决策 62；W14.6 随 M2b |
 | D10 | 已决定 | — | — | 决策 60；W14.4 随 M2b，W0.12 发现滥用则提前单独交付 |
 | D11 | 待处理 | — | — | W14.5 随 M2b |
 | 计划外 | 已提交 | `7ba074a5`、`f99a9d4e` | 未部署 | 履约证据预算与内部证据快照时效修复；按 D2 备注线上仍为 `92259475`，随下一次部署上线 |
 | W0 | 未开始 | — | — | W0.1–W0.14 随 M1；W0.15 随 M2a；W0.16 随 M3 |
-| W0.1 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`ApplicationError::safe_kind()` 闭集分类，首个调用方为履约 reconcile 未持久化错误日志 |
-| W0.7 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；COD 实收资金化各拒绝分支细分为独立 `safe_kind`（target `auction::settlement::funding_diagnostics`），持久化 defer reason 不变、无迁移；部署后按 `ops/README.md` 的 D1 诊断章节收集分类证据 |
-| W0.14 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；审计失败按 SQLSTATE 分类（决策 32、71），`[readiness] audit_failure_mode` 默认 `shadow`、就绪缓存 1 秒；观察到差异只在 `transient` 类后由用户切换 `classified`（决策 72），W0.6 的超时须在切换后启用 |
-| W7.11 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
+| W0.1 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`ApplicationError::safe_kind()` 闭集分类，首个调用方为履约 reconcile 未持久化错误日志 |
+| W0.7 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；COD 实收资金化各拒绝分支细分为独立 `safe_kind`（target `auction::settlement::funding_diagnostics`），持久化 defer reason 不变、无迁移；部署后按 `ops/README.md` 的 D1 诊断章节收集分类证据 |
+| W0.14 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；审计失败按 SQLSTATE 分类（决策 32、71），`[readiness] audit_failure_mode` 默认 `shadow`、就绪缓存 1 秒；观察到差异只在 `transient` 类后由用户切换 `classified`（决策 72），W0.6 的超时须在切换后启用 |
+| W7.11 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
 | W1 | 未开始 | — | — | W1.0 为 M1 首项（D2）；W1.10 方案已定（决策 40） |
 | W1.0 | 已提交 | `b2ccb9fd` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；完整 Read Mail 观察降频为每小时、维护独立循环、isekai 相位错峰，回退开关 `poll_isolation_enabled`；待用户部署后按“维护不再超时、`mail-maintenance-*` p95 < 60 秒”验收 |
 | W2 | 未开始 | — | — | 随 M3，排在 W9.9 之后 |
@@ -192,11 +192,13 @@
 | W5 | 未开始 | — | — | W5.1、W5.6 暂缓（决策 50）；其余（含 W5.8）随 M4 |
 | W6 | W6.1–W6.4、W6.6 已批准 | — | — | 全部随 M2a，W6.3、W6.6 先行 |
 | W7 | 未开始 | — | — | W7.1a、W7.5、W7.7、W7.8a、W7.11 随 M1；W7.9、W7.10 随 M2b；W7.6 随 M3；W7.1、W7.2、W7.3、W7.8 随 M6 |
+| W7.5 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；`service stop/restart` 只读时段门禁（Final 或截止不晚于保护窗口末端的在拍 lot，含已过截止仍在拍），`--protection-window-minutes` 默认 60，例外须 `--force --reason` |
 | W8 | 未开始 | — | — | 放在 M6 最后 |
 | W9 | 未开始 | — | — | W9.5、W9.7 随 M2a；W9.8、W9.10、W9.11 随 M2b；W9.9 为 M3 首项 |
 | W10 | 未开始 | — | — | W10.1、W10.2 为 M1 首批，W10.6 随 M1；W10.8、W10.7 随 M2a；W10.9 随 M5 |
 | W10.1 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`backup scheduled` + systemd timer 模板（每日 UTC 03:15），回执 `auction-backup-run.v1`；待用户安装启用 timer 后按“连续 7 天成功、人为失败如实反映”验收 |
 | W10.2 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；主机 `age` 公钥加密 + `object_store` 上传 R2 日/月前缀、完整回读校验，`[backup.offsite]` 默认关闭；启用前需用户完成 R2 bucket/生命周期/bucket lock、令牌、`age` 密钥与数据密钥离线托管，验收含一次端到端恢复演练 |
+| W10.6 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；手工流程 `ops/deploy/MIGRATION-DRILL.md` 与回执模板 `auction-migration-drill.v1`；W7.2 落地后自动核对 |
 | W11 | 未开始 | — | — | W11.4 随 M2a；W11.2 改为偿付能力报告（v11） |
 | W12 | 未开始 | — | — | W12.3 已批准，随 M4；W12.8 随 M4 |
 | W13 | 未开始 | — | — | W13.1–W13.5 全部随 M1；W13.6 随 M6 |

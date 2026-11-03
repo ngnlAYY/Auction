@@ -10,7 +10,7 @@ Auction 的运维命令行：配置与部署预检、分体 systemd 部署的顺
 
 | feature | 作用 |
 | --- | --- |
-| （默认无） | 可用 `config show/check` 与 `service status/stop`；数据库、备份、业务命令和 `service start/restart` 明确报错 |
+| （默认无） | 可用 `config show/check` 与 `service status`；`service stop` 无法读取时段证据，默认拒绝，只能以 `--force --reason` 声明例外；数据库、备份、业务命令和 `service start/restart` 明确报错 |
 | `postgres` | 数据库、备份恢复与全部业务运维命令 |
 | `cache-redis` | 隐含 `postgres`；规则导入后失效 Redis 中的 Public 规则缓存 |
 
@@ -32,9 +32,9 @@ cargo build --locked --release -p auction-cli --features postgres,cache-redis
 | 退出码 | 含义 |
 | --- | --- |
 | `0` | 成功（`--help`、`--version` 同样为 0） |
-| `2` | 参数错误，或 `config` 命令失败 |
+| `2` | 参数错误（包括窗口越界、force/reason 缺少配对、原因空白或格式非法），或 `config` 命令失败 |
 | `3` | `db`、`backup` 命令失败；定时备份的配置、水位、锁、超时、创建、校验、异机副本或清理失败也使用此码，打卡失败不改变退出码 |
-| `4` | `service` 命令失败或部署未完全就绪 |
+| `4` | `service` 命令失败、时段门禁拒绝/查询失败未强制，或部署未完全就绪 |
 | `5` | 业务运维命令失败、被拒绝，或已提交但需要人工处理（如资金账户冻结） |
 
 ## 命令一览
@@ -81,6 +81,10 @@ auction-cli --config-dir /etc/auction service status
 auction-cli --config-dir /etc/auction service start --startup-timeout-seconds 30
 auction-cli --config-dir /etc/auction service restart
 auction-cli --config-dir /etc/auction service stop
+# 按演练回执设置本次窗口；默认 60 分钟
+auction-cli --config-dir /etc/auction service restart --protection-window-minutes 90
+# 人工例外，原因会进入输出/journal，不能填写秘密或玩家信息
+auction-cli --config-dir /etc/auction service stop --force --reason '紧急修复主机磁盘故障'
 ```
 
 | 参数 | 默认值 |
@@ -89,15 +93,34 @@ auction-cli --config-dir /etc/auction service stop
 | `--state-dir`（部署控制锁目录） | `/var/lib/auction/deployment` |
 | `--worker-unit` / `--admin-unit` / `--public-unit` | `auction-worker.service` / `auction-admin-api.service` / `auction-public-api.service` |
 | `start/restart --startup-timeout-seconds` | 每角色 readiness 的完整预算（状态查询、探测、进程身份复核及轮询等待），默认 30 秒，范围 1–300；`systemctl start` 本身另有 90 秒上限 |
+| `stop/restart --protection-window-minutes` | 本次调用的截止保护窗口，默认 60 分钟，范围 1–10080（7 天）；运维须依据[迁移演练回执](../../ops/deploy/MIGRATION-DRILL.md#停机时长与窗口)设为至少实测停机时长的 3 倍 |
+| `stop/restart --force --reason <文本>` | 默认不强制；两者必须配对，原因须为 1–1024 字节、首尾无空白且不含控制字符的单行文本 |
 
 - **start**：取得部署锁（`<state-dir>/deployment-control.lock`，目录不存在时以 0700 创建）→ `config check --strict` → 核对三个 unit 均已装载、`Environment=AUCTION_CONFIG_FILE` 与 `--config-dir` 中的角色文件是同一文件、Admin runtime 文件与父目录归 Admin unit 的固定 `User` 所有（不接受 `DynamicUser`）→ 三角色全部运行时只按顺序复核 readiness 并返回 `already_running`；部分运行或处于转换状态则拒绝 → 检查 TCP 监听端口可绑定 → 执行迁移 → 按 Worker → Admin → Public 逐个 `systemctl start`，等待 unit 为 active 且应用 readiness 返回 HTTP 200，探测前后 `MainPID` 与 `InvocationID` 不变。任一角色失败时反序停止本次启动的全部 unit；已提交的迁移不会回退。
 - **readiness**：Public/Admin 探测 `GET /health/ready`（TCP 或 Unix socket），Worker 探测 control socket 的 `GET /v1/health/ready`。Worker control 只接受 `allowed_peer_uids/gids` 中的调用者，**以 root 运行 `service` 时须把 `0` 加入 `allowed_peer_uids`**，否则 Worker 永远无法判定就绪；因此 `service start` 也要求启用 `[worker.control]`。
-- **restart**：先完成与 start 相同的预检（新配置不可用时不停止现有服务），再按 Public → Admin → Worker 停止，随后迁移并顺序启动。
-- **stop**：按 Public → Admin → Worker 逐个停止，并确认每个 unit 已停止后才处理下一个。
+- **restart**：先完成与 start 相同的预检（新配置不可用时不停止现有服务），再读取只读时段证据；允许或已声明人工例外后，按 Public → Admin → Worker 停止，随后迁移并顺序启动。
+- **stop**：取得部署锁，读取只读时段证据；允许或已声明人工例外后，按 Public → Admin → Worker 逐个停止，并确认每个 unit 已停止后才处理下一个。
 - **status**：不取锁、不要求严格权限；输出每个 unit 的 `load_state/active_state/sub_state/main_pid` 与 readiness，任一角色未就绪即以 4 退出。配置无法加载时仍报告 systemd 状态，并在 `config_error` 中给出原因。
 - systemctl 调用均有超时（查询 10 秒、启动 90 秒、停止为 unit 的有限 `TimeoutStopUSec` + 10 秒）；超时只终止 systemctl 客户端，已提交给 systemd 的 job 可能仍在执行，须重新查看状态。
 
 [`ops/deploy/systemd/auction-stack.service.example`](../../ops/deploy/systemd/auction-stack.service.example) 把 `service start/stop` 包装为 oneshot unit，用于开机按顺序拉起。
+
+### 停机时段门禁
+
+在首个 `systemctl stop` 前，从 Worker 数据库读取同一可重复读只读快照，不加行锁/advisory lock、不写入。仅以下业务条件阻挡：
+
+1. `public.auctions.status = 'final'` 的任一场次，不根据排期推测 Final，也不因其截止已过而放行。
+2. `public.lots.status = 'live'` 且 `effective_end_at <= protected_until`（数据库检查时刻加保护窗口），包括已过截止但生命周期尚未关闭的 lot，等于窗口末端也阻挡。软截止与提前结算均以持久化的 lot 有效截止为准，不使用场次名义结束时间。
+
+慢速代理的调度来源是 `lots.slow_due_at`，它本身不触发门禁；只有其 lot 满足上述截止条件才计入。Live 的其余时段允许重启，持久化代理任务在恢复后顺延执行。查询、连接、配置加载或行解码失败（含 live lot 缺截止）默认失败关闭，退出码 4，尚未发出任何停止请求。`start` 不查此门禁。
+
+`--force --reason` 只绕过时段阻挡或证据不可用，仍读取并记录能取得的证据，不绕过 restart 的配置/unit 预检、部署锁、停止确认、迁移或 readiness。已过截止却长期仍为 live 的 lot，须先人工排查生命周期与收尾故障，再以 `--force --reason` 声明例外。窗口用 CLI 参数而非角色 TOML：这是本次运维停机的预算，调用时可按演练结果设置，无需重启角色；CLI 只校验数值范围，不自动读取演练回执或保证三倍关系。systemd 包装调用默认用 60 分钟；需要更大窗口时由运维在包装命令中显式传参。
+
+停止前向 stderr 输出一行 `stop/restart 停机时段门禁：<JSON>`，正常保存到 journal；内容为 `outcome=allowed/blocked/forced`、`protection_window_minutes`、`force`、`reason`、`snapshot`、`query_error`。snapshot 只含数据库 `checked_at/protected_until`、`final_auctions`（场次 ID 与有效截止）和 `ending_lots`（场次/lot ID 与有效截止），无玩家信息；证据不可用时 snapshot 为 null，query_error 为安全分类。未强制的拒绝还输出单个 stdout JSON（`action=stop/restart`、`outcome=blocked`、`shutdown_gate`），然后以 4 退出。成功 stop 的 JSON 增加 `shutdown_gate`；成功 restart 沿用既有 `action=start`、`outcome/migration/roles` 并增加 `shutdown_gate`。后续停止/迁移/启动失败可能没有 stdout 结果，停止前的 stderr 声明仍保留；这里不新增持久回执文件。
+
+`query_error` 的配置加载失败只附固定 `kind`（`config_read/config_parse/config_invalid/config_load`），连接失败只附 `StorageError` 变体的固定分类；时段查询失败附固定 `stage`、SQLx 变体名 `sqlx_kind` 和经过校验的 `sqlstate`（恰好 5 位 ASCII 大写字母或数字，缺失为 `none`、非法为 `invalid`）。不输出配置值、连接串、SQL 或驱动原文，也不保留底层错误链。
+
+门禁是检查时刻的快照，不阻止并发竞价或生命周期推进，也不能拦截直接 systemctl、合并部署、主机重启与系统自动更新；这些绕过 CLI 的停机边界由 W9.6 约束，见[运维说明](../../ops/README.md#停机时段保护)。
 
 ## 停机门禁
 
@@ -182,6 +205,7 @@ auction-cli backup restore --manifest /var/backups/auction/auction-20261030.dump
 - 恢复不保留对象 owner 与权限（以应用账号为 owner 的空库恢复后即归应用账号所有）。
 
 完整的灾备流程见[备份与恢复手册](../../ops/deploy/RECOVERY.md)。
+含迁移版本上线前另须完成[迁移演练](../../ops/deploy/MIGRATION-DRILL.md)，保存[手工回执](../../ops/deploy/migration-drill-receipt.template.json)；M1 不自动核对回执。
 
 ### 定时备份
 

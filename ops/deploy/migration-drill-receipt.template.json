@@ -1,0 +1,87 @@
+{
+  "format": "auction-migration-drill.v1",
+  "drill_id": "<本次唯一编号>",
+  "supersedes_drill_id": null,
+  "operator": "<执行人>",
+  "reviewer": "<审核人>",
+  "date_utc": "<YYYY-MM-DD>",
+  "started_at": null,
+  "finished_at": null,
+  "artifact": {
+    "version": "<候选版本>",
+    "commit": "<完整提交 SHA>",
+    "package": "<CI 制品名称>",
+    "package_sha256": "<64 位小写 SHA-256>",
+    "cli_sha256": "<64 位小写 SHA-256>",
+    "previous_version": "<停机测量使用的旧版本/提交>"
+  },
+  "backup": {
+    "created_at": null,
+    "schema_version": null,
+    "database_name_sha256": "<manifest 库名摘要>",
+    "files": [
+      { "kind": "archive", "name": "<原 archive 文件名>", "sha256": "<SHA-256>" },
+      { "kind": "manifest", "name": "<原 manifest 文件名>", "sha256": "<SHA-256>" }
+    ],
+    "verify_result": "not_run",
+    "verify_evidence": "backup-verify.json"
+  },
+  "postgres": {
+    "major": 18,
+    "server_version": null,
+    "isolated": false,
+    "instance_label": "<人工核对的隔离实例身份>",
+    "host": "127.0.0.1",
+    "port": 55432,
+    "database": "auction"
+  },
+  "restore": {
+    "result": "not_run",
+    "elapsed_seconds": null,
+    "receipt": "restore.json",
+    "preflight_evidence": "restored-preflight.json"
+  },
+  "migration": {
+    "before_version": null,
+    "after_version": null,
+    "expected_version": null,
+    "applied": null,
+    "started_at": null,
+    "finished_at": null,
+    "elapsed_seconds": null,
+    "exit_code": null,
+    "result": "not_run",
+    "evidence": "migrate.json",
+    "timing_evidence": "migrate-time.txt"
+  },
+  "readiness": {
+    "budget_seconds_per_role": 30,
+    "worker": { "result": "not_run", "http_status": null, "exit_code": null, "checked_at": null, "pid": null, "evidence": "worker-ready.json" },
+    "admin": { "result": "not_run", "http_status": null, "exit_code": null, "checked_at": null, "pid": null, "evidence": "admin-ready.json" },
+    "public": { "result": "not_run", "http_status": null, "exit_code": null, "checked_at": null, "pid": null, "evidence": "public-ready.json" }
+  },
+  "consistency_check": {
+    "work_item": "W11.4",
+    "result": "not_available",
+    "evidence": null,
+    "note": "M1 未有正式巡检入口；落地后必须执行，未执行不能标为 passed"
+  },
+  "downtime": {
+    "started_at": null,
+    "drained_at": null,
+    "ready_at": null,
+    "measured_seconds": null,
+    "estimated_seconds": null,
+    "estimate_basis": "<排空、迁移、安装/备份、readiness、巡检与额外预算的测量依据>",
+    "minimum_window_minutes": null,
+    "selected_window_minutes": null
+  },
+  "evidence_files": [
+    { "name": "<证据文件名>", "sha256": "<SHA-256>" }
+  ],
+  "anomalies": [],
+  "conclusion": {
+    "result": "not_run",
+    "summary": "<异常、限制、未完成项及是否可进入部署的结论>"
+  }
+}
