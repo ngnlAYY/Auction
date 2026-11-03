@@ -4,6 +4,14 @@
 
 [`ci/checks/check.sh`](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、目录布局、配置示例、翻译键、装备诊断闭集、源码计数棘轮与 Markdown 链接检查；完整清单见 [CI 与发布](../README.md#静态门禁cicheckschecksh)。`just verify` 先运行 `all`，再执行格式、编译、feature、依赖版本与 Clippy/WASM 检查，不运行行为测试。
 
+## unwrap/expect 门禁
+
+根 [`Cargo.toml`](../../Cargo.toml) 的 workspace Clippy 将 `unwrap_used`、`expect_used` 设为 `deny`；所有成员继承统一策略。`lint` 检查 native 全工作区、全部 target 与 feature，`wasm` 分别检查 Public/Admin 浏览器及共享依赖，覆盖只在 `wasm32` 编译的分支。构建脚本随所属成员检查；Clippy 会跳过部分宏展开，因此新增或修改本仓库宏时仍须核对定义中的 `unwrap`/`expect`，不能只依靠调用点的 Clippy 结果。
+
+根 [`clippy.toml`](../../clippy.toml) 使用 `allow-unwrap-in-tests = true`、`allow-expect-in-tests = true` 豁免测试上下文（包括 `#[test]` 与 `#[cfg(test)]` 模块），不在整个测试构建中放宽生产函数。生产代码须显式传播错误或处理 `None`；不可恢复的启动不变量也应给出可行动的错误。必要例外只允许最小范围的 `#[expect(clippy::unwrap_used, reason = "中文原因")]` 或对应 `expect_used`，不得 crate 级关闭。
+
+回退时移除上述两个 workspace lint 与测试配置即可；既有安全错误处理保持不变。
+
 ## 源码计数棘轮
 
 ```bash

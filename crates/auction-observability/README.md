@@ -8,6 +8,14 @@
 
 `init_with_config` 安装 JSON 格式的 `tracing-subscriber`（关闭 ANSI），过滤器取公共配置的 `log_filter`，省略时为 `info,<服务名>=debug`。`init_json_stderr` 只供 `auction-cli` 在资金证据阶段输出闭集诊断日志。日志不得包含连接串、Cookie、密钥、登录 key 或邮件正文；各 owner 只记录安全分类与标识。
 
+### 重复错误去重
+
+`RateLimitedLog` 是由调用循环显式持有的 helper：每个固定 `target`/固定 `kind` 建立一个实例，键不含错误正文、账号、业务标识或其他动态值。窗口从首条开始，固定 60 秒；这是运维日志聚合周期，不参与业务调度，暂不增加窗口配置字段。窗口内首条（包括 ERROR）由调用方按原级别与原安全字段正常输出，其余只累加抑制计数。到期时在 `auction_observability::log_dedup` target 输出一条 WARN 汇总，含 `log_target`、`kind`、`suppressed_count`、`window_seconds` 与 `window_complete`；没有重复时不输出汇总。正文和动态字段不保存在 helper 中，汇总不继承 span。
+
+调用方先用原事件的 `tracing::enabled!` 检查过滤，再调用 `should_log()`，避免为不可见日志生成汇总；同时必须在已有 Tokio 循环的 `select!` 中持续轮询 `flush_when_due()`，因此停止报错后仍会到期汇总。等待可取消，不创建独立后台任务或全局锁。实例丢弃时补齐尚未汇总的计数，未到期则 `window_complete = false`；进程被强制终止时无法保证汇总。采用显式 helper 可限定接入范围，避免全局 Layer 干预其他日志或 OTLP span。
+
+当前只接入 Worker delivery 循环的 `delivery_cycle_failed` 日志；不改变轮询节奏、重试、租约、指标、持久化或结果未知不重发的不变量，其他日志仍走原路径。默认在 WARN 汇总可见时启用；回退可在现有 `log_filter` 追加 `auction_observability::log_dedup=off`，重启后该 helper 放行所有原始日志，也可移除调用点恢复原日志。汇总 target 被过滤时不执行抑制，避免计数不可见。配置文件与重启规则见[配置参考](../../ops/config/README.md#commontoml)。
+
 ## Tracing（可选）
 
 启用后挂载 OTLP/HTTP span exporter：有界队列（`queue_capacity`）、批量大小与超时、采样比例（百万分率）、关闭时有界刷新；导出头只来自敏感文件中对应角色的 `*_otlp_headers`。导出失败只降级健康状态与指标，不影响业务；支持从入站请求附着 W3C trace context。
@@ -74,6 +82,7 @@ Read Mail 日志的 `read_observed` 始终是完整列表数量；观察降频�
 | 路径 | 内容 |
 | --- | --- |
 | `crates/auction-observability/src/telemetry/` | subscriber 装配、OTLP 批处理器与 exporter 健康 |
+| `crates/auction-observability/src/logging/` | 固定类别错误日志去重与窗口汇总 |
 | `crates/auction-observability/src/metrics/` | 注册表、业务/HTTP/WebSocket/Worker/连接池/tracing 指标 |
 | `crates/auction-observability/src/health/` | 心跳模型、发布器、Admin 仪表盘快照 |
 

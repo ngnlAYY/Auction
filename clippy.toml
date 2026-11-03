@@ -1,0 +1,3 @@
+# 可选：仅豁免测试上下文；宏展开的覆盖边界见 ci/checks/README.md。
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

@@ -54,7 +54,7 @@
 
 | 区块 | 用途 |
 | --- | --- |
-| `log_filter` | tracing 过滤器（`EnvFilter` 语法），默认 `info,<服务名>=debug` |
+| `log_filter` | tracing 过滤器（`EnvFilter` 语法），默认 `info,<服务名>=debug`；追加 `auction_observability::log_dedup=off` 可在重启后关闭已接入调用点的重复错误去重，窗口与汇总语义见 [observability README](../../crates/auction-observability/README.md#重复错误去重) |
 | `[metrics]` | `enabled` 默认 false：是否提供 `/metrics`；Public/Admin 开启时 listener 必须是 loopback 或 Unix socket。`reject_forwarded_requests` 默认 true：Public/Admin 拒绝带转发头的指标请求，false 回退旧访问行为，修改需重启 |
 | `[readiness]` | 审计失败模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
 | `[cache]` | 见[缓存](#缓存) |

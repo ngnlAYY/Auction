@@ -1,5 +1,7 @@
 //! Worker 持久化运行时的启动、任务装配与优雅排空。
 
+use auction_observability::RateLimitedLog;
+
 use super::*;
 
 /// 无数据库时仅用于保持进程存活的启动骨架。
@@ -185,10 +187,12 @@ where
         ));
     }
 
+    let mut delivery_failure_log = RateLimitedLog::new(module_path!(), "delivery_cycle_failed");
     let fatal_error = loop {
         tokio::select! {
             biased;
             () = &mut shutdown => break None,
+            () = delivery_failure_log.flush_when_due() => {}
             _ = &mut delivery_sleep, if delivery_enabled && delivery_cycles.is_empty() =>
             {
                 worker.metrics.observe_schedule_delay(
@@ -204,7 +208,10 @@ where
                 match result {
                     Some(Ok(Ok(()))) => {}
                     Some(Ok(Err(error))) => {
-                        tracing::warn!(error = %error, "delivery worker cycle failed; retrying after poll delay");
+                        // 只去重附加日志；轮询节奏、指标、持久化与未知外写处置沿用原路径。
+                        if tracing::enabled!(tracing::Level::WARN) && delivery_failure_log.should_log() {
+                            tracing::warn!(error = %error, "delivery worker cycle failed; retrying after poll delay");
+                        }
                     }
                     Some(Err(error)) => break Some(WorkerError::DeliveryTaskJoin(error)),
                     None => {}
@@ -305,6 +312,8 @@ where
         worker.control.mark_draining();
     }
     let _ = drain_sender.send(true);
+    // 先沿用原停止通知，再补齐日志计数，避免排空等待延后窗口汇总。
+    drop(delivery_failure_log);
     let drain = async {
         // 单组错误不能提前 drop 其他在途 owner；所有组共享同一总排空截止。
         let results = [
