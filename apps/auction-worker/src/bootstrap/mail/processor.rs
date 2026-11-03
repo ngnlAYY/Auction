@@ -11,6 +11,7 @@ pub(super) fn build_processor_and_delivery(
     store: &Arc<DatabaseStore>,
     client: &MoogleMailClient,
     credentials: &MoogleMailCredentialSet,
+    sent_baseline_observer: Arc<dyn auction_application::SentBaselineObserver>,
 ) -> anyhow::Result<MailProcessorPorts> {
     match store.as_ref() {
         DatabaseStore::Postgres(postgres_store) => {
@@ -75,7 +76,8 @@ pub(super) fn build_processor_and_delivery(
                 std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
             )
             .map_err(|error| anyhow::Error::msg(error.to_string()))?
-            .with_settlement_equipment_secrets(equipment_secrets, delivery_opener);
+            .with_settlement_equipment_secrets(equipment_secrets, delivery_opener)
+            .with_sent_baseline(mail_config.sent_baseline_mode, sent_baseline_observer);
             let processor: Arc<dyn MailProcessor> = Arc::new(
                 auction_application::MailProcessorService::new_for_worlds(
                     world_configs.iter().map(|world| world.world_id.clone()).collect(),

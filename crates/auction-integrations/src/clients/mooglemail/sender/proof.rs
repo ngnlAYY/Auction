@@ -1,100 +1,90 @@
-//! 完整 Sent 基线与新增邮件的只读身份、正文和资产证明。
+//! 基线之外候选的完整身份、正文与资产证明；候选枚举由 baseline owner 负责。
 
 use super::*;
 use crate::clients::mooglemail::parser::{canonical_mail_body_digest, subject_is_list_projection};
 use auction_application::mail_recipient_is_list_projection;
 use tokio::time::{Instant, timeout_at};
 
-/// 同一独占凭据会话内取得的完整 Sent 基线；不可克隆，随 prepared 句柄一次消费。
-/// 只有本次 fresh 轮次扫描到末页才能构造；不持久化，也不把缺页当作空历史。
-pub(crate) struct MoogleMailSentBaseline {
-    pub(super) world: MoogleMailWorld,
-    pub(super) seen: HashSet<String>,
-}
-
 impl MoogleMailSender {
-    /// 在持久 sending fence 前完成全部只读基线扫描，由调用方一直持有原 session。
-    pub(crate) async fn prepare_sent_baseline(
-        &self,
-        cookie: &MoogleMailCookie,
-        world: MoogleMailWorld,
-    ) -> Result<MoogleMailSentBaseline, MoogleMailError> {
-        // 上一次发送后的完整扫描已覆盖当时的全部 Sent；复用只省一次全量读取，
-        // 候选仍逐封重新证明，过期或换凭据时实时退回完整扫描。
-        if let Some(seen) = self.cached_sent_baseline(cookie, world) {
-            tracing::debug!(%world, mails = seen.len(), "MoogleMail 复用已证明的 Sent 基线");
-            return Ok(MoogleMailSentBaseline { world, seen });
-        }
-        let deadline = Instant::now()
-            .checked_add(self.verification_budget)
-            .ok_or_else(|| scan_timeout(world))?;
-        let round = self.client.read_round(cookie, world, true)?;
-        check_deadline(deadline, world)?;
-        let list = timeout_at(
-            deadline,
-            self.client.observe_sent_list(cookie, &round, self.verification_pages),
-        )
-        .await
-        .map_err(|_| scan_timeout(world))??;
-        check_deadline(deadline, world)?;
-        if !list.complete {
-            // 未扫描到尾页不能排除同标题旧邮件；此时尚未执行任何 POST。
-            return Err(self.scan_page_limit(world, "baseline", list.summaries.len()));
-        }
-        let seen: HashSet<String> =
-            list.summaries.iter().map(|summary| summary.external_mail_id.clone()).collect();
-        check_deadline(deadline, world)?;
-        // 本次扫描已完整；即使随后 fence 中止，这份排除集仍可用于下一次基线与候选过滤。
-        self.remember_sent_baseline(cookie, world, seen.clone());
-        Ok(MoogleMailSentBaseline { world, seen })
-    }
-
     pub(super) async fn verify_new_sent(
         &self,
         request: &MoogleMailSendRequest,
         cookie: &MoogleMailCookie,
-        baseline: &HashSet<String>,
+        baseline: &MoogleMailSentBaseline,
         response_mail_id: Option<&str>,
     ) -> Result<String, MoogleMailError> {
         let world = request.world;
-        if response_mail_id.is_some_and(|mail_id| baseline.contains(mail_id)) {
-            return Err(verification_unavailable(world));
+        self.check_response_hint(baseline, response_mail_id)?;
+        if let Err(error) = self.check_baseline_scope(cookie, baseline) {
+            self.shadow_uncomparable(
+                baseline,
+                auction_application::SentBaselineReason::ScopeChanged,
+            );
+            return Err(error);
         }
         let deadline = Instant::now()
             .checked_add(self.verification_budget)
             .ok_or_else(|| scan_timeout(world))?;
+        // POST 完成/取消屏障之后建立 fresh 轮次，不能提升发送前或发送中的观测。
+        let round = self.client.read_round(cookie, world, true)?;
+        let candidates =
+            match self.observe_new_sent(request, cookie, baseline, &round, deadline).await {
+                Ok(candidates) => candidates,
+                Err(error) => {
+                    self.shadow_uncomparable(baseline, super::baseline::error_reason(&error));
+                    return Err(error);
+                }
+            };
+        let result = self
+            .verify_candidates(request, cookie, &candidates, response_mail_id, &round, deadline)
+            .await;
+        // 旧证明先完成；影子超时或差异不能改写其裁决，也不占用另一份总预算。
+        if result.as_ref().is_err_and(|error| error.is_session_expired()) {
+            self.shadow_uncomparable(
+                baseline,
+                auction_application::SentBaselineReason::ReadUnavailable,
+            );
+        } else {
+            self.compare_sent_shadow(request, cookie, baseline, &candidates, &round, deadline)
+                .await;
+        }
+        let verified = result?;
+        self.check_baseline_scope(cookie, baseline)?;
+        if let Some(seen) = baseline.full_seen() {
+            let mut next_baseline = seen.clone();
+            next_baseline.extend(
+                candidates.summaries().iter().map(|summary| summary.external_mail_id.clone()),
+            );
+            self.remember_sent_baseline(cookie, world, next_baseline);
+        }
+        Ok(verified)
+    }
+
+    async fn verify_candidates(
+        &self,
+        request: &MoogleMailSendRequest,
+        cookie: &MoogleMailCookie,
+        candidates: &super::baseline::SentCandidates,
+        response_mail_id: Option<&str>,
+        round: &super::super::client::MoogleMailReadRound,
+        deadline: Instant,
+    ) -> Result<String, MoogleMailError> {
+        let world = request.world;
         let expected_body = canonical_mail_body_digest(&request.message.body);
         let mut expected_equipment = request.equipment_ids.iter().collect::<Vec<_>>();
         expected_equipment.sort_unstable();
-        // POST 的完成/取消屏障之外再建立 fresh 轮次，绝不接受发送前或发送中的观测。
-        let round = self.client.read_round(cookie, world, true)?;
-        check_deadline(deadline, world)?;
-        // 只需枚举比基线边界更新的前缀；更旧的邮件全部在基线中，已被排除。
-        let list = timeout_at(
-            deadline,
-            self.client.observe_sent_prefix(cookie, &round, self.verification_pages, baseline),
-        )
-        .await
-        .map_err(|_| scan_timeout(world))??;
-        check_deadline(deadline, world)?;
-        if !list.bounded {
-            return Err(self.scan_page_limit(world, "after_send", list.summaries.len()));
-        }
         let mut verified: Option<String> = None;
-        for summary in list.summaries.iter().filter(|summary| {
-            !baseline.contains(&summary.external_mail_id)
-                && summary.world == world
-                && mail_recipient_is_list_projection(&summary.recipient, &request.message.recipient)
-                && subject_is_list_projection(&summary.subject, &request.message.subject)
+        for summary in candidates.summaries().iter().filter(|summary| {
+            candidates.mids.contains(&summary.external_mail_id)
+                && is_list_candidate(summary, request)
         }) {
-            // 列表解析或候选过滤可能耗尽预算；过期 timeout 的首次 poll 也不能派发新详情读取。
             check_deadline(deadline, world)?;
             let target = self.client.sent_detail(world, &summary.external_mail_id)?;
-            let detail = timeout_at(deadline, self.client.get_in_round(&target, cookie, &round))
-                .await
-                .map_err(|_| scan_timeout(world))??;
-            check_deadline(deadline, world)?;
-            let proof = timeout_at(
+            let detail =
+                within_deadline(world, deadline, self.client.get_in_round(&target, cookie, round))
+                    .await?;
+            let proof = within_deadline(
+                world,
                 deadline,
                 self.client.diagnose_parse(
                     &target,
@@ -102,16 +92,14 @@ impl MoogleMailSender {
                     self.parser.parse_sent_content_proof(&detail, summary),
                 ),
             )
-            .await
-            .map_err(|_| scan_timeout(world))??;
-            check_deadline(deadline, world)?;
+            .await?;
             if proof.body_digest != expected_body {
                 if response_mail_id == Some(proof.external_mail_id.as_str()) {
                     return Err(verification_unavailable(world));
                 }
                 continue;
             }
-            // 同一正文的资产缺失可能来自立即领取，不能忽略后误认另一封为本次成功。
+            // 不变量 4、6：同正文的资产缺失可能来自立即领取，不能忽略后误认另一封成功。
             if proof.world != world
                 || !proof.recipient.eq_ignore_ascii_case(&request.message.recipient)
                 || proof.subject != request.message.subject
@@ -124,20 +112,10 @@ impl MoogleMailSender {
             }
             verified = Some(proof.external_mail_id);
         }
-        check_deadline(deadline, world)?;
-        timeout_at(deadline, self.client.check_read_round(cookie, &round))
-            .await
-            .map_err(|_| scan_timeout(world))??;
-        check_deadline(deadline, world)?;
-        let verified = verified
+        within_deadline(world, deadline, self.client.check_read_round(cookie, round)).await?;
+        verified
             .filter(|mail_id| response_mail_id.is_none_or(|hint| hint == mail_id))
-            .ok_or_else(|| verification_unavailable(world))?;
-        // 基线是捕获时的完整集合；前缀枚举到的都是更晚创建且已被证明的邮件，
-        // 两者并集仍是当前时刻的完整集合，可作为下一次发送的排除集。
-        let mut next_baseline = baseline.clone();
-        next_baseline.extend(list.summaries.iter().map(|summary| summary.external_mail_id.clone()));
-        self.remember_sent_baseline(cookie, world, next_baseline);
-        Ok(verified)
+            .ok_or_else(|| verification_unavailable(world))
     }
 
     /// 只输出计数与闭集阶段；不把 MID、收件人、正文或凭据带入普通日志。
@@ -187,4 +165,29 @@ fn verification_unavailable(world: MoogleMailWorld) -> MoogleMailError {
         MoogleMailErrorCategory::RemoteTemporary,
         false,
     )
+}
+
+/// 列表投影只筛选候选；最终收件人、主题与资产仍必须由详情精确证明。
+pub(super) fn is_list_candidate(
+    summary: &super::super::MoogleMailSentSummary,
+    request: &MoogleMailSendRequest,
+) -> bool {
+    summary.world == request.world
+        && mail_recipient_is_list_projection(&summary.recipient, &request.message.recipient)
+        && subject_is_list_projection(&summary.subject, &request.message.subject)
+}
+
+/// 各次回退共用调用方原截止点；过期时不派发新的只读请求。
+pub(super) async fn within_deadline<T>(
+    world: MoogleMailWorld,
+    deadline: Instant,
+    future: impl std::future::Future<Output = Result<T, MoogleMailError>>,
+) -> Result<T, MoogleMailError> {
+    check_deadline(deadline, world)?;
+    let result = timeout_at(deadline, future).await.map_err(|elapsed| {
+        tracing::trace!(%world, timeout = %elapsed, "MoogleMail Sent 只读预算耗尽");
+        scan_timeout(world)
+    })??;
+    check_deadline(deadline, world)?;
+    Ok(result)
 }

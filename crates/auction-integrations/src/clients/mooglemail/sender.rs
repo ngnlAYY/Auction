@@ -7,11 +7,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod baseline;
 mod equipment;
 mod maintenance;
 mod proof;
 
-pub(crate) use proof::MoogleMailSentBaseline;
+pub(crate) use baseline::MoogleMailSentBaseline;
 
 pub use maintenance::{
     MoogleMailComposeSnapshot, MoogleMailDiscardOutcome, MoogleMailSentListEntry,
@@ -97,12 +98,15 @@ pub struct MoogleMailSender {
     parser: MoogleMailParser,
     verification_pages: usize,
     verification_budget: Duration,
+    sent_baseline_mode: auction_application::SentBaselineMode,
+    sent_baseline_observer: Arc<dyn auction_application::SentBaselineObserver>,
     /// 最近一次已完整证明的 Sent 摘要；只作排除集，缺失条目最多增加候选详情读取。
     sent_baselines: Arc<Mutex<HashMap<MoogleMailWorld, CachedSentBaseline>>>,
 }
 
 struct CachedSentBaseline {
     credential: uuid::Uuid,
+    scope: super::client::MoogleMailSentScope,
     seen: HashSet<String>,
     captured: Instant,
 }
@@ -115,6 +119,8 @@ impl MoogleMailSender {
             parser: MoogleMailParser,
             verification_pages: 100,
             verification_budget: Duration::from_secs(30),
+            sent_baseline_mode: auction_application::SentBaselineMode::Shadow,
+            sent_baseline_observer: auction_application::noop_sent_baseline_observer(),
             sent_baselines: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -148,22 +154,27 @@ impl MoogleMailSender {
         let cache = self.sent_baselines.lock().ok()?;
         let entry = cache.get(&world)?;
         (entry.credential == cookie.observation_key()
+            && self.client.check_sent_scope(cookie, &entry.scope).is_ok()
             && entry.captured.elapsed() <= SENT_BASELINE_REUSE_WINDOW)
             .then(|| entry.seen.clone())
     }
 
-    /// 只由发送后完整扫描成功路径写入；失败、未知结果或换凭据都必须丢弃旧基线。
+    /// 由发送前完整枚举或发送后完整排除集与前缀的并集写入；单独水位不能充当完整缓存。
     pub(crate) fn remember_sent_baseline(
         &self,
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
         seen: HashSet<String>,
     ) {
+        let Ok(scope) = self.client.current_sent_scope(cookie, world) else {
+            return;
+        };
         if let Ok(mut cache) = self.sent_baselines.lock() {
             cache.insert(
                 world,
                 CachedSentBaseline {
                     credential: cookie.observation_key(),
+                    scope,
                     seen,
                     captured: Instant::now(),
                 },
@@ -291,6 +302,7 @@ impl MoogleMailSender {
                 MoogleMailErrorCategory::Configuration,
             ));
         }
+        self.check_baseline_scope(cookie, &baseline)?;
         let compose = self.client.compose(request.world)?;
         let initial = self.client.get(&compose, cookie).await?;
         let parsed_initial = self.parser.parse_compose_state(&initial, request.world);
@@ -437,7 +449,7 @@ impl MoogleMailSender {
             self.client.diagnose_parse(&compose, &response, confirmation).await.ok().flatten();
         let proof = async {
             let external_mail_id = self
-                .verify_new_sent(request, cookie, &baseline.seen, confirmation_hint.as_deref())
+                .verify_new_sent(request, cookie, &baseline, confirmation_hint.as_deref())
                 .await?;
             // Sent 证明后必须再证明 compose 回到空表单；残留草稿意味着资产状态仍未收口。
             let state = self.inspect_compose(cookie, request.world).await?;

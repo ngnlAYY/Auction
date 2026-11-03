@@ -7,6 +7,7 @@ mod migration;
 mod pool;
 mod process;
 mod readiness;
+mod sent_baseline;
 mod shutdown;
 pub use shutdown::{
     ShutdownCriticalKind, ShutdownOutcome, ShutdownPhase, ShutdownReason, ShutdownRecorder,

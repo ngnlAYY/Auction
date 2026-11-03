@@ -24,6 +24,7 @@ pub(super) async fn configure_mail_poll(
     store: Arc<DatabaseStore>,
     profile_reader: Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
     progress_observer: Arc<dyn auction_application::MailPollProgressObserver>,
+    sent_baseline_observer: Arc<dyn auction_application::SentBaselineObserver>,
 ) -> anyhow::Result<(
     Vec<MailPollRuntime>,
     Option<Arc<dyn DeliveryTransport>>,
@@ -85,6 +86,7 @@ pub(super) async fn configure_mail_poll(
             &store,
             client.as_ref(),
             &credentials,
+            sent_baseline_observer,
         )?;
         let maintenance = Arc::new(auction_application::MailboxMaintenanceService::new(
             Arc::new(delivery_transport.maintenance_adapter())

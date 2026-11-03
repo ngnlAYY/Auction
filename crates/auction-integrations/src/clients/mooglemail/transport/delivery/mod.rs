@@ -12,6 +12,16 @@ use actions::PreparedMoogleMailTake;
 use credentials::PreparedMoogleMailCredentials;
 
 impl MoogleMailDeliveryTransport {
+    /// 注入发送前基线模式与只读影子观测器；不改变持久 fence 和外写次数。
+    pub fn with_sent_baseline(
+        mut self,
+        mode: auction_application::SentBaselineMode,
+        observer: Arc<dyn auction_application::SentBaselineObserver>,
+    ) -> Self {
+        self.sender = self.sender.with_sent_baseline(mode, observer);
+        self
+    }
+
     /// 配置所有 Send 操作的发送前后 Sent 核对边界。
     pub fn with_send_verification(
         mut self,

@@ -166,6 +166,22 @@ Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、metrics.en
 
 回退时设置 `poll_isolation_enabled = false` 并重启 Worker：恢复每轮 Read Mail 观察、维护与收件的三分支 `tokio::join!`、原观察频率和无相位日程，不启动独立维护任务，两个新节奏参数不生效。重启须遵守部署时段门禁。
 
+#### MoogleMail 发送前基线
+
+`[worker.mooglemail] sent_baseline_mode` 可选，默认 `"shadow"`；只接受 `full`、`shadow`、`watermark`，未知值在配置解析时拒绝。该字段只属于 Worker TOML，不进入 Admin runtime 参数或 W7.7 在线开关；修改需要重启 Worker，并受部署时段门禁（W7.5）约束。
+
+| 值 | 行为 |
+| --- | --- |
+| `full` | 完整 Sent 排除集及其十分钟有效缓存，保留旧路径 |
+| `shadow` | 旧路径唯一裁决；复用同一读取轮次的页面，只读比较水位的新增 MID 集合与列表候选集合；不增加 POST |
+| `watermark` | 每次发送前 fresh 读完最新分钟组，保存最大数值 MID 与该分钟；发送后核对原锚点并读完边界分钟，按 `MID > W` 取得候选，再执行原完整详情和 compose 证明 |
+
+边界随 prepared 句柄一次消费，不新增持久水位表，不推进 Worker 游标。Empty 需要空列表及末页证明。仅水位路径要求 MID 为无前导零、可由 `u128` 受检解析的十进制身份，通用 opaque ID 解析不变；还要求同一账号与世界代次内 MID 分配单调且不复用，Sent 时间排序与之相容，同分钟行允许任意排列。数字空洞不算不连续。凭据、world、endpoint 或 owner 代次变化立即使上下文与旧完整缓存失效。
+
+写前边界无效时在原预算内回退 fresh 完整扫描；写后锚点消失时完整枚举并使用原边界，不以发送后最大 MID 重建基线。写后 MID/时间前提失效且缺少发送前完整集合时保持 `write_unknown`。完整回退仍受 `maximum_pages`（1–100）和原 `fetch_timeout_seconds` 截止点、限速及资源限制；失败关闭，未知结果绝不重发。常规轮 Sent/Read Mail 水位及每日校验不在本切片内。
+
+默认 shadow 沿用旧路径，不能解除 D3；须在旧完整扫描触顶前由用户完成观察并切换 watermark。核实 MID 语义、观察周期、分支样本及差异口径见[运维手册](../README.md#sent-发送基线影子观察)。回退为 `full` 并受控重启；换回不认识该字段的旧二进制前须移除新字段。
+
 ## runtime 配置（`runtime/admin.toml`）
 
 runtime 文件让运营人员在 Admin “参数配置”页修改部分参数，而无需登录服务器编辑 TOML。Admin 是唯一写者：提交的候选先经服务端完整校验，再以命令账本 + 原子替换写入（临时文件、rename、目录同步、独立锁文件）。文件必须是 0640、父目录禁止他人写入、归 Admin 运行账号所有。**修改在重启相关角色后生效**，不改写已有场次与任务。

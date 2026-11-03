@@ -183,6 +183,8 @@ request_timeout_seconds = 15
 batch_size = 100
 # 可选：单次有界读取的最大页数，范围 1-100，默认 20。
 maximum_pages = 20
+# 可选：发送前基线模式，默认 shadow；full 保留旧完整基线，shadow 只读比较且旧路径裁决，watermark 启用临时 MID 边界；核实与观察通过后由用户切换，修改需受控重启。
+sent_baseline_mode = "shadow"
 # 可选：标准五字段 cron，默认每 5 分钟；也支持 @hourly/@daily/@every 以及 TZ=/CRON_TZ= 时区前缀。
 schedule = "*/5 * * * *"
 # 可选：收件与维护独立运行并按世界平移日程；默认 true；false 恢复每轮三分支 join、原观察频率和无相位日程，新节奏参数不生效；修改需重启。
