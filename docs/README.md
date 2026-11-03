@@ -14,7 +14,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [架构改进计划](plans/architecture-improvement.md) | 外部账号调度、处置模型、规则上移、运维台、告警、验证与发布的分阶段方案与进度 |
+| [架构改进计划](plans/architecture-improvement.md) | 入口：目标与原则、执行须知、工作流总览与里程碑、待决定事项、待办池与进度；各工作流详情、现状基线与决策记录位于 `docs/plans/architecture-improvement/` |
 
 ## 业务指南
 
