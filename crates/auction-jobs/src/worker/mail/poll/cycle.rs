@@ -2,6 +2,9 @@
 
 use std::sync::Arc;
 
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_world,
+};
 use auction_application::{
     Clock, MailDiagnosticRecorder, MailPollStore, MailProcessor, RecurringSchedule,
 };
@@ -12,6 +15,7 @@ use super::super::{PersistentWorker, WorkerError, poll_delay};
 use super::maintenance::{run_maintenance, run_read_observation};
 use super::processing::process_claim;
 use super::{MailPollGateway, MailPollRuntime, MailPollRuntimeConfig};
+use crate::worker::diagnostics;
 
 /// 等待已装配日程与 `[0, jitter]` 后轮询；手动触发跳过等待和 due 时间。
 pub(crate) async fn run_loop<C>(
@@ -21,60 +25,73 @@ pub(crate) async fn run_loop<C>(
 ) where
     C: Clock + 'static,
 {
-    loop {
-        if *shutdown.borrow() || worker.control.is_draining() {
-            return;
-        }
-        let now = worker.clock.now();
-        let Some(next_wake_at) = runtime.schedule.next_after(now) else {
-            tracing::error!(
-                world_id = %runtime.world_id,
-                mailbox_key = %runtime.mailbox_key,
-                "MoogleMail cron 无法计算下一次触发时刻，停止该邮箱循环"
-            );
-            return;
-        };
-        let Some(schedule_delay) =
-            next_wake_at.signed_duration_since(now).to_std().ok().filter(|delay| !delay.is_zero())
-        else {
-            tracing::error!(
-                world_id = %runtime.world_id,
-                mailbox_key = %runtime.mailbox_key,
-                "MoogleMail cron 返回了非未来触发时刻，停止该邮箱循环"
-            );
-            return;
-        };
-        let wait = poll_delay(schedule_delay, runtime.config.jitter);
-        let scheduled_wake = tokio::time::Instant::now() + wait;
-        let scheduled_sleep = tokio::time::sleep_until(scheduled_wake);
-        tokio::pin!(scheduled_sleep);
-        let force = tokio::select! {
-            biased;
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
-                    return;
-                }
-                continue;
+    let diagnostic_metrics = worker.metrics.clone();
+    let diagnostic_loop = runtime.loop_kind();
+    let body = async move {
+        loop {
+            if *shutdown.borrow() || worker.control.is_draining() {
+                return;
             }
-            () = &mut scheduled_sleep => {
-                worker.metrics.observe_schedule_delay(
-                    runtime.loop_kind(),
-                    tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
+            let now = worker.clock.now();
+            let Some(next_wake_at) = runtime.schedule.next_after(now) else {
+                diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
+                tracing::error!(
+                    world_id = %runtime.world_id,
+                    mailbox_key = %runtime.mailbox_key,
+                    "MoogleMail cron 无法计算下一次触发时刻，停止该邮箱循环"
                 );
-                false
-            }
-            () = runtime.wakeup.notified() => true,
-        };
+                return;
+            };
+            let Some(schedule_delay) = next_wake_at
+                .signed_duration_since(now)
+                .to_std()
+                .ok()
+                .filter(|delay| !delay.is_zero())
+            else {
+                diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
+                tracing::error!(
+                    world_id = %runtime.world_id,
+                    mailbox_key = %runtime.mailbox_key,
+                    "MoogleMail cron 返回了非未来触发时刻，停止该邮箱循环"
+                );
+                return;
+            };
+            let wait = poll_delay(schedule_delay, runtime.config.jitter);
+            let scheduled_wake = tokio::time::Instant::now() + wait;
+            let scheduled_sleep = tokio::time::sleep_until(scheduled_wake);
+            tokio::pin!(scheduled_sleep);
+            let force = tokio::select! {
+                biased;
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        return;
+                    }
+                    continue;
+                }
+                () = &mut scheduled_sleep => {
+                    worker.metrics.observe_schedule_delay(
+                        runtime.loop_kind(),
+                        tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
+                    );
+                    false
+                }
+                () = runtime.wakeup.notified() => true,
+            };
 
-        if let Err(error) = run_cycle(worker.as_ref(), &runtime, force).await {
-            tracing::warn!(
-                error = %error,
-                world_id = %runtime.world_id,
-                mailbox_key = %runtime.mailbox_key,
-                "MoogleMail 邮箱轮询失败；该邮箱将在自身下一轮重试"
-            );
+            if let Err(error) = run_cycle(worker.as_ref(), &runtime, force).await {
+                diagnostics::unpersisted_error(
+                    "mail_poll",
+                    "poll_mailbox",
+                    error.diagnostic_kind(),
+                    DiagnosticContext {
+                        world: diagnostic_world(&runtime.world_id),
+                        ..Default::default()
+                    },
+                );
+            }
         }
-    }
+    };
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
 }
 
 async fn run_cycle<C>(
@@ -151,11 +168,23 @@ where
     .await
     {
         Ok(Ok(claims)) if tokio::time::Instant::now() < lease_deadline => claims,
-        Ok(Ok(_)) | Err(_) => {
-            tracing::warn!(
-                mailbox_key = %runtime.mailbox_key,
-                "MoogleMail 邮箱领取未在租约截止前确认；保留可能已提交的 claim"
+        diagnostic_outcome @ (Ok(Ok(_)) | Err(..)) => {
+            diagnostics::warn(
+                "mail_poll",
+                if diagnostic_outcome.is_err() {
+                    "claim_mailbox_timeout"
+                } else {
+                    "claim_mailbox_expired"
+                },
+                if diagnostic_outcome.is_err() {
+                    SafeErrorKind::TIMEOUT
+                } else {
+                    SafeErrorKind::LEASE_EXPIRED
+                },
+                DiagnosticContext::default(),
             );
+            drop(diagnostic_outcome);
+
             return Ok(WorkerResult::Error);
         }
         Ok(Err(error)) => return Err(error.into()),

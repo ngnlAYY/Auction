@@ -2,15 +2,15 @@
 //! Worker 只负责发现持久化 due generation 并触发命令；竞价锁、资格检查、领域计划、命令账本
 //! 和审计仍由应用服务与存储事务共同拥有。
 
+use auction_domain::{CommandId, CompetitionPlan, LotId, ProxyAuthorizationId};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use auction_domain::{CommandId, CompetitionPlan, LotId, ProxyAuthorizationId};
-
 use super::{ApplicationFuture, CompetitionTransactionError, RequestHash};
 use crate::ApplicationError;
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 
 /// 旧版命令账本用于慢速代理执行结果的稳定命令种类。
 pub const SLOW_PROXY_COMMAND_KIND: &str = "execute_slow_response";
@@ -28,7 +28,15 @@ impl SlowProxyDue {
     /// 校验扫描结果，并按 Auction-BF 的稳定算法生成命令身份和请求摘要。
     pub fn into_command(self) -> Result<ExecuteSlowProxyCommand, CompetitionTransactionError> {
         self.validate()?;
-        let generation = i64::try_from(self.generation).map_err(|_| {
+        let generation = i64::try_from(self.generation).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                error.diagnostic_kind(),
+                "slow_proxy",
+                "convert_generation",
+                DiagnosticContext::default(),
+            );
+
             CompetitionTransactionError::Failed("慢速代理世代超出旧命令范围".to_owned())
         })?;
         let due_nanos = self.due_at.timestamp_nanos_opt().ok_or_else(|| {
@@ -163,7 +171,16 @@ fn legacy_request_hash(
         generation,
         due_at: due.due_at.to_rfc3339_opts(SecondsFormat::AutoSi, true),
     })
-    .map_err(|_| CompetitionTransactionError::Failed("慢速代理旧版请求摘要编码失败".to_owned()))?;
+    .map_err(|error| {
+        record_error(
+            DiagnosticLevel::Error,
+            error.diagnostic_kind(),
+            "slow_proxy",
+            "hash_legacy_request",
+            DiagnosticContext::default(),
+        );
+        CompetitionTransactionError::Failed("慢速代理旧版请求摘要编码失败".to_owned())
+    })?;
     let digest = Sha256::digest(payload);
     let mut bytes = [0_u8; 32];
     bytes.copy_from_slice(&digest);

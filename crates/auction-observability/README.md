@@ -14,7 +14,14 @@
 
 调用方先用原事件的 `tracing::enabled!` 检查过滤，再调用 `should_log()`，避免为不可见日志生成汇总；同时必须在已有 Tokio 循环的 `select!` 中持续轮询 `flush_when_due()`，因此停止报错后仍会到期汇总。等待可取消，不创建独立后台任务或全局锁。实例丢弃时补齐尚未汇总的计数，未到期则 `window_complete = false`；进程被强制终止时无法保证汇总。采用显式 helper 可限定接入范围，避免全局 Layer 干预其他日志或 OTLP span。
 
-当前只接入 Worker delivery 循环的 `delivery_cycle_failed` 日志；不改变轮询节奏、重试、租约、指标、持久化或结果未知不重发的不变量，其他日志仍走原路径。默认在 WARN 汇总可见时启用；回退可在现有 `log_filter` 追加 `auction_observability::log_dedup=off`，重启后该 helper 放行所有原始日志，也可移除调用点恢复原日志。汇总 target 被过滤时不执行抑制，避免计数不可见。配置文件与重启规则见[配置参考](../../ops/config/README.md#commontoml)。
+I-A 新增 jobs/application 的 `auction::diagnostics` 诊断门，复用 `RateLimitedLog`。
+键由固定 kind/phase/safe_kind 组成，有界保存 512 个窗口，满时放行原日志；窗口不保存业务标识。
+主 Worker 在原 select 中刷新，排空后关闭；PM 共享同一长期窗口。原 delivery 循环的去重仍保留。
+不改变轮询节奏、重试、租约、指标、持久化或结果未知不重发的不变量，其他日志仍走原路径。
+默认在 WARN 汇总可见时启用；回退可在现有 `log_filter` 追加
+`auction_observability::log_dedup=off`，重启后该 helper 放行所有原始日志。
+也可移除调用点恢复原日志。汇总 target 被过滤时不执行抑制，避免计数不可见。
+配置文件与重启规则见[配置参考](../../ops/config/README.md#commontoml)。
 
 ## Tracing（可选）
 
@@ -35,6 +42,7 @@
 | `auction_worker_loop_iterations_total`、`auction_worker_loop_iteration_duration_seconds`、`auction_worker_schedule_delay_seconds` | Worker 各循环的轮次、耗时与调度延迟 |
 | `auction_worker_batch_items_total`、`auction_worker_batch_capacity_total`、`auction_worker_batch_saturated_total` | 批次利用率与饱和次数 |
 | `auction_worker_retry_attempts_total`、`auction_worker_retry_mode_bound` | 重试次数与重试模式 |
+| `auction_worker_unpersisted_error_total` | 未确认对应持久化失败、退避或人工处置的错误；见[口径](#未持久化错误) |
 | `auction_postgres_pool_*` | PostgreSQL 连接池大小、空闲、获取次数与等待时长、空池等待与取消次数 |
 | `auction_tracing_*` | tracing 是否启用、导出失败/丢弃 span、最近成功/失败时间、是否降级 |
 | `auction_audit_write_failures_total{class,sqlstate_class,kind}` | 原始审计 SQL 失败尝试累计，包含回滚后重试成功的尝试；关闭 exporter 不影响底层计数 |
@@ -93,6 +101,40 @@ Worker 的 `ProcessMetrics::sent_baseline` 注入应用层窄观测端口；四�
 在途阶段因排空超时或任务取消而中断时，守卫记录一次 `canceled`；停止后没有开始的阶段不计轮次。维护与观察不绑定内联或持久重试指标。`auction_worker_loop_iteration_duration_seconds` 的有限桶为 `0.01、0.05、0.1、0.25、0.5、1、5、30、60、120、300` 秒，可用于观察维护 p95 是否低于 60 秒；调度延迟从叠加 jitter 后的计划唤醒时刻开始计算。
 
 Read Mail 日志的 `read_observed` 始终是完整列表数量；观察降频只改变采样节奏，失败不输出部分数量。配置与回退见[配置参考](../../ops/config/README.md#mooglemail-收件与维护)。
+
+### 未持久化错误
+
+`auction_worker_unpersisted_error_total{loop,kind}` 统计
+“本次失败没有确认形成对应的持久化失败、退避或人工处置事实”。
+提交结果未知也计入；不因计数补造失败事实、改变租约或授权重发。
+该计数随进程重启归零，不能作为持久积压或资金事实。
+
+loop 沿用 `WorkerLoop` 闭集；PM 先归入 forum。
+邮件独立维护/观察采用对应阶段 label，旧 join 路径采用原邮件 owner。
+kind 来自 ApplicationError、InternalEvidenceError、FundingError 的 safe_kind 闭集，
+加 timeout、task_join、lease_expired、configuration_invalid、other；未知类别只生成 other。
+固定类别使用 `SafeErrorKind` 关联常量，既有 `safe_kind()` 字符串才经 `from_label` 映射。
+UUID、失败码、日志 kind/phase、正文和远端返回值不得进入 label。
+关闭 metrics 时不注册 collector，no-op recorder 不改变处理结果。
+
+记录点由 owner 的最终处置决定：claim/扫描失败、未确认的阶段/围栏/续租/完成、
+保存失败退避或人工处置失败；维护把错误装入 Ok(report) 时在原因丢失前记录。
+`DiagnosticDisposition::Unpersisted` 以枚举匹配触发计数，不比较日志字符串。
+原轮次、批次与重试指标不改口径：error 轮次可能已经保存失败事实，也可能没有确认保存，
+不能据此推导本计数。
+
+不计正常排空和取消、正常 stale 竞争、唤醒提示回退，
+以及已确认保存的 Deferred/ManualReconcile。
+实时 acknowledge 失败后若 record_failure 成功，不重复统计外层 Err。
+PM 的 prepare 失败仅 release_unsent 而未保存原因仍计入，
+但 send/reconcile 后 finish(None) 已保存人工处置时不计入。
+失败回退成功时不统计原错误；回退写入本身失败时记录该失败，避免内外层重复计数。
+
+Worker 观测上下文通过 task-local 窄包装传递，JoinSet 子任务显式继承。
+包装不重建 deadline，不 detach，不改变返回值或取消。
+指标通知发生在 enabled! 与 RateLimitedLog 之前；关闭或抑制日志不能降低计数。
+部署后通过现有 /metrics 采集，以 rate 或 increase 观察，
+不能把本次静态门禁当作真实故障样本验收。
 
 ## 心跳与健康
 

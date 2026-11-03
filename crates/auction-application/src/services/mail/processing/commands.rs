@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use super::pricing::{decimal_identity, valid_text};
 use super::*;
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 
 pub(super) fn validate_command(command: &MailAuctionIntakeCommand) -> Result<(), ApplicationError> {
     if command.command_id.is_nil()
@@ -50,8 +51,17 @@ pub(super) fn replay_result(
     {
         return Err(MailProcessingError::CommandConflict.into());
     }
-    let result: MailAuctionIntakeResult = serde_json::from_slice(&stored.result_payload)
-        .map_err(|_| MailProcessingError::StoredResultCorrupt)?;
+    let result: MailAuctionIntakeResult =
+        serde_json::from_slice(&stored.result_payload).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Warn,
+                error.diagnostic_kind(),
+                "mail_intake",
+                "decode_replay_result",
+                DiagnosticContext::default(),
+            );
+            MailProcessingError::StoredResultCorrupt
+        })?;
     result.validate()?;
     Ok(result)
 }

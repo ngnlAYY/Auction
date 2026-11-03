@@ -6,6 +6,7 @@ use super::{
     AdminUserService, create_hash, mutation_hash, revert_hash, validate_create, validate_mutation,
     validate_revert,
 };
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 use crate::{
     AdminLoginKeyIssuer, AdminLoginKeyOpener, AdminRenameRevertCommand, AdminRenameRevertWrite,
     AdminUserCommandKind, AdminUserCommandResult, AdminUserCreateCommand, AdminUserCreateWrite,
@@ -200,12 +201,16 @@ where
         }
         let generated_key = if wants_key {
             let envelope = result.response_envelope.ok_or(AdminUserError::StoredResultCorrupt)?;
-            Some(
-                self.opener
-                    .open(result.user.id, envelope)
-                    .await
-                    .map_err(|_| AdminUserError::KeyUnavailable)?,
-            )
+            Some(self.opener.open(result.user.id, envelope).await.map_err(|error| {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "admin_users",
+                    "open_replay_key",
+                    DiagnosticContext::default(),
+                );
+                AdminUserError::KeyUnavailable
+            })?)
         } else {
             None
         };

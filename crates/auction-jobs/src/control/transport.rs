@@ -10,6 +10,10 @@ use std::{
     time::Duration,
 };
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::worker::diagnostics;
+
 #[cfg(unix)]
 use std::{
     collections::HashSet,
@@ -352,8 +356,19 @@ impl WorkerControlHandle {
         {
             return Err(TriggerError::InvalidCommand);
         }
-        let mut history =
-            self.inner.trigger_history.lock().map_err(|_| TriggerError::Unavailable)?;
+        let mut history = self.inner.trigger_history.lock().map_err(|error| {
+            diagnostics::warn(
+                "control_trigger",
+                "lock_history",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    command_id: Uuid::parse_str(&command.command_id).ok(),
+                    route: Some(WORKER_CONTROL_TRIGGER_POLL_PATH),
+                    ..Default::default()
+                },
+            );
+            TriggerError::Unavailable
+        })?;
         if let Some(result) = history.results.get(&command.command_id).cloned() {
             return Ok(result);
         }

@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticDisposition, DiagnosticError};
 use auction_application::{
     Clock, MailMessage, MailPollBatch, MailPollClaim, MailPollCompletion, MailPollProgressStage,
     MailProcessingDecision, MailProcessor,
@@ -20,6 +21,7 @@ use super::{
     MailPollFetchRequest, MailPollGateway, MailPollGatewayError, MailPollPage,
     MailPollRuntimeConfig,
 };
+use crate::worker::diagnostics as worker_diagnostics;
 
 mod business;
 mod diagnostics;
@@ -130,18 +132,25 @@ where
                         lease_deadline = renewed_deadline;
                     }
                     Ok(Err(error)) => {
-                        tracing::error!(
-                            error = %error,
-                            mailbox_key = %renewal_claim.mailbox_key,
-                            "MoogleMail 租约续期失败，取消当前陈旧处理"
+                        worker_diagnostics::error(
+                            "mail_poll",
+                            "lease_renew",
+                            error.diagnostic_kind(),
+                            DiagnosticContext {
+                                disposition: Some(DiagnosticDisposition::Unpersisted),
+                                ..Default::default()
+                            },
                         );
                         return WorkerResult::Error;
                     }
-                    Err(_) => {
-                        tracing::error!(
-                            mailbox_key = %renewal_claim.mailbox_key,
-                            "MoogleMail 租约续期超时，取消当前陈旧处理"
+                    Err(error) => {
+                        worker_diagnostics::unpersisted_error(
+                            "mail_poll",
+                            "lease_renew_timeout",
+                            worker_diagnostics::timeout_kind(&error),
+                            DiagnosticContext::default(),
                         );
+
                         return WorkerResult::Error;
                     }
                 }
@@ -218,7 +227,14 @@ where
             .await;
             return WorkerResult::Error;
         }
-        Err(_) => {
+        Err(error) => {
+            worker_diagnostics::warn(
+                "mail_poll",
+                "fetch_batch_timeout",
+                worker_diagnostics::timeout_kind(&error),
+                DiagnosticContext::default(),
+            );
+
             record_failure(
                 store,
                 clock,
@@ -285,7 +301,14 @@ where
         )
         .await;
         match completion {
-            Err(_) => {
+            Err(error) => {
+                worker_diagnostics::warn(
+                    "mail_poll",
+                    "lookup_completion_timeout",
+                    worker_diagnostics::timeout_kind(&error),
+                    DiagnosticContext::default(),
+                );
+
                 budget_exhausted = true;
                 break;
             }
@@ -296,7 +319,12 @@ where
             }
             Ok(Ok(MailPollCompletion::Missing)) => {}
             Ok(Err(error)) => {
-                tracing::error!(error = %error, "MoogleMail 已完成事实核验失败");
+                worker_diagnostics::error(
+                    "mail_poll",
+                    "lookup_completion",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
                 suffix_failure = Some((
                     "completion_lookup_failed".to_owned(),
                     "MoogleMail 已完成事实核验失败，未越过失败邮件".to_owned(),
@@ -358,7 +386,14 @@ where
                             Some((failure.failure_code.to_owned(), failure.safe_detail.to_owned()));
                         break;
                     }
-                    Err(_) => {
+                    Err(error) => {
+                        worker_diagnostics::warn(
+                            "mail_poll",
+                            "process_batch_timeout",
+                            worker_diagnostics::timeout_kind(&error),
+                            DiagnosticContext::default(),
+                        );
+
                         diagnostic.retain_failure("batch_processing_timeout").await;
                         budget_exhausted = true;
                         break;
@@ -427,10 +462,11 @@ where
         observer.update(&claim, MailPollProgressStage::Committing, None);
     }
     if let Err(error) = store.commit(claim.clone(), batch).await {
-        tracing::error!(
-            error = %error,
-            mailbox_key = %claim.mailbox_key,
-            "MoogleMail Worker 提交入站批次失败"
+        worker_diagnostics::error(
+            "mail_poll",
+            "commit_batch",
+            error.diagnostic_kind(),
+            DiagnosticContext::default(),
         );
         record_failure(
             store,

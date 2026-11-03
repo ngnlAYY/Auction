@@ -1,6 +1,9 @@
 //! Recovery 已入队 action 的外部结果观察。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
 use super::*;
+use crate::worker::diagnostics;
 
 pub(in crate::worker::runtime) async fn observe_recovery_action<C>(
     store: Arc<dyn RecoveryWorkStore>,
@@ -51,7 +54,12 @@ where
             WorkerResult::Success
         }
         Err(error) => {
-            tracing::warn!(error = %error, "recovery action observation failed");
+            diagnostics::warn(
+                "recovery_observation",
+                "observe_action",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
             release_recovery_action(store, clock, claim, retry_delay, "recovery_observation_failed")
                 .await
         }

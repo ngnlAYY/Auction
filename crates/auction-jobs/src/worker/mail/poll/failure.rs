@@ -2,11 +2,15 @@
 
 use std::sync::Arc;
 
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind,
+};
 use auction_application::{Clock, MailPollBatch, MailPollClaim, MailPollStore, RecurringSchedule};
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerRetryKind};
 use chrono::Duration as ChronoDuration;
 
 use super::MailPollRuntimeConfig;
+use crate::worker::diagnostics;
 
 pub(super) async fn record_failure<C>(
     store: Arc<dyn MailPollStore>,
@@ -38,10 +42,12 @@ pub(super) async fn record_failure_with_prefix<C>(
     let now = clock.now();
     let delay = retry_delay(config.retry_base, config.retry_maximum, claim.attempt_count);
     let Ok(delay) = ChronoDuration::from_std(delay) else {
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!("MoogleMail Worker 失败退避时长超出时间表示范围，保留当前 claim");
         return;
     };
     let Some(backoff_at) = now.checked_add_signed(delay) else {
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!("MoogleMail Worker 失败退避时间溢出，保留当前 claim");
         return;
     };
@@ -61,7 +67,15 @@ pub(super) async fn record_failure_with_prefix<C>(
         None => store.fail(claim, retry_at, failure_code, safe_detail).await,
     };
     if let Err(error) = result {
-        tracing::error!(error = %error, "MoogleMail Worker 保存失败退避状态失败");
+        diagnostics::error(
+            "mail_poll",
+            "record_failure",
+            error.diagnostic_kind(),
+            DiagnosticContext {
+                disposition: Some(DiagnosticDisposition::Unpersisted),
+                ..Default::default()
+            },
+        );
     }
 }
 

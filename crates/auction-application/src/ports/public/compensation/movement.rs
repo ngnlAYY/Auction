@@ -1,6 +1,7 @@
 //! Public 补偿账本逐笔流水模型与一致性校验。
 
 use super::*;
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 
 /// 补偿账本允许公开的 movement 类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,8 +153,16 @@ impl PublicCompensationMovementPage {
         self.round.validate()?;
         let request = PublicCompensationMovementRequest { limit: self.limit, offset: self.offset };
         request.validate()?;
-        let entry_count =
-            i64::try_from(self.entries.len()).map_err(|_| "公开补偿账本页大小溢出")?;
+        let entry_count = i64::try_from(self.entries.len()).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                error.diagnostic_kind(),
+                "compensation_movement",
+                "convert_entry_count",
+                DiagnosticContext::default(),
+            );
+            "公开补偿账本页大小溢出"
+        })?;
         if self.total != self.round.movement_count || self.total < 2 || entry_count > self.limit {
             return Err("公开补偿账本页无效");
         }
@@ -161,7 +170,16 @@ impl PublicCompensationMovementPage {
         for (index, entry) in self.entries.iter().enumerate() {
             let expected_sequence = self
                 .offset
-                .checked_add(i64::try_from(index).map_err(|_| "公开补偿账本序号溢出")?)
+                .checked_add(i64::try_from(index).map_err(|error| {
+                    record_error(
+                        DiagnosticLevel::Error,
+                        error.diagnostic_kind(),
+                        "compensation_movement",
+                        "convert_sequence",
+                        DiagnosticContext::default(),
+                    );
+                    "公开补偿账本序号溢出"
+                })?)
                 .and_then(|value| value.checked_add(1))
                 .ok_or("公开补偿账本序号溢出")?;
             if entry.validate().is_err()

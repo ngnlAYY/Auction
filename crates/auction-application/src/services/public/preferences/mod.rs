@@ -1,5 +1,6 @@
 //! 偏好 CAS 与原结果重放；仅影响未来通知，不扫描历史队列。
 
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 use crate::{
     LotWatchError, LotWatchPreference, LotWatchPreferenceTransaction, LotWatchTransaction,
     RequestHash, SetLotWatchPreferenceCommand, StoredCommand, TransactionPolicy, TransactionRunner,
@@ -22,8 +23,16 @@ where
     {
         return Err(LotWatchError::Invalid);
     }
-    let hash = RequestHash::from_request(KIND, command.user_id, &command)
-        .map_err(|_| LotWatchError::Invalid)?;
+    let hash = RequestHash::from_request(KIND, command.user_id, &command).map_err(|error| {
+        record_error(
+            DiagnosticLevel::Warn,
+            error.diagnostic_kind(),
+            "lot_watch_preference",
+            "hash_request",
+            DiagnosticContext::default(),
+        );
+        LotWatchError::Invalid
+    })?;
     runner
         .run(TransactionPolicy::serializable(), |transaction| {
             let command = command.clone();
@@ -34,7 +43,16 @@ where
                         return Err(LotWatchError::Conflict);
                     }
                     let result: LotWatchPreference = serde_json::from_slice(&stored.result_payload)
-                        .map_err(|_| LotWatchError::Unavailable)?;
+                        .map_err(|error| {
+                            record_error(
+                                DiagnosticLevel::Warn,
+                                error.diagnostic_kind(),
+                                "lot_watch_preference",
+                                "decode_replay_result",
+                                DiagnosticContext::default(),
+                            );
+                            LotWatchError::Unavailable
+                        })?;
                     if stored.result_code != "ok"
                         || result.user_id != command.user_id
                         || result.channel != command.channel
@@ -65,8 +83,16 @@ where
                         aggregate_id: command.user_id,
                         request_hash: hash,
                         result_code: "ok".to_owned(),
-                        result_payload: serde_json::to_vec(&result)
-                            .map_err(|_| LotWatchError::Unavailable)?,
+                        result_payload: serde_json::to_vec(&result).map_err(|error| {
+                            record_error(
+                                DiagnosticLevel::Warn,
+                                error.diagnostic_kind(),
+                                "lot_watch_preference",
+                                "encode_result",
+                                DiagnosticContext::default(),
+                            );
+                            LotWatchError::Unavailable
+                        })?,
                     })
                     .await?;
                 Ok(result)

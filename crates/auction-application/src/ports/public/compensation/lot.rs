@@ -4,6 +4,7 @@
 //! 冲正事实只追加，存在时说明该件成交已撤销且池余额已按冻结规则回滚。
 
 use super::*;
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 
 /// 单场逐件明细的编号分页与补偿账本分页共用同一规则。
 pub type PublicCompensationLotRequest = PublicCompensationMovementRequest;
@@ -112,13 +113,29 @@ impl PublicCompensationLotPage {
     pub fn validate(&self) -> Result<(), &'static str> {
         self.round.validate()?;
         PublicCompensationLotRequest { limit: self.limit, offset: self.offset }.validate()?;
-        let entry_count =
-            i64::try_from(self.entries.len()).map_err(|_| "公开逐件结算明细页大小溢出")?;
+        let entry_count = i64::try_from(self.entries.len()).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                error.diagnostic_kind(),
+                "compensation_lot",
+                "convert_entry_count",
+                DiagnosticContext::default(),
+            );
+            "公开逐件结算明细页大小溢出"
+        })?;
         let reversal_count = self.entries.iter().filter(|entry| entry.reversal.is_some()).count();
         if self.total < entry_count
             || entry_count > self.limit
-            || i64::try_from(reversal_count).map_err(|_| "公开逐件结算明细页大小溢出")?
-                > self.round.reversal_count
+            || i64::try_from(reversal_count).map_err(|error| {
+                record_error(
+                    DiagnosticLevel::Error,
+                    error.diagnostic_kind(),
+                    "compensation_lot",
+                    "convert_reversal_count",
+                    DiagnosticContext::default(),
+                );
+                "公开逐件结算明细页大小溢出"
+            })? > self.round.reversal_count
         {
             return Err("公开逐件结算明细页无效");
         }

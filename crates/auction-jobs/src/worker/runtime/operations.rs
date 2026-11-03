@@ -1,6 +1,9 @@
 //! Operations alert 三类周期循环的运行时编排；扫描、分发和对账彼此隔离，单轮失败不阻塞其他 owner。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
 use super::*;
+use crate::worker::diagnostics;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum OperationsAlertLoopAction {
@@ -10,7 +13,7 @@ pub(super) enum OperationsAlertLoopAction {
 }
 
 impl OperationsAlertLoopAction {
-    const fn loop_kind(self) -> WorkerLoop {
+    pub(super) const fn loop_kind(self) -> WorkerLoop {
         match self {
             Self::Scan => WorkerLoop::OperationsAlertScan,
             Self::Dispatch => WorkerLoop::OperationsAlertDispatch,
@@ -18,11 +21,11 @@ impl OperationsAlertLoopAction {
         }
     }
 
-    const fn name(self) -> &'static str {
+    const fn diagnostic_phases(self) -> (&'static str, &'static str) {
         match self {
-            Self::Scan => "scan",
-            Self::Dispatch => "dispatch",
-            Self::Reconcile => "reconcile",
+            Self::Scan => ("scan_sources", "scan_sources_timeout"),
+            Self::Dispatch => ("dispatch_alert", "dispatch_alert_timeout"),
+            Self::Reconcile => ("reconcile_delivery", "reconcile_delivery_timeout"),
         }
     }
 
@@ -46,59 +49,70 @@ pub(super) async fn run_operations_alert_loop<C>(
 ) where
     C: Clock + 'static,
 {
-    loop {
-        if control.is_draining() {
-            return;
-        }
-        let started = std::time::Instant::now();
-        let now = clock.now();
-        let attempt = tokio::time::timeout(action.timeout(runtime.config), async {
-            match action {
-                OperationsAlertLoopAction::Scan => runtime.scan(now).await.map(|()| None),
-                OperationsAlertLoopAction::Dispatch => runtime.dispatch(now).await.map(|()| None),
-                OperationsAlertLoopAction::Reconcile => {
-                    runtime.reconcile(now, runtime.config.reconcile_limit).await.map(Some)
-                }
+    let diagnostic_metrics = metrics.clone();
+    let diagnostic_loop = action.loop_kind();
+    let body = async move {
+        loop {
+            if control.is_draining() {
+                return;
             }
-        })
-        .await;
-        let metric_result = match attempt {
-            Ok(Ok(processed)) => {
-                if let Some(processed) = processed {
-                    metrics.observe_batch(
-                        WorkerLoop::OperationsAlertReconcile,
-                        processed,
-                        usize::from(runtime.config.reconcile_limit),
+            let started = std::time::Instant::now();
+            let now = clock.now();
+            let attempt = tokio::time::timeout(action.timeout(runtime.config), async {
+                match action {
+                    OperationsAlertLoopAction::Scan => runtime.scan(now).await.map(|()| None),
+                    OperationsAlertLoopAction::Dispatch => {
+                        runtime.dispatch(now).await.map(|()| None)
+                    }
+                    OperationsAlertLoopAction::Reconcile => {
+                        runtime.reconcile(now, runtime.config.reconcile_limit).await.map(Some)
+                    }
+                }
+            })
+            .await;
+            let metric_result = match attempt {
+                Ok(Ok(processed)) => {
+                    if let Some(processed) = processed {
+                        metrics.observe_batch(
+                            WorkerLoop::OperationsAlertReconcile,
+                            processed,
+                            usize::from(runtime.config.reconcile_limit),
+                        );
+                    }
+                    WorkerResult::Success
+                }
+                Ok(Err(error)) => {
+                    diagnostics::unpersisted_error(
+                        "operations_alert",
+                        action.diagnostic_phases().0,
+                        error.diagnostic_kind(),
+                        DiagnosticContext::default(),
                     );
+                    WorkerResult::Error
                 }
-                WorkerResult::Success
-            }
-            Ok(Err(error)) => {
-                tracing::warn!(
-                    error = %error,
-                    operation = action.name(),
-                    "operations alert worker cycle failed; retrying after poll delay"
-                );
-                WorkerResult::Error
-            }
-            Err(_) => {
-                tracing::warn!(
-                    operation = action.name(),
-                    "operations alert worker cycle timed out; retrying after poll delay"
-                );
-                WorkerResult::Error
-            }
-        };
-        metrics.observe_iteration(action.loop_kind(), metric_result, started.elapsed());
+                Err(error) => {
+                    diagnostics::unpersisted_error(
+                        "operations_alert",
+                        action.diagnostic_phases().1,
+                        diagnostics::timeout_kind(&error),
+                        DiagnosticContext::default(),
+                    );
 
-        let wait = poll_delay(runtime.config.poll_interval, runtime.config.jitter);
-        let scheduled_wake = tokio::time::Instant::now() + wait;
-        if wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
-            return;
+                    WorkerResult::Error
+                }
+            };
+            metrics.observe_iteration(action.loop_kind(), metric_result, started.elapsed());
+
+            let wait = poll_delay(runtime.config.poll_interval, runtime.config.jitter);
+            let scheduled_wake = tokio::time::Instant::now() + wait;
+            if wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
+                return;
+            }
+            metrics.observe_schedule_delay(
+                action.loop_kind(),
+                tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
+            );
         }
-        metrics.observe_schedule_delay(
-            action.loop_kind(),
-            tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
-        );
-    }
+    };
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
 }

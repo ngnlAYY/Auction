@@ -1,6 +1,9 @@
 //! 先准备后持久 fence；sending 后任何错误只留原 sender 只读对账。
-use super::*;
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
 use auction_application::{LotWatchError, LotWatchPmClaimRequest, valid_forum_pm_id};
+
+use super::*;
+use crate::worker::diagnostics;
 
 pub(super) async fn process(
     runtime: &LotWatchPmRuntime,
@@ -25,8 +28,24 @@ pub(super) async fn process(
             // 尚未执行只读请求，不消耗人工核对意图；租约到期后仍可领取。
             return Ok(());
         }
-        let receipt =
-            runtime.sender.reconcile(claim.world, &claim.message, sender).await.ok().flatten();
+        let receipt = runtime
+            .sender
+            .reconcile(claim.world, &claim.message, sender)
+            .await
+            .inspect_err(|error| {
+                diagnostics::warn(
+                    "forum_pm",
+                    "read_sent_receipt",
+                    error.diagnostic_kind(),
+                    DiagnosticContext {
+                        world: Some(claim.world),
+                        notification_id: diagnostic_id(&claim.message.notification_id),
+                        ..Default::default()
+                    },
+                );
+            })
+            .ok()
+            .flatten();
         check_deadline(deadline)?;
         return runtime.store.finish(claim, receipt).await;
     }
@@ -41,7 +60,20 @@ pub(super) async fn process(
     let prepared = match prepared {
         Ok(prepared) => prepared,
         // prepare 契约保证只有 GET，只有这阶段才允许安全延期。
-        Err(_) => return runtime.store.release_unsent(claim).await,
+        Err(error) => {
+            let diagnostic_kind = error.diagnostic_kind();
+            diagnostics::warn(
+                "forum_pm",
+                "prepare_message",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
+            return runtime
+                .store
+                .release_unsent(claim)
+                .await
+                .inspect(|()| diagnostics::unpersisted(diagnostic_kind));
+        }
     };
     if *drain.borrow() {
         if activity.enabled() {
@@ -64,8 +96,26 @@ pub(super) async fn process(
     check_deadline(deadline)?;
     claim.sender = Some(sender);
     // start 提交响应未知直接返回；绝不执行 POST，也绝不释放回 pending。
-    let receipt =
-        if !activity.enabled() && *drain.borrow() { None } else { prepared.send().await.ok() };
+    let receipt = if !activity.enabled() && *drain.borrow() {
+        None
+    } else {
+        prepared
+            .send()
+            .await
+            .inspect_err(|error| {
+                diagnostics::warn(
+                    "forum_pm",
+                    "send_message",
+                    error.diagnostic_kind(),
+                    DiagnosticContext {
+                        world: Some(claim.world),
+                        notification_id: diagnostic_id(&claim.message.notification_id),
+                        ..Default::default()
+                    },
+                );
+            })
+            .ok()
+    };
     check_deadline(deadline)?;
     runtime.store.finish(claim, receipt).await?;
     activity.complete();

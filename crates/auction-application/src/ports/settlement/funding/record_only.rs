@@ -1,8 +1,10 @@
 //! 缺账户时显式初始化仅账目策略；不要求专用账号声明、个人余额或人为P/C预算。
 
-use super::{FundingCommitOutcome, FundingError, FundingFuture, FundingReconciliationResult};
 use serde::Serialize;
 use uuid::Uuid;
+
+use super::{FundingCommitOutcome, FundingError, FundingFuture, FundingReconciliationResult};
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 
 /// 命令绑定只读责任预览；旧strict账户不接受隐式转换。
 #[derive(Debug, Clone, Serialize)]
@@ -63,7 +65,16 @@ impl FundingRecordOnlyCommand {
     pub fn request_digest(&self) -> Result<[u8; 32], FundingError> {
         crate::RequestHash::from_request("funding_record_only_initialize_v1", self.command_id, self)
             .map(|hash| hash.as_bytes())
-            .map_err(|_| FundingError::Invalid)
+            .map_err(|error| {
+                record_error(
+                    DiagnosticLevel::Error,
+                    error.diagnostic_kind(),
+                    "funding_record_only",
+                    "hash_request",
+                    DiagnosticContext::default(),
+                );
+                FundingError::Invalid
+            })
     }
 }
 

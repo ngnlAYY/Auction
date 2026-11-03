@@ -1,9 +1,11 @@
 //! 装备 PM 独立队列端口；发送与只读核对的持久授权不可互换。
 
-use crate::{ForumPmMessage, ForumPmReceipt, LotWatchFuture, RequestHash};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::{ForumPmMessage, ForumPmReceipt, LotWatchFuture, RequestHash};
 
 /// 与 users 身份约束一致的规范论坛数字 ID，不按显示名投递。
 pub fn valid_forum_pm_id(value: &str) -> bool {
@@ -23,8 +25,16 @@ pub fn forum_pm_digest(message: &ForumPmMessage) -> Result<RequestHash, crate::L
     {
         return Err(crate::LotWatchError::Invalid);
     }
-    RequestHash::from_request("lot_watch_pm", message.notification_id, message)
-        .map_err(|_| crate::LotWatchError::Invalid)
+    RequestHash::from_request("lot_watch_pm", message.notification_id, message).map_err(|error| {
+        record_error(
+            DiagnosticLevel::Error,
+            error.diagnostic_kind(),
+            "forum_pm",
+            "hash_notification",
+            DiagnosticContext::default(),
+        );
+        crate::LotWatchError::Invalid
+    })
 }
 
 /// 持久领取证明，不能只凭队列 ID 完成发送。

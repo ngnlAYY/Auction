@@ -1,6 +1,9 @@
 //! Recovery 买家黑名单 action 的幂等执行与 proof 收口。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticDisposition, DiagnosticError};
+
 use super::*;
+use crate::worker::diagnostics;
 
 pub(in crate::worker::runtime) async fn process_recovery_buyer_blacklist<C>(
     store: Arc<dyn RecoveryWorkStore>,
@@ -36,9 +39,14 @@ where
         {
             Ok(()) => WorkerResult::Success,
             Err(fence_error) => {
-                tracing::error!(
-                    error = %fence_error,
-                    "recovery buyer blacklist manual fence failed"
+                diagnostics::error(
+                    "recovery_blacklist",
+                    "persist_invalid_reason",
+                    fence_error.diagnostic_kind(),
+                    DiagnosticContext {
+                        disposition: Some(DiagnosticDisposition::Unpersisted),
+                        ..Default::default()
+                    },
                 );
                 WorkerResult::Error
             }
@@ -56,16 +64,26 @@ where
         match RequestHash::from_request("users_recovery_buyer_blacklist", action_id, &request) {
             Ok(hash) => hash,
             Err(error) => {
-                tracing::error!(error = %error, "recovery buyer blacklist request hash failed");
+                diagnostics::error(
+                    "recovery_blacklist",
+                    "hash_command",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
                 return match store
                     .mark_action_manual_reconcile(claim, "recovery_request_hash_failed".to_owned())
                     .await
                 {
                     Ok(()) => WorkerResult::Success,
                     Err(fence_error) => {
-                        tracing::error!(
-                            error = %fence_error,
-                            "recovery buyer blacklist manual fence failed"
+                        diagnostics::error(
+                            "recovery_blacklist",
+                            "persist_hash_failure",
+                            fence_error.diagnostic_kind(),
+                            DiagnosticContext {
+                                disposition: Some(DiagnosticDisposition::Unpersisted),
+                                ..Default::default()
+                            },
                         );
                         WorkerResult::Error
                     }
@@ -94,9 +112,11 @@ where
             let proof_digest = match result.legacy_proof_digest() {
                 Ok(proof_digest) => proof_digest,
                 Err(error) => {
-                    tracing::error!(
-                        error = %error,
-                        "recovery buyer blacklist proof digest failed"
+                    diagnostics::error(
+                        "recovery_blacklist",
+                        "build_result_proof",
+                        error.diagnostic_kind(),
+                        DiagnosticContext::default(),
                     );
                     return match store
                         .mark_action_manual_reconcile(
@@ -107,9 +127,14 @@ where
                     {
                         Ok(()) => WorkerResult::Success,
                         Err(fence_error) => {
-                            tracing::error!(
-                                error = %fence_error,
-                                "recovery buyer blacklist digest fence failed"
+                            diagnostics::error(
+                                "recovery_blacklist",
+                                "persist_invalid_proof",
+                                fence_error.diagnostic_kind(),
+                                DiagnosticContext {
+                                    disposition: Some(DiagnosticDisposition::Unpersisted),
+                                    ..Default::default()
+                                },
                             );
                             WorkerResult::Error
                         }
@@ -128,7 +153,15 @@ where
             {
                 Ok(()) => WorkerResult::Success,
                 Err(error) => {
-                    tracing::error!(error = %error, "recovery buyer blacklist proof fence failed");
+                    diagnostics::error(
+                        "recovery_blacklist",
+                        "persist_completion",
+                        error.diagnostic_kind(),
+                        DiagnosticContext {
+                            disposition: Some(DiagnosticDisposition::Unpersisted),
+                            ..Default::default()
+                        },
+                    );
                     WorkerResult::Error
                 }
             }
@@ -142,12 +175,25 @@ where
         {
             Ok(()) => WorkerResult::Success,
             Err(error) => {
-                tracing::error!(error = %error, "recovery buyer blacklist result fence failed");
+                diagnostics::error(
+                    "recovery_blacklist",
+                    "persist_invalid_result",
+                    error.diagnostic_kind(),
+                    DiagnosticContext {
+                        disposition: Some(DiagnosticDisposition::Unpersisted),
+                        ..Default::default()
+                    },
+                );
                 WorkerResult::Error
             }
         },
         Err(error) => {
-            tracing::warn!(error = %error, "recovery buyer blacklist owner failed");
+            diagnostics::warn(
+                "recovery_blacklist",
+                "execute_blacklist",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
             release_recovery_action(
                 store,
                 clock,

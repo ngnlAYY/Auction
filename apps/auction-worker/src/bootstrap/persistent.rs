@@ -293,6 +293,7 @@ pub(super) async fn run_worker(
     let auction_lease_duration = std::time::Duration::from_secs(lease_duration_seconds);
     let (pm_drain, pm_receiver) = tokio::sync::watch::channel(stopping);
     let write_lifecycle_for_pm = write_lifecycle.clone();
+    let metrics_for_pm = metrics.worker();
     let mut pm_task = forum_pm.filter(|_| !stopping).map(|runtime| {
         let worker_id = worker_id.clone();
         let task_exit = WorkerRuntimeTaskExit::new(
@@ -302,7 +303,11 @@ pub(super) async fn run_worker(
         );
         TaskGuard::new(tokio::spawn(async move {
             let _task_exit = task_exit;
-            runtime.with_write_lifecycle(write_lifecycle_for_pm).run(worker_id, pm_receiver).await;
+            runtime
+                .with_metrics(metrics_for_pm)
+                .with_write_lifecycle(write_lifecycle_for_pm)
+                .run(worker_id, pm_receiver)
+                .await;
         }))
     });
     // 主 shutdown 一经触发即停止 PM 新领取，不等其他循环排空完成。

@@ -1,8 +1,10 @@
 //! Worker 持久化运行时的启动、任务装配与优雅排空。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::RateLimitedLog;
 
 use super::*;
+use crate::worker::diagnostics;
 
 /// 无数据库时仅用于保持进程存活的启动骨架。
 /// 真实 Worker 必须使用下面的 `run_persistent_with_settlement_until_shutdown`；
@@ -74,6 +76,8 @@ where
     }
 
     let worker = Arc::new(worker);
+    let diagnostic_logs = diagnostics::install();
+    let _diagnostic_guard = diagnostics::DiagnosticLogGuard::new(diagnostic_logs.clone());
 
     bind_worker_metric_modes(worker.metrics.as_ref());
 
@@ -113,10 +117,14 @@ where
             ));
         }
         let delivery_worker = Arc::clone(&worker);
-        delivery_cycles.spawn(async move { run_delivery_cycle(delivery_worker.as_ref()).await });
+        delivery_cycles.spawn(diagnostics::inherit(async move {
+            run_delivery_cycle(delivery_worker.as_ref()).await
+        }));
     }
     let mut delivery_scheduled_wake = tokio::time::Instant::now();
     let mut delivery_sleep = Box::pin(tokio::time::sleep(std::time::Duration::ZERO));
+    // 仅给启动时有限个常驻任务保留指标 owner；不参与调度或恢复。
+    let mut diagnostic_task_loops = std::collections::HashMap::new();
     let mut operations_alert_tasks = JoinSet::new();
     if let Some(runtime) = &worker.operations_alert {
         for action in [
@@ -124,7 +132,8 @@ where
             OperationsAlertLoopAction::Dispatch,
             OperationsAlertLoopAction::Reconcile,
         ] {
-            operations_alert_tasks.spawn(run_background(
+            let diagnostic_loop = action.loop_kind();
+            let diagnostic_task = operations_alert_tasks.spawn(run_background(
                 worker.write_lifecycle.clone(),
                 run_operations_alert_loop(
                     Arc::clone(runtime),
@@ -135,6 +144,7 @@ where
                     drain_sender.subscribe(),
                 ),
             ));
+            diagnostic_task_loops.insert(diagnostic_task.id(), diagnostic_loop);
         }
     }
     let mut auction_tasks = JoinSet::new();
@@ -163,17 +173,25 @@ where
     let mut mail_maintenance_tasks = JoinSet::new();
     for runtime in worker.mail_polls.iter().cloned() {
         if runtime.has_independent_maintenance() {
-            mail_maintenance_tasks.spawn(mail_poll::run_maintenance_loop(
+            let diagnostic_loop = if runtime.world_id == "isekai" {
+                WorkerLoop::MailMaintenanceIsekai
+            } else {
+                WorkerLoop::MailMaintenanceMain
+            };
+            let diagnostic_task = mail_maintenance_tasks.spawn(mail_poll::run_maintenance_loop(
                 Arc::clone(&worker),
                 runtime.clone(),
                 drain_sender.subscribe(),
             ));
+            diagnostic_task_loops.insert(diagnostic_task.id(), diagnostic_loop);
         }
-        mail_poll_tasks.spawn(mail_poll::run_loop(
+        let diagnostic_loop = runtime.loop_kind();
+        let diagnostic_task = mail_poll_tasks.spawn(mail_poll::run_loop(
             Arc::clone(&worker),
             runtime,
             drain_sender.subscribe(),
         ));
+        diagnostic_task_loops.insert(diagnostic_task.id(), diagnostic_loop);
     }
     let mut forum_tasks = JoinSet::new();
     if worker.forum_sync.is_some() || worker.forum_reply.is_some() {
@@ -193,6 +211,7 @@ where
             biased;
             () = &mut shutdown => break None,
             () = delivery_failure_log.flush_when_due() => {}
+            () = diagnostic_logs.flush_when_due() => {}
             _ = &mut delivery_sleep, if delivery_enabled && delivery_cycles.is_empty() =>
             {
                 worker.metrics.observe_schedule_delay(
@@ -200,20 +219,34 @@ where
                     tokio::time::Instant::now().saturating_duration_since(delivery_scheduled_wake),
                 );
                 let delivery_worker = Arc::clone(&worker);
-                delivery_cycles.spawn(async move {
+                delivery_cycles.spawn(diagnostics::inherit(async move {
                     run_delivery_cycle(delivery_worker.as_ref()).await
-                });
+                }));
             }
             result = delivery_cycles.join_next(), if !delivery_cycles.is_empty() => {
                 match result {
                     Some(Ok(Ok(()))) => {}
                     Some(Ok(Err(error))) => {
                         // 只去重附加日志；轮询节奏、指标、持久化与未知外写处置沿用原路径。
-                        if tracing::enabled!(tracing::Level::WARN) && delivery_failure_log.should_log() {
-                            tracing::warn!(error = %error, "delivery worker cycle failed; retrying after poll delay");
+                        if tracing::enabled!(tracing::Level::WARN)
+                            && delivery_failure_log.should_log()
+                        {
+                            diagnostics::warn(
+                                "worker_runtime",
+                                "poll_delivery",
+                                error.diagnostic_kind(),
+                                DiagnosticContext::default(),
+                            );
                         }
                     }
-                    Some(Err(error)) => break Some(WorkerError::DeliveryTaskJoin(error)),
+                    Some(Err(error)) => {
+                        observe_task_join(
+                            worker.metrics.as_ref(),
+                            Some(WorkerLoop::Delivery),
+                            &error,
+                        );
+                        break Some(WorkerError::DeliveryTaskJoin(error));
+                    }
                     None => {}
                 }
                 let wait = if std::mem::take(&mut delivery_wake_pending) {
@@ -226,6 +259,12 @@ where
             }
             result = delivery_wakeup_tasks.join_next(), if !delivery_wakeup_tasks.is_empty() => {
                 if let Some(Err(error)) = result {
+                    if !error.is_cancelled() {
+                        worker.metrics.observe_unpersisted_error(
+                            WorkerLoop::Delivery,
+                            diagnostics::join_kind(&error),
+                        );
+                    }
                     break Some(WorkerError::DeliveryTaskJoin(error));
                 }
             }
@@ -240,56 +279,108 @@ where
             }
             result = operations_alert_tasks.join_next(), if !operations_alert_tasks.is_empty() => {
                 match result {
-                    Some(Err(error)) => break Some(WorkerError::OperationsAlertTaskJoin(error)),
+                    Some(Err(error)) => {
+                        observe_task_join(
+                            worker.metrics.as_ref(),
+                            diagnostic_task_loops.get(&error.id()).copied(),
+                            &error,
+                        );
+                        break Some(WorkerError::OperationsAlertTaskJoin(error));
+                    }
                     Some(Ok(())) if worker.control.is_draining() => {}
                     Some(Ok(())) | None => break Some(WorkerError::OperationsAlertTaskExited),
                 }
             }
             result = auction_tasks.join_next(), if !auction_tasks.is_empty() => {
                 match result {
-                    Some(Err(error)) => break Some(WorkerError::AuctionTaskJoin(error)),
+                    Some(Err(error)) => {
+                        observe_task_join(
+                            worker.metrics.as_ref(),
+                            Some(WorkerLoop::Auction),
+                            &error,
+                        );
+                        break Some(WorkerError::AuctionTaskJoin(error));
+                    }
                     Some(Ok(())) if worker.control.is_draining() => {}
                     Some(Ok(())) | None => break Some(WorkerError::AuctionTaskExited),
                 }
             }
             result = fulfillment_tasks.join_next(), if !fulfillment_tasks.is_empty() => {
                 match result {
-                    Some(Err(error)) => break Some(WorkerError::FulfillmentTaskJoin(error)),
+                    Some(Err(error)) => {
+                        observe_task_join(
+                            worker.metrics.as_ref(),
+                            Some(WorkerLoop::AuctionFulfillment),
+                            &error,
+                        );
+                        break Some(WorkerError::FulfillmentTaskJoin(error));
+                    }
                     Some(Ok(())) if worker.control.is_draining() => {}
                     Some(Ok(())) | None => break Some(WorkerError::FulfillmentTaskExited),
                 }
             }
             result = recovery_tasks.join_next(), if !recovery_tasks.is_empty() => {
                 match result {
-                    Some(Err(error)) => break Some(WorkerError::RecoveryTaskJoin(error)),
+                    Some(Err(error)) => {
+                        observe_task_join(
+                            worker.metrics.as_ref(),
+                            Some(WorkerLoop::AuctionRecovery),
+                            &error,
+                        );
+                        break Some(WorkerError::RecoveryTaskJoin(error));
+                    }
                     Some(Ok(())) if worker.control.is_draining() => {}
                     Some(Ok(())) | None => break Some(WorkerError::RecoveryTaskExited),
                 }
             }
             result = mail_poll_tasks.join_next(), if !mail_poll_tasks.is_empty() => {
                 match result {
-                    Some(Err(error)) => break Some(WorkerError::MailPollTaskJoin(error)),
+                    Some(Err(error)) => {
+                        observe_task_join(
+                            worker.metrics.as_ref(),
+                            diagnostic_task_loops.get(&error.id()).copied(),
+                            &error,
+                        );
+                        break Some(WorkerError::MailPollTaskJoin(error));
+                    }
                     Some(Ok(())) if worker.control.is_draining() => {}
                     Some(Ok(())) | None => break Some(WorkerError::MailPollTaskExited),
                 }
             }
             result = mail_maintenance_tasks.join_next(), if !mail_maintenance_tasks.is_empty() => {
                 match result {
-                    Some(Err(error)) => break Some(WorkerError::MailMaintenanceTaskJoin(error)),
+                    Some(Err(error)) => {
+                        observe_task_join(
+                            worker.metrics.as_ref(),
+                            diagnostic_task_loops.get(&error.id()).copied(),
+                            &error,
+                        );
+                        break Some(WorkerError::MailMaintenanceTaskJoin(error));
+                    }
                     Some(Ok(())) if worker.control.is_draining() => {}
                     Some(Ok(())) | None => break Some(WorkerError::MailMaintenanceTaskExited),
                 }
             }
             result = forum_tasks.join_next(), if !forum_tasks.is_empty() => {
                 match result {
-                    Some(Err(error)) => break Some(WorkerError::ForumTaskJoin(error)),
+                    Some(Err(error)) => {
+                        observe_task_join(worker.metrics.as_ref(), Some(WorkerLoop::Forum), &error);
+                        break Some(WorkerError::ForumTaskJoin(error));
+                    }
                     Some(Ok(())) if worker.control.is_draining() => {}
                     Some(Ok(())) | None => break Some(WorkerError::ForumTaskExited),
                 }
             }
             result = realtime_tasks.join_next(), if !realtime_tasks.is_empty() => {
                 match result {
-                    Some(Err(error)) => break Some(WorkerError::RealtimeTaskJoin(error)),
+                    Some(Err(error)) => {
+                        observe_task_join(
+                            worker.metrics.as_ref(),
+                            Some(WorkerLoop::Realtime),
+                            &error,
+                        );
+                        break Some(WorkerError::RealtimeTaskJoin(error));
+                    }
                     Some(Ok(())) if worker.control.is_draining() => {}
                     Some(Ok(())) | None => break Some(WorkerError::RealtimeTaskExited),
                 }
@@ -331,16 +422,29 @@ where
         results.into_iter().find_map(Result::err).map_or(Ok(()), Err)
     };
     // 装配根统一拥有关键段、普通收口与二次信号截止，致命分支不得另建短预算。
-    let drained = drain.await;
+    tokio::pin!(drain);
+    let drained = loop {
+        tokio::select! {
+            biased;
+            result = &mut drain => break result,
+            () = diagnostic_logs.flush_when_due() => {}
+        }
+    };
     let result = match fatal_error {
         Some(error) => {
             if let Err(drain_error) = drained {
-                tracing::warn!(error = %drain_error, "another worker task failed while draining");
+                diagnostics::warn(
+                    "worker_runtime",
+                    "drain_shutdown",
+                    drain_error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
             }
             Err(error)
         }
         None => drained,
     };
+    diagnostic_logs.close();
     tracing::info!(worker_id = %worker.worker_id, "auction worker stopping");
     result
 }
@@ -351,4 +455,17 @@ async fn run_background<F: std::future::Future>(
     future: F,
 ) {
     let _completed = lifecycle.background(future).await;
+}
+
+/// 常驻任务的 panic/join 不经过业务失败持久化；正常取消不增加计数。
+fn observe_task_join(
+    metrics: &dyn WorkerRecorder,
+    loop_kind: Option<WorkerLoop>,
+    error: &tokio::task::JoinError,
+) {
+    if let Some(loop_kind) = loop_kind
+        && !error.is_cancelled()
+    {
+        metrics.observe_unpersisted_error(loop_kind, diagnostics::join_kind(error));
+    }
 }

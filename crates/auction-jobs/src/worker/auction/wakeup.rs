@@ -3,10 +3,12 @@
 use std::time::Duration;
 
 use auction_application::Clock;
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
 use chrono::{DateTime, Utc};
 use tokio::time::Instant;
 
 use super::super::PersistentWorker;
+use crate::worker::diagnostics;
 
 /// 三个只读提示查询的总预算；超时或失败时沿用常规轮询，不阻塞主循环或停机。
 const HINT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -24,8 +26,14 @@ where
 {
     match tokio::time::timeout(HINT_TIMEOUT, earliest_due_wait(worker)).await {
         Ok(wait) => wait.map(|wait| wait.saturating_add(DUE_MARGIN).max(MIN_DUE_WAIT)),
-        Err(_) => {
-            tracing::debug!("auction worker due hint timed out; using poll interval");
+        Err(error) => {
+            diagnostics::warn(
+                "auction_wakeup",
+                "read_hints_timeout",
+                diagnostics::timeout_kind(&error),
+                DiagnosticContext::default(),
+            );
+
             None
         }
     }
@@ -41,16 +49,21 @@ where
     let database_now = match worker.schedule.database_now().await {
         Ok(now) => Some(now),
         Err(error) => {
-            tracing::debug!(error = %error, "auction worker due hint clock unavailable");
+            diagnostics::debug(
+                "auction_wakeup",
+                "read_database_clock",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
             None
         }
     };
     let mut wait = None;
     if let Some(now) = database_now {
-        let lifecycle = hint(worker.schedule.next_claimable_at(now).await, "lifecycle");
+        let lifecycle = hint(worker.schedule.next_claimable_at(now).await, "read_lifecycle_hint");
         wait = shorter(wait, until(now, database_observed_at, lifecycle));
         if let Some(reader) = &worker.slow_proxy_due {
-            let slow_proxy = hint(reader.next_slow_proxy_due_at(now).await, "slow_proxy");
+            let slow_proxy = hint(reader.next_slow_proxy_due_at(now).await, "read_slow_proxy_hint");
             wait = shorter(wait, until(now, database_observed_at, slow_proxy));
         }
     }
@@ -59,7 +72,11 @@ where
         let now = worker.clock.now();
         wait = shorter(
             wait,
-            until(now, observed_at, hint(store.next_claimable_at(now).await, "settlement")),
+            until(
+                now,
+                observed_at,
+                hint(store.next_claimable_at(now).await, "read_settlement_hint"),
+            ),
         );
     }
     wait.map(|deadline| deadline.saturating_duration_since(Instant::now()))
@@ -67,10 +84,15 @@ where
 
 fn hint(
     result: Result<Option<DateTime<Utc>>, auction_application::ApplicationError>,
-    owner: &'static str,
+    phase: &'static str,
 ) -> Option<DateTime<Utc>> {
     result.unwrap_or_else(|error| {
-        tracing::debug!(owner, error = %error, "auction worker due hint unavailable");
+        diagnostics::debug(
+            "auction_wakeup",
+            phase,
+            error.diagnostic_kind(),
+            DiagnosticContext::default(),
+        );
         None
     })
 }

@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::ports::RequestHash;
-
 use super::{
     business::{
         AdminRuntimeEquipmentColorsConfig, AdminRuntimeEquipmentFilterConfig,
@@ -17,6 +15,8 @@ use super::{
         validate_security, validate_session, validate_tracing, validate_unix_path,
     },
 };
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::ports::RequestHash;
 
 /// runtime 文件和命令账本允许的最大候选字节数。
 pub const MAX_ADMIN_RUNTIME_DOCUMENT_BYTES: usize = 4 << 20;
@@ -376,7 +376,14 @@ impl AdminRuntimeDocument {
         &self,
         expected_fingerprint: &str,
     ) -> Result<RequestHash, AdminRuntimeConfigError> {
-        let encoded = serde_json::to_vec(self).map_err(|_| {
+        let encoded = serde_json::to_vec(self).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                error.diagnostic_kind(),
+                "admin_runtime_config",
+                "encode_request",
+                DiagnosticContext::default(),
+            );
             AdminRuntimeConfigError::InvalidCommand("runtime 文档编码失败".to_owned())
         })?;
         let mut hasher = Sha256::new();

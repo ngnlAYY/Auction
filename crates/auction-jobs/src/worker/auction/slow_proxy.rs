@@ -2,11 +2,15 @@
 
 use std::sync::Arc;
 
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, diagnostic_id,
+};
 use auction_application::{Clock, SlowProxyCommandPort, SlowProxyDue, is_stale_slow_proxy_error};
 use auction_observability::{WorkerLoop, WorkerResult};
 use tokio::task::JoinSet;
 
 use super::super::{PersistentWorker, merge_worker_result};
+use crate::worker::diagnostics;
 
 /// 每轮只执行一次数据库时间驱动的有界扫描，避免 stale 候选在同轮内被反复读取。
 pub(super) async fn run_phase<C>(worker: &PersistentWorker<C>) -> WorkerResult
@@ -29,11 +33,22 @@ where
     {
         Ok(Ok(candidates)) => candidates,
         Ok(Err(error)) => {
-            tracing::warn!(error = %error, "auction slow proxy scan failed");
+            diagnostics::unpersisted_error(
+                "slow_proxy",
+                "scan_candidates",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
             return WorkerResult::Error;
         }
-        Err(_) => {
-            tracing::warn!("auction slow proxy scan timed out");
+        Err(error) => {
+            diagnostics::unpersisted_error(
+                "slow_proxy",
+                "scan_candidates_timeout",
+                diagnostics::timeout_kind(&error),
+                DiagnosticContext::default(),
+            );
+
             return WorkerResult::Error;
         }
     };
@@ -50,29 +65,46 @@ where
             let commands = Arc::clone(commands);
             let item_timeout = worker.auction.item_timeout;
             let control = worker.control.clone();
-            tasks.spawn(async move {
+            tasks.spawn(diagnostics::inherit(async move {
                 if control.is_draining() {
                     return WorkerResult::Success;
                 }
                 match tokio::time::timeout(item_timeout, execute_candidate(commands, due)).await {
                     Ok(result) => result,
-                    Err(_) => {
-                        tracing::warn!(
-                            lot_id = %due.lot_id,
-                            authorization_id = %due.authorization_id,
-                            generation = due.generation,
-                            "auction slow proxy item timed out"
+                    Err(error) => {
+                        diagnostics::unpersisted_error(
+                            "slow_proxy",
+                            "item_timeout",
+                            diagnostics::timeout_kind(&error),
+                            DiagnosticContext {
+                                authorization_id: diagnostic_id(&due.authorization_id),
+                                lot_id: diagnostic_id(&due.lot_id),
+                                ..Default::default()
+                            },
                         );
+
                         WorkerResult::Error
                     }
                 }
-            });
+            }));
         }
         while let Some(result) = tasks.join_next().await {
             match result {
                 Ok(item_result) => merge_worker_result(&mut phase_result, item_result),
                 Err(error) => {
-                    tracing::error!(error = %error, "auction slow proxy item task join failed");
+                    diagnostics::error(
+                        "slow_proxy",
+                        "item_join",
+                        diagnostics::join_kind(&error),
+                        DiagnosticContext {
+                            disposition: if error.is_cancelled() {
+                                None
+                            } else {
+                                Some(DiagnosticDisposition::Unpersisted)
+                            },
+                            ..Default::default()
+                        },
+                    );
                     phase_result = WorkerResult::Canceled;
                 }
             }
@@ -88,12 +120,15 @@ async fn execute_candidate(
     let command = match due.into_command() {
         Ok(command) => command,
         Err(error) => {
-            tracing::warn!(
-                lot_id = %due.lot_id,
-                authorization_id = %due.authorization_id,
-                generation = due.generation,
-                error = %error,
-                "auction slow proxy candidate is invalid"
+            diagnostics::unpersisted_error(
+                "slow_proxy",
+                "build_command",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    lot_id: diagnostic_id(&due.lot_id),
+                    authorization_id: diagnostic_id(&due.authorization_id),
+                    ..Default::default()
+                },
             );
             return WorkerResult::Error;
         }
@@ -122,13 +157,16 @@ async fn execute_candidate(
             WorkerResult::Success
         }
         Err(error) => {
-            tracing::warn!(
-                lot_id = %due.lot_id,
-                authorization_id = %due.authorization_id,
-                command_id = %command.command_id,
-                generation = due.generation,
-                error = %error,
-                "auction slow proxy candidate failed"
+            diagnostics::unpersisted_error(
+                "slow_proxy",
+                "execute_command",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    lot_id: diagnostic_id(&due.lot_id),
+                    command_id: diagnostic_id(&command.command_id),
+                    authorization_id: diagnostic_id(&due.authorization_id),
+                    ..Default::default()
+                },
             );
             WorkerResult::Error
         }

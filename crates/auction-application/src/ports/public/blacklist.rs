@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::ApplicationFuture;
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 
 /// Public 黑名单编号页允许的最大偏移。
 pub const MAX_PUBLIC_BLACKLIST_OFFSET: i64 = 2_147_483_647;
@@ -42,7 +43,16 @@ pub struct PublicBlacklistPage {
 impl PublicBlacklistPage {
     /// 校验 owner 返回的页边界和公开字段。
     pub fn validate(&self) -> Result<(), &'static str> {
-        let entry_count = i64::try_from(self.entries.len()).map_err(|_| "公开黑名单页大小溢出")?;
+        let entry_count = i64::try_from(self.entries.len()).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                error.diagnostic_kind(),
+                "public_blacklist",
+                "convert_entry_count",
+                DiagnosticContext::default(),
+            );
+            "公开黑名单页大小溢出"
+        })?;
         if self.total < 0
             || self.limit < 1
             || self.offset < 0

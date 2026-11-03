@@ -1,6 +1,9 @@
 //! Worker control Unix socket 的 peer 凭据过滤监听器。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
 use super::*;
+use crate::worker::diagnostics;
 
 #[cfg(unix)]
 pub(super) struct PeerCheckedUnixListener {
@@ -33,11 +36,21 @@ impl axum::serve::Listener for PeerCheckedUnixListener {
                         );
                     }
                     Err(error) => {
-                        tracing::warn!(error = %error, "Worker control 无法读取 peer credential");
+                        diagnostics::warn(
+                            "control_listener",
+                            "read_peer_credentials",
+                            error.diagnostic_kind(),
+                            DiagnosticContext::default(),
+                        );
                     }
                 },
                 Err(error) => {
-                    tracing::error!(error = %error, "Worker control accept 失败");
+                    diagnostics::error(
+                        "control_listener",
+                        "accept_connection",
+                        error.diagnostic_kind(),
+                        DiagnosticContext::default(),
+                    );
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             }

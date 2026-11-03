@@ -3,11 +3,15 @@
 use std::sync::Arc;
 
 use auction_application::Clock;
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
+};
 use auction_observability::{WorkerLoop, WorkerResult};
 use chrono::Duration as ChronoDuration;
 use tokio::task::JoinSet;
 
 use super::{PersistentWorker, merge_worker_result, poll_delay, process_fulfillment_claim};
+use crate::worker::diagnostics;
 
 /// 立即处理一个批次，随后按旧版 polling+jitter cadence 重试。
 /// 批次或单项失败只影响 fulfillment owner；只有循环任务 panic 或意外退出才由装配根
@@ -18,29 +22,38 @@ pub(super) async fn run_loop<C>(
 ) where
     C: Clock + 'static,
 {
-    loop {
-        if worker.control.is_draining() {
-            return;
-        }
-        let started = std::time::Instant::now();
-        let result = run_batch(worker.as_ref()).await;
-        if result != WorkerResult::Success {
-            tracing::warn!(
-                "fulfillment worker batch was not fully processed; retrying after poll delay"
+    let diagnostic_metrics = worker.metrics.clone();
+    let diagnostic_loop = auction_observability::WorkerLoop::AuctionFulfillment;
+    let body = async move {
+        loop {
+            if worker.control.is_draining() {
+                return;
+            }
+            let started = std::time::Instant::now();
+            let result = run_batch(worker.as_ref()).await;
+            if result != WorkerResult::Success {
+                tracing::warn!(
+                    "fulfillment worker batch was not fully processed; retrying after poll delay"
+                );
+            }
+            worker.metrics.observe_iteration(
+                WorkerLoop::AuctionFulfillment,
+                result,
+                started.elapsed(),
+            );
+
+            let wait = poll_delay(worker.fulfillment.poll_interval, worker.fulfillment.jitter);
+            let scheduled_wake = tokio::time::Instant::now() + wait;
+            if super::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
+                return;
+            }
+            worker.metrics.observe_schedule_delay(
+                WorkerLoop::AuctionFulfillment,
+                tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
             );
         }
-        worker.metrics.observe_iteration(WorkerLoop::AuctionFulfillment, result, started.elapsed());
-
-        let wait = poll_delay(worker.fulfillment.poll_interval, worker.fulfillment.jitter);
-        let scheduled_wake = tokio::time::Instant::now() + wait;
-        if super::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
-            return;
-        }
-        worker.metrics.observe_schedule_delay(
-            WorkerLoop::AuctionFulfillment,
-            tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
-        );
-    }
+    };
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
 }
 
 /// 按并发波次领取，避免批次中尚未开始的任务提前消耗 claim lease。
@@ -53,10 +66,12 @@ where
         return WorkerResult::Success;
     };
     let Ok(lease_duration) = ChronoDuration::from_std(worker.fulfillment.lease_duration) else {
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!("fulfillment worker lease duration is invalid");
         return WorkerResult::Error;
     };
     let Ok(retry_delay) = ChronoDuration::from_std(worker.fulfillment.retry_delay) else {
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!("fulfillment worker retry delay is invalid");
         return WorkerResult::Error;
     };
@@ -69,6 +84,7 @@ where
         let wave_limit = u16::try_from(wave_limit).unwrap_or(worker.fulfillment.concurrency);
         let now = worker.clock.now();
         let Some(lease_until) = now.checked_add_signed(lease_duration) else {
+            diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
             tracing::error!("fulfillment worker lease deadline overflowed");
             batch_result = WorkerResult::Error;
             break;
@@ -83,12 +99,23 @@ where
         {
             Ok(Ok(claims)) => claims,
             Ok(Err(error)) => {
-                tracing::warn!(error = %error, "fulfillment worker claim wave failed");
+                diagnostics::unpersisted_error(
+                    "settlement_fulfillment",
+                    "claim_wave",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
                 batch_result = WorkerResult::Error;
                 break;
             }
-            Err(_) => {
-                tracing::warn!("fulfillment worker claim wave timed out");
+            Err(error) => {
+                diagnostics::unpersisted_error(
+                    "settlement_fulfillment",
+                    "claim_wave_timeout",
+                    diagnostics::timeout_kind(&error),
+                    DiagnosticContext::default(),
+                );
+
                 batch_result = WorkerResult::Error;
                 break;
             }
@@ -107,12 +134,13 @@ where
             let clock = Arc::clone(&worker.clock);
             let metrics = Arc::clone(&worker.metrics);
             let control = worker.control.clone();
-            tasks.spawn(async move {
+            tasks.spawn(diagnostics::inherit(async move {
                 if control.is_draining() {
                     return WorkerResult::Success;
                 }
                 let obligation_id = claim.obligation_id;
                 if tokio::time::Instant::now() >= item_deadline {
+                    diagnostics::unpersisted(SafeErrorKind::LEASE_EXPIRED);
                     tracing::warn!(%obligation_id, "fulfillment item expired before execution");
                     return WorkerResult::Error;
                 }
@@ -123,18 +151,39 @@ where
                 .await
                 {
                     Ok(result) => result,
-                    Err(_) => {
-                        tracing::warn!(%obligation_id, "fulfillment worker item timed out");
+                    Err(error) => {
+                        diagnostics::unpersisted_error(
+                            "settlement_fulfillment",
+                            "item_timeout",
+                            diagnostics::timeout_kind(&error),
+                            DiagnosticContext {
+                                obligation_id: diagnostic_id(&obligation_id),
+                                ..Default::default()
+                            },
+                        );
+
                         WorkerResult::Error
                     }
                 }
-            });
+            }));
         }
         while let Some(result) = tasks.join_next().await {
             match result {
                 Ok(item_result) => merge_worker_result(&mut batch_result, item_result),
                 Err(error) => {
-                    tracing::error!(error = %error, "fulfillment worker item task join failed");
+                    diagnostics::error(
+                        "settlement_fulfillment",
+                        "item_join",
+                        diagnostics::join_kind(&error),
+                        DiagnosticContext {
+                            disposition: if error.is_cancelled() {
+                                None
+                            } else {
+                                Some(DiagnosticDisposition::Unpersisted)
+                            },
+                            ..Default::default()
+                        },
+                    );
                     batch_result = WorkerResult::Canceled;
                 }
             }

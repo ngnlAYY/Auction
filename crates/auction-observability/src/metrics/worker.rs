@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use auction_application::diagnostics::SafeErrorKind;
 use prometheus::{
     CounterVec, GaugeVec, HistogramOpts, HistogramVec, Opts, Registry, core::Collector,
 };
@@ -14,6 +15,7 @@ use super::types::{
 /// Prometheus Worker 指标的固定 label 适配器。
 pub(super) struct PrometheusWorkerRecorder {
     iterations: CounterVec,
+    unpersisted_errors: CounterVec,
     durations: HistogramVec,
     batch_items: CounterVec,
     batch_capacity: CounterVec,
@@ -35,6 +37,14 @@ impl PrometheusWorkerRecorder {
                 "Total Worker loop iterations by fixed loop and result.",
             ),
             &["loop", "result"],
+        )
+        .map_err(MetricsError::Registry)?;
+        let unpersisted_errors = CounterVec::new(
+            Opts::new(
+                "auction_worker_unpersisted_error_total",
+                "Worker failures without a confirmed persisted disposition.",
+            ),
+            &["loop", "kind"],
         )
         .map_err(MetricsError::Registry)?;
         let durations = HistogramVec::new(
@@ -95,6 +105,7 @@ impl PrometheusWorkerRecorder {
 
         for collector in [
             Box::new(iterations.clone()) as Box<dyn Collector>,
+            Box::new(unpersisted_errors.clone()),
             Box::new(durations.clone()),
             Box::new(batch_items.clone()),
             Box::new(batch_capacity.clone()),
@@ -108,6 +119,7 @@ impl PrometheusWorkerRecorder {
 
         Ok(Arc::new(Self {
             iterations,
+            unpersisted_errors,
             durations,
             batch_items,
             batch_capacity,
@@ -121,6 +133,10 @@ impl PrometheusWorkerRecorder {
 }
 
 impl WorkerRecorder for PrometheusWorkerRecorder {
+    fn observe_unpersisted_error(&self, loop_kind: WorkerLoop, kind: SafeErrorKind) {
+        self.unpersisted_errors.with_label_values(&[loop_kind.label(), kind.label()]).inc();
+    }
+
     fn bind_retry_mode(&self, loop_kind: WorkerLoop, retry_kind: WorkerRetryKind) {
         if !valid_retry_mode(loop_kind, retry_kind) {
             return;

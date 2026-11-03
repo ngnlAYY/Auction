@@ -264,6 +264,74 @@ curl --fail http://127.0.0.1:18090/metrics
 - 日志只包含安全分类与标识（命令 ID、拍卖/lot/义务 ID、错误码），不含连接串、Cookie、密钥、登录 key 或邮件正文。
 - 可选 OTLP/HTTP tracing：在角色文件 `[tracing]` 启用，导出头只能写在敏感文件的 `*_otlp_headers` 中（进程环境中的 `OTEL_EXPORTER_OTLP_*HEADERS` 会导致拒绝启动）。
 
+### 安全错误与未持久化指标
+
+W0.2 的 I-A 覆盖 jobs/application，I-B 尚未覆盖的 integrations/HTTP 继续按原 owner 排查。
+新增日志 target 为 `auction::diagnostics`；先按 kind 选择 owner，再用 phase 定位步骤，
+safe_kind 查看安全错误类别，按业务 UUID 或安全 span 关联同一义务/投递。
+不同原因不修改持久化 defer reason/失败码，因此旧版本仍能读取、重放和恢复原事实。
+kind 为简短 owner，phase 为语义步骤；同一二元组只表示同一种原因，禁止序号和模块路径标签。
+
+I-A 的 kind 按业务 owner 汇总如下；日志 kind 与指标 kind 不同，后者始终是 safe_kind 闭集。
+
+| 业务 owner | 日志 kind |
+| --- | --- |
+| 管理用例 | `admin_intake`、`admin_runtime_config`、`admin_users`、`admin_worlds` |
+| 竞价生命周期与慢代理 | `auction_lifecycle`、`slow_proxy` |
+| 拍卖排期与唤醒提示 | `auction_schedule`、`auction_wakeup` |
+| 竞价账本、历史与时间 | `competition_ledger`、`competition_history`、`competition_timestamp` |
+| 履约调度与用例 | `settlement_fulfillment`、`fulfillment` |
+| 履约授权与收件人 | `fulfillment_authorization`、`fulfillment_recipient` |
+| 内部履约与退款 | `fulfillment_internal`、`fulfillment_refund` |
+| 结算与结算账本 | `settlement`、`settlement_ledger` |
+| 资金用例 | `funding`、`funding_record_only` |
+| 投递与投递唤醒 | `delivery`、`delivery_wakeup` |
+| 论坛主题同步与回复 | `forum_sync`、`forum_reply` |
+| 论坛通知与私信 | `forum_notification`、`forum_pm` |
+| 邮件入站与轮询 | `mail_intake`、`mail_poll` |
+| 邮箱维护与只读观察 | `mail_maintenance`、`mail_observation` |
+| 恢复派发与阶段推进 | `recovery_dispatch`、`recovery_resolution` |
+| 恢复激活与买家黑名单 | `recovery_activation`、`recovery_blacklist` |
+| 恢复健康与观察 | `recovery_health`、`recovery_observation` |
+| 关注与偏好 | `lot_watch`、`lot_watch_preference` |
+| 关注邮件与私信 | `lot_watch_mail`、`lot_watch_pm` |
+| 公开黑名单与会话偏好 | `public_blacklist`、`session_preference` |
+| 公开补偿场次与逐件明细 | `compensation_round`、`compensation_lot` |
+| 公开补偿账本 | `compensation_movement` |
+| Worker 控制面 | `control_listener`、`control_server`、`control_trigger` |
+| Worker 运行时与实时消费 | `worker_runtime`、`realtime_consumer` |
+| 运维告警 | `operations_alert` |
+
+例如筛选内部履约的身份读取，并保留关联字段：
+
+```bash
+journalctl -u auction-worker -o cat |
+  jq -c 'select(.target == "auction::diagnostics") |
+    select(.fields.kind == "fulfillment_internal") |
+    select(.fields.phase == "read_identity") |
+    {fields, span, spans}'
+```
+
+可进一步使用 `.fields.safe_kind == "repository_failed"` 过滤。
+不要依赖旧 message 文案或原错误字段；原日志统一改为安全字段后，人类可读消息仅作显示。
+去重汇总位于 `auction_observability::log_dedup`，
+包含固定 kind/phase/safe_kind 与 suppressed_count。
+首条带原安全业务标识，汇总不保存标识。
+不要为了定位原因打开原错误正文、Cookie 或 URL 日志。
+配置回退沿用 log_filter；禁用汇总 target 会放行原诊断日志。
+
+新增 `auction_worker_unpersisted_error_total{loop,kind}` 表示没有确认对应持久处置的失败。
+例如查询：
+
+```promql
+sum by (loop, kind) (increase(auction_worker_unpersisted_error_total[15m]))
+```
+
+它与轮次 error、持久重试计数分别解释，不能相加推断失败义务数。
+提交未知计入但不授权重发；已持久化的退避、人工处置和正常排空不计入。
+口径、关闭方式和 PM/实时/维护特殊情况见
+[可观测性说明](../crates/auction-observability/README.md#未持久化错误)。
+
 ### D1 诊断
 
 COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagnostics`。默认过滤器 `info,<服务名>=debug` 已包含其 WARN，因此默认开启；显式自定义过滤器若屏蔽该 target，可在 `common.toml` 的现有 `log_filter` 末尾追加 `,auction::settlement::funding_diagnostics=warn`。关闭时追加 `,auction::settlement::funding_diagnostics=off`。例如，以下是开启配置，保留现场其他过滤指令后再追加目标指令：

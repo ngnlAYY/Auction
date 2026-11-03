@@ -1,9 +1,27 @@
 //! 结算与履约持久任务的 Worker 编排；执行结果必须持久化，不以空端口冒充成功。
 
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
+};
+
 use super::*;
+use crate::worker::diagnostics;
 
 const MAXIMUM_FULFILLMENT_PHASE_ADVANCES: usize = 4;
 
+#[tracing::instrument(
+
+    skip_all,
+
+    fields(
+
+        obligation_id = %claim.obligation_id,
+
+        delivery_id = ?claim.delivery_id,
+
+    )
+
+)]
 pub(super) async fn process_fulfillment_claim<C>(
     fulfillment_store: Arc<dyn SettlementFulfillmentStore>,
     fulfillment_commands: Arc<dyn SettlementFulfillmentCommandPort>,
@@ -21,6 +39,7 @@ where
         let obligation_id = claim.obligation_id;
         let retry_count = claim.retry_count;
         if clock.now() >= claim.lease_until {
+            diagnostics::unpersisted(SafeErrorKind::LEASE_EXPIRED);
             tracing::warn!(%obligation_id, "settlement fulfillment lease expired before phase");
             return WorkerResult::Error;
         }
@@ -66,14 +85,18 @@ where
                         return WorkerResult::Success;
                     }
                     },
-                    Err(_error) => {
+                    Err(error) => {
+diagnostics::unpersisted_error(
+"settlement_fulfillment",
+"prepare_obligation",
+error.diagnostic_kind(),
+DiagnosticContext { obligation_id: diagnostic_id(&obligation_id), ..Default::default() },
+);
+
                         // 应用服务返回的错误尚未完成 fulfillment 状态迁移；旧版让 claim
                         // 保持原 lease/fence，交给下一轮重新领取，不能在这里猜测并覆盖
                         // 阶段专属 error_code。
-                        tracing::warn!(
-                            obligation_id = %obligation_id,
-                            "settlement fulfillment phase returned an unpersisted error"
-                        );
+
                         return WorkerResult::Error;
                     }
                 }
@@ -114,19 +137,27 @@ where
                     );
                     return WorkerResult::Success;
                 }
-                Err(_error) => {
+                Err(error) => {
+                    diagnostics::unpersisted_error(
+                        "settlement_fulfillment",
+                        "activate_delivery",
+                        error.diagnostic_kind(),
+                        DiagnosticContext {
+                            obligation_id: diagnostic_id(&obligation_id),
+                            ..Default::default()
+                        },
+                    );
+
                     // 该错误没有对应的旧版持久化阶段结果；保留 claim 的 fencing，避免
                     // 把存储/状态错误误分类为 delivery_unavailable。
-                    tracing::warn!(
-                        obligation_id = %obligation_id,
-                        "settlement fulfillment phase returned an unpersisted error"
-                    );
+
                     return WorkerResult::Error;
                 }
             },
             auction_application::SettlementFulfillmentState::Enqueued => {
                 let observed_at = clock.now();
                 let Some(retry_at) = observed_at.checked_add_signed(retry_delay) else {
+                    diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
                     tracing::error!(
                         obligation_id = %claim.obligation_id,
                         "fulfillment reconcile retry timestamp overflow; claim remains leased"
@@ -179,13 +210,17 @@ where
                         // reconcile 的 dependency/证据错误若已被应用服务识别，会以 Deferred、
                         // Failed 或 ManualReconcile 返回；这里只处理未完成持久迁移的错误。
                         // 安全分类只补充诊断，保留失败关闭、原 claim 租约与重试，不记录错误正文。
-                        tracing::warn!(
-                            obligation_id = %obligation_id,
-                            delivery_id = ?delivery_id,
-                            phase = "reconcile",
-                            safe_kind = error.safe_kind(),
-                            "settlement fulfillment reconcile returned an unpersisted error"
+                        diagnostics::unpersisted_error(
+                            "settlement_fulfillment",
+                            "reconcile_obligation",
+                            error.diagnostic_kind(),
+                            DiagnosticContext {
+                                obligation_id: diagnostic_id(&obligation_id),
+                                delivery_id,
+                                ..Default::default()
+                            },
                         );
+
                         return WorkerResult::Error;
                     }
                 }
@@ -203,10 +238,15 @@ where
             WorkerResult::Success
         }
         Err(error) => {
-            tracing::error!(
-                obligation_id = %obligation_id,
-                error = %error,
-                "settlement fulfillment failed to persist bounded phase reconciliation"
+            diagnostics::error(
+                "settlement_fulfillment",
+                "persist_advance_limit",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    disposition: Some(DiagnosticDisposition::Unpersisted),
+                    obligation_id: diagnostic_id(&obligation_id),
+                    ..Default::default()
+                },
             );
             WorkerResult::Error
         }
@@ -231,9 +271,15 @@ async fn bounded_fulfillment<T>(
     if budget.is_zero() {
         return Err(auction_application::ApplicationError::FulfillmentDependencyUnavailable);
     }
-    tokio::time::timeout(budget, operation)
-        .await
-        .map_err(|_| auction_application::ApplicationError::FulfillmentDependencyUnavailable)?
+    tokio::time::timeout(budget, operation).await.map_err(|error| {
+        diagnostics::warn(
+            "settlement_fulfillment",
+            "phase_timeout",
+            diagnostics::timeout_kind(&error),
+            DiagnosticContext::default(),
+        );
+        auction_application::ApplicationError::FulfillmentDependencyUnavailable
+    })?
 }
 
 fn observe_fulfillment_retry(metrics: &dyn WorkerRecorder, retry_count: u32) {
@@ -244,6 +290,19 @@ fn observe_fulfillment_retry(metrics: &dyn WorkerRecorder, retry_count: u32) {
     }
 }
 
+#[tracing::instrument(
+
+    skip_all,
+
+    fields(
+
+        workflow_id = %claim.workflow_id,
+
+        auction_id = %claim.auction_id,
+
+    )
+
+)]
 pub(super) async fn process_settlement_claim<C>(
     settlement_store: Arc<dyn SettlementWorkStore>,
     settlement_commands: Arc<dyn SettlementCommandPort>,
@@ -255,7 +314,15 @@ where
 {
     if claim.completion_only {
         if let Err(error) = settlement_store.complete(claim, clock.now()).await {
-            tracing::error!(error = %error, "settlement worker failed to persist completion fence");
+            diagnostics::error(
+                "settlement",
+                "complete_replayed_claim",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    disposition: Some(DiagnosticDisposition::Unpersisted),
+                    ..Default::default()
+                },
+            );
             return WorkerResult::Error;
         }
         return WorkerResult::Success;
@@ -291,7 +358,15 @@ where
     match settlement_commands.settle(command).await {
         Ok(_) => {
             if let Err(error) = settlement_store.complete(claim, clock.now()).await {
-                tracing::error!(error = %error, "settlement worker failed to persist completion");
+                diagnostics::error(
+                    "settlement",
+                    "complete_claim",
+                    error.diagnostic_kind(),
+                    DiagnosticContext {
+                        disposition: Some(DiagnosticDisposition::Unpersisted),
+                        ..Default::default()
+                    },
+                );
                 return WorkerResult::Error;
             }
             WorkerResult::Success
@@ -348,12 +423,21 @@ pub(super) async fn record_settlement_failure<C>(
     let now = clock.now();
     let Some(retry_at) = now.checked_add_signed(retry_delay(claim.attempt_count)) else {
         // 结算失败不能因为时间溢出而回到当前时刻；让 claim 按既有 fence 失效后再恢复。
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!(failure_code, "settlement retry timestamp overflow; claim remains leased");
         return;
     };
     if let Err(error) =
         settlement_store.fail(claim, retry_at, failure_code.to_owned(), safe_detail).await
     {
-        tracing::error!(error = %error, failure_code, "settlement worker failed to persist retry state");
+        diagnostics::error(
+            "settlement",
+            "record_failure",
+            error.diagnostic_kind(),
+            DiagnosticContext {
+                disposition: Some(DiagnosticDisposition::Unpersisted),
+                ..Default::default()
+            },
+        );
     }
 }

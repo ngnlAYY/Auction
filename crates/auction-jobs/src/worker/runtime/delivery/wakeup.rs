@@ -2,8 +2,11 @@
 
 use std::{sync::Arc, time::Duration};
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::{ApplicationError, DeliveryWorkStore};
 use tokio::sync::{Notify, watch};
+
+use crate::worker::diagnostics;
 
 pub(in crate::worker::runtime) async fn run(
     store: Arc<dyn DeliveryWorkStore>,
@@ -38,7 +41,14 @@ pub(in crate::worker::runtime) async fn run(
                 let _ = drain.changed().await;
                 return;
             }
-            Err(_) => {}
+            Err(error) => {
+                diagnostics::warn(
+                    "delivery_wakeup",
+                    "subscribe_notifications",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
+            }
         }
         tracing::warn!("delivery wakeup disconnected; polling remains active");
         tokio::select! {

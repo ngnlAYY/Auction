@@ -1,9 +1,9 @@
 all:#[path] 403
 all:use_super::* 333
-jobs:Err(_) 49
-jobs:map_err(|_|) 20
-application:Err(_) 22
-application:map_err(|_|) 99
+jobs:Err(_) 4
+jobs:map_err(|_|) 12
+application:Err(_) 6
+application:map_err(|_|) 16
 http:Err(_) 118
 http:map_err(|_|) 121
 storage:Err(_) 4

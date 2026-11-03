@@ -15,7 +15,7 @@ where
     run_phase(
         worker,
         batch_result,
-        "return",
+        ("record_return", "record_return_timeout"),
         |now| store.record_due_return(now),
         |recorded| {
             tracing::info!(

@@ -1,7 +1,23 @@
 //! Recovery action 的状态分派与 prepared delivery 构造。
 
-use super::*;
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
+};
 
+use super::*;
+use crate::worker::diagnostics;
+
+#[tracing::instrument(
+
+    skip_all,
+
+    fields(
+
+        action_id = %claim.action_id,
+
+    )
+
+)]
 pub(in crate::worker::runtime) async fn process_recovery_action<C>(
     store: Arc<dyn RecoveryWorkStore>,
     delivery: Option<Arc<dyn MailDeliveryEnqueuer>>,
@@ -25,7 +41,15 @@ where
         return match store.mark_action_manual_reconcile(claim, failure_code.to_owned()).await {
             Ok(()) => WorkerResult::Success,
             Err(error) => {
-                tracing::error!(error = %error, "recovery action unsupported-kind fence failed");
+                diagnostics::error(
+                    "recovery_dispatch",
+                    "persist_unsupported_action",
+                    error.diagnostic_kind(),
+                    DiagnosticContext {
+                        disposition: Some(DiagnosticDisposition::Unpersisted),
+                        ..Default::default()
+                    },
+                );
                 WorkerResult::Error
             }
         };
@@ -47,6 +71,16 @@ where
     }
 
     let Some(delivery) = delivery else {
+        diagnostics::info(
+            "recovery_dispatch",
+            "require_delivery_owner",
+            SafeErrorKind::CAPABILITY_UNAVAILABLE,
+            DiagnosticContext {
+                action_id: diagnostic_id(&claim.action_id),
+                defer_reason: Some("recovery_delivery_unavailable"),
+                ..Default::default()
+            },
+        );
         return release_recovery_action(
             store,
             clock,
@@ -67,7 +101,15 @@ where
                 {
                     Ok(()) => WorkerResult::Success,
                     Err(error) => {
-                        tracing::error!(error = %error, "recovery action recipient fence failed");
+                        diagnostics::error(
+                            "recovery_dispatch",
+                            "persist_missing_recipient",
+                            error.diagnostic_kind(),
+                            DiagnosticContext {
+                                disposition: Some(DiagnosticDisposition::Unpersisted),
+                                ..Default::default()
+                            },
+                        );
                         WorkerResult::Error
                     }
                 };
@@ -95,7 +137,15 @@ where
                 {
                     Ok(()) => WorkerResult::Success,
                     Err(error) => {
-                        tracing::error!(error = %error, "recovery action source mail fence failed");
+                        diagnostics::error(
+                            "recovery_dispatch",
+                            "persist_missing_source_mail",
+                            error.diagnostic_kind(),
+                            DiagnosticContext {
+                                disposition: Some(DiagnosticDisposition::Unpersisted),
+                                ..Default::default()
+                            },
+                        );
                         WorkerResult::Error
                     }
                 };
@@ -144,7 +194,12 @@ where
         let request_hash = match request_hash {
             Ok(hash) => hash,
             Err(error) => {
-                tracing::error!(error = %error, "recovery payment reminder request hash failed");
+                diagnostics::error(
+                    "recovery_dispatch",
+                    "hash_command",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
                 return release_recovery_action(
                     store,
                     clock,
@@ -193,7 +248,12 @@ where
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    tracing::warn!(error = %error, "recovery legacy preparation lookup failed");
+                    diagnostics::warn(
+                        "recovery_dispatch",
+                        "read_legacy_delivery",
+                        error.diagnostic_kind(),
+                        DiagnosticContext::default(),
+                    );
                     return release_recovery_action(
                         store,
                         clock,
@@ -218,7 +278,12 @@ where
                 .await;
             }
             Err(error) => {
-                tracing::warn!(error = %error, "recovery delivery prepare failed");
+                diagnostics::warn(
+                    "recovery_dispatch",
+                    "prepare_delivery",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
                 return release_recovery_action(
                     store,
                     clock,
@@ -241,7 +306,12 @@ where
         {
             Ok(claim) => claim,
             Err(error) => {
-                tracing::error!(error = %error, "recovery action prepared link failed");
+                diagnostics::error(
+                    "recovery_dispatch",
+                    "link_delivery",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
                 return release_recovery_action(
                     store,
                     clock,

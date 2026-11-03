@@ -3,11 +3,13 @@
 use std::sync::Arc;
 
 use auction_application::Clock;
+use auction_application::diagnostics::SafeErrorKind;
 use auction_observability::WorkerLoop;
 
 use super::super::super::{PersistentWorker, poll_delay, wait_until_or_shutdown};
 use super::super::MailPollRuntime;
 use super::{metrics::IterationGuard, run_maintenance, run_read_observation};
+use crate::worker::diagnostics;
 
 /// 先完成 Sent/compose 维护，再按内存间隔做完整 Read Mail 纯观察；手动收件不唤醒此循环。
 pub(crate) async fn run_loop<C>(
@@ -35,6 +37,7 @@ pub(crate) async fn run_loop<C>(
             .and_then(|next| next.signed_duration_since(now).to_std().ok())
             .filter(|delay| !delay.is_zero())
         else {
+            diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
             tracing::error!(
                 world_id = %runtime.world_id,
                 mailbox_key = %runtime.mailbox_key,
@@ -55,7 +58,14 @@ pub(crate) async fn run_loop<C>(
         );
         let iteration = IterationGuard::new(Arc::clone(&worker.metrics), maintenance_loop);
         // 在途 sweep 沿用原预算排空，避免在 discard POST 中途因停止信号另建重试授权。
-        iteration.finish(run_maintenance(&runtime, &worker.write_lifecycle).await);
+        iteration.finish(
+            diagnostics::scope(
+                worker.metrics.clone(),
+                maintenance_loop,
+                run_maintenance(&runtime, &worker.write_lifecycle),
+            )
+            .await,
+        );
 
         if *shutdown.borrow() || worker.control.is_draining() {
             return;
@@ -67,7 +77,11 @@ pub(crate) async fn run_loop<C>(
             iteration.finish(
                 worker
                     .write_lifecycle
-                    .background(run_read_observation(&runtime))
+                    .background(diagnostics::scope(
+                        worker.metrics.clone(),
+                        observation_loop,
+                        run_read_observation(&runtime),
+                    ))
                     .await
                     .unwrap_or(auction_observability::WorkerResult::Canceled),
             );

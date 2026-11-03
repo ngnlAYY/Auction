@@ -4,6 +4,7 @@
 
 use std::{future::Future, pin::Pin, sync::Arc};
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 use auction_application::{
     ApplicationError, Clock, RealtimeConsumerRequest, RealtimeConsumerStore, RealtimeEventSink,
 };
@@ -13,6 +14,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use super::{PersistentWorker, poll_delay};
+use crate::worker::diagnostics;
 
 #[derive(Debug, Error)]
 pub enum RealtimeConsumerConfigError {
@@ -55,7 +57,12 @@ impl PersistentRealtimeConsumer {
     }
 
     async fn run_once_inner(&self, now: DateTime<Utc>) -> Result<usize, ApplicationError> {
-        let Some(batch) = self.store.read_batch(self.request.clone()).await? else {
+        let Some(batch) = self
+            .store
+            .read_batch(self.request.clone())
+            .await
+            .inspect_err(|error| diagnostics::unpersisted(error.diagnostic_kind()))?
+        else {
             return Ok(0);
         };
         if batch.consumer_key != self.request.consumer_key
@@ -165,6 +172,7 @@ impl PersistentRealtimeConsumer {
                 failed_at,
             )
             .await
+            .inspect_err(|error| diagnostics::unpersisted(error.diagnostic_kind()))
     }
 }
 
@@ -184,38 +192,48 @@ pub(crate) async fn run_loop<C>(
 ) where
     C: Clock + 'static,
 {
-    loop {
-        if worker.control.is_draining() {
-            return;
-        }
-        let started = std::time::Instant::now();
-        let now = worker.clock.now();
-        let result = if let Some(consumer) = &worker.realtime_consumer {
-            match consumer.run_once(now).await {
-                Ok(processed) if processed > 0 => {
-                    tracing::info!(processed, "realtime consumer advanced persisted cursor");
-                    WorkerResult::Success
-                }
-                Ok(_) => WorkerResult::Success,
-                Err(error) => {
-                    tracing::warn!(error = %error, "realtime consumer cycle failed; retrying");
-                    WorkerResult::Error
-                }
+    let diagnostic_metrics = worker.metrics.clone();
+    let diagnostic_loop = auction_observability::WorkerLoop::Realtime;
+    let body = async move {
+        loop {
+            if worker.control.is_draining() {
+                return;
             }
-        } else {
-            WorkerResult::Success
-        };
-        worker.metrics.observe_iteration(WorkerLoop::Realtime, result, started.elapsed());
-        let wait = poll_delay(worker.auction.poll_interval, worker.auction.jitter);
-        let deadline = tokio::time::Instant::now() + wait;
-        if super::wait_until_or_shutdown(&mut shutdown, deadline).await {
-            return;
+            let started = std::time::Instant::now();
+            let now = worker.clock.now();
+            let result = if let Some(consumer) = &worker.realtime_consumer {
+                match consumer.run_once(now).await {
+                    Ok(processed) if processed > 0 => {
+                        tracing::info!(processed, "realtime consumer advanced persisted cursor");
+                        WorkerResult::Success
+                    }
+                    Ok(_) => WorkerResult::Success,
+                    Err(error) => {
+                        diagnostics::warn(
+                            "realtime_consumer",
+                            "consume_events",
+                            error.diagnostic_kind(),
+                            DiagnosticContext::default(),
+                        );
+                        WorkerResult::Error
+                    }
+                }
+            } else {
+                WorkerResult::Success
+            };
+            worker.metrics.observe_iteration(WorkerLoop::Realtime, result, started.elapsed());
+            let wait = poll_delay(worker.auction.poll_interval, worker.auction.jitter);
+            let deadline = tokio::time::Instant::now() + wait;
+            if super::wait_until_or_shutdown(&mut shutdown, deadline).await {
+                return;
+            }
+            worker.metrics.observe_schedule_delay(
+                WorkerLoop::Realtime,
+                tokio::time::Instant::now().saturating_duration_since(deadline),
+            );
         }
-        worker.metrics.observe_schedule_delay(
-            WorkerLoop::Realtime,
-            tokio::time::Instant::now().saturating_duration_since(deadline),
-        );
-    }
+    };
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
 }
 
 fn safe_sink_error(failure_code: &str, safe_detail: &str) -> (String, String) {
@@ -229,5 +247,6 @@ fn safe_sink_error(failure_code: &str, safe_detail: &str) -> (String, String) {
 }
 
 fn repository_error(message: &str) -> ApplicationError {
+    diagnostics::unpersisted(SafeErrorKind::REPOSITORY_FAILED);
     auction_application::RepositoryError::Failed(message.to_owned()).into()
 }

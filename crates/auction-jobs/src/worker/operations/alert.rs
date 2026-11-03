@@ -4,6 +4,7 @@
 
 use std::{sync::Arc, time::Duration};
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticDisposition, DiagnosticError};
 use auction_application::{
     ApplicationError, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation,
     MailDeliveryOrigin, MailNotificationTemplate, OperationsAlertDispatchErrorCode,
@@ -13,6 +14,8 @@ use auction_application::{
 };
 use auction_domain::CommandId;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+
+use crate::worker::diagnostics;
 
 /// 三个 operations alert 循环共享的调度与 deadline 边界。
 #[derive(Debug, Clone, Copy)]
@@ -89,18 +92,34 @@ impl OperationsAlertRuntime {
         let snapshot = match source_result {
             Ok(Ok(snapshot)) => snapshot,
             Ok(Err(error)) => {
-                tracing::warn!(error = %error, "operations alert source snapshot unavailable");
+                diagnostics::warn(
+                    "operations_alert",
+                    "read_sources",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
                 return unavailable_observations();
             }
-            Err(_) => {
-                tracing::warn!("operations alert source snapshot timed out");
+            Err(error) => {
+                diagnostics::warn(
+                    "operations_alert",
+                    "read_sources_timeout",
+                    diagnostics::timeout_kind(&error),
+                    DiagnosticContext::default(),
+                );
+
                 return unavailable_observations();
             }
         };
         match evaluate_snapshot(&snapshot, &self.policy) {
             Ok(observations) => observations,
             Err(error) => {
-                tracing::warn!(error = %error, "operations alert source snapshot failed validation");
+                diagnostics::warn(
+                    "operations_alert",
+                    "evaluate_sources",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
                 unavailable_observations()
             }
         }
@@ -157,7 +176,12 @@ impl OperationsAlertRuntime {
                     .await?;
             }
             Err(error) => {
-                tracing::warn!(error = %error, "operations alert delivery enqueue failed");
+                diagnostics::warn(
+                    "operations_alert",
+                    "enqueue_delivery",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
                 self.fail_claim(claim, OperationsAlertDispatchErrorCode::Persistence).await?;
             }
         }
@@ -199,11 +223,21 @@ fn unavailable_observations() -> Vec<auction_application::OperationsAlertSourceO
         OperationsAlertSource::Recovery,
     ]
     .into_iter()
-    .filter_map(|source| match auction_application::OperationsAlertSourceObservation::unavailable(source) {
-        Ok(observation) => Some(observation),
-        Err(error) => {
-            tracing::error!(error = %error, source = %source, "operations alert unavailable observation construction failed");
-            None
+    .filter_map(|source| {
+        match auction_application::OperationsAlertSourceObservation::unavailable(source) {
+            Ok(observation) => Some(observation),
+            Err(error) => {
+                diagnostics::error(
+                    "operations_alert",
+                    "build_unavailable_observation",
+                    error.diagnostic_kind(),
+                    DiagnosticContext {
+                        disposition: Some(DiagnosticDisposition::Unpersisted),
+                        ..Default::default()
+                    },
+                );
+                None
+            }
         }
     })
     .collect()

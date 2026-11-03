@@ -7,6 +7,7 @@ use std::sync::Arc;
 use auction_domain::{CommandId, EquipmentId};
 use uuid::Uuid;
 
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
 use crate::{
     AdminIntakeCommand, AdminIntakeError, AdminIntakePolicy, AdminIntakePort, AdminIntakeRecord,
     AdminIntakeResult, AdminIntakeSourceKind, AdminIntakeSourceReader, AdminIntakeTransaction,
@@ -134,7 +135,16 @@ where
                     }
 
                     let result = transaction.add_admin_intake(write).await?;
-                    result.validate().map_err(|_| AdminIntakeError::StoredResultCorrupt)?;
+                    result.validate().map_err(|error| {
+                        record_error(
+                            DiagnosticLevel::Warn,
+                            error.diagnostic_kind(),
+                            "admin_intake",
+                            "validate_owner_result",
+                            DiagnosticContext::default(),
+                        );
+                        AdminIntakeError::StoredResultCorrupt
+                    })?;
                     transaction
                         .append_admin_intake_record(AdminIntakeRecord {
                             command_id,
@@ -198,8 +208,26 @@ fn replay_result(
     if stored.result_code != "accepted" {
         return Err(AdminIntakeError::StoredResultCorrupt.into());
     }
-    let result: AdminIntakeResult = serde_json::from_slice(&stored.result_payload)
-        .map_err(|_| AdminIntakeError::StoredResultCorrupt)?;
-    result.validate().map_err(|_| AdminIntakeError::StoredResultCorrupt)?;
+    let result: AdminIntakeResult =
+        serde_json::from_slice(&stored.result_payload).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Warn,
+                error.diagnostic_kind(),
+                "admin_intake",
+                "decode_replay_result",
+                DiagnosticContext::default(),
+            );
+            AdminIntakeError::StoredResultCorrupt
+        })?;
+    result.validate().map_err(|error| {
+        record_error(
+            DiagnosticLevel::Warn,
+            error.diagnostic_kind(),
+            "admin_intake",
+            "validate_replay_result",
+            DiagnosticContext::default(),
+        );
+        AdminIntakeError::StoredResultCorrupt
+    })?;
     Ok(result)
 }

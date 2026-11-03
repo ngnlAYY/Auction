@@ -1,7 +1,10 @@
 //! Worker control Unix socket 服务端装配；服务生命周期、peer 凭据过滤和 socket
 //! 文件安全由子模块拥有，不会启动第二个监听器。
 
+use auction_application::diagnostics::DiagnosticContext;
+
 use super::*;
+use crate::worker::diagnostics;
 
 #[cfg(unix)]
 mod listener;
@@ -102,13 +105,21 @@ impl WorkerControlServer {
                 move |request: axum::extract::Request, next: axum::middleware::Next| async move {
                     match tokio::time::timeout(request_timeout, next.run(request)).await {
                         Ok(http_response) => http_response,
-                        Err(_) => response(
-                            StatusCode::GATEWAY_TIMEOUT,
-                            ResponseCode::Unavailable,
-                            "Worker 控制请求超时",
-                            Option::<()>::None,
-                            &Uuid::new_v4().to_string(),
-                        ),
+                        Err(error) => {
+                            diagnostics::warn(
+                                "control_server",
+                                "request_timeout",
+                                diagnostics::timeout_kind(&error),
+                                DiagnosticContext::default(),
+                            );
+                            response(
+                                StatusCode::GATEWAY_TIMEOUT,
+                                ResponseCode::Unavailable,
+                                "Worker 控制请求超时",
+                                Option::<()>::None,
+                                &Uuid::new_v4().to_string(),
+                            )
+                        }
                     }
                 },
             ))

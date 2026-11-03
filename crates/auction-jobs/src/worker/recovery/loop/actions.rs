@@ -3,11 +3,15 @@
 use std::sync::Arc;
 
 use auction_application::Clock;
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
+};
 use auction_observability::{WorkerLoop, WorkerResult, WorkerRetryKind};
 use chrono::Duration as ChronoDuration;
 use tokio::task::JoinSet;
 
 use super::{PersistentWorker, merge_worker_result, observe_phase, process_recovery_action};
+use crate::worker::diagnostics;
 
 pub(super) async fn process_actions<C>(
     worker: &PersistentWorker<C>,
@@ -22,11 +26,13 @@ pub(super) async fn process_actions<C>(
         return;
     }
     let Ok(lease_duration) = ChronoDuration::from_std(worker.recovery.lease_duration) else {
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!("recovery action lease duration is invalid");
         merge_worker_result(batch_result, WorkerResult::Error);
         return;
     };
     let Ok(retry_delay) = ChronoDuration::from_std(worker.recovery.retry_delay) else {
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!("recovery action retry delay is invalid");
         merge_worker_result(batch_result, WorkerResult::Error);
         return;
@@ -48,6 +54,7 @@ pub(super) async fn process_actions<C>(
             let item_deadline = tokio::time::Instant::now() + worker.recovery.item_timeout;
             let now = worker.clock.now();
             let Some(lease_until) = now.checked_add_signed(lease_duration) else {
+                diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
                 tracing::error!("recovery action lease deadline overflowed");
                 phase_result = WorkerResult::Error;
                 exhausted = true;
@@ -65,13 +72,24 @@ pub(super) async fn process_actions<C>(
                     break;
                 }
                 Ok(Err(error)) => {
-                    tracing::warn!(error = %error, "recovery action claim phase failed");
+                    diagnostics::unpersisted_error(
+                        "recovery_dispatch",
+                        "claim_action",
+                        error.diagnostic_kind(),
+                        DiagnosticContext::default(),
+                    );
                     phase_result = WorkerResult::Error;
                     exhausted = true;
                     break;
                 }
-                Err(_) => {
-                    tracing::warn!("recovery action claim timed out");
+                Err(error) => {
+                    diagnostics::unpersisted_error(
+                        "recovery_dispatch",
+                        "claim_action_timeout",
+                        diagnostics::timeout_kind(&error),
+                        DiagnosticContext::default(),
+                    );
+
                     phase_result = WorkerResult::Error;
                     exhausted = true;
                     break;
@@ -93,12 +111,13 @@ pub(super) async fn process_actions<C>(
             let blacklister = worker.recovery_blacklister.clone();
             let clock = Arc::clone(&worker.clock);
             let control = worker.control.clone();
-            tasks.spawn(async move {
+            tasks.spawn(diagnostics::inherit(async move {
                 if control.is_draining() {
                     return WorkerResult::Success;
                 }
                 let action_id = claim.action_id;
                 if tokio::time::Instant::now() >= item_deadline {
+                    diagnostics::unpersisted(SafeErrorKind::LEASE_EXPIRED);
                     tracing::warn!(%action_id, "recovery action expired before execution");
                     return WorkerResult::Error;
                 }
@@ -116,18 +135,39 @@ pub(super) async fn process_actions<C>(
                 .await
                 {
                     Ok(result) => result,
-                    Err(_) => {
-                        tracing::warn!(%action_id, "recovery action item timed out");
+                    Err(error) => {
+                        diagnostics::unpersisted_error(
+                            "recovery_dispatch",
+                            "item_timeout",
+                            diagnostics::timeout_kind(&error),
+                            DiagnosticContext {
+                                action_id: diagnostic_id(&action_id),
+                                ..Default::default()
+                            },
+                        );
+
                         WorkerResult::Error
                     }
                 }
-            });
+            }));
         }
         while let Some(result) = tasks.join_next().await {
             match result {
                 Ok(action_result) => merge_worker_result(&mut phase_result, action_result),
                 Err(error) => {
-                    tracing::error!(error = %error, "recovery action task join failed");
+                    diagnostics::error(
+                        "recovery_dispatch",
+                        "item_join",
+                        diagnostics::join_kind(&error),
+                        DiagnosticContext {
+                            disposition: if error.is_cancelled() {
+                                None
+                            } else {
+                                Some(DiagnosticDisposition::Unpersisted)
+                            },
+                            ..Default::default()
+                        },
+                    );
                     phase_result = WorkerResult::Canceled;
                 }
             }

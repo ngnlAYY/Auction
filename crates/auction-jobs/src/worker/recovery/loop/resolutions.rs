@@ -23,7 +23,7 @@ pub(super) async fn advance_relists<C>(
     run_phase(
         worker,
         batch_result,
-        "relist",
+        ("advance_relist", "advance_relist_timeout"),
         |now| store.advance_due_relist(now, retry_delay),
         |advance| record(advance, "relist"),
     )
@@ -42,7 +42,7 @@ pub(super) async fn complete_refunds<C>(
     run_phase(
         worker,
         batch_result,
-        "refund",
+        ("complete_refund", "complete_refund_timeout"),
         |now| store.complete_due_refund(now),
         |advance| record(advance, "refund"),
     )
@@ -61,7 +61,7 @@ pub(super) async fn advance_cod_returns<C>(
     run_phase(
         worker,
         batch_result,
-        "COD return",
+        ("advance_cod_return", "advance_cod_return_timeout"),
         |now| store.advance_due_cod_return(now),
         |advance| record(advance, "COD return"),
     )

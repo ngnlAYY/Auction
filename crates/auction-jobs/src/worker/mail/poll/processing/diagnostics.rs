@@ -2,10 +2,13 @@
 
 use std::{sync::Arc, time::Duration};
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::{
     MailDiagnosticContext, MailDiagnosticOutcome, MailDiagnosticReceipt, MailDiagnosticRecorder,
     MailDiagnosticStage, MailMessage, MailProcessingDecision, PreparedMailEvidence,
 };
+
+use crate::worker::diagnostics;
 
 pub(super) struct MailMessageDiagnostic {
     context: MailDiagnosticContext,
@@ -32,6 +35,7 @@ impl MailMessageDiagnostic {
             Some(recorder) => match recorder.prepare_message(context.clone(), message) {
                 Ok(prepared) => (Some(prepared), ""),
                 Err(error) => {
+                    diagnostics::unpersisted(error.diagnostic_kind());
                     tracing::warn!(
                         world_id = %context.world_id,
                         mailbox_key = ?context.mailbox_key,
@@ -131,14 +135,14 @@ impl MailMessageDiagnostic {
                 );
                 None
             }
-            Err(_) => {
-                tracing::warn!(
-                    world_id = %context.world_id,
-                    external_mail_id = ?context.external_mail_id,
-                    evidence_status = "save_failed",
-                    diagnostic_error = "diagnostic_timeout",
-                    "MoogleMail diagnostic evidence unavailable"
+            Err(error) => {
+                diagnostics::unpersisted_error(
+                    "mail_poll",
+                    "retain_diagnostic_timeout",
+                    diagnostics::timeout_kind(&error),
+                    DiagnosticContext::default(),
                 );
+
                 None
             }
         }

@@ -6,6 +6,9 @@ use std::{
     sync::Arc,
 };
 
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_id,
+};
 use auction_application::{
     ApplicationError, CompetitionCommandPort, CompetitionTransactionError, CreateProxyCommand,
     ForumBidCommandRecord, ForumCommandStatus, ForumCredentialAvailability, ForumPostWriter,
@@ -19,6 +22,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::{PersistentWorker, WorkerError};
+use crate::worker::diagnostics;
 
 #[path = "reply/command.rs"]
 mod command;
@@ -135,10 +139,26 @@ pub(crate) async fn run_cycle<C>(
 where
     C: auction_application::Clock + 'static,
 {
-    let lease_duration =
-        Duration::from_std(lease_duration).map_err(|_| WorkerError::InvalidForumConfiguration)?;
-    let poll_interval =
-        Duration::from_std(poll_interval).map_err(|_| WorkerError::InvalidForumConfiguration)?;
+    let lease_duration = Duration::from_std(lease_duration)
+        .map_err(|_| WorkerError::InvalidForumConfiguration)
+        .inspect_err(|error| {
+            diagnostics::unpersisted_error(
+                "forum_reply",
+                "convert_lease_duration",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
+        })?;
+    let poll_interval = Duration::from_std(poll_interval)
+        .map_err(|_| WorkerError::InvalidForumConfiguration)
+        .inspect_err(|error| {
+            diagnostics::unpersisted_error(
+                "forum_reply",
+                "convert_poll_interval",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
+        })?;
     let mut seen_auctions = HashSet::new();
     let mut processed = 0_u16;
     let mut topic_failed = false;
@@ -151,16 +171,39 @@ where
                 })
                 .collect::<Vec<_>>();
         if available_worlds.is_empty() {
+            diagnostics::unpersisted_error(
+                "forum_reply",
+                "require_credential",
+                SafeErrorKind::CAPABILITY_UNAVAILABLE,
+                DiagnosticContext::default(),
+            );
             topic_failed = true;
             break;
         }
         // 内容租约必须覆盖领取和远端编辑的总预算，领取响应不重置单项时限。
         let item_deadline = tokio::time::Instant::now()
             .checked_add(runtime.item_timeout)
-            .ok_or(WorkerError::InvalidForumConfiguration)?;
+            .ok_or(WorkerError::InvalidForumConfiguration)
+            .inspect_err(|error| {
+                diagnostics::unpersisted_error(
+                    "forum_reply",
+                    "check_item_deadline",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
+            })?;
         let now = worker.clock.now();
-        let lease_until =
-            now.checked_add_signed(lease_duration).ok_or(WorkerError::InvalidForumConfiguration)?;
+        let lease_until = now
+            .checked_add_signed(lease_duration)
+            .ok_or(WorkerError::InvalidForumConfiguration)
+            .inspect_err(|error| {
+                diagnostics::unpersisted_error(
+                    "forum_reply",
+                    "check_lease_deadline",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
+            })?;
         // 每次只领取即将处理的一场拍卖，避免批量候选在等待前序主题时耗尽内容租约。
         let topics = worker
             .write_lifecycle
@@ -178,14 +221,39 @@ where
         let Some(topics) = topics else {
             break;
         };
-        let mut topics = topics.map_err(|timeout| {
-            let _elapsed = timeout;
-            WorkerError::ForumTopicProcessingFailed
-        })??;
+        let mut topics = topics
+            .map_err(|timeout| {
+                diagnostics::unpersisted_error(
+                    "forum_reply",
+                    "claim_topic_timeout",
+                    diagnostics::timeout_kind(&timeout),
+                    DiagnosticContext::default(),
+                );
+                let _elapsed = timeout;
+                WorkerError::ForumTopicProcessingFailed
+            })?
+            .inspect_err(|error| {
+                diagnostics::unpersisted_error(
+                    "forum_reply",
+                    "claim_topic",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
+            })?;
         let Some(topic) = topics.pop() else {
             break;
         };
+        let diagnostic_auction_id = topic.auction_id;
         if tokio::time::Instant::now() >= item_deadline {
+            diagnostics::unpersisted_error(
+                "forum_reply",
+                "check_claim_deadline",
+                SafeErrorKind::LEASE_EXPIRED,
+                DiagnosticContext {
+                    auction_id: diagnostic_id(&diagnostic_auction_id),
+                    ..Default::default()
+                },
+            );
             // 不读取或编辑远端主题，也不把可能已提交的 claim 释放成新一轮工作。
             return Err(WorkerError::ForumTopicProcessingFailed);
         }
@@ -198,14 +266,33 @@ where
             let scanned_at = worker.clock.now();
             let next_scan_at = scanned_at
                 .checked_add_signed(poll_interval)
-                .ok_or(WorkerError::InvalidForumConfiguration)?;
+                .ok_or(WorkerError::InvalidForumConfiguration)
+                .inspect_err(|error| {
+                    diagnostics::unpersisted_error(
+                        "forum_reply",
+                        "check_next_scan_time",
+                        error.diagnostic_kind(),
+                        DiagnosticContext::default(),
+                    );
+                })?;
             let processed_through_post_number = topic.processed_through_post_number;
             if let Some(failure_code) = topic.content_last_error_code.clone() {
                 // 重复领取没有读取远端证明，不能借 finish 清掉上一轮的未知写入门禁。
                 runtime
                     .store
                     .fail_topic_scan(topic, scanned_at, next_scan_at, failure_code)
-                    .await?;
+                    .await
+                    .inspect_err(|error| {
+                        diagnostics::unpersisted_error(
+                            "forum_reply",
+                            "persist_duplicate_failure",
+                            error.diagnostic_kind(),
+                            DiagnosticContext {
+                                auction_id: diagnostic_id(&diagnostic_auction_id),
+                                ..Default::default()
+                            },
+                        );
+                    })?;
                 topic_failed = true;
             } else {
                 runtime
@@ -216,7 +303,18 @@ where
                         scanned_at,
                         next_scan_at,
                     )
-                    .await?;
+                    .await
+                    .inspect_err(|error| {
+                        diagnostics::unpersisted_error(
+                            "forum_reply",
+                            "finish_duplicate_scan",
+                            error.diagnostic_kind(),
+                            DiagnosticContext {
+                                auction_id: diagnostic_id(&diagnostic_auction_id),
+                                ..Default::default()
+                            },
+                        );
+                    })?;
             }
             break;
         }
@@ -239,11 +337,14 @@ where
             {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
-                    tracing::warn!(
-                        auction_id = %topic.auction_id,
-                        thread_id = %topic.thread_id,
-                        error = %error,
-                        "论坛回帖主题导入未完成"
+                    diagnostics::warn(
+                        "forum_reply",
+                        "process_topic",
+                        error.diagnostic_kind(),
+                        DiagnosticContext {
+                            auction_id: diagnostic_id(&topic.auction_id),
+                            ..Default::default()
+                        },
                     );
                     record_topic_failure(
                         runtime,
@@ -253,15 +354,31 @@ where
                         &error,
                         &write_progress,
                     )
-                    .await?;
+                    .await
+                    .inspect_err(|error| {
+                        diagnostics::unpersisted_error(
+                            "forum_reply",
+                            "record_topic_failure",
+                            error.diagnostic_kind(),
+                            DiagnosticContext {
+                                auction_id: diagnostic_id(&diagnostic_auction_id),
+                                ..Default::default()
+                            },
+                        );
+                    })?;
                     topic_failed = true;
                 }
-                Err(_) => {
-                    tracing::warn!(
-                        auction_id = %topic.auction_id,
-                        thread_id = %topic.thread_id,
-                        "论坛回帖主题导入超时，保留该主题等待持久化调度重试"
+                Err(error) => {
+                    diagnostics::warn(
+                        "forum_reply",
+                        "process_topic_timeout",
+                        diagnostics::timeout_kind(&error),
+                        DiagnosticContext {
+                            auction_id: diagnostic_id(&topic.auction_id),
+                            ..Default::default()
+                        },
                     );
+
                     record_topic_failure_code(
                         runtime,
                         topic,
@@ -270,7 +387,18 @@ where
                         "topic_processing_timeout",
                         &write_progress,
                     )
-                    .await?;
+                    .await
+                    .inspect_err(|error| {
+                        diagnostics::unpersisted_error(
+                            "forum_reply",
+                            "record_topic_timeout",
+                            error.diagnostic_kind(),
+                            DiagnosticContext {
+                                auction_id: diagnostic_id(&diagnostic_auction_id),
+                                ..Default::default()
+                            },
+                        );
+                    })?;
                     topic_failed = true;
                 }
             }
