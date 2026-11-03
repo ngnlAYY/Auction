@@ -45,7 +45,7 @@ pub(super) fn parse_postgres_command(
 }
 
 pub(super) async fn insert_command_postgres(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: Uuid,
     kind: AdminUserCommandKind,
     request_hash: RequestHash,
@@ -78,7 +78,7 @@ pub(super) async fn insert_command_postgres(
 }
 
 pub(super) async fn insert_audit_postgres(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: Uuid,
     kind: AdminUserCommandKind,
     user_id: Uuid,
@@ -107,7 +107,7 @@ pub(super) async fn insert_audit_postgres(
 }
 
 pub(super) async fn lock_command(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: Uuid,
 ) -> Result<(), ApplicationError> {
     crate::database::lock_command_id(transaction, command_id).await.map_err(map_storage_error)
@@ -130,7 +130,7 @@ pub(super) fn map_admin_write_error(error: sqlx::Error) -> ApplicationError {
 
 pub(super) fn map_storage_error(error: sqlx::Error) -> ApplicationError {
     match &error {
-        _ if crate::database::is_serialization_conflict(&error) => {
+        _ if crate::database::observed_serialization_conflict(&error) => {
             // 不把可重试冲突降成字符串；事务 owner 负责保留原命令并执行有界重试。
             CompetitionTransactionError::SerializationConflict.into()
         }

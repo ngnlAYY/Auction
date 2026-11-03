@@ -1,10 +1,11 @@
 //! 已提交历史自寄修复记录的运行期证明；只从追加修复表与原投递完整身份相互匹配的事实解除历史阻塞，
 //! 不相信单独 metadata。修复命令本身已下线，本模块只读，不写入修复表。
 
+use crate::database::TrackedTransaction as Transaction;
 use std::sync::LazyLock;
 
 use auction_application::FundingError;
-use sqlx::{Postgres, Transaction};
+use sqlx::Postgres;
 use uuid::Uuid;
 
 use super::settlement_funding::storage as sql_error;

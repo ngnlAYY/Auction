@@ -55,7 +55,7 @@ pub(super) fn is_conflict(error: &RecoveryCommandError) -> bool {
 
 #[cfg(feature = "postgres")]
 pub(super) fn map_sql_error(error: sqlx::Error) -> RecoveryCommandError {
-    if crate::database::is_serialization_conflict(&error) {
+    if crate::database::observed_serialization_conflict(&error) {
         RecoveryCommandError::SerializationConflict
     } else {
         RecoveryCommandError::Failed(crate::database::sql_error_context(

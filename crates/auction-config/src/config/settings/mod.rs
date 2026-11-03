@@ -23,6 +23,8 @@ const CONFIG_FILE_ENV: &str = "AUCTION_CONFIG_FILE";
 mod app;
 mod auction;
 mod backup;
+mod database;
+pub use database::*;
 mod errors;
 mod operations;
 mod secrets;

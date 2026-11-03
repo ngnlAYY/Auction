@@ -9,7 +9,9 @@ use auction_application::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticLevel, DiagnosticSink, SafeDiagnostic,
     SafeErrorKind, diagnostic_enabled, diagnostic_world, install_diagnostic_sink, record_error,
 };
-use auction_observability::{DiagnosticLogWindows, WorkerLoop, WorkerRecorder};
+use auction_observability::{
+    DiagnosticLogWindows, WorkerLoop, WorkerRecorder, scope_database_worker_loop,
+};
 
 /// 超时只有固定类别，不读取底层 future。
 pub(crate) fn timeout_kind(_error: &tokio::time::error::Elapsed) -> SafeErrorKind {
@@ -89,13 +91,17 @@ struct WorkerDiagnosticContext {
 }
 tokio::task_local! { static CONTEXT: WorkerDiagnosticContext; }
 
-/// 只给诊断传递 owner；不改变 future 的预算、取消、返回值或持久化。
+/// 同一循环身份传给诊断与连接观测；不改变预算、取消、返回值或持久化。
 pub(crate) async fn scope<F: Future>(
     metrics: Arc<dyn WorkerRecorder>,
     loop_kind: WorkerLoop,
     future: F,
 ) -> F::Output {
-    CONTEXT.scope(WorkerDiagnosticContext { metrics, loop_kind }, future).await
+    scope_database_worker_loop(
+        loop_kind,
+        CONTEXT.scope(WorkerDiagnosticContext { metrics, loop_kind }, future),
+    )
+    .await
 }
 
 /// JoinSet 子任务显式继承观测 owner；Tokio task-local 不会自动跨 spawn。
@@ -103,7 +109,7 @@ pub(crate) fn inherit<F: Future>(future: F) -> impl Future<Output = F::Output> {
     let context = CONTEXT.try_with(Clone::clone).ok();
     async move {
         match context {
-            Some(context) => CONTEXT.scope(context, future).await,
+            Some(context) => scope(context.metrics, context.loop_kind, future).await,
             None => future.await,
         }
     }

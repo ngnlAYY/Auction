@@ -58,7 +58,7 @@ pub(super) fn parse_layout(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn read_pages(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     auction_id: uuid::Uuid,
     page_count: i32,
 ) -> Result<Vec<ForumCatalogPage>, ApplicationError> {
@@ -101,7 +101,7 @@ pub(super) async fn read_pages(
 /// 发布事务可重放同一组身份，不得借冲突更新把旧固定帖改指向另一远端帖子。
 #[cfg(feature = "postgres")]
 pub(super) async fn publish_pages(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     auction_id: uuid::Uuid,
     rendered: &ForumRenderedThread,
     published: &ForumPublishedLayout,
@@ -135,7 +135,7 @@ pub(super) async fn publish_pages(
 /// 调用方的主记录 CAS 及全部续页写入必须同事务提交，任何一页缺失都回滚本地证明。
 #[cfg(feature = "postgres")]
 pub(super) async fn update_pages(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     topic: &ForumReplyTopic,
     rendered: &ForumRenderedThread,
 ) -> Result<(), ApplicationError> {

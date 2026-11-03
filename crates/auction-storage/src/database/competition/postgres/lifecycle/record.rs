@@ -69,7 +69,7 @@ pub(super) async fn append_lifecycle_record_inner(
 
 /// 只有进入公开预览后，发现流才通知客户端重新读取当前拍卖。
 async fn append_preview_discovery_event(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command: &AuctionLifecycleCommand,
     context: &AuctionLifecycleContext,
     result: &AuctionLifecycleResult,

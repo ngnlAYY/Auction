@@ -10,30 +10,39 @@ use sha2::{Digest, Sha256};
 
 impl FundingReconciliationReader for crate::DatabaseStore {
     fn preview_funding(&self, expected_uid: String) -> FundingFuture<'_, FundingPreview> {
-        Box::pin(async move {
-            auction_domain::FundingAccountKey::new(&expected_uid).map_err(invalid)?;
-            let mut tx = self
-                .postgres_pool()
-                .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE, READ ONLY")
-                .await
-                .map_err(storage)?;
-            let result = snapshot(&mut tx, &expected_uid).await?;
-            tx.commit().await.map_err(storage)?;
-            Ok(result)
-        })
+        Box::pin(self.tracked_postgres_pool().observe_transaction(
+            auction_observability::DatabaseTransactionOwner::Funding,
+            async move {
+                auction_domain::FundingAccountKey::new(&expected_uid).map_err(invalid)?;
+                let mut tx = self
+                    .tracked_postgres_pool()
+                    .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE, READ ONLY")
+                    .await
+                    .map_err(storage)?;
+                let result = snapshot(&mut tx, &expected_uid).await?;
+                tx.commit().await.map_err(storage)?;
+                Ok(result)
+            },
+        ))
     }
     fn replay_funding(
         &self,
         command: FundingReconciliationCommand,
     ) -> FundingFuture<'_, Option<FundingReconciliationResult>> {
-        Box::pin(async move {
-            command.validate()?;
-            let mut tx =
-                self.postgres_pool().begin_with("BEGIN READ ONLY").await.map_err(storage)?;
-            let result = super::reconciliation::replay_command(&mut tx, &command).await?;
-            tx.commit().await.map_err(storage)?;
-            Ok(result)
-        })
+        Box::pin(self.tracked_postgres_pool().observe_transaction(
+            auction_observability::DatabaseTransactionOwner::Funding,
+            async move {
+                command.validate()?;
+                let mut tx = self
+                    .tracked_postgres_pool()
+                    .begin_with("BEGIN READ ONLY")
+                    .await
+                    .map_err(storage)?;
+                let result = super::reconciliation::replay_command(&mut tx, &command).await?;
+                tx.commit().await.map_err(storage)?;
+                Ok(result)
+            },
+        ))
     }
 }
 

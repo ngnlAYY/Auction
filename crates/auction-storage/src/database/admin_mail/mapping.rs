@@ -9,7 +9,7 @@ use auction_application::MailDisplaySnapshot;
 
 pub(super) fn map_sql_error(error: sqlx::Error) -> AdminMailTransactionError {
     match &error {
-        _ if crate::database::is_serialization_conflict(&error) => {
+        _ if crate::database::observed_serialization_conflict(&error) => {
             AdminMailTransactionError::SerializationConflict
         }
         sqlx::Error::Database(database_error)

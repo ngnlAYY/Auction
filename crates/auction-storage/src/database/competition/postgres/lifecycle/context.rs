@@ -71,6 +71,11 @@ pub(super) async fn load_lifecycle_context_postgres(
         cancelled_reason: row.try_get("cancelled_reason").map_err(map_sql_error)?,
         cancelled_by: row.try_get("cancelled_by").map_err(map_sql_error)?,
     };
+    auction_observability::database_transaction_phase(if auction.status == AuctionStatus::Final {
+        auction_observability::DatabaseTransactionPhase::Final
+    } else {
+        auction_observability::DatabaseTransactionPhase::NonFinal
+    });
     let final_phase_lead_seconds: i64 =
         row.try_get("policy_final_phase_lead_seconds").map_err(map_sql_error)?;
     if final_phase_lead_seconds <= 0 {

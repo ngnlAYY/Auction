@@ -14,7 +14,7 @@ use super::super::common::storage_error;
 /// 重复绑定同一 replay 仍复核游标边界，可收口旧版仅标记 resolved、未推进游标的窗口。
 #[cfg(feature = "postgres")]
 pub(crate) async fn resolve_failure_postgres_tx(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     consumer_key: &str,
     stream_key: &str,
     event_id: Uuid,

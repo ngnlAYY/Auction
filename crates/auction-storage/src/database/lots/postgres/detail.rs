@@ -83,7 +83,7 @@ pub(in crate::database::lots) async fn detail_postgres(
 
 #[cfg(feature = "postgres")]
 async fn postgres_detail_projection(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     lot_id: Uuid,
 ) -> Result<Option<PublicAuctionProjection>, ApplicationError> {
     let row = sqlx::query(concat!(

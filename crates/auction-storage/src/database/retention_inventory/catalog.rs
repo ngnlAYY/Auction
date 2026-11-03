@@ -5,7 +5,7 @@ use super::*;
 use sqlx::{Row, postgres::PgRow};
 
 pub(super) async fn read_foreign_key_inventory(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<PostgresForeignKeyInventoryReport, RetentionInventoryError> {
     let rows = sqlx::query(
         "SELECT
@@ -85,7 +85,7 @@ pub(super) fn map_foreign_key(
 
 /// 共享运维只读快照上限，失败映射为本模块错误。
 pub(super) async fn set_read_only_limits(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<(), RetentionInventoryError> {
     crate::database::set_read_only_limits(transaction)
         .await
@@ -93,7 +93,7 @@ pub(super) async fn set_read_only_limits(
 }
 
 pub(super) async fn read_schema_identity(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<PostgresSchemaIdentity, RetentionInventoryError> {
     let row = sqlx::query(
         "SELECT application, baseline_version, installed_at
@@ -120,7 +120,7 @@ pub(super) async fn read_schema_identity(
 }
 
 pub(super) async fn read_migration_inventory(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<PostgresMigrationInventory, RetentionInventoryError> {
     let rows = sqlx::query(
         "SELECT version, description, success, checksum
@@ -160,7 +160,7 @@ pub(super) async fn read_migration_inventory(
 }
 
 pub(super) async fn read_relations(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<Vec<PostgresRelationInventory>, RetentionInventoryError> {
     let rows = sqlx::query(
         "SELECT namespace.nspname AS schema_name,

@@ -25,53 +25,62 @@ pub(super) async fn replay(
 }
 
 pub(super) async fn run(
-    pool: &sqlx::PgPool,
+    pool: &crate::database::TrackedPool<Postgres>,
     command: &FundingRecordOnlyCommand,
     evidence: &SettlementInternalEvidenceSnapshot,
 ) -> Result<FundingCommitOutcome, FundingError> {
-    command.validate()?;
-    for attempt in 0..3 {
-        let mut tx =
-            pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(storage)?;
-        let operation = async {
-            if let Some(result) = replay(&mut tx, command).await? {
-                return Ok(result);
-            }
-            let budget = (evidence.expires_at - chrono::Utc::now()).num_milliseconds();
-            if budget <= 0 {
-                return Err(FundingError::Unproven);
-            }
-            sqlx::query("SELECT set_config('transaction_timeout',$1,true)")
-                .bind(format!("{budget}ms"))
-                .execute(&mut *tx)
-                .await
-                .map_err(storage)?;
-            apply(&mut tx, command, evidence).await
-        }
-        .await;
-        match operation {
-            Ok(result) => match tx.commit().await {
-                Ok(()) => return Ok(FundingCommitOutcome::Committed(result)),
-                Err(error) => match storage(error) {
-                    FundingError::SerializationConflict if attempt < 2 => continue,
-                    FundingError::SerializationConflict => {
-                        return Ok(FundingCommitOutcome::RolledBack(
-                            FundingError::SerializationConflict,
-                        ));
-                    }
-                    error => return Err(error),
-                },
-            },
-            Err(error) => {
-                tx.rollback().await.map_err(storage)?;
-                if matches!(error, FundingError::SerializationConflict) && attempt < 2 {
-                    continue;
+    pool.observe_transaction(auction_observability::DatabaseTransactionOwner::Funding, async {
+        command.validate()?;
+        for attempt in 0..3 {
+            let mut tx =
+                pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(storage)?;
+            let operation = async {
+                if let Some(result) = replay(&mut tx, command).await? {
+                    return Ok(result);
                 }
-                return Ok(FundingCommitOutcome::RolledBack(error));
+                let budget = (evidence.expires_at - chrono::Utc::now()).num_milliseconds();
+                if budget <= 0 {
+                    return Err(FundingError::Unproven);
+                }
+                sqlx::query("SELECT set_config('transaction_timeout',$1,true)")
+                    .bind(format!("{budget}ms"))
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(storage)?;
+                apply(&mut tx, command, evidence).await
+            }
+            .await;
+            match operation {
+                Ok(result) => match tx.commit().await {
+                    Ok(()) => return Ok(FundingCommitOutcome::Committed(result)),
+                    Err(error) => match storage(error) {
+                        FundingError::SerializationConflict if attempt < 2 => continue,
+                        FundingError::SerializationConflict => {
+                            auction_observability::database_transaction_exhausted();
+                            return Ok(FundingCommitOutcome::RolledBack(
+                                FundingError::SerializationConflict,
+                            ));
+                        }
+                        error => return Err(error),
+                    },
+                },
+                Err(error) => {
+                    tx.rollback().await.map_err(storage)?;
+                    if matches!(error, FundingError::SerializationConflict) && attempt < 2 {
+                        continue;
+                    }
+                    crate::database::observe_retry_exhaustion(
+                        attempt + 1,
+                        3,
+                        matches!(error, FundingError::SerializationConflict),
+                    );
+                    return Ok(FundingCommitOutcome::RolledBack(error));
+                }
             }
         }
-    }
-    Ok(FundingCommitOutcome::RolledBack(FundingError::SerializationConflict))
+        Ok(FundingCommitOutcome::RolledBack(FundingError::SerializationConflict))
+    })
+    .await
 }
 
 async fn apply(

@@ -69,7 +69,7 @@ pub(crate) async fn load_envelope_postgres(
 }
 
 pub(super) async fn load_mail_command_tx(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: CommandId,
     kind: MailUserCommandKind,
     request_hash: RequestHash,

@@ -1,11 +1,12 @@
 //! 标记持久错误分类、追加审计和通知资格失效；不修改 delivery 历史结果。
 
+use crate::database::TrackedTransaction as Transaction;
 use auction_application::CompetitionTransactionError;
-use sqlx::{Postgres, Transaction};
+use sqlx::Postgres;
 use uuid::Uuid;
 
 pub(super) fn sql_error(error: sqlx::Error) -> CompetitionTransactionError {
-    if crate::database::is_serialization_conflict(&error) {
+    if crate::database::observed_serialization_conflict(&error) {
         CompetitionTransactionError::SerializationConflict
     } else {
         CompetitionTransactionError::Failed(crate::database::sql_error_context(

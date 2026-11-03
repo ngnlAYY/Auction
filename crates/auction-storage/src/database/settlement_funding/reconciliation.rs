@@ -36,39 +36,48 @@ impl FundingReconciliationWriter for crate::DatabaseStore {
         evidence: &'a SettlementInternalEvidenceSnapshot,
         _gate: FundingCashGate,
     ) -> FundingFuture<'a, FundingCommitOutcome> {
-        Box::pin(async move {
-            command.validate()?;
-            for attempt in 0..3 {
-                let mut tx = self
-                    .postgres_pool()
-                    .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
-                    .await
-                    .map_err(storage)?;
-                match apply(&mut tx, command, evidence).await {
-                    Ok(result) => match tx.commit().await {
-                        Ok(()) => return Ok(FundingCommitOutcome::Committed(result)),
-                        Err(error) => match storage(error) {
-                            FundingError::SerializationConflict if attempt < 2 => continue,
-                            FundingError::SerializationConflict => {
-                                return Ok(FundingCommitOutcome::RolledBack(
-                                    FundingError::SerializationConflict,
-                                ));
-                            }
-                            error => return Err(error),
+        Box::pin(self.tracked_postgres_pool().observe_transaction(
+            auction_observability::DatabaseTransactionOwner::Funding,
+            async move {
+                command.validate()?;
+                for attempt in 0..3 {
+                    let mut tx = self
+                        .tracked_postgres_pool()
+                        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+                        .await
+                        .map_err(storage)?;
+                    match apply(&mut tx, command, evidence).await {
+                        Ok(result) => match tx.commit().await {
+                            Ok(()) => return Ok(FundingCommitOutcome::Committed(result)),
+                            Err(error) => match storage(error) {
+                                FundingError::SerializationConflict if attempt < 2 => continue,
+                                FundingError::SerializationConflict => {
+                                    auction_observability::database_transaction_exhausted();
+                                    return Ok(FundingCommitOutcome::RolledBack(
+                                        FundingError::SerializationConflict,
+                                    ));
+                                }
+                                error => return Err(error),
+                            },
                         },
-                    },
-                    Err(error) => {
-                        // 只有显式ROLLBACK已确认才允许释放而不撤销owner。
-                        tx.rollback().await.map_err(storage)?;
-                        if matches!(error, FundingError::SerializationConflict) && attempt < 2 {
-                            continue;
+                        Err(error) => {
+                            // 只有显式ROLLBACK已确认才允许释放而不撤销owner。
+                            tx.rollback().await.map_err(storage)?;
+                            if matches!(error, FundingError::SerializationConflict) && attempt < 2 {
+                                continue;
+                            }
+                            crate::database::observe_retry_exhaustion(
+                                attempt + 1,
+                                3,
+                                matches!(error, FundingError::SerializationConflict),
+                            );
+                            return Ok(FundingCommitOutcome::RolledBack(error));
                         }
-                        return Ok(FundingCommitOutcome::RolledBack(error));
                     }
                 }
-            }
-            Ok(FundingCommitOutcome::RolledBack(FundingError::SerializationConflict))
-        })
+                Ok(FundingCommitOutcome::RolledBack(FundingError::SerializationConflict))
+            },
+        ))
     }
 }
 

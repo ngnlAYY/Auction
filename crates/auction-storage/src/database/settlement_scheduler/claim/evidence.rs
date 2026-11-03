@@ -1,9 +1,10 @@
 //! 结算领取的审计和实时事件证据。
 
+use crate::database::TrackedTransaction as Transaction;
 use auction_domain::{CommandId, deterministic_uuid};
 use chrono::{DateTime, Utc};
 use serde_json::json;
-use sqlx::{Postgres, Transaction};
+use sqlx::Postgres;
 use uuid::Uuid;
 
 use crate::database::audit_health::AuditWriteResult as _;

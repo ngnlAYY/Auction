@@ -27,10 +27,12 @@ pub(super) async fn ensure_postgres(
 ) -> Result<ScheduledRoundSnapshot, auction_application::RepositoryError> {
     validate_request(&request)?;
     crate::database::retry_conflicts(
+        pool,
+        auction_observability::DatabaseTransactionOwner::Scheduler,
         crate::database::SERIALIZABLE_ATTEMPTS,
         |error: &PostgresBootstrapError| {
             matches!(error, PostgresBootstrapError::Storage(source)
-                if crate::database::is_serialization_conflict(source))
+                if crate::database::observed_serialization_conflict(source))
         },
         || ensure_postgres_once(pool, &request),
     )
@@ -234,7 +236,7 @@ async fn ensure_postgres_once(
 
 #[cfg(feature = "postgres")]
 async fn insert_command_postgres(
-    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     request: &ScheduledRoundBootstrap,
     missed: bool,
     now: DateTime<Utc>,
@@ -266,7 +268,7 @@ async fn insert_command_postgres(
 
 #[cfg(feature = "postgres")]
 async fn append_audit_postgres(
-    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     request: &ScheduledRoundBootstrap,
     missed: bool,
     now: DateTime<Utc>,

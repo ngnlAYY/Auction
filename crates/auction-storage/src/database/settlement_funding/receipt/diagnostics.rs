@@ -1,8 +1,9 @@
 //! 收据拒绝的唯一内部字典与只读辅助诊断；原授权 SQL 和原错误决定业务结果。
 
 use super::super::{LockedFundingAccount, diagnostics};
+use crate::database::TrackedTransaction as Transaction;
 use auction_application::{FundingCollectedReceipt, FundingError};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 /// 只用于日志，绝不写入持久化失败码或替代资金授权。

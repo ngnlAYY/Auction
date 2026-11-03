@@ -112,7 +112,7 @@ pub(super) async fn renew_postgres(
 /// 先取得行锁，再由后续 UPDATE 检查实时有效期，避免锁等待前求值的时间条件放过过期租约。
 /// sending 调用方保持 lot → delivery 锁序；续租/释放不再取 lot 锁。
 async fn lock_delivery_lease(
-    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     delivery_id: Uuid,
 ) -> Result<(), auction_application::RepositoryError> {
     sqlx::query("SELECT id FROM public.deliveries WHERE id = $1 FOR UPDATE")

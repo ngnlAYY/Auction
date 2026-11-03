@@ -34,9 +34,16 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
         crate::service::acquire_maintenance(options.config_dir, options.maintenance).await?;
     let config = options.config_dir.load_worker()?;
     let url = config.database_url().context("Worker 配置缺少数据库连接")?;
-    let environment = Libpq::from_url(url, options.database)?;
+    let environment = Libpq::from_url(
+        url,
+        options.database,
+        config.database_profiles.mode,
+        auction_storage::DatabaseConnectionPurpose::CliRestore,
+    )?;
 
-    let store = crate::database::connect(url).await?;
+    let store =
+        crate::database::connect(&config, auction_storage::DatabaseConnectionPurpose::CliRestore)
+            .await?;
     let result = crate::database::preflight(&store, options.database).await;
     // 自身连接必须先关闭，否则 pg_restore 阶段会多出一个非外部客户端的会话。
     store.postgres_pool().close().await;
@@ -60,7 +67,10 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
         .await
         .context("恢复失败；单事务恢复应已整体回滚，请用 db preflight 复核目标仍为空库")?;
 
-    let store = crate::database::connect(url).await.context("恢复已提交，但重新连接校验失败")?;
+    let store =
+        crate::database::connect(&config, auction_storage::DatabaseConnectionPurpose::CliRestore)
+            .await
+            .context("恢复已提交，但重新连接校验失败")?;
     let restored = crate::database::preflight(&store, options.database).await;
     store.postgres_pool().close().await;
     let restored = restored.context("恢复已提交，但读取恢复后的 schema 失败；保持停机")?;

@@ -149,7 +149,7 @@ impl DeliveryWorkStore for DatabaseStore {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
-                Self::Postgres(store) => wakeup::subscribe(store.raw_pool()).await,
+                Self::Postgres(store) => wakeup::subscribe(store.pool()).await,
             }
         })
     }

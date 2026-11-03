@@ -106,7 +106,7 @@ pub(crate) async fn lookup_completion(
 }
 
 pub(crate) async fn insert_or_verify_intake(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     mailbox_key: &str,
     item: &MailPollIntake,
 ) -> Result<(), ApplicationError> {
@@ -190,7 +190,7 @@ pub(crate) async fn insert_or_verify_intake(
 }
 
 pub(crate) async fn insert_or_verify_mail_command(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     mailbox_key: &str,
     item: &MailPollIntake,
 ) -> Result<(), ApplicationError> {

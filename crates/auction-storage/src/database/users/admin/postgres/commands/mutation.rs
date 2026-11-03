@@ -16,6 +16,8 @@ pub(crate) async fn mutate_postgres(
     validate_mutation_write(&write)?;
     // 重试不重新生成 key 或命令身份，只在结构化序列化冲突/死锁时重跑完整事务。
     crate::database::retry_conflicts(
+        store.pool(),
+        auction_observability::DatabaseTransactionOwner::Admin,
         usize::from(TransactionPolicy::serializable().max_attempts),
         ApplicationError::is_serialization_conflict,
         || mutate_postgres_once(store, &write),
@@ -99,7 +101,7 @@ async fn mutate_postgres_once(
 }
 
 async fn apply_mutation_postgres(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     write: &AdminUserMutationWrite,
     before: &AdminUser,
 ) -> Result<(), ApplicationError> {
@@ -282,7 +284,7 @@ async fn apply_mutation_postgres(
 }
 
 async fn lock_forum_identity_ownership_postgres(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     user_id: Uuid,
     forum_account_id: &str,
 ) -> Result<(), ApplicationError> {

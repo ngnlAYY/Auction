@@ -35,7 +35,7 @@ const SETTLEMENT_BATCH_SIZE: usize = 256;
 /// 在原 Serializable 事务内执行一个结算批次，减少持有结算锁期间的往返。完整批次复用固定语句形状，
 /// 可变尾批不挤占连接的预处理语句缓存。
 async fn execute_settlement_batch(
-    transaction: &mut sqlx::Transaction<'static, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'static, sqlx::Postgres>,
     mut query: sqlx::QueryBuilder<sqlx::Postgres>,
     rows: usize,
 ) -> Result<(), SettlementTransactionError> {
@@ -63,47 +63,67 @@ impl SettlementTransactionRunner for PostgresStore {
         E: SettlementTransactionFailure,
         F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
     {
-        async move {
-            if let Err(error) = TransactionPolicy::new(policy.isolation, policy.max_attempts) {
-                return Err(E::from(error));
-            }
+        self.pool().observe_transaction(
+            auction_observability::DatabaseTransactionOwner::Settlement,
+            async move {
+                if let Err(error) = TransactionPolicy::new(policy.isolation, policy.max_attempts) {
+                    return Err(E::from(error));
+                }
 
-            for attempt in 0..policy.max_attempts {
-                let transaction =
-                    match self.pool().begin_with(begin_statement(policy.isolation)).await {
-                        Ok(transaction) => transaction,
-                        Err(_) => {
-                            return Err(E::from(SettlementTransactionError::Failed(
-                                "PostgreSQL 结算事务无法开始".to_owned(),
-                            )));
-                        }
-                    };
-                let mut transaction = PostgresCompetitionTransaction::new(transaction);
+                for attempt in 0..policy.max_attempts {
+                    let transaction =
+                        match self.pool().begin_with(begin_statement(policy.isolation)).await {
+                            Ok(transaction) => transaction,
+                            Err(_) => {
+                                return Err(E::from(SettlementTransactionError::Failed(
+                                    "PostgreSQL 结算事务无法开始".to_owned(),
+                                )));
+                            }
+                        };
+                    let mut transaction = PostgresCompetitionTransaction::new(transaction);
 
-                match operation(&mut transaction).await {
-                    Ok(value) => match transaction.commit().await {
-                        Ok(()) => return Ok(value),
+                    match operation(&mut transaction).await {
+                        Ok(value) => match transaction.commit().await {
+                            Ok(()) => return Ok(value),
+                            Err(error) => {
+                                let error = map_sql_error(error);
+                                if matches!(
+                                    error,
+                                    SettlementTransactionError::SerializationConflict
+                                ) && attempt + 1 < policy.max_attempts
+                                {
+                                    continue;
+                                }
+                                crate::database::observe_retry_exhaustion(
+                                    usize::from(attempt + 1),
+                                    usize::from(policy.max_attempts),
+                                    matches!(
+                                        error,
+                                        SettlementTransactionError::SerializationConflict
+                                    ),
+                                );
+                                return Err(E::from(error));
+                            }
+                        },
                         Err(error) => {
-                            let error = map_sql_error(error);
-                            if matches!(error, SettlementTransactionError::SerializationConflict)
+                            if error.is_serialization_conflict()
                                 && attempt + 1 < policy.max_attempts
                             {
                                 continue;
                             }
-                            return Err(E::from(error));
+                            crate::database::observe_retry_exhaustion(
+                                usize::from(attempt + 1),
+                                usize::from(policy.max_attempts),
+                                error.is_serialization_conflict(),
+                            );
+                            return Err(error);
                         }
-                    },
-                    Err(error) => {
-                        if error.is_serialization_conflict() && attempt + 1 < policy.max_attempts {
-                            continue;
-                        }
-                        return Err(error);
                     }
                 }
-            }
 
-            Err(E::from(SettlementTransactionError::SerializationConflict))
-        }
+                Err(E::from(SettlementTransactionError::SerializationConflict))
+            },
+        )
     }
 }
 

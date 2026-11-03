@@ -1,6 +1,7 @@
 //! 标记 owner：Serializable 命令、逐条竞价事实与独立发送证明。
 //! 所有业务写入持有竞价共用 lot 锁；不从 GET 或代理快照轮询恢复标记。
 
+use crate::database::TrackedTransaction as Transaction;
 mod commands;
 mod facts;
 mod persistence;
@@ -14,7 +15,7 @@ pub(crate) use proof::{
 };
 
 use auction_application::{CompetitionTransactionError, LotWatchError};
-use sqlx::{Postgres, Transaction};
+use sqlx::Postgres;
 use uuid::Uuid;
 
 use persistence::{audit, invalidate, sql_error};

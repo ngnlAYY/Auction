@@ -15,7 +15,7 @@ enum ReconcileTransactionError {
 impl ReconcileTransactionError {
     fn retryable(&self) -> bool {
         match self {
-            Self::Storage(error) => crate::database::is_serialization_conflict(error),
+            Self::Storage(error) => crate::database::observed_serialization_conflict(error),
             Self::Funding(error) => {
                 matches!(error, auction_application::FundingError::SerializationConflict)
             }
@@ -37,6 +37,9 @@ impl ReconcileTransactionError {
 macro_rules! run_reconcile_transaction {
     ($pool:expr, $transaction:ident, $body:block) => {
         crate::database::retry_conflicts(
+    $pool,
+    auction_observability::DatabaseTransactionOwner::Fulfillment,
+
             crate::database::SERIALIZABLE_ATTEMPTS,
             ReconcileTransactionError::retryable,
             || async {
@@ -192,7 +195,7 @@ pub(super) async fn satisfy_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn manual_reconcile_in_transaction(
-    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     obligation_id: Uuid,
     execution_state: &str,
     state_version: u64,
@@ -336,7 +339,7 @@ pub(super) async fn manual_reconcile_postgres(
 
 #[cfg(feature = "postgres")]
 async fn append_manual_reconcile_audit(
-    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     audit_id: Uuid,
     obligation_id: Uuid,
     claim_fencing: i64,
@@ -439,7 +442,7 @@ pub(super) async fn fail_postgres(
 /// 取得 execution 行锁后再校验 TTL，避免锁等待前求值的时钟放过过期 claim。
 #[cfg(feature = "postgres")]
 async fn lock_fulfillment(
-    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     obligation_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -455,7 +458,7 @@ async fn lock_fulfillment(
 #[cfg(feature = "postgres")]
 #[allow(clippy::too_many_arguments)]
 async fn append_terminal_audit(
-    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     audit_id: Uuid,
     claim: &SettlementFulfillmentClaim,
     state: &str,

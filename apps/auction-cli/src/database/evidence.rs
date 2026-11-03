@@ -16,7 +16,9 @@ pub(super) async fn preflight(
     output: &Path,
 ) -> anyhow::Result<()> {
     files::require_private_target(output)?;
-    let store = connect(config_dir, database).await?;
+    let store =
+        connect(config_dir, database, auction_storage::DatabaseConnectionPurpose::CliPreflight)
+            .await?;
     let result = super::preflight(&store, database).await;
     store.postgres_pool().close().await;
     let preflight = result?;
@@ -36,7 +38,9 @@ pub(super) async fn inventory(
     output: &Path,
 ) -> anyhow::Result<()> {
     files::require_private_target(output)?;
-    let store = connect(config_dir, database).await?;
+    let store =
+        connect(config_dir, database, auction_storage::DatabaseConnectionPurpose::CliInventory)
+            .await?;
     let DatabaseStore::Postgres(postgres) = &store;
     let result = postgres.collect_retention_inventory(database).await;
     store.postgres_pool().close().await;
@@ -53,9 +57,13 @@ pub(super) async fn inventory(
     }))
 }
 
-async fn connect(config_dir: &ConfigDir, database: &str) -> anyhow::Result<DatabaseStore> {
+async fn connect(
+    config_dir: &ConfigDir,
+    database: &str,
+    purpose: auction_storage::DatabaseConnectionPurpose,
+) -> anyhow::Result<DatabaseStore> {
     let config = config_dir.load_worker()?;
     let url = config.database_url().context("Worker 配置缺少数据库连接")?;
     DatabaseTarget::parse(url)?.require_database(database)?;
-    super::connect(url).await
+    super::connect(&config, purpose).await
 }

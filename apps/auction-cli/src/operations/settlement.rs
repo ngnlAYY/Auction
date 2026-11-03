@@ -22,7 +22,9 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: SettlementCommand) -> a
     let lot_id = text::command_id(args.lot_id, "lot_id")?;
     // 错误确认或不完整执行声明在连接前拒绝；写入时不得先用新预览阻断原命令重放。
     let command = execution_command(args)?;
-    let (_, store) = super::worker_store(config_dir).await?;
+    let (_, store) =
+        super::worker_store(config_dir, auction_storage::DatabaseConnectionPurpose::CliOperations)
+            .await?;
     let result = async {
         if let Some(command) = command {
             let result = store.resolve_equipment_loss(command).await.context(

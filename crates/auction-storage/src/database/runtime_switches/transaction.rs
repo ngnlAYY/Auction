@@ -85,7 +85,7 @@ pub(super) async fn write(
         .bind(audit_id).bind(serde_json::to_value(&event).map_err(invalid)?).bind(now)
         .execute(&mut *tx).await?;
     if let Err(error) = tx.commit().await {
-        if super::super::backend::is_serialization_conflict(&error) {
+        if super::super::backend::observed_serialization_conflict(&error) {
             return Err(error.into());
         }
         return Err(RuntimeSwitchError::OutcomeUnknown.into());

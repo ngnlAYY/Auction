@@ -12,6 +12,21 @@ pub enum DatabaseStore {
 
 #[cfg(feature = "postgres")]
 impl DatabaseStore {
+    /// 指标关闭只使用 no-op，不能改变事务或连接释放结果。
+    pub fn with_database_recorder(
+        mut self,
+        recorder: auction_observability::DatabaseRecorder,
+    ) -> Self {
+        let Self::Postgres(store) = &mut self;
+        store.pool = store.pool.clone().with_database_recorder(recorder);
+        self
+    }
+
+    pub(crate) fn tracked_postgres_pool(&self) -> &TrackedPool<Postgres> {
+        let Self::Postgres(store) = self;
+        store.pool()
+    }
+
     /// 装配根注入迁移就绪模式；只放宽探针，不改变迁移、备份与恢复的严格边界。
     pub fn with_migration_compatibility_mode(
         mut self,
@@ -54,10 +69,13 @@ impl DatabaseStore {
         audit_health::metrics_source(store.runtime_switches.clone())
     }
 
-    pub async fn connect(database_url: &str) -> Result<Self, StorageError> {
+    pub async fn connect(
+        database_url: &str,
+        profile: DatabaseConnectionProfile,
+    ) -> Result<Self, StorageError> {
         let backend = DatabaseBackend::from_url(database_url)?;
 
-        PostgresStore::connect(database_url)
+        PostgresStore::connect(database_url, profile)
             .await
             .map(Self::Postgres)
             .map_err(|source| StorageError::Connection { backend, source })

@@ -1,10 +1,11 @@
 //! 精确delivery锁验、持久sending与追加现金证据审计。
 
+use crate::database::TrackedTransaction as Transaction;
 use auction_application::{
     DeliveryPreparedExpectation, DeliveryWorkClaim, SettlementInternalEvidenceSnapshot,
 };
 use chrono::{DateTime, Utc};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use super::super::{DeliveryAudit, START_SENDING, append_delivery_audit, worker_state_metadata};

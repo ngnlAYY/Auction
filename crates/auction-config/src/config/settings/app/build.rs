@@ -15,6 +15,8 @@ impl AppConfig {
             log_filter,
             metrics,
             readiness,
+            database_profiles,
+            database_pool,
             tracing,
             shutdown,
             realtime,
@@ -190,6 +192,7 @@ impl AppConfig {
             resolve_http_security_origins(&mut http_security, listen_addr)?;
             validate_http_security(&http_security)?;
         }
+        database_pool.validate(database_profiles, role, http_security.request_timeout_seconds)?;
         let public_uses_unix = role == Role::Public
             && listener.as_ref().is_some_and(|listener| listener.mode == HttpListenMode::Unix);
         if http_security.trusted_unix_proxy && !admin_uses_unix && !public_uses_unix {
@@ -215,6 +218,8 @@ impl AppConfig {
             log_filter,
             metrics,
             readiness,
+            database_profiles,
+            database_pool,
             tracing,
             shutdown,
             realtime,

@@ -24,6 +24,7 @@ pub(crate) struct Deployment {
     paths: [PathBuf; 3],
     strict: bool,
     warnings: Vec<String>,
+    database_budget: super::budget::DatabaseBudgetReport,
 }
 
 #[derive(Serialize)]
@@ -31,6 +32,7 @@ pub(crate) struct DeploymentReport<'a> {
     passed: bool,
     strict: bool,
     database_backend: &'static str,
+    database_budget: &'a super::budget::DatabaseBudgetReport,
     roles: Vec<RoleReport<'a>>,
     worker_control: Option<&'a Endpoint>,
     runtime_config_file: Option<String>,
@@ -54,6 +56,7 @@ impl Deployment {
             passed: true,
             strict: self.strict,
             database_backend: DatabaseBackend::Postgres.name(),
+            database_budget: &self.database_budget,
             roles: [Role::Public, Role::Admin, Role::Worker]
                 .into_iter()
                 .zip(&self.paths)
@@ -128,6 +131,7 @@ pub(crate) fn check(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<Depl
     shared_runtime(&public, &admin, &worker)?;
     admin_worker(&admin, &worker)?;
     worker.validate_backup()?;
+    let database_budget = super::budget::check(&public, &admin, &worker)?;
 
     let public_endpoint = Endpoint::public(&public)?;
     let admin_endpoint = Endpoint::admin(&admin)?;
@@ -159,6 +163,7 @@ pub(crate) fn check(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<Depl
         paths,
         strict,
         warnings: permissions.warnings,
+        database_budget,
     })
 }
 

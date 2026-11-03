@@ -253,7 +253,7 @@ pub(crate) async fn fail(
 }
 
 async fn rollback_error(
-    transaction: sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     message: &str,
 ) -> Result<AdminMailPollState, ApplicationError> {
     let _ = transaction.rollback().await;

@@ -1,6 +1,7 @@
 //! watch owner 的独立发送资格；不借用论坛命令或任意邮件模板证明来源。
 
-use sqlx::{Postgres, Transaction};
+use crate::database::TrackedTransaction as Transaction;
+use sqlx::Postgres;
 use uuid::Uuid;
 
 // SQL 片段只在本 owner 定义，由 delivery 的领取和 sending fence 共用。

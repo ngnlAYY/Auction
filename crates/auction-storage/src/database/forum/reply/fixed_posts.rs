@@ -219,7 +219,7 @@ pub(super) async fn finish_topic_scan_postgres(
 
 /// 先取得内容行锁，再由后续写入检查实时时钟；终态调用方已先锁 auction。
 async fn lock_content_claim(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     topic: &ForumReplyTopic,
 ) -> Result<(), ApplicationError> {
     sqlx::query(
@@ -234,7 +234,7 @@ async fn lock_content_claim(
 
 /// 只认 Worker 实际渲染并证明的版本，不从当前状态反推成功；锁序为 auction → sync。
 async fn lock_terminal_version(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     topic: &ForumReplyTopic,
 ) -> Result<(), ApplicationError> {
     let Some(version) = topic.confirmed_terminal_version else { return Ok(()) };

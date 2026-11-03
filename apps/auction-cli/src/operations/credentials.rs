@@ -17,7 +17,9 @@ use crate::deployment::ConfigDir;
 use crate::support::text;
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: CredentialCommand) -> anyhow::Result<()> {
-    let (config, store) = super::worker_store(config_dir).await?;
+    let (config, store) =
+        super::worker_store(config_dir, auction_storage::DatabaseConnectionPurpose::CliOperations)
+            .await?;
     let result = async {
         let (key_id, key_material) = config
             .credential_data_key_id()

@@ -1,5 +1,6 @@
 //! 唯一现金账本owner；事务helper不提交、不外呼、不决定履约状态。
 
+use crate::database::TrackedTransaction as Transaction;
 mod account;
 mod cash_gate;
 mod classification;
@@ -24,13 +25,13 @@ pub use obligations::{
 };
 
 use auction_application::{FundingError, FundingMutation, SettlementInternalEvidenceSnapshot};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 /// SQL失败仅暴露安全分类；事务owner负责重试40001/40P01并保留原命令。
 /// 历史自寄修复证明与内部履约复用同一映射，不另建副本。
 pub(crate) fn storage(error: sqlx::Error) -> FundingError {
-    if crate::database::is_serialization_conflict(&error) {
+    if crate::database::observed_serialization_conflict(&error) {
         FundingError::SerializationConflict
     } else {
         FundingError::Storage

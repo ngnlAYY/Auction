@@ -37,7 +37,11 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: MailCommand) -> anyhow:
         }
         MailCommand::InspectSent { obligation_id, output } => {
             files::require_private_target(&output)?;
-            let (config, store) = super::worker_store(config_dir).await?;
+            let (config, store) = super::worker_store(
+                config_dir,
+                auction_storage::DatabaseConnectionPurpose::CliOperations,
+            )
+            .await?;
             let result = inspect_sent(&config, &store, obligation_id, &output).await;
             store.postgres_pool().close().await;
             result

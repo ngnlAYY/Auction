@@ -36,7 +36,8 @@ impl From<auction_application::RepositoryError> for DeliveryTransactionError {
 impl DeliveryTransactionError {
     fn is_retryable(&self) -> bool {
         matches!(self, Self::Funding(auction_application::FundingError::SerializationConflict))
-            || matches!(self, Self::Sqlx(error) if crate::database::is_serialization_conflict(error))
+            || matches!(self, Self::Sqlx(error)
+                if crate::database::observed_serialization_conflict(error))
     }
 
     fn into_repository_error(self) -> auction_application::RepositoryError {
@@ -60,85 +61,99 @@ async fn run_serializable_delivery_transaction<T, F>(
 where
     T: Send,
     F: for<'a> FnMut(
-            &'a mut sqlx::Transaction<'static, Postgres>,
+            &'a mut crate::database::TrackedTransaction<'static, Postgres>,
             Option<&'a auction_application::SettlementInternalEvidenceSnapshot>,
         ) -> DeliveryTransactionFuture<'a, T>
         + Send,
 {
-    let deadline = custody.map(|(_, deadline)| deadline);
-    let custody = custody.map(|(snapshot, _)| snapshot);
-    let run = async {
-        for attempt in 0..3 {
-            let mut transaction = match pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await
-            {
-                Ok(transaction) => transaction,
-                Err(error) => {
-                    let error = DeliveryTransactionError::from(error);
-                    if error.is_retryable() && attempt < 2 {
-                        continue;
-                    }
-                    return Err(error.into_repository_error());
-                }
-            };
+    pool.observe_transaction(auction_observability::DatabaseTransactionOwner::Fulfillment, async {
+        let deadline = custody.map(|(_, deadline)| deadline);
+        let custody = custody.map(|(snapshot, _)| snapshot);
+        let run = async {
+            for attempt in 0..3 {
+                let mut transaction =
+                    match pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await {
+                        Ok(transaction) => transaction,
+                        Err(error) => {
+                            let error = DeliveryTransactionError::from(error);
+                            if error.is_retryable() && attempt < 2 {
+                                continue;
+                            }
+                            crate::database::observe_retry_exhaustion(
+                                attempt + 1,
+                                3,
+                                error.is_retryable(),
+                            );
+                            return Err(error.into_repository_error());
+                        }
+                    };
 
-            let operation_result = async {
-                if let Some(custody) = custody {
-                    let budget = (custody.expires_at - Utc::now()).num_milliseconds();
-                    if budget <= 0 {
-                        return Err(DeliveryTransactionError::Funding(
-                            auction_application::FundingError::Unproven,
-                        ));
+                let operation_result = async {
+                    if let Some(custody) = custody {
+                        let budget = (custody.expires_at - Utc::now()).num_milliseconds();
+                        if budget <= 0 {
+                            return Err(DeliveryTransactionError::Funding(
+                                auction_application::FundingError::Unproven,
+                            ));
+                        }
+                        // PostgreSQL 18 整事务预算包含锁等待与 COMMIT，重试不延长证据窗口。
+                        sqlx::query("SELECT set_config('transaction_timeout',$1,true)")
+                            .bind(format!("{budget}ms"))
+                            .execute(&mut *transaction)
+                            .await?;
                     }
-                    // PostgreSQL 18 整事务预算包含锁等待与 COMMIT，重试不延长证据窗口。
-                    sqlx::query("SELECT set_config('transaction_timeout',$1,true)")
-                        .bind(format!("{budget}ms"))
-                        .execute(&mut *transaction)
-                        .await?;
+                    let value = operation(&mut transaction, custody).await?;
+                    if let Some(custody) = custody {
+                        crate::validate_mail_evidence_time(&mut transaction, custody)
+                            .await
+                            .map_err(super::internal::evidence_error)
+                            .map_err(DeliveryTransactionError::Funding)?;
+                    }
+                    Ok(value)
                 }
-                let value = operation(&mut transaction, custody).await?;
-                if let Some(custody) = custody {
-                    crate::validate_mail_evidence_time(&mut transaction, custody)
-                        .await
-                        .map_err(super::internal::evidence_error)
-                        .map_err(DeliveryTransactionError::Funding)?;
-                }
-                Ok(value)
-            }
-            .await;
-            match operation_result {
-                Ok(value) => match transaction.commit().await {
-                    Ok(()) => return Ok(value),
+                .await;
+                match operation_result {
+                    Ok(value) => match transaction.commit().await {
+                        Ok(()) => return Ok(value),
+                        Err(error) => {
+                            let error = DeliveryTransactionError::from(error);
+                            if error.is_retryable() && attempt < 2 {
+                                continue;
+                            }
+                            crate::database::observe_retry_exhaustion(
+                                attempt + 1,
+                                3,
+                                error.is_retryable(),
+                            );
+                            return Err(error.into_repository_error());
+                        }
+                    },
                     Err(error) => {
-                        let error = DeliveryTransactionError::from(error);
-                        if error.is_retryable() && attempt < 2 {
+                        let retryable = error.is_retryable();
+                        let mapped = error.into_repository_error();
+                        if retryable && attempt < 2 {
+                            let _ = transaction.rollback().await;
                             continue;
                         }
-                        return Err(error.into_repository_error());
-                    }
-                },
-                Err(error) => {
-                    let retryable = error.is_retryable();
-                    let mapped = error.into_repository_error();
-                    if retryable && attempt < 2 {
                         let _ = transaction.rollback().await;
-                        continue;
+                        crate::database::observe_retry_exhaustion(attempt + 1, 3, retryable);
+                        return Err(mapped);
                     }
-                    let _ = transaction.rollback().await;
-                    return Err(mapped);
                 }
             }
-        }
 
-        Err(repository_error_owned("Serializable 履约事务重试状态异常"))
-    };
-    if let Some(deadline) = deadline {
-        // 外层覆盖连接池排队；取消或超时由调用方尚未确认的 guard 撤销当前 owner。
-        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), run)
-            .await
-            .map_err(|_| repository_error_owned("退款库存证据提交预算已耗尽"))?
-    } else {
-        run.await
-    }
+            Err(repository_error_owned("Serializable 履约事务重试状态异常"))
+        };
+        if let Some(deadline) = deadline {
+            // 外层覆盖连接池排队；取消或超时由调用方尚未确认的 guard 撤销当前 owner。
+            tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), run)
+                .await
+                .map_err(|_| repository_error_owned("退款库存证据提交预算已耗尽"))?
+        } else {
+            run.await
+        }
+    })
+    .await
 }
 
 #[cfg(feature = "postgres")]

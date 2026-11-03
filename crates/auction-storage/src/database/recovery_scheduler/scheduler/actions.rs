@@ -34,7 +34,8 @@ impl From<auction_application::RepositoryError> for RecoveryActionTransactionErr
 #[cfg(feature = "postgres")]
 impl RecoveryActionTransactionError {
     fn is_retryable(&self) -> bool {
-        matches!(self, Self::Storage(error) if crate::database::is_serialization_conflict(error))
+        matches!(self, Self::Storage(error)
+            if crate::database::observed_serialization_conflict(error))
     }
 
     fn into_repository_error(self) -> auction_application::RepositoryError {
@@ -56,57 +57,68 @@ pub(super) async fn run_serializable_action_transaction<T, F>(
 where
     T: Send,
     F: for<'a> FnMut(
-            &'a mut sqlx::Transaction<'static, Postgres>,
+            &'a mut crate::database::TrackedTransaction<'static, Postgres>,
         ) -> RecoveryActionTransactionFuture<'a, T>
         + Send,
 {
-    for attempt in 0..3 {
-        let mut transaction = match pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await {
-            Ok(transaction) => transaction,
-            Err(error) => {
-                let error = RecoveryActionTransactionError::from(error);
-                if error.is_retryable() && attempt < 2 {
-                    continue;
-                }
-                return Err(error.into_repository_error());
-            }
-        };
-
-        match operation(&mut transaction).await {
-            Ok(value) => match transaction.commit().await {
-                Ok(()) => return Ok(value),
+    pool.observe_transaction(auction_observability::DatabaseTransactionOwner::Recovery, async {
+        for attempt in 0..3 {
+            let mut transaction = match pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await
+            {
+                Ok(transaction) => transaction,
                 Err(error) => {
                     let error = RecoveryActionTransactionError::from(error);
                     if error.is_retryable() && attempt < 2 {
                         continue;
                     }
+                    crate::database::observe_retry_exhaustion(attempt + 1, 3, error.is_retryable());
                     return Err(error.into_repository_error());
                 }
-            },
-            Err(error) => {
-                let retryable = error.is_retryable();
-                let mapped = error.into_repository_error();
-                let _ = transaction.rollback().await;
-                if retryable && attempt < 2 {
-                    continue;
+            };
+
+            match operation(&mut transaction).await {
+                Ok(value) => match transaction.commit().await {
+                    Ok(()) => return Ok(value),
+                    Err(error) => {
+                        let error = RecoveryActionTransactionError::from(error);
+                        if error.is_retryable() && attempt < 2 {
+                            continue;
+                        }
+                        crate::database::observe_retry_exhaustion(
+                            attempt + 1,
+                            3,
+                            error.is_retryable(),
+                        );
+                        return Err(error.into_repository_error());
+                    }
+                },
+                Err(error) => {
+                    let retryable = error.is_retryable();
+                    let mapped = error.into_repository_error();
+                    let _ = transaction.rollback().await;
+                    if retryable && attempt < 2 {
+                        continue;
+                    }
+                    crate::database::observe_retry_exhaustion(attempt + 1, 3, retryable);
+                    return Err(mapped);
                 }
-                return Err(mapped);
             }
         }
-    }
 
-    Err(repository_error("recovery action Serializable 重试状态异常"))
+        Err(repository_error("recovery action Serializable 重试状态异常"))
+    })
+    .await
 }
 
 /// 先锁 action，再由后续 UPDATE 检查实时租约；需要父 case 的调用方必须先锁 recovery。
 #[cfg(feature = "postgres")]
 async fn lock_action(
-    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    transaction: &mut sqlx::PgConnection,
     action_id: Uuid,
 ) -> Result<(), RecoveryActionTransactionError> {
     sqlx::query("SELECT id FROM public.settlement_recovery_actions WHERE id = $1 FOR UPDATE")
         .bind(action_id)
-        .fetch_optional(&mut **transaction)
+        .fetch_optional(&mut *transaction)
         .await
         .map_err(RecoveryActionTransactionError::from)?;
     Ok(())

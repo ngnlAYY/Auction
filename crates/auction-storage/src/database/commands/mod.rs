@@ -99,7 +99,9 @@ impl CompetitionCommandPort for DatabaseCompetitionCommands {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service = CompetitionService::new(Arc::new(store.clone()));
+                    let service = CompetitionService::new(Arc::new(
+                        store.for_transaction(auction_observability::DatabaseTransactionOwner::Bid),
+                    ));
                     service.place_bid(command).await
                 }
             }
@@ -117,7 +119,10 @@ impl CompetitionCommandPort for DatabaseCompetitionCommands {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service = CompetitionService::new(Arc::new(store.clone()));
+                    let service =
+                        CompetitionService::new(Arc::new(store.for_transaction(
+                            auction_observability::DatabaseTransactionOwner::Proxy,
+                        )));
                     service.create_proxy(command).await
                 }
             }
@@ -133,7 +138,10 @@ impl CompetitionCommandPort for DatabaseCompetitionCommands {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service = CompetitionService::new(Arc::new(store.clone()));
+                    let service =
+                        CompetitionService::new(Arc::new(store.for_transaction(
+                            auction_observability::DatabaseTransactionOwner::Proxy,
+                        )));
                     service.lower_proxy(command).await
                 }
             }
@@ -151,7 +159,9 @@ impl SlowProxyCommandPort for DatabaseCompetitionCommands {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service = CompetitionService::new(Arc::new(store.clone()));
+                    let service = CompetitionService::new(Arc::new(store.for_transaction(
+                        auction_observability::DatabaseTransactionOwner::SlowProxy,
+                    )));
                     service.execute_slow_proxy(command).await
                 }
             }
@@ -206,7 +216,9 @@ impl AuctionLifecycleCommandPort for DatabaseAuctionLifecycleCommands {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
                     let service = AuctionLifecycleService::new(
-                        Arc::new(store.clone()),
+                        Arc::new(store.for_transaction(
+                            auction_observability::DatabaseTransactionOwner::Lifecycle,
+                        )),
                         policy,
                         successor_policy,
                     )

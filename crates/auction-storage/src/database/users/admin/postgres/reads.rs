@@ -11,27 +11,30 @@ pub(crate) async fn list_postgres(
     store: &super::super::super::super::PostgresStore,
     request: AdminUserListRequest,
 ) -> Result<AdminUserPage, ApplicationError> {
-    let mut transaction = store
+    store
         .pool()
-        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
-        .await
-        .map_err(map_storage_error)?;
-    let name = request.name.as_deref().filter(|value| !value.is_empty());
-    let status = request.status.map(AdminUserStatus::as_str);
-    let total: i64 = sqlx::query_scalar(
-        "SELECT count(*)
+        .observe_transaction(auction_observability::DatabaseTransactionOwner::Admin, async {
+            let mut transaction = store
+                .pool()
+                .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+                .await
+                .map_err(map_storage_error)?;
+            let name = request.name.as_deref().filter(|value| !value.is_empty());
+            let status = request.status.map(AdminUserStatus::as_str);
+            let total: i64 = sqlx::query_scalar(
+                "SELECT count(*)
          FROM public.users
          WHERE ($1::text IS NULL OR strpos(username, $1) > 0
                 OR strpos(forum_account_id, $1) > 0)
            AND ($2::text IS NULL OR status = $2)",
-    )
-    .bind(name)
-    .bind(status)
-    .fetch_one(&mut *transaction)
-    .await
-    .map_err(map_storage_error)?;
-    let rows = sqlx::query(
-        "SELECT id, username, forum_account_id, status, key_status, state_version,
+            )
+            .bind(name)
+            .bind(status)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(map_storage_error)?;
+            let rows = sqlx::query(
+                "SELECT id, username, forum_account_id, status, key_status, state_version,
                 created_at, updated_at
          FROM public.users
          WHERE ($1::text IS NULL OR strpos(username, $1) > 0
@@ -39,37 +42,42 @@ pub(crate) async fn list_postgres(
            AND ($2::text IS NULL OR status = $2)
          ORDER BY username COLLATE \"C\", id
          LIMIT $3 OFFSET $4",
-    )
-    .bind(name)
-    .bind(status)
-    .bind(request.limit)
-    .bind(request.offset)
-    .fetch_all(&mut *transaction)
-    .await
-    .map_err(map_storage_error)?;
-    let page_users =
-        rows.into_iter().map(|row| map_postgres_user(&row)).collect::<Result<Vec<_>, _>>()?;
-    let user_ids = page_users.iter().map(|user| user.id).collect::<Vec<_>>();
-    let mut histories = load_blacklist_histories_postgres(&mut transaction, &user_ids).await?;
-    let users = page_users
-        .into_iter()
-        .map(|user| {
-            let (blacklist_count, blacklist_history) =
-                histories.remove(&user.id).unwrap_or_default();
-            AdminUserListItem { user, blacklist_count, blacklist_history }
+            )
+            .bind(name)
+            .bind(status)
+            .bind(request.limit)
+            .bind(request.offset)
+            .fetch_all(&mut *transaction)
+            .await
+            .map_err(map_storage_error)?;
+            let page_users = rows
+                .into_iter()
+                .map(|row| map_postgres_user(&row))
+                .collect::<Result<Vec<_>, _>>()?;
+            let user_ids = page_users.iter().map(|user| user.id).collect::<Vec<_>>();
+            let mut histories =
+                load_blacklist_histories_postgres(&mut transaction, &user_ids).await?;
+            let users = page_users
+                .into_iter()
+                .map(|user| {
+                    let (blacklist_count, blacklist_history) =
+                        histories.remove(&user.id).unwrap_or_default();
+                    AdminUserListItem { user, blacklist_count, blacklist_history }
+                })
+                .collect();
+            transaction.commit().await.map_err(map_storage_error)?;
+            let page = AdminUserPage { users, total, limit: request.limit, offset: request.offset };
+            if page.validate(&request) {
+                Ok(page)
+            } else {
+                Err(admin_error(AdminUserError::StoredResultCorrupt))
+            }
         })
-        .collect();
-    transaction.commit().await.map_err(map_storage_error)?;
-    let page = AdminUserPage { users, total, limit: request.limit, offset: request.offset };
-    if page.validate(&request) {
-        Ok(page)
-    } else {
-        Err(admin_error(AdminUserError::StoredResultCorrupt))
-    }
+        .await
 }
 
 async fn load_blacklist_histories_postgres(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     user_ids: &[Uuid],
 ) -> Result<HashMap<Uuid, (i64, Vec<AdminUserBlacklistHistoryEntry>)>, ApplicationError> {
     let mut histories = HashMap::<Uuid, (i64, Vec<AdminUserBlacklistHistoryEntry>)>::new();
@@ -124,7 +132,7 @@ pub(crate) async fn find_command_postgres(
 }
 
 pub(super) async fn load_user_postgres_tx(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     user_id: Uuid,
 ) -> Result<AdminUser, ApplicationError> {
     let row = sqlx::query(
@@ -141,7 +149,7 @@ pub(super) async fn load_user_postgres_tx(
 }
 
 pub(super) async fn load_command_postgres_tx(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: Uuid,
     kind: AdminUserCommandKind,
     request_hash: RequestHash,

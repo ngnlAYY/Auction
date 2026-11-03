@@ -27,7 +27,9 @@ mod evidence;
 const BUDGET: Duration = Duration::from_secs(30);
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: FundsCommand) -> anyhow::Result<()> {
-    let (config, store) = super::worker_store(config_dir).await?;
+    let (config, store) =
+        super::worker_store(config_dir, auction_storage::DatabaseConnectionPurpose::CliOperations)
+            .await?;
     let result = async {
         match command {
             FundsCommand::Preview { uid } => preview(&store, uid).await,

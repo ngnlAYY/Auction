@@ -32,6 +32,7 @@ pub(super) async fn run(
         secrets.database_url(),
         &application.database,
         &application.username,
+        super::profile::resolve(&config, auction_storage::DatabaseConnectionPurpose::CliCreate),
     )
     .await
     .context("连接维护库并取得建库锁失败")?;

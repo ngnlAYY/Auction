@@ -179,7 +179,7 @@ pub(super) async fn authorize(
 }
 
 async fn existing_command(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command: &ForumWriteRetryAuthorizationCommand,
 ) -> Result<Option<ForumWriteRetryAuthorizationResult>, ApplicationError> {
     let Some(row) = sqlx::query(

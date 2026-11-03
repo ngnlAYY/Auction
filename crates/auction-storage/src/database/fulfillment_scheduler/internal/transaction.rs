@@ -1,6 +1,7 @@
 //! Serializable 三次整事务重试；只有确认回滚才允许释放 opaque commit guard。
 
 use super::{conflicts, evidence_error, locks, persistence, sql_error, validation};
+use crate::database::TrackedTransaction as Transaction;
 use crate::settlement_funding;
 use auction_application::{
     FundingCollectedReceipt, FundingError, FundingMutation, SettlementFulfillmentProof,
@@ -8,7 +9,7 @@ use auction_application::{
     SettlementInternalEvidenceSnapshot,
 };
 use auction_domain::InternalSettlementAction;
-use sqlx::{Postgres, Transaction};
+use sqlx::Postgres;
 
 #[tracing::instrument(
     target = "auction::settlement::funding_diagnostics",
@@ -28,88 +29,106 @@ pub(super) async fn run(
     proof: Option<&SettlementFulfillmentProof>,
     external_refund: bool,
 ) -> Result<Outcome, FundingError> {
-    let rejected = |kind, stage, error| diagnose_collected(proof.is_some(), kind, stage, error);
-    for attempt in 0..3 {
-        let mut tx = pool
-            .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
-            .await
-            .map_err(sql_error)
-            .map_err(|error| {
-                rejected("collected_transaction_begin_failed", "transaction_begin", error)
-            })?;
-        let operation = async {
-            persistence::validate_command(
-                command,
-                if external_refund {
-                    "external_refund"
-                } else if proof.is_some() {
-                    "collected"
-                } else {
-                    "internal"
-                },
-            )
-            .map_err(|error| {
-                rejected("collected_transaction_command_failed", "transaction_command", error)
-            })?;
-            if persistence::replay(&mut tx, command).await.map_err(|error| {
-                rejected("collected_transaction_replay_failed", "transaction_replay", error)
-            })? {
-                return Ok(false);
-            }
-            // PostgreSQL 18 的整事务超时覆盖锁等待与commit，不逐语句重置预算。
-            let budget = (evidence.expires_at.min(command.claim.lease_until) - chrono::Utc::now())
-                .num_milliseconds();
-            if budget <= 0 {
-                return Err(rejected(
-                    "collected_transaction_budget_expired",
-                    "transaction_budget",
-                    FundingError::Unproven,
-                ));
-            }
-            sqlx::query("SELECT set_config('transaction_timeout',$1,true)")
-                .bind(format!("{budget}ms"))
-                .execute(&mut *tx)
+    pool.observe_transaction(auction_observability::DatabaseTransactionOwner::Fulfillment, async {
+        let rejected = |kind, stage, error| diagnose_collected(proof.is_some(), kind, stage, error);
+        for attempt in 0..3 {
+            let mut tx = pool
+                .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
                 .await
                 .map_err(sql_error)
                 .map_err(|error| {
-                    rejected(
-                        "collected_transaction_timeout_setup_failed",
-                        "transaction_timeout",
-                        error,
-                    )
+                    rejected("collected_transaction_begin_failed", "transaction_begin", error)
                 })?;
-            apply(&mut tx, command, evidence, proof, external_refund).await
-        }
-        .await;
-        match operation {
-            Ok(frozen) => match tx.commit().await {
-                Ok(()) => {
-                    return Ok(if frozen { Outcome::FundingDeferred } else { Outcome::Committed });
+            let operation = async {
+                persistence::validate_command(
+                    command,
+                    if external_refund {
+                        "external_refund"
+                    } else if proof.is_some() {
+                        "collected"
+                    } else {
+                        "internal"
+                    },
+                )
+                .map_err(|error| {
+                    rejected("collected_transaction_command_failed", "transaction_command", error)
+                })?;
+                if persistence::replay(&mut tx, command).await.map_err(|error| {
+                    rejected("collected_transaction_replay_failed", "transaction_replay", error)
+                })? {
+                    return Ok(false);
                 }
-                Err(error) => match rejected(
-                    "collected_transaction_commit_failed",
-                    "transaction_commit",
-                    sql_error(error),
-                ) {
-                    FundingError::SerializationConflict if attempt < 2 => continue,
-                    FundingError::SerializationConflict => {
-                        return Ok(Outcome::RolledBack(FundingError::SerializationConflict));
+                // PostgreSQL 18 的整事务超时覆盖锁等待与commit，不逐语句重置预算。
+                let budget = (evidence.expires_at.min(command.claim.lease_until)
+                    - chrono::Utc::now())
+                .num_milliseconds();
+                if budget <= 0 {
+                    return Err(rejected(
+                        "collected_transaction_budget_expired",
+                        "transaction_budget",
+                        FundingError::Unproven,
+                    ));
+                }
+                sqlx::query("SELECT set_config('transaction_timeout',$1,true)")
+                    .bind(format!("{budget}ms"))
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(sql_error)
+                    .map_err(|error| {
+                        rejected(
+                            "collected_transaction_timeout_setup_failed",
+                            "transaction_timeout",
+                            error,
+                        )
+                    })?;
+                apply(&mut tx, command, evidence, proof, external_refund).await
+            }
+            .await;
+            match operation {
+                Ok(frozen) => match tx.commit().await {
+                    Ok(()) => {
+                        return Ok(if frozen {
+                            Outcome::FundingDeferred
+                        } else {
+                            Outcome::Committed
+                        });
                     }
-                    error => return Err(error),
+                    Err(error) => match rejected(
+                        "collected_transaction_commit_failed",
+                        "transaction_commit",
+                        sql_error(error),
+                    ) {
+                        FundingError::SerializationConflict if attempt < 2 => continue,
+                        FundingError::SerializationConflict => {
+                            auction_observability::database_transaction_exhausted();
+                            return Ok(Outcome::RolledBack(FundingError::SerializationConflict));
+                        }
+                        error => return Err(error),
+                    },
                 },
-            },
-            Err(error) => {
-                tx.rollback().await.map_err(sql_error).map_err(|error| {
-                    rejected("collected_transaction_rollback_failed", "transaction_rollback", error)
-                })?;
-                if matches!(error, FundingError::SerializationConflict) && attempt < 2 {
-                    continue;
+                Err(error) => {
+                    tx.rollback().await.map_err(sql_error).map_err(|error| {
+                        rejected(
+                            "collected_transaction_rollback_failed",
+                            "transaction_rollback",
+                            error,
+                        )
+                    })?;
+                    if matches!(error, FundingError::SerializationConflict) && attempt < 2 {
+                        continue;
+                    }
+                    crate::database::observe_retry_exhaustion(
+                        attempt + 1,
+                        3,
+                        matches!(error, FundingError::SerializationConflict),
+                    );
+                    return Ok(Outcome::RolledBack(error));
                 }
-                return Ok(Outcome::RolledBack(error));
             }
         }
-    }
-    Ok(Outcome::RolledBack(FundingError::SerializationConflict))
+        Ok(Outcome::RolledBack(FundingError::SerializationConflict))
+    })
+    .await
 }
 
 async fn apply(

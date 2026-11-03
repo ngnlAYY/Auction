@@ -126,7 +126,7 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
 /// 旧prepare/activate/satisfy也遵守同一业务锁序，不能在fulfillment后反锁义务。
 #[cfg(feature = "postgres")]
 pub(super) async fn lock_legacy(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     claim: &auction_application::SettlementFulfillmentClaim,
     custody: Option<(&SettlementInternalEvidenceSnapshot, uuid::Uuid)>,
 ) -> Result<bool, FundingError> {

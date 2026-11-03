@@ -18,10 +18,11 @@ pub(super) async fn acknowledge_postgres(
     event_id: Uuid,
     stream_sequence: i64,
 ) -> Result<(), ApplicationError> {
-    let mut transaction = connection
+    let transaction = connection
         .begin()
         .await
         .map_err(|error| storage_error_from(error, "打开 PostgreSQL 实时游标事务失败"))?;
+    let mut transaction = crate::database::TrackedTransaction::borrowed(transaction);
     let result = acknowledge_postgres_inner(
         &mut transaction,
         consumer_key,
@@ -44,7 +45,7 @@ pub(super) async fn acknowledge_postgres(
 
 #[cfg(feature = "postgres")]
 async fn acknowledge_postgres_inner(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     consumer_key: &str,
     stream_key: &str,
     event_id: Uuid,

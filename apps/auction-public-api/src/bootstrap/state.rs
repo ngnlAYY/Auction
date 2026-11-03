@@ -185,9 +185,10 @@ pub(super) async fn configure_state(
         config.readiness.cache_enabled,
     );
     let store = Arc::new(
-        DatabaseStore::connect(database_url)
+        DatabaseStore::connect(database_url, database_profile(config)?)
             .await
             .context("connect public database")?
+            .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness()),
@@ -397,4 +398,28 @@ pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task
             }
         }
     })
+}
+
+#[cfg(feature = "postgres")]
+fn database_profile(
+    config: &auction_config::AppConfig,
+) -> Result<auction_storage::DatabaseConnectionProfile, auction_config::ConfigError> {
+    use auction_config::{DatabaseProfileMode, Role};
+    use auction_storage::{DatabaseConnectionProfile, DatabaseConnectionPurpose as Purpose};
+    if config.database_profiles.mode == DatabaseProfileMode::Legacy {
+        return Ok(DatabaseConnectionProfile::legacy());
+    }
+    let purpose = match config.role {
+        Role::Public => Purpose::Public,
+        Role::Admin => Purpose::Admin,
+        Role::Worker => Purpose::Worker,
+    };
+    let timeouts =
+        config.database_pool.timeouts()?.map(|value| auction_storage::DatabaseConnectionTimeouts {
+            acquire_millis: value.acquire_timeout_millis,
+            statement_millis: value.statement_timeout_millis,
+            lock_millis: value.lock_timeout_millis,
+            idle_transaction_millis: value.idle_in_transaction_session_timeout_millis,
+        });
+    Ok(DatabaseConnectionProfile::service(purpose, config.database_pool.max_connections, timeouts))
 }

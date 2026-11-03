@@ -1,9 +1,10 @@
 //! PostgreSQL Delivery owner 的同事务追加式审计写入；只接受已校验的低基数状态元数据，
 //! payload、远端原文、Cookie 和密钥永不入审计，写入失败必须回滚调用方事务。
 
+use crate::database::TrackedTransaction as Transaction;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use sqlx::{Postgres, Transaction};
+use sqlx::Postgres;
 use uuid::Uuid;
 
 use crate::database::audit_health::AuditWriteResult as _;

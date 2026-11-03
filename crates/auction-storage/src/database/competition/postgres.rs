@@ -1,3 +1,4 @@
+use crate::database::TrackedTransaction as Transaction;
 use std::future::Future;
 
 use auction_application::{
@@ -20,7 +21,7 @@ use auction_domain::{
 };
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use serde_json::{Value, json};
-use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
+use sqlx::{Postgres, Row, postgres::PgRow};
 use uuid::Uuid;
 
 use crate::database::audit_health::AuditWriteResult as _;
@@ -81,7 +82,7 @@ impl TransactionRunner for PostgresStore {
         E: TransactionFailure,
         F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
     {
-        async move {
+        self.pool().observe_transaction(self.transaction_owner, async move {
             if let Err(error) = TransactionPolicy::new(policy.isolation, policy.max_attempts) {
                 return Err(E::from(error));
             }
@@ -104,6 +105,11 @@ impl TransactionRunner for PostgresStore {
                             {
                                 continue;
                             }
+                            crate::database::observe_retry_exhaustion(
+                                usize::from(attempt + 1),
+                                usize::from(policy.max_attempts),
+                                matches!(error, CompetitionTransactionError::SerializationConflict),
+                            );
                             return Err(E::from(error));
                         }
                     },
@@ -111,13 +117,18 @@ impl TransactionRunner for PostgresStore {
                         if error.is_serialization_conflict() && attempt + 1 < policy.max_attempts {
                             continue;
                         }
+                        crate::database::observe_retry_exhaustion(
+                            usize::from(attempt + 1),
+                            usize::from(policy.max_attempts),
+                            error.is_serialization_conflict(),
+                        );
                         return Err(error);
                     }
                 }
             }
 
             Err(E::from(CompetitionTransactionError::SerializationConflict))
-        }
+        })
     }
 }
 

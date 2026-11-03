@@ -25,7 +25,11 @@ pub(super) async fn run(config_dir: &ConfigDir, args: ConfirmSentArgs) -> anyhow
     // 对类型化内容计算摘要；空白与字段顺序不改变确认身份，任何观察值变化均须重新确认。
     let digest = lower_hex(&Sha256::digest(serde_json::to_vec(&evidence)?));
     let command = execution_command(&args, evidence.clone(), &digest)?;
-    let (_, store) = super::super::worker_store(config_dir).await?;
+    let (_, store) = super::super::worker_store(
+        config_dir,
+        auction_storage::DatabaseConnectionPurpose::CliOperations,
+    )
+    .await?;
     let result = async {
         if let Some(command) = command {
             // 不用最新预览阻断原命令重放；端口负责幂等、CAS 与全部匹配规则。

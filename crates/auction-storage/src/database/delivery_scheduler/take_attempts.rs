@@ -1,9 +1,10 @@
 //! Take 发送前冻结原账号；旧未知动作不能用当前账号的同 MID 观察恢复。
 
+use crate::database::TrackedTransaction as Transaction;
 use auction_application::{DeliveryTakeExpectation, DeliveryWorkClaim};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use sqlx::{Postgres, Transaction};
+use sqlx::Postgres;
 use uuid::Uuid;
 
 /// 冻结账号只服务于已解码 Take 的同世界、同 MID；资产仍由完整 claim payload 拥有。

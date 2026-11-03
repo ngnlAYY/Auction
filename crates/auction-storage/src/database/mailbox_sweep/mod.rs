@@ -534,6 +534,8 @@ async fn begin_compose_discard(
 ) -> Result<bool, auction_application::ApplicationError> {
     // 一次性尝试不是远端成功证明；仅明确中止的冲突可以重试，不重放未知提交。
     crate::database::retry_conflicts(
+        pool,
+        auction_observability::DatabaseTransactionOwner::MailboxSweep,
         crate::database::SERIALIZABLE_ATTEMPTS,
         RecoveryError::retryable,
         || recovery::begin_discard_once(pool, delivery_id, fencing_version, expectation),
@@ -675,6 +677,8 @@ async fn persist_transition(
     update: RecoveryUpdate<'_>,
 ) -> Result<bool, auction_application::ApplicationError> {
     crate::database::retry_conflicts(
+        pool,
+        auction_observability::DatabaseTransactionOwner::MailboxSweep,
         crate::database::SERIALIZABLE_ATTEMPTS,
         RecoveryError::retryable,
         || persist_transition_once(pool, delivery_id, &update),
@@ -956,7 +960,7 @@ impl RecoveryError {
     }
     fn retryable(&self) -> bool {
         match self {
-            Self::Sqlx(error) => crate::database::is_serialization_conflict(error),
+            Self::Sqlx(error) => crate::database::observed_serialization_conflict(error),
             Self::Funding(auction_application::FundingError::SerializationConflict) => true,
             Self::Evidence(error) => error.is_serialization_conflict(),
             _ => false,

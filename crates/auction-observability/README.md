@@ -206,3 +206,87 @@ Worker 观测上下文通过 task-local 窄包装传递，JoinSet 子任务显�
 ## 运行时开关指标
 
 `auction_runtime_switch_refresh_successes_total{role}` 与 `auction_runtime_switch_refresh_failures_total{role}` 为饱和刷新累计；`auction_runtime_switch_snapshot_age_seconds{role}` 表示最后成功快照年龄，未成功为 -1。`auction_runtime_switch_applied_revision{role,switch}` 是已观察事实版本（未设置为 0）；`auction_runtime_switch_effective_value{role,switch}` 中 bool 为 0/1，审计模式 legacy/shadow/classified 为 0/1/2。Worker 不导出不适用的 HTTP 缓存项。标签只来自 Rust 闭集角色和名称；collector 只读内存，scrape 不查数据库，也不重复累计。角色实际值的到期回落会在 scrape 时重新解析。 exporter 关闭不影响刷新或审计累计。操作见[运行时开关](../../ops/README.md#运行时开关)。
+
+## 数据库事务与连接观测
+
+数据库 recorder 由 `ProcessMetrics::database` 注入存储适配器，
+两种连接模式均使用同一口径；关闭指标时为 no-op，不执行 SQL 或建立监听。
+保留已有 `auction_postgres_pool_*` 名称与含义。
+
+新增计数器如下，未注明时标签为 `{owner,phase}`：
+
+- `auction_db_transactions_total{owner,outcome,phase}`：完整 owner 操作。
+- `auction_db_transaction_attempts_total`：实际进入的事务尝试。
+- `auction_db_transaction_conflicts_total{owner,kind,phase,site}`：冲突失败尝试，
+  每次尝试只计一次，含最后一次；重复错误映射不增加计数。
+- `auction_db_transaction_conflicted_total`：遇过冲突的完整操作，只计一次。
+- `auction_db_transaction_retries_total`：冲突后真正进入下一次事务尝试。
+- `auction_db_transaction_retry_exhausted_total`：owner 已确认用尽原尝试预算。
+  Deferred、RolledBack 的原返回值保持不变，计数不依赖它是否表现为 Err。
+
+`owner` 初始闭集共 21 项：
+
+```text
+bid proxy slow_proxy lifecycle settlement fulfillment funding
+delivery_claim delivery_fence delivery_outcome delivery_admin recovery
+mail_intake mailbox_sweep scheduler public_identity public_watch admin
+runtime_switch equipment_loss sent_confirmation
+```
+
+`outcome` 为 success、error、exhausted、canceled；
+`kind` 为 serialization_failure（40001）、deadlock（40P01）；
+`phase` 为 final、non_final、unknown、not_applicable；
+`site` 为 realtime_sequence、other、unknown。
+
+owner 由存储命令边界或原事务 runner 选择，不取 HTTP 路由、用户或业务 ID。
+Final 来自事务内权威快照，取不到就记 unknown；不为标签额外查库。
+尝试结束时才按已取得的 phase 累计，取消也通过守卫收口。
+序号分配 SQL 明确失败记 realtime_sequence；COMMIT 冲突不能由 SQLSTATE 推断热点。
+比率分别计算“冲突尝试/全部尝试”和“遇冲突操作/全部操作”，不能混用分母。
+Final 耗尽需单独看绝对次数，unknown 未解释前不宣称 Final 零耗尽。
+
+连接生命周期指标：
+
+- `auction_worker_db_acquire_duration_seconds{loop,outcome}`：获取等待秒数。
+  outcome 为 success、timeout、error、canceled，失败等待也计入。
+- `auction_worker_db_connection_hold_duration_seconds{loop}`：应用持有秒数。
+- `auction_worker_db_connections{loop}`：当前应用借出数，取消与异常自动扣回。
+- `auction_db_reserved_connections{purpose}`：长期所有权/订阅预留数。
+  purpose 为 mail_ownership、forum_ownership、realtime_ownership、delivery_listener。
+
+两个直方图有限桶为 0.001、0.005、0.01、0.05、0.1、0.5、1、5、30、120 秒，
+另含 +Inf。loop 严格复用 WorkerLoop 的 15 项闭集：
+
+```text
+mail-main mail-isekai mail-maintenance-main mail-maintenance-isekai
+mail-read-observation-main mail-read-observation-isekai delivery auction
+auction-fulfillment auction-recovery forum realtime operations-alert-scan
+operations-alert-dispatch operations-alert-reconcile
+```
+持有守卫随普通 Executor、显式 acquire 和事务移动，覆盖 commit/rollback await；
+不依赖 after_release，不把 SQLx 后台回滚/归池耗时冒充应用持有时间。
+已有池 gauge 仍反映真实池大小与借出数，raw 迁移/LISTEN 获取不伪造 acquisition。
+
+`scope_database_worker_loop` 设置无监听 task-local 归属，
+`current_database_worker_loop` 供存储读取。jobs 的 `diagnostics::scope` 同时设置
+诊断与连接观测的同一个 WorkerLoop；`inherit` 在创建子任务 future 时捕获现有身份，
+再在子任务中进入同一个 scope，不另建循环或改变 W0.3 计数。
+新任务不会自动继承 Tokio task-local，业务 JoinSet 子任务显式使用 `inherit`。
+
+覆盖邮件收件、独立维护与 Read 观察、投递、拍卖生命周期与慢速代理、结算履约、
+恢复、论坛同步/回帖/PM、实时消费，以及告警扫描/分发/对账。
+生命周期、结算、慢速代理、履约、恢复 action 和投递工作项的子任务继承父循环身份。
+常驻根任务在各自已有入口建立 scope；邮件独立维护与 Read 观察阶段使用各自的嵌套
+scope，结束或取消后恢复外层归属。旧版邮件三分支 join 仍沿用收件循环身份，
+不改变原有诊断与轮次口径。这里没有新增或移动循环入口。
+
+启动装配、角色心跳、运行时开关刷新、凭据所有权 sticky 状态监视、control 服务、
+loopback 指标服务和 tracing 刷新/关闭不属于业务循环，不设置 WorkerLoop。
+这些任务的数据库活动仍反映在已有总池指标中，不伪装成某个业务循环。
+连接生命周期只统计获取/持有/释放；`auction_worker_task_panics_total` 仍只由既有
+join 收口记录，两个 recorder 分别注册于数据库与 Worker owner，不互相增加计数。
+ownership/LISTEN 只进 reserved gauge，不混入普通循环持有时长。
+LISTEN 的预留生命周期为成功订阅到订阅对象销毁，重连瞬间不作为物理连接精确快照。
+
+所有标签均为代码闭集，不包含 SQL、连接串、Cookie、正文、主键或错误原文。
+计数、scope 与守卫不能决定重试、锁、证据期限、结果或缓存命中行为。

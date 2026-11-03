@@ -28,6 +28,7 @@ pub(super) async fn create_postgres(
     max_public_sessions: u32,
 ) -> Result<PublicSessionIdentity, ApplicationError> {
     store
+        .for_transaction(auction_observability::DatabaseTransactionOwner::PublicIdentity)
         .run(TransactionPolicy::serializable(), |transaction| {
             Box::pin(create_locked(transaction, record, max_public_sessions))
         })

@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::Context;
 use auction_config::{AppConfig, Role};
 
+mod budget;
 mod check;
 mod listener;
 mod summary;

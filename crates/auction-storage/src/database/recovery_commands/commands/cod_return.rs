@@ -17,9 +17,13 @@ pub(in crate::database::recovery_commands) async fn advance_cod_return_postgres(
     now: DateTime<Utc>,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
     // 退回卖家时要锁补偿池，可能与任一世界的结算发生序列化冲突；冲突有界重试。
-    crate::database::retry_conflicts(crate::database::SERIALIZABLE_ATTEMPTS, is_conflict, || {
-        advance_cod_return_postgres_once(pool, now)
-    })
+    crate::database::retry_conflicts(
+        pool,
+        auction_observability::DatabaseTransactionOwner::Recovery,
+        crate::database::SERIALIZABLE_ATTEMPTS,
+        is_conflict,
+        || advance_cod_return_postgres_once(pool, now),
+    )
     .await
 }
 

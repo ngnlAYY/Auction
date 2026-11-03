@@ -321,8 +321,7 @@ const fn config_role(role: ManagedRole) -> auction_config::Role {
 
 #[cfg(feature = "postgres")]
 async fn migrate(deployment: &Deployment) -> anyhow::Result<serde_json::Value> {
-    let url = deployment.worker.database_url().context("Worker 缺少数据库连接")?;
-    let report = crate::database::apply_migrations(url).await?;
+    let report = crate::database::apply_migrations(&deployment.worker).await?;
     Ok(serde_json::to_value(report)?)
 }
 

@@ -38,7 +38,7 @@ enum ClaimError {
 
 impl ClaimError {
     fn is_retryable(&self) -> bool {
-        matches!(self, Self::Sqlx(error) if crate::database::is_serialization_conflict(error))
+        matches!(self, Self::Sqlx(error) if crate::database::observed_serialization_conflict(error))
     }
 
     fn into_repository(self) -> auction_application::RepositoryError {
@@ -65,18 +65,28 @@ pub(super) async fn claim_postgres(
     lease_until: DateTime<Utc>,
     limit: u16,
 ) -> Result<Vec<SettlementWorkClaim>, auction_application::RepositoryError> {
-    for attempt in 1..=CLAIM_TRANSACTION_ATTEMPTS {
-        match claim_transaction(pool, worker_id, now, lease_until, limit).await {
-            Ok(claims) => return Ok(claims),
-            Err(error) if error.is_retryable() && attempt < CLAIM_TRANSACTION_ATTEMPTS => {
-                // 与竞价/结算相同，含首次最多三次；每次从新事务开始，保留有界线性退避。
-                tokio::time::sleep(CLAIM_RETRY_BASE_DELAY.saturating_mul(attempt as u32)).await;
+    pool.observe_transaction(auction_observability::DatabaseTransactionOwner::Settlement, async {
+        for attempt in 1..=CLAIM_TRANSACTION_ATTEMPTS {
+            match claim_transaction(pool, worker_id, now, lease_until, limit).await {
+                Ok(claims) => return Ok(claims),
+                Err(error) if error.is_retryable() && attempt < CLAIM_TRANSACTION_ATTEMPTS => {
+                    // 与竞价/结算相同，含首次最多三次；每次从新事务开始，保留有界线性退避。
+                    tokio::time::sleep(CLAIM_RETRY_BASE_DELAY.saturating_mul(attempt as u32)).await;
+                }
+                Err(error) => {
+                    crate::database::observe_retry_exhaustion(
+                        attempt,
+                        CLAIM_TRANSACTION_ATTEMPTS,
+                        error.is_retryable(),
+                    );
+                    return Err(error.into_repository());
+                }
             }
-            Err(error) => return Err(error.into_repository()),
         }
-    }
-    // 循环的最后一次尝试总会返回；这里只为未来改动留下失败关闭的出口，不以 panic 终止 Worker。
-    Err(repository_failure("结算领取事务重试次数耗尽"))
+        // 循环的最后一次尝试总会返回；这里只为未来改动留下失败关闭的出口，不以 panic 终止 Worker。
+        Err(repository_failure("结算领取事务重试次数耗尽"))
+    })
+    .await
 }
 
 async fn claim_transaction(

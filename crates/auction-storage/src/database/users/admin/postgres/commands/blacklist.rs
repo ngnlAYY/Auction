@@ -12,6 +12,8 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
 ) -> Result<RecoveryBuyerBlacklistResult, ApplicationError> {
     // 与竞价事务共用三次以内的有界策略；每次重试仍借用同一命令、摘要和历史时间。
     crate::database::retry_conflicts(
+        store.pool(),
+        auction_observability::DatabaseTransactionOwner::Admin,
         usize::from(TransactionPolicy::serializable().max_attempts),
         ApplicationError::is_serialization_conflict,
         || ensure_recovery_blacklist_postgres_once(store, &command),
@@ -140,7 +142,7 @@ async fn ensure_recovery_blacklist_postgres_once(
 /// 锁顺序固定为 lot -> proxy，调用方随后必须锁 user，再撤销 session，与竞价和登录事务一致。
 /// 每个代理转换写入确定性拍卖子命令，使追加式转换的 `origin_command_id` 始终有账本证据。
 pub(super) async fn freeze_blacklist_proxies_postgres(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     source_command_id: Uuid,
     user_id: Uuid,
     now: DateTime<Utc>,
@@ -294,7 +296,7 @@ pub(super) async fn freeze_blacklist_proxies_postgres(
 
 /// 调用方须已持有 user 行锁；会话撤销不能早于用户锁，避免与登录或偏好写入反向等待。
 pub(super) async fn revoke_public_sessions_postgres(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     user_id: Uuid,
     now: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {

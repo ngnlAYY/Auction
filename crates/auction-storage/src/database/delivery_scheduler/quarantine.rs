@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) async fn quarantine_mail_dispositions(
-    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     now: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
     let rows = sqlx::query(concat!(

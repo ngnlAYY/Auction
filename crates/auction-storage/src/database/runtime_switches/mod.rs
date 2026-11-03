@@ -19,9 +19,18 @@ impl RuntimeSwitchStore for DatabaseStore {
         let Self::Postgres(store) = self;
         Box::pin(async move {
             command.validate()?;
-            super::backend::retry_conflicts(super::backend::SERIALIZABLE_ATTEMPTS,
-                |error| matches!(error, transaction::WriteError::Sql(error) if super::backend::is_serialization_conflict(error)),
-                || transaction::write(store, &command)).await.map_err(transaction::WriteError::public)
+            super::backend::retry_conflicts(
+                store.pool(),
+                auction_observability::DatabaseTransactionOwner::RuntimeSwitch,
+                super::backend::SERIALIZABLE_ATTEMPTS,
+                |error| {
+                    matches!(error, transaction::WriteError::Sql(error)
+                    if super::backend::observed_serialization_conflict(error))
+                },
+                || transaction::write(store, &command),
+            )
+            .await
+            .map_err(transaction::WriteError::public)
         })
     }
 }

@@ -11,17 +11,18 @@ pub(crate) mod watch_pm;
 
 use std::sync::Arc;
 
-use anyhow::Context;
 use auction_config::AppConfig;
 use auction_storage::DatabaseStore;
 
 use crate::deployment::ConfigDir;
 
 /// 连接 Worker 配置的数据库，返回配置与共享存储。
-async fn worker_store(config_dir: &ConfigDir) -> anyhow::Result<(AppConfig, Arc<DatabaseStore>)> {
+async fn worker_store(
+    config_dir: &ConfigDir,
+    purpose: auction_storage::DatabaseConnectionPurpose,
+) -> anyhow::Result<(AppConfig, Arc<DatabaseStore>)> {
     let config = config_dir.load_worker()?;
-    let url = config.database_url().context("Worker 配置缺少数据库连接")?;
-    let store = Arc::new(crate::database::connect(url).await?);
+    let store = Arc::new(crate::database::connect(&config, purpose).await?);
     Ok((config, store))
 }
 

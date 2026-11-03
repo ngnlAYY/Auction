@@ -1,7 +1,8 @@
 //! 结算初次领取时的 lot 锁和 due 世代校验。
 
+use crate::database::TrackedTransaction as Transaction;
 use chrono::{DateTime, Utc};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 /// 锁定同一拍卖的全部 lot，并确认软截止没有在拍卖行锁之后发生变化。

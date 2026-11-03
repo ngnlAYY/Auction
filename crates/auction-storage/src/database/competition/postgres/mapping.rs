@@ -153,7 +153,7 @@ pub(crate) const fn begin_statement(isolation: TransactionIsolation) -> &'static
 }
 
 pub(crate) fn map_sql_error(error: sqlx::Error) -> CompetitionTransactionError {
-    if crate::database::is_serialization_conflict(&error) {
+    if crate::database::observed_serialization_conflict(&error) {
         CompetitionTransactionError::SerializationConflict
     } else if is_unique_error(&error) {
         CompetitionTransactionError::Conflict

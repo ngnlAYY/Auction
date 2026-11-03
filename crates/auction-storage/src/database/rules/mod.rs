@@ -1,5 +1,6 @@
 //! Public 规则文档查询与 Admin 发布适配器的稳定出口；规则事务和读模型位于子模块。
 
+use crate::database::TrackedTransaction as Transaction;
 #[cfg(feature = "postgres")]
 use std::future::Future;
 
@@ -16,9 +17,9 @@ use auction_application::{
 use chrono::{DateTime, Utc};
 #[cfg(feature = "postgres")]
 use serde_json::{Value, json};
-use sqlx::Row;
 #[cfg(feature = "postgres")]
-use sqlx::{Postgres, Transaction};
+use sqlx::Postgres;
+use sqlx::Row;
 #[cfg(feature = "postgres")]
 use uuid::Uuid;
 

@@ -14,12 +14,20 @@ use std::{
     time::Instant,
 };
 
-use auction_observability::PoolMetricsSnapshot;
+use auction_observability::{
+    DatabaseAcquireOutcome, DatabaseConflictSite, DatabaseRecorder, DatabaseReservedPurpose,
+    DatabaseTransactionOwner, PoolMetricsSnapshot, WorkerLoop, current_database_worker_loop,
+};
 use futures_util::{TryStreamExt, future::BoxFuture, stream::BoxStream};
 use sqlx::{
-    Database, Either, Execute, Executor, Pool, SqlSafeStr, SqlStr, Transaction,
+    Database, Either, Execute, Executor, Pool, SqlSafeStr, SqlStr, Transaction as SqlxTransaction,
     pool::PoolConnection,
 };
+
+mod lease;
+use TrackedTransaction as Transaction;
+pub(crate) use lease::TrackedConnection;
+pub use lease::TrackedTransaction;
 
 #[cfg(feature = "postgres")]
 mod metrics;
@@ -76,6 +84,7 @@ where
 {
     pool: Pool<DB>,
     metrics: Arc<PoolMetrics>,
+    recorder: DatabaseRecorder,
 }
 
 impl<DB> Clone for TrackedPool<DB>
@@ -83,7 +92,11 @@ where
     DB: Database,
 {
     fn clone(&self) -> Self {
-        Self { pool: self.pool.clone(), metrics: Arc::clone(&self.metrics) }
+        Self {
+            pool: self.pool.clone(),
+            metrics: Arc::clone(&self.metrics),
+            recorder: self.recorder.clone(),
+        }
     }
 }
 
@@ -101,7 +114,28 @@ where
     DB: Database,
 {
     pub(crate) fn new(pool: Pool<DB>) -> Self {
-        Self { pool, metrics: Arc::new(PoolMetrics::default()) }
+        Self {
+            pool,
+            metrics: Arc::new(PoolMetrics::default()),
+            recorder: DatabaseRecorder::default(),
+        }
+    }
+
+    pub(crate) fn with_database_recorder(mut self, recorder: DatabaseRecorder) -> Self {
+        self.recorder = recorder;
+        self
+    }
+
+    pub(crate) fn recorder(&self) -> &DatabaseRecorder {
+        &self.recorder
+    }
+
+    pub(crate) async fn observe_transaction<T, E>(
+        &self,
+        owner: DatabaseTransactionOwner,
+        future: impl Future<Output = Result<T, E>>,
+    ) -> Result<T, E> {
+        self.recorder.transaction(owner, future).await
     }
 
     pub(crate) fn raw(&self) -> &Pool<DB> {
@@ -114,6 +148,17 @@ where
 
     /// 开始一次可取消的 acquisition，并记录池是否当时没有空闲连接。
     pub(crate) fn acquire(&self) -> TrackedAcquire<'_, DB> {
+        self.acquire_for(None)
+    }
+
+    pub(crate) fn acquire_reserved(
+        &self,
+        purpose: DatabaseReservedPurpose,
+    ) -> TrackedAcquire<'_, DB> {
+        self.acquire_for(Some(purpose))
+    }
+
+    fn acquire_for(&self, reserved: Option<DatabaseReservedPurpose>) -> TrackedAcquire<'_, DB> {
         let empty = self.pool.num_idle() == 0;
         let constructing = empty && self.pool.size() < self.pool.options().get_max_connections();
         if empty {
@@ -125,6 +170,9 @@ where
         TrackedAcquire {
             inner: Box::pin(self.pool.acquire()),
             metrics: Arc::clone(&self.metrics),
+            recorder: self.recorder.clone(),
+            loop_kind: if reserved.is_none() { current_database_worker_loop() } else { None },
+            reserved,
             started_at: Instant::now(),
             empty,
             constructing,
@@ -154,8 +202,17 @@ where
     ) -> BoxFuture<'static, Result<Transaction<'static, DB>, sqlx::Error>> {
         let pool = self.clone();
         Box::pin(async move {
+            auction_observability::database_transaction_attempt();
             let connection = pool.acquire().await?;
-            Transaction::begin(connection, statement).await
+            let (connection, guard) = connection.into_parts();
+            let result = SqlxTransaction::begin(connection, statement).await;
+            match result {
+                Ok(transaction) => Ok(Transaction::new(transaction, guard)),
+                Err(error) => {
+                    observe_sql_error(&error, DatabaseConflictSite::Unknown);
+                    Err(error)
+                }
+            }
         })
     }
 }
@@ -178,6 +235,9 @@ where
 {
     inner: Pin<Box<dyn Future<Output = Result<PoolConnection<DB>, sqlx::Error>> + Send + 'a>>,
     metrics: Arc<PoolMetrics>,
+    recorder: DatabaseRecorder,
+    loop_kind: Option<WorkerLoop>,
+    reserved: Option<DatabaseReservedPurpose>,
     started_at: Instant,
     empty: bool,
     constructing: bool,
@@ -189,7 +249,7 @@ impl<DB> Future for TrackedAcquire<'_, DB>
 where
     DB: Database,
 {
-    type Output = Result<PoolConnection<DB>, sqlx::Error>;
+    type Output = Result<TrackedConnection<DB>, sqlx::Error>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -215,7 +275,22 @@ where
                 if this.constructing {
                     this.metrics.constructing_connections.fetch_sub(1, Ordering::Relaxed);
                 }
-                Poll::Ready(result)
+                let outcome = match &result {
+                    Ok(_) => DatabaseAcquireOutcome::Success,
+                    Err(sqlx::Error::PoolTimedOut) => DatabaseAcquireOutcome::Timeout,
+                    Err(error) => {
+                        observe_sql_error(error, DatabaseConflictSite::Unknown);
+                        DatabaseAcquireOutcome::Error
+                    }
+                };
+                this.recorder.acquire(this.loop_kind, outcome, elapsed);
+                Poll::Ready(result.map(|connection| {
+                    let guard = match this.reserved {
+                        Some(purpose) => this.recorder.reserve(purpose),
+                        None => this.recorder.hold(this.loop_kind),
+                    };
+                    TrackedConnection::new(connection, guard)
+                }))
             }
         }
     }
@@ -231,6 +306,11 @@ where
         }
         if self.started && !self.finished {
             self.metrics.canceled_acquires.fetch_add(1, Ordering::Relaxed);
+            self.recorder.acquire(
+                self.loop_kind,
+                DatabaseAcquireOutcome::Canceled,
+                self.started_at.elapsed(),
+            );
             if self.empty {
                 PoolMetrics::add_duration(
                     &self.metrics.empty_acquire_wait_duration_nanos,
@@ -309,5 +389,14 @@ where
             let mut connection = pool.acquire().await?;
             (&mut *connection).describe(sql).await
         })
+    }
+}
+
+/// 原 SQLSTATE 的窄投影；冲突谓词本身保持纯函数。
+pub(crate) fn observe_sql_error(error: &sqlx::Error, site: DatabaseConflictSite) {
+    if let Some(database) = error.as_database_error()
+        && let Some(code) = database.code()
+    {
+        auction_observability::record_database_conflict(&code, site);
     }
 }

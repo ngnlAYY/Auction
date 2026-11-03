@@ -95,7 +95,7 @@ pub(super) fn deleted_result(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn insert_command(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: Uuid,
     kind: AdminCredentialCommandKind,
     request_hash: RequestHash,
@@ -126,7 +126,7 @@ pub(super) async fn insert_command(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn insert_audit(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: Uuid,
     kind: AdminCredentialCommandKind,
     credential_id: Uuid,
@@ -156,7 +156,7 @@ pub(super) async fn insert_audit(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn lock_command(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: Uuid,
 ) -> Result<(), ApplicationError> {
     crate::database::lock_command_id(transaction, command_id).await.map_err(map_storage_error)

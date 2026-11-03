@@ -1,11 +1,12 @@
 //! Credits Send资金授权；所有远端观察已在持同session的业务事务外完成。
 
+use crate::database::TrackedTransaction as Transaction;
 use auction_application::{
     DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliveryWorkClaim, FundingMutation,
     InternalEvidencePurpose, SettlementInternalEvidenceSnapshot,
 };
 use chrono::{DateTime, Utc};
-use sqlx::{Postgres, Transaction};
+use sqlx::Postgres;
 use uuid::Uuid;
 
 use super::{

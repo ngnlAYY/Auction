@@ -23,7 +23,12 @@ impl LotWatchPreferencePort for DatabaseStore {
     fn set(&self, command: SetLotWatchPreferenceCommand) -> LotWatchFuture<'_, LotWatchPreference> {
         Box::pin(async move {
             let Self::Postgres(store) = self;
-            auction_application::set_lot_watch_preference(store, command).await
+            auction_application::set_lot_watch_preference(
+                &store
+                    .for_transaction(auction_observability::DatabaseTransactionOwner::PublicWatch),
+                command,
+            )
+            .await
         })
     }
 }

@@ -13,7 +13,9 @@ use crate::deployment::ConfigDir;
 use crate::support::text;
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: ForumCommand) -> anyhow::Result<()> {
-    let (_, store) = super::worker_store(config_dir).await?;
+    let (_, store) =
+        super::worker_store(config_dir, auction_storage::DatabaseConnectionPurpose::CliOperations)
+            .await?;
     let result = async {
         match command {
             ForumCommand::Recovery { limit } => {

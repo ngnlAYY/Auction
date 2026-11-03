@@ -299,3 +299,66 @@ Worker 新路径在首次停止时关闭入口，立即取消尚未登记交接�
 这是“部署字段来自 TOML”的明确行为覆盖例外，不引入环境变量覆盖，也不扩展 AdminRuntimeDocument。`readiness_audit_failure_mode` 取 legacy/shadow/classified，对应三角色 `[readiness] audit_failure_mode`；`readiness_cache_enabled` 取布尔，对应 Public/Admin `[readiness] cache_enabled`。优先级为最新且未过期的数据库 set → 启动时 TOML 基线；clear、expire、过期或未设置均取基线。修改 TOML 不会改动数据库事实，无期限 override 会继续覆盖。
 
 三角色五秒刷新，单次一秒预算；首次失败保留基线，后续失败保留最后成功快照，但仍按原数据库期限回落。默认基线仍为 shadow/true；切 classified 仍需用户审阅影子样本。切换不清零审计累计；策略版本变化立即使旧 HTTP 就绪缓存失效。Worker control 不使用 HTTP 就绪缓存。`migration_compatibility_mode`、排空预算、邮件隔离和指标转发开关本批继续重启生效；W7.10 的 runtime 文件预算热读取也不在本批范围。操作与 stale 诊断见[运维手册](../README.md#运行时开关)。
+
+## 数据库连接分档
+
+公共文件的 `[database_profiles] mode` 为 `profiled`（默认）或 `legacy`。
+未知模式在 TOML 解析时拒绝；连接参数只在建连时应用，修改须重启。
+重启受 W7.5 停机门禁约束，本批不接入 W7.7。
+长期凭据与 realtime 会话已借出，修改池选项不能在线改写它们；
+强制轮换会释放所有权锁，因此不支持靠替换池实现无重启切换。
+
+`profiled` 按代码中的用途枚举指定 `application_name`，不开放任意名称。
+三服务名称为 `auction-public`、`auction-admin`、`auction-worker`。
+CLI 名称按入口区分，见 [CLI 连接用途](../../apps/auction-cli/README.md#数据库连接用途)。
+关闭服务超时时仅设置服务名称，沿用 30 秒 acquire 与服务器既有会话设置。
+`legacy` 固定池上限 16、acquire 30 秒，不显式设置名称或任何会话参数。
+两种模式均保留原池指标及新增事务观测，指标关闭不改变业务结果。
+
+三个角色文件各有 `[database_pool]`：
+
+- `max_connections` 默认 16，表示物理池总上限，包含长期 owner。
+  Public 预留 1，Admin 预留 0，Worker 按最坏情况预留 3；
+  扣除后至少剩 1 个普通连接。Worker 的 3 个分别为邮件、论坛与 LISTEN。
+- `timeouts_enabled` 默认 false；与 `mode = "legacy"` 同时启用会失败。
+- `acquire_timeout_millis`、`statement_timeout_millis`、
+  `lock_timeout_millis` 均无隐式默认值，启用时必须全部显式填写。
+  候选值分别为 2000、5000、1000，不能将候选值理解为默认启用值。
+  三者范围为 1–120000ms，且 lock 必须短于 statement。
+- Public/Admin 的 acquire 必须严格短于有效 HTTP `request_timeout`；
+  Admin 在 runtime 覆盖完成后校验。Worker 无 HTTP 请求期限。
+  这不保证多条语句和多次事务尝试的总耗时小于 HTTP 期限。
+- `idle_in_transaction_session_timeout_millis` 默认 0，范围 0–3600000ms。
+  服务超时开关关闭时不写入；开启后 0 表示禁用该单项。
+  非零可能产生 `25P03`；按决策 71 仍归 unknown，可能粘滞阻断 readiness，
+  必须由用户另行决定，不能因 W0.14 已部署就自动启用。
+
+服务超时仅在以下条件全部满足后由用户启用：W0.14 已部署；
+按决策 72 观察完整 Final 与结算周期，差异仅在预期瞬时类别；
+三角色有效 readiness 策略均为 `classified`；指标可采集并查看。
+配置加载不会查询数据库来证明这些线上前置条件。
+回退顺序为先关闭服务超时并重启，再考虑切回 readiness 旧模式。
+
+维护策略位于公共文件的 `[database_profiles.maintenance]`：
+`max_connections` 默认 4，`acquire_timeout_millis` 默认 30000。
+profiled 维护档的基础 `statement_timeout` 显式为 0，不套用服务档短超时。
+已有 owner 限界保留：建库/重建 30 秒语句与 5 秒锁等待；
+恢复预检/保留盘点 5 秒语句与 1 秒锁等待，以及证据事务的局部限界。
+池的 `after_connect` 与直连复用固定 GUC 名、绑定值的单次 `set_config` 初始化；
+设置失败的连接不交给 owner。驱动 UTC、TLS 与目标解析规则不变。
+`SET LOCAL` 在事务内覆盖会话值，事务结束后恢复，并非自动取最小值。
+
+部署预算位于公共文件的 `[database_profiles.budget]`，均为规划声明：
+
+- `max_connections = 100`。
+- `superuser_reserved_connections = 3`，`reserved_connections = 0`；
+  reserve 初值待用户核实线上，工具不宣称已经验证服务器值。
+- `max_concurrent_cli = 2`，只声明预算并行数，不强制调度 CLI 进程。
+- `external_reserved_connections = 8`，覆盖独立 guard、外部备份程序、
+  exporter 与人工运维会话；不是从服务池再次扣减长期 owner。
+
+`auction-cli config check` 汇总一组 Public/Admin/Worker 的实际池上限，
+加上并行 CLI 池与外部预留，和扣除服务器 reserve 后的普通连接上限比较。
+profiled 超预算失败，legacy 只展示预算，保留旧路径。
+每增加实例都要另计服务池，不能把一个配置目录的核对当作全主机发现。
+`config show` 仅输出非敏感配置和实际池上限，不输出 URL 或凭据。

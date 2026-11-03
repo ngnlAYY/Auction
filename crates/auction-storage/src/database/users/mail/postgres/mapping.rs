@@ -23,7 +23,7 @@ pub(super) fn registration_user(row: &PgRow) -> Result<RegistrationUser, Applica
 }
 
 pub(super) async fn forum_only_identity(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     user_id: Uuid,
 ) -> Result<bool, ApplicationError> {
     sqlx::query_scalar(
@@ -40,7 +40,7 @@ pub(super) async fn forum_only_identity(
 }
 
 pub(super) async fn persist_user_mail_result(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: CommandId,
     kind: MailUserCommandKind,
     request_hash: RequestHash,
@@ -137,7 +137,7 @@ fn parse_result_code(
 }
 
 pub(super) async fn lock_command(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: CommandId,
 ) -> Result<(), ApplicationError> {
     crate::database::lock_command_id(transaction, command_id).await.map_err(map_storage_error)

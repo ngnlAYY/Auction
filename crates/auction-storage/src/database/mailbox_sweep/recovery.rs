@@ -1,12 +1,13 @@
 //! 冻结账号与精确恢复门；旧尝试、过期 owner 与重复 MID 都不能冒充当前事实。
 
+use crate::database::TrackedTransaction as Transaction;
 use auction_application::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
     sent_list_minute_start,
 };
 use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
-use sqlx::{Postgres, Transaction};
+use sqlx::Postgres;
 use uuid::Uuid;
 
 use super::{RecoveryError, attempts};

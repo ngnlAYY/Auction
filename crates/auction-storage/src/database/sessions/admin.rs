@@ -35,6 +35,9 @@ pub(super) async fn create_postgres(
     store: &PostgresStore,
     record: AdminSessionRecord,
 ) -> Result<AdminSessionIdentity, ApplicationError> {
+    store.pool().observe_transaction(
+        auction_observability::DatabaseTransactionOwner::Admin,
+        async {
     let mut transaction = store
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
@@ -84,6 +87,9 @@ pub(super) async fn create_postgres(
         expires_at: record.expires_at,
         absolute_expires_at: record.absolute_expires_at,
     })
+
+        },
+    ).await
 }
 
 #[cfg(feature = "postgres")]

@@ -18,7 +18,7 @@ use thiserror::Error;
 use super::super::DatabaseStore;
 use super::common::storage_error;
 
-type OwnershipConnection = Mutex<Option<sqlx::pool::PoolConnection<sqlx::Postgres>>>;
+type OwnershipConnection = Mutex<Option<crate::database::TrackedConnection<sqlx::Postgres>>>;
 
 /// 持有一种外部 Cookie 运行时所有权的 PostgreSQL session；guard 销毁必须关闭物理连接，
 /// 不能把仍持有 session advisory lock 的连接放回池中。
@@ -150,7 +150,14 @@ impl DatabaseStore {
             DatabaseStore::Postgres(store) => {
                 let mut connection = store
                     .pool()
-                    .acquire()
+                    .acquire_reserved(match kind {
+                        AdminCredentialKind::MailCookie => {
+                            auction_observability::DatabaseReservedPurpose::MailOwnership
+                        }
+                        AdminCredentialKind::ForumCookie => {
+                            auction_observability::DatabaseReservedPurpose::ForumOwnership
+                        }
+                    })
                     .await
                     .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
                 // 后续任一路径提前返回时都关闭 session，以释放 advisory lock。

@@ -5,7 +5,7 @@ use super::*;
 use sqlx::{Row, postgres::PgRow};
 
 pub(super) async fn read_realtime_inventory(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<PostgresRealtimeInventory, RetentionInventoryError> {
     let rows = sqlx::query(
         "WITH selected_streams AS (
