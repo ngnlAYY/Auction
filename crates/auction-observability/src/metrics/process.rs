@@ -10,6 +10,7 @@ use super::{
     audit::{AuditMetricsCollector, AuditMetricsSource},
     business::PrometheusBusinessRecorder,
     http::HttpRecorder,
+    migration::{self, MigrationReadinessRecorder},
     pool::PoolMetricsCollector,
     readiness::{self, ReadinessRecorder},
     tracing::{DisabledTracingHealth, TracingCollector, valid_identity},
@@ -28,6 +29,7 @@ pub struct ProcessMetrics {
     worker: Arc<dyn WorkerRecorder>,
     business: Arc<dyn BusinessRecorder>,
     readiness: Arc<dyn ReadinessRecorder>,
+    migration_readiness: MigrationReadinessRecorder,
     http: HttpRecorder,
 }
 
@@ -122,9 +124,19 @@ impl ProcessMetrics {
         };
 
         let readiness = readiness::build(&registry)?;
+        let migration_readiness = migration::build(&registry)?;
         let shutdown = super::shutdown::build(&registry)?;
         let http = HttpRecorder::build(&registry, role)?;
-        Ok(Self { enabled: true, registry, worker, business, readiness, shutdown, http })
+        Ok(Self {
+            enabled: true,
+            registry,
+            worker,
+            business,
+            readiness,
+            migration_readiness,
+            shutdown,
+            http,
+        })
     }
 
     /// 创建空注册表与 no-op 记录器；关闭时不注册 collector，也不建立后台任务。
@@ -135,6 +147,7 @@ impl ProcessMetrics {
             worker: noop_worker_recorder(),
             business: noop_business_recorder(),
             readiness: readiness::noop(),
+            migration_readiness: MigrationReadinessRecorder::default(),
             shutdown: super::shutdown::noop(),
             http: HttpRecorder::default(),
         }
@@ -177,6 +190,11 @@ impl ProcessMetrics {
     /// 返回 HTTP readiness 的闭集记录器；由角色装配根注入探针。
     pub fn readiness(&self) -> Arc<dyn ReadinessRecorder> {
         Arc::clone(&self.readiness)
+    }
+
+    /// 返回迁移就绪的闭集记录器；数据库检查与 heartbeat 共用同一进程计数。
+    pub fn migration_readiness(&self) -> MigrationReadinessRecorder {
+        self.migration_readiness.clone()
     }
 
     /// 返回 Public/Admin 共用的 HTTP 记录器；关闭指标或其他角色得到 no-op。

@@ -17,7 +17,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 | --- | --- |
 | `DatabaseStore::connect(url)` | 建立连接池（16 连接，带获取追踪与 Prometheus 指标源）；`DatabaseStore` 为大部分端口实现者 |
 | `DatabaseStore::migrate()` | 在 SQLx 迁移锁内执行内嵌迁移；空库或合法历史才允许，未知非空库拒绝 |
-| `ProcessReadinessPort` | readiness：完整迁移历史匹配且按启动模式通过审计失败门禁，见[审计失败与就绪](#审计失败与就绪) |
+| `ProcessReadinessPort` | readiness：按迁移模式核对已知历史及兼容后缀，再按审计模式通过门禁，见[迁移就绪](#迁移就绪)与[审计失败与就绪](#审计失败与就绪) |
 | `Database*Commands` | 竞价、生命周期、结算、Admin 拍卖/录入/lot/邮件/规则/runtime/世界等命令组合器 |
 | `initialize_empty_postgres` | 合并部署首次启动：确认专用空库且无其他客户端后在迁移锁内建 schema |
 | `PostgresDatabaseBootstrap` | 维护库连接上的“缺失才创建”建库（`auction-cli db create`） |
@@ -209,6 +209,14 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 ## 迁移兼容层
 
 迁移文件位于 [`migrations/postgres/`](../../migrations/postgres)，编译期经 `sqlx::migrate!` 内嵌。[`crates/auction-storage/src/database/migrations/`](src/database/migrations) 为少数历史迁移提供“执行视图”：保留文件原 checksum，只在执行时对固定版本做限定替换（`000005`/`000015` 给保留字别名改名，`000044` 先立即执行延迟约束，`000047` 给保留字列名加引号）。仅 `000005`/`000015` 额外接受已部署的固定别名修正版 checksum；`000044`/`000047` 只接受原文件 checksum，其他差异均失败关闭。已发布的迁移文件永远不能修改。
+
+## 迁移就绪
+
+`database/migrations/readiness.rs` 的 `check_postgres_readiness` 是 readiness 专用入口：`DatabaseStore::with_migration_compatibility_mode` 接受装配根注入的启动策略，默认 shadow，实际仍要求完整历史匹配；只有 compatible 模式允许数据库超前。075 引入只追加登记表，本版登记 breaking；001–074 不回填，缺行不兼容。完整判定表与表契约见[数据库契约](../../docs/contracts/database.md#迁移兼容登记与就绪)，分级清单见[迁移说明](../../migrations/postgres/README.md#兼容分级与登记)。
+
+检查使用一个 `REPEATABLE READ, READ ONLY` 快照，整个数据库检查预算 750ms；同版只读历史，超前时用实际迁移 LEFT JOIN 登记逐条检查连续版本、成功状态与闭集等级。SQL 查询与解码错误走 `storage_error_from` 安全投影并拒绝就绪，不计作审计写入失败。`postgres_history_matches` 保持严格：恢复、备份、盘点与迁移执行不因 readiness 开关接受未来版本。
+
+三角色通过 `with_migration_readiness_recorder` 注入进程记录器；supervisor 的临时连接注入同一迁移模式，默认无指标 exporter。shadow 差异日志 target 为 `auction::storage::migration_readiness`，只包含固定 class、期望/数据库版本、strict/compatible 布尔结果；唯一预期差异为 `compatible_ahead`。指标名与闭集分支见[可观测性说明](../auction-observability/README.md#迁移就绪指标)。平时保持 shadow，换回已含该逻辑的旧程序前须显式选择 compatible，操作与保留新版 CLI 的要求见[程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
 
 ## 源码结构
 

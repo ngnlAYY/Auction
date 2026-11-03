@@ -2,7 +2,19 @@
 
 [CI 与发布](../README.md) · [开发指南](../../docs/development.md)
 
-[`ci/checks/check.sh`](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、目录布局、配置示例、翻译键、装备诊断闭集、源码计数棘轮与 Markdown 链接检查；完整清单见 [CI 与发布](../README.md#静态门禁cicheckschecksh)。`just verify` 先运行 `all`，再执行格式、编译、feature、依赖版本与 Clippy/WASM 检查，不运行行为测试。
+[`ci/checks/check.sh`](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、目录布局、配置示例、翻译键、装备诊断闭集、源码计数棘轮、Markdown 链接与迁移兼容登记检查；完整清单见 [CI 与发布](../README.md#静态门禁cicheckschecksh)。`just verify` 先运行 `all`，再执行格式、编译、feature、依赖版本与 Clippy/WASM 检查，不运行行为测试。
+
+## 迁移兼容登记
+
+```bash
+bash ci/checks/check.sh migration-compatibility
+```
+
+[`ci/checks/migration-compatibility.pl`](migration-compatibility.pl) 读取迁移文件，对编号大于 074 的文件执行词法与正则约束；001–074 不要求登记且原文件不能改写。文件名须为六位编号与 snake_case 描述，新编号自 075 连续、不得重复。
+
+词法扫描区分行注释、嵌套块注释、单引号/转义字符串、双引号标识符及带标签的 dollar quote；只在顶层分号切分 SQL，函数与 DO 内的 INSERT 也计数但不能充当合法登记，EXECUTE 字符串中的登记表引用拒绝。普通字符串与非过程 dollar quote 中的示例不计为登记。每个新文件须恰好一次 `INSERT INTO public.schema_migration_compatibility (version, level) VALUES (十进制本版本, 'compatible' 或 'breaking');`，必须是最后一条无条件顶层 SQL。允许关键字大小写及空白变化，等级字面量保持小写；禁止 upsert、INSERT SELECT、多行 VALUES、过程内登记或用注释/字符串冒充登记。
+
+禁止 `-- no-transaction`，顶层 BEGIN/START TRANSACTION、COMMIT/END、ROLLBACK/ABORT、PREPARE/SET TRANSACTION，保持 SQLx 对迁移与登记的事务边界。失败输出文件与原因并退出 1。该门禁不执行 SQL、不连接数据库、不证明 compatible 的业务承诺；分类审阅规则由[迁移说明](../../migrations/postgres/README.md#兼容分级与登记)拥有，跨版本验证仍由 W7.8 后续工作负责。
 
 ## unwrap/expect 门禁
 

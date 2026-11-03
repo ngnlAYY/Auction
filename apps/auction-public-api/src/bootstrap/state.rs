@@ -181,7 +181,9 @@ pub(super) async fn configure_state(
         DatabaseStore::connect(database_url)
             .await
             .context("connect public database")?
-            .with_audit_failure_mode(config.readiness.audit_failure_mode),
+            .with_audit_failure_mode(config.readiness.audit_failure_mode)
+            .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
+            .with_migration_readiness_recorder(metrics.migration_readiness()),
     );
     metrics
         .register_pool_metrics(store.pool_metrics_source())

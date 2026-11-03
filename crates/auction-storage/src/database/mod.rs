@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 #[cfg(feature = "postgres")]
-use auction_application::{ApplicationError, ProcessReadinessPort, RepositoryError};
+use auction_application::{ApplicationError, ProcessReadinessPort};
 #[cfg(feature = "postgres")]
 use auction_observability::{HeartbeatHealthReader, HeartbeatReadinessFuture, PoolMetricsSource};
 #[cfg(feature = "postgres")]

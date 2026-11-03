@@ -29,7 +29,7 @@ auction-server --config-dir /var/lib/auction/config
 2. 配置目录不存在：运行首次设置页（表单须确认“初始化并启动”），生成合并布局配置。
 3. 加载三角色配置并预检：只支持 PostgreSQL；必须启用 Worker control 且允许当前 UID；三角色共用数据库目标、`common_file` 与 `runtime_config_file`，装备数据密钥与 `bot_players` 快照一致；Admin 的 `worker_config_file` 指向本部署的 Worker 配置；listener 不重叠、不使用动态端口，socket 路径未被占用。
 4. 首次设置后：在 300 秒内把专用空库初始化为当前 schema（`initialize_empty_postgres` 确认库为空且无其他客户端）。
-5. 只读检查数据库就绪（30 秒）：schema 不是当前版本时拒绝启动，提示停服后以同一服务账号执行 `auction-cli --config-dir <配置目录> db migrate`。普通启动从不隐式迁移。
+5. 只读检查数据库就绪（外层 30 秒，数据库检查自身 750ms）：临时数据库连接注入与角色相同的 common readiness 策略，默认迁移 shadow 仍要求当前完整历史；显式 compatible 可接受全部已登记兼容的未来后缀，其余拒绝启动。普通启动从不隐式迁移。精确边界见[数据库契约](../../docs/contracts/database.md#迁移兼容登记与就绪)；回退前的模式切换、CLI 版本与停机要求见[程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
 6. 按 Worker → Admin → Public 顺序派生子进程（独立进程组、父进程死亡时子进程收到 SIGTERM、继承 owner 锁），每个角色在 `--startup-timeout-seconds` 内通过就绪探针（Worker 为 control socket 的 `/v1/health/ready`，Admin/Public 为 `/health/ready`）后再启动下一个。全部就绪后输出 `auction-server ready: worker, admin, public`。
 
 ## 运行与退出

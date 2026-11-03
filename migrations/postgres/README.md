@@ -14,6 +14,31 @@
 6. **约束在数据库层强制**：状态闭集、金额范围、互斥字段、只追加（触发器）等规则写成 CHECK、唯一约束或触发器，不只依赖应用代码。
 7. **同步更新**：每次新增迁移都把[保留政策](../../ops/deploy/retention-policy.v1.json)的 `database_schema_version` 更新为新的最高版本（否则 `auction-cli db inventory` 拒绝运行）；新增表还须加入对应数据族；同步[数据库契约](../../docs/contracts/database.md)。
 8. **部署顺序**：迁移若要求旧 Worker 先停止（例如新增发送证明字段），在文件注释中写明；分体部署的 `service restart` 与合并部署的停服迁移都满足这一点。
+9. **兼容登记**：075 起每个文件在自身事务末尾恰好登记本版本一次；规范与默认 breaking 规则见下节，CI 静态门禁强制。
+
+## 兼容分级与登记
+
+001–074 保持原文件，不回填兼容表；缺行即 `breaking`。075 建立只追加登记表并将自身登记为 `breaking`。后续迁移默认采用 `breaking`，只有证明旧程序读写不受影响的纯新增才可选择 `compatible`：
+
+| 情况 | 等级 |
+| --- | --- |
+| 纯新增表、列、普通索引，旧程序不读取、不依赖且读写结果不受影响；新增列允许旧写入省略，新表自身保护约束不改变旧业务 | 可经审阅声明 `compatible` |
+| 收紧约束、新增会拒绝旧写入的唯一性要求、修改既有触发器、改变冻结策略或要求停止旧角色以防行为冲突 | `breaking` |
+| 删除、改名、改变类型或既有读写语义，无法证明兼容 | `breaking` |
+| 放宽 CHECK 后会写入旧程序无法解析的新状态、种类、失败码、告警来源或策略版本 | `breaking`；只有旧程序对未知值已有明确容错证据才可另行评估 |
+
+069 放宽快照闭集但旧程序不认识新竞价策略，071 冻结旧补偿池写入，均属于 `breaking`。注释须说明 owner、保护的不变量、等级依据和必要停机顺序；兼容承诺要覆盖实际允许回退的旧程序范围，不能只考虑最新程序。
+
+每个新文件的最后一条顶层 SQL 固定为以下单行 VALUES 形式，版本使用文件编号对应的十进制整数，等级必须显式填写：
+
+```sql
+INSERT INTO public.schema_migration_compatibility (version, level)
+VALUES (76, 'breaking');
+```
+
+不要手工 BEGIN/COMMIT/ROLLBACK，不使用 `-- no-transaction`；SQLx 将文件 SQL、登记与本版本迁移成功记录同事务提交。禁止 upsert、INSERT SELECT、多行或过程内登记；等级事实不能 UPDATE/DELETE/TRUNCATE。修正追加新迁移，不编辑已发布 SQL 或历史等级。
+
+`bash ci/checks/check.sh migration-compatibility` 已纳入 `all` / `just verify`，词法及正则约束见[静态门禁](../../ci/checks/README.md#迁移兼容登记)。门禁只验证登记格式，兼容声明仍须审阅；跨版本验证随 W7.8 的后续测试工作交付。readiness 判定由[数据库契约](../../docs/contracts/database.md#迁移兼容登记与就绪)定义，程序回退步骤见[恢复手册](../../ops/deploy/RECOVERY.md#程序回退)。
 
 ## 执行兼容层
 
@@ -97,3 +122,4 @@
 | 000072 | 装备损失人工责任事实（只追加、唯一退休原投递）；record_only 操作者承担买方责任，释放冻结卖家款到正常队列 |
 | 000073 | 人工 Sent 观察命令与冻结 attempt/MID 绑定（只追加），独立 operator proof 恢复正常履约对账；不直接确认收款或付款 |
 | 000074 | operator proof 强谓词扩展到被 Admin 对账判失败、但原生 Sent 证明已寄出的结算发送；只替换函数，原失败命令与快照不改写 |
+| 000075 | 迁移兼容等级登记（只追加）；001–074 不回填，本版保守登记 breaking |

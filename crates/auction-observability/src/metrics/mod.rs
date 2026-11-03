@@ -3,6 +3,7 @@
 mod audit;
 mod business;
 mod http;
+mod migration;
 mod pool;
 mod process;
 mod readiness;
@@ -20,6 +21,7 @@ pub use audit::{
     AuditMetricsSource, AuditSqlstateClass,
 };
 pub use http::{HttpRateLimitKind, HttpRecorder, WebSocketConnectionGuard};
+pub use migration::{MigrationReadinessBranch, MigrationReadinessRecorder};
 pub use process::ProcessMetrics;
 pub use readiness::{ReadinessCacheOutcome, ReadinessCheckResult, ReadinessRecorder};
 pub use types::*;

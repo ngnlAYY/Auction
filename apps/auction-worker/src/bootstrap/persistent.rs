@@ -49,6 +49,8 @@ pub(super) async fn run_worker(
             .await
             .context("connect worker database")?
             .with_audit_failure_mode(config.readiness.audit_failure_mode)
+            .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
+            .with_migration_readiness_recorder(metrics.migration_readiness())
             .with_delivery_send_intervals(config.worker.mooglemail.send_intervals)
             .context("configure delivery send intervals")?,
     );

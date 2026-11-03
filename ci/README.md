@@ -26,7 +26,8 @@ bash ci/checks/check.sh <检查项>...
 | `ratchet` | 源码计数不得超过仓库基线；下降时提示更新，口径与更新方式见[计数棘轮](checks/README.md#源码计数棘轮) |
 | `ratchet-counts` | 仅输出当前 14 项计数，不修改基线；供人工审阅下调 |
 | `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[链接检查](checks/README.md#markdown-相对链接) |
-| `all` | `repository layout config i18n equipment-contract ratchet markdown-links` |
+| `migration-compatibility` | 075 起每个迁移末尾恰好登记自身一次，闭集等级、版本及事务规范见[迁移兼容登记](checks/README.md#迁移兼容登记) |
+| `all` | `repository layout config i18n equipment-contract ratchet markdown-links migration-compatibility` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `feature` | `auction-storage`（仅 `postgres`）、`auction-cache`（仅 `redis`），以及 `auction-setup` 的空默认图与 `postgres` 完整图 |

@@ -156,7 +156,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 迁移 `000071` 把两个世界的补偿池余额相加，合并为一个以 main Credits 计的全局池，并冻结旧的按世界池表；旧程序写旧表会失败关闭，因此同样必须停止全部旧角色后迁移。合并规则见[结算与履约](../docs/guide/settlement.md#补偿池)。
 
-**回退**：迁移只向前。旧程序遇到更高的 schema 版本不会就绪，所以已迁移后的回退只能是“旧程序 + 恢复升级前的备份”，见[备份与恢复](deploy/RECOVERY.md)。
+**回退**：迁移只向前。W7.8a 已随一版部署后，目标旧程序已含兼容逻辑且本次跨越的迁移全部登记 compatible，才可保留当前数据库换回程序；换回前必须显式设置 `[readiness] migration_compatibility_mode = "compatible"`，保留能识别当前数据库的新版 CLI。默认 shadow 不放宽，含 breaking、缺登记或无法确认仍须恢复升级前备份并核对外部历史。完整区间判定、CLI 限制与操作步骤见[程序回退](deploy/RECOVERY.md#程序回退)。
 
 ## 反向代理
 
@@ -174,7 +174,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 | 目标 | 检查 |
 | --- | --- |
-| Public / Admin | `GET /health/live`、`GET /health/ready`（数据库完整迁移身份匹配、审计模式门禁通过；Public 另要求 realtime relay 新鲜；默认一秒进程缓存） |
+| Public / Admin | `GET /health/live`、`GET /health/ready`（数据库按迁移模式校验、审计模式门禁通过；Public 另要求 realtime relay 新鲜；默认一秒进程缓存） |
 | Worker | control socket 的 `GET /v1/health/ready`，例如 `curl --unix-socket /run/hv-auction/worker/control.sock http://localhost/v1/health/ready`（调用者须在 peer allowlist 中） |
 | 全部 | `auction-cli service status`（分体部署） |
 

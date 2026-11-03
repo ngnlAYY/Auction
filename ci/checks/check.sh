@@ -236,6 +236,10 @@ check_markdown_links() {
 		perl ci/checks/markdown-links.pl
 }
 
+check_migration_compatibility() {
+	perl ci/checks/migration-compatibility.pl migrations/postgres/*.up.sql
+}
+
 # 本地 Justfile 与 CI 共用命令定义，避免编译参数在两处漂移。
 run_checks() {
 	local check
@@ -248,6 +252,7 @@ run_checks() {
 		ratchet) check_source_ratchet ;;
 		ratchet-counts) check_source_ratchet --counts ;;
 		markdown-links) check_markdown_links ;;
+		migration-compatibility) check_migration_compatibility ;;
 		dependency-versions) check_dependency_versions ;;
 		repository) check_repository_contracts ;;
 		fmt) cargo fmt --all -- --check ;;
@@ -267,7 +272,7 @@ run_checks() {
 			;;
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout config i18n equipment-contract ratchet markdown-links ;;
+		all) run_checks repository layout config i18n equipment-contract ratchet markdown-links migration-compatibility ;;
 		rust) run_checks fmt check feature dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

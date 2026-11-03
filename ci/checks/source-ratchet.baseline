@@ -7,7 +7,7 @@ application:map_err(|_|) 99
 http:Err(_) 118
 http:map_err(|_|) 121
 storage:Err(_) 4
-storage:map_err(|_|) 330
+storage:map_err(|_|) 328
 integrations:Err(_) 24
 integrations:map_err(|_|) 368
 apps:Err(_) 17
