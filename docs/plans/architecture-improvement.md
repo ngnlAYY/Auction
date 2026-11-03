@@ -175,7 +175,7 @@
 | D2 | 已提交 | `b2ccb9fd` | 未部署 | W1.0；线上已部署 `92259475`，未包含修复 |
 | D3 | 已提交 | `fa46d605` | 未部署 | W0.12 估计 6–9 周触及 100 页上限；决策 74 提前交付 W1.4 发送基线；默认 `shadow`，须在触顶前观察并由用户切换 `watermark` |
 | D4 | 已决定 | — | — | 决策 14；W1.3、W1.7 随 M2b |
-| D5 | 待量化 | 量化指标随本提交 | 未部署 | W0.6 的 `auction_db_transaction_*{owner,phase}` 部署并经 W0.10 采集后，以 Final 阶段 `bid`/`proxy`/`slow_proxy` 的耗尽次数决定是否提前交付 W12.1 |
+| D5 | 待量化 | 量化指标 `5ebfc1c8` | 未部署 | W0.6 的 `auction_db_transaction_*{owner,phase}` 部署并经 W0.10 采集后，以 Final 阶段 `bid`/`proxy`/`slow_proxy` 的耗尽次数决定是否提前交付 W12.1 |
 | D6 | 已决定 | 说明 `6cc3769f` | 未部署 | 决策 15；`docs/guide` 玩家说明已提交（Claude 依代码核实：回帖无发帖时间，`PlaceBidCommand` 按导入时服务端时钟判定），Admin 五语言规则文档由用户发布；W0.12 显示主题最多约 27 楼，远低于页数上限，W1.11 不提前 |
 | D7 | 已提交 | `4ba5abe3` | 未部署 | 决策 32、71、72；W0.14 默认影子模式，切换 `classified` 后生效 |
 | D8 | 已提交 | `4ba5abe3` | 未部署 | 决策 33；W7.11 |
@@ -187,18 +187,20 @@
 | W0.1 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`ApplicationError::safe_kind()` 闭集分类，首个调用方为履约 reconcile 未持久化错误日志 |
 | W0.7 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；COD 实收资金化各拒绝分支细分为独立 `safe_kind`（target `auction::settlement::funding_diagnostics`），持久化 defer reason 不变、无迁移；部署后按 `ops/README.md` 的 D1 诊断章节收集分类证据 |
 | W0.14 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；审计失败按 SQLSTATE 分类（决策 32、71），`[readiness] audit_failure_mode` 默认 `shadow`、就绪缓存 1 秒；观察到差异只在 `transient` 类后由用户切换 `classified`（决策 72），W0.6 的超时须在切换后启用 |
-| W0.12 | 进行中 | 部分 `5e2f455b` | — | 执行者：Claude（经用户批准的线上只读核实）；主机、配置与数据库部分完成，结论见[现状基线](architecture-improvement/baseline.md#w012-线上只读核实2026-11-03)；浏览器部分待 Bot 账号战斗结束 |
+| W0.12 | 进行中 | 部分 `5e2f455b` | — | 执行者：Claude（经用户批准的线上只读核实）；主机、配置与数据库部分完成，结论见[现状基线](architecture-improvement/baseline.md#w012-线上只读核实2026-11-03)；浏览器部分待 Bot 账号战斗结束（用户确认后执行），范围含 Sent 分页与 MID 顺序（W1.4 切换依据）、compose 邮资，并新增论坛主题页发帖时间的显示与精度（W0.5 `posted_minute` 依据） |
 | W0.9 | 已提交 | `57d1748d` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 E）实现、Claude 监督；HTTP 请求量/状态码/延迟、WebSocket 连接、限流拒绝指标；`[metrics] reject_forwarded_requests` 默认 true（带转发头的 `/metrics` 请求返回 404），CDN 头待 W0.12 |
 | W0.11 | 已提交 | `0a30c5c8` | 未部署 | 同上；`RateLimitedLog` 固定类别 60 秒窗口去重，首个调用点为 delivery 循环失败日志；`log_filter` 加 `auction_observability::log_dedup=off` 可关闭 |
-| W0.2 | 进行中 | I-A `46eb1c43` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 I）实现、Claude 监督；I-A 覆盖 jobs/application 152 个错误丢弃位点，`auction::diagnostics` 安全记录（52 个 kind、301 对 kind/phase，清单见 `ops/README.md`），持久化 defer reason/失败码不变（用户决定）；I-B（integrations + HTTP）待做 |
+| W0.2 | 进行中 | I-A `46eb1c43` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 I）实现、Claude 监督；I-A 覆盖 jobs/application 152 个错误丢弃位点，`auction::diagnostics` 安全记录（52 个 kind、301 对 kind/phase，清单见 `ops/README.md`），持久化 defer reason/失败码不变（用户决定）；I-B（integrations + HTTP）实现中途按用户要求暂停（2026-11-03）：worktree `error-logging` 基于 `46eb1c43`，未提交改动 147 个文件，已编译通过、棘轮 HTTP 74/94、integrations 2/84，尚缺静态对照与完整门禁；恢复时先 rebase 到主分支 |
 | W0.3 | 已提交 | `46eb1c43` | 未部署 | 同上；`auction_worker_unpersisted_error_total{loop,kind}`，口径为未确认形成持久失败、退避或人工处置（提交结果未知计入），先于日志去重累加；PM 暂归 `forum` loop |
 | W0.10 | 已提交 | `421ee64c` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；`common.toml [metrics]` 三角色可选 loopback 出口（只允许 `127.0.0.1`，示例 19100/19101/19102，省略即关闭），复用 W0.9 `/metrics` 契约，出口故障只降级采集；`ops/monitoring/` 提供 Prometheus、exporter 查询与 unit 示例；待用户按 `ops/README.md` 安装 Prometheus、node_exporter、postgres_exporter 并启用出口后验收；W0.13 随后续批次 |
 | W13.3a | 已提交 | `7a532130` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 N）实现、Claude 监督；release 开启 `overflow-checks`（`wasm-release` 继承，保留 abort），原生装配根与 CLI 安装安全 panic hook（target `auction::panic`，只输出线程、位置与 `&'static str` payload），顶层 JoinError 固定分类；Worker 已有子任务收口新增 `auction_worker_task_panics_total{loop}`，处置与计数不变；逐 owner panic 计次拆为 W13.3b 待用户决定 |
-| W0.6 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 K）实现、Claude 监督；`[database_profiles] mode` 默认 `profiled`（`legacy` 为旧路径），服务池 16、维护池 4、固定 `application_name`，`deployment check` 汇总连接预算；服务超时默认关闭，启用须显式填写阈值且以 W0.14 切换 `classified` 为前置（见待决定）；21 个事务 owner 的尝试/冲突/重试/耗尽指标，Worker 循环连接获取与持有指标；切换需重启 |
+| W0.6 | 已提交 | `5ebfc1c8` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 K）实现、Claude 监督；`[database_profiles] mode` 默认 `profiled`（`legacy` 为旧路径），服务池 16、维护池 4、固定 `application_name`，`deployment check` 汇总连接预算；服务超时默认关闭，启用须显式填写阈值且以 W0.14 切换 `classified` 为前置（见待决定）；21 个事务 owner 的尝试/冲突/重试/耗尽指标，Worker 循环连接获取与持有指标；切换需重启 |
+| W0.4、W0.5 | 未开始 | — | — | 设计已审定（车道 M，Codex gpt-6.1-sol）：外部账号请求/门等待/锁等待/预算耗尽指标与论坛同口径指标，回帖导入延迟以“首条新命令账本提交确认”为终点、`poll_window` 上下界估计，论坛 world 允许 `shared`；须待 W0.2 I-B 合入后开工（同批客户端文件） |
+| W0.13 | 进行中 | — | — | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；实现中途按用户要求暂停（2026-11-03）：worktree `sli` 基于 `5ebfc1c8`，未提交改动 24 个文件；Worker 每 60 秒只读汇总窗口 Gauge，`[metrics] sli_snapshot_enabled` 默认关闭并新增 W7.7 开关 `metrics_sli_snapshot_enabled`；实时推送延迟、容量与慢速代理当前积压有索引支撑，邮件完成、付款观察与慢速代理历史缺全局时间索引，标为“待索引”（是否以兼容迁移补索引待定）；SLO 目标值待基线观察后提出 |
 | W0.8 | 已提交 | `e78dac4f` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 D）实现、Claude 监督；`storage_error_from`/`sql_error_context` 附加 sqlx 变体、SQLSTATE、约束名、表名；1100 处直接 SQLx 闭包与 13 个具名 mapper 一次改完，`storage:map_err(\|_\|)` 1432 → 330；其余 330 处另定范围 |
 | W7.11 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
 | W7.8a | 已提交 | `3f0a2097` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 F）实现、Claude 监督；迁移 075 建只追加兼容登记表（001–074 缺行即 breaking，075 自身 breaking），`check.sh migration-compatibility` 检查每个新迁移恰好登记一次；`[readiness] migration_compatibility_mode` 默认 `shadow`，回退旧程序前须设为 `compatible`；本版含 breaking 迁移，部署后才能为之后的版本提供回退能力 |
-| W7.7 | 进行中 | 第一批 `5e2f455b` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 H）实现、Claude 监督；第一批：迁移 076 只追加开关事实兼命令账本、三角色 5 秒刷新、`auction-cli switch`、Admin `/config` 只读卡片，接入 `readiness_audit_failure_mode` 与 `readiness_cache_enabled`；第二批（邮件轮询隔离与指标转发拒绝）待做 |
+| W7.7 | 进行中 | 第一批 `5e2f455b` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 H）实现、Claude 监督；第一批：迁移 076 只追加开关事实兼命令账本、三角色 5 秒刷新、`auction-cli switch`、Admin `/config` 只读卡片，接入 `readiness_audit_failure_mode` 与 `readiness_cache_enabled`；第二批（邮件轮询隔离与指标转发拒绝）待做，排在 W0.13 合入之后（同改开关闭集） |
 | W1 | 未开始 | — | — | W1.0 为 M1 首项（D2）；W1.10 方案已定（决策 40） |
 | W1.0 | 已提交 | `b2ccb9fd` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；完整 Read Mail 观察降频为每小时、维护独立循环、isekai 相位错峰，回退开关 `poll_isolation_enabled`；待用户部署后按“维护不再超时、`mail-maintenance-*` p95 < 60 秒”验收 |
 | W1.4（发送基线切片） | 已提交 | `fa46d605` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 J）实现、Claude 监督；发送前临时 MID 边界 + 前缀扫描，`[worker.mooglemail] sent_baseline_mode` 默认 `shadow`；切换 `watermark` 前须完成浏览器 MID 语义核实与至少一个完整场次周期的影子观察；常规轮水位与每日校验仍随 M3 |
