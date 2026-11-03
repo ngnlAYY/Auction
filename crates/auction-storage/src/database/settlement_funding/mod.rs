@@ -4,6 +4,7 @@ mod account;
 mod cash_gate;
 mod classification;
 mod deliveries;
+pub(crate) mod diagnostics;
 mod ledger;
 mod obligations;
 mod policy;

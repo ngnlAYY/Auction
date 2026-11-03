@@ -16,24 +16,44 @@ pub(super) async fn validate(
     external_refund: bool,
 ) -> Result<(), FundingError> {
     let c = &command.claim;
-    if !InternalSettlementAction::matches_frozen_shape(
+    let rejected = |kind, error| {
+        if collected {
+            crate::database::settlement_funding::diagnostics::reject(kind, "claim_validate", error)
+        } else {
+            error
+        }
+    };
+    let rejection = if !InternalSettlementAction::matches_frozen_shape(
         c.kind,
         c.world,
         c.equipment_world,
         c.amount,
         c.carrier_credit,
-    ) || !evidence.validate()
-        || evidence.observed_from < c.claimed_at
-        || evidence.operation_id != command.command_id
-        || evidence.identity.world != c.world
-        || !matches!(&evidence.purpose, InternalEvidencePurpose::SettlementClaim {
+    ) {
+        Some("collected_claim_shape_invalid")
+    } else if !evidence.validate() {
+        Some("collected_claim_snapshot_invalid")
+    } else if evidence.observed_from < c.claimed_at {
+        Some("collected_claim_observation_before_claim")
+    } else if evidence.operation_id != command.command_id {
+        Some("collected_claim_operation_mismatch")
+    } else if evidence.identity.world != c.world {
+        Some("collected_claim_world_mismatch")
+    } else if !matches!(&evidence.purpose, InternalEvidencePurpose::SettlementClaim {
             obligation_id, claim_token, claim_fencing, state_version
         } if *obligation_id==c.obligation_id.as_uuid() && *claim_token==c.claim_token
             && *claim_fencing==c.claim_fencing && *state_version==c.state_version)
-        || (!collected && !external_refund && evidence.identity.player_name != c.recipient)
-        || (external_refund && c.kind != SettlementObligationKind::BuyerRefund)
     {
-        return Err(FundingError::Unproven);
+        Some("collected_claim_binding_mismatch")
+    } else if !collected && !external_refund && evidence.identity.player_name != c.recipient {
+        Some("collected_claim_recipient_mismatch")
+    } else if external_refund && c.kind != SettlementObligationKind::BuyerRefund {
+        Some("collected_claim_refund_kind_invalid")
+    } else {
+        None
+    };
+    if let Some(kind) = rejection {
+        return Err(rejected(kind, FundingError::Unproven));
     }
     let prepare_digest = c.prepare_request_hash.map(|hash| hash.as_bytes());
     let activate_digest = c.activate_request_hash.map(|hash| hash.as_bytes());
@@ -64,16 +84,17 @@ pub(super) async fn validate(
         .bind(c.equipment_id.as_uuid()).bind(&c.external_equipment_id).bind(c.equipment_world.as_str())
         .bind(c.recipient_user_id).bind(c.prerequisite_id.map(|id| id.as_uuid()))
         .bind(if collected { "enqueued" } else { "pending" })
-        .bind(i64::try_from(c.state_version).map_err(|_| FundingError::Invalid)?)
+        .bind(i64::try_from(c.state_version).map_err(|_| rejected("collected_claim_version_invalid", FundingError::Invalid))?)
         .bind(c.claim_token).bind(c.claim_fencing).bind(c.world.as_str()).bind(c.delivery_id)
         .bind(&c.recipient).bind(c.prepare_command_id.map(|id| id.as_uuid()))
         .bind(c.activate_command_id.map(|id| id.as_uuid())).bind(c.submission_id.map(|id| id.as_uuid()))
         .bind(c.lease_until)
         .bind(prepare_digest.as_ref().map(|value| value.as_slice()))
         .bind(activate_digest.as_ref().map(|value| value.as_slice()))
-        .fetch_one(&mut **tx).await.map_err(sql_error)?;
+        .fetch_one(&mut **tx).await.map_err(sql_error)
+        .map_err(|error| rejected("collected_claim_query_failed", error))?;
     if !valid {
-        return Err(FundingError::Conflict);
+        return Err(rejected("collected_claim_conflict", FundingError::Conflict));
     }
     if let Some(user_id) = c.recipient_user_id {
         let user =
@@ -81,7 +102,8 @@ pub(super) async fn validate(
                 .bind(user_id)
                 .fetch_one(&mut **tx)
                 .await
-                .map_err(sql_error)?;
+                .map_err(sql_error)
+                .map_err(|error| rejected("collected_claim_user_query_failed", error))?;
         // 实收只验证 UUID 仍存在；地址由已发送 delivery 与 Sent 证明精确绑定。
         if !collected
             && (user.try_get::<String, _>("username").map_err(sql_error)? != c.recipient
@@ -95,9 +117,10 @@ pub(super) async fn validate(
     }
     if let Some(prerequisite) = c.prerequisite_id {
         let satisfied: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM public.settlement_obligation_fulfillments WHERE obligation_id=$1 AND execution_state='satisfied' AND proof_digest IS NOT NULL)")
-            .bind(prerequisite.as_uuid()).fetch_one(&mut **tx).await.map_err(sql_error)?;
+            .bind(prerequisite.as_uuid()).fetch_one(&mut **tx).await.map_err(sql_error)
+            .map_err(|error| rejected("collected_prerequisite_query_failed", error))?;
         if !satisfied {
-            return Err(FundingError::Unproven);
+            return Err(rejected("collected_prerequisite_unproven", FundingError::Unproven));
         }
     }
     if !collected {
@@ -158,5 +181,8 @@ pub(super) async fn validate(
             }
         }
     }
-    crate::validate_mail_evidence_time(tx, evidence).await.map_err(super::evidence_error)
+    crate::validate_mail_evidence_time(tx, evidence)
+        .await
+        .map_err(super::evidence_error)
+        .map_err(|error| rejected("collected_claim_time_unproven", error))
 }

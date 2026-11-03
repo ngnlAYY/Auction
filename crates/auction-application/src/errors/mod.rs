@@ -1,3 +1,4 @@
+mod safe_kind;
 mod sessions;
 
 use thiserror::Error;

@@ -1,5 +1,6 @@
 //! scope/account必须在业务锁之前取得，账户不存在也锁scope防启用竞态。
 
+use super::diagnostics::{TARGET, reject};
 use super::*;
 
 /// 仅本owner可构造的早锁令牌；不得跨事务缓存或在提交后复用。
@@ -45,12 +46,21 @@ pub(super) async fn verify_locked(
     .bind(account.uid())
     .fetch_one(&mut **tx)
     .await
-    .map_err(storage)?;
+    .map_err(storage)
+    .map_err(|error| reject("funding_account_verify_failed", "account_verify", error))?;
     if transaction_id != account.transaction_id {
-        return Err(FundingError::Conflict);
+        return Err(reject(
+            "funding_account_transaction_conflict",
+            "account_verify",
+            FundingError::Conflict,
+        ));
     }
     if require_ready && status != "ready" {
-        return Err(FundingError::Unavailable);
+        return Err(reject(
+            "funding_account_not_ready",
+            "account_verify",
+            FundingError::Unavailable,
+        ));
     }
     Ok(())
 }
@@ -153,18 +163,28 @@ pub async fn check_funding_cash(
 ) -> Result<bool, FundingError> {
     verify_locked(tx, account, true).await?;
     if account.records_only() {
-        return Err(FundingError::Unsupported);
+        return Err(reject(
+            "funding_cash_mode_unsupported",
+            "cash_gate",
+            FundingError::Unsupported,
+        ));
     }
     if observed_credits < 0 {
-        return Err(FundingError::Invalid);
+        return Err(reject("funding_cash_invalid", "cash_gate", FundingError::Invalid));
     }
     let (local, unknown): (i64, bool) = sqlx::query_as(
         "SELECT COALESCE(sum(amount) FILTER (WHERE state <> 'spent'),0)::bigint, COALESCE(bool_or(state IN ('unknown','in_flight')),false) FROM public.settlement_funding_allocations WHERE uid=$1")
-        .bind(account.uid()).fetch_one(&mut **tx).await.map_err(storage)?;
+        .bind(account.uid()).fetch_one(&mut **tx).await.map_err(storage)
+        .map_err(|error| reject("funding_cash_query_failed", "cash_gate", error))?;
     if observed_credits < local {
         sqlx::query("UPDATE public.settlement_funding_accounts SET status='frozen',state_version=state_version+1,updated_at=clock_timestamp() WHERE uid=$1")
-            .bind(account.uid()).execute(&mut **tx).await.map_err(storage)?;
+            .bind(account.uid()).execute(&mut **tx).await.map_err(storage)
+            .map_err(|error| reject("funding_cash_freeze_failed", "cash_gate", error))?;
+        tracing::warn!(target: TARGET, safe_kind = "funding_cash_shortfall", stage = "cash_gate", "现金缺口已写入原事务，等待原提交结果");
         return Ok(false);
+    }
+    if unknown {
+        tracing::warn!(target: TARGET, safe_kind = "funding_outbound_unresolved", stage = "cash_gate", "原资金门存在未收口的外发占用");
     }
     Ok(!unknown)
 }
@@ -176,17 +196,37 @@ pub async fn check_funding_evidence(
     evidence: &auction_application::SettlementInternalEvidenceSnapshot,
 ) -> Result<bool, FundingError> {
     verify_locked(tx, account, true).await?;
-    if evidence.identity.authenticated_uid != account.uid() || !evidence.validate() {
-        return Err(FundingError::Unproven);
+    if evidence.identity.authenticated_uid != account.uid() {
+        return Err(reject(
+            "funding_evidence_account_mismatch",
+            "funding_evidence",
+            FundingError::Unproven,
+        ));
     }
-    crate::validate_mail_evidence_time(tx, evidence).await.map_err(evidence_error)?;
+    if !evidence.validate() {
+        return Err(reject(
+            "funding_evidence_snapshot_invalid",
+            "funding_evidence",
+            FundingError::Unproven,
+        ));
+    }
+    crate::validate_mail_evidence_time(tx, evidence)
+        .await
+        .map_err(evidence_error)
+        .map_err(|error| reject("funding_evidence_time_unproven", "funding_evidence", error))?;
     if account.records_only() {
         if evidence.main_cash.is_some() {
-            return Err(FundingError::Unproven);
+            return Err(reject(
+                "funding_evidence_cash_unexpected",
+                "funding_evidence",
+                FundingError::Unproven,
+            ));
         }
         // 原allocation未知状态仍由reserve/finish/return按原delivery精确保留，不自动释放。
         return Ok(true);
     }
-    let cash = evidence.main_cash.as_ref().ok_or(FundingError::Unproven)?;
+    let cash = evidence.main_cash.as_ref().ok_or_else(|| {
+        reject("funding_evidence_cash_missing", "funding_evidence", FundingError::Unproven)
+    })?;
     check_funding_cash(tx, account, cash.credits).await
 }

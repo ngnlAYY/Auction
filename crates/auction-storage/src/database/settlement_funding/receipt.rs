@@ -5,6 +5,15 @@ use auction_application::{FundingCollectedReceipt, canonical_settlement_fulfillm
 use auction_domain::{SETTLEMENT_PPM, SettlementId, SettlementObligationKind, SettlementWorld};
 use serde_json::json;
 
+mod diagnostics;
+use diagnostics::{ReceiptRejection as Rejection, diagnose_relation, reject};
+
+#[tracing::instrument(
+    target = "auction::settlement::funding_diagnostics",
+    level = "warn",
+    skip_all,
+    fields(obligation_id = %receipt.payment_obligation_id, delivery_id = %receipt.delivery_id)
+)]
 pub(super) async fn validate_receipt(
     tx: &mut Transaction<'_, Postgres>,
     account: &LockedFundingAccount,
@@ -13,27 +22,45 @@ pub(super) async fn validate_receipt(
     buyer: i64,
 ) -> Result<(), FundingError> {
     let evidence = receipt.evidence;
-    let sent = evidence.sent_collection.as_ref().ok_or(FundingError::Unproven)?;
+    let sent = evidence
+        .sent_collection
+        .as_ref()
+        .ok_or_else(|| reject(Rejection::SentMissing, FundingError::Unproven))?;
     let cash = evidence.main_cash.as_ref();
-    if !evidence.validate()
-        || receipt.payment_obligation_id != payment
-        || receipt.buyer_credits != buyer
-        || sent.binding.authenticated_uid != account.uid()
-        || sent.binding.world != SettlementWorld::Main
-        || if account.records_only() {
-            cash.is_some()
-        } else {
-            cash.is_none_or(|cash| {
-                cash.binding.world != SettlementWorld::Main
-                    || cash.binding.authenticated_uid != account.uid()
-            })
+    // 按原 || 顺序逐项早返回；只细分日志，不放宽任何联合证明或身份条件。
+    if !evidence.validate() {
+        return Err(reject(Rejection::SnapshotInvalid, FundingError::Unproven));
+    }
+    if receipt.payment_obligation_id != payment {
+        return Err(reject(Rejection::PaymentMismatch, FundingError::Unproven));
+    }
+    if receipt.buyer_credits != buyer {
+        return Err(reject(Rejection::BuyerMismatch, FundingError::Unproven));
+    }
+    if sent.binding.authenticated_uid != account.uid() {
+        return Err(reject(Rejection::SentUidMismatch, FundingError::Unproven));
+    }
+    if sent.binding.world != SettlementWorld::Main {
+        return Err(reject(Rejection::SentWorldMismatch, FundingError::Unproven));
+    }
+    if account.records_only() {
+        if cash.is_some() {
+            return Err(reject(Rejection::CashUnexpected, FundingError::Unproven));
         }
-        || !auction_application::valid_external_positive_id(&sent.external_mail_id)
-    {
-        return Err(FundingError::Unproven);
+    } else {
+        let cash = cash.ok_or_else(|| reject(Rejection::CashMissing, FundingError::Unproven))?;
+        if cash.binding.world != SettlementWorld::Main {
+            return Err(reject(Rejection::CashWorldMismatch, FundingError::Unproven));
+        }
+        if cash.binding.authenticated_uid != account.uid() {
+            return Err(reject(Rejection::CashUidMismatch, FundingError::Unproven));
+        }
+    }
+    if !auction_application::valid_external_positive_id(&sent.external_mail_id) {
+        return Err(reject(Rejection::MailIdInvalid, FundingError::Unproven));
     }
     // generation/credential锁由调用者按统一前缀取得；此处只复核全快照实时时效，不倒锁。
-    crate::validate_mail_evidence_time(tx, evidence).await.map_err(evidence_error)?;
+    crate::validate_mail_evidence_time(tx, evidence).await.map_err(receipt_evidence_error)?;
     let row = sqlx::query(
         r#"SELECT o.obligation_kind,o.amount,o.carrier_credit,o.equipment_id,
         e.name AS equipment_name,d.payload,d.recipient,d.result_metadata,
@@ -67,11 +94,14 @@ pub(super) async fn validate_receipt(
     .bind(if account.records_only() {"record_opening"} else {"reconciliation"})
     .fetch_optional(&mut **tx)
     .await
-    .map_err(storage)?
-    .ok_or(FundingError::Unproven)?;
-    let kind: String = row.try_get("obligation_kind").map_err(storage)?;
-    let carrier: i64 = row.try_get("carrier_credit").map_err(storage)?;
-    let amount: i64 = row.try_get("amount").map_err(storage)?;
+    .map_err(|error| reject(Rejection::QueryFailed, storage(error)))?;
+    let Some(row) = row else {
+        let kind = diagnose_relation(tx, account, receipt, payment, &sent.external_mail_id).await;
+        return Err(reject(kind, FundingError::Unproven));
+    };
+    let kind: String = row.try_get("obligation_kind").map_err(decode)?;
+    let carrier: i64 = row.try_get("carrier_credit").map_err(decode)?;
+    let amount: i64 = row.try_get("amount").map_err(decode)?;
     let (kind, template) = match kind.as_str() {
         "winner_equipment_cod" if carrier == 0 => {
             (SettlementObligationKind::WinnerEquipmentCod, "settlement_winner_equipment_cod")
@@ -79,23 +109,35 @@ pub(super) async fn validate_receipt(
         "winner_payment_carrier_cod" if carrier == 1 => {
             (SettlementObligationKind::WinnerPaymentCarrierCod, "settlement_payment_carrier")
         }
-        _ => return Err(FundingError::Unproven),
+        _ => {
+            let rejection = match kind.as_str() {
+                "winner_equipment_cod" | "winner_payment_carrier_cod" => Rejection::CarrierInvalid,
+                _ => Rejection::KindInvalid,
+            };
+            return Err(reject(rejection, FundingError::Unproven));
+        }
     };
-    let cod = buyer.checked_add(carrier).ok_or(FundingError::Invalid)?;
-    if amount != buyer
-        || buyer <= 0
-        || row.try_get::<String, _>("recipient").map_err(storage)? != sent.recipient
-        || canonical_settlement_fulfillment_subject(kind, SettlementId::from_uuid(payment))
-            .as_deref()
-            != Some(sent.subject.as_str())
-    {
-        return Err(FundingError::Unproven);
+    let cod = buyer
+        .checked_add(carrier)
+        .ok_or_else(|| reject(Rejection::CodOverflow, FundingError::Invalid))?;
+    if amount != buyer {
+        return Err(reject(Rejection::AmountMismatch, FundingError::Unproven));
     }
-    let payload: serde_json::Value = row.try_get("payload").map_err(storage)?;
+    if buyer <= 0 {
+        return Err(reject(Rejection::BuyerNonpositive, FundingError::Unproven));
+    }
+    if row.try_get::<String, _>("recipient").map_err(decode)? != sent.recipient {
+        return Err(reject(Rejection::RecipientMismatch, FundingError::Unproven));
+    }
+    if canonical_settlement_fulfillment_subject(kind, SettlementId::from_uuid(payment)).as_deref()
+        != Some(sent.subject.as_str())
+    {
+        return Err(reject(Rejection::SubjectMismatch, FundingError::Unproven));
+    }
+    let payload: serde_json::Value = row.try_get("payload").map_err(decode)?;
     let mut variables = json!({"reference":payment.to_string(),"amount":cod.to_string()});
     let equipment = if carrier == 0 {
-        variables["item_name"] =
-            row.try_get::<String, _>("equipment_name").map_err(storage)?.into();
+        variables["item_name"] = row.try_get::<String, _>("equipment_name").map_err(decode)?.into();
         // 精确旧三变量保留原证明；新明细必须从同一事务中的冻结结算事实重建，不能信任 payload 自报数值。
         let legacy_variables =
             payload.get("variables").and_then(serde_json::Value::as_object).is_some_and(|values| {
@@ -107,25 +149,32 @@ pub(super) async fn validate_receipt(
         if !legacy_variables {
             append_frozen_pricing(&row, buyer, &mut variables)?;
         }
-        json!([{"kind":"auction_equipment_key","id":row.try_get::<Uuid,_>("equipment_id").map_err(storage)?.to_string()}])
+        json!([{"kind":"auction_equipment_key","id":row.try_get::<Uuid,_>("equipment_id").map_err(decode)?.to_string()}])
     } else {
         json!([])
     };
     let expected = json!({"schema_version":1,"operation":"send","world":"main","template":template,
         "variables":variables,"credits":carrier,"cod":cod,"equipment_secret_refs":equipment});
-    let metadata: serde_json::Value = row.try_get("result_metadata").map_err(storage)?;
+    let metadata: serde_json::Value = row.try_get("result_metadata").map_err(decode)?;
     let exact = (metadata["proof"] == "sent_exact_payload_v1"
         && metadata["sent_verified"] == true
         && metadata["settlement_obligation_id"] == payment.to_string())
-        || row.try_get::<bool, _>("frozen_sent_proven").map_err(storage)?;
+        || row.try_get::<bool, _>("frozen_sent_proven").map_err(decode)?;
     // 恢复证明必须关联不可变发送尝试及唯一 MID，不能只凭 proof 标签资金化，也不代替本次同账号已收款联合证据。
-    if payload != expected
-        || metadata["operation"] != "send"
-        || metadata["template"] != template
-        || metadata["external_reference_proven"] != true
-        || !exact
-    {
-        return Err(FundingError::Unproven);
+    if payload != expected {
+        return Err(reject(Rejection::PayloadMismatch, FundingError::Unproven));
+    }
+    if metadata["operation"] != "send" {
+        return Err(reject(Rejection::OperationMismatch, FundingError::Unproven));
+    }
+    if metadata["template"] != template {
+        return Err(reject(Rejection::TemplateMismatch, FundingError::Unproven));
+    }
+    if metadata["external_reference_proven"] != true {
+        return Err(reject(Rejection::ReferenceUnproven, FundingError::Unproven));
+    }
+    if !exact {
+        return Err(reject(Rejection::SentProofUnproven, FundingError::Unproven));
     }
     Ok(())
 }
@@ -136,45 +185,80 @@ fn append_frozen_pricing(
     buyer: i64,
     variables: &mut serde_json::Value,
 ) -> Result<(), FundingError> {
-    let amount = |column: &str| {
-        row.try_get::<Option<i64>, _>(column).map_err(storage)?.ok_or(FundingError::Unproven)
-    };
-    let settlement_amount = |column| {
-        auction_domain::SettlementAmount::new(amount(column)?).map_err(|_| FundingError::Unproven)
+    let settlement_amount = |column: &str, missing, invalid| {
+        let amount = row
+            .try_get::<Option<i64>, _>(column)
+            .map_err(decode_pricing)?
+            .ok_or_else(|| reject(missing, FundingError::Unproven))?;
+        auction_domain::SettlementAmount::new(amount)
+            .map_err(|_| reject(invalid, FundingError::Unproven))
     };
     let hold_ppm = row
         .try_get::<Option<i64>, _>("settlement_hold_ppm")
-        .map_err(storage)?
-        .ok_or(FundingError::Unproven)?;
+        .map_err(decode_pricing)?
+        .ok_or_else(|| reject(Rejection::PricingHoldMissing, FundingError::Unproven))?;
     let adjustment_ppm = row
         .try_get::<Option<i64>, _>("settlement_adjustment_ppm")
-        .map_err(storage)?
-        .ok_or(FundingError::Unproven)?;
+        .map_err(decode_pricing)?
+        .ok_or_else(|| reject(Rejection::PricingAdjustmentMissing, FundingError::Unproven))?;
     let line = auction_domain::SettlementLine {
         lot_id: auction_domain::LotId::from_uuid(
-            row.try_get("settlement_lot_id").map_err(storage)?,
+            row.try_get("settlement_lot_id").map_err(decode_pricing)?,
         ),
-        end_price: settlement_amount("settlement_end_price")?,
-        listed_price: settlement_amount("settlement_listed_price")?,
-        buyer_amount: settlement_amount("settlement_buyer_amount")?,
-        seller_amount: settlement_amount("settlement_seller_amount")?,
-        tax_amount: settlement_amount("settlement_tax_amount")?,
-        compensation_amount: settlement_amount("settlement_compensation_amount")?,
+        end_price: settlement_amount(
+            "settlement_end_price",
+            Rejection::PricingEndPriceMissing,
+            Rejection::PricingEndPriceInvalid,
+        )?,
+        listed_price: settlement_amount(
+            "settlement_listed_price",
+            Rejection::PricingListedPriceMissing,
+            Rejection::PricingListedPriceInvalid,
+        )?,
+        buyer_amount: settlement_amount(
+            "settlement_buyer_amount",
+            Rejection::PricingBuyerAmountMissing,
+            Rejection::PricingBuyerAmountInvalid,
+        )?,
+        seller_amount: settlement_amount(
+            "settlement_seller_amount",
+            Rejection::PricingSellerAmountMissing,
+            Rejection::PricingSellerAmountInvalid,
+        )?,
+        tax_amount: settlement_amount(
+            "settlement_tax_amount",
+            Rejection::PricingTaxAmountMissing,
+            Rejection::PricingTaxAmountInvalid,
+        )?,
+        compensation_amount: settlement_amount(
+            "settlement_compensation_amount",
+            Rejection::PricingCompensationAmountMissing,
+            Rejection::PricingCompensationAmountInvalid,
+        )?,
         hold_ppm,
         adjustment_ppm,
     };
     let winning_bid = line.end_price.value();
     let buyer_amount = line.buyer_amount.value();
-    let pool_credit = line.buyer_pool_credit().map_err(|_| FundingError::Unproven)?.value();
-    let adjusted_price = buyer_amount.checked_add(pool_credit).ok_or(FundingError::Unproven)?;
-    if buyer_amount != buyer || !(0..=SETTLEMENT_PPM).contains(&hold_ppm) {
-        return Err(FundingError::Unproven);
+    let pool_credit = line
+        .buyer_pool_credit()
+        .map_err(|_| reject(Rejection::PricingPoolInvalid, FundingError::Unproven))?
+        .value();
+    let adjusted_price = buyer_amount
+        .checked_add(pool_credit)
+        .ok_or_else(|| reject(Rejection::PricingAdjustedOverflow, FundingError::Unproven))?;
+    if buyer_amount != buyer {
+        return Err(reject(Rejection::PricingBuyerMismatch, FundingError::Unproven));
     }
-    let mode: Option<String> = row.try_get("settlement_policy_mode").map_err(storage)?;
+    if !(0..=SETTLEMENT_PPM).contains(&hold_ppm) {
+        return Err(reject(Rejection::PricingHoldInvalid, FundingError::Unproven));
+    }
+    let mode: Option<String> = row.try_get("settlement_policy_mode").map_err(decode_pricing)?;
     let mode =
         crate::database::settlement_policy::decode_mode(mode.as_deref().unwrap_or("hold_curve_v1"))
-            .map_err(|_| FundingError::Unproven)?;
-    line.validate_for_mode(mode).map_err(|_| FundingError::Unproven)?;
+            .map_err(|_| reject(Rejection::PricingModeInvalid, FundingError::Unproven))?;
+    line.validate_for_mode(mode)
+        .map_err(|_| reject(Rejection::PricingLineInvalid, FundingError::Unproven))?;
     if mode == auction_domain::SettlementMode::HoldCurveV2 {
         variables["pricing_mode"] = "hold_curve_v2".into();
     }
@@ -186,12 +270,22 @@ fn append_frozen_pricing(
     Ok(())
 }
 
+#[tracing::instrument(
+    target = "auction::settlement::funding_diagnostics",
+    level = "warn",
+    skip_all,
+    fields(obligation_id = %receipt.payment_obligation_id, delivery_id = %receipt.delivery_id)
+)]
 pub(super) async fn store_receipt(
     tx: &mut Transaction<'_, Postgres>,
     source: Uuid,
     receipt: &FundingCollectedReceipt<'_>,
 ) -> Result<(), FundingError> {
-    let sent = receipt.evidence.sent_collection.as_ref().ok_or(FundingError::Unproven)?;
+    let sent = receipt
+        .evidence
+        .sent_collection
+        .as_ref()
+        .ok_or_else(|| reject(Rejection::StoreSentMissing, FundingError::Unproven))?;
     let cash = receipt.evidence.main_cash.as_ref();
     let evidence = json!({"credential_id":sent.binding.credential_id,
         "credential_version":sent.binding.credential_version,"runtime_generation":sent.binding.runtime.generation,
@@ -206,6 +300,22 @@ pub(super) async fn store_receipt(
     sqlx::query("INSERT INTO public.settlement_funding_receipts(source_id,uid,payment_obligation_id,delivery_id,external_mail_id,evidence) VALUES($1,$2,$3,$4,$5,$6)")
         .bind(source).bind(&sent.binding.authenticated_uid).bind(receipt.payment_obligation_id)
         .bind(receipt.delivery_id).bind(&sent.external_mail_id).bind(evidence)
-        .execute(&mut **tx).await.map_err(storage)?;
+        .execute(&mut **tx).await.map_err(|error| reject(Rejection::StoreFailed, storage(error)))?;
     Ok(())
+}
+
+fn decode(error: sqlx::Error) -> FundingError {
+    reject(Rejection::RowDecodeFailed, storage(error))
+}
+
+fn decode_pricing(error: sqlx::Error) -> FundingError {
+    reject(Rejection::PricingRowDecodeFailed, storage(error))
+}
+
+fn receipt_evidence_error(error: crate::MailEvidenceTransactionError) -> FundingError {
+    let kind = match &error {
+        crate::MailEvidenceTransactionError::Sqlx(_) => Rejection::QueryFailed,
+        crate::MailEvidenceTransactionError::Rejected(_) => Rejection::EvidenceTimeInvalid,
+    };
+    reject(kind, evidence_error(error))
 }

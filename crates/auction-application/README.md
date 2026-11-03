@@ -61,6 +61,109 @@
 - **敏感值**：Cookie、装备 key、登录 key 等经专用值对象受控暴露，并对明文调试输出与丢弃清理设定边界；普通查询投影不含秘密。显式的凭据命令、Admin key 签发结果与投递端口可携带专用秘密类型，不能把这些类型直接映射为普通查询 DTO。
 - **错误**：`ApplicationError` 区分能力缺失（`CapabilityUnavailable`，HTTP 层通常映射为 `501 feature_not_supported`）、领域错误、仓储错误与各 owner 的闭集错误；错误文本不回显输入中的秘密。
 
+## 错误安全分类
+
+[`crates/auction-application/src/errors/safe_kind.rs`](src/errors/safe_kind.rs) 的 `ApplicationError::safe_kind()` 返回下表闭集中的固定 `&'static str`，不分配字符串，不读取 Display、Debug、source 或错误正文，不包含秘密、金额、版本号或用户输入。分类仅用于诊断，不参与重试或业务判定；原错误、事务冲突检测与邮件重试分类保持原语义。既有分类值保持稳定，新增或细分分类时同步本表；本节是分类集合的唯一说明位置。
+
+表中未细分的 owner 错误，其全部内层变体归入同一类别；事务错误与命令账本按下列精确原因分类。`RepositoryError` 当前只有 `Failed(String)`，不从文本推断冲突或可用性。
+
+| 变体或内层原因 | `safe_kind` |
+| --- | --- |
+| `CapabilityUnavailable(_)` | `capability_unavailable` |
+| `ForumIdentityRejected(_)` | `forum_identity_rejected` |
+| `FulfillmentEvidenceNotObserved` | `evidence_not_observed` |
+| `FulfillmentDependencyUnavailable` | `dependency_unavailable` |
+| `FulfillmentAccountBusy` | `remote_busy` |
+| `FulfillmentDependencyMismatch` | `dependency_mismatch` |
+| `FulfillmentEquipmentSecretNotFound` | `equipment_secret_not_found` |
+| `Domain(_)` | `domain_rejected` |
+| `Repository(Failed(_))`；`CompetitionTransaction`、`SettlementTransaction`、`RecoveryCommand`、`AdminRulesTransaction`、`AdminMailTransaction` 的 `Failed(_)`；直接或嵌套的 `CommandLedgerError::Storage` | `repository_failed` |
+| `DeliveryAdmin(_)` | `delivery_admin_error` |
+| `CompetitionTransaction`、`SettlementTransaction`、`RecoveryCommand`、`AdminRulesTransaction`、`AdminMailTransaction` 的 `SerializationConflict` | `repository_serialization_conflict` |
+| `CompetitionTransaction`、`SettlementTransaction`、`AdminRulesTransaction`、`AdminMailTransaction` 的 `Conflict` | `repository_conflict` |
+| `CompetitionTransaction` 的 `NotFound`、`AdminIntakeUnavailable`、`IntakeClosed`、`AdminIntakeSellerBlacklisted`、`AdminIntakeEquipmentConflict`、`StaleState`、`InvalidState`、`BidderIneligible`、`StaleSlowProxy` | `competition_rejected` |
+| `SettlementTransaction(NotFound)` | `settlement_not_found` |
+| `RecoveryCommand(CommandConflict)`；直接或嵌套的 `CommandLedgerError::Conflict` | `command_conflict` |
+| `RecoveryCommand` 的 `InvalidCommand`、`NotFound`、`StaleState`、`NotConfirmable`、`EvidenceUnresolved`、`InvalidStoredResult` | `recovery_rejected` |
+| `RealtimeAdmin(_)` | `realtime_admin_error` |
+| 直接或嵌套的 `CommandLedgerError::InvalidRecord` | `command_ledger_invalid` |
+| `TransactionPolicy(_)` | `transaction_policy_invalid` |
+| `Serialization(_)` | `serialization_failed` |
+| `Session(_)` | `session_error` |
+| `AdminRules(_)` | `admin_rules_error` |
+| `AdminRulesTransaction(RevisionConflict { .. })` | `rules_revision_conflict` |
+| `AdminMail(_)` | `admin_mail_error` |
+| `AdminMailTransaction(NotFound)` | `mail_poll_state_not_found` |
+| `AdminMailTransaction(StateConflict { .. })` | `mail_state_conflict` |
+| `AdminIntake(_)` | `admin_intake_error` |
+| `AdminForumPreview(_)` | `admin_forum_preview_error` |
+| `ForumRemote`：`write_started == true` | `remote_write_started` |
+| `ForumRemote`：`write_started == false && retryable == true` | `remote_retryable` |
+| `ForumRemote`：`write_started == false && retryable == false` | `remote_rejected` |
+| `AdminAudit(_)` | `admin_audit_error` |
+| `AdminCredential(_)` | `admin_credential_error` |
+| `AdminLotUpdate(_)` | `admin_lot_update_error` |
+| `AdminRuntime(_)` | `admin_runtime_error` |
+| `AdminRuntimeFile(_)` | `runtime_file_error` |
+| `AdminRuntimeCommand(_)` | `runtime_command_error` |
+| `AdminUser(_)` | `admin_user_error` |
+| `AdminWorld(_)` | `admin_world_error` |
+| `MailProcessing(_)` | `mail_processing_error` |
+| `OperationsAlert(_)` | `operations_alert_error` |
+
+命令账本的嵌套位置仅为 `CompetitionTransaction(CommandLedger(_))` 与 `SettlementTransaction(CommandLedger(_))`。论坛分类不直接返回 `ForumRemoteError::code()`；`remote_write_started` 只表示已开始写入，不推断最终结果。
+
+首个调用方为 [`crates/auction-jobs/src/worker/runtime/settlement.rs`](../auction-jobs/src/worker/runtime/settlement.rs) 的 `process_fulfillment_claim`：仅在 reconcile 返回未持久化错误的原 warn 上增加 `safe_kind`、`delivery_id` 与固定 `phase="reconcile"`。日志不输出原错误或 claim 快照，保持原错误结果、租约和重试行为；HTTP、JSON、事件、配置及数据库契约不变。
+
+### 资金与内部证据错误
+
+`FundingError::safe_kind()` 与 `InternalEvidenceError::safe_kind()` 同样只穷尽匹配枚举并返回固定字面量，不读取错误正文，不参与资金、证据或重试判定；它们仍是独立端口错误，不新增 `ApplicationError` 变体。
+
+| 错误变体 | `safe_kind` |
+| --- | --- |
+| `FundingError::Invalid` | `funding_invalid` |
+| `FundingError::Conflict` | `funding_conflict` |
+| `FundingError::Unavailable` | `funding_unavailable` |
+| `FundingError::Unproven` | `funding_unproven` |
+| `FundingError::Unsupported` | `funding_unsupported` |
+| `FundingError::SerializationConflict` | `funding_serialization_conflict` |
+| `FundingError::Storage` | `funding_storage_error` |
+| `InternalEvidenceError::Unsupported` | `evidence_unsupported` |
+| `InternalEvidenceError::Unproven` | `evidence_unproven` |
+| `InternalEvidenceError::Unavailable` | `evidence_unavailable` |
+| `InternalEvidenceError::Expired` | `evidence_expired` |
+| `InternalEvidenceError::Revoked` | `evidence_revoked` |
+| `InternalEvidenceError::InvalidRequest` | `evidence_request_invalid` |
+
+### COD 实收 reconcile 位置分类
+
+[`crates/auction-application/src/services/settlement/fulfillment/collected.rs`](src/services/settlement/fulfillment/collected.rs) 使用独立 target `auction::settlement::funding_diagnostics`；instrument span 仅携带义务、投递、稳定命令与闭集世界，不跨 await 持有 entered guard。每个位置使用下表固定 `safe_kind`，原错误类别仅进入 `cause_kind`，不记录错误文本或快照。
+
+| 位置 | `safe_kind` |
+| --- | --- |
+| 缺少原 delivery | `collected_delivery_missing` |
+| 未接内部端口时，原外部 satisfy 返回错误 | `collected_external_satisfy_failed` |
+| 建立稳定命令失败 | `collected_command_invalid` |
+| 原命令重放失败 | `collected_replay_failed` |
+| 资金策略读取失败 | `collected_policy_read_failed` |
+| 证据请求建立失败 | `collected_evidence_request_failed` |
+| 无 canonical subject | `collected_subject_invalid` |
+| 联合证据准备失败 | `collected_evidence_prepare_failed` |
+| 准备失败后的原 legacy satisfy 也失败 | `collected_legacy_satisfy_failed` |
+| 策略身份不等 | `collected_identity_mismatch` |
+| check_current 失败 | `collected_evidence_current_failed` |
+| begin_commit 失败 | `collected_commit_guard_failed` |
+| 原 FundingDeferred 已确认提交 | `collected_funding_deferred` |
+| 原 RolledBack 已确认回滚 | `collected_funding_rolled_back` |
+| 事务返回 Err，尚无确认结果 | `collected_funding_outcome_unconfirmed` |
+| 任一原 defer 持久化失败 | `collected_defer_persist_failed` |
+
+`stage` 区分 `delivery`、`external_satisfy`、`command`、`replay`、`policy`、`evidence_request`、`subject`、`evidence_prepare`、`legacy_satisfy`、`identity`、`evidence_current`、`commit_guard`、`commit` 及 defer 失败时的 `funding_deferred`/`funding_rolled_back`。只记录有原错误的位置的 `cause_kind`；策略读取之前已丢失的内层原因不从文本反推。
+
+身份不等时仍短路，不调用 check_current；原五处 defer 调用仍使用 `collected_funding_evidence_wait` 或 `collected_funding_wait`。原 Committed/FundingDeferred/RolledBack 的 guard 确认位置不变，Err 仍不确认并撤销 owner、返回原固定仓储错误。结果字段 `outcome` 只在已知分支写 `committed`、`rolled_back` 或 `unconfirmed`；不据日志自动重发或改写人工证明。
+
+收据/价格拒绝码、前置存储阶段与辅助查询的唯一说明见 [Storage 资金拒绝字典](../auction-storage/README.md#cod-实收资金化拒绝诊断)。过滤与开关见[运维 D1 诊断](../../ops/README.md#d1-诊断)。仅增加日志，不改路由、JSON、事件、配置字段、数据库、持久化失败码或审计事实。
+
 ## 会话
 
 - **Public**：玩家用登录 key 登录，原始 token 只在登录响应中出现一次，存储端只保存摘要。登录时长由账号偏好决定（默认永久，可设固定期限），活动不延长期限；每个用户的并发会话数受 `max_public_sessions` 限制。

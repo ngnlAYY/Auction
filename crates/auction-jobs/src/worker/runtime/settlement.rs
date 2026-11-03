@@ -134,6 +134,7 @@ where
                     return WorkerResult::Error;
                 };
                 let deadline = fulfillment_budget(&claim, observed_at);
+                let delivery_id = claim.delivery_id;
                 match bounded_fulfillment(
                     deadline,
                     fulfillment_commands.reconcile(claim, observed_at, retry_at),
@@ -174,11 +175,15 @@ where
                         }
                         return WorkerResult::Success;
                     }
-                    Err(_error) => {
+                    Err(error) => {
                         // reconcile 的 dependency/证据错误若已被应用服务识别，会以 Deferred、
                         // Failed 或 ManualReconcile 返回；这里只处理未完成持久迁移的错误。
+                        // 安全分类只补充诊断，保留失败关闭、原 claim 租约与重试，不记录错误正文。
                         tracing::warn!(
                             obligation_id = %obligation_id,
+                            delivery_id = ?delivery_id,
+                            phase = "reconcile",
+                            safe_kind = error.safe_kind(),
                             "settlement fulfillment reconcile returned an unpersisted error"
                         );
                         return WorkerResult::Error;
