@@ -82,11 +82,11 @@ impl AppConfig {
         let mut http_security = http_security.unwrap_or_else(|| HttpSecurityConfig::for_role(role));
         let session = session.unwrap_or_else(|| RoleSessionConfig::for_role(role));
 
-        // Admin runtime 文件是 Admin 运行时策略的唯一生效源；否则 metrics 区块虽然能被
-        // 解析并通过 runtime API 返回，进程装配却仍会读取主配置，形成“可写但不生效”的假配置。
+        // Admin runtime 只覆盖指标启用状态；转发请求拒绝策略仍由部署配置持有，避免新增
+        // runtime 字段改变文档指纹和命令摘要，也避免覆盖时把显式回退开关丢失。
         let metrics = admin_runtime
             .as_ref()
-            .map(|runtime| MetricsConfig { enabled: runtime.metrics.enabled })
+            .map(|runtime| MetricsConfig { enabled: runtime.metrics.enabled, ..metrics })
             .unwrap_or(metrics);
         let tracing = admin_runtime.as_ref().map(runtime_tracing).unwrap_or(tracing);
 

@@ -19,7 +19,7 @@ where
             .route("/api/v1/health", get(health))
             .route("/health/live", get(health::health_live))
             .route("/health/ready", get(health::public_health_ready))
-            .route("/metrics", get(metrics::public)),
+            .route("/metrics", axum::routing::any(metrics::public)),
     )
     .fallback(web_assets::serve_public_asset::<A>)
     .layer(middleware::from_fn_with_state(boundary, boundary::enforce))
@@ -39,7 +39,7 @@ where
             .route("/api/v1/health", get(health))
             .route("/health/live", get(health::health_live))
             .route("/health/ready", get(health::admin_health_ready))
-            .route("/metrics", get(metrics::admin)),
+            .route("/metrics", axum::routing::any(metrics::admin)),
     )
     .fallback(web_assets::serve_admin_asset::<A>)
     .layer(middleware::from_fn_with_state(boundary, boundary::enforce))

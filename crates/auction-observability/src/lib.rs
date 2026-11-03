@@ -14,10 +14,11 @@ pub use health::{
 pub use metrics::{
     AuditFailureClass, AuditFailureKind, AuditFailureObservation, AuditMetricsSnapshot,
     AuditMetricsSource, AuditSqlstateClass, BusinessEvent, BusinessOutcome, BusinessRecorder,
-    METRICS_ROUTE, MetricsError, PoolMetricsBackend, PoolMetricsSnapshot, PoolMetricsSource,
-    ProcessMetrics, ReadinessCacheOutcome, ReadinessCheckResult, ReadinessRecorder,
-    ShutdownCriticalKind, ShutdownOutcome, ShutdownPhase, ShutdownReason, ShutdownRecorder,
-    ShutdownRole, WorkerLoop, WorkerRecorder, WorkerResult, WorkerRetryKind, noop_worker_recorder,
+    HttpRateLimitKind, HttpRecorder, METRICS_ROUTE, MetricsError, PoolMetricsBackend,
+    PoolMetricsSnapshot, PoolMetricsSource, ProcessMetrics, ReadinessCacheOutcome,
+    ReadinessCheckResult, ReadinessRecorder, ShutdownCriticalKind, ShutdownOutcome, ShutdownPhase,
+    ShutdownReason, ShutdownRecorder, ShutdownRole, WebSocketConnectionGuard, WorkerLoop,
+    WorkerRecorder, WorkerResult, WorkerRetryKind, noop_worker_recorder,
 };
 pub use telemetry::{
     InitError, ShutdownError, TracingConfig, TracingRuntime, attach_remote_trace_context,

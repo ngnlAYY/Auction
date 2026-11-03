@@ -209,12 +209,27 @@ histogram_quantile(0.95, sum by (instance, le) (rate(auction_readiness_check_dur
 
 ### 指标
 
-Public/Worker 在 `common.toml` 设置 `[metrics] enabled = true`；Admin 配置了 runtime 文件时，以 runtime 的 `[metrics]` 为准。Public/Admin 在各自 listener 上提供 `/metrics`（listener 必须是 loopback TCP 或 Unix socket），Worker 在启用的 control socket 上提供 `/metrics`。指标族见 [auction-observability](../crates/auction-observability/README.md#指标)。建议关注：
+Public/Worker 在 `common.toml` 设置 `[metrics] enabled = true`；Admin 配置了 runtime 文件时，enabled 以 runtime 的 `[metrics]` 为准。Public/Admin 在各自 listener 上提供 `/metrics`（listener 必须是 loopback TCP 或 Unix socket），Worker 在启用的 control socket 上提供 `/metrics`。指标族见 [auction-observability](../crates/auction-observability/README.md#指标)。建议关注：
 
+- 按路由模板的 HTTP 请求数、状态码和延迟，已升级 WebSocket 当前/累计数，login/mutation/realtime 频率拒绝；
 - Worker 循环迭代与调度延迟、批次饱和、重试次数；
 - 数据库连接池等待与空池次数；
 - tracing 导出失败或降级；
 - 业务事件计数。
+
+Public/Admin 默认开启部署层 `common.toml [metrics] reject_forwarded_requests = true`：带转发头的任意方法在应用层返回空 404，优先于 request-id 400，不带 `Allow`，与 Caddy 的公网 404 屏蔽并存。精确头集合与直连方法见[路由契约](../docs/contracts/routes.md#健康与指标publicadmin)。CDN 专用来源头待 W0.12 核实后补充；代理剥除所有识别头时，仅靠应用层头检查无法识别转发，因此必须保留 listener 限制和 Caddy 屏蔽。
+
+采集器应直接请求本机 loopback `/metrics`；Unix listener 可通过支持 Unix socket 的采集客户端直接访问实际 `listener.socket_path`，不要通过 HTTP 反向代理或附加转发头。以下是 TCP 直连和 SSH 隧道示例，Admin 可改用 8091；`auction-host` 替换为部署主机的 SSH 地址：
+
+```bash
+# 在部署主机直接访问 Public 的 loopback listener。
+curl --fail http://127.0.0.1:8090/metrics
+# 从本机建立隧道；另一终端访问映射端口，不经过 HTTP 代理。
+ssh -N -L 18090:127.0.0.1:8090 auction-host
+curl --fail http://127.0.0.1:18090/metrics
+```
+
+回退时仅将 common 中的 `metrics.reject_forwarded_requests` 设为 false，并按时段门禁重启 Public/Admin，恢复旧访问行为；runtime 对 enabled 的覆盖不会覆盖此开关。该字段不在 Admin 参数文档中，修改需重启；保留 Caddy 屏蔽和 loopback/Unix 限制。关闭 `metrics.enabled` 可停用指标 collector，所有 HTTP 记录与连接观测守卫成为 no-op。Worker control 继续按 peer UID/GID 授权；新增 loopback 采集出口与指标存储由 W0.10 处理。
 
 ### 运维告警
 

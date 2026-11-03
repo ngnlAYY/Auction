@@ -14,7 +14,7 @@
 ```
 
 - `code` 是稳定的机器可读值，客户端只依据 HTTP 状态与 `code` 分支，不解析 `message`（中文提示，可能调整）。通常成功为 HTTP 200 / `ok`；创建拍卖、用户和手工录入 lot 为 201 / `created`；凭据录入与首次发布规则为 201 / `ok`；触发邮件轮询为 202 / `accepted`；创建代理仍为 200 / `ok`。
-- Public/Admin 响应头始终回传 `x-request-id`（合法输入沿用，缺失时生成，非法或重复输入返回 400）；错误 JSON 含 `request_id` 字段，但 handler 的常规错误可能为 null，排查以响应头为准。
+- Public/Admin 响应头始终回传 `x-request-id`（合法输入沿用，缺失时生成，非法或重复输入返回 400；指标转发拒绝优先返回 404 并回传安全生成的标识）；错误 JSON 含 `request_id` 字段，但 handler 的常规错误可能为 null，排查以响应头为准。
 - 时间为 RFC 3339 字符串；金额为整数 Credits；标识为小写 UUID 字符串。
 
 ### 通用错误码
@@ -53,7 +53,13 @@
 | GET | `/health/live` | 进程存活：`{"code":"live","message":"…","data":{"live":true}}` |
 | GET | `/health/ready` | 就绪：Public 要求数据库与 realtime relay 新鲜；Admin 要求数据库就绪；均按审计模式判定。默认 shadow 保持任一审计失败即未就绪，classified 仅由 permanent + unknown 阻断。成功为 200 / `ready`，未就绪为 503 / `not_ready` |
 | GET | `/health`、`/api/v1/health` | 服务名、状态与运行进程版本 |
-| GET | `/metrics` | Prometheus 文本；需启用 metrics，且 listener 为 loopback TCP 或 Unix socket |
+| GET / HEAD | `/metrics` | 直连 Prometheus 文本（HEAD 无正文）；需启用 metrics，且 listener 为 loopback TCP 或 Unix socket |
+
+Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 `X-Forwarded-*`、`X-Real-IP` 或 `Via` 的请求，只判断头存在性，不解析或记录头值；空值、重复或非法值也拒绝。任何方法均返回空 404，不带 `Allow`，并附安全响应头、`Cache-Control: no-store` 与安全 request-id；该拒绝优先于 request-id 400、方法 405 和指标编码。CDN 专用来源头待 W0.12 核实实际代理链后再加入。
+
+直连的其他方法保留空 405 与 `Allow: GET,HEAD`；GET/HEAD 在未启用、带 query 时返回 404，编码失败返回 500。未注册的路径变体沿用 fallback 的 404。路由使用 `any(...)` 注册并由 owner 显式检查方法，避免框架对拒绝响应补出 `Allow`。
+
+部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true，设为 false 并重启 Public/Admin 恢复旧访问行为；指标启用、query 与监听限制仍生效。Admin runtime 只覆盖 `metrics.enabled`，该安全开关不进入 runtime 文档、不改变文档指纹或命令摘要。配置见[配置参考](../../ops/config/README.md#commontoml)，Caddy 的公网 404 规则与应用收紧同时保留。
 
 默认启用一秒进程缓存与并发单飞，只保存最终就绪布尔值；正负结果均缓存，过期后等待新检查，不继续返回过期成功。检查限时 750ms，超时、异常或刷新任务取消均产生未就绪；请求断开不取消共享刷新。`Cache-Control: no-store` 及 JSON 结构保持不变，缓存不由代理、CDN 或浏览器持有。开关见[就绪策略](../../ops/config/README.md#就绪策略)。
 

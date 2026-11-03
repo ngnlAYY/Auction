@@ -3,10 +3,12 @@
 # 可选：tracing 过滤器；省略时使用进程默认过滤器。
 log_filter = "info,auction=debug"
 
-# 可选区块：进程本地 Prometheus 指标；Admin runtime 可在重启时覆盖 Admin 的实际值。
+# 可选区块：进程本地 Prometheus 指标；Admin runtime 仅在重启时覆盖 Admin 的 enabled。
 [metrics]
 # 可选：是否启用固定指标端点；省略时关闭。
 enabled = false
+# 可选：Public/Admin 是否拒绝带转发头的指标请求；默认 true，false 回退旧行为，修改需重启；不进入 Admin runtime。
+reject_forwarded_requests = true
 
 # 可选区块：三角色共用的就绪策略；修改后须重启，不由 Admin runtime 覆盖。
 [readiness]

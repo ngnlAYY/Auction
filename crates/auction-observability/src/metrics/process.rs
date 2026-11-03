@@ -9,6 +9,7 @@ use prometheus::{
 use super::{
     audit::{AuditMetricsCollector, AuditMetricsSource},
     business::PrometheusBusinessRecorder,
+    http::HttpRecorder,
     pool::PoolMetricsCollector,
     readiness::{self, ReadinessRecorder},
     tracing::{DisabledTracingHealth, TracingCollector, valid_identity},
@@ -27,6 +28,7 @@ pub struct ProcessMetrics {
     worker: Arc<dyn WorkerRecorder>,
     business: Arc<dyn BusinessRecorder>,
     readiness: Arc<dyn ReadinessRecorder>,
+    http: HttpRecorder,
 }
 
 impl ProcessMetrics {
@@ -121,7 +123,8 @@ impl ProcessMetrics {
 
         let readiness = readiness::build(&registry)?;
         let shutdown = super::shutdown::build(&registry)?;
-        Ok(Self { enabled: true, registry, worker, business, readiness, shutdown })
+        let http = HttpRecorder::build(&registry, role)?;
+        Ok(Self { enabled: true, registry, worker, business, readiness, shutdown, http })
     }
 
     /// 创建空注册表与 no-op 记录器；关闭时不注册 collector，也不建立后台任务。
@@ -133,6 +136,7 @@ impl ProcessMetrics {
             business: noop_business_recorder(),
             readiness: readiness::noop(),
             shutdown: super::shutdown::noop(),
+            http: HttpRecorder::default(),
         }
     }
 
@@ -165,14 +169,19 @@ impl ProcessMetrics {
         Arc::clone(&self.business)
     }
 
-    /// 返回 HTTP readiness 的闭集记录器；由角色装配根注入探针。
     /// 返回仅接受闭集身份的排空指标端口。
     pub fn shutdown(&self) -> Arc<dyn super::shutdown::ShutdownRecorder> {
         Arc::clone(&self.shutdown)
     }
 
+    /// 返回 HTTP readiness 的闭集记录器；由角色装配根注入探针。
     pub fn readiness(&self) -> Arc<dyn ReadinessRecorder> {
         Arc::clone(&self.readiness)
+    }
+
+    /// 返回 Public/Admin 共用的 HTTP 记录器；关闭指标或其他角色得到 no-op。
+    pub fn http(&self) -> HttpRecorder {
+        self.http.clone()
     }
 
     /// 注册数据库连接池状态 collector。
