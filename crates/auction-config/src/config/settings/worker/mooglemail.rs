@@ -38,6 +38,14 @@ pub struct MoogleMailWorkerConfig {
     pub maximum_pages: usize,
     /// 每个 world 共用的标准五字段 cron；支持旧版描述符和时区前缀。
     pub schedule: String,
+    /// 独立运行收件与维护并错峰两个世界；关闭时恢复每轮三分支并行的旧路径。
+    pub poll_isolation_enabled: bool,
+    /// 独立维护的 cron；省略时跟随 runtime 覆盖后实际生效的收件 schedule。
+    /// 只在 poll_isolation_enabled 开启时生效，修改需要重启 Worker。
+    pub maintenance_schedule: Option<String>,
+    /// 完整 Read Mail 纯观察的最小间隔，默认 3600 秒，范围 60 至 86400。
+    /// 每次维护结束后检查，实际间隔向上取整到维护节奏；旧路径忽略此值。
+    pub read_mail_observation_interval_seconds: u64,
     /// 每个 cron 触发时刻后附加的随机抖动上限秒数。
     pub jitter_seconds: u64,
     pub lease_duration_seconds: u64,
@@ -166,6 +174,9 @@ impl Default for MoogleMailWorkerConfig {
             batch_size: 100,
             maximum_pages: 20,
             schedule: "*/5 * * * *".to_owned(),
+            poll_isolation_enabled: true,
+            maintenance_schedule: None,
+            read_mail_observation_interval_seconds: 3600,
             jitter_seconds: 5,
             lease_duration_seconds: 60,
             renew_interval_seconds: 10,

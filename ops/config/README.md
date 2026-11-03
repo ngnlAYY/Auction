@@ -87,7 +87,7 @@ Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、metrics �
 | `[worker.recovery]` | 恢复：批次、并发、轮询、租约、超时、低余额阈值、健康刷新与证据过期 |
 | `[worker.control]` | Worker control：开关、socket 组、`allowed_peer_uids`/`allowed_peer_gids`（启用时至少一项）、运行目录与 socket 路径 |
 | `[worker.forum]` | 论坛同步：开关、凭据 scope、公开站点 origin、板块 ID、轮询、页数上限、请求间隔与超时、租约 |
-| `[worker.mooglemail]` | 邮件：开关、邮箱标识与世界、邮件默认起拍价、请求边界、cron 计划与抖动、租约、重试、发件人白名单、`keyenv_file`（本地联调） |
+| `[worker.mooglemail]` | 邮件：开关、邮箱标识与世界、邮件默认起拍价、请求边界、收件与维护 cron、观察间隔与隔离开关、抖动、租约、重试、发件人白名单、`keyenv_file`（本地联调） |
 | `[worker.mooglemail.send_intervals]` | 各类出站邮件发送起点的最小间隔 |
 | `[worker.mooglemail.diagnostics]` | 诊断归档：开关、目录（生产须为可写目录）、保留天数、总字节上限 |
 | `[worker.mooglemail.equipment_filter]` | 投稿过滤：品质门槛（始终生效）、前后缀/分类/类型/等级过滤 |
@@ -100,6 +100,22 @@ Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、metrics �
 - MoogleMail：需要凭据来源（数据库凭据 + `credential_data_key`，或 `keyenv_file`，或 `mooglemail_cookie`）以及 `user_login_data_key`。
 - 论坛：需要 `ehentai_cookie` 或 `credential_data_key`。
 - 运维告警：需要收件人，告警世界必须在已启用的 MoogleMail 世界内。
+
+#### MoogleMail 收件与维护
+
+以下字段只属于 `worker.toml` 的 `[worker.mooglemail]`，不由 Admin 参数界面接管，修改后需要重启 Worker：
+
+| 字段 | 默认值与范围 | 行为 |
+| --- | --- | --- |
+| `poll_isolation_enabled` | `true` | 每个世界独立运行收件与维护；维护先执行 Sent/Take 恢复和 compose 清理，再检查 Read Mail 纯观察是否到期 |
+| `maintenance_schedule` | 省略；接受与 `schedule` 相同的标准 cron、描述符、时区前缀和 `@every` | 省略时跟随实际生效的收件 `schedule`，包括 Admin 托管邮件参数对该字段的覆盖；显式配置时使用独立维护日程 |
+| `read_mail_observation_interval_seconds` | `3600`，范围 `60–86400` | 完整已读列表纯计数观察的最小间隔；首次观察延后该间隔，只在每次 `sweep` 结束后检查，实际间隔向上取整到维护节奏；失败也消耗本次间隔 |
+
+两个世界同时启用且隔离开启时，启动时从实际收件日程的首两个未来触发时刻计算一次相位：`phase = min(150 秒, 两次触发间隔 / 2)`。main 使用零相位，isekai 使用该相位；单世界部署使用零相位。同一世界的收件和维护都按 `schedule.next_after(now - phase) + phase` 平移整条日程，再叠加原 `jitter_seconds`，不会因直接给下一触发点加延迟而漏掉尚未到来的偏移时刻。`@every` 是相对节奏，在该公式中自然抵消相位，不另加错峰分支。默认五分钟 cron 下，两个世界的名义触发点相差 150 秒。
+
+收件唤醒与持久邮箱下一次 due 使用同一平移日程；租约、游标、命令资格与业务完成仍依赖数据库事实。手动触发立即唤醒收件，不受相位影响，也不唤醒独立维护。维护和纯观察分别使用原 `fetch_timeout_seconds` 的总截止点，各阶段内的数据库等待、凭据排队与远端操作不能重置期限。`maximum_pages`、完整列表检查、恢复及发送证明保持原语义；低频纯观察只记录完整列表数量，不创建历史入站命令。
+
+回退时设置 `poll_isolation_enabled = false` 并重启 Worker：恢复每轮 Read Mail 观察、维护与收件的三分支 `tokio::join!`、原观察频率和无相位日程，不启动独立维护任务，两个新节奏参数不生效。重启须遵守部署时段门禁。
 
 ## runtime 配置（`runtime/admin.toml`）
 

@@ -42,7 +42,7 @@ impl PrometheusWorkerRecorder {
                 "auction_worker_loop_iteration_duration_seconds",
                 "Worker loop iteration duration in seconds.",
             )
-            .buckets(vec![0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 5.0, 30.0]),
+            .buckets(vec![0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 5.0, 30.0, 60.0, 120.0, 300.0]),
             &["loop"],
         )
         .map_err(MetricsError::Registry)?;
@@ -136,13 +136,14 @@ impl WorkerRecorder for PrometheusWorkerRecorder {
     ) {
         self.iterations.with_label_values(&[loop_kind.label(), result.label()]).inc();
         self.durations.with_label_values(&[loop_kind.label()]).observe(duration.as_secs_f64());
-        let event = business_event_for_worker(loop_kind);
-        let outcome = match result {
-            WorkerResult::Success => BusinessOutcome::Success,
-            WorkerResult::Error | WorkerResult::Canceled => BusinessOutcome::Error,
-        };
-        self.business.observe(event, outcome);
-        self.business.observe_duration(event, duration);
+        if let Some(event) = business_event_for_worker(loop_kind) {
+            let outcome = match result {
+                WorkerResult::Success => BusinessOutcome::Success,
+                WorkerResult::Error | WorkerResult::Canceled => BusinessOutcome::Error,
+            };
+            self.business.observe(event, outcome);
+            self.business.observe_duration(event, duration);
+        }
     }
 
     fn observe_batch(&self, loop_kind: WorkerLoop, items: usize, capacity: usize) {
@@ -170,8 +171,13 @@ impl WorkerRecorder for PrometheusWorkerRecorder {
     }
 }
 
-fn business_event_for_worker(loop_kind: WorkerLoop) -> BusinessEvent {
-    match loop_kind {
+fn business_event_for_worker(loop_kind: WorkerLoop) -> Option<BusinessEvent> {
+    let event = match loop_kind {
+        // 维护和纯观察只计阶段轮次；不能因循环拆分重复增加 MailIntake 业务事件。
+        WorkerLoop::MailMaintenanceMain
+        | WorkerLoop::MailMaintenanceIsekai
+        | WorkerLoop::MailReadObservationMain
+        | WorkerLoop::MailReadObservationIsekai => return None,
         WorkerLoop::MailMain | WorkerLoop::MailIsekai => BusinessEvent::MailIntake,
         WorkerLoop::Delivery => BusinessEvent::MailDelivery,
         WorkerLoop::Auction => BusinessEvent::AuctionLifecycle,
@@ -182,7 +188,8 @@ fn business_event_for_worker(loop_kind: WorkerLoop) -> BusinessEvent {
         WorkerLoop::OperationsAlertScan
         | WorkerLoop::OperationsAlertDispatch
         | WorkerLoop::OperationsAlertReconcile => BusinessEvent::OperationsAlert,
-    }
+    };
+    Some(event)
 }
 
 fn valid_retry_mode(loop_kind: WorkerLoop, retry_kind: WorkerRetryKind) -> bool {
@@ -192,6 +199,10 @@ fn valid_retry_mode(loop_kind: WorkerLoop, retry_kind: WorkerRetryKind) -> bool 
             matches!(retry_kind, WorkerRetryKind::Persisted)
         }
         WorkerLoop::Auction
+        | WorkerLoop::MailMaintenanceMain
+        | WorkerLoop::MailMaintenanceIsekai
+        | WorkerLoop::MailReadObservationMain
+        | WorkerLoop::MailReadObservationIsekai
         | WorkerLoop::Forum
         | WorkerLoop::Realtime
         | WorkerLoop::OperationsAlertScan

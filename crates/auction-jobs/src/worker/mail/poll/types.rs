@@ -100,6 +100,10 @@ pub trait MailPollGateway: Send + Sync {
 /// 单个 MoogleMail 邮箱的独立调度、超时、续租与重试边界。
 #[derive(Debug, Clone, Copy)]
 pub struct MailPollRuntimeConfig {
+    /// 开启时收件独立运行；关闭时恢复每轮观察、维护、收件的三分支 join。
+    pub poll_isolation_enabled: bool,
+    /// 完整 Read Mail 纯观察的最小间隔；每次维护结束后检查，首次延后同一间隔。
+    pub read_mail_observation_interval: std::time::Duration,
     pub batch_size: u16,
     pub jitter: std::time::Duration,
     pub lease_duration: std::time::Duration,
@@ -117,6 +121,8 @@ pub struct MailPollRuntimeConfig {
 impl Default for MailPollRuntimeConfig {
     fn default() -> Self {
         Self {
+            poll_isolation_enabled: true,
+            read_mail_observation_interval: std::time::Duration::from_secs(3600),
             batch_size: 100,
             jitter: std::time::Duration::from_secs(5),
             lease_duration: std::time::Duration::from_secs(60),
@@ -134,7 +140,9 @@ impl Default for MailPollRuntimeConfig {
 
 impl MailPollRuntimeConfig {
     fn validate(self) -> bool {
-        self.batch_size > 0
+        (std::time::Duration::from_secs(60)..=std::time::Duration::from_secs(86_400))
+            .contains(&self.read_mail_observation_interval)
+            && self.batch_size > 0
             && self.batch_size <= MAX_MAIL_POLL_BATCH_SIZE
             && self.jitter <= std::time::Duration::from_secs(86_400)
             && !self.lease_duration.is_zero()
@@ -169,6 +177,7 @@ pub struct MailPollRuntime {
     pub mailbox_key: String,
     pub config: MailPollRuntimeConfig,
     pub(super) schedule: Arc<dyn RecurringSchedule>,
+    pub(super) maintenance_schedule: Arc<dyn RecurringSchedule>,
     pub(super) wakeup: Arc<Notify>,
 }
 
@@ -193,6 +202,7 @@ impl MailPollRuntime {
             world_id,
             mailbox_key,
             config,
+            maintenance_schedule: Arc::clone(&schedule),
             schedule,
             wakeup: Arc::new(Notify::new()),
         };
@@ -214,10 +224,21 @@ impl MailPollRuntime {
         self
     }
 
-    /// 注入当前已配置世界的定期维护；Read Mail、Sent/compose 与 Inbox 各自有界并行。
+    /// 注入当前世界的维护服务；是否独立运行由 poll_isolation_enabled 选择。
     pub fn with_maintenance(mut self, maintenance: Arc<MailboxMaintenanceService>) -> Self {
         self.maintenance = Some(maintenance);
         self
+    }
+
+    /// 注入独立维护日程；装配根已按同一世界相位平移，关闭隔离时忽略此日程。
+    pub fn with_maintenance_schedule(mut self, schedule: Arc<dyn RecurringSchedule>) -> Self {
+        self.maintenance_schedule = schedule;
+        self
+    }
+
+    /// 只在新路径且已注入维护服务时，由 runner 启动独立任务。
+    pub(in crate::worker::runtime) fn has_independent_maintenance(&self) -> bool {
+        self.config.poll_isolation_enabled && self.maintenance.is_some()
     }
 
     /// 合并一次手动触发；轮询正在执行时，通知会保留到下一轮领取。
@@ -230,6 +251,8 @@ impl MailPollRuntime {
         matches!(self.world_id.as_str(), "main" | "isekai")
             && auction_domain::valid_text(&self.mailbox_key, 256)
             && self.schedule.next_after(now).is_some_and(|next| next > now)
+            && (!self.has_independent_maintenance()
+                || self.maintenance_schedule.next_after(now).is_some_and(|next| next > now))
             && self.config.validate()
     }
 

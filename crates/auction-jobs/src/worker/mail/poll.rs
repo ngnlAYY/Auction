@@ -5,14 +5,20 @@
 pub(super) mod cycle;
 #[path = "../mail/poll/failure.rs"]
 pub(super) mod failure;
+#[path = "../mail/maintenance/mod.rs"]
+mod maintenance;
 #[path = "../mail/poll/mapping.rs"]
 pub(super) mod mapping;
 #[path = "../mail/poll/processing/mod.rs"]
 pub(super) mod processing;
+#[path = "../mail/schedule/mod.rs"]
+mod schedule;
 #[path = "../mail/poll/types.rs"]
 pub(super) mod types;
 
 pub(crate) use cycle::run_loop;
+pub(crate) use maintenance::run_loop as run_maintenance_loop;
+pub use schedule::{PhasedMailSchedule, mail_world_phase};
 pub use types::{
     MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
     MailPollPage, MailPollRuntime, MailPollRuntimeConfig,

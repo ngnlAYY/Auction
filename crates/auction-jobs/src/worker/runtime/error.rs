@@ -39,6 +39,12 @@ pub enum WorkerError {
     MailPollTaskJoin(#[source] tokio::task::JoinError),
     #[error("MoogleMail poll worker task exited unexpectedly")]
     MailPollTaskExited,
+    /// 独立维护任务异常触发统一 drain，未知外写仍由原持久围栏恢复。
+    #[error("MoogleMail 维护任务执行失败")]
+    MailMaintenanceTaskJoin(#[source] tokio::task::JoinError),
+    /// 常驻维护任务在未进入 drain 时退出，不能静默失去维护能力。
+    #[error("MoogleMail 维护任务意外退出")]
+    MailMaintenanceTaskExited,
     #[error("forum sync configuration is invalid")]
     InvalidForumSyncConfiguration,
     #[error("forum reply configuration is invalid")]

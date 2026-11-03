@@ -153,6 +153,14 @@ pub(super) fn noop_business_recorder() -> Arc<dyn BusinessRecorder> {
 pub enum WorkerLoop {
     MailMain,
     MailIsekai,
+    /// 主世界独立维护阶段，不映射为业务收件事件。
+    MailMaintenanceMain,
+    /// 异世界独立维护阶段，不映射为业务收件事件。
+    MailMaintenanceIsekai,
+    /// 主世界完整 Read Mail 纯观察，不映射为业务收件事件。
+    MailReadObservationMain,
+    /// 异世界完整 Read Mail 纯观察，不映射为业务收件事件。
+    MailReadObservationIsekai,
     Delivery,
     Auction,
     /// 结算履约准备与对账。
@@ -170,6 +178,10 @@ impl WorkerLoop {
         match self {
             Self::MailMain => "mail-main",
             Self::MailIsekai => "mail-isekai",
+            Self::MailMaintenanceMain => "mail-maintenance-main",
+            Self::MailMaintenanceIsekai => "mail-maintenance-isekai",
+            Self::MailReadObservationMain => "mail-read-observation-main",
+            Self::MailReadObservationIsekai => "mail-read-observation-isekai",
             Self::Delivery => "delivery",
             Self::Auction => "auction",
             Self::AuctionFulfillment => "auction-fulfillment",

@@ -144,7 +144,15 @@ where
         recovery_tasks.spawn(recovery::run_loop(Arc::clone(&worker), drain_sender.subscribe()));
     }
     let mut mail_poll_tasks = JoinSet::new();
+    let mut mail_maintenance_tasks = JoinSet::new();
     for runtime in worker.mail_polls.iter().cloned() {
+        if runtime.has_independent_maintenance() {
+            mail_maintenance_tasks.spawn(mail_poll::run_maintenance_loop(
+                Arc::clone(&worker),
+                runtime.clone(),
+                drain_sender.subscribe(),
+            ));
+        }
         mail_poll_tasks.spawn(mail_poll::run_loop(
             Arc::clone(&worker),
             runtime,
@@ -242,6 +250,13 @@ where
                     Some(Ok(())) | None => break Some(WorkerError::MailPollTaskExited),
                 }
             }
+            result = mail_maintenance_tasks.join_next(), if !mail_maintenance_tasks.is_empty() => {
+                match result {
+                    Some(Err(error)) => break Some(WorkerError::MailMaintenanceTaskJoin(error)),
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::MailMaintenanceTaskExited),
+                }
+            }
             result = forum_tasks.join_next(), if !forum_tasks.is_empty() => {
                 match result {
                     Some(Err(error)) => break Some(WorkerError::ForumTaskJoin(error)),
@@ -284,6 +299,7 @@ where
             drain_worker_tasks(&mut fulfillment_tasks, "fulfillment").await,
             drain_worker_tasks(&mut recovery_tasks, "recovery").await,
             drain_worker_tasks(&mut mail_poll_tasks, "MoogleMail").await,
+            drain_worker_tasks(&mut mail_maintenance_tasks, "MoogleMail maintenance").await,
             drain_worker_tasks(&mut forum_tasks, "forum").await,
             drain_worker_tasks(&mut realtime_tasks, "realtime").await,
         ];
