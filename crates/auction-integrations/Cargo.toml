@@ -23,6 +23,12 @@ tokio.workspace = true
 uuid.workspace = true
 rustls.workspace = true
 url.workspace = true
+object_store = { workspace = true, optional = true }
+
+[features]
+default = []
+# 可选：CLI 定时备份的独立打卡与 R2 副本传输。
+backup = ["dep:object_store"]
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

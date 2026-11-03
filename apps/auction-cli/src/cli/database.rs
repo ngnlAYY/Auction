@@ -85,6 +85,18 @@ pub(crate) enum RebuildModeArg {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum BackupCommand {
+    /// 定时逻辑备份：持久运行记录、磁盘门禁、create/verify、本地保留与终态回执。
+    Scheduled {
+        /// 备份源库名，必须与 Worker 配置及实际连接一致。
+        #[arg(long, value_name = "NAME")]
+        database: String,
+        /// scheduled 专用私有目录；普通手动备份不会纳入清理。
+        #[arg(long, value_name = "DIR")]
+        output_dir: PathBuf,
+        /// 私有运行状态、锁与不可变回执目录，必须与 output-dir 分离。
+        #[arg(long, value_name = "DIR")]
+        state_dir: PathBuf,
+    },
     /// 用 pg_dump 生成 custom-format archive 与配对 manifest；不修改数据库。
     Create {
         /// 人工确认的源数据库名，须与连接实际返回的 current_database 一致。

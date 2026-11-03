@@ -26,6 +26,140 @@ auction-cli --config-dir /etc/auction backup verify --database auction \
 - 依赖部署环境 `PATH` 中的 `pg_dump`/`pg_restore`，主版本不得低于服务器（18）。
 - `backup verify` 不连接数据库，可在异地存储上离线校验。
 
+## 定时备份
+
+发布包的分体与合并形态均包含 `systemd/auction-backup.service.example` 与 `systemd/auction-backup.timer.example`（仓库源为 `ops/deploy/systemd/` 下同名文件）。启用由用户执行；启用 timer 同时授权按下述规则清理这个专用目录内的旧定时备份。备份范围仍只有数据库；可选异机副本将 archive 与 manifest 分别加密上传 R2。runtime 配置、诊断证据和 WAL/物理基础备份由后续工作项交付。
+
+先确认发布包中的 `auction-cli` 带 postgres feature，运行账号能读取配置，PATH 中的 `pg_dump/pg_restore` 为 PG18 客户端；启用异机副本还须按下节安装主机 `age` 并完成离线托管及 bucket lock 设置。根据实际库名和目录编辑 service。以下安装命令在解压后的发布包根目录以 root 执行：
+
+```bash
+install -d -o auction -g auction -m 0700 /var/backups/auction/scheduled /var/lib/auction/backup
+install -m 0644 systemd/auction-backup.service.example /etc/systemd/system/auction-backup.service
+install -m 0644 systemd/auction-backup.timer.example /etc/systemd/system/auction-backup.timer
+sudo -u auction /opt/auction/bin/auction-cli --config-dir /etc/auction config check --strict
+systemctl daemon-reload
+systemctl enable --now auction-backup.timer
+```
+
+合并部署将 service 的 `--config-dir` 改为 `/var/lib/auction/config`。两个目录必须是不重叠的私有真实目录，运行账号固定；状态目录保存历史回执与运行记录，不要因更新程序而删除。普通参数在 `common.toml [backup]`，见[配置参考](../config/README.md#定时备份策略)，修改后下一次 CLI 调用即生效，无需重启角色。停用回退为 `systemctl disable --now auction-backup.timer`；已经在执行的 oneshot 不因停用 timer 自动停止，若需中止由用户另行停止 service。停用不影响 Public/Admin/Worker，手动 create/verify/restore 继续可用。
+
+默认排期由 `crates/auction-config/src/config/settings/auction/policy.rs` 的 `AuctionScheduleConfig::default` 与 `AuctionEconomicsConfig::default` 定义：UTC 周五 00:00 开拍，周六 12:00 名义结束，Final 提前 900 秒；`AuctionEarlyBirdConfig::default` 的早鸟及赛季前场次均在 18:00 名义结束。结算只在 Final 中所有 lot 的有效截止过去后启动（见[结算与履约](../../docs/guide/settlement.md#1-结算计算)）。timer 选每日 UTC 03:15，随机延迟最多 15 分钟，CLI 最多两小时，避开这两组默认 Final/结算高峰。软截止延长、自定义排期和 Persistent 停机补跑可能改变实际重叠情况，部署者需按实际时段调整 timer。`Persistent=true` 只补一次错过的唤醒，不补造停机期间每天的备份。
+
+任务先取得状态目录独占锁，再收口上次运行；取锁失败只写 stderr 并退出 3，不写回执。持锁后建立本次运行记录，只加载 Worker 及其引用文件并校验备份策略，Public/Admin 的无关配置不会阻断备份；联合 `config check --strict` 作为运维预检保留。总预算从命令启动计算（默认 7200 秒），创建、加密、旧项重试和日/月上传共用此期限，到期写 failed 并退出 3；活动项目记 timeout，顶层 failure 保留首个失败（没有更早错误时为 timeout）；service 的 130 分钟预算另给终态同步和打卡余量。磁盘在 create 前后检查，异机启用时还预留待写密文空间；暂存目录必须与输出同文件系统，已有暂存自然计入占用。按非特权可用空间判断，扣除预留后字节和比例都必须达标；不足记 `disk_low`，不通过删除仍应保留的恢复点腾空间。create、verify 或已启用的异机阶段失败都不进入本次本地清理。失败以退出码 3、终态回执和 journal 反映。
+
+本地保留默认最近 7 份：保留本次已校验的新备份及最近 6 份合格旧备份。清理只认同一输出目录、库名摘要、scheduled 命名和 completed 回执，检查已校验标志、设备号/inode/大小及 owner-only 单链接普通文件；该次启用异机时还要求已校验的 daily 副本。旧 failed/interrupted 上传项重试成功后追加绑定原 manifest 的 `offsite/completed/<run_id>.json` 完成事实，供清理使用，不改写原失败/中断回执。旧 v1 未启用异机的 completed 回执保持原资格。删除前不重新 verify 或重读 archive；本地校验前失败的运行回执静默忽略，不反复记副本告警；已经本地校验但 daily 资格不足才记 replica_not_verified。实际异常、手动、不完整或缺少完成证据的目录项仍保留并按清理规则跳过。`offsite-staging/` 不进入保留枚举或跳过噪音，历史回执不清理。异机长期失败使本地备份和密文累积，最终触发 `disk_low`，属于失败关闭；用户应修复上传或增加容量，不自动扩大删除范围。
+
+查看 timer、service 与日志：
+
+```bash
+systemctl list-timers auction-backup.timer
+systemctl status auction-backup.service
+journalctl -u auction-backup.service
+```
+
+每次运行的回执为 `/var/lib/auction/backup/receipts/<run_id>.json`，格式 `auction-backup-run.v1`，字段及错误码见[CLI 回执契约](../../apps/auction-cli/README.md#定时备份)。回执为 0600、临时文件同步后无覆盖原子改名发布，`completed/failed/interrupted` 都是不可变终态；运行中状态为 `<state-dir>/running.json`，阶段更新使用原子替换。状态目录锁排除并发进程，无记录租约。强杀或断电当次可能来不及写终态，当次只依赖 systemd 失败状态和 journal；下一次 scheduled 取得同一目录锁后，对有效残留记录追加 interrupted。终态已发布且身份、已知 archive 证据一致时沿用原终态，不改成中断。无效记录或与同名终态冲突的记录，以 0600、`RENAME_NOREPLACE` 原样改名保留为 `<state-dir>/running.invalid-<UTC时间戳>-<本次run_id>.json`；本次回执增加 `recovery_warnings`，journal 告警只显示原因码及保留文件名，随后照常执行备份。保留文件需人工查看，历史终态不修改。只有存储读写或保留改名失败才报告 `recovery_failed` 并停止。不要直接把残留 archive 当作已校验备份。
+
+| 回执错误码/现象 | 排查动作 |
+| --- | --- |
+| `config_error` | 以 auction 账号运行 `config check --strict`，检查配置文件、权限及备份范围参数；不要把敏感 TOML 或 URL 粘进日志 |
+| 状态目录取锁失败（无回执） / `output_lock_busy_or_invalid` | 查看是否已有 scheduled 进程使用该状态或输出目录；锁通过描述符释放，不以删除锁文件代替核对 |
+| `disk_low` / `disk_check_failed` | 检查该输出目录所在文件系统及回执水位；保留恢复点，按授权范围处理其他占用 |
+| `create_failed` / `verify_failed` | 查看 service journal、PG18 客户端和数据库连接条件；修复后发起新运行，保留旧失败记录 |
+| `offsite_preflight_failed` | 运行账号的 PATH 中检查 `age --version` 和可执行权限；此错误发生在 pg_dump 前 |
+| `offsite_encryption_failed` / `offsite_local_read_failed` | 核对公钥、暂存权限、文件身份与磁盘；不丢弃或重新加密已经封存的密文 |
+| `offsite_access_denied` / `offsite_transport_failed` / `offsite_daily_failed` | 检查限定 bucket 的令牌、endpoint、网络与 bucket lock；修复后下一次 scheduled 自动用原密文重试 |
+| `offsite_retry_failed` / `offsite_state_failed` | 核对状态目录及 offsite.failed_items；逐项失败不会阻断其他项目，状态目录整体不可枚举或运行记录不可写则停止推进 |
+| `offsite.skipped_pending` 非空 | 按固定原因码和可选 run_id 核对原 pending、原回执与密文；格式/身份不符和目的地变化均保留告警并跳过，不阻断本次新副本，人工处理步骤见下文 |
+| `offsite_object_conflict` / `offsite_monthly_failed` / `offsite_remote_record_invalid` | 按下文异常处置核对完成记录和两份密文；禁止覆盖、删除或换名绕过冲突 |
+| `retention_failed` / 跳过数量上升 | 核对回执、文件权限、硬链接和文件身份变化；工具不自动删除不明文件 |
+| `timeout` | 先核对备份大小与资源占用，再在既定范围内调整内部预算；systemd 上限应继续更长 |
+| `recovery_warnings` 含 `running_record_invalid` / `terminal_receipt_conflict` | 备份继续执行；按 journal 中的保留文件名人工检查 `running.invalid-*.json` 与相关历史终态，不将文件内容粘进日志；保留文件不会自动删除 |
+| `recovery_failed` | 检查状态/回执目录的读写、权限、磁盘以及保留改名是否失败；修复存储条件后重试 |
+| `receipt_failed` / 只有 running 记录 | 检查状态目录的权限和磁盘，下一次启动按已有终态或 interrupted 收口 |
+
+外部打卡服务当前暂缓启用，Worker 敏感 TOML 两个打卡地址保持省略/空值，此时不发网络请求。以后启用时，CLI 先发布终态回执，再向成功或失败地址发一次 HTTPS GET，独立客户端不带 Cookie、不跟随重定向、不读代理环境；连接三秒、总预算五秒，不重试。回执只保存 `heartbeat_configured` 标志；`sent/failed/not_configured` 与 HTTP 状态码只经 stderr 进入 systemd journal，不写 URL 或独立打卡回执，打卡失败不会改写备份结果或退出码。在用户启用外部服务前，失败只通过回执、systemd 状态和日志查看。
+
+## 异机副本前置准备
+
+以下步骤由用户执行。CLI 不生成或保存 age 私钥，不配置 Cloudflare 控制台，也不把托管材料装进数据库备份。
+
+### 1. 离线生成与托管密钥
+
+1. 在受信任的离线工作站安装 age，并在 0700 私有目录中执行下列命令。把私钥导入密码管理器，再保存一份加密离线介质副本；测试两处均能独立取回后，按本地安全流程移除工作副本。服务器只接收 `recipient.txt` 中的公钥，不接收 identity 文件或私钥口令。
+
+   ```bash
+   umask 077
+   age-keygen -o backup-identity.txt
+   age-keygen -y backup-identity.txt > recipient.txt
+   ```
+
+2. 与 age 私钥一起托管三组数据密钥：`equipment_data_key_id/equipment_data_key`、`user_login_data_key_id/user_login_data_key`、`credential_data_key_id/credential_data_key`。保存**标识、材料、用途、适用时间和历史版本**；三组互不复用，轮换后仍保留能解开保留期内旧备份的版本。数据库只保存密文，没有这些材料就不能恢复相应列。
+3. 取回时先按备份日期与信封 key_id 选择历史版本，交叉核对密码管理器和离线副本中的清单；在隔离恢复机创建 0600 敏感 TOML，填入所需三组材料。age 私钥只在离线解密工作站使用，随后仅传递解密后的 archive/manifest 到隔离 PG18 主机。日志和演练回执只记录 key_id、取回是否成功及条数，不保存材料或解密明文。
+4. 服务器通过受信任的软件包渠道安装主机 `age`，确认固定服务账号在 systemd PATH 中可执行 `age --version`。该命令会在每次启用异机的 scheduled 中、pg_dump 之前预检。实际加密使用公钥参数、关闭 stdin、不读取口令，不引入 Rust age crate。
+
+### 2. 用户在 Cloudflare 控制台配置 R2
+
+1. 创建专用 bucket，记录 S3 API 的 HTTPS 根 endpoint。统一选择普通配置的 `<prefix>`（例如 `auction`）；下面规则使用真实前缀，不使用占位文本。
+2. 按下表为前缀配置按对象年龄淘汰的生命周期和 bucket lock；启用备份之前核验规则已生效。锁定期不长于淘汰期，按决策使用相同天数。WAL 与基础备份前缀先预留，W10.7 再产生对象，不在本轮启用 PG archive_mode。
+
+   | 前缀 | 生命周期淘汰 | bucket lock |
+   | --- | --- | --- |
+   | `<prefix>/daily/` | 30 天 | 30 天 |
+   | `<prefix>/monthly/` | 365 天 | 365 天 |
+   | `<prefix>/wal/` | 21 天 | 21 天 |
+   | `<prefix>/base/` | 21 天 | 21 天 |
+
+3. 配置未完成分片的自动回收规则，例如 7 天，防止强杀遗留的 multipart 占用长期积累。这只回收未完成会话，不改变完整对象的锁定规则。
+4. 创建**仅限该 bucket 的对象读写令牌**，服务器不使用账户级管理权限。R2 令牌档位无法单独排除删除，防删除/覆盖必须依靠 bucket lock。将 access key ID、secret 只写入 Worker 引用的 0600 敏感 TOML；令牌不进命令参数、环境变量、URL、回执或 shell 历史。下载演练可在受信任工作站另用限定 bucket 的只读令牌。
+5. 核验清单：四个前缀的年龄规则与锁定期正确；令牌只覆盖该 bucket；在用户授权的专用核验对象上验证锁定期内删除/覆盖被拒绝，保留非秘密的状态码证据；R2 可 HEAD/GET/LIST；服务器公钥与离线托管私钥配对。不要用生产恢复点做删除核验。
+6. 填写 `common.toml [backup.offsite]` 的公钥、endpoint、bucket、prefix 后设 `enabled = true`，以服务账号执行 `config check --strict`。这是纯本地检查，不能证明 bucket lock 或网络可用。下一次 timer 自动生效；首次上线需用户观察 daily 与 monthly 完成记录及运行回执。
+
+**bucket lock 是启用异机副本的前置条件。** 单次 PUT 使用原生 create-only；分片开始前先 HEAD，已有对象只回读核对。object_store 的公开分片完成接口本身没有条件写入，工具不拦截 SDK 请求或改写签名头。分片不可变性依靠 bucket lock + 唯一 run_id 命名 + 重用完全相同的密文 + 上传后 HEAD/完整 SHA-256 校验共同保证；不能仅用 HEAD 排除并发覆盖。
+
+### 3. 运行、重试与轮换
+
+日期取明文 manifest 的 UTC `created_at`，日副本路径为 `<prefix>/daily/YYYY/MM/DD/<run_id>/`，月副本为 `monthly/YYYY/MM/<run_id>/`。同一密文依次上传 archive、manifest，最后写 `completed.json`（`auction-backup-upload.v1`）；只有完整校验通过且有完成记录才算恢复点。每个 UTC 备份月第一份完成副本另存月前缀；本机月标记缺失时遍历 LIST 的全部完成记录，解析/字段无效、缺件或长度/摘要不符的记录逐条跳过，journal 只输出固定原因码 monthly_record_invalid；第一份完整有效记录恢复标记，全部无效则正常创建本次月副本。LIST/GET 传输或拒绝访问仍使该项目失败。固定一个执行账号、目的地及状态目录，避免多个独立调度器争抢月首判断。
+
+先处理当天新备份的加密、上传、校验和 finalize，再按时间重试旧项，有限预算优先保护最新恢复点。坏任务、原回执不匹配或目的地变化的旧项跳过并告警，保留原文件和密文；单个项目失败或密文冲突只记录该项并继续，其余成功项目照常 finalize。全部处理完或预算耗尽后，任一项目失败都会使本次整体 failed，failure 取首个失败；跳过告警本身不改变 outcome。回执 failed 不表示本次 daily 一定失败，应同时核对 offsite.daily 和远端完成记录。任务位于 `<state-dir>/offsite/pending/`，封存密文位于 `<output-dir>/offsite-staging/<run_id>/`，全部为私有目录/文件；阶段检查点保存相同字节的摘要和已完成对象。409/412 或响应未知时读取原对象：先 HEAD 长度，再按最多 64 MiB 的区间顺序 get_range，累计实际长度和完整 SHA-256；两者一致为 already_present，不同为冲突，绝不覆盖、删除或另取名称。每段单独受 300 秒请求超时约束，全部区间仍共享本次总预算。daily 与所需 monthly 均完成后才删除密文暂存与待上传项，历史运行回执永不改写。
+
+远端对象由 bucket 生命周期按年龄淘汰，工具从不删除。正常每天一份时约保留 30 份日、12 份月；漏跑、补跑及日历月份长度会影响瞬时数量，这不是精确份数上限。关闭异机功能只需 `enabled = false`，下次运行暂停上传和旧项重试，原任务与未取得副本资格的本地备份继续保留；停止全部定时任务则停用 timer。变更 prefix、endpoint、bucket 或公钥后，目的地哈希不符的旧项会保留并跳过告警，新目标正常创建新恢复点；原任务不能自动改投新目标或重新加密，需按下表人工处理。令牌可以在保持目标不变时轮换。
+
+## 从 R2 取回并演练恢复
+
+此流程需要用户另行执行，目标必须是**隔离 PG18 实例**，禁用全部外部邮件、论坛与调度，不连生产数据库或游戏服务。一次演练应使用真实备份中每类至少一条密文样本；空数据族记为未验证，不能当作解密成功。
+
+1. 在 R2 的 daily/monthly 中选择有 `completed.json` 的恢复点。下载完成记录，检查 `format = auction-backup-upload.v1`、run_id、UTC 日期、两份对象名/长度/密文 SHA-256、明文 manifest SHA-256、age 版本和校验时间；对象名必须都在同一恢复点前缀内。只有两份密文而无完成记录时不能选择该点。
+2. 在受信任工作站通过控制台或已授权的 S3 客户端下载**记录指定的两个对象**，保持 `<archive>.age` 与 `<archive>.manifest.age` 文件名。下载目录为 0700，文件为 0600。逐一用 `wc -c < 文件` 和 `sha256sum 文件` 核对记录的 bytes 与 sha256；不能使用 multipart ETag 代替整文件摘要。任一不符则保留证据并停止该恢复点。
+3. 按上节从密码管理器或离线副本取回对应 age 私钥，在离线工作站解密到新文件，禁止覆盖已有恢复证据：
+
+   ```bash
+   umask 077
+   age --decrypt --identity backup-identity.txt --output scheduled-<时间>-<run_id>.dump \
+     scheduled-<时间>-<run_id>.dump.age
+   age --decrypt --identity backup-identity.txt --output scheduled-<时间>-<run_id>.dump.manifest \
+     scheduled-<时间>-<run_id>.dump.manifest.age
+   sha256sum scheduled-<时间>-<run_id>.dump.manifest
+   ```
+
+   manifest 明文摘要必须与完成记录的 `plaintext_manifest_sha256` 一致；两次解密认证均成功后，再安全传递 archive/manifest。不要把 identity 文件放到生产备份服务器。
+4. 使用与 manifest 绑定的**原库名**执行离线校验：`auction-cli backup verify --database <原库名> --manifest <解密后的manifest>`。隔离配置指向 PG18 独立端口/实例，三角色保持停止；准备空库，执行 `db preflight`、`backup restore --dry-run`，再执行 `backup restore --receipt <新的0600回执>`，具体门禁和参数见[恢复流程](#恢复流程)。不在恢复前 migrate，不用 fresh-schema 代替空库。
+5. 从托管清单取回对应历史版本的三组数据密钥，在隔离环境只读读取恢复库中的样本信封，使用现有 owner 的解密入口核验：装备 `EquipmentKeyOpener::open`，用户登录 key `MoogleMailLoginKeyReader` 的 `AdminLoginKeyOpener::open`，外部 Cookie `CredentialSealer` 的 `AdminCredentialOpener::open`。保留原装备/用户/凭据 ID、kind、scope、key_id 和 AAD 绑定，验证认证标签与指纹；不能通过改信封、重新封装或重新注册来证明旧材料可恢复。由监督者授权的隔离核验程序调用这些入口，只输出数据族、样本 ID、key_id、成功条数和失败分类，不输出密钥、Cookie、登录 key 或装备明文；当前 CLI 没有通用“导出解密列”命令。
+6. 核对恢复 schema/迁移版本、关键表和只读业务事实，记录完成记录自身摘要、R2 对象名、下载校验结果、restore 回执、三组材料的解密条数和演练耗时。恢复到生产前仍须执行[外部历史核对](#6-外部历史核对与启动)，不因一次隔离演练而自动放行外部重发。清理恢复工作副本按托管流程执行，长期保留非秘密演练回执。
+
+## 异机异常处置
+
+| 情况 | 处置 |
+| --- | --- |
+| age 私钥遗失 | 从另一托管副本取回；两处均遗失则既有密文不能解开，公钥和 R2 令牌不能替代私钥。保护仍可用的本地明文并由用户决定新的密钥和备份策略 |
+| 某组数据密钥遗失或版本不符 | 即使 age 解密/数据库恢复成功，相关列仍不可用；从历史托管版本取回，不覆盖或重置恢复库中的旧信封 |
+| 密文长度或摘要冲突 | 只使该项目失败，后续项目继续；按 offsite.failed_items 中的 run_id、stage、固定错误码核对原暂存、任务与远端对象，确认目的地、公钥和 bucket lock。保留全部原证据，不重新加密、覆盖、删除或换名规避冲突 |
+| 跳过的待上传项 | 根据 skipped_pending 的原因码核对原 JSON、原回执、文件身份及权限；无法确认 run_id 时人工列举私有 pending 目录，不把内容粘进日志。不得编辑任务身份或摘要骗过校验；证据可修复时恢复原文件条件，无法修复时由用户将原任务与密文整体隔离保留 |
+| pending_destination_changed | 新目标已继续备份；由用户决定是否在原目标/公钥配置下另行处理保留任务，或整体隔离原任务与密文。不能把旧任务哈希改成新目标、换名重传或重新加密；原数据密钥和 age 私钥版本仍须托管 |
+| 完成记录缺失或缺件 | 不视为成功恢复点；优先选择另一个完整点。原暂存和任务尚在时修复条件后由 scheduled 继续，不能手工捏造完成记录 |
+| 上传结果未知、409 或 412 | 让工具 HEAD + 完整回读对账；一致视为 already_present，不一致失败。不得把无响应当作未上传并改名重传 |
+| 月标记丢失 | 保留其他状态，下一次遍历 monthly 完成记录；坏记录跳过，首份完整有效记录恢复标记，全部无效则创建新月副本。按 monthly_record_invalid 告警人工查看原坏证据，不删除或伪造完成记录；存储访问错误仍需修复后重试 |
+| 状态或暂存损坏、长期积压 | 保留所有原证据，查看固定错误码、pending 与原运行回执；不要凭新公钥重新生成同名密文。修复存储/网络或增加容量，必要时由用户隔离完整旧任务，关闭异机不会自动删积压 |
+
 ## 恢复流程
 
 ### 1. 停止服务

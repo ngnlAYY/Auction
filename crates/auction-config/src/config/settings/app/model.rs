@@ -82,6 +82,8 @@ pub(super) struct CommonFileConfig {
     /// 进程本地 Prometheus 指标公共默认值；Admin runtime 仍可在重启时覆盖。
     pub(super) metrics: MetricsConfig,
     pub(super) cache: CacheConfig,
+    /// CLI 专用策略；常驻角色不应用其运维语义。
+    pub(super) backup: BackupConfig,
     /// 创建拍卖时冻结的计划、经济、结算和恢复策略。
     pub(super) auction: AuctionConfig,
 }
@@ -96,6 +98,7 @@ pub(super) struct BuildInput {
     pub(super) tracing: TracingSettings,
     pub(super) realtime: RealtimeConfig,
     pub(super) cache: CacheConfig,
+    pub(super) backup: BackupConfig,
     pub(super) auction: AuctionConfig,
     pub(super) worker: WorkerConfig,
     pub(super) http_security: Option<HttpSecurityConfig>,
@@ -122,6 +125,8 @@ pub struct AppConfig {
     pub realtime: RealtimeConfig,
     /// 非敏感缓存策略。
     pub cache: CacheConfig,
+    /// 只由 CLI 校验并消费的定时备份策略。
+    pub backup: BackupConfig,
     /// 创建拍卖时冻结的经济、结算和恢复策略模板。
     pub auction: AuctionConfig,
     pub worker: WorkerConfig,

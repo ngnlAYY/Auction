@@ -22,6 +22,7 @@ const CONFIG_FILE_ENV: &str = "AUCTION_CONFIG_FILE";
 
 mod app;
 mod auction;
+mod backup;
 mod errors;
 mod operations;
 mod secrets;
@@ -43,6 +44,7 @@ use self::worker_validation::*;
 
 pub use app::*;
 pub use auction::*;
+pub use backup::{BackupConfig, BackupOffsiteConfig};
 pub use errors::ConfigError;
 pub use secrets::{
     MoogleMailKeyEnv, PostgresConnectionConfig, PostgresMaintenanceSecrets, load_mooglemail_keyenv,

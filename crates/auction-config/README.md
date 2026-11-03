@@ -2,7 +2,7 @@
 
 [文档导航](../../docs/README.md) · [配置参考](../../ops/config/README.md) · [示例配置](../../ops/config/examples)
 
-TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文件、Admin runtime 文件与维护凭据，以及首次部署的配置生成。所有配置错误都在进程启动前失败，错误只给出路径与字段提示，绝不回显秘密值。
+TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文件、Admin runtime 文件与维护凭据，以及首次部署的配置生成。角色运行配置在启动前校验，CLI 专用备份参数由 CLI 显式校验；错误只给出路径与字段提示，绝不回显秘密值。
 
 ## 公开接口
 
@@ -10,8 +10,11 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 | --- | --- |
 | `AppConfig::load(role)` | 读取 `AUCTION_CONFIG_FILE`；未设置时尝试运行目录下的 `ops/config/<role>.toml`（不是仓库模板）；不存在时使用内置默认值。Admin 的 `auction-config/admin.toml` 发现与首次设置由 Admin 装配根另行处理 |
 | `AppConfig::load_from_path(role, path)` | 从显式路径加载（`auction-server`、`auction-cli` 使用） |
+| `BackupConfig`、`BackupOffsiteConfig`、`AppConfig::validate_backup()` | CLI 专用本地策略、age 公钥/R2 目的地及成对敏感凭据和 HTTPS 打卡地址校验；不改变常驻角色的运行行为 |
 | `AppConfig` 字段 | 已合并、已校验的非敏感配置：listener、metrics、tracing、realtime、cache、auction、worker、http_security、session、路径、`admin_runtime`、装备规则与 `bot_players` 投影 |
 | `AppConfig` getter | 敏感值只经显式 getter 暴露：`database_url()`、`redis_url()`、`admin_actor()/admin_secret()`、三组数据密钥、Cookie、`tracing_headers()`；`Debug` 输出已脱敏 |
+| `backup_heartbeat_success_url()/backup_heartbeat_failure_url()` | 只供 CLI 交给备份传输适配器的可选地址；省略或空字符串均表示未配置，不可写入日志或回执 |
+| `backup_r2_access_key_id()/backup_r2_secret_access_key()` | Worker 敏感文件中的 bucket 对象读写令牌，只交给备份适配器；无环境、实例元数据、age 私钥或口令入口 |
 | `TomlRuntimeFileStore` | Admin runtime 文件的读取与原子替换（临时文件 + rename + 目录同步 + 独立锁文件） |
 | `load_postgres_maintenance_secrets` | 读取建库/重建维护凭据（仅 `auction-cli` 使用） |
 | `load_mooglemail_keyenv` | 读取本地联调用的 `.keyenv`（`hv-ck-key1` 为 Bot 号，`hv-ck-key2` 为测试号） |
@@ -33,6 +36,7 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 
 - **数据库**：`[database]` 五字段要求显式主机、非零端口、账号、口令与库名，账号口令按原文填写，由 loader 负责 URL 编码；兼容的 `database_url` 必须显式指定主机（或 socket）与库名，省略端口时固定为 5432，不继承 `PGPORT` 等环境变量。
 - **Redis**：`cache.backend = "redis"` 时必须提供 `redis_url`。
+- **备份**：`common.toml [backup]` 本地策略与 `[backup.offsite]` 的启用依赖、字段范围见[配置参考](../../ops/config/README.md#定时备份策略)。三角色仅解析保留；CLI `config check` 与 scheduled 显式校验，异机字段摘要只有是否配置。R2 凭据用 `SecretString` 保存且成对、非空、无控制字符；公钥只做长度、前缀与字符集检查，实际加密由主机 age 完成。错误只有字段名与固定原因。外部打卡仍暂缓启用。
 - **tracing**：启用时须有 endpoint 与非零采样率；进程环境中存在 `OTEL_EXPORTER_OTLP_HEADERS` 或 `OTEL_EXPORTER_OTLP_TRACES_HEADERS` 时拒绝启动，导出头只能来自敏感文件。
 - **Worker**：启用 MoogleMail 时必须有凭据来源（数据库凭据所需的 `credential_data_key`、`.keyenv` 或 `mooglemail_cookie`）以及 `user_login_data_key`；启用论坛时必须有 `ehentai_cookie` 或 `credential_data_key`；启用运维告警时须配置收件人、告警 world 必须在已启用的 MoogleMail 世界内，且 Worker 运行时要求 MoogleMail 投递可用。
 - **HTTP**：origin allowlist 启用时不能为空（TCP 模式可从 listener 推导）；`trusted_unix_proxy` 只能用于 Unix listener；Public/Admin 启用 metrics 时 listener 必须是 loopback TCP 或 Unix socket（`/metrics` 与业务共用 listener，不能直接暴露到公网）。
@@ -44,6 +48,7 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 | 路径 | 内容 |
 | --- | --- |
 | `crates/auction-config/src/config/settings/app/` | `AppConfig` 模型、加载、最终构建与 getter |
+| `crates/auction-config/src/config/settings/backup/` | CLI 专用本地默认值、异机副本启用依赖、公钥/目的地/凭据与打卡 URL 校验 |
 | `crates/auction-config/src/config/settings/auction/` | 缓存、拍卖策略/排期/早鸟、HTTP listener、可观测性、角色默认值 |
 | `crates/auction-config/src/config/settings/worker/` | Worker 主循环、投递、履约、恢复、control、论坛、MoogleMail、运维告警 |
 | `crates/auction-config/src/config/settings/worker_validation/`、`crates/auction-config/src/config/settings/validation/` | 各区块的范围与跨字段校验 |

@@ -35,6 +35,9 @@ pub(crate) struct DeploymentReport<'a> {
     worker_control: Option<&'a Endpoint>,
     runtime_config_file: Option<String>,
     warnings: &'a [String],
+    backup: serde_json::Value,
+    backup_heartbeat_success_configured: bool,
+    backup_heartbeat_failure_configured: bool,
 }
 
 #[derive(Serialize)]
@@ -68,6 +71,15 @@ impl Deployment {
                 .as_ref()
                 .map(|path| path.display().to_string()),
             warnings: &self.warnings,
+            backup: super::summary::backup_projection(&self.worker),
+            backup_heartbeat_success_configured: self
+                .worker
+                .backup_heartbeat_success_url()
+                .is_some(),
+            backup_heartbeat_failure_configured: self
+                .worker
+                .backup_heartbeat_failure_url()
+                .is_some(),
         }
     }
 }
@@ -115,6 +127,7 @@ pub(crate) fn check(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<Depl
     shared_database(&public, &admin, &worker)?;
     shared_runtime(&public, &admin, &worker)?;
     admin_worker(&admin, &worker)?;
+    worker.validate_backup()?;
 
     let public_endpoint = Endpoint::public(&public)?;
     let admin_endpoint = Endpoint::admin(&admin)?;

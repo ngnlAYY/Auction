@@ -63,6 +63,7 @@ fn projection(config: &AppConfig) -> anyhow::Result<Value> {
             "backend": config.cache.backend.name(),
             "public_rules_ttl_seconds": config.cache.public_rules_ttl_seconds,
         },
+        "backup": backup_projection(config),
         "observability": {
             "log_filter": config.log_filter,
             "metrics_enabled": config.metrics.enabled,
@@ -123,4 +124,25 @@ fn projection(config: &AppConfig) -> anyhow::Result<Value> {
             "credential_data_key": config.credential_data_key_configured(),
         },
     }))
+}
+
+pub(super) fn backup_projection(config: &AppConfig) -> Value {
+    let offsite = &config.backup.offsite;
+    json!({
+        "local_retention_count": config.backup.local_retention_count,
+        "min_free_bytes": config.backup.min_free_bytes,
+        "min_free_percent": config.backup.min_free_percent,
+        "timeout_seconds": config.backup.timeout_seconds,
+        "heartbeat_success_configured": config.backup_heartbeat_success_url().is_some(),
+        "heartbeat_failure_configured": config.backup_heartbeat_failure_url().is_some(),
+        "offsite": {
+            "enabled": offsite.enabled,
+            "age_recipient_configured": !offsite.age_recipient.is_empty(),
+            "endpoint_configured": !offsite.endpoint.is_empty(),
+            "bucket_configured": !offsite.bucket.is_empty(),
+            "prefix_configured": !offsite.prefix.is_empty(),
+            "access_key_id_configured": config.backup_r2_access_key_id().is_some(),
+            "secret_access_key_configured": config.backup_r2_secret_access_key().is_some(),
+        },
+    })
 }
