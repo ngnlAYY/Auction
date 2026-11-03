@@ -126,14 +126,44 @@ pub(crate) enum ServiceAction {
         #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=300))]
         startup_timeout_seconds: u64,
     },
-    /// 按 Public → Admin → Worker 顺序停止三个 unit。
-    Stop,
+    /// 通过只读时段门禁后，按 Public → Admin → Worker 顺序停止三个 unit。
+    Stop {
+        #[command(flatten)]
+        shutdown: ShutdownArgs,
+    },
     /// 先预检新配置，再反序停止并执行与 start 相同的迁移和顺序启动。
     Restart {
         /// 每个角色等待 readiness 的秒数。
         #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=300))]
         startup_timeout_seconds: u64,
+        #[command(flatten)]
+        shutdown: ShutdownArgs,
     },
+}
+
+/// 只影响本次显式停机的时段保护与人工例外声明；不属于角色运行配置。
+#[derive(Debug, Args)]
+pub(crate) struct ShutdownArgs {
+    /// lot 有效截止的保护窗口（分钟）；运维须按迁移演练停机时长的至少三倍设置。
+    #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u32).range(1..=10080))]
+    pub(crate) protection_window_minutes: u32,
+    /// 绕过时段阻挡或查询失败；仍须提供 --reason，不绕过其他部署预检。
+    #[arg(long, requires = "reason")]
+    pub(crate) force: bool,
+    /// 强制停机原因：1–1024 字节、首尾无空白且不含控制字符；不要填写秘密或玩家信息。
+    #[arg(long, requires = "force", value_parser = shutdown_reason)]
+    pub(crate) reason: Option<String>,
+}
+
+fn shutdown_reason(value: &str) -> Result<String, String> {
+    if value.is_empty()
+        || value.len() > 1024
+        || value.trim() != value
+        || value.chars().any(char::is_control)
+    {
+        return Err("原因必须是 1–1024 字节、首尾无空白且不含控制字符的文本".to_owned());
+    }
+    Ok(value.to_owned())
 }
 
 /// 分体部署的宿主机边界；unit 名称只作为参数传入，不进入业务配置。

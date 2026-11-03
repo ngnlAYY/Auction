@@ -242,6 +242,8 @@ auction-cli --config-dir /etc/auction db migrate       # 仍保持三角色停�
 
 定期在**隔离的 PostgreSQL 实例**上演练完整恢复。使用同名数据库（manifest 绑定库名摘要，不能恢复到其他库名）。一次性演练库可用 `db rebuild --ephemeral` 替代备份前提做 `fresh-schema` 重建，实际执行仍须提供 `--execute --confirm 'EPHEMERAL <库名>' --receipt <新回执>`；它不会生成恢复所需的空库，`empty-for-restore` 模式必须提供 `--backup-manifest` 且不接受 `--ephemeral`。
 
+含迁移版本部署前，还须按[迁移演练](MIGRATION-DRILL.md)用最新备份和候选程序完成升级、readiness 并留存[回执](migration-drill-receipt.template.json)。恢复演练与新空库安装不能替代旧备份到候选 schema 的升级演练；该回执中的完整停机耗时用于设置 CLI 时段保护窗口。
+
 ## 全新空库
 
 需要一个带当前 schema 的全新库（例如测试环境）时：

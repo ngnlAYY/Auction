@@ -39,11 +39,12 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 - **人工 Sent owner**：`database/sent_confirmation` 实现 `DeliverySentConfirmationPort`；追加独立 operator 观察及责任声明，与原冻结发送尝试、唯一 MID 和当前 fence 绑定。装备继续经共享强证明谓词和原履约恢复 helper 取得真实 Sent collected/资金化/原金额卖方付款。现金只允许 main 已收款 lot 的原卖方正额货款（已领取须匹配原生金额回执并显式接受），精确绑定原 UID/lot/义务/投递/金额、`unknown` seller 分配及预留命令/分录；同事务复用自动恢复的 `finish_funded_delivery(Sent)` 记为 `spent`，同 ID 重放不重复支出，不创建来源或收款。被 Admin 对账判失败、但 Sent 证明已寄出的投递以追加 confirmation 更正（迁移 `000074` 扩展强谓词），原失败命令与审计不改写。不伪造 `sent_verified`，不重发邮件，原 Admin 手填成功仍拒绝。准入与分钟时窗见[结算指南](../../docs/guide/settlement.md#sent-人工证据确认)，永久保留事实见[数据库契约](../../docs/contracts/database.md#结算资金恢复与投递)。
 - **运行时独占**：外部 Cookie 的运行时 owner（邮件、论坛各一）和 Public realtime consumer 以 PostgreSQL session advisory lock 实现，连接断开即失去所有权；所有权失效后持有方必须退出。
 - **只读快照**：报表与运维读取使用可重复读只读事务，运维快照设置 5 秒语句与 1 秒锁等待上限。
+- **停机时段证据**：`database/shutdown_window` 的 `PostgresStore::collect_shutdown_window` 读取 Final 场次与截止不晚于保护窗口末端（含已过截止）的在拍 lot，沿用只读快照与上限，不加行锁/advisory lock、不写数据库；CLI 消费安全投影并处理强制声明。判定来源、窗口、失败关闭与输出见 [CLI 时段门禁](../../apps/auction-cli/README.md#停机时段门禁)。
 - **Public 会话活动**：普通活动不延长期限，`last_activity_at` 按 60 秒节流写入；需要活动写入时，在语句完成后复用独立只读查询重新认证。行锁等待可能跨过期限或撤销，仅靠等待前的物化快照或 `UPDATE WHERE clock_timestamp()` 不能证明等待后的身份仍有效；无需活动写入的快路保持单条查询且不写会话行。
 - **收件目标**：Admin 录入与邮件入库共用 `database/intake_target`：在已持有 world 锁后锁定收件目标与拍卖、校验一致性、按锁定版本 CAS 推进预览修订并写入装备 key；错误分类仍由各自 owner 决定。
 - **邮件入库编号**：持有原 world/目标拍卖锁，在同一 Serializable 事务中按分类聚合已有编号，同时归并全局 lot 序号；空场次仍从 1 开始，分类编号各自递增，溢出和损坏分类快照继续失败关闭。
 - **赛季收件边界**：新场次冻结的 `intake_opens_at` 同时约束锁后数据库实时钟和邮件原始 `received_at`；任一早于边界都返回 `IntakeClosed`，延迟轮询不能把旧赛季邮件加入新赛季。等于边界允许继续，历史 NULL 不增加限制；已持久接受命令仍先重放原决定。Admin 录入复核锁后当前时刻；恢复重列在既有 world/auction/recovery 等锁和证明复核后取 `clock_timestamp()`，不能使用事务开始时间或 Worker 选候选时的旧时刻替代换季判断。旧赛季识别同时保留原场次开拍和原始投稿收件事实，以二者较早时刻为起点，避免改期开拍绕过换季阻断。
-- **错误**：对外只返回固定分类文本，不携带 SQL、连接串或驱动原文。
+- **错误**：对外只返回固定分类与安全字段，不携带 SQL、连接串或驱动原文；停机时段证据的诊断字段见 [CLI 时段门禁](../../apps/auction-cli/README.md#停机时段门禁)。
 - **连接目标**：连接前固定显式端口（省略为 5432），拒绝未知查询参数；IPv6 主机名去括号后重新匹配 pgpass。
 
 ## 审计失败与就绪

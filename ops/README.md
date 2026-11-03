@@ -16,6 +16,7 @@
 发布包（`auction-rust-<版本>-<提交前 12 位>[-single].tar.gz`）包含 `bin/`（分体包：三个角色程序 + `auction-cli`；合并包：`auction-server` + `auction-cli`）、`docs/`（部署、恢复、CLI 说明与 Web 资源摘要）、`systemd/`、`caddy/`、`config/examples/` 与 `retention-policy.v1.json`；分体包另含 `tmpfiles/`，合并包另含首次设置代理示例与单文件说明（以上均为发布包内的路径）。敏感模板以 `secrets.toml.example`、`secrets/postgres-rebuild.toml.example` 命名，须复制为配置引用的实际文件名。用发布包内的 `SHA256SUMS` 校验解压后的文件。
 
 两种发布包均包含 `auction-backup.service.example` 与 `auction-backup.timer.example`；仅由用户按[定时备份](deploy/RECOVERY.md#定时备份)单独安装启用，不随三个角色服务自动开启。
+两种发布包的 `docs/` 也包含 `MIGRATION-DRILL.md` 与 `migration-drill-receipt.template.json`，用于含迁移版本部署前的手工演练与留证。
 
 启用异机副本还须安装主机 `age`、离线托管三组数据密钥及 age 私钥，并由用户在 R2 控制台配置限定 bucket 的令牌、生命周期与 bucket lock，见[异机副本前置准备](deploy/RECOVERY.md#异机副本前置准备)。
 
@@ -119,8 +120,8 @@ W7.2 的在途发送门禁尚未实现，当前部署不受其保护。现有 `s
 
 ```bash
 auction-cli --config-dir /etc/auction service status     # 三个 unit 的状态与 readiness（未全部就绪时退出码 4）
-auction-cli --config-dir /etc/auction service restart    # 预检新配置 → 反序停止 → 迁移 → 顺序启动
-systemctl stop auction-stack.service                     # 按 Public → Admin → Worker 停止
+auction-cli --config-dir /etc/auction service restart    # 预检新配置 → 时段门禁 → 反序停止 → 迁移 → 顺序启动
+auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 Public → Admin → Worker 停止
 ```
 
 注意：
@@ -129,11 +130,19 @@ systemctl stop auction-stack.service                     # 按 Public → Admin 
 - Worker 在凭据所有权失效、control 服务停止等运行时故障时以非零状态退出，由 `Restart=on-failure` 拉起。
 - 迁移、建库、重建与恢复要求三个 unit 全部停止（或使用合并部署的 owner 锁），见[停机门禁](../apps/auction-cli/README.md#停机门禁)。
 
+### 停机时段保护
+
+`service stop/restart` 在真正停机前只读检查数据库：任一场次处于 Final，或任一在拍 lot 的有效截止不晚于未来保护窗口末端（含已过截止但仍为 live），就拒绝并以 4 退出，输出场次/lot ID 与截止时间。慢速代理按其 lot 的同一截止条件计入，调度到期时间本身不单独阻挡；Live 期间其他时段允许重启，代理恢复后顺延。数据库不可达、配置不可读或查询失败同样默认拒绝；`start` 不受影响。
+
+保护窗口通过 `--protection-window-minutes` 设置（默认 60，范围 1–10080 分钟）。运维必须根据[迁移演练回执](deploy/MIGRATION-DRILL.md#停机时长与窗口)设为不少于实测停机时长的 3 倍；CLI 只校验范围。窗口只对本次命令生效，systemd 包装命令若未传参则仍用 60。紧急例外用 `service stop/restart --force --reason '具体原因'`，两者缺一即参数错误（退出码 2）；原因不可为空或包含秘密、玩家信息。已过截止却长期卡在 live 的 lot，须先人工排查生命周期与收尾故障，再记录原因强制停机。停止前的 stderr/journal 与成功/拒绝 JSON 记录 force、原因、证据与判定，后续失败仍可查看停止前声明。字段与区间边界见 [CLI 契约](../apps/auction-cli/README.md#停机时段门禁)。
+
+**边界（W9.6）**：只读快照不冻结拍卖状态。直接 `systemctl stop/restart` 角色 unit、合并部署的 `auction-server` 停机、系统自动更新重启、关机与断电均可能绕过 CLI；即使 stack 的 ExecStop 被拒绝，也不能把它当成主机关机屏障。系统自动更新/维护重启、主机层排期与防绕过由 W9.6 约束，本批次没有实现主机拦截。W9.6 落地前由运维关闭或协调无人值守自动重启，按同一保护窗口安排维护，避免用直接 systemctl 绕开拒绝。
+
 ## 升级
 
 分体部署：
 
-1. 阅读版本说明；如有配置变更，先在新配置上执行 `auction-cli config check --strict`。
+1. 阅读版本说明；如有配置变更，先在新配置上执行 `auction-cli config check --strict`。含迁移的版本在生产停机前用最新备份完成[迁移演练](deploy/MIGRATION-DRILL.md)，审核回执并据实设置保护窗口；M1 手工核对，W7.2 落地后接入自动门禁。
 2. 停服并建立确定的恢复点：`auction-cli service stop`，然后 `auction-cli backup create --database auction --output /var/backups/auction/auction-<日期>.dump`。
 3. 保留旧程序以便回退，安装新程序到 `/opt/auction/bin/`。
 4. `auction-cli --config-dir /etc/auction service start`：严格预检 → 迁移 → 按序启动并等待就绪。
@@ -291,6 +300,7 @@ D1 仍待线上分类证据确认。部署后由用户执行只读核对，数�
 ## 备份与恢复
 
 例行备份使用 `auction-cli backup scheduled` 配合独立 systemd timer，包含磁盘门禁、本地保留和不可变回执；启用、回退与故障处理见[定时备份](deploy/RECOVERY.md#定时备份)。外部打卡暂缓启用，异机加密上传另行交付；当前仍需把 archive 与 manifest 一起复制到异地。升级前确定恢复点继续使用手动 `backup create/verify`。恢复、重建与演练见[备份与恢复手册](deploy/RECOVERY.md)。
+含迁移版本的升级演练使用独立的[迁移演练手册](deploy/MIGRATION-DRILL.md)与[回执模板](deploy/migration-drill-receipt.template.json)，恢复过程仍复用上述手册。
 
 ## 故障排查
 

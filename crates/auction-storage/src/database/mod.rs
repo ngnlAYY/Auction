@@ -57,6 +57,8 @@ mod settlement_policy;
 #[cfg(feature = "postgres")]
 mod settlement_report;
 #[cfg(feature = "postgres")]
+mod shutdown_window;
+#[cfg(feature = "postgres")]
 mod slow_proxy_due;
 #[cfg(feature = "postgres")]
 pub use bootstrap::{
@@ -80,6 +82,10 @@ pub use retention_inventory::{
     PostgresRealtimeStreamInventory, PostgresRelationInventory, PostgresRetentionFamilyInventory,
     PostgresRetentionInventory, PostgresRetentionTableInventory, PostgresSchemaIdentity,
     RETENTION_INVENTORY_FORMAT, RetentionInventoryError, RetentionPolicy, RetentionPolicyFamily,
+};
+#[cfg(feature = "postgres")]
+pub use shutdown_window::{
+    PostgresShutdownWindow, ShutdownEndingLot, ShutdownFinalAuction, ShutdownWindowError,
 };
 #[cfg(feature = "postgres")]
 mod commands;
