@@ -56,6 +56,7 @@ struct MailState {
     fault: Option<Fault>,
     unread: BTreeSet<String>,
     removed_sent: BTreeSet<String>,
+    reads: usize,
     writes: usize,
 }
 
@@ -110,6 +111,11 @@ impl MailDouble {
         self.state.lock().expect("test state poisoned").writes
     }
 
+    /// 已收到的读取请求数；熔断拒绝必须不增加该计数。
+    pub fn read_requests(&self) -> usize {
+        self.state.lock().expect("test state poisoned").reads
+    }
+
     /// 为未来论坛支持保留显式失败入口，不构造缺失页面。
     pub fn require_fixture(&self, service: UnsupportedService) -> Result<(), UnsupportedFixture> {
         Err(UnsupportedFixture(service))
@@ -143,6 +149,8 @@ async fn handle(
         let mut state = state.lock().expect("test state poisoned");
         if method == Method::POST {
             state.writes += 1;
+        } else if method == Method::GET {
+            state.reads += 1;
         }
         state.fault
     };

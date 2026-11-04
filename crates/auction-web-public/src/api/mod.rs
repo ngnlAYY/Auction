@@ -73,8 +73,8 @@ pub(crate) use rules::{RulesDocument, fetch_rules};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use session::PUBLIC_SESSION_CHANGE_STORAGE_KEY;
 pub(crate) use session::{
-    PublicSession, PublicSessionApiError, PublicSessionCheckTrigger, fetch_public_session,
-    login_public, logout_public,
+    PublicSession, PublicSessionApiError, PublicSessionCheckTrigger, SessionRefreshReason,
+    fetch_public_session, login_public, logout_public,
 };
 pub(crate) use status::fetch_public_readiness;
 

@@ -42,7 +42,7 @@ pub(crate) async fn set_session_preference(
     .map_err(|error| failure(error.code(), 0))?;
     if response.ok() {
         // 即使正文损坏，Cookie 和服务端截止也可能已经更新，仍须通知本页及其他标签页。
-        super::session::notify_public_session_change(false);
+        super::session::notify_public_session_change(super::session::SessionRefreshReason::Refresh);
     }
     decode(response, user_id, Some(command)).await
 }

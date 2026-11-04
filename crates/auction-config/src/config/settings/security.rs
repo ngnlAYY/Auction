@@ -73,7 +73,7 @@ pub struct SessionConfig {
     pub idle_ttl_seconds: u64,
     /// 会话绝对过期秒数；省略时为 604800 秒。
     pub absolute_ttl_seconds: u64,
-    /// 单个公开用户允许的最大并发会话数；省略时为 5 个。
+    /// 单个公开用户允许的最大并发会话数；省略时为 10 个。
     pub max_public_sessions: u32,
 }
 
@@ -82,7 +82,7 @@ impl Default for SessionConfig {
         Self {
             idle_ttl_seconds: 30 * 60,
             absolute_ttl_seconds: 7 * 24 * 60 * 60,
-            max_public_sessions: 5,
+            max_public_sessions: 10,
         }
     }
 }
@@ -90,13 +90,13 @@ impl Default for SessionConfig {
 /// Public 部署只拥有并发上限；登录时长由账号偏好拥有，未设置时默认永久。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PublicSessionSettings {
-    /// 单个公开用户允许的最大并发会话数；省略时为 5 个。
+    /// 单个公开用户允许的最大并发会话数；省略时为 10 个。
     pub max_public_sessions: u32,
 }
 
 impl Default for PublicSessionSettings {
     fn default() -> Self {
-        Self { max_public_sessions: 5 }
+        Self { max_public_sessions: 10 }
     }
 }
 
@@ -116,7 +116,7 @@ impl RoleSessionConfig {
             Role::Admin => Self::Timed(SessionConfig {
                 idle_ttl_seconds: 15 * 60,
                 absolute_ttl_seconds: 8 * 60 * 60,
-                max_public_sessions: 5,
+                max_public_sessions: 10,
             }),
             Role::Worker => Self::Timed(SessionConfig::default()),
         }

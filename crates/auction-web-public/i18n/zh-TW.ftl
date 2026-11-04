@@ -368,6 +368,8 @@ session-menu-label = 帳戶工作階段
 session-login = 登入
 logout = 登出
 logout-error = 資料載入失敗——將自動重試。
+session-ended-elsewhere = 此帳號已在其他裝置登入，目前的工作階段已結束。
+session-ended-relogin = 用原登入 key 重新登入
 
 session-duration-title = 登入時長
 session-duration-permanent = 永久（預設）

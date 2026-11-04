@@ -100,7 +100,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | 方法 | 路径 | 会话 | 说明 |
 | --- | --- | --- | --- |
 | GET | `/api/v1/session` | — | 当前会话；未登录仍返回 200 / `ok`，`data: null`；不写 Cookie |
-| POST | `/api/v1/session` | — | `{"key": "<登录 key>"}` 登录，成功后下发 HttpOnly Cookie |
+| POST | `/api/v1/session` | — | `{"key": "<登录 key>"}` 登录，成功后下发 HttpOnly Cookie；满额时在同一事务与用户行锁内注销最久未活动的有效会话，不返回 409 `session_limit` |
 | PUT | `/api/v1/session` | ✓ | 空请求体，无查询参数；将当前服务端会话截止同步到浏览器 Cookie，不延长数据库截止 |
 | DELETE | `/api/v1/session` | ✓ | 退出并撤销会话 |
 | GET / PUT | `/api/v1/me/session-preference` | ✓ | 登录时长偏好：`{"command_id","duration_seconds"(null 为永久),"expected_version"}` |

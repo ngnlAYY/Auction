@@ -109,6 +109,58 @@ check_repository_contracts() {
 	fi
 }
 
+check_systemd_templates() {
+	local failures
+
+	failures=$(
+		for file in ops/deploy/systemd/auction-public-api.service.example \
+			ops/deploy/systemd/auction-admin-api.service.example; do
+			awk -v file="$file" '
+        BEGIN { section = ""; bad = 0 }
+        /^[[:space:]]*\[/ { section = $0; next }
+        section == "[Unit]" && /^[[:space:]]*(After|Wants|Requires)[[:space:]]*=/ {
+          key = $0
+          sub(/[[:space:]]*=.*/, "", key)
+          gsub(/[[:space:]]/, "", key)
+          value = $0
+          sub(/^[^=]*=[[:space:]]*/, "", value)
+          count = split(value, deps, /[[:space:]]+/)
+          for (i = 1; i <= count; i++) {
+            dep = deps[i]
+            if (dep == "") continue
+            # 角色之间只能 Wants=：Requires= 会把停止与失败传播到 Public/Admin。
+            if (key == "Requires" && (dep == "auction-worker.service" || dep == "auction-admin-api.service")) {
+              printf "%s:%d: 角色依赖不得使用 Requires=：%s=%s\n", file, FNR, key, dep
+              bad = 1
+            }
+            if (key == "After" || key == "Wants") seen[key SUBSEP dep] = 1
+          }
+        }
+        END {
+          targets = (file ~ /public-api/) ? "auction-worker.service auction-admin-api.service" : "auction-worker.service"
+          n = split(targets, required, " ")
+          for (i = 1; i <= n; i++) {
+            if (!(("After" SUBSEP required[i]) in seen)) {
+              printf "%s: [Unit] After= 缺少 %s\n", file, required[i]
+              bad = 1
+            }
+            if (!(("Wants" SUBSEP required[i]) in seen)) {
+              printf "%s: [Unit] Wants= 缺少 %s\n", file, required[i]
+              bad = 1
+            }
+          }
+          exit bad
+        }
+      ' "$file"
+		done
+	)
+	if [[ -n "$failures" ]]; then
+		printf '%s\n' "systemd 角色模板的依赖与顺序约束无效：" >&2
+		printf '%s' "$failures" >&2
+		return 1
+	fi
+}
+
 check_config_examples() {
 	local missing
 
@@ -247,6 +299,7 @@ run_checks() {
 		case "$check" in
 		layout) check_layout ;;
 		config) check_config_examples ;;
+		systemd-templates) check_systemd_templates ;;
 		i18n) check_i18n ;;
 		equipment-contract) bash ci/checks/equipment-contract.sh ;;
 		ratchet) check_source_ratchet ;;
@@ -272,7 +325,7 @@ run_checks() {
 			;;
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout config i18n equipment-contract ratchet markdown-links migration-compatibility ;;
+		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet markdown-links migration-compatibility ;;
 		rust) run_checks fmt check feature dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

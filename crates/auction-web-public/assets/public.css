@@ -55,6 +55,38 @@
   letter-spacing: 0.02em;
 }
 
+/* 满额登录腾位后，被注销的设备看到“已在其他设备登录”；提示条与页头同宽，可手动关闭。 */
+.public-shell__session-ended-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding-block: var(--space-2);
+  padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
+  border-block-end: var(--border-width) solid var(--color-border);
+  background: var(--color-surface-raised);
+  color: var(--color-warning);
+  font-size: var(--text-sm);
+}
+
+.public-shell__session-ended-text {
+  flex: 1 1 18rem;
+}
+
+.public-shell__session-ended-login {
+  color: var(--color-link);
+  text-decoration: underline;
+}
+
+.public-shell__session-ended-dismiss {
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--text-base);
+  line-height: 1;
+}
+
 .public-shell__logo:focus-visible {
   text-decoration: none;
 }

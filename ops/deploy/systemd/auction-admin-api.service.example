@@ -1,8 +1,9 @@
 [Unit]
 Description=Auction Rust Admin API
 After=network-online.target auction-worker.service
-Wants=network-online.target
-Requires=auction-worker.service
+Wants=network-online.target auction-worker.service
+# 故障域隔离：Wants= 只表达启动期望，不传播停止/失败。Worker 重启不会连带停止本服务；
+# 启动顺序仍由 After= 与 auction-cli service（auction-stack.service）保证。
 
 [Service]
 Type=simple

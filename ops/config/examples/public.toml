@@ -81,10 +81,10 @@ trusted_proxy_cidrs = []
 # 可选：是否信任 Unix socket 上游提供的 X-Forwarded-For；仅 listener.mode = unix 时可设为 true。
 trusted_unix_proxy = false
 
-# 可选区块：Public 会话并发策略；省略整个区块时上限为 5。登录时长由账号「我的」设置，默认永久。
+# 可选区块：Public 会话并发策略；省略整个区块时上限为 10。登录时长由账号「我的」设置，默认永久。
 [session]
-# 可选：单个公开用户允许的最大并发会话数，默认 5。
-max_public_sessions = 5
+# 可选：单个公开用户允许的最大并发会话数，默认 10；满额登录注销最久未活动的有效会话。
+max_public_sessions = 10
 
 # 可选区块：本角色服务池；修改均需重启，受停机门禁约束。
 [database_pool]

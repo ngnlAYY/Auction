@@ -98,17 +98,21 @@ usermod -aG auction-worker-control auction
 
 初始化失败或结果未知时服务不会自动重试（unit 为 `Restart=no`）：保留配置与数据库现场，核对后用 `auction-cli db` 系列命令恢复。
 
+合并部署是单一故障域：`auction-server` 监管的三个子进程任一退出都会停止其余角色，且 unit 为 `Restart=no`，需要人工核对后恢复。分体部署的 `Wants=` 隔离（W7.9）不适用于合并部署；该问题记入 W8.1。
+
 ## systemd 服务与顺序控制
 
 | unit | 说明 |
 | --- | --- |
 | `auction-worker.service` | `Restart=on-failure`；`RuntimeDirectory=hv-auction/worker` 管理 control socket 目录；可写 `/var/lib/auction` |
-| `auction-admin-api.service` | `Requires=`/`After=` Worker；附加组 `auction-worker-control` 以访问 control socket；可写 `/etc/auction/runtime` |
-| `auction-public-api.service` | `Requires=`/`After=` Worker 与 Admin |
+| `auction-admin-api.service` | `Wants=`/`After=` Worker；附加组 `auction-worker-control` 以访问 control socket；可写 `/etc/auction/runtime` |
+| `auction-public-api.service` | `Wants=`/`After=` Worker 与 Admin |
 | `auction-stack.service` | oneshot、`RemainAfterExit`，以 root 执行 `auction-cli service start/stop`；开机按序拉起 |
 | `auction-server.service` | 合并部署专用；`KillMode=mixed`、`TimeoutStopSec=225s`、`Restart=no` |
 
 Public/Admin unit 保持 `TimeoutStopSec=45s`，Worker 为 `120s`，stack 为 `330s`；保留原有 systemd 加固选项。外层上限按“普通 + 关键段 + tracing 上限 + 余量”计算，三角色普通预算默认 10 秒，Worker 关键段默认 60 秒，tracing 上限 30 秒。supervisor 从 RolePlan 求和，默认 195 秒，server unit 为 225 秒。提高应用预算须同步提高相应 unit 上限，详见[排空与停止预算](config/README.md#排空与停止预算)。
+
+**故障域隔离**：Public/Admin 对 Worker（Public 还对 Admin）只使用 `Wants=` 与 `After=`，不使用 `Requires=`。`Wants=` 只表达启动期望，不传播停止与失败：Worker 因故障退出并由 `Restart=on-failure` 自动重启时，systemd 不会连带停止或重启 Public 与 Admin；`After=` 只在同一次事务中保证启动先后，实际 readiness 编排仍由 `auction-cli service` 负责。Worker 重启期间 Public 仍可响应已有请求，依赖 Worker 的操作（Admin 的 control 调用、投递与邮件相关的业务读写）可能暂时失败或返回既有错误，恢复后不重放外部写入。模板检查见 `ci/checks/check.sh` 的 `systemd-templates`。合并部署的 `auction-server.service` 不受此改动影响：任一子进程退出仍会停止其余角色且 unit 为 `Restart=no`，属 W8.1 范围，需要人工核对后恢复。
 
 Worker 停止时立即取消尚未登记交接的准备期工作并保留持久 claim。delivery、PM 和 compose discard 在持久围栏调用前登记，围栏调用开始即受保护；关闭先赢时不发起围栏，登记先赢时围栏往返也计入活动、阻止排空结束。登记本身不授权外写，只有围栏确认提交才继续 POST；确认失败或提交未知仍不执行外写。论坛在已有持久 claim 下的首个实际 POST 前登记，同一活动的后续必要 POST 不因关闭入口被截断。已登记交接与关键段的 owner 继续执行原续租、凭据校验和结果落库，共享一次 60 秒截止，之后普通收口最多 10 秒；仅在既有结果端口确认提交后 complete，其余由 drop 记未收口。60 秒只保证“剩余工作可在预算内完成时落库后退出，否则保持既有未知边界”；不延长请求、lease 或证据寿命。超时和二次信号非零退出，关闭路径不补造失败或人工态；二次信号跳过可选 tracing 刷新。旧路径可通过角色配置 `critical_write_timeout_seconds = 0` 回退，切换需重启。
 
@@ -126,7 +130,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 注意：
 
-- 三个角色 unit 的 `Requires=`/`After=` 不提供应用 readiness 编排；单独重启 Worker 可能影响依赖角色的运行状态。需要整体重启时使用 `auction-cli service restart`。
+- 三个角色 unit 的 `Wants=`/`After=` 不提供应用 readiness 编排；`Wants=` 不传播停止/失败，单独重启 Worker 不再连带停止 Public 与 Admin，但依赖 Worker 的操作会短暂失败。需要整体重启时使用 `auction-cli service restart`。
 - Worker 在凭据所有权失效、control 服务停止等运行时故障时以非零状态退出，由 `Restart=on-failure` 拉起。
 - 迁移、建库、重建与恢复要求三个 unit 全部停止（或使用合并部署的 owner 锁），见[停机门禁](../apps/auction-cli/README.md#停机门禁)。
 
@@ -795,8 +799,9 @@ WASM 继承开启检查，保留 abort，现有 hook 展示静态错误横幅。
 邮件、论坛、PM、告警叶子直接执行，没有新增 catch_unwind；
 panic 仍退出常驻任务，Worker 随后排空并非零退出。
 分体 Worker 模板由 systemd `Restart=on-failure` 拉起；
-Public/Admin 的 Requires 绑定仍可能传播影响。
-合并 server 当前会停止其余角色，模板 `Restart=no`，需人工核对后恢复。
+Public/Admin 对 Worker 使用 `Wants=`，Worker 重启不连带停止它们，
+但依赖 Worker 的操作会短暂失败。
+合并 server 当前会停止其余角色，模板 `Restart=no`，需人工核对后恢复（W8.1）。
 
 W13.3b 已落无迁移的首次 panic 阻断：生命周期/结算写 fenced `task_panic_terminal`
 并排除后续自动领取；履约/恢复 action 使用现有 `manual_reconcile`；delivery 按

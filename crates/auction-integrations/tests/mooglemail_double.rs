@@ -95,18 +95,21 @@ async fn reads_captured_mail_routes_and_details() {
 #[tokio::test]
 async fn classifies_account_busy_cookie_invalid_timeout_and_drift() {
     let server = MailDouble::start().await.unwrap();
-    let client = client(&server);
-    let target = client.inbox_page(MoogleMailWorld::Main, 0).unwrap();
+    // 账号忙会打开进程内熔断窗口；每种故障用独立客户端，避免前一分类吞掉后续请求。
     for (fault, expected) in [
         (Fault::AccountBusy, MoogleMailErrorCategory::AccountBusy),
         (Fault::CookieInvalid, MoogleMailErrorCategory::SessionExpired),
         (Fault::Timeout(Duration::from_secs(1)), MoogleMailErrorCategory::RemoteTemporary),
     ] {
+        let client = client(&server);
+        let target = client.inbox_page(MoogleMailWorld::Main, 0).unwrap();
         server.set_fault(Some(fault));
         assert_eq!(client.get(&target, &cookie()).await.unwrap_err().category, expected);
     }
     server.set_fault(Some(Fault::ProtocolDrift));
-    let bytes = client.get(&target, &cookie()).await.unwrap();
+    let client = client(&server);
+    let bytes =
+        client.get(&client.inbox_page(MoogleMailWorld::Main, 0).unwrap(), &cookie()).await.unwrap();
     assert_eq!(
         MoogleMailParser
             .scan_inbox_page(&bytes, MoogleMailWorld::Main, 0, &mut HashSet::new())
@@ -213,4 +216,170 @@ async fn write_faults_preserve_unknown_and_explicit_rejections() {
         }
     }
     assert_eq!(server.write_requests(), 3);
+}
+
+#[tokio::test]
+async fn account_busy_window_allows_one_probe_and_keeps_worlds_separate() {
+    let server = MailDouble::start().await.unwrap();
+    let client = client(&server);
+    let cookie = cookie();
+    let main = client.inbox_page(MoogleMailWorld::Main, 0).unwrap();
+    server.set_fault(Some(Fault::AccountBusy));
+
+    // 首次命中战斗页只升级退避，不阻止同一次请求的结果分类。
+    assert_eq!(
+        client.get(&main, &cookie).await.unwrap_err().category,
+        MoogleMailErrorCategory::AccountBusy
+    );
+    assert_eq!(server.read_requests(), 1);
+
+    // 当前窗口只放行一次只读探测；探测同样命中后其余读取不再发出网络。
+    assert_eq!(
+        client.get(&main, &cookie).await.unwrap_err().category,
+        MoogleMailErrorCategory::AccountBusy
+    );
+    assert_eq!(server.read_requests(), 2);
+    assert_eq!(
+        client.get(&main, &cookie).await.unwrap_err().category,
+        MoogleMailErrorCategory::AccountBusy
+    );
+    assert_eq!(server.read_requests(), 2);
+    assert_eq!(
+        client.get(&main, &cookie).await.unwrap_err().category,
+        MoogleMailErrorCategory::AccountBusy
+    );
+    assert_eq!(server.read_requests(), 2);
+
+    // 世界隔离：主世界熔断期间异世界仍可发出自己的第一次请求。
+    let isekai = client.inbox_page(MoogleMailWorld::Isekai, 0).unwrap();
+    assert_eq!(
+        client.get(&isekai, &cookie).await.unwrap_err().category,
+        MoogleMailErrorCategory::AccountBusy
+    );
+    assert_eq!(server.read_requests(), 3);
+    assert!(!client.permits_write(MoogleMailWorld::Main));
+    assert!(!client.permits_write(MoogleMailWorld::Isekai));
+}
+
+#[tokio::test]
+async fn account_busy_rejects_writes_before_any_network_request() {
+    use auction_integrations::mooglemail::{MoogleMailForm, MoogleMailMessageFields};
+
+    let server = MailDouble::start().await.unwrap();
+    let client = client(&server);
+    let cookie = cookie();
+    let world = MoogleMailWorld::Main;
+    let compose = client.compose(world).unwrap();
+    let bytes = client.get(&compose, &cookie).await.unwrap();
+    let state = MoogleMailParser.parse_compose_state(&bytes, world).unwrap();
+    let fields = MoogleMailMessageFields {
+        recipient: "FixtureRecipient".into(),
+        subject: "fixture".into(),
+        body: "fixture".into(),
+    };
+    assert!(client.permits_write(world));
+
+    server.set_fault(Some(Fault::AccountBusy));
+    assert_eq!(
+        client.get(&compose, &cookie).await.unwrap_err().category,
+        MoogleMailErrorCategory::AccountBusy
+    );
+    assert!(!client.permits_write(world));
+
+    let form = MoogleMailForm::send(state.token(), &fields).unwrap();
+    let error = client.post(&compose, &cookie, form).await.unwrap_err();
+    assert_eq!(error.category, MoogleMailErrorCategory::AccountBusy);
+    // 拒绝发生在请求发出之前，不能伪装成已开始的写入。
+    assert!(!error.write_started());
+    assert_eq!(server.write_requests(), 0);
+}
+
+/// 只统计是否调用留证接口；不落盘、不构造真实密文。
+#[derive(Default)]
+struct CountingRecorder {
+    retained: std::sync::atomic::AtomicUsize,
+}
+
+impl auction_application::MailDiagnosticRecorder for CountingRecorder {
+    fn prepare_response(
+        &self,
+        _context: auction_application::MailDiagnosticContext,
+        _status: Option<u16>,
+        _body: Option<&[u8]>,
+    ) -> Result<auction_application::PreparedMailEvidence, auction_application::MailDiagnosticError>
+    {
+        Err(auction_application::MailDiagnosticError::UnsupportedPlatform)
+    }
+
+    fn prepare_message(
+        &self,
+        _context: auction_application::MailDiagnosticContext,
+        _message: &auction_application::MailMessage,
+    ) -> Result<auction_application::PreparedMailEvidence, auction_application::MailDiagnosticError>
+    {
+        Err(auction_application::MailDiagnosticError::UnsupportedPlatform)
+    }
+
+    fn retain(
+        &self,
+        _prepared: auction_application::PreparedMailEvidence,
+        _outcome: auction_application::MailDiagnosticOutcome,
+    ) -> auction_application::MailDiagnosticFuture<'_, auction_application::MailDiagnosticReceipt>
+    {
+        Box::pin(async { Err(auction_application::MailDiagnosticError::UnsupportedPlatform) })
+    }
+
+    fn retain_response(
+        &self,
+        _context: auction_application::MailDiagnosticContext,
+        _status: Option<u16>,
+        _body: Option<&[u8]>,
+        _outcome: auction_application::MailDiagnosticOutcome,
+    ) -> auction_application::MailDiagnosticFuture<'_, auction_application::MailDiagnosticReceipt>
+    {
+        use std::sync::atomic::Ordering;
+        self.retained.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {
+            Ok(auction_application::MailDiagnosticReceipt {
+                evidence_id: uuid::Uuid::nil(),
+                plaintext_bytes: 0,
+                sha256: String::new(),
+                body_available: true,
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn duplicate_busy_pages_are_retained_once_per_busy_period() {
+    use std::sync::{Arc, atomic::Ordering};
+
+    let server = MailDouble::start().await.unwrap();
+    let recorder = Arc::new(CountingRecorder::default());
+    let client = client(&server).with_diagnostics(recorder.clone());
+    let cookie = cookie();
+    let main = client.inbox_page(MoogleMailWorld::Main, 0).unwrap();
+    let isekai = client.inbox_page(MoogleMailWorld::Isekai, 0).unwrap();
+    let retained = || recorder.retained.load(Ordering::SeqCst);
+    server.set_fault(Some(Fault::AccountBusy));
+
+    let first = client.get(&main, &cookie).await.unwrap_err();
+    assert_eq!(first.category, MoogleMailErrorCategory::AccountBusy);
+    assert_eq!(first.evidence_status, "retained");
+    assert_eq!(retained(), 1);
+
+    // 探测重演同一忙碌期的战斗页：不再新增证据，但错误分类保持不变。
+    let probe = client.get(&main, &cookie).await.unwrap_err();
+    assert_eq!(probe.category, MoogleMailErrorCategory::AccountBusy);
+    assert_eq!(retained(), 1);
+
+    // 熔断拒绝没有正文，也不能占用证据容量。
+    let rejected = client.get(&main, &cookie).await.unwrap_err();
+    assert_eq!(rejected.evidence_status, "suppressed");
+    assert_eq!(retained(), 1);
+
+    // 异世界是独立忙碌期，仍保存自己的首份战斗页。
+    let other_world = client.get(&isekai, &cookie).await.unwrap_err();
+    assert_eq!(other_world.evidence_status, "retained");
+    assert_eq!(retained(), 2);
 }

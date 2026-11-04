@@ -61,6 +61,14 @@ impl MoogleMailClient {
             error.evidence_status = "disabled";
             return error;
         };
+        // 同一忙碌期只保存首份战斗页：探测或其他重复命中不再占用诊断容量。
+        // 只跳过账号忙证据，write_unknown 等其他类别的保全不受影响。
+        if error.category == MoogleMailErrorCategory::AccountBusy
+            && !self.account_busy.retain_busy_evidence(error.world)
+        {
+            error.evidence_status = "suppressed";
+            return error;
+        }
         // typed target 只接受受限 ID；不能记录 URL，其路径和查询可能包含装备 key。
         let external_mail_id = target
             .url
