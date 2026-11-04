@@ -3,9 +3,10 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use auction_application::{
-    MAX_MAIL_POLL_BATCH_SIZE, MailDiagnosticRecorder, MailMessage, MailPollClaim,
-    MailPollProgressObserver, MailPollStore, MailProcessor, MailboxMaintenanceService,
-    RecurringSchedule, RuntimeSwitches,
+    ExternalMetricsEvent, ExternalMetricsObserver, MAX_MAIL_POLL_BATCH_SIZE, MailBudget,
+    MailDiagnosticRecorder, MailMessage, MailPhase, MailPollClaim, MailPollProgressObserver,
+    MailPollStore, MailProcessor, MailWorld, MailboxMaintenanceService, RecurringSchedule,
+    RuntimeSwitches,
 };
 use auction_observability::WorkerLoop;
 use chrono::{DateTime, Utc};
@@ -190,6 +191,7 @@ pub struct MailPollRuntime {
     pub(super) diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
     pub(super) progress_observer: Option<Arc<dyn MailPollProgressObserver>>,
     pub(super) maintenance: Option<Arc<MailboxMaintenanceService>>,
+    pub(crate) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
     pub world_id: String,
     pub mailbox_key: String,
     pub config: MailPollRuntimeConfig,
@@ -223,6 +225,7 @@ impl MailPollRuntime {
             diagnostics: None,
             progress_observer: None,
             maintenance: None,
+            external_metrics: auction_application::noop_external_metrics_observer(),
             world_id,
             mailbox_key,
             config,
@@ -257,6 +260,20 @@ impl MailPollRuntime {
         self
     }
 
+    /// 注入同步外部客户端指标；关闭或非 Worker 角色使用 no-op。
+    pub fn with_external_metrics(
+        mut self,
+        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+    ) -> Self {
+        self.external_metrics = observer;
+        self
+    }
+
+    /// 记录本 world 的预算耗尽；只读同步计数，不改变任何截止点。
+    pub(crate) fn observe_budget(&self, phase: MailPhase, budget: MailBudget) {
+        observe_budget(&self.world_id, self.external_metrics.as_ref(), phase, budget);
+    }
+
     /// 维护服务存在时 runner 始终启动任务；旧路径下任务只 idle，不退出。
     pub(in crate::worker::runtime) fn has_independent_maintenance(&self) -> bool {
         self.maintenance.is_some()
@@ -281,4 +298,19 @@ impl MailPollRuntime {
     pub(in crate::worker::runtime) fn loop_kind(&self) -> WorkerLoop {
         if self.world_id == "isekai" { WorkerLoop::MailIsekai } else { WorkerLoop::MailMain }
     }
+}
+
+/// 把 Worker 的 world 字符串映射到闭集后记录预算耗尽；未知 world 不产生标签。
+pub(crate) fn observe_budget(
+    world_id: &str,
+    observer: &dyn ExternalMetricsObserver,
+    phase: MailPhase,
+    budget: MailBudget,
+) {
+    let world = match world_id {
+        "main" => MailWorld::Main,
+        "isekai" => MailWorld::Isekai,
+        _ => return,
+    };
+    observer.observe(ExternalMetricsEvent::MailBudgetExhausted { world, phase, budget });
 }

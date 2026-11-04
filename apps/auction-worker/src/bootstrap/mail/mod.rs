@@ -26,6 +26,7 @@ pub(super) async fn configure_mail_poll(
     progress_observer: Arc<dyn auction_application::MailPollProgressObserver>,
     sent_baseline_observer: Arc<dyn auction_application::SentBaselineObserver>,
     switches: auction_application::RuntimeSwitches,
+    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
 ) -> anyhow::Result<(
     Vec<MailPollRuntime>,
     Option<Arc<dyn DeliveryTransport>>,
@@ -67,6 +68,7 @@ pub(super) async fn configure_mail_poll(
         let (credentials, ownership) =
             credentials::load_credentials(config, mail_config, &world_configs, Arc::clone(&store))
                 .await?;
+        let credentials = credentials.with_external_metrics(Arc::clone(&external_metrics));
         let endpoint = Url::parse(&mail_config.endpoint).context("parse MoogleMail endpoint")?;
         let mut client = MoogleMailClient::with_config(MoogleMailClientConfig {
             endpoint,
@@ -80,7 +82,7 @@ pub(super) async fn configure_mail_poll(
         if let Some(recorder) = diagnostics::configure(config)? {
             client = client.with_diagnostics(recorder);
         }
-        let client = Arc::new(client);
+        let client = Arc::new(client.with_external_metrics(Arc::clone(&external_metrics)));
         let (processor, delivery_transport) = processor::build_processor_and_delivery(
             config,
             mail_config,
@@ -108,6 +110,7 @@ pub(super) async fn configure_mail_poll(
                 maintenance_schedule,
                 progress_observer,
                 switches,
+                external_metrics: Arc::clone(&external_metrics),
             },
         )
         .await?;

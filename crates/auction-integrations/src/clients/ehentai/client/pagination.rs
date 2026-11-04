@@ -2,7 +2,10 @@
 
 use auction_application::diagnostics::DiagnosticContext;
 
+use crate::clients::metrics::topic_scan_discovered;
 use crate::diagnostics as safe_diagnostics;
+
+use auction_application::{ForumTopicScanOutcome, ForumWorld};
 
 use std::collections::BTreeSet;
 
@@ -21,12 +24,13 @@ impl EhentaiClient {
         first_page: &ParsedHtmlPage,
         thread_id: &str,
         operation: EhentaiOperation,
+        metrics_world: ForumWorld,
     ) -> Result<Vec<(u64, Url)>, EhentaiError> {
         let first_target = self.index_url(&[("showtopic", thread_id)], operation)?;
         let identity = self.topic_page_identity(first_page, &first_target, thread_id, operation)?;
         let maximum_offset = identity.offsets.last().copied().unwrap_or(0);
         validate_page_post_count(0, maximum_offset, identity.post_count, operation)?;
-        self.topic_page_targets_through(thread_id, maximum_offset, operation)
+        self.topic_page_targets_through(thread_id, maximum_offset, operation, metrics_world)
     }
 
     fn topic_page_targets_through(
@@ -34,6 +38,7 @@ impl EhentaiClient {
         thread_id: &str,
         maximum_offset: u64,
         operation: EhentaiOperation,
+        metrics_world: ForumWorld,
     ) -> Result<Vec<(u64, Url)>, EhentaiError> {
         if !maximum_offset.is_multiple_of(FORUM_POSTS_PER_PAGE) {
             return Err(EhentaiError::protocol(operation, false));
@@ -44,11 +49,17 @@ impl EhentaiClient {
             .and_then(|value| usize::try_from(value).ok())
             .ok_or_else(|| EhentaiError::protocol(operation, false))?;
         if page_count > self.maximum_topic_pages {
+            topic_scan_discovered(
+                self.external_metrics().as_ref(),
+                metrics_world,
+                ForumTopicScanOutcome::PageLimit,
+                page_count,
+            );
             return Err(EhentaiError::protocol(operation, false));
         }
         let first_target = self.index_url(&[("showtopic", thread_id)], operation)?;
 
-        (0..page_count)
+        let targets = (0..page_count)
             .map(|page| {
                 let offset = u64::try_from(page)
                     .ok()
@@ -65,7 +76,14 @@ impl EhentaiClient {
                 };
                 Ok((offset, target))
             })
-            .collect()
+            .collect::<Result<Vec<_>, EhentaiError>>()?;
+        topic_scan_discovered(
+            self.external_metrics().as_ref(),
+            metrics_world,
+            ForumTopicScanOutcome::Complete,
+            targets.len(),
+        );
+        Ok(targets)
     }
 
     pub(super) fn validate_topic_page_identity(
@@ -269,7 +287,7 @@ mod tests {
             .unwrap_or_else(|error| panic!("安全论坛客户端应可构造: {error:?}"));
 
         let targets = client
-            .topic_page_targets(&page, "300433", EhentaiOperation::FetchTopic)
+            .topic_page_targets(&page, "300433", EhentaiOperation::FetchTopic, ForumWorld::Main)
             .unwrap_or_else(|error| panic!("编辑链接的空 st 不代表分页偏移: {error:?}"));
 
         assert_eq!(targets.len(), 1);

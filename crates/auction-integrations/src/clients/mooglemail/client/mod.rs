@@ -70,6 +70,7 @@ pub struct MoogleMailClient {
     request_timeout: Duration,
     diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
+    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
 }
 
 impl MoogleMailClient {
@@ -142,6 +143,7 @@ impl MoogleMailClient {
             request_timeout: config.request_timeout,
             diagnostics: None,
             ownership: None,
+            external_metrics: auction_application::noop_external_metrics_observer(),
         })
     }
 
@@ -185,6 +187,23 @@ impl MoogleMailClient {
     pub fn with_diagnostics(mut self, diagnostics: Arc<dyn MailDiagnosticRecorder>) -> Self {
         self.diagnostics = Some(diagnostics);
         self
+    }
+
+    /// 注入同步外部客户端指标；只读取共享门的配置间隔，不改变实际间隔。
+    pub fn with_external_metrics(
+        mut self,
+        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+    ) -> Self {
+        observer.observe(auction_application::ExternalMetricsEvent::MailRequestInterval {
+            interval: self.gate.interval(),
+        });
+        self.external_metrics = observer;
+        self
+    }
+
+    /// 供 sender 的扫描预算 owner 记录同步指标；不暴露给进程外调用方。
+    pub(crate) fn external_metrics(&self) -> Arc<dyn auction_application::ExternalMetricsObserver> {
+        Arc::clone(&self.external_metrics)
     }
 
     /// 让同一客户端的 Worker 业务处理复用诊断 owner，避免并发写入绕过容量边界。

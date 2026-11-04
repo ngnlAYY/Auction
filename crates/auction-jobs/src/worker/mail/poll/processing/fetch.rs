@@ -13,6 +13,7 @@ pub(super) async fn fetch_with_retry(
     config: MailPollRuntimeConfig,
     metric_context: MailPollMetricContext,
 ) -> Result<MailPollPage, MailPollGatewayError> {
+    let world_id = request.world_id.clone();
     for attempt in 1..=config.fetch_attempts {
         let deadline =
             std::time::Instant::now().checked_add(config.fetch_timeout).ok_or_else(|| {
@@ -43,6 +44,12 @@ pub(super) async fn fetch_with_retry(
             }
             Ok(Err(error)) => return Err(error),
             Err(error) if attempt < config.fetch_attempts => {
+                super::super::types::observe_budget(
+                    &world_id,
+                    metric_context.external_metrics.as_ref(),
+                    auction_application::MailPhase::PollFetch,
+                    auction_application::MailBudget::Time,
+                );
                 diagnostics::warn(
                     "mail_poll",
                     "retry_fetch_timeout",
@@ -61,6 +68,12 @@ pub(super) async fn fetch_with_retry(
                 .await;
             }
             Err(error) => {
+                super::super::types::observe_budget(
+                    &world_id,
+                    metric_context.external_metrics.as_ref(),
+                    auction_application::MailPhase::PollFetch,
+                    auction_application::MailBudget::Time,
+                );
                 diagnostics::warn(
                     "mail_poll",
                     "fetch_timeout",

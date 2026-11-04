@@ -27,8 +27,19 @@ pub(super) async fn process_topic(
     poll_interval: chrono::Duration,
     write_progress: &ForumWriteProgress,
 ) -> Result<(), ApplicationError> {
+    let scan_started = std::time::Instant::now();
     let preview = runtime.reader.fetch_topic(topic.world, topic.thread_id.clone()).await?;
     validate_fixed_layout(&topic, &preview)?;
+    // 观测窗口只覆盖完整远端读取；导入点是命令账本首次插入得到确认，不是竞价最终裁决。
+    let scan_observed = std::time::Instant::now();
+    let delay_guard = runtime.reply_delay.begin_scan(
+        topic.auction_id,
+        topic.world,
+        topic.reply_phase,
+        scan_started,
+        scan_observed,
+        preview.posts.iter().map(|post| post.post.id.clone()),
+    );
     // 当前顺序仅用于本轮扫描边界；删帖会重新编号，稳定命令身份始终由 post_id 与原负载核对。
     // preview 持有整轮快照；索引只借用 ID，避免每次扫描再逐帖分配相同字符串。
     let post_numbers = preview
@@ -270,6 +281,7 @@ pub(super) async fn process_topic(
         ));
     }
     let scan_completed = command_error.is_none();
+    delay_guard.finish(scan_completed);
     refresh_fixed_posts(
         runtime,
         topic,

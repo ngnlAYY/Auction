@@ -2,6 +2,9 @@
 
 use auction_application::diagnostics::DiagnosticContext;
 
+use crate::clients::metrics::{
+    ForumRequestGuard, forum_pm_category, forum_pm_request_result, forum_signal,
+};
 use crate::diagnostics as safe_diagnostics;
 
 use auction_application::{
@@ -30,6 +33,7 @@ struct PreparedPm {
     message: ForumPmMessage,
     sender: String,
     form: PmForm,
+    metrics_world: auction_application::ForumWorld,
 }
 
 impl PreparedForumPm for PreparedPm {
@@ -40,26 +44,80 @@ impl PreparedForumPm for PreparedPm {
     fn send(mut self: Box<Self>) -> ForumPmFuture<'static, ForumPmReceipt> {
         Box::pin(async move {
             // 调用方必须先持久化 sending fence；本对象不存在重试、换号或重新准备分支。
+            let mut operation = crate::clients::metrics::ForumPmOperationGuard::start(
+                self.client.external_metrics(),
+                self.metrics_world,
+                auction_application::ForumPmPhase::Send,
+                false,
+            );
             let result = async {
-                self.client.submit_pm(&self.form, self.session.cookie()).await?;
-                self.client.scan_sent(&self.message, &self.sender, self.session.cookie()).await
+                self.client
+                    .submit_pm(
+                        &self.form,
+                        self.session.cookie(),
+                        self.metrics_world,
+                        &mut operation,
+                    )
+                    .await?;
+                self.client
+                    .scan_sent(
+                        &self.message,
+                        &self.sender,
+                        self.session.cookie(),
+                        self.metrics_world,
+                    )
+                    .await
             }
             .await;
             if matches!(result, Err(ForumPmError::Authentication)) {
                 // 写后失效同样停用当前 Cookie，但不能据此认定未发送或授权重发。
                 let _ = self.session.invalidate_current().await;
             }
-            result
+            let write_started = operation.write_started();
+            let failure_category = result.as_ref().err().map(|error| forum_pm_category(*error));
+            let result = result
                 .map_err(|diagnostic_cause| {
                     safe_diagnostics::warn(
                         "forum_pm",
                         "send_unknown",
                         safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext { write_started: Some(true), ..Default::default() },
+                        DiagnosticContext {
+                            write_started: Some(write_started),
+                            ..Default::default()
+                        },
                     );
                     ForumPmError::OutcomeUnknown
-                })?
-                .ok_or(ForumPmError::OutcomeUnknown)
+                })
+                .and_then(|receipt| receipt.ok_or(ForumPmError::OutcomeUnknown));
+            if result.is_ok() {
+                operation.finish(
+                    auction_application::ForumPmOutcome::Proved,
+                    auction_application::ForumPmCategory::None,
+                );
+            } else {
+                // 未越过 POST 的错误保留已知分类；一旦越过 POST，结果只能按未知处理。
+                let (outcome, category) = if write_started {
+                    (
+                        auction_application::ForumPmOutcome::Unknown,
+                        auction_application::ForumPmCategory::OutcomeUnknown,
+                    )
+                } else {
+                    (
+                        auction_application::ForumPmOutcome::Error,
+                        failure_category.unwrap_or(auction_application::ForumPmCategory::None),
+                    )
+                };
+                operation.finish(outcome, category);
+                if write_started {
+                    self.client.external_metrics().observe(
+                        auction_application::ExternalMetricsEvent::ForumWriteUnknown {
+                            world: self.metrics_world,
+                            operation: auction_application::ForumOperation::PmSend,
+                        },
+                    );
+                }
+            }
+            result
         })
     }
 }
@@ -69,6 +127,7 @@ impl EhentaiClient {
         &self,
         message: &ForumPmMessage,
         mut session: EhentaiCredentialSession,
+        metrics_world: auction_application::ForumWorld,
     ) -> Result<Box<dyn PreparedForumPm>, ForumPmError> {
         self.validate_pm_client()?;
         validate_message(message)?;
@@ -77,7 +136,14 @@ impl EhentaiClient {
             ("CODE", "04"),
             ("MID", &message.recipient_forum_account_id),
         ])?;
-        let result = self.pm_get(target.clone(), session.cookie()).await;
+        let result = self
+            .pm_get(
+                target.clone(),
+                session.cookie(),
+                metrics_world,
+                auction_application::ForumOperation::PmPrepare,
+            )
+            .await;
         if matches!(result, Err(ForumPmError::Authentication)) {
             let _ = session.invalidate_current().await;
         }
@@ -89,6 +155,7 @@ impl EhentaiClient {
             message: message.clone(),
             sender,
             form,
+            metrics_world,
         }))
     }
 
@@ -97,13 +164,14 @@ impl EhentaiClient {
         message: &ForumPmMessage,
         sender: &str,
         mut session: EhentaiCredentialSession,
+        metrics_world: auction_application::ForumWorld,
     ) -> Result<Option<ForumPmReceipt>, ForumPmError> {
         self.validate_pm_client()?;
         validate_message(message)?;
         if !valid_topic_id(sender) {
             return Err(ForumPmError::Protocol);
         }
-        let result = self.scan_sent(message, sender, session.cookie()).await;
+        let result = self.scan_sent(message, sender, session.cookie(), metrics_world).await;
         if matches!(result, Err(ForumPmError::Authentication)) {
             let _ = session.invalidate_current().await;
         }
@@ -147,8 +215,12 @@ impl EhentaiClient {
         &self,
         target: Url,
         cookie: &EhentaiCookie,
+        metrics_world: auction_application::ForumWorld,
+        metrics_operation: auction_application::ForumOperation,
     ) -> Result<String, ForumPmError> {
-        self.wait_rate(EhentaiOperation::CheckSession).await.map_err(map_error)?;
+        self.wait_rate(EhentaiOperation::CheckSession, metrics_world, metrics_operation)
+            .await
+            .map_err(map_error)?;
         self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
                 "forum_pm",
@@ -158,74 +230,116 @@ impl EhentaiClient {
             );
             ForumPmError::Unavailable
         })?;
-        let response = self
-            .pm_client
-            .as_ref()
-            .ok_or(ForumPmError::Unavailable)?
-            .get(target)
-            .header(header::USER_AGENT, USER_AGENT)
-            .header(
-                header::COOKIE,
-                cookie_header(cookie, EhentaiOperation::CheckSession).map_err(map_error)?,
-            )
-            .timeout(self.request_timeout)
-            .send()
-            .await
-            .map_err(|diagnostic_cause| {
+        let request_metrics = ForumRequestGuard::start(
+            std::sync::Arc::clone(&self.external_metrics),
+            metrics_world,
+            metrics_operation,
+        );
+        let result = async {
+            let response = self
+                .pm_client
+                .as_ref()
+                .ok_or(ForumPmError::Unavailable)?
+                .get(target)
+                .header(header::USER_AGENT, USER_AGENT)
+                .header(
+                    header::COOKIE,
+                    cookie_header(cookie, EhentaiOperation::CheckSession).map_err(map_error)?,
+                )
+                .timeout(self.request_timeout)
+                .send()
+                .await
+                .map_err(|diagnostic_cause| {
+                    if diagnostic_cause.is_timeout() {
+                        forum_signal(
+                            self.external_metrics.as_ref(),
+                            metrics_world,
+                            metrics_operation,
+                            auction_application::ForumSignal::Timeout,
+                        );
+                    }
+                    safe_diagnostics::warn(
+                        "forum_pm",
+                        "read_page",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    ForumPmError::Unavailable
+                })?;
+            let status = response.status();
+            let location = response.headers().get(header::LOCATION).cloned();
+            let html = response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| {
+                    v.split(';').next().is_some_and(|v| v.trim().eq_ignore_ascii_case("text/html"))
+                });
+            let mut body = request::SensitiveResponseBody(
+                self.read_response(
+                    response,
+                    EhentaiOperation::CheckSession,
+                    metrics_world,
+                    metrics_operation,
+                    false,
+                )
+                .await
+                .map_err(map_error)?,
+            );
+            if is_session_expired(status, location.as_ref(), &body.0) {
+                return Err(ForumPmError::Authentication);
+            }
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                forum_signal(
+                    self.external_metrics.as_ref(),
+                    metrics_world,
+                    metrics_operation,
+                    auction_application::ForumSignal::RateLimited,
+                );
+                return Err(ForumPmError::RateLimited);
+            }
+            if !status.is_success() || location.is_some() || !html {
+                return Err(ForumPmError::Protocol);
+            }
+            // 正文等待和读后 owner 复核都由清理守卫覆盖；失锁响应不能继续作为凭据证明。
+            self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
                 safe_diagnostics::warn(
                     "forum_pm",
-                    "read_page",
+                    "check_read_receipt_owner",
                     safe_diagnostics::project(&diagnostic_cause),
                     DiagnosticContext::default(),
                 );
                 ForumPmError::Unavailable
             })?;
-        let status = response.status();
-        let location = response.headers().get(header::LOCATION).cloned();
-        let html =
-            response.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(
-                |v| v.split(';').next().is_some_and(|v| v.trim().eq_ignore_ascii_case("text/html")),
-            );
-        let mut body = request::SensitiveResponseBody(
-            self.read_response(response, EhentaiOperation::CheckSession, false)
-                .await
-                .map_err(map_error)?,
-        );
-        if is_session_expired(status, location.as_ref(), &body.0) {
-            return Err(ForumPmError::Authentication);
+            String::from_utf8(std::mem::take(&mut body.0)).map_err(|error| {
+                let diagnostic = safe_diagnostics::project(&error);
+                let mut bytes = error.into_bytes();
+                bytes.fill(0);
+                safe_diagnostics::warn(
+                    "forum_pm",
+                    "decode_response",
+                    diagnostic,
+                    DiagnosticContext::default(),
+                );
+                ForumPmError::Protocol
+            })
         }
-        if status == StatusCode::TOO_MANY_REQUESTS {
-            return Err(ForumPmError::RateLimited);
-        }
-        if !status.is_success() || location.is_some() || !html {
-            return Err(ForumPmError::Protocol);
-        }
-        // 正文等待和读后 owner 复核都由清理守卫覆盖；失锁响应不能继续作为凭据证明。
-        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_pm",
-                "check_read_receipt_owner",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            ForumPmError::Unavailable
-        })?;
-        String::from_utf8(std::mem::take(&mut body.0)).map_err(|error| {
-            let diagnostic = safe_diagnostics::project(&error);
-            let mut bytes = error.into_bytes();
-            bytes.fill(0);
-            safe_diagnostics::warn(
-                "forum_pm",
-                "decode_response",
-                diagnostic,
-                DiagnosticContext::default(),
-            );
-            ForumPmError::Protocol
-        })
+        .await;
+        request_metrics.finish(forum_pm_request_result(&result));
+        result
     }
 
-    async fn submit_pm(&self, form: &PmForm, cookie: &EhentaiCookie) -> Result<(), ForumPmError> {
-        self.wait_rate(EhentaiOperation::CheckSession).await.map_err(map_error)?;
+    async fn submit_pm(
+        &self,
+        form: &PmForm,
+        cookie: &EhentaiCookie,
+        metrics_world: auction_application::ForumWorld,
+        operation: &mut crate::clients::metrics::ForumPmOperationGuard,
+    ) -> Result<(), ForumPmError> {
+        let metrics_operation = auction_application::ForumOperation::PmSend;
+        self.wait_rate(EhentaiOperation::CheckSession, metrics_world, metrics_operation)
+            .await
+            .map_err(map_error)?;
         self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
                 "forum_pm",
@@ -240,54 +354,85 @@ impl EhentaiClient {
             .extend_pairs(form.values.iter().map(|(name, value)| (name.as_str(), value.as_str())))
             .finish();
         // 只使用封闭白名单字段，不跟踪、不保存草稿；一次 send 调用仅有这一次 POST。
-        let response = self
-            .pm_client
-            .as_ref()
-            .ok_or(ForumPmError::Unavailable)?
-            .post(form.action.clone())
-            .header(header::USER_AGENT, USER_AGENT)
-            .header(
-                header::COOKIE,
-                cookie_header(cookie, EhentaiOperation::CheckSession).map_err(map_error)?,
-            )
-            .header(header::ORIGIN, &self.origin)
-            .header(header::REFERER, form.referer.as_str())
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(encoded)
-            .timeout(self.request_timeout)
-            .send()
-            .await
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "forum_pm",
-                    "submit_message",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext { write_started: Some(true), ..Default::default() },
+        let request_metrics = ForumRequestGuard::start(
+            std::sync::Arc::clone(&self.external_metrics),
+            metrics_world,
+            metrics_operation,
+        );
+        let result = async {
+            let client = self.pm_client.as_ref().ok_or(ForumPmError::Unavailable)?;
+            let cookie =
+                cookie_header(cookie, EhentaiOperation::CheckSession).map_err(map_error)?;
+            // POST 即将发出；此后的取消与错误都属于结果未知，之前的错误保留原分类。
+            operation.mark_write_started();
+            let response = client
+                .post(form.action.clone())
+                .header(header::USER_AGENT, USER_AGENT)
+                .header(header::COOKIE, cookie)
+                .header(header::ORIGIN, &self.origin)
+                .header(header::REFERER, form.referer.as_str())
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(encoded)
+                .timeout(self.request_timeout)
+                .send()
+                .await
+                .map_err(|diagnostic_cause| {
+                    if diagnostic_cause.is_timeout() {
+                        forum_signal(
+                            self.external_metrics.as_ref(),
+                            metrics_world,
+                            metrics_operation,
+                            auction_application::ForumSignal::Timeout,
+                        );
+                    }
+                    safe_diagnostics::warn(
+                        "forum_pm",
+                        "submit_message",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext { write_started: Some(true), ..Default::default() },
+                    );
+                    ForumPmError::OutcomeUnknown
+                })?;
+            let status = response.status();
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                forum_signal(
+                    self.external_metrics.as_ref(),
+                    metrics_world,
+                    metrics_operation,
+                    auction_application::ForumSignal::RateLimited,
                 );
-                ForumPmError::OutcomeUnknown
-            })?;
-        let status = response.status();
-        let location = response.headers().get(header::LOCATION).cloned();
-        let body = self
-            .read_response(response, EhentaiOperation::CheckSession, true)
-            .await
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "forum_pm",
-                    "read_send_receipt",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext { write_started: Some(true), ..Default::default() },
-                );
-                ForumPmError::OutcomeUnknown
-            })?;
-        if is_session_expired(status, location.as_ref(), &body) {
-            return Err(ForumPmError::Authentication);
+            }
+            let location = response.headers().get(header::LOCATION).cloned();
+            let body = self
+                .read_response(
+                    response,
+                    EhentaiOperation::CheckSession,
+                    metrics_world,
+                    metrics_operation,
+                    true,
+                )
+                .await
+                .map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "forum_pm",
+                        "read_send_receipt",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext { write_started: Some(true), ..Default::default() },
+                    );
+                    ForumPmError::OutcomeUnknown
+                })?;
+            if is_session_expired(status, location.as_ref(), &body) {
+                return Err(ForumPmError::Authentication);
+            }
+            if !status.is_success() || location.is_some() {
+                return Err(ForumPmError::OutcomeUnknown);
+            }
+            // HTTP 200 只是允许开始只读核对，并非发送回执。
+            Ok(())
         }
-        if !status.is_success() || location.is_some() {
-            return Err(ForumPmError::OutcomeUnknown);
-        }
-        // HTTP 200 只是允许开始只读核对，并非发送回执。
-        Ok(())
+        .await;
+        request_metrics.finish(forum_pm_request_result(&result));
+        result
     }
 }
 

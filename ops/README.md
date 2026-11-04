@@ -367,6 +367,67 @@ Caddy 的公网 `/metrics` 404 规则继续保留，采集不经过 Caddy 或 Cl
 `reject_forwarded_requests = false` 并重启对应角色；保留 Caddy 公网屏蔽和监听限制。
 监控服务由用户独立启停，不绑定 Auction readiness。
 
+#### 外部账号客户端查询示例
+
+W0.4/W0.5 的指标只在 Worker 装配真实记录器；关闭 metrics 时记录器为 no-op，
+series 不出现，不会以零值替代缺测。启用或关闭都按配置与重启窗口执行。
+进程重启后计数器归零，查询使用 `rate`/`increase`，不要跨重启直接比较原始值。
+客户端、Worker、HTTP 与数据库层的失败计数不可相加当作“总失败”；
+这些指标只覆盖外部账号客户端，不替代 W0.3、W0.6 或 W0.9。
+采集与保存仍以 W0.10 的 loopback 出口和 Prometheus 为前提。
+
+维护耗时 p95（沿用 W1.0 轮次直方图，不另建同义族）：
+
+```promql
+histogram_quantile(0.95,
+  sum by (le) (
+    rate(auction_worker_loop_iteration_duration_seconds_bucket{loop=~"mail-maintenance-.*"}[5m])
+  ))
+```
+
+请求门等待 p95 与邮件预算耗尽速率：
+
+```promql
+histogram_quantile(0.95,
+  sum by (le, world, operation) (
+    rate(auction_mooglemail_request_gate_wait_seconds_bucket[5m])
+  ))
+sum by (world, phase, budget) (
+  rate(auction_mooglemail_budget_exhaustions_total[5m])
+)
+sum by (world, phase) (
+  rate(auction_forum_budget_exhaustions_total[5m])
+)
+```
+
+论坛主题扫描的平均发现/处理页数与处理 p95：
+
+```promql
+sum by (world, outcome) (rate(auction_forum_topic_scan_pages_sum{measure="discovered"}[5m]))
+  / sum by (world, outcome) (rate(auction_forum_topic_scan_pages_count{measure="discovered"}[5m]))
+histogram_quantile(0.95,
+  sum by (le, world, outcome) (
+    rate(auction_forum_topic_scan_pages_bucket{measure="processed"}[5m])
+  ))
+```
+
+回帖延迟覆盖与上界 p95；observed 只表示有有效窗口样本，不是最终接受延迟：
+
+```promql
+sum by (world, phase, outcome) (
+  rate(auction_forum_reply_delay_samples_total[5m])
+)
+sum(rate(auction_forum_reply_delay_samples_total{outcome="observed"}[5m]))
+  / sum(rate(auction_forum_reply_delay_samples_total[5m]))
+histogram_quantile(0.95,
+  sum by (le, world, phase, bound) (
+    rate(auction_forum_reply_delay_estimate_seconds_bucket[5m])
+  ))
+```
+
+`lower/midpoint/upper` 的分位差只是分位估计区间，不是逐样本宽度；
+Final 分位目标、允许误差与最低覆盖率由 W0.13 定义，缺测不能解释为零延迟。
+
 ### SLI 基线与容量观察
 
 先部署本批程序并按 W0.10 开启 Worker 的 metrics 采集；

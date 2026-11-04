@@ -47,6 +47,35 @@
 
 论坛复用原持久 claim；`submit_form` 在第一个实际 POST 前通过 `ForumWriteProgress` 同步登记，关闭入口只拒绝首次登记，已登记的同一工作项继续完成必要 POST/回读，结果提交仍由应用/Worker owner 确认。MoogleMail delivery、discard 和 PM 的围栏调用开始即受保护，登记不代替持久围栏确认。装备准备、compose、Sent 核对及 PM 的 POST/Sent 都保持原凭据与结果未知边界，不因排空延长请求或重试外写。
 
+## 外部客户端指标边界（W0.4/W0.5）
+
+本 crate 通过应用层窄端口 `ExternalMetricsObserver` 记录同步事件；
+不依赖 Prometheus，记录器无 I/O、无 `.await`，关闭指标或非 Worker 角色为 no-op。
+指标不改变请求间隔、锁顺序、deadline、重试、取消、写入围栏或未知结果处理。
+
+- **物理请求**：`requests_total` 在通过校验、即将执行 HTTP 请求时加一；
+  锁等待、凭据拒绝、缓存复用不增加请求数。`results_total` 在请求边界终结时加一，
+  取消由 guard 补记；`ok` 不表示发送、资产或投递证明完成。
+- **共享读取**：Inbox/Read Mail 的物理请求在共享任务内部计数；等待者和缓存命中
+  不重复计数。取消等待者不改变既有共享请求的寿命，也不伪造一次新请求。
+- **邮件锁**：只记录获取等待 `exclusive/incoming_read/incoming_write`；
+  不把持有时间、业务耗时或锁内步骤算作等待。
+- **信号**：GET/POST 的超时、429 与战斗页识别分别记录 `timeout`、`rate_limited`、
+  `account_busy`；POST 的 429/5xx/写后会话失效仍按原 `write_unknown` 结果处理，
+  信号与结果可以同时出现，不能互相替代。
+- **论坛写入未知**：每次逻辑写入返回未知结果时加一，包括写后失效、缺少精确证明
+  与越过写入边界后的取消；只读对账失败不算新的未知写入。
+- **PM**：prepare 只读，send 单次 POST 后核对同一 sender 的 Sent；`not_observed`
+  只表示未找到完整证明，不授权重寄。核对是只读操作，不增加新的写入未知。
+- **预算**：维护、观察、fetch、批次由 Worker 调用方记录；Sent/Read 扫描与共享读取
+  在各自客户端预算边界记录。一次耗尽只由原 owner 记录，不在通用错误构造器累加。
+- **World**：邮件只用 `main/isekai`；论坛允许 `shared`，仅用于没有权威世界上下文
+  的资料读取，主题与 PM 仍使用各自的权威世界。
+
+客户端层、Worker 层、HTTP 层与数据库层的失败计数口径不同，不可相加当作“总失败”。
+完整指标名称、合法组合、直方图桶与缺样语义见
+[可观测性 README](../auction-observability/README.md#外部账号客户端指标w04w05)。
+
 ## 安全错误记录
 
 W0.2 I-B 在错误即将折叠或被丢弃的边界复用应用层 `diagnostics::record_error`。

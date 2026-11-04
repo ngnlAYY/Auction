@@ -9,6 +9,7 @@ use std::{collections::HashSet, mem::size_of};
 use tokio::sync::OnceCell;
 
 use super::*;
+use crate::clients::metrics::MailLockWaitGuard;
 use crate::clients::mooglemail::parser::{
     MoogleMailParser, MoogleMailSentSummary, MoogleMailSummary,
 };
@@ -207,7 +208,16 @@ impl MoogleMailClient {
         let world = round.key.world;
         self.check_read_round(cookie, round).await?;
         validate_pages(maximum_pages, world)?;
+        let operation =
+            if read_mail { MoogleMailOperation::ReadMail } else { MoogleMailOperation::Inbox };
+        let lock_wait = MailLockWaitGuard::start(
+            Arc::clone(&self.external_metrics),
+            world,
+            operation,
+            auction_application::MailLock::IncomingRead,
+        );
         let _list_guard = Arc::clone(&round.scope.incoming).read_owned().await;
+        lock_wait.acquired();
         let membership = round.scope.membership_revision.load(Ordering::Acquire);
         let key = (read_mail, maximum_pages, membership);
         let cell = {

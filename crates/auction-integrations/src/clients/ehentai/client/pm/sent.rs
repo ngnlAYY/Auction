@@ -23,6 +23,7 @@ impl EhentaiClient {
         message: &ForumPmMessage,
         sender: &str,
         cookie: &EhentaiCookie,
+        metrics_world: auction_application::ForumWorld,
     ) -> Result<Option<ForumPmReceipt>, ForumPmError> {
         let initial = self.pm_url(&[("act", "Msg"), ("CODE", "01"), ("VID", "sent")])?;
         let (initial, _) = read_link(&initial, initial.as_str(), &["act", "CODE", "VID"])?;
@@ -31,7 +32,15 @@ impl EhentaiClient {
         let mut candidates: BTreeMap<String, Candidate> = BTreeMap::new();
         let mut total_bytes = 0_usize;
         while let Some(target) = pages.pop_front() {
-            let source = self.scan_get(target.clone(), cookie, total_bytes).await?;
+            let source = self
+                .scan_get(
+                    target.clone(),
+                    cookie,
+                    total_bytes,
+                    metrics_world,
+                    auction_application::ForumOperation::PmSentList,
+                )
+                .await?;
             add_bytes(&mut total_bytes, source.len())?;
             let page = parse_list(&source, &target, message, sender)?;
             for next in page.pages {
@@ -63,7 +72,15 @@ impl EhentaiClient {
             if candidate.recipient != message.recipient_forum_account_id {
                 return Err(ForumPmError::Protocol);
             }
-            let source = self.scan_get(candidate.target.clone(), cookie, total_bytes).await?;
+            let source = self
+                .scan_get(
+                    candidate.target.clone(),
+                    cookie,
+                    total_bytes,
+                    metrics_world,
+                    auction_application::ForumOperation::PmSentDetail,
+                )
+                .await?;
             add_bytes(&mut total_bytes, source.len())?;
             verify_detail(&source, &candidate.target, message, sender)?;
             if receipt.is_some() {
@@ -84,6 +101,8 @@ impl EhentaiClient {
         target: Url,
         cookie: &EhentaiCookie,
         consumed: usize,
+        metrics_world: auction_application::ForumWorld,
+        metrics_operation: auction_application::ForumOperation,
     ) -> Result<String, ForumPmError> {
         let remaining = MAXIMUM_SCAN_BYTES
             .checked_sub(consumed)
@@ -92,7 +111,7 @@ impl EhentaiClient {
         // 读取前收紧流式字节门禁，避免最后一页仍按完整单页上限消费聚合预算。
         let mut reader = self.clone();
         reader.maximum_response_bytes = self.maximum_response_bytes.min(remaining);
-        reader.pm_get(target, cookie).await
+        reader.pm_get(target, cookie, metrics_world, metrics_operation).await
     }
 }
 

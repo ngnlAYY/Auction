@@ -33,6 +33,7 @@
 | [`crates/auction-application/src/ports/lot_watch_pm/`](src/ports/lot_watch_pm) | 装备超价提醒私信的独立队列与人工对账 |
 | [`crates/auction-application/src/ports/realtime/`](src/ports/realtime) | Public 回放、Worker 消费、Admin 运维 |
 | [`crates/auction-application/src/ports/operations/`](src/ports/operations) | 运维告警、进程 readiness、Worker control 状态 |
+| [external_metrics](src/ports/external_metrics) | 外部客户端观测闭集与 no-op |
 
 ### 主要服务
 
@@ -50,6 +51,20 @@
 | Admin 系列服务 | 凭据、用户、规则、runtime 配置、录入、世界、排期等后台命令 |
 | `SettlementEquipmentLossPort` | 显式人工装备损失 preview/resolve；稳定命令绑定 actor/reason、UID、recovery/payment/delivery 版本和冻结卖家金额，安全投影不输出原载荷；外部买方补偿声明不等于完成回执，详见[数据库契约](../../docs/contracts/database.md#结算资金恢复与投递) |
 | `DeliverySentConfirmationPort` | 正式 CLI 的人工 Sent preview/confirm；v1 观察绑定冻结正文摘要、身份、分钟时窗、金额与实际资产，已收取资产和旧尝试歧义分别显式接受；独立 operator proof 只恢复正常对账，详见[数据库契约](../../docs/contracts/database.md#结算资金恢复与投递) |
+
+## 外部客户端观测
+
+`ExternalMetricsObserver` 是同步、无 I/O 的窄端口；指标实现由 `auction-observability`
+提供，关闭 metrics 或非 Worker 角色使用 no-op。事件只含编译期闭集 label 与调用点
+已有的时长/页数，不含玩家名、MID、主题/帖子 ID、URL、正文、错误原文或凭据。
+记录不改变请求间隔、锁顺序、deadline、重试、取消、写入围栏或未知结果处理。
+不同层（客户端、Worker、HTTP、数据库）的计数不能相加当作“总失败”。
+
+论坛回帖端口增加两项只读投影：`ForumCommandStart.is_new` 表示本次事务是否首次
+插入命令账本（`pending` 重试与已完成命令重放为 false）；`ForumReplyTopic.reply_phase`
+来自领取时已连接的拍卖状态，仅用于指标分桶，不参与命令裁决，也不进入浏览器 DTO。
+导入延迟终点是每个回帖第一条新命令账本提交得到确认，不是竞价最终接受。
+完整指标契约见[可观测性](../auction-observability/README.md#外部账号客户端指标w04w05)。
 
 ## 横切约定
 

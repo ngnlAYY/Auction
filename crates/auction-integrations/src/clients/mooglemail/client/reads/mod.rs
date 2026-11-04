@@ -2,6 +2,7 @@
 
 use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
 
+use crate::clients::metrics::MailLockWaitGuard;
 use crate::diagnostics as safe_diagnostics;
 
 use std::{
@@ -442,7 +443,14 @@ impl MoogleMailClient {
         world: MoogleMailWorld,
     ) -> Result<IncomingDetailGuard, MoogleMailError> {
         let (_, scope) = self.read_scope(cookie, world)?;
+        let lock_wait = MailLockWaitGuard::start(
+            Arc::clone(&self.external_metrics),
+            world,
+            MoogleMailOperation::Detail,
+            auction_application::MailLock::IncomingWrite,
+        );
         let guard = Arc::clone(&scope.incoming).write_owned().await;
+        lock_wait.acquired();
         scope.membership_revision.fetch_add(1, Ordering::AcqRel);
         Ok(IncomingDetailGuard { scope, _guard: guard })
     }

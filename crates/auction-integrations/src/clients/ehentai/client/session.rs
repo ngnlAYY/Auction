@@ -14,7 +14,15 @@ impl EhentaiClient {
             return Err(EhentaiError::credential(operation));
         }
         let target = self.index_url(&[("act", "UserCP"), ("CODE", "00")], operation)?;
-        let (body, _) = self.get_page(operation, target.clone(), None, cookie).await?;
+        let (body, _) = self
+            .get_page(
+                operation,
+                auction_application::ForumOperation::CheckSession,
+                ForumRequestScope::new(auction_application::ForumWorld::Shared, cookie),
+                target.clone(),
+                None,
+            )
+            .await?;
         let source = std::str::from_utf8(&body).map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
                 "forum_session",

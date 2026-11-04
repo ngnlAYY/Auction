@@ -25,6 +25,22 @@ impl MoogleMailSender {
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
     ) -> Result<MoogleMailSentBaseline, MoogleMailError> {
+        let result = self.prepare_sent_baseline_inner(cookie, world).await;
+        if let Err(error) = &result {
+            self.observe_budget_error(
+                world,
+                auction_application::MailPhase::SentBaselineBefore,
+                error,
+            );
+        }
+        result
+    }
+
+    async fn prepare_sent_baseline_inner(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+    ) -> Result<MoogleMailSentBaseline, MoogleMailError> {
         let deadline = Instant::now()
             .checked_add(self.verification_budget)
             .ok_or_else(|| scan_timeout(world))?;

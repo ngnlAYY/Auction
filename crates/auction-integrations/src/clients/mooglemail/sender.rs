@@ -116,6 +116,40 @@ struct CachedSentBaseline {
 }
 
 impl MoogleMailSender {
+    /// 记录扫描预算实际耗尽；只读同步指标，不改变截止点或重试。
+    pub(super) fn observe_budget(
+        &self,
+        world: MoogleMailWorld,
+        phase: auction_application::MailPhase,
+        budget: auction_application::MailBudget,
+    ) {
+        self.client.external_metrics().observe(
+            auction_application::ExternalMetricsEvent::MailBudgetExhausted {
+                world: crate::clients::metrics::mail_world(world),
+                phase,
+                budget,
+            },
+        );
+    }
+
+    /// 从既有扫描错误闭集映射预算耗尽类别，不把普通读取失败算成预算。
+    pub(super) fn observe_budget_error(
+        &self,
+        world: MoogleMailWorld,
+        phase: auction_application::MailPhase,
+        error: &MoogleMailError,
+    ) {
+        match error.category {
+            MoogleMailErrorCategory::SentScanTimeout => {
+                self.observe_budget(world, phase, auction_application::MailBudget::Time);
+            }
+            MoogleMailErrorCategory::SentScanPageLimit => {
+                self.observe_budget(world, phase, auction_application::MailBudget::Pages);
+            }
+            _ => {}
+        }
+    }
+
     /// 使用共享 MoogleMail client 构造发送编排器。
     pub fn new(client: MoogleMailClient) -> Self {
         Self {

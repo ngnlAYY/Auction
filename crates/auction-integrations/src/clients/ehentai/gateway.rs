@@ -2,6 +2,9 @@
 
 use auction_application::diagnostics::DiagnosticContext;
 
+use crate::clients::metrics::{
+    ForumPmOperationGuard, ForumWriteUnknownGuard, forum_pm_category, forum_world,
+};
 use crate::diagnostics as safe_diagnostics;
 
 use super::*;
@@ -32,8 +35,15 @@ impl EhentaiGateway {
         progress: auction_application::ForumWriteProgress,
     ) -> Result<auction_application::ForumTopicPublication, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
+        let metrics_world = forum_world(world);
+        let write_unknown = ForumWriteUnknownGuard::start(
+            self.client.external_metrics(),
+            metrics_world,
+            auction_application::ForumOperation::CreateTopic,
+            progress.clone(),
+        );
         let client = self.client.as_ref().clone().with_write_progress(progress);
-        match client.create_topic(world, session.cookie(), rendered).await {
+        let result = match client.create_topic(world, session.cookie(), rendered).await {
             Err(error) if error.is_session_expired() => {
                 let _ = session.invalidate_current().await;
                 Err(EhentaiError::credential(EhentaiOperation::CreateTopic))
@@ -43,7 +53,9 @@ impl EhentaiGateway {
                 Err(error)
             }
             result => result,
-        }
+        };
+        write_unknown.finish(&result);
+        result
     }
 
     /// 只读按有界精确标题集合查找唯一主题；会话失效后停止，不切换 Cookie。
@@ -91,8 +103,15 @@ impl EhentaiGateway {
         progress: auction_application::ForumWriteProgress,
     ) -> Result<ForumPublishedPost, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
+        let metrics_world = forum_world(world);
+        let write_unknown = ForumWriteUnknownGuard::start(
+            self.client.external_metrics(),
+            metrics_world,
+            auction_application::ForumOperation::ReplyTopic,
+            progress.clone(),
+        );
         let client = self.client.as_ref().clone().with_write_progress(progress);
-        match client.reply_topic(world, thread_id, body, session.cookie()).await {
+        let result = match client.reply_topic(world, thread_id, body, session.cookie()).await {
             Err(error) if error.is_session_expired() => {
                 let _ = session.invalidate_current().await;
                 Err(EhentaiError::credential(EhentaiOperation::ReplyTopic))
@@ -102,7 +121,9 @@ impl EhentaiGateway {
                 Err(error)
             }
             result => result,
-        }
+        };
+        write_unknown.finish(&result);
+        result
     }
 
     /// 编辑固定目录页或系统日志；POST 开始后绝不切换 Cookie 重发。
@@ -116,8 +137,18 @@ impl EhentaiGateway {
         progress: auction_application::ForumWriteProgress,
     ) -> Result<ForumPublishedPost, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
+        let metrics_world = forum_world(world);
+        let write_unknown = ForumWriteUnknownGuard::start(
+            self.client.external_metrics(),
+            metrics_world,
+            auction_application::ForumOperation::EditPost,
+            progress.clone(),
+        );
         let client = self.client.as_ref().clone().with_write_progress(progress);
-        match client.edit_post(world, thread_id, post_id, metadata, body, session.cookie()).await {
+        let result = match client
+            .edit_post(world, thread_id, post_id, metadata, body, session.cookie())
+            .await
+        {
             Err(error) if error.is_session_expired() => {
                 let _ = session.invalidate_current().await;
                 Err(EhentaiError::credential(EhentaiOperation::EditPost))
@@ -127,7 +158,9 @@ impl EhentaiGateway {
                 Err(error)
             }
             result => result,
-        }
+        };
+        write_unknown.finish(&result);
+        result
     }
 
     /// 只读回读固定楼层原始 BBCode 与首帖元数据；明确失效后返回凭据不可用。
@@ -176,6 +209,12 @@ impl auction_application::ForumTargetProfileReader for EhentaiGateway {
             })
             .await
             .map_err(|diagnostic_cause| {
+                self.client.external_metrics().observe(
+                    auction_application::ExternalMetricsEvent::ForumBudgetExhausted {
+                        world: auction_application::ForumWorld::Shared,
+                        phase: auction_application::ForumBudgetPhase::Profile,
+                    },
+                );
                 safe_diagnostics::warn(
                     "forum_profile",
                     "read_profile_timeout",
@@ -195,16 +234,39 @@ impl auction_application::ForumPmSender for EhentaiGateway {
         message: &'a auction_application::ForumPmMessage,
     ) -> auction_application::ForumPmFuture<'a, Box<dyn auction_application::PreparedForumPm>> {
         Box::pin(async move {
-            let session = self.credentials.begin(Some(world)).map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "forum_pm",
-                    "acquire_send_session",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                auction_application::ForumPmError::Unavailable
-            })?;
-            self.client.prepare_pm(message, session).await
+            let metrics_world = forum_world(world);
+            let operation = ForumPmOperationGuard::start(
+                self.client.external_metrics(),
+                metrics_world,
+                auction_application::ForumPmPhase::Prepare,
+                false,
+            );
+            let session = match self.credentials.begin(Some(world)) {
+                Ok(session) => session,
+                Err(diagnostic_cause) => {
+                    safe_diagnostics::warn(
+                        "forum_pm",
+                        "acquire_send_session",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    operation.finish(
+                        auction_application::ForumPmOutcome::Error,
+                        auction_application::ForumPmCategory::Unavailable,
+                    );
+                    return Err(auction_application::ForumPmError::Unavailable);
+                }
+            };
+            let result = self.client.prepare_pm(message, session, metrics_world).await;
+            match &result {
+                Ok(_) => operation.finish(
+                    auction_application::ForumPmOutcome::Prepared,
+                    auction_application::ForumPmCategory::None,
+                ),
+                Err(error) => operation
+                    .finish(auction_application::ForumPmOutcome::Error, forum_pm_category(*error)),
+            }
+            result
         })
     }
 
@@ -215,16 +277,46 @@ impl auction_application::ForumPmSender for EhentaiGateway {
         sender_forum_account_id: &'a str,
     ) -> auction_application::ForumPmFuture<'a, Option<auction_application::ForumPmReceipt>> {
         Box::pin(async move {
-            let session = self.credentials.begin(Some(world)).map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "forum_pm",
-                    "acquire_reconcile_session",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                auction_application::ForumPmError::Unavailable
-            })?;
-            self.client.reconcile_pm(message, sender_forum_account_id, session).await
+            let metrics_world = forum_world(world);
+            let operation = ForumPmOperationGuard::start(
+                self.client.external_metrics(),
+                metrics_world,
+                auction_application::ForumPmPhase::Reconcile,
+                false,
+            );
+            let session = match self.credentials.begin(Some(world)) {
+                Ok(session) => session,
+                Err(diagnostic_cause) => {
+                    safe_diagnostics::warn(
+                        "forum_pm",
+                        "acquire_reconcile_session",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    operation.finish(
+                        auction_application::ForumPmOutcome::Error,
+                        auction_application::ForumPmCategory::Unavailable,
+                    );
+                    return Err(auction_application::ForumPmError::Unavailable);
+                }
+            };
+            let result = self
+                .client
+                .reconcile_pm(message, sender_forum_account_id, session, metrics_world)
+                .await;
+            match &result {
+                Ok(Some(_)) => operation.finish(
+                    auction_application::ForumPmOutcome::Proved,
+                    auction_application::ForumPmCategory::None,
+                ),
+                Ok(None) => operation.finish(
+                    auction_application::ForumPmOutcome::NotObserved,
+                    auction_application::ForumPmCategory::None,
+                ),
+                Err(error) => operation
+                    .finish(auction_application::ForumPmOutcome::Error, forum_pm_category(*error)),
+            }
+            result
         })
     }
 }

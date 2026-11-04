@@ -79,6 +79,15 @@ pub(super) async fn process_command(
             return Err(error);
         }
     };
+    if start.is_new {
+        runtime.reply_delay.observe_import(
+            topic.auction_id,
+            topic.world,
+            topic.reply_phase,
+            post_id,
+            std::time::Instant::now(),
+        );
+    }
     let command_id = start.command_id;
     if !start.should_run {
         // 竞价命令已经完成时仍需重放安全的应用命令，以便恢复此前入账但通知失败的场景。

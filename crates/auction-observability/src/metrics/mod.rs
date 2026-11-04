@@ -4,6 +4,7 @@ mod audit;
 mod business;
 mod database;
 pub use database::*;
+mod external_client;
 mod http;
 mod migration;
 mod pool;

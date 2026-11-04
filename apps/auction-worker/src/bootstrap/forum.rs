@@ -8,6 +8,7 @@ pub(super) async fn configure_forum(
     config: &AppConfig,
     store: Arc<DatabaseStore>,
     delivery_enabled: bool,
+    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
 ) -> anyhow::Result<(
     Option<auction_jobs::ForumSyncRuntime>,
     Option<auction_jobs::ForumReplyRuntime>,
@@ -109,7 +110,8 @@ pub(super) async fn configure_forum(
             main_board_id: forum_config.main_board_id,
             isekai_board_id: forum_config.isekai_board_id,
         })
-        .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+        .map_err(|error| anyhow::Error::msg(error.to_string()))?
+        .with_external_metrics(Arc::clone(&external_metrics)),
     );
     let gateway = Arc::new(
         EhentaiGateway::new(Arc::clone(&client), credentials)
@@ -172,7 +174,8 @@ pub(super) async fn configure_forum(
             std::time::Duration::from_secs(forum_config.item_timeout_seconds),
             forum_config.public_base_url.clone(),
         )?
-        .with_post_body_verification(forum_config.verify_post_body),
+        .with_post_body_verification(forum_config.verify_post_body)
+        .with_external_metrics(Arc::clone(&external_metrics)),
     );
     // PM 复用同一网关、限速及凭据 ownership，与 MM enabled 无关。
     let pm = auction_jobs::LotWatchPmRuntime::new(
@@ -183,6 +186,7 @@ pub(super) async fn configure_forum(
         std::time::Duration::from_secs(forum_config.item_timeout_seconds),
         std::time::Duration::from_secs(forum_config.lease_duration_seconds),
     )
-    .map_err(anyhow::Error::msg)?;
+    .map_err(anyhow::Error::msg)?
+    .with_external_metrics(external_metrics);
     Ok((sync, reply, Some(pm), Some(gateway), runtime_ownership))
 }

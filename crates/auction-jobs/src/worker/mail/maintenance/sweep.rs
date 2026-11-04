@@ -48,6 +48,10 @@ pub(in crate::worker::runtime::mail_poll) async fn run_maintenance(
             }
         }
         Err(error) => {
+            runtime.observe_budget(
+                auction_application::MailPhase::Maintenance,
+                auction_application::MailBudget::Time,
+            );
             diagnostics::unpersisted_error(
                 "mail_maintenance",
                 "sweep_timeout",
@@ -61,6 +65,10 @@ pub(in crate::worker::runtime::mail_poll) async fn run_maintenance(
             WorkerResult::Error
         }
         Ok(Err(error)) if tokio::time::Instant::now() >= deadline => {
+            runtime.observe_budget(
+                auction_application::MailPhase::Maintenance,
+                auction_application::MailBudget::Time,
+            );
             diagnostics::unpersisted_error(
                 "mail_maintenance",
                 "sweep_deadline",

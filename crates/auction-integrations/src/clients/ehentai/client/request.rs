@@ -2,6 +2,7 @@
 
 use auction_application::diagnostics::DiagnosticContext;
 
+use crate::clients::metrics::{ForumGateWaitGuard, ForumRequestGuard, forum_result, forum_signal};
 use crate::diagnostics as safe_diagnostics;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,22 +13,25 @@ impl EhentaiClient {
     pub(super) async fn get_page(
         &self,
         operation: EhentaiOperation,
+        metrics_operation: auction_application::ForumOperation,
+        scope: ForumRequestScope<'_>,
         target: Url,
         referer: Option<&Url>,
-        cookie: &EhentaiCookie,
     ) -> Result<(Vec<u8>, StatusCode), EhentaiError> {
-        self.get_page_with_budget(operation, target, referer, cookie, None).await
+        self.get_page_with_budget(operation, metrics_operation, scope, target, referer, None).await
     }
 
     pub(super) async fn get_page_with_budget(
         &self,
         operation: EhentaiOperation,
+        metrics_operation: auction_application::ForumOperation,
+        scope: ForumRequestScope<'_>,
         target: Url,
         referer: Option<&Url>,
-        cookie: &EhentaiCookie,
         budget: Option<&AtomicUsize>,
     ) -> Result<(Vec<u8>, StatusCode), EhentaiError> {
-        self.wait_rate(operation).await?;
+        let ForumRequestScope { metrics_world, cookie } = scope;
+        self.wait_rate(operation, metrics_world, metrics_operation).await?;
         let mut request = self
             .client
             .get(target)
@@ -48,65 +52,109 @@ impl EhentaiClient {
         if budget.is_some_and(|budget| budget.load(Ordering::Relaxed) == 0) {
             return Err(EhentaiError::response_too_large(operation));
         }
-        let response =
-            request.timeout(self.request_timeout).send().await.map_err(|diagnostic_cause| {
+        let request_metrics = ForumRequestGuard::start(
+            std::sync::Arc::clone(&self.external_metrics),
+            metrics_world,
+            metrics_operation,
+        );
+        let result = async {
+            let response =
+                request.timeout(self.request_timeout).send().await.map_err(|diagnostic_cause| {
+                    if diagnostic_cause.is_timeout() {
+                        forum_signal(
+                            self.external_metrics.as_ref(),
+                            metrics_world,
+                            metrics_operation,
+                            auction_application::ForumSignal::Timeout,
+                        );
+                    }
+                    safe_diagnostics::warn(
+                        "forum_topic",
+                        "fetch_page",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    EhentaiError::remote_temporary(operation, false)
+                })?;
+            let status = response.status();
+            let location = response.headers().get(header::LOCATION).cloned();
+            let mut body = SensitiveResponseBody(
+                self.read_response_with_budget(
+                    response,
+                    operation,
+                    metrics_world,
+                    metrics_operation,
+                    false,
+                    budget,
+                )
+                .await?,
+            );
+            if is_session_expired(status, location.as_ref(), &body.0) {
+                return Err(EhentaiError::session_expired(operation));
+            }
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                forum_signal(
+                    self.external_metrics.as_ref(),
+                    metrics_world,
+                    metrics_operation,
+                    auction_application::ForumSignal::RateLimited,
+                );
+                return Err(EhentaiError::rate_limited(operation, false));
+            }
+            if status.is_server_error() {
+                return Err(EhentaiError::remote_temporary(operation, false));
+            }
+            if status == StatusCode::FORBIDDEN {
+                return Err(classify_forbidden(operation, &body.0));
+            }
+            if !status.is_success() {
+                return Err(EhentaiError::protocol(operation, false));
+            }
+            if location.is_some() || !body_looks_like_html(&body.0) {
+                return Err(EhentaiError::protocol(operation, false));
+            }
+            // 等待正文时 owner 可能已失效；只有完成复核的原 session 才能交付本次读取。
+            self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
                 safe_diagnostics::warn(
                     "forum_topic",
-                    "fetch_page",
+                    "check_receipt_owner",
                     safe_diagnostics::project(&diagnostic_cause),
                     DiagnosticContext::default(),
                 );
-                EhentaiError::remote_temporary(operation, false)
+                EhentaiError::credential(operation)
             })?;
-        let status = response.status();
-        let location = response.headers().get(header::LOCATION).cloned();
-        let mut body = SensitiveResponseBody(
-            self.read_response_with_budget(response, operation, false, budget).await?,
-        );
-        if is_session_expired(status, location.as_ref(), &body.0) {
-            return Err(EhentaiError::session_expired(operation));
+            Ok((std::mem::take(&mut body.0), status))
         }
-        if status == StatusCode::TOO_MANY_REQUESTS {
-            return Err(EhentaiError::rate_limited(operation, false));
-        }
-        if status.is_server_error() {
-            return Err(EhentaiError::remote_temporary(operation, false));
-        }
-        if status == StatusCode::FORBIDDEN {
-            return Err(classify_forbidden(operation, &body.0));
-        }
-        if !status.is_success() {
-            return Err(EhentaiError::protocol(operation, false));
-        }
-        if location.is_some() || !body_looks_like_html(&body.0) {
-            return Err(EhentaiError::protocol(operation, false));
-        }
-        // 等待正文时 owner 可能已失效；只有完成复核的原 session 才能交付本次读取。
-        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "check_receipt_owner",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::credential(operation)
-        })?;
-        Ok((std::mem::take(&mut body.0), status))
+        .await;
+        request_metrics.finish(forum_result(&result));
+        result
     }
 
     pub(super) async fn read_response(
         &self,
         response: Response,
         operation: EhentaiOperation,
+        metrics_world: auction_application::ForumWorld,
+        metrics_operation: auction_application::ForumOperation,
         write_started: bool,
     ) -> Result<Vec<u8>, EhentaiError> {
-        self.read_response_with_budget(response, operation, write_started, None).await
+        self.read_response_with_budget(
+            response,
+            operation,
+            metrics_world,
+            metrics_operation,
+            write_started,
+            None,
+        )
+        .await
     }
 
     async fn read_response_with_budget(
         &self,
         mut response: Response,
         operation: EhentaiOperation,
+        metrics_world: auction_application::ForumWorld,
+        metrics_operation: auction_application::ForumOperation,
         write_started: bool,
         budget: Option<&AtomicUsize>,
     ) -> Result<Vec<u8>, EhentaiError> {
@@ -128,6 +176,14 @@ impl EhentaiClient {
             .min(self.maximum_response_bytes);
         let mut body = SensitiveResponseBody(Vec::with_capacity(capacity));
         while let Some(chunk) = response.chunk().await.map_err(|diagnostic_cause| {
+            if diagnostic_cause.is_timeout() {
+                forum_signal(
+                    self.external_metrics.as_ref(),
+                    metrics_world,
+                    metrics_operation,
+                    auction_application::ForumSignal::Timeout,
+                );
+            }
             safe_diagnostics::warn(
                 "forum_topic",
                 "read_response",
@@ -237,13 +293,24 @@ impl EhentaiClient {
             && !self.request_timeout.is_zero()
     }
 
-    pub(super) async fn wait_rate(&self, operation: EhentaiOperation) -> Result<(), EhentaiError> {
+    pub(super) async fn wait_rate(
+        &self,
+        operation: EhentaiOperation,
+        metrics_world: auction_application::ForumWorld,
+        metrics_operation: auction_application::ForumOperation,
+    ) -> Result<(), EhentaiError> {
+        let gate_wait = ForumGateWaitGuard::start(
+            std::sync::Arc::clone(&self.external_metrics),
+            metrics_world,
+            metrics_operation,
+        );
         // 等待期间持有异步锁；取消尚未获准的请求不能预占后续时间槽。
         let mut next = self.gate.lock().await;
         let wait = next.saturating_duration_since(Instant::now());
         if !wait.is_zero() {
             tokio::time::sleep(wait).await;
         }
+        gate_wait.finish(auction_application::WaitOutcome::Acquired);
         let Some(next_deadline) = Instant::now().checked_add(self.minimum_request_interval) else {
             // 限速截止时间不可表示时不能继续发起外部请求，交给 Worker 安全退避。
             return Err(EhentaiError::remote_temporary(operation, false));

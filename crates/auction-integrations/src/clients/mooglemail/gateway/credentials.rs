@@ -2,6 +2,7 @@
 
 use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
 
+use crate::clients::metrics::MailLockWaitGuard;
 use crate::diagnostics as safe_diagnostics;
 
 use std::sync::{Arc, Mutex};
@@ -42,6 +43,7 @@ pub struct MoogleMailCredentialSet {
     candidates: Arc<Mutex<Vec<MoogleMailCredentialCandidate>>>,
     invalidator: Option<Arc<dyn AdminCredentialRuntimeWriter>>,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
+    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
 }
 
 impl MoogleMailCredentialSet {
@@ -209,7 +211,21 @@ impl MoogleMailCredentialSet {
                 false,
             ));
         }
-        Ok(Self { candidates: Arc::new(Mutex::new(candidates)), invalidator, ownership })
+        Ok(Self {
+            candidates: Arc::new(Mutex::new(candidates)),
+            invalidator,
+            ownership,
+            external_metrics: auction_application::noop_external_metrics_observer(),
+        })
+    }
+
+    /// 注入排他锁等待指标；指标失败不改变锁顺序或凭据选择。
+    pub fn with_external_metrics(
+        mut self,
+        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+    ) -> Self {
+        self.external_metrics = observer;
+        self
     }
 
     /// 同 session 复用入口只能使用原集合，防止把另一 owner 的 HTTP client 配到此 Cookie。
@@ -251,7 +267,14 @@ impl MoogleMailCredentialSet {
         operation: MoogleMailOperation,
     ) -> Result<MoogleMailCredentialSession, MoogleMailError> {
         let current = self.current_candidate(world, operation)?;
+        let lock_wait = MailLockWaitGuard::start(
+            Arc::clone(&self.external_metrics),
+            world,
+            operation,
+            auction_application::MailLock::Exclusive,
+        );
         let operation_guard = Arc::clone(&current.operation_lock).lock_owned().await;
+        lock_wait.acquired();
         // 集合最多一条凭据且只会撤销；等待期间失效必须失败，不能重获或换号。
         if !self.candidate_is_active(current.key, world, operation)? {
             return Err(operation_error(

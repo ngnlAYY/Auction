@@ -21,6 +21,7 @@ pub struct LotWatchPmRuntime {
     item_timeout: Duration,
     lease_seconds: i64,
     metrics: Arc<dyn auction_observability::WorkerRecorder>,
+    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
     write_lifecycle: auction_application::ExternalWriteLifecycle,
 }
 
@@ -52,6 +53,7 @@ impl LotWatchPmRuntime {
             item_timeout,
             lease_seconds: lease_seconds as i64,
             metrics: auction_observability::noop_worker_recorder(),
+            external_metrics: auction_application::noop_external_metrics_observer(),
             write_lifecycle: auction_application::ExternalWriteLifecycle::default(),
         })
     }
@@ -63,6 +65,30 @@ impl LotWatchPmRuntime {
     ) -> Self {
         self.write_lifecycle = lifecycle;
         self
+    }
+
+    /// 注入同步外部客户端指标；关闭 metrics 时为 no-op。
+    pub fn with_external_metrics(
+        mut self,
+        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+    ) -> Self {
+        self.external_metrics = observer;
+        self
+    }
+
+    /// 记录 PM 单项总预算耗尽；只读同步计数，不改变持久 fence。
+    pub(crate) fn observe_budget(
+        &self,
+        world: auction_domain::SettlementWorld,
+        phase: auction_application::ForumBudgetPhase,
+    ) {
+        let world = match world {
+            auction_domain::SettlementWorld::Main => auction_application::ForumWorld::Main,
+            auction_domain::SettlementWorld::Isekai => auction_application::ForumWorld::Isekai,
+        };
+        self.external_metrics.observe(
+            auction_application::ExternalMetricsEvent::ForumBudgetExhausted { world, phase },
+        );
     }
 
     /// 注入同一进程 recorder；PM 使用 Forum 闭集，不新增标签。
@@ -99,12 +125,20 @@ impl LotWatchPmRuntime {
                         available_worlds,
                     };
                     let deadline = tokio::time::Instant::now() + self.item_timeout;
+                    let claimed_world = std::sync::Arc::new(std::sync::Mutex::new(None));
                     let activity = self
                         .write_lifecycle
                         .activity(auction_application::CriticalWriteKind::ForumPm);
                     let operation = tokio::time::timeout_at(
                         deadline,
-                        delivery::process(&self, request, &drain, deadline, &activity),
+                        delivery::process(
+                            &self,
+                            request,
+                            &drain,
+                            deadline,
+                            &activity,
+                            &claimed_world,
+                        ),
                     );
                     let Some(result) = activity.run(operation).await else {
                         return;
@@ -120,6 +154,16 @@ impl LotWatchPmRuntime {
                             );
                         }
                         Err(error) => {
+                            let world = match claimed_world.lock() {
+                                Ok(guard) => *guard,
+                                Err(poisoned) => *poisoned.into_inner(),
+                            };
+                            if let Some(world) = world {
+                                self.observe_budget(
+                                    world,
+                                    auction_application::ForumBudgetPhase::PmItem,
+                                );
+                            }
                             diagnostics::unpersisted_error(
                                 "forum_pm",
                                 "deliver_notifications_timeout",

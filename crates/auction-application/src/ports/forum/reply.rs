@@ -14,11 +14,32 @@ use super::{
     ForumRenderedThread,
 };
 
+/// 领取主题时观察到的拍卖阶段；跨阶段样本不能作为严格 Final SLA 证明。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForumReplyPhase {
+    Normal,
+    Final,
+    Unknown,
+}
+
+impl ForumReplyPhase {
+    /// 只映射领取时刻已连接的拍卖状态，不新增查询。
+    pub const fn from_auction_status(status: &str) -> Self {
+        match status.as_bytes() {
+            b"live" => Self::Normal,
+            b"final" => Self::Final,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 /// 已发布论坛主题的最小扫描目标。
 #[derive(Clone, PartialEq, Eq)]
 pub struct ForumReplyTopic {
     pub auction_id: AuctionId,
     pub world: SettlementWorld,
+    /// 领取时观察到的拍卖阶段；只用于指标分桶，不参与命令裁决。
+    pub reply_phase: ForumReplyPhase,
     pub thread_id: String,
     pub catalog_post_id: String,
     pub catalog_layout: super::ForumCatalogLayout,
@@ -48,6 +69,7 @@ impl fmt::Debug for ForumReplyTopic {
             .debug_struct("ForumReplyTopic")
             .field("auction_id", &self.auction_id)
             .field("world", &self.world)
+            .field("reply_phase", &self.reply_phase)
             .field("thread_id", &self.thread_id)
             .field("catalog_post_id", &self.catalog_post_id)
             .field("catalog_layout", &self.catalog_layout)
@@ -165,6 +187,8 @@ pub struct ForumCommandStart {
     pub command_id: Uuid,
     pub status: ForumCommandStatus,
     pub should_run: bool,
+    /// 本次事务首次插入账本时为 true；pending 重试与已完成命令重放均为 false。
+    pub is_new: bool,
 }
 
 pub trait ForumReplyStore: Send + Sync {

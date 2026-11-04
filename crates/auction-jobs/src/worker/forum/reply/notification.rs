@@ -67,6 +67,15 @@ pub(super) async fn process_notification(
             return Err(error);
         }
     };
+    if start.is_new {
+        runtime.reply_delay.observe_import(
+            topic.auction_id,
+            topic.world,
+            topic.reply_phase,
+            post_id,
+            std::time::Instant::now(),
+        );
+    }
     let command_id = start.command_id;
     if !start.should_run {
         return Ok(());
