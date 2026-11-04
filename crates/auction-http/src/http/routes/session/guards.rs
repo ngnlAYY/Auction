@@ -99,7 +99,7 @@ pub(crate) fn admin_session_guard(
     None
 }
 
-fn rate_limited_response(retry_after: u64) -> Response {
+pub(crate) fn rate_limited_response(retry_after: u64) -> Response {
     let mut response_headers = HeaderMap::new();
     if let Ok(value) = HeaderValue::from_str(&retry_after.max(1).to_string()) {
         response_headers.insert(header::RETRY_AFTER, value);

@@ -14,7 +14,7 @@ test:
 
 # 显式运行 PostgreSQL 18 测试；设置 AUCTION_TEST_DATABASE_URL 时复用该服务器，否则用本机 PG18 二进制启动并清理临时集群。
 test-db:
-    @cargo test --locked -p auction-storage --features test-db --tests -- postgres_
+    @cargo test --locked -p auction-storage --features test-db --test postgres -- postgres_
 
 # 只检查 rustfmt 格式，不写文件。
 fmt:

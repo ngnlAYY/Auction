@@ -15,6 +15,7 @@ use super::intent::{
 };
 use super::model::SettlementDeliveryIntent;
 use super::proof::proof_digest;
+use super::schedule::{collection_poll_delay, evidence_poll_delay};
 use super::validation::{repository_error, valid_external_mail_id, validate_claim};
 use crate::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, diagnostic_id, record_error,
@@ -357,6 +358,14 @@ impl SettlementFulfillmentService {
             return Err(repository_error("当前履约阶段不允许读取发送回执"));
         }
         let retry_delay = retry_at - observed_at;
+        // 证据等待按该义务已持久化的延期次数指数退避，最多 10 分钟；
+        // 付款截止前后恢复基础间隔。依赖与身份错误仍按配置间隔重试，不进入退避。
+        let evidence_delay = evidence_poll_delay(
+            retry_delay,
+            claim.retry_count,
+            claim.payment_deadline_at,
+            observed_at,
+        );
         let Some(delivery_id) = claim.delivery_id else {
             return Err(repository_error("发送回执缺少 delivery identity"));
         };
@@ -431,11 +440,13 @@ impl SettlementFulfillmentService {
             | SettlementFulfillmentDeliveryStatus::Claimed
             | SettlementFulfillmentDeliveryStatus::Sending => {
                 // 发送与履约是独立循环；先释放本阶段 claim，再以同一事务写入追踪时间。
-                // COD/货款沿用共享窗口，其余装备寄送保持普通重试间隔。
-                let poll_delay = self
-                    .collection_next_poll(&claim, observed_at)
-                    .map(|next| next - observed_at)
-                    .unwrap_or(retry_delay);
+                // COD/货款沿用共享窗口，其余装备寄送按证据年龄退避；付款截止前后收窄到基础间隔。
+                let poll_delay = collection_poll_delay(
+                    self.collection_next_poll(&claim, observed_at),
+                    observed_at,
+                    evidence_delay,
+                    claim.payment_deadline_at,
+                );
                 record_error(
                     DiagnosticLevel::Info,
                     SafeErrorKind::EVIDENCE_NOT_OBSERVED,
@@ -513,7 +524,7 @@ impl SettlementFulfillmentService {
                     .defer_now(
                         claim,
                         delivery_id,
-                        retry_delay,
+                        evidence_delay,
                         "evidence_not_observed",
                         "MoogleMail Sent 暂未观察到目标邮件",
                     )
@@ -565,11 +576,14 @@ impl SettlementFulfillmentService {
                     ..Default::default()
                 },
             );
-            // 买家支付 COD、卖家领取货款都只能等对方在游戏内操作；统一对到下一个窗口。
-            let poll_delay = self
-                .collection_next_poll(&claim, observed_at)
-                .map(|next| next - observed_at)
-                .unwrap_or(retry_delay);
+            // 买家支付 COD、卖家领取货款都只能等对方在游戏内操作；统一对到下一个窗口，
+            // 付款截止前后收窄到基础间隔，其余装备寄送按证据年龄退避。
+            let poll_delay = collection_poll_delay(
+                self.collection_next_poll(&claim, observed_at),
+                observed_at,
+                evidence_delay,
+                claim.payment_deadline_at,
+            );
             return self
                 .defer_now(
                     claim,

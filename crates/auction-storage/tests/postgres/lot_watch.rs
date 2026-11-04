@@ -8,7 +8,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 #[allow(dead_code)]
-mod support;
+use crate::support;
 
 use auction_application::{
     DeliveryClaimExclusions, DeliveryWorkStore, LotWatchPmClaimRequest, LotWatchPmWorkStore,

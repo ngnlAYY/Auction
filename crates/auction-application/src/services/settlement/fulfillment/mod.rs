@@ -9,6 +9,7 @@ mod internal;
 mod model;
 mod proof;
 mod refund;
+mod schedule;
 mod service;
 mod validation;
 

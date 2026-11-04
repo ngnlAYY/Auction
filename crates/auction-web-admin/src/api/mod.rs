@@ -117,7 +117,7 @@ use auction_contracts::{
 pub(crate) use auction_contracts::{
     AdminDeliveryListResponse as DeliveryPage, AdminDeliveryResponse as Delivery,
 };
-use auction_web_shared::TransportError;
+use auction_web_shared::{BrowserErrorClass, TransportError, report_browser_error};
 use chrono::{DateTime, Utc};
 use gloo_net::http::{Request, Response};
 use serde::Deserialize;
@@ -176,12 +176,13 @@ pub(crate) async fn response_failure(response: Response) -> AdminApiFailure {
 /// 读取错误 envelope 而不触发认证副作用，供会话检查自身消费确定的未认证结果。
 async fn read_response_failure(response: Response) -> AdminApiFailure {
     let status = response.status();
-    let code = response
-        .json::<AdminApiErrorResponse>()
-        .await
-        .ok()
-        .map(AdminApiErrorResponse::into_code)
-        .unwrap_or_else(|| format!("http_{status}"));
+    let code = match response.json::<AdminApiErrorResponse>().await {
+        Ok(payload) => payload.into_code(),
+        Err(_) => {
+            report_browser_error(BrowserErrorClass::DtoDecode);
+            format!("http_{status}")
+        }
+    };
     AdminApiFailure { status: Some(status), code }
 }
 
@@ -236,6 +237,7 @@ pub(crate) fn invalid_request_error(_error: impl ToString) -> String {
 }
 
 pub(crate) fn invalid_response_error(_error: impl ToString) -> String {
+    report_browser_error(BrowserErrorClass::DtoDecode);
     "invalid_response".to_owned()
 }
 

@@ -21,6 +21,9 @@ pub use headers::apply_browser_security_headers;
 
 const MAX_RATE_LIMIT_ENTRIES: usize = 4096;
 
+/// 浏览器错误信标在任一限流窗口内的每来源上限；与登录、普通 mutation 使用独立账本。
+const BROWSER_ERROR_LIMIT_PER_WINDOW: u32 = 30;
+
 /// 装配根传入 HTTP 安全适配器的非敏感参数。
 pub struct HttpSecurityOptions<'a> {
     /// 是否为浏览器 Cookie 设置 `Secure`。
@@ -51,6 +54,7 @@ pub struct PublicHttpSecurity {
     login_limiter: RateLimiter,
     mutation_limiter: RateLimiter,
     realtime_connection_limiter: RateLimiter,
+    browser_error_limiter: RateLimiter,
 }
 
 impl Default for PublicHttpSecurity {
@@ -62,6 +66,10 @@ impl Default for PublicHttpSecurity {
             login_limiter: RateLimiter::new(10, Duration::from_secs(60)),
             mutation_limiter: RateLimiter::new(60, Duration::from_secs(60)),
             realtime_connection_limiter: RateLimiter::new(60, Duration::from_secs(60)),
+            browser_error_limiter: RateLimiter::new(
+                BROWSER_ERROR_LIMIT_PER_WINDOW,
+                Duration::from_secs(60),
+            ),
         }
     }
 }
@@ -92,6 +100,10 @@ impl PublicHttpSecurity {
             login_limiter: RateLimiter::new(login_limit, rate_limit_window),
             mutation_limiter: RateLimiter::new(mutation_limit, rate_limit_window),
             realtime_connection_limiter: RateLimiter::new(mutation_limit, rate_limit_window),
+            browser_error_limiter: RateLimiter::new(
+                BROWSER_ERROR_LIMIT_PER_WINDOW,
+                rate_limit_window,
+            ),
         })
     }
 
@@ -121,6 +133,11 @@ impl PublicHttpSecurity {
 
     pub(crate) fn allow_realtime_connection(&self, address: IpAddr) -> Option<u64> {
         self.realtime_connection_limiter.allow(address)
+    }
+
+    /// 信标使用独立账本，不能消耗登录或业务 mutation 配额。
+    pub(crate) fn allow_browser_error(&self, address: IpAddr) -> Option<u64> {
+        self.browser_error_limiter.allow(address)
     }
 }
 
@@ -167,6 +184,10 @@ impl AdminHttpSecurity {
 
     pub(crate) fn allow_mutation(&self, address: IpAddr) -> Option<u64> {
         self.inner.allow_mutation(address)
+    }
+
+    pub(crate) fn allow_browser_error(&self, address: IpAddr) -> Option<u64> {
+        self.inner.allow_browser_error(address)
     }
 }
 

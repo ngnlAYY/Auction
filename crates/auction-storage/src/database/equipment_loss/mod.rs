@@ -11,6 +11,8 @@ use uuid::Uuid;
 use super::{DatabaseStore, settlement_funding as funding};
 
 mod proof;
+#[cfg(feature = "test-db")]
+pub use proof::delivery_snapshot_equality_sql;
 pub(crate) use proof::trusted_losses;
 mod snapshot;
 mod transaction;

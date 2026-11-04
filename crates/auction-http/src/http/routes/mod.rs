@@ -38,6 +38,7 @@ mod admin_worlds;
 mod blacklist;
 #[path = "../shared/boundary.rs"]
 mod boundary;
+mod browser_errors;
 #[path = "../public/compensation.rs"]
 mod compensation;
 #[path = "../public/countdown/mod.rs"]
