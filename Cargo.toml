@@ -29,7 +29,7 @@ auction-web-public = { path = "crates/auction-web-public" }
 auction-web-shared = { path = "crates/auction-web-shared" }
 
 # 异步运行时：Tokio 1.53.x 是官方 LTS 分支，后续只接受该分支内的补丁升级。
-tokio = { version = "~1.53.3", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "~1.54.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 # HTTP 与 Web
 # 查询参数由 HTTP owner 严格解析；不启用未使用的宏、Form/Query 提取器。
