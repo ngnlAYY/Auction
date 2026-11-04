@@ -389,6 +389,7 @@ admin-audit-actor-worker = Worker
 admin-audit-actor-system = System
 admin-audit-source-public = Public API
 admin-audit-source-admin = Admin API
+admin-audit-source-cli = CLI
 admin-audit-source-worker = Worker
 admin-audit-source-system = System
 admin-audit-result-success = Succeeded

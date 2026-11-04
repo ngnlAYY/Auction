@@ -63,7 +63,7 @@ pub(super) async fn write(
     let audit_id = Uuid::new_v4();
     let (actor_type, source) = match command.entrypoint.as_str() {
         "admin" => ("admin", "admin"),
-        "cli" => ("admin", "system"),
+        "cli" => ("admin", "cli"),
         _ => ("system", "system"),
     };
     sqlx::query("INSERT INTO public.audit_records
@@ -71,9 +71,9 @@ pub(super) async fn write(
         VALUES($1,$2,$3,$4,$5,'runtime_switch',$6,'success',$7,$8)")
         .bind(audit_id).bind(now).bind(actor_type).bind(&command.actor_id)
         .bind(format!("runtime_switch.{}", command.operation.label())).bind(command.name.label()).bind(source)
-        .bind(serde_json::json!({"command_id": command.command_id, "entrypoint": command.entrypoint,
+        .bind(auction_application::cli_audit_metadata(command.operator_identity.as_ref(), serde_json::json!({"command_id": command.command_id, "entrypoint": command.entrypoint,
             "executor": if command.entrypoint == "cli" { "auction-cli" } else { command.entrypoint.as_str() },
-            "previous": previous, "accepted": event}))
+            "previous": previous, "accepted": event})))
         .execute(&mut *tx).await.record_audit_failure()?;
     sqlx::query("INSERT INTO public.runtime_switch_events
         (command_id,digest_version,request_digest,switch_name,revision,expected_revision,operation,

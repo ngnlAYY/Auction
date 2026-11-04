@@ -130,6 +130,7 @@ async fn import(
                 title: request.title,
                 markdown: request.markdown,
                 actor_id: actor.to_owned(),
+                operator_identity: Some(super::operator_identity::capture()?),
                 request_id: Some(request_id.clone()),
                 request_hash,
             })

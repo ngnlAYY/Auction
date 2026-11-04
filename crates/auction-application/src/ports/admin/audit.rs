@@ -184,7 +184,7 @@ fn valid_actor_type(value: Option<&str>) -> bool {
 
 fn valid_source(value: Option<&str>) -> bool {
     value.is_none_or(|value| {
-        value.is_empty() || matches!(value, "public" | "admin" | "worker" | "system")
+        value.is_empty() || matches!(value, "public" | "admin" | "worker" | "system" | "cli")
     })
 }
 

@@ -135,7 +135,7 @@
 | `realtime_consumer_offsets`、`realtime_failures` | 各 consumer 游标与转发失败记录 |
 | `operations_alert_runtime_state`、`operations_alert_signals`、`operations_alert_batches`、`operations_alert_batch_items` | 运维告警的运行状态、信号、批次与批次项 |
 | `service_heartbeats` | 三角色进程心跳（TTL 30 秒），是唯一被标记为“待决定是否短期保留”的数据族；`audit_failure_count` 在发布进程为 legacy/shadow 时是全部审计失败累计，classified 时仅为阻断就绪的 permanent + unknown 累计，成功写入不清零、重启归零；结构不变，完整分类计数在进程指标中保留，见[就绪策略](../../ops/config/README.md#就绪策略) |
-| `audit_records` | 追加式审计：操作者类型（public_user/admin/worker/system）、动作、实体、结果、来源与安全元数据；触发器禁止修改与删除 |
+| `audit_records` | 追加式审计：操作者类型（public_user/admin/worker/system）、动作、实体、结果、来源（public/admin/worker/system/cli）与安全元数据；触发器禁止修改与删除 |
 
 ### 当前态投影
 
@@ -178,7 +178,7 @@ expected_revision、set/clear/expire、布尔或枚举值、UTC 期限、操作�
 
 读取先取每名称最新事实，再判断该 set 的期限。未设置、clear、expire 或最新 set 已过期均回落本角色启动时的 TOML 基线，绝不从更早事实恢复覆盖。未知名称在值解码之前忽略；已知名称的类型、枚举或结果投影损坏则拒绝整次刷新，保留原成功快照。新增名称须保持旧程序忽略规则；扩展已知名称的取值须另行评估跨版本兼容，不能默认兼容。
 
-写事务为 Read Committed，锁序为共用 command advisory → 带命名空间的 switch advisory → 最新事实版本 CAS；该 owner 不取得拍卖等业务锁。锁后读取最新版本，同事务追加事实、可重放结果与审计。同 ID 同摘要先返回原结果，即使原设置已过期或已有后续命令也不续期、不改写；异摘要冲突。只重试明确中止的 `40001`/`40P01`，最多三次；提交回执未知要求原 ID、原参数重试。CLI 审计使用 `actor_type=admin`、`source=system`，metadata 标注 `entrypoint=cli`、`executor=auction-cli`；`--actor` 是声明，系统 UID 与 SUDO_USER 的追溯仍属后续工作。
+写事务为 Read Committed，锁序为共用 command advisory → 带命名空间的 switch advisory → 最新事实版本 CAS；该 owner 不取得拍卖等业务锁。锁后读取最新版本，同事务追加事实、可重放结果与审计。同 ID 同摘要先返回原结果，即使原设置已过期或已有后续命令也不续期、不改写；异摘要冲突。只重试明确中止的 `40001`/`40P01`，最多三次；提交回执未知要求原 ID、原参数重试。CLI 审计使用 `actor_type=admin`、`source=cli`，metadata 标注 `entrypoint=cli`、`os_uid`、可选 `sudo_user` 与 `executor=auction-cli`；Admin 写入保持 `source=admin`。`--actor` 是人工说明，不替代主机身份。
 
 三角色启动立即读取、每五秒刷新，单次预算一秒。成功时原子替换完整不可变快照；首次失败用 TOML，后续失败保留最后成功快照及原期限。期限来自数据库时间，进程用查询开始时刻和单调时钟保守推算，不因传输延迟延长期限。Worker 每周期对最新且已到期 set 追加 expire，其命令 UUID 由原 set UUID 与固定 `runtime-switch-expire-v1` 派生；竞争时重新读取，结果未知保持原身份。实际回落不等待 expire 追加成功，原 set 的期限已是持久证据。
 

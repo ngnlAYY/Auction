@@ -61,6 +61,7 @@ fn execution_command(args: EquipmentLossArgs) -> anyhow::Result<Option<Equipment
         )?,
         lot_id: args.lot_id,
         actor: text::actor(args.actor.as_deref().context("--actor 必填")?)?.to_owned(),
+        operator_identity: Some(super::operator_identity::capture()?),
         reason: args.reason.context("--reason 必填")?,
         funding_uid: args.funding_uid.context("--funding-uid 必填")?,
         expected_recovery_version: args

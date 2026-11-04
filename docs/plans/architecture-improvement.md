@@ -217,7 +217,8 @@
 | W7.1a | 已提交 | 远端设置 | — | 仓库转公开；`main` 已设为默认分支（当前 `383138a8`），分支保护要求 `docs`/`verify`/`security-audit`/`msrv`、线性历史、禁止强推与删除；`ci/dependency-version-guard` 与两个 dependabot 分支已删除，tokio PR #10 已按决策 52 关闭；`main` CI 成功，候选二进制为 `24a9c115` |
 | W7.5 | 已提交 | `69fd85a0` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；`service stop/restart` 只读时段门禁（Final 或截止不晚于保护窗口末端的在拍 lot，含已过截止仍在拍），`--protection-window-minutes` 默认 60，例外须 `--force --reason` |
 | W8 | 未开始 | — | — | 放在 M6 最后 |
-| W9 | 未开始 | — | — | W9.5、W9.7 随 M2a；W9.8、W9.10、W9.11 随 M2b；W9.9 为 M3 首项 |
+| W9.7 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；CLI 审计 `source=cli`，metadata 添加 `entrypoint=cli`、`os_uid`、可选 `sudo_user`；`--actor` 仍必填；Admin 保持 `source=admin`；迁移 078 breaking；Admin 审计页支持 cli |
+| W9 | 进行中 | — | — | W9.5、W9.7 随 M2a；W9.8、W9.10、W9.11 随 M2b；W9.9 为 M3 首项 |
 | W10 | 进行中 | — | 未部署 | W10.1、W10.2、W10.6 已提交；W10.8 随本提交；W10.7 随 M2a；W10.9 随 M5 |
 | W10.1 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`backup scheduled` + systemd timer 模板（每日 UTC 03:15），回执 `auction-backup-run.v1`；本地 2026-11-04 已启用用户级 timer 并完成一次 systemd oneshot create+verify+retention；仍待连续 7 天成功与一次人为失败核验 |
 | W10.2 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；主机 `age` 公钥加密 + `object_store` 上传 R2 日/月前缀、完整回读校验，`[backup.offsite]` 默认关闭；本地 2026-11-04 已用 `hv-auction` bucket 完成首次 daily/monthly 上传、bucket lock 覆盖/删除 409、age 解密与隔离 PG18 恢复；仍待三组数据密钥加密列解密、生命周期规则核验与 `age` 私钥离线托管 |

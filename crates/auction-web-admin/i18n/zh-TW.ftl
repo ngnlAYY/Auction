@@ -448,6 +448,7 @@ admin-audit-actor-worker = Worker
 admin-audit-actor-system = 系統
 admin-audit-source-public = Public API
 admin-audit-source-admin = Admin API
+admin-audit-source-cli = CLI
 admin-audit-source-worker = Worker
 admin-audit-source-system = 系統
 admin-audit-result-success = 成功
