@@ -12,6 +12,7 @@ mod libpq;
 mod manifest;
 mod restore;
 mod scheduled;
+pub(crate) mod wal;
 
 pub(crate) use manifest::BackupManifest;
 use manifest::sha256_file;

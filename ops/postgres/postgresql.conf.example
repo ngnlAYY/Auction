@@ -30,10 +30,19 @@ log_autovacuum_min_duration = 1000
 log_checkpoints = on
 log_temp_files = 10240
 
-# 归档与时间点恢复由 W10.7 启用；本阶段保持关闭。
+# 归档与时间点恢复（W10.7）：默认保持关闭。打开 archive_mode 需要重启 PostgreSQL，
+# 受 W7.5 停机时段门禁约束；启用前必须先安装含 `wal archive`/`wal upload` 的 auction-cli、
+# 建好暂存目录并让上传 timer 至少成功运行一次（见 ops/deploy/RECOVERY.md）。
+# archive_command 由 postgres 账号执行，不读敏感 TOML；收件人公钥不是秘密，直接写在参数里。
+# 任一步失败返回非零，由 PostgreSQL 重试同一段；暂存积压会撑满磁盘，须监控
+# pg_stat_archiver.failed_count、暂存目录占用与上传 timer 状态。
 archive_mode = off
+# archive_mode = on
+# archive_command = '/opt/auction/bin/auction-cli wal archive --staging-dir /var/lib/auction/wal-staging --recipient age1<收件人公钥> %p %f'
 # archive_timeout = 300
-# archive_command = '... W10.7 ...'
+
+# 不使用 archive_library：归档只走本机命令，压缩与加密都在暂存目录完成。
+# 时间点恢复窗口 14 天、WAL 与基础备份保留 21 天（决策 49），由 R2 生命周期与锁定期实现。
 
 # 明确保持自动清理开启；每表参数由 autovacuum.sql.example 设置。
 autovacuum = on
