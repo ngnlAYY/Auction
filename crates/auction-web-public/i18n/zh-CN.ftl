@@ -368,6 +368,8 @@ session-menu-label = 账户会话
 session-login = 登录
 logout = 退出登录
 logout-error = 暂时无法加载，请稍后重试。
+session-ended-elsewhere = 该账号已在其他设备登录，当前会话已结束。
+session-ended-relogin = 用原登录 key 重新登录
 
 session-duration-title = 登录时长
 session-duration-permanent = 永久（默认）

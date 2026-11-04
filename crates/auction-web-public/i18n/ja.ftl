@@ -368,6 +368,8 @@ session-menu-label = アカウントセッション
 session-login = ログイン
 logout = ログアウト
 logout-error = データを読み込めませんでした——自動的に再試行します。
+session-ended-elsewhere = このアカウントが別の端末でログインしたため、現在のセッションは終了しました。
+session-ended-relogin = 元のログインキーで再ログイン
 
 session-duration-title = ログイン期間
 session-duration-permanent = 無期限（既定）

@@ -24,9 +24,32 @@ pub(super) fn invalidate_cookie_sync() {
     cookie::invalidate();
 }
 
-/// 外壳会话重读入口；参数为 true 时先失效旧身份，阻止继续使用旧确认宿主。
+/// 会话重读原因。认证失败要先失效旧身份并提示服务端撤销；本浏览器主动退出只同步为匿名。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SessionRefreshReason {
+    /// 主动重读（聚焦、可见性、标签页广播、截止到期、登录或偏好保存）：保留原快照。
+    Refresh,
+    /// 认证失败（401 或 `session_changed`）：先失效旧身份，并视为服务端撤销。
+    AuthenticationFailed,
+    /// 本浏览器主动退出：先失效旧身份，但不提示“已在其他设备登录”。
+    LoggedOut,
+}
+
+impl SessionRefreshReason {
+    /// 已知认证变化必须先卸载旧用户命令，阻止继续使用旧确认宿主。
+    pub(crate) fn invalidates(self) -> bool {
+        !matches!(self, Self::Refresh)
+    }
+
+    /// 未到期却失效的认证会话只可能来自服务端撤销；主动退出与普通重读不提示。
+    pub(crate) fn shows_ended_elsewhere(self) -> bool {
+        matches!(self, Self::AuthenticationFailed)
+    }
+}
+
+/// 外壳会话重读入口。
 #[derive(Clone, Copy)]
-pub(crate) struct PublicSessionCheckTrigger(pub(crate) EventHandler<bool>);
+pub(crate) struct PublicSessionCheckTrigger(pub(crate) EventHandler<SessionRefreshReason>);
 
 /// 标签页间只广播随机修订，不保存用户身份或凭据。
 #[cfg(target_arch = "wasm32")]
@@ -35,16 +58,16 @@ pub(crate) const PUBLIC_SESSION_CHANGE_STORAGE_KEY: &str = "hv.public.session-re
 /// 认证失败或身份前置条件冲突时，重新读取当前 Cookie 对应的权威身份。
 pub(super) fn observe_public_session_failure(status: u16, code: &str) {
     if status == 401 || code == "session_changed" {
-        notify_public_session_change(true);
+        notify_public_session_change(SessionRefreshReason::AuthenticationFailed);
     }
 }
 
-pub(super) fn notify_public_session_change(invalidate: bool) {
+pub(super) fn notify_public_session_change(reason: SessionRefreshReason) {
     let trigger = Runtime::try_current()
         .filter(|runtime| runtime.try_current_scope_id().is_some())
         .and_then(|_| try_consume_context::<PublicSessionCheckTrigger>());
     if let Some(trigger) = trigger {
-        trigger.0.call(invalidate);
+        trigger.0.call(reason);
     }
     #[cfg(target_arch = "wasm32")]
     if let Some(storage) =
@@ -150,7 +173,7 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
         return Err(parse_api_error(response).await);
     }
     // Cookie 已由响应写入；即使正文解码失败也重读。重登同账号不能清除原未决命令。
-    notify_public_session_change(false);
+    notify_public_session_change(SessionRefreshReason::Refresh);
     let payload: PublicLoginResponse = decoder::decode_success(response, valid_login_session_value)
         .await
         .map_err(|_| PublicSessionApiError::local("invalid_response"))?;
@@ -212,7 +235,8 @@ pub(crate) async fn logout_public(user_id: String) -> Result<(), String> {
         observe_public_session_failure(status, &code);
         return Err(code);
     }
-    notify_public_session_change(true);
+    // 主动退出：其他标签页同步为匿名，但不提示被其他设备挤下线。
+    notify_public_session_change(SessionRefreshReason::LoggedOut);
     decoder::decode_success::<Value, _>(response, Value::is_null).await.map(|_| ())
 }
 

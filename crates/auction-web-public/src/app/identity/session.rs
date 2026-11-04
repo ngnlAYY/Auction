@@ -7,7 +7,8 @@ use dioxus::prelude::*;
 use url::form_urlencoded;
 
 use crate::api::{
-    PublicSession, PublicSessionApiError, fetch_registration_info, login_public, logout_public,
+    PublicSession, PublicSessionApiError, SessionRefreshReason, fetch_registration_info,
+    login_public, logout_public,
 };
 
 use super::{PublicSessionResource, Route};
@@ -337,7 +338,7 @@ fn login_blacklisted_reason(error: &PublicSessionApiError) -> Option<&str> {
 }
 
 /// 同源认证广播与窗口聚焦只触发权威重读；账号真正改变后才销毁旧确认宿主。
-pub(crate) fn use_public_session_sync(check_session: EventHandler<bool>) {
+pub(crate) fn use_public_session_sync(check_session: EventHandler<SessionRefreshReason>) {
     #[cfg(target_arch = "wasm32")]
     let _guard = use_hook(move || {
         // Hook 保存 guard 到外壳卸载；最后一个引用释放时移除所有 DOM listener。
@@ -350,7 +351,7 @@ pub(crate) fn use_public_session_sync(check_session: EventHandler<bool>) {
 /// 有限会话只在真实截止后复核一次；永久会话不建立计时器，也不把远期日期当永久。
 pub(crate) fn use_public_session_expiry(
     session: PublicSessionResource,
-    check_session: EventHandler<bool>,
+    check_session: EventHandler<SessionRefreshReason>,
 ) {
     #[cfg(target_arch = "wasm32")]
     {
@@ -378,7 +379,7 @@ pub(crate) fn use_public_session_expiry(
                         .num_milliseconds()
                         .saturating_add(1_000);
                     if remaining <= 0 {
-                        check_session.call(false);
+                        check_session.call(SessionRefreshReason::Refresh);
                         return;
                     }
                     gloo_timers::future::TimeoutFuture::new(
@@ -402,17 +403,17 @@ struct PublicSessionSync {
 
 #[cfg(target_arch = "wasm32")]
 impl PublicSessionSync {
-    fn install(check_session: EventHandler<bool>) -> Option<Self> {
+    fn install(check_session: EventHandler<SessionRefreshReason>) -> Option<Self> {
         use wasm_bindgen::{JsCast, closure::Closure};
 
         let window = web_sys::window()?;
         let storage = Closure::new(move |event: web_sys::StorageEvent| {
             if event.key().as_deref() == Some(crate::api::PUBLIC_SESSION_CHANGE_STORAGE_KEY) {
                 // 随机修订只表示认证操作发生，同账号重登仍须保留原未知命令及 ID。
-                check_session.call(false);
+                check_session.call(SessionRefreshReason::Refresh);
             }
         });
-        let focus = Closure::new(move || check_session.call(false));
+        let focus = Closure::new(move || check_session.call(SessionRefreshReason::Refresh));
         let guard = Self { window, storage, focus };
         guard
             .window

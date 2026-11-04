@@ -19,6 +19,7 @@ use super::{
 };
 use super::{forms::MoogleMailForm, protocol::MoogleMailUrlBuilder};
 
+mod account_busy;
 mod diagnostics;
 mod reads;
 mod request;
@@ -65,6 +66,8 @@ pub struct MoogleMailClient {
     builder: MoogleMailUrlBuilder,
     client: Client,
     gate: Arc<IntervalGate>,
+    /// 账号忙熔断只限制请求节奏；克隆出的客户端共享同一份状态。
+    account_busy: Arc<account_busy::MoogleMailAccountBusy>,
     reads: Arc<reads::MailboxReads>,
     maximum_response_bytes: usize,
     request_timeout: Duration,
@@ -138,6 +141,7 @@ impl MoogleMailClient {
             builder,
             client,
             gate: Arc::new(IntervalGate::new(config.minimum_request_interval)),
+            account_busy: Arc::new(account_busy::MoogleMailAccountBusy::default()),
             reads: Arc::new(reads::MailboxReads::default()),
             maximum_response_bytes,
             request_timeout: config.request_timeout,
@@ -204,6 +208,12 @@ impl MoogleMailClient {
     /// 供 sender 的扫描预算 owner 记录同步指标；不暴露给进程外调用方。
     pub(crate) fn external_metrics(&self) -> Arc<dyn auction_application::ExternalMetricsObserver> {
         Arc::clone(&self.external_metrics)
+    }
+
+    /// 账号忙熔断窗口内不允许发起远端写入；失败关闭的断言在请求发出前后仍由适配器执行。
+    /// 调用方只能在 sending 围栏前使用该判断，不能据此改写业务状态。
+    pub fn permits_write(&self, world: MoogleMailWorld) -> bool {
+        self.account_busy.permits_write(world, Instant::now())
     }
 
     /// 让同一客户端的 Worker 业务处理复用诊断 owner，避免并发写入绕过容量边界。

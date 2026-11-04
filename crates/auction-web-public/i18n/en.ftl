@@ -369,6 +369,8 @@ session-menu-label = Account session
 session-login = Log in
 logout = Log out
 logout-error = Could not load data — it will retry automatically.
+session-ended-elsewhere = This account was signed in on another device, so this session ended.
+session-ended-relogin = Sign in again with your original login key
 
 session-duration-title = Login duration
 session-duration-permanent = Permanent (default)

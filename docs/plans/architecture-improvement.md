@@ -206,7 +206,11 @@
 | W7.11 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
 | W7.8a | 已提交 | `3f0a2097` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 F）实现、Claude 监督；迁移 075 建只追加兼容登记表（001–074 缺行即 breaking，075 自身 breaking），`check.sh migration-compatibility` 检查每个新迁移恰好登记一次；`[readiness] migration_compatibility_mode` 默认 `shadow`，回退旧程序前须设为 `compatible`；本版含 breaking 迁移，部署后才能为之后的版本提供回退能力 |
 | W7.7 | 已提交 | 第一批 `5e2f455b`；第二批随本提交 | 未部署 | 执行者：Codex（第一批 gpt-6.1-sol，车道 H；第二批 DeepSeek V4.1 Flash，车道 O）实现、Claude 监督；迁移 076 只追加开关事实兼命令账本、三角色 5 秒刷新、`auction-cli switch`、Admin `/config` 只读卡片；闭集共 5 项：`readiness_audit_failure_mode`、`readiness_cache_enabled`、`metrics_sli_snapshot_enabled`（W0.13）、`mooglemail_poll_isolation_enabled`（每世界常驻维护任务 + 互斥门，在途轮次按开始时模式结束，不重写 `next_poll_at`）、`metrics_reject_forwarded_requests`（只允许在线收紧，`set false` 以 `UnsafeRelaxation` 拒绝）；W1.9 主动暂停随 M2b 复用 |
-| W1 | 进行中 | — | 未部署 | W1.0 已提交（D2）；W1.4 发送基线切片已提前提交（D3）；其余随 M2b/M3；W1.10 方案已定（决策 40） |
+| W1.1 | 已提交 | 随本提交 | — | 进程内 per-world 账号忙熔断 1→2→5→10 分钟；窗口内仅一次读探测，写请求在 fence 前拒绝；证据每忙碌期保留一次 |
+| W1.2 | 进行中 | 随本提交 | — | 忙碌诊断去重完成；`write_unknown` 优先淘汰尚未实现 |
+| W7.9 | 已提交 | 随本提交 | — | Public/Admin 对 Worker/Admin 改为 `Wants=`，保留 `After=` 启动顺序；systemd 模板静态门禁；合并部署仍单故障域 |
+| W9.8 | 已提交 | 随本提交 | — | Public 会话上限默认 10；用户行锁内注销最旧活动会话，不删除记录/不改登录 key；五语言“其他设备登录”提示；PG18 并发测试 |
+| W1 | 进行中 | — | 未部署 | W1.0/W1.1/W1.2 已提交；W1.4 发送基线切片（D3，M3）；其余随 M2b/M3；W1.10 方案已定（决策 40） |
 | W1.0 | 已提交 | `b2ccb9fd` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；完整 Read Mail 观察降频为每小时、维护独立循环、isekai 相位错峰，回退开关 `poll_isolation_enabled`；待用户部署后按“维护不再超时、`mail-maintenance-*` p95 < 60 秒”验收 |
 | W1.4（发送基线切片） | 已提交 | `fa46d605` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 J）实现、Claude 监督；发送前临时 MID 边界 + 前缀扫描，`[worker.mooglemail] sent_baseline_mode` 默认 `shadow`；切换 `watermark` 前须完成浏览器 MID 语义核实与至少一个完整场次周期的影子观察；常规轮水位与每日校验仍随 M3 |
 | W2 | 未开始 | — | — | 随 M3，排在 W9.9 之后 |
