@@ -263,7 +263,3 @@ sanitization = "见顶层 sanitization；未复制原始页面。"
 pairs = []
 bytes = 5391
 sha256 = "1f8d60171373b4e4f2ef1e48b4235e3a652ca9963f151201fc9cc8dc9a6e4a62"
-
-[[missing]]
-class = "battle"
-reason = "本地授权来源没有该类别的真实样本；未创建合成替代页。"
