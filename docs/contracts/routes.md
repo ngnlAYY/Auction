@@ -168,7 +168,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/auctions/{auction_id}/lots` | lot 列表（`page`、`page_size`）；响应头 `x-auction-capability-manual-intake` 声明手工录入是否可用 |
 | PATCH | `/api/v1/admin/lots/{lot_id}` | 草稿 lot：`withdraw` 撤下或 `set_start_price` 修改起拍价 |
 | GET | `/api/v1/admin/lots/{lot_id}/proxy-events` | 代理事件历史（`page`、`page_size`、`cursor`） |
-| POST | `/api/v1/admin/worlds/{world_id}/auction-intake/items` | 手工录入装备到该世界当前接收投稿的 Draft 或 Preview 场次；无接收目标或尚未到冻结的最早收件时刻时返回 `409 auction_intake_unavailable` |
+| POST | `/api/v1/admin/worlds/{world_id}/auction-intake/items` | 手工录入装备到该世界当前接收投稿的 Draft 或 Preview 场次；无接收目标或尚未到冻结的最早收件时刻时返回 `409 auction_intake_unavailable`；`source_kind=url` 的装备页面由 Worker control 代为读取（W1.10），Worker 不可用时返回 `503 equipment_source_unavailable`，外部访问暂停时返回 `409 external_access_paused` |
 | POST | `/api/v1/admin/auction-forum/preview` | 论坛主题预览渲染 |
 | GET | `/api/v1/admin/forum/sync-status` | 论坛同步状态 |
 | GET | `/api/v1/admin/auctions/{auction_id}/forum` | 该场论坛主题与诊断的本地安全投影；刷新不请求论坛，也不触发或授权重写 |
@@ -250,7 +250,13 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 | GET | `/v1/status` | 版本与轮询器数量等安全状态 |
 | GET | `/v1/mail/progress` | 各邮箱轮询进度 |
 | POST | `/v1/mail/polls:trigger` | 触发一次邮件轮询 |
+| POST | `/v1/equipment/reads` | W1.10：Admin 手工装备 URL 读取代为执行；请求只含 `world_id` 与公开装备链接 |
+| POST | `/v1/mail/sent:lookup` | W1.10：CLI `mail inspect-sent` 的 Sent 只读核查代为执行 |
 | GET | `/metrics` | Worker 指标 |
+
+两个远端读取路由在 Worker 未装配 MoogleMail 完整能力时返回 `501 capability_unavailable`，
+W1.9 主动暂停期间返回 `409 paused`（请求不发往远端），超时为 `504`；单次读取仍受 Worker
+自己的 fetch 预算约束，Admin/CLI 不得回退到本地直连。
 
 ## 浏览器页面
 
@@ -294,7 +300,7 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 
 W0.13 在 database_intent 中增加 Worker 专用 bool `metrics_sli_snapshot_enabled`；
 W7.7 第二批再增加 Worker 专用 `mooglemail_poll_isolation_enabled` 和三角色
-`metrics_reject_forwarded_requests`，共五个已知意图。admin_applied 只含当前
+`metrics_reject_forwarded_requests`；W1.9 增加三角色 `external_access_paused`，共六个已知意图。admin_applied 只含当前
 Admin 消费的项，数量不固定且不要求与 database_intent 等长；前端按名称闭集
 分别校验两个数组，并要求 admin_applied 是 database_intent 的名称子集。
 复用现有只读卡片，不新增路由或 JSON 字段；更新后须刷新旧 Admin 页面。

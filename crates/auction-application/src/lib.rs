@@ -13,6 +13,10 @@ pub use ports::{
     ReplyDelaySampleOutcome, WaitOutcome, noop_external_metrics_observer,
 };
 pub use ports::{
+    NotificationFailure, NotificationKind, NotificationRecorder, NotificationStage,
+    noop_notification_recorder,
+};
+pub use ports::{
     SentBaselineBranch, SentBaselineEvent, SentBaselineMode, SentBaselineObserver,
     SentBaselinePhase, SentBaselineReason, noop_sent_baseline_observer,
 };
@@ -224,10 +228,13 @@ pub use ports::{
     SettlementWorkClaim, SettlementWorkStore, SlowProxyCommandPort, SlowProxyDue,
     SlowProxyDueReader, SlowProxyExecutionContext, StoredCommand, TransactionFailure,
     TransactionFuture, TransactionIsolation, TransactionPolicy, TransactionPolicyError,
-    TransactionRunner, UNKNOWN_ADMIN_PROXY_EVENT_TOTAL, WORKER_HOT_FIELD_PATHS,
-    WORKER_RESTART_ONLY_FIELD_PATHS, WorkerControlCondition, WorkerControlMailProgress,
-    WorkerControlPort, WorkerControlStatus, WorkerControlTrigger, WorkerDeliveryHotConfig,
-    WorkerFieldEffect, WorkerForumHotConfig, WorkerHotConfig, WorkerMailHotConfig, WorldReader,
+    TransactionRunner, UNKNOWN_ADMIN_PROXY_EVENT_TOTAL, UnavailableWorkerRemoteRead,
+    WORKER_HOT_FIELD_PATHS, WORKER_REMOTE_READ_TIMEOUT_SECONDS, WORKER_RESTART_ONLY_FIELD_PATHS,
+    WorkerControlCondition, WorkerControlMailProgress, WorkerControlPort, WorkerControlStatus,
+    WorkerControlTrigger, WorkerDeliveryHotConfig, WorkerEquipmentReadRequest,
+    WorkerEquipmentReadResponse, WorkerFieldEffect, WorkerForumHotConfig, WorkerHotConfig,
+    WorkerMailHotConfig, WorkerRemoteReadError, WorkerRemoteReadFuture, WorkerRemoteReadPort,
+    WorkerSentLookupCandidate, WorkerSentLookupRequest, WorkerSentLookupResponse, WorldReader,
     WorldSnapshot, admin_intake_aggregate_id, admin_mail_aggregate_id, admin_world_aggregate_id,
     allowed_recovery_commands, body_digest, canonical_settlement_fulfillment_subject,
     canonical_summary, canonical_summary_prefix, credential_scope, credential_secret_hash,

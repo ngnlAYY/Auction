@@ -29,6 +29,14 @@ pub(super) async fn run_loop<C>(
             if worker.control.is_draining() {
                 return;
             }
+            // W1.9：履约批次包含 Sent 证据读取与 compose 写入；暂停期间不领取新批次，
+            // 已领取项按其自身 lease 与 sending 围栏完成。
+            if worker.external_access_paused() {
+                if super::wait_while_paused(&mut shutdown).await {
+                    return;
+                }
+                continue;
+            }
             let started = std::time::Instant::now();
             let result = run_batch(worker.as_ref()).await;
             if result != WorkerResult::Success {

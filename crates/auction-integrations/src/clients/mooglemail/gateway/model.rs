@@ -92,6 +92,19 @@ pub struct MoogleMailSentLookupReport {
     pub observed_at: DateTime<Utc>,
 }
 
+impl MoogleMailSentLookupStatus {
+    /// 结论标签；CLI 证据文件自 W1.10 起使用同一名称，保持既有回执字段不变。
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Unique => "Unique",
+            Self::CollectedUnproven => "CollectedUnproven",
+            Self::Multiple => "Multiple",
+            Self::NotObserved => "NotObserved",
+            Self::Incomplete => "Incomplete",
+        }
+    }
+}
+
 /// 已完成摘要/详情交叉校验的一次有界邮件拉取。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailPage {

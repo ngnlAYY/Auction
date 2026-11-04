@@ -599,28 +599,37 @@ impl EquipmentSourceAdapter {
         world_id: String,
         input: CanonicalEquipment,
     ) -> Result<AdminIntakeSourceSnapshot, AdminIntakeError> {
-        if !matches!(world_id.as_str(), "main" | "isekai") {
-            return Err(AdminIntakeError::InvalidCommand);
-        }
-        input.validate()?;
-        let facts = canonical_facts(&input)
-            .map_err(|reason| diagnostics::source_parse_error("canonical_json", reason))?;
-        let key = EquipmentKey::new(&input.key).map_err(|_| AdminIntakeError::InvalidSource)?;
-        let fingerprint = canonical_fingerprint(&world_id, &facts)?;
-        let attributes = facts.attributes();
-        Ok(AdminIntakeSourceSnapshot {
-            adapter: "manual-json-v1".to_owned(),
-            source_fingerprint: fingerprint,
-            external_equipment_id: facts.external_equipment_id,
-            name: facts.name,
-            category: facts.category,
-            level: facts.level.legacy_level(),
-            tradeable: facts.tradeable,
-            attributes,
-            collected_at: Utc::now(),
-            key,
-        })
+        canonical_json_snapshot(&world_id, input)
     }
+}
+
+/// canonical JSON 录入不经网络：W1.10 后 Admin 仍在本进程完成该分支，
+/// URL 分支则改为经 Worker control 执行。
+pub fn canonical_json_snapshot(
+    world_id: &str,
+    input: CanonicalEquipment,
+) -> Result<AdminIntakeSourceSnapshot, AdminIntakeError> {
+    if !matches!(world_id, "main" | "isekai") {
+        return Err(AdminIntakeError::InvalidCommand);
+    }
+    input.validate()?;
+    let facts = canonical_facts(&input)
+        .map_err(|reason| diagnostics::source_parse_error("canonical_json", reason))?;
+    let key = EquipmentKey::new(&input.key).map_err(|_| AdminIntakeError::InvalidSource)?;
+    let fingerprint = canonical_fingerprint(world_id, &facts)?;
+    let attributes = facts.attributes();
+    Ok(AdminIntakeSourceSnapshot {
+        adapter: "manual-json-v1".to_owned(),
+        source_fingerprint: fingerprint,
+        external_equipment_id: facts.external_equipment_id,
+        name: facts.name,
+        category: facts.category,
+        level: facts.level.legacy_level(),
+        tradeable: facts.tradeable,
+        attributes,
+        collected_at: Utc::now(),
+        key,
+    })
 }
 
 impl AdminIntakeSourceReader for EquipmentSourceAdapter {

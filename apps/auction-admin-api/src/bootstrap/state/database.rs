@@ -1,28 +1,25 @@
 //! Admin API 的数据库完整档状态和端口装配。
 
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::Context;
 use auction_application::{
     AdminAuctionCreatePort, AdminAuctionReader, AdminAuctionSchedulePort, AdminAuditPort,
     AdminCredentialCheckPort, AdminCredentialCheckService, AdminCredentialHealthReader,
-    AdminCredentialKind, AdminCredentialOpener, AdminCredentialPort, AdminCredentialRuntimeReader,
-    AdminCredentialRuntimeWriter, AdminCredentialService, AdminCredentialWorld,
-    AdminForumPreviewPort, AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort,
-    AdminProxyEventReader, AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort,
-    AdminRuntimeConfigService, AdminSessionConfig, AdminSessionPort, AdminSessionService,
-    AdminSessionStore, AdminUserPort, AdminUserService, AdminWorldPort,
-    AuctionLifecycleCommandPort, AuctionLifecyclePolicy, DeliveryAdminPort,
-    OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort, RecoveryCommandPort,
-    RecoveryCommandService, RecoveryReportReader, SettlementCatalogReader, SettlementReportReader,
+    AdminCredentialOpener, AdminCredentialPort, AdminCredentialService, AdminForumPreviewPort,
+    AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader,
+    AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort, AdminRuntimeConfigService,
+    AdminSessionConfig, AdminSessionPort, AdminSessionService, AdminSessionStore, AdminUserPort,
+    AdminUserService, AdminWorldPort, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
+    DeliveryAdminPort, OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort,
+    RecoveryCommandPort, RecoveryCommandService, RecoveryReportReader, SettlementCatalogReader,
+    SettlementReportReader,
 };
 use auction_config::{AppConfig, TomlRuntimeFileStore};
 use auction_http::AdminApiState;
 use auction_integrations::{
-    CredentialSealer, CredentialVerifier, DataKey, EquipmentKeySealer, EquipmentSourceAdapter,
-    ForumPreviewAdapter, MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader,
-    build_equipment_http_client,
-    mooglemail::{MoogleMailCookie, MoogleMailCredentialSet, MoogleMailWorld},
+    CredentialSealer, CredentialVerifier, DataKey, EquipmentKeySealer, ForumPreviewAdapter,
+    MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader,
 };
 use auction_observability::{
     HealthReader, HealthService, HeartbeatHealthReader, HeartbeatPublisher,
@@ -46,85 +43,6 @@ impl auction_application::Clock for SystemClock {
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
-}
-
-async fn load_equipment_source_credentials(
-    config: &AppConfig,
-    store: Arc<DatabaseStore>,
-) -> anyhow::Result<Option<MoogleMailCredentialSet>> {
-    let mut cookies = Vec::new();
-    if let Some((key_id, key_material)) =
-        config.credential_data_key_id().zip(config.credential_data_key())
-    {
-        let data_key = Arc::new(
-            DataKey::from_base64(key_id, key_material)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-        );
-        let opener = CredentialSealer::new(data_key);
-        let reader: Arc<dyn AdminCredentialRuntimeReader> = store.clone();
-        let mut records = Vec::new();
-        let mut seen_record_ids = HashSet::new();
-        for credential_world in [AdminCredentialWorld::Main, AdminCredentialWorld::Isekai] {
-            for record in reader
-                .list_active(AdminCredentialKind::MailCookie, credential_world)
-                .await
-                .context("load active equipment source credentials")?
-            {
-                // shared scope 会同时出现在两个 world 查询中，只向进程内集合加入一次。
-                if seen_record_ids.insert(record.id) {
-                    records.push((record, credential_world));
-                }
-            }
-        }
-        anyhow::ensure!(records.len() <= 1, "装备来源只允许一个 active mail_cookie");
-        cookies.reserve(records.len());
-        for (record, credential_world) in records {
-            let secret = opener
-                .open(record.kind, record.id, &record.scope, &record.envelope)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            let value = match String::from_utf8(secret) {
-                Ok(value) => value,
-                Err(error) => {
-                    let mut bytes = error.into_bytes();
-                    bytes.fill(0);
-                    anyhow::bail!("装备来源凭据不是有效 UTF-8");
-                }
-            };
-            let world = if record.scope
-                == AdminCredentialWorld::Shared.scope(AdminCredentialKind::MailCookie)
-            {
-                None
-            } else {
-                Some(match credential_world {
-                    AdminCredentialWorld::Main => MoogleMailWorld::Main,
-                    AdminCredentialWorld::Isekai => MoogleMailWorld::Isekai,
-                    AdminCredentialWorld::Shared => anyhow::bail!("装备来源凭据 world scope 无效"),
-                })
-            };
-            cookies.push((
-                record.id,
-                world,
-                MoogleMailCookie::new(value)
-                    .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-            ));
-        }
-    }
-    if !cookies.is_empty() {
-        let invalidator: Arc<dyn AdminCredentialRuntimeWriter> = store;
-        return MoogleMailCredentialSet::from_runtime_cookies_with_scopes(cookies, invalidator)
-            .map(Some)
-            .map_err(|error| anyhow::Error::msg(error.to_string()));
-    }
-    config
-        .mooglemail_cookie()
-        .map(|cookie| {
-            MoogleMailCredentialSet::from_cookies(vec![
-                MoogleMailCookie::new(cookie)
-                    .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-            ])
-            .map_err(|error| anyhow::Error::msg(error.to_string()))
-        })
-        .transpose()
 }
 
 /// 连接数据库并组装 Admin API 的完整端口图。
@@ -212,16 +130,22 @@ pub(super) async fn configure_state(
         Some((key_id, key_material)) => {
             let data_key = DataKey::from_base64(key_id, key_material)
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            let mut source = EquipmentSourceAdapter::production(
-                build_equipment_http_client()?,
-                config::equipment_source_policy(config)?,
-            )
-            .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            if let Some(credentials) =
-                load_equipment_source_credentials(config, Arc::clone(&store)).await?
-            {
-                source = source.with_mooglemail_credentials(credentials);
-            }
+            // W1.10：URL 来源改经 Worker control 执行；Admin 不再持有 Cookie、HTTP 客户端或
+            // 第二套请求限速器。socket 路径无效时装配明确不可用的端口，不回退到本地直连。
+            let remote: Arc<dyn auction_application::WorkerRemoteReadPort> =
+                match auction_integrations::WorkerRemoteReadClient::new(
+                    config.worker_control_socket_path(),
+                    std::time::Duration::from_secs(
+                        auction_application::WORKER_REMOTE_READ_TIMEOUT_SECONDS,
+                    ),
+                ) {
+                    Ok(client) => Arc::new(client),
+                    Err(error) => {
+                        let _ = error;
+                        Arc::new(auction_application::UnavailableWorkerRemoteRead)
+                    }
+                };
+            let source = auction_integrations::WorkerEquipmentSourceReader::new(remote);
             let sealer = EquipmentKeySealer::new(data_key);
             let intake: Arc<dyn AdminIntakePort> = Arc::new(DatabaseAdminIntakeCommands::new(
                 Arc::clone(&store),

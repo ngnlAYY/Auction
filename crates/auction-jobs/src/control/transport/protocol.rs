@@ -74,6 +74,10 @@ pub(super) enum ResponseCode {
     NotReady,
     Unavailable,
     Invalid,
+    /// W1.9 主动暂停；请求未发往远端。
+    Paused,
+    /// 当前 Worker 未装配该远端读取能力。
+    CapabilityUnavailable,
 }
 
 impl ResponseCode {
@@ -84,6 +88,8 @@ impl ResponseCode {
             Self::NotReady => "not_ready",
             Self::Unavailable => "unavailable",
             Self::Invalid => "invalid_command_id",
+            Self::Paused => "paused",
+            Self::CapabilityUnavailable => "capability_unavailable",
         }
     }
 }

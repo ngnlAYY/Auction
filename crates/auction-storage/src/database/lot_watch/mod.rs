@@ -11,7 +11,7 @@ mod proof;
 
 pub(crate) use facts::{apply_bid, auto_watch_proxy};
 pub(crate) use proof::{
-    delivery_eligible, delivery_watch_gate, delivery_watch_invalidated, lock_delivery_lot,
+    delivery_eligible, delivery_watch_expired, delivery_watch_gate, lock_delivery_lot,
 };
 
 use auction_application::{CompetitionTransactionError, LotWatchError};

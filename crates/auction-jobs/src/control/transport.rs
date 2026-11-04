@@ -24,7 +24,9 @@ use std::{
 use super::MailPollProgressTracker;
 use auction_application::{
     ApplicationFuture, MailPollProgressSnapshot, WorkerControlCondition, WorkerControlMailProgress,
-    WorkerControlPort, WorkerControlStatus, WorkerControlTrigger,
+    WorkerControlPort, WorkerControlStatus, WorkerControlTrigger, WorkerEquipmentReadRequest,
+    WorkerEquipmentReadResponse, WorkerRemoteReadError, WorkerRemoteReadPort,
+    WorkerSentLookupRequest, WorkerSentLookupResponse,
 };
 use auction_observability::{METRICS_ROUTE, MetricsError, ProcessMetrics};
 use axum::{
@@ -64,10 +66,17 @@ pub const WORKER_CONTROL_MAIL_PROGRESS_PATH: &str = "/v1/mail/progress";
 pub const WORKER_CONTROL_TRIGGER_POLL_PATH: &str = "/v1/mail/polls:trigger";
 /// Worker control peer-authenticated Prometheus scrape path。
 pub const WORKER_CONTROL_METRICS_PATH: &str = METRICS_ROUTE;
+/// W1.10：Admin 手工装备 URL 读取经 Worker 执行。
+pub const WORKER_CONTROL_EQUIPMENT_READ_PATH: &str = "/v1/equipment/reads";
+/// W1.10：CLI `mail inspect-sent` 的远端 Sent 只读核查经 Worker 执行。
+pub const WORKER_CONTROL_SENT_LOOKUP_PATH: &str = "/v1/mail/sent:lookup";
 
 const HEADER_PROTOCOL_VERSION: &str = "x-worker-control-version";
 const HEADER_REQUEST_ID: &str = "x-request-id";
 const DEFAULT_BODY_LIMIT: usize = 1024;
+/// 远端读取路由使用更长的请求超时；单次读取仍由 Worker 自己的 fetch 预算终止。
+const REMOTE_READ_REQUEST_TIMEOUT: Duration =
+    Duration::from_secs(auction_application::WORKER_REMOTE_READ_TIMEOUT_SECONDS);
 const MAX_RESPONSE_BYTES: usize = 64 << 10;
 const MAX_REMEMBERED_TRIGGER_COMMANDS: usize = 256;
 

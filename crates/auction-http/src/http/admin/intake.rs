@@ -212,6 +212,14 @@ fn map_error(error: ApplicationError) -> Response {
                 )
                 .into_response()
             }
+            ApplicationError::AdminIntake(AdminIntakeError::ExternalAccessPaused) => {
+                super::api_error(
+                    StatusCode::CONFLICT,
+                    "external_access_paused",
+                    "外部访问已暂停；请等待恢复或到期后重试",
+                )
+                .into_response()
+            }
             ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
             ApplicationError::AdminIntake(AdminIntakeError::CommandConflict)
             | ApplicationError::CommandLedger(CommandLedgerError::Conflict)
