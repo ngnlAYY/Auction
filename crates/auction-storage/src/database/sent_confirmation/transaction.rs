@@ -160,9 +160,9 @@ pub(super) async fn apply(
     .await?;
     sqlx::query("INSERT INTO public.audit_records(id,occurred_at,actor_type,actor_id,action,entity_type,
         entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'admin',$2,'delivery.sent_operator_confirmed',
-        'delivery',$3,'success','admin',$4)")
+        'delivery',$3,'success',$5,$4)")
         .bind(command.command_id).bind(&command.actor).bind(command.delivery_id.to_string())
-        .bind(json!({"command_id":command.command_id,"request_digest":digest,
+        .bind(auction_application::cli_audit_metadata(command.operator_identity.as_ref(), json!({"command_id":command.command_id,"request_digest":digest,
             "fencing_version":command.expected_fencing_version,
             "sending_fencing_version":snapshot.sending_fencing_version,
             "external_reference":result.external_reference,
@@ -178,7 +178,8 @@ pub(super) async fn apply(
             "reason":command.reason,
             "collection_funding":if expected.credits > 0 {"already_collected"} else {"normal_worker"},
             "seller_payment":if expected.credits > 0 {"original_sent_confirmed"} else {"normal_queue"},
-            "funding_allocation_id":snapshot.data["funding_allocation"]["id"]}))
+            "funding_allocation_id":snapshot.data["funding_allocation"]["id"]})))
+        .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
         .execute(&mut **tx).await?;
     Ok(result)
 }

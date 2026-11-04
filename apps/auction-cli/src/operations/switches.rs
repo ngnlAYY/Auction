@@ -39,6 +39,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: SwitchCommand) -> anyho
             command_id: text::command_id(write.command_id, "--command-id")?, name,
             expected_revision: write.expected_revision, operation, value, expires_at,
             expired_command_id: None, actor_id: text::actor(&write.actor)?.to_owned(),
+            operator_identity: Some(super::operator_identity::capture()?),
             entrypoint: "cli".to_owned(), reason: write.reason,
         }).await?;
         print_json(&json!({"status": "database_accepted", "message": "数据库已接受；当前状态请核对最新事实与各角色指标", "accepted": event}))

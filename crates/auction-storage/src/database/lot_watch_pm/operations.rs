@@ -113,8 +113,10 @@ async fn audit_request(
 ) -> Result<(), LotWatchError> {
     use crate::database::audit_health::AuditWriteResult as _;
     sqlx::query("INSERT INTO public.audit_records (id,actor_type,actor_id,action,entity_type,entity_id,result,source,metadata)
-        VALUES ($1,'admin',$2,'lot_watch_pm.reconcile_requested','lot_watch_notification',$3,'success','system',$4)")
-        .bind(Uuid::new_v4()).bind(&command.actor).bind(command.notification_id.to_string()).bind(serde_json::json!({"command_id":command.command_id,"fencing_version":next}))
+        VALUES ($1,'admin',$2,'lot_watch_pm.reconcile_requested','lot_watch_notification',$3,'success',$5,$4)")
+        .bind(Uuid::new_v4()).bind(&command.actor).bind(command.notification_id.to_string())
+        .bind(auction_application::cli_audit_metadata(command.operator_identity.as_ref(), serde_json::json!({"command_id":command.command_id,"fencing_version":next})))
+        .bind(if command.operator_identity.is_some() { "cli" } else { "system" })
         .execute(&mut **tx).await.record_audit_failure().map_err(sql_error)?;
     Ok(())
 }

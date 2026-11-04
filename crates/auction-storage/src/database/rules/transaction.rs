@@ -230,23 +230,27 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
         result: AdminRulesDocument,
     ) -> impl Future<Output = Result<(), AdminRulesTransactionError>> + Send {
         async move {
-            let metadata = json!({
-                "command_id": command.command_id.as_uuid(),
-                "locale": result.locale,
-                "revision": result.revision,
-            });
+            let metadata = auction_application::cli_audit_metadata(
+                command.operator_identity.as_ref(),
+                json!({
+                    "command_id": command.command_id.as_uuid(),
+                    "locale": result.locale,
+                    "revision": result.revision,
+                }),
+            );
             sqlx::query(
                 "INSERT INTO public.audit_records
                     (id, actor_type, actor_id, action, entity_type, entity_id, result,
                      request_id, source, metadata)
                  VALUES ($1, 'admin', $2, 'rules.publish', 'rules_document', $3,
-                         'success', $4, 'admin', $5)",
+                         'success', $4, $6, $5)",
             )
             .bind(Uuid::new_v4())
             .bind(command.actor_id)
             .bind(result.locale)
             .bind(command.request_id)
             .bind(metadata)
+            .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
             .execute(&mut **self.transaction_mut()?)
             .await
             .record_audit_failure()

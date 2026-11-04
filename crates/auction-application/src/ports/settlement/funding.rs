@@ -104,6 +104,9 @@ pub struct FundingPreview {
 pub struct FundingReconciliationCommand {
     pub command_id: Uuid,
     pub actor: String,
+    /// 主机身份只写处置证据，不改变原命令的幂等摘要。
+    #[serde(skip)]
+    pub operator_identity: Option<crate::CliOperatorIdentity>,
     pub expected_uid: String,
     pub expected_version: i64,
     pub preview_digest: [u8; 32],

@@ -85,9 +85,12 @@ pub(super) async fn import_postgres(
                 write.command_id,
                 AdminCredentialCommandKind::Import,
                 write.credential_id,
-                &write.actor_id,
-                write.request_id.as_deref(),
-                write.now,
+                CredentialAuditContext {
+                    actor_id: &write.actor_id,
+                    request_id: write.request_id.as_deref(),
+                    now: write.now,
+                    operator_identity: write.operator_identity.as_ref(),
+                },
             )
             .await?;
             transaction
@@ -182,9 +185,12 @@ pub(super) async fn mutate_postgres(
                 write.command_id,
                 write.action,
                 write.credential_id,
-                &write.actor_id,
-                write.request_id.as_deref(),
-                write.now,
+                CredentialAuditContext {
+                    actor_id: &write.actor_id,
+                    request_id: write.request_id.as_deref(),
+                    now: write.now,
+                    operator_identity: None,
+                },
             )
             .await?;
             transaction
@@ -254,9 +260,12 @@ pub(super) async fn delete_postgres(
                 write.command_id,
                 AdminCredentialCommandKind::Delete,
                 write.credential_id,
-                &write.actor_id,
-                write.request_id.as_deref(),
-                write.now,
+                CredentialAuditContext {
+                    actor_id: &write.actor_id,
+                    request_id: write.request_id.as_deref(),
+                    now: write.now,
+                    operator_identity: None,
+                },
             )
             .await?;
             sqlx::query("DELETE FROM public.credential_keys WHERE id = $1 AND state_version = $2")

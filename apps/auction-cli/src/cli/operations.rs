@@ -35,7 +35,7 @@ pub(crate) enum CredentialCommand {
         #[arg(long)]
         player_name: Option<String>,
         /// 写入审计的操作者标识。
-        #[arg(long, default_value = "auction-cli")]
+        #[arg(long)]
         actor: String,
     },
 }

@@ -303,7 +303,7 @@ const AUDIT_KEYS: &[&str] = &[
 ];
 
 const AUDIT_ACTOR_TYPE_VALUES: &[&str] = &["public_user", "admin", "worker", "system"];
-const AUDIT_SOURCE_VALUES: &[&str] = &["public", "admin", "worker", "system"];
+const AUDIT_SOURCE_VALUES: &[&str] = &["public", "admin", "worker", "system", "cli"];
 const AUDIT_RESULT_VALUES: &[&str] = &["success", "rejected", "failure"];
 
 /// 审计列表可排序列：发生时间、操作者、动作、实体、来源、结果。

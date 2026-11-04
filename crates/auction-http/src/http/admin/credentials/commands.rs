@@ -95,6 +95,7 @@ pub(crate) async fn create(
             player_name: input.player_name,
             source,
             actor_id: identity.actor,
+            operator_identity: None,
             request_id: request_id(&headers),
             now: Utc::now(),
         })

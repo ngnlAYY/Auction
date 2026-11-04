@@ -73,6 +73,7 @@ fn execution_command(
         delivery_id: args.delivery_id,
         expected_fencing_version: version,
         actor: text::actor(args.actor.as_deref().context("--actor 必填")?)?.to_owned(),
+        operator_identity: Some(super::super::operator_identity::capture()?),
         reason: args.reason.clone().context("--reason 必填")?,
         evidence,
         accept_collected_assets: args.accept_collected_assets,

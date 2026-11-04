@@ -43,6 +43,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: ForumCommand) -> anyhow
                         command_id,
                         auction_id,
                         actor_id: actor.to_owned(),
+                        operator_identity: Some(super::operator_identity::capture()?),
                         request_hash,
                     })
                     .await

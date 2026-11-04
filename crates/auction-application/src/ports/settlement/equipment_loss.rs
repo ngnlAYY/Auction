@@ -11,6 +11,9 @@ pub struct EquipmentLossCommand {
     pub command_id: Uuid,
     pub lot_id: Uuid,
     pub actor: String,
+    /// 主机身份不改变原命令的幂等摘要。
+    #[serde(skip)]
+    pub operator_identity: Option<crate::CliOperatorIdentity>,
     pub reason: String,
     pub funding_uid: String,
     pub expected_recovery_version: u64,

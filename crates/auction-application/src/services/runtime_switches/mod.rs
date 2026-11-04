@@ -44,6 +44,7 @@ impl RuntimeSwitchRefreshService {
                 expires_at: None,
                 expired_command_id: Some(event.command_id),
                 actor_id: "runtime-switch-expirer".to_owned(),
+                operator_identity: None,
                 entrypoint: "system".to_owned(),
                 reason: "override expired".to_owned(),
             };

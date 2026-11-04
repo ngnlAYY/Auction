@@ -76,6 +76,8 @@ pub struct AdminRulesPublishCommand {
     pub title: String,
     pub markdown: String,
     pub actor_id: String,
+    /// CLI 装配根采集的身份；不参与业务摘要。
+    pub operator_identity: Option<crate::CliOperatorIdentity>,
     pub request_id: Option<String>,
     pub request_hash: RequestHash,
 }

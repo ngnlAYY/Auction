@@ -35,6 +35,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: PmCommand) -> anyhow::R
                         command_id: command_id.into(),
                         expected_fencing_version,
                         actor,
+                        operator_identity: Some(super::operator_identity::capture()?),
                     })
                     .await
                     .context("请求装备 PM 只读对账失败")?;

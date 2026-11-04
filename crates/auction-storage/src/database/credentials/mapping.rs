@@ -125,28 +125,38 @@ pub(super) async fn insert_command(
 }
 
 #[cfg(feature = "postgres")]
+pub(super) struct CredentialAuditContext<'a> {
+    pub actor_id: &'a str,
+    pub request_id: Option<&'a str>,
+    pub now: DateTime<Utc>,
+    pub operator_identity: Option<&'a auction_application::CliOperatorIdentity>,
+}
+
+#[cfg(feature = "postgres")]
 pub(super) async fn insert_audit(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: Uuid,
     kind: AdminCredentialCommandKind,
     credential_id: Uuid,
-    actor_id: &str,
-    request_id: Option<&str>,
-    now: DateTime<Utc>,
+    context: CredentialAuditContext<'_>,
 ) -> Result<(), ApplicationError> {
     sqlx::query(
         "INSERT INTO public.audit_records
             (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id,
              result, request_id, source, metadata)
-         VALUES ($1, $2, 'admin', $3, $4, 'credential', $5, 'success', $6, 'admin', $7)",
+         VALUES ($1, $2, 'admin', $3, $4, 'credential', $5, 'success', $6, $8, $7)",
     )
     .bind(Uuid::new_v4())
-    .bind(now)
-    .bind(actor_id)
+    .bind(context.now)
+    .bind(context.actor_id)
     .bind(format!("credential.{}", kind.as_str()))
     .bind(credential_id.to_string())
-    .bind(request_id)
-    .bind(Json(json!({ "command_id": command_id, "command_kind": kind.as_str() })))
+    .bind(context.request_id)
+    .bind(Json(auction_application::cli_audit_metadata(
+        context.operator_identity,
+        json!({ "command_id": command_id, "command_kind": kind.as_str() }),
+    )))
+    .bind(if context.operator_identity.is_some() { "cli" } else { "admin" })
     .execute(&mut **transaction)
     .await
     .record_audit_failure()

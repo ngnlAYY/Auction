@@ -78,6 +78,7 @@ async fn execute(
                     player_name,
                     source: AdminCredentialImportSource::Cookie(secret),
                     actor_id: actor,
+                    operator_identity: Some(super::operator_identity::capture()?),
                     request_id: None,
                     now: chrono::Utc::now(),
                 })

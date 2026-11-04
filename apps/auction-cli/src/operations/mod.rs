@@ -4,6 +4,7 @@ pub(crate) mod credentials;
 pub(crate) mod forum;
 pub(crate) mod funds;
 pub(crate) mod mail;
+mod operator_identity;
 pub(crate) mod rules;
 pub(crate) mod settlement;
 pub(crate) mod switches;

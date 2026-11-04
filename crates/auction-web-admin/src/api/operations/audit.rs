@@ -144,7 +144,7 @@ fn decode_audit_record(record: StrictAuditRecord) -> Result<AdminAuditRecord, &'
         || record.entity_type.is_empty()
         || record.entity_id.is_empty()
         || !matches!(record.result.as_str(), "success" | "rejected" | "failure")
-        || !matches!(record.source.as_str(), "public" | "admin" | "worker" | "system")
+        || !matches!(record.source.as_str(), "public" | "admin" | "worker" | "system" | "cli")
         || !record.metadata.is_object()
     {
         return Err("audit_record");
