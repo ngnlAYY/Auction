@@ -42,6 +42,7 @@ pub struct PublicApiState {
     watch_preference: Option<Arc<dyn auction_application::LotWatchPreferencePort>>,
     commands: Option<Arc<dyn CompetitionCommandPort>>,
     metrics: Option<Arc<ProcessMetrics>>,
+    runtime_switch_snapshot: Option<auction_application::RuntimeSwitches>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
     realtime_discovery_connections: Arc<Semaphore>,
     realtime_hub: Option<Arc<RealtimeHub>>,
@@ -70,6 +71,7 @@ impl Default for PublicApiState {
             watch_preference: None,
             commands: None,
             metrics: None,
+            runtime_switch_snapshot: None,
             readiness: None,
             realtime_discovery_connections: Arc::new(Semaphore::new(
                 MAX_PUBLIC_DISCOVERY_CONNECTIONS,
@@ -121,6 +123,7 @@ impl PublicApiState {
             watch_preference: None,
             commands,
             metrics: None,
+            runtime_switch_snapshot: None,
             readiness: None,
             realtime_discovery_connections: Arc::new(Semaphore::new(
                 MAX_PUBLIC_DISCOVERY_CONNECTIONS,
@@ -171,6 +174,15 @@ impl PublicApiState {
         self
     }
 
+    /// 注入进程共享的运行时开关快照，供指标边界在请求入口读取。
+    pub fn with_runtime_switch_snapshot(
+        mut self,
+        switches: auction_application::RuntimeSwitches,
+    ) -> Self {
+        self.runtime_switch_snapshot = Some(switches);
+        self
+    }
+
     /// 注入只读 readiness 检查；未注入时 `/health/ready` 明确返回未就绪。
     pub fn with_readiness(mut self, readiness: Arc<dyn ProcessReadinessPort>) -> Self {
         self.readiness = Some(readiness);
@@ -203,8 +215,12 @@ impl PublicApiState {
     /// 返回与本 state 同源的协议边界，供路由装配时建立全局 middleware。
     pub fn http_boundary(&self) -> HttpBoundary {
         let boundary = self.security.boundary();
-        match &self.metrics {
+        let boundary = match &self.metrics {
             Some(metrics) => boundary.with_metrics(metrics.http()),
+            None => boundary,
+        };
+        match &self.runtime_switch_snapshot {
+            Some(switches) => boundary.with_runtime_switches(switches.clone()),
             None => boundary,
         }
     }

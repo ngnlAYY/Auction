@@ -63,7 +63,13 @@ async fn run_service(
         .context("initialize Prometheus metrics")?,
     );
     let shutdown_metrics = metrics.shutdown();
-    let _metrics_task = metrics::start(config, Arc::clone(&metrics));
+    let switches = auction_application::RuntimeSwitches::new(
+        auction_application::RuntimeSwitchRole::Admin,
+        config.readiness.audit_failure_mode,
+        config.readiness.cache_enabled,
+    )
+    .with_metrics_reject_forwarded_requests_baseline(config.metrics.reject_forwarded_requests);
+    let _metrics_task = metrics::start(config, Arc::clone(&metrics), switches.clone());
     // 依赖装配可能等待数据库锁或连接；终止信号不能等到开始提供 HTTP 后才被读取。
     let (bound_listener, state, heartbeat, runtime_switch_task) = tokio::select! {
         biased;
@@ -73,10 +79,14 @@ async fn run_service(
         }
         result = async {
             let bound_listener = listener::bind(config).await.context("bind admin-api listener")?;
-            let (state, heartbeat, runtime_switch_task) =
-                state::configure_state(config, telemetry.health_reader(), Arc::clone(&metrics))
-                    .await
-                    .context("configure admin-api state")?;
+            let (state, heartbeat, runtime_switch_task) = state::configure_state(
+                    config,
+                    telemetry.health_reader(),
+                    Arc::clone(&metrics),
+                    switches.clone(),
+                )
+                .await
+                .context("configure admin-api state")?;
             Ok::<_, anyhow::Error>((bound_listener, state, heartbeat, runtime_switch_task))
         } => result?,
     };
@@ -87,8 +97,7 @@ async fn run_service(
     #[cfg(not(feature = "postgres"))]
     let mut heartbeat_task: Option<TaskGuard<()>> = None;
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
-    let boundary =
-        state.http_boundary().with_metrics_access(config.metrics.reject_forwarded_requests);
+    let boundary = state.http_boundary();
     let app = auction_http::admin_router::<crate::web_assets::AdminWebAssets>(
         env!("CARGO_PKG_VERSION"),
         boundary,

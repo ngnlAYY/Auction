@@ -168,8 +168,10 @@
 expected_revision、set/clear/expire、布尔或枚举值、UTC 期限、操作者、入口、
 原因、审计关联及固定结果；每名称 revision 唯一，同一设置最多追加一次 expire。
 数据库对名称只检查 1–64 字节及 snake_case，应用写入使用 Rust 闭集。
-已知名称增加 Worker 专用 bool `metrics_sli_snapshot_enabled`；
-原审计模式和 Public/Admin 的 `readiness_cache_enabled` 保持。
+已知名称增加 Worker 专用 bool `metrics_sli_snapshot_enabled` 与
+`mooglemail_poll_isolation_enabled`，以及三角色 bool
+`metrics_reject_forwarded_requests`；原审计模式和 Public/Admin 的
+`readiness_cache_enabled` 保持。
 新名称复用解析、摘要、最新事实、到期和审计，不新增迁移。
 
 读取先取每名称最新事实，再判断该 set 的期限。未设置、clear、expire 或最新 set 已过期均回落本角色启动时的 TOML 基线，绝不从更早事实恢复覆盖。未知名称在值解码之前忽略；已知名称的类型、枚举或结果投影损坏则拒绝整次刷新，保留原成功快照。新增名称须保持旧程序忽略规则；扩展已知名称的取值须另行评估跨版本兼容，不能默认兼容。
@@ -178,7 +180,12 @@ expected_revision、set/clear/expire、布尔或枚举值、UTC 期限、操作�
 
 三角色启动立即读取、每五秒刷新，单次预算一秒。成功时原子替换完整不可变快照；首次失败用 TOML，后续失败保留最后成功快照及原期限。期限来自数据库时间，进程用查询开始时刻和单调时钟保守推算，不因传输延迟延长期限。Worker 每周期对最新且已到期 set 追加 expire，其命令 UUID 由原 set UUID 与固定 `runtime-switch-expire-v1` 派生；竞争时重新读取，结果未知保持原身份。实际回落不等待 expire 追加成功，原 set 的期限已是持久证据。
 
-此缓存只选择正确的就绪路径，不决定金额、资格、幂等、锁、会话或审计写入。运行时模式只改变审计分类累计的投影，不清零计数；HTTP 缓存绑定策略版本及期限状态，旧版本在途检查不得作为新版本缓存或返回成功。操作步骤见[运行时开关](../../ops/README.md#运行时开关)。
+此缓存只选择已经就绪且正确的运行路径，不决定金额、资格、幂等、锁、会话或
+审计写入。运行时模式只改变审计分类累计的投影，不清零计数；HTTP 缓存绑定
+策略版本及期限状态，旧版本在途检查不得作为新版本缓存或返回成功。
+指标转发拒绝只允许命令层在线收紧，放宽须修改部署配置并重启；
+直接写库绕过命令不在本批威胁模型内。操作步骤见
+[运行时开关](../../ops/README.md#运行时开关)。
 
 ## 连接档位与事务观测
 

@@ -106,7 +106,9 @@ impl Collector for RuntimeSwitchCollector {
                     _ => 0.0,
                 },
                 RuntimeSwitchName::ReadinessCacheEnabled
-                | RuntimeSwitchName::MetricsSliSnapshotEnabled => {
+                | RuntimeSwitchName::MetricsSliSnapshotEnabled
+                | RuntimeSwitchName::MooglemailPollIsolationEnabled
+                | RuntimeSwitchName::MetricsRejectForwardedRequests => {
                     f64::from(view.effective_value.as_bool().unwrap_or(false))
                 }
             };

@@ -74,7 +74,7 @@ loopback TCP 或 Unix socket；Worker control 按原 peer 授权提供指标。
 | `public_loopback_listen_address` | 省略关闭；Public 附加指标地址 |
 | `admin_loopback_listen_address` | 省略关闭；Admin 附加指标地址 |
 | `worker_loopback_listen_address` | 省略关闭；Worker 附加指标地址 |
-| `reject_forwarded_requests` | 默认 true；业务指标路由及三角色新出口拒绝转发 |
+| `reject_forwarded_requests` | 默认 true；业务指标路由及三角色新出口拒绝转发的 TOML 基线；在线开关只允许收紧 |
 | `sli_snapshot_enabled` | 默认 false；Worker 每六十秒只读汇总的 TOML 基线 |
 
 有效 `enabled = true` 且填写本角色地址时才监听；地址只接受数值
@@ -83,9 +83,11 @@ loopback TCP 或 Unix socket；Worker control 按原 peer 授权提供指标。
 任一地址都不能与本角色实际业务 TCP listener 冲突，包括通配监听；
 Admin 按 runtime 生效后的 listener 核对。示例端口为 19100/19101/19102。
 
-Admin runtime 的 `[metrics]` **只覆盖 Admin 的 `enabled`**；拒绝策略和三个地址
+Admin runtime 的 `[metrics]` **只覆盖 Admin 的 `enabled`**；拒绝策略基线和三个地址
 始终来自 common，不进入 runtime 文档，不改变指纹或命令摘要。
-Public/Worker 的 `enabled` 仍来自 common。上述字段修改均须重启对应角色。
+Public/Worker 的 `enabled` 仍来自 common。
+`metrics_reject_forwarded_requests` 可在线 `set true` 收紧、`clear` 回落此基线；
+`set false` 被命令层拒绝。放宽拒绝或修改地址/`enabled` 仍须重启对应角色。
 
 附加出口只提供 `/metrics`，共享业务指标路由的判定与响应实现；
 Worker 的新出口独立于 control socket，不开放 control/健康/业务路由。
@@ -195,19 +197,35 @@ Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、`metrics.e
 
 #### MoogleMail 收件与维护
 
-以下字段只属于 `worker.toml` 的 `[worker.mooglemail]`，不由 Admin 参数界面接管，修改后需要重启 Worker：
+以下字段只属于 `worker.toml` 的 `[worker.mooglemail]`，不由 Admin 参数界面接管。
+路径隔离可在运行时切换；维护日程和观察间隔仍按启动配置生效：
 
 | 字段 | 默认值与范围 | 行为 |
 | --- | --- | --- |
-| `poll_isolation_enabled` | `true` | 每个世界独立运行收件与维护；维护先执行 Sent/Take 恢复和 compose 清理，再检查 Read Mail 纯观察是否到期 |
+| `poll_isolation_enabled` | `true` | 在线开关基线；true 独立收件与维护，false 恢复每轮三分支 join |
 | `maintenance_schedule` | 省略；接受与 `schedule` 相同的标准 cron、描述符、时区前缀和 `@every` | 省略时跟随实际生效的收件 `schedule`，包括 Admin 托管邮件参数对该字段的覆盖；显式配置时使用独立维护日程 |
 | `read_mail_observation_interval_seconds` | `3600`，范围 `60–86400` | 完整已读列表纯计数观察的最小间隔；首次观察延后该间隔，只在每次 `sweep` 结束后检查，实际间隔向上取整到维护节奏；失败也消耗本次间隔 |
 
-两个世界同时启用且隔离开启时，启动时从实际收件日程的首两个未来触发时刻计算一次相位：`phase = min(150 秒, 两次触发间隔 / 2)`。main 使用零相位，isekai 使用该相位；单世界部署使用零相位。同一世界的收件和维护都按 `schedule.next_after(now - phase) + phase` 平移整条日程，再叠加原 `jitter_seconds`，不会因直接给下一触发点加延迟而漏掉尚未到来的偏移时刻。`@every` 是相对节奏，在该公式中自然抵消相位，不另加错峰分支。默认五分钟 cron 下，两个世界的名义触发点相差 150 秒。
+两个世界同时启用时，启动时从实际收件日程的首两个未来触发时刻计算一次相位：
+`phase = min(150 秒, 两次触发间隔 / 2)`。main 使用零相位，isekai 使用该相位；
+单世界部署使用零相位。无论基线是否隔离开启，装配都预构建无相位与带相位两套
+收件日程并冻结相位，供在线切换直接选择。同一世界的收件和维护都按
+`schedule.next_after(now - phase) + phase` 平移整条日程，再叠加原
+`jitter_seconds`，不会因直接给下一触发点加延迟而漏掉尚未到来的偏移时刻。
+`@every` 是相对节奏，在该公式中自然抵消相位，不另加错峰分支。
+默认五分钟 cron 下，两个世界的名义触发点相差 150 秒。
 
 收件唤醒与持久邮箱下一次 due 使用同一平移日程；租约、游标、命令资格与业务完成仍依赖数据库事实。手动触发立即唤醒收件，不受相位影响，也不唤醒独立维护。维护和纯观察分别使用原 `fetch_timeout_seconds` 的总截止点，各阶段内的数据库等待、凭据排队与远端操作不能重置期限。`maximum_pages`、完整列表检查、恢复及发送证明保持原语义；低频纯观察只记录完整列表数量，不创建历史入站命令。
 
-回退时设置 `poll_isolation_enabled = false` 并重启 Worker：恢复每轮 Read Mail 观察、维护与收件的三分支 `tokio::join!`、原观察频率和无相位日程，不启动独立维护任务，两个新节奏参数不生效。重启须遵守部署时段门禁。
+在线切换使用 `auction-cli switch set mooglemail_poll_isolation_enabled false`，
+clear 回落此 TOML 基线；无需重启。切换在下一轮收件调度或下一次维护门复读后生效，
+在途轮次按开始时模式完整结束。旧路径恢复每轮 Read Mail 观察、维护与收件的
+三分支 `tokio::join!`、原观察频率和无相位日程；维护任务保持 idle 而不退出，
+两个循环共用每世界互斥门。进入隔离时观察计时重置为当前时刻，
+睡眠按不超过五秒切片复读开关，不重复叠加 jitter 或重置同一模式的触发点。
+启动时始终解析并校验 `maintenance_schedule`，即使基线为 false；
+在线切换不重写 `mail_poll_state.next_poll_at`，首个新模式收件可继续等待旧 due。
+显式维护日程与观察间隔的修改仍需重启 Worker。
 
 #### MoogleMail 发送前基线
 
@@ -316,11 +334,20 @@ Worker 新路径在首次停止时关闭入口，立即取消尚未登记交接�
 | readiness_audit_failure_mode | legacy/shadow/classified | 三角色 / readiness.audit_failure_mode |
 | readiness_cache_enabled | bool | Public/Admin / readiness.cache_enabled |
 | metrics_sli_snapshot_enabled | bool | Worker / metrics.sli_snapshot_enabled |
+| mooglemail_poll_isolation_enabled | bool | Worker / worker.mooglemail.poll_isolation_enabled |
+| metrics_reject_forwarded_requests | bool | 三角色 / metrics.reject_forwarded_requests |
 
 优先级为最新且未过期的数据库 set → 启动时 TOML 基线。
 clear、expire、到期或未设置均回落基线；修改 TOML 不清除无期限覆盖。
 
-三角色五秒刷新，单次一秒预算；首次失败保留基线，后续失败保留最后成功快照，但仍按原数据库期限回落。默认基线仍为 shadow/true；切 classified 仍需用户审阅影子样本。切换不清零审计累计；策略版本变化立即使旧 HTTP 就绪缓存失效。Worker control 不使用 HTTP 就绪缓存。`migration_compatibility_mode`、排空预算、邮件隔离和指标转发开关本批继续重启生效；W7.10 的 runtime 文件预算热读取也不在本批范围。操作与 stale 诊断见[运维手册](../README.md#运行时开关)。
+三角色五秒刷新，单次一秒预算；首次失败保留基线，后续失败保留最后成功快照，
+但仍按原数据库期限回落。默认基线仍为 shadow/true；切 classified 仍需用户
+审阅影子样本。切换不清零审计累计；策略版本变化立即使旧 HTTP 就绪缓存失效。
+Worker control 不使用 HTTP 就绪缓存。邮件隔离开关在 Worker 下一轮调度或维护门
+复读后生效；指标转发拒绝在每次 `/metrics` 请求边界读取，且只允许在线收紧，
+`set false` 被命令层拒绝。`migration_compatibility_mode`、排空预算与 W7.10 的
+runtime 文件预算热读取仍不在本批范围。操作与 stale 诊断见
+[运维手册](../README.md#运行时开关)。
 
 ## 数据库连接分档
 

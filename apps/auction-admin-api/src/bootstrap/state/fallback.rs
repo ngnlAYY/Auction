@@ -17,13 +17,14 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     _tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     _metrics: Arc<ProcessMetrics>,
+    switches: auction_application::RuntimeSwitches,
 ) -> anyhow::Result<(AdminApiState, Option<Arc<auction_observability::HeartbeatPublisher>>)> {
     let security = config::configure_security(config)?;
     let worker_control = config::configure_worker_control(config);
     if config.database_url().is_some() {
         anyhow::bail!("admin-api 配置了数据库，但当前制品未编译 postgres feature");
     }
-    Ok((empty_state(config, security, worker_control), None))
+    Ok((empty_state(config, security, worker_control, switches), None))
 }
 
 /// 两种 feature 路径共用同一端口集合；安全校验与缺失 feature 错误仍由调用方按原顺序处理。
@@ -31,6 +32,7 @@ pub(super) fn empty_state(
     config: &AppConfig,
     security: AdminHttpSecurity,
     worker_control: Option<Arc<dyn WorkerControlPort>>,
+    switches: auction_application::RuntimeSwitches,
 ) -> AdminApiState {
     AdminApiState::new(
         None,
@@ -63,4 +65,5 @@ pub(super) fn empty_state(
     )
     .with_dashboard_worlds(config::configured_dashboard_worlds(config))
     .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config))
+    .with_runtime_switch_snapshot(switches)
 }

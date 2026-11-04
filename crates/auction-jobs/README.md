@@ -26,7 +26,14 @@ Worker 的调度运行时与本地控制面：把应用层的持久化端口编�
 
 邮件的独立维护任务由 `crates/auction-jobs/src/worker/runtime/runner.rs` 的独立 `JoinSet` 持有，共用 shutdown watch、意外退出监督和总排空截止。每次 `sweep` 与随后到期的纯观察各有一个原 `fetch_timeout` 截止点，阶段内不重置；进入 drain 后不再启动新阶段，在途 `sweep` 保留原 discard 围栏。纯观察首次延后一个间隔，只在 `sweep` 结束后检查，失败也消耗间隔；内存时刻仅减少观察读取，不决定持久任务状态。
 
-收件与维护的日程按同一世界相位平移，再叠加原 jitter；手动 `wakeup` 只唤醒收件。`poll_isolation_enabled = false` 时不启动独立维护任务，恢复原 cron、每轮三分支 join 和原观察频率。维护日程、观察间隔与相位规则见[配置参考](../../ops/config/README.md#mooglemail-收件与维护)，指标口径见[可观测性](../auction-observability/README.md#邮件循环口径)。
+收件与维护的日程按同一世界相位平移，再叠加原 jitter；手动 `wakeup` 只唤醒收件。
+每个 world 始终有一个维护任务和一个收件循环，通过同一
+`Arc<tokio::sync::Mutex<()>>` 串行化维护与观察：隔离路径由维护任务执行，
+旧路径由收件循环在 claim 前取得并持有到三分支 join 结束。切换按下一轮或
+下一次维护门复读生效，在途轮次、claim、租约与预算不重置；旧路径下维护任务只
+idle，不退出。维护日程、观察间隔与相位规则见
+[配置参考](../../ops/config/README.md#mooglemail-收件与维护)，指标口径见
+[可观测性](../auction-observability/README.md#邮件循环口径)。
 
 世界相位计算与日程平移策略由 [`crates/auction-jobs/src/worker/mail/schedule/mod.rs`](src/worker/mail/schedule/mod.rs) 持有，经 crate 根导出 `mail_world_phase` 与 `PhasedMailSchedule`；Worker 装配根只判断是否启用相位、处理启动错误并注入日程。
 
@@ -73,7 +80,12 @@ delivery 的 claimed 可重领，sending 到期加 grace 后转人工，不自�
 
 ## 运行时开关刷新
 
-`start_runtime_switch_refresh` 启动即限时读取，此后五秒周期调用应用刷新服务，每次一秒预算；Worker 另限时追加到期收口。调用方用 TaskGuard 管理生命周期，刷新不依赖业务循环、主动暂停或就绪状态。首次失败保留 TOML，后续保留成功快照和原期限，见[运维手册](../../ops/README.md#运行时开关)。
+`start_runtime_switch_refresh` 启动即限时读取，此后五秒周期调用应用刷新服务，
+每次一秒预算；Worker 另限时追加到期收口。调用方用 TaskGuard 管理生命周期，
+刷新不依赖业务循环、主动暂停或就绪状态。邮件循环每轮读取
+`mooglemail_poll_isolation_enabled`；指标边界在每次请求入口读取
+`metrics_reject_forwarded_requests`。首次失败保留 TOML，后续保留成功快照和
+原期限，见[运维手册](../../ops/README.md#运行时开关)。
 
 
 ## SLI 汇总任务

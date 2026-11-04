@@ -27,7 +27,9 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: SwitchCommand) -> anyho
         let value = value.map(|value| match name {
             RuntimeSwitchName::ReadinessAuditFailureMode => Ok(json!(value)),
             RuntimeSwitchName::ReadinessCacheEnabled
-            | RuntimeSwitchName::MetricsSliSnapshotEnabled => value
+            | RuntimeSwitchName::MetricsSliSnapshotEnabled
+            | RuntimeSwitchName::MooglemailPollIsolationEnabled
+            | RuntimeSwitchName::MetricsRejectForwardedRequests => value
                 .parse::<bool>()
                 .map(|value| json!(value))
                 .map_err(invalid_boolean),

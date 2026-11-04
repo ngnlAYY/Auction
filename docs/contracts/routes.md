@@ -292,8 +292,11 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 
 ### 运行时开关只读接口
 
-W0.13 在 database_intent 中增加 Worker 专用 bool `metrics_sli_snapshot_enabled`，
-共三个已知意图；admin_applied 仍只有两项 Admin 消费的就绪策略。
+W0.13 在 database_intent 中增加 Worker 专用 bool `metrics_sli_snapshot_enabled`；
+W7.7 第二批再增加 Worker 专用 `mooglemail_poll_isolation_enabled` 和三角色
+`metrics_reject_forwarded_requests`，共五个已知意图。admin_applied 只含当前
+Admin 消费的项，数量不固定且不要求与 database_intent 等长；前端按名称闭集
+分别校验两个数组，并要求 admin_applied 是 database_intent 的名称子集。
 复用现有只读卡片，不新增路由或 JSON 字段；更新后须刷新旧 Admin 页面。
 Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当作已应用证明。
 基线和在线覆盖规则见[配置参考](../../ops/config/README.md#数据库运行时开关)。

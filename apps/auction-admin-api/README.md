@@ -48,7 +48,8 @@ Admin 从 common 注入[审计就绪策略](../../ops/config/README.md#就绪策
 
 指标附加出口由 common 的 `metrics.admin_loopback_listen_address` 选择，
 省略关闭，示例为 `127.0.0.1:19101`。只有有效 `metrics.enabled = true` 才监听。
-Admin runtime **只覆盖 enabled**，地址和 `reject_forwarded_requests` 始终来自 common。
+Admin runtime **只覆盖 enabled**；地址和 `reject_forwarded_requests` 基线始终来自 common。
+运行时可在线 set true 收紧转发拒绝，clear 回落 common；放宽仍须修改部署配置并重启。
 Unix socket 部署可由 Prometheus 直接抓附加出口，复用业务 `/metrics` 契约与注册表。
 绑定/服务失败只记录固定类别 ERROR，不影响 readiness；任务随进程退出取消。
 删除地址并按部署窗口重启即回退。校验见
@@ -70,7 +71,12 @@ Worker 读取其中由 `managed = true` 接管的分组。
 
 ## 数据库运行时开关
 
-启动装配注入 TOML 就绪基线并立即读取数据库开关，随后每五秒刷新、单次一秒预算，任务随进程生命周期收口。审计模式使用三角色共享规则；Public/Admin 另接入 HTTP 就绪缓存，Worker 负责到期收口。失败保留原快照及期限，不清零审计累计；本批不热读取其他配置。核对与回退见[运维手册](../../ops/README.md#运行时开关)。
+启动装配注入 TOML 就绪基线与指标转发拒绝基线，并立即读取数据库开关，
+随后每五秒刷新、单次一秒预算，任务随进程生命周期收口。审计模式使用三角色
+共享规则；Public/Admin 另接入 HTTP 就绪缓存，Worker 负责到期收口。
+同一 `RuntimeSwitches` 同时供业务 `/metrics`、loopback 出口与 Admin 只读卡片
+使用；指标转发拒绝只允许在线收紧。失败保留原快照及期限，不清零审计累计。
+核对与回退见[运维手册](../../ops/README.md#运行时开关)。
 
 ## 数据库连接档位
 

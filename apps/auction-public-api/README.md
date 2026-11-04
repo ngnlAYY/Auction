@@ -53,7 +53,12 @@ cargo run --locked -p auction-public-api --features postgres,web-embed   # 需�
 
 ## 数据库运行时开关
 
-启动装配注入 TOML 就绪基线并立即读取数据库开关，随后每五秒刷新、单次一秒预算，任务随进程生命周期收口。审计模式使用三角色共享规则；Public/Admin 另接入 HTTP 就绪缓存，Worker 负责到期收口。失败保留原快照及期限，不清零审计累计；本批不热读取其他配置。核对与回退见[运维手册](../../ops/README.md#运行时开关)。
+启动装配注入 TOML 就绪基线与指标转发拒绝基线，并立即读取数据库开关，
+随后每五秒刷新、单次一秒预算，任务随进程生命周期收口。审计模式使用三角色
+共享规则；Public/Admin 另接入 HTTP 就绪缓存，Worker 负责到期收口。
+同一 `RuntimeSwitches` 同时供业务 `/metrics` 与 loopback 出口在请求边界读取；
+`metrics_reject_forwarded_requests` 只允许在线收紧。失败保留原快照及期限，
+不清零审计累计。核对与回退见[运维手册](../../ops/README.md#运行时开关)。
 
 ## 数据库连接档位
 

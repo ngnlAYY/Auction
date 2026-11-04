@@ -640,7 +640,8 @@ impl DiagnosticError for crate::OperationsAlertError {
 impl DiagnosticError for crate::RuntimeSwitchError {
     fn diagnostic_kind(&self) -> SafeErrorKind {
         match self {
-            Self::Invalid => SafeErrorKind::DOMAIN_REJECTED,
+            // 只收紧策略的拒绝属于输入被拒，与无效命令同一类别。
+            Self::Invalid | Self::UnsafeRelaxation => SafeErrorKind::DOMAIN_REJECTED,
             Self::Conflict => SafeErrorKind::REPOSITORY_CONFLICT,
             Self::Corrupt => SafeErrorKind::RUNTIME_SWITCH_CORRUPT,
             Self::Unavailable => SafeErrorKind::DEPENDENCY_UNAVAILABLE,

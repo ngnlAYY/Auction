@@ -25,6 +25,7 @@ pub(super) async fn configure_mail_poll(
     profile_reader: Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
     progress_observer: Arc<dyn auction_application::MailPollProgressObserver>,
     sent_baseline_observer: Arc<dyn auction_application::SentBaselineObserver>,
+    switches: auction_application::RuntimeSwitches,
 ) -> anyhow::Result<(
     Vec<MailPollRuntime>,
     Option<Arc<dyn DeliveryTransport>>,
@@ -55,13 +56,14 @@ pub(super) async fn configure_mail_poll(
                 .context("parse MoogleMail standard cron schedule")?,
         );
         // AppConfig 已应用 Admin 托管覆盖；省略维护日程时跟随最终生效的收件日程。
-        let maintenance_schedule: Arc<dyn RecurringSchedule> = if mail_config.poll_isolation_enabled
-            && let Some(expression) = &mail_config.maintenance_schedule
-        {
-            Arc::new(StandardCronSchedule::parse(expression).context("解析 MoogleMail 维护 cron")?)
-        } else {
-            Arc::clone(&schedule)
-        };
+        // 即使基线关闭也解析并校验显式维护日程，在线切回隔离时不能暴露启动时未发现的错误。
+        let maintenance_schedule: Arc<dyn RecurringSchedule> =
+            match &mail_config.maintenance_schedule {
+                Some(expression) => Arc::new(
+                    StandardCronSchedule::parse(expression).context("解析 MoogleMail 维护 cron")?,
+                ),
+                None => Arc::clone(&schedule),
+            };
         let (credentials, ownership) =
             credentials::load_credentials(config, mail_config, &world_configs, Arc::clone(&store))
                 .await?;
@@ -105,6 +107,7 @@ pub(super) async fn configure_mail_poll(
                 schedule,
                 maintenance_schedule,
                 progress_observer,
+                switches,
             },
         )
         .await?;

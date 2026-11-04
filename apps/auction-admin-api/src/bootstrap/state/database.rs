@@ -132,6 +132,7 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<auction_observability::ProcessMetrics>,
+    switches: auction_application::RuntimeSwitches,
 ) -> anyhow::Result<(
     AdminApiState,
     Option<Arc<HeartbeatPublisher>>,
@@ -140,13 +141,12 @@ pub(super) async fn configure_state(
     let security = config::configure_security(config)?;
     let worker_control = config::configure_worker_control(config);
     let Some(database_url) = config.database_url() else {
-        return Ok((super::fallback::empty_state(config, security, worker_control), None, None));
+        return Ok((
+            super::fallback::empty_state(config, security, worker_control, switches),
+            None,
+            None,
+        ));
     };
-    let switches = auction_application::RuntimeSwitches::new(
-        auction_application::RuntimeSwitchRole::Admin,
-        config.readiness.audit_failure_mode,
-        config.readiness.cache_enabled,
-    );
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
             .await
@@ -393,6 +393,7 @@ pub(super) async fn configure_state(
     .with_dashboard_worlds(config::configured_dashboard_worlds(config))
     .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config))
     .with_runtime_switches(store.clone(), switches.clone())
+    .with_runtime_switch_snapshot(switches.clone())
     .with_readiness(Arc::new(
         auction_http::HttpReadinessProbe::new(
             store,

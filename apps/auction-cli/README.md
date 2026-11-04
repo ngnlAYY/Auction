@@ -393,7 +393,7 @@ Bot 内部履约（买卖双方之一是 Bot 自己时不经邮件外发）需�
 ## 运行时开关
 
 `auction-cli --config-dir /etc/auction switch list` 只读返回数据库时间、
-三个已知名称的最新事实和 revision（未设置为 0），不证明运行进程已应用。
+五个已知名称的最新事实和 revision（未设置为 0），不证明运行进程已应用。
 set/clear 直接执行在线命令，不停机、不调用 W7.5、不隐式迁移，
 也不要求先停止 Worker。
 
@@ -407,9 +407,23 @@ auction-cli --config-dir /etc/auction switch set readiness_cache_enabled false \
 auction-cli --config-dir /etc/auction switch clear readiness_audit_failure_mode \
   --command-id <新的稳定UUID> --expected-revision <list中的版本> \
   --actor <操作者说明> --reason <非敏感原因>
+auction-cli --config-dir /etc/auction switch set mooglemail_poll_isolation_enabled false \
+  --command-id <新的稳定UUID> --expected-revision <list中的版本> \
+  --no-expiry --actor <操作者说明> --reason <非敏感原因>
+auction-cli --config-dir /etc/auction switch set metrics_reject_forwarded_requests true \
+  --command-id <新的稳定UUID> --expected-revision <list中的版本> \
+  --no-expiry --actor <操作者说明> --reason <非敏感原因>
 ```
 
 set 的绝对 RFC3339 到期与 `--no-expiry` 必须二选一；期限最多六位小数、不接受闰秒，与 PostgreSQL 微秒精度一致。审计模式只接受 legacy/shadow/classified，缓存只接受 true/false。clear 不删除历史，只追加事实并回落各进程启动时的 TOML 基线。没有重读文件或重启；修改文件基线仍按原部署流程执行。
+
+`metrics_reject_forwarded_requests` 是安全策略，只允许在线收紧：
+`set true` 与 `clear` 被接受，`set false` 在命令校验层固定拒绝，
+错误正文为“指标转发拒绝只能在线收紧；放宽须修改部署配置并重启”，
+退出码仍是业务运维命令的 5。放宽必须修改 common 的
+`[metrics] reject_forwarded_requests` 并重启对应角色。
+邮件隔离开关切换在 Worker 下一轮调度或下一次维护门复读后生效；
+在途 claim、租约、批次预算与 sweep 不因切换重置。
 
 命令返回 `status=database_accepted` 和固定 `accepted`，含义是“数据库已接受”。同 ID 同参重放原结果，即使已经过期或已有新命令也不续期、不覆盖。异参、旧 revision 被拒绝；重新读取后，新的意图使用新 ID。提交结果未知时必须使用原 ID 和全部原参数原样重试，不能换 ID 重发。`--actor` 当前仍是操作者声明，CLI 审计来源在 metadata 中标明 executor/entrypoint；自动 UID/SUDO_USER 追溯尚未接入。
 

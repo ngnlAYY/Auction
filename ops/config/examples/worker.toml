@@ -187,9 +187,11 @@ maximum_pages = 20
 sent_baseline_mode = "shadow"
 # 可选：标准五字段 cron，默认每 5 分钟；也支持 @hourly/@daily/@every 以及 TZ=/CRON_TZ= 时区前缀。
 schedule = "*/5 * * * *"
-# 可选：收件与维护独立运行并按世界平移日程；默认 true；false 恢复每轮三分支 join、原观察频率和无相位日程，新节奏参数不生效；修改需重启。
+# 运行时开关 mooglemail_poll_isolation_enabled 可在线切换，clear 回落此值；
+# false 恢复每轮三分支 join、原观察频率和无相位日程。
+# 可选：收件与维护独立运行并按世界平移日程的 TOML 基线，默认 true。
 poll_isolation_enabled = true
-# 可选：独立维护 cron，语法与 schedule 相同；默认省略并跟随 Admin 托管覆盖后实际生效的 schedule，仅 poll_isolation_enabled=true 时生效。
+# 可选：独立维护 cron，语法与 schedule 相同；默认省略并跟随 Admin 托管覆盖后实际生效的 schedule；启动时始终解析并校验，修改需重启。
 # maintenance_schedule = "*/5 * * * *"
 # 可选：完整 Read Mail 纯观察的最小间隔秒数，范围 60-86400，默认 3600；首次延后同一间隔，每次 sweep 后检查并向上取整到维护节奏，失败也消耗间隔；仅隔离开启时生效，修改需重启。
 read_mail_observation_interval_seconds = 3600

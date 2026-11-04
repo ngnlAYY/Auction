@@ -159,7 +159,15 @@ async fn run_service(
         .context("initialize Prometheus metrics")?,
     );
     let cache = configure_cache(config).context("configure worker cache")?;
-    let _metrics_task = metrics::start(config, Arc::clone(&metrics));
+    let switches = auction_application::RuntimeSwitches::new(
+        auction_application::RuntimeSwitchRole::Worker,
+        config.readiness.audit_failure_mode,
+        config.readiness.cache_enabled,
+    )
+    .with_sli_snapshot_baseline(config.metrics.sli_snapshot_enabled)
+    .with_mooglemail_poll_isolation_baseline(config.worker.mooglemail.poll_isolation_enabled)
+    .with_metrics_reject_forwarded_requests_baseline(config.metrics.reject_forwarded_requests);
+    let _metrics_task = metrics::start(config, Arc::clone(&metrics), switches.clone());
     tracing::info!(
         database_configured = config.database_url().is_some(),
         cache_backend = cache.backend(),
@@ -176,6 +184,7 @@ async fn run_service(
         config,
         telemetry.health_reader(),
         Arc::clone(&metrics),
+        switches,
         runtime_failure_sender,
         shutdown_runtime.lifecycle.clone(),
         Box::pin(async move {

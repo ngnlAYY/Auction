@@ -74,6 +74,8 @@ pub struct RuntimeSwitches {
     audit_baseline: AuditFailureMode,
     cache_baseline: bool,
     sli_baseline: bool,
+    mail_isolation_baseline: bool,
+    metrics_reject_baseline: bool,
     state: Arc<RwLock<Arc<Snapshot>>>,
     successes: Arc<AtomicU64>,
     failures: Arc<AtomicU64>,
@@ -97,6 +99,8 @@ impl RuntimeSwitches {
             audit_baseline,
             cache_baseline,
             sli_baseline: false,
+            mail_isolation_baseline: true,
+            metrics_reject_baseline: true,
             state: Arc::new(RwLock::new(Arc::new(Snapshot {
                 read: RuntimeSwitchRead { database_time: Utc::now(), events: Vec::new() },
                 loaded_at: None,
@@ -112,13 +116,37 @@ impl RuntimeSwitches {
         self
     }
 
+    /// Worker 在首次刷新前注入 MoogleMail 路径隔离基线。
+    pub fn with_mooglemail_poll_isolation_baseline(mut self, enabled: bool) -> Self {
+        self.mail_isolation_baseline = enabled;
+        self
+    }
+
+    /// 三角色在首次刷新前注入指标转发拒绝基线。
+    pub fn with_metrics_reject_forwarded_requests_baseline(mut self, enabled: bool) -> Self {
+        self.metrics_reject_baseline = enabled;
+        self
+    }
+
     /// 仅 Worker 消费；沿用同一最新事实、期限与失败回落规则。
     pub fn sli_snapshot_enabled(&self) -> bool {
-        self.status().switches.into_iter().any(|view| {
-            view.name == RuntimeSwitchName::MetricsSliSnapshotEnabled
-                && view.applies
-                && view.effective_value.as_bool().unwrap_or(false)
-        })
+        self.effective_bool(RuntimeSwitchName::MetricsSliSnapshotEnabled, self.sli_baseline)
+    }
+
+    /// 仅 Worker 消费；每次读取只看目标项的期限与角色适用性。
+    pub fn mooglemail_poll_isolation_enabled(&self) -> bool {
+        self.effective_bool(
+            RuntimeSwitchName::MooglemailPollIsolationEnabled,
+            self.mail_isolation_baseline,
+        )
+    }
+
+    /// 指标边界在每次请求入口读取一次；不构造完整状态视图。
+    pub fn metrics_reject_forwarded_requests(&self) -> bool {
+        self.effective_bool(
+            RuntimeSwitchName::MetricsRejectForwardedRequests,
+            self.metrics_reject_baseline,
+        )
     }
 
     fn current(&self) -> Arc<Snapshot> {
@@ -177,46 +205,10 @@ impl RuntimeSwitches {
     pub fn status(&self) -> RuntimeSwitchStatus {
         let snapshot = self.current();
         let age = snapshot.loaded_at.map(|at| at.elapsed());
-        let now = age
-            .and_then(|age| chrono::Duration::from_std(age).ok())
-            .and_then(|age| snapshot.read.database_time.checked_add_signed(age));
+        let now = database_now(&snapshot, age);
         let switches = RuntimeSwitchName::ALL
             .into_iter()
-            .map(|name| {
-                let latest = snapshot.read.events.iter().find(|event| event.name == name).cloned();
-                let applies = name.applies_to(self.role);
-                let overridden = applies
-                    && latest.as_ref().is_some_and(|event| {
-                        event.operation == RuntimeSwitchOperation::Set
-                            && event
-                                .expires_at
-                                .is_none_or(|until| now.is_some_and(|now| now < until))
-                    });
-                let baseline = match name {
-                    RuntimeSwitchName::ReadinessAuditFailureMode => {
-                        json!(audit_label(self.audit_baseline))
-                    }
-                    RuntimeSwitchName::ReadinessCacheEnabled => json!(self.cache_baseline),
-                    RuntimeSwitchName::MetricsSliSnapshotEnabled => json!(self.sli_baseline),
-                };
-                let effective_value = if overridden {
-                    latest
-                        .as_ref()
-                        .and_then(|event| event.value.clone())
-                        .unwrap_or_else(|| baseline.clone())
-                } else {
-                    baseline.clone()
-                };
-                RuntimeSwitchView {
-                    name,
-                    applied_revision: latest.as_ref().map_or(0, |event| event.revision),
-                    latest,
-                    toml_baseline: baseline,
-                    effective_value,
-                    overridden,
-                    applies,
-                }
-            })
+            .map(|name| self.view(&snapshot, now, name))
             .collect();
         RuntimeSwitchStatus {
             role: self.role,
@@ -241,7 +233,9 @@ impl RuntimeSwitches {
             let index = match view.name {
                 RuntimeSwitchName::ReadinessAuditFailureMode => 0,
                 RuntimeSwitchName::ReadinessCacheEnabled => 1,
-                RuntimeSwitchName::MetricsSliSnapshotEnabled => continue,
+                RuntimeSwitchName::MetricsSliSnapshotEnabled
+                | RuntimeSwitchName::MooglemailPollIsolationEnabled
+                | RuntimeSwitchName::MetricsRejectForwardedRequests => continue,
             };
             policy.revisions[index] = view.applied_revision;
             policy.overrides[index] = view.overridden;
@@ -257,11 +251,72 @@ impl RuntimeSwitches {
                     policy.cache_enabled =
                         view.effective_value.as_bool().unwrap_or(self.cache_baseline)
                 }
-                RuntimeSwitchName::MetricsSliSnapshotEnabled => {}
+                RuntimeSwitchName::MetricsSliSnapshotEnabled
+                | RuntimeSwitchName::MooglemailPollIsolationEnabled
+                | RuntimeSwitchName::MetricsRejectForwardedRequests => {}
             }
         }
         policy
     }
+
+    fn effective_bool(&self, name: RuntimeSwitchName, baseline: bool) -> bool {
+        let snapshot = self.current();
+        let age = snapshot.loaded_at.map(|at| at.elapsed());
+        let now = database_now(&snapshot, age);
+        let view = self.view(&snapshot, now, name);
+        view.applies && view.effective_value.as_bool().unwrap_or(baseline)
+    }
+
+    fn view(
+        &self,
+        snapshot: &Snapshot,
+        now: Option<chrono::DateTime<Utc>>,
+        name: RuntimeSwitchName,
+    ) -> RuntimeSwitchView {
+        let latest = snapshot.read.events.iter().find(|event| event.name == name).cloned();
+        let applies = name.applies_to(self.role);
+        let overridden = applies
+            && latest.as_ref().is_some_and(|event| {
+                event.operation == RuntimeSwitchOperation::Set
+                    && event.expires_at.is_none_or(|until| now.is_some_and(|now| now < until))
+            });
+        let baseline = match name {
+            RuntimeSwitchName::ReadinessAuditFailureMode => json!(audit_label(self.audit_baseline)),
+            RuntimeSwitchName::ReadinessCacheEnabled => json!(self.cache_baseline),
+            RuntimeSwitchName::MetricsSliSnapshotEnabled => json!(self.sli_baseline),
+            RuntimeSwitchName::MooglemailPollIsolationEnabled => {
+                json!(self.mail_isolation_baseline)
+            }
+            RuntimeSwitchName::MetricsRejectForwardedRequests => {
+                json!(self.metrics_reject_baseline)
+            }
+        };
+        let effective_value = if overridden {
+            latest
+                .as_ref()
+                .and_then(|event| event.value.clone())
+                .unwrap_or_else(|| baseline.clone())
+        } else {
+            baseline.clone()
+        };
+        RuntimeSwitchView {
+            name,
+            applied_revision: latest.as_ref().map_or(0, |event| event.revision),
+            latest,
+            toml_baseline: baseline,
+            effective_value,
+            overridden,
+            applies,
+        }
+    }
+}
+
+fn database_now(
+    snapshot: &Snapshot,
+    age: Option<std::time::Duration>,
+) -> Option<chrono::DateTime<Utc>> {
+    age.and_then(|age| chrono::Duration::from_std(age).ok())
+        .and_then(|age| snapshot.read.database_time.checked_add_signed(age))
 }
 
 fn increment(counter: &AtomicU64) {

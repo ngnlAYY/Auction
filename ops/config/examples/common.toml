@@ -9,7 +9,9 @@ log_filter = "info,auction=debug"
 enabled = false
 # 可选：Worker SLI 汇总基线，默认 false；需启用 metrics，可由数据库开关覆盖。
 sli_snapshot_enabled = false
-# 可选：默认 true，拒绝业务指标路由及三角色附加出口的转发请求；修改需重启。
+# 运行时开关 metrics_reject_forwarded_requests 只允许在线 set true 收紧或 clear 回落，
+# 放宽须修改此值并重启对应角色。
+# 可选：默认 true，拒绝业务指标路由及三角色附加出口转发请求的 TOML 基线。
 reject_forwarded_requests = true
 # 可选：省略关闭，enabled 为 true 才监听；只接受 127.0.0.1 与非零端口。
 # public_loopback_listen_address = "127.0.0.1:19100"

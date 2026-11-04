@@ -17,6 +17,7 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
+    switches: auction_application::RuntimeSwitches,
 ) -> anyhow::Result<(
     AdminApiState,
     Option<Arc<auction_observability::HeartbeatPublisher>>,
@@ -24,11 +25,12 @@ pub(super) async fn configure_state(
 )> {
     #[cfg(feature = "postgres")]
     {
-        database::configure_state(config, tracing_health, metrics).await
+        database::configure_state(config, tracing_health, metrics, switches).await
     }
     #[cfg(not(feature = "postgres"))]
     {
-        let (state, heartbeat) = fallback::configure_state(config, tracing_health, metrics).await?;
+        let (state, heartbeat) =
+            fallback::configure_state(config, tracing_health, metrics, switches).await?;
         Ok((state, heartbeat, None))
     }
 }

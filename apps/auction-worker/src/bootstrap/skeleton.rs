@@ -10,6 +10,7 @@ pub(super) async fn run_worker(
     config: &AppConfig,
     _tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
+    _switches: auction_application::RuntimeSwitches,
     runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
     _write_lifecycle: auction_application::ExternalWriteLifecycle,
     shutdown: ShutdownFuture,
