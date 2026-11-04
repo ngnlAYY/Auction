@@ -64,7 +64,7 @@ Worker 为扫描时处于 Live 且没有同步记录的场次建立任务；重�
 
 主题扫描页数超过 `maximum_topic_pages` 时，该场的回帖导入整体失败关闭、不再导入新回帖，而不是跳过部分出价；运营者处理前，请改在网站出价。
 
-Admin“规则内容”的五语言导入稿见 [`ops/rules/forum-reply-import`](../../ops/rules/forum-reply-import/README.md)，由用户核对后用 `auction-cli rules import` 发布。
+Admin“规则内容”的五语言编辑稿见 [`ops/rules/forum-reply-import`](../../ops/rules/forum-reply-import/README.md)。已有规则内容时由用户在 Admin 逐语言编辑并发布；`auction-cli rules import` 仅用于首次发布或补齐缺失语言。
 
 ## 身份
 
