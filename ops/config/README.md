@@ -75,6 +75,7 @@ loopback TCP 或 Unix socket；Worker control 按原 peer 授权提供指标。
 | `admin_loopback_listen_address` | 省略关闭；Admin 附加指标地址 |
 | `worker_loopback_listen_address` | 省略关闭；Worker 附加指标地址 |
 | `reject_forwarded_requests` | 默认 true；业务指标路由及三角色新出口拒绝转发 |
+| `sli_snapshot_enabled` | 默认 false；Worker 每六十秒只读汇总的 TOML 基线 |
 
 有效 `enabled = true` 且填写本角色地址时才监听；地址只接受数值
 `127.0.0.1` 和非零端口，拒绝主机名、通配地址、其他 IPv4 和 IPv6。
@@ -98,6 +99,17 @@ Worker control 的 peer UID/GID 授权不变，也不使用转发拒绝开关。
 安装、直接采集与 SSH 隧道见[运维手册](../README.md#指标)。
 
 经济、结算与恢复策略在**创建场次时冻结**，修改模板只影响之后创建的场次；排期控制后续计划与早鸟收件窗口，不改写已创建场次的时间与策略快照。业务含义见[业务规则](../../docs/business-rules.md)与[结算与履约](../../docs/guide/settlement.md)。
+
+### SLI 快照
+
+SLI 基线不由 Admin runtime 覆盖；仅 Worker 消费，且须同时启用有效 metrics。
+启动时把 `sli_snapshot_enabled` 注入 W7.7，数据库 bool 开关
+`metrics_sli_snapshot_enabled` 可在线覆盖；clear/到期回到当前进程的 TOML 基线。
+单改 TOML 基线须重启，在线切换开关不需重启；旧程序回退须移除未知 TOML 字段。
+汇总最多借一个空闲连接，忙时跳过，总预算两秒，失败保留旧指标及原年龄。
+未实现历史流程标为待索引，不以零耗时代替缺测。启用、查看与回退见
+[SLI 运维](../README.md#sli-基线与容量观察)，完整定义见
+[SLI 口径](../../crates/auction-observability/README.md#sli-与容量基线)。
 
 ### 就绪策略
 
@@ -296,7 +308,17 @@ Worker 新路径在首次停止时关闭入口，立即取消尚未登记交接�
 
 ## 数据库运行时开关
 
-这是“部署字段来自 TOML”的明确行为覆盖例外，不引入环境变量覆盖，也不扩展 AdminRuntimeDocument。`readiness_audit_failure_mode` 取 legacy/shadow/classified，对应三角色 `[readiness] audit_failure_mode`；`readiness_cache_enabled` 取布尔，对应 Public/Admin `[readiness] cache_enabled`。优先级为最新且未过期的数据库 set → 启动时 TOML 基线；clear、expire、过期或未设置均取基线。修改 TOML 不会改动数据库事实，无期限 override 会继续覆盖。
+这是部署字段来自 TOML 的明确行为覆盖例外，不引入环境变量覆盖，
+也不扩展 AdminRuntimeDocument。已知名称及基线如下：
+
+| 名称 | 值 | 消费角色 / TOML 基线 |
+| --- | --- | --- |
+| readiness_audit_failure_mode | legacy/shadow/classified | 三角色 / readiness.audit_failure_mode |
+| readiness_cache_enabled | bool | Public/Admin / readiness.cache_enabled |
+| metrics_sli_snapshot_enabled | bool | Worker / metrics.sli_snapshot_enabled |
+
+优先级为最新且未过期的数据库 set → 启动时 TOML 基线。
+clear、expire、到期或未设置均回落基线；修改 TOML 不清除无期限覆盖。
 
 三角色五秒刷新，单次一秒预算；首次失败保留基线，后续失败保留最后成功快照，但仍按原数据库期限回落。默认基线仍为 shadow/true；切 classified 仍需用户审阅影子样本。切换不清零审计累计；策略版本变化立即使旧 HTTP 就绪缓存失效。Worker control 不使用 HTTP 就绪缓存。`migration_compatibility_mode`、排空预算、邮件隔离和指标转发开关本批继续重启生效；W7.10 的 runtime 文件预算热读取也不在本批范围。操作与 stale 诊断见[运维手册](../README.md#运行时开关)。
 

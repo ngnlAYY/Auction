@@ -61,7 +61,7 @@ pub struct RuntimeSwitchStatus {
     pub refresh_successes: u64,
     /// 失败刷新累计。
     pub refresh_failures: u64,
-    /// 两项已知开关。
+    /// 本版全部已知开关。
     pub switches: Vec<RuntimeSwitchView>,
 }
 
@@ -71,6 +71,7 @@ pub struct RuntimeSwitches {
     role: RuntimeSwitchRole,
     audit_baseline: AuditFailureMode,
     cache_baseline: bool,
+    sli_baseline: bool,
     state: Arc<RwLock<Arc<Snapshot>>>,
     successes: Arc<AtomicU64>,
     failures: Arc<AtomicU64>,
@@ -93,6 +94,7 @@ impl RuntimeSwitches {
             role,
             audit_baseline,
             cache_baseline,
+            sli_baseline: false,
             state: Arc::new(RwLock::new(Arc::new(Snapshot {
                 read: RuntimeSwitchRead { database_time: Utc::now(), events: Vec::new() },
                 loaded_at: None,
@@ -100,6 +102,21 @@ impl RuntimeSwitches {
             successes: Arc::new(AtomicU64::new(0)),
             failures: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Worker 在首次刷新前注入已校验的指标汇总基线。
+    pub fn with_sli_snapshot_baseline(mut self, enabled: bool) -> Self {
+        self.sli_baseline = enabled;
+        self
+    }
+
+    /// 仅 Worker 消费；沿用同一最新事实、期限与失败回落规则。
+    pub fn sli_snapshot_enabled(&self) -> bool {
+        self.status().switches.into_iter().any(|view| {
+            view.name == RuntimeSwitchName::MetricsSliSnapshotEnabled
+                && view.applies
+                && view.effective_value.as_bool().unwrap_or(false)
+        })
     }
 
     fn current(&self) -> Arc<Snapshot> {
@@ -160,6 +177,7 @@ impl RuntimeSwitches {
                         json!(audit_label(self.audit_baseline))
                     }
                     RuntimeSwitchName::ReadinessCacheEnabled => json!(self.cache_baseline),
+                    RuntimeSwitchName::MetricsSliSnapshotEnabled => json!(self.sli_baseline),
                 };
                 let effective_value = if overridden {
                     latest
@@ -198,7 +216,13 @@ impl RuntimeSwitches {
             revisions: [0; 2],
             overrides: [false; 2],
         };
-        for (index, view) in status.switches.iter().enumerate() {
+        for view in &status.switches {
+            // SLI 开关不改变 HTTP 就绪缓存身份，也不能进入两项策略数组。
+            let index = match view.name {
+                RuntimeSwitchName::ReadinessAuditFailureMode => 0,
+                RuntimeSwitchName::ReadinessCacheEnabled => 1,
+                RuntimeSwitchName::MetricsSliSnapshotEnabled => continue,
+            };
             policy.revisions[index] = view.applied_revision;
             policy.overrides[index] = view.overridden;
             match view.name {
@@ -213,6 +237,7 @@ impl RuntimeSwitches {
                     policy.cache_enabled =
                         view.effective_value.as_bool().unwrap_or(self.cache_baseline)
                 }
+                RuntimeSwitchName::MetricsSliSnapshotEnabled => {}
             }
         }
         policy

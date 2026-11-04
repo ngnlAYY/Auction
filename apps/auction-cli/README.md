@@ -392,7 +392,10 @@ Bot 内部履约（买卖双方之一是 Bot 自己时不经邮件外发）需�
 
 ## 运行时开关
 
-`auction-cli --config-dir /etc/auction switch list` 只读返回数据库时间及两个已知名称的最新事实和 revision（未设置为 0），不证明运行进程已应用。set/clear 直接执行在线数据库命令，不停机、不调用 W7.5、不隐式迁移，也不要求先停止 Worker。
+`auction-cli --config-dir /etc/auction switch list` 只读返回数据库时间、
+三个已知名称的最新事实和 revision（未设置为 0），不证明运行进程已应用。
+set/clear 直接执行在线命令，不停机、不调用 W7.5、不隐式迁移，
+也不要求先停止 Worker。
 
 ```bash
 auction-cli --config-dir /etc/auction switch set readiness_audit_failure_mode classified \
@@ -448,3 +451,12 @@ funds open-record-only/reconcile 另长期持有邮件与论坛 owner 共 2 个�
 汇总三角色实际上限、长期预留、CLI 并行和外部预留，profiled 超预算失败。
 `config show` 仅增加非敏感配置投影；预算不连接数据库或核实 reserve。
 字段和启用/回退顺序见[配置参考](../../ops/config/README.md#数据库连接分档)。
+
+
+## SLI 汇总开关
+
+W0.13 增加 Worker 专用 bool `metrics_sli_snapshot_enabled`，
+CLI 沿用既有 set/clear、稳定命令身份、revision 和期限规则。
+TOML 基线为 common 的 `metrics.sli_snapshot_enabled`，默认 false。
+关闭汇总应明确 set false；clear 只回到当前基线，未必关闭。
+完整启用、查看与回退见[SLI 运维](../../ops/README.md#sli-基线与容量观察)。

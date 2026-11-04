@@ -19,6 +19,11 @@ mod tracing;
 mod types;
 mod worker;
 
+mod realtime;
+mod sli;
+pub use realtime::{RealtimeRecorder, RealtimeScope};
+pub use sli::SliMetrics;
+
 pub use audit::{
     AuditFailureClass, AuditFailureKind, AuditFailureObservation, AuditMetricsSnapshot,
     AuditMetricsSource, AuditSqlstateClass,

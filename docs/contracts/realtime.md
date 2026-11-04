@@ -106,3 +106,22 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 2. 用最后确认的游标调用 `GET /api/v1/events` 补齐（`has_more` 时翻页），再按 `stream_sequence` 合并缓冲帧，以 `event_id` 去重。
 3. 发现序列跳号或 `refetch_required` 时重新读取权威快照并重新补齐。
 4. 断线后指数退避重连（Public 前端：基数 1 秒起步、翻倍至 30 秒，实际等待取基数的 1/2 至 1 倍）；连接存活 30 秒后重置失败计数，连续 8 次快速失败转为手动刷新。页面隐藏时暂停重连退避与后台轮询，已建立的 WebSocket 不因隐藏而主动关闭。
+
+
+## 推送观测边界
+
+W0.13 只在进程内帧中附带事件 created_at 和固定 scope，
+送给浏览器的原 JSON 编码字节、信封、schema_version 与 HTTP 补读不变。
+Hub 缓冲、淘汰、连接配额、游标及 at-least-once 重投规则保持。
+
+`auction_realtime_relay_duration_seconds{scope}` 从持久事件创建时间
+到本地 sink 交给 Hub；无订阅者也可成功，不证明客户端收到。
+`auction_realtime_push_duration_seconds{scope}` 从同一起点
+到一个连接的 WS send 成功完成，包含轮询、排队和写出等待。
+只观察事件文本帧，不把 Ping、失败写出或 HTTP 补读混入；
+重投或不同连接各自形成成功写出样本。
+
+scope 仅 auction/discovery，不导出事件或 stream 标识。
+这两个终点均为服务端代理，不证明浏览器收到或处理完成；
+created_at 也不是精确 COMMIT 时间。负时差跳过并计闭集 skipped 指标。
+详细口径和局限见[SLI 文档](../../crates/auction-observability/README.md#sli-与容量基线)。

@@ -1,0 +1,66 @@
+# 审批前保留占位，不加入 rule_files，不启用外部通知通道。
+# 基线观察后由 Claude 提出、用户确认 SLO 与容量目标。
+groups:
+  - name: auction-slo-draft
+    rules:
+      - alert: AuctionBidLatency
+        expr: |
+          auction:sli_bid_http_p99_seconds:5m > <BID_P99_SECONDS>
+          and sum(increase(auction_http_request_duration_seconds_count{
+            role="public",route="/api/v1/lots/{lot_id}/bids",method="POST"
+          }[5m])) >= <MIN_SAMPLES>
+        for: <FOR_DURATION>
+
+      - alert: AuctionRealtimePushLatency
+        expr: |
+          auction:sli_realtime_push_p99_seconds:5m > <REALTIME_PUSH_P99_SECONDS>
+          and on (scope) sum by (scope) (
+            increase(auction_realtime_push_duration_seconds_count[5m])
+          ) >= <MIN_SAMPLES>
+        for: <FOR_DURATION>
+
+      - alert: AuctionRealtimeRelayLatency
+        expr: |
+          auction:sli_realtime_relay_p99_seconds:5m > <REALTIME_RELAY_P99_SECONDS>
+          and on (scope) sum by (scope) (
+            increase(auction_realtime_relay_duration_seconds_count[5m])
+          ) >= <MIN_SAMPLES>
+        for: <FOR_DURATION>
+
+      - alert: AuctionBidConflictAbortRate
+        expr: auction:sli_bid_conflict_abort_ratio:5m > <BID_CONFLICT_ABORT_RATIO>
+        for: <FOR_DURATION>
+
+      - alert: AuctionFinalBidRetryExhausted
+        expr: auction:sli_final_bid_retry_exhausted_since_start > 0
+        for: <FOR_DURATION>
+        annotations:
+          summary: '按已有 D5 条件提前评估 W12.1。'
+
+      - alert: AuctionSliSnapshotUnavailable
+        expr: |
+          (auction_sli_snapshot_enabled == 1)
+          and on (job,instance) (
+            auction_sli_snapshot_available == 0
+            or auction_sli_snapshot_age_seconds > <MAX_SNAPSHOT_AGE_SECONDS>
+          )
+        for: <FOR_DURATION>
+
+      - alert: AuctionFinalForumReplyImportDelay
+        expr: <W0_5_FINAL_UPPER_DELAY_EXPRESSION> > <FORUM_FINAL_DELAY_SECONDS>
+        for: <FOR_DURATION>
+
+      - alert: AuctionFinalForumReplyEstimateWidth
+        expr: <W0_5_ESTIMATE_WIDTH_EXPRESSION> > <FORUM_ESTIMATE_WIDTH_SECONDS>
+        for: <FOR_DURATION>
+
+      - alert: AuctionFinalForumReplyEstimateCoverage
+        expr: <W0_5_ESTIMATE_COVERAGE_EXPRESSION> < <FORUM_ESTIMATE_COVERAGE_RATIO>
+        for: <FOR_DURATION>
+
+# 待索引的历史流程不填写表达式，不从不存在的序列推导成功。
+# <KEY_MAIL_P99_SECONDS>、<MIN_REMINDER_MARGIN_SECONDS>、
+# <FIRST_PAYMENT_MAIL_P99_SECONDS>、<LAST_PAYMENT_MAIL_P99_SECONDS>、
+# <SELLER_PAYOUT_P99_SECONDS>、<SUBMISSION_TAKE_P99_SECONDS>、
+# <SUBMISSION_REJECTION_P99_SECONDS>、<SLOW_PROXY_P99_SECONDS> 待实现后接入。
+# 容量验收另留 <FINAL_BID_COMMANDS_PER_SECOND>、<CONCURRENT_WEBSOCKETS>。

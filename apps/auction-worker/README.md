@@ -94,3 +94,16 @@ profiled 模式使用 `auction-worker`，本角色 `[database_pool]` 默认物�
 超时必须显式填写阈值，W0.14 观察并由用户切换三角色有效 classified 后才启用。
 池与长期会话参数修改需经停机门禁重启，本批不接 W7.7。
 配置与 legacy 回退见[连接分档](../../ops/config/README.md#数据库连接分档)。
+
+
+## SLI 汇总
+
+有数据库且有效 metrics.enabled=true 时，装配根建立独立 SLI 任务及内存 collector。
+`metrics.sli_snapshot_enabled` 默认 false，经 Worker 专用数据库开关
+`metrics_sli_snapshot_enabled` 在线覆盖；Admin runtime 不覆盖该基线。
+默认禁用不读取 SLI SQL；无数据库骨架不提供业务 SLI。
+每六十秒至多借一个空闲连接、执行两秒预算的只读轮次。
+失败、忙或超限只降级指标，不进入业务退出守卫或 readiness。
+旧快照保留并持续增加年龄；待索引流程不导出零分位。
+启用与回退见[运维手册](../../ops/README.md#sli-基线与容量观察)，
+完整口径见[SLI 文档](../../crates/auction-observability/README.md#sli-与容量基线)。

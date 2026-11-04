@@ -26,3 +26,6 @@ pub use worker::{
 
 mod runtime_switches;
 pub use runtime_switches::start_runtime_switch_refresh;
+
+mod sli;
+pub use sli::start_sli_snapshot;

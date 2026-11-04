@@ -41,25 +41,36 @@ pub enum RuntimeSwitchName {
     ReadinessAuditFailureMode,
     /// HTTP 最终就绪结果的短缓存。
     ReadinessCacheEnabled,
+    /// Worker 的附加只读 SLI 汇总。
+    MetricsSliSnapshotEnabled,
 }
 
 impl RuntimeSwitchName {
     /// 本版完整名称集。
-    pub const ALL: [Self; 2] = [Self::ReadinessAuditFailureMode, Self::ReadinessCacheEnabled];
+    pub const ALL: [Self; 3] = [
+        Self::ReadinessAuditFailureMode,
+        Self::ReadinessCacheEnabled,
+        Self::MetricsSliSnapshotEnabled,
+    ];
     /// 稳定持久名称与指标标签。
     pub const fn label(self) -> &'static str {
         match self {
             Self::ReadinessAuditFailureMode => "readiness_audit_failure_mode",
             Self::ReadinessCacheEnabled => "readiness_cache_enabled",
+            Self::MetricsSliSnapshotEnabled => "metrics_sli_snapshot_enabled",
         }
     }
     /// 在解码值之前识别名称；未知名称不是损坏数据。
     pub fn parse(value: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|name| name.label() == value)
     }
-    /// Worker 无 HTTP 就绪缓存。
+    /// 名称与消费角色绑定；不适用的进程只展示数据库意图。
     pub fn applies_to(self, role: RuntimeSwitchRole) -> bool {
-        self != Self::ReadinessCacheEnabled || role != RuntimeSwitchRole::Worker
+        match self {
+            Self::ReadinessAuditFailureMode => true,
+            Self::ReadinessCacheEnabled => role != RuntimeSwitchRole::Worker,
+            Self::MetricsSliSnapshotEnabled => role == RuntimeSwitchRole::Worker,
+        }
     }
     /// 闭集名称绑定值类型，拒绝已知名称下的未知枚举或类型。
     pub fn valid_value(self, value: &serde_json::Value) -> bool {
@@ -67,7 +78,7 @@ impl RuntimeSwitchName {
             Self::ReadinessAuditFailureMode => value
                 .as_str()
                 .is_some_and(|value| matches!(value, "legacy" | "shadow" | "classified")),
-            Self::ReadinessCacheEnabled => value.is_boolean(),
+            Self::ReadinessCacheEnabled | Self::MetricsSliSnapshotEnabled => value.is_boolean(),
         }
     }
 }

@@ -48,7 +48,8 @@ pub(super) async fn run_worker(
         auction_application::RuntimeSwitchRole::Worker,
         config.readiness.audit_failure_mode,
         config.readiness.cache_enabled,
-    );
+    )
+    .with_sli_snapshot_baseline(config.metrics.sli_snapshot_enabled);
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
             .await
@@ -72,6 +73,14 @@ pub(super) async fn run_worker(
     metrics
         .register_audit_metrics(store.audit_metrics_source())
         .context("register worker audit metrics")?;
+    let _sli_task = if metrics.enabled() {
+        let recorder = auction_observability::SliMetrics::register(&metrics, switches.clone())
+            .context("register worker SLI metrics")?;
+        let reader: Arc<dyn auction_application::SliSnapshotReader> = store.clone();
+        Some(TaskGuard::new(auction_jobs::start_sli_snapshot(reader, switches.clone(), recorder)))
+    } else {
+        None
+    };
     let worker_id = format!("auction-worker-{}", Uuid::new_v4());
     let schedule: Arc<dyn ScheduledRoundStore> = store.clone();
     let lifecycle_store = Arc::clone(&store);

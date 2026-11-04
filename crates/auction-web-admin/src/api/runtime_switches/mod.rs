@@ -10,7 +10,7 @@ pub(crate) async fn fetch_runtime_switches() -> Result<RuntimeSwitchListResponse
     }
     let payload: ApiResponse<RuntimeSwitchListResponse> =
         response.json().await.map_err(invalid_response_error)?;
-    if payload.data.database_intent.len() != 2 || payload.data.admin_applied.len() != 2 {
+    if payload.data.database_intent.len() != 3 || payload.data.admin_applied.len() != 2 {
         return Err("invalid_response".to_owned());
     }
     Ok(payload.data)

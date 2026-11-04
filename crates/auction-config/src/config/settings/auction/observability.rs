@@ -12,6 +12,8 @@ use super::Role;
 pub struct MetricsConfig {
     /// 是否注册并暴露固定 `/metrics` scrape endpoint；省略时关闭。
     pub enabled: bool,
+    /// Worker 只读 SLI 汇总基线；默认关闭，可由数据库开关覆盖。
+    pub sli_snapshot_enabled: bool,
     /// 业务指标路由与三角色附加出口的转发拒绝策略，默认开启。
     /// 仅由部署配置持有，Admin runtime 只能覆盖 enabled，不得覆盖该安全策略。
     pub reject_forwarded_requests: bool,
@@ -27,6 +29,7 @@ impl Default for MetricsConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            sli_snapshot_enabled: false,
             reject_forwarded_requests: true,
             public_loopback_listen_address: None,
             admin_loopback_listen_address: None,

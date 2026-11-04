@@ -205,7 +205,16 @@ Worker 观测上下文通过 task-local 窄包装传递，JoinSet 子任务显�
 
 ## 运行时开关指标
 
-`auction_runtime_switch_refresh_successes_total{role}` 与 `auction_runtime_switch_refresh_failures_total{role}` 为饱和刷新累计；`auction_runtime_switch_snapshot_age_seconds{role}` 表示最后成功快照年龄，未成功为 -1。`auction_runtime_switch_applied_revision{role,switch}` 是已观察事实版本（未设置为 0）；`auction_runtime_switch_effective_value{role,switch}` 中 bool 为 0/1，审计模式 legacy/shadow/classified 为 0/1/2。Worker 不导出不适用的 HTTP 缓存项。标签只来自 Rust 闭集角色和名称；collector 只读内存，scrape 不查数据库，也不重复累计。角色实际值的到期回落会在 scrape 时重新解析。 exporter 关闭不影响刷新或审计累计。操作见[运行时开关](../../ops/README.md#运行时开关)。
+`auction_runtime_switch_refresh_successes_total{role}` 与
+`auction_runtime_switch_refresh_failures_total{role}` 为饱和刷新累计。
+`auction_runtime_switch_snapshot_age_seconds{role}` 表示最后成功年龄，初始为 -1。
+`auction_runtime_switch_applied_revision{role,switch}` 为已观察事实版本，未设置为 0；
+`auction_runtime_switch_effective_value{role,switch}` 的 bool 为 0/1，
+审计模式 legacy/shadow/classified 为 0/1/2。
+Worker 不导出 HTTP 缓存项，增加 metrics_sli_snapshot_enabled；Public/Admin 不消费此项。
+标签来自 Rust 闭集，scrape 只读内存、不查数据库、不重复累计。
+期限回落在使用时重新解析；exporter 关闭不影响刷新或审计累计。
+操作见[运行时开关](../../ops/README.md#运行时开关)。
 
 ## 数据库事务与连接观测
 
@@ -290,3 +299,176 @@ LISTEN 的预留生命周期为成功订阅到订阅对象销毁，重连瞬间�
 
 所有标签均为代码闭集，不包含 SQL、连接串、Cookie、正文、主键或错误原文。
 计数、scope 与守卫不能决定重试、锁、证据期限、结果或缓存命中行为。
+
+
+## SLI 与容量基线
+
+W0.13 只增加观测，不参与竞价、资格、截止、履约或重发判定。
+指标和 label 不包含玩家名、各类业务 ID、IP、SQL、正文或错误文本。
+目标值暂不确定：**基线观察后由 Claude 提出、用户确认**。
+记录规则在 `ops/monitoring/auction-recording.rules.yml`，
+告警草案在 `ops/monitoring/auction-alerts.rules.yml.template`，后者不加载。
+
+### 已有指标与实时代理
+
+- 出价 p99 复用 `auction_http_request_duration_seconds`，选择 Public 的
+  `POST /api/v1/lots/{lot_id}/bids` 模板；从 HTTP 边界进入到响应生成完成。
+  包含认证、解码、事务和响应装配，覆盖全部结果，不含网络传输或浏览器处理。
+  成功率与失败状态另看 `auction_http_requests_total`；不能从耗时族筛成功状态。
+- `auction_realtime_relay_duration_seconds{scope}` 从 `realtime_events.created_at`
+  到本地 sink 成功交给 Hub；无订阅者时也可有样本，不代表客户端收到。
+- `auction_realtime_push_duration_seconds{scope}` 从同一起点到一个连接的
+  `socket.send` 成功完成；样本为事件乘连接，失败、Ping 和 HTTP 补读不计。
+  at-least-once 重投仍可能产生新的写出样本，不以无界集合去重。
+- `scope` 仅为 `auction/discovery`，不使用原始 stream。
+  创建时间仅随进程内帧携带，JSON 编码、补读、游标和线协议均不变。
+  数据库创建时间不是精确 COMMIT 时间；WS 写出也不证明浏览器处理完成。
+  起终点为墙钟时间，负时差不补成零，计入
+  `auction_realtime_observations_skipped_total{scope,stage}`；stage 为 relay/push。
+  正常直方图观察仍受桶分辨率与时钟同步影响。
+
+出价冲突全部引用 W0.6，不在 HTTP、Worker 或 SLI 汇总中重新计数：
+
+| 比率或次数 | 分子 / 分母 |
+| --- | --- |
+| 尝试冲突中止率 | conflicts_total / attempts_total |
+| 遭遇冲突的操作比率 | conflicted_total / transactions_total |
+| 操作耗尽率 | retry_exhausted_total / transactions_total |
+| Final 耗尽 | retry_exhausted_total，限定 phase=final |
+
+上表省略共同前缀 `auction_db_transaction`；操作分母实际名称是
+`auction_db_transactions_total`，尝试分母是 `auction_db_transaction_attempts_total`。
+owner 仅取 `bid/proxy/slow_proxy`；按 owner、phase 比较，不混淆尝试与操作。
+`unknown` 不猜作 Final；领域拒绝、幂等冲突和 HTTP 503 不能代替数据库冲突。
+分子分母均取同一窗口的 rate，分母无样本时不补零。
+原始 Final 耗尽累计非零即按已有 D5 条件提前评估 W12.1；
+同时保留一小时 increase，但不能只靠 increase 识别首次出现即为 1 的序列。
+原计数、重试及 phase 定义见[数据库观测](#数据库事务与连接观测)。
+
+### Worker 窗口快照
+
+`SliMetrics` 只由有数据库且启用 metrics 的 Worker 注册。
+`[metrics] sli_snapshot_enabled` 默认 false，运行时 bool 开关为
+`metrics_sli_snapshot_enabled`。开关刷新、期限、审计与只读卡片复用 W7.7。
+每 60 秒唤醒一次，跳过漏掉的 tick，不追赶补跑；禁用时不查询数据库。
+生效等待包含现有五秒开关刷新和下一次六十秒唤醒；
+关闭开关不取消已开始、总预算两秒的只读轮次。
+
+汇总通过应用端口调用 storage 的唯一 SQL owner，最多借一个现有空闲连接。
+池忙立即跳过，不等连接、不扩池，不建立第二个连接池。
+只读 Repeatable Read 事务内串行查询，局部 statement timeout 为 1000ms、
+lock timeout 为 100ms，包含 BEGIN、查询与确认回滚的总预算为两秒。
+成功只读回滚后原子发布完整数值快照；失败或取消不写任何业务事实。
+失败连接丢弃，不将未知清理状态归还业务池；任务退出的事务按 SQLx 取消规则回滚。
+
+窗口为数据库快照时间向前七天，容量候选按事件创建时间取闭区间。
+通过 `realtime_events_created_at_idx` 最多读取 10001 条候选，
+再按主键有界关联 bid、命令、lot 与场次，不扫描全部历史再筛选。
+10000 是候选上限，额外一条只检测溢出；kind/replay 分类在 LIMIT 之后。
+慢速代理当前积压使用 `lots_due_slow_idx`，同样最多 10001 条。
+任一候选集合超限就使整轮 `limited`，不发布截断统计。
+这些是索引路径、输入规模与时间预算约束，本批没有连接数据库验证实际执行计划。
+
+| 指标 | 语义 |
+| --- | --- |
+| `auction_sli_snapshot_enabled` | 当前 Worker 开关，0/1 |
+| `auction_sli_snapshot_available` | 是否曾取得完整快照，0/1 |
+| `auction_sli_snapshot_age_seconds` | 查询开始后的单调时钟年龄；首次成功前为 -1 |
+| `auction_sli_snapshot_last_success_timestamp_seconds` | 最近成功快照的数据库时间；初始为 0 |
+| `auction_sli_snapshot_refreshes_total{outcome}` | 实际轮次；禁用不计轮次 |
+| `auction_sli_snapshot_refresh_duration_seconds` | 实际汇总耗时直方图 |
+| `auction_sli_flow_available{flow}` | 流程是否有完整可发布数据；不代表数据仍新鲜 |
+| `auction_sli_flow_blocked{flow,reason}` | 待实现流程，reason 固定 awaiting_index |
+
+outcome 为 `success/busy/timeout/limited/storage/invalid_data`。
+失败保留全部旧值及原年龄，不刷新成功时间，不把缺测伪装成恢复。
+关闭开关也保留最后快照；查询和看板必须同时核对 enabled、available 和 age。
+Scrape 只读内存，容量与积压 Gauge 的一次编码不交错混用两轮快照。
+历史数据不会反复 observe 到 Histogram；刷新耗时只记录实际执行的一轮。
+
+`auction_final_bid_commands_per_second{world,kind}` 为最近六十秒接受命令数除以六十；
+`auction_final_bid_peak_per_second{world,kind}` 为七天内数据库事件创建秒的最大命令数。
+world 仅 main/isekai，kind 仅 ordinary/proxy_create/slow_proxy。
+按稳定 command_id 去重，忽略运维 replay，不把自动反击多条事实当多个用户命令。
+Final 用已持久化的 final_phase_at 与 bid 创建时间关联，不根据 HTTP 路径猜测。
+仅覆盖这三类已接受命令，不代表全部请求负载、失败请求或任意生命周期事实。
+
+`auction_sli_pending{flow,world}` 与 `auction_sli_oldest_pending_seconds{flow,world}`
+只实现 flow=slow_proxy_execution：当前 live lot 上仍保留的到期调度数量和最老秒数。
+包括已过有效截止但尚未清除的条目，不重做执行资格判定；
+字段已被推进或清除的历史世代不在当前积压中，不能据此证明没有漏执行。
+完整候选集合为空时才输出零；首次成功前不创建容量和积压数值序列。
+
+WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总数的七天采样峰值。
+它可能漏掉抓取间隔内的短峰，不能把各实例不同时刻的最大值相加当同时峰值。
+容量观测仅为基线，不是压力测试或能力承诺。
+目标保留 `<FINAL_BID_COMMANDS_PER_SECOND>`、`<CONCURRENT_WEBSOCKETS>`。
+
+### 待索引的历史流程
+
+以下八项不运行 SQL、不发布耗时或余量样本；各自 flow_available=0、
+flow_blocked{reason="awaiting_index"}=1。状态与数值零严格区分。
+索引缺口指无法在现有结构下完整枚举七天窗口候选；
+给全表扫描加 statement timeout 或对历史主键任意截断，都不能证明完整覆盖。
+本批不新增索引或迁移，后续须先确定候选索引与证据关联，再实现派生。
+
+| flow | 缺少的有界候选路径 |
+| --- | --- |
+| register_key | 邮件发送完成时间窗口及入站时间回查 |
+| outbid_deadline_margin | 已发送通知窗口，包含失效后的历史通知 |
+| settlement_first_payment_mail | 场次结算窗口及应发付款邮件完整集合 |
+| settlement_last_payment_mail | 同上，还须证明全部应发邮件已完成 |
+| buyer_payment_to_seller_payout | 付款证明观察及货款发送完成窗口 |
+| submission_take | 投稿对应 Take 完成窗口及入站关联 |
+| submission_rejection_notice | 拒收通知发送完成窗口及入站关联 |
+| slow_proxy_execution | 按 action/时间枚举全部慢速代理历史审计 |
+
+`inbound_mail_poll_idx` 以 mailbox_key 开头；delivery 的领取/lease 索引
+只覆盖工作队列，不能枚举全部成功发送。通知的 live 部分索引不覆盖全部历史。
+`settlement_obligations_read_idx` 需要先知道场次；
+`audit_records_entity_idx` 需要先知道 entity_id，不能用于全局 tick 时间窗口。
+当前 slow_due 索引只能描述尚未清除的调度，不能替代历史执行证据。
+完整索引证据与 owner 见[数据库契约](../../docs/contracts/database.md#sli-只读查询)。
+
+这些流程的终点和将来指标口径固定如下，均以秒为单位：
+
+- 注册/key：入站 received_at → key 回信首次获得本地成功发送证明，观察 p50/p95/p99。
+- 提醒：lot 有效截止减发送证明时间，观察 p01/p05 及非正余量比例。
+  deadline_state 仅 provisional/final；在拍取当前有效截止，结束后取最终有效截止。
+  D4 只使用 final；不保存或伪造发送瞬间的截止快照。
+- 结算首封：settled_at → 第一封应发付款邮件的成功证明；无应发集合不生成零样本。
+  末封：settled_at → 全部应发集合成功后的最后时间；未齐全保持未完成。
+- 买家至卖方：首次有效付款 proof_observed_at → 前置义务关联的卖方货款发送证明。
+  缺可靠付款证据的历史记录不可评估，不以一般 updated_at 替代。
+- 投稿收取：入站 received_at → Take 的成功动作证明，不以本地录入时间替代。
+  拒收：入站 received_at → 拒收通知发送证明，并另看附件 Return 状态。
+  成功投稿接收回执邮件由 W14.3 新增，当前没有该邮件 SLI。
+- 慢速代理：lot.slow_proxy_tick 的 metadata.due_at → 审计 occurred_at，观察 p95/p99。
+  幂等重放不增加审计样本，当前积压不能代替这项历史分位。
+
+将来完成样本按终点落入七天窗口；未完成项另报数量和最老年龄，不只看成功者。
+阈值比率使用已成熟起点群组作分母，不把未知或失败结果算成功。
+预留 `auction_sli_window_duration_seconds{flow,world,quantile}`（p50/p95/p99）、
+`auction_sli_window_samples`、`auction_sli_window_outcomes`；这些待索引族当前不注册。
+提醒预留 `auction_sli_outbid_margin_seconds{world,channel,deadline_state,quantile}`，
+channel 仅 mm/pm；当前也不注册，不用零值替代不可评估。
+
+本地发送证明不是玩家收件时间，proof_observed_at 不是 HV 实际付款瞬间。
+只读派生不会为证明指标而访问外部邮箱，也不会授权外部重发。
+
+### Final 回帖导入与目标确认
+
+Final 回帖导入延迟引用 W0.5，采集由外部账号指标 owner 负责：
+`auction_forum_reply_import_delay_estimate_seconds{world,phase,method,bound}`，
+bound 为 lower/midpoint/upper；以及
+`auction_forum_reply_delay_samples_total{world,phase,method,outcome}`。
+method/outcome 沿用 W0.5 闭集，不在本批新增采集或重算远端时间。
+记录规则只对样本按 outcome 记录，边界表达式保留接口草案，待 W0.5 合入确认。
+目标必须同时约束延迟上界、估计区间宽度和有效估计覆盖率，不能只约束 midpoint。
+若源为直方图，分位边界之差仅表示分位估计区间，不等于逐样本宽度的分位。
+当前基线尚无 W0.5 序列，缺测不能解释为零延迟或覆盖率达标。
+
+所有 SLO、告警保持占位，告警模板不加入 rule_files。
+覆盖至少一个含 Final、结算与邮件处理的完整场次周期后，
+由 Claude 提出目标、用户确认，再作为 W1/W12 验收标准。
+待索引、无样本、超限或证据不足的流程不能报告 SLO 已达标。

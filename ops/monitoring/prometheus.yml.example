@@ -6,6 +6,10 @@ global:
   scrape_timeout: 10s
   evaluation_interval: 30s
 
+# 只加载无 SLO 阈值的记录规则；.template 告警草案不加载。
+rule_files:
+  - /etc/prometheus/auction-recording.rules.yml
+
 scrape_configs:
   - job_name: auction-public
     static_configs:

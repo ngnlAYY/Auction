@@ -151,6 +151,19 @@ where
         self.acquire_for(None)
     }
 
+    /// 附加只读观测只借现有空闲连接，不等待或扩池。
+    pub(crate) fn try_acquire(&self) -> Option<TrackedConnection<DB>> {
+        let started = Instant::now();
+        let connection = self.pool.try_acquire()?;
+        let elapsed = started.elapsed();
+        self.metrics.acquires.fetch_add(1, Ordering::Relaxed);
+        PoolMetrics::add_duration(&self.metrics.acquire_duration_nanos, elapsed.as_nanos());
+        let loop_kind = current_database_worker_loop();
+        self.recorder.acquire(loop_kind, DatabaseAcquireOutcome::Success, elapsed);
+        let guard = self.recorder.hold(loop_kind);
+        Some(TrackedConnection::new(connection, guard))
+    }
+
     pub(crate) fn acquire_reserved(
         &self,
         purpose: DatabaseReservedPurpose,

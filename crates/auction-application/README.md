@@ -182,7 +182,12 @@
 
 ## 运行时开关
 
-`RuntimeSwitchName` 为两项就绪行为绑定值类型与角色；`RuntimeSwitchCommand` 统一稳定摘要、重放输入及 CAS/到期规则。`RuntimeSwitches` 保存完整不可变快照和启动 TOML 基线，`RuntimeSwitchRefreshService` 经窄端口刷新并为到期 set 派生稳定收口命令。先取最新事实，再判期限，不恢复早期覆盖。它不参与资金、资格、幂等、锁或审计写入要求。权威存储和失败规则见[数据库契约](../../docs/contracts/database.md#运行时行为开关)。
+`RuntimeSwitchName` 为审计模式、HTTP 就绪缓存和 Worker SLI 汇总绑定类型与角色。
+`RuntimeSwitchCommand` 共用稳定摘要、重放输入及 CAS/到期规则。
+`RuntimeSwitches` 保存完整不可变快照及 TOML 基线；刷新和到期仍由原服务负责。
+SLI 开关不进入两项 readiness 缓存身份，不因观测切换使就绪缓存失效。
+先取最新事实再判期限，不恢复早期覆盖，不参与资金、资格或审计写入要求。
+权威规则见[数据库契约](../../docs/contracts/database.md#运行时行为开关)。
 
 ## 安全错误记录（I-A）
 
@@ -216,3 +221,13 @@ Worker 的本地 warn/error/info/debug helper 统一字段顺序，`unpersisted_
 不能用返回 Err、WorkerResult::Error 或一般重试错误代替。
 详见[指标口径](../auction-observability/README.md#未持久化错误)
 与[排障方式](../../ops/README.md#安全错误与未持久化指标)。
+
+
+## SLI 只读端口
+
+`ports/sli` 拥有 `SliSnapshotReader`、固定世界/命令类型、数值快照及闭集错误。
+storage 拥有全部 SQL，jobs 只负责唤醒，observability 只编码内存。
+快照不包含业务标识或秘密，不参与业务判定，也不授权外部写入或重试。
+`metrics_sli_snapshot_enabled` 仅 Worker 消费，TOML 基线默认 false；
+沿用既有开关解析、刷新、期限和审计，不进入 readiness 缓存身份。
+完整指标口径见[SLI 文档](../auction-observability/README.md#sli-与容量基线)。

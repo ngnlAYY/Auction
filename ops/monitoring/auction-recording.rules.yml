@@ -1,0 +1,104 @@
+# 只记录已有事实；所有业务 SLO 和容量目标留待基线观察后审批。
+# 无样本保持缺测或 NaN，不使用零值填补。
+groups:
+  - name: auction-user-sli
+    rules:
+      - record: auction:sli_bid_http_p99_seconds:5m
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(auction_http_request_duration_seconds_bucket{
+              role="public",route="/api/v1/lots/{lot_id}/bids",method="POST"
+            }[5m]))
+          )
+
+      - record: auction:sli_realtime_push_p99_seconds:5m
+        expr: |
+          histogram_quantile(0.99,
+            sum by (scope,le) (rate(auction_realtime_push_duration_seconds_bucket[5m]))
+          )
+
+      - record: auction:sli_realtime_relay_p99_seconds:5m
+        expr: |
+          histogram_quantile(0.99,
+            sum by (scope,le) (rate(auction_realtime_relay_duration_seconds_bucket[5m]))
+          )
+
+      # W0.6 拥有全部计数；此处只选择 owner 并去掉 kind/site 维度。
+      - record: auction:sli_bid_conflict_abort_ratio:5m
+        expr: |
+          sum by (owner,phase) (rate(auction_db_transaction_conflicts_total{
+            owner=~"bid|proxy|slow_proxy"
+          }[5m]))
+          /
+          sum by (owner,phase) (rate(auction_db_transaction_attempts_total{
+            owner=~"bid|proxy|slow_proxy"
+          }[5m]))
+
+      - record: auction:sli_bid_conflicted_operation_ratio:5m
+        expr: |
+          sum by (owner,phase) (rate(auction_db_transaction_conflicted_total{
+            owner=~"bid|proxy|slow_proxy"
+          }[5m]))
+          /
+          sum by (owner,phase) (rate(auction_db_transactions_total{
+            owner=~"bid|proxy|slow_proxy"
+          }[5m]))
+
+      - record: auction:sli_bid_retry_exhausted_ratio:5m
+        expr: |
+          sum by (owner,phase) (rate(auction_db_transaction_retry_exhausted_total{
+            owner=~"bid|proxy|slow_proxy"
+          }[5m]))
+          /
+          sum by (owner,phase) (rate(auction_db_transactions_total{
+            owner=~"bid|proxy|slow_proxy"
+          }[5m]))
+
+      # 保留原始累计以捕获首次出现即为 1 的序列，不能只依赖 increase。
+      # 非零触发 W12.1 提前评估，是已有 D5 条件，不是本批新增 SLO。
+      - record: auction:sli_final_bid_retry_exhausted_since_start
+        expr: |
+          sum by (owner) (auction_db_transaction_retry_exhausted_total{
+            owner=~"bid|proxy|slow_proxy",phase="final"
+          })
+
+      - record: auction:sli_final_bid_retry_exhausted:1h
+        expr: |
+          sum by (owner) (increase(auction_db_transaction_retry_exhausted_total{
+            owner=~"bid|proxy|slow_proxy",phase="final"
+          }[1h]))
+
+      # Gauge 表示最后成功快照，不能使用 rate；新鲜度必须另看 age_seconds。
+      - record: auction:sli_final_bid_commands_per_second:last_snapshot
+        expr: |
+          auction_final_bid_commands_per_second
+          and on (job,instance) (auction_sli_snapshot_enabled == 1)
+          and on (job,instance) (auction_sli_snapshot_available == 1)
+
+      - record: auction:sli_final_bid_peak_per_second:last_snapshot
+        expr: |
+          auction_final_bid_peak_per_second
+          and on (job,instance) (auction_sli_snapshot_enabled == 1)
+          and on (job,instance) (auction_sli_snapshot_available == 1)
+
+      - record: auction:websocket_connections
+        expr: sum(auction_websocket_connections{role="public"})
+
+      # Prometheus 采样的同时连接峰值，是下界，不代表压测容量。
+      - record: auction:websocket_connections_peak:7d
+        expr: max_over_time(auction:websocket_connections[7d])
+
+      # W0.5 尚未在本基线；缺该指标时本规则无样本，不补零。
+      - record: auction:sli_final_forum_reply_delay_samples:5m
+        expr: |
+          sum by (world,method,outcome) (increase(auction_forum_reply_delay_samples_total{
+            phase="final"
+          }[5m]))
+
+      # W0.5 边界草案的权威源为：
+      # auction_forum_reply_import_delay_estimate_seconds{
+      #   world,phase="final",method,bound="lower|midpoint|upper"
+      # }
+      # 等 W0.5 的指标类型和 outcome 闭集合入后再固定边界与覆盖率表达式。
+      # upper 约束延迟；upper-lower 约束同一估计的宽度；有效估计/全部候选约束覆盖率。
+      # 若为 Histogram，分位边界差只表示分位估计区间，不能冒充逐样本宽度分位。
