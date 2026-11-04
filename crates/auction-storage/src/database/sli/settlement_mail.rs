@@ -108,9 +108,57 @@ const SETTLEMENT_AGGREGATE: &str = "
                ORDER BY extract(epoch FROM (last_at-settled_at))
            ) FILTER (WHERE last_at >= $1 AND last_at <= $2) AS last_p99,
            count(*) FILTER (WHERE NOT all_success) AS incomplete,
-           extract(epoch FROM ($2 - min(settled_at) FILTER (WHERE NOT all_success)))
+           (extract(epoch FROM ($2 - min(settled_at) FILTER (WHERE NOT all_success))))
+               ::double precision AS oldest_incomplete_seconds
+    FROM per_auction
+    GROUP BY world_id";
+
+const SETTLEMENT_ALL_COUNT: &str = "
+    WITH settlements AS MATERIALIZED (
+        SELECT settlement.auction_id
+        FROM public.auction_settlements settlement
+        ORDER BY settlement.settled_at,settlement.auction_id
+        LIMIT $1
+    )
+    SELECT count(*) AS candidates FROM settlements";
+
+const SETTLEMENT_INCOMPLETE: &str = "
+    WITH settlements AS MATERIALIZED (
+        SELECT settlement.auction_id,settlement.settled_at,auction.world_id
+        FROM public.auction_settlements settlement
+        JOIN public.auctions auction ON auction.id=settlement.auction_id
+        ORDER BY settlement.settled_at,settlement.auction_id
+        LIMIT $1
+    ),
+    payments AS (
+        SELECT obligation.auction_id,obligation.id AS obligation_id,
+               settlement.settled_at,settlement.world_id
+        FROM settlements settlement
+        JOIN public.settlement_obligations obligation
+          ON obligation.auction_id=settlement.auction_id
+        WHERE obligation.obligation_kind IN
+              ('winner_equipment_cod','winner_payment_carrier_cod','winner_equipment_handoff')
+    ),
+    fulfilled AS (
+        SELECT payment.auction_id,payment.world_id,payment.settled_at,payment.obligation_id,
+               COALESCE(bool_or(delivery.status='succeeded'),false) AS has_success
+        FROM payments payment
+        LEFT JOIN public.settlement_obligation_fulfillments fulfillment
+          ON fulfillment.obligation_id=payment.obligation_id
+        LEFT JOIN public.deliveries delivery
+          ON delivery.id=fulfillment.delivery_id AND delivery.status='succeeded'
+        GROUP BY payment.auction_id,payment.world_id,payment.settled_at,payment.obligation_id
+    ),
+    per_auction AS (
+        SELECT world_id,auction_id,settled_at,bool_and(has_success) AS all_success
+        FROM fulfilled
+        GROUP BY world_id,auction_id,settled_at
+    )
+    SELECT world_id,count(*) AS incomplete,
+           (extract(epoch FROM ($2 - min(settled_at))))::double precision
                AS oldest_incomplete_seconds
     FROM per_auction
+    WHERE NOT all_success
     GROUP BY world_id";
 
 pub(super) async fn read(
@@ -132,6 +180,15 @@ pub(super) async fn read(
         .map_err(storage)?;
     let candidates: i64 = row.try_get("candidates").map_err(storage)?;
     if candidates > SLI_CANDIDATE_LIMIT as i64 {
+        return Err(SliSnapshotError::Limited);
+    }
+    let all_count = sqlx::query(SETTLEMENT_ALL_COUNT)
+        .bind(candidate_limit())
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(storage)?;
+    let all_candidates: i64 = all_count.try_get("candidates").map_err(storage)?;
+    if all_candidates > SLI_CANDIDATE_LIMIT as i64 {
         return Err(SliSnapshotError::Limited);
     }
     let rows = sqlx::query(SETTLEMENT_AGGREGATE)
@@ -180,6 +237,27 @@ pub(super) async fn read(
             })?,
             oldest_incomplete_seconds: row.try_get("oldest_incomplete_seconds").map_err(storage)?,
         };
+    }
+    for row in sqlx::query(SETTLEMENT_INCOMPLETE)
+        .bind(candidate_limit())
+        .bind(now)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(storage)?
+    {
+        let world: String = row.try_get("world_id").map_err(storage)?;
+        let index = match world.as_str() {
+            "main" => 0,
+            "isekai" => 1,
+            _ => return Err(SliSnapshotError::InvalidData),
+        };
+        let incomplete: i64 = row.try_get("incomplete").map_err(storage)?;
+        last[index].incomplete = u64::try_from(incomplete).map_err(|error| {
+            let _ = error;
+            SliSnapshotError::InvalidData
+        })?;
+        last[index].oldest_incomplete_seconds =
+            row.try_get("oldest_incomplete_seconds").map_err(storage)?;
     }
     Ok((first, last))
 }

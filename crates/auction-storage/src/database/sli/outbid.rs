@@ -38,7 +38,7 @@ const MM_AGGREGATE: &str = "
         LIMIT $3
     )
     SELECT auction.world_id,
-           CASE WHEN auction.status IN ('final','settling','settled','cancelled')
+           CASE WHEN auction.status IN ('settling','settled','cancelled')
                 THEN 'final' ELSE 'provisional' END AS deadline_state,
            count(*) AS samples,
            percentile_cont(0.01) WITHIN GROUP (
@@ -84,7 +84,7 @@ const PM_AGGREGATE: &str = "
         LIMIT $3
     )
     SELECT auction.world_id,
-           CASE WHEN auction.status IN ('final','settling','settled','cancelled')
+           CASE WHEN auction.status IN ('settling','settled','cancelled')
                 THEN 'final' ELSE 'provisional' END AS deadline_state,
            count(*) AS samples,
            percentile_cont(0.01) WITHIN GROUP (

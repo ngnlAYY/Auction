@@ -567,15 +567,22 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
 这些流程的终点和将来指标口径固定如下，均以秒为单位：
 
 - 注册/key：入站 received_at → key 回信首次获得本地成功发送证明，观察 p50/p95/p99。
+  Send 证明只认 `delivery_has_frozen_sent_proof` 的当前 attempt/binding（含人工 operator），
+  不以 `payload.external_mail_id` 的入站 MID 与出站 Sent MID 直接比较。
 - 提醒：lot 有效截止减发送证明时间，观察 p01/p05 及非正余量比例。
-  deadline_state 仅 provisional/final；在拍取当前有效截止，结束后取最终有效截止。
-  D4 只使用 final；不保存或伪造发送瞬间的截止快照。
+  deadline_state 仅 provisional/final；Final 仍在竞价阶段，只有 settling/settled/cancelled
+  或截止不可再延长时才为 final。D4 只使用 final；不保存或伪造发送瞬间的截止快照。
 - 结算首封：settled_at → 第一封应发付款邮件的成功证明；无应发集合不生成零样本。
   末封：settled_at → 全部应发集合成功后的最后时间；未齐全保持未完成。
-- 买家至卖方：首次有效付款 proof_observed_at → 前置义务关联的卖方货款发送证明。
-  缺可靠付款证据的历史记录不可评估，不以一般 updated_at 替代。
-- 投稿收取：入站 received_at → Take 的成功动作证明，不以本地录入时间替代。
-  拒收：入站 received_at → 拒收通知发送证明，并另看附件 Return 状态。
+  首/末封候选按付款邮件完成终点落窗，settled_at 可以早于七天；
+  incomplete 独立枚举全部结算场次的未完成付款集合，不只依赖七天内成功样本。
+- 买家至卖方：首次有效付款 proof_observed_at → 卖方货款发送证明。
+  main 直接取 seller_payout 的付款前置；isekai 先经 winner_equipment_handoff 的
+  prerequisite 找到真正付款义务。缺可靠付款证据计 unknown，不以一般 updated_at 替代。
+- 投稿收取：入站 received_at → Take 的成功动作证明，复用 conflicts/intake 的
+  action_removed_or_success_page / action_recovered_inbox_v1 owner 谓词，不以本地录入时间替代。
+  拒收：入站 received_at → 拒收通知发送证明，覆盖 equipment_rejected、no_attachments 与
+  assets_rejected；并另看附件 Return 状态。
   成功投稿接收回执邮件由 W14.3 新增，当前没有该邮件 SLI。
 - 慢速代理：lot.slow_proxy_tick 的 metadata.due_at → 审计 occurred_at，观察 p95/p99。
   幂等重放不增加审计样本，当前积压不能代替这项历史分位。

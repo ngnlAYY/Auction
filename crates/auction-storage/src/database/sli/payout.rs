@@ -1,4 +1,5 @@
 //! 首次有效付款证明到卖方货款发送成功的窗口。
+//! Isekai 的 seller_payout 前置是 winner_equipment_handoff，付款证明在它的前置义务上。
 
 use auction_application::{
     SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliFlowWindow, SliSnapshotError, SliWorld,
@@ -20,14 +21,22 @@ const PAYOUT_COUNT: &str = "
         LIMIT $3
     )
     SELECT count(*) AS candidates,
-           count(*) FILTER (WHERE payout.id IS NULL OR payment.id IS NULL) AS invalid
+           count(*) FILTER (
+               WHERE payout.id IS NULL OR link.id IS NULL OR payment.id IS NULL
+           ) AS invalid
     FROM candidates candidate
     LEFT JOIN public.settlement_obligation_fulfillments fulfillment
       ON fulfillment.delivery_id=candidate.id
     LEFT JOIN public.settlement_obligations payout
       ON payout.id=fulfillment.obligation_id AND payout.obligation_kind='seller_payout'
+    LEFT JOIN public.settlement_obligations link
+      ON link.id=payout.prerequisite_obligation_id
+    LEFT JOIN public.settlement_obligations handoff
+      ON handoff.id=link.id AND handoff.obligation_kind='winner_equipment_handoff'
     LEFT JOIN public.settlement_obligations payment
-      ON payment.id=payout.prerequisite_obligation_id
+      ON payment.id=CASE WHEN link.obligation_kind='winner_equipment_handoff'
+                         THEN handoff.prerequisite_obligation_id ELSE link.id END
+     AND payment.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')
     LEFT JOIN public.settlement_obligation_fulfillments proof
       ON proof.obligation_id=payment.id AND proof.proof_observed_at IS NOT NULL";
 
@@ -48,8 +57,14 @@ const PAYOUT_UNKNOWN: &str = "
       ON fulfillment.delivery_id=candidate.id
     JOIN public.settlement_obligations payout
       ON payout.id=fulfillment.obligation_id AND payout.obligation_kind='seller_payout'
+    JOIN public.settlement_obligations link
+      ON link.id=payout.prerequisite_obligation_id
+    LEFT JOIN public.settlement_obligations handoff
+      ON handoff.id=link.id AND handoff.obligation_kind='winner_equipment_handoff'
     JOIN public.settlement_obligations payment
-      ON payment.id=payout.prerequisite_obligation_id
+      ON payment.id=CASE WHEN link.obligation_kind='winner_equipment_handoff'
+                         THEN handoff.prerequisite_obligation_id ELSE link.id END
+     AND payment.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')
     LEFT JOIN public.settlement_obligation_fulfillments proof
       ON proof.obligation_id=payment.id AND proof.proof_observed_at IS NOT NULL
     WHERE proof.proof_observed_at IS NULL
@@ -81,8 +96,14 @@ const PAYOUT_AGGREGATE: &str = "
       ON fulfillment.delivery_id=candidate.id
     JOIN public.settlement_obligations payout
       ON payout.id=fulfillment.obligation_id AND payout.obligation_kind='seller_payout'
+    JOIN public.settlement_obligations link
+      ON link.id=payout.prerequisite_obligation_id
+    LEFT JOIN public.settlement_obligations handoff
+      ON handoff.id=link.id AND handoff.obligation_kind='winner_equipment_handoff'
     JOIN public.settlement_obligations payment
-      ON payment.id=payout.prerequisite_obligation_id
+      ON payment.id=CASE WHEN link.obligation_kind='winner_equipment_handoff'
+                         THEN handoff.prerequisite_obligation_id ELSE link.id END
+     AND payment.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')
     JOIN public.settlement_obligation_fulfillments proof
       ON proof.obligation_id=payment.id AND proof.proof_observed_at IS NOT NULL
     GROUP BY payout.world_id";
@@ -109,22 +130,15 @@ pub(super) async fn read(
     if invalid > 0 {
         return Err(SliSnapshotError::InvalidData);
     }
-    let unknown_rows = sqlx::query(PAYOUT_UNKNOWN)
-        .bind(since)
-        .bind(now)
-        .bind(candidate_limit())
-        .fetch_all(&mut *connection)
-        .await
-        .map_err(storage)?;
-    let rows = sqlx::query(PAYOUT_AGGREGATE)
-        .bind(since)
-        .bind(now)
-        .bind(candidate_limit())
-        .fetch_all(&mut *connection)
-        .await
-        .map_err(storage)?;
     let mut windows = [SliFlowWindow::default(); SliWorld::ALL.len()];
-    for row in unknown_rows {
+    for row in sqlx::query(PAYOUT_UNKNOWN)
+        .bind(since)
+        .bind(now)
+        .bind(candidate_limit())
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(storage)?
+    {
         let world: String = row.try_get("world_id").map_err(storage)?;
         let index = match world.as_str() {
             "main" => 0,
@@ -137,7 +151,14 @@ pub(super) async fn read(
             SliSnapshotError::InvalidData
         })?;
     }
-    for row in rows {
+    for row in sqlx::query(PAYOUT_AGGREGATE)
+        .bind(since)
+        .bind(now)
+        .bind(candidate_limit())
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(storage)?
+    {
         let world: String = row.try_get("world_id").map_err(storage)?;
         let index = match world.as_str() {
             "main" => 0,
@@ -153,7 +174,7 @@ pub(super) async fn read(
             p50: row.try_get("p50").map_err(storage)?,
             p95: row.try_get("p95").map_err(storage)?,
             p99: row.try_get("p99").map_err(storage)?,
-            unknown: 0,
+            unknown: windows[index].unknown,
             incomplete: 0,
             oldest_incomplete_seconds: None,
         };
