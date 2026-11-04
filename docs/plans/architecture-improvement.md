@@ -215,6 +215,7 @@
 | W6.3 | 已提交 | `2241689b`、本分支 | 未部署 | MoogleMail、公开论坛主题/登录、PM 列表/详情、主世界战斗页均有真实脱敏样本；论坛与邮件 manifest 分开维护 |
 | W6.5 | 已提交 | 随本提交 | — | `just test` 运行默认 feature 全 targets；`just test-db` 要求隔离 PG18 的 `AUCTION_TEST_DATABASE_URL`；默认 verify 仍不运行测试；AGENTS/CONTRIBUTING/开发指南与计划交付规范同步 |
 | W6.6 | 进行中 | 随本提交 | — | MoogleMail 与论坛 loopback 替身；真实客户端覆盖邮件读取/详情/compose、论坛主题/PM、登录/战斗、账号忙、Cookie 失效、超时、结构漂移、写入未知、邮资不足、收件人不存在；写表单成功路径仍缺真实 fixture |
+| W6.4 | 已提交 | 随本提交 | — | CI 独立 `test` job：安装 PostgreSQL 18、运行 `just test` 与 `just test-db`；不并入默认 verify |
 | W6 | 进行中 | W6.1–W6.4、W6.6 已批准 | — | W6.3/W6.5/W6.6 已开始；W6.1/W6.2/W6.4 随后 |
 | W7 | 进行中 | — | 未部署 | W7.1a 已建立 `main` 与保护；W7.5、W7.7、W7.8a、W7.11 已提交；W7.9、W7.10 随 M2b；W7.6 随 M3；W7.1、W7.2、W7.3、W7.8 随 M6 |
 | W7.1a | 已提交 | 远端设置 | — | 仓库转公开；`main` 已设为默认分支（当前 `383138a8`），分支保护要求 `docs`/`verify`/`security-audit`/`msrv`、线性历史、禁止强推与删除；`ci/dependency-version-guard` 与两个 dependabot 分支已删除，tokio PR #10 已按决策 52 关闭；`main` CI 成功，候选二进制为 `24a9c115` |
