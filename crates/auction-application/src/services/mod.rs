@@ -81,13 +81,17 @@ pub use user_mail::MailUserService;
 
 #[path = "public/watch.rs"]
 mod lot_watch;
-pub use lot_watch::{lot_watch_notification, set_lot_watch};
+pub use lot_watch::{OutbidNotice, lot_watch_notification, set_lot_watch};
 #[path = "public/preferences/mod.rs"]
 mod watch_preference;
 pub use watch_preference::set_lot_watch_preference;
 #[path = "public/watch_notification.rs"]
 mod watch_notification;
 pub use watch_notification::{LotWatchPmNotification, lot_watch_pm_notification};
+mod notification_text {
+    include!("public/notification_text.rs");
+}
+pub use notification_text::{format_credits, format_deadline, lot_code};
 
 mod runtime_switches;
 pub use runtime_switches::RuntimeSwitchRefreshService;

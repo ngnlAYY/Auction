@@ -185,23 +185,7 @@ pub(super) async fn process_topic(
                 ));
                 continue;
             }
-            let notify_mode = command.notify.as_deref();
-            if matches!(notify_mode, Some("pm" | "both")) {
-                system_entries.push(runtime_warning(
-                    post_number,
-                    &post.post.id,
-                    Some(command.line),
-                    "forum_pm_unavailable",
-                ));
-            }
-            if runtime.notifier.is_none() && matches!(notify_mode, Some("mm" | "both")) {
-                system_entries.push(runtime_warning(
-                    post_number,
-                    &post.post.id,
-                    Some(command.line),
-                    "mm_notification_unavailable",
-                ));
-            }
+            // W14.4：notify 只建立关注订阅，不再依赖 MoogleMail/PM owner 是否装配。
             for lot_code in &command.lot_codes {
                 let Some(&lot_id) = target_by_code.get(lot_code) else {
                     tracing::warn!(

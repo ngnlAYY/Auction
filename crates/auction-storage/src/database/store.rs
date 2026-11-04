@@ -57,6 +57,13 @@ impl DatabaseStore {
         self
     }
 
+    /// 注入通知正文使用的公开站点 origin；只影响新通知的冻结正文，不改变已入队载荷。
+    pub fn with_public_base_url(mut self, url: Option<String>) -> Self {
+        let Self::Postgres(store) = &mut self;
+        store.public_base_url = url;
+        self
+    }
+
     /// 注入同一进程共享的动态只读策略；不改变审计写入和事务重试。
     pub fn with_runtime_switches(mut self, switches: auction_application::RuntimeSwitches) -> Self {
         let Self::Postgres(store) = &mut self;

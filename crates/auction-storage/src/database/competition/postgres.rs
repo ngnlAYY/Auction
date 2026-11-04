@@ -46,14 +46,22 @@ pub struct PostgresCompetitionTransaction {
     transaction: Option<PgTransaction>,
     /// W14.8 通知创建指标；默认 no-op，装配根注入进程记录器。
     notifications: std::sync::Arc<dyn auction_application::NotificationRecorder>,
+    /// W14.2 被超提醒使用的公开站点 origin；未配置时正文省略链接。
+    public_base_url: Option<String>,
 }
 
 impl PostgresCompetitionTransaction {
     pub(crate) fn new(
         transaction: PgTransaction,
         notifications: std::sync::Arc<dyn auction_application::NotificationRecorder>,
+        public_base_url: Option<String>,
     ) -> Self {
-        Self { transaction: Some(transaction), notifications }
+        Self { transaction: Some(transaction), notifications, public_base_url }
+    }
+
+    /// 通知正文写入时使用的公开站点 origin；只在事务内读取冻结快照。
+    pub(crate) fn public_base_url(&self) -> Option<&str> {
+        self.public_base_url.as_deref()
     }
 
     /// 借用事务前复制共享句柄，供跨越 `transaction_mut()` 借用的观测调用使用。
@@ -108,6 +116,7 @@ impl TransactionRunner for PostgresStore {
                 let mut transaction = PostgresCompetitionTransaction::new(
                     transaction,
                     std::sync::Arc::clone(&self.notification_metrics),
+                    self.public_base_url.clone(),
                 );
 
                 match operation(&mut transaction).await {

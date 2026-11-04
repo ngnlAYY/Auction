@@ -5,6 +5,10 @@ mod operator_audit;
 mod ports;
 pub use operator_audit::{CliOperatorIdentity, cli_audit_metadata};
 pub use ports::{
+    AccountWorkPriority, GateClass, GatePoll, GateTicket, LOW_PRIORITY_FLOOR_AFTER,
+    OperationLockState, PriorityGateState, SegmentPlan,
+};
+pub use ports::{
     ExternalMetricsEvent, ExternalMetricsObserver, ForumBudgetPhase, ForumOperation,
     ForumPmCategory, ForumPmOutcome, ForumPmPhase, ForumRequestCategory, ForumSignal,
     ForumTopicScanMeasure, ForumTopicScanMode, ForumTopicScanOutcome, ForumWorld, MailBudget,
@@ -157,8 +161,8 @@ pub use ports::{
     MailProcessor, MailTemplateError, MailUserCommandKind, MailUserPort, MailUserRebindCommand,
     MailUserRegisterCommand, MailUserRegisterWrite, MailUserRekeyCommand, MailUserRekeyWrite,
     MailUserResult, MailUserResultCode, MailUserStore, MigrationCompatibilityMode,
-    OperationsAlertBatchClaim, OperationsAlertBatchItem, OperationsAlertClaimRequest,
-    OperationsAlertDeliverySnapshot, OperationsAlertDeliveryStatus,
+    NotifySubscription, OperationsAlertBatchClaim, OperationsAlertBatchItem,
+    OperationsAlertClaimRequest, OperationsAlertDeliverySnapshot, OperationsAlertDeliveryStatus,
     OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
     OperationsAlertFulfillmentSnapshot, OperationsAlertHealth, OperationsAlertKind,
     OperationsAlertObserveCommand, OperationsAlertPolicy, OperationsAlertProcessSnapshot,
@@ -325,8 +329,8 @@ pub use ports::{
     sent_list_minute_start,
 };
 pub use services::{
-    LotWatchPmNotification, lot_watch_notification, lot_watch_pm_notification, set_lot_watch,
-    set_lot_watch_preference,
+    LotWatchPmNotification, OutbidNotice, format_credits, format_deadline, lot_code,
+    lot_watch_notification, lot_watch_pm_notification, set_lot_watch, set_lot_watch_preference,
 };
 pub use services::{MailboxMaintenanceReport, MailboxMaintenanceService};
 

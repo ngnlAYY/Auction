@@ -20,6 +20,15 @@ impl LotWatchPreferencePort for DatabaseStore {
             map(&row)
         })
     }
+    fn pm_available(&self, user_id: Uuid) -> LotWatchFuture<'_, bool> {
+        Box::pin(async move {
+            if user_id.is_nil() {
+                return Err(LotWatchError::Invalid);
+            }
+            let Self::Postgres(store) = self;
+            forum_pm_available(store.pool(), user_id).await
+        })
+    }
     fn set(&self, command: SetLotWatchPreferenceCommand) -> LotWatchFuture<'_, LotWatchPreference> {
         Box::pin(async move {
             let Self::Postgres(store) = self;
@@ -33,7 +42,40 @@ impl LotWatchPreferencePort for DatabaseStore {
     }
 }
 
+/// PM 可用性同时要求账号已绑定论坛数字 ID 与 Worker 公布的论坛同步启用状态；
+/// 没有可靠启用观测时按不可用处理，避免保存一个静默失效的渠道。
+async fn forum_pm_available<'e, E>(executor: E, user_id: Uuid) -> Result<bool, LotWatchError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query_scalar(
+        "SELECT COALESCE(
+             (SELECT true FROM public.users WHERE id = $1 AND forum_account_id IS NOT NULL),
+             false
+         ) AND COALESCE((
+             SELECT CASE
+                 WHEN bool_or(details -> 'forum_sync_enabled' = 'true'::jsonb) THEN true
+                 WHEN bool_and(COALESCE(details -> 'forum_sync_enabled' = 'false'::jsonb, false))
+                     THEN false
+                 ELSE NULL
+             END
+             FROM public.service_heartbeats
+             WHERE service_name = 'auction-worker' AND process_role = 'worker'
+               AND status IN ('starting', 'ready', 'degraded')
+               AND expires_at > clock_timestamp()
+         ), false)",
+    )
+    .bind(user_id)
+    .fetch_one(executor)
+    .await
+    .map_err(|error| LotWatchError::Transaction(sql_error(error)))
+}
+
 impl LotWatchPreferenceTransaction for PostgresCompetitionTransaction {
+    async fn forum_pm_available(&mut self, user_id: Uuid) -> Result<bool, LotWatchError> {
+        forum_pm_available(&mut **self.transaction_mut()?, user_id).await
+    }
+
     async fn lock_preference(
         &mut self,
         user_id: Uuid,

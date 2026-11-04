@@ -283,6 +283,17 @@ pub struct ForumCommandStart {
     pub is_new: bool,
 }
 
+/// W14.4：论坛 `notify` 的结果；不再产生导入回执邮件。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotifySubscription {
+    /// 本次新建订阅。
+    Subscribed,
+    /// 用户此前已在同 lot 上标记，天然去重。
+    AlreadySubscribed,
+    /// 超出每帖或每账号每场订阅上限；调用方写入系统日志楼的拒绝结果。
+    Capped(&'static str),
+}
+
 pub trait ForumReplyStore: Send + Sync {
     /// 领取固定楼层刷新目标；内容 lease 必须覆盖单主题总时限，避免多 Worker 交叉编辑远端帖子。
     /// 必须在 LIMIT 前按实际凭据可用世界过滤，不能让不可用世界耗尽本轮名额。
@@ -317,6 +328,18 @@ pub trait ForumReplyStore: Send + Sync {
         &self,
         record: ForumBidCommandRecord,
     ) -> ApplicationFuture<'_, ForumCommandStart>;
+
+    /// 在命令事务内把回帖者的该 lot 标记为关注；按用户 × lot 唯一，天然去重。
+    /// 上限在锁内重新计数：每帖最多 8 条订阅、每账号每场最多 64 条。
+    fn subscribe_notify(
+        &self,
+        command_id: Uuid,
+        auction_id: AuctionId,
+        lot_id: LotId,
+        user_id: UserId,
+        post_id: String,
+        lot_code: String,
+    ) -> ApplicationFuture<'_, NotifySubscription>;
 
     fn finish_command(
         &self,

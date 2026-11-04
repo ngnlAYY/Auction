@@ -9,7 +9,7 @@ use std::{
 
 use auction_application::{AdminCredentialRuntimeOwnership, MailDiagnosticRecorder};
 use reqwest::{Client, StatusCode, header};
-use tokio::{sync::Mutex, time};
+use tokio::time;
 use url::Url;
 
 use super::{
@@ -21,16 +21,18 @@ use super::{forms::MoogleMailForm, protocol::MoogleMailUrlBuilder};
 
 mod account_busy;
 mod diagnostics;
+mod gate;
 mod reads;
 mod request;
 mod security;
 
+use gate::PriorityGate;
 pub(crate) use reads::{
     MoogleMailReadRound, MoogleMailSentList, MoogleMailSentPrefix, MoogleMailSentScope,
     SentBoundary, SentBoundaryScan,
 };
+use security::build_mooglemail_http_client;
 pub(crate) use security::is_hentaiverse_login_response;
-use security::{IntervalGate, build_mooglemail_http_client};
 
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -65,7 +67,7 @@ impl MoogleMailClientConfig {
 pub struct MoogleMailClient {
     builder: MoogleMailUrlBuilder,
     client: Client,
-    gate: Arc<IntervalGate>,
+    gate: Arc<PriorityGate>,
     /// 账号忙熔断只限制请求节奏；克隆出的客户端共享同一份状态。
     account_busy: Arc<account_busy::MoogleMailAccountBusy>,
     reads: Arc<reads::MailboxReads>,
@@ -140,7 +142,7 @@ impl MoogleMailClient {
         Ok(Self {
             builder,
             client,
-            gate: Arc::new(IntervalGate::new(config.minimum_request_interval)),
+            gate: Arc::new(PriorityGate::new(config.minimum_request_interval)),
             account_busy: Arc::new(account_busy::MoogleMailAccountBusy::default()),
             reads: Arc::new(reads::MailboxReads::default()),
             maximum_response_bytes,

@@ -69,6 +69,13 @@ where
                 if current.version != command.expected_version {
                     return Err(LotWatchError::Conflict);
                 }
+                // W14.5：选择 PM 但论坛同步未启用或账号未绑定论坛账号时拒绝保存，
+                // 避免渠道静默失效；重放已完成命令不受当前可用性影响。
+                if command.channel == "pm"
+                    && !transaction.forum_pm_available(command.user_id).await?
+                {
+                    return Err(LotWatchError::PmUnavailable);
+                }
                 let next = current.version.checked_add(1).ok_or(LotWatchError::Unavailable)?;
                 transaction.write_preference(&command, next).await?;
                 let result = LotWatchPreference {
