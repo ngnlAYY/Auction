@@ -6,7 +6,7 @@
 //! `lot`（lot 目录/详情与竞价命令）、`account`（我的竞价与代理授权）；本文件只保留共享
 //! envelope 解码与基础谓词原语。
 
-use auction_web_shared::is_legacy_uuid as uuid;
+use auction_web_shared::{BrowserErrorClass, is_legacy_uuid as uuid, report_browser_error};
 use gloo_net::http::Response;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
@@ -43,12 +43,25 @@ where
     T: DeserializeOwned,
     F: FnOnce(&Value) -> bool,
 {
-    let payload = response.json::<Value>().await.map_err(|_| "invalid_response".to_owned())?;
-    decode_success_value(payload, validate)
+    let payload = response.json::<Value>().await.map_err(|_| {
+        report_browser_error(BrowserErrorClass::DtoDecode);
+        "invalid_response".to_owned()
+    })?;
+    let decoded = decode_success_value(payload, validate);
+    if decoded.is_err() {
+        report_browser_error(BrowserErrorClass::DtoDecode);
+    }
+    decoded
 }
 
 /// 解析旧共享 client 接受的错误 envelope；顶层扩展允许存在，但三项基础字段必须显式出现。
 pub(crate) async fn decode_error(response: Response) -> Result<(String, Value), String> {
+    decode_error_value(response)
+        .await
+        .inspect_err(|_| report_browser_error(BrowserErrorClass::DtoDecode))
+}
+
+async fn decode_error_value(response: Response) -> Result<(String, Value), String> {
     let mut payload = response.json::<Value>().await.map_err(|_| "invalid_response".to_owned())?;
     let envelope = payload.as_object_mut().ok_or_else(|| "invalid_response".to_owned())?;
     let code =

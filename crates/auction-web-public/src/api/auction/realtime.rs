@@ -21,6 +21,8 @@ use uuid::Uuid;
 use super::send_get;
 
 #[cfg(target_arch = "wasm32")]
+use auction_web_shared::{BrowserErrorClass, report_browser_error};
+#[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{Message, State as WebSocketState, futures::WebSocket};
 #[cfg(target_arch = "wasm32")]
 use gloo_timers::future::TimeoutFuture;
@@ -487,6 +489,7 @@ where
         };
         let Message::Text(message) = message else {
             // 二进制帧不直接终止订阅：按毒帧计数，连续超限才断开重连。
+            report_browser_error(BrowserErrorClass::RealtimeProtocol);
             consecutive_bad_frames += 1;
             if consecutive_bad_frames >= MAX_CONSECUTIVE_BAD_FRAMES {
                 return Err(RealtimeError::transient("实时 WebSocket 连续返回不支持的二进制帧"));
@@ -497,6 +500,7 @@ where
             Ok(event) => event,
             Err(error) => {
                 // 单帧解码失败只计毒帧，不终止整条订阅；连续超限才断开重连。
+                report_browser_error(BrowserErrorClass::RealtimeProtocol);
                 consecutive_bad_frames += 1;
                 if consecutive_bad_frames >= MAX_CONSECUTIVE_BAD_FRAMES {
                     return Err(RealtimeError::transient(format!(
@@ -523,6 +527,7 @@ where
             return Err(RealtimeError::permanent("实时事件序列超过可表示范围"));
         };
         if event.stream_sequence != next_sequence {
+            report_browser_error(BrowserErrorClass::RealtimeProtocol);
             return Err(RealtimeError::transient("实时事件序列出现断档"));
         }
         expected_after = event.stream_sequence;
