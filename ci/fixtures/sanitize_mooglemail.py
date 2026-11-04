@@ -222,7 +222,7 @@ def manifest(outputs):
         if "nostate" in filename:
             lines.append('source_note = "来源目录已有的去状态脚本诊断变体；非独立远端响应，不能当作真实无状态响应证据。"')
         lines.append("")
-    for kind in ["battle"]:
+    for kind in []:
         lines += ["[[missing]]", f"class = {quote(kind)}",
                   'reason = "本地授权来源没有该类别的真实样本；未创建合成替代页。"', ""]
     return "\n".join(lines)
