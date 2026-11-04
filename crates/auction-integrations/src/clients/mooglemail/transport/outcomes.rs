@@ -26,6 +26,7 @@ pub(crate) fn exact_action_expectation(
 
 pub(crate) fn send_receipt(
     outcome: MoogleMailSendOutcome,
+    carries_assets: bool,
 ) -> Result<MoogleMailSendReceipt, DeliveryTransportError> {
     match outcome {
         MoogleMailSendOutcome::Sent(receipt) => Ok(receipt),
@@ -46,6 +47,27 @@ pub(crate) fn send_receipt(
             }),
         }),
         MoogleMailSendOutcome::RecipientNotFound { returned_mail_id } => {
+            // 零资产通知没有退信资产要取回：收件人不存在已是协议事实，直接失败关闭并留下终态审计，
+            // 不能占用人工对账队列。带资产发送仍按退信流程转人工，避免丢掉未取回的 Credits/装备。
+            if !carries_assets {
+                return Err(DeliveryTransportError {
+                    failure_code: "recipient_not_found".to_owned(),
+                    safe_detail: "MoogleMail 收件人不存在；零资产通知直接失败关闭".to_owned(),
+                    outcome_unknown: false,
+                    // 退信 MID 只用于资产取回；零资产通知不带引用，避免被当作可取回的退信。
+                    external_reference: None,
+                    result_metadata: json!({
+                        "stage": "send",
+                        "operation": MoogleMailOperation::Send.as_str(),
+                        "category": "recipient_not_found",
+                        "reason_code": "recipient_not_found",
+                        "recipient_skipped_for_cycle": true,
+                        "zero_asset_notification": true,
+                        "retryable": false,
+                        "take_required": false,
+                    }),
+                });
+            }
             let mut result_metadata = json!({
                 "stage": "send",
                 "operation": MoogleMailOperation::Send.as_str(),
@@ -340,5 +362,63 @@ fn transport_stage(operation: MoogleMailOperation) -> &'static str {
         MoogleMailOperation::Send => "send",
         MoogleMailOperation::ReturnMessage | MoogleMailOperation::Take => "action",
         _ => "read",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    fn recipient_not_found(returned_mail_id: Option<&str>) -> MoogleMailSendOutcome {
+        MoogleMailSendOutcome::RecipientNotFound {
+            returned_mail_id: returned_mail_id.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn zero_asset_recipient_not_found_fails_closed_without_reconcile() {
+        let error = send_receipt(recipient_not_found(Some("3120869")), false)
+            .expect_err("收件人不存在必须是失败");
+        // 零资产通知没有退信资产可取回：确定失败关闭，不进入人工对账，也不保留退信引用。
+        assert_eq!(error.failure_code, "recipient_not_found");
+        assert!(!error.outcome_unknown);
+        assert!(error.external_reference.is_none());
+        assert_eq!(error.result_metadata.get("take_required"), Some(&serde_json::json!(false)));
+        assert_eq!(error.result_metadata.get("retryable"), Some(&serde_json::json!(false)));
+        assert_eq!(
+            error.result_metadata.get("zero_asset_notification"),
+            Some(&serde_json::json!(true))
+        );
+        assert_eq!(
+            error.result_metadata.get("recipient_skipped_for_cycle"),
+            Some(&serde_json::json!(true))
+        );
+    }
+
+    #[test]
+    fn asset_recipient_not_found_keeps_manual_return_flow() {
+        let error = send_receipt(recipient_not_found(Some("3120869")), true)
+            .expect_err("收件人不存在必须是失败");
+        // 带资产发送仍须人工取回退信中的 Credits/装备，不能终结为普通 failed。
+        assert_eq!(error.failure_code, "recipient_not_found");
+        assert!(error.outcome_unknown);
+        assert_eq!(error.external_reference.as_deref(), Some("3120869"));
+        assert_eq!(error.result_metadata.get("take_required"), Some(&serde_json::json!(true)));
+        assert!(error.result_metadata.get("zero_asset_notification").is_none());
+    }
+
+    #[test]
+    fn recipient_is_sender_stays_unknown_only_with_staged_assets() {
+        assert!(
+            send_receipt(MoogleMailSendOutcome::RecipientIsSender { assets_staged: true }, false)
+                .expect_err("自寄必须失败")
+                .outcome_unknown
+        );
+        assert!(
+            !send_receipt(MoogleMailSendOutcome::RecipientIsSender { assets_staged: false }, false)
+                .expect_err("自寄必须失败")
+                .outcome_unknown
+        );
     }
 }
