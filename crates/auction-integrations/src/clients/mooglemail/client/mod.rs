@@ -21,12 +21,11 @@ use super::{forms::MoogleMailForm, protocol::MoogleMailUrlBuilder};
 
 mod account_busy;
 mod diagnostics;
-mod gate;
 mod reads;
 mod request;
 mod security;
 
-use gate::PriorityGate;
+use crate::clients::gate::PriorityGate;
 pub(crate) use reads::{
     MoogleMailReadRound, MoogleMailSentList, MoogleMailSentPrefix, MoogleMailSentScope,
     SentBoundary, SentBoundaryScan,

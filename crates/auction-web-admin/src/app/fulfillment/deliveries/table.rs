@@ -127,7 +127,10 @@ pub(super) fn DeliveryRow(
         "claimed" => Some(DeliveryDialogKind::Release),
         "failed"
             if !is_mail_disposition_conflict(&delivery)
-                && delivery.reason_code.as_deref() != Some("lot_watch_invalidated") =>
+                && !matches!(
+                    delivery.reason_code.as_deref(),
+                    Some("lot_watch_invalidated" | "recipient_renamed")
+                ) =>
         {
             Some(DeliveryDialogKind::Retry)
         }

@@ -181,6 +181,13 @@ impl ForumOperation {
             Self::PmSentDetail => "pm_sent_detail",
         }
     }
+
+    /// 是否属于改变远端状态的论坛写入（建主题、回帖、编辑、PM 发送）。
+    /// 写入使用请求门的前台档；页面预读、资料读取与 Sent 列表仍属后台只读。
+    /// 该分类只决定请求先后，不改变写入未知或自动重发规则。
+    pub const fn is_write(self) -> bool {
+        matches!(self, Self::CreateTopic | Self::ReplyTopic | Self::EditPost | Self::PmSend)
+    }
 }
 
 /// 邮件请求边界结果；ok 只表示请求终结，不表示资产或投递证明完成。
@@ -799,4 +806,33 @@ pub enum ExternalMetricsEvent {
         world: MailWorld,
         class: MailNoticeClass,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ForumOperation;
+
+    #[test]
+    fn forum_writes_are_foreground_only_for_state_changing_operations() {
+        for operation in [
+            ForumOperation::CreateTopic,
+            ForumOperation::ReplyTopic,
+            ForumOperation::EditPost,
+            ForumOperation::PmSend,
+        ] {
+            assert!(operation.is_write(), "{} 应使用前台档", operation.label());
+        }
+        for operation in [
+            ForumOperation::CheckSession,
+            ForumOperation::ReconcileTopic,
+            ForumOperation::FetchTopic,
+            ForumOperation::ReadPost,
+            ForumOperation::Profile,
+            ForumOperation::PmPrepare,
+            ForumOperation::PmSentList,
+            ForumOperation::PmSentDetail,
+        ] {
+            assert!(!operation.is_write(), "{} 应保持后台档", operation.label());
+        }
+    }
 }

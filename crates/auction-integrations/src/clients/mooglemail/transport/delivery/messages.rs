@@ -168,11 +168,15 @@ impl MoogleMailDeliveryTransport {
         fencing_version: i64,
     ) -> Result<DeliverySendResult, DeliveryTransportError> {
         let world = rendered.request.world;
+        // 是否有资产随信寄出决定收件人不存在时的收口方式：零资产通知失败关闭，
+        // 带资产发送仍需人工取回退信。该判断只读冻结期望，不改变发送内容。
+        let carries_assets =
+            expectation.credits > 0 || expectation.cod > 0 || !expectation.equipment_ids.is_empty();
         let outcome = self
             .send_with_credentials(session, rendered.request)
             .await
             .map_err(|error| transport_error(error, false))?;
-        let receipt = send_receipt(outcome)?;
+        let receipt = send_receipt(outcome, carries_assets)?;
         // 旧版 fulfillment snapshot 使用 world/operation 前缀区分远端 ID 与本地 fallback；
         // reconcile 必须先校验此前缀，不能把任意 delivery 引用当作 Sent 邮件 ID。
         let external_reference = format!("mooglemail:{world}:send:{}", receipt.external_mail_id);

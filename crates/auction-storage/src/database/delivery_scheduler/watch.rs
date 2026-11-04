@@ -30,6 +30,50 @@ pub(super) async fn retire_expired(
                   delivery.payload, delivery.origin_kind"#
     ))
     .bind(now).fetch_all(&mut **transaction).await.map_err(map_storage_error)?;
+    record_retirement(transaction, rows, now, notifications, "lot_watch_invalidated").await?;
+    retire_pending(transaction, now, notifications).await
+}
+
+/// 玩家改名后冻结收件人已失效：在围栏前退役尚未发送的提醒并记录原因，
+/// 不把它当成发送失败或人工对账，也不改写原冻结载荷。
+pub(super) async fn retire_renamed(
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
+    now: DateTime<Utc>,
+    notifications: &dyn auction_application::NotificationRecorder,
+) -> Result<(), auction_application::RepositoryError> {
+    let rows = sqlx::query(concat!(
+        r#"WITH retired AS (
+            SELECT deliveries.id FROM public.deliveries AS deliveries
+            WHERE deliveries.status IN ('pending', 'claimed')
+              AND deliveries.sending_at IS NULL AND "#,
+        crate::database::lot_watch::delivery_watch_renamed!(),
+        r#"
+            ORDER BY deliveries.created_at, deliveries.id
+            LIMIT 100 FOR UPDATE OF deliveries SKIP LOCKED
+        )
+        UPDATE public.deliveries AS delivery
+        SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
+            completed_at = GREATEST($1, delivery.created_at, delivery.claimed_at),
+            external_reference = NULL, failure_code = 'recipient_renamed',
+            result_metadata = '{"outcome_unknown":false,"preflight_blocked":true,"reason_code":"recipient_renamed"}'::jsonb,
+            fencing_version = delivery.fencing_version + 1,
+            updated_at = GREATEST(CURRENT_TIMESTAMP, $1, delivery.created_at, delivery.claimed_at)
+        FROM retired WHERE delivery.id = retired.id
+        RETURNING delivery.id, delivery.command_id, delivery.fencing_version, delivery.attempt_count,
+                  delivery.payload, delivery.origin_kind"#
+    ))
+    .bind(now).fetch_all(&mut **transaction).await.map_err(map_storage_error)?;
+    record_retirement(transaction, rows, now, notifications, "recipient_renamed").await
+}
+
+/// 退役行只追加一条确定未写入的失败审计，并按通知种类记一次 retired 指标。
+async fn record_retirement(
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
+    rows: Vec<sqlx::postgres::PgRow>,
+    now: DateTime<Utc>,
+    notifications: &dyn auction_application::NotificationRecorder,
+    failure_code: &str,
+) -> Result<(), auction_application::RepositoryError> {
     for row in rows {
         let delivery_id: Uuid = row.try_get("id").map_err(map_storage_error)?;
         // 提醒在 sending 围栏前失去资格：只记录一次退役，不改变 failed 状态语义。
@@ -46,14 +90,24 @@ pub(super) async fn retire_expired(
         let fencing_version: i64 = row.try_get("fencing_version").map_err(map_storage_error)?;
         let attempt_count: i32 = row.try_get("attempt_count").map_err(map_storage_error)?;
         let request_id = command_id.to_string();
-        append_delivery_audit(transaction, DeliveryAudit {
-            occurred_at: now, actor_type: "worker", actor_id: "delivery-worker", action: FAIL,
-            delivery_id, request_id: Some(&request_id), source: "worker",
-            metadata: serde_json::json!({"status": "failed", "failure_code": "lot_watch_invalidated",
+        append_delivery_audit(
+            transaction,
+            DeliveryAudit {
+                occurred_at: now,
+                actor_type: "worker",
+                actor_id: "delivery-worker",
+                action: FAIL,
+                delivery_id,
+                request_id: Some(&request_id),
+                source: "worker",
+                metadata: serde_json::json!({"status": "failed", "failure_code": failure_code,
                 "fencing_version": fencing_version, "attempt_count": attempt_count}),
-        }).await.map_err(map_storage_error)?;
+            },
+        )
+        .await
+        .map_err(map_storage_error)?;
     }
-    retire_pending(transaction, now, notifications).await
+    Ok(())
 }
 
 /// W14.11：lot 已结束或错过有效截止的待定提醒按决策 14 退役；

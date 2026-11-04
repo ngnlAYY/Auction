@@ -5,7 +5,6 @@ use auction_application::diagnostics::DiagnosticContext;
 use crate::diagnostics as safe_diagnostics;
 
 use std::{
-    collections::VecDeque,
     fs::{self, DirBuilder, File, Metadata, OpenOptions},
     io::{self, Read, Write},
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
@@ -16,7 +15,10 @@ use std::{
 use auction_application::MailDiagnosticError;
 use uuid::Uuid;
 
-use super::{MAX_FILE_BYTES, MoogleMailDiagnosticArchiveConfig};
+use super::{
+    EvictionHeader, MAX_FILE_BYTES, MAX_HEADER_BYTES, MoogleMailDiagnosticArchiveConfig,
+    RecordEntry, WRITE_UNKNOWN_FAILURE_CODE, eviction_order, eviction_plan,
+};
 
 const HARD_MAX_FILES: usize = 1024;
 
@@ -296,9 +298,7 @@ fn remove_file(path: &Path) -> Result<(), MailDiagnosticError> {
 }
 
 /// 只清理严格命名的本模块临时文件；先收集再清理，未知文件使整次操作失败。
-fn collect_records(
-    directory: &LockedDirectory,
-) -> Result<VecDeque<(PathBuf, SystemTime, u64)>, MailDiagnosticError> {
+fn collect_records(directory: &LockedDirectory) -> Result<Vec<RecordEntry>, MailDiagnosticError> {
     let mut temporary = Vec::new();
     let mut records = Vec::new();
     for entry in fs::read_dir(&directory.path).map_err(|diagnostic_cause| {
@@ -354,9 +354,9 @@ fn collect_records(
         if metadata.len() > MAX_FILE_BYTES as u64 {
             return Err(MailDiagnosticError::Capacity);
         }
-        result.push((
+        result.push(RecordEntry {
             path,
-            metadata.modified().map_err(|diagnostic_cause| {
+            modified: metadata.modified().map_err(|diagnostic_cause| {
                 safe_diagnostics::error(
                     "mooglemail_diagnostics",
                     "read_record_timestamp",
@@ -365,11 +365,33 @@ fn collect_records(
                 );
                 MailDiagnosticError::Io
             })?,
-            metadata.len(),
-        ));
+            size: metadata.len(),
+            // 分类只在本次写入确实需要淘汰时才读取，普通追加不额外扫描证据头。
+            write_unknown: false,
+        });
     }
-    result.sort_by_key(|(_, modified, _)| *modified);
-    Ok(result.into())
+    result.sort_by_key(|record| record.modified);
+    Ok(result)
+}
+
+/// 读取公开头首行判断是否为写入未知证据。
+/// 无法读取或解析时按“需要保留”处理：分类失败不能成为先删证据的理由，
+/// 容量边界仍由后续的统一检查兜底。
+fn write_unknown_evidence(path: &Path, owner: u32) -> bool {
+    let Ok(file) = open_private(path, owner, false) else {
+        return true;
+    };
+    let mut header = Vec::new();
+    if file.take((MAX_HEADER_BYTES + 1) as u64).read_to_end(&mut header).is_err() {
+        return true;
+    }
+    let Some(split) = header.iter().position(|byte| *byte == b'\n') else {
+        return true;
+    };
+    let Ok(parsed) = serde_json::from_slice::<EvictionHeader>(&header[..split]) else {
+        return true;
+    };
+    parsed.outcome.failure_code == WRITE_UNKNOWN_FAILURE_CODE
 }
 
 pub(super) fn persist(
@@ -385,26 +407,29 @@ pub(super) fn persist(
     }
     let mut records = collect_records(&directory)?;
     let now = SystemTime::now();
-    let mut total = records
-        .iter()
-        .try_fold(0u64, |sum, (_, _, size)| sum.checked_add(*size))
-        .ok_or(MailDiagnosticError::Capacity)?;
-    // 每次写入都清理过期证据；容量不足时继续淘汰最旧记录，不要求先等满保留期。
-    while let Some((path, modified, size)) = records.front() {
-        let expired = now.duration_since(*modified).is_ok_and(|age| age >= config.retention);
-        let too_many = records.len() >= HARD_MAX_FILES;
-        let too_large = total
-            .checked_add(bytes.len() as u64)
-            .is_none_or(|size| size > config.maximum_total_bytes);
-        if !expired && !too_many && !too_large {
-            break;
+    let incoming = bytes.len() as u64;
+    let plan = |records: &[RecordEntry]| {
+        eviction_plan(
+            records,
+            now,
+            incoming,
+            config.retention,
+            config.maximum_total_bytes,
+            HARD_MAX_FILES,
+        )
+    };
+    // 普通追加不需要读取证据头：没有淘汰需求时直接用修改时间顺序。
+    let mut evicted = plan(&records)?;
+    if evicted > 0 {
+        // 确实需要淘汰时才读取公开头分类，把写入未知证据排到普通证据之后。
+        for record in &mut records {
+            record.write_unknown = write_unknown_evidence(&record.path, directory.owner);
         }
-        remove_file(path)?;
-        total -= size;
-        records.pop_front();
+        records = eviction_order(records).into();
+        evicted = plan(&records)?;
     }
-    if total.checked_add(bytes.len() as u64).is_none_or(|size| size > config.maximum_total_bytes) {
-        return Err(MailDiagnosticError::Capacity);
+    for record in records.iter().take(evicted) {
+        remove_file(&record.path)?;
     }
     let temporary = directory.path.join(format!(".{id}.tmp"));
     publish_private(&temporary, &destination, bytes, Some(directory.owner))

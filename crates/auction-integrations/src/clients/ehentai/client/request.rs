@@ -304,19 +304,22 @@ impl EhentaiClient {
             metrics_world,
             metrics_operation,
         );
-        // 等待期间持有异步锁；取消尚未获准的请求不能预占后续时间槽。
-        let mut next = self.gate.lock().await;
-        let wait = next.saturating_duration_since(Instant::now());
-        if !wait.is_zero() {
-            tokio::time::sleep(wait).await;
-        }
-        gate_wait.finish(auction_application::WaitOutcome::Acquired);
-        let Some(next_deadline) = Instant::now().checked_add(self.minimum_request_interval) else {
-            // 限速截止时间不可表示时不能继续发起外部请求，交给 Worker 安全退避。
-            return Err(EhentaiError::remote_temporary(operation, false));
+        // 与 MoogleMail 同一个分级门：建主题、回帖、编辑与 PM 发送等业务写入使用前台档，
+        // 页面预读、增量扫描与 Sent 列表沿用后台档。优先级只决定先后，不改变总间隔，
+        // 也不改变 POST 之后的写入未知语义。
+        let class = if metrics_operation.is_write() {
+            auction_application::GateClass::Foreground
+        } else {
+            auction_application::GateClass::Background
         };
-        *next = next_deadline;
-        Ok(())
+        let gate_result = self.gate.wait(class).await;
+        gate_wait.finish(if gate_result.is_ok() {
+            auction_application::WaitOutcome::Acquired
+        } else {
+            auction_application::WaitOutcome::Error
+        });
+        // 拒绝发生在请求发出之前：这不是写入未知，调用方仍按临时错误退避。
+        gate_result.map_err(|()| EhentaiError::remote_temporary(operation, false))
     }
 }
 

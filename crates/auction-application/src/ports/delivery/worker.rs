@@ -60,7 +60,8 @@ pub struct DeliveryTransportError {
     pub failure_code: String,
     pub safe_detail: String,
     /// true 表示不能安全自动重发或终结，必须进入人工 reconcile。
-    /// 除远端结果未知外，也包括收件人不存在但退信资产尚未取回等已证明拒绝场景。
+    /// 除远端结果未知外，也包括收件人不存在但退信资产尚未取回等已证明拒绝场景；
+    /// 未携带 Credits、CoD 或装备的零资产通知没有可取回的退信资产，收件人不存在只按确定失败收口。
     pub outcome_unknown: bool,
     /// 远端明确失败时仍可能返回的安全引用，例如退信 `mid`。
     pub external_reference: Option<String>,

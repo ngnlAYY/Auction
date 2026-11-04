@@ -335,11 +335,14 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
             });
     }
 
-    // 仅 watch 明确失效且从未发送允许没有 sending 时间；未知发送不能进入此例外。
-    if snapshot.reason_code.as_deref() == Some("lot_watch_invalidated") {
+    // 仅 watch 明确失效或收件人改名且从未发送允许没有 sending 时间；未知发送不能进入此例外。
+    if matches!(
+        snapshot.reason_code.as_deref(),
+        Some("lot_watch_invalidated" | "recipient_renamed")
+    ) {
         return snapshot.origin_kind == "lot_watch"
             && snapshot.status == "failed"
-            && snapshot.failure_code.as_deref() == Some("lot_watch_invalidated")
+            && snapshot.failure_code.as_deref() == snapshot.reason_code.as_deref()
             && snapshot.cod == Some(0)
             && snapshot.lease_expires_at.is_none()
             && snapshot.sending_at.is_none()
@@ -509,10 +512,13 @@ fn valid_preparation_rejection_metadata(
             && metadata.get("external_reference_proven").is_none_or(|value| value == false))
 }
 
+/// 围栏前退役的 watch 提醒（lot 失效或收件人改名）只允许携带确定未写入的标记。
 fn valid_invalidated_watch_metadata(metadata: &Value) -> bool {
-    metadata.get("reason_code").and_then(Value::as_str) != Some("lot_watch_invalidated")
-        || (metadata.get("outcome_unknown").and_then(Value::as_bool) == Some(false)
-            && metadata.get("preflight_blocked").and_then(Value::as_bool) == Some(true))
+    !matches!(
+        metadata.get("reason_code").and_then(Value::as_str),
+        Some("lot_watch_invalidated" | "recipient_renamed")
+    ) || (metadata.get("outcome_unknown").and_then(Value::as_bool) == Some(false)
+        && metadata.get("preflight_blocked").and_then(Value::as_bool) == Some(true))
 }
 
 fn valid_terminal_alert_metadata(metadata: &Value) -> bool {

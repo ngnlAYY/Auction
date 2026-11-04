@@ -5,7 +5,7 @@ use std::{
     collections::HashSet,
     fmt,
     sync::{Arc, Mutex as StdMutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use auction_application::{
@@ -23,7 +23,6 @@ use reqwest::{
     redirect::Policy,
 };
 use scraper::{Html, Selector};
-use tokio::sync::Mutex;
 use url::{Url, form_urlencoded};
 use uuid::Uuid;
 

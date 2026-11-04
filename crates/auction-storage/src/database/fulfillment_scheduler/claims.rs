@@ -125,6 +125,7 @@ pub(super) async fn claim_postgres(
                   settlement.seller_amount, settlement.tax_amount, settlement.compensation_amount,
                   settlement.hold_ppm, settlement.adjustment_ppm,
                   settlement.adjustment_metadata ->> 'policy' AS settlement_policy_mode,
+                  recovery.payment_deadline_at AS recovery_payment_deadline_at,
                   o.submission_id, submission.source_kind AS submission_source_kind,
                   submission.source_reference AS submission_source_reference,
                   submission.mailbox_key AS submission_mailbox_key,
@@ -139,6 +140,8 @@ pub(super) async fn claim_postgres(
                ON equipment.id = o.equipment_id
            LEFT JOIN public.lot_settlements AS settlement
                ON settlement.lot_id = o.lot_id AND o.obligation_kind = 'winner_equipment_cod'
+           LEFT JOIN public.settlement_recoveries AS recovery
+               ON recovery.payment_obligation_id = o.id
            LEFT JOIN public.users AS recipient_user
                ON recipient_user.id = o.recipient_user_id
            LEFT JOIN public.auction_submissions AS submission
@@ -529,6 +532,11 @@ pub(super) fn map_claim(
         equipment_name: string_column(row, "equipment_name").map_err(ClaimMappingError::Context)?,
         settlement_line: pricing::map_settlement_line(row).map_err(ClaimMappingError::Context)?,
         settlement_mode: pricing::map_settlement_mode(row).map_err(ClaimMappingError::Context)?,
+        // 只有 recovery case 覆盖的付款义务才有冻结期限；历史义务缺列时保持 None。
+        payment_deadline_at: row
+            .try_get("recovery_payment_deadline_at")
+            .map_err(map_storage_error)
+            .map_err(ClaimMappingError::Context)?,
         submission_id: submission_id.map(SubmissionId::from_uuid),
         submission_source_kind: row
             .try_get("submission_source_kind")
