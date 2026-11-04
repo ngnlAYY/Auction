@@ -177,42 +177,55 @@ impl PrometheusCollector for Collector {
                     for (quantile, value) in
                         [("p50", window.p50), ("p95", window.p95), ("p99", window.p99)]
                     {
-                        if let Some(value) = value {
-                            self.window_duration
-                                .with_label_values(&[flow.label(), world.label(), quantile])
-                                .set(value);
-                        }
+                        set_optional(
+                            &self.window_duration,
+                            &[flow.label(), world.label(), quantile],
+                            value,
+                        );
                     }
                 }
                 for channel in SliOutbidChannel::ALL {
                     for state in SliDeadlineState::ALL {
                         let margin =
                             snapshot.value.outbid[world_index][channel.index()][state.index()];
+                        let labels = [world.label(), channel.label(), state.label()];
                         if margin.samples == 0 {
+                            let _ = self.outbid_samples.remove_label_values(&labels);
+                            let _ = self.outbid_non_positive.remove_label_values(&labels);
+                            for quantile in ["p01", "p05"] {
+                                let _ = self.outbid_margin.remove_label_values(&[
+                                    world.label(),
+                                    channel.label(),
+                                    state.label(),
+                                    quantile,
+                                ]);
+                            }
                             continue;
                         }
-                        let labels = [world.label(), channel.label(), state.label()];
                         self.outbid_samples.with_label_values(&labels).set(margin.samples as f64);
                         self.outbid_non_positive
                             .with_label_values(&labels)
                             .set(margin.non_positive as f64);
                         for (quantile, value) in [("p01", margin.p01), ("p05", margin.p05)] {
-                            if let Some(value) = value {
-                                self.outbid_margin
-                                    .with_label_values(&[
-                                        world.label(),
-                                        channel.label(),
-                                        state.label(),
-                                        quantile,
-                                    ])
-                                    .set(value);
-                            }
+                            set_optional(
+                                &self.outbid_margin,
+                                &[world.label(), channel.label(), state.label(), quantile],
+                                value,
+                            );
                         }
                     }
                 }
             }
         }
         self.families().into_iter().flat_map(PrometheusCollector::collect).collect()
+    }
+}
+
+fn set_optional(vector: &GaugeVec, labels: &[&str], value: Option<f64>) {
+    if let Some(value) = value {
+        vector.with_label_values(labels).set(value);
+    } else {
+        let _ = vector.remove_label_values(labels);
     }
 }
 

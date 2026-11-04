@@ -1,4 +1,5 @@
 //! 场次结算到首封/末封付款邮件成功证明的窗口。
+//! 候选按付款邮件完成终点落窗；起点 settled_at 可以早于七天。
 
 use auction_application::{
     SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliFlowWindow, SliSnapshotError, SliWorld,
@@ -9,31 +10,57 @@ use sqlx::{PgConnection, Row};
 use super::{candidate_limit, storage};
 
 const SETTLEMENT_COUNT: &str = "
-    WITH settlements AS MATERIALIZED (
-        SELECT settlement.auction_id,settlement.settled_at,auction.world_id
-        FROM public.auction_settlements settlement
-        JOIN public.auctions auction ON auction.id=settlement.auction_id
-        WHERE settlement.settled_at >= $1 AND settlement.settled_at <= $2
+    WITH candidate_auctions AS MATERIALIZED (
+        SELECT DISTINCT settlement.auction_id,settlement.settled_at,auction.world_id
+        FROM public.deliveries delivery
+        JOIN public.settlement_obligation_fulfillments fulfillment
+          ON fulfillment.delivery_id=delivery.id
+        JOIN public.settlement_obligations obligation
+          ON obligation.id=fulfillment.obligation_id
+        JOIN public.auction_settlements settlement
+          ON settlement.auction_id=obligation.auction_id
+        JOIN public.auctions auction ON auction.id=obligation.auction_id
+        WHERE delivery.status='succeeded'
+          AND delivery.origin_kind='settlement'
+          AND delivery.payload->>'template' IN
+              ('settlement_winner_equipment_cod','settlement_payment_carrier',
+               'settlement_equipment_handoff')
+          AND obligation.obligation_kind IN
+              ('winner_equipment_cod','winner_payment_carrier_cod','winner_equipment_handoff')
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
         ORDER BY settlement.settled_at,settlement.auction_id
         LIMIT $3
     )
-    SELECT count(*) AS candidates FROM settlements";
+    SELECT count(*) AS candidates FROM candidate_auctions";
 
-const AGGREGATE: &str = "
-    WITH settlements AS MATERIALIZED (
-        SELECT settlement.auction_id,settlement.settled_at,auction.world_id
-        FROM public.auction_settlements settlement
-        JOIN public.auctions auction ON auction.id=settlement.auction_id
-        WHERE settlement.settled_at >= $1 AND settlement.settled_at <= $2
+const SETTLEMENT_AGGREGATE: &str = "
+    WITH candidate_auctions AS MATERIALIZED (
+        SELECT DISTINCT settlement.auction_id,settlement.settled_at,auction.world_id
+        FROM public.deliveries delivery
+        JOIN public.settlement_obligation_fulfillments fulfillment
+          ON fulfillment.delivery_id=delivery.id
+        JOIN public.settlement_obligations obligation
+          ON obligation.id=fulfillment.obligation_id
+        JOIN public.auction_settlements settlement
+          ON settlement.auction_id=obligation.auction_id
+        JOIN public.auctions auction ON auction.id=obligation.auction_id
+        WHERE delivery.status='succeeded'
+          AND delivery.origin_kind='settlement'
+          AND delivery.payload->>'template' IN
+              ('settlement_winner_equipment_cod','settlement_payment_carrier',
+               'settlement_equipment_handoff')
+          AND obligation.obligation_kind IN
+              ('winner_equipment_cod','winner_payment_carrier_cod','winner_equipment_handoff')
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
         ORDER BY settlement.settled_at,settlement.auction_id
         LIMIT $3
     ),
     payments AS (
         SELECT obligation.auction_id,obligation.id AS obligation_id,
-               settlement.settled_at,settlement.world_id
-        FROM settlements settlement
+               candidate.settled_at,candidate.world_id
+        FROM candidate_auctions candidate
         JOIN public.settlement_obligations obligation
-          ON obligation.auction_id=settlement.auction_id
+          ON obligation.auction_id=candidate.auction_id
         WHERE obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod','winner_equipment_handoff')
     ),
@@ -60,26 +87,26 @@ const AGGREGATE: &str = "
         GROUP BY world_id,auction_id,settled_at
     )
     SELECT world_id,
-           count(*) FILTER (WHERE first_at IS NOT NULL) AS first_samples,
+           count(*) FILTER (WHERE first_at >= $1 AND first_at <= $2) AS first_samples,
            percentile_cont(0.5) WITHIN GROUP (
                ORDER BY extract(epoch FROM (first_at-settled_at))
-           ) FILTER (WHERE first_at IS NOT NULL) AS first_p50,
+           ) FILTER (WHERE first_at >= $1 AND first_at <= $2) AS first_p50,
            percentile_cont(0.95) WITHIN GROUP (
                ORDER BY extract(epoch FROM (first_at-settled_at))
-           ) FILTER (WHERE first_at IS NOT NULL) AS first_p95,
+           ) FILTER (WHERE first_at >= $1 AND first_at <= $2) AS first_p95,
            percentile_cont(0.99) WITHIN GROUP (
                ORDER BY extract(epoch FROM (first_at-settled_at))
-           ) FILTER (WHERE first_at IS NOT NULL) AS first_p99,
-           count(*) FILTER (WHERE last_at IS NOT NULL) AS last_samples,
+           ) FILTER (WHERE first_at >= $1 AND first_at <= $2) AS first_p99,
+           count(*) FILTER (WHERE last_at >= $1 AND last_at <= $2) AS last_samples,
            percentile_cont(0.5) WITHIN GROUP (
                ORDER BY extract(epoch FROM (last_at-settled_at))
-           ) FILTER (WHERE last_at IS NOT NULL) AS last_p50,
+           ) FILTER (WHERE last_at >= $1 AND last_at <= $2) AS last_p50,
            percentile_cont(0.95) WITHIN GROUP (
                ORDER BY extract(epoch FROM (last_at-settled_at))
-           ) FILTER (WHERE last_at IS NOT NULL) AS last_p95,
+           ) FILTER (WHERE last_at >= $1 AND last_at <= $2) AS last_p95,
            percentile_cont(0.99) WITHIN GROUP (
                ORDER BY extract(epoch FROM (last_at-settled_at))
-           ) FILTER (WHERE last_at IS NOT NULL) AS last_p99,
+           ) FILTER (WHERE last_at >= $1 AND last_at <= $2) AS last_p99,
            count(*) FILTER (WHERE NOT all_success) AS incomplete,
            extract(epoch FROM ($2 - min(settled_at) FILTER (WHERE NOT all_success)))
                AS oldest_incomplete_seconds
@@ -107,7 +134,7 @@ pub(super) async fn read(
     if candidates > SLI_CANDIDATE_LIMIT as i64 {
         return Err(SliSnapshotError::Limited);
     }
-    let rows = sqlx::query(AGGREGATE)
+    let rows = sqlx::query(SETTLEMENT_AGGREGATE)
         .bind(since)
         .bind(now)
         .bind(candidate_limit())
