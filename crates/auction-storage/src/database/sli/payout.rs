@@ -10,17 +10,22 @@ use sqlx::{PgConnection, Row};
 use super::{candidate_limit, storage};
 
 const PAYOUT_COUNT: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
-          AND delivery.origin_kind='settlement'
-          AND delivery.payload->>'template'='settlement_seller_payout'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
         ORDER BY delivery.completed_at,delivery.id
         LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at
+        FROM window_deliveries delivery
+        WHERE delivery.origin_kind='settlement'
+          AND delivery.payload->>'template'='settlement_seller_payout'
     )
-    SELECT count(*) AS candidates,
+    SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
+           count(*) AS candidates,
            count(*) FILTER (
                WHERE payout.id IS NULL OR link.id IS NULL OR payment.id IS NULL
            ) AS invalid
@@ -41,15 +46,19 @@ const PAYOUT_COUNT: &str = "
       ON proof.obligation_id=payment.id AND proof.proof_observed_at IS NOT NULL";
 
 const PAYOUT_UNKNOWN: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
-          AND delivery.origin_kind='settlement'
-          AND delivery.payload->>'template'='settlement_seller_payout'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
         ORDER BY delivery.completed_at,delivery.id
         LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at
+        FROM window_deliveries delivery
+        WHERE delivery.origin_kind='settlement'
+          AND delivery.payload->>'template'='settlement_seller_payout'
     )
     SELECT payout.world_id,count(*) AS unknown
     FROM candidates candidate
@@ -71,15 +80,19 @@ const PAYOUT_UNKNOWN: &str = "
     GROUP BY payout.world_id";
 
 const PAYOUT_AGGREGATE: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
-          AND delivery.origin_kind='settlement'
-          AND delivery.payload->>'template'='settlement_seller_payout'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
         ORDER BY delivery.completed_at,delivery.id
         LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at
+        FROM window_deliveries delivery
+        WHERE delivery.origin_kind='settlement'
+          AND delivery.payload->>'template'='settlement_seller_payout'
     )
     SELECT payout.world_id,count(*) AS samples,
            percentile_cont(0.5) WITHIN GROUP (
@@ -122,9 +135,10 @@ pub(super) async fn read(
         .fetch_one(&mut *connection)
         .await
         .map_err(storage)?;
+    let window_count: i64 = row.try_get("window_count").map_err(storage)?;
     let candidate_count: i64 = row.try_get("candidates").map_err(storage)?;
     let invalid: i64 = row.try_get("invalid").map_err(storage)?;
-    if candidate_count > SLI_CANDIDATE_LIMIT as i64 {
+    if window_count > SLI_CANDIDATE_LIMIT as i64 || candidate_count > SLI_CANDIDATE_LIMIT as i64 {
         return Err(SliSnapshotError::Limited);
     }
     if invalid > 0 {
