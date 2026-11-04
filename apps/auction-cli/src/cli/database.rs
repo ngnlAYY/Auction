@@ -44,6 +44,15 @@ pub(crate) enum DbCommand {
         #[arg(long, value_name = "FILE")]
         output: PathBuf,
     },
+    /// 在有界只读快照检查内部不变量，仅追加巡检审计事实，不改变资金或资产。
+    InspectConsistency {
+        /// 人工确认的数据库名，须与 Worker 配置和实际连接一致。
+        #[arg(long, value_name = "NAME")]
+        database: String,
+        /// 不可覆盖的私有 JSON 报告绝对路径；父目录须已存在。
+        #[arg(long, value_name = "FILE")]
+        output: PathBuf,
+    },
     /// 删除并以原 owner/编码/locale 重建已确认的数据库；默认只读演练。
     Rebuild {
         /// 人工确认的目标数据库名，须同时匹配 Worker 配置与集群 catalog。

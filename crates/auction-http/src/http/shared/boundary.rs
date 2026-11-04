@@ -70,6 +70,9 @@ impl HttpBoundary {
         let mut networks = Vec::with_capacity(trusted_proxy_cidrs.len());
         for value in trusted_proxy_cidrs {
             let network = value.parse::<IpNet>().map_err(|_| "trusted proxy CIDR 格式无效")?;
+            if network.prefix_len() == 0 {
+                return Err("trusted proxy CIDR 不能信任所有地址");
+            }
             if network.trunc().to_string() != *value || networks.contains(&network) {
                 return Err("trusted proxy CIDR 必须规范且不能重复");
             }
@@ -402,4 +405,69 @@ fn finish_response(mut response: Response, request_id: &str) -> Response {
     // `Date` 由 Hyper 的 HTTP/1 与 HTTP/2 编码器按秒缓存后统一补齐，这里无需逐响应格式化。
     super::countdown::apply_security_headers(&mut response);
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    fn headers(value: &'static str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(FORWARDED_FOR_HEADER, HeaderValue::from_static(value));
+        // CDN 专用头不能自行授予信任；可信上游应把核验后的链写入 XFF。
+        headers.insert("cf-connecting-ip", HeaderValue::from_static("192.0.2.99"));
+        headers
+    }
+
+    #[test]
+    fn cdn_chain_ignores_spoofed_left_prefix_and_untrusted_peers() {
+        let boundary = HttpBoundary::new(
+            Duration::from_secs(15),
+            &["127.0.0.1/32".to_owned(), "173.245.48.0/20".to_owned()],
+            false,
+        )
+        .unwrap();
+        let chain = headers("192.0.2.123, 198.51.100.7, 173.245.48.10");
+        assert_eq!(
+            resolve_client_address(Some("127.0.0.1:1234".parse().unwrap()), &chain, &boundary),
+            "198.51.100.7".parse::<IpAddr>().unwrap()
+        );
+        assert_eq!(
+            resolve_client_address(Some("203.0.113.10:1234".parse().unwrap()), &chain, &boundary),
+            "203.0.113.10".parse::<IpAddr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn unix_proxy_requires_explicit_trust_and_cdn_cidrs() {
+        let chain = headers("198.51.100.7, 173.245.48.10");
+        let no_trust = HttpBoundary::default();
+        assert_eq!(resolve_client_address(None, &chain, &no_trust), Ipv4Addr::UNSPECIFIED);
+        let trusted_unix = HttpBoundary::new(Duration::from_secs(15), &[], true).unwrap();
+        assert_eq!(
+            resolve_client_address(None, &chain, &trusted_unix),
+            "173.245.48.10".parse::<IpAddr>().unwrap()
+        );
+        let with_cdn =
+            HttpBoundary::new(Duration::from_secs(15), &["173.245.48.0/20".to_owned()], true)
+                .unwrap();
+        assert_eq!(
+            resolve_client_address(None, &chain, &with_cdn),
+            "198.51.100.7".parse::<IpAddr>().unwrap()
+        );
+        assert_eq!(
+            resolve_client_address(None, &headers("198.51.100.7, bad"), &with_cdn),
+            Ipv4Addr::UNSPECIFIED
+        );
+    }
+
+    #[test]
+    fn universal_proxy_trust_is_rejected_at_http_boundary() {
+        for network in ["0.0.0.0/0", "::/0"] {
+            assert!(
+                HttpBoundary::new(Duration::from_secs(15), &[network.to_owned()], false).is_err()
+            );
+        }
+    }
 }

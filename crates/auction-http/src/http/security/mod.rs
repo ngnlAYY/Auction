@@ -12,7 +12,11 @@ use url::Url;
 
 use super::boundary::HttpBoundary;
 
+mod admin_login;
 mod headers;
+#[cfg(test)]
+mod rotation_tests;
+use admin_login::AdminLoginDefense;
 pub use headers::apply_browser_security_headers;
 
 const MAX_RATE_LIMIT_ENTRIES: usize = 4096;
@@ -126,12 +130,14 @@ impl PublicHttpSecurity {
 #[derive(Clone, Default)]
 pub struct AdminHttpSecurity {
     inner: PublicHttpSecurity,
+    login: AdminLoginDefense,
 }
 
 impl AdminHttpSecurity {
     /// 从配置建立 Admin HTTP 安全策略；校验失败时在启动期拒绝。
     pub fn new(options: HttpSecurityOptions<'_>) -> Result<Self, &'static str> {
-        Ok(Self { inner: PublicHttpSecurity::new(options)? })
+        let login = AdminLoginDefense::new(options.login_limit, options.rate_limit_window);
+        Ok(Self { inner: PublicHttpSecurity::new(options)?, login })
     }
 
     pub(crate) fn cookie_secure(&self) -> bool {
@@ -147,7 +153,16 @@ impl AdminHttpSecurity {
     }
 
     pub(crate) fn allow_login(&self, address: IpAddr) -> Option<u64> {
-        self.inner.allow_login(address)
+        self.login.allow().or_else(|| self.inner.allow_login(address))
+    }
+
+    /// 无效凭据按共享账号计数，不允许更换来源绕过退避。
+    pub(crate) fn login_failed(&self) {
+        self.login.failed();
+    }
+
+    pub(crate) fn login_succeeded(&self) {
+        self.login.succeeded();
     }
 
     pub(crate) fn allow_mutation(&self, address: IpAddr) -> Option<u64> {
@@ -255,6 +270,7 @@ impl RateLimiter {
 
     /// 消耗一个地址的固定窗口额度；`None` 表示允许，`Some` 是拒绝后的最短重试秒数。
     fn allow(&self, address: IpAddr) -> Option<u64> {
+        let address = rate_limit_key(address);
         let Ok(mut entries) = self.entries.lock() else {
             return Some(self.window.as_secs().max(1));
         };
@@ -293,5 +309,53 @@ impl RateLimiter {
         }
         entries.insert(address, RateWindow { started: now, last_seen: now, count: 1 });
         None
+    }
+}
+
+// IPv4-mapped IPv6 必须与 IPv4 共用键；原生 IPv6 在 /64 内共用额度。
+fn rate_limit_key(address: IpAddr) -> IpAddr {
+    match address {
+        IpAddr::V6(address) => address
+            .to_ipv4_mapped()
+            .map(IpAddr::V4)
+            .unwrap_or_else(|| IpAddr::V6((u128::from(address) & (u128::MAX << 64)).into())),
+        address => address,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn ipv6_addresses_share_a_64_bit_rate_limit_key() {
+        let limiter = RateLimiter::new(1, Duration::from_secs(60));
+        assert_eq!(limiter.allow("2001:db8:1:2::1".parse().unwrap()), None);
+        assert!(limiter.allow("2001:db8:1:2:ffff::2".parse().unwrap()).is_some());
+        assert_eq!(limiter.allow("2001:db8:1:3::1".parse().unwrap()), None);
+    }
+
+    #[test]
+    fn mapped_ipv6_cannot_bypass_ipv4_rate_limit() {
+        let limiter = RateLimiter::new(1, Duration::from_secs(60));
+        assert_eq!(limiter.allow("192.0.2.1".parse().unwrap()), None);
+        assert!(limiter.allow("::ffff:192.0.2.1".parse().unwrap()).is_some());
+    }
+
+    #[test]
+    fn admin_login_quota_and_failure_backoff_ignore_rotating_sources() {
+        let security = AdminHttpSecurity::default();
+        for suffix in 1..=10 {
+            assert_eq!(security.allow_login(IpAddr::from([192, 0, 2, suffix])), None);
+        }
+        assert!(security.allow_login("198.51.100.1".parse().unwrap()).is_some());
+        let failures = AdminHttpSecurity::default();
+        for _ in 0..5 {
+            failures.login_failed();
+        }
+        assert!(failures.allow_login("198.51.100.2".parse().unwrap()).is_some());
+        failures.login_succeeded();
+        assert_eq!(failures.allow_login("198.51.100.3".parse().unwrap()), None);
     }
 }

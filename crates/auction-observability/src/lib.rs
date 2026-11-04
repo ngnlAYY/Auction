@@ -25,8 +25,8 @@ pub use metrics::{
     MigrationReadinessRecorder, PoolMetricsBackend, PoolMetricsSnapshot, PoolMetricsSource,
     ProcessMetrics, ReadinessCacheOutcome, ReadinessCheckResult, ReadinessRecorder,
     ShutdownCriticalKind, ShutdownOutcome, ShutdownPhase, ShutdownReason, ShutdownRecorder,
-    ShutdownRole, WebSocketConnectionGuard, WorkerLoop, WorkerRecorder, WorkerResult,
-    WorkerRetryKind, current_database_worker_loop, database_transaction_attempt,
+    ShutdownRole, WebSocketConnectionGuard, WorkerLoop, WorkerPanicOwner, WorkerRecorder,
+    WorkerResult, WorkerRetryKind, current_database_worker_loop, database_transaction_attempt,
     database_transaction_exhausted, database_transaction_phase, noop_worker_recorder,
     record_database_conflict, scope_database_worker_loop,
 };

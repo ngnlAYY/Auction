@@ -37,7 +37,7 @@
 | --- | --- |
 | `[database]` `host`、`port`、`username`、`password`、`name` | PostgreSQL 连接（必填）。账号与口令按原文填写，loader 负责编码；端口必须非零。也可用兼容的 `database_url`（`postgres://…`），二者不能同时出现 |
 | `redis_url` | `cache.backend = "redis"` 时必填 |
-| `admin_actor`、`admin_secret` | Admin 登录凭据，必须成对；secret 16–4096 字节、无控制字符 |
+| `admin_actor`、`admin_secret` | Admin 登录凭据，必须成对；既有 secret 16–4096 字节可加载，首次设置要求至少 32 字节；无控制字符 |
 | `equipment_data_key_id` / `equipment_data_key` | 装备 key 加密（手工录入、投稿）；三角色必须一致 |
 | `user_login_data_key_id` / `user_login_data_key` | 用户登录 key 加密（注册回信、Admin 用户管理） |
 | `credential_data_key_id` / `credential_data_key` | 外部 Cookie 加密（凭据管理、Worker 读取数据库凭据、诊断归档） |

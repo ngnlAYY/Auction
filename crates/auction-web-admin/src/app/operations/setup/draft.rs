@@ -197,6 +197,7 @@ impl Default for SetupDraft {
         ] {
             draft.set(field, value.to_owned());
         }
+        draft.generate_admin_secret();
         // 排期草稿与首次 wire 的兼容默认值一致，恢复进阶参数不触碰这些值。
         let schedule = auction_contracts::SetupScheduleRequest::default();
         for (field, value) in [
@@ -223,6 +224,13 @@ impl SetupDraft {
         self.values[field as usize] = value;
     }
 
+    /// 两个独立 v4 UUID 共含 244 位随机熵；使用既有系统/浏览器安全随机源，不降级。
+    pub(super) fn generate_admin_secret(&mut self) {
+        let secret = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+        self.set(SetupField::AdminSecret, secret.clone());
+        self.set(SetupField::AdminConfirmation, secret);
+    }
+
     /// 只恢复性能与日志草稿；凭据、站点、监听端口和业务开关不受影响。
     pub(super) fn reset_advanced(&mut self) {
         let defaults = Self::default();
@@ -238,5 +246,31 @@ impl SetupDraft {
         {
             self.values[field as usize].clear();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn setup_generates_and_replaces_random_admin_secret() {
+        let mut draft = SetupDraft::default();
+        let original = draft.value(SetupField::AdminSecret).to_owned();
+        assert_eq!(original.len(), 64);
+        assert!(original.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(draft.value(SetupField::AdminConfirmation), original);
+        draft.reset_advanced();
+        assert_eq!(draft.value(SetupField::AdminSecret), original);
+        draft.generate_admin_secret();
+        assert_ne!(draft.value(SetupField::AdminSecret), original);
+        assert_eq!(
+            draft.value(SetupField::AdminSecret),
+            draft.value(SetupField::AdminConfirmation)
+        );
+        draft.clear_passwords();
+        assert!(draft.value(SetupField::AdminSecret).is_empty());
+        assert!(draft.value(SetupField::AdminConfirmation).is_empty());
     }
 }

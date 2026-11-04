@@ -18,6 +18,7 @@ pub(super) fn SetupInput(
     busy: bool,
 ) -> Element {
     let id = field.id();
+    let mut reveal_secret = use_signal(|| false);
     let help_id = format!("{id}-help");
     let error_id = format!("{id}-error");
     let error = issues.read().iter().find(|issue| issue.field == field).map(|issue| t!(issue.key));
@@ -51,7 +52,7 @@ pub(super) fn SetupInput(
                 input {
                     id,
                     name: id,
-                    r#type: field.input_type(),
+                    r#type: if field == SetupField::AdminSecret && reveal_secret() { "text" } else { field.input_type() },
                     inputmode: if bounds.is_some() { "numeric" } else if field.input_type() == "url" { "url" } else { "text" },
                     autocomplete: field.autocomplete(),
                     autocapitalize: "none",
@@ -71,6 +72,30 @@ pub(super) fn SetupInput(
                         draft.write().set(field, event.value());
                         issues.write().retain(|issue| !field.related(issue.field));
                     },
+                }
+            }
+            if field == SetupField::AdminSecret {
+                div { class: "admin-setup__actions",
+                    button {
+                        r#type: "button",
+                        disabled: busy,
+                        onclick: move |_| {
+                            if busy { return; }
+                            draft.write().generate_admin_secret();
+                            issues.write().retain(|issue| !field.related(issue.field));
+                            reveal_secret.set(true);
+                        },
+                        {t!("setup-admin-secret-generate")}
+                    }
+                    button {
+                        r#type: "button",
+                        disabled: busy,
+                        aria_controls: id,
+                        aria_pressed: reveal_secret().to_string(),
+                        onclick: move |_| { if !busy { reveal_secret.toggle(); } },
+                        if reveal_secret() { {t!("setup-admin-secret-hide")} }
+                        else { {t!("setup-admin-secret-show")} }
+                    }
                 }
             }
             p { id: help_id, class: "admin-setup__hint", {t!(&format!("{id}-help"))} }

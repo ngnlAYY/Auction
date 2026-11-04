@@ -36,10 +36,11 @@ pub(crate) async fn admin(
 
 /// 任意来源的转发痕迹都拒绝；空值、重复值和非法值也属于存在，绝不解析或记录值。
 pub(crate) fn has_forwarding_headers(headers: &HeaderMap) -> bool {
-    // CDN 专用来源头待 W0.12 核实实际代理链后再补充；不能据此宣称能识别全部代理。
     headers.keys().any(|name| {
-        matches!(name.as_str(), "forwarded" | "x-real-ip" | "via")
-            || name.as_str().starts_with("x-forwarded-")
+        matches!(
+            name.as_str(),
+            "forwarded" | "x-real-ip" | "via" | "cf-connecting-ip" | "cf-ray" | "true-client-ip"
+        ) || name.as_str().starts_with("x-forwarded-")
     })
 }
 
@@ -62,5 +63,21 @@ fn render(metrics: Option<&ProcessMetrics>, method: Method, uri: Uri) -> Respons
         Err(MetricsError::Registry(_) | MetricsError::Encode(_)) => {
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn cdn_headers_are_forwarding_traces_even_when_empty() {
+        for name in ["cf-connecting-ip", "cf-ray", "true-client-ip"] {
+            let mut headers = HeaderMap::new();
+            headers.insert(name, axum::http::HeaderValue::from_static(""));
+            assert!(has_forwarding_headers(&headers));
+        }
+        assert!(!has_forwarding_headers(&HeaderMap::new()));
     }
 }

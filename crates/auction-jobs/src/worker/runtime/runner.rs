@@ -466,6 +466,12 @@ fn observe_task_join(
     if let Some(loop_kind) = loop_kind
         && !error.is_cancelled()
     {
+        if error.is_panic() {
+            metrics.observe_task_panic(
+                loop_kind,
+                auction_observability::WorkerPanicOwner::CriticalLoop,
+            );
+        }
         metrics.observe_unpersisted_error(loop_kind, diagnostics::join_kind(error));
     }
 }

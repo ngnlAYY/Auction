@@ -196,7 +196,7 @@
 | W0.3 | 已提交 | `46eb1c43` | 未部署 | 同上；`auction_worker_unpersisted_error_total{loop,kind}`，口径为未确认形成持久失败、退避或人工处置（提交结果未知计入），先于日志去重累加；PM 暂归 `forum` loop |
 | W0.10 | 已提交 | `421ee64c` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；`common.toml [metrics]` 三角色可选 loopback 出口（只允许 `127.0.0.1`，示例 19100/19101/19102，省略即关闭），复用 W0.9 `/metrics` 契约，出口故障只降级采集；`ops/monitoring/` 提供 Prometheus、exporter 查询与 unit 示例；待用户按 `ops/README.md` 安装 Prometheus、node_exporter、postgres_exporter 并启用出口后验收；W0.13 随后续批次 |
 | W13.3a | 已提交 | `7a532130` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 N）实现、Claude 监督；release 开启 `overflow-checks`（`wasm-release` 继承，保留 abort），原生装配根与 CLI 安装安全 panic hook（target `auction::panic`，只输出线程、位置与 `&'static str` payload），顶层 JoinError 固定分类；Worker 已有子任务收口新增 `auction_worker_task_panics_total{loop}`，处置与计数不变；逐 owner panic 计次拆为 W13.3b 待用户决定 |
-| W13.3b | 暂缓 | — | — | 决策 75：延后到 M2a，与 W0.15 影子框架同批；M1 只保留 W13.3a，不把缩范围方案当作纯 panic 计次或完整人工终态 |
+| W13.3b | 已提交 | 随本提交 | — | panic 指标按 `loop,owner` 闭集；生命周期/结算首 panic 写 fenced terminal，履约/recovery 走 manual_reconcile，delivery 按 claimed/sending 区分；slow proxy/关键循环失败关闭；无迁移/无新终态 CLI |
 | W0.6 | 已提交 | `5ebfc1c8` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 K）实现、Claude 监督；`[database_profiles] mode` 默认 `profiled`（`legacy` 为旧路径），服务池 16、维护池 4、固定 `application_name`，`deployment check` 汇总连接预算；服务超时默认关闭，启用须显式填写阈值且以 W0.14 切换 `classified` 为前置（见待决定）；21 个事务 owner 的尝试/冲突/重试/耗尽指标，Worker 循环连接获取与持有指标；切换需重启 |
 | W0.4 | 已提交 | `bc0e5430` | 未部署 | 执行者：Codex（DeepSeek V4.1 Flash，车道 M）实现、Claude 监督；Worker 装配同步外部指标记录器，覆盖 19 个邮件操作的物理请求、请求门/独占锁/incoming 读写锁等待、`account_busy`/限流/超时信号与维护/观察/fetch/批次/扫描预算耗尽；关闭 metrics 或非 Worker 为 no-op，不改变请求间隔、锁顺序、deadline、重试、取消、写入围栏或结果未知处理 |
 | W0.5 | 已提交 | `bc0e5430` | 未部署 | 执行者：Codex（DeepSeek V4.1 Flash，车道 M）实现、Claude 监督；论坛物理请求、门等待、主题扫描发现/处理页数、写入未知、PM prepare/send/reconcile 与回帖导入延迟 `poll_window` 上下界估计（终点为每帖首条新命令账本提交确认，不填零）；`ForumCommandStart.is_new` 与 `ForumReplyTopic.reply_phase` 是只读投影，不参与命令裁决；论坛 world 允许 `shared` 仅限无世界资料读取 |
@@ -222,12 +222,14 @@
 | W7.5 | 已提交 | `69fd85a0` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；`service stop/restart` 只读时段门禁（Final 或截止不晚于保护窗口末端的在拍 lot，含已过截止仍在拍），`--protection-window-minutes` 默认 60，例外须 `--force --reason` |
 | W8 | 未开始 | — | — | 放在 M6 最后 |
 | W9.7 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；CLI 审计 `source=cli`，metadata 添加 `entrypoint=cli`、`os_uid`、可选 `sudo_user`；`--actor` 仍必填；Admin 保持 `source=admin`；迁移 078 breaking；Admin 审计页支持 cli |
+| W9.5 | 已提交 | 随本提交 | — | Admin 全局登录退避（5 次后 1→60s）、IPv6 /64、失败 WARN、复用 401/429 指标；首次设置 64 hex 随机密钥且最短 32 字节；短密钥/可信代理警告；拒绝 /0 trusted proxy；CDN 专用转发头拒绝 |
 | W9 | 进行中 | — | — | W9.5、W9.7 随 M2a；W9.8、W9.10、W9.11 随 M2b；W9.9 为 M3 首项 |
 | W10 | 进行中 | — | 未部署 | W10.1、W10.2、W10.6 已提交；W10.8 随本提交；W10.7 随 M2a；W10.9 随 M5 |
 | W10.1 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`backup scheduled` + systemd timer 模板（每日 UTC 03:15），回执 `auction-backup-run.v1`；本地 2026-11-04 已启用用户级 timer 并完成一次 systemd oneshot create+verify+retention；仍待连续 7 天成功与一次人为失败核验 |
 | W10.2 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；主机 `age` 公钥加密 + `object_store` 上传 R2 日/月前缀、完整回读校验，`[backup.offsite]` 默认关闭；本地 2026-11-04 已用 `hv-auction` bucket 完成首次 daily/monthly 上传、bucket lock 覆盖/删除 409、age 解密与隔离 PG18 恢复；仍待三组数据密钥加密列解密、生命周期规则核验与 `age` 私钥离线托管 |
 | W10.6 | 已提交 | `69fd85a0`；演练 2026-11-04 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；手工流程 `ops/deploy/MIGRATION-DRILL.md` 与回执模板 `auction-migration-drill.v1`。本地隔离 PG18 演练：schema 74→77 applied=3，旧/新三角色 readiness 200，停机实测 46 秒、含备份/安装/单元的估算 60 秒；回执 `target/operations-evidence/m1-drill-20261104T053636Z/migration-drill-receipt.json`，结论 incomplete（W11.4 not_available、评审待签字） |
 | W10.8 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；`ops/postgres/postgresql.conf.example`、`autovacuum.sql.example`、`extensions.sql.example` 与说明；连接预算 64/97、`pg_stat_statements`、慢查询/锁等待/autovacuum 日志、热行表与只追加表参数；`archive_mode=off`，W10.7 再启用；重启受 W7.5 |
+| W11.4 | 已提交 | 随本提交 | — | 只读一致性巡检：lot/bid 投影、补偿池、义务链、delivery/义务、realtime 序号、慢代理残留；每项预算 5s/总 40s，最多 100 样本；结果追加 audit_records；CLI `db inspect-consistency` |
 | W11 | 未开始 | — | — | W11.4 随 M2a；W11.2 改为偿付能力报告（v11） |
 | W12 | 未开始 | — | — | W12.3 已批准，随 M4；W12.8 随 M4 |
 | W13 | 进行中 | — | 未部署 | W13.1、W13.2、W13.4、W13.5 已提交；W13.3a 已提交，W13.3b 延后到 M2a（决策 75）；W13.6 随 M6 |

@@ -68,7 +68,7 @@ Public/Admin sink 不安装 Worker observer，不增加 W0.3 计数。
 | `auction_worker_batch_items_total`、`auction_worker_batch_capacity_total`、`auction_worker_batch_saturated_total` | 批次利用率与饱和次数 |
 | `auction_worker_retry_attempts_total`、`auction_worker_retry_mode_bound` | 重试次数与重试模式 |
 | `auction_worker_unpersisted_error_total` | 未确认对应持久化失败、退避或人工处置的错误；见[口径](#未持久化错误) |
-| `auction_worker_task_panics_total{loop}` | 现有工作项 join 收口观察到的 panic |
+| `auction_worker_task_panics_total{loop,owner}` | 工作项 join 收口观察到的 panic；owner 为闭集，取消不计数 |
 | `auction_postgres_pool_*` | PostgreSQL 连接池大小、空闲、获取次数与等待时长、空池等待与取消次数 |
 | `auction_tracing_*` | tracing 是否启用、导出失败/丢弃 span、最近成功/失败时间、是否降级 |
 | `auction_audit_write_failures_total{class,sqlstate_class,kind}` | 原始审计 SQL 失败尝试累计，包含回滚后重试成功的尝试；关闭 exporter 不影响底层计数 |

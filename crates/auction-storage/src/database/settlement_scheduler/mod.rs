@@ -113,6 +113,7 @@ fn valid_settlement_failure_code(value: &str) -> bool {
             | "canceled"
             | "invalid_state"
             | "settlement_mismatch"
+            | "task_panic_terminal"
     )
 }
 
