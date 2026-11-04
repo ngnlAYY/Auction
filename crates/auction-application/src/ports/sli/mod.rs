@@ -11,6 +11,7 @@ pub const SLI_CANDIDATE_LIMIT: usize = 10_000;
 /// 慢速代理当前积压的固定 flow 标签。
 pub const SLI_SLOW_PROXY_FLOW: &str = "slow_proxy_execution";
 /// 尚缺窗口候选索引的历史流程；不得导出伪造的零分位。
+/// 迁移 `000077` 只提供候选索引；派生查询与证明核验实现前不得从此列表移除。
 pub const SLI_AWAITING_INDEX: [&str; 8] = [
     "register_key",
     "outbid_deadline_margin",
