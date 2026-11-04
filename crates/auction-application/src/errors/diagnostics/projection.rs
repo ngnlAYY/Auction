@@ -553,7 +553,9 @@ impl DiagnosticError for crate::LotWatchError {
             Self::Transaction(error) => error.diagnostic_kind(),
             Self::Unavailable => SafeErrorKind::DEPENDENCY_UNAVAILABLE,
             Self::Conflict => SafeErrorKind::REPOSITORY_CONFLICT,
-            Self::Invalid | Self::NotFound | Self::TooMany => SafeErrorKind::DOMAIN_REJECTED,
+            Self::Invalid | Self::NotFound | Self::TooMany | Self::PmUnavailable => {
+                SafeErrorKind::DOMAIN_REJECTED
+            }
         }
     }
 }

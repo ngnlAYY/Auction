@@ -16,7 +16,10 @@ pub fn valid_forum_pm_id(value: &str) -> bool {
 pub fn forum_pm_digest(message: &ForumPmMessage) -> Result<RequestHash, crate::LotWatchError> {
     if message.notification_id.is_nil()
         || !valid_forum_pm_id(&message.recipient_forum_account_id)
-        || message.title != format!("Outbid {}", message.notification_id.simple())
+        || !message.title.starts_with("Outbid ")
+        || message.title.len() > 160
+        || !message.title.is_ascii()
+        || message.title.contains(['[', ']', '<', '>'])
         || message.body.len() < 2
         || message.body.len() > 2048
         || !message.body.is_ascii()

@@ -5,11 +5,10 @@ use crate::database::TrackedTransaction as Transaction;
 mod commands;
 mod facts;
 mod persistence;
-mod pm_fact;
 mod preference;
 mod proof;
 
-pub(crate) use facts::{apply_bid, auto_watch_proxy};
+pub(crate) use facts::{apply_bid, auto_watch_bid, auto_watch_proxy};
 pub(crate) use proof::{
     delivery_eligible, delivery_watch_expired, delivery_watch_gate, lock_delivery_lot,
 };

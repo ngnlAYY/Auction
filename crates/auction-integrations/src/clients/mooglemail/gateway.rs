@@ -9,6 +9,7 @@ const MAX_FETCH_LIMIT: usize = 1000;
 mod credentials;
 mod internal;
 mod model;
+mod operation_lock;
 mod reader;
 mod sent_evidence;
 
@@ -18,6 +19,7 @@ pub use model::{
     MoogleMailGatewayConfig, MoogleMailPage, MoogleMailSentLookupReport,
     MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
 };
+pub(crate) use operation_lock::{OperationLock, OperationLockGuard};
 pub use reader::MoogleMailGateway;
 
 fn configuration(world: MoogleMailWorld) -> MoogleMailError {

@@ -15,6 +15,8 @@ pub struct PostgresStore {
     pub(crate) migration_readiness_recorder: auction_observability::MigrationReadinessRecorder,
     /// W14.8 通知生命周期观测；默认 no-op，装配根在 Worker 启动时注入进程记录器。
     pub(crate) notification_metrics: std::sync::Arc<dyn auction_application::NotificationRecorder>,
+    /// W14.2 通知正文使用的公开站点 origin；装配根注入，未配置时正文省略链接。
+    pub(crate) public_base_url: Option<String>,
 }
 
 #[cfg(feature = "postgres")]
@@ -38,6 +40,7 @@ impl PostgresStore {
             migration_readiness_recorder:
                 auction_observability::MigrationReadinessRecorder::default(),
             notification_metrics: auction_application::noop_notification_recorder(),
+            public_base_url: None,
         })
     }
 

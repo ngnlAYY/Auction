@@ -97,30 +97,73 @@ where
         .await
 }
 
-/// 为一个已失去的领先周期建立唯一通知身份；正文只含公开 lot UUID 与已接受价格。
+/// 被超提醒的公开上下文（W14.2）：lot 代码、装备名、有效截止与网站链接。
+///
+/// 所有字段都来自同一事务内的权威快照，正文只使用这些公开信息；
+/// 不含代理上限、装备 key 或任何凭据。
+#[derive(Debug, Clone, Copy)]
+pub struct OutbidNotice<'a> {
+    pub lot_code: &'a str,
+    pub item_name: &'a str,
+    /// 当前有效截止（含软截止延长）；尚未进入在拍状态时为空。
+    pub deadline: Option<chrono::DateTime<chrono::Utc>>,
+    /// 公开站点 origin；未配置时省略链接而不伪造地址。
+    pub site_url: Option<&'a str>,
+}
+
+impl OutbidNotice<'_> {
+    fn lot_url(&self) -> Option<String> {
+        let site = self.site_url?;
+        Some(format!("{}/lots/{}", site.trim_end_matches('/'), self.lot_code))
+    }
+
+    /// 邮件与私信共用的英文正文；字段顺序固定，便于人工核对。
+    fn body(&self, amount: i64) -> String {
+        let mut body = format!(
+            "Your leading bid has been outbid.\n\n\
+             Item: {item}\n\
+             Lot: {code}\n\
+             Accepted bid: {amount} Credits\n",
+            item = self.item_name,
+            code = self.lot_code,
+            amount = crate::format_credits(amount),
+        );
+        if let Some(deadline) = self.deadline {
+            body.push_str(&format!("Bidding closes: {}\n", crate::format_deadline(deadline)));
+        }
+        if let Some(url) = self.lot_url() {
+            body.push_str(&format!("View the lot: {url}\n"));
+        }
+        body.push_str(
+            "\nCheck the auction website for the latest price\n\
+             and place another bid if you wish to continue.",
+        );
+        body
+    }
+}
+
+/// 为一个已失去的领先周期建立唯一通知身份；正文只含公开 lot 信息与已接受价格。
 pub fn lot_watch_notification(
     lot_id: uuid::Uuid,
     user_id: uuid::Uuid,
     cycle: u64,
     amount: i64,
+    notice: OutbidNotice<'_>,
     world_id: String,
     recipient: String,
 ) -> Result<crate::MailDeliveryCommand, LotWatchError> {
     use crate::{
         MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
     };
+    if notice.lot_code.is_empty() || notice.item_name.is_empty() {
+        return Err(LotWatchError::Invalid);
+    }
     let notification_id = uuid::Uuid::new_v5(
         &uuid::Uuid::NAMESPACE_URL,
         format!("auction/lot-watch-v1/{lot_id}/{user_id}/{cycle}").as_bytes(),
     );
     // 英文正文随领先周期冻结，并继续参与原请求摘要。
-    let body = format!(
-        "Your leading bid has been outbid.\n\n\
-         Accepted bid: {amount} Credits\n\n\
-         Check the auction website for the latest price\n\
-         and place another bid if you wish to continue.\n\n\
-         Lot reference: {lot_id}"
-    );
+    let body = notice.body(amount);
     let hash = RequestHash::from_request(
         "lot_watch_notification",
         notification_id,

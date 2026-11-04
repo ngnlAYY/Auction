@@ -16,10 +16,13 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use tokio::sync::{OwnedRwLockWriteGuard, OwnedSemaphorePermit, RwLock, Semaphore, watch};
+use tokio::sync::{
+    OwnedRwLockReadGuard, OwnedRwLockWriteGuard, OwnedSemaphorePermit, RwLock, Semaphore, watch,
+};
 use uuid::Uuid;
 
-use super::*;
+use self::parent::*;
+use super as parent;
 
 mod lists;
 mod sent_boundary;
@@ -514,6 +517,21 @@ impl Drop for IncomingDetailGuard {
     }
 }
 
+/// 长列表扫描的每一段重新获取成员关系读锁；段间释放后详情 GET 可以推进。
+/// 若段间成员关系已改变，本次扫描放弃（不缓存半份列表），由下一轮按新 revision 重扫。
+pub(super) async fn lock_incoming_segment(
+    incoming: &Arc<RwLock<()>>,
+    membership_revision: &AtomicU64,
+    expected: u64,
+    world: MoogleMailWorld,
+) -> Result<OwnedRwLockReadGuard<()>, MoogleMailError> {
+    let guard = Arc::clone(incoming).read_owned().await;
+    if membership_revision.load(Ordering::Acquire) != expected {
+        return Err(read_unavailable(world));
+    }
+    Ok(guard)
+}
+
 fn read_unavailable(world: MoogleMailWorld) -> MoogleMailError {
     MoogleMailError::new(
         MoogleMailOperation::Inbox,
@@ -530,4 +548,45 @@ fn unavailable(world: MoogleMailWorld) -> MoogleMailError {
         MoogleMailErrorCategory::CredentialUnavailable,
         false,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[tokio::test]
+    async fn incoming_segment_releases_lock_between_pages() {
+        let incoming = Arc::new(RwLock::new(()));
+        let revision = Arc::new(AtomicU64::new(0));
+        let segment =
+            lock_incoming_segment(&incoming, &revision, 0, MoogleMailWorld::Main).await.unwrap();
+
+        // 详情 GET 的写锁在段内被阻塞；这证明扫描确实持有成员关系读锁。
+        let writer = {
+            let incoming = Arc::clone(&incoming);
+            let revision = Arc::clone(&revision);
+            tokio::spawn(async move {
+                let _guard = incoming.write().await;
+                revision.fetch_add(1, Ordering::AcqRel);
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!writer.is_finished(), "writer must wait while the segment is held");
+
+        // 段结束释放后，写者可以推进并改变成员关系。
+        drop(segment);
+        tokio::time::timeout(Duration::from_secs(1), writer)
+            .await
+            .expect("writer acquired after segment release")
+            .expect("writer task");
+
+        // 下一段取锁时发现 revision 改变：本次扫描放弃，而不是继续用旧成员关系。
+        assert!(
+            lock_incoming_segment(&incoming, &revision, 0, MoogleMailWorld::Main).await.is_err()
+        );
+        assert!(
+            lock_incoming_segment(&incoming, &revision, 1, MoogleMailWorld::Main).await.is_ok()
+        );
+    }
 }

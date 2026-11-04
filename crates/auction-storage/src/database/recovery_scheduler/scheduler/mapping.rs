@@ -51,6 +51,7 @@ pub(super) fn map_due_recovery_row(
             .map_err(map_storage_error)?,
         equipment_completed_at: row.try_get("equipment_completed_at").map_err(map_storage_error)?,
         created_at: row.try_get("created_at").map_err(map_storage_error)?,
+        payment_sent_proven: row.try_get("payment_sent_proven").map_err(map_storage_error)?,
     })
 }
 

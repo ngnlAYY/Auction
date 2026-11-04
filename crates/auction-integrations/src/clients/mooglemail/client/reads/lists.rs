@@ -8,11 +8,16 @@ use std::{collections::HashSet, mem::size_of};
 
 use tokio::sync::OnceCell;
 
+use auction_application::SegmentPlan;
+
 use super::*;
 use crate::clients::metrics::MailLockWaitGuard;
 use crate::clients::mooglemail::parser::{
     MoogleMailParser, MoogleMailSentSummary, MoogleMailSummary,
 };
+
+/// 每次持有成员关系读锁的最大页数；段间必须释放，详情 GET 才有机会推进。
+const INCOMING_SCAN_SEGMENT_PAGES: usize = 4;
 
 type ListCell<T> = Arc<OnceCell<Arc<T>>>;
 
@@ -210,14 +215,6 @@ impl MoogleMailClient {
         validate_pages(maximum_pages, world)?;
         let operation =
             if read_mail { MoogleMailOperation::ReadMail } else { MoogleMailOperation::Inbox };
-        let lock_wait = MailLockWaitGuard::start(
-            Arc::clone(&self.external_metrics),
-            world,
-            operation,
-            auction_application::MailLock::IncomingRead,
-        );
-        let _list_guard = Arc::clone(&round.scope.incoming).read_owned().await;
-        lock_wait.acquired();
         let membership = round.scope.membership_revision.load(Ordering::Acquire);
         let key = (read_mail, maximum_pages, membership);
         let cell = {
@@ -245,40 +242,60 @@ impl MoogleMailClient {
                 let mut seen = HashSet::new();
                 let mut complete = false;
                 let mut bytes = self.retain_list_bytes(0, world)?;
-                for page in 0..maximum_pages {
-                    let target = if read_mail {
-                        self.read_mail_page(world, page)?
-                    } else {
-                        self.inbox_page(world, page)?
-                    };
-                    let document = self.get_in_round(&target, cookie, round).await?;
-                    let parsed = if read_mail {
-                        MoogleMailParser.scan_read_mail_page(&document, world, page, &mut seen)
-                    } else {
-                        MoogleMailParser.scan_inbox_page(&document, world, page, &mut seen)
-                    };
-                    let parsed = self.diagnose_parse(&target, &document, parsed).await?;
-                    let previous_capacity = summaries.capacity();
-                    let payload_bytes = parsed
-                        .summaries
-                        .iter()
-                        .map(|summary| {
-                            summary.external_mail_id.capacity()
-                                + summary.sender.capacity()
-                                + summary.subject.capacity()
-                        })
-                        .sum::<usize>();
-                    summaries.extend(parsed.summaries);
-                    bytes.merge(self.retain_list_bytes(
-                        payload_bytes
-                            + (summaries.capacity() - previous_capacity)
-                                * size_of::<MoogleMailSummary>(),
+                // 长列表按段释放成员关系读锁：详情 GET 可在段间推进，下一次取锁发现
+                // revision 改变即放弃本次扫描，避免整轮持锁拖住写入。
+                let mut plan = SegmentPlan::new(maximum_pages, INCOMING_SCAN_SEGMENT_PAGES);
+                'segments: while let Some(pages) = plan.next_segment() {
+                    let lock_wait = MailLockWaitGuard::start(
+                        Arc::clone(&self.external_metrics),
                         world,
-                    )?);
-                    if !parsed.has_next_page {
-                        complete = true;
-                        break;
+                        operation,
+                        auction_application::MailLock::IncomingRead,
+                    );
+                    let segment = lock_incoming_segment(
+                        &round.scope.incoming,
+                        &round.scope.membership_revision,
+                        membership,
+                        world,
+                    )
+                    .await?;
+                    lock_wait.acquired();
+                    for page in pages {
+                        let target = if read_mail {
+                            self.read_mail_page(world, page)?
+                        } else {
+                            self.inbox_page(world, page)?
+                        };
+                        let document = self.get_in_round(&target, cookie, round).await?;
+                        let parsed = if read_mail {
+                            MoogleMailParser.scan_read_mail_page(&document, world, page, &mut seen)
+                        } else {
+                            MoogleMailParser.scan_inbox_page(&document, world, page, &mut seen)
+                        };
+                        let parsed = self.diagnose_parse(&target, &document, parsed).await?;
+                        let previous_capacity = summaries.capacity();
+                        let payload_bytes = parsed
+                            .summaries
+                            .iter()
+                            .map(|summary| {
+                                summary.external_mail_id.capacity()
+                                    + summary.sender.capacity()
+                                    + summary.subject.capacity()
+                            })
+                            .sum::<usize>();
+                        summaries.extend(parsed.summaries);
+                        bytes.merge(self.retain_list_bytes(
+                            payload_bytes
+                                + (summaries.capacity() - previous_capacity)
+                                    * size_of::<MoogleMailSummary>(),
+                            world,
+                        )?);
+                        if !parsed.has_next_page {
+                            complete = true;
+                            break 'segments;
+                        }
                     }
+                    drop(segment);
                 }
                 self.check_read_round(cookie, round).await?;
                 Ok::<_, MoogleMailError>(Arc::new(MoogleMailIncomingList {

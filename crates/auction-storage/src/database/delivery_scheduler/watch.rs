@@ -53,5 +53,60 @@ pub(super) async fn retire_expired(
                 "fencing_version": fencing_version, "attempt_count": attempt_count}),
         }).await.map_err(map_storage_error)?;
     }
+    retire_pending(transaction, now, notifications).await
+}
+
+/// W14.11：lot 已结束或错过有效截止的待定提醒按决策 14 退役；
+/// 仍可能有可用慢速代理反击的待定行保持 pending，等竞价事务收口。
+async fn retire_pending(
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
+    now: DateTime<Utc>,
+    notifications: &dyn auction_application::NotificationRecorder,
+) -> Result<(), auction_application::RepositoryError> {
+    let rows = sqlx::query(
+        "UPDATE public.lot_watch_pending_notifications AS pending
+         SET status = 'retired', resolution_reason = 'lot_closed', resolved_at = $1
+         FROM public.lots AS lot, public.auctions AS auction
+         WHERE pending.lot_id = lot.id AND auction.id = lot.auction_id
+           AND pending.status = 'pending'
+           AND (
+               auction.status <> 'live'
+               OR lot.effective_end_at IS NULL
+               OR lot.effective_end_at <= $1
+           )
+         RETURNING pending.user_id, pending.lot_id, pending.leadership_cycle",
+    )
+    .bind(now)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?;
+    for row in rows {
+        let user_id: Uuid = row.try_get("user_id").map_err(map_storage_error)?;
+        let lot_id: Uuid = row.try_get("lot_id").map_err(map_storage_error)?;
+        let cycle: i64 = row.try_get("leadership_cycle").map_err(map_storage_error)?;
+        notifications.observe_stage(
+            auction_application::NotificationKind::LotWatchMail,
+            auction_application::NotificationStage::Retired,
+        );
+        sqlx::query(
+            "INSERT INTO public.audit_records
+             (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id,
+              result, source, metadata)
+             VALUES ($1, $2, 'worker', 'delivery-worker', 'lot_watch.pending_retired',
+                     'lot', $3, 'success', 'worker', $4)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(now)
+        .bind(lot_id.to_string())
+        .bind(serde_json::json!({
+            "status": "retired",
+            "reason": "lot_closed",
+            "user_id": user_id,
+            "cycle": cycle,
+        }))
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_storage_error)?;
+    }
     Ok(())
 }

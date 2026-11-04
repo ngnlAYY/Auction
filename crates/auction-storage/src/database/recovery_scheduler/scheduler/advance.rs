@@ -17,7 +17,13 @@ pub(super) struct DueRecoveryRow {
     pub(super) equipment_execution_state: Option<String>,
     pub(super) equipment_completed_at: Option<DateTime<Utc>>,
     pub(super) created_at: DateTime<Utc>,
+    /// W14.6：付款投递已有自动或人工发送证明；没有证明时逾期提醒只延后。
+    pub(super) payment_sent_proven: bool,
 }
+/// 付款邮件缺乏发送证明时的延后间隔；只影响重试节奏，不改冻结期限。
+#[cfg(feature = "postgres")]
+const PAYMENT_MAIL_UNPROVEN_RETRY_MINUTES: i64 = 15;
+
 #[cfg(feature = "postgres")]
 pub(super) async fn advance_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
@@ -38,12 +44,17 @@ pub(super) async fn advance_postgres(
                   recovery.world_id,
                   payment_f.execution_state AS payment_execution_state,
                   payment_f.completed_at AS payment_completed_at,
+                  COALESCE(public.delivery_has_frozen_sent_proof(
+                      payment_d.id, payment_d.result_metadata, payment_d.external_reference
+                  ), false) AS payment_sent_proven,
                   equipment_f.execution_state AS equipment_execution_state,
                   equipment_f.completed_at AS equipment_completed_at,
                   recovery.created_at
            FROM public.settlement_recoveries AS recovery
            LEFT JOIN public.settlement_obligation_fulfillments AS payment_f
                ON payment_f.obligation_id = recovery.payment_obligation_id
+           LEFT JOIN public.deliveries AS payment_d
+               ON payment_d.id = payment_f.delivery_id
            LEFT JOIN public.settlement_obligation_fulfillments AS equipment_f
                ON equipment_f.obligation_id = recovery.equipment_obligation_id
            WHERE (recovery.next_attempt_at IS NULL OR recovery.next_attempt_at <= $1)
@@ -89,6 +100,51 @@ pub(super) async fn advance_postgres(
             } else if row.world_id == "isekai" && payment_satisfied {
                 ("delivering_equipment", row.reminder_count, None, false)
             } else if row.stage == "awaiting_payment" {
+                if !row.payment_sent_proven {
+                    // W14.6（D9）：付款邮件（含 COD/载体）尚无发送证明时不提前提醒，
+                    // 只延后本轮并记录可观测审计；不修改冻结的 payment_deadline_at。
+                    sqlx::query(
+                        r#"UPDATE public.settlement_recoveries
+                           SET next_attempt_at = $2, updated_at = $3
+                           WHERE id = $1 AND stage = $4 AND state_version = $5"#,
+                    )
+                    .bind(row.id)
+                    .bind(now + chrono::Duration::minutes(PAYMENT_MAIL_UNPROVEN_RETRY_MINUTES))
+                    .bind(now)
+                    .bind(&row.stage)
+                    .bind(row.state_version)
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(map_storage_error)?;
+                    sqlx::query(
+                        r#"INSERT INTO public.audit_records
+                               (id, occurred_at, actor_type, actor_id, action, entity_type,
+                                entity_id, result, source, metadata)
+                           VALUES ($1, $2, 'system', 'auction-recovery',
+                                   'recovery.payment_reminder_deferred',
+                                   'settlement_recovery', $3, 'success', 'worker', $4)"#,
+                    )
+                    .bind(Uuid::new_v4())
+                    .bind(now)
+                    .bind(row.id.to_string())
+                    .bind(serde_json::json!({
+                        "reason": "payment_mail_not_sent",
+                        "stage": row.stage,
+                        "deadline_passed": true,
+                    }))
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(map_storage_error)?;
+                    transaction.commit().await.map_err(map_storage_error)?;
+                    return Ok(Some(RecoveryCaseAdvance {
+                        recovery_id: SettlementId::from_uuid(row.id),
+                        stage: row.stage,
+                        reminder_count: row.reminder_count,
+                        state_version: row.state_version,
+                        completed: false,
+                        advanced_at: now,
+                    }));
+                }
                 if row.reminder_count >= row.reminder_limit {
                     return Err(repository_error("recovery 提醒次数已超过冻结上限"));
                 }
