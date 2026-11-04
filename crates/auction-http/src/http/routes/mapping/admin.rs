@@ -366,6 +366,7 @@ fn map_recovery_error_code(
         | "gateway_outcome_unknown"
         | "invalid_gateway_result"
         | "lease_expired_outcome_unknown"
+        | "task_panic"
         | "preflight_unproven" => Ok(PublicRecoveryErrorCode::OutcomeUnknown),
         "delivery_unavailable"
         | "recovery_observation_failed"

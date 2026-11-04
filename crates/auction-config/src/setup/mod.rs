@@ -26,6 +26,9 @@ use crate::{
 mod managed;
 pub use managed::managed_runtime_directory;
 
+#[cfg(test)]
+mod tests;
+
 /// 管理页提交、但不依赖浏览器 DTO 的一次性部署选项。
 pub struct FirstRunConfig {
     pub database: PostgresConnectionConfig,
@@ -89,7 +92,7 @@ impl FirstRunConfig {
         }
         if self.admin_actor.is_empty()
             || self.admin_actor.len() > 128
-            || !(16..=512).contains(&self.admin_secret.len())
+            || !(32..=512).contains(&self.admin_secret.len())
             || self.public_origin == self.admin_origin
             || !valid_origin(&self.public_origin)
             || !valid_origin(&self.admin_origin)

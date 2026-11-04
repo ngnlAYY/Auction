@@ -105,6 +105,7 @@ pub(super) async fn fail_postgres(
     .await
 }
 
+#[derive(Clone, Copy)]
 struct Terminal<'a> {
     status: &'static str,
     reference: Option<&'a str>,
@@ -141,10 +142,25 @@ async fn persist_once(
     let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     // 无远端身份也只能使用持久关联，frozen/spent/returned均不能丢失绑定。
     let account = funding::lock_funded_delivery_account(&mut tx, claim.delivery_id).await?;
-    sqlx::query("SELECT id FROM public.deliveries WHERE id=$1 FOR UPDATE")
-        .bind(claim.delivery_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM public.deliveries WHERE id=$1 FOR UPDATE")
+            .bind(claim.delivery_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    let mut terminal = *terminal;
+    let mut panic_metadata;
+    if terminal.failure == Some("task_panic") && status == "claimed" {
+        // 数据库仍为 claimed 才能证明尚未外写；sending 或提交未知一律保留人工核对。
+        panic_metadata = terminal.metadata.clone();
+        panic_metadata["stage"] = serde_json::json!("preflight_blocked");
+        panic_metadata["failure_code"] = serde_json::json!("task_panic");
+        panic_metadata["write_started"] = serde_json::json!(false);
+        panic_metadata["outcome_unknown"] = serde_json::json!(false);
+        terminal.status = "failed";
+        terminal.audit = FAIL;
+        terminal.preparation_rejected = true;
+        terminal.metadata = &panic_metadata;
+    }
     if terminal.audit == SUCCEED
         && claim.payload.get("operation").and_then(serde_json::Value::as_str) == Some("send")
     {

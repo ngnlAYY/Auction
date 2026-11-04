@@ -222,13 +222,40 @@ where
             let clock = Arc::clone(&worker.clock);
             let config = worker.delivery;
             let control = worker.control.clone();
+            let panic_store = Arc::clone(&store);
+            let panic_clock = Arc::clone(&clock);
+            let panic_claim = claim.clone();
             tasks.spawn(diagnostics::inherit(async move {
-                activity
-                    .run(process_delivery_claim(
+                match diagnostics::catch_item_panic(
+                    "delivery",
+                    activity.run(process_delivery_claim(
                         store, transport, clock, config, control, claim, &activity,
-                    ))
-                    .await
-                    .unwrap_or_else(|| DeliveryTaskResult::completed(WorkerResult::Canceled))
+                    )),
+                )
+                .await
+                {
+                    Ok(result) => result
+                        .unwrap_or_else(|| DeliveryTaskResult::completed(WorkerResult::Canceled)),
+                    Err(()) => {
+                        let error = DeliveryTransportError {
+                            failure_code: "task_panic".to_owned(),
+                            safe_detail: "工作项 panic，需人工检查后恢复".to_owned(),
+                            outcome_unknown: true,
+                            external_reference: None,
+                            result_metadata: serde_json::json!({"reason": "task_panic"}),
+                        };
+                        match tokio::time::timeout(
+                            config.finalize_timeout,
+                            panic_store.fail(panic_claim, error, panic_clock.now()),
+                        )
+                        .await
+                        {
+                            Ok(Ok(())) => activity.complete(),
+                            _ => diagnostics::unpersisted(SafeErrorKind::TASK_PANIC),
+                        }
+                        DeliveryTaskResult::completed(WorkerResult::Error)
+                    }
+                }
             }));
         }
 

@@ -41,6 +41,7 @@ pub(super) async fn postgres(
          ) AS deadline ON true
          WHERE round.status = 'active'
            AND round.final_completed_at IS NULL
+           AND round.last_failure_code IS DISTINCT FROM 'task_panic_terminal'
            AND (round.lease_until IS NULL OR round.lease_until <= $1)
            AND (
                (round.preview_completed_at IS NULL AND round.preview_due_at <= $1)

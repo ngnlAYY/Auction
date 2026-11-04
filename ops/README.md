@@ -781,7 +781,7 @@ WASM 继承开启检查，保留 abort，现有 hook 展示静态错误横幅。
 `payload` 只显示静态字符串，格式化 String 或其他类型均为固定占位；
 顶层 join 日志只显示 `panic`、`cancelled` 或 `other`。
 不要求采集完整 payload、凭据或外部响应来排障。
-再查看 `auction_worker_task_panics_total{loop}` 的增量，
+再查看 `auction_worker_task_panics_total{loop,owner}` 的增量，
 关联 `auction::diagnostics` 的 `phase=item_panic`、`safe_kind=task_panic`。
 该指标按闭集循环预置零值，进程重启归零；
 它只覆盖现有工作项子任务的 join 收口，不是工作项尝试次数。
@@ -795,15 +795,16 @@ panic 仍退出常驻任务，Worker 随后排空并非零退出。
 Public/Admin 的 Requires 绑定仍可能传播影响。
 合并 server 当前会停止其余角色，模板 `Restart=no`，需人工核对后恢复。
 
-工作项 panic 计次、封顶和人工阻断尚未实现：W13.3b 待用户决定，
-原因是逐 owner 规则、所需迁移与影子框架超出本批无迁移范围。
-当前恢复语义如下，不应把观测指标当成新的自动处置：
+W13.3b 已落无迁移的首次 panic 阻断：生命周期/结算写 fenced `task_panic_terminal`
+并排除后续自动领取；履约/恢复 action 使用现有 `manual_reconcile`；delivery 按
+持久 `claimed`/`sending` 区分准备失败与结果未知。慢代理与直接关键循环仍失败关闭。
+系统不提供新的通用人工恢复 CLI；仍需按 owner 现有修复路径核对持久状态。
 
 | 工作项 | panic 后的现状 |
 | --- | --- |
-| 生命周期 | 租约到期可重领，领取增加 attempt_count，无封顶 |
-| 结算 | 重领不增加次数，只有显式失败落库才增加 |
-| 履约、恢复 action | 重领不增加 retry_count，显式释放才增加 |
+| 生命周期 | 首次 panic 写 terminal，后续自动领取排除；人工按 owner 路径处理 |
+| 结算 | 首次 panic 写 terminal 并追加审计，后续自动领取排除 |
+| 履约、恢复 action | 首次 panic 转 `manual_reconcile`，不自动重试 |
 | delivery | claimed 可重领并计次；sending 到期加 grace 后转人工 |
 | 邮箱轮询 | panic 不增加连续失败数；重启后可重领，成功清零 |
 | 论坛 | 发布领取计次但无封顶；过期 claim 按未知写入对账 |

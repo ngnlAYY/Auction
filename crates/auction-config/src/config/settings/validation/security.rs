@@ -31,6 +31,11 @@ pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), 
         let network = value
             .parse::<IpNet>()
             .map_err(|_| ConfigError::InvalidHttpSecurity("trusted_proxy_cidrs 必须是规范 CIDR"))?;
+        if network.prefix_len() == 0 {
+            return Err(ConfigError::InvalidHttpSecurity(
+                "trusted_proxy_cidrs 不能信任所有地址；CDN 必须配置其实际公布的网段",
+            ));
+        }
         if network.trunc().to_string() != *value
             || config.trusted_proxy_cidrs[..index].iter().any(|existing| existing == value)
         {
@@ -150,4 +155,22 @@ fn validate_max_public_sessions(max_public_sessions: u32) -> Result<(), ConfigEr
         return Err(ConfigError::InvalidSessionConfig("max_public_sessions 必须位于 1 至 100"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn trusted_proxy_cidrs_reject_universal_trust() {
+        let mut config =
+            HttpSecurityConfig { allowed_origins_enabled: false, ..HttpSecurityConfig::default() };
+        for network in ["0.0.0.0/0", "::/0"] {
+            config.trusted_proxy_cidrs = vec![network.to_owned()];
+            assert!(validate_http_security(&config).is_err());
+        }
+        config.trusted_proxy_cidrs = vec!["127.0.0.1/32".to_owned(), "173.245.48.0/20".to_owned()];
+        assert!(validate_http_security(&config).is_ok());
+    }
 }

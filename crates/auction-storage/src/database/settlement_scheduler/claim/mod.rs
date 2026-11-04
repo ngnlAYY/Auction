@@ -138,6 +138,7 @@ async fn claim_transaction(
                AND a.settlement_complete_command_id IS NULL
                AND a.settlement_due_at IS NOT NULL
                AND a.settlement_due_at <= $1
+               AND a.settlement_last_error_code IS DISTINCT FROM 'task_panic_terminal'
                AND (
                    a.settlement_next_attempt_at IS NULL
                    OR a.settlement_next_attempt_at <= $1
@@ -156,6 +157,7 @@ async fn claim_transaction(
                AND a.settlement_due_at <= $1
                AND a.settlement_next_attempt_at IS NOT NULL
                AND a.settlement_next_attempt_at <= $1
+               AND a.settlement_last_error_code IS DISTINCT FROM 'task_panic_terminal'
            )
            ORDER BY COALESCE(
                a.settlement_next_attempt_at,
