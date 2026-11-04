@@ -8,6 +8,15 @@ default:
 verify:
     @bash ci/checks/check.sh all fmt check feature dependency-versions lint wasm
 
+# 显式运行默认 feature 下的纯逻辑、单元与本地替身测试；数据库测试必须独立隔离。
+test:
+    @cargo test --locked --workspace --all-targets
+
+# 显式运行 PostgreSQL 18 测试；W6.2 接入前可能匹配 0 项，不能据此声称数据库覆盖。
+test-db:
+    @: "${AUCTION_TEST_DATABASE_URL:?请设置 AUCTION_TEST_DATABASE_URL，指向隔离的 PostgreSQL 18 测试库}"
+    @cargo test --locked -p auction-storage --features postgres --tests -- postgres_
+
 # 只检查 rustfmt 格式，不写文件。
 fmt:
     @bash ci/checks/check.sh fmt

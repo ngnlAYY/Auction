@@ -8,6 +8,8 @@
 
    ```bash
    just verify            # 策略门禁 + fmt + check + feature + clippy + wasm
+   just test              # 行为变更：纯逻辑、单元与本地替身
+   just test-db           # 涉及数据库：隔离 PG18，须设置 AUCTION_TEST_DATABASE_URL
    just release-check     # 需要完整发布制品时（Fat LTO，较慢）
    ```
 
@@ -17,5 +19,5 @@
 - 路由、事件、DTO、配置、迁移变化必须同步对应文档；文档使用中文，Markdown 链接相对当前文档目录，正文展示的仓库路径以仓库根为起点。
 - 迁移只追加，已发布的迁移文件不能修改。
 - 不提交凭据、私有 TOML、`.keyenv`、机器专属路径或构建产物。
-- 默认只做静态验证，不新增或执行行为测试；如需行为验证，先说明范围与环境。
+- `just verify` 保持静态门禁；行为变更随功能维护并运行受影响范围的测试。已批准的 W6 测试类别、数据库隔离与尚未接入时的覆盖限制见[测试说明](docs/development.md#测试)；其他行为验证先说明范围与环境并取得授权。
 - 安全问题不要开公开 issue，请直接联系维护者；修复发布前不公开复现细节。
