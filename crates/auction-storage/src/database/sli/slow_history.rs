@@ -105,6 +105,7 @@ pub(super) async fn read(
             unknown: 0,
             incomplete: 0,
             oldest_incomplete_seconds: None,
+            incomplete_available: false,
         };
     }
     Ok(windows)

@@ -30,6 +30,7 @@ pub(super) struct Collector {
     window_unknown: GaugeVec,
     window_incomplete: GaugeVec,
     window_oldest_incomplete: GaugeVec,
+    window_incomplete_available: GaugeVec,
     outbid_margin: GaugeVec,
     outbid_samples: GaugeVec,
     outbid_non_positive: GaugeVec,
@@ -81,6 +82,10 @@ impl Collector {
                 "auction_sli_window_oldest_incomplete_seconds",
                 &["flow", "world"],
             )?,
+            window_incomplete_available: vector(
+                "auction_sli_window_incomplete_available",
+                &["flow", "world"],
+            )?,
             outbid_margin: vector(
                 "auction_sli_outbid_margin_seconds",
                 &["world", "channel", "deadline_state", "quantile"],
@@ -98,7 +103,7 @@ impl Collector {
         })
     }
 
-    fn families(&self) -> [&dyn PrometheusCollector; 18] {
+    fn families(&self) -> [&dyn PrometheusCollector; 19] {
         [
             &self.available,
             &self.enabled,
@@ -113,6 +118,7 @@ impl Collector {
             &self.window_unknown,
             &self.window_incomplete,
             &self.window_oldest_incomplete,
+            &self.window_incomplete_available,
             &self.outbid_margin,
             &self.outbid_samples,
             &self.outbid_non_positive,
@@ -170,10 +176,22 @@ impl PrometheusCollector for Collector {
                     let labels = [flow.label(), world.label()];
                     self.window_samples.with_label_values(&labels).set(window.samples as f64);
                     self.window_unknown.with_label_values(&labels).set(window.unknown as f64);
-                    self.window_incomplete.with_label_values(&labels).set(window.incomplete as f64);
-                    self.window_oldest_incomplete
+                    self.window_incomplete_available
                         .with_label_values(&labels)
-                        .set(window.oldest_incomplete_seconds.unwrap_or(-1.0));
+                        .set(if window.incomplete_available { 1.0 } else { 0.0 });
+                    if window.incomplete_available {
+                        self.window_incomplete
+                            .with_label_values(&labels)
+                            .set(window.incomplete as f64);
+                        set_optional(
+                            &self.window_oldest_incomplete,
+                            &labels,
+                            window.oldest_incomplete_seconds,
+                        );
+                    } else {
+                        let _ = self.window_incomplete.remove_label_values(&labels);
+                        let _ = self.window_oldest_incomplete.remove_label_values(&labels);
+                    }
                     for (quantile, value) in
                         [("p50", window.p50), ("p95", window.p95), ("p99", window.p99)]
                     {

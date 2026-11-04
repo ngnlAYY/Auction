@@ -191,6 +191,7 @@ pub(super) async fn read(
             unknown: windows[index].unknown,
             incomplete: 0,
             oldest_incomplete_seconds: None,
+            incomplete_available: false,
         };
     }
     Ok(windows)

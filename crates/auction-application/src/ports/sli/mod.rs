@@ -138,6 +138,8 @@ pub struct SliFlowWindow {
     pub incomplete: u64,
     /// 未完成群组中最老者的秒数；没有已定义群组时为空。
     pub oldest_incomplete_seconds: Option<f64>,
+    /// `incomplete`/`oldest` 是否有完整候选路径；false 表示覆盖不可用，不得按零解释。
+    pub incomplete_available: bool,
 }
 
 /// 提醒渠道闭集。

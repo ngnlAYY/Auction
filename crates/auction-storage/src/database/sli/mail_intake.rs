@@ -438,6 +438,7 @@ async fn read_flow(
             unknown: windows[index].unknown,
             incomplete: 0,
             oldest_incomplete_seconds: None,
+            incomplete_available: false,
         };
     }
     Ok(windows)

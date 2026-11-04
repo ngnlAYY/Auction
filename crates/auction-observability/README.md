@@ -540,7 +540,8 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
 支付义务扇出另有 10001 哨兵。任一入口或扇出超限整轮不可评估。每个 flow 发布
 `auction_sli_window_duration_seconds{flow,world,quantile}`（仅有效分位）、
 `auction_sli_window_samples`、`auction_sli_window_unknown`、
-`auction_sli_window_incomplete` 与 `auction_sli_window_oldest_incomplete_seconds`；
+`auction_sli_window_incomplete`、`auction_sli_window_oldest_incomplete_seconds` 与
+`auction_sli_window_incomplete_available`；
 提醒另发布 `auction_sli_outbid_margin_seconds{world,channel,deadline_state,quantile}`
 （p01/p05）、`auction_sli_outbid_samples` 与 `auction_sli_outbid_non_positive`。
 无样本不生成分位；坏 metadata 使整轮 InvalidData；结算末封未齐只计 incomplete。
@@ -577,8 +578,10 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
   末封：settled_at → 全部应发集合成功后的最后时间；未齐全保持未完成。
   首/末封只认 COD 与 carrier 付款邮件模板；isekai 的 equipment_handoff 是付款后的
   装备交付，不是付款邮件，不进入首/末封集合；`bot_internal_v1` 内部满足的义务
-  也不需要邮件，不计入应发集合。候选按付款邮件完成终点落窗，
-  settled_at 可以早于七天；incomplete 独立枚举全部结算场次的未完成付款集合。
+  也不需要邮件，不计入应发集合。候选按付款邮件完成终点落窗，settled_at 可以早于七天。
+  当前所有 flow 的 incomplete 覆盖尚未实现：`auction_sli_window_incomplete_available=0`，
+  不发布 incomplete/oldest；不能把未查询的未完成集合当作零。待各 flow 的完整未完成
+  候选查询（含 failed/manual_reconcile 与缺证据义务）落地后再启用。
 - 买家至卖方：首次有效付款 proof_observed_at → 卖方货款发送证明。
   main 直接取 seller_payout 的付款前置；isekai 先经 winner_equipment_handoff 的
   prerequisite 找到真正付款义务。缺可靠付款证据计 unknown，不以一般 updated_at 替代。

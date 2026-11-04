@@ -258,7 +258,9 @@ Worker 任务与业务循环分离；`/metrics` 不读取数据库。
 再做类型/关联分类；结算的支付义务扇出另有 10001 哨兵，任一溢出整轮不可评估。
 首/末封付款集合只含 COD 与 carrier 付款义务；`winner_equipment_handoff` 是付款后的
 isekai 装备交付，不是付款邮件，不进入该集合；`bot_internal_v1` 内部满足的义务
-同样不要求邮件。
+同样不要求邮件。当前所有 flow 的 incomplete 覆盖尚未实现
+（`auction_sli_window_incomplete_available=0`），不发布 incomplete/oldest；
+待各 flow 的完整未完成候选查询落地后再启用，不能返回缩窗计数或伪零。
 成功样本按终点落入七天窗口；`auction_sli_window_*` 发布样本数和 p50/p95/p99，
 提醒另发布 `auction_sli_outbid_*` 的 p01/p05 与非正余量。没有样本时不生成分位序列，
 `unknown`/`incomplete` 不能当作零延迟；坏 metadata 或无法归属的候选使整轮失败关闭。
