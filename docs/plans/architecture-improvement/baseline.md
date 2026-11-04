@@ -60,7 +60,7 @@
 | 角色 unit | `auction-test-*`：Public `Requires=` Worker 与 Admin，Admin `Requires=` Worker，均 `Restart=on-failure`、`TimeoutStopSec=45s`；systemd 257 | 30 天内无自动重启记录，`Requires=` 在自动重启时的实际传播未核实（W7.9）；W7.11 部署时 Worker unit 须调至 120 秒 |
 | 停机排空 | 2026-11-02 15:01 停机时 Worker 在 10 秒排空到期后以 `status=1/FAILURE` 退出 | D8 的线上实例，W7.11 修复 |
 | 邮件参数 | 生效值来自 `worker.toml`（runtime `managed = false`）：`maximum_pages = 100`、`fetch_timeout_seconds = 120`、请求间隔 1000 ms、`*/5` cron | D3 的上限即硬上限 100 |
-| Sent 增速 | 系统 10-18 至 11-02 成功发信 375 封（main），结算日 60–80 封；Sent 当前页数待浏览器核实（Bot 账号战斗中） | 估计 6–9 周超过 100 页；决策 74 提前交付 W1.4 发送基线 |
+| Sent 增速 | 系统 10-18 至 11-02 成功发信 375 封（main，约 23 封/天），结算日 60–80 封；2026-11-04 浏览器核实 main Sent 共 37 页 549 行（见下节） | 按约 23 封/天，约 41 天（2026-12 中旬）超过 100 页（1500 行）；决策 74 提前交付 W1.4 发送基线，须在此前完成影子观察并切换 `watermark` |
 | Read Mail | 完整已读列表 511 封（W1.0 前的 Worker 日志 `read_observed`） | — |
 | 论坛 | 3 个主题，最多约 27 楼（≥2 页），`maximum_topic_pages = 10` | D6 不需提前交付 W1.11 |
 | 通知与提醒 | 论坛 `notify` 30/90 天 0 次；选 PM 渠道未绑定论坛账号的用户 0 人，`recipient_missing` 抑制 0 条 | D10、D11 目前无实际影响 |
@@ -68,4 +68,17 @@
 | PostgreSQL | 18.6，迁移 074，`max_connections = 100`，`shared_buffers = 128MB`，`work_mem = 4MB`，只装 `plpgsql`；库 28 MB，WAL 32 MB；PostgreSQL 与 Redis 只监听本机 | W10.8 需加 `pg_stat_statements`；备份与 WAL 存储压力小 |
 | 指标存储 | 无 Prometheus 或任何 exporter，指标开关全部关闭 | W0.10 需用户安装 |
 | 其他监听 | `19344` 端口由 sing-box 监听在所有网卡 | 留给 W9.6 核查 |
-| 未核实 | HV 是否原样保存非 ASCII 正文（需发信）、普通邮件与 COD 过期退回期限（库内无退回样本）、Sent 页数与 HV 是否自动清理、Read Mail 排序键、邮资（待浏览器只读核实） | 需写操作的项另行批准 |
+| 未核实 | HV 是否原样保存非 ASCII 正文（需发信）、普通邮件与 COD 过期退回期限（库内无退回样本）、HV 是否按约一年自动清理 Sent（见下节）、邮资金额、isekai 的 Sent 与 Read Mail（isekai 角色战斗中未读） | 需写操作的项另行批准 |
+
+### 浏览器只读核实（2026-11-04）
+
+经用户确认 main 角色不在战斗、浏览器已登录 Bot 账号后，用同源 `fetch` 只读 GET（请求间隔不少于 1.5 秒）读取 main 的 Sent 全部分页、Read Mail 前 3 页与 compose 页说明文字，以及论坛 WTS 板块与一个已结算场次主题；未打开收件箱邮件详情或登录 key 邮件，未提交任何表单。只记录计数与顺序统计，不记录收件人、主题、正文或玩家名。isekai 角色当时在 The Tower 战斗中，邮件页返回战斗界面，未读取。
+
+| 项 | 结论 | 影响 |
+| --- | --- | --- |
+| Sent 分页 | 每页 15 行，分页参数从 0 起（首页无参数，“Next” 指向 `page=1`）；main 共 37 页 549 行，末页 9 行；最新 2026-11-03 11:22，最早 2025-11-04 03:19（恰约一年前，可能是 HV 的保留上限，也可能只是账号最早发信，需隔日复核最早行是否前移）；全程遍历无重复行 | D3 剩余约 41 天；`maximum_pages = 100` 对应 1500 行 |
+| Sent 顺序 | 显示顺序按时间（只到分钟）非递增；相邻 548 对中 MID 递减 546 对，2 对递增且都在同一分钟内（同分钟相邻 44 对），跨分钟、跨页均无 MID 逆序 | W1.4 发送前边界“最大 MID + 读完边界分钟”的前提成立；同分钟内显示顺序不等于 MID 顺序，必须读完整个边界分钟 |
+| Read Mail 顺序 | 前 3 页 45 行中 1 处 MID 逆序，发生在相邻分钟（较早一分钟的邮件 MID 大 1） | MID 很可能在发送前（如草稿创建时）分配，收到时间与 MID 不严格同序；W1.3 的 Read Mail 水位不能只按 MID 单调假设设计 |
+| MID 与发送流程 | 代码中 `prepare_sent_baseline` 在打开 compose 前完成，且 compose 必须为空草稿，否则返回 `PreflightUnproven` | 本系统发出的邮件草稿必在边界之后创建，`MID > W` 能选中；同账号人工在边界前起草、边界后发出的邮件 MID 可能小于 W，水位路径不会把它当候选，而完整集合路径会——影子比较中这类差异属预期类别 |
+| 邮资 | compose 页只说明 CoD 功能需付费（拥有 Postage Paid perk 可免），未显示金额 | 金额与计费方式仍需从实际扣款或 HV 说明核实 |
+| 论坛发帖时间 | 帖子头部显示绝对时间 `Mon D YYYY, HH:MM`，只到分钟，按账号时区显示：Bot 论坛账号页脚 `Time is now` 比 UTC 快 8 小时；样本主题首帖时间换算为开拍后 8 分钟，与库内一致；未在该样本中看到 `Today`/`Yesterday` 相对时间 | W0.5 的 `posted_minute` 方法可行：须按页面页脚时钟推导时区偏移、按 `[T, T+60s)` 解释，进行中主题需再核实相对时间格式 |
