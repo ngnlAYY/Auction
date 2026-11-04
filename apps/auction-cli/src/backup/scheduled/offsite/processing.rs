@@ -67,11 +67,9 @@ impl Processor<'_> {
             staging::seal(self.state, item, self.output, self.config, receipt, self.journal)
                 .await?;
         pipeline::stage(self.journal, receipt, Stage::OffsiteDaily)?;
-        let daily = format!(
-            "{}/daily/{}/{}",
-            self.config.backup.offsite.prefix,
-            item.archive.created_at.format("%Y/%m/%d"),
-            item.run_id
+        let daily = super::object_key(
+            &self.config.backup.offsite.prefix,
+            &format!("daily/{}/{}", item.archive.created_at.format("%Y/%m/%d"), item.run_id),
         );
         replica::Transfer {
             store: &self.prepared.store,
@@ -97,11 +95,9 @@ impl Processor<'_> {
             replica::checkpoint(self.state, item, receipt, self.journal)?;
         }
         if item.write_monthly == Some(true) {
-            let monthly = format!(
-                "{}/monthly/{}/{}",
-                self.config.backup.offsite.prefix,
-                item.archive.created_at.format("%Y/%m"),
-                item.run_id
+            let monthly = super::object_key(
+                &self.config.backup.offsite.prefix,
+                &format!("monthly/{}/{}", item.archive.created_at.format("%Y/%m"), item.run_id),
             );
             let completed = replica::Transfer {
                 store: &self.prepared.store,

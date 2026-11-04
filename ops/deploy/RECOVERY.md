@@ -102,7 +102,7 @@ journalctl -u auction-backup.service
 ### 2. 用户在 Cloudflare 控制台配置 R2
 
 1. 创建专用 bucket，记录 S3 API 的 HTTPS 根 endpoint。统一选择普通配置的 `<prefix>`（例如 `auction`）；下面规则使用真实前缀，不使用占位文本。
-2. 按下表为前缀配置按对象年龄淘汰的生命周期和 bucket lock；启用备份之前核验规则已生效。锁定期不长于淘汰期，按决策使用相同天数。WAL 与基础备份前缀先预留，W10.7 再产生对象，不在本轮启用 PG archive_mode。
+2. 按下表为对象键前缀配置按对象年龄淘汰的生命周期和 bucket lock；启用备份之前核验规则已生效。`<prefix>` 为空时键直接为 `daily/`、`monthly/` 等，非空时为 `<prefix>/daily/`。锁定期不长于淘汰期，按决策使用相同天数。WAL 与基础备份前缀先预留，W10.7 再产生对象，不在本轮启用 PG archive_mode。
 
    | 前缀 | 生命周期淘汰 | bucket lock |
    | --- | --- | --- |

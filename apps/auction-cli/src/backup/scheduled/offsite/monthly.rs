@@ -19,7 +19,8 @@ pub(super) async fn exists(
 ) -> anyhow::Result<bool> {
     let month = item.archive.created_at.format("%Y-%m").to_string();
     let name = marker_name(item);
-    let root = format!("{prefix}/monthly/{}", item.archive.created_at.format("%Y/%m"));
+    let root =
+        super::object_key(prefix, &format!("monthly/{}", item.archive.created_at.format("%Y/%m")));
     match state.months.read(&name) {
         Ok(bytes) => {
             let marker: MonthMarker = serde_json::from_slice(&bytes).context("月副本标记无效")?;
@@ -92,10 +93,13 @@ pub(super) async fn should_write(
     }
     let marker: MonthMarker = serde_json::from_slice(&state.months.read(&marker_name(item))?)
         .context("月副本标记无效")?;
-    let own_key = format!(
-        "{prefix}/monthly/{}/{}/completed.json",
-        item.archive.created_at.format("%Y/%m"),
-        item.run_id
+    let own_key = super::object_key(
+        prefix,
+        &format!(
+            "monthly/{}/{}/completed.json",
+            item.archive.created_at.format("%Y/%m"),
+            item.run_id
+        ),
     );
     Ok(marker.completion.key == own_key)
 }
