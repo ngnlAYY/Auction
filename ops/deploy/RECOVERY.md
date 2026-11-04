@@ -28,7 +28,7 @@ auction-cli --config-dir /etc/auction backup verify --database auction \
 
 ## 定时备份
 
-发布包的分体与合并形态均包含 `systemd/auction-backup.service.example` 与 `systemd/auction-backup.timer.example`（仓库源为 `ops/deploy/systemd/` 下同名文件），以及 WAL 上传器的 `systemd/auction-wal-upload.service.example` 与 `systemd/auction-wal-upload.timer.example`。启用由用户执行；启用 timer 同时授权按下述规则清理这个专用目录内的旧定时备份。备份范围仍只有数据库；可选异机副本将 archive 与 manifest 分别加密上传 R2。runtime 配置、诊断证据和每周物理基础备份由后续工作项交付；WAL 归档与上传见[WAL 归档与时间点恢复](#wal-归档与时间点恢复)。
+发布包的分体与合并形态均包含 `systemd/auction-backup.service.example` 与 `systemd/auction-backup.timer.example`（仓库源为 `ops/deploy/systemd/` 下同名文件），以及 WAL 上传器的 `systemd/auction-wal-upload.service.example`、`systemd/auction-wal-upload.timer.example` 与每周基础备份的 `systemd/auction-base-backup.service.example`、`systemd/auction-base-backup.timer.example`。启用由用户执行；启用 timer 同时授权按下述规则清理这个专用目录内的旧定时备份。备份范围仍只有数据库；可选异机副本将 archive 与 manifest 分别加密上传 R2。runtime 配置与诊断证据由后续工作项交付；WAL 归档、每周基础备份与上传见[WAL 归档与时间点恢复](#wal-归档与时间点恢复)。
 
 timer 的 `ExecStart` 调用 `auction-cli backup scheduled`；线上旧 CLI `f99a9d4e` 早于该子命令，**必须先安装包含该命令的候选 CLI，再启用 timer**。R2、`age` 与监控服务可以在部署前准备，但旧程序上的 timer/出口验收不成立。完整顺序见[运维手册的 M1 候选上线顺序](../README.md#m1-候选上线顺序备份与指标前置)。
 
@@ -85,7 +85,7 @@ journalctl -u auction-backup.service
 
 目标（决策 18、31、41、49）：RPO ≤ 5 分钟（`archive_timeout = 300`）、RTO ≤ 2 小时，可恢复到过去 **14 天**内任一时刻；WAL 与基础备份都保留 **21 天**，同时保有 3 份基础备份。两者使用 R2 的独立前缀 `<prefix>/wal/` 与 `<prefix>/base/`，生命周期与 bucket lock 均为 21 天，与日/月备份前缀互不影响。
 
-本仓库当前交付的切片：`archive_mode`/`archive_timeout` 模板、`archive_command` 调用的 `auction-cli wal archive`（zstd 压缩 + age 公钥加密 + fsync 暂存）、独立上传器 `auction-cli wal upload`（R2 `wal/` 前缀、校验后删除本地副本）。**每周 `pg_basebackup` 物理基础备份与 `base/` 前缀尚未交付**，所以时间点恢复目前不能闭环；基础备份落地前，恢复点仍以[定时备份](#定时备份)的日/月逻辑备份为准。归档、上传与暂存目录大小的指标和外部打卡也尚未实现，现阶段只能靠 `pg_stat_archiver`、`systemctl` 状态与磁盘占用观察。
+本仓库当前交付的切片：`archive_mode`/`archive_timeout` 模板、`archive_command` 调用的 `auction-cli wal archive`（zstd 压缩 + age 公钥加密 + fsync 暂存）、每周 `auction-cli wal base-backup`（`pg_basebackup` 物理基础备份，同样 zstd + age + fsync 暂存）以及独立上传器 `auction-cli wal upload`（R2 `wal/` 与 `base/` 前缀、长度与完整 SHA-256 校验）。WAL 校验通过后删除本地副本；基础备份在本地保留最近 **3** 份、更旧的完整暂存项在校验上传后删除，远端份数由 bucket 生命周期（21 天）淘汰。归档、上传与暂存目录大小的指标和外部打卡尚未实现，现阶段靠 `pg_stat_archiver`、`systemctl` 状态与磁盘占用观察。**本仓库尚未在隔离实例上完成一次真实的时间点恢复演练**，时间点恢复步骤见下文，交付状态不能当作演练结论。
 
 ### 组成与数据流
 
@@ -95,16 +95,19 @@ journalctl -u auction-backup.service
    archive_command = '/opt/auction/bin/auction-cli wal archive --staging-dir /var/lib/auction/wal-staging --recipient age1<收件人公钥> %p %f'
    ```
 
-   命令以 **postgres 账号**执行，不读敏感 TOML；收件人公钥写在参数里（公钥不是秘密，私钥仍按[离线托管](#1-离线生成与托管密钥)保存）。它把 `zstd` 压缩流经 `age --encrypt --recipient` 写入 `<段名>.zst.age`，`fsync` 文件与目录后发布 `<段名>.zst.age.manifest.json`（`auction-wal-archive.v1`：段名、源字节数与 mtime、密文长度、归档时刻）。任一步失败返回非零，由 PostgreSQL 重试同一段；同一段已有 manifest 且源文件字节数与 mtime 一致时直接成功退出，不重复加密。源内容不同或密文长度与 manifest 不符时失败关闭，不覆盖既有证据。
-2. `auction-wal-upload.timer` 每 5 分钟以 **auction 账号**运行 `auction-cli wal upload --staging-dir /var/lib/auction/wal-staging --budget-seconds 300`。它按段名顺序上传到 `<prefix>/wal/<段名>.zst.age`；远端已有相同长度与完整 SHA-256 的对象视为成功（bucket lock 下重传会返回 409），校验通过后删除本地密文与 manifest。
-3. 上传失败、冲突或预算耗尽都保留本地文件并以非零退出；stdout 的 JSON 报告逐项给出 `uploaded`、`already_present`、`failed`、`invalid`、`incomplete` 与 `remaining`，systemd 记录失败状态。`incomplete` 是归档进程尚未发布完成的项（含只剩 manifest 的残留），不是上传失败。
+   命令以 **postgres 账号**执行，不读敏感 TOML；收件人公钥写在参数里（公钥不是秘密，私钥仍按[离线生成与托管密钥](#1-离线生成与托管密钥)保存）。它把 `zstd` 压缩流经 `age --encrypt --recipient` 写入 `<段名>.zst.age`，`fsync` 文件与目录后发布 `<段名>.zst.age.manifest.json`（`auction-wal-archive.v1`：段名、源字节数与 mtime、密文长度、归档时刻）。任一步失败返回非零，由 PostgreSQL 重试同一段；同一段已有 manifest 且源文件字节数与 mtime 一致时直接成功退出，不重复加密。源内容不同或密文长度与 manifest 不符时失败关闭，不覆盖既有证据。
+2. **每周基础备份**由 `auction-base-backup.timer` 以 **postgres 账号**执行 `auction-cli wal base-backup --staging-dir /var/lib/auction/wal-staging --recipient age1<收件人公钥>`。它运行 `pg_basebackup --pgdata=- --format=tar --wal-method=fetch --checkpoint=fast --label base-<UTC时刻> --no-password`，连接的数据库与角色来自 libpq 默认值（本机 socket、peer 认证），因此执行账号必须有 `REPLICATION` 权限或为超级用户；`-D -` 要求集群**没有额外表空间**，`-X fetch` 把所需 WAL 并入同一个 `base.tar` 流，使产物是可直接用于时间点恢复的独立基础备份。tar 流经 `zstd` 与 `age --encrypt --recipient` 写入 `base-<UTC时刻>.tar.zst.age`，`fsync` 文件与目录后发布 `base-<UTC时刻>.tar.zst.age.manifest.json`（`auction-base-backup.v1`：备份 ID、开始/结束时刻、压缩前与密文字节数、密文 SHA-256）。任一外部程序非零退出都失败关闭，不发布任何文件；同一秒内重跑沿用既有身份，只有密文而没有 manifest 视为上次中断并重新归档。
+3. `auction-wal-upload.timer` 每 5 分钟以 **auction 账号**运行 `auction-cli wal upload --staging-dir /var/lib/auction/wal-staging --budget-seconds 300`。WAL 按段名顺序上传到 `<prefix>/wal/<段名>.zst.age`，校验通过后删除本地密文与 manifest。基础备份上传到 `<prefix>/base/<备份 ID>/`：先密文、再 manifest，最后发布 `completed.json`（`auction-base-upload.v1`：备份 ID、备份完成时刻、两份对象的长度与 SHA-256）；完成记录取备份完成时刻而非上传时刻，响应丢失后重试生成完全相同的字节。远端已有相同长度与完整 SHA-256 的对象视为成功（bucket lock 下重传会返回 409）。基础备份/WAL 共用一次运行的总预算；单份密文无法在 300 秒内上传完时，同时调大 `--budget-seconds` 与 service 的 `TimeoutStartSec`，否则每次都会超时并保留本地文件重试。
+4. 基础备份每次成功上传后，上传器在暂存目录写入本机证据 `base-<备份 ID>.upload.json`（`auction-base-receipt.v1`：备份 ID、上传时刻、`completed.json` 的 SHA-256）。之后每 5 分钟的运行据此跳过该组，不再重算本地 SHA-256 或完整回读远端；证据缺失或无效时按未上传处理，宁可多一次完整校验。删除该文件就会让下一次运行重新核对远端对象（幂等，不会产生第二份）。
+5. 基础备份的本地保留在每次上传运行末尾执行：按备份 ID 倒序保留最新 **3** 组完整暂存项（密文与 manifest 长度一致），更旧的完整项依次删除本机证据、manifest 与密文，并 `fsync` 目录；本次上传失败的旧备份不会被删除，未形成完整一对的暂存项只报告 `incomplete`、从不主动删除。异机副本关闭（`[backup.offsite] enabled = false`）时保留策略照常执行，此时本地就是唯一副本，报告 `outcome = skipped`。
+6. 上传失败、冲突或预算耗尽都保留本地文件并以非零退出；stdout 的 JSON 报告逐项给出 WAL 的 `uploaded`、`already_present`、`failed`、`invalid`、`incomplete` 与 `remaining`，以及基础备份的 `base.uploaded`、`base.already_present`、`base.already_verified`、`base.failed`、`base.retained`、`base.removed`，systemd 记录失败状态。`incomplete` 是创建进程尚未发布完成的项（WAL 段名或基础备份 ID），不是上传失败。
 
 ### 启用顺序
 
-1. 安装包含 `wal archive`/`wal upload` 的 `auction-cli`（旧 CLI 没有该子命令，先装候选再改 PostgreSQL）。
-2. 在归档账号（postgres）的 PATH 中安装 `zstd` 与 `age`，确认 `zstd --version`、`age --version` 可执行；服务器只放公钥。同时确认 postgres 账号可执行 `/opt/auction/bin/auction-cli`（目录可遍历、二进制可执行），否则 `archive_command` 直接返回 127。
-3. 建立暂存目录并确认权限：`postgres:auction`、`2770`（setgid，使密文继承 `auction` 组）。可用 `ops/deploy/tmpfiles/hv-auction.conf.example` 中对应的 `d /var/lib/auction/wal-staging 2770 postgres auction - -` 行，或手工 `install -d -o postgres -g auction -m 2770 /var/lib/auction/wal-staging`。
-4. 以 auction 账号执行 `auction-cli --config-dir /etc/auction config check --strict`，确认 `[backup.offsite]` 已启用且 R2 令牌可写 `<prefix>/wal/`。
+1. 安装包含 `wal archive`/`wal base-backup`/`wal upload` 的 `auction-cli`（旧 CLI 没有这些子命令，先装候选再改 PostgreSQL）。
+2. 在归档账号（postgres）的 PATH 中安装 `zstd`、`age` 与 `pg_basebackup`（PG18 客户端），确认 `zstd --version`、`age --version`、`pg_basebackup --version` 可执行；服务器只放公钥。同时确认 postgres 账号可执行 `/opt/auction/bin/auction-cli`（目录可遍历、二进制可执行），否则 `archive_command` 直接返回 127。
+3. 建立暂存目录并确认权限：`postgres:auction`、`2770`（setgid，使密文继承 `auction` 组）。可用 `ops/deploy/tmpfiles/hv-auction.conf.example` 中对应的 `d /var/lib/auction/wal-staging 2770 postgres auction - -` 行，或手工 `install -d -o postgres -g auction -m 2770 /var/lib/auction/wal-staging`。WAL 段与基础备份共用该目录；基础备份会占用本机数份容量。
+4. 以 auction 账号执行 `auction-cli --config-dir /etc/auction config check --strict`，确认 `[backup.offsite]` 已启用且 R2 令牌可写 `<prefix>/wal/` 与 `<prefix>/base/`。
 5. 手工验证一次归档与上传（不改 `archive_mode`）：
 
    ```bash
@@ -116,8 +119,18 @@ journalctl -u auction-backup.service
    ```
 
    重跑同一 `wal archive` 必须输出 `already_archived` 并退出 0；重跑上传必须报 `already_present` 或空集合。
-6. 安装并启用 `auction-wal-upload.service/timer`（发布包 `systemd/` 目录），确认一次成功运行。
-7. **只有以上步骤都通过后**，才在 `postgresql.conf` 打开归档并在 W7.5 允许的窗口重启：
+6. 手工验证一次基础备份与上传：
+
+   ```bash
+   sudo -u postgres /opt/auction/bin/auction-cli wal base-backup \
+     --staging-dir /var/lib/auction/wal-staging --recipient age1<收件人公钥>
+   sudo -u auction /opt/auction/bin/auction-cli --config-dir /etc/auction wal upload \
+     --staging-dir /var/lib/auction/wal-staging --budget-seconds 300
+   ```
+
+   第一条输出 `status = created`，暂存目录出现同名 `.tar.zst.age` 与 `.manifest.json`；第二条报告 `base.uploaded`（或 `base.already_present`）且 R2 `<prefix>/base/<备份 ID>/` 下三份对象齐全。同一天再次运行 `base-backup` 会创建新的备份 ID，这是预期行为；保留策略只在超过 3 份时删除最旧的完整副本。执行账号必须有 `REPLICATION` 权限或为超级用户，集群不能有额外表空间。
+7. 安装并启用 `auction-wal-upload.service/timer` 与 `auction-base-backup.service/timer`（发布包 `systemd/` 目录），确认各一次成功运行。上传器同时负责 WAL 与基础备份；只启用基础备份 timer 而不启用上传 timer 时，基础备份只在本地暂存且不会按远端校验后清理。
+8. **只有以上步骤都通过后**，才在 `postgresql.conf` 打开归档并在 W7.5 允许的窗口重启：
 
    ```conf
    archive_mode = on
@@ -130,13 +143,14 @@ journalctl -u auction-backup.service
 
 ```bash
 psql -d auction -c 'SELECT archived_count, failed_count, last_archived_wal, last_failed_wal FROM pg_stat_archiver'
-systemctl list-timers auction-wal-upload.timer
-systemctl status auction-wal-upload.service
-journalctl -u auction-wal-upload.service
+systemctl list-timers auction-wal-upload.timer auction-base-backup.timer
+systemctl status auction-wal-upload.service auction-base-backup.service
+journalctl -u auction-wal-upload.service -u auction-base-backup.service
 df -h /var/lib/auction/wal-staging
+ls -l /var/lib/auction/wal-staging | grep '^.*base-'
 ```
 
-`failed_count` 持续增长表示 `archive_command` 失败（zstd/age 缺失、权限、暂存目录不可写），此时 `pg_wal` 会增长；暂存目录长期非空表示上传器失败或未启用 timer。R2 侧核对 `<prefix>/wal/` 下对象数量与最新段名，不与日/月备份混用前缀。
+`failed_count` 持续增长表示 `archive_command` 失败（zstd/age 缺失、权限、暂存目录不可写），此时 `pg_wal` 会增长；暂存目录长期非空表示上传器失败或未启用 timer。R2 侧核对 `<prefix>/wal/` 下对象数量与最新段名，以及 `<prefix>/base/` 下每个备份目录是否都有 `completed.json`；不与日/月备份混用前缀。本机基础备份数量应稳定在 3 组，每组三份文件（密文、manifest 与该备份上传成功后出现的 `.upload.json` 本机证据）；只有密文与 manifest 而没有证据表示还没成功上传，只有证据与 manifest 没有密文说明该组已被清理或损坏。
 
 ### 失败处置
 
@@ -146,17 +160,23 @@ df -h /var/lib/auction/wal-staging
 | `WAL manifest 存在但密文缺失` | 保留 manifest 与目录，人工核对是否有人删除了密文；确认密文确实不存在且该段尚未被确认时，删除残留 manifest 让下一次重试重新归档 |
 | `同名 WAL 段已有不同源内容的归档` | 失败关闭，不覆盖。核对段名是否被另一实例复用、暂存目录是否被复制；处理前先保留全部证据 |
 | 上传器 `offsite_object_conflict` | 远端同名对象长度或摘要不同：保留本地密文，按[异机异常处置](#异机异常处置)核对 bucket、prefix 与令牌，不覆盖、不改名 |
+| `wal base-backup` 报 `pg_basebackup 失败` | 读取 journal 中截断的 stderr：连接失败、缺少 `REPLICATION` 权限、额外表空间或 WAL 已被回收都会在这里失败。修复后用 postgres 账号手工重跑；命令不发布任何半成品 |
+| `wal base-backup` 报 `基础备份 manifest 存在但密文缺失` | 失败关闭：保留 manifest 与目录，人工核对是否有人删除了密文；确认密文确实不存在时，删除残留 manifest（或整组暂存）后重新生成基础备份。不能手工补写 manifest |
+| `基础备份密文 SHA-256 与 manifest 不一致` | 上传器在上传前失败关闭。该暂存项已损坏，不能上传或改名规避；保留证据并由用户决定删除该组后重新生成，不能在保留份数外长期占用暂存目录 |
+| 上传器 `base.failed` 长期非空 | 按报告中的备份 ID 核对 R2 前缀、bucket lock 与令牌；本地副本会保留（本次上传失败的项不参与保留删除），修复后下一次上传按对象摘要对账并输出 `base.already_present` |
+| 怀疑远端基础备份被删除或被改动 | 本机 `.upload.json` 只是“曾经校验通过”的证据，不会每次运行交叉重核远端。删除对应证据后下一次上传会重新 HEAD + 完整回读并输出 `base.already_present`（不再产生第二份）；对象缺失时重新上传。远端对象的淘汰只由 bucket 生命周期执行，CLI 从不删除远端对象 |
 | 暂存目录占满磁盘 | 先确认上传器与 R2 可用并恢复上传，不要直接删除未上传密文；确需腾空间时按授权范围处理已上传且校验通过的对象 |
 | 需要停止归档 | 先 `systemctl disable --now auction-wal-upload.timer`，再在 W7.5 窗口内把 `archive_mode` 改回 `off` 并重启；停机期间未归档的段留在 `pg_wal`，重启后 PostgreSQL 会继续尝试归档 |
 
-### 时间点恢复（基础备份交付后）
+### 时间点恢复
 
-完整流程需要 R2 中的一份基础备份与截至目标时刻的全部 WAL。基础备份交付前的替代做法是[从 R2 取回并演练恢复](#从-r2-取回并演练恢复)中的逻辑备份恢复，它只能恢复到备份时刻。
+完整流程需要 R2 中的一份基础备份与截至目标时刻的全部 WAL。基础备份与归档命令已交付，但**本仓库尚未在隔离 PG18 实例上完整演练过该流程**；执行一次演练前，恢复点仍以[定时备份](#定时备份)的日/月逻辑备份为主，它只能恢复到备份时刻。
 
-1. 在隔离 PG18 实例上，用离线 age 私钥解密 `base/` 中的基础备份与 `wal/` 中目标时刻之前的全部段，逐个用 `wc -c` 与 `sha256sum` 核对远端记录，再用 `zstd -d` 还原原始文件名。
-2. 把基础备份展开为数据目录，写入 `postgresql.auto.conf` 的 `restore_command` 指向解密后的 WAL 目录，创建 `recovery.signal`，在 `recovery_target_time` 指定目标时刻，启动实例并核对停止点日志。
-3. 核对 schema/迁移版本、关键表与只读业务事实，然后按[外部历史核对](#6-外部历史核对与启动)排除备份之后已经发生的邮件、附件与论坛写入；恢复库不能直接接生产外部功能。
-4. 记录使用的段范围、目标时刻、解密与还原结果、恢复耗时与外部核对结论。不要在演练机上保留私钥或明文 WAL。
+1. 在 R2 的 `<prefix>/base/<备份 ID>/` 中选择备份，下载 `completed.json` 检查 `format = auction-base-upload.v1`、备份 ID、`created_unix_seconds`、两份对象名/长度/SHA-256，并核对其中的 manifest 与暂存时 manifest 一致；只有密文而没有完成记录时不能当作恢复点。随后下载该备份的 `base-<ID>.tar.zst.age` 与 manifest，再下载 `<prefix>/wal/` 中目标时刻之前、且晚于该基础备份起点的全部段。
+2. 在离线工作站用 age 私钥把基础备份与 WAL 段解密到 0700 目录，逐个用 `wc -c` 与 `sha256sum` 核对完成的记录与 `auction-base-backup.v1` 的 `cipher_bytes`/`cipher_sha256`；再用 `zstd -d` 还原 `base.tar` 与 `<段名>` 文件名。不得在恢复机留下私钥或明文 WAL。
+3. 把 `base.tar` 展开为隔离实例的数据目录（tar 内已包含备份期间的 WAL，可直接启动），写入指向解密后 WAL 目录的 `restore_command`，创建 `recovery.signal`，在 `recovery_target_time` 指定目标时刻，启动实例并核对停止点日志。`-X fetch` 的基础备份只包含备份期间的 WAL，之后的时间点仍依赖 `wal/` 中已归档的段。
+4. 核对 schema/迁移版本、关键表与只读业务事实，然后按[外部历史核对](#6-外部历史核对与启动)排除备份之后已经发生的邮件、附件与论坛写入；恢复库不能直接接生产外部功能。
+5. 记录使用的备份 ID 与段范围、目标时刻、解密与还原结果、恢复耗时与外部核对结论。一次演练习得后才能把时间点恢复计入可恢复性证据。
 
 
 ## 异机副本前置准备
@@ -180,7 +200,7 @@ df -h /var/lib/auction/wal-staging
 ### 2. 用户在 Cloudflare 控制台配置 R2
 
 1. 创建专用 bucket，记录 S3 API 的 HTTPS 根 endpoint。统一选择普通配置的 `<prefix>`（例如 `auction`）；下面规则使用真实前缀，不使用占位文本。
-2. 按下表为对象键前缀配置按对象年龄淘汰的生命周期和 bucket lock；启用备份之前核验规则已生效。`<prefix>` 为空时键直接为 `daily/`、`monthly/` 等，非空时为 `<prefix>/daily/`。锁定期不长于淘汰期，按决策使用相同天数。`<prefix>/wal/` 由 W10.7 上传器产生（见[WAL 归档与时间点恢复](#wal-归档与时间点恢复)），`<prefix>/base/` 仍待每周基础备份交付；默认 `archive_mode = off`，启用须按该节顺序执行。
+2. 按下表为对象键前缀配置按对象年龄淘汰的生命周期和 bucket lock；启用备份之前核验规则已生效。`<prefix>` 为空时键直接为 `daily/`、`monthly/` 等，非空时为 `<prefix>/daily/`。锁定期不长于淘汰期，按决策使用相同天数。`<prefix>/wal/` 与 `<prefix>/base/` 由 W10.7 上传器产生（见[WAL 归档与时间点恢复](#wal-归档与时间点恢复)），`base/` 下每个备份一个目录（`<prefix>/base/<备份 ID>/`）；默认 `archive_mode = off`，启用须按该节顺序执行。
 
    | 前缀 | 生命周期淘汰 | bucket lock |
    | --- | --- | --- |

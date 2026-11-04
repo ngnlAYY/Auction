@@ -146,7 +146,7 @@ SLI 基线不由 Admin runtime 覆盖；仅 Worker 消费，且须同时启用�
 
 `common.toml [backup.offsite]` 同样只由 CLI 消费，默认关闭；`enabled = false` 在下次 scheduled 生效，暂停加密、上传和旧待上传项的重试，不影响本地备份或角色进程。重新启用后继续原待上传项。启用前必须完成[离线密钥托管与 R2 设置](../deploy/RECOVERY.md#异机副本前置准备)，特别是 daily/monthly 的 bucket lock；CLI 不代替用户检查或修改控制台策略。
 
-`auction-cli wal upload`（W10.7 上传器）复用同一 `[backup.offsite]` 目的地、`prefix` 与 R2 凭据，对象键为 `<prefix>/wal/<段名>.zst.age`，`enabled = false` 时只输出 `skipped`。WAL 归档命令不读配置：PostgreSQL 服务账号不持有敏感 TOML 权限，`archive_command` 直接使用 `--recipient` 传入同一 `age_recipient` 公钥；改动公钥时必须同步这两处，私钥仍只离线保存。详见[WAL 归档与时间点恢复](../deploy/RECOVERY.md#wal-归档与时间点恢复)。
+`auction-cli wal upload`（W10.7 上传器）复用同一 `[backup.offsite]` 目的地、`prefix` 与 R2 凭据：WAL 段的对象键为 `<prefix>/wal/<段名>.zst.age`，每周基础备份为 `<prefix>/base/<备份 ID>/` 下的密文、manifest 与 `completed.json`。`enabled = false` 时只输出 `skipped`（仍按本地策略清理多余的基础备份）。WAL 归档与基础备份命令不读配置：PostgreSQL 服务账号不持有敏感 TOML 权限，`archive_command` 与 `wal base-backup` 直接使用 `--recipient` 传入同一 `age_recipient` 公钥；改动公钥时必须同步这两处，私钥仍只离线保存。详见[WAL 归档与时间点恢复](../deploy/RECOVERY.md#wal-归档与时间点恢复)。
 
 | 字段 | 默认值 | 校验 |
 | --- | --- | --- |

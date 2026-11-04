@@ -15,7 +15,7 @@
 
 发布包（`auction-rust-<版本>-<提交前 12 位>[-single].tar.gz`）包含 `bin/`（分体包：三个角色程序 + `auction-cli`；合并包：`auction-server` + `auction-cli`）、`docs/`（部署、恢复、CLI 说明与 Web 资源摘要）、`systemd/`、`caddy/`、`config/examples/` 与 `retention-policy.v1.json`；分体包另含 `tmpfiles/`，合并包另含首次设置代理示例与单文件说明（以上均为发布包内的路径）。敏感模板以 `secrets.toml.example`、`secrets/postgres-rebuild.toml.example` 命名，须复制为配置引用的实际文件名。用发布包内的 `SHA256SUMS` 校验解压后的文件。
 
-两种发布包均包含 `auction-backup.service.example` 与 `auction-backup.timer.example`；仅由用户按[定时备份](deploy/RECOVERY.md#定时备份)单独安装启用，不随三个角色服务自动开启。
+两种发布包均包含 `auction-backup.service.example` 与 `auction-backup.timer.example`，以及 WAL 相关 timer 模板 `auction-wal-upload.service.example`、`auction-wal-upload.timer.example`、`auction-base-backup.service.example`、`auction-base-backup.timer.example`；仅由用户按[定时备份](deploy/RECOVERY.md#定时备份)与[WAL 归档与时间点恢复](deploy/RECOVERY.md#wal-归档与时间点恢复)单独安装启用，不随三个角色服务自动开启。
 两种发布包的 `docs/` 也包含 `MIGRATION-DRILL.md` 与 `migration-drill-receipt.template.json`，用于含迁移版本部署前的手工演练与留证。
 
 启用异机副本还须安装主机 `age`、离线托管三组数据密钥及 age 私钥，并由用户在 R2 控制台配置限定 bucket 的令牌、生命周期与 bucket lock，见[异机副本前置准备](deploy/RECOVERY.md#异机副本前置准备)。
@@ -757,7 +757,7 @@ D1 仍待线上分类证据确认。部署后由用户执行只读核对，数�
 
 例行备份使用 `auction-cli backup scheduled` 配合独立 systemd timer，包含磁盘门禁、本地保留和不可变回执；启用、回退与故障处理见[定时备份](deploy/RECOVERY.md#定时备份)。外部打卡暂缓启用，异机加密上传另行交付；当前仍需把 archive 与 manifest 一起复制到异地。升级前确定恢复点继续使用手动 `backup create/verify`。恢复、重建与演练见[备份与恢复手册](deploy/RECOVERY.md)。
 
-WAL 归档已交付命令与模板（W10.7）：`archive_command` 调用 `auction-cli wal archive` 把段压缩、age 加密后 fsync 到本机暂存，`auction-wal-upload.timer` 每 5 分钟运行 `auction-cli wal upload` 上传 R2 的 `<prefix>/wal/` 并在校验后删除本地副本。`archive_mode` 默认仍为 `off`，开启需要重启 PostgreSQL 并受[停机时段保护](#停机时段保护)约束；顺序、验证与回退见[WAL 归档与时间点恢复](deploy/RECOVERY.md#wal-归档与时间点恢复)。每周物理基础备份尚未交付。
+WAL 归档与每周物理基础备份已交付命令与模板（W10.7）：`archive_command` 调用 `auction-cli wal archive` 把段压缩、age 加密后 fsync 到本机暂存，`auction-base-backup.timer` 每周运行 `auction-cli wal base-backup` 用 `pg_basebackup` 生成同样加密的基础备份，`auction-wal-upload.timer` 每 5 分钟运行 `auction-cli wal upload` 把两者分别上传 R2 的 `<prefix>/wal/` 与 `<prefix>/base/`，校验后删除 WAL 本地副本，基础备份在本地保留最近 3 份。`archive_mode` 默认仍为 `off`，开启需要重启 PostgreSQL 并受[停机时段保护](#停机时段保护)约束；顺序、验证与回退见[WAL 归档与时间点恢复](deploy/RECOVERY.md#wal-归档与时间点恢复)。
 
 含迁移版本的升级演练使用独立的[迁移演练手册](deploy/MIGRATION-DRILL.md)与[回执模板](deploy/migration-drill-receipt.template.json)，恢复过程仍复用上述手册。
 
