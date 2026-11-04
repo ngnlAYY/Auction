@@ -21,6 +21,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 | `auction` | 拍卖投稿 |
 | `register` | 注册或找回登录 key |
 | `rebind` | 改名后换绑账号 |
+| `rekey` | 轮换登录 key 并注销全部会话 |
 | `auction equipment delivery [<UUID>]`、`auction payment request [<UUID>]` | 结算邮件被退回（退件） |
 | 其他 | 不含附件/Credits/COD：归档；含资产：整封退回 |
 
@@ -59,6 +60,10 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 | --- | --- | --- |
 | `register` | 任意（不能带附件、Credits 或 COD） | 以发件人游戏名注册并回信登录 key；已注册则重新发送 key。被拉黑或身份冲突时回信说明 |
 | `rebind` | 旧登录 key | 把 key 对应账号的名称改为当前发件人的名称（用于游戏内改名后）；key 无效、被拉黑或冲突时回信说明 |
+| `rekey` | 任意（不能带附件、Credits 或 COD） | 以发件人游戏名找到账号，在同一事务内轮换登录 key、注销该账号全部有效会话并回信新 key；未注册、被拉黑或身份冲突时回信说明。可在 Worker 配置中关闭该主题 |
+
+- `register` 与 `rekey` 各自按账号 24 小时只回信一次（窗口可配置）；同一窗口内更早的旧 key 仍无法登录，因为轮换命令本身已经提交。超出的请求照常记录命令与审计，但不再寄出 key 或说明信。
+- 说明信（`auction` 拒收/无附件说明、`rebind` 结果、`user_assets_rejected`、论坛回执）按发件人或论坛账号每 24 小时最多 10 封（窗口与上限可配置）；超出时只记录命令与审计，不寄说明信，但邮件附带的资产仍照常退回。
 
 账户类邮件带资产时整封退回并回信说明（`user_assets_rejected`）。登录 key 只出现在回信中，系统只保存其摘要与加密信封；回信需要 `user_login_data_key`。
 

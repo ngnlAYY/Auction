@@ -171,6 +171,14 @@ mailbox_key = "mooglemail:main"
 world_id = "main"
 # 可选：拍卖邮件未填写 start 时的起拍价（Credits）；省略时使用邮件专属默认值 50000。
 # start_price = 50000
+# 可选：是否接受 `rekey` 主题（登录 key 自助轮换）；默认 true。关闭后该主题按未知邮件归档。
+rekey_enabled = true
+# 可选：注册与轮换各自每账号回信一次的窗口秒数，范围 60-604800，默认 86400。
+account_reply_window_seconds = 86400
+# 可选：说明信（拒收说明、换绑结果、论坛回执）的计数窗口秒数，范围 60-604800，默认 86400。
+explanation_mail_window_seconds = 86400
+# 可选：说明信窗口内每个发件人/论坛账号的最大封数，0 表示不限制，范围 0-100，默认 10。
+explanation_mail_limit = 10
 # 可选：固定生产 origin 或回环联调 origin；默认 https://hentaiverse.org。
 endpoint = "https://hentaiverse.org"
 # 可选：单次响应最大字节数，范围 1-8388608，默认 8388608。
@@ -284,6 +292,10 @@ register_key = "Your HV-Auction login key is ready.\n\nPlayer: {username}\n\nLog
 register_result = "Your registration could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nresolving this issue."
 # 可选：重绑结果正文，默认如下；要求 {result_code}，可选 {username}。
 rebind_result = "Your account rebind request has been processed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nunderstanding the result."
+# 可选：登录 key 轮换成功时的新 key 正文，默认如下；要求 {login_key}、{username}。
+rekey_key = "Your HV-Auction login key has been rotated.\n\nPlayer: {username}\n\nNew login key:\n{login_key}\n\nAll previous sessions have been signed out.\nKeep this key private."
+# 可选：登录 key 轮换失败正文，默认如下；要求 {result_code}，可选 {username}。
+rekey_result = "Your login key rotation request could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nSend a message with the subject \"register\" first\nif you have not registered yet.\nContact the auction operator if you need help\nunderstanding the result."
 # 可选：主世界竞得装备的货到付款正文，默认如下；要求 {item_name}、{amount}、{reference}，可选 {price_breakdown}，旧载荷的明细块为空。
 settlement_winner_equipment_cod = "Your auction item is ready to collect.\n\nItem: {item_name}\n\n{price_breakdown}Amount due (CoD): {amount} Credits\n\nCollect the attached equipment to pay the CoD\nand receive your item.\n\nReference: {reference}"
 # 可选：异世界付款载体正文，默认如下；要求 {amount}、{reference}，amount 为包含载体 Credits 的 CoD 总额。

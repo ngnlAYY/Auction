@@ -9,6 +9,7 @@ use super::super::mail_processing::MailProcessingError;
 pub enum MailUserCommandKind {
     Register,
     Rebind,
+    Rekey,
 }
 
 impl MailUserCommandKind {
@@ -17,6 +18,7 @@ impl MailUserCommandKind {
         match self {
             Self::Register => "register",
             Self::Rebind => "rebind",
+            Self::Rekey => "rekey",
         }
     }
 }
@@ -29,8 +31,10 @@ pub enum MailUserResultCode {
     Blacklisted,
     IdentityConflict,
     Rebound,
+    Rekeyed,
     Unchanged,
     InvalidKey,
+    NotRegistered,
 }
 
 impl MailUserResultCode {
@@ -42,8 +46,10 @@ impl MailUserResultCode {
             Self::Blacklisted => "blacklisted",
             Self::IdentityConflict => "identity_conflict",
             Self::Rebound => "rebound",
+            Self::Rekeyed => "rekeyed",
             Self::Unchanged => "unchanged",
             Self::InvalidKey => "invalid_key",
+            Self::NotRegistered => "not_registered",
         }
     }
 }
@@ -62,6 +68,8 @@ impl MailUserResult {
             (kind, self.code),
             (MailUserCommandKind::Register, MailUserResultCode::IdentityConflict)
                 | (MailUserCommandKind::Rebind, MailUserResultCode::InvalidKey)
+                | (MailUserCommandKind::Rekey, MailUserResultCode::IdentityConflict)
+                | (MailUserCommandKind::Rekey, MailUserResultCode::NotRegistered)
         );
         if self.user_id.is_none() != allows_missing_user {
             return Err(MailProcessingError::InvalidUserResult);
@@ -81,6 +89,13 @@ impl MailUserResult {
                     | MailUserResultCode::IdentityConflict
                     | MailUserResultCode::Unchanged
                     | MailUserResultCode::InvalidKey
+            ),
+            MailUserCommandKind::Rekey => matches!(
+                self.code,
+                MailUserResultCode::Rekeyed
+                    | MailUserResultCode::Blacklisted
+                    | MailUserResultCode::IdentityConflict
+                    | MailUserResultCode::NotRegistered
             ),
         };
         if !valid_code {

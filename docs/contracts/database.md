@@ -62,6 +62,8 @@
 | `scheduled_rounds` | 周排期与早鸟场次的轮次身份（常规周按世界+本地周唯一，早鸟按 `slot_key` 唯一；`early-bird:YYYY-MM-DD:N`，N 为 0 时是赛季前场次） |
 | `auction_forum_sync`、`forum_sync_admin_commands`、`auction_forum_bid_commands`、`auction_forum_catalog_pages` | 论坛主题同步状态（含租约与 fencing）、人工授权、回帖竞价命令、目录分页帖 |
 
+论坛回帖导入游标不单独建表：增量扫描以 `auction_forum_bid_commands` 中该主题 `post_number` 最高的行作为“已处理到的最大帖子 ID”，页号由楼层与每页 20 楼换算。每轮仍读取固定楼层所在页，并先核对游标页仍包含该 `post_id`；帖子被删除或楼层前移时回退完整扫描。迁移 `000005` 建立的 `auction_forum_reply_cursors` 仍无人读写，其 `(scope, last_scan_at)` 结构无法表示按主题的帖子与页码，留给 W8.2 评估清理，本项不追加迁移。
+
 `auctions.policy_snapshot` 的竞价版本在创建场次时冻结：既有 `schema_version=4` 解码为竞价 v1；新建场次写入 `schema_version=5`、数值 `bidding_version=2`，统一最低增量并允许代理用尽上限反超。迁移 `000069` 仅放宽快照 CHECK，拒绝 v5 缺少版本、版本非数值 2 或未知 schema，不回填或改写任何旧场次。普通竞价、慢速到期、Final 与账户代理降额能力共用该版本；历史事实和命令结果保持原样。价格语义见[业务规则](../business-rules.md#代理竞价)。
 
 ### 装备标记
@@ -80,7 +82,7 @@
 | `user_login_key_envelopes` | 加密保存的登录 key（`user_login_data_key` 信封，用于邮件重发） |
 | `user_blacklist`、`user_blacklist_history` | 黑名单当前状态与只追加历史 |
 | `user_renames`、`user_game_identity_history`、`forum_identity_history`、`forum_bidder_identities` | 改名、游戏身份与论坛身份的历史 |
-| `user_admin_commands`、`user_mail_commands` | Admin 用户命令与邮件注册/换绑命令账本 |
+| `user_admin_commands`、`user_mail_commands` | Admin 用户命令与邮件注册/换绑/轮换命令账本；`inbound_mail.mail_kind` 含 `rekey` |
 | `credential_keys`、`credential_admin_commands` | 加密保存的邮件/论坛 Cookie（`credential_data_key` 信封）及其命令账本；每种 kind 同时最多一个 active |
 
 ### 结算、资金、恢复与投递

@@ -94,6 +94,38 @@ impl EhentaiGateway {
         }
     }
 
+    /// 按游标读取主题；游标页不再包含该帖子时客户端自行回退完整读取。
+    pub async fn fetch_topic_incremental(
+        &self,
+        world: SettlementWorld,
+        thread_id: &str,
+        cursor: Option<&auction_application::ForumTopicCursor>,
+        fixed_through_post_number: u32,
+    ) -> Result<auction_application::ForumTopicScan, EhentaiError> {
+        let mut session = self.credentials.begin(Some(world))?;
+        match self
+            .client
+            .fetch_topic_incremental(
+                world,
+                thread_id,
+                session.cookie(),
+                cursor,
+                fixed_through_post_number,
+            )
+            .await
+        {
+            Err(error) if error.is_session_expired() => {
+                let _ = session.invalidate_current().await;
+                Err(EhentaiError::credential(EhentaiOperation::FetchTopic))
+            }
+            Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
+                let _ = session.invalidate_current().await;
+                Err(error)
+            }
+            result => result,
+        }
+    }
+
     /// 建立目录续页或系统日志；正文只移交一次，POST 开始后保持写入未知边界。
     pub async fn reply_topic(
         &self,
@@ -427,6 +459,26 @@ impl ForumTopicReader for EhentaiGateway {
             EhentaiGateway::fetch_topic(self, world, &thread_id)
                 .await
                 .map_err(observed_application_error)
+        })
+    }
+
+    fn fetch_topic_since(
+        &self,
+        world: SettlementWorld,
+        thread_id: String,
+        cursor: Option<auction_application::ForumTopicCursor>,
+        fixed_through_post_number: u32,
+    ) -> ApplicationFuture<'_, auction_application::ForumTopicScan> {
+        Box::pin(async move {
+            EhentaiGateway::fetch_topic_incremental(
+                self,
+                world,
+                &thread_id,
+                cursor.as_ref(),
+                fixed_through_post_number,
+            )
+            .await
+            .map_err(observed_application_error)
         })
     }
 }

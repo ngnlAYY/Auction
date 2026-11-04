@@ -258,7 +258,10 @@ pub use admin_runtime_config::{
     AdminRuntimeStoredCommand, AdminRuntimeTracingConfig, AdminRuntimeUpdateCommand,
     AdminRuntimeWorkerConfig, AdminRuntimeWorkerControlConfig, AdminRuntimeWorldConfig,
     AdminRuntimeWorldsConfig, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES, MailTemplateError,
+    WORKER_HOT_FIELD_PATHS, WORKER_RESTART_ONLY_FIELD_PATHS, WorkerDeliveryHotConfig,
+    WorkerFieldEffect, WorkerForumHotConfig, WorkerHotConfig, WorkerMailHotConfig,
     valid_allowlist_host, valid_allowlist_path_prefix, valid_listener_group,
+    worker_hot_field_effect,
 };
 pub use admin_settlement_catalog::{
     MAX_SETTLEMENT_CATALOG_OFFSET, MAX_SETTLEMENT_CATALOG_PAGE_SIZE, SettlementCatalogEntry,
@@ -325,9 +328,9 @@ pub use external_metrics::{
     ExternalMetricsEvent, ExternalMetricsObserver, ForumBudgetPhase, ForumOperation,
     ForumPmCategory, ForumPmOutcome, ForumPmPhase, ForumRequestCategory, ForumSignal,
     ForumTopicScanMeasure, ForumTopicScanMode, ForumTopicScanOutcome, ForumWorld, MailBudget,
-    MailLock, MailLockOutcome, MailOperation, MailPhase, MailRequestCategory, MailSignal,
-    MailWorld, ReplyDelayBound, ReplyDelayMethod, ReplyDelayPhase, ReplyDelaySampleOutcome,
-    WaitOutcome, noop_external_metrics_observer,
+    MailLock, MailLockOutcome, MailNoticeClass, MailOperation, MailPhase, MailRequestCategory,
+    MailSignal, MailWorld, ReplyDelayBound, ReplyDelayMethod, ReplyDelayPhase,
+    ReplyDelaySampleOutcome, WaitOutcome, noop_external_metrics_observer,
 };
 mod sent_baseline;
 mod shadow_run;
@@ -346,9 +349,10 @@ pub use forum_colors::{
     EquipmentGroup, PEERLESS_COLORS, equipment_color_decision, validate_equipment_color_rules,
 };
 pub use forum_reply::{
-    ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity, ForumCatalogPage,
-    ForumCommandOutcome, ForumCommandStart, ForumCommandStatus, ForumLotTarget, ForumReplyPhase,
-    ForumReplyStore, ForumReplyTopic, ForumTopicReader,
+    FORUM_POSTS_PER_PAGE, ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity,
+    ForumCatalogPage, ForumCommandOutcome, ForumCommandStart, ForumCommandStatus, ForumLotTarget,
+    ForumReplyPhase, ForumReplyStore, ForumReplyTopic, ForumTopicCursor, ForumTopicReader,
+    ForumTopicScan, forum_topic_fixed_page_count, forum_topic_scan_pages,
 };
 pub use forum_sync::{
     FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot, ForumCatalogLayout, ForumCredentialAvailability,
@@ -409,9 +413,10 @@ pub use mail_processing::{
     MailAuctionIntakeTransaction, MailAuctionIntakeWrite, MailAuctionItem, MailAuctionItemWrite,
     MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation,
     MailDeliveryOrigin, MailDeliveryResult, MailEquipmentAttachment, MailEquipmentFilter,
-    MailEquipmentReader, MailMessage, MailNotificationTemplate, MailProcessingAttempt,
-    MailProcessingDecision, MailProcessingError, MailProcessingFuture, MailProcessor,
-    default_accepted_qualities, mail_auction_aggregate_id, valid_notification_body,
+    MailEquipmentReader, MailMessage, MailNoticeEnqueue, MailNoticeLimit, MailNotificationTemplate,
+    MailProcessingAttempt, MailProcessingDecision, MailProcessingError, MailProcessingFuture,
+    MailProcessor, default_accepted_qualities, explanation_notice_limit, mail_auction_aggregate_id,
+    valid_notification_body,
 };
 pub use operations_alert::{
     MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES,
@@ -513,8 +518,8 @@ pub use shadow_run::{
 pub use user_mail::{
     MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssue,
     MailLoginKeyIssuer, MailLoginKeyReader, MailUserCommandKind, MailUserPort,
-    MailUserRebindCommand, MailUserRegisterCommand, MailUserRegisterWrite, MailUserResult,
-    MailUserResultCode, MailUserStore,
+    MailUserRebindCommand, MailUserRegisterCommand, MailUserRegisterWrite, MailUserRekeyCommand,
+    MailUserRekeyWrite, MailUserResult, MailUserResultCode, MailUserStore,
 };
 pub use worker_control::{
     WorkerControlCondition, WorkerControlMailProgress, WorkerControlPort, WorkerControlStatus,

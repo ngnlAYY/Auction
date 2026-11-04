@@ -17,6 +17,7 @@ pub(super) fn mail_kind_label(kind: &str) -> String {
         "delivery" => t!("admin-mail-kind-delivery"),
         "registration" => t!("admin-mail-kind-registration"),
         "rebind" => t!("admin-mail-kind-rebind"),
+        "rekey" => t!("admin-mail-kind-rekey"),
         "unknown" => t!("admin-mail-kind-unknown"),
         _ => kind.to_owned(),
     }

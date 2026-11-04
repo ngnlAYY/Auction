@@ -98,7 +98,7 @@ impl MailPollIntake {
             && valid_text(&self.world_id, 256)
             && matches!(
                 self.mail_kind.as_str(),
-                "equipment" | "bid" | "delivery" | "registration" | "rebind" | "unknown"
+                "equipment" | "bid" | "delivery" | "registration" | "rebind" | "rekey" | "unknown"
             )
             && matches!(self.status.as_str(), "accepted" | "rejected" | "failed")
             && self.content_digest != [0; 32]

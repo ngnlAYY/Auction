@@ -230,6 +230,7 @@ pub(super) fn user_request_hash(
     let operation = match kind {
         MailUserCommandKind::Register => "mail-user-register-v1",
         MailUserCommandKind::Rebind => "mail-user-rebind-v1",
+        MailUserCommandKind::Rekey => "mail-user-rekey-v1",
     };
     Ok(crate::RequestHash::from_request(
         operation,

@@ -252,7 +252,8 @@ where
                 let wait = if std::mem::take(&mut delivery_wake_pending) {
                     std::time::Duration::ZERO
                 } else {
-                    poll_delay(worker.delivery.poll_interval, worker.delivery.jitter)
+                    let delivery = worker.delivery_runtime();
+                    poll_delay(delivery.poll_interval, delivery.jitter)
                 };
                 delivery_scheduled_wake = tokio::time::Instant::now() + wait;
                 delivery_sleep.as_mut().reset(delivery_scheduled_wake);

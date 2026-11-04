@@ -21,6 +21,14 @@ pub struct MoogleMailWorkerConfig {
     pub equipment_filter: MoogleMailEquipmentFilterConfig,
     /// MoogleMail 业务通知模板；与 Admin runtime 共用同一闭集与校验，省略时使用默认英文模板。
     pub mail_templates: AdminRuntimeMailTemplatesConfig,
+    /// 是否接受 `rekey` 主题（登录 key 自助轮换）。关闭后该主题按未知邮件归档，用于回退。
+    pub rekey_enabled: bool,
+    /// 注册与轮换回信的计数窗口秒数；同一账号各主题在该窗口内最多回一封。
+    pub account_reply_window_seconds: u64,
+    /// 说明信（拒收说明、换绑结果、论坛回执）的计数窗口秒数。
+    pub explanation_mail_window_seconds: u64,
+    /// 说明信窗口内每个发件人/论坛账号的最大封数；0 表示不限制。
+    pub explanation_mail_limit: u32,
     /// MoogleMail 异常原始响应证据的本地保存策略；不由 Admin runtime 接管。
     pub diagnostics: MoogleMailDiagnosticsConfig,
     /// 可选 `.keyenv` 路径；相对路径相对于主 Worker 配置文件解析。
@@ -167,6 +175,10 @@ impl Default for MoogleMailWorkerConfig {
             start_price: None,
             equipment_filter: MoogleMailEquipmentFilterConfig::default(),
             mail_templates: AdminRuntimeMailTemplatesConfig::default(),
+            rekey_enabled: true,
+            account_reply_window_seconds: 86_400,
+            explanation_mail_window_seconds: 86_400,
+            explanation_mail_limit: 10,
             diagnostics: MoogleMailDiagnosticsConfig::default(),
             keyenv_file: None,
             endpoint: "https://hentaiverse.org".to_owned(),

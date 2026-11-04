@@ -9,6 +9,9 @@ mod draft;
 mod early_bird;
 #[path = "config/form.rs"]
 mod form;
+mod hot_fields {
+    include!("config/hot_fields.rs");
+}
 #[path = "config/model.rs"]
 mod model;
 #[path = "config/operational_fields.rs"]

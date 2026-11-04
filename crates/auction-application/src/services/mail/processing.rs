@@ -18,9 +18,10 @@ use crate::{
     MailAuctionIntakeResult, MailAuctionIntakeTransaction, MailAuctionIntakeWrite,
     MailAuctionItemWrite, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation,
     MailDeliveryOrigin, MailDeliveryResult, MailEquipmentAttachment, MailEquipmentFilter,
-    MailEquipmentReader, MailLoginKey, MailMessage, MailNotificationTemplate,
-    MailProcessingDecision, MailProcessingError, MailProcessor, MailUserCommandKind, MailUserPort,
-    MailUserRebindCommand, MailUserRegisterCommand, MailUserResultCode, StoredCommand,
+    MailEquipmentReader, MailLoginKey, MailMessage, MailNoticeClass, MailNoticeEnqueue,
+    MailNoticeLimit, MailNotificationTemplate, MailProcessingDecision, MailProcessingError,
+    MailProcessor, MailUserCommandKind, MailUserPort, MailUserRebindCommand,
+    MailUserRegisterCommand, MailUserRekeyCommand, MailUserResultCode, MailWorld, StoredCommand,
     TransactionPolicy, TransactionRunner, mail_auction_aggregate_id,
 };
 

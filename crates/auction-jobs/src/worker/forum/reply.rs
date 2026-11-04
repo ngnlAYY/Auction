@@ -80,6 +80,9 @@ pub struct ForumReplyRuntime {
     pub(crate) item_timeout: std::time::Duration,
     pub(crate) public_base_url: Option<String>,
     pub(crate) verify_post_body: bool,
+    /// 说明信预算窗口与上限，默认 24 小时 10 封；论坛回执与 MoogleMail 说明信共用计数。
+    pub(crate) mail_notice_window_seconds: u64,
+    pub(crate) mail_notice_limit: u32,
     pub(crate) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
     reply_delay: ReplyDelayEstimator,
 }
@@ -124,6 +127,8 @@ impl ForumReplyRuntime {
             item_timeout,
             public_base_url,
             verify_post_body: false,
+            mail_notice_window_seconds: 86_400,
+            mail_notice_limit: 10,
             external_metrics: auction_application::noop_external_metrics_observer(),
             reply_delay: ReplyDelayEstimator::new(
                 auction_application::noop_external_metrics_observer(),
@@ -132,6 +137,13 @@ impl ForumReplyRuntime {
     }
 
     /// 配置正常固定帖刷新的额外正文校验；未知写入始终只读核对。
+    /// 覆盖说明信预算；阈值来自 Worker 配置，仍只影响说明信，不改变命令与资产退回。
+    pub fn with_mail_notice_budget(mut self, window_seconds: u64, maximum: u32) -> Self {
+        self.mail_notice_window_seconds = window_seconds;
+        self.mail_notice_limit = maximum;
+        self
+    }
+
     pub fn with_post_body_verification(mut self, enabled: bool) -> Self {
         self.verify_post_body = enabled;
         self
@@ -168,7 +180,8 @@ pub(crate) async fn run_cycle<C>(
     runtime: &ForumReplyRuntime,
     lease_duration: std::time::Duration,
     poll_interval: std::time::Duration,
-) -> Result<(), WorkerError>
+    hot: Option<auction_application::WorkerForumHotConfig>,
+) -> Result<Option<std::time::Duration>, WorkerError>
 where
     C: auction_application::Clock + 'static,
 {
@@ -192,10 +205,23 @@ where
                 DiagnosticContext::default(),
             );
         })?;
+    // 热快照只替换批次与单项预算；与启动租约冲突时退回启动值。
+    let (batch_size, item_timeout) = hot
+        .filter(|hot| {
+            let item = std::time::Duration::from_secs(hot.item_timeout_seconds);
+            hot.batch_size > 0
+                && hot.batch_size <= MAX_BATCH_SIZE
+                && !item.is_zero()
+                && lease_duration.to_std().is_ok_and(|lease| item < lease)
+        })
+        .map(|hot| (hot.batch_size, std::time::Duration::from_secs(hot.item_timeout_seconds)))
+        .unwrap_or((runtime.batch_size, runtime.item_timeout));
     let mut seen_auctions = HashSet::new();
+    // Final 阶段本轮排定的最早下一次导入；循环据此提前唤醒，而不是等满常规轮询间隔。
+    let mut earliest_final_scan: Option<chrono::DateTime<chrono::Utc>> = None;
     let mut processed = 0_u16;
     let mut topic_failed = false;
-    while processed < runtime.batch_size && !worker.control.is_draining() {
+    while processed < batch_size && !worker.control.is_draining() {
         let available_worlds =
             [auction_domain::SettlementWorld::Main, auction_domain::SettlementWorld::Isekai]
                 .into_iter()
@@ -215,7 +241,7 @@ where
         }
         // 内容租约必须覆盖领取和远端编辑的总预算，领取响应不重置单项时限。
         let item_deadline = tokio::time::Instant::now()
-            .checked_add(runtime.item_timeout)
+            .checked_add(item_timeout)
             .ok_or(WorkerError::InvalidForumConfiguration)
             .inspect_err(|error| {
                 diagnostics::unpersisted_error(
@@ -369,7 +395,17 @@ where
             )
             .await
             {
-                Ok(Ok(())) => {}
+                Ok(Ok(next_scan_at)) => {
+                    // 只有 Final 阶段收紧的排期才提前唤醒；其他阶段保持常规轮询节奏。
+                    if topic.reply_phase == auction_application::ForumReplyPhase::Final
+                        && let Some(next_scan_at) = next_scan_at
+                    {
+                        earliest_final_scan = Some(
+                            earliest_final_scan
+                                .map_or(next_scan_at, |current| current.min(next_scan_at)),
+                        );
+                    }
+                }
                 Ok(Err(error)) => {
                     diagnostics::warn(
                         "forum_reply",
@@ -447,7 +483,11 @@ where
         };
         result?;
     }
-    if topic_failed { Err(WorkerError::ForumTopicProcessingFailed) } else { Ok(()) }
+    if topic_failed {
+        return Err(WorkerError::ForumTopicProcessingFailed);
+    }
+    Ok(earliest_final_scan
+        .map(|next_scan_at| (next_scan_at - worker.clock.now()).to_std().unwrap_or_default()))
 }
 
 async fn record_topic_failure(

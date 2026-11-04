@@ -91,6 +91,7 @@ pub(super) async fn configure_mail_poll(
             client.as_ref(),
             &credentials,
             sent_baseline_observer,
+            Arc::clone(&external_metrics),
         )?;
         let maintenance = Arc::new(auction_application::MailboxMaintenanceService::new(
             Arc::new(delivery_transport.maintenance_adapter())

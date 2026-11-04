@@ -83,17 +83,28 @@ impl DatabaseStore {
 
     /// 装配根在共享适配器前注入启动快照；不从存储层读取配置或环境。
     pub fn with_delivery_send_intervals(
-        mut self,
+        self,
         intervals: auction_application::DeliverySendIntervals,
     ) -> Result<Self, auction_application::RepositoryError> {
+        self.set_delivery_send_intervals(intervals)?;
+        Ok(self)
+    }
+
+    /// 热读取在完整候选校验后原子替换发送节奏；同一进程的 clone 立即看到新值。
+    /// 只改变发送开始的最小间距，不改变金额、资格、幂等或既有 claim。
+    pub fn set_delivery_send_intervals(
+        &self,
+        intervals: auction_application::DeliverySendIntervals,
+    ) -> Result<(), auction_application::RepositoryError> {
         if !intervals.is_valid() {
             return Err(auction_application::RepositoryError::Failed(
                 "邮件发送间隔必须位于 0 至 86400 秒".to_owned(),
             ));
         }
-        let Self::Postgres(store) = &mut self;
-        store.delivery_send_intervals = intervals;
-        Ok(self)
+        let Self::Postgres(store) = self;
+        *store.delivery_send_intervals.write().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            intervals;
+        Ok(())
     }
 
     pub const fn backend(&self) -> DatabaseBackend {

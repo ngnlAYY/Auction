@@ -276,6 +276,8 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
 mod control;
 mod forum;
 mod fulfillment;
+#[cfg(feature = "postgres")]
+mod hot;
 mod mail;
 mod metrics;
 mod operations_alert;

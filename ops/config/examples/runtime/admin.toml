@@ -96,6 +96,10 @@ register_key = "Your HV-Auction login key is ready.\n\nPlayer: {username}\n\nLog
 register_result = "Your registration could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nresolving this issue."
 # 可选：重绑结果正文，默认如下；要求 {result_code}，可选 {username}。
 rebind_result = "Your account rebind request has been processed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nunderstanding the result."
+# 可选：登录 key 轮换成功时的新 key 正文，默认如下；要求 {login_key}、{username}。
+rekey_key = "Your HV-Auction login key has been rotated.\n\nPlayer: {username}\n\nNew login key:\n{login_key}\n\nAll previous sessions have been signed out.\nKeep this key private."
+# 可选：登录 key 轮换失败正文，默认如下；要求 {result_code}，可选 {username}。
+rekey_result = "Your login key rotation request could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nSend a message with the subject \"register\" first\nif you have not registered yet.\nContact the auction operator if you need help\nunderstanding the result."
 # 可选：主世界竞得装备的货到付款正文，默认如下；要求 {item_name}、{amount}、{reference}，可选 {price_breakdown}，旧载荷的明细块为空。
 settlement_winner_equipment_cod = "Your auction item is ready to collect.\n\nItem: {item_name}\n\n{price_breakdown}Amount due (CoD): {amount} Credits\n\nCollect the attached equipment to pay the CoD\nand receive your item.\n\nReference: {reference}"
 # 可选：异世界付款载体正文，默认如下；要求 {amount}、{reference}，amount 为包含载体 Credits 的 CoD 总额。

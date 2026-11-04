@@ -17,7 +17,7 @@ pub(super) async fn claim_postgres(
         auction_observability::DatabaseTransactionOwner::DeliveryClaim,
         async {
     let pool = store.pool();
-    let intervals = serde_json::to_value(store.delivery_send_intervals)
+    let intervals = serde_json::to_value(store.delivery_send_intervals())
         .map_err(|_| repository_error_owned("delivery 发送间隔无法序列化"))?;
     let sending_grace_micros = i64::try_from(sending_grace.as_micros())
         .map_err(|_| repository_error_owned("delivery sending grace 超出数据库范围"))?;

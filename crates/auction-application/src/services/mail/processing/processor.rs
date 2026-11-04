@@ -20,15 +20,28 @@ mod routing;
 pub struct MailProcessorConfig {
     pub start_price: i64,
     pub equipment_filter: MailEquipmentFilter,
+    /// 同一账号在该窗口内最多回信一次的注册/轮换限制。
+    pub account_reply_window_seconds: u64,
+    /// 说明信（拒收、换绑结果、论坛回执）的 24 小时窗口。
+    pub explanation_window_seconds: u64,
+    /// 说明信窗口内的最大封数；0 表示不限制。
+    pub explanation_limit: u32,
+    /// 是否接受 `rekey` 主题；关闭时按未知邮件处理，用于回退。
+    pub rekey_enabled: bool,
 }
 
 /// MoogleMail 业务处理器。
-/// 拍卖、注册和换绑命令都先交给对应 owner，再通过无密文 delivery outbox 安排外部动作；
+/// 拍卖、注册、轮换和换绑命令都先交给对应 owner，再通过无密文 delivery outbox 安排外部动作；
 /// 结算退回邮件只记录可审计证据，由 Recovery/Settlement owner 后续消费。
 pub struct MailProcessorService<E, A, D, U, C> {
     world_ids: Vec<String>,
     start_price: i64,
     equipment_filter: MailEquipmentFilter,
+    account_reply_window_seconds: u64,
+    explanation_window_seconds: u64,
+    explanation_limit: u32,
+    rekey_enabled: bool,
+    metrics: Arc<dyn crate::ExternalMetricsObserver>,
     equipment: Arc<E>,
     auctions: Arc<A>,
     deliveries: Arc<D>,
@@ -75,6 +88,9 @@ where
                 .any(|(index, world_id)| world_ids[..index].contains(world_id))
             || config.start_price <= 0
             || config.equipment_filter.validate().is_err()
+            || !(60..=604_800).contains(&config.account_reply_window_seconds)
+            || !(60..=604_800).contains(&config.explanation_window_seconds)
+            || config.explanation_limit > 100
         {
             return Err(MailProcessingError::InvalidConfiguration);
         }
@@ -82,12 +98,26 @@ where
             world_ids,
             start_price: config.start_price,
             equipment_filter: config.equipment_filter,
+            account_reply_window_seconds: config.account_reply_window_seconds,
+            explanation_window_seconds: config.explanation_window_seconds,
+            explanation_limit: config.explanation_limit,
+            rekey_enabled: config.rekey_enabled,
+            metrics: crate::noop_external_metrics_observer(),
             equipment,
             auctions,
             deliveries,
             users,
             clock,
         })
+    }
+
+    /// 替换外部指标观察者；发送预算抑制事件与请求指标共用同一闭集。
+    pub fn with_external_metrics(
+        mut self,
+        metrics: Arc<dyn crate::ExternalMetricsObserver>,
+    ) -> Self {
+        self.metrics = metrics;
+        self
     }
 }
 

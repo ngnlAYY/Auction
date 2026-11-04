@@ -39,6 +39,58 @@ impl EhentaiClient {
         self.topic_page_targets_through(thread_id, maximum_offset, operation, metrics_world)
     }
 
+    /// 计算本轮的增量读取预算，并核对游标页仍包含游标帖子。
+    ///
+    /// 返回需要读取的页号（0 基）与已经单独读过的游标页偏移；游标缺失、无效、
+    /// 落在固定楼层之内，或游标页不再包含该帖子（删帖使楼层前移）时返回全部页，
+    /// 也就是回退完整扫描。
+    pub(super) async fn incremental_scan_plan(
+        &self,
+        targets: &[(u64, Url)],
+        cursor: Option<&ForumTopicCursor>,
+        fixed_through_post_number: u32,
+        read_context: &TopicPageReadContext,
+        state: IncrementalScanState<'_>,
+        operation: EhentaiOperation,
+    ) -> Result<(Vec<u32>, Option<u64>), EhentaiError> {
+        let IncrementalScanState { pages, total_bytes } = state;
+        let page_count = u32::try_from(targets.len()).map_err(|error| {
+            let _ = error;
+            EhentaiError::protocol(operation, false)
+        })?;
+        let all_pages = (0..page_count).collect::<Vec<_>>();
+        let Some(cursor) = cursor.filter(|cursor| cursor.validate().is_ok()) else {
+            return Ok((all_pages, None));
+        };
+        let fixed_page_count =
+            auction_application::forum_topic_fixed_page_count(fixed_through_post_number);
+        let selected_pages = auction_application::forum_topic_scan_pages(
+            Some(cursor.page()),
+            fixed_page_count,
+            page_count,
+        );
+        if selected_pages.len() == targets.len() {
+            return Ok((all_pages, None));
+        }
+        let Some((offset, page_target)) = targets.get(cursor.page() as usize) else {
+            return Ok((all_pages, None));
+        };
+        let (offset, page_bytes, page) =
+            read_topic_page(read_context.clone(), *offset, page_target.clone()).await?;
+        *total_bytes = total_bytes
+            .checked_add(page_bytes)
+            .filter(|total| *total <= HARD_MAXIMUM_TOPIC_BYTES)
+            .ok_or_else(|| EhentaiError::response_too_large(operation))?;
+        let cursor_page_contains_post = page.post_ids().any(|post_id| post_id == cursor.post_id);
+        let plan = confirm_incremental_pages(selected_pages, page_count, cursor_page_contains_post);
+        if !cursor_page_contains_post {
+            // 删帖或楼层前移使游标页不再包含该帖子：整场重读，绝不跳过无法证明的楼层。
+            return Ok((plan, None));
+        }
+        pages.push((offset, page));
+        Ok((plan, Some(offset)))
+    }
+
     fn topic_page_targets_through(
         &self,
         thread_id: &str,
@@ -246,6 +298,23 @@ impl EhentaiClient {
     }
 }
 
+/// 增量扫描的写入目标：已读页面与累计字节。游标页探测结果先写入这些状态，再继续并发读取。
+pub(super) struct IncrementalScanState<'a> {
+    pub pages: &'a mut Vec<(u64, ParsedHtmlPage)>,
+    pub total_bytes: &'a mut usize,
+}
+
+/// 游标页核对结果决定分页预算：只有确认该帖子仍在游标页时才跳过更早的分页。
+///
+/// 删帖、楼层前移或帖子被移动到别的页都会让核对失败，此时退回完整读取。
+fn confirm_incremental_pages(
+    selected_pages: Vec<u32>,
+    page_count: u32,
+    cursor_page_contains_post: bool,
+) -> Vec<u32> {
+    if cursor_page_contains_post { selected_pages } else { (0..page_count).collect() }
+}
+
 fn canonical_page_offset(value: &str) -> Option<u64> {
     if value == "0" {
         return Some(0);
@@ -355,5 +424,21 @@ mod tests {
         ] {
             assert!(targets(&valid.replace(old, new)).is_err(), "{new}");
         }
+    }
+}
+
+#[cfg(test)]
+mod incremental_tests {
+    use super::confirm_incremental_pages;
+
+    #[test]
+    fn confirmed_cursor_page_keeps_incremental_window() {
+        assert_eq!(confirm_incremental_pages(vec![0, 3, 4, 5], 6, true), vec![0, 3, 4, 5]);
+    }
+
+    #[test]
+    fn deleted_or_shifted_cursor_post_falls_back_to_full_scan() {
+        // 游标页不再包含该帖子：删帖、楼层前移或被移动到其他页，都必须重读全部页。
+        assert_eq!(confirm_incremental_pages(vec![0, 3, 4, 5], 6, false), vec![0, 1, 2, 3, 4, 5]);
     }
 }

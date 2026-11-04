@@ -171,6 +171,8 @@ pub(super) fn RuntimeConfigFields(
                     TemplateField { form, disabled, path: "mail_templates.register_key", label: t!("admin-runtime-template-register-key"), on_dirty: on_dirty }
                     TemplateField { form, disabled, path: "mail_templates.register_result", label: t!("admin-runtime-template-register-result"), on_dirty: on_dirty }
                     TemplateField { form, disabled, path: "mail_templates.rebind_result", label: t!("admin-runtime-template-rebind-result"), on_dirty: on_dirty }
+                    TemplateField { form, disabled, path: "mail_templates.rekey_key", label: t!("admin-runtime-template-rekey-key"), on_dirty: on_dirty }
+                    TemplateField { form, disabled, path: "mail_templates.rekey_result", label: t!("admin-runtime-template-rekey-result"), on_dirty: on_dirty }
                     TemplateField { form, disabled, path: "mail_templates.settlement_winner_equipment_cod", label: t!("admin-runtime-template-winner-cod"), on_dirty: on_dirty }
                     TemplateField { form, disabled, path: "mail_templates.settlement_payment_carrier", label: t!("admin-runtime-template-payment-carrier"), on_dirty: on_dirty }
                     TemplateField { form, disabled, path: "mail_templates.settlement_payment_reminder", label: t!("admin-runtime-template-payment-reminder"), on_dirty: on_dirty }
@@ -313,7 +315,11 @@ fn TextField(
     let value = use_memo(use_reactive((&path,), move |(path,)| form.read().input(path)));
     rsx! {
         label { class: "admin-runtime-field",
-            span { "{label}" }
+            span { "{label}"
+                if super::hot_fields::is_hot(path) {
+                    span { class: "admin-runtime-hot-badge", title: t!("admin-runtime-hot-field-title"), {t!("admin-runtime-hot-field-badge")} }
+                }
+            }
             input {
                 id: validation::field_id(path),
                 name: path,
@@ -350,7 +356,11 @@ fn NumberField(
     let error_id = format!("{}-error", validation::field_id(path));
     rsx! {
         label { class: "admin-runtime-field",
-            span { "{label}" }
+            span { "{label}"
+                if super::hot_fields::is_hot(path) {
+                    span { class: "admin-runtime-hot-badge", title: t!("admin-runtime-hot-field-title"), {t!("admin-runtime-hot-field-badge")} }
+                }
+            }
             input {
                 id: validation::field_id(path),
                 name: path,

@@ -206,6 +206,10 @@
 | W7.11 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
 | W7.8a | 已提交 | `3f0a2097` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 F）实现、Claude 监督；迁移 075 建只追加兼容登记表（001–074 缺行即 breaking，075 自身 breaking），`check.sh migration-compatibility` 检查每个新迁移恰好登记一次；`[readiness] migration_compatibility_mode` 默认 `shadow`，回退旧程序前须设为 `compatible`；本版含 breaking 迁移，部署后才能为之后的版本提供回退能力 |
 | W7.7 | 已提交 | 第一批 `5e2f455b`；第二批随本提交 | 未部署 | 执行者：Codex（第一批 gpt-6.1-sol，车道 H；第二批 DeepSeek V4.1 Flash，车道 O）实现、Claude 监督；迁移 076 只追加开关事实兼命令账本、三角色 5 秒刷新、`auction-cli switch`、Admin `/config` 只读卡片；闭集共 5 项：`readiness_audit_failure_mode`、`readiness_cache_enabled`、`metrics_sli_snapshot_enabled`（W0.13）、`mooglemail_poll_isolation_enabled`（每世界常驻维护任务 + 互斥门，在途轮次按开始时模式结束，不重写 `next_poll_at`）、`metrics_reject_forwarded_requests`（只允许在线收紧，`set false` 以 `UnsafeRelaxation` 拒绝）；W1.9 主动暂停随 M2b 复用 |
+| W1.11 | 已提交 | 随本提交 | — | 论坛导入游标来自命令账本最高 post_number/post_id；固定楼层页+游标页增量，删帖/楼层前移回退全量；Final 按最早 lot 截止收紧轮询；无迁移 |
+| W7.10 | 已提交 | 随本提交 | — | Worker 热读取发送节奏、邮件/论坛预算、超时/批量与 W1 预算/退避；完整校验后原子替换，失败保留旧值并告警；Admin 标注热字段 |
+| W9.10 | 已提交 | 随本提交 | — | `rekey` 主题轮换登录 key、注销全部会话、24h 账号回信预算；五语言模板/配置 |
+| W9.11 | 已提交 | 随本提交 | — | 说明信 10/24h 上限，超额仍退回资产但不寄说明；`auction_mooglemail_notice_suppressed_total` |
 | W1.1 | 已提交 | 随本提交 | — | 进程内 per-world 账号忙熔断 1→2→5→10 分钟；窗口内仅一次读探测，写请求在 fence 前拒绝；证据每忙碌期保留一次 |
 | W1.2 | 进行中 | 随本提交 | — | 忙碌诊断去重完成；`write_unknown` 优先淘汰尚未实现 |
 | W7.9 | 已提交 | 随本提交 | — | Public/Admin 对 Worker/Admin 改为 `Wants=`，保留 `After=` 启动顺序；systemd 模板静态门禁；合并部署仍单故障域 |

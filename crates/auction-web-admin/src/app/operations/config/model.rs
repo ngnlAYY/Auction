@@ -18,6 +18,8 @@ const TEXT_FIELDS: &[&str] = &[
     "mail_templates.auction_no_attachments",
     "mail_templates.operations_alert",
     "mail_templates.rebind_result",
+    "mail_templates.rekey_key",
+    "mail_templates.rekey_result",
     "mail_templates.register_key",
     "mail_templates.register_result",
     "mail_templates.settlement_buyer_refund",

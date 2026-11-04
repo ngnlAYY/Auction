@@ -187,6 +187,18 @@ pub(crate) fn render_notification(
                 &[("result_code", result_code), ("username", recipient)],
             )?,
         )),
+        ("rekey_key", "rekeyed") => {
+            let key = login_key?;
+            let body = key.with_encoded(|encoded| {
+                templates.render("rekey_key", &[("login_key", encoded), ("username", recipient)])
+            })?;
+            Some(("Auction login key rotated".to_owned(), body))
+        }
+        ("rekey_result", "blacklisted" | "identity_conflict" | "not_registered") => Some((
+            "Key rotation result".to_owned(),
+            templates
+                .render("rekey_result", &[("result_code", result_code), ("username", recipient)])?,
+        )),
         (
             "rebind_result",
             "rebound" | "unchanged" | "blacklisted" | "identity_conflict" | "invalid_key"

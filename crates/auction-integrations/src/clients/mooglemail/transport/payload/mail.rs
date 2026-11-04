@@ -122,6 +122,25 @@ pub(crate) fn decode_payload(
                         return Err(invalid_payload());
                     }
                 }
+                Some("rekey_key") => {
+                    if claim.origin_kind != "mail_intake"
+                        || payload.user_key_user_id.is_none()
+                        || payload.result_code.as_deref() != Some("rekeyed")
+                    {
+                        return Err(invalid_payload());
+                    }
+                }
+                Some("rekey_result") => {
+                    if claim.origin_kind != "mail_intake"
+                        || payload.user_key_user_id.is_some()
+                        || !matches!(
+                            payload.result_code.as_deref(),
+                            Some("blacklisted" | "identity_conflict" | "not_registered")
+                        )
+                    {
+                        return Err(invalid_payload());
+                    }
+                }
                 Some("rebind_result") => {
                     if claim.origin_kind != "mail_intake"
                         || payload.user_key_user_id.is_some()

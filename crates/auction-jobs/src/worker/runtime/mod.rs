@@ -66,6 +66,7 @@ mod common;
 mod config;
 mod delivery;
 mod error;
+mod hot;
 mod lifecycle;
 mod model;
 mod operations;
@@ -74,6 +75,7 @@ mod settlement;
 
 pub use config::*;
 pub use error::WorkerError;
+pub use hot::WorkerHotRuntime;
 pub use model::PersistentWorker;
 pub use runner::{run_persistent_with_settlement_until_shutdown, run_until_shutdown};
 

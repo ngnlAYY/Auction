@@ -35,10 +35,11 @@ where
         if transport_concurrency == 0 {
             return Err(WorkerError::InvalidDeliveryConfiguration);
         }
-        let effective_concurrency =
-            usize::from(worker.delivery.concurrency.min(transport_concurrency));
+        // 本轮使用边界处的完整热快照；租约、续租、宽限和并发仍来自启动配置。
+        let delivery = worker.delivery_runtime();
+        let effective_concurrency = usize::from(delivery.concurrency.min(transport_concurrency));
         let delivery_started = std::time::Instant::now();
-        let delivery_lease = ChronoDuration::from_std(worker.delivery.lease_duration)
+        let delivery_lease = ChronoDuration::from_std(delivery.lease_duration)
             .map_err(|_| WorkerError::InvalidDeliveryConfiguration)?;
         let mut delivery_count = 0usize;
         let mut delivery_result = WorkerResult::Success;
@@ -50,7 +51,7 @@ where
 
         while !worker.control.is_draining() {
             if (tasks.len() >= effective_concurrency
-                || delivery_count >= usize::from(worker.delivery.batch_limit))
+                || delivery_count >= usize::from(delivery.batch_limit))
                 && let Some(result) = tasks.join_next().await
             {
                 merge_delivery_task_result(
@@ -62,14 +63,12 @@ where
                 );
             }
 
-            if worker.control.is_draining()
-                || delivery_count >= usize::from(worker.delivery.batch_limit)
-            {
+            if worker.control.is_draining() || delivery_count >= usize::from(delivery.batch_limit) {
                 break;
             }
 
             // 领取可能已提交但回执丢失；本地只等待原 lease，不主动释放未知结果。
-            let claim_deadline = tokio::time::Instant::now() + worker.delivery.lease_duration;
+            let claim_deadline = tokio::time::Instant::now() + delivery.lease_duration;
             let now = worker.clock.now();
             let Some(lease_until) = now.checked_add_signed(delivery_lease) else {
                 claim_error = Some(ApplicationError::Repository(
@@ -87,7 +86,7 @@ where
                         worker.worker_id.clone(),
                         now,
                         lease_until,
-                        worker.delivery.sending_grace,
+                        delivery.sending_grace,
                         DeliveryClaimExclusions {
                             unavailable_worlds: unavailable_worlds.iter().cloned().collect(),
                             unavailable_send_worlds: unavailable_send_worlds
@@ -160,7 +159,7 @@ where
             }
             if !delivery_transport.available(&claim) {
                 let release = tokio::time::timeout(
-                    worker.delivery.finalize_timeout,
+                    delivery.finalize_timeout,
                     delivery_store.release(claim.clone(), worker.clock.now()),
                 )
                 .await;
@@ -220,7 +219,7 @@ where
             let store = Arc::clone(delivery_store);
             let transport = Arc::clone(delivery_transport);
             let clock = Arc::clone(&worker.clock);
-            let config = worker.delivery;
+            let config = delivery;
             let control = worker.control.clone();
             let panic_store = Arc::clone(&store);
             let panic_clock = Arc::clone(&clock);
@@ -272,7 +271,7 @@ where
             worker.metrics.observe_batch(
                 WorkerLoop::Delivery,
                 delivery_count,
-                usize::from(worker.delivery.batch_limit),
+                usize::from(delivery.batch_limit),
             );
         }
         if claim_error.is_some() {

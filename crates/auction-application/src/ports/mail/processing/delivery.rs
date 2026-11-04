@@ -55,6 +55,8 @@ pub enum MailNotificationTemplate {
     RegisterKey,
     RegisterResult,
     RebindResult,
+    RekeyKey,
+    RekeyResult,
     ForumAuctionNotice,
     RecoveryPaymentReminder,
     OperationsAlert,
@@ -72,6 +74,8 @@ impl MailNotificationTemplate {
             Self::RegisterKey => "register_key",
             Self::RegisterResult => "register_result",
             Self::RebindResult => "rebind_result",
+            Self::RekeyKey => "rekey_key",
+            Self::RekeyResult => "rekey_result",
             Self::ForumAuctionNotice => "forum_auction_notice",
             Self::RecoveryPaymentReminder => "recovery_payment_reminder",
             Self::OperationsAlert => "operations_alert",
@@ -121,6 +125,53 @@ pub struct MailDeliveryResult {
     pub delivery_id: Uuid,
 }
 
+/// 说明信模板闭集（决策 63）：拒收说明、换绑结果与论坛回执共用同一发件人预算。
+pub const EXPLANATION_NOTICE_TEMPLATES: &[&str] = &[
+    "auction_assets_rejected",
+    "auction_no_attachments",
+    "auction_equipment_rejected",
+    "user_assets_rejected",
+    "rebind_result",
+    "forum_auction_notice",
+];
+
+/// 按发件人窗口建立说明信预算；`window_seconds` 由调用方按配置校验后传入。
+pub fn explanation_notice_limit(
+    window_seconds: u64,
+    maximum: u32,
+    now: DateTime<Utc>,
+) -> MailNoticeLimit {
+    let seconds = i64::try_from(window_seconds).unwrap_or(604_800).clamp(60, 604_800);
+    MailNoticeLimit {
+        templates: EXPLANATION_NOTICE_TEMPLATES,
+        since: now - chrono::Duration::seconds(seconds),
+        maximum,
+    }
+}
+
+/// 回信预算：在 `since` 之后该收件人已入队的 `templates` 数量达到 `maximum` 时不再入队。
+/// 模板集合由应用层决定；storage 只按 payload 中冻结的模板名计数，因此不复制业务策略。
+#[derive(Debug, Clone, Copy)]
+pub struct MailNoticeLimit {
+    pub templates: &'static [&'static str],
+    pub since: DateTime<Utc>,
+    /// 0 表示不限制。
+    pub maximum: u32,
+}
+
+impl MailNoticeLimit {
+    pub fn counts(self, template: MailNotificationTemplate) -> bool {
+        self.templates.contains(&template.as_str())
+    }
+}
+
+/// 受预算约束的入队结果；被抑制时不产生 delivery 行，由调用方在命令与审计中记录原因。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MailNoticeEnqueue {
+    Enqueued(MailDeliveryResult),
+    Suppressed,
+}
+
 /// recovery delivery 激活时使用的稳定身份。
 /// prepare 属于 delivery 行本身的幂等身份；activate 属于 recovery action 的第二个本地事务
 /// 边界。两者分开保存，才能在 delivery 已经进入 pending 而 action 尚未写回时安全重放。
@@ -137,6 +188,15 @@ pub struct MailDeliveryActivation {
 /// MoogleMail delivery outbox 入队端口。
 pub trait MailDeliveryEnqueuer: Send + Sync {
     fn enqueue(&self, command: MailDeliveryCommand) -> ApplicationFuture<'_, MailDeliveryResult>;
+
+    /// 在同一 Serializable 事务内先计数再入队；达到预算时返回 [`MailNoticeEnqueue::Suppressed`]。
+    /// 计数按收件人不区分 ASCII 大小写与 payload 中冻结的模板名，和入队必须同事务完成，
+    /// 避免并发入站邮件在同一窗口内一起越过上限。
+    fn enqueue_within_limit(
+        &self,
+        command: MailDeliveryCommand,
+        limit: MailNoticeLimit,
+    ) -> ApplicationFuture<'_, MailNoticeEnqueue>;
 
     /// 只读恢复旧版已准备但尚未关联 action 的同邮件投递；完整负载不符必须失败关闭。
     /// 返回 None 只表示该旧命令尚不存在，或已绑定另一次退件，调用者才能准备新轮次。

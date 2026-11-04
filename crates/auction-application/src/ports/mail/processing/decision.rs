@@ -24,7 +24,7 @@ impl MailProcessingDecision {
     pub fn validate(&self) -> Result<(), MailProcessingError> {
         if !matches!(
             self.mail_kind.as_str(),
-            "equipment" | "bid" | "delivery" | "registration" | "rebind" | "unknown"
+            "equipment" | "bid" | "delivery" | "registration" | "rebind" | "rekey" | "unknown"
         ) || !matches!(self.status.as_str(), "accepted" | "rejected" | "failed")
             || !valid_text(&self.decision_code, 256)
             || !self.metadata.is_object()

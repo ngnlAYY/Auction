@@ -217,14 +217,12 @@ impl DeliveryWorkStore for DatabaseStore {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
-                Self::Postgres(store) => start_sending_postgres(
-                    store.pool(),
-                    &_claim,
-                    _started_at,
-                    &store.delivery_send_intervals,
-                )
-                .await
-                .map_err(ApplicationError::from),
+                Self::Postgres(store) => {
+                    let intervals = store.delivery_send_intervals();
+                    start_sending_postgres(store.pool(), &_claim, _started_at, &intervals)
+                        .await
+                        .map_err(ApplicationError::from)
+                }
             }
         })
     }
@@ -246,13 +244,14 @@ impl DeliveryWorkStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
+                    let intervals = store.delivery_send_intervals();
                     cash::run(
                         store.pool(),
                         &_claim,
                         _started_at,
                         None,
                         None,
-                        &store.delivery_send_intervals,
+                        &intervals,
                         _expectation,
                     )
                     .await
@@ -273,13 +272,14 @@ impl DeliveryWorkStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
+                    let intervals = store.delivery_send_intervals();
                     cash::run(
                         store.pool(),
                         &_claim,
                         _started_at,
                         Some(_evidence),
                         Some(_deadline),
-                        &store.delivery_send_intervals,
+                        &intervals,
                         _expectation,
                     )
                     .await

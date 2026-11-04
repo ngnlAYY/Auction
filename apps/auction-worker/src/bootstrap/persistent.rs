@@ -15,6 +15,8 @@ use super::fulfillment::{
     UnavailableFulfillmentCustodyReader, UnavailableFulfillmentEvidenceReader,
 };
 #[cfg(feature = "postgres")]
+use super::hot::spawn_hot_config_watch;
+#[cfg(feature = "postgres")]
 use super::mail::configure_mail_poll;
 #[cfg(feature = "postgres")]
 use super::operations_alert::configure_operations_alert;
@@ -59,6 +61,13 @@ pub(super) async fn run_worker(
     let _runtime_switch_task = auction_process::TaskGuard::new(
         auction_jobs::start_runtime_switch_refresh(store.clone(), switches.clone()).await,
     );
+    // 启动快照来自实际生效的 Worker 配置；只有配置了 runtime 文件才启动周期热读取。
+    let hot_config =
+        auction_jobs::WorkerHotRuntime::new(auction_config::worker_hot_config(&config.worker));
+    let _hot_config_task = config
+        .runtime_config_path
+        .clone()
+        .map(|path| spawn_hot_config_watch(path, hot_config.clone(), Arc::clone(&store)));
     metrics
         .register_runtime_switch_metrics(switches.clone())
         .context("register runtime switch metrics")?;
@@ -416,6 +425,7 @@ pub(super) async fn run_worker(
                 ),
             },
             mail_polls,
+            hot: hot_config,
             forum: auction_jobs::ForumWorkerRuntimeConfig {
                 poll_interval: std::time::Duration::from_secs(
                     config.worker.forum.poll_interval_seconds,

@@ -22,6 +22,7 @@ pub(super) fn OperationalConfigFields(
     on_dirty: EventHandler<()>,
 ) -> Element {
     rsx! {
+        p { class: "admin-runtime-section-warning", {t!("admin-runtime-hot-fields-note")} }
         mail::MailFields { form, disabled, on_dirty }
         forum::ForumFields { form, disabled, on_dirty }
         economics::EconomicsFields { form, disabled, on_dirty }
