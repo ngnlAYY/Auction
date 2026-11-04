@@ -11,7 +11,8 @@ use super::{candidate_limit, storage};
 
 const PAYOUT_COUNT: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload
+        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload,
+               delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
@@ -23,6 +24,8 @@ const PAYOUT_COUNT: &str = "
         FROM window_deliveries delivery
         WHERE delivery.origin_kind='settlement'
           AND delivery.payload->>'template'='settlement_seller_payout'
+          AND public.delivery_has_frozen_sent_proof(
+              delivery.id,delivery.result_metadata,delivery.external_reference)
     )
     SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
            count(*) AS candidates,
@@ -47,7 +50,8 @@ const PAYOUT_COUNT: &str = "
 
 const PAYOUT_UNKNOWN: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload
+        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload,
+               delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
@@ -59,6 +63,8 @@ const PAYOUT_UNKNOWN: &str = "
         FROM window_deliveries delivery
         WHERE delivery.origin_kind='settlement'
           AND delivery.payload->>'template'='settlement_seller_payout'
+          AND public.delivery_has_frozen_sent_proof(
+              delivery.id,delivery.result_metadata,delivery.external_reference)
     )
     SELECT payout.world_id,count(*) AS unknown
     FROM candidates candidate
@@ -81,7 +87,8 @@ const PAYOUT_UNKNOWN: &str = "
 
 const PAYOUT_AGGREGATE: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload
+        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload,
+               delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
@@ -93,6 +100,8 @@ const PAYOUT_AGGREGATE: &str = "
         FROM window_deliveries delivery
         WHERE delivery.origin_kind='settlement'
           AND delivery.payload->>'template'='settlement_seller_payout'
+          AND public.delivery_has_frozen_sent_proof(
+              delivery.id,delivery.result_metadata,delivery.external_reference)
     )
     SELECT payout.world_id,count(*) AS samples,
            percentile_cont(0.5) WITHIN GROUP (

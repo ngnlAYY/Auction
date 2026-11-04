@@ -12,7 +12,8 @@ use super::{candidate_limit, storage};
 
 const SETTLEMENT_COUNT: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
@@ -41,7 +42,8 @@ const SETTLEMENT_COUNT: &str = "
 
 const SETTLEMENT_PAYMENT_COUNT: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
@@ -63,6 +65,8 @@ const SETTLEMENT_PAYMENT_COUNT: &str = "
               ('settlement_winner_equipment_cod','settlement_payment_carrier')
           AND obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod')
+          AND public.delivery_has_frozen_sent_proof(
+              delivery.id,delivery.result_metadata,delivery.external_reference)
     ),
     payments AS MATERIALIZED (
         SELECT obligation.auction_id,obligation.id AS obligation_id,
@@ -87,7 +91,8 @@ const SETTLEMENT_PAYMENT_COUNT: &str = "
 
 const SETTLEMENT_AGGREGATE: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
@@ -109,6 +114,8 @@ const SETTLEMENT_AGGREGATE: &str = "
               ('settlement_winner_equipment_cod','settlement_payment_carrier')
           AND obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod')
+          AND public.delivery_has_frozen_sent_proof(
+              delivery.id,delivery.result_metadata,delivery.external_reference)
     ),
     payments AS MATERIALIZED (
         SELECT obligation.auction_id,obligation.id AS obligation_id,
@@ -137,7 +144,10 @@ const SETTLEMENT_AGGREGATE: &str = "
         LEFT JOIN public.settlement_obligation_fulfillments fulfillment
           ON fulfillment.obligation_id=payment.obligation_id
         LEFT JOIN public.deliveries delivery
-          ON delivery.id=fulfillment.delivery_id AND delivery.status='succeeded'
+          ON delivery.id=fulfillment.delivery_id
+         AND delivery.status='succeeded'
+         AND public.delivery_has_frozen_sent_proof(
+             delivery.id,delivery.result_metadata,delivery.external_reference)
         GROUP BY payment.auction_id,payment.world_id,payment.settled_at,payment.obligation_id
     ),
     per_auction AS (

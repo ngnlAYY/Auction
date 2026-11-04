@@ -12,7 +12,7 @@ use super::{candidate_limit, storage};
 
 const MM_COUNT: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at
+        SELECT delivery.id,delivery.completed_at,delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
@@ -24,6 +24,8 @@ const MM_COUNT: &str = "
         FROM window_deliveries delivery
         JOIN public.lot_watch_notifications notification
           ON notification.delivery_id=delivery.id
+        WHERE public.delivery_has_frozen_sent_proof(
+            delivery.id,delivery.result_metadata,delivery.external_reference)
     )
     SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
            count(*) AS candidates,
@@ -34,7 +36,7 @@ const MM_COUNT: &str = "
 
 const MM_AGGREGATE: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at
+        SELECT delivery.id,delivery.completed_at,delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
@@ -46,6 +48,8 @@ const MM_AGGREGATE: &str = "
         FROM window_deliveries delivery
         JOIN public.lot_watch_notifications notification
           ON notification.delivery_id=delivery.id
+        WHERE public.delivery_has_frozen_sent_proof(
+            delivery.id,delivery.result_metadata,delivery.external_reference)
     )
     SELECT auction.world_id,
            CASE WHEN auction.status IN ('settling','settled','cancelled')

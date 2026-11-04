@@ -569,8 +569,9 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
 这些流程的终点和将来指标口径固定如下，均以秒为单位：
 
 - 注册/key：入站 received_at → key 回信首次获得本地成功发送证明，观察 p50/p95/p99。
-  Send 证明只认 `delivery_has_frozen_sent_proof` 的当前 attempt/binding（含人工 operator），
-  不以 `payload.external_mail_id` 的入站 MID 与出站 Sent MID 直接比较。
+  Send 证明只认 `delivery_has_frozen_sent_proof` 的当前 attempt/binding（含人工 operator）；
+  注册、拒收、结算付款、seller payout 与 MM 提醒使用同一强谓词。`payload.external_mail_id`
+  是入站 MID，不能与出站 Sent MID 直接比较。
 - 提醒：lot 有效截止减发送证明时间，观察 p01/p05 及非正余量比例。
   deadline_state 仅 provisional/final；Final 仍在竞价阶段，只有 settling/settled/cancelled
   或截止不可再延长时才为 final。D4 只使用 final；不保存或伪造发送瞬间的截止快照。
