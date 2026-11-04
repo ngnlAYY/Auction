@@ -7,6 +7,43 @@ use auction_application::diagnostics::{
 use super::*;
 use crate::worker::diagnostics;
 
+pub(in crate::worker::runtime) async fn process_recovery_action<C: Clock + 'static>(
+    store: Arc<dyn RecoveryWorkStore>,
+    delivery: Option<Arc<dyn MailDeliveryEnqueuer>>,
+    blacklister: Option<Arc<dyn RecoveryBuyerBlacklister>>,
+    clock: Arc<C>,
+    retry_delay: ChronoDuration,
+    claim: auction_application::RecoveryActionClaim,
+) -> WorkerResult {
+    match diagnostics::catch_item_panic(
+        "recovery_dispatch",
+        process_recovery_action_inner(
+            Arc::clone(&store),
+            delivery,
+            blacklister,
+            clock,
+            retry_delay,
+            claim.clone(),
+        ),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(()) => {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                store.mark_action_manual_reconcile(claim, "task_panic".to_owned()),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                _ => diagnostics::unpersisted(SafeErrorKind::TASK_PANIC),
+            }
+            WorkerResult::Error
+        }
+    }
+}
+
 #[tracing::instrument(
 
     skip_all,
@@ -18,7 +55,7 @@ use crate::worker::diagnostics;
     )
 
 )]
-pub(in crate::worker::runtime) async fn process_recovery_action<C>(
+async fn process_recovery_action_inner<C>(
     store: Arc<dyn RecoveryWorkStore>,
     delivery: Option<Arc<dyn MailDeliveryEnqueuer>>,
     blacklister: Option<Arc<dyn RecoveryBuyerBlacklister>>,

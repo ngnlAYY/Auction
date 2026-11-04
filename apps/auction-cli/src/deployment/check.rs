@@ -126,6 +126,7 @@ pub(crate) fn check(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<Depl
     let [public, admin, worker]: [AppConfig; 3] =
         configs.try_into().map_err(|_| anyhow::anyhow!("部署必须包含三个角色"))?;
 
+    permissions.warnings.extend(admin.admin_security_warnings().into_iter().map(str::to_owned));
     shared_files(&public, &admin, &worker)?;
     shared_database(&public, &admin, &worker)?;
     shared_runtime(&public, &admin, &worker)?;

@@ -489,7 +489,7 @@ fn valid_failed_reference_metadata(
 
 fn preparation_rejected(snapshot: &DeliveryAdminSnapshot) -> bool {
     snapshot.status == "failed"
-        && snapshot.failure_code.as_deref() == Some("invalid_payload")
+        && matches!(snapshot.failure_code.as_deref(), Some("invalid_payload" | "task_panic"))
         && snapshot.sending_at.is_none()
 }
 
@@ -500,7 +500,8 @@ fn valid_preparation_rejection_metadata(
 ) -> bool {
     !preparation_rejected(snapshot)
         || (metadata.get("stage").and_then(Value::as_str) == Some("preflight_blocked")
-            && metadata.get("failure_code").and_then(Value::as_str) == Some("invalid_payload")
+            && metadata.get("failure_code").and_then(Value::as_str)
+                == snapshot.failure_code.as_deref()
             && metadata.get("write_started").and_then(Value::as_bool) == Some(false)
             && metadata.get("outcome_unknown").and_then(Value::as_bool) == Some(false)
             && metadata.get("proof").is_none()

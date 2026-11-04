@@ -15,12 +15,14 @@ pub(crate) async fn login_admin_session(
         return session_unavailable();
     };
     let Some((actor, secret)) = read_admin_basic_auth(&headers) else {
+        state.security().login_failed();
         return api_error(StatusCode::UNAUTHORIZED, "invalid_credentials", "登录凭据无效")
             .into_response();
     };
     let now = Utc::now();
     match session.login(actor, secret, now).await {
         Ok(result) => {
+            state.security().login_succeeded();
             let mut response_headers = no_store_headers();
             let Ok(session_cookie) = admin_cookie(
                 ADMIN_SESSION_COOKIE,
@@ -54,7 +56,13 @@ pub(crate) async fn login_admin_session(
             (StatusCode::OK, response_headers, Json(ApiResponse::ok("登录成功", data)))
                 .into_response()
         }
-        Err(error) => map_admin_session_error(error),
+        Err(error) => {
+            let response = map_admin_session_error(error);
+            if response.status() == StatusCode::UNAUTHORIZED {
+                state.security().login_failed();
+            }
+            response
+        }
     }
 }
 

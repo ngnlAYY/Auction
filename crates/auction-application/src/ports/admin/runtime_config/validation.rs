@@ -231,7 +231,8 @@ pub(super) fn validate_security(
                 "security.trusted_proxy_cidrs 无效".to_owned(),
             ));
         };
-        if network.trunc().to_string() != *value
+        if network.prefix_len() == 0
+            || network.trunc().to_string() != *value
             || config.trusted_proxy_cidrs[..index].iter().any(|existing| existing == value)
         {
             return Err(AdminRuntimeConfigError::InvalidDocument(

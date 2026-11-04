@@ -106,6 +106,10 @@ where
                             ..Default::default()
                         },
                     );
+                    if error.is_panic() {
+                        // 没有持久失败端口的到期读取不能无限回扫同一故障项；交给常驻监管失败关闭。
+                        std::panic::resume_unwind(error.into_panic());
+                    }
                     phase_result = WorkerResult::Canceled;
                 }
             }

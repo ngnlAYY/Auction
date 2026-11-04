@@ -250,12 +250,48 @@ impl WorkerRetryKind {
     }
 }
 
+/// 工作项 panic 的固定 owner；不接受工作项 ID 或动态指标 label。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkerPanicOwner {
+    Lifecycle,
+    Settlement,
+    SlowProxy,
+    Fulfillment,
+    RecoveryAction,
+    Delivery,
+    CriticalLoop,
+}
+
+impl WorkerPanicOwner {
+    pub const ALL: [Self; 7] = [
+        Self::Lifecycle,
+        Self::Settlement,
+        Self::SlowProxy,
+        Self::Fulfillment,
+        Self::RecoveryAction,
+        Self::Delivery,
+        Self::CriticalLoop,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Lifecycle => "lifecycle",
+            Self::Settlement => "settlement",
+            Self::SlowProxy => "slow_proxy",
+            Self::Fulfillment => "fulfillment",
+            Self::RecoveryAction => "recovery_action",
+            Self::Delivery => "delivery",
+            Self::CriticalLoop => "critical_loop",
+        }
+    }
+}
+
 /// Worker 循环使用的低基数指标端口。
 /// Worker crate 只依赖这组窄操作，不知道 Prometheus 注册表和 exposition 格式；关闭指标
 /// 时使用同一接口的 no-op 实现，避免在业务循环中散落条件分支。
 pub trait WorkerRecorder: Send + Sync {
     /// 现有工作项子任务在 join 收口时观察到的 panic；不写入持久尝试次数。
-    fn observe_task_panic(&self, loop_kind: WorkerLoop);
+    fn observe_task_panic(&self, loop_kind: WorkerLoop, owner: WorkerPanicOwner);
 
     /// 没有确认对应持久失败、退避或人工处置的错误；不接收动态 label。
     fn observe_unpersisted_error(&self, loop_kind: WorkerLoop, kind: SafeErrorKind);
@@ -276,7 +312,7 @@ pub trait WorkerRecorder: Send + Sync {
 struct NoopWorkerRecorder;
 
 impl WorkerRecorder for NoopWorkerRecorder {
-    fn observe_task_panic(&self, _loop_kind: WorkerLoop) {}
+    fn observe_task_panic(&self, _loop_kind: WorkerLoop, _owner: WorkerPanicOwner) {}
 
     fn observe_unpersisted_error(&self, _loop_kind: WorkerLoop, _kind: SafeErrorKind) {}
 

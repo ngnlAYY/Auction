@@ -27,6 +27,13 @@ mod competition;
 #[cfg(feature = "postgres")]
 mod competition_audit;
 #[cfg(feature = "postgres")]
+mod consistency_inspection;
+#[cfg(feature = "postgres")]
+pub use consistency_inspection::{
+    ConsistencyCheckReport, ConsistencyInspectionError, ConsistencyInspectionReport,
+    ConsistencyViolation,
+};
+#[cfg(feature = "postgres")]
 mod equipment_loss;
 #[cfg(feature = "postgres")]
 mod intake_target;

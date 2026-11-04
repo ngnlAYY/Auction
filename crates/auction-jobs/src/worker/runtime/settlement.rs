@@ -46,7 +46,19 @@ where
         match claim.state {
             auction_application::SettlementFulfillmentState::Pending => {
                 let deadline = fulfillment_budget(&claim, clock.now());
-                match bounded_fulfillment(deadline, fulfillment_commands.prepare_next(claim, clock.now(), retry_delay)).await {
+                let Some(result) = guard_fulfillment_panic(
+                    &fulfillment_store,
+                    claim.clone(),
+                    bounded_fulfillment(
+                        deadline,
+                        fulfillment_commands.prepare_next(claim, clock.now(), retry_delay),
+                    ),
+                )
+                .await
+                else {
+                    return WorkerResult::Error;
+                };
+                match result {
                     Ok(auction_application::SettlementFulfillmentPreparationOutcome::InternallySatisfied { obligation_id }) => {
                         tracing::info!(obligation_id = %obligation_id, "settlement obligation internally satisfied");
                         return WorkerResult::Success;
@@ -101,59 +113,69 @@ DiagnosticContext { obligation_id: diagnostic_id(&obligation_id), ..Default::def
                     }
                 }
             }
-            auction_application::SettlementFulfillmentState::Prepared => match fulfillment_commands
-                .activate(claim, clock.now(), retry_delay)
+            auction_application::SettlementFulfillmentState::Prepared => {
+                let Some(result) = guard_fulfillment_panic(
+                    &fulfillment_store,
+                    claim.clone(),
+                    fulfillment_commands.activate(claim, clock.now(), retry_delay),
+                )
                 .await
-            {
-                Ok(auction_application::SettlementFulfillmentPhaseResult::Advanced(result)) => {
-                    tracing::info!(
-                        obligation_id = %result.obligation_id,
-                        delivery_id = %result.delivery_id,
-                        activate_command_id = %result.activate_command_id,
-                        "settlement fulfillment activated delivery outbox"
-                    );
-                    claim = result.next_claim;
-                }
-                Ok(auction_application::SettlementFulfillmentPhaseResult::Deferred {
-                    obligation_id,
-                    failure_code,
-                }) => {
-                    observe_fulfillment_retry(metrics.as_ref(), retry_count);
-                    tracing::info!(
-                        obligation_id = %obligation_id,
-                        failure_code,
-                        "settlement fulfillment dependency deferred before activation"
-                    );
-                    return WorkerResult::Success;
-                }
-                Ok(auction_application::SettlementFulfillmentPhaseResult::ManualReconcile {
-                    obligation_id,
-                    failure_code,
-                }) => {
-                    tracing::warn!(
-                        obligation_id = %obligation_id,
-                        failure_code,
-                        "settlement fulfillment stopped for manual reconciliation before activation"
-                    );
-                    return WorkerResult::Success;
-                }
-                Err(error) => {
-                    diagnostics::unpersisted_error(
-                        "settlement_fulfillment",
-                        "activate_delivery",
-                        error.diagnostic_kind(),
-                        DiagnosticContext {
-                            obligation_id: diagnostic_id(&obligation_id),
-                            ..Default::default()
-                        },
-                    );
-
-                    // 该错误没有对应的旧版持久化阶段结果；保留 claim 的 fencing，避免
-                    // 把存储/状态错误误分类为 delivery_unavailable。
-
+                else {
                     return WorkerResult::Error;
+                };
+                match result {
+                    Ok(auction_application::SettlementFulfillmentPhaseResult::Advanced(result)) => {
+                        tracing::info!(
+                            obligation_id = %result.obligation_id,
+                            delivery_id = %result.delivery_id,
+                            activate_command_id = %result.activate_command_id,
+                            "settlement fulfillment activated delivery outbox"
+                        );
+                        claim = result.next_claim;
+                    }
+                    Ok(auction_application::SettlementFulfillmentPhaseResult::Deferred {
+                        obligation_id,
+                        failure_code,
+                    }) => {
+                        observe_fulfillment_retry(metrics.as_ref(), retry_count);
+                        tracing::info!(
+                            obligation_id = %obligation_id,
+                            failure_code,
+                            "settlement fulfillment dependency deferred before activation"
+                        );
+                        return WorkerResult::Success;
+                    }
+                    Ok(
+                        auction_application::SettlementFulfillmentPhaseResult::ManualReconcile {
+                            obligation_id,
+                            failure_code,
+                        },
+                    ) => {
+                        tracing::warn!(
+                            obligation_id = %obligation_id,
+                            failure_code,
+                            "settlement fulfillment stopped for manual reconciliation before activation"
+                        );
+                        return WorkerResult::Success;
+                    }
+                    Err(error) => {
+                        diagnostics::unpersisted_error(
+                            "settlement_fulfillment",
+                            "activate_delivery",
+                            error.diagnostic_kind(),
+                            DiagnosticContext {
+                                obligation_id: diagnostic_id(&obligation_id),
+                                ..Default::default()
+                            },
+                        );
+
+                        // 该错误没有对应的旧版持久化阶段结果；保留 claim 的 fencing，避免
+                        // 把存储/状态错误误分类为 delivery_unavailable。
+
+                        return WorkerResult::Error;
+                    }
                 }
-            },
+            }
             auction_application::SettlementFulfillmentState::Enqueued => {
                 let observed_at = clock.now();
                 let Some(retry_at) = observed_at.checked_add_signed(retry_delay) else {
@@ -166,12 +188,19 @@ DiagnosticContext { obligation_id: diagnostic_id(&obligation_id), ..Default::def
                 };
                 let deadline = fulfillment_budget(&claim, observed_at);
                 let delivery_id = claim.delivery_id;
-                match bounded_fulfillment(
-                    deadline,
-                    fulfillment_commands.reconcile(claim, observed_at, retry_at),
+                let Some(result) = guard_fulfillment_panic(
+                    &fulfillment_store,
+                    claim.clone(),
+                    bounded_fulfillment(
+                        deadline,
+                        fulfillment_commands.reconcile(claim, observed_at, retry_at),
+                    ),
                 )
                 .await
-                {
+                else {
+                    return WorkerResult::Error;
+                };
+                match result {
                     Ok(result) => {
                         match result.status {
                             auction_application::SettlementFulfillmentReconcileStatus::Deferred => {
@@ -282,11 +311,74 @@ async fn bounded_fulfillment<T>(
     })?
 }
 
+async fn guard_fulfillment_panic<T>(
+    store: &Arc<dyn SettlementFulfillmentStore>,
+    claim: SettlementFulfillmentClaim,
+    future: impl Future<Output = Result<T, ApplicationError>>,
+) -> Option<Result<T, ApplicationError>> {
+    match diagnostics::catch_item_panic("settlement_fulfillment", future).await {
+        Ok(result) => Some(result),
+        Err(()) => {
+            // 使用当前阶段的 fence；已提交的下一阶段不能被旧 claim 覆盖。
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                store.manual_reconcile(claim, "task_panic".to_owned()),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                _ => diagnostics::unpersisted(SafeErrorKind::TASK_PANIC),
+            }
+            None
+        }
+    }
+}
+
 fn observe_fulfillment_retry(metrics: &dyn WorkerRecorder, retry_count: u32) {
     // 领取本身不增加 retry_count；只有本次 Deferred 已经把此前至少一次 release
     // 再次释放，才与旧版 ReleaseFulfillment 后的 retry 指标一致。
     if retry_count > 0 {
         metrics.observe_retry(WorkerLoop::AuctionFulfillment, WorkerRetryKind::Persisted);
+    }
+}
+
+// 结算命令幂等但 panic 原因未知；不把故障 owner 无限重新领取。
+pub(super) async fn process_settlement_claim<C: Clock + 'static>(
+    settlement_store: Arc<dyn SettlementWorkStore>,
+    settlement_commands: Arc<dyn SettlementCommandPort>,
+    clock: Arc<C>,
+    claim: SettlementWorkClaim,
+) -> WorkerResult {
+    match diagnostics::catch_item_panic(
+        "settlement",
+        process_settlement_claim_inner(
+            Arc::clone(&settlement_store),
+            settlement_commands,
+            Arc::clone(&clock),
+            claim.clone(),
+        ),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(()) => {
+            if tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                record_settlement_failure(
+                    settlement_store,
+                    clock,
+                    claim,
+                    "task_panic_terminal",
+                    "工作项 panic，停止自动执行，需人工检查后恢复".to_owned(),
+                ),
+            )
+            .await
+            .is_err()
+            {
+                diagnostics::unpersisted(SafeErrorKind::TASK_PANIC);
+            }
+            WorkerResult::Error
+        }
     }
 }
 
@@ -303,7 +395,7 @@ fn observe_fulfillment_retry(metrics: &dyn WorkerRecorder, retry_count: u32) {
     )
 
 )]
-pub(super) async fn process_settlement_claim<C>(
+async fn process_settlement_claim_inner<C>(
     settlement_store: Arc<dyn SettlementWorkStore>,
     settlement_commands: Arc<dyn SettlementCommandPort>,
     clock: Arc<C>,

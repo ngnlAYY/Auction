@@ -98,7 +98,9 @@ fn issue(draft: &SetupDraft, field: SetupField) -> Option<&'static str> {
         SetupField::DatabaseUsername | SetupField::DatabasePassword => database_text(value),
         SetupField::DatabaseName => database_text(value) && !matches!(value, "." | ".."),
         SetupField::AdminActor => !value.contains([':', '\r', '\n', '\0']),
-        SetupField::AdminSecret => value.len() >= 16 && !value.contains(['\r', '\n', '\0']),
+        SetupField::AdminSecret => {
+            value.len() >= 32 && !value.bytes().any(|byte| byte.is_ascii_control())
+        }
         SetupField::AdminConfirmation => {
             return (value != draft.value(SetupField::AdminSecret))
                 .then_some("setup-password-mismatch");

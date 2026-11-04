@@ -10,6 +10,7 @@ use crate::deployment::ConfigDir;
 
 mod create;
 mod evidence;
+mod inspection;
 pub(crate) mod profile;
 mod rebuild;
 mod target;
@@ -33,6 +34,9 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: DbCommand) -> anyhow::R
         }
         DbCommand::Inventory { database, output } => {
             evidence::inventory(config_dir, &database, &output).await
+        }
+        DbCommand::InspectConsistency { database, output } => {
+            inspection::run(config_dir, &database, &output).await
         }
         DbCommand::Rebuild {
             database,
