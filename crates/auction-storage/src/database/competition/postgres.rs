@@ -44,11 +44,23 @@ type PgTransaction = Transaction<'static, Postgres>;
 /// 回调不能自取独立连接，也不能把命令账本和竞价写入拆成两个事务。
 pub struct PostgresCompetitionTransaction {
     transaction: Option<PgTransaction>,
+    /// W14.8 通知创建指标；默认 no-op，装配根注入进程记录器。
+    notifications: std::sync::Arc<dyn auction_application::NotificationRecorder>,
 }
 
 impl PostgresCompetitionTransaction {
-    pub(crate) fn new(transaction: PgTransaction) -> Self {
-        Self { transaction: Some(transaction) }
+    pub(crate) fn new(
+        transaction: PgTransaction,
+        notifications: std::sync::Arc<dyn auction_application::NotificationRecorder>,
+    ) -> Self {
+        Self { transaction: Some(transaction), notifications }
+    }
+
+    /// 借用事务前复制共享句柄，供跨越 `transaction_mut()` 借用的观测调用使用。
+    pub(crate) fn notifications_arc(
+        &self,
+    ) -> std::sync::Arc<dyn auction_application::NotificationRecorder> {
+        std::sync::Arc::clone(&self.notifications)
     }
 
     pub(crate) async fn commit(mut self) -> Result<(), sqlx::Error> {
@@ -93,7 +105,10 @@ impl TransactionRunner for PostgresStore {
                         Ok(transaction) => transaction,
                         Err(error) => return Err(E::from(map_sql_error(error))),
                     };
-                let mut transaction = PostgresCompetitionTransaction::new(transaction);
+                let mut transaction = PostgresCompetitionTransaction::new(
+                    transaction,
+                    std::sync::Arc::clone(&self.notification_metrics),
+                );
 
                 match operation(&mut transaction).await {
                     Ok(value) => match transaction.commit().await {

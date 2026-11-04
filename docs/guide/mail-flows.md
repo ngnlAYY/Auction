@@ -86,8 +86,54 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 | `manual_seconds` | 手工及未归类邮件 |
 
 - 每类可设置发送起点的最小间隔（默认 0），跨世界共用，并与客户端请求间隔（默认 1 秒）及单账号串行叠加。
+- 出价被超提醒的有效期只到该 lot 的有效截止（含软截止延长）：截止后尚未开始发送的提醒在发送围栏前按预检退役，记为未发送失败（`lot_watch_invalidated`），不发送也不补发；论坛私信队列同样在截止后退役（`suppressed`/`source_invalid`）。已经进入发送围栏的提醒不改写结果，未知时只做人工对账。
 - 正文模板可在 `[worker.mooglemail.mail_templates]` 或 runtime 文件中定制；模板只能使用规定的占位符（如 `{login_key}`、`{amount}`、`{reference}`），未知键或非法正文在 Worker 启动时被拒绝。
 - 同一时刻只有一个 Worker 持有邮件 Cookie 的运行时所有权；对同一账号的远端写入串行执行。
+
+## 通知目录
+
+这是全部出站通知的唯一清单（W14.1）。新增或修改通知时必须同步本表、`auction_application::NotificationKind` 与 `AdminRuntimeMailTemplatesConfig`；`crates/auction-application/tests/notification_catalog.rs` 会核对三处一致。
+
+阅读约定：
+
+- **触发事实**：创建通知的持久业务事实；不是外部页面事件。
+- **渠道**：`MM` = MoogleMail；`PM` = 论坛私信。
+- **发送类别**：`delivery_send_category` 的持久分组，对应 `[worker.mooglemail.send_intervals]` 的 `*_seconds` 键。
+- **出队位置**：领取并执行发送的队列与循环。
+- **失效条件**：在 sending 围栏前允许退役或抑制的条件；进入围栏后只按未知结果人工对账，不改写已冻结载荷。
+- **模板键与冻结字段**：正文在创建时冻结；之后改模板只影响新通知。模板键之外的字段（收件人、主题、资产、引用）同样冻结并参与请求摘要。
+
+<!-- notification-catalog:start -->
+| 模板键 / 身份 | 触发事实 | 收件人 | 渠道 | 发送类别 | 出队位置 | 失效条件 | 冻结字段（正文外） |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `register_key` | `register` 命令成功（`registered`）或找回既有账号（`recovered`） | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 同账号 24 小时内已回过一封（抑制）；创建后不退役 | 收件人、主题、登录 key 引用；正文占位符 `{login_key}`、`{username}` |
+| `register_result` | `register` 命令被拒（`blacklisted`、`identity_conflict`） | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 同账号 24 小时预算（抑制） | 收件人、结果码；占位符 `{result_code}`、`{username}` |
+| `rebind_result` | `rebind` 成功或失败（key 无效、被拉黑、身份冲突） | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制） | 收件人、结果码；占位符 `{result_code}`、`{username}` |
+| `rekey_key` | `rekey` 命令轮换成功（原会话已注销） | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 同账号 24 小时预算（抑制） | 收件人、主题、登录 key 引用；占位符 `{login_key}`、`{username}` |
+| `rekey_result` | `rekey` 被拒（未注册、被拉黑、身份冲突） | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 同账号 24 小时预算（抑制） | 收件人、结果码；占位符 `{result_code}`、`{username}` |
+| `auction_assets_rejected` | 投稿邮件含 Credits、CoD 或非装备资产，整封退回 | 发件人游戏名 | MM | intake | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制）；退回动作独立执行 | 收件人、主题、退回邮件身份；正文无占位符 |
+| `auction_no_attachments` | `auction` 邮件事务内没有任何装备附件 | 发件人游戏名 | MM | intake | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制） | 收件人、主题；正文无占位符 |
+| `auction_equipment_rejected` | 装备校验失败（筛选规则、结构漂移、重复、已投递等） | 发件人游戏名 | MM | intake | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制）；退回动作独立执行 | 收件人、主题、原因码、退回邮件身份；占位符 `{reason_code}`/`{reason_text}`、`{next_steps}`、`{mail_reference}` |
+| `user_assets_rejected` | 账号类主题（`register`/`rebind`/`rekey`）携带资产 | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制）；资产照常退回 | 收件人、主题、退回邮件身份；正文无占位符 |
+| `forum_auction_notice` | 论坛回帖命令 `notify` 接受并建立稳定命令事实 | 论坛回帖者游戏名 | MM | intake | `deliveries` outbox / delivery 循环 | 与说明信共用发件人 24 小时上限（抑制）；同一 `post_id`/行/lot 只建一条命令 | 收件人、主题、lot 代码与行号；正文为冻结模板文本 |
+| `settlement_winner_equipment_cod` | 结算产生竞得装备 COD 义务并准备发送 | 买家游戏名 | MM | settlement（含装备时为 equipment） | `deliveries` outbox / delivery 循环 | 义务被取消或前置未满足（不进围栏）；未领取 COD 超过付款期限转恢复流程 | 收件人、义务 ID、装备 ID、COD 金额、结算明细；占位符 `{item_name}`、`{amount}`、`{reference}`、`{price_breakdown}` |
+| `settlement_payment_carrier` | 异世界竞得者需向 main 支付 1 Credit 载体 | 买家游戏名 | MM | settlement | `deliveries` outbox / delivery 循环 | 前置义务未完成；COD 未领取超过期限转恢复 | 收件人、义务 ID、Credits 与 COD；占位符 `{amount}`、`{reference}` |
+| `settlement_payment_reminder`（payload 身份 `recovery_payment_reminder`） | 恢复流程判定 COD 款项逾期仍未领取 | 买家游戏名（固定 main） | MM | settlement | `deliveries` outbox / delivery 循环 | 付款/领取已完成或恢复动作已终结即不再创建；已创建不重发 | 收件人、recovery 身份、原邮件 ID；占位符 `{reference}` |
+| `settlement_equipment_handoff` | 结算需要把装备交给买家（非 COD 路径） | 买家游戏名 | MM | equipment | `deliveries` outbox / delivery 循环 | 前置义务未满足；退件由恢复流程重新决定 | 收件人、义务 ID、装备 ID；占位符 `{item_name}`、`{reference}` |
+| `settlement_seller_payout` | 结算确认买方付款后向卖家支付货款 | 卖家游戏名 | MM | settlement | `deliveries` outbox / delivery 循环 | 存在前置义务或被冲正；只按冻结义务发送 | 收件人、义务 ID、金额；占位符 `{amount}`、`{reference}` |
+| `settlement_buyer_refund` | 恢复/撤拍决定退还买方 Credits | 买家游戏名 | MM | settlement | `deliveries` outbox / delivery 循环 | 前置证据不足或已完成 | 收件人、义务 ID、金额；占位符 `{amount}`、`{reference}` |
+| `lot_watch` | 竞价事务内领先者失去领先周期，且其偏好渠道为 MM | 被超玩家的游戏名 | MM | outbid | `deliveries` outbox / delivery 循环 | 取消标记、重新领先（`invalidated_at`）或 lot 有效截止已过，在围栏前退役（`lot_watch_invalidated`） | 通知 ID、lot、领先周期、被超价格、世界；正文冻结为英文模板 |
+| `lot_watch_pm` | 同一领先周期失去领先，且偏好渠道为 PM 并已绑定论坛账号 | 绑定论坛账号 | PM | ——（PM 队列自有时序） | `lot_watch_pm_deliveries` / forum PM 循环 | 未绑定论坛账号时直接 `suppressed`（`recipient_missing`）；lot 截止后 `suppressed`/`source_invalid` | 通知 ID、论坛账号 ID、标题与正文摘要 |
+| `operations_alert` | 扫描器判定需要运营处理（积压、失败、逾期、余额、证据过期等） | 配置的运营收件人 | MM | operations | `deliveries` outbox（受 `operations_alert_batches.status='enqueued'` 门禁）/ delivery 循环 | 批次被合并、冷却或取消即不再创建；同指纹去重 | 收件人、告警批次、安全摘要；占位符 `{summary}` |
+<!-- notification-catalog:end -->
+
+### 通知指标
+
+`auction_notification_events_total{kind,stage}` 按上表 `模板键 / 身份` 统计 `created`、`retired`、`suppressed`、`sent`、`failed`；`auction_notification_failures_total{kind,reason}` 细分失败原因（`send_rejected` 另立 `insufficient_postage`），`auction_notification_delivery_latency_seconds{kind}` 记录从 outbox 创建到终态的延迟，`auction_notification_postage_estimate_credits_total{kind}` 按发送次数累计估算邮资。标签全部来自闭集，不含收件人、正文或 MID。记录失败只影响观测，不改变发送、抑制、退役或人工对账结果。
+
+PM 渠道没有独立 outbox：`lot_watch_pm` 的 `created`、`suppressed`（`recipient_missing`）与 `retired`（截止后 `source_invalid`）随 `lot_watch_pm_deliveries` 的队列转迁记录；`sent` 与 `failed` 由 PM 循环在 `finish` 收口时记录，回执缺失按 `write_unknown` 计入失败。PM 领取结构不带创建时间，因此 `auction_notification_delivery_latency_seconds{kind="lot_watch_pm"}` 目前没有样本；需要 PM 延迟时先给 PM claim 增加只读 `created_at`。
+
+邮资金额仍未核实（W0.12），`auction_notification_postage_estimate_credits_total` 在核实前保持零值，只作为 W11.2 的接口；不得把零值当作“免邮资”结论。
 
 ## 资产动作证明
 

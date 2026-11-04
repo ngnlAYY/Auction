@@ -2,7 +2,10 @@
 
 use super::super::*;
 
-type MailProcessorPorts = (Arc<dyn MailProcessor>, MoogleMailDeliveryTransport);
+/// processor、delivery transport 与本进程唯一的装备来源适配器。
+/// W1.10 的 control 远端读取复用同一实例，因此 Admin 装备读取与 Worker 自身请求共用同一请求门与熔断。
+type MailProcessorPorts =
+    (Arc<dyn MailProcessor>, MoogleMailDeliveryTransport, Arc<EquipmentSourceAdapter>);
 
 // 装配根逐项注入显式依赖；参数数量来自配置/存储/外部客户端的清晰边界，不引入仅用于传参的容器。
 #[allow(clippy::too_many_arguments)]
@@ -43,6 +46,7 @@ pub(super) fn build_processor_and_delivery(
                 equipment = equipment.with_diagnostics(recorder);
             }
             let equipment = Arc::new(equipment);
+            let equipment_for_control = Arc::clone(&equipment);
             let equipment_secrets: Arc<dyn SettlementFulfillmentEquipmentSecretReader> =
                 store.clone();
             let auctions =
@@ -118,7 +122,7 @@ pub(super) fn build_processor_and_delivery(
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?
                 .with_external_metrics(external_metrics),
             );
-            Ok((processor, delivery_transport))
+            Ok((processor, delivery_transport, equipment_for_control))
         }
     }
 }

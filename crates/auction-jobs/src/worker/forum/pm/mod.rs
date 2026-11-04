@@ -22,6 +22,8 @@ pub struct LotWatchPmRuntime {
     lease_seconds: i64,
     metrics: Arc<dyn auction_observability::WorkerRecorder>,
     external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    /// W14.8 通知阶段指标；PM 渠道没有 outbox，只在终态与退役处记录。
+    notifications: Arc<dyn auction_application::NotificationRecorder>,
     write_lifecycle: auction_application::ExternalWriteLifecycle,
 }
 
@@ -54,6 +56,7 @@ impl LotWatchPmRuntime {
             lease_seconds: lease_seconds as i64,
             metrics: auction_observability::noop_worker_recorder(),
             external_metrics: auction_application::noop_external_metrics_observer(),
+            notifications: auction_application::noop_notification_recorder(),
             write_lifecycle: auction_application::ExternalWriteLifecycle::default(),
         })
     }
@@ -64,6 +67,15 @@ impl LotWatchPmRuntime {
         lifecycle: auction_application::ExternalWriteLifecycle,
     ) -> Self {
         self.write_lifecycle = lifecycle;
+        self
+    }
+
+    /// 注入 W14.8 通知指标；关闭指标时为 no-op，不改变发送与对账语义。
+    pub fn with_notifications(
+        mut self,
+        recorder: Arc<dyn auction_application::NotificationRecorder>,
+    ) -> Self {
+        self.notifications = recorder;
         self
     }
 

@@ -29,7 +29,8 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: SwitchCommand) -> anyho
             RuntimeSwitchName::ReadinessCacheEnabled
             | RuntimeSwitchName::MetricsSliSnapshotEnabled
             | RuntimeSwitchName::MooglemailPollIsolationEnabled
-            | RuntimeSwitchName::MetricsRejectForwardedRequests => value
+            | RuntimeSwitchName::MetricsRejectForwardedRequests
+            | RuntimeSwitchName::ExternalAccessPaused => value
                 .parse::<bool>()
                 .map(|value| json!(value))
                 .map_err(invalid_boolean),

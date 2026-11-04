@@ -37,6 +37,7 @@ pub(crate) async fn apply_bid(
     transaction: &mut Transaction<'_, Postgres>,
     bid: &AcceptedBid,
     occurred_at: DateTime<Utc>,
+    notifications: &dyn auction_application::NotificationRecorder,
 ) -> Result<(), CompetitionTransactionError> {
     let lot_id = bid.lot_id.as_uuid();
     let row = match lock_leadership(transaction, lot_id).await? {
@@ -77,7 +78,7 @@ pub(crate) async fn apply_bid(
     .await
     .map_err(sql_error)?;
     if let Some((user_id, cycle)) = displaced {
-        notify(transaction, bid, user_id.as_uuid(), cycle, occurred_at).await?;
+        notify(transaction, bid, user_id.as_uuid(), cycle, occurred_at, notifications).await?;
     }
     Ok(())
 }
@@ -102,6 +103,7 @@ async fn notify(
     user_id: Uuid,
     cycle: u64,
     occurred_at: DateTime<Utc>,
+    notifications: &dyn auction_application::NotificationRecorder,
 ) -> Result<(), CompetitionTransactionError> {
     let lot_id = bid.lot_id.as_uuid();
     let row = sqlx::query("SELECT watch.version, u.username, a.world_id,
@@ -145,14 +147,18 @@ async fn notify(
     )
     .map_err(|_| corrupt())?;
     // 复用 delivery owner 的 SQL、身份冲突校验与审计，不自行复制 outbox 写入。
-    let delivery =
-        crate::database::mail_delivery::enqueue_in_transaction(transaction, &command, None)
-            .await
-            .map_err(|error| match error {
-            // 40001/40P01 必须返回竞价 runner，按原预算重试整个事务而非局部入队。
-            MailDeliveryTransactionError::Sqlx(error) => sql_error(error),
-            MailDeliveryTransactionError::Rejected(_) => corrupt(),
-        })?;
+    let delivery = crate::database::mail_delivery::enqueue_in_transaction(
+        transaction,
+        &command,
+        None,
+        Some(notifications),
+    )
+    .await
+    .map_err(|error| match error {
+        // 40001/40P01 必须返回竞价 runner，按原预算重试整个事务而非局部入队。
+        MailDeliveryTransactionError::Sqlx(error) => sql_error(error),
+        MailDeliveryTransactionError::Rejected(_) => corrupt(),
+    })?;
     sqlx::query(
         "INSERT INTO public.lot_watch_notifications
         (id, user_id, lot_id, leadership_cycle, displaced_bid_id, watch_version, delivery_id,

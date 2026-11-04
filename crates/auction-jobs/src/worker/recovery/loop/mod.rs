@@ -36,6 +36,13 @@ pub(super) async fn run_loop<C>(
             if worker.control.is_draining() {
                 return;
             }
+            // W1.9：恢复流程会重新投递与核对远端邮件；暂停期间不领取新批次。
+            if worker.external_access_paused() {
+                if super::wait_while_paused(&mut shutdown).await {
+                    return;
+                }
+                continue;
+            }
             let started = std::time::Instant::now();
             let result = run_batch(worker.as_ref()).await;
             if result != WorkerResult::Success {

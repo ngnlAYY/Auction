@@ -2,7 +2,8 @@
 
 #[cfg(feature = "postgres")]
 use super::control::{
-    WorkerRuntimeTaskExit, join_worker_control_task, worker_control_server_config,
+    WorkerRemoteReads, WorkerRuntimeTaskExit, join_worker_control_task,
+    worker_control_server_config,
 };
 #[cfg(feature = "postgres")]
 use super::control::{
@@ -53,6 +54,7 @@ pub(super) async fn run_worker(
             .context("connect worker database")?
             .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
+            .with_notification_recorder(metrics.notifications())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness())
             .with_delivery_send_intervals(config.worker.mooglemail.send_intervals)
@@ -115,6 +117,7 @@ pub(super) async fn run_worker(
         mail_custody_reader,
         internal_evidence_reader,
         mail_runtime_ownership,
+        mail_control_reads,
     ) = configure_mail_poll(
         config,
         Arc::clone(&store),
@@ -225,6 +228,9 @@ pub(super) async fn run_worker(
         tracing::warn!(error = %error, "worker heartbeat starting publish failed");
     }
     let control_shutdown = Arc::new(tokio::sync::Notify::new());
+    // W1.10：只有装配了 MoogleMail 的完整档才提供远端只读能力；否则路由明确不可用。
+    let remote_reads =
+        mail_control_reads.map(|mail| WorkerRemoteReads::build(mail, switches.clone()));
     let mut control_task = if config.worker.control.enabled {
         let server_config = worker_control_server_config(config)?;
         let server = WorkerControlServer::bind_with_metrics(
@@ -234,6 +240,10 @@ pub(super) async fn run_worker(
         )
         .await
         .context("bind Worker control socket")?;
+        let server = match remote_reads {
+            Some(remote_reads) => server.with_remote_reads(remote_reads),
+            None => server,
+        };
         let shutdown = Arc::clone(&control_shutdown);
         let task_exit = WorkerRuntimeTaskExit::new(
             control.clone(),
@@ -316,6 +326,7 @@ pub(super) async fn run_worker(
     let (pm_drain, pm_receiver) = tokio::sync::watch::channel(stopping);
     let write_lifecycle_for_pm = write_lifecycle.clone();
     let metrics_for_pm = metrics.worker();
+    let notifications_for_pm = metrics.notifications();
     let mut pm_task = forum_pm.filter(|_| !stopping).map(|runtime| {
         let worker_id = worker_id.clone();
         let task_exit = WorkerRuntimeTaskExit::new(
@@ -327,6 +338,7 @@ pub(super) async fn run_worker(
             let _task_exit = task_exit;
             runtime
                 .with_metrics(metrics_for_pm)
+                .with_notifications(notifications_for_pm)
                 .with_write_lifecycle(write_lifecycle_for_pm)
                 .run(worker_id, pm_receiver)
                 .await;
@@ -441,10 +453,12 @@ pub(super) async fn run_worker(
             // 外部广播协议尚未冻结；没有具体 sink 时不启动实时消费，避免伪造转发成功。
             realtime_consumer: None,
             metrics: metrics.worker(),
+            notifications: metrics.notifications(),
             control: control.clone(),
             clock: Arc::new(SystemClock),
             worker_id,
             write_lifecycle: write_lifecycle.clone(),
+            switches: switches.clone(),
         },
         shutdown,
     );

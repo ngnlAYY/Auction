@@ -35,6 +35,13 @@ pub(crate) async fn run_loop<C>(
             if *shutdown.borrow() || worker.control.is_draining() {
                 return;
             }
+            // W1.9：暂停只阻止开始新的领取轮；已领取项与已进入围栏的写入按原路径结束。
+            if worker.external_access_paused() {
+                if super::super::wait_while_paused(&mut shutdown).await {
+                    return;
+                }
+                continue;
+            }
             // 每个循环边界只替换预算类热参数；租约与日程仍沿用启动配置。
             if !runtime.config.apply_hot(&worker.hot.snapshot().mail) {
                 diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);

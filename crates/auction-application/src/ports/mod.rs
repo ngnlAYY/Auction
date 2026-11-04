@@ -80,6 +80,7 @@ mod forum;
 #[path = "forum/profile.rs"]
 mod forum_profile;
 pub use forum_profile::*;
+mod notification_metrics;
 #[path = "settlement/evidence/mod.rs"]
 mod settlement_evidence;
 pub use settlement_evidence::*;
@@ -164,6 +165,9 @@ mod settlement_scheduler;
 mod user_mail;
 #[path = "operations/worker_control.rs"]
 mod worker_control;
+mod worker_remote_read {
+    include!("operations/worker_remote_read.rs");
+}
 
 pub use admin_auction_create::{
     AdminAuctionCreatePort, AdminAuctionCreateTransaction, AdminCreateAuctionCommand,
@@ -331,6 +335,10 @@ pub use external_metrics::{
     MailLock, MailLockOutcome, MailNoticeClass, MailOperation, MailPhase, MailRequestCategory,
     MailSignal, MailWorld, ReplyDelayBound, ReplyDelayMethod, ReplyDelayPhase,
     ReplyDelaySampleOutcome, WaitOutcome, noop_external_metrics_observer,
+};
+pub use notification_metrics::{
+    NotificationFailure, NotificationKind, NotificationRecorder, NotificationStage,
+    noop_notification_recorder,
 };
 mod sent_baseline;
 mod shadow_run;
@@ -524,6 +532,12 @@ pub use user_mail::{
 pub use worker_control::{
     WorkerControlCondition, WorkerControlMailProgress, WorkerControlPort, WorkerControlStatus,
     WorkerControlTrigger,
+};
+pub use worker_remote_read::{
+    UnavailableWorkerRemoteRead, WORKER_REMOTE_READ_TIMEOUT_SECONDS, WorkerEquipmentReadRequest,
+    WorkerEquipmentReadResponse, WorkerRemoteReadError, WorkerRemoteReadFuture,
+    WorkerRemoteReadPort, WorkerSentLookupCandidate, WorkerSentLookupRequest,
+    WorkerSentLookupResponse,
 };
 
 pub use early_bird_schedule::{

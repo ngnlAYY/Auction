@@ -13,6 +13,8 @@ pub struct PostgresStore {
     pub(crate) runtime_switches: auction_application::RuntimeSwitches,
     pub(crate) migration_compatibility_mode: auction_application::MigrationCompatibilityMode,
     pub(crate) migration_readiness_recorder: auction_observability::MigrationReadinessRecorder,
+    /// W14.8 通知生命周期观测；默认 no-op，装配根在 Worker 启动时注入进程记录器。
+    pub(crate) notification_metrics: std::sync::Arc<dyn auction_application::NotificationRecorder>,
 }
 
 #[cfg(feature = "postgres")]
@@ -35,6 +37,7 @@ impl PostgresStore {
             ),
             migration_readiness_recorder:
                 auction_observability::MigrationReadinessRecorder::default(),
+            notification_metrics: auction_application::noop_notification_recorder(),
         })
     }
 
@@ -52,6 +55,11 @@ impl PostgresStore {
     /// 当前生效的发送节奏；热读取成功后由装配根原子替换，claim 事务每次读取快照。
     pub(crate) fn delivery_send_intervals(&self) -> auction_application::DeliverySendIntervals {
         *self.delivery_send_intervals.read().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// 当前进程的通知指标记录器；关闭指标时为 no-op，不影响入队、抑制或退役结果。
+    pub(crate) fn notification_metrics(&self) -> &dyn auction_application::NotificationRecorder {
+        self.notification_metrics.as_ref()
     }
 
     pub(crate) fn raw_pool(&self) -> &PgPool {

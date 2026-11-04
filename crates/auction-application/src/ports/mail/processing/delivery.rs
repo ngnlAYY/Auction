@@ -64,6 +64,23 @@ pub enum MailNotificationTemplate {
 }
 
 impl MailNotificationTemplate {
+    /// 全部模板的稳定顺序；通知目录测试据此核对文档与模板注册一致。
+    pub const ALL: [Self; 13] = [
+        Self::AuctionAssetsRejected,
+        Self::AuctionNoAttachments,
+        Self::AuctionEquipmentRejected,
+        Self::UserAssetsRejected,
+        Self::RegisterKey,
+        Self::RegisterResult,
+        Self::RebindResult,
+        Self::RekeyKey,
+        Self::RekeyResult,
+        Self::ForumAuctionNotice,
+        Self::RecoveryPaymentReminder,
+        Self::OperationsAlert,
+        Self::LotWatch,
+    ];
+
     /// 返回稳定的模板名。
     pub const fn as_str(self) -> &'static str {
         match self {

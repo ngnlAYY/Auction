@@ -12,6 +12,7 @@ use super::*;
 use crate::worker::diagnostics;
 
 mod lease;
+mod notification;
 mod wakeup;
 use lease::DeliveryLease;
 pub(super) use wakeup::run as run_delivery_wakeup;
@@ -34,6 +35,11 @@ where
         let transport_concurrency = delivery_transport.maximum_concurrency();
         if transport_concurrency == 0 {
             return Err(WorkerError::InvalidDeliveryConfiguration);
+        }
+        // W1.9：暂停只阻止本轮开始新的领取与外部发送；已领取且越过 sending 围栏的写入
+        // 仍在各自任务中按原预算完成，这里不取消任何在途任务。
+        if worker.external_access_paused() {
+            return Ok(());
         }
         // 本轮使用边界处的完整热快照；租约、续租、宽限和并发仍来自启动配置。
         let delivery = worker.delivery_runtime();
@@ -221,6 +227,7 @@ where
             let clock = Arc::clone(&worker.clock);
             let config = delivery;
             let control = worker.control.clone();
+            let notifications = Arc::clone(&worker.notifications);
             let panic_store = Arc::clone(&store);
             let panic_clock = Arc::clone(&clock);
             let panic_claim = claim.clone();
@@ -228,7 +235,14 @@ where
                 match diagnostics::catch_item_panic(
                     "delivery",
                     activity.run(process_delivery_claim(
-                        store, transport, clock, config, control, claim, &activity,
+                        store,
+                        transport,
+                        clock,
+                        config,
+                        control,
+                        notifications,
+                        claim,
+                        &activity,
                     )),
                 )
                 .await
@@ -355,12 +369,14 @@ impl DeliveryTaskResult {
     )
 
 )]
+#[allow(clippy::too_many_arguments)]
 async fn process_delivery_claim<C>(
     delivery_store: Arc<dyn DeliveryWorkStore>,
     delivery_transport: Arc<dyn DeliveryTransport>,
     clock: Arc<C>,
     config: DeliveryWorkerRuntimeConfig,
     control: WorkerControlHandle,
+    notifications: Arc<dyn auction_application::NotificationRecorder>,
     claim: DeliveryWorkClaim,
     activity: &ExternalWriteActivity,
 ) -> DeliveryTaskResult
@@ -382,6 +398,9 @@ where
         )
         .await;
     }
+    // 通知指标只依赖冻结载荷与创建时间；在 claim 被移入各终态调用前取值。
+    let notification_kind = notification::kind_of(&claim);
+    let notification_created_at = claim.created_at;
     let mut lease = match DeliveryLease::new(&claim, clock.as_ref(), config) {
         Ok(lease) => lease,
         Err(failure_code) => {
@@ -419,12 +438,20 @@ where
         Ok(Ok(prepared)) => prepared,
         Ok(Err(error)) if error.failure_code == "invalid_payload" => {
             // 确定的本地载荷错误未执行任何写入；不能伪造 Sending，也不能永久重领坏任务。
+            let completed_at = clock.now();
             let result = tokio::time::timeout(
                 config.finalize_timeout,
-                delivery_store.reject_preparation(claim, clock.now()),
+                delivery_store.reject_preparation(claim, completed_at),
             )
             .await;
             return DeliveryTaskResult::completed(if matches!(result, Ok(Ok(()))) {
+                notification::record_failed(
+                    notifications.as_ref(),
+                    notification_kind,
+                    "invalid_payload",
+                    &serde_json::json!({"stage": "preflight_blocked"}),
+                    notification::latency(notification_created_at, completed_at),
+                );
                 WorkerResult::Success
             } else {
                 diagnostics::unpersisted(SafeErrorKind::REPOSITORY_FAILED);
@@ -563,13 +590,19 @@ where
     let result = result.and_then(normalize_delivery_send_result);
     match result {
         Ok(result) => {
+            let completed_at = clock.now();
             match tokio::time::timeout(
                 config.finalize_timeout,
-                delivery_store.succeed(claim, result, clock.now()),
+                delivery_store.succeed(claim, result, completed_at),
             )
             .await
             {
                 Ok(Ok(())) => {
+                    notification::record_sent(
+                        notifications.as_ref(),
+                        notification_kind,
+                        notification::latency(notification_created_at, completed_at),
+                    );
                     activity.complete();
                     DeliveryTaskResult::completed(if lease_failed {
                         WorkerResult::Error
@@ -614,13 +647,23 @@ where
             } else {
                 None
             };
+            let failure_code = error.failure_code.clone();
+            let failure_metadata = error.result_metadata.clone();
+            let completed_at = clock.now();
             let worker_result = match tokio::time::timeout(
                 config.finalize_timeout,
-                delivery_store.fail(claim, error, clock.now()),
+                delivery_store.fail(claim, error, completed_at),
             )
             .await
             {
                 Ok(Ok(())) => {
+                    notification::record_failed(
+                        notifications.as_ref(),
+                        notification_kind,
+                        &failure_code,
+                        &failure_metadata,
+                        notification::latency(notification_created_at, completed_at),
+                    );
                     activity.complete();
                     if lease_failed { WorkerResult::Error } else { WorkerResult::Success }
                 }

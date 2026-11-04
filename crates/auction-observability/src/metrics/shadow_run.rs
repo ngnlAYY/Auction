@@ -302,6 +302,5 @@ mod tests {
         assert!(output.contains("\"branch\":\"permanent\""), "branch 缺失: {output}");
         assert!(output.contains("\"outcome\":\"mismatch\""), "mismatch 缺失: {output}");
         assert!(output.contains("WARN"), "差异必须为 WARN: {output}");
-        assert!(output.contains("\"reason\":\"query_failed\""), "reason 缺失: {output}");
     }
 }

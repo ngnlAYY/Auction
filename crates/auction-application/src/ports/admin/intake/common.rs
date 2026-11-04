@@ -32,6 +32,8 @@ pub enum AdminIntakeError {
     SourceUnavailable,
     #[error("Admin 装备来源能力未配置")]
     SourceUnconfigured,
+    #[error("外部访问已暂停；恢复或到期后再执行装备读取")]
+    ExternalAccessPaused,
     #[error("装备 key 加密能力未配置或失败")]
     KeyUnavailable,
     #[error("Admin 装备录入命令与已有请求冲突")]

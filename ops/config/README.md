@@ -260,7 +260,7 @@ runtime 文件让运营人员在 Admin “参数配置”页修改部分参数�
 | `[equipment_colors]` | 论坛装备名标色规则；同时决定公开站点的“稀有/融合”分组（Peerless 或首条命中规则实际上色的为稀有） | 重启三角色 |
 | `[mail_templates]` | 出站邮件正文 | 重启 Worker |
 | `[[dashboard_mailboxes]]` | 仪表盘需要核对的世界与邮箱 | 重启 Admin |
-| `[equipment_source]` | Admin 手工录入时读取装备详情：允许的主机与路径、请求边界、是否要求可交易 | 重启 Admin |
+| `[equipment_source]` | Admin 手工录入策略：`require_tradeable` 仍生效；自 W1.10 起主机/路径 allowlist 与请求边界不再由 Admin 使用，装备页面读取改由 Worker 执行并沿用 Worker 的装备来源策略 | 重启 Admin |
 | `[listener]`、`[metrics]`、`[security]`、`[session]`、`[tracing]`、`[worker_control]` | Admin 自身的监听、指标 enabled、HTTP 安全、会话、tracing 与 control socket 路径；指标转发拒绝开关只在 common 文件中配置 | 重启 Admin |
 | `[operations.*]` | 接管部署参数（见下） | 见下 |
 
@@ -352,6 +352,7 @@ Worker 新路径在首次停止时关闭入口，立即取消尚未登记交接�
 | metrics_sli_snapshot_enabled | bool | Worker / metrics.sli_snapshot_enabled |
 | mooglemail_poll_isolation_enabled | bool | Worker / worker.mooglemail.poll_isolation_enabled |
 | metrics_reject_forwarded_requests | bool | 三角色 / metrics.reject_forwarded_requests |
+| external_access_paused | bool | 三角色 / 无 TOML 基线（等价 false） |
 
 优先级为最新且未过期的数据库 set → 启动时 TOML 基线。
 clear、expire、到期或未设置均回落基线；修改 TOML 不清除无期限覆盖。
@@ -361,7 +362,10 @@ clear、expire、到期或未设置均回落基线；修改 TOML 不清除无期
 审阅影子样本。切换不清零审计累计；策略版本变化立即使旧 HTTP 就绪缓存失效。
 Worker control 不使用 HTTP 就绪缓存。邮件隔离开关在 Worker 下一轮调度或维护门
 复读后生效；指标转发拒绝在每次 `/metrics` 请求边界读取，且只允许在线收紧，
-`set false` 被命令层拒绝。`migration_compatibility_mode`、排空预算与 W7.10 的
+`set false` 被命令层拒绝。`external_access_paused`（W1.9）没有基线字段：只有未到期的
+数据库 set 才暂停，clear 或到期即恢复；它阻止三角色的新外部请求，但实际拦截由 Worker
+（含经 control 代执行的 Admin 装备读取与 CLI Sent 核查）执行，详见
+[运维手册](../README.md#主动暂停外部访问w19)。`migration_compatibility_mode`、排空预算与 W7.10 的
 runtime 文件预算热读取仍不在本批范围。操作与 stale 诊断见
 [运维手册](../README.md#运行时开关)。
 

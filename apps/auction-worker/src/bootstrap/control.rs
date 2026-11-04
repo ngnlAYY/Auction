@@ -124,3 +124,138 @@ pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task
         }
     })
 }
+
+/// W1.10：Worker 侧远端只读执行器。
+/// 复用本进程唯一的装备来源适配器与按世界的 MoogleMail gateway，因此 Admin 装备读取与
+/// CLI Sent 核查和 Worker 自身请求共用同一请求门、账号熔断与 W1.9 暂停判定；
+/// 暂停只阻止新请求，已进入 sending 围栏的写入不受影响。
+#[cfg(feature = "postgres")]
+pub(super) struct WorkerRemoteReads {
+    mail: super::mail::MailControlRemoteReads,
+    switches: auction_application::RuntimeSwitches,
+}
+
+#[cfg(feature = "postgres")]
+impl WorkerRemoteReads {
+    /// 装配 control 远端读取能力；未配置 MoogleMail 时不装配，路由明确返回能力不可用。
+    pub(super) fn build(
+        mail: super::mail::MailControlRemoteReads,
+        switches: auction_application::RuntimeSwitches,
+    ) -> Arc<dyn auction_application::WorkerRemoteReadPort> {
+        Arc::new(Self { mail, switches })
+    }
+}
+
+#[cfg(feature = "postgres")]
+impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
+    fn read_equipment(
+        &self,
+        request: auction_application::WorkerEquipmentReadRequest,
+    ) -> auction_application::WorkerRemoteReadFuture<
+        '_,
+        auction_application::WorkerEquipmentReadResponse,
+    > {
+        Box::pin(async move {
+            if self.switches.external_access_paused() {
+                return Err(auction_application::WorkerRemoteReadError::Paused);
+            }
+            let snapshot = auction_application::AdminIntakeSourceReader::read_url(
+                self.mail.equipment.as_ref(),
+                request.world_id,
+                request.equipment_url,
+            )
+            .await
+            .map_err(|error| match error {
+                auction_application::ApplicationError::AdminIntake(error) => {
+                    remote_read_intake_error(error)
+                }
+                _ => auction_application::WorkerRemoteReadError::Unavailable,
+            })?;
+            auction_application::WorkerEquipmentReadResponse::from_snapshot(snapshot)
+        })
+    }
+
+    fn lookup_sent(
+        &self,
+        request: auction_application::WorkerSentLookupRequest,
+    ) -> auction_application::WorkerRemoteReadFuture<
+        '_,
+        auction_application::WorkerSentLookupResponse,
+    > {
+        Box::pin(async move {
+            if self.switches.external_access_paused() {
+                return Err(auction_application::WorkerRemoteReadError::Paused);
+            }
+            let world = MoogleMailWorld::parse(&request.world)
+                .ok_or(auction_application::WorkerRemoteReadError::Invalid)?;
+            let gateway = self
+                .mail
+                .gateways
+                .get(&world)
+                .ok_or(auction_application::WorkerRemoteReadError::Unavailable)?;
+            let report = gateway
+                .lookup_sent(MoogleMailSentLookupRequest {
+                    world,
+                    recipient: request.recipient,
+                    subject: request.subject,
+                    external_equipment_id: request.external_equipment_id,
+                    maximum_pages: self.mail.maximum_pages,
+                    deadline: std::time::Instant::now() + self.mail.fetch_timeout,
+                    observed_at: Utc::now(),
+                })
+                .await
+                .map_err(|error| match error.category {
+                    MoogleMailErrorCategory::Configuration => {
+                        auction_application::WorkerRemoteReadError::Invalid
+                    }
+                    MoogleMailErrorCategory::SentScanTimeout => {
+                        auction_application::WorkerRemoteReadError::Timeout
+                    }
+                    _ => auction_application::WorkerRemoteReadError::Unavailable,
+                })?;
+            Ok(auction_application::WorkerSentLookupResponse {
+                status: report.status.label().to_owned(),
+                scan_complete: report.scan_complete,
+                pages_scanned: u32::try_from(report.pages_scanned).unwrap_or(u32::MAX),
+                observed_at: report.observed_at,
+                candidates: report
+                    .candidates
+                    .into_iter()
+                    .map(|candidate| auction_application::WorkerSentLookupCandidate {
+                        external_mail_id: candidate.external_mail_id,
+                        recipient: candidate.recipient,
+                        subject: candidate.subject,
+                        sent_at: Some(candidate.sent_at),
+                        remaining_credits: candidate.remaining_credits,
+                        cod_pending: candidate.cod_pending,
+                        remaining_equipment_ids: candidate.remaining_equipment_ids,
+                        collected: candidate.collected,
+                        observed_at: candidate.observed_at,
+                    })
+                    .collect(),
+            })
+        })
+    }
+}
+
+#[cfg(feature = "postgres")]
+fn remote_read_intake_error(
+    error: auction_application::AdminIntakeError,
+) -> auction_application::WorkerRemoteReadError {
+    match error {
+        auction_application::AdminIntakeError::ExternalAccessPaused => {
+            auction_application::WorkerRemoteReadError::Paused
+        }
+        auction_application::AdminIntakeError::InvalidCommand
+        | auction_application::AdminIntakeError::InvalidSource => {
+            auction_application::WorkerRemoteReadError::Invalid
+        }
+        auction_application::AdminIntakeError::SourceUnavailable
+        | auction_application::AdminIntakeError::SourceUnconfigured
+        | auction_application::AdminIntakeError::KeyUnavailable
+        | auction_application::AdminIntakeError::CommandConflict
+        | auction_application::AdminIntakeError::StoredResultCorrupt => {
+            auction_application::WorkerRemoteReadError::Unavailable
+        }
+    }
+}

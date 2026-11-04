@@ -39,6 +39,13 @@ pub(crate) async fn run_loop<C>(
         if *shutdown.borrow() || worker.control.is_draining() {
             return;
         }
+        // W1.9：维护与只读观察都是外部读取；暂停期间不开始新一轮。
+        if worker.external_access_paused() {
+            if crate::worker::runtime::wait_while_paused(&mut shutdown).await {
+                return;
+            }
+            continue;
+        }
         if !runtime.config.apply_hot(&worker.hot.snapshot().mail) {
             diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
             tracing::warn!(

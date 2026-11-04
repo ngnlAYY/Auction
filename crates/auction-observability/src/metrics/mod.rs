@@ -7,6 +7,7 @@ pub use database::*;
 mod external_client;
 mod http;
 mod migration;
+mod notification;
 mod pool;
 mod process;
 mod readiness;

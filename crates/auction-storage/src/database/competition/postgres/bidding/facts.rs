@@ -8,6 +8,7 @@ pub(in crate::database::competition) async fn insert_bid(
     bid: &AcceptedBid,
     occurred_at: DateTime<Utc>,
 ) -> Result<(), CompetitionTransactionError> {
+    let notifications = std::sync::Arc::clone(&transaction.notifications_arc());
     let transaction = transaction.transaction_mut()?;
     sqlx::query(
         r#"INSERT INTO public.bids
@@ -28,7 +29,8 @@ pub(in crate::database::competition) async fn insert_bid(
     .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
-    crate::database::lot_watch::apply_bid(transaction, bid, occurred_at).await?;
+    crate::database::lot_watch::apply_bid(transaction, bid, occurred_at, notifications.as_ref())
+        .await?;
     Ok(())
 }
 

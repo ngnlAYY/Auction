@@ -56,6 +56,17 @@ pub(in crate::worker) async fn wait_until_or_shutdown(
         () = tokio::time::sleep_until(deadline) => false,
     }
 }
+/// 主动暂停期间重读开关的固定切片；所有循环共用同一节奏。
+pub(in crate::worker) const PAUSE_REREAD_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(5);
+
+/// 暂停期间的有界等待；返回 true 表示收到 drain。
+pub(in crate::worker) async fn wait_while_paused(
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+) -> bool {
+    wait_until_or_shutdown(shutdown, tokio::time::Instant::now() + PAUSE_REREAD_INTERVAL).await
+}
+
 pub(super) fn retry_delay(attempt_count: u32) -> ChronoDuration {
     let exponent = attempt_count.saturating_sub(1).min(8);
     let seconds = 5_u64.saturating_mul(1_u64 << exponent).min(15 * 60);

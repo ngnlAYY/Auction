@@ -47,6 +47,16 @@ impl DatabaseStore {
         self
     }
 
+    /// 注入 W14.8 通知指标记录器；只观测生命周期，不改变入队、抑制、退役或发送结果。
+    pub fn with_notification_recorder(
+        mut self,
+        recorder: std::sync::Arc<dyn auction_application::NotificationRecorder>,
+    ) -> Self {
+        let Self::Postgres(store) = &mut self;
+        store.notification_metrics = recorder;
+        self
+    }
+
     /// 注入同一进程共享的动态只读策略；不改变审计写入和事务重试。
     pub fn with_runtime_switches(mut self, switches: auction_application::RuntimeSwitches) -> Self {
         let Self::Postgres(store) = &mut self;

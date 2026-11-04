@@ -9,8 +9,6 @@ use auction_application::{AdminCredentialWorld, WorkerControlPort};
 use auction_cache::CacheStore;
 use auction_config::{AppConfig, CacheBackend};
 use auction_http::{AdminHttpSecurity, HttpSecurityOptions};
-#[cfg(feature = "postgres")]
-use auction_integrations::EquipmentSourcePolicy;
 use auction_jobs::WorkerControlClient;
 
 pub(super) fn configure_worker_control(config: &AppConfig) -> Option<Arc<dyn WorkerControlPort>> {
@@ -49,24 +47,6 @@ fn configured_dashboard_mailboxes(config: &AppConfig) -> impl Iterator<Item = (&
         .flatten()
         .map(|mailbox| (mailbox.world_id.as_str(), mailbox.mailbox_key.as_str()))
         .chain(worker_mailboxes.into_iter().flat_map(|mail| mail.configured_mailboxes()))
-}
-
-#[cfg(feature = "postgres")]
-pub(super) fn equipment_source_policy(config: &AppConfig) -> anyhow::Result<EquipmentSourcePolicy> {
-    let source = config
-        .admin_runtime
-        .as_ref()
-        .map(|runtime| runtime.equipment_source.clone())
-        .unwrap_or_default();
-    Ok(EquipmentSourcePolicy {
-        allowed_hosts: source.allowed_hosts,
-        allowed_path_prefixes: source.allowed_path_prefixes,
-        allowlist_enabled: source.allowlist_enabled,
-        maximum_response_bytes: usize::try_from(source.maximum_response_bytes)
-            .context("admin equipment_source response limit exceeds this platform")?,
-        minimum_request_interval: Duration::from_millis(source.minimum_request_interval_millis),
-        request_timeout: Duration::from_secs(source.request_timeout_seconds),
-    })
 }
 
 #[cfg(feature = "postgres")]

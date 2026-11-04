@@ -23,6 +23,8 @@ pub struct DeliveryWorkClaim {
     pub attempt_count: u32,
     pub worker_id: String,
     pub claimed_at: DateTime<Utc>,
+    /// outbox 创建时间；用于按通知种类记录送达延迟，不参与发送判定。
+    pub created_at: DateTime<Utc>,
 }
 
 /// 当前 delivery 领取轮次中暂不再领取的 MoogleMail 收件人。

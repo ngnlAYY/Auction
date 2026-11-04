@@ -41,8 +41,8 @@ use auction_integrations::ehentai::{
 use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailCredentialSet,
     MoogleMailDeliveryTransport, MoogleMailError, MoogleMailErrorCategory, MoogleMailGateway,
-    MoogleMailGatewayConfig, MoogleMailMessage, MoogleMailNotificationTemplates, MoogleMailWorld,
-    into_application_message,
+    MoogleMailGatewayConfig, MoogleMailMessage, MoogleMailNotificationTemplates,
+    MoogleMailSentLookupRequest, MoogleMailWorld, into_application_message,
 };
 #[cfg(feature = "postgres")]
 use auction_integrations::{

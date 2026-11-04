@@ -80,7 +80,10 @@ impl SettlementTransactionRunner for PostgresStore {
                                 )));
                             }
                         };
-                    let mut transaction = PostgresCompetitionTransaction::new(transaction);
+                    let mut transaction = PostgresCompetitionTransaction::new(
+                        transaction,
+                        std::sync::Arc::clone(&self.notification_metrics),
+                    );
 
                     match operation(&mut transaction).await {
                         Ok(value) => match transaction.commit().await {

@@ -93,6 +93,9 @@ pub(crate) fn send_receipt(
                 "stage": "send",
                 "operation": MoogleMailOperation::Send.as_str(),
                 "category": "write_rejected",
+                // 当前冻结协议只在可见页面明确出现邮资不足时判为 Rejected；显式记录原因，
+                // 供 W14.8 指标把 send_rejected 细分出 insufficient_postage。
+                "reason_code": "insufficient_postage",
             }),
         }),
     }

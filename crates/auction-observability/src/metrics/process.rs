@@ -35,6 +35,7 @@ pub struct ProcessMetrics {
     shadow: Arc<dyn auction_application::ShadowRecorder>,
     http: HttpRecorder,
     database: super::DatabaseRecorder,
+    notifications: Arc<dyn auction_application::NotificationRecorder>,
 }
 
 impl ProcessMetrics {
@@ -139,6 +140,8 @@ impl ProcessMetrics {
         registry.register(Box::new(tracing)).map_err(MetricsError::Registry)?;
 
         let business = PrometheusBusinessRecorder::build(&registry)?;
+        // W14.8 通知生命周期、失败、送达延迟与邮资估算；三角色共用同一闭集族。
+        let notifications = super::notification::build(&registry)?;
         let worker = if role == "worker" {
             PrometheusWorkerRecorder::build(&registry, Arc::clone(&business))?
         } else {
@@ -175,6 +178,7 @@ impl ProcessMetrics {
             shutdown,
             http,
             database,
+            notifications,
         })
     }
 
@@ -193,6 +197,7 @@ impl ProcessMetrics {
             shutdown: super::shutdown::noop(),
             http: HttpRecorder::default(),
             database: super::DatabaseRecorder::default(),
+            notifications: auction_application::noop_notification_recorder(),
         }
     }
 
@@ -223,6 +228,11 @@ impl ProcessMetrics {
 
     pub fn business(&self) -> Arc<dyn BusinessRecorder> {
         Arc::clone(&self.business)
+    }
+
+    /// 返回 W14.8 通知指标端口；关闭指标时为 no-op。
+    pub fn notifications(&self) -> Arc<dyn auction_application::NotificationRecorder> {
+        Arc::clone(&self.notifications)
     }
 
     /// 返回仅接受闭集身份的排空指标端口。

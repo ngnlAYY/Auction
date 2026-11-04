@@ -18,6 +18,16 @@ mod processor;
 mod runtime;
 
 #[cfg(feature = "postgres")]
+/// W1.10 远端只读所需的进程内依赖：本进程唯一的装备来源适配器、按世界的 gateway 与预算。
+/// 与 Worker 自身请求共用同一实例，因此不存在第二套限速器或熔断状态。
+pub(super) struct MailControlRemoteReads {
+    pub(super) equipment: Arc<EquipmentSourceAdapter>,
+    pub(super) gateways: HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>,
+    pub(super) maximum_pages: usize,
+    pub(super) fetch_timeout: std::time::Duration,
+}
+
+#[cfg(feature = "postgres")]
 /// 根据 Worker 配置装配 MoogleMail 轮询、业务处理、delivery 和履约证据读取端口。
 pub(super) async fn configure_mail_poll(
     config: &AppConfig,
@@ -34,10 +44,11 @@ pub(super) async fn configure_mail_poll(
     Option<Arc<dyn SettlementFulfillmentCustodyReader>>,
     Option<Arc<dyn auction_application::SettlementInternalEvidenceReader>>,
     Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
+    Option<MailControlRemoteReads>,
 )> {
     let mail_config = &config.worker.mooglemail;
     if !mail_config.enabled {
-        return Ok((Vec::new(), None, None, None, None, None));
+        return Ok((Vec::new(), None, None, None, None, None, None));
     }
 
     #[cfg(not(feature = "postgres"))]
@@ -83,16 +94,17 @@ pub(super) async fn configure_mail_poll(
             client = client.with_diagnostics(recorder);
         }
         let client = Arc::new(client.with_external_metrics(Arc::clone(&external_metrics)));
-        let (processor, delivery_transport) = processor::build_processor_and_delivery(
-            config,
-            mail_config,
-            &world_configs,
-            &store,
-            client.as_ref(),
-            &credentials,
-            sent_baseline_observer,
-            Arc::clone(&external_metrics),
-        )?;
+        let (processor, delivery_transport, equipment_source) =
+            processor::build_processor_and_delivery(
+                config,
+                mail_config,
+                &world_configs,
+                &store,
+                client.as_ref(),
+                &credentials,
+                sent_baseline_observer,
+                Arc::clone(&external_metrics),
+            )?;
         let maintenance = Arc::new(auction_application::MailboxMaintenanceService::new(
             Arc::new(delivery_transport.maintenance_adapter())
                 as Arc<dyn auction_application::MoogleMailboxMaintenance>,
@@ -136,6 +148,12 @@ pub(super) async fn configure_mail_poll(
                 .with_cash_evidence_gateway(gateway.clone())
                 .with_funding_policy_reader(store.clone()),
         );
+        let control_reads = MailControlRemoteReads {
+            equipment: equipment_source,
+            gateways: gateways.clone(),
+            maximum_pages: mail_config.maximum_pages,
+            fetch_timeout: std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
+        };
         let evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader> =
             Arc::new(MoogleMailFulfillmentEvidenceReader { gateways });
         Ok((
@@ -145,6 +163,7 @@ pub(super) async fn configure_mail_poll(
             Some(custody_reader),
             Some(gateway),
             ownership,
+            Some(control_reads),
         ))
     }
 }

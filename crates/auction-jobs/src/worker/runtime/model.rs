@@ -40,12 +40,16 @@ pub struct PersistentWorker<C> {
     pub realtime_consumer: Option<Arc<dyn RealtimeConsumerRunner>>,
     /// Worker 固定 label 的指标端口；关闭指标时由装配根注入 no-op 实现。
     pub metrics: Arc<dyn WorkerRecorder>,
+    /// W14.8 通知生命周期与送达延迟指标；关闭指标时为 no-op，不影响发送结果。
+    pub notifications: Arc<dyn auction_application::NotificationRecorder>,
     /// Worker control 的进程状态和 MoogleMail 即时唤醒器。
     pub control: WorkerControlHandle,
     pub clock: Arc<C>,
     pub worker_id: String,
     /// 仅控制进程内取消；持久状态仍由原窄端口拥有。
     pub write_lifecycle: auction_application::ExternalWriteLifecycle,
+    /// W1.9 主动暂停的共享快照；与 MoogleMail 轮询器使用同一份数据库事实。
+    pub switches: auction_application::RuntimeSwitches,
 }
 
 impl<C> PersistentWorker<C> {
@@ -58,6 +62,12 @@ impl<C> PersistentWorker<C> {
             tracing::warn!("热读取的 delivery 预算与启动租约不一致，继续使用启动配置");
             self.delivery
         }
+    }
+
+    /// W1.9 外部访问是否处于主动暂停；每次判定都重读最新事实与期限。
+    /// 暂停只阻止开始新的外部请求，已进入 sending 围栏的写入按其自身预算完成。
+    pub(crate) fn external_access_paused(&self) -> bool {
+        self.switches.external_access_paused()
     }
 
     /// 当前论坛轮询/抖动热参数；租约仍来自启动配置。

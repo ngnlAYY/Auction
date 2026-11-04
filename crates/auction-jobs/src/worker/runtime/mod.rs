@@ -79,11 +79,11 @@ pub use hot::WorkerHotRuntime;
 pub use model::PersistentWorker;
 pub use runner::{run_persistent_with_settlement_until_shutdown, run_until_shutdown};
 
-pub(super) use common::wait_until_or_shutdown;
 use common::{
     bind_worker_metric_modes, drain_delivery_tasks, drain_worker_tasks, merge_worker_result,
     poll_delay, retry_delay,
 };
+pub(super) use common::{wait_until_or_shutdown, wait_while_paused};
 use delivery::run_delivery_cycle;
 use lifecycle::process_claim;
 use operations::{OperationsAlertLoopAction, run_operations_alert_loop};

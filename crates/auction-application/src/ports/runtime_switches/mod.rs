@@ -47,16 +47,19 @@ pub enum RuntimeSwitchName {
     MooglemailPollIsolationEnabled,
     /// 指标路由拒绝携带转发痕迹的请求。
     MetricsRejectForwardedRequests,
+    /// 主动暂停全部外部访问（W1.9）；到期自动恢复。
+    ExternalAccessPaused,
 }
 
 impl RuntimeSwitchName {
     /// 本版完整名称集。
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::ReadinessAuditFailureMode,
         Self::ReadinessCacheEnabled,
         Self::MetricsSliSnapshotEnabled,
         Self::MooglemailPollIsolationEnabled,
         Self::MetricsRejectForwardedRequests,
+        Self::ExternalAccessPaused,
     ];
     /// 稳定持久名称与指标标签。
     pub const fn label(self) -> &'static str {
@@ -66,6 +69,7 @@ impl RuntimeSwitchName {
             Self::MetricsSliSnapshotEnabled => "metrics_sli_snapshot_enabled",
             Self::MooglemailPollIsolationEnabled => "mooglemail_poll_isolation_enabled",
             Self::MetricsRejectForwardedRequests => "metrics_reject_forwarded_requests",
+            Self::ExternalAccessPaused => "external_access_paused",
         }
     }
     /// 在解码值之前识别名称；未知名称不是损坏数据。
@@ -80,6 +84,8 @@ impl RuntimeSwitchName {
             Self::MetricsSliSnapshotEnabled => role == RuntimeSwitchRole::Worker,
             Self::MooglemailPollIsolationEnabled => role == RuntimeSwitchRole::Worker,
             Self::MetricsRejectForwardedRequests => true,
+            // 三角色都展示；实际拦截由 Worker 与经 Worker control 的远端读取执行。
+            Self::ExternalAccessPaused => true,
         }
     }
     /// 闭集名称绑定值类型，拒绝已知名称下的未知枚举或类型。
@@ -91,7 +97,8 @@ impl RuntimeSwitchName {
             Self::ReadinessCacheEnabled
             | Self::MetricsSliSnapshotEnabled
             | Self::MooglemailPollIsolationEnabled
-            | Self::MetricsRejectForwardedRequests => value.is_boolean(),
+            | Self::MetricsRejectForwardedRequests
+            | Self::ExternalAccessPaused => value.is_boolean(),
         }
     }
 }
