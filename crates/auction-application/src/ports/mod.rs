@@ -330,6 +330,7 @@ pub use external_metrics::{
     WaitOutcome, noop_external_metrics_observer,
 };
 mod sent_baseline;
+mod shadow_run;
 pub use delivery_admin::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
     DeliveryAdminPage, DeliveryAdminPort, DeliveryAdminResult, DeliveryAdminSnapshot,
@@ -505,6 +506,10 @@ pub use settlement_report::{
     SettlementReportReader, SettlementSummary,
 };
 pub use settlement_scheduler::{SettlementWorkClaim, SettlementWorkStore};
+pub use shadow_run::{
+    ShadowOutcome, ShadowOwner, ShadowRecorder, ShadowSample, noop_shadow_recorder,
+    record_comparison, record_sample, record_uncomparable,
+};
 pub use user_mail::{
     MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssue,
     MailLoginKeyIssuer, MailLoginKeyReader, MailUserCommandKind, MailUserPort,

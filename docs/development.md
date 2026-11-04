@@ -115,15 +115,17 @@ just test
 # 等价于：cargo test --locked --workspace --all-targets
 
 just test-db
-# 先要求 AUCTION_TEST_DATABASE_URL 非空，再执行：
-# cargo test --locked -p auction-storage --features postgres --tests -- postgres_
+# 未设置 AUCTION_TEST_DATABASE_URL 时用本机 PG18 二进制启动临时集群，再执行：
+# cargo test --locked -p auction-storage --features test-db --tests -- postgres_
 ```
 
 `just test` 使用默认 feature，运行单元测试及无需数据库的集成测试（包括本地替身）；不运行文档测试，不要求 PostgreSQL，不连接真实游戏或论坛账号。可按改动所属 owner 缩小范围，例如 `cargo test --locked -p auction-domain --lib`；交付说明写出实际命令及未覆盖范围。
 
-`just test-db` 要求预先设置 `AUCTION_TEST_DATABASE_URL`，指向隔离、可丢弃的 PostgreSQL 18 测试库；不能指向本地常驻业务库或生产库，也不能用其他数据库替代。URL 只通过环境传入，不写入文档、日志或提交的配置。测试环境变量仅服务测试夹具，不改变应用的 TOML 配置规则。涉及锁、隔离级别、幂等或迁移的断言必须在真实 PG18 上执行，夹具须校验服务器 major 为 18。
+`just test-db` 启用 `auction-storage` 的 `test-db` feature。设置 `AUCTION_TEST_DATABASE_URL` 时复用该 URL 所在服务器，只创建与删除夹具自己的模板库和测试库，不改写 URL 指向的库；未设置时依次用 `AUCTION_TEST_PG_BIN`、`PATH`、`/usr/lib/postgresql/18/bin` 的 PostgreSQL 18 二进制在临时目录启动一次性集群。URL 只通过环境传入，不写入文档、日志或提交的配置；夹具校验服务器 major 为 18。涉及锁、隔离级别、幂等或迁移的断言必须在真实 PG18 上执行。
 
-当前入口只启用已存在的 `auction-storage/postgres` feature，并用测试全名包含 `postgres_` 的过滤条件选择数据库测试；不引用尚未落地的独立测试 target 或 feature。W6.2 骨架尚未接入，因此命令可能成功但匹配 **0 项测试**，这不代表数据库覆盖、连接成功、PG18 版本核验或迁移验收；未设置 URL 时入口明确失败。W6.2 落地时须同步接入独立测试 feature 与夹具，保持 `postgres_` 命名选择契约，让数据库测试只在 `just test-db` 运行，不得让默认 `just test` 要求数据库，并落实临时集群、逐测试独立库及清理。
+夹具先在新建空库上执行全部内嵌迁移得到模板库，再由每个测试 `CREATE DATABASE ... TEMPLATE` 克隆独立库；测试库析构时执行 `DROP DATABASE ... WITH (FORCE)`，临时集群在最后一个测试释放共享句柄后停止服务并删除数据目录。`postgres_` 前缀是数据库测试的命名选择契约。
+
+当前骨架只有 `crates/auction-storage/tests/postgres_storage.rs` 的空库迁移、模板克隆与 `WorldReader` 存储端口冒烟测试；157 个存储端口与运行时 SQL 尚未逐方法覆盖，不能据此声称数据库覆盖完整。数据库测试只在 `just test-db` 运行，默认 `just test` 不要求数据库；后续按 owner 扩展时保持同一入口、临时集群与逐测试独立库。
 
 ## 数据库变更
 

@@ -27,6 +27,8 @@ url.workspace = true
 [features]
 default = []
 postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring-webpki", "dep:tokio"]
+# 可选：W6.2 PostgreSQL 18 集成测试夹具；只在 `just test-db` 启用，默认构建与 `just verify` 不运行测试。
+test-db = ["postgres"]
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

@@ -11,6 +11,7 @@ mod pool;
 mod process;
 mod readiness;
 mod sent_baseline;
+mod shadow_run;
 mod shutdown;
 pub use shutdown::{
     ShutdownCriticalKind, ShutdownOutcome, ShutdownPhase, ShutdownReason, ShutdownRecorder,
