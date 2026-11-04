@@ -138,17 +138,20 @@
 
 | 动作 | 服务的工作项 | 时间 |
 | --- | --- | --- |
-| R2：建立 bucket，按日/月备份、WAL、基础备份前缀配置生命周期规则与 bucket lock（日 30 天、月 365 天、WAL 与基础备份 21 天），签发只限该 bucket 的对象读写令牌并写入敏感 TOML | W10.2、W10.7 | M1（WAL 与基础备份前缀在 M2a） |
+| R2：建立 bucket，按日/月备份、WAL、基础备份前缀配置生命周期规则与 bucket lock（日 30 天、月 365 天、WAL 与基础备份 21 天），签发只限该 bucket 的对象读写令牌并写入敏感 TOML | W10.2、W10.7 | M1（部署前配置；异机启用需候选安装，WAL 与基础备份前缀在 M2a） |
 | 把三组数据密钥与 `age` 私钥一起离线托管（密码管理器 + 离线副本），并参加一次端到端恢复演练 | W10.2 | M1 |
 | 离线生成 `age` 密钥对：私钥存密码管理器与一份离线副本，公钥交给服务器 | W10.2 | M1 |
 | 选定心跳/Webhook 服务：建立备份与 WAL 打卡检查、Worker 心跳检查与 Public `/health/ready` 的 HTTP 检查，报到地址写入敏感配置 | W10.1、W10.7、W5.1、W5.6 | 暂缓（决策 50） |
-| 主机安装 Prometheus、node_exporter、postgres_exporter（只监听 127.0.0.1），配置 SSH 隧道查看 | W0.10 | M1 |
+| 主机安装 Prometheus、node_exporter、postgres_exporter（只监听 127.0.0.1），配置 SSH 隧道查看 | W0.10 | M1（部署前安装服务；三角色 loopback 出口在候选安装后启用） |
+| 安装并启用 `auction-backup.timer`，先执行一次手动 `backup create`/`backup verify` | W10.1 | M1（候选安装后；旧 CLI `f99a9d4e` 不含 `backup scheduled`） |
 | GitHub：建立 `main`、设为默认分支并开启分支保护（必须通过 CI）；删除已合入的旧分支，关闭 `tokio-1.54.1` 与 `tungstenite-0.30.0` 两个 dependabot PR | W7.1a | M1（已完成 2026-11-04：`main` + 保护，旧分支删除，tokio PR #10 关闭；tungstenite 已不存在） |
 | 提供 W0.12 线上只读核实所需的 SSH 与 psql 访问 | W0.12 | M1 |
 | 应用 PostgreSQL 配置片段并按 W7.5 选择窗口重启 | W10.8、W10.7 | M2a |
 | 建立运行账号并在部署时执行授权变更 | W9.9 | M3 |
 | 在 Admin“规则内容”发布五语言规则更新 | D6、W1.7、W1.11、W9.8、W9.10、W9.11、W14 的玩家可见变化 | 随对应部署 |
 | 启用 MoogleMail 运维告警时：准备 Bot 以外的 HV 角色作为告警收件人并写入配置 | W5.5、W5.8 | 暂缓（决策 58） |
+
+执行顺序约束：R2、`age`、Prometheus/exporter 服务与 `auction_metrics` 账号可在候选部署前准备；`auction-backup.timer`、三角色 loopback metrics 出口及对应验收必须等 M1 候选（含 `backup scheduled` 与 W0.10）安装后执行。线上旧 CLI `f99a9d4e` 不具备这些子命令/出口，不能在旧程序上启用新 timer 或要求出口验收。
 
 线上运维事项（不属于本计划）：`fetch_timeout_seconds` 维持现状；xilixilixi 邮件为日常交流、与拍卖无关，不重试，待 W2.5 的“确认已处置”收口。
 
