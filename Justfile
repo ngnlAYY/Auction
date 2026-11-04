@@ -12,10 +12,9 @@ verify:
 test:
     @cargo test --locked --workspace --all-targets
 
-# 显式运行 PostgreSQL 18 测试；W6.2 接入前可能匹配 0 项，不能据此声称数据库覆盖。
+# 显式运行 PostgreSQL 18 测试；设置 AUCTION_TEST_DATABASE_URL 时复用该服务器，否则用本机 PG18 二进制启动并清理临时集群。
 test-db:
-    @: "${AUCTION_TEST_DATABASE_URL:?请设置 AUCTION_TEST_DATABASE_URL，指向隔离的 PostgreSQL 18 测试库}"
-    @cargo test --locked -p auction-storage --features postgres --tests -- postgres_
+    @cargo test --locked -p auction-storage --features test-db --tests -- postgres_
 
 # 只检查 rustfmt 格式，不写文件。
 fmt:
