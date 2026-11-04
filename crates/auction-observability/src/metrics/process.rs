@@ -32,6 +32,7 @@ pub struct ProcessMetrics {
     migration_readiness: MigrationReadinessRecorder,
     sent_baseline: Arc<dyn auction_application::SentBaselineObserver>,
     external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    shadow: Arc<dyn auction_application::ShadowRecorder>,
     http: HttpRecorder,
     database: super::DatabaseRecorder,
 }
@@ -156,6 +157,8 @@ impl ProcessMetrics {
         } else {
             auction_application::noop_external_metrics_observer()
         };
+        // W0.15 影子运行框架的共享计数；三角色都预置零值，未接入 owner 时保持为空。
+        let shadow = super::shadow_run::build(&registry)?;
         let shutdown = super::shutdown::build(&registry)?;
         let http = HttpRecorder::build(&registry, role)?;
         let database = super::DatabaseRecorder::build(&registry)?;
@@ -168,6 +171,7 @@ impl ProcessMetrics {
             migration_readiness,
             sent_baseline,
             external_metrics,
+            shadow,
             shutdown,
             http,
             database,
@@ -185,6 +189,7 @@ impl ProcessMetrics {
             migration_readiness: MigrationReadinessRecorder::default(),
             sent_baseline: auction_application::noop_sent_baseline_observer(),
             external_metrics: auction_application::noop_external_metrics_observer(),
+            shadow: super::shadow_run::noop(),
             shutdown: super::shutdown::noop(),
             http: HttpRecorder::default(),
             database: super::DatabaseRecorder::default(),
@@ -238,6 +243,12 @@ impl ProcessMetrics {
     /// 返回 Worker 的发送基线局部影子记录器；其他角色及关闭指标时为 no-op。
     pub fn sent_baseline(&self) -> Arc<dyn auction_application::SentBaselineObserver> {
         Arc::clone(&self.sent_baseline)
+    }
+
+    /// 返回 W0.15 影子运行共享记录端口；关闭指标时为 no-op。
+    /// 新旧判定的裁决权属于调用点，记录器只累加样本与差异。
+    pub fn shadow(&self) -> Arc<dyn auction_application::ShadowRecorder> {
+        Arc::clone(&self.shadow)
     }
 
     /// 返回外部论坛与邮件客户端的闭集指标端口；关闭指标时为 no-op。

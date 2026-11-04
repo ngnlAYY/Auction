@@ -79,6 +79,8 @@ Public/Admin sink 不安装 Worker observer，不增加 W0.3 计数。
 | `auction_readiness_check_duration_seconds` | 实际底层 HTTP 检查耗时直方图，秒 |
 | `auction_readiness_migration_checks_total{branch}` | 实际数据库迁移检查按固定分支累计；不因 HTTP 缓存命中或合并等待者重复累计 |
 | `auction_readiness_migration_shadow_mismatch_total{class}` | 迁移 shadow 新旧判定差异；唯一预期差异为 `compatible_ahead` |
+| `auction_shadow_evaluations_total{owner,branch}` | W0.15 共享影子框架：各 owner/分支完成的可比较样本数，预置零值 |
+| `auction_shadow_mismatch_total{owner}` | W0.15 共享影子框架：新旧判定不一致样本数；切换前必须为零 |
 
 指标默认关闭；Public/Admin 业务 listener 必须是 loopback TCP 或 Unix socket。
 三个装配根可另开默认关闭的 `127.0.0.1` 指标出口，复用本进程同一注册表；
@@ -108,11 +110,43 @@ WebSocket 只在成功进入 `on_upgrade` 回调后增加当前数和累计数�
 
 `ProcessMetrics::migration_readiness` 返回可克隆记录器，三角色将其注入数据库适配器；heartbeat 与 HTTP 底层数据库检查共同累计，HTTP 缓存命中不发起新检查。`branch` 与 `class` 都是 `current`、`behind`、`ahead`、`compatible_ahead`、`incompatible_ahead`、`invalid_history`、`query_failed` 的闭集，预置零值。`ahead` 只表示 strict 模式未读取兼容登记；`query_failed` 包含本次检查的 SQL/解码失败或内部超时；被外层 HTTP 预算先取消的检查由原 HTTP timeout 指标记录，可能尚未产生迁移分支计数。
 
-只有迁移 shadow 模式出现 strict/compatible 布尔差异时增加 mismatch；预期仅 `compatible_ahead`，其他类别应为零。版本号只在结构化日志，不进入 label；metrics 关闭时记录器为 no-op，日志与失败关闭规则保持。暂沿用 W0.14 命名风格，W0.15 共享框架落地后再统一；不把同版无差异或无样本作为超前分支验收。判定及开关由[数据库契约](../../docs/contracts/database.md#迁移兼容登记与就绪)与[配置参考](../../ops/config/README.md#就绪策略)定义。
+只有迁移 shadow 模式出现 strict/compatible 布尔差异时增加 mismatch；预期仅 `compatible_ahead`，其他类别应为零。版本号只在结构化日志，不进入 label；metrics 关闭时记录器为 no-op，日志与失败关闭规则保持。本项暂沿用 W0.14 的局部命名；W0.15 共享框架（下文）已提供，迁移随后续工作项，不把同版无差异或无样本作为超前分支验收。判定及开关由[数据库契约](../../docs/contracts/database.md#迁移兼容登记与就绪)与[配置参考](../../ops/config/README.md#就绪策略)定义。
+
+### 影子运行共享框架（W0.15）
+
+改变判定口径的工作项先影子运行：旧路径继续裁决，新路径只并行计算待比较的值。共享契约在
+[`auction-application`](../auction-application/src/ports/shadow_run/mod.rs)：`ShadowOwner`
+是 owner 闭集并声明自己的判定分支，`ShadowOutcome` 为 `match/mismatch/uncomparable`，
+`ShadowRecorder` 只累加计数。调用点用 `record_comparison` 比较新旧结果，用
+`record_uncomparable` 声明没有可比证据的样本；两个 helper 都不返回可影响控制流的值。
+
+装配根从 `ProcessMetrics::shadow` 取得记录器；三角色都注册同一注册表，未接线 owner、
+关闭指标或其他角色使用 no-op，比较与日志路径保持一致。框架本身不读取配置、不执行 I/O、
+不创建后台任务，也不改变判定、重试、锁、租约或持久化；当前没有生产调用点，默认只输出
+预置零值。
+
+| 指标 | 口径 |
+| --- | --- |
+| `auction_shadow_evaluations_total{owner,branch}` | 每个分支完成的可比较样本数，包含一致与不一致；`branch` 必须已在该 owner 的闭集中登记 |
+| `auction_shadow_mismatch_total{owner}` | 新旧判定不一致的样本数；正常可比较样本必须为零，切换条件另见交付规范 |
+
+标签全部来自编译期闭集并预置零值；未登记的分支会被丢弃并输出 ERROR，不扩张 series。
+`uncomparable` 不计入 evaluations，因此不能作为“差异为零”的证据。
+
+结构化日志 target 为 `auction::shadow`，字段只有 `owner`、`branch`、`outcome` 与
+`uncomparable` 的 `reason`；差异与不可比较为 WARN，一致为 DEBUG。不得写入 MID、账号、
+正文、URL、错误原文或任何业务主键；样本量大时由调用点复用 W0.11 去重。
+
+接入新的影子 owner：在 `ShadowOwner` 增加变体并登记其分支标签；在旧路径得出裁决后调用
+`record_comparison`（不可比较时调用 `record_uncomparable`）并把 `ProcessMetrics::shadow`
+注入该 owner；观察期覆盖至少一个含 Final 与结算的完整场次周期、每个分支都有样本且差异
+为零后，由用户切换并删除旧路径。新增 owner 或分支时同步本节与
+[交付规范](../../docs/plans/architecture-improvement.md#5-每个工作项的交付规范)。回退为移除
+调用点：指标与日志是附加输出，无迁移、无持久状态。
 
 ### Sent 发送基线局部影子指标
 
-Worker 的 `ProcessMetrics::sent_baseline` 注入应用层窄观测端口；四族均按实际事件累计，scrape 不重复增加。关闭指标或其他角色得到 no-op，不影响证明、日志或失败关闭。W0.15 共享框架尚未落地，暂沿用 W0.14 的局部影子风格。
+Worker 的 `ProcessMetrics::sent_baseline` 注入应用层窄观测端口；四族均按实际事件累计，scrape 不重复增加。关闭指标或其他角色得到 no-op，不影响证明、日志或失败关闭。本切片保留局部 family；[影子运行共享框架](#影子运行共享框架w015)已提供，迁移时按 `owner/branch` 口径合并，`world` 并入 branch 标签。
 
 | 指标 | 口径 |
 | --- | --- |

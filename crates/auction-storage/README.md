@@ -10,6 +10,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 | --- | --- |
 | （默认无） | 只编译 `DatabaseBackend`、部署目标身份与错误类型；应用以“无数据库骨架”启动 |
 | `postgres` | SQLx PostgreSQL 驱动（rustls + webpki 根证书）与全部实现 |
+| `test-db` | W6.2 PostgreSQL 18 集成测试夹具（临时集群、已迁移模板库与逐测试克隆库）；只在 `just test-db` 启用 |
 
 ## 对外入口
 

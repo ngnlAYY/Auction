@@ -16,6 +16,10 @@ pub use ports::{
     SentBaselineBranch, SentBaselineEvent, SentBaselineMode, SentBaselineObserver,
     SentBaselinePhase, SentBaselineReason, noop_sent_baseline_observer,
 };
+pub use ports::{
+    ShadowOutcome, ShadowOwner, ShadowRecorder, ShadowSample, noop_shadow_recorder,
+    record_comparison, record_sample, record_uncomparable,
+};
 mod services;
 
 pub use errors::diagnostics;
