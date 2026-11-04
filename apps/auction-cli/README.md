@@ -47,7 +47,7 @@ cargo build --locked --release -p auction-cli --features postgres,cache-redis
 | `service` | `status`、`start`、`stop`、`restart` | 启停 systemd unit；start/restart 执行迁移 |
 | `db` | `status`、`migrate`、`create`、`preflight`、`inventory`、`rebuild` | migrate/create/rebuild 写入 |
 | `backup` | `create`、`verify`、`restore`、`scheduled` | restore 写数据库；scheduled 写本地备份/回执并按资格清理，可选 age 加密/R2 副本与外部打卡 |
-| `wal` | `archive`、`upload` | archive 写本地暂存（`archive_command` 入口）；upload 读暂存、写 R2 `wal/` 前缀并删除已校验副本 |
+| `wal` | `archive`、`base-backup`、`upload` | archive/base-backup 写本地暂存（`archive_command` 与每周 timer 入口）；upload 读暂存、写 R2 `wal/` 与 `base/` 前缀，按规则清理本地副本 |
 | `credential` | `list`、`import` | import 写入 |
 | `rules` | `import` | 写入 |
 | `forum` | `recovery`、`authorize-retry` | authorize-retry 写入 |
@@ -258,12 +258,16 @@ archive 命名为 `scheduled-<UTC秒时间>-<run_id>.dump`。本次新备份通�
 
 打卡读取 Worker 敏感 TOML 的 `backup_heartbeat_success_url/backup_heartbeat_failure_url`，默认空即不建客户端、不联网。外部服务目前暂缓启用，示例保持空值。启用后，在终态发布后向对应地址发送一次 HTTPS GET，禁止 userinfo、重定向、环境代理与重试；连接预算三秒、请求总预算五秒，不携带 Cookie，不读取响应正文。结果只经 `progress()` 向 stderr 输出 `sent/failed/not_configured` 和可选 HTTP 状态码，systemd 下进入 journal，不另写打卡回执，不改变备份结果与退出码。Worker 配置尚不能加载时按未配置处理；回执存储失败则记录错误并尝试一次失败打卡。
 
-### WAL 归档与上传（W10.7）
+### WAL 归档、每周基础备份与上传（W10.7）
 
 ```bash
 # PostgreSQL archive_command 入口（以 postgres 账号执行，不读敏感 TOML）
 auction-cli wal archive --staging-dir /var/lib/auction/wal-staging \
   --recipient age1<收件人公钥> /path/to/pg_wal/000000010000000000000001 000000010000000000000001
+
+# 每周物理基础备份（以 postgres 账号执行，需要 REPLICATION 权限）
+auction-cli wal base-backup --staging-dir /var/lib/auction/wal-staging \
+  --recipient age1<收件人公钥>
 
 # 独立上传器（auction 账号，systemd timer 每 5 分钟调用）
 auction-cli --config-dir /etc/auction wal upload \
@@ -272,9 +276,13 @@ auction-cli --config-dir /etc/auction wal upload \
 
 `wal archive` 的 `SOURCE`（PostgreSQL `%p`）与 `NAME`（`%f`）都是位置参数，`NAME` 必须等于 `SOURCE` 的文件名；段名只接受 24 位十六进制 WAL 段、`<8 位十六进制>.history` 与 `<24 位>.backup`。命令校验收件人公钥形状（62 字节 `age1` + bech32）、暂存目录（绝对路径、非符号链接、禁止 other 写入）与源文件（普通文件）。随后按 `zstd -q -T1 -c -- <源>` → `age --encrypt --recipient <公钥>` 的顺序压缩与加密，写入 `<段名>.zst.age` 临时文件；两个子进程都退出 0 后才 `fsync` 文件、设为 0640、改名发布，再 `fsync` 目录并写入 `<段名>.zst.age.manifest.json`（`auction-wal-archive.v1`：段名、源字节数与 mtime、密文长度、归档时刻）。任一步失败都以退出码 3 结束并清理本次临时文件，由 PostgreSQL 重试同一段；失败原因只含固定阶段与有界 stderr 文本，不含密钥。
 
-重复归档只认 manifest：同一段已有 manifest 且源字节数与 mtime 一致时输出 `already_archived` 并退出 0，不重复加密；只有密文而没有 manifest 表示上次在发布前中断，删除该密文后重新归档（PostgreSQL 从未收到成功退出）；manifest 存在而密文缺失、源内容不同或密文长度与 manifest 不符时失败关闭，不覆盖既有证据。`wal upload` 读取 Worker 配置，`[backup.offsite] enabled = false` 时输出 `outcome = skipped` 并退出 0；否则在暂存目录内取 `wal-upload.lock` 互斥锁，按段名顺序把 `<段名>.zst.age` 上传到 `<prefix>/wal/<段名>.zst.age`。远端已有相同长度与完整 SHA-256 的对象记 `already_present`（bucket lock 下重传返回 409），校验通过后删除本地密文与 manifest 并 `fsync` 目录；失败、冲突或预算耗尽保留本地文件并以退出码 3 结束。stdout 报告含 `uploaded/already_present/failed/invalid/incomplete/remaining`：`invalid` 是 manifest 无效或长度不符的项，`incomplete` 是归档尚未发布完成的项（含只剩 manifest 的残留），两者都不删除本地文件。
+重复归档只认 manifest：同一段已有 manifest 且源字节数与 mtime 一致时输出 `already_archived` 并退出 0，不重复加密；只有密文而没有 manifest 表示上次在发布前中断，删除该密文后重新归档（PostgreSQL 从未收到成功退出）；manifest 存在而密文缺失、源内容不同或密文长度与 manifest 不符时失败关闭，不覆盖既有证据。
 
-归档密文是 age 公钥加密结果、manifest 无秘密，因此发布为 0640 并依赖暂存目录的 setgid 组共享（`postgres:auction`、`2770`）；上传器与归档命令使用不同账号时不要改成 0700。启用顺序、W7.5 重启门禁、验证查询与时间点恢复见[WAL 归档与时间点恢复](../../ops/deploy/RECOVERY.md#wal-归档与时间点恢复)。每周 `pg_basebackup` 基础备份尚未交付；`archive_mode` 默认仍为 `off`。
+`wal base-backup` 生成每周物理基础备份，按 postgres 账号运行且不读敏感 TOML。它执行 `pg_basebackup --pgdata=- --format=tar --wal-method=fetch --checkpoint=fast --label <备份 ID> --no-password`，连接使用 libpq 默认值（本机 socket、peer 认证），因此执行账号必须有 `REPLICATION` 权限或为超级用户；`-D -` 要求集群没有额外表空间，`-X fetch` 把所需 WAL 并入同一个 `base.tar` 流。tar 流经 `zstd -q -T1 -c` 与 `age --encrypt --recipient` 写入 `<备份 ID>.tar.zst.age`（0640），`fsync` 文件与目录后发布 `<备份 ID>.tar.zst.age.manifest.json`（`auction-base-backup.v1`：备份 ID、开始/结束时刻、压缩前后字节数、密文 SHA-256）。备份 ID 固定为 `base-YYYYMMDDTHHMMSSZ`（UTC）；任一外部程序非零退出都以退出码 3 结束并清理临时文件，不发布任何一方；同一秒内重跑返回 `already_created`，只有密文而没有 manifest 时清理后重新生成。
+
+`wal upload` 读取 Worker 配置，`[backup.offsite] enabled = false` 时执行本地基础备份保留清理，输出 `outcome = skipped` 并退出 0（清理失败时为 `failed`）；否则在暂存目录内取 `wal-upload.lock` 互斥锁，按段名顺序把 `<段名>.zst.age` 上传到 `<prefix>/wal/<段名>.zst.age`，再按备份 ID 顺序把每组基础备份上传到 `<prefix>/base/<备份 ID>/`：先密文、再 manifest，最后发布字节固定的 `completed.json`（`auction-base-upload.v1`）。远端已有相同长度与完整 SHA-256 的对象记 `already_present`（bucket lock 下重传返回 409）；WAL 校验通过后删除本地密文与 manifest 并 `fsync` 目录。基础备份成功上传后写入本机证据 `<备份 ID>.upload.json`（`auction-base-receipt.v1`），后续运行据此跳过重复回读（`base.already_verified`），证据缺失或无效按未上传处理；本地保留最新 3 组完整暂存项，更旧的组依次删除本机证据、manifest 与密文，本次上传失败的组不参与删除。失败、冲突或预算耗尽保留本地文件并以退出码 3 结束。stdout 报告含 WAL 的 `uploaded/already_present/failed/invalid/incomplete/remaining` 与 `base.uploaded/base.already_present/base.already_verified/base.failed/base.retained/base.removed`：`invalid` 是 manifest 无效或长度不符的项，`incomplete` 是创建进程尚未发布完成的项（WAL 段名或基础备份 ID），两者都不删除本地文件。
+
+归档密文是 age 公钥加密结果、manifest 无秘密，因此发布为 0640 并依赖暂存目录的 setgid 组共享（`postgres:auction`、`2770`）；上传器与归档命令使用不同账号时不要改成 0700。启用顺序、W7.5 重启门禁、验证查询与时间点恢复见[WAL 归档与时间点恢复](../../ops/deploy/RECOVERY.md#wal-归档与时间点恢复)。`archive_mode` 默认仍为 `off`；本仓库尚未在隔离实例演练时间点恢复。
 
 ## 业务运维
 
@@ -405,7 +413,7 @@ Bot 内部履约（买卖双方之一是 Bot 自己时不经邮件外发）需�
 | `apps/auction-cli/src/backup/` | manifest、libpq 环境与 passfile、可复用 create、备份/校验/恢复 |
 | `apps/auction-cli/src/backup/scheduled/` | 定时编排、目录边界、磁盘门禁、独占锁/回执、保留清理与打卡装配 |
 | `apps/auction-cli/src/backup/scheduled/offsite/` | age、同盘暂存、待上传检查点、日/月副本编排与追加完成事实 |
-| `apps/auction-cli/src/backup/wal/` | WAL 归档命令（zstd+age+fsync 暂存）、暂存 manifest 与重复判定、R2 `wal/` 上传器 |
+| `apps/auction-cli/src/backup/wal/` | WAL 归档与每周 `pg_basebackup`（zstd+age+fsync 暂存）、暂存 manifest 与重复判定、R2 `wal/`+`base/` 上传器与本地保留 |
 | `apps/auction-cli/src/operations/` | 凭据、规则、论坛、PM、邮件、资金与结算异常 |
 | `apps/auction-cli/src/support/` | 私有文件、锁文件与输入校验 |
 

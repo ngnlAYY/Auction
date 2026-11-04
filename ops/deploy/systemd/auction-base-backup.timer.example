@@ -1,0 +1,17 @@
+# W10.7 每周基础备份：WAL 与基础备份都保留 21 天、同时保有 3 份周基础备份（决策 49）。
+# 选择周日 06:15 UTC：避开每日 03:15–03:30 的定时逻辑备份及其两小时预算，
+# 也避开周五 00:00 开拍、周六 12:00 结束的默认场次。
+# Persistent=true 只补一次错过的唤醒，不补造停机期间每一周的备份。
+# 上传与本地保留由 auction-wal-upload.timer 完成；只启用本 timer 时基础备份只在本地暂存。
+[Unit]
+Description=Auction weekly PostgreSQL base backup timer
+
+[Timer]
+OnCalendar=Sun 06:15:00 UTC
+Persistent=true
+RandomizedDelaySec=10min
+AccuracySec=1min
+Unit=auction-base-backup.service
+
+[Install]
+WantedBy=timers.target
