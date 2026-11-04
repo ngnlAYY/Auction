@@ -1,0 +1,38 @@
+-- Auction 热行表与大只追加表的 autovacuum 基线（W10.8）。
+-- 在目标数据库执行；表名必须存在，执行前先完成迁移。按实际负载复核，不替代全局默认值。
+
+-- 热行表：更新/删除频繁，降低 scale factor，让 autovacuum 更早介入。
+ALTER TABLE public.realtime_streams SET (
+    autovacuum_vacuum_scale_factor = 0.02,
+    autovacuum_analyze_scale_factor = 0.01
+);
+ALTER TABLE public.lots SET (
+    autovacuum_vacuum_scale_factor = 0.02,
+    autovacuum_analyze_scale_factor = 0.01
+);
+ALTER TABLE public.users SET (
+    autovacuum_vacuum_scale_factor = 0.02,
+    autovacuum_analyze_scale_factor = 0.01
+);
+
+-- 大只追加表：主要依赖 insert 触发 analyze 和冻结，避免全表 vacuum 过于频繁。
+ALTER TABLE public.realtime_events SET (
+    autovacuum_vacuum_insert_scale_factor = 0.02,
+    autovacuum_analyze_scale_factor = 0.02
+);
+ALTER TABLE public.audit_records SET (
+    autovacuum_vacuum_insert_scale_factor = 0.02,
+    autovacuum_analyze_scale_factor = 0.02
+);
+ALTER TABLE public.deliveries SET (
+    autovacuum_vacuum_insert_scale_factor = 0.02,
+    autovacuum_analyze_scale_factor = 0.02
+);
+ALTER TABLE public.inbound_mail SET (
+    autovacuum_vacuum_insert_scale_factor = 0.02,
+    autovacuum_analyze_scale_factor = 0.02
+);
+ALTER TABLE public.bids SET (
+    autovacuum_vacuum_insert_scale_factor = 0.02,
+    autovacuum_analyze_scale_factor = 0.02
+);
