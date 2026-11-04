@@ -507,7 +507,7 @@ lock timeout 为 100ms，包含 BEGIN、查询与确认回滚的总预算为两�
 | `auction_sli_snapshot_refreshes_total{outcome}` | 实际轮次；禁用不计轮次 |
 | `auction_sli_snapshot_refresh_duration_seconds` | 实际汇总耗时直方图 |
 | `auction_sli_flow_available{flow}` | 流程是否有完整可发布数据；不代表数据仍新鲜 |
-| `auction_sli_flow_blocked{flow,reason}` | 待实现流程，reason 固定 awaiting_index |
+| `auction_sli_flow_blocked{flow,reason}` | 历史流程的固定阻塞原因；当前八项均已实现，无 awaiting_index 系列 |
 
 outcome 为 `success/busy/timeout/limited/storage/invalid_data`。
 失败保留全部旧值及原年龄，不刷新成功时间，不把缺测伪装成恢复。
@@ -533,15 +533,21 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
 容量观测仅为基线，不是压力测试或能力承诺。
 目标保留 `<FINAL_BID_COMMANDS_PER_SECOND>`、`<CONCURRENT_WEBSOCKETS>`。
 
-### 历史流程（索引已具备，派生待实现）
+### 历史流程
 
-迁移 `000077` 已为以下八项补齐全局时间候选索引，但派生查询、10001 条溢出哨兵、
-关联扇出限制与证据核验尚未实现。因此八项仍不运行 SQL、不发布耗时或余量样本；
-各自 flow_available=0、flow_blocked{reason="awaiting_index"}=1。状态与数值零严格区分。
+迁移 `000077` 的全局时间索引支撑八项只读窗口；Worker 在同一只读快照内按终点落窗，
+每个候选源上限 10001 条，超限整轮不可评估。每个 flow 发布
+`auction_sli_window_duration_seconds{flow,world,quantile}`（仅有效分位）、
+`auction_sli_window_samples`、`auction_sli_window_unknown`、
+`auction_sli_window_incomplete` 与 `auction_sli_window_oldest_incomplete_seconds`；
+提醒另发布 `auction_sli_outbid_margin_seconds{world,channel,deadline_state,quantile}`
+（p01/p05）、`auction_sli_outbid_samples` 与 `auction_sli_outbid_non_positive`。
+无样本不生成分位；坏 metadata 使整轮 InvalidData；结算末封未齐只计 incomplete。
+完整快照后 `auction_sli_flow_available` 对八项为 1，不再有 awaiting_index 系列。
 索引存在不等于完整覆盖：给全表扫描加 statement timeout 或对历史主键任意截断，
 都不能证明完整窗口。
 
-| flow | 仍需实现的有界候选与证据 |
+| flow | 窗口与证据 |
 | --- | --- |
 | register_key | 成功投递完成窗口、入站回查与注册/key 身份证明 |
 | outbid_deadline_margin | 已成功发送的 MM/PM 完成窗口，包含失效后的历史通知，以及有效截止 |
@@ -574,13 +580,12 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
 - 慢速代理：lot.slow_proxy_tick 的 metadata.due_at → 审计 occurred_at，观察 p95/p99。
   幂等重放不增加审计样本，当前积压不能代替这项历史分位。
 
-将来完成样本按终点落入七天窗口；未完成项另报数量和最老年龄，不只看成功者。
+完成样本按终点落入七天窗口；未完成项另报数量和最老年龄，不只看成功者。
 阈值比率使用已成熟起点群组作分母，不把未知或失败结果算成功。
-预留 `auction_sli_window_duration_seconds{flow,world,quantile}`（p50/p95/p99）、
-`auction_sli_window_samples`、`auction_sli_window_outcomes`；迁移 077 的候选索引已具备，
-但这些历史族在当前派生查询实现前仍不注册。
-提醒预留 `auction_sli_outbid_margin_seconds{world,channel,deadline_state,quantile}`，
-channel 仅 mm/pm；当前也不注册，不用零值替代不可评估。
+`unknown` 与 `incomplete` 是覆盖结果，不是零延迟；没有分位序列时不能按 0 解释。
+提醒的 p01/p05 与非正余量只对成功发送的 MM/PM 样本计算；`mm`/`pm` 与
+`provisional`/`final` 是固定标签。迁移 077 的索引只提供候选入口，
+实际关联仍按场次、义务或主键点查。
 
 本地发送证明不是玩家收件时间，proof_observed_at 不是 HV 实际付款瞬间。
 只读派生不会为证明指标而访问外部邮箱，也不会授权外部重发。
@@ -600,4 +605,4 @@ bound 为 lower/midpoint/upper；以及
 所有 SLO、告警保持占位，告警模板不加入 rule_files。
 覆盖至少一个含 Final、结算与邮件处理的完整场次周期后，
 由 Claude 提出目标、用户确认，再作为 W1/W12 验收标准。
-待索引、无样本、超限或证据不足的流程不能报告 SLO 已达标。
+无样本、unknown/incomplete、超限或证据不足的流程不能报告 SLO 已达标。

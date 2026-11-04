@@ -254,8 +254,10 @@ Worker 任务与业务循环分离；`/metrics` 不读取数据库。
 - `auction_settlements_sli_settled_at_idx`：全局场次结算窗口。
 - `audit_records_sli_slow_proxy_tick_idx`：固定 `lot.slow_proxy_tick` 的全部历史审计。
 
-这些索引只是候选入口；八项派生查询、10001 条溢出哨兵、关联扇出限制与证明核验尚未实现，
-所以 `auction_sli_flow_blocked{reason="awaiting_index"}` 在派生落地前仍保持不可用。
+这些索引是八项只读窗口的候选入口；查询已实现 10001 条溢出哨兵与按主键/场次的关联点查。
+成功样本按终点落入七天窗口；`auction_sli_window_*` 发布样本数和 p50/p95/p99，
+提醒另发布 `auction_sli_outbid_*` 的 p01/p05 与非正余量。没有样本时不生成分位序列，
+`unknown`/`incomplete` 不能当作零延迟；坏 metadata 或无法归属的候选使整轮失败关闭。
 不以全表扫描加超时、当前任务集或任意截断代替完整历史窗口。
-完整逐项状态、起终点、单位及预留指标见
+完整逐项状态、起终点、单位及指标见
 [SLI owner 文档](../../crates/auction-observability/README.md#sli-与容量基线)。
