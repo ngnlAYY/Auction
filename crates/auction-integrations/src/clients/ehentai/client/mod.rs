@@ -646,14 +646,7 @@ async fn read_topic_page(
             );
             EhentaiError::protocol(context.operation, false)
         })?;
-    context.client.validate_topic_page_identity(
-        &page,
-        &identity_target,
-        &context.thread_id,
-        offset,
-        context.known_maximum_offset,
-        context.operation,
-    )?;
+    context.client.validate_topic_page_identity(&page, &identity_target, offset, &context)?;
     Ok((offset, page_bytes, page))
 }
 
