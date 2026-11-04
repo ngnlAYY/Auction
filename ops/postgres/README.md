@@ -26,6 +26,8 @@
 3. 在 W7.5 允许的窗口重启 PostgreSQL。
 4. 在目标库执行 `extensions.sql.example`，确认 `pg_stat_statements` 可查询。
 5. 执行 `autovacuum.sql.example`；按实际表规模复核参数，不要盲目套用。
+慢查询日志同时设置 `log_parameter_max_length = 0` 与 `log_parameter_max_length_on_error = 0`，只记录 SQL 与时长，不记录绑定参数，避免敏感值进入日志。
+
 6. 运行下列只读核验并保留输出：
 
 ```sql
@@ -34,6 +36,8 @@ SHOW superuser_reserved_connections;
 SHOW shared_preload_libraries;
 SHOW log_min_duration_statement;
 SHOW log_lock_waits;
+SHOW log_parameter_max_length;
+SHOW log_parameter_max_length_on_error;
 SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements';
 SELECT relname, n_live_tup, n_dead_tup, last_autovacuum, last_autoanalyze
 FROM pg_stat_user_tables

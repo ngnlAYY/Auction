@@ -22,6 +22,9 @@ pg_stat_statements.track = all
 
 # 慢查询与锁等待；应用层仍有自己的 1 秒慢语句告警。
 log_min_duration_statement = 1000
+# 慢语句只记录 SQL 与时长，不记录绑定参数，避免凭据、Cookie、登录 key 或邮件正文进入日志。
+log_parameter_max_length = 0
+log_parameter_max_length_on_error = 0
 log_lock_waits = on
 log_autovacuum_min_duration = 1000
 log_checkpoints = on
