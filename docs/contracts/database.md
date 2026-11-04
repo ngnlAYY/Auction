@@ -2,7 +2,7 @@
 
 [文档导航](../README.md) · [迁移](../../migrations/postgres/README.md) · [auction-storage](../../crates/auction-storage/README.md) · [保留政策](../../ops/deploy/retention-policy.v1.json)
 
-唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000076`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
+唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000077`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
 
 ## schema 身份与版本
 
@@ -164,6 +164,8 @@
 
 迁移 `000076` 纯新增 `runtime_switch_events`，登记 `compatible`：旧程序不读取该表，既有业务约束、审计闭集与冻结事实不变。表的 UPDATE、DELETE、TRUNCATE 都被触发器拒绝，数据族为 `schema_and_configuration`，永久保留且不授权清理。
 
+迁移 `000077` 只新增五个历史 SLI 索引，登记 `compatible`：旧程序只读写既有表，索引不改变查询结果、约束或写入语义；索引候选入口见 [SLI 只读查询](#sli-只读查询)。
+
 表按非零 command_id 保存版本 1 的 32 字节请求摘要、名称、递增 revision、
 expected_revision、set/clear/expire、布尔或枚举值、UTC 期限、操作者、入口、
 原因、审计关联及固定结果；每名称 revision 唯一，同一设置最多追加一次 expire。
@@ -221,7 +223,7 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 `crates/auction-storage/src/database/sli/` 是 W0.13 SQL 的唯一 owner。
 应用端口 `SliSnapshotReader` 只传递数值和快照时间，不暴露 SQL、业务 ID 或正文。
 Worker 任务与业务循环分离；`/metrics` 不读取数据库。
-不新增表、索引或迁移，不修改业务隔离、锁序、账本、审计、事件或外写规则。
+迁移 `000077` 只新增历史 SLI 的五个全局时间候选索引，不修改业务隔离、锁序、账本、审计、事件或外写规则；索引存在不等于派生查询已实现。
 
 `TrackedPool::try_acquire` 只尝试现有空闲连接，不等待或扩池，保留原池占用观测。
 每轮串行至多一个连接；新建只读 Repeatable Read 事务，无 FOR UPDATE。
@@ -244,11 +246,16 @@ Worker 任务与业务循环分离；`/metrics` 不读取数据库。
 成本边界来自索引前缀、候选上限、主键关联和总时间预算；
 本批没有执行 EXPLAIN 或连接数据库，不能声称线上计划或耗时已验证。
 
-历史耗时与提醒余量均标为待索引：
-`inbound_mail_poll_idx` 需要已知 mailbox_key；delivery 的领取/lease 部分索引
-不覆盖全部完成记录；通知 live 部分索引不覆盖失效后的通知。
-结算义务按场次的索引不能枚举全局完成窗口；
-`audit_records_entity_idx` 需要先知道 entity_id，不能枚举全部慢速 tick。
+历史耗时与提醒余量的候选入口由迁移 `000077` 提供：
+
+- `inbound_mail_sli_received_at_idx`：全局入站时间窗口；现有轮询索引需要已知 mailbox_key。
+- `deliveries_sli_succeeded_completed_at_idx`：全部成功投递的完成时间；领取/lease 部分索引不覆盖历史完成记录。
+- `lot_watch_pm_sli_succeeded_completed_at_idx`：已成功 PM 的完成时间，包括后来失效的通知。
+- `auction_settlements_sli_settled_at_idx`：全局场次结算窗口。
+- `audit_records_sli_slow_proxy_tick_idx`：固定 `lot.slow_proxy_tick` 的全部历史审计。
+
+这些索引只是候选入口；八项派生查询、10001 条溢出哨兵、关联扇出限制与证明核验尚未实现，
+所以 `auction_sli_flow_blocked{reason="awaiting_index"}` 在派生落地前仍保持不可用。
 不以全表扫描加超时、当前任务集或任意截断代替完整历史窗口。
 完整逐项状态、起终点、单位及预留指标见
 [SLI owner 文档](../../crates/auction-observability/README.md#sli-与容量基线)。

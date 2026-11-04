@@ -56,7 +56,7 @@
 
 | 编号 | 工作流 | 优先级 | 依赖 | 迁移 | 估算 |
 | --- | --- | --- | --- | --- | --- |
-| [W0](architecture-improvement/w00-errors-metrics.md) | 错误分类、指标与采集路径、用户可见 SLO、已知缺陷诊断、待核实事实、就绪探针、影子运行框架、浏览器错误信标 | P0（W0.15、W0.16 为 P1） | W0.14 先于 W0.6 | 否 | 10–13 天 |
+| [W0](architecture-improvement/w00-errors-metrics.md) | 错误分类、指标与采集路径、用户可见 SLO、已知缺陷诊断、待核实事实、就绪探针、影子运行框架、浏览器错误信标 | P0（W0.15、W0.16 为 P1） | W0.14 先于 W0.6 | 是（W0.13 索引 077；其余否） | 10–13 天 |
 | [W1](architecture-improvement/w01-external-account.md) | 外部账号调度：快速限界、熔断、三层争用统一调度、访问收口、主动暂停、增量扫描、证据退避、论坛对齐与增量导入 | P0 | W0；W1.11 依赖 W0.5；W1.1、W1.4、W1.11 先有 W6.3；模拟类验收依赖 W6.6；W1.10 依赖 W1.3 | 是（暂停开关、扫描水位、论坛游标） | 15–19 天 |
 | [W2](architecture-improvement/w02-dispositions.md) | 统一处置事实模型 | P1 | W0、W3.7、W9.9；操作者字段按 W9.7 | 是 | 6–8 天 |
 | [W3](architecture-improvement/w03-rules.md) | 规则上移：类型化快照、纯函数判定、时区无关证明、排期规则下沉 | P1 | W3.7 无依赖；其余批次依赖 W2 的领域类型与 W6.2 | 视批次（收窄数据库函数需迁移） | 10–14 天，分批 |
@@ -94,15 +94,15 @@
 
 | 里程碑 | 内容 | 完成标志 |
 | --- | --- | --- |
-| M1 | W1.0、W10.1、W10.2、W7.1a、W0.1–W0.14、W7.5、W7.7、W7.8a、W7.11、W10.6、W13.1–W13.5 | 维护不再超时；定时备份与异机副本运行，数据密钥已离线托管，端到端恢复演练完成一次；`main` 成为部署基线，部署改用 CI 制品；错误、外部请求、HTTP、SLO、主机与数据库可度量且可采集；D1 原因可读，D5 冲突率有基线；就绪探针不再被瞬时错误永久翻转；待核实事实写入基线；Final 阶段无法误停机，停机不再打断越过围栏的外部写入；运行时开关可用；此后只含兼容迁移的版本可换回旧程序；迁移演练流程可用；回归门禁、链接检查与定时审计生效 |
-| M2a | W0.15、W6.3、W6.6、W6.1、W6.2、W6.4、W6.5、W9.5、W9.7、W10.8、W10.7、W11.4 | 测试与安全底座：回放语料、外部服务替身、测试入口、规范与 CI 测试作业可用；影子运行框架就绪；Admin 登录防护补齐；CLI 操作者可追溯；PostgreSQL 有配置基线，WAL 归档可做 14 天内的时间点恢复；一致性巡检可作为后续改造的安全网 |
+| M1 | W1.0、W10.1、W10.2、W7.1a、W0.1–W0.14、W7.5、W7.7、W7.8a、W7.11、W10.6、W13.1–W13.5（W13.3b 延后到 M2a） | 维护不再超时；定时备份与异机副本运行，数据密钥已离线托管，端到端恢复演练完成一次；`main` 成为部署基线，部署改用 CI 制品；错误、外部请求、HTTP、SLO、主机与数据库可度量且可采集；D1 原因可读，D5 冲突率有基线；就绪探针不再被瞬时错误永久翻转；待核实事实写入基线；Final 阶段无法误停机，停机不再打断越过围栏的外部写入；运行时开关可用；此后只含兼容迁移的版本可换回旧程序；迁移演练流程可用；回归门禁、链接检查与定时审计生效 |
+| M2a | W0.15、W13.3b、W6.3、W6.6、W6.1、W6.2、W6.4、W6.5、W9.5、W9.7、W10.8、W10.7、W11.4 | 测试与安全底座：回放语料、外部服务替身、测试入口、规范与 CI 测试作业可用；影子运行框架就绪；Admin 登录防护补齐；CLI 操作者可追溯；PostgreSQL 有配置基线，WAL 归档可做 14 天内的时间点恢复；一致性巡检可作为后续改造的安全网；逐 owner panic 计次随 W0.15 同批 |
 | M2b | W1.1–W1.3、W1.6、W1.7、W1.9–W1.11、W7.9、W7.10、W9.8、W9.10、W9.11、W14.8、W14.1、W14.2、W14.4–W14.6、W14.9、W14.11 | 调度与玩家可见变化：熔断、统一调度与主动暂停生效，指标达标；Admin/CLI 不再直连账号；论坛增量导入消除页数悬崖；单角色故障不再拖垮 Public 与 Admin；发送节奏与预算无需重启即可调整；提醒按截止排序且截止后退役；玩家会话满额可自动腾出名额，玩家可自助轮换登录 key；通知正文能识别装备、金额与期限，论坛 notify 与说明信有上限，PM 渠道不再静默失效，逾期提醒不早于付款邮件 |
 | M3 | W9.9、W3.7、W1.4、W1.5、W1.8、W2、W0.16、W7.6 | 服务改用无 DDL 的运行账号；时区无关证明先行；增量扫描消除 Sent 悬崖；处置模型落地，仪表盘无专用排除；浏览器错误可计数，部署后旧页面提示刷新 |
 | M4 | W5.2–W5.5、W5.7、W5.8、W3.1–W3.3、W3.8、W4、W12.1、W12.3、W12.4、W12.5、W12.8、W14.3 | 告警来源齐全、分级合理、处置手册就绪，告警台可确认与静默；运维台闭环，可按 Reference 检索并查看玩家支持视图；核心准入上移；同场出价热点消除，读路径与关键循环受保护；投稿回执、卖方成交汇总与换季提醒上线 |
 | M5 | W3 其余、W10.0、W10.3–W10.5、W10.9、W11.1–W11.3、W9.3、W9.4、W9.6、W12.6 | 恢复演练、清理与对账自动化，恢复后外部核对有工具，偿付能力可报告，密钥环与主机加固完成 |
 | M6 | W7.1、W7.2、W7.3、W7.8、W12.2、W12.7、W13.6，最后 W8 | 发布流水线可用，兼容声明有测试验证，热路径按指标调整，依赖升级有固定节奏，最后完成部署形态与结构评估 |
 
-里程碑内按表中顺序推进（决策 46、54）。M1 的前三项先行：W1.0（D2）、W10.1 与 W10.2（含 bucket lock、数据密钥托管与端到端恢复演练）各自完成即单独交付，W7.1a 只需用户完成远端设置；随后 W0.1 → W0.7（D1）、W0.14（D7，须先于 W0.6 的超时）、W7.11（D8），再完成 M1 其余各项。M2a 先交付 W6.3 与 W6.6，M2b 才开始依赖它们的 W1.1、W1.11；W10.8 先于 W10.7；W9.10 与 W9.8 同批，W9.11 与 W9.10 共用计数；M2b 中 W14.8 先于 W14.1，W14.1 先于 W14.2、W14.4。M3 以 W9.9 开头，先于 W2 新建的表。W5.1、W5.6 暂缓（决策 50），用户选定外部服务后排入当时的里程碑。
+里程碑内按表中顺序推进（决策 46、54）。M1 的前三项先行：W1.0（D2）、W10.1 与 W10.2（含 bucket lock、数据密钥托管与端到端恢复演练）各自完成即单独交付，W7.1a 只需用户完成远端设置；随后 W0.1 → W0.7（D1）、W0.14（D7，须先于 W0.6 的超时）、W7.11（D8），再完成 M1 其余各项。W13.3b 按决策 75 延后到 M2a，与 W0.15 同批。M2a 先交付 W6.3 与 W6.6，M2b 才开始依赖它们的 W1.1、W1.11；W10.8 先于 W10.7；W9.10 与 W9.8 同批，W9.11 与 W9.10 共用计数；M2b 中 W14.8 先于 W14.1，W14.1 先于 W14.2、W14.4。M3 以 W9.9 开头，先于 W2 新建的表。W5.1、W5.6 暂缓（决策 50），用户选定外部服务后排入当时的里程碑。
 
 发布冻结（决策 57）：从赛季前场次开拍起，到首场早鸟场次结算完毕，只部署修复，不上线行为变更或含 `breaking` 迁移的版本；下一次为 2027-05-01 换季前后。W7.5 的时段门禁照常生效。
 
@@ -129,8 +129,6 @@
 | --- | --- | --- |
 | W12.1 的序号热点方案（提交后由唯一分配者分配 / 事务前按场次排队 / 按 lot 拆分事件流），依 W0.6 的冲突数据选择 | W12.1 | M4 开工前；若 D5 触发提前交付，则在提前交付前 |
 | SLO 目标值（出价 p99 延迟、冲突中止率、实时推送延迟、登录 key 邮件送达延迟、提醒距截止余量、Final 阶段回帖导入延迟），由我按 W0.13 基线提出（决策 56） | W1、W12 的验收 | M1 结束时 |
-| W13.3b 工作项 panic 计次的范围与口径：各 owner 计数语义不一（生命周期领取计次，结算/履约/恢复只在失败路径计次，邮件/论坛/PM/告警分发直接在常驻任务内执行），PM 发送前与论坛内容扫描、论坛竞价命令缺少可复用的人工终态或计数字段，与详情页“迁移：否”冲突；另需三态开关与影子观察（W0.15 在 M2a）。选项：缩小到有可复用字段的 owner 并无迁移交付、允许迁移完整交付，或整体延后到 M2a 与 W0.15 同批 | W13.3b（W13.3a 构建防护与观测已随 M1 交付） | M1 结束时 |
-| W0.13 待索引的 8 项历史 SLI（注册/key 邮件、提醒距截止余量、结算至首封/末封付款邮件、买家付款至卖方货款、投稿至收取/拒收回执、慢速代理执行滞后）：是否在 M1 内追加一个只含 `CREATE INDEX` 的兼容迁移（线上库约 28 MB，建索引代价小，但会略增写放大），或延后到 W12 统一评估索引 | W0.13 完整验收、W1/W12 部分 SLO | M1 结束时 |
 | W0.6 服务超时启用：`timeouts_enabled` 默认关闭；启用须 W0.14 部署并按决策 72 观察后三角色有效策略为 `classified`，候选值 acquire 2 秒、statement 5 秒、lock 1 秒；`idle_in_transaction_session_timeout` 非 0 时产生的 `25P03` 按决策 71 仍归 unknown、会粘滞阻断，是否启用或扩展白名单另定；预算中的 `superuser_reserved_connections`/`reserved_connections` 待线上只读核实 | W0.6 超时（D5 量化与分档不受阻） | W0.14 切换 `classified` 后 |
 | 外部心跳与告警服务的选型与启用时间（决策 50），以及是否启用 MoogleMail 运维告警（决策 58，启用须先有 Bot 以外的收件角色） | W5.1、W5.6、备份打卡与 W5.5、W5.8 的主动通知；启用前没有任何主动告警，备份失败、Worker 崩溃与整机宕机都不会主动通知 | 无硬性期限 |
 
@@ -145,7 +143,7 @@
 | 离线生成 `age` 密钥对：私钥存密码管理器与一份离线副本，公钥交给服务器 | W10.2 | M1 |
 | 选定心跳/Webhook 服务：建立备份与 WAL 打卡检查、Worker 心跳检查与 Public `/health/ready` 的 HTTP 检查，报到地址写入敏感配置 | W10.1、W10.7、W5.1、W5.6 | 暂缓（决策 50） |
 | 主机安装 Prometheus、node_exporter、postgres_exporter（只监听 127.0.0.1），配置 SSH 隧道查看 | W0.10 | M1 |
-| GitHub：建立 `main`、设为默认分支并开启分支保护（必须通过 CI）；删除已合入的旧分支，关闭 `tokio-1.54.1` 与 `tungstenite-0.30.0` 两个 dependabot PR | W7.1a | M1 |
+| GitHub：建立 `main`、设为默认分支并开启分支保护（必须通过 CI）；删除已合入的旧分支，关闭 `tokio-1.54.1` 与 `tungstenite-0.30.0` 两个 dependabot PR | W7.1a | M1（已完成 2026-11-04：`main` + 保护，旧分支删除，tokio PR #10 关闭；tungstenite 已不存在） |
 | 提供 W0.12 线上只读核实所需的 SSH 与 psql 访问 | W0.12 | M1 |
 | 应用 PostgreSQL 配置片段并按 W7.5 选择窗口重启 | W10.8、W10.7 | M2a |
 | 建立运行账号并在部署时执行授权变更 | W9.9 | M3 |
@@ -195,11 +193,11 @@
 | W0.3 | 已提交 | `46eb1c43` | 未部署 | 同上；`auction_worker_unpersisted_error_total{loop,kind}`，口径为未确认形成持久失败、退避或人工处置（提交结果未知计入），先于日志去重累加；PM 暂归 `forum` loop |
 | W0.10 | 已提交 | `421ee64c` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；`common.toml [metrics]` 三角色可选 loopback 出口（只允许 `127.0.0.1`，示例 19100/19101/19102，省略即关闭），复用 W0.9 `/metrics` 契约，出口故障只降级采集；`ops/monitoring/` 提供 Prometheus、exporter 查询与 unit 示例；待用户按 `ops/README.md` 安装 Prometheus、node_exporter、postgres_exporter 并启用出口后验收；W0.13 随后续批次 |
 | W13.3a | 已提交 | `7a532130` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 N）实现、Claude 监督；release 开启 `overflow-checks`（`wasm-release` 继承，保留 abort），原生装配根与 CLI 安装安全 panic hook（target `auction::panic`，只输出线程、位置与 `&'static str` payload），顶层 JoinError 固定分类；Worker 已有子任务收口新增 `auction_worker_task_panics_total{loop}`，处置与计数不变；逐 owner panic 计次拆为 W13.3b 待用户决定 |
-| W13.3b | 待决定 | — | — | 范围与口径待用户决定：可复用字段的 owner 缩范围、允许迁移完整交付，或延后到 M2a 与 W0.15 同批；见[仍待决定](#仍待决定) |
+| W13.3b | 暂缓 | — | — | 决策 75：延后到 M2a，与 W0.15 影子框架同批；M1 只保留 W13.3a，不把缩范围方案当作纯 panic 计次或完整人工终态 |
 | W0.6 | 已提交 | `5ebfc1c8` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 K）实现、Claude 监督；`[database_profiles] mode` 默认 `profiled`（`legacy` 为旧路径），服务池 16、维护池 4、固定 `application_name`，`deployment check` 汇总连接预算；服务超时默认关闭，启用须显式填写阈值且以 W0.14 切换 `classified` 为前置（见待决定）；21 个事务 owner 的尝试/冲突/重试/耗尽指标，Worker 循环连接获取与持有指标；切换需重启 |
-| W0.4 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（DeepSeek V4.1 Flash，车道 M）实现、Claude 监督；Worker 装配同步外部指标记录器，覆盖 19 个邮件操作的物理请求、请求门/独占锁/incoming 读写锁等待、`account_busy`/限流/超时信号与维护/观察/fetch/批次/扫描预算耗尽；关闭 metrics 或非 Worker 为 no-op，不改变请求间隔、锁顺序、deadline、重试、取消、写入围栏或结果未知处理 |
-| W0.5 | 已提交 | 随本提交 | 未部署 | 执行者：Codex（DeepSeek V4.1 Flash，车道 M）实现、Claude 监督；论坛物理请求、门等待、主题扫描发现/处理页数、写入未知、PM prepare/send/reconcile 与回帖导入延迟 `poll_window` 上下界估计（终点为每帖首条新命令账本提交确认，不填零）；`ForumCommandStart.is_new` 与 `ForumReplyTopic.reply_phase` 是只读投影，不参与命令裁决；论坛 world 允许 `shared` 仅限无世界资料读取 |
-| W0.13 | 已提交 | `5b87ae11` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；Worker 每 60 秒只读汇总窗口 Gauge（只借空闲连接、Repeatable Read 只读、2 秒预算，候选超 10000 整轮不可评估），`[metrics] sli_snapshot_enabled` 默认关闭、W7.7 开关 `metrics_sli_snapshot_enabled`；已实现实时 relay/WS 写出延迟、Final 出价容量、慢速代理当前积压；出价延迟与冲突引用 W0.9/W0.6，Final 回帖导入引用 W0.5；邮件、提醒余量、付款、投稿与慢速代理历史共 8 项缺全局时间索引，以 `auction_sli_flow_blocked{reason="awaiting_index"}` 标明（是否以兼容迁移补索引见待决定）；记录规则与告警模板在 `ops/monitoring/`，SLO 目标值待基线观察后提出 |
+| W0.4 | 已提交 | `bc0e5430` | 未部署 | 执行者：Codex（DeepSeek V4.1 Flash，车道 M）实现、Claude 监督；Worker 装配同步外部指标记录器，覆盖 19 个邮件操作的物理请求、请求门/独占锁/incoming 读写锁等待、`account_busy`/限流/超时信号与维护/观察/fetch/批次/扫描预算耗尽；关闭 metrics 或非 Worker 为 no-op，不改变请求间隔、锁顺序、deadline、重试、取消、写入围栏或结果未知处理 |
+| W0.5 | 已提交 | `bc0e5430` | 未部署 | 执行者：Codex（DeepSeek V4.1 Flash，车道 M）实现、Claude 监督；论坛物理请求、门等待、主题扫描发现/处理页数、写入未知、PM prepare/send/reconcile 与回帖导入延迟 `poll_window` 上下界估计（终点为每帖首条新命令账本提交确认，不填零）；`ForumCommandStart.is_new` 与 `ForumReplyTopic.reply_phase` 是只读投影，不参与命令裁决；论坛 world 允许 `shared` 仅限无世界资料读取 |
+| W0.13 | 已提交 | `5b87ae11`；索引迁移随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；Worker 每 60 秒只读汇总窗口 Gauge（只借空闲连接、Repeatable Read 只读、2 秒预算，候选超 10000 整轮不可评估），`[metrics] sli_snapshot_enabled` 默认关闭、W7.7 开关 `metrics_sli_snapshot_enabled`；已实现实时 relay/WS 写出延迟、Final 出价容量、慢速代理当前积压；出价延迟与冲突引用 W0.9/W0.6，Final 回帖导入引用 W0.5；迁移 `000077` 已补五个全局时间候选索引（决策 77），但邮件、提醒余量、付款、投稿与慢速代理历史共 8 项派生查询仍未实现，继续以 `auction_sli_flow_blocked{reason="awaiting_index"}` 标明；记录规则与告警模板在 `ops/monitoring/`，SLO 目标值待基线观察后提出 |
 | W0.8 | 已提交 | `e78dac4f` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 D）实现、Claude 监督；`storage_error_from`/`sql_error_context` 附加 sqlx 变体、SQLSTATE、约束名、表名；1100 处直接 SQLx 闭包与 13 个具名 mapper 一次改完，`storage:map_err(\|_\|)` 1432 → 330；其余 330 处另定范围 |
 | W7.11 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
 | W7.8a | 已提交 | `3f0a2097` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 F）实现、Claude 监督；迁移 075 建只追加兼容登记表（001–074 缺行即 breaking，075 自身 breaking），`check.sh migration-compatibility` 检查每个新迁移恰好登记一次；`[readiness] migration_compatibility_mode` 默认 `shadow`，回退旧程序前须设为 `compatible`；本版含 breaking 迁移，部署后才能为之后的版本提供回退能力 |
@@ -212,7 +210,8 @@
 | W4 | 未开始 | — | — | 含 W4.5、W4.6，随 M4 |
 | W5 | 未开始 | — | — | W5.1、W5.6 暂缓（决策 50）；其余（含 W5.8）随 M4 |
 | W6 | W6.1–W6.4、W6.6 已批准 | — | — | 全部随 M2a，W6.3、W6.6 先行 |
-| W7 | 进行中 | — | 未部署 | W7.5、W7.7、W7.8a、W7.11 已提交；W7.1a 未做；W7.9、W7.10 随 M2b；W7.6 随 M3；W7.1、W7.2、W7.3、W7.8 随 M6 |
+| W7 | 进行中 | — | 未部署 | W7.1a 已建立 `main` 与保护；W7.5、W7.7、W7.8a、W7.11 已提交；W7.9、W7.10 随 M2b；W7.6 随 M3；W7.1、W7.2、W7.3、W7.8 随 M6 |
+| W7.1a | 已提交 | 远端设置 | — | 仓库转公开；`main` 以 `bc0e5430` 建立并设为默认分支；分支保护要求 `docs`/`verify`/`security-audit`/`msrv`、线性历史、禁止强推与删除；`ci/dependency-version-guard` 与两个 dependabot 分支已删除，tokio PR #10 已按决策 52 关闭；`main` CI 成功（run 41764443674），后续提交继续由该工作流验证 |
 | W7.5 | 已提交 | `69fd85a0` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；`service stop/restart` 只读时段门禁（Final 或截止不晚于保护窗口末端的在拍 lot，含已过截止仍在拍），`--protection-window-minutes` 默认 60，例外须 `--force --reason` |
 | W8 | 未开始 | — | — | 放在 M6 最后 |
 | W9 | 未开始 | — | — | W9.5、W9.7 随 M2a；W9.8、W9.10、W9.11 随 M2b；W9.9 为 M3 首项 |
@@ -222,7 +221,7 @@
 | W10.6 | 已提交 | `69fd85a0` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；手工流程 `ops/deploy/MIGRATION-DRILL.md` 与回执模板 `auction-migration-drill.v1`；W7.2 落地后自动核对 |
 | W11 | 未开始 | — | — | W11.4 随 M2a；W11.2 改为偿付能力报告（v11） |
 | W12 | 未开始 | — | — | W12.3 已批准，随 M4；W12.8 随 M4 |
-| W13 | 进行中 | — | 未部署 | W13.1、W13.2、W13.4、W13.5 已提交；W13.3a 已提交，W13.3b 待决定；W13.6 随 M6 |
+| W13 | 进行中 | — | 未部署 | W13.1、W13.2、W13.4、W13.5 已提交；W13.3a 已提交，W13.3b 延后到 M2a（决策 75）；W13.6 随 M6 |
 | W13.1 | 已提交 | `42bd8477` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 B）实现、Claude 监督；`check.sh ratchet`，基线 `ci/checks/source-ratchet.baseline`（14 项） |
 | W13.4 | 已提交 | `42bd8477` | 未部署 | 同上；`check.sh markdown-links` 离线检查相对链接与锚点，现有文档无断链 |
 | W13.5 | 已提交 | `42bd8477` | 未部署 | 同上；CI 每周一 04:17 UTC 运行 `security-audit`；发布 tag 审计待 W7.1 |
