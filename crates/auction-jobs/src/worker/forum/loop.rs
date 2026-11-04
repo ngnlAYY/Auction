@@ -23,6 +23,13 @@ pub(crate) async fn run_loop<C>(
             if worker.control.is_draining() {
                 return;
             }
+            // W1.9：论坛同步、回帖导入与 PM 都是外部访问；暂停期间不开始新周期。
+            if worker.external_access_paused() {
+                if super::wait_while_paused(&mut shutdown).await {
+                    return;
+                }
+                continue;
+            }
             let started = std::time::Instant::now();
             // 每个循环边界读取一次完整热快照；租约仍来自启动配置。
             let forum = worker.forum_runtime();

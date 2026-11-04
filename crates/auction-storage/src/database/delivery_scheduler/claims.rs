@@ -22,10 +22,11 @@ pub(super) async fn claim_postgres(
     let sending_grace_micros = i64::try_from(sending_grace.as_micros())
         .map_err(|_| repository_error_owned("delivery sending grace 超出数据库范围"))?;
     // 过期结果单独短事务：资金scope/account必须在delivery前，不能批量先锁delivery。
-    super::expired::reconcile(pool, now, sending_grace_micros).await?;
+    super::expired::reconcile(pool, now, sending_grace_micros, store.notification_metrics())
+        .await?;
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     super::quarantine::quarantine_mail_dispositions(&mut transaction, now).await?;
-    super::watch::retire_invalidated(&mut transaction, now).await?;
+    super::watch::retire_expired(&mut transaction, now, store.notification_metrics()).await?;
     let excluded_worlds =
         exclusions.recipients.iter().map(|excluded| excluded.world.as_str()).collect::<Vec<_>>();
     let excluded_names = exclusions
@@ -35,7 +36,7 @@ pub(super) async fn claim_postgres(
         .collect::<Vec<_>>();
     let rows = sqlx::query(concat!(
         r#"SELECT id, command_id, request_digest, origin_kind, origin_id,
-                  recipient, payload, fencing_version, attempt_count
+                  recipient, payload, fencing_version, attempt_count, created_at
            FROM public.deliveries AS deliveries
            WHERE (
                    (
@@ -243,5 +244,6 @@ pub(super) fn map_claim(
         attempt_count,
         worker_id: worker_id.to_owned(),
         claimed_at,
+        created_at: row.try_get("created_at").map_err(map_storage_error)?,
     })
 }

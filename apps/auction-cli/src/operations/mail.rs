@@ -1,26 +1,16 @@
 //! MoogleMail 运维证据：加密诊断归档的离线导出，以及撤拍退回义务的 Sent 只读核查。
 
-use std::{
-    path::Path,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use auction_application::{
-    AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeReader, AdminCredentialWorld,
-    SettlementFulfillmentSentLookupReader, canonical_settlement_fulfillment_subject,
+    SettlementFulfillmentSentLookupReader, WORKER_REMOTE_READ_TIMEOUT_SECONDS,
+    WorkerRemoteReadError, WorkerRemoteReadPort, WorkerSentLookupRequest,
+    canonical_settlement_fulfillment_subject,
 };
 use auction_config::AppConfig;
-use auction_domain::{SettlementId, SettlementObligationKind, SettlementWorld};
-use auction_integrations::{
-    CredentialSealer, DataKey,
-    mooglemail::{
-        MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailCredentialSet,
-        MoogleMailDiagnosticArchiveConfig, MoogleMailGateway, MoogleMailGatewayConfig,
-        MoogleMailSentLookupRequest, MoogleMailWorld,
-    },
-};
+use auction_domain::{SettlementId, SettlementObligationKind};
+use auction_integrations::{DataKey, mooglemail::MoogleMailDiagnosticArchiveConfig};
 use auction_storage::DatabaseStore;
 use serde_json::json;
 use uuid::Uuid;
@@ -92,6 +82,8 @@ fn export(
 }
 
 /// 冻结目标须为单件装备、零 Credits/COD；Sent 匹配只证明发送记录，collected 不等于已送达。
+/// W1.10：远端 Sent 只读扫描改由 Worker control 执行，命令行不再持有凭据或第二个限速器；
+/// Worker 不可用或外部访问被暂停时明确失败，不回退到本地直连。
 async fn inspect_sent(
     config: &AppConfig,
     store: &DatabaseStore,
@@ -103,48 +95,23 @@ async fn inspect_sent(
     if target.credits != 0 || target.cod != 0 || target.recipient.trim().is_empty() {
         anyhow::bail!("Sent 核查目标违反零金额或收件人不变量");
     }
-    let world = match target.world {
-        SettlementWorld::Main => MoogleMailWorld::Main,
-        SettlementWorld::Isekai => MoogleMailWorld::Isekai,
-    };
     let subject = canonical_settlement_fulfillment_subject(
         SettlementObligationKind::WithdrawnReturn,
         SettlementId::from_uuid(obligation_id),
     )
     .context("无法生成履约邮件标题")?;
-    let mail = &config.worker.mooglemail;
-    let client = Arc::new(
-        MoogleMailClient::with_config(MoogleMailClientConfig {
-            endpoint: url::Url::parse(&mail.endpoint).context("MoogleMail endpoint 无效")?,
-            maximum_response_bytes: mail.maximum_response_bytes,
-            minimum_request_interval: Duration::from_millis(mail.minimum_request_interval_millis),
-            request_timeout: Duration::from_secs(mail.request_timeout_seconds),
-        })
-        .map_err(|error| anyhow::anyhow!(error.to_string()))?,
-    );
-    let gateway = MoogleMailGateway::new(
-        client,
-        readonly_credentials(config, store, target.world).await?,
-        MoogleMailGatewayConfig {
-            maximum_pages: mail.maximum_pages,
-            sender_allowlist: Vec::new(),
-            sender_allowlist_disabled: true,
-            fetch_budget: Duration::from_secs(mail.fetch_timeout_seconds),
-        },
+    let client = auction_integrations::WorkerRemoteReadClient::new(
+        config.worker_control_socket_path(),
+        std::time::Duration::from_secs(WORKER_REMOTE_READ_TIMEOUT_SECONDS),
     )
-    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-    let report = gateway
-        .lookup_sent(MoogleMailSentLookupRequest {
-            world,
-            recipient: target.recipient.clone(),
-            subject: subject.clone(),
-            external_equipment_id: target.external_equipment_id.clone(),
-            maximum_pages: mail.maximum_pages,
-            deadline: Instant::now() + Duration::from_secs(mail.fetch_timeout_seconds),
-            observed_at: chrono::Utc::now(),
-        })
-        .await
-        .map_err(|error| anyhow::anyhow!("Sent 只读查询失败：{error}"))?;
+    .map_err(|error| anyhow::anyhow!("Worker control client 不可用：{error}"))?;
+    let request = WorkerSentLookupRequest {
+        world: target.world.as_str().to_owned(),
+        recipient: target.recipient.clone(),
+        subject: subject.clone(),
+        external_equipment_id: target.external_equipment_id.clone(),
+    };
+    let report = client.lookup_sent(request).await.map_err(remote_read_error)?;
     let candidates = report
         .candidates
         .iter()
@@ -165,7 +132,7 @@ async fn inspect_sent(
     let evidence = json!({
         "schema_version": 1,
         "obligation_id": obligation_id,
-        "status": format!("{:?}", report.status),
+        "status": report.status,
         "scan_complete": report.scan_complete,
         "pages_scanned": report.pages_scanned,
         "time_unverified": true,
@@ -188,42 +155,17 @@ async fn inspect_sent(
     }))
 }
 
-/// 一次查询同时覆盖目标 world 与 shared scope；多于一个 active 凭据即拒绝，不拼接不同快照。
-async fn readonly_credentials(
-    config: &AppConfig,
-    store: &DatabaseStore,
-    world: SettlementWorld,
-) -> anyhow::Result<MoogleMailCredentialSet> {
-    let cookie = if let Some((key_id, key_material)) =
-        config.credential_data_key_id().zip(config.credential_data_key())
-    {
-        let opener = CredentialSealer::new(Arc::new(
-            DataKey::from_base64(key_id, key_material)
-                .map_err(|_| anyhow::anyhow!("credential 数据密钥格式无效"))?,
-        ));
-        let credential_world = match world {
-            SettlementWorld::Main => AdminCredentialWorld::Main,
-            SettlementWorld::Isekai => AdminCredentialWorld::Isekai,
-        };
-        let mut records = store
-            .list_active(AdminCredentialKind::MailCookie, credential_world)
-            .await
-            .context("读取 active 邮件凭据失败")?;
-        if records.len() != 1 {
-            anyhow::bail!("目标 world 必须恰好有一个 active 邮件凭据（当前 {}）", records.len());
-        }
-        let record = records.pop().context("邮件凭据不可用")?;
-        let secret = opener
-            .open(record.kind, record.id, &record.scope, &record.envelope)
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        String::from_utf8(secret).context("邮件凭据不是 UTF-8")?
-    } else if let Some(path) = &config.worker.mooglemail.keyenv_file {
-        auction_config::load_mooglemail_keyenv(path)?.bot_cookie().to_owned()
-    } else {
-        config.mooglemail_cookie().context("没有可用的 MoogleMail 凭据")?.to_owned()
-    };
-    MoogleMailCredentialSet::from_cookies(vec![
-        MoogleMailCookie::new(cookie).map_err(|error| anyhow::anyhow!(error.to_string()))?,
-    ])
-    .map_err(|error| anyhow::anyhow!(error.to_string()))
+/// Worker 侧稳定错误转为可执行提示；暂停与能力不可用不得重试成直连。
+fn remote_read_error(error: WorkerRemoteReadError) -> anyhow::Error {
+    match error {
+        WorkerRemoteReadError::Paused => anyhow::anyhow!(
+            "外部访问已暂停（external_access_paused）；请等待恢复或到期后重试，不会回退到直连"
+        ),
+        WorkerRemoteReadError::Unavailable => anyhow::anyhow!(
+            "Worker control 不可用；Sent 远端读取能力不可用，请先确认 Worker 与 control socket"
+        ),
+        WorkerRemoteReadError::Timeout => anyhow::anyhow!("Worker Sent 核查超时；未取得结论"),
+        WorkerRemoteReadError::Incompatible => anyhow::anyhow!("Worker control 响应不受支持"),
+        WorkerRemoteReadError::Invalid => anyhow::anyhow!("Sent 核查请求无效"),
+    }
 }

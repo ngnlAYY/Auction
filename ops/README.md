@@ -840,7 +840,8 @@ SQLSTATE 和错误文本用于定位原因，不能据此自动重试、重发�
 `readiness_cache_enabled`（Public/Admin）及
 `metrics_sli_snapshot_enabled`（Worker，默认基线 false）、
 `mooglemail_poll_isolation_enabled`（Worker，默认基线 true）和
-`metrics_reject_forwarded_requests`（三角色，默认基线 true）。
+`metrics_reject_forwarded_requests`（三角色，默认基线 true）以及
+`external_access_paused`（三角色，W1.9 主动暂停外部访问，无 TOML 基线）。
 通过 `auction-cli switch list` 读取 revision，再用稳定命令 ID、期望版本、
 actor 与原因执行 set/clear，参数见[CLI 参考](../apps/auction-cli/README.md#运行时开关)。
 切 classified 前仍须审阅[影子样本](#审计就绪影子观察)，系统不自动推进。
@@ -866,8 +867,30 @@ set 以未过期数据库事实覆盖启动时 TOML；clear 或到期只回到�
 数据库 076 登记 compatible，但首次迁移仍受原停机流程约束；随后切换开关无需重启、
 不受 W7.5 阻挡。程序回退须使用已含 W7.8a 且显式启用兼容模式的旧程序，按
 [程序回退](deploy/RECOVERY.md#程序回退)核对超前区间；旧程序会忽略新开关并使用其
-TOML。M1 Admin 只读；邮件隔离与指标转发已接入第二批，排空预算及迁移模式仍是
-启动配置。W1.9 主动暂停尚未实现，不得将本机制视为已暂停外部请求。
+TOML。M1 Admin 只读；邮件隔离、指标转发与主动暂停已接入第二批，排空预算及迁移模式仍是
+启动配置。
+
+#### 主动暂停外部访问（W1.9）
+
+人工使用账号、事故处置或恢复后安全启动时，用带到期时间的暂停标记阻止**全部**新外部请求：
+
+```bash
+auction-cli --config-dir /etc/auction switch set external_access_paused true \
+  --expires-at 2026-11-04T12:00:00Z \
+  --command-id <稳定UUID> --expected-revision <list中的版本> \
+  --actor <操作者说明> --reason <非接触发账号的操作>
+```
+
+- Worker 在每个循环边界判定：MoogleMail 收件与维护、delivery 发送、结算履约、恢复与论坛
+  都不开始新轮次或新批次；Admin 手工装备读取与 CLI `mail inspect-sent` 因改为经 Worker
+  control 执行而同样被拦截（`409 paused` / CLI 明确报“外部访问已暂停”）。
+- 与已有的**按世界暂停收件**并存：按世界暂停只停该世界的业务收件，全局暂停停全部外部访问；
+  两者同时生效时以更严格的全局暂停为准。
+- 暂停只阻止发起新请求，不撤销已进入 sending 围栏或已领取的写入；这些写入按自身 lease
+  与预算完成，不会重发。
+- 到期由数据库事实自动回落（`expire` 收口由 Worker 追加），不需要手工 clear；需要立即恢复时执行
+  `switch clear external_access_paused`。核对方式与其它开关相同：Admin `/config` 卡片 +
+  `auction_runtime_switch_effective_value{switch="external_access_paused"}`。
 
 数据库服务端基线见 [PostgreSQL 18 基线](postgres/README.md)：连接预算、`pg_stat_statements`、慢查询/锁等待日志与热行表 autovacuum；归档在 W10.7 启用。
 

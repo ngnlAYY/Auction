@@ -31,6 +31,27 @@ pub(super) async fn claim(
         WHERE notification_id IN (SELECT notification_id FROM public.lot_watch_pm_deliveries
         WHERE status='sending' AND lease_expires_at <= clock_timestamp() ORDER BY lease_expires_at LIMIT 1 FOR UPDATE SKIP LOCKED)")
         .execute(&mut *tx).await.map_err(sql_error)?;
+    // 提醒资格随 lot 有效截止结束（决策 14）：截止后尚未开始发送的 PM 按预检退役语义收口，
+    // 与 MoogleMail 投递同一规则；已 sending 的行不动，其外部结果只由原 sender 对账。
+    let retired = sqlx::query_scalar::<_, Uuid>(
+        "WITH retired AS (
+        SELECT q.notification_id FROM public.lot_watch_pm_deliveries q
+        JOIN public.lot_watch_notifications n ON n.id=q.notification_id AND n.channel='pm'
+        JOIN public.lots lot ON lot.id=n.lot_id
+        WHERE q.status IN ('pending','claimed') AND q.sending_at IS NULL
+        AND lot.effective_end_at IS NOT NULL AND lot.effective_end_at <= clock_timestamp()
+        ORDER BY q.created_at,q.notification_id LIMIT 100 FOR UPDATE OF q SKIP LOCKED
+    )
+    UPDATE public.lot_watch_pm_deliveries q SET status='suppressed',failure_code='source_invalid',
+        lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,
+        fencing_version=q.fencing_version+1,
+        completed_at=clock_timestamp(),updated_at=clock_timestamp()
+    FROM retired WHERE q.notification_id=retired.notification_id
+    RETURNING q.notification_id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(sql_error)?;
     let token = Uuid::new_v4();
     // 持久领取时间把失败或超时的准备任务排到其他已等待任务之后；UUID 稳定打破并列。
     // release 不清空 claimed_at，重启也不能让最早创建的坏收件人独占每轮名额。
@@ -84,5 +105,12 @@ pub(super) async fn claim(
         })
         .transpose()?;
     tx.commit().await.map_err(sql_error)?;
+    // 只观测已提交的预检退役，不改变队列结果或重试语义。
+    for _ in &retired {
+        store.notification_metrics().observe_stage(
+            auction_application::NotificationKind::LotWatchPm,
+            auction_application::NotificationStage::Retired,
+        );
+    }
     Ok(result)
 }

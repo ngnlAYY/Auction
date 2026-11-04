@@ -49,7 +49,16 @@ pub(super) async fn process(
             .ok()
             .flatten();
         check_claim_deadline(runtime, claim.world, deadline)?;
-        return runtime.store.finish(claim, receipt).await;
+        let recovered = receipt.is_some();
+        let result = runtime.store.finish(claim, receipt).await;
+        if result.is_ok() && recovered {
+            // 只读核对找到原发送回执：这是同一条被超提醒的送达终态。
+            runtime.notifications.observe_stage(
+                auction_application::NotificationKind::LotWatchPm,
+                auction_application::NotificationStage::Sent,
+            );
+        }
+        return result;
     }
     if *drain.borrow() {
         if activity.enabled() {
@@ -119,7 +128,24 @@ pub(super) async fn process(
             .ok()
     };
     check_claim_deadline(runtime, claim.world, deadline)?;
+    let sent = receipt.is_some();
     runtime.store.finish(claim, receipt).await?;
+    // None 表示远端结果未知，不重发：只记录失败原因，仍由人工对账收口。
+    if sent {
+        runtime.notifications.observe_stage(
+            auction_application::NotificationKind::LotWatchPm,
+            auction_application::NotificationStage::Sent,
+        );
+    } else {
+        runtime.notifications.observe_stage(
+            auction_application::NotificationKind::LotWatchPm,
+            auction_application::NotificationStage::Failed,
+        );
+        runtime.notifications.observe_failure(
+            auction_application::NotificationKind::LotWatchPm,
+            auction_application::NotificationFailure::WriteUnknown,
+        );
+    }
     activity.complete();
     Ok(())
 }

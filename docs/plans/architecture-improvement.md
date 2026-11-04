@@ -214,6 +214,11 @@
 | W1.2 | 进行中 | 随本提交 | — | 忙碌诊断去重完成；`write_unknown` 优先淘汰尚未实现 |
 | W7.9 | 已提交 | 随本提交 | — | Public/Admin 对 Worker/Admin 改为 `Wants=`，保留 `After=` 启动顺序；systemd 模板静态门禁；合并部署仍单故障域 |
 | W9.8 | 已提交 | 随本提交 | — | Public 会话上限默认 10；用户行锁内注销最旧活动会话，不删除记录/不改登录 key；五语言“其他设备登录”提示；PG18 并发测试 |
+| W1.7 | 已提交 | 随本提交 | — | 出价被超提醒在 lot 有效截止后、sending 围栏前退役；MM/PM 一致；五语言稿 |
+| W1.9 | 已提交 | 随本提交 | — | `external_access_paused` 运行时开关与到期回退；Worker 各外部轮次 admission 门；已越过 fence 的写入不取消 |
+| W1.10 | 已提交 | 随本提交 | — | Admin 装备读取与 CLI Sent 核查经 Worker control；共享调度/熔断；Worker 不可用明确能力不可用 |
+| W14.1 | 已提交 | 随本提交 | — | 19 类通知目录（触发、收件人、渠道、出队、失效、模板键）与模板注册一致性测试 |
+| W14.8 | 已提交 | 随本提交 | — | 通知 created/retired/suppressed/sent/failed 指标、失败原因、延迟与邮资估算；PM/MM 接入；非结算告警待迁移 |
 | W1 | 进行中 | — | 未部署 | W1.0/W1.1/W1.2 已提交；W1.4 发送基线切片（D3，M3）；其余随 M2b/M3；W1.10 方案已定（决策 40） |
 | W1.0 | 已提交 | `b2ccb9fd` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；完整 Read Mail 观察降频为每小时、维护独立循环、isekai 相位错峰，回退开关 `poll_isolation_enabled`；待用户部署后按“维护不再超时、`mail-maintenance-*` p95 < 60 秒”验收 |
 | W1.4（发送基线切片） | 已提交 | `fa46d605` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 J）实现、Claude 监督；发送前临时 MID 边界 + 前缀扫描，`[worker.mooglemail] sent_baseline_mode` 默认 `shadow`；切换 `watermark` 前须完成浏览器 MID 语义核实与至少一个完整场次周期的影子观察；常规轮水位与每日校验仍随 M3 |

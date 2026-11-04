@@ -40,7 +40,9 @@ impl MailDeliveryEnqueuer for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    enqueue_postgres(store.pool(), &command).await.map_err(ApplicationError::from)
+                    enqueue_postgres(store.pool(), &command, store.notification_metrics())
+                        .await
+                        .map_err(ApplicationError::from)
                 }
             }
         })
@@ -67,11 +69,14 @@ impl MailDeliveryEnqueuer for DatabaseStore {
             }
             match self {
                 #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    enqueue_within_limit_postgres(store.pool(), &command, limit)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+                Self::Postgres(store) => enqueue_within_limit_postgres(
+                    store.pool(),
+                    &command,
+                    limit,
+                    store.notification_metrics(),
+                )
+                .await
+                .map_err(ApplicationError::from),
             }
         })
     }
@@ -113,7 +118,9 @@ impl MailDeliveryEnqueuer for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    prepare_postgres(store.pool(), &command).await.map_err(ApplicationError::from)
+                    prepare_postgres(store.pool(), &command, store.notification_metrics())
+                        .await
+                        .map_err(ApplicationError::from)
                 }
             }
         })
