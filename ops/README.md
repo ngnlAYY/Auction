@@ -752,6 +752,9 @@ D1 仍待线上分类证据确认。部署后由用户执行只读核对，数�
 ## 备份与恢复
 
 例行备份使用 `auction-cli backup scheduled` 配合独立 systemd timer，包含磁盘门禁、本地保留和不可变回执；启用、回退与故障处理见[定时备份](deploy/RECOVERY.md#定时备份)。外部打卡暂缓启用，异机加密上传另行交付；当前仍需把 archive 与 manifest 一起复制到异地。升级前确定恢复点继续使用手动 `backup create/verify`。恢复、重建与演练见[备份与恢复手册](deploy/RECOVERY.md)。
+
+WAL 归档已交付命令与模板（W10.7）：`archive_command` 调用 `auction-cli wal archive` 把段压缩、age 加密后 fsync 到本机暂存，`auction-wal-upload.timer` 每 5 分钟运行 `auction-cli wal upload` 上传 R2 的 `<prefix>/wal/` 并在校验后删除本地副本。`archive_mode` 默认仍为 `off`，开启需要重启 PostgreSQL 并受[停机时段保护](#停机时段保护)约束；顺序、验证与回退见[WAL 归档与时间点恢复](deploy/RECOVERY.md#wal-归档与时间点恢复)。每周物理基础备份尚未交付。
+
 含迁移版本的升级演练使用独立的[迁移演练手册](deploy/MIGRATION-DRILL.md)与[回执模板](deploy/migration-drill-receipt.template.json)，恢复过程仍复用上述手册。
 
 ## 故障排查

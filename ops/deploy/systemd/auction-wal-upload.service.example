@@ -1,0 +1,32 @@
+# W10.7 暂存 WAL 上传器：把 PostgreSQL 归档到本机暂存的密文上传 R2 的 wal/ 前缀，校验后删除本地副本。
+# 与 auction-backup.service 共用 auction 账号、配置目录与 R2 令牌；不读写数据库。
+# 暂存目录由归档命令（postgres 账号）写入，必须预建为 postgres:auction、2770（见 RECOVERY.md）。
+[Unit]
+Description=Auction WAL staging uploader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=auction
+Group=auction
+WorkingDirectory=/opt/auction
+UMask=0077
+ExecStart=/opt/auction/bin/auction-cli --config-dir /etc/auction wal upload --staging-dir /var/lib/auction/wal-staging --budget-seconds 300
+Restart=no
+# CLI 总预算 300 秒；额外余量留给进程收口与 journal 落盘。
+TimeoutStartSec=6min
+TimeoutStopSec=60s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/auction/wal-staging
+StandardOutput=journal
+StandardError=journal

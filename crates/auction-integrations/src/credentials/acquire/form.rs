@@ -293,3 +293,127 @@ fn selector(value: &str) -> Result<Selector, ApplicationError> {
         unavailable()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+    use auction_application::AdminCredentialLogin;
+
+    fn page_url() -> Url {
+        Url::parse("https://forums.e-hentai.org/index.php").unwrap()
+    }
+
+    fn session() -> String {
+        "0123456789abcdef0123456789abcdef".to_owned()
+    }
+
+    fn login_page(method: &str, action: &str, fields: &str) -> String {
+        format!(
+            r#"<html><head><title>Login</title></head><body><form method="{method}" action="{action}">{fields}</form></body></html>"#
+        )
+    }
+
+    fn valid_fields() -> &'static str {
+        r#"<input type="hidden" name="referer" value="/index.php?act=Login&amp;CODE=00">
+<input type="hidden" name="b" value="">
+<input type="hidden" name="bt" value="">
+<input type="text" name="UserName">
+<input type="password" name="PassWord">
+<input type="checkbox" name="CookieDate" value="1">"#
+    }
+
+    fn login() -> AdminCredentialLogin {
+        AdminCredentialLogin::new("fixture-user".to_owned(), "fixture-password".to_owned())
+            .unwrap_or_else(|error| panic!("测试凭据必须合法: {error:?}"))
+    }
+
+    #[test]
+    fn parses_the_closed_login_form_and_encodes_only_known_fields() {
+        let action = format!("index.php?act=Login&CODE=01&s={}", session());
+        let body = login_page("POST", &action, valid_fields());
+        let form = parse(body.as_bytes(), &page_url(), &page_url())
+            .unwrap_or_else(|error| panic!("真实登录页结构必须可解析: {error:?}"));
+
+        let (url, encoded) = form
+            .encode(&login())
+            .unwrap_or_else(|error| panic!("合法登录表单必须可编码: {error:?}"));
+        let expected = page_url()
+            .join(&action)
+            .unwrap_or_else(|error| panic!("测试动作必须可解析: {error:?}"));
+        assert_eq!(url, expected);
+        let encoded = String::from_utf8(encoded)
+            .unwrap_or_else(|error| panic!("表单编码必须是 UTF-8: {error:?}"));
+        assert!(encoded.contains("UserName=fixture-user"));
+        assert!(encoded.contains("PassWord=fixture-password"));
+        assert!(encoded.contains("CookieDate=1"));
+        assert!(encoded.contains("referer=%2Findex.php%3Fact%3DLogin%26CODE%3D00"));
+        // Privacy 明确不提交，页面 submit 按钮也不作为认证字段。
+        assert!(!encoded.contains("Privacy"));
+        assert!(!encoded.contains("submit"));
+    }
+
+    #[test]
+    fn rejects_challenge_pages_wrong_actions_and_extra_or_duplicate_fields() {
+        let action = format!("index.php?act=Login&CODE=01&s={}", session());
+        let challenge = r#"<html><head><title>Just a moment...</title></head><body><form method="post" action="index.php?act=Login&CODE=01"><input type="text" name="UserName"><input type="password" name="PassWord"><input type="checkbox" name="CookieDate" value="1"></form></body></html>"#;
+        assert!(parse(challenge.as_bytes(), &page_url(), &page_url()).is_err());
+
+        let wrong_code = login_page("POST", "index.php?act=Login&CODE=02", valid_fields());
+        assert!(parse(wrong_code.as_bytes(), &page_url(), &page_url()).is_err());
+
+        let get_form = login_page("GET", &action, valid_fields());
+        assert!(parse(get_form.as_bytes(), &page_url(), &page_url()).is_err());
+
+        let missing_referer = login_page(
+            "POST",
+            &action,
+            r#"<input type="hidden" name="b" value=""><input type="hidden" name="bt" value=""><input type="text" name="UserName"><input type="password" name="PassWord"><input type="checkbox" name="CookieDate" value="1">"#,
+        );
+        assert!(parse(missing_referer.as_bytes(), &page_url(), &page_url()).is_err());
+
+        let unknown_field = login_page(
+            "POST",
+            &action,
+            &format!("{}<input type=\"hidden\" name=\"extra\" value=\"123456\">", valid_fields()),
+        );
+        assert!(parse(unknown_field.as_bytes(), &page_url(), &page_url()).is_err());
+
+        let duplicate = format!(
+            r#"<html><body><form method="post" action="{action}">{}</form><form method="post" action="{action}">{}</form></body></html>"#,
+            valid_fields(),
+            valid_fields()
+        );
+        assert!(parse(duplicate.as_bytes(), &page_url(), &page_url()).is_err());
+    }
+
+    #[test]
+    fn login_response_requires_explicit_rejection_or_challenge_evidence() {
+        // 普通 200 登录页本身不能证明密码错误。
+        assert!(
+            check_response(
+                br#"<html><body><div class="tablepad">Welcome back</div></body></html>"#,
+                StatusCode::OK,
+                true
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            check_response(b"", StatusCode::TOO_MANY_REQUESTS, true).unwrap_err().to_string(),
+            AdminCredentialError::LoginBusy.to_string()
+        );
+        assert_eq!(
+            check_response(b"", StatusCode::UNAUTHORIZED, true).unwrap_err().to_string(),
+            AdminCredentialError::LoginRejected.to_string()
+        );
+        assert!(
+            check_response(
+                br#"<html><body><div class="errorwrap">Password was wrong</div></body></html>"#,
+                StatusCode::OK,
+                true
+            )
+            .is_err()
+        );
+        assert!(check_response(b"", StatusCode::OK, true).is_ok());
+    }
+}
