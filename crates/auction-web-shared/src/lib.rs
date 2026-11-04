@@ -24,7 +24,10 @@ pub use i18n::{LanguagePicker, SUPPORTED_LOCALES, SupportedLocale, use_locale_ef
 pub use theme::{THEME_STORAGE_KEY, Theme, ThemePicker, use_theme_effects};
 
 pub use a11y::{use_dialog_focus_trap, use_route_focus};
-pub use bootstrap::{install_panic_hook, use_app_boot_ready};
+pub use bootstrap::{
+    BROWSER_ERROR_ROUTE, BUILD_ID, BrowserErrorClass, build_id_is_valid, install_panic_hook,
+    report_browser_error, report_browser_error_with_build_id, use_app_boot_ready,
+};
 pub use clock::{SecondTicker, use_second_tick, use_second_ticker};
 pub use commands::{ConfirmCommand, use_confirm_command};
 pub use errors::{BaseErrorKind, base_api_error_message, classify_base_error};

@@ -118,7 +118,8 @@ pub struct SettlementFulfillmentClaim {
     pub settlement_line: Option<SettlementLine>,
     /// 与明细同源的冻结模式；v2 账单必须明确名义比例与实分奖池优惠的区别。
     pub settlement_mode: Option<SettlementMode>,
-    /// recovery case 在结算事务内冻结的付款期限；只用于正文呈现，逾期判定仍由 recovery owner 负责。
+    /// recovery case 在结算事务内冻结的付款期限；只用于正文呈现与证据轮询聚焦，
+    /// 逾期判定仍由 recovery owner 负责。
     /// 该值缺失只可能是没有 recovery 行的历史义务，因此不进入必填不变量。
     pub payment_deadline_at: Option<DateTime<Utc>>,
     pub submission_id: Option<SubmissionId>,
@@ -403,6 +404,9 @@ pub trait SettlementFulfillmentCommandPort: Send + Sync {
         SettlementFulfillmentPhaseResult<SettlementFulfillmentActivationResult>,
     >;
 
+    /// 读取发送回执并收口证据。`retry_at` 是调度器按配置基础间隔给出的最早重试点：
+    /// 证据未观察的延期会按履约年龄指数退避（上限 10 分钟，付款截止前后回到基础间隔），
+    /// 依赖与身份错误仍按该基础间隔重试；COD/货款等待继续沿用共享追踪窗口的对齐时刻。
     fn reconcile(
         &self,
         claim: SettlementFulfillmentClaim,

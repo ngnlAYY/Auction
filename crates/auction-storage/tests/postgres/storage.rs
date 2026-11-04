@@ -6,7 +6,7 @@
 //! `support` 负责临时集群、模板库迁移与逐测试克隆库；测试本身只使用公开的存储入口。
 #![cfg(feature = "test-db")]
 
-mod support;
+use crate::support;
 
 use auction_application::WorldReader;
 use auction_storage::postgres_expected_migration_version;

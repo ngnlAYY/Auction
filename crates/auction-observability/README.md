@@ -63,7 +63,9 @@ Public/Admin sink 不安装 Worker observer，不增加 W0.3 计数。
 | `auction_http_requests_total` | Public/Admin HTTP 响应数，label 为 `role`、`route`、`method`、精确状态码 `status` |
 | `auction_http_request_duration_seconds` | HTTP 响应生成耗时，label 为 `role`、`route`、`method` |
 | `auction_websocket_connections`、`auction_websocket_connections_total` | Public 已升级连接的当前数与累计数，label 为 `role` |
-| `auction_http_rate_limit_rejections_total` | 实际频率拒绝次数，label 为 `role`、`kind`（`login`、`mutation`、`realtime`） |
+| `auction_http_rate_limit_rejections_total` | 实际频率拒绝次数，label 为 `role`、`kind`（`login`、`mutation`、`realtime`、`browser_error`） |
+| `auction_browser_errors_total` | 已接受的浏览器错误信标，label 为 `role`、`class`（`wasm_panic`、`dto_decode`、`realtime_protocol`） |
+| `auction_browser_error_build_mismatches_total` | 上报构建号与当前进程构建号不一致的信标数，label 为 `role`；上报值不进入标签 |
 | `auction_worker_loop_iterations_total`、`auction_worker_loop_iteration_duration_seconds`、`auction_worker_schedule_delay_seconds` | Worker 各循环的轮次、耗时与调度延迟 |
 | `auction_worker_batch_items_total`、`auction_worker_batch_capacity_total`、`auction_worker_batch_saturated_total` | 批次利用率与饱和次数 |
 | `auction_worker_retry_attempts_total`、`auction_worker_retry_mode_bound` | 重试次数与重试模式 |

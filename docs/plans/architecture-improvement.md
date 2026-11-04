@@ -196,6 +196,7 @@
 | W0.3 | 已提交 | `46eb1c43` | 未部署 | 同上；`auction_worker_unpersisted_error_total{loop,kind}`，口径为未确认形成持久失败、退避或人工处置（提交结果未知计入），先于日志去重累加；PM 暂归 `forum` loop |
 | W0.10 | 已提交 | `421ee64c` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；`common.toml [metrics]` 三角色可选 loopback 出口（只允许 `127.0.0.1`，示例 19100/19101/19102，省略即关闭），复用 W0.9 `/metrics` 契约，出口故障只降级采集；`ops/monitoring/` 提供 Prometheus、exporter 查询与 unit 示例；待用户按 `ops/README.md` 安装 Prometheus、node_exporter、postgres_exporter 并启用出口后验收；W0.13 随后续批次 |
 | W13.3a | 已提交 | `7a532130` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 N）实现、Claude 监督；release 开启 `overflow-checks`（`wasm-release` 继承，保留 abort），原生装配根与 CLI 安装安全 panic hook（target `auction::panic`，只输出线程、位置与 `&'static str` payload），顶层 JoinError 固定分类；Worker 已有子任务收口新增 `auction_worker_task_panics_total{loop}`，处置与计数不变；逐 owner panic 计次拆为 W13.3b 待用户决定 |
+| W0.16 | 已提交 | 随本提交 | — | 匿名浏览器错误信标：闭集 class/build、限流、空 body、只累加指标；WASM panic/DTO/实时协议接入 |
 | W0.15 | 已提交 | 随本提交 | — | 共享影子运行端口、`auction_shadow_*` 指标与结构化日志；闭集 owner/branch、零初始化、不可比较样本不伪造覆盖；无生产调用点 |
 | W13.3b | 已提交 | 随本提交 | — | panic 指标按 `loop,owner` 闭集；生命周期/结算首 panic 写 fenced terminal，履约/recovery 走 manual_reconcile，delivery 按 claimed/sending 区分；slow proxy/关键循环失败关闭；无迁移/无新终态 CLI |
 | W0.6 | 已提交 | `5ebfc1c8` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 K）实现、Claude 监督；`[database_profiles] mode` 默认 `profiled`（`legacy` 为旧路径），服务池 16、维护池 4、固定 `application_name`，`deployment check` 汇总连接预算；服务超时默认关闭，启用须显式填写阈值且以 W0.14 切换 `classified` 为前置（见待决定）；21 个事务 owner 的尝试/冲突/重试/耗尽指标，Worker 循环连接获取与持有指标；切换需重启 |
@@ -222,6 +223,7 @@
 | W14.11 | 已提交 | 随本提交 | — | 慢代理可行动期仅记 pending，耗尽后按行动结果发提醒；截止清理 |
 | W1.6 | 已提交 | 随本提交 | — | 论坛客户端复用 PriorityGate，写流程前台、读后台；保留论坛自身 429/未知写入分类 |
 | W14.9 | 已提交 | 随本提交 | — | 零资产收件人不存在失败关闭；发送前用户名改名退役 lot_watch 提醒 |
+| W1.5 | 已提交 | 随本提交 | — | 履约证据按 retry_count 1→2→4→8→10 分钟退避，付款截止前后回到基础频率；不改期限/策略 |
 | W1.7 | 已提交 | 随本提交 | — | 出价被超提醒在 lot 有效截止后、sending 围栏前退役；MM/PM 一致；五语言稿 |
 | W1.9 | 已提交 | 随本提交 | — | `external_access_paused` 运行时开关与到期回退；Worker 各外部轮次 admission 门；已越过 fence 的写入不取消 |
 | W1.10 | 已提交 | 随本提交 | — | Admin 装备读取与 CLI Sent 核查经 Worker control；共享调度/熔断；Worker 不可用明确能力不可用 |

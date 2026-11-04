@@ -31,7 +31,7 @@ pub use audit::{
     AuditFailureClass, AuditFailureKind, AuditFailureObservation, AuditMetricsSnapshot,
     AuditMetricsSource, AuditSqlstateClass,
 };
-pub use http::{HttpRateLimitKind, HttpRecorder, WebSocketConnectionGuard};
+pub use http::{BrowserErrorClass, HttpRateLimitKind, HttpRecorder, WebSocketConnectionGuard};
 pub use migration::{MigrationReadinessBranch, MigrationReadinessRecorder};
 pub use process::ProcessMetrics;
 pub use readiness::{ReadinessCacheOutcome, ReadinessCheckResult, ReadinessRecorder};

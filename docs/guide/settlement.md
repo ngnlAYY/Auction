@@ -83,6 +83,8 @@ Worker 的“结算履约”循环领取可执行义务，按 `pending → prepa
 
 满足（`satisfied`）后解除依赖它的义务（例如 main 买方付款后、isekai 装备交付完成后，`SellerPayout` 变为 ready）。证据不一致或结果未知时转 `manual_reconcile`，在 Admin“结算报表”中处理。
 
+证据未观察时不空转：等待 delivery 终态、Sent 回执或买家/卖家在 MoogleMail 领取资产的延期，按该义务已持久化的延期次数指数放宽（`worker.fulfillment.retry_delay_seconds` 起每档翻倍），最多 10 分钟；COD/货款仍按共享追踪窗口（`evidence_poll_seconds`）对齐读取。付款截止（`payment_deadline_at`）前后一个上限周期回到基础间隔，因此迟到付款的确认与卖方货款最多延后 10 分钟。退避只决定轮询时刻：付款期限、逾期判定与恢复策略都不变；依赖或身份错误仍按配置的基础间隔重试。
+
 结算相关邮件主题带义务 ID，例如 `auction equipment delivery [<义务 UUID>]`、`auction payment request [<义务 UUID>]`。买方拒收或 COD 过期被退回时，退件回到 Bot 收件箱，邮件处理器据主题识别为对应义务的退件证据（见[邮件流程](mail-flows.md#结算退件)）。
 
 新建的 main 装备 COD 邮件正文包含装备名、价格明细（成交价、附加费或补偿、应付金额）与冻结付款期限；isekai 载体付款邮件展示装备名、含载体 Credit 的 COD 面额与同一冻结期限；卖方货款与买方退款邮件写明对应装备名与金额。付款期限取自结算事务内建立的恢复记录（`payment_deadline_at`），只用于正文呈现，不改变逾期判定。各类邮件正文模板可在 `[worker.mooglemail.mail_templates]`（或 runtime 文件）中定制，已冻结的旧投递保留原载荷，正文缺项时按中性文案呈现。

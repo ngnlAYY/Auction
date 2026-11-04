@@ -35,6 +35,8 @@ pub use consistency_inspection::{
 };
 #[cfg(feature = "postgres")]
 mod equipment_loss;
+#[cfg(feature = "test-db")]
+pub use equipment_loss::delivery_snapshot_equality_sql;
 #[cfg(feature = "postgres")]
 mod intake_target;
 #[cfg(feature = "postgres")]
@@ -157,6 +159,8 @@ mod lots;
 pub use lots::DatabasePublicLotReader;
 #[cfg(feature = "postgres")]
 mod legacy_self_proof;
+#[cfg(feature = "test-db")]
+pub use legacy_self_proof::{trusted_delivery_predicate_sql, trusted_obligation_equality_sql};
 #[cfg(feature = "postgres")]
 mod operations_alert;
 #[cfg(feature = "postgres")]

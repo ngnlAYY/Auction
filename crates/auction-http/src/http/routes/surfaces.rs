@@ -63,6 +63,7 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         .route("/api/v1/price-history", get(list_price_history))
         .route_layer(middleware::from_fn(response_cache::no_cache));
     let no_store_routes = Router::<PublicApiState>::new()
+        .route("/api/v1/browser-errors", post(browser_errors::public))
         .route("/api/v1/registration-info", get(registration::get))
         .route("/api/v1/forum/sync-status", get(forum::sync_status))
         .route("/api/v1/auctions/{auction_id}/forum", get(forum::get))
@@ -133,6 +134,7 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
     use method_strict::{MethodRouterExt as _, get, patch, post, put};
 
     let routes = Router::<AdminApiState>::new()
+        .route("/api/v1/browser-errors", post(browser_errors::admin))
         .route(
             "/api/v1/admin/session",
             axum::routing::get(current_admin_session)

@@ -14,16 +14,36 @@ pub enum HttpRateLimitKind {
     Login,
     Mutation,
     Realtime,
+    BrowserError,
 }
 
 impl HttpRateLimitKind {
-    const ALL: [Self; 3] = [Self::Login, Self::Mutation, Self::Realtime];
+    const ALL: [Self; 4] = [Self::Login, Self::Mutation, Self::Realtime, Self::BrowserError];
 
     const fn label(self) -> &'static str {
         match self {
             Self::Login => "login",
             Self::Mutation => "mutation",
             Self::Realtime => "realtime",
+            Self::BrowserError => "browser_error",
+        }
+    }
+}
+
+/// 浏览器错误信标的固定类别；只允许产品内定义的三类，原始错误正文不进入指标。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BrowserErrorClass {
+    WasmPanic,
+    DtoDecode,
+    RealtimeProtocol,
+}
+
+impl BrowserErrorClass {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::WasmPanic => "wasm_panic",
+            Self::DtoDecode => "dto_decode",
+            Self::RealtimeProtocol => "realtime_protocol",
         }
     }
 }
@@ -38,6 +58,8 @@ struct PrometheusHttpRecorder {
     requests: IntCounterVec,
     durations: HistogramVec,
     rate_limit_rejections: [IntCounter; HttpRateLimitKind::ALL.len()],
+    browser_errors: IntCounterVec,
+    browser_error_build_mismatches: IntCounter,
     websocket: Option<WebSocketMetrics>,
 }
 
@@ -80,9 +102,30 @@ impl HttpRecorder {
         .map_err(MetricsError::Registry)?;
         let rate_limit_rejections =
             HttpRateLimitKind::ALL.map(|kind| rejections.with_label_values(&[kind.label()]));
+        let browser_errors = IntCounterVec::new(
+            Opts::new(
+                "auction_browser_errors_total",
+                "Total accepted browser error beacons by fixed class.",
+            )
+            .const_label("role", role),
+            &["class"],
+        )
+        .map_err(MetricsError::Registry)?;
+        let browser_error_build_mismatches = IntCounter::with_opts(
+            Opts::new(
+                "auction_browser_error_build_mismatches_total",
+                "Total accepted browser error beacons whose build id is not the current process build.",
+            )
+            .const_label("role", role),
+        )
+        .map_err(MetricsError::Registry)?;
         registry.register(Box::new(requests.clone())).map_err(MetricsError::Registry)?;
         registry.register(Box::new(durations.clone())).map_err(MetricsError::Registry)?;
         registry.register(Box::new(rejections)).map_err(MetricsError::Registry)?;
+        registry.register(Box::new(browser_errors.clone())).map_err(MetricsError::Registry)?;
+        registry
+            .register(Box::new(browser_error_build_mismatches.clone()))
+            .map_err(MetricsError::Registry)?;
         let websocket = if role == "public" {
             let connections = IntGauge::with_opts(
                 Opts::new(
@@ -111,6 +154,8 @@ impl HttpRecorder {
                 requests,
                 durations,
                 rate_limit_rejections,
+                browser_errors,
+                browser_error_build_mismatches,
                 websocket,
             })),
         })
@@ -144,6 +189,20 @@ impl HttpRecorder {
     pub fn observe_rate_limit_rejection(&self, kind: HttpRateLimitKind) {
         if let Some(inner) = &self.inner {
             inner.rate_limit_rejections[kind as usize].inc();
+        }
+    }
+
+    /// 记录一条已通过格式与限流校验的浏览器错误信标；类别是闭集，不接收原始错误正文。
+    pub fn observe_browser_error(&self, class: BrowserErrorClass) {
+        if let Some(inner) = &self.inner {
+            inner.browser_errors.with_label_values(&[class.label()]).inc();
+        }
+    }
+
+    /// 构建号不一致只累加固定计数，不把上报的构建号写进标签，避免无界标签空间。
+    pub fn observe_browser_error_build_mismatch(&self) {
+        if let Some(inner) = &self.inner {
+            inner.browser_error_build_mismatches.inc();
         }
     }
 

@@ -18,10 +18,10 @@ pub use logging::{
 };
 pub use metrics::{
     AuditFailureClass, AuditFailureKind, AuditFailureObservation, AuditMetricsSnapshot,
-    AuditMetricsSource, AuditSqlstateClass, BusinessEvent, BusinessOutcome, BusinessRecorder,
-    DatabaseAcquireOutcome, DatabaseConflictSite, DatabaseConnectionGuard, DatabaseRecorder,
-    DatabaseReservedPurpose, DatabaseTransactionOwner, DatabaseTransactionPhase, HttpRateLimitKind,
-    HttpRecorder, METRICS_ROUTE, MetricsError, MigrationReadinessBranch,
+    AuditMetricsSource, AuditSqlstateClass, BrowserErrorClass, BusinessEvent, BusinessOutcome,
+    BusinessRecorder, DatabaseAcquireOutcome, DatabaseConflictSite, DatabaseConnectionGuard,
+    DatabaseRecorder, DatabaseReservedPurpose, DatabaseTransactionOwner, DatabaseTransactionPhase,
+    HttpRateLimitKind, HttpRecorder, METRICS_ROUTE, MetricsError, MigrationReadinessBranch,
     MigrationReadinessRecorder, PoolMetricsBackend, PoolMetricsSnapshot, PoolMetricsSource,
     ProcessMetrics, ReadinessCacheOutcome, ReadinessCheckResult, ReadinessRecorder,
     ShutdownCriticalKind, ShutdownOutcome, ShutdownPhase, ShutdownReason, ShutdownRecorder,

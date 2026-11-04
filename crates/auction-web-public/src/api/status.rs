@@ -3,6 +3,7 @@
 //! 这里不泄露后端错误正文，轮询生命周期仍由页面 owner 管理。
 
 use auction_contracts::{HealthProbeResponse, HealthReadyData};
+use auction_web_shared::{BrowserErrorClass, report_browser_error};
 use gloo_net::http::Request;
 
 use super::{TransportError, send_request};
@@ -19,7 +20,9 @@ pub(crate) async fn fetch_public_readiness() -> Result<bool, String> {
     .await
     .map_err(|error| error.code().to_owned())?;
     let response_ok = response.ok();
-    let payload: HealthProbeResponse<HealthReadyData> =
-        response.json().await.map_err(|_| "invalid_response".to_owned())?;
+    let payload: HealthProbeResponse<HealthReadyData> = response.json().await.map_err(|_| {
+        report_browser_error(BrowserErrorClass::DtoDecode);
+        "invalid_response".to_owned()
+    })?;
     Ok(response_ok && payload.data.ready)
 }

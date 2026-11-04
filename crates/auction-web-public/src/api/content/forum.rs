@@ -5,6 +5,7 @@ use url::Url;
 
 pub(crate) use auction_contracts::PublicForumResponse as ForumThread;
 use auction_contracts::PublicForumSyncStatusResponse;
+use auction_web_shared::{BrowserErrorClass, report_browser_error};
 
 use super::{ApiResponse, send_get};
 
@@ -16,7 +17,10 @@ pub(crate) async fn fetch_forum_sync_enabled() -> Result<bool, String> {
         return Err(format!("HTTP {}", response.status()));
     }
     let payload: ApiResponse<PublicForumSyncStatusResponse> =
-        response.json().await.map_err(|error| error.to_string())?;
+        response.json().await.map_err(|error| {
+            report_browser_error(BrowserErrorClass::DtoDecode);
+            error.to_string()
+        })?;
     Ok(payload.data.enabled)
 }
 
@@ -26,9 +30,12 @@ pub(crate) async fn fetch_forum_thread(auction_id: String) -> Result<ForumThread
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<ForumThread> =
-        response.json().await.map_err(|error| error.to_string())?;
+    let payload: ApiResponse<ForumThread> = response.json().await.map_err(|error| {
+        report_browser_error(BrowserErrorClass::DtoDecode);
+        error.to_string()
+    })?;
     if !valid_forum_thread(&payload.data, &auction_id) {
+        report_browser_error(BrowserErrorClass::DtoDecode);
         return Err("invalid_response".to_owned());
     }
     Ok(payload.data)
