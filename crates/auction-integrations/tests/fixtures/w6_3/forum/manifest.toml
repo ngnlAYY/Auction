@@ -2,7 +2,7 @@
 schema_version = 1
 capture_date = "2026-11-04"
 source = "forums.e-hentai.org 公开页面（无 Cookie、无登录）"
-sanitization = "玩家名与账号 UID 替换；URL 中的 32 位 s 会话值替换为等长 fixture；保留主题、帖子、作者链接、分页和表单结构。"
+sanitization = "玩家名、正文中的卖家/作者身份与账号 UID 替换；URL 中的 32 位 s 会话值替换为等长 fixture；保留主题、帖子、作者链接、分页和表单结构。"
 
 [[fixtures]]
 file = "topic-302133.html"
@@ -11,7 +11,7 @@ class = "forum_topic"
 parser_entry_point = "extract_html_page"
 sanitization = "见顶层 sanitization；仅公开主题页。"
 bytes = 38296
-sha256 = "e2c40f0602ba19e8e12410486f062f05579ca56c1e2ad9468e52b3afa1f463e0"
+sha256 = "55b29ab302a0aa74c7b4c1a01f231c48e1772002313c33048249a17b0fc59157"
 
 [[fixtures]]
 file = "login.html"
