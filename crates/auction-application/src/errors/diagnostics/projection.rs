@@ -5,6 +5,169 @@
 pub struct SafeErrorKind(&'static str);
 
 impl SafeErrorKind {
+    /// 其他 HTTP 5xx 响应；不读取响应正文。
+    pub const HTTP_SERVER_ERROR: Self = Self("http_server_error");
+
+    /// 远端认证拒绝。
+    pub const REMOTE_AUTHENTICATION_ERROR: Self = Self("remote_authentication_error");
+
+    /// 远端收件人无效。
+    pub const REMOTE_RECIPIENT_INVALID: Self = Self("remote_recipient_invalid");
+
+    /// 远端时间与本地观测偏差。
+    pub const CLOCK_SKEW: Self = Self("clock_skew");
+
+    /// 影子候选集合不同。
+    pub const SHADOW_MISMATCH: Self = Self("shadow_mismatch");
+
+    /// 装备来源闭集原因：equipment_name_invalid。
+    pub const EQUIPMENT_NAME_INVALID: Self = Self("equipment_name_invalid");
+
+    /// 装备来源闭集原因：equipment_quality_unknown。
+    pub const EQUIPMENT_QUALITY_UNKNOWN: Self = Self("equipment_quality_unknown");
+
+    /// 装备来源闭集原因：equipment_kind_unknown。
+    pub const EQUIPMENT_KIND_UNKNOWN: Self = Self("equipment_kind_unknown");
+
+    /// 装备来源闭集原因：equipment_category_unknown。
+    pub const EQUIPMENT_CATEGORY_UNKNOWN: Self = Self("equipment_category_unknown");
+
+    /// 装备来源闭集原因：equipment_category_mismatch。
+    pub const EQUIPMENT_CATEGORY_MISMATCH: Self = Self("equipment_category_mismatch");
+
+    /// 装备来源闭集原因：equipment_level_invalid。
+    pub const EQUIPMENT_LEVEL_INVALID: Self = Self("equipment_level_invalid");
+
+    /// 装备来源闭集原因：equipment_page_structure_invalid。
+    pub const EQUIPMENT_PAGE_STRUCTURE_INVALID: Self = Self("equipment_page_structure_invalid");
+
+    /// 装备来源闭集原因：equipment_attributes_invalid。
+    pub const EQUIPMENT_ATTRIBUTES_INVALID: Self = Self("equipment_attributes_invalid");
+
+    /// 装备来源闭集原因：equipment_canonical_mismatch。
+    pub const EQUIPMENT_CANONICAL_MISMATCH: Self = Self("equipment_canonical_mismatch");
+
+    /// 运行时开关事实损坏。
+    pub const RUNTIME_SWITCH_CORRUPT: Self = Self("runtime_switch_corrupt");
+
+    /// 运行时开关提交结果未知。
+    pub const RUNTIME_SWITCH_OUTCOME_UNKNOWN: Self = Self("runtime_switch_outcome_unknown");
+
+    /// Sent 基线闭集理由 InvalidMid。
+    pub const SENT_BASELINE_INVALID_MID: Self = Self("sent_baseline_invalid_mid");
+
+    /// Sent 基线闭集理由 OrderViolation。
+    pub const SENT_BASELINE_ORDER_VIOLATION: Self = Self("sent_baseline_order_violation");
+
+    /// Sent 基线闭集理由 PageDiscontinuity。
+    pub const SENT_BASELINE_PAGE_DISCONTINUITY: Self = Self("sent_baseline_page_discontinuity");
+
+    /// Sent 基线闭集理由 AnchorMissing。
+    pub const SENT_BASELINE_ANCHOR_MISSING: Self = Self("sent_baseline_anchor_missing");
+
+    /// Sent 基线闭集理由 AnchorChanged。
+    pub const SENT_BASELINE_ANCHOR_CHANGED: Self = Self("sent_baseline_anchor_changed");
+
+    /// Sent 基线闭集理由 PageLimit。
+    pub const SENT_BASELINE_PAGE_LIMIT: Self = Self("sent_baseline_page_limit");
+
+    /// Sent 基线闭集理由 Timeout。
+    pub const SENT_BASELINE_TIMEOUT: Self = Self("sent_baseline_timeout");
+
+    /// Sent 基线闭集理由 ReadUnavailable。
+    pub const SENT_BASELINE_READ_UNAVAILABLE: Self = Self("sent_baseline_read_unavailable");
+
+    /// Sent 基线闭集理由 CacheBoundaryDelta。
+    pub const SENT_BASELINE_CACHE_BOUNDARY_DELTA: Self = Self("sent_baseline_cache_boundary_delta");
+
+    /// Sent 基线闭集理由 BoundaryUnavailable。
+    pub const SENT_BASELINE_BOUNDARY_UNAVAILABLE: Self = Self("sent_baseline_boundary_unavailable");
+
+    /// Sent 基线闭集理由 ScopeChanged。
+    pub const SENT_BASELINE_SCOPE_CHANGED: Self = Self("sent_baseline_scope_changed");
+
+    /// Sent 基线闭集理由 ResponseHintConflict。
+    pub const SENT_BASELINE_RESPONSE_HINT_CONFLICT: Self =
+        Self("sent_baseline_response_hint_conflict");
+
+    /// Sent 基线闭集理由 Canceled。
+    pub const SENT_BASELINE_CANCELED: Self = Self("sent_baseline_canceled");
+
+    /// 本地 I/O 失败。
+    pub const IO_ERROR: Self = Self("io_error");
+
+    /// 密码运算失败。
+    pub const CRYPTOGRAPHIC_ERROR: Self = Self("cryptographic_error");
+
+    /// 外部响应字段解析失败。
+    pub const RESPONSE_PARSE_ERROR: Self = Self("response_parse_error");
+
+    /// 请求或受限头字段编码失败。
+    pub const REQUEST_ENCODING_ERROR: Self = Self("request_encoding_error");
+
+    /// 远端正文传输失败。
+    pub const REMOTE_BODY_ERROR: Self = Self("remote_body_error");
+
+    /// 远端传输失败。
+    pub const REMOTE_TRANSPORT_ERROR: Self = Self("remote_transport_error");
+
+    /// 凭据所有权不可用。
+    pub const CREDENTIAL_UNAVAILABLE: Self = Self("credential_unavailable");
+
+    /// 远端会话已失效。
+    pub const REMOTE_SESSION_EXPIRED: Self = Self("remote_session_expired");
+
+    /// 远端账号忙。
+    pub const REMOTE_ACCOUNT_BUSY: Self = Self("remote_account_busy");
+
+    /// 远端限流。
+    pub const REMOTE_RATE_LIMITED: Self = Self("remote_rate_limited");
+
+    /// Sent 扫描页数预算耗尽。
+    pub const SENT_SCAN_PAGE_LIMIT: Self = Self("sent_scan_page_limit");
+
+    /// Sent 扫描时间预算耗尽。
+    pub const SENT_SCAN_TIMEOUT: Self = Self("sent_scan_timeout");
+
+    /// 未确认持久化前置事实。
+    pub const PERSISTENCE_UNAVAILABLE: Self = Self("persistence_unavailable");
+
+    /// 远端响应超限。
+    pub const REMOTE_RESPONSE_TOO_LARGE: Self = Self("remote_response_too_large");
+
+    /// 远端协议结构不符。
+    pub const REMOTE_PROTOCOL_ERROR: Self = Self("remote_protocol_error");
+
+    /// 远端身份不匹配。
+    pub const REMOTE_IDENTITY_MISMATCH: Self = Self("remote_identity_mismatch");
+
+    /// 远端身份未获证明。
+    pub const REMOTE_IDENTITY_UNPROVEN: Self = Self("remote_identity_unproven");
+
+    /// 外写结果未知。
+    pub const REMOTE_WRITE_UNKNOWN: Self = Self("remote_write_unknown");
+
+    /// 远端交互验证。
+    pub const REMOTE_CHALLENGE: Self = Self("remote_challenge");
+
+    /// 远端主题已锁定。
+    pub const REMOTE_TOPIC_LOCKED: Self = Self("remote_topic_locked");
+
+    /// 远端拒绝权限。
+    pub const REMOTE_PERMISSION_DENIED: Self = Self("remote_permission_denied");
+
+    /// 隔离的任务 panic；只作观测，不代表持久化工作项计次。
+    pub const TASK_PANIC: Self = Self("task_panic");
+
+    /// HTTP 内部错误响应。
+    pub const HTTP_INTERNAL_ERROR: Self = Self("http_internal_error");
+
+    /// HTTP 上游错误响应。
+    pub const HTTP_BAD_GATEWAY: Self = Self("http_bad_gateway");
+
+    /// HTTP 服务暂不可用响应。
+    pub const HTTP_SERVICE_UNAVAILABLE: Self = Self("http_service_unavailable");
+
     /// 固定安全类别：`admin_audit_error`。
     pub const ADMIN_AUDIT_ERROR: Self = Self("admin_audit_error");
 
@@ -176,9 +339,6 @@ impl SafeErrorKind {
     /// 固定安全类别：`task_join`。
     pub const TASK_JOIN: Self = Self("task_join");
 
-    /// 固定安全类别：`task_panic`；只作观测，不代表持久化工作项计次。
-    pub const TASK_PANIC: Self = Self("task_panic");
-
     /// 固定安全类别：`timeout`。
     pub const TIMEOUT: Self = Self("timeout");
 
@@ -188,6 +348,65 @@ impl SafeErrorKind {
     /// 只接受已登记类别，不把调用方字符串直接放进日志或指标。
     pub fn from_label(label: &str) -> Self {
         match label {
+            "http_server_error" => Self::HTTP_SERVER_ERROR,
+            "remote_authentication_error" => Self::REMOTE_AUTHENTICATION_ERROR,
+            "remote_recipient_invalid" => Self::REMOTE_RECIPIENT_INVALID,
+            "clock_skew" => Self::CLOCK_SKEW,
+            "shadow_mismatch" => Self::SHADOW_MISMATCH,
+
+            "equipment_name_invalid" => Self::EQUIPMENT_NAME_INVALID,
+            "equipment_quality_unknown" => Self::EQUIPMENT_QUALITY_UNKNOWN,
+            "equipment_kind_unknown" => Self::EQUIPMENT_KIND_UNKNOWN,
+            "equipment_category_unknown" => Self::EQUIPMENT_CATEGORY_UNKNOWN,
+            "equipment_category_mismatch" => Self::EQUIPMENT_CATEGORY_MISMATCH,
+            "equipment_level_invalid" => Self::EQUIPMENT_LEVEL_INVALID,
+            "equipment_page_structure_invalid" => Self::EQUIPMENT_PAGE_STRUCTURE_INVALID,
+            "equipment_attributes_invalid" => Self::EQUIPMENT_ATTRIBUTES_INVALID,
+            "equipment_canonical_mismatch" => Self::EQUIPMENT_CANONICAL_MISMATCH,
+
+            "runtime_switch_corrupt" => Self::RUNTIME_SWITCH_CORRUPT,
+            "runtime_switch_outcome_unknown" => Self::RUNTIME_SWITCH_OUTCOME_UNKNOWN,
+            "sent_baseline_invalid_mid" => Self::SENT_BASELINE_INVALID_MID,
+            "sent_baseline_order_violation" => Self::SENT_BASELINE_ORDER_VIOLATION,
+            "sent_baseline_page_discontinuity" => Self::SENT_BASELINE_PAGE_DISCONTINUITY,
+            "sent_baseline_anchor_missing" => Self::SENT_BASELINE_ANCHOR_MISSING,
+            "sent_baseline_anchor_changed" => Self::SENT_BASELINE_ANCHOR_CHANGED,
+            "sent_baseline_page_limit" => Self::SENT_BASELINE_PAGE_LIMIT,
+            "sent_baseline_timeout" => Self::SENT_BASELINE_TIMEOUT,
+            "sent_baseline_read_unavailable" => Self::SENT_BASELINE_READ_UNAVAILABLE,
+            "sent_baseline_cache_boundary_delta" => Self::SENT_BASELINE_CACHE_BOUNDARY_DELTA,
+            "sent_baseline_boundary_unavailable" => Self::SENT_BASELINE_BOUNDARY_UNAVAILABLE,
+            "sent_baseline_scope_changed" => Self::SENT_BASELINE_SCOPE_CHANGED,
+            "sent_baseline_response_hint_conflict" => Self::SENT_BASELINE_RESPONSE_HINT_CONFLICT,
+            "sent_baseline_canceled" => Self::SENT_BASELINE_CANCELED,
+
+            "io_error" => Self::IO_ERROR,
+            "cryptographic_error" => Self::CRYPTOGRAPHIC_ERROR,
+            "response_parse_error" => Self::RESPONSE_PARSE_ERROR,
+            "request_encoding_error" => Self::REQUEST_ENCODING_ERROR,
+            "remote_body_error" => Self::REMOTE_BODY_ERROR,
+            "remote_transport_error" => Self::REMOTE_TRANSPORT_ERROR,
+            "credential_unavailable" => Self::CREDENTIAL_UNAVAILABLE,
+            "remote_session_expired" => Self::REMOTE_SESSION_EXPIRED,
+            "remote_account_busy" => Self::REMOTE_ACCOUNT_BUSY,
+            "remote_rate_limited" => Self::REMOTE_RATE_LIMITED,
+            "sent_scan_page_limit" => Self::SENT_SCAN_PAGE_LIMIT,
+            "sent_scan_timeout" => Self::SENT_SCAN_TIMEOUT,
+            "persistence_unavailable" => Self::PERSISTENCE_UNAVAILABLE,
+            "remote_response_too_large" => Self::REMOTE_RESPONSE_TOO_LARGE,
+            "remote_protocol_error" => Self::REMOTE_PROTOCOL_ERROR,
+            "remote_identity_mismatch" => Self::REMOTE_IDENTITY_MISMATCH,
+            "remote_identity_unproven" => Self::REMOTE_IDENTITY_UNPROVEN,
+            "remote_write_unknown" => Self::REMOTE_WRITE_UNKNOWN,
+            "remote_challenge" => Self::REMOTE_CHALLENGE,
+            "remote_topic_locked" => Self::REMOTE_TOPIC_LOCKED,
+            "remote_permission_denied" => Self::REMOTE_PERMISSION_DENIED,
+            "task_panic" => Self::TASK_PANIC,
+
+            "http_internal_error" => Self::HTTP_INTERNAL_ERROR,
+            "http_bad_gateway" => Self::HTTP_BAD_GATEWAY,
+            "http_service_unavailable" => Self::HTTP_SERVICE_UNAVAILABLE,
+
             "admin_audit_error" => Self::ADMIN_AUDIT_ERROR,
             "admin_credential_error" => Self::ADMIN_CREDENTIAL_ERROR,
             "admin_forum_preview_error" => Self::ADMIN_FORUM_PREVIEW_ERROR,
@@ -245,7 +464,6 @@ impl SafeErrorKind {
             "session_error" => Self::SESSION_ERROR,
             "settlement_not_found" => Self::SETTLEMENT_NOT_FOUND,
             "task_join" => Self::TASK_JOIN,
-            "task_panic" => Self::TASK_PANIC,
             "timeout" => Self::TIMEOUT,
             "transaction_policy_invalid" => Self::TRANSACTION_POLICY_INVALID,
             _ => Self::OTHER,
@@ -416,5 +634,53 @@ impl DiagnosticError for crate::CompetitionTransactionError {
 impl DiagnosticError for crate::OperationsAlertError {
     fn diagnostic_kind(&self) -> SafeErrorKind {
         SafeErrorKind::OPERATIONS_ALERT_ERROR
+    }
+}
+
+impl DiagnosticError for crate::RuntimeSwitchError {
+    fn diagnostic_kind(&self) -> SafeErrorKind {
+        match self {
+            Self::Invalid => SafeErrorKind::DOMAIN_REJECTED,
+            Self::Conflict => SafeErrorKind::REPOSITORY_CONFLICT,
+            Self::Corrupt => SafeErrorKind::RUNTIME_SWITCH_CORRUPT,
+            Self::Unavailable => SafeErrorKind::DEPENDENCY_UNAVAILABLE,
+            Self::OutcomeUnknown => SafeErrorKind::RUNTIME_SWITCH_OUTCOME_UNKNOWN,
+        }
+    }
+}
+
+impl DiagnosticError for crate::SentBaselineReason {
+    fn diagnostic_kind(&self) -> SafeErrorKind {
+        match self {
+            Self::InvalidMid => SafeErrorKind::SENT_BASELINE_INVALID_MID,
+            Self::OrderViolation => SafeErrorKind::SENT_BASELINE_ORDER_VIOLATION,
+            Self::PageDiscontinuity => SafeErrorKind::SENT_BASELINE_PAGE_DISCONTINUITY,
+            Self::AnchorMissing => SafeErrorKind::SENT_BASELINE_ANCHOR_MISSING,
+            Self::AnchorChanged => SafeErrorKind::SENT_BASELINE_ANCHOR_CHANGED,
+            Self::PageLimit => SafeErrorKind::SENT_BASELINE_PAGE_LIMIT,
+            Self::Timeout => SafeErrorKind::SENT_BASELINE_TIMEOUT,
+            Self::ReadUnavailable => SafeErrorKind::SENT_BASELINE_READ_UNAVAILABLE,
+            Self::CacheBoundaryDelta => SafeErrorKind::SENT_BASELINE_CACHE_BOUNDARY_DELTA,
+            Self::BoundaryUnavailable => SafeErrorKind::SENT_BASELINE_BOUNDARY_UNAVAILABLE,
+            Self::ScopeChanged => SafeErrorKind::SENT_BASELINE_SCOPE_CHANGED,
+            Self::ResponseHintConflict => SafeErrorKind::SENT_BASELINE_RESPONSE_HINT_CONFLICT,
+            Self::Canceled => SafeErrorKind::SENT_BASELINE_CANCELED,
+        }
+    }
+}
+
+impl DiagnosticError for crate::EquipmentSourceDetailCode {
+    fn diagnostic_kind(&self) -> SafeErrorKind {
+        match self {
+            Self::InvalidName => SafeErrorKind::EQUIPMENT_NAME_INVALID,
+            Self::UnknownQuality => SafeErrorKind::EQUIPMENT_QUALITY_UNKNOWN,
+            Self::UnknownKind => SafeErrorKind::EQUIPMENT_KIND_UNKNOWN,
+            Self::UnknownCategory => SafeErrorKind::EQUIPMENT_CATEGORY_UNKNOWN,
+            Self::CategoryMismatch => SafeErrorKind::EQUIPMENT_CATEGORY_MISMATCH,
+            Self::InvalidLevel => SafeErrorKind::EQUIPMENT_LEVEL_INVALID,
+            Self::PageStructure => SafeErrorKind::EQUIPMENT_PAGE_STRUCTURE_INVALID,
+            Self::InvalidAttributes => SafeErrorKind::EQUIPMENT_ATTRIBUTES_INVALID,
+            Self::CanonicalMismatch => SafeErrorKind::EQUIPMENT_CANONICAL_MISMATCH,
+        }
     }
 }

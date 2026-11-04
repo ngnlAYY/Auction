@@ -1,5 +1,9 @@
 //! Public 拍卖、标的、装备和游标契约映射。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics;
+
 use super::super::*;
 use auction_contracts::AuctionSummaryV2Response;
 
@@ -144,7 +148,14 @@ pub(crate) fn lot_detail_equipment_target(
         world_id: detail.projection.world_id.clone(),
         projected_game_equipment_url,
     };
-    target.validate().map_err(|_| ())?;
+    target.validate().map_err(|diagnostic_cause| {
+        diagnostics::error(
+            "public_catalog",
+            "validate_equipment_target",
+            diagnostics::invalid_state(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })?;
     Ok(target)
 }
 

@@ -3,6 +3,10 @@
 //! 普通列表和详情不持有 compose 排他会话；只有草稿读取与 discard 需要窄互斥。
 //! 观测本身不提升为投递成功；discard 只丢弃调用方已精确匹配到本地已知投递的草稿。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::*;
 use chrono::{DateTime, Utc};
 use tokio::time::{Instant, timeout_at};
@@ -167,8 +171,15 @@ impl MoogleMailSender {
         {
             return Err(protocol_drift(world));
         }
-        let form =
-            MoogleMailForm::discard(state.token(), &fields).map_err(|_| protocol_drift(world))?;
+        let form = MoogleMailForm::discard(state.token(), &fields).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_maintenance",
+                "build_discard_form",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            protocol_drift(world)
+        })?;
         self.client.post(&compose, cookie, form).await?;
         let document = self.client.get(&compose, cookie).await.map_err(discard_unknown)?;
         let after = self
@@ -199,7 +210,15 @@ impl MoogleMailSender {
             self.client.observe_sent_list(cookie, &round, self.verification_pages),
         )
         .await
-        .map_err(|_| proof::scan_timeout(world))??;
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_maintenance",
+                "read_sent_list_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            proof::scan_timeout(world)
+        })??;
         proof::check_deadline(deadline, world)?;
         if !list.complete {
             return Err(self.scan_page_limit(world, "maintenance", list.summaries.len()));
@@ -233,7 +252,15 @@ impl MoogleMailSender {
             self.client.observe_incoming_list(cookie, &round, self.verification_pages, true),
         )
         .await
-        .map_err(|_| proof::scan_timeout(world))??;
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_maintenance",
+                "read_inbox_list_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            proof::scan_timeout(world)
+        })??;
         proof::check_deadline(deadline, world)?;
         if !list.complete {
             return Err(MoogleMailError::protocol_drift(MoogleMailOperation::ReadMail, world));
@@ -300,7 +327,15 @@ impl MoogleMailSender {
             .await
         })
         .await
-        .map_err(|_| proof::scan_timeout(world))?;
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_maintenance",
+                "read_inbox_assets_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            proof::scan_timeout(world)
+        })?;
         proof::check_deadline(deadline, world)?;
         result
     }
@@ -393,7 +428,15 @@ impl MoogleMailSender {
             })
         })
         .await
-        .map_err(|_| proof::scan_timeout(world))?;
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_maintenance",
+                "read_sent_state_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            proof::scan_timeout(world)
+        })?;
         proof::check_deadline(deadline, world)?;
         result
     }

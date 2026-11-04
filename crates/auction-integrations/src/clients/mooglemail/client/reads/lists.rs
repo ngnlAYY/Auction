@@ -1,5 +1,9 @@
 //! 三种真实邮箱列表的有界完整扫描；列表身份与页数一起缓存，缺页不会伪装为完整。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{collections::HashSet, mem::size_of};
 
 use tokio::sync::OnceCell;
@@ -49,7 +53,18 @@ impl MoogleMailClient {
         self.check_read_round(cookie, round).await?;
         validate_pages(maximum_pages, world)?;
         let cell = {
-            let mut cells = round.epoch.lists.sent.lock().map_err(|_| read_unavailable(world))?;
+            let mut cells = round.epoch.lists.sent.lock().map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "lock_sent_cache",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                read_unavailable(world)
+            })?;
             if cells.len() >= 8 && !cells.contains_key(&maximum_pages) {
                 return Err(read_unavailable(world));
             }
@@ -196,8 +211,18 @@ impl MoogleMailClient {
         let membership = round.scope.membership_revision.load(Ordering::Acquire);
         let key = (read_mail, maximum_pages, membership);
         let cell = {
-            let mut cells =
-                round.epoch.lists.incoming.lock().map_err(|_| read_unavailable(world))?;
+            let mut cells = round.epoch.lists.incoming.lock().map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "lock_inbox_cache",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                read_unavailable(world)
+            })?;
             cells.retain(|(_, _, revision), _| *revision == membership);
             if cells.len() >= 8 && !cells.contains_key(&key) {
                 return Err(read_unavailable(world));
@@ -262,10 +287,24 @@ impl MoogleMailClient {
         bytes: usize,
         world: MoogleMailWorld,
     ) -> Result<OwnedSemaphorePermit, MoogleMailError> {
-        let bytes = u32::try_from(bytes).map_err(|_| read_unavailable(world))?;
-        Arc::clone(&self.reads.bytes)
-            .try_acquire_many_owned(bytes)
-            .map_err(|_| read_unavailable(world))
+        let bytes = u32::try_from(bytes).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "convert_body_budget",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            read_unavailable(world)
+        })?;
+        Arc::clone(&self.reads.bytes).try_acquire_many_owned(bytes).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "reserve_body_budget",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            read_unavailable(world)
+        })
     }
 }
 

@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{WorkerControlCondition, WorkerControlTrigger};
@@ -45,7 +49,15 @@ pub(crate) async fn trigger_poll(
     let Some(admin_mail) = state.admin_mail() else { return feature_unavailable() };
     let snapshot = match admin_mail.dashboard_snapshot().await {
         Ok(snapshot) => snapshot,
-        Err(_) => return worker_unavailable(),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "admin_mail",
+                "read_poll_state",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return worker_unavailable();
+        }
     };
     if snapshot.pollers.is_empty() {
         return super::api_error(StatusCode::CONFLICT, "poll_rejected", "没有已装配的邮箱轮询器")
@@ -56,7 +68,15 @@ pub(crate) async fn trigger_poll(
     };
     let result = match worker_control.trigger_poll(input.command_id).await {
         Ok(result) => result,
-        Err(_) => return worker_unavailable(),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "admin_mail",
+                "trigger_poll",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return worker_unavailable();
+        }
     };
     if result.condition != WorkerControlCondition::Available
         || !result.accepted

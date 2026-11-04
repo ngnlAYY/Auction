@@ -1,5 +1,9 @@
 //! 同轮次 MID 与列表候选集合影子比较；不执行 POST，也不改写旧证明裁决。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_application::{SentBaselineEvent, SentBaselineReason};
 use tokio::time::Instant;
 
@@ -27,7 +31,15 @@ impl MoogleMailSender {
         if !valid {
             self.shadow_uncomparable(baseline, SentBaselineReason::ResponseHintConflict);
             if matches!(baseline.kind, SentBaselineKind::Watermark(_)) {
-                tracing::warn!(world = %baseline.world, reason = "response_hint_conflict", "MoogleMail 响应身份不符合发送前边界，保持写入未知");
+                safe_diagnostics::warn(
+                    "mooglemail_baseline",
+                    "validate_response_hint",
+                    safe_diagnostics::project(&SentBaselineReason::ResponseHintConflict),
+                    DiagnosticContext {
+                        world: diagnostic_world(baseline.world.as_str()),
+                        ..Default::default()
+                    },
+                );
             }
             return Err(unavailable(baseline.world));
         }
@@ -70,7 +82,14 @@ impl MoogleMailSender {
         let mid_sets_equal = legacy.mids == shadow.mids;
         let candidate_sets_equal = old_candidates == new_candidates;
         if !mid_sets_equal || !candidate_sets_equal {
-            tracing::warn!(world = %request.world, legacy_only_mids = legacy.mids.difference(&shadow.mids).count(), watermark_only_mids = shadow.mids.difference(&legacy.mids).count(), legacy_only_candidates = old_candidates.difference(&new_candidates).count(), watermark_only_candidates = new_candidates.difference(&old_candidates).count(), "MoogleMail Sent 基线影子差集计数");
+            tracing::debug!(
+                world = %request.world,
+                legacy_only_mids = legacy.mids.difference(&shadow.mids).count(),
+                watermark_only_mids = shadow.mids.difference(&legacy.mids).count(),
+                legacy_only_candidates = old_candidates.difference(&new_candidates).count(),
+                watermark_only_candidates = new_candidates.difference(&old_candidates).count(),
+                "MoogleMail Sent 基线影子差集计数"
+            );
         }
         sample.finish(SentBaselineEvent::Evaluation {
             branch: shadow.branch(boundary, request),

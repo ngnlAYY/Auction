@@ -1,12 +1,14 @@
 //! 查询参数、错误响应和请求游标解析辅助函数。
 
 use super::super::*;
+use crate::diagnostics;
 
 pub(crate) fn api_error(
     status: StatusCode,
     code: &'static str,
     message: &'static str,
 ) -> (StatusCode, Json<ApiErrorResponse>) {
+    diagnostics::response_error(status, Some(code));
     (
         status,
         Json(ApiErrorResponse {

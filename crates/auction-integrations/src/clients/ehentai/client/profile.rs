@@ -1,5 +1,9 @@
 //! 论坛目标资料联合证明：固定 UID GET、资料布局及目标 MID 一致，不读取页头登录身份。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::collections::BTreeMap;
 
 use auction_application::{
@@ -27,43 +31,41 @@ enum ProfileStage {
 }
 
 impl ProfileStage {
-    const fn as_str(self) -> &'static str {
+    const fn diagnostic_phase(self) -> &'static str {
         match self {
-            Self::Client => "client",
-            Self::Get => "profile_get",
-            Self::Owner => "owner",
-            Self::NameLayout => "name_layout",
-            Self::OptionsLayout => "options_layout",
-            Self::ContainerLayout => "container_layout",
-            Self::NameShape => "name_shape",
-            Self::NameValue => "name_value",
-            Self::MidLayout => "mid_layout",
-            Self::MidQuery => "mid_query",
-            Self::MidBinding => "mid_binding",
+            Self::Client => "validate_client_configuration",
+            Self::Get => "fetch_profile",
+            Self::Owner => "validate_profile_owner",
+            Self::NameLayout => "parse_name_layout",
+            Self::OptionsLayout => "parse_options_layout",
+            Self::ContainerLayout => "parse_container_layout",
+            Self::NameShape => "validate_name_shape",
+            Self::NameValue => "validate_name_value",
+            Self::MidLayout => "parse_mid_layout",
+            Self::MidQuery => "parse_mid_query",
+            Self::MidBinding => "validate_mid_binding",
         }
     }
 }
 
 // 只记录闭集阶段与应用错误；目标 UID、名称、URL 和原始资料页都不进入日志。
 fn profile_failure(stage: ProfileStage, error: InternalEvidenceError) -> InternalEvidenceError {
-    tracing::warn!(stage = stage.as_str(), error = ?error, "Forum target profile evidence failed");
+    safe_diagnostics::warn(
+        "forum_profile",
+        stage.diagnostic_phase(),
+        safe_diagnostics::project(&error),
+        DiagnosticContext::default(),
+    );
     error
 }
 
 // ForumPmError 全部为不携带文本的 unit variant；仅输出固定分类，不格式化传输错误。
 fn profile_get_failure(error: ForumPmError) -> InternalEvidenceError {
-    let category = match error {
-        ForumPmError::Unavailable => "unavailable",
-        ForumPmError::Authentication => "authentication",
-        ForumPmError::RateLimited => "rate_limited",
-        ForumPmError::InvalidRecipient => "invalid_recipient",
-        ForumPmError::Protocol => "protocol",
-        ForumPmError::OutcomeUnknown => "outcome_unknown",
-    };
-    tracing::warn!(
-        stage = ProfileStage::Get.as_str(),
-        category,
-        "Forum target profile read rejected"
+    safe_diagnostics::warn(
+        "forum_profile",
+        ProfileStage::Get.diagnostic_phase(),
+        safe_diagnostics::project(&error),
+        DiagnosticContext::default(),
     );
     InternalEvidenceError::Unavailable
 }
@@ -74,7 +76,14 @@ impl EhentaiClient {
         target_uid: &str,
         cookie: &EhentaiCookie,
     ) -> Result<ForumTargetProfileEvidence, InternalEvidenceError> {
-        self.validate_pm_client().map_err(|_| {
+        self.validate_pm_client().map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_profile",
+                "validate_client",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+
             profile_failure(ProfileStage::Client, InternalEvidenceError::Unavailable)
         })?;
         if !valid_external_positive_id(target_uid) {
@@ -82,13 +91,27 @@ impl EhentaiClient {
         }
         let target = self
             .index_url(&[("showuser", target_uid)], EhentaiOperation::CheckSession)
-            .map_err(|_| InternalEvidenceError::InvalidRequest)?;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_profile",
+                    "build_profile_target",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                InternalEvidenceError::InvalidRequest
+            })?;
         // 仅 GET 资料；复用强制不重定向的安全池，不经过发帖或 PM 准备流程。
         let source = self.pm_get(target.clone(), cookie).await.map_err(profile_get_failure)?;
         let name = parse_target_profile(&source, &target, target_uid)?;
-        self.check_ownership(cookie)
-            .await
-            .map_err(|_| profile_failure(ProfileStage::Owner, InternalEvidenceError::Revoked))?;
+        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_profile",
+                "check_owner",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            profile_failure(ProfileStage::Owner, InternalEvidenceError::Revoked)
+        })?;
         let observed_at = chrono::Utc::now();
         let protocol_version = "forum_target_profile_mid_v1";
         let mut hash = Sha256::new();
@@ -111,7 +134,15 @@ fn select_one<'a>(
     document: &'a Html,
     query: &str,
 ) -> Result<ElementRef<'a>, InternalEvidenceError> {
-    let selector = Selector::parse(query).map_err(|_| InternalEvidenceError::Unproven)?;
+    let selector = Selector::parse(query).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_profile",
+            "build_profile_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        InternalEvidenceError::Unproven
+    })?;
     let mut nodes = document.select(&selector);
     let node = nodes.next().ok_or(InternalEvidenceError::Unproven)?;
     if nodes.next().is_some() {
@@ -168,11 +199,27 @@ fn parse_target_profile(
     if !valid_mail_player_name(&full_name) {
         return Err(fail(ProfileStage::NameValue));
     }
-    let selector = Selector::parse("a[href]").map_err(|_| fail(ProfileStage::MidLayout))?;
+    let selector = Selector::parse("a[href]").map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_profile",
+            "build_identity_link_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        fail(ProfileStage::MidLayout)
+    })?;
     let mut matches = 0;
     for anchor in container.select(&selector) {
         let reference = anchor.attr("href").ok_or_else(|| fail(ProfileStage::MidLayout))?;
-        let url = target.join(reference).map_err(|_| fail(ProfileStage::MidLayout))?;
+        let url = target.join(reference).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_profile",
+                "resolve_identity_link",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            fail(ProfileStage::MidLayout)
+        })?;
         let is_target_action = anchor.text().collect::<String>().trim()
             == "Send a Personal Message"
             || url.query_pairs().any(|(key, _)| key == "MID");
@@ -211,8 +258,12 @@ fn parse_target_profile(
     if matches != 1 {
         // 数量只用于区分按钮缺失与目标歧义，不记录任何链接或页面内容。
         let error = InternalEvidenceError::Unproven;
-        tracing::warn!(stage = "mid_count", mid_count = matches, error = ?error,
-            "Forum target profile evidence failed");
+        safe_diagnostics::warn(
+            "forum_profile",
+            "validate_mid_count",
+            safe_diagnostics::project(&error),
+            DiagnosticContext::default(),
+        );
         return Err(error);
     }
     Ok(full_name)

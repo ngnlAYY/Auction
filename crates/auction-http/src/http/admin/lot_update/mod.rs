@@ -2,6 +2,10 @@
 //! 这里只解析旧 HTTP 请求、会话和 CSRF，并把动作映射到应用命令；版本 fence、幂等、锁、
 //! 预览修订和 withdrawn-return 义务全部由应用/存储层负责。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use super::AdminApiState;
@@ -65,7 +69,15 @@ pub(crate) async fn update(
     };
     let request_hash = match RequestHash::from_request(action.command_kind(), lot_uuid, &input) {
         Ok(hash) => hash,
-        Err(_) => return super::internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::error(
+                "admin_lots",
+                "hash_update",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return super::internal_error();
+        }
     };
     let Some(port) = state.admin_lot_update() else {
         return super::api_error(
@@ -104,7 +116,8 @@ pub(crate) async fn update(
 }
 
 fn map_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::AdminLotUpdate(AdminLotUpdateError::InvalidCommand) => {
             super::api_error(StatusCode::BAD_REQUEST, "invalid_lot_command", "后台拍品修改参数无效")
                 .into_response()
@@ -139,5 +152,7 @@ fn map_error(error: ApplicationError) -> Response {
             "Admin lot 服务暂不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response("admin_lots", "respond_update_failure", diagnostic_kind, response)
 }

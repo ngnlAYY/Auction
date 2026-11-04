@@ -1,5 +1,9 @@
 //! Public 黑名单 HTTP 适配器。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use auction_application::{MAX_PUBLIC_BLACKLIST_OFFSET, PublicBlacklistEntry};
 use auction_contracts::{
     ApiErrorResponse, ApiResponse, PublicBlacklistEntryResponse, PublicBlacklistResponse,
@@ -40,7 +44,14 @@ pub(crate) async fn list(
         ));
     };
     let request = auction_application::PublicBlacklistRequest { limit: page_size, offset };
-    let result = reader.list_public_blacklist(request).await.map_err(|_| {
+    let result = reader.list_public_blacklist(request).await.map_err(|diagnostic_cause| {
+        diagnostics::warn(
+            "public_blacklist",
+            "read_page",
+            DiagnosticError::diagnostic_kind(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+
         api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "黑名单暂不可用")
     })?;
     if result.validate().is_err() || result.limit != page_size || result.offset != offset {

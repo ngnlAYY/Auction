@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::*;
 
 /// 未转义 JSON 文本直接借用响应；转义文本由解码器分配，目标字段再按需取得所有权。
@@ -136,8 +140,16 @@ pub(crate) fn parse_page_time(
 ) -> Result<DateTime<Utc>, MoogleMailError> {
     // 游戏页面按 UTC 直接展示邮件时间（2026-10-18 实测：本地 05:14Z 发出的邮件显示 05:14），
     // 不能再按 HVT-8 换算，否则当天邮件整体偏移 +8 小时。
-    let naive = NaiveDateTime::parse_from_str(value, INBOX_TIME_FORMAT)
-        .map_err(|_| protocol(operation, world))?;
+    let naive =
+        NaiveDateTime::parse_from_str(value, INBOX_TIME_FORMAT).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "parse_page_time",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            protocol(operation, world)
+        })?;
     Ok(naive.and_utc())
 }
 
@@ -255,7 +267,15 @@ pub(crate) fn selector(
     operation: MoogleMailOperation,
     world: MoogleMailWorld,
 ) -> Result<Selector, MoogleMailError> {
-    Selector::parse(value).map_err(|_| protocol(operation, world))
+    Selector::parse(value).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_read",
+            "build_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        );
+        protocol(operation, world)
+    })
 }
 
 pub(crate) fn protocol(operation: MoogleMailOperation, world: MoogleMailWorld) -> MoogleMailError {

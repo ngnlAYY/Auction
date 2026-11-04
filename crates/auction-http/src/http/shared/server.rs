@@ -2,6 +2,10 @@
 //! Axum 的便捷 `serve` 不暴露请求头读取超时。本模块保持 Axum Router 所有权不变，只在
 //! 连接层固定 5 秒 HTTP/1 header timeout，并统一跟踪连接级优雅关闭。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics;
+
 use std::{future::Future, io, net::SocketAddr, time::Duration};
 
 use axum::{Router, body::Body, extract::ConnectInfo, serve::Listener};
@@ -36,7 +40,7 @@ where
                 let watcher = graceful.watcher();
                 let address = address.into();
                 let app = app.clone();
-                connections.spawn(async move {
+                let body = async move {
                     // 连接地址直接写入请求，避免为每条 TCP 连接重建全部路由的 middleware。
                     let service = app.map_request(move |mut request: hyper::Request<Incoming>| {
                         if let Some(address) = address {
@@ -56,9 +60,18 @@ where
                         .serve_connection_with_upgrades(TokioIo::new(stream), service)
                         .into_owned();
                     if let Err(error) = watcher.watch(connection).await {
-                        tracing::debug!(?address, error = %error, "HTTP connection closed with error");
+                        diagnostics::debug(
+                            "http_transport",
+                            "serve_connection",
+                            diagnostics::connection_kind(&error),
+                            DiagnosticContext {
+                                route: Some("__connection__"),
+                                ..Default::default()
+                            },
+                        );
                     }
-                });
+                };
+                connections.spawn(body);
             }
             result = connections.join_next(), if !connections.is_empty() => {
                 log_connection_join(result);
@@ -77,6 +90,11 @@ fn log_connection_join(result: Option<Result<(), tokio::task::JoinError>>) {
     if let Some(Err(error)) = result
         && !error.is_cancelled()
     {
-        tracing::warn!(error = %error, "HTTP connection task join failed");
+        diagnostics::warn(
+            "http_transport",
+            "join_connection",
+            diagnostics::join_kind(&error),
+            DiagnosticContext { route: Some("__connection__"), ..Default::default() },
+        );
     }
 }

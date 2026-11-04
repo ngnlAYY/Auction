@@ -2,6 +2,10 @@
 //! 根模块只负责认证后的请求编排和稳定路由入口；各业务 section 的安全聚合与响应字段映射
 //! 分别由子模块拥有。owner 未装配或读取失败时明确返回 unknown，避免用缓存或占位数据误导运维。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
+
+use crate::diagnostics;
+
 mod mapping;
 mod sections;
 
@@ -63,7 +67,15 @@ pub(crate) async fn get(
         match state.worker_control() {
             Some(port) => match port.status().await {
                 Ok(status) => status,
-                Err(_) => WorkerControlStatus::unavailable(WorkerControlCondition::Unavailable),
+                Err(diagnostic_cause) => {
+                    diagnostics::warn(
+                        "admin_dashboard",
+                        "read_worker",
+                        DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    WorkerControlStatus::unavailable(WorkerControlCondition::Unavailable)
+                }
             },
             None => WorkerControlStatus::unavailable(WorkerControlCondition::Unavailable),
         }
@@ -86,7 +98,18 @@ pub(crate) async fn get(
     };
     let owner_snapshot = async {
         match state.operations_alert_source() {
-            Some(port) => port.snapshot(chrono::Utc::now()).await.ok(),
+            Some(port) => port
+                .snapshot(chrono::Utc::now())
+                .await
+                .inspect_err(|cause| {
+                    diagnostics::warn(
+                        "admin_dashboard",
+                        "read_operations_snapshot",
+                        cause.diagnostic_kind(),
+                        DiagnosticContext::default(),
+                    );
+                })
+                .ok(),
             None => None,
         }
     };
@@ -94,7 +117,15 @@ pub(crate) async fn get(
         match state.operations_alert() {
             Some(port) => match port.health().await {
                 Ok(health) => sections::map_alerting(health),
-                Err(_) => sections::unknown_section_with_code("source_unavailable"),
+                Err(diagnostic_cause) => {
+                    diagnostics::warn(
+                        "admin_dashboard",
+                        "read_alert_health",
+                        DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    sections::unknown_section_with_code("source_unavailable")
+                }
             },
             None => sections::unknown_section_with_code("source_unavailable"),
         }
@@ -107,7 +138,22 @@ pub(crate) async fn get(
                     &snapshot.process,
                     state.dashboard_worlds(),
                 ),
-                Ok(_) | Err(_) => sections::unknown_section_with_code("source_unavailable"),
+                diagnostic_outcome => {
+                    let (phase, safe_kind) = match &diagnostic_outcome {
+                        Err(cause) => ("read_credential_snapshot", cause.diagnostic_kind()),
+                        Ok(_) => {
+                            ("validate_credential_snapshot", SafeErrorKind::DEPENDENCY_MISMATCH)
+                        }
+                    };
+                    diagnostics::warn(
+                        "admin_dashboard",
+                        phase,
+                        safe_kind,
+                        DiagnosticContext::default(),
+                    );
+                    drop(diagnostic_outcome);
+                    sections::unknown_section_with_code("source_unavailable")
+                }
             },
             None => sections::unknown_section_with_code("source_unavailable"),
         }
@@ -148,10 +194,18 @@ fn unavailable(message: &'static str) -> Response {
 }
 
 fn map_error(error: HealthError) -> Response {
-    match error {
+    let diagnostic_kind = diagnostics::health_kind(&error);
+    let body = || match error {
         HealthError::InvalidCommand | HealthError::StaleObservation => super::internal_error(),
         HealthError::InvalidData | HealthError::Storage { .. } => {
             unavailable("健康 dashboard 暂不可用")
         }
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_dashboard",
+        "respond_health_failure",
+        diagnostic_kind,
+        response,
+    )
 }

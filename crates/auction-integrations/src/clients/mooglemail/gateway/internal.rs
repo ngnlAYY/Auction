@@ -1,5 +1,9 @@
 //! 同 Cookie/operation guard 的联合证据；没有资金授权、业务状态迁移或远端写入。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -45,8 +49,31 @@ impl MoogleMailGateway {
             Ok::<_, Error>(identity)
         })
         .await;
-        let identity =
-            result.map_err(|_| identity_error(world))?.map_err(|_| identity_error(world))?;
+        let identity = result
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_identity",
+                    "read_identity_timeout",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                identity_error(world)
+            })?
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_identity",
+                    "read_identity",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                identity_error(world)
+            })?;
         Ok(Some(auction_application::VerifiedMailPlayerIdentity {
             credential_id: identity.credential_id,
             credential_version: identity.credential_version,
@@ -226,7 +253,15 @@ impl MoogleMailGateway {
             Ok(snapshot)
         })
         .await
-        .map_err(|_| at(Stage::Deadline, MoogleMailWorld::from(request.world), Error::Expired))?
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_evidence",
+                "read_snapshot_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            at(Stage::Deadline, MoogleMailWorld::from(request.world), Error::Expired)
+        })?
     }
 
     pub(crate) async fn read_identity_in_session(
@@ -387,7 +422,14 @@ impl SettlementInternalEvidenceReader for MoogleMailGateway {
                     })
             })
             .await
-            .map_err(|_| {
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_evidence",
+                    "prepare_snapshot_timeout",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+
                 at(Stage::Deadline, MoogleMailWorld::from(request.world), Error::Expired)
             })?
         })

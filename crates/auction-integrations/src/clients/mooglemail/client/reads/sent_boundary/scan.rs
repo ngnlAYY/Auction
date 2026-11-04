@@ -1,5 +1,9 @@
 //! 发送前后共用的 Sent 分钟组扫描，始终受原页数、字节、截止点与读取屏障约束。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{collections::HashSet, mem::size_of};
 
 use auction_application::SentBaselineReason;
@@ -73,6 +77,15 @@ impl MoogleMailClient {
                     None => Ok(()),
                 });
                 if let Err(reason) = checked {
+                    safe_diagnostics::warn(
+                        "mooglemail_baseline",
+                        "validate_page_order",
+                        safe_diagnostics::project(&reason),
+                        DiagnosticContext {
+                            world: diagnostic_world(world.as_str()),
+                            ..Default::default()
+                        },
+                    );
                     // 分页重叠可补齐枚举；同页后续发现身份/时间前提失效时不能降级成可恢复问题。
                     if result.issue.is_none()
                         || result.issue == Some(SentBaselineReason::PageDiscontinuity)

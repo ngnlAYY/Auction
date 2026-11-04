@@ -1,5 +1,7 @@
 //! 同源只读快照、TOML 基线与期限解析；缓存仅选择都正确的运行路径。
 
+use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+
 use super::{
     RuntimeSwitchError, RuntimeSwitchEvent, RuntimeSwitchName, RuntimeSwitchOperation,
     RuntimeSwitchRead, RuntimeSwitchRole,
@@ -123,7 +125,16 @@ impl RuntimeSwitches {
         // 锁内只有完整 Arc 替换；异常不会暴露半构造快照。
         match self.state.read() {
             Ok(state) => Arc::clone(&state),
-            Err(poison) => Arc::clone(&poison.into_inner()),
+            Err(poison) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    poison.diagnostic_kind(),
+                    "runtime_switches",
+                    "recover_snapshot_read",
+                    DiagnosticContext::default(),
+                );
+                Arc::clone(&poison.into_inner())
+            }
         }
     }
 
@@ -142,7 +153,16 @@ impl RuntimeSwitches {
         let snapshot = Arc::new(Snapshot { read, loaded_at: Some(started_at) });
         match self.state.write() {
             Ok(mut state) => *state = snapshot,
-            Err(poison) => *poison.into_inner() = snapshot,
+            Err(poison) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    poison.diagnostic_kind(),
+                    "runtime_switches",
+                    "recover_snapshot_write",
+                    DiagnosticContext::default(),
+                );
+                *poison.into_inner() = snapshot;
+            }
         }
         increment(&self.successes);
         Ok(())

@@ -5,6 +5,7 @@ mod backup;
 mod clients;
 mod credentials;
 mod cryptobox;
+mod diagnostics;
 mod equipment;
 mod forum;
 mod login_key;

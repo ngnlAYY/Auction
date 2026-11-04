@@ -1,6 +1,10 @@
 //! Admin 规则文档 HTTP 适配器。
 //! GET 读取安全快照，POST 只做候选规范化校验，PUT 通过应用端口完成版本 CAS、幂等发布和审计。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{
@@ -150,7 +154,15 @@ pub(crate) async fn publish(
     let request_hash =
         match RequestHash::from_request("admin_rules_publish", input.command_id, &input) {
             Ok(hash) => hash,
-            Err(_) => return super::internal_error(),
+            Err(diagnostic_cause) => {
+                diagnostics::error(
+                    "admin_rules",
+                    "hash_publication",
+                    DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                return super::internal_error();
+            }
         };
     let Some(port) = state.admin_rules() else {
         return feature_unavailable();
@@ -209,7 +221,8 @@ fn feature_unavailable() -> Response {
 }
 
 fn map_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::AdminRules(AdminRulesError::InvalidLocale) => {
             super::api_error(StatusCode::BAD_REQUEST, "invalid_locale", "语言参数无效")
                 .into_response()
@@ -257,5 +270,12 @@ fn map_error(error: ApplicationError) -> Response {
             "规则内容暂不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_rules",
+        "respond_publication_failure",
+        diagnostic_kind,
+        response,
+    )
 }

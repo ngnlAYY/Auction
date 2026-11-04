@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use super::*;
 
 pub(crate) const PUBLIC_SESSION_COOKIE: &str = "auction_public_session";
@@ -65,7 +69,15 @@ pub(crate) async fn current_session(
     match session.current(raw_token, Utc::now()).await {
         Ok(identity) => current_session_response(Some(identity)),
         Err(error) if is_unauthenticated(&error) => current_session_response(None),
-        Err(_) => session_unavailable(),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_session",
+                "read_current",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            session_unavailable()
+        }
     }
 }
 
@@ -98,7 +110,15 @@ pub(crate) async fn refresh_session_cookie(
     let identity = match session.inspect(raw_token.clone(), now).await {
         Ok(identity) => identity,
         Err(error) if is_unauthenticated(&error) => return authentication_error(),
-        Err(_) => return session_unavailable(),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_session",
+                "inspect_refresh",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return session_unavailable();
+        }
     };
     if let Err(response) = check_public_expected_user(&parts.headers, identity.user_id) {
         return *response;
@@ -138,9 +158,23 @@ pub(crate) async fn logout_session(
             }
         }
         Err(error) if is_unauthenticated(&error) => return authentication_error(),
-        Err(_) => return session_unavailable(),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_session",
+                "inspect_logout",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return session_unavailable();
+        }
     }
-    if session.logout(raw_token, now).await.is_err() {
+    if let Err(cause) = session.logout(raw_token, now).await {
+        diagnostics::warn(
+            "public_session",
+            "revoke_session",
+            cause.diagnostic_kind(),
+            DiagnosticContext::default(),
+        );
         return session_unavailable();
     }
     let mut response_headers = no_store_headers();

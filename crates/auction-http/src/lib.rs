@@ -1,6 +1,7 @@
 //! HTTP 表面适配器的薄 crate 入口。
 
 mod assets;
+mod diagnostics;
 mod http;
 
 pub use assets::serve_admin_setup_asset;

@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::DeliveryAdminListRequest;
@@ -77,7 +81,15 @@ pub(crate) async fn list(
     };
     let entry_count = match i64::try_from(page_result.entries.len()) {
         Ok(count) => count,
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::error(
+                "admin_delivery",
+                "convert_entry_count",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     if page_result.limit != page_size
         || page_result.offset != offset

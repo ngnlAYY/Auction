@@ -1,5 +1,9 @@
 //! 加密载荷和公开认证头的闭集校验，以及敏感临时缓冲的清理。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_application::{
     MailDiagnosticContext, MailDiagnosticError, MailDiagnosticOutcome, MailDiagnosticStage,
     MailMessage,
@@ -161,12 +165,35 @@ pub fn parsed_message(message: &MailMessage) -> Result<SensitiveBytes, MailDiagn
         let key = attachment
             .key
             .with_bytes(|raw| std::str::from_utf8(raw).map(str::to_owned))
-            .map_err(|_| MailDiagnosticError::InvalidMessage)?
-            .map_err(|_| MailDiagnosticError::InvalidMessage)?;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::error(
+                    "mooglemail_diagnostics",
+                    "open_attachment_key",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                MailDiagnosticError::InvalidMessage
+            })?
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::error(
+                    "mooglemail_diagnostics",
+                    "decode_attachment_key",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                MailDiagnosticError::InvalidMessage
+            })?;
         value.attachments.push((attachment.external_equipment_id.clone(), key));
     }
-    let result =
-        SensitiveBytes(serde_json::to_vec(&value).map_err(|_| MailDiagnosticError::Serialization)?);
+    let result = SensitiveBytes(serde_json::to_vec(&value).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "encode_message",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Serialization
+    })?);
     if result.0.len() > MAX_PAYLOAD {
         return Err(MailDiagnosticError::PayloadTooLarge);
     }

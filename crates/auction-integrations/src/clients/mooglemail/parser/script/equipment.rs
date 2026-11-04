@@ -1,5 +1,9 @@
 //! MoogleMail HTML/JavaScript 中的装备 key 提取与严格 JSON 访问。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::*;
 
 pub(crate) fn equipment_keys(
@@ -20,8 +24,19 @@ pub(crate) fn equipment_keys(
         // 目标位置按遮罩后的括号栈定位，字段和对象仍由严格 JSON 解码器验证。
         for start in equipment_root_candidates(&source, &masked, wanted) {
             let candidate = &source[start..];
-            let (found, saw_wanted) = decode_equipment_root(candidate, wanted)
-                .map_err(|_| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
+            let (found, saw_wanted) =
+                decode_equipment_root(candidate, wanted).map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "mooglemail_read",
+                        "decode_equipment_script",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext {
+                            world: diagnostic_world(world.as_str()),
+                            ..Default::default()
+                        },
+                    );
+                    detail_error(world, MoogleMailErrorCategory::ProtocolDrift)
+                })?;
             if !saw_wanted {
                 continue;
             }
@@ -141,7 +156,14 @@ pub(crate) fn decode_equipment_root(
     wanted: &HashSet<String>,
 ) -> Result<(HashMap<String, MoogleMailEquipmentKey>, bool), ()> {
     let mut decoder = serde_json::Deserializer::from_str(source);
-    decoder.deserialize_map(EquipmentRootVisitor { wanted }).map_err(|_| ())
+    decoder.deserialize_map(EquipmentRootVisitor { wanted }).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "mooglemail_read",
+            "decode_equipment_map",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
 }
 
 pub(crate) struct EquipmentRootVisitor<'a> {

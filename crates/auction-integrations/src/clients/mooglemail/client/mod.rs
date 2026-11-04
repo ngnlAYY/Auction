@@ -1,3 +1,7 @@
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -71,7 +75,13 @@ pub struct MoogleMailClient {
 impl MoogleMailClient {
     /// 使用配置构造适配器，并强制采用关闭代理和自动重定向的 HTTP client。
     pub fn with_config(config: MoogleMailClientConfig) -> Result<Self, MoogleMailError> {
-        let client = build_mooglemail_http_client().map_err(|_| {
+        let client = build_mooglemail_http_client().map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "build_http_client",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
             MoogleMailError::new(
                 MoogleMailOperation::Inbox,
                 MoogleMailWorld::Main,
@@ -84,7 +94,13 @@ impl MoogleMailClient {
 
     /// 使用生产固定 endpoint 和默认限速/超时构造适配器。
     pub fn production() -> Result<Self, MoogleMailError> {
-        let config = MoogleMailClientConfig::production().map_err(|_| {
+        let config = MoogleMailClientConfig::production().map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "validate_production_configuration",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
             MoogleMailError::new(
                 MoogleMailOperation::Inbox,
                 MoogleMailWorld::Main,
@@ -145,8 +161,22 @@ impl MoogleMailClient {
             // 预算同时覆盖持锁连接的排队与探测；超时取消会永久撤销 owner。
             time::timeout(Duration::from_secs(1), ownership.check())
                 .await
-                .map_err(|_| ())?
-                .map_err(|_| ())?;
+                .map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "mooglemail_session",
+                        "check_owner_timeout",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                })?
+                .map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "mooglemail_session",
+                        "check_owner",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                })?;
         }
         Ok(())
     }

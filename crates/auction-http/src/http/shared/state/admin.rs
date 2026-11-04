@@ -1,5 +1,9 @@
 //! Admin HTTP surface 的应用端口状态容器。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics;
+
 use std::sync::Arc;
 
 use auction_application::{
@@ -383,8 +387,13 @@ impl AdminApiState {
         let Some(key) = public_rules_cache_key(locale) else {
             return;
         };
-        if cache.invalidate(key).await.is_err() {
-            tracing::warn!(locale, "public rules cache invalidation failed");
+        if let Err(cause) = cache.invalidate(key).await {
+            diagnostics::warn(
+                "public_rules",
+                "invalidate_cache",
+                diagnostics::cache_kind(&cause),
+                DiagnosticContext::default(),
+            );
         }
     }
 }

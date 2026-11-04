@@ -1,5 +1,9 @@
 //! Public 代理创建与降价命令 handler。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use super::super::*;
 
 /// 创建代理授权命令；命令账本和代理快照提交后返回旧契约要求的完整命令投影。
@@ -52,7 +56,15 @@ pub(crate) async fn create_proxy_authorization(
             )
             .into_response();
         }
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_proxy",
+                "read_create_lot",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     let Some(commands) = state.commands() else {
         return competition_unavailable();
@@ -63,7 +75,15 @@ pub(crate) async fn create_proxy_authorization(
     let request_hash =
         match CreateProxyCommand::legacy_request_hash(lot_id, bidder_id, mode, maximum_amount) {
             Ok(request_hash) => request_hash,
-            Err(_) => return internal_error(),
+            Err(diagnostic_cause) => {
+                diagnostics::error(
+                    "public_proxy",
+                    "hash_create",
+                    DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                return internal_error();
+            }
         };
     let command = CreateProxyCommand {
         command_id,
@@ -147,7 +167,15 @@ pub(crate) async fn lower_proxy_authorization(
             )
             .into_response();
         }
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_proxy",
+                "read_lower_lot",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     let Some(commands) = state.commands() else {
         return competition_unavailable();
@@ -163,7 +191,15 @@ pub(crate) async fn lower_proxy_authorization(
         new_maximum,
     ) {
         Ok(request_hash) => request_hash,
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::error(
+                "public_proxy",
+                "hash_lower",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     let command = LowerProxyCommand {
         command_id,
@@ -216,9 +252,21 @@ async fn require_visible_proxy_lot(state: &PublicApiState, lot_id: Uuid) -> Opti
     match reader.public_lot(lot_id).await {
         Ok(Some(_)) => None,
         Ok(None) => Some(not_found_error().into_response()),
-        Err(_) => Some(
-            api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_proxy",
+                "read_visible_lot",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            Some(
+                api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "temporarily_unavailable",
+                    "服务暂时不可用",
+                )
                 .into_response(),
-        ),
+            )
+        }
     }
 }

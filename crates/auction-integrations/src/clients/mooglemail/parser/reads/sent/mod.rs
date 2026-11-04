@@ -1,5 +1,9 @@
 //! MoogleMail Sent 分页解析；详情解析位于同目录的 `detail.rs`。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 mod detail;
 
 use super::super::*;
@@ -13,8 +17,15 @@ impl MoogleMailParser {
         page: usize,
         seen: &mut HashSet<String>,
     ) -> Result<MoogleMailSentPage, MoogleMailError> {
-        let source =
-            str::from_utf8(document).map_err(|_| protocol(MoogleMailOperation::Sent, world))?;
+        let source = str::from_utf8(document).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "decode_sent_page",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            protocol(MoogleMailOperation::Sent, world)
+        })?;
         if source.trim().is_empty() {
             return Err(protocol(MoogleMailOperation::Sent, world));
         }

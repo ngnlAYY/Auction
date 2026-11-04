@@ -1,5 +1,9 @@
 //! Public 规则文档 HTTP 适配器。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use auction_application::{PUBLIC_RULES_DEFAULT_LOCALE, PublicRulesDocument, PublicRulesRequest};
 use auction_contracts::{ApiErrorResponse, ApiResponse, PublicRulesResponse};
 use axum::{
@@ -35,14 +39,28 @@ pub(crate) async fn get(
             "规则内容暂不可用",
         ));
     };
-    let mut document = reader.get_public_rules(request).await.map_err(|_| {
+    let mut document = reader.get_public_rules(request).await.map_err(|diagnostic_cause| {
+        diagnostics::warn(
+            "public_rules",
+            "read_requested_locale",
+            DiagnosticError::diagnostic_kind(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+
         api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "规则内容暂不可用")
     })?;
     if document.is_none() && requested_locale != PUBLIC_RULES_DEFAULT_LOCALE {
         document = reader
             .get_public_rules(PublicRulesRequest { locale: PUBLIC_RULES_DEFAULT_LOCALE.to_owned() })
             .await
-            .map_err(|_| {
+            .map_err(|diagnostic_cause| {
+                diagnostics::warn(
+                    "public_rules",
+                    "read_fallback_locale",
+                    DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+
                 api_error(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "storage_unavailable",

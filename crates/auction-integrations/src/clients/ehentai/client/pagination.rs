@@ -1,5 +1,9 @@
 //! E-Hentai 论坛主题分页发现与受限目标构造。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::collections::BTreeSet;
 
 use crate::forum::ParsedHtmlPage;
@@ -120,8 +124,17 @@ impl EhentaiClient {
                 continue;
             }
             resolved.set_fragment(None);
-            let Some(topic_id) = optional_query_identity(&resolved, &["showtopic", "t"])
-                .map_err(|_| EhentaiError::protocol(operation, false))?
+            let Some(topic_id) = optional_query_identity(&resolved, &["showtopic", "t"]).map_err(
+                |diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "forum_topic",
+                        "parse_topic_identity",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    EhentaiError::protocol(operation, false)
+                },
+            )?
             else {
                 continue;
             };
@@ -129,13 +142,30 @@ impl EhentaiClient {
                 continue;
             }
             thread_identity_seen = true;
-            let post_id = optional_query_identity(&resolved, &["p", "pid", "gopid"])
-                .map_err(|_| EhentaiError::protocol(operation, false))?;
+            let post_id = optional_query_identity(&resolved, &["p", "pid", "gopid"]).map_err(
+                |diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "forum_topic",
+                        "parse_post_identity",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    EhentaiError::protocol(operation, false)
+                },
+            )?;
             if post_id.as_deref().is_some_and(|post_id| post_ids.contains(post_id)) {
                 page_post_identity_seen = true;
             }
-            let Some(offset_value) = optional_query_identity(&resolved, &["st"])
-                .map_err(|_| EhentaiError::protocol(operation, false))?
+            let Some(offset_value) =
+                optional_query_identity(&resolved, &["st"]).map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "forum_topic",
+                        "parse_page_offset",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    EhentaiError::protocol(operation, false)
+                })?
             else {
                 continue;
             };
@@ -154,8 +184,15 @@ impl EhentaiClient {
         if !thread_identity_seen || !page_post_identity_seen {
             return Err(EhentaiError::protocol(operation, false));
         }
-        let post_count =
-            u64::try_from(post_ids.len()).map_err(|_| EhentaiError::protocol(operation, false))?;
+        let post_count = u64::try_from(post_ids.len()).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_topic",
+                "convert_post_count",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::protocol(operation, false)
+        })?;
         Ok(TopicPageIdentity { offsets, post_count })
     }
 }
@@ -172,8 +209,15 @@ fn validate_target_offset(
     expected_offset: u64,
     operation: EhentaiOperation,
 ) -> Result<(), EhentaiError> {
-    let value = optional_query_identity(page_target, &["st"])
-        .map_err(|_| EhentaiError::protocol(operation, false))?;
+    let value = optional_query_identity(page_target, &["st"]).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "forum_topic",
+            "validate_page_offset",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        EhentaiError::protocol(operation, false)
+    })?;
     let valid = if expected_offset == 0 {
         value.as_deref().is_none_or(|value| value == "0")
     } else {

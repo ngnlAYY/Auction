@@ -1,5 +1,9 @@
 //! Admin 拍卖生命周期命令处理器。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use super::super::*;
 
 pub(crate) async fn admin_preview_auction(
@@ -107,7 +111,15 @@ pub(crate) async fn execute_admin_lifecycle(
     let request_hash = match RequestHash::from_request(action.command_kind(), auction_uuid, &input)
     {
         Ok(hash) => hash,
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "admin_lifecycle",
+                "hash_command",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     let Some(lifecycle) = state.lifecycle() else {
         return api_error(

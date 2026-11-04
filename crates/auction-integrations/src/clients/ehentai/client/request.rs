@@ -1,5 +1,9 @@
 //! E-Hentai HTTP 请求、响应边界和固定 origin 校验。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
@@ -32,15 +36,28 @@ impl EhentaiClient {
         if let Some(referer) = referer {
             request = request.header(header::REFERER, referer.as_str());
         }
-        self.check_ownership(cookie).await.map_err(|_| EhentaiError::credential(operation))?;
+        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_topic",
+                "check_read_owner",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::credential(operation)
+        })?;
         if budget.is_some_and(|budget| budget.load(Ordering::Relaxed) == 0) {
             return Err(EhentaiError::response_too_large(operation));
         }
-        let response = request
-            .timeout(self.request_timeout)
-            .send()
-            .await
-            .map_err(|_| EhentaiError::remote_temporary(operation, false))?;
+        let response =
+            request.timeout(self.request_timeout).send().await.map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_topic",
+                    "fetch_page",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                EhentaiError::remote_temporary(operation, false)
+            })?;
         let status = response.status();
         let location = response.headers().get(header::LOCATION).cloned();
         let mut body = SensitiveResponseBody(
@@ -65,7 +82,15 @@ impl EhentaiClient {
             return Err(EhentaiError::protocol(operation, false));
         }
         // 等待正文时 owner 可能已失效；只有完成复核的原 session 才能交付本次读取。
-        self.check_ownership(cookie).await.map_err(|_| EhentaiError::credential(operation))?;
+        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_topic",
+                "check_receipt_owner",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::credential(operation)
+        })?;
         Ok((std::mem::take(&mut body.0), status))
     }
 
@@ -102,7 +127,14 @@ impl EhentaiClient {
             .unwrap_or_default()
             .min(self.maximum_response_bytes);
         let mut body = SensitiveResponseBody(Vec::with_capacity(capacity));
-        while let Some(chunk) = response.chunk().await.map_err(|_| {
+        while let Some(chunk) = response.chunk().await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_topic",
+                "read_response",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+
             if write_started {
                 EhentaiError::write_unknown(operation)
             } else {
@@ -146,8 +178,15 @@ impl EhentaiClient {
         reference: &str,
         operation: EhentaiOperation,
     ) -> Result<Url, EhentaiError> {
-        let resolved =
-            base.join(reference).map_err(|_| EhentaiError::protocol(operation, false))?;
+        let resolved = base.join(reference).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_topic",
+                "resolve_same_origin",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::protocol(operation, false)
+        })?;
         if !same_origin(&resolved, &self.base_url)
             || !resolved.username().is_empty()
             || resolved.password().is_some()

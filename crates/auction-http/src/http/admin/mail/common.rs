@@ -1,3 +1,7 @@
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use auction_application::{AdminMailError, AdminMailTransactionError, ApplicationError};
 use auction_contracts::ApiErrorResponseWithData;
 use axum::{
@@ -15,7 +19,8 @@ pub(crate) fn feature_unavailable() -> Response {
 }
 
 pub(crate) fn map_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::AdminMail(AdminMailError::InvalidRequest)
         | ApplicationError::AdminMail(AdminMailError::InvalidCommand) => {
             super::api_error(StatusCode::BAD_REQUEST, "invalid_mail_request", "邮件参数无效")
@@ -56,5 +61,7 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
             "邮件服务暂不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response("admin_mail", "respond_command_failure", diagnostic_kind, response)
 }

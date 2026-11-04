@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{RealtimeReplayCommand, RequestHash};
@@ -64,7 +68,15 @@ pub(crate) async fn replay(
             match legacy_replay_command_id(failure_id, input.schema_version, &input.public_payload)
             {
                 Ok(command_id) => command_id,
-                Err(_) => return internal_error(),
+                Err(diagnostic_cause) => {
+                    diagnostics::error(
+                        "admin_realtime",
+                        "derive_replay_command",
+                        diagnostics::invalid_state(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    return internal_error();
+                }
             }
         }
     };
@@ -77,7 +89,15 @@ pub(crate) async fn replay(
     let request_hash = match RequestHash::from_request(REPLAY_COMMAND_KIND, failure_id, &hash_input)
     {
         Ok(hash) => hash,
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::error(
+                "admin_realtime",
+                "hash_replay",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     let Some(port) = state.realtime_admin() else {
         return replay_unavailable();

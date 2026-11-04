@@ -3,6 +3,10 @@
 //! 普通邮箱读取不占 compose guard；只有 compose 观察和 discard 持有短时排他会话。
 //! 读取接受前重新核验当前凭据与 owner，不把共享观察升级成资金或库存授权。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_application::{
     ApplicationError, MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard,
     MoogleMailboxInboxAssets, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
@@ -41,10 +45,20 @@ impl MoogleMailMaintenanceAdapter {
         &self,
         world: MoogleMailWorld,
     ) -> Result<MoogleMailCredentialSession, ApplicationError> {
-        self.credentials
-            .begin_exclusive(world, MoogleMailOperation::Compose)
-            .await
-            .map_err(|_| maintenance_error("MoogleMail 维护会话不可用"))
+        self.credentials.begin_exclusive(world, MoogleMailOperation::Compose).await.map_err(
+            |diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_maintenance",
+                    "acquire_compose_session",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                maintenance_error("MoogleMail 维护会话不可用")
+            },
+        )
     }
 
     async fn read_session(
@@ -52,10 +66,15 @@ impl MoogleMailMaintenanceAdapter {
         world: MoogleMailWorld,
         operation: MoogleMailOperation,
     ) -> Result<MoogleMailCredentialSession, ApplicationError> {
-        self.credentials
-            .begin_read(world, operation)
-            .await
-            .map_err(|_| maintenance_error("MoogleMail 维护读取会话不可用"))
+        self.credentials.begin_read(world, operation).await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_maintenance",
+                "acquire_read_session",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            maintenance_error("MoogleMail 维护读取会话不可用")
+        })
     }
 }
 
@@ -305,7 +324,15 @@ impl MoogleMailMaintenanceAdapter {
 async fn check_observation_session(
     session: &MoogleMailCredentialSession,
 ) -> Result<(), ApplicationError> {
-    session.check_current().await.map_err(|_| maintenance_error("MoogleMail 维护读取会话已失效"))
+    session.check_current().await.map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "mooglemail_maintenance",
+            "check_read_session",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        maintenance_error("MoogleMail 维护读取会话已失效")
+    })
 }
 
 fn maintenance_world(world_id: &str) -> Result<MoogleMailWorld, ApplicationError> {

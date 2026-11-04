@@ -2,6 +2,10 @@
 //! 页面 token 只供受控写入使用，Cookie 与 token 不进入业务 DTO 或日志。
 //! 应用层仍需自行完成邮件分类、幂等入库和业务命令编排。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 mod client;
 mod diagnostics;
 mod error;
@@ -66,9 +70,18 @@ pub fn into_application_message(
     for mut attachment in attachments {
         let key = match auction_domain::EquipmentKey::new(attachment.key.expose()) {
             Ok(key) => key,
-            Err(_) => {
+            Err(cause) => {
                 attachment.key.clear();
                 message.clear_secrets();
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "map_attachment_key",
+                    safe_diagnostics::project(&cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(message.world.as_str()),
+                        ..Default::default()
+                    },
+                );
                 return Err(MoogleMailError::new(
                     MoogleMailOperation::Detail,
                     message.world,

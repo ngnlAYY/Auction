@@ -1,5 +1,9 @@
 //! 旧版 MoogleMail schema-v1 结算 payload 校验与通知正文渲染。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_application::canonical_settlement_fulfillment_subject;
 use auction_domain::{SettlementId, SettlementObligationKind};
 
@@ -56,7 +60,15 @@ fn decode_send_payload(
     claim: &DeliveryWorkClaim,
 ) -> Result<(SettlementDeliveryPayload, MoogleMailWorld), DeliveryTransportError> {
     let mut payload =
-        SettlementSendWirePayload::deserialize(&claim.payload).map_err(|_| invalid_payload())?;
+        SettlementSendWirePayload::deserialize(&claim.payload).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "settlement_delivery",
+                "decode_send_payload",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            invalid_payload()
+        })?;
     let world = MoogleMailWorld::parse(&payload.world).ok_or_else(invalid_payload)?;
     if payload.schema_version != SCHEMA_VERSION
         || payload.operation != "send"
@@ -87,7 +99,15 @@ fn decode_return_payload(
     claim: &DeliveryWorkClaim,
 ) -> Result<(SettlementDeliveryPayload, MoogleMailWorld), DeliveryTransportError> {
     let payload =
-        SettlementReturnWirePayload::deserialize(&claim.payload).map_err(|_| invalid_payload())?;
+        SettlementReturnWirePayload::deserialize(&claim.payload).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "settlement_delivery",
+                "decode_return_payload",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            invalid_payload()
+        })?;
     let world = MoogleMailWorld::parse(&payload.world).ok_or_else(invalid_payload)?;
     if payload.schema_version != SCHEMA_VERSION
         || payload.operation != "return"

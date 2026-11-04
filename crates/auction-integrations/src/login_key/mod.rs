@@ -3,6 +3,10 @@
 //! 解密，Admin 创建/签发命令及其幂等重放通过专用 opener 返回生成的 key。
 //! Admin 手工 key 保留旧版 32–256 字节闭集，Worker 解密只接受系统签发的 canonical Base64URL。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{fmt, sync::Arc};
 
 use auction_application::{
@@ -68,8 +72,14 @@ impl MoogleMailLoginKeyIssuer {
             return Err(MailProcessingError::InvalidLoginKey.into());
         }
         let mut entropy = [0_u8; LOGIN_KEY_ENTROPY_BYTES];
-        if self.random.fill(&mut entropy).is_err() {
+        if let Err(diagnostic_cause) = self.random.fill(&mut entropy) {
             entropy.fill(0);
+            safe_diagnostics::error(
+                "login_key",
+                "generate_entropy",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
             return Err(crypto_error(LoginKeyCryptoError::RandomSource));
         }
         let encoded = URL_SAFE_NO_PAD.encode(entropy.as_slice());
@@ -236,25 +246,45 @@ fn seal(
     aad: &[u8],
     random: &SystemRandom,
 ) -> Result<(Vec<u8>, Vec<u8>), LoginKeyCryptoError> {
-    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, data_key.material())
-        .map_err(|_| LoginKeyCryptoError::Encryption)?;
+    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, data_key.material()).map_err(
+        |diagnostic_cause| {
+            safe_diagnostics::error(
+                "login_key",
+                "prepare_encryption_key",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            LoginKeyCryptoError::Encryption
+        },
+    )?;
     let key = aead::LessSafeKey::new(unbound);
     let mut nonce = vec![0_u8; LOGIN_KEY_NONCE_BYTES];
-    random.fill(&mut nonce).map_err(|_| LoginKeyCryptoError::RandomSource)?;
+    random.fill(&mut nonce).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "login_key",
+            "generate_nonce",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        LoginKeyCryptoError::RandomSource
+    })?;
     let nonce_array: [u8; LOGIN_KEY_NONCE_BYTES] =
         nonce.as_slice().try_into().map_err(|_| LoginKeyCryptoError::Encryption)?;
     // 预留认证标签，避免追加标签时扩容并复制整份加密缓冲。
     let mut buffer = Vec::with_capacity(plaintext.len() + aead::AES_256_GCM.tag_len());
     buffer.extend_from_slice(plaintext);
-    if key
-        .seal_in_place_append_tag(
-            aead::Nonce::assume_unique_for_key(nonce_array),
-            aead::Aad::from(aad),
-            &mut buffer,
-        )
-        .is_err()
-    {
+    if let Err(diagnostic_cause) = key.seal_in_place_append_tag(
+        aead::Nonce::assume_unique_for_key(nonce_array),
+        aead::Aad::from(aad),
+        &mut buffer,
+    ) {
         buffer.fill(0);
+        safe_diagnostics::error(
+            "login_key",
+            "encrypt_key",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
         return Err(LoginKeyCryptoError::Encryption);
     }
     Ok((buffer, nonce))
@@ -274,8 +304,17 @@ fn open(
             LoginKeyCryptoError::InvalidEnvelope
         });
     }
-    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, data_key.material())
-        .map_err(|_| LoginKeyCryptoError::Decryption)?;
+    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, data_key.material()).map_err(
+        |diagnostic_cause| {
+            safe_diagnostics::error(
+                "login_key",
+                "prepare_decryption_key",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            LoginKeyCryptoError::Decryption
+        },
+    )?;
     let key = aead::LessSafeKey::new(unbound);
     let nonce_array: [u8; LOGIN_KEY_NONCE_BYTES] =
         nonce.try_into().map_err(|_| LoginKeyCryptoError::InvalidEnvelope)?;
@@ -289,7 +328,14 @@ fn open(
         .map(|plaintext| plaintext.len())
     {
         Ok(length) => length,
-        Err(_) => {
+        Err(diagnostic_cause) => {
+            safe_diagnostics::debug(
+                "login_key",
+                "decrypt_key",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+
             buffer.fill(0);
             return Err(LoginKeyCryptoError::Decryption);
         }

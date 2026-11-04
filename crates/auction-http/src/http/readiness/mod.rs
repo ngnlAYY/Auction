@@ -1,5 +1,9 @@
 //! HTTP 最终就绪判定的短缓存与单飞；不缓存数据库数据，不参与业务命令准入。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::{panic::AssertUnwindSafe, sync::Arc, time::Duration};
 
 use auction_application::{ApplicationFuture, ProcessReadinessPort, RepositoryError};
@@ -81,7 +85,9 @@ impl HttpReadinessProbe {
             observation: CheckObservation::new(Arc::clone(&self.metrics)),
         };
         let source = Arc::clone(&self.source);
-        tokio::spawn(async move { refresh(source, completion).await });
+        let diagnostic_context = diagnostics::RequestDiagnostics::capture();
+        let body = async move { refresh(source, completion).await };
+        tokio::spawn(diagnostic_context.run(body));
         drop(current);
         wait_for_refresh(receiver).await
     }
@@ -96,7 +102,12 @@ impl ProcessReadinessPort for HttpReadinessProbe {
                 let mut observation = CheckObservation::new(Arc::clone(&self.metrics));
                 let result = self.source.check().await;
                 if let Err(error) = &result {
-                    tracing::warn!(target: "auction::storage::audit_health", safe_kind = error.safe_kind(), "HTTP readiness 检查失败");
+                    diagnostics::warn(
+                        "http_readiness",
+                        "check_source_direct",
+                        error.diagnostic_kind(),
+                        DiagnosticContext::default(),
+                    );
                 }
                 observation.result = if result.is_ok() {
                     ReadinessCheckResult::Ready
@@ -141,15 +152,32 @@ async fn refresh(source: Arc<dyn ProcessReadinessPort>, mut completion: RefreshC
         Ok(Ok(Ok(()))) => (true, ReadinessCheckResult::Ready),
         Ok(Err(timeout)) => {
             // 截止前没有完整依赖证明，超时按未就绪处理；只保留类型，不记录错误原文。
+            diagnostics::warn(
+                "http_readiness",
+                "check_source_timeout",
+                diagnostics::timeout_kind(&timeout),
+                DiagnosticContext::default(),
+            );
             let _elapsed = timeout;
             (false, ReadinessCheckResult::Timeout)
         }
         Ok(Ok(Err(error))) => {
-            tracing::warn!(target: "auction::storage::audit_health", safe_kind = error.safe_kind(), "HTTP readiness 检查失败");
+            diagnostics::warn(
+                "http_readiness",
+                "check_source_refresh",
+                error.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
             (false, ReadinessCheckResult::NotReady)
         }
         Err(panic_payload) => {
             // panic 无法证明依赖就绪；载荷可能含敏感值，不格式化也不写入日志。
+            diagnostics::error(
+                "http_readiness",
+                "check_source_panic",
+                diagnostics::panic_kind(&panic_payload),
+                DiagnosticContext::default(),
+            );
             drop(panic_payload);
             (false, ReadinessCheckResult::NotReady)
         }

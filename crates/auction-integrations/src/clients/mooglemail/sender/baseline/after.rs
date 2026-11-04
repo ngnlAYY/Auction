@@ -1,5 +1,9 @@
 //! 写后只读候选枚举；旧路径裁决与影子比较分离，边界失效不能补造发送前历史。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{collections::HashSet, sync::Arc};
 
 use auction_application::{
@@ -208,7 +212,12 @@ impl WatermarkFailure {
         world: crate::clients::mooglemail::MoogleMailWorld,
         reason: SentBaselineReason,
     ) -> Self {
-        tracing::warn!(%world, phase = "after_send", reason = reason.label(), "MoogleMail 发送前边界前提失效，无法事后重建旧集合");
+        safe_diagnostics::warn(
+            "mooglemail_baseline",
+            "reject_after_send_premise",
+            safe_diagnostics::project(&reason),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        );
         Self { reason, error: unavailable(world) }
     }
 }

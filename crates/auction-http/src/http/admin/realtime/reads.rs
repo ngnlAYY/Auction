@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{
@@ -59,7 +63,15 @@ pub(crate) async fn list_events(
     };
     let entry_count = match i64::try_from(result.entries.len()) {
         Ok(count) => count,
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::error(
+                "admin_realtime",
+                "convert_event_count",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     let expected_count = result.total.saturating_sub(offset).clamp(0, page_size);
     if result.limit != page_size
@@ -126,7 +138,15 @@ pub(crate) async fn list_lag(
     };
     let entry_count = match i64::try_from(result.entries.len()) {
         Ok(count) => count,
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::error(
+                "admin_realtime",
+                "convert_lag_count",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     if result.limit != page_size
         || result.offset != offset
@@ -205,7 +225,15 @@ pub(crate) async fn list_failures(
     };
     let entry_count = match i64::try_from(result.entries.len()) {
         Ok(count) => count,
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::error(
+                "admin_realtime",
+                "convert_failure_count",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     if result.limit != page_size
         || result.offset != offset

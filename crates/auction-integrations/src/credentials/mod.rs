@@ -1,6 +1,10 @@
 //! 外部凭据获取、校验与密封适配器；mail_cookie 与 forum_cookie 使用不同 AAD 和指纹域，
 //! 本模块不读配置或数据库，账号密码仅供单次论坛登录，持久化边界只接收不透明密文信封。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{fmt, sync::Arc};
 
 use auction_application::{
@@ -59,20 +63,39 @@ impl CredentialSealer {
         }
         let aad = credential_aad(kind, credential_id, scope);
         let mut nonce = [0_u8; NONCE_LENGTH];
-        self.random.fill(&mut nonce).map_err(|_| crypto_error())?;
-        let key = self.data_key.aead_key().map_err(|_| crypto_error())?;
+        self.random.fill(&mut nonce).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "credential_crypto",
+                "generate_nonce",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            crypto_error()
+        })?;
+        let key = self.data_key.aead_key().map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "credential_crypto",
+                "load_encryption_key",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            crypto_error()
+        })?;
         // 预留认证标签，避免追加标签时扩容并复制整份加密缓冲。
         let mut ciphertext = Vec::with_capacity(secret.len() + aead::AES_256_GCM.tag_len());
         ciphertext.extend_from_slice(secret);
-        if key
-            .seal_in_place_append_tag(
-                aead::Nonce::assume_unique_for_key(nonce),
-                aead::Aad::from(aad.as_bytes()),
-                &mut ciphertext,
-            )
-            .is_err()
-        {
+        if let Err(diagnostic_cause) = key.seal_in_place_append_tag(
+            aead::Nonce::assume_unique_for_key(nonce),
+            aead::Aad::from(aad.as_bytes()),
+            &mut ciphertext,
+        ) {
             ciphertext.fill(0);
+            safe_diagnostics::error(
+                "credential_crypto",
+                "encrypt_secret",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
             return Err(crypto_error());
         }
         let fingerprint = fingerprint(&self.data_key, kind, secret);
@@ -103,16 +126,40 @@ impl CredentialSealer {
             return Err(crypto_error());
         }
         let aad = credential_aad(kind, credential_id, scope);
-        let key = self.data_key.aead_key().map_err(|_| crypto_error())?;
-        let nonce =
-            aead::Nonce::try_assume_unique_for_key(envelope.nonce()).map_err(|_| crypto_error())?;
+        let key = self.data_key.aead_key().map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "credential_crypto",
+                "load_decryption_key",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            crypto_error()
+        })?;
+        let nonce = aead::Nonce::try_assume_unique_for_key(envelope.nonce()).map_err(
+            |diagnostic_cause| {
+                safe_diagnostics::error(
+                    "credential_crypto",
+                    "validate_nonce",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                crypto_error()
+            },
+        )?;
         let mut secret = envelope.ciphertext().to_vec();
         let length = match key
             .open_in_place(nonce, aead::Aad::from(aad.as_bytes()), &mut secret)
             .map(|plaintext| plaintext.len())
         {
             Ok(length) => length,
-            Err(_) => {
+            Err(diagnostic_cause) => {
+                safe_diagnostics::error(
+                    "credential_crypto",
+                    "decrypt_secret",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+
                 secret.fill(0);
                 return Err(crypto_error());
             }

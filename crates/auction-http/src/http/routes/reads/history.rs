@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use super::*;
 
 /// 公开竞价日志。编号页与 keyset cursor 页沿用旧系统互斥的分页字段。
@@ -73,7 +77,14 @@ pub(crate) async fn list_bid_log(
             "公开竞价日志暂不可用",
         ));
     };
-    let page_result = reader.list_public_bid_log(request).await.map_err(|_| {
+    let page_result = reader.list_public_bid_log(request).await.map_err(|diagnostic_cause| {
+        diagnostics::warn(
+            "public_history",
+            "read_bid_log",
+            DiagnosticError::diagnostic_kind(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+
         api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "公开竞价日志暂不可用")
     })?;
     let Some(page_result) = page_result else {

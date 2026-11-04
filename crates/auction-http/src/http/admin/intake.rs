@@ -2,6 +2,10 @@
 //! 这里保持旧版的 URL/canonical JSON 请求和响应形状；来源读取、装备 key 处理、锁和幂等
 //! 都交给应用端口与 PostgreSQL owner，处理器不直接拼接 SQL 或修改拍卖状态。
 
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{
@@ -179,75 +183,87 @@ fn feature_unavailable() -> Response {
 }
 
 fn map_error(error: ApplicationError) -> Response {
-    match error {
-        ApplicationError::AdminIntake(AdminIntakeError::InvalidCommand) => super::api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_auction_intake",
-            "后台拍品录入参数无效",
-        )
-        .into_response(),
-        ApplicationError::AdminIntake(AdminIntakeError::InvalidSource) => super::api_error(
-            StatusCode::BAD_REQUEST,
-            "unsupported_equipment_source",
-            "装备 URL 或页面内容未通过安全校验",
-        )
-        .into_response(),
-        ApplicationError::AdminIntake(AdminIntakeError::SourceUnavailable) => super::api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "equipment_source_unavailable",
-            "装备页面暂时无法读取；请检查对应世界的 MM Cookie 或稍后重试",
-        )
-        .into_response(),
-        ApplicationError::AdminIntake(AdminIntakeError::SourceUnconfigured) => super::api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "equipment_source_unavailable",
-            "装备来源尚未配置",
-        )
-        .into_response(),
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
-        ApplicationError::AdminIntake(AdminIntakeError::CommandConflict)
-        | ApplicationError::CommandLedger(CommandLedgerError::Conflict)
-        | ApplicationError::CompetitionTransaction(CompetitionTransactionError::CommandLedger(
-            CommandLedgerError::Conflict,
-        )) => super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || {
+        match error {
+            ApplicationError::AdminIntake(AdminIntakeError::InvalidCommand) => super::api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_auction_intake",
+                "后台拍品录入参数无效",
+            )
             .into_response(),
-        ApplicationError::CompetitionTransaction(
-            CompetitionTransactionError::AdminIntakeUnavailable
-            | CompetitionTransactionError::NotFound,
-        ) => super::api_error(
-            StatusCode::CONFLICT,
-            "auction_intake_unavailable",
-            "当前世界没有可接收拍品的草稿场次；请先创建草稿场次",
-        )
-        .into_response(),
-        // 沿用既有错误码，Admin 端按“无可接收场次”提示；说明文字指出赛季开始前停止收件。
-        ApplicationError::CompetitionTransaction(CompetitionTransactionError::IntakeClosed) => {
-            super::api_error(
+            ApplicationError::AdminIntake(AdminIntakeError::InvalidSource) => super::api_error(
+                StatusCode::BAD_REQUEST,
+                "unsupported_equipment_source",
+                "装备 URL 或页面内容未通过安全校验",
+            )
+            .into_response(),
+            ApplicationError::AdminIntake(AdminIntakeError::SourceUnavailable) => super::api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "equipment_source_unavailable",
+                "装备页面暂时无法读取；请检查对应世界的 MM Cookie 或稍后重试",
+            )
+            .into_response(),
+            ApplicationError::AdminIntake(AdminIntakeError::SourceUnconfigured) => {
+                super::api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "equipment_source_unavailable",
+                    "装备来源尚未配置",
+                )
+                .into_response()
+            }
+            ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+            ApplicationError::AdminIntake(AdminIntakeError::CommandConflict)
+            | ApplicationError::CommandLedger(CommandLedgerError::Conflict)
+            | ApplicationError::CompetitionTransaction(
+                CompetitionTransactionError::CommandLedger(CommandLedgerError::Conflict),
+            ) => super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+                .into_response(),
+            ApplicationError::CompetitionTransaction(
+                CompetitionTransactionError::AdminIntakeUnavailable
+                | CompetitionTransactionError::NotFound,
+            ) => super::api_error(
                 StatusCode::CONFLICT,
                 "auction_intake_unavailable",
-                "赛季开始前已停止接收装备；新赛季开始后再录入",
+                "当前世界没有可接收拍品的草稿场次；请先创建草稿场次",
             )
-            .into_response()
+            .into_response(),
+            // 沿用既有错误码，Admin 端按“无可接收场次”提示；说明文字指出赛季开始前停止收件。
+            ApplicationError::CompetitionTransaction(CompetitionTransactionError::IntakeClosed) => {
+                super::api_error(
+                    StatusCode::CONFLICT,
+                    "auction_intake_unavailable",
+                    "赛季开始前已停止接收装备；新赛季开始后再录入",
+                )
+                .into_response()
+            }
+            ApplicationError::CompetitionTransaction(
+                CompetitionTransactionError::AdminIntakeSellerBlacklisted,
+            ) => super::api_error(
+                StatusCode::CONFLICT,
+                "seller_blacklisted",
+                "该玩家受黑名单限制；请解除限制或更换卖家",
+            )
+            .into_response(),
+            ApplicationError::CompetitionTransaction(
+                CompetitionTransactionError::AdminIntakeEquipmentConflict,
+            ) => super::api_error(
+                StatusCode::CONFLICT,
+                "equipment_conflict",
+                "该装备已存在于拍卖系统；请勿重复录入",
+            )
+            .into_response(),
+            // 密钥不可用、结果损坏、序列化及并发冲突等其余错误统一返回暂不可用。
+            _ => temporarily_unavailable(),
         }
-        ApplicationError::CompetitionTransaction(
-            CompetitionTransactionError::AdminIntakeSellerBlacklisted,
-        ) => super::api_error(
-            StatusCode::CONFLICT,
-            "seller_blacklisted",
-            "该玩家受黑名单限制；请解除限制或更换卖家",
-        )
-        .into_response(),
-        ApplicationError::CompetitionTransaction(
-            CompetitionTransactionError::AdminIntakeEquipmentConflict,
-        ) => super::api_error(
-            StatusCode::CONFLICT,
-            "equipment_conflict",
-            "该装备已存在于拍卖系统；请勿重复录入",
-        )
-        .into_response(),
-        // 密钥不可用、结果损坏、序列化及并发冲突等其余错误统一返回暂不可用。
-        _ => temporarily_unavailable(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_intake",
+        "respond_command_failure",
+        diagnostic_kind,
+        response,
+    )
 }
 
 fn temporarily_unavailable() -> Response {

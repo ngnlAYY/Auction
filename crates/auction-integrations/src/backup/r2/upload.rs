@@ -1,5 +1,9 @@
 //! 固定对象名上传：小对象原生 create-only，大对象先 HEAD 再原生分片；失败后统一回读对账。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{fs::File, io::Read};
 
 use auction_application::lower_hex;
@@ -143,12 +147,25 @@ impl R2BackupStore {
 async fn read_chunk(mut file: File, limit: usize) -> Result<(File, Vec<u8>), BackupStoreError> {
     tokio::task::spawn_blocking(move || {
         let mut bytes = Vec::with_capacity(limit);
-        (&mut file)
-            .take(limit as u64)
-            .read_to_end(&mut bytes)
-            .map_err(|_| BackupStoreError::LocalRead)?;
+        (&mut file).take(limit as u64).read_to_end(&mut bytes).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "backup_archive",
+                "read_chunk",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            BackupStoreError::LocalRead
+        })?;
         Ok((file, bytes))
     })
     .await
-    .map_err(|_| BackupStoreError::LocalRead)?
+    .map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "backup_archive",
+            "read_chunk_join",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        BackupStoreError::LocalRead
+    })?
 }

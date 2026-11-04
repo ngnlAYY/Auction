@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::super::*;
 
 pub(crate) struct DetailFields {
@@ -24,35 +28,133 @@ pub(crate) fn parse_terminal_empty_detail(
     world: MoogleMailWorld,
 ) -> Result<(DetailFields, String), MoogleMailError> {
     let operation = MoogleMailOperation::Take;
-    let source = str::from_utf8(source_bytes).map_err(|_| action_proof_error(operation, world))?;
+    let source = str::from_utf8(source_bytes).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "mooglemail_take",
+            "decode_terminal_detail",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        );
+        action_proof_error(operation, world)
+    })?;
     if source.trim().is_empty() {
         return Err(action_proof_error(operation, world));
     }
     let document = Html::parse_document(source);
-    if has_result_message(&document, world).map_err(|_| action_proof_error(operation, world))? {
+    if has_result_message(&document, world).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "mooglemail_take",
+            "verify_terminal_result",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        );
+        action_proof_error(operation, world)
+    })? {
         return Err(action_proof_error(operation, world));
     }
-    parse_token_for_operation(&document, world, operation)
-        .map_err(|_| action_proof_error(operation, world))?;
+    parse_token_for_operation(&document, world, operation).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "mooglemail_take",
+            "verify_terminal_token",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        );
+        action_proof_error(operation, world)
+    })?;
 
-    let envelope_selector = selector("#mmail_outer", operation, world)
-        .map_err(|_| action_proof_error(operation, world))?;
-    let form_selector = selector("form#mailform", operation, world)
-        .map_err(|_| action_proof_error(operation, world))?;
-    let all_form_selector =
-        selector("form", operation, world).map_err(|_| action_proof_error(operation, world))?;
-    let panes_selector = selector("#mmail_attachpanes", operation, world)
-        .map_err(|_| action_proof_error(operation, world))?;
-    let buttons_selector = selector("#mmail_showbuttons", operation, world)
-        .map_err(|_| action_proof_error(operation, world))?;
-    let envelope = unique_element(document.select(&envelope_selector), operation, world)
-        .map_err(|_| action_proof_error(operation, world))?;
-    let form = unique_element(document.select(&form_selector), operation, world)
-        .map_err(|_| action_proof_error(operation, world))?;
-    unique_element(document.select(&panes_selector), operation, world)
-        .map_err(|_| action_proof_error(operation, world))?;
-    unique_element(document.select(&buttons_selector), operation, world)
-        .map_err(|_| action_proof_error(operation, world))?;
+    let envelope_selector =
+        selector("#mmail_outer", operation, world).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_take",
+                "build_terminal_envelope_selector",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        })?;
+    let form_selector =
+        selector("form#mailform", operation, world).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_take",
+                "build_terminal_form_selector",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        })?;
+    let all_form_selector = selector("form", operation, world).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_take",
+            "build_terminal_all_forms_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        );
+        action_proof_error(operation, world)
+    })?;
+    let panes_selector =
+        selector("#mmail_attachpanes", operation, world).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_take",
+                "build_terminal_panes_selector",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        })?;
+    let buttons_selector =
+        selector("#mmail_showbuttons", operation, world).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_take",
+                "build_terminal_buttons_selector",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        })?;
+    let envelope = unique_element(document.select(&envelope_selector), operation, world).map_err(
+        |diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_take",
+                "validate_terminal_envelope",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        },
+    )?;
+    let form = unique_element(document.select(&form_selector), operation, world).map_err(
+        |diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_take",
+                "validate_terminal_form",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        },
+    )?;
+    unique_element(document.select(&panes_selector), operation, world).map_err(
+        |diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_take",
+                "validate_terminal_panes",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        },
+    )?;
+    unique_element(document.select(&buttons_selector), operation, world).map_err(
+        |diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_take",
+                "validate_terminal_buttons",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        },
+    )?;
     // 侧栏 stamina 的 `#recoverform` 出现在每个真实页面上，表单唯一性只能在 envelope 内核对。
     if envelope.select(&all_form_selector).take(2).count() != 1
         || envelope.select(&form_selector).take(2).count() != 1
@@ -63,13 +165,39 @@ pub(crate) fn parse_terminal_empty_detail(
     }
 
     // 导航栏与提示区不属于邮件状态；只在邮件 envelope 内核对剩余动作与资产。
-    let onclick_selector = selector("[onclick]", operation, world)
-        .map_err(|_| action_proof_error(operation, world))?;
-    let asset_selector =
-        selector("#mmail_attachlist, #mmail_attachcount, #newcod", operation, world)
-            .map_err(|_| action_proof_error(operation, world))?;
-    let equipment_selector = selector("[onmouseover]", operation, world)
-        .map_err(|_| action_proof_error(operation, world))?;
+    let onclick_selector = selector("[onclick]", operation, world).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_take",
+            "build_terminal_action_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        );
+        action_proof_error(operation, world)
+    })?;
+    let asset_selector = selector(
+        "#mmail_attachlist, #mmail_attachcount, #newcod",
+        operation,
+        world,
+    )
+    .map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_take",
+            "build_terminal_asset_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        );
+        action_proof_error(operation, world)
+    })?;
+    let equipment_selector =
+        selector("[onmouseover]", operation, world).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_take",
+                "build_terminal_equipment_selector",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        })?;
     if envelope.select(&asset_selector).next().is_some()
         || envelope.select(&equipment_selector).next().is_some()
         || envelope.select(&onclick_selector).any(|action| {
@@ -102,12 +230,35 @@ pub(crate) fn parse_terminal_empty_detail(
         }
     }
 
-    let fields = parse_detail_fields_for(form, world, operation)
-        .map_err(|_| action_proof_error(operation, world))?;
-    let textarea_selector =
-        selector("textarea", operation, world).map_err(|_| action_proof_error(operation, world))?;
-    let textarea = unique_element(form.select(&textarea_selector), operation, world)
-        .map_err(|_| action_proof_error(operation, world))?;
+    let fields = parse_detail_fields_for(form, world, operation).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "mooglemail_take",
+            "parse_terminal_fields",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        );
+        action_proof_error(operation, world)
+    })?;
+    let textarea_selector = selector("textarea", operation, world).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_take",
+            "build_terminal_textarea_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        );
+        action_proof_error(operation, world)
+    })?;
+    let textarea = unique_element(form.select(&textarea_selector), operation, world).map_err(
+        |diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_take",
+                "validate_terminal_textarea",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        },
+    )?;
     let body = textarea.text().collect::<String>();
     if !valid_message_body(&body) {
         return Err(action_proof_error(operation, world));

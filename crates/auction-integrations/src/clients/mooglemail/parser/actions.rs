@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::*;
 
 impl MoogleMailParser {
@@ -10,8 +14,18 @@ impl MoogleMailParser {
         if !summary.validate() {
             return Err(detail_error(summary.world, MoogleMailErrorCategory::Configuration));
         }
-        let source = str::from_utf8(document)
-            .map_err(|_| detail_error(summary.world, MoogleMailErrorCategory::ProtocolDrift))?;
+        let source = str::from_utf8(document).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "decode_message_detail",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(summary.world.as_str()),
+                    ..Default::default()
+                },
+            );
+            detail_error(summary.world, MoogleMailErrorCategory::ProtocolDrift)
+        })?;
         if source.trim().is_empty() {
             return Err(detail_error(summary.world, MoogleMailErrorCategory::ProtocolDrift));
         }
@@ -75,8 +89,15 @@ impl MoogleMailParser {
         source_bytes: &[u8],
         world: MoogleMailWorld,
     ) -> Result<MoogleMailActionState, MoogleMailError> {
-        let source = str::from_utf8(source_bytes)
-            .map_err(|_| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
+        let source = str::from_utf8(source_bytes).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "decode_action_state",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            detail_error(world, MoogleMailErrorCategory::ProtocolDrift)
+        })?;
         if source.trim().is_empty() {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
@@ -137,18 +158,39 @@ impl MoogleMailParser {
         if !valid_opaque_id(external_mail_id) {
             return Err(action_proof_error(operation, world));
         }
-        let source =
-            str::from_utf8(source_bytes).map_err(|_| action_proof_error(operation, world))?;
+        let source = str::from_utf8(source_bytes).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_return",
+                "decode_return_receipt",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        })?;
         if source.trim().is_empty() {
             return Err(action_proof_error(operation, world));
         }
         let document = Html::parse_document(source);
-        if has_result_message(&document, world).map_err(|_| action_proof_error(operation, world))? {
+        if has_result_message(&document, world).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_return",
+                "verify_result_message",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        })? {
             return Err(action_proof_error(operation, world));
         }
-        if returned_receipt_matches(&document, before, world)
-            .map_err(|_| action_proof_error(operation, world))?
-        {
+        if returned_receipt_matches(&document, before, world).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_return",
+                "verify_return_receipt",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            action_proof_error(operation, world)
+        })? {
             return Ok(());
         }
         // Inbox 只列未读邮件，写前详情 GET 本身就会使目标消失；缺席绝不是退回证明。
@@ -185,7 +227,17 @@ impl MoogleMailParser {
                     world,
                 )
             }
-            Err(_) => {
+            Err(diagnostic_cause) => {
+                safe_diagnostics::debug(
+                    "mooglemail_take",
+                    "parse_terminal_detail",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+
                 let (fields, body) = parse_terminal_empty_detail(source_bytes, world)?;
                 prove_take_identity_and_receipts(
                     before,

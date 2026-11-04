@@ -1,5 +1,9 @@
 //! 单个 E-Hentai Cookie、失效回写与操作会话。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::*;
@@ -214,7 +218,15 @@ impl EhentaiCredentialSet {
         let candidate = self
             .candidates
             .lock()
-            .map_err(|_| EhentaiError::credential(EhentaiOperation::FetchTopic))?
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_credentials",
+                    "lock_candidates",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                EhentaiError::credential(EhentaiOperation::FetchTopic)
+            })?
             .iter()
             .find(|candidate| {
                 candidate.cookie.is_active()
@@ -254,20 +266,31 @@ impl EhentaiCredentialSession {
         // 先同步撤销已准备的 PM、分页和发帖会话；失效回写取消或失败不能复活这些克隆。
         current.cookie.revoke();
         {
-            let mut candidates = self
-                .set
-                .candidates
-                .lock()
-                .map_err(|_| EhentaiError::credential(EhentaiOperation::FetchTopic))?;
+            let mut candidates = self.set.candidates.lock().map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_credentials",
+                    "lock_revocation",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                EhentaiError::credential(EhentaiOperation::FetchTopic)
+            })?;
             candidates.retain(|candidate| candidate.key != current.key);
         }
         if let (Some(persistent_id), Some(invalidator)) =
             (current.persistent_id, self.set.invalidator.as_ref())
         {
-            invalidator
-                .mark_invalid(persistent_id, Utc::now())
-                .await
-                .map_err(|_| EhentaiError::credential(EhentaiOperation::FetchTopic))?;
+            invalidator.mark_invalid(persistent_id, Utc::now()).await.map_err(
+                |diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "forum_credentials",
+                        "persist_revocation",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    EhentaiError::credential(EhentaiOperation::FetchTopic)
+                },
+            )?;
         }
         Ok(())
     }

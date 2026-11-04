@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{
@@ -66,7 +70,15 @@ pub(crate) async fn update(
         &input,
     ) {
         Ok(hash) => hash,
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::error(
+                "admin_auctions",
+                "hash_schedule",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     let Some(port) = state.auction_schedule() else {
         return feature_unavailable();
@@ -123,7 +135,8 @@ fn feature_unavailable() -> Response {
 }
 
 fn map_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::Domain(auction_domain::DomainError::InvalidSchedule(_)) => {
             invalid_command()
         }
@@ -154,5 +167,12 @@ fn map_error(error: ApplicationError) -> Response {
             "Admin 拍卖计划修改暂不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_auctions",
+        "respond_schedule_failure",
+        diagnostic_kind,
+        response,
+    )
 }

@@ -94,3 +94,28 @@ Public 装配根注册 `RealtimeRecorder` 并注入 Hub；关闭 metrics 时记�
 WS 事件 send 成功后才记 push；Hub sink 交接记 relay，均不改变原控制流。
 公开 `RealtimeSubscription::recv` 继续返回原文本帧，内部 WS 使用带观测信息的接收。
 线协议、补读、游标、缓冲与淘汰边界见[实时契约](../../docs/contracts/realtime.md#推送观测边界)。
+
+## 安全错误记录
+
+W0.2 I-B 覆盖类型化错误映射、5xx helper、直接 5xx、请求 panic/超时、
+listener/连接、WebSocket、就绪缓存与 Admin 运行时开关读取失败。
+在原错误即将折叠时先投影，再返回原响应；统一响应观察只检查状态码，
+不读取或修改正文、JSON、错误码、响应头、会话或命令。
+
+诊断 target 为 `auction::diagnostics`，字段为固定 owner `kind`、语义 `phase`、
+闭集 `safe_kind` 与已有业务 UUID。`route` 来自框架 `MatchedPath` 的路由模板，
+绝不使用原始路径、URL、query 或请求头。无法匹配时固定为 `__unmatched__`；
+无请求的监听器、连接与后台路径分别使用 `__listener__`、`__connection__`、`__background__`。
+请求内复用既有 span 的规范化 `request_id`，不另生成 ID；升级任务和就绪共享刷新显式继承
+安全路由与原 span，不保留整个请求。日志门不缓存 route、request-id 或业务标识。
+
+500、内部不变量与 panic 用 ERROR；依赖、传输、超时和未确认结果用 WARN；
+未启用能力与 501 用 INFO，正常 4xx 拒绝不记 ERROR。
+JSON、游标、参数、认证格式等闭集输入解析继续固定拒绝，不记录输入或底层内容。
+`api_error` 与请求结束的 5xx 观察按状态去掉重复日志，类型化原因在折叠前单独保留。
+
+Public/Admin 装配根在原服务生命周期中安装诊断日志门、刷新到期窗口并在关闭时 flush/close；
+不增加后台任务。HTTP 不设置 Unpersisted 处置，不增加 Worker W0.3 计数。
+窗口、回退方式见[可观测性说明](../auction-observability/README.md#重复错误去重)，
+owner 与过滤例子见[排障手册](../../ops/README.md#安全错误与未持久化指标)。
+持久化值、HTTP 状态码、错误码、JSON、超时预算、缓存判定与请求控制流全部保持原契约。

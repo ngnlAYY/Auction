@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{AdminCreateAuctionCommand, RequestHash};
@@ -56,7 +60,15 @@ pub(crate) async fn create(
     }
     let request_hash = match RequestHash::from_request("admin_auction_create", auction_id, &input) {
         Ok(hash) => hash,
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::error(
+                "admin_auctions",
+                "hash_create",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     let Some(port) = state.auction_create() else {
         return create_feature_unavailable();

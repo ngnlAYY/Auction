@@ -1,5 +1,9 @@
 //! Admin 论坛本地投影读取；刷新不调用论坛网关，也不授予 Worker 写入权限。
 
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::ApplicationError;
@@ -119,14 +123,19 @@ fn unavailable() -> Response {
 }
 
 fn map_reader_error(error: ApplicationError) -> Response {
-    if matches!(error, ApplicationError::CapabilityUnavailable(_)) {
-        api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "feature_not_supported",
-            "论坛镜像仅支持 PostgreSQL 完整档",
-        )
-        .into_response()
-    } else {
-        unavailable()
-    }
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || {
+        if matches!(error, ApplicationError::CapabilityUnavailable(_)) {
+            api_error(
+                StatusCode::NOT_IMPLEMENTED,
+                "feature_not_supported",
+                "论坛镜像仅支持 PostgreSQL 完整档",
+            )
+            .into_response()
+        } else {
+            unavailable()
+        }
+    };
+    let response = body();
+    diagnostics::mapped_response("admin_forum", "respond_status_failure", diagnostic_kind, response)
 }

@@ -2,6 +2,10 @@
 //! 这里负责严格解析旧契约的筛选和两种分页形状，并把应用层安全投影转换为稳定 DTO。审计
 //! 记录只读，metadata 不在 HTTP 层重新解释为数据库模型。
 
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{
@@ -262,7 +266,8 @@ fn feature_unavailable() -> Response {
 }
 
 fn map_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
         ApplicationError::AdminAudit(_) => invalid_query(),
         _ => super::api_error(
@@ -271,5 +276,7 @@ fn map_error(error: ApplicationError) -> Response {
             "Admin 审计服务暂不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response("admin_audit", "respond_read_failure", diagnostic_kind, response)
 }

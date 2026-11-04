@@ -1,5 +1,9 @@
 //! Admin dashboard 邮件轮询 section。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use auction_application::AdminMailPort;
 use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
@@ -11,7 +15,14 @@ pub(crate) async fn load_mail_section(
     port: &dyn AdminMailPort,
     configured_mailbox_keys: &[String],
 ) -> Result<AdminDashboardSectionResponse, ()> {
-    let snapshot = port.dashboard_snapshot().await.map_err(|_| ())?;
+    let snapshot = port.dashboard_snapshot().await.map_err(|diagnostic_cause| {
+        diagnostics::warn(
+            "admin_dashboard",
+            "read_mail",
+            DiagnosticError::diagnostic_kind(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })?;
     if !snapshot.validate() {
         return Err(());
     }

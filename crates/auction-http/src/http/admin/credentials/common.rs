@@ -1,3 +1,7 @@
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use auction_application::{AdminCredentialError, ApplicationError};
 use axum::{
     http::{StatusCode, Uri},
@@ -36,7 +40,8 @@ pub(crate) fn invalid_request(code: &'static str, message: &'static str) -> Resp
 }
 
 pub(crate) fn map_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::AdminCredential(AdminCredentialError::InvalidRequest) => {
             invalid_request("invalid_credential_request", "凭据管理参数无效")
         }
@@ -129,5 +134,12 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
             "凭据管理服务暂不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_credentials",
+        "respond_command_failure",
+        diagnostic_kind,
+        response,
+    )
 }

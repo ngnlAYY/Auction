@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use auction_config::{AppConfig, Role};
-use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
+use auction_observability::{DiagnosticLogOwner, ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{
     DrainOutcome, TaskGuard, TerminationSignals, join_error_kind, wait_for_drain,
 };
@@ -34,7 +34,11 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     auction_observability::install_safe_panic_hook();
 
     let mut forced = false;
-    let result = run_service(&config, &telemetry, &mut signals, &mut forced).await;
+    let result = {
+        let diagnostic_logs = DiagnosticLogOwner::install();
+        let body = run_service(&config, &telemetry, &mut signals, &mut forced);
+        diagnostic_logs.run(body).await
+    };
     if !forced {
         shutdown_tracing(telemetry, &mut signals).await;
     }

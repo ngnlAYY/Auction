@@ -2,6 +2,10 @@
 //! 这里仅处理旧版分页/游标契约与应用投影映射；补偿守恒、逐件结算与冲正一致性由应用端口及
 //! PostgreSQL 快照读取边界负责。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use auction_application::{
     ApplicationError, DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE,
     DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE, MAX_PUBLIC_COMPENSATION_OFFSET,
@@ -323,9 +327,17 @@ async fn resolve_equipment_urls(
             "服务暂时不可用",
         ));
     };
-    let links = resolver.resolve_public_equipment_links(&targets).await.map_err(|_| {
-        api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
-    })?;
+    let links =
+        resolver.resolve_public_equipment_links(&targets).await.map_err(|diagnostic_cause| {
+            diagnostics::warn(
+                "public_compensation",
+                "resolve_equipment_links",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+
+            api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+        })?;
     if links.len() != targets.len() {
         return Err(api_error(
             StatusCode::SERVICE_UNAVAILABLE,

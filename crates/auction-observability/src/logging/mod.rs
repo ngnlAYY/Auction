@@ -1,7 +1,7 @@
 //! 由调用循环拥有的固定类别日志去重；只保留计时与计数，不保存错误正文。
 
 mod diagnostics;
-pub use diagnostics::DiagnosticLogWindows;
+pub use diagnostics::{DiagnosticLogOwner, DiagnosticLogWindows};
 mod panic;
 pub(crate) use panic::PanicSafeJson;
 pub use panic::install_safe_panic_hook;

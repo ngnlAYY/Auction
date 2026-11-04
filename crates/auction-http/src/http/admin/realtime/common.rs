@@ -1,3 +1,7 @@
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use std::collections::BTreeMap;
 
 use auction_application::{
@@ -21,7 +25,8 @@ pub(crate) fn parse_page(query: &BTreeMap<&str, String>) -> Result<(i64, i64, i6
 }
 
 pub(crate) fn map_realtime_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::RealtimeAdmin(RealtimeAdminError::InvalidCommand) => super::api_error(
             StatusCode::BAD_REQUEST,
             "invalid_realtime_command",
@@ -54,14 +59,22 @@ pub(crate) fn map_realtime_error(error: ApplicationError) -> Response {
             "realtime 管理服务暂不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_realtime",
+        "respond_read_failure",
+        diagnostic_kind,
+        response,
+    )
 }
 
 /// 把内部 typed replay 错误投影回旧 v1 的稳定 HTTP 外壳。
 /// 存储层继续区分 resolved、mismatch、命令冲突和 capability；这里只收窄公开 code/status，
 /// 不回退命令账本、事务 fence 或错误正文隔离。
 pub(crate) fn map_replay_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::RealtimeAdmin(RealtimeAdminError::InvalidCommand) => invalid_replay(),
         ApplicationError::RealtimeAdmin(RealtimeAdminError::NotFound) => {
             super::api_error(StatusCode::NOT_FOUND, "not_found", "实时 failure 不存在")
@@ -79,7 +92,14 @@ pub(crate) fn map_replay_error(error: ApplicationError) -> Response {
             replay_unavailable()
         }
         _ => replay_unavailable(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_realtime",
+        "respond_replay_failure",
+        diagnostic_kind,
+        response,
+    )
 }
 
 pub(crate) fn invalid_replay() -> Response {

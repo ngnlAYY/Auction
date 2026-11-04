@@ -1,5 +1,9 @@
 //! Armory organize 的完整正向库存证据与发送前状态读取；没有命中不是负向库存证明。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::collections::{BTreeMap, HashSet};
 
 use super::super::*;
@@ -63,15 +67,39 @@ impl MoogleMailParser {
         {
             return Err(fail());
         }
-        let mut base =
-            Url::parse(&format!("https://hentaiverse.org{}", world.path())).map_err(|_| fail())?;
+        let mut base = Url::parse(&format!("https://hentaiverse.org{}", world.path())).map_err(
+            |diagnostic_cause| {
+                safe_diagnostics::error(
+                    "mooglemail_inventory",
+                    "build_inventory_origin",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                fail()
+            },
+        )?;
         base.query_pairs_mut()
             .append_pair("s", "Bazaar")
             .append_pair("ss", "am")
             .append_pair("screen", "organize")
             .append_pair("filter", category.as_str());
         // 生产 organize 表单省略 action，按当前固定请求 URL 提交；显式 action 仍须通过下方闭集校验。
-        let action = base.join(form.attr("action").unwrap_or_default()).map_err(|_| fail())?;
+        let action =
+            base.join(form.attr("action").unwrap_or_default()).map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_inventory",
+                    "resolve_inventory_action",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                fail()
+            })?;
         let mut pairs = BTreeMap::new();
         for (key, value) in action.query_pairs() {
             if pairs.insert(key.into_owned(), value.into_owned()).is_some() {

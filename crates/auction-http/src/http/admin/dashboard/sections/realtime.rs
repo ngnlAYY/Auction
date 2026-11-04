@@ -1,5 +1,9 @@
 //! Admin dashboard realtime lag/failure section。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use auction_application::RealtimeAdminPort;
 use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
@@ -10,7 +14,14 @@ use super::super::super::timestamp;
 pub(crate) async fn load_realtime_section(
     port: &dyn RealtimeAdminPort,
 ) -> Result<AdminDashboardSectionResponse, ()> {
-    let snapshot = port.dashboard_snapshot().await.map_err(|_| ())?;
+    let snapshot = port.dashboard_snapshot().await.map_err(|diagnostic_cause| {
+        diagnostics::warn(
+            "admin_dashboard",
+            "read_realtime",
+            DiagnosticError::diagnostic_kind(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })?;
     if !snapshot.validate() {
         return Err(());
     }

@@ -34,9 +34,14 @@ subscriber 未就绪时仅将同样字段写到 stderr，写入失败不触发�
 
 调用方先用原事件的 `tracing::enabled!` 检查过滤，再调用 `should_log()`，避免为不可见日志生成汇总；同时必须在已有 Tokio 循环的 `select!` 中持续轮询 `flush_when_due()`，因此停止报错后仍会到期汇总。等待可取消，不创建独立后台任务或全局锁。实例丢弃时补齐尚未汇总的计数，未到期则 `window_complete = false`；进程被强制终止时无法保证汇总。采用显式 helper 可限定接入范围，避免全局 Layer 干预其他日志或 OTLP span。
 
-I-A 新增 jobs/application 的 `auction::diagnostics` 诊断门，复用 `RateLimitedLog`。
+I-A/I-B 的 jobs/application/integrations/HTTP 共用 `auction::diagnostics` 诊断门。
 键由固定 kind/phase/safe_kind 组成，有界保存 512 个窗口，满时放行原日志；窗口不保存业务标识。
 主 Worker 在原 select 中刷新，排空后关闭；PM 共享同一长期窗口。原 delivery 循环的去重仍保留。
+Public/Admin 在 tracing 初始化后由原服务 owner 安装 `DiagnosticLogOwner`。
+`run` 同时轮询原服务 future 与到期 flush；原服务结束、取消或提前返回时 Drop 执行 close。
+不新建后台任务；窗口只持有固定类别与计数，不保存路由模板、request-id、UUID 或整个事件。
+未安装日志门的 CLI 等调用方直接输出安全日志。
+Public/Admin sink 不安装 Worker observer，不增加 W0.3 计数。
 不改变轮询节奏、重试、租约、指标、持久化或结果未知不重发的不变量，其他日志仍走原路径。
 默认在 WARN 汇总可见时启用；回退可在现有 `log_filter` 追加
 `auction_observability::log_dedup=off`，重启后该 helper 放行所有原始日志。
@@ -162,6 +167,10 @@ kind 来自 ApplicationError、InternalEvidenceError、FundingError 的 safe_kin
 加 timeout、task_join、lease_expired、configuration_invalid、other；未知类别只生成 other。
 子任务 panic 的原 `task_join` 未持久化计数保留，
 新增 `task_panic` 诊断不带 Unpersisted 标记，避免重复累计或改分类。
+
+I-B 为集成与 HTTP 补充闭集投影，已知远端和运行时变体不折叠为 other，
+类别见[集成记录规则](../auction-integrations/README.md#安全错误记录)。
+闭集扩展不新增指标族或 label，也不把 HTTP 错误计入 Worker 指标。
 固定类别使用 `SafeErrorKind` 关联常量，既有 `safe_kind()` 字符串才经 `from_label` 映射。
 UUID、失败码、日志 kind/phase、正文和远端返回值不得进入 label。
 关闭 metrics 时不注册 collector，no-op recorder 不改变处理结果。

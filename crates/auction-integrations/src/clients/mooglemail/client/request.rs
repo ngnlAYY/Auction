@@ -1,5 +1,9 @@
 //! MoogleMail typed GET/POST 请求与远端结果分类。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::security::{
     is_hentaiverse_battle_response, is_html_content_type, is_javascript_content_type,
     is_session_expired, post_allowed,
@@ -23,9 +27,18 @@ impl MoogleMailClient {
         let mut response = DiagnosticResponse::default();
         match self.get_inner(target, cookie, &mut response).await {
             Ok(body) => Ok(body),
-            Err(error) => Err(self
-                .diagnose_http(target, response.status, response.body.as_deref(), error)
-                .await),
+            Err(error) => {
+                let error = self
+                    .diagnose_http(target, response.status, response.body.as_deref(), error)
+                    .await;
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "read_transaction",
+                    safe_diagnostics::project(&error),
+                    DiagnosticContext::default(),
+                );
+                Err(error)
+            }
         }
     }
 
@@ -38,7 +51,17 @@ impl MoogleMailClient {
         if target.origin != self.builder.origin {
             return Err(self.configuration(target));
         }
-        self.gate.wait().await.map_err(|_| {
+        self.gate.wait().await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "wait_rate",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(target.world.as_str()),
+                    ..Default::default()
+                },
+            );
+
             MoogleMailError::new(
                 target.operation,
                 target.world,
@@ -47,8 +70,19 @@ impl MoogleMailClient {
             )
         })?;
 
-        let mut cookie_header = header::HeaderValue::from_str(cookie.expose())
-            .map_err(|_| self.configuration(target))?;
+        let mut cookie_header =
+            header::HeaderValue::from_str(cookie.expose()).map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "encode_cookie",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(target.world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                self.configuration(target)
+            })?;
         cookie_header.set_sensitive(true);
         let request = self
             .client
@@ -57,9 +91,30 @@ impl MoogleMailClient {
             .header(header::COOKIE, cookie_header)
             .timeout(self.request_timeout)
             .build()
-            .map_err(|_| self.configuration(target))?;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "build_request",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(target.world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                self.configuration(target)
+            })?;
         // 限速等待后、真正发出请求前重新证明原 session 仍持有凭据 owner。
-        self.check_ownership().await.map_err(|_| {
+        self.check_ownership().await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "check_request_owner",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(target.world.as_str()),
+                    ..Default::default()
+                },
+            );
+
             MoogleMailError::new(
                 target.operation,
                 target.world,
@@ -75,7 +130,17 @@ impl MoogleMailClient {
                 false,
             ));
         }
-        let response = self.client.execute(request).await.map_err(|_| {
+        let response = self.client.execute(request).await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "fetch_page",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(target.world.as_str()),
+                    ..Default::default()
+                },
+            );
+
             MoogleMailError::new(
                 target.operation,
                 target.world,
@@ -158,7 +223,17 @@ impl MoogleMailClient {
         } else if !status.is_success() || !is_html {
             return Err(self.protocol(target));
         }
-        self.check_ownership().await.map_err(|_| {
+        self.check_ownership().await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "check_response_owner",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(target.world.as_str()),
+                    ..Default::default()
+                },
+            );
+
             MoogleMailError::new(
                 target.operation,
                 target.world,
@@ -189,9 +264,18 @@ impl MoogleMailClient {
         let mut response = DiagnosticResponse::default();
         match self.post_inner(target, cookie, form, &mut response).await {
             Ok(body) => Ok(body),
-            Err(error) => Err(self
-                .diagnose_http(target, response.status, response.body.as_deref(), error)
-                .await),
+            Err(error) => {
+                let error = self
+                    .diagnose_http(target, response.status, response.body.as_deref(), error)
+                    .await;
+                safe_diagnostics::warn(
+                    "mooglemail_send",
+                    "write_transaction",
+                    safe_diagnostics::project(&error),
+                    DiagnosticContext::default(),
+                );
+                Err(error)
+            }
         }
     }
 
@@ -206,7 +290,18 @@ impl MoogleMailClient {
         if target.origin != self.builder.origin || !post_allowed(target.operation, operation) {
             return Err(self.configuration_for(operation, target.world));
         }
-        self.gate.wait().await.map_err(|_| {
+        self.gate.wait().await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_send",
+                "wait_rate",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(target.world.as_str()),
+                    write_started: Some(false),
+                    ..Default::default()
+                },
+            );
+
             MoogleMailError::new(
                 operation,
                 target.world,
@@ -215,8 +310,20 @@ impl MoogleMailClient {
             )
         })?;
 
-        let mut cookie_header = header::HeaderValue::from_str(cookie.expose())
-            .map_err(|_| self.configuration_for(operation, target.world))?;
+        let mut cookie_header =
+            header::HeaderValue::from_str(cookie.expose()).map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_send",
+                    "encode_cookie",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(target.world.as_str()),
+                        write_started: Some(false),
+                        ..Default::default()
+                    },
+                );
+                self.configuration_for(operation, target.world)
+            })?;
         cookie_header.set_sensitive(true);
         let request = self
             .client
@@ -227,21 +334,64 @@ impl MoogleMailClient {
             .timeout(self.request_timeout)
             .body(form.encode())
             .build()
-            .map_err(|_| self.configuration_for(operation, target.world))?;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_send",
+                    "build_request",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(target.world.as_str()),
+                        write_started: Some(false),
+                        ..Default::default()
+                    },
+                );
+                self.configuration_for(operation, target.world)
+            })?;
         // 先前步骤可能已准备装备或暂存 compose 资产；失锁不能被降级为可安全重发。
-        self.check_ownership().await.map_err(|_| self.write_unknown(operation, target.world))?;
+        self.check_ownership().await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_send",
+                "check_request_owner",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(target.world.as_str()),
+                    write_started: Some(true),
+                    ..Default::default()
+                },
+            );
+            self.write_unknown(operation, target.world)
+        })?;
         if !cookie.is_active() {
             return Err(self.write_unknown(operation, target.world));
         }
         // 必须覆盖请求发出前至完整响应；Drop 同时处理取消和未知远端结果。
-        let _write_barrier = self
-            .write_barrier(cookie, target.world)
-            .map_err(|_| self.write_unknown(operation, target.world))?;
-        let response = self
-            .client
-            .execute(request)
-            .await
-            .map_err(|_| self.write_unknown(operation, target.world))?;
+        let _write_barrier =
+            self.write_barrier(cookie, target.world).map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_send",
+                    "persist_write_fence",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(target.world.as_str()),
+                        write_started: Some(true),
+                        ..Default::default()
+                    },
+                );
+                self.write_unknown(operation, target.world)
+            })?;
+        let response = self.client.execute(request).await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_send",
+                "submit_request",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(target.world.as_str()),
+                    write_started: Some(true),
+                    ..Default::default()
+                },
+            );
+            self.write_unknown(operation, target.world)
+        })?;
         diagnostic.status = Some(response.status().as_u16());
 
         if response.url().as_str() != target.url.as_str() {
@@ -314,7 +464,19 @@ impl MoogleMailClient {
         time::timeout(self.request_timeout, async {
             // 有界预留减少敏感正文扩容复制；失败或取消清理半截正文，诊断仅保留完整响应。
             let mut body = SensitiveBytes(Vec::with_capacity(capacity));
-            while let Some(chunk) = response.chunk().await.map_err(|_| read_error())? {
+            while let Some(chunk) = response.chunk().await.map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "read_response_chunk",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        write_started: Some(write_started),
+                        ..Default::default()
+                    },
+                );
+                read_error()
+            })? {
                 if body.0.len().saturating_add(chunk.len()) > self.maximum_response_bytes {
                     return Err(if write_started {
                         self.write_unknown(operation, world)
@@ -332,7 +494,19 @@ impl MoogleMailClient {
             Ok(std::mem::take(&mut body.0))
         })
         .await
-        .map_err(|_| read_error())?
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "read_response_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(world.as_str()),
+                    write_started: Some(write_started),
+                    ..Default::default()
+                },
+            );
+            read_error()
+        })?
     }
 
     fn configuration(&self, target: &MoogleMailTarget) -> MoogleMailError {

@@ -1,3 +1,7 @@
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 pub(super) use super::super::parse_canonical_uuid;
 use auction_application::{AdminUserError, ApplicationError};
 use auction_contracts::ApiErrorResponseWithData;
@@ -52,35 +56,46 @@ pub(super) fn invalid_request(code: &'static str, message: &'static str) -> Resp
 }
 
 pub(super) fn map_error(error: ApplicationError) -> Response {
-    match error {
-        ApplicationError::AdminUser(AdminUserError::InvalidRequest) => invalid_user_command(),
-        ApplicationError::AdminUser(AdminUserError::NotFound) => {
-            super::api_error(StatusCode::NOT_FOUND, "not_found", "用户不存在").into_response()
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || {
+        match error {
+            ApplicationError::AdminUser(AdminUserError::InvalidRequest) => invalid_user_command(),
+            ApplicationError::AdminUser(AdminUserError::NotFound) => {
+                super::api_error(StatusCode::NOT_FOUND, "not_found", "用户不存在").into_response()
+            }
+            ApplicationError::AdminUser(AdminUserError::Conflict) => {
+                super::api_error(StatusCode::CONFLICT, "user_conflict", "用户与现有记录冲突")
+                    .into_response()
+            }
+            ApplicationError::AdminUser(AdminUserError::CommandConflict) => {
+                super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+                    .into_response()
+            }
+            ApplicationError::AdminUser(AdminUserError::VersionConflict { current_version }) => {
+                version_conflict("state_conflict", current_version)
+            }
+            ApplicationError::AdminUser(AdminUserError::RenameNotRevertable) => {
+                super::api_error(StatusCode::CONFLICT, "rename_not_revertable", "改名记录不能回滚")
+                    .into_response()
+            }
+            ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+            // 密钥不可用、结果损坏及其余依赖错误统一返回依赖不可用。
+            _ => dependency_unavailable(),
         }
-        ApplicationError::AdminUser(AdminUserError::Conflict) => {
-            super::api_error(StatusCode::CONFLICT, "user_conflict", "用户与现有记录冲突")
-                .into_response()
-        }
-        ApplicationError::AdminUser(AdminUserError::CommandConflict) => {
-            super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
-                .into_response()
-        }
-        ApplicationError::AdminUser(AdminUserError::VersionConflict { current_version }) => {
-            version_conflict("state_conflict", current_version)
-        }
-        ApplicationError::AdminUser(AdminUserError::RenameNotRevertable) => {
-            super::api_error(StatusCode::CONFLICT, "rename_not_revertable", "改名记录不能回滚")
-                .into_response()
-        }
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
-        // 密钥不可用、结果损坏及其余依赖错误统一返回依赖不可用。
-        _ => dependency_unavailable(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_users",
+        "respond_command_failure",
+        diagnostic_kind,
+        response,
+    )
 }
 
 /// 改名回滚沿用旧版独立的业务错误命名，不能与普通用户命令合并。
 pub(super) fn map_revert_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::AdminUser(AdminUserError::InvalidRequest) => invalid_rename_command(),
         ApplicationError::AdminUser(AdminUserError::NotFound) => {
             super::api_error(StatusCode::NOT_FOUND, "not_found", "改名记录不存在").into_response()
@@ -102,16 +117,21 @@ pub(super) fn map_revert_error(error: ApplicationError) -> Response {
         }
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
         _ => dependency_unavailable(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response("admin_users", "respond_revert_failure", diagnostic_kind, response)
 }
 
 /// 用户列表只把 owner 的请求拒绝映射为查询错误，其余失败保持依赖错误外壳。
 pub(super) fn map_list_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::AdminUser(AdminUserError::InvalidRequest) => invalid_query(),
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
         _ => dependency_unavailable(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response("admin_users", "respond_list_failure", diagnostic_kind, response)
 }
 
 fn version_conflict(code: &'static str, current_version: i64) -> Response {

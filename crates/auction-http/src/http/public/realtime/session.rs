@@ -1,5 +1,9 @@
 //! WebSocket 的只读会话复核；原始 token 仅留在连接内，不进入日志或事件。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::{sync::Arc, time::Duration};
 
 use auction_application::{PublicSessionIdentity, PublicSessionPort};
@@ -55,7 +59,24 @@ impl RealtimeSession {
             Ok(Err(error)) if is_unauthenticated(&error) => {
                 return Err(SessionCheckError::Expired);
             }
-            Ok(Err(_)) | Err(_) => return Err(SessionCheckError::Unavailable),
+            Ok(Err(cause)) => {
+                diagnostics::warn(
+                    "public_realtime",
+                    "read_session",
+                    cause.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
+                return Err(SessionCheckError::Unavailable);
+            }
+            Err(cause) => {
+                diagnostics::warn(
+                    "public_realtime",
+                    "read_session_timeout",
+                    diagnostics::timeout_kind(&cause),
+                    DiagnosticContext::default(),
+                );
+                return Err(SessionCheckError::Unavailable);
+            }
         };
         let now = Utc::now();
         if identity.user_id != self.user_id

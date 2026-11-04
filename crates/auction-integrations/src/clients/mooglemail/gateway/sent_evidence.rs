@@ -1,5 +1,9 @@
 //! 在已有身份/现金 session 中复用既有 Sent 解析，不重取 guard、不推算原 COD 金额。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::time::{Duration, Instant};
 
 use auction_application::{
@@ -50,7 +54,15 @@ impl MoogleMailGateway {
             PreparedSettlementInternalEvidence::new(snapshot, Box::new(session), deadline)
         })
         .await
-        .map_err(|_| Error::Expired)?
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_evidence",
+                "prepare_sent_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            Error::Expired
+        })?
     }
 
     /// 同 session 窄读取入口；调用方保留原 guard/绝对预算，禁止嵌套 begin_exclusive。
@@ -151,6 +163,14 @@ impl MoogleMailGateway {
             Ok(evidence)
         })
         .await
-        .map_err(|_| Error::Expired)?
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_evidence",
+                "read_collection_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            Error::Expired
+        })?
     }
 }

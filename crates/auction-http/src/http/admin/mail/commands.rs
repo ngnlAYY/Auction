@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use super::{
@@ -50,7 +54,15 @@ pub(crate) async fn set_paused(
     let request_hash =
         match RequestHash::from_request("admin_mail_set_polling_paused", aggregate_id, &input) {
             Ok(hash) => hash,
-            Err(_) => return internal_error(),
+            Err(diagnostic_cause) => {
+                diagnostics::error(
+                    "admin_mail",
+                    "hash_pause",
+                    DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                return internal_error();
+            }
         };
     let Some(port) = state.admin_mail() else {
         return feature_unavailable();

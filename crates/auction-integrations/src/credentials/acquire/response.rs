@@ -1,5 +1,9 @@
 //! 登录响应只保留短时自有缓冲；不记录 URL、headers、正文或任何远端错误细节。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_application::{AdminCredentialError, ApplicationError};
 use reqwest::{Response, StatusCode, header};
 use url::Url;
@@ -53,7 +57,15 @@ pub(super) async fn read(
         .unwrap_or_default()
         .min(MAXIMUM_RESPONSE_BYTES);
     let mut body = SecretBuffer(Vec::with_capacity(capacity));
-    while let Some(chunk) = response.chunk().await.map_err(|_| unavailable())? {
+    while let Some(chunk) = response.chunk().await.map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "credential_login",
+            "read_response_chunk",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        unavailable()
+    })? {
         if body.0.len().saturating_add(chunk.len()) > MAXIMUM_RESPONSE_BYTES {
             return Err(unavailable());
         }

@@ -189,9 +189,9 @@ SLI 开关不进入两项 readiness 缓存身份，不因观测切换使就绪�
 先取最新事实再判期限，不恢复早期覆盖，不参与资金、资格或审计写入要求。
 权威规则见[数据库契约](../../docs/contracts/database.md#运行时行为开关)。
 
-## 安全错误记录（I-A）
+## 安全错误记录
 
-W0.2 本批覆盖 jobs/application；integrations 与 HTTP 的 I-B 完成前仍为部分完成。
+W0.2 由 I-A（jobs/application）与 I-B（integrations/HTTP）共同完成。
 所有持久化 defer reason、failure_code、命令结果与对外协议保持原值。
 同一函数不同原因用不同日志 kind/phase 和 safe_kind 区分，沿用 W0.7 的回退语义。
 
@@ -206,7 +206,11 @@ kind 是简短的用例 owner，例如 `fulfillment_internal`、`mail_maintenanc
 不使用函数名序号，同一 kind/phase 只对应同一种原因。超时与回执过期分别命名。
 完整 owner 清单见[排障方式](../../ops/README.md#安全错误与未持久化指标)。
 禁止把动态错误码、错误正文、URL/query、Cookie、密钥或请求/快照对象作为字段。
-上下文只允许业务 UUID、闭集世界和固定处置元数据；纯转换通过 skip_all 的安全业务 span 继承标识。
+上下文只允许业务 UUID、闭集世界、框架路由模板和固定处置元数据。
+`evidence_id` 是既有加密归档的 UUID；不输出证据正文、路径或密钥。
+HTTP route 只同步借用框架 `MatchedPath`，不存进窗口；纯转换从安全业务 span 继承标识。
+I-B 将闭集扩展为 113 类，外部自定义错误穷尽匹配，不能以 other 掩盖已知变体。
+新增类别及边界见[集成记录规则](../auction-integrations/README.md#安全错误记录)。
 `DiagnosticDisposition` 是处置闭集，当前仅有 `Unpersisted`，日志标签为 unpersisted。
 它只表示未确认持久处置，不创建任何业务事实。
 

@@ -1,5 +1,9 @@
 //! MoogleMail return/take 动作的身份前置校验与结果证明。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::*;
 use auction_application::{
     DeliverySendCredentialBinding, DeliveryTakeExpectation, InternalEvidenceError,
@@ -47,7 +51,14 @@ impl MoogleMailDeliveryTransport {
             }
             // 配置 Cookie 可即时 Take，但不能用未来当前账号的缺失页恢复这次动作。
             Err(InternalEvidenceError::Unsupported) => None,
-            Err(_) => {
+            Err(diagnostic_cause) => {
+                safe_diagnostics::warn(
+                    "mooglemail_take",
+                    "bind_credential",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+
                 return Err(transport_error(
                     MoogleMailError::new(
                         MoogleMailOperation::Take,
@@ -102,7 +113,15 @@ impl MoogleMailDeliveryTransport {
             .client
             .diagnose_parse(&target, &before, self.parser.parse_action_state(&before, world))
             .await
-            .map_err(|_| preflight_unproven(operation))?;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_take",
+                    "parse_preflight",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                preflight_unproven(operation)
+            })?;
         let preflight_proven = state.sender().eq_ignore_ascii_case(&claim.recipient)
             && match operation {
                 MoogleMailOperation::ReturnMessage => state.returnable && expected.is_none(),
@@ -138,10 +157,17 @@ impl MoogleMailDeliveryTransport {
         } else {
             self.parser.prove_take_completed(&state, &response, world)
         };
-        self.client
-            .diagnose_parse(&target, &response, proof)
-            .await
-            .map_err(|_| action_proof_unproven(operation))?;
+        self.client.diagnose_parse(&target, &response, proof).await.map_err(
+            |diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_take",
+                    "verify_take_receipt",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                action_proof_unproven(operation)
+            },
+        )?;
         let mut result_metadata = json!({
             "operation": action_name(operation),
             "external_mail_id": external_mail_id,

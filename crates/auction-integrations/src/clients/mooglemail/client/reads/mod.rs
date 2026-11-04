@@ -1,5 +1,9 @@
 //! 共享邮箱观测：凭据/world/runtime 隔离，独立等待者、写屏障及有界敏感响应。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{
     collections::HashMap,
     ops::Deref,
@@ -155,7 +159,15 @@ impl MoogleMailClient {
                 .and_then(|owner| owner.mail_runtime_binding())
                 .map(|binding| binding.generation),
         };
-        let mut scopes = self.reads.scopes.lock().map_err(|_| read_unavailable(world))?;
+        let mut scopes = self.reads.scopes.lock().map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "lock_read_scopes",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            read_unavailable(world)
+        })?;
         if let Some(scope) = scopes.get(&key) {
             return Ok((key, Arc::clone(scope)));
         }
@@ -182,7 +194,15 @@ impl MoogleMailClient {
         fresh: bool,
     ) -> Result<MoogleMailReadRound, MoogleMailError> {
         let (key, scope) = self.read_scope(cookie, world)?;
-        let mut state = scope.state.lock().map_err(|_| read_unavailable(world))?;
+        let mut state = scope.state.lock().map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "lock_round_cache",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            read_unavailable(world)
+        })?;
         state.touched = Instant::now();
         if fresh {
             scope.revision.fetch_add(1, Ordering::AcqRel);
@@ -216,7 +236,15 @@ impl MoogleMailClient {
         world: MoogleMailWorld,
     ) -> Result<MoogleMailReadRound, MoogleMailError> {
         let (key, scope) = self.read_scope(cookie, world)?;
-        let mut state = scope.state.lock().map_err(|_| read_unavailable(world))?;
+        let mut state = scope.state.lock().map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "lock_isolated_round",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            read_unavailable(world)
+        })?;
         state.touched = Instant::now();
         let epoch = Arc::new(ReadEpoch {
             revision: scope.revision.load(Ordering::Acquire),
@@ -265,8 +293,18 @@ impl MoogleMailClient {
         };
         let key = format!("{membership}:{}", target.url);
         let mut receiver = {
-            let mut requests =
-                round.epoch.requests.lock().map_err(|_| read_unavailable(target.world))?;
+            let mut requests = round.epoch.requests.lock().map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "lock_requests",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(target.world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                read_unavailable(target.world)
+            })?;
             // 当前等待者仍收到原错误；后续重试不复用失败结果，也不借替换条目重置请求预算。
             if let Some(receiver) = requests
                 .entries
@@ -278,9 +316,20 @@ impl MoogleMailClient {
                 if requests.started >= MAX_REQUESTS_PER_ROUND {
                     return Err(read_unavailable(target.world));
                 }
-                let permit = Arc::clone(&self.reads.jobs)
-                    .try_acquire_owned()
-                    .map_err(|_| read_unavailable(target.world))?;
+                let permit = Arc::clone(&self.reads.jobs).try_acquire_owned().map_err(
+                    |diagnostic_cause| {
+                        safe_diagnostics::warn(
+                            "mooglemail_read",
+                            "reserve_job_slot",
+                            safe_diagnostics::project(&diagnostic_cause),
+                            DiagnosticContext {
+                                world: diagnostic_world(target.world.as_str()),
+                                ..Default::default()
+                            },
+                        );
+                        read_unavailable(target.world)
+                    },
+                )?;
                 let (sender, receiver) = watch::channel(None);
                 requests.started += 1;
                 requests.entries.insert(key, receiver.clone());
@@ -299,7 +348,17 @@ impl MoogleMailClient {
                             .try_acquire_many_owned(body.0.capacity() as u32)
                         {
                             Ok(bytes) => bytes,
-                            Err(_) => {
+                            Err(diagnostic_cause) => {
+                                safe_diagnostics::warn(
+                                    "mooglemail_read",
+                                    "reserve_response_bytes",
+                                    safe_diagnostics::project(&diagnostic_cause),
+                                    DiagnosticContext {
+                                        world: diagnostic_world(target.world.as_str()),
+                                        ..Default::default()
+                                    },
+                                );
+
                                 body.0.fill(0);
                                 return Err(read_unavailable(target.world));
                             }
@@ -321,7 +380,18 @@ impl MoogleMailClient {
             if let Some(result) = result {
                 break result;
             }
-            receiver.changed().await.map_err(|_| read_unavailable(target.world))?;
+            receiver.changed().await.map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "wait_response",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(target.world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                read_unavailable(target.world)
+            })?;
         };
         self.check_read_round(cookie, round).await?;
         result
@@ -333,7 +403,18 @@ impl MoogleMailClient {
         round: &MoogleMailReadRound,
     ) -> Result<(), MoogleMailError> {
         round.check(cookie, round.key.world)?;
-        self.check_ownership().await.map_err(|_| unavailable(round.key.world))?;
+        self.check_ownership().await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "check_round_owner",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(round.key.world.as_str()),
+                    ..Default::default()
+                },
+            );
+            unavailable(round.key.world)
+        })?;
         let generation = self
             .ownership
             .as_ref()

@@ -1,3 +1,7 @@
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 pub(crate) use super::super::parse_canonical_uuid;
 use auction_application::{ApplicationError, CommandLedgerError, CompetitionTransactionError};
 use axum::{
@@ -29,7 +33,8 @@ pub(crate) fn create_feature_unavailable() -> Response {
 }
 
 pub(crate) fn map_create_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::Domain(auction_domain::DomainError::InvalidSchedule(_)) => {
             invalid_create_command()
         }
@@ -61,11 +66,19 @@ pub(crate) fn map_create_error(error: ApplicationError) -> Response {
             "服务暂时不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_auctions",
+        "respond_create_failure",
+        diagnostic_kind,
+        response,
+    )
 }
 
 pub(crate) fn map_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
         _ => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -73,5 +86,12 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
             "Admin 拍卖列表暂不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_auctions",
+        "respond_lifecycle_failure",
+        diagnostic_kind,
+        response,
+    )
 }

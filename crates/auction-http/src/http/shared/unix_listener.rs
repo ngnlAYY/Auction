@@ -5,6 +5,10 @@
 
 #![cfg(target_os = "linux")]
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics;
+
 use std::{
     ffi::CString,
     fs::{self, File, OpenOptions},
@@ -87,7 +91,12 @@ impl Listener for UnixHttpListener {
             match self.listener.accept().await {
                 Ok((stream, _address)) => return (stream, None),
                 Err(error) => {
-                    tracing::error!(error = %error, "Unix HTTP listener accept 失败");
+                    diagnostics::error(
+                        "http_listener",
+                        "accept_unix_connection",
+                        diagnostics::io_kind(&error),
+                        DiagnosticContext { route: Some("__listener__"), ..Default::default() },
+                    );
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             }
@@ -257,7 +266,15 @@ async fn prepare_socket_path(path: &Path) -> io::Result<()> {
             remove_if_same_socket(path, Some(identity))
         }
         Ok(Err(error)) => Err(with_context(error, "无法确认 Unix listener socket 是否已失效")),
-        Err(_) => Err(invalid("无法在限定时间内确认 Unix listener socket 是否已失效")),
+        Err(cause) => {
+            diagnostics::warn(
+                "http_listener",
+                "probe_stale_socket_timeout",
+                diagnostics::timeout_kind(&cause),
+                DiagnosticContext { route: Some("__listener__"), ..Default::default() },
+            );
+            Err(invalid("无法在限定时间内确认 Unix listener socket 是否已失效"))
+        }
     }
 }
 

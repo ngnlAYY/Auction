@@ -1,28 +1,95 @@
 //! E-Hentai 隐藏表单提取、URL/origin 校验与响应协议判断。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::sync::LazyLock;
 
 use super::*;
 
-static FORM_SELECTOR: LazyLock<Result<Selector, ()>> =
-    LazyLock::new(|| Selector::parse("form").map_err(|_| ()));
-static HIDDEN_INPUT_SELECTOR: LazyLock<Result<Selector, ()>> =
-    LazyLock::new(|| Selector::parse("input[type='hidden'][name]").map_err(|_| ()));
-static TOPIC_TITLE_SELECTOR: LazyLock<Result<Selector, ()>> =
-    LazyLock::new(|| Selector::parse("[name='TopicTitle']").map_err(|_| ()));
-static TOPIC_METADATA_SELECTOR: LazyLock<Result<Selector, ()>> =
-    LazyLock::new(|| Selector::parse("[name='TopicTitle'], [name='TopicDesc']").map_err(|_| ()));
-static POST_BODY_SELECTOR: LazyLock<Result<Selector, ()>> =
-    LazyLock::new(|| Selector::parse("[name='Post']").map_err(|_| ()));
-static LINK_SELECTOR: LazyLock<Result<Selector, ()>> =
-    LazyLock::new(|| Selector::parse("a[href]").map_err(|_| ()));
-static LOGIN_FIELD_SELECTOR: LazyLock<Result<Selector, ()>> =
-    LazyLock::new(|| Selector::parse("input[name]").map_err(|_| ()));
+static FORM_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
+    Selector::parse("form").map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_forms",
+            "build_form_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
+});
+static HIDDEN_INPUT_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
+    Selector::parse("input[type='hidden'][name]").map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_forms",
+            "build_hidden_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
+});
+static TOPIC_TITLE_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
+    Selector::parse("[name='TopicTitle']").map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_forms",
+            "build_title_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
+});
+static TOPIC_METADATA_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
+    Selector::parse("[name='TopicTitle'], [name='TopicDesc']").map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_forms",
+            "build_metadata_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
+});
+static POST_BODY_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
+    Selector::parse("[name='Post']").map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_forms",
+            "build_body_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
+});
+static LINK_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
+    Selector::parse("a[href]").map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_forms",
+            "build_link_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
+});
+static LOGIN_FIELD_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
+    Selector::parse("input[name]").map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_forms",
+            "build_login_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
+});
 
 fn cached_selector(
     cache: &'static LazyLock<Result<Selector, ()>>,
 ) -> Result<&'static Selector, ()> {
-    LazyLock::force(cache).as_ref().map_err(|_| ())
+    LazyLock::force(cache).as_ref().map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_forms",
+            "read_cached_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
 }
 
 pub(super) fn form_selector() -> Result<&'static Selector, ()> {
@@ -216,8 +283,15 @@ pub(super) fn cookie_header(
     if !valid_cookie(cookie) {
         return Err(EhentaiError::credential(operation));
     }
-    let mut header =
-        HeaderValue::from_str(cookie.as_str()).map_err(|_| EhentaiError::credential(operation))?;
+    let mut header = HeaderValue::from_str(cookie.as_str()).map_err(|diagnostic_cause| {
+        safe_diagnostics::debug(
+            "forum_session",
+            "encode_cookie",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        EhentaiError::credential(operation)
+    })?;
     header.set_sensitive(true);
     Ok(header)
 }

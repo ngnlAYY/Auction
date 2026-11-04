@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use super::*;
 
 pub(crate) async fn list_worlds(
@@ -15,7 +19,14 @@ pub(crate) async fn list_worlds(
             "世界目录暂不可用",
         ));
     };
-    let worlds = reader.list_worlds().await.map_err(|_| {
+    let worlds = reader.list_worlds().await.map_err(|diagnostic_cause| {
+        diagnostics::warn(
+            "public_worlds",
+            "read_worlds",
+            DiagnosticError::diagnostic_kind(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+
         api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "世界目录暂不可用")
     })?;
     let worlds = worlds.into_iter().map(map_world).collect();

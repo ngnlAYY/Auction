@@ -1,5 +1,9 @@
 //! 公开页面查看 HentaVerse 装备时使用的短生命周期解密适配器。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -81,15 +85,31 @@ impl PublicEquipmentLinkResolver for EquipmentGameLinkResolver {
                     return Err(dependency_error("公开装备链接投影不一致"));
                 }
 
-                let key = opener
-                    .open(secret.equipment_id, &secret.envelope)
-                    .map_err(|_| dependency_error("公开装备链接密钥不可用"))?;
+                let key = opener.open(secret.equipment_id, &secret.envelope).map_err(
+                    |diagnostic_cause| {
+                        safe_diagnostics::warn(
+                            "equipment_link",
+                            "open_key",
+                            safe_diagnostics::project(&diagnostic_cause),
+                            DiagnosticContext::default(),
+                        );
+                        dependency_error("公开装备链接密钥不可用")
+                    },
+                )?;
                 let link = key
                     .with_bytes(|bytes| {
                         let key = std::str::from_utf8(bytes).ok()?;
                         PublicEquipmentGameLink::new(format!("{public_url}/{key}")).ok()
                     })
-                    .map_err(|_| dependency_error("公开装备链接密钥无效"))?
+                    .map_err(|diagnostic_cause| {
+                        safe_diagnostics::warn(
+                            "equipment_link",
+                            "build_link",
+                            safe_diagnostics::project(&diagnostic_cause),
+                            DiagnosticContext::default(),
+                        );
+                        dependency_error("公开装备链接密钥无效")
+                    })?
                     .ok_or_else(|| dependency_error("公开装备链接格式无效"))?;
                 links.push(link);
             }

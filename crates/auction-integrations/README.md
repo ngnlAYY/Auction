@@ -46,3 +46,90 @@
 - 修改加密 AAD、指纹域或信封格式会使既有密文无法解开，必须以新版本前缀并保留旧版解密路径。
 
 论坛复用原持久 claim；`submit_form` 在第一个实际 POST 前通过 `ForumWriteProgress` 同步登记，关闭入口只拒绝首次登记，已登记的同一工作项继续完成必要 POST/回读，结果提交仍由应用/Worker owner 确认。MoogleMail delivery、discard 和 PM 的围栏调用开始即受保护，登记不代替持久围栏确认。装备准备、compose、Sent 核对及 PM 的 POST/Sent 都保持原凭据与结果未知边界，不因排空延长请求或重试外写。
+
+## 安全错误记录
+
+W0.2 I-B 在错误即将折叠或被丢弃的边界复用应用层 `diagnostics::record_error`。
+本 crate 的私有 `diagnostics::project` 仅匹配类型、闭集变体与非敏感控制标志；
+日志入口只接收安全投影，不接收原错误。固定类别使用 `SafeErrorKind` 关联常量。
+`reqwest::Error` 只看超时、构造、正文/解码类别，不读取 URL 或错误链。
+MoogleMail、论坛、PM、Sent 基线、装备来源与运行时开关错误都穷尽匹配。
+
+字段沿用 `kind`（简短 owner）、`phase`（语义步骤）、`safe_kind`（闭集原因），
+并按已有上下文附加 world、业务 UUID、`write_started` 或 `evidence_id`。
+同一 owner 的超时与普通失败使用不同 phase；不使用编号或模块路径作为类别。
+owner 清单与过滤例子见[排障手册](../../ops/README.md#安全错误与未持久化指标)。
+绝不记录 URL/query、响应片段、请求头、Cookie、玩家名、邮件主题/正文或凭据；
+也不调用原错误的 Display、Debug、source。加密归档沿用原格式与访问边界。
+
+内部不变量、诊断归档/加密失败用 ERROR；传输、远端拒绝、解析漂移和未知结果用 WARN；
+缓存回退、不能比较的影子样本与正常输入拒绝用 DEBUG。
+Sent 指标 observer 先于日志与去重；不改变评估、回退或取消事件的数量和值。
+高频日志由 Worker/Public/Admin 的长期 owner 复用 60 秒诊断门，不缓存事件或身份。
+CLI 等未安装 owner 的调用方直接输出安全日志，不创建后台任务。
+外写未知仍只读对账，绝不自动重发；缓存失败继续原回源路径。
+
+保留的错误折叠须按输入类别解释：Admin 预览、URL/key/数字等闭集输入校验仍返回固定拒绝；
+论坛渲染的有界缓冲只产生 BodyTooLarge，保留原映射；共享读取轮次的失败结果由生产者记录，
+消费者筛除已失败缓存不重复记录。远端响应解码和本地依赖失败不能归入这些例外。
+
+I-B 新增以下安全类别，均有同名大写关联常量与 `from_label` 的显式映射。
+原有 59 类保持原值，当前闭集共 113 类；未知标签才归 other，任意远端文本不进入 label。
+完整闭集由应用层投影拥有，新增类别如下：
+
+| 分类 | 新增 safe_kind |
+| --- | --- |
+| 本地依赖与观测 | `clock_skew` |
+| 本地依赖与观测 | `credential_unavailable` |
+| 本地依赖与观测 | `cryptographic_error` |
+| 装备解析 | `equipment_attributes_invalid` |
+| 装备解析 | `equipment_canonical_mismatch` |
+| 装备解析 | `equipment_category_mismatch` |
+| 装备解析 | `equipment_category_unknown` |
+| 装备解析 | `equipment_kind_unknown` |
+| 装备解析 | `equipment_level_invalid` |
+| 装备解析 | `equipment_name_invalid` |
+| 装备解析 | `equipment_page_structure_invalid` |
+| 装备解析 | `equipment_quality_unknown` |
+| HTTP 响应 | `http_bad_gateway` |
+| HTTP 响应 | `http_internal_error` |
+| HTTP 响应 | `http_server_error` |
+| HTTP 响应 | `http_service_unavailable` |
+| 本地依赖与观测 | `io_error` |
+| 本地依赖与观测 | `persistence_unavailable` |
+| 远端协议 | `remote_account_busy` |
+| 远端协议 | `remote_authentication_error` |
+| 远端协议 | `remote_body_error` |
+| 远端协议 | `remote_challenge` |
+| 远端协议 | `remote_identity_mismatch` |
+| 远端协议 | `remote_identity_unproven` |
+| 远端协议 | `remote_permission_denied` |
+| 远端协议 | `remote_protocol_error` |
+| 远端协议 | `remote_rate_limited` |
+| 远端协议 | `remote_recipient_invalid` |
+| 远端协议 | `remote_response_too_large` |
+| 远端协议 | `remote_session_expired` |
+| 远端协议 | `remote_topic_locked` |
+| 远端协议 | `remote_transport_error` |
+| 远端协议 | `remote_write_unknown` |
+| 本地依赖与观测 | `request_encoding_error` |
+| 本地依赖与观测 | `response_parse_error` |
+| 运行时开关 | `runtime_switch_corrupt` |
+| 运行时开关 | `runtime_switch_outcome_unknown` |
+| Sent 基线 | `sent_baseline_anchor_changed` |
+| Sent 基线 | `sent_baseline_anchor_missing` |
+| Sent 基线 | `sent_baseline_boundary_unavailable` |
+| Sent 基线 | `sent_baseline_cache_boundary_delta` |
+| Sent 基线 | `sent_baseline_canceled` |
+| Sent 基线 | `sent_baseline_invalid_mid` |
+| Sent 基线 | `sent_baseline_order_violation` |
+| Sent 基线 | `sent_baseline_page_discontinuity` |
+| Sent 基线 | `sent_baseline_page_limit` |
+| Sent 基线 | `sent_baseline_read_unavailable` |
+| Sent 基线 | `sent_baseline_response_hint_conflict` |
+| Sent 基线 | `sent_baseline_scope_changed` |
+| Sent 基线 | `sent_baseline_timeout` |
+| Sent 扫描 | `sent_scan_page_limit` |
+| Sent 扫描 | `sent_scan_timeout` |
+| 本地依赖与观测 | `shadow_mismatch` |
+| 本地依赖与观测 | `task_panic` |

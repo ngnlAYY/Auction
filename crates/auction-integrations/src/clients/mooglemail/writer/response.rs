@@ -1,5 +1,9 @@
 //! 最终发送响应的成功证明和明确失败分类。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::str;
 
 use scraper::Html;
@@ -62,8 +66,15 @@ fn parse_response(
     document: &[u8],
     world: MoogleMailWorld,
 ) -> Result<(&str, Html), MoogleMailError> {
-    let source = str::from_utf8(document)
-        .map_err(|_| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
+    let source = str::from_utf8(document).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "mooglemail_send",
+            "decode_send_document",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        compose_error(world, MoogleMailErrorCategory::ProtocolDrift)
+    })?;
     if source.trim().is_empty() {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }

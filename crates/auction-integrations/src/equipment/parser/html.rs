@@ -1,5 +1,9 @@
 //! 装备页面的 HTML 结构和属性提取；不推断名称语义、装备大类或交易资格。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{collections::BTreeMap, sync::LazyLock};
 
 use scraper::{ElementRef, Html, Selector};
@@ -22,7 +26,16 @@ struct EquipmentSelectors {
 
 // 选择器来自固定源码；每进程只编译一次，错误仍按页面结构错误返回，不缓存外部正文。
 static SELECTORS: LazyLock<Result<EquipmentSelectors, ()>> = LazyLock::new(|| {
-    let parse = |value| Selector::parse(value).map_err(|_| ());
+    let parse = |value| {
+        Selector::parse(value).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "equipment_fetch",
+                "build_equipment_selectors",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+        })
+    };
     Ok(EquipmentSelectors {
         panel: parse("div.showequip")?,
         children: parse("div.showequip > div")?,
@@ -43,9 +56,25 @@ pub(super) struct EquipmentPageFields {
 pub(super) fn extract_equipment_page(
     body: &[u8],
 ) -> Result<EquipmentPageFields, EquipmentParseError> {
-    let document = std::str::from_utf8(body).map_err(|_| EquipmentParseError::PageStructure)?;
+    let document = std::str::from_utf8(body).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "equipment_fetch",
+            "decode_equipment_page",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        EquipmentParseError::PageStructure
+    })?;
     let document = Html::parse_document(document);
-    let selectors = SELECTORS.as_ref().map_err(|_| EquipmentParseError::PageStructure)?;
+    let selectors = SELECTORS.as_ref().map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "equipment_fetch",
+            "read_equipment_selectors",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        EquipmentParseError::PageStructure
+    })?;
     let mut panels = document.select(&selectors.panel);
     let panel = panels.next().ok_or(EquipmentParseError::PageStructure)?;
     if panels.next().is_some() {

@@ -1,5 +1,9 @@
 //! 论坛登录态的只读正向证明；公开页面 HTTP 200 本身不是认证成功。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::*;
 
 impl EhentaiClient {
@@ -11,13 +15,34 @@ impl EhentaiClient {
         }
         let target = self.index_url(&[("act", "UserCP"), ("CODE", "00")], operation)?;
         let (body, _) = self.get_page(operation, target.clone(), None, cookie).await?;
-        let source =
-            std::str::from_utf8(&body).map_err(|_| EhentaiError::protocol(operation, false))?;
+        let source = std::str::from_utf8(&body).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_session",
+                "decode_session_page",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::protocol(operation, false)
+        })?;
         let document = Html::parse_document(source);
-        let navigation =
-            Selector::parse("#userlinks").map_err(|_| EhentaiError::protocol(operation, false))?;
-        let links =
-            Selector::parse("a[href]").map_err(|_| EhentaiError::protocol(operation, false))?;
+        let navigation = Selector::parse("#userlinks").map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "forum_session",
+                "build_navigation_selector",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::protocol(operation, false)
+        })?;
+        let links = Selector::parse("a[href]").map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "forum_session",
+                "build_link_selector",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::protocol(operation, false)
+        })?;
         let navigation = document.select(&navigation).collect::<Vec<_>>();
         if navigation.len() != 1 {
             return Err(EhentaiError::protocol(operation, false));

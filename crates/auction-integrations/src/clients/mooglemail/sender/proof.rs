@@ -1,5 +1,9 @@
 //! 基线之外候选的完整身份、正文与资产证明；候选枚举由 baseline owner 负责。
 
+use auction_application::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::*;
 use crate::clients::mooglemail::parser::{canonical_mail_body_digest, subject_is_list_projection};
 use auction_application::mail_recipient_is_list_projection;
@@ -123,15 +127,19 @@ impl MoogleMailSender {
         &self,
         world: MoogleMailWorld,
         phase: &'static str,
-        observed_messages: usize,
+        _observed_messages: usize,
     ) -> MoogleMailError {
-        tracing::warn!(
-            %world,
-            phase,
-            maximum_pages = self.verification_pages,
-            observed_messages,
-            failure_code = "sent_scan_page_limit",
-            "MoogleMail Sent scan reached page limit before final page"
+        safe_diagnostics::warn(
+            "mooglemail_baseline",
+            match phase {
+                "baseline" => "scan_full_baseline",
+                "maintenance" => "scan_maintenance",
+                "after_send" => "scan_sent_prefix",
+                "after_send_boundary" => "scan_sent_boundary",
+                _ => "scan_sent_proof",
+            },
+            safe_diagnostics::category(SafeErrorKind::SENT_SCAN_PAGE_LIMIT),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
         );
         MoogleMailError::new(
             MoogleMailOperation::Sent,
