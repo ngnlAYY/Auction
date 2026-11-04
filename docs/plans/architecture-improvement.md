@@ -178,7 +178,7 @@
 | D3 | 已提交 | `fa46d605` | 未部署 | W0.12 估计 6–9 周触及 100 页上限；决策 74 提前交付 W1.4 发送基线；默认 `shadow`，须在触顶前观察并由用户切换 `watermark` |
 | D4 | 已决定 | — | — | 决策 14；W1.3、W1.7 随 M2b |
 | D5 | 待量化 | 量化指标 `5ebfc1c8` | 未部署 | W0.6 的 `auction_db_transaction_*{owner,phase}` 部署并经 W0.10 采集后，以 Final 阶段 `bid`/`proxy`/`slow_proxy` 的耗尽次数决定是否提前交付 W12.1 |
-| D6 | 已决定 | 说明 `6cc3769f` | 未部署 | 决策 15；`docs/guide` 玩家说明已提交（Claude 依代码核实：回帖无发帖时间，`PlaceBidCommand` 按导入时服务端时钟判定），Admin 五语言规则文档由用户发布；W0.12 显示主题最多约 27 楼，远低于页数上限，W1.11 不提前 |
+| D6 | 已决定 | 说明 `6cc3769f`；五语言稿 `383138a8` | 未部署 | 决策 15；`docs/guide` 玩家说明已提交（Claude 依代码核实：回帖无发帖时间，`PlaceBidCommand` 按导入时服务端时钟判定）；五语言编辑稿在 `ops/rules/forum-reply-import/`，已有规则须在 Admin 编辑发布，`rules import` 仅首次/缺失语言；W0.12 显示主题最多约 27 楼，远低于页数上限，W1.11 不提前 |
 | D7 | 已提交 | `4ba5abe3` | 未部署 | 决策 32、71、72；W0.14 默认影子模式，切换 `classified` 后生效 |
 | D8 | 已提交 | `4ba5abe3` | 未部署 | 决策 33；W7.11 |
 | D9 | 已决定 | — | — | 决策 62；W14.6 随 M2b |
@@ -200,7 +200,7 @@
 | W0.6 | 已提交 | `5ebfc1c8` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 K）实现、Claude 监督；`[database_profiles] mode` 默认 `profiled`（`legacy` 为旧路径），服务池 16、维护池 4、固定 `application_name`，`deployment check` 汇总连接预算；服务超时默认关闭，启用须显式填写阈值且以 W0.14 切换 `classified` 为前置（见待决定）；21 个事务 owner 的尝试/冲突/重试/耗尽指标，Worker 循环连接获取与持有指标；切换需重启 |
 | W0.4 | 已提交 | `bc0e5430` | 未部署 | 执行者：Codex（DeepSeek V4.1 Flash，车道 M）实现、Claude 监督；Worker 装配同步外部指标记录器，覆盖 19 个邮件操作的物理请求、请求门/独占锁/incoming 读写锁等待、`account_busy`/限流/超时信号与维护/观察/fetch/批次/扫描预算耗尽；关闭 metrics 或非 Worker 为 no-op，不改变请求间隔、锁顺序、deadline、重试、取消、写入围栏或结果未知处理 |
 | W0.5 | 已提交 | `bc0e5430` | 未部署 | 执行者：Codex（DeepSeek V4.1 Flash，车道 M）实现、Claude 监督；论坛物理请求、门等待、主题扫描发现/处理页数、写入未知、PM prepare/send/reconcile 与回帖导入延迟 `poll_window` 上下界估计（终点为每帖首条新命令账本提交确认，不填零）；`ForumCommandStart.is_new` 与 `ForumReplyTopic.reply_phase` 是只读投影，不参与命令裁决；论坛 world 允许 `shared` 仅限无世界资料读取 |
-| W0.13 | 已提交 | `5b87ae11`；索引迁移随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；Worker 每 60 秒只读汇总窗口 Gauge（只借空闲连接、Repeatable Read 只读、2 秒预算，候选超 10000 整轮不可评估），`[metrics] sli_snapshot_enabled` 默认关闭、W7.7 开关 `metrics_sli_snapshot_enabled`；已实现实时 relay/WS 写出延迟、Final 出价容量、慢速代理当前积压；出价延迟与冲突引用 W0.9/W0.6，Final 回帖导入引用 W0.5；迁移 `000077` 已补五个全局时间候选索引（决策 77），但邮件、提醒余量、付款、投稿与慢速代理历史共 8 项派生查询仍未实现，继续以 `auction_sli_flow_blocked{reason="awaiting_index"}` 标明；记录规则与告警模板在 `ops/monitoring/`，SLO 目标值待基线观察后提出 |
+| W0.13 | 已提交 | `5b87ae11`；索引迁移 `d0de52a5` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；Worker 每 60 秒只读汇总窗口 Gauge（只借空闲连接、Repeatable Read 只读、2 秒预算，候选超 10000 整轮不可评估），`[metrics] sli_snapshot_enabled` 默认关闭、W7.7 开关 `metrics_sli_snapshot_enabled`；已实现实时 relay/WS 写出延迟、Final 出价容量、慢速代理当前积压；出价延迟与冲突引用 W0.9/W0.6，Final 回帖导入引用 W0.5；迁移 `000077` 已补五个全局时间候选索引（决策 77），但邮件、提醒余量、付款、投稿与慢速代理历史共 8 项派生查询仍未实现，继续以 `auction_sli_flow_blocked{reason="awaiting_index"}` 标明；记录规则与告警模板在 `ops/monitoring/`，SLO 目标值待基线观察后提出 |
 | W0.8 | 已提交 | `e78dac4f` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 D）实现、Claude 监督；`storage_error_from`/`sql_error_context` 附加 sqlx 变体、SQLSTATE、约束名、表名；1100 处直接 SQLx 闭包与 13 个具名 mapper 一次改完，`storage:map_err(\|_\|)` 1432 → 330；其余 330 处另定范围 |
 | W7.11 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
 | W7.8a | 已提交 | `3f0a2097` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 F）实现、Claude 监督；迁移 075 建只追加兼容登记表（001–074 缺行即 breaking，075 自身 breaking），`check.sh migration-compatibility` 检查每个新迁移恰好登记一次；`[readiness] migration_compatibility_mode` 默认 `shadow`，回退旧程序前须设为 `compatible`；本版含 breaking 迁移，部署后才能为之后的版本提供回退能力 |
@@ -214,7 +214,7 @@
 | W5 | 未开始 | — | — | W5.1、W5.6 暂缓（决策 50）；其余（含 W5.8）随 M4 |
 | W6 | W6.1–W6.4、W6.6 已批准 | — | — | 全部随 M2a，W6.3、W6.6 先行 |
 | W7 | 进行中 | — | 未部署 | W7.1a 已建立 `main` 与保护；W7.5、W7.7、W7.8a、W7.11 已提交；W7.9、W7.10 随 M2b；W7.6 随 M3；W7.1、W7.2、W7.3、W7.8 随 M6 |
-| W7.1a | 已提交 | 远端设置 | — | 仓库转公开；`main` 以 `bc0e5430` 建立并设为默认分支；分支保护要求 `docs`/`verify`/`security-audit`/`msrv`、线性历史、禁止强推与删除；`ci/dependency-version-guard` 与两个 dependabot 分支已删除，tokio PR #10 已按决策 52 关闭；`main` CI 成功（run 41764443674），后续提交继续由该工作流验证 |
+| W7.1a | 已提交 | 远端设置 | — | 仓库转公开；`main` 已设为默认分支（当前 `383138a8`），分支保护要求 `docs`/`verify`/`security-audit`/`msrv`、线性历史、禁止强推与删除；`ci/dependency-version-guard` 与两个 dependabot 分支已删除，tokio PR #10 已按决策 52 关闭；`main` CI 成功，候选二进制为 `24a9c115` |
 | W7.5 | 已提交 | `69fd85a0` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；`service stop/restart` 只读时段门禁（Final 或截止不晚于保护窗口末端的在拍 lot，含已过截止仍在拍），`--protection-window-minutes` 默认 60，例外须 `--force --reason` |
 | W8 | 未开始 | — | — | 放在 M6 最后 |
 | W9 | 未开始 | — | — | W9.5、W9.7 随 M2a；W9.8、W9.10、W9.11 随 M2b；W9.9 为 M3 首项 |
