@@ -27,7 +27,13 @@ impl EhentaiClient {
         metrics_world: ForumWorld,
     ) -> Result<Vec<(u64, Url)>, EhentaiError> {
         let first_target = self.index_url(&[("showtopic", thread_id)], operation)?;
-        let identity = self.topic_page_identity(first_page, &first_target, thread_id, operation)?;
+        let identity = self.topic_page_identity(
+            first_page,
+            &first_target,
+            thread_id,
+            operation,
+            metrics_world,
+        )?;
         let maximum_offset = identity.offsets.last().copied().unwrap_or(0);
         validate_page_post_count(0, maximum_offset, identity.post_count, operation)?;
         self.topic_page_targets_through(thread_id, maximum_offset, operation, metrics_world)
@@ -90,12 +96,18 @@ impl EhentaiClient {
         &self,
         page: &ParsedHtmlPage,
         page_target: &Url,
-        thread_id: &str,
         expected_offset: u64,
-        known_maximum_offset: u64,
-        operation: EhentaiOperation,
+        context: &TopicPageReadContext,
     ) -> Result<(), EhentaiError> {
-        let identity = self.topic_page_identity(page, page_target, thread_id, operation)?;
+        let operation = context.operation;
+        let known_maximum_offset = context.known_maximum_offset;
+        let identity = self.topic_page_identity(
+            page,
+            page_target,
+            &context.thread_id,
+            operation,
+            context.metrics_world,
+        )?;
         let discovered_maximum_offset = identity.offsets.last().copied().unwrap_or(0);
         if discovered_maximum_offset > known_maximum_offset {
             return Err(EhentaiError::protocol(operation, false));
@@ -115,6 +127,7 @@ impl EhentaiClient {
         page_target: &Url,
         thread_id: &str,
         operation: EhentaiOperation,
+        metrics_world: ForumWorld,
     ) -> Result<TopicPageIdentity, EhentaiError> {
         let mut post_ids = BTreeSet::new();
         for post_id in page.post_ids() {
@@ -159,9 +172,28 @@ impl EhentaiClient {
             if topic_id != thread_id {
                 continue;
             }
+            // 真实 IPB 用引用链接证明帖子身份；只接受当前世界板块的受限引用动作。
+            let query_identity = |aliases: &[&str]| {
+                optional_query_identity(&resolved, aliases)
+                    .map_err(|()| EhentaiError::protocol(operation, false))
+            };
+            if query_identity(&["qpid"])?.is_some() {
+                let board = match metrics_world {
+                    ForumWorld::Main => self.board_for_world(SettlementWorld::Main),
+                    ForumWorld::Isekai => self.board_for_world(SettlementWorld::Isekai),
+                    ForumWorld::Shared => return Err(EhentaiError::protocol(operation, false)),
+                };
+                let expected_board = board.to_string();
+                if query_identity(&["f"])?.as_deref() != Some(expected_board.as_str())
+                    || query_identity(&["act"])?.as_deref() != Some("Post")
+                    || query_identity(&["CODE"])?.as_deref() != Some("02")
+                {
+                    return Err(EhentaiError::protocol(operation, false));
+                }
+            }
             thread_identity_seen = true;
-            let post_id = optional_query_identity(&resolved, &["p", "pid", "gopid"]).map_err(
-                |diagnostic_cause| {
+            let post_id = optional_query_identity(&resolved, &["p", "pid", "gopid", "qpid"])
+                .map_err(|diagnostic_cause| {
                     safe_diagnostics::warn(
                         "forum_topic",
                         "parse_post_identity",
@@ -169,8 +201,7 @@ impl EhentaiClient {
                         DiagnosticContext::default(),
                     );
                     EhentaiError::protocol(operation, false)
-                },
-            )?;
+                })?;
             if post_id.as_deref().is_some_and(|post_id| post_ids.contains(post_id)) {
                 page_post_identity_seen = true;
             }
@@ -292,5 +323,37 @@ mod tests {
 
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].0, 0);
+    }
+
+    #[test]
+    fn captured_quote_identity_stays_bound_to_origin_thread_board_and_post() {
+        let mut config = EhentaiClientConfig::production().unwrap();
+        config.test_board_mode = true;
+        let client = EhentaiClient::with_config(config).unwrap();
+        let quote = "index.php?act=Post&amp;CODE=02&amp;f=4&amp;t=302133&amp;qpid=6987908";
+        let valid = format!(
+            "<a href=\"{quote}\">Quote</a><div class=\"postcolor\" id=\"post-6987908\">Catalog</div>"
+        );
+        let targets = |html: &str| {
+            let page = crate::ForumPreviewAdapter::new().parse_html_page(html).unwrap();
+            client.topic_page_targets(
+                &page,
+                "302133",
+                EhentaiOperation::FetchTopic,
+                ForumWorld::Main,
+            )
+        };
+        assert!(targets(&valid).is_ok());
+        for (old, new) in [
+            ("index.php?", "https://example.invalid/index.php?"),
+            ("t=302133", "t=999"),
+            ("f=4", "f=77"),
+            ("qpid=6987908", "qpid=999"),
+            ("qpid=6987908", "qpid=6987908&amp;qpid=6987908"),
+            ("qpid=6987908", "qpid=6987908&amp;p=6987908"),
+            ("CODE=02", "CODE=03"),
+        ] {
+            assert!(targets(&valid.replace(old, new)).is_err(), "{new}");
+        }
     }
 }
