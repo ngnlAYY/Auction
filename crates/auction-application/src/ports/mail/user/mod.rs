@@ -8,7 +8,10 @@ mod model;
 mod ports;
 mod security;
 
-pub use commands::{MailUserRebindCommand, MailUserRegisterCommand, MailUserRegisterWrite};
+pub use commands::{
+    MailUserRebindCommand, MailUserRegisterCommand, MailUserRegisterWrite, MailUserRekeyCommand,
+    MailUserRekeyWrite,
+};
 pub use model::{MailUserCommandKind, MailUserResult, MailUserResultCode};
 pub use ports::{
     MailLoginKeyEnvelopeReader, MailLoginKeyIssuer, MailLoginKeyReader, MailUserPort, MailUserStore,

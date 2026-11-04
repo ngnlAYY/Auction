@@ -17,8 +17,10 @@ use auction_application::{
     ApplicationError, ApplicationFuture, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
 };
 
+mod hot;
 mod validation;
 
+pub use hot::{RuntimeFileStamp, load_worker_hot_config, worker_hot_config};
 pub(crate) use validation::validate_runtime_document;
 
 /// runtime 文件构造和本地持久化错误；不回显 TOML 原文。

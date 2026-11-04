@@ -63,19 +63,24 @@ where
                 .await;
         }
         if message.attachments.is_empty() {
-            let delivery_id = self
-                .enqueue_notice(
+            let notice_id = self
+                .enqueue_explanation(
                     &message,
                     MailNotificationTemplate::AuctionNoAttachments,
                     "auction_no_attachments",
-                    None,
                 )
                 .await?;
+            let mut delivery_ids = Vec::new();
+            delivery_ids.extend(notice_id);
             return decision(
                 "equipment",
                 "rejected",
                 "auction_no_attachments",
-                json!({ "attachment_count": 0, "delivery_ids": [delivery_id] }),
+                json!({
+                    "attachment_count": 0,
+                    "delivery_ids": delivery_ids,
+                    "notice_suppressed": notice_id.is_none(),
+                }),
             );
         }
         if !message.claimable {

@@ -165,6 +165,29 @@ impl ForumWorkerRuntimeConfig {
     pub(super) fn validate(self) -> bool {
         bounded(self.poll_interval) && self.jitter <= MAX_INTERVAL && bounded(self.lease_duration)
     }
+
+    /// 只替换热读取的轮询与抖动；租约仍来自启动配置。
+    pub(super) fn with_hot(self, hot: &auction_application::WorkerForumHotConfig) -> Self {
+        Self {
+            poll_interval: Duration::from_secs(hot.poll_interval_seconds),
+            jitter: Duration::from_secs(hot.jitter_seconds),
+            lease_duration: self.lease_duration,
+        }
+    }
+}
+
+impl DeliveryWorkerRuntimeConfig {
+    /// 只替换热读取的批次、轮询、抖动与超时；租约、续租、发送宽限和并发仍来自启动配置。
+    pub(super) fn with_hot(self, hot: &auction_application::WorkerDeliveryHotConfig) -> Self {
+        Self {
+            batch_limit: hot.batch_limit,
+            poll_interval: Duration::from_secs(hot.poll_interval_seconds),
+            jitter: Duration::from_secs(hot.jitter_seconds),
+            request_timeout: Duration::from_secs(hot.request_timeout_seconds),
+            finalize_timeout: Duration::from_secs(hot.finalize_timeout_seconds),
+            ..self
+        }
+    }
 }
 
 /// Fulfillment 与 Recovery loop 共用的已校验运行边界；两者字段、默认值与校验完全一致。
@@ -203,5 +226,62 @@ impl FulfillmentWorkerRuntimeConfig {
             && !self.item_timeout.is_zero()
             && self.item_timeout < self.lease_duration
             && bounded(self.retry_delay)
+    }
+}
+
+#[cfg(test)]
+mod hot_overlay_tests {
+    use std::time::Duration;
+
+    use auction_application::{WorkerDeliveryHotConfig, WorkerForumHotConfig};
+
+    use super::{DeliveryWorkerRuntimeConfig, ForumWorkerRuntimeConfig};
+
+    #[test]
+    fn delivery_hot_overlay_keeps_lease_and_concurrency() {
+        let startup = DeliveryWorkerRuntimeConfig {
+            lease_duration: Duration::from_secs(90),
+            renew_interval: Duration::from_secs(15),
+            sending_grace: Duration::from_secs(400),
+            concurrency: 3,
+            ..DeliveryWorkerRuntimeConfig::default()
+        };
+        let hot = WorkerDeliveryHotConfig {
+            batch_limit: 12,
+            poll_interval_seconds: 7,
+            jitter_seconds: 2,
+            request_timeout_seconds: 200,
+            finalize_timeout_seconds: 8,
+        };
+        let next = startup.with_hot(&hot);
+        assert_eq!(next.batch_limit, 12);
+        assert_eq!(next.poll_interval, Duration::from_secs(7));
+        assert_eq!(next.jitter, Duration::from_secs(2));
+        assert_eq!(next.request_timeout, Duration::from_secs(200));
+        assert_eq!(next.finalize_timeout, Duration::from_secs(8));
+        // 重启字段保持启动值，热快照不能改写 claim、sending 围栏或并发。
+        assert_eq!(next.lease_duration, startup.lease_duration);
+        assert_eq!(next.renew_interval, startup.renew_interval);
+        assert_eq!(next.sending_grace, startup.sending_grace);
+        assert_eq!(next.concurrency, startup.concurrency);
+        assert!(next.validate());
+    }
+
+    #[test]
+    fn forum_hot_overlay_keeps_lease() {
+        let startup = ForumWorkerRuntimeConfig {
+            lease_duration: Duration::from_secs(300),
+            ..Default::default()
+        };
+        let hot = WorkerForumHotConfig {
+            batch_size: 9,
+            poll_interval_seconds: 45,
+            jitter_seconds: 3,
+            item_timeout_seconds: 120,
+        };
+        let next = startup.with_hot(&hot);
+        assert_eq!(next.poll_interval, Duration::from_secs(45));
+        assert_eq!(next.jitter, Duration::from_secs(3));
+        assert_eq!(next.lease_duration, Duration::from_secs(300));
     }
 }

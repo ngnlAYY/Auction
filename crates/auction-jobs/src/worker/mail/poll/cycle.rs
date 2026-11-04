@@ -23,7 +23,7 @@ const SWITCH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs
 /// 等待已装配日程与 `[0, jitter]` 后轮询；手动触发跳过等待和 due 时间。
 pub(crate) async fn run_loop<C>(
     worker: Arc<PersistentWorker<C>>,
-    runtime: MailPollRuntime,
+    mut runtime: MailPollRuntime,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) where
     C: Clock + 'static,
@@ -34,6 +34,15 @@ pub(crate) async fn run_loop<C>(
         loop {
             if *shutdown.borrow() || worker.control.is_draining() {
                 return;
+            }
+            // 每个循环边界只替换预算类热参数；租约与日程仍沿用启动配置。
+            if !runtime.config.apply_hot(&worker.hot.snapshot().mail) {
+                diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
+                tracing::warn!(
+                    world_id = %runtime.world_id,
+                    mailbox_key = %runtime.mailbox_key,
+                    "热读取的 MoogleMail 预算与当前租约不一致，继续使用上一次有效配置"
+                );
             }
             let mut isolated = runtime.switches.mooglemail_poll_isolation_enabled();
             let mut schedule = poll_schedule(&runtime, isolated);

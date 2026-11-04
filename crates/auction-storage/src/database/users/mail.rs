@@ -4,8 +4,8 @@
 use auction_application::MailUserResultCode;
 use auction_application::{
     ApplicationError, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailUserCommandKind,
-    MailUserRebindCommand, MailUserRegisterWrite, MailUserResult, MailUserStore, RepositoryError,
-    RequestHash,
+    MailUserRebindCommand, MailUserRegisterWrite, MailUserRekeyWrite, MailUserResult,
+    MailUserStore, RepositoryError, RequestHash,
 };
 use auction_domain::CommandId;
 #[cfg(feature = "postgres")]
@@ -76,6 +76,18 @@ impl MailUserStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => postgres::rebind_postgres(store, _command).await,
+            }
+        })
+    }
+
+    fn rekey_login_key(
+        &self,
+        _write: MailUserRekeyWrite,
+    ) -> auction_application::ApplicationFuture<'_, MailUserResult> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => postgres::rekey_postgres(store, _write).await,
             }
         })
     }

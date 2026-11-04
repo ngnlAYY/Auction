@@ -103,6 +103,7 @@ pub(crate) async fn run_cycle<C>(
     worker: &PersistentWorker<C>,
     runtime: &ForumSyncRuntime,
     lease_duration: std::time::Duration,
+    hot: Option<auction_application::WorkerForumHotConfig>,
 ) -> Result<(), WorkerError>
 where
     C: Clock + 'static,
@@ -117,9 +118,20 @@ where
                 DiagnosticContext::default(),
             );
         })?;
+    // 热快照只替换批次与单项预算；与启动租约冲突时退回启动值，不能让 claim 越过租约。
+    let (batch_size, item_timeout) = hot
+        .filter(|hot| {
+            let item = std::time::Duration::from_secs(hot.item_timeout_seconds);
+            hot.batch_size > 0
+                && hot.batch_size <= MAX_BATCH_SIZE
+                && !item.is_zero()
+                && lease_duration.to_std().is_ok_and(|lease| item < lease)
+        })
+        .map(|hot| (hot.batch_size, std::time::Duration::from_secs(hot.item_timeout_seconds)))
+        .unwrap_or((runtime.batch_size, runtime.item_timeout));
     let mut processed = 0_u16;
     let mut first_error = None;
-    while processed < runtime.batch_size && !worker.control.is_draining() {
+    while processed < batch_size && !worker.control.is_draining() {
         let available_worlds =
             [auction_domain::SettlementWorld::Main, auction_domain::SettlementWorld::Isekai]
                 .into_iter()
@@ -138,7 +150,7 @@ where
         }
         // 领取与远端处理共用领取前截止，数据库等待不能重新获得完整处理预算。
         let item_deadline = tokio::time::Instant::now()
-            .checked_add(runtime.item_timeout)
+            .checked_add(item_timeout)
             .ok_or(WorkerError::InvalidForumSyncConfiguration)
             .inspect_err(|error| {
                 diagnostics::unpersisted_error(

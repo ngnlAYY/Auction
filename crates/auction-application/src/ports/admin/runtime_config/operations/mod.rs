@@ -21,7 +21,8 @@ pub use worker::{
     AdminRuntimeWorkerConfig,
 };
 
-/// 可独立接管的参数；保存只更新候选文件，进程重启后才消费。
+/// 可独立接管的参数；保存只更新候选文件。Worker 的节奏/预算字段由周期热读取在下一个
+/// 循环边界使用，其余字段在进程重启后才消费。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeOperationsConfig {

@@ -179,3 +179,63 @@ fn matching_origin_id(stored: &str, command: &MailDeliveryCommand) -> bool {
     matches!(stored, value if value == canonical || value == legacy)
         && matches!(command.origin_id.as_str(), value if value == canonical || value == legacy)
 }
+
+/// 受回信预算约束的入队：计数与插入在同一 Serializable 事务内，达到上限时不写行。
+/// 已存在的同一 command 直接走幂等路径，不因预算重新计算而丢失原 delivery。
+pub(super) async fn enqueue_within_limit_postgres(
+    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    command: &MailDeliveryCommand,
+    limit: auction_application::MailNoticeLimit,
+) -> Result<auction_application::MailNoticeEnqueue, RepositoryError> {
+    use auction_application::MailNoticeEnqueue;
+
+    if limit.maximum == 0 {
+        let result = enqueue_postgres(pool, command).await?;
+        return Ok(MailNoticeEnqueue::Enqueued(result));
+    }
+    pool.observe_transaction(
+        auction_observability::DatabaseTransactionOwner::DeliveryOutcome,
+        async {
+            let mut transaction = pool
+                .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+                .await
+                .map_err(map_storage_error)?;
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM public.deliveries WHERE command_id = $1)",
+            )
+            .bind(command.command_id.as_uuid())
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(map_storage_error)?;
+            if !exists {
+                let templates = limit
+                    .templates
+                    .iter()
+                    .map(|template| (*template).to_owned())
+                    .collect::<Vec<_>>();
+                let count: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM public.deliveries
+                     WHERE lower(recipient) = lower($1)
+                       AND created_at >= $2
+                       AND payload->>'template' = ANY($3)",
+                )
+                .bind(&command.recipient)
+                .bind(limit.since)
+                .bind(&templates)
+                .fetch_one(&mut *transaction)
+                .await
+                .map_err(map_storage_error)?;
+                if count >= i64::from(limit.maximum) {
+                    transaction.commit().await.map_err(map_storage_error)?;
+                    return Ok(MailNoticeEnqueue::Suppressed);
+                }
+            }
+            let result = enqueue_in_transaction(&mut transaction, command, None)
+                .await
+                .map_err(MailDeliveryTransactionError::into_repository)?;
+            transaction.commit().await.map_err(map_storage_error)?;
+            Ok(MailNoticeEnqueue::Enqueued(result))
+        },
+    )
+    .await
+}

@@ -505,17 +505,22 @@ impl Drop for ForumWriteUnknownGuard {
     }
 }
 
-/// 完整主题扫描的页数观测；取消时记录 canceled，不把缺样当零页。
+/// 主题扫描的页数观测；增量读取与完整读取分开计数，取消时记录 canceled，不把缺样当零页。
 pub(crate) struct ForumTopicScanGuard {
     observer: Arc<dyn ExternalMetricsObserver>,
     world: ForumWorld,
+    mode: ForumTopicScanMode,
     pages: usize,
     completed: bool,
 }
 
 impl ForumTopicScanGuard {
     pub(crate) fn start(observer: Arc<dyn ExternalMetricsObserver>, world: ForumWorld) -> Self {
-        Self { observer, world, pages: 0, completed: false }
+        Self { observer, world, mode: ForumTopicScanMode::Full, pages: 0, completed: false }
+    }
+
+    pub(crate) fn set_mode(&mut self, mode: ForumTopicScanMode) {
+        self.mode = mode;
     }
 
     pub(crate) fn set_pages(&mut self, pages: usize) {
@@ -535,7 +540,7 @@ impl ForumTopicScanGuard {
     fn observe(&self, measure: ForumTopicScanMeasure, outcome: ForumTopicScanOutcome) {
         self.observer.observe(ExternalMetricsEvent::ForumTopicScanPages {
             world: self.world,
-            mode: ForumTopicScanMode::Full,
+            mode: self.mode,
             measure,
             outcome,
             pages: self.pages,

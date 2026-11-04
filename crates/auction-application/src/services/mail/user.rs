@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::{
     ApplicationError, ApplicationFuture, MailLoginKeyIssuer, MailProcessingError,
     MailUserCommandKind, MailUserPort, MailUserRebindCommand, MailUserRegisterCommand,
-    MailUserRegisterWrite, MailUserResult, MailUserStore,
+    MailUserRegisterWrite, MailUserRekeyCommand, MailUserRekeyWrite, MailUserResult, MailUserStore,
 };
 
 /// Users owner 的 MoogleMail 用例服务。
@@ -92,6 +92,43 @@ where
         let result = self.store.rebind_username(command).await?;
         result.validate(MailUserCommandKind::Rebind).map_err(ApplicationError::from)
     }
+
+    /// 为发件人账号轮换登录 key：新 key 与全部会话失效必须在同一个 Users 事务内提交。
+    /// 账号不存在时不签发可用信封，只记录 `not_registered` 命令结果供回信说明。
+    pub async fn rekey_login_key(
+        &self,
+        command: MailUserRekeyCommand,
+    ) -> Result<MailUserResult, ApplicationError> {
+        validate_rekey_command(&command)?;
+        if let Some(result) = self
+            .store
+            .find_mail_command(command.command_id, MailUserCommandKind::Rekey, command.request_hash)
+            .await?
+        {
+            return result.validate(MailUserCommandKind::Rekey).map_err(ApplicationError::from);
+        }
+
+        // 账号不存在时仍先选一个临时 UUID 以复用同一签发路径；storage 不会为此 UUID 落信封。
+        let user_id = self
+            .store
+            .find_registration_user_id(command.username.clone())
+            .await?
+            .unwrap_or_else(Uuid::new_v4);
+        let issue = self.issuer.issue(user_id).await?;
+        if issue.public_key_hash == [0; 32] || issue.envelope.ciphertext().len() < 16 {
+            return Err(MailProcessingError::InvalidLoginKeyEnvelope.into());
+        }
+        let result = self
+            .store
+            .rekey_login_key(MailUserRekeyWrite {
+                command,
+                user_id,
+                public_key_hash: issue.public_key_hash,
+                envelope: issue.envelope,
+            })
+            .await?;
+        result.validate(MailUserCommandKind::Rekey).map_err(ApplicationError::from)
+    }
 }
 
 impl<S, I> MailUserPort for MailUserService<S, I>
@@ -112,6 +149,13 @@ where
     ) -> ApplicationFuture<'_, MailUserResult> {
         Box::pin(async move { MailUserService::rebind_username(self, command).await })
     }
+
+    fn rekey_login_key(
+        &self,
+        command: MailUserRekeyCommand,
+    ) -> ApplicationFuture<'_, MailUserResult> {
+        Box::pin(async move { MailUserService::rekey_login_key(self, command).await })
+    }
 }
 
 fn validate_register_command(command: &MailUserRegisterCommand) -> Result<(), ApplicationError> {
@@ -131,6 +175,17 @@ fn validate_rebind_command(command: &MailUserRebindCommand) -> Result<(), Applic
         || command.old_key_hash == [0; 32]
         || !valid_identity(&command.next_username)
         || command.history_id.is_nil()
+        || command.now.timestamp_nanos_opt().is_none()
+    {
+        return Err(MailProcessingError::InvalidUserCommand.into());
+    }
+    Ok(())
+}
+
+fn validate_rekey_command(command: &MailUserRekeyCommand) -> Result<(), ApplicationError> {
+    if command.command_id.is_nil()
+        || command.request_hash.as_bytes() == [0; 32]
+        || !valid_identity(&command.username)
         || command.now.timestamp_nanos_opt().is_none()
     {
         return Err(MailProcessingError::InvalidUserCommand.into());

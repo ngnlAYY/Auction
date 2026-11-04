@@ -427,6 +427,12 @@ fn valid_notification(payload: &AttachmentPayload, origin: &str) -> bool {
         Some("register_result") => {
             no_key && matches!(code, Some("blacklisted" | "identity_conflict"))
         }
+        Some("rekey_key") => {
+            payload.user_key_user_id.is_some_and(|id| !id.is_nil()) && code == Some("rekeyed")
+        }
+        Some("rekey_result") => {
+            no_key && matches!(code, Some("blacklisted" | "identity_conflict" | "not_registered"))
+        }
         Some("rebind_result") => {
             no_key
                 && matches!(

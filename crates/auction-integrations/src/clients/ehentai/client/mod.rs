@@ -8,6 +8,8 @@ use crate::diagnostics as safe_diagnostics;
 
 use std::{collections::VecDeque, sync::atomic::AtomicUsize};
 
+use self::parent::*;
+use super as parent;
 use super::forms::{
     PostForm, TopicForm, body_looks_like_html, build_forum_http_client, clean_line, cookie_header,
     fixed_post_form_values, fixed_post_metadata, form_selector, hidden_input_selector,
@@ -17,7 +19,6 @@ use super::forms::{
     valid_post_id, valid_rendered_post, valid_rendered_thread, valid_topic_description,
     valid_topic_id, valid_topic_title, valid_topic_titles,
 };
-use super::*;
 
 mod pagination;
 mod pm;
@@ -388,6 +389,37 @@ impl EhentaiClient {
         result
     }
 
+    /// 按游标读取主题：固定楼层页 + 游标页及其之后的分页。
+    ///
+    /// 先核对游标页仍包含游标帖子；删帖导致楼层前移或帖子缺失时回退完整读取，
+    /// 因此增量只是减少分页请求，不改变任何帖子、命令或固定楼层的解释结果。
+    pub async fn fetch_topic_incremental(
+        &self,
+        world: SettlementWorld,
+        thread_id: &str,
+        cookie: &EhentaiCookie,
+        cursor: Option<&ForumTopicCursor>,
+        fixed_through_post_number: u32,
+    ) -> Result<ForumTopicScan, EhentaiError> {
+        let mut scan = ForumTopicScanGuard::start(self.external_metrics(), forum_world(world));
+        let result = self
+            .fetch_topic_scan(
+                world,
+                thread_id,
+                cookie,
+                &mut scan,
+                cursor,
+                fixed_through_post_number,
+            )
+            .await;
+        if result.is_ok() {
+            scan.finish_complete();
+        } else {
+            scan.finish_error();
+        }
+        result
+    }
+
     async fn fetch_topic_inner(
         &self,
         world: SettlementWorld,
@@ -395,6 +427,20 @@ impl EhentaiClient {
         cookie: &EhentaiCookie,
         scan: &mut ForumTopicScanGuard,
     ) -> Result<AdminForumPreviewResult, EhentaiError> {
+        self.fetch_topic_scan(world, thread_id, cookie, scan, None, 0)
+            .await
+            .map(|scan| scan.preview)
+    }
+
+    async fn fetch_topic_scan(
+        &self,
+        world: SettlementWorld,
+        thread_id: &str,
+        cookie: &EhentaiCookie,
+        scan: &mut ForumTopicScanGuard,
+        cursor: Option<&ForumTopicCursor>,
+        fixed_through_post_number: u32,
+    ) -> Result<ForumTopicScan, EhentaiError> {
         let operation = EhentaiOperation::FetchTopic;
         if !self.valid_for() || !valid_cookie(cookie) || !valid_topic_id(thread_id) {
             return Err(EhentaiError::configuration(operation));
@@ -435,15 +481,12 @@ impl EhentaiClient {
         scan.set_pages(1);
         let targets =
             self.topic_page_targets(&first_page, thread_id, operation, forum_world(world))?;
-        let expected_pages = targets.len();
         let maximum_offset = targets.last().map(|(offset, _)| *offset).unwrap_or(0);
-        let mut remaining = targets.into_iter().skip(1).collect::<VecDeque<_>>();
-        let mut pages = Vec::with_capacity(expected_pages);
+        let mut pages = Vec::with_capacity(targets.len());
         let mut total_bytes = html.len();
         drop(html);
         pages.push((0_u64, first_page));
         scan.set_pages(pages.len());
-        let mut reads = tokio::task::JoinSet::new();
         let read_context = TopicPageReadContext {
             client: self.clone(),
             cookie: cookie.clone(),
@@ -455,6 +498,36 @@ impl EhentaiClient {
             // 在逐块读取时共享剩余额度，不能等并发整页下载、解析后才发现超限。
             remaining_bytes: Arc::new(AtomicUsize::new(HARD_MAXIMUM_TOPIC_BYTES - total_bytes)),
         };
+        // 增量预算：只读固定楼层页与游标页之后；游标页先单独核对，失败即整场重读。
+        let (selected_pages, probed_offset) = self
+            .incremental_scan_plan(
+                &targets,
+                cursor,
+                fixed_through_post_number,
+                &read_context,
+                pagination::IncrementalScanState {
+                    pages: &mut pages,
+                    total_bytes: &mut total_bytes,
+                },
+                operation,
+            )
+            .await?;
+        let mode = if selected_pages.len() == targets.len() {
+            ForumTopicScanMode::Full
+        } else {
+            scan.set_mode(ForumTopicScanMode::Incremental);
+            ForumTopicScanMode::Incremental
+        };
+        let expected_pages = selected_pages.len();
+        let mut remaining = targets
+            .into_iter()
+            .enumerate()
+            .filter(|(index, _)| *index != 0)
+            .filter(|(index, _)| selected_pages.binary_search(&(*index as u32)).is_ok())
+            .filter(|(_, (offset, _))| Some(*offset) != probed_offset)
+            .map(|(_, target)| target)
+            .collect::<VecDeque<_>>();
+        let mut reads = tokio::task::JoinSet::new();
         spawn_topic_page_reads(&mut reads, &mut remaining, &read_context);
         while let Some(read) = reads.join_next().await {
             let page = read.map_err(|diagnostic_cause| {
@@ -478,8 +551,12 @@ impl EhentaiClient {
         if pages.len() != expected_pages || pages.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
             return Err(EhentaiError::protocol(operation, false));
         }
+        // 绝对楼层由分页偏移与本页序号换算；目录首帖（楼层 1）不进入 preview.posts。
+        let page_post_counts =
+            pages.iter().map(|(offset, page)| (*offset, page.post_count())).collect::<Vec<_>>();
+        let post_numbers = topic_post_numbers(&page_post_counts, operation)?;
         let parsed_pages = pages.into_iter().map(|(_, page)| page).collect();
-        parser.parse_html_pages(parsed_pages).map_err(|diagnostic_cause| {
+        let preview = parser.parse_html_pages(parsed_pages).map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
                 "forum_topic",
                 "merge_pages",
@@ -487,7 +564,13 @@ impl EhentaiClient {
                 DiagnosticContext::default(),
             );
             EhentaiError::protocol(operation, false)
-        })
+        })?;
+        let result = ForumTopicScan { preview, post_numbers, mode };
+        result.validate().map_err(|error| {
+            let _ = error;
+            EhentaiError::protocol(operation, false)
+        })?;
+        Ok(result)
     }
 
     /// 建立目录续页或系统日志回复；POST 后必须返回 exact thread/post proof。
@@ -650,6 +733,34 @@ async fn read_topic_page(
     Ok((offset, page_bytes, page))
 }
 
+/// 把分页覆盖换算成绝对楼层（1 基）。目录首帖占楼层 1，但不进入 `preview.posts`，
+/// 因此结果从楼层 2 开始，与 fixture 中的行保持一一对应。
+fn topic_post_numbers(
+    pages: &[(u64, usize)],
+    operation: EhentaiOperation,
+) -> Result<Vec<u32>, EhentaiError> {
+    let mut post_numbers = Vec::new();
+    for (offset, count) in pages {
+        for index in 0..*count {
+            let floor = offset
+                .checked_add(u64::try_from(index).map_err(|error| {
+                    let _ = error;
+                    EhentaiError::protocol(operation, false)
+                })?)
+                .and_then(|value| value.checked_add(1))
+                .ok_or_else(|| EhentaiError::protocol(operation, false))?;
+            if floor == 1 {
+                continue;
+            }
+            post_numbers.push(u32::try_from(floor).map_err(|error| {
+                let _ = error;
+                EhentaiError::protocol(operation, false)
+            })?);
+        }
+    }
+    Ok(post_numbers)
+}
+
 fn spawn_topic_page_reads(
     reads: &mut tokio::task::JoinSet<
         Result<(u64, usize, crate::forum::ParsedHtmlPage), EhentaiError>,
@@ -678,5 +789,34 @@ impl fmt::Debug for EhentaiClient {
             .field("main_board_id", &self.main_board_id)
             .field("isekai_board_id", &self.isekai_board_id)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn full_scan_floors_follow_page_offsets() {
+        // 三页各 20 楼：楼层 1 是目录首帖，不进入 preview.posts。
+        let numbers =
+            topic_post_numbers(&[(0, 20), (20, 20), (40, 20)], EhentaiOperation::FetchTopic)
+                .expect("楼层换算在预算内");
+        assert_eq!(numbers.len(), 59);
+        assert_eq!(numbers.first().copied(), Some(2));
+        assert_eq!(numbers.last().copied(), Some(60));
+    }
+
+    #[test]
+    fn incremental_scan_keeps_absolute_floors_after_skipped_pages() {
+        // 固定首帖页 + 游标页（第 6 页，0 基 5）：中间分页被跳过，楼层仍为绝对楼层。
+        let numbers =
+            topic_post_numbers(&[(0, 20), (100, 20), (120, 7)], EhentaiOperation::FetchTopic)
+                .expect("楼层换算在预算内");
+        assert_eq!(numbers.len(), 19 + 20 + 7);
+        assert_eq!(numbers[18], 20);
+        assert_eq!(numbers[19], 101);
+        assert_eq!(numbers.last().copied(), Some(127));
     }
 }
