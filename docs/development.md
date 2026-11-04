@@ -21,6 +21,8 @@
 ```bash
 just                 # 列出全部入口
 just verify          # 默认验证：策略门禁 → fmt → check → feature → clippy → wasm（不运行测试）
+just test            # 默认 feature 下的纯逻辑、单元与本地替身测试
+just test-db         # 显式 PG18 集成测试，要求 AUCTION_TEST_DATABASE_URL
 just fmt             # 只检查格式
 just lint            # clippy -D warnings（all-features）
 just wasm-check      # wasm32 目标 Clippy 检查两个浏览器包（-D warnings）
@@ -106,13 +108,22 @@ AUCTION_CONFIG_FILE=$dir/public.toml just run-public
 
 ## 测试
 
-默认门禁与 CI 只做格式、编译与静态分析，不运行测试。明确需要行为验证时，可按所涉及的业务边界选择单个 crate，例如：
+`just verify` 继续只做格式、编译与静态分析；测试使用独立入口，不并入默认门禁。行为变更必须随功能维护并运行受影响范围的测试，至少覆盖正反例与所修复问题的回归断言。已批准的 W6 类别包括纯逻辑、属性/快照、脱敏页面回放、PostgreSQL 18 集成，以及本地 MoogleMail/论坛替身；其他行为验证仍按 [AGENTS.md](../AGENTS.md#验证范围) 的授权范围执行。
 
 ```bash
-cargo test --locked -p auction-domain --lib
+just test
+# 等价于：cargo test --locked --workspace --all-targets
+
+just test-db
+# 先要求 AUCTION_TEST_DATABASE_URL 非空，再执行：
+# cargo test --locked -p auction-storage --features postgres --tests -- postgres_
 ```
 
-涉及数据库语义（锁、隔离级别、幂等）的验证需要真实 PostgreSQL 18，不能用其他数据库替代。
+`just test` 使用默认 feature，运行单元测试及无需数据库的集成测试（包括本地替身）；不运行文档测试，不要求 PostgreSQL，不连接真实游戏或论坛账号。可按改动所属 owner 缩小范围，例如 `cargo test --locked -p auction-domain --lib`；交付说明写出实际命令及未覆盖范围。
+
+`just test-db` 要求预先设置 `AUCTION_TEST_DATABASE_URL`，指向隔离、可丢弃的 PostgreSQL 18 测试库；不能指向本地常驻业务库或生产库，也不能用其他数据库替代。URL 只通过环境传入，不写入文档、日志或提交的配置。测试环境变量仅服务测试夹具，不改变应用的 TOML 配置规则。涉及锁、隔离级别、幂等或迁移的断言必须在真实 PG18 上执行，夹具须校验服务器 major 为 18。
+
+当前入口只启用已存在的 `auction-storage/postgres` feature，并用测试全名包含 `postgres_` 的过滤条件选择数据库测试；不引用尚未落地的独立测试 target 或 feature。W6.2 骨架尚未接入，因此命令可能成功但匹配 **0 项测试**，这不代表数据库覆盖、连接成功、PG18 版本核验或迁移验收；未设置 URL 时入口明确失败。W6.2 落地时须同步接入独立测试 feature 与夹具，保持 `postgres_` 命名选择契约，让数据库测试只在 `just test-db` 运行，不得让默认 `just test` 要求数据库，并落实临时集群、逐测试独立库及清理。
 
 ## 数据库变更
 
