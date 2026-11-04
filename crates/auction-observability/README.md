@@ -535,8 +535,9 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
 
 ### 历史流程
 
-迁移 `000077` 的全局时间索引支撑八项只读窗口；Worker 在同一只读快照内按终点落窗，
-每个候选源上限 10001 条，超限整轮不可评估。每个 flow 发布
+迁移 `000077` 的全局时间索引支撑八项只读窗口；Worker 在同一只读快照内按终点落窗。
+每个流程先以成功完成时间入口 MATERIALIZED LIMIT 10001，再做类型/关联分类；结算的
+支付义务扇出另有 10001 哨兵。任一入口或扇出超限整轮不可评估。每个 flow 发布
 `auction_sli_window_duration_seconds{flow,world,quantile}`（仅有效分位）、
 `auction_sli_window_samples`、`auction_sli_window_unknown`、
 `auction_sli_window_incomplete` 与 `auction_sli_window_oldest_incomplete_seconds`；
@@ -574,8 +575,9 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
   或截止不可再延长时才为 final。D4 只使用 final；不保存或伪造发送瞬间的截止快照。
 - 结算首封：settled_at → 第一封应发付款邮件的成功证明；无应发集合不生成零样本。
   末封：settled_at → 全部应发集合成功后的最后时间；未齐全保持未完成。
-  首/末封候选按付款邮件完成终点落窗，settled_at 可以早于七天；
-  incomplete 独立枚举全部结算场次的未完成付款集合，不只依赖七天内成功样本。
+  首/末封只认 COD 与 carrier 付款邮件模板；isekai 的 equipment_handoff 是付款后的
+  装备交付，不是付款邮件，不进入首/末封集合。候选按付款邮件完成终点落窗，
+  settled_at 可以早于七天；incomplete 独立枚举全部结算场次的未完成付款集合。
 - 买家至卖方：首次有效付款 proof_observed_at → 卖方货款发送证明。
   main 直接取 seller_payout 的付款前置；isekai 先经 winner_equipment_handoff 的
   prerequisite 找到真正付款义务。缺可靠付款证据计 unknown，不以一般 updated_at 替代。

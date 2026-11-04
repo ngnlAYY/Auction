@@ -11,10 +11,21 @@ use sqlx::{PgConnection, Row};
 use super::{candidate_limit, storage};
 
 const REGISTER_COUNT: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.status,delivery.failure_code,delivery.lease_token,
+               delivery.lease_expires_at,delivery.sending_at,
                delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
+        WHERE delivery.status='succeeded'
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
+        ORDER BY delivery.completed_at,delivery.id
+        LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.result_metadata,delivery.external_reference
+        FROM window_deliveries delivery
         WHERE delivery.status='succeeded' AND delivery.origin_kind='mail_intake'
           AND delivery.payload->>'operation'='send'
           AND delivery.payload->>'template'='register_key'
@@ -22,7 +33,8 @@ const REGISTER_COUNT: &str = "
         ORDER BY delivery.completed_at,delivery.id
         LIMIT $3
     )
-    SELECT count(*) AS candidates,
+    SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
+           count(*) AS candidates,
            count(*) FILTER (WHERE inbound.id IS NULL) AS invalid
     FROM candidates candidate
     LEFT JOIN public.inbound_mail inbound
@@ -30,10 +42,21 @@ const REGISTER_COUNT: &str = "
      AND inbound.external_mail_id=candidate.payload->>'external_mail_id'";
 
 const REGISTER_UNKNOWN: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.status,delivery.failure_code,delivery.lease_token,
+               delivery.lease_expires_at,delivery.sending_at,
                delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
+        WHERE delivery.status='succeeded'
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
+        ORDER BY delivery.completed_at,delivery.id
+        LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.result_metadata,delivery.external_reference
+        FROM window_deliveries delivery
         WHERE delivery.status='succeeded' AND delivery.origin_kind='mail_intake'
           AND delivery.payload->>'operation'='send'
           AND delivery.payload->>'template'='register_key'
@@ -52,10 +75,21 @@ const REGISTER_UNKNOWN: &str = "
     GROUP BY inbound.world_id";
 
 const REGISTER_AGGREGATE: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.status,delivery.failure_code,delivery.lease_token,
+               delivery.lease_expires_at,delivery.sending_at,
                delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
+        WHERE delivery.status='succeeded'
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
+        ORDER BY delivery.completed_at,delivery.id
+        LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.result_metadata,delivery.external_reference
+        FROM window_deliveries delivery
         WHERE delivery.status='succeeded' AND delivery.origin_kind='mail_intake'
           AND delivery.payload->>'operation'='send'
           AND delivery.payload->>'template'='register_key'
@@ -83,16 +117,28 @@ const REGISTER_AGGREGATE: &str = "
     GROUP BY inbound.world_id";
 
 const TAKE_COUNT: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.status,delivery.failure_code,delivery.lease_token,
+               delivery.lease_expires_at,delivery.sending_at,
+               delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
+        WHERE delivery.status='succeeded'
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
+        ORDER BY delivery.completed_at,delivery.id
+        LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload
+        FROM window_deliveries delivery
         WHERE delivery.status='succeeded' AND delivery.origin_kind='mail_intake'
           AND delivery.payload->>'operation'='take'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
         ORDER BY delivery.completed_at,delivery.id
         LIMIT $3
     )
-    SELECT count(*) AS candidates,
+    SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
+           count(*) AS candidates,
            count(*) FILTER (WHERE inbound.id IS NULL) AS invalid
     FROM candidates candidate
     LEFT JOIN public.inbound_mail inbound
@@ -100,7 +146,18 @@ const TAKE_COUNT: &str = "
      AND inbound.external_mail_id=candidate.payload->>'external_mail_id'";
 
 const TAKE_UNKNOWN: &str = "
-    WITH candidates AS MATERIALIZED (
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.status,delivery.failure_code,delivery.lease_token,
+               delivery.lease_expires_at,delivery.sending_at,
+               delivery.result_metadata,delivery.external_reference
+        FROM public.deliveries delivery
+        WHERE delivery.status='succeeded'
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
+        ORDER BY delivery.completed_at,delivery.id
+        LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
         SELECT delivery.id,delivery.completed_at,delivery.payload,
                (delivery.failure_code IS NULL AND delivery.lease_token IS NULL
                 AND delivery.lease_expires_at IS NULL AND delivery.sending_at IS NOT NULL
@@ -124,7 +181,7 @@ const TAKE_UNKNOWN: &str = "
                      AND delivery.result_metadata->>'reason' IN
                          ('inbox_mail_absent','attachments_absent'))
                 )) AS proof_ok
-        FROM public.deliveries delivery
+        FROM window_deliveries delivery
         WHERE delivery.status='succeeded' AND delivery.origin_kind='mail_intake'
           AND delivery.payload->>'operation'='take'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
@@ -140,7 +197,18 @@ const TAKE_UNKNOWN: &str = "
     GROUP BY inbound.world_id";
 
 const TAKE_AGGREGATE: &str = "
-    WITH candidates AS MATERIALIZED (
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.status,delivery.failure_code,delivery.lease_token,
+               delivery.lease_expires_at,delivery.sending_at,
+               delivery.result_metadata,delivery.external_reference
+        FROM public.deliveries delivery
+        WHERE delivery.status='succeeded'
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
+        ORDER BY delivery.completed_at,delivery.id
+        LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
         SELECT delivery.id,delivery.completed_at,delivery.payload,
                (delivery.failure_code IS NULL AND delivery.lease_token IS NULL
                 AND delivery.lease_expires_at IS NULL AND delivery.sending_at IS NOT NULL
@@ -164,7 +232,7 @@ const TAKE_AGGREGATE: &str = "
                      AND delivery.result_metadata->>'reason' IN
                          ('inbox_mail_absent','attachments_absent'))
                 )) AS proof_ok
-        FROM public.deliveries delivery
+        FROM window_deliveries delivery
         WHERE delivery.status='succeeded' AND delivery.origin_kind='mail_intake'
           AND delivery.payload->>'operation'='take'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
@@ -189,10 +257,21 @@ const TAKE_AGGREGATE: &str = "
     GROUP BY inbound.world_id";
 
 const REJECTION_COUNT: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.status,delivery.failure_code,delivery.lease_token,
+               delivery.lease_expires_at,delivery.sending_at,
                delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
+        WHERE delivery.status='succeeded'
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
+        ORDER BY delivery.completed_at,delivery.id
+        LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.result_metadata,delivery.external_reference
+        FROM window_deliveries delivery
         WHERE delivery.status='succeeded' AND delivery.origin_kind='mail_intake'
           AND delivery.payload->>'operation'='send'
           AND delivery.payload->>'template' IN
@@ -201,7 +280,8 @@ const REJECTION_COUNT: &str = "
         ORDER BY delivery.completed_at,delivery.id
         LIMIT $3
     )
-    SELECT count(*) AS candidates,
+    SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
+           count(*) AS candidates,
            count(*) FILTER (WHERE inbound.id IS NULL) AS invalid
     FROM candidates candidate
     LEFT JOIN public.inbound_mail inbound
@@ -209,10 +289,21 @@ const REJECTION_COUNT: &str = "
      AND inbound.external_mail_id=candidate.payload->>'external_mail_id'";
 
 const REJECTION_UNKNOWN: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.status,delivery.failure_code,delivery.lease_token,
+               delivery.lease_expires_at,delivery.sending_at,
                delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
+        WHERE delivery.status='succeeded'
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
+        ORDER BY delivery.completed_at,delivery.id
+        LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.result_metadata,delivery.external_reference
+        FROM window_deliveries delivery
         WHERE delivery.status='succeeded' AND delivery.origin_kind='mail_intake'
           AND delivery.payload->>'operation'='send'
           AND delivery.payload->>'template' IN
@@ -232,10 +323,21 @@ const REJECTION_UNKNOWN: &str = "
     GROUP BY inbound.world_id";
 
 const REJECTION_AGGREGATE: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.status,delivery.failure_code,delivery.lease_token,
+               delivery.lease_expires_at,delivery.sending_at,
                delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
+        WHERE delivery.status='succeeded'
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
+        ORDER BY delivery.completed_at,delivery.id
+        LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+               delivery.result_metadata,delivery.external_reference
+        FROM window_deliveries delivery
         WHERE delivery.status='succeeded' AND delivery.origin_kind='mail_intake'
           AND delivery.payload->>'operation'='send'
           AND delivery.payload->>'template' IN
@@ -280,9 +382,10 @@ async fn read_flow(
         .fetch_one(&mut *connection)
         .await
         .map_err(storage)?;
+    let window_count: i64 = row.try_get("window_count").map_err(storage)?;
     let candidate_count: i64 = row.try_get("candidates").map_err(storage)?;
     let invalid: i64 = row.try_get("invalid").map_err(storage)?;
-    if candidate_count > SLI_CANDIDATE_LIMIT as i64 {
+    if window_count > SLI_CANDIDATE_LIMIT as i64 || candidate_count > SLI_CANDIDATE_LIMIT as i64 {
         return Err(SliSnapshotError::Limited);
     }
     if invalid > 0 {

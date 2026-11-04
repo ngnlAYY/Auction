@@ -254,7 +254,10 @@ Worker 任务与业务循环分离；`/metrics` 不读取数据库。
 - `auction_settlements_sli_settled_at_idx`：全局场次结算窗口。
 - `audit_records_sli_slow_proxy_tick_idx`：固定 `lot.slow_proxy_tick` 的全部历史审计。
 
-这些索引是八项只读窗口的候选入口；查询已实现 10001 条溢出哨兵与按主键/场次的关联点查。
+这些索引是八项只读窗口的候选入口；查询先按成功完成时间 MATERIALIZED LIMIT 10001，
+再做类型/关联分类；结算的支付义务扇出另有 10001 哨兵，任一溢出整轮不可评估。
+首/末封付款集合只含 COD 与 carrier 付款义务；`winner_equipment_handoff` 是付款后的
+isekai 装备交付，不是付款邮件，不进入该集合。
 成功样本按终点落入七天窗口；`auction_sli_window_*` 发布样本数和 p50/p95/p99，
 提醒另发布 `auction_sli_outbid_*` 的 p01/p05 与非正余量。没有样本时不生成分位序列，
 `unknown`/`incomplete` 不能当作零延迟；坏 metadata 或无法归属的候选使整轮失败关闭。

@@ -1,5 +1,6 @@
 //! 场次结算到首封/末封付款邮件成功证明的窗口。
-//! 候选按付款邮件完成终点落窗；起点 settled_at 可以早于七天。
+//! 成功样本按付款邮件完成终点落窗；未完成覆盖独立枚举全部结算场次。
+//! 所有入口先按物理时间索引 MATERIALIZED LIMIT 10001，再分类；义务扇出另有哨兵。
 
 use auction_application::{
     SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliFlowWindow, SliSnapshotError, SliWorld,
@@ -10,59 +11,108 @@ use sqlx::{PgConnection, Row};
 use super::{candidate_limit, storage};
 
 const SETTLEMENT_COUNT: &str = "
-    WITH candidate_auctions AS MATERIALIZED (
-        SELECT DISTINCT settlement.auction_id,settlement.settled_at,auction.world_id
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind
         FROM public.deliveries delivery
-        JOIN public.settlement_obligation_fulfillments fulfillment
-          ON fulfillment.delivery_id=delivery.id
-        JOIN public.settlement_obligations obligation
-          ON obligation.id=fulfillment.obligation_id
-        JOIN public.auction_settlements settlement
-          ON settlement.auction_id=obligation.auction_id
-        JOIN public.auctions auction ON auction.id=obligation.auction_id
         WHERE delivery.status='succeeded'
-          AND delivery.origin_kind='settlement'
-          AND delivery.payload->>'template' IN
-              ('settlement_winner_equipment_cod','settlement_payment_carrier',
-               'settlement_equipment_handoff')
-          AND obligation.obligation_kind IN
-              ('winner_equipment_cod','winner_payment_carrier_cod','winner_equipment_handoff')
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
-        ORDER BY settlement.settled_at,settlement.auction_id
-        LIMIT $3
-    )
-    SELECT count(*) AS candidates FROM candidate_auctions";
-
-const SETTLEMENT_AGGREGATE: &str = "
-    WITH candidate_auctions AS MATERIALIZED (
-        SELECT DISTINCT settlement.auction_id,settlement.settled_at,auction.world_id
-        FROM public.deliveries delivery
-        JOIN public.settlement_obligation_fulfillments fulfillment
-          ON fulfillment.delivery_id=delivery.id
-        JOIN public.settlement_obligations obligation
-          ON obligation.id=fulfillment.obligation_id
-        JOIN public.auction_settlements settlement
-          ON settlement.auction_id=obligation.auction_id
-        JOIN public.auctions auction ON auction.id=obligation.auction_id
-        WHERE delivery.status='succeeded'
-          AND delivery.origin_kind='settlement'
-          AND delivery.payload->>'template' IN
-              ('settlement_winner_equipment_cod','settlement_payment_carrier',
-               'settlement_equipment_handoff')
-          AND obligation.obligation_kind IN
-              ('winner_equipment_cod','winner_payment_carrier_cod','winner_equipment_handoff')
-          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
-        ORDER BY settlement.settled_at,settlement.auction_id
+        ORDER BY delivery.completed_at,delivery.id
         LIMIT $3
     ),
-    payments AS (
+    candidate_auctions AS MATERIALIZED (
+        SELECT DISTINCT settlement.auction_id,settlement.settled_at,auction.world_id
+        FROM window_deliveries delivery
+        JOIN public.settlement_obligation_fulfillments fulfillment
+          ON fulfillment.delivery_id=delivery.id
+        JOIN public.settlement_obligations obligation
+          ON obligation.id=fulfillment.obligation_id
+        JOIN public.auction_settlements settlement
+          ON settlement.auction_id=obligation.auction_id
+        JOIN public.auctions auction ON auction.id=obligation.auction_id
+        WHERE delivery.origin_kind='settlement'
+          AND delivery.payload->>'template' IN
+              ('settlement_winner_equipment_cod','settlement_payment_carrier')
+          AND obligation.obligation_kind IN
+              ('winner_equipment_cod','winner_payment_carrier_cod')
+    )
+    SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
+           count(*) AS candidates
+    FROM candidate_auctions";
+
+const SETTLEMENT_PAYMENT_COUNT: &str = "
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind
+        FROM public.deliveries delivery
+        WHERE delivery.status='succeeded'
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
+        ORDER BY delivery.completed_at,delivery.id
+        LIMIT $3
+    ),
+    candidate_auctions AS MATERIALIZED (
+        SELECT DISTINCT settlement.auction_id,settlement.settled_at,auction.world_id
+        FROM window_deliveries delivery
+        JOIN public.settlement_obligation_fulfillments fulfillment
+          ON fulfillment.delivery_id=delivery.id
+        JOIN public.settlement_obligations obligation
+          ON obligation.id=fulfillment.obligation_id
+        JOIN public.auction_settlements settlement
+          ON settlement.auction_id=obligation.auction_id
+        JOIN public.auctions auction ON auction.id=obligation.auction_id
+        WHERE delivery.origin_kind='settlement'
+          AND delivery.payload->>'template' IN
+              ('settlement_winner_equipment_cod','settlement_payment_carrier')
+          AND obligation.obligation_kind IN
+              ('winner_equipment_cod','winner_payment_carrier_cod')
+    ),
+    payments AS MATERIALIZED (
         SELECT obligation.auction_id,obligation.id AS obligation_id,
                candidate.settled_at,candidate.world_id
         FROM candidate_auctions candidate
         JOIN public.settlement_obligations obligation
           ON obligation.auction_id=candidate.auction_id
         WHERE obligation.obligation_kind IN
-              ('winner_equipment_cod','winner_payment_carrier_cod','winner_equipment_handoff')
+              ('winner_equipment_cod','winner_payment_carrier_cod')
+        LIMIT $3
+    )
+    SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
+           (SELECT count(*) FROM candidate_auctions) AS candidate_auctions,
+           count(*) AS payment_count
+    FROM payments";
+
+const SETTLEMENT_AGGREGATE: &str = "
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind
+        FROM public.deliveries delivery
+        WHERE delivery.status='succeeded'
+          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
+        ORDER BY delivery.completed_at,delivery.id
+        LIMIT $3
+    ),
+    candidate_auctions AS MATERIALIZED (
+        SELECT DISTINCT settlement.auction_id,settlement.settled_at,auction.world_id
+        FROM window_deliveries delivery
+        JOIN public.settlement_obligation_fulfillments fulfillment
+          ON fulfillment.delivery_id=delivery.id
+        JOIN public.settlement_obligations obligation
+          ON obligation.id=fulfillment.obligation_id
+        JOIN public.auction_settlements settlement
+          ON settlement.auction_id=obligation.auction_id
+        JOIN public.auctions auction ON auction.id=obligation.auction_id
+        WHERE delivery.origin_kind='settlement'
+          AND delivery.payload->>'template' IN
+              ('settlement_winner_equipment_cod','settlement_payment_carrier')
+          AND obligation.obligation_kind IN
+              ('winner_equipment_cod','winner_payment_carrier_cod')
+    ),
+    payments AS MATERIALIZED (
+        SELECT obligation.auction_id,obligation.id AS obligation_id,
+               candidate.settled_at,candidate.world_id
+        FROM candidate_auctions candidate
+        JOIN public.settlement_obligations obligation
+          ON obligation.auction_id=candidate.auction_id
+        WHERE obligation.obligation_kind IN
+              ('winner_equipment_cod','winner_payment_carrier_cod')
+        LIMIT $3
     ),
     fulfilled AS (
         SELECT payment.auction_id,payment.world_id,payment.settled_at,payment.obligation_id,
@@ -119,8 +169,18 @@ const SETTLEMENT_ALL_COUNT: &str = "
         FROM public.auction_settlements settlement
         ORDER BY settlement.settled_at,settlement.auction_id
         LIMIT $1
+    ),
+    payments AS MATERIALIZED (
+        SELECT obligation.id
+        FROM settlements settlement
+        JOIN public.settlement_obligations obligation
+          ON obligation.auction_id=settlement.auction_id
+        WHERE obligation.obligation_kind IN
+              ('winner_equipment_cod','winner_payment_carrier_cod')
+        LIMIT $1
     )
-    SELECT count(*) AS candidates FROM settlements";
+    SELECT (SELECT count(*) FROM settlements) AS settlement_count,
+           (SELECT count(*) FROM payments) AS payment_count";
 
 const SETTLEMENT_INCOMPLETE: &str = "
     WITH settlements AS MATERIALIZED (
@@ -130,14 +190,15 @@ const SETTLEMENT_INCOMPLETE: &str = "
         ORDER BY settlement.settled_at,settlement.auction_id
         LIMIT $1
     ),
-    payments AS (
+    payments AS MATERIALIZED (
         SELECT obligation.auction_id,obligation.id AS obligation_id,
                settlement.settled_at,settlement.world_id
         FROM settlements settlement
         JOIN public.settlement_obligations obligation
           ON obligation.auction_id=settlement.auction_id
         WHERE obligation.obligation_kind IN
-              ('winner_equipment_cod','winner_payment_carrier_cod','winner_equipment_handoff')
+              ('winner_equipment_cod','winner_payment_carrier_cod')
+        LIMIT $1
     ),
     fulfilled AS (
         SELECT payment.auction_id,payment.world_id,payment.settled_at,payment.obligation_id,
@@ -171,24 +232,27 @@ pub(super) async fn read(
     let since = now
         .checked_sub_signed(chrono::Duration::seconds(SLI_WINDOW_SECONDS))
         .ok_or(SliSnapshotError::InvalidData)?;
-    let row = sqlx::query(SETTLEMENT_COUNT)
+    let count = sqlx::query(SETTLEMENT_COUNT)
         .bind(since)
         .bind(now)
         .bind(candidate_limit())
         .fetch_one(&mut *connection)
         .await
         .map_err(storage)?;
-    let candidates: i64 = row.try_get("candidates").map_err(storage)?;
-    if candidates > SLI_CANDIDATE_LIMIT as i64 {
+    let window_count: i64 = count.try_get("window_count").map_err(storage)?;
+    let candidates: i64 = count.try_get("candidates").map_err(storage)?;
+    if window_count > SLI_CANDIDATE_LIMIT as i64 || candidates > SLI_CANDIDATE_LIMIT as i64 {
         return Err(SliSnapshotError::Limited);
     }
-    let all_count = sqlx::query(SETTLEMENT_ALL_COUNT)
+    let payment_count = sqlx::query(SETTLEMENT_PAYMENT_COUNT)
+        .bind(since)
+        .bind(now)
         .bind(candidate_limit())
         .fetch_one(&mut *connection)
         .await
         .map_err(storage)?;
-    let all_candidates: i64 = all_count.try_get("candidates").map_err(storage)?;
-    if all_candidates > SLI_CANDIDATE_LIMIT as i64 {
+    let payments: i64 = payment_count.try_get("payment_count").map_err(storage)?;
+    if payments > SLI_CANDIDATE_LIMIT as i64 {
         return Err(SliSnapshotError::Limited);
     }
     let rows = sqlx::query(SETTLEMENT_AGGREGATE)
@@ -209,7 +273,6 @@ pub(super) async fn read(
         };
         let first_samples: i64 = row.try_get("first_samples").map_err(storage)?;
         let last_samples: i64 = row.try_get("last_samples").map_err(storage)?;
-        let incomplete: i64 = row.try_get("incomplete").map_err(storage)?;
         first[index] = SliFlowWindow {
             samples: u64::try_from(first_samples).map_err(|error| {
                 let _ = error;
@@ -231,12 +294,19 @@ pub(super) async fn read(
             p95: row.try_get("last_p95").map_err(storage)?,
             p99: row.try_get("last_p99").map_err(storage)?,
             unknown: 0,
-            incomplete: u64::try_from(incomplete).map_err(|error| {
-                let _ = error;
-                SliSnapshotError::InvalidData
-            })?,
-            oldest_incomplete_seconds: row.try_get("oldest_incomplete_seconds").map_err(storage)?,
+            incomplete: 0,
+            oldest_incomplete_seconds: None,
         };
+    }
+    let all_count = sqlx::query(SETTLEMENT_ALL_COUNT)
+        .bind(candidate_limit())
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(storage)?;
+    let settlement_count: i64 = all_count.try_get("settlement_count").map_err(storage)?;
+    let all_payments: i64 = all_count.try_get("payment_count").map_err(storage)?;
+    if settlement_count > SLI_CANDIDATE_LIMIT as i64 || all_payments > SLI_CANDIDATE_LIMIT as i64 {
+        return Err(SliSnapshotError::Limited);
     }
     for row in sqlx::query(SETTLEMENT_INCOMPLETE)
         .bind(candidate_limit())

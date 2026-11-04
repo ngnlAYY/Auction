@@ -1,4 +1,5 @@
 //! 已成功发送的 MM/PM 被超提醒距有效截止的余量。
+//! 先按成功完成时间入口限界，再关联通知/场次；不先扫描稀疏目标。
 
 use auction_application::{
     SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliDeadlineState, SliOutbidChannel, SliOutbidMargin,
@@ -10,32 +11,41 @@ use sqlx::{PgConnection, Row};
 use super::{candidate_limit, storage};
 
 const MM_COUNT: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.completed_at,notification.lot_id
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at
         FROM public.deliveries delivery
-        JOIN public.lot_watch_notifications notification
-          ON notification.delivery_id=delivery.id
         WHERE delivery.status='succeeded'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
         ORDER BY delivery.completed_at,delivery.id
         LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.completed_at,notification.lot_id
+        FROM window_deliveries delivery
+        JOIN public.lot_watch_notifications notification
+          ON notification.delivery_id=delivery.id
     )
-    SELECT count(*) AS candidates,
+    SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
+           count(*) AS candidates,
            count(*) FILTER (WHERE lot.id IS NULL OR auction.id IS NULL) AS invalid
     FROM candidates candidate
     LEFT JOIN public.lots lot ON lot.id=candidate.lot_id
     LEFT JOIN public.auctions auction ON auction.id=lot.auction_id";
 
 const MM_AGGREGATE: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.completed_at,notification.lot_id
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.id,delivery.completed_at
         FROM public.deliveries delivery
-        JOIN public.lot_watch_notifications notification
-          ON notification.delivery_id=delivery.id
         WHERE delivery.status='succeeded'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
         ORDER BY delivery.completed_at,delivery.id
         LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.completed_at,notification.lot_id
+        FROM window_deliveries delivery
+        JOIN public.lot_watch_notifications notification
+          ON notification.delivery_id=delivery.id
     )
     SELECT auction.world_id,
            CASE WHEN auction.status IN ('settling','settled','cancelled')
@@ -56,32 +66,41 @@ const MM_AGGREGATE: &str = "
     GROUP BY auction.world_id,deadline_state";
 
 const PM_COUNT: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.completed_at,notification.lot_id
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.notification_id,delivery.completed_at
         FROM public.lot_watch_pm_deliveries delivery
-        JOIN public.lot_watch_notifications notification
-          ON notification.id=delivery.notification_id
         WHERE delivery.status='succeeded'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
         ORDER BY delivery.completed_at,delivery.notification_id
         LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.completed_at,notification.lot_id
+        FROM window_deliveries delivery
+        JOIN public.lot_watch_notifications notification
+          ON notification.id=delivery.notification_id
     )
-    SELECT count(*) AS candidates,
+    SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
+           count(*) AS candidates,
            count(*) FILTER (WHERE lot.id IS NULL OR auction.id IS NULL) AS invalid
     FROM candidates candidate
     LEFT JOIN public.lots lot ON lot.id=candidate.lot_id
     LEFT JOIN public.auctions auction ON auction.id=lot.auction_id";
 
 const PM_AGGREGATE: &str = "
-    WITH candidates AS MATERIALIZED (
-        SELECT delivery.completed_at,notification.lot_id
+    WITH window_deliveries AS MATERIALIZED (
+        SELECT delivery.notification_id,delivery.completed_at
         FROM public.lot_watch_pm_deliveries delivery
-        JOIN public.lot_watch_notifications notification
-          ON notification.id=delivery.notification_id
         WHERE delivery.status='succeeded'
           AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
         ORDER BY delivery.completed_at,delivery.notification_id
         LIMIT $3
+    ),
+    candidates AS MATERIALIZED (
+        SELECT delivery.completed_at,notification.lot_id
+        FROM window_deliveries delivery
+        JOIN public.lot_watch_notifications notification
+          ON notification.id=delivery.notification_id
     )
     SELECT auction.world_id,
            CASE WHEN auction.status IN ('settling','settled','cancelled')
@@ -126,9 +145,11 @@ pub(super) async fn read(
             .fetch_one(&mut *connection)
             .await
             .map_err(storage)?;
+        let window_count: i64 = row.try_get("window_count").map_err(storage)?;
         let candidate_count: i64 = row.try_get("candidates").map_err(storage)?;
         let invalid: i64 = row.try_get("invalid").map_err(storage)?;
-        if candidate_count > SLI_CANDIDATE_LIMIT as i64 {
+        if window_count > SLI_CANDIDATE_LIMIT as i64 || candidate_count > SLI_CANDIDATE_LIMIT as i64
+        {
             return Err(SliSnapshotError::Limited);
         }
         if invalid > 0 {
