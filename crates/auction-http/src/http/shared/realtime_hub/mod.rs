@@ -9,11 +9,16 @@ use std::{
 };
 
 use auction_application::{PublicRealtimeEvent, RealtimeEventSink, RealtimeSinkError};
+use auction_observability::{RealtimeRecorder, RealtimeScope};
 use axum::extract::ws::Utf8Bytes;
+use chrono::{DateTime, Utc};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use uuid::Uuid;
 
 mod connections;
+mod observation;
+
+pub(crate) use observation::ObservedFrame;
 
 use connections::{ConnectionLimits, ConnectionPermit};
 
@@ -39,7 +44,7 @@ pub struct RealtimeHubHealth {
 
 struct HubState {
     next_id: u64,
-    streams: BTreeMap<String, BTreeMap<u64, Sender<Utf8Bytes>>>,
+    streams: BTreeMap<String, BTreeMap<u64, Sender<ObservedFrame>>>,
 }
 
 /// 单个 Public 进程拥有的 stream 广播器。
@@ -47,6 +52,7 @@ pub struct RealtimeHub {
     client_buffer: usize,
     connections: Arc<ConnectionLimits>,
     state: Mutex<HubState>,
+    metrics: RealtimeRecorder,
 }
 
 impl RealtimeHub {
@@ -59,7 +65,14 @@ impl RealtimeHub {
             client_buffer,
             connections: Arc::new(ConnectionLimits::default()),
             state: Mutex::new(HubState { next_id: 0, streams: BTreeMap::new() }),
+            metrics: RealtimeRecorder::default(),
         })
+    }
+
+    /// 注入 Public 进程观测端口；不改变配额或帧路由。
+    pub fn with_metrics(mut self, metrics: RealtimeRecorder) -> Self {
+        self.metrics = metrics;
+        self
     }
 
     /// 为已认证用户的明确 stream 建立独占订阅；分配缓冲区前先取得双重连接配额。
@@ -86,7 +99,7 @@ impl RealtimeHub {
     }
 
     /// 非阻塞广播已编码帧；队列已满或连接已关闭的订阅会被淘汰。
-    fn broadcast(&self, stream_key: &str, frame: Utf8Bytes) {
+    fn broadcast(&self, stream_key: &str, frame: ObservedFrame) {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -143,7 +156,7 @@ pub struct RealtimeSubscription {
     hub: Arc<RealtimeHub>,
     stream_key: String,
     id: u64,
-    receiver: Receiver<Utf8Bytes>,
+    receiver: Receiver<ObservedFrame>,
     // Hub 淘汰发送端时不能提前归还槽位；消费者真正结束前仍占用连接资源。
     _connection_permit: ConnectionPermit,
 }
@@ -151,6 +164,14 @@ pub struct RealtimeSubscription {
 impl RealtimeSubscription {
     /// 等待下一个已提交、已校验并编码的 v1 事件帧；淘汰后不再排空旧缓冲。
     pub async fn recv(&mut self) -> Option<Utf8Bytes> {
+        self.recv_observed().await.map(|frame| frame.body)
+    }
+
+    pub(crate) fn observe_push(&self, scope: RealtimeScope, created_at: DateTime<Utc>) {
+        self.hub.metrics.push(scope, created_at);
+    }
+
+    pub(crate) async fn recv_observed(&mut self) -> Option<ObservedFrame> {
         // 满队列淘汰只会丢弃 sender；mpsc 默认仍先交付全部积压帧，可能让慢连接长期
         // 占用配额。关闭前后都复核，令等待中的接收也在淘汰后直接进入 1013 关闭路径。
         if self.receiver.is_closed() {
@@ -195,12 +216,19 @@ impl RealtimeEventSink for RealtimeHubSink {
                 safe_detail: detail.to_owned(),
             })?;
             let stream_key = event.stream_key.clone();
+            let created_at = event.created_at;
+            let scope = if stream_key == "auction:discovery" {
+                RealtimeScope::Discovery
+            } else {
+                RealtimeScope::Auction
+            };
             let frame =
                 super::realtime::encode_websocket_frame(event).map_err(|_| RealtimeSinkError {
                     failure_code: "encode_failed".to_owned(),
                     safe_detail: "实时事件编码失败".to_owned(),
                 })?;
-            self.hub.broadcast(&stream_key, frame);
+            self.hub.broadcast(&stream_key, ObservedFrame { body: frame, created_at, scope });
+            self.hub.metrics.relay(scope, created_at);
             Ok(())
         })
     }

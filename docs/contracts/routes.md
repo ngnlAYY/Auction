@@ -292,4 +292,10 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 
 ### 运行时开关只读接口
 
+W0.13 在 database_intent 中增加 Worker 专用 bool `metrics_sli_snapshot_enabled`，
+共三个已知意图；admin_applied 仍只有两项 Admin 消费的就绪策略。
+复用现有只读卡片，不新增路由或 JSON 字段；更新后须刷新旧 Admin 页面。
+Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当作已应用证明。
+基线和在线覆盖规则见[配置参考](../../ops/config/README.md#数据库运行时开关)。
+
 `GET /api/v1/admin/runtime-switches` 使用既有 Admin 限流与会话守卫，仅返回读取投影；无写入口。成功为 200，返回 `database_time`、`database_intent`（名称、revision、最新动作/值/期限、actor_id、entrypoint、reason）、`admin_last_success_age_seconds`（从未成功为 null）及 `admin_applied`（名称、revision、TOML 基线、实际值、是否覆盖）。数据库意图是本次限时一秒查询，Admin 实际值来自后台五秒刷新快照，二者可能暂时不同；接口不证明 Public/Worker 已应用。无效认证沿用 401，限流沿用 429，缺少能力或读取失败为 503。认证后的成功与存储失败均带 `Cache-Control: no-store`。页面继续使用 `/config`，没有新增 SPA 路由。

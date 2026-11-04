@@ -258,8 +258,12 @@ pub(super) async fn configure_state(
         PublicSessionConfig { max_public_sessions: session_settings.max_public_sessions };
     let session: Arc<dyn PublicSessionPort> =
         Arc::new(PublicSessionService::new(authenticator, session_store, session_config)?);
-    let hub =
-        Arc::new(RealtimeHub::new(config.realtime.client_buffer).map_err(anyhow::Error::msg)?);
+    let realtime_metrics = auction_observability::RealtimeRecorder::register(&metrics)
+        .context("register public realtime latency metrics")?;
+    let hub = RealtimeHub::new(config.realtime.client_buffer)
+        .map_err(anyhow::Error::msg)?
+        .with_metrics(realtime_metrics);
+    let hub = Arc::new(hub);
     let sink: Arc<dyn RealtimeEventSink> = Arc::new(RealtimeHubSink::new(Arc::clone(&hub)));
     let ownership = Arc::new(
         store

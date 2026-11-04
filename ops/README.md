@@ -289,6 +289,8 @@ Caddy 的公网 `/metrics` 404 规则继续保留，采集不经过 Caddy 或 Cl
    ```bash
    install -d -m 0755 /etc/prometheus
    install -m 0644 ops/monitoring/prometheus.yml.example /etc/prometheus/prometheus.yml
+   install -m 0644 ops/monitoring/auction-recording.rules.yml \
+     /etc/prometheus/auction-recording.rules.yml
    install -m 0644 ops/monitoring/postgres-queries.yml.example \
      /etc/prometheus/postgres-queries.yml
    install -m 0644 ops/monitoring/prometheus.service.example \
@@ -364,6 +366,74 @@ Caddy 的公网 `/metrics` 404 规则继续保留，采集不经过 Caddy 或 Cl
 若单独回退转发拒绝，修改 common 的 `reject_forwarded_requests = false`
 并重启对应角色；保留 Caddy 公网屏蔽和监听限制。
 监控服务由用户独立启停，不绑定 Auction readiness。
+
+### SLI 基线与容量观察
+
+先部署本批程序并按 W0.10 开启 Worker 的 metrics 采集；
+已有数据库 076 提供运行时开关，本批不新增迁移或索引。
+`common.toml [metrics] sli_snapshot_enabled` 默认 false，Admin runtime 不覆盖。
+TOML 基线须启动加载；已有有效 metrics 后，可由用户在线设置开关：
+
+```bash
+auction-cli --config-dir /etc/auction switch list
+auction-cli --config-dir /etc/auction switch set metrics_sli_snapshot_enabled true \
+  --command-id <稳定UUID> --expected-revision <list中的版本> \
+  --no-expiry --actor <操作者说明> --reason <非敏感原因>
+```
+
+数据库覆盖通常在下一次五秒刷新应用；汇总按六十秒唤醒，
+因此还要等待下一轮成功快照。默认禁用不发 SLI SQL；metrics 未启用或无数据库时不建任务。
+Admin 只读卡片展示三个数据库意图、两个 Admin 实际项，不能代替 Worker 应用确认。
+更新后刷新旧 Admin 页面；Worker 实际开关可查看：
+
+```promql
+auction_runtime_switch_effective_value{role="worker",switch="metrics_sli_snapshot_enabled"}
+auction_sli_snapshot_enabled
+auction_sli_snapshot_available
+auction_sli_snapshot_age_seconds
+auction_sli_snapshot_refreshes_total
+```
+
+available=0、age=-1 表示尚未成功，不能当作业务延迟为零。
+首次完整成功后才有容量和当前慢速代理积压 Gauge；失败保留旧值，年龄继续增长。
+关闭开关也保留最后值；查看数据必须同时核对开关、available、年龄及刷新结果。
+`busy` 说明没有空闲池连接，本轮立即跳过，不扩池或等待；
+`limited` 表示候选超过 10000，整轮不发布截断统计；
+timeout/storage/invalid_data 也只降级采集，不影响 readiness 或业务循环。
+只读事务串行最多一个连接，总预算两秒，实际计划和耗时仍需另行授权核验。
+
+复制并加载 `ops/monitoring/auction-recording.rules.yml`，
+用安装版本的 `promtool check rules` 与 `check config` 核对后由用户重载 Prometheus。
+`auction-alerts.rules.yml.template` 含占位，**不加入 rule_files**，不启用外部通知。
+记录规则中的最后快照 Gauge 不使用 rate，新鲜度由年龄单独判断。
+
+```promql
+auction:sli_bid_http_p99_seconds:5m
+auction:sli_realtime_push_p99_seconds:5m
+auction:sli_bid_conflict_abort_ratio:5m
+auction:sli_final_bid_retry_exhausted_since_start
+auction:sli_final_bid_commands_per_second:last_snapshot
+auction:sli_final_bid_peak_per_second:last_snapshot
+auction:websocket_connections_peak:7d
+auction_sli_pending{flow="slow_proxy_execution"}
+auction_sli_flow_blocked{reason="awaiting_index"}
+```
+
+Final 耗尽原始累计非零即按已有 D5 条件提前评估 W12.1，不能只看 increase。
+容量区分普通命令、代理创建、慢速代理，不把自动反击多条事实当多个用户命令。
+WS 峰值是采样下界，数据库单秒峰值是已接受命令基线，均不是压力测试能力。
+历史邮件、提醒、结算和慢速 tick 的分位因缺候选索引暂不实现，
+以 flow_available=0 和 awaiting_index 明示，不报告零延迟或 SLO 已达标。
+Final 回帖导入只引用待合入的 W0.5；延迟上界、估计宽度和覆盖率须同时约束。
+服务端响应、WS 写出、本地发送证明与付款观察均为代理，不是真实客户端收件时刻。
+完整逐项状态和指标闭集见
+[SLI owner 文档](../crates/auction-observability/README.md#sli-与容量基线)。
+
+所有 SLO 与容量目标保持占位：**基线观察后由 Claude 提出、用户确认**。
+回退汇总应在线明确 set `metrics_sli_snapshot_enabled=false`，沿用新命令 ID、
+最新 revision、期限及原因规则；clear 只回到 TOML 基线，未必关闭。
+已开始的短只读轮次可完成，之后不再查询；业务路径和已发布事实均不改动。
+若回退旧程序，还须移除它不认识的 TOML 字段，旧程序会忽略未来数据库开关名。
 
 ### 运维告警
 
@@ -592,7 +662,13 @@ SQLSTATE 和错误文本用于定位原因，不能据此自动重试、重发�
 
 ## 运行时开关
 
-本批仅开放 `readiness_audit_failure_mode`（三角色）和 `readiness_cache_enabled`（Public/Admin）。通过 `auction-cli switch list` 读取 revision，再用稳定命令 ID、期望版本、actor 与原因执行 set/clear，参数见[CLI 参考](../apps/auction-cli/README.md#运行时开关)。切 classified 前仍须审阅[影子样本](#审计就绪影子观察)，系统不自动推进。
+已开放 `readiness_audit_failure_mode`（三角色）、
+`readiness_cache_enabled`（Public/Admin）及
+`metrics_sli_snapshot_enabled`（Worker，默认基线 false）。
+通过 `auction-cli switch list` 读取 revision，再用稳定命令 ID、期望版本、
+actor 与原因执行 set/clear，参数见[CLI 参考](../apps/auction-cli/README.md#运行时开关)。
+切 classified 前仍须审阅[影子样本](#审计就绪影子观察)，系统不自动推进。
+SLI 开关只控制附加只读汇总，不改变 readiness 缓存身份或业务授权。
 
 set 以未过期数据库事实覆盖启动时 TOML；clear 或到期只回到基线，基线不一定是 legacy 或 false。若要明确回旧路径，应分别 set legacy/false；若要恢复部署基线，则 clear。无期限覆盖需要显式 `--no-expiry`，会跨进程重启保留；修改 TOML 不会清除它。所有操作均追加事实与审计，期限自动回落不等待 Worker 的 expire 审计收口完成。
 

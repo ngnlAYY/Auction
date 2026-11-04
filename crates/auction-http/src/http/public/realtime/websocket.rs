@@ -7,7 +7,7 @@ use auction_observability::{HttpRecorder, ProcessMetrics};
 use axum::{
     extract::{
         ConnectInfo, State, WebSocketUpgrade,
-        ws::{CloseFrame, Message, Utf8Bytes, WebSocket},
+        ws::{CloseFrame, Message, WebSocket},
     },
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
@@ -17,7 +17,7 @@ use tokio::{
     time::{Duration, Instant, MissedTickBehavior, interval_at, sleep, timeout},
 };
 
-use super::super::realtime_hub::{RealtimeSubscription, RealtimeSubscriptionError};
+use super::super::realtime_hub::{ObservedFrame, RealtimeSubscription, RealtimeSubscriptionError};
 use super::super::{PublicApiState, api_error, not_found_error, parse_query};
 use super::session::{RealtimeSession, SessionCheckError};
 use super::target::{RealtimeTarget, parse_websocket_target};
@@ -238,9 +238,11 @@ async fn stream_events(
                         .await;
                         return;
                     };
-                    if !send_message(&mut socket, Message::Text(frame)).await {
+                    let ObservedFrame { body, created_at, scope } = frame;
+                    if !send_message(&mut socket, Message::Text(body)).await {
                         return;
                     }
+                    subscription.observe_push(scope, created_at);
                 }
             },
         }
@@ -249,7 +251,7 @@ async fn stream_events(
 
 enum RealtimeInput {
     Client(Option<Result<Message, axum::Error>>),
-    Event(Option<Utf8Bytes>),
+    Event(Option<ObservedFrame>),
 }
 
 async fn receive_input(
@@ -259,7 +261,7 @@ async fn receive_input(
     // 两个数据来源公平竞争；外层仍优先处理关闭、会话和存活期限。
     tokio::select! {
         message = socket.recv() => RealtimeInput::Client(message),
-        frame = subscription.recv() => RealtimeInput::Event(frame),
+        frame = subscription.recv_observed() => RealtimeInput::Event(frame),
     }
 }
 

@@ -105,7 +105,8 @@ impl Collector for RuntimeSwitchCollector {
                     Some("shadow") => 1.0,
                     _ => 0.0,
                 },
-                RuntimeSwitchName::ReadinessCacheEnabled => {
+                RuntimeSwitchName::ReadinessCacheEnabled
+                | RuntimeSwitchName::MetricsSliSnapshotEnabled => {
                     f64::from(view.effective_value.as_bool().unwrap_or(false))
                 }
             };

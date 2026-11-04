@@ -85,3 +85,12 @@ WebSocket 每连接的发送队列有界。队列满时 Hub 淘汰发送端，�
 ## 运行时就绪策略
 
 `HttpReadinessProbe` 使用共享策略身份（revision、覆盖期限状态与有效值）隔离短缓存和单飞任务；策略改变后旧结果不能用于新缓存，等待者也不能返回过期策略的成功。认证只读 `GET /api/v1/admin/runtime-switches` 显式映射数据库意图和 Admin 本地快照，成功及读取失败 no-store，不依赖 runtime 文件。见[路由契约](../../docs/contracts/routes.md#运行时开关只读接口)。
+
+
+## 实时 SLI 观测
+
+Public 装配根注册 `RealtimeRecorder` 并注入 Hub；关闭 metrics 时记录器为 no-op。
+`ObservedFrame` 仅在进程内携带创建时间与 scope，正文仍是原来的已编码 Utf8Bytes。
+WS 事件 send 成功后才记 push；Hub sink 交接记 relay，均不改变原控制流。
+公开 `RealtimeSubscription::recv` 继续返回原文本帧，内部 WS 使用带观测信息的接收。
+线协议、补读、游标、缓冲与淘汰边界见[实时契约](../../docs/contracts/realtime.md#推送观测边界)。

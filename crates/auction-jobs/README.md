@@ -74,3 +74,15 @@ delivery 的 claimed 可重领，sending 到期加 grace 后转人工，不自�
 ## 运行时开关刷新
 
 `start_runtime_switch_refresh` 启动即限时读取，此后五秒周期调用应用刷新服务，每次一秒预算；Worker 另限时追加到期收口。调用方用 TaskGuard 管理生命周期，刷新不依赖业务循环、主动暂停或就绪状态。首次失败保留 TOML，后续保留成功快照和原期限，见[运维手册](../../ops/README.md#运行时开关)。
+
+
+## SLI 汇总任务
+
+`start_sli_snapshot` 是独立六十秒唤醒任务，跳过漏掉的 tick，不追赶、不重试。
+装配根只在 Worker 已有数据库且启用 metrics 时创建，并用 TaskGuard 持有。
+每轮检查同源的 `metrics_sli_snapshot_enabled`，禁用不查询。
+应用只读端口由 storage 实现，总预算两秒，只借一个现有空闲池连接。
+成功发布完整数值快照，失败只记固定 kind/phase 和刷新指标，保留旧快照及原年龄。
+任务不接业务退出通道、不改变 readiness，也不阻塞生命周期或外写循环。
+关闭开关不强制取消已开始的短只读轮次；退出时由装配根回收。
+口径见[SLI 文档](../auction-observability/README.md#sli-与容量基线)。

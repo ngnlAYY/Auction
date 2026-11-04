@@ -164,7 +164,13 @@
 
 迁移 `000076` 纯新增 `runtime_switch_events`，登记 `compatible`：旧程序不读取该表，既有业务约束、审计闭集与冻结事实不变。表的 UPDATE、DELETE、TRUNCATE 都被触发器拒绝，数据族为 `schema_and_configuration`，永久保留且不授权清理。
 
-表按非零 `command_id` 保存版本 1 的 32 字节请求摘要、开关名、每名称递增 `revision`、`expected_revision`、set/clear/expire、布尔或枚举字符串值、UTC 期限、操作者声明、实际入口、原因、审计关联及固定结果。`(switch_name, revision)` 唯一；同一设置最多追加一个 expire。数据库对名称只检查 1–64 字节和 snake_case 格式，应用写入使用 Rust 闭集。本批仅有 `readiness_audit_failure_mode` 与 `readiness_cache_enabled`；后者由 Public/Admin 消费。
+表按非零 command_id 保存版本 1 的 32 字节请求摘要、名称、递增 revision、
+expected_revision、set/clear/expire、布尔或枚举值、UTC 期限、操作者、入口、
+原因、审计关联及固定结果；每名称 revision 唯一，同一设置最多追加一次 expire。
+数据库对名称只检查 1–64 字节及 snake_case，应用写入使用 Rust 闭集。
+已知名称增加 Worker 专用 bool `metrics_sli_snapshot_enabled`；
+原审计模式和 Public/Admin 的 `readiness_cache_enabled` 保持。
+新名称复用解析、摘要、最新事实、到期和审计，不新增迁移。
 
 读取先取每名称最新事实，再判断该 set 的期限。未设置、clear、expire 或最新 set 已过期均回落本角色启动时的 TOML 基线，绝不从更早事实恢复覆盖。未知名称在值解码之前忽略；已知名称的类型、枚举或结果投影损坏则拒绝整次刷新，保留原成功快照。新增名称须保持旧程序忽略规则；扩展已知名称的取值须另行评估跨版本兼容，不能默认兼容。
 
@@ -201,3 +207,41 @@ W0.7 `diagnose_relation` 的 250ms 限界与原回滚路径保持不变。
 Final 标签只来自本次事务已读权威快照；取快照前失败保留 unknown，
 不能据此宣称 Final 零耗尽。实时序号分配点明确失败才标记 realtime_sequence；
 COMMIT 报告的 SSI 冲突不推测为序号热点。
+
+
+## SLI 只读查询
+
+`crates/auction-storage/src/database/sli/` 是 W0.13 SQL 的唯一 owner。
+应用端口 `SliSnapshotReader` 只传递数值和快照时间，不暴露 SQL、业务 ID 或正文。
+Worker 任务与业务循环分离；`/metrics` 不读取数据库。
+不新增表、索引或迁移，不修改业务隔离、锁序、账本、审计、事件或外写规则。
+
+`TrackedPool::try_acquire` 只尝试现有空闲连接，不等待或扩池，保留原池占用观测。
+每轮串行至多一个连接；新建只读 Repeatable Read 事务，无 FOR UPDATE。
+局部 statement_timeout=1000ms、lock_timeout=100ms，不改 W0.6 会话档位。
+包含 BEGIN、全部读取和确认回滚的总预算两秒；成功回滚后才发布完整快照。
+错误、超时或候选超限时丢弃该连接并保留旧指标，不触发业务重试或 readiness。
+任务取消沿用 SQLx 事务取消清理，不补写业务或审计事实。
+
+已实施的候选路径：
+
+- `capacity::read` 用迁移 033 的 `realtime_events_created_at_idx`
+  按七天时间范围及 created_at/event_id 倒序取候选。
+  在 kind/replay 过滤之前限制至 10001 行；超过 10000 则整轮 limited。
+  用主键关联 bid、auction_commands、lot、auction；LATERAL/LIMIT 保留点查边界。
+  按 command_id 去重，只返回 main/isekai 与三类已接受 Final 命令的数值。
+- `pending::read` 用迁移 001 的 `lots_due_slow_idx`，按 slow_due_at/id
+  取当前到期 live lot，再按 auction 主键查世界，同样使用 10001 行哨兵。
+  当前积压包含过期未清除字段，不能证明历史世代都已执行。
+
+成本边界来自索引前缀、候选上限、主键关联和总时间预算；
+本批没有执行 EXPLAIN 或连接数据库，不能声称线上计划或耗时已验证。
+
+历史耗时与提醒余量均标为待索引：
+`inbound_mail_poll_idx` 需要已知 mailbox_key；delivery 的领取/lease 部分索引
+不覆盖全部完成记录；通知 live 部分索引不覆盖失效后的通知。
+结算义务按场次的索引不能枚举全局完成窗口；
+`audit_records_entity_idx` 需要先知道 entity_id，不能枚举全部慢速 tick。
+不以全表扫描加超时、当前任务集或任意截断代替完整历史窗口。
+完整逐项状态、起终点、单位及预留指标见
+[SLI owner 文档](../../crates/auction-observability/README.md#sli-与容量基线)。

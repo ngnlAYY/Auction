@@ -26,7 +26,11 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: SwitchCommand) -> anyho
         let name = RuntimeSwitchName::parse(&name).ok_or_else(|| anyhow::anyhow!("未知开关名"))?;
         let value = value.map(|value| match name {
             RuntimeSwitchName::ReadinessAuditFailureMode => Ok(json!(value)),
-            RuntimeSwitchName::ReadinessCacheEnabled => value.parse::<bool>().map(|value| json!(value)).map_err(invalid_boolean),
+            RuntimeSwitchName::ReadinessCacheEnabled
+            | RuntimeSwitchName::MetricsSliSnapshotEnabled => value
+                .parse::<bool>()
+                .map(|value| json!(value))
+                .map_err(invalid_boolean),
         }).transpose()?;
         let expires_at = expires_at.map(|value| chrono::DateTime::parse_from_rfc3339(&value).map(|time| time.with_timezone(&chrono::Utc))).transpose()?;
         let event = store.write(RuntimeSwitchCommand {

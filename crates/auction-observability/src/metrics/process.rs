@@ -36,6 +36,11 @@ pub struct ProcessMetrics {
 }
 
 impl ProcessMetrics {
+    /// 附加观测模块只在启用时注册 collector，不暴露注册表给业务层。
+    pub(super) fn enabled_registry(&self) -> Option<&Registry> {
+        self.enabled.then_some(&self.registry)
+    }
+
     /// 注册同源纯内存开关指标；关闭 exporter 不影响刷新。
     pub fn register_runtime_switch_metrics(
         &self,

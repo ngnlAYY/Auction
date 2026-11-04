@@ -257,3 +257,6 @@ mod tests {
 
 #[cfg(feature = "postgres")]
 mod runtime_switches;
+
+#[cfg(feature = "postgres")]
+mod sli;
