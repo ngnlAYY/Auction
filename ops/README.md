@@ -860,6 +860,8 @@ set 以未过期数据库事实覆盖启动时 TOML；clear 或到期只回到�
 TOML。M1 Admin 只读；邮件隔离与指标转发已接入第二批，排空预算及迁移模式仍是
 启动配置。W1.9 主动暂停尚未实现，不得将本机制视为已暂停外部请求。
 
+数据库服务端基线见 [PostgreSQL 18 基线](postgres/README.md)：连接预算、`pg_stat_statements`、慢查询/锁等待日志与热行表 autovacuum；归档在 W10.7 启用。
+
 ## 数据库连接预算与启用顺序
 
 先用 `auction-cli config check --strict` 查看 `database_budget` 表，

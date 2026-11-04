@@ -1,0 +1,39 @@
+# Auction PostgreSQL 18 服务端基线（W10.8）
+# 本文件是片段模板，不替代发行版 postgresql.conf；合并前核对现有值，重启受 W7.5 门禁约束。
+# 连接预算见 ops/postgres/README.md；所有服务仍只监听本机。
+
+listen_addresses = '127.0.0.1'
+port = 5432
+
+# 三角色服务池各 16（含长期 owner），维护池 4，最多 2 个并行 CLI，
+# 外部/备份/exporter/人工会话预留 8；3 个 superuser 保留连接。
+max_connections = 100
+superuser_reserved_connections = 3
+reserved_connections = 0
+
+shared_buffers = 128MB
+work_mem = 4MB
+maintenance_work_mem = 64MB
+
+# W12.4 热点分析依赖；需要 CREATE EXTENSION 和重启。
+shared_preload_libraries = 'pg_stat_statements'
+pg_stat_statements.max = 10000
+pg_stat_statements.track = all
+
+# 慢查询与锁等待；应用层仍有自己的 1 秒慢语句告警。
+log_min_duration_statement = 1000
+log_lock_waits = on
+log_autovacuum_min_duration = 1000
+log_checkpoints = on
+log_temp_files = 10240
+
+# 归档与时间点恢复由 W10.7 启用；本阶段保持关闭。
+archive_mode = off
+# archive_timeout = 300
+# archive_command = '... W10.7 ...'
+
+# 明确保持自动清理开启；每表参数由 autovacuum.sql.example 设置。
+autovacuum = on
+track_counts = on
+
+password_encryption = 'scram-sha-256'
