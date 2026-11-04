@@ -148,11 +148,11 @@ SLI 基线不由 Admin runtime 覆盖；仅 Worker 消费，且须同时启用�
 
 | 字段 | 默认值 | 校验 |
 | --- | --- | --- |
-| `enabled` | `false` | 为 true 时下面四项及成对 R2 凭据必填 |
+| `enabled` | `false` | 为 true 时 `age_recipient`、`endpoint`、`bucket` 及成对 R2 凭据必填；`prefix` 可空，空表示 bucket 根下直接使用 `daily/`、`monthly/` 等固定布局 |
 | `age_recipient` | `""` | age 原生 X25519 公钥，62 字节、小写 `age1` 与 bech32 字符集；加密由主机 age 校验，不提供私钥或口令字段 |
 | `endpoint` | `""` | HTTPS 根地址，无 userinfo、query、fragment 或额外路径 |
 | `bucket` | `""` | 3–63 字节的小写字母、数字或连字符，首尾为字母/数字；拒绝保留名称 |
-| `prefix` | `""` | 最多 512 字节的字母、数字、`-_.` 与 `/`，无首尾斜杠、空段、`.` 段或 `..` |
+| `prefix` | `""` | 可选；最多 512 字节的字母、数字、`-_.` 与 `/`，无首尾斜杠、空段、`.` 段或 `..`；空串表示不添加前缀 |
 
 Worker 引用的敏感 TOML 根字段 `backup_r2_access_key_id` 与 `backup_r2_secret_access_key` 必须成对、非空、不超过 4096 字节，无首尾空白或控制字符；禁用时可以全部省略。它们由 `SecretString` 保存，仅经显式 getter 交给 R2 适配器，不能放在 common、角色或 runtime 文件。公钥、endpoint、bucket 和 prefix 是普通配置。`config check` 校验启用依赖及字段格式，但不执行 age、不连接 R2；`config check` 与 `config show` 对异机字段只输出 enabled 及是否配置，绝不输出字段值、令牌或签名 URL。错误只有字段名与固定原因。轮换令牌不改变待上传身份；更换公钥或目的地后，哈希不匹配的旧项保留并记 pending_destination_changed 告警，新目标正常继续备份。旧任务不能自动改投新目标，需由用户在原配置下处理或将原状态与密文整体隔离保留。
 

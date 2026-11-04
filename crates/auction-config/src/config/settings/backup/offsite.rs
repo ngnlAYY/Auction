@@ -27,7 +27,6 @@ pub(super) fn validate(config: &AppConfig) -> Result<(), ConfigError> {
         ("age_recipient", &offsite.age_recipient),
         ("endpoint", &offsite.endpoint),
         ("bucket", &offsite.bucket),
-        ("prefix", &offsite.prefix),
     ] {
         if offsite.enabled && value.is_empty() {
             return Err(invalid(field, "required_when_enabled"));

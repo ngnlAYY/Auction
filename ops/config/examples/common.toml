@@ -57,7 +57,7 @@ age_recipient = ""
 endpoint = ""
 # 可选：默认空，启用时必填；预先建立且已配置生命周期与 bucket lock 的 bucket 名。
 bucket = ""
-# 可选：默认空，启用时必填；例如 auction，无首尾斜杠、空段或点段；daily/monthly 由工具追加。
+# 可选：默认空；为空时对象直接在 bucket 根下使用 daily/monthly 等固定布局，非空时追加该前缀，无首尾斜杠、空段或点段。
 prefix = ""
 
 # 可选区块：每周自动建立拍卖的时间表；省略时使用同样时间但保持关闭。
