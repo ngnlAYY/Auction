@@ -1,0 +1,38 @@
+# W10.7 每周物理基础备份：以 postgres 账号运行 pg_basebackup，tar 流经 zstd 与 age 公钥
+# 加密后写入 WAL 暂存目录；由 auction-wal-upload.timer 上传 R2 的 <prefix>/base/。
+# 连接使用 libpq 默认值（本机 socket、peer 认证），执行账号必须有 REPLICATION 权限或为
+# 超级用户；pg_basebackup -D - 要求集群没有额外表空间。
+# 暂存目录由归档命令与上传器共用，必须预建为 postgres:auction、2770（见 RECOVERY.md）。
+# 把 --recipient 换成 [backup.offsite] age_recipient 的公钥；私钥离线保存，服务器只放公钥。
+[Unit]
+Description=Auction weekly PostgreSQL base backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+WorkingDirectory=/opt/auction
+UMask=0077
+ExecStart=/opt/auction/bin/auction-cli wal base-backup --staging-dir /var/lib/auction/wal-staging --recipient age1<收件人公钥>
+Restart=no
+# 基础备份需要读取整个集群；大库应同时调大本值并核对磁盘余量。
+TimeoutStartSec=90min
+TimeoutStopSec=60s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/auction/wal-staging
+StandardOutput=journal
+StandardError=journal
+# 单次失败以非零退出，systemd 记录失败状态；命令不发布任何半成品。
+# 基础备份的本地保留（最近 3 组）与 R2 上传由 auction-wal-upload.timer 执行，
+# 因此两个 timer 必须一起启用。

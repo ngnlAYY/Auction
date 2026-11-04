@@ -56,6 +56,13 @@ const INHERITED: &[&str] = &[
     "PGUSER",
 ];
 
+/// 清除 libpq 会读取的继承变量；外部工具的身份只来自显式设置的环境。
+pub(super) fn clear_inherited(command: &mut Command) {
+    for key in INHERITED {
+        command.env_remove(key);
+    }
+}
+
 pub(super) struct Libpq {
     variables: Vec<(&'static str, String)>,
     passfile: Option<Passfile>,
@@ -149,9 +156,7 @@ impl Libpq {
     }
 
     fn apply(&self, command: &mut Command) {
-        for key in INHERITED {
-            command.env_remove(key);
-        }
+        clear_inherited(command);
         for (key, value) in &self.variables {
             command.env(key, value);
         }

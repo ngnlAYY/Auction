@@ -47,7 +47,7 @@ ORDER BY relname;
 
 ## 归档与恢复
 
-`archive_mode` 默认保持 `off`。W10.7 已交付启用所需的命令与模板：`archive_command` 调用 `auction-cli wal archive` 完成 zstd 压缩与 age 公钥加密并 fsync 到本地暂存，独立 systemd timer 运行 `auction-cli wal upload` 把密文上传 R2 的 `<prefix>/wal/`，`archive_timeout = 300` 保证 RPO ≤ 5 分钟。WAL 与基础备份保留 21 天、可恢复到过去 14 天内任一时刻；每周 `pg_basebackup` 基础备份尚未交付。
+`archive_mode` 默认保持 `off`。W10.7 已交付启用所需的命令与模板：`archive_command` 调用 `auction-cli wal archive` 完成 zstd 压缩与 age 公钥加密并 fsync 到本地暂存，独立 systemd timer 运行 `auction-cli wal upload` 把密文上传 R2 的 `<prefix>/wal/`，每周 `auction-base-backup.timer` 运行 `auction-cli wal base-backup` 用 `pg_basebackup` 生成同样加密的基础备份并由同一上传器写入 `<prefix>/base/`；`archive_timeout = 300` 保证 RPO ≤ 5 分钟。WAL 与基础备份保留 21 天、可恢复到过去 14 天内任一时刻，本机基础备份保留最近 3 份；本仓库尚未在隔离实例演练时间点恢复。
 
 启用顺序、目录权限、验证查询与回退见[备份与恢复手册的 WAL 归档与时间点恢复](../deploy/RECOVERY.md#wal-归档与时间点恢复)。打开 `archive_mode` 需要重启 PostgreSQL，受 [W7.5 停机门禁](../README.md#数据库连接预算与启用顺序)约束；启用前必须先让上传 timer 成功运行一次，避免产生未纳入上传器的 WAL。
 

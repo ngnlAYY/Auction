@@ -1,4 +1,5 @@
-//! WAL 暂存命名、归档 manifest 与重复判定；只描述本地证据，不访问数据库或 R2。
+//! WAL 暂存命名、归档 manifest、每周基础备份 manifest 与重复判定；只描述本地证据，
+//! 不访问数据库或 R2。
 //!
 //! 暂存目录由 PostgreSQL 服务账号写入、由上传账号读取并删除，因此不能用
 //! `PrivateDirectory`（它要求执行账号独占 0700）；这里只要求目录非符号链接且
@@ -26,6 +27,21 @@ pub(super) const MANIFEST_SUFFIX: &str = ".zst.age.manifest.json";
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 /// age X25519 收件人公钥的 bech32 数据字符集。
 const BECH32: &[u8] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+/// 基础备份身份前缀；文件名与对象键都由它派生，不与 24 位 WAL 段名重叠。
+pub(super) const BASE_ID_PREFIX: &str = "base-";
+/// 基础备份密文文件名固定为 `<备份 ID>.tar.zst.age`。
+pub(super) const BASE_CIPHER_SUFFIX: &str = ".tar.zst.age";
+/// 基础备份 manifest 文件名固定为 `<备份 ID>.tar.zst.age.manifest.json`。
+pub(super) const BASE_MANIFEST_SUFFIX: &str = ".tar.zst.age.manifest.json";
+/// 基础备份 manifest 的格式名；字段只追加，旧文件继续可读。
+pub(super) const BASE_MANIFEST_FORMAT: &str = "auction-base-backup.v1";
+/// 本机上传证据文件名固定为 `<备份 ID>.upload.json`。
+pub(super) const BASE_RECEIPT_SUFFIX: &str = ".upload.json";
+/// 本机上传证据的格式名；只用于避免每 5 分钟重复回读已上传的基础备份。
+pub(super) const BASE_RECEIPT_FORMAT: &str = "auction-base-receipt.v1";
+/// 本地保留的基础备份份数：与 21 天生命周期规则对齐（决策 49）。
+pub(super) const BASE_RETENTION_KEEP: usize = 3;
 
 /// 单个 WAL 段的归档证据；与密文一起构成上传器唯一认可的暂存单元。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,17 +100,97 @@ pub(super) struct Staged {
     pub(super) record: ArchiveManifest,
 }
 
-/// 无法解析的暂存项；只报告固定原因，不阻断其他段的上传。
+/// 一次 `pg_basebackup` 的本地证据；密文只由上传器读取，私钥离线。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct BaseManifest {
+    pub(super) format: String,
+    /// 备份身份，同时也是 `pg_basebackup --label` 与对象键中的目录名。
+    pub(super) backup_id: String,
+    /// 开始与结束时刻（UNIX 秒）；只用于诊断与排序，不参与上传幂等。
+    pub(super) started_unix_seconds: u64,
+    pub(super) finished_unix_seconds: u64,
+    /// `pg_basebackup` 输出的 tar 流字节数（压缩前）。
+    pub(super) plaintext_bytes: u64,
+    /// 密文字节数；上传前与本地密文长度核对。
+    pub(super) cipher_bytes: u64,
+    /// 密文 SHA-256；上传前重算并核对，避免上传已损坏的文件。
+    pub(super) cipher_sha256: String,
+}
+
+impl BaseManifest {
+    /// 字段闭集与备份身份一致性；不重算摘要（扫描时只核对长度，上传时重算）。
+    pub(super) fn validate(&self, backup_id: &str) -> anyhow::Result<()> {
+        if self.format != BASE_MANIFEST_FORMAT
+            || self.backup_id != backup_id
+            || !valid_base_id(&self.backup_id)
+            || self.plaintext_bytes == 0
+            || self.cipher_bytes == 0
+            || !is_sha256(&self.cipher_sha256)
+            || self.finished_unix_seconds < self.started_unix_seconds
+        {
+            anyhow::bail!("基础备份 manifest 的格式、身份或长度字段无效：{backup_id}");
+        }
+        Ok(())
+    }
+}
+
+/// 已可上传的一组基础备份暂存文件。
+#[derive(Debug, Clone)]
+pub(super) struct BaseStaged {
+    pub(super) backup_id: String,
+    pub(super) cipher: PathBuf,
+    pub(super) manifest: PathBuf,
+    pub(super) record: BaseManifest,
+    /// 已有有效本机上传证据；上传器跳过重复的远端完整回读。
+    pub(super) uploaded: bool,
+}
+
+/// 本机上传证据：只说明这组密文与 manifest 曾以这些对象摘要完成远端校验。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct BaseReceipt {
+    pub(super) format: String,
+    pub(super) backup_id: String,
+    pub(super) uploaded_unix_seconds: u64,
+    /// 远端 `completed.json` 的 SHA-256。
+    pub(super) completion_sha256: String,
+}
+
+impl BaseReceipt {
+    pub(super) fn validate(&self, backup_id: &str) -> anyhow::Result<()> {
+        if self.format != BASE_RECEIPT_FORMAT
+            || self.backup_id != backup_id
+            || !valid_base_id(&self.backup_id)
+            || !is_sha256(&self.completion_sha256)
+        {
+            anyhow::bail!("基础备份上传证据的格式或身份无效：{backup_id}");
+        }
+        Ok(())
+    }
+}
+
+/// 本地保留计划的投影：`retained` 保留在暂存目录，`removable` 由上传器删除。
+#[derive(Debug)]
+pub(super) struct Retention {
+    pub(super) retained: Vec<String>,
+    pub(super) removable: Vec<BaseStaged>,
+}
+
+/// 无法解析的暂存项；只报告固定原因，不阻断其他项的上传。
 #[derive(Debug)]
 pub(super) struct InvalidEntry {
-    pub(super) segment_name: String,
+    /// WAL 段名或基础备份 ID，取决于所在的扫描集合。
+    pub(super) name: String,
     pub(super) reason: String,
 }
 
-/// 一次暂存扫描的结果；`incomplete` 是归档进程尚未发布完成的项，不是失败。
+/// 一次暂存扫描的结果；`incomplete` 是创建进程尚未发布完成的项（WAL 段名或基础备份
+/// ID），不是失败。
 #[derive(Debug)]
 pub(super) struct StagedScan {
     pub(super) ready: Vec<Staged>,
+    pub(super) base: Vec<BaseStaged>,
     pub(super) incomplete: Vec<String>,
     pub(super) invalid: Vec<InvalidEntry>,
 }
@@ -131,18 +227,77 @@ pub(super) fn manifest_path(directory: &Path, segment: &str) -> PathBuf {
     directory.join(format!("{segment}{MANIFEST_SUFFIX}"))
 }
 
-/// 暂存目录必须已存在：归档账号与上传账号都需要写入/删除权限，因此不创建也不改权限。
+/// 基础备份 ID 固定为 `base-YYYYMMDDTHHMMSSZ`；只从 UTC 时刻派生，不含路径分隔符。
+pub(super) fn valid_base_id(backup_id: &str) -> bool {
+    let Some(stamp) = backup_id.strip_prefix(BASE_ID_PREFIX) else { return false };
+    let bytes = stamp.as_bytes();
+    bytes.len() == 16
+        && bytes[..8].iter().all(u8::is_ascii_digit)
+        && bytes[8] == b'T'
+        && bytes[9..15].iter().all(u8::is_ascii_digit)
+        && bytes[15] == b'Z'
+}
+
+/// 由当前 UTC 时刻派生备份 ID；同一秒内的重复运行得到同一身份。
+pub(super) fn base_id(now: chrono::DateTime<chrono::Utc>) -> String {
+    format!("{BASE_ID_PREFIX}{}", now.format("%Y%m%dT%H%M%SZ"))
+}
+
+pub(super) fn base_cipher_path(directory: &Path, backup_id: &str) -> PathBuf {
+    directory.join(format!("{backup_id}{BASE_CIPHER_SUFFIX}"))
+}
+
+pub(super) fn base_manifest_path(directory: &Path, backup_id: &str) -> PathBuf {
+    directory.join(format!("{backup_id}{BASE_MANIFEST_SUFFIX}"))
+}
+
+pub(super) fn base_receipt_path(directory: &Path, backup_id: &str) -> PathBuf {
+    directory.join(format!("{backup_id}{BASE_RECEIPT_SUFFIX}"))
+}
+
+/// 文件名对应的基础备份身份；不是基础备份名时返回 None。
+pub(super) fn base_id_from_file_name(name: &str) -> Option<&str> {
+    let backup_id = name
+        .strip_suffix(BASE_CIPHER_SUFFIX)
+        .or_else(|| name.strip_suffix(BASE_MANIFEST_SUFFIX))
+        .or_else(|| name.strip_suffix(BASE_RECEIPT_SUFFIX))?;
+    valid_base_id(backup_id).then_some(backup_id)
+}
+
+/// 只保留最新 `keep` 份完整基础备份；更旧的完整暂存项可由上传器删除。
+///
+/// 只考虑密文与 manifest 都通过长度校验的项，`extend_keep` 中的 ID（本次上传失败的项）
+/// 也保留，避免上传中断后先删掉唯一的本地副本。
+pub(super) fn retention_plan(
+    mut complete: Vec<BaseStaged>,
+    keep: usize,
+    extend_keep: &[String],
+) -> Retention {
+    complete.sort_by(|left, right| right.backup_id.cmp(&left.backup_id));
+    let mut retained = Vec::new();
+    let mut removable = Vec::new();
+    for (index, set) in complete.into_iter().enumerate() {
+        if index < keep || extend_keep.contains(&set.backup_id) {
+            retained.push(set.backup_id);
+        } else {
+            removable.push(set);
+        }
+    }
+    Retention { retained, removable }
+}
+
+/// 暂存目录必须已存在：归档/基础备份账号与上传账号都需要写入/删除权限，因此不创建也不改权限。
 pub(super) fn require_staging_dir(directory: &Path) -> anyhow::Result<()> {
     if !directory.is_absolute() {
-        anyhow::bail!("WAL 暂存目录必须是绝对路径：{}", directory.display());
+        anyhow::bail!("暂存目录必须是绝对路径：{}", directory.display());
     }
     let metadata = fs::symlink_metadata(directory)
-        .with_context(|| format!("读取 WAL 暂存目录失败：{}", directory.display()))?;
+        .with_context(|| format!("读取暂存目录失败：{}", directory.display()))?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        anyhow::bail!("WAL 暂存目录必须是非符号链接目录：{}", directory.display());
+        anyhow::bail!("暂存目录必须是非符号链接目录：{}", directory.display());
     }
     if metadata.mode() & 0o002 != 0 {
-        anyhow::bail!("WAL 暂存目录禁止 other 写入：{}", directory.display());
+        anyhow::bail!("暂存目录禁止 other 写入：{}", directory.display());
     }
     Ok(())
 }
@@ -191,16 +346,22 @@ pub(super) fn classify(
     }
 }
 
-/// 枚举可上传的暂存对；格式错误逐项报告，不阻止其他段继续上传。
+/// 枚举可上传的暂存对；格式错误逐项报告，不阻止其他项继续上传。
 pub(super) fn staged(directory: &Path) -> anyhow::Result<StagedScan> {
     let mut segments = Vec::new();
+    let mut bases = Vec::new();
     for entry in fs::read_dir(directory)
-        .with_context(|| format!("枚举 WAL 暂存目录失败：{}", directory.display()))?
+        .with_context(|| format!("枚举暂存目录失败：{}", directory.display()))?
     {
         let entry =
-            entry.with_context(|| format!("读取 WAL 暂存目录项失败：{}", directory.display()))?;
+            entry.with_context(|| format!("读取暂存目录项失败：{}", directory.display()))?;
         let file_name = entry.file_name();
         let Some(file_name) = file_name.to_str() else { continue };
+        // 基础备份名与 WAL 段名互不重叠：先识别基础备份，再按 WAL 后缀归类。
+        if let Some(backup_id) = base_id_from_file_name(file_name) {
+            bases.push(backup_id.to_owned());
+            continue;
+        }
         // 密文与 manifest 都登记段名：只剩一半的暂存项也进入 incomplete，避免静默遗留。
         let segment = file_name
             .strip_suffix(CIPHER_SUFFIX)
@@ -212,8 +373,15 @@ pub(super) fn staged(directory: &Path) -> anyhow::Result<StagedScan> {
     }
     segments.sort();
     segments.dedup();
+    bases.sort();
+    bases.dedup();
 
-    let mut scan = StagedScan { ready: Vec::new(), incomplete: Vec::new(), invalid: Vec::new() };
+    let mut scan = StagedScan {
+        ready: Vec::new(),
+        base: Vec::new(),
+        incomplete: Vec::new(),
+        invalid: Vec::new(),
+    };
     for segment in segments {
         let cipher = cipher_path(directory, &segment);
         let manifest = manifest_path(directory, &segment);
@@ -233,21 +401,75 @@ pub(super) fn staged(directory: &Path) -> anyhow::Result<StagedScan> {
         }) {
             Ok(record) => record,
             Err(error) => {
-                scan.invalid
-                    .push(InvalidEntry { segment_name: segment, reason: format!("{error:#}") });
+                scan.invalid.push(InvalidEntry { name: segment, reason: format!("{error:#}") });
                 continue;
             }
         };
         if cipher_metadata.len() != record.cipher_bytes {
             scan.invalid.push(InvalidEntry {
-                segment_name: segment,
+                name: segment,
                 reason: "WAL 密文长度与 manifest 不一致".to_owned(),
             });
             continue;
         }
         scan.ready.push(Staged { segment_name: segment, cipher, manifest, record });
     }
+    for backup_id in bases {
+        let cipher = base_cipher_path(directory, &backup_id);
+        let manifest = base_manifest_path(directory, &backup_id);
+        let Some(cipher_metadata) = regular_or_none(&cipher)? else {
+            // 基础备份创建器先发布密文、再发布 manifest；缺一半时不删除，只报告。
+            scan.incomplete.push(backup_id);
+            continue;
+        };
+        if regular_or_none(&manifest)?.is_none() {
+            scan.incomplete.push(backup_id);
+            continue;
+        }
+        let record = match read_base_manifest(&manifest).and_then(|record| {
+            record.validate(&backup_id)?;
+            Ok(record)
+        }) {
+            Ok(record) => record,
+            Err(error) => {
+                scan.invalid.push(InvalidEntry { name: backup_id, reason: format!("{error:#}") });
+                continue;
+            }
+        };
+        if cipher_metadata.len() != record.cipher_bytes {
+            scan.invalid.push(InvalidEntry {
+                name: backup_id,
+                reason: "基础备份密文长度与 manifest 不一致".to_owned(),
+            });
+            continue;
+        }
+        let uploaded = read_base_receipt(directory, &backup_id)?;
+        scan.base.push(BaseStaged { backup_id, cipher, manifest, record, uploaded });
+    }
     Ok(scan)
+}
+
+/// 有界读取基础备份 manifest；拒绝符号链接、特殊文件与超出上限的输入。
+fn read_base_manifest(path: &Path) -> anyhow::Result<BaseManifest> {
+    let bytes = files::read_bounded(path, MAX_MANIFEST_BYTES)?;
+    serde_json::from_slice(&bytes).context("解析基础备份 manifest 失败")
+}
+
+/// 本机上传证据无效或缺失时视为尚未上传：宁可多一次完整回读，也不能跳过真正未上传的备份。
+fn read_base_receipt(directory: &Path, backup_id: &str) -> anyhow::Result<bool> {
+    let path = base_receipt_path(directory, backup_id);
+    let Some(metadata) = regular_or_none(&path)? else { return Ok(false) };
+    if metadata.len() > MAX_MANIFEST_BYTES {
+        return Ok(false);
+    }
+    let bytes = files::read_bounded(&path, MAX_MANIFEST_BYTES)?;
+    let Ok(receipt) = serde_json::from_slice::<BaseReceipt>(&bytes) else { return Ok(false) };
+    Ok(receipt.validate(backup_id).is_ok())
+}
+
+/// 只接受 64 位小写十六进制摘要。
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// 有界读取 manifest；拒绝符号链接、特殊文件与超出上限的输入。
@@ -260,19 +482,24 @@ fn read_manifest(path: &Path) -> anyhow::Result<ArchiveManifest> {
 fn regular_or_none(path: &Path) -> anyhow::Result<Option<Metadata>> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-            anyhow::bail!("WAL 暂存项必须是普通文件：{}", path.display())
+            anyhow::bail!("暂存项必须是普通文件：{}", path.display())
         }
         Ok(metadata) => Ok(Some(metadata)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => {
-            Err(error).with_context(|| format!("读取 WAL 暂存项失败：{}", path.display()))
-        }
+        Err(error) => Err(error).with_context(|| format!("读取暂存项失败：{}", path.display())),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ArchiveManifest, MANIFEST_FORMAT, valid_recipient, valid_segment_name};
+    use std::path::Path;
+
+    use super::{
+        ArchiveManifest, BASE_MANIFEST_FORMAT, BASE_RECEIPT_FORMAT, BaseManifest, BaseReceipt,
+        BaseStaged, MANIFEST_FORMAT, base_cipher_path, base_id, base_id_from_file_name,
+        base_manifest_path, base_receipt_path, retention_plan, staged, valid_base_id,
+        valid_recipient, valid_segment_name,
+    };
 
     #[test]
     fn segment_names_match_postgresql_forms() {
@@ -317,5 +544,154 @@ mod tests {
         let mut wrong_format = record;
         wrong_format.format = "auction-wal-archive.v0".to_owned();
         assert!(wrong_format.validate("000000010000000000000001").is_err());
+    }
+
+    fn base_record(backup_id: &str) -> BaseManifest {
+        BaseManifest {
+            format: BASE_MANIFEST_FORMAT.to_owned(),
+            backup_id: backup_id.to_owned(),
+            started_unix_seconds: 10,
+            finished_unix_seconds: 20,
+            plaintext_bytes: 1024,
+            cipher_bytes: 512,
+            cipher_sha256: "0".repeat(64),
+        }
+    }
+
+    fn staged_base(backup_id: &str) -> BaseStaged {
+        let directory = Path::new("/nonexistent");
+        BaseStaged {
+            backup_id: backup_id.to_owned(),
+            cipher: base_cipher_path(directory, backup_id),
+            manifest: base_manifest_path(directory, backup_id),
+            record: base_record(backup_id),
+            uploaded: false,
+        }
+    }
+
+    #[test]
+    fn base_ids_follow_derived_timestamp_form() {
+        assert!(valid_base_id("base-20261104T031500Z"));
+        assert_eq!(
+            base_id(
+                chrono::DateTime::parse_from_rfc3339("2026-11-04T03:15:00Z")
+                    .expect("解析时刻")
+                    .with_timezone(&chrono::Utc)
+            ),
+            "base-20261104T031500Z"
+        );
+        assert!(!valid_base_id("base-20261104T031500"));
+        assert!(!valid_base_id("base-2026110T031500Z"));
+        assert!(!valid_base_id("base-20261104t031500Z"));
+        assert!(!valid_base_id("000000010000000000000001"));
+        assert!(!valid_base_id("../base-20261104T031500Z"));
+
+        assert_eq!(
+            base_id_from_file_name("base-20261104T031500Z.tar.zst.age"),
+            Some("base-20261104T031500Z")
+        );
+        assert_eq!(
+            base_id_from_file_name("base-20261104T031500Z.tar.zst.age.manifest.json"),
+            Some("base-20261104T031500Z")
+        );
+        assert_eq!(base_id_from_file_name("000000010000000000000001.zst.age"), None);
+        assert_eq!(
+            base_id_from_file_name("base-20261104T031500Z.upload.json"),
+            Some("base-20261104T031500Z")
+        );
+        assert_eq!(base_id_from_file_name("base-backup.lock"), None);
+    }
+
+    #[test]
+    fn base_manifest_validation_binds_identity_shape_and_length() {
+        let record = base_record("base-20261104T031500Z");
+        assert!(record.validate("base-20261104T031500Z").is_ok());
+        assert!(record.validate("base-20261111T031500Z").is_err());
+
+        let mut empty = record.clone();
+        empty.cipher_bytes = 0;
+        assert!(empty.validate("base-20261104T031500Z").is_err());
+
+        let mut unordered = record.clone();
+        unordered.finished_unix_seconds = 1;
+        assert!(unordered.validate("base-20261104T031500Z").is_err());
+
+        let mut bad_digest = record;
+        bad_digest.cipher_sha256 = "z".repeat(64);
+        assert!(bad_digest.validate("base-20261104T031500Z").is_err());
+    }
+
+    #[test]
+    fn retention_keeps_newest_sets_and_extends_for_failed_ids() {
+        let complete = vec![
+            staged_base("base-20261014T031500Z"),
+            staged_base("base-20261021T031500Z"),
+            staged_base("base-20261028T031500Z"),
+            staged_base("base-20261104T031500Z"),
+        ];
+        let plan = retention_plan(complete.clone(), 3, &[]);
+        assert_eq!(plan.retained.len(), 3);
+        assert_eq!(plan.removable.len(), 1);
+        assert_eq!(plan.removable[0].backup_id, "base-20261014T031500Z");
+        assert_eq!(plan.retained[0], "base-20261104T031500Z");
+
+        let plan = retention_plan(complete, 3, &["base-20261014T031500Z".to_owned()]);
+        assert!(plan.removable.is_empty());
+        assert_eq!(plan.retained.len(), 4);
+
+        // 少于保留份数时不删除任何项。
+        let plan = retention_plan(vec![staged_base("base-20261104T031500Z")], 3, &[]);
+        assert!(plan.removable.is_empty());
+    }
+
+    #[test]
+    fn staged_marks_base_sets_uploaded_only_with_valid_receipt() {
+        use std::fs;
+
+        let root = std::env::temp_dir().join(format!(
+            "auction-wal-staged-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("时钟")
+                .as_nanos()
+        ));
+        fs::create_dir(&root).expect("创建测试目录");
+        let id = "base-20261104T031500Z";
+        fs::write(base_cipher_path(&root, id), b"cipher").expect("写入密文");
+        let record = base_record(id);
+        let record = BaseManifest { cipher_bytes: 6, plaintext_bytes: 16, ..record };
+        fs::write(base_manifest_path(&root, id), serde_json::to_vec(&record).expect("序列化"))
+            .expect("写入 manifest");
+
+        let scan = staged(&root).expect("首次扫描");
+        assert_eq!(scan.base.len(), 1);
+        assert!(!scan.base[0].uploaded);
+
+        let receipt = BaseReceipt {
+            format: BASE_RECEIPT_FORMAT.to_owned(),
+            backup_id: id.to_owned(),
+            uploaded_unix_seconds: 3,
+            completion_sha256: "1".repeat(64),
+        };
+        let receipt_path = base_receipt_path(&root, id);
+        fs::write(&receipt_path, serde_json::to_vec(&receipt).expect("序列化证据"))
+            .expect("写入证据");
+        let scan = staged(&root).expect("带证据扫描");
+        assert!(scan.base[0].uploaded);
+
+        // 身份不符的证据不能把未上传的组当成已上传。
+        let wrong = BaseReceipt { backup_id: "base-20261111T031500Z".to_owned(), ..receipt };
+        fs::write(&receipt_path, serde_json::to_vec(&wrong).expect("序列化证据"))
+            .expect("覆盖证据");
+        let scan = staged(&root).expect("错误证据扫描");
+        assert!(!scan.base[0].uploaded);
+
+        // 损坏的证据按未上传处理，不使整次扫描失败。
+        fs::write(&receipt_path, b"not-json").expect("写入损坏证据");
+        let scan = staged(&root).expect("损坏证据扫描");
+        assert!(!scan.base[0].uploaded);
+
+        fs::remove_dir_all(&root).expect("清理测试目录");
     }
 }
