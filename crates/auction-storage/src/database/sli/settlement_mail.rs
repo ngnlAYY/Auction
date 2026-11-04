@@ -72,6 +72,12 @@ const SETTLEMENT_PAYMENT_COUNT: &str = "
           ON obligation.auction_id=candidate.auction_id
         WHERE obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod')
+          AND NOT EXISTS (
+              SELECT 1 FROM public.settlement_obligation_fulfillments internal
+              WHERE internal.obligation_id=obligation.id
+                AND internal.execution_state='satisfied'
+                AND internal.proof_kind='bot_internal_v1'
+          )
         LIMIT $3
     )
     SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
@@ -112,6 +118,12 @@ const SETTLEMENT_AGGREGATE: &str = "
           ON obligation.auction_id=candidate.auction_id
         WHERE obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod')
+          AND NOT EXISTS (
+              SELECT 1 FROM public.settlement_obligation_fulfillments internal
+              WHERE internal.obligation_id=obligation.id
+                AND internal.execution_state='satisfied'
+                AND internal.proof_kind='bot_internal_v1'
+          )
         LIMIT $3
     ),
     fulfilled AS (
@@ -177,6 +189,12 @@ const SETTLEMENT_ALL_COUNT: &str = "
           ON obligation.auction_id=settlement.auction_id
         WHERE obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod')
+          AND NOT EXISTS (
+              SELECT 1 FROM public.settlement_obligation_fulfillments internal
+              WHERE internal.obligation_id=obligation.id
+                AND internal.execution_state='satisfied'
+                AND internal.proof_kind='bot_internal_v1'
+          )
         LIMIT $1
     )
     SELECT (SELECT count(*) FROM settlements) AS settlement_count,
@@ -198,6 +216,12 @@ const SETTLEMENT_INCOMPLETE: &str = "
           ON obligation.auction_id=settlement.auction_id
         WHERE obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod')
+          AND NOT EXISTS (
+              SELECT 1 FROM public.settlement_obligation_fulfillments internal
+              WHERE internal.obligation_id=obligation.id
+                AND internal.execution_state='satisfied'
+                AND internal.proof_kind='bot_internal_v1'
+          )
         LIMIT $1
     ),
     fulfilled AS (

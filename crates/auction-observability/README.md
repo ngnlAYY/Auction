@@ -576,7 +576,8 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
 - 结算首封：settled_at → 第一封应发付款邮件的成功证明；无应发集合不生成零样本。
   末封：settled_at → 全部应发集合成功后的最后时间；未齐全保持未完成。
   首/末封只认 COD 与 carrier 付款邮件模板；isekai 的 equipment_handoff 是付款后的
-  装备交付，不是付款邮件，不进入首/末封集合。候选按付款邮件完成终点落窗，
+  装备交付，不是付款邮件，不进入首/末封集合；`bot_internal_v1` 内部满足的义务
+  也不需要邮件，不计入应发集合。候选按付款邮件完成终点落窗，
   settled_at 可以早于七天；incomplete 独立枚举全部结算场次的未完成付款集合。
 - 买家至卖方：首次有效付款 proof_observed_at → 卖方货款发送证明。
   main 直接取 seller_payout 的付款前置；isekai 先经 winner_equipment_handoff 的
