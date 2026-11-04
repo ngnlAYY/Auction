@@ -166,7 +166,7 @@ Worker 引用的敏感 TOML 根字段 `backup_r2_access_key_id` 与 `backup_r2_s
 | --- | --- |
 | `[listener]` | `mode = "tcp"`（`address`，默认 Public `127.0.0.1:8090`、Admin `127.0.0.1:8091`）或 `mode = "unix"`（`runtime_directory`、`socket_path`、`group`）。Unix 运行目录及其祖先必须由 root 或运行账号拥有、禁止 group/other 写入、无符号链接 |
 | `[http_security]` | origin allowlist（`allowed_origins_enabled`、`allowed_origins` 精确 origin，最多 16 个）、登录/写请求限流与窗口、`cookie_secure`（生产必须 true）、请求超时、`trusted_proxy_cidrs`（最多 64 个规范 CIDR）、`trusted_unix_proxy`（仅 Unix listener） |
-| `[session]` | Public：`max_public_sessions`（默认 5）。Admin：`idle_ttl_seconds`（默认 900）、`absolute_ttl_seconds`（默认 28800） |
+| `[session]` | Public：`max_public_sessions`（默认 10；满额登录注销最久未活动的有效会话）。Admin：`idle_ttl_seconds`（默认 900）、`absolute_ttl_seconds`（默认 28800） |
 | `[tracing]` | OTLP/HTTP 导出：开关、endpoint、批量与超时、队列容量、采样比例（百万分率） |
 | `[realtime]`（Public） | `consumer_key`（每个实例唯一）、轮询间隔、每页流数与事件数、每连接缓冲 |
 

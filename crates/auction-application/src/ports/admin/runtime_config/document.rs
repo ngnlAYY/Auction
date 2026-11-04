@@ -147,13 +147,13 @@ pub struct AdminRuntimeSessionConfig {
     pub idle_ttl_seconds: u64,
     /// 会话绝对过期秒数；省略时沿用旧版 Admin 的 28800 秒。
     pub absolute_ttl_seconds: u64,
-    /// 单个公开用户允许的最大并发会话数；省略时为 5 个。
+    /// 单个公开用户允许的最大并发会话数；省略时为 10 个。
     pub max_public_sessions: u32,
 }
 
 impl Default for AdminRuntimeSessionConfig {
     fn default() -> Self {
-        Self { idle_ttl_seconds: 900, absolute_ttl_seconds: 28_800, max_public_sessions: 5 }
+        Self { idle_ttl_seconds: 900, absolute_ttl_seconds: 28_800, max_public_sessions: 10 }
     }
 }
 

@@ -200,8 +200,8 @@ trusted_unix_proxy = false
 idle_ttl_seconds = 900
 # 可选：绝对过期秒数，默认沿用旧版 Admin 的 28800，不能小于空闲过期时间。
 absolute_ttl_seconds = 28800
-# 可选：单个公开用户允许的最大并发会话数，默认 5。
-max_public_sessions = 5
+# 可选：单个公开用户允许的最大并发会话数，默认 10；满额登录注销最久未活动的有效会话。
+max_public_sessions = 10
 
 # 可选区块：tracing 导出参数；省略整个区块时关闭导出。
 [tracing]

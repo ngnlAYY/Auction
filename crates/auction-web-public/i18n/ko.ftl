@@ -368,6 +368,8 @@ session-menu-label = 계정 세션
 session-login = 로그인
 logout = 로그아웃
 logout-error = 데이터를 불러오지 못했어요 — 자동으로 다시 시도해요.
+session-ended-elsewhere = 이 계정이 다른 기기에서 로그인되어 현재 세션이 종료되었습니다.
+session-ended-relogin = 원래 로그인 키로 다시 로그인
 
 session-duration-title = 로그인 유지 기간
 session-duration-permanent = 무기한(기본값)

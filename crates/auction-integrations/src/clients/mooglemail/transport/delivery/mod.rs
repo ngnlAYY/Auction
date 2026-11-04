@@ -169,7 +169,9 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
             // 永久留在 pending。
             _ => return true,
         };
-        world.map_or(true, |world| self.credentials.available(world))
+        world.map_or(true, |world| {
+            self.credentials.available(world) && self.client.permits_write(world)
+        })
     }
 
     fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_> {
