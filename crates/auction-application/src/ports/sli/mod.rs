@@ -12,16 +12,7 @@ pub const SLI_CANDIDATE_LIMIT: usize = 10_000;
 pub const SLI_SLOW_PROXY_FLOW: &str = "slow_proxy_execution";
 /// 尚缺窗口候选索引的历史流程；不得导出伪造的零分位。
 /// 迁移 `000077` 只提供候选索引；派生查询与证明核验实现前不得从此列表移除。
-pub const SLI_AWAITING_INDEX: [&str; 8] = [
-    "register_key",
-    "outbid_deadline_margin",
-    "settlement_first_payment_mail",
-    "settlement_last_payment_mail",
-    "buyer_payment_to_seller_payout",
-    "submission_take",
-    "submission_rejection_notice",
-    SLI_SLOW_PROXY_FLOW,
-];
+pub const SLI_AWAITING_INDEX: [&str; 0] = [];
 
 /// 指标支持的固定世界集合。
 #[derive(Debug, Clone, Copy)]
@@ -86,6 +77,132 @@ pub struct SliPending {
     pub oldest_seconds: f64,
 }
 
+/// 历史窗口 SLI 的固定流程闭集。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliFlow {
+    RegisterKey,
+    SettlementFirstPaymentMail,
+    SettlementLastPaymentMail,
+    BuyerPaymentToSellerPayout,
+    SubmissionTake,
+    SubmissionRejectionNotice,
+    SlowProxyExecution,
+}
+
+impl SliFlow {
+    pub const ALL: [Self; 7] = [
+        Self::RegisterKey,
+        Self::SettlementFirstPaymentMail,
+        Self::SettlementLastPaymentMail,
+        Self::BuyerPaymentToSellerPayout,
+        Self::SubmissionTake,
+        Self::SubmissionRejectionNotice,
+        Self::SlowProxyExecution,
+    ];
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::RegisterKey => 0,
+            Self::SettlementFirstPaymentMail => 1,
+            Self::SettlementLastPaymentMail => 2,
+            Self::BuyerPaymentToSellerPayout => 3,
+            Self::SubmissionTake => 4,
+            Self::SubmissionRejectionNotice => 5,
+            Self::SlowProxyExecution => 6,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::RegisterKey => "register_key",
+            Self::SettlementFirstPaymentMail => "settlement_first_payment_mail",
+            Self::SettlementLastPaymentMail => "settlement_last_payment_mail",
+            Self::BuyerPaymentToSellerPayout => "buyer_payment_to_seller_payout",
+            Self::SubmissionTake => "submission_take",
+            Self::SubmissionRejectionNotice => "submission_rejection_notice",
+            Self::SlowProxyExecution => "slow_proxy_execution",
+        }
+    }
+}
+
+/// 一个流程在七天窗口内的有界分位与覆盖结果。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SliFlowWindow {
+    pub samples: u64,
+    pub p50: Option<f64>,
+    pub p95: Option<f64>,
+    pub p99: Option<f64>,
+    /// 已识别但无法归入完整观察的候选数；不得当作零延迟。
+    pub unknown: u64,
+    /// 已识别但窗口或关联不完整的候选数。
+    pub incomplete: u64,
+    /// 未完成群组中最老者的秒数；没有已定义群组时为空。
+    pub oldest_incomplete_seconds: Option<f64>,
+    /// `incomplete`/`oldest` 是否有完整候选路径；false 表示覆盖不可用，不得按零解释。
+    pub incomplete_available: bool,
+}
+
+/// 提醒渠道闭集。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliOutbidChannel {
+    Mm,
+    Pm,
+}
+
+impl SliOutbidChannel {
+    pub const ALL: [Self; 2] = [Self::Mm, Self::Pm];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Mm => "mm",
+            Self::Pm => "pm",
+        }
+    }
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Mm => 0,
+            Self::Pm => 1,
+        }
+    }
+}
+
+/// 截止状态闭集；只有 final 用于 D4 验收。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliDeadlineState {
+    Provisional,
+    Final,
+}
+
+impl SliDeadlineState {
+    pub const ALL: [Self; 2] = [Self::Provisional, Self::Final];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Provisional => "provisional",
+            Self::Final => "final",
+        }
+    }
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Provisional => 0,
+            Self::Final => 1,
+        }
+    }
+}
+
+/// 提醒送达时距有效截止的余量窗口。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SliOutbidMargin {
+    pub samples: u64,
+    pub p01: Option<f64>,
+    pub p05: Option<f64>,
+    pub non_positive: u64,
+    /// 已成功发送但缺强 Send 证明的提醒数；不进入分位。
+    pub unknown: u64,
+}
+
 /// 一轮只读事务内取得的数值快照；不含任何玩家或业务主键。
 #[derive(Debug, Clone)]
 pub struct SliSnapshot {
@@ -95,6 +212,11 @@ pub struct SliSnapshot {
     pub final_bids: [[SliBidCapacity; SliBidKind::ALL.len()]; SliWorld::ALL.len()],
     /// 每个世界当前尚留在 lot 上的到期慢速代理。
     pub slow_pending: [SliPending; SliWorld::ALL.len()],
+    /// 槽位依次对应 SliWorld::ALL 与 SliFlow::ALL。
+    pub windows: [[SliFlowWindow; SliFlow::ALL.len()]; SliWorld::ALL.len()],
+    /// 槽位依次对应 SliWorld、SliOutbidChannel 与 SliDeadlineState。
+    pub outbid: [[[SliOutbidMargin; SliDeadlineState::ALL.len()]; SliOutbidChannel::ALL.len()];
+        SliWorld::ALL.len()],
 }
 
 impl SliSnapshot {
