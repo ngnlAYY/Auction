@@ -1,0 +1,216 @@
+//! 用真实 HTTP 客户端对 W6.3 回环替身执行受限邮件读取。
+
+// 测试夹具的固定值失败即测试失败；不对测试装配伪造回退。
+#![allow(clippy::expect_used)]
+
+use auction_integrations::mooglemail::{
+    MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailErrorCategory,
+    MoogleMailParser, MoogleMailWorld,
+};
+use auction_test_support::mooglemail::{Fault, MailDouble, UnsupportedService};
+use std::{collections::HashSet, time::Duration};
+
+fn client(server: &MailDouble) -> MoogleMailClient {
+    MoogleMailClient::with_config(MoogleMailClientConfig {
+        endpoint: server.endpoint(),
+        maximum_response_bytes: 8 * 1024 * 1024,
+        minimum_request_interval: Duration::from_millis(1),
+        request_timeout: Duration::from_millis(200),
+    })
+    .expect("loopback client")
+}
+fn cookie() -> MoogleMailCookie {
+    MoogleMailCookie::new("ipb_member_id=fixture; ipb_pass_hash=fixture").expect("fixture cookie")
+}
+
+#[tokio::test]
+async fn reads_captured_mail_routes_and_details() {
+    let server = MailDouble::start().await.expect("loopback server");
+    let client = client(&server);
+    let parser = MoogleMailParser;
+    let cookie = cookie();
+    for world in [MoogleMailWorld::Main, MoogleMailWorld::Isekai] {
+        let bytes = client.get(&client.inbox_page(world, 0).unwrap(), &cookie).await.unwrap();
+        assert!(
+            parser
+                .scan_inbox_page(&bytes, world, 0, &mut HashSet::new())
+                .unwrap()
+                .summaries
+                .is_empty()
+        );
+        let bytes = client.get(&client.read_mail_page(world, 0).unwrap(), &cookie).await.unwrap();
+        let read = parser.scan_read_mail_page(&bytes, world, 0, &mut HashSet::new()).unwrap();
+        assert!(!read.summaries.is_empty());
+        if world == MoogleMailWorld::Main {
+            let summary =
+                read.summaries.iter().find(|row| row.external_mail_id == "3125357").unwrap();
+            let bytes =
+                client.get(&client.detail(world, "3125357").unwrap(), &cookie).await.unwrap();
+            assert_eq!(parser.parse_detail(&bytes, summary).unwrap().external_mail_id, "3125357");
+        }
+        let bytes = client.get(&client.sent_page(world, 0).unwrap(), &cookie).await.unwrap();
+        let sent = parser.scan_sent_page(&bytes, world, 0, &mut HashSet::new()).unwrap();
+        assert!(!sent.summaries.is_empty());
+        if world == MoogleMailWorld::Main {
+            for mid in ["3125366", "3125364", "3125344", "3125305", "3125298"] {
+                let summary =
+                    sent.summaries.iter().find(|row| row.external_mail_id == mid).unwrap();
+                let bytes =
+                    client.get(&client.sent_detail(world, mid).unwrap(), &cookie).await.unwrap();
+                assert_eq!(
+                    parser
+                        .parse_sent_detail(&bytes, summary, summary.sent_at)
+                        .unwrap()
+                        .external_mail_id,
+                    mid
+                );
+            }
+        }
+        let bytes = client.get(&client.compose(world).unwrap(), &cookie).await.unwrap();
+        parser.parse_compose_state(&bytes, world).unwrap();
+    }
+    for page in [1, 2] {
+        let bytes = client
+            .get(&client.read_mail_page(MoogleMailWorld::Main, page).unwrap(), &cookie)
+            .await
+            .unwrap();
+        assert_eq!(
+            parser
+                .scan_read_mail_page(&bytes, MoogleMailWorld::Main, page, &mut HashSet::new())
+                .unwrap()
+                .summaries
+                .len(),
+            15
+        );
+    }
+    for target in [
+        client.detail(MoogleMailWorld::Main, "0").unwrap(),
+        client.sent_detail(MoogleMailWorld::Main, "0").unwrap(),
+    ] {
+        let bytes = client.get(&target, &cookie).await.unwrap();
+        assert_eq!(bytes, include_bytes!("fixtures/w6_3/inboxdetail-missing.html"));
+    }
+}
+
+#[tokio::test]
+async fn classifies_account_busy_cookie_invalid_timeout_and_drift() {
+    let server = MailDouble::start().await.unwrap();
+    let client = client(&server);
+    let target = client.inbox_page(MoogleMailWorld::Main, 0).unwrap();
+    for (fault, expected) in [
+        (Fault::AccountBusy, MoogleMailErrorCategory::AccountBusy),
+        (Fault::CookieInvalid, MoogleMailErrorCategory::SessionExpired),
+        (Fault::Timeout(Duration::from_secs(1)), MoogleMailErrorCategory::RemoteTemporary),
+    ] {
+        server.set_fault(Some(fault));
+        assert_eq!(client.get(&target, &cookie()).await.unwrap_err().category, expected);
+    }
+    server.set_fault(Some(Fault::ProtocolDrift));
+    let bytes = client.get(&target, &cookie()).await.unwrap();
+    assert_eq!(
+        MoogleMailParser
+            .scan_inbox_page(&bytes, MoogleMailWorld::Main, 0, &mut HashSet::new())
+            .unwrap_err()
+            .category,
+        MoogleMailErrorCategory::ProtocolDrift
+    );
+    for service in
+        [UnsupportedService::Forum, UnsupportedService::Battle, UnsupportedService::Login]
+    {
+        assert!(server.require_fixture(service).is_err());
+    }
+}
+
+#[tokio::test]
+async fn reading_moves_unread_receipt_and_sent_removal_is_consistent() {
+    let server = MailDouble::start().await.unwrap();
+    server.set_return_receipt_unread(true);
+    let client = client(&server);
+    let cookie = cookie();
+    let world = MoogleMailWorld::Main;
+    let bytes = client.get(&client.inbox_page(world, 0).unwrap(), &cookie).await.unwrap();
+    let inbox = MoogleMailParser.scan_inbox_page(&bytes, world, 0, &mut HashSet::new()).unwrap();
+    assert_eq!(inbox.summaries.len(), 1);
+    let bytes = client.get(&client.read_mail_page(world, 0).unwrap(), &cookie).await.unwrap();
+    assert_eq!(
+        MoogleMailParser
+            .scan_read_mail_page(&bytes, world, 0, &mut HashSet::new())
+            .unwrap()
+            .summaries
+            .len(),
+        14
+    );
+    client.get(&client.detail(world, "3125357").unwrap(), &cookie).await.unwrap();
+    let bytes = client.get(&client.inbox_page(world, 0).unwrap(), &cookie).await.unwrap();
+    assert!(
+        MoogleMailParser
+            .scan_inbox_page(&bytes, world, 0, &mut HashSet::new())
+            .unwrap()
+            .summaries
+            .is_empty()
+    );
+    server.remove_sent("3125366");
+    let bytes = client.get(&client.sent_page(world, 0).unwrap(), &cookie).await.unwrap();
+    assert_eq!(
+        MoogleMailParser
+            .scan_sent_page(&bytes, world, 0, &mut HashSet::new())
+            .unwrap()
+            .summaries
+            .len(),
+        14
+    );
+    let bytes = client.get(&client.sent_detail(world, "3125366").unwrap(), &cookie).await.unwrap();
+    assert!(MoogleMailParser.parse_action_state(&bytes, world).is_err());
+    let bytes = client.get(&client.sent_page(world, 0).unwrap(), &cookie).await.unwrap();
+    for summary in
+        MoogleMailParser.scan_sent_page(&bytes, world, 0, &mut HashSet::new()).unwrap().summaries
+    {
+        server.remove_sent(&summary.external_mail_id);
+    }
+    let bytes = client.get(&client.sent_page(world, 0).unwrap(), &cookie).await.unwrap();
+    assert!(
+        MoogleMailParser
+            .scan_sent_page(&bytes, world, 0, &mut HashSet::new())
+            .unwrap()
+            .summaries
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn write_faults_preserve_unknown_and_explicit_rejections() {
+    use auction_integrations::mooglemail::{
+        MoogleMailForm, MoogleMailMessageFields, MoogleMailSendResponseFailure,
+    };
+    let server = MailDouble::start().await.unwrap();
+    let client = client(&server);
+    let cookie = cookie();
+    let world = MoogleMailWorld::Main;
+    let target = client.compose(world).unwrap();
+    let bytes = client.get(&target, &cookie).await.unwrap();
+    let state = MoogleMailParser.parse_compose_state(&bytes, world).unwrap();
+    let fields = MoogleMailMessageFields {
+        recipient: "FixtureRecipient".into(),
+        subject: "fixture".into(),
+        body: "fixture".into(),
+    };
+    for fault in [Fault::WriteResultUnknown, Fault::InsufficientPostage, Fault::MissingRecipient] {
+        server.set_fault(Some(fault));
+        let form = MoogleMailForm::send(state.token(), &fields).unwrap();
+        let bytes = client.post(&target, &cookie, form).await.unwrap();
+        assert!(MoogleMailParser.prove_send_completed(&bytes, world).is_err());
+        let failure = MoogleMailParser.classify_send_response_failure(&bytes, world).unwrap();
+        match fault {
+            Fault::WriteResultUnknown => assert!(failure.is_none()),
+            Fault::InsufficientPostage => {
+                assert!(matches!(failure, Some(MoogleMailSendResponseFailure::Rejected)))
+            }
+            Fault::MissingRecipient => assert!(matches!(
+                failure,
+                Some(MoogleMailSendResponseFailure::RecipientNotFound { .. })
+            )),
+            _ => unreachable!(),
+        }
+    }
+    assert_eq!(server.write_requests(), 3);
+}

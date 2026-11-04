@@ -331,6 +331,7 @@ version = "0.1.0"
 dependencies = [
  "auction-application",
  "auction-domain",
+ "auction-test-support",
  "base64 0.23.1",
  "chrono",
  "object_store",
@@ -476,6 +477,17 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "auction-test-support"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "scraper",
+ "thiserror 2.0.21",
+ "tokio",
+ "url",
 ]
 
 [[package]]
