@@ -4,6 +4,8 @@ use super::super::*;
 
 type MailProcessorPorts = (Arc<dyn MailProcessor>, MoogleMailDeliveryTransport);
 
+// 装配根逐项注入显式依赖；参数数量来自配置/存储/外部客户端的清晰边界，不引入仅用于传参的容器。
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build_processor_and_delivery(
     config: &AppConfig,
     mail_config: &auction_config::MoogleMailWorkerConfig,
@@ -12,6 +14,7 @@ pub(super) fn build_processor_and_delivery(
     client: &MoogleMailClient,
     credentials: &MoogleMailCredentialSet,
     sent_baseline_observer: Arc<dyn auction_application::SentBaselineObserver>,
+    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
 ) -> anyhow::Result<MailProcessorPorts> {
     match store.as_ref() {
         DatabaseStore::Postgres(postgres_store) => {
@@ -86,6 +89,10 @@ pub(super) fn build_processor_and_delivery(
                     world_configs.iter().map(|world| world.world_id.clone()).collect(),
                     MailProcessorConfig {
                         start_price: mail_config.start_price.unwrap_or(50_000),
+                        rekey_enabled: mail_config.rekey_enabled,
+                        account_reply_window_seconds: mail_config.account_reply_window_seconds,
+                        explanation_window_seconds: mail_config.explanation_mail_window_seconds,
+                        explanation_limit: mail_config.explanation_mail_limit,
                         equipment_filter: MailEquipmentFilter {
                             enabled: mail_config.equipment_filter.enabled,
                             qualities: mail_config.equipment_filter.qualities.clone(),
@@ -108,7 +115,8 @@ pub(super) fn build_processor_and_delivery(
                     users,
                     Arc::new(SystemClock),
                 )
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                .map_err(|error| anyhow::Error::msg(error.to_string()))?
+                .with_external_metrics(external_metrics),
             );
             Ok((processor, delivery_transport))
         }

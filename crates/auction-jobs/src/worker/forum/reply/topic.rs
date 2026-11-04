@@ -9,6 +9,11 @@ use auction_application::{
 use super::*;
 use crate::worker::diagnostics;
 
+/// Final 阶段的最短导入间隔；截止前后都保持该节奏直到拍卖离开 live/final。
+const FINAL_SCAN_MINIMUM_INTERVAL_SECONDS: i64 = 5;
+/// Final 阶段按最早 lot 有效截止剩余时间收紧间隔的除数。
+const FINAL_SCAN_REMAINING_DIVISOR: i32 = 6;
+
 #[tracing::instrument(
 
     skip_all,
@@ -26,11 +31,19 @@ pub(super) async fn process_topic(
     clock: &dyn auction_application::Clock,
     poll_interval: chrono::Duration,
     write_progress: &ForumWriteProgress,
-) -> Result<(), ApplicationError> {
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApplicationError> {
     let scan_started = std::time::Instant::now();
-    let preview = runtime.reader.fetch_topic(topic.world, topic.thread_id.clone()).await?;
+    // 游标只是已导入的最高楼层；固定楼层页仍必须重读，游标页再核对一次帖子身份。
+    let cursor = runtime.store.reply_cursor(topic.auction_id, topic.thread_id.clone()).await?;
+    let fixed_through_post_number =
+        u32::try_from(topic.system_log_post_number()).unwrap_or(u32::MAX);
+    let scan = runtime
+        .reader
+        .fetch_topic_since(topic.world, topic.thread_id.clone(), cursor, fixed_through_post_number)
+        .await?;
+    let auction_application::ForumTopicScan { preview, post_numbers, mode: _ } = scan;
     validate_fixed_layout(&topic, &preview)?;
-    // 观测窗口只覆盖完整远端读取；导入点是命令账本首次插入得到确认，不是竞价最终裁决。
+    // 观测窗口覆盖本轮实际读取的分页；增量扫描看不到游标页之前的旧帖，但那部分已有历史窗口。
     let scan_observed = std::time::Instant::now();
     let delay_guard = runtime.reply_delay.begin_scan(
         topic.auction_id,
@@ -40,13 +53,15 @@ pub(super) async fn process_topic(
         scan_observed,
         preview.posts.iter().map(|post| post.post.id.clone()),
     );
-    // 当前顺序仅用于本轮扫描边界；删帖会重新编号，稳定命令身份始终由 post_id 与原负载核对。
-    // preview 持有整轮快照；索引只借用 ID，避免每次扫描再逐帖分配相同字符串。
+    // 楼层号来自分页偏移而不是本轮下标；增量扫描可能跳过中间分页。
+    // 删帖可使当前读数下降，稳定命令身份始终由 post_id 与原负载核对。
     let post_numbers = preview
         .posts
         .iter()
-        .enumerate()
-        .map(|(index, post)| (post.post.id.as_str(), index + 2))
+        .zip(post_numbers)
+        .map(|(post, post_number)| {
+            (post.post.id.as_str(), usize::try_from(post_number).unwrap_or(usize::MAX))
+        })
         .collect::<HashMap<_, _>>();
     let fixed_floor = topic.system_log_post_number();
     let mut system_entries = warning_entries(&topic, &preview, &post_numbers);
@@ -282,7 +297,7 @@ pub(super) async fn process_topic(
     }
     let scan_completed = command_error.is_none();
     delay_guard.finish(scan_completed);
-    refresh_fixed_posts(
+    let next_scan_at = refresh_fixed_posts(
         runtime,
         topic,
         TopicScanProgress { processed_through_post_number, system_entries, scan_completed },
@@ -291,7 +306,7 @@ pub(super) async fn process_topic(
         write_progress,
     )
     .await?;
-    command_error.map_or(Ok(()), Err)
+    command_error.map_or(Ok(next_scan_at), Err)
 }
 
 fn requires_bidder_identity(post: &auction_application::AdminForumBidPost) -> bool {
@@ -375,7 +390,7 @@ async fn refresh_fixed_posts(
     clock: &dyn auction_application::Clock,
     poll_interval: chrono::Duration,
     write_progress: &ForumWriteProgress,
-) -> Result<(), ApplicationError> {
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApplicationError> {
     let TopicScanProgress { processed_through_post_number, system_entries, scan_completed } = scan;
     let processed_through_post_number_i32 =
         i32::try_from(processed_through_post_number).map_err(|error| {
@@ -479,7 +494,7 @@ async fn refresh_fixed_posts(
     if !catalog_changed && !continuation_changed && !system_log_changed {
         if !scan_completed {
             if !floor_changed {
-                return Ok(());
+                return Ok(None);
             }
             let updated_at = clock.now();
             runtime
@@ -493,15 +508,16 @@ async fn refresh_fixed_posts(
                 )
                 .await?;
             write_progress.confirm_write();
-            return Ok(());
+            return Ok(None);
         }
-        let (updated_at, next_scan_at) = completed_scan_times(clock, poll_interval)?;
+        let (updated_at, next_scan_at) =
+            completed_scan_times(runtime, &topic, clock, poll_interval).await?;
         runtime
             .store
             .finish_topic_scan(topic, processed_through_post_number_i32, updated_at, next_scan_at)
             .await?;
         write_progress.confirm_write();
-        return Ok(());
+        return Ok(Some(next_scan_at));
     }
     if catalog_changed && !reconciliation_only && confirmed_terminal_version.is_none() {
         reconcile_or_edit_fixed_post(
@@ -541,9 +557,9 @@ async fn refresh_fixed_posts(
             )
             .await?;
         write_progress.confirm_write();
-        return Ok(());
+        return Ok(None);
     }
-    let next_scan_at = next_scan_at(updated_at, poll_interval)?;
+    let next_scan_at = next_scan_at(runtime, &topic, updated_at, poll_interval).await?;
     runtime
         .store
         .record_fixed_posts_update(
@@ -556,7 +572,7 @@ async fn refresh_fixed_posts(
         )
         .await?;
     write_progress.confirm_write();
-    Ok(())
+    Ok(Some(next_scan_at))
 }
 
 async fn reconcile_or_edit_fixed_post(
@@ -612,22 +628,63 @@ async fn reconcile_or_edit_fixed_post(
     Ok(())
 }
 
-fn completed_scan_times(
+async fn completed_scan_times(
+    runtime: &ForumReplyRuntime,
+    topic: &auction_application::ForumReplyTopic,
     clock: &dyn auction_application::Clock,
     poll_interval: chrono::Duration,
 ) -> Result<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>), ApplicationError> {
     let completed_at = clock.now();
-    let next_scan_at = next_scan_at(completed_at, poll_interval)?;
+    let next_scan_at = next_scan_at(runtime, topic, completed_at, poll_interval).await?;
     Ok((completed_at, next_scan_at))
 }
 
-fn next_scan_at(
+/// 计算下一次导入时刻；Final 阶段按最早 lot 有效截止收紧间隔。
+async fn next_scan_at(
+    runtime: &ForumReplyRuntime,
+    topic: &auction_application::ForumReplyTopic,
     completed_at: chrono::DateTime<chrono::Utc>,
     poll_interval: chrono::Duration,
 ) -> Result<chrono::DateTime<chrono::Utc>, ApplicationError> {
+    let interval = if topic.reply_phase == auction_application::ForumReplyPhase::Final {
+        match runtime.store.earliest_live_lot_deadline(topic.auction_id).await? {
+            Some(earliest_deadline) => {
+                final_scan_interval(completed_at, earliest_deadline, poll_interval)
+            }
+            None => poll_interval,
+        }
+    } else {
+        poll_interval
+    };
     completed_at
-        .checked_add_signed(poll_interval)
+        .checked_add_signed(interval)
         .ok_or_else(|| repository_error("论坛下一次扫描时间超出可表示范围"))
+}
+
+/// Final 阶段把导入间隔收紧到“最早 lot 有效截止剩余时间 / 6”，
+/// 并夹在最短间隔与常规轮询间隔之间。截止已过时固定为最短间隔，
+/// 直到拍卖离开 live/final；这里只改变读取节奏，不改变任何裁决时刻。
+fn final_scan_interval(
+    completed_at: chrono::DateTime<chrono::Utc>,
+    earliest_deadline: chrono::DateTime<chrono::Utc>,
+    poll_interval: chrono::Duration,
+) -> chrono::Duration {
+    let minimum = chrono::Duration::seconds(FINAL_SCAN_MINIMUM_INTERVAL_SECONDS);
+    if poll_interval <= minimum {
+        return poll_interval;
+    }
+    // 负数（已过截止）也按最短间隔处理，不能给远端负延迟。
+    let remaining = earliest_deadline
+        .signed_duration_since(completed_at)
+        .checked_div(FINAL_SCAN_REMAINING_DIVISOR)
+        .unwrap_or(minimum);
+    if remaining < minimum {
+        minimum
+    } else if remaining > poll_interval {
+        poll_interval
+    } else {
+        remaining
+    }
 }
 
 fn runtime_warning(
@@ -688,6 +745,47 @@ fn target_map(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn final_scan_interval_tightens_near_earliest_deadline() {
+        let completed_at = chrono::DateTime::parse_from_rfc3339("2026-11-04T10:00:00Z")
+            .unwrap_or_else(|error| panic!("时间应合法: {error:?}"))
+            .with_timezone(&chrono::Utc);
+        let poll = chrono::Duration::minutes(5);
+
+        // 剩余 60 分钟时仍受常规轮询间隔限制。
+        let far = completed_at + chrono::Duration::minutes(60);
+        assert_eq!(final_scan_interval(completed_at, far, poll), poll);
+
+        // 剩余 60 秒时按 1/6 收紧到 10 秒。
+        let near = completed_at + chrono::Duration::seconds(60);
+        assert_eq!(final_scan_interval(completed_at, near, poll), chrono::Duration::seconds(10));
+
+        // 剩余不足 30 秒时收敛到最短间隔，而不是继续线性缩小。
+        let imminent = completed_at + chrono::Duration::seconds(12);
+        assert_eq!(
+            final_scan_interval(completed_at, imminent, poll),
+            chrono::Duration::seconds(FINAL_SCAN_MINIMUM_INTERVAL_SECONDS)
+        );
+
+        // 截止已过仍保持最短间隔，等到拍卖离开 live/final。
+        let past = completed_at - chrono::Duration::minutes(3);
+        assert_eq!(
+            final_scan_interval(completed_at, past, poll),
+            chrono::Duration::seconds(FINAL_SCAN_MINIMUM_INTERVAL_SECONDS)
+        );
+    }
+
+    #[test]
+    fn final_scan_interval_never_exceeds_poll_interval() {
+        let completed_at = chrono::DateTime::parse_from_rfc3339("2026-11-04T10:00:00Z")
+            .unwrap_or_else(|error| panic!("时间应合法: {error:?}"))
+            .with_timezone(&chrono::Utc);
+        // 轮询间隔本身低于最短间隔时不放大读取频率。
+        let short_poll = chrono::Duration::seconds(3);
+        let near = completed_at + chrono::Duration::seconds(6);
+        assert_eq!(final_scan_interval(completed_at, near, short_poll), short_poll);
+    }
 
     #[test]
     fn commandless_post_does_not_require_bidder_identity() {

@@ -40,7 +40,27 @@ impl ForumWorld {
     }
 }
 
-/// 邮件物理请求操作；与既有安全错误分类的 operation 字符串保持一致。
+/// MoogleMail 说明信预算的稳定类别标签。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MailNoticeClass {
+    /// 注册或登录 key 轮换的账号回信。
+    AccountReply,
+    /// 拒收说明、换绑结果与论坛回执等发件人说明信。
+    Explanation,
+}
+
+impl MailNoticeClass {
+    pub const ALL: [Self; 2] = [Self::AccountReply, Self::Explanation];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::AccountReply => "account_reply",
+            Self::Explanation => "explanation",
+        }
+    }
+}
+
+/// MoogleMail 物理请求操作；与既有安全错误分类的 operation 字符串保持一致。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MailOperation {
     Inbox,
@@ -435,16 +455,18 @@ impl MailBudget {
     }
 }
 
-/// 主题扫描阶段；本批只记录全量扫描。
+/// 主题扫描阶段：完整读取或按游标增量读取。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForumTopicScanMode {
     Full,
+    Incremental,
 }
 
 impl ForumTopicScanMode {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Full => "full",
+            Self::Incremental => "incremental",
         }
     }
 }
@@ -771,5 +793,10 @@ pub enum ExternalMetricsEvent {
         phase: ReplyDelayPhase,
         method: ReplyDelayMethod,
         outcome: ReplyDelaySampleOutcome,
+    },
+    /// 说明信或账号回信因 24 小时预算被抑制；入站命令与审计仍已记录。
+    MailNoticeSuppressed {
+        world: MailWorld,
+        class: MailNoticeClass,
     },
 }

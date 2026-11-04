@@ -71,10 +71,12 @@ pub(super) async fn persist_user_mail_result(
         MailUserResultCode::Registered
         | MailUserResultCode::Recovered
         | MailUserResultCode::Rebound
+        | MailUserResultCode::Rekeyed
         | MailUserResultCode::Unchanged => "success",
         MailUserResultCode::Blacklisted
         | MailUserResultCode::IdentityConflict
-        | MailUserResultCode::InvalidKey => "rejected",
+        | MailUserResultCode::InvalidKey
+        | MailUserResultCode::NotRegistered => "rejected",
     };
     sqlx::query(
         "INSERT INTO public.audit_records
@@ -131,6 +133,10 @@ fn parse_result_code(
         (MailUserCommandKind::Rebind, "identity_conflict") => MailUserResultCode::IdentityConflict,
         (MailUserCommandKind::Rebind, "unchanged") => MailUserResultCode::Unchanged,
         (MailUserCommandKind::Rebind, "invalid_key") => MailUserResultCode::InvalidKey,
+        (MailUserCommandKind::Rekey, "rekeyed") => MailUserResultCode::Rekeyed,
+        (MailUserCommandKind::Rekey, "blacklisted") => MailUserResultCode::Blacklisted,
+        (MailUserCommandKind::Rekey, "identity_conflict") => MailUserResultCode::IdentityConflict,
+        (MailUserCommandKind::Rekey, "not_registered") => MailUserResultCode::NotRegistered,
         _ => return Err(repository_error("Users MoogleMail 结果码损坏")),
     };
     Ok(result)
@@ -169,6 +175,19 @@ pub(super) fn validate_rebind_command(
         || command.now.timestamp_nanos_opt().is_none()
     {
         return Err(repository_error("Users MoogleMail 换绑参数无效"));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_rekey_write(write: &MailUserRekeyWrite) -> Result<(), ApplicationError> {
+    if write.user_id.is_nil()
+        || write.public_key_hash == [0; 32]
+        || write.command.command_id.is_nil()
+        || write.command.request_hash.as_bytes() == [0; 32]
+        || !valid_identity(&write.command.username)
+        || write.command.now.timestamp_nanos_opt().is_none()
+    {
+        return Err(repository_error("Users MoogleMail 轮换参数无效"));
     }
     Ok(())
 }

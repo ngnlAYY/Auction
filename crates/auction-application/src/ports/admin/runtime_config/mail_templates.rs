@@ -25,6 +25,10 @@ pub struct AdminRuntimeMailTemplatesConfig {
     pub register_result: String,
     /// 重绑结果通知；要求 `{result_code}`，可选 `{username}`。
     pub rebind_result: String,
+    /// 登录 key 自助轮换成功时发送新 key；要求 `{login_key}`、`{username}`。
+    pub rekey_key: String,
+    /// 轮换失败通知；要求 `{result_code}`，可选 `{username}`。
+    pub rekey_result: String,
     /// 主世界竞得装备的货到付款正文；要求 `{item_name}`、`{amount}`、`{reference}`，
     /// 可选 `{price_breakdown}`，旧载荷没有冻结结算明细时该块为空。
     pub settlement_winner_equipment_cod: String,
@@ -116,6 +120,30 @@ impl Default for AdminRuntimeMailTemplatesConfig {
                 "Player: {username}\n",
                 "Result code: {result_code}\n",
                 "\n",
+                "Contact the auction operator if you need help\n",
+                "understanding the result.",
+            )
+            .to_owned(),
+            rekey_key: concat!(
+                "Your HV-Auction login key has been rotated.\n",
+                "\n",
+                "Player: {username}\n",
+                "\n",
+                "New login key:\n",
+                "{login_key}\n",
+                "\n",
+                "All previous sessions have been signed out.\n",
+                "Keep this key private.",
+            )
+            .to_owned(),
+            rekey_result: concat!(
+                "Your login key rotation request could not be completed.\n",
+                "\n",
+                "Player: {username}\n",
+                "Result code: {result_code}\n",
+                "\n",
+                "Send a message with the subject \"register\" first\n",
+                "if you have not registered yet.\n",
                 "Contact the auction operator if you need help\n",
                 "understanding the result.",
             )
@@ -224,7 +252,7 @@ impl MailTemplateError {
 
 impl AdminRuntimeMailTemplatesConfig {
     /// 按固定闭集顺序返回 `(模板键, 正文)`；键名即 Worker 渲染入口。
-    pub fn entries(&self) -> [(&'static str, &str); 14] {
+    pub fn entries(&self) -> [(&'static str, &str); 16] {
         [
             ("auction_assets_rejected", &self.auction_assets_rejected),
             ("auction_no_attachments", &self.auction_no_attachments),
@@ -233,6 +261,8 @@ impl AdminRuntimeMailTemplatesConfig {
             ("register_key", &self.register_key),
             ("register_result", &self.register_result),
             ("rebind_result", &self.rebind_result),
+            ("rekey_key", &self.rekey_key),
+            ("rekey_result", &self.rekey_result),
             ("settlement_winner_equipment_cod", &self.settlement_winner_equipment_cod),
             ("settlement_payment_carrier", &self.settlement_payment_carrier),
             ("settlement_payment_reminder", &self.settlement_payment_reminder),
@@ -271,7 +301,10 @@ fn placeholder_rule(key: &str) -> (&'static [&'static str], &'static [&'static s
             (&[], &["reason_code", "reason_text", "next_steps", "mail_reference"])
         }
         "register_key" => (&["login_key", "username"], &["login_key", "username"]),
-        "register_result" | "rebind_result" => (&["result_code"], &["result_code", "username"]),
+        "register_result" | "rebind_result" | "rekey_result" => {
+            (&["result_code"], &["result_code", "username"])
+        }
+        "rekey_key" => (&["login_key", "username"], &["login_key", "username"]),
         "settlement_winner_equipment_cod" => (
             &["item_name", "amount", "reference"],
             &["item_name", "amount", "reference", "price_breakdown"],

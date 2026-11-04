@@ -25,6 +25,7 @@ use activation::activate_postgres;
 pub(crate) use common::MailDeliveryTransactionError;
 #[cfg(feature = "postgres")]
 pub(super) use disposition::has_return_intent;
+use outbox::enqueue_within_limit_postgres;
 #[cfg(feature = "postgres")]
 use outbox::{enqueue_postgres, prepare_postgres};
 use validation::validate_command;
@@ -40,6 +41,36 @@ impl MailDeliveryEnqueuer for DatabaseStore {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
                     enqueue_postgres(store.pool(), &command).await.map_err(ApplicationError::from)
+                }
+            }
+        })
+    }
+
+    fn enqueue_within_limit(
+        &self,
+        command: MailDeliveryCommand,
+        limit: auction_application::MailNoticeLimit,
+    ) -> auction_application::ApplicationFuture<'_, auction_application::MailNoticeEnqueue> {
+        Box::pin(async move {
+            validate_command(&command)?;
+            if limit.maximum > 0
+                && !limit.counts(
+                    command
+                        .template
+                        .ok_or(auction_application::MailProcessingError::InvalidDecision)?,
+                )
+            {
+                return Err(auction_application::RepositoryError::Failed(
+                    "回信预算模板集合不包含当前通知".to_owned(),
+                )
+                .into());
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    enqueue_within_limit_postgres(store.pool(), &command, limit)
+                        .await
+                        .map_err(ApplicationError::from)
                 }
             }
         })

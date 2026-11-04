@@ -302,7 +302,7 @@ fn valid_equipment_filter(value: &Value) -> bool {
 }
 
 fn valid_mail_templates(value: &Value) -> bool {
-    const TEMPLATES: [(&str, &[&str], &[&str]); 14] = [
+    const TEMPLATES: [(&str, &[&str], &[&str]); 16] = [
         ("auction_assets_rejected", &[], &[]),
         (
             "auction_equipment_rejected",
@@ -312,6 +312,8 @@ fn valid_mail_templates(value: &Value) -> bool {
         ("auction_no_attachments", &[], &[]),
         ("operations_alert", &["summary"], &["summary"]),
         ("rebind_result", &["result_code"], &["result_code", "username"]),
+        ("rekey_key", &["login_key", "username"], &["login_key", "username"]),
+        ("rekey_result", &["result_code"], &["result_code", "username"]),
         ("register_key", &["login_key", "username"], &["login_key", "username"]),
         ("register_result", &["result_code"], &["result_code", "username"]),
         ("settlement_buyer_refund", &["amount", "reference"], &["amount", "reference"]),

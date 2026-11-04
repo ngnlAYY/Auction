@@ -18,6 +18,8 @@ pub(super) fn processing_code_message(code: &str) -> String {
         "registration_rejected" => t!("admin-mail-result-registration-rejected"),
         "rebind_accepted" => t!("admin-mail-result-rebind-accepted"),
         "rebind_rejected" => t!("admin-mail-result-rebind-rejected"),
+        "rekey_accepted" => t!("admin-mail-result-rekey-accepted"),
+        "rekey_rejected" => t!("admin-mail-result-rekey-rejected"),
         "archived" => t!("admin-mail-result-archived"),
         "settlement_recovery_returned" => t!("admin-mail-result-recovery-returned"),
         "start_price_invalid" => t!("admin-mail-reason-price-invalid"),

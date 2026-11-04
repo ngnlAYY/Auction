@@ -30,6 +30,21 @@ pub(crate) fn validate_mooglemail_worker(
             "diagnostics.directory 必须是非空且不含控制字符的路径",
         ));
     }
+    if !(60..=604_800).contains(&config.account_reply_window_seconds) {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "account_reply_window_seconds 必须位于 60 至 604800",
+        ));
+    }
+    if !(60..=604_800).contains(&config.explanation_mail_window_seconds) {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "explanation_mail_window_seconds 必须位于 60 至 604800",
+        ));
+    }
+    if config.explanation_mail_limit > 100 {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "explanation_mail_limit 必须位于 0 至 100",
+        ));
+    }
     if config.start_price.is_some_and(|value| value <= 0) {
         return Err(ConfigError::InvalidMoogleMailConfig("start_price 覆盖值必须大于零"));
     }

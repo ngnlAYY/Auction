@@ -28,6 +28,8 @@ pub struct PersistentWorker<C> {
     pub delivery_store: Option<Arc<dyn DeliveryWorkStore>>,
     pub delivery_transport: Option<Arc<dyn DeliveryTransport>>,
     pub delivery: DeliveryWorkerRuntimeConfig,
+    /// runtime 文件的周期热读取快照；循环在每个边界读取完整快照。
+    pub hot: WorkerHotRuntime,
     /// 每个启用的 MoogleMail world 都拥有独立的持久化游标和 gateway。
     pub mail_polls: Vec<mail_poll::MailPollRuntime>,
     pub forum: ForumWorkerRuntimeConfig,
@@ -44,4 +46,28 @@ pub struct PersistentWorker<C> {
     pub worker_id: String,
     /// 仅控制进程内取消；持久状态仍由原窄端口拥有。
     pub write_lifecycle: auction_application::ExternalWriteLifecycle,
+}
+
+impl<C> PersistentWorker<C> {
+    /// 当前 delivery 热参数；组合后越界时保留启动配置并告警，不中断循环。
+    pub(super) fn delivery_runtime(&self) -> DeliveryWorkerRuntimeConfig {
+        let hot = self.delivery.with_hot(&self.hot.snapshot().delivery);
+        if hot.validate() {
+            hot
+        } else {
+            tracing::warn!("热读取的 delivery 预算与启动租约不一致，继续使用启动配置");
+            self.delivery
+        }
+    }
+
+    /// 当前论坛轮询/抖动热参数；租约仍来自启动配置。
+    pub(super) fn forum_runtime(&self) -> ForumWorkerRuntimeConfig {
+        let hot = self.forum.with_hot(&self.hot.snapshot().forum);
+        if hot.validate() {
+            hot
+        } else {
+            tracing::warn!("热读取的论坛轮询参数无效，继续使用启动配置");
+            self.forum
+        }
+    }
 }

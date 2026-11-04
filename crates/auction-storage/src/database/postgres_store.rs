@@ -8,7 +8,8 @@ use super::*;
 pub struct PostgresStore {
     pub(super) pool: TrackedPool<Postgres>,
     pub(crate) transaction_owner: auction_observability::DatabaseTransactionOwner,
-    pub(crate) delivery_send_intervals: auction_application::DeliverySendIntervals,
+    pub(crate) delivery_send_intervals:
+        std::sync::Arc<std::sync::RwLock<auction_application::DeliverySendIntervals>>,
     pub(crate) runtime_switches: auction_application::RuntimeSwitches,
     pub(crate) migration_compatibility_mode: auction_application::MigrationCompatibilityMode,
     pub(crate) migration_readiness_recorder: auction_observability::MigrationReadinessRecorder,
@@ -26,7 +27,9 @@ impl PostgresStore {
         Ok(Self {
             pool: TrackedPool::new(pool),
             transaction_owner: auction_observability::DatabaseTransactionOwner::Admin,
-            delivery_send_intervals: auction_application::DeliverySendIntervals::default(),
+            delivery_send_intervals: std::sync::Arc::new(std::sync::RwLock::new(
+                auction_application::DeliverySendIntervals::default(),
+            )),
             runtime_switches: auction_application::RuntimeSwitches::default(),
             migration_compatibility_mode: auction_application::MigrationCompatibilityMode::default(
             ),
@@ -44,6 +47,11 @@ impl PostgresStore {
 
     pub(crate) fn pool(&self) -> &TrackedPool<Postgres> {
         &self.pool
+    }
+
+    /// 当前生效的发送节奏；热读取成功后由装配根原子替换，claim 事务每次读取快照。
+    pub(crate) fn delivery_send_intervals(&self) -> auction_application::DeliverySendIntervals {
+        *self.delivery_send_intervals.read().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub(crate) fn raw_pool(&self) -> &PgPool {

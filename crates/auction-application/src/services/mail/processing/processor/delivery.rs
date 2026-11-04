@@ -3,6 +3,10 @@
 use super::super::commands::{decision, delivery_request_hash, stable_command_id};
 use super::*;
 
+/// 账号回信模板：注册与轮换各自独立计数，但同一窗口内只回一次。
+pub(super) const REGISTER_REPLY_TEMPLATES: &[&str] = &["register_key", "register_result"];
+pub(super) const REKEY_REPLY_TEMPLATES: &[&str] = &["rekey_key", "rekey_result"];
+
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
 where
     E: MailEquipmentReader,
@@ -24,15 +28,18 @@ where
         }
         let attachment_count = attachment_ids.len();
         let return_id = self.enqueue_return(message, attachment_ids).await?;
-        let notice_id = self.enqueue_notice(message, template, reason_code, None).await?;
+        let notice_id = self.enqueue_explanation(message, template, reason_code).await?;
+        let mut delivery_ids = vec![return_id];
+        delivery_ids.extend(notice_id);
         decision(
             "equipment",
             "rejected",
             decision_code,
             json!({
                 "attachment_count": attachment_count,
-                "delivery_ids": [return_id, notice_id],
+                "delivery_ids": delivery_ids,
                 "reason_code": reason_code,
+                "notice_suppressed": notice_id.is_none(),
             }),
         )
     }
@@ -69,14 +76,63 @@ where
         .await
     }
 
-    pub(super) async fn enqueue_notice(
+    /// 账号回信（注册/轮换）：同一账号在窗口内只寄一封，超出的仍保留命令与审计。
+    pub(super) async fn enqueue_account_notice(
         &self,
         message: &MailMessage,
         template: MailNotificationTemplate,
         result_code: &str,
         user_key_user_id: Option<Uuid>,
-    ) -> Result<Uuid, ApplicationError> {
-        self.enqueue_delivery(
+        templates: &'static [&'static str],
+    ) -> Result<Option<Uuid>, ApplicationError> {
+        let limit = MailNoticeLimit {
+            templates,
+            since: self.clock.now()
+                - chrono::Duration::seconds(bounded_window_seconds(
+                    self.account_reply_window_seconds,
+                )),
+            maximum: 1,
+        };
+        let command = self.notice_command(message, template, result_code, user_key_user_id)?;
+        match self.deliveries.enqueue_within_limit(command, limit).await? {
+            MailNoticeEnqueue::Enqueued(result) => Ok(Some(valid_delivery_id(result)?)),
+            MailNoticeEnqueue::Suppressed => {
+                self.observe_suppression(message, MailNoticeClass::AccountReply);
+                Ok(None)
+            }
+        }
+    }
+
+    /// 说明信：按发件人/论坛账号共用一个 24 小时窗口，附带资产仍由调用方独立退回。
+    pub(super) async fn enqueue_explanation(
+        &self,
+        message: &MailMessage,
+        template: MailNotificationTemplate,
+        result_code: &str,
+    ) -> Result<Option<Uuid>, ApplicationError> {
+        let limit = crate::explanation_notice_limit(
+            self.explanation_window_seconds,
+            self.explanation_limit,
+            self.clock.now(),
+        );
+        let command = self.notice_command(message, template, result_code, None)?;
+        match self.deliveries.enqueue_within_limit(command, limit).await? {
+            MailNoticeEnqueue::Enqueued(result) => Ok(Some(valid_delivery_id(result)?)),
+            MailNoticeEnqueue::Suppressed => {
+                self.observe_suppression(message, MailNoticeClass::Explanation);
+                Ok(None)
+            }
+        }
+    }
+
+    fn notice_command(
+        &self,
+        message: &MailMessage,
+        template: MailNotificationTemplate,
+        result_code: &str,
+        user_key_user_id: Option<Uuid>,
+    ) -> Result<MailDeliveryCommand, ApplicationError> {
+        self.delivery_command(
             message,
             MailDeliveryOperation::Send,
             Some(template),
@@ -84,7 +140,6 @@ where
             user_key_user_id,
             Vec::new(),
         )
-        .await
     }
 
     async fn enqueue_delivery(
@@ -96,6 +151,27 @@ where
         user_key_user_id: Option<Uuid>,
         attachment_ids: Vec<String>,
     ) -> Result<Uuid, ApplicationError> {
+        let command = self.delivery_command(
+            message,
+            operation,
+            template,
+            result_code,
+            user_key_user_id,
+            attachment_ids,
+        )?;
+        let result = self.deliveries.enqueue(command).await?;
+        valid_delivery_id(result)
+    }
+
+    fn delivery_command(
+        &self,
+        message: &MailMessage,
+        operation: MailDeliveryOperation,
+        template: Option<MailNotificationTemplate>,
+        result_code: Option<String>,
+        user_key_user_id: Option<Uuid>,
+        attachment_ids: Vec<String>,
+    ) -> Result<MailDeliveryCommand, ApplicationError> {
         let command_operation = match operation {
             MailDeliveryOperation::Return => DELIVERY_RETURN_OPERATION,
             MailDeliveryOperation::Take => DELIVERY_TAKE_OPERATION,
@@ -115,34 +191,44 @@ where
             user_key_user_id,
             &attachment_ids,
         )?;
-        let result: MailDeliveryResult = self
-            .deliveries
-            .enqueue(MailDeliveryCommand {
-                command_id,
-                request_hash,
-                origin: MailDeliveryOrigin::MailIntake,
-                origin_id: format!(
-                    "{}:{}:{}",
-                    message.world_id,
-                    message.external_mail_id,
-                    operation.as_str()
-                ),
-                operation,
-                world_id: message.world_id.clone(),
-                external_mail_id: message.external_mail_id.clone(),
-                recipient: message.sender.clone(),
-                template,
-                result_code,
-                user_key_user_id,
-                credits: 0,
-                cod: 0,
-                attachment_ids,
-                notification_body: None,
-            })
-            .await?;
-        if result.delivery_id.is_nil() {
-            return Err(MailProcessingError::OwnerResultInvalid.into());
-        }
-        Ok(result.delivery_id)
+        Ok(MailDeliveryCommand {
+            command_id,
+            request_hash,
+            origin: MailDeliveryOrigin::MailIntake,
+            origin_id: format!(
+                "{}:{}:{}",
+                message.world_id,
+                message.external_mail_id,
+                operation.as_str()
+            ),
+            operation,
+            world_id: message.world_id.clone(),
+            external_mail_id: message.external_mail_id.clone(),
+            recipient: message.sender.clone(),
+            template,
+            result_code,
+            user_key_user_id,
+            credits: 0,
+            cod: 0,
+            attachment_ids,
+            notification_body: None,
+        })
     }
+
+    fn observe_suppression(&self, message: &MailMessage, class: MailNoticeClass) {
+        let world = if message.world_id == "main" { MailWorld::Main } else { MailWorld::Isekai };
+        self.metrics.observe(crate::ExternalMetricsEvent::MailNoticeSuppressed { world, class });
+    }
+}
+
+fn valid_delivery_id(result: MailDeliveryResult) -> Result<Uuid, ApplicationError> {
+    if result.delivery_id.is_nil() {
+        return Err(MailProcessingError::OwnerResultInvalid.into());
+    }
+    Ok(result.delivery_id)
+}
+
+/// 配置窗口已经以秒为单位校验；转换到 chrono 前再限制一次，避免超界构造 panic。
+fn bounded_window_seconds(seconds: u64) -> i64 {
+    i64::try_from(seconds).unwrap_or(604_800).clamp(60, 604_800)
 }

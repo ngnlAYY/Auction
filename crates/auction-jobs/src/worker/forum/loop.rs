@@ -24,13 +24,17 @@ pub(crate) async fn run_loop<C>(
                 return;
             }
             let started = std::time::Instant::now();
+            // 每个循环边界读取一次完整热快照；租约仍来自启动配置。
+            let forum = worker.forum_runtime();
+            let hot_forum = worker.hot.snapshot().forum;
             let mut cycle_result = WorkerResult::Success;
             let mut cycle_healthy = true;
             if let Some(runtime) = &worker.forum_sync {
                 let result = super::forum_sync::run_cycle(
                     worker.as_ref(),
                     runtime,
-                    worker.forum.lease_duration,
+                    forum.lease_duration,
+                    Some(hot_forum),
                 )
                 .await;
                 if let Err(error) = result {
@@ -45,29 +49,38 @@ pub(crate) async fn run_loop<C>(
                 }
             }
 
+            let mut earliest_reply_scan = None;
             if let Some(runtime) = &worker.forum_reply {
                 let result = super::forum_reply::run_cycle(
                     worker.as_ref(),
                     runtime,
-                    worker.forum.lease_duration,
-                    worker.forum.poll_interval,
+                    forum.lease_duration,
+                    forum.poll_interval,
+                    Some(hot_forum),
                 )
                 .await;
-                if let Err(error) = result {
-                    cycle_result = WorkerResult::Error;
-                    cycle_healthy = false;
-                    diagnostics::warn(
-                        "forum_reply",
-                        "poll_replies",
-                        error.diagnostic_kind(),
-                        DiagnosticContext::default(),
-                    );
+                match result {
+                    Ok(hint) => earliest_reply_scan = hint,
+                    Err(error) => {
+                        cycle_result = WorkerResult::Error;
+                        cycle_healthy = false;
+                        diagnostics::warn(
+                            "forum_reply",
+                            "poll_replies",
+                            error.diagnostic_kind(),
+                            DiagnosticContext::default(),
+                        );
+                    }
                 }
             }
             worker.control.mark_forum_cycle(cycle_healthy);
             worker.metrics.observe_iteration(WorkerLoop::Forum, cycle_result, started.elapsed());
 
-            let wait = poll_delay(worker.forum.poll_interval, worker.forum.jitter);
+            let mut wait = poll_delay(forum.poll_interval, forum.jitter);
+            if let Some(earliest) = earliest_reply_scan {
+                // Final 阶段按最早 lot 有效截止排定的导入早于常规轮询；下限 1 秒避免空转。
+                wait = wait.min(earliest.max(std::time::Duration::from_secs(1)));
+            }
             let scheduled_wake = tokio::time::Instant::now() + wait;
             if super::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
                 return;

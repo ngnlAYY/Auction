@@ -55,6 +55,11 @@ impl ParsedHtmlPage {
         self.posts.iter().map(|post| post.id.as_str())
     }
 
+    /// 本页帖子数；用于把分页偏移换算成主题内的绝对楼层。
+    pub(crate) fn post_count(&self) -> usize {
+        self.posts.len()
+    }
+
     pub(crate) fn navigation_references(&self) -> impl Iterator<Item = &str> {
         self.navigation_references.iter().map(String::as_str)
     }

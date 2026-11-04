@@ -99,30 +99,58 @@ pub(super) async fn process_notification(
     };
     let external_mail_id =
         format!("forum:{}:{}:{}:{}:{}", topic.auction_id, topic.thread_id, post_id, line, lot_code);
-    let result = notifier
-        .enqueue(MailDeliveryCommand {
-            command_id: CommandId::from_uuid(command_id),
-            request_hash,
-            origin: MailDeliveryOrigin::MailIntake,
-            origin_id: external_mail_id.clone(),
-            operation: MailDeliveryOperation::Send,
-            world_id: topic.world.as_str().to_owned(),
-            external_mail_id,
-            recipient: bidder.player_name.clone(),
-            template: Some(MailNotificationTemplate::ForumAuctionNotice),
-            result_code: Some("forum_auction_notice".to_owned()),
-            user_key_user_id: None,
-            credits: 0,
-            cod: 0,
-            attachment_ids: Vec::new(),
-            notification_body: None,
-        })
-        .await;
+    let notice_command = MailDeliveryCommand {
+        command_id: CommandId::from_uuid(command_id),
+        request_hash,
+        origin: MailDeliveryOrigin::MailIntake,
+        origin_id: external_mail_id.clone(),
+        operation: MailDeliveryOperation::Send,
+        world_id: topic.world.as_str().to_owned(),
+        external_mail_id,
+        recipient: bidder.player_name.clone(),
+        template: Some(MailNotificationTemplate::ForumAuctionNotice),
+        result_code: Some("forum_auction_notice".to_owned()),
+        user_key_user_id: None,
+        credits: 0,
+        cod: 0,
+        attachment_ids: Vec::new(),
+        notification_body: None,
+    };
+    // 决策 63：论坛回执与邮件说明信共用发件人 24 小时预算；超额仍保留命令与审计。
+    let limit = auction_application::explanation_notice_limit(
+        runtime.mail_notice_window_seconds,
+        runtime.mail_notice_limit,
+        chrono::Utc::now(),
+    );
+    let result = notifier.enqueue_within_limit(notice_command, limit).await;
     match result {
-        Ok(result) if !result.delivery_id.is_nil() => {
+        Ok(auction_application::MailNoticeEnqueue::Enqueued(result))
+            if !result.delivery_id.is_nil() =>
+        {
             finish(runtime, command_id, "applied", "", "论坛 MoogleMail 通知已入队").await?;
         }
-        Ok(_) => {
+        Ok(auction_application::MailNoticeEnqueue::Suppressed) => {
+            let world = if topic.world.as_str() == "main" {
+                auction_application::MailWorld::Main
+            } else {
+                auction_application::MailWorld::Isekai
+            };
+            runtime.external_metrics.observe(
+                auction_application::ExternalMetricsEvent::MailNoticeSuppressed {
+                    world,
+                    class: auction_application::MailNoticeClass::Explanation,
+                },
+            );
+            finish(
+                runtime,
+                command_id,
+                "applied",
+                "notice_suppressed",
+                "说明信预算已用尽，未寄出论坛通知",
+            )
+            .await?;
+        }
+        Ok(auction_application::MailNoticeEnqueue::Enqueued(_)) => {
             finish(
                 runtime,
                 command_id,

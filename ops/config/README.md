@@ -183,11 +183,13 @@ Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、`metrics.e
 | `[worker.recovery]` | 恢复：批次、并发、轮询、租约、超时、低余额阈值、健康刷新与证据过期 |
 | `[worker.control]` | Worker control：开关、socket 组、`allowed_peer_uids`/`allowed_peer_gids`（启用时至少一项）、运行目录与 socket 路径 |
 | `[worker.forum]` | 论坛同步：开关、凭据 scope、公开站点 origin、板块 ID、轮询、页数上限、请求间隔与超时、租约 |
-| `[worker.mooglemail]` | 邮件：开关、邮箱标识与世界、邮件默认起拍价、请求边界、收件与维护 cron、观察间隔与隔离开关、抖动、租约、重试、发件人白名单、`keyenv_file`（本地联调） |
+| `[worker.mooglemail]` | 邮件：开关、邮箱标识与世界、邮件默认起拍价、请求边界、收件与维护 cron、观察间隔与隔离开关、抖动、租约、重试、发件人白名单、`rekey_enabled`、账号回信与说明信窗口/上限、`keyenv_file`（本地联调） |
 | `[worker.mooglemail.send_intervals]` | 各类出站邮件发送起点的最小间隔 |
 | `[worker.mooglemail.diagnostics]` | 诊断归档：开关、目录（生产须为可写目录）、保留天数、总字节上限 |
 | `[worker.mooglemail.equipment_filter]` | 投稿过滤：品质门槛（始终生效）、前后缀/分类/类型/等级过滤 |
-| `[worker.mooglemail.mail_templates]` | 出站邮件正文模板（只能使用规定占位符） |
+| `[worker.mooglemail.mail_templates]` | 出站邮件正文模板（只能使用规定占位符）；含 `register_key`/`register_result`、`rekey_key`/`rekey_result`、`rebind_result` |
+
+账号回信与说明信预算：`account_reply_window_seconds`（默认 86400，范围 60–604800）与 `rekey_enabled` 控制每个账号的注册/轮换回信；`explanation_mail_window_seconds`（默认 86400）与 `explanation_mail_limit`（默认 10，0 表示不限）控制按发件人或论坛账号的说明信。超限只记录命令与审计，说明信不寄出，附带资产仍退回；这些阈值当前随 Worker 启动读取，尚未接入热读取。
 | `[[worker.mooglemail.additional_worlds]]` | 额外世界的邮箱（独立游标、租约与白名单） |
 | `[worker.operations_alert]` | 运维告警：开关、收件人与世界、扫描间隔、批次窗口、冷却、各类积压阈值 |
 
@@ -247,7 +249,7 @@ clear 回落此 TOML 基线；无需重启。切换在下一轮收件调度或�
 
 ## runtime 配置（`runtime/admin.toml`）
 
-runtime 文件让运营人员在 Admin “参数配置”页修改部分参数，而无需登录服务器编辑 TOML。Admin 是唯一写者：提交的候选先经服务端完整校验，再以命令账本 + 原子替换写入（临时文件、rename、目录同步、独立锁文件）。文件必须是 0640、父目录禁止他人写入、归 Admin 运行账号所有。**修改在重启相关角色后生效**，不改写已有场次与任务。
+runtime 文件让运营人员在 Admin “参数配置”页修改部分参数，而无需登录服务器编辑 TOML。Admin 是唯一写者：提交的候选先经服务端完整校验，再以命令账本 + 原子替换写入（临时文件、rename、目录同步、独立锁文件）。文件必须是 0640、父目录禁止他人写入、归 Admin 运行账号所有。**热读取字段在 Worker 下一个读取周期生效，其余字段在重启相关角色后生效**，都不改写已有场次与任务。
 
 | 区块 | 用途 | 生效 |
 | --- | --- | --- |
@@ -270,10 +272,22 @@ runtime 文件让运营人员在 Admin “参数配置”页修改部分参数�
 | --- | --- | --- |
 | `economics` | 新场次经济模板（`[auction.economics]`） | 重启 Admin 与 Worker |
 | `schedule` | 周排期与早鸟期（`[auction.schedule]`） | 重启 Admin 与 Worker |
-| `forum` | 论坛同步参数 | 重启 Worker |
+| `forum` | 论坛同步参数 | `batch_size`、`poll_interval_seconds`、`jitter_seconds`、`item_timeout_seconds` 即时生效；其余重启 Worker |
 | `alerts` | 运维告警参数 | 重启 Worker |
-| `worker`（含 `delivery`/`fulfillment`/`recovery`） | Worker 各循环的调度边界；不覆盖 `worker.fulfillment.evidence_poll_seconds` | 重启 Worker |
-| `mail`（含 `send_intervals`） | 邮件轮询计划与请求边界、发送间隔；不包含全局开关、endpoint、凭据、邮箱身份与诊断归档路径 | 重启 Worker |
+| `worker`（含 `delivery`/`fulfillment`/`recovery`） | Worker 各循环的调度边界；不覆盖 `worker.fulfillment.evidence_poll_seconds` | `delivery.batch_limit`、`delivery.poll_interval_seconds`、`delivery.jitter_seconds`、`delivery.request_timeout_seconds`、`delivery.finalize_timeout_seconds` 即时生效；其余重启 Worker |
+| `mail`（含 `send_intervals`） | 邮件轮询计划与请求边界、发送间隔；不包含全局开关、endpoint、凭据、邮箱身份与诊断归档路径 | 发送间隔、批次、抖动、尝试次数、退避与处理超时即时生效（见下表）；日程、租约、页数/响应字节与 HTTP 超时重启 Worker |
+
+### Worker 热读取字段
+
+Worker 每 30 秒检查一次 runtime 文件的长度与修改时间；候选变化时先完成整份文档校验，再原子替换发送节奏与循环参数。校验失败保留旧值并记录告警，不影响正在执行的循环。热读取只改变节奏、预算与反压，不决定金额、资格、幂等、租约、审计或业务状态；Admin 参数页对同一批字段标注“即时生效”。
+
+| 组 | 即时生效字段 |
+| --- | --- |
+| `mail` | `[mail.send_intervals]` 七类间隔、`batch_size`、`jitter_seconds`、`fetch_attempts`、`fetch_timeout_seconds`、`process_attempts`、`item_timeout_seconds`、`batch_timeout_seconds`、`retry_base_seconds`、`retry_maximum_seconds` |
+| `forum` | `batch_size`、`poll_interval_seconds`、`jitter_seconds`、`item_timeout_seconds` |
+| `worker.delivery` | `batch_limit`、`poll_interval_seconds`、`jitter_seconds`、`request_timeout_seconds`、`finalize_timeout_seconds` |
+
+`send_intervals` 只影响后续 delivery 领取计算的最小发送起点，不改变既有 claim、sending 围栏或资金结果。热参数与启动租约冲突时（例如论坛 `item_timeout_seconds` 不小于当前租约），Worker 记录告警并继续使用启动值，下一次读取周期再检查。
 
 启用接管时，`config check` 还会核对 Admin 与 Worker 得到的有效模板与排期一致。
 

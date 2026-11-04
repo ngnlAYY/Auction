@@ -29,7 +29,7 @@ impl AdminRuntimeMailDeliveryBudget {
 pub struct AdminRuntimeMailConfig {
     /// 是否接管邮件运行参数；默认关闭，不改变既有 Worker 行为。
     pub managed: bool,
-    /// 同类邮件开始发送的最小间距；全零省略，保存后重启 Worker 生效。
+    /// 同类邮件开始发送的最小间距；全零省略。Worker 热读取成功后在下一个 delivery 领取生效。
     #[serde(skip_serializing_if = "DeliverySendIntervals::is_zero")]
     pub send_intervals: DeliverySendIntervals,
     /// 标准五字段 cron、旧版描述符或 @every；完整解析由配置适配器校验。

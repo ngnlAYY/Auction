@@ -8,6 +8,9 @@ mod commands;
 mod document;
 #[path = "runtime_config/errors.rs"]
 mod errors;
+mod hot {
+    include!("runtime_config/hot.rs");
+}
 #[path = "runtime_config/mail_templates.rs"]
 mod mail_templates;
 #[path = "runtime_config/operations/mod.rs"]
@@ -33,6 +36,11 @@ pub use document::{
     MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
 };
 pub use errors::{AdminRuntimeCommandError, AdminRuntimeConfigError, AdminRuntimeFileError};
+pub use hot::{
+    WORKER_HOT_FIELD_PATHS, WORKER_RESTART_ONLY_FIELD_PATHS, WorkerDeliveryHotConfig,
+    WorkerFieldEffect, WorkerForumHotConfig, WorkerHotConfig, WorkerMailHotConfig,
+    worker_hot_field_effect,
+};
 pub use mail_templates::{AdminRuntimeMailTemplatesConfig, MailTemplateError};
 pub use operations::{
     AdminRuntimeAlertsConfig, AdminRuntimeDeliveryConfig, AdminRuntimeEconomicsConfig,
