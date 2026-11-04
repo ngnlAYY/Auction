@@ -64,6 +64,8 @@ Worker 为扫描时处于 Live 且没有同步记录的场次建立任务；重�
 
 主题扫描页数超过 `maximum_topic_pages` 时，该场的回帖导入整体失败关闭、不再导入新回帖，而不是跳过部分出价；运营者处理前，请改在网站出价。
 
+Admin“规则内容”的五语言导入稿见 [`ops/rules/forum-reply-import`](../../ops/rules/forum-reply-import/README.md)，由用户核对后用 `auction-cli rules import` 发布。
+
 ## 身份
 
 - 回帖者以论坛账号的数字 ID（`showuser`）识别。首次出现时按“已绑定该论坛 ID 的账号”或“同名（不区分大小写）且未绑定论坛的账号”匹配；都没有时建立一个只能通过论坛参与、不能登录网站的账号。
