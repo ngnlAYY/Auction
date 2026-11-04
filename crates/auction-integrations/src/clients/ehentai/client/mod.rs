@@ -1,5 +1,9 @@
 //! E-Hentai HTTP 客户端与论坛协议事务；固定 origin、限流、响应大小边界、
 //! 主题创建/读取和 POST 后的 write-unknown 栅栏集中在此，表单与判定辅助在 forms.rs。
+//!
+//! 限速与 MoogleMail 共用 `crate::clients::gate` 的分级请求门：建主题、回帖、编辑与
+//! PM 发送走前台档，页面预读与增量扫描走后台档。论坛是独立 origin，没有 HentaiVerse
+//! 战斗页信号，因此不接账号忙熔断；429 与 Cloudflare 等分类和写入未知语义保持原样。
 
 use auction_application::diagnostics::DiagnosticContext;
 
@@ -118,7 +122,8 @@ pub struct EhentaiClient {
     pm_client: Option<Client>,
     base_url: Url,
     origin: String,
-    gate: Arc<Mutex<Instant>>,
+    /// 与 MoogleMail 相同的容量 1 分级请求门；克隆共享同一份限速状态。
+    gate: Arc<crate::clients::gate::PriorityGate>,
     maximum_response_bytes: usize,
     maximum_topic_pages: usize,
     request_timeout: Duration,
@@ -151,7 +156,9 @@ impl EhentaiClient {
                 .ok(),
             base_url,
             origin,
-            gate: Arc::new(Mutex::new(Instant::now())),
+            gate: Arc::new(crate::clients::gate::PriorityGate::new(
+                DEFAULT_MINIMUM_REQUEST_INTERVAL,
+            )),
             maximum_response_bytes: DEFAULT_MAXIMUM_RESPONSE_BYTES,
             maximum_topic_pages: DEFAULT_MAXIMUM_TOPIC_PAGES,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
@@ -202,7 +209,9 @@ impl EhentaiClient {
             pm_client: Some(pm_client),
             base_url: config.endpoint,
             origin,
-            gate: Arc::new(Mutex::new(Instant::now())),
+            gate: Arc::new(crate::clients::gate::PriorityGate::new(
+                config.minimum_request_interval,
+            )),
             maximum_response_bytes: config.maximum_response_bytes,
             maximum_topic_pages: config.maximum_topic_pages,
             request_timeout: config.request_timeout,

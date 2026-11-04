@@ -58,7 +58,22 @@ macro_rules! delivery_watch_expired {
 }
 pub(crate) use delivery_watch_expired;
 
+// 玩家改名后，提醒的冻结收件人不再是该用户当前名称，远端已不存在该收件人。
+// 未开始发送的提醒按预检退役收口并记录原因；已 sending 的行仍由 delivery owner 保留未知结果。
+macro_rules! delivery_watch_renamed {
+    () => {
+        r#"(deliveries.origin_kind = 'lot_watch' AND EXISTS (
+            SELECT 1 FROM public.lot_watch_notifications notification
+            JOIN public.users recipient ON recipient.id = notification.user_id
+            WHERE notification.delivery_id = deliveries.id
+              AND recipient.username IS DISTINCT FROM notification.recipient
+        ))"#
+    };
+}
+pub(crate) use delivery_watch_renamed;
+
 /// Admin 重试/释放也只能使用同一来源证明；调用方先持有 lot 锁再锁 delivery。
+/// 收件人已改名的提醒已按预检退役，重放只会再次失败，因此不提供重试资格。
 pub(crate) async fn delivery_eligible(
     transaction: &mut Transaction<'_, Postgres>,
     delivery_id: Uuid,
@@ -66,6 +81,8 @@ pub(crate) async fn delivery_eligible(
     sqlx::query_scalar(concat!(
         "SELECT ",
         delivery_watch_gate!(),
+        " AND NOT ",
+        delivery_watch_renamed!(),
         " FROM public.deliveries AS deliveries WHERE deliveries.id = $1"
     ))
     .bind(delivery_id)

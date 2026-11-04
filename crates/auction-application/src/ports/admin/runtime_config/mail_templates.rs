@@ -154,6 +154,7 @@ impl Default for AdminRuntimeMailTemplatesConfig {
                 "Item: {item_name}\n",
                 "\n",
                 "{price_breakdown}Amount due (CoD): {amount} Credits\n",
+                "Payment deadline: {payment_deadline}\n",
                 "\n",
                 "Collect the attached equipment to pay the CoD\n",
                 "and receive your item.\n",
@@ -164,7 +165,9 @@ impl Default for AdminRuntimeMailTemplatesConfig {
             settlement_payment_carrier: concat!(
                 "This mail collects payment for your Isekai auction item.\n",
                 "\n",
+                "Item: {item_name}\n",
                 "CoD: {amount} Credits\n",
+                "Payment deadline: {payment_deadline}\n",
                 "\n",
                 "Collect the attached Credits to pay the CoD.\n",
                 "Your equipment will be sent separately in Isekai\n",
@@ -196,6 +199,7 @@ impl Default for AdminRuntimeMailTemplatesConfig {
             settlement_seller_payout: concat!(
                 "Your auction payout is attached.\n",
                 "\n",
+                "Item: {item_name}\n",
                 "Amount: {amount} Credits\n",
                 "\n",
                 "Please collect the attached Credits.\n",
@@ -206,6 +210,7 @@ impl Default for AdminRuntimeMailTemplatesConfig {
             settlement_buyer_refund: concat!(
                 "Your auction refund is attached.\n",
                 "\n",
+                "Item: {item_name}\n",
                 "Amount: {amount} Credits\n",
                 "\n",
                 "Please collect the attached Credits.\n",
@@ -307,10 +312,13 @@ fn placeholder_rule(key: &str) -> (&'static [&'static str], &'static [&'static s
         "rekey_key" => (&["login_key", "username"], &["login_key", "username"]),
         "settlement_winner_equipment_cod" => (
             &["item_name", "amount", "reference"],
-            &["item_name", "amount", "reference", "price_breakdown"],
+            &["item_name", "amount", "reference", "price_breakdown", "payment_deadline"],
         ),
-        "settlement_payment_carrier" | "settlement_seller_payout" | "settlement_buyer_refund" => {
-            (&["amount", "reference"], &["amount", "reference"])
+        "settlement_payment_carrier" => {
+            (&["amount", "reference"], &["amount", "reference", "item_name", "payment_deadline"])
+        }
+        "settlement_seller_payout" | "settlement_buyer_refund" => {
+            (&["amount", "reference"], &["amount", "reference", "item_name"])
         }
         "settlement_payment_reminder" => (&["reference"], &["reference"]),
         "settlement_equipment_handoff" => {
@@ -363,4 +371,65 @@ fn validate_body(
         return Err(MailTemplateError::MissingPlaceholder);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn default_settlement_templates_state_deadline_and_item() {
+        let templates = AdminRuntimeMailTemplatesConfig::default();
+        templates.validate().expect("默认模板必须自洽");
+        let cod = templates.body("settlement_winner_equipment_cod").unwrap_or_default();
+        assert!(cod.contains("{payment_deadline}"), "{cod}");
+        assert!(cod.contains("{item_name}"), "{cod}");
+        let carrier = templates.body("settlement_payment_carrier").unwrap_or_default();
+        assert!(carrier.contains("{payment_deadline}"), "{carrier}");
+        assert!(carrier.contains("{item_name}"), "{carrier}");
+        for key in ["settlement_seller_payout", "settlement_buyer_refund"] {
+            let body = templates.body(key).unwrap_or_default();
+            assert!(body.contains("{item_name}"), "{key}: {body}");
+            // 期限只属于付款请求；金额邮件不得引用它。
+            assert!(!body.contains("{payment_deadline}"), "{key}: {body}");
+        }
+    }
+
+    #[test]
+    fn settlement_placeholder_closed_set_rejects_unknown_and_allows_new_keys() {
+        // 金额邮件可写装备名，但不能引入未登记变量。
+        let refund_allowed = AdminRuntimeMailTemplatesConfig {
+            settlement_buyer_refund: "Refund for {item_name}: {amount} Credits\n{reference}"
+                .to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        refund_allowed.validate().expect("item_name 是退款邮件的允许占位符");
+        let refund_unknown = AdminRuntimeMailTemplatesConfig {
+            settlement_buyer_refund:
+                "Refund for {item_name}: {amount} Credits\n{reference}\n{payment_deadline}"
+                    .to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        assert_eq!(
+            refund_unknown.validate(),
+            Err(("settlement_buyer_refund", MailTemplateError::UnknownPlaceholder))
+        );
+        // 载体付款邮件允许冻结期限，同时仍要求金额与引用。
+        let carrier_allowed = AdminRuntimeMailTemplatesConfig {
+            settlement_payment_carrier:
+                "Pay {amount} Credits for {item_name}\nby {payment_deadline}\n{reference}"
+                    .to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        carrier_allowed.validate().expect("载体付款邮件的期限是允许占位符");
+        let carrier_missing = AdminRuntimeMailTemplatesConfig {
+            settlement_payment_carrier: "Pay {amount} Credits by {payment_deadline}".to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        assert_eq!(
+            carrier_missing.validate(),
+            Err(("settlement_payment_carrier", MailTemplateError::MissingPlaceholder))
+        );
+    }
 }

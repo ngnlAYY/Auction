@@ -30,8 +30,23 @@ struct WinnerPricing {
 }
 
 /// 接受精确旧三/八变量或显式标记 v2 的九变量，拒绝半套价格数据和未知字段。
+/// 付款期限是后期加入的可选变量，不参与价格闭集；其取值由调用方单独校验。
 pub(super) fn valid_winner_variables(variables: &BTreeMap<String, String>) -> bool {
-    exact_variables(variables, LEGACY_VARIABLES) || winner_pricing(variables).is_some()
+    let pricing_variables = without_optional_deadline(variables);
+    exact_variables(&pricing_variables, LEGACY_VARIABLES)
+        || winner_pricing(&pricing_variables).is_some()
+}
+
+/// 去掉可选的付款期限键；没有该键时借用原表，避免每次校验都复制价格变量。
+fn without_optional_deadline(
+    variables: &BTreeMap<String, String>,
+) -> std::borrow::Cow<'_, BTreeMap<String, String>> {
+    if !variables.contains_key("payment_deadline") {
+        return std::borrow::Cow::Borrowed(variables);
+    }
+    let mut filtered = variables.clone();
+    filtered.remove("payment_deadline");
+    std::borrow::Cow::Owned(filtered)
 }
 
 fn winner_pricing(variables: &BTreeMap<String, String>) -> Option<WinnerPricing> {
@@ -78,10 +93,11 @@ fn winner_pricing(variables: &BTreeMap<String, String>) -> Option<WinnerPricing>
 
 /// 历史已准备邮件没有比例事实，保留原载荷并省略明细；不补写为零或套用现行曲线。
 pub(super) fn render_price_breakdown(variables: &BTreeMap<String, String>) -> Option<String> {
-    if exact_variables(variables, LEGACY_VARIABLES) {
+    let pricing_variables = without_optional_deadline(variables);
+    if exact_variables(&pricing_variables, LEGACY_VARIABLES) {
         return Some(String::new());
     }
-    let pricing = winner_pricing(variables)?;
+    let pricing = winner_pricing(&pricing_variables)?;
     let adjustment_label = match pricing.adjustment_ppm.cmp(&0) {
         std::cmp::Ordering::Less => "discount",
         std::cmp::Ordering::Equal => "no adjustment",
