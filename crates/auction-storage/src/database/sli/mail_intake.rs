@@ -193,7 +193,7 @@ const TAKE_UNKNOWN: &str = "
     JOIN public.inbound_mail inbound
       ON inbound.world_id=candidate.payload->>'world'
      AND inbound.external_mail_id=candidate.payload->>'external_mail_id'
-    WHERE NOT candidate.proof_ok
+    WHERE candidate.proof_ok IS NOT TRUE
     GROUP BY inbound.world_id";
 
 const TAKE_AGGREGATE: &str = "
