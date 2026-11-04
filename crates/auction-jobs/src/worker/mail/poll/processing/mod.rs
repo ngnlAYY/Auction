@@ -178,10 +178,15 @@ where
         config,
         schedule,
         metrics,
+        external_metrics,
         loop_kind,
     } = context;
     let mut batch_deadline = std::time::Instant::now() + config.batch_timeout;
-    let metric_context = MailPollMetricContext { metrics: Arc::clone(&metrics), loop_kind };
+    let metric_context = MailPollMetricContext {
+        metrics: Arc::clone(&metrics),
+        external_metrics: Arc::clone(&external_metrics),
+        loop_kind,
+    };
     let failure_context = MailPollFailureContext {
         schedule: Arc::clone(&schedule),
         config,
@@ -197,6 +202,12 @@ where
     let polled_at = clock.now();
     let Some(fetch_remaining) = batch_deadline.checked_duration_since(std::time::Instant::now())
     else {
+        super::types::observe_budget(
+            &world_id,
+            external_metrics.as_ref(),
+            auction_application::MailPhase::PollBatch,
+            auction_application::MailBudget::Time,
+        );
         record_failure(
             store,
             clock,
@@ -228,6 +239,12 @@ where
             return WorkerResult::Error;
         }
         Err(error) => {
+            super::types::observe_budget(
+                &world_id,
+                external_metrics.as_ref(),
+                auction_application::MailPhase::PollBatch,
+                auction_application::MailBudget::Time,
+            );
             worker_diagnostics::warn(
                 "mail_poll",
                 "fetch_batch_timeout",
@@ -287,6 +304,12 @@ where
         let Some(lookup_remaining) =
             batch_deadline.checked_duration_since(std::time::Instant::now())
         else {
+            super::types::observe_budget(
+                &world_id,
+                external_metrics.as_ref(),
+                auction_application::MailPhase::PollBatch,
+                auction_application::MailBudget::Time,
+            );
             budget_exhausted = true;
             break;
         };
@@ -302,6 +325,12 @@ where
         .await;
         match completion {
             Err(error) => {
+                super::types::observe_budget(
+                    &world_id,
+                    external_metrics.as_ref(),
+                    auction_application::MailPhase::PollBatch,
+                    auction_application::MailBudget::Time,
+                );
                 worker_diagnostics::warn(
                     "mail_poll",
                     "lookup_completion_timeout",
@@ -335,6 +364,12 @@ where
         let Some(process_remaining) =
             batch_deadline.checked_duration_since(std::time::Instant::now())
         else {
+            super::types::observe_budget(
+                &world_id,
+                external_metrics.as_ref(),
+                auction_application::MailPhase::PollBatch,
+                auction_application::MailBudget::Time,
+            );
             budget_exhausted = true;
             break;
         };
@@ -387,6 +422,12 @@ where
                         break;
                     }
                     Err(error) => {
+                        super::types::observe_budget(
+                            &world_id,
+                            external_metrics.as_ref(),
+                            auction_application::MailPhase::PollBatch,
+                            auction_application::MailBudget::Time,
+                        );
                         worker_diagnostics::warn(
                             "mail_poll",
                             "process_batch_timeout",

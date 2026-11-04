@@ -142,6 +142,120 @@ label，均只计 Worker 阶段指标，不映射为 `BusinessEvent::MailIntake`
 
 Read Mail 日志的 `read_observed` 始终是完整列表数量；观察降频只改变采样节奏，失败不输出部分数量。配置与回退见[配置参考](../../ops/config/README.md#mooglemail-收件与维护)。
 
+### 外部账号客户端指标（W0.4/W0.5）
+
+`ProcessMetrics::external_metrics` 只在 Worker 角色注入真实记录器；
+其他角色或关闭 metrics 时使用同一 no-op。记录器同步、无 I/O、无 `.await`，
+不改变请求间隔、锁范围与顺序、deadline、重试、取消、写入围栏或“未知不重发”；
+指标调用先于日志过滤与去重。客户端物理请求、共享读取、Worker 预算和导入估计
+属于不同层，计数不可相加当作“总失败”。
+本包只拥有注册与记录；采集与保存仍依赖 W0.10 的 loopback 出口和外部 Prometheus。
+
+#### MoogleMail（W0.4）
+
+| 指标 | 类型 | labels 与口径 |
+| --- | --- | --- |
+| `auction_mooglemail_requests_total` | Counter | `{world,operation}`；物理执行前加一，不证明对端收到 |
+| `auction_mooglemail_request_results_total` | Counter | `{world,operation,category}` |
+| `auction_mooglemail_request_signals_total` | Counter | `{world,operation,kind}` |
+| `auction_mooglemail_request_gate_wait_seconds` | Histogram | `{world,operation,outcome}` |
+| `auction_mooglemail_lock_wait_seconds` | Histogram | `{world,operation,lock,outcome}`；只测获取等待 |
+| `auction_mooglemail_budget_exhaustions_total` | Counter | `{world,phase,budget}`；预算 owner 至多一次 |
+| `auction_mooglemail_request_interval_seconds` | Gauge | 无 world；共享门的配置间隔，不是实测请求间隔。 |
+
+`world` 只能是 `main/isekai`。`operation` 为 `inbox`、`read_mail`、`detail`、
+`sent`、`sent_detail`、`balance`、`equipment`、`identity`、`inventory`、
+`inventory_organize`、`equipment_unstore`、`equipment_unlock`、`compose`、
+`attach_add`、`attach_cod`、`send`、`return_message`、`attach_remove`、`discard`；
+保留既有 `Take → attach_remove` 命名。`category` 为 `ok/canceled` 加
+`configuration`、`credential_unavailable`、`session_expired`、`account_busy`、
+`rate_limited`、`remote_temporary`、`sent_scan_page_limit`、`sent_scan_timeout`、
+`persistence_unavailable`、`response_too_large`、`protocol_drift`、
+`identity_mismatch`、`identity_unproven`、`not_observed`、`write_unknown`。
+门等待 `outcome` 为 `acquired/error/canceled`；锁等待只用 `acquired/canceled`。
+
+`phase` 为 `poll_fetch`、`poll_batch`、`maintenance`、`read_observation`、
+`shared_read`、`sent_scan`、`read_scan`、`sent_baseline_before`、
+`sent_baseline_after`；`budget=time/pages`。`poll_fetch`、`poll_batch`、
+`maintenance`、`read_observation` 只记录 `time`；`sent_scan`、`read_scan`、
+`shared_read`、`sent_baseline_before/after` 记录 `time` 或 `pages`。
+共享读取的物理请求在其共享任务内计数；等待者与缓存复用不重复计数。
+维护/观察的正常排空取消不冒充预算耗尽；批次即使提交成功前缀，也保留已发生的耗尽。
+
+请求门/锁等待直方图桶为
+`0.001、0.01、0.05、0.1、0.5、0.75、1、2、5、15、30、60、120、300` 秒，
+另有 `+Inf`。维护/观察耗时继续使用 W1.0 的
+`auction_worker_loop_iteration_duration_seconds`，不另建同义耗时族。
+
+#### 论坛客户端（W0.5）
+
+| 指标 | 类型 | labels 与口径 |
+| --- | --- | --- |
+| `auction_forum_requests_total` | Counter | `{world,operation}`；物理请求边界，共享读取的等待者不重复计数。 |
+| `auction_forum_request_results_total` | Counter | `{world,operation,category}`；含取消。 |
+| `auction_forum_request_signals_total` | Counter | `{world,operation,kind}` |
+| `auction_forum_request_gate_wait_seconds` | Histogram | `{world,operation,outcome}`。 |
+| `auction_forum_request_interval_seconds` | Gauge | 无 world；共享门的配置间隔。 |
+| `auction_forum_topic_scan_pages` | Histogram | `{world,mode,measure,outcome}`；见下节 |
+| `auction_forum_write_unknown_total` | Counter | `{world,operation}`；每次逻辑写入返回未知结果一次。 |
+| `auction_forum_pm_operations_total` | Counter | `{world,phase,outcome,category}`。 |
+| `auction_forum_budget_exhaustions_total` | Counter | `{world,phase}` |
+| `auction_forum_reply_delay_estimate_seconds` | Histogram | `{world,phase,method,bound}`；见下节 |
+| `auction_forum_reply_delay_samples_total` | Counter | `{world,phase,method,outcome}`；覆盖与缺样 |
+
+`world` 为 `main/isekai/shared`；`shared` 只用于无权威世界上下文的资料读取，
+主题与 PM 不使用。`operation` 为 `check_session`、`create_topic`、
+`reconcile_topic`、`fetch_topic`、`reply_topic`、`edit_post`、`read_post`、
+`profile`、`pm_prepare`、`pm_send`、`pm_sent_list`、`pm_sent_detail`。
+`category` 为 `ok/canceled` 加 `configuration`、`credential_unavailable`、
+`session_expired`、`rate_limited`、`remote_temporary`、`cloudflare`、
+`topic_locked`、`permission_denied`、`response_too_large`、`protocol_drift`、
+`write_unknown`。
+
+主题扫描当前只记录 `mode=full`。`discovered` 表示导航声明的页数，
+在页数上限拒绝前记录；`processed` 表示已消费并校验的页数，成功为 `complete`，
+失败为 `error`，取消为 `canceled`。并发读取任务数不是扫描页数，实际开销仍看请求计数。
+页数桶为 `0、1、2、3、5、8、10、15、20、50、100`。
+
+`write_unknown` 只在逻辑写入的远端结果未知时加一，包括写后会话失效、缺少精确证明，
+以及越过写入边界后的取消；只读核对失败不算新的未知写入。
+PM 合法组合：prepare 为 `prepared/error`，send 为 `proved/unknown`，
+reconcile 为 `proved/not_observed/error`，尚未进入写阶段的取消可记 `canceled`；
+`category` 为 `none/unavailable/authentication/rate_limited/`
+`invalid_recipient/protocol/outcome_unknown`。
+`proved` 必须已有完整回执；`not_observed` 不表示未发送。
+
+#### 回帖导入延迟
+
+终点是每个回帖第一条**新**命令账本提交得到确认，不是竞价最终接受。
+`pending` 重试与已完成命令重放不计新命令；提交回执丢失可能漏样，不补造零样本。
+`ForumCommandStart.is_new` 只表达本次是否首次插入，不进入浏览器 DTO。
+领取时从已连接的拍卖状态投影 `phase=normal/final/unknown`；跨阶段样本
+不能作为严格 Final SLA 证明。
+
+本批只实现 `method=poll_window`。上次完整扫描开始为 `A`，本次完整扫描完成为 `B`，
+首次导入确认为 `I`，记录区间 `[I-B, I-A]` 与中点；中点只是统计估计。
+该方法依赖完整扫描与稳定可见性假设，窗口宽度包含扫描间隔和扫描耗时，
+不能用配置轮询间隔代替。首次扫描、覆盖不完整、重启、状态淘汰或时钟异常时
+不填零：`outcome` 为 `observed/missing_baseline/coverage_unknown/state_evicted/`
+`timestamp_unavailable/clock_invalid`。估计器只保存有界内部 ID 与单调时刻，
+不含玩家名、MID、正文、URL 或凭据。
+
+`method=posted_minute` 本批不实现；只有后续核实页头时间、时区和 DST 后才扩展，
+分钟值应解释为 `[T,T+60s)`。延迟桶为
+`1、5、10、30、60、120、300、600、1800、3600、86400` 秒。
+Final 分位目标、允许误差与最低覆盖率由 W0.13 定义；本批只提供样本与覆盖率，
+不宣称 SLO 达标。
+
+#### 与计划详情页的差异
+
+W0.4 原列 `poll/cycle.rs` 为主要接入点；W1.0 后维护/观察的实际预算 owner
+已在 `worker/mail/maintenance/`，预算指标按该 owner 记录。客户端默认间隔、
+Worker 默认 fetch 预算与 W0.12 记录的线上值不可混用。W1.4 当前只交付发送基线切片，
+不含常规 Sent/Read Mail 持久水位。当前解析模型没有发帖时间；
+“没有发帖时间”只表示代码未提取，不表示线上页头没有时间。W0.12 记录指标开关
+全部关闭且没有存储，因此本批只完成实现与静态门禁，实采仍依赖 W0.10。
+
 ### 工作项子任务 panic
 
 `auction_worker_task_panics_total{loop}` 使用全部 15 个 `WorkerLoop` label，
@@ -473,12 +587,12 @@ channel 仅 mm/pm；当前也不注册，不用零值替代不可评估。
 
 ### Final 回帖导入与目标确认
 
-Final 回帖导入延迟引用 W0.5，采集由外部账号指标 owner 负责：
-`auction_forum_reply_import_delay_estimate_seconds{world,phase,method,bound}`，
+Final 回帖导入延迟已由 W0.5 接入：
+`auction_forum_reply_delay_estimate_seconds{world,phase,method,bound}`，
 bound 为 lower/midpoint/upper；以及
 `auction_forum_reply_delay_samples_total{world,phase,method,outcome}`。
-method/outcome 沿用 W0.5 闭集，不在本批新增采集或重算远端时间。
-记录规则只对样本按 outcome 记录，边界表达式保留接口草案，待 W0.5 合入确认。
+当前 method 只有 `poll_window`，`posted_minute` 留待核实页头时间后扩展。
+终点是第一条新命令账本提交得到确认，导入确认不等于竞价最终接受。
 目标必须同时约束延迟上界、估计区间宽度和有效估计覆盖率，不能只约束 midpoint。
 若源为直方图，分位边界之差仅表示分位估计区间，不等于逐样本宽度的分位。
 当前基线尚无 W0.5 序列，缺测不能解释为零延迟或覆盖率达标。

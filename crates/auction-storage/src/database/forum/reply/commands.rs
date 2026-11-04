@@ -70,6 +70,7 @@ pub(super) async fn begin_command_postgres(
             command_id: record.command_id,
             status: ForumCommandStatus::Pending,
             should_run: true,
+            is_new: true,
         });
     }
 
@@ -167,7 +168,7 @@ pub(super) async fn begin_command_postgres(
         .commit()
         .await
         .map_err(|error| storage_error_from(error, "提交既有论坛命令账本事务失败"))?;
-    Ok(ForumCommandStart { command_id: existing_command_id, status, should_run })
+    Ok(ForumCommandStart { command_id: existing_command_id, status, should_run, is_new: false })
 }
 
 #[cfg(feature = "postgres")]

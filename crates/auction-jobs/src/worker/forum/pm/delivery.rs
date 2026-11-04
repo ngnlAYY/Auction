@@ -11,12 +11,14 @@ pub(super) async fn process(
     drain: &watch::Receiver<bool>,
     deadline: tokio::time::Instant,
     activity: &auction_application::ExternalWriteActivity,
+    claimed_world: &std::sync::Mutex<Option<auction_domain::SettlementWorld>>,
 ) -> Result<(), LotWatchError> {
     check_deadline(deadline)?;
     let Some(mut claim) = runtime.store.claim(request).await? else {
         return Ok(());
     };
-    check_deadline(deadline)?;
+    set_claimed_world(claimed_world, claim.world);
+    check_claim_deadline(runtime, claim.world, deadline)?;
     if claim.reconcile {
         let sender = claim
             .sender
@@ -46,7 +48,7 @@ pub(super) async fn process(
             })
             .ok()
             .flatten();
-        check_deadline(deadline)?;
+        check_claim_deadline(runtime, claim.world, deadline)?;
         return runtime.store.finish(claim, receipt).await;
     }
     if *drain.borrow() {
@@ -56,7 +58,7 @@ pub(super) async fn process(
         return runtime.store.release_unsent(claim).await;
     }
     let prepared = runtime.sender.prepare(claim.world, &claim.message).await;
-    check_deadline(deadline)?;
+    check_claim_deadline(runtime, claim.world, deadline)?;
     let prepared = match prepared {
         Ok(prepared) => prepared,
         // prepare 契约保证只有 GET，只有这阶段才允许安全延期。
@@ -93,7 +95,7 @@ pub(super) async fn process(
     if !runtime.store.start_sending(claim.clone(), sender.clone()).await? {
         return Ok(());
     }
-    check_deadline(deadline)?;
+    check_claim_deadline(runtime, claim.world, deadline)?;
     claim.sender = Some(sender);
     // start 提交响应未知直接返回；绝不执行 POST，也绝不释放回 pending。
     let receipt = if !activity.enabled() && *drain.borrow() {
@@ -116,7 +118,7 @@ pub(super) async fn process(
             })
             .ok()
     };
-    check_deadline(deadline)?;
+    check_claim_deadline(runtime, claim.world, deadline)?;
     runtime.store.finish(claim, receipt).await?;
     activity.complete();
     Ok(())
@@ -125,4 +127,27 @@ pub(super) async fn process(
 /// timeout 可能先 poll 出迟到回执；每次阶段交接都复核原截止，过期后只保留持久 claim。
 fn check_deadline(deadline: tokio::time::Instant) -> Result<(), LotWatchError> {
     if tokio::time::Instant::now() >= deadline { Err(LotWatchError::Unavailable) } else { Ok(()) }
+}
+
+fn check_claim_deadline(
+    runtime: &LotWatchPmRuntime,
+    world: auction_domain::SettlementWorld,
+    deadline: tokio::time::Instant,
+) -> Result<(), LotWatchError> {
+    if tokio::time::Instant::now() >= deadline {
+        runtime.observe_budget(world, auction_application::ForumBudgetPhase::PmItem);
+        Err(LotWatchError::Unavailable)
+    } else {
+        Ok(())
+    }
+}
+
+fn set_claimed_world(
+    claimed_world: &std::sync::Mutex<Option<auction_domain::SettlementWorld>>,
+    world: auction_domain::SettlementWorld,
+) {
+    match claimed_world.lock() {
+        Ok(mut guard) => *guard = Some(world),
+        Err(poisoned) => *poisoned.into_inner() = Some(world),
+    }
 }

@@ -217,10 +217,23 @@ impl MoogleMailSender {
                 safe_diagnostics::project(&diagnostic_cause),
                 DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
             );
+            self.observe_budget(
+                world,
+                auction_application::MailPhase::SentScan,
+                auction_application::MailBudget::Time,
+            );
             proof::scan_timeout(world)
         })??;
-        proof::check_deadline(deadline, world)?;
+        if let Err(error) = proof::check_deadline(deadline, world) {
+            self.observe_budget_error(world, auction_application::MailPhase::SentScan, &error);
+            return Err(error);
+        }
         if !list.complete {
+            self.observe_budget(
+                world,
+                auction_application::MailPhase::SentScan,
+                auction_application::MailBudget::Pages,
+            );
             return Err(self.scan_page_limit(world, "maintenance", list.summaries.len()));
         }
         let summaries = list
@@ -233,7 +246,10 @@ impl MoogleMailSender {
                 sent_at: summary.sent_at,
             })
             .collect();
-        proof::check_deadline(deadline, world)?;
+        if let Err(error) = proof::check_deadline(deadline, world) {
+            self.observe_budget_error(world, auction_application::MailPhase::SentScan, &error);
+            return Err(error);
+        }
         Ok(summaries)
     }
 
@@ -259,14 +275,30 @@ impl MoogleMailSender {
                 safe_diagnostics::project(&diagnostic_cause),
                 DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
             );
+            self.observe_budget(
+                world,
+                auction_application::MailPhase::ReadScan,
+                auction_application::MailBudget::Time,
+            );
             proof::scan_timeout(world)
         })??;
-        proof::check_deadline(deadline, world)?;
+        if let Err(error) = proof::check_deadline(deadline, world) {
+            self.observe_budget_error(world, auction_application::MailPhase::ReadScan, &error);
+            return Err(error);
+        }
         if !list.complete {
+            self.observe_budget(
+                world,
+                auction_application::MailPhase::ReadScan,
+                auction_application::MailBudget::Pages,
+            );
             return Err(MoogleMailError::protocol_drift(MoogleMailOperation::ReadMail, world));
         }
         let summaries = list.summaries.clone();
-        proof::check_deadline(deadline, world)?;
+        if let Err(error) = proof::check_deadline(deadline, world) {
+            self.observe_budget_error(world, auction_application::MailPhase::ReadScan, &error);
+            return Err(error);
+        }
         Ok(summaries)
     }
 
@@ -292,6 +324,11 @@ impl MoogleMailSender {
                 .await?;
             proof::check_deadline(deadline, world)?;
             if !inbox.complete {
+                self.observe_budget(
+                    world,
+                    auction_application::MailPhase::SharedRead,
+                    auction_application::MailBudget::Pages,
+                );
                 return Err(MoogleMailError::protocol_drift(MoogleMailOperation::Inbox, world));
             }
             let summary =
@@ -313,6 +350,11 @@ impl MoogleMailSender {
                 .await?;
             proof::check_deadline(deadline, world)?;
             if !read.complete {
+                self.observe_budget(
+                    world,
+                    auction_application::MailPhase::SharedRead,
+                    auction_application::MailBudget::Pages,
+                );
                 return Err(MoogleMailError::protocol_drift(MoogleMailOperation::ReadMail, world));
             }
             let summary =
@@ -334,9 +376,17 @@ impl MoogleMailSender {
                 safe_diagnostics::project(&diagnostic_cause),
                 DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
             );
+            self.observe_budget(
+                world,
+                auction_application::MailPhase::SharedRead,
+                auction_application::MailBudget::Time,
+            );
             proof::scan_timeout(world)
         })?;
-        proof::check_deadline(deadline, world)?;
+        if let Err(error) = proof::check_deadline(deadline, world) {
+            self.observe_budget_error(world, auction_application::MailPhase::SharedRead, &error);
+            return Err(error);
+        }
         result
     }
 

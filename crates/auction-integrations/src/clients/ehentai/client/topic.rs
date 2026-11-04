@@ -2,6 +2,7 @@
 
 use auction_application::diagnostics::DiagnosticContext;
 
+use crate::clients::metrics::forum_operation;
 use crate::diagnostics as safe_diagnostics;
 
 use std::sync::LazyLock;
@@ -31,6 +32,7 @@ static ACKNOWLEDGEMENT_REFRESH_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLo
 
 struct FixedPostFormTarget<'a> {
     operation: EhentaiOperation,
+    metrics_world: auction_application::ForumWorld,
     url: Url,
     board_id: i32,
     thread_id: &'a str,
@@ -43,6 +45,7 @@ impl EhentaiClient {
         &self,
         board_id: i32,
         board_url: &Url,
+        metrics_world: auction_application::ForumWorld,
         cookie: &EhentaiCookie,
     ) -> Result<TopicForm, EhentaiError> {
         let operation = EhentaiOperation::CreateTopic;
@@ -51,7 +54,15 @@ impl EhentaiClient {
             &[("act", "Post"), ("CODE", "00"), ("f", board_value.as_str())],
             operation,
         )?;
-        let (body, _) = self.get_page(operation, target.clone(), Some(board_url), cookie).await?;
+        let (body, _) = self
+            .get_page(
+                operation,
+                auction_application::ForumOperation::CreateTopic,
+                ForumRequestScope::new(metrics_world, cookie),
+                target.clone(),
+                Some(board_url),
+            )
+            .await?;
         let html = std::str::from_utf8(&body).map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
                 "forum_topic",
@@ -131,6 +142,7 @@ impl EhentaiClient {
         form: TopicForm,
         board_id: i32,
         rendered: ForumRenderedThread,
+        metrics_world: auction_application::ForumWorld,
         cookie: &EhentaiCookie,
     ) -> Result<auction_application::ForumPublishedThread, EhentaiError> {
         let operation = EhentaiOperation::CreateTopic;
@@ -142,8 +154,16 @@ impl EhentaiClient {
         set_form_value(&mut values, "REPLIER", "1".to_owned());
         set_form_value(&mut values, "bbmode", "normal".to_owned());
         set_form_value(&mut values, "enableemo", "yes".to_owned());
-        let (status, location, body) =
-            self.submit_form(&form.action, &form.referer, values, operation, cookie).await?;
+        let (status, location, body) = self
+            .submit_form(
+                &form.action,
+                &form.referer,
+                values,
+                operation,
+                auction_application::ForumOperation::CreateTopic,
+                ForumRequestScope::new(metrics_world, cookie),
+            )
+            .await?;
         if is_session_expired(status, location.as_ref(), &body) {
             return Err(EhentaiError::new(
                 operation,
@@ -176,8 +196,10 @@ impl EhentaiClient {
         referer: &Url,
         values: Vec<(String, String)>,
         operation: EhentaiOperation,
-        cookie: &EhentaiCookie,
+        metrics_operation: auction_application::ForumOperation,
+        scope: ForumRequestScope<'_>,
     ) -> Result<(StatusCode, Option<HeaderValue>, Vec<u8>), EhentaiError> {
+        let ForumRequestScope { metrics_world, cookie } = scope;
         if values.len() > MAXIMUM_FORM_FIELDS {
             return Err(EhentaiError::protocol(operation, false));
         }
@@ -185,7 +207,7 @@ impl EhentaiClient {
             .extend_pairs(values.iter().map(|(name, value)| (name.as_str(), value.as_str())))
             .finish();
 
-        self.wait_rate(operation).await?;
+        self.wait_rate(operation, metrics_world, metrics_operation).await?;
         // 尚未发送本次 POST；历史或前序写入的未知状态由调用方进度和持久门禁保留。
         self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
@@ -213,25 +235,54 @@ impl EhentaiClient {
                 return Err(EhentaiError::credential(operation));
             }
         }
-        let response = request.send().await.map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "submit_form",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext { write_started: Some(true), ..Default::default() },
-            );
-            EhentaiError::write_unknown(operation)
-        })?;
-        let status = response.status();
-        let location = response.headers().get(header::LOCATION).cloned();
-        let body = self.read_response(response, operation, true).await?;
-        Ok((status, location, body))
+        let request_metrics = crate::clients::metrics::ForumRequestGuard::start(
+            std::sync::Arc::clone(&self.external_metrics),
+            metrics_world,
+            metrics_operation,
+        );
+        let result = async {
+            let response = request.send().await.map_err(|diagnostic_cause| {
+                if diagnostic_cause.is_timeout() {
+                    crate::clients::metrics::forum_signal(
+                        self.external_metrics.as_ref(),
+                        metrics_world,
+                        metrics_operation,
+                        auction_application::ForumSignal::Timeout,
+                    );
+                }
+                safe_diagnostics::warn(
+                    "forum_topic",
+                    "submit_form",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext { write_started: Some(true), ..Default::default() },
+                );
+                EhentaiError::write_unknown(operation)
+            })?;
+            let status = response.status();
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                crate::clients::metrics::forum_signal(
+                    self.external_metrics.as_ref(),
+                    metrics_world,
+                    metrics_operation,
+                    auction_application::ForumSignal::RateLimited,
+                );
+            }
+            let location = response.headers().get(header::LOCATION).cloned();
+            let body = self
+                .read_response(response, operation, metrics_world, metrics_operation, true)
+                .await?;
+            Ok((status, location, body))
+        }
+        .await;
+        request_metrics.finish(crate::clients::metrics::forum_result(&result));
+        result
     }
 
     pub(super) async fn load_reply_form(
         &self,
         board_id: i32,
         thread_id: &str,
+        metrics_world: auction_application::ForumWorld,
         cookie: &EhentaiCookie,
     ) -> Result<PostForm, EhentaiError> {
         let board = board_id.to_string();
@@ -242,6 +293,7 @@ impl EhentaiClient {
         self.load_fixed_post_form(
             FixedPostFormTarget {
                 operation: EhentaiOperation::ReplyTopic,
+                metrics_world,
                 url: target,
                 board_id,
                 thread_id,
@@ -258,6 +310,7 @@ impl EhentaiClient {
         board_id: i32,
         thread_id: &str,
         post_id: &str,
+        metrics_world: auction_application::ForumWorld,
         cookie: &EhentaiCookie,
     ) -> Result<PostForm, EhentaiError> {
         let board = board_id.to_string();
@@ -275,6 +328,7 @@ impl EhentaiClient {
         self.load_fixed_post_form(
             FixedPostFormTarget {
                 operation: EhentaiOperation::EditPost,
+                metrics_world,
                 url: target,
                 board_id,
                 thread_id,
@@ -292,8 +346,15 @@ impl EhentaiClient {
         cookie: &EhentaiCookie,
     ) -> Result<PostForm, EhentaiError> {
         let topic = self.index_url(&[("showtopic", target.thread_id)], target.operation)?;
-        let (body, _) =
-            self.get_page(target.operation, target.url.clone(), Some(&topic), cookie).await?;
+        let (body, _) = self
+            .get_page(
+                target.operation,
+                forum_operation(target.operation),
+                ForumRequestScope::new(target.metrics_world, cookie),
+                target.url.clone(),
+                Some(&topic),
+            )
+            .await?;
         let html = std::str::from_utf8(&body).map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
                 "forum_topic",
@@ -392,7 +453,7 @@ impl EhentaiClient {
         thread_id: &str,
         edit: Option<(&str, Option<&str>, Option<&str>)>,
         rendered: ForumRenderedPost,
-        cookie: &EhentaiCookie,
+        scope: ForumRequestScope<'_>,
     ) -> Result<ForumPublishedPost, EhentaiError> {
         let operation =
             if edit.is_some() { EhentaiOperation::EditPost } else { EhentaiOperation::ReplyTopic };
@@ -418,8 +479,16 @@ impl EhentaiClient {
                 set_form_value(&mut values, "TopicDesc", description.to_owned());
             }
         }
-        let (status, location, body) =
-            self.submit_form(&form.action, &form.referer, values, operation, cookie).await?;
+        let (status, location, body) = self
+            .submit_form(
+                &form.action,
+                &form.referer,
+                values,
+                operation,
+                forum_operation(operation),
+                scope,
+            )
+            .await?;
         if is_session_expired(status, location.as_ref(), &body) {
             return Err(EhentaiError::new(
                 operation,

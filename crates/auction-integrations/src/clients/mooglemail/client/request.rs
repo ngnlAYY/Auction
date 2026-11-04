@@ -2,6 +2,7 @@
 
 use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
 
+use crate::clients::metrics::{MailGateWaitGuard, MailRequestGuard, mail_result, mail_signal};
 use crate::diagnostics as safe_diagnostics;
 
 use super::security::{
@@ -51,7 +52,18 @@ impl MoogleMailClient {
         if target.origin != self.builder.origin {
             return Err(self.configuration(target));
         }
-        self.gate.wait().await.map_err(|diagnostic_cause| {
+        let gate_wait = MailGateWaitGuard::start(
+            std::sync::Arc::clone(&self.external_metrics),
+            target.world,
+            target.operation,
+        );
+        let gate_result = self.gate.wait().await;
+        gate_wait.finish(if gate_result.is_ok() {
+            auction_application::WaitOutcome::Acquired
+        } else {
+            auction_application::WaitOutcome::Error
+        });
+        gate_result.map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
                 "mooglemail_read",
                 "wait_rate",
@@ -130,126 +142,157 @@ impl MoogleMailClient {
                 false,
             ));
         }
-        let response = self.client.execute(request).await.map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "mooglemail_read",
-                "fetch_page",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext {
-                    world: diagnostic_world(target.world.as_str()),
-                    ..Default::default()
-                },
-            );
+        let request_metrics = MailRequestGuard::start(
+            std::sync::Arc::clone(&self.external_metrics),
+            target.world,
+            target.operation,
+        );
+        let result = async {
+            let response = self.client.execute(request).await.map_err(|diagnostic_cause| {
+                if diagnostic_cause.is_timeout() {
+                    mail_signal(
+                        self.external_metrics.as_ref(),
+                        target.world,
+                        target.operation,
+                        auction_application::MailSignal::Timeout,
+                    );
+                }
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "fetch_page",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(target.world.as_str()),
+                        ..Default::default()
+                    },
+                );
 
-            MoogleMailError::new(
-                target.operation,
-                target.world,
-                MoogleMailErrorCategory::RemoteTemporary,
-                true,
-            )
-        })?;
-        diagnostic.status = Some(response.status().as_u16());
+                MoogleMailError::new(
+                    target.operation,
+                    target.world,
+                    MoogleMailErrorCategory::RemoteTemporary,
+                    true,
+                )
+            })?;
+            diagnostic.status = Some(response.status().as_u16());
 
-        if response.url().as_str() != target.url.as_str() {
-            return Err(self.protocol(target));
-        }
-        if response
-            .headers()
-            .get(header::CONTENT_ENCODING)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| {
-                !value.trim().is_empty() && !value.eq_ignore_ascii_case("identity")
-            })
-            || response
-                .content_length()
-                .is_some_and(|length| length > self.maximum_response_bytes as u64)
-        {
-            return Err(self.response_too_large(target));
-        }
-        let status = response.status();
-        let location = response.headers().get(header::LOCATION).cloned();
-        let is_html = is_html_content_type(response.headers());
-        let is_javascript =
-            target.inventory_metadata && is_javascript_content_type(response.headers());
-
-        diagnostic.body =
-            Some(self.read_response_body(response, target.operation, target.world, false).await?);
-        let body = diagnostic.body.as_deref().ok_or_else(|| self.protocol(target))?;
-
-        // 名称脚本不是 HTML；避免把装备名中的登录或战斗文字当作页面状态。
-        if !is_javascript && is_session_expired(status, location.as_ref(), body) {
-            return Err(MoogleMailError::new(
-                target.operation,
-                target.world,
-                MoogleMailErrorCategory::SessionExpired,
-                false,
-            ));
-        }
-        if !is_javascript && is_hentaiverse_battle_response(body) {
-            return Err(MoogleMailError::new(
-                target.operation,
-                target.world,
-                MoogleMailErrorCategory::AccountBusy,
-                true,
-            ));
-        }
-        if status == StatusCode::TOO_MANY_REQUESTS {
-            return Err(MoogleMailError::new(
-                target.operation,
-                target.world,
-                MoogleMailErrorCategory::RateLimited,
-                true,
-            ));
-        }
-        if status.is_server_error() {
-            return Err(MoogleMailError::new(
-                target.operation,
-                target.world,
-                MoogleMailErrorCategory::RemoteTemporary,
-                true,
-            ));
-        }
-        if target.inventory_metadata {
-            let script = body.strip_prefix(b"\xef\xbb\xbf").unwrap_or(body);
-            if status != StatusCode::OK
-                || !is_javascript
-                || script
-                    .iter()
-                    .find(|byte| !byte.is_ascii_whitespace())
-                    .is_none_or(|byte| *byte == b'<')
-            {
+            if response.url().as_str() != target.url.as_str() {
                 return Err(self.protocol(target));
             }
-        } else if !status.is_success() || !is_html {
-            return Err(self.protocol(target));
-        }
-        self.check_ownership().await.map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "mooglemail_read",
-                "check_response_owner",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext {
-                    world: diagnostic_world(target.world.as_str()),
-                    ..Default::default()
-                },
-            );
+            if response
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| {
+                    !value.trim().is_empty() && !value.eq_ignore_ascii_case("identity")
+                })
+                || response
+                    .content_length()
+                    .is_some_and(|length| length > self.maximum_response_bytes as u64)
+            {
+                return Err(self.response_too_large(target));
+            }
+            let status = response.status();
+            let location = response.headers().get(header::LOCATION).cloned();
+            let is_html = is_html_content_type(response.headers());
+            let is_javascript =
+                target.inventory_metadata && is_javascript_content_type(response.headers());
 
-            MoogleMailError::new(
-                target.operation,
-                target.world,
-                MoogleMailErrorCategory::CredentialUnavailable,
-                false,
-            )
-        })?;
-        if !cookie.is_active() {
-            return Err(MoogleMailError::new(
-                target.operation,
-                target.world,
-                MoogleMailErrorCategory::CredentialUnavailable,
-                false,
-            ));
+            diagnostic.body = Some(
+                self.read_response_body(response, target.operation, target.world, false).await?,
+            );
+            let body = diagnostic.body.as_deref().ok_or_else(|| self.protocol(target))?;
+
+            // 名称脚本不是 HTML；避免把装备名中的登录或战斗文字当作页面状态。
+            if !is_javascript && is_session_expired(status, location.as_ref(), body) {
+                return Err(MoogleMailError::new(
+                    target.operation,
+                    target.world,
+                    MoogleMailErrorCategory::SessionExpired,
+                    false,
+                ));
+            }
+            if !is_javascript && is_hentaiverse_battle_response(body) {
+                mail_signal(
+                    self.external_metrics.as_ref(),
+                    target.world,
+                    target.operation,
+                    auction_application::MailSignal::AccountBusy,
+                );
+                return Err(MoogleMailError::new(
+                    target.operation,
+                    target.world,
+                    MoogleMailErrorCategory::AccountBusy,
+                    true,
+                ));
+            }
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                mail_signal(
+                    self.external_metrics.as_ref(),
+                    target.world,
+                    target.operation,
+                    auction_application::MailSignal::RateLimited,
+                );
+                return Err(MoogleMailError::new(
+                    target.operation,
+                    target.world,
+                    MoogleMailErrorCategory::RateLimited,
+                    true,
+                ));
+            }
+            if status.is_server_error() {
+                return Err(MoogleMailError::new(
+                    target.operation,
+                    target.world,
+                    MoogleMailErrorCategory::RemoteTemporary,
+                    true,
+                ));
+            }
+            if target.inventory_metadata {
+                let script = body.strip_prefix(b"\xef\xbb\xbf").unwrap_or(body);
+                if status != StatusCode::OK
+                    || !is_javascript
+                    || script
+                        .iter()
+                        .find(|byte| !byte.is_ascii_whitespace())
+                        .is_none_or(|byte| *byte == b'<')
+                {
+                    return Err(self.protocol(target));
+                }
+            } else if !status.is_success() || !is_html {
+                return Err(self.protocol(target));
+            }
+            self.check_ownership().await.map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "check_response_owner",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(target.world.as_str()),
+                        ..Default::default()
+                    },
+                );
+
+                MoogleMailError::new(
+                    target.operation,
+                    target.world,
+                    MoogleMailErrorCategory::CredentialUnavailable,
+                    false,
+                )
+            })?;
+            if !cookie.is_active() {
+                return Err(MoogleMailError::new(
+                    target.operation,
+                    target.world,
+                    MoogleMailErrorCategory::CredentialUnavailable,
+                    false,
+                ));
+            }
+            diagnostic.body.take().ok_or_else(|| self.protocol(target))
         }
-        diagnostic.body.take().ok_or_else(|| self.protocol(target))
+        .await;
+        request_metrics.finish(mail_result(&result));
+        result
     }
 
     /// 对 compose/detail/Armory organize typed target 执行恰好一次表单 POST。
@@ -290,7 +333,18 @@ impl MoogleMailClient {
         if target.origin != self.builder.origin || !post_allowed(target.operation, operation) {
             return Err(self.configuration_for(operation, target.world));
         }
-        self.gate.wait().await.map_err(|diagnostic_cause| {
+        let gate_wait = MailGateWaitGuard::start(
+            std::sync::Arc::clone(&self.external_metrics),
+            target.world,
+            operation,
+        );
+        let gate_result = self.gate.wait().await;
+        gate_wait.finish(if gate_result.is_ok() {
+            auction_application::WaitOutcome::Acquired
+        } else {
+            auction_application::WaitOutcome::Error
+        });
+        gate_result.map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
                 "mooglemail_send",
                 "wait_rate",
@@ -379,61 +433,87 @@ impl MoogleMailClient {
                 );
                 self.write_unknown(operation, target.world)
             })?;
-        let response = self.client.execute(request).await.map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "mooglemail_send",
-                "submit_request",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext {
-                    world: diagnostic_world(target.world.as_str()),
-                    write_started: Some(true),
-                    ..Default::default()
-                },
-            );
-            self.write_unknown(operation, target.world)
-        })?;
-        diagnostic.status = Some(response.status().as_u16());
+        let request_metrics = MailRequestGuard::start(
+            std::sync::Arc::clone(&self.external_metrics),
+            target.world,
+            operation,
+        );
+        let result = async {
+            let response = self.client.execute(request).await.map_err(|diagnostic_cause| {
+                if diagnostic_cause.is_timeout() {
+                    mail_signal(
+                        self.external_metrics.as_ref(),
+                        target.world,
+                        operation,
+                        auction_application::MailSignal::Timeout,
+                    );
+                }
+                safe_diagnostics::warn(
+                    "mooglemail_send",
+                    "submit_request",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(target.world.as_str()),
+                        write_started: Some(true),
+                        ..Default::default()
+                    },
+                );
+                self.write_unknown(operation, target.world)
+            })?;
+            diagnostic.status = Some(response.status().as_u16());
 
-        if response.url().as_str() != target.url.as_str() {
-            return Err(self.write_unknown(operation, target.world));
+            if response.url().as_str() != target.url.as_str() {
+                return Err(self.write_unknown(operation, target.world));
+            }
+            if response
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| {
+                    !value.trim().is_empty() && !value.eq_ignore_ascii_case("identity")
+                })
+                || response
+                    .content_length()
+                    .is_some_and(|length| length > self.maximum_response_bytes as u64)
+            {
+                return Err(self.write_unknown(operation, target.world));
+            }
+            let status = response.status();
+            let location = response.headers().get(header::LOCATION).cloned();
+            let is_html = is_html_content_type(response.headers());
+            diagnostic.body =
+                Some(self.read_response_body(response, operation, target.world, true).await?);
+            let body = diagnostic
+                .body
+                .as_deref()
+                .ok_or_else(|| self.write_unknown(operation, target.world))?;
+            if is_session_expired(status, location.as_ref(), body) {
+                return Err(MoogleMailError::after_write(
+                    operation,
+                    target.world,
+                    MoogleMailErrorCategory::SessionExpired,
+                ));
+            }
+            if status == StatusCode::TOO_MANY_REQUESTS
+                || status.is_server_error()
+                || !status.is_success()
+                || !is_html
+            {
+                if status == StatusCode::TOO_MANY_REQUESTS {
+                    mail_signal(
+                        self.external_metrics.as_ref(),
+                        target.world,
+                        operation,
+                        auction_application::MailSignal::RateLimited,
+                    );
+                }
+                return Err(self.write_unknown(operation, target.world));
+            }
+            diagnostic.body.take().ok_or_else(|| self.write_unknown(operation, target.world))
         }
-        if response
-            .headers()
-            .get(header::CONTENT_ENCODING)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| {
-                !value.trim().is_empty() && !value.eq_ignore_ascii_case("identity")
-            })
-            || response
-                .content_length()
-                .is_some_and(|length| length > self.maximum_response_bytes as u64)
-        {
-            return Err(self.write_unknown(operation, target.world));
-        }
-        let status = response.status();
-        let location = response.headers().get(header::LOCATION).cloned();
-        let is_html = is_html_content_type(response.headers());
-        diagnostic.body =
-            Some(self.read_response_body(response, operation, target.world, true).await?);
-        let body = diagnostic
-            .body
-            .as_deref()
-            .ok_or_else(|| self.write_unknown(operation, target.world))?;
-        if is_session_expired(status, location.as_ref(), body) {
-            return Err(MoogleMailError::after_write(
-                operation,
-                target.world,
-                MoogleMailErrorCategory::SessionExpired,
-            ));
-        }
-        if status == StatusCode::TOO_MANY_REQUESTS
-            || status.is_server_error()
-            || !status.is_success()
-            || !is_html
-        {
-            return Err(self.write_unknown(operation, target.world));
-        }
-        diagnostic.body.take().ok_or_else(|| self.write_unknown(operation, target.world))
+        .await;
+        request_metrics.finish(mail_result(&result));
+        result
     }
 
     /// 每块正文入缓冲前校验总量；无 Content-Length 的响应也不能绕过内存边界。
@@ -465,6 +545,14 @@ impl MoogleMailClient {
             // 有界预留减少敏感正文扩容复制；失败或取消清理半截正文，诊断仅保留完整响应。
             let mut body = SensitiveBytes(Vec::with_capacity(capacity));
             while let Some(chunk) = response.chunk().await.map_err(|diagnostic_cause| {
+                if diagnostic_cause.is_timeout() {
+                    mail_signal(
+                        self.external_metrics.as_ref(),
+                        world,
+                        operation,
+                        auction_application::MailSignal::Timeout,
+                    );
+                }
                 safe_diagnostics::warn(
                     "mooglemail_read",
                     "read_response_chunk",
@@ -495,6 +583,12 @@ impl MoogleMailClient {
         })
         .await
         .map_err(|diagnostic_cause| {
+            mail_signal(
+                self.external_metrics.as_ref(),
+                world,
+                operation,
+                auction_application::MailSignal::Timeout,
+            );
             safe_diagnostics::warn(
                 "mooglemail_read",
                 "read_response_timeout",

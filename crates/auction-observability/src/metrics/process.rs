@@ -31,6 +31,7 @@ pub struct ProcessMetrics {
     readiness: Arc<dyn ReadinessRecorder>,
     migration_readiness: MigrationReadinessRecorder,
     sent_baseline: Arc<dyn auction_application::SentBaselineObserver>,
+    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
     http: HttpRecorder,
     database: super::DatabaseRecorder,
 }
@@ -150,6 +151,11 @@ impl ProcessMetrics {
         } else {
             auction_application::noop_sent_baseline_observer()
         };
+        let external_metrics = if role == "worker" {
+            super::external_client::build(&registry)?
+        } else {
+            auction_application::noop_external_metrics_observer()
+        };
         let shutdown = super::shutdown::build(&registry)?;
         let http = HttpRecorder::build(&registry, role)?;
         let database = super::DatabaseRecorder::build(&registry)?;
@@ -161,6 +167,7 @@ impl ProcessMetrics {
             readiness,
             migration_readiness,
             sent_baseline,
+            external_metrics,
             shutdown,
             http,
             database,
@@ -177,6 +184,7 @@ impl ProcessMetrics {
             readiness: readiness::noop(),
             migration_readiness: MigrationReadinessRecorder::default(),
             sent_baseline: auction_application::noop_sent_baseline_observer(),
+            external_metrics: auction_application::noop_external_metrics_observer(),
             shutdown: super::shutdown::noop(),
             http: HttpRecorder::default(),
             database: super::DatabaseRecorder::default(),
@@ -230,6 +238,11 @@ impl ProcessMetrics {
     /// 返回 Worker 的发送基线局部影子记录器；其他角色及关闭指标时为 no-op。
     pub fn sent_baseline(&self) -> Arc<dyn auction_application::SentBaselineObserver> {
         Arc::clone(&self.sent_baseline)
+    }
+
+    /// 返回外部论坛与邮件客户端的闭集指标端口；关闭指标时为 no-op。
+    pub fn external_metrics(&self) -> Arc<dyn auction_application::ExternalMetricsObserver> {
+        Arc::clone(&self.external_metrics)
     }
 
     /// 返回 Public/Admin 共用的 HTTP 记录器；关闭指标或其他角色得到 no-op。

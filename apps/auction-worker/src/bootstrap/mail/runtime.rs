@@ -19,6 +19,7 @@ pub(super) struct MailPollRuntimePorts {
     pub(super) maintenance_schedule: Arc<dyn RecurringSchedule>,
     pub(super) progress_observer: Arc<dyn auction_application::MailPollProgressObserver>,
     pub(super) switches: auction_application::RuntimeSwitches,
+    pub(super) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
 }
 
 pub(super) async fn build_poll_runtimes(
@@ -34,6 +35,7 @@ pub(super) async fn build_poll_runtimes(
     let maintenance_schedule = ports.maintenance_schedule;
     let progress_observer = ports.progress_observer;
     let switches = ports.switches;
+    let external_metrics = ports.external_metrics;
     let world_configs = mail_config.configured_worlds();
     // 两个世界即冻结相位；在线切换不能等待新的启动周期，且单世界明确使用零相位。
     let isekai_phase = if world_configs.len() > 1 {
@@ -133,7 +135,8 @@ pub(super) async fn build_poll_runtimes(
                 retry_maximum: std::time::Duration::from_secs(mail_config.retry_maximum_seconds),
             },
         )?
-        .with_progress_observer(Arc::clone(&progress_observer));
+        .with_progress_observer(Arc::clone(&progress_observer))
+        .with_external_metrics(Arc::clone(&external_metrics));
         if let Some(recorder) = client.diagnostic_recorder() {
             runtime = runtime.with_diagnostics(recorder);
         }

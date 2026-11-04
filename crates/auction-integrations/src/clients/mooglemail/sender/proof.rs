@@ -17,6 +17,24 @@ impl MoogleMailSender {
         baseline: &MoogleMailSentBaseline,
         response_mail_id: Option<&str>,
     ) -> Result<String, MoogleMailError> {
+        let result = self.verify_new_sent_inner(request, cookie, baseline, response_mail_id).await;
+        if let Err(error) = &result {
+            self.observe_budget_error(
+                request.world,
+                auction_application::MailPhase::SentBaselineAfter,
+                error,
+            );
+        }
+        result
+    }
+
+    async fn verify_new_sent_inner(
+        &self,
+        request: &MoogleMailSendRequest,
+        cookie: &MoogleMailCookie,
+        baseline: &MoogleMailSentBaseline,
+        response_mail_id: Option<&str>,
+    ) -> Result<String, MoogleMailError> {
         let world = request.world;
         self.check_response_hint(baseline, response_mail_id)?;
         if let Err(error) = self.check_baseline_scope(cookie, baseline) {

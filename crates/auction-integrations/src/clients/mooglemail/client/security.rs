@@ -188,4 +188,8 @@ impl IntervalGate {
         *next = Instant::now().checked_add(self.interval).ok_or(())?;
         Ok(())
     }
+
+    pub(super) const fn interval(&self) -> Duration {
+        self.interval
+    }
 }

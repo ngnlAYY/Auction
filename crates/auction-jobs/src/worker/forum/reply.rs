@@ -32,12 +32,14 @@ mod common;
 mod notification;
 #[path = "reply/rejection.rs"]
 mod rejection;
+mod reply_delay;
 #[path = "reply/topic.rs"]
 mod topic;
 
 use command::process_command;
 use common::{bounded_detail, finish, forum_command_id, is_retryable, repository_error};
 use notification::process_notification;
+use reply_delay::ReplyDelayEstimator;
 use topic::process_topic;
 
 const MAX_BATCH_SIZE: u16 = 100;
@@ -78,6 +80,8 @@ pub struct ForumReplyRuntime {
     pub(crate) item_timeout: std::time::Duration,
     pub(crate) public_base_url: Option<String>,
     pub(crate) verify_post_body: bool,
+    pub(crate) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    reply_delay: ReplyDelayEstimator,
 }
 
 impl ForumReplyRuntime {
@@ -120,6 +124,10 @@ impl ForumReplyRuntime {
             item_timeout,
             public_base_url,
             verify_post_body: false,
+            external_metrics: auction_application::noop_external_metrics_observer(),
+            reply_delay: ReplyDelayEstimator::new(
+                auction_application::noop_external_metrics_observer(),
+            ),
         })
     }
 
@@ -127,6 +135,31 @@ impl ForumReplyRuntime {
     pub fn with_post_body_verification(mut self, enabled: bool) -> Self {
         self.verify_post_body = enabled;
         self
+    }
+
+    /// 注入同步外部客户端指标；延迟估计只读内存，不改变扫描或命令控制流。
+    pub fn with_external_metrics(
+        mut self,
+        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+    ) -> Self {
+        self.reply_delay = ReplyDelayEstimator::new(Arc::clone(&observer));
+        self.external_metrics = observer;
+        self
+    }
+
+    /// 记录论坛单项预算耗尽；只读同步计数，不改变截止点。
+    pub(crate) fn observe_budget(
+        &self,
+        world: auction_domain::SettlementWorld,
+        phase: auction_application::ForumBudgetPhase,
+    ) {
+        let world = match world {
+            auction_domain::SettlementWorld::Main => auction_application::ForumWorld::Main,
+            auction_domain::SettlementWorld::Isekai => auction_application::ForumWorld::Isekai,
+        };
+        self.external_metrics.observe(
+            auction_application::ExternalMetricsEvent::ForumBudgetExhausted { world, phase },
+        );
     }
 }
 
@@ -245,6 +278,7 @@ where
         };
         let diagnostic_auction_id = topic.auction_id;
         if tokio::time::Instant::now() >= item_deadline {
+            runtime.observe_budget(topic.world, auction_application::ForumBudgetPhase::TopicItem);
             diagnostics::unpersisted_error(
                 "forum_reply",
                 "check_claim_deadline",
@@ -369,6 +403,10 @@ where
                     topic_failed = true;
                 }
                 Err(error) => {
+                    runtime.observe_budget(
+                        topic.world,
+                        auction_application::ForumBudgetPhase::TopicItem,
+                    );
                     diagnostics::warn(
                         "forum_reply",
                         "process_topic_timeout",

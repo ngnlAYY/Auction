@@ -3,6 +3,7 @@
 
 use auction_application::diagnostics::DiagnosticContext;
 
+use crate::clients::metrics::{ForumTopicScanGuard, forum_operation, forum_world};
 use crate::diagnostics as safe_diagnostics;
 
 use std::{collections::VecDeque, sync::atomic::AtomicUsize};
@@ -93,6 +94,22 @@ impl EhentaiClientConfig {
     }
 }
 
+/// 单次论坛请求的指标世界与账号 Cookie；只收敛参数，不改变所有权或请求顺序。
+#[derive(Clone, Copy)]
+pub(super) struct ForumRequestScope<'a> {
+    pub(super) metrics_world: auction_application::ForumWorld,
+    pub(super) cookie: &'a EhentaiCookie,
+}
+
+impl<'a> ForumRequestScope<'a> {
+    pub(super) const fn new(
+        metrics_world: auction_application::ForumWorld,
+        cookie: &'a EhentaiCookie,
+    ) -> Self {
+        Self { metrics_world, cookie }
+    }
+}
+
 #[derive(Clone)]
 pub struct EhentaiClient {
     client: Client,
@@ -110,6 +127,7 @@ pub struct EhentaiClient {
     isekai_board_id: i32,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
     write_progress: Option<auction_application::ForumWriteProgress>,
+    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
 }
 
 impl EhentaiClient {
@@ -142,6 +160,7 @@ impl EhentaiClient {
             isekai_board_id: ISEKAI_BOARD_ID,
             ownership: None,
             write_progress: None,
+            external_metrics: auction_application::noop_external_metrics_observer(),
         }
     }
 
@@ -192,6 +211,7 @@ impl EhentaiClient {
             isekai_board_id: config.isekai_board_id,
             ownership: None,
             write_progress: None,
+            external_metrics: auction_application::noop_external_metrics_observer(),
         })
     }
 
@@ -213,6 +233,22 @@ impl EhentaiClient {
     ) -> Self {
         self.write_progress = Some(progress);
         self
+    }
+
+    /// 注入同步外部客户端指标；只读取配置间隔，不改变请求门。
+    pub fn with_external_metrics(
+        mut self,
+        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+    ) -> Self {
+        observer.observe(auction_application::ExternalMetricsEvent::ForumRequestInterval {
+            interval: self.minimum_request_interval,
+        });
+        self.external_metrics = observer;
+        self
+    }
+
+    pub(crate) fn external_metrics(&self) -> Arc<dyn auction_application::ExternalMetricsObserver> {
+        Arc::clone(&self.external_metrics)
     }
 
     async fn check_ownership(&self, cookie: &EhentaiCookie) -> Result<(), ()> {
@@ -276,8 +312,8 @@ impl EhentaiClient {
             return Ok(auction_application::ForumTopicPublication::Existing(published));
         }
 
-        let form = self.load_topic_form(board_id, &board_url, cookie).await?;
-        self.submit_topic(form, board_id, rendered, cookie)
+        let form = self.load_topic_form(board_id, &board_url, forum_world(world), cookie).await?;
+        self.submit_topic(form, board_id, rendered, forum_world(world), cookie)
             .await
             .map(auction_application::ForumTopicPublication::Created)
     }
@@ -321,7 +357,15 @@ impl EhentaiClient {
         let board_id = self.board_for_world(world);
         let board_value = board_id.to_string();
         let board_url = self.index_url(&[("showforum", board_value.as_str())], operation)?;
-        let (body, _) = self.get_page(operation, board_url.clone(), None, cookie).await?;
+        let (body, _) = self
+            .get_page(
+                operation,
+                forum_operation(operation),
+                ForumRequestScope::new(forum_world(world), cookie),
+                board_url.clone(),
+                None,
+            )
+            .await?;
         let published =
             self.find_topic(&board_url, board_id, title, reconciliation_titles, &body, operation)?;
         Ok((board_id, board_url, published))
@@ -334,6 +378,23 @@ impl EhentaiClient {
         thread_id: &str,
         cookie: &EhentaiCookie,
     ) -> Result<AdminForumPreviewResult, EhentaiError> {
+        let mut scan = ForumTopicScanGuard::start(self.external_metrics(), forum_world(world));
+        let result = self.fetch_topic_inner(world, thread_id, cookie, &mut scan).await;
+        if result.is_ok() {
+            scan.finish_complete();
+        } else {
+            scan.finish_error();
+        }
+        result
+    }
+
+    async fn fetch_topic_inner(
+        &self,
+        world: SettlementWorld,
+        thread_id: &str,
+        cookie: &EhentaiCookie,
+        scan: &mut ForumTopicScanGuard,
+    ) -> Result<AdminForumPreviewResult, EhentaiError> {
         let operation = EhentaiOperation::FetchTopic;
         if !self.valid_for() || !valid_cookie(cookie) || !valid_topic_id(thread_id) {
             return Err(EhentaiError::configuration(operation));
@@ -343,7 +404,15 @@ impl EhentaiClient {
             return Err(EhentaiError::configuration(operation));
         }
         let target = self.index_url(&[("showtopic", thread_id)], operation)?;
-        let (body, _) = self.get_page(operation, target.clone(), Some(&target), cookie).await?;
+        let (body, _) = self
+            .get_page(
+                operation,
+                forum_operation(operation),
+                ForumRequestScope::new(forum_world(world), cookie),
+                target.clone(),
+                Some(&target),
+            )
+            .await?;
         let html = String::from_utf8(body).map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
                 "forum_topic",
@@ -363,7 +432,9 @@ impl EhentaiClient {
             );
             EhentaiError::protocol(operation, false)
         })?;
-        let targets = self.topic_page_targets(&first_page, thread_id, operation)?;
+        scan.set_pages(1);
+        let targets =
+            self.topic_page_targets(&first_page, thread_id, operation, forum_world(world))?;
         let expected_pages = targets.len();
         let maximum_offset = targets.last().map(|(offset, _)| *offset).unwrap_or(0);
         let mut remaining = targets.into_iter().skip(1).collect::<VecDeque<_>>();
@@ -371,11 +442,13 @@ impl EhentaiClient {
         let mut total_bytes = html.len();
         drop(html);
         pages.push((0_u64, first_page));
+        scan.set_pages(pages.len());
         let mut reads = tokio::task::JoinSet::new();
         let read_context = TopicPageReadContext {
             client: self.clone(),
             cookie: cookie.clone(),
             operation,
+            metrics_world: forum_world(world),
             thread_id: thread_id.to_owned(),
             known_maximum_offset: maximum_offset,
             referer: target,
@@ -398,6 +471,7 @@ impl EhentaiClient {
                 .filter(|total| *total <= HARD_MAXIMUM_TOPIC_BYTES)
                 .ok_or_else(|| EhentaiError::response_too_large(operation))?;
             pages.push((page.0, page.2));
+            scan.set_pages(pages.len());
             spawn_topic_page_reads(&mut reads, &mut remaining, &read_context);
         }
         pages.sort_unstable_by_key(|(offset, _)| *offset);
@@ -433,8 +507,16 @@ impl EhentaiClient {
             return Err(EhentaiError::configuration(operation));
         }
         let board_id = self.board_for_world(world);
-        let form = self.load_reply_form(board_id, thread_id, cookie).await?;
-        self.submit_fixed_post(form, board_id, thread_id, None, body, cookie).await
+        let form = self.load_reply_form(board_id, thread_id, forum_world(world), cookie).await?;
+        self.submit_fixed_post(
+            form,
+            board_id,
+            thread_id,
+            None,
+            body,
+            ForumRequestScope::new(forum_world(world), cookie),
+        )
+        .await
     }
 
     /// 编辑已持久化的固定目录页或系统日志；目标 post ID 必须由调用方提供，不能从正文猜测。
@@ -464,7 +546,8 @@ impl EhentaiClient {
             return Err(EhentaiError::configuration(operation));
         }
         let board_id = self.board_for_world(world);
-        let form = self.load_edit_form(board_id, thread_id, post_id, cookie).await?;
+        let form =
+            self.load_edit_form(board_id, thread_id, post_id, forum_world(world), cookie).await?;
         if metadata
             .is_some_and(|metadata| metadata.title.is_some() || metadata.description.is_some())
             && form.metadata.is_none()
@@ -482,7 +565,7 @@ impl EhentaiClient {
                 metadata.and_then(|metadata| metadata.description.as_deref()),
             )),
             body,
-            cookie,
+            ForumRequestScope::new(forum_world(world), cookie),
         )
         .await
     }
@@ -504,7 +587,8 @@ impl EhentaiClient {
             return Err(EhentaiError::configuration(operation));
         }
         let board_id = self.board_for_world(world);
-        let form = self.load_edit_form(board_id, thread_id, post_id, cookie).await?;
+        let form =
+            self.load_edit_form(board_id, thread_id, post_id, forum_world(world), cookie).await?;
         let body = ForumRenderedPost { body: form.body };
         if !valid_rendered_post(&body) {
             return Err(EhentaiError::protocol(operation, false));
@@ -518,6 +602,7 @@ struct TopicPageReadContext {
     client: EhentaiClient,
     cookie: EhentaiCookie,
     operation: EhentaiOperation,
+    metrics_world: auction_application::ForumWorld,
     thread_id: String,
     known_maximum_offset: u64,
     referer: Url,
@@ -534,9 +619,10 @@ async fn read_topic_page(
         .client
         .get_page_with_budget(
             context.operation,
+            forum_operation(context.operation),
+            ForumRequestScope::new(context.metrics_world, &context.cookie),
             page_target,
             Some(&context.referer),
-            &context.cookie,
             Some(&context.remaining_bytes),
         )
         .await?;

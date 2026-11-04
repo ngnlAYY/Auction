@@ -74,6 +74,7 @@ mod sent_confirmation;
 pub use sent_confirmation::*;
 #[path = "public/equipment_link.rs"]
 mod equipment_link;
+mod external_metrics;
 #[path = "forum/public.rs"]
 mod forum;
 #[path = "forum/profile.rs"]
@@ -320,6 +321,14 @@ pub use delivery::{
     DeliverySendResult, DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim,
     DeliveryWorkStore,
 };
+pub use external_metrics::{
+    ExternalMetricsEvent, ExternalMetricsObserver, ForumBudgetPhase, ForumOperation,
+    ForumPmCategory, ForumPmOutcome, ForumPmPhase, ForumRequestCategory, ForumSignal,
+    ForumTopicScanMeasure, ForumTopicScanMode, ForumTopicScanOutcome, ForumWorld, MailBudget,
+    MailLock, MailLockOutcome, MailOperation, MailPhase, MailRequestCategory, MailSignal,
+    MailWorld, ReplyDelayBound, ReplyDelayMethod, ReplyDelayPhase, ReplyDelaySampleOutcome,
+    WaitOutcome, noop_external_metrics_observer,
+};
 mod sent_baseline;
 pub use delivery_admin::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
@@ -337,8 +346,8 @@ pub use forum_colors::{
 };
 pub use forum_reply::{
     ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity, ForumCatalogPage,
-    ForumCommandOutcome, ForumCommandStart, ForumCommandStatus, ForumLotTarget, ForumReplyStore,
-    ForumReplyTopic, ForumTopicReader,
+    ForumCommandOutcome, ForumCommandStart, ForumCommandStatus, ForumLotTarget, ForumReplyPhase,
+    ForumReplyStore, ForumReplyTopic, ForumTopicReader,
 };
 pub use forum_sync::{
     FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot, ForumCatalogLayout, ForumCredentialAvailability,

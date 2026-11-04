@@ -26,6 +26,23 @@ pub(in crate::worker::runtime::mail_poll) async fn run_read_observation(
             );
             WorkerResult::Success
         }
+        Ok(Err(error)) if tokio::time::Instant::now() >= deadline => {
+            runtime.observe_budget(
+                auction_application::MailPhase::ReadObservation,
+                auction_application::MailBudget::Time,
+            );
+            diagnostics::unpersisted_error(
+                "mail_observation",
+                "read_mail_deadline",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    world: diagnostic_world(&runtime.world_id),
+                    ..Default::default()
+                },
+            );
+
+            WorkerResult::Error
+        }
         Ok(Err(error)) => {
             diagnostics::unpersisted_error(
                 "mail_observation",
@@ -39,6 +56,10 @@ pub(in crate::worker::runtime::mail_poll) async fn run_read_observation(
             WorkerResult::Error
         }
         Err(error) => {
+            runtime.observe_budget(
+                auction_application::MailPhase::ReadObservation,
+                auction_application::MailBudget::Time,
+            );
             diagnostics::unpersisted_error(
                 "mail_observation",
                 "read_mail_timeout",

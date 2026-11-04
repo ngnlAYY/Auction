@@ -6,7 +6,7 @@ use crate::database::storage_error_from;
 #[cfg(feature = "postgres")]
 use auction_application::{
     ApplicationError, ForumActiveProxy, ForumCommandOutcome, ForumCommandStatus, ForumLotTarget,
-    ForumReplyTopic,
+    ForumReplyPhase, ForumReplyTopic,
 };
 #[cfg(feature = "postgres")]
 use auction_domain::{AuctionId, LotId, UserId};
@@ -42,7 +42,7 @@ pub(super) async fn claim_published_topics_postgres(
         .await
         .map_err(|error| storage_error_from(error, "开启论坛回帖领取事务失败"))?;
     let rows = sqlx::query(
-        "SELECT sync.auction_id, auction.world_id, sync.thread_id,
+        "SELECT sync.auction_id, auction.world_id, auction.status, sync.thread_id,
                 sync.catalog_post_id, sync.system_log_post_id,
                 sync.title, sync.body, sync.system_log_body, sync.content_revision,
                 sync.processed_through_post_number,
@@ -88,6 +88,9 @@ pub(super) async fn claim_published_topics_postgres(
         let world_id: String = row
             .try_get("world_id")
             .map_err(|error| storage_error_from(error, "读取论坛回帖世界失败"))?;
+        let auction_status: String = row
+            .try_get("status")
+            .map_err(|error| storage_error_from(error, "读取论坛回帖拍卖状态失败"))?;
         let thread_id: String = row
             .try_get("thread_id")
             .map_err(|error| storage_error_from(error, "读取论坛回帖主题标识失败"))?;
@@ -182,6 +185,7 @@ pub(super) async fn claim_published_topics_postgres(
         topics.push(ForumReplyTopic {
             auction_id: AuctionId::from_uuid(auction_id),
             world,
+            reply_phase: ForumReplyPhase::from_auction_status(&auction_status),
             thread_id,
             catalog_post_id,
             catalog_layout,

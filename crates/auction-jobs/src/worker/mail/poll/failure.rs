@@ -108,6 +108,7 @@ pub(super) fn safe_failure_detail(value: &str) -> String {
 #[derive(Clone)]
 pub(super) struct MailPollMetricContext {
     pub(super) metrics: Arc<dyn WorkerRecorder>,
+    pub(super) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
     pub(super) loop_kind: WorkerLoop,
 }
 

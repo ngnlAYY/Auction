@@ -239,6 +239,7 @@ where
             config: runtime.config,
             schedule: Arc::clone(&schedule),
             metrics: Arc::clone(&worker.metrics),
+            external_metrics: Arc::clone(&runtime.external_metrics),
             loop_kind: runtime.loop_kind(),
         };
         let item_result = process_claim(context, claim, lease_deadline).await;
@@ -294,5 +295,6 @@ pub(super) struct MailPollProcessContext<C> {
     pub(super) config: MailPollRuntimeConfig,
     pub(super) schedule: Arc<dyn RecurringSchedule>,
     pub(super) metrics: Arc<dyn WorkerRecorder>,
+    pub(super) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
     pub(super) loop_kind: WorkerLoop,
 }
