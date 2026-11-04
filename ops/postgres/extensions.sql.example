@@ -1,0 +1,2 @@
+-- W10.8：pg_stat_statements 需要 shared_preload_libraries 已生效并重启。
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
