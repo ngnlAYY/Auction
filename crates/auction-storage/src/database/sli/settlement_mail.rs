@@ -41,7 +41,9 @@ const AGGREGATE: &str = "
         SELECT payment.auction_id,payment.world_id,payment.settled_at,payment.obligation_id,
                min(delivery.completed_at) FILTER (WHERE delivery.status='succeeded') AS first_at,
                max(delivery.completed_at) FILTER (WHERE delivery.status='succeeded') AS last_at,
-               bool_or(delivery.status='succeeded') AS has_success
+               -- 无 fulfillment/delivery 的义务必须视为未成功；空组 bool_or 为 NULL，
+               -- bool_and 会忽略 NULL，不能据此宣称末封已完成。
+               COALESCE(bool_or(delivery.status='succeeded'),false) AS has_success
         FROM payments payment
         LEFT JOIN public.settlement_obligation_fulfillments fulfillment
           ON fulfillment.obligation_id=payment.obligation_id
