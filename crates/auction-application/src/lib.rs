@@ -1,7 +1,9 @@
 //! 用例、窄端口和事务边界。
 
 mod errors;
+mod operator_audit;
 mod ports;
+pub use operator_audit::{CliOperatorIdentity, cli_audit_metadata};
 pub use ports::{
     ExternalMetricsEvent, ExternalMetricsObserver, ForumBudgetPhase, ForumOperation,
     ForumPmCategory, ForumPmOutcome, ForumPmPhase, ForumRequestCategory, ForumSignal,

@@ -56,6 +56,7 @@ where
                 player_name: command.player_name,
                 envelope,
                 actor_id: command.actor_id,
+                operator_identity: command.operator_identity,
                 request_id: command.request_id,
                 now: command.now,
             })

@@ -208,6 +208,7 @@ fn AuditFilters(
                             option { value: "", {t!("admin-audit-all")} }
                             option { value: "public", {audit_source_label("public")} }
                             option { value: "admin", {audit_source_label("admin")} }
+                            option { value: "cli", {audit_source_label("cli")} }
                             option { value: "worker", {audit_source_label("worker")} }
                             option { value: "system", {audit_source_label("system")} }
                         }
@@ -460,6 +461,7 @@ fn audit_source_label(value: &str) -> String {
     match value {
         "public" => t!("admin-audit-source-public"),
         "admin" => t!("admin-audit-source-admin"),
+        "cli" => t!("admin-audit-source-cli"),
         "worker" => t!("admin-audit-source-worker"),
         "system" => t!("admin-audit-source-system"),
         _ => value.to_owned(),

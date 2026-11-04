@@ -96,6 +96,9 @@ pub struct RequestLotWatchPmReconcile {
     pub notification_id: Uuid,
     pub expected_fencing_version: i64,
     pub actor: String,
+    /// 主机身份不改变原命令的幂等摘要。
+    #[serde(skip)]
+    pub operator_identity: Option<crate::CliOperatorIdentity>,
 }
 
 /// 无重发、强制成功或废弃动作。

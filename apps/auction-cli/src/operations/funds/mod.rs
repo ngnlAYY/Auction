@@ -45,6 +45,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: FundsCommand) -> anyhow
                 let command = FundingReconciliationCommand {
                     command_id: text::command_id(write.command_id, "--command-id")?,
                     actor: text::actor(&write.actor)?.to_owned(),
+                    operator_identity: Some(super::operator_identity::capture()?),
                     expected_uid: write.uid,
                     expected_version: write.expected_version,
                     preview_digest: text::sha256_hex(&write.preview_digest)?,
@@ -68,6 +69,7 @@ async fn preview(store: &DatabaseStore, uid: String) -> anyhow::Result<()> {
     let record_only = FundingRecordOnlyCommand {
         command_id: Uuid::nil(),
         actor: String::new(),
+        operator_identity: None,
         expected_uid: uid.clone(),
         expected_version: preview.account_version,
         preview_digest: preview.digest,
@@ -106,6 +108,7 @@ async fn open_record_only(
     let command = FundingRecordOnlyCommand {
         command_id: text::command_id(write.command_id, "--command-id")?,
         actor: text::actor(&write.actor)?.to_owned(),
+        operator_identity: Some(super::operator_identity::capture()?),
         expected_uid: write.uid,
         expected_version: write.expected_version,
         preview_digest: text::sha256_hex(&write.preview_digest)?,

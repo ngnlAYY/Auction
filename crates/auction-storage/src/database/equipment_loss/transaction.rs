@@ -141,14 +141,15 @@ pub(super) async fn apply(
     require_one(changed.rows_affected())?;
     sqlx::query("INSERT INTO public.audit_records(id,occurred_at,actor_type,actor_id,action,entity_type,
         entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'admin',$2,'auction.settlement.equipment_loss',
-        'lot',$3,'success','admin',$4)")
+        'lot',$3,'success',$5,$4)")
         .bind(command.command_id).bind(&command.actor).bind(command.lot_id.to_string())
-        .bind(json!({"command":command,"payment_obligation_id":payment_id,"delivery_id":delivery_id,
+        .bind(auction_application::cli_audit_metadata(command.operator_identity.as_ref(), json!({"command":command,"payment_obligation_id":payment_id,"delivery_id":delivery_id,
             "seller_obligation_id":seller_id,"refund_obligation_id":refund_id,"recovery_id":recovery_id,
             "buyer_amount":split.buyer.value(),"compensation_amount":split.compensation.value(),
             "seller_amount":split.seller.value(),"tax_amount":split.tax.value(),
             "proof_kind":"operator_equipment_loss_v1","external_compensation_completed":false,
-            "cod_collected":false,"seller_payment":"normal_queue","executor":"auction-cli"}))
+            "cod_collected":false,"seller_payment":"normal_queue","executor":"auction-cli"})))
+        .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
         .execute(&mut **tx).await?;
     Ok(result)
 }

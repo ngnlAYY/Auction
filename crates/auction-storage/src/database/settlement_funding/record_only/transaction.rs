@@ -173,17 +173,21 @@ async fn apply(
             "protocol_version":binding.protocol_version,"digest":binding.digest},
         "equipment":null,"main_cash":null,"sent_collection":null,
         "observed_from":e.observed_from,"expires_at":e.expires_at,"digest":e.digest});
-    let metadata = json!({"command_id":command.command_id,"accounting_mode":"record_only","policy_version":1,
+    let metadata = auction_application::cli_audit_metadata(
+        command.operator_identity.as_ref(),
+        json!({"command_id":command.command_id,"accounting_mode":"record_only","policy_version":1,
         "source_id":source,"recorded_liabilities":preview.isolated_liabilities,"preview_digest":preview.digest,"evidence_digest":e.digest,
-        "executor":"auction-cli"});
+        "executor":"auction-cli"}),
+    );
     sqlx::query("INSERT INTO public.settlement_funding_commands(command_id,uid,action,target_id,request_digest,result,\"authorization\") VALUES($1,$2,'record_only_init',$1,$3,$4,$5)")
         .bind(command.command_id).bind(&command.expected_uid).bind(mutation.request_digest.as_slice())
         .bind(serde_json::to_value(&result).map_err(invalid)?)
         .bind(json!({"accounting_mode":"record_only","policy_version":1,"full_snapshot":evidence,"facts":preview.facts}))
         .execute(&mut **tx).await.map_err(storage)?;
-    // 审计来源使用既有角色闭集；具体执行器单独保留在 metadata，不能作为新 source 写入。
-    sqlx::query("INSERT INTO public.audit_records(id,occurred_at,actor_type,actor_id,action,entity_type,entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'admin',$2,'auction.funding.record_only_initialized','funding_account',$3,'success','admin',$4)")
+    // 显式 CLI 身份决定来源；未携带身份的 Admin 调用保持原来源，不改写历史事实。
+    sqlx::query("INSERT INTO public.audit_records(id,occurred_at,actor_type,actor_id,action,entity_type,entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'admin',$2,'auction.funding.record_only_initialized','funding_account',$3,'success',$5,$4)")
         .bind(command.command_id).bind(&command.actor).bind(&command.expected_uid).bind(metadata)
+        .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
         .execute(&mut **tx).await.map_err(storage)?;
     crate::validate_mail_evidence_time(tx, e).await.map_err(evidence_error)?;
     Ok(result)

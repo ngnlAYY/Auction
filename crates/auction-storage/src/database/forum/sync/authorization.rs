@@ -155,19 +155,23 @@ pub(super) async fn authorize(
              (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id,
               result, request_id, source, metadata)
          VALUES ($1, $2, 'admin', $3, 'forum.authorize_write_retry',
-                 'auction_forum_sync', $4, 'success', $5, 'admin', $6)",
+                 'auction_forum_sync', $4, 'success', $5, $7, $6)",
     )
     .bind(Uuid::new_v4())
     .bind(authorized_at)
     .bind(&command.actor_id)
     .bind(command.auction_id.to_string())
     .bind(command.command_id.to_string())
-    .bind(serde_json::json!({
-        "command_id": command.command_id,
-        "previous_failure_code": AUTHORIZATION_REQUIRED,
-        "next_failure_code": WRITE_AUTHORIZED,
-        "source_revision": source_revision,
-    }))
+    .bind(auction_application::cli_audit_metadata(
+        command.operator_identity.as_ref(),
+        serde_json::json!({
+            "command_id": command.command_id,
+            "previous_failure_code": AUTHORIZATION_REQUIRED,
+            "next_failure_code": WRITE_AUTHORIZED,
+            "source_revision": source_revision,
+        }),
+    ))
+    .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
     .execute(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "追加论坛写入授权审计失败"))?;
