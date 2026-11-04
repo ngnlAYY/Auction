@@ -219,8 +219,8 @@
 | W8 | 未开始 | — | — | 放在 M6 最后 |
 | W9 | 未开始 | — | — | W9.5、W9.7 随 M2a；W9.8、W9.10、W9.11 随 M2b；W9.9 为 M3 首项 |
 | W10 | 进行中 | — | 未部署 | W10.1、W10.2、W10.6 已提交；W10.8、W10.7 随 M2a；W10.9 随 M5 |
-| W10.1 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`backup scheduled` + systemd timer 模板（每日 UTC 03:15），回执 `auction-backup-run.v1`；待用户安装启用 timer 后按“连续 7 天成功、人为失败如实反映”验收 |
-| W10.2 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；主机 `age` 公钥加密 + `object_store` 上传 R2 日/月前缀、完整回读校验，`[backup.offsite]` 默认关闭；启用前需用户完成 R2 bucket/生命周期/bucket lock、令牌、`age` 密钥与数据密钥离线托管，验收含一次端到端恢复演练 |
+| W10.1 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`backup scheduled` + systemd timer 模板（每日 UTC 03:15），回执 `auction-backup-run.v1`；本地 2026-11-04 已启用用户级 timer 并完成一次 systemd oneshot create+verify+retention；仍待连续 7 天成功与一次人为失败核验 |
+| W10.2 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；主机 `age` 公钥加密 + `object_store` 上传 R2 日/月前缀、完整回读校验，`[backup.offsite]` 默认关闭；本地 2026-11-04 已用 `hv-auction` bucket 完成首次 daily/monthly 上传、bucket lock 覆盖/删除 409、age 解密与隔离 PG18 恢复；仍待三组数据密钥加密列解密、生命周期规则核验与 `age` 私钥离线托管 |
 | W10.6 | 已提交 | `69fd85a0`；演练 2026-11-04 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；手工流程 `ops/deploy/MIGRATION-DRILL.md` 与回执模板 `auction-migration-drill.v1`。本地隔离 PG18 演练：schema 74→77 applied=3，旧/新三角色 readiness 200，停机实测 46 秒、含备份/安装/单元的估算 60 秒；回执 `target/operations-evidence/m1-drill-20261104T053636Z/migration-drill-receipt.json`，结论 incomplete（W11.4 not_available、评审待签字） |
 | W11 | 未开始 | — | — | W11.4 随 M2a；W11.2 改为偿付能力报告（v11） |
 | W12 | 未开始 | — | — | W12.3 已批准，随 M4；W12.8 随 M4 |
@@ -230,6 +230,13 @@
 | W13.5 | 已提交 | `42bd8477` | 未部署 | 同上；CI 每周一 04:17 UTC 运行 `security-audit`；发布 tag 审计待 W7.1 |
 | W13.2 | 已提交 | `0a30c5c8` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 G）实现、Claude 监督；workspace `unwrap_used`/`expect_used = deny`，测试上下文经 `clippy.toml` 豁免；宏展开内的调用不受 Clippy 覆盖，见 `ci/checks/README.md` |
 | W14 | 未开始 | — | — | W14.8、W14.1、W14.2、W14.4–W14.6、W14.9 随 M2b；W14.3 随 M4（决策 64）；W14.7 取消（决策 65）；W14.10 随各项交付；W14.11 随 M2b（决策 67） |
+
+### M1 收尾记录（2026-11-04）
+
+- 代码与本地验证：`main` 已含 M1 工作项，本地 schema 77；R2 首次 daily/monthly 上传、bucket lock 409、age 解密、隔离恢复已完成；W10.1 timer 已启用并完成一次 systemd 备份。
+- 仍未完成：线上部署与运行时验收（W1.0、W0.4/W0.5、W0.14、W7.5/W7.11、W0.13 生产基线）；W10.2 三组数据密钥加密列解密、生命周期规则核验、`age` 私钥离线托管；W10.1 连续 7 天与一次人为失败；W10.6 回执仍为 `incomplete`（W11.4 属 M2a）及评审签字；SLO 目标值；D6 五语言规则在 Admin 发布。
+- 口径更正：W1.4 属 M3，不是 M1 未完成项；W10.2 不要求等待 30/365 天轮换，只要求规则配置/核验；W0.6 服务超时开关不是 M1 硬性阻塞。
+- 下一阶段：M2a 先做 W6.3 脱敏回放语料与 W6.6 外部服务替身；W6.3 需要真实 Inbox/Read Mail/Sent/详情/战斗页/论坛页样本，当前仓库只有 Sent 脱敏样本，缺失页面需在获得授权后采集。
 
 ## 8. 术语
 
