@@ -34,6 +34,9 @@ mod reads;
 mod script;
 mod types;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) use common::*;
 pub(crate) use detail::*;
 pub(crate) use list_helpers::*;

@@ -8,7 +8,9 @@ mod database;
 mod operations;
 mod settlement;
 mod switches;
+mod wal;
 pub(crate) use switches::SwitchCommand;
+pub(crate) use wal::WalCommand;
 
 #[cfg(feature = "postgres")]
 pub(crate) use database::RebuildModeArg;
@@ -57,6 +59,9 @@ pub(crate) enum Command {
     /// PostgreSQL custom-format 备份、离线校验与单事务恢复。
     #[command(subcommand)]
     Backup(BackupCommand),
+    /// WAL 归档（archive_command 入口）与暂存上传（R2 独立前缀）。
+    #[command(subcommand)]
+    Wal(WalCommand),
     /// 外部 Cookie 凭据的安全列表与 stdin 导入。
     #[command(subcommand)]
     Credential(CredentialCommand),

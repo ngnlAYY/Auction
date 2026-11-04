@@ -1,0 +1,16 @@
+# W10.7 WAL 上传间隔 5 分钟，与 archive_timeout = 300 一起保证 RPO ≤ 5 分钟（决策 31）。
+# Persistent=true 只补一次错过的唤醒，不补造停机期间每个间隔的上传。
+# 归档未启用或 [backup.offsite] enabled = false 时上传器报告 skipped 并退出 0；暂存为空时正常完成。
+# 单次失败以非零退出，systemd 记录失败状态；未上传的密文保留在暂存目录等待下次重试。
+[Unit]
+Description=Auction WAL staging upload timer
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+RandomizedDelaySec=30s
+AccuracySec=30s
+Unit=auction-wal-upload.service
+
+[Install]
+WantedBy=timers.target

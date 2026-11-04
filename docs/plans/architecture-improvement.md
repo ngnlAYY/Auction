@@ -214,6 +214,7 @@
 | W4 | 未开始 | — | — | 含 W4.5、W4.6，随 M4 |
 | W5 | 未开始 | — | — | W5.1、W5.6 暂缓（决策 50）；其余（含 W5.8）随 M4 |
 | W6.3 | 已提交 | `2241689b`、本分支 | 未部署 | MoogleMail、公开论坛主题/登录、PM 列表/详情、主世界战斗页均有真实脱敏样本；论坛与邮件 manifest 分开维护 |
+| W6.1 | 已提交 | 随本提交 | — | 56 个纯逻辑回归：结算守恒/持有曲线/冲正、竞价 v1/v2/代理/软截止、排期 DST/早鸟、邮件/论坛解析、前端实时与查询；未扩大私有 API |
 | W6.2 | 已提交 | 随本提交 | — | PostgreSQL 18 测试骨架：临时集群/模板库/每测试克隆与清理；2 个迁移+storage smoke 通过；157 端口覆盖仍待扩展 |
 | W6.5 | 已提交 | 随本提交 | — | `just test` 运行默认 feature 全 targets；`just test-db` 要求隔离 PG18 的 `AUCTION_TEST_DATABASE_URL`；默认 verify 仍不运行测试；AGENTS/CONTRIBUTING/开发指南与计划交付规范同步 |
 | W6.6 | 进行中 | 随本提交 | — | MoogleMail 与论坛 loopback 替身；真实客户端覆盖邮件读取/详情/compose、论坛主题/PM、登录/战斗、账号忙、Cookie 失效、超时、结构漂移、写入未知、邮资不足、收件人不存在；写表单成功路径仍缺真实 fixture |
@@ -226,10 +227,11 @@
 | W9.7 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；CLI 审计 `source=cli`，metadata 添加 `entrypoint=cli`、`os_uid`、可选 `sudo_user`；`--actor` 仍必填；Admin 保持 `source=admin`；迁移 078 breaking；Admin 审计页支持 cli |
 | W9.5 | 已提交 | 随本提交 | — | Admin 全局登录退避（5 次后 1→60s）、IPv6 /64、失败 WARN、复用 401/429 指标；首次设置 64 hex 随机密钥且最短 32 字节；短密钥/可信代理警告；拒绝 /0 trusted proxy；CDN 专用转发头拒绝 |
 | W9 | 进行中 | — | — | W9.5、W9.7 随 M2a；W9.8、W9.10、W9.11 随 M2b；W9.9 为 M3 首项 |
-| W10 | 进行中 | — | 未部署 | W10.1、W10.2、W10.6 已提交；W10.8 随本提交；W10.7 随 M2a；W10.9 随 M5 |
+| W10 | 进行中 | — | 未部署 | W10.1、W10.2、W10.6、W10.8 已提交；W10.7 进行中；W10.9 随 M5 |
 | W10.1 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`backup scheduled` + systemd timer 模板（每日 UTC 03:15），回执 `auction-backup-run.v1`；本地 2026-11-04 已启用用户级 timer 并完成一次 systemd oneshot create+verify+retention；仍待连续 7 天成功与一次人为失败核验 |
 | W10.2 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；主机 `age` 公钥加密 + `object_store` 上传 R2 日/月前缀、完整回读校验，`[backup.offsite]` 默认关闭；本地 2026-11-04 已用 `hv-auction` bucket 完成首次 daily/monthly 上传、bucket lock 覆盖/删除 409、age 解密与隔离 PG18 恢复；仍待三组数据密钥加密列解密、生命周期规则核验与 `age` 私钥离线托管 |
 | W10.6 | 已提交 | `69fd85a0`；演练 2026-11-04 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；手工流程 `ops/deploy/MIGRATION-DRILL.md` 与回执模板 `auction-migration-drill.v1`。本地隔离 PG18 演练：schema 74→77 applied=3，旧/新三角色 readiness 200，停机实测 46 秒、含备份/安装/单元的估算 60 秒；回执 `target/operations-evidence/m1-drill-20261104T053636Z/migration-drill-receipt.json`，结论 incomplete（W11.4 not_available、评审待签字） |
+| W10.7 | 进行中 | 随本提交 | 未部署 | WAL archive/upload、zstd+age 暂存、R2 `wal/` 上传与幂等校验、systemd timer 与文档；weekly basebackup/PITR 闭环未完成 |
 | W10.8 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；`ops/postgres/postgresql.conf.example`、`autovacuum.sql.example`、`extensions.sql.example` 与说明；连接预算 64/97、`pg_stat_statements`、慢查询/锁等待/autovacuum 日志、热行表与只追加表参数；`archive_mode=off`，W10.7 再启用；重启受 W7.5 |
 | W11.4 | 已提交 | 随本提交 | — | 只读一致性巡检：lot/bid 投影、补偿池、义务链、delivery/义务、realtime 序号、慢代理残留；每项预算 5s/总 40s，最多 100 样本；结果追加 audit_records；CLI `db inspect-consistency` |
 | W11 | 未开始 | — | — | W11.4 随 M2a；W11.2 改为偿付能力报告（v11） |
