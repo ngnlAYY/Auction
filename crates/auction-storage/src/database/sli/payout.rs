@@ -20,12 +20,12 @@ const PAYOUT_COUNT: &str = "
         LIMIT $3
     ),
     candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at
+        SELECT delivery.id,delivery.completed_at,
+               public.delivery_has_frozen_sent_proof(
+                   delivery.id,delivery.result_metadata,delivery.external_reference) AS proof_ok
         FROM window_deliveries delivery
         WHERE delivery.origin_kind='settlement'
           AND delivery.payload->>'template'='settlement_seller_payout'
-          AND public.delivery_has_frozen_sent_proof(
-              delivery.id,delivery.result_metadata,delivery.external_reference)
     )
     SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
            count(*) AS candidates,
@@ -59,14 +59,14 @@ const PAYOUT_UNKNOWN: &str = "
         LIMIT $3
     ),
     candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at
+        SELECT delivery.id,delivery.completed_at,
+               public.delivery_has_frozen_sent_proof(
+                   delivery.id,delivery.result_metadata,delivery.external_reference) AS proof_ok
         FROM window_deliveries delivery
         WHERE delivery.origin_kind='settlement'
           AND delivery.payload->>'template'='settlement_seller_payout'
-          AND public.delivery_has_frozen_sent_proof(
-              delivery.id,delivery.result_metadata,delivery.external_reference)
     )
-    SELECT payout.world_id,count(*) AS unknown
+    SELECT payout.world_id,count(DISTINCT candidate.id) AS unknown
     FROM candidates candidate
     JOIN public.settlement_obligation_fulfillments fulfillment
       ON fulfillment.delivery_id=candidate.id
@@ -82,7 +82,7 @@ const PAYOUT_UNKNOWN: &str = "
      AND payment.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')
     LEFT JOIN public.settlement_obligation_fulfillments proof
       ON proof.obligation_id=payment.id AND proof.proof_observed_at IS NOT NULL
-    WHERE proof.proof_observed_at IS NULL
+    WHERE NOT candidate.proof_ok OR proof.proof_observed_at IS NULL
     GROUP BY payout.world_id";
 
 const PAYOUT_AGGREGATE: &str = "
@@ -96,23 +96,23 @@ const PAYOUT_AGGREGATE: &str = "
         LIMIT $3
     ),
     candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at
+        SELECT delivery.id,delivery.completed_at,
+               public.delivery_has_frozen_sent_proof(
+                   delivery.id,delivery.result_metadata,delivery.external_reference) AS proof_ok
         FROM window_deliveries delivery
         WHERE delivery.origin_kind='settlement'
           AND delivery.payload->>'template'='settlement_seller_payout'
-          AND public.delivery_has_frozen_sent_proof(
-              delivery.id,delivery.result_metadata,delivery.external_reference)
     )
-    SELECT payout.world_id,count(*) AS samples,
+    SELECT payout.world_id,count(*) FILTER (WHERE candidate.proof_ok) AS samples,
            percentile_cont(0.5) WITHIN GROUP (
                ORDER BY extract(epoch FROM (candidate.completed_at-proof.proof_observed_at))
-           ) AS p50,
+           ) FILTER (WHERE candidate.proof_ok) AS p50,
            percentile_cont(0.95) WITHIN GROUP (
                ORDER BY extract(epoch FROM (candidate.completed_at-proof.proof_observed_at))
-           ) AS p95,
+           ) FILTER (WHERE candidate.proof_ok) AS p95,
            percentile_cont(0.99) WITHIN GROUP (
                ORDER BY extract(epoch FROM (candidate.completed_at-proof.proof_observed_at))
-           ) AS p99
+           ) FILTER (WHERE candidate.proof_ok) AS p99
     FROM candidates candidate
     JOIN public.settlement_obligation_fulfillments fulfillment
       ON fulfillment.delivery_id=candidate.id

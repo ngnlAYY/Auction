@@ -543,8 +543,10 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
 `auction_sli_window_incomplete`、`auction_sli_window_oldest_incomplete_seconds` 与
 `auction_sli_window_incomplete_available`；
 提醒另发布 `auction_sli_outbid_margin_seconds{world,channel,deadline_state,quantile}`
-（p01/p05）、`auction_sli_outbid_samples` 与 `auction_sli_outbid_non_positive`。
-无样本不生成分位；坏 metadata 使整轮 InvalidData；结算末封未齐只计 incomplete。
+（p01/p05）、`auction_sli_outbid_samples`、`auction_sli_outbid_non_positive` 与
+`auction_sli_outbid_unknown`。无样本不生成分位；坏 metadata 使整轮 InvalidData；
+已完成但缺强 Send 证明的候选不进入分位，按 unknown 记录；结算首/末封任一付款投递
+缺证明时该场不发布分位并计 unknown。
 完整快照后 `auction_sli_flow_available` 对八项为 1，不再有 awaiting_index 系列。
 索引存在不等于完整覆盖：给全表扫描加 statement timeout 或对历史主键任意截断，
 都不能证明完整窗口。
@@ -580,12 +582,15 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
   首/末封只认 COD 与 carrier 付款邮件模板；isekai 的 equipment_handoff 是付款后的
   装备交付，不是付款邮件，不进入首/末封集合；`bot_internal_v1` 内部满足的义务
   也不需要邮件，不计入应发集合。候选按付款邮件完成终点落窗，settled_at 可以早于七天。
+  候选保留全部成功付款投递；任一投递缺强证明（含更早期次）时该场不给首/末封分位，
+  统一计 `unknown`，避免把较晚已证明邮件误当首封。
   当前所有 flow 的 incomplete 覆盖尚未实现：`auction_sli_window_incomplete_available=0`，
   不发布 incomplete/oldest；不能把未查询的未完成集合当作零。待各 flow 的完整未完成
   候选查询（含 failed/manual_reconcile 与缺证据义务）落地后再启用。
 - 买家至卖方：首次有效付款 proof_observed_at → 卖方货款发送证明。
   main 直接取 seller_payout 的付款前置；isekai 先经 winner_equipment_handoff 的
-  prerequisite 找到真正付款义务。缺可靠付款证据计 unknown，不以一般 updated_at 替代。
+  prerequisite 找到真正付款义务。缺可靠付款证据或 seller_payout 投递缺强证明
+  计 unknown，不以一般 updated_at 替代。
 - 投稿收取：入站 received_at → Take 的成功动作证明，复用 conflicts/intake 的
   action_removed_or_success_page / action_recovered_inbox_v1 owner 谓词，不以本地录入时间替代。
   拒收：入站 received_at → 拒收通知发送证明，覆盖 equipment_rejected、no_attachments 与

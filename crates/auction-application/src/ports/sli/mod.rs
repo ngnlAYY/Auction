@@ -199,6 +199,8 @@ pub struct SliOutbidMargin {
     pub p01: Option<f64>,
     pub p05: Option<f64>,
     pub non_positive: u64,
+    /// 已成功发送但缺强 Send 证明的提醒数；不进入分位。
+    pub unknown: u64,
 }
 
 /// 一轮只读事务内取得的数值快照；不含任何玩家或业务主键。

@@ -34,6 +34,7 @@ pub(super) struct Collector {
     outbid_margin: GaugeVec,
     outbid_samples: GaugeVec,
     outbid_non_positive: GaugeVec,
+    outbid_unknown: GaugeVec,
     flow_available: IntGaugeVec,
     blocked: IntGaugeVec,
 }
@@ -98,12 +99,16 @@ impl Collector {
                 "auction_sli_outbid_non_positive",
                 &["world", "channel", "deadline_state"],
             )?,
+            outbid_unknown: vector(
+                "auction_sli_outbid_unknown",
+                &["world", "channel", "deadline_state"],
+            )?,
             flow_available,
             blocked,
         })
     }
 
-    fn families(&self) -> [&dyn PrometheusCollector; 19] {
+    fn families(&self) -> [&dyn PrometheusCollector; 20] {
         [
             &self.available,
             &self.enabled,
@@ -122,6 +127,7 @@ impl Collector {
             &self.outbid_margin,
             &self.outbid_samples,
             &self.outbid_non_positive,
+            &self.outbid_unknown,
             &self.flow_available,
             &self.blocked,
         ]
@@ -210,6 +216,7 @@ impl PrometheusCollector for Collector {
                         if margin.samples == 0 {
                             let _ = self.outbid_samples.remove_label_values(&labels);
                             let _ = self.outbid_non_positive.remove_label_values(&labels);
+                            let _ = self.outbid_unknown.remove_label_values(&labels);
                             for quantile in ["p01", "p05"] {
                                 let _ = self.outbid_margin.remove_label_values(&[
                                     world.label(),
@@ -224,6 +231,7 @@ impl PrometheusCollector for Collector {
                         self.outbid_non_positive
                             .with_label_values(&labels)
                             .set(margin.non_positive as f64);
+                        self.outbid_unknown.with_label_values(&labels).set(margin.unknown as f64);
                         for (quantile, value) in [("p01", margin.p01), ("p05", margin.p05)] {
                             set_optional(
                                 &self.outbid_margin,

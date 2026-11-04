@@ -20,12 +20,12 @@ const MM_COUNT: &str = "
         LIMIT $3
     ),
     candidates AS MATERIALIZED (
-        SELECT delivery.completed_at,notification.lot_id
+        SELECT delivery.completed_at,notification.lot_id,
+               public.delivery_has_frozen_sent_proof(
+                   delivery.id,delivery.result_metadata,delivery.external_reference) AS proof_ok
         FROM window_deliveries delivery
         JOIN public.lot_watch_notifications notification
           ON notification.delivery_id=delivery.id
-        WHERE public.delivery_has_frozen_sent_proof(
-            delivery.id,delivery.result_metadata,delivery.external_reference)
     )
     SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
            count(*) AS candidates,
@@ -44,26 +44,27 @@ const MM_AGGREGATE: &str = "
         LIMIT $3
     ),
     candidates AS MATERIALIZED (
-        SELECT delivery.completed_at,notification.lot_id
+        SELECT delivery.completed_at,notification.lot_id,
+               public.delivery_has_frozen_sent_proof(
+                   delivery.id,delivery.result_metadata,delivery.external_reference) AS proof_ok
         FROM window_deliveries delivery
         JOIN public.lot_watch_notifications notification
           ON notification.delivery_id=delivery.id
-        WHERE public.delivery_has_frozen_sent_proof(
-            delivery.id,delivery.result_metadata,delivery.external_reference)
     )
     SELECT auction.world_id,
            CASE WHEN auction.status IN ('settling','settled','cancelled')
                 THEN 'final' ELSE 'provisional' END AS deadline_state,
-           count(*) AS samples,
+           count(*) FILTER (WHERE candidate.proof_ok) AS samples,
            percentile_cont(0.01) WITHIN GROUP (
                ORDER BY extract(epoch FROM (lot.effective_end_at-candidate.completed_at))
-           ) AS p01,
+           ) FILTER (WHERE candidate.proof_ok) AS p01,
            percentile_cont(0.05) WITHIN GROUP (
                ORDER BY extract(epoch FROM (lot.effective_end_at-candidate.completed_at))
-           ) AS p05,
+           ) FILTER (WHERE candidate.proof_ok) AS p05,
            count(*) FILTER (
-               WHERE lot.effective_end_at <= candidate.completed_at
-           ) AS non_positive
+               WHERE candidate.proof_ok AND lot.effective_end_at <= candidate.completed_at
+           ) AS non_positive,
+           count(*) FILTER (WHERE NOT candidate.proof_ok) AS unknown
     FROM candidates candidate
     JOIN public.lots lot ON lot.id=candidate.lot_id
     JOIN public.auctions auction ON auction.id=lot.auction_id
@@ -181,6 +182,16 @@ pub(super) async fn read(
             };
             let samples: i64 = row.try_get("samples").map_err(storage)?;
             let non_positive: i64 = row.try_get("non_positive").map_err(storage)?;
+            let unknown = match channel {
+                SliOutbidChannel::Mm => {
+                    let unknown: i64 = row.try_get("unknown").map_err(storage)?;
+                    u64::try_from(unknown).map_err(|error| {
+                        let _ = error;
+                        SliSnapshotError::InvalidData
+                    })?
+                }
+                SliOutbidChannel::Pm => 0,
+            };
             result[world][channel.index()][state] = SliOutbidMargin {
                 samples: u64::try_from(samples).map_err(|error| {
                     let _ = error;
@@ -192,6 +203,7 @@ pub(super) async fn read(
                     let _ = error;
                     SliSnapshotError::InvalidData
                 })?,
+                unknown,
             };
         }
     }

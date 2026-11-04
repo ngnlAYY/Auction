@@ -65,8 +65,6 @@ const SETTLEMENT_PAYMENT_COUNT: &str = "
               ('settlement_winner_equipment_cod','settlement_payment_carrier')
           AND obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod')
-          AND public.delivery_has_frozen_sent_proof(
-              delivery.id,delivery.result_metadata,delivery.external_reference)
     ),
     payments AS MATERIALIZED (
         SELECT obligation.auction_id,obligation.id AS obligation_id,
@@ -114,8 +112,6 @@ const SETTLEMENT_AGGREGATE: &str = "
               ('settlement_winner_equipment_cod','settlement_payment_carrier')
           AND obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod')
-          AND public.delivery_has_frozen_sent_proof(
-              delivery.id,delivery.result_metadata,delivery.external_reference)
     ),
     payments AS MATERIALIZED (
         SELECT obligation.auction_id,obligation.id AS obligation_id,
@@ -135,26 +131,42 @@ const SETTLEMENT_AGGREGATE: &str = "
     ),
     fulfilled AS (
         SELECT payment.auction_id,payment.world_id,payment.settled_at,payment.obligation_id,
-               min(delivery.completed_at) FILTER (WHERE delivery.status='succeeded') AS first_at,
-               max(delivery.completed_at) FILTER (WHERE delivery.status='succeeded') AS last_at,
+               min(delivery.completed_at) FILTER (
+                   WHERE delivery.status='succeeded'
+                     AND public.delivery_has_frozen_sent_proof(
+                         delivery.id,delivery.result_metadata,delivery.external_reference)
+               ) AS first_at,
+               max(delivery.completed_at) FILTER (
+                   WHERE delivery.status='succeeded'
+                     AND public.delivery_has_frozen_sent_proof(
+                         delivery.id,delivery.result_metadata,delivery.external_reference)
+               ) AS last_at,
+               -- 任一付款投递缺强证明即视为该义务证明不全；无投递也必须为 false。
+               COALESCE(bool_and(COALESCE(
+                   public.delivery_has_frozen_sent_proof(
+                       delivery.id,delivery.result_metadata,delivery.external_reference),
+                   false)),false) AS all_proof,
                -- 无 fulfillment/delivery 的义务必须视为未成功；空组 bool_or 为 NULL，
                -- bool_and 会忽略 NULL，不能据此宣称末封已完成。
-               COALESCE(bool_or(delivery.status='succeeded'),false) AS has_success
+               COALESCE(bool_or(
+                   delivery.status='succeeded'
+                   AND public.delivery_has_frozen_sent_proof(
+                       delivery.id,delivery.result_metadata,delivery.external_reference)
+               ),false) AS has_success
         FROM payments payment
         LEFT JOIN public.settlement_obligation_fulfillments fulfillment
           ON fulfillment.obligation_id=payment.obligation_id
         LEFT JOIN public.deliveries delivery
           ON delivery.id=fulfillment.delivery_id
-         AND delivery.status='succeeded'
-         AND public.delivery_has_frozen_sent_proof(
-             delivery.id,delivery.result_metadata,delivery.external_reference)
         GROUP BY payment.auction_id,payment.world_id,payment.settled_at,payment.obligation_id
     ),
     per_auction AS (
         SELECT world_id,auction_id,settled_at,
-               min(first_at) AS first_at,
-               CASE WHEN bool_and(has_success) THEN max(last_at) END AS last_at,
-               bool_and(has_success) AS all_success
+               bool_and(all_proof) AS all_proof,
+               bool_and(has_success) AS all_success,
+               CASE WHEN bool_and(all_proof) THEN min(first_at) END AS first_at,
+               CASE WHEN bool_and(all_proof) AND bool_and(has_success)
+                    THEN max(last_at) END AS last_at
         FROM fulfilled
         GROUP BY world_id,auction_id,settled_at
     )
@@ -179,9 +191,7 @@ const SETTLEMENT_AGGREGATE: &str = "
            percentile_cont(0.99) WITHIN GROUP (
                ORDER BY extract(epoch FROM (last_at-settled_at))
            ) FILTER (WHERE last_at >= $1 AND last_at <= $2) AS last_p99,
-           count(*) FILTER (WHERE NOT all_success) AS incomplete,
-           (extract(epoch FROM ($2 - min(settled_at) FILTER (WHERE NOT all_success))))
-               ::double precision AS oldest_incomplete_seconds
+           count(*) FILTER (WHERE NOT all_proof) AS unknown
     FROM per_auction
     GROUP BY world_id";
 
@@ -236,6 +246,11 @@ pub(super) async fn read(
         };
         let first_samples: i64 = row.try_get("first_samples").map_err(storage)?;
         let last_samples: i64 = row.try_get("last_samples").map_err(storage)?;
+        let unknown: i64 = row.try_get("unknown").map_err(storage)?;
+        let unknown = u64::try_from(unknown).map_err(|error| {
+            let _ = error;
+            SliSnapshotError::InvalidData
+        })?;
         first[index] = SliFlowWindow {
             samples: u64::try_from(first_samples).map_err(|error| {
                 let _ = error;
@@ -244,7 +259,7 @@ pub(super) async fn read(
             p50: row.try_get("first_p50").map_err(storage)?,
             p95: row.try_get("first_p95").map_err(storage)?,
             p99: row.try_get("first_p99").map_err(storage)?,
-            unknown: 0,
+            unknown,
             incomplete: 0,
             oldest_incomplete_seconds: None,
             incomplete_available: false,
@@ -257,7 +272,7 @@ pub(super) async fn read(
             p50: row.try_get("last_p50").map_err(storage)?,
             p95: row.try_get("last_p95").map_err(storage)?,
             p99: row.try_get("last_p99").map_err(storage)?,
-            unknown: 0,
+            unknown,
             incomplete: 0,
             oldest_incomplete_seconds: None,
             incomplete_available: false,
