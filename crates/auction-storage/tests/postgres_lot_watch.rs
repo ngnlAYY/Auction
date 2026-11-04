@@ -12,7 +12,7 @@ mod support;
 
 use auction_application::{
     DeliveryClaimExclusions, DeliveryWorkStore, LotWatchPmClaimRequest, LotWatchPmWorkStore,
-    MailNotificationTemplate, lot_watch_notification, lot_watch_pm_notification,
+    MailNotificationTemplate, OutbidNotice, lot_watch_notification, lot_watch_pm_notification,
 };
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
@@ -180,9 +180,20 @@ async fn seed_watch(
     .expect("写入测试出价");
 
     if channel == "pm" {
-        let notification =
-            lot_watch_pm_notification(lot_id, watcher_id, 1, 120000, Some("9001".to_owned()))
-                .expect("构造 PM 提醒");
+        let notification = lot_watch_pm_notification(
+            lot_id,
+            watcher_id,
+            1,
+            120000,
+            OutbidNotice {
+                lot_code: "Clo01",
+                item_name: "Phase Robe of Niflheim",
+                deadline: Some(deadline),
+                site_url: Some("https://auction.example.com"),
+            },
+            Some("9001".to_owned()),
+        )
+        .expect("构造 PM 提醒");
         sqlx::query(
             "INSERT INTO public.lot_watch_notifications
                 (id, user_id, lot_id, leadership_cycle, displaced_bid_id, watch_version,
@@ -220,6 +231,12 @@ async fn seed_watch(
         watcher_id,
         1,
         120000,
+        OutbidNotice {
+            lot_code: "Clo01",
+            item_name: "Phase Robe of Niflheim",
+            deadline: Some(deadline),
+            site_url: Some("https://auction.example.com"),
+        },
         "main".to_owned(),
         format!("{seed}-w"),
     )

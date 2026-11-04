@@ -111,6 +111,9 @@ mod mail_diagnostics;
 #[path = "mail/equipment_diagnostics.rs"]
 mod mail_equipment_diagnostics;
 pub use mail_equipment_diagnostics::*;
+mod account_scheduling {
+    include!("mail/scheduling.rs");
+}
 #[path = "scheduling/early_bird.rs"]
 mod early_bird_schedule;
 #[path = "mail/display.rs"]
@@ -121,6 +124,10 @@ mod mail_maintenance;
 mod mail_poll;
 #[path = "mail/processing.rs"]
 mod mail_processing;
+pub use account_scheduling::{
+    AccountWorkPriority, GateClass, GatePoll, GateTicket, LOW_PRIORITY_FLOOR_AFTER,
+    OperationLockState, PriorityGateState, SegmentPlan,
+};
 #[path = "operations/alert.rs"]
 mod operations_alert;
 #[path = "auction/queries.rs"]
@@ -360,7 +367,7 @@ pub use forum_reply::{
     FORUM_POSTS_PER_PAGE, ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity,
     ForumCatalogPage, ForumCommandOutcome, ForumCommandStart, ForumCommandStatus, ForumLotTarget,
     ForumReplyPhase, ForumReplyStore, ForumReplyTopic, ForumTopicCursor, ForumTopicReader,
-    ForumTopicScan, forum_topic_fixed_page_count, forum_topic_scan_pages,
+    ForumTopicScan, NotifySubscription, forum_topic_fixed_page_count, forum_topic_scan_pages,
 };
 pub use forum_sync::{
     FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot, ForumCatalogLayout, ForumCredentialAvailability,

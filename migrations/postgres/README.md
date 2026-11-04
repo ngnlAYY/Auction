@@ -127,3 +127,5 @@ VALUES (76, 'breaking');
 | 000076 | 运行时行为开关只追加事实兼命令账本；纯新增、旧程序不读，登记 compatible |
 | 000077 | W0.13 历史 SLI 的五个全局时间候选索引；仅新增普通索引，不改写事实，登记 compatible |
 | 000078 | CLI 运维审计来源显式区分 `cli`；扩展 `audit_records.source` CHECK，不修改历史行，登记 breaking（旧程序与旧 Admin 前端拒绝 cli） |
+| 000079 | `rekey` 自助轮换命令与入站种类；扩展 CHECK 后登记 breaking |
+| 000080 | W14.11 慢速代理等待期间的待定被超提醒（只追加、单向收口）；纯新增，登记 compatible |

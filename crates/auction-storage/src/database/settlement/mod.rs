@@ -83,6 +83,7 @@ impl SettlementTransactionRunner for PostgresStore {
                     let mut transaction = PostgresCompetitionTransaction::new(
                         transaction,
                         std::sync::Arc::clone(&self.notification_metrics),
+                        self.public_base_url.clone(),
                     );
 
                     match operation(&mut transaction).await {

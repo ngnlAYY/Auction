@@ -7,7 +7,6 @@ use super::*;
 pub(super) async fn configure_forum(
     config: &AppConfig,
     store: Arc<DatabaseStore>,
-    delivery_enabled: bool,
     external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
 ) -> anyhow::Result<(
     Option<auction_jobs::ForumSyncRuntime>,
@@ -156,8 +155,6 @@ pub(super) async fn configure_forum(
     let reply_store: Arc<dyn ForumReplyStore> = store.clone();
     let commands: Arc<dyn CompetitionCommandPort> =
         Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store)));
-    let notifier: Option<Arc<dyn MailDeliveryEnqueuer>> =
-        if delivery_enabled { Some(store.clone()) } else { None };
     let reply = Some(
         auction_jobs::ForumReplyRuntime::new(
             auction_jobs::ForumReplyPorts {
@@ -168,17 +165,12 @@ pub(super) async fn configure_forum(
                 renderer,
                 equipment_links,
                 commands,
-                notifier,
             },
             forum_config.batch_size,
             std::time::Duration::from_secs(forum_config.item_timeout_seconds),
             forum_config.public_base_url.clone(),
         )?
         .with_post_body_verification(forum_config.verify_post_body)
-        .with_mail_notice_budget(
-            config.worker.mooglemail.explanation_mail_window_seconds,
-            config.worker.mooglemail.explanation_mail_limit,
-        )
         .with_external_metrics(Arc::clone(&external_metrics)),
     );
     // PM 复用同一网关、限速及凭据 ownership，与 MM enabled 无关。

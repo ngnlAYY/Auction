@@ -169,32 +169,6 @@ pub(super) fn post_allowed(
     }
 }
 
-pub(super) struct IntervalGate {
-    interval: Duration,
-    next: Mutex<Instant>,
-}
-
-impl IntervalGate {
-    pub(super) fn new(interval: Duration) -> Self {
-        Self { interval, next: Mutex::new(Instant::now()) }
-    }
-
-    pub(super) async fn wait(&self) -> Result<(), ()> {
-        // 只有实际获准的请求推进时间槽；预算取消不会留下未发送请求的限速债务。
-        let mut next = self.next.lock().await;
-        let delay = next.saturating_duration_since(Instant::now());
-        if !delay.is_zero() {
-            time::sleep(delay).await;
-        }
-        *next = Instant::now().checked_add(self.interval).ok_or(())?;
-        Ok(())
-    }
-
-    pub(super) const fn interval(&self) -> Duration {
-        self.interval
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use self::parent::*;

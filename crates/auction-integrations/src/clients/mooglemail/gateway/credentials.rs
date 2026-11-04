@@ -7,9 +7,10 @@ use crate::diagnostics as safe_diagnostics;
 
 use std::sync::{Arc, Mutex};
 
-use auction_application::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
+use auction_application::{
+    AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter, GateClass,
+};
 use chrono::Utc;
-use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use uuid::Uuid;
 
 use super::*;
@@ -22,7 +23,16 @@ struct MoogleMailCredentialCandidate {
     player_name: Option<String>,
     world: Option<MoogleMailWorld>,
     cookie: MoogleMailCookie,
-    operation_lock: Arc<AsyncMutex<()>>,
+    operation_lock: Arc<OperationLock>,
+}
+
+/// 维护的 compose 观察与资产写入共用同一把锁；只有 compose 页面观察属于后台维护，
+/// 发送与资产动作属于前台写入，不能被维护观察无限推迟。
+fn operation_lock_class(operation: MoogleMailOperation) -> GateClass {
+    match operation {
+        MoogleMailOperation::Compose => GateClass::Background,
+        _ => GateClass::Foreground,
+    }
 }
 
 /// 数据库凭据的运行时身份元数据；名称仅为预期值，Cookie 的 Debug 已脱敏。
@@ -65,7 +75,7 @@ impl MoogleMailCredentialSet {
                 player_name: None,
                 world: None,
                 cookie,
-                operation_lock: Arc::new(AsyncMutex::new(())),
+                operation_lock: Arc::new(OperationLock::new()),
             }],
             None,
             Some(ownership),
@@ -85,7 +95,7 @@ impl MoogleMailCredentialSet {
                     player_name: None,
                     world: None,
                     cookie,
-                    operation_lock: Arc::new(AsyncMutex::new(())),
+                    operation_lock: Arc::new(OperationLock::new()),
                 })
                 .collect(),
             None,
@@ -109,7 +119,7 @@ impl MoogleMailCredentialSet {
                     player_name: None,
                     world: None,
                     cookie,
-                    operation_lock: Arc::new(AsyncMutex::new(())),
+                    operation_lock: Arc::new(OperationLock::new()),
                 })
                 .collect(),
             Some(invalidator),
@@ -133,7 +143,7 @@ impl MoogleMailCredentialSet {
                     player_name: None,
                     world,
                     cookie,
-                    operation_lock: Arc::new(AsyncMutex::new(())),
+                    operation_lock: Arc::new(OperationLock::new()),
                 })
                 .collect(),
             Some(invalidator),
@@ -159,7 +169,7 @@ impl MoogleMailCredentialSet {
                     player_name: credential.player_name,
                     world: credential.world,
                     cookie: credential.cookie,
-                    operation_lock: Arc::new(AsyncMutex::new(())),
+                    operation_lock: Arc::new(OperationLock::new()),
                 })
                 .collect(),
             Some(invalidator),
@@ -273,7 +283,8 @@ impl MoogleMailCredentialSet {
             operation,
             auction_application::MailLock::Exclusive,
         );
-        let operation_guard = Arc::clone(&current.operation_lock).lock_owned().await;
+        let operation_guard =
+            Arc::clone(&current.operation_lock).lock(operation_lock_class(operation)).await;
         lock_wait.acquired();
         // 集合最多一条凭据且只会撤销；等待期间失效必须失败，不能重获或换号。
         if !self.candidate_is_active(current.key, world, operation)? {
@@ -374,7 +385,7 @@ pub(crate) struct MoogleMailCredentialSession {
     world: MoogleMailWorld,
     operation: MoogleMailOperation,
     current: MoogleMailCredentialCandidate,
-    operation_guard: Option<OwnedMutexGuard<()>>,
+    operation_guard: Option<OperationLockGuard>,
 }
 
 impl MoogleMailCredentialSession {

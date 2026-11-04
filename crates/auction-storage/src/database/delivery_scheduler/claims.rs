@@ -90,7 +90,22 @@ pub(super) async fn claim_postgres(
                  WHERE cadence.category = public.delivery_send_category(deliveries.origin_kind, deliveries.payload)
                    AND cadence.last_started_at + (($7 ->> (cadence.category || '_seconds'))::bigint * interval '1 second') > $1
              )
-           ORDER BY CASE WHEN origin_kind = 'lot_watch' THEN 0 ELSE 1 END, created_at, id
+           ORDER BY CASE public.delivery_send_category(deliveries.origin_kind, deliveries.payload)
+                      WHEN 'operations' THEN 0
+                      WHEN 'account' THEN 1
+                      WHEN 'outbid' THEN 2
+                      ELSE 3
+                    END,
+                    CASE public.delivery_send_category(deliveries.origin_kind, deliveries.payload)
+                      WHEN 'outbid' THEN (
+                        SELECT notification_lot.effective_end_at
+                        FROM public.lot_watch_notifications AS notification
+                        JOIN public.lots AS notification_lot
+                          ON notification_lot.id = notification.lot_id
+                        WHERE notification.delivery_id = deliveries.id
+                      )
+                    END ASC NULLS LAST,
+                    deliveries.created_at, deliveries.id
            LIMIT $2
            FOR UPDATE SKIP LOCKED"#
     ))

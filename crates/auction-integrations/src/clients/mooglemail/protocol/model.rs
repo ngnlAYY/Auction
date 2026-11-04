@@ -103,6 +103,22 @@ pub enum MoogleMailOperation {
 }
 
 impl MoogleMailOperation {
+    /// 纯只读观测：收件箱/已读列表、Sent 列表与详情、余额、装备、身份与库存页。
+    /// 写入流程中的 compose/detail 页面不在此列，仍占前台令牌。
+    pub const fn is_background_read(self) -> bool {
+        matches!(
+            self,
+            Self::Inbox
+                | Self::ReadMail
+                | Self::Sent
+                | Self::SentDetail
+                | Self::Balance
+                | Self::Equipment
+                | Self::Identity
+                | Self::Inventory
+        )
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Inbox => "inbox",

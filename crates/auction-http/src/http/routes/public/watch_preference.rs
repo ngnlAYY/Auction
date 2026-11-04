@@ -22,8 +22,9 @@ pub(crate) async fn get_watch_preference(
     let Some(port) = state.watch_preference() else {
         return failure(LotWatchError::Unavailable);
     };
+    let pm_available = port.pm_available(identity.user_id).await.unwrap_or(false);
     match port.get(identity.user_id).await {
-        Ok(value) if valid(&value, identity.user_id) => success(value),
+        Ok(value) if valid(&value, identity.user_id) => success(value, pm_available),
         Ok(_) => failure(LotWatchError::Unavailable),
         Err(error) => failure(error),
     }
@@ -74,7 +75,7 @@ pub(crate) async fn set_watch_preference(
                 && value.channel == input.channel
                 && Some(value.version) == input.expected_version.checked_add(1) =>
         {
-            success(value)
+            success(value, port.pm_available(identity.user_id).await.unwrap_or(false))
         }
         Ok(_) => failure(LotWatchError::Unavailable),
         Err(error) => failure(error),
@@ -83,11 +84,12 @@ pub(crate) async fn set_watch_preference(
 fn valid(value: &LotWatchPreference, user_id: uuid::Uuid) -> bool {
     value.user_id == user_id && value.version > 0 && matches!(value.channel.as_str(), "mm" | "pm")
 }
-fn success(value: LotWatchPreference) -> Response {
+fn success(value: LotWatchPreference, pm_available: bool) -> Response {
     let data = PublicLotWatchPreferenceResponse {
         user_id: value.user_id.to_string(),
         channel: value.channel,
         version: value.version,
+        pm_available,
     };
     (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("竞价警告渠道已确认", data)))
         .into_response()
@@ -102,6 +104,11 @@ fn failure(error: LotWatchError) -> Response {
             LotWatchError::Conflict => {
                 (StatusCode::CONFLICT, "watch_preference_conflict", "警告渠道命令或版本冲突")
             }
+            LotWatchError::PmUnavailable => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "pm_channel_unavailable",
+                "PM 提醒需要已启用的论坛同步与已绑定论坛账号",
+            ),
             _ => (StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "警告渠道暂不可用"),
         };
         api_error(status, code, message).into_response()

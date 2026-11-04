@@ -55,6 +55,7 @@ pub(super) async fn run_worker(
             .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
             .with_notification_recorder(metrics.notifications())
+            .with_public_base_url(config.worker.forum.public_base_url.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness())
             .with_delivery_send_intervals(config.worker.mooglemail.send_intervals)
@@ -102,13 +103,7 @@ pub(super) async fn run_worker(
     let slow_proxy_commands: Arc<dyn SlowProxyCommandPort> =
         Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store)));
     let (forum_sync, forum_reply, forum_pm, forum_profile_reader, forum_runtime_ownership) =
-        configure_forum(
-            config,
-            Arc::clone(&store),
-            config.worker.mooglemail.enabled,
-            metrics.external_metrics(),
-        )
-        .await?;
+        configure_forum(config, Arc::clone(&store), metrics.external_metrics()).await?;
     let mail_progress = auction_jobs::MailPollProgressTracker::default();
     let (
         mail_polls,

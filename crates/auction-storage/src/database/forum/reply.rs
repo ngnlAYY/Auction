@@ -3,7 +3,7 @@
 use auction_application::{
     ApplicationFuture, ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord,
     ForumBidderIdentity, ForumCommandOutcome, ForumCommandStart, ForumLotTarget, ForumRenderedPost,
-    ForumRenderedThread, ForumReplyStore, ForumReplyTopic,
+    ForumRenderedThread, ForumReplyStore, ForumReplyTopic, NotifySubscription,
 };
 use auction_domain::{AuctionId, LotId, SettlementWorld, UserId};
 use chrono::{DateTime, Utc};
@@ -17,6 +17,8 @@ mod fixed_posts;
 #[cfg(feature = "postgres")]
 mod identity;
 mod queries;
+#[cfg(feature = "postgres")]
+mod subscribe;
 mod validation;
 
 #[cfg(feature = "postgres")]
@@ -34,6 +36,8 @@ use queries::{
     earliest_live_lot_deadline_postgres, lot_targets_postgres, reply_commands_open_postgres,
     reply_cursor_postgres,
 };
+#[cfg(feature = "postgres")]
+use subscribe::subscribe_notify_postgres;
 use validation::{
     MAX_ERROR_CODE_BYTES, MAX_ERROR_DETAIL_BYTES, MAX_FIXED_POST_ID_BYTES,
     MAX_FORUM_ACCOUNT_ID_BYTES, MAX_PLAYER_NAME_BYTES, MAX_REPLY_BATCH_SIZE, MAX_THREAD_ID_BYTES,
@@ -158,6 +162,28 @@ impl ForumReplyStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => begin_command_postgres(store, record).await,
+            }
+        })
+    }
+
+    fn subscribe_notify(
+        &self,
+        command_id: Uuid,
+        auction_id: AuctionId,
+        lot_id: LotId,
+        user_id: UserId,
+        post_id: String,
+        lot_code: String,
+    ) -> ApplicationFuture<'_, NotifySubscription> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    subscribe_notify_postgres(
+                        store, command_id, auction_id, lot_id, user_id, &post_id, &lot_code,
+                    )
+                    .await
+                }
             }
         })
     }

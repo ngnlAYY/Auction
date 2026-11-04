@@ -61,7 +61,13 @@ impl MoogleMailClient {
             target.world,
             target.operation,
         );
-        let gate_result = self.gate.wait().await;
+        // 纯只读观测使用后台档；compose/detail 等写入流程页面仍有前台份额。
+        let class = if target.operation.is_background_read() {
+            auction_application::GateClass::Background
+        } else {
+            auction_application::GateClass::Foreground
+        };
+        let gate_result = self.gate.wait(class).await;
         gate_wait.finish(if gate_result.is_ok() {
             auction_application::WaitOutcome::Acquired
         } else {
@@ -345,7 +351,8 @@ impl MoogleMailClient {
             target.world,
             operation,
         );
-        let gate_result = self.gate.wait().await;
+        // 表单写入一律前台：账号忙与发送围栏都不能被后台读取挤到后面。
+        let gate_result = self.gate.wait(auction_application::GateClass::Foreground).await;
         gate_wait.finish(if gate_result.is_ok() {
             auction_application::WaitOutcome::Acquired
         } else {
