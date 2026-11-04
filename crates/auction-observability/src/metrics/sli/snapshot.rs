@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use auction_application::{
-    RuntimeSwitches, SLI_AWAITING_INDEX, SLI_SLOW_PROXY_FLOW, SliBidKind, SliWorld,
+    RuntimeSwitches, SLI_AWAITING_INDEX, SLI_SLOW_PROXY_FLOW, SliBidKind, SliDeadlineState,
+    SliFlow, SliOutbidChannel, SliWorld,
 };
 use prometheus::{
     Gauge, GaugeVec, IntGauge, IntGaugeVec, Opts,
@@ -24,6 +25,16 @@ pub(super) struct Collector {
     peak: GaugeVec,
     pending: GaugeVec,
     oldest: GaugeVec,
+    window_duration: GaugeVec,
+    window_samples: GaugeVec,
+    window_unknown: GaugeVec,
+    window_incomplete: GaugeVec,
+    window_oldest_incomplete: GaugeVec,
+    window_incomplete_available: GaugeVec,
+    outbid_margin: GaugeVec,
+    outbid_samples: GaugeVec,
+    outbid_non_positive: GaugeVec,
+    outbid_unknown: GaugeVec,
     flow_available: IntGaugeVec,
     blocked: IntGaugeVec,
 }
@@ -61,12 +72,43 @@ impl Collector {
             peak: vector("auction_final_bid_peak_per_second", &["world", "kind"])?,
             pending: vector("auction_sli_pending", &["flow", "world"])?,
             oldest: vector("auction_sli_oldest_pending_seconds", &["flow", "world"])?,
+            window_duration: vector(
+                "auction_sli_window_duration_seconds",
+                &["flow", "world", "quantile"],
+            )?,
+            window_samples: vector("auction_sli_window_samples", &["flow", "world"])?,
+            window_unknown: vector("auction_sli_window_unknown", &["flow", "world"])?,
+            window_incomplete: vector("auction_sli_window_incomplete", &["flow", "world"])?,
+            window_oldest_incomplete: vector(
+                "auction_sli_window_oldest_incomplete_seconds",
+                &["flow", "world"],
+            )?,
+            window_incomplete_available: vector(
+                "auction_sli_window_incomplete_available",
+                &["flow", "world"],
+            )?,
+            outbid_margin: vector(
+                "auction_sli_outbid_margin_seconds",
+                &["world", "channel", "deadline_state", "quantile"],
+            )?,
+            outbid_samples: vector(
+                "auction_sli_outbid_samples",
+                &["world", "channel", "deadline_state"],
+            )?,
+            outbid_non_positive: vector(
+                "auction_sli_outbid_non_positive",
+                &["world", "channel", "deadline_state"],
+            )?,
+            outbid_unknown: vector(
+                "auction_sli_outbid_unknown",
+                &["world", "channel", "deadline_state"],
+            )?,
             flow_available,
             blocked,
         })
     }
 
-    fn families(&self) -> [&dyn PrometheusCollector; 10] {
+    fn families(&self) -> [&dyn PrometheusCollector; 20] {
         [
             &self.available,
             &self.enabled,
@@ -76,6 +118,16 @@ impl Collector {
             &self.peak,
             &self.pending,
             &self.oldest,
+            &self.window_duration,
+            &self.window_samples,
+            &self.window_unknown,
+            &self.window_incomplete,
+            &self.window_oldest_incomplete,
+            &self.window_incomplete_available,
+            &self.outbid_margin,
+            &self.outbid_samples,
+            &self.outbid_non_positive,
+            &self.outbid_unknown,
             &self.flow_available,
             &self.blocked,
         ]
@@ -94,7 +146,18 @@ impl PrometheusCollector for Collector {
         self.age.set(
             snapshot.as_ref().map_or(-1.0, |snapshot| snapshot.started.elapsed().as_secs_f64()),
         );
-        for flow in ["final_bid_capacity", "slow_proxy_pending"] {
+        for flow in [
+            "final_bid_capacity",
+            "slow_proxy_pending",
+            "register_key",
+            "outbid_deadline_margin",
+            "settlement_first_payment_mail",
+            "settlement_last_payment_mail",
+            "buyer_payment_to_seller_payout",
+            "submission_take",
+            "submission_rejection_notice",
+            "slow_proxy_execution",
+        ] {
             self.flow_available.with_label_values(&[flow]).set(i64::from(snapshot.is_some()));
         }
         if let Some(snapshot) = snapshot.as_ref() {
@@ -111,9 +174,84 @@ impl PrometheusCollector for Collector {
                 let labels = [SLI_SLOW_PROXY_FLOW, world.label()];
                 self.pending.with_label_values(&labels).set(pending.count as f64);
                 self.oldest.with_label_values(&labels).set(pending.oldest_seconds);
+                for flow in SliFlow::ALL {
+                    if SLI_AWAITING_INDEX.contains(&flow.label()) {
+                        continue;
+                    }
+                    let window = snapshot.value.windows[world_index][flow.index()];
+                    let labels = [flow.label(), world.label()];
+                    self.window_samples.with_label_values(&labels).set(window.samples as f64);
+                    self.window_unknown.with_label_values(&labels).set(window.unknown as f64);
+                    self.window_incomplete_available
+                        .with_label_values(&labels)
+                        .set(if window.incomplete_available { 1.0 } else { 0.0 });
+                    if window.incomplete_available {
+                        self.window_incomplete
+                            .with_label_values(&labels)
+                            .set(window.incomplete as f64);
+                        set_optional(
+                            &self.window_oldest_incomplete,
+                            &labels,
+                            window.oldest_incomplete_seconds,
+                        );
+                    } else {
+                        let _ = self.window_incomplete.remove_label_values(&labels);
+                        let _ = self.window_oldest_incomplete.remove_label_values(&labels);
+                    }
+                    for (quantile, value) in
+                        [("p50", window.p50), ("p95", window.p95), ("p99", window.p99)]
+                    {
+                        set_optional(
+                            &self.window_duration,
+                            &[flow.label(), world.label(), quantile],
+                            value,
+                        );
+                    }
+                }
+                for channel in SliOutbidChannel::ALL {
+                    for state in SliDeadlineState::ALL {
+                        let margin =
+                            snapshot.value.outbid[world_index][channel.index()][state.index()];
+                        let labels = [world.label(), channel.label(), state.label()];
+                        if margin.samples == 0 {
+                            let _ = self.outbid_samples.remove_label_values(&labels);
+                            let _ = self.outbid_non_positive.remove_label_values(&labels);
+                            let _ = self.outbid_unknown.remove_label_values(&labels);
+                            for quantile in ["p01", "p05"] {
+                                let _ = self.outbid_margin.remove_label_values(&[
+                                    world.label(),
+                                    channel.label(),
+                                    state.label(),
+                                    quantile,
+                                ]);
+                            }
+                            continue;
+                        }
+                        self.outbid_samples.with_label_values(&labels).set(margin.samples as f64);
+                        self.outbid_non_positive
+                            .with_label_values(&labels)
+                            .set(margin.non_positive as f64);
+                        self.outbid_unknown.with_label_values(&labels).set(margin.unknown as f64);
+                        for (quantile, value) in [("p01", margin.p01), ("p05", margin.p05)] {
+                            set_optional(
+                                &self.outbid_margin,
+                                &[world.label(), channel.label(), state.label(), quantile],
+                                value,
+                            );
+                        }
+                    }
+                }
             }
         }
         self.families().into_iter().flat_map(PrometheusCollector::collect).collect()
+    }
+}
+
+fn set_optional(vector: &GaugeVec, labels: &[&str], value: Option<f64>) {
+    if let Some(value) = value {
+        vector.with_label_values(labels).set(value);
+    } else {
+        let _ = vector.remove_label_values(labels);
     }
 }
 

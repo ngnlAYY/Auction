@@ -331,6 +331,6 @@ pub use services::RuntimeSwitchRefreshService;
 
 pub use ports::{
     SLI_AWAITING_INDEX, SLI_CANDIDATE_LIMIT, SLI_SLOW_PROXY_FLOW, SLI_WINDOW_SECONDS,
-    SliBidCapacity, SliBidKind, SliPending, SliSnapshot, SliSnapshotError, SliSnapshotReader,
-    SliWorld,
+    SliBidCapacity, SliBidKind, SliDeadlineState, SliFlow, SliFlowWindow, SliOutbidChannel,
+    SliOutbidMargin, SliPending, SliSnapshot, SliSnapshotError, SliSnapshotReader, SliWorld,
 };

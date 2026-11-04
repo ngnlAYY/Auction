@@ -254,8 +254,18 @@ Worker 任务与业务循环分离；`/metrics` 不读取数据库。
 - `auction_settlements_sli_settled_at_idx`：全局场次结算窗口。
 - `audit_records_sli_slow_proxy_tick_idx`：固定 `lot.slow_proxy_tick` 的全部历史审计。
 
-这些索引只是候选入口；八项派生查询、10001 条溢出哨兵、关联扇出限制与证明核验尚未实现，
-所以 `auction_sli_flow_blocked{reason="awaiting_index"}` 在派生落地前仍保持不可用。
+这些索引是八项只读窗口的候选入口；查询先按成功完成时间 MATERIALIZED LIMIT 10001，
+再做类型/关联分类；结算的支付义务扇出另有 10001 哨兵，任一溢出整轮不可评估。
+首/末封付款集合只含 COD 与 carrier 付款义务；`winner_equipment_handoff` 是付款后的
+isekai 装备交付，不是付款邮件，不进入该集合；`bot_internal_v1` 内部满足的义务
+同样不要求邮件。所有 Send 样本（注册、拒收、结算付款、payout、MM 提醒）统一用
+`delivery_has_frozen_sent_proof`；候选先保留在完成窗口内，缺强证明的投递不进入分位，
+结算按场次、outbid 按提醒、payout 按货款发送分别累计 unknown。当前所有 flow 的 incomplete 覆盖尚未实现
+（`auction_sli_window_incomplete_available=0`），不发布 incomplete/oldest；
+待各 flow 的完整未完成候选查询落地后再启用，不能返回缩窗计数或伪零。
+成功样本按终点落入七天窗口；`auction_sli_window_*` 发布样本数和 p50/p95/p99，
+提醒另发布 `auction_sli_outbid_*` 的 p01/p05 与非正余量。没有样本时不生成分位序列，
+`unknown`/`incomplete` 不能当作零延迟；坏 metadata 或无法归属的候选使整轮失败关闭。
 不以全表扫描加超时、当前任务集或任意截断代替完整历史窗口。
-完整逐项状态、起终点、单位及预留指标见
+完整逐项状态、起终点、单位及指标见
 [SLI owner 文档](../../crates/auction-observability/README.md#sli-与容量基线)。
