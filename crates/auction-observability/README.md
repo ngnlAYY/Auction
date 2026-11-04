@@ -533,31 +533,30 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
 容量观测仅为基线，不是压力测试或能力承诺。
 目标保留 `<FINAL_BID_COMMANDS_PER_SECOND>`、`<CONCURRENT_WEBSOCKETS>`。
 
-### 待索引的历史流程
+### 历史流程（索引已具备，派生待实现）
 
-以下八项不运行 SQL、不发布耗时或余量样本；各自 flow_available=0、
-flow_blocked{reason="awaiting_index"}=1。状态与数值零严格区分。
-索引缺口指无法在现有结构下完整枚举七天窗口候选；
-给全表扫描加 statement timeout 或对历史主键任意截断，都不能证明完整覆盖。
-本批不新增索引或迁移，后续须先确定候选索引与证据关联，再实现派生。
+迁移 `000077` 已为以下八项补齐全局时间候选索引，但派生查询、10001 条溢出哨兵、
+关联扇出限制与证据核验尚未实现。因此八项仍不运行 SQL、不发布耗时或余量样本；
+各自 flow_available=0、flow_blocked{reason="awaiting_index"}=1。状态与数值零严格区分。
+索引存在不等于完整覆盖：给全表扫描加 statement timeout 或对历史主键任意截断，
+都不能证明完整窗口。
 
-| flow | 缺少的有界候选路径 |
+| flow | 仍需实现的有界候选与证据 |
 | --- | --- |
-| register_key | 邮件发送完成时间窗口及入站时间回查 |
-| outbid_deadline_margin | 已发送通知窗口，包含失效后的历史通知 |
-| settlement_first_payment_mail | 场次结算窗口及应发付款邮件完整集合 |
+| register_key | 成功投递完成窗口、入站回查与注册/key 身份证明 |
+| outbid_deadline_margin | 已成功发送的 MM/PM 完成窗口，包含失效后的历史通知，以及有效截止 |
+| settlement_first_payment_mail | 场次结算窗口、应发付款邮件完整集合与首封证明 |
 | settlement_last_payment_mail | 同上，还须证明全部应发邮件已完成 |
-| buyer_payment_to_seller_payout | 付款证明观察及货款发送完成窗口 |
-| submission_take | 投稿对应 Take 完成窗口及入站关联 |
-| submission_rejection_notice | 拒收通知发送完成窗口及入站关联 |
-| slow_proxy_execution | 按 action/时间枚举全部慢速代理历史审计 |
+| buyer_payment_to_seller_payout | 货款发送完成窗口、前置付款义务与首次有效付款证明 |
+| submission_take | 投稿对应 Take 完成窗口、尝试与入站关联 |
+| submission_rejection_notice | 拒收通知发送完成窗口与入站关联 |
+| slow_proxy_execution | 按 action/时间枚举全部慢速代理历史审计并核验 metadata |
 
-`inbound_mail_poll_idx` 以 mailbox_key 开头；delivery 的领取/lease 索引
-只覆盖工作队列，不能枚举全部成功发送。通知的 live 部分索引不覆盖全部历史。
-`settlement_obligations_read_idx` 需要先知道场次；
-`audit_records_entity_idx` 需要先知道 entity_id，不能用于全局 tick 时间窗口。
-当前 slow_due 索引只能描述尚未清除的调度，不能替代历史执行证据。
-完整索引证据与 owner 见[数据库契约](../../docs/contracts/database.md#sli-只读查询)。
+候选入口分别为 `inbound_mail_sli_received_at_idx`、
+`deliveries_sli_succeeded_completed_at_idx`、`lot_watch_pm_sli_succeeded_completed_at_idx`、
+`auction_settlements_sli_settled_at_idx` 与 `audit_records_sli_slow_proxy_tick_idx`；
+它们不替代按场次、按义务或按主键的点查。当前 slow_due 索引只能描述尚未清除的调度，
+不能替代历史执行证据。完整索引证据与 owner 见[数据库契约](../../docs/contracts/database.md#sli-只读查询)。
 
 这些流程的终点和将来指标口径固定如下，均以秒为单位：
 
@@ -578,7 +577,8 @@ flow_blocked{reason="awaiting_index"}=1。状态与数值零严格区分。
 将来完成样本按终点落入七天窗口；未完成项另报数量和最老年龄，不只看成功者。
 阈值比率使用已成熟起点群组作分母，不把未知或失败结果算成功。
 预留 `auction_sli_window_duration_seconds{flow,world,quantile}`（p50/p95/p99）、
-`auction_sli_window_samples`、`auction_sli_window_outcomes`；这些待索引族当前不注册。
+`auction_sli_window_samples`、`auction_sli_window_outcomes`；迁移 077 的候选索引已具备，
+但这些历史族在当前派生查询实现前仍不注册。
 提醒预留 `auction_sli_outbid_margin_seconds{world,channel,deadline_state,quantile}`，
 channel 仅 mm/pm；当前也不注册，不用零值替代不可评估。
 

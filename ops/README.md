@@ -483,9 +483,9 @@ auction_sli_flow_blocked{reason="awaiting_index"}
 Final 耗尽原始累计非零即按已有 D5 条件提前评估 W12.1，不能只看 increase。
 容量区分普通命令、代理创建、慢速代理，不把自动反击多条事实当多个用户命令。
 WS 峰值是采样下界，数据库单秒峰值是已接受命令基线，均不是压力测试能力。
-历史邮件、提醒、结算和慢速 tick 的分位因缺候选索引暂不实现，
+历史邮件、提醒、结算和慢速 tick 的候选索引已由迁移 077 补齐，但派生查询与证明核验尚未实现；
 以 flow_available=0 和 awaiting_index 明示，不报告零延迟或 SLO 已达标。
-Final 回帖导入只引用待合入的 W0.5；延迟上界、估计宽度和覆盖率须同时约束。
+Final 回帖导入已由 W0.5 接入；延迟上界、估计宽度和覆盖率须同时约束。
 服务端响应、WS 写出、本地发送证明与付款观察均为代理，不是真实客户端收件时刻。
 完整逐项状态和指标闭集见
 [SLI owner 文档](../crates/auction-observability/README.md#sli-与容量基线)。
