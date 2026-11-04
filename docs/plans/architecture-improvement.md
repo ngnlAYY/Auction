@@ -212,7 +212,7 @@
 | W3 | 未开始 | — | — | W3.7 随 M3 先行 |
 | W4 | 未开始 | — | — | 含 W4.5、W4.6，随 M4 |
 | W5 | 未开始 | — | — | W5.1、W5.6 暂缓（决策 50）；其余（含 W5.8）随 M4 |
-| W6.3 | 进行中 | `2241689b` | 未部署 | MoogleMail 脱敏子集 21 页与 manifest；`ci/fixtures/sanitize_mooglemail.py --check` 证明真实名称/token 未残留；论坛/战斗/登录页尚缺 |
+| W6.3 | 进行中 | `2241689b` | 未部署 | MoogleMail 脱敏子集 21 页与 manifest；公开论坛主题/登录页脱敏子集；PM/战斗页尚缺 |
 | W6.5 | 已提交 | 随本提交 | — | `just test` 运行默认 feature 全 targets；`just test-db` 要求隔离 PG18 的 `AUCTION_TEST_DATABASE_URL`；默认 verify 仍不运行测试；AGENTS/CONTRIBUTING/开发指南与计划交付规范同步 |
 | W6.6 | 进行中 | 随本提交 | — | MoogleMail loopback 替身与 4 个真实客户端集成测试；覆盖读取/详情/compose、账号忙、Cookie 失效、超时、结构漂移、写入未知、邮资不足、收件人不存在；论坛/战斗/登录语料缺失，未实现不得伪造 |
 | W6 | 进行中 | W6.1–W6.4、W6.6 已批准 | — | W6.3/W6.5/W6.6 已开始；W6.1/W6.2/W6.4 随后 |
