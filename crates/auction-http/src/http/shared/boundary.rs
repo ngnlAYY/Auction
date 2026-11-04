@@ -2,6 +2,8 @@
 //! 本模块处理协议级关联、可信代理、指标访问、安全响应头、超时、panic 隔离和访问观测。业务认证、
 //! origin/CSRF 与命令幂等仍由各自 handler 和应用端口负责。
 
+use auction_application::diagnostics::DiagnosticContext;
+
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     panic::AssertUnwindSafe,
@@ -23,6 +25,8 @@ use futures_util::FutureExt;
 use ipnet::IpNet;
 use tracing::Instrument;
 use uuid::Uuid;
+
+use crate::diagnostics;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
@@ -159,14 +163,24 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
     );
     auction_observability::attach_remote_trace_context(&span, traceparent, tracestate);
 
+    let diagnostic_route = request.extensions().get::<MatchedPath>().cloned();
     let response_request_id = request_id.as_str();
-    let response = async move {
+    let body = async move {
         let run = AssertUnwindSafe(next.run(request)).catch_unwind();
         // 超时覆盖 WebSocket 握手；on_upgrade 已独立持有长连接，不受请求计时器约束。
         match tokio::time::timeout(boundary.request_timeout, run).await {
-            Ok(Ok(response)) => response,
-            Ok(Err(_)) => {
-                tracing::error!("HTTP handler panic");
+            Ok(Ok(response)) => {
+                diagnostics::response_status(response.status());
+                response
+            }
+            Ok(Err(diagnostic_cause)) => {
+                diagnostics::error(
+                    "http_boundary",
+                    "catch_panic",
+                    diagnostics::panic_kind(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+
                 error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal_error",
@@ -174,11 +188,14 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
                     response_request_id,
                 )
             }
-            Err(_) => {
-                tracing::warn!(
-                    timeout_seconds = boundary.request_timeout.as_secs(),
-                    "HTTP request timed out"
+            Err(diagnostic_cause) => {
+                diagnostics::warn(
+                    "http_boundary",
+                    "request_timeout",
+                    diagnostics::timeout_kind(&diagnostic_cause),
+                    DiagnosticContext::default(),
                 );
+
                 error_response(
                     StatusCode::GATEWAY_TIMEOUT,
                     "timeout",
@@ -187,9 +204,8 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
                 )
             }
         }
-    }
-    .instrument(span.clone())
-    .await;
+    };
+    let response = diagnostics::scope(diagnostic_route, body).instrument(span.clone()).await;
 
     let status = response.status();
     span.record("status", status.as_u16());

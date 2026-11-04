@@ -1,5 +1,9 @@
 //! Cookie header 与 Set-Cookie 分开解析；游戏凭据只保存两个认证字段，不把论坛会话带到游戏。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_application::{
     AdminCredentialError, AdminCredentialKind, AdminCredentialSecret, ApplicationError,
     MAX_ADMIN_CREDENTIAL_SECRET_BYTES,
@@ -80,7 +84,15 @@ impl LoginCookies {
             {
                 return Err(unavailable());
             }
-            let value = header.to_str().map_err(|_| unavailable())?;
+            let value = header.to_str().map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "credential_login",
+                    "decode_cookie_header",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                unavailable()
+            })?;
             if !visible_ascii(value) {
                 return Err(unavailable());
             }
@@ -123,7 +135,15 @@ impl LoginCookies {
             return Ok(None);
         }
         let value = self.render(COOKIE_NAMES.len());
-        let mut header = HeaderValue::from_bytes(&value.0).map_err(|_| unavailable())?;
+        let mut header = HeaderValue::from_bytes(&value.0).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "credential_login",
+                "encode_cookie_header",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            unavailable()
+        })?;
         header.set_sensitive(true);
         Ok(Some(header))
     }
@@ -146,7 +166,15 @@ impl LoginCookies {
             bytes.fill(0);
             unavailable()
         })?;
-        AdminCredentialSecret::new(text).map_err(|_| unavailable())
+        AdminCredentialSecret::new(text).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "credential_login",
+                "seal_cookie_secret",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            unavailable()
+        })
     }
 
     fn render(&self, field_count: usize) -> SecretBuffer {

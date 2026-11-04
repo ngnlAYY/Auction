@@ -1,5 +1,9 @@
 //! Public/Admin 会话限流、来源检查和身份认证守卫。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use auction_observability::HttpRateLimitKind;
 
 use super::*;
@@ -138,7 +142,15 @@ async fn authenticated_admin_session_with_csrf(
     match session.current(raw_token, raw_csrf.clone(), Utc::now()).await {
         Ok(identity) => Ok((raw_csrf, identity)),
         Err(error) if is_unauthenticated(&error) => Err(Box::new(authentication_error())),
-        Err(_) => Err(Box::new(session_unavailable())),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "admin_session",
+                "validate_csrf",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            Err(Box::new(session_unavailable()))
+        }
     }
 }
 
@@ -177,7 +189,15 @@ pub(crate) async fn authenticated_public_identity(
     match session.current(raw_token, Utc::now()).await {
         Ok(identity) => Ok(identity),
         Err(error) if is_unauthenticated(&error) => Err(Box::new(authentication_error())),
-        Err(_) => Err(Box::new(session_unavailable())),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_session",
+                "authenticate_identity",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            Err(Box::new(session_unavailable()))
+        }
     }
 }
 
@@ -208,7 +228,15 @@ pub(crate) async fn authenticated_public_competition_identity(
             Ok(identity)
         }
         Err(error) if is_unauthenticated(&error) => Err(Box::new(authentication_error())),
-        Err(_) => Err(Box::new(competition_unavailable())),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_competition",
+                "authenticate_identity",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            Err(Box::new(competition_unavailable()))
+        }
     }
 }
 

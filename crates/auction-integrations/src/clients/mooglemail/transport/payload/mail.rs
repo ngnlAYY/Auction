@@ -1,5 +1,9 @@
 //! 普通 MoogleMail delivery payload 的安全校验。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::collections::HashSet;
 
 use super::super::*;
@@ -17,8 +21,15 @@ pub(crate) fn decode_payload(
     {
         return Err(invalid_payload());
     }
-    let payload =
-        MailDeliveryPayload::deserialize(&claim.payload).map_err(|_| invalid_payload())?;
+    let payload = MailDeliveryPayload::deserialize(&claim.payload).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mail_delivery",
+            "decode_mail_payload",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        invalid_payload()
+    })?;
     if payload.schema_version != SCHEMA_VERSION
         || !valid_line(&payload.world, 16, false)
         || !valid_line(&payload.external_mail_id, 256, false)

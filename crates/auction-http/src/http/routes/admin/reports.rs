@@ -1,5 +1,9 @@
 //! Admin 结算与 recovery 安全报告读取处理器。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
+
+use crate::diagnostics;
+
 use super::super::*;
 
 /// 读取 PostgreSQL 权威结算报告。
@@ -48,13 +52,16 @@ pub(crate) async fn admin_settlement_report(
                 )
                 .into_response();
             }
-            Err(_) => {
-                // 底层错误可能携带 SQL 或连接信息；日志只记录业务标识与闭集失败分类。
-                tracing::warn!(
-                    auction_id = %auction_uuid,
-                    failure_code = "report_read_failed",
-                    "admin_settlement_report_failed"
+            Err(diagnostic_cause) => {
+                diagnostics::warn(
+                    "admin_reports",
+                    "read_settlement",
+                    DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                    DiagnosticContext { auction_id: Some(auction_uuid), ..Default::default() },
                 );
+
+                // 底层错误可能携带 SQL 或连接信息；日志只记录业务标识与闭集失败分类。
+
                 return api_error(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "storage_unavailable",
@@ -64,10 +71,11 @@ pub(crate) async fn admin_settlement_report(
             }
         };
     if !valid_settlement_report(&report, auction_uuid) {
-        tracing::warn!(
-            auction_id = %auction_uuid,
-            failure_code = "report_validation_failed",
-            "admin_settlement_report_failed"
+        diagnostics::error(
+            "admin_reports",
+            "validate_settlement",
+            SafeErrorKind::DOMAIN_REJECTED,
+            DiagnosticContext { auction_id: Some(auction_uuid), ..Default::default() },
         );
         return internal_error();
     }
@@ -125,7 +133,14 @@ pub(crate) async fn admin_recovery_report(
                 )
                 .into_response();
             }
-            Err(_) => {
+            Err(diagnostic_cause) => {
+                diagnostics::warn(
+                    "admin_reports",
+                    "read_recovery",
+                    DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+
                 return api_error(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "storage_unavailable",
@@ -139,7 +154,14 @@ pub(crate) async fn admin_recovery_report(
     }
     let report = match map_recovery_report(report) {
         Ok(report) => report,
-        Err(_) => {
+        Err(diagnostic_cause) => {
+            diagnostics::error(
+                "admin_reports",
+                "project_recovery",
+                diagnostics::invalid_state(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+
             // 内部错误码不能进入旧 v1 wire；未知值按依赖不可用处理，且不回显原文。
             return api_error(
                 StatusCode::SERVICE_UNAVAILABLE,

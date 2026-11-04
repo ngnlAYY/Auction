@@ -1,5 +1,9 @@
 //! Public 实时连接的进程总量与每用户配额；和 discovery 专属容量、请求频率分离。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
@@ -35,7 +39,15 @@ impl ConnectionLimits {
         if user_id.is_nil() {
             return Err(RealtimeSubscriptionError::Unavailable);
         }
-        let mut counts = self.counts.lock().map_err(|_| RealtimeSubscriptionError::Unavailable)?;
+        let mut counts = self.counts.lock().map_err(|diagnostic_cause| {
+            diagnostics::error(
+                "realtime_hub",
+                "lock_user_counts",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            RealtimeSubscriptionError::Unavailable
+        })?;
         if counts.draining {
             return Err(RealtimeSubscriptionError::Unavailable);
         }
@@ -60,8 +72,15 @@ impl ConnectionLimits {
             // notify_waiters 从 Notified 创建时起生效；先登记再读计数，避免最后一次 Drop 丢失唤醒。
             let drained = self.drained.notified();
             {
-                let counts =
-                    self.counts.lock().map_err(|_| RealtimeSubscriptionError::Unavailable)?;
+                let counts = self.counts.lock().map_err(|diagnostic_cause| {
+                    diagnostics::error(
+                        "realtime_hub",
+                        "lock_drain_state",
+                        DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    RealtimeSubscriptionError::Unavailable
+                })?;
                 if !counts.draining {
                     return Err(RealtimeSubscriptionError::Unavailable);
                 }

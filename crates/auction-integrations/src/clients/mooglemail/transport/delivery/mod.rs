@@ -1,5 +1,9 @@
 //! MoogleMail delivery transport 的入口分派与稳定端口适配。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::*;
 
 mod actions;
@@ -117,8 +121,15 @@ impl MoogleMailDeliveryTransport {
             }
             "take" => {
                 let take = take.ok_or_else(invalid_payload)?;
-                let session = Arc::try_unwrap(take.session)
-                    .map_err(|_| preflight_unproven(MoogleMailOperation::Take))?;
+                let session = Arc::try_unwrap(take.session).map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "mooglemail_take",
+                        "unwrap_action_session",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    preflight_unproven(MoogleMailOperation::Take)
+                })?;
                 self.send_action(
                     &claim,
                     &payload.external_mail_id,

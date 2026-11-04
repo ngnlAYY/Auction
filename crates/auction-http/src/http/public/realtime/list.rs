@@ -1,5 +1,9 @@
 //! Public 持久化实时事件列表读取。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use auction_application::PublicRealtimeRequest;
 use auction_contracts::{ApiErrorResponse, ApiResponse};
 use axum::{
@@ -39,7 +43,14 @@ pub(crate) async fn list(
             "实时事件暂不可用",
         ));
     };
-    let page = reader.list_public_events(request).await.map_err(|_| {
+    let page = reader.list_public_events(request).await.map_err(|diagnostic_cause| {
+        diagnostics::warn(
+            "public_realtime",
+            "read_events",
+            DiagnosticError::diagnostic_kind(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+
         api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "实时事件暂不可用")
     })?;
     let Some(page) = page else {

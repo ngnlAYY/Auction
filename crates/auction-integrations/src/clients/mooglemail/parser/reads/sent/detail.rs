@@ -1,5 +1,9 @@
 //! MoogleMail Sent 详情及正文/附件一致性解析。
 
+use auction_application::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_application::mail_recipient_is_list_projection;
 
 use super::super::super::*;
@@ -18,7 +22,17 @@ impl MoogleMailParser {
                 MoogleMailErrorCategory::Configuration,
             ));
         }
-        let source = str::from_utf8(document).map_err(|_| {
+        let source = str::from_utf8(document).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "decode_sent_detail",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(summary.world.as_str()),
+                    ..Default::default()
+                },
+            );
+
             detail_error_for(
                 MoogleMailOperation::SentDetail,
                 summary.world,
@@ -181,11 +195,14 @@ impl MoogleMailParser {
         // 列表时间按页面 UTC 文本解析，只剩分钟级取整误差；发送先后仍由
         // claim.claimed_at 与 observed_at 把关，出现偏差异常时保留证据但不拒绝整封邮件。
         if observed_at < summary.sent_at {
-            tracing::warn!(
-                world = %summary.world,
-                sent_at = %summary.sent_at,
-                observed_at = %observed_at,
-                "MoogleMail Sent 详情时间晚于本地观测；按弱时间语义继续解析"
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "observe_sent_clock_skew",
+                safe_diagnostics::category(SafeErrorKind::CLOCK_SKEW),
+                DiagnosticContext {
+                    world: diagnostic_world(summary.world.as_str()),
+                    ..Default::default()
+                },
             );
         }
         let proof = self.parse_sent_content_proof(document, summary)?;

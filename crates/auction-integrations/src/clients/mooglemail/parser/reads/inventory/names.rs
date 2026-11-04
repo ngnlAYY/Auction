@@ -1,5 +1,9 @@
 //! 只解码原生装备元数据的命名 JSON 字面量，不执行脚本或从其它对象猜测名称。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use serde::de::DeserializeSeed;
 
 use super::*;
@@ -72,7 +76,19 @@ impl InventoryNames {
                 1
             };
         let before = self.declared;
-        self.include(str::from_utf8(bytes).map_err(|_| fail())?, wanted, world)?;
+        self.include(
+            str::from_utf8(bytes).map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_inventory",
+                    "decode_name_script",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                fail()
+            })?,
+            wanted,
+            world,
+        )?;
         if before[expected]
             || !self.declared[expected]
             || self.declared[1 - expected] != before[1 - expected]
@@ -106,8 +122,24 @@ impl InventoryNames {
                 let mut decoder = serde_json::Deserializer::from_str(json);
                 EquipmentNames { wanted, names: &mut self.values }
                     .deserialize(&mut decoder)
-                    .map_err(|_| fail())?;
-                decoder.end().map_err(|_| fail())?;
+                    .map_err(|diagnostic_cause| {
+                        safe_diagnostics::warn(
+                            "mooglemail_inventory",
+                            "decode_name_map",
+                            safe_diagnostics::project(&diagnostic_cause),
+                            DiagnosticContext::default(),
+                        );
+                        fail()
+                    })?;
+                decoder.end().map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "mooglemail_inventory",
+                        "finish_name_map",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    fail()
+                })?;
             }
         }
         Ok(())

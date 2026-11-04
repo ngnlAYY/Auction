@@ -1,5 +1,9 @@
 //! 当前会话的装备标记边界；身份不来自请求负载，完整列表不允许静默截断。
 
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use auction_application::{LotWatch, LotWatchError, MAX_LOT_WATCHES, SetLotWatchCommand};
 use auction_contracts::{
     PublicLotWatchResponse, PublicLotWatchesResponse, PublicSetLotWatchRequest,
@@ -127,13 +131,20 @@ fn map_watch(watch: LotWatch) -> PublicLotWatchResponse {
 }
 
 fn watch_error(error: LotWatchError) -> Response {
-    let (status, code, message) = match error {
-        LotWatchError::Invalid => {
-            (StatusCode::UNPROCESSABLE_ENTITY, "invalid_watch", "标记输入无效或渠道未启用")
-        }
-        LotWatchError::Conflict => (StatusCode::CONFLICT, "watch_conflict", "标记命令或版本冲突"),
-        LotWatchError::NotFound => (StatusCode::NOT_FOUND, "not_found", "公开拍卖或标的不存在"),
-        _ => (StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "装备标记暂不可用"),
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || {
+        let (status, code, message) = match error {
+            LotWatchError::Invalid => {
+                (StatusCode::UNPROCESSABLE_ENTITY, "invalid_watch", "标记输入无效或渠道未启用")
+            }
+            LotWatchError::Conflict => {
+                (StatusCode::CONFLICT, "watch_conflict", "标记命令或版本冲突")
+            }
+            LotWatchError::NotFound => (StatusCode::NOT_FOUND, "not_found", "公开拍卖或标的不存在"),
+            _ => (StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "装备标记暂不可用"),
+        };
+        api_error(status, code, message).into_response()
     };
-    api_error(status, code, message).into_response()
+    let response = body();
+    diagnostics::mapped_response("lot_watch", "respond_command_failure", diagnostic_kind, response)
 }

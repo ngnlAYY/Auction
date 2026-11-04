@@ -1,5 +1,9 @@
 //! 装备 header 的等级与交易状态协议；大类名称复用领域词典。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_domain::equipment::taxonomy::EquipmentCategory;
 
 use super::{EquipmentParseError, identity::taxonomy_error};
@@ -68,7 +72,15 @@ pub(super) fn parse_header(value: &str) -> Result<EquipmentHeader, EquipmentPars
         if tiers.len() != 3
             || tiers.iter().any(|tier| match tier.parse::<i32>() {
                 Ok(tier) => !(0..=1_000).contains(&tier),
-                Err(_) => true,
+                Err(diagnostic_cause) => {
+                    safe_diagnostics::warn(
+                        "equipment_fetch",
+                        "parse_forge_tier",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    true
+                }
             })
         {
             return Err(EquipmentParseError::InvalidLevel);
@@ -80,7 +92,15 @@ pub(super) fn parse_header(value: &str) -> Result<EquipmentHeader, EquipmentPars
         level = if *raw == "Unassigned" {
             EquipmentLevel::Unassigned
         } else {
-            let parsed = raw.parse::<i32>().map_err(|_| EquipmentParseError::InvalidLevel)?;
+            let parsed = raw.parse::<i32>().map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "equipment_fetch",
+                    "parse_level",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                EquipmentParseError::InvalidLevel
+            })?;
             if !(1..=100_000).contains(&parsed) {
                 return Err(EquipmentParseError::InvalidLevel);
             }

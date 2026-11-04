@@ -1,5 +1,9 @@
 //! 联合证据失败的闭集阶段；不记录页面、URL、UID、装备标识或凭据材料。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_application::InternalEvidenceError;
 
 use super::{MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld};
@@ -33,32 +37,32 @@ pub(super) enum EvidenceStage {
 }
 
 impl EvidenceStage {
-    const fn as_str(self) -> &'static str {
+    const fn diagnostic_phase(self) -> &'static str {
         match self {
-            Self::Request => "request",
-            Self::SessionAcquire => "session_acquire",
-            Self::SessionOwnership => "session_ownership",
-            Self::RuntimeBinding => "runtime_binding",
-            Self::OwnerCheck => "owner_check",
-            Self::IdentityGet => "identity_get",
-            Self::UidParse => "uid_parse",
-            Self::ProfileCapability => "profile_capability",
-            Self::ProfileRead => "profile_read",
-            Self::ProfileValidation => "profile_validation",
-            Self::AccountBinding => "account_binding",
-            Self::ComposeGet => "compose_get",
-            Self::ComposeWorld => "compose_world",
-            Self::ComposeParse => "compose_parse",
-            Self::ComposeDirty => "compose_dirty",
-            Self::InventoryGet => "inventory_get",
-            Self::InventoryParse => "inventory_parse",
-            Self::InventoryMissing => "inventory_missing",
-            Self::CashGet => "cash_get",
-            Self::CashWorld => "cash_world",
-            Self::CashParse => "cash_parse",
-            Self::SnapshotProof => "snapshot_proof",
-            Self::SnapshotGuard => "snapshot_guard",
-            Self::Deadline => "deadline",
+            Self::Request => "validate_request",
+            Self::SessionAcquire => "acquire_session",
+            Self::SessionOwnership => "validate_session_owner",
+            Self::RuntimeBinding => "validate_runtime_binding",
+            Self::OwnerCheck => "check_owner",
+            Self::IdentityGet => "read_identity",
+            Self::UidParse => "parse_identity_uid",
+            Self::ProfileCapability => "require_profile_reader",
+            Self::ProfileRead => "read_profile",
+            Self::ProfileValidation => "validate_profile",
+            Self::AccountBinding => "validate_account_binding",
+            Self::ComposeGet => "read_compose",
+            Self::ComposeWorld => "validate_compose_world",
+            Self::ComposeParse => "parse_compose",
+            Self::ComposeDirty => "reject_dirty_compose",
+            Self::InventoryGet => "read_inventory",
+            Self::InventoryParse => "parse_inventory",
+            Self::InventoryMissing => "require_equipment",
+            Self::CashGet => "read_balance",
+            Self::CashWorld => "validate_balance_world",
+            Self::CashParse => "parse_balance",
+            Self::SnapshotProof => "validate_snapshot",
+            Self::SnapshotGuard => "acquire_snapshot_guard",
+            Self::Deadline => "enforce_deadline",
         }
     }
 }
@@ -68,26 +72,25 @@ pub(super) fn at(
     world: MoogleMailWorld,
     error: InternalEvidenceError,
 ) -> InternalEvidenceError {
-    tracing::warn!(
-        stage = stage.as_str(),
-        world = world.as_str(),
-        error = ?error,
-        "MoogleMail internal evidence failed"
+    safe_diagnostics::warn(
+        "mooglemail_evidence",
+        stage.diagnostic_phase(),
+        safe_diagnostics::project(&error),
+        DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
     );
     error
 }
 
 // 原错误只投影三个闭集枚举；不格式化整个错误或其证据引用、底层文本。
 pub(super) fn read_error(
-    operation: MoogleMailOperation,
+    _operation: MoogleMailOperation,
     world: MoogleMailWorld,
     category: MoogleMailErrorCategory,
 ) {
-    tracing::warn!(
-        stage = "typed_read",
-        operation = operation.as_str(),
-        world = world.as_str(),
-        category = category.as_str(),
-        "MoogleMail internal evidence read rejected"
+    safe_diagnostics::warn(
+        "mooglemail_evidence",
+        "reject_typed_read",
+        safe_diagnostics::category(safe_diagnostics::mooglemail_kind(category)),
+        DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
     );
 }

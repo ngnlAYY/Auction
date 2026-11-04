@@ -1,5 +1,9 @@
 //! Public 普通竞价命令 handler。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use super::super::*;
 
 /// Public 普通竞价命令：认证、请求摘要和事务结果都在 HTTP 边界完成稳定映射。
@@ -41,7 +45,15 @@ pub(crate) async fn place_bid(
             )
             .into_response();
         }
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_bid",
+                "read_lot",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     let Some(commands) = state.commands() else {
         return competition_unavailable();
@@ -53,7 +65,15 @@ pub(crate) async fn place_bid(
         lot_id, bidder_id, amount,
     ) {
         Ok(request_hash) => request_hash,
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::error(
+                "public_bid",
+                "hash_command",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     let command = auction_application::PlaceBidCommand {
         command_id,

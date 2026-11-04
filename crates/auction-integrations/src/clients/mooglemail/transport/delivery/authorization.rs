@@ -1,5 +1,9 @@
 //! 所有 Send 共用原 session、冻结请求与撤销 guard；现金另附同会话资金证据。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::time::Instant;
 
 use auction_application::{
@@ -63,7 +67,15 @@ impl MoogleMailDeliveryTransport {
                 }
                 // 配置 Cookie 没有持久身份，可即时证明发送，但不能凭后续换号观察恢复。
                 Err(InternalEvidenceError::Unsupported) => None,
-                Err(_) => return Err(cash_unproven()),
+                Err(diagnostic_cause) => {
+                    safe_diagnostics::warn(
+                        "mooglemail_send",
+                        "bind_credential",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    return Err(cash_unproven());
+                }
             };
             let expectation = Arc::new(expectation);
             let session = Arc::new(session);
@@ -75,7 +87,15 @@ impl MoogleMailDeliveryTransport {
             let fence_lease = Box::new(SharedSession(Arc::clone(&session)));
             let send_expectation = Arc::clone(&expectation);
             let send: DeliveryPreparedSend<'_> = Box::pin(async move {
-                let session = Arc::try_unwrap(session).map_err(|_| cash_unproven())?;
+                let session = Arc::try_unwrap(session).map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "mooglemail_send",
+                        "unwrap_send_session",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    cash_unproven()
+                })?;
                 self.send_rendered(
                     rendered,
                     &mut PreparedMoogleMailCredentials { session, baseline },
@@ -89,7 +109,15 @@ impl MoogleMailDeliveryTransport {
                 .with_send_expectation(expectation))
         })
         .await
-        .map_err(|_| cash_unproven())?
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_send",
+                "authorize_send_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            cash_unproven()
+        })?
     }
 
     async fn prepare_cash_evidence(
@@ -100,7 +128,15 @@ impl MoogleMailDeliveryTransport {
         deadline: Instant,
     ) -> Result<Option<PreparedSettlementInternalEvidence>, DeliveryTransportError> {
         let policy = match &self.funding_policy_reader {
-            Some(reader) => reader.funding_policy().await.map_err(|_| cash_unproven())?,
+            Some(reader) => reader.funding_policy().await.map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_send",
+                    "read_funding_policy",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                cash_unproven()
+            })?,
             None => auction_application::FundingPolicy {
                 mode: auction_application::FundingAccountingMode::StrictCash,
                 expected_uid: None,
@@ -132,11 +168,15 @@ impl MoogleMailDeliveryTransport {
         let snapshot = gateway.read_internal_evidence_in_session(session, &request).await.map_err(
             |error| {
                 // 预检失败必须留下去敏原因，否则运维无法区分会话/页面/证据过期。
-                tracing::warn!(
-                    delivery_id = %claim.delivery_id,
-                    world = ?request.world,
-                    error = ?error,
-                    "MoogleMail 现金预检证据读取失败"
+                safe_diagnostics::warn(
+                    "mooglemail_send",
+                    "read_cash_evidence",
+                    safe_diagnostics::project(&error),
+                    DiagnosticContext {
+                        world: Some(request.world),
+                        delivery_id: Some(claim.delivery_id),
+                        ..Default::default()
+                    },
                 );
                 cash_unproven()
             },
@@ -151,10 +191,15 @@ impl MoogleMailDeliveryTransport {
         )
         .map(Some)
         .map_err(|error| {
-            tracing::warn!(
-                delivery_id = %claim.delivery_id,
-                error = ?error,
-                "MoogleMail 现金预检证据未能绑定会话租约"
+            safe_diagnostics::warn(
+                "mooglemail_send",
+                "bind_cash_evidence",
+                safe_diagnostics::project(&error),
+                DiagnosticContext {
+                    world: Some(request.world),
+                    delivery_id: Some(claim.delivery_id),
+                    ..Default::default()
+                },
             );
             cash_unproven()
         })

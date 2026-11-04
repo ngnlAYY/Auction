@@ -1,6 +1,10 @@
 //! E-Hentai HTTP 客户端与论坛协议事务；固定 origin、限流、响应大小边界、
 //! 主题创建/读取和 POST 后的 write-unknown 栅栏集中在此，表单与判定辅助在 forms.rs。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{collections::VecDeque, sync::atomic::AtomicUsize};
 
 use super::forms::{
@@ -42,8 +46,15 @@ pub struct EhentaiClientConfig {
 impl EhentaiClientConfig {
     /// 返回生产固定 origin 的默认配置。
     pub fn production() -> Result<Self, EhentaiError> {
-        let endpoint = Url::parse(PRODUCTION_ENDPOINT)
-            .map_err(|_| EhentaiError::configuration(EhentaiOperation::CreateTopic))?;
+        let endpoint = Url::parse(PRODUCTION_ENDPOINT).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "forum_session",
+                "parse_endpoint",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::configuration(EhentaiOperation::CreateTopic)
+        })?;
         Ok(Self {
             endpoint,
             maximum_response_bytes: DEFAULT_MAXIMUM_RESPONSE_BYTES,
@@ -109,7 +120,16 @@ impl EhentaiClient {
         let origin = origin_of(&base_url).unwrap_or_default();
         Self {
             client,
-            pm_client: build_forum_http_client().ok(),
+            pm_client: build_forum_http_client()
+                .inspect_err(|cause| {
+                    safe_diagnostics::warn(
+                        "forum_pm",
+                        "build_optional_client",
+                        safe_diagnostics::project(cause),
+                        DiagnosticContext::default(),
+                    );
+                })
+                .ok(),
             base_url,
             origin,
             gate: Arc::new(Mutex::new(Instant::now())),
@@ -128,8 +148,15 @@ impl EhentaiClient {
     /// 使用安全默认 HTTP client 建立客户端。
     pub fn with_config(config: EhentaiClientConfig) -> Result<Self, EhentaiError> {
         config.validate(EhentaiOperation::CreateTopic)?;
-        let client = build_forum_http_client()
-            .map_err(|_| EhentaiError::configuration(EhentaiOperation::CreateTopic))?;
+        let client = build_forum_http_client().map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "forum_session",
+                "build_client",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::configuration(EhentaiOperation::CreateTopic)
+        })?;
         Self::from_config_and_client(config, client)
     }
 
@@ -141,8 +168,15 @@ impl EhentaiClient {
         config.validate(EhentaiOperation::CreateTopic)?;
         let origin = origin_of(&config.endpoint)
             .ok_or(EhentaiError::configuration(EhentaiOperation::CreateTopic))?;
-        let pm_client = build_forum_http_client()
-            .map_err(|_| EhentaiError::configuration(EhentaiOperation::CheckSession))?;
+        let pm_client = build_forum_http_client().map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "forum_session",
+                "build_pm_client",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::configuration(EhentaiOperation::CheckSession)
+        })?;
         Ok(Self {
             client,
             pm_client: Some(pm_client),
@@ -189,8 +223,22 @@ impl EhentaiClient {
             // 预算同时覆盖持锁连接的排队与探测；超时取消会永久撤销 owner。
             tokio::time::timeout(Duration::from_secs(1), ownership.check())
                 .await
-                .map_err(|_| ())?
-                .map_err(|_| ())?;
+                .map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "forum_session",
+                        "check_owner_timeout",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                })?
+                .map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "forum_session",
+                        "check_owner",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                })?;
         }
         cookie.is_active().then_some(()).ok_or(())
     }
@@ -296,10 +344,25 @@ impl EhentaiClient {
         }
         let target = self.index_url(&[("showtopic", thread_id)], operation)?;
         let (body, _) = self.get_page(operation, target.clone(), Some(&target), cookie).await?;
-        let html = String::from_utf8(body).map_err(|_| EhentaiError::protocol(operation, false))?;
+        let html = String::from_utf8(body).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_topic",
+                "decode_first_page",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::protocol(operation, false)
+        })?;
         let parser = crate::ForumPreviewAdapter::new();
-        let first_page =
-            parser.parse_html_page(&html).map_err(|_| EhentaiError::protocol(operation, false))?;
+        let first_page = parser.parse_html_page(&html).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_topic",
+                "parse_first_page",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::protocol(operation, false)
+        })?;
         let targets = self.topic_page_targets(&first_page, thread_id, operation)?;
         let expected_pages = targets.len();
         let maximum_offset = targets.last().map(|(offset, _)| *offset).unwrap_or(0);
@@ -321,7 +384,15 @@ impl EhentaiClient {
         };
         spawn_topic_page_reads(&mut reads, &mut remaining, &read_context);
         while let Some(read) = reads.join_next().await {
-            let page = read.map_err(|_| EhentaiError::remote_temporary(operation, false))??;
+            let page = read.map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_topic",
+                    "read_page_join",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                EhentaiError::remote_temporary(operation, false)
+            })??;
             total_bytes = total_bytes
                 .checked_add(page.1)
                 .filter(|total| *total <= HARD_MAXIMUM_TOPIC_BYTES)
@@ -334,7 +405,15 @@ impl EhentaiClient {
             return Err(EhentaiError::protocol(operation, false));
         }
         let parsed_pages = pages.into_iter().map(|(_, page)| page).collect();
-        parser.parse_html_pages(parsed_pages).map_err(|_| EhentaiError::protocol(operation, false))
+        parser.parse_html_pages(parsed_pages).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_topic",
+                "merge_pages",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::protocol(operation, false)
+        })
     }
 
     /// 建立目录续页或系统日志回复；POST 后必须返回 exact thread/post proof。
@@ -461,12 +540,26 @@ async fn read_topic_page(
             Some(&context.remaining_bytes),
         )
         .await?;
-    let html =
-        String::from_utf8(body).map_err(|_| EhentaiError::protocol(context.operation, false))?;
+    let html = String::from_utf8(body).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "forum_topic",
+            "decode_extra_page",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        EhentaiError::protocol(context.operation, false)
+    })?;
     let page_bytes = html.len();
-    let page = crate::ForumPreviewAdapter::new()
-        .parse_html_page(&html)
-        .map_err(|_| EhentaiError::protocol(context.operation, false))?;
+    let page =
+        crate::ForumPreviewAdapter::new().parse_html_page(&html).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_topic",
+                "parse_extra_page",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EhentaiError::protocol(context.operation, false)
+        })?;
     context.client.validate_topic_page_identity(
         &page,
         &identity_target,

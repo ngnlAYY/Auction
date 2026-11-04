@@ -1,5 +1,9 @@
 //! HV 服务端唯一声明的严格解析；不执行脚本，不从字符串、注释或请求参数获取 UID。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::super::*;
 
 impl MoogleMailParser {
@@ -52,7 +56,15 @@ pub(super) fn trusted_document(
     world: MoogleMailWorld,
     operation: MoogleMailOperation,
 ) -> Result<Html, MoogleMailError> {
-    let source = str::from_utf8(bytes).map_err(|_| protocol(operation, world))?;
+    let source = str::from_utf8(bytes).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "mooglemail_identity",
+            "decode_identity_page",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        );
+        protocol(operation, world)
+    })?;
     if source.trim().is_empty() {
         return Err(protocol(operation, world));
     }

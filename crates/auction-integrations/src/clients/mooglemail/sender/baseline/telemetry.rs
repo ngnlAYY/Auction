@@ -1,5 +1,9 @@
 //! 局部影子记录及取消收尾；记录内容不含远端身份，关闭 exporter 不改变判定。
 
+use auction_application::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -14,22 +18,50 @@ pub(super) fn record(
     world: MoogleMailWorld,
     event: SentBaselineEvent,
 ) {
+    observer.observe(world.as_str(), event);
     match event {
         SentBaselineEvent::Evaluation { branch, mid_sets_equal, candidate_sets_equal } => {
             if mid_sets_equal && candidate_sets_equal {
-                tracing::debug!(%world, branch = branch.label(), mid_sets_equal, candidate_sets_equal, "MoogleMail Sent 基线影子集合一致");
+                tracing::debug!(
+                    world = world.as_str(),
+                    branch = branch.label(),
+                    mid_sets_equal,
+                    candidate_sets_equal,
+                    "MoogleMail Sent 基线影子集合一致"
+                );
             } else {
-                tracing::warn!(%world, branch = branch.label(), mid_sets_equal, candidate_sets_equal, "MoogleMail Sent 基线影子集合存在非预期差异");
+                safe_diagnostics::warn(
+                    "mooglemail_baseline",
+                    "compare_shadow_sets",
+                    safe_diagnostics::category(SafeErrorKind::SHADOW_MISMATCH),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
             }
         }
         SentBaselineEvent::Uncomparable(reason) => {
-            tracing::debug!(%world, reason = reason.label(), "MoogleMail Sent 基线影子不可比较")
+            safe_diagnostics::debug(
+                "mooglemail_baseline",
+                "compare_shadow_sample",
+                safe_diagnostics::project(&reason),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
         }
         SentBaselineEvent::Fallback { phase, reason } => {
-            tracing::warn!(%world, phase = phase.label(), reason = reason.label(), "MoogleMail Sent 边界回退完整扫描")
+            let phase = match phase {
+                auction_application::SentBaselinePhase::BeforeSend => "fallback_before_send",
+                auction_application::SentBaselinePhase::AfterSend => "fallback_after_send",
+            };
+            safe_diagnostics::warn(
+                "mooglemail_baseline",
+                phase,
+                safe_diagnostics::project(&reason),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
         }
     }
-    observer.observe(world.as_str(), event);
 }
 
 pub(super) struct ShadowSample {

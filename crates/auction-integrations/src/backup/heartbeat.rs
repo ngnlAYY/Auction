@@ -1,5 +1,9 @@
 //! 备份打卡：仅一次 HTTPS GET，超时和传输错误全部收敛为脱敏结果。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::time::Duration;
 
 use reqwest::{Client, redirect::Policy};
@@ -54,7 +58,15 @@ pub async fn send_backup_heartbeat(address: Option<&str>) -> BackupHeartbeatResu
             http_status: Some(response.status().as_u16()),
         },
         Ok(response) => failed(Some(response.status().as_u16())),
-        Err(_) => failed(None),
+        Err(diagnostic_cause) => {
+            safe_diagnostics::warn(
+                "backup_heartbeat",
+                "send_heartbeat",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            failed(None)
+        }
     }
 }
 

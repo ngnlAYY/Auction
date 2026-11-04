@@ -1,5 +1,9 @@
 //! PM 固定目标、身份与纯文本证明；任何未知操作字段均失败关闭。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::collections::BTreeMap;
 
 use scraper::{ElementRef, Node};
@@ -7,7 +11,15 @@ use scraper::{ElementRef, Node};
 use super::*;
 
 pub(super) fn selector(value: &str) -> Result<Selector, ForumPmError> {
-    Selector::parse(value).map_err(|_| ForumPmError::Protocol)
+    Selector::parse(value).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_pm",
+            "build_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        ForumPmError::Protocol
+    })
 }
 
 pub(super) fn validate_message(message: &ForumPmMessage) -> Result<(), ForumPmError> {
@@ -32,7 +44,15 @@ pub(super) fn read_link(
     reference: &str,
     allowed: &[&str],
 ) -> Result<(Url, BTreeMap<String, String>), ForumPmError> {
-    let mut url = base.join(reference).map_err(|_| ForumPmError::Protocol)?;
+    let mut url = base.join(reference).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "forum_pm",
+            "resolve_read_link",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        ForumPmError::Protocol
+    })?;
     if !same_origin(base, &url)
         || !url.username().is_empty()
         || url.password().is_some()

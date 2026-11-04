@@ -1,5 +1,9 @@
 //! MoogleMail 收件、Sent 和余额的有界读取流程。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
@@ -139,27 +143,68 @@ impl MoogleMailGateway {
             self.credentials.begin_read(world, MoogleMailOperation::Inbox),
         )
         .await
-        .map_err(|_| fetch_budget_exhausted(world))??;
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "acquire_inbox_session_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            fetch_budget_exhausted(world)
+        })??;
         match tokio::time::timeout_at(
             deadline,
             self.fetch_with_cookie(world, cursor, limit, session.cookie(), deadline, journal),
         )
         .await
         {
-            Err(_) => Err(fetch_budget_exhausted(world)),
+            Err(diagnostic_cause) => {
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "fetch_inbox_timeout",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                Err(fetch_budget_exhausted(world))
+            }
             Ok(Ok(page)) => {
-                tokio::time::timeout_at(deadline, session.check_current())
-                    .await
-                    .map_err(|_| fetch_budget_exhausted(world))??;
+                tokio::time::timeout_at(deadline, session.check_current()).await.map_err(
+                    |diagnostic_cause| {
+                        safe_diagnostics::warn(
+                            "mooglemail_read",
+                            "check_inbox_owner_timeout",
+                            safe_diagnostics::project(&diagnostic_cause),
+                            DiagnosticContext {
+                                world: diagnostic_world(world.as_str()),
+                                ..Default::default()
+                            },
+                        );
+                        fetch_budget_exhausted(world)
+                    },
+                )??;
                 if tokio::time::Instant::now() >= deadline {
                     return Err(fetch_budget_exhausted(world));
                 }
                 Ok(page)
             }
             Ok(Err(error)) if error.category == MoogleMailErrorCategory::SessionExpired => {
-                tokio::time::timeout_at(deadline, session.invalidate_current())
-                    .await
-                    .map_err(|_| fetch_budget_exhausted(world))??;
+                tokio::time::timeout_at(deadline, session.invalidate_current()).await.map_err(
+                    |diagnostic_cause| {
+                        safe_diagnostics::warn(
+                            "mooglemail_read",
+                            "invalidate_inbox_session_timeout",
+                            safe_diagnostics::project(&diagnostic_cause),
+                            DiagnosticContext {
+                                world: diagnostic_world(world.as_str()),
+                                ..Default::default()
+                            },
+                        );
+                        fetch_budget_exhausted(world)
+                    },
+                )??;
                 Err(error)
             }
             Ok(Err(error)) => Err(error),
@@ -207,7 +252,15 @@ impl MoogleMailGateway {
             }
         })
         .await
-        .map_err(|_| fetch_budget_exhausted(world))?;
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "read_sent_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            fetch_budget_exhausted(world)
+        })?;
         // timeout_at 不抢占同步解析，也可能直接接受已就绪的缓存结果。
         if tokio::time::Instant::now() >= deadline {
             return Err(fetch_budget_exhausted(world));
@@ -236,7 +289,18 @@ impl MoogleMailGateway {
             self.credentials.begin_read(request.world, MoogleMailOperation::Sent),
         )
         .await
-        .map_err(|_| fetch_budget_exhausted(request.world))??;
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "acquire_sent_session_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(request.world.as_str()),
+                    ..Default::default()
+                },
+            );
+            fetch_budget_exhausted(request.world)
+        })??;
         tokio::time::timeout_at(deadline, async {
             match self.lookup_sent_with_cookie(&request, session.cookie(), deadline).await {
                 Ok(report) => {
@@ -254,7 +318,18 @@ impl MoogleMailGateway {
             }
         })
         .await
-        .map_err(|_| fetch_budget_exhausted(request.world))?
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "lookup_sent_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(request.world.as_str()),
+                    ..Default::default()
+                },
+            );
+            fetch_budget_exhausted(request.world)
+        })?
     }
 
     async fn lookup_sent_with_cookie(
@@ -269,7 +344,18 @@ impl MoogleMailGateway {
             self.client.observe_sent_list(cookie, &round, request.maximum_pages),
         )
         .await
-        .map_err(|_| fetch_budget_exhausted(request.world))??;
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "read_sent_list_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext {
+                    world: diagnostic_world(request.world.as_str()),
+                    ..Default::default()
+                },
+            );
+            fetch_budget_exhausted(request.world)
+        })??;
         let mut candidates = Vec::new();
         for summary in list.summaries.iter().filter(|summary| {
             mail_recipient_is_list_projection(&summary.recipient, &request.recipient)
@@ -282,7 +368,18 @@ impl MoogleMailGateway {
                 self.client.get_in_round(&detail_target, cookie, &round),
             )
             .await
-            .map_err(|_| fetch_budget_exhausted(request.world))??;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "read_sent_detail_timeout",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(request.world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                fetch_budget_exhausted(request.world)
+            })??;
             let snapshot = self
                 .client
                 .diagnose_parse(
@@ -380,7 +477,15 @@ impl MoogleMailGateway {
             }
         })
         .await
-        .map_err(|_| fetch_budget_exhausted(world))?;
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "read_balance_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            fetch_budget_exhausted(world)
+        })?;
         if tokio::time::Instant::now() >= deadline {
             return Err(fetch_budget_exhausted(world));
         }
@@ -488,7 +593,15 @@ impl MoogleMailGateway {
             Ok(snapshot)
         })
         .await
-        .map_err(|_| fetch_budget_exhausted(world))?
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "build_sent_snapshot_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            fetch_budget_exhausted(world)
+        })?
     }
 
     async fn fetch_with_cookie(
@@ -512,7 +625,15 @@ impl MoogleMailGateway {
                     u16::try_from(limit).map_err(|_| configuration(world))?,
                 )
                 .await
-                .map_err(|_| read_journal_unavailable(world))?;
+                .map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "mooglemail_read",
+                        "claim_read_journal",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    read_journal_unavailable(world)
+                })?;
             if pending.len() > limit {
                 return Err(protocol_error(world));
             }
@@ -605,10 +726,17 @@ impl MoogleMailGateway {
                 })
                 .collect();
             // 原子登记整窗后才允许首个详情 GET；取消或提交失败时队列仍可恢复。
-            store
-                .stage_reads(claim.clone(), world.as_str().to_owned(), summaries)
-                .await
-                .map_err(|_| read_journal_unavailable(world))?;
+            store.stage_reads(claim.clone(), world.as_str().to_owned(), summaries).await.map_err(
+                |diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "mooglemail_read",
+                        "stage_read_journal",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    read_journal_unavailable(world)
+                },
+            )?;
         }
         let detail_deadline =
             deadline.checked_sub(std::time::Duration::from_millis(100)).unwrap_or(deadline);
@@ -627,7 +755,15 @@ impl MoogleMailGateway {
             .await
             {
                 Ok(Ok(document)) => document,
-                Err(_) => break,
+                Err(diagnostic_cause) => {
+                    safe_diagnostics::warn(
+                        "mooglemail_read",
+                        "fetch_detail_timeout",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    break;
+                }
                 Ok(Err(error)) => return Err(error),
             };
             let message = self

@@ -1,7 +1,9 @@
 //! Admin 认证只读开关接口；数据库意图与本进程实际快照分别映射。
 
 use super::AdminApiState;
+use crate::diagnostics;
 use auction_application::RuntimeSwitchName;
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 use auction_contracts::{
     ApiResponse, RuntimeSwitchAppliedDto, RuntimeSwitchIntentDto, RuntimeSwitchListResponse,
 };
@@ -37,6 +39,17 @@ pub(crate) async fn get(
     let read = match tokio::time::timeout(Duration::from_secs(1), store.read()).await {
         Ok(Ok(read)) => read,
         other => {
+            let (phase, safe_kind) = match &other {
+                Ok(Err(cause)) => ("read_switches", cause.diagnostic_kind()),
+                Err(cause) => ("read_switches_timeout", diagnostics::timeout_kind(cause)),
+                Ok(Ok(_)) => ("validate_switch_read", SafeErrorKind::DEPENDENCY_MISMATCH),
+            };
+            diagnostics::warn(
+                "admin_runtime_switches",
+                phase,
+                safe_kind,
+                DiagnosticContext::default(),
+            );
             drop(other);
             return (
                 StatusCode::SERVICE_UNAVAILABLE,

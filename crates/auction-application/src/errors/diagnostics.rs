@@ -35,15 +35,17 @@ impl DiagnosticDisposition {
     }
 }
 
-/// 诊断只携带业务 UUID 和固定世界；禁止保存正文、凭据、URL 或 claim token。
+/// 诊断只携带业务 UUID、固定世界和路由模板；禁止正文、凭据、URL 或 claim token。
+/// route 只能来自框架 MatchedPath 或源码路由模板；同步借用，不被日志门缓存。
 #[derive(Clone, Copy, Default)]
-pub struct DiagnosticContext {
-    pub route: Option<&'static str>,
+pub struct DiagnosticContext<'a> {
+    pub route: Option<&'a str>,
     pub worker_loop: Option<&'static str>,
     pub round_id: Option<Uuid>,
     pub workflow_id: Option<Uuid>,
     pub authorization_id: Option<Uuid>,
     pub notification_id: Option<Uuid>,
+    pub evidence_id: Option<Uuid>,
     pub obligation_id: Option<Uuid>,
     pub delivery_id: Option<Uuid>,
     pub auction_id: Option<Uuid>,
@@ -58,17 +60,17 @@ pub struct DiagnosticContext {
 
 /// 已完成安全投影的事件；固定 kind/phase 由调用点提供，不接受整个错误对象。
 #[derive(Clone, Copy)]
-pub struct SafeDiagnostic {
+pub struct SafeDiagnostic<'a> {
     pub level: DiagnosticLevel,
     pub safe_kind: SafeErrorKind,
     pub kind: &'static str,
     pub phase: &'static str,
-    pub context: DiagnosticContext,
+    pub context: DiagnosticContext<'a>,
 }
 
 /// 可选日志门；实现只能过滤诊断，不得访问或改变命令状态。
 pub trait DiagnosticSink: Send + Sync {
-    fn record(&self, diagnostic: &SafeDiagnostic);
+    fn record(&self, diagnostic: &SafeDiagnostic<'_>);
 }
 
 static SINK: OnceLock<Arc<dyn DiagnosticSink>> = OnceLock::new();
@@ -85,7 +87,7 @@ pub fn record_error(
     safe_kind: SafeErrorKind,
     kind: &'static str,
     phase: &'static str,
-    context: DiagnosticContext,
+    context: DiagnosticContext<'_>,
 ) {
     let diagnostic = SafeDiagnostic { level, safe_kind, kind, phase, context };
     match SINK.get() {
@@ -96,7 +98,7 @@ pub fn record_error(
 }
 
 /// 输出经过安全投影的事件；供日志门在窗口首条或未启用去重时调用。
-pub fn emit_safe_diagnostic(diagnostic: &SafeDiagnostic) {
+pub fn emit_safe_diagnostic(diagnostic: &SafeDiagnostic<'_>) {
     let SafeDiagnostic { level, safe_kind, kind, phase, context } = diagnostic;
     let world = context.world.map(|world| match world {
         SettlementWorld::Main => "main",
@@ -117,6 +119,7 @@ pub fn emit_safe_diagnostic(diagnostic: &SafeDiagnostic) {
                 workflow_id = ?context.workflow_id,
                 authorization_id = ?context.authorization_id,
                 notification_id = ?context.notification_id,
+                evidence_id = ?context.evidence_id,
                 obligation_id = ?context.obligation_id,
                 delivery_id = ?context.delivery_id,
                 auction_id = ?context.auction_id,
@@ -200,7 +203,7 @@ impl DiagnosticId for SettlementId {
 }
 
 /// 去重门只对原事件可见时开启窗口；指标 observer 必须先于此检查。
-pub fn diagnostic_enabled(diagnostic: &SafeDiagnostic) -> bool {
+pub fn diagnostic_enabled(diagnostic: &SafeDiagnostic<'_>) -> bool {
     match diagnostic.level {
         DiagnosticLevel::Error => {
             tracing::enabled!(target: "auction::diagnostics", tracing::Level::ERROR)

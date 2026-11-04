@@ -1,5 +1,9 @@
 //! Admin recovery case 的人工确认处理器。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use super::super::*;
 
 /// 以版本 fence 确认一个已解决 custody 证据的 recovery case。
@@ -70,7 +74,15 @@ pub(crate) async fn admin_confirm_recovery(
         &input.reason,
     ) {
         Ok(hash) => hash,
-        Err(_) => return internal_error(),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "admin_recovery",
+                "hash_confirmation",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return internal_error();
+        }
     };
     let Some(commands) = state.recovery_commands() else {
         return api_error(

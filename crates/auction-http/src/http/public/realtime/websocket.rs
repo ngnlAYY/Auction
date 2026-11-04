@@ -1,5 +1,9 @@
 //! Public 实时 WebSocket 建立、补发和连接生命周期。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::PublicRealtimeAuctionStatus;
@@ -16,6 +20,8 @@ use tokio::{
     sync::{OwnedSemaphorePermit, watch},
     time::{Duration, Instant, MissedTickBehavior, interval_at, sleep, timeout},
 };
+
+use crate::diagnostics::RequestDiagnostics;
 
 use super::super::realtime_hub::{ObservedFrame, RealtimeSubscription, RealtimeSubscriptionError};
 use super::super::{PublicApiState, api_error, not_found_error, parse_query};
@@ -88,7 +94,14 @@ pub(crate) async fn websocket(
                 return not_found_error().into_response();
             }
             Ok(Some(_)) => {}
-            Err(_) => {
+            Err(diagnostic_cause) => {
+                diagnostics::warn(
+                    "public_realtime",
+                    "read_auction_status",
+                    DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+
                 return api_error(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "storage_unavailable",
@@ -139,17 +152,19 @@ pub(crate) async fn websocket(
     let session = RealtimeSession::new(session_service, raw_token, identity);
     let http_metrics = state.metrics().map_or_else(HttpRecorder::default, ProcessMetrics::http);
 
+    let diagnostic_context = RequestDiagnostics::capture();
     upgrade
         .max_message_size(MAX_MESSAGE_BYTES)
         .max_frame_size(MAX_MESSAGE_BYTES)
         .on_upgrade(move |socket| {
             // 升级成功才计数；守卫由 future 持有，未轮询即取消和所有连接退出也会减回。
             let connection = http_metrics.websocket_connection();
-            async move {
+            let body = async move {
                 let _connection = connection;
                 stream_events(socket, subscription, session, discovery_permit, realtime_shutdown)
                     .await;
-            }
+            };
+            diagnostic_context.run(body)
         })
         .into_response()
 }

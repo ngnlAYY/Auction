@@ -1,5 +1,9 @@
 //! MoogleMail 单 Cookie 普通读会话与资产操作的互斥隔离。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::sync::{Arc, Mutex};
 
 use auction_application::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
@@ -279,7 +283,14 @@ impl MoogleMailCredentialSet {
         }
         self.candidates
             .lock()
-            .map_err(|_| {
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_credentials",
+                    "lock_candidates",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+
                 operation_error(operation, world, MoogleMailErrorCategory::CredentialUnavailable)
             })?
             .iter()
@@ -310,7 +321,14 @@ impl MoogleMailCredentialSet {
                         && candidate.world.is_none_or(|scope| scope == world)
                 })
             })
-            .map_err(|_| {
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_credentials",
+                    "check_candidate",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+
                 operation_error(operation, world, MoogleMailErrorCategory::CredentialUnavailable)
             })
     }
@@ -368,8 +386,30 @@ impl MoogleMailCredentialSession {
         if let Some(owner) = &self.set.ownership {
             tokio::time::timeout(std::time::Duration::from_secs(1), owner.check())
                 .await
-                .map_err(|_| unavailable())?
-                .map_err(|_| unavailable())?;
+                .map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "mooglemail_credentials",
+                        "check_owner_timeout",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext {
+                            world: diagnostic_world(self.world.as_str()),
+                            ..Default::default()
+                        },
+                    );
+                    unavailable()
+                })?
+                .map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "mooglemail_credentials",
+                        "check_owner",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext {
+                            world: diagnostic_world(self.world.as_str()),
+                            ..Default::default()
+                        },
+                    );
+                    unavailable()
+                })?;
         }
         if !self.set.candidate_is_active(self.current.key, self.world, self.operation)? {
             return Err(unavailable());
@@ -394,11 +434,17 @@ impl MoogleMailCredentialSession {
         if self.operation_guard.is_none() {
             return Err(Error::Unsupported);
         }
-        if !self
-            .set
-            .candidate_is_active(self.current.key, world, self.operation)
-            .map_err(|_| Error::Unavailable)?
-        {
+        if !self.set.candidate_is_active(self.current.key, world, self.operation).map_err(
+            |diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_credentials",
+                    "check_internal_candidate",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                Error::Unavailable
+            },
+        )? {
             return Err(Error::Revoked);
         }
         let id = self.current.persistent_id.ok_or(Error::Unsupported)?;
@@ -425,8 +471,24 @@ impl MoogleMailCredentialSession {
         let owner = self.set.ownership.as_ref().ok_or(Error::Unsupported)?;
         tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), owner.check())
             .await
-            .map_err(|_| Error::Expired)?
-            .map_err(|_| Error::Revoked)?;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_credentials",
+                    "check_internal_owner_timeout",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                Error::Expired
+            })?
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_credentials",
+                    "check_internal_owner",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                Error::Revoked
+            })?;
         if std::time::Instant::now() >= deadline {
             return Err(Error::Expired);
         }
@@ -465,7 +527,17 @@ impl MoogleMailCredentialSession {
         let current = &self.current;
         current.cookie.revoke();
         {
-            let mut candidates = self.set.candidates.lock().map_err(|_| {
+            let mut candidates = self.set.candidates.lock().map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_credentials",
+                    "lock_revocation",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(self.world.as_str()),
+                        ..Default::default()
+                    },
+                );
+
                 operation_error(
                     self.operation,
                     self.world,
@@ -477,13 +549,25 @@ impl MoogleMailCredentialSession {
         if let (Some(persistent_id), Some(invalidator)) =
             (current.persistent_id, self.set.invalidator.as_ref())
         {
-            invalidator.mark_invalid(persistent_id, Utc::now()).await.map_err(|_| {
-                operation_error(
-                    self.operation,
-                    self.world,
-                    MoogleMailErrorCategory::CredentialUnavailable,
-                )
-            })?;
+            invalidator.mark_invalid(persistent_id, Utc::now()).await.map_err(
+                |diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "mooglemail_credentials",
+                        "persist_revocation",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext {
+                            world: diagnostic_world(self.world.as_str()),
+                            ..Default::default()
+                        },
+                    );
+
+                    operation_error(
+                        self.operation,
+                        self.world,
+                        MoogleMailErrorCategory::CredentialUnavailable,
+                    )
+                },
+            )?;
         }
         Ok(())
     }

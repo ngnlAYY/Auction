@@ -1,6 +1,10 @@
 //! Admin 手动 Cookie 检查：固定 HTTPS 只读端点、单并发与有界时限；不借用 Worker
 //! 写入会话、不建候选池、不记录远端正文。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{sync::Arc, time::Duration};
 
 use auction_application::{
@@ -32,17 +36,49 @@ impl CredentialVerifier {
     pub fn production(opener: Arc<dyn AdminCredentialOpener>) -> Result<Self, ApplicationError> {
         let unavailable =
             || ApplicationError::AdminCredential(AdminCredentialError::CheckUnavailable);
-        let mut forum = EhentaiClientConfig::production().map_err(|_| unavailable())?;
+        let mut forum = EhentaiClientConfig::production().map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "credential_check",
+                "configure_forum",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            unavailable()
+        })?;
         forum.request_timeout = Duration::from_secs(4);
         forum.minimum_request_interval = Duration::from_secs(2);
-        let mut game = MoogleMailClientConfig::production().map_err(|_| unavailable())?;
+        let mut game = MoogleMailClientConfig::production().map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "credential_check",
+                "configure_game",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            unavailable()
+        })?;
         game.request_timeout = Duration::from_secs(4);
         game.minimum_request_interval = Duration::from_secs(2);
         game.maximum_response_bytes = 2 * 1024 * 1024;
         Ok(Self {
             opener,
-            forum: EhentaiClient::with_config(forum).map_err(|_| unavailable())?,
-            game: MoogleMailClient::with_config(game).map_err(|_| unavailable())?,
+            forum: EhentaiClient::with_config(forum).map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "credential_check",
+                    "construct_forum_client",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                unavailable()
+            })?,
+            game: MoogleMailClient::with_config(game).map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "credential_check",
+                    "construct_game_client",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                unavailable()
+            })?,
             slots: Semaphore::new(1),
         })
     }
@@ -62,7 +98,15 @@ impl CredentialVerifier {
                     Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
                         Invalid
                     }
-                    Err(_) => Inconclusive,
+                    Err(diagnostic_cause) => {
+                        safe_diagnostics::warn(
+                            "credential_check",
+                            "verify_forum_session",
+                            safe_diagnostics::project(&diagnostic_cause),
+                            DiagnosticContext::default(),
+                        );
+                        Inconclusive
+                    }
                 }
             }
             AdminCredentialKind::MailCookie => {
@@ -100,12 +144,28 @@ impl CredentialVerifier {
                 match self.game.get(&target, &cookie).await {
                     Ok(body) => match MoogleMailParser.parse_balance(&body, world, Utc::now()) {
                         Ok(_) => Valid,
-                        Err(_) => Inconclusive,
+                        Err(diagnostic_cause) => {
+                            safe_diagnostics::warn(
+                                "credential_check",
+                                "parse_game_identity",
+                                safe_diagnostics::project(&diagnostic_cause),
+                                DiagnosticContext::default(),
+                            );
+                            Inconclusive
+                        }
                     },
                     Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
                         Invalid
                     }
-                    Err(_) => Inconclusive,
+                    Err(diagnostic_cause) => {
+                        safe_diagnostics::warn(
+                            "credential_check",
+                            "verify_game_session",
+                            safe_diagnostics::project(&diagnostic_cause),
+                            DiagnosticContext::default(),
+                        );
+                        Inconclusive
+                    }
                 }
             }
         }

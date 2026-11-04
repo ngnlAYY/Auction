@@ -38,7 +38,7 @@ pub(crate) fn warn(
     kind: &'static str,
     phase: &'static str,
     safe_kind: SafeErrorKind,
-    context: DiagnosticContext,
+    context: DiagnosticContext<'_>,
 ) {
     record_error(DiagnosticLevel::Warn, safe_kind, kind, phase, context);
 }
@@ -48,7 +48,7 @@ pub(crate) fn error(
     kind: &'static str,
     phase: &'static str,
     safe_kind: SafeErrorKind,
-    context: DiagnosticContext,
+    context: DiagnosticContext<'_>,
 ) {
     record_error(DiagnosticLevel::Error, safe_kind, kind, phase, context);
 }
@@ -58,7 +58,7 @@ pub(crate) fn info(
     kind: &'static str,
     phase: &'static str,
     safe_kind: SafeErrorKind,
-    context: DiagnosticContext,
+    context: DiagnosticContext<'_>,
 ) {
     record_error(DiagnosticLevel::Info, safe_kind, kind, phase, context);
 }
@@ -68,7 +68,7 @@ pub(crate) fn debug(
     kind: &'static str,
     phase: &'static str,
     safe_kind: SafeErrorKind,
-    context: DiagnosticContext,
+    context: DiagnosticContext<'_>,
 ) {
     record_error(DiagnosticLevel::Debug, safe_kind, kind, phase, context);
 }
@@ -78,7 +78,7 @@ pub(crate) fn unpersisted_error(
     kind: &'static str,
     phase: &'static str,
     safe_kind: SafeErrorKind,
-    mut context: DiagnosticContext,
+    mut context: DiagnosticContext<'_>,
 ) {
     context.disposition = Some(DiagnosticDisposition::Unpersisted);
     warn(kind, phase, safe_kind, context);
@@ -125,7 +125,7 @@ struct WorkerDiagnosticSink {
     windows: Arc<DiagnosticLogWindows>,
 }
 impl DiagnosticSink for WorkerDiagnosticSink {
-    fn record(&self, diagnostic: &SafeDiagnostic) {
+    fn record(&self, diagnostic: &SafeDiagnostic<'_>) {
         // 计数先于过滤与去重；普通应用拒绝和已持久处置不带此标记。
         if matches!(diagnostic.context.disposition, Some(DiagnosticDisposition::Unpersisted)) {
             unpersisted(diagnostic.safe_kind);

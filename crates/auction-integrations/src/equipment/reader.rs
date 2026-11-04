@@ -1,6 +1,10 @@
 //! 装备来源读取器与应用端口适配；负责请求节流、无重定向读取、响应边界、world
 //! 路径选择和短生命周期 key 交接，页面解析归档在 `parser`/`model`。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{
     sync::{
         Arc,
@@ -174,11 +178,33 @@ impl EquipmentSourceAdapter {
         let mut session = credentials
             .begin_read(world, MoogleMailOperation::Equipment)
             .await
-            .map_err(|_| AdminIntakeError::SourceUnavailable)?;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "equipment_fetch",
+                    "acquire_session",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                AdminIntakeError::SourceUnavailable
+            })?;
         match self.fetch_document_attempt(target, Some(session.cookie())).await {
             Ok(body) => {
                 let mut body = fetch::SensitiveResponseBody(body);
-                session.check_current().await.map_err(|_| AdminIntakeError::SourceUnavailable)?;
+                session.check_current().await.map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "equipment_fetch",
+                        "check_response_owner",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext {
+                            world: diagnostic_world(world.as_str()),
+                            ..Default::default()
+                        },
+                    );
+                    AdminIntakeError::SourceUnavailable
+                })?;
                 Ok(std::mem::take(&mut body.0))
             }
             Err(EquipmentFetchError::Intake(error)) => Err(error),
@@ -198,7 +224,15 @@ impl EquipmentSourceAdapter {
         self.await_request_slot().await;
         timeout(self.policy.request_timeout, self.fetch_document_once(target, cookie))
             .await
-            .map_err(|_| EquipmentFetchError::Intake(AdminIntakeError::SourceUnavailable))?
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "equipment_fetch",
+                    "fetch_timeout",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                EquipmentFetchError::Intake(AdminIntakeError::SourceUnavailable)
+            })?
     }
 
     async fn fetch_document_once(
@@ -245,11 +279,19 @@ impl EquipmentSourceAdapter {
                 self.fetch_document_once_observed(target, None, Some(Arc::clone(&status_slot))),
             )
             .await
-            .map_err(|_| fetch::EquipmentFetchFailure {
-                category: MailEquipmentDiagnosticCategory::Timeout,
-                status: fetch::nonzero_status(&status_slot),
-                elapsed_millis: fetch::elapsed_millis(started),
-                body: None,
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "equipment_fetch",
+                    "fetch_observed_timeout",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                fetch::EquipmentFetchFailure {
+                    category: MailEquipmentDiagnosticCategory::Timeout,
+                    status: fetch::nonzero_status(&status_slot),
+                    elapsed_millis: fetch::elapsed_millis(started),
+                    body: None,
+                }
             })?
             .map_err(|error| match error {
                 EquipmentFetchError::Observed(failure) => failure,
@@ -270,11 +312,22 @@ impl EquipmentSourceAdapter {
         let mut session = credentials
             .begin_read(world, MoogleMailOperation::Equipment)
             .await
-            .map_err(|_| fetch::EquipmentFetchFailure {
-                category: MailEquipmentDiagnosticCategory::CredentialUnavailable,
-                status: None,
-                elapsed_millis: None,
-                body: None,
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "equipment_fetch",
+                    "acquire_observed_session",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                fetch::EquipmentFetchFailure {
+                    category: MailEquipmentDiagnosticCategory::CredentialUnavailable,
+                    status: None,
+                    elapsed_millis: None,
+                    body: None,
+                }
             })?;
         self.await_request_slot().await;
         let status_slot = Arc::new(AtomicU16::new(0));
@@ -288,19 +341,38 @@ impl EquipmentSourceAdapter {
             ),
         )
         .await
-        .map_err(|_| fetch::EquipmentFetchFailure {
-            category: MailEquipmentDiagnosticCategory::Timeout,
-            status: fetch::nonzero_status(&status_slot),
-            elapsed_millis: fetch::elapsed_millis(started),
-            body: None,
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "equipment_fetch",
+                "fetch_authenticated_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            fetch::EquipmentFetchFailure {
+                category: MailEquipmentDiagnosticCategory::Timeout,
+                status: fetch::nonzero_status(&status_slot),
+                elapsed_millis: fetch::elapsed_millis(started),
+                body: None,
+            }
         })?;
         match result {
             Ok(body) => {
-                session.check_current().await.map_err(|_| fetch::EquipmentFetchFailure {
-                    category: MailEquipmentDiagnosticCategory::CredentialUnavailable,
-                    status: fetch::nonzero_status(&status_slot),
-                    elapsed_millis: fetch::elapsed_millis(started),
-                    body: None,
+                session.check_current().await.map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "equipment_fetch",
+                        "check_observed_owner",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext {
+                            world: diagnostic_world(world.as_str()),
+                            ..Default::default()
+                        },
+                    );
+                    fetch::EquipmentFetchFailure {
+                        category: MailEquipmentDiagnosticCategory::CredentialUnavailable,
+                        status: fetch::nonzero_status(&status_slot),
+                        elapsed_millis: fetch::elapsed_millis(started),
+                        body: None,
+                    }
                 })?;
                 Ok(body)
             }
@@ -343,8 +415,24 @@ impl EquipmentSourceAdapter {
         let key = attachment
             .key
             .with_bytes(|bytes| std::str::from_utf8(bytes).map(str::to_owned))
-            .map_err(|_| AdminIntakeError::InvalidSource)?
-            .map_err(|_| AdminIntakeError::InvalidSource)?;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "equipment_fetch",
+                    "decode_attachment_key",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                AdminIntakeError::InvalidSource
+            })?
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "equipment_fetch",
+                    "validate_attachment_encoding",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                AdminIntakeError::InvalidSource
+            })?;
         let prefix = if world_id == "isekai" { "/isekai/equip/" } else { "/equip/" };
         let mut target = self.endpoint.clone();
         target.set_path(&format!("{prefix}{}/{key}", attachment.external_equipment_id));
@@ -385,8 +473,17 @@ impl EquipmentSourceAdapter {
         };
         let prefix = if context.world_id == "isekai" { "/isekai/equip/" } else { "/equip/" };
         let target = match attachment.key.with_bytes(|bytes| {
-            std::str::from_utf8(bytes).map_err(|_| AdminIntakeError::InvalidSource).and_then(
-                |key| {
+            std::str::from_utf8(bytes)
+                .map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "equipment_fetch",
+                        "decode_diagnostic_attachment",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    AdminIntakeError::InvalidSource
+                })
+                .and_then(|key| {
                     let mut target = self.endpoint.clone();
                     target.set_path(&format!("{prefix}{}/{}", context.external_equipment_id, key));
                     // 与手工 URL 读取复用唯一 origin/world/ID/key/allowlist 门，诊断不另开宽松路径。
@@ -397,8 +494,7 @@ impl EquipmentSourceAdapter {
                         target.as_str(),
                     )
                     .map(|(target, _, _)| target)
-                },
-            )
+                })
         }) {
             Ok(Ok(target)) => target,
             _ => {

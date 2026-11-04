@@ -2,6 +2,10 @@
 //! 处理器只负责 Admin session/CSRF、请求体边界、稳定 DTO 映射和错误状态；论坛语法解析由
 //! `auction-integrations::ForumPreviewAdapter` 完成，预览成功不代表已经发布远程论坛。
 
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 #[path = "forum/status.rs"]
 mod status;
 
@@ -147,7 +151,8 @@ fn map_warning(warning: auction_application::AdminForumWarning) -> AdminForumWar
 }
 
 fn map_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::AdminForumPreview(AdminForumPreviewError::InvalidInput)
         | ApplicationError::AdminForumPreview(AdminForumPreviewError::ParseFailed) => {
             super::api_error(StatusCode::BAD_REQUEST, "invalid_forum_auction", "论坛拍卖内容无效")
@@ -165,5 +170,12 @@ fn map_error(error: ApplicationError) -> Response {
             "论坛拍卖预览暂不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_forum",
+        "respond_operation_failure",
+        diagnostic_kind,
+        response,
+    )
 }

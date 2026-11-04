@@ -1,5 +1,9 @@
 //! E-Hentai 单 Cookie 网关与 Forum 端口适配。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::*;
 
 /// 使用唯一论坛 Cookie；明确失效会回写，不自动换号或重放外部写入。
@@ -159,14 +163,27 @@ impl auction_application::ForumTargetProfileReader for EhentaiGateway {
     > {
         Box::pin(async move {
             tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
-                let session = self
-                    .credentials
-                    .begin(None)
-                    .map_err(|_| auction_application::InternalEvidenceError::Unavailable)?;
+                let session = self.credentials.begin(None).map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "forum_profile",
+                        "acquire_session",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    auction_application::InternalEvidenceError::Unavailable
+                })?;
                 self.client.read_target_profile(&target_uid, session.cookie()).await
             })
             .await
-            .map_err(|_| auction_application::InternalEvidenceError::Expired)?
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_profile",
+                    "read_profile_timeout",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                auction_application::InternalEvidenceError::Expired
+            })?
         })
     }
 }
@@ -178,10 +195,15 @@ impl auction_application::ForumPmSender for EhentaiGateway {
         message: &'a auction_application::ForumPmMessage,
     ) -> auction_application::ForumPmFuture<'a, Box<dyn auction_application::PreparedForumPm>> {
         Box::pin(async move {
-            let session = self
-                .credentials
-                .begin(Some(world))
-                .map_err(|_| auction_application::ForumPmError::Unavailable)?;
+            let session = self.credentials.begin(Some(world)).map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_pm",
+                    "acquire_send_session",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                auction_application::ForumPmError::Unavailable
+            })?;
             self.client.prepare_pm(message, session).await
         })
     }
@@ -193,10 +215,15 @@ impl auction_application::ForumPmSender for EhentaiGateway {
         sender_forum_account_id: &'a str,
     ) -> auction_application::ForumPmFuture<'a, Option<auction_application::ForumPmReceipt>> {
         Box::pin(async move {
-            let session = self
-                .credentials
-                .begin(Some(world))
-                .map_err(|_| auction_application::ForumPmError::Unavailable)?;
+            let session = self.credentials.begin(Some(world)).map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_pm",
+                    "acquire_reconcile_session",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                auction_application::ForumPmError::Unavailable
+            })?;
             self.client.reconcile_pm(message, sender_forum_account_id, session).await
         })
     }
@@ -227,7 +254,7 @@ impl ForumPublisher for EhentaiGateway {
         Box::pin(async move {
             EhentaiGateway::find_topic_by_titles(self, world, &titles)
                 .await
-                .map_err(EhentaiError::into_application_error)
+                .map_err(observed_application_error)
         })
     }
 
@@ -240,7 +267,7 @@ impl ForumPublisher for EhentaiGateway {
         Box::pin(async move {
             EhentaiGateway::create_topic(self, world, rendered, progress)
                 .await
-                .map_err(EhentaiError::into_application_error)
+                .map_err(observed_application_error)
         })
     }
 }
@@ -256,7 +283,7 @@ impl ForumPostWriter for EhentaiGateway {
         Box::pin(async move {
             EhentaiGateway::reply_topic(self, world, &thread_id, body, progress)
                 .await
-                .map_err(EhentaiError::into_application_error)
+                .map_err(observed_application_error)
         })
     }
 
@@ -280,7 +307,7 @@ impl ForumPostWriter for EhentaiGateway {
                 progress,
             )
             .await
-            .map_err(EhentaiError::into_application_error)
+            .map_err(observed_application_error)
         })
     }
 
@@ -293,7 +320,7 @@ impl ForumPostWriter for EhentaiGateway {
         Box::pin(async move {
             EhentaiGateway::read_post(self, world, &thread_id, &post_id)
                 .await
-                .map_err(EhentaiError::into_application_error)
+                .map_err(observed_application_error)
         })
     }
 }
@@ -307,7 +334,26 @@ impl ForumTopicReader for EhentaiGateway {
         Box::pin(async move {
             EhentaiGateway::fetch_topic(self, world, &thread_id)
                 .await
-                .map_err(EhentaiError::into_application_error)
+                .map_err(observed_application_error)
         })
     }
+}
+
+fn observed_application_error(error: EhentaiError) -> ApplicationError {
+    let (kind, phase) = match error.operation() {
+        super::EhentaiOperation::CheckSession => ("credential_check", "check_forum_session"),
+        super::EhentaiOperation::CreateTopic => ("forum_topic", "create_topic"),
+        super::EhentaiOperation::ReconcileTopic => ("forum_topic", "reconcile_topic"),
+        super::EhentaiOperation::FetchTopic => ("forum_topic", "fetch_topic"),
+        super::EhentaiOperation::ReplyTopic => ("forum_topic", "reply_topic"),
+        super::EhentaiOperation::EditPost => ("forum_topic", "edit_post"),
+        super::EhentaiOperation::ReadPost => ("forum_topic", "read_post"),
+    };
+    safe_diagnostics::warn(
+        kind,
+        phase,
+        safe_diagnostics::project(&error),
+        DiagnosticContext::default(),
+    );
+    error.into_application_error()
 }

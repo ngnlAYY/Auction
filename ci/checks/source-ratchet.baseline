@@ -4,11 +4,11 @@ jobs:Err(_) 4
 jobs:map_err(|_|) 12
 application:Err(_) 6
 application:map_err(|_|) 16
-http:Err(_) 118
-http:map_err(|_|) 121
+http:Err(_) 73
+http:map_err(|_|) 94
 storage:Err(_) 4
 storage:map_err(|_|) 325
-integrations:Err(_) 24
-integrations:map_err(|_|) 363
+integrations:Err(_) 1
+integrations:map_err(|_|) 64
 apps:Err(_) 17
 apps:map_err(|_|) 28

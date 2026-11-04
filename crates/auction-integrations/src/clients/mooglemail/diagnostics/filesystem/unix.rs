@@ -1,5 +1,9 @@
 //! Unix 私有目录、跨进程锁和无覆盖发布；所有阻塞操作由归档层调度。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{
     collections::VecDeque,
     fs::{self, DirBuilder, File, Metadata, OpenOptions},
@@ -24,18 +28,42 @@ struct LockedDirectory {
 
 /// 目录配置可相对于 Worker TOML；逐级拒绝符号链接后才规范化父目录。
 fn normalized_target(target: &Path) -> Result<PathBuf, MailDiagnosticError> {
-    let target = std::path::absolute(target).map_err(|_| MailDiagnosticError::Io)?;
+    let target = std::path::absolute(target).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "resolve_absolute_path",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })?;
     let name = target.file_name().ok_or(MailDiagnosticError::InvalidContext)?;
     let parent = target.parent().ok_or(MailDiagnosticError::InvalidContext)?;
     let mut prefix = PathBuf::new();
     for component in parent.components() {
         prefix.push(component.as_os_str());
-        let metadata = fs::symlink_metadata(&prefix).map_err(|_| MailDiagnosticError::Io)?;
+        let metadata = fs::symlink_metadata(&prefix).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "inspect_parent",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Io
+        })?;
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(MailDiagnosticError::Io);
         }
     }
-    let parent = fs::canonicalize(parent).map_err(|_| MailDiagnosticError::Io)?;
+    let parent = fs::canonicalize(parent).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "canonicalize_parent",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })?;
     Ok(parent.join(name))
 }
 
@@ -52,9 +80,25 @@ fn private_directory(
                 return Err(MailDiagnosticError::Io);
             }
         }
-        Err(_) => return Err(MailDiagnosticError::NotFound),
+        Err(diagnostic_cause) => {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "read_directory",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return Err(MailDiagnosticError::NotFound);
+        }
     }
-    let metadata = fs::symlink_metadata(&path).map_err(|_| MailDiagnosticError::Io)?;
+    let metadata = fs::symlink_metadata(&path).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "inspect_directory",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })?;
     if !metadata.is_dir()
         || metadata.file_type().is_symlink()
         || metadata.permissions().mode() & 0o7777 != 0o700
@@ -69,7 +113,15 @@ fn private_file(
     owner: u32,
     allow_two_links: bool,
 ) -> Result<Metadata, MailDiagnosticError> {
-    let metadata = fs::symlink_metadata(path).map_err(|_| MailDiagnosticError::Io)?;
+    let metadata = fs::symlink_metadata(path).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "inspect_file",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })?;
     if !metadata.is_file()
         || metadata.file_type().is_symlink()
         || metadata.uid() != owner
@@ -87,12 +139,25 @@ fn same_file(first: &Metadata, second: &Metadata) -> bool {
 
 fn open_private(path: &Path, owner: u32, write: bool) -> Result<File, MailDiagnosticError> {
     let before = private_file(path, owner, false)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .write(write)
-        .open(path)
-        .map_err(|_| MailDiagnosticError::Io)?;
-    let opened = file.metadata().map_err(|_| MailDiagnosticError::Io)?;
+    let file =
+        OpenOptions::new().read(true).write(write).open(path).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "open_file",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Io
+        })?;
+    let opened = file.metadata().map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "inspect_open_file",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })?;
     let after = private_file(path, owner, false)?;
     if !same_file(&before, &opened) || !same_file(&opened, &after) {
         return Err(MailDiagnosticError::Io);
@@ -112,7 +177,15 @@ fn locked_directory(target: &Path, create: bool) -> Result<LockedDirectory, Mail
         .open(&lock_path)
     {
         Ok(file) => {
-            let opened = file.metadata().map_err(|_| MailDiagnosticError::Io)?;
+            let opened = file.metadata().map_err(|diagnostic_cause| {
+                safe_diagnostics::error(
+                    "mooglemail_diagnostics",
+                    "inspect_lock_file",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                MailDiagnosticError::Io
+            })?;
             if !private_file(&lock_path, owner, false)
                 .is_ok_and(|current| same_file(&current, &opened))
             {
@@ -128,26 +201,72 @@ fn locked_directory(target: &Path, create: bool) -> Result<LockedDirectory, Mail
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
             open_private(&lock_path, owner, true)?
         }
-        Err(_) => return Err(MailDiagnosticError::Io),
+        Err(diagnostic_cause) => {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "create_lock_file",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return Err(MailDiagnosticError::Io);
+        }
     };
     // 不在后台阻塞任务中无限等待其他进程；锁繁忙也是可观测的留证失败。
-    lock.try_lock().map_err(|_| MailDiagnosticError::Io)?;
-    let current = fs::symlink_metadata(&path).map_err(|_| MailDiagnosticError::Io)?;
+    lock.try_lock().map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "lock_directory",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })?;
+    let current = fs::symlink_metadata(&path).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "inspect_locked_directory",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })?;
     if !same_file(&directory_metadata, &current) {
         return Err(MailDiagnosticError::Io);
     }
 
     // 新建的空私有文件由当前有效账号拥有，用它核对预存目录 owner，避免依赖环境变量或新增 FFI。
     let probe_path = path.join(format!(".{}.tmp", Uuid::new_v4()));
-    let probe = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&probe_path)
-        .map_err(|_| MailDiagnosticError::Io)?;
-    let probe_metadata = probe.metadata().map_err(|_| MailDiagnosticError::Io);
+    let probe =
+        OpenOptions::new().write(true).create_new(true).mode(0o600).open(&probe_path).map_err(
+            |diagnostic_cause| {
+                safe_diagnostics::error(
+                    "mooglemail_diagnostics",
+                    "create_probe",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                MailDiagnosticError::Io
+            },
+        )?;
+    let probe_metadata = probe.metadata().map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "inspect_probe",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    });
     drop(probe);
-    fs::remove_file(&probe_path).map_err(|_| MailDiagnosticError::Io)?;
+    fs::remove_file(&probe_path).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "remove_probe",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })?;
     if probe_metadata?.uid() != owner {
         return Err(MailDiagnosticError::Io);
     }
@@ -165,7 +284,15 @@ fn managed_name(name: &str, temporary: bool) -> Option<Uuid> {
 }
 
 fn remove_file(path: &Path) -> Result<(), MailDiagnosticError> {
-    fs::remove_file(path).map_err(|_| MailDiagnosticError::Io)
+    fs::remove_file(path).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "remove_record",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })
 }
 
 /// 只清理严格命名的本模块临时文件；先收集再清理，未知文件使整次操作失败。
@@ -174,8 +301,24 @@ fn collect_records(
 ) -> Result<VecDeque<(PathBuf, SystemTime, u64)>, MailDiagnosticError> {
     let mut temporary = Vec::new();
     let mut records = Vec::new();
-    for entry in fs::read_dir(&directory.path).map_err(|_| MailDiagnosticError::Io)? {
-        let entry = entry.map_err(|_| MailDiagnosticError::Io)?;
+    for entry in fs::read_dir(&directory.path).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "list_records",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })? {
+        let entry = entry.map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "read_record_entry",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Io
+        })?;
         let name = entry.file_name();
         let name = name.to_str().ok_or(MailDiagnosticError::Io)?;
         if name == ".lock" {
@@ -213,7 +356,15 @@ fn collect_records(
         }
         result.push((
             path,
-            metadata.modified().map_err(|_| MailDiagnosticError::Io)?,
+            metadata.modified().map_err(|diagnostic_cause| {
+                safe_diagnostics::error(
+                    "mooglemail_diagnostics",
+                    "read_record_timestamp",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                MailDiagnosticError::Io
+            })?,
             metadata.len(),
         ));
     }
@@ -269,13 +420,32 @@ pub(super) fn read(
         return Err(MailDiagnosticError::NotFound);
     }
     let file = open_private(&path, directory.owner, false)?;
-    if file.metadata().map_err(|_| MailDiagnosticError::Io)?.len() > MAX_FILE_BYTES as u64 {
+    if file
+        .metadata()
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "inspect_record",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Io
+        })?
+        .len()
+        > MAX_FILE_BYTES as u64
+    {
         return Err(MailDiagnosticError::PayloadTooLarge);
     }
     let mut bytes = Vec::new();
-    file.take((MAX_FILE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|_| MailDiagnosticError::Io)?;
+    file.take((MAX_FILE_BYTES + 1) as u64).read_to_end(&mut bytes).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "read_record",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })?;
     if bytes.len() > MAX_FILE_BYTES {
         return Err(MailDiagnosticError::PayloadTooLarge);
     }
@@ -288,13 +458,27 @@ fn publish_private(
     bytes: &[u8],
     owner: Option<u32>,
 ) -> Result<(), MailDiagnosticError> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(temporary)
-        .map_err(|_| MailDiagnosticError::Io)?;
-    let metadata = file.metadata().map_err(|_| MailDiagnosticError::Io)?;
+    let mut file =
+        OpenOptions::new().write(true).create_new(true).mode(0o600).open(temporary).map_err(
+            |diagnostic_cause| {
+                safe_diagnostics::error(
+                    "mooglemail_diagnostics",
+                    "create_private_file",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                MailDiagnosticError::Io
+            },
+        )?;
+    let metadata = file.metadata().map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "inspect_private_file",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })?;
     let mut published = false;
     let result = (|| {
         if owner.is_some_and(|owner| metadata.uid() != owner)
@@ -302,14 +486,46 @@ fn publish_private(
         {
             return Err(MailDiagnosticError::Io);
         }
-        file.write_all(bytes).map_err(|_| MailDiagnosticError::Io)?;
-        file.sync_all().map_err(|_| MailDiagnosticError::Io)?;
+        file.write_all(bytes).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "write_record",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Io
+        })?;
+        file.sync_all().map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "sync_record",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Io
+        })?;
         // hard_link 在目标已存在时失败，保证不会覆盖已发布证据或用户的导出文件。
-        fs::hard_link(temporary, destination).map_err(|_| MailDiagnosticError::Io)?;
+        fs::hard_link(temporary, destination).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "publish_record",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Io
+        })?;
         published = true;
         remove_file(temporary)?;
         let parent = destination.parent().ok_or(MailDiagnosticError::Io)?;
-        File::open(parent).and_then(|file| file.sync_all()).map_err(|_| MailDiagnosticError::Io)
+        File::open(parent).and_then(|file| file.sync_all()).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "sync_parent",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Io
+        })
     })();
     if result.is_err() {
         for path in [Some(temporary), published.then_some(destination)].into_iter().flatten() {

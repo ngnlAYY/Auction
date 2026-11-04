@@ -1,5 +1,9 @@
 //! 临时发送边界与分钟组校验；不收紧通用 opaque MID，也不提供发送成功证明。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 mod scan;
 
 use std::collections::HashMap;
@@ -130,7 +134,17 @@ pub(crate) fn numeric_mid(value: &str) -> Option<u128> {
     {
         return None;
     }
-    value.parse().ok()
+    value
+        .parse::<u128>()
+        .inspect_err(|cause| {
+            safe_diagnostics::warn(
+                "mooglemail_baseline",
+                "parse_mid",
+                safe_diagnostics::project(cause),
+                DiagnosticContext::default(),
+            );
+        })
+        .ok()
 }
 
 #[derive(Default)]

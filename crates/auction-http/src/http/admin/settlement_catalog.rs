@@ -1,5 +1,9 @@
 //! Admin 结算报表选择目录 HTTP 适配器。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{
@@ -76,7 +80,15 @@ pub(crate) async fn list(
     let result = match reader.list_settlement_catalog(request.clone()).await {
         Ok(result) => result,
         Err(ApplicationError::CapabilityUnavailable(_)) => return feature_unavailable(),
-        Err(_) => return unavailable(),
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "admin_settlement",
+                "read_catalog",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return unavailable();
+        }
     };
     if !result.validate(&request) {
         return internal_error();

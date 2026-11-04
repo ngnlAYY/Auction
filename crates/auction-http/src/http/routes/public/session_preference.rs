@@ -1,5 +1,9 @@
 //! 登录时长偏好的账号边界；会话与版本复核、幂等和截止计算归应用及存储 owner。
 
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use super::*;
 use auction_application::{PublicSessionPreferenceResult, SetPublicSessionPreferenceCommand};
 use auction_contracts::{PublicSessionPreferenceResponse, PublicSetSessionPreferenceRequest};
@@ -120,7 +124,8 @@ fn success(value: PublicSessionPreferenceResult) -> Response {
 }
 
 fn failure(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::Session(SessionError::InvalidPreference) => api_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_session_preference",
@@ -133,5 +138,12 @@ fn failure(error: ApplicationError) -> Response {
         }
         error if is_unauthenticated(&error) => authentication_error(),
         _ => session_unavailable(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "session_preference",
+        "respond_command_failure",
+        diagnostic_kind,
+        response,
+    )
 }

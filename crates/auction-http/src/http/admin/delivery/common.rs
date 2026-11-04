@@ -1,3 +1,7 @@
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use auction_application::{ApplicationError, DeliveryAdminError};
 use axum::{
     http::StatusCode,
@@ -14,7 +18,8 @@ pub(crate) fn feature_unavailable() -> Response {
 }
 
 pub(crate) fn map_delivery_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
         ApplicationError::DeliveryAdmin(DeliveryAdminError::Invalid) => super::api_error(
             StatusCode::BAD_REQUEST,
@@ -45,5 +50,12 @@ pub(crate) fn map_delivery_error(error: ApplicationError) -> Response {
             "服务暂时不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_delivery",
+        "respond_command_failure",
+        diagnostic_kind,
+        response,
+    )
 }

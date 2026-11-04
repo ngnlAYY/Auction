@@ -1,5 +1,9 @@
 //! compose 页面状态解析和 staged asset 证明。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::collections::HashSet;
 
 use scraper::Html;
@@ -82,8 +86,15 @@ fn parse_compose_state(
     document: &[u8],
     world: MoogleMailWorld,
 ) -> Result<MoogleMailComposeState, MoogleMailError> {
-    let source = std::str::from_utf8(document)
-        .map_err(|_| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
+    let source = std::str::from_utf8(document).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "mooglemail_send",
+            "decode_compose_document",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        compose_error(world, MoogleMailErrorCategory::ProtocolDrift)
+    })?;
     if source.trim().is_empty() || source.trim() == "state lock limiter in effect" {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }

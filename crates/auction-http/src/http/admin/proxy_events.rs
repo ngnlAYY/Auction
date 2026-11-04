@@ -2,6 +2,10 @@
 //! 这里仅处理 Admin 会话、路径/分页解析和稳定 DTO 映射；代理状态、命令账本和一致性快照
 //! 由应用端口与存储适配器负责。
 
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{
@@ -216,7 +220,8 @@ fn feature_unavailable() -> Response {
 }
 
 fn map_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
         _ => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -224,5 +229,12 @@ fn map_error(error: ApplicationError) -> Response {
             "Admin 代理历史服务暂不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_proxy_events",
+        "respond_read_failure",
+        diagnostic_kind,
+        response,
+    )
 }

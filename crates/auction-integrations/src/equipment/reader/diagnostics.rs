@@ -1,5 +1,9 @@
 //! 装备读取的敏感证据准备与留存；不参与装备业务决定。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::*;
 
 pub(super) fn prepare_observation(
@@ -145,11 +149,19 @@ pub(super) async fn retain_failure(
         Ok(Err(error)) => {
             (MailEquipmentEvidenceStatus::SaveFailed, evidence_id, Some(error.as_str().to_owned()))
         }
-        Err(_) => (
-            MailEquipmentEvidenceStatus::CompletionUnconfirmed,
-            evidence_id,
-            Some("retention_timeout".to_owned()),
-        ),
+        Err(diagnostic_cause) => {
+            safe_diagnostics::warn(
+                "equipment_diagnostics",
+                "retain_timeout",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            (
+                MailEquipmentEvidenceStatus::CompletionUnconfirmed,
+                evidence_id,
+                Some("retention_timeout".to_owned()),
+            )
+        }
     };
     snapshot.evidence_id = retained_id;
     snapshot.evidence_status = status;
@@ -162,7 +174,15 @@ pub(super) fn source_parse_error(
     source_kind: &'static str,
     reason: EquipmentParseError,
 ) -> AdminIntakeError {
-    tracing::warn!(source_kind, reason = reason.as_str(), "equipment source parsing rejected");
+    safe_diagnostics::warn(
+        "equipment_fetch",
+        match source_kind {
+            "html" => "parse_html_equipment",
+            _ => "parse_json_equipment",
+        },
+        safe_diagnostics::project(&reason),
+        DiagnosticContext::default(),
+    );
     AdminIntakeError::InvalidSource
 }
 

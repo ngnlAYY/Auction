@@ -452,13 +452,14 @@ Final 回帖导入只引用待合入的 W0.5；延迟上界、估计宽度和覆
 
 ### 安全错误与未持久化指标
 
-W0.2 的 I-A 覆盖 jobs/application，I-B 尚未覆盖的 integrations/HTTP 继续按原 owner 排查。
+W0.2 已由 I-A（jobs/application）与 I-B（integrations/HTTP）共同覆盖。
 新增日志 target 为 `auction::diagnostics`；先按 kind 选择 owner，再用 phase 定位步骤，
 safe_kind 查看安全错误类别，按业务 UUID 或安全 span 关联同一义务/投递。
 不同原因不修改持久化 defer reason/失败码，因此旧版本仍能读取、重放和恢复原事实。
 kind 为简短 owner，phase 为语义步骤；同一二元组只表示同一种原因，禁止序号和模块路径标签。
 
-I-A 的 kind 按业务 owner 汇总如下；日志 kind 与指标 kind 不同，后者始终是 safe_kind 闭集。
+kind 按业务 owner 汇总如下；日志 kind 与指标 kind 不同，后者始终是 safe_kind 闭集。
+下表保留 I-A owner；后续表补齐 I-B 新 owner，复用的 owner 仍见本表。
 
 | 业务 owner | 日志 kind |
 | --- | --- |
@@ -488,6 +489,94 @@ I-A 的 kind 按业务 owner 汇总如下；日志 kind 与指标 kind 不同，
 | Worker 运行时与实时消费 | `worker_runtime`、`realtime_consumer` |
 | 运维告警 | `operations_alert` |
 
+
+I-B 新增 owner：
+
+| 范围 | 日志 kind |
+| --- | --- |
+| Admin 接口 | `admin_auctions` |
+| Admin 接口 | `admin_audit` |
+| Admin 接口 | `admin_credentials` |
+| Admin 接口 | `admin_dashboard` |
+| Admin 接口 | `admin_delivery` |
+| Admin 接口 | `admin_forum` |
+| Admin 接口 | `admin_lifecycle` |
+| Admin 接口 | `admin_lots` |
+| Admin 接口 | `admin_mail` |
+| Admin 接口 | `admin_proxy_events` |
+| Admin 接口 | `admin_realtime` |
+| Admin 接口 | `admin_recovery` |
+| Admin 接口 | `admin_reports` |
+| Admin 接口 | `admin_rules` |
+| Admin 接口 | `admin_runtime` |
+| Admin 接口 | `admin_runtime_switches` |
+| Admin 接口 | `admin_session` |
+| Admin 接口 | `admin_settlement` |
+| 备份适配器 | `backup_archive` |
+| 备份适配器 | `backup_heartbeat` |
+| 凭据与密钥 | `credential_check` |
+| 凭据与密钥 | `credential_crypto` |
+| 凭据与密钥 | `credential_login` |
+| 装备来源与密钥 | `equipment_crypto` |
+| 装备来源与密钥 | `equipment_diagnostics` |
+| 装备来源与密钥 | `equipment_fetch` |
+| 装备来源与密钥 | `equipment_link` |
+| 论坛协议 | `forum_credentials` |
+| 论坛协议 | `forum_forms` |
+| 论坛协议 | `forum_profile` |
+| 论坛协议 | `forum_session` |
+| 论坛协议 | `forum_topic` |
+| HTTP/实时传输 | `http_boundary` |
+| HTTP/实时传输 | `http_listener` |
+| HTTP/实时传输 | `http_readiness` |
+| HTTP/实时传输 | `http_response` |
+| HTTP/实时传输 | `http_transport` |
+| 凭据与密钥 | `login_key` |
+| 邮件协议与投递 | `mail_delivery` |
+| 邮件协议与投递 | `mooglemail_baseline` |
+| 邮件协议与投递 | `mooglemail_credentials` |
+| 邮件协议与投递 | `mooglemail_diagnostics` |
+| 邮件协议与投递 | `mooglemail_evidence` |
+| 邮件协议与投递 | `mooglemail_identity` |
+| 邮件协议与投递 | `mooglemail_inventory` |
+| 邮件协议与投递 | `mooglemail_maintenance` |
+| 邮件协议与投递 | `mooglemail_read` |
+| 邮件协议与投递 | `mooglemail_return` |
+| 邮件协议与投递 | `mooglemail_send` |
+| 邮件协议与投递 | `mooglemail_session` |
+| 邮件协议与投递 | `mooglemail_take` |
+| Public 接口 | `public_account` |
+| Public 接口 | `public_bid` |
+| Public 接口 | `public_catalog` |
+| Public 接口 | `public_compensation` |
+| Public 接口 | `public_competition` |
+| Public 接口 | `public_countdown` |
+| Public 接口 | `public_history` |
+| Public 接口 | `public_proxy` |
+| Public 接口 | `public_realtime` |
+| Public 接口 | `public_rules` |
+| Public 接口 | `public_session` |
+| Public 接口 | `public_worlds` |
+| HTTP/实时传输 | `realtime_hub` |
+| 运行时开关 | `runtime_switches` |
+| 邮件协议与投递 | `settlement_delivery` |
+
+HTTP 通过 `.fields.route` 查看路由模板，并在 `.span` / `.spans` 中关联规范化 request_id。
+不要使用原始路径、query 或请求头过滤；未匹配与非请求路径使用固定占位类别。
+例如筛选 Admin 运行时开关的数据库读取失败：
+
+```bash
+journalctl -u auction-admin-api -o cat |
+  jq -c 'select(.target == "auction::diagnostics") |
+    select(.fields.kind == "admin_runtime_switches") |
+    select(.fields.phase == "read_switches") |
+    {fields, span, spans}'
+```
+
+Sent 回退看 `mooglemail_baseline` 的 `fallback_before_send` / `fallback_after_send`，
+用 safe_kind 区分锚点、页序、范围、预算或读取失败；影子计数不因日志抑制减少。
+HTTP 就绪刷新看 `http_readiness`；Storage 的审计健康分类仍使用原 `auction::storage::audit_health`。
+
 例如筛选内部履约的身份读取，并保留关联字段：
 
 ```bash
@@ -503,6 +592,7 @@ journalctl -u auction-worker -o cat |
 去重汇总位于 `auction_observability::log_dedup`，
 包含固定 kind/phase/safe_kind 与 suppressed_count。
 首条带原安全业务标识，汇总不保存标识。
+Worker、Public、Admin 的长期服务 owner 均负责窗口刷新与关闭；HTTP 不计入 W0.3。
 不要为了定位原因打开原错误正文、Cookie 或 URL 日志。
 配置回退沿用 log_filter；禁用汇总 target 会放行原诊断日志。
 

@@ -1,5 +1,9 @@
 //! 装备来源归一化模型与稳定指纹；模型不携带原始 HTML，装备 key 不写入 fingerprint 或属性 JSON。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::collections::BTreeMap;
 
 use auction_application::{AdminIntakeError, CanonicalEquipment};
@@ -121,7 +125,15 @@ pub(super) fn canonical_fingerprint(
         tradeable: facts.tradeable,
         stats: &facts.stats,
     })
-    .map_err(|_| AdminIntakeError::InvalidSource)?;
+    .map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "equipment_fetch",
+            "hash_facts",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        AdminIntakeError::InvalidSource
+    })?;
     // 沿用同一域和 JSON 字节，不为域前缀再次复制完整装备快照。
     let mut digest = Sha256::new();
     digest.update(b"manual-json-v1\0");

@@ -1,6 +1,10 @@
 //! 数据密钥与装备 key 的加密信封适配器；应用层只得到密文信封，明文
 //! key 用后由领域值对象清零。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::fmt;
 
 use auction_domain::{EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
@@ -91,8 +95,17 @@ impl DataKey {
     }
 
     pub(crate) fn aead_key(&self) -> Result<aead::LessSafeKey, EquipmentKeySealerError> {
-        let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, &self.material)
-            .map_err(|_| EquipmentKeySealerError::Unconfigured)?;
+        let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, &self.material).map_err(
+            |diagnostic_cause| {
+                safe_diagnostics::error(
+                    "equipment_crypto",
+                    "prepare_cipher_key",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                EquipmentKeySealerError::Unconfigured
+            },
+        )?;
         Ok(aead::LessSafeKey::new(unbound))
     }
 
@@ -147,32 +160,59 @@ impl EquipmentKeySealer {
         }
 
         let mut nonce = [0_u8; NONCE_LENGTH];
-        self.random.fill(&mut nonce).map_err(|_| EquipmentKeySealerError::RandomSource)?;
+        self.random.fill(&mut nonce).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "equipment_crypto",
+                "generate_nonce",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EquipmentKeySealerError::RandomSource
+        })?;
         let aead_key = self.data_key.aead_key()?;
         let ciphertext = key
             .with_bytes(|plaintext| {
                 // 预留认证标签，避免追加标签时扩容并复制整份加密缓冲。
                 let mut buffer = Vec::with_capacity(plaintext.len() + aead::AES_256_GCM.tag_len());
                 buffer.extend_from_slice(plaintext);
-                if aead_key
-                    .seal_in_place_append_tag(
-                        aead::Nonce::assume_unique_for_key(nonce),
-                        aead::Aad::from(aad.as_bytes()),
-                        &mut buffer,
-                    )
-                    .is_err()
-                {
+                if let Err(diagnostic_cause) = aead_key.seal_in_place_append_tag(
+                    aead::Nonce::assume_unique_for_key(nonce),
+                    aead::Aad::from(aad.as_bytes()),
+                    &mut buffer,
+                ) {
                     buffer.fill(0);
+                    safe_diagnostics::error(
+                        "equipment_crypto",
+                        "encrypt_key",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
                     return Err(EquipmentKeySealerError::Encryption);
                 }
                 Ok(buffer)
             })
-            .map_err(|_| EquipmentKeySealerError::Encryption)??;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::error(
+                    "equipment_crypto",
+                    "encrypt_key_join",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                EquipmentKeySealerError::Encryption
+            })??;
 
         // 与解密共用分块 HMAC，避免为指纹另建含明文 key 的拼接缓冲。
         let fingerprint = key
             .with_bytes(|plaintext| fingerprint(&self.data_key, plaintext))
-            .map_err(|_| EquipmentKeySealerError::Encryption)?;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::error(
+                    "equipment_crypto",
+                    "fingerprint_key",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                EquipmentKeySealerError::Encryption
+            })?;
 
         let envelope = EquipmentKeyEnvelope::new(
             ciphertext,
@@ -180,7 +220,15 @@ impl EquipmentKeySealer {
             self.data_key.id.clone(),
             fingerprint,
         )
-        .map_err(|_| EquipmentKeySealerError::Encryption)?;
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "equipment_crypto",
+                "build_envelope",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EquipmentKeySealerError::Encryption
+        })?;
         Ok(envelope)
     }
 
@@ -221,7 +269,15 @@ impl EquipmentKeyOpener {
         if equipment_id.is_nil() {
             return Err(EquipmentKeyOpenerError::InvalidEquipmentId);
         }
-        envelope.validate().map_err(|_| EquipmentKeyOpenerError::InvalidEnvelope)?;
+        envelope.validate().map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "equipment_crypto",
+                "validate_envelope",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            EquipmentKeyOpenerError::InvalidEnvelope
+        })?;
         if envelope.encryption_key_id() != self.data_key.id() {
             return Err(EquipmentKeyOpenerError::KeyMismatch);
         }
@@ -235,24 +291,54 @@ impl EquipmentKeyOpener {
             envelope.nonce().try_into().map_err(|_| EquipmentKeyOpenerError::InvalidEnvelope)?;
         let mut buffer = envelope.ciphertext().to_vec();
         let result = (|| {
-            let aead_key =
-                self.data_key.aead_key().map_err(|_| EquipmentKeyOpenerError::Decryption)?;
+            let aead_key = self.data_key.aead_key().map_err(|diagnostic_cause| {
+                safe_diagnostics::error(
+                    "equipment_crypto",
+                    "prepare_decryption_key",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                EquipmentKeyOpenerError::Decryption
+            })?;
             let plaintext = aead_key
                 .open_in_place(
                     aead::Nonce::assume_unique_for_key(nonce_array),
                     aead::Aad::from(aad.as_bytes()),
                     &mut buffer,
                 )
-                .map_err(|_| EquipmentKeyOpenerError::Decryption)?;
+                .map_err(|diagnostic_cause| {
+                    safe_diagnostics::error(
+                        "equipment_crypto",
+                        "decrypt_key",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    EquipmentKeyOpenerError::Decryption
+                })?;
 
             let actual_fingerprint = fingerprint(&self.data_key, plaintext);
             if !bool::from(actual_fingerprint.as_bytes().ct_eq(envelope.fingerprint().as_bytes())) {
                 return Err(EquipmentKeyOpenerError::FingerprintMismatch);
             }
 
-            let plaintext =
-                std::str::from_utf8(plaintext).map_err(|_| EquipmentKeyOpenerError::InvalidUtf8)?;
-            EquipmentKey::new(plaintext).map_err(|_| EquipmentKeyOpenerError::InvalidPlaintext)
+            let plaintext = std::str::from_utf8(plaintext).map_err(|diagnostic_cause| {
+                safe_diagnostics::error(
+                    "equipment_crypto",
+                    "decode_key",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                EquipmentKeyOpenerError::InvalidUtf8
+            })?;
+            EquipmentKey::new(plaintext).map_err(|diagnostic_cause| {
+                safe_diagnostics::error(
+                    "equipment_crypto",
+                    "validate_key",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                EquipmentKeyOpenerError::InvalidPlaintext
+            })
         })();
         buffer.fill(0);
         result

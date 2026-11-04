@@ -1,5 +1,9 @@
 //! PM 准备、单次提交和同账号 Sent 对账；令牌与 Cookie 只驻留本次内存会话。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_application::{
     ForumPmError, ForumPmFuture, ForumPmMessage, ForumPmReceipt, PreparedForumPm,
 };
@@ -45,7 +49,17 @@ impl PreparedForumPm for PreparedPm {
                 // 写后失效同样停用当前 Cookie，但不能据此认定未发送或授权重发。
                 let _ = self.session.invalidate_current().await;
             }
-            result.map_err(|_| ForumPmError::OutcomeUnknown)?.ok_or(ForumPmError::OutcomeUnknown)
+            result
+                .map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "forum_pm",
+                        "send_unknown",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext { write_started: Some(true), ..Default::default() },
+                    );
+                    ForumPmError::OutcomeUnknown
+                })?
+                .ok_or(ForumPmError::OutcomeUnknown)
         })
     }
 }
@@ -97,7 +111,15 @@ impl EhentaiClient {
     }
 
     pub(super) fn validate_pm_client(&self) -> Result<(), ForumPmError> {
-        let production = Url::parse(PRODUCTION_ENDPOINT).map_err(|_| ForumPmError::Protocol)?;
+        let production = Url::parse(PRODUCTION_ENDPOINT).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "forum_pm",
+                "validate_endpoint",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            ForumPmError::Protocol
+        })?;
         let allowed = same_origin(&self.base_url, &production)
             || (self.base_url.scheme() == "http" && is_loopback_host(&self.base_url));
         if !self.valid_for()
@@ -127,7 +149,15 @@ impl EhentaiClient {
         cookie: &EhentaiCookie,
     ) -> Result<String, ForumPmError> {
         self.wait_rate(EhentaiOperation::CheckSession).await.map_err(map_error)?;
-        self.check_ownership(cookie).await.map_err(|_| ForumPmError::Unavailable)?;
+        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_pm",
+                "check_read_owner",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            ForumPmError::Unavailable
+        })?;
         let response = self
             .pm_client
             .as_ref()
@@ -141,7 +171,15 @@ impl EhentaiClient {
             .timeout(self.request_timeout)
             .send()
             .await
-            .map_err(|_| ForumPmError::Unavailable)?;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_pm",
+                    "read_page",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                ForumPmError::Unavailable
+            })?;
         let status = response.status();
         let location = response.headers().get(header::LOCATION).cloned();
         let html =
@@ -163,17 +201,40 @@ impl EhentaiClient {
             return Err(ForumPmError::Protocol);
         }
         // 正文等待和读后 owner 复核都由清理守卫覆盖；失锁响应不能继续作为凭据证明。
-        self.check_ownership(cookie).await.map_err(|_| ForumPmError::Unavailable)?;
+        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_pm",
+                "check_read_receipt_owner",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            ForumPmError::Unavailable
+        })?;
         String::from_utf8(std::mem::take(&mut body.0)).map_err(|error| {
+            let diagnostic = safe_diagnostics::project(&error);
             let mut bytes = error.into_bytes();
             bytes.fill(0);
+            safe_diagnostics::warn(
+                "forum_pm",
+                "decode_response",
+                diagnostic,
+                DiagnosticContext::default(),
+            );
             ForumPmError::Protocol
         })
     }
 
     async fn submit_pm(&self, form: &PmForm, cookie: &EhentaiCookie) -> Result<(), ForumPmError> {
         self.wait_rate(EhentaiOperation::CheckSession).await.map_err(map_error)?;
-        self.check_ownership(cookie).await.map_err(|_| ForumPmError::Unavailable)?;
+        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "forum_pm",
+                "check_send_owner",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            ForumPmError::Unavailable
+        })?;
         // 复用已有 URL 编码器，不为 PM 额外开启 reqwest feature。
         let encoded = url::form_urlencoded::Serializer::new(String::new())
             .extend_pairs(form.values.iter().map(|(name, value)| (name.as_str(), value.as_str())))
@@ -196,13 +257,29 @@ impl EhentaiClient {
             .timeout(self.request_timeout)
             .send()
             .await
-            .map_err(|_| ForumPmError::OutcomeUnknown)?;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_pm",
+                    "submit_message",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext { write_started: Some(true), ..Default::default() },
+                );
+                ForumPmError::OutcomeUnknown
+            })?;
         let status = response.status();
         let location = response.headers().get(header::LOCATION).cloned();
         let body = self
             .read_response(response, EhentaiOperation::CheckSession, true)
             .await
-            .map_err(|_| ForumPmError::OutcomeUnknown)?;
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_pm",
+                    "read_send_receipt",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext { write_started: Some(true), ..Default::default() },
+                );
+                ForumPmError::OutcomeUnknown
+            })?;
         if is_session_expired(status, location.as_ref(), &body) {
             return Err(ForumPmError::Authentication);
         }
@@ -215,6 +292,12 @@ impl EhentaiClient {
 }
 
 fn map_error(error: EhentaiError) -> ForumPmError {
+    safe_diagnostics::warn(
+        "forum_pm",
+        "project_transport_failure",
+        safe_diagnostics::project(&error),
+        DiagnosticContext::default(),
+    );
     match error.category() {
         EhentaiErrorCategory::SessionExpired => ForumPmError::Authentication,
         EhentaiErrorCategory::RateLimited => ForumPmError::RateLimited,

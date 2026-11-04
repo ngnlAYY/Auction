@@ -1,5 +1,9 @@
 //! 会话、生命周期、竞价和恢复命令的统一 HTTP 错误映射。
 
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use super::*;
 
 macro_rules! map_temporarily_unavailable {
@@ -41,7 +45,8 @@ macro_rules! map_temporarily_unavailable {
 }
 
 pub(crate) fn map_login_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::Session(SessionError::InvalidLoginKey) => {
             api_error(StatusCode::BAD_REQUEST, "invalid_key", "登录凭据格式无效").into_response()
         }
@@ -70,27 +75,45 @@ pub(crate) fn map_login_error(error: ApplicationError) -> Response {
             api_error(StatusCode::CONFLICT, "session_limit", "并发会话数量已达上限").into_response()
         }
         _ => session_unavailable(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "public_session",
+        "respond_login_failure",
+        diagnostic_kind,
+        response,
+    )
 }
 
 pub(crate) fn map_admin_session_error(error: ApplicationError) -> Response {
-    match error {
-        ApplicationError::Session(SessionError::InvalidCredentials)
-        | ApplicationError::Session(SessionError::InvalidIdentity) => {
-            api_error(StatusCode::UNAUTHORIZED, "invalid_credentials", "登录凭据无效")
-                .into_response()
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || {
+        match error {
+            ApplicationError::Session(SessionError::InvalidCredentials)
+            | ApplicationError::Session(SessionError::InvalidIdentity) => {
+                api_error(StatusCode::UNAUTHORIZED, "invalid_credentials", "登录凭据无效")
+                    .into_response()
+            }
+            ApplicationError::Session(SessionError::Unauthenticated) => authentication_error(),
+            // 配置无效、令牌生成失败及其余错误统一返回会话不可用。
+            _ => session_unavailable(),
         }
-        ApplicationError::Session(SessionError::Unauthenticated) => authentication_error(),
-        // 配置无效、令牌生成失败及其余错误统一返回会话不可用。
-        _ => session_unavailable(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_session",
+        "respond_authentication_failure",
+        diagnostic_kind,
+        response,
+    )
 }
 
 pub(crate) fn map_admin_lifecycle_error(
     action: AuctionLifecycleAction,
     error: ApplicationError,
 ) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::CapabilityUnavailable(_)
             if action == AuctionLifecycleAction::EarlySettlement =>
         {
@@ -127,7 +150,14 @@ pub(crate) fn map_admin_lifecycle_error(
         )) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
         _ => competition_unavailable(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_lifecycle",
+        "respond_command_failure",
+        diagnostic_kind,
+        response,
+    )
 }
 
 pub(crate) fn is_unauthenticated(error: &ApplicationError) -> bool {
@@ -135,7 +165,8 @@ pub(crate) fn is_unauthenticated(error: &ApplicationError) -> bool {
 }
 
 pub(crate) fn map_competition_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::AdminLotUpdate(AdminLotUpdateError::InvalidCommand) => {
             api_error(StatusCode::BAD_REQUEST, "invalid_lot_command", "后台拍品修改参数无效")
                 .into_response()
@@ -220,11 +251,19 @@ pub(crate) fn map_competition_error(error: ApplicationError) -> Response {
         )
         .into_response(),
         map_temporarily_unavailable!() => competition_unavailable(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "public_competition",
+        "respond_command_failure",
+        diagnostic_kind,
+        response,
+    )
 }
 
 pub(crate) fn map_recovery_command_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::AdminLotUpdate(AdminLotUpdateError::InvalidCommand) => {
             api_error(StatusCode::BAD_REQUEST, "invalid_lot_command", "后台拍品修改参数无效")
                 .into_response()
@@ -259,7 +298,14 @@ pub(crate) fn map_recovery_command_error(error: ApplicationError) -> Response {
         )
         .into_response(),
         map_temporarily_unavailable!() => competition_unavailable(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_recovery",
+        "respond_command_failure",
+        diagnostic_kind,
+        response,
+    )
 }
 
 pub(crate) fn authentication_error() -> Response {

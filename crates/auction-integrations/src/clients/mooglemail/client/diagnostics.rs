@@ -1,5 +1,9 @@
 //! HTTP 与解析失败的加密证据接线；保留原错误的重试和写入未知语义。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_application::{MailDiagnosticContext, MailDiagnosticOutcome, MailDiagnosticStage};
 
 use super::*;
@@ -14,16 +18,24 @@ impl MoogleMailClient {
     ) -> Result<T, MoogleMailError> {
         match result {
             Ok(value) => Ok(value),
-            Err(error) => Err(self
-                .record_diagnostic(
-                    MailDiagnosticStage::Parse,
-                    target,
-                    // 成功读取接口只返回正文，解析层不能伪造已经丢失的 HTTP 状态码。
-                    None,
-                    Some(document),
-                    error,
-                )
-                .await),
+            Err(error) => {
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "parse_response",
+                    safe_diagnostics::project(&error),
+                    DiagnosticContext::default(),
+                );
+                Err(self
+                    .record_diagnostic(
+                        MailDiagnosticStage::Parse,
+                        target,
+                        // 成功读取接口只返回正文，解析层不能伪造已经丢失的 HTTP 状态码。
+                        None,
+                        Some(document),
+                        error,
+                    )
+                    .await)
+            }
         }
     }
 
@@ -80,10 +92,26 @@ impl MoogleMailClient {
                     if receipt.body_available { "retained" } else { "body_unavailable" };
             }
             Ok(Err(failure)) => {
+                safe_diagnostics::error(
+                    "mooglemail_diagnostics",
+                    "retain_response",
+                    safe_diagnostics::project(&failure),
+                    DiagnosticContext::default(),
+                );
                 error.evidence_status = "save_failed";
                 error.evidence_failure = Some(failure.as_str());
             }
-            Err(_) => {
+            Err(diagnostic_cause) => {
+                safe_diagnostics::warn(
+                    "mooglemail_diagnostics",
+                    "retain_timeout",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(error.world.as_str()),
+                        ..Default::default()
+                    },
+                );
+
                 error.evidence_status = "save_failed";
                 error.evidence_failure = Some("diagnostic_timeout");
             }

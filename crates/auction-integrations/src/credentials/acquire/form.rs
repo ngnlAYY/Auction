@@ -1,5 +1,9 @@
 //! 只提交当前登录页的封闭字段集合；未知隐藏控件、验证码和额外验证均失败关闭。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_application::{AdminCredentialError, AdminCredentialLogin, ApplicationError};
 use reqwest::StatusCode;
 use scraper::{Html, Selector};
@@ -20,7 +24,15 @@ impl LoginForm {
         self,
         login: &AdminCredentialLogin,
     ) -> Result<(Url, Vec<u8>), ApplicationError> {
-        let password = std::str::from_utf8(login.password()).map_err(|_| unavailable())?;
+        let password = std::str::from_utf8(login.password()).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "credential_login",
+                "encode_password",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            unavailable()
+        })?;
         let field_bytes = self.hidden.iter().map(|field| field.0.len()).sum::<usize>()
             + login.username().len()
             + password.len();
@@ -28,7 +40,15 @@ impl LoginForm {
         let mut encoded =
             url::form_urlencoded::Serializer::new(String::with_capacity(field_bytes * 3 + 128));
         for (name, value) in HIDDEN_NAMES.iter().zip(&self.hidden) {
-            let value = std::str::from_utf8(&value.0).map_err(|_| unavailable())?;
+            let value = std::str::from_utf8(&value.0).map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "credential_login",
+                    "encode_hidden_fields",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                unavailable()
+            })?;
             encoded.append_pair(name, value);
         }
         encoded.append_pair("UserName", login.username());
@@ -44,7 +64,15 @@ pub(super) fn parse(
     page_url: &Url,
     submit_url: &Url,
 ) -> Result<LoginForm, ApplicationError> {
-    let source = std::str::from_utf8(body).map_err(|_| unavailable())?;
+    let source = std::str::from_utf8(body).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "credential_login",
+            "decode_login_page",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        unavailable()
+    })?;
     let document = Html::parse_document(source);
     if challenge(&document)? {
         return Err(AdminCredentialError::LoginChallenge.into());
@@ -139,7 +167,15 @@ pub(super) fn check_response(
     status: StatusCode,
     submitted: bool,
 ) -> Result<(), ApplicationError> {
-    let source = std::str::from_utf8(body).map_err(|_| unavailable())?;
+    let source = std::str::from_utf8(body).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "credential_login",
+            "decode_login_response",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        unavailable()
+    })?;
     let document = Html::parse_document(source);
     if challenge(&document)? {
         return Err(AdminCredentialError::LoginChallenge.into());
@@ -247,5 +283,13 @@ fn contains_ascii(value: &str, needle: &str) -> bool {
 }
 
 fn selector(value: &str) -> Result<Selector, ApplicationError> {
-    Selector::parse(value).map_err(|_| unavailable())
+    Selector::parse(value).map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "credential_login",
+            "build_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        unavailable()
+    })
 }

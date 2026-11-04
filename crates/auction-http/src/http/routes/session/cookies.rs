@@ -1,5 +1,9 @@
 //! Public/Admin Cookie、Basic Auth 和 CSRF 头的安全解析与生成。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics;
+
 use super::*;
 
 pub(crate) fn read_public_session_cookie(headers: &HeaderMap) -> Option<String> {
@@ -83,7 +87,14 @@ pub(crate) fn admin_cookie(
     if secure {
         value.push_str("; Secure");
     }
-    HeaderValue::from_str(&value).map_err(|_| ())
+    HeaderValue::from_str(&value).map_err(|diagnostic_cause| {
+        diagnostics::error(
+            "admin_session",
+            "encode_cookie",
+            diagnostics::invalid_header(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
 }
 
 pub(crate) fn append_clear_cookie(headers: &mut HeaderMap, secure: bool) {
@@ -132,5 +143,12 @@ pub(crate) fn public_session_cookie(
     if secure {
         value.push_str("; Secure");
     }
-    HeaderValue::from_str(&value).map_err(|_| ())
+    HeaderValue::from_str(&value).map_err(|diagnostic_cause| {
+        diagnostics::error(
+            "public_session",
+            "encode_cookie",
+            diagnostics::invalid_header(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
 }

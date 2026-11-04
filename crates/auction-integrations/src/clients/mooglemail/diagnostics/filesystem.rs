@@ -1,5 +1,9 @@
 //! 证据文件格式与平台边界；按最终落盘字节计算容量。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use auction_application::MailDiagnosticError;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use std::{
@@ -51,8 +55,15 @@ pub(super) fn persist(
 ) -> Result<(), MailDiagnosticError> {
     validate_config(config)?;
     payload::validate_header(header, header.evidence_id)?;
-    let mut encoded =
-        serde_json::to_string(header).map_err(|_| MailDiagnosticError::Serialization)?;
+    let mut encoded = serde_json::to_string(header).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "encode_record_header",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Serialization
+    })?;
     if encoded.len() > MAX_HEADER_BYTES || ciphertext.len() > MAX_CIPHERTEXT_BYTES {
         return Err(MailDiagnosticError::PayloadTooLarge);
     }
@@ -79,11 +90,26 @@ pub(super) fn read(
         .position(|byte| *byte == b'\n')
         .filter(|split| *split <= MAX_HEADER_BYTES)
         .ok_or(MailDiagnosticError::Authentication)?;
-    let header: PublicHeader = serde_json::from_slice(&encoded[..split])
-        .map_err(|_| MailDiagnosticError::Authentication)?;
+    let header: PublicHeader =
+        serde_json::from_slice(&encoded[..split]).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "decode_record_header",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Authentication
+        })?;
     payload::validate_header(&header, id)?;
-    let ciphertext =
-        BASE64.decode(&encoded[split + 1..]).map_err(|_| MailDiagnosticError::Authentication)?;
+    let ciphertext = BASE64.decode(&encoded[split + 1..]).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "decode_record_ciphertext",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Authentication
+    })?;
     if ciphertext.len() > MAX_CIPHERTEXT_BYTES {
         return Err(MailDiagnosticError::PayloadTooLarge);
     }

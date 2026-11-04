@@ -1,7 +1,12 @@
 //! 三角色共用的周期唤醒；应用服务拥有刷新与到期规则。
 
+use crate::worker::diagnostics;
+use auction_application::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
 use auction_application::{
-    RuntimeSwitchRefreshService, RuntimeSwitchRole, RuntimeSwitchStore, RuntimeSwitches,
+    RuntimeSwitchError, RuntimeSwitchRefreshService, RuntimeSwitchRole, RuntimeSwitchStore,
+    RuntimeSwitches,
 };
 use std::{sync::Arc, time::Duration};
 
@@ -21,16 +26,11 @@ pub async fn start_runtime_switch_refresh(
         loop {
             interval.tick().await;
             refresh(&service, &switches).await;
-            if switches.status().role == RuntimeSwitchRole::Worker
-                && !matches!(
-                    tokio::time::timeout(Duration::from_secs(1), service.expire()).await,
-                    Ok(Ok(()))
-                )
-            {
-                tracing::warn!(
-                    role = "worker",
-                    "运行时开关到期收口未确认；后续按原命令重试，期限回落不受影响"
-                );
+            if switches.status().role == RuntimeSwitchRole::Worker {
+                let attempt = tokio::time::timeout(Duration::from_secs(1), service.expire()).await;
+                if !matches!(attempt, Ok(Ok(()))) {
+                    record_failure(&attempt, "expire_override", "expire_override_timeout");
+                }
             }
         }
     })
@@ -38,7 +38,8 @@ pub async fn start_runtime_switch_refresh(
 
 async fn refresh(service: &RuntimeSwitchRefreshService, switches: &RuntimeSwitches) {
     let previous = switches.readiness_policy();
-    if matches!(tokio::time::timeout(Duration::from_secs(1), service.refresh()).await, Ok(Ok(()))) {
+    let attempt = tokio::time::timeout(Duration::from_secs(1), service.refresh()).await;
+    if matches!(attempt, Ok(Ok(()))) {
         let current = switches.readiness_policy();
         if previous != current {
             tracing::info!(
@@ -50,9 +51,26 @@ async fn refresh(service: &RuntimeSwitchRefreshService, switches: &RuntimeSwitch
         }
     } else {
         switches.refresh_failed();
-        tracing::warn!(
-            role = switches.status().role.label(),
-            "运行时开关刷新失败；保留最后成功快照及原期限"
-        );
+        record_failure(&attempt, "refresh_snapshot", "refresh_snapshot_timeout");
     }
+}
+
+// 只有观测使用此投影；失败计数已在 refresh_failed 中累加，日志过滤和去重不影响指标。
+fn record_failure(
+    attempt: &Result<Result<(), RuntimeSwitchError>, tokio::time::error::Elapsed>,
+    phase: &'static str,
+    timeout_phase: &'static str,
+) {
+    let (phase, safe_kind) = match attempt {
+        Ok(Ok(())) => return,
+        Ok(Err(cause)) => (phase, cause.diagnostic_kind()),
+        Err(elapsed) => (timeout_phase, diagnostics::timeout_kind(elapsed)),
+    };
+    record_error(
+        DiagnosticLevel::Warn,
+        safe_kind,
+        "runtime_switches",
+        phase,
+        DiagnosticContext::default(),
+    );
 }

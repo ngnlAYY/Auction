@@ -1,4 +1,7 @@
-//! Worker 生命周期持有的有界诊断窗口；只缓存固定键和计数，不缓存事件或业务标识。
+//! 角色服务生命周期持有的有界诊断窗口；只缓存固定键和计数，不缓存事件或业务标识。
+
+mod owner;
+pub use owner::DiagnosticLogOwner;
 
 use std::{
     collections::HashMap,
@@ -25,7 +28,7 @@ pub struct DiagnosticLogWindows {
 }
 
 impl DiagnosticLogWindows {
-    /// 由 Worker 长期 owner 建立，随后安装窄诊断门，不创建独立任务。
+    /// 由角色的长期 owner 建立，随后安装窄诊断门，不创建独立任务。
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             windows: Mutex::new(HashMap::new()),
@@ -78,7 +81,7 @@ impl DiagnosticLogWindows {
 }
 
 impl DiagnosticSink for DiagnosticLogWindows {
-    fn record(&self, diagnostic: &SafeDiagnostic) {
+    fn record(&self, diagnostic: &SafeDiagnostic<'_>) {
         let allowed = if self.active.load(Ordering::Acquire) {
             let mut windows = match self.windows.lock() {
                 Ok(windows) => windows,

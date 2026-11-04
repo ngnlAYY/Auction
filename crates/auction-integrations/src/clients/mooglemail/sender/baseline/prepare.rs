@@ -1,5 +1,9 @@
 //! sending fence 前的完整排除集与 fresh 临时边界；缺失时在同一预算内失败关闭。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{collections::HashSet, sync::Arc};
 
 use auction_application::{
@@ -122,7 +126,15 @@ impl MoogleMailSender {
             ),
         )
         .await
-        .map_err(|error| error_reason(&error))?;
+        .map_err(|error| {
+            safe_diagnostics::warn(
+                "mooglemail_baseline",
+                "read_boundary",
+                safe_diagnostics::project(&error),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            error_reason(&error)
+        })?;
         let boundary = scan.before_boundary()?;
         // Shadow 保留旧缓存裁决，但捕获窗口不同的两组候选不能冒充等价样本。
         if let Some(seen) = cached

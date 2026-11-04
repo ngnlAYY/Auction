@@ -1,5 +1,9 @@
 //! 固定用途派生、完整头部 AAD 和带清理守卫的 AES-GCM 边界。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::payload::SensitiveBytes;
 use crate::DataKey;
 use auction_application::MailDiagnosticError;
@@ -18,11 +22,26 @@ pub fn seal(
     plaintext: &[u8],
 ) -> Result<Vec<u8>, MailDiagnosticError> {
     let mut nonce = [0u8; NONCE];
-    SystemRandom::new().fill(&mut nonce).map_err(|_| MailDiagnosticError::Encryption)?;
+    SystemRandom::new().fill(&mut nonce).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "generate_nonce",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Encryption
+    })?;
     let derived = derive(key, source, b"encrypt");
     let aead = aead::LessSafeKey::new(
-        aead::UnboundKey::new(&aead::AES_256_GCM, &derived.0)
-            .map_err(|_| MailDiagnosticError::Encryption)?,
+        aead::UnboundKey::new(&aead::AES_256_GCM, &derived.0).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "prepare_encryption_key",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Encryption
+        })?,
     );
     let sealed_len = plaintext.len() + aead::AES_256_GCM.tag_len();
     // 在最终信封的正文区原地加密，避免另建并复制整份密文；出错仍清理明文缓冲。
@@ -35,7 +54,15 @@ pub fn seal(
             aead::Aad::from(aad),
             &mut output.0[NONCE..],
         )
-        .map_err(|_| MailDiagnosticError::Encryption)?;
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "encrypt_payload",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Encryption
+        })?;
     output.0.extend_from_slice(tag.as_ref());
     Ok(std::mem::take(&mut output.0))
 }
@@ -53,8 +80,15 @@ pub fn open(
         ciphertext[..NONCE].try_into().map_err(|_| MailDiagnosticError::Authentication)?;
     let derived = derive(key, source, b"encrypt");
     let aead = aead::LessSafeKey::new(
-        aead::UnboundKey::new(&aead::AES_256_GCM, &derived.0)
-            .map_err(|_| MailDiagnosticError::Authentication)?,
+        aead::UnboundKey::new(&aead::AES_256_GCM, &derived.0).map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "prepare_decryption_key",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Authentication
+        })?,
     );
     let mut plain = SensitiveBytes(ciphertext[NONCE..].to_vec());
     let opened = aead
@@ -63,7 +97,15 @@ pub fn open(
             aead::Aad::from(aad),
             &mut plain.0,
         )
-        .map_err(|_| MailDiagnosticError::Authentication)?;
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "decrypt_payload",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Authentication
+        })?;
     let length = opened.len();
     plain.0[length..].fill(0);
     plain.0.truncate(length);

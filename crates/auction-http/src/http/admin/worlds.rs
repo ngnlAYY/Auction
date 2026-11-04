@@ -1,5 +1,9 @@
 //! Admin 业务世界目录与启停 HTTP 适配器。
 
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{
@@ -124,7 +128,8 @@ fn map_world(world: WorldSnapshot) -> Option<AdminWorldResponse> {
 }
 
 fn map_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::AdminWorld(AdminWorldError::InvalidCommand) => {
             api_error(StatusCode::BAD_REQUEST, "invalid_world_command", "业务世界命令无效")
                 .into_response()
@@ -157,7 +162,14 @@ fn map_error(error: ApplicationError) -> Response {
         )
         .into_response(),
         _ => unavailable(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_worlds",
+        "respond_command_failure",
+        diagnostic_kind,
+        response,
+    )
 }
 
 fn unavailable() -> Response {

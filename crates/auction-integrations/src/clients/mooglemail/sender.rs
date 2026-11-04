@@ -1,5 +1,9 @@
 //! MoogleMail 分步写入与发送后 Sent 完成证明。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -151,10 +155,38 @@ impl MoogleMailSender {
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
     ) -> Option<HashSet<String>> {
-        let cache = self.sent_baselines.lock().ok()?;
+        let cache = self
+            .sent_baselines
+            .lock()
+            .inspect_err(|cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_baseline",
+                    "lock_cached_baseline",
+                    safe_diagnostics::project(cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+            })
+            .ok()?;
         let entry = cache.get(&world)?;
         (entry.credential == cookie.observation_key()
-            && self.client.check_sent_scope(cookie, &entry.scope).is_ok()
+            && self
+                .client
+                .check_sent_scope(cookie, &entry.scope)
+                .inspect_err(|cause| {
+                    safe_diagnostics::debug(
+                        "mooglemail_baseline",
+                        "check_cached_scope",
+                        safe_diagnostics::project(cause),
+                        DiagnosticContext {
+                            world: diagnostic_world(world.as_str()),
+                            ..Default::default()
+                        },
+                    );
+                })
+                .is_ok()
             && entry.captured.elapsed() <= SENT_BASELINE_REUSE_WINDOW)
             .then(|| entry.seen.clone())
     }
@@ -166,10 +198,24 @@ impl MoogleMailSender {
         world: MoogleMailWorld,
         seen: HashSet<String>,
     ) {
-        let Ok(scope) = self.client.current_sent_scope(cookie, world) else {
+        let Ok(scope) = self.client.current_sent_scope(cookie, world).inspect_err(|cause| {
+            safe_diagnostics::debug(
+                "mooglemail_baseline",
+                "read_cache_scope",
+                safe_diagnostics::project(cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+        }) else {
             return;
         };
-        if let Ok(mut cache) = self.sent_baselines.lock() {
+        if let Ok(mut cache) = self.sent_baselines.lock().inspect_err(|cause| {
+            safe_diagnostics::warn(
+                "mooglemail_baseline",
+                "lock_baseline_store",
+                safe_diagnostics::project(cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+        }) {
             cache.insert(
                 world,
                 CachedSentBaseline {
@@ -183,7 +229,14 @@ impl MoogleMailSender {
     }
 
     pub(crate) fn forget_sent_baseline(&self, world: MoogleMailWorld) {
-        if let Ok(mut cache) = self.sent_baselines.lock() {
+        if let Ok(mut cache) = self.sent_baselines.lock().inspect_err(|cause| {
+            safe_diagnostics::warn(
+                "mooglemail_baseline",
+                "lock_baseline_invalidation",
+                safe_diagnostics::project(cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+        }) {
             cache.remove(&world);
         }
     }
@@ -207,7 +260,7 @@ impl MoogleMailSender {
         expected: &MoogleMailSendRequest,
     ) {
         match self.inspect_compose(cookie, world).await {
-            Ok(snapshot) => tracing::warn!(
+            Ok(snapshot) => tracing::debug!(
                 clean = snapshot.clean,
                 expected_message_staged = snapshot.recipient == expected.message.recipient
                     && snapshot.subject == expected.message.subject
@@ -222,9 +275,11 @@ impl MoogleMailSender {
                     // 诊断 GET 也可证明凭据失效；不覆盖原投递结果，由原 session 回写撤销。
                     cookie.revoke();
                 }
-                tracing::warn!(
-                    error = %error,
-                    "MoogleMail send failed; compose page unreadable"
+                safe_diagnostics::warn(
+                    "mooglemail_send",
+                    "read_failed_compose",
+                    safe_diagnostics::project(&error),
+                    DiagnosticContext::default(),
                 );
             }
         }
@@ -316,7 +371,18 @@ impl MoogleMailSender {
         };
         let mut state = match self.client.diagnose_parse(&compose, &initial, initial_parse).await {
             Ok(state) => state,
-            Err(_) => return Ok(MoogleMailSendOutcome::PreflightUnproven { dirty }),
+            Err(diagnostic_cause) => {
+                safe_diagnostics::warn(
+                    "mooglemail_send",
+                    "parse_compose_state",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(request.world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                return Ok(MoogleMailSendOutcome::PreflightUnproven { dirty });
+            }
         };
 
         self.prepare_equipment(cookie, request, write_started).await?;
@@ -340,7 +406,13 @@ impl MoogleMailSender {
         if request.credits > 0 {
             let form =
                 MoogleMailForm::attach_credits(state.token(), &request.message, request.credits)
-                    .map_err(|_| {
+                    .map_err(|diagnostic_cause| {
+                        safe_diagnostics::warn(
+                            "mooglemail_send",
+                            "build_credit_form",
+                            safe_diagnostics::project(&diagnostic_cause),
+                            DiagnosticContext::default(),
+                        );
                         write_error(
                             request.world,
                             MoogleMailOperation::AttachAdd,
@@ -371,7 +443,18 @@ impl MoogleMailSender {
         for (index, equipment_id) in request.equipment_ids.iter().enumerate() {
             let form =
                 MoogleMailForm::attach_equipment(state.token(), &request.message, equipment_id)
-                    .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachAdd))?;
+                    .map_err(|diagnostic_cause| {
+                        safe_diagnostics::warn(
+                            "mooglemail_send",
+                            "build_equipment_form",
+                            safe_diagnostics::project(&diagnostic_cause),
+                            DiagnosticContext {
+                                world: diagnostic_world(request.world.as_str()),
+                                ..Default::default()
+                            },
+                        );
+                        write_unknown(request.world, MoogleMailOperation::AttachAdd)
+                    })?;
             let response = self.client.post(&compose, cookie, form).await?;
             *write_started = true;
             state = self
@@ -394,7 +477,18 @@ impl MoogleMailSender {
 
         if request.cod > 0 {
             let form = MoogleMailForm::attach_cod(state.token(), &request.message, request.cod)
-                .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachCod))?;
+                .map_err(|diagnostic_cause| {
+                    safe_diagnostics::warn(
+                        "mooglemail_send",
+                        "build_cod_form",
+                        safe_diagnostics::project(&diagnostic_cause),
+                        DiagnosticContext {
+                            world: diagnostic_world(request.world.as_str()),
+                            ..Default::default()
+                        },
+                    );
+                    write_unknown(request.world, MoogleMailOperation::AttachCod)
+                })?;
             let response = self.client.post(&compose, cookie, form).await?;
             *write_started = true;
             state = self
@@ -417,17 +511,28 @@ impl MoogleMailSender {
 
         let assets_staged =
             request.credits > 0 || request.cod > 0 || !request.equipment_ids.is_empty();
-        let form = MoogleMailForm::send(state.token(), &request.message).map_err(|_| {
-            if assets_staged {
-                write_unknown(request.world, MoogleMailOperation::Send)
-            } else {
-                write_error(
-                    request.world,
-                    MoogleMailOperation::Send,
-                    MoogleMailErrorCategory::Configuration,
-                )
-            }
-        })?;
+        let form =
+            MoogleMailForm::send(state.token(), &request.message).map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_send",
+                    "build_send_form",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(request.world.as_str()),
+                        ..Default::default()
+                    },
+                );
+
+                if assets_staged {
+                    write_unknown(request.world, MoogleMailOperation::Send)
+                } else {
+                    write_error(
+                        request.world,
+                        MoogleMailOperation::Send,
+                        MoogleMailErrorCategory::Configuration,
+                    )
+                }
+            })?;
         let response = self.client.post(&compose, cookie, form).await?;
         let (failure, confirmation) = self.parser.inspect_send_response(&response, request.world);
         if let Some(failure) =

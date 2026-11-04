@@ -2,6 +2,10 @@
 //! 认证和应用端口负责权限、快照与存储语义；这里仅解析路径/分页并映射安全响应，不把 SQL
 //! 行或装备密钥传到浏览器。
 
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{
@@ -167,7 +171,8 @@ fn feature_unavailable() -> Response {
 }
 
 fn map_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
         _ => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -175,5 +180,7 @@ fn map_error(error: ApplicationError) -> Response {
             "Admin lot 服务暂不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response("admin_lots", "respond_list_failure", diagnostic_kind, response)
 }

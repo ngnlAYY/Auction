@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use super::*;
 
 /// 读取当前用户自己的普通竞价和代理历史，保留旧接口的独立分页字段。
@@ -78,7 +82,14 @@ pub(crate) async fn list_my_bids(
     };
     let page = match reader.list_public_user_bids(identity.user_id, request).await {
         Ok(page) => page,
-        Err(_) => {
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_account",
+                "read_bids",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+
             return api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "storage_unavailable",
@@ -142,7 +153,14 @@ pub(crate) async fn get_my_proxy_authorization(
     match lots.public_lot(lot_uuid).await {
         Ok(Some(_)) => {}
         Ok(None) => return not_found_error().into_response(),
-        Err(_) => {
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_account",
+                "read_proxy_lot",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+
             return api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "storage_unavailable",
@@ -161,7 +179,14 @@ pub(crate) async fn get_my_proxy_authorization(
     };
     let authorization = match reader.public_user_proxy(lot_uuid, identity.user_id).await {
         Ok(authorization) => authorization,
-        Err(_) => {
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_account",
+                "read_proxy_authorization",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+
             return api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "storage_unavailable",

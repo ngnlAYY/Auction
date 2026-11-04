@@ -3,6 +3,10 @@
 //! `auction-application`/`auction-storage` 负责。慢连接在发送队列满时立即淘汰，避免阻塞
 //! relay 和其他连接。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
@@ -81,10 +85,26 @@ impl RealtimeHub {
         stream_key: String,
         user_id: Uuid,
     ) -> Result<RealtimeSubscription, RealtimeSubscriptionError> {
-        validate_stream_key(&stream_key).map_err(|_| RealtimeSubscriptionError::Unavailable)?;
+        validate_stream_key(&stream_key).map_err(|diagnostic_cause| {
+            diagnostics::error(
+                "realtime_hub",
+                "validate_stream_key",
+                diagnostics::invalid_state(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            RealtimeSubscriptionError::Unavailable
+        })?;
         let connection_permit = self.connections.acquire(user_id)?;
         let (sender, receiver) = mpsc::channel(self.client_buffer);
-        let mut state = self.state.lock().map_err(|_| RealtimeSubscriptionError::Unavailable)?;
+        let mut state = self.state.lock().map_err(|diagnostic_cause| {
+            diagnostics::error(
+                "realtime_hub",
+                "lock_subscriptions",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            RealtimeSubscriptionError::Unavailable
+        })?;
         state.next_id =
             state.next_id.checked_add(1).ok_or(RealtimeSubscriptionError::Unavailable)?;
         let id = state.next_id;
@@ -223,9 +243,17 @@ impl RealtimeEventSink for RealtimeHubSink {
                 RealtimeScope::Auction
             };
             let frame =
-                super::realtime::encode_websocket_frame(event).map_err(|_| RealtimeSinkError {
-                    failure_code: "encode_failed".to_owned(),
-                    safe_detail: "实时事件编码失败".to_owned(),
+                super::realtime::encode_websocket_frame(event).map_err(|diagnostic_cause| {
+                    diagnostics::error(
+                        "realtime_hub",
+                        "encode_frame",
+                        DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                        DiagnosticContext::default(),
+                    );
+                    RealtimeSinkError {
+                        failure_code: "encode_failed".to_owned(),
+                        safe_detail: "实时事件编码失败".to_owned(),
+                    }
                 })?;
             self.hub.broadcast(&stream_key, ObservedFrame { body: frame, created_at, scope });
             self.hub.metrics.relay(scope, created_at);

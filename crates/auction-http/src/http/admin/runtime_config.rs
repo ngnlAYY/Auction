@@ -2,6 +2,10 @@
 //! HTTP 只负责 session/CSRF、稳定 JSON DTO 和错误状态映射；非敏感配置文档的严格校验、
 //! fingerprint fence、文件原子替换和命令账本重放由应用端口及其外层适配器负责。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use std::net::SocketAddr;
 
 use auction_application::{
@@ -188,14 +192,29 @@ fn map_snapshot(
     snapshot: AdminRuntimeSnapshot,
     include_taxonomy: bool,
 ) -> Result<AdminRuntimeConfigResponse, Box<Response>> {
-    snapshot.validate().map_err(|_| Box::new(super::internal_error()))?;
+    snapshot.validate().map_err(|diagnostic_cause| {
+        diagnostics::error(
+            "admin_runtime",
+            "validate_snapshot",
+            diagnostics::invalid_state(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        Box::new(super::internal_error())
+    })?;
     let mut document = snapshot.document;
     // 升级前的 Rust runtime 文件没有旧版三组业务字段。HTTP 投影补齐旧版默认值，使管理端
     // 能立即编辑完整契约；物理文件在首次成功保存前仍保持原指纹，避免破坏 durable 重放。
     document.materialize_business_defaults();
     let equipment_taxonomy = include_taxonomy.then(|| taxonomy::equipment_taxonomy(&document));
-    let mut document =
-        serde_json::to_value(document).map_err(|_| Box::new(super::internal_error()))?;
+    let mut document = serde_json::to_value(document).map_err(|diagnostic_cause| {
+        diagnostics::error(
+            "admin_runtime",
+            "encode_document",
+            DiagnosticError::diagnostic_kind(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        Box::new(super::internal_error())
+    })?;
     // `false` 在物理文档中省略以保持旧指纹；浏览器投影显式补齐开关，避免隐藏默认行为。
     let Some(equipment_source) =
         document.get_mut("equipment_source").and_then(Value::as_object_mut)
@@ -241,7 +260,8 @@ fn feature_unavailable() -> Response {
 }
 
 fn map_error(error: ApplicationError) -> Response {
-    match error {
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || match error {
         ApplicationError::AdminRuntime(
             AdminRuntimeConfigError::InvalidDocument(_)
             | AdminRuntimeConfigError::InvalidCommand(_),
@@ -291,5 +311,12 @@ fn map_error(error: ApplicationError) -> Response {
             "runtime 配置服务暂不可用",
         )
         .into_response(),
-    }
+    };
+    let response = body();
+    diagnostics::mapped_response(
+        "admin_runtime",
+        "respond_command_failure",
+        diagnostic_kind,
+        response,
+    )
 }

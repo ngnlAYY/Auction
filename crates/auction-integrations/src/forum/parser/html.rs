@@ -1,5 +1,9 @@
 //! 论坛 HTML 的单次 DOM 解析、帖子抽取、作者识别和正文规整。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::sync::LazyLock;
 
 use scraper::{ElementRef, Html, Node, Selector};
@@ -7,16 +11,47 @@ use url::Url;
 
 use super::model::{ParsedHtmlPage, ParsedPost};
 
-static POST_SELECTOR: LazyLock<Result<Selector, ()>> =
-    LazyLock::new(|| Selector::parse("div.postcolor").map_err(|_| ()));
-static EDIT_SELECTOR: LazyLock<Result<Selector, ()>> =
-    LazyLock::new(|| Selector::parse(".edit").map_err(|_| ()));
+static POST_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
+    Selector::parse("div.postcolor").map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_topic",
+            "build_preview_post_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
+});
+static EDIT_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
+    Selector::parse(".edit").map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_topic",
+            "build_preview_edit_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
+});
 static AUTHOR_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
     Selector::parse(".bigusername, .normalname, .author, .username, .post-author, .member_name")
-        .map_err(|_| ())
+        .map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "forum_topic",
+                "build_preview_author_selector",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+        })
 });
-static LINK_SELECTOR: LazyLock<Result<Selector, ()>> =
-    LazyLock::new(|| Selector::parse("a[href]").map_err(|_| ()));
+static LINK_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
+    Selector::parse("a[href]").map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "forum_topic",
+            "build_preview_link_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+    })
+});
 
 fn cached_selector(
     cache: &'static LazyLock<Result<Selector, ()>>,

@@ -1,5 +1,9 @@
 //! 图片读取与安全头：只接收公开拍卖身份及闭集计时器，不接受自定义正文或任意时间。
 
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use super::{
     super::{PublicApiState, api_error, not_found_error, parse_public_uuid, parse_query},
     svg::{TimerKind, render},
@@ -31,12 +35,28 @@ pub(crate) async fn get(
     let snapshot = reader
         .public_auction_countdown(auction_id)
         .await
-        .map_err(|_| unavailable())?
+        .map_err(|diagnostic_cause| {
+            diagnostics::warn(
+                "public_countdown",
+                "read_snapshot",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            unavailable()
+        })?
         .ok_or_else(not_found_error)?;
     if snapshot.auction_id != auction_id || snapshot.validate().is_err() {
         return Err(unavailable());
     }
-    let body = render(kind, &snapshot).map_err(|_| unavailable())?;
+    let body = render(kind, &snapshot).map_err(|diagnostic_cause| {
+        diagnostics::warn(
+            "public_countdown",
+            "render_countdown",
+            diagnostics::invalid_state(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        unavailable()
+    })?;
     let mut response = body.into_response();
     response
         .headers_mut()

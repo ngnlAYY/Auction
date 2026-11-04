@@ -1,4 +1,8 @@
 //! 当前会话账号统一警告渠道；严格 JSON、CSRF 与无查询参数边界。
+use auction_application::diagnostics::DiagnosticError;
+
+use crate::diagnostics;
+
 use super::*;
 use auction_application::{LotWatchError, LotWatchPreference, SetLotWatchPreferenceCommand};
 use auction_contracts::{PublicLotWatchPreferenceResponse, PublicSetLotWatchPreferenceRequest};
@@ -89,14 +93,24 @@ fn success(value: LotWatchPreference) -> Response {
         .into_response()
 }
 fn failure(error: LotWatchError) -> Response {
-    let (status, code, message) = match error {
-        LotWatchError::Invalid => {
-            (StatusCode::UNPROCESSABLE_ENTITY, "invalid_watch_preference", "警告渠道或版本无效")
-        }
-        LotWatchError::Conflict => {
-            (StatusCode::CONFLICT, "watch_preference_conflict", "警告渠道命令或版本冲突")
-        }
-        _ => (StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "警告渠道暂不可用"),
+    let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
+    let body = || {
+        let (status, code, message) = match error {
+            LotWatchError::Invalid => {
+                (StatusCode::UNPROCESSABLE_ENTITY, "invalid_watch_preference", "警告渠道或版本无效")
+            }
+            LotWatchError::Conflict => {
+                (StatusCode::CONFLICT, "watch_preference_conflict", "警告渠道命令或版本冲突")
+            }
+            _ => (StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "警告渠道暂不可用"),
+        };
+        api_error(status, code, message).into_response()
     };
-    api_error(status, code, message).into_response()
+    let response = body();
+    diagnostics::mapped_response(
+        "lot_watch_preference",
+        "respond_command_failure",
+        diagnostic_kind,
+        response,
+    )
 }

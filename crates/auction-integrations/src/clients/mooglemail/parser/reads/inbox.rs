@@ -1,5 +1,9 @@
 //! Inbox 与 Read Mail 的真实收件列表解析；页签来源由调用方明确指定。
 
+use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::super::*;
 
 impl MoogleMailParser {
@@ -38,7 +42,15 @@ impl MoogleMailParser {
             MoogleMailOperation::ReadMail => "read",
             _ => return Err(protocol(operation, world)),
         };
-        let source = str::from_utf8(document).map_err(|_| protocol(operation, world))?;
+        let source = str::from_utf8(document).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "decode_inbox_page",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            protocol(operation, world)
+        })?;
         if source.trim().is_empty() {
             return Err(protocol(operation, world));
         }
@@ -118,7 +130,15 @@ impl MoogleMailParser {
             Ok(state) => return Ok(Some(state)),
             Err(error) => error,
         };
-        let source = str::from_utf8(document).map_err(|_| error)?;
+        let source = str::from_utf8(document).map_err(|diagnostic_cause| {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "decode_missing_detail",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            error
+        })?;
         let html = Html::parse_document(source);
         let content = selector(
             "#mmail_outer, form#mailform, #mmail_attachpanes",

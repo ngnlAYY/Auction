@@ -1,3 +1,7 @@
+use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
 use super::*;
 use auction_contracts::AuctionSummaryV2Response;
 
@@ -81,7 +85,14 @@ async fn auction_list<T>(
             include_forum_thread_url,
         })
         .await
-        .map_err(|_| {
+        .map_err(|diagnostic_cause| {
+            diagnostics::warn(
+                "public_catalog",
+                "read_auctions",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+
             api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "拍卖目录暂不可用")
         })?;
     if result.limit != page_size || result.offset != offset {
@@ -116,7 +127,14 @@ pub(crate) async fn current_auction(
             "当前拍卖暂不可用",
         ));
     };
-    let auction = reader.current_auction(world_id).await.map_err(|_| {
+    let auction = reader.current_auction(world_id).await.map_err(|diagnostic_cause| {
+        diagnostics::warn(
+            "public_catalog",
+            "read_current_auction",
+            DiagnosticError::diagnostic_kind(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+
         api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "当前拍卖暂不可用")
     })?;
     Ok(Json(ApiResponse::ok(

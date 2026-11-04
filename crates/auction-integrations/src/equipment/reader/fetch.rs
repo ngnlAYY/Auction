@@ -1,5 +1,9 @@
 //! 装备来源 HTTP 读取的有界结果和敏感缓冲生命周期。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::*;
 
 pub(super) struct EquipmentFetchFailure {
@@ -73,14 +77,23 @@ pub(super) async fn document_once(
     let mut request =
         adapter.client.get(target).header(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT);
     if let Some(cookie) = cookie {
-        let mut header = reqwest::header::HeaderValue::from_str(cookie.expose()).map_err(|_| {
-            observed_failure(
-                MailEquipmentDiagnosticCategory::CredentialUnavailable,
-                None,
-                started,
-                None,
-            )
-        })?;
+        let mut header = reqwest::header::HeaderValue::from_str(cookie.expose()).map_err(
+            |diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "equipment_fetch",
+                    "encode_cookie",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+
+                observed_failure(
+                    MailEquipmentDiagnosticCategory::CredentialUnavailable,
+                    None,
+                    started,
+                    None,
+                )
+            },
+        )?;
         header.set_sensitive(true);
         request = request.header(reqwest::header::COOKIE, header);
     }
@@ -106,7 +119,14 @@ pub(super) async fn document_once(
             None,
         ));
     }
-    let mut response = request.send().await.map_err(|_| {
+    let mut response = request.send().await.map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "equipment_fetch",
+            "send_request",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+
         EquipmentFetchError::Observed(EquipmentFetchFailure {
             category: MailEquipmentDiagnosticCategory::Network,
             status: None,
@@ -167,7 +187,14 @@ pub(super) async fn document_once(
         .unwrap_or_default()
         .min(adapter.policy.maximum_response_bytes);
     let mut body = SensitiveResponseBody(Vec::with_capacity(capacity));
-    while let Some(chunk) = response.chunk().await.map_err(|_| {
+    while let Some(chunk) = response.chunk().await.map_err(|diagnostic_cause| {
+        safe_diagnostics::warn(
+            "equipment_fetch",
+            "read_response_chunk",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+
         observed_failure(
             MailEquipmentDiagnosticCategory::Network,
             Some(status.as_u16()),

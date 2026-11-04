@@ -1,3 +1,7 @@
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use super::*;
 
 pub(crate) fn valid_inbox_header(
@@ -92,7 +96,15 @@ pub(crate) fn valid_next_page_href(
     }
     let base = match Url::parse("https://hentaiverse.org/") {
         Ok(base) => base,
-        Err(_) => return false,
+        Err(diagnostic_cause) => {
+            safe_diagnostics::error(
+                "mooglemail_read",
+                "build_pagination_origin",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            return false;
+        }
     };
     let parsed = if raw.starts_with('/') {
         if raw.starts_with("//") {
@@ -100,7 +112,15 @@ pub(crate) fn valid_next_page_href(
         }
         match base.join(raw) {
             Ok(parsed) => parsed,
-            Err(_) => return false,
+            Err(diagnostic_cause) => {
+                safe_diagnostics::debug(
+                    "mooglemail_read",
+                    "resolve_relative_page_link",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                return false;
+            }
         }
     } else {
         // 当前 MoogleMail 会输出规范同源绝对分页 URL；只兼容精确 HTTPS origin，
@@ -110,7 +130,15 @@ pub(crate) fn valid_next_page_href(
         }
         match Url::parse(raw) {
             Ok(parsed) => parsed,
-            Err(_) => return false,
+            Err(diagnostic_cause) => {
+                safe_diagnostics::debug(
+                    "mooglemail_read",
+                    "parse_absolute_page_link",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                return false;
+            }
         }
     };
     if parsed.scheme() != "https"

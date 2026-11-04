@@ -1,5 +1,9 @@
 //! 发送前的装备库存证明与最小出库/解锁；不回滚、不重试，也不自动卸下装备。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::collections::HashMap;
 
 use super::*;
@@ -133,7 +137,13 @@ impl MoogleMailSender {
             } else {
                 MoogleMailForm::unlock_equipment(&state.token, &equipment_ids)
             }
-            .map_err(|_| {
+            .map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_send",
+                    "build_organize_form",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
                 write_error(request.world, operation, MoogleMailErrorCategory::Configuration)
             })?;
             drop(equipment_ids);

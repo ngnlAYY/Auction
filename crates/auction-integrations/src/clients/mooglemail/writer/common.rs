@@ -1,5 +1,9 @@
 //! MoogleMail 写入页面共用的安全文本、金额和响应定位辅助。
 
+use auction_application::diagnostics::DiagnosticContext;
+
+use crate::diagnostics as safe_diagnostics;
+
 use std::str;
 
 use scraper::{ElementRef, Html, Node, Selector};
@@ -213,7 +217,15 @@ pub(super) fn has_visible_result_message(
 }
 
 pub(super) fn selector(value: &str, world: MoogleMailWorld) -> Result<Selector, MoogleMailError> {
-    Selector::parse(value).map_err(|_| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))
+    Selector::parse(value).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_send",
+            "build_compose_selector",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        compose_error(world, MoogleMailErrorCategory::ProtocolDrift)
+    })
 }
 
 pub(super) fn compose_error(
