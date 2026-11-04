@@ -9,13 +9,16 @@ use auction_application::{
     Clock, MailDiagnosticRecorder, MailPollStore, MailProcessor, RecurringSchedule,
 };
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
-use chrono::Duration as ChronoDuration;
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
 use super::super::{PersistentWorker, WorkerError, poll_delay};
 use super::maintenance::{run_maintenance, run_read_observation};
 use super::processing::process_claim;
 use super::{MailPollGateway, MailPollRuntime, MailPollRuntimeConfig};
 use crate::worker::diagnostics;
+
+/// 收件等待期间重读开关的切片上限；不改变原触发点或重复叠加 jitter。
+const SWITCH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// 等待已装配日程与 `[0, jitter]` 后轮询；手动触发跳过等待和 due 时间。
 pub(crate) async fn run_loop<C>(
@@ -32,8 +35,11 @@ pub(crate) async fn run_loop<C>(
             if *shutdown.borrow() || worker.control.is_draining() {
                 return;
             }
-            let now = worker.clock.now();
-            let Some(next_wake_at) = runtime.schedule.next_after(now) else {
+            let mut isolated = runtime.switches.mooglemail_poll_isolation_enabled();
+            let mut schedule = poll_schedule(&runtime, isolated);
+            let Some(mut scheduled_wake) =
+                next_poll_wake(&runtime, schedule.as_ref(), worker.clock.now())
+            else {
                 diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
                 tracing::error!(
                     world_id = %runtime.world_id,
@@ -42,43 +48,56 @@ pub(crate) async fn run_loop<C>(
                 );
                 return;
             };
-            let Some(schedule_delay) = next_wake_at
-                .signed_duration_since(now)
-                .to_std()
-                .ok()
-                .filter(|delay| !delay.is_zero())
-            else {
-                diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
-                tracing::error!(
-                    world_id = %runtime.world_id,
-                    mailbox_key = %runtime.mailbox_key,
-                    "MoogleMail cron 返回了非未来触发时刻，停止该邮箱循环"
-                );
-                return;
-            };
-            let wait = poll_delay(schedule_delay, runtime.config.jitter);
-            let scheduled_wake = tokio::time::Instant::now() + wait;
-            let scheduled_sleep = tokio::time::sleep_until(scheduled_wake);
-            tokio::pin!(scheduled_sleep);
-            let force = tokio::select! {
-                biased;
-                changed = shutdown.changed() => {
-                    if changed.is_err() || *shutdown.borrow() {
-                        return;
+            let force = loop {
+                let now = tokio::time::Instant::now();
+                let slice = scheduled_wake.saturating_duration_since(now).min(SWITCH_POLL_INTERVAL);
+                tokio::select! {
+                    biased;
+                    changed = shutdown.changed() => {
+                        if changed.is_err() || *shutdown.borrow() {
+                            return;
+                        }
+                        break None;
                     }
-                    continue;
+                    () = tokio::time::sleep_until(now + slice) => {
+                        let current = runtime.switches.mooglemail_poll_isolation_enabled();
+                        if current != isolated {
+                            isolated = current;
+                            schedule = poll_schedule(&runtime, isolated);
+                            let Some(next_wake) =
+                                next_poll_wake(&runtime, schedule.as_ref(), worker.clock.now())
+                            else {
+                                diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
+                                tracing::error!(
+                                    world_id = %runtime.world_id,
+                                    mailbox_key = %runtime.mailbox_key,
+                                    "MoogleMail cron 无法在切换后计算下一次触发时刻，停止该邮箱循环"
+                                );
+                                return;
+                            };
+                            scheduled_wake = next_wake;
+                            continue;
+                        }
+                        if tokio::time::Instant::now() >= scheduled_wake {
+                            worker.metrics.observe_schedule_delay(
+                                runtime.loop_kind(),
+                                tokio::time::Instant::now()
+                                    .saturating_duration_since(scheduled_wake),
+                            );
+                            break Some(false);
+                        }
+                    }
+                    () = runtime.wakeup.notified() => break Some(true),
                 }
-                () = &mut scheduled_sleep => {
-                    worker.metrics.observe_schedule_delay(
-                        runtime.loop_kind(),
-                        tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
-                    );
-                    false
-                }
-                () = runtime.wakeup.notified() => true,
             };
+            let Some(force) = force else { continue };
+            // 手动触发或到期时再读一次，让本轮使用醒来的那一时刻的模式与日程。
+            isolated = runtime.switches.mooglemail_poll_isolation_enabled();
+            schedule = poll_schedule(&runtime, isolated);
 
-            if let Err(error) = run_cycle(worker.as_ref(), &runtime, force).await {
+            if let Err(error) =
+                run_cycle(worker.as_ref(), &runtime, force, isolated, schedule, &mut shutdown).await
+            {
                 diagnostics::unpersisted_error(
                     "mail_poll",
                     "poll_mailbox",
@@ -98,6 +117,9 @@ async fn run_cycle<C>(
     worker: &PersistentWorker<C>,
     runtime: &MailPollRuntime,
     force: bool,
+    isolated: bool,
+    schedule: Arc<dyn RecurringSchedule>,
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), WorkerError>
 where
     C: Clock + 'static,
@@ -108,19 +130,24 @@ where
     }
     let loop_kind = runtime.loop_kind();
     let iteration_started = std::time::Instant::now();
-    let result = if runtime.config.poll_isolation_enabled {
+    let result = if isolated {
         // 新路径只等待收件；维护由 runner 的独立 JoinSet 监督，不改变 claim/证明/提交边界。
         worker
             .write_lifecycle
-            .background(run_cycle_inner(worker, runtime, force))
+            .background(run_cycle_inner(worker, runtime, force, schedule))
             .await
             .unwrap_or(Ok(WorkerResult::Canceled))
     } else {
-        // 旧路径保留每轮三分支 join 与原观察频率；下一轮仍等待最慢分支完成。
+        // 旧路径在 claim 前取得世界维护门，并持有到三分支 join 结束；等锁可被停止打断。
+        let Some(_maintenance_guard) = acquire_maintenance_lock(worker, runtime, shutdown).await
+        else {
+            return Ok(());
+        };
+        // 保留每轮三分支 join 与原观察频率；下一轮仍等待最慢分支完成。
         let (_, _, result) = tokio::join!(
             worker.write_lifecycle.background(run_read_observation(runtime)),
             run_maintenance(runtime, &worker.write_lifecycle),
-            worker.write_lifecycle.background(run_cycle_inner(worker, runtime, force)),
+            worker.write_lifecycle.background(run_cycle_inner(worker, runtime, force, schedule)),
         );
         result.unwrap_or(Ok(WorkerResult::Canceled))
     };
@@ -136,6 +163,7 @@ async fn run_cycle_inner<C>(
     worker: &PersistentWorker<C>,
     runtime: &MailPollRuntime,
     force: bool,
+    schedule: Arc<dyn RecurringSchedule>,
 ) -> Result<WorkerResult, WorkerError>
 where
     C: Clock + 'static,
@@ -209,7 +237,7 @@ where
             world_id: runtime.world_id.clone(),
             mailbox_key: runtime.mailbox_key.clone(),
             config: runtime.config,
-            schedule: Arc::clone(&runtime.schedule),
+            schedule: Arc::clone(&schedule),
             metrics: Arc::clone(&worker.metrics),
             loop_kind: runtime.loop_kind(),
         };
@@ -217,6 +245,41 @@ where
         super::super::merge_worker_result(&mut iteration_result, item_result);
     }
     Ok(iteration_result)
+}
+
+fn poll_schedule(runtime: &MailPollRuntime, isolated: bool) -> Arc<dyn RecurringSchedule> {
+    if isolated { Arc::clone(&runtime.phased_schedule) } else { Arc::clone(&runtime.schedule) }
+}
+
+fn next_poll_wake(
+    runtime: &MailPollRuntime,
+    schedule: &dyn RecurringSchedule,
+    now: DateTime<Utc>,
+) -> Option<tokio::time::Instant> {
+    let next_wake_at = schedule.next_after(now)?;
+    let schedule_delay =
+        next_wake_at.signed_duration_since(now).to_std().ok().filter(|delay| !delay.is_zero())?;
+    Some(tokio::time::Instant::now() + poll_delay(schedule_delay, runtime.config.jitter))
+}
+
+async fn acquire_maintenance_lock<'a, C>(
+    worker: &PersistentWorker<C>,
+    runtime: &'a MailPollRuntime,
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+) -> Option<tokio::sync::MutexGuard<'a, ()>> {
+    if *shutdown.borrow() || worker.control.is_draining() {
+        return None;
+    }
+    tokio::select! {
+        biased;
+        changed = shutdown.changed() => {
+            drop(changed);
+            None
+        }
+        guard = runtime.maintenance_lock.lock() => {
+            (!worker.control.is_draining() && !*shutdown.borrow()).then_some(guard)
+        }
+    }
 }
 
 pub(super) struct MailPollProcessContext<C> {

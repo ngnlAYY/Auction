@@ -182,10 +182,14 @@
 
 ## 运行时开关
 
-`RuntimeSwitchName` 为审计模式、HTTP 就绪缓存和 Worker SLI 汇总绑定类型与角色。
+`RuntimeSwitchName` 为审计模式、HTTP 就绪缓存、Worker SLI 汇总、Worker
+邮件隔离和三角色指标转发拒绝绑定类型与角色。
 `RuntimeSwitchCommand` 共用稳定摘要、重放输入及 CAS/到期规则。
 `RuntimeSwitches` 保存完整不可变快照及 TOML 基线；刷新和到期仍由原服务负责。
 SLI 开关不进入两项 readiness 缓存身份，不因观测切换使就绪缓存失效。
+邮件隔离与指标转发由目标化 bool 访问器读取，不构造完整 `status()`。
+`metrics_reject_forwarded_requests` 在命令校验层拒绝 `set false`，
+只允许在线收紧；放宽须修改部署配置并重启。
 先取最新事实再判期限，不恢复早期覆盖，不参与资金、资格或审计写入要求。
 权威规则见[数据库契约](../../docs/contracts/database.md#运行时行为开关)。
 

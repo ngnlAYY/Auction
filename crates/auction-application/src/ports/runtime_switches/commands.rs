@@ -118,6 +118,13 @@ pub struct RuntimeSwitchCommand {
 impl RuntimeSwitchCommand {
     /// 基础校验不依赖现在时刻，保证过期命令仍可重放。
     pub fn validate(&self) -> Result<(), RuntimeSwitchError> {
+        if self.name == RuntimeSwitchName::MetricsRejectForwardedRequests
+            && self.operation == RuntimeSwitchOperation::Set
+            && self.value.as_ref().and_then(Value::as_bool) == Some(false)
+        {
+            // 安全策略只允许在线收紧；放宽仍需修改经过部署审阅的 TOML 并重启。
+            return Err(RuntimeSwitchError::UnsafeRelaxation);
+        }
         if self.expires_at.is_some_and(|until| {
             until.timestamp_subsec_nanos() >= 1_000_000_000
                 || until.timestamp_subsec_nanos() % 1000 != 0

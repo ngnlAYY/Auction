@@ -20,11 +20,11 @@ use super::super::{boundary, server};
 pub async fn serve_metrics(
     listener: TcpListener,
     metrics: Arc<ProcessMetrics>,
-    reject_forwarded_requests: bool,
+    switches: auction_application::RuntimeSwitches,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
     let boundary = boundary::HttpBoundary::default()
-        .with_metrics_access(reject_forwarded_requests)
+        .with_runtime_switches(switches)
         .with_metrics(metrics.http());
     let app = Router::new()
         .route(METRICS_ROUTE, axum::routing::any(metrics_response))

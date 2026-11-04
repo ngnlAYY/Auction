@@ -6,10 +6,18 @@ use auction_application::Clock;
 use auction_application::diagnostics::SafeErrorKind;
 use auction_observability::WorkerLoop;
 
-use super::super::super::{PersistentWorker, poll_delay, wait_until_or_shutdown};
+use super::super::super::{PersistentWorker, poll_delay};
 use super::super::MailPollRuntime;
 use super::{metrics::IterationGuard, run_maintenance, run_read_observation};
 use crate::worker::diagnostics;
+
+/// 开关重读与 idle 等待的切片上限；正常退出视为致命，因此旧路径只能等待停止。
+const SWITCH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+enum WaitOutcome {
+    Due,
+    ModeChanged,
+}
 
 /// 先完成 Sent/compose 维护，再按内存间隔做完整 Read Mail 纯观察；手动收件不唤醒此循环。
 pub(crate) async fn run_loop<C>(
@@ -26,17 +34,28 @@ pub(crate) async fn run_loop<C>(
     };
     // 首次观察延后一个完整间隔；此时刻只减少纯观察读取，不充当持久任务的 due 或完成证据。
     let mut last_observation = tokio::time::Instant::now();
+    let mut isolated = runtime.switches.mooglemail_poll_isolation_enabled();
     loop {
         if *shutdown.borrow() || worker.control.is_draining() {
             return;
         }
-        let now = worker.clock.now();
-        let Some(delay) = runtime
-            .maintenance_schedule
-            .next_after(now)
-            .and_then(|next| next.signed_duration_since(now).to_std().ok())
-            .filter(|delay| !delay.is_zero())
-        else {
+        let current = runtime.switches.mooglemail_poll_isolation_enabled();
+        if current != isolated {
+            isolated = current;
+            // 从旧路径进入隔离时重新起算观察间隔，避免沿用旧路径的每轮观察节奏。
+            if isolated {
+                last_observation = tokio::time::Instant::now();
+            }
+        }
+        if !isolated {
+            // 旧路径由收件循环执行维护；本任务保持存活并周期重读，正常退出会被 runner 视为致命。
+            if wait_for_switch(&mut shutdown, SWITCH_POLL_INTERVAL).await {
+                return;
+            }
+            continue;
+        }
+
+        let Some(scheduled_wake) = next_maintenance_wake(&runtime, worker.clock.now()) else {
             diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
             tracing::error!(
                 world_id = %runtime.world_id,
@@ -45,17 +64,27 @@ pub(crate) async fn run_loop<C>(
             );
             return;
         };
-        let scheduled_wake = tokio::time::Instant::now() + poll_delay(delay, runtime.config.jitter);
-        if wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
-            return;
-        }
-        if *shutdown.borrow() || worker.control.is_draining() {
-            return;
+        match wait_for_maintenance(&worker, &runtime, &mut shutdown, scheduled_wake).await {
+            Some(WaitOutcome::Due) => {}
+            Some(WaitOutcome::ModeChanged) => {
+                isolated = false;
+                continue;
+            }
+            None => return,
         }
         worker.metrics.observe_schedule_delay(
             maintenance_loop,
             tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
         );
+        let Some(guard) = acquire_maintenance_lock(&worker, &runtime, &mut shutdown).await else {
+            return;
+        };
+        // 等锁期间可能已切回旧路径；锁内复读后才允许执行，避免与收件循环的 join 重叠。
+        if !runtime.switches.mooglemail_poll_isolation_enabled() {
+            drop(guard);
+            isolated = false;
+            continue;
+        }
         let iteration = IterationGuard::new(Arc::clone(&worker.metrics), maintenance_loop);
         // 在途 sweep 沿用原预算排空，避免在 discard POST 中途因停止信号另建重试授权。
         iteration.finish(
@@ -67,9 +96,6 @@ pub(crate) async fn run_loop<C>(
             .await,
         );
 
-        if *shutdown.borrow() || worker.control.is_draining() {
-            return;
-        }
         if last_observation.elapsed() >= runtime.config.read_mail_observation_interval {
             // 仅在 sweep 之后检查，实际观察间隔向上取整到维护节奏；失败也消耗这次间隔。
             last_observation = tokio::time::Instant::now();
@@ -85,6 +111,81 @@ pub(crate) async fn run_loop<C>(
                     .await
                     .unwrap_or(auction_observability::WorkerResult::Canceled),
             );
+        }
+        drop(guard);
+    }
+}
+
+async fn wait_for_switch(
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+    interval: std::time::Duration,
+) -> bool {
+    tokio::select! {
+        biased;
+        changed = shutdown.changed() => changed.is_err() || *shutdown.borrow(),
+        () = tokio::time::sleep(interval) => false,
+    }
+}
+
+fn next_maintenance_wake(
+    runtime: &MailPollRuntime,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<tokio::time::Instant> {
+    let delay = runtime
+        .maintenance_schedule
+        .next_after(now)?
+        .signed_duration_since(now)
+        .to_std()
+        .ok()
+        .filter(|delay| !delay.is_zero())?;
+    Some(tokio::time::Instant::now() + poll_delay(delay, runtime.config.jitter))
+}
+
+async fn wait_for_maintenance<C>(
+    worker: &PersistentWorker<C>,
+    runtime: &MailPollRuntime,
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+    scheduled_wake: tokio::time::Instant,
+) -> Option<WaitOutcome> {
+    loop {
+        let now = tokio::time::Instant::now();
+        let slice = scheduled_wake.saturating_duration_since(now).min(SWITCH_POLL_INTERVAL);
+        tokio::select! {
+            biased;
+            changed = shutdown.changed() => {
+                return (!(changed.is_err() || *shutdown.borrow())).then_some(WaitOutcome::Due);
+            }
+            () = tokio::time::sleep_until(now + slice) => {
+                if !runtime.switches.mooglemail_poll_isolation_enabled() {
+                    return Some(WaitOutcome::ModeChanged);
+                }
+                if tokio::time::Instant::now() >= scheduled_wake {
+                    return Some(WaitOutcome::Due);
+                }
+            }
+        }
+        if worker.control.is_draining() {
+            return None;
+        }
+    }
+}
+
+async fn acquire_maintenance_lock<'a, C>(
+    worker: &PersistentWorker<C>,
+    runtime: &'a MailPollRuntime,
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+) -> Option<tokio::sync::MutexGuard<'a, ()>> {
+    if *shutdown.borrow() || worker.control.is_draining() {
+        return None;
+    }
+    tokio::select! {
+        biased;
+        changed = shutdown.changed() => {
+            drop(changed);
+            None
+        }
+        guard = runtime.maintenance_lock.lock() => {
+            (!worker.control.is_draining() && !*shutdown.borrow()).then_some(guard)
         }
     }
 }

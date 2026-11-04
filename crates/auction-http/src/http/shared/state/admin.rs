@@ -65,6 +65,7 @@ pub struct AdminApiState {
     dashboard_worlds: Arc<[AdminCredentialWorld]>,
     dashboard_mailbox_keys: Arc<[String]>,
     metrics: Option<Arc<ProcessMetrics>>,
+    runtime_switch_snapshot: Option<auction_application::RuntimeSwitches>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
     security: AdminHttpSecurity,
     public_rules_cache: Option<Arc<dyn ReadModelCache>>,
@@ -157,6 +158,7 @@ impl AdminApiState {
             dashboard_worlds: Arc::default(),
             dashboard_mailbox_keys: Arc::default(),
             metrics: None,
+            runtime_switch_snapshot: None,
             readiness: None,
             security,
             public_rules_cache: None,
@@ -166,6 +168,15 @@ impl AdminApiState {
     /// 注入进程本地 Prometheus 指标注册表；指标不读取 Admin 业务状态。
     pub fn with_metrics(mut self, metrics: Arc<ProcessMetrics>) -> Self {
         self.metrics = Some(metrics);
+        self
+    }
+
+    /// 注入进程共享的运行时开关快照，供指标边界在请求入口读取。
+    pub fn with_runtime_switch_snapshot(
+        mut self,
+        switches: auction_application::RuntimeSwitches,
+    ) -> Self {
+        self.runtime_switch_snapshot = Some(switches);
         self
     }
 
@@ -219,8 +230,12 @@ impl AdminApiState {
     /// 返回与本 state 同源的协议边界，供路由装配时建立全局 middleware。
     pub fn http_boundary(&self) -> HttpBoundary {
         let boundary = self.security.boundary();
-        match &self.metrics {
+        let boundary = match &self.metrics {
             Some(metrics) => boundary.with_metrics(metrics.http()),
+            None => boundary,
+        };
+        match &self.runtime_switch_snapshot {
+            Some(switches) => boundary.with_runtime_switches(switches.clone()),
             None => boundary,
         }
     }

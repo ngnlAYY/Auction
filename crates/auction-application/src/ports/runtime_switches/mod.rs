@@ -43,14 +43,20 @@ pub enum RuntimeSwitchName {
     ReadinessCacheEnabled,
     /// Worker 的附加只读 SLI 汇总。
     MetricsSliSnapshotEnabled,
+    /// Worker 的 MoogleMail 收件与维护隔离。
+    MooglemailPollIsolationEnabled,
+    /// 指标路由拒绝携带转发痕迹的请求。
+    MetricsRejectForwardedRequests,
 }
 
 impl RuntimeSwitchName {
     /// 本版完整名称集。
-    pub const ALL: [Self; 3] = [
+    pub const ALL: [Self; 5] = [
         Self::ReadinessAuditFailureMode,
         Self::ReadinessCacheEnabled,
         Self::MetricsSliSnapshotEnabled,
+        Self::MooglemailPollIsolationEnabled,
+        Self::MetricsRejectForwardedRequests,
     ];
     /// 稳定持久名称与指标标签。
     pub const fn label(self) -> &'static str {
@@ -58,6 +64,8 @@ impl RuntimeSwitchName {
             Self::ReadinessAuditFailureMode => "readiness_audit_failure_mode",
             Self::ReadinessCacheEnabled => "readiness_cache_enabled",
             Self::MetricsSliSnapshotEnabled => "metrics_sli_snapshot_enabled",
+            Self::MooglemailPollIsolationEnabled => "mooglemail_poll_isolation_enabled",
+            Self::MetricsRejectForwardedRequests => "metrics_reject_forwarded_requests",
         }
     }
     /// 在解码值之前识别名称；未知名称不是损坏数据。
@@ -70,6 +78,8 @@ impl RuntimeSwitchName {
             Self::ReadinessAuditFailureMode => true,
             Self::ReadinessCacheEnabled => role != RuntimeSwitchRole::Worker,
             Self::MetricsSliSnapshotEnabled => role == RuntimeSwitchRole::Worker,
+            Self::MooglemailPollIsolationEnabled => role == RuntimeSwitchRole::Worker,
+            Self::MetricsRejectForwardedRequests => true,
         }
     }
     /// 闭集名称绑定值类型，拒绝已知名称下的未知枚举或类型。
@@ -78,7 +88,10 @@ impl RuntimeSwitchName {
             Self::ReadinessAuditFailureMode => value
                 .as_str()
                 .is_some_and(|value| matches!(value, "legacy" | "shadow" | "classified")),
-            Self::ReadinessCacheEnabled | Self::MetricsSliSnapshotEnabled => value.is_boolean(),
+            Self::ReadinessCacheEnabled
+            | Self::MetricsSliSnapshotEnabled
+            | Self::MooglemailPollIsolationEnabled
+            | Self::MetricsRejectForwardedRequests => value.is_boolean(),
         }
     }
 }
@@ -110,6 +123,9 @@ pub enum RuntimeSwitchError {
     /// 提交回执无法确认，不授权新命令替代重试。
     #[error("运行时开关提交结果未知；必须使用原命令 ID 和全部原参数原样重试")]
     OutcomeUnknown,
+    /// 安全策略只能在线收紧，放宽必须回到部署配置。
+    #[error("指标转发拒绝只能在线收紧；放宽须修改部署配置并重启")]
+    UnsafeRelaxation,
 }
 
 /// 窄端口的异步结果。

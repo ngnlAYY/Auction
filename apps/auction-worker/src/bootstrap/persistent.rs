@@ -30,6 +30,7 @@ pub(super) async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
+    switches: auction_application::RuntimeSwitches,
     runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
     write_lifecycle: auction_application::ExternalWriteLifecycle,
     shutdown: ShutdownFuture,
@@ -44,12 +45,6 @@ pub(super) async fn run_worker(
         run_worker_skeleton(config, metrics, runtime_failure, shutdown).await?;
         return Ok(());
     };
-    let switches = auction_application::RuntimeSwitches::new(
-        auction_application::RuntimeSwitchRole::Worker,
-        config.readiness.audit_failure_mode,
-        config.readiness.cache_enabled,
-    )
-    .with_sli_snapshot_baseline(config.metrics.sli_snapshot_enabled);
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
             .await
@@ -111,6 +106,7 @@ pub(super) async fn run_worker(
         forum_profile_reader,
         Arc::new(mail_progress.clone()),
         metrics.sent_baseline(),
+        switches.clone(),
     )
     .await?;
     let runtime_owners = [

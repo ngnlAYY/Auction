@@ -21,5 +21,6 @@ pub(crate) use maintenance::run_loop as run_maintenance_loop;
 pub use schedule::{PhasedMailSchedule, mail_world_phase};
 pub use types::{
     MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
-    MailPollPage, MailPollRuntime, MailPollRuntimeConfig,
+    MailPollPage, MailPollRuntime, MailPollRuntimeBindings, MailPollRuntimeConfig,
+    MailPollSchedules,
 };

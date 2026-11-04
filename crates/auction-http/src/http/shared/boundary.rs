@@ -39,7 +39,7 @@ pub struct HttpBoundary {
     trusted_proxy_cidrs: Arc<[IpNet]>,
     trusted_unix_proxy: bool,
     metrics: HttpRecorder,
-    reject_forwarded_requests: bool,
+    runtime_switches: Option<auction_application::RuntimeSwitches>,
 }
 
 impl Default for HttpBoundary {
@@ -49,7 +49,7 @@ impl Default for HttpBoundary {
             trusted_proxy_cidrs: Arc::default(),
             trusted_unix_proxy: false,
             metrics: HttpRecorder::default(),
-            reject_forwarded_requests: true,
+            runtime_switches: None,
         }
     }
 }
@@ -83,9 +83,9 @@ impl HttpBoundary {
         })
     }
 
-    /// 由装配根注入部署层的指标访问开关；修改需重启，不属于 Admin runtime 文档。
-    pub fn with_metrics_access(mut self, reject_forwarded_requests: bool) -> Self {
-        self.reject_forwarded_requests = reject_forwarded_requests;
+    /// 注入进程共享的运行时开关快照；指标访问策略在每次请求入口读取一次。
+    pub fn with_runtime_switches(mut self, switches: auction_application::RuntimeSwitches) -> Self {
+        self.runtime_switches = Some(switches);
         self
     }
 
@@ -116,7 +116,12 @@ pub(crate) async fn enforce(
 }
 
 async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Next) -> Response {
-    let reject_metrics = boundary.reject_forwarded_requests
+    // 未注入快照时 fail closed；注入后每次请求只做一次目标化解析。
+    let reject_forwarded_requests = boundary
+        .runtime_switches
+        .as_ref()
+        .is_none_or(auction_application::RuntimeSwitches::metrics_reject_forwarded_requests);
+    let reject_metrics = reject_forwarded_requests
         && request.uri().path() == METRICS_ROUTE
         && super::metrics::has_forwarding_headers(request.headers());
     let request_id = normalize_request_id(request.headers_mut());

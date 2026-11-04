@@ -363,8 +363,8 @@ Caddy 的公网 `/metrics` 404 规则继续保留，采集不经过 Caddy 或 Cl
 
 回退：删除对应 `*_loopback_listen_address`，按部署窗口重启该角色，
 原业务 listener/control 指标路径保留。关闭有效 `metrics.enabled` 可停用 collector。
-若单独回退转发拒绝，修改 common 的 `reject_forwarded_requests = false`
-并重启对应角色；保留 Caddy 公网屏蔽和监听限制。
+若单独回退转发拒绝，在线开关不能放宽；修改 common 的
+`reject_forwarded_requests = false` 并重启对应角色；保留 Caddy 公网屏蔽和监听限制。
 监控服务由用户独立启停，不绑定 Auction readiness。
 
 ### SLI 基线与容量观察
@@ -754,11 +754,22 @@ SQLSTATE 和错误文本用于定位原因，不能据此自动重试、重发�
 
 已开放 `readiness_audit_failure_mode`（三角色）、
 `readiness_cache_enabled`（Public/Admin）及
-`metrics_sli_snapshot_enabled`（Worker，默认基线 false）。
+`metrics_sli_snapshot_enabled`（Worker，默认基线 false）、
+`mooglemail_poll_isolation_enabled`（Worker，默认基线 true）和
+`metrics_reject_forwarded_requests`（三角色，默认基线 true）。
 通过 `auction-cli switch list` 读取 revision，再用稳定命令 ID、期望版本、
 actor 与原因执行 set/clear，参数见[CLI 参考](../apps/auction-cli/README.md#运行时开关)。
 切 classified 前仍须审阅[影子样本](#审计就绪影子观察)，系统不自动推进。
 SLI 开关只控制附加只读汇总，不改变 readiness 缓存身份或业务授权。
+邮件隔离开关控制 Worker 单世界的收件与维护执行路径；切换在下一轮调度
+或下一次维护门复读后生效，在途 claim、租约、批次预算和 sweep 完整结束。
+指标转发拒绝开关在每次 `/metrics` 请求的边界入口读取一次；业务路由与
+三角色 loopback 出口共用同一动态策略。
+
+`metrics_reject_forwarded_requests` 是安全策略，命令层只允许在线收紧：
+`set true` 和 `clear` 成功，`set false` 固定拒绝并以业务运维退出码 5 失败。
+放宽拒绝策略必须修改 common 的 `[metrics] reject_forwarded_requests` 并重启
+对应角色；直接写库绕过 CLI/应用命令不在本批威胁模型内。
 
 set 以未过期数据库事实覆盖启动时 TOML；clear 或到期只回到基线，基线不一定是 legacy 或 false。若要明确回旧路径，应分别 set legacy/false；若要恢复部署基线，则 clear。无期限覆盖需要显式 `--no-expiry`，会跨进程重启保留；修改 TOML 不会清除它。所有操作均追加事实与审计，期限自动回落不等待 Worker 的 expire 审计收口完成。
 
@@ -768,7 +779,11 @@ set 以未过期数据库事实覆盖启动时 TOML；clear 或到期只回到�
 
 审计分类累计不会因切换清零；HTTP 缓存绑定策略版本和期限状态，旧策略检查完成后不能回填当前缓存或返回旧成功。Worker control 原有健康口径不在本批统一，Worker 的审计模式应结合心跳及指标核对。
 
-数据库 076 登记 compatible，但首次迁移仍受原停机流程约束；随后切换开关无需重启、不受 W7.5 阻挡。程序回退须使用已含 W7.8a 且显式启用兼容模式的旧程序，按[程序回退](deploy/RECOVERY.md#程序回退)核对超前区间；旧程序会忽略新开关并使用其 TOML。M1 Admin 只读，邮件隔离、指标转发开关留第二批，排空预算及迁移模式仍是启动配置。W1.9 主动暂停尚未实现，不得将本机制视为已暂停外部请求。
+数据库 076 登记 compatible，但首次迁移仍受原停机流程约束；随后切换开关无需重启、
+不受 W7.5 阻挡。程序回退须使用已含 W7.8a 且显式启用兼容模式的旧程序，按
+[程序回退](deploy/RECOVERY.md#程序回退)核对超前区间；旧程序会忽略新开关并使用其
+TOML。M1 Admin 只读；邮件隔离与指标转发已接入第二批，排空预算及迁移模式仍是
+启动配置。W1.9 主动暂停尚未实现，不得将本机制视为已暂停外部请求。
 
 ## 数据库连接预算与启用顺序
 

@@ -55,7 +55,13 @@ WebSocket 每连接的发送队列有界。队列满时 Hub 淘汰发送端，�
 
 `/metrics` 通过 `any(...)` 挂载，由共用处理器显式保留 GET/HEAD 和直连 405，避免框架向转发拒绝追加 `Allow`。默认拒绝 `Forwarded`、全部 `X-Forwarded-*`、`X-Real-IP`、`Via` 的存在，不依赖代理是否可信，也不解析或记录头值；拒绝经 `finish_response` 补安全头与 `no-store`，优先于 request-id 400 和方法错误。CDN 专用来源头待 W0.12 核实后补充。完整边界见[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)。
 
-部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true；设为 false 并重启 Public/Admin 回到旧访问行为。该字段不进入 Admin runtime 文档；runtime 只覆盖 `metrics.enabled`，保留部署层拒绝策略。listener 限制和 Caddy 的公网 404 规则继续生效，直接采集与 SSH 隧道见[运维手册](../../ops/README.md#指标)。
+部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true，是运行时
+开关 `metrics_reject_forwarded_requests` 的基线。业务 `/metrics` 与三角色
+loopback 出口共用同一 `RuntimeSwitches`，每个请求在 boundary 入口读取一次；
+`set true` 可在线收紧，`clear` 回落 TOML，`set false` 在命令层拒绝，
+放宽必须改 common 并重启。runtime 只覆盖 `metrics.enabled`。listener 限制和
+Caddy 的公网 404 规则继续生效，直接采集与 SSH 隧道见
+[运维手册](../../ops/README.md#指标)。
 
 `serve_metrics` 为三个装配根提供仅含 `/metrics` 的附加 HTTP 适配，
 接收已绑定 TCP listener，复用上述 boundary 和指标渲染函数。

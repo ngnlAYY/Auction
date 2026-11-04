@@ -31,7 +31,15 @@ cargo run --locked -p auction-worker --features postgres   # 本地开发；优�
 5. **外部凭据运行时所有权**：实际装载 MoogleMail 或论坛凭据时，Worker 用 PostgreSQL session advisory lock 取得对应凭据种类的唯一 owner，同一时刻只有一个 Worker 能使用该类凭据；竞争同一 owner 的第二个实例启动失败。每秒检查一次已取得的所有权，一旦失效（例如数据库连接断开）立即触发排空并以非零状态退出，由进程管理器重启后重新竞争。
 6. 启用 `[worker.control]` 时绑定 control socket（见下文），发布心跳，启动全部循环。
 
-MoogleMail 默认通过 `poll_isolation_enabled = true` 为每个世界独立运行收件与维护，维护按自己的日程先执行 `sweep`，再按默认一小时的最小间隔观察完整 Read Mail 列表。省略维护日程时跟随 Admin 托管覆盖后的收件日程；两个世界使用启动时计算的相位平移日程。参数只在 `worker.toml` 中配置，详见[配置参考](../../ops/config/README.md#mooglemail-收件与维护)。设置开关为 `false` 并重启可恢复原三分支 join 路径，重启须遵守部署时段门禁。
+MoogleMail 默认通过 `[worker.mooglemail] poll_isolation_enabled = true` 为每个世界
+独立运行收件与维护，维护按自己的日程先执行 `sweep`，再按默认一小时的最小间隔
+观察完整 Read Mail 列表。省略维护日程时跟随 Admin 托管覆盖后的收件日程；
+两个世界使用启动时冻结的相位平移日程。该 TOML 值是在线开关
+`mooglemail_poll_isolation_enabled` 的基线，可用 `auction-cli switch set` 切换；
+clear 回落 TOML。切换在下一轮调度或下一次维护门复读后生效，在途 claim、租约、
+批次预算与 sweep 完整结束。启动时始终解析并校验维护日程，即使基线关闭；
+在线切换不重写 `mail_poll_state.next_poll_at`。详见
+[配置参考](../../ops/config/README.md#mooglemail-收件与维护)。
 
 ## 外部能力的启用条件
 
@@ -56,7 +64,9 @@ MoogleMail 默认通过 `poll_isolation_enabled = true` 为每个世界独立运
 省略关闭，示例为 `127.0.0.1:19102`；还须 `metrics.enabled = true`。
 该出口独立于 control socket，不需要启用 control 或扩展 peer allowlist，
 只挂载 `/metrics` 并复用本进程注册表和 `auction-http` 的公共指标契约。
-`reject_forwarded_requests` 对新出口生效；control 原授权方式保持不变。
+`reject_forwarded_requests` 对新出口生效，其运行时开关
+`metrics_reject_forwarded_requests` 可在线收紧、clear 回落 TOML；
+放宽须改 common 并重启。control 原授权方式保持不变。
 绑定/服务失败仅记录固定类别 ERROR，不触发业务退出守卫，也不影响 readiness。
 附加任务随进程退出取消，删除地址并按部署窗口重启即恢复原指标路径。
 Worker 装配根依赖 `auction-http`，不引入 Public/Admin 应用或浏览器 crate，
@@ -85,7 +95,12 @@ delivery/PM/discard 在持久围栏调用前登记交接，围栏调用开始即
 
 ## 数据库运行时开关
 
-启动装配注入 TOML 就绪基线并立即读取数据库开关，随后每五秒刷新、单次一秒预算，任务随进程生命周期收口。审计模式使用三角色共享规则；Public/Admin 另接入 HTTP 就绪缓存，Worker 负责到期收口。失败保留原快照及期限，不清零审计累计；本批不热读取其他配置。核对与回退见[运维手册](../../ops/README.md#运行时开关)。
+启动装配注入 TOML 就绪基线、SLI 基线、邮件隔离基线与指标转发拒绝基线，
+并立即读取数据库开关，随后每五秒刷新、单次一秒预算，任务随进程生命周期收口。
+审计模式使用三角色共享规则；Public/Admin 另接入 HTTP 就绪缓存，
+Worker 负责到期收口。同一 `RuntimeSwitches` 同时供持久 Worker、无数据库骨架的
+loopback 指标出口与邮件循环使用。失败保留原快照及期限，不清零审计累计。
+核对与回退见[运维手册](../../ops/README.md#运行时开关)。
 
 ## 数据库连接档位
 

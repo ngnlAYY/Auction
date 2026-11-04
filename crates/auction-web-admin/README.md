@@ -75,4 +75,9 @@ bash ci/release/web-bundle.sh admin
 
 ## 运行时开关卡片
 
-现有 `/config` 页面增加独立认证只读卡片，不受 runtime 文件是否启用影响。它显示数据库意图及 Admin 本地快照，手动刷新后核对年龄；Public/Worker 应用状态经各自指标确认。写入本批使用 CLI，页面无新增 SPA 路由。见[运维手册](../../ops/README.md#运行时开关)。
+现有 `/config` 页面增加独立认证只读卡片，不受 runtime 文件是否启用影响。
+它显示数据库意图及 Admin 本地快照，手动刷新后核对年龄；Public/Worker 应用状态
+经各自指标确认。客户端只校验名称属于当前闭集、意图/applied 各自唯一且
+applied 是意图子集，不假设两个数组等长或固定为旧名称数量。
+写入本批使用 CLI，页面无新增 SPA 路由。见
+[运维手册](../../ops/README.md#运行时开关)。

@@ -127,7 +127,11 @@ Worker 的 `ProcessMetrics::sent_baseline` 注入应用层窄观测端口；四�
 
 ### 邮件循环口径
 
-`poll_isolation_enabled = true` 时，`mail-main`、`mail-isekai` 的轮次耗时只覆盖收件，不包含独立维护和纯观察；关闭开关时仍覆盖原三分支 join，结果沿用收件分支的口径。新路径增加以下固定 `loop` label，均只计 Worker 阶段指标，不映射为 `BusinessEvent::MailIntake`，不增加业务收件事件与耗时：
+`mooglemail_poll_isolation_enabled` 为 true 时，`mail-main`、`mail-isekai`
+的轮次耗时只覆盖收件，不包含独立维护和纯观察；关闭时仍覆盖原三分支 join，
+结果沿用收件分支的口径。切换不改变在途轮次口径。隔离路径增加以下固定 `loop`
+label，均只计 Worker 阶段指标，不映射为 `BusinessEvent::MailIntake`，
+不增加业务收件事件与耗时：
 
 | label | 计时与结果 |
 | --- | --- |
@@ -220,7 +224,9 @@ Worker 观测上下文通过 task-local 窄包装传递，JoinSet 子任务显�
 `auction_runtime_switch_applied_revision{role,switch}` 为已观察事实版本，未设置为 0；
 `auction_runtime_switch_effective_value{role,switch}` 的 bool 为 0/1，
 审计模式 legacy/shadow/classified 为 0/1/2。
-Worker 不导出 HTTP 缓存项，增加 metrics_sli_snapshot_enabled；Public/Admin 不消费此项。
+Worker 不导出 HTTP 缓存项，增加 metrics_sli_snapshot_enabled 与
+mooglemail_poll_isolation_enabled；Public/Admin 不消费这两项。
+三角色都导出 metrics_reject_forwarded_requests。
 标签来自 Rust 闭集，scrape 只读内存、不查数据库、不重复累计。
 期限回落在使用时重新解析；exporter 关闭不影响刷新或审计累计。
 操作见[运行时开关](../../ops/README.md#运行时开关)。

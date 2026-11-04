@@ -5,7 +5,7 @@ use std::{future::Future, pin::Pin, sync::Arc};
 use auction_application::{
     MAX_MAIL_POLL_BATCH_SIZE, MailDiagnosticRecorder, MailMessage, MailPollClaim,
     MailPollProgressObserver, MailPollStore, MailProcessor, MailboxMaintenanceService,
-    RecurringSchedule,
+    RecurringSchedule, RuntimeSwitches,
 };
 use auction_observability::WorkerLoop;
 use chrono::{DateTime, Utc};
@@ -100,8 +100,6 @@ pub trait MailPollGateway: Send + Sync {
 /// 单个 MoogleMail 邮箱的独立调度、超时、续租与重试边界。
 #[derive(Debug, Clone, Copy)]
 pub struct MailPollRuntimeConfig {
-    /// 开启时收件独立运行；关闭时恢复每轮观察、维护、收件的三分支 join。
-    pub poll_isolation_enabled: bool,
     /// 完整 Read Mail 纯观察的最小间隔；每次维护结束后检查，首次延后同一间隔。
     pub read_mail_observation_interval: std::time::Duration,
     pub batch_size: u16,
@@ -121,7 +119,6 @@ pub struct MailPollRuntimeConfig {
 impl Default for MailPollRuntimeConfig {
     fn default() -> Self {
         Self {
-            poll_isolation_enabled: true,
             read_mail_observation_interval: std::time::Duration::from_secs(3600),
             batch_size: 100,
             jitter: std::time::Duration::from_secs(5),
@@ -166,6 +163,26 @@ impl MailPollRuntimeConfig {
 
 /// Worker 中单个 MoogleMail world 的依赖与独立唤醒器。
 #[derive(Clone)]
+pub struct MailPollSchedules {
+    /// 无相位收件日程。
+    pub receive: Arc<dyn RecurringSchedule>,
+    /// 启动时冻结世界相位的收件日程。
+    pub phased_receive: Arc<dyn RecurringSchedule>,
+    /// 维护日程；始终按同一世界相位预构建。
+    pub maintenance: Arc<dyn RecurringSchedule>,
+}
+
+/// 轮询运行时需要的共享快照与日程；把启动期绑定收拢为一个参数。
+#[derive(Clone)]
+pub struct MailPollRuntimeBindings {
+    /// 三套启动时冻结的日程。
+    pub schedules: MailPollSchedules,
+    /// 与进程其余 owner 共享的不可变开关快照。
+    pub switches: RuntimeSwitches,
+}
+
+/// Worker 中单个 MoogleMail world 的依赖与独立唤醒器。
+#[derive(Clone)]
 pub struct MailPollRuntime {
     pub store: Arc<dyn MailPollStore>,
     pub gateway: Arc<dyn MailPollGateway>,
@@ -176,8 +193,15 @@ pub struct MailPollRuntime {
     pub world_id: String,
     pub mailbox_key: String,
     pub config: MailPollRuntimeConfig,
+    /// 每次选择收件/维护路径都重新读取；不缓存为启动事实。
+    pub(super) switches: RuntimeSwitches,
+    /// 无相位收件日程，供旧路径和相位关闭时使用。
     pub(super) schedule: Arc<dyn RecurringSchedule>,
+    /// 启动时冻结世界相位的收件日程；与 `schedule` 同时预构建。
+    pub(super) phased_schedule: Arc<dyn RecurringSchedule>,
     pub(super) maintenance_schedule: Arc<dyn RecurringSchedule>,
+    /// 同一世界维护的唯一执行门；两个循环都必须在执行维护前取得。
+    pub(super) maintenance_lock: Arc<tokio::sync::Mutex<()>>,
     pub(super) wakeup: Arc<Notify>,
 }
 
@@ -189,7 +213,7 @@ impl MailPollRuntime {
         processor: Option<Arc<dyn MailProcessor>>,
         world_id: String,
         mailbox_key: String,
-        schedule: Arc<dyn RecurringSchedule>,
+        bindings: MailPollRuntimeBindings,
         config: MailPollRuntimeConfig,
     ) -> Result<Self, WorkerError> {
         let runtime = Self {
@@ -202,8 +226,11 @@ impl MailPollRuntime {
             world_id,
             mailbox_key,
             config,
-            maintenance_schedule: Arc::clone(&schedule),
-            schedule,
+            switches: bindings.switches,
+            schedule: bindings.schedules.receive,
+            phased_schedule: bindings.schedules.phased_receive,
+            maintenance_schedule: bindings.schedules.maintenance,
+            maintenance_lock: Arc::new(tokio::sync::Mutex::new(())),
             wakeup: Arc::new(Notify::new()),
         };
         if !runtime.validate() {
@@ -224,21 +251,15 @@ impl MailPollRuntime {
         self
     }
 
-    /// 注入当前世界的维护服务；是否独立运行由 poll_isolation_enabled 选择。
+    /// 注入当前世界的维护服务；两条路径共用同一服务与互斥门。
     pub fn with_maintenance(mut self, maintenance: Arc<MailboxMaintenanceService>) -> Self {
         self.maintenance = Some(maintenance);
         self
     }
 
-    /// 注入独立维护日程；装配根已按同一世界相位平移，关闭隔离时忽略此日程。
-    pub fn with_maintenance_schedule(mut self, schedule: Arc<dyn RecurringSchedule>) -> Self {
-        self.maintenance_schedule = schedule;
-        self
-    }
-
-    /// 只在新路径且已注入维护服务时，由 runner 启动独立任务。
+    /// 维护服务存在时 runner 始终启动任务；旧路径下任务只 idle，不退出。
     pub(in crate::worker::runtime) fn has_independent_maintenance(&self) -> bool {
-        self.config.poll_isolation_enabled && self.maintenance.is_some()
+        self.maintenance.is_some()
     }
 
     /// 合并一次手动触发；轮询正在执行时，通知会保留到下一轮领取。
@@ -251,8 +272,9 @@ impl MailPollRuntime {
         matches!(self.world_id.as_str(), "main" | "isekai")
             && auction_domain::valid_text(&self.mailbox_key, 256)
             && self.schedule.next_after(now).is_some_and(|next| next > now)
-            && (!self.has_independent_maintenance()
-                || self.maintenance_schedule.next_after(now).is_some_and(|next| next > now))
+            && self.phased_schedule.next_after(now).is_some_and(|next| next > now)
+            // 即使基线关闭也校验维护日程，保证在线切换不会暴露启动时未发现的配置错误。
+            && self.maintenance_schedule.next_after(now).is_some_and(|next| next > now)
             && self.config.validate()
     }
 

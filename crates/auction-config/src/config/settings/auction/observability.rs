@@ -14,8 +14,8 @@ pub struct MetricsConfig {
     pub enabled: bool,
     /// Worker 只读 SLI 汇总基线；默认关闭，可由数据库开关覆盖。
     pub sli_snapshot_enabled: bool,
-    /// 业务指标路由与三角色附加出口的转发拒绝策略，默认开启。
-    /// 仅由部署配置持有，Admin runtime 只能覆盖 enabled，不得覆盖该安全策略。
+    /// 业务指标路由与三角色附加出口的转发拒绝 TOML 基线，默认开启。
+    /// 运行时开关 `metrics_reject_forwarded_requests` 只能在线收紧；放宽须改此值并重启。
     pub reject_forwarded_requests: bool,
     /// Public 附加指标地址；省略即关闭，仅接受 127.0.0.1 与非零端口。
     pub public_loopback_listen_address: Option<SocketAddr>,

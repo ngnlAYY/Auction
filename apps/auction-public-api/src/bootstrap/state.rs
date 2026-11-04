@@ -160,6 +160,7 @@ pub(super) async fn configure_state(
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
     cache: Arc<dyn ReadModelCache>,
+    switches: auction_application::RuntimeSwitches,
 ) -> anyhow::Result<(
     PublicApiState,
     Option<Arc<HeartbeatPublisher>>,
@@ -172,18 +173,14 @@ pub(super) async fn configure_state(
             PublicApiState::new(
                 None, None, None, None, None, None, None, None, None, None, None, None, None, None,
                 security,
-            ),
+            )
+            .with_runtime_switch_snapshot(switches),
             None,
             None,
             None,
         ));
     };
 
-    let switches = auction_application::RuntimeSwitches::new(
-        auction_application::RuntimeSwitchRole::Public,
-        config.readiness.audit_failure_mode,
-        config.readiness.cache_enabled,
-    );
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
             .await
@@ -296,7 +293,7 @@ pub(super) async fn configure_state(
             config.readiness.cache_enabled,
             metrics.readiness(),
         )
-        .with_runtime_switches(switches),
+        .with_runtime_switches(switches.clone()),
     );
     let state = PublicApiState::new(
         Some(worlds),
@@ -318,6 +315,7 @@ pub(super) async fn configure_state(
     .with_lot_watches(store.clone())
     .with_lot_watch_preference(store.clone())
     .with_realtime_hub(hub)
+    .with_runtime_switch_snapshot(switches)
     .with_readiness(readiness);
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "public heartbeat ready publish failed");
@@ -331,6 +329,7 @@ pub(super) async fn configure_state(
     _tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     _metrics: Arc<ProcessMetrics>,
     _cache: Arc<dyn ReadModelCache>,
+    switches: auction_application::RuntimeSwitches,
 ) -> anyhow::Result<(
     PublicApiState,
     Option<Arc<auction_observability::HeartbeatPublisher>>,
@@ -345,7 +344,8 @@ pub(super) async fn configure_state(
         PublicApiState::new(
             None, None, None, None, None, None, None, None, None, None, None, None, None, None,
             security,
-        ),
+        )
+        .with_runtime_switch_snapshot(switches),
         None,
         None,
         None,

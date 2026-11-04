@@ -40,10 +40,11 @@ pub struct MoogleMailWorkerConfig {
     pub sent_baseline_mode: auction_application::SentBaselineMode,
     /// 每个 world 共用的标准五字段 cron；支持旧版描述符和时区前缀。
     pub schedule: String,
-    /// 独立运行收件与维护并错峰两个世界；关闭时恢复每轮三分支并行的旧路径。
+    /// 独立运行收件与维护并错峰两个世界的 TOML 基线；运行时开关
+    /// `mooglemail_poll_isolation_enabled` 可在线切换，clear 后回落此值。
     pub poll_isolation_enabled: bool,
     /// 独立维护的 cron；省略时跟随 runtime 覆盖后实际生效的收件 schedule。
-    /// 只在 poll_isolation_enabled 开启时生效，修改需要重启 Worker。
+    /// 启动时始终解析并校验，即使基线关闭；在线切换不重写邮箱下一次 due。
     pub maintenance_schedule: Option<String>,
     /// 完整 Read Mail 纯观察的最小间隔，默认 3600 秒，范围 60 至 86400。
     /// 每次维护结束后检查，实际间隔向上取整到维护节奏；旧路径忽略此值。
