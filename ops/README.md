@@ -158,6 +158,18 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 **回退**：迁移只向前。W7.8a 已随一版部署后，目标旧程序已含兼容逻辑且本次跨越的迁移全部登记 compatible，才可保留当前数据库换回程序；换回前必须显式设置 `[readiness] migration_compatibility_mode = "compatible"`，保留能识别当前数据库的新版 CLI。默认 shadow 不放宽，含 breaking、缺登记或无法确认仍须恢复升级前备份并核对外部历史。完整区间判定、CLI 限制与操作步骤见[程序回退](deploy/RECOVERY.md#程序回退)。
 
+### M1 候选上线顺序（备份与指标前置）
+
+线上旧 CLI `f99a9d4e` 早于 `backup scheduled` 与三角色 loopback metrics 出口，不能在旧程序上启用新 timer 或要求出口验收。正确顺序：
+
+1. **部署前准备，不改变旧角色**：R2 bucket/生命周期/bucket lock/令牌；`age` 密钥离线托管与主机 `age`；Prometheus、node_exporter、postgres_exporter 的软件、unit 与 `auction_metrics` 只读账号。监控服务可以先启动，此时 scrape 目标不可用是预期的。
+2. **安装候选**：按“升级”流程安装 M1 候选（含迁移 075–077），同步安装 Worker 120s、server 225s 的 systemd unit；`service start` 完成迁移并等待三角色就绪。
+3. **启用新版能力**：在 common 填写三个 loopback metrics 地址并受控重启角色；安装并启用 `auction-backup.timer`，先执行一次手动 `backup create`/`backup verify`。
+4. **异机与恢复演练**：配置 `[backup.offsite]`，观察首次 daily/monthly 回执，再按[备份与恢复](deploy/RECOVERY.md#从-r2-取回并演练恢复)完成一次端到端恢复演练。
+5. **观察后切换**：维护 p95、D5 冲突、shadow 差异与备份连续成功后，才切换 `readiness_audit_failure_mode=classified`、`timeouts_enabled` 与 `sent_baseline_mode=watermark`。
+
+在旧程序上执行第 3–5 步会因缺少子命令或出口失败；这些步骤不属于部署前准备。
+
 ## 反向代理
 
 [`ops/deploy/caddy/Caddyfile`](deploy/caddy/Caddyfile) 是 Public 与 Admin 两个站点的模板：
