@@ -107,7 +107,7 @@
 ## 数据库与迁移
 
 - PostgreSQL 固定 major 18；驱动由显式 `postgres` feature 启用，不使用 `AnyPool`。
-- 迁移只追加，已发布文件禁止修改或删除；规则见[迁移说明](migrations/postgres/README.md)。新表同步[保留政策](ops/deploy/retention-policy.v1.json)与[数据库契约](docs/contracts/database.md)。
+- 迁移只追加，已发布文件禁止修改或删除；规则见[迁移说明](migrations/postgres/README.md)。新表同步[保留政策 v2](ops/deploy/retention-policy.v2.json)与[数据库契约](docs/contracts/database.md)。
 - 破坏性数据库操作只能经 `auction-cli` 的显式确认、可验证备份与回执完成；开发脚本不得加入 `DROP DATABASE`。
 
 ## Web 规则

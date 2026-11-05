@@ -328,7 +328,7 @@ build_inputs_fingerprint() {
 	path_fingerprint \
 		apps crates migrations \
 		ops/config/examples \
-		ops/deploy/retention-policy.v1.json \
+		ops/deploy/retention-policy.v2.json \
 		Cargo.toml Cargo.lock rust-toolchain.toml .cargo ci/release "${tool_recipe_inputs[@]}"
 }
 

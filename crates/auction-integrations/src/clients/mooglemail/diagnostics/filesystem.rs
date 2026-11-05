@@ -38,6 +38,75 @@ pub(super) struct RecordEntry {
     pub(super) write_unknown: bool,
 }
 
+/// 加密诊断证据的只读保留快照；只统计文件数与字节数，不读取或导出正文。
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct MailDiagnosticRetentionSnapshot {
+    pub directory_present: bool,
+    pub total_files: u64,
+    pub ordinary_expired_files: u64,
+    pub ordinary_expired_bytes: u64,
+    pub write_unknown_held_files: u64,
+    pub write_unknown_held_bytes: u64,
+    /// 已超过处置后 90 天保全窗、需人工跟进处置状态的写入未知证据数；不是删除候选。
+    pub write_unknown_over_hold_window_files: u64,
+    pub retained_files: u64,
+    pub temporary_files: u64,
+    pub unexpected_entries: u64,
+}
+
+/// 单个证据文件按修改时间与是否写入未知分类；边界为 `age >= 期限`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EvidenceRetention {
+    Retained,
+    OrdinaryExpired,
+    WriteUnknownHeld,
+    WriteUnknownOverHold,
+}
+
+pub(super) fn classify_evidence(
+    age: Duration,
+    retention: Duration,
+    hold: Duration,
+    write_unknown: bool,
+) -> EvidenceRetention {
+    if age < retention {
+        return EvidenceRetention::Retained;
+    }
+    if !write_unknown {
+        return EvidenceRetention::OrdinaryExpired;
+    }
+    if age >= hold {
+        EvidenceRetention::WriteUnknownOverHold
+    } else {
+        EvidenceRetention::WriteUnknownHeld
+    }
+}
+
+/// 只读统计诊断目录；目录缺失视为空快照，其他权限或格式异常失败关闭。
+/// 不需要父密钥：本函数只读取文件元数据与公开头，不导出正文。
+pub fn retention_snapshot(
+    directory: &Path,
+    retention: Duration,
+    hold: Duration,
+    now: SystemTime,
+) -> Result<MailDiagnosticRetentionSnapshot, MailDiagnosticError> {
+    if directory.as_os_str().is_empty()
+        || directory.file_name().is_none()
+        || directory.to_string_lossy().chars().any(char::is_control)
+        || matches!(
+            directory.components().next_back(),
+            Some(Component::CurDir | Component::ParentDir | Component::RootDir)
+        )
+        || retention < Duration::from_secs(86_400)
+        || retention > Duration::from_secs(365 * 86_400)
+        || hold < retention
+        || hold > Duration::from_secs(365 * 86_400)
+    {
+        return Err(MailDiagnosticError::InvalidContext);
+    }
+    platform::retention_snapshot(directory, retention, hold, now)
+}
+
 /// 结果未知证据的公开失败码；与 `MailDiagnosticOutcome::failure_code` 的闭集一致。
 /// 只有已证明“远端写入结果未知”的证据享受保全优先级，其他分类按普通证据淘汰。
 pub(super) const WRITE_UNKNOWN_FAILURE_CODE: &str = "write_unknown";
@@ -185,7 +254,7 @@ pub(super) fn write_private_export(output: &Path, bytes: &[u8]) -> Result<(), Ma
 
 #[cfg(test)]
 mod tests {
-    use super::{RecordEntry, eviction_order, eviction_plan};
+    use super::{EvidenceRetention, RecordEntry, classify_evidence, eviction_order, eviction_plan};
     use auction_application::MailDiagnosticError;
     use std::{
         path::PathBuf,
@@ -277,5 +346,107 @@ mod tests {
     fn eviction_fails_closed_when_every_candidate_is_still_too_large() {
         let records = ordered(vec![record("only", 995, 10, true)]);
         assert_eq!(plan(&records, 2_000, 86_400, 1_000, 1_024), Err(MailDiagnosticError::Capacity));
+    }
+
+    #[test]
+    fn evidence_retention_boundaries_are_exact_and_type_aware() {
+        let retention = Duration::from_secs(7 * 86_400);
+        let hold = Duration::from_secs(90 * 86_400);
+        // 差一秒不满 7 天：保留。
+        assert_eq!(
+            classify_evidence(retention - Duration::from_secs(1), retention, hold, false),
+            EvidenceRetention::Retained
+        );
+        // 恰好满 7 天的普通证据：候选。
+        assert_eq!(
+            classify_evidence(retention, retention, hold, false),
+            EvidenceRetention::OrdinaryExpired
+        );
+        // 满 7 天的写入未知证据：保全，不是候选。
+        assert_eq!(
+            classify_evidence(retention, retention, hold, true),
+            EvidenceRetention::WriteUnknownHeld
+        );
+        // 未处置的写入未知证据即使超过 90 天也只标记跟进，仍不是候选。
+        assert_eq!(
+            classify_evidence(hold, retention, hold, true),
+            EvidenceRetention::WriteUnknownOverHold
+        );
+    }
+
+    #[test]
+    fn retention_snapshot_counts_ordinary_and_held_evidence() {
+        use std::{
+            fs::{self, OpenOptions},
+            io::Write,
+            os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
+        };
+        use uuid::Uuid;
+
+        struct Guard(std::path::PathBuf);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let directory = std::env::temp_dir().join(format!("auction-retention-{}", Uuid::new_v4()));
+        fs::DirBuilder::new().mode(0o700).create(&directory).expect("创建私有目录");
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("目录权限");
+        let _guard = Guard(directory.clone());
+
+        let write = |name: Uuid, failure_code: &str, modified: SystemTime| {
+            let path = directory.join(format!("{name}.evidence"));
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+                .expect("创建证据文件");
+            file.write_all(
+                format!(
+                    "{{\"outcome\":{{\"failure_code\":\"{failure_code}\",\"decision_code\":null}}}}\nQUJD"
+                )
+                .as_bytes(),
+            )
+            .expect("写入证据文件");
+            file.set_modified(modified).expect("设置修改时间");
+        };
+
+        let now = SystemTime::now();
+        let old = now - Duration::from_secs(8 * 86_400);
+        let fresh = now - Duration::from_secs(86_400);
+        write(Uuid::new_v4(), "ordinary_failure", old);
+        write(Uuid::new_v4(), "write_unknown", old);
+        write(Uuid::new_v4(), "ordinary_failure", fresh);
+
+        let snapshot = super::retention_snapshot(
+            &directory,
+            Duration::from_secs(7 * 86_400),
+            Duration::from_secs(90 * 86_400),
+            now,
+        )
+        .expect("统计证据保留快照");
+        assert!(snapshot.directory_present);
+        assert_eq!(snapshot.total_files, 3);
+        assert_eq!(snapshot.ordinary_expired_files, 1);
+        assert_eq!(snapshot.write_unknown_held_files, 1);
+        assert_eq!(snapshot.write_unknown_over_hold_window_files, 0);
+        assert_eq!(snapshot.retained_files, 1);
+        assert_eq!(snapshot.unexpected_entries, 0);
+        assert_eq!(snapshot.temporary_files, 0);
+        assert!(snapshot.ordinary_expired_bytes > 0);
+        assert!(snapshot.write_unknown_held_bytes > 0);
+
+        let missing = directory.join("absent");
+        let absent = super::retention_snapshot(
+            &missing,
+            Duration::from_secs(7 * 86_400),
+            Duration::from_secs(90 * 86_400),
+            now,
+        )
+        .expect("缺失目录按空快照");
+        assert!(!absent.directory_present);
+        assert_eq!(absent.total_files, 0);
     }
 }

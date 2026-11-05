@@ -134,7 +134,7 @@ just test-db
 ## 数据库变更
 
 1. 在 [`migrations/postgres/`](../migrations/postgres) 新增迁移文件 `NNNNNN_<名称>.up.sql`（编号连续），见[迁移说明](../migrations/postgres/README.md)。
-2. 每次新增迁移都把 [`ops/deploy/retention-policy.v1.json`](../ops/deploy/retention-policy.v1.json) 的 `database_schema_version` 更新为新的最高版本；新增表还须加入对应数据族。
+2. 每次新增迁移都把 [`ops/deploy/retention-policy.v2.json`](../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 更新为新的最高版本；新增表还须加入对应数据族。运行态族的新清理规则只能来自用户决策，并须同时加入代码内闭集与政策校验。
 3. 同步 [数据库契约](contracts/database.md)。
 
 ## 接口变更

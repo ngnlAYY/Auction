@@ -13,7 +13,7 @@
 
 两种形态共用同一配置布局与同一个 `auction-cli`，但不能同时用于同一套配置。
 
-发布包（`auction-rust-<版本>-<提交前 12 位>[-single].tar.gz`）包含 `bin/`（分体包：三个角色程序 + `auction-cli`；合并包：`auction-server` + `auction-cli`）、`docs/`（部署、恢复、CLI 说明与 Web 资源摘要）、`systemd/`、`caddy/`、`config/examples/` 与 `retention-policy.v1.json`；分体包另含 `tmpfiles/`，合并包另含首次设置代理示例与单文件说明（以上均为发布包内的路径）。敏感模板以 `secrets.toml.example`、`secrets/postgres-rebuild.toml.example`、`secrets/postgres-owner.toml.example` 命名，须复制为配置引用的实际文件名。用发布包内的 `SHA256SUMS` 校验解压后的文件。
+发布包（`auction-rust-<版本>-<提交前 12 位>[-single].tar.gz`）包含 `bin/`（分体包：三个角色程序 + `auction-cli`；合并包：`auction-server` + `auction-cli`）、`docs/`（部署、恢复、CLI 说明与 Web 资源摘要）、`systemd/`、`caddy/`、`config/examples/` 与 `retention-policy.v2.json`；分体包另含 `tmpfiles/`，合并包另含首次设置代理示例与单文件说明（以上均为发布包内的路径）。敏感模板以 `secrets.toml.example`、`secrets/postgres-rebuild.toml.example`、`secrets/postgres-owner.toml.example` 命名，须复制为配置引用的实际文件名。用发布包内的 `SHA256SUMS` 校验解压后的文件。
 
 两种发布包均包含 `auction-backup.service.example` 与 `auction-backup.timer.example`，以及 WAL 相关 timer 模板 `auction-wal-upload.service.example`、`auction-wal-upload.timer.example`、`auction-base-backup.service.example`、`auction-base-backup.timer.example`；仅由用户按[定时备份](deploy/RECOVERY.md#定时备份)与[WAL 归档与时间点恢复](deploy/RECOVERY.md#wal-归档与时间点恢复)单独安装启用，不随三个角色服务自动开启。
 两种发布包的 `docs/` 也包含 `MIGRATION-DRILL.md` 与 `migration-drill-receipt.template.json`，用于含迁移版本部署前的手工演练与留证。
@@ -1099,6 +1099,7 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 | Bot 资金账户 | `auction-cli funds preview` 可在线只读执行；开户或现金对账写入前须先停止 Worker，见[结算与履约](../docs/guide/settlement.md#bot-内部履约与资金账户) |
 | 导出邮件诊断证据 | `auction-cli mail export-evidence <evidence-id> --output <文件>` |
 | 数据保留盘点 | `auction-cli db inventory`（只统计，不授权删除） |
+| 保留清理只读演练 | `auction-cli db retention-dry-run`（按政策 v2 统计候选行/文件并写 run id 回执；不执行删除） |
 
 ## 备份与恢复
 
