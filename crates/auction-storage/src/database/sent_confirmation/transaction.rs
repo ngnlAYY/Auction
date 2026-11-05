@@ -72,10 +72,8 @@ pub(super) async fn apply(
         return Err(Error::Rejected);
     }
     let expected = snapshot.expectation.as_ref().ok_or(Error::Rejected)?;
-    let obligation_id = snapshot.data["obligation"]["id"]
-        .as_str()
-        .and_then(|id| Uuid::parse_str(id).ok())
-        .ok_or(Error::Rejected)?;
+    let admission = snapshot.admission()?;
+    let obligation_id = admission.obligation.as_ref().map(|o| o.id).ok_or(Error::Rejected)?;
     if !attempts::bind_sent(
         tx,
         command.delivery_id,
@@ -107,21 +105,23 @@ pub(super) async fn apply(
         .bind(command.accept_attempt_history).bind(&snapshot.data).bind(serde_json::to_value(&result)?)
         .execute(&mut **tx).await?;
     let corrects_admin_failure = p.corrects_admin_failure;
-    let admin_failure_command_id = &snapshot.data["admin_failure"]["command_id"];
+    let corrected_admin_failure_command_id = corrects_admin_failure
+        .then(|| admission.admin_failure.as_ref().map(|failure| failure.command_id))
+        .flatten();
     // 不设置 sent_verified；下游只能通过持久 confirmation+attempt+binding 强谓词获得此证明能力。
     let mut metadata = json!({
         "operation":"send", "proof":"sent_operator_confirmed_v1",
         "external_reference_proven":true, "operator_confirmation_id":command.command_id,
         "send_expectation":expected, "sending_fencing_version":snapshot.sending_fencing_version,
         "recipient":command.evidence.recipient,
-        "template":snapshot.data["delivery"]["payload"]["template"],
+        "template":admission.delivery.payload.template.clone(),
         "settlement_obligation_id":obligation_id,
         "sent_at":command.evidence.sent_minute,
         "sent_time_precision":"minute", "collected":command.evidence.collected,
         "cod_pending":command.evidence.cod_pending,
     });
     if corrects_admin_failure {
-        metadata["corrected_admin_failure_command_id"] = admin_failure_command_id.clone();
+        metadata["corrected_admin_failure_command_id"] = json!(corrected_admin_failure_command_id);
     }
     // 状态门与快照准入一致：更正只作用于仍停在原 Admin 失败结论上的行，失败标记随成功移除，
     // 原结论保留在命令账本、审计与 confirmation 快照中。
@@ -169,16 +169,12 @@ pub(super) async fn apply(
             "accept_collected_assets":command.accept_collected_assets,
             "accept_attempt_history":command.accept_attempt_history,
             "corrects_admin_failure":corrects_admin_failure,
-            "admin_failure_command_id":if corrects_admin_failure {
-                admin_failure_command_id.clone()
-            } else {
-                serde_json::Value::Null
-            },
+            "admin_failure_command_id":corrected_admin_failure_command_id,
             "proof":"sent_operator_confirmed_v1","executor":"auction-cli",
             "reason":command.reason,
             "collection_funding":if expected.credits > 0 {"already_collected"} else {"normal_worker"},
             "seller_payment":if expected.credits > 0 {"original_sent_confirmed"} else {"normal_queue"},
-            "funding_allocation_id":snapshot.data["funding_allocation"]["id"]})))
+            "funding_allocation_id":admission.funding_allocation.as_ref().map(|allocation| allocation.id)})))
         .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
         .execute(&mut **tx).await?;
     Ok(result)

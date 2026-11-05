@@ -6,9 +6,12 @@ use auction_application::{
 };
 
 use super::DatabaseStore;
+use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
 mod commands;
+#[cfg(feature = "postgres")]
+mod detail;
 #[cfg(feature = "postgres")]
 mod mapping;
 #[cfg(feature = "postgres")]
@@ -29,6 +32,23 @@ impl DeliveryAdminPort for DatabaseStore {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
                     reads::list(store.pool(), &request).await.map_err(ApplicationError::from)
+                }
+            }
+        })
+    }
+
+    fn detail(
+        &self,
+        delivery_id: Uuid,
+    ) -> auction_application::ApplicationFuture<'_, auction_application::DeliveryAdminDetail> {
+        Box::pin(async move {
+            if delivery_id.is_nil() {
+                return Err(DeliveryAdminError::Invalid.into());
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    detail::detail(store.pool(), delivery_id).await.map_err(ApplicationError::from)
                 }
             }
         })

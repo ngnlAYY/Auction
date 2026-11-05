@@ -5,11 +5,13 @@ use auction_application::diagnostics::{
 };
 use auction_application::{
     AdminMailPollStateRequest, AdminMailPollingCommand, AdminMailTransactionError,
-    ApplicationError, AuctionEarlyBirdCalendar, AuctionPolicyTemplate, AuctionScheduleSlot,
-    AuctionScheduleSource, AuctionWeeklySchedule, Clock, RequestHash, ScheduledRoundBootstrap,
+    ApplicationError, AuctionPolicyTemplate, Clock, RequestHash, ScheduledRoundBootstrap,
     ScheduledRoundSnapshot,
 };
-use auction_domain::{AuctionId, CommandId, legacy_natural_key_uuid};
+use auction_domain::{
+    AuctionEarlyBirdCalendar, AuctionId, AuctionScheduleSlot, AuctionScheduleSource,
+    AuctionWeeklySchedule, CommandId, legacy_natural_key_uuid,
+};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Serialize;
 

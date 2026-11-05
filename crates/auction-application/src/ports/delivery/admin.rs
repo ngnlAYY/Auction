@@ -172,6 +172,9 @@ pub struct DeliveryAdminResult {
 pub trait DeliveryAdminPort: Send + Sync {
     fn list(&self, request: DeliveryAdminListRequest) -> ApplicationFuture<'_, DeliveryAdminPage>;
 
+    /// 读取单条投递的证据详情；不存在时返回 `DeliveryAdminError::NotFound`。
+    fn detail(&self, delivery_id: Uuid) -> ApplicationFuture<'_, super::DeliveryAdminDetail>;
+
     fn execute(&self, command: DeliveryAdminCommand) -> ApplicationFuture<'_, DeliveryAdminResult>;
 }
 

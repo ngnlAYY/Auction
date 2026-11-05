@@ -1,9 +1,9 @@
 //! 排期日历的纯逻辑回归：IANA 时区 DST 解析、跨 DST 后继、早鸟窗口与赛季前场次、冻结来源校验。
 
-use auction_application::{
+use auction_domain::{
     AuctionEarlyBirdConfig, AuctionEarlyBirdSlot, AuctionScheduleSource, AuctionScheduleTimes,
+    DomainError,
 };
-use auction_domain::DomainError;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
 
 fn required<T>(value: Option<T>) -> T {

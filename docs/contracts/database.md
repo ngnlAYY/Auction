@@ -2,7 +2,7 @@
 
 [文档导航](../README.md) · [迁移](../../migrations/postgres/README.md) · [auction-storage](../../crates/auction-storage/README.md) · [保留政策](../../ops/deploy/retention-policy.v1.json)
 
-唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000083`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
+唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000084`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
 
 ## schema 身份与版本
 
@@ -240,13 +240,74 @@ W0.7 `diagnose_relation` 的 250ms 限界与原回滚路径保持不变。
 现金 fence 的 `Deferred` 与资金的 `RolledBack(SerializationConflict)`
 即使以 Ok 返回，也在原终止分支计耗尽。单次 Read Committed 领取不新增重试。
 
-原最多三次尝试、既有等待与全部错误返回保持不变。
+原最多三次尝试与全部错误返回保持不变；确认重跑前的等待改为带抖动退避
+（窗口 6ms 起、每次翻倍、24ms 封顶，取窗口一半加一半均匀抖动），
+使同时冲突的事务不再同步重试，尝试次数与重试白名单不变。
 超时、锁等待失败、连接中断和未知 COMMIT 不扩大自动重试白名单；
 数据库错误不能证明外部请求未执行，结果未知仍按原命令核对，不自动重发。
 Final 标签只来自本次事务已读权威快照；取快照前失败保留 unknown，
 不能据此宣称 Final 零耗尽。实时序号分配点明确失败才标记 realtime_sequence；
 COMMIT 报告的 SSI 冲突不推测为序号热点。
 
+
+## 价格历史读路径
+
+`crates/auction-storage/src/database/price_history/` 是公开成交价格历史 SQL 的唯一 owner；
+应用端口为 `PublicPriceHistoryReader`，HTTP 只映射 DTO。可见集合固定为
+`a.status = 'settled'`、`l.status = 'sold'`、`l.leader_user_id IS NOT NULL` 且 lot 与场次
+结算记录同时存在的 lot；游标页按 `l.effective_end_at DESC, a.sequence DESC, l.lot_number, l.id`
+取顶部若干行，编号页在同一快照内返回完整总数、最低/最高价与中位价。
+
+迁移 `000084` 只新增普通索引 `lots_sold_history_effective_end_idx`
+（`(effective_end_at DESC, id)`，`INCLUDE (auction_id, current_price, lot_number)`，
+谓词 `status = 'sold' AND leader_user_id IS NOT NULL`），登记 `compatible`：
+它只提供候选入口，不改变可见集合、排序、统计、金额、资格、锁序、审计或事件。
+
+测量口径与结果（一次性隔离 PG18、合成 500 场次 × 20 件成交 = 10000 条价格历史、
+每场景对同一份生产查询原文执行 `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`，
+先在有索引的库上测一次，再 `DROP INDEX` 后测同一批查询作为基线）：
+
+| 场景 | 无索引 | 有索引 | 缓冲区（无 → 有） |
+| --- | --- | --- | --- |
+| 游标首屏 | 38.0ms | 0.77ms | 6087 → 1910 |
+| 游标 boundary 页 | 44.8ms | 0.87ms | 6087 → 3537 |
+| 游标 + 世界过滤 | 22.1ms | 0.70ms | 6095 → 2573 |
+| 游标 + 价格区间 | 3.1ms | 1.3ms | 2640 → 2640 |
+| 编号页（closed_desc，全量统计） | 48.7ms | 48.2ms | 8874 → 8874 |
+
+游标页因此不再顺序扫描并排序全部已成交 lot；编号页与价格区间过滤不受索引影响，符合预期：
+前者必须覆盖全部匹配行才能给出总数与中位价，后者的搜索键不是截止时间。为价格区间再加一个
+以 `current_price` 为前导的索引只会增加写入成本，本批不新增。
+
+另在一个 2 万条已成交 lot 的独立数据集上评估过"把装备/买家/卖家连接改写为 `EXISTS`
+半连接"：无过滤编号页 96.6ms → 76.9ms，但带名称过滤反升到 124.5ms、带卖家过滤反升到
+85.4ms（哈希连接被逐行主键探测替换）。因此不采用该改写，保留原连接顺序与共享的
+`price_history_scope_sql!` 定义，两条分页路径继续使用同一份可见集合条件。
+
+复现入口：`cargo test -p auction-storage --features test-db --test perf -- --ignored --nocapture`
+（默认 `just test-db` 不运行；报告写入 `AUCTION_PERF_REPORT_DIR`，默认 `target/perf/<unix 秒>`）。
+
+## 热点与连接竞争测量
+
+同一夹具还量化了 W12.1（同场 `realtime_streams` 序号热点）、W12.8（出价事务内
+`pg_notify`）与 W12.4（匿名读与出价共享连接池）三项。口径：一次性隔离 PG18，16 个并发
+Serializable 事务在同一瞬间对同一场次的不同 lot 递增同一 `streams` 行，事务语句顺序与出价
+一致（`SET TRANSACTION ISOLATION LEVEL SERIALIZABLE` → 序号 upsert → lot 行更新 →
+可选 `pg_notify`），重试预算与生产相同（3 次）。
+
+- 立即重试（旧行为）：32 个事务中 12 个成功提交、20 个耗尽预算。
+- 带抖动退避（本批实现）：18 个成功、14 个耗尽。抖动把"同时重试再次碰撞"的概率降下来，
+  但同一瞬间争用同一序号的尝试仍会耗尽——这正是 W12.1 仍需根治方案（提交后分配序号、
+  事务前按场次排队或按 lot 拆分事件流）的依据，本批只交付量化与退避，不改变
+  `stream_sequence` 契约。
+- `pg_notify`：8 并发下提交 p95 245µs（无通知）→ 286µs（每事务内通知），单次上限 381µs。
+  在本机 socket 与这个量级上没有可测的提交串行化，因此本批不把唤醒移出出价事务（W12.8）。
+- 匿名读突发：同一物理池上 24 个并发价格历史首屏把出价 p95 从 36.8ms 抬到 170.1ms
+  （4.6×）；把读并发限到 4 后出价 p95 回到 32.1ms（0.87× 对照），读 p95 120ms。
+  这量化了 W12.4 读限流/并发门的必要性：读必须受限，否则会拖慢出价。
+
+复现入口：`cargo test -p auction-storage --features test-db --test perf -- --ignored --nocapture`
+（默认 `just test-db` 不运行；报告写入 `AUCTION_PERF_REPORT_DIR`）。
 
 ## SLI 只读查询
 

@@ -4,7 +4,7 @@ use chrono::Timelike;
 use serde::{Deserialize, Serialize};
 
 use super::{AdminRuntimeConfigError, invalid, require};
-use crate::AuctionEarlyBirdConfig;
+use auction_domain::AuctionEarlyBirdConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
