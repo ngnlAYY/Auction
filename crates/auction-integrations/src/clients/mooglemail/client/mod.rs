@@ -72,6 +72,9 @@ pub struct MoogleMailClient {
     reads: Arc<reads::MailboxReads>,
     maximum_response_bytes: usize,
     request_timeout: Duration,
+    /// Sent / Inbox / Read Mail 水位每日完整校验的最大间隔；由 Worker 部署配置注入，
+    /// 只决定何时多读一轮完整列表，不改变任何水位、证明或发送结果。
+    mail_scan_daily_full_interval: chrono::Duration,
     diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
     external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
@@ -146,6 +149,7 @@ impl MoogleMailClient {
             reads: Arc::new(reads::MailboxReads::default()),
             maximum_response_bytes,
             request_timeout: config.request_timeout,
+            mail_scan_daily_full_interval: auction_application::MAIL_SCAN_DAILY_FULL_INTERVAL,
             diagnostics: None,
             ownership: None,
             external_metrics: auction_application::noop_external_metrics_observer(),
@@ -204,6 +208,20 @@ impl MoogleMailClient {
         });
         self.external_metrics = observer;
         self
+    }
+
+    /// 注入部署配置的每日完整校验间隔；零值不生效，保持 24 小时默认。
+    /// 水位、游标与证明语义不变，只影响多读一轮完整列表的节奏。
+    pub fn with_mail_scan_daily_full_interval(mut self, interval: chrono::Duration) -> Self {
+        if !interval.is_zero() {
+            self.mail_scan_daily_full_interval = interval;
+        }
+        self
+    }
+
+    /// 每日完整校验间隔；供 Sent/Inbox/Read Mail 的扫描计划共享同一取值。
+    pub(crate) fn mail_scan_daily_full_interval(&self) -> chrono::Duration {
+        self.mail_scan_daily_full_interval
     }
 
     /// 供 sender 的扫描预算 owner 记录同步指标；不暴露给进程外调用方。
@@ -322,5 +340,27 @@ impl MoogleMailClient {
         equipment_key: &MoogleMailEquipmentKey,
     ) -> Result<MoogleMailTarget, MoogleMailError> {
         self.builder.equipment(world, equipment_id, equipment_key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MoogleMailClient, MoogleMailClientConfig};
+
+    #[test]
+    fn daily_full_interval_defaults_to_one_day_and_accepts_configured_value() {
+        let config = MoogleMailClientConfig::production().expect("生产 endpoint 可解析");
+        let client = MoogleMailClient::with_config(config).expect("默认客户端可构造");
+        assert_eq!(
+            client.mail_scan_daily_full_interval(),
+            auction_application::MAIL_SCAN_DAILY_FULL_INTERVAL
+        );
+
+        let client = client.with_mail_scan_daily_full_interval(chrono::Duration::hours(1));
+        assert_eq!(client.mail_scan_daily_full_interval(), chrono::Duration::hours(1));
+
+        // 零值不生效：配置校验已拒绝 0，这里保持默认而不是退化成每轮完整扫描。
+        let client = client.with_mail_scan_daily_full_interval(chrono::Duration::zero());
+        assert_eq!(client.mail_scan_daily_full_interval(), chrono::Duration::hours(1));
     }
 }

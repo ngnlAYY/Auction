@@ -291,7 +291,7 @@ impl MoogleMailSender {
         let plan = auction_application::plan_mail_scan(
             checkpoint.as_ref(),
             chrono::Utc::now(),
-            auction_application::MAIL_SCAN_DAILY_FULL_INTERVAL,
+            self.client.mail_scan_daily_full_interval(),
         );
         self.observe_scan(
             world,

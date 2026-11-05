@@ -57,6 +57,9 @@ pub struct MoogleMailWorkerConfig {
     /// 完整 Read Mail 纯观察的最小间隔，默认 3600 秒，范围 60 至 86400。
     /// 每次维护结束后检查，实际间隔向上取整到维护节奏；旧路径忽略此值。
     pub read_mail_observation_interval_seconds: u64,
+    /// Sent / Inbox / Read Mail 水位的完整校验间隔秒数，范围 60 至 604800，默认 86400。
+    /// 只决定多读一轮完整列表的节奏；完整校验超限仍只告警，绝不阻断发送或轮询。
+    pub mail_scan_daily_full_interval_seconds: u64,
     /// 每个 cron 触发时刻后附加的随机抖动上限秒数。
     pub jitter_seconds: u64,
     pub lease_duration_seconds: u64,
@@ -193,6 +196,7 @@ impl Default for MoogleMailWorkerConfig {
             poll_isolation_enabled: true,
             maintenance_schedule: None,
             read_mail_observation_interval_seconds: 3600,
+            mail_scan_daily_full_interval_seconds: 86_400,
             jitter_seconds: 5,
             lease_duration_seconds: 60,
             renew_interval_seconds: 10,

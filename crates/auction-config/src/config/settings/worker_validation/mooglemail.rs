@@ -101,6 +101,11 @@ pub(crate) fn validate_mooglemail_worker(
             "read_mail_observation_interval_seconds 必须位于 60 至 86400",
         ));
     }
+    if !(60..=604_800).contains(&config.mail_scan_daily_full_interval_seconds) {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "mail_scan_daily_full_interval_seconds 必须位于 60 至 604800",
+        ));
+    }
     if config.jitter_seconds > 86_400 {
         return Err(ConfigError::InvalidMoogleMailConfig("jitter_seconds 必须位于 0 至 86400"));
     }
@@ -274,4 +279,35 @@ pub(crate) fn validate_mooglemail_world(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn mail_scan_daily_full_interval_is_bounded_and_defaults_to_one_day() {
+        let default = MoogleMailWorkerConfig::default();
+        assert_eq!(default.mail_scan_daily_full_interval_seconds, 86_400);
+        assert!(validate_mooglemail_worker(&default).is_ok());
+
+        for accepted in [60, 3_600, 86_400, 604_800] {
+            let config = MoogleMailWorkerConfig {
+                mail_scan_daily_full_interval_seconds: accepted,
+                ..MoogleMailWorkerConfig::default()
+            };
+            assert!(validate_mooglemail_worker(&config).is_ok(), "{accepted} 应被接受");
+        }
+        for rejected in [0, 59, 604_801] {
+            let config = MoogleMailWorkerConfig {
+                mail_scan_daily_full_interval_seconds: rejected,
+                ..MoogleMailWorkerConfig::default()
+            };
+            let error = validate_mooglemail_worker(&config).expect_err("越界间隔必须被拒绝");
+            assert!(
+                matches!(error, ConfigError::InvalidMoogleMailConfig(message) if message.contains("mail_scan_daily_full_interval_seconds"))
+            );
+        }
+    }
 }

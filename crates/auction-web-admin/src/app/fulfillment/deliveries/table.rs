@@ -12,6 +12,7 @@ use auction_web_shared::{
 use crate::api::{Delivery, DeliveryPage};
 use crate::app::surface::pending::PendingCommands;
 
+use super::super::Route;
 use super::super::sort::{SortDirection, SortableTh, directed};
 use super::dialog::DeliveryDialog;
 use super::helpers::{
@@ -198,6 +199,11 @@ pub(super) fn DeliveryRow(
             }
             td {
                 div { class: "admin-delivery-actions",
+                    Link {
+                        class: "admin-delivery-detail-link",
+                        to: Route::DeliveryDetail { delivery_id: delivery.id.clone() },
+                        {t!("delivery-detail-open")}
+                    }
                     if let (Some(kind), Some(label)) = (kind, action_label) {
                         button {
                             r#type: "button",

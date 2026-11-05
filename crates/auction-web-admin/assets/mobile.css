@@ -272,14 +272,18 @@
 
   .admin-mail-detail__grid,
   .admin-mail-original__grid,
-  .admin-mail-equipment-diagnostic__grid {
+  .admin-mail-equipment-diagnostic__grid,
+  .admin-delivery-detail__grid,
+  .admin-delivery-sent-proof__grid {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-1);
   }
 
   .admin-mail-detail__grid dd,
   .admin-mail-original__grid dd,
-  .admin-mail-equipment-diagnostic__grid dd {
+  .admin-mail-equipment-diagnostic__grid dd,
+  .admin-delivery-detail__grid dd,
+  .admin-delivery-sent-proof__grid dd {
     margin-block-end: var(--space-3);
   }
 
