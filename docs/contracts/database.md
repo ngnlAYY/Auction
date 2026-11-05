@@ -379,6 +379,49 @@ cargo test -p auction-storage --features test-db --test postgres \
 复现入口：`cargo test -p auction-storage --features test-db --test perf -- --ignored --nocapture`
 （默认 `just test-db` 不运行；报告写入 `AUCTION_PERF_REPORT_DIR`）。
 
+### W12.1 残余的实测归因（未消除，属于待决策的设计权衡）
+
+`000090`/`000092` 之后跨 lot 出价仍会以 40001 耗尽。逐语句隔离测量（隔离 PG18、真实 schema
+与真实事务语句顺序、8 并发、每笔只写自己的 lot/账本/事件/审计行、6 轮共 48 笔，同一瞬间进入
+事务）得到：
+
+| 事务形状（除注明外只保留该语句） | 40001 / 48 |
+| --- | --- |
+| 完整出价事务（Serializable，当前实现） | 42 |
+| 只保留 `UPDATE lots … WHERE id = 本 lot AND state_version = 前版本`（8 个不同 lot） | 42 |
+| 只保留 `INSERT auction_commands` + `INSERT bids`（含 `000090` 触发器） | 5 |
+| 只保留 `INSERT bids` + `INSERT lot_watch_events` | 1 |
+| 只保留 `INSERT bids` + `INSERT realtime_events` | 5 |
+| 只保留 `INSERT bids` + `INSERT audit_records` | 7 |
+| 四张追加表（无 lot 更新） | 7 |
+| 只保留锁内快照（`FOR SHARE OF world/auction` + `FOR UPDATE OF l`） | 0 |
+| 只保留 `SELECT auction_commands`（未命中） | 0 |
+
+- 主导项是 `UPDATE lots`：同一 `lots` 页上的八笔**互不相交**行更新即可让 SSI 互相中止——每笔
+  更新前都要读自己那一行，页级谓词锁与同页写入形成双向 rw 反依赖。场次通常只有数行到数十行，
+  必然同页，`vacuum`/索引/锁序都不改变这一点。
+- `bids`/`lot_watch_events`/`realtime_events`/`audit_records` 的追加索引页产生少量同类误报。
+  把 `000090` 触发器改成单语句 CAS（`UPDATE … WHERE last_bid_fact_index = fact_index - 1`，
+  仅错误路径再区分 23503/23514）实测不改变冲突数（账本+事实 10/48 对 5/48，完整事务 42/48 对
+  42/48），因此**不需要迁移**。
+- `find_command` 未命中读取、锁内快照与 `last_bid_fact_index` 触发器单独都不产生冲突；日志里以
+  它们为「pivot 发现点」的记录属于同一 doomed 事务被顺带命中的语句，不是它们制造了冲突。
+
+结论：在不改变隔离级别的前提下，读/写删减、推迟写入、锁序调整与索引/触发器调整都无法消除这
+部分残余——它是 PostgreSQL SSI 的页级谓词锁误报，而竞价事务必须更新 lot 行并在事务内写入事实、
+审计与事件。可选路线都需要明确决策：
+
+1. 保持 Serializable 并接受 Final 阶段重叠出价的 40001 耗尽（当前实现；HTTP 负载下实测 8 波
+   跨 lot 8 并发为 24–40/64 笔 503，进程内直连服务为 8 并发 0–2/8、12 并发 1–2/12 笔耗尽）。
+2. 把 Public 竞价改为显式锁 + Read Committed（同一夹具实测 0 冲突、0 503），但这改变不变量 2
+   的隔离级别约定，必须由用户批准并同步本文件与 `AGENTS.md`。
+3. 进入 Serializable 前按场次排队，保留 Serializable 但把 Final 阶段跨 lot 并发退化为串行；
+   需要单独评估出价 p99 与 SLO。
+
+复现方式：在一次性隔离 PG18 上执行全部迁移后，按本节「事务形状」列出的语句序列各跑 8 个并发
+会话（每会话一笔、同一瞬间开始、跳过不需要的语句），统计 `could not serialize access`。探针
+脚本与原始日志不入库，也不随部署分发。
+
 ## SLI 只读查询
 
 `crates/auction-storage/src/database/sli/` 是 W0.13 SQL 的唯一 owner。
