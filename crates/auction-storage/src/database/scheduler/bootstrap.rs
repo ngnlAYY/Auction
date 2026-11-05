@@ -114,7 +114,7 @@ async fn ensure_postgres_once(
             .try_get::<Option<serde_json::Value>, _>("schedule_snapshot")
             .map_err(map_storage_error)?
         {
-            let source: auction_application::AuctionScheduleSource = serde_json::from_value(source)
+            let source: auction_domain::AuctionScheduleSource = serde_json::from_value(source)
                 .map_err(|_| repository_error_owned("周计划来源快照无效"))?;
             if source != request.schedule_source {
                 return Err(repository_error_owned("周计划来源快照冲突").into());

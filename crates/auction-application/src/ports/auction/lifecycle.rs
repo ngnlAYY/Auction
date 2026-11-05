@@ -158,7 +158,7 @@ pub struct AuctionLifecycleContext {
     pub settled_at: Option<DateTime<Utc>>,
     pub scheduled_round_local_week: Option<NaiveDate>,
     /// 旧轮次没有来源时保留历史 UTC 七天规则，不推测时区或重写既定时间。
-    pub schedule_source: Option<super::AuctionScheduleSource>,
+    pub schedule_source: Option<auction_domain::AuctionScheduleSource>,
 }
 
 /// 当前拍卖结束接收装备时建立的下一期草稿与持久化周轮次。
@@ -166,7 +166,7 @@ pub struct AuctionLifecycleContext {
 pub struct AuctionPreviewSuccessorPlan {
     /// 仅应用于本次新建后继的启动期有效模板；不改写前序拍卖。
     pub policy: super::AuctionPolicyTemplate,
-    pub schedule_source: Option<super::AuctionScheduleSource>,
+    pub schedule_source: Option<auction_domain::AuctionScheduleSource>,
     pub round_id: uuid::Uuid,
     pub auction_id: AuctionId,
     pub create_command_id: CommandId,

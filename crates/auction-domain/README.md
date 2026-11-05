@@ -4,7 +4,7 @@
 
 纯领域模型：拍卖聚合、竞价与代理规划、结算计算、义务与资金规则、装备词典和跨层文本不变量。不做任何 I/O，不依赖数据库、HTTP、配置或时钟（时间由调用方传入），所有金额与版本运算溢出即失败。上层通过它获得“同样的输入一定得到同样的计划”的确定性，应用层负责把计划放进同一个数据库事务。
 
-依赖只有 `chrono`、`serde`、`sha2`、`thiserror`、`uuid`，浏览器端不直接依赖本 crate。
+依赖只有 `chrono`、`chrono-tz`、`serde`、`sha2`、`thiserror`、`uuid`，浏览器端不直接依赖本 crate。
 
 ## 模块地图
 
@@ -13,7 +13,8 @@
 | [`crates/auction-domain/src/auction/`](src/auction) | `Auction` 聚合与 `AuctionStatus` 状态机 |
 | [`crates/auction-domain/src/bidding/`](src/bidding) | `BidAmount`（金额网格）、`AuctionRules`（每场冻结的经济/时间规则）、`LotBidState`、`CompetitionPlan` 规划器与触发器 |
 | [`crates/auction-domain/src/proxy/`](src/proxy) | 代理授权快照、追加式转换事实与生命周期 |
-| [`crates/auction-domain/src/settlement/`](src/settlement) | 结算策略、持有时长曲线、`SettlementPlan`、义务闭集、恢复策略、资金分配与 Bot 内部履约选择 |
+| [`crates/auction-domain/src/settlement/`](src/settlement) | 结算策略、持有时长曲线、`SettlementPlan`、义务闭集、恢复策略与阶段推进、人工 Sent/装备损失准入、资金分配与 Bot 内部履约选择 |
+| [`crates/auction-domain/src/scheduling/`](src/scheduling) | 排期纯规则：IANA 时区来源与 DST 归一化、周场次、赛季早鸟窗口、赛季前场次与阶段覆盖期 |
 | [`crates/auction-domain/src/equipment/`](src/equipment) | 只在可信调用链短暂存在、自动清零的 `EquipmentKey`（固定十字节内联保存，清除后不可读取）；[`crates/auction-domain/src/equipment/taxonomy/`](src/equipment/taxonomy) 是装备名称、种类与词缀的唯一词典 |
 | [`crates/auction-domain/src/identity/`](src/identity) | 各类强类型 UUID 标识与确定性派生 |
 | [`crates/auction-domain/src/watch/`](src/watch) | 装备标记的提醒渠道（MM/PM）与连续领先周期 |
@@ -88,7 +89,7 @@ Draft ──► Preview ──► Live ──► Final ──► Settling ──
 
 恢复策略 `RecoveryPolicy`（`RemindV1`）按版本固定付款超时：v1 为 7 天，v2（赛季前场次）为 24 小时；均为 1 次提醒，COD 被退回的次数上限默认 3、可配 1–10。
 
-领域层只定义冻结付款时长，不按当前赛季重写既有策略；时区排期、赛季前计划结束加 24 小时必须严格早于赛季开始日本地 00:00 的准入，以及实际付款起点与到期推进，由应用层负责。v2 的 24 小时是固定经过时长，不是当地日历日；`pre_season` 保留原模板的提醒参数与 COD 退回上限。
+领域层只定义冻结付款时长，不按当前赛季重写既有策略；时区排期、赛季前计划结束加 24 小时必须严格早于赛季开始日本地 00:00 的准入，以及实际付款起点与到期推进，按纯规则在 `scheduling` 与 `settlement` 中判定，应用层只做配置投影、锁定快照与事务编排。v2 的 24 小时是固定经过时长，不是当地日历日；`pre_season` 保留原模板的提醒参数与 COD 退回上限。
 
 ## 资金与内部履约
 

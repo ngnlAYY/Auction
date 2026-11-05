@@ -22,11 +22,11 @@
 | --- | --- |
 | [`crates/auction-application/src/ports/core/`](src/ports/core) | `Clock`、`CommandLedger`/`RequestHash`/`StoredCommand`（幂等账本）、事务策略、仓储错误、稳定编码（小写十六进制、旧版 Go JSON 兼容摘要） |
 | [`crates/auction-application/src/ports/auction/`](src/ports/auction) | 公开查询、竞价命令、生命周期、慢速代理到期、冻结的策略模板 |
-| [`crates/auction-application/src/ports/scheduling/`](src/ports/scheduling) | 周排期、赛季早鸟日历、IANA 时区来源、Worker 排期 bootstrap |
+| [`crates/auction-application/src/ports/scheduling/`](src/ports/scheduling) | Worker 排期 bootstrap 与 `RecurringSchedule`；周排期、赛季早鸟与 IANA 时区规则在 `auction_domain::scheduling` |
 | [`crates/auction-application/src/ports/public/`](src/ports/public) | 规则、黑名单、补偿池、装备链接、会话与登录时长偏好、装备标记与提醒偏好、读模型缓存 |
 | [`crates/auction-application/src/ports/admin/`](src/ports/admin) | 拍卖创建/排期/列表、lot 修改、装备录入、论坛预览、邮件状态、规则、runtime 配置、凭据、用户、世界启停、审计、改名历史、结算目录 |
 | [`crates/auction-application/src/ports/mail/`](src/ports/mail) | 轮询持久化、业务处理、注册/换绑、诊断证据、装备读取诊断、邮箱维护、展示投影 |
-| [`crates/auction-application/src/ports/delivery/`](src/ports/delivery) | 投递 outbox Worker、发送节奏分组、Send/Take 期望冻结、Admin 投递操作 |
+| [`crates/auction-application/src/ports/delivery/`](src/ports/delivery) | 投递 outbox Worker、发送节奏分组、Send/Take 期望冻结、Admin 投递列表与证据详情（尝试、Sent 观察/目击、领取、处置、来源义务与恢复）、人工 Sent 准入快照与判定 |
 | [`crates/auction-application/src/ports/settlement/`](src/ports/settlement) | 结算命令、Worker 调度、履约、联合远端证据、资金、内部履约、报表 |
 | [`crates/auction-application/src/ports/recovery/`](src/ports/recovery) | 付款超时恢复的调度、命令、健康与报表 |
 | [`crates/auction-application/src/ports/forum/`](src/ports/forum) | 论坛主题同步、回帖导入、Public 镜像、装备标色规则、论坛私信、目标资料 |
@@ -51,7 +51,7 @@
 | `PublicSessionService` / `AdminSessionService` | 会话签发与校验 |
 | Admin 系列服务 | 凭据、用户、规则、runtime 配置、录入、世界、排期等后台命令 |
 | `SettlementEquipmentLossPort` | 显式人工装备损失 preview/resolve；稳定命令绑定 actor/reason、UID、recovery/payment/delivery 版本和冻结卖家金额，安全投影不输出原载荷；外部买方补偿声明不等于完成回执，详见[数据库契约](../../docs/contracts/database.md#结算资金恢复与投递) |
-| `DeliverySentConfirmationPort` | 正式 CLI 的人工 Sent preview/confirm；v1 观察绑定冻结正文摘要、身份、分钟时窗、金额与实际资产，已收取资产和旧尝试歧义分别显式接受；独立 operator proof 只恢复正常对账，详见[数据库契约](../../docs/contracts/database.md#结算资金恢复与投递) |
+| `DeliverySentConfirmationPort` | 正式 CLI 与 Admin（`DeliverySentProofService` 选择已写入证据后）共用的人工 Sent preview/confirm；v1 观察绑定冻结正文摘要、身份、分钟时窗、金额与实际资产，已收取资产和旧尝试歧义分别显式接受；独立 operator proof 只恢复正常对账，详见[数据库契约](../../docs/contracts/database.md#结算资金恢复与投递) |
 
 ## 外部客户端观测
 

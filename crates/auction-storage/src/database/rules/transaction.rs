@@ -69,6 +69,10 @@ impl AdminRulesTransactionRunner for PostgresStore {
                                     AdminRulesTransactionError::SerializationConflict
                                 ) && attempt + 1 < policy.max_attempts
                                 {
+                                    crate::database::serializable_retry_backoff(usize::from(
+                                        attempt + 1,
+                                    ))
+                                    .await;
                                     continue;
                                 }
                                 crate::database::observe_retry_exhaustion(
@@ -86,6 +90,10 @@ impl AdminRulesTransactionRunner for PostgresStore {
                             if error.is_serialization_conflict()
                                 && attempt + 1 < policy.max_attempts
                             {
+                                crate::database::serializable_retry_backoff(usize::from(
+                                    attempt + 1,
+                                ))
+                                .await;
                                 continue;
                             }
                             crate::database::observe_retry_exhaustion(

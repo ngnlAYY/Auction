@@ -92,15 +92,30 @@ pub(super) async fn advance_postgres(
 
         let payment_satisfied = row.payment_execution_state.as_deref() == Some("satisfied");
         let equipment_satisfied = row.equipment_execution_state.as_deref() == Some("satisfied");
+        // 阶段推进只在领域层判定；这里只负责把锁定行投影成事实并执行结果分支。
+        let facts = auction_domain::RecoveryAdvanceFacts {
+            world: match row.world_id.as_str() {
+                "main" => auction_domain::SettlementWorld::Main,
+                "isekai" => auction_domain::SettlementWorld::Isekai,
+                _ => return Err(repository_error("recovery world 不受支持")),
+            },
+            stage: auction_domain::RecoveryStage::parse(&row.stage)
+                .ok_or_else(|| repository_error("recovery due case 状态不支持推进"))?,
+            payment_satisfied,
+            payment_completed_at: row.payment_completed_at,
+            equipment_satisfied,
+            equipment_completed_at: row.equipment_completed_at,
+            reminder_count: row.reminder_count,
+            reminder_limit: row.reminder_limit,
+            payment_sent_proven: row.payment_sent_proven,
+            created_at: row.created_at,
+            observed_at: now,
+        };
         let (next_stage, next_reminder_count, completed_at, create_reminder) =
-            if row.world_id == "main" && payment_satisfied {
-                ("completed", row.reminder_count, row.payment_completed_at, false)
-            } else if row.world_id == "isekai" && equipment_satisfied {
-                ("completed", row.reminder_count, row.equipment_completed_at, false)
-            } else if row.world_id == "isekai" && payment_satisfied {
-                ("delivering_equipment", row.reminder_count, None, false)
-            } else if row.stage == "awaiting_payment" {
-                if !row.payment_sent_proven {
+            match auction_domain::next_recovery_advance(&facts)
+                .map_err(|error| repository_error(&error.to_string()))?
+            {
+                auction_domain::RecoveryAdvance::DeferPaymentReminder => {
                     // W14.6（D9）：付款邮件（含 COD/载体）尚无发送证明时不提前提醒，
                     // 只延后本轮并记录可观测审计；不修改冻结的 payment_deadline_at。
                     sqlx::query(
@@ -145,28 +160,19 @@ pub(super) async fn advance_postgres(
                         advanced_at: now,
                     }));
                 }
-                if row.reminder_count >= row.reminder_limit {
-                    return Err(repository_error("recovery 提醒次数已超过冻结上限"));
+                auction_domain::RecoveryAdvance::Completed { completed_at } => {
+                    ("completed", row.reminder_count, Some(completed_at), false)
                 }
-                (
-                    "payment_overdue",
-                    row.reminder_count
-                        .checked_add(1)
-                        .ok_or_else(|| repository_error("recovery 提醒次数溢出"))?,
-                    None,
-                    true,
-                )
-            } else {
-                return Err(repository_error("recovery due case 状态不支持推进"));
+                auction_domain::RecoveryAdvance::DeliverEquipment => {
+                    ("delivering_equipment", row.reminder_count, None, false)
+                }
+                auction_domain::RecoveryAdvance::RemindPayment { reminder_count } => {
+                    ("payment_overdue", reminder_count, None, true)
+                }
             };
 
-        if next_stage == "completed" {
-            let Some(completed_at) = completed_at else {
-                return Err(repository_error("recovery 完成事实缺少履约时间"));
-            };
-            if completed_at < row.created_at || completed_at > now {
-                return Err(repository_error("recovery 完成事实时间越界"));
-            }
+        if next_stage == "completed" && completed_at.is_none() {
+            return Err(repository_error("recovery 完成事实缺少履约时间"));
         }
 
         let updated = sqlx::query(

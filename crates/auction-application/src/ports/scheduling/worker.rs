@@ -60,7 +60,7 @@ pub struct ScheduledRoundBootstrap {
     pub request_hash: super::RequestHash,
     pub policy: AuctionPolicyTemplate,
     /// 新轮次必须冻结原始 IANA 本地计划，后继不按 UTC 固定时长推算。
-    pub schedule_source: super::AuctionScheduleSource,
+    pub schedule_source: auction_domain::AuctionScheduleSource,
     /// 新拍卖最早接收装备的时刻；语义与开拍后继一致，不参与请求摘要。
     pub intake_opens_at: Option<DateTime<Utc>>,
 }

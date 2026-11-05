@@ -9,15 +9,15 @@ use auction_application::{
     AdminRulesReader, AdminRulesRequest, AdminUpdateAuctionScheduleCommand, AdminWorldPort,
     AdminWorldSetEnabledCommand, ApplicationFuture, AuctionLifecycleCommand,
     AuctionLifecycleCommandPort, AuctionLifecyclePolicy, AuctionLifecycleResult,
-    AuctionLifecycleService, AuctionPolicyTemplate, AuctionScheduleCalendar, Clock,
-    CompetitionCommandOutcome, CompetitionCommandPort, CompetitionService, CreateProxyCommand,
-    ExecuteSlowProxyCommand, LowerProxyCommand, PlaceBidCommand, SlowProxyCommandPort,
+    AuctionLifecycleService, AuctionPolicyTemplate, Clock, CompetitionCommandOutcome,
+    CompetitionCommandPort, CompetitionService, CreateProxyCommand, ExecuteSlowProxyCommand,
+    LowerProxyCommand, PlaceBidCommand, SlowProxyCommandPort,
 };
 #[cfg(feature = "postgres")]
 use auction_application::{
     AdminAuctionCreateService, AdminAuctionScheduleService, AdminRulesService, AdminWorldService,
 };
-use auction_domain::CompetitionPlan;
+use auction_domain::{AuctionScheduleCalendar, CompetitionPlan};
 
 use super::DatabaseStore;
 

@@ -4,12 +4,10 @@ use chrono::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::super::ConfigError;
-use auction_application::{
-    AuctionEarlyBirdConfig, AuctionPolicyTemplate, AuctionScheduleCalendar, AuctionWeeklySchedule,
-};
+use auction_application::AuctionPolicyTemplate;
 use auction_domain::{
-    AdjustmentAnchor, DEFAULT_COD_RETURN_LIMIT, RecoveryMode, RecoveryPolicy, SettlementMode,
-    SettlementPolicy,
+    AdjustmentAnchor, AuctionEarlyBirdConfig, AuctionScheduleCalendar, AuctionWeeklySchedule,
+    DEFAULT_COD_RETURN_LIMIT, RecoveryMode, RecoveryPolicy, SettlementMode, SettlementPolicy,
 };
 
 /// 拍卖创建时冻结的非敏感策略配置。

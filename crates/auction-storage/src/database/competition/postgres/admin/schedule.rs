@@ -117,7 +117,7 @@ async fn load_admin_auction_schedule_inner(
     let schedule_source = row
         .try_get::<Option<Value>, _>("schedule_snapshot")
         .map_err(map_sql_error)?
-        .map(serde_json::from_value::<auction_application::AuctionScheduleSource>)
+        .map(serde_json::from_value::<auction_domain::AuctionScheduleSource>)
         .transpose()
         .map_err(|_| invalid_state("Admin 拍卖排期来源无效"))?;
     let snapshot = AdminAuctionScheduleSnapshot {

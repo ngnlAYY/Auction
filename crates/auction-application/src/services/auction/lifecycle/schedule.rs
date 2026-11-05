@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::{AuctionScheduleSlot, AuctionScheduleSource, AuctionScheduleTimes};
+use auction_domain::{AuctionScheduleSlot, AuctionScheduleSource, AuctionScheduleTimes};
 
 /// 冻结周链遇到早鸟替代时向后顺延的最大周数，覆盖约两年。
 const MAX_SUPPRESSED_WEEKS: i64 = 106;
@@ -56,7 +56,7 @@ pub(super) fn successor_plan(
         scheduled_end_at: chrono::DateTime<chrono::Utc>,
         policy: serde_json::Value,
         #[serde(skip_serializing_if = "Option::is_none")]
-        schedule_source: &'a Option<crate::AuctionScheduleSource>,
+        schedule_source: &'a Option<auction_domain::AuctionScheduleSource>,
     }
     let create_request_hash = RequestHash::from_request(
         "scheduled_auction_create",

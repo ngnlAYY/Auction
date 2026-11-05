@@ -344,6 +344,19 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         )
         .route("/api/v1/admin/audit", get(admin_audit::list))
         .route("/api/v1/admin/deliveries", get(delivery_admin::list))
+        .route("/api/v1/admin/deliveries/{delivery_id}", get(delivery_admin::detail))
+        .route(
+            "/api/v1/admin/deliveries/{delivery_id}/sent-proof/preview",
+            post(delivery_admin::sent_proof_preview).layer(DefaultBodyLimit::max(16 << 10)).layer(
+                middleware::from_fn_with_state(strict_json::post(16 << 10), strict_json::enforce),
+            ),
+        )
+        .route(
+            "/api/v1/admin/deliveries/{delivery_id}/sent-proof/confirm",
+            post(delivery_admin::sent_proof_confirm).layer(DefaultBodyLimit::max(16 << 10)).layer(
+                middleware::from_fn_with_state(strict_json::post(16 << 10), strict_json::enforce),
+            ),
+        )
         .route(
             "/api/v1/admin/deliveries/{delivery_id}/release",
             post(delivery_admin::release).layer(DefaultBodyLimit::max(4 << 10)).layer(

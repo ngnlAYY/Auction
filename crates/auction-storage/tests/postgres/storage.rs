@@ -8,7 +8,7 @@
 
 use crate::support;
 
-use auction_application::WorldReader;
+use auction_application::{PublicPriceHistoryReader, WorldReader};
 use auction_storage::postgres_expected_migration_version;
 use chrono::Utc;
 
@@ -292,6 +292,60 @@ async fn postgres_public_login_serializes_concurrent_evictions_under_user_lock()
     .expect("统计并发登录后的会话");
     assert_eq!(active, 10, "并发登录后有效会话仍等于上限");
     assert_eq!(revoked, 2, "两次满额登录各注销一个最久未活动的会话");
+
+    store.postgres_pool().close().await;
+}
+
+/// 迁移 000084 的价格历史索引必须与查询里恒定的可见集合条件一致：只覆盖已成交且有买家的
+/// lot，前导键是游标页的排序键。索引是纯候选入口，可见集合仍由 SQL 决定。
+#[tokio::test]
+async fn postgres_price_history_index_matches_owner_predicate() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+
+    let (definition, predicate): (String, Option<String>) = sqlx::query_as(
+        "SELECT pg_get_indexdef(i.indexrelid), pg_get_expr(i.indpred, i.indrelid)
+         FROM pg_index i
+         JOIN pg_class c ON c.oid = i.indexrelid
+         WHERE c.relname = 'lots_sold_history_effective_end_idx'",
+    )
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取价格历史索引定义");
+
+    assert!(
+        definition.contains("btree (effective_end_at DESC, id)"),
+        "前导键必须是游标页排序键：{definition}"
+    );
+    assert!(
+        definition.contains("INCLUDE (auction_id, current_price, lot_number)"),
+        "非搜索列以 INCLUDE 提供，避免改变唯一性或写入要求：{definition}"
+    );
+    let predicate = predicate.expect("部分索引必须带谓词");
+    assert!(
+        predicate.contains("status = 'sold'::text")
+            && predicate.contains("leader_user_id IS NOT NULL"),
+        "谓词必须与查询恒定条件一致：{predicate}"
+    );
+
+    // 索引不得改变价格历史的可见集合：空库上带与不带索引的结果都必须为空页。
+    let request = auction_application::PublicPriceHistoryListRequest {
+        name_terms: Vec::new(),
+        world_id: None,
+        closed_from: None,
+        closed_before: None,
+        minimum_price: None,
+        maximum_price: None,
+        buyer: None,
+        seller: None,
+        sort: auction_application::PublicPriceHistorySort::ClosedDesc,
+        limit: 25,
+        offset: 0,
+        cursor: None,
+    };
+    let page = store.list_public_price_history(request).await.expect("空库价格历史编号页");
+    assert_eq!(page.entries.len(), 0, "空库不应有历史行");
+    assert_eq!(page.total, Some(0), "空库统计应为零");
 
     store.postgres_pool().close().await;
 }

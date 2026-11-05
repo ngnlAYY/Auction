@@ -84,7 +84,7 @@ pub(super) async fn load_lifecycle_context_postgres(
     let schedule_source = row
         .try_get::<Option<Value>, _>("schedule_snapshot")
         .map_err(map_sql_error)?
-        .map(serde_json::from_value::<auction_application::AuctionScheduleSource>)
+        .map(serde_json::from_value::<auction_domain::AuctionScheduleSource>)
         .transpose()
         .map_err(|_| invalid_state("周排期来源快照无效"))?;
     if let Some(source) = &schedule_source {

@@ -12,6 +12,13 @@ mod mapping;
 #[cfg(feature = "postgres")]
 mod postgres;
 
+/// 只在 `test-db` 下暴露生产查询原文给基准/EXPLAIN 夹具，保证测量的是同一份 SQL，
+/// 而不是测试里另写一份副本；默认构建与发布制品不包含该出口。
+#[cfg(feature = "test-db")]
+pub mod benchmark_sql {
+    pub use super::postgres::{cursor_query_sql, numbered_query_sql};
+}
+
 impl PublicPriceHistoryReader for DatabaseStore {
     fn list_public_price_history(
         &self,

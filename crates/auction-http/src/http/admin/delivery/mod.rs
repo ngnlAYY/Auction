@@ -4,8 +4,10 @@
 
 mod commands;
 mod common;
+mod detail;
 mod list;
 mod mapping;
+mod sent_proof;
 
 pub(super) use super::{
     AdminApiState, admin_session_guard, api_error, authenticated_admin_mutation,
@@ -14,5 +16,7 @@ pub(super) use super::{
 };
 pub(super) use commands::{reconcile, release, retry};
 pub(super) use common::{feature_unavailable, map_delivery_error};
+pub(super) use detail::detail;
 pub(super) use list::list;
-pub(super) use mapping::map_snapshot;
+pub(super) use mapping::{map_detail, map_sent_proof_preview, map_sent_proof_result, map_snapshot};
+pub(super) use sent_proof::{confirm as sent_proof_confirm, preview as sent_proof_preview};

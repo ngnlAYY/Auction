@@ -11,9 +11,9 @@ use auction_application::{
     AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort, AdminRuntimeConfigService,
     AdminSessionConfig, AdminSessionPort, AdminSessionService, AdminSessionStore, AdminUserPort,
     AdminUserService, AdminWorldPort, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
-    DeliveryAdminPort, OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort,
-    RecoveryCommandPort, RecoveryCommandService, RecoveryReportReader, SettlementCatalogReader,
-    SettlementReportReader,
+    DeliveryAdminPort, DeliverySentConfirmationPort, DeliverySentProofService,
+    OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort, RecoveryCommandPort,
+    RecoveryCommandService, RecoveryReportReader, SettlementCatalogReader, SettlementReportReader,
 };
 use auction_config::{AppConfig, TomlRuntimeFileStore};
 use auction_http::AdminApiState;
@@ -235,6 +235,11 @@ pub(super) async fn configure_state(
         Arc::new(DatabaseAdminMailCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
     let admin_proxy_events: Arc<dyn AdminProxyEventReader> = store.clone();
     let delivery_admin: Arc<dyn DeliveryAdminPort> = store.clone();
+    let delivery_sent_confirmation: Arc<dyn DeliverySentConfirmationPort> = store.clone();
+    let delivery_sent_proof = Arc::new(DeliverySentProofService::new(
+        Arc::clone(&delivery_admin),
+        delivery_sent_confirmation,
+    ));
     let operations_alert: Arc<dyn OperationsAlertStore> = store.clone();
     let operations_alert_source: Arc<dyn OperationsAlertSourceReader> = store.clone();
     let credential_health: Arc<dyn AdminCredentialHealthReader> = store.clone();
@@ -310,6 +315,7 @@ pub(super) async fn configure_state(
         security,
     )
     .with_forum_reader(store.clone())
+    .with_delivery_sent_proof(delivery_sent_proof)
     .with_credential_check(credential_check)
     .with_auction_schedule(auction_schedule)
     .with_admin_worlds(admin_worlds)
