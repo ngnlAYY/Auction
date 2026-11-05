@@ -9,15 +9,16 @@ use std::{
     io::{self, Read, Write},
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use auction_application::MailDiagnosticError;
 use uuid::Uuid;
 
 use super::{
-    EvictionHeader, MAX_FILE_BYTES, MAX_HEADER_BYTES, MoogleMailDiagnosticArchiveConfig,
-    RecordEntry, WRITE_UNKNOWN_FAILURE_CODE, eviction_order, eviction_plan,
+    EvictionHeader, MAX_FILE_BYTES, MAX_HEADER_BYTES, MailDiagnosticRetentionSnapshot,
+    MoogleMailDiagnosticArchiveConfig, RecordEntry, WRITE_UNKNOWN_FAILURE_CODE, eviction_order,
+    eviction_plan,
 };
 
 const HARD_MAX_FILES: usize = 1024;
@@ -392,6 +393,101 @@ fn write_unknown_evidence(path: &Path, owner: u32) -> bool {
         return true;
     };
     parsed.outcome.failure_code == WRITE_UNKNOWN_FAILURE_CODE
+}
+
+pub(super) fn retention_snapshot(
+    directory: &Path,
+    retention: Duration,
+    hold: Duration,
+    now: SystemTime,
+) -> Result<MailDiagnosticRetentionSnapshot, MailDiagnosticError> {
+    let path = normalized_target(directory)?;
+    let directory = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(MailDiagnosticRetentionSnapshot::default());
+        }
+        Err(error) => {
+            let _ = error;
+            return Err(MailDiagnosticError::Io);
+        }
+    };
+    if directory.file_type().is_symlink() || !directory.is_dir() {
+        return Err(MailDiagnosticError::Io);
+    }
+    let owner = directory.uid();
+    let mut snapshot =
+        MailDiagnosticRetentionSnapshot { directory_present: true, ..Default::default() };
+    for entry in fs::read_dir(&path).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "list_retention_snapshot",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })? {
+        let entry = entry.map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "read_retention_entry",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Io
+        })?;
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            snapshot.unexpected_entries = snapshot.unexpected_entries.saturating_add(1);
+            continue;
+        };
+        if managed_name(name, false).is_some() {
+            let metadata = private_file(&entry.path(), owner, false)?;
+            let modified = metadata.modified().map_err(|diagnostic_cause| {
+                safe_diagnostics::error(
+                    "mooglemail_diagnostics",
+                    "read_retention_timestamp",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                MailDiagnosticError::Io
+            })?;
+            let age = now.duration_since(modified).unwrap_or(Duration::ZERO);
+            snapshot.total_files = snapshot.total_files.saturating_add(1);
+            let write_unknown =
+                if age >= retention { write_unknown_evidence(&entry.path(), owner) } else { false };
+            match super::classify_evidence(age, retention, hold, write_unknown) {
+                super::EvidenceRetention::Retained => {
+                    snapshot.retained_files = snapshot.retained_files.saturating_add(1);
+                }
+                super::EvidenceRetention::OrdinaryExpired => {
+                    snapshot.ordinary_expired_files =
+                        snapshot.ordinary_expired_files.saturating_add(1);
+                    snapshot.ordinary_expired_bytes =
+                        snapshot.ordinary_expired_bytes.saturating_add(metadata.len());
+                }
+                super::EvidenceRetention::WriteUnknownHeld => {
+                    snapshot.write_unknown_held_files =
+                        snapshot.write_unknown_held_files.saturating_add(1);
+                    snapshot.write_unknown_held_bytes =
+                        snapshot.write_unknown_held_bytes.saturating_add(metadata.len());
+                }
+                super::EvidenceRetention::WriteUnknownOverHold => {
+                    snapshot.write_unknown_held_files =
+                        snapshot.write_unknown_held_files.saturating_add(1);
+                    snapshot.write_unknown_held_bytes =
+                        snapshot.write_unknown_held_bytes.saturating_add(metadata.len());
+                    snapshot.write_unknown_over_hold_window_files =
+                        snapshot.write_unknown_over_hold_window_files.saturating_add(1);
+                }
+            }
+        } else if managed_name(name, true).is_some() {
+            snapshot.temporary_files = snapshot.temporary_files.saturating_add(1);
+        } else {
+            snapshot.unexpected_entries = snapshot.unexpected_entries.saturating_add(1);
+        }
+    }
+    Ok(snapshot)
 }
 
 pub(super) fn persist(

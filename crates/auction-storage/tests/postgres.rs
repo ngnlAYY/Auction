@@ -15,6 +15,8 @@ mod lot_watch;
 mod operations_alert;
 #[path = "postgres/realtime_sequence.rs"]
 mod realtime_sequence;
+#[path = "postgres/retention_dry_run.rs"]
+mod retention_dry_run;
 #[path = "postgres/snapshot_timezone.rs"]
 mod snapshot_timezone;
 #[path = "postgres/storage.rs"]

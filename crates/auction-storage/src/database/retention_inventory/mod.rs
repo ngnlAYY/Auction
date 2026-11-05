@@ -9,9 +9,9 @@ use super::PostgresStore;
 /// 盘点证据的机器可读格式标识。
 pub const RETENTION_INVENTORY_FORMAT: &str = "auction-retention-inventory.v1";
 
-/// 编译进运维制品的保留政策矩阵。
+/// 编译进运维制品的保留政策矩阵（v2：运行态数据族带删除期限，删除仍须只读演练与批准）。
 const RETENTION_POLICY_JSON: &str =
-    include_str!("../../../../../ops/deploy/retention-policy.v1.json");
+    include_str!("../../../../../ops/deploy/retention-policy.v2.json");
 
 /// 单次盘点最多报告的 public 关系数量。
 const MAX_RELATIONS: i64 = 512;
@@ -36,8 +36,32 @@ mod realtime;
 use catalog::*;
 use mapping::*;
 pub use model::*;
+pub(crate) use policy::retention_rule_spec;
 use policy::*;
 use realtime::*;
+
+/// 供同 crate 的只读清理演练复用同一份内嵌政策（含期限），避免两处解析分叉。
+pub(crate) fn load_retention_policy_for_dry_run() -> Result<RetentionPolicy, RetentionInventoryError>
+{
+    load_retention_policy()
+}
+
+/// 内嵌政策的 SHA-256；盘点与演练回执都用它固定政策身份。
+pub(crate) fn retention_policy_sha256() -> String {
+    sha256_hex(RETENTION_POLICY_JSON.as_bytes())
+}
+
+/// 按规则读取政策 v2 的期限（天）；只用于运维回执，不授权任何变更。
+pub(crate) fn retention_policy_rule_duration_days(rule_id: &str) -> Option<i64> {
+    load_retention_policy()
+        .ok()?
+        .families
+        .iter()
+        .flat_map(|family| family.retention.iter())
+        .flat_map(|retention| retention.rules.iter())
+        .find(|rule| rule.rule_id == rule_id)
+        .map(|rule| rule.duration_days)
+}
 
 impl PostgresStore {
     /// 在只读、可重复读事务中收集有限的 PostgreSQL retention 盘点。`confirmed_database_name` 必须与
@@ -127,6 +151,7 @@ impl PostgresStore {
             "foreign_keys 的依赖关系在政策明确前一律视为资格阻断因素".to_owned(),
             "eligibility_assessed=false；结果不是归档或删除授权".to_owned(),
             "relations 与 policy_tables 的行数和体积统计可能因 PostgreSQL 统计信息延迟或重置而不精确".to_owned(),
+            "mail_diagnostic_files 是文件族，没有数据库表；候选文件数由 auction-cli db retention-dry-run 统计".to_owned(),
         ];
         if !migration.current {
             notes.push(

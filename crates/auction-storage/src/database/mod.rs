@@ -99,6 +99,7 @@ pub use retention_inventory::{
     PostgresRealtimeStreamInventory, PostgresRelationInventory, PostgresRetentionFamilyInventory,
     PostgresRetentionInventory, PostgresRetentionTableInventory, PostgresSchemaIdentity,
     RETENTION_INVENTORY_FORMAT, RetentionInventoryError, RetentionPolicy, RetentionPolicyFamily,
+    RetentionPolicyRetention, RetentionPolicyRule, RetentionRestoreObjectives,
 };
 #[cfg(feature = "postgres")]
 pub use shutdown_window::{
@@ -202,7 +203,14 @@ mod recovery_report;
 #[path = "recovery_scheduler/scheduler.rs"]
 mod recovery_scheduler;
 #[cfg(feature = "postgres")]
+mod retention_dry_run;
+#[cfg(feature = "postgres")]
 mod retention_inventory;
+#[cfg(feature = "postgres")]
+pub use retention_dry_run::{
+    RETENTION_DRY_RUN_FORMAT, RetentionDryRunError, RetentionDryRunReport, RetentionFamilyDryRun,
+    RetentionRuleDryRun, RetentionTableDryRun,
+};
 #[cfg(feature = "postgres")]
 mod rules;
 #[cfg(feature = "postgres")]
@@ -257,6 +265,11 @@ pub(crate) use backend::{
 pub(crate) use pool::PostgresPoolMetricsSource;
 #[cfg(feature = "postgres")]
 pub use postgres_store::{PostgresStore, postgres_expected_migration_version};
+/// 政策 v2 的规则期限（天）；运维回执用它记录文件族期限，不授权变更。
+#[cfg(feature = "postgres")]
+pub fn retention_policy_rule_duration_days(rule_id: &str) -> Option<i64> {
+    retention_inventory::retention_policy_rule_duration_days(rule_id)
+}
 #[cfg(feature = "postgres")]
 pub use store::DatabaseStore;
 

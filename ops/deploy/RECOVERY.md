@@ -422,4 +422,4 @@ auction-cli db rebuild --database auction --maintenance-secrets … --owner-secr
 
 ## 数据保留
 
-`auction-cli db inventory` 按[保留政策](retention-policy.v1.json)统计各数据族的规模，只读、不授权任何归档或删除。当前政策对业务数据全部为永久保留；任何清理都需要先由业务负责人确定保留期限、法律保留与归档方案，再单独实现与评审。
+`auction-cli db inventory` 按[保留政策 v2](retention-policy.v2.json)统计各数据族的规模，只读、不授权任何归档或删除。`auction-cli db retention-dry-run` 按政策期限统计运行态族的候选行与加密诊断文件候选数，只执行 SELECT 并输出带 `run_id` 的私有回执；`mutation_executed`/`deletion_authorized` 恒为 false。审计、资金与业务事实永久保留；任何实际清理都需要先完成只读演练并经用户批准，再单独实现与评审。

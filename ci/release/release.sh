@@ -810,7 +810,7 @@ package_release() (
 		"ops/deploy/MIGRATION-DRILL.md|docs/MIGRATION-DRILL.md|644" \
 		"ops/deploy/migration-drill-receipt.template.json|docs/migration-drill-receipt.template.json|644" \
 		"apps/auction-cli/README.md|docs/CLI.md|644" \
-		"ops/deploy/retention-policy.v1.json|retention-policy.v1.json|644" \
+		"ops/deploy/retention-policy.v2.json|retention-policy.v2.json|644" \
 		"ops/deploy/caddy/Caddyfile|caddy/Caddyfile|644" \
 		"$temporary_root/SYSTEMD.md|systemd/README.md|644" \
 		"ops/deploy/systemd/auction-backup.service.example|systemd/auction-backup.service.example|644" \

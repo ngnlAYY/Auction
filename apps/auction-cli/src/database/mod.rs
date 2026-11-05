@@ -74,6 +74,9 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: DbCommand) -> anyhow::R
         DbCommand::Inventory { database, output } => {
             evidence::inventory(config_dir, &database, &output).await
         }
+        DbCommand::RetentionDryRun { database, output } => {
+            evidence::retention_dry_run(config_dir, &database, &output).await
+        }
         DbCommand::InspectConsistency { database, output } => {
             inspection::run(config_dir, &database, &output).await
         }
