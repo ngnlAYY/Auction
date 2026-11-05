@@ -13,6 +13,9 @@ pub enum OperationsAlertSource {
 }
 
 impl OperationsAlertSource {
+    /// 来源闭集；与迁移 005/020 的 `operations_alert_signals.source` CHECK 一致。
+    pub const ALL: [Self; 4] = [Self::Process, Self::Delivery, Self::Fulfillment, Self::Recovery];
+
     /// 返回数据库和日志使用的稳定名称。
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -21,6 +24,11 @@ impl OperationsAlertSource {
             Self::Fulfillment => "fulfillment",
             Self::Recovery => "recovery",
         }
+    }
+
+    /// 从持久化名称解析；未知名称返回 `None`，调用方不得回退到默认来源。
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|source| source.as_str() == value)
     }
 }
 
@@ -52,6 +60,26 @@ pub enum OperationsAlertKind {
 }
 
 impl OperationsAlertKind {
+    /// 持久化种类闭集；与迁移 005/020 的 `operations_alert_signals.kind` CHECK 一致。
+    pub const ALL: [Self; 16] = [
+        Self::ServiceMissing,
+        Self::ServiceDegraded,
+        Self::AuditFailure,
+        Self::SourceUnavailable,
+        Self::DeliveryPending,
+        Self::DeliveryReturnedMail,
+        Self::DeliveryManualReconcile,
+        Self::FulfillmentBacklog,
+        Self::FulfillmentFailed,
+        Self::FulfillmentManualReconcile,
+        Self::RecoveryPaymentOverdue,
+        Self::RecoveryRelistPending,
+        Self::RecoveryFailed,
+        Self::RecoveryManualReconcile,
+        Self::BalanceLow,
+        Self::EvidenceStale,
+    ];
+
     /// 返回数据库和通知摘要使用的稳定名称。
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -73,9 +101,55 @@ impl OperationsAlertKind {
             Self::EvidenceStale => "evidence_stale",
         }
     }
+
+    /// 告警分级（决策 66）：只有付款逾期与待重列属于非紧急的每日摘要。
+    pub const fn severity(self) -> OperationsAlertSeverity {
+        match self {
+            Self::RecoveryPaymentOverdue | Self::RecoveryRelistPending => {
+                OperationsAlertSeverity::Digest
+            }
+            _ => OperationsAlertSeverity::Urgent,
+        }
+    }
+
+    /// 该种类下一次重复通知的最小间隔；紧急信号沿用策略冷却，非紧急信号不短于每日摘要节奏。
+    pub fn repeat_interval(self, cooldown: Duration) -> Duration {
+        match self.severity() {
+            OperationsAlertSeverity::Urgent => cooldown,
+            OperationsAlertSeverity::Digest => cooldown.max(OPERATIONS_ALERT_DIGEST_INTERVAL),
+        }
+    }
 }
 
 impl fmt::Display for OperationsAlertKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// 非紧急（每日摘要）信号的重复通知节奏。
+pub const OPERATIONS_ALERT_DIGEST_INTERVAL: Duration = Duration::from_secs(24 * 3_600);
+
+/// 告警分级闭集（决策 66）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum OperationsAlertSeverity {
+    /// 需要立即处理；按策略冷却重复通知。
+    Urgent,
+    /// 非紧急；重复通知并入每日摘要节奏（摘要聚合本身属于 W5.8）。
+    Digest,
+}
+
+impl OperationsAlertSeverity {
+    /// 返回稳定名称；日志与后续告警台使用同一闭集。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Urgent => "urgent",
+            Self::Digest => "digest",
+        }
+    }
+}
+
+impl fmt::Display for OperationsAlertSeverity {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
@@ -127,6 +201,16 @@ impl OperationsAlertSignal {
         };
         signal.validate()?;
         Ok(signal)
+    }
+
+    /// 返回该 signal 的告警分级。
+    pub const fn severity(&self) -> OperationsAlertSeverity {
+        self.kind.severity()
+    }
+
+    /// 返回该 signal 下一次重复通知的最小间隔。
+    pub fn repeat_interval(&self, cooldown: Duration) -> Duration {
+        self.kind.repeat_interval(cooldown)
     }
 
     /// 校验持久化前后的 signal identity 与数值边界。

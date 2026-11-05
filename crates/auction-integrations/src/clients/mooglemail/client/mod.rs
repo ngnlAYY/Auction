@@ -211,6 +211,11 @@ impl MoogleMailClient {
         Arc::clone(&self.external_metrics)
     }
 
+    /// 远端 endpoint 的稳定 origin；只用于扫描检查点作用域，不含路径、凭据或查询。
+    pub(crate) fn endpoint_scope(&self) -> &str {
+        &self.builder.origin
+    }
+
     /// 账号忙熔断窗口内不允许发起远端写入；失败关闭的断言在请求发出前后仍由适配器执行。
     /// 调用方只能在 sending 围栏前使用该判断，不能据此改写业务状态。
     pub fn permits_write(&self, world: MoogleMailWorld) -> bool {

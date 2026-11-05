@@ -50,6 +50,8 @@ mod mail_intake;
 #[cfg(feature = "postgres")]
 mod mail_poll;
 #[cfg(feature = "postgres")]
+mod mail_scan_checkpoint;
+#[cfg(feature = "postgres")]
 mod mailbox_sweep;
 #[cfg(feature = "postgres")]
 pub use least_privilege::{apply_runtime_privileges, runtime_privileges_present};

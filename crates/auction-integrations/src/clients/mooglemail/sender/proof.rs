@@ -91,7 +91,8 @@ impl MoogleMailSender {
                     observed_at: summary.sent_at,
                 }),
                 false,
-            );
+            )
+            .await;
         }
         Ok(verified)
     }

@@ -267,7 +267,8 @@ impl MoogleMailSender {
                 observed_at: summary.sent_at,
             }),
             true,
-        );
+        )
+        .await;
         Ok(summaries)
     }
 
@@ -284,6 +285,8 @@ impl MoogleMailSender {
             .checked_add(self.verification_budget)
             .ok_or_else(|| proof::scan_timeout(world))?;
         let round = self.client.read_round(cookie, world, false)?;
+        // 重启后的首个维护轮恢复持久检查点；作用域不匹配或损坏时回退完整校验。
+        self.ensure_read_scan_checkpoint(cookie, world).await;
         let checkpoint = self.read_scan_checkpoint(cookie, world);
         let plan = auction_application::plan_mail_scan(
             checkpoint.as_ref(),
@@ -337,7 +340,7 @@ impl MoogleMailSender {
                         reason: None,
                     },
                 );
-                self.remember_read_scan(cookie, world, scan.newest.clone(), false);
+                self.remember_read_scan(cookie, world, scan.newest.clone(), false).await;
                 if let Err(error) = proof::check_deadline(deadline, world) {
                     self.observe_budget_error(
                         world,
@@ -449,7 +452,8 @@ impl MoogleMailSender {
                     observed_at: summary.received_at,
                 }),
                 true,
-            );
+            )
+            .await;
             return Ok(list.summaries.clone());
         }
         self.remember_read_scan(
@@ -460,7 +464,8 @@ impl MoogleMailSender {
                 observed_at: summary.received_at,
             }),
             true,
-        );
+        )
+        .await;
         if let Some(prefix) = prefix {
             let anchor = shadow_anchor
                 .as_ref()

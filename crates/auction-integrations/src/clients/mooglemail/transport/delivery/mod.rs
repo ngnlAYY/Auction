@@ -35,6 +35,15 @@ impl MoogleMailDeliveryTransport {
         self
     }
 
+    /// 注入 Sent / Read Mail 检查点持久化；未注入时只使用进程内水位。
+    pub fn with_mail_scan_checkpoint_store(
+        mut self,
+        store: Arc<dyn auction_application::MailScanCheckpointStore>,
+    ) -> Self {
+        self.sender = self.sender.with_mail_scan_checkpoint_store(store);
+        self
+    }
+
     /// 配置所有 Send 操作的发送前后 Sent 核对边界。
     pub fn with_send_verification(
         mut self,

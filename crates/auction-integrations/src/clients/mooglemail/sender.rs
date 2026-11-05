@@ -5,8 +5,8 @@ use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
 use crate::diagnostics as safe_diagnostics;
 
 use auction_application::{
-    MailScanCheckpoint, MailScanEvent, MailScanObserver, MailScanWatermark,
-    advance_mail_scan_watermark,
+    MailScanCheckpoint, MailScanCheckpointKey, MailScanCheckpointStore, MailScanEvent,
+    MailScanObserver, MailScanStream, MailScanWatermark, advance_mail_scan_watermark,
 };
 use chrono::Utc;
 
@@ -21,6 +21,8 @@ mod baseline;
 mod equipment;
 mod maintenance;
 mod proof;
+#[cfg(test)]
+mod tests;
 
 pub(crate) use baseline::MoogleMailSentBaseline;
 
@@ -116,6 +118,8 @@ pub struct MoogleMailSender {
     sent_scans: Arc<Mutex<HashMap<MoogleMailWorld, CachedSentScan>>>,
     /// Read Mail 观测水位；独立于投递游标，只用于维护观察计数。
     read_scans: Arc<Mutex<HashMap<MoogleMailWorld, CachedReadScan>>>,
+    /// 可选持久检查点；只缩短重启后的前缀扫描，读取失败仍回退完整扫描。
+    scan_checkpoints: Option<Arc<dyn MailScanCheckpointStore>>,
     scan_observer: Arc<dyn MailScanObserver>,
 }
 
@@ -184,6 +188,7 @@ impl MoogleMailSender {
             sent_baselines: Arc::new(Mutex::new(HashMap::new())),
             sent_scans: Arc::new(Mutex::new(HashMap::new())),
             read_scans: Arc::new(Mutex::new(HashMap::new())),
+            scan_checkpoints: None,
             scan_observer: auction_application::noop_mail_scan_observer(),
         }
     }
@@ -310,6 +315,134 @@ impl MoogleMailSender {
         self.scan_observer.observe(world.as_str(), event);
     }
 
+    /// 注入持久检查点；未注入时行为与只有进程内水位一致。
+    pub fn with_mail_scan_checkpoint_store(
+        mut self,
+        store: Arc<dyn MailScanCheckpointStore>,
+    ) -> Self {
+        self.scan_checkpoints = Some(store);
+        self
+    }
+
+    /// 只有数据库来源的 Cookie 才具备稳定凭据身份与版本；配置 Cookie 只使用内存。
+    fn scan_checkpoint_key(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        stream: MailScanStream,
+    ) -> Option<MailScanCheckpointKey> {
+        let persisted = cookie.persisted_credential()?;
+        let key = MailScanCheckpointKey {
+            credential_id: persisted.id,
+            credential_version: persisted.version,
+            world_id: world.as_str().to_owned(),
+            stream,
+            endpoint_scope: self.client.endpoint_scope().to_owned(),
+        };
+        key.validate().then_some(key)
+    }
+
+    /// 读取持久检查点；缺失、损坏或读取失败都只意味着本轮不能增量。
+    async fn load_scan_checkpoint(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        stream: MailScanStream,
+    ) -> Option<MailScanCheckpoint> {
+        let store = self.scan_checkpoints.as_ref()?;
+        let key = self.scan_checkpoint_key(cookie, world, stream)?;
+        match store.load(&key).await {
+            Ok(Some(checkpoint)) if checkpoint.validate() => Some(checkpoint),
+            Ok(Some(_)) => {
+                tracing::warn!(
+                    world = world.as_str(),
+                    stream = stream.label(),
+                    "MoogleMail 持久扫描检查点无效；回退完整扫描"
+                );
+                None
+            }
+            Ok(None) => None,
+            Err(error) => {
+                let _ = error;
+                tracing::debug!(
+                    world = world.as_str(),
+                    stream = stream.label(),
+                    "MoogleMail 持久扫描检查点读取失败；回退完整扫描"
+                );
+                None
+            }
+        }
+    }
+
+    /// 重启后的首次 Sent 发送前加载持久检查点；已有有效内存条目时不覆盖。
+    async fn ensure_sent_scan_checkpoint(&self, cookie: &MoogleMailCookie, world: MoogleMailWorld) {
+        if self.sent_scan_checkpoint(cookie, world).is_some() {
+            return;
+        }
+        let Some(checkpoint) = self.load_scan_checkpoint(cookie, world, MailScanStream::Sent).await
+        else {
+            return;
+        };
+        let Ok(scope) = self.client.current_sent_scope(cookie, world) else {
+            return;
+        };
+        let Ok(mut cache) = self.sent_scans.lock() else {
+            return;
+        };
+        let reuse_existing = cache.get(&world).is_some_and(|entry| {
+            entry.credential == cookie.observation_key()
+                && self.client.check_sent_scope(cookie, &entry.scope).is_ok()
+        });
+        if !reuse_existing {
+            cache.insert(
+                world,
+                CachedSentScan { credential: cookie.observation_key(), scope, checkpoint },
+            );
+        }
+    }
+
+    /// Read Mail 维护轮加载持久检查点；它与投递游标完全独立。
+    async fn ensure_read_scan_checkpoint(&self, cookie: &MoogleMailCookie, world: MoogleMailWorld) {
+        if self.read_scan_checkpoint(cookie, world).is_some() {
+            return;
+        }
+        let Some(checkpoint) =
+            self.load_scan_checkpoint(cookie, world, MailScanStream::ReadMail).await
+        else {
+            return;
+        };
+        let Ok(mut cache) = self.read_scans.lock() else {
+            return;
+        };
+        if cache.get(&world).is_none_or(|entry| entry.credential != cookie.observation_key()) {
+            cache
+                .insert(world, CachedReadScan { credential: cookie.observation_key(), checkpoint });
+        }
+    }
+
+    /// 持久化失败只影响下次重启优化；当前轮已确认的水位仍保留在内存。
+    async fn persist_scan_checkpoint(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        stream: MailScanStream,
+        checkpoint: &MailScanCheckpoint,
+    ) {
+        let Some(store) = self.scan_checkpoints.as_ref() else {
+            return;
+        };
+        let Some(key) = self.scan_checkpoint_key(cookie, world, stream) else {
+            return;
+        };
+        if store.save(&key, checkpoint).await.is_err() {
+            tracing::debug!(
+                world = world.as_str(),
+                stream = stream.label(),
+                "MoogleMail 持久扫描检查点写入失败；不影响本轮结果"
+            );
+        }
+    }
+
     /// 只有凭据与读取代次仍一致的水位才可用于下一轮前缀。
     pub(crate) fn sent_scan_checkpoint(
         &self,
@@ -352,7 +485,7 @@ impl MoogleMailSender {
     }
 
     /// 记录 Sent 水位；`full` 才推进每日校验时间。水位缺失或作用域变化时只会回退完整扫描。
-    pub(crate) fn remember_sent_scan(
+    pub(crate) async fn remember_sent_scan(
         &self,
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
@@ -369,41 +502,50 @@ impl MoogleMailSender {
         }) else {
             return;
         };
-        let Ok(mut cache) = self.sent_scans.lock().inspect_err(|cause| {
-            safe_diagnostics::warn(
-                "mooglemail_scan",
-                "lock_sent_scan_store",
-                safe_diagnostics::project(cause),
-                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        // 锁只覆盖内存水位更新；持久化必须在释放 guard 后执行。
+        let checkpoint = {
+            let Ok(mut cache) = self.sent_scans.lock().inspect_err(|cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_scan",
+                    "lock_sent_scan_store",
+                    safe_diagnostics::project(cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+            }) else {
+                return;
+            };
+            let previous = cache.get(&world).filter(|entry| {
+                entry.credential == cookie.observation_key()
+                    && self.client.check_sent_scope(cookie, &entry.scope).is_ok()
+            });
+            let watermark = newest
+                .map(|newest| {
+                    advance_mail_scan_watermark(
+                        previous.and_then(|entry| entry.checkpoint.watermark.as_ref()),
+                        &newest,
+                    )
+                })
+                .or_else(|| previous.and_then(|entry| entry.checkpoint.watermark.clone()));
+            let last_full_scan_at = if full {
+                Some(Utc::now())
+            } else {
+                previous.and_then(|entry| entry.checkpoint.last_full_scan_at)
+            };
+            let checkpoint = MailScanCheckpoint { watermark, last_full_scan_at };
+            cache.insert(
+                world,
+                CachedSentScan {
+                    credential: cookie.observation_key(),
+                    scope,
+                    checkpoint: checkpoint.clone(),
+                },
             );
-        }) else {
-            return;
+            checkpoint
         };
-        let previous = cache.get(&world).filter(|entry| {
-            entry.credential == cookie.observation_key()
-                && self.client.check_sent_scope(cookie, &entry.scope).is_ok()
-        });
-        let watermark = newest
-            .map(|newest| {
-                advance_mail_scan_watermark(
-                    previous.and_then(|entry| entry.checkpoint.watermark.as_ref()),
-                    &newest,
-                )
-            })
-            .or_else(|| previous.and_then(|entry| entry.checkpoint.watermark.clone()));
-        let last_full_scan_at = if full {
-            Some(Utc::now())
-        } else {
-            previous.and_then(|entry| entry.checkpoint.last_full_scan_at)
-        };
-        cache.insert(
-            world,
-            CachedSentScan {
-                credential: cookie.observation_key(),
-                scope,
-                checkpoint: MailScanCheckpoint { watermark, last_full_scan_at },
-            },
-        );
+        self.persist_scan_checkpoint(cookie, world, MailScanStream::Sent, &checkpoint).await;
     }
 
     /// Read Mail 水位只绑定凭据；维护观察轮次不携带 Sent 作用域。
@@ -433,45 +575,53 @@ impl MoogleMailSender {
             .map(|entry| entry.checkpoint.clone())
     }
 
-    pub(crate) fn remember_read_scan(
+    pub(crate) async fn remember_read_scan(
         &self,
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
         newest: Option<MailScanWatermark>,
         full: bool,
     ) {
-        let Ok(mut cache) = self.read_scans.lock().inspect_err(|cause| {
-            safe_diagnostics::warn(
-                "mooglemail_scan",
-                "lock_read_scan_store",
-                safe_diagnostics::project(cause),
-                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        let checkpoint = {
+            let Ok(mut cache) = self.read_scans.lock().inspect_err(|cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_scan",
+                    "lock_read_scan_store",
+                    safe_diagnostics::project(cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+            }) else {
+                return;
+            };
+            let previous =
+                cache.get(&world).filter(|entry| entry.credential == cookie.observation_key());
+            let watermark = newest
+                .map(|newest| {
+                    advance_mail_scan_watermark(
+                        previous.and_then(|entry| entry.checkpoint.watermark.as_ref()),
+                        &newest,
+                    )
+                })
+                .or_else(|| previous.and_then(|entry| entry.checkpoint.watermark.clone()));
+            let last_full_scan_at = if full {
+                Some(Utc::now())
+            } else {
+                previous.and_then(|entry| entry.checkpoint.last_full_scan_at)
+            };
+            let checkpoint = MailScanCheckpoint { watermark, last_full_scan_at };
+            cache.insert(
+                world,
+                CachedReadScan {
+                    credential: cookie.observation_key(),
+                    checkpoint: checkpoint.clone(),
+                },
             );
-        }) else {
-            return;
+            checkpoint
         };
-        let previous =
-            cache.get(&world).filter(|entry| entry.credential == cookie.observation_key());
-        let watermark = newest
-            .map(|newest| {
-                advance_mail_scan_watermark(
-                    previous.and_then(|entry| entry.checkpoint.watermark.as_ref()),
-                    &newest,
-                )
-            })
-            .or_else(|| previous.and_then(|entry| entry.checkpoint.watermark.clone()));
-        let last_full_scan_at = if full {
-            Some(Utc::now())
-        } else {
-            previous.and_then(|entry| entry.checkpoint.last_full_scan_at)
-        };
-        cache.insert(
-            world,
-            CachedReadScan {
-                credential: cookie.observation_key(),
-                checkpoint: MailScanCheckpoint { watermark, last_full_scan_at },
-            },
-        );
+        self.persist_scan_checkpoint(cookie, world, MailScanStream::ReadMail, &checkpoint).await;
     }
 
     /// 在持久 sending fence 前只读检查 compose；调用方须持有直到 send 完成的同一凭据 guard。

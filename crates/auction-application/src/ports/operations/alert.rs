@@ -52,5 +52,6 @@ pub use model::{
     OperationsAlertTarget,
 };
 pub use signals::{
-    OperationsAlertError, OperationsAlertKind, OperationsAlertSignal, OperationsAlertSource,
+    OPERATIONS_ALERT_DIGEST_INTERVAL, OperationsAlertError, OperationsAlertKind,
+    OperationsAlertSeverity, OperationsAlertSignal, OperationsAlertSource,
 };

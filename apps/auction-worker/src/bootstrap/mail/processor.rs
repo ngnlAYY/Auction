@@ -89,7 +89,10 @@ pub(super) fn build_processor_and_delivery(
             .map_err(|error| anyhow::Error::msg(error.to_string()))?
             .with_settlement_equipment_secrets(equipment_secrets, delivery_opener)
             .with_sent_baseline(mail_config.sent_baseline_mode, sent_baseline_observer)
-            .with_mail_scan_observer(mail_scan_observer);
+            .with_mail_scan_observer(mail_scan_observer)
+            .with_mail_scan_checkpoint_store(
+                Arc::clone(store) as Arc<dyn auction_application::MailScanCheckpointStore>
+            );
             let processor: Arc<dyn MailProcessor> = Arc::new(
                 auction_application::MailProcessorService::new_for_worlds(
                     world_configs.iter().map(|world| world.world_id.clone()).collect(),

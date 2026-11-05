@@ -29,11 +29,18 @@ impl OperationsAlertObserveCommand {
             OperationsAlertSource::Fulfillment,
             OperationsAlertSource::Recovery,
         ];
+        // 四个来源共享同一 fingerprint 空间：跨来源重复同样代表同一 signal，
+        // 必须在写入前拒绝，避免同一轮出现两条水位或两次通知。
+        let mut fingerprints =
+            std::collections::HashSet::with_capacity(expected.len() * MAX_OPERATIONS_ALERT_SIGNALS);
         for (observation, source) in self.observations.iter().zip(expected) {
             if observation.source != source {
                 return Err(OperationsAlertError::Invalid);
             }
             observation.validate()?;
+            if observation.signals.iter().any(|signal| !fingerprints.insert(signal.fingerprint)) {
+                return Err(OperationsAlertError::Invalid);
+            }
         }
         Ok(())
     }

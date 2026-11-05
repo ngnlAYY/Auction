@@ -221,6 +221,12 @@ impl MoogleMailCredentialSet {
                 false,
             ));
         }
+        // 只有数据库来源同时具备持久 ID 与版本；检查点作用域不得使用进程内观测 UUID。
+        for candidate in &candidates {
+            if let (Some(id), Some(version)) = (candidate.persistent_id, candidate.state_version) {
+                candidate.cookie.bind_persisted_credential(id, version);
+            }
+        }
         Ok(Self {
             candidates: Arc::new(Mutex::new(candidates)),
             invalidator,
