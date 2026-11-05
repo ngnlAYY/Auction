@@ -71,6 +71,10 @@ build-single: build-api build-release
 verify-artifacts:
     @bash ci/release/release.sh verify-artifacts
 
+# 只核对两端 Web payload 体积预算，不构建、不读取原生制品。
+web-size:
+    @bash ci/release/release.sh verify-web-size
+
 # 完整构建、制品门禁与发布装配；不加参数不运行测试。
 release-check *args:
     @bash ci/release/release.sh release-check {{args}}

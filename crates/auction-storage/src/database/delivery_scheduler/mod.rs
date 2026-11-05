@@ -121,6 +121,8 @@ pub(super) mod take_attempts;
 mod wakeup;
 #[cfg(feature = "postgres")]
 mod watch;
+#[cfg(feature = "postgres")]
+pub(crate) use wakeup::publish_after_commit;
 
 #[cfg(feature = "postgres")]
 use super::delivery_audit::{
