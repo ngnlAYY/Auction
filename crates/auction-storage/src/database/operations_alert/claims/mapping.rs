@@ -99,11 +99,5 @@ pub(super) fn parse_kind(value: &str) -> Option<OperationsAlertKind> {
 }
 
 pub(super) fn parse_source(value: &str) -> Option<OperationsAlertSource> {
-    Some(match value {
-        "process" => OperationsAlertSource::Process,
-        "delivery" => OperationsAlertSource::Delivery,
-        "fulfillment" => OperationsAlertSource::Fulfillment,
-        "recovery" => OperationsAlertSource::Recovery,
-        _ => return None,
-    })
+    OperationsAlertSource::parse(value)
 }

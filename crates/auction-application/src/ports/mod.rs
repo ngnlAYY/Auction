@@ -127,6 +127,9 @@ mod mail_maintenance;
 mod mail_poll;
 #[path = "mail/processing.rs"]
 mod mail_processing;
+mod mail_scan_checkpoint {
+    include!("mail/scan_checkpoint.rs");
+}
 mod mail_scan {
     include!("mail/scan.rs");
 }
@@ -449,18 +452,23 @@ pub use mail_scan::{
     MailScanWatermark, advance_mail_scan_watermark, compare_mail_scan_mids,
     noop_mail_scan_observer, numeric_mail_scan_id, plan_mail_scan,
 };
+pub use mail_scan_checkpoint::{
+    MailScanCheckpointFuture, MailScanCheckpointKey, MailScanCheckpointStore,
+    noop_mail_scan_checkpoint_store,
+};
 pub use operations_alert::{
     MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES,
-    MAX_OPERATIONS_ALERT_SIGNALS, OperationsAlertBatchClaim, OperationsAlertBatchItem,
-    OperationsAlertClaimRequest, OperationsAlertDeliverySnapshot, OperationsAlertDeliveryStatus,
-    OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
-    OperationsAlertFulfillmentSnapshot, OperationsAlertHealth, OperationsAlertKind,
-    OperationsAlertObserveCommand, OperationsAlertPolicy, OperationsAlertProcessSnapshot,
-    OperationsAlertProcessState, OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
-    OperationsAlertRuntimeStatus, OperationsAlertSignal, OperationsAlertSnapshot,
-    OperationsAlertSource, OperationsAlertSourceObservation, OperationsAlertSourceReader,
-    OperationsAlertStore, OperationsAlertTarget, body_digest, canonical_summary,
-    canonical_summary_prefix, evaluate_snapshot, request_hash,
+    MAX_OPERATIONS_ALERT_SIGNALS, OPERATIONS_ALERT_DIGEST_INTERVAL, OperationsAlertBatchClaim,
+    OperationsAlertBatchItem, OperationsAlertClaimRequest, OperationsAlertDeliverySnapshot,
+    OperationsAlertDeliveryStatus, OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch,
+    OperationsAlertError, OperationsAlertFulfillmentSnapshot, OperationsAlertHealth,
+    OperationsAlertKind, OperationsAlertObserveCommand, OperationsAlertPolicy,
+    OperationsAlertProcessSnapshot, OperationsAlertProcessState, OperationsAlertRecoverySnapshot,
+    OperationsAlertRecoveryWorld, OperationsAlertRuntimeStatus, OperationsAlertSeverity,
+    OperationsAlertSignal, OperationsAlertSnapshot, OperationsAlertSource,
+    OperationsAlertSourceObservation, OperationsAlertSourceReader, OperationsAlertStore,
+    OperationsAlertTarget, body_digest, canonical_summary, canonical_summary_prefix,
+    evaluate_snapshot, request_hash,
 };
 pub use queries::{
     AuctionReader, CurrentAuctionSnapshot, DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE,

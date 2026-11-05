@@ -60,6 +60,8 @@ impl MoogleMailSender {
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
     ) -> Result<MoogleMailSentBaseline, MoogleMailError> {
+        // 重启后先恢复持久检查点；没有或作用域不匹配时保持完整扫描。
+        self.ensure_sent_scan_checkpoint(cookie, world).await;
         let deadline = Instant::now()
             .checked_add(self.verification_budget)
             .ok_or_else(|| scan_timeout(world))?;
@@ -165,7 +167,7 @@ impl MoogleMailSender {
                     "MoogleMail 每日完整校验未完成；继续水位前缀，不阻断发送"
                 );
                 // 记录本次尝试，下一次每日校验在 24 小时后；水位保持不变。
-                self.remember_sent_scan(cookie, world, None, true);
+                self.remember_sent_scan(cookie, world, None, true).await;
                 None
             }
         }
@@ -241,7 +243,7 @@ impl MoogleMailSender {
             match self.scan_boundary(cookie, world, round, deadline, Some(preferred), cached).await
             {
                 Ok(boundary) => {
-                    self.remember_boundary(cookie, world, &boundary);
+                    self.remember_boundary(cookie, world, &boundary).await;
                     return Ok(boundary);
                 }
                 Err(reason) if boundary_prefix_retryable(reason) => {
@@ -255,7 +257,7 @@ impl MoogleMailSender {
             }
         }
         let boundary = self.scan_boundary(cookie, world, round, deadline, None, cached).await?;
-        self.remember_boundary(cookie, world, &boundary);
+        self.remember_boundary(cookie, world, &boundary).await;
         Ok(boundary)
     }
 
@@ -302,7 +304,7 @@ impl MoogleMailSender {
     }
 
     /// 只把已取得的边界作为下一轮前缀起点；空列表不伪造水位。
-    fn remember_boundary(
+    async fn remember_boundary(
         &self,
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
@@ -319,7 +321,8 @@ impl MoogleMailSender {
                 observed_at: *sent_at,
             }),
             false,
-        );
+        )
+        .await;
     }
 
     async fn prepare_full(
@@ -357,7 +360,8 @@ impl MoogleMailSender {
                 observed_at: summary.sent_at,
             }),
             true,
-        );
+        )
+        .await;
         Ok(seen)
     }
 }

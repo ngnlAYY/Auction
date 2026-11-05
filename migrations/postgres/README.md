@@ -132,3 +132,4 @@ VALUES (76, 'breaking');
 | 000080 | W14.11 慢速代理等待期间的待定被超提醒（只追加、单向收口）；纯新增，登记 compatible |
 | 000082 | W14.3 玩家通知来源：卖方成交汇总与换季 isekai 提醒；放宽 `deliveries.origin_kind` CHECK、扩展发送类别、新增身份唯一索引；旧程序不认识新来源，登记 breaking |
 | 000081 | W9.9 数据库最小权限：运行账号 `auction_runtime` 只有 USAGE/无 DDL、无 TRUNCATE，只追加表仅 INSERT，序列与 `_sqlx_migrations` 只读，默认权限只授读取面；只改授权，登记 compatible |
+| 000083 | W1.4 Sent / Read Mail 扫描检查点：按凭据版本、世界与 endpoint origin 持久化最高 MID、水位时间与最近完整校验时间；只服务增量前缀，Inbox 仍以 `mail_poll_state.cursor_value` 为权威游标；把新表加入运行账号可变表授权，登记 compatible |
