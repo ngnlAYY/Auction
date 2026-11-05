@@ -39,7 +39,7 @@ pub(super) async fn assetless_notifications(
     let mut rows = sqlx::query(
         "SELECT id,origin_id,command_id,payload FROM public.deliveries
          WHERE origin_kind='mail_intake'
-           AND payload->>'operation'='send'
+           AND payload_operation='send'
            AND payload->'credits'='0'::jsonb
            AND payload->'cod'='0'::jsonb
            AND payload->'attachment_ids'='[]'::jsonb

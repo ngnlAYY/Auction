@@ -7,6 +7,8 @@ mod support;
 mod auction_write_queue;
 #[path = "postgres/bid_cross_lot.rs"]
 mod bid_cross_lot;
+#[path = "postgres/delivery_payload_columns.rs"]
+mod delivery_payload_columns;
 #[path = "postgres/lot_watch.rs"]
 mod lot_watch;
 #[path = "postgres/operations_alert.rs"]

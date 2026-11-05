@@ -129,8 +129,8 @@ pub(crate) async fn resume_after_delivery_proof(
            AND delivery.request_digest=action.prepare_request_digest
            AND delivery.activation_command_id=action.activate_command_id
            AND delivery.activation_request_digest=action.activate_request_digest
-           AND delivery.payload->>'operation'='send'
-           AND delivery.payload->>'template'='recovery_payment_reminder'
+           AND delivery.payload_operation='send'
+           AND delivery.payload_template='recovery_payment_reminder'
            AND public.delivery_has_frozen_sent_proof(
                delivery.id,delivery.result_metadata,delivery.external_reference)
          RETURNING action.id,action.recovery_id",

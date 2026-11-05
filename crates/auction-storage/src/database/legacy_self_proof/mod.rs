@@ -17,7 +17,9 @@ use super::settlement_funding::storage as sql_error;
 /// 调用方固定使用 r/d 别名；该条件不包含付款满足或资金用途授权。
 ///
 /// 整行比较覆盖 `deliveries` 全部列：先把每个 `timestamptz` 列按 `AT TIME ZONE 'UTC'`
-/// 归一化再转 JSON，再按原来的排除列剔除已单独断言的变动列。两侧使用同一归一化函数，
+/// 归一化再转 JSON，再按原来的排除列剔除已单独断言的变动列；迁移 `000094` 的
+/// `payload_world`/`payload_operation`/`payload_template` 是从 `payload` 派生的生成列，
+/// 也在两侧一起剔除。两侧使用同一归一化函数，
 /// 因此结论只取决于时刻本身，不取决于会话 `TimeZone`；快照里出现非 UTC 偏移的时间文本
 /// 也按同一瞬间比较。时间键在快照中缺失时先由 `?&` 拒绝，避免把缺失键当成 `null`；
 /// 快照时间值不是可解析的时间文本时求值报错，不静默判为相等。
@@ -43,7 +45,7 @@ pub(crate) const TRUSTED_DELIVERY_PREDICATE: &str = r#"
             'completed_at',coalesce(to_jsonb(d.completed_at AT TIME ZONE 'UTC'),'null'::jsonb),
             'activated_at',coalesce(to_jsonb(d.activated_at AT TIME ZONE 'UTC'),'null'::jsonb),
             'created_at',coalesce(to_jsonb(d.created_at AT TIME ZONE 'UTC'),'null'::jsonb)))
-        -'status'-'fencing_version'-'updated_at'-'result_metadata')=
+        -'status'-'fencing_version'-'updated_at'-'result_metadata'-'payload_world'-'payload_operation'-'payload_template')=
         ((r.original_snapshot->'delivery' || jsonb_build_object(
             'lease_expires_at',coalesce(to_jsonb((r.original_snapshot#>>'{delivery,lease_expires_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
             'claimed_at',coalesce(to_jsonb((r.original_snapshot#>>'{delivery,claimed_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
@@ -51,7 +53,7 @@ pub(crate) const TRUSTED_DELIVERY_PREDICATE: &str = r#"
             'completed_at',coalesce(to_jsonb((r.original_snapshot#>>'{delivery,completed_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
             'activated_at',coalesce(to_jsonb((r.original_snapshot#>>'{delivery,activated_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
             'created_at',coalesce(to_jsonb((r.original_snapshot#>>'{delivery,created_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb)))
-        -'status'-'fencing_version'-'updated_at'-'result_metadata')
+        -'status'-'fencing_version'-'updated_at'-'result_metadata'-'payload_world'-'payload_operation'-'payload_template')
     AND (d.result_metadata-'legacy_self_reconciliation')=r.original_snapshot#>'{delivery,result_metadata}'
     AND d.result_metadata->'legacy_self_reconciliation'->>'command_id'=r.command_id::text
     AND r.evidence->'identity'->>'uid'=r.uid

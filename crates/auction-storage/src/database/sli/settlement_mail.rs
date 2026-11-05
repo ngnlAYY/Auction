@@ -12,7 +12,8 @@ use super::{candidate_limit, storage};
 
 const SETTLEMENT_COUNT: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.payload_world,
+               delivery.payload_operation,delivery.payload_template,delivery.origin_kind,
                delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
@@ -31,7 +32,7 @@ const SETTLEMENT_COUNT: &str = "
           ON settlement.auction_id=obligation.auction_id
         JOIN public.auctions auction ON auction.id=obligation.auction_id
         WHERE delivery.origin_kind='settlement'
-          AND delivery.payload->>'template' IN
+          AND delivery.payload_template IN
               ('settlement_winner_equipment_cod','settlement_payment_carrier')
           AND obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod')
@@ -42,7 +43,8 @@ const SETTLEMENT_COUNT: &str = "
 
 const SETTLEMENT_PAYMENT_COUNT: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.payload_world,
+               delivery.payload_operation,delivery.payload_template,delivery.origin_kind,
                delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
@@ -61,7 +63,7 @@ const SETTLEMENT_PAYMENT_COUNT: &str = "
           ON settlement.auction_id=obligation.auction_id
         JOIN public.auctions auction ON auction.id=obligation.auction_id
         WHERE delivery.origin_kind='settlement'
-          AND delivery.payload->>'template' IN
+          AND delivery.payload_template IN
               ('settlement_winner_equipment_cod','settlement_payment_carrier')
           AND obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod')
@@ -89,7 +91,8 @@ const SETTLEMENT_PAYMENT_COUNT: &str = "
 
 const SETTLEMENT_AGGREGATE: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.origin_kind,
+        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.payload_world,
+               delivery.payload_operation,delivery.payload_template,delivery.origin_kind,
                delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
@@ -108,7 +111,7 @@ const SETTLEMENT_AGGREGATE: &str = "
           ON settlement.auction_id=obligation.auction_id
         JOIN public.auctions auction ON auction.id=obligation.auction_id
         WHERE delivery.origin_kind='settlement'
-          AND delivery.payload->>'template' IN
+          AND delivery.payload_template IN
               ('settlement_winner_equipment_cod','settlement_payment_carrier')
           AND obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod')
