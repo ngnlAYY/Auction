@@ -64,6 +64,15 @@ pub(crate) enum DbCommand {
         #[arg(long, value_name = "FILE")]
         output: PathBuf,
     },
+    /// 只读演练保留清理：按政策 v2 统计运行态数据族的候选行与诊断文件数，写入带 run id 的回执；绝不执行删除。
+    RetentionDryRun {
+        /// 人工确认的数据库名，须与连接实际返回的 current_database 一致。
+        #[arg(long, value_name = "NAME")]
+        database: String,
+        /// 不可覆盖的绝对回执路径；父目录须已存在且禁止 group/other 写入。
+        #[arg(long, value_name = "FILE")]
+        output: PathBuf,
+    },
     /// 在有界只读快照检查内部不变量，仅追加巡检审计事实，不改变资金或资产。
     InspectConsistency {
         /// 人工确认的数据库名，须与 Worker 配置和实际连接一致。

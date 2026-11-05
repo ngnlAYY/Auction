@@ -8,3 +8,4 @@ mod payload;
 pub use archive::{
     MoogleMailDiagnosticArchive, MoogleMailDiagnosticArchiveConfig, export_mooglemail_diagnostic,
 };
+pub use filesystem::{MailDiagnosticRetentionSnapshot, retention_snapshot};

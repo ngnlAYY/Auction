@@ -245,7 +245,7 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 
 ## 维护约定
 
-- SQL 只出现在本 crate；新增表或约束必须新增迁移文件，并同步[数据库契约](../../docs/contracts/database.md)与[保留政策](../../ops/deploy/retention-policy.v1.json)（`database_schema_version` 须等于最高迁移版本，否则 `db inventory` 拒绝运行）。
+- SQL 只出现在本 crate；新增表或约束必须新增迁移文件，并同步[数据库契约](../../docs/contracts/database.md)与[保留政策 v2](../../ops/deploy/retention-policy.v2.json)（`database_schema_version` 须等于最高迁移版本，否则 `db inventory` 与 `db retention-dry-run` 拒绝运行）。
 - 动态拼接 SQL 只允许编译期常量片段，业务值一律 `bind`；同一 owner 内多条查询共享的投影或过滤以字面量宏定义，经 `concat!` 组合成静态查询（如 lot 列表/详情、竞价日志、价格历史、账户代理），不在运行时拼接；DDL 标识符经 `quote_identifier`，库名先过 `valid_ddl_database_name`（ASCII 字母数字与 `_-.`）。
 - 新增 `pub` 接口前确认存在调用方，编译器不会对跨 crate 未使用的 `pub` 项告警。
 

@@ -13,8 +13,26 @@ pub struct RetentionPolicy {
     pub database_schema_version: i64,
     pub authority: String,
     pub inventory_authorizes_mutation: bool,
+    #[serde(default)]
+    pub deletion_requires_dry_run_and_operator_approval: bool,
+    #[serde(default)]
+    pub audit_financial_and_business_facts_retain_forever: bool,
+    #[serde(default)]
+    pub restore_objectives: Option<RetentionRestoreObjectives>,
     pub families: Vec<RetentionPolicyFamily>,
+    #[serde(default)]
+    pub resolved_operator_decisions: Vec<String>,
     pub required_operator_decisions: Vec<String>,
+}
+
+/// 恢复目标与演练节奏（决策 31）；仅作为政策事实记录，不驱动备份执行。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RetentionRestoreObjectives {
+    pub rpo_seconds: i64,
+    pub rto_seconds: i64,
+    pub wal_archive_enabled: bool,
+    pub point_in_time_recovery_window_days: i64,
+    pub rehearsal_cadence: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -27,6 +45,29 @@ pub struct RetentionPolicyFamily {
     pub candidate_class: String,
     pub mutation_authorized: bool,
     pub tables: Vec<String>,
+    /// 只有运行态数据族携带清理规则；`retain_forever` 族必须省略。
+    #[serde(default)]
+    pub retention: Option<RetentionPolicyRetention>,
+}
+
+/// 一个数据族的清理规则集合；`rule_id` 使用代码内闭集，政策只提供期限。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RetentionPolicyRetention {
+    pub kind: String,
+    pub rules: Vec<RetentionPolicyRule>,
+    #[serde(default)]
+    pub retain_forever: Vec<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RetentionPolicyRule {
+    pub rule_id: String,
+    #[serde(default)]
+    pub table: Option<String>,
+    pub basis: String,
+    pub duration_days: i64,
 }
 
 /// PostgreSQL schema 身份安全投影。
