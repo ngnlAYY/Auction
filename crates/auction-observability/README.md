@@ -108,6 +108,41 @@ WebSocket 只在成功进入 `on_upgrade` 回调后增加当前数和累计数�
 
 审计 label 全部为编译期闭集：`class` 为 `transient/permanent/unknown`；`sqlstate_class` 为 `08/09/21/22/23/25/27/28/39/3D/3F/40/42/44/53/55/57/58/P0/XX`、`other` 或非 SQL 的 `none`；kind 与映射由 [auction-storage 分类表](../auction-storage/README.md#审计失败与就绪)拥有。失败族在首次观察对应组合后出现；影子三类及缓存/检查各结果预置零值。审计 collector 只读取内存快照，并发 scrape 不重复累计；HTTP 记录器由装配根创建的 `ProcessMetrics` 注册并注入探针。观测和切换见[运维手册](../../ops/README.md#审计就绪影子观察)。
 
+### Final 阶段每次出价的页面重读（W12.2）
+
+实时事件只通知“竞价发生变化”，页面随后重读权威接口；本口径只用 W0.9 的 HTTP 计数
+度量这个重读量，不改变读取语义，也不从事件负载推导竞价结果。分母取同一窗口内
+`auction_business_events_total{event="bid",outcome="success"}` 的增加量，即被接受的出价事实数。
+
+lot 详情页在一次通知后只重读两份权威数据，均按模板分别计数：
+`GET /api/v1/lots/{lot_id}`（详情与当前价）与
+`GET /api/v1/auctions/{auction_id}/bid-log`（竞价历史）。同期打开的看板、账号等页面
+各有自己的读取（`/api/v1/auctions/{auction_id}/lots`、`/api/v1/me/bids` 等），比较时
+需一并计入或单独列出；不要混入 `/metrics`、`/health/*`、`__unmatched__`（SPA 与静态
+资源 fallback）与写入路由。
+
+```promql
+(
+  sum(increase(auction_http_requests_total{role="public",method="GET",status="200",route="/api/v1/lots/{lot_id}"}[15m]))
+  +
+  sum(increase(auction_http_requests_total{role="public",method="GET",status="200",route="/api/v1/auctions/{auction_id}/bid-log"}[15m]))
+)
+/
+sum(increase(auction_business_events_total{event="bid",outcome="success"}[15m]))
+```
+
+客户端对同一条竞价通知使用“从首条待处理通知起 100 毫秒、后续通知不延后截止”的合并
+窗口（[`refresh.rs`](../auction-web-public/src/app/surface/board/refresh.rs)），窗口内
+N 条通知对同一资源只重读一次；资源尚未就绪时不消费修订号，就绪后仍读最新快照。
+因此期望重读量约为“打开的详情页数 × 2 × 该窗口内的重读轮次”：出价间隔不短于窗口时
+每笔各读一次，密集突发时按 100 毫秒窗口摊薄，但不会完全合并成一次。比值长期高于
+该期望说明存在未合并或重复的读取，应调整窗口或减少资源重启，而不是减少权威读取。
+
+单页读数只能作参考：`auction_websocket_connections{role="public"}` 只统计已升级的
+WebSocket 连接，未认证页面（手动刷新）不计入。Final 窗口按场次
+`final_phase_at` 到 `effective_end_at` 取相同时间范围；进程重启后计数器归零，使用
+`increase` 而不是差分配额。W12.2 的线上基线待部署后在真实 Final 窗口采集，当前不预填。
+
 ### 迁移就绪指标
 
 `ProcessMetrics::migration_readiness` 返回可克隆记录器，三角色将其注入数据库适配器；heartbeat 与 HTTP 底层数据库检查共同累计，HTTP 缓存命中不发起新检查。`branch` 与 `class` 都是 `current`、`behind`、`ahead`、`compatible_ahead`、`incompatible_ahead`、`invalid_history`、`query_failed` 的闭集，预置零值。`ahead` 只表示 strict 模式未读取兼容登记；`query_failed` 包含本次检查的 SQL/解码失败或内部超时；被外层 HTTP 预算先取消的检查由原 HTTP timeout 指标记录，可能尚未产生迁移分支计数。

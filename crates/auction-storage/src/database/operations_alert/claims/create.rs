@@ -114,12 +114,24 @@ pub(crate) async fn claim_postgres(
         return Ok(Some(claim));
     }
 
-    let rows = sqlx::query(
+    // 决策 66：紧急信号沿用冷却重复通知；每日摘要类信号只在 24 小时窗口内合并为一批。
+    // 摘要批次不再区分单条信号节奏，避免同一故障按不同到期时间各发一封。
+    let digest_kinds: Vec<&str> = OperationsAlertKind::ALL
+        .into_iter()
+        .filter(|kind| kind.severity() == OperationsAlertSeverity::Digest)
+        .map(OperationsAlertKind::as_str)
+        .collect();
+    let max_items = i64::try_from(request.max_items).map_err(|error| {
+        let _ = error;
+        OperationsAlertError::Invalid
+    })?;
+    let urgent_rows = sqlx::query(
         "SELECT signal.fingerprint, signal.kind, signal.scope, signal.source,
                 signal.count_value, signal.age_seconds, signal.state_version
          FROM public.operations_alert_signals AS signal
          WHERE signal.active
            AND signal.next_notify_at <= $1
+           AND signal.kind <> ALL($3::text[])
            AND NOT EXISTS (
                SELECT 1
                FROM public.operations_alert_batch_items AS item
@@ -144,36 +156,174 @@ pub(crate) async fn claim_postgres(
          FOR UPDATE OF signal SKIP LOCKED",
     )
     .bind(request.now)
-    .bind(i64::try_from(request.max_items).map_err(|_| OperationsAlertError::Invalid)?)
+    .bind(max_items)
+    .bind(&digest_kinds)
     .fetch_all(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "读取 operations alert due signal 失败"))?;
-    if rows.is_empty() {
+
+    let mut resolved_rows = Vec::new();
+    if urgent_rows.is_empty() {
+        // 摘要窗口：最近 24 小时内已有摘要批次入队/成功时，本轮不再生成第二封摘要。
+        let digest_due = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (
+                 SELECT 1
+                 FROM public.operations_alert_batches AS batch
+                 INNER JOIN public.operations_alert_batch_items AS item
+                   ON item.batch_id = batch.id
+                 INNER JOIN public.operations_alert_signals AS signal
+                   ON signal.fingerprint = item.fingerprint
+                 WHERE batch.status IN ('enqueued', 'succeeded')
+                   AND batch.created_at > $1 - interval '24 hours'
+                   AND signal.kind = ANY($2::text[])
+             )",
+        )
+        .bind(request.now)
+        .bind(&digest_kinds)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(|error| storage_error_from(error, "读取 operations alert 摘要窗口失败"))?;
+        if !digest_due {
+            let digest_rows = sqlx::query(
+                "SELECT signal.fingerprint, signal.kind, signal.scope, signal.source,
+                        signal.count_value, signal.age_seconds, signal.state_version
+                 FROM public.operations_alert_signals AS signal
+                 WHERE signal.active
+                   AND signal.next_notify_at <= $1
+                   AND signal.kind = ANY($3::text[])
+                   AND NOT EXISTS (
+                       SELECT 1
+                       FROM public.operations_alert_batch_items AS item
+                       INNER JOIN public.operations_alert_batches AS batch
+                         ON batch.id = item.batch_id
+                       WHERE item.fingerprint = signal.fingerprint
+                         AND batch.status IN ('pending', 'claimed')
+                   )
+                 ORDER BY signal.kind, signal.scope, signal.fingerprint
+                 LIMIT $2
+                 FOR UPDATE OF signal SKIP LOCKED",
+            )
+            .bind(request.now)
+            .bind(max_items)
+            .bind(&digest_kinds)
+            .fetch_all(&mut *transaction)
+            .await
+            .map_err(|error| storage_error_from(error, "读取 operations alert 摘要 signal 失败"))?;
+            let remaining = request.max_items.saturating_sub(digest_rows.len());
+            if remaining > 0 {
+                // 已恢复项只在生成摘要批次时附带一次；领取即标记，避免批次失败后同一
+                // 恢复项在后续摘要重复出现（恢复本身仍完整保留在告警台历史）。
+                resolved_rows = sqlx::query(
+                    "SELECT fingerprint, kind, scope, state_version, resolved_at
+                     FROM public.operations_alert_signals
+                     WHERE NOT active
+                       AND resolved_at IS NOT NULL
+                       AND resolution_notified_at IS NULL
+                       AND kind = ANY($2::text[])
+                       AND resolved_at > $1 - interval '24 hours'
+                     ORDER BY resolved_at, fingerprint
+                     LIMIT $3
+                     FOR UPDATE SKIP LOCKED",
+                )
+                .bind(request.now)
+                .bind(&digest_kinds)
+                .bind(i64::try_from(remaining).map_err(|error| {
+                    let _ = error;
+                    OperationsAlertError::Invalid
+                })?)
+                .fetch_all(&mut *transaction)
+                .await
+                .map_err(|error| {
+                    storage_error_from(error, "读取 operations alert 已恢复 signal 失败")
+                })?;
+            }
+            let mut lines = digest_rows;
+            let digest_row_start = lines.len();
+            lines.append(&mut resolved_rows);
+            let rows = lines;
+            if rows.is_empty() {
+                transaction.commit().await.map_err(|error| {
+                    storage_error_from(error, "提交 operations alert 空领取事务失败")
+                })?;
+                return Ok(None);
+            }
+            let claim = create_batch(&mut transaction, request, rows, digest_row_start).await?;
+            transaction.commit().await.map_err(|error| {
+                storage_error_from(error, "提交 operations alert 摘要领取事务失败")
+            })?;
+            return Ok(claim);
+        }
+    }
+    if urgent_rows.is_empty() {
         transaction
             .commit()
             .await
             .map_err(|error| storage_error_from(error, "提交 operations alert 空领取事务失败"))?;
         return Ok(None);
     }
+    let claim = create_batch(&mut transaction, request, urgent_rows, 0).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 operations alert 领取事务失败"))?;
+    Ok(claim)
+}
 
+/// 从已锁定的 signal 行创建批次；`resolved_from` 之后的行是已恢复摘要项。
+async fn create_batch(
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
+    request: &OperationsAlertClaimRequest,
+    rows: Vec<sqlx::postgres::PgRow>,
+    resolved_from: usize,
+) -> Result<Option<OperationsAlertBatchClaim>, ApplicationError> {
     let mut items = Vec::with_capacity(rows.len());
+    let mut resolved_fingerprints = Vec::new();
     for (index, row) in rows.iter().enumerate() {
-        let signal = signal_from_row(row)?;
+        let signal_version: i64 = row
+            .try_get("state_version")
+            .map_err(|error| storage_error_from(error, "读取 operations alert signal 版本失败"))?;
+        let fingerprint: Vec<u8> = row.try_get("fingerprint").map_err(|error| {
+            storage_error_from(error, "读取 operations alert signal fingerprint 失败")
+        })?;
+        let summary = if index < resolved_from {
+            signal_from_row(row)?.render_summary().map_err(ApplicationError::from)?
+        } else {
+            // 已恢复项只出现在下一封摘要，正文明确标注恢复，不触发新的阈值评估。
+            let kind: String = row
+                .try_get("kind")
+                .map_err(|error| storage_error_from(error, "读取已恢复告警种类失败"))?;
+            let scope: String = row
+                .try_get("scope")
+                .map_err(|error| storage_error_from(error, "读取已恢复告警范围失败"))?;
+            let summary = format!("已恢复：{kind} {scope}");
+            if !auction_domain::valid_text(&summary, 512) {
+                return Err(ApplicationError::OperationsAlert(
+                    OperationsAlertError::StoredResultCorrupt,
+                ));
+            }
+            resolved_fingerprints.push(fingerprint.clone());
+            summary
+        };
         items.push(OperationsAlertBatchItem {
-            fingerprint: signal.fingerprint,
-            signal_version: row.try_get("state_version").map_err(|error| {
-                storage_error_from(error, "读取 operations alert signal 版本失败")
+            fingerprint: fingerprint.try_into().map_err(|_| {
+                ApplicationError::OperationsAlert(OperationsAlertError::StoredResultCorrupt)
             })?,
+            signal_version,
             ordinal: i32::try_from(index)
                 .ok()
                 .and_then(|index| index.checked_add(1))
                 .ok_or_else(|| storage_error("operations alert 批次序号溢出"))?,
-            summary: signal.render_summary().map_err(ApplicationError::from)?,
+            summary,
         });
     }
     let (item_count, summary) =
         canonical_summary_prefix(&items, request.max_body_bytes).map_err(ApplicationError::from)?;
     items.truncate(item_count);
+    // 正文前缀截断可能丢弃尾部（通常是已恢复项）；只为真正进入批次的行标记已通知，
+    // 其余保留到下一封摘要，避免恢复提示丢失。
+    resolved_fingerprints.retain(|fingerprint| {
+        items.iter().any(|item| item.fingerprint.as_slice() == fingerprint.as_slice())
+    });
     let batch_id = Uuid::new_v4();
     let command_id = Uuid::new_v4();
     let delivery_id = Uuid::new_v5(
@@ -211,7 +361,7 @@ pub(crate) async fn claim_postgres(
     .bind(&request.target.recipient)
     .bind(payload)
     .bind(request.now)
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await
     .map_err(|error| storage_error_from(error, "写入 operations alert delivery 失败"))?;
     sqlx::query(
@@ -230,9 +380,12 @@ pub(crate) async fn claim_postgres(
     .bind(claim_token)
     .bind(request.now)
     .bind(request.lease_until)
-    .bind(i32::try_from(items.len()).map_err(|_| OperationsAlertError::Invalid)?)
+    .bind(i32::try_from(items.len()).map_err(|error| {
+        let _ = error;
+        OperationsAlertError::Invalid
+    })?)
     .bind(body_digest.as_slice())
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await
     .map_err(|error| storage_error_from(error, "写入 operations alert 批次失败"))?;
     // 正文前缀已保证 1–64 项，最多 320 个参数；与 batch/delivery 同事务追加。
@@ -251,12 +404,25 @@ pub(crate) async fn claim_postgres(
     query
         .build()
         .persistent(false)
-        .execute(&mut *transaction)
+        .execute(&mut **transaction)
         .await
         .map_err(|error| storage_error_from(error, "写入 operations alert 批次条目失败"))?;
+    if !resolved_fingerprints.is_empty() {
+        sqlx::query(
+            "UPDATE public.operations_alert_signals
+             SET resolution_notified_at = $2
+             WHERE fingerprint = ANY($1::bytea[]) AND NOT active
+               AND resolution_notified_at IS NULL",
+        )
+        .bind(&resolved_fingerprints)
+        .bind(request.now)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|error| storage_error_from(error, "标记 operations alert 已恢复项进入摘要失败"))?;
+    }
     let request_id = command_id.to_string();
     append_delivery_audit(
-        &mut transaction,
+        &mut *transaction,
         DeliveryAudit {
             occurred_at: request.now,
             actor_type: "system",
@@ -273,10 +439,6 @@ pub(crate) async fn claim_postgres(
     )
     .await
     .map_err(|error| storage_error_from(error, "追加 operations alert delivery 准备审计失败"))?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| storage_error_from(error, "提交 operations alert 领取事务失败"))?;
     Ok(Some(OperationsAlertBatchClaim {
         batch_id,
         command_id,
