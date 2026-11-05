@@ -48,6 +48,7 @@ mod shared;
 mod sort;
 #[path = "../operations/status.rs"]
 mod status;
+mod support;
 #[path = "../identity/users.rs"]
 mod users;
 #[path = "../validation.rs"]

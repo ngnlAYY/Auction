@@ -11,10 +11,10 @@ use crate::{
     AdminLotUpdateError, AdminMailError, AdminMailTransactionError, AdminRulesError,
     AdminRulesTransactionError, AdminRuntimeCommandError, AdminRuntimeConfigError,
     AdminRuntimeFileError, AdminUserError, AdminWorldError, CommandLedgerError,
-    CompetitionTransactionError, DeliveryAdminError, ForumRemoteError, MailProcessingError,
-    OperationsAlertError, RealtimeAdminError, RecoveryCommandError, RepositoryError,
-    SettlementTransactionError, SettlementTransactionFailure, TransactionFailure,
-    TransactionPolicyError,
+    CompetitionTransactionError, DeliveryAdminError, DeliveryDispositionCommandError,
+    ForumRemoteError, MailProcessingError, OperationsAlertError, RealtimeAdminError,
+    RecoveryCommandError, RepositoryError, SettlementTransactionError,
+    SettlementTransactionFailure, TransactionFailure, TransactionPolicyError,
 };
 use serde_json::Error as JsonError;
 
@@ -144,6 +144,9 @@ pub enum ApplicationError {
 
     #[error(transparent)]
     PlayerNotification(#[from] crate::PlayerNotificationError),
+
+    #[error(transparent)]
+    DeliveryDisposition(#[from] DeliveryDispositionCommandError),
 }
 
 impl ApplicationError {

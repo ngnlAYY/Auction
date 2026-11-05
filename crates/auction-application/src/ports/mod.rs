@@ -77,6 +77,18 @@ pub use sent_admission::*;
 #[path = "delivery/sent_confirmation.rs"]
 mod sent_confirmation;
 pub use sent_confirmation::*;
+mod delivery_disposition {
+    include!("delivery/disposition.rs");
+}
+pub use delivery_disposition::*;
+mod delivery_support {
+    include!("delivery/support.rs");
+}
+pub use delivery_support::{
+    MAX_PLAYER_SUPPORT_ROWS, MAX_PLAYER_SUPPORT_USER_LEN, PlayerSupportBid, PlayerSupportBundle,
+    PlayerSupportDeal, PlayerSupportNotification, PlayerSupportObligation, PlayerSupportReference,
+    PlayerSupportRequest, PlayerSupportSelector, PlayerSupportUser,
+};
 #[path = "public/equipment_link.rs"]
 mod equipment_link;
 mod external_metrics;
@@ -361,9 +373,12 @@ pub use player_notifications::{
 mod sent_baseline;
 mod shadow_run;
 pub use delivery_admin::{
-    DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
-    DeliveryAdminPage, DeliveryAdminPort, DeliveryAdminResult, DeliveryAdminSnapshot,
-    MAX_DELIVERY_ADMIN_OFFSET, MAX_DELIVERY_ADMIN_PAGE_SIZE, MAX_DELIVERY_COD,
+    DELIVERY_ADMIN_CATEGORIES, DELIVERY_ADMIN_RETIREMENT_REASONS,
+    DELIVERY_ADMIN_SUPPRESSION_REASONS, DELIVERY_ADMIN_WORLDS, DeliveryAdminAction,
+    DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest, DeliveryAdminPage,
+    DeliveryAdminPort, DeliveryAdminResult, DeliveryAdminSnapshot, MAX_DELIVERY_ADMIN_OFFSET,
+    MAX_DELIVERY_ADMIN_PAGE_SIZE, MAX_DELIVERY_ADMIN_RECIPIENT_LEN,
+    MAX_DELIVERY_ADMIN_TEMPLATE_LEN, MAX_DELIVERY_COD,
 };
 pub use delivery_detail::{
     DeliveryAdminAttempt, DeliveryAdminCustody, DeliveryAdminDetail, DeliveryAdminDisposition,
@@ -507,7 +522,8 @@ pub use realtime_admin::{
 };
 pub use realtime_consumer::{
     MAX_REALTIME_CONSUMER_BATCH_SIZE, RealtimeConsumerBatch, RealtimeConsumerRequest,
-    RealtimeConsumerStore, RealtimeEventSink, RealtimeSinkError, RealtimeStreamStore,
+    RealtimeConsumerStore, RealtimeEventSink, RealtimeSequenceAllocator, RealtimeSinkError,
+    RealtimeStreamStore,
 };
 pub use recovery::{
     RecoveryCommandError, RecoveryCommandPort, RecoveryCommandRepository, RecoveryCommandService,

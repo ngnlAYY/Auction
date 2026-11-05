@@ -141,6 +141,7 @@ where
                     Arc::clone(&worker.metrics),
                     action,
                     worker.control.clone(),
+                    worker.bulk_quota.clone(),
                     drain_sender.subscribe(),
                 ),
             ));
@@ -152,6 +153,14 @@ where
         worker.write_lifecycle.clone(),
         auction::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
     ));
+    // W12.5：结算独立成任务，结算单项的耗时不再推迟生命周期与慢速代理的推进。
+    let mut settlement_tasks = JoinSet::new();
+    if worker.settlement_store.is_some() && worker.settlement_commands.is_some() {
+        settlement_tasks.spawn(run_background(
+            worker.write_lifecycle.clone(),
+            auction::run_settlement_loop(Arc::clone(&worker), drain_sender.subscribe()),
+        ));
+    }
     let mut fulfillment_tasks = JoinSet::new();
     if worker.fulfillment_store.is_some() && worker.fulfillment_commands.is_some() {
         fulfillment_tasks.spawn(run_background(
@@ -313,6 +322,20 @@ where
                     Some(Ok(())) | None => break Some(WorkerError::AuctionTaskExited),
                 }
             }
+            result = settlement_tasks.join_next(), if !settlement_tasks.is_empty() => {
+                match result {
+                    Some(Err(error)) => {
+                        observe_task_join(
+                            worker.metrics.as_ref(),
+                            Some(WorkerLoop::Settlement),
+                            &error,
+                        );
+                        break Some(WorkerError::SettlementTaskJoin(error));
+                    }
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::SettlementTaskExited),
+                }
+            }
             result = fulfillment_tasks.join_next(), if !fulfillment_tasks.is_empty() => {
                 match result {
                     Some(Err(error)) => {
@@ -434,6 +457,7 @@ where
             drain_worker_tasks(&mut delivery_wakeup_tasks, "delivery wakeup").await,
             drain_worker_tasks(&mut operations_alert_tasks, "operations alert").await,
             drain_worker_tasks(&mut auction_tasks, "auction").await,
+            drain_worker_tasks(&mut settlement_tasks, "settlement").await,
             drain_worker_tasks(&mut fulfillment_tasks, "fulfillment").await,
             drain_worker_tasks(&mut recovery_tasks, "recovery").await,
             drain_worker_tasks(&mut player_notification_tasks, "player notifications").await,

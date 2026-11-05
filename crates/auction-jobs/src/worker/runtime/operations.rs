@@ -45,6 +45,7 @@ pub(super) async fn run_operations_alert_loop<C>(
     metrics: Arc<dyn WorkerRecorder>,
     action: OperationsAlertLoopAction,
     control: WorkerControlHandle,
+    bulk_quota: Option<Arc<super::WorkerConnectionQuota>>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) where
     C: Clock + 'static,
@@ -57,6 +58,11 @@ pub(super) async fn run_operations_alert_loop<C>(
                 return;
             }
             let started = std::time::Instant::now();
+            // W12.5：告警扫描/分发/对账属于批量轮次，受共享连接配额限制；许可只覆盖本轮查询。
+            let bulk_permit = match &bulk_quota {
+                Some(quota) => Some(quota.acquire().await),
+                None => None,
+            };
             let now = clock.now();
             let attempt = tokio::time::timeout(action.timeout(runtime.config), async {
                 match action {
@@ -102,6 +108,7 @@ pub(super) async fn run_operations_alert_loop<C>(
                 }
             };
             metrics.observe_iteration(action.loop_kind(), metric_result, started.elapsed());
+            drop(bulk_permit);
 
             let wait = poll_delay(runtime.config.poll_interval, runtime.config.jitter);
             let scheduled_wake = tokio::time::Instant::now() + wait;

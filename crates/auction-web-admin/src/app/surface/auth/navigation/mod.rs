@@ -19,6 +19,7 @@ fn NavigationLinks(current_route: Route) -> Element {
             (Route::Users {}, t!("nav-users")),
             (Route::Renames {}, t!("nav-renames")),
             (Route::Deliveries {}, t!("nav-deliveries")),
+            (Route::PlayerSupport {}, t!("nav-support")),
             (Route::Outbox {}, t!("page-outbox-title")),
             (Route::Settlement {}, t!("nav-settlement")),
             (Route::Config {}, t!("nav-config")),

@@ -265,6 +265,26 @@ async fn record_retirement(
         )
         .await
         .map_err(map_storage_error)?;
+        // 同一事务追加统一处置事实：预检退役以投递行自身（id、fence、失败码）为证，
+        // 没有外部引用。是否解除失败计数由失败码闭集在领域层决定。
+        crate::database::delivery_disposition::append(
+            transaction,
+            crate::database::delivery_disposition::DeliveryDispositionFact {
+                delivery_id,
+                fencing_version,
+                kind: auction_domain::DeliveryDispositionKind::PreflightRetired,
+                source: auction_domain::DeliveryDispositionSource::default(),
+                actor_source: auction_domain::DeliveryDispositionActorSource::Worker,
+                actor_id: "delivery-worker",
+                reason: None,
+                reason_code: Some(failure_code),
+                detail: None,
+                command_id: None,
+                request_digest: None,
+            },
+        )
+        .await
+        .map_err(map_storage_error)?;
     }
     Ok(())
 }

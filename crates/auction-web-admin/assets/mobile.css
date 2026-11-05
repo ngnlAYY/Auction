@@ -444,3 +444,15 @@
   }
 }
 }
+
+@media (max-width: 720px) {
+  .admin-delivery-search {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-delivery-search :is(input, select) {
+    inline-size: 100%;
+    min-inline-size: 0;
+  }
+}

@@ -48,6 +48,9 @@ pub struct PostgresCompetitionTransaction {
     notifications: std::sync::Arc<dyn auction_application::NotificationRecorder>,
     /// W14.2 被超提醒使用的公开站点 origin；未配置时正文省略链接。
     public_base_url: Option<String>,
+    /// W12.1 已写入待定序号事件（`stream_sequence IS NULL`）的 stream key；提交后补号。
+    /// 同一命令的多条竞价事实属于同一场次，因此只在 key 变化时追加。
+    deferred_stream_keys: Vec<String>,
 }
 
 impl PostgresCompetitionTransaction {
@@ -56,7 +59,24 @@ impl PostgresCompetitionTransaction {
         notifications: std::sync::Arc<dyn auction_application::NotificationRecorder>,
         public_base_url: Option<String>,
     ) -> Self {
-        Self { transaction: Some(transaction), notifications, public_base_url }
+        Self {
+            transaction: Some(transaction),
+            notifications,
+            public_base_url,
+            deferred_stream_keys: Vec::new(),
+        }
+    }
+
+    /// 记录本事务写的待定 stream；提交后由调用方在同一进程内补号（失败由 relay 兜底）。
+    pub(crate) fn record_deferred_stream(&mut self, stream_key: &str) {
+        if self.deferred_stream_keys.last().map(String::as_str) != Some(stream_key) {
+            self.deferred_stream_keys.push(stream_key.to_owned());
+        }
+    }
+
+    /// 取出待补号的 stream key；提交成功后才允许分配，回滚则一并丢弃。
+    pub(crate) fn take_deferred_stream_keys(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.deferred_stream_keys)
     }
 
     /// 通知正文写入时使用的公开站点 origin；只在事务内读取冻结快照。
@@ -120,27 +140,42 @@ impl TransactionRunner for PostgresStore {
                 );
 
                 match operation(&mut transaction).await {
-                    Ok(value) => match transaction.commit().await {
-                        Ok(()) => return Ok(value),
-                        Err(error) => {
-                            let error = map_sql_error(error);
-                            if matches!(error, CompetitionTransactionError::SerializationConflict)
-                                && attempt + 1 < policy.max_attempts
-                            {
-                                crate::database::serializable_retry_backoff(usize::from(
-                                    attempt + 1,
-                                ))
+                    Ok(value) => {
+                        // W12.1：竞价事件的序号在提交后分配，回滚时随事务一起丢弃。
+                        let deferred = transaction.take_deferred_stream_keys();
+                        match transaction.commit().await {
+                            Ok(()) => {
+                                crate::database::realtime::allocate_deferred_sequences_after_commit(
+                                    self, &deferred,
+                                )
                                 .await;
-                                continue;
+                                return Ok(value);
                             }
-                            crate::database::observe_retry_exhaustion(
-                                usize::from(attempt + 1),
-                                usize::from(policy.max_attempts),
-                                matches!(error, CompetitionTransactionError::SerializationConflict),
-                            );
-                            return Err(E::from(error));
+                            Err(error) => {
+                                let error = map_sql_error(error);
+                                if matches!(
+                                    error,
+                                    CompetitionTransactionError::SerializationConflict
+                                ) && attempt + 1 < policy.max_attempts
+                                {
+                                    crate::database::serializable_retry_backoff(usize::from(
+                                        attempt + 1,
+                                    ))
+                                    .await;
+                                    continue;
+                                }
+                                crate::database::observe_retry_exhaustion(
+                                    usize::from(attempt + 1),
+                                    usize::from(policy.max_attempts),
+                                    matches!(
+                                        error,
+                                        CompetitionTransactionError::SerializationConflict
+                                    ),
+                                );
+                                return Err(E::from(error));
+                            }
                         }
-                    },
+                    }
                     Err(error) => {
                         if error.is_serialization_conflict() && attempt + 1 < policy.max_attempts {
                             crate::database::serializable_retry_backoff(usize::from(attempt + 1))

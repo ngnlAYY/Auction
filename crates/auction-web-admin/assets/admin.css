@@ -3700,3 +3700,71 @@
   padding-block: var(--space-3);
   overflow-wrap: anywhere;
 }
+
+/* W4.5 投递检索表单：与状态筛选同一行，窄屏时由移动端样式改为整行。 */
+.admin-delivery-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.admin-delivery-search label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--admin-space-label);
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-label);
+}
+
+.admin-delivery-search :is(input, select) {
+  min-block-size: auto;
+  padding: var(--admin-space-compact) var(--space-2);
+  border: var(--border-width) solid var(--color-input-border);
+  border-radius: var(--admin-radius-input);
+  color: var(--color-text);
+  background: var(--color-input-bg);
+}
+
+.admin-delivery-search input[type="text"] {
+  inline-size: 11rem;
+}
+
+.admin-delivery-search input[type="datetime-local"] {
+  inline-size: 12rem;
+}
+
+/* W4.6 玩家支持视图：只读汇总分区。 */
+.admin-support-page > h1 {
+  margin: 0 0 var(--space-4);
+  font-size: var(--admin-text-title);
+}
+
+.admin-support-summary__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.admin-support-summary__facts dt {
+  color: var(--color-text-muted);
+}
+
+.admin-support-summary__facts dd {
+  margin: 0;
+  min-inline-size: 0;
+}
+
+.admin-support-references {
+  margin: var(--space-3) 0 0;
+  padding-inline-start: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-label);
+}
+
+.admin-support-section {
+  margin-block-start: var(--space-4);
+}

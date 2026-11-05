@@ -134,6 +134,13 @@ mod tests {
         ) -> ApplicationFuture<'_, DeliveryAdminResult> {
             Box::pin(async { Err(DeliveryAdminError::Unavailable.into()) })
         }
+
+        fn player_support(
+            &self,
+            _request: crate::PlayerSupportRequest,
+        ) -> ApplicationFuture<'_, crate::PlayerSupportBundle> {
+            Box::pin(async { Err(DeliveryAdminError::Unavailable.into()) })
+        }
     }
 
     struct FakeConfirmation {
@@ -184,6 +191,11 @@ mod tests {
             recipient: "Restia".to_owned(),
             cod: Some(0),
             status: "manual_reconcile".to_owned(),
+            template: Some("settlement_seller_payout".to_owned()),
+            category: Some("settlement".to_owned()),
+            world: Some("main".to_owned()),
+            retirement_reason: None,
+            suppression_reason: None,
             lease_expires_at: None,
             fencing_version: 3,
             attempt_count: 1,

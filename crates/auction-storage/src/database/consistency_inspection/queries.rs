@@ -197,6 +197,8 @@ ORDER BY entity_key, reason LIMIT $1
 "#;
 
 // 当前保留策略尚未授权删除 realtime 前缀，因此从 1 开始逐流连续；同时核对分配器尾部。
+// W12.1：竞价事件允许在提交后短暂处于“未分配序号”（stream_sequence IS NULL）。这类行不进入
+// 回放，也不参与连续性与尾部核对；真正的问题是它们长期滞留，因此单独检查待定积压年龄。
 const REALTIME: &str = r#"
 WITH violations AS (
     SELECT stream.stream_key AS entity_key, 'realtime_sequence_gap_or_tail_mismatch'::text AS reason
@@ -204,11 +206,18 @@ WITH violations AS (
     LEFT JOIN LATERAL (
         SELECT count(*)::numeric AS count, min(stream_sequence) AS first,
                max(stream_sequence) AS last
-        FROM public.realtime_events WHERE stream_key = stream.stream_key
+        FROM public.realtime_events
+        WHERE stream_key = stream.stream_key AND stream_sequence IS NOT NULL
     ) events ON true
     WHERE (events.count = 0 AND stream.next_sequence <> 1)
        OR (events.count > 0 AND (events.first <> 1 OR events.last::numeric <> events.count
            OR stream.next_sequence::numeric <> events.last::numeric + 1))
+    UNION ALL
+    SELECT pending.stream_key, 'realtime_unsequenced_backlog'::text
+    FROM public.realtime_events AS pending
+    WHERE pending.stream_sequence IS NULL
+      AND pending.created_at < transaction_timestamp() - interval '5 minutes'
+    GROUP BY pending.stream_key
     UNION ALL
     SELECT offsets.consumer_key || ':' || offsets.stream_key, 'consumer_offset_ahead_of_stream'
     FROM public.realtime_consumer_offsets offsets

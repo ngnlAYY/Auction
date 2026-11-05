@@ -11,6 +11,32 @@ pub const MAX_DELIVERY_ADMIN_PAGE_SIZE: i64 = 100;
 pub const MAX_DELIVERY_ADMIN_OFFSET: i64 = 100_000;
 /// Admin 交付投影允许显示的最大 COD 整数；与旧版 JSON 安全整数边界一致。
 pub const MAX_DELIVERY_COD: i64 = 9_007_199_254_740_991;
+/// 收件人筛选的最大字符数；与 Admin 输入框 maxlength 对齐。
+pub const MAX_DELIVERY_ADMIN_RECIPIENT_LEN: usize = 256;
+/// 冻结模板键的最大字符数；模板键由邮件流程生成，远短于该上限。
+pub const MAX_DELIVERY_ADMIN_TEMPLATE_LEN: usize = 64;
+/// 发送类别闭集；与 `public.delivery_send_category` 的返回集合一一对应。
+pub const DELIVERY_ADMIN_CATEGORIES: [&str; 7] =
+    ["outbid", "account", "intake", "settlement", "equipment", "operations", "manual"];
+/// 世界闭集；投递载荷只允许这两个已发布世界。
+pub const DELIVERY_ADMIN_WORLDS: [&str; 2] = ["main", "isekai"];
+/// 退役原因闭集：在 sending 围栏前确定未写入外部系统。
+pub const DELIVERY_ADMIN_RETIREMENT_REASONS: [&str; 5] = [
+    "lot_watch_invalidated",
+    "recipient_renamed",
+    "auction_opened",
+    "season_boundary_passed",
+    "season_reminder_resolved",
+];
+/// 抑制原因闭集：在发送前被隔离、批次终止或载荷拒绝，从未开始外部写入。
+pub const DELIVERY_ADMIN_SUPPRESSION_REASONS: [&str; 6] = [
+    "mail_disposition_conflict",
+    "invalid_payload",
+    "task_panic",
+    "dependency_mismatch",
+    "retry_exhausted",
+    "operations_alert_batch_terminal",
+];
 
 /// Delivery Admin 查询与命令使用的稳定业务错误。
 /// 该类型只携带闭集分类，不跨应用边界暴露数据库驱动或持久化正文。
@@ -33,21 +59,45 @@ pub enum DeliveryAdminError {
     SentSighted,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DeliveryAdminListRequest {
     pub status: Option<String>,
+    /// 收件人精确匹配（ASCII 大小写不敏感）；不含通配符。
+    pub recipient: Option<String>,
+    /// 参考编号：投递 ID、来源义务 ID 或玩家通知 ID 的规范 UUID 文本。
+    pub reference: Option<Uuid>,
+    /// 冻结的 MoogleMail 模板键。
+    pub template: Option<String>,
+    /// 发送类别闭集，见 [`DELIVERY_ADMIN_CATEGORIES`]。
+    pub category: Option<String>,
+    /// `main` / `isekai`。
+    pub world: Option<String>,
+    /// 创建时间下界（含）。
+    pub created_from: Option<DateTime<Utc>>,
+    /// 创建时间上界（含）。
+    pub created_to: Option<DateTime<Utc>>,
     pub limit: i64,
     pub offset: i64,
 }
 
 impl DeliveryAdminListRequest {
     /// 校验有界查询，避免 Admin 端通过未限制的 offset 扫描整个 outbox。
+    /// 所有筛选都是精确值；自由文本只允许已裁剪、无控制字符且有上限的单个值。
     pub fn validate(&self) -> bool {
         self.limit > 0
             && self.limit <= MAX_DELIVERY_ADMIN_PAGE_SIZE
             && self.offset >= 0
             && self.offset <= MAX_DELIVERY_ADMIN_OFFSET
             && self.status.as_ref().is_none_or(|status| valid_delivery_status(status))
+            && self.reference.is_none_or(|reference| !reference.is_nil())
+            && self.recipient.as_deref().is_none_or(valid_recipient_filter)
+            && self.template.as_deref().is_none_or(valid_template_filter)
+            && self
+                .category
+                .as_deref()
+                .is_none_or(|value| DELIVERY_ADMIN_CATEGORIES.contains(&value))
+            && self.world.as_deref().is_none_or(|value| DELIVERY_ADMIN_WORLDS.contains(&value))
+            && self.created_from.zip(self.created_to).is_none_or(|(from, to)| from <= to)
     }
 }
 
@@ -127,6 +177,16 @@ pub struct DeliveryAdminSnapshot {
     /// 仅从版本化 `send` payload 提取的金额，不跨端口传递 payload 原文。
     pub cod: Option<i64>,
     pub status: String,
+    /// 冻结的模板键；Return/Take 与无模板投递为 `None`。
+    pub template: Option<String>,
+    /// 发送类别；非 `send` 操作或旧载荷无法归类时为 `None`。
+    pub category: Option<String>,
+    /// 投递载荷的世界；旧载荷缺省按 `main` 归属。
+    pub world: Option<String>,
+    /// 围栏前退役原因；只在确定未写入外部系统时出现。
+    pub retirement_reason: Option<String>,
+    /// 围栏前抑制原因；只在确定未写入外部系统时出现。
+    pub suppression_reason: Option<String>,
     pub lease_expires_at: Option<DateTime<Utc>>,
     pub fencing_version: i64,
     pub attempt_count: u32,
@@ -176,6 +236,12 @@ pub trait DeliveryAdminPort: Send + Sync {
     fn detail(&self, delivery_id: Uuid) -> ApplicationFuture<'_, super::DeliveryAdminDetail>;
 
     fn execute(&self, command: DeliveryAdminCommand) -> ApplicationFuture<'_, DeliveryAdminResult>;
+
+    /// 只读汇总某个玩家或某个参考编号关联的出价、成交、义务、投递与通知。
+    fn player_support(
+        &self,
+        request: super::PlayerSupportRequest,
+    ) -> ApplicationFuture<'_, super::PlayerSupportBundle>;
 }
 
 fn valid_delivery_status(value: &str) -> bool {
@@ -189,6 +255,23 @@ fn valid_delivery_status(value: &str) -> bool {
             | "failed"
             | "manual_reconcile"
     )
+}
+
+/// 收件人筛选只接受已裁剪、无控制字符且不超过上限的单个值；不做通配符展开。
+fn valid_recipient_filter(value: &str) -> bool {
+    !value.is_empty()
+        && value == value.trim()
+        && value.chars().count() <= MAX_DELIVERY_ADMIN_RECIPIENT_LEN
+        && !value.chars().any(char::is_control)
+}
+
+/// 模板键来自邮件流程闭集，限制为小写字母、数字、下划线与连字符。
+fn valid_template_filter(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_DELIVERY_ADMIN_TEMPLATE_LEN
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+        })
 }
 
 /// Go `encoding/json.Marshal` 默认启用 HTML-safe string；摘要必须逐字兼容该历史行为。
@@ -223,4 +306,108 @@ fn push_go_json_string(output: &mut Vec<u8>, value: &str) {
         }
     }
     output.push(b'"');
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+    use crate::ports::{MAX_PLAYER_SUPPORT_USER_LEN, PlayerSupportRequest, PlayerSupportSelector};
+    use chrono::TimeZone;
+
+    fn base() -> DeliveryAdminListRequest {
+        DeliveryAdminListRequest { limit: 50, offset: 0, ..DeliveryAdminListRequest::default() }
+    }
+
+    #[test]
+    fn filters_accept_closed_sets_and_bounded_text() {
+        let request = DeliveryAdminListRequest {
+            status: Some("failed".to_owned()),
+            recipient: Some("Restia".to_owned()),
+            reference: Some(Uuid::from_u128(7)),
+            template: Some("settlement_seller_payout".to_owned()),
+            category: Some("settlement".to_owned()),
+            world: Some("isekai".to_owned()),
+            created_from: Some(Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).single().expect("time")),
+            created_to: Some(Utc.with_ymd_and_hms(2026, 11, 2, 0, 0, 0).single().expect("time")),
+            ..base()
+        };
+        assert!(request.validate());
+    }
+
+    #[test]
+    fn filters_reject_unknown_enums_and_untrimmed_text() {
+        for request in [
+            DeliveryAdminListRequest { category: Some("bogus".to_owned()), ..base() },
+            DeliveryAdminListRequest { world: Some("moon".to_owned()), ..base() },
+            DeliveryAdminListRequest { recipient: Some(" Restia".to_owned()), ..base() },
+            DeliveryAdminListRequest { recipient: Some("Restia\n".to_owned()), ..base() },
+            DeliveryAdminListRequest { template: Some("Bad Template".to_owned()), ..base() },
+            DeliveryAdminListRequest { status: Some("unknown".to_owned()), ..base() },
+            DeliveryAdminListRequest { reference: Some(Uuid::nil()), ..base() },
+        ] {
+            assert!(!request.validate(), "应当拒绝非法筛选: {request:?}");
+        }
+    }
+
+    #[test]
+    fn filters_reject_reversed_time_range_and_oversized_pages() {
+        let later = Utc.with_ymd_and_hms(2026, 11, 2, 0, 0, 0).single().expect("time");
+        let earlier = Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).single().expect("time");
+        assert!(
+            !DeliveryAdminListRequest {
+                created_from: Some(later),
+                created_to: Some(earlier),
+                ..base()
+            }
+            .validate()
+        );
+        assert!(!DeliveryAdminListRequest { limit: 0, ..base() }.validate());
+        assert!(
+            !DeliveryAdminListRequest { limit: MAX_DELIVERY_ADMIN_PAGE_SIZE + 1, ..base() }
+                .validate()
+        );
+        assert!(
+            !DeliveryAdminListRequest {
+                recipient: Some("x".repeat(MAX_DELIVERY_ADMIN_RECIPIENT_LEN + 1)),
+                ..base()
+            }
+            .validate()
+        );
+    }
+
+    #[test]
+    fn player_support_requires_exactly_one_bounded_selector() {
+        assert!(
+            PlayerSupportRequest { selector: PlayerSupportSelector::User("Restia".to_owned()) }
+                .validate()
+        );
+        assert!(
+            PlayerSupportRequest { selector: PlayerSupportSelector::Reference(Uuid::from_u128(1)) }
+                .validate()
+        );
+        assert!(
+            !PlayerSupportRequest { selector: PlayerSupportSelector::User(String::new()) }
+                .validate()
+        );
+        assert!(
+            !PlayerSupportRequest { selector: PlayerSupportSelector::User(" Restia".to_owned()) }
+                .validate()
+        );
+        assert!(
+            !PlayerSupportRequest {
+                selector: PlayerSupportSelector::User("x".repeat(MAX_PLAYER_SUPPORT_USER_LEN + 1))
+            }
+            .validate()
+        );
+        // 形似 UUID 但不是规范文本时不能当成用户名去扫描。
+        assert!(
+            !PlayerSupportRequest {
+                selector: PlayerSupportSelector::User(
+                    "0f8fad5b-d9cb-469f-a165-70867728950".to_owned()
+                )
+            }
+            .validate()
+        );
+    }
 }

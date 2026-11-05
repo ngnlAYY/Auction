@@ -10,6 +10,11 @@ pub(crate) fn map_snapshot(snapshot: DeliveryAdminSnapshot) -> AdminDeliveryResp
         recipient: snapshot.recipient,
         cod: snapshot.cod,
         status: snapshot.status,
+        template: snapshot.template,
+        category: snapshot.category,
+        world: snapshot.world,
+        retirement_reason: snapshot.retirement_reason,
+        suppression_reason: snapshot.suppression_reason,
         lease_expires_at: snapshot.lease_expires_at.map(super::timestamp),
         fencing_version: snapshot.fencing_version,
         attempt_count: snapshot.attempt_count,
@@ -132,6 +137,96 @@ pub(crate) fn map_detail(
     }
 }
 
+/// 将玩家支持汇总映射为管理端只读 DTO；分区上限与参考编号由应用层唯一校验。
+pub(crate) fn map_player_support(
+    bundle: auction_application::PlayerSupportBundle,
+) -> auction_contracts::AdminPlayerSupportBundleResponse {
+    use auction_contracts::{
+        AdminPlayerSupportBidResponse, AdminPlayerSupportBundleResponse,
+        AdminPlayerSupportDealResponse, AdminPlayerSupportNotificationResponse,
+        AdminPlayerSupportObligationResponse, AdminPlayerSupportReferenceResponse,
+        AdminPlayerSupportUserResponse,
+    };
+    AdminPlayerSupportBundleResponse {
+        user: bundle.user.map(|user| AdminPlayerSupportUserResponse {
+            id: user.id.to_string(),
+            username: user.username,
+            status: user.status,
+            game_player_id: user.game_player_id,
+        }),
+        bids: bundle
+            .bids
+            .into_iter()
+            .map(|bid| AdminPlayerSupportBidResponse {
+                bid_id: bid.bid_id.to_string(),
+                lot_id: bid.lot_id.to_string(),
+                auction_id: bid.auction_id.to_string(),
+                lot_number: bid.lot_number,
+                world_id: bid.world_id,
+                amount: bid.amount,
+                mechanism: bid.mechanism,
+                lot_status: bid.lot_status,
+                created_at: super::timestamp(bid.created_at),
+            })
+            .collect(),
+        deals: bundle
+            .deals
+            .into_iter()
+            .map(|deal| AdminPlayerSupportDealResponse {
+                lot_id: deal.lot_id.to_string(),
+                auction_id: deal.auction_id.to_string(),
+                lot_number: deal.lot_number,
+                world_id: deal.world_id,
+                equipment_name: deal.equipment_name,
+                final_price: deal.final_price,
+                effective_end_at: deal.effective_end_at.map(super::timestamp),
+            })
+            .collect(),
+        obligations: bundle
+            .obligations
+            .into_iter()
+            .map(|obligation| AdminPlayerSupportObligationResponse {
+                obligation_id: obligation.obligation_id.to_string(),
+                auction_id: obligation.auction_id.to_string(),
+                lot_id: obligation.lot_id.to_string(),
+                world_id: obligation.world_id,
+                obligation_kind: obligation.obligation_kind,
+                business_state: obligation.business_state,
+                amount: obligation.amount,
+                fulfillment_state: obligation.fulfillment_state,
+                fulfillment_error_code: obligation.fulfillment_error_code,
+                delivery_id: obligation.delivery_id.map(|id| id.to_string()),
+            })
+            .collect(),
+        deliveries: bundle.deliveries.into_iter().map(map_snapshot).collect(),
+        notifications: bundle
+            .notifications
+            .into_iter()
+            .map(|notification| AdminPlayerSupportNotificationResponse {
+                notification_id: notification.notification_id.to_string(),
+                channel: notification.channel,
+                kind: notification.kind,
+                lot_id: notification.lot_id.map(|id| id.to_string()),
+                auction_id: notification.auction_id.map(|id| id.to_string()),
+                state: notification.state,
+                state_reason: notification.state_reason,
+                delivery_id: notification.delivery_id.map(|id| id.to_string()),
+                created_at: super::timestamp(notification.created_at),
+                updated_at: super::timestamp(notification.updated_at),
+            })
+            .collect(),
+        references: bundle
+            .references
+            .into_iter()
+            .map(|reference| AdminPlayerSupportReferenceResponse {
+                kind: reference.kind,
+                id: reference.id.to_string(),
+            })
+            .collect(),
+        truncated: bundle.truncated,
+    }
+}
+
 /// 将人工证明预览映射为管理端 DTO；`blockers` 保持闭集字符串，浏览器不推导新结论。
 pub(crate) fn map_sent_proof_preview(
     preview: auction_application::SentConfirmationPreview,
@@ -190,6 +285,11 @@ mod tests {
                 recipient: "Restia".to_owned(),
                 cod: Some(0),
                 status: "manual_reconcile".to_owned(),
+                template: Some("settlement_seller_payout".to_owned()),
+                category: Some("settlement".to_owned()),
+                world: Some("main".to_owned()),
+                retirement_reason: None,
+                suppression_reason: None,
                 lease_expires_at: None,
                 fencing_version: 4,
                 attempt_count: 1,
