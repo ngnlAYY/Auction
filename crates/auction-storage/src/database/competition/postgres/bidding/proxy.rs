@@ -65,30 +65,45 @@ pub(in crate::database::competition) async fn apply_proxy_changes(
             continue;
         }
         let reason = terminal_reasons.get(&state.id).copied().flatten();
-        let transaction = transaction.transaction_mut()?;
-        sqlx::query(
-            r#"INSERT INTO public.bid_proxy_authorizations
-                (authorization_id, lot_id, user_id, authorization_sequence, usage_number,
-                 maximum_amount, mode, status, terminal_reason, state_version,
-                 creation_command_id, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)"#,
-        )
-        .bind(state.id.as_uuid())
-        .bind(state.lot_id.as_uuid())
-        .bind(state.user_id.as_uuid())
-        .bind(i64_version(state.authorization_sequence, "代理序号")?)
-        .bind(i64_version(state.usage_number, "代理使用次数")?)
-        .bind(state.maximum_amount.value())
-        .bind(state.mode.as_str())
-        .bind(state.status.as_str())
-        .bind(reason.map(ProxyTerminalReason::as_str))
-        .bind(i64_version(state.state_version, "代理状态版本")?)
-        .bind(state.creation_command_id.as_uuid())
-        .bind(occurred_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?;
-        crate::database::lot_watch::auto_watch_proxy(transaction, state).await?;
+        let event_id =
+            crate::database::lot_watch::proxy_event(state.id.as_uuid(), state.lot_id.as_uuid());
+        {
+            let transaction = transaction.transaction_mut()?;
+            sqlx::query(
+                r#"INSERT INTO public.bid_proxy_authorizations
+                    (authorization_id, lot_id, user_id, authorization_sequence, usage_number,
+                     maximum_amount, mode, status, terminal_reason, state_version,
+                     creation_command_id, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)"#,
+            )
+            .bind(state.id.as_uuid())
+            .bind(state.lot_id.as_uuid())
+            .bind(state.user_id.as_uuid())
+            .bind(i64_version(state.authorization_sequence, "代理序号")?)
+            .bind(i64_version(state.usage_number, "代理使用次数")?)
+            .bind(state.maximum_amount.value())
+            .bind(state.mode.as_str())
+            .bind(state.status.as_str())
+            .bind(reason.map(ProxyTerminalReason::as_str))
+            .bind(i64_version(state.state_version, "代理状态版本")?)
+            .bind(state.creation_command_id.as_uuid())
+            .bind(occurred_at)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_sql_error)?;
+            // W12.1 残留：新建代理的自动标记同样由提交后事件派生，不在 Serializable 事务内写标记。
+            crate::database::lot_watch::record_proxy_event(
+                transaction,
+                event_id,
+                state.id.as_uuid(),
+                state.user_id.as_uuid(),
+                state.lot_id.as_uuid(),
+                state.state_version,
+                occurred_at,
+            )
+            .await?;
+        }
+        transaction.record_lot_watch_event(event_id);
     }
 
     for transition in &plan.proxy_transitions {
