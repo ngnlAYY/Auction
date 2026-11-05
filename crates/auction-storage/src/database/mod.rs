@@ -79,6 +79,8 @@ mod slow_proxy_due;
 pub use bootstrap::{
     PostgresBootstrapResult, PostgresDatabaseBootstrap, PostgresDatabaseBootstrapError,
 };
+#[cfg(feature = "test-db")]
+pub use competition::BidQueueMode;
 #[cfg(feature = "postgres")]
 pub use competition::PostgresCompetitionTransaction;
 #[cfg(feature = "postgres")]

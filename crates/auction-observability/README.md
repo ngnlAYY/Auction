@@ -476,6 +476,15 @@ Final 耗尽需单独看绝对次数，unknown 未解释前不宣称 Final 零�
 - `auction_db_reserved_connections{purpose}`：长期所有权/订阅预留数。
   purpose 为 mail_ownership、forum_ownership、realtime_ownership、delivery_listener。
 
+出价队列指标（同一数据库记录器，关闭指标时为 no-op）：
+
+- `auction_bid_queue_wait_seconds{stage}`：实际排队等待秒数。stage 为 `in_process`（同实例按
+  场次互斥）与 `cross_instance`（PostgreSQL 会话 advisory lock）。只在真正等待过时观测；
+  未经过队列的命令不产生样本。
+- `auction_bid_queue_requests_total{outcome}`：经过队列的命令结果。outcome 为 `acquired`、
+  `timed_out`（排队预算用尽，映射为暂时不可用）、`canceled`（请求被取消或连接断开，
+  凭证在 Drop 中解锁）与 `failed`（加锁语句或连接获取失败）。
+
 两个直方图有限桶为 0.001、0.005、0.01、0.05、0.1、0.5、1、5、30、120 秒，
 另含 +Inf。loop 严格复用 WorkerLoop 的 17 项闭集：
 

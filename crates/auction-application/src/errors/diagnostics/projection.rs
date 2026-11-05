@@ -210,6 +210,9 @@ impl SafeErrorKind {
     /// 固定安全类别：`competition_rejected`。
     pub const COMPETITION_REJECTED: Self = Self("competition_rejected");
 
+    /// 固定安全类别：`competition_queue_timeout`。
+    pub const COMPETITION_QUEUE_TIMEOUT: Self = Self("competition_queue_timeout");
+
     /// 固定安全类别：`configuration_invalid`。
     pub const CONFIGURATION_INVALID: Self = Self("configuration_invalid");
 
@@ -627,6 +630,7 @@ impl DiagnosticError for crate::CompetitionTransactionError {
         match self {
             Error::Failed(_) => SafeErrorKind::REPOSITORY_FAILED,
             Error::SerializationConflict => SafeErrorKind::REPOSITORY_SERIALIZATION_CONFLICT,
+            Error::QueueWaitTimeout => SafeErrorKind::COMPETITION_QUEUE_TIMEOUT,
             Error::Conflict => SafeErrorKind::REPOSITORY_CONFLICT,
             _ => SafeErrorKind::COMPETITION_REJECTED,
         }

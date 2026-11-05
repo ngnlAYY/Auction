@@ -18,17 +18,17 @@ pub use logging::{
 };
 pub use metrics::{
     AuditFailureClass, AuditFailureKind, AuditFailureObservation, AuditMetricsSnapshot,
-    AuditMetricsSource, AuditSqlstateClass, BrowserErrorClass, BusinessEvent, BusinessOutcome,
-    BusinessRecorder, DatabaseAcquireOutcome, DatabaseConflictSite, DatabaseConnectionGuard,
-    DatabaseRecorder, DatabaseReservedPurpose, DatabaseTransactionOwner, DatabaseTransactionPhase,
-    HttpRateLimitKind, HttpRecorder, METRICS_ROUTE, MetricsError, MigrationReadinessBranch,
-    MigrationReadinessRecorder, PoolMetricsBackend, PoolMetricsSnapshot, PoolMetricsSource,
-    ProcessMetrics, ReadinessCacheOutcome, ReadinessCheckResult, ReadinessRecorder,
-    ShutdownCriticalKind, ShutdownOutcome, ShutdownPhase, ShutdownReason, ShutdownRecorder,
-    ShutdownRole, WebSocketConnectionGuard, WorkerLoop, WorkerPanicOwner, WorkerRecorder,
-    WorkerResult, WorkerRetryKind, current_database_worker_loop, database_transaction_attempt,
-    database_transaction_exhausted, database_transaction_phase, noop_worker_recorder,
-    record_database_conflict, scope_database_worker_loop,
+    AuditMetricsSource, AuditSqlstateClass, BidQueueOutcome, BidQueueWaitStage, BrowserErrorClass,
+    BusinessEvent, BusinessOutcome, BusinessRecorder, DatabaseAcquireOutcome, DatabaseConflictSite,
+    DatabaseConnectionGuard, DatabaseRecorder, DatabaseReservedPurpose, DatabaseTransactionOwner,
+    DatabaseTransactionPhase, HttpRateLimitKind, HttpRecorder, METRICS_ROUTE, MetricsError,
+    MigrationReadinessBranch, MigrationReadinessRecorder, PoolMetricsBackend, PoolMetricsSnapshot,
+    PoolMetricsSource, ProcessMetrics, ReadinessCacheOutcome, ReadinessCheckResult,
+    ReadinessRecorder, ShutdownCriticalKind, ShutdownOutcome, ShutdownPhase, ShutdownReason,
+    ShutdownRecorder, ShutdownRole, WebSocketConnectionGuard, WorkerLoop, WorkerPanicOwner,
+    WorkerRecorder, WorkerResult, WorkerRetryKind, current_database_worker_loop,
+    database_transaction_attempt, database_transaction_exhausted, database_transaction_phase,
+    noop_worker_recorder, record_database_conflict, scope_database_worker_loop,
 };
 pub use telemetry::{
     InitError, ShutdownError, TracingConfig, TracingRuntime, attach_remote_trace_context,

@@ -13,16 +13,23 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::sync::Arc;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Instant,
+};
 
 use auction_application::{
     ApplicationError, CompetitionCommandPort, LotWatchReminderStore, PlaceBidCommand,
 };
 use auction_domain::{BidAmount, CommandId, LotId, UserId};
-use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
+use auction_storage::{BidQueueMode, DatabaseCompetitionCommands, DatabaseStore};
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
 use sqlx::Row;
+use std::time::Duration as StdDuration;
 use tokio::sync::Barrier;
 use uuid::Uuid;
 
@@ -89,6 +96,17 @@ async fn seed_user(pool: &sqlx::PgPool, user_id: Uuid, username: &str) {
 ///
 /// 领先周期行由迁移 000090 的 lot 触发器随 lot 创建事务一起写入，竞价不再懒初始化。
 async fn seed_round(store: &DatabaseStore, seed: &str, lots: usize) -> SeededRound {
+    seed_round_with_filler(store, seed, lots, 1, true).await
+}
+
+/// 同一形状的场次，可选场次序号与是否写入生产量级填充数据；多轮演练只在首轮填充。
+async fn seed_round_with_filler(
+    store: &DatabaseStore,
+    seed: &str,
+    lots: usize,
+    sequence: i32,
+    with_filler: bool,
+) -> SeededRound {
     let pool = store.postgres_pool();
     let deadline = Utc::now() + Duration::hours(2);
     let opened = deadline - Duration::hours(4);
@@ -109,13 +127,14 @@ async fn seed_round(store: &DatabaseStore, seed: &str, lots: usize) -> SeededRou
         "INSERT INTO public.auctions
             (id, world_id, sequence, title, status, scheduled_open_at, preview_scheduled_at,
              scheduled_end_at, effective_end_at, policy_snapshot)
-         VALUES ($1, 'main', 1, $2, 'final', $3, $3, $4, $4, $5)",
+         VALUES ($1, 'main', $6, $2, 'final', $3, $3, $4, $4, $5)",
     )
     .bind(auction_id)
     .bind(format!("{seed} auction"))
     .bind(opened)
     .bind(deadline)
     .bind(policy(deadline))
+    .bind(sequence)
     .execute(pool)
     .await
     .expect("写入测试场次");
@@ -178,7 +197,9 @@ async fn seed_round(store: &DatabaseStore, seed: &str, lots: usize) -> SeededRou
     // 生产形状的填充数据：让热路径的选择走索引/位图而不是 8 行表的顺序扫描。
     // 顺序扫描会在 Serializable 下取得关系级谓词锁，把"不同 lot"误判为冲突，测出的
     // 数字不能代表真实负载。
-    seed_history(pool, auction_id, deadline).await.expect("写入生产形状填充数据");
+    if with_filler {
+        seed_history(pool, auction_id, deadline).await.expect("写入生产形状填充数据");
+    }
 
     SeededRound { lots: seeded_lots, bidders, leaders }
 }
@@ -311,10 +332,20 @@ async fn seed_history(
 }
 
 fn place_bid_command(seed: &str, round: usize, lot_id: Uuid, bidder_id: Uuid) -> PlaceBidCommand {
+    place_bid_command_with_amount(seed, round, lot_id, bidder_id, BASE_PRICE + BID_STEP)
+}
+
+fn place_bid_command_with_amount(
+    seed: &str,
+    round: usize,
+    lot_id: Uuid,
+    bidder_id: Uuid,
+    amount: i64,
+) -> PlaceBidCommand {
     let command_id = CommandId::from_uuid(stable_id(seed, &format!("command-{round}")));
     let lot_id = LotId::from_uuid(lot_id);
     let bidder_id = UserId::from_uuid(bidder_id);
-    let amount = BidAmount::new(BASE_PRICE + BID_STEP).expect("合法竞价金额");
+    let amount = BidAmount::new(amount).expect("合法竞价金额");
     let request_hash =
         PlaceBidCommand::legacy_request_hash(lot_id, bidder_id, amount).expect("稳定请求摘要");
     PlaceBidCommand {
@@ -882,4 +913,362 @@ async fn postgres_lot_watch_outbox_applies_proxy_creation_mark() {
     assert_eq!(reminders, 0, "新建代理本身不产生被超提醒");
 
     store.postgres_pool().close().await;
+}
+
+/// 多轮演练按本轮 lot 断言：同一数据库里还会有其它轮次的事实，不能再用全局计数。
+async fn assert_round_results(
+    store: &DatabaseStore,
+    label: &str,
+    concurrent: usize,
+    seeded: &SeededRound,
+) {
+    let pool = store.postgres_pool();
+    for (index, lot_id) in seeded.lots.iter().enumerate() {
+        let bids: i64 = sqlx::query_scalar("SELECT count(*) FROM public.bids WHERE lot_id = $1")
+            .bind(lot_id)
+            .fetch_one(pool)
+            .await
+            .expect("读取竞价事实");
+        assert_eq!(bids, 1, "{label}: lot {index} 应恰有一条竞价事实");
+        let row = sqlx::query(
+            "SELECT current_price, leader_user_id, state_version FROM public.lots WHERE id = $1",
+        )
+        .bind(lot_id)
+        .fetch_one(pool)
+        .await
+        .expect("读取 lot 最终状态");
+        let current_price: i64 = row.get("current_price");
+        let leader: Uuid = row.get("leader_user_id");
+        let state_version: i64 = row.get("state_version");
+        assert_eq!(current_price, BASE_PRICE + BID_STEP, "{label}: lot {index} 价格");
+        assert_eq!(leader, seeded.bidders[index], "{label}: lot {index} 领先者");
+        assert_eq!(state_version, 2, "{label}: lot {index} 状态版本只推进一次");
+    }
+    let notifications: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.lot_watch_notifications WHERE lot_id = ANY($1)",
+    )
+    .bind(&seeded.lots[..])
+    .fetch_one(pool)
+    .await
+    .expect("读取本轮提醒事实");
+    assert_eq!(notifications, i64::try_from(concurrent).expect("并发数"), "{label}: 提醒事实数");
+}
+
+/// 把演练场次移出活动集合，允许同一世界创建下一轮 `final` 场次。
+async fn retire_auction(store: &DatabaseStore, seed: &str) {
+    sqlx::query("UPDATE public.auctions SET status = 'settled' WHERE id = $1")
+        .bind(stable_id(seed, "auction"))
+        .execute(store.postgres_pool())
+        .await
+        .expect("回收演练场次");
+}
+
+/// 当前数据库里仍被持有的会话级 advisory lock 数；每个测试独占克隆库，因此只统计本夹具。
+async fn advisory_lock_count(pool: &sqlx::PgPool) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM pg_locks
+         WHERE locktype = 'advisory'
+           AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("读取 advisory lock 数")
+}
+
+/// 在预算内等待条件成立；超时返回 `false`，由调用方断言给出可读失败信息。
+async fn wait_for_condition<F, Fut>(budget: StdDuration, mut check: F) -> bool
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline = Instant::now() + budget;
+    loop {
+        if check().await {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(StdDuration::from_millis(10)).await;
+    }
+}
+
+/// 两个模拟 Public 实例共用一个数据库：同一场次的跨 lot 出价必须经会话 advisory lock 串行。
+///
+/// 夹具用一条独立连接把 lot0 的行锁住，让实例一的出价停在事务内并持有队列凭证；此时实例二的
+/// 出价（不同 lot、不同连接池、不同进程内互斥量）必须在**队列**上等待，不能直接进入事务。
+/// 放行后两笔都成功，且没有 40001——这才是跨实例串行而不是仅进程内互斥的证据。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_bid_queue_serializes_cross_lot_across_instances() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let instance_one = database.store().await.expect("实例一连接");
+    let instance_two = database.store().await.expect("实例二连接");
+    let seeded = seed_round(&instance_one, "queue-cross-instance", 2).await;
+    let commands_one = Arc::new(DatabaseCompetitionCommands::new(Arc::new(instance_one.clone())));
+    let commands_two = Arc::new(DatabaseCompetitionCommands::new(Arc::new(instance_two.clone())));
+    let pool = instance_one.postgres_pool();
+
+    // 阻塞实例一出价的事务内进度：事务已经持有队列凭证，只是卡在 lot 行锁上。
+    let mut blocker = pool.acquire().await.expect("取得阻塞连接");
+    sqlx::query("BEGIN").execute(&mut *blocker).await.expect("开启阻塞事务");
+    sqlx::query("SELECT id FROM public.lots WHERE id = $1 FOR UPDATE")
+        .bind(seeded.lots[0])
+        .execute(&mut *blocker)
+        .await
+        .expect("锁定 lot0");
+
+    let first_command =
+        place_bid_command("queue-cross-instance", 0, seeded.lots[0], seeded.bidders[0]);
+    let first = {
+        let commands = Arc::clone(&commands_one);
+        tokio::spawn(async move { commands.place_bid(first_command).await })
+    };
+    assert!(
+        wait_for_condition(StdDuration::from_secs(5), || async {
+            advisory_lock_count(pool).await >= 1
+        })
+        .await,
+        "实例一必须已经持有该场次的会话锁"
+    );
+
+    let second_command =
+        place_bid_command("queue-cross-instance", 1, seeded.lots[1], seeded.bidders[1]);
+    let mut second = {
+        let commands = Arc::clone(&commands_two);
+        tokio::spawn(async move { commands.place_bid(second_command).await })
+    };
+    // 不同进程内互斥量、不同连接池：只有跨实例会话锁能让它停下来。
+    assert!(
+        tokio::time::timeout(StdDuration::from_millis(300), &mut second).await.is_err(),
+        "实例二在实例一持锁期间不得进入同一场次的事务"
+    );
+
+    sqlx::query("ROLLBACK").execute(&mut *blocker).await.expect("释放阻塞事务");
+    // 阻塞连接必须先归还：`PgPool::close` 会等待所有借出连接结束。
+    drop(blocker);
+    first.await.expect("实例一出价任务不得 panic").expect("实例一出价必须成功");
+    second.await.expect("实例二出价任务不得 panic").expect("实例二出价必须成功");
+
+    let deadline = Instant::now() + StdDuration::from_secs(5);
+    while advisory_lock_count(pool).await != 0 && Instant::now() < deadline {
+        tokio::time::sleep(StdDuration::from_millis(10)).await;
+    }
+    assert_eq!(advisory_lock_count(pool).await, 0, "队列凭证必须在出价结束后释放");
+    let bids: i64 = sqlx::query_scalar("SELECT count(*) FROM public.bids WHERE lot_id = ANY($1)")
+        .bind(&seeded.lots[..2])
+        .fetch_one(pool)
+        .await
+        .expect("读取竞价事实");
+    assert_eq!(bids, 2, "跨实例串行后两笔出价各写一条事实");
+
+    instance_one.postgres_pool().close().await;
+    instance_two.postgres_pool().close().await;
+}
+
+/// 被拒绝的命令同样要归还队列：业务错误不得把同一场次永久锁死。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_bid_queue_releases_after_rejected_command() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let commands = DatabaseCompetitionCommands::new(Arc::new(store.clone()));
+    let seeded = seed_round(&store, "queue-rejected", 1).await;
+    let pool = store.postgres_pool();
+
+    // 金额未超过当前价：事务内被领域规则拒绝，事务回滚，但队列凭证必须已经归还。
+    let rejected = place_bid_command_with_amount(
+        "queue-rejected",
+        0,
+        seeded.lots[0],
+        seeded.bidders[0],
+        BASE_PRICE,
+    );
+    let error = commands.place_bid(rejected).await.expect_err("未超过当前价的出价必须被拒绝");
+    assert!(matches!(error, ApplicationError::Domain(_)), "拒绝必须来自领域规则：{error:?}");
+    assert!(
+        wait_for_condition(StdDuration::from_secs(5), || async {
+            advisory_lock_count(pool).await == 0
+        })
+        .await,
+        "被拒绝的命令必须释放会话锁"
+    );
+
+    let accepted = place_bid_command("queue-rejected", 1, seeded.lots[0], seeded.bidders[0]);
+    commands.place_bid(accepted).await.expect("释放后同场次必须能正常出价");
+    let bids: i64 = sqlx::query_scalar("SELECT count(*) FROM public.bids WHERE lot_id = $1")
+        .bind(seeded.lots[0])
+        .fetch_one(pool)
+        .await
+        .expect("读取竞价事实");
+    assert_eq!(bids, 1, "被拒绝的命令不得留下竞价事实");
+
+    store.postgres_pool().close().await;
+}
+
+/// 取消（客户端断连 / 请求被丢弃）必须归还队列凭证：凭证的 `Drop` 负责解锁会话锁。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_bid_queue_releases_when_command_is_canceled() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let commands = Arc::new(DatabaseCompetitionCommands::new(Arc::new(store.clone())));
+    let seeded = seed_round(&store, "queue-canceled", 1).await;
+    let pool = store.postgres_pool();
+
+    let mut blocker = pool.acquire().await.expect("取得阻塞连接");
+    sqlx::query("BEGIN").execute(&mut *blocker).await.expect("开启阻塞事务");
+    sqlx::query("SELECT id FROM public.lots WHERE id = $1 FOR UPDATE")
+        .bind(seeded.lots[0])
+        .execute(&mut *blocker)
+        .await
+        .expect("锁定 lot0");
+
+    let command = place_bid_command("queue-canceled", 0, seeded.lots[0], seeded.bidders[0]);
+    let task = {
+        let commands = Arc::clone(&commands);
+        tokio::spawn(async move { commands.place_bid(command).await })
+    };
+    assert!(
+        wait_for_condition(StdDuration::from_secs(5), || async {
+            advisory_lock_count(pool).await >= 1
+        })
+        .await,
+        "取消前必须确认命令已经持有队列凭证"
+    );
+
+    task.abort();
+    assert!(task.await.expect_err("任务必须被取消").is_cancelled());
+    sqlx::query("ROLLBACK").execute(&mut *blocker).await.expect("释放阻塞事务");
+    drop(blocker);
+    assert!(
+        wait_for_condition(StdDuration::from_secs(5), || async {
+            advisory_lock_count(pool).await == 0
+        })
+        .await,
+        "取消后会话锁必须被释放或随会话关闭回收"
+    );
+
+    let retry = place_bid_command("queue-canceled", 1, seeded.lots[0], seeded.bidders[0]);
+    commands.place_bid(retry).await.expect("取消后同一场次必须仍可出价");
+
+    store.postgres_pool().close().await;
+}
+
+/// 六轮 Final 阶段负载演练：排队前后各测一次，输出分位延迟、失败分类与连接池峰值。
+///
+/// 显式运行：`cargo test -p auction-storage --features test-db --test postgres \
+/// -- --ignored --nocapture postgres_bid_queue_drill`
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "W12.1 六轮负载演练：显式运行以测量排队前后的延迟与连接池占用"]
+async fn postgres_bid_queue_drill_reports_latency_and_pool_usage() {
+    const ROUNDS: usize = 6;
+    let concurrent = std::env::var("AUCTION_CROSSLOT_LOTS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| (2..=12).contains(value))
+        .unwrap_or(DEFAULT_CONCURRENT_BIDS);
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let mut filler_seeded = false;
+    // 同一世界的场次序号唯一，两个模式共用递增序号。
+    let mut auction_sequence = 0_i32;
+
+    for mode in [BidQueueMode::Direct, BidQueueMode::Queued] {
+        let store = database.store().await.expect("连接测试数据库").with_bid_queue_mode(mode);
+        let commands = Arc::new(DatabaseCompetitionCommands::new(Arc::new(store.clone())));
+        let pool = store.postgres_pool();
+        let mut latencies = Vec::new();
+        let mut conflicts = 0_usize;
+        let mut timeouts = 0_usize;
+        let mut other = 0_usize;
+        let mut accepted_total = 0_usize;
+        let peak = Arc::new(AtomicU64::new(0));
+
+        for round in 0..ROUNDS {
+            let seed = format!("drill-{mode:?}-{round}");
+            auction_sequence += 1;
+            let seeded =
+                seed_round_with_filler(&store, &seed, concurrent, auction_sequence, !filler_seeded)
+                    .await;
+            filler_seeded = true;
+            let barrier = Arc::new(Barrier::new(concurrent));
+            let sampler = {
+                let pool = pool.clone();
+                let peak = Arc::clone(&peak);
+                tokio::spawn(async move {
+                    loop {
+                        let tracked =
+                            u32::try_from(pool.num_idle()).unwrap_or(u32::MAX).min(pool.size());
+                        peak.fetch_max(u64::from(pool.size() - tracked), Ordering::Relaxed);
+                        tokio::time::sleep(StdDuration::from_millis(2)).await;
+                    }
+                })
+            };
+            let mut handles = Vec::with_capacity(concurrent);
+            for index in 0..concurrent {
+                let commands = Arc::clone(&commands);
+                let barrier = Arc::clone(&barrier);
+                let command =
+                    place_bid_command(&seed, index, seeded.lots[index], seeded.bidders[index]);
+                handles.push(tokio::spawn(async move {
+                    barrier.wait().await;
+                    let started = Instant::now();
+                    let result = commands.place_bid(command).await;
+                    (started.elapsed(), result)
+                }));
+            }
+            for handle in handles {
+                let (elapsed, result) = handle.await.expect("出价任务不得 panic");
+                latencies.push(elapsed);
+                match result {
+                    Ok(_) => accepted_total += 1,
+                    Err(ApplicationError::CompetitionTransaction(
+                        auction_application::CompetitionTransactionError::SerializationConflict,
+                    )) => conflicts += 1,
+                    Err(ApplicationError::CompetitionTransaction(
+                        auction_application::CompetitionTransactionError::QueueWaitTimeout,
+                    )) => timeouts += 1,
+                    Err(error) => {
+                        if other < 3 {
+                            println!("  轮 {round} 其它失败：{error:?}");
+                        }
+                        other += 1;
+                    }
+                }
+            }
+            sampler.abort();
+            // 对照组的 40001 会让部分 lot 没有事实，只对排队组断言完整结果。
+            if mode == BidQueueMode::Queued {
+                assert_round_results(&store, &seed, concurrent, &seeded).await;
+            }
+            // 每个世界同时只允许一个活动场次；本轮结束后把场次移出活动集合，
+            // 下一轮（含另一个模式的首轮）才能在同一世界再建 `final` 场次。
+            retire_auction(&store, &seed).await;
+        }
+
+        latencies.sort_unstable();
+        let percentile = |fraction: f64| {
+            if latencies.is_empty() {
+                return 0.0;
+            }
+            let index = ((latencies.len() as f64 - 1.0) * fraction).round() as usize;
+            latencies[index].as_secs_f64() * 1_000.0
+        };
+        println!(
+            "W12.1 drill mode={mode:?} 轮数={ROUNDS} 并发={concurrent} 总数={} 成功={accepted_total} \
+             序列化耗尽={conflicts} 排队超时={timeouts} 其它失败={other}",
+            latencies.len()
+        );
+        println!(
+            "  p50={:.1}ms p95={:.1}ms p99={:.1}ms 连接池峰值={} （池上限 {}）",
+            percentile(0.50),
+            percentile(0.95),
+            percentile(0.99),
+            peak.load(Ordering::Relaxed),
+            pool.options().get_max_connections(),
+        );
+        if mode == BidQueueMode::Queued {
+            assert_eq!(conflicts, 0, "排队后不得再出现序列化耗尽");
+            assert_eq!(timeouts, 0, "排队预算内不得超时");
+            assert_eq!(other, 0, "排队后不得出现其它失败");
+        }
+        pool.close().await;
+    }
 }
