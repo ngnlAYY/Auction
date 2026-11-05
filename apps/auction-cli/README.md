@@ -48,6 +48,7 @@ cargo build --locked --release -p auction-cli --features postgres,cache-redis
 | `db` | `status`、`migrate`、`create`、`preflight`、`inventory`、`rebuild` | migrate/create/rebuild 写入 |
 | `backup` | `create`、`verify`、`restore`、`scheduled` | restore 写数据库；scheduled 写本地备份/回执并按资格清理，可选 age 加密/R2 副本与外部打卡 |
 | `wal` | `archive`、`base-backup`、`upload` | archive/base-backup 写本地暂存（`archive_command` 与每周 timer 入口）；upload 读暂存、写 R2 `wal/` 与 `base/` 前缀，按规则清理本地副本 |
+| `alert` | `report` | 只读主机证据；写入 `backup`/`wal` 两个运维告警来源 |
 | `credential` | `list`、`import` | import 写入 |
 | `rules` | `import` | 写入 |
 | `forum` | `recovery`、`authorize-retry` | authorize-retry 写入 |
@@ -298,6 +299,20 @@ auction-cli --config-dir /etc/auction wal upload \
 `wal upload` 读取 Worker 配置，`[backup.offsite] enabled = false` 时执行本地基础备份保留清理，输出 `outcome = skipped` 并退出 0（清理失败时为 `failed`）；否则在暂存目录内取 `wal-upload.lock` 互斥锁，按段名顺序把 `<段名>.zst.age` 上传到 `<prefix>/wal/<段名>.zst.age`，再按备份 ID 顺序把每组基础备份上传到 `<prefix>/base/<备份 ID>/`：先密文、再 manifest，最后发布字节固定的 `completed.json`（`auction-base-upload.v1`）。远端已有相同长度与完整 SHA-256 的对象记 `already_present`（bucket lock 下重传返回 409）；WAL 校验通过后删除本地密文与 manifest 并 `fsync` 目录。基础备份成功上传后写入本机证据 `<备份 ID>.upload.json`（`auction-base-receipt.v1`），后续运行据此跳过重复回读（`base.already_verified`），证据缺失或无效按未上传处理；本地保留最新 3 组完整暂存项，更旧的组依次删除本机证据、manifest 与密文，本次上传失败的组不参与删除。失败、冲突或预算耗尽保留本地文件并以退出码 3 结束。stdout 报告含 WAL 的 `uploaded/already_present/failed/invalid/incomplete/remaining` 与 `base.uploaded/base.already_present/base.already_verified/base.failed/base.retained/base.removed`：`invalid` 是 manifest 无效或长度不符的项，`incomplete` 是创建进程尚未发布完成的项（WAL 段名或基础备份 ID），两者都不删除本地文件。
 
 归档密文是 age 公钥加密结果、manifest 无秘密，因此发布为 0640 并依赖暂存目录的 setgid 组共享（`postgres:auction`、`2770`）；上传器与归档命令使用不同账号时不要改成 0700。启用顺序、W7.5 重启门禁、验证查询与时间点恢复见[WAL 归档与时间点恢复](../../ops/deploy/RECOVERY.md#wal-归档与时间点恢复)。`archive_mode` 默认仍为 `off`；本仓库尚未在隔离实例演练时间点恢复。
+
+### 主机侧运维告警报告（W5.5）
+
+```bash
+auction-cli --config-dir /etc/auction alert report   --backup-output-dir /var/backups/auction/scheduled   --backup-state-dir /var/lib/auction/backup   --wal-staging-dir /var/lib/auction/wal-staging
+```
+
+`alert report` 读取 Worker 配置（含 `[backup]` 水位与 `[backup.offsite]`）后采集三项主机事实：备份输出目录的 `statvfs` 非特权可用块、`<state-dir>/receipts/` 中开始时间最晚的终态回执、WAL 暂存目录中已发布 manifest 且尚未上传的段。它不执行备份、上传或迁移，也不写回执；报告只输出安全投影（kind/scope/count/age/fingerprint/摘要），不含路径、底层错误正文或凭据。
+
+- `backup` 来源：可用空间不同时满足 `[backup].min_free_bytes` 与 `min_free_percent` 时产生 `disk_capacity_low`（count 为缺口字节）；最近一次终态为 `failed`/`interrupted` 时产生 `backup_failed`（age 为距 `finished_at` 的秒数）。目录或回执不可读、或没有任何终态回执时，观察标记为来源不完整（`source_unavailable`），已确认的异常仍然上报，但不会关闭该来源的历史告警。
+- `wal` 来源：`[backup.offsite] enabled = false` 时暂存是本机唯一副本，报告输出 `wal_offsite_disabled` 并解除历史告警；启用异机副本时，最老暂存段达到 30 分钟产生 `wal_upload_stalled`（count 为暂存段数，age 为最老段年龄）。暂存目录不可读时同样标记来源不完整。
+- 未启用 `[worker.operations_alert]`（或告警运行状态为停用）时输出 `outcome = skipped`、`reason = operations_alert_disabled` 并退出 0，不写任何告警行。
+- 幂等：signal fingerprint 只由 `kind` 与固定 scope 决定，重复运行是 upsert；`next_notify_at` 在已有行上保持不变，因此 CLI 重试不会产生第二条告警或重置冷却。`backup` 与 `wal` 独立提交，缺少一项证据不影响另一项来源的恢复判定。
+- 固定观察窗口（代码常量，不进入运行配置）：WAL 暂存积压 30 分钟。timer 示例见 `ops/deploy/systemd/auction-alert-report.{service,timer}.example`；处置步骤见[运维手册的 backup/wal 小节](../../ops/README.md#告警处置手册)。
 
 ## 业务运维
 

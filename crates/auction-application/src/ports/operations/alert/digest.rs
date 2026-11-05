@@ -189,6 +189,12 @@ pub(super) fn valid_signal_identity(
         | OperationsAlertKind::NotificationPostageInsufficient => {
             source == OperationsAlertSource::Notification && scope == "notification"
         }
+        OperationsAlertKind::DiskCapacityLow | OperationsAlertKind::BackupFailed => {
+            source == OperationsAlertSource::Backup && scope == "backup"
+        }
+        OperationsAlertKind::WalUploadStalled => {
+            source == OperationsAlertSource::Wal && scope == "wal"
+        }
     }
 }
 

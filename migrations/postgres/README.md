@@ -138,3 +138,4 @@ VALUES (76, 'breaking');
 
 | 000089 | W5.8 告警台：确认与静默只追加事实表，signal 增加当前活动周期投影与已恢复摘要标记；新表只授 SELECT/INSERT，旧程序忽略新列，登记 compatible |
 | 000090 | W12.1 残留：`auction_commands.last_bid_fact_index` 取代 `bids` 上的 `max(fact_index)` 范围聚合读取（连续性仍由触发器强制）；lot 创建事务直接建立 `lot_watch_leadership` 并回填缺失行，消除首笔竞价的锁定读取未命中；替换既有触发器，登记 breaking |
+| 000091 | W5.5 主机侧运维告警来源：`operations_alert_signals` 闭集新增 `backup`/`wal` 来源与 `disk_capacity_low`/`backup_failed`/`wal_upload_stalled` 种类，由 `auction-cli alert report` 在主机上采集磁盘水位、备份回执与 WAL 暂存事实后提交；只放宽 CHECK、不新建表、不改变授权，旧程序无法解析新 kind/source，登记 breaking |

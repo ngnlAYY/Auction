@@ -20,11 +20,20 @@ pub enum OperationsAlertSource {
     Forum,
     /// 非结算通知投递失败（含邮资不足）。
     Notification,
+    /// 主机侧备份证据：备份目录容量与最近一次定时备份终态。
+    /// 由 `auction-cli alert report` 在主机上读取回执与文件系统，不进入 Worker 扫描。
+    Backup,
+    /// 主机侧 WAL 归档证据：暂存目录里超过时限仍未上传的段。
+    /// 同样由 `auction-cli alert report` 单独观察。
+    Wal,
 }
 
 impl OperationsAlertSource {
-    /// 来源闭集；与迁移 005/020/085 的 `operations_alert_signals.source` CHECK 一致。
-    pub const ALL: [Self; 9] = [
+    /// Worker 每轮扫描必须提交的来源闭集，顺序即 `OperationsAlertObserveCommand` 的校验顺序。
+    ///
+    /// 主机侧来源不由 Worker 观察：Worker 无法读取主机文件系统，伪造一条“来源不可用”会
+    /// 掩盖真实状态；它们由 CLI 单独提交 `OperationsAlertHostObserveCommand`。
+    pub const WORKER: [Self; 9] = [
         Self::Process,
         Self::Delivery,
         Self::Fulfillment,
@@ -34,6 +43,25 @@ impl OperationsAlertSource {
         Self::Lifecycle,
         Self::Forum,
         Self::Notification,
+    ];
+
+    /// 主机侧来源闭集，顺序即 `OperationsAlertHostObserveCommand` 的校验顺序。
+    pub const HOST: [Self; 2] = [Self::Backup, Self::Wal];
+
+    /// 持久化来源闭集（Worker 扫描 + 主机侧报告）；与迁移 005/020/085/091 的
+    /// `operations_alert_signals.source` CHECK 一致。
+    pub const ALL: [Self; 11] = [
+        Self::Process,
+        Self::Delivery,
+        Self::Fulfillment,
+        Self::Recovery,
+        Self::Mail,
+        Self::Credential,
+        Self::Lifecycle,
+        Self::Forum,
+        Self::Notification,
+        Self::Backup,
+        Self::Wal,
     ];
 
     /// 返回数据库和日志使用的稳定名称。
@@ -48,7 +76,14 @@ impl OperationsAlertSource {
             Self::Lifecycle => "lifecycle",
             Self::Forum => "forum",
             Self::Notification => "notification",
+            Self::Backup => "backup",
+            Self::Wal => "wal",
         }
+    }
+
+    /// 该来源是否由主机侧 CLI 报告，而不是 Worker 扫描。
+    pub const fn is_host(self) -> bool {
+        matches!(self, Self::Backup | Self::Wal)
     }
 
     /// 从持久化名称解析；未知名称返回 `None`，调用方不得回退到默认来源。
@@ -68,6 +103,8 @@ impl OperationsAlertSource {
             Self::Lifecycle => "alert-runbook-lifecycle",
             Self::Forum => "alert-runbook-forum",
             Self::Notification => "alert-runbook-notification",
+            Self::Backup => "alert-runbook-backup",
+            Self::Wal => "alert-runbook-wal",
         }
     }
 }
@@ -117,11 +154,17 @@ pub enum OperationsAlertKind {
     NotificationPostageInsufficient,
     /// 外部游戏账号长时间处于忙或不可用状态。
     AccountBusy,
+    /// 备份目录所在文件系统低于配置的字节与比例水位。
+    DiskCapacityLow,
+    /// 最近一次定时备份终态为失败或中断。
+    BackupFailed,
+    /// WAL 暂存目录里存在超过固定时限仍未上传的段：归档/上传链路积压。
+    WalUploadStalled,
 }
 
 impl OperationsAlertKind {
-    /// 持久化种类闭集；与迁移 005/020/085 的 `operations_alert_signals.kind` CHECK 一致。
-    pub const ALL: [Self; 26] = [
+    /// 持久化种类闭集；与迁移 005/020/085/091 的 `operations_alert_signals.kind` CHECK 一致。
+    pub const ALL: [Self; 29] = [
         Self::ServiceMissing,
         Self::ServiceDegraded,
         Self::AuditFailure,
@@ -148,6 +191,9 @@ impl OperationsAlertKind {
         Self::NotificationDeliveryFailed,
         Self::NotificationPostageInsufficient,
         Self::AccountBusy,
+        Self::DiskCapacityLow,
+        Self::BackupFailed,
+        Self::WalUploadStalled,
     ];
 
     /// 从持久化名称解析全部已登记种类；未知名称返回 `None`，调用方不得回退到默认种类。
@@ -184,6 +230,9 @@ impl OperationsAlertKind {
             Self::NotificationDeliveryFailed => "notification_delivery_failed",
             Self::NotificationPostageInsufficient => "notification_postage_insufficient",
             Self::AccountBusy => "account_busy",
+            Self::DiskCapacityLow => "disk_capacity_low",
+            Self::BackupFailed => "backup_failed",
+            Self::WalUploadStalled => "wal_upload_stalled",
         }
     }
 
@@ -191,6 +240,8 @@ impl OperationsAlertKind {
     /// 需要立即人工介入的信号按策略冷却重复通知。
     /// 论坛发布、非结算通知失败与队列延迟都会由 Worker 自动重试或推进，重复通知只会放大
     /// 同一故障的噪声，因此并入每日摘要；邮资不足、账号忙、凭据失效与轮询停滞不会自愈。
+    /// 主机侧的磁盘水位、备份失败与 WAL 积压同样不会自愈，且会阻塞 PostgreSQL 回收，
+    /// 保持紧急级；它们只由 CLI 在固定观察窗口后上报，不会因一次瞬时抖动反复通知。
     pub const fn severity(self) -> OperationsAlertSeverity {
         match self {
             Self::RecoveryPaymentOverdue
@@ -230,6 +281,9 @@ pub const OPERATIONS_ALERT_LIFECYCLE_GRACE: Duration = Duration::from_secs(15 * 
 pub const OPERATIONS_ALERT_QUEUE_LATENCY_AGE: Duration = Duration::from_secs(10 * 60);
 /// 外部账号持续忙：同一世界余额读取连续处于忙状态的持续时间。
 pub const OPERATIONS_ALERT_ACCOUNT_BUSY_AGE: Duration = Duration::from_secs(15 * 60);
+/// WAL 暂存积压：`archive_timeout` 为 300 秒、上传器每 5 分钟运行一次，因此一段暂存
+/// 超过 30 分钟仍未上传说明归档或上传链路已持续失败。该阈值不进入运行配置。
+pub const OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE: Duration = Duration::from_secs(30 * 60);
 
 /// 年龄水位是否达到固定阈值；负值（时钟回拨归一化）不告警。
 pub(super) const fn reached(age_seconds: i64, threshold: Duration) -> bool {
@@ -406,6 +460,18 @@ impl OperationsAlertSignal {
             OperationsAlertKind::AccountBusy => format!(
                 "{} 外部账号已忙 {} 秒，共 {} 次观测",
                 self.scope, self.age_seconds, self.count
+            ),
+            OperationsAlertKind::DiskCapacityLow => format!(
+                "备份文件系统可用空间低于配置水位，缺口 {} 字节；请清理旧副本或扩容",
+                self.count
+            ),
+            OperationsAlertKind::BackupFailed => format!(
+                "定时备份最近一次运行未成功，已 {} 秒；请核对回执与 journal",
+                self.age_seconds
+            ),
+            OperationsAlertKind::WalUploadStalled => format!(
+                "WAL 归档暂存积压 {} 段，最老 {} 秒未上传；请核对上传器与 PostgreSQL 回收",
+                self.count, self.age_seconds
             ),
         };
         if !auction_domain::valid_text(&summary, 512) {

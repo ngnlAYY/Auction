@@ -16,6 +16,8 @@ pub(crate) mod wal;
 
 pub(crate) use manifest::BackupManifest;
 use manifest::sha256_file;
+pub(crate) use scheduled::{DiskUsage, TerminalOutcome, disk_usage, latest_terminal_run};
+pub(crate) use wal::staged_wal_facts;
 
 /// 通过 manifest、摘要与 archive 目录三重校验的恢复点。
 pub(crate) struct VerifiedBackup {

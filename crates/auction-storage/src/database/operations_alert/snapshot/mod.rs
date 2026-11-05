@@ -3,5 +3,5 @@
 mod observe;
 mod reads;
 
-pub(super) use observe::observe_postgres;
+pub(super) use observe::{observe_host_postgres, observe_postgres};
 pub(super) use reads::snapshot_postgres;

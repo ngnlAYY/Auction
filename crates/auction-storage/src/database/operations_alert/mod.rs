@@ -77,6 +77,19 @@ impl OperationsAlertStore for DatabaseStore {
         })
     }
 
+    fn observe_host(
+        &self,
+        command: auction_application::OperationsAlertHostObserveCommand,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            command.validate().map_err(ApplicationError::from)?;
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => observe_host_postgres(store.pool(), &command).await,
+            }
+        })
+    }
+
     fn claim_due_batch(
         &self,
         request: OperationsAlertClaimRequest,
@@ -209,4 +222,4 @@ use delivery::{
 #[cfg(feature = "postgres")]
 use health::{health_postgres, publish_runtime_status_postgres};
 #[cfg(feature = "postgres")]
-use snapshot::{observe_postgres, snapshot_postgres};
+use snapshot::{observe_host_postgres, observe_postgres, snapshot_postgres};

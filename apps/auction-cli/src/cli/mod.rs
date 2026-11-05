@@ -4,11 +4,13 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+mod alerts;
 mod database;
 mod operations;
 mod settlement;
 mod switches;
 mod wal;
+pub(crate) use alerts::AlertCommand;
 pub(crate) use switches::SwitchCommand;
 pub(crate) use wal::WalCommand;
 
@@ -63,6 +65,9 @@ pub(crate) enum Command {
     /// WAL 归档（archive_command 入口）与暂存上传（R2 独立前缀）。
     #[command(subcommand)]
     Wal(WalCommand),
+    /// 主机侧运维告警：读取磁盘、备份回执与 WAL 暂存事实并写入告警来源。
+    #[command(subcommand)]
+    Alert(AlertCommand),
     /// 外部 Cookie 凭据的安全列表与 stdin 导入。
     #[command(subcommand)]
     Credential(CredentialCommand),

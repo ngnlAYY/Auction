@@ -1,0 +1,37 @@
+# W5.5 主机侧告警报告：只读取备份目录水位、定时备份终态回执与 WAL 暂存目录，
+# 把 backup/wal 两个来源写入运维告警；不执行备份、上传、迁移或任何业务写入。
+# 与 auction-backup / auction-wal-upload 共用 auction 账号、配置目录与这些目录的读权限。
+# 未启用 [worker.operations_alert] 时命令输出 outcome=skipped 并退出 0，不写任何告警行。
+[Unit]
+Description=Auction host operations alert report
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=auction
+Group=auction
+WorkingDirectory=/opt/auction
+UMask=0077
+ExecStart=/opt/auction/bin/auction-cli --config-dir /etc/auction alert report \
+    --backup-output-dir /var/backups/auction/scheduled \
+    --backup-state-dir /var/lib/auction/backup
+# WAL 归档（W10.7）实际启用后再追加下面一行；暂存目录不存在时报告会如实标记 wal
+# 来源不可用，因此未启用 WAL 的部署不要提前打开它。
+#   --wal-staging-dir /var/lib/auction/wal-staging
+Restart=no
+# 只读主机证据并写一次告警观察；正常远低于一分钟。
+TimeoutStartSec=2min
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+StandardOutput=journal
+StandardError=journal

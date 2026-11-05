@@ -4,8 +4,11 @@
 
 use crate::{app::print_json, cli::WalCommand, deployment::ConfigDir};
 
+pub(crate) use evidence::staged_wal_facts;
+
 mod archive;
 mod base;
+mod evidence;
 mod model;
 mod upload;
 
