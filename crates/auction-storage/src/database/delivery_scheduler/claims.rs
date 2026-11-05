@@ -75,19 +75,19 @@ pub(super) async fn claim_postgres(
              AND NOT EXISTS (
                  SELECT 1
                  FROM unnest($3::text[], $4::text[]) AS excluded(world, recipient)
-                 WHERE lower(deliveries.payload ->> 'world') = excluded.world
+                 WHERE lower(deliveries.payload_world) = excluded.world
                    AND lower(deliveries.recipient) = excluded.recipient
              )
              AND NOT EXISTS (
                  SELECT 1
                  FROM unnest($5::text[]) AS excluded(world)
-                 WHERE lower(deliveries.payload ->> 'world') = excluded.world
+                 WHERE lower(deliveries.payload_world) = excluded.world
              )
              AND NOT EXISTS (
                  SELECT 1
                  FROM unnest($6::text[]) AS excluded(world)
-                 WHERE deliveries.payload ->> 'operation' = 'send'
-                   AND lower(deliveries.payload ->> 'world') = excluded.world
+                 WHERE deliveries.payload_operation = 'send'
+                   AND lower(deliveries.payload_world) = excluded.world
              )
              AND NOT EXISTS (
                  SELECT 1 FROM public.delivery_send_cadence AS cadence

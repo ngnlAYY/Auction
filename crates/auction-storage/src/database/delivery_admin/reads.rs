@@ -29,14 +29,14 @@ macro_rules! delivery_filters {
                  )
              )
              AND ($3::text IS NULL OR lower(deliveries.recipient) = lower($3::text))
-             AND ($4::text IS NULL OR deliveries.payload ->> 'template' = $4::text)
+             AND ($4::text IS NULL OR deliveries.payload_template = $4::text)
              AND (
                  $5::text IS NULL
                  OR public.delivery_send_category(deliveries.origin_kind, deliveries.payload) = $5::text
              )
              AND (
                  $6::text IS NULL
-                 OR COALESCE(deliveries.payload ->> 'world', 'main') = $6::text
+                 OR COALESCE(deliveries.payload_world, 'main') = $6::text
              )
              AND ($7::timestamptz IS NULL OR deliveries.created_at >= $7::timestamptz)
              AND ($8::timestamptz IS NULL OR deliveries.created_at <= $8::timestamptz)"#

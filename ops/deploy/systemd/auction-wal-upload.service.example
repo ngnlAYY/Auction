@@ -30,5 +30,23 @@ RestrictSUIDSGID=true
 LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadWritePaths=/var/lib/auction/wal-staging
+# --- W9.6 主机加固：资源上限与沙箱 ---
+# 上传是流式压缩/加密，上限防止异常重试或大文件一次性读入拖垮主机。
+MemoryMax=768M
+TasksMax=256
+LimitCORE=0
+CapabilityBoundingSet=
+PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+MemoryDenyWriteExecute=true
 StandardOutput=journal
 StandardError=journal

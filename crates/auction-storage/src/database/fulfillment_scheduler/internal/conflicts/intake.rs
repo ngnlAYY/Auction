@@ -119,8 +119,8 @@ pub(super) async fn closed_source_history(
          FROM public.deliveries d
          JOIN public.inbound_mail im ON im.external_mail_id=d.payload->>'external_mail_id'
             AND im.world_id=$2 AND im.mailbox_key='mooglemail:'||im.world_id
-         WHERE d.origin_kind='mail_intake' AND d.payload->>'world'=$2
-           AND d.payload->>'operation'='return'
+         WHERE d.origin_kind='mail_intake' AND d.payload_world=$2
+           AND d.payload_operation='return'
            AND d.status='succeeded' AND d.failure_code IS NULL
            AND d.lease_token IS NULL AND d.lease_expires_at IS NULL
            AND d.sending_at IS NOT NULL AND d.completed_at>=d.sending_at

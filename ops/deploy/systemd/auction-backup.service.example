@@ -29,5 +29,24 @@ RestrictSUIDSGID=true
 LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadWritePaths=/var/backups/auction/scheduled /var/lib/auction/backup
+# --- W9.6 主机加固：资源上限与沙箱 ---
+# pg_dump 流式写出，正常占用远低于上限；上限防止异常重试或大对象读取拖垮主机。
+MemoryMax=768M
+TasksMax=256
+# 备份产物不含进程内存，但同进程曾持有数据库凭据，仍不写核心转储。
+LimitCORE=0
+CapabilityBoundingSet=
+PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+MemoryDenyWriteExecute=true
 StandardOutput=journal
 StandardError=journal

@@ -84,7 +84,7 @@ pub(super) async fn bind_send(
     expected: Option<&DeliverySendExpectation>,
 ) -> Result<Option<(String, String, DateTime<Utc>)>, RecoveryError> {
     let Some(delivery): Option<RecoveryDelivery> = sqlx::query_as(
-        "SELECT origin_kind,origin_id,recipient,COALESCE(payload->>'world','main') AS world_id,
+        "SELECT origin_kind,origin_id,recipient,COALESCE(payload_world,'main') AS world_id,
                 payload,fencing_version,status,external_reference,sending_at,completed_at
          FROM public.deliveries WHERE id=$1",
     )
@@ -191,7 +191,7 @@ pub(super) async fn bind_send(
                  || CASE WHEN $5::jsonb IS NULL THEN '{}'::jsonb
                          ELSE jsonb_build_object('send_expectation',$5::jsonb) END
          WHERE id=$1 AND fencing_version=$4 AND status='manual_reconcile'
-           AND external_reference IS NULL AND payload->>'operation'='send'
+           AND external_reference IS NULL AND payload_operation='send'
          RETURNING completed_at",
     )
     .bind(delivery_id)
@@ -337,10 +337,10 @@ pub(super) async fn begin_discard_once(
              || jsonb_build_object('compose_discard_attempt',
                  jsonb_build_object('started_at',clock_timestamp(),'fencing_version',$2::bigint))
          WHERE id=$1 AND fencing_version=$2 AND status='manual_reconcile'
-           AND external_reference IS NULL AND payload->>'operation'='send'
+           AND external_reference IS NULL AND payload_operation='send'
            AND sending_at IS NOT NULL AND completed_at IS NOT NULL
            AND ($3 OR (origin_kind IN ('settlement','mail_intake')
-               AND COALESCE(payload->>'world','main')='main'
+               AND COALESCE(payload_world,'main')='main'
                AND COALESCE(payload->'variables'->>'reference','')<>''))
            AND NOT EXISTS (SELECT 1 FROM public.delivery_sent_bindings
                WHERE delivery_id=$1 AND fencing_version=$4)

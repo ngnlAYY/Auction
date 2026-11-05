@@ -323,11 +323,11 @@ async fn unproven_sends(
             FROM public.deliveries d
             LEFT JOIN public.mailbox_sweep_cursors sweep ON sweep.world_id = $1
             WHERE d.status = 'manual_reconcile'
-              AND d.payload->>'operation' IN ('send', 'take')
+              AND d.payload_operation IN ('send', 'take')
               AND d.external_reference IS NULL
               AND d.sending_at IS NOT NULL
               AND d.completed_at IS NOT NULL
-              AND COALESCE(d.payload->>'world', 'main') = $1
+              AND COALESCE(d.payload_world, 'main') = $1
             ORDER BY sweep_order, d.created_at, d.id
             LIMIT $2
          )
@@ -337,13 +337,13 @@ async fn unproven_sends(
                 COALESCE((d.payload->>'cod')::bigint, 0) AS cod,
                 COALESCE((d.payload->>'credits')::bigint, 0) AS credits,
                 COALESCE(d.payload->'variables'->>'reference', '') AS reference,
-                COALESCE(d.payload->>'template', '') AS template,
+                COALESCE(d.payload_template, '') AS template,
                 d.payload->>'result_code' AS result_code,
                 NULLIF(d.payload->>'user_key_user_id', '')::uuid AS user_key_user_id,
                 COALESCE(d.payload->>'external_mail_id', '') AS inbound_mail_id,
                 d.sending_at,
                 d.completed_at AS outcome_recorded_at,
-                COALESCE(d.payload->>'operation', '') AS operation,
+                COALESCE(d.payload_operation, '') AS operation,
                 CASE WHEN attempt.expectation IS NOT NULL
                     THEN attempt.expectation->'equipment_ids'
                 WHEN d.origin_kind='settlement' THEN (
@@ -357,7 +357,7 @@ async fn unproven_sends(
                         COALESCE(d.payload->'equipment_secret_refs','[]'::jsonb)) AS ref
                     LEFT JOIN public.equipment e ON e.id::text=ref->>'id'
                         AND ref->>'kind'='auction_equipment_key'
-                        AND e.world_id=COALESCE(d.payload->>'world','main')
+                        AND e.world_id=COALESCE(d.payload_world,'main')
                 ) ELSE COALESCE(d.payload->'attachment_ids','[]'::jsonb) END AS attachment_value,
                 COALESCE((d.result_metadata->>'sweep_retries')::bigint, 0) AS sweep_retries,
                 d.fencing_version,
@@ -509,9 +509,9 @@ async fn record_sweep_attempt(
     let result = sqlx::query(
         "INSERT INTO public.mailbox_sweep_cursors (world_id, last_created_at, last_delivery_id)
          SELECT $1, created_at, id FROM public.deliveries
-         WHERE id = $2 AND COALESCE(payload->>'world', 'main') = $1
+         WHERE id = $2 AND COALESCE(payload_world, 'main') = $1
            AND status = 'manual_reconcile' AND external_reference IS NULL
-           AND payload->>'operation' IN ('send', 'take')
+           AND payload_operation IN ('send', 'take')
            AND sending_at IS NOT NULL AND completed_at IS NOT NULL
          ON CONFLICT (world_id) DO UPDATE
          SET last_created_at = EXCLUDED.last_created_at,
@@ -633,14 +633,14 @@ async fn record_sighting(
              || jsonb_build_object('sent_reference_sighting', $3::jsonb)
          WHERE delivery.id = $1 AND delivery.fencing_version = $2
            AND delivery.status = 'manual_reconcile' AND delivery.origin_kind = 'settlement'
-           AND delivery.payload->>'operation' = 'send'
+           AND delivery.payload_operation = 'send'
            AND NOT EXISTS (SELECT 1 FROM public.delivery_sent_bindings binding
-               WHERE binding.world_id = COALESCE(delivery.payload->>'world', 'main')
+               WHERE binding.world_id = COALESCE(delivery.payload_world, 'main')
                  AND binding.external_mail_id = $4 AND binding.delivery_id <> delivery.id)
            AND NOT EXISTS (SELECT 1 FROM public.deliveries other
                WHERE other.id <> delivery.id
                  AND other.external_reference =
-                     'mooglemail:' || COALESCE(delivery.payload->>'world', 'main') || ':send:' || $4)",
+                     'mooglemail:' || COALESCE(delivery.payload_world, 'main') || ':send:' || $4)",
     )
     .bind(delivery_id)
     .bind(fencing_version)
@@ -770,7 +770,7 @@ async fn persist_transition_once(
                          || jsonb_build_object('sweep_retries',$2::bigint,
                              'sweep_requeued_at',clock_timestamp(),'sweep_requeue_reason',$3::text)
                  WHERE id=$1 AND status='manual_reconcile' AND origin_kind='mail_intake'
-                   AND payload->>'operation'='take' AND external_reference IS NULL
+                   AND payload_operation='take' AND external_reference IS NULL
                    AND COALESCE((result_metadata->>'sweep_retries')::bigint,0)=$2-1
                    AND fencing_version=$4
                  RETURNING origin_id,updated_at",
@@ -822,8 +822,8 @@ async fn persist_transition_once(
                      lease_token=NULL,lease_expires_at=NULL,
                      result_metadata=COALESCE(result_metadata,'{}'::jsonb)||$3::jsonb
                  WHERE id=$1 AND status='manual_reconcile' AND origin_kind='mail_intake'
-                   AND payload->>'operation'='take' AND external_reference IS NULL
-                   AND sending_at IS NOT NULL AND COALESCE(payload->>'world','main')=$4
+                   AND payload_operation='take' AND external_reference IS NULL
+                   AND sending_at IS NOT NULL AND COALESCE(payload_world,'main')=$4
                    AND payload->>'external_mail_id'=$5
                    AND fencing_version=$6
                    AND NOT EXISTS (

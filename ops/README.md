@@ -151,7 +151,202 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 保护窗口通过 `--protection-window-minutes` 设置（默认 60，范围 1–10080 分钟）。运维必须根据[迁移演练回执](deploy/MIGRATION-DRILL.md#停机时长与窗口)设为不少于实测停机时长的 3 倍；CLI 只校验范围。窗口只对本次命令生效，systemd 包装命令若未传参则仍用 60。紧急例外用 `service stop/restart --force --reason '具体原因'`，两者缺一即参数错误（退出码 2）；原因不可为空或包含秘密、玩家信息。已过截止却长期卡在 live 的 lot，须先人工排查生命周期与收尾故障，再记录原因强制停机。停止前的 stderr/journal 与成功/拒绝 JSON 记录 force、原因、证据与判定，后续失败仍可查看停止前声明。字段与区间边界见 [CLI 契约](../apps/auction-cli/README.md#停机时段门禁)。
 
-**边界（W9.6）**：只读快照不冻结拍卖状态。直接 `systemctl stop/restart` 角色 unit、合并部署的 `auction-server` 停机、系统自动更新重启、关机与断电均可能绕过 CLI；即使 stack 的 ExecStop 被拒绝，也不能把它当成主机关机屏障。系统自动更新/维护重启、主机层排期与防绕过由 W9.6 约束，本批次没有实现主机拦截。W9.6 落地前由运维关闭或协调无人值守自动重启，按同一保护窗口安排维护，避免用直接 systemctl 绕开拒绝。
+**边界（W9.6）**：只读快照不冻结拍卖状态。直接 `systemctl stop/restart` 角色 unit、合并部署的 `auction-server` 停机、系统自动更新重启、关机与断电均可能绕过 CLI；即使 stack 的 ExecStop 被拒绝，也不能把它当成主机关机屏障。系统自动更新/维护重启、主机层排期与防绕过由 W9.6 约束，本批次没有实现主机拦截；无人值守自动重启须按[主机加固基线](#主机加固基线w96)关闭或排期，按同一保护窗口安排维护，避免用直接 systemctl 绕开拒绝。
+
+## 主机加固基线（W9.6）
+
+本节是主机层基线：systemd 资源上限与沙箱、SSH、防火墙、PostgreSQL 监听、无人值守升级、时间同步、journald 与 PostgreSQL 小版本升级。模板随发布包提供，主机配置由用户执行；仓库不安装 unit、不改主机服务、不代替现场核对。线上实际 unit 名可能是 `auction-test-*`，须把相同指令合并进实际启用的 unit 文件后 `systemctl daemon-reload`，再按 `service restart` 受控生效。
+
+### systemd 资源上限与沙箱
+
+所有 `*.service.example` 都声明资源上限与 `LimitCORE=0`；三个角色、合并部署与四个 oneshot 另加沙箱选项。上限是失控保护，不是容量规划：按现状单机约 1.9 GB 内存取值，正常占用远低于上限。
+
+| unit | MemoryMax | TasksMax | 沙箱 |
+| --- | ---: | ---: | --- |
+| `auction-public-api` | 512M | 256 | 完整 |
+| `auction-admin-api` | 512M | 256 | 完整 |
+| `auction-worker` | 768M | 512 | 完整 |
+| `auction-server`（合并部署） | 1200M | 1024 | 完整 |
+| `auction-backup` | 768M | 256 | 完整 |
+| `auction-base-backup` | 768M | 256 | 完整 |
+| `auction-wal-upload` | 768M | 256 | 完整 |
+| `auction-alert-report` | 256M | 128 | 完整 |
+| `auction-stack` | 512M | 128 | 保守 |
+
+“完整”沙箱 = `CapabilityBoundingSet=`（空）、`PrivateDevices=true`、`ProtectClock=true`、`ProtectHostname=true`、`ProtectKernelLogs=true`、`ProtectProc=invisible`、`ProcSubset=pid`、`RestrictNamespaces=true`、`RestrictRealtime=true`、`SystemCallArchitectures=native`、`SystemCallFilter=@system-service`、`SystemCallErrorNumber=EPERM`、`MemoryDenyWriteExecute=true`，并保留模板原有的 `ProtectSystem=strict`、`ProtectHome=true`、`NoNewPrivileges=true`、`RestrictAddressFamilies=` 等。服务只读写已列出的 `ReadWritePaths`，`/proc/self` 仍可用；沙箱不改变启动顺序、就绪判定与停止预算。
+
+`auction-stack` 以 root 运行 `auction-cli service` 并调用 `systemctl`，失败即整套服务无法启动，因此只加不改变编排能力的选项：不加 `CapabilityBoundingSet=`、`SystemCallFilter=` 与 `ProtectProc=`。收紧前须在演练主机用 `systemd-analyze security` 与一次完整 `service stop/start` 验证。
+
+`systemd-analyze security` 评分（systemd 257，`--offline=yes` 分析仓库模板）：
+
+| unit | 加固前 | 加固后 |
+| --- | --- | --- |
+| 三个角色、`auction-server`、四个 oneshot | 7.0 MEDIUM | 1.5 OK |
+| `auction-stack` | 7.3 MEDIUM | 5.2 MEDIUM |
+
+复现（只读，不需要安装 unit）：
+
+```bash
+mkdir -p /tmp/sdscore
+for f in ops/deploy/systemd/*.service.example; do cp "$f" "/tmp/sdscore/$(basename "$f" .example)"; done
+for f in /tmp/sdscore/*.service; do
+  printf '%-38s ' "$(basename "$f")"
+  systemd-analyze security --offline=yes "$f" | grep -E 'Overall exposure level'
+done
+```
+
+线上核对（在目标主机，只读）：
+
+```bash
+systemd-analyze security auction-test-worker.service
+systemctl show auction-test-worker.service \
+  -p MemoryMax -p MemoryCurrent -p MemoryPeak -p TasksMax -p TasksCurrent -p LimitCORE
+systemctl show auction-test-worker.service \
+  -p CapabilityBoundingSet -p ProtectProc -p ProcSubset -p MemoryDenyWriteExecute -p SystemCallFilter
+pid=$(systemctl show -p MainPID --value auction-test-worker.service)
+grep -E '^(Seccomp|CapEff):' /proc/$pid/status
+```
+
+`Seccomp: 2` 表示过滤器已装载，`CapEff: 0000000000000000` 表示没有有效 capability。
+
+调整与回退：`MemoryCurrent` 长期超过 `MemoryMax` 的 70%，或 `TasksCurrent` 接近 `TasksMax`，先查真实原因（泄漏、池大小、并行 CLI）再调大上限，不能把 OOM kill 当正常回收。角色启动失败且 journal 出现 `EPERM` 时按顺序放宽：先删 `MemoryDenyWriteExecute=`，再删 `SystemCallFilter=` 与 `SystemCallErrorNumber=`，最后才放宽资源上限；每次只改一项，`daemon-reload` 后受控重启。资源上限本身可单独保留。
+
+### SSH
+
+只允许密钥登录，禁止 root 直接登录：
+
+```
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AllowUsers <运维账号>
+```
+
+改完先 `sshd -t` 校验，再 `systemctl reload ssh`（不要断开现有会话），另开终端确认能登录。核对：
+
+```bash
+sshd -T | grep -E '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|pubkeyauthentication|allowusers)'
+```
+
+需要 root 权限时用 `sudo -i` 或 `su -`；始终保留至少一个可登录账号与一把离线备份密钥。
+
+### 防火墙与端口
+
+入站默认拒绝，只开放 SSH 与反向代理端口。Public/Admin 默认走 Unix socket、PostgreSQL 与 Redis 只监听本机，因此除 SSH 外通常只需 80/443（ACME 与 HTTPS）；经 Cloudflare 代理时可进一步只允许 Cloudflare 地址段访问 443。
+
+```bash
+ss -lntup        # 核对实际监听；0.0.0.0/:: 上不属于预期的端口都要处理
+nft list ruleset
+```
+
+最小 nftables 示例（按实际端口与来源调整，先 `nft -c -f /etc/nftables.conf` 试运行）：
+
+```
+table inet filter {
+  chain input {
+    type filter hook input priority 0; policy drop;
+    ct state established,related accept
+    iif lo accept
+    tcp dport 22 accept
+    tcp dport { 80, 443 } accept
+    ip protocol icmp accept
+    ip6 nexthdr icmpv6 accept
+  }
+  chain forward { type filter hook forward priority 0; policy drop; }
+  chain output  { type filter hook output priority 0; policy accept; }
+}
+```
+
+**待决定（W0.12）**：2026-11-03 记录到 `19344` 端口由 sing-box 监听在所有网卡，与拍卖服务无关但扩大暴露面。它不属于本仓库服务；改为只监听本机或在防火墙显式拒绝外部访问，由用户决定后执行。核对 `ss -lntup | grep ':19344\b'`；决定前不得视为已加固。
+
+### PostgreSQL 只监听本机
+
+`listen_addresses` 只含 `127.0.0.1`（或只用 Unix socket），`pg_hba.conf` 不对非本机来源开放 `trust`；服务与 CLI 都通过本机连接。配置片段与连接预算见 [PostgreSQL 18 服务端基线](postgres/README.md)。核对：
+
+```bash
+ss -lntp | grep 5432                    # 期望只有 127.0.0.1:5432
+psql -Atc "SHOW listen_addresses"
+```
+
+### 无人值守升级与重启窗口
+
+安全更新可以自动安装，但**自动重启必须避开 Final 与保护窗口**：CLI 的停机门禁只能拦 `service stop/restart`，拦不住主机重启，也不能把 stack 的 ExecStop 当关机屏障。
+
+```
+# /etc/apt/apt.conf.d/20auto-upgrades
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+# /etc/apt/apt.conf.d/50unattended-upgrades
+Unattended-Upgrade::Automatic-Reboot "false";
+```
+
+选择一：保持 `Automatic-Reboot "false"`，由运维在保护窗口外 `auction-cli service stop`、`reboot`、开机后核对 `service status`。选择二：把 `Automatic-Reboot-Time` 设到确认无 Final 的固定时段，并接受重启仍可能撞上临时场次；两者都要写进维护排期。核对：
+
+```bash
+apt-config dump | grep -E 'APT::Periodic::Unattended-Upgrade|Unattended-Upgrade::Automatic-Reboot'
+systemctl list-timers 'apt-daily*' --all
+test -f /var/run/reboot-required && cat /var/run/reboot-required /var/run/reboot-required.pkgs
+```
+
+`needrestart` 可能在升级后自动重启 PostgreSQL 或 sshd；确认 `/etc/needrestart/conf.d/` 未启用自动重启模式（`$nrconf{restart} = 'l'` 为列表模式），否则小版本升级会绕过时段门禁。
+
+### 时间同步
+
+出价截止、会话期限、代理到期与证据时间窗都依赖本机时钟。启用 systemd-timesyncd 或 chrony 并确认已同步：
+
+```bash
+timedatectl                      # 期望 System clock synchronized: yes、NTP service: active
+timedatectl show -p NTPSynchronized --value
+chronyc tracking                 # 使用 chrony 时
+```
+
+时区保持 UTC 或与日志/审计一致，不在运行中手工 `date -s`。
+
+### journald 持久化与容量
+
+JSON 日志是排障与审计证据来源，必须持久化并设上限（根分区余量有限，WAL 暂存与备份也在同一磁盘）。
+
+```
+# /etc/systemd/journald.conf
+[Journal]
+Storage=persistent
+SystemMaxUse=2G
+SystemMaxFileSize=64M
+RuntimeMaxUse=256M
+RateLimitIntervalSec=30s
+RateLimitBurst=10000
+```
+
+`RateLimitBurst` 调低会丢弃高频 WARN，排障前先看是否有限流记录。核对与维护：
+
+```bash
+journalctl --disk-usage
+journalctl --verify
+systemctl restart systemd-journald      # 只影响日志服务，不重启角色
+journalctl --vacuum-size=1G             # 需要腾空间时；先导出要保留的证据
+```
+
+### PostgreSQL 小版本升级
+
+小版本升级（18.x → 18.y）二进制兼容，不需要 `pg_upgrade`，但会重启数据库并断开全部连接，因此必须当作计划停机并纳入[停机时段保护](#停机时段保护)：
+
+1. 选在无 Final、且保护窗口覆盖整个升级时长的时段。
+2. `auction-cli --config-dir /etc/auction service stop`；被拒绝就改期，确需强制时按 `--force --reason` 规则记录原因。
+3. `auction-cli backup create --database auction --output /var/backups/auction/auction-<日期>.dump` 并 `backup verify`。
+4. `apt-get update && apt-get install --only-upgrade postgresql-18`（不跨大版本，不手工 `pg_upgrade`），然后 `systemctl restart postgresql`。
+5. 核对 `pg_isready`、`psql -Atc "SELECT version()"`、`SHOW shared_preload_libraries`（`pg_stat_statements` 仍加载）与迁移版本未变。
+6. `auction-cli --config-dir /etc/auction service start --owner-secrets /etc/auction/owner/postgres.toml`，再 `service status` 确认三角色就绪。
+
+跨大版本升级不属于本节，须走 `pg_upgrade` 与完整恢复演练。
+
+### 尚未落地（延后）
+
+- `auction-stack.service` 的完整沙箱：需先在演练主机验证 `systemctl`/D-Bus 与 `/proc` 可见性。
+- `IPAddressDeny=`/`IPAddressAllow=` 出站白名单：依赖稳定维护的外部端点清单（Cloudflare、MoogleMail、论坛、R2、数据库）。
+- `PrivateUsers=true`：会破坏 Unix socket 属主与 peer 凭据校验，不适用于三角色。
+- `19344`（sing-box）暴露面处置：等用户按 W0.12 决定。
+- 主机基线目前只有文档与手工核对命令，没有配置管理或漂移检测；线上 `auction-test-*` unit 也未由本次模板改动自动更新。
 
 ## 升级
 

@@ -72,7 +72,7 @@ pub(super) async fn after_credentials(
              JOIN public.settlement_obligations o ON o.id=r.payment_obligation_id
              JOIN public.equipment e ON e.id=o.equipment_id
              WHERE d.origin_id=a.id::text AND e.external_equipment_id=$2 AND e.world_id=$3)
-           OR (d.payload->>'world'=$3 AND (
+           OR (d.payload_world=$3 AND (
              d.payload->'attachment_ids' @> jsonb_build_array($2::text)
              OR EXISTS(SELECT 1 FROM public.equipment e
                WHERE e.external_equipment_id=$2 AND e.world_id=$3

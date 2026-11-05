@@ -33,5 +33,23 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# --- W9.6 主机加固：资源上限与沙箱 ---
+# 只读证据并写一次告警，占用很低；上限为失控保护。
+MemoryMax=256M
+TasksMax=128
+LimitCORE=0
+CapabilityBoundingSet=
+PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+MemoryDenyWriteExecute=true
 StandardOutput=journal
 StandardError=journal

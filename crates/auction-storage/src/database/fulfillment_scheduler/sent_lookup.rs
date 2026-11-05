@@ -47,10 +47,10 @@ async fn read_postgres(
          WHERE o.id = $1 AND o.obligation_kind = 'withdrawn_return'
            AND f.delivery_operation = 'send' AND d.origin_kind = 'settlement'
            AND e.world_id = o.world_id AND d.attempt_count = 1
-           AND d.payload ->> 'world' = o.world_id
+           AND d.payload_world = o.world_id
            AND d.origin_id = o.id::text
            AND d.payload ->> 'schema_version' = '1'
-           AND d.payload ->> 'template' = 'settlement_equipment_handoff'
+           AND d.payload_template = 'settlement_equipment_handoff'
            AND d.payload -> 'variables' ->> 'reference' = o.id::text",
     )
     .bind(obligation_uuid)

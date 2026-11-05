@@ -230,7 +230,7 @@ pub(super) async fn enqueue_within_limit_postgres(
                     "SELECT count(*) FROM public.deliveries
                      WHERE lower(recipient) = lower($1)
                        AND created_at >= $2
-                       AND payload->>'template' = ANY($3)",
+                       AND payload_template = ANY($3)",
                 )
                 .bind(&command.recipient)
                 .bind(limit.since)

@@ -35,6 +35,29 @@ LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadWritePaths=/var/lib/auction
 LimitNOFILE=65536
+# --- W9.6 主机加固：资源上限与沙箱 ---
+# 本 unit 的 cgroup 同时包含三个子进程，上限须高于分体部署三角色之和；
+# 按单机约 1.9 GB 内存取 1200M，属失控保护而非容量规划。
+MemoryMax=1200M
+TasksMax=1024
+# 不写核心转储：转储可能含会话、Cookie 与密钥材料。
+LimitCORE=0
+# 服务不需要任何 Linux capability。
+CapabilityBoundingSet=
+PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+# 只保留本进程可见的 /proc 与 pid 子集；/proc/self 与 sched_getaffinity 仍可用。
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Rust 服务没有 JIT；若将来引入运行时生成代码的依赖须先移除本行。
+MemoryDenyWriteExecute=true
 
 [Install]
 WantedBy=multi-user.target

@@ -140,3 +140,4 @@ VALUES (76, 'breaking');
 | 000090 | W12.1 残留：`auction_commands.last_bid_fact_index` 取代 `bids` 上的 `max(fact_index)` 范围聚合读取（连续性仍由触发器强制）；lot 创建事务直接建立 `lot_watch_leadership` 并回填缺失行，消除首笔竞价的锁定读取未命中；替换既有触发器，登记 breaking |
 | 000091 | W5.5 主机侧运维告警来源：`operations_alert_signals` 闭集新增 `backup`/`wal` 来源与 `disk_capacity_low`/`backup_failed`/`wal_upload_stalled` 种类，由 `auction-cli alert report` 在主机上采集磁盘水位、备份回执与 WAL 暂存事实后提交；只放宽 CHECK、不新建表、不改变授权，旧程序无法解析新 kind/source，登记 breaking |
 | 000092 | W12.1 残留：被超提醒与自动标记改为提交后 outbox（`lot_watch_events` 只追加处理进度、租约与顺序屏障）；出价事务只插入事件，提醒在独立事务应用；把新表加入运行账号可变表授权；纯新增表/索引与授权，登记 compatible |
+| 000094 | W12.6 投递热键列化：`deliveries.payload` 的 `world`/`operation`/`template` 提升为 `GENERATED ALWAYS … STORED` 生成列并由整表重写回填，`payload` 仍是唯一真相；两个候选索引换成列形式，整行证据比较两侧剔除派生列；旧程序回退后整行证明会失败关闭，登记 breaking |

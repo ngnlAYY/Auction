@@ -71,8 +71,8 @@ async fn has_operation(
         "SELECT EXISTS (
             SELECT 1 FROM public.deliveries
             WHERE origin_kind = 'mail_intake'
-              AND payload->>'world' = $1 AND payload->>'external_mail_id' = $2
-              AND payload->>'operation' = $3
+              AND payload_world = $1 AND payload->>'external_mail_id' = $2
+              AND payload_operation = $3
         )",
     )
     .bind(world_id)

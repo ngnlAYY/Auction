@@ -106,7 +106,7 @@ async fn exclude_conflicts(
            EXISTS(SELECT 1 FROM public.auction_forum_bid_commands forum_command
              WHERE forum_command.command_id=d.command_id
                AND forum_command.command_kind='notify' AND forum_command.amount=0
-               AND forum_command.world_id=d.payload->>'world'
+               AND forum_command.world_id=d.payload_world
                AND d.origin_id='forum:' || forum_command.auction_id::text || ':'
                    || forum_command.thread_id || ':' || forum_command.post_id || ':'
                    || forum_command.line_number::text || ':' || forum_command.lot_code
@@ -144,7 +144,7 @@ async fn exclude_conflicts(
         "SELECT EXISTS(SELECT 1 FROM public.deliveries d
          WHERE d.id IS DISTINCT FROM $3 AND (
            d.payload->'schema_version' IS DISTINCT FROM '1'::jsonb
-           OR d.payload->>'world' IS NULL OR d.payload->>'world' NOT IN ('main','isekai')
+           OR d.payload_world IS NULL OR d.payload_world NOT IN ('main','isekai')
            OR EXISTS(SELECT 1 FROM public.settlement_obligations origin_obligation
               JOIN public.equipment origin_equipment ON origin_equipment.id=origin_obligation.equipment_id
               WHERE d.origin_kind='settlement' AND d.origin_id=origin_obligation.id::text
@@ -164,11 +164,11 @@ async fn exclude_conflicts(
                  'template',d.payload->'template','variables',d.payload->'variables',
                  'credits',d.payload->'credits','cod',d.payload->'cod',
                  'equipment_secret_refs',d.payload->'equipment_secret_refs')
-             OR NOT COALESCE(d.payload->>'template' IN ('settlement_winner_equipment_cod',
+             OR NOT COALESCE(d.payload_template IN ('settlement_winner_equipment_cod',
                  'settlement_payment_carrier','settlement_equipment_handoff',
                  'settlement_seller_payout','settlement_buyer_refund'),false)
              OR jsonb_typeof(d.payload->'variables') IS DISTINCT FROM 'object'
-             OR d.payload->'variables' IS DISTINCT FROM CASE d.payload->>'template'
+             OR d.payload->'variables' IS DISTINCT FROM CASE d.payload_template
                  WHEN 'settlement_winner_equipment_cod' THEN CASE
                      WHEN d.payload->'variables' ? 'pricing_mode' THEN CASE
                          WHEN d.payload->'variables'->>'pricing_mode'='hold_curve_v2' THEN jsonb_build_object(
@@ -213,7 +213,7 @@ async fn exclude_conflicts(
                  AND d.payload->'cod'<='9223372036854775807'::jsonb,false)
              OR CASE WHEN jsonb_typeof(d.payload->'equipment_secret_refs')='array'
                  THEN jsonb_array_length(d.payload->'equipment_secret_refs') ELSE -1 END
-                <> CASE WHEN d.payload->>'template' IN (
+                <> CASE WHEN d.payload_template IN (
                      'settlement_winner_equipment_cod','settlement_equipment_handoff') THEN 1 ELSE 0 END
              OR EXISTS(SELECT 1 FROM jsonb_array_elements(
                 CASE WHEN jsonb_typeof(d.payload->'equipment_secret_refs')='array'
@@ -222,11 +222,11 @@ async fn exclude_conflicts(
                        'kind','auction_equipment_key','id',ref->'id')
                    OR jsonb_typeof(ref->'id') IS DISTINCT FROM 'string'
                    OR NOT EXISTS(SELECT 1 FROM public.equipment known
-                       WHERE known.id::text=ref->>'id' AND known.world_id=d.payload->>'world')
+                       WHERE known.id::text=ref->>'id' AND known.world_id=d.payload_world)
                    OR EXISTS(SELECT 1 FROM public.equipment target
                        WHERE target.id::text=ref->>'id'
                          AND target.external_equipment_id=$1 AND target.world_id=$2))
-             OR d.payload->>'operation' IS DISTINCT FROM 'send')))
+             OR d.payload_operation IS DISTINCT FROM 'send')))
            AND NOT EXISTS(SELECT 1 FROM public.settlement_obligation_fulfillments f
                WHERE f.delivery_id=d.id AND f.execution_state='satisfied' AND f.proof_digest IS NOT NULL)
            AND NOT EXISTS(SELECT 1 FROM public.settlement_recovery_actions a

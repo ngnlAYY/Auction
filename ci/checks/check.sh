@@ -159,6 +159,46 @@ check_systemd_templates() {
 		printf '%s' "$failures" >&2
 		return 1
 	fi
+
+	# W9.6：每个 service 模板都必须声明资源上限并关闭核心转储。
+	# 上限值属于主机容量判断，这里只要求存在、非空且 LimitCORE 恰为 0，
+	# 避免新增 unit 或复制模板时悄悄丢掉这些指令。
+	failures=$(
+		for file in ops/deploy/systemd/*.service.example; do
+			awk -v file="$file" '
+        BEGIN { section = ""; bad = 0 }
+        /^[[:space:]]*\[/ { section = $0; next }
+        section ~ /^\[Service\]/ {
+          key = $0
+          sub(/[[:space:]]*=.*/, "", key)
+          gsub(/[[:space:]]/, "", key)
+          value = $0
+          sub(/^[^=]*=[[:space:]]*/, "", value)
+          gsub(/[[:space:]]/, "", value)
+          if (key != "MemoryMax" && key != "TasksMax" && key != "LimitCORE") next
+          seen[key] = 1
+          if (value == "") {
+            printf "%s:%d: %s= 不能为空\n", file, FNR, key
+            bad = 1
+          } else if (key == "LimitCORE" && value != "0") {
+            printf "%s:%d: LimitCORE= 必须为 0\n", file, FNR
+            bad = 1
+          }
+        }
+        END {
+          if (!("MemoryMax" in seen)) { printf "%s: [Service] 缺少 MemoryMax=\n", file; bad = 1 }
+          if (!("TasksMax" in seen)) { printf "%s: [Service] 缺少 TasksMax=\n", file; bad = 1 }
+          if (!("LimitCORE" in seen)) { printf "%s: [Service] 缺少 LimitCORE=0\n", file; bad = 1 }
+          exit bad
+        }
+      ' "$file"
+		done
+	)
+	if [[ -n "$failures" ]]; then
+		printf '%s\n' "systemd 服务模板缺少资源上限（W9.6）：" >&2
+		printf '%s' "$failures" >&2
+		return 1
+	fi
 }
 
 check_config_examples() {

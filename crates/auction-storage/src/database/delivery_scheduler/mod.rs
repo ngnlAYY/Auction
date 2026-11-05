@@ -20,24 +20,24 @@ macro_rules! delivery_mail_disposition_gate {
     () => {
         r#"(
     deliveries.origin_kind <> 'mail_intake'
-    OR deliveries.payload ->> 'operation' = 'send'
+    OR deliveries.payload_operation = 'send'
     OR (
-        deliveries.payload ->> 'operation' IN ('take', 'return')
+        deliveries.payload_operation IN ('take', 'return')
         AND NOT EXISTS (
             SELECT 1 FROM public.deliveries AS opposite
             WHERE opposite.origin_kind = 'mail_intake'
-              AND opposite.payload ->> 'world' = deliveries.payload ->> 'world'
+              AND opposite.payload_world = deliveries.payload_world
               AND opposite.payload ->> 'external_mail_id' = deliveries.payload ->> 'external_mail_id'
-              AND opposite.payload ->> 'operation' = CASE
-                  WHEN deliveries.payload ->> 'operation' = 'take' THEN 'return'
+              AND opposite.payload_operation = CASE
+                  WHEN deliveries.payload_operation = 'take' THEN 'return'
                   ELSE 'take'
               END
         )
-        AND ((deliveries.payload ->> 'operation' = 'take') = EXISTS (
+        AND ((deliveries.payload_operation = 'take') = EXISTS (
             SELECT 1 FROM public.auction_submissions AS submission
             INNER JOIN public.auctions AS auction ON auction.id = submission.auction_id
             WHERE submission.source_kind = 'mail'
-              AND auction.world_id = deliveries.payload ->> 'world'
+              AND auction.world_id = deliveries.payload_world
               AND submission.external_mail_id = deliveries.payload ->> 'external_mail_id'
         ))
     )
@@ -58,21 +58,21 @@ macro_rules! delivery_completion_gate {
     OR (
     (
         deliveries.origin_kind = 'mail_intake'
-        AND deliveries.payload ->> 'template' = 'forum_auction_notice'
-        AND deliveries.payload ->> 'operation' = 'send'
+        AND deliveries.payload_template = 'forum_auction_notice'
+        AND deliveries.payload_operation = 'send'
         AND EXISTS (
             SELECT 1
             FROM public.auction_forum_bid_commands AS forum_command
             WHERE forum_command.command_id = deliveries.command_id
               AND forum_command.command_kind = 'notify'
-              AND forum_command.world_id = deliveries.payload ->> 'world'
+              AND forum_command.world_id = deliveries.payload_world
         )
     )
     OR EXISTS (
         SELECT 1
         FROM public.inbound_mail AS inbound
         INNER JOIN public.mail_commands AS command ON command.mail_id = inbound.id
-        WHERE inbound.world_id = deliveries.payload ->> 'world'
+        WHERE inbound.world_id = deliveries.payload_world
           AND inbound.external_mail_id = deliveries.payload ->> 'external_mail_id'
           AND inbound.status IN ('accepted', 'rejected', 'failed')
           AND inbound.decision_code <> 'parsed_pending_processing'

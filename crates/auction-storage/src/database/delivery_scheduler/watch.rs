@@ -79,15 +79,15 @@ pub(super) async fn retire_receipts(
             WHERE deliveries.status IN ('pending', 'claimed')
               AND deliveries.sending_at IS NULL
               AND deliveries.origin_kind = 'mail_intake'
-              AND deliveries.payload ->> 'operation' = 'send'
-              AND deliveries.payload ->> 'template' = 'auction_submission_receipt'
+              AND deliveries.payload_operation = 'send'
+              AND deliveries.payload_template = 'auction_submission_receipt'
               AND EXISTS (
                   SELECT 1
                   FROM public.auction_submissions AS submission
                   INNER JOIN public.auctions AS auction ON auction.id = submission.auction_id
                   WHERE submission.source_kind = 'mail'
                     AND submission.external_mail_id = deliveries.payload ->> 'external_mail_id'
-                    AND auction.world_id = deliveries.payload ->> 'world'
+                    AND auction.world_id = deliveries.payload_world
                     AND auction.status NOT IN ('draft', 'preview')
               )
             ORDER BY deliveries.created_at, deliveries.id

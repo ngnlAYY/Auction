@@ -155,7 +155,7 @@ async fn execute_transaction(
         let sighted: bool = sqlx::query_scalar(
             "SELECT COALESCE(result_metadata,'{}'::jsonb) ? 'sent_reference_sighting'
              FROM public.deliveries
-             WHERE id=$1 AND origin_kind='settlement' AND payload->>'operation'='send'",
+             WHERE id=$1 AND origin_kind='settlement' AND payload_operation='send'",
         )
         .bind(command.delivery_id)
         .fetch_optional(transaction.connection()?)
