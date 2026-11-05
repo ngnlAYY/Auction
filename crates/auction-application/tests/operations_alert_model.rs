@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-//! W5.2 告警分级、来源闭集与去重：只验证纯应用层映射与身份绑定，
+//! W5.2/W5.5 告警分级、来源闭集、主机侧事实映射与去重：只验证纯应用层映射与身份绑定，
 //! 不连接数据库、不发送通知，也不引入迁移。
 
 use std::collections::BTreeSet;
@@ -9,11 +9,14 @@ use std::time::Duration;
 use auction_application::{
     OPERATIONS_ALERT_DIGEST_INTERVAL, OPERATIONS_ALERT_LIFECYCLE_GRACE,
     OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OPERATIONS_ALERT_QUEUE_LATENCY_AGE,
-    OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot, OperationsAlertError,
-    OperationsAlertForumSnapshot, OperationsAlertKind, OperationsAlertLifecycleSnapshot,
-    OperationsAlertMailSnapshot, OperationsAlertNotificationSnapshot, OperationsAlertPolicy,
-    OperationsAlertSeverity, OperationsAlertSignal, OperationsAlertSnapshot, OperationsAlertSource,
-    OperationsAlertSourceObservation, evaluate_snapshot,
+    OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE, OperationsAlertCredentialSnapshot,
+    OperationsAlertDeliverySnapshot, OperationsAlertError, OperationsAlertForumSnapshot,
+    OperationsAlertHostBackupFacts, OperationsAlertHostBackupOutcome, OperationsAlertHostBackupRun,
+    OperationsAlertHostDisk, OperationsAlertHostObserveCommand, OperationsAlertHostWalFacts,
+    OperationsAlertKind, OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
+    OperationsAlertNotificationSnapshot, OperationsAlertPolicy, OperationsAlertSeverity,
+    OperationsAlertSignal, OperationsAlertSnapshot, OperationsAlertSource,
+    OperationsAlertSourceObservation, evaluate_host_backup, evaluate_host_wal, evaluate_snapshot,
 };
 
 const COOLDOWN: Duration = Duration::from_secs(1_800);
@@ -21,16 +24,17 @@ const COOLDOWN: Duration = Duration::from_secs(1_800);
 /// 每个种类唯一合法的来源与范围；`source_unavailable` 的 scope 等于来源名称。
 fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'static str) {
     use OperationsAlertKind::{
-        AccountBusy, AuctionPhaseOverdue, AuditFailure, BalanceLow, CredentialInvalid,
-        DeliveryManualReconcile, DeliveryPending, DeliveryReturnedMail, EvidenceStale,
-        ForumMessageFailed, ForumSyncFailed, FulfillmentBacklog, FulfillmentFailed,
-        FulfillmentManualReconcile, MailPollStalled, NotificationDeliveryFailed,
+        AccountBusy, AuctionPhaseOverdue, AuditFailure, BackupFailed, BalanceLow,
+        CredentialInvalid, DeliveryManualReconcile, DeliveryPending, DeliveryReturnedMail,
+        DiskCapacityLow, EvidenceStale, ForumMessageFailed, ForumSyncFailed, FulfillmentBacklog,
+        FulfillmentFailed, FulfillmentManualReconcile, MailPollStalled, NotificationDeliveryFailed,
         NotificationPostageInsufficient, ProxyExpiryOverdue, QueueLatency, RecoveryFailed,
         RecoveryManualReconcile, RecoveryPaymentOverdue, RecoveryRelistPending, ServiceDegraded,
-        ServiceMissing, SourceUnavailable,
+        ServiceMissing, SourceUnavailable, WalUploadStalled,
     };
     use OperationsAlertSource::{
-        Credential, Delivery, Forum, Fulfillment, Lifecycle, Mail, Notification, Process, Recovery,
+        Backup, Credential, Delivery, Forum, Fulfillment, Lifecycle, Mail, Notification, Process,
+        Recovery, Wal,
     };
     match kind {
         ServiceMissing | ServiceDegraded => (Process, "worker"),
@@ -54,6 +58,8 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         NotificationDeliveryFailed | NotificationPostageInsufficient => {
             (Notification, "notification")
         }
+        DiskCapacityLow | BackupFailed => (Backup, "backup"),
+        WalUploadStalled => (Wal, "wal"),
     }
 }
 
@@ -126,7 +132,7 @@ fn source_closed_set_round_trips_and_rejects_unknown_names() {
         assert_eq!(source.to_string(), source.as_str());
     }
     assert_eq!(OperationsAlertSource::parse(""), None);
-    assert_eq!(OperationsAlertSource::parse("backup"), None);
+    assert_eq!(OperationsAlertSource::parse("host"), None);
     assert_eq!(OperationsAlertSource::parse("Process"), None);
 }
 
@@ -252,10 +258,10 @@ fn quiet_snapshot() -> OperationsAlertSnapshot {
 fn missing_sources_are_reported_for_every_closed_source() {
     let observations = evaluate_snapshot(&OperationsAlertSnapshot::default(), &policy())
         .expect("空快照必须可评估");
-    assert_eq!(observations.len(), OperationsAlertSource::ALL.len());
+    assert_eq!(observations.len(), OperationsAlertSource::WORKER.len());
     let reported: BTreeSet<&str> =
         observations.iter().map(|observation| observation.source.as_str()).collect();
-    for source in OperationsAlertSource::ALL {
+    for source in OperationsAlertSource::WORKER {
         assert!(reported.contains(source.as_str()), "{} 缺失来源必须被报告", source.as_str());
         let observation = observations
             .iter()
@@ -452,7 +458,7 @@ fn observe_command_requires_the_full_source_closed_set_in_order() {
 
     let observations = evaluate_snapshot(&OperationsAlertSnapshot::default(), &policy())
         .expect("空快照必须可评估");
-    assert_eq!(observations.len(), OperationsAlertSource::ALL.len());
+    assert_eq!(observations.len(), OperationsAlertSource::WORKER.len());
     let command = OperationsAlertObserveCommand {
         observations: observations.clone(),
         now: Utc::now(),
@@ -477,4 +483,234 @@ fn observe_command_requires_the_full_source_closed_set_in_order() {
         batch_window: Duration::from_secs(120),
     };
     assert_eq!(command.validate(), Err(OperationsAlertError::Invalid));
+}
+
+/// 备份来源的磁盘门禁与定时备份终态：字节与比例下限同时满足才算正常。
+fn backup_facts(
+    available_bytes: u64,
+    outcome: OperationsAlertHostBackupOutcome,
+) -> OperationsAlertHostBackupFacts {
+    OperationsAlertHostBackupFacts {
+        disk: Some(OperationsAlertHostDisk {
+            total_bytes: 1_000_000,
+            available_bytes,
+            min_free_bytes: 100_000,
+            min_free_percent: 20,
+        }),
+        latest_run: Some(OperationsAlertHostBackupRun { outcome, age_seconds: 3_600 }),
+    }
+}
+
+#[test]
+fn host_backup_reports_disk_shortfall_and_failed_receipt() {
+    // 比例下限 20%（200 000 字节）高于字节下限 100 000，因此缺口按比例下限计算。
+    let observation =
+        evaluate_host_backup(&backup_facts(150_000, OperationsAlertHostBackupOutcome::Failed))
+            .expect("备份事实必须可评估");
+    assert!(observation.available);
+    assert_eq!(observation.source, OperationsAlertSource::Backup);
+    let kinds: Vec<OperationsAlertKind> = observation.signals.iter().map(|s| s.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![OperationsAlertKind::DiskCapacityLow, OperationsAlertKind::BackupFailed]
+    );
+    assert_eq!(observation.signals[0].scope, "backup");
+    // 缺口 = 200 000 - 150 000。
+    assert_eq!(observation.signals[0].count, 50_000);
+    assert_eq!(observation.signals[1].age_seconds, 3_600);
+    assert_eq!(
+        observation.signals[1].severity(),
+        OperationsAlertSeverity::Urgent,
+        "备份失败与磁盘水位不会自愈，保持紧急级"
+    );
+}
+
+#[test]
+fn host_backup_completed_and_above_threshold_is_quiet() {
+    let observation =
+        evaluate_host_backup(&backup_facts(500_000, OperationsAlertHostBackupOutcome::Completed))
+            .expect("备份事实必须可评估");
+    assert!(observation.available);
+    assert!(observation.signals.is_empty());
+}
+
+#[test]
+fn host_backup_interrupted_receipt_alerts_without_disk_signal() {
+    let observation =
+        evaluate_host_backup(&backup_facts(250_000, OperationsAlertHostBackupOutcome::Interrupted))
+            .expect("备份事实必须可评估");
+    let kinds: Vec<OperationsAlertKind> = observation.signals.iter().map(|s| s.kind).collect();
+    assert_eq!(kinds, vec![OperationsAlertKind::BackupFailed]);
+}
+
+#[test]
+fn host_backup_missing_evidence_stays_unavailable_and_keeps_known_signals() {
+    let missing_receipt = OperationsAlertHostBackupFacts {
+        disk: Some(OperationsAlertHostDisk {
+            total_bytes: 1_000_000,
+            available_bytes: 10_000,
+            min_free_bytes: 100_000,
+            min_free_percent: 20,
+        }),
+        latest_run: None,
+    };
+    let observation = evaluate_host_backup(&missing_receipt).expect("备份事实必须可评估");
+    assert!(!observation.available, "缺少终态回执时来源必须标记为不完整");
+    assert_eq!(
+        observation.signals[0].kind,
+        OperationsAlertKind::SourceUnavailable,
+        "不完整来源必须以固定 source_unavailable 开头"
+    );
+    assert!(
+        observation
+            .signals
+            .iter()
+            .any(|signal| signal.kind == OperationsAlertKind::DiskCapacityLow),
+        "已确认的磁盘异常不能被证据缺失掩盖"
+    );
+
+    let missing_disk = OperationsAlertHostBackupFacts {
+        disk: None,
+        latest_run: Some(OperationsAlertHostBackupRun {
+            outcome: OperationsAlertHostBackupOutcome::Completed,
+            age_seconds: 60,
+        }),
+    };
+    let observation = evaluate_host_backup(&missing_disk).expect("备份事实必须可评估");
+    assert!(!observation.available);
+    assert_eq!(observation.signals.len(), 1);
+}
+
+#[test]
+fn host_backup_rejects_invalid_thresholds_and_negative_age() {
+    let mut facts = backup_facts(500_000, OperationsAlertHostBackupOutcome::Completed);
+    facts.disk = Some(OperationsAlertHostDisk {
+        total_bytes: 1_000_000,
+        available_bytes: 500_000,
+        min_free_bytes: 100_000,
+        min_free_percent: 0,
+    });
+    assert_eq!(evaluate_host_backup(&facts), Err(OperationsAlertError::Invalid));
+    let mut facts = backup_facts(500_000, OperationsAlertHostBackupOutcome::Failed);
+    facts.latest_run = Some(OperationsAlertHostBackupRun {
+        outcome: OperationsAlertHostBackupOutcome::Failed,
+        age_seconds: -1,
+    });
+    assert_eq!(evaluate_host_backup(&facts), Err(OperationsAlertError::Invalid));
+}
+
+#[test]
+fn host_wal_alerts_only_after_the_fixed_stall_window() {
+    let quiet = evaluate_host_wal(&OperationsAlertHostWalFacts {
+        staged_segments: 3,
+        oldest_staged_age_seconds: OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE.as_secs() as i64 - 1,
+    })
+    .expect("WAL 事实必须可评估");
+    assert!(quiet.available);
+    assert!(quiet.signals.is_empty());
+
+    let stalled = evaluate_host_wal(&OperationsAlertHostWalFacts {
+        staged_segments: 3,
+        oldest_staged_age_seconds: OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE.as_secs() as i64,
+    })
+    .expect("WAL 事实必须可评估");
+    assert!(stalled.available);
+    assert_eq!(stalled.signals.len(), 1);
+    assert_eq!(stalled.signals[0].kind, OperationsAlertKind::WalUploadStalled);
+    assert_eq!(stalled.signals[0].scope, "wal");
+    assert_eq!(stalled.signals[0].count, 3);
+    assert_eq!(
+        stalled.signals[0].age_seconds,
+        OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE.as_secs() as i64
+    );
+}
+
+#[test]
+fn host_wal_rejects_inconsistent_or_negative_facts() {
+    assert_eq!(
+        evaluate_host_wal(&OperationsAlertHostWalFacts {
+            staged_segments: 0,
+            oldest_staged_age_seconds: 10,
+        }),
+        Err(OperationsAlertError::Invalid),
+        "没有暂存段时不存在年龄"
+    );
+    assert_eq!(
+        evaluate_host_wal(&OperationsAlertHostWalFacts {
+            staged_segments: -1,
+            oldest_staged_age_seconds: 0,
+        }),
+        Err(OperationsAlertError::Invalid)
+    );
+}
+
+/// 主机侧命令只接受 host 来源，顺序固定，重复运行命中同一 fingerprint（upsert 去重）。
+#[test]
+fn host_observe_command_dedupes_cli_retries_by_fingerprint() {
+    use chrono::Utc;
+
+    let facts = backup_facts(10_000, OperationsAlertHostBackupOutcome::Failed);
+    let first = evaluate_host_backup(&facts).expect("备份事实必须可评估");
+    let retry = evaluate_host_backup(&facts).expect("备份事实必须可评估");
+    let first_fingerprints: Vec<[u8; 32]> =
+        first.signals.iter().map(|signal| signal.fingerprint).collect();
+    let retry_fingerprints: Vec<[u8; 32]> =
+        retry.signals.iter().map(|signal| signal.fingerprint).collect();
+    assert_eq!(
+        first_fingerprints, retry_fingerprints,
+        "相同事实的重试必须命中同一 signal，而不是新建第二条"
+    );
+
+    let wal = evaluate_host_wal(&OperationsAlertHostWalFacts {
+        staged_segments: 1,
+        oldest_staged_age_seconds: 3_600,
+    })
+    .expect("WAL 事实必须可评估");
+    let command = OperationsAlertHostObserveCommand {
+        observations: vec![first, wal],
+        now: Utc::now(),
+        batch_window: Duration::from_secs(120),
+    };
+    assert_eq!(command.validate(), Ok(()));
+
+    let reversed = OperationsAlertHostObserveCommand {
+        observations: vec![command.observations[1].clone(), command.observations[0].clone()],
+        now: Utc::now(),
+        batch_window: Duration::from_secs(120),
+    };
+    assert_eq!(reversed.validate(), Err(OperationsAlertError::Invalid));
+
+    let worker_source = OperationsAlertHostObserveCommand {
+        observations: vec![
+            OperationsAlertSourceObservation::unavailable(OperationsAlertSource::Mail)
+                .expect("不可用观察必须可构造"),
+        ],
+        now: Utc::now(),
+        batch_window: Duration::from_secs(120),
+    };
+    assert_eq!(
+        worker_source.validate(),
+        Err(OperationsAlertError::Invalid),
+        "主机侧入口不得写入 Worker 来源"
+    );
+
+    let empty = OperationsAlertHostObserveCommand {
+        observations: Vec::new(),
+        now: Utc::now(),
+        batch_window: Duration::from_secs(120),
+    };
+    assert_eq!(empty.validate(), Err(OperationsAlertError::Invalid));
+}
+
+#[test]
+fn host_sources_are_not_part_of_the_worker_scan_closed_set() {
+    for source in OperationsAlertSource::HOST {
+        assert!(source.is_host());
+        assert!(!OperationsAlertSource::WORKER.contains(&source));
+        assert!(OperationsAlertSource::ALL.contains(&source));
+        assert!(source.runbook_anchor().starts_with("alert-runbook-"));
+    }
+    for source in OperationsAlertSource::WORKER {
+        assert!(!source.is_host());
+    }
 }

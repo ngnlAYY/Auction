@@ -1,4 +1,4 @@
-//! W5.5 运维告警来源补齐：迁移 000085 的闭集与新增来源水位读取。
+//! W5.5 运维告警来源补齐：迁移 000085/000091 的闭集与新增来源水位读取。
 //!
 //! 只在空库上用真实 PostgreSQL 18 验证两件事：数据库层 kind/scope/source/identity 闭集
 //! 对新增取值放行且仍拒绝未登记取值；新增来源的读取查询在已迁移 schema 上真实执行并返回
@@ -72,19 +72,22 @@ async fn postgres_operations_alert_sources_migration_registers_breaking_extensio
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
 
-    // 085 之后的迁移各自追加登记；这里只要求内嵌最高版本已覆盖 085，避免每加一个迁移
-    // 都要修改本断言，同时保留“085 必须登记 breaking”的原意。
+    // 085/091 之后的迁移各自追加登记；这里只要求内嵌最高版本已覆盖 091，避免每加一个
+    // 迁移都要修改本断言，同时保留“放宽闭集的迁移必须登记 breaking”的原意。
     assert!(
-        postgres_expected_migration_version() >= 85,
-        "内嵌迁移必须已包含 W5.5 告警来源扩展（085）"
+        postgres_expected_migration_version() >= 91,
+        "内嵌迁移必须已包含 W5.5 主机侧告警来源扩展（091）"
     );
-    let level: String = sqlx::query_scalar(
-        "SELECT level FROM public.schema_migration_compatibility WHERE version = 85",
-    )
-    .fetch_one(store.postgres_pool())
-    .await
-    .expect("迁移 085 必须登记兼容等级");
-    assert_eq!(level, "breaking", "放宽告警闭集后旧程序无法解析新取值");
+    for version in [85, 91] {
+        let level: String = sqlx::query_scalar(
+            "SELECT level FROM public.schema_migration_compatibility WHERE version = $1",
+        )
+        .bind(version)
+        .fetch_one(store.postgres_pool())
+        .await
+        .unwrap_or_else(|error| panic!("迁移 {version} 必须登记兼容等级：{error}"));
+        assert_eq!(level, "breaking", "放宽告警闭集后旧程序无法解析新取值");
+    }
 
     store.postgres_pool().close().await;
 }
@@ -120,6 +123,8 @@ async fn postgres_operations_alert_closed_sets_accept_new_kinds_and_reject_unkno
             Kind::NotificationDeliveryFailed | Kind::NotificationPostageInsufficient => {
                 ("notification", "notification")
             }
+            Kind::DiskCapacityLow | Kind::BackupFailed => ("backup", "backup"),
+            Kind::WalUploadStalled => ("wal", "wal"),
         };
         let seed = format!("kind-{index:02}-{}", kind.as_str());
         insert_signal(&store, &seed, kind.as_str(), scope, source)
@@ -133,7 +138,7 @@ async fn postgres_operations_alert_closed_sets_accept_new_kinds_and_reject_unkno
     assert!(unknown_kind.is_err(), "未登记 kind 必须被拒绝");
 
     let unknown_source =
-        insert_signal(&store, "unknown-source", "mail_poll_stalled", "mail", "backup").await;
+        insert_signal(&store, "unknown-source", "mail_poll_stalled", "mail", "host").await;
     assert!(unknown_source.is_err(), "未登记 source 必须被拒绝");
 
     // identity 闭集仍生效：来源与 scope 不匹配的新种类同样拒绝。

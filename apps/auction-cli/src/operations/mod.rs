@@ -1,5 +1,6 @@
 //! 业务运维命令；只装配既有应用端口与存储实现，不绕过领域规则、幂等账本或追加式审计。
 
+pub(crate) mod alerts;
 pub(crate) mod credentials;
 pub(crate) mod forum;
 pub(crate) mod funds;

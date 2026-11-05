@@ -527,13 +527,15 @@ Final 回帖导入已由 W0.5 接入；延迟上界、估计宽度和覆盖率�
 
 ### 运维告警
 
-启用 `[worker.operations_alert]`（需要 MoogleMail 已启用且收件人在同一世界）后，Worker 定期扫描并通过 MoogleMail 发送告警邮件。扫描覆盖九个来源：`process`（进程缺失/降级与审计失败）、`delivery`（投递积压、人工对账、退信与已领取但未推进的队列延迟）、`fulfillment`（履约积压与失败）、`recovery`（付款逾期、待重挂、余额与证据、账号持续忙）、`mail`（收件轮询停滞）、`credential`（凭据失效）、`lifecycle`（场次未进入 Final、慢速代理到期未执行）、`forum`（主题发布与私信失败）、`notification`（非结算通知失败与邮资不足）。
+启用 `[worker.operations_alert]`（需要 MoogleMail 已启用且收件人在同一世界）后，Worker 定期扫描并通过 MoogleMail 发送告警邮件。Worker 扫描九个来源：`process`（进程缺失/降级与审计失败）、`delivery`（投递积压、人工对账、退信与已领取但未推进的队列延迟）、`fulfillment`（履约积压与失败）、`recovery`（付款逾期、待重挂、余额与证据、账号持续忙）、`mail`（收件轮询停滞）、`credential`（凭据失效）、`lifecycle`（场次未进入 Final、慢速代理到期未执行）、`forum`（主题发布与私信失败）、`notification`（非结算通知失败与邮资不足）。
 
-同一信号有冷却时间（默认 30 分钟），通知按窗口合并。信号按决策 66 分级：需要立即处理的种类沿用冷却后重复通知；付款逾期、待重列、队列延迟、论坛主题发布失败与非结算通知失败属于自动重试/自动推进的等待类，24 小时内最多合并为一封每日摘要，已恢复的摘要类信号会以“已恢复：”附在下一封摘要中，不单独发送恢复通知。W5.5 新增来源的观察窗口是代码常量而不是运行配置：收件轮询停滞与生命周期宽限各 15 分钟、队列延迟 10 分钟、账号持续忙 15 分钟。
+主机侧另有两个来源由 `auction-cli alert report` 报告（timer 示例见 `ops/deploy/systemd/auction-alert-report.{service,timer}.example`）：`backup`（备份目录容量低于 `[backup]` 的字节/比例水位、最近一次定时备份终态不是 `completed`）与 `wal`（WAL 暂存段超过 30 分钟仍未上传）。Worker 无法读取主机文件系统，因此不扫描这两个来源；启用告警后由独立 timer 运行报告命令，同一事实重复提交是幂等 upsert，不会产生第二条告警或重置冷却。
+
+同一信号有冷却时间（默认 30 分钟），通知按窗口合并。信号按决策 66 分级：需要立即处理的种类沿用冷却后重复通知；付款逾期、待重列、队列延迟、论坛主题发布失败与非结算通知失败属于自动重试/自动推进的等待类，24 小时内最多合并为一封每日摘要，已恢复的摘要类信号会以“已恢复：”附在下一封摘要中，不单独发送恢复通知。W5.5 新增来源的观察窗口是代码常量而不是运行配置：收件轮询停滞与生命周期宽限各 15 分钟、队列延迟 10 分钟、账号持续忙 15 分钟、WAL 暂存积压 30 分钟。
 
 告警台（W5.8）始终可用：即使未启用 `[worker.operations_alert]`，Admin 的“告警台”也是活动与历史告警的唯一入口。每条告警显示来源、范围、首次/最近时间、计数与处置手册锚点；确认只记录操作者已处理，静默仅在到期前抑制重复通知，二者都不改变信号、阈值或恢复判定。侧栏的待办数来自投递人工对账、待确认恢复与活动告警，仪表盘默认每 30 秒自动刷新。
 
-告警种类、来源与范围是迁移 005、015、020、085 的数据库 CHECK 闭集，新增来源必须随迁移扩展并按 W7.8a 登记等级。每个来源的处置步骤见[告警处置手册](#告警处置手册)。
+告警种类、来源与范围是迁移 005、015、020、085、091 的数据库 CHECK 闭集，新增来源必须随迁移扩展并按 W7.8a 登记等级。每个来源的处置步骤见[告警处置手册](#告警处置手册)。
 
 ### 告警台
 
@@ -550,6 +552,8 @@ Admin 的“告警台”列出全部活动与历史告警。筛选支持 `active
 | lifecycle | `alert-runbook-lifecycle` | 场次/代理推进 |
 | forum | `alert-runbook-forum` | 论坛主题与私信恢复 |
 | notification | `alert-runbook-notification` | 非结算通知与邮资 |
+| backup | `alert-runbook-backup` | 备份目录水位与定时备份回执 |
+| wal | `alert-runbook-wal` | WAL 暂存积压与归档上传 |
 
 - 确认（acknowledge）只追加操作者事实并显示确认人与时间；不改写 signal 的 kind/scope/count/age/active。
 - 静默（silence）可选 1/8/24/72 小时，只把该 signal 的重复通知时间推到到期时间。到期后仍活动的 signal 会按原阈值继续通知；静默不会关闭告警，也不会延长任何截止时间。
@@ -861,11 +865,23 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 - 邮资耗尽（MoogleMail 提示 postage 不足）：补充 Bot 账号 Credits 后在 Admin“投递队列”重试失败项；补足前不要反复重试。
 - 恢复判定：失败计数与最老年龄归零，新通知能正常寄出。
 
-### 主机：磁盘满、备份与 WAL 归档失败
+<a id="alert-runbook-backup"></a>
 
-- 现象：备份或恢复命令报磁盘门禁失败、`auction-cli backup scheduled` 回执失败、`auction-cli wal archive/upload` 失败。
-- 立即处置：先核对数据目录、暂存目录与保留目录的剩余空间（定时备份自带磁盘门禁），清理过期回执与旧本地副本后再重跑；WAL 归档积压会阻塞 PostgreSQL 回收，必须优先处理。
-- 恢复判定：`backup verify` 或 `wal upload` 回执成功，归档目录不再积压。备份与 WAL 的命令细节见[备份与恢复手册](deploy/RECOVERY.md)与[WAL 归档与时间点恢复](deploy/RECOVERY.md#wal-归档与时间点恢复)。
+### backup：备份目录水位与定时备份失败
+
+- 现象：`disk_capacity_low`（备份目录可用空间低于 `[backup].min_free_bytes` 或 `min_free_percent`，正文给出缺口字节）、`backup_failed`（最近一次终态回执为 `failed` 或 `interrupted`）。`source_unavailable` 表示报告读不到备份目录、回执目录或暂无终态回执。
+- 立即处置：`df -h /var/backups/auction`；`auction-cli backup scheduled` 的终态在 `<state-dir>/receipts/<run_id>.json`，失败阶段与固定错误码在 `failure` 字段，底层错误只进入 journal（`journalctl -u auction-backup`）。先清理过期回执与旧本地副本，或扩容后再重跑；不要为通过水位门禁删除仍符合保留资格的恢复点。
+- `source_unavailable` 且从未完成备份：先按部署文档启用 `auction-backup.timer` 并确认 `alert report` 的 `--backup-output-dir`/`--backup-state-dir` 指向实际目录。
+- 恢复判定：一次 `completed` 终态回执发布，且可用空间同时满足字节与比例下限（报告下一轮自动解除）。
+
+<a id="alert-runbook-wal"></a>
+
+### wal：WAL 暂存积压与归档上传
+
+- 现象：`wal_upload_stalled`（暂存目录中尚未上传的 WAL 段最老超过 30 分钟，正文给出段数与年龄）；`source_unavailable` 表示暂存目录不可读或不是安全目录。`wal_offsite_disabled` 只是报告跳过项：`[backup.offsite] enabled = false` 时暂存是本机唯一副本，久留不算故障。
+- 立即处置：核对 `journalctl -u auction-wal-upload` 的上传结果与 `auction-cli wal upload` 的 JSON 报告；检查 R2 凭据、bucket lock 冲突与网络。WAL 积压会阻塞 PostgreSQL 回收并推高 `pg_wal` 占用，必须优先处理。
+- 恢复判定：`wal upload` 报告 `completed` 且暂存目录中不再有超过阈值的段；下一次报告自动解除。
+- 备份与 WAL 的命令细节见[备份与恢复手册](deploy/RECOVERY.md)与[WAL 归档与时间点恢复](deploy/RECOVERY.md#wal-归档与时间点恢复)。
 
 ### 游戏页面结构变化与账号风险
 
