@@ -527,7 +527,11 @@ Final 回帖导入已由 W0.5 接入；延迟上界、估计宽度和覆盖率�
 
 ### 运维告警
 
-启用 `[worker.operations_alert]`（需要 MoogleMail 已启用且收件人在同一世界）后，Worker 定期扫描并通过 MoogleMail 发送告警邮件：投递积压（数量 / 最老年龄）、需要人工对账的投递、履约积压、付款逾期以及进程健康。同一信号有冷却时间（默认 30 分钟），通知按窗口合并。信号按决策 66 分级：需要立即处理的种类沿用冷却后重复通知；付款逾期与待重列属于非紧急种类，重复通知不短于每日摘要节奏（每日摘要聚合与告警台属于 W5.8）。告警种类、来源与范围是迁移 005、020 的数据库 CHECK 闭集，新增来源必须随迁移扩展。
+启用 `[worker.operations_alert]`（需要 MoogleMail 已启用且收件人在同一世界）后，Worker 定期扫描并通过 MoogleMail 发送告警邮件。扫描覆盖九个来源：`process`（进程缺失/降级与审计失败）、`delivery`（投递积压、人工对账、退信与已领取但未推进的队列延迟）、`fulfillment`（履约积压与失败）、`recovery`（付款逾期、待重挂、余额与证据、账号持续忙）、`mail`（收件轮询停滞）、`credential`（凭据失效）、`lifecycle`（场次未进入 Final、慢速代理到期未执行）、`forum`（主题发布与私信失败）、`notification`（非结算通知失败与邮资不足）。
+
+同一信号有冷却时间（默认 30 分钟），通知按窗口合并。信号按决策 66 分级：需要立即处理的种类沿用冷却后重复通知；付款逾期、待重列、队列延迟、论坛主题发布失败与非结算通知失败属于自动重试/自动推进的等待类，重复通知不短于每日摘要节奏（每日摘要聚合与告警台属于 W5.8）。W5.5 新增来源的观察窗口是代码常量而不是运行配置：收件轮询停滞与生命周期宽限各 15 分钟、队列延迟 10 分钟、账号持续忙 15 分钟。
+
+告警种类、来源与范围是迁移 005、015、020、085 的数据库 CHECK 闭集，新增来源必须随迁移扩展并按 W7.8a 登记等级。每个来源的处置步骤见[告警处置手册](#告警处置手册)。
 
 ### Admin 仪表盘
 
@@ -747,6 +751,86 @@ D1 仍待线上分类证据确认。部署后由用户执行只读核对，数�
 5. 核对稳定内部/资金命令、funding lot、receipt 的存在性，区分重放、业务拒绝、已确认回滚、未确认结果和 defer 持久化失败；预算类结合日志时序核对证据与 claim 窗口。
 
 正常资金拒绝会先回滚再尝试保存 Deferred，不能仅凭拒绝码认定它解释了 unpersisted；还需检查外层超时、早期错误或 defer 失败。确认根因后另行批准修复；不据诊断修改人工 Sent、更正原失败命令或自动重发。
+
+## 告警处置手册
+
+本节是 W5.7 的处置入口：每条活动告警的“来源”对应一个小节，告警正文只包含安全分类与计数，
+处置时按对应小节逐项核对。线上一旦启用 `[worker.operations_alert]`，同一内容也会出现在
+Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与后续 W5.8 告警台可见，不会主动发送通知。
+
+### process：进程缺失或降级
+
+- 现象：`service_missing` / `service_degraded` 对应 public、admin 或 worker 角色，或 `audit_failure` 累计增加。
+- 立即处置：`systemctl status auction-test-{public-api,admin-api,worker}`；核对 `/health/ready` 的底层检查与最近的 `auction::*` 结构化日志。
+- Worker 反复退出（崩溃循环）时先停止 unit，再按[Panic 排障](#panic-排障)与[数据库不可用](#recovery付款逾期重挂与账号忙)定位；不要让它继续领取工作项。
+- 数据库不可用表现为三个角色同时降级或 readiness 报连接失败：先确认 PostgreSQL 进程、`statement_timeout` 与连接预算（见[数据库连接预算与启用顺序](#数据库连接预算与启用顺序)），再决定是否整体重启。
+- 恢复判定：三个角色连续两轮扫描都为 `ready`，且 `audit_failure` 不再增长。
+
+### delivery：投递积压、人工对账与队列延迟
+
+- 现象：`delivery_pending`（数量或最老年龄超阈值）、`delivery_manual_reconcile`、`delivery_returned_mail`、`queue_latency`（已领取但没有推进）。
+- 立即处置：在 Admin“投递队列”按状态过滤；`manual_reconcile` 与退信按[日常运维](#日常运维)的“结果未知的投递”核对，绝不自动重发。
+- `queue_latency` 说明 Worker 领取后没有推进：检查 Worker 是否仍在运行、是否被账号忙阻塞、`[worker.delivery] request_timeout_seconds` 是否长于停机排空预算。
+- 恢复判定：积压数量与最老年龄回到阈值以下，`queue_latency` 的已领取行全部进入终态。
+
+### fulfillment：结算履约积压与失败
+
+- 现象：`fulfillment_backlog`、`fulfillment_failed`、`fulfillment_manual_reconcile`。
+- 立即处置：在 Admin 结算报表查看义务状态；失败项核对 `last_error_code`，人工对账项与投递对账同源。
+- 恢复判定：义务进入 `satisfied` 或按[恢复规则](../docs/guide/settlement.md#4-恢复付款超时与拒收)进入人工决定，积压年龄回落。
+
+### recovery：付款逾期、重挂与账号忙
+
+- 现象：`recovery_payment_overdue`、`recovery_relist_pending`（每日摘要类）、`recovery_failed`、`recovery_manual_reconcile`、`balance_low`、`evidence_stale`、`account_busy`。
+- 账号忙（Bot 账号 45 秒内重复请求或页面提示繁忙）：停止人为触发，等待 Worker 退避重试；持续超过 15 分钟会单独形成 `account_busy`，此时核对是否同时存在第二个 Worker 或 CLI 命令占用同一账号。
+- 余额 `low` 与 evidence `stale` 分别对应资金账户与游戏页面读取，先补足 Credits 或恢复页面读取，再确认积压。
+- 恢复判定：两个世界的余额与 evidence 状态回到 `ok`，逾期与重挂计数归零。
+
+### mail：收件轮询停滞
+
+- 现象：`mail_poll_stalled`，正文给出停滞秒数与连续失败次数。
+- 立即处置：核对 `mail_poll_state.last_poll_at`、`consecutive_failures` 与 `paused`；若刚在 Admin 暂停收件，该邮箱不计为停滞。
+- Cookie 失效（登录页回到未登录、Inbox 无 Mail 列表）：按 `credential` 小节重新录入凭据。
+- 恢复判定：一次成功轮询后 `last_poll_at` 前进、`consecutive_failures` 归零。
+
+### credential：Cookie 与外部凭据失效
+
+- 现象：`credential_invalid`，范围是 `mail_cookie` 或 `external_api`。
+- 立即处置：Admin“Cookie 池”录入新值并停用旧值（每种 kind 同时只能一个 active），或 `auction-cli credential import`；随后 `auction-cli service restart` 让 Worker 重新取得所有权。
+- 常见原因：Cookie 过期、账号被封或被踢下线、维护窗口内重新登录。若疑似账号被盗，按[游戏页面结构变化与账号风险](#游戏页面结构变化与账号风险)处理。
+- 恢复判定：该 kind 的当前行不再为 `invalid`，且收件轮询与论坛写入恢复正常。
+
+### lifecycle：生命周期与慢速代理逾期
+
+- 现象：`auction_phase_overdue`（场次结束时间已过仍在 live）、`proxy_expiry_overdue`（慢速代理到期未执行）。
+- 立即处置：确认 Worker 生命周期循环在运行且没有长期占用结算；两者都由 Worker 推进，不需要人工改数据库。
+- Final 期间 Worker、Public 或数据库不可用只告警，不延长 lot 截止时间。
+- 恢复判定：场次进入 Final/结算、到期代理已完成，计数与最老年龄归零。
+
+### forum：论坛发布与私信失败
+
+- 现象：`forum_sync_failed`（每日摘要类）、`forum_message_failed`。
+- 立即处置：`auction-cli forum recovery` 查看写入未知或失败的主题；`auction-cli pm list` / `pm reconcile` 处理私信。私信进入人工对账说明可能已经发出，不能仅凭页面缺失判定未发送。
+- HV 页面结构变化（表单字段、固定楼层标记缺失）会在这里集中出现，按[游戏页面结构变化与账号风险](#游戏页面结构变化与账号风险)处理。
+- 恢复判定：主题 `published`、私信进入 `succeeded` 或完成人工对账。
+
+### notification：非结算通知与邮资不足
+
+- 现象：`notification_delivery_failed`（每日摘要类）、`notification_postage_insufficient`。
+- 邮资耗尽（MoogleMail 提示 postage 不足）：补充 Bot 账号 Credits 后在 Admin“投递队列”重试失败项；补足前不要反复重试。
+- 恢复判定：失败计数与最老年龄归零，新通知能正常寄出。
+
+### 主机：磁盘满、备份与 WAL 归档失败
+
+- 现象：备份或恢复命令报磁盘门禁失败、`auction-cli backup scheduled` 回执失败、`auction-cli wal archive/upload` 失败。
+- 立即处置：先核对数据目录、暂存目录与保留目录的剩余空间（定时备份自带磁盘门禁），清理过期回执与旧本地副本后再重跑；WAL 归档积压会阻塞 PostgreSQL 回收，必须优先处理。
+- 恢复判定：`backup verify` 或 `wal upload` 回执成功，归档目录不再积压。备份与 WAL 的命令细节见[备份与恢复手册](deploy/RECOVERY.md)与[WAL 归档与时间点恢复](deploy/RECOVERY.md#wal-归档与时间点恢复)。
+
+### 游戏页面结构变化与账号风险
+
+- 页面结构变化（装备分组、Sent 列表、固定楼层标记）：表现为 `mail_poll_stalled`、协议漂移的投递失败或论坛同步失败。先保存脱敏页面样本，再按对应来源处置；不要放宽解析或改用人工确认绕过证据。
+- 账号被盗或被封：立即停止 Worker，停用该 Cookie 与相关 key，替换为新账号凭据；同时核对 Sent 与论坛是否出现未知写入，结果未知的一律转人工对账。
+- 恢复判定：结构与登录恢复正常，且不再出现新的协议漂移失败。
 
 ## 日常运维
 

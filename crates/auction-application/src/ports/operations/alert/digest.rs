@@ -166,6 +166,29 @@ pub(super) fn valid_signal_identity(
         OperationsAlertKind::BalanceLow | OperationsAlertKind::EvidenceStale => {
             source == OperationsAlertSource::Recovery && matches!(scope, "main" | "isekai")
         }
+        OperationsAlertKind::AccountBusy => {
+            source == OperationsAlertSource::Recovery && matches!(scope, "main" | "isekai")
+        }
+        OperationsAlertKind::MailPollStalled => {
+            source == OperationsAlertSource::Mail && scope == "mail"
+        }
+        OperationsAlertKind::CredentialInvalid => {
+            source == OperationsAlertSource::Credential
+                && matches!(scope, "mail_cookie" | "external_api")
+        }
+        OperationsAlertKind::AuctionPhaseOverdue | OperationsAlertKind::ProxyExpiryOverdue => {
+            source == OperationsAlertSource::Lifecycle && scope == "auction"
+        }
+        OperationsAlertKind::QueueLatency => {
+            source == OperationsAlertSource::Delivery && scope == "delivery"
+        }
+        OperationsAlertKind::ForumSyncFailed | OperationsAlertKind::ForumMessageFailed => {
+            source == OperationsAlertSource::Forum && scope == "forum"
+        }
+        OperationsAlertKind::NotificationDeliveryFailed
+        | OperationsAlertKind::NotificationPostageInsufficient => {
+            source == OperationsAlertSource::Notification && scope == "notification"
+        }
     }
 }
 

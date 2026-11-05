@@ -171,6 +171,8 @@ mailbox_key = "mooglemail:main"
 world_id = "main"
 # 可选：拍卖邮件未填写 start 时的起拍价（Credits）；省略时使用邮件专属默认值 50000。
 # start_price = 50000
+# 可选：本地联调使用的 .keyenv 路径，相对本文件解析；省略时不读取。生产应使用数据库凭据或敏感 mooglemail_cookie。
+# keyenv_file = "mooglemail.keyenv"
 # 可选：是否接受 `rekey` 主题（登录 key 自助轮换）；默认 true。关闭后该主题按未知邮件归档。
 rekey_enabled = true
 # 可选：注册与轮换各自每账号回信一次的窗口秒数，范围 60-604800，默认 86400。
@@ -203,6 +205,8 @@ poll_isolation_enabled = true
 # maintenance_schedule = "*/5 * * * *"
 # 可选：完整 Read Mail 纯观察的最小间隔秒数，范围 60-86400，默认 3600；首次延后同一间隔，每次 sweep 后检查并向上取整到维护节奏，失败也消耗间隔；仅隔离开启时生效，修改需重启。
 read_mail_observation_interval_seconds = 3600
+# 可选：Sent/Inbox/Read Mail 水位每日完整校验的最大间隔秒数，范围 60-604800，默认 86400；只决定多读一轮完整列表的节奏，超限或失败只告警、不阻断发送与轮询，修改需重启。
+mail_scan_daily_full_interval_seconds = 86400
 # 可选：每个 cron 触发时刻后附加的随机抖动上限秒数，范围 0-86400，默认 5。
 jitter_seconds = 5
 # 可选：邮箱 claim 租约秒数，范围 1-86400，默认 60；处理期间会续租。
@@ -330,7 +334,7 @@ enabled = false
 scan_interval_seconds = 60
 # 可选：每轮完成后附加的随机抖动上限秒数，不能超过 scan_interval_seconds，默认 5；0 表示关闭抖动。
 jitter_seconds = 5
-# 可选：读取 process/delivery/fulfillment/recovery 来源的超时秒数，范围 1-30，默认 5。
+# 可选：读取全部告警来源（process/delivery/fulfillment/recovery/mail/credential/lifecycle/forum/notification）的超时秒数，范围 1-30，默认 5。
 source_timeout_seconds = 5
 # 可选：同一轮观察结果合并到通知批次前的窗口秒数，范围 1-3600，默认 120。
 batch_window_seconds = 120

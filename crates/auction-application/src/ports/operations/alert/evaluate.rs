@@ -1,14 +1,20 @@
 //! operations alert 四来源阈值 evaluator。
 
 use super::model::{
-    OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
-    OperationsAlertProcessSnapshot, OperationsAlertRecoverySnapshot, OperationsAlertSnapshot,
-    OperationsAlertSourceObservation,
+    OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot,
+    OperationsAlertForumSnapshot, OperationsAlertFulfillmentSnapshot,
+    OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
+    OperationsAlertNotificationSnapshot, OperationsAlertPolicy, OperationsAlertProcessSnapshot,
+    OperationsAlertRecoverySnapshot, OperationsAlertSnapshot, OperationsAlertSourceObservation,
 };
-use super::signals::{OperationsAlertKind, OperationsAlertSignal, OperationsAlertSource};
+use super::signals::{
+    OPERATIONS_ALERT_ACCOUNT_BUSY_AGE, OPERATIONS_ALERT_LIFECYCLE_GRACE,
+    OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OPERATIONS_ALERT_QUEUE_LATENCY_AGE, OperationsAlertKind,
+    OperationsAlertSignal, OperationsAlertSource, reached,
+};
 use super::*;
 
-/// 从四个 source 快照生成完整 signal 集合。
+/// 从全部来源快照生成完整 signal 集合；来源闭集见 `OperationsAlertSource::ALL`。
 pub fn evaluate_snapshot(
     snapshot: &OperationsAlertSnapshot,
     policy: &OperationsAlertPolicy,
@@ -19,6 +25,11 @@ pub fn evaluate_snapshot(
         evaluate_delivery(snapshot.delivery, policy)?,
         evaluate_fulfillment(snapshot.fulfillment, policy)?,
         evaluate_recovery(snapshot.recovery.as_ref(), policy)?,
+        evaluate_mail(snapshot.mail)?,
+        evaluate_credential(snapshot.credential)?,
+        evaluate_lifecycle(snapshot.lifecycle)?,
+        evaluate_forum(snapshot.forum)?,
+        evaluate_notification(snapshot.notification)?,
     ];
     let total = result.iter().map(|observation| observation.signals.len()).sum::<usize>();
     if total > policy.max_signals_per_scan {
@@ -92,10 +103,13 @@ fn evaluate_delivery(
         || snapshot.manual_reconcile < 0
         || snapshot.returned_mail_manual_reconcile < 0
         || snapshot.returned_mail_manual_reconcile > snapshot.manual_reconcile
+        || snapshot.claimed < 0
         || snapshot.oldest_pending_age_seconds < 0
         || snapshot.oldest_manual_reconcile_age_seconds < 0
         || snapshot.oldest_returned_mail_age_seconds < 0
+        || snapshot.oldest_claimed_age_seconds < 0
         || (snapshot.pending == 0 && snapshot.oldest_pending_age_seconds != 0)
+        || (snapshot.claimed == 0 && snapshot.oldest_claimed_age_seconds != 0)
         || (snapshot.manual_reconcile == 0 && snapshot.oldest_manual_reconcile_age_seconds != 0)
         || (snapshot.returned_mail_manual_reconcile == 0
             && snapshot.oldest_returned_mail_age_seconds != 0)
@@ -104,6 +118,18 @@ fn evaluate_delivery(
         return Err(OperationsAlertError::Invalid);
     }
     let mut signals = Vec::new();
+    // 领取后长期没有推进属于队列延迟，与“从未领取”的 pending 积压是两个不同故障面。
+    if snapshot.claimed > 0
+        && reached(snapshot.oldest_claimed_age_seconds, OPERATIONS_ALERT_QUEUE_LATENCY_AGE)
+    {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::QueueLatency,
+            "delivery",
+            OperationsAlertSource::Delivery,
+            snapshot.claimed,
+            snapshot.oldest_claimed_age_seconds,
+        )?);
+    }
     if snapshot.pending >= policy.delivery_pending_count_threshold
         || snapshot.oldest_pending_age_seconds
             >= policy.delivery_pending_age_threshold.as_secs() as i64
@@ -255,6 +281,7 @@ fn evaluate_recovery(
             || worlds.iter().any(|value: &String| value == &world.world)
             || world.balance_credits < 0
             || world.evidence_age_seconds < 0
+            || world.balance_stall_age_seconds < 0
             || world.updated_at.timestamp_nanos_opt().is_none()
             || world.balance_observed_at.is_some_and(|value| value.timestamp_nanos_opt().is_none())
             || world
@@ -267,6 +294,19 @@ fn evaluate_recovery(
         if (world.balance_status == "not_applicable") != (world.evidence_status == "not_applicable")
         {
             return Err(OperationsAlertError::Invalid);
+        }
+        // 账号忙本身让来源不可用；持续超过阈值时再补一条可处置信号，
+        // 让“一次瞬时忙”与“熔断/账号长期不可用”在仪表盘上可区分。
+        if world.balance_status == "busy"
+            && reached(world.balance_stall_age_seconds, OPERATIONS_ALERT_ACCOUNT_BUSY_AGE)
+        {
+            signals.push(OperationsAlertSignal::new(
+                OperationsAlertKind::AccountBusy,
+                world.world.clone(),
+                OperationsAlertSource::Recovery,
+                1,
+                world.balance_stall_age_seconds,
+            )?);
         }
         match world.balance_status.as_str() {
             "ok" | "not_applicable" => {}
@@ -303,4 +343,175 @@ fn evaluate_recovery(
         observation.validate()?;
         Ok(observation)
     }
+}
+
+fn evaluate_mail(
+    snapshot: Option<OperationsAlertMailSnapshot>,
+) -> Result<OperationsAlertSourceObservation, OperationsAlertError> {
+    let Some(snapshot) = snapshot else {
+        return OperationsAlertSourceObservation::unavailable(OperationsAlertSource::Mail);
+    };
+    if snapshot.last_poll_age_seconds < 0 || snapshot.consecutive_failures < 0 {
+        return Err(OperationsAlertError::Invalid);
+    }
+    let mut signals = Vec::new();
+    // 显式暂停的邮箱已在读取层排除；这里只判断失败计数与水位超限。
+    if snapshot.consecutive_failures > 0
+        || reached(snapshot.last_poll_age_seconds, OPERATIONS_ALERT_MAIL_POLL_STALL_AGE)
+    {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::MailPollStalled,
+            "mail",
+            OperationsAlertSource::Mail,
+            snapshot.consecutive_failures,
+            snapshot.last_poll_age_seconds,
+        )?);
+    }
+    OperationsAlertSourceObservation::available(OperationsAlertSource::Mail, signals)
+}
+
+fn evaluate_credential(
+    snapshot: Option<OperationsAlertCredentialSnapshot>,
+) -> Result<OperationsAlertSourceObservation, OperationsAlertError> {
+    let Some(snapshot) = snapshot else {
+        return OperationsAlertSourceObservation::unavailable(OperationsAlertSource::Credential);
+    };
+    if snapshot.invalid_mail_cookie < 0 || snapshot.invalid_external_api < 0 {
+        return Err(OperationsAlertError::Invalid);
+    }
+    let mut signals = Vec::new();
+    for (scope, count) in [
+        ("mail_cookie", snapshot.invalid_mail_cookie),
+        ("external_api", snapshot.invalid_external_api),
+    ] {
+        if count > 0 {
+            signals.push(OperationsAlertSignal::new(
+                OperationsAlertKind::CredentialInvalid,
+                scope,
+                OperationsAlertSource::Credential,
+                count,
+                0,
+            )?);
+        }
+    }
+    OperationsAlertSourceObservation::available(OperationsAlertSource::Credential, signals)
+}
+
+fn evaluate_lifecycle(
+    snapshot: Option<OperationsAlertLifecycleSnapshot>,
+) -> Result<OperationsAlertSourceObservation, OperationsAlertError> {
+    let Some(snapshot) = snapshot else {
+        return OperationsAlertSourceObservation::unavailable(OperationsAlertSource::Lifecycle);
+    };
+    if snapshot.phase_overdue_count < 0
+        || snapshot.oldest_phase_overdue_age_seconds < 0
+        || snapshot.proxy_expiry_overdue_count < 0
+        || snapshot.oldest_proxy_overdue_age_seconds < 0
+        || (snapshot.phase_overdue_count == 0 && snapshot.oldest_phase_overdue_age_seconds != 0)
+        || (snapshot.proxy_expiry_overdue_count == 0
+            && snapshot.oldest_proxy_overdue_age_seconds != 0)
+    {
+        return Err(OperationsAlertError::Invalid);
+    }
+    let mut signals = Vec::new();
+    // 宽限期吸收 Worker 的调度抖动；只有到期后仍未推进才算“应进入 Final 而未进入”。
+    if snapshot.phase_overdue_count > 0
+        && reached(snapshot.oldest_phase_overdue_age_seconds, OPERATIONS_ALERT_LIFECYCLE_GRACE)
+    {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::AuctionPhaseOverdue,
+            "auction",
+            OperationsAlertSource::Lifecycle,
+            snapshot.phase_overdue_count,
+            snapshot.oldest_phase_overdue_age_seconds,
+        )?);
+    }
+    if snapshot.proxy_expiry_overdue_count > 0
+        && reached(snapshot.oldest_proxy_overdue_age_seconds, OPERATIONS_ALERT_LIFECYCLE_GRACE)
+    {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::ProxyExpiryOverdue,
+            "auction",
+            OperationsAlertSource::Lifecycle,
+            snapshot.proxy_expiry_overdue_count,
+            snapshot.oldest_proxy_overdue_age_seconds,
+        )?);
+    }
+    OperationsAlertSourceObservation::available(OperationsAlertSource::Lifecycle, signals)
+}
+
+fn evaluate_forum(
+    snapshot: Option<OperationsAlertForumSnapshot>,
+) -> Result<OperationsAlertSourceObservation, OperationsAlertError> {
+    let Some(snapshot) = snapshot else {
+        return OperationsAlertSourceObservation::unavailable(OperationsAlertSource::Forum);
+    };
+    if snapshot.sync_failed_count < 0
+        || snapshot.oldest_sync_failed_age_seconds < 0
+        || snapshot.message_failed_count < 0
+        || snapshot.oldest_message_failed_age_seconds < 0
+        || (snapshot.sync_failed_count == 0 && snapshot.oldest_sync_failed_age_seconds != 0)
+        || (snapshot.message_failed_count == 0 && snapshot.oldest_message_failed_age_seconds != 0)
+    {
+        return Err(OperationsAlertError::Invalid);
+    }
+    let mut signals = Vec::new();
+    if snapshot.sync_failed_count > 0 {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::ForumSyncFailed,
+            "forum",
+            OperationsAlertSource::Forum,
+            snapshot.sync_failed_count,
+            snapshot.oldest_sync_failed_age_seconds,
+        )?);
+    }
+    if snapshot.message_failed_count > 0 {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::ForumMessageFailed,
+            "forum",
+            OperationsAlertSource::Forum,
+            snapshot.message_failed_count,
+            snapshot.oldest_message_failed_age_seconds,
+        )?);
+    }
+    OperationsAlertSourceObservation::available(OperationsAlertSource::Forum, signals)
+}
+
+fn evaluate_notification(
+    snapshot: Option<OperationsAlertNotificationSnapshot>,
+) -> Result<OperationsAlertSourceObservation, OperationsAlertError> {
+    let Some(snapshot) = snapshot else {
+        return OperationsAlertSourceObservation::unavailable(OperationsAlertSource::Notification);
+    };
+    if snapshot.failed_count < 0
+        || snapshot.oldest_failed_age_seconds < 0
+        || snapshot.postage_insufficient_count < 0
+        || snapshot.oldest_postage_age_seconds < 0
+        || snapshot.postage_insufficient_count > snapshot.failed_count
+        || (snapshot.failed_count == 0 && snapshot.oldest_failed_age_seconds != 0)
+        || (snapshot.postage_insufficient_count == 0 && snapshot.oldest_postage_age_seconds != 0)
+    {
+        return Err(OperationsAlertError::Invalid);
+    }
+    let mut signals = Vec::new();
+    // 邮资不足是失败的一个子集，仍计入总失败水位，不互相替代。
+    if snapshot.postage_insufficient_count > 0 {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::NotificationPostageInsufficient,
+            "notification",
+            OperationsAlertSource::Notification,
+            snapshot.postage_insufficient_count,
+            snapshot.oldest_postage_age_seconds,
+        )?);
+    }
+    if snapshot.failed_count > 0 {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::NotificationDeliveryFailed,
+            "notification",
+            OperationsAlertSource::Notification,
+            snapshot.failed_count,
+            snapshot.oldest_failed_age_seconds,
+        )?);
+    }
+    OperationsAlertSourceObservation::available(OperationsAlertSource::Notification, signals)
 }

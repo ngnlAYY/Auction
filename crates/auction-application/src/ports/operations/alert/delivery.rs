@@ -16,20 +16,16 @@ pub struct OperationsAlertObserveCommand {
 impl OperationsAlertObserveCommand {
     /// 校验 observation 顺序、时间和批次边界。
     pub fn validate(&self) -> Result<(), OperationsAlertError> {
-        if self.observations.len() != 4
+        // 每轮必须提交完整来源闭集，顺序由闭集定义；新增来源只扩展闭集，不另立名单。
+        let expected = OperationsAlertSource::ALL;
+        if self.observations.len() != expected.len()
             || self.now.timestamp_nanos_opt().is_none()
             || self.batch_window < Duration::from_secs(1)
             || self.batch_window > Duration::from_secs(3_600)
         {
             return Err(OperationsAlertError::Invalid);
         }
-        let expected = [
-            OperationsAlertSource::Process,
-            OperationsAlertSource::Delivery,
-            OperationsAlertSource::Fulfillment,
-            OperationsAlertSource::Recovery,
-        ];
-        // 四个来源共享同一 fingerprint 空间：跨来源重复同样代表同一 signal，
+        // 所有来源共享同一 fingerprint 空间：跨来源重复同样代表同一 signal，
         // 必须在写入前拒绝，避免同一轮出现两条水位或两次通知。
         let mut fingerprints =
             std::collections::HashSet::with_capacity(expected.len() * MAX_OPERATIONS_ALERT_SIGNALS);

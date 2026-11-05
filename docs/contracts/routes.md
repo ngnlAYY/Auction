@@ -298,7 +298,8 @@ W1.9 主动暂停期间返回 `409 paused`（请求不发往远端），超时�
 | `/cookies`（别名 `/credentials`） | Cookie 池 |
 | `/users` | 用户与 Key |
 | `/renames` | 改名回滚 |
-| `/deliveries`（别名 `/delivery`） | 投递队列 |
+| `/deliveries`（别名 `/delivery`） | 投递队列；可按投递 ID 直接定位详情 |
+| `/deliveries/{delivery_id}` | 投递详情：冻结 Send/Take 尝试、可引用 Sent 证据、领取状态、追加式处置、来源义务与恢复，以及人工 Sent 证明入口 |
 | `/outbox` | 实时事件 |
 | `/settlement` | 结算报表 |
 | `/config` | 参数配置 |

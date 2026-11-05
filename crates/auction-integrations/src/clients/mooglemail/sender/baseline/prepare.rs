@@ -13,8 +13,6 @@ use auction_application::{
 use chrono::Utc;
 use tokio::time::Instant;
 
-use auction_application::MAIL_SCAN_DAILY_FULL_INTERVAL;
-
 use super::{MoogleMailSentBaseline, SentBaselineKind, error_reason, telemetry::ShadowSample};
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailSender, MoogleMailWorld,
@@ -114,7 +112,7 @@ impl MoogleMailSender {
         let plan = auction_application::plan_mail_scan(
             Some(&checkpoint),
             Utc::now(),
-            MAIL_SCAN_DAILY_FULL_INTERVAL,
+            self.client.mail_scan_daily_full_interval(),
         );
         self.observe_scan(
             world,

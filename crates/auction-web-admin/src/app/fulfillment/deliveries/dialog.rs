@@ -4,10 +4,12 @@ use auction_contracts::ADMIN_DELIVERY_RECONCILE_FAILURE_CODES;
 use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
 
-use crate::api::{Delivery, DeliveryAction};
+use crate::api::{Delivery, DeliveryAction, fetch_delivery_detail};
+use crate::app::surface::format_admin_time;
 
 use super::helpers::{delivery_display_id, is_mail_disposition_conflict};
 use super::model::{DeliveryActionRequest, DeliveryDialogKind, DeliveryReconcileDraft};
+use super::sent_proof::evidence_kind_label;
 
 /// 展示 delivery 动作的确认和人工对账字段。
 #[component]
@@ -83,6 +85,7 @@ pub(super) fn DeliveryDialog(
                                     .then_some(failure),
                             });
                         },
+                        ReconcileEvidenceCandidates { delivery_id: delivery_id.clone() }
                         label { r#for: "delivery-reconcile-action-{delivery_id}", {t!("delivery-reconcile-action")} }
                         if disposition_conflict {
                             p { class: "admin-delivery-reconcile__warning", {t!("delivery-mail-disposition-conflict")} }
@@ -198,6 +201,61 @@ pub(super) fn DeliveryDialog(
                     }
                 }
         }
+    }
+}
+
+/// 人工对账前展示该投递已写入的 Sent 目击与候选；只读，不改变判失败闭集或命令语义。
+/// 维护证据是结果未知时的首要线索：重试或判失败前应先核对 MID、时间与领取状态。
+#[component]
+fn ReconcileEvidenceCandidates(delivery_id: String) -> Element {
+    let detail = use_resource(use_reactive((&delivery_id,), move |(delivery_id,)| async move {
+        let result = fetch_delivery_detail(delivery_id.clone()).await;
+        (delivery_id, result)
+    }));
+    let loading = detail.state().cloned() != UseResourceState::Ready;
+    let loaded = if loading {
+        None
+    } else {
+        detail
+            .read()
+            .as_ref()
+            .filter(|(loaded_id, _)| loaded_id == &delivery_id)
+            .map(|(_, result)| result.clone())
+    };
+    let Some(Ok(detail)) = loaded else {
+        return rsx! {};
+    };
+    rsx! {
+        section { class: "admin-delivery-reconcile__evidence",
+            h3 { {t!("delivery-reconcile-sightings")} }
+            p { class: "admin-panel__note", {t!("delivery-reconcile-sightings-help")} }
+            if detail.evidence.is_empty() {
+                p { class: "admin-panel__note", {t!("delivery-reconcile-sightings-empty")} }
+            } else {
+                ul { class: "admin-delivery-reconcile__sightings",
+                    for item in detail.evidence {
+                        li { key: "{item.reference}",
+                            span { class: "admin-delivery-reconcile__kind", {evidence_kind_label(&item.kind)} }
+                            code { {item.external_mail_id.clone().unwrap_or_else(|| t!("value-empty"))} }
+                            span { {observed_label(&item.observed_at)} }
+                            span { {collected_label(item.collected)} }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn observed_label(value: &Option<String>) -> String {
+    value.as_deref().map(format_admin_time).unwrap_or_else(|| t!("value-empty"))
+}
+
+fn collected_label(value: Option<bool>) -> String {
+    match value {
+        Some(true) => t!("delivery-detail-yes"),
+        Some(false) => t!("delivery-detail-no"),
+        None => t!("delivery-detail-custody-unobserved"),
     }
 }
 

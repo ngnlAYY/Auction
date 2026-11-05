@@ -10,6 +10,7 @@ mod audit;
 mod credentials;
 #[path = "operations/dashboard.rs"]
 mod dashboard;
+mod delivery;
 #[path = "auction/forum.rs"]
 mod forum;
 #[path = "auction/intake.rs"]
@@ -59,6 +60,10 @@ pub(crate) use credentials::{
     mutate_admin_credential,
 };
 pub(crate) use dashboard::{AdminDashboardSnapshot, fetch_dashboard};
+pub(crate) use delivery::{
+    SentProofCommand, confirm_delivery_sent_proof, fetch_delivery_detail,
+    preview_delivery_sent_proof,
+};
 pub(crate) use forum::{AdminForumStatus, fetch_admin_forum_status};
 pub(crate) use intake::{AdminIntakeResult, add_admin_intake};
 pub(crate) use lifecycle::{AdminAuctionLifecycleAction, execute_admin_auction_lifecycle};
@@ -110,12 +115,20 @@ pub(crate) use worlds::{
     AdminBusinessWorld, fetch_admin_business_worlds, set_admin_business_world_enabled,
 };
 
+pub(crate) use auction_contracts::{
+    AdminDeliveryAttemptResponse as DeliveryAttempt,
+    AdminDeliveryCustodyResponse as DeliveryCustody, AdminDeliveryDetailResponse as DeliveryDetail,
+    AdminDeliveryDispositionResponse as DeliveryDisposition,
+    AdminDeliveryEvidenceResponse as DeliveryEvidence, AdminDeliveryListResponse as DeliveryPage,
+    AdminDeliveryObligationResponse as DeliveryObligation,
+    AdminDeliveryRecoveryResponse as DeliveryRecovery, AdminDeliveryResponse as Delivery,
+    AdminDeliverySentEvidenceRequest as DeliverySentEvidence,
+    AdminDeliverySentProofPreviewResponse as DeliverySentProofPreview,
+    AdminDeliverySentProofResponse as DeliverySentProofResult,
+};
 use auction_contracts::{
     AdminDeliveryCommandRequest, AdminDeliveryCommandResponse, AdminDeliveryListResponse,
     AdminDeliveryResponse, ApiResponse,
-};
-pub(crate) use auction_contracts::{
-    AdminDeliveryListResponse as DeliveryPage, AdminDeliveryResponse as Delivery,
 };
 use auction_web_shared::{BrowserErrorClass, TransportError, report_browser_error};
 use chrono::{DateTime, Utc};
