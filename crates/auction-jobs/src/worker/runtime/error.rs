@@ -13,6 +13,10 @@ pub enum WorkerError {
     AuctionTaskJoin(#[source] tokio::task::JoinError),
     #[error("auction worker task exited unexpectedly")]
     AuctionTaskExited,
+    #[error("settlement worker task failed")]
+    SettlementTaskJoin(#[source] tokio::task::JoinError),
+    #[error("settlement worker task exited unexpectedly")]
+    SettlementTaskExited,
     #[error("worker delivery loop configuration is invalid")]
     InvalidDeliveryConfiguration,
     #[error("worker fulfillment loop configuration is invalid")]

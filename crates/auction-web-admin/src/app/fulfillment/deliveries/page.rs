@@ -11,7 +11,7 @@ use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
 use super::super::query::use_deliveries_query_state;
 use super::dialog::DeliveryDialog;
-use super::filters::DeliveryFilters;
+use super::filters::{DeliveryFilters, DeliveryFiltersDraft};
 use super::helpers::is_mail_disposition_conflict;
 use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
@@ -30,7 +30,7 @@ pub fn page() -> Element {
     let query_state = query.state;
     let requested_query = use_memo(move || {
         let current = query_state.read();
-        (current.status.clone(), current.page)
+        (current.status.clone(), current.filters(), current.page)
     });
     let mut pending_dialog = use_signal(|| None::<DeliveryDialogState>);
     let mut reconcile_draft = use_signal(|| None::<DeliveryReconcileDraft>);
@@ -55,7 +55,7 @@ pub fn page() -> Element {
             let _ = refresh();
             requested_query()
         },
-        |(status, page), size| fetch_deliveries(status, page, size),
+        |(status, filters, page), size| fetch_deliveries(status, filters, page, size),
     );
 
     let open_dialog = move |(delivery, kind): (Delivery, DeliveryDialogKind)| {
@@ -167,6 +167,7 @@ pub fn page() -> Element {
     let mut on_status_change = query.clone();
     let mut on_page_change = query.clone();
     let mut on_sort_change = query.clone();
+    let mut on_filters_change = query.clone();
 
     rsx! {
         section { class: "admin-delivery-page", aria_labelledby: "delivery-title",
@@ -192,12 +193,32 @@ pub fn page() -> Element {
             }
             DeliveryFilters {
                 status: query_state().status.clone(),
+                recipient: query_state().recipient.clone(),
+                reference: query_state().reference.clone(),
+                template: query_state().template.clone(),
+                category: query_state().category.clone(),
+                world: query_state().world.clone(),
+                created_from: query_state().created_from.clone(),
+                created_to: query_state().created_to.clone(),
                 on_status_change: move |status| {
                     // 选择状态后立即回到第一页并保留排序，由页面 push 到地址栏。
                     let mut next = query_state();
                     next.status = status;
                     next.page = 1;
                     on_status_change.push(next);
+                },
+                on_filters_change: move |filters: DeliveryFiltersDraft| {
+                    // 提交筛选后回到第一页；空值由 query 序列化自动省略。
+                    let mut next = query_state();
+                    next.recipient = filters.recipient;
+                    next.reference = filters.reference;
+                    next.template = filters.template;
+                    next.category = filters.category;
+                    next.world = filters.world;
+                    next.created_from = filters.created_from;
+                    next.created_to = filters.created_to;
+                    next.page = 1;
+                    on_filters_change.push(next);
                 },
             }
             if let Some(page) = page {

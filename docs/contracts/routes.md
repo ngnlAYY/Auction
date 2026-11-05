@@ -190,7 +190,8 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/mail/intake/{intake_id}` | 单封入站邮件详情 |
 | PUT | `/api/v1/admin/mail/polling` | 暂停/恢复收件轮询 |
 | POST | `/api/v1/admin/mail/polls:trigger` | 经 Worker control 立即触发一次轮询 |
-| GET | `/api/v1/admin/deliveries` | 投递 outbox（`page`、`page_size`、`status`） |
+| GET | `/api/v1/admin/deliveries` | 投递 outbox（`page`、`page_size`、`status`、`recipient`、`reference`、`template`、`category`、`world`、`created_from`、`created_to`）；`reference` 接受投递、结算义务或玩家通知的规范 UUID；筛选都是精确匹配且失败关闭；列表附带 `template`、`category`、`world`、`retirement_reason` 与 `suppression_reason` |
+| GET | `/api/v1/admin/player-support` | 玩家支持只读汇总；`user`（用户名或用户 UUID）与 `reference`（规范 UUID）必须恰好提供一个，返回出价、成交、义务、投递与通知各最多 50 行，`truncated` 表示达到上限 |
 | GET | `/api/v1/admin/deliveries/{delivery_id}` | 投递详情：冻结 Send/Take 尝试、Sent 观察/目击与可引用证据、领取状态、追加式处置、来源义务与恢复；不含 payload、正文、Cookie、登录 key |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/sent-proof/preview` | 人工 Sent 证明预览；必须选择该投递已写入的维护证据 `evidence_reference`，只返回闭集 blockers，不写事实 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/sent-proof/confirm` | 人工 Sent 证明确认；复用 CLI 的稳定命令 ID 与幂等摘要，`command_id` 同参重放返回原结果；证据引用不进入摘要 |
@@ -300,6 +301,7 @@ W1.9 主动暂停期间返回 `409 paused`（请求不发往远端），超时�
 | `/renames` | 改名回滚 |
 | `/deliveries`（别名 `/delivery`） | 投递队列；可按投递 ID 直接定位详情 |
 | `/deliveries/{delivery_id}` | 投递详情：冻结 Send/Take 尝试、可引用 Sent 证据、领取状态、追加式处置、来源义务与恢复，以及人工 Sent 证明入口 |
+| `/player-support` | 玩家支持：按用户名/用户 ID 或参考编号只读汇总出价、成交、义务、投递与通知（含退役与抑制原因），入口与结果同步到 `user`/`reference` query |
 | `/outbox` | 实时事件 |
 | `/settlement` | 结算报表 |
 | `/config` | 参数配置 |

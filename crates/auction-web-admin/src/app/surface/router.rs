@@ -4,7 +4,7 @@
 use super::auth::AdminShell;
 use super::{
     auctions, audit, config, credentials, dashboard, deliveries, lots, mail, realtime, renames,
-    rules, settlement, status, users,
+    rules, settlement, status, support, users,
 };
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
@@ -120,6 +120,10 @@ pub(super) enum Route {
         #[route("/delivery")]
         DeliveryOverview {},
 
+        /// W4.6 玩家支持：按用户或参考编号只读汇总，一次检索定位相关记录。
+        #[route("/player-support")]
+        PlayerSupport {},
+
         #[route("/outbox")]
         Outbox {},
 
@@ -225,6 +229,11 @@ fn DeliveryDetail(delivery_id: String) -> Element {
 #[component]
 fn DeliveryOverview() -> Element {
     redirect_admin_alias("/deliveries")
+}
+
+#[component]
+fn PlayerSupport() -> Element {
+    support::page()
 }
 
 #[component]

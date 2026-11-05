@@ -177,5 +177,34 @@ pub(super) async fn apply(
             "funding_allocation_id":admission.funding_allocation.as_ref().map(|allocation| allocation.id)})))
         .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
         .execute(&mut **tx).await?;
+    // 同一事务追加统一处置事实：人工证明解除了原未知或已被判失败的终态。
+    crate::database::delivery_disposition::append(
+        tx,
+        crate::database::delivery_disposition::DeliveryDispositionFact {
+            delivery_id: command.delivery_id,
+            fencing_version: command.expected_fencing_version,
+            kind: auction_domain::DeliveryDispositionKind::OperatorSentConfirmation,
+            source: auction_domain::DeliveryDispositionSource {
+                sent_confirmation_id: Some(command.command_id),
+                ..Default::default()
+            },
+            actor_source: if command.operator_identity.is_some() {
+                auction_domain::DeliveryDispositionActorSource::Cli
+            } else {
+                auction_domain::DeliveryDispositionActorSource::Admin
+            },
+            actor_id: &command.actor,
+            reason: Some(&command.reason),
+            reason_code: Some("sent_operator_confirmed_v1"),
+            detail: Some(&json!({
+                "proof": "sent_operator_confirmed_v1",
+                "corrects_admin_failure": corrects_admin_failure,
+                "sending_fencing_version": snapshot.sending_fencing_version,
+            })),
+            command_id: None,
+            request_digest: None,
+        },
+    )
+    .await?;
     Ok(result)
 }

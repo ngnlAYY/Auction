@@ -72,10 +72,11 @@ async fn postgres_operations_alert_sources_migration_registers_breaking_extensio
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
 
-    assert_eq!(
-        postgres_expected_migration_version(),
-        85,
-        "W5.5 告警来源扩展是当前内嵌最高迁移版本"
+    // 085 之后的迁移各自追加登记；这里只要求内嵌最高版本已覆盖 085，避免每加一个迁移
+    // 都要修改本断言，同时保留“085 必须登记 breaking”的原意。
+    assert!(
+        postgres_expected_migration_version() >= 85,
+        "内嵌迁移必须已包含 W5.5 告警来源扩展（085）"
     );
     let level: String = sqlx::query_scalar(
         "SELECT level FROM public.schema_migration_compatibility WHERE version = 85",

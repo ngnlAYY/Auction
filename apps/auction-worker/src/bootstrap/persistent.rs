@@ -365,6 +365,13 @@ pub(super) async fn run_worker(
         pm_drain.send_replace(true);
     };
     let fatal_wakeup = control.fatal_wakeup();
+    // W12.5：批量与维护循环共享的连接配额。关键循环（生命周期、慢速代理、独立结算、履约）
+    // 从不获取许可，因此始终保留配额之外的连接；配额来源是同一服务池上限，不新增配置项。
+    let bulk_quota = auction_jobs::WorkerConnectionQuota::new(
+        config.database_pool.worker_bulk_connection_budget(),
+    )
+    .map(Arc::new)
+    .context("worker bulk connection quota must be non-zero")?;
     let runner = auction_jobs::run_persistent_with_settlement_until_shutdown(
         auction_jobs::PersistentWorker {
             schedule,
@@ -471,6 +478,7 @@ pub(super) async fn run_worker(
             clock: Arc::new(SystemClock),
             worker_id,
             write_lifecycle: write_lifecycle.clone(),
+            bulk_quota: Some(bulk_quota),
             switches: switches.clone(),
         },
         shutdown,

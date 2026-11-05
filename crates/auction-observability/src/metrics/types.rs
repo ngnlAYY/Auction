@@ -68,6 +68,8 @@ pub enum BusinessEvent {
     MailIntake,
     MailDelivery,
     AuctionLifecycle,
+    /// W12.5 结算阶段已从拍卖主循环拆为独立任务，单独计数轮次与结果。
+    Settlement,
     Fulfillment,
     /// recovery 退回、重列或退款动作。
     Recovery,
@@ -77,12 +79,13 @@ pub enum BusinessEvent {
 }
 
 impl BusinessEvent {
-    pub(super) const ALL: [Self; 10] = [
+    pub(super) const ALL: [Self; 11] = [
         Self::Bid,
         Self::Proxy,
         Self::MailIntake,
         Self::MailDelivery,
         Self::AuctionLifecycle,
+        Self::Settlement,
         Self::Fulfillment,
         Self::Recovery,
         Self::ForumSync,
@@ -97,6 +100,7 @@ impl BusinessEvent {
             Self::MailIntake => "mail-intake",
             Self::MailDelivery => "mail-delivery",
             Self::AuctionLifecycle => "auction-lifecycle",
+            Self::Settlement => "settlement",
             Self::Fulfillment => "fulfillment",
             Self::Recovery => "recovery",
             Self::ForumSync => "forum-sync",
@@ -164,6 +168,8 @@ pub enum WorkerLoop {
     MailReadObservationIsekai,
     Delivery,
     Auction,
+    /// W12.5 结算阶段独立循环：结算耗时不再推迟另一世界的生命周期与慢速代理推进。
+    Settlement,
     /// 结算履约准备与对账。
     AuctionFulfillment,
     AuctionRecovery,
@@ -178,7 +184,7 @@ pub enum WorkerLoop {
 
 impl WorkerLoop {
     /// 初始化固定循环的零值序列，不接收运行时 label。
-    pub(super) const ALL: [Self; 16] = [
+    pub(super) const ALL: [Self; 17] = [
         Self::MailMain,
         Self::MailIsekai,
         Self::MailMaintenanceMain,
@@ -187,6 +193,7 @@ impl WorkerLoop {
         Self::MailReadObservationIsekai,
         Self::Delivery,
         Self::Auction,
+        Self::Settlement,
         Self::AuctionFulfillment,
         Self::AuctionRecovery,
         Self::Forum,
@@ -207,6 +214,7 @@ impl WorkerLoop {
             Self::MailReadObservationIsekai => "mail-read-observation-isekai",
             Self::Delivery => "delivery",
             Self::Auction => "auction",
+            Self::Settlement => "settlement",
             Self::AuctionFulfillment => "auction-fulfillment",
             Self::AuctionRecovery => "auction-recovery",
             Self::Forum => "forum",

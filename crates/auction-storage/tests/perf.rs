@@ -695,6 +695,126 @@ async fn run_contention(
     Ok(merged)
 }
 
+/// W12.1 之后的热点事务：Serializable 内只写事件行（`stream_sequence` 为 NULL）与自己的 lot 行，
+/// 提交后再由分配器补号。与 `run_contention` 使用同一数据集、并发和重试预算，只替换序号路径，
+/// 因此可以直接比较“提交内序号”与“提交后序号”的冲突/耗尽/延迟。
+async fn run_contention_deferred(
+    pool: &PgPool,
+    auction_id: &str,
+    lot_ids: Arc<Vec<String>>,
+    concurrency: usize,
+    per_task: usize,
+) -> Result<LoadStats, String> {
+    let stream_key = format!("auction:{auction_id}");
+    let allocation_sql = auction_storage::realtime_benchmark_sql::deferred_allocation_sql();
+    let mut handles = Vec::with_capacity(concurrency);
+    for task in 0..concurrency {
+        let pool = pool.clone();
+        let stream_key = stream_key.clone();
+        let lot_ids = Arc::clone(&lot_ids);
+        handles.push(tokio::spawn(async move {
+            let mut stats = LoadStats::default();
+            for step in 0..per_task {
+                let lot_id = lot_ids[(task * per_task + step) % lot_ids.len()].clone();
+                let started = Instant::now();
+                let mut attempt = 1_u8;
+                loop {
+                    stats.transactions += 1;
+                    let mut transaction = match pool.begin().await {
+                        Ok(transaction) => transaction,
+                        Err(_) => {
+                            stats.other_failures += 1;
+                            break;
+                        }
+                    };
+                    let outcome =
+                        apply_deferred_hotspot_transaction(&mut transaction, &stream_key, &lot_id)
+                            .await;
+                    let result = match outcome {
+                        Ok(()) => {
+                            let commit_started = Instant::now();
+                            transaction.commit().await.map(|()| commit_started.elapsed())
+                        }
+                        Err(error) => {
+                            let _ = transaction.rollback().await;
+                            Err(error)
+                        }
+                    };
+                    match result {
+                        Ok(commit_elapsed) => {
+                            // 提交后补号：真实路径在 runner 内完成，失败由 relay 兜底。
+                            let _ = sqlx::query(allocation_sql)
+                                .bind(&stream_key)
+                                .bind(256_i64)
+                                .execute(&pool)
+                                .await;
+                            stats.commit_micros.push(
+                                u64::try_from(commit_elapsed.as_micros()).unwrap_or(u64::MAX),
+                            );
+                            stats.latencies_micros.push(
+                                u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
+                            );
+                            *stats.attempts.entry(usize::from(attempt)).or_default() += 1;
+                            break;
+                        }
+                        Err(error) => {
+                            let conflict = error
+                                .as_database_error()
+                                .and_then(|database| database.code())
+                                .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01"));
+                            if !conflict {
+                                stats.other_failures += 1;
+                                break;
+                            }
+                            stats.conflicts += 1;
+                            if attempt >= 3 {
+                                stats.exhausted += 1;
+                                stats.latencies_micros.push(
+                                    u64::try_from(started.elapsed().as_micros())
+                                        .unwrap_or(u64::MAX),
+                                );
+                                break;
+                            }
+                            tokio::time::sleep(retry_window(attempt)).await;
+                            attempt += 1;
+                        }
+                    }
+                }
+            }
+            stats
+        }));
+    }
+
+    let mut merged = LoadStats::default();
+    for handle in handles {
+        merged.merge(handle.await.map_err(|error| format!("负载任务失败：{error}"))?);
+    }
+    Ok(merged)
+}
+
+/// W12.1 事务形状：事件行（序号 NULL）→ 自己的 lot 行；不触碰共享的 stream 计数行。
+async fn apply_deferred_hotspot_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    stream_key: &str,
+    lot_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE").execute(&mut **transaction).await?;
+    sqlx::query(
+        "INSERT INTO public.realtime_events
+            (event_id, stream_key, stream_sequence, kind, schema_version, public_payload)
+         VALUES (gen_random_uuid(), $1, NULL, 'auction.opened', 1,
+                 '{\"auction_id\": null}'::jsonb)",
+    )
+    .bind(stream_key)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query("UPDATE public.lots SET state_version = state_version + 1 WHERE id = $1::uuid")
+        .bind(lot_id)
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
+}
+
 /// 一次热点事务的全部语句：流序号分配 → lot 行更新 →（可选）同事务 `pg_notify`。
 /// 语句顺序与 `database/competition/postgres/bidding` 的真实出价事务一致，只是把事实写入
 /// 换成 `state_version` 递增，避免夹具伪造出价金额或资格判定。
@@ -861,6 +981,16 @@ async fn perf_bid_hotspot_and_notify_commit() {
     let notified = run_contention(&pool, &auction_id, Arc::clone(&lot_ids), 8, 2, true, true)
         .await
         .expect("含 pg_notify 的并发场景");
+    // W12.1 对照：16 个并发事务各写**不同** lot，因此任何序列化冲突只能来自共享的 stream 行。
+    // 同一形状下比较“提交内序号”（旧路径）与“提交后补号”（新路径）。
+    let cross_lot_legacy =
+        run_contention(&pool, &auction_id, Arc::clone(&lot_ids), concurrency, 1, true, false)
+            .await
+            .expect("不同 lot 的提交内序号对照");
+    let deferred =
+        run_contention_deferred(&pool, &auction_id, Arc::clone(&lot_ids), concurrency, 1)
+            .await
+            .expect("提交后补号的并发场景");
 
     let after: Vec<i64> = sqlx::query_scalar(
         "SELECT state_version FROM public.lots WHERE auction_id = $1::uuid ORDER BY lot_number",
@@ -878,6 +1008,8 @@ async fn perf_bid_hotspot_and_notify_commit() {
         ("抖动退避", &jittered, expected),
         ("通知对照", &notify_baseline, expected_notified),
         ("含 pg_notify", &notified, expected_notified),
+        ("不同 lot 旧序号", &cross_lot_legacy, concurrency),
+        ("提交后补号", &deferred, concurrency),
     ] {
         assert_eq!(
             committed(stats) + stats.exhausted + stats.other_failures,
@@ -894,6 +1026,8 @@ async fn perf_bid_hotspot_and_notify_commit() {
                 + committed(&jittered)
                 + committed(&notify_baseline)
                 + committed(&notified)
+                + committed(&cross_lot_legacy)
+                + committed(&deferred)
         )
         .unwrap_or(0),
         "每个成功事务必须恰好应用一次，耗尽或其它失败不得留下部分写入"
@@ -902,7 +1036,7 @@ async fn perf_bid_hotspot_and_notify_commit() {
     let notify_commit_max = notified.commit_micros.iter().copied().max().unwrap_or(0);
     println!(
         "热点并发（{} 并发 × {} 事务/任务，同一场次同一 stream row）：\n           固定等待：成功 {}、耗尽 {}、p50 {}us、p95 {}us\n           抖动退避：成功 {}、耗尽 {}、p50 {}us、p95 {}us\n           含 pg_notify：成功 {}、单次提交上限 {}us\n  \
-         通知对照：提交 p95 {}us；含通知：提交 p95 {}us、p50 {}us",
+         通知对照：提交 p95 {}us；含通知：提交 p95 {}us、p50 {}us\n           不同 lot 旧序号：成功 {}、冲突 {}、耗尽 {}、p50 {}us、p95 {}us\n           提交后补号：成功 {}、冲突 {}、耗尽 {}、p50 {}us、p95 {}us",
         concurrency,
         per_task,
         committed(&fixed),
@@ -917,8 +1051,22 @@ async fn perf_bid_hotspot_and_notify_commit() {
         notify_commit_max,
         notify_baseline.commit_percentile_micros(0.95),
         notified.commit_percentile_micros(0.95),
-        notified.commit_percentile_micros(0.50)
+        notified.commit_percentile_micros(0.50),
+        committed(&cross_lot_legacy),
+        cross_lot_legacy.conflicts,
+        cross_lot_legacy.exhausted,
+        cross_lot_legacy.percentile_micros(0.50),
+        cross_lot_legacy.percentile_micros(0.95),
+        committed(&deferred),
+        deferred.conflicts,
+        deferred.exhausted,
+        deferred.percentile_micros(0.50),
+        deferred.percentile_micros(0.95)
     );
+    // W12.1 的验收口径：提交后补号不允许出现冲突或耗尽，而且每个成功事务只应用一次。
+    assert_eq!(deferred.conflicts, 0, "不同 lot 的提交后补号不得再产生序列化冲突");
+    assert_eq!(deferred.exhausted, 0, "不同 lot 的提交后补号不得耗尽重试预算");
+    assert_eq!(committed(&deferred), concurrency, "不同 lot 的提交后补号应全部提交成功");
 
     let report = json!({
         "schema": "auction.bid_hotspot_load.v1",
@@ -930,6 +1078,8 @@ async fn perf_bid_hotspot_and_notify_commit() {
         "jittered_backoff": jittered.to_json(),
         "notify_control": notify_baseline.to_json(),
         "with_pg_notify": notified.to_json(),
+        "cross_lot_legacy_sequence": cross_lot_legacy.to_json(),
+        "deferred_sequence": deferred.to_json(),
         "applied_state_versions": applied,
     });
     let path = write_report("bid-hotspot-load", &report);

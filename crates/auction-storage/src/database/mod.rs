@@ -146,6 +146,8 @@ mod delivery_admin;
 #[cfg(feature = "postgres")]
 mod delivery_audit;
 #[cfg(feature = "postgres")]
+mod delivery_disposition;
+#[cfg(feature = "postgres")]
 mod delivery_scheduler;
 #[cfg(feature = "postgres")]
 mod equipment_secrets;
@@ -179,6 +181,8 @@ pub use price_history::benchmark_sql;
 mod public_equipment_link;
 #[cfg(feature = "postgres")]
 mod realtime;
+#[cfg(all(feature = "postgres", feature = "test-db"))]
+pub use realtime::sequence::benchmark_sql as realtime_benchmark_sql;
 #[cfg(feature = "postgres")]
 mod realtime_admin;
 #[cfg(feature = "postgres")]

@@ -44,6 +44,8 @@ pub(super) async fn run_loop<C>(
                 continue;
             }
             let started = std::time::Instant::now();
+            // W12.5：恢复推进属于批量轮次，受共享连接配额限制；许可在本轮结束时释放。
+            let _bulk_permit = worker.bulk_permit().await;
             let result = run_batch(worker.as_ref()).await;
             if result != WorkerResult::Success {
                 tracing::warn!(

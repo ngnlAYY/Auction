@@ -13,11 +13,14 @@ use gloo_net::http::Request;
 use uuid::Uuid;
 
 use super::{
-    AdminApiFailure, MAX_JSON_SAFE_INTEGER, StrictDeliveryEnvelope, decode_delivery,
-    fetch_csrf_token, invalid_request_error, invalid_response_error, parse_delivery_time,
-    response_error, response_failure, send_get, send_request, valid_safe_text, valid_success_code,
-    valid_uuid,
+    AdminApiFailure, MAX_JSON_SAFE_INTEGER, PlayerSupportBundle, StrictDeliveryEnvelope,
+    decode_delivery, fetch_csrf_token, invalid_request_error, invalid_response_error,
+    parse_delivery_time, response_error, response_failure, send_get, send_request, valid_safe_text,
+    valid_success_code, valid_uuid,
 };
+
+/// 与服务端 `MAX_PLAYER_SUPPORT_ROWS` 对齐；超过即视为损坏响应。
+const MAX_PLAYER_SUPPORT_ROWS: usize = 50;
 
 /// 读取单条投递的完整证据详情；响应必须精确对应请求的投递 ID。
 pub(crate) async fn fetch_delivery_detail(
@@ -316,6 +319,132 @@ fn valid_hex_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
+/// W4.6 玩家支持只读汇总；`user` 与 `reference` 必须恰好提供一个。
+pub(crate) async fn fetch_player_support(
+    user: String,
+    reference: String,
+) -> Result<PlayerSupportBundle, String> {
+    let (key, value) = match (user.trim(), reference.trim()) {
+        (user, "") if !user.is_empty() && user.len() <= 256 => ("user", user),
+        ("", reference) if valid_uuid(reference) => ("reference", reference),
+        _ => return Err("invalid_player_support_query".to_owned()),
+    };
+    if key == "user" && value.chars().any(char::is_control) {
+        return Err("invalid_player_support_query".to_owned());
+    }
+    let url = format!("/api/v1/admin/player-support?{key}={}", url_encode(value));
+    let response = send_get(&url).await?;
+    if !response.ok() {
+        return Err(response_error(response).await);
+    }
+    let payload: StrictDeliveryEnvelope<PlayerSupportBundle> =
+        response.json().await.map_err(invalid_response_error)?;
+    decode_player_support(payload).map_err(|_| invalid_response_error("player_support"))
+}
+
+/// 只放行页面实际展示的闭集与有界数值；任何未知种类或越界 ID 都让整页失败关闭。
+fn decode_player_support(
+    payload: StrictDeliveryEnvelope<PlayerSupportBundle>,
+) -> Result<PlayerSupportBundle, ()> {
+    if payload.code != "ok" || payload.message.is_empty() {
+        return Err(());
+    }
+    let bundle = payload.data;
+    if bundle.bids.len() > MAX_PLAYER_SUPPORT_ROWS
+        || bundle.deals.len() > MAX_PLAYER_SUPPORT_ROWS
+        || bundle.obligations.len() > MAX_PLAYER_SUPPORT_ROWS
+        || bundle.deliveries.len() > MAX_PLAYER_SUPPORT_ROWS
+        || bundle.notifications.len() > MAX_PLAYER_SUPPORT_ROWS
+    {
+        return Err(());
+    }
+    if let Some(user) = &bundle.user
+        && (!valid_uuid(&user.id)
+            || user.username.is_empty()
+            || !matches!(user.status.as_str(), "active" | "blacklisted")
+            || user.game_player_id.as_deref().is_some_and(|value| value.is_empty()))
+    {
+        return Err(());
+    }
+    for bid in &bundle.bids {
+        if !valid_uuid(&bid.bid_id)
+            || !valid_uuid(&bid.lot_id)
+            || !valid_uuid(&bid.auction_id)
+            || bid.lot_number < 0
+            || !valid_world(&bid.world_id)
+            || !(0..=MAX_JSON_SAFE_INTEGER).contains(&bid.amount)
+            || !matches!(bid.mechanism.as_str(), "ordinary" | "proxy")
+            || !matches!(
+                bid.lot_status.as_str(),
+                "pending" | "live" | "sold" | "unsold" | "withdrawn"
+            )
+            || parse_delivery_time(&bid.created_at).is_none()
+        {
+            return Err(());
+        }
+    }
+    for deal in &bundle.deals {
+        if !valid_uuid(&deal.lot_id)
+            || !valid_uuid(&deal.auction_id)
+            || deal.lot_number < 0
+            || !valid_world(&deal.world_id)
+            || deal.equipment_name.is_empty()
+            || !(0..=MAX_JSON_SAFE_INTEGER).contains(&deal.final_price)
+        {
+            return Err(());
+        }
+    }
+    for obligation in &bundle.obligations {
+        if !valid_uuid(&obligation.obligation_id)
+            || !valid_uuid(&obligation.auction_id)
+            || !valid_uuid(&obligation.lot_id)
+            || !valid_world(&obligation.world_id)
+            || !valid_safe_text(&obligation.obligation_kind, 64)
+            || !matches!(obligation.business_state.as_str(), "ready" | "blocked" | "contingent")
+            || !(0..=MAX_JSON_SAFE_INTEGER).contains(&obligation.amount)
+            || obligation.delivery_id.as_deref().is_some_and(|id| !valid_uuid(id))
+        {
+            return Err(());
+        }
+    }
+    for delivery in &bundle.deliveries {
+        super::decode_delivery(delivery.clone())?;
+    }
+    for notification in &bundle.notifications {
+        if !valid_uuid(&notification.notification_id)
+            || !matches!(notification.channel.as_str(), "mm" | "pm" | "pending")
+            || !valid_safe_text(&notification.state, 64)
+            || notification.lot_id.as_deref().is_some_and(|id| !valid_uuid(id))
+            || notification.auction_id.as_deref().is_some_and(|id| !valid_uuid(id))
+            || notification.delivery_id.as_deref().is_some_and(|id| !valid_uuid(id))
+            || notification.state_reason.as_deref().is_some_and(|value| !valid_safe_text(value, 96))
+            || parse_delivery_time(&notification.created_at).is_none()
+            || parse_delivery_time(&notification.updated_at).is_none()
+        {
+            return Err(());
+        }
+    }
+    for reference in &bundle.references {
+        if !matches!(
+            reference.kind.as_str(),
+            "delivery" | "obligation" | "notification" | "lot" | "auction"
+        ) || !valid_uuid(&reference.id)
+        {
+            return Err(());
+        }
+    }
+    Ok(bundle)
+}
+
+fn valid_world(world: &str) -> bool {
+    matches!(world, "main" | "isekai")
+}
+
+fn url_encode(value: &str) -> String {
+    url::form_urlencoded::Serializer::new(String::new()).append_pair("v", value).finish()[2..]
+        .to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use auction_contracts::{
@@ -344,6 +473,11 @@ mod tests {
             recipient: "Restia".to_owned(),
             cod: Some(0),
             status: "manual_reconcile".to_owned(),
+            template: Some("settlement_seller_payout".to_owned()),
+            category: Some("settlement".to_owned()),
+            world: Some("main".to_owned()),
+            retirement_reason: None,
+            suppression_reason: None,
             lease_expires_at: None,
             fencing_version: 3,
             attempt_count: 1,

@@ -102,6 +102,8 @@ pub(crate) async fn run_loop<C>(
         }
         let iteration = IterationGuard::new(Arc::clone(&worker.metrics), maintenance_loop);
         // 在途 sweep 沿用原预算排空，避免在 discard POST 中途因停止信号另建重试授权。
+        // W12.5：维护轮次受共享连接配额限制，许可只覆盖本轮 sweep，不在 idle 等待期间占用。
+        let bulk_permit = worker.bulk_permit().await;
         iteration.finish(
             diagnostics::scope(
                 worker.metrics.clone(),
@@ -110,6 +112,7 @@ pub(crate) async fn run_loop<C>(
             )
             .await,
         );
+        drop(bulk_permit);
 
         if last_observation.elapsed() >= runtime.config.read_mail_observation_interval {
             // 仅在 sweep 之后检查，实际观察间隔向上取整到维护节奏；失败也消耗这次间隔。
