@@ -69,6 +69,30 @@ impl DatabaseConnectionProfile {
         }
     }
 
+    /// 普通业务可同时持有的连接上限；长期 owner 与 readiness 各保留一个物理连接。
+    /// 与配置校验中的 Public 1 / Admin 0 / Worker 3 个长期预留保持同一口径；
+    /// CLI/维护档没有 readiness 探针，不额外扣减容量。
+    pub(crate) const fn ordinary_capacity(self) -> u32 {
+        let long_lived = match self.purpose {
+            Some(DatabaseConnectionPurpose::Public) => 1,
+            Some(DatabaseConnectionPurpose::Worker) => 3,
+            // legacy 档不区分角色；按 Worker 的最坏长期 owner 预留，避免探针无连接。
+            None => 3,
+            Some(_) => 0,
+        };
+        let readiness = match self.purpose {
+            Some(
+                DatabaseConnectionPurpose::Public
+                | DatabaseConnectionPurpose::Admin
+                | DatabaseConnectionPurpose::Worker,
+            )
+            | None => 1,
+            Some(_) => 0,
+        };
+        let capacity = self.max_connections.saturating_sub(long_lived).saturating_sub(readiness);
+        if capacity == 0 { 1 } else { capacity }
+    }
+
     pub(crate) fn pool_options(self) -> sqlx::postgres::PgPoolOptions {
         let options = sqlx::postgres::PgPoolOptions::new()
             .max_connections(self.max_connections)
@@ -141,3 +165,35 @@ impl DatabaseConnectionProfile {
 #[derive(Debug, Error)]
 #[error("数据库连接档位无效")]
 struct InvalidProfile;
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn ordinary_capacity_reserves_long_lived_and_readiness_slots() {
+        let public =
+            DatabaseConnectionProfile::service(DatabaseConnectionPurpose::Public, 16, None);
+        let admin = DatabaseConnectionProfile::service(DatabaseConnectionPurpose::Admin, 16, None);
+        let worker =
+            DatabaseConnectionProfile::service(DatabaseConnectionPurpose::Worker, 16, None);
+        let legacy = DatabaseConnectionProfile::legacy();
+        assert_eq!(public.ordinary_capacity(), 14, "Public 1 长期 owner + 1 readiness");
+        assert_eq!(admin.ordinary_capacity(), 15, "Admin 仅扣 1 readiness");
+        assert_eq!(worker.ordinary_capacity(), 12, "Worker 3 长期预留 + 1 readiness");
+        assert_eq!(legacy.ordinary_capacity(), 12, "legacy 按 Worker 最坏 owner 与探针预留");
+    }
+
+    #[test]
+    fn tiny_pools_keep_at_least_one_ordinary_slot() {
+        let admin = DatabaseConnectionProfile::service(DatabaseConnectionPurpose::Admin, 1, None);
+        let maintenance = DatabaseConnectionProfile::maintenance(
+            DatabaseConnectionPurpose::CliBackupCheck,
+            1,
+            30_000,
+        );
+        assert_eq!(admin.ordinary_capacity(), 1);
+        assert_eq!(maintenance.ordinary_capacity(), 1, "维护档只有一个槽位时不额外扣减");
+    }
+}

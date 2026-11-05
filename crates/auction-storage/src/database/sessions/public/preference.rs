@@ -185,7 +185,7 @@ async fn set_locked(
             .map_err(|_| storage_error("编码 Public 登录时长命令结果失败"))?,
     };
     match transaction.insert_command_inner(&stored).await {
-        Ok(()) => Ok(result),
+        Ok(_) => Ok(result),
         Err(CompetitionTransactionError::CommandLedger(CommandLedgerError::Conflict)) => {
             Err(SessionError::PreferenceConflict.into())
         }

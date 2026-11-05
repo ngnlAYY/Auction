@@ -140,9 +140,13 @@ async fn seed_watch(
     .await
     .expect("写入测试标记");
 
+    // 迁移 000090 起 lot 创建事务会写入初始领先周期（cycle = 首次状态版本）；
+    // 测试需要显式的第 2 周期，因此覆盖同一行而不是再插入一行。
     sqlx::query(
         "INSERT INTO public.lot_watch_leadership (lot_id, leader_user_id, cycle)
-         VALUES ($1, $2, 2)",
+         VALUES ($1, $2, 2)
+         ON CONFLICT (lot_id) DO UPDATE
+         SET leader_user_id = EXCLUDED.leader_user_id, cycle = EXCLUDED.cycle",
     )
     .bind(lot_id)
     .bind(leader_id)
