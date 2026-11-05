@@ -17,6 +17,7 @@ pub(super) fn build_processor_and_delivery(
     client: &MoogleMailClient,
     credentials: &MoogleMailCredentialSet,
     sent_baseline_observer: Arc<dyn auction_application::SentBaselineObserver>,
+    mail_scan_observer: Arc<dyn auction_application::MailScanObserver>,
     external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
 ) -> anyhow::Result<MailProcessorPorts> {
     match store.as_ref() {
@@ -87,7 +88,8 @@ pub(super) fn build_processor_and_delivery(
             )
             .map_err(|error| anyhow::Error::msg(error.to_string()))?
             .with_settlement_equipment_secrets(equipment_secrets, delivery_opener)
-            .with_sent_baseline(mail_config.sent_baseline_mode, sent_baseline_observer);
+            .with_sent_baseline(mail_config.sent_baseline_mode, sent_baseline_observer)
+            .with_mail_scan_observer(mail_scan_observer);
             let processor: Arc<dyn MailProcessor> = Arc::new(
                 auction_application::MailProcessorService::new_for_worlds(
                     world_configs.iter().map(|world| world.world_id.clone()).collect(),

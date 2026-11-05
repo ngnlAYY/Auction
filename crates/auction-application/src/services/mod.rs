@@ -65,7 +65,11 @@ pub use competition::{
 pub use fulfillment::SettlementFulfillmentService;
 pub use lifecycle::AuctionLifecycleService;
 pub use mail_maintenance::{MailboxMaintenanceReport, MailboxMaintenanceService};
-pub use mail_processing::{MailAuctionIntakeService, MailProcessorConfig, MailProcessorService};
+pub use mail_processing::{
+    MAX_SUBMISSION_RECEIPT_BODY_BYTES, MailAuctionIntakeService, MailProcessorConfig,
+    MailProcessorService, SUBMISSION_RECEIPT_SUBJECT, submission_receipt_body,
+    submission_receipt_invalid_reason,
+};
 pub use public_rules_cache::{CachedPublicRulesReader, public_rules_cache_key};
 pub use realtime_relay::{RealtimeRelay, RealtimeRelayBatch, RealtimeRelayConfig};
 pub use recovery::RecoveryCommandService;

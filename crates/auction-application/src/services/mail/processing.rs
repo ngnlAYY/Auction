@@ -22,7 +22,7 @@ use crate::{
     MailNoticeLimit, MailNotificationTemplate, MailProcessingDecision, MailProcessingError,
     MailProcessor, MailUserCommandKind, MailUserPort, MailUserRebindCommand,
     MailUserRegisterCommand, MailUserRekeyCommand, MailUserResultCode, MailWorld, StoredCommand,
-    TransactionPolicy, TransactionRunner, mail_auction_aggregate_id,
+    SubmissionReceiptFacts, TransactionPolicy, TransactionRunner, mail_auction_aggregate_id,
 };
 
 #[path = "processing/commands.rs"]
@@ -33,6 +33,13 @@ mod intake;
 mod pricing;
 #[path = "processing/processor.rs"]
 mod processor;
+mod receipt {
+    include!("processing/receipt.rs");
+}
 
 pub use intake::MailAuctionIntakeService;
 pub use processor::{MailProcessorConfig, MailProcessorService};
+pub use receipt::{
+    MAX_SUBMISSION_RECEIPT_BODY_BYTES, SUBMISSION_RECEIPT_SUBJECT, submission_receipt_body,
+    submission_receipt_invalid_reason,
+};

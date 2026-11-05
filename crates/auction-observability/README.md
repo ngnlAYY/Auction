@@ -161,6 +161,19 @@ Worker 的 `ProcessMetrics::sent_baseline` 注入应用层窄观测端口；四�
 
 日志只输出 world、固定分支/原因/阶段、页数、集合一致布尔值及差集数量，不输出 MID、收件人、主题、正文或凭据。旧路径触顶而水位边界可取得是预期可用性差异；shadow 此时不发送，计不可比较而非通过。观察与切换见[运维手册](../../ops/README.md#sent-发送基线影子观察)。
 
+### 邮件增量扫描指标
+
+Worker 的 `ProcessMetrics::mail_scan` 注入应用层闭集观测端口；Sent、Inbox 与 Read Mail 的计划、前缀、完整校验和影子比较分别累计。关闭指标或其他角色得到 no-op，扫描窗口、回退与证明路径保持不变。水位只缩短读取范围，不是发送、收取或已读证明。
+
+| 指标 | 口径 |
+| --- | --- |
+| `auction_mooglemail_scan_plan_total{world,stream,mode,reason}` | 本轮完整或增量选择；`reason` 为闭集，增量固定为 `incremental` |
+| `auction_mooglemail_scan_prefix_total{world,stream,outcome,reason}` | 前缀结论；只有到达锚点才是 `complete`，缺失、重复、顺序异常或超限计回退 |
+| `auction_mooglemail_scan_verification_total{world,stream,outcome,reason}` | 每日或显式完整校验；`page_limit` 只告警，不阻断发送或轮询 |
+| `auction_mooglemail_scan_shadow_total{world,stream,outcome,result}` | 完整枚举与前缀的“新增 MID”集合比较；`result` 为 `match/mismatch` |
+
+`world` 为 `main/isekai`；`stream` 为 `sent/inbox/read_mail`；`mode` 为 `full/incremental`；`outcome` 为 `complete/page_limit/error/canceled`。`reason` 与 `MailScanReason` 的固定标签一致，只预置实际可达组合。日志只输出 world、流、页数与固定原因，不输出 MID、收件人、主题、正文或凭据。
+
 ### 邮件循环口径
 
 `mooglemail_poll_isolation_enabled` 为 true 时，`mail-main`、`mail-isekai`
@@ -631,7 +644,7 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
   action_removed_or_success_page / action_recovered_inbox_v1 owner 谓词，不以本地录入时间替代。
   拒收：入站 received_at → 拒收通知发送证明，覆盖 equipment_rejected、no_attachments 与
   assets_rejected；并另看附件 Return 状态。
-  成功投稿接收回执邮件由 W14.3 新增，当前没有该邮件 SLI。
+  成功投稿接收回执邮件由 W14.3 新增（`auction_submission_receipt`），当前仍没有该邮件的专用 SLI 流程；它按通知种类计入 W14.8 的 created/sent/failed 指标。
 - 慢速代理：lot.slow_proxy_tick 的 metadata.due_at → 审计 occurred_at，观察 p95/p99。
   幂等重放不增加审计样本，当前积压不能代替这项历史分位。
 

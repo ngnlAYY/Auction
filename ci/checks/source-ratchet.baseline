@@ -1,11 +1,11 @@
 all:#[path] 403
-all:use_super::* 327
+all:use_super::* 326
 jobs:Err(_) 3
 jobs:map_err(|_|) 12
 application:Err(_) 6
 application:map_err(|_|) 16
 http:Err(_) 73
-http:map_err(|_|) 94
+http:map_err(|_|) 93
 storage:Err(_) 4
 storage:map_err(|_|) 319
 integrations:Err(_) 1

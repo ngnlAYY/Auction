@@ -24,6 +24,10 @@ const MAX_RATE_LIMIT_ENTRIES: usize = 4096;
 /// 浏览器错误信标在任一限流窗口内的每来源上限；与登录、普通 mutation 使用独立账本。
 const BROWSER_ERROR_LIMIT_PER_WINDOW: u32 = 30;
 
+/// 未显式配置时的匿名读每来源窗口上限与并发上限；并发上限由装配层按服务池进一步校正。
+const DEFAULT_ANONYMOUS_READ_LIMIT: u32 = 300;
+const DEFAULT_ANONYMOUS_READ_CONCURRENCY: usize = 8;
+
 /// 装配根传入 HTTP 安全适配器的非敏感参数。
 pub struct HttpSecurityOptions<'a> {
     /// 是否为浏览器 Cookie 设置 `Secure`。
@@ -37,6 +41,11 @@ pub struct HttpSecurityOptions<'a> {
     /// 状态变更请求在固定窗口内的最大次数；Public realtime 连接尝试复用该数值，
     /// 但使用独立账本，不能消耗 mutation 配额。
     pub mutation_limit: u32,
+    /// 匿名公开读取在固定窗口内的每来源最大次数；与登录、mutation 使用独立账本，
+    /// 且 IPv6 按 /64 聚合。
+    pub anonymous_read_limit: u32,
+    /// 匿名公开读取的进程内并发上限；出价等写请求不占用该额度。
+    pub anonymous_read_concurrency: u32,
     pub rate_limit_window: Duration,
     /// 普通 HTTP 请求的最长处理时间。
     pub request_timeout: Duration,
@@ -55,6 +64,34 @@ pub struct PublicHttpSecurity {
     mutation_limiter: RateLimiter,
     realtime_connection_limiter: RateLimiter,
     browser_error_limiter: RateLimiter,
+    // 读闸门与写路径完全独立：匿名读突发只能等待自己的许可，不会占用出价连接。
+    anonymous_read_gate: AnonymousReadGate,
+}
+
+/// 匿名读闸门的可克隆句柄；只共享来源额度与并发许可，不携带其他 HTTP 策略。
+#[derive(Clone)]
+pub struct AnonymousReadGate {
+    limiter: RateLimiter,
+    permits: Arc<tokio::sync::Semaphore>,
+}
+
+impl AnonymousReadGate {
+    fn new(limit: u32, window: Duration, concurrency: usize) -> Self {
+        Self {
+            limiter: RateLimiter::new(limit, window),
+            permits: Arc::new(tokio::sync::Semaphore::new(concurrency)),
+        }
+    }
+
+    /// `None` 表示允许，`Some` 是拒绝后的最短重试秒数；IPv6 按 /64 聚合。
+    pub(crate) fn allow(&self, address: IpAddr) -> Option<u64> {
+        self.limiter.allow(address)
+    }
+
+    /// 非阻塞取得一个并发许可；无许可时调用方立即拒绝，不排入等待队列。
+    pub(crate) fn try_acquire(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        Arc::clone(&self.permits).try_acquire_owned().ok()
+    }
 }
 
 impl Default for PublicHttpSecurity {
@@ -70,6 +107,11 @@ impl Default for PublicHttpSecurity {
                 BROWSER_ERROR_LIMIT_PER_WINDOW,
                 Duration::from_secs(60),
             ),
+            anonymous_read_gate: AnonymousReadGate::new(
+                DEFAULT_ANONYMOUS_READ_LIMIT,
+                Duration::from_secs(60),
+                DEFAULT_ANONYMOUS_READ_CONCURRENCY,
+            ),
         }
     }
 }
@@ -83,6 +125,8 @@ impl PublicHttpSecurity {
             allowed_origins,
             login_limit,
             mutation_limit,
+            anonymous_read_limit,
+            anonymous_read_concurrency,
             rate_limit_window,
             request_timeout,
             trusted_proxy_cidrs,
@@ -90,9 +134,18 @@ impl PublicHttpSecurity {
         } = options;
         let origins = OriginPolicy::new(origins_enabled, allowed_origins)?;
         let boundary = HttpBoundary::new(request_timeout, trusted_proxy_cidrs, trusted_unix_proxy)?;
-        if login_limit == 0 || mutation_limit == 0 || rate_limit_window.is_zero() {
+        if login_limit == 0
+            || mutation_limit == 0
+            || anonymous_read_limit == 0
+            || anonymous_read_concurrency == 0
+            || rate_limit_window.is_zero()
+        {
             return Err("HTTP 速率限制配置无效");
         }
+        let read_concurrency = usize::try_from(anonymous_read_concurrency).map_err(|error| {
+            let _ = error;
+            "HTTP 速率限制配置无效"
+        })?;
         Ok(Self {
             boundary,
             cookie_secure,
@@ -103,6 +156,11 @@ impl PublicHttpSecurity {
             browser_error_limiter: RateLimiter::new(
                 BROWSER_ERROR_LIMIT_PER_WINDOW,
                 rate_limit_window,
+            ),
+            anonymous_read_gate: AnonymousReadGate::new(
+                anonymous_read_limit,
+                rate_limit_window,
+                read_concurrency,
             ),
         })
     }
@@ -129,6 +187,11 @@ impl PublicHttpSecurity {
 
     pub(crate) fn allow_mutation(&self, address: IpAddr) -> Option<u64> {
         self.mutation_limiter.allow(address)
+    }
+
+    /// 路由装配使用的闸门句柄；不暴露其余安全策略。
+    pub(crate) fn anonymous_read_gate(&self) -> AnonymousReadGate {
+        self.anonymous_read_gate.clone()
     }
 
     pub(crate) fn allow_realtime_connection(&self, address: IpAddr) -> Option<u64> {
@@ -211,7 +274,10 @@ impl OriginPolicy {
         }
         let mut allowed = Vec::with_capacity(values.len());
         for value in values {
-            let parsed = Url::parse(value).map_err(|_| "allowed_origins 格式无效")?;
+            let parsed = Url::parse(value).map_err(|error| {
+                let _ = error;
+                "allowed_origins 格式无效"
+            })?;
             let normalized_value = value.strip_suffix('/').unwrap_or(value);
             let serialized_value = parsed.as_str();
             let serialized_value = serialized_value.strip_suffix('/').unwrap_or(serialized_value);
