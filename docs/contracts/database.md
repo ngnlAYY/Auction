@@ -325,6 +325,36 @@ Serializable 事务在同一瞬间对同一场次的不同 lot 递增同一 `str
   （4.6×）；把读并发限到 4 后出价 p95 回到 32.1ms（0.87× 对照），读 p95 120ms。
   这量化了 W12.4 读限流/并发门的必要性：读必须受限，否则会拖慢出价。
 
+### W12.1 残留：跨 lot 的 Serializable 误报
+
+出价事务的真实形状（命令账本 → 锁内快照 → 资格 → 竞价事实 → 实时事件 → lot 更新 → 审计）
+在 Final 阶段并发出价时仍会被 40001 中止。测量证据（隔离 PG18，同一 `final` 场次、不同 lot、
+不同用户、8 并发、同一瞬间进入事务，重试预算 3 次）：
+
+- `enforce_bid_fact_sequence()` 旧实现每写一条竞价事实都做
+  `SELECT max(fact_index) FROM bids WHERE command_id = …`。这是范围扫描：在 `bids` 索引页
+  取得页级谓词锁，而所有并发出价都向同一索引插入，两个逻辑无关的命令形成双向 rw 反依赖。
+  8 并发下该触发器单独就把冲突率推到 88%（禁用触发器后同一夹具为 0%）。
+- 命令账本先对不存在的 `command_id` 做 `SELECT … FOR UPDATE`（写侧页谓词锁），随后
+  `INSERT … ON CONFLICT`；8 并发同为 88%，改成普通读取后降到 17%。
+- `SELECT auction_id FROM lots` 与 `lot_watch_leadership` 的锁定读取未命中都会叠加谓词锁；
+  小表上的顺序/位图扫描会升级为关系级/页级锁。
+
+迁移 `000090` 因此把事实连续性计数提升为 `auction_commands.last_bid_fact_index`
+（触发器只读写本事务自己的命令行，连续性仍由数据库强制），并让 lot 创建事务直接写入
+`lot_watch_leadership`；命令账本改为非锁定读取 + INSERT 仲裁，只有并发同 ID 已提交时才
+锁定读取并要求调用方按账本结果重放。剩余测量入口：
+
+```bash
+cargo test -p auction-storage --features test-db --test postgres \
+  -- postgres_final_cross_lot_bids_do_not_exhaust_serializable_retries --ignored --nocapture
+```
+
+该演练仍会打印成功/序列化冲突计数：夹具上 8 并发平均仍有约 1–2 笔以 40001 结束（不是业务
+争用，而是多表重叠事务之间的 SSI 误报）。彻底消除需要把被超提醒与标记写入移出 Web 出价的
+Serializable 窗口（或用可持久化 outbox 提交后再应用），该项仍待决策，未在本次改动中放宽
+任何不变量或事务边界。
+
 复现入口：`cargo test -p auction-storage --features test-db --test perf -- --ignored --nocapture`
 （默认 `just test-db` 不运行；报告写入 `AUCTION_PERF_REPORT_DIR`）。
 

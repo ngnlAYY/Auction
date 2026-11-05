@@ -26,10 +26,12 @@ impl PostgresStore {
         profile: DatabaseConnectionProfile,
     ) -> Result<Self, sqlx::Error> {
         let options = profile.connect_options(database_url)?;
+        let ordinary_capacity = profile.ordinary_capacity();
         let pool = profile.pool_options().connect_with(options).await?;
 
         Ok(Self {
-            pool: TrackedPool::new(pool),
+            // 普通业务配额小于物理池，保证 readiness 始终有可用连接。
+            pool: TrackedPool::new(pool, ordinary_capacity),
             transaction_owner: auction_observability::DatabaseTransactionOwner::Admin,
             delivery_send_intervals: std::sync::Arc::new(std::sync::RwLock::new(
                 auction_application::DeliverySendIntervals::default(),

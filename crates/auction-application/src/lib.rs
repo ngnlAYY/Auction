@@ -111,7 +111,7 @@ pub use ports::{
     AuctionLifecycleTransaction, AuctionLifecycleWriteSummary, AuctionPolicyTemplate,
     AuctionPreviewSuccessorPlan, AuctionReader, AuctionRepository, AuditFailureMode,
     AuthorizedDeliveryPreparation, AuthorizedDeliverySend, CanonicalEquipment,
-    CanonicalEquipmentStat, Clock, CommandLedger, CommandLedgerError,
+    CanonicalEquipmentStat, Clock, CommandInsert, CommandLedger, CommandLedgerError,
     CompetitionCommandAuditContext, CompetitionCommandAuditKind, CompetitionCommandOutcome,
     CompetitionCommandPort, CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome,
     CompetitionProxyTransitionRecord, CompetitionSnapshot, CompetitionTransaction,

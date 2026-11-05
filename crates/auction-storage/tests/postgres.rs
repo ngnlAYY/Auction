@@ -3,6 +3,8 @@
 
 mod support;
 
+#[path = "postgres/bid_cross_lot.rs"]
+mod bid_cross_lot;
 #[path = "postgres/lot_watch.rs"]
 mod lot_watch;
 #[path = "postgres/operations_alert.rs"]

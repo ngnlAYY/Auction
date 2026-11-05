@@ -67,7 +67,8 @@ pub(super) async fn apply_final_proxy_plans_postgres(
             return Err(invalid_state("最终阶段代理子命令与 lot 计划不一致"));
         }
         let audit = final_proxy_audit_record(command, auction.updated_at, proxy_plan)?;
-        transaction.insert_command_inner(&proxy_plan.command).await?;
+        // 生命周期子命令在锁内首次写入；重复（并发同 ID）沿旧语义视为已完成。
+        let _ = transaction.insert_command_inner(&proxy_plan.command).await?;
         transaction
             .apply_public_command_plan_inner(&proxy_plan.competition, None, auction.updated_at)
             .await?;

@@ -75,6 +75,11 @@ pub(super) fn is_ready(mode: AuditFailureMode) -> bool {
         increment(&SHADOW_MISMATCHES[AuditFailureClass::Transient as usize]);
         tracing::warn!(target: "auction::storage::audit_health", class = "transient", sqlstate_class = "none", kind = "shadow_readiness_mismatch", blocks_classified_readiness = false, "审计就绪影子判定出现预期差异");
     }
+    gate_ready(mode, total, blocking)
+}
+
+/// 门禁口径的纯投影：shadow 按决策 72 保留旧判定，classified 只看 permanent + unknown。
+const fn gate_ready(mode: AuditFailureMode, total: i64, blocking: i64) -> bool {
     match mode {
         AuditFailureMode::Legacy | AuditFailureMode::Shadow => total == 0,
         AuditFailureMode::Classified => blocking == 0,
@@ -112,4 +117,24 @@ pub(super) fn metrics_source(
     switches: auction_application::RuntimeSwitches,
 ) -> Arc<dyn AuditMetricsSource> {
     Arc::new(ProcessAuditMetricsSource { switches })
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn classified_ignores_transient_failures_but_not_blocking_ones() {
+        assert!(gate_ready(AuditFailureMode::Classified, 3, 0));
+        assert!(!gate_ready(AuditFailureMode::Classified, 3, 1));
+    }
+
+    #[test]
+    fn legacy_and_shadow_keep_the_old_any_failure_decision() {
+        // 决策 72：shadow 只观察差异，不提前切换实际判定。
+        assert!(!gate_ready(AuditFailureMode::Legacy, 1, 0));
+        assert!(!gate_ready(AuditFailureMode::Shadow, 1, 0));
+        assert!(gate_ready(AuditFailureMode::Shadow, 0, 0));
+    }
 }

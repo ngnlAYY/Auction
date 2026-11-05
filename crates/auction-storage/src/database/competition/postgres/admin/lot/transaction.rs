@@ -20,7 +20,7 @@ impl AdminLotUpdateTransaction for PostgresCompetitionTransaction {
         &mut self,
         command: StoredCommand,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
-        async move { self.insert_command_inner(&command).await }
+        async move { self.insert_command_inner(&command).await.map(|_| ()) }
     }
 
     fn load_admin_lot_for_update(

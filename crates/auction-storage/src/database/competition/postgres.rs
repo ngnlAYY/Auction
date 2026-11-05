@@ -8,7 +8,7 @@ use auction_application::{
     AdminWorldSetEnabledCommand, AdminWorldTransaction, AuctionLifecycleCommand,
     AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan, AuctionLifecycleResult,
     AuctionLifecycleTransaction, AuctionLifecycleWriteSummary, AuctionPolicyTemplate,
-    AuctionPreviewSuccessorPlan, CommandLedgerError, CompetitionCommandAuditContext,
+    AuctionPreviewSuccessorPlan, CommandInsert, CommandLedgerError, CompetitionCommandAuditContext,
     CompetitionProxyTransitionRecord, CompetitionSnapshot, CompetitionTransaction,
     CompetitionTransactionError, ProxyUsageContext, RequestHash, SettlementAuctionSnapshot,
     SlowProxyExecutionContext, StoredCommand, TransactionFailure, TransactionFuture,
@@ -51,6 +51,9 @@ pub struct PostgresCompetitionTransaction {
     /// W12.1 已写入待定序号事件（`stream_sequence IS NULL`）的 stream key；提交后补号。
     /// 同一命令的多条竞价事实属于同一场次，因此只在 key 变化时追加。
     deferred_stream_keys: Vec<String>,
+    /// 锁内快照同时读出的场次 ID。实时事件与竞价事实同事务写入时不必再次读取 `lots`：
+    /// 额外的等值读取会在 Serializable 下叠加谓词锁（W12.1 残留的跨 lot 误报来源）。
+    loaded_auction_id: Option<Uuid>,
 }
 
 impl PostgresCompetitionTransaction {
@@ -64,6 +67,7 @@ impl PostgresCompetitionTransaction {
             notifications,
             public_base_url,
             deferred_stream_keys: Vec::new(),
+            loaded_auction_id: None,
         }
     }
 
@@ -77,6 +81,15 @@ impl PostgresCompetitionTransaction {
     /// 取出待补号的 stream key；提交成功后才允许分配，回滚则一并丢弃。
     pub(crate) fn take_deferred_stream_keys(&mut self) -> Vec<String> {
         std::mem::take(&mut self.deferred_stream_keys)
+    }
+
+    /// 锁内快照读出的场次 ID；调用方据此写实时事件，避免再次探测 `lots`。
+    pub(crate) fn loaded_auction_id(&self) -> Option<Uuid> {
+        self.loaded_auction_id
+    }
+
+    pub(crate) fn record_loaded_auction(&mut self, auction_id: Uuid) {
+        self.loaded_auction_id = Some(auction_id);
     }
 
     /// 通知正文写入时使用的公开站点 origin；只在事务内读取冻结快照。
@@ -211,7 +224,7 @@ impl CompetitionTransaction for PostgresCompetitionTransaction {
     fn insert_command(
         &mut self,
         command: StoredCommand,
-    ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
+    ) -> impl Future<Output = Result<CommandInsert, CompetitionTransactionError>> + Send {
         async move { self.insert_command_inner(&command).await }
     }
 

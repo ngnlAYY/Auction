@@ -19,6 +19,8 @@ impl ApplicationError {
             Self::FulfillmentDependencyMismatch => "dependency_mismatch",
             Self::FulfillmentEquipmentSecretNotFound => "equipment_secret_not_found",
             Self::Domain(_) => "domain_rejected",
+            Self::Repository(RepositoryError::Timeout) => "timeout",
+            Self::Repository(RepositoryError::Unavailable) => "dependency_unavailable",
             Self::Repository(RepositoryError::Failed(_))
             | Self::CompetitionTransaction(CompetitionTransactionError::Failed(_))
             | Self::SettlementTransaction(SettlementTransactionError::Failed(_))
@@ -120,5 +122,21 @@ impl ApplicationError {
                 crate::DeliveryDispositionCommandError::Unavailable => "repository_failed",
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn readiness_errors_do_not_project_as_repository_failed() {
+        let timeout = ApplicationError::from(RepositoryError::Timeout);
+        let unavailable = ApplicationError::from(RepositoryError::Unavailable);
+        assert_eq!(timeout.safe_kind(), "timeout");
+        assert_eq!(unavailable.safe_kind(), "dependency_unavailable");
+        assert_ne!(timeout.safe_kind(), "repository_failed");
+        assert_ne!(unavailable.safe_kind(), "repository_failed");
     }
 }

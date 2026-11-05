@@ -177,6 +177,16 @@ pub trait TransactionFailure:
 /// 事务回调的异步返回类型，使 runner 能在提交前继续持有事务对象。
 pub type TransactionFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
+/// 命令账本的写入结果。
+///
+/// `Inserted` 表示本事务新写入账本；`Duplicate` 表示同一命令已由并发事务提交，调用方
+/// 必须按账本结果重放，绝不能再次应用计划（否则同一命令会写两遍事实）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandInsert {
+    Inserted,
+    Duplicate(StoredCommand),
+}
+
 /// 竞价事务对象。实现必须在同一数据库事务中锁定快照并原子应用计划。
 pub trait CompetitionTransaction: Send {
     fn find_command(
@@ -187,7 +197,7 @@ pub trait CompetitionTransaction: Send {
     fn insert_command(
         &mut self,
         command: StoredCommand,
-    ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
+    ) -> impl Future<Output = Result<CommandInsert, CompetitionTransactionError>> + Send;
 
     /// 返回数据库当前时间；调用方在业务锁齐备后读取，截止与事实不使用进程时钟。
     fn current_time(

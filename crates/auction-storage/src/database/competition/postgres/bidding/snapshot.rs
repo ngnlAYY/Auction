@@ -65,6 +65,7 @@ impl PostgresCompetitionTransaction {
                        FOR SHARE OF auction
                    )
                    SELECT
+                    locked_auction.id AS auction_id,
                     l.start_price, l.current_price, l.leader_user_id, l.leader_proxy_last,
                     l.effective_end_at, l.state_version, l.last_proxy_sequence,
                     l.slow_generation, l.slow_authorization_id, l.slow_due_at, l.material,
@@ -107,6 +108,7 @@ impl PostgresCompetitionTransaction {
         let Some(row) = row else {
             return Err(CompetitionTransactionError::NotFound);
         };
+        self.record_loaded_auction(row.try_get("auction_id").map_err(map_sql_error)?);
 
         // 连接与行锁等待可能跨过开放或截止边界，门禁必须使用锁后数据库时间。
         let now = self.current_time_inner().await?;
@@ -150,6 +152,7 @@ impl PostgresCompetitionTransaction {
             let transaction = self.transaction_mut()?;
             sqlx::query(
                 r#"SELECT
+                    a.id AS auction_id,
                     l.start_price, l.current_price, l.leader_user_id, l.leader_proxy_last,
                     l.effective_end_at, l.state_version, l.last_proxy_sequence,
                     l.slow_generation, l.slow_authorization_id, l.slow_due_at, l.material,
@@ -186,6 +189,7 @@ impl PostgresCompetitionTransaction {
         let Some(row) = row else {
             return Err(CompetitionTransactionError::NotFound);
         };
+        self.record_loaded_auction(row.try_get("auction_id").map_err(map_sql_error)?);
         let effective_end_at = row
             .try_get::<Option<DateTime<Utc>>, _>("effective_end_at")
             .map_err(map_sql_error)?
