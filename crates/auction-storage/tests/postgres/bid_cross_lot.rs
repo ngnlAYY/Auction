@@ -506,6 +506,78 @@ async fn postgres_duplicate_bid_command_replays_without_second_fact() {
     store.postgres_pool().close().await;
 }
 
+/// 同一 `command_id` 的**并发**重复提交：账本唯一主键仲裁，落在 lot 行锁后面的那一笔以 40001
+/// 中止并在重试时命中账本、按原结果重放。只写一条事实/事件，lot 状态只推进一次——这是
+/// 不变量 1「同 ID 同请求返回原结果」在并发形状下的直接回归（此前只有顺序重放用例）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_concurrent_duplicate_bid_command_replays_without_second_fact() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let commands = Arc::new(DatabaseCompetitionCommands::new(Arc::new(store.clone())));
+    let seeded = seed_round(&store, "concurrent-duplicate", 1).await;
+    let command = place_bid_command("concurrent-duplicate", 0, seeded.lots[0], seeded.bidders[0]);
+    let command_uuid = command.command_id.as_uuid();
+
+    let barrier = Arc::new(Barrier::new(2));
+    let mut handles = Vec::with_capacity(2);
+    for _ in 0..2 {
+        let commands = Arc::clone(&commands);
+        let barrier = Arc::clone(&barrier);
+        let command = command.clone();
+        handles.push(tokio::spawn(async move {
+            barrier.wait().await;
+            commands.place_bid(command).await
+        }));
+    }
+    let mut versions = Vec::with_capacity(2);
+    for handle in handles {
+        let outcome =
+            handle.await.expect("出价任务不得 panic").expect("并发同 ID 提交必须都返回原结果");
+        versions.push(outcome.plan.final_lot.state_version);
+    }
+    assert_eq!(versions[0], versions[1], "并发同 ID 重放必须返回同一状态版本");
+
+    let pool = store.postgres_pool();
+    let bids: i64 = sqlx::query_scalar("SELECT count(*) FROM public.bids WHERE lot_id = $1")
+        .bind(seeded.lots[0])
+        .fetch_one(pool)
+        .await
+        .expect("读取竞价事实");
+    assert_eq!(bids, 1, "并发同 ID 只能写一条竞价事实");
+    let commands_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM public.auction_commands WHERE command_id = $1")
+            .bind(command_uuid)
+            .fetch_one(pool)
+            .await
+            .expect("读取命令账本");
+    assert_eq!(commands_count, 1, "并发同 ID 只能有一条账本记录");
+    let counter: i32 = sqlx::query_scalar(
+        "SELECT last_bid_fact_index FROM public.auction_commands WHERE command_id = $1",
+    )
+    .bind(command_uuid)
+    .fetch_one(pool)
+    .await
+    .expect("读取事实序号计数");
+    assert_eq!(counter, 1, "并发重放不得再次推进事实序号");
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.realtime_events WHERE public_payload ->> 'lot_id' = $1",
+    )
+    .bind(seeded.lots[0].to_string())
+    .fetch_one(pool)
+    .await
+    .expect("读取实时事件");
+    assert_eq!(events, 1, "并发同 ID 只能写一条实时事件");
+    let state_version: i64 =
+        sqlx::query_scalar("SELECT state_version FROM public.lots WHERE id = $1")
+            .bind(seeded.lots[0])
+            .fetch_one(pool)
+            .await
+            .expect("读取 lot 状态版本");
+    assert_eq!(state_version, 2, "并发重放不得二次推进 lot 状态版本");
+
+    store.postgres_pool().close().await;
+}
+
 /// 迁移 000090：竞价事实连续性仍由数据库强制，且不再通过 `bids` 范围聚合读取。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_bid_fact_counter_rejects_non_contiguous_facts() {
