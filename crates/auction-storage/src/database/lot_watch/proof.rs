@@ -9,12 +9,12 @@ macro_rules! delivery_watch_gate {
     () => {
         r#"(
         (deliveries.origin_kind <> 'lot_watch' AND
-         COALESCE(deliveries.payload ->> 'template', '') <> 'lot_watch')
+         COALESCE(deliveries.payload_template, '') <> 'lot_watch')
         OR (
           deliveries.origin_kind = 'lot_watch'
           AND deliveries.origin_id = 'lot_watch:' || deliveries.command_id::text
-          AND deliveries.payload ->> 'template' = 'lot_watch'
-          AND deliveries.payload ->> 'operation' = 'send'
+          AND deliveries.payload_template = 'lot_watch'
+          AND deliveries.payload_operation = 'send'
           AND EXISTS (
             SELECT 1 FROM public.lot_watch_notifications notification
             JOIN public.lot_watches watch ON watch.user_id = notification.user_id

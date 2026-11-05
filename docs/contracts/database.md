@@ -103,7 +103,7 @@
 | `settlement_legacy_self_reconciliations`、`settlement_legacy_bot_seller_claims` | 历史 Bot 自交易结算的核对证明（只追加） |
 | `settlement_equipment_losses` | 装备损失的人工责任声明与原 owner 快照；command/lot/recovery/payment/delivery/seller/refund 各自唯一，只追加，永久退役原投递 |
 | `settlement_recoveries`、`settlement_recovery_actions`、`settlement_recovery_commands`、`settlement_recovery_health`、`settlement_recovery_return_consumptions` | 付款超时恢复的状态、动作、人工确认、健康与 COD 退回计数 |
-| `deliveries` | 出站邮件 outbox：来源、收件人、负载、状态（prepared → pending → claimed → sending → succeeded / failed / manual_reconcile）、租约与 fencing |
+| `deliveries` | 出站邮件 outbox：来源、收件人、负载、状态（prepared → pending → claimed → sending → succeeded / failed / manual_reconcile）、租约与 fencing；`payload` 仍是唯一真相，热键 `world`/`operation`/`template` 由迁移 `000094` 提升为只读生成列 `payload_world`/`payload_operation`/`payload_template`（`GENERATED ALWAYS … STORED`，写入方不能也不得直接赋值） |
 | `delivery_send_attempts`、`delivery_sent_bindings`、`delivery_take_attempts` | 发送/收取尝试的摘要与远端邮件 ID 绑定（只追加），用于结果未知时的对账 |
 | `delivery_sent_confirmations` | 正式 CLI 的人工 Sent 观察命令、请求摘要、接受项、原 owner 快照与结果；只追加，按当前 delivery/fence 和 world/MID 唯一 |
 | `delivery_send_cadence`、`delivery_admin_commands` | 同类邮件发送节奏；Admin 投递操作账本 |
@@ -295,13 +295,22 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 
 迁移 `000087` 只新增四个投递 Admin 检索候选索引，登记 `compatible`：
 `deliveries_admin_recipient_idx`（`lower(recipient)` 前导）、
-`deliveries_admin_template_idx`（`payload->>'template'` 前导，部分索引）、
+`deliveries_admin_template_idx`（模板前导，部分索引）、
 `deliveries_admin_origin_id_idx`（结算来源 `origin_id` 前导，仅两种结算 origin）、
 `deliveries_admin_category_idx`（不可变函数 `public.delivery_send_category(origin_kind, payload)`
-前导）。世界筛选复用 `deliveries_mailbox_sweep_order` 的 `COALESCE(payload->>'world','main')`
+前导）。世界筛选复用 `deliveries_mailbox_sweep_order` 的 `COALESCE(payload_world,'main')`
 前导。索引只提供候选入口：筛选语义、计数、排序、分页上限与安全投影仍由
 `crates/auction-storage/src/database/delivery_admin/reads.rs` 与应用层校验决定，不改变金额、
 状态迁移、租约、审计、事件、冻结载荷或发送节奏。
+
+迁移 `000094`（W12.6）把 `deliveries.payload` 的三个已证明热键提升为只读生成列，并把上面
+两个此前以 `payload ->> …` 表达式为列的索引换成列形式：`deliveries_mailbox_sweep_order` 的
+前导改为 `COALESCE(payload_world,'main')`，`deliveries_admin_template_idx` 的部分谓词改为
+`payload_template IS NOT NULL`（NULL 永远不匹配等值筛选，子集语义不变）。`payload` 仍是唯一
+真相：生成列不能独立写入，`ADD COLUMN … STORED` 在停机门禁下按既有 `payload` 为历史行回填，
+不 UPDATE 任何既有列。整行证据比较（人工 Sent、装备损失、历史自寄修复）在两侧同时剔除这三列，
+使升级前写入的冻结快照继续成立。等级登记 `breaking`：新列会出现在整行 JSON 中，单独回退到
+旧程序会让这些证明失败关闭。
 
 复现入口：`cargo test -p auction-storage --features test-db --test perf -- --ignored --nocapture`
 （默认 `just test-db` 不运行；报告写入 `AUCTION_PERF_REPORT_DIR`，默认 `target/perf/<unix 秒>`）。
@@ -334,6 +343,28 @@ Serializable 事务在同一瞬间对同一场次的不同 lot 递增同一 `str
 - 匿名读突发：同一物理池上 24 个并发价格历史首屏把出价 p95 从 36.8ms 抬到 170.1ms
   （4.6×）；把读并发限到 4 后出价 p95 回到 32.1ms（0.87× 对照），读 p95 120ms。
   这量化了 W12.4 读限流/并发门的必要性：读必须受限，否则会拖慢出价。
+
+### W12.6 投递载荷键列化
+
+迁移 `000094` 前后的对比在隔离 PG18 上完成：真实结构（全部迁移按序执行，含 `000094`）、
+`deliveries` 5 万行（1 万 pending、2 万 manual_reconcile、2 万 succeeded；`payload` 约 1KB，
+含 `variables.body`），`ANALYZE` 后以 `EXPLAIN (ANALYZE, TIMING OFF)` 取三次测量的稳定值。
+对照只在 SQL 表达式上不同：一侧保留 `payload ->> 'world'/'operation'`，另一侧使用
+`payload_world`/`payload_operation`。
+
+| 形状 | `payload ->> …` | 生成列 |
+| --- | --- | --- |
+| 维护扫描（轮转前缀，`LIMIT 100`） | 35.0–35.8ms，13,571 缓冲区（顺序扫描 + top-N 排序） | 0.38–0.95ms，74 缓冲区（`deliveries_mailbox_sweep_order` 索引扫描） |
+| `status='pending'` 过滤计数（全表 5 万） | 22.3–25.2ms | 21.7–24.8ms |
+| 领取扫描（含 `delivery_send_category` 排序） | 133–144ms | 132–138ms |
+
+结论与边界：最大收益来自维护扫描的部分索引在新列形式上可被用作索引条件（约 90–130 倍）；
+纯过滤的全表计数由堆读取主导，列化收益落在噪声内；领取扫描本来就要为
+`delivery_send_category(origin_kind, payload)` 读取 `payload`，因此没有可见差异。三种写法在
+同一数据集上选出完全相同的行集合（维护扫描：两边各 10,000 行、差集 0），列值与
+`payload ->>` 的漂移计数为 0。这些数字是合成语料的对照测量，不是生产基准；复现入口为
+`cargo test -p auction-storage --features test-db --test postgres -- postgres_delivery_`
+（同时断言生成列不可直写、升级前形状的整行证据仍成立、维护扫描使用列索引）。
 
 ### W12.1 残留：跨 lot 的 Serializable 误报
 

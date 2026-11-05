@@ -30,6 +30,29 @@ LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadWritePaths=/run/hv-auction
 LimitNOFILE=65536
+# --- W9.6 主机加固：资源上限与沙箱 ---
+# 上限是失控保护，不是容量规划：按约 1.9 GB 内存的单机取值，远高于正常占用。
+# 若 MemoryCurrent 长期接近上限，先核对真实占用再调大，不能把 OOM 当正常回收。
+MemoryMax=512M
+TasksMax=256
+# 不写核心转储：转储可能含会话、Cookie 与密钥材料。
+LimitCORE=0
+# 服务不需要任何 Linux capability。
+CapabilityBoundingSet=
+PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+# 只保留本进程可见的 /proc 与 pid 子集；/proc/self 与 sched_getaffinity 仍可用。
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Rust 服务没有 JIT；若将来引入运行时生成代码的依赖须先移除本行。
+MemoryDenyWriteExecute=true
 
 [Install]
 WantedBy=multi-user.target
