@@ -1,10 +1,10 @@
 //! W12 数据库热点的可重复基准与负载夹具（`test-db` feature，默认不参与 `just test-db`）。
 //!
-//! 目标：把 W12.1（同场序列号热点）、W12.4（价格历史读路径）、W12.8（出价事务内的
+//! 目标：把 W12.1（同场序列号热点）、W12.4（价格历史读路径）、W12.8（出价/投递事务内的
 //! `pg_notify` 提交串行）从"估计"变成可复现的测量。所有 SQL 都取自生产 owner：
 //! 价格历史两条查询经 `auction_storage::benchmark_sql` 读同一份原文，序列号分配与通知
-//! 语句在 `benchmark` 模块内复制自 `database/realtime/sequence.rs` 与迁移 `000059` 的
-//! 触发器语义，测试里不再另写一份"看起来差不多"的查询。
+//! 语句在 `benchmark` 模块内复制自 `database/realtime/sequence.rs`、迁移 `000059` 的旧触发器
+//! 语义与迁移 `000093` 的提交后唤醒语义，测试里不再另写一份"看起来差不多"的查询。
 //!
 //! 运行（显式、耗时、需要本机 PostgreSQL 18 二进制）：
 //!
@@ -34,6 +34,7 @@ use auction_application::{
 use auction_storage::DatabaseStore;
 use serde_json::{Value, json};
 use sqlx::{AssertSqlSafe, PgPool, Row};
+use uuid::Uuid;
 
 /// 合成历史的场次数量；每个场次固定 20 件成交装备（全部 Cloth，复用既有分类编号约束）。
 const SEED_AUCTIONS: i64 = 500;
@@ -134,6 +135,8 @@ struct LoadStats {
     other_failures: usize,
     latencies_micros: Vec<u64>,
     commit_micros: Vec<u64>,
+    /// 提交后单独发送唤醒的耗时（含取连接与自动提交）；不并入 commit_micros。
+    post_commit_notify_micros: Vec<u64>,
 }
 
 impl LoadStats {
@@ -147,6 +150,7 @@ impl LoadStats {
         self.other_failures += other.other_failures;
         self.latencies_micros.extend(other.latencies_micros);
         self.commit_micros.extend(other.commit_micros);
+        self.post_commit_notify_micros.extend(other.post_commit_notify_micros);
     }
 
     fn percentile_micros(&self, percentile: f64) -> u64 {
@@ -155,6 +159,10 @@ impl LoadStats {
 
     fn commit_percentile_micros(&self, percentile: f64) -> u64 {
         percentile_of(&self.commit_micros, percentile)
+    }
+
+    fn post_commit_notify_percentile_micros(&self, percentile: f64) -> u64 {
+        percentile_of(&self.post_commit_notify_micros, percentile)
     }
 
     fn to_json(&self) -> Value {
@@ -171,6 +179,12 @@ impl LoadStats {
             "commit_p50_us": self.commit_percentile_micros(0.50),
             "commit_p95_us": self.commit_percentile_micros(0.95),
             "commit_max_us": self.commit_micros.iter().copied().max().unwrap_or(0),
+            "post_commit_notify_p50_us":
+                self.post_commit_notify_percentile_micros(0.50),
+            "post_commit_notify_p95_us":
+                self.post_commit_notify_percentile_micros(0.95),
+            "post_commit_notify_max_us":
+                self.post_commit_notify_micros.iter().copied().max().unwrap_or(0),
         })
     }
 }
@@ -600,6 +614,17 @@ async fn perf_price_history_index_and_plans() {
     pool.close().await;
 }
 
+/// 唤醒通知的发送位置：决定 NOTIFY 是否落在业务事务的提交路径上。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NotifyMode {
+    /// 不发送通知（对照基线）。
+    None,
+    /// 旧路径：投递写入事务内 `pg_notify`，提交持有 NOTIFY 全局锁。
+    InTransaction,
+    /// 新路径：事务提交后单独执行自动提交的 `pg_notify`。
+    AfterCommit,
+}
+
 /// 竞价热点负载：同一场次不同 lot 的 Serializable 事务同时递增同一 `realtime_streams` 行，
 /// 复现 D5（同场重叠出价必有一方序列化失败）。
 async fn run_contention(
@@ -609,7 +634,7 @@ async fn run_contention(
     concurrency: usize,
     per_task: usize,
     backoff: bool,
-    notify: bool,
+    notify: NotifyMode,
 ) -> Result<LoadStats, String> {
     let stream_key = format!("auction:{auction_id}");
     let mut handles = Vec::with_capacity(concurrency);
@@ -632,13 +657,18 @@ async fn run_contention(
                             break;
                         }
                     };
-                    // 与竞价事务相同的语句顺序：先开 Serializable，再分配流序号，再改 lot，
-                    // 需要唤醒时在同一事务内 pg_notify（模拟 notify_delivery_ready 触发器）。
+                    // 与竞价事务相同的语句顺序：先开 Serializable，再分配流序号，再改 lot。
+                    // 旧路径在事务内 pg_notify（模拟已删除的 notify_delivery_ready 触发器）；
+                    // 新路径在事务提交后单独发送，提交不持有 NOTIFY 全局锁。
                     // PostgreSQL 的 SSI 冲突既可能在语句处报告，也可能延迟到 COMMIT，两个位置
                     // 都必须按同一冲突谓词归类，否则夹具会把真实冲突误记为其它失败。
-                    let outcome =
-                        apply_hotspot_transaction(&mut transaction, &stream_key, &lot_id, notify)
-                            .await;
+                    let outcome = apply_hotspot_transaction(
+                        &mut transaction,
+                        &stream_key,
+                        &lot_id,
+                        matches!(notify, NotifyMode::InTransaction),
+                    )
+                    .await;
                     let commit_started = Instant::now();
                     let result = match outcome {
                         Ok(()) => transaction.commit().await.map(|()| commit_started.elapsed()),
@@ -652,6 +682,17 @@ async fn run_contention(
                             stats.commit_micros.push(
                                 u64::try_from(commit_elapsed.as_micros()).unwrap_or(u64::MAX),
                             );
+                            if notify == NotifyMode::AfterCommit {
+                                // 提交后再发送；独立自动提交事务，不延长原事务提交。
+                                let notify_started = Instant::now();
+                                let _ = sqlx::query("SELECT public.signal_delivery_ready()")
+                                    .execute(&pool)
+                                    .await;
+                                stats.post_commit_notify_micros.push(
+                                    u64::try_from(notify_started.elapsed().as_micros())
+                                        .unwrap_or(u64::MAX),
+                                );
+                            }
                             stats.latencies_micros.push(
                                 u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
                             );
@@ -898,7 +939,7 @@ async fn timed_read_burst(
         Ok::<TimedReads, String>(TimedReads { latencies, failures })
     });
 
-    let bids = run_contention(pool, auction_id, lot_ids, 16, 1, true, false).await?;
+    let bids = run_contention(pool, auction_id, lot_ids, 16, 1, true, NotifyMode::None).await?;
     let reads = read_handle.await.map_err(|error| format!("读突发任务失败：{error}"))??;
     Ok((reads, bids))
 }
@@ -958,7 +999,7 @@ async fn perf_bid_hotspot_and_notify_commit() {
         concurrency,
         per_task,
         false,
-        false,
+        NotifyMode::None,
     )
     .await
     .expect("无退避并发场景");
@@ -969,24 +1010,51 @@ async fn perf_bid_hotspot_and_notify_commit() {
         concurrency,
         per_task,
         true,
-        false,
+        NotifyMode::None,
     )
     .await
     .expect("抖动退避并发场景");
-    // W12.8：同一并发与退避下，只把"事务内 pg_notify"这一项打开/关闭，比较提交耗时。
+    // W12.8：同一并发与退避下，比较三种唤醒位置的提交耗时——
+    // 事务内 pg_notify（旧触发器）、提交后单独发送、以及不发送的对照。
     let notify_baseline =
-        run_contention(&pool, &auction_id, Arc::clone(&lot_ids), 8, 2, true, false)
+        run_contention(&pool, &auction_id, Arc::clone(&lot_ids), 8, 2, true, NotifyMode::None)
             .await
             .expect("不含 pg_notify 的对照场景");
-    let notified = run_contention(&pool, &auction_id, Arc::clone(&lot_ids), 8, 2, true, true)
-        .await
-        .expect("含 pg_notify 的并发场景");
+    let notified = run_contention(
+        &pool,
+        &auction_id,
+        Arc::clone(&lot_ids),
+        8,
+        2,
+        true,
+        NotifyMode::InTransaction,
+    )
+    .await
+    .expect("含事务内 pg_notify 的并发场景");
+    let after_commit_notify = run_contention(
+        &pool,
+        &auction_id,
+        Arc::clone(&lot_ids),
+        8,
+        2,
+        true,
+        NotifyMode::AfterCommit,
+    )
+    .await
+    .expect("提交后 pg_notify 的并发场景");
     // W12.1 对照：16 个并发事务各写**不同** lot，因此任何序列化冲突只能来自共享的 stream 行。
     // 同一形状下比较“提交内序号”（旧路径）与“提交后补号”（新路径）。
-    let cross_lot_legacy =
-        run_contention(&pool, &auction_id, Arc::clone(&lot_ids), concurrency, 1, true, false)
-            .await
-            .expect("不同 lot 的提交内序号对照");
+    let cross_lot_legacy = run_contention(
+        &pool,
+        &auction_id,
+        Arc::clone(&lot_ids),
+        concurrency,
+        1,
+        true,
+        NotifyMode::None,
+    )
+    .await
+    .expect("不同 lot 的提交内序号对照");
     let deferred =
         run_contention_deferred(&pool, &auction_id, Arc::clone(&lot_ids), concurrency, 1)
             .await
@@ -1008,6 +1076,7 @@ async fn perf_bid_hotspot_and_notify_commit() {
         ("抖动退避", &jittered, expected),
         ("通知对照", &notify_baseline, expected_notified),
         ("含 pg_notify", &notified, expected_notified),
+        ("提交后通知", &after_commit_notify, expected_notified),
         ("不同 lot 旧序号", &cross_lot_legacy, concurrency),
         ("提交后补号", &deferred, concurrency),
     ] {
@@ -1026,6 +1095,7 @@ async fn perf_bid_hotspot_and_notify_commit() {
                 + committed(&jittered)
                 + committed(&notify_baseline)
                 + committed(&notified)
+                + committed(&after_commit_notify)
                 + committed(&cross_lot_legacy)
                 + committed(&deferred)
         )
@@ -1036,7 +1106,7 @@ async fn perf_bid_hotspot_and_notify_commit() {
     let notify_commit_max = notified.commit_micros.iter().copied().max().unwrap_or(0);
     println!(
         "热点并发（{} 并发 × {} 事务/任务，同一场次同一 stream row）：\n           固定等待：成功 {}、耗尽 {}、p50 {}us、p95 {}us\n           抖动退避：成功 {}、耗尽 {}、p50 {}us、p95 {}us\n           含 pg_notify：成功 {}、单次提交上限 {}us\n  \
-         通知对照：提交 p95 {}us；含通知：提交 p95 {}us、p50 {}us\n           不同 lot 旧序号：成功 {}、冲突 {}、耗尽 {}、p50 {}us、p95 {}us\n           提交后补号：成功 {}、冲突 {}、耗尽 {}、p50 {}us、p95 {}us",
+         通知对照：提交 p95 {}us；事务内通知提交 p95 {}us、p50 {}us；提交后通知提交 p95 {}us、p50 {}us、发送 p95 {}us\n           不同 lot 旧序号：成功 {}、冲突 {}、耗尽 {}、p50 {}us、p95 {}us\n           提交后补号：成功 {}、冲突 {}、耗尽 {}、p50 {}us、p95 {}us",
         concurrency,
         per_task,
         committed(&fixed),
@@ -1052,6 +1122,9 @@ async fn perf_bid_hotspot_and_notify_commit() {
         notify_baseline.commit_percentile_micros(0.95),
         notified.commit_percentile_micros(0.95),
         notified.commit_percentile_micros(0.50),
+        after_commit_notify.commit_percentile_micros(0.95),
+        after_commit_notify.commit_percentile_micros(0.50),
+        after_commit_notify.post_commit_notify_percentile_micros(0.95),
         committed(&cross_lot_legacy),
         cross_lot_legacy.conflicts,
         cross_lot_legacy.exhausted,
@@ -1078,6 +1151,7 @@ async fn perf_bid_hotspot_and_notify_commit() {
         "jittered_backoff": jittered.to_json(),
         "notify_control": notify_baseline.to_json(),
         "with_pg_notify": notified.to_json(),
+        "pg_notify_after_commit": after_commit_notify.to_json(),
         "cross_lot_legacy_sequence": cross_lot_legacy.to_json(),
         "deferred_sequence": deferred.to_json(),
         "applied_state_versions": applied,
@@ -1113,9 +1187,10 @@ async fn perf_anonymous_read_burst_does_not_starve_bids() {
     // 两档匿名读突发共用同一物理池（`DatabaseStore` 的旧式语义），因此这组测量回答的是
     // "读抢连接会不会拖慢出价"，而不是另一套读池的效果。生产 Public 另有独立读限流/并发门，
     // 这里用"限流前/限流后"两档对比量化那道门的作用。
-    let bids_alone = run_contention(&pool, &auction_id, Arc::clone(&lot_ids), 16, 1, true, false)
-        .await
-        .expect("无读突发的出价对照");
+    let bids_alone =
+        run_contention(&pool, &auction_id, Arc::clone(&lot_ids), 16, 1, true, NotifyMode::None)
+            .await
+            .expect("无读突发的出价对照");
     let (unlimited_reads, bids_with_unlimited) =
         timed_read_burst(&store, &pool, &auction_id, Arc::clone(&lot_ids), 24, 2)
             .await
@@ -1175,5 +1250,181 @@ async fn perf_anonymous_read_burst_does_not_starve_bids() {
     });
     let path = write_report("read-burst-load", &report);
     println!("混合负载报告：{}", path.display());
+    pool.close().await;
+}
+
+/// W12.8 直接测量：投递入队事务在不同唤醒位置下的提交耗时。
+///
+/// 同一行插入（`deliveries` pending）在 000093 前会触发 `notify_delivery_ready` 在事务内
+/// `pg_notify`；迁移后触发器删除，提交后单独发送。这里在测试库上临时重建与 000059 完全
+/// 相同的触发器以测量“旧路径”，再删除它以测量“新路径”。只写合成投递，不领取、不发送。
+async fn run_delivery_wakeup_load(
+    pool: &PgPool,
+    concurrency: usize,
+    per_task: usize,
+    mode: NotifyMode,
+) -> Result<LoadStats, String> {
+    let mut handles = Vec::with_capacity(concurrency);
+    for task in 0..concurrency {
+        let pool = pool.clone();
+        handles.push(tokio::spawn(async move {
+            let mut stats = LoadStats::default();
+            for step in 0..per_task {
+                let sequence = task * per_task + step;
+                stats.transactions += 1;
+                let delivery_id = Uuid::new_v5(
+                    &Uuid::NAMESPACE_OID,
+                    format!("perf-delivery-{mode:?}-{sequence}").as_bytes(),
+                );
+                let mut digest = [0_u8; 32];
+                digest[..8].copy_from_slice(&(sequence as u64).to_le_bytes());
+                let started = Instant::now();
+                let mut transaction = match pool.begin().await {
+                    Ok(transaction) => transaction,
+                    Err(_) => {
+                        stats.other_failures += 1;
+                        break;
+                    }
+                };
+                let inserted = sqlx::query(
+                    "INSERT INTO public.deliveries
+                        (id, command_id, request_digest, origin_kind, origin_id,
+                         recipient, payload, status)
+                     VALUES ($1, $2, $3, 'lot_watch', $4, $5, '{}'::jsonb, 'pending')",
+                )
+                .bind(delivery_id)
+                .bind(Uuid::new_v5(
+                    &Uuid::NAMESPACE_OID,
+                    format!("perf-delivery-command-{mode:?}-{sequence}").as_bytes(),
+                ))
+                .bind(digest.as_slice())
+                .bind(format!("perf-{sequence}"))
+                .bind("perf@example.invalid")
+                .execute(&mut *transaction)
+                .await;
+                if inserted.is_err() {
+                    stats.other_failures += 1;
+                    let _ = transaction.rollback().await;
+                    continue;
+                }
+                let commit_started = Instant::now();
+                match transaction.commit().await {
+                    Ok(()) => {
+                        stats.commit_micros.push(
+                            u64::try_from(commit_started.elapsed().as_micros()).unwrap_or(u64::MAX),
+                        );
+                        if mode == NotifyMode::AfterCommit {
+                            let notify_started = Instant::now();
+                            let _ = sqlx::query("SELECT public.signal_delivery_ready()")
+                                .execute(&pool)
+                                .await;
+                            stats.post_commit_notify_micros.push(
+                                u64::try_from(notify_started.elapsed().as_micros())
+                                    .unwrap_or(u64::MAX),
+                            );
+                        }
+                        stats
+                            .latencies_micros
+                            .push(u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX));
+                        *stats.attempts.entry(1).or_default() += 1;
+                    }
+                    Err(_) => stats.other_failures += 1,
+                }
+            }
+            stats
+        }));
+    }
+
+    let mut merged = LoadStats::default();
+    for handle in handles {
+        merged.merge(handle.await.map_err(|error| format!("负载任务失败：{error}"))?);
+    }
+    Ok(merged)
+}
+
+#[tokio::test]
+#[ignore = "W12.8 负载夹具：显式运行，不在默认 test-db 门禁中执行"]
+async fn perf_delivery_wakeup_commit_path() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let pool = store.postgres_pool().clone();
+    let concurrency = 16_usize;
+    let per_task = 25_usize;
+
+    // 重建 000059 的触发器，测量旧路径“事务内 NOTIFY”的提交耗时。
+    sqlx::query(
+        "CREATE FUNCTION public.perf_notify_delivery_ready() RETURNS trigger
+         LANGUAGE plpgsql AS $$
+         BEGIN
+             PERFORM pg_notify('auction_delivery_ready', '');
+             RETURN NEW;
+         END;
+         $$",
+    )
+    .execute(&pool)
+    .await
+    .expect("建立测量用唤醒触发器函数");
+    sqlx::query(
+        "CREATE TRIGGER perf_delivery_ready_after_insert
+         AFTER INSERT ON public.deliveries
+         FOR EACH ROW WHEN (NEW.origin_kind = 'lot_watch' AND NEW.status = 'pending')
+         EXECUTE FUNCTION public.perf_notify_delivery_ready()",
+    )
+    .execute(&pool)
+    .await
+    .expect("建立测量用唤醒触发器");
+
+    let trigger_path =
+        run_delivery_wakeup_load(&pool, concurrency, per_task, NotifyMode::InTransaction)
+            .await
+            .expect("旧触发器路径");
+
+    sqlx::query("DROP TRIGGER perf_delivery_ready_after_insert ON public.deliveries")
+        .execute(&pool)
+        .await
+        .expect("删除测量用触发器");
+    sqlx::query("DROP FUNCTION public.perf_notify_delivery_ready()")
+        .execute(&pool)
+        .await
+        .expect("删除测量用触发器函数");
+
+    let after_commit =
+        run_delivery_wakeup_load(&pool, concurrency, per_task, NotifyMode::AfterCommit)
+            .await
+            .expect("提交后唤醒路径");
+
+    let expected = concurrency * per_task;
+    assert_eq!(
+        trigger_path.attempts.values().copied().sum::<usize>(),
+        expected,
+        "旧触发器路径不得出现失败"
+    );
+    assert_eq!(
+        after_commit.attempts.values().copied().sum::<usize>(),
+        expected,
+        "提交后唤醒路径不得出现失败"
+    );
+    assert_eq!(trigger_path.other_failures, 0);
+    assert_eq!(after_commit.other_failures, 0);
+    println!(
+        "投递唤醒（{} 并发 × {} 行/任务）：\n           事务内触发器提交 p95 {}us、p50 {}us；提交后发送提交 p95 {}us、p50 {}us、发送 p95 {}us",
+        concurrency,
+        per_task,
+        trigger_path.commit_percentile_micros(0.95),
+        trigger_path.commit_percentile_micros(0.50),
+        after_commit.commit_percentile_micros(0.95),
+        after_commit.commit_percentile_micros(0.50),
+        after_commit.post_commit_notify_percentile_micros(0.95)
+    );
+
+    let report = json!({
+        "schema": "auction.delivery_wakeup_commit.v1",
+        "concurrency": concurrency,
+        "rows_per_task": per_task,
+        "trigger_in_transaction": trigger_path.to_json(),
+        "notify_after_commit": after_commit.to_json(),
+    });
+    let path = write_report("delivery-wakeup-commit", &report);
+    println!("投递唤醒报告：{}", path.display());
     pool.close().await;
 }

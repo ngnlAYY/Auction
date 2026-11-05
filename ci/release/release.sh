@@ -9,7 +9,12 @@ cd "$repository_root"
 
 # 工具选择与身份共用同一入口；回执校验失败时不进入任何发布操作。
 source ci/release/build-identity.sh
-configure_build_tools
+# 只读的 payload 体积检查不需要 dx/rustc，也不读取受控工具；其余入口仍先校验工具回执。
+command_name=${1:-}
+if [[ "$command_name" != verify-web-size ]]; then
+	configure_build_tools
+fi
+if [[ $# -gt 0 ]]; then shift; fi
 
 artifact_root="$repository_root/target/dist/artifacts"
 api_artifact_root="$artifact_root/api"
@@ -21,6 +26,8 @@ single_build_root="$repository_root/target/dist/build/single"
 package_output_root="$repository_root/target/dist/package"
 api_only_public_root="$repository_root/target/dist/api-only-assets/public"
 api_only_admin_root="$repository_root/target/dist/api-only-assets/admin"
+# 体积预算的基线是刻意维护的数据文件；发布门禁只读取，不写回。
+web_size_budget_file="$repository_root/ci/release/web-size-budget.v1"
 assets_missing_message="web assets are not included in this binary; run \`just build-release\`"
 # 发布 feature 的唯一来源：可部署制品含 Redis；API-only 对照只留 PostgreSQL。
 api_only_features='postgres'
@@ -49,9 +56,14 @@ require_command() {
 	fi
 }
 
-for required in cargo date diff dx find git gzip install sha256sum sort stat tar; do
-	require_command "$required"
-done
+# 只读体积检查不需要发布工具链，只要求测量 payload 所需的基础命令。
+if [[ "$command_name" == verify-web-size ]]; then
+	for required in find git sha256sum; do require_command "$required"; done
+else
+	for required in cargo date diff dx find git gzip install sha256sum sort stat tar; do
+		require_command "$required"
+	done
+fi
 
 worktree_state() {
 	local status
@@ -208,6 +220,8 @@ build_variant() (
 		bash ci/release/web-bundle.sh admin
 		web_payload_sha public >/dev/null
 		web_payload_sha admin >/dev/null
+		verify_surface_size_budget public
+		verify_surface_size_budget admin
 	fi
 	verify_build_info "$next" "$variant"
 
@@ -260,6 +274,31 @@ web_payload_sha() {
 	local package
 	package=$(web_surface_package "$1") || return 2
 	verify_web_payload "$1" "$repository_root/target/dx/build/$package/web"
+}
+
+# 发布与独立检查共用的体积预算入口：先按稳定目录解析 surface，再读取统一的预算文件。
+verify_surface_size_budget() {
+	local stable_root
+	stable_root=$(web_surface_root "$1" "$repository_root") || return 2
+	verify_web_size_budget "$1" "$stable_root" "$web_size_budget_file"
+}
+
+# 独立体积检查：不构建、不读取原生制品；成功时打印实测值，供刻意刷新基线时抄录。
+verify_web_size() {
+	local surface stable_root sizes
+	for surface in public admin; do
+		stable_root=$(web_surface_root "$surface" "$repository_root") || return 1
+		verify_web_payload "$surface" "$stable_root" >/dev/null || return 1
+		verify_surface_size_budget "$surface" || return 1
+		sizes=$(web_payload_sizes "$surface" "$stable_root") || return 1
+		if [[ ! "$sizes" =~ ^([0-9]+)\ ([0-9]+)$ ]]; then
+			printf '无法测量 %s Web payload 体积：%s\n' "$surface" "$stable_root" >&2
+			return 1
+		fi
+		printf '%s payload 体积：wasm=%s bytes payload=%s bytes\n' \
+			"$surface" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+	done
+	printf 'Public/Admin Web payload 体积未超出硬上限。\n'
 }
 
 # contains 要求每个标记都出现，excludes 要求每个标记都缺席；用于证明 Web 资源只进入对应二进制。
@@ -345,6 +384,8 @@ verify_artifacts() {
 		printf '嵌入构建保存的 Web 标记与当前 payload 不一致\n' >&2
 		return 1
 	fi
+	verify_surface_size_budget public
+	verify_surface_size_budget admin
 
 	local binary path
 	for path in "${api_only_binaries[@]/#/$api_artifact_root/bin/}" "${binaries[@]/#/$embedded_artifact_root/bin/}"; do
@@ -908,15 +949,13 @@ usage() {
 		'      ci/release/release.sh package [--single-binary] [--allow-dirty]' \
 		'      ci/release/release.sh build-api | build-embedded | verify-artifacts' \
 		'      ci/release/release.sh build-single | verify-single' \
-		'      ci/release/release.sh source-fingerprint' >&2
+		'      ci/release/release.sh verify-web-size | source-fingerprint' >&2
 }
 
-command_name=${1:-}
-if [[ $# -gt 0 ]]; then shift; fi
 case "$command_name" in
 release-check) release_check "$@" ;;
 package) package_release "$@" ;;
-build-api | build-embedded | build-single | verify-single | verify-artifacts | source-fingerprint)
+build-api | build-embedded | build-single | verify-single | verify-artifacts | verify-web-size | source-fingerprint)
 	if [[ $# -ne 0 ]]; then
 		printf '%s 不接受额外参数\n' "$command_name" >&2
 		exit 2
@@ -928,6 +967,8 @@ build-api | build-embedded | build-single | verify-single | verify-artifacts | s
 	build-single) build_single ;;
 	verify-single) verify_single_artifacts ;;
 	verify-artifacts) verify_artifacts ;;
+	# 只读稳定 payload 的体积预算，不构建原生程序，也不改写任何产物。
+	verify-web-size) verify_web_size ;;
 	# 只输出源码身份指纹，供 CI 用作制品缓存键或人工核对复用判定；不读写产物目录。
 	source-fingerprint) source_fingerprint ;;
 	esac

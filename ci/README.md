@@ -5,7 +5,7 @@
 | 目录 | 内容 |
 | --- | --- |
 | [`ci/checks/`](checks) | [静态门禁说明](checks/README.md)：[`ci/checks/check.sh`](checks/check.sh)（策略、格式、编译、lint、审计）与对应脚本/基线 |
-| [`ci/release/`](release) | 发布入口 [`ci/release/release.sh`](release/release.sh)、Web payload 构建 [`ci/release/web-bundle.sh`](release/web-bundle.sh)、共用身份函数 [`ci/release/build-identity.sh`](release/build-identity.sh) |
+| [`ci/release/`](release) | 发布入口 [`ci/release/release.sh`](release/release.sh)、Web payload 构建 [`ci/release/web-bundle.sh`](release/web-bundle.sh)、共用身份函数 [`ci/release/build-identity.sh`](release/build-identity.sh)、体积预算 [`ci/release/web-size-budget.v1`](release/web-size-budget.v1) |
 | [`ci/tools/`](tools) | 受控工具链与构建工具的安装、校验与本地 Blaze 试验入口 |
 
 发布工具面向 Linux x86_64；装包还需 Perl（重定位文档链接）。CI 的 Cargo 编译、Clippy 与依赖图解析命令使用 `--locked`。格式检查和独立审计工具使用各自的参数。
@@ -62,10 +62,10 @@ bash ci/release/release.sh release-check [--single-binary] [--allow-dirty]   # �
 bash ci/release/release.sh package [--single-binary] [--allow-dirty]         # 只装配已构建制品
 bash ci/release/release.sh build-api | build-embedded | verify-artifacts
 bash ci/release/release.sh build-single | verify-single
-bash ci/release/release.sh source-fingerprint
+bash ci/release/release.sh verify-web-size | source-fingerprint
 ```
 
-对应 Justfile：`just build-api`、`just build-release`、`just build-single`、`just verify-artifacts`、`just release-check`、`just package`。
+对应 Justfile：`just build-api`、`just build-release`、`just build-single`、`just verify-artifacts`、`just web-size`、`just release-check`、`just package`。
 
 ### 制品变体
 
@@ -78,6 +78,7 @@ bash ci/release/release.sh source-fingerprint
 ### 门禁
 
 - **页面 payload**：先用 `ci/release/web-bundle.sh` 构建两端 payload，校验入口页标题（“Auction 公开站点” / “Auction 管理站点”）、跨端隔离、只含普通文件与唯一一组 JS/WASM、payload 清单与哈希。目录遍历或摘要生成失败即拒绝复用，不把失败留下的部分输出当作有效清单。
+- **体积预算**：两端 payload 的 WASM 与总量按 [`ci/release/web-size-budget.v1`](release/web-size-budget.v1) 的基线比较；明显增长只告警，超过硬上限使发布失败。见 [Web payload 体积预算](#web-payload-体积预算)。
 - **二进制标记**：Public 只含 Public payload 的标记与哈希，Admin 只含 Admin 的，Worker 与 auction-cli 不含任何页面标记；API-only 二进制含“资源缺失”提示而不含 payload。
 - **依赖边界**（`cargo tree`）：Worker 不依赖任何前端 crate；Public 不依赖 Admin 前端；Admin 不依赖 Public 前端；`auction-server` 不依赖 `auction-cli`。
 - **BUILD-INFO 与校验和**：每个制品目录记录源码身份、构建输入与环境指纹、feature 和文件摘要；工具链经受控工具身份绑定。复用判定比较这些指纹、锁文件、feature 和制品摘要；仅仓库提交或不在构建输入范围内的文档变化，不必重新编译。
@@ -108,8 +109,26 @@ bash ci/release/web-bundle.sh admin
 
 以 `wasm-release` profile 运行受控 `dx bundle`，复制到稳定目录 `target/dx/build/<包名>/web/public`（后端 `web-embed` 从这里内嵌），写入 payload 清单与哈希。复用要求本 surface、共享层、契约、工具配方及构建环境指纹一致，且现有 payload 再次通过完整门禁；仅比较 `dx` 与 `rustc` 版本不足以证明可复用。
 
+### Web payload 体积预算
+
+```bash
+bash ci/release/release.sh verify-web-size   # 只读既有 payload 与预算，不构建原生程序
+just web-size                                # 同上
+```
+
+[`ci/release/web-size-budget.v1`](release/web-size-budget.v1) 是刻意维护的数据文件（`schema=auction-web-size-budget/1`），每个 surface 记录两对数字：
+
+- `<surface>_wasm_baseline_bytes` / `<surface>_payload_baseline_bytes`：基线实测值。当前为 Public WASM 2756864、Public payload 2933467、Admin WASM 4111988、Admin payload 4269558 字节。
+- `<surface>_wasm_max_bytes` / `<surface>_payload_max_bytes`：硬上限。当前为 Public 3100000/3300000、Admin 4600000/4800000 字节。
+
+`payload` 取 `target/dx/build/<包名>/web/public` 下全部普通文件（含内嵌标记 `auction-web-manifest.v1`）的字节合计，`wasm` 取其中唯一一组 `auction-web-<surface>_bg*.wasm`；测量前的 payload 必须先通过完整门禁，测量失败（目录缺失、摘要或体积无法计算）同样失败关闭。
+
+判定：超过 `baseline × (1 + warn_growth_basis_points/10000)`（当前 `warn_growth_basis_points=500`，即 5%）只打印 `WARN`，发布继续；超过 `_max_bytes` 打印实测值、基线与上限并使命令失败。检查点在 `build-embedded`/`release-check`（Web payload 生成后、链接原生程序前）、`verify-artifacts`/`verify-single`（复用制品同样受限）与独立的 `verify-web-size`。该检查只读既有文件，不改变运行时行为，也不写入基线。
+
+刷新基线必须刻意进行：先确认体积增长来自有意的前端改动，运行 `just web-build`（或 `just build-release`）得到新 payload，再运行 `just web-size` 抄录输出的 `wasm=` 与 `payload=` 实测字节，只更新对应 surface 的 baseline；按预期余量调整 `_max_bytes` 时不能低于 baseline。基线改动与引起增长的前端改动同批提交；预算失败应先排查体积回归，不得直接把上限抬到实测值以上来让发布通过。
+
 ### 构建身份：`ci/release/build-identity.sh`
 
-`ci/release/release.sh` 与 `ci/release/web-bundle.sh` 共用：选择受控工具（`target/build-tools/bin` 优先、`NO_DOWNLOADS=1`）、计算源码身份指纹（已跟踪与未忽略的新文件、删除与 mode 变化）、计算前后端共享构建号、读取 BUILD-INFO、校验 Web payload。未通过环境变量指定时，显式清空 Cargo 配置中的两类 rustc 包装器；环境变量指定的 `sccache` 替换为受控版本，其他显式包装器保留并计入构建环境指纹。
+`ci/release/release.sh` 与 `ci/release/web-bundle.sh` 共用：选择受控工具（`target/build-tools/bin` 优先、`NO_DOWNLOADS=1`）、计算源码身份指纹（已跟踪与未忽略的新文件、删除与 mode 变化）、计算前后端共享构建号、读取 BUILD-INFO、校验 Web payload，以及只读的 payload 体积测量与预算判定。未通过环境变量指定时，显式清空 Cargo 配置中的两类 rustc 包装器；环境变量指定的 `sccache` 替换为受控版本，其他显式包装器保留并计入构建环境指纹。
 
 两个入口都在构建前把 `web_build_identity`（两个 Web surface 输入并集指纹的前 32 位）导出为 `AUCTION_BUILD_ID`。原生程序把它写进每个 HTTP 响应头 `x-auction-build` 与实时 WebSocket 首帧，浏览器把同一值编译进 payload 并与自身比较；不一致时只提示刷新，不自动重载。该值只随浏览器 payload 输入变化，后端专属部署不会误报。

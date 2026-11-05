@@ -31,13 +31,15 @@ pub(super) async fn auto_watch(
     audit(transaction, user_id, lot_id, action, serde_json::json!({"version": version})).await
 }
 
+/// 应用一条已提交的竞价事实。返回本轮是否入队了至少一条新的 `lot_watch` 投递；
+/// 调用方在事务提交后据此发送唤醒，通知不在事务内。
 pub(crate) async fn apply_bid(
     transaction: &mut Transaction<'_, Postgres>,
     bid: &AcceptedBid,
     occurred_at: DateTime<Utc>,
     notifications: &dyn auction_application::NotificationRecorder,
     public_base_url: Option<&str>,
-) -> Result<(), CompetitionTransactionError> {
+) -> Result<bool, CompetitionTransactionError> {
     let lot_id = bid.lot_id.as_uuid();
     let row = match lock_leadership(transaction, lot_id).await? {
         Some(row) => row,
@@ -66,7 +68,7 @@ pub(crate) async fn apply_bid(
         })?,
     };
     if leadership.leader == Some(bid.bidder_id) {
-        return Ok(());
+        return Ok(false);
     }
     let displaced = leadership.accept(bid.bidder_id, bid.state_version);
     invalidate(transaction, bid.bidder_id.as_uuid(), lot_id, "leading_again").await?;
@@ -82,8 +84,9 @@ pub(crate) async fn apply_bid(
     .execute(&mut **transaction)
     .await
     .map_err(sql_error)?;
+    let mut wakeup = false;
     if let Some((user_id, cycle)) = displaced {
-        notify(
+        wakeup |= notify(
             transaction,
             bid,
             user_id.as_uuid(),
@@ -96,8 +99,9 @@ pub(crate) async fn apply_bid(
     }
     // 代理状态在本事务内已更新：慢速代理耗尽或被更高普通出价击败后，
     // 待定提醒在此刻入队；反超成功则退役待定事实。
-    resolve_pending(transaction, lot_id, occurred_at, notifications, public_base_url).await?;
-    Ok(())
+    wakeup |=
+        resolve_pending(transaction, lot_id, occurred_at, notifications, public_base_url).await?;
+    Ok(wakeup)
 }
 
 async fn lock_leadership(
@@ -190,16 +194,16 @@ async fn notify(
     occurred_at: DateTime<Utc>,
     notifications: &dyn auction_application::NotificationRecorder,
     public_base_url: Option<&str>,
-) -> Result<(), CompetitionTransactionError> {
+) -> Result<bool, CompetitionTransactionError> {
     let lot_id = bid.lot_id.as_uuid();
     let Some(target) = load_target(transaction, user_id, lot_id).await? else {
-        return Ok(());
+        return Ok(false);
     };
     let amount = bid.amount.value();
     // 决策 67：慢速代理仍会自动反击时，持有人还不能行动；只记待定事实。
     if slow_proxy_can_act(&target, occurred_at) {
         defer(transaction, bid, user_id, cycle, amount, &target, occurred_at).await?;
-        return Ok(());
+        return Ok(false);
     }
     enqueue(
         transaction,
@@ -303,7 +307,7 @@ async fn enqueue(
     occurred_at: DateTime<Utc>,
     notifications: &dyn auction_application::NotificationRecorder,
     public_base_url: Option<&str>,
-) -> Result<(), CompetitionTransactionError> {
+) -> Result<bool, CompetitionTransactionError> {
     match target.channel.as_str() {
         "mm" => {
             let command = auction_application::lot_watch_notification(
@@ -360,7 +364,8 @@ async fn enqueue(
                 "lot_watch.outbid",
                 serde_json::json!({"cycle": cycle, "bid_id": bid_id, "delivery_id": delivery.delivery_id}),
             )
-            .await
+            .await?;
+            Ok(true)
         }
         "pm" => {
             let notification = auction_application::lot_watch_pm_notification(
@@ -421,7 +426,8 @@ async fn enqueue(
                     "suppressed": notification.recipient.is_none(),
                 }),
             )
-            .await
+            .await?;
+            Ok(false)
         }
         _ => Err(corrupt()),
     }
@@ -435,13 +441,14 @@ fn pending_id(lot_id: Uuid, user_id: Uuid, cycle: u64) -> Uuid {
 }
 
 /// 解析本 lot 的待定提醒：反超成功或 lot 结束即退役，代理耗尽即入队。
+/// 返回本轮是否入队了至少一条新的 `lot_watch` 投递。
 async fn resolve_pending(
     transaction: &mut Transaction<'_, Postgres>,
     lot_id: Uuid,
     occurred_at: DateTime<Utc>,
     notifications: &dyn auction_application::NotificationRecorder,
     public_base_url: Option<&str>,
-) -> Result<(), CompetitionTransactionError> {
+) -> Result<bool, CompetitionTransactionError> {
     let rows = sqlx::query(
         "SELECT pending.id, pending.user_id, pending.leadership_cycle, pending.displaced_bid_id,
                 pending.amount, pending.channel, pending.recipient, pending.watch_version,
@@ -461,6 +468,7 @@ async fn resolve_pending(
     .fetch_all(&mut **transaction)
     .await
     .map_err(sql_error)?;
+    let mut wakeup = false;
     for row in rows {
         let id: Uuid = row.try_get("id").map_err(sql_error)?;
         let user_id: Uuid = row.try_get("user_id").map_err(sql_error)?;
@@ -527,7 +535,7 @@ async fn resolve_pending(
             forum_account_id: recipient.or(target.forum_account_id),
             ..target
         };
-        enqueue(
+        wakeup |= enqueue(
             transaction,
             bid_id,
             user_id,
@@ -552,7 +560,7 @@ async fn resolve_pending(
         )
         .await?;
     }
-    Ok(())
+    Ok(wakeup)
 }
 
 // 事务装配按显式列/身份/审计字段逐项传递，避免为单次调用引入临时容器。

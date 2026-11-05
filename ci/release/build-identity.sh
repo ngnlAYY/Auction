@@ -192,6 +192,79 @@ verify_web_payload() (
 	printf '%s\n' "$marker_sha"
 )
 
+# 稳定 Web payload 目录；surface 闭集之外失败，避免调用方自行拼包名而漂移。
+web_surface_root() {
+	local surface=$1 repository_root=$2 package
+	package=$(web_surface_package "$surface") || return 2
+	printf '%s/target/dx/build/%s/web\n' "$repository_root" "$package"
+}
+
+# 单端 payload 体积：唯一优化 WASM 字节数与内嵌的全部普通文件合计。
+# verify_web_payload 已保证只存在一组 JS/WASM；输出 `wasm_bytes payload_bytes`。
+web_payload_sizes() (
+	local surface=$1
+	local stable_root=$2
+	local root wasm_bytes payload_bytes
+	root="$stable_root/public"
+	[[ -d "$root" && ! -L "$root" ]] || return 1
+	wasm_bytes=$(find "$root" -type f -name "auction-web-${surface}_bg*.wasm" -printf '%s\n' |
+		awk '{ total += $1 } END { print total + 0 }') || return 1
+	payload_bytes=$(find "$root" -type f -printf '%s\n' |
+		awk '{ total += $1 } END { print total + 0 }') || return 1
+	printf '%s %s\n' "$wasm_bytes" "$payload_bytes"
+)
+
+# 发布体积预算：超过 baseline + 万分比告警阈值只打印 WARN，超过硬上限失败关闭。
+# baseline 必须来自刻意复核的 payload，不能随构建自动刷新，否则体积回归永远不会被发现。
+verify_web_size_budget() {
+	local surface=$1 stable_root=$2 budget_file=$3
+	local schema warn_basis_points sizes wasm_bytes payload_bytes measured_bytes
+	local metric baseline_key max_key baseline_bytes max_bytes warn_bytes failed=0
+	if [[ ! -f "$budget_file" || -L "$budget_file" ]]; then
+		printf 'Web 体积预算文件缺失或不是普通文件：%s\n' "$budget_file" >&2
+		return 1
+	fi
+	schema=$(read_build_info "$budget_file" schema)
+	warn_basis_points=$(read_build_info "$budget_file" warn_growth_basis_points)
+	if [[ "$schema" != auction-web-size-budget/1 || ! "$warn_basis_points" =~ ^(0|[1-9][0-9]{0,4})$ ]]; then
+		printf 'Web 体积预算文件 schema 或告警阈值无效：%s\n' "$budget_file" >&2
+		return 1
+	fi
+	sizes=$(web_payload_sizes "$surface" "$stable_root") || return 1
+	if [[ ! "$sizes" =~ ^([0-9]+)\ ([0-9]+)$ ]]; then
+		printf '无法测量 %s Web payload 体积：%s\n' "$surface" "$stable_root" >&2
+		return 1
+	fi
+	wasm_bytes=${BASH_REMATCH[1]}
+	payload_bytes=${BASH_REMATCH[2]}
+	for metric in wasm payload; do
+		baseline_key="${surface}_${metric}_baseline_bytes"
+		max_key="${surface}_${metric}_max_bytes"
+		baseline_bytes=$(read_build_info "$budget_file" "$baseline_key")
+		max_bytes=$(read_build_info "$budget_file" "$max_key")
+		if [[ ! "$baseline_bytes" =~ ^[1-9][0-9]*$ || ! "$max_bytes" =~ ^[1-9][0-9]*$ ]]; then
+			printf 'Web 体积预算缺少有效的 %s/%s：%s\n' \
+				"$baseline_key" "$max_key" "$budget_file" >&2
+			return 1
+		fi
+		if ((baseline_bytes > max_bytes)); then
+			printf 'Web 体积预算基线不得高于硬上限：%s\n' "$budget_file" >&2
+			return 1
+		fi
+		if [[ "$metric" == wasm ]]; then measured_bytes=$wasm_bytes; else measured_bytes=$payload_bytes; fi
+		warn_bytes=$((baseline_bytes + baseline_bytes * warn_basis_points / 10000))
+		if ((measured_bytes > max_bytes)); then
+			printf '%s %s 体积超出预算：%s > 上限 %s 字节（基线 %s）\n' \
+				"$surface" "$metric" "$measured_bytes" "$max_bytes" "$baseline_bytes" >&2
+			failed=1
+		elif ((measured_bytes > warn_bytes)); then
+			printf 'WARN %s %s 体积超过基线告警阈值：%s > %s 字节（基线 %s，容许 %s bp）\n' \
+				"$surface" "$metric" "$measured_bytes" "$warn_bytes" "$baseline_bytes" "$warn_basis_points" >&2
+		fi
+	done
+	return "$failed"
+}
+
 # Cargo 按调用目录、父目录与 CARGO_HOME 合并配置；应用与工具复用同一文件身份算法。
 # 只输出摘要，保留链接目标和缺失路径身份，不把用户配置原文写入回执。
 cargo_config_fingerprint() {

@@ -197,7 +197,23 @@ async fn process_batch(
             batch.claimed.saturating_add(u16::try_from(claimed.len()).unwrap_or(u16::MAX));
         for event in claimed {
             match process_claimed(store, &event, worker_id).await {
-                Ok(()) => batch.completed = batch.completed.saturating_add(1),
+                Ok(queued_delivery) => {
+                    batch.completed = batch.completed.saturating_add(1);
+                    // 通知在投递入队事务提交之后单独发送，不延长提交的 NOTIFY 锁；
+                    // 发送失败只降低及时性，Worker 的轮询扫描仍会领取已提交投递。
+                    if queued_delivery
+                        && let Err(error) =
+                            crate::database::delivery_scheduler::publish_after_commit(store.pool())
+                                .await
+                    {
+                        tracing::warn!(
+                            event_id = %event.event_id,
+                            lot_id = %event.lot_id,
+                            error = %error,
+                            "delivery wakeup after commit failed; polling remains active"
+                        );
+                    }
+                }
                 Err(error) => {
                     batch.retried = batch.retried.saturating_add(1);
                     release_claim(store, &event.event_id, worker_id, error).await;
@@ -297,11 +313,12 @@ fn storage_row_error(error: sqlx::Error) -> auction_application::ApplicationErro
 }
 
 /// 处理单条事件；处理事务与 `status = 'done'` 同一事务提交。
+/// 返回提交事务是否入队了新的 `lot_watch` 投递；调用方在提交后发送唤醒。
 async fn process_claimed(
     store: &PostgresStore,
     event: &ClaimedEvent,
     worker_id: &str,
-) -> Result<(), &'static str> {
+) -> Result<bool, &'static str> {
     let mut transaction =
         store.pool().begin_with("BEGIN ISOLATION LEVEL READ COMMITTED").await.map_err(|error| {
             let _ = error;
@@ -321,7 +338,7 @@ async fn process_claimed(
     })?;
     if !owned {
         let _ = transaction.rollback().await;
-        return Ok(());
+        return Ok(false);
     }
     // 即使租约被并发回收，同一 lot 的处理仍按 advisory 锁串行，保证领先周期顺序。
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
@@ -335,7 +352,7 @@ async fn process_claimed(
 
     let notifications = store.notification_metrics();
     let public_base_url = store.public_base_url.clone();
-    match event.event_kind.as_str() {
+    let queued_delivery = match event.event_kind.as_str() {
         "bid_accepted" => {
             let bid_id = event.bid_id.ok_or("missing_bid_identity")?;
             let bid = load_bid(&mut transaction, bid_id, event.lot_id).await?;
@@ -357,7 +374,7 @@ async fn process_claimed(
                 public_base_url.as_deref(),
             )
             .await
-            .map_err(error_class)?;
+            .map_err(error_class)?
         }
         "proxy_created" => {
             super::facts::auto_watch(
@@ -368,9 +385,10 @@ async fn process_claimed(
             )
             .await
             .map_err(error_class)?;
+            false
         }
         _ => return Err("unknown_event_kind"),
-    }
+    };
 
     let updated = sqlx::query(
         "UPDATE public.lot_watch_events
@@ -393,7 +411,8 @@ async fn process_claimed(
     transaction.commit().await.map_err(|error| {
         let _ = error;
         "commit_failed"
-    })
+    })?;
+    Ok(queued_delivery)
 }
 
 async fn load_bid(

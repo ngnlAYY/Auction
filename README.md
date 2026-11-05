@@ -48,6 +48,7 @@ HentaiVerse 装备拍卖服务的全 Rust 实现：玩家在网站或 E-Hentai �
 ```bash
 just verify            # 默认验证：策略门禁、fmt、check、feature、clippy、wasm（不运行测试）
 just web-build         # 构建两端页面 payload（需要受控 dx，见 ci/tools/README.md）
+just web-size          # 只核对两端 Web payload 体积预算（不构建，见 ci/README.md）
 just run-public        # postgres + web-embed；run-admin 同理，run-worker 只启用 postgres
 just db-migrate <配置目录>
 just build-release     # 完整发布制品（Fat LTO，较慢）

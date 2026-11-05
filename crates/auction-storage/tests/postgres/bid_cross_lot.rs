@@ -22,7 +22,8 @@ use std::{
 };
 
 use auction_application::{
-    ApplicationError, CompetitionCommandPort, LotWatchReminderStore, PlaceBidCommand,
+    ApplicationError, CompetitionCommandPort, DeliveryClaimExclusions, DeliveryWorkStore,
+    LotWatchReminderStore, PlaceBidCommand,
 };
 use auction_domain::{BidAmount, CommandId, LotId, UserId};
 use auction_storage::{BidQueueMode, DatabaseCompetitionCommands, DatabaseStore};
@@ -1271,4 +1272,174 @@ async fn postgres_bid_queue_drill_reports_latency_and_pool_usage() {
         }
         pool.close().await;
     }
+}
+
+/// W12.8：事务内唤醒触发器已删除；投递入队事务提交后由处理进程单独发送唤醒，
+/// 通知到达时投递必须已经提交且可领取。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_delivery_wakeup_is_published_after_commit() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let seeded = seed_round(&store, "wakeup-after-commit", 1).await;
+    let pool = store.postgres_pool();
+
+    let triggers: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_trigger
+         WHERE tgname = 'delivery_ready_after_insert' AND NOT tgisinternal",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("读取投递触发器");
+    assert_eq!(triggers, 0, "事务内唤醒触发器必须已删除");
+    let functions: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pg_proc WHERE proname = 'notify_delivery_ready'")
+            .fetch_one(pool)
+            .await
+            .expect("读取旧唤醒函数");
+    assert_eq!(functions, 0, "事务内唤醒函数必须已删除");
+
+    let mut wakeup = store.subscribe_wakeups().await.expect("订阅投递唤醒");
+    let commands = DatabaseCompetitionCommands::new(Arc::new(store.clone()));
+    let command = place_bid_command("wakeup-after-commit", 0, seeded.lots[0], seeded.bidders[0]);
+    commands.place_bid(command).await.expect("出价必须被接受");
+
+    tokio::time::timeout(StdDuration::from_secs(10), wakeup.wait())
+        .await
+        .expect("提交后必须发送唤醒")
+        .expect("唤醒订阅不得断开");
+
+    // 通知本身不代替领取；到达后投递必须可被 claim 查询选中。
+    let now = Utc::now();
+    let claims = store
+        .claim_due(
+            "wakeup-after-commit".to_owned(),
+            now,
+            now + Duration::minutes(2),
+            StdDuration::from_secs(60),
+            DeliveryClaimExclusions::default(),
+            1,
+        )
+        .await
+        .expect("领取被超提醒投递");
+    assert_eq!(claims.len(), 1, "唤醒到达后必须能领取已提交投递");
+
+    // LISTEN 连接由订阅句柄独占；先释放，否则 close 会一直等待该连接归还。
+    drop(wakeup);
+    store.postgres_pool().close().await;
+}
+
+/// W12.8 崩溃窗口：投递事务提交后、通知发出前进程崩溃不会丢失投递；
+/// 轮询扫描直接按持久状态领取，通知不是正确性的前提。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_delivery_wakeup_crash_before_notify_falls_back_to_scan() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let pool = store.postgres_pool();
+    let seed = "wakeup-crash-window";
+
+    // 模拟“提交成功但没有发送通知”：直接写入已提交的 pending 投递，全程不调用唤醒。
+    // 用 `manual` 来源隔离 lot/watch 资格退役逻辑，只验证 claim 不依赖通知。
+    let delivery_id = stable_id(seed, "delivery");
+    let payload = json!({
+        "schema_version": 1,
+        "operation": "send",
+        "world": "main",
+        "external_mail_id": "wakeup-crash",
+        "template": "outbid",
+        "result_code": null,
+        "user_key_user_id": null,
+        "credits": null,
+        "cod": null,
+        "attachment_ids": [],
+        "body": "outbid notice",
+    });
+    sqlx::query(
+        "INSERT INTO public.deliveries
+            (id, command_id, request_digest, origin_kind, origin_id, recipient, payload, status)
+         VALUES ($1, $2, $3, 'manual', $4, $5, $6, 'pending')",
+    )
+    .bind(delivery_id)
+    .bind(stable_id(seed, "command"))
+    .bind([7_u8; 32].as_slice())
+    .bind(seed)
+    .bind("wakeup-recipient")
+    .bind(&payload)
+    .execute(pool)
+    .await
+    .expect("写入已提交投递");
+
+    let now = Utc::now();
+    let claims = store
+        .claim_due(
+            "wakeup-scan".to_owned(),
+            now,
+            now + Duration::minutes(2),
+            StdDuration::from_secs(60),
+            DeliveryClaimExclusions::default(),
+            1,
+        )
+        .await
+        .expect("轮询领取");
+    assert_eq!(claims.len(), 1, "未发送通知时轮询仍必须领取已提交投递");
+    assert_eq!(claims[0].delivery_id, delivery_id);
+
+    store.postgres_pool().close().await;
+}
+
+/// W12.8：通知只是提示；同一批唤醒下并发领取不会重复处理同一条投递。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_delivery_wakeup_does_not_duplicate_claims() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let pool = store.postgres_pool();
+    let seed = "wakeup-duplicate";
+
+    let delivery_id = stable_id(seed, "delivery");
+    let payload = json!({
+        "schema_version": 1,
+        "operation": "send",
+        "world": "main",
+        "external_mail_id": "wakeup-duplicate",
+        "template": "outbid",
+        "result_code": null,
+        "user_key_user_id": null,
+        "credits": null,
+        "cod": null,
+        "attachment_ids": [],
+        "body": "outbid notice",
+    });
+    sqlx::query(
+        "INSERT INTO public.deliveries
+            (id, command_id, request_digest, origin_kind, origin_id, recipient, payload, status)
+         VALUES ($1, $2, $3, 'manual', $4, $5, $6, 'pending')",
+    )
+    .bind(delivery_id)
+    .bind(stable_id(seed, "command"))
+    .bind([8_u8; 32].as_slice())
+    .bind(seed)
+    .bind("wakeup-recipient")
+    .bind(&payload)
+    .execute(pool)
+    .await
+    .expect("写入已提交投递");
+
+    let now = Utc::now();
+    let claim = |worker: &'static str| {
+        store.claim_due(
+            worker.to_owned(),
+            now,
+            now + Duration::minutes(2),
+            StdDuration::from_secs(60),
+            DeliveryClaimExclusions::default(),
+            1,
+        )
+    };
+    let (first, second) = tokio::join!(claim("wakeup-duplicate-a"), claim("wakeup-duplicate-b"));
+    let first = first.expect("并发领取 A");
+    let second = second.expect("并发领取 B");
+    let claimed =
+        first.iter().chain(second.iter()).filter(|c| c.delivery_id == delivery_id).count();
+    assert_eq!(claimed, 1, "同一唤醒下的并发领取必须恰好成功一次");
+
+    store.postgres_pool().close().await;
 }

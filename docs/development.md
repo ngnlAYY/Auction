@@ -27,6 +27,7 @@ just fmt             # 只检查格式
 just lint            # clippy -D warnings（all-features）
 just wasm-check      # wasm32 目标 Clippy 检查两个浏览器包（-D warnings）
 just web-build       # 构建 Public/Admin 页面 payload（需要受控 dx）
+just web-size        # 只核对两端 Web payload 体积预算（不构建）
 just run-public      # cargo run --locked -p auction-public-api --features postgres,web-embed
 just run-admin
 just run-worker
