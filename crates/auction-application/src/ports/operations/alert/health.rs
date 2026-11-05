@@ -119,6 +119,10 @@ pub trait OperationsAlertStore: Send + Sync {
 
     fn observe(&self, command: OperationsAlertObserveCommand) -> ApplicationFuture<'_, ()>;
 
+    /// 写入主机侧来源观察；只解析本次提交的来源，不关闭其它来源的活动告警。
+    fn observe_host(&self, command: OperationsAlertHostObserveCommand)
+    -> ApplicationFuture<'_, ()>;
+
     fn claim_due_batch(
         &self,
         request: OperationsAlertClaimRequest,

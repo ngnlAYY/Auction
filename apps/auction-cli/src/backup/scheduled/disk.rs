@@ -1,6 +1,6 @@
 //! 只读检查备份文件系统的非特权可用块；两个阈值必须同时满足，不以清理保留点绕过门禁。
 
-use std::{mem::MaybeUninit, os::fd::AsRawFd};
+use std::{fs::File, mem::MaybeUninit, os::fd::AsRawFd};
 
 use anyhow::Context;
 use auction_config::BackupConfig;
@@ -22,22 +22,42 @@ pub(super) struct DiskSnapshot {
     pub passed: bool,
 }
 
+/// 文件系统块统计；定时备份门禁与主机侧告警报告共用同一次 `fstatvfs` 读取。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct FilesystemUsage {
+    pub total_bytes: u64,
+    pub available_bytes: u64,
+}
+
+/// 读取目录描述符所在文件系统的总字节与非特权可用字节。
+pub(super) fn usage(directory: &File) -> anyhow::Result<FilesystemUsage> {
+    let mut statistics = MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY：fstatvfs 只写入正确尺寸的缓冲区；仅在返回成功后读取已初始化的值。
+    if unsafe { libc::fstatvfs(directory.as_raw_fd(), statistics.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error()).context("读取磁盘水位失败");
+    }
+    // SAFETY：上面的 fstatvfs 已成功填充整个结构体。
+    let statistics = unsafe { statistics.assume_init() };
+    Ok(FilesystemUsage {
+        total_bytes: statistics
+            .f_blocks
+            .checked_mul(statistics.f_frsize)
+            .context("文件系统大小溢出")?,
+        available_bytes: statistics
+            .f_bavail
+            .checked_mul(statistics.f_frsize)
+            .context("文件系统可用大小溢出")?,
+    })
+}
+
 pub(super) fn inspect(
     directory: &PrivateDirectory,
     config: &BackupConfig,
     reserved_bytes: u64,
 ) -> anyhow::Result<DiskSnapshot> {
-    let mut statistics = MaybeUninit::<libc::statvfs>::uninit();
-    // SAFETY：fstatvfs 只写入正确尺寸的缓冲区；仅在返回成功后读取已初始化的值。
-    if unsafe { libc::fstatvfs(directory.directory.as_raw_fd(), statistics.as_mut_ptr()) } != 0 {
-        return Err(std::io::Error::last_os_error()).context("读取磁盘水位失败");
-    }
-    // SAFETY：上面的 fstatvfs 已成功填充整个结构体。
-    let statistics = unsafe { statistics.assume_init() };
-    let total_bytes =
-        statistics.f_blocks.checked_mul(statistics.f_frsize).context("文件系统大小溢出")?;
-    let available_bytes =
-        statistics.f_bavail.checked_mul(statistics.f_frsize).context("文件系统可用大小溢出")?;
+    let usage = usage(&directory.directory)?;
+    let total_bytes = usage.total_bytes;
+    let available_bytes = usage.available_bytes;
     let remaining = available_bytes.saturating_sub(reserved_bytes);
     let passed = total_bytes != 0
         && available_bytes >= reserved_bytes

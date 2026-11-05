@@ -32,6 +32,9 @@ mod digest;
 mod evaluate;
 #[path = "alert/health.rs"]
 mod health;
+mod host {
+    include!("alert/host.rs");
+}
 #[path = "alert/model.rs"]
 mod model;
 #[path = "alert/signals.rs"]
@@ -48,13 +51,17 @@ pub use console::{
 pub use delivery::{
     OperationsAlertBatchClaim, OperationsAlertBatchItem, OperationsAlertClaimRequest,
     OperationsAlertDeliveryStatus, OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch,
-    OperationsAlertObserveCommand,
+    OperationsAlertHostObserveCommand, OperationsAlertObserveCommand,
 };
 pub use digest::{body_digest, canonical_summary, canonical_summary_prefix, request_hash};
 pub use evaluate::evaluate_snapshot;
 pub use health::{
     OperationsAlertHealth, OperationsAlertRuntimeStatus, OperationsAlertSourceReader,
     OperationsAlertStore,
+};
+pub use host::{
+    OperationsAlertHostBackupFacts, OperationsAlertHostBackupOutcome, OperationsAlertHostBackupRun,
+    OperationsAlertHostDisk, OperationsAlertHostWalFacts, evaluate_host_backup, evaluate_host_wal,
 };
 pub use model::{
     OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot,
@@ -67,6 +74,7 @@ pub use model::{
 pub use signals::{
     OPERATIONS_ALERT_ACCOUNT_BUSY_AGE, OPERATIONS_ALERT_DIGEST_INTERVAL,
     OPERATIONS_ALERT_LIFECYCLE_GRACE, OPERATIONS_ALERT_MAIL_POLL_STALL_AGE,
-    OPERATIONS_ALERT_QUEUE_LATENCY_AGE, OperationsAlertError, OperationsAlertKind,
-    OperationsAlertSeverity, OperationsAlertSignal, OperationsAlertSource,
+    OPERATIONS_ALERT_QUEUE_LATENCY_AGE, OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE,
+    OperationsAlertError, OperationsAlertKind, OperationsAlertSeverity, OperationsAlertSignal,
+    OperationsAlertSource,
 };

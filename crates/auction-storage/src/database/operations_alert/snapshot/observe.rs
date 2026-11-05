@@ -1,4 +1,4 @@
-//! Operations alert signal 观察事务。
+//! Operations alert signal 观察事务；Worker 完整闭集与主机侧 CLI 报告共用同一写入语义。
 
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
@@ -11,9 +11,47 @@ pub(crate) async fn observe_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
     command: &OperationsAlertObserveCommand,
 ) -> Result<(), ApplicationError> {
-    let batch_window = chrono_duration(command.batch_window)?;
-    let next_notify_at = command
-        .now
+    observe_observations(
+        pool,
+        &command.observations,
+        command.now,
+        command.batch_window,
+        Watermark::Worker,
+    )
+    .await
+}
+
+pub(crate) async fn observe_host_postgres(
+    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    command: &auction_application::OperationsAlertHostObserveCommand,
+) -> Result<(), ApplicationError> {
+    observe_observations(
+        pool,
+        &command.observations,
+        command.now,
+        command.batch_window,
+        Watermark::Host,
+    )
+    .await
+}
+
+/// 扫描水位的更新归属：Worker 每轮前进 `last_observed_at`；主机侧报告只写信号，
+/// 不改写 Worker 的扫描水位，避免用 CLI 运行掩盖 Worker 已停止扫描。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Watermark {
+    Worker,
+    Host,
+}
+
+async fn observe_observations(
+    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    observations: &[auction_application::OperationsAlertSourceObservation],
+    now: chrono::DateTime<chrono::Utc>,
+    batch_window: std::time::Duration,
+    watermark: Watermark,
+) -> Result<(), ApplicationError> {
+    let batch_window = chrono_duration(batch_window)?;
+    let next_notify_at = now
         .checked_add_signed(batch_window)
         .ok_or_else(|| storage_error("operations alert 首次通知时间溢出"))?;
     let mut transaction = pool
@@ -21,7 +59,23 @@ pub(crate) async fn observe_postgres(
         .await
         .map_err(|error| storage_error_from(error, "开启 operations alert 观察事务失败"))?;
 
-    for observation in &command.observations {
+    if watermark == Watermark::Host {
+        // 主机侧报告没有 Worker 的扫描水位可用，必须在事务内确认告警功能仍然启用；
+        // 否则会向已经停用的告警表写入无人通知的活动信号。
+        let enabled: Option<bool> = sqlx::query_scalar(
+            "SELECT enabled
+             FROM public.operations_alert_runtime_state
+             WHERE singleton_id = 1",
+        )
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|error| storage_error_from(error, "读取 operations alert 运行状态失败"))?;
+        if enabled != Some(true) {
+            return rollback_operations_alert(transaction, "operations alert 运行状态未启用").await;
+        }
+    }
+
+    for observation in observations {
         let mut fingerprints = HashSet::with_capacity(observation.signals.len());
         for signal in &observation.signals {
             signal.validate().map_err(ApplicationError::from)?;
@@ -67,7 +121,7 @@ pub(crate) async fn observe_postgres(
             .bind(signal.kind.as_str())
             .bind(&signal.scope)
             .bind(signal.source.as_str())
-            .bind(command.now)
+            .bind(now)
             .bind(next_notify_at)
             .bind(signal.count)
             .bind(signal.age_seconds)
@@ -113,7 +167,7 @@ pub(crate) async fn observe_postgres(
                  WHERE fingerprint = ANY($1::bytea[]) AND active",
             )
             .bind(&resolved)
-            .bind(command.now)
+            .bind(now)
             .execute(&mut *transaction)
             .await
             .map_err(|error| {
@@ -122,17 +176,19 @@ pub(crate) async fn observe_postgres(
         }
     }
 
-    let runtime_update = sqlx::query(
-        "UPDATE public.operations_alert_runtime_state
-         SET last_observed_at = GREATEST(COALESCE(last_observed_at, $1), $1)
-         WHERE singleton_id = 1 AND enabled",
-    )
-    .bind(command.now)
-    .execute(&mut *transaction)
-    .await
-    .map_err(|error| storage_error_from(error, "更新 operations alert 扫描水位失败"))?;
-    if runtime_update.rows_affected() != 1 {
-        return rollback_operations_alert(transaction, "operations alert 运行状态未启用").await;
+    if watermark == Watermark::Worker {
+        let runtime_update = sqlx::query(
+            "UPDATE public.operations_alert_runtime_state
+             SET last_observed_at = GREATEST(COALESCE(last_observed_at, $1), $1)
+             WHERE singleton_id = 1 AND enabled",
+        )
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| storage_error_from(error, "更新 operations alert 扫描水位失败"))?;
+        if runtime_update.rows_affected() != 1 {
+            return rollback_operations_alert(transaction, "operations alert 运行状态未启用").await;
+        }
     }
 
     transaction
