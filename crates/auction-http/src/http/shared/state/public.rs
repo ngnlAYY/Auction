@@ -14,7 +14,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 
 use super::super::HttpBoundary;
 use super::super::realtime_hub::{RealtimeHub, RealtimeSubscriptionError};
-use super::super::security::PublicHttpSecurity;
+use super::super::security::{AnonymousReadGate, PublicHttpSecurity};
 
 const MAX_PUBLIC_DISCOVERY_CONNECTIONS: usize = 128;
 
@@ -288,6 +288,11 @@ impl PublicApiState {
 
     pub(crate) fn security(&self) -> &PublicHttpSecurity {
         &self.security
+    }
+
+    /// 供路由装配获取匿名读闸门句柄；不暴露其余安全策略。
+    pub fn anonymous_read_gate(&self) -> AnonymousReadGate {
+        self.security.anonymous_read_gate()
     }
 
     pub(crate) fn metrics(&self) -> Option<&ProcessMetrics> {

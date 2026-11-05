@@ -67,6 +67,13 @@ impl MailAuctionIntakePort for NoAuctions {
     ) -> ApplicationFuture<'_, MailAuctionIntakeResult> {
         Box::pin(async { Err(ApplicationError::CapabilityUnavailable("auction intake")) })
     }
+
+    fn load_submission_receipt(
+        &self,
+        _submission_id: Uuid,
+    ) -> ApplicationFuture<'_, Option<auction_application::SubmissionReceiptFacts>> {
+        Box::pin(async { Ok(None) })
+    }
 }
 
 #[derive(Default)]

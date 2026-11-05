@@ -363,6 +363,31 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
             });
     }
 
+    // W14.3：投稿回执在原场次开拍后、任何发送之前退役；与 watch 一样允许只有 created/completed。
+    if snapshot.reason_code.as_deref() == Some("auction_opened") {
+        return snapshot.origin_kind == "mail_intake"
+            && snapshot.status == "failed"
+            && snapshot.failure_code.as_deref() == Some("auction_notice_invalidated")
+            && snapshot.cod == Some(0)
+            && snapshot.lease_expires_at.is_none()
+            && snapshot.sending_at.is_none()
+            && snapshot.external_reference.is_none()
+            && !snapshot.take_required
+            && snapshot.returned_mail_id.is_none()
+            && snapshot.fencing_version > 0
+            && snapshot.claimed_at.is_none_or(|claimed| {
+                !is_zero_time(claimed)
+                    && claimed >= snapshot.created_at
+                    && snapshot.attempt_count > 0
+            })
+            && snapshot.completed_at.is_some_and(|completed| {
+                !is_zero_time(completed)
+                    && completed >= snapshot.created_at
+                    && snapshot.claimed_at.is_none_or(|claimed| completed >= claimed)
+                    && completed <= snapshot.updated_at
+            });
+    }
+
     // 告警在激活前确定终止没有 claimed/sending 事实，不能套用已发送投递的时间链。
     if snapshot.status == "failed"
         && snapshot.origin_kind == "operations_alert"

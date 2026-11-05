@@ -28,7 +28,9 @@ mod lists;
 mod sent_boundary;
 mod sent_scope;
 
-pub(crate) use lists::{MoogleMailSentList, MoogleMailSentPrefix};
+pub(crate) use lists::{
+    MoogleMailIncomingList, MoogleMailIncomingPrefix, MoogleMailSentList, MoogleMailSentPrefix,
+};
 pub(crate) use sent_boundary::{SentBoundary, SentBoundaryScan};
 pub(crate) use sent_scope::MoogleMailSentScope;
 

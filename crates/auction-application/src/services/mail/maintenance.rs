@@ -68,7 +68,8 @@ impl MailboxMaintenanceService {
     }
 
     /// Read Mail 独立预算观察；Worker 与 Sent/compose 维护及 Inbox intake 分别驱动。
-    /// 这里只返回历史数量；已绑定 MID 的恢复查询另由共享 reader 回落 Read Mail。
+    /// 返回值是本轮实际扫描到的行数：增量轮只含水位之后的新增，每日校验轮为完整数量；
+    /// 它只是观察计数，不是已读、收取或业务完成证明。
     pub async fn observe_read_mail(
         &self,
         world_id: &str,

@@ -65,6 +65,9 @@ pub(super) fn configure_security(config: &AppConfig) -> anyhow::Result<AdminHttp
         allowed_origins: &config.http_security.allowed_origins,
         login_limit: config.http_security.login_rate_limit,
         mutation_limit: config.http_security.mutation_rate_limit,
+        // Admin 路由不挂载匿名读闸门，这里仅满足共享构造签名。
+        anonymous_read_limit: config.http_security.anonymous_read_rate_limit,
+        anonymous_read_concurrency: config.http_security.anonymous_read_concurrency.unwrap_or(1),
         rate_limit_window: Duration::from_secs(config.http_security.rate_limit_window_seconds),
         request_timeout: Duration::from_secs(config.http_security.request_timeout_seconds),
         trusted_proxy_cidrs: &config.http_security.trusted_proxy_cidrs,

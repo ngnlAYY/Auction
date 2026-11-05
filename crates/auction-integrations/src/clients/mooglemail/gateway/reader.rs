@@ -6,20 +6,85 @@ use crate::diagnostics as safe_diagnostics;
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    sync::Arc,
+    sync::{Arc, Mutex as StdMutex},
 };
 
 use chrono::{DateTime, Utc};
 
+use self::parent::*;
+use super as parent;
+use super::super::client::{MoogleMailIncomingList, MoogleMailIncomingPrefix, MoogleMailReadRound};
 use super::super::protocol::valid_opaque_id;
-use super::*;
 use crate::clients::mooglemail::parser::subject_is_list_projection;
 use auction_application::{
     MailPollClaim, MailPollProgressObserver, MailPollProgressStage, MailPollReadJournal,
-    MailPollReadSummary, mail_recipient_is_list_projection,
+    MailPollReadSummary, MailScanAnchor, MailScanCheckpoint, MailScanEvent, MailScanObserver,
+    MailScanOutcome, MailScanReason, MailScanStream, MailScanWatermark,
+    advance_mail_scan_watermark, mail_recipient_is_list_projection, plan_mail_scan,
 };
 
 type ReadJournalContext<'a> = (&'a dyn MailPollReadJournal, &'a MailPollClaim);
+
+/// 与完整枚举共用的窗口选择：游标之前的行不进入窗口；超过上限时保留最旧窗口，
+/// 让未处理的旧邮件在下一轮优先提交，而不是被新邮件挤出游标。
+fn incoming_window_rows(
+    rows: &[MoogleMailSummary],
+    cursor: Option<&str>,
+    limit: usize,
+) -> VecDeque<MoogleMailSummary> {
+    let mut window = VecDeque::with_capacity(limit.min(rows.len()));
+    for summary in rows {
+        if cursor.is_some_and(|value| value == summary.external_mail_id) {
+            break;
+        }
+        if window.len() == limit {
+            window.pop_front();
+        }
+        window.push_back(summary.clone());
+    }
+    window
+}
+
+/// 恢复窗口使用的列表观测：命中已知最低待读 MID 的前缀，或完整枚举回退。
+enum RecoveryRows {
+    Prefix(MoogleMailIncomingPrefix),
+    Full(Arc<MoogleMailIncomingList>),
+}
+
+impl RecoveryRows {
+    fn summaries(&self) -> &[MoogleMailSummary] {
+        match self {
+            Self::Prefix(scan) => &scan.summaries,
+            Self::Full(list) => &list.summaries,
+        }
+    }
+}
+
+/// 目标已知的最小 MID 是自然下界：读到它即可停止，更新邮件仍在本前缀中。
+fn pending_anchor(window: &VecDeque<MoogleMailSummary>) -> Option<MailScanAnchor> {
+    window
+        .iter()
+        .filter_map(|summary| {
+            auction_application::numeric_mail_scan_id(&summary.external_mail_id)
+                .map(|value| (value, summary.external_mail_id.as_str()))
+        })
+        .min_by_key(|(value, _)| *value)
+        .and_then(|(_, mail_id)| MailScanAnchor::from_cursor(mail_id))
+}
+
+/// 比较完整枚举与前缀的“新增”MID 集合；游标之前的历史行不参与。
+fn new_mail_ids(rows: &[MoogleMailSummary], cursor: Option<&str>) -> HashSet<String> {
+    let anchor = cursor.and_then(auction_application::numeric_mail_scan_id);
+    rows.iter()
+        .filter(|summary| {
+            anchor.is_none_or(|anchor| {
+                auction_application::numeric_mail_scan_id(&summary.external_mail_id)
+                    .is_some_and(|value| value > anchor)
+            })
+        })
+        .map(|summary| summary.external_mail_id.clone())
+        .collect()
+}
 
 /// MoogleMail 收件箱读取 gateway。
 pub struct MoogleMailGateway {
@@ -29,6 +94,9 @@ pub struct MoogleMailGateway {
     pub(super) parser: MoogleMailParser,
     pub(super) profile_reader: Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
     progress_observer: Option<Arc<dyn MailPollProgressObserver>>,
+    /// 进程内每日校验检查点；重启只会多做一次完整扫描，永远不会跳过未提交游标之后的行。
+    scan_checkpoints: StdMutex<HashMap<(MoogleMailWorld, MailScanStream), MailScanCheckpoint>>,
+    scan_observer: Arc<dyn MailScanObserver>,
 }
 
 impl MoogleMailGateway {
@@ -61,13 +129,317 @@ impl MoogleMailGateway {
             parser: MoogleMailParser,
             profile_reader: None,
             progress_observer: None,
+            scan_checkpoints: StdMutex::new(HashMap::new()),
+            scan_observer: auction_application::noop_mail_scan_observer(),
         })
+    }
+
+    /// 注入增量扫描的闭集观测；观察失败不改变读取或证明结果。
+    pub fn with_scan_observer(mut self, observer: Arc<dyn MailScanObserver>) -> Self {
+        self.scan_observer = observer;
+        self
     }
 
     /// 注入进程内观测；仅持有 claim 的轮询路径报告真实读取目标，不参与协议或授权决定。
     pub fn with_progress_observer(mut self, observer: Arc<dyn MailPollProgressObserver>) -> Self {
         self.progress_observer = Some(observer);
         self
+    }
+
+    fn scan_plan(
+        &self,
+        world: MoogleMailWorld,
+        stream: MailScanStream,
+    ) -> auction_application::MailScanPlan {
+        let checkpoint = self
+            .scan_checkpoints
+            .lock()
+            .ok()
+            .and_then(|checkpoints| checkpoints.get(&(world, stream)).cloned());
+        plan_mail_scan(
+            checkpoint.as_ref(),
+            Utc::now(),
+            auction_application::MAIL_SCAN_DAILY_FULL_INTERVAL,
+        )
+    }
+
+    /// 只推进进程内检查点；水位不是提交游标，轮询仍以 claim.cursor_value 为锚点。
+    fn record_scan_checkpoint(
+        &self,
+        world: MoogleMailWorld,
+        stream: MailScanStream,
+        newest: Option<MailScanWatermark>,
+        observed_at: DateTime<Utc>,
+        full: bool,
+    ) {
+        let Ok(mut checkpoints) = self.scan_checkpoints.lock() else {
+            tracing::warn!("MoogleMail 扫描检查点锁不可用；本轮结果照常返回");
+            return;
+        };
+        let key = (world, stream);
+        let previous = checkpoints.get(&key).cloned();
+        let watermark = newest
+            .map(|newest| {
+                advance_mail_scan_watermark(
+                    previous.as_ref().and_then(|c| c.watermark.as_ref()),
+                    &newest,
+                )
+            })
+            .or_else(|| previous.as_ref().and_then(|c| c.watermark.clone()));
+        let last_full_scan_at = if full {
+            Some(observed_at)
+        } else {
+            previous.and_then(|checkpoint| checkpoint.last_full_scan_at)
+        };
+        checkpoints.insert(key, MailScanCheckpoint { watermark, last_full_scan_at });
+    }
+
+    fn observe_scan(&self, world: MoogleMailWorld, event: MailScanEvent) {
+        self.scan_observer.observe(world.as_str(), event);
+    }
+
+    /// 目标已知的恢复读取：读到最低待读 MID 即停；锚点缺失时回退完整枚举并保持失败关闭。
+    async fn recovery_rows(
+        &self,
+        world: MoogleMailWorld,
+        cookie: &MoogleMailCookie,
+        round: &MoogleMailReadRound,
+        read_mail: bool,
+        anchor: Option<&MailScanAnchor>,
+    ) -> Result<RecoveryRows, MoogleMailError> {
+        let stream = if read_mail { MailScanStream::ReadMail } else { MailScanStream::Inbox };
+        if let Some(anchor) = anchor {
+            let scan = self
+                .client
+                .observe_incoming_prefix(
+                    cookie,
+                    round,
+                    self.config.maximum_pages,
+                    read_mail,
+                    anchor,
+                )
+                .await?;
+            if scan.anchor_found {
+                self.observe_scan(
+                    world,
+                    MailScanEvent::Prefix {
+                        stream,
+                        outcome: MailScanOutcome::Complete,
+                        reason: None,
+                    },
+                );
+                tracing::debug!(
+                    world = world.as_str(),
+                    stream = stream.label(),
+                    pages_scanned = scan.pages_scanned,
+                    "MoogleMail 恢复读取在最低待读 MID 处停止"
+                );
+                return Ok(RecoveryRows::Prefix(scan));
+            }
+            self.observe_scan(
+                world,
+                MailScanEvent::Prefix {
+                    stream,
+                    outcome: MailScanOutcome::Error,
+                    reason: scan.issue,
+                },
+            );
+        }
+        let list = self
+            .client
+            .observe_incoming_list(cookie, round, self.config.maximum_pages, read_mail)
+            .await?;
+        if !list.complete {
+            return Err(protocol_error(world));
+        }
+        self.observe_scan(
+            world,
+            MailScanEvent::Verification {
+                stream,
+                outcome: MailScanOutcome::Complete,
+                reason: MailScanReason::RequestedFull,
+            },
+        );
+        Ok(RecoveryRows::Full(list))
+    }
+
+    /// 优先从前缀构建窗口；每日校验、缺锚点或超限才完整枚举。
+    ///
+    /// 前缀只缩小观察范围：窗口内容仍需逐封详情解析、业务幂等与既有证明流程，
+    /// 水位缺失或分页位移时立即回退完整扫描。
+    async fn select_incoming_window(
+        &self,
+        world: MoogleMailWorld,
+        cookie: &MoogleMailCookie,
+        round: &MoogleMailReadRound,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<VecDeque<MoogleMailSummary>, MoogleMailError> {
+        let plan = self.scan_plan(world, MailScanStream::Inbox);
+        self.observe_scan(
+            world,
+            MailScanEvent::Plan {
+                stream: MailScanStream::Inbox,
+                mode: plan.mode,
+                reason: plan.reason,
+            },
+        );
+        let anchor = cursor.and_then(MailScanAnchor::from_cursor);
+        let mut prefix = None;
+        if let Some(anchor) = anchor.as_ref() {
+            let scan = self
+                .client
+                .observe_incoming_prefix(cookie, round, self.config.maximum_pages, false, anchor)
+                .await?;
+            if scan.anchor_found {
+                self.observe_scan(
+                    world,
+                    MailScanEvent::Prefix {
+                        stream: MailScanStream::Inbox,
+                        outcome: MailScanOutcome::Complete,
+                        reason: None,
+                    },
+                );
+                tracing::debug!(
+                    world = world.as_str(),
+                    pages_scanned = scan.pages_scanned,
+                    "MoogleMail 收件前缀扫描在锚点处停止"
+                );
+                prefix = Some(scan);
+            } else {
+                let reason = scan.issue.unwrap_or(MailScanReason::ReadUnavailable);
+                self.observe_scan(
+                    world,
+                    MailScanEvent::Prefix {
+                        stream: MailScanStream::Inbox,
+                        outcome: MailScanOutcome::Error,
+                        reason: Some(reason),
+                    },
+                );
+            }
+        }
+        // `NoWatermark`（例如空列表或上次超限）仍可用持久游标做前缀；
+        // 只有首次、检查点损坏、从未校验或每日到期才需要完整枚举。
+        let verification_due = matches!(
+            plan.reason,
+            MailScanReason::NoCheckpoint
+                | MailScanReason::InvalidCheckpoint
+                | MailScanReason::NoFullVerification
+                | MailScanReason::DailyVerification
+                | MailScanReason::RequestedFull
+        );
+        if !verification_due && let Some(prefix) = prefix {
+            self.record_scan_checkpoint(
+                world,
+                MailScanStream::Inbox,
+                prefix.newest.clone(),
+                round.observed_at(),
+                false,
+            );
+            return Ok(incoming_window_rows(&prefix.summaries, cursor, limit));
+        }
+        let full = match self
+            .client
+            .observe_incoming_list(cookie, round, self.config.maximum_pages, false)
+            .await
+        {
+            Ok(full) => full,
+            Err(error) => {
+                if let Some(prefix) = prefix {
+                    // 每日校验读取失败只告警；前缀已经证明比游标更新的窗口完整。
+                    self.record_scan_checkpoint(
+                        world,
+                        MailScanStream::Inbox,
+                        None,
+                        round.observed_at(),
+                        true,
+                    );
+                    self.observe_scan(
+                        world,
+                        MailScanEvent::Verification {
+                            stream: MailScanStream::Inbox,
+                            outcome: MailScanOutcome::Error,
+                            reason: plan.reason,
+                        },
+                    );
+                    tracing::warn!(
+                        world = world.as_str(),
+                        "MoogleMail 完整校验读取失败；沿用已确认的前缀窗口"
+                    );
+                    return Ok(incoming_window_rows(&prefix.summaries, cursor, limit));
+                }
+                return Err(error);
+            }
+        };
+        let outcome =
+            if full.complete { MailScanOutcome::Complete } else { MailScanOutcome::PageLimit };
+        // 计划外的完整枚举（前缀缺失回退）以 requested_full 记录，不冒充每日校验。
+        let verification_reason =
+            if verification_due { plan.reason } else { MailScanReason::RequestedFull };
+        self.observe_scan(
+            world,
+            MailScanEvent::Verification {
+                stream: MailScanStream::Inbox,
+                outcome,
+                reason: if full.complete { verification_reason } else { MailScanReason::PageLimit },
+            },
+        );
+        let watermark = if full.complete {
+            full.summaries.first().map(|summary| MailScanWatermark {
+                mail_id: summary.external_mail_id.clone(),
+                observed_at: summary.received_at,
+            })
+        } else {
+            // 未到末页的枚举不能推进“已完整扫描”的水位；只更新校验时间。
+            None
+        };
+        // 超限也算一次校验尝试；避免每个轮询轮都重扫同一超长列表。
+        self.record_scan_checkpoint(
+            world,
+            MailScanStream::Inbox,
+            watermark,
+            round.observed_at(),
+            true,
+        );
+        if !full.complete {
+            // 超过页数上限只告警；若前缀已确认窗口完整则继续轮询，否则维持原失败关闭。
+            if let Some(prefix) = &prefix {
+                return Ok(incoming_window_rows(&prefix.summaries, cursor, limit));
+            }
+            return Err(protocol_error(world));
+        }
+        if let Some(prefix) = &prefix {
+            self.compare_incoming_shadow(world, &full.summaries, &prefix.summaries, cursor);
+        }
+        Ok(incoming_window_rows(&full.summaries, cursor, limit))
+    }
+
+    fn compare_incoming_shadow(
+        &self,
+        world: MoogleMailWorld,
+        legacy: &[MoogleMailSummary],
+        candidate: &[MoogleMailSummary],
+        cursor: Option<&str>,
+    ) {
+        let legacy = new_mail_ids(legacy, cursor);
+        let candidate = new_mail_ids(candidate, cursor);
+        let shadow = auction_application::compare_mail_scan_mids(&legacy, &candidate);
+        self.observe_scan(
+            world,
+            MailScanEvent::Shadow {
+                stream: MailScanStream::Inbox,
+                outcome: MailScanOutcome::Complete,
+                mid_sets_equal: shadow.is_match(),
+            },
+        );
+        if !shadow.is_match() {
+            tracing::warn!(
+                world = world.as_str(),
+                legacy_only = shadow.legacy_only,
+                candidate_only = shadow.candidate_only,
+                "MoogleMail 增量窗口与完整枚举的新增 MID 集合不一致"
+            );
+        }
     }
 
     /// 读取一个 world 的未完成邮件窗口；cursor 是最后一封已完成邮件的 external_mail_id。
@@ -658,19 +1030,14 @@ impl MoogleMailGateway {
             }
         }
         let recovering = !window.is_empty();
-        // 必须先扫完列表，再允许任何详情 GET 改变 Inbox/Read Mail 成员关系。
-        let inbox = self
-            .client
-            .observe_incoming_list(cookie, &round, self.config.maximum_pages, false)
-            .await?;
-        if !inbox.complete {
-            return Err(protocol_error(world));
-        }
         if recovering {
+            // 恢复窗口的待读 MID 已知：最低 MID 就是自然下界，读到它即可停止翻页。
+            let anchor = pending_anchor(&window);
             // 索引只借用本批 pending，按列表线性定位，避免每个 MID 重扫整个邮箱。
             let mut pending: HashMap<_, _> =
                 window.iter().map(|summary| (summary.external_mail_id.as_str(), summary)).collect();
-            for summary in &inbox.summaries {
+            let inbox = self.recovery_rows(world, cookie, &round, false, anchor.as_ref()).await?;
+            for summary in inbox.summaries() {
                 if let Some(expected) = pending.remove(summary.external_mail_id.as_str())
                     && (summary.world != expected.world
                         || summary.received_at != expected.received_at)
@@ -679,14 +1046,8 @@ impl MoogleMailGateway {
                 }
             }
             if !pending.is_empty() {
-                let read = self
-                    .client
-                    .observe_incoming_list(cookie, &round, self.config.maximum_pages, true)
-                    .await?;
-                if !read.complete {
-                    return Err(protocol_error(world));
-                }
-                for summary in &read.summaries {
+                let read = self.recovery_rows(world, cookie, &round, true, anchor.as_ref()).await?;
+                for summary in read.summaries() {
                     if let Some(expected) = pending.remove(summary.external_mail_id.as_str())
                         && (summary.world != expected.world
                             || summary.received_at != expected.received_at)
@@ -697,17 +1058,8 @@ impl MoogleMailGateway {
             }
             // 历史列表只定位既有账本 MID；两表都缺失仍按原 MID 读取，不删除或新增 pending。
         } else {
-            for summary in &inbox.summaries {
-                if cursor.is_some_and(|value| value == summary.external_mail_id) {
-                    break;
-                }
-                // 列表显示名不代表完整身份；先有界保留最旧窗口，白名单只能在详情解析后判断。
-                // 窗口满时丢弃队首，避免 backlog 超过 limit 时跳过尚未处理的旧邮件。
-                if window.len() == limit {
-                    window.pop_front();
-                }
-                window.push_back(summary.clone());
-            }
+            // 列表显示名不代表完整身份；窗口只是候选，白名单与内容证明在详情解析后判断。
+            window = self.select_incoming_window(world, cookie, &round, cursor, limit).await?;
         }
         let had_candidates = !window.is_empty();
         if had_candidates
@@ -844,4 +1196,102 @@ fn fetch_budget_exhausted(world: MoogleMailWorld) -> MoogleMailError {
         MoogleMailErrorCategory::RemoteTemporary,
         true,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+    use chrono::TimeZone;
+
+    fn summary(id: &str, minute: u32) -> MoogleMailSummary {
+        MoogleMailSummary {
+            external_mail_id: id.to_owned(),
+            world: MoogleMailWorld::Main,
+            sender: "sender".to_owned(),
+            subject: format!("subject-{id}"),
+            received_at: Utc.with_ymd_and_hms(2026, 11, 4, 12, minute, 0).unwrap(),
+        }
+    }
+
+    fn rows() -> Vec<MoogleMailSummary> {
+        vec![
+            summary("105", 9),
+            summary("104", 8),
+            summary("103", 7),
+            summary("100", 6),
+            summary("99", 5),
+        ]
+    }
+
+    #[test]
+    fn window_stops_at_known_cursor_without_reading_older_rows() {
+        let window = incoming_window_rows(&rows(), Some("103"), 10);
+        assert_eq!(
+            window.iter().map(|summary| summary.external_mail_id.as_str()).collect::<Vec<_>>(),
+            vec!["105", "104"],
+            "游标之前的行不进入窗口"
+        );
+    }
+
+    #[test]
+    fn window_limits_keep_oldest_backlog_for_next_round() {
+        let window = incoming_window_rows(&rows(), Some("99"), 2);
+        assert_eq!(
+            window.iter().map(|summary| summary.external_mail_id.as_str()).collect::<Vec<_>>(),
+            vec!["103", "100"],
+            "超过上限时保留最旧窗口；未进入窗口的新邮件仍大于游标，下一轮重新可见"
+        );
+    }
+
+    #[test]
+    fn new_mail_ids_exclude_cursor_and_older_rows() {
+        let ids = new_mail_ids(&rows(), Some("100"));
+        assert_eq!(ids, HashSet::from(["105".to_owned(), "104".to_owned(), "103".to_owned()]));
+        let all = new_mail_ids(&rows(), None);
+        assert_eq!(all.len(), 5);
+    }
+
+    #[test]
+    fn prefix_scan_early_stops_on_cursor() {
+        let mut scan =
+            auction_application::MailPrefixScan::new(MailScanAnchor::from_cursor("103").unwrap());
+        let mut seen = Vec::new();
+        for summary in rows() {
+            match scan.observe(&summary.external_mail_id, summary.received_at) {
+                Ok(auction_application::MailPrefixPage::Continue) => seen.push(summary),
+                Ok(auction_application::MailPrefixPage::Done) => {
+                    assert!(scan.anchor_found());
+                    break;
+                }
+                Err(reason) => panic!("前缀不应失败：{reason:?}"),
+            }
+        }
+        assert_eq!(seen.len(), 2, "只读取锚点之前的 105 与 104");
+        assert_eq!(seen[0].external_mail_id, "105");
+    }
+
+    #[test]
+    fn pending_anchor_uses_lowest_known_target() {
+        let window = VecDeque::from(vec![summary("105", 9), summary("100", 6), summary("103", 7)]);
+        assert_eq!(pending_anchor(&window).unwrap().mail_id, "100");
+        assert_eq!(pending_anchor(&VecDeque::new()), None);
+        let invalid = VecDeque::from(vec![summary("not-a-mid", 1)]);
+        assert_eq!(pending_anchor(&invalid), None, "无效 MID 不能成为锚点");
+    }
+
+    #[test]
+    fn prefix_scan_falls_back_when_cursor_disappears() {
+        let mut scan =
+            auction_application::MailPrefixScan::new(MailScanAnchor::from_cursor("101").unwrap());
+        assert_eq!(
+            scan.observe("105", Utc.with_ymd_and_hms(2026, 11, 4, 12, 9, 0).unwrap()),
+            Ok(auction_application::MailPrefixPage::Continue)
+        );
+        assert_eq!(
+            scan.observe("100", Utc.with_ymd_and_hms(2026, 11, 4, 12, 6, 0).unwrap()),
+            Err(auction_application::MailScanReason::AnchorMissing),
+            "跨过锚点却未见到锚点行时必须回退完整扫描"
+        );
+    }
 }

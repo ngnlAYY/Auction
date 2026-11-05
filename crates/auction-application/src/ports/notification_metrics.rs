@@ -20,6 +20,7 @@ pub enum NotificationKind {
     AuctionAssetsRejected,
     AuctionNoAttachments,
     AuctionEquipmentRejected,
+    AuctionSubmissionReceipt,
     UserAssetsRejected,
     ForumAuctionNotice,
     SettlementWinnerEquipmentCod,
@@ -35,7 +36,7 @@ pub enum NotificationKind {
 
 impl NotificationKind {
     /// 零初始化与闭集断言使用的稳定顺序；顺序与判别值一致。
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::RegisterKey,
         Self::RegisterResult,
         Self::RebindResult,
@@ -44,6 +45,7 @@ impl NotificationKind {
         Self::AuctionAssetsRejected,
         Self::AuctionNoAttachments,
         Self::AuctionEquipmentRejected,
+        Self::AuctionSubmissionReceipt,
         Self::UserAssetsRejected,
         Self::ForumAuctionNotice,
         Self::SettlementWinnerEquipmentCod,
@@ -68,6 +70,7 @@ impl NotificationKind {
             Self::AuctionAssetsRejected => "auction_assets_rejected",
             Self::AuctionNoAttachments => "auction_no_attachments",
             Self::AuctionEquipmentRejected => "auction_equipment_rejected",
+            Self::AuctionSubmissionReceipt => "auction_submission_receipt",
             Self::UserAssetsRejected => "user_assets_rejected",
             Self::ForumAuctionNotice => "forum_auction_notice",
             Self::SettlementWinnerEquipmentCod => "settlement_winner_equipment_cod",
@@ -112,6 +115,7 @@ impl NotificationKind {
             "auction_assets_rejected" => Self::AuctionAssetsRejected,
             "auction_no_attachments" => Self::AuctionNoAttachments,
             "auction_equipment_rejected" => Self::AuctionEquipmentRejected,
+            "auction_submission_receipt" => Self::AuctionSubmissionReceipt,
             "user_assets_rejected" => Self::UserAssetsRejected,
             "forum_auction_notice" => Self::ForumAuctionNotice,
             "settlement_winner_equipment_cod" => Self::SettlementWinnerEquipmentCod,

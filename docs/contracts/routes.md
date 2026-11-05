@@ -28,7 +28,7 @@
 | 409 | `command_conflict` 及各业务冲突码 | 同一 `command_id` 携带不同请求；版本不匹配；业务规则拒绝 |
 | 405 | `method_not_allowed`（带 `Allow`） | 路径存在但方法不受支持 |
 | 413 / 415 | `body_too_large` / `unsupported_media_type` | 请求体超过路由上限；写接口非 JSON 内容类型 |
-| 429 | `rate_limited`（带 `Retry-After`）、`realtime_busy`、`discovery_busy` | 速率或连接数超限 |
+| 429 | `rate_limited`（带 `Retry-After`）、`read_busy`（带 `Retry-After`）、`realtime_busy`、`discovery_busy` | 速率或连接数超限；匿名读的来源窗口或进程内并发已达上限 |
 | 501 | `feature_not_supported` | 部分可选端口未装配（如 Admin 缺少数据密钥）；无数据库的 Public 读取/会话常用 503 |
 | 503 | `storage_unavailable`、`temporarily_unavailable`、`realtime_unavailable` | 依赖或实时 Hub 暂不可用 |
 | 422 | `invalid_watch`、`invalid_watch_preference`、`invalid_session_preference` | 标记或账号偏好输入不满足约束 |
@@ -44,7 +44,7 @@
 
 ### 缓存头
 
-公开目录类读取（世界、规则、黑名单、补偿池汇总、拍卖列表、当前拍卖、竞价日志、价格历史）返回 `Cache-Control: no-cache`；含会话、装备 key 或命令结果的响应以及全部 Admin 接口返回 `no-store`。
+公开目录类读取（世界、规则、黑名单、补偿池汇总、拍卖列表、当前拍卖、竞价日志、价格历史）返回 `Cache-Control: no-cache`；含会话、装备 key 或命令结果的响应以及全部 Admin 接口返回 `no-store`。倒计时 SVG 是唯一允许短缓存的动态读取：成功响应为 `Cache-Control: public, max-age=5`，错误仍为 `no-store`；CDN 专用头继续禁止边缘保存，避免截止时间被长时间缓存。
 
 ## 健康与指标（Public、Admin）
 

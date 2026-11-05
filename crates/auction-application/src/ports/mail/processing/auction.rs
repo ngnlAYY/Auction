@@ -141,6 +141,50 @@ impl MailAuctionIntakeResult {
     }
 }
 
+/// 投稿接收回执的冻结 lot 行；代码与起拍价来自录入事务，不在发送时重建。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmissionReceiptLot {
+    pub lot_code: String,
+    pub item_name: String,
+    pub start_price: i64,
+}
+
+/// 整封投稿回执所需的冻结事实：按原邮件合并所有 lot，场次使用拍卖序号。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmissionReceiptFacts {
+    pub session: i64,
+    /// 录入时的拍卖状态；已离开 draft/preview 的场次不再补寄回执。
+    pub auction_status: String,
+    pub lots: Vec<SubmissionReceiptLot>,
+}
+
+impl SubmissionReceiptFacts {
+    /// 拒绝损坏事实：回执正文直接引用这些值，不能把空代码或负价格寄给玩家。
+    pub fn validate(&self) -> Result<(), MailProcessingError> {
+        let valid_lot_code = |code: &str| {
+            !code.is_empty()
+                && code.len() <= 32
+                && code.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        };
+        if self.session <= 0
+            || !matches!(
+                self.auction_status.as_str(),
+                "draft" | "preview" | "live" | "final" | "settling" | "settled" | "cancelled"
+            )
+            || self.lots.is_empty()
+            || self.lots.len() > 1000
+            || self.lots.iter().any(|lot| {
+                !valid_lot_code(&lot.lot_code)
+                    || lot.start_price <= 0
+                    || !auction_domain::valid_text(&lot.item_name, 512)
+            })
+        {
+            return Err(MailProcessingError::OwnerResultInvalid);
+        }
+        Ok(())
+    }
+}
+
 /// MoogleMail 拍卖入站事务能力。
 pub trait MailAuctionIntakeTransaction: Send {
     /// 恢复已提交投稿及其原附件；无命令返回 None，身份或账本不一致必须失败关闭。
@@ -148,6 +192,12 @@ pub trait MailAuctionIntakeTransaction: Send {
         &mut self,
         lookup: MailAuctionIntakeLookup,
     ) -> impl Future<Output = Result<Option<MailAuctionAcceptance>, CompetitionTransactionError>> + Send;
+
+    /// 读取已提交投稿的回执事实；只读，不重新生成录入命令。
+    fn load_submission_receipt(
+        &mut self,
+        submission_id: Uuid,
+    ) -> impl Future<Output = Result<Option<SubmissionReceiptFacts>, CompetitionTransactionError>> + Send;
 
     fn add_mail_auction_intake(
         &mut self,
@@ -171,6 +221,12 @@ pub trait MailAuctionIntakePort: Send + Sync {
         &self,
         command: MailAuctionIntakeCommand,
     ) -> ApplicationFuture<'_, MailAuctionIntakeResult>;
+
+    /// 已提交投稿的回执事实；只读且不重新计算价格，缺失表示投稿不存在。
+    fn load_submission_receipt(
+        &self,
+        submission_id: Uuid,
+    ) -> ApplicationFuture<'_, Option<SubmissionReceiptFacts>>;
 }
 
 /// MoogleMail 拍卖入站审计记录。

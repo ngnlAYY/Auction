@@ -18,6 +18,7 @@ pub(super) struct MailPollRuntimePorts {
     pub(super) schedule: Arc<dyn RecurringSchedule>,
     pub(super) maintenance_schedule: Arc<dyn RecurringSchedule>,
     pub(super) progress_observer: Arc<dyn auction_application::MailPollProgressObserver>,
+    pub(super) mail_scan: Arc<dyn auction_application::MailScanObserver>,
     pub(super) switches: auction_application::RuntimeSwitches,
     pub(super) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
 }
@@ -34,6 +35,7 @@ pub(super) async fn build_poll_runtimes(
     let schedule = ports.schedule;
     let maintenance_schedule = ports.maintenance_schedule;
     let progress_observer = ports.progress_observer;
+    let mail_scan = ports.mail_scan;
     let switches = ports.switches;
     let external_metrics = ports.external_metrics;
     let world_configs = mail_config.configured_worlds();
@@ -78,7 +80,9 @@ pub(super) async fn build_poll_runtimes(
             },
         )
         .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-        gateway = gateway.with_progress_observer(Arc::clone(&progress_observer));
+        gateway = gateway
+            .with_progress_observer(Arc::clone(&progress_observer))
+            .with_scan_observer(Arc::clone(&mail_scan));
         if let Some(reader) = &profile_reader {
             gateway = gateway.with_forum_profile_reader(reader.clone());
         }

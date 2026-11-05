@@ -15,11 +15,12 @@ const MAIL_FLOWS: &str = include_str!("../../../docs/guide/mail-flows.md");
 const START: &str = "<!-- notification-catalog:start -->";
 const END: &str = "<!-- notification-catalog:end -->";
 
-/// 目录中不需要可编辑模板的渠道：论坛回执正文与被超提醒由代码冻结，PM 走论坛私信。
-const NON_TEMPLATE_KINDS: [NotificationKind; 3] = [
+/// 目录中不需要可编辑模板的渠道：论坛回执正文、被超提醒与投稿接收回执由代码冻结，PM 走论坛私信。
+const NON_TEMPLATE_KINDS: [NotificationKind; 4] = [
     NotificationKind::ForumAuctionNotice,
     NotificationKind::LotWatchMail,
     NotificationKind::LotWatchPm,
+    NotificationKind::AuctionSubmissionReceipt,
 ];
 
 /// 提取目录表第一列的模板键 / 身份。

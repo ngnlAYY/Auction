@@ -51,6 +51,8 @@ pub enum MailNotificationTemplate {
     AuctionAssetsRejected,
     AuctionNoAttachments,
     AuctionEquipmentRejected,
+    /// W14.3 投稿接收回执：整封投稿按原邮件合并，正文在录入事务完成后冻结。
+    AuctionSubmissionReceipt,
     UserAssetsRejected,
     RegisterKey,
     RegisterResult,
@@ -65,10 +67,11 @@ pub enum MailNotificationTemplate {
 
 impl MailNotificationTemplate {
     /// 全部模板的稳定顺序；通知目录测试据此核对文档与模板注册一致。
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::AuctionAssetsRejected,
         Self::AuctionNoAttachments,
         Self::AuctionEquipmentRejected,
+        Self::AuctionSubmissionReceipt,
         Self::UserAssetsRejected,
         Self::RegisterKey,
         Self::RegisterResult,
@@ -87,6 +90,7 @@ impl MailNotificationTemplate {
             Self::AuctionAssetsRejected => "auction_assets_rejected",
             Self::AuctionNoAttachments => "auction_no_attachments",
             Self::AuctionEquipmentRejected => "auction_equipment_rejected",
+            Self::AuctionSubmissionReceipt => "auction_submission_receipt",
             Self::UserAssetsRejected => "user_assets_rejected",
             Self::RegisterKey => "register_key",
             Self::RegisterResult => "register_result",

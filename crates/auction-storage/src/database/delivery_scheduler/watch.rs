@@ -66,6 +66,51 @@ pub(super) async fn retire_renamed(
     record_retirement(transaction, rows, now, notifications, "recipient_renamed").await
 }
 
+/// W14.3：投稿接收回执在 sending 围栏前复核原场次；已开拍或撤场的场次不再补寄回执。
+/// 只退役尚未开始外部写入的 delivery，冻结载荷与投稿事实都不改写。
+pub(super) async fn retire_receipts(
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
+    now: DateTime<Utc>,
+    notifications: &dyn auction_application::NotificationRecorder,
+) -> Result<(), auction_application::RepositoryError> {
+    let rows = sqlx::query(
+        r#"WITH retired AS (
+            SELECT deliveries.id FROM public.deliveries AS deliveries
+            WHERE deliveries.status IN ('pending', 'claimed')
+              AND deliveries.sending_at IS NULL
+              AND deliveries.origin_kind = 'mail_intake'
+              AND deliveries.payload ->> 'operation' = 'send'
+              AND deliveries.payload ->> 'template' = 'auction_submission_receipt'
+              AND EXISTS (
+                  SELECT 1
+                  FROM public.auction_submissions AS submission
+                  INNER JOIN public.auctions AS auction ON auction.id = submission.auction_id
+                  WHERE submission.source_kind = 'mail'
+                    AND submission.external_mail_id = deliveries.payload ->> 'external_mail_id'
+                    AND auction.world_id = deliveries.payload ->> 'world'
+                    AND auction.status NOT IN ('draft', 'preview')
+              )
+            ORDER BY deliveries.created_at, deliveries.id
+            LIMIT 100 FOR UPDATE OF deliveries SKIP LOCKED
+        )
+        UPDATE public.deliveries AS delivery
+        SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
+            completed_at = GREATEST($1, delivery.created_at, delivery.claimed_at),
+            external_reference = NULL, failure_code = 'auction_notice_invalidated',
+            result_metadata = '{"outcome_unknown":false,"preflight_blocked":true,"reason_code":"auction_opened"}'::jsonb,
+            fencing_version = delivery.fencing_version + 1,
+            updated_at = GREATEST(CURRENT_TIMESTAMP, $1, delivery.created_at, delivery.claimed_at)
+        FROM retired WHERE delivery.id = retired.id
+        RETURNING delivery.id, delivery.command_id, delivery.fencing_version, delivery.attempt_count,
+                  delivery.payload, delivery.origin_kind"#,
+    )
+    .bind(now)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?;
+    record_retirement(transaction, rows, now, notifications, "auction_notice_invalidated").await
+}
+
 /// 退役行只追加一条确定未写入的失败审计，并按通知种类记一次 retired 指标。
 async fn record_retirement(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,

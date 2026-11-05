@@ -31,6 +31,7 @@ pub struct ProcessMetrics {
     readiness: Arc<dyn ReadinessRecorder>,
     migration_readiness: MigrationReadinessRecorder,
     sent_baseline: Arc<dyn auction_application::SentBaselineObserver>,
+    mail_scan: Arc<dyn auction_application::MailScanObserver>,
     external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
     shadow: Arc<dyn auction_application::ShadowRecorder>,
     http: HttpRecorder,
@@ -155,6 +156,11 @@ impl ProcessMetrics {
         } else {
             auction_application::noop_sent_baseline_observer()
         };
+        let mail_scan = if role == "worker" {
+            super::mail_scan::build(&registry)?
+        } else {
+            auction_application::noop_mail_scan_observer()
+        };
         let external_metrics = if role == "worker" {
             super::external_client::build(&registry)?
         } else {
@@ -173,6 +179,7 @@ impl ProcessMetrics {
             readiness,
             migration_readiness,
             sent_baseline,
+            mail_scan,
             external_metrics,
             shadow,
             shutdown,
@@ -192,6 +199,7 @@ impl ProcessMetrics {
             readiness: readiness::noop(),
             migration_readiness: MigrationReadinessRecorder::default(),
             sent_baseline: auction_application::noop_sent_baseline_observer(),
+            mail_scan: auction_application::noop_mail_scan_observer(),
             external_metrics: auction_application::noop_external_metrics_observer(),
             shadow: super::shadow_run::noop(),
             shutdown: super::shutdown::noop(),
@@ -253,6 +261,11 @@ impl ProcessMetrics {
     /// 返回 Worker 的发送基线局部影子记录器；其他角色及关闭指标时为 no-op。
     pub fn sent_baseline(&self) -> Arc<dyn auction_application::SentBaselineObserver> {
         Arc::clone(&self.sent_baseline)
+    }
+
+    /// 返回 Worker 的增量扫描记录器；其他角色及关闭指标时为 no-op。
+    pub fn mail_scan(&self) -> Arc<dyn auction_application::MailScanObserver> {
+        Arc::clone(&self.mail_scan)
     }
 
     /// 返回 W0.15 影子运行共享记录端口；关闭指标时为 no-op。

@@ -7,9 +7,13 @@ use crate::diagnostics as safe_diagnostics;
 use std::{collections::HashSet, sync::Arc};
 
 use auction_application::{
+    MailScanEvent, MailScanMode, MailScanOutcome, MailScanReason, MailScanStream,
     SentBaselineEvent, SentBaselineMode, SentBaselinePhase, SentBaselineReason,
 };
+use chrono::Utc;
 use tokio::time::Instant;
+
+use auction_application::MAIL_SCAN_DAILY_FULL_INTERVAL;
 
 use super::{MoogleMailSentBaseline, SentBaselineKind, error_reason, telemetry::ShadowSample};
 use crate::clients::mooglemail::{
@@ -17,6 +21,21 @@ use crate::clients::mooglemail::{
     client::{MoogleMailReadRound, SentBoundary},
     sender::proof::{check_deadline, scan_timeout, within_deadline},
 };
+
+/// 锚点消失、分页位移、顺序异常或超限只否定前缀起点；最新分钟组扫描仍可重新取得边界。
+/// 读取失败、预算耗尽、作用域变化与影子缓存差异不能靠重试掩盖。
+fn boundary_prefix_retryable(reason: SentBaselineReason) -> bool {
+    matches!(
+        reason,
+        SentBaselineReason::AnchorMissing
+            | SentBaselineReason::PageDiscontinuity
+            | SentBaselineReason::OrderViolation
+            | SentBaselineReason::AnchorChanged
+            | SentBaselineReason::InvalidMid
+            | SentBaselineReason::PageLimit
+            | SentBaselineReason::BoundaryUnavailable
+    )
+}
 
 impl MoogleMailSender {
     /// 原 session 跨越准备、持久 fence 与写后证明；不在 fence 后重建发送前历史。
@@ -54,26 +73,102 @@ impl MoogleMailSender {
                 self.prepare_shadow(cookie, world, &round, deadline).await?
             }
             SentBaselineMode::Watermark => {
-                match self.prepare_boundary(cookie, world, &round, deadline, None).await {
-                    Ok(boundary) => SentBaselineKind::Watermark(boundary),
-                    Err(reason) => {
-                        self.baseline_event(
-                            world,
-                            SentBaselineEvent::Fallback {
-                                phase: SentBaselinePhase::BeforeSend,
-                                reason,
-                            },
-                        );
-                        // 不变量 6、9：异常边界不能借缓存跳过完整历史，且回退不重置截止点。
-                        SentBaselineKind::Full(
-                            self.prepare_full(cookie, world, &round, deadline, false).await?,
-                        )
+                match self.daily_sent_verification(cookie, world, &round).await {
+                    Some(seen) => SentBaselineKind::Full(seen),
+                    None => {
+                        match self.prepare_boundary(cookie, world, &round, deadline, None).await {
+                            Ok(boundary) => SentBaselineKind::Watermark(boundary),
+                            Err(reason) => {
+                                self.baseline_event(
+                                    world,
+                                    SentBaselineEvent::Fallback {
+                                        phase: SentBaselinePhase::BeforeSend,
+                                        reason,
+                                    },
+                                );
+                                // 不变量 6、9：异常边界不能借缓存跳过完整历史，且回退不重置截止点。
+                                SentBaselineKind::Full(
+                                    self.prepare_full(cookie, world, &round, deadline, false)
+                                        .await?,
+                                )
+                            }
+                        }
                     }
                 }
             }
         };
         self.client.check_sent_scope(cookie, &scope)?;
         Ok(MoogleMailSentBaseline { world, scope, kind })
+    }
+
+    /// 每日完整校验只用于排除集与水位刷新；页数超限或读取失败只告警，绝不阻断发送。
+    async fn daily_sent_verification(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        round: &MoogleMailReadRound,
+    ) -> Option<HashSet<String>> {
+        let checkpoint = self.sent_scan_checkpoint(cookie, world)?;
+        let plan = auction_application::plan_mail_scan(
+            Some(&checkpoint),
+            Utc::now(),
+            MAIL_SCAN_DAILY_FULL_INTERVAL,
+        );
+        self.observe_scan(
+            world,
+            MailScanEvent::Plan {
+                stream: MailScanStream::Sent,
+                mode: plan.mode,
+                reason: plan.reason,
+            },
+        );
+        if plan.mode != MailScanMode::Full
+            || !matches!(
+                plan.reason,
+                MailScanReason::DailyVerification | MailScanReason::NoFullVerification
+            )
+        {
+            return None;
+        }
+        // 只使用三分之一预算，确保校验失败后水位前缀仍有读取与证明预算。
+        let verify_deadline = Instant::now().checked_add(self.verification_budget / 3)?;
+        match self.prepare_full(cookie, world, round, verify_deadline, false).await {
+            Ok(seen) => {
+                self.observe_scan(
+                    world,
+                    MailScanEvent::Verification {
+                        stream: MailScanStream::Sent,
+                        outcome: MailScanOutcome::Complete,
+                        reason: plan.reason,
+                    },
+                );
+                Some(seen)
+            }
+            Err(error) => {
+                let reason = error_reason(&error);
+                let outcome = match reason {
+                    SentBaselineReason::PageLimit => MailScanOutcome::PageLimit,
+                    SentBaselineReason::Canceled => MailScanOutcome::Canceled,
+                    _ => MailScanOutcome::Error,
+                };
+                self.observe_scan(
+                    world,
+                    MailScanEvent::Verification {
+                        stream: MailScanStream::Sent,
+                        outcome,
+                        reason: plan.reason,
+                    },
+                );
+                tracing::warn!(
+                    world = world.as_str(),
+                    outcome = outcome.label(),
+                    "MoogleMail 每日完整校验未完成；继续水位前缀，不阻断发送"
+                );
+                // 记录本次尝试，下一次每日校验在 24 小时后；水位保持不变。
+                self.remember_sent_scan(cookie, world, None, true);
+                None
+            }
+        }
     }
 
     async fn prepare_shadow(
@@ -130,6 +225,50 @@ impl MoogleMailSender {
         deadline: Instant,
         cached: Option<&HashSet<String>>,
     ) -> Result<SentBoundary, SentBaselineReason> {
+        // 上一轮完整扫描或边界捕获留下的水位只缩短前缀起点；边界仍按本轮最新行重算。
+        let preferred = self
+            .sent_scan_checkpoint(cookie, world)
+            .and_then(|checkpoint| checkpoint.watermark)
+            .and_then(|watermark| {
+                let numeric_mid = auction_application::numeric_mail_scan_id(&watermark.mail_id)?;
+                Some(SentBoundary::Mail {
+                    mail_id: watermark.mail_id,
+                    numeric_mid,
+                    sent_at: watermark.observed_at,
+                })
+            });
+        if let Some(preferred) = preferred.as_ref() {
+            match self.scan_boundary(cookie, world, round, deadline, Some(preferred), cached).await
+            {
+                Ok(boundary) => {
+                    self.remember_boundary(cookie, world, &boundary);
+                    return Ok(boundary);
+                }
+                Err(reason) if boundary_prefix_retryable(reason) => {
+                    tracing::debug!(
+                        world = world.as_str(),
+                        reason = reason.label(),
+                        "MoogleMail 发送前水位前缀回退最新分钟组"
+                    );
+                }
+                Err(reason) => return Err(reason),
+            }
+        }
+        let boundary = self.scan_boundary(cookie, world, round, deadline, None, cached).await?;
+        self.remember_boundary(cookie, world, &boundary);
+        Ok(boundary)
+    }
+
+    /// 单次边界扫描；`boundary` 存在时读到锚点分钟前即停，仍要求锚点行与顺序一致。
+    async fn scan_boundary(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        round: &MoogleMailReadRound,
+        deadline: Instant,
+        boundary: Option<&SentBoundary>,
+        cached: Option<&HashSet<String>>,
+    ) -> Result<SentBoundary, SentBaselineReason> {
         let scan = within_deadline(
             world,
             deadline,
@@ -137,7 +276,7 @@ impl MoogleMailSender {
                 cookie,
                 round,
                 self.verification_pages,
-                None,
+                boundary,
                 deadline,
             ),
         )
@@ -160,6 +299,27 @@ impl MoogleMailSender {
         }
         tracing::debug!(%world, pages_scanned = scan.pages_scanned, empty = matches!(boundary, SentBoundary::Empty), "MoogleMail 已取得发送前临时边界");
         Ok(boundary)
+    }
+
+    /// 只把已取得的边界作为下一轮前缀起点；空列表不伪造水位。
+    fn remember_boundary(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        boundary: &SentBoundary,
+    ) {
+        let SentBoundary::Mail { mail_id, sent_at, .. } = boundary else {
+            return;
+        };
+        self.remember_sent_scan(
+            cookie,
+            world,
+            Some(auction_application::MailScanWatermark {
+                mail_id: mail_id.clone(),
+                observed_at: *sent_at,
+            }),
+            false,
+        );
     }
 
     async fn prepare_full(
@@ -188,6 +348,16 @@ impl MoogleMailSender {
         check_deadline(deadline, world)?;
         // 完整枚举即具备排除集资格；fence 中止不会把它变成任务完成事实。
         self.remember_sent_baseline(cookie, world, seen.clone());
+        // 水位只服务后续前缀；完整枚举成功才更新每日校验时间。
+        self.remember_sent_scan(
+            cookie,
+            world,
+            list.summaries.first().map(|summary| auction_application::MailScanWatermark {
+                mail_id: summary.external_mail_id.clone(),
+                observed_at: summary.sent_at,
+            }),
+            true,
+        );
         Ok(seen)
     }
 }

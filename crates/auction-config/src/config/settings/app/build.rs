@@ -193,6 +193,21 @@ impl AppConfig {
             validate_http_security(&http_security)?;
         }
         database_pool.validate(database_profiles, role, http_security.request_timeout_seconds)?;
+        // 匿名读并发是进程内闸门：每次读最多占用该数量的服务池连接，出价等写请求不经过
+        // 该信号量，因此读突发不能把出价排到读队列之后。省略时取 Public 服务池扣除
+        // 1 个长期所有权预留后再折半，并至少留 1 个可用连接给写路径。
+        if role == Role::Public {
+            let available = database_pool.max_connections.saturating_sub(1);
+            let limit = http_security
+                .anonymous_read_concurrency
+                .unwrap_or_else(|| (available.saturating_sub(1) / 2).max(1));
+            if available > 1 && limit >= available {
+                return Err(ConfigError::InvalidHttpSecurity(
+                    "anonymous_read_concurrency 必须小于 Public 服务池扣除长期连接后的可用连接数",
+                ));
+            }
+            http_security.anonymous_read_concurrency = Some(limit);
+        }
         let public_uses_unix = role == Role::Public
             && listener.as_ref().is_some_and(|listener| listener.mode == HttpListenMode::Unix);
         if http_security.trusted_unix_proxy && !admin_uses_unix && !public_uses_unix {

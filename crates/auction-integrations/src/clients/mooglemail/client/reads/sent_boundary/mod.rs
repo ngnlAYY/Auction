@@ -126,25 +126,20 @@ impl SentBoundaryScan {
     }
 }
 
-/// 只接受无前导零的十进制身份；不截断、不归一化、不按字典序比较。
+/// 与增量扫描共用的十进制 MID 解析；不截断、不归一化、不按字典序比较。
 pub(crate) fn numeric_mid(value: &str) -> Option<u128> {
-    if value.is_empty()
-        || (value.len() > 1 && value.starts_with('0'))
-        || !value.bytes().all(|byte| byte.is_ascii_digit())
-    {
-        return None;
+    let parsed = auction_application::numeric_mail_scan_id(value);
+    if parsed.is_none() {
+        safe_diagnostics::debug(
+            "mooglemail_baseline",
+            "parse_mid",
+            safe_diagnostics::category(
+                auction_application::diagnostics::SafeErrorKind::DOMAIN_REJECTED,
+            ),
+            DiagnosticContext::default(),
+        );
     }
-    value
-        .parse::<u128>()
-        .inspect_err(|cause| {
-            safe_diagnostics::warn(
-                "mooglemail_baseline",
-                "parse_mid",
-                safe_diagnostics::project(cause),
-                DiagnosticContext::default(),
-            );
-        })
-        .ok()
+    parsed
 }
 
 #[derive(Default)]

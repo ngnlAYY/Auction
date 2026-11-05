@@ -166,4 +166,30 @@ where
     ) -> ApplicationFuture<'_, MailAuctionIntakeResult> {
         Box::pin(async move { MailAuctionIntakeService::ingest_mail(self, command).await })
     }
+
+    fn load_submission_receipt(
+        &self,
+        submission_id: Uuid,
+    ) -> ApplicationFuture<'_, Option<SubmissionReceiptFacts>> {
+        Box::pin(async move {
+            if submission_id.is_nil() {
+                return Err(MailProcessingError::InvalidAuctionCommand.into());
+            }
+            let facts = self
+                .repository
+                .run(TransactionPolicy::read_committed(), move |transaction| {
+                    Box::pin(async move {
+                        transaction
+                            .load_submission_receipt(submission_id)
+                            .await
+                            .map_err(ApplicationError::from)
+                    })
+                })
+                .await?;
+            if let Some(facts) = &facts {
+                facts.validate()?;
+            }
+            Ok(facts)
+        })
+    }
 }

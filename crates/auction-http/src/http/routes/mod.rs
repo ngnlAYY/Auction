@@ -51,6 +51,9 @@ mod forum;
 mod method_strict;
 #[path = "../metrics/mod.rs"]
 mod metrics;
+mod read_gate {
+    include!("../shared/read_gate.rs");
+}
 #[path = "../public/realtime/mod.rs"]
 mod realtime;
 #[path = "../admin/realtime/mod.rs"]
@@ -183,7 +186,8 @@ pub use realtime_hub::{
     RealtimeSubscriptionError,
 };
 pub use security::{
-    AdminHttpSecurity, HttpSecurityOptions, PublicHttpSecurity, apply_browser_security_headers,
+    AdminHttpSecurity, AnonymousReadGate, HttpSecurityOptions, PublicHttpSecurity,
+    apply_browser_security_headers,
 };
 pub use server::serve_http;
 pub use state::{AdminApiState, PublicApiState};

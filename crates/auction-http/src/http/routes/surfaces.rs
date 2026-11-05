@@ -7,7 +7,11 @@ use super::*;
 /// 健康检查路径沿用已冻结的旧契约；其余路径交给内嵌的公开端 SPA 产物处理。
 /// `version` 由装配根传入自身的 `CARGO_PKG_VERSION`：契约 crate 内展开该宏只会得到契约
 /// 自己的版本，而健康检查要报告的是运行进程的版本。
-pub fn public_router<A>(version: &'static str, boundary: HttpBoundary) -> Router<PublicApiState>
+pub fn public_router<A>(
+    version: &'static str,
+    boundary: HttpBoundary,
+    anonymous_read_gate: AnonymousReadGate,
+) -> Router<PublicApiState>
 where
     A: rust_embed::RustEmbed + Send + Sync + 'static,
 {
@@ -20,6 +24,7 @@ where
             .route("/health/live", get(health::health_live))
             .route("/health/ready", get(health::public_health_ready))
             .route("/metrics", axum::routing::any(metrics::public)),
+        anonymous_read_gate,
     )
     .fallback(web_assets::serve_public_asset::<A>)
     .layer(middleware::from_fn_with_state(boundary, boundary::enforce))
@@ -48,7 +53,10 @@ where
 /// 注册已冻结的 Public 路径。
 /// 路由只负责绑定各自的 HTTP owner；未装配的窄端口仍由 handler 明确返回能力不可用，
 /// 不用伪造的成功 payload 掩盖部署缺口。
-fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiState> {
+fn public_feature_routes(
+    router: Router<PublicApiState>,
+    anonymous_read_gate: AnonymousReadGate,
+) -> Router<PublicApiState> {
     use method_strict::{MethodRouterExt as _, get, post, put};
 
     let no_cache_routes = Router::<PublicApiState>::new()
@@ -61,18 +69,40 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         .route("/api/v1/auctions/current", get(current_auction))
         .route("/api/v1/auctions/{auction_id}/bid-log", get(list_bid_log))
         .route("/api/v1/price-history", get(list_price_history))
-        .route_layer(middleware::from_fn(response_cache::no_cache));
-    let no_store_routes = Router::<PublicApiState>::new()
-        .route("/api/v1/browser-errors", post(browser_errors::public))
+        .route_layer(middleware::from_fn(response_cache::no_cache))
+        // 匿名读闸门独立于登录/mutation 限流；写路由不挂载该层。
+        .route_layer(middleware::from_fn_with_state(
+            anonymous_read_gate.clone(),
+            read_gate::enforce,
+        ));
+    // 匿名读但含完整装备 key 的投影：保持 no-store，并只由读闸门约束并发与来源额度。
+    let anonymous_read_routes = Router::<PublicApiState>::new()
         .route("/api/v1/registration-info", get(registration::get))
         .route("/api/v1/forum/sync-status", get(forum::sync_status))
         .route("/api/v1/auctions/{auction_id}/forum", get(forum::get))
-        // 动态图片显式提供 HEAD；其余 JSON GET 不隐式扩展方法闭集。
+        .route("/api/v1/events", get(realtime::list))
+        .route("/api/v1/compensation-pool/{auction_id}/movements", get(compensation::movements))
+        .route("/api/v1/compensation-pool/{auction_id}/lots", get(compensation::lots))
+        .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
+        .route("/api/v1/lots/{lot_id}", get(lot_detail))
+        .route_layer(middleware::from_fn(response_cache::no_store))
+        .route_layer(middleware::from_fn_with_state(
+            anonymous_read_gate.clone(),
+            read_gate::enforce,
+        ));
+    // 动态图片显式提供 HEAD；倒计时只做秒级缓存，其余 JSON GET 不隐式扩展方法闭集。
+    let countdown_routes = Router::<PublicApiState>::new()
         .route(
             "/api/v1/auctions/{auction_id}/countdown/{timer}",
             method_strict::get_head(countdown::get),
         )
-        .route("/api/v1/events", get(realtime::list))
+        .route_layer(middleware::from_fn(response_cache::short_lived))
+        .route_layer(middleware::from_fn_with_state(
+            anonymous_read_gate.clone(),
+            read_gate::enforce,
+        ));
+    let no_store_routes = Router::<PublicApiState>::new()
+        .route("/api/v1/browser-errors", post(browser_errors::public))
         .route(
             "/api/v1/session",
             axum::routing::get(current_session)
@@ -106,11 +136,6 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
             "/api/v1/lots/{lot_id}/watch",
             put(set_lot_watch).layer(DefaultBodyLimit::max(4 << 10)),
         )
-        // P09/P11/P14 投影含完整装备 key，必须禁止浏览器和共享缓存持久化响应。
-        .route("/api/v1/compensation-pool/{auction_id}/movements", get(compensation::movements))
-        .route("/api/v1/compensation-pool/{auction_id}/lots", get(compensation::lots))
-        .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
-        .route("/api/v1/lots/{lot_id}", get(lot_detail))
         .route("/api/v1/lots/{lot_id}/proxy-authorizations/mine", get(get_my_proxy_authorization))
         .route("/api/v1/lots/{lot_id}/proxy-authorizations", post(create_proxy_authorization))
         .route(
@@ -119,13 +144,17 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         )
         .route("/api/v1/lots/{lot_id}/bids", post(place_bid))
         .route_layer(middleware::from_fn(response_cache::no_store));
-    let routes = no_cache_routes.merge(no_store_routes).route(
-        "/api/v1/ws",
-        // HTTP/1.1 使用 GET Upgrade，HTTP/2 使用扩展 CONNECT；两者共用会话与范围门禁。
-        axum::routing::get(realtime::websocket)
-            .connect(realtime::websocket)
-            .strict_methods("CONNECT, GET"),
-    );
+    let routes = no_cache_routes
+        .merge(anonymous_read_routes)
+        .merge(countdown_routes)
+        .merge(no_store_routes)
+        .route(
+            "/api/v1/ws",
+            // HTTP/1.1 使用 GET Upgrade，HTTP/2 使用扩展 CONNECT；两者共用会话与范围门禁。
+            axum::routing::get(realtime::websocket)
+                .connect(realtime::websocket)
+                .strict_methods("CONNECT, GET"),
+        );
     router.merge(routes.route_layer(middleware::from_fn(boundary::normalize_api_rejection)))
 }
 

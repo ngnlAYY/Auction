@@ -124,6 +124,9 @@ mod mail_maintenance;
 mod mail_poll;
 #[path = "mail/processing.rs"]
 mod mail_processing;
+mod mail_scan {
+    include!("mail/scan.rs");
+}
 pub use account_scheduling::{
     AccountWorkPriority, GateClass, GatePoll, GateTicket, LOW_PRIORITY_FLOOR_AFTER,
     OperationLockState, PriorityGateState, SegmentPlan,
@@ -430,8 +433,15 @@ pub use mail_processing::{
     MailDeliveryOrigin, MailDeliveryResult, MailEquipmentAttachment, MailEquipmentFilter,
     MailEquipmentReader, MailMessage, MailNoticeEnqueue, MailNoticeLimit, MailNotificationTemplate,
     MailProcessingAttempt, MailProcessingDecision, MailProcessingError, MailProcessingFuture,
-    MailProcessor, default_accepted_qualities, explanation_notice_limit, mail_auction_aggregate_id,
-    valid_notification_body,
+    MailProcessor, SubmissionReceiptFacts, SubmissionReceiptLot, default_accepted_qualities,
+    explanation_notice_limit, mail_auction_aggregate_id, valid_notification_body,
+};
+pub use mail_scan::{
+    MAIL_SCAN_DAILY_FULL_INTERVAL, MailPrefixOutcome, MailPrefixPage, MailPrefixScan,
+    MailScanAnchor, MailScanCheckpoint, MailScanEvent, MailScanMode, MailScanObserver,
+    MailScanOutcome, MailScanPlan, MailScanReason, MailScanShadow, MailScanStream,
+    MailScanWatermark, advance_mail_scan_watermark, compare_mail_scan_mids,
+    noop_mail_scan_observer, numeric_mail_scan_id, plan_mail_scan,
 };
 pub use operations_alert::{
     MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES,

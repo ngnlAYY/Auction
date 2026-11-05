@@ -304,6 +304,11 @@ where
     ) -> Result<MailProcessingDecision, ApplicationError> {
         result.validate()?;
         let delivery_id = self.enqueue_take(message, attachment_ids).await?;
+        // 回执与领取意图同一处理回合写入；已开拍或超预算时跳过，不改变已提交的接受决定。
+        let receipt_id = self.enqueue_submission_receipt(message, result.submission_id).await?;
+        let mut delivery_ids = vec![delivery_id];
+        let receipt_enqueued = receipt_id.is_some();
+        delivery_ids.extend(receipt_id);
         decision(
             "equipment",
             "accepted",
@@ -315,7 +320,8 @@ where
                 "existing_count": result.existing_count,
                 "preview_revision": result.preview_revision,
                 "attachment_count": result.lot_ids.len(),
-                "delivery_ids": [delivery_id],
+                "delivery_ids": delivery_ids,
+                "receipt_enqueued": receipt_enqueued,
             }),
         )
     }

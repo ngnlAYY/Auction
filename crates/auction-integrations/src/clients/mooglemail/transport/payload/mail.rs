@@ -74,7 +74,12 @@ pub(crate) fn decode_payload(
     {
         return Err(invalid_payload());
     }
+    // W14.3：投稿回执是唯一允许 mail_intake 携带冻结正文的通知，正文由录入事实生成。
+    let frozen_intake_body = claim.origin_kind == "mail_intake"
+        && payload.operation == "send"
+        && payload.template.as_deref() == Some("auction_submission_receipt");
     if !matches!(claim.origin_kind.as_str(), "operations_alert" | "lot_watch")
+        && !frozen_intake_body
         && payload.body.is_some()
     {
         return Err(invalid_payload());
@@ -174,6 +179,16 @@ pub(crate) fn decode_payload(
                             .as_deref()
                             .and_then(equipment_rejection_copy)
                             .is_none()
+                    {
+                        return Err(invalid_payload());
+                    }
+                }
+                Some("auction_submission_receipt") => {
+                    // 整封投稿合并的回执：正文必须来自录入事实，零资产且不引用登录 key。
+                    if claim.origin_kind != "mail_intake"
+                        || payload.result_code.as_deref() != Some("accepted")
+                        || payload.user_key_user_id.is_some()
+                        || !valid_notification_body(payload.body.as_deref())
                     {
                         return Err(invalid_payload());
                     }

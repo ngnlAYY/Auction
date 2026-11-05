@@ -29,12 +29,15 @@ pub(super) struct MailControlRemoteReads {
 
 #[cfg(feature = "postgres")]
 /// 根据 Worker 配置装配 MoogleMail 轮询、业务处理、delivery 和履约证据读取端口。
+// 装配根逐项注入显式依赖，避免为单次调用引入仅用于传参的容器。
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn configure_mail_poll(
     config: &AppConfig,
     store: Arc<DatabaseStore>,
     profile_reader: Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
     progress_observer: Arc<dyn auction_application::MailPollProgressObserver>,
     sent_baseline_observer: Arc<dyn auction_application::SentBaselineObserver>,
+    mail_scan_observer: Arc<dyn auction_application::MailScanObserver>,
     switches: auction_application::RuntimeSwitches,
     external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
 ) -> anyhow::Result<(
@@ -103,6 +106,7 @@ pub(super) async fn configure_mail_poll(
                 client.as_ref(),
                 &credentials,
                 sent_baseline_observer,
+                Arc::clone(&mail_scan_observer),
                 Arc::clone(&external_metrics),
             )?;
         let maintenance = Arc::new(auction_application::MailboxMaintenanceService::new(
@@ -122,6 +126,7 @@ pub(super) async fn configure_mail_poll(
                 schedule,
                 maintenance_schedule,
                 progress_observer,
+                mail_scan: Arc::clone(&mail_scan_observer),
                 switches,
                 external_metrics: Arc::clone(&external_metrics),
             },

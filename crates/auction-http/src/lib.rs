@@ -6,10 +6,10 @@ mod http;
 
 pub use assets::serve_admin_setup_asset;
 pub use http::{
-    AdminApiState, AdminHttpSecurity, HttpBoundary, HttpReadinessProbe, HttpSecurityOptions,
-    PublicApiState, PublicHttpSecurity, RealtimeHub, RealtimeHubHealth, RealtimeHubSink,
-    RealtimeSubscription, RealtimeSubscriptionError, admin_router, apply_browser_security_headers,
-    public_router, serve_http, serve_metrics,
+    AdminApiState, AdminHttpSecurity, AnonymousReadGate, HttpBoundary, HttpReadinessProbe,
+    HttpSecurityOptions, PublicApiState, PublicHttpSecurity, RealtimeHub, RealtimeHubHealth,
+    RealtimeHubSink, RealtimeSubscription, RealtimeSubscriptionError, admin_router,
+    apply_browser_security_headers, public_router, serve_http, serve_metrics,
 };
 
 #[cfg(target_os = "linux")]

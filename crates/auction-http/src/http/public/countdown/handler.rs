@@ -61,7 +61,7 @@ pub(crate) async fn get(
     response
         .headers_mut()
         .insert(header::CONTENT_TYPE, HeaderValue::from_static("image/svg+xml; charset=utf-8"));
-    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    // 缓存策略由路由组的 short_lived 中间件签发；倒计时随截止时间变化，只允许秒级复用。
     response.extensions_mut().insert(CountdownImage);
     Ok(response)
 }

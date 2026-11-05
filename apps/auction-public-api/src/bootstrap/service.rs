@@ -120,9 +120,11 @@ async fn run_service(
     let mut realtime_relay_task: Option<TaskGuard<()>> = None;
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
     let boundary = state.http_boundary();
+    let anonymous_read_gate = state.anonymous_read_gate();
     let app = auction_http::public_router::<crate::web_assets::PublicWebAssets>(
         env!("CARGO_PKG_VERSION"),
         boundary,
+        anonymous_read_gate,
     )
     .with_state(state);
 

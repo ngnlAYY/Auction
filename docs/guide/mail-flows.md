@@ -37,7 +37,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
    - 品质在接收列表内（默认 Legendary、Peerless；早鸟窗口内使用早鸟品质列表）；
    - 启用过滤时检查前缀、后缀、分类、类型与等级范围。
    任一件不合格 → **整封**退回，并回信说明原因（`auction_equipment_rejected`）。装备页面暂时读不到等非确定错误不会退回，而是留待重试。
-5. 全部通过 → 在一个事务内把装备加入该世界当前接收投稿的场次（Draft 或 Preview），保存加密的装备 key，然后投递一个“收取附件”操作把装备收入 Bot 账号。若锁后数据库当前时间或邮件原始 `received_at` 早于该场次冻结的最早收件时刻（新赛季开始），事务拒收 → **整封**退回并回信说明（`auction_equipment_rejected`，原因 `season_intake_closed`），不收取附件。因此旧赛季来信即使延迟到新赛季处理仍被拒绝；关闭赛季前轮询暂停也不绕过此门禁。已持久接受的投稿按上文重放原决定。
+5. 全部通过 → 在一个事务内把装备加入该世界当前接收投稿的场次（Draft 或 Preview），保存加密的装备 key，然后投递一个“收取附件”操作把装备收入 Bot 账号，并按整封投稿合并寄出投稿接收回执（`auction_submission_receipt`：场次、每个 lot 的代码、装备名与起拍价）。若场次在回执发送前已开拍，回执在 sending 围栏前退役，不补寄旧场次回执。若锁后数据库当前时间或邮件原始 `received_at` 早于该场次冻结的最早收件时刻（新赛季开始），事务拒收 → **整封**退回并回信说明（`auction_equipment_rejected`，原因 `season_intake_closed`），不收取附件。因此旧赛季来信即使延迟到新赛季处理仍被拒绝；关闭赛季前轮询暂停也不绕过此门禁。已持久接受的投稿按上文重放原决定。
 
 被拒绝的装备读取会留下加密诊断证据（默认保留 7 天），可用 `auction-cli mail export-evidence` 导出。
 
@@ -117,6 +117,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 | `auction_assets_rejected` | 投稿邮件含 Credits、CoD 或非装备资产，整封退回 | 发件人游戏名 | MM | intake | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制）；退回动作独立执行 | 收件人、主题、退回邮件身份；正文无占位符 |
 | `auction_no_attachments` | `auction` 邮件事务内没有任何装备附件 | 发件人游戏名 | MM | intake | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制） | 收件人、主题；正文无占位符 |
 | `auction_equipment_rejected` | 装备校验失败（筛选规则、结构漂移、重复、已投递等） | 发件人游戏名 | MM | intake | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制）；退回动作独立执行 | 收件人、主题、原因码、退回邮件身份；占位符 `{reason_code}`/`{reason_text}`、`{next_steps}`、`{mail_reference}` |
+| `auction_submission_receipt` | 拍卖投稿被接受（`accepted`）；整封投稿按原邮件合并为一封 | 发件人游戏名 | MM | intake | `deliveries` outbox / delivery 循环 | 原场次已开拍或撤场（auction 状态离开 `draft`/`preview`）时在 sending 围栏前退役（`auction_notice_invalidated`，原因 `auction_opened`）；正文超出 16 KiB 或投稿事实缺失时不创建 | 收件人、场次序号、每个 lot 的代码、装备名与起拍价；正文在创建时冻结 |
 | `user_assets_rejected` | 账号类主题（`register`/`rebind`/`rekey`）携带资产 | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制）；资产照常退回 | 收件人、主题、退回邮件身份；正文无占位符 |
 | `forum_auction_notice` | 历史种类：旧版 `notify` 导入回执；W14.4 起不再创建，`notify` 改为订阅该 lot 的被超提醒 | 论坛回帖者游戏名 | MM（已停用） | intake | 无新出队 | 不再产生；历史已入队投递按原冻结载荷处理 | 收件人、主题、lot 代码与行号 |
 | `settlement_winner_equipment_cod` | 结算产生竞得装备 COD 义务并准备发送 | 买家游戏名 | MM | settlement（含装备时为 equipment） | `deliveries` outbox / delivery 循环 | 义务被取消或前置未满足（不进围栏）；未领取 COD 超过付款期限转恢复流程 | 收件人、义务 ID、装备 ID 与名称、COD 金额、结算明细、冻结付款期限；占位符 `{item_name}`、`{amount}`、`{reference}`、`{price_breakdown}`、`{payment_deadline}` |
