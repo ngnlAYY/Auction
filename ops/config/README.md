@@ -29,6 +29,7 @@
 - 角色文件路径：Public/Worker 的 `AppConfig::load` 先读取 `AUCTION_CONFIG_FILE`，未设置时尝试当前目录下的 `ops/config/<角色>.toml`，不存在则构造内置默认配置；正式装配仍要求数据库等依赖齐备。Admin 入口另会尝试 `auction-config/admin.toml`，仍不存在才进入首次设置。这些是运行时发现路径，仓库模板位于 `ops/config/examples/`。`auction-server` 与 `auction-cli` 使用 `--config-dir` 指定目录，不用该环境变量选择配置；`auction-server` 检测到它会拒绝启动。
 - 除 `AUCTION_CONFIG_FILE` 外不存在任何环境变量覆盖；部署字段写在文件中。W7.7 的两个闭集行为开关可由数据库事实覆盖 TOML 基线，规则见下文。
 - 已移除的配置字段不会静默忽略：加载器仍解析旧键，但在校验阶段以可行动的说明拒绝，要求从部署 TOML 删除（例如 `[worker.delivery] concurrency` 与 `operations.worker.delivery.concurrency`，MoogleMail transport 的有效并发始终为 1）。回退到旧程序时同样必须先删除新程序认识的未知字段，见下文热读取边界。
+- 角色文件只接受该角色实际读取的区块，其余区块在启动和 `config check` 中直接拒绝，不再静默忽略：Public 拒绝 `[worker]`；Admin 拒绝 `[realtime]`；Worker 拒绝 `[listener]`、`[http_security]`、`[realtime]` 与 `[session]`。Admin 的 `[worker]` 保留（runtime 缺失时的邮件参数回退），Public/Admin 的 `[listener]`、`[http_security]`、`[session]` 保留。Admin 角色文件里的 `[session] max_public_sessions` 同样不会生效，加载时单独拒绝。错误给出角色、区块与 owner 文档位置，不回显配置值。
 - 所有角色运行配置的解析与校验错误都在启动前失败，错误不回显秘密值。CLI 专用 `[backup]` 的范围和打卡 URL 由 CLI 校验，常驻角色仅解析保留。角色、公共、普通敏感与 runtime 文件大小上限为 4 MiB；独立维护凭据另限 64 KiB。
 - 三个角色必须引用同一个 `common_file`，并且同时引用同一个 `runtime_config_file`（或全部省略）；三角色数据库目标必须相同。`auction-cli config check` 会联合检查这些一致性。
 
@@ -177,7 +178,7 @@ Worker 引用的敏感 TOML 根字段 `backup_r2_access_key_id` 与 `backup_r2_s
 | --- | --- |
 | `[listener]` | `mode = "tcp"`（`address`，默认 Public `127.0.0.1:8090`、Admin `127.0.0.1:8091`）或 `mode = "unix"`（`runtime_directory`、`socket_path`、`group`）。Unix 运行目录及其祖先必须由 root 或运行账号拥有、禁止 group/other 写入、无符号链接 |
 | `[http_security]` | origin allowlist（`allowed_origins_enabled`、`allowed_origins` 精确 origin，最多 16 个）、登录/写请求限流与窗口、匿名读限流与并发上限（`anonymous_read_rate_limit` 默认 300、`anonymous_read_concurrency` 默认取 Public 服务池可用连接的一半；仅 Public 生效，IPv6 按 /64）、`cookie_secure`（生产必须 true）、请求超时、`trusted_proxy_cidrs`（最多 64 个规范 CIDR）、`trusted_unix_proxy`（仅 Unix listener） |
-| `[session]` | Public：`max_public_sessions`（默认 10；满额登录注销最久未活动的有效会话）。Admin：`idle_ttl_seconds`（默认 900）、`absolute_ttl_seconds`（默认 28800） |
+| `[session]` | Public：`max_public_sessions`（默认 10；满额登录注销最久未活动的有效会话）。Admin：`idle_ttl_seconds`（默认 900）、`absolute_ttl_seconds`（默认 28800）；Admin 角色文件中的 `max_public_sessions` 不会生效，加载时拒绝并要求删除，公开会话上限只写在 public.toml 与共享 runtime 文档 |
 | `[tracing]` | OTLP/HTTP 导出：开关、endpoint、批量与超时、队列容量、采样比例（百万分率） |
 | `[realtime]`（Public） | `consumer_key`（每个实例唯一）、轮询间隔、每页流数与事件数、每连接缓冲 |
 
@@ -194,7 +195,7 @@ Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、`metrics.e
 | `[worker.recovery]` | 恢复：批次、并发、轮询、租约、超时、低余额阈值、健康刷新与证据过期 |
 | `[worker.control]` | Worker control：开关、socket 组、`allowed_peer_uids`/`allowed_peer_gids`（启用时至少一项）、运行目录与 socket 路径 |
 | `[worker.forum]` | 论坛同步：开关、凭据 scope、公开站点 origin、板块 ID、轮询、页数上限、请求间隔与超时、租约 |
-| `[worker.mooglemail]` | 邮件：开关、邮箱标识与世界、邮件默认起拍价、请求边界、收件与维护 cron、观察间隔与隔离开关、抖动、租约、重试、发件人白名单、`rekey_enabled`、账号回信与说明信窗口/上限、`keyenv_file`（本地联调） |
+| `[worker.mooglemail]` | 邮件：开关、邮箱标识与世界、邮件默认起拍价、请求边界、收件与维护 cron、观察间隔与隔离开关、每日完整校验间隔、抖动、租约、重试、发件人白名单、`rekey_enabled`、账号回信与说明信窗口/上限、`keyenv_file`（本地联调） |
 | `[worker.mooglemail.send_intervals]` | 各类出站邮件发送起点的最小间隔 |
 | `[worker.mooglemail.diagnostics]` | 诊断归档：开关、目录（生产须为可写目录）、保留天数、总字节上限 |
 | `[worker.mooglemail.equipment_filter]` | 投稿过滤：品质门槛（始终生效）、前后缀/分类/类型/等级过滤 |
@@ -254,7 +255,9 @@ clear 回落此 TOML 基线；无需重启。切换在下一轮收件调度或�
 
 边界随 prepared 句柄一次消费，不新增持久水位表，不推进 Worker 游标。Empty 需要空列表及末页证明。仅水位路径要求 MID 为无前导零、可由 `u128` 受检解析的十进制身份，通用 opaque ID 解析不变；还要求同一账号与世界代次内 MID 分配单调且不复用，Sent 时间排序与之相容，同分钟行允许任意排列。数字空洞不算不连续。凭据、world、endpoint 或 owner 代次变化立即使上下文与旧完整缓存失效。
 
-写前边界无效时在原预算内回退 fresh 完整扫描；写后锚点消失时完整枚举并使用原边界，不以发送后最大 MID 重建基线。写后 MID/时间前提失效且缺少发送前完整集合时保持 `write_unknown`。完整回退仍受 `maximum_pages`（1–100）和原 `fetch_timeout_seconds` 截止点、限速及资源限制；失败关闭，未知结果绝不重发。常规轮 Sent/Read Mail 水位及每日校验不在本切片内。
+写前边界无效时在原预算内回退 fresh 完整扫描；写后锚点消失时完整枚举并使用原边界，不以发送后最大 MID 重建基线。写后 MID/时间前提失效且缺少发送前完整集合时保持 `write_unknown`。完整回退仍受 `maximum_pages`（1–100）和原 `fetch_timeout_seconds` 截止点、限速及资源限制；失败关闭，未知结果绝不重发。
+
+常规轮 Sent/Inbox/Read Mail 使用持久水位前缀扫描，并按 `[worker.mooglemail] mail_scan_daily_full_interval_seconds` 定期执行完整校验。该字段范围 60–604800 秒、默认 86400；只改变多读一轮完整列表的节奏，完整枚举超限或失败仍只告警，不阻断发送、收取或维护，也不把水位当作任何证明。修改需重启 Worker，不进入 Admin runtime 参数或在线开关。
 
 默认 shadow 沿用旧路径，不能解除 D3；须在旧完整扫描触顶前由用户完成观察并切换 watermark。核实 MID 语义、观察周期、分支样本及差异口径见[运维手册](../README.md#sent-发送基线影子观察)。回退为 `full` 并受控重启；换回不认识该字段的旧二进制前须移除新字段。
 
@@ -322,7 +325,9 @@ Worker 每 30 秒检查一次 runtime 文件的长度与修改时间；候选变
 | runtime 文件 | 恰好 0640；父目录不能被 group/other 写入、不能是符号链接 |
 | 维护凭据 | 规范化绝对路径、非符号链接、单硬链接、归当前账号且仅 owner 可读 |
 
-`auction-cli config check` 在非严格模式下把普通文件和敏感文件的权限问题列为警告，`--strict` 视为错误；runtime 文件及父目录的权限由 loader 强制检查，维护凭据也有独立的强制检查，不受此开关放宽。生产部署必须通过严格检查。
+`auction-cli config check` 在非严格模式下把普通文件和敏感文件的权限问题列为警告，`--strict` 视为错误；runtime 文件及父目录的权限由 loader 强制检查，维护凭据也有独立的强制检查，不受此开关放宽。生产部署必须通过严格检查。两种模式都先经过同一套角色加载校验：语法、未知字段、角色不支持的区块、字段范围、三角色引用一致性与数据库账号分工因此都会在严格检查中覆盖；`--strict` 只在此基础上把权限问题和缺失 `[database_roles] owner` 声明升级为错误，不会跳过任何加载期拒绝。
+
+启动使用的同一条加载路径也给出同一组可行动错误（例如 `[worker.delivery] concurrency` 已移除、角色文件不支持 `[realtime]`）；这些错误只含角色/区块/字段名与固定说明，不回显 TOML 原文或秘密值。
 
 ## 示例与首次设置
 

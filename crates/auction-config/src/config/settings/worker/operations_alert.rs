@@ -14,7 +14,7 @@ pub struct OperationsAlertWorkerConfig {
     pub scan_interval_seconds: u64,
     /// 每轮完成后附加的随机抖动上限秒数；不能超过轮询间隔，省略时为 5 秒。
     pub jitter_seconds: u64,
-    /// 读取四类健康来源的超时秒数，范围 1-30；省略时为 5 秒。
+    /// 读取全部告警来源的超时秒数，范围 1-30；省略时为 5 秒。
     pub source_timeout_seconds: u64,
     /// 同一轮观察结果合并到通知批次前的窗口秒数，范围 1-3600；省略时为 120 秒。
     pub batch_window_seconds: u64,

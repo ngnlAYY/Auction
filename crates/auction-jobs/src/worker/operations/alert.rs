@@ -216,31 +216,27 @@ impl OperationsAlertRuntime {
 }
 
 fn unavailable_observations() -> Vec<auction_application::OperationsAlertSourceObservation> {
-    [
-        OperationsAlertSource::Process,
-        OperationsAlertSource::Delivery,
-        OperationsAlertSource::Fulfillment,
-        OperationsAlertSource::Recovery,
-    ]
-    .into_iter()
-    .filter_map(|source| {
-        match auction_application::OperationsAlertSourceObservation::unavailable(source) {
-            Ok(observation) => Some(observation),
-            Err(error) => {
-                diagnostics::error(
-                    "operations_alert",
-                    "build_unavailable_observation",
-                    error.diagnostic_kind(),
-                    DiagnosticContext {
-                        disposition: Some(DiagnosticDisposition::Unpersisted),
-                        ..Default::default()
-                    },
-                );
-                None
+    // 来源闭集由应用层唯一维护；新增来源只需扩展闭集，这里不再重复名单。
+    OperationsAlertSource::ALL
+        .into_iter()
+        .filter_map(|source| {
+            match auction_application::OperationsAlertSourceObservation::unavailable(source) {
+                Ok(observation) => Some(observation),
+                Err(error) => {
+                    diagnostics::error(
+                        "operations_alert",
+                        "build_unavailable_observation",
+                        error.diagnostic_kind(),
+                        DiagnosticContext {
+                            disposition: Some(DiagnosticDisposition::Unpersisted),
+                            ..Default::default()
+                        },
+                    );
+                    None
+                }
             }
-        }
-    })
-    .collect()
+        })
+        .collect()
 }
 
 fn checked_add(now: DateTime<Utc>, duration: Duration) -> Result<DateTime<Utc>, ApplicationError> {

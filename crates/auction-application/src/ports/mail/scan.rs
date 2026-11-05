@@ -14,7 +14,8 @@ use chrono::{DateTime, Duration, Utc};
 /// 单个 MID 允许的最大字节数；与数据库与轮询游标边界一致。
 pub const MAX_MAIL_SCAN_ID_BYTES: usize = 256;
 
-/// 每日一次完整校验的默认间隔；配置化由 W1.8 收口，本轮保持固定 24 小时。
+/// 每日完整校验的默认间隔；部署可在 `[worker.mooglemail]
+/// mail_scan_daily_full_interval_seconds` 覆盖，缺失时保持 24 小时。
 pub const MAIL_SCAN_DAILY_FULL_INTERVAL: Duration = Duration::hours(24);
 
 /// 增量扫描所属的远端列表；同一水位不能跨列表或跨 world 复用。

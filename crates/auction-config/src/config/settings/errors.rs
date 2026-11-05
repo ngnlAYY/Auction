@@ -183,4 +183,14 @@ pub enum ConfigError {
 
     #[error("Admin runtime Worker 部署引用无效：{0}")]
     InvalidRuntimeWorkerConfig(&'static str),
+
+    #[error(
+        "{role} 角色文件不支持 [{section}] 区块：该角色从不读取此区块，保留它会让配置看起来生效。请删除该区块，或将对应设置写入拥有它的配置文件；区块与 owner 的对照见 ops/config/README.md"
+    )]
+    UnsupportedRoleSection { role: &'static str, section: &'static str },
+
+    #[error(
+        "Admin 角色文件的 [session] max_public_sessions 不会生效：Admin 进程从不限制公开用户会话数。请删除该字段；公开会话上限只属于 public.toml 的 [session] 与共享 runtime 文档，见 ops/config/README.md"
+    )]
+    AdminSessionLimitNotApplied,
 }

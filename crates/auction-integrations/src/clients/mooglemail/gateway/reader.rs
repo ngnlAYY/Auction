@@ -156,11 +156,7 @@ impl MoogleMailGateway {
             .lock()
             .ok()
             .and_then(|checkpoints| checkpoints.get(&(world, stream)).cloned());
-        plan_mail_scan(
-            checkpoint.as_ref(),
-            Utc::now(),
-            auction_application::MAIL_SCAN_DAILY_FULL_INTERVAL,
-        )
+        plan_mail_scan(checkpoint.as_ref(), Utc::now(), self.client.mail_scan_daily_full_interval())
     }
 
     /// 只推进进程内检查点；水位不是提交游标，轮询仍以 claim.cursor_value 为锚点。

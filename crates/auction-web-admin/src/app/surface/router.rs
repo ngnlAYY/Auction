@@ -113,6 +113,10 @@ pub(super) enum Route {
         #[route("/deliveries")]
         Deliveries {},
 
+        /// 单条投递的只读证据详情；玩家报出的投递 Reference 可直接定位。
+        #[route("/deliveries/:delivery_id")]
+        DeliveryDetail { delivery_id: String },
+
         #[route("/delivery")]
         DeliveryOverview {},
 
@@ -211,6 +215,11 @@ fn Renames() -> Element {
 #[component]
 fn Deliveries() -> Element {
     deliveries::page()
+}
+
+#[component]
+fn DeliveryDetail(delivery_id: String) -> Element {
+    deliveries::detail_page(delivery_id)
 }
 
 #[component]

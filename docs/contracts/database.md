@@ -139,6 +139,7 @@
 | `realtime_streams`、`realtime_events` | 事件流与事件（流内序号连续），见[实时事件](realtime.md) |
 | `realtime_consumer_offsets`、`realtime_failures` | 各 consumer 游标与转发失败记录 |
 | `operations_alert_runtime_state`、`operations_alert_signals`、`operations_alert_batches`、`operations_alert_batch_items` | 运维告警的运行状态、信号、批次与批次项 |
+| `operations_alert_signals` 的 kind / scope / source / identity 闭集 | 迁移 `000005`/`000015`/`000020` 建立，`000085` 扩展为 26 个 kind、9 个 source：`process`、`delivery`、`fulfillment`、`recovery`、`mail`、`credential`、`lifecycle`、`forum`、`notification`。`source_unavailable` 仍要求 scope 等于来源名；新来源各自的 scope 是 `mail`、`mail_cookie`/`external_api`、`auction`、`forum`、`notification`。应用层 `OperationsAlertKind::ALL` 与 `OperationsAlertSource::ALL` 与该闭集逐项对应，未登记取值在数据库层失败关闭。信号只读各 owner 已提交的安全水位，不参与竞价、结算或投递正确性 |
 | `service_heartbeats` | 三角色进程心跳（TTL 30 秒），是唯一被标记为“待决定是否短期保留”的数据族；`audit_failure_count` 在发布进程为 legacy/shadow 时是全部审计失败累计，classified 时仅为阻断就绪的 permanent + unknown 累计，成功写入不清零、重启归零；结构不变，完整分类计数在进程指标中保留，见[就绪策略](../../ops/config/README.md#就绪策略) |
 | `audit_records` | 追加式审计：操作者类型（public_user/admin/worker/system）、动作、实体、结果、来源（public/admin/worker/system/cli）与安全元数据；触发器禁止修改与删除 |
 

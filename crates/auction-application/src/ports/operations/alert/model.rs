@@ -90,6 +90,9 @@ pub struct OperationsAlertDeliverySnapshot {
     pub oldest_pending_age_seconds: i64,
     pub oldest_manual_reconcile_age_seconds: i64,
     pub oldest_returned_mail_age_seconds: i64,
+    /// 已领取（claimed/sending）的投递数量；用于识别领取后没有推进的队列延迟。
+    pub claimed: i64,
+    pub oldest_claimed_age_seconds: i64,
     pub last_update_at: Option<DateTime<Utc>>,
 }
 
@@ -111,6 +114,8 @@ pub struct OperationsAlertRecoveryWorld {
     pub balance_status: String,
     pub evidence_status: String,
     pub evidence_age_seconds: i64,
+    /// 余额读取连续处于同一非正常状态（busy/unavailable）的持续时间；正常时为 0。
+    pub balance_stall_age_seconds: i64,
     pub balance_observed_at: Option<DateTime<Utc>>,
     pub evidence_last_success_at: Option<DateTime<Utc>>,
     pub updated_at: DateTime<Utc>,
@@ -127,13 +132,60 @@ pub struct OperationsAlertRecoverySnapshot {
     pub worlds: Vec<OperationsAlertRecoveryWorld>,
 }
 
-/// 四个告警来源的安全快照；单个来源缺失时 evaluator 会生成 unavailable signal。
+/// Mail source 快照：收件轮询水位。Admin 显式暂停的邮箱由读取层排除，不进入该水位。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OperationsAlertMailSnapshot {
+    pub last_poll_age_seconds: i64,
+    pub consecutive_failures: i64,
+}
+
+/// Credential source 快照：每种凭据当前行的失效数量。
+/// 只用稳定种类名，不携带凭据标签、指纹或密文。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OperationsAlertCredentialSnapshot {
+    pub invalid_mail_cookie: i64,
+    pub invalid_external_api: i64,
+}
+
+/// Lifecycle source 快照：结束时间已过但尚未推进的场次与慢速代理。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OperationsAlertLifecycleSnapshot {
+    pub phase_overdue_count: i64,
+    pub oldest_phase_overdue_age_seconds: i64,
+    pub proxy_expiry_overdue_count: i64,
+    pub oldest_proxy_overdue_age_seconds: i64,
+}
+
+/// Forum source 快照：主题发布与私信投递失败。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OperationsAlertForumSnapshot {
+    pub sync_failed_count: i64,
+    pub oldest_sync_failed_age_seconds: i64,
+    pub message_failed_count: i64,
+    pub oldest_message_failed_age_seconds: i64,
+}
+
+/// Notification source 快照：非结算通知投递失败与邮资不足。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OperationsAlertNotificationSnapshot {
+    pub failed_count: i64,
+    pub oldest_failed_age_seconds: i64,
+    pub postage_insufficient_count: i64,
+    pub oldest_postage_age_seconds: i64,
+}
+
+/// 全部告警来源的安全快照；单个来源缺失时 evaluator 会生成 unavailable signal。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OperationsAlertSnapshot {
     pub process: Option<OperationsAlertProcessSnapshot>,
     pub delivery: Option<OperationsAlertDeliverySnapshot>,
     pub fulfillment: Option<OperationsAlertFulfillmentSnapshot>,
     pub recovery: Option<OperationsAlertRecoverySnapshot>,
+    pub mail: Option<OperationsAlertMailSnapshot>,
+    pub credential: Option<OperationsAlertCredentialSnapshot>,
+    pub lifecycle: Option<OperationsAlertLifecycleSnapshot>,
+    pub forum: Option<OperationsAlertForumSnapshot>,
+    pub notification: Option<OperationsAlertNotificationSnapshot>,
 }
 
 /// 告警阈值与批次边界。

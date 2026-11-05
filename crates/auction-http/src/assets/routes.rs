@@ -60,6 +60,7 @@ pub(super) fn browser_route(surface: Surface, path: &str) -> bool {
                     .strip_prefix("/auctions/")
                     .and_then(|value| value.strip_suffix("/lots"))
                     .is_some_and(valid_parameter)
+                || path.strip_prefix("/deliveries/").is_some_and(valid_parameter)
         }
     }
 }

@@ -51,14 +51,12 @@ trusted_proxy_cidrs = []
 # 可选：是否信任 Unix socket 上游；仅有效的 Unix listener 可设为 true。
 trusted_unix_proxy = false
 
-# 可选区块：会话过期和并发策略；存在 runtime 文件时由 runtime.session 覆盖。
+# 可选区块：Admin 会话过期策略；存在 runtime 文件时由 runtime.session 覆盖。公开会话并发上限属于 public.toml，写在这里会被拒绝。
 [session]
 # 可选：空闲过期秒数，默认沿用旧版 Admin 的 900。
 idle_ttl_seconds = 900
 # 可选：绝对过期秒数，默认沿用旧版 Admin 的 28800，不能小于空闲过期时间。
 absolute_ttl_seconds = 28800
-# 可选：单个公开用户允许的最大并发会话数，默认 10；满额登录注销最久未活动的有效会话。
-max_public_sessions = 10
 
 # 可选区块：本角色服务池；修改均需重启，受停机门禁约束。
 [database_pool]

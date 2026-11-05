@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 
 use auction_web_shared::{AsyncState, AsyncStateKind};
 
-use crate::api::{Delivery, DeliveryAction, execute_delivery, fetch_deliveries};
+use crate::api::{Delivery, DeliveryAction, execute_delivery, fetch_deliveries, valid_uuid};
 use crate::app::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
 use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
@@ -34,6 +34,20 @@ pub fn page() -> Element {
     });
     let mut pending_dialog = use_signal(|| None::<DeliveryDialogState>);
     let mut reconcile_draft = use_signal(|| None::<DeliveryReconcileDraft>);
+    // 玩家报出的投递 Reference 可直接定位详情；只接受规范 UUID，不猜测其他编号。
+    let mut lookup = use_signal(String::new);
+    let mut lookup_invalid = use_signal(|| false);
+    let navigator = navigator();
+    let open_lookup = move |event: FormEvent| {
+        event.prevent_default();
+        let target = lookup().trim().to_owned();
+        if !valid_uuid(&target) {
+            lookup_invalid.set(true);
+            return;
+        }
+        lookup_invalid.set(false);
+        let _ = navigator.push(format!("/deliveries/{target}"));
+    };
     let pagination = use_admin_pagination("deliveries", &["page_size"], Some(100), i64::MAX);
     let deliveries = use_admin_page(
         pagination.clone(),
@@ -158,6 +172,24 @@ pub fn page() -> Element {
         section { class: "admin-delivery-page", aria_labelledby: "delivery-title",
             h1 { id: "delivery-title", {t!("page-deliveries-title")} }
             PendingCommandPanel { owner: commands }
+            form { class: "admin-delivery-lookup", onsubmit: open_lookup,
+                label { r#for: "delivery-lookup-id", {t!("delivery-detail-lookup-label")} }
+                input {
+                    id: "delivery-lookup-id",
+                    r#type: "text",
+                    value: lookup(),
+                    oninput: move |event| {
+                        lookup.set(event.value());
+                        lookup_invalid.set(false);
+                    },
+                }
+                button { r#type: "submit", {t!("delivery-detail-lookup-open")} }
+                if lookup_invalid() {
+                    p { class: "admin-delivery-error", role: "alert",
+                        {t!("delivery-detail-lookup-invalid")}
+                    }
+                }
+            }
             DeliveryFilters {
                 status: query_state().status.clone(),
                 on_status_change: move |status| {
