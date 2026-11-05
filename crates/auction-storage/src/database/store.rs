@@ -263,8 +263,16 @@ impl DatabaseStore {
     async fn check_process_readiness(&self) -> Result<(), ApplicationError> {
         self.check_database_readiness().await?;
         let Self::Postgres(store) = self;
-        if !audit_health::is_ready(store.runtime_switches.readiness_policy().audit_failure_mode) {
-            return Err(storage_error("审计失败阻断进程 readiness"));
+        let mode = store.runtime_switches.readiness_policy().audit_failure_mode;
+        if !audit_health::is_ready(mode) {
+            // 门禁拒绝的根因在审计类别；不得让上层日志把它误读成数据库/schema 故障。
+            tracing::warn!(
+                target: "auction::storage::audit_health",
+                audit_failure_mode = auction_application::audit_label(mode),
+                blocking_failures = audit_health::failure_count(mode),
+                "审计失败门禁阻断进程 readiness"
+            );
+            return Err(auction_application::RepositoryError::Unavailable.into());
         }
         Ok(())
     }

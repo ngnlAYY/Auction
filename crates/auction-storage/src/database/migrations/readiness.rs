@@ -3,13 +3,12 @@
 use crate::database::TrackedTransaction as Transaction;
 use std::time::Duration;
 
-use auction_application::{ApplicationError, MigrationCompatibilityMode};
+use auction_application::{ApplicationError, MigrationCompatibilityMode, RepositoryError};
 use auction_observability::MigrationReadinessBranch;
 use sqlx::{Postgres, Row, postgres::PgRow};
 
 use crate::database::{
     PostgresStore, postgres_expected_migration_version, set_read_only_limits, storage_error,
-    storage_error_from,
 };
 
 // 与 HTTP 底层检查采用同一上限；heartbeat 和 supervisor 的独立调用也不能无限等待。
@@ -33,9 +32,13 @@ pub(in crate::database) async fn check_postgres_readiness(
     store: &PostgresStore,
 ) -> Result<(), ApplicationError> {
     let expected_version = postgres_expected_migration_version();
+    // 超时只证明预算内没有完成检查；不得投影为 repository_failed，否则与真实数据库错误混淆。
     let result = tokio::time::timeout(CHECK_TIMEOUT, read_snapshot(store, expected_version))
         .await
-        .map_err(|elapsed| storage_error(&format!("迁移 readiness 检查超时：{elapsed}")))
+        .map_err(|error| {
+            let _ = error;
+            ApplicationError::from(RepositoryError::Timeout)
+        })
         .and_then(std::convert::identity);
     if result.is_err() {
         store.migration_readiness_recorder.observe(MigrationReadinessBranch::QueryFailed, false);
@@ -69,24 +72,48 @@ pub(in crate::database) async fn check_postgres_readiness(
     }
 }
 
+/// 有界预算内的饱和/取消是暂时不可用，不是仓储故障；schema 与其他驱动错误保留原诊断。
+/// 与审计分类共用同一组瞬时 SQLSTATE，避免把预期负载下的超时记成 repository_failed。
+fn readiness_error(error: sqlx::Error, context: &'static str) -> ApplicationError {
+    if is_transient(&error) {
+        RepositoryError::Unavailable.into()
+    } else {
+        crate::database::storage_error_from(error, context)
+    }
+}
+
+fn is_transient(error: &sqlx::Error) -> bool {
+    if matches!(error, sqlx::Error::PoolTimedOut) {
+        return true;
+    }
+    let Some(code) = error.as_database_error().and_then(|database| database.code()) else {
+        return false;
+    };
+    code.starts_with("08")
+        || matches!(
+            code.as_ref(),
+            "40001" | "40P01" | "53300" | "55P03" | "57014" | "57P01" | "57P02" | "57P03"
+        )
+}
+
 async fn read_snapshot(
     store: &PostgresStore,
     expected_version: i64,
 ) -> Result<Assessment, ApplicationError> {
     let mut transaction = store
         .pool()
-        .begin_read_snapshot()
+        .begin_read_snapshot_reserved()
         .await
-        .map_err(|error| storage_error_from(error, "开启迁移 readiness 只读快照失败"))?;
+        .map_err(|error| readiness_error(error, "开启迁移 readiness 只读快照失败"))?;
     set_read_only_limits(&mut transaction)
         .await
-        .map_err(|(stage, error)| storage_error_from(error, stage))?;
+        .map_err(|(stage, error)| readiness_error(error, stage))?;
     let rows = sqlx::query(
         "SELECT version, success, checksum FROM public._sqlx_migrations ORDER BY version",
     )
     .fetch_all(&mut *transaction)
     .await
-    .map_err(|error| storage_error_from(error, "读取 readiness 迁移历史失败"))?;
+    .map_err(|error| readiness_error(error, "读取 readiness 迁移历史失败"))?;
     let assessment = assess_history(
         &mut transaction,
         &rows,
@@ -97,7 +124,7 @@ async fn read_snapshot(
     transaction
         .commit()
         .await
-        .map_err(|error| storage_error_from(error, "结束迁移 readiness 只读快照失败"))?;
+        .map_err(|error| readiness_error(error, "结束迁移 readiness 只读快照失败"))?;
     Ok(assessment)
 }
 
@@ -111,7 +138,7 @@ async fn assess_history(
         .iter()
         .map(|row| row.try_get::<i64, _>("version"))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| storage_error_from(error, "解码 readiness 迁移版本失败"))?;
+        .map_err(|error| readiness_error(error, "解码 readiness 迁移版本失败"))?;
     let database_version = versions.last().copied().unwrap_or(0);
     if super::postgres_history_matches(rows, expected_version) {
         return Ok(Assessment {
@@ -170,7 +197,7 @@ async fn compatible_suffix(
     .bind(expected_version)
     .fetch_all(&mut **transaction)
     .await
-    .map_err(|error| storage_error_from(error, "读取 readiness 迁移兼容登记失败"))?;
+    .map_err(|error| readiness_error(error, "读取 readiness 迁移兼容登记失败"))?;
     if rows.is_empty() || rows.len() != expected_count {
         return Ok(false);
     }
@@ -178,13 +205,13 @@ async fn compatible_suffix(
     for row in rows {
         let version = row
             .try_get::<i64, _>("version")
-            .map_err(|error| storage_error_from(error, "解码兼容迁移版本失败"))?;
+            .map_err(|error| readiness_error(error, "解码兼容迁移版本失败"))?;
         let success = row
             .try_get::<bool, _>("success")
-            .map_err(|error| storage_error_from(error, "解码兼容迁移状态失败"))?;
+            .map_err(|error| readiness_error(error, "解码兼容迁移状态失败"))?;
         let level = row
             .try_get::<Option<String>, _>("level")
-            .map_err(|error| storage_error_from(error, "解码迁移兼容等级失败"))?;
+            .map_err(|error| readiness_error(error, "解码迁移兼容等级失败"))?;
         if previous_version.checked_add(1) != Some(version)
             || !success
             || level.as_deref() != Some("compatible")
@@ -194,4 +221,22 @@ async fn compatible_suffix(
         previous_version = version;
     }
     Ok(previous_version == database_version)
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn saturated_pool_is_not_reported_as_repository_failure() {
+        let error = readiness_error(sqlx::Error::PoolTimedOut, "readiness");
+        assert_eq!(error.safe_kind(), "dependency_unavailable");
+        // 连接错误仍保留仓储故障类别，避免把真实依赖故障说成暂时饱和。
+        let error = readiness_error(
+            sqlx::Error::Io(std::io::Error::other("connection reset")),
+            "readiness",
+        );
+        assert_eq!(error.safe_kind(), "repository_failed");
+    }
 }

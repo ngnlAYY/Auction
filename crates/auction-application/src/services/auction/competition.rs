@@ -7,7 +7,7 @@ use auction_domain::{
 use serde::Serialize;
 
 use crate::{
-    ApplicationError, CompetitionCommandAuditContext, CompetitionCommandAuditKind,
+    ApplicationError, CommandInsert, CompetitionCommandAuditContext, CompetitionCommandAuditKind,
     CompetitionCommandOutcome, CompetitionCommandPort, CompetitionTransaction,
     CompetitionWireTimestamp, ExecuteSlowProxyCommand, ProxyUsageContext, RequestHash,
     SLOW_PROXY_COMMAND_KIND, SlowProxyCommandPort, SlowProxyExecutionContext, StoredCommand,
@@ -416,7 +416,7 @@ where
                         trigger,
                     )
                     .map_err(map_slow_proxy_planning_error)?;
-                    transaction
+                    match transaction
                         .insert_command(StoredCommand {
                             command_id,
                             command_kind: SLOW_PROXY_COMMAND_KIND.to_owned(),
@@ -425,7 +425,23 @@ where
                             result_code: "accepted".to_owned(),
                             result_payload: serde_json::to_vec(&plan)?,
                         })
-                        .await?;
+                        .await?
+                    {
+                        CommandInsert::Inserted => {}
+                        // 并发同 ID 已提交：返回账本里已经应用的同一计划，不重复推进。
+                        CommandInsert::Duplicate(stored) => {
+                            if stored.result_code != "accepted" {
+                                return Err(crate::CompetitionTransactionError::Failed(
+                                    "慢速代理命令账本结果分类不支持重放".to_owned(),
+                                )
+                                .into());
+                            }
+                            let replayed: CompetitionPlan =
+                                serde_json::from_slice(&stored.result_payload)?;
+                            slow_replay::validate(&command, &replayed)?;
+                            return Ok(replayed);
+                        }
+                    }
                     transaction
                         .apply_slow_proxy_plan(
                             &plan,
@@ -456,59 +472,7 @@ where
                 let command = command.clone();
                 Box::pin(async move {
                     if let Some(stored) = transaction.find_command(command_id).await? {
-                        if !stored.matches_request(command_kind, lot_id.as_uuid(), request_hash) {
-                            return Err(crate::CommandLedgerError::Conflict.into());
-                        }
-                        return match stored.result_code.as_str() {
-                            "accepted" => {
-                                let replayed: CompetitionPlan =
-                                    serde_json::from_slice(&stored.result_payload)?;
-                                match &command {
-                                    CompetitionCommand::PlaceBid(_) => {
-                                        legacy_ledger::replay_accepted(&command, replayed, &[], 0)
-                                    }
-                                    CompetitionCommand::CreateProxy(create) => {
-                                        let authorization_id = ProxyAuthorizationId::from_uuid(
-                                            legacy_ledger::deterministic_id(
-                                                create.command_id,
-                                                "auction-proxy-authorization",
-                                                1,
-                                            ),
-                                        );
-                                        let transitions = transaction
-                                            .proxy_transition_history(authorization_id)
-                                            .await?;
-                                        let quota_limit =
-                                            transaction.proxy_quota_limit(lot_id).await?;
-                                        legacy_ledger::replay_accepted(
-                                            &command,
-                                            replayed,
-                                            &transitions,
-                                            quota_limit,
-                                        )
-                                    }
-                                    CompetitionCommand::LowerProxy(lower) => {
-                                        let transitions = transaction
-                                            .proxy_transition_history(lower.authorization_id)
-                                            .await?;
-                                        let quota_limit =
-                                            transaction.proxy_quota_limit(lot_id).await?;
-                                        legacy_ledger::replay_accepted(
-                                            &command,
-                                            replayed,
-                                            &transitions,
-                                            quota_limit,
-                                        )
-                                    }
-                                }
-                            }
-                            legacy_ledger::LEGACY_RESULT_CODE => {
-                                legacy_ledger::replay(&command, &stored.result_payload)
-                            }
-                            // 旧版把同一请求命中的非成功结果分类为账本冲突；上方仍先核对
-                            // command kind、aggregate 与摘要，保留新版更强的防篡改边界。
-                            _ => Err(crate::CommandLedgerError::Conflict.into()),
-                        };
+                        return replay_stored_command(transaction, &command, stored).await;
                     }
 
                     let mut snapshot = transaction.load_for_update(lot_id).await?;
@@ -619,7 +583,7 @@ where
                             quota_limit,
                             now,
                         )?;
-                    transaction
+                    match transaction
                         .insert_command(StoredCommand {
                             command_id,
                             command_kind: command_kind.to_owned(),
@@ -628,7 +592,14 @@ where
                             result_code: legacy_ledger::LEGACY_RESULT_CODE.to_owned(),
                             result_payload: payload,
                         })
-                        .await?;
+                        .await?
+                    {
+                        CommandInsert::Inserted => {}
+                        // 并发同 ID 已提交：按账本结果重放，不再应用本事务计划。
+                        CommandInsert::Duplicate(stored) => {
+                            return replay_stored_command(transaction, &command, stored).await;
+                        }
+                    }
                     if let Some(prerequisite) = prerequisite_plan {
                         transaction.apply_plan(&prerequisite, None, now).await?;
                     }
@@ -639,6 +610,53 @@ where
                 })
             })
             .await
+    }
+}
+
+/// 按命令账本结果重放；顺序重试与并发同 ID 提交共用同一路径，保证同 ID 同请求返回原结果。
+async fn replay_stored_command<T>(
+    transaction: &mut T,
+    command: &CompetitionCommand,
+    stored: StoredCommand,
+) -> Result<CompetitionCommandOutcome, ApplicationError>
+where
+    T: CompetitionTransaction,
+{
+    if !stored.matches_request(command.kind(), command.lot_id().as_uuid(), command.request_hash()) {
+        return Err(crate::CommandLedgerError::Conflict.into());
+    }
+    let lot_id = command.lot_id();
+    match stored.result_code.as_str() {
+        "accepted" => {
+            let replayed: CompetitionPlan = serde_json::from_slice(&stored.result_payload)?;
+            match command {
+                CompetitionCommand::PlaceBid(_) => {
+                    legacy_ledger::replay_accepted(command, replayed, &[], 0)
+                }
+                CompetitionCommand::CreateProxy(create) => {
+                    let authorization_id =
+                        ProxyAuthorizationId::from_uuid(legacy_ledger::deterministic_id(
+                            create.command_id,
+                            "auction-proxy-authorization",
+                            1,
+                        ));
+                    let transitions =
+                        transaction.proxy_transition_history(authorization_id).await?;
+                    let quota_limit = transaction.proxy_quota_limit(lot_id).await?;
+                    legacy_ledger::replay_accepted(command, replayed, &transitions, quota_limit)
+                }
+                CompetitionCommand::LowerProxy(lower) => {
+                    let transitions =
+                        transaction.proxy_transition_history(lower.authorization_id).await?;
+                    let quota_limit = transaction.proxy_quota_limit(lot_id).await?;
+                    legacy_ledger::replay_accepted(command, replayed, &transitions, quota_limit)
+                }
+            }
+        }
+        legacy_ledger::LEGACY_RESULT_CODE => legacy_ledger::replay(command, &stored.result_payload),
+        // 旧版把同一请求命中的非成功结果分类为账本冲突；上方仍先核对 command kind、
+        // aggregate 与摘要，保留新版更强的防篡改边界。
+        _ => Err(crate::CommandLedgerError::Conflict.into()),
     }
 }
 

@@ -349,3 +349,15 @@ async fn postgres_price_history_index_matches_owner_predicate() {
 
     store.postgres_pool().close().await;
 }
+
+/// readiness 必须区分“真实依赖故障”和暂时饱和：池关闭后不得仍报告就绪。
+#[tokio::test]
+async fn postgres_readiness_reports_real_database_failure() {
+    use auction_application::ProcessReadinessPort;
+
+    let database = support::TestDatabase::create().await.expect("克隆已迁移模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    store.check().await.expect("刚连接的已迁移数据库应就绪");
+    store.postgres_pool().close().await;
+    assert!(store.check().await.is_err(), "连接池关闭后不得报告就绪");
+}

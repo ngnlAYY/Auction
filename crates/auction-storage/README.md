@@ -77,6 +77,8 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 
 `DatabaseStore::with_runtime_switches` 由三角色装配根注入共享快照；默认 shadow 沿用全部失败累计门禁并观察新旧差异，legacy 不计算影子，classified 仅投影 permanent + unknown。HTTP、心跳与既有告警共享该模式的 `audit_failure_count`，不改 DTO 或 schema。纯内存审计指标由装配根注册，关闭 exporter 不影响计数；日志仅包含固定类别和 kind，不包含驱动原文。指标字典见 [auction-observability](../auction-observability/README.md#指标)，开关与切换步骤见[配置参考](../../ops/config/README.md#就绪策略)和[运维手册](../../ops/README.md#审计就绪影子观察)。
 
+`check_database_readiness` 使用 `begin_read_snapshot_reserved`：`TrackedPool` 把普通业务连接限制在物理池扣除长期 owner 与 readiness 预留后的容量，readiness 始终保留一个真实池连接，Final 写饱和或匿名读突发不能把探针饿死；连接池关闭、连接失败与 schema/迁移失败仍使 readiness 失败。失败投影区分 `timeout`（有界预算内未完成检查）与 `dependency_unavailable`（池饱和或审计门禁），不再统一记为 `repository_failed`；审计门禁另在 `auction::storage::audit_health` 输出 `审计失败门禁阻断进程 readiness`。Worker 批量连接预算相应扣除 1 个 readiness 保留位。
+
 ## SQL 错误安全上下文
 
 [`crates/auction-storage/src/database/backend.rs`](src/database/backend.rs) 的 `storage_error_from` 接收原始 SQLx 错误，返回增强文本的 `ApplicationError::Repository(RepositoryError::Failed(String))`；`sql_error_context` 是字符串投影的唯一实现，供健康错误和具名 SQL mapper 的原有 `Failed(String)` 出口复用。纯校验拒绝、非 SQLx 错误及没有原始错误的 `ok_or_else` 继续使用固定文本。已压缩为其他闭集错误的路径不从文本反推 SQL 原因。

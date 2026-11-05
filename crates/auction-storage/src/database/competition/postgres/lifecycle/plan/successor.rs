@@ -60,7 +60,8 @@ pub(super) async fn insert_successor_postgres(
         return Err(invalid_state("下一期草稿不满足初始状态不变量"));
     }
 
-    transaction
+    // 下一期创建命令由本事务首次写入；同 ID 已存在时沿用旧语义视为已完成。
+    let _ = transaction
         .insert_command_inner(&StoredCommand {
             command_id: successor.create_command_id,
             command_kind: "scheduled_auction_create".to_owned(),

@@ -340,9 +340,10 @@ pub use compensation::{
 };
 pub use core_clock::Clock;
 pub use core_competition::{
-    CompetitionCommandAuditContext, CompetitionCommandAuditKind, CompetitionProxyTransitionRecord,
-    CompetitionSnapshot, CompetitionTransaction, CompetitionTransactionError, ProxyUsageContext,
-    SlowProxyExecutionContext, TransactionFailure, TransactionFuture, TransactionRunner,
+    CommandInsert, CompetitionCommandAuditContext, CompetitionCommandAuditKind,
+    CompetitionProxyTransitionRecord, CompetitionSnapshot, CompetitionTransaction,
+    CompetitionTransactionError, ProxyUsageContext, SlowProxyExecutionContext, TransactionFailure,
+    TransactionFuture, TransactionRunner,
 };
 pub(crate) use core_encoding::for_each_legacy_go_json_segment;
 pub use core_encoding::lower_hex;
