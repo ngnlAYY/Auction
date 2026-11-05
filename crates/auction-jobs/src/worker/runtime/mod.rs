@@ -39,6 +39,9 @@ mod fulfillment;
 mod mail_poll;
 #[path = "../operations/alert.rs"]
 mod operations_alert;
+mod player_notifications {
+    include!("../player_notifications.rs");
+}
 #[path = "../realtime/consumer.rs"]
 mod realtime_consumer;
 #[path = "../recovery/loop/mod.rs"]
@@ -57,6 +60,7 @@ pub use mail_poll::{
     MailPollSchedules, PhasedMailSchedule, mail_world_phase,
 };
 pub use operations_alert::{OperationsAlertRuntime, OperationsAlertRuntimeConfig};
+pub use player_notifications::{PlayerNotificationRuntime, PlayerNotificationRuntimeConfig};
 pub use realtime_consumer::{
     PersistentRealtimeConsumer, RealtimeConsumerConfigError, RealtimeConsumerRunner,
 };

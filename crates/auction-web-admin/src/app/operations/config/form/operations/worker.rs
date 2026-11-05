@@ -26,7 +26,6 @@ pub(super) fn WorkerFields(
             RuntimeGroup { title: t!("admin-runtime-op-section-delivery"),
                 div { class: "admin-runtime-field-grid",
                     NumberField { form, disabled, path: "operations.worker.delivery.batch_limit", label: t!("admin-runtime-op-batch-limit"), minimum: "1", maximum: "1000", on_dirty }
-                    NumberField { form, disabled, path: "operations.worker.delivery.concurrency", label: t!("admin-runtime-op-concurrency"), minimum: "1", maximum: "1000", on_dirty }
                     NumberField { form, disabled, path: "operations.worker.delivery.poll_interval_seconds", label: t!("admin-runtime-op-poll-interval-seconds"), minimum: "1", maximum: "86400", on_dirty }
                     NumberField { form, disabled, path: "operations.worker.delivery.jitter_seconds", label: t!("admin-runtime-op-jitter-seconds"), minimum: "0", maximum: "86400", on_dirty }
                     NumberField { form, disabled, path: "operations.worker.delivery.lease_duration_seconds", label: t!("admin-runtime-op-lease-duration-seconds"), minimum: "1", maximum: "86400", on_dirty }

@@ -11,6 +11,10 @@ cd "$repository_root"
 source ci/release/build-identity.sh
 configure_build_tools
 
+# 浏览器构建号与原生程序共用来源指纹；部署后旧页面据此发现偏差。复用判定不因它改变。
+AUCTION_BUILD_ID=$(web_build_identity) || exit 1
+export AUCTION_BUILD_ID
+
 surface=${1:-}
 if ! package=$(web_surface_package "$surface"); then
 	printf '未知 Web surface：%s\n' "$surface" >&2

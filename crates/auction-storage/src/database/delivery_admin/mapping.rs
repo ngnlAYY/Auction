@@ -592,6 +592,8 @@ fn valid_origin_kind(value: &str) -> bool {
             | "mail_intake"
             | "operations_alert"
             | "lot_watch"
+            | "seller_summary"
+            | "season_reminder"
     )
 }
 

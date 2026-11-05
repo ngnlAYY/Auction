@@ -26,6 +26,8 @@ use super::skeleton::run_worker_skeleton;
 #[cfg(feature = "postgres")]
 use super::*;
 #[cfg(feature = "postgres")]
+use auction_application::{PlayerNotificationScanner, PlayerNotificationService};
+#[cfg(feature = "postgres")]
 use chrono::Timelike;
 
 #[cfg(feature = "postgres")]
@@ -258,6 +260,21 @@ pub(super) async fn run_worker(
     let recovery_delivery: Option<Arc<dyn MailDeliveryEnqueuer>> =
         if recovery_delivery_enabled { Some(store.clone()) } else { None };
     let recovery_blacklister: Option<Arc<dyn RecoveryBuyerBlacklister>> = Some(store.clone());
+    // W14.3：玩家通知扫描只读持久事实；发送仍由 delivery 循环负责。
+    let player_notifications = {
+        let scanner: Arc<dyn PlayerNotificationScanner> = store.clone();
+        let delivery: Arc<dyn MailDeliveryEnqueuer> = store.clone();
+        Some(Arc::new(
+            auction_jobs::PlayerNotificationRuntime::new(
+                Arc::new(PlayerNotificationService::new(scanner, delivery, Arc::new(SystemClock))),
+                auction_jobs::PlayerNotificationRuntimeConfig {
+                    poll_interval: std::time::Duration::from_secs(300),
+                    jitter: std::time::Duration::from_secs(30),
+                },
+            )
+            .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+        ))
+    };
     let recovery_worlds = if config.worker.mooglemail.enabled {
         config
             .worker
@@ -390,6 +407,7 @@ pub(super) async fn run_worker(
             recovery_resolution,
             recovery_delivery,
             recovery_blacklister,
+            player_notifications,
             recovery: auction_jobs::RecoveryWorkerRuntimeConfig {
                 batch_limit: config.worker.recovery.batch_limit,
                 concurrency: config.worker.recovery.concurrency,
@@ -411,7 +429,6 @@ pub(super) async fn run_worker(
             delivery_transport,
             delivery: auction_jobs::DeliveryWorkerRuntimeConfig {
                 batch_limit: config.worker.delivery.batch_limit,
-                concurrency: config.worker.delivery.concurrency,
                 poll_interval: std::time::Duration::from_secs(
                     config.worker.delivery.poll_interval_seconds,
                 ),

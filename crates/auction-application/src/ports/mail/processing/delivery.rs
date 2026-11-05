@@ -31,6 +31,10 @@ pub enum MailDeliveryOrigin {
     SettlementRecoveryAction,
     OperationsAlert,
     LotWatch,
+    /// W14.3 卖方成交与流拍汇总；每场每卖方一封，正文在结算事实后冻结。
+    SellerSummary,
+    /// W14.3 换季前 isekai 领取与交付提醒；边界取自已冻结的赛季身份。
+    SeasonReminder,
 }
 
 impl MailDeliveryOrigin {
@@ -41,6 +45,8 @@ impl MailDeliveryOrigin {
             Self::SettlementRecoveryAction => "settlement_recovery_action",
             Self::OperationsAlert => "operations_alert",
             Self::LotWatch => "lot_watch",
+            Self::SellerSummary => "seller_summary",
+            Self::SeasonReminder => "season_reminder",
         }
     }
 }
@@ -53,6 +59,10 @@ pub enum MailNotificationTemplate {
     AuctionEquipmentRejected,
     /// W14.3 投稿接收回执：整封投稿按原邮件合并，正文在录入事务完成后冻结。
     AuctionSubmissionReceipt,
+    /// W14.3 卖方成交与流拍汇总：正文在结算事实确定后冻结，每场每卖方一封。
+    AuctionSellerSummary,
+    /// W14.3 换季前 isekai 领取与交付提醒：正文绑定已冻结的赛季边界。
+    IsekaiSeasonReminder,
     UserAssetsRejected,
     RegisterKey,
     RegisterResult,
@@ -67,11 +77,13 @@ pub enum MailNotificationTemplate {
 
 impl MailNotificationTemplate {
     /// 全部模板的稳定顺序；通知目录测试据此核对文档与模板注册一致。
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 16] = [
         Self::AuctionAssetsRejected,
         Self::AuctionNoAttachments,
         Self::AuctionEquipmentRejected,
         Self::AuctionSubmissionReceipt,
+        Self::AuctionSellerSummary,
+        Self::IsekaiSeasonReminder,
         Self::UserAssetsRejected,
         Self::RegisterKey,
         Self::RegisterResult,
@@ -91,6 +103,8 @@ impl MailNotificationTemplate {
             Self::AuctionNoAttachments => "auction_no_attachments",
             Self::AuctionEquipmentRejected => "auction_equipment_rejected",
             Self::AuctionSubmissionReceipt => "auction_submission_receipt",
+            Self::AuctionSellerSummary => "auction_seller_summary",
+            Self::IsekaiSeasonReminder => "isekai_season_reminder",
             Self::UserAssetsRejected => "user_assets_rejected",
             Self::RegisterKey => "register_key",
             Self::RegisterResult => "register_result",

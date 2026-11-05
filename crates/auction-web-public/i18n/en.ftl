@@ -562,3 +562,6 @@ watch-unknown = Save result unknown. Retry the exact same command to resolve it;
 watch-conflict = Marks changed or command conflicted. Refresh, review the server state, then retry your change.
 watch-save-error = Mark could not be saved. Refresh server marks before trying again.
 watch-retry-command = Retry original save
+
+stale-build-notice = A new version has been deployed. Refresh this page to load it; your current input is not submitted automatically.
+stale-build-refresh = Refresh page

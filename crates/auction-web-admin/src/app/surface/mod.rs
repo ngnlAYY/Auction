@@ -58,9 +58,9 @@ use dioxus_i18n::prelude::*;
 use unic_langid::langid;
 
 use auction_web_shared::{
-    BaseStylesheet,
+    BaseStylesheet, StaleBuildBanner,
     i18n::{DEFAULT_ADMIN_LOCALE, initial_language},
-    use_locale_effects, use_theme_effects,
+    legacy_t as t, use_locale_effects, use_theme_effects,
 };
 
 pub(super) use command::{run_admin_action, run_admin_feedback_action};
@@ -106,6 +106,10 @@ fn App() -> Element {
         document::Stylesheet { href: ADMIN_DESKTOP_CSS }
         document::Stylesheet { href: ADMIN_MOBILE_CSS }
         div { class: "app-root",
+            StaleBuildBanner {
+                message: t!("stale-build-notice"),
+                refresh_label: t!("stale-build-refresh"),
+            }
             Router::<Route> {}
         }
     }

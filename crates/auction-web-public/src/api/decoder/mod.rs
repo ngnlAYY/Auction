@@ -15,12 +15,15 @@ use serde_json::{Map, Value};
 use chrono::DateTime;
 
 mod account;
+mod build_hello;
 mod catalog;
 mod lot;
 #[cfg(target_arch = "wasm32")]
 mod realtime;
 
 pub(crate) use account::{decode_my_bids, decode_my_proxy};
+#[cfg(target_arch = "wasm32")]
+pub(crate) use build_hello::decode_build_hello;
 pub(crate) use catalog::{
     decode_auction_list, decode_auction_list_v2, decode_bid_log_page, decode_blacklist,
     decode_compensation_lots, decode_compensation_pool, decode_current_auction,

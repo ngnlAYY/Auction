@@ -127,7 +127,7 @@ auction-cli --config-dir /etc/auction service stop --force --reason '紧急修�
 
 ## 停机门禁
 
-`db migrate`、`db create`、`db rebuild` 与 `backup restore` 在写数据库前取得停机证明：
+`db migrate`、`db grants`、`db create`、`db rebuild` 与 `backup restore` 在写数据库前取得停机证明：
 
 1. 若 `<config-dir>` 的同级运行目录 `.<目录名>.server/owner.lock` 存在（合并部署），以非阻塞方式取得其独占锁；`auction-server` 或其子进程仍在运行时失败。合并部署必须用与 `auction-server` 相同的服务账号执行，锁文件须为该账号所有的单链接 owner-only 文件。
 2. 否则先取得部署控制锁（`--state-dir` 不存在时以 0700 创建），再查询三个 systemd unit，全部为 `inactive`、`failed` 或 `not-found` 才继续；目录首次创建期间也与 `service` 命令互斥，目录或锁无法安全创建时拒绝维护。
@@ -141,24 +141,36 @@ auction-cli --config-dir /etc/auction service stop --force --reason '紧急修�
 
 ```bash
 auction-cli db status
-auction-cli db migrate
+auction-cli db migrate --owner-secrets /etc/auction/owner/postgres.toml
 ```
 
 `db status` 只读输出目标库身份、服务器版本、是否只读/recovery、其他会话数、库大小、schema 身份与迁移历史；schema 不是当前二进制的期望版本时以 3 退出。
 
-`db migrate` 在门禁后执行二进制内嵌的全部追加式迁移（SQLx 迁移锁内），输出迁移前后版本。空库会建立完整 schema；存在未知用户对象的非空库被拒绝；历史 checksum 不匹配、失败记录或缺失版本同样失败。迁移只向前，不提供回滚。
+`db migrate` 在门禁后以**迁移 owner**（`--owner-secrets`）执行二进制内嵌的全部追加式迁移（SQLx 迁移锁内），输出迁移前后版本。空库会建立完整 schema；存在未知用户对象的非空库被拒绝；历史 checksum 不匹配、失败记录或缺失版本同样失败。迁移只向前，不提供回滚。服务运行账号（`auction_runtime`）没有 DDL 权限，不能用于本命令；`--owner-secrets` 必须指向 Worker 配置中的同一数据库，账号必须与 `[database_roles] owner` 一致且不同于服务账号，否则命令在连接前失败。
+
+迁移 `000081` 把运行账号的最小权限固化为 `public.apply_auction_runtime_privileges()`（授权定义只此一份），`db grants` 用同一函数在恢复后或授权变更时重放：
 
 075 起每个新迁移同事务追加兼容登记；readiness 的 compatible 模式不放宽本 CLI 的迁移、preflight、备份或 inventory 版本边界。程序回退时保留能识别当前数据库的新版 CLI，只换回已包含 W7.8a 的旧角色程序，事先显式设置 `migration_compatibility_mode = "compatible"`；不承诺旧 CLI 的 `service start/restart` 能接受未来数据库，也没有自动 rollback 命令。完整步骤见[程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
+
+### 重放运行账号权限
+
+```bash
+auction-cli db grants --owner-secrets /etc/auction/owner/postgres.toml
+```
+
+以迁移 owner 重放 `public.apply_auction_runtime_privileges()`：重建 `public` schema 的 `USAGE`、可变表读写、只追加表仅 `INSERT`、序列 `USAGE`/`SELECT`，并恢复默认权限。备份恢复使用 `--no-owner --no-privileges`，ACL 与默认权限都不在 dump 中，因此 `backup restore` 会在核对 schema 后自动调用该函数；手工换库、手工授权变更或需要重新收口权限时使用本命令。数据库尚未执行迁移 081 时命令明确失败并提示先 `db migrate`。
 
 ### 建库
 
 ```bash
-auction-cli db create --database auction --maintenance-secrets /etc/auction/maintenance/postgres.toml
+auction-cli db create --database auction \
+  --maintenance-secrets /etc/auction/maintenance/postgres.toml \
+  --owner-secrets /etc/auction/owner/postgres.toml
 ```
 
-首次部署时用独立维护凭据创建应用数据库：`--database` 须与 Worker 配置的库名一致，owner 为 Worker 配置中的数据库账号。维护凭据文件（模板见 `ops/config/examples/secrets/postgres-rebuild.toml`）使用 `[database]` 五字段，也兼容与之互斥的 `database_url`；维护库名固定为 `postgres`，主机与端口须与应用库相同。目标提取复用实际 SQLx 连接选项：`hostaddr` 按查询顺序覆盖 TCP host，已指定的 Unix socket 优先于后续 TCP host；socket 路径区分大小写，IP 地址按规范化地址比较。文件必须是规范化绝对路径、非符号链接、单硬链接、归当前账号所有且仅 owner 可读，父目录禁止 group/other 写入。
+首次部署时用独立维护凭据创建应用数据库：`--database` 须与 Worker 配置的库名一致，库 owner 是 `--owner-secrets` 中的迁移 owner（不是服务账号）。维护凭据文件（模板见 `ops/config/examples/secrets/postgres-rebuild.toml`）使用 `[database]` 五字段，也兼容与之互斥的 `database_url`；维护库名固定为 `postgres`，主机与端口须与应用库相同。目标提取复用实际 SQLx 连接选项：`hostaddr` 按查询顺序覆盖 TCP host，已指定的 Unix socket 优先于后续 TCP host；socket 路径区分大小写，IP 地址按规范化地址比较。文件必须是规范化绝对路径、非符号链接、单硬链接、归当前账号所有且仅 owner 可读，父目录禁止 group/other 写入。
 
-命令取得集群级 advisory lock，要求连接可写主节点；目标不存在时校验维护角色具备 `CREATEDB`（或 superuser）、应用角色存在且可被指派为 owner，然后 `CREATE DATABASE` 并用应用账号回连验证。目标已存在时只校验 owner 与应用连接，返回 `already_exists`。本命令不迁移、不修改已有库，随后需执行 `db migrate`。
+命令取得集群级 advisory lock，要求连接可写主节点；目标不存在时校验维护角色具备 `CREATEDB`（或 superuser）、owner 角色存在且可被指派为 owner，然后 `CREATE DATABASE` 并用 owner 账号回连验证。目标已存在时只校验 owner 与 owner 连接，返回 `already_exists`。本命令不迁移、不修改已有库，随后需执行 `db migrate --owner-secrets`。
 
 ### 恢复预检与保留盘点
 
@@ -178,11 +190,13 @@ auction-cli db inventory --database auction --output /var/backups/auction/invent
 # 只读演练（默认）：持锁预检并输出预检证据
 auction-cli db rebuild --database auction \
   --maintenance-secrets /etc/auction/maintenance/postgres.toml \
+  --owner-secrets /etc/auction/owner/postgres.toml \
   --mode empty-for-restore --backup-manifest /var/backups/auction/auction-20261030.dump.manifest
 
 # 实际执行
 auction-cli db rebuild --database auction \
   --maintenance-secrets /etc/auction/maintenance/postgres.toml \
+  --owner-secrets /etc/auction/owner/postgres.toml \
   --mode empty-for-restore --backup-manifest /var/backups/auction/auction-20261030.dump.manifest \
   --execute --confirm 'REBUILD auction' --receipt /var/backups/auction/rebuild-20261030.json
 ```
@@ -197,17 +211,18 @@ auction-cli db rebuild --database auction \
 ```bash
 auction-cli backup create --database auction --output /var/backups/auction/auction-20261030.dump
 auction-cli backup verify --manifest /var/backups/auction/auction-20261030.dump.manifest --database auction
-auction-cli backup restore --manifest /var/backups/auction/auction-20261030.dump.manifest --database auction --dry-run
 auction-cli backup restore --manifest /var/backups/auction/auction-20261030.dump.manifest --database auction \
-  --receipt /var/backups/auction/restore-20261030.json
+  --owner-secrets /etc/auction/owner/postgres.toml --dry-run
+auction-cli backup restore --manifest /var/backups/auction/auction-20261030.dump.manifest --database auction \
+  --owner-secrets /etc/auction/owner/postgres.toml --receipt /var/backups/auction/restore-20261030.json
 ```
 
 - 依赖部署环境 `PATH` 中的 `pg_dump`/`pg_restore`，主版本不得低于服务器（PostgreSQL 18）。连接参数投影复用实际 SQLx 连接选项的有效 host/socket、port、database 与 user；仅传最终 `PGHOST`，不独立保留 `PGHOSTADDR`，避免预检与外部工具因查询覆盖规则不同而连接不同实例。继承的连接相关 `PG*` 环境全部清除，显式口令只写入 0600 临时 passfile 并在命令结束后删除，从不进入进程参数；TLS 与显式口令仍从敏感配置提取，不承诺与 SQLx 的全部环境默认值或隐式凭据来源一致。连接串只能含 `host`、`hostaddr`、`port`、`dbname`、`user`、`password`、`sslmode`、`sslrootcert`、`sslcert`、`sslkey`、`application_name`（另兼容 SQLx 的 TLS 别名与 `statement-cache-capacity`），`options` 与未知参数被拒绝。
 - `create`：`--output` 必须以 `.dump` 结尾，文件名不得含反斜杠、控制字符或首尾空白，archive 与同目录 `<archive>.manifest` 均不得已存在。备份源须有 Auction schema 身份与完整迁移历史；`pg_dump --format=custom --no-owner --no-privileges` 写入临时文件，经 `pg_restore --list` 解析并同步 archive 文件后以硬链接无覆盖发布，随后同步父目录并写入 manifest；备份前后 schema 版本不一致则丢弃 archive。
 - manifest 格式为 `auction-postgres-backup.v1`，记录 archive 文件名、archive SHA-256、库名 SHA-256、schema 版本与创建时间；此前运维工具生成的同格式备份可直接校验与恢复。
 - `verify`：不连接数据库，校验 manifest 字段闭集、库名摘要、archive SHA-256 与 archive 目录。
-- `restore`：通过停机门禁；备份 schema 版本不得高于当前二进制；目标必须是同名空库（零其他会话、可写主节点、无用户对象、无 schema 身份与迁移历史，可先用 `db rebuild --mode empty-for-restore` 准备）。恢复前再次校验恢复点，以 `pg_restore --single-transaction --exit-on-error --no-owner --no-privileges` 执行，完成后核对 schema 身份与迁移版本等于备份版本，再写入 `auction-postgres-restore.v1` 回执。恢复较旧备份后按提示执行 `db migrate`。
-- 恢复不保留对象 owner 与权限（以应用账号为 owner 的空库恢复后即归应用账号所有）。
+- `restore`：通过停机门禁；备份 schema 版本不得高于当前二进制；目标必须是同名空库（零其他会话、可写主节点、无用户对象、无 schema 身份与迁移历史，可先用 `db rebuild --mode empty-for-restore` 准备）。恢复前再次校验恢复点，以 `pg_restore --single-transaction --exit-on-error --no-owner --no-privileges` 执行，完成后核对 schema 身份与迁移版本等于备份版本，再写入 `auction-postgres-restore.v1` 回执。恢复较旧备份后按提示执行 `db migrate --owner-secrets`。
+- 恢复以 `--no-owner --no-privileges` 执行，对象 owner 与 ACL 都不在 dump 中：恢复后对象归迁移 owner，回执的 `ownership_restored=false`。备份版本已含`000081` 时命令会在核对 schema 后重放运行账号授权并记录 `runtime_privileges_applied=true`；缺失授权函数或以旧版本恢复时保持停机并提示先 `db migrate`。
 
 完整的灾备流程见[备份与恢复手册](../../ops/deploy/RECOVERY.md)。
 含迁移版本上线前另须完成[迁移演练](../../ops/deploy/MIGRATION-DRILL.md)，保存[手工回执](../../ops/deploy/migration-drill-receipt.template.json)；M1 不自动核对回执。
@@ -469,12 +484,12 @@ legacy 使用旧池 16、acquire 30 秒，不显式设置 application_name 或�
 入口与 application_name：
 
 - db status：`auction-cli-status`。
-- db migrate、service start/restart 迁移、fresh-schema 重建后的迁移：
-  `auction-cli-migrate`。
+- db migrate、db grants、service start/restart 迁移、fresh-schema 重建后的迁移：
+  `auction-cli-migrate`（连接使用 `--owner-secrets` 的迁移 owner，不是服务账号）。
 - db preflight / inventory：`auction-cli-preflight` / `auction-cli-inventory`。
 - backup create / scheduled 的前后 SQL 核对：`auction-cli-backup-check`；
   外部 pg_dump：`auction-cli-backup`。
-- backup restore 的前后核对及外部 pg_restore：`auction-cli-restore`；
+- backup restore 的前后核对及外部 pg_restore：`auction-cli-restore`（同样使用迁移 owner）；
   预检池先关闭，才执行外部恢复，之后另建核对池。
 - db create / rebuild 的维护库直连：`auction-cli-create` / `auction-cli-rebuild`；
   建库后置目标库验证复用 create 用途。

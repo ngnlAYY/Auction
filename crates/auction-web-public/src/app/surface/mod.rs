@@ -77,7 +77,7 @@ use crate::api::{
 };
 use auction_web_shared::{
     AsyncState, AsyncStateKind, BaseErrorKind, BaseStylesheet, LanguagePicker, Pager, QueryState,
-    QueryWriteMode, ThemePicker, Time, TruncatedText, base_api_error_message,
+    QueryWriteMode, StaleBuildBanner, ThemePicker, Time, TruncatedText, base_api_error_message,
     format_credit_amount as format_amount,
     i18n::{DEFAULT_PUBLIC_LOCALE, format_localized_time_for_language, initial_language},
     legacy_t as t, use_app_boot_ready, use_dialog_focus_trap, use_locale_effects, use_query_state,

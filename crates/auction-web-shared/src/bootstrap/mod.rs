@@ -8,10 +8,19 @@ pub const BROWSER_ERROR_ROUTE: &str = "/api/v1/browser-errors";
 
 /// 浏览器构建号；发布构建通过 `AUCTION_BUILD_ID` 注入，未注入时退回 workspace 版本。
 /// 服务端用同一表达式比较构建号，只把偏差计入固定计数，不把值写入指标标签。
-pub const BUILD_ID: &str = match option_env!("AUCTION_BUILD_ID") {
+const INJECTED_BUILD_ID: &str = match option_env!("AUCTION_BUILD_ID") {
     Some(value) => value,
     None => env!("CARGO_PKG_VERSION"),
 };
+
+static BUILD_ID: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {
+    if build_id_is_valid(INJECTED_BUILD_ID) { INJECTED_BUILD_ID } else { env!("CARGO_PKG_VERSION") }
+});
+
+/// 当前页面构建号；非法注入回退包版本，保证比较与上报使用同一份可判定值。
+pub fn build_id() -> &'static str {
+    *BUILD_ID
+}
 
 /// 信标只接受闭集类别；WASM panic、DTO 解码失败与实时协议错误之外的错误不进入该通道。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,7 +51,7 @@ pub fn build_id_is_valid(value: &str) -> bool {
 
 /// 以当前构建号发送一条信标；请求无正文，失败静默，不影响页面主流程。
 pub fn report_browser_error(class: BrowserErrorClass) {
-    report_browser_error_with_build_id(class, BUILD_ID);
+    report_browser_error_with_build_id(class, build_id());
 }
 
 /// 供测试或显式构建号调用；非法构建号降级为 `unknown`，避免把任意文本拼进 URL。

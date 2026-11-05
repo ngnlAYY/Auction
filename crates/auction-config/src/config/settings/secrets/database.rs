@@ -163,3 +163,17 @@ fn validate_text(field: &'static str, value: &str, maximum: usize) -> Result<(),
     }
     Ok(())
 }
+
+/// 从连接串提取非秘密的账号名，供离线预检区分迁移 owner 与服务运行账号。
+/// 只接受与驱动一致的两种写法：URL userinfo 与 `user` 查询参数；两者都没有时返回 None，
+/// 不读取 PGUSER 或当前系统账号，避免把本机身份误判为部署账号。
+pub fn database_url_username(database_url: &str) -> Option<String> {
+    let url = Url::parse(database_url).ok()?;
+    let userinfo = url.username();
+    if !userinfo.is_empty() {
+        return Some(userinfo.to_owned());
+    }
+    url.query_pairs()
+        .find(|(key, value)| key.as_ref() == "user" && !value.is_empty())
+        .map(|(_, value)| value.into_owned())
+}

@@ -169,6 +169,13 @@ where
             recovery::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
         ));
     }
+    let mut player_notification_tasks = JoinSet::new();
+    if worker.player_notifications.is_some() {
+        player_notification_tasks.spawn(run_background(
+            worker.write_lifecycle.clone(),
+            player_notifications::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
+        ));
+    }
     let mut mail_poll_tasks = JoinSet::new();
     let mut mail_maintenance_tasks = JoinSet::new();
     for runtime in worker.mail_polls.iter().cloned() {
@@ -334,6 +341,20 @@ where
                     Some(Ok(())) | None => break Some(WorkerError::RecoveryTaskExited),
                 }
             }
+            result = player_notification_tasks.join_next(), if !player_notification_tasks.is_empty() => {
+                match result {
+                    Some(Err(error)) => {
+                        observe_task_join(
+                            worker.metrics.as_ref(),
+                            Some(WorkerLoop::PlayerNotifications),
+                            &error,
+                        );
+                        break Some(WorkerError::PlayerNotificationTaskJoin(error));
+                    }
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::PlayerNotificationTaskExited),
+                }
+            }
             result = mail_poll_tasks.join_next(), if !mail_poll_tasks.is_empty() => {
                 match result {
                     Some(Err(error)) => {
@@ -415,6 +436,7 @@ where
             drain_worker_tasks(&mut auction_tasks, "auction").await,
             drain_worker_tasks(&mut fulfillment_tasks, "fulfillment").await,
             drain_worker_tasks(&mut recovery_tasks, "recovery").await,
+            drain_worker_tasks(&mut player_notification_tasks, "player notifications").await,
             drain_worker_tasks(&mut mail_poll_tasks, "MoogleMail").await,
             drain_worker_tasks(&mut mail_maintenance_tasks, "MoogleMail maintenance").await,
             drain_worker_tasks(&mut forum_tasks, "forum").await,

@@ -1432,3 +1432,6 @@ admin-switches-reason = Reason
 admin-switches-applied = Admin effective value / revision
 admin-switches-baseline = TOML baseline
 admin-switches-unset = Unset
+
+stale-build-notice = A new version has been deployed. Refresh this page to load it; your current input is not submitted automatically.
+stale-build-refresh = Refresh page

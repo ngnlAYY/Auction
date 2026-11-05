@@ -110,4 +110,6 @@ bash ci/release/web-bundle.sh admin
 
 ### 构建身份：`ci/release/build-identity.sh`
 
-`ci/release/release.sh` 与 `ci/release/web-bundle.sh` 共用：选择受控工具（`target/build-tools/bin` 优先、`NO_DOWNLOADS=1`）、计算源码身份指纹（已跟踪与未忽略的新文件、删除与 mode 变化）、读取 BUILD-INFO、校验 Web payload。未通过环境变量指定时，显式清空 Cargo 配置中的两类 rustc 包装器；环境变量指定的 `sccache` 替换为受控版本，其他显式包装器保留并计入构建环境指纹。
+`ci/release/release.sh` 与 `ci/release/web-bundle.sh` 共用：选择受控工具（`target/build-tools/bin` 优先、`NO_DOWNLOADS=1`）、计算源码身份指纹（已跟踪与未忽略的新文件、删除与 mode 变化）、计算前后端共享构建号、读取 BUILD-INFO、校验 Web payload。未通过环境变量指定时，显式清空 Cargo 配置中的两类 rustc 包装器；环境变量指定的 `sccache` 替换为受控版本，其他显式包装器保留并计入构建环境指纹。
+
+两个入口都在构建前把 `web_build_identity`（两个 Web surface 输入并集指纹的前 32 位）导出为 `AUCTION_BUILD_ID`。原生程序把它写进每个 HTTP 响应头 `x-auction-build` 与实时 WebSocket 首帧，浏览器把同一值编译进 payload 并与自身比较；不一致时只提示刷新，不自动重载。该值只随浏览器 payload 输入变化，后端专属部署不会误报。

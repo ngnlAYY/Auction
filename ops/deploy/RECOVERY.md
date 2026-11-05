@@ -318,6 +318,7 @@ systemctl stop auction-server.service         # 合并部署
 ```bash
 auction-cli --config-dir /etc/auction db rebuild --database auction \
   --maintenance-secrets /etc/auction/maintenance/postgres.toml \
+  --owner-secrets /etc/auction/owner/postgres.toml \
   --mode empty-for-restore \
   --backup-manifest /var/backups/auction/auction-<时间>.dump.manifest
 ```
@@ -327,6 +328,7 @@ auction-cli --config-dir /etc/auction db rebuild --database auction \
 ```bash
 auction-cli --config-dir /etc/auction db rebuild --database auction \
   --maintenance-secrets /etc/auction/maintenance/postgres.toml \
+  --owner-secrets /etc/auction/owner/postgres.toml \
   --mode empty-for-restore \
   --backup-manifest /var/backups/auction/auction-<时间>.dump.manifest \
   --execute --confirm 'REBUILD auction' \
@@ -335,7 +337,7 @@ auction-cli --config-dir /etc/auction db rebuild --database auction \
 
 命令以原 owner、编码、locale provider、tablespace 与连接上限重建空库（`DROP DATABASE … WITH (FORCE)` + `CREATE DATABASE … TEMPLATE template0`），并写入回执（`auction-postgres-rebuild.v1`）。
 
-目标库已不存在（例如新集群）时，改用 `auction-cli db create --database auction --maintenance-secrets …` 建立空库。**不要**在恢复前执行 `db migrate`——恢复目标必须没有任何 schema。
+目标库已不存在（例如新集群）时，改用 `auction-cli db create --database auction --maintenance-secrets … --owner-secrets …` 建立空库；新库 owner 是 `--owner-secrets` 中的迁移 owner，服务账号（`auction_runtime`）不是库 owner。**不要**在恢复前执行 `db migrate`——恢复目标必须没有任何 schema。
 
 ### 3. 预检与演练
 
@@ -343,6 +345,7 @@ auction-cli --config-dir /etc/auction db rebuild --database auction \
 auction-cli --config-dir /etc/auction db preflight --database auction \
   --output /var/backups/auction/preflight-<时间>.json
 auction-cli --config-dir /etc/auction backup restore --database auction \
+  --owner-secrets /etc/auction/owner/postgres.toml \
   --manifest /var/backups/auction/auction-<时间>.dump.manifest --dry-run
 ```
 
@@ -352,22 +355,32 @@ auction-cli --config-dir /etc/auction backup restore --database auction \
 
 ```bash
 auction-cli --config-dir /etc/auction backup restore --database auction \
+  --owner-secrets /etc/auction/owner/postgres.toml \
   --manifest /var/backups/auction/auction-<时间>.dump.manifest \
   --receipt /var/backups/auction/restore-<时间>.json
 ```
 
 - 恢复前再次校验 archive，以 `pg_restore --single-transaction --exit-on-error --no-owner --no-privileges` 执行，完成后核对 schema 身份与迁移版本等于备份版本，最后写入回执（`auction-postgres-restore.v1`）。
 - 恢复使用单事务；明确在提交前失败时应整体回滚，但客户端报错、连接中断或回执缺失都不能单独证明目标仍为空。保持停机，用 `db preflight` 核对；若恢复已提交但后续核对或回执写入失败，库已非空，不能直接重跑恢复，须先确定实际结果。
-- 备份的 schema 版本不得高于当前 `auction-cli`；恢复不保留对象 owner 与权限（空库归应用角色所有，恢复后的对象也归它所有）。
+- 备份的 schema 版本不得高于当前 `auction-cli`；恢复不保留对象 owner 与 ACL（`--no-owner --no-privileges`）。恢复后的对象归迁移 owner，回执的 `ownership_restored=false`。
+- 备份版本已含迁移 `000081` 时，命令在核对 schema 后自动以同一 owner 连接重放 `public.apply_auction_runtime_privileges()`（回执 `runtime_privileges_applied=true`），否则服务账号没有对象权限。若该函数缺失或恢复的是更旧备份，命令保持停机并以非零退出，须先执行 `db migrate --owner-secrets` 再启动；手工换库或需要重新收口权限时执行 `auction-cli db grants --owner-secrets /etc/auction/owner/postgres.toml`。
 
 ### 5. 迁移
 
 ```bash
 auction-cli --config-dir /etc/auction db status        # 备份版本较旧时显示未到当前版本
-auction-cli --config-dir /etc/auction db migrate       # 仍保持三角色停止
+auction-cli --config-dir /etc/auction db grants --owner-secrets /etc/auction/owner/postgres.toml
+auction-cli --config-dir /etc/auction db migrate --owner-secrets /etc/auction/owner/postgres.toml
 ```
 
-合并部署：以服务账号执行 `auction-cli --config-dir /var/lib/auction/config db migrate`；完成下述外部历史核对后再启动。
+复核权限重放（`granted` 信息见 stdout 的 `runtime_role`）：
+
+```bash
+sudo -u postgres psql -d auction -Atc "select has_schema_privilege('auction_runtime','public','CREATE'), has_table_privilege('auction_runtime','bids','UPDATE'), has_table_privilege('auction_runtime','bids','INSERT')"
+# 期望：f|f|t
+```
+
+合并部署：以服务账号执行 `auction-cli --config-dir /var/lib/auction/config db migrate --owner-secrets /var/lib/auction/owner/postgres.toml`；完成下述外部历史核对后再启动。
 
 ### 6. 外部历史核对与启动
 
@@ -389,12 +402,12 @@ auction-cli --config-dir /etc/auction db migrate       # 仍保持三角色停�
 需要一个带当前 schema 的全新库（例如测试环境）时：
 
 ```bash
-auction-cli db rebuild --database auction --maintenance-secrets … \
+auction-cli db rebuild --database auction --maintenance-secrets … --owner-secrets … \
   --mode fresh-schema --backup-manifest <现有库的备份 manifest> \
   --execute --confirm 'REBUILD auction' --receipt <回执>
 ```
 
-或对新建的空库直接执行 `auction-cli db migrate`。
+或对新建的空库直接执行 `auction-cli db migrate --owner-secrets …`（空库执行全部迁移时 000081 会自动授予运行账号权限）。
 
 ## 回执状态判读
 

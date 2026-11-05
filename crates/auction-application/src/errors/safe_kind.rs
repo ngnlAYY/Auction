@@ -105,6 +105,7 @@ impl ApplicationError {
             Self::AdminWorld(_) => "admin_world_error",
             Self::MailProcessing(_) => "mail_processing_error",
             Self::OperationsAlert(_) => "operations_alert_error",
+            Self::PlayerNotification(_) => "player_notification_error",
         }
     }
 }

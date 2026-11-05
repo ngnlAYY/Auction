@@ -213,7 +213,8 @@ fn business_event_for_worker(loop_kind: WorkerLoop) -> Option<BusinessEvent> {
         WorkerLoop::MailMaintenanceMain
         | WorkerLoop::MailMaintenanceIsekai
         | WorkerLoop::MailReadObservationMain
-        | WorkerLoop::MailReadObservationIsekai => return None,
+        | WorkerLoop::MailReadObservationIsekai
+        | WorkerLoop::PlayerNotifications => return None,
         WorkerLoop::MailMain | WorkerLoop::MailIsekai => BusinessEvent::MailIntake,
         WorkerLoop::Delivery => BusinessEvent::MailDelivery,
         WorkerLoop::Auction => BusinessEvent::AuctionLifecycle,
@@ -243,7 +244,8 @@ fn valid_retry_mode(loop_kind: WorkerLoop, retry_kind: WorkerRetryKind) -> bool 
         | WorkerLoop::Realtime
         | WorkerLoop::OperationsAlertScan
         | WorkerLoop::OperationsAlertDispatch
-        | WorkerLoop::OperationsAlertReconcile => false,
+        | WorkerLoop::OperationsAlertReconcile
+        | WorkerLoop::PlayerNotifications => false,
     }
 }
 

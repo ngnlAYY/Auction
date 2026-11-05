@@ -20,6 +20,7 @@ pub(super) struct Options<'a> {
     pub(super) config_dir: &'a ConfigDir,
     pub(super) database: &'a str,
     pub(super) maintenance_secrets: &'a Path,
+    pub(super) owner_secrets: &'a Path,
     pub(super) mode: RebuildModeArg,
     pub(super) backup_manifest: Option<&'a Path>,
     pub(super) ephemeral: bool,
@@ -60,6 +61,8 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
         .context("读取维护凭据失败")?;
     let maintenance_target = DatabaseTarget::parse(secrets.database_url())?;
     application.require_same_endpoint(&maintenance_target)?;
+    let owner = super::load_owner_secrets(options.owner_secrets)?;
+    super::require_owner_target(&config, &owner)?;
 
     let backup = match options.backup_manifest {
         Some(manifest) => Some(crate::backup::verify_pair(manifest, options.database).await?),
@@ -116,7 +119,7 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
         Ok(result) => {
             receipt["rebuild"] = serde_json::to_value(&result)?;
             if options.mode == RebuildModeArg::FreshSchema {
-                match super::apply_migrations(&config).await {
+                match super::apply_migrations(&config, &owner).await {
                     Ok(report) => {
                         receipt["migration"] = serde_json::to_value(report)?;
                         Ok(())

@@ -29,6 +29,8 @@ pub(super) async fn claim_postgres(
     super::watch::retire_expired(&mut transaction, now, store.notification_metrics()).await?;
     super::watch::retire_renamed(&mut transaction, now, store.notification_metrics()).await?;
     super::watch::retire_receipts(&mut transaction, now, store.notification_metrics()).await?;
+    super::watch::retire_player_notifications(&mut transaction, now, store.notification_metrics())
+        .await?;
     let excluded_worlds =
         exclusions.recipients.iter().map(|excluded| excluded.world.as_str()).collect::<Vec<_>>();
     let excluded_names = exclusions

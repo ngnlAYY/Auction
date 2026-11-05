@@ -1431,3 +1431,6 @@ admin-switches-reason = 理由
 admin-switches-applied = Admin の有効値 / リビジョン
 admin-switches-baseline = TOML の基準値
 admin-switches-unset = 未設定
+
+stale-build-notice = 新しいバージョンが公開されました。このページを再読み込みしてください。現在の入力は自動送信されません。
+stale-build-refresh = ページを再読み込み

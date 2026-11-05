@@ -13,8 +13,9 @@ pub(crate) use switches::SwitchCommand;
 pub(crate) use wal::WalCommand;
 
 #[cfg(feature = "postgres")]
+#[cfg(feature = "postgres")]
 pub(crate) use database::RebuildModeArg;
-pub(crate) use database::{BackupCommand, DbCommand};
+pub(crate) use database::{BackupCommand, DbCommand, OwnerSecretsArg};
 pub(crate) use operations::{
     CredentialCommand, ForumCommand, FundsCommand, MailCommand, PmCommand, RulesCommand,
 };
@@ -130,11 +131,13 @@ pub(crate) struct ServiceArgs {
 pub(crate) enum ServiceAction {
     /// 显示三个 unit 的 systemd 状态与应用 readiness；任一角色未就绪时以非零退出。
     Status,
-    /// 严格预检、执行迁移，再按 Worker → Admin → Public 逐个启动并等待 readiness。
+    /// 严格预检、以迁移 owner 执行迁移，再按 Worker → Admin → Public 逐个启动并等待 readiness。
     Start {
         /// 每个角色等待 readiness 的秒数。
         #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=300))]
         startup_timeout_seconds: u64,
+        #[command(flatten)]
+        owner: OwnerSecretsArg,
     },
     /// 通过只读时段门禁后，按 Public → Admin → Worker 顺序停止三个 unit。
     Stop {
@@ -146,6 +149,9 @@ pub(crate) enum ServiceAction {
         /// 每个角色等待 readiness 的秒数。
         #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=300))]
         startup_timeout_seconds: u64,
+        /// 停机后执行迁移所用的 owner 凭据；服务账号没有 DDL 权限。
+        #[command(flatten)]
+        owner: OwnerSecretsArg,
         #[command(flatten)]
         shutdown: ShutdownArgs,
     },

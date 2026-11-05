@@ -401,6 +401,11 @@ fn finish_response(mut response: Response, request_id: &str) -> Response {
     if let Ok(value) = HeaderValue::from_str(request_id) {
         headers.insert(REQUEST_ID_HEADER, value);
     }
+    // 部署后仍打开的旧页面靠这个响应头发现前后端构建号不一致；值已限定为 HTTP 头安全字符。
+    headers.insert(
+        super::build_identity::BUILD_ID_HEADER,
+        HeaderValue::from_static(super::build_identity::build_id()),
+    );
     super::security::apply_browser_security_headers(headers);
     // `Date` 由 Hyper 的 HTTP/1 与 HTTP/2 编码器按秒缓存后统一补齐，这里无需逐响应格式化。
     super::countdown::apply_security_headers(&mut response);
@@ -469,5 +474,17 @@ mod tests {
                 HttpBoundary::new(Duration::from_secs(15), &[network.to_owned()], false).is_err()
             );
         }
+    }
+
+    #[test]
+    fn every_response_reports_the_process_build_id() {
+        let response = finish_response(StatusCode::NO_CONTENT.into_response(), "request-1");
+        let reported = response
+            .headers()
+            .get(super::super::build_identity::BUILD_ID_HEADER)
+            .and_then(|value| value.to_str().ok());
+        assert_eq!(reported, Some(super::super::build_identity::build_id()));
+        // 构建号与安全头同样是每个响应的固定部分，不能只在成功正文上出现。
+        assert!(response.headers().contains_key(header::CONTENT_SECURITY_POLICY));
     }
 }

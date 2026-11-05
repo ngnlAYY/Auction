@@ -21,6 +21,8 @@ pub enum NotificationKind {
     AuctionNoAttachments,
     AuctionEquipmentRejected,
     AuctionSubmissionReceipt,
+    AuctionSellerSummary,
+    IsekaiSeasonReminder,
     UserAssetsRejected,
     ForumAuctionNotice,
     SettlementWinnerEquipmentCod,
@@ -36,7 +38,7 @@ pub enum NotificationKind {
 
 impl NotificationKind {
     /// 零初始化与闭集断言使用的稳定顺序；顺序与判别值一致。
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 22] = [
         Self::RegisterKey,
         Self::RegisterResult,
         Self::RebindResult,
@@ -46,6 +48,8 @@ impl NotificationKind {
         Self::AuctionNoAttachments,
         Self::AuctionEquipmentRejected,
         Self::AuctionSubmissionReceipt,
+        Self::AuctionSellerSummary,
+        Self::IsekaiSeasonReminder,
         Self::UserAssetsRejected,
         Self::ForumAuctionNotice,
         Self::SettlementWinnerEquipmentCod,
@@ -71,6 +75,8 @@ impl NotificationKind {
             Self::AuctionNoAttachments => "auction_no_attachments",
             Self::AuctionEquipmentRejected => "auction_equipment_rejected",
             Self::AuctionSubmissionReceipt => "auction_submission_receipt",
+            Self::AuctionSellerSummary => "auction_seller_summary",
+            Self::IsekaiSeasonReminder => "isekai_season_reminder",
             Self::UserAssetsRejected => "user_assets_rejected",
             Self::ForumAuctionNotice => "forum_auction_notice",
             Self::SettlementWinnerEquipmentCod => "settlement_winner_equipment_cod",
@@ -116,6 +122,8 @@ impl NotificationKind {
             "auction_no_attachments" => Self::AuctionNoAttachments,
             "auction_equipment_rejected" => Self::AuctionEquipmentRejected,
             "auction_submission_receipt" => Self::AuctionSubmissionReceipt,
+            "auction_seller_summary" => Self::AuctionSellerSummary,
+            "isekai_season_reminder" => Self::IsekaiSeasonReminder,
             "user_assets_rejected" => Self::UserAssetsRejected,
             "forum_auction_notice" => Self::ForumAuctionNotice,
             "settlement_winner_equipment_cod" => Self::SettlementWinnerEquipmentCod,

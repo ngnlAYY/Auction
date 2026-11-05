@@ -205,6 +205,11 @@ async fn bootstrap() -> Result<Cluster, String> {
     };
     ensure_server_major_18(&admin_url).await?;
 
+    run_sql(
+        &admin_url,
+        "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='auction_runtime') THEN          CREATE ROLE auction_runtime LOGIN; END IF; END $$;",
+    )
+    .await?;
     let cluster = Cluster { admin_url, template: unique_name("auction_test_tmpl_"), server };
     let statement = format!("CREATE DATABASE {}", quote_ident(&cluster.template));
     run_sql(&cluster.admin_url, &statement).await?;

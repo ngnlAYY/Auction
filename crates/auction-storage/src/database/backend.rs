@@ -292,6 +292,12 @@ pub enum StorageError {
 
     #[error("refusing to migrate an unknown non-empty {backend} database")]
     UnknownDatabase { backend: DatabaseBackend },
+
+    #[error("failed to apply runtime database privileges")]
+    RuntimePrivileges {
+        #[source]
+        source: sqlx::Error,
+    },
 }
 
 /// 映射前保存冲突种类；统计在尝试结束时去重，纯冲突谓词不承担计数副作用。

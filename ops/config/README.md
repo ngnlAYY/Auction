@@ -28,6 +28,7 @@
 
 - 角色文件路径：Public/Worker 的 `AppConfig::load` 先读取 `AUCTION_CONFIG_FILE`，未设置时尝试当前目录下的 `ops/config/<角色>.toml`，不存在则构造内置默认配置；正式装配仍要求数据库等依赖齐备。Admin 入口另会尝试 `auction-config/admin.toml`，仍不存在才进入首次设置。这些是运行时发现路径，仓库模板位于 `ops/config/examples/`。`auction-server` 与 `auction-cli` 使用 `--config-dir` 指定目录，不用该环境变量选择配置；`auction-server` 检测到它会拒绝启动。
 - 除 `AUCTION_CONFIG_FILE` 外不存在任何环境变量覆盖；部署字段写在文件中。W7.7 的两个闭集行为开关可由数据库事实覆盖 TOML 基线，规则见下文。
+- 已移除的配置字段不会静默忽略：加载器仍解析旧键，但在校验阶段以可行动的说明拒绝，要求从部署 TOML 删除（例如 `[worker.delivery] concurrency` 与 `operations.worker.delivery.concurrency`，MoogleMail transport 的有效并发始终为 1）。回退到旧程序时同样必须先删除新程序认识的未知字段，见下文热读取边界。
 - 所有角色运行配置的解析与校验错误都在启动前失败，错误不回显秘密值。CLI 专用 `[backup]` 的范围和打卡 URL 由 CLI 校验，常驻角色仅解析保留。角色、公共、普通敏感与 runtime 文件大小上限为 4 MiB；独立维护凭据另限 64 KiB。
 - 三个角色必须引用同一个 `common_file`，并且同时引用同一个 `runtime_config_file`（或全部省略）；三角色数据库目标必须相同。`auction-cli config check` 会联合检查这些一致性。
 
@@ -35,7 +36,7 @@
 
 | 字段 | 说明 |
 | --- | --- |
-| `[database]` `host`、`port`、`username`、`password`、`name` | PostgreSQL 连接（必填）。账号与口令按原文填写，loader 负责编码；端口必须非零。也可用兼容的 `database_url`（`postgres://…`），二者不能同时出现 |
+| `[database]` `host`、`port`、`username`、`password`、`name` | PostgreSQL 连接（必填）。`username` 必须是迁移 081 授权的运行账号 `auction_runtime`（无 DDL、无 `TRUNCATE`、对只追加表只可 `INSERT`），不得使用迁移 owner 或维护账号。账号与口令按原文填写，loader 负责编码；端口必须非零。也可用兼容的 `database_url`（`postgres://…`），二者不能同时出现 |
 | `redis_url` | `cache.backend = "redis"` 时必填 |
 | `admin_actor`、`admin_secret` | Admin 登录凭据，必须成对；既有 secret 16–4096 字节可加载，首次设置要求至少 32 字节；无控制字符 |
 | `equipment_data_key_id` / `equipment_data_key` | 装备 key 加密（手工录入、投稿）；三角色必须一致 |
@@ -48,7 +49,16 @@
 
 三组数据密钥都是 32 字节随机数的标准 Base64（`openssl rand -base64 32`），标识与材料必须成对，三组不能复用。密钥缺失时对应能力不可用（接口返回能力不可用，Worker 相关功能拒绝启用）。
 
-文件必须只有 owner 可访问（建议 0600）。建库/重建用的维护凭据是另一份独立文件（模板 `ops/config/examples/secrets/postgres-rebuild.toml`），使用 `[database]` 五字段或与之互斥的兼容 `database_url`，目标库固定为 `postgres`；只供 `auction-cli db create/rebuild` 使用，常驻进程不引用。`admin_actor`、密钥、Cookie 与 OTLP headers 等根字段须写在 `[database]` 表之前，避免被 TOML 解释为数据库字段。
+文件必须只有 owner 可访问（建议 0600）。`admin_actor`、密钥、Cookie 与 OTLP headers 等根字段须写在 `[database]` 表之前，避免被 TOML 解释为数据库字段。
+
+高权限凭据与运行账号分成两份独立文件，常驻角色只引用 `secrets.toml`：
+
+| 文件 | 模板 | 账号与用途 | 使用方 |
+| --- | --- | --- | --- |
+| 维护凭据 | `ops/config/examples/secrets/postgres-rebuild.toml` | 集群级高权限账号，目标库固定为 `postgres` | 只供 `auction-cli db create/rebuild` |
+| owner 凭据 | `ops/config/examples/secrets/postgres-owner.toml` | 应用数据库 owner（迁移账号），`name` 必须与应用库一致 | 只供 `auction-cli db create`、`db migrate`、`db rebuild`、`backup restore` 与 `service start/restart`，以 `--owner-secrets` 传入 |
+
+两份文件都使用 `[database]` 五字段或与之互斥的兼容 `database_url`，都不允许被任何角色的 `secrets_file` 或 runtime 引用。owner 账号名同时写入公共文件的 `[database_roles] owner`，`config check --strict` 据此拒绝服务误用 owner 账号；`db migrate` 还会核对 `--owner-secrets` 账号与声明一致。迁移 081 之后服务账号不能建表、`TRUNCATE`，也不能对只追加表 `UPDATE`/`DELETE`，因此任何需要 DDL 的运维命令都必须使用 owner 凭据。
 
 ## common.toml
 
@@ -59,6 +69,7 @@
 | `[readiness]` | 审计失败模式、迁移兼容模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
 | `[cache]` | 见[缓存](#缓存) |
 | `[backup]` | CLI 专用定时备份策略，见[定时备份策略](#定时备份策略) |
+| `[database_roles]` | 数据库账号分工：`owner` 是迁移 owner 账号名（小写标识符，生产严格预检必填），运行账号固定为 `auction_runtime` 不可配置；`owner` 不能与运行账号相同，服务使用 owner 会被拒绝 |
 | `[auction.schedule]` | 周排期：时区、预览/开拍/计划结束的星期与时间、参与世界 |
 | `[auction.schedule.early_bird]` | 赛季早鸟期：赛季开始日期与时间、窗口天数、开拍日、开拍钟点、预览提前量、竞价时长、赛季前场次、窗口内品质、赛季前暂停收件 |
 | `[auction.economics]` | 新场次的经济规则：默认起拍价、加价比例、软截止窗口与延长、代理开关/默认模式/慢速间隔/设置次数上限、Final 提前量 |
@@ -178,7 +189,7 @@ Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、`metrics.e
 | 区块 | 用途 |
 | --- | --- |
 | `[worker]` | 拍卖主循环：并发、轮询间隔、批次上限、抖动、单项超时、恢复重试间隔 |
-| `[worker.delivery]` | 投递 outbox：批次、并发、轮询、租约与续租、发送宽限、请求与收尾超时 |
+| `[worker.delivery]` | 投递 outbox：批次、轮询、租约与续租、发送宽限、请求与收尾超时。并发不可配置，有效并发由 transport 决定（MoogleMail 始终为 1）；已移除的 `concurrency` 字段会被加载拒绝 |
 | `[worker.fulfillment]` | 结算履约：批次、并发、轮询、租约、超时、重试间隔、证据轮询间隔 |
 | `[worker.recovery]` | 恢复：批次、并发、轮询、租约、超时、低余额阈值、健康刷新与证据过期 |
 | `[worker.control]` | Worker control：开关、socket 组、`allowed_peer_uids`/`allowed_peer_gids`（启用时至少一项）、运行目录与 socket 路径 |
@@ -407,6 +418,18 @@ CLI 名称按入口区分，见 [CLI 连接用途](../../apps/auction-cli/README
 三角色有效 readiness 策略均为 `classified`；指标可采集并查看。
 配置加载不会查询数据库来证明这些线上前置条件。
 回退顺序为先关闭服务超时并重启，再考虑切回 readiness 旧模式。
+
+### 数据库账号分工
+
+迁移 owner 只供 CLI 的建库、迁移、重建与恢复使用；Public、Admin 与 Worker 共用一个无 DDL 的运行账号。
+账号定义在迁移 081 中：`auction_runtime` 只有 `public` schema 的 `USAGE`，无 `CREATE`、无 `TRUNCATE`；
+普通表可读写，只追加事实表（出价、审计、结算结果、发送证明等）只可 `INSERT`，冻结证据与
+`_sqlx_migrations`、`schema_migration_compatibility` 只可 `SELECT`；序列只给 `USAGE`/`SELECT`。
+未来由 owner 新建的表默认只给 `SELECT`，新增写入面必须在对应迁移里显式 `GRANT`。
+完整清单与不变量见[数据库契约](../../docs/contracts/database.md#数据库账号与权限)。
+
+`config check --strict` 要求每个角色的 `[database].username` 等于 `auction_runtime`，并要求
+`[database_roles] owner` 已声明且与之不同；否则部署预检失败。非严格模式只输出警告。
 
 维护策略位于公共文件的 `[database_profiles.maintenance]`：
 `max_connections` 默认 4，`acquire_timeout_millis` 默认 30000。

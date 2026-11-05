@@ -189,6 +189,15 @@ async fn stream_events(
     if !recheck_session(&mut socket, &mut session).await {
         return;
     }
+    // 首帧先报告进程构建号，部署后仍打开的旧页面据此提示刷新；事件帧形状不变。
+    if !send_message(
+        &mut socket,
+        Message::Text(super::super::build_identity::build_hello_frame().into()),
+    )
+    .await
+    {
+        return;
+    }
     let session_deadline = sleep(session.next_check_delay());
     tokio::pin!(session_deadline);
 

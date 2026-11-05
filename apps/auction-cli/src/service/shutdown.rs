@@ -115,6 +115,7 @@ async fn inspect(
             StorageError::MigrationSourceInvariant { .. } => "migration_source_invariant",
             StorageError::MigrationTarget { .. } => "migration_target",
             StorageError::UnknownDatabase { .. } => "unknown_database",
+            StorageError::RuntimePrivileges { .. } => "runtime_privileges",
         };
         anyhow::anyhow!("停机门禁无法连接 PostgreSQL（kind={kind}）")
     })?;
