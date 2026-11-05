@@ -52,8 +52,8 @@ recovery_retry_delay_seconds = 60
 [worker.delivery]
 # 可选：单轮最多领取的 delivery 数量，范围 1-1000，默认 100。
 batch_limit = 100
-# 可选：delivery 配置并发上限，范围 1-batch_limit，默认 8；当前 MoogleMail transport 的有效上限为 1。
-concurrency = 8
+# 投递并发不在这里配置：有效并发由 transport 决定（MoogleMail 始终为 1）；旧配置中的 `concurrency` 字段
+# 会被加载明确拒绝，请删除。
 # 可选：Delivery 独立轮询间隔秒数，范围 1-86400，默认 60。
 poll_interval_seconds = 60
 # 可选：每轮完成后附加的随机抖动上限秒数，范围 0-86400，默认 5；0 表示关闭抖动。

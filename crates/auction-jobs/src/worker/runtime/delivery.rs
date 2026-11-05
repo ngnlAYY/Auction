@@ -41,9 +41,10 @@ where
         if worker.external_access_paused() {
             return Ok(());
         }
-        // 本轮使用边界处的完整热快照；租约、续租、宽限和并发仍来自启动配置。
+        // 本轮使用边界处的完整热快照；租约、续租和宽限仍来自启动配置。并发只由 transport
+        // 决定（MoogleMail 为 1），再以 batch_limit 收口，不存在单独的“配置并发”上限。
         let delivery = worker.delivery_runtime();
-        let effective_concurrency = usize::from(delivery.concurrency.min(transport_concurrency));
+        let effective_concurrency = usize::from(transport_concurrency.min(delivery.batch_limit));
         let delivery_started = std::time::Instant::now();
         let delivery_lease = ChronoDuration::from_std(delivery.lease_duration)
             .map_err(|_| WorkerError::InvalidDeliveryConfiguration)?;

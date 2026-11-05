@@ -172,6 +172,11 @@ reminder_limit = 1
 # 可选：同一笔 COD 允许的退回次数，范围 1-10，默认 3；达到上限后装备退回卖家并拉黑买家。
 cod_return_limit = 3
 
+# 可选区块：数据库账号分工；运行账号固定为 auction_runtime（迁移 081 的授权对象），此处只声明迁移 owner。
+[database_roles]
+# 可选（生产严格预检必填）：迁移 owner 账号名，只能是小写标识符；须与 --owner-secrets 的 [database].username 一致，不能等于 auction_runtime，服务使用 owner 账号会被 config check --strict 拒绝。
+owner = "auction_owner"
+
 # 可选区块：连接分档；以下修改均需重启，受停机门禁约束。
 [database_profiles]
 # 可选：默认 profiled；legacy 完整恢复旧连接参数，修改需重启。

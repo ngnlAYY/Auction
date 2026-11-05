@@ -4,9 +4,9 @@ pub(crate) fn validate_delivery_worker(config: &DeliveryWorkerConfig) -> Result<
     if config.batch_limit == 0 || config.batch_limit > 1000 {
         return Err(ConfigError::InvalidDeliveryWorkerConfig("batch_limit 必须位于 1 至 1000"));
     }
-    if config.concurrency == 0 || config.concurrency > config.batch_limit {
+    if config.obsolete_concurrency.is_some() {
         return Err(ConfigError::InvalidDeliveryWorkerConfig(
-            "concurrency 必须位于 1 至 batch_limit",
+            "[worker.delivery] concurrency 已移除：MoogleMail transport 的有效并发始终为 1，请删除该字段",
         ));
     }
     if config.poll_interval_seconds == 0 || config.poll_interval_seconds > 86_400 {
@@ -47,4 +47,24 @@ pub(crate) fn validate_delivery_worker(config: &DeliveryWorkerConfig) -> Result<
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn removed_delivery_concurrency_is_rejected_with_an_actionable_message() {
+        let legacy: DeliveryWorkerConfig =
+            toml::from_str("concurrency = 8").expect("旧字段仍可解析");
+        let error = validate_delivery_worker(&legacy).expect_err("旧字段必须被拒绝");
+        assert!(
+            matches!(error, ConfigError::InvalidDeliveryWorkerConfig(message) if message.contains("已移除"))
+        );
+
+        let current: DeliveryWorkerConfig =
+            toml::from_str("batch_limit = 50\npoll_interval_seconds = 30").expect("新字段可解析");
+        assert!(validate_delivery_worker(&current).is_ok());
+    }
 }

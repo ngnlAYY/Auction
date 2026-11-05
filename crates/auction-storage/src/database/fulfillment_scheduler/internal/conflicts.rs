@@ -386,6 +386,19 @@ fn valid_attachment_origin(
                 && origin_id == format!("lot_watch:{command_id}")
                 && payload.external_mail_id == command_id.to_string()
         }
+        // W14.3 零资产玩家通知：结算汇总与换季提醒都不携带装备引用，
+        // 也不能被误判成与资金责任有关的附件投递。
+        "seller_summary" => {
+            !command_id.is_nil()
+                && payload.world == "main"
+                && origin_id.starts_with("seller_summary:")
+                && payload.external_mail_id == command_id.to_string()
+        }
+        "season_reminder" => {
+            payload.world == "isekai"
+                && origin_id.starts_with("season_reminder:")
+                && payload.external_mail_id.starts_with("season-end:")
+        }
         _ => false,
     }
 }
@@ -404,6 +417,18 @@ fn valid_notification(payload: &AttachmentPayload, origin: &str) -> bool {
         };
         return payload.template.as_deref() == Some(expected.0)
             && code == Some(expected.1)
+            && no_key
+            && auction_application::valid_notification_body(payload.body.as_deref());
+    }
+    if origin == "seller_summary" {
+        return payload.template.as_deref() == Some("auction_seller_summary")
+            && code == Some("summary")
+            && no_key
+            && auction_application::valid_notification_body(payload.body.as_deref());
+    }
+    if origin == "season_reminder" {
+        return payload.template.as_deref() == Some("isekai_season_reminder")
+            && code == Some("season_end")
             && no_key
             && auction_application::valid_notification_body(payload.body.as_deref());
     }

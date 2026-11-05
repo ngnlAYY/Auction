@@ -2,16 +2,33 @@
 
 use std::path::PathBuf;
 
-use clap::{Subcommand, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 
 use super::MaintenanceArgs;
+
+/// 迁移 owner 凭据：只允许 auction-cli 的建库、迁移、重建与恢复读取。
+#[derive(Debug, Clone, Args)]
+pub(crate) struct OwnerSecretsArg {
+    /// owner-only TOML，只含指向应用数据库的 [database]；账号须为数据库 owner，不得与服务共用。
+    #[arg(long, value_name = "FILE")]
+    pub(crate) owner_secrets: PathBuf,
+}
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum DbCommand {
     /// 只读输出连接目标的身份、迁移历史与当前二进制期望版本。
     Status,
-    /// 在确认三角色均已停止后执行内嵌的追加式迁移；合并部署须先停止 auction-server。
+    /// 在确认三角色均已停止后以迁移 owner 执行内嵌的追加式迁移；合并部署须先停止 auction-server。
     Migrate {
+        #[command(flatten)]
+        owner: OwnerSecretsArg,
+        #[command(flatten)]
+        maintenance: MaintenanceArgs,
+    },
+    /// 以迁移 owner 重放运行账号最小权限（迁移 000081 的授权函数）；恢复后与授权变更时使用。
+    Grants {
+        #[command(flatten)]
+        owner: OwnerSecretsArg,
         #[command(flatten)]
         maintenance: MaintenanceArgs,
     },
@@ -23,6 +40,9 @@ pub(crate) enum DbCommand {
         /// owner-only 维护 TOML，只含指向同集群 postgres 库的 [database]。
         #[arg(long, value_name = "FILE")]
         maintenance_secrets: PathBuf,
+        /// owner-only 迁移凭据，只含指向应用数据库的 [database]；新库 owner 必须是该账号。
+        #[command(flatten)]
+        owner: OwnerSecretsArg,
         #[command(flatten)]
         maintenance: MaintenanceArgs,
     },
@@ -61,6 +81,9 @@ pub(crate) enum DbCommand {
         /// owner-only 维护 TOML，只含指向同集群 postgres 库的 [database]。
         #[arg(long, value_name = "FILE")]
         maintenance_secrets: PathBuf,
+        /// owner-only 迁移凭据；fresh-schema 重建后由该账号执行迁移。
+        #[command(flatten)]
+        owner: OwnerSecretsArg,
         /// 重建后保持空库等待恢复，或立即应用当前二进制的全部迁移。
         #[arg(long, value_enum, default_value = "fresh-schema")]
         mode: RebuildModeArg,
@@ -138,6 +161,9 @@ pub(crate) enum BackupCommand {
         /// 恢复成功后写入的不可覆盖私有 JSON 回执；实际恢复时必填。
         #[arg(long, value_name = "FILE", required_unless_present = "dry_run")]
         receipt: Option<PathBuf>,
+        /// owner-only 迁移凭据；pg_restore 需要 DDL 与对象所有权，不能使用服务运行账号。
+        #[command(flatten)]
+        owner: OwnerSecretsArg,
         #[command(flatten)]
         maintenance: MaintenanceArgs,
     },

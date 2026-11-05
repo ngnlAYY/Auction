@@ -114,6 +114,7 @@ async fn send_request_observed_with_timeout(
         let request = build(Some(&signal))?;
         let send = async move {
             let response = request.send().await.map_err(|_| TransportError::Network(None))?;
+            observe_response_build(&response);
             observe(&response);
             let status = response.status();
             let mut body =
@@ -145,8 +146,17 @@ async fn send_request_observed_with_timeout(
     {
         let _ = timeout_millis;
         let response = build(None)?.send().await.map_err(|_| TransportError::Network(None))?;
+        observe_response_build(&response);
         observe(&response);
         Ok(response)
+    }
+}
+
+/// 每个成功收到的响应都比对一次服务端构建号；头缺失时保持原状，由实时首帧兜底。
+/// `gloo_net::http::Headers::get` 在两个目标都返回 `Option<String>`。
+fn observe_response_build(response: &Response) {
+    if let Some(build) = response.headers().get(crate::SERVER_BUILD_HEADER) {
+        crate::observe_server_build_id(&build);
     }
 }
 

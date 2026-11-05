@@ -13,8 +13,9 @@
 5. **并发安全**：修改被运行中进程写入的表时，先 `LOCK TABLE … IN SHARE ROW EXCLUSIVE MODE` 等方式阻止并发写，再检查与改写。迁移本身只在停机门禁下执行。
 6. **约束在数据库层强制**：状态闭集、金额范围、互斥字段、只追加（触发器）等规则写成 CHECK、唯一约束或触发器，不只依赖应用代码。
 7. **同步更新**：每次新增迁移都把[保留政策](../../ops/deploy/retention-policy.v1.json)的 `database_schema_version` 更新为新的最高版本（否则 `auction-cli db inventory` 拒绝运行）；新增表还须加入对应数据族；同步[数据库契约](../../docs/contracts/database.md)。
-8. **部署顺序**：迁移若要求旧 Worker 先停止（例如新增发送证明字段），在文件注释中写明；分体部署的 `service restart` 与合并部署的停服迁移都满足这一点。
-9. **兼容登记**：075 起每个文件在自身事务末尾恰好登记本版本一次；规范与默认 breaking 规则见下节，CI 静态门禁强制。
+8. **运行账号授权**：迁移 `000081` 起 Public/Admin/Worker 共用的 `auction_runtime` 只有读取面与显式写入面。owner 之后新建的表默认只获得 `SELECT`（序列 `USAGE`/`SELECT`），因此**新增表或新增写入面的迁移必须显式 `GRANT`**：可变表授 `INSERT, UPDATE, DELETE`，只追加表只授 `INSERT`，冻结证据与 `_sqlx_migrations` 不授写入，永不授 `TRUNCATE`、`CREATE` 或 `UPDATE`（序列）。授权对象固定为 `auction_runtime`，与[数据库契约](../../docs/contracts/database.md#数据库账号与权限)一致。
+9. **部署顺序**：迁移若要求旧 Worker 先停止（例如新增发送证明字段），在文件注释中写明；分体部署的 `service restart` 与合并部署的停服迁移都满足这一点。
+10. **兼容登记**：075 起每个文件在自身事务末尾恰好登记本版本一次；规范与默认 breaking 规则见下节，CI 静态门禁强制。
 
 ## 兼容分级与登记
 
@@ -129,3 +130,5 @@ VALUES (76, 'breaking');
 | 000078 | CLI 运维审计来源显式区分 `cli`；扩展 `audit_records.source` CHECK，不修改历史行，登记 breaking（旧程序与旧 Admin 前端拒绝 cli） |
 | 000079 | `rekey` 自助轮换命令与入站种类；扩展 CHECK 后登记 breaking |
 | 000080 | W14.11 慢速代理等待期间的待定被超提醒（只追加、单向收口）；纯新增，登记 compatible |
+| 000082 | W14.3 玩家通知来源：卖方成交汇总与换季 isekai 提醒；放宽 `deliveries.origin_kind` CHECK、扩展发送类别、新增身份唯一索引；旧程序不认识新来源，登记 breaking |
+| 000081 | W9.9 数据库最小权限：运行账号 `auction_runtime` 只有 USAGE/无 DDL、无 TRUNCATE，只追加表仅 INSERT，序列与 `_sqlx_migrations` 只读，默认权限只授读取面；只改授权，登记 compatible |

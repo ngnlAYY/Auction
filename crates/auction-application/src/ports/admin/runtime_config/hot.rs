@@ -60,7 +60,6 @@ pub const WORKER_RESTART_ONLY_FIELD_PATHS: &[&str] = &[
     "operations.worker.delivery.lease_duration_seconds",
     "operations.worker.delivery.renew_interval_seconds",
     "operations.worker.delivery.sending_grace_seconds",
-    "operations.worker.delivery.concurrency",
     "operations.worker.concurrency",
     "operations.worker.poll_interval_seconds",
     "operations.worker.batch_limit",
@@ -201,8 +200,8 @@ impl WorkerHotConfig {
 
 #[cfg(test)]
 mod tests {
-    use super as parent;
     use self::parent::*;
+    use super as parent;
 
     fn baseline() -> WorkerHotConfig {
         WorkerHotConfig {

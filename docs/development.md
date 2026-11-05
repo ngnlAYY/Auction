@@ -75,10 +75,13 @@ just config-show worker "$dir"      # 单角色安全投影
 ### 3. 迁移
 
 ```bash
-just db-migrate "$dir"              # auction-cli db migrate --no-systemd
+just db-migrate "$dir" "$owner_secrets"   # auction-cli db migrate --owner-secrets … --no-systemd
+just db-grants  "$dir" "$owner_secrets"   # 重放运行账号最小权限（迁移 000081）
 ```
 
-普通启动从不隐式迁移；schema 不是当前版本时进程不会就绪。
+普通启动从不隐式迁移；schema 不是当前版本时进程不会就绪。服务账号是迁移 081 授权的
+`auction_runtime`（无 DDL、无 `TRUNCATE`、只追加表仅 `INSERT`），迁移与恢复必须用 owner-only
+的迁移凭据（`--owner-secrets`），本地模板见 `ops/config/examples/secrets/postgres-owner.toml`。
 
 ### 4. 启动
 

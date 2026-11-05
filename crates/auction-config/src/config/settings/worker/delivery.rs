@@ -2,13 +2,17 @@ use auction_application::AdminRuntimeDeliveryConfig;
 use serde::Deserialize;
 
 /// Delivery outbox 的独立领取、续租与外部调用边界。
+///
+/// 并发不在这里配置：MoogleMail compose 是账号级可变状态，transport 的
+/// `maximum_concurrency` 已是有效上限（当前为 1）；旧字段 `concurrency` 只用于给出明确拒绝。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DeliveryWorkerConfig {
     /// 单轮最多领取的 delivery 数量；范围 1-1000，默认 100。
     pub batch_limit: u16,
-    /// 单轮 delivery 并发数；范围 1-batch_limit，默认 8。
-    pub concurrency: u16,
+    /// 已移除的投递并发字段；只记录出现与否，加载时明确拒绝。
+    #[serde(rename = "concurrency", default, deserialize_with = "obsolete_field")]
+    pub obsolete_concurrency: Option<()>,
     /// Delivery 独立轮询间隔秒数；范围 1-86400，默认 60。
     pub poll_interval_seconds: u64,
     /// 每轮完成后附加的随机抖动上限秒数；范围 0-86400，默认 5。
@@ -36,7 +40,7 @@ impl From<&AdminRuntimeDeliveryConfig> for DeliveryWorkerConfig {
     fn from(delivery: &AdminRuntimeDeliveryConfig) -> Self {
         Self {
             batch_limit: delivery.batch_limit,
-            concurrency: delivery.concurrency,
+            obsolete_concurrency: None,
             poll_interval_seconds: delivery.poll_interval_seconds,
             jitter_seconds: delivery.jitter_seconds,
             lease_duration_seconds: delivery.lease_duration_seconds,
@@ -46,4 +50,12 @@ impl From<&AdminRuntimeDeliveryConfig> for DeliveryWorkerConfig {
             finalize_timeout_seconds: delivery.finalize_timeout_seconds,
         }
     }
+}
+
+/// 只记录已移除字段是否出现，不保留或使用其值。
+fn obsolete_field<'de, D>(deserializer: D) -> Result<Option<()>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <serde::de::IgnoredAny as Deserialize>::deserialize(deserializer).map(|_| Some(()))
 }

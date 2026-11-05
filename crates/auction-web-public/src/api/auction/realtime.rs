@@ -496,6 +496,11 @@ where
             }
             continue;
         };
+        // 建连首帧报告服务端构建号；识别后只更新偏差提示，不进入事件序列。
+        if let Some(server_build) = super::decoder::decode_build_hello(&message) {
+            auction_web_shared::observe_server_build_id(&server_build);
+            continue;
+        }
         let event = match super::decoder::decode_realtime_event(&message, auction_id, world) {
             Ok(event) => event,
             Err(error) => {

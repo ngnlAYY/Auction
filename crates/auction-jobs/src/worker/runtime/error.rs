@@ -33,6 +33,10 @@ pub enum WorkerError {
     OperationsAlertTaskJoin(#[source] tokio::task::JoinError),
     #[error("operations alert worker task exited unexpectedly")]
     OperationsAlertTaskExited,
+    #[error("player notification worker task failed")]
+    PlayerNotificationTaskJoin(#[source] tokio::task::JoinError),
+    #[error("player notification worker task exited unexpectedly")]
+    PlayerNotificationTaskExited,
     #[error("worker identity must not be empty")]
     InvalidWorkerIdentity,
     #[error("MoogleMail poll configuration is invalid")]

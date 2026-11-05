@@ -91,10 +91,15 @@ run-admin:
 run-worker:
     cargo run --locked -p auction-worker --features postgres
 
-# 本地开发库执行内嵌迁移；普通启动不隐式迁移，本地不经 systemd 停机门禁。
+# 本地开发库以迁移 owner 执行内嵌迁移；普通启动不隐式迁移，本地不经 systemd 停机门禁。
 [positional-arguments]
-db-migrate config_dir="ops/config":
-    cargo run --locked -p auction-cli --features postgres -- --config-dir "$1" db migrate --no-systemd
+db-migrate config_dir="ops/config" owner_secrets="ops/config/owner/postgres.toml":
+    cargo run --locked -p auction-cli --features postgres -- --config-dir "$1" db migrate --owner-secrets "$2" --no-systemd
+
+# 本地开发库重放运行账号最小权限（迁移 000081 的授权函数）。
+[positional-arguments]
+db-grants config_dir="ops/config" owner_secrets="ops/config/owner/postgres.toml":
+    cargo run --locked -p auction-cli --features postgres -- --config-dir "$1" db grants --owner-secrets "$2" --no-systemd
 
 # 输出指定角色的有效配置安全投影，默认 public。
 [positional-arguments]

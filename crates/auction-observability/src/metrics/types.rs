@@ -172,11 +172,13 @@ pub enum WorkerLoop {
     OperationsAlertScan,
     OperationsAlertDispatch,
     OperationsAlertReconcile,
+    /// W14.3 卖方汇总与换季提醒的玩家通知扫描。
+    PlayerNotifications,
 }
 
 impl WorkerLoop {
     /// 初始化固定循环的零值序列，不接收运行时 label。
-    pub(super) const ALL: [Self; 15] = [
+    pub(super) const ALL: [Self; 16] = [
         Self::MailMain,
         Self::MailIsekai,
         Self::MailMaintenanceMain,
@@ -192,6 +194,7 @@ impl WorkerLoop {
         Self::OperationsAlertScan,
         Self::OperationsAlertDispatch,
         Self::OperationsAlertReconcile,
+        Self::PlayerNotifications,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -211,6 +214,7 @@ impl WorkerLoop {
             Self::OperationsAlertScan => "operations-alert-scan",
             Self::OperationsAlertDispatch => "operations-alert-dispatch",
             Self::OperationsAlertReconcile => "operations-alert-reconcile",
+            Self::PlayerNotifications => "player-notifications",
         }
     }
 }

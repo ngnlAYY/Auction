@@ -250,6 +250,8 @@ pub(crate) fn map_competition_error(error: ApplicationError) -> Response {
             "当前部署档位不支持该功能",
         )
         .into_response(),
+        // 玩家通知扫描只在 Worker 内运行，不会从 HTTP 命令路径到达；保守映射为暂时不可用。
+        ApplicationError::PlayerNotification(_) => competition_unavailable(),
         map_temporarily_unavailable!() => competition_unavailable(),
     };
     let response = body();
@@ -297,6 +299,8 @@ pub(crate) fn map_recovery_command_error(error: ApplicationError) -> Response {
             "恢复确认仅支持 PostgreSQL 完整档",
         )
         .into_response(),
+        // 玩家通知扫描只在 Worker 内运行，不会从 HTTP 命令路径到达；保守映射为暂时不可用。
+        ApplicationError::PlayerNotification(_) => competition_unavailable(),
         map_temporarily_unavailable!() => competition_unavailable(),
     };
     let response = body();

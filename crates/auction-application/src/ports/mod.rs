@@ -81,6 +81,9 @@ mod forum;
 mod forum_profile;
 pub use forum_profile::*;
 mod notification_metrics;
+mod player_notifications {
+    include!("player_notifications.rs");
+}
 #[path = "settlement/evidence/mod.rs"]
 mod settlement_evidence;
 pub use settlement_evidence::*;
@@ -349,6 +352,9 @@ pub use external_metrics::{
 pub use notification_metrics::{
     NotificationFailure, NotificationKind, NotificationRecorder, NotificationStage,
     noop_notification_recorder,
+};
+pub use player_notifications::{
+    PlayerNotificationError, PlayerNotificationScanner, SeasonReminderFact, SellerSummaryLotFact,
 };
 mod sent_baseline;
 mod shadow_run;
