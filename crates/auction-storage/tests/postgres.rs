@@ -7,6 +7,8 @@ mod support;
 mod lot_watch;
 #[path = "postgres/operations_alert.rs"]
 mod operations_alert;
+#[path = "postgres/realtime_sequence.rs"]
+mod realtime_sequence;
 #[path = "postgres/snapshot_timezone.rs"]
 mod snapshot_timezone;
 #[path = "postgres/storage.rs"]

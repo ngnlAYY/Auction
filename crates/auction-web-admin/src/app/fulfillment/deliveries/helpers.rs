@@ -50,3 +50,28 @@ pub(super) fn delivery_display_type(origin_kind: &str) -> String {
         _ => origin_kind.to_owned(),
     }
 }
+
+/// 发送类别标签；未知类别返回原文，闭集由服务端保证。
+pub(crate) fn delivery_category_label(category: &str) -> String {
+    match category {
+        "outbid" => t!("delivery-category-outbid"),
+        "account" => t!("delivery-category-account"),
+        "intake" => t!("delivery-category-intake"),
+        "settlement" => t!("delivery-category-settlement"),
+        "equipment" => t!("delivery-category-equipment"),
+        "operations" => t!("delivery-category-operations"),
+        "manual" => t!("delivery-category-manual"),
+        _ => category.to_owned(),
+    }
+}
+
+/// 行内终态说明：退役/抑制原因优先于普通失败码，二者都只在确定未写入时出现。
+pub(crate) fn delivery_outcome_label(delivery: &Delivery) -> String {
+    if let Some(reason) = delivery.retirement_reason.as_deref() {
+        return t!("delivery-outcome-retired", reason: reason);
+    }
+    if let Some(reason) = delivery.suppression_reason.as_deref() {
+        return t!("delivery-outcome-suppressed", reason: reason);
+    }
+    delivery.failure_code.clone().unwrap_or_default()
+}

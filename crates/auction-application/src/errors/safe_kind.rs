@@ -106,6 +106,19 @@ impl ApplicationError {
             Self::MailProcessing(_) => "mail_processing_error",
             Self::OperationsAlert(_) => "operations_alert_error",
             Self::PlayerNotification(_) => "player_notification_error",
+            Self::DeliveryDisposition(error) => match error {
+                crate::DeliveryDispositionCommandError::Invalid => "delivery_disposition_invalid",
+                crate::DeliveryDispositionCommandError::NotFound => "delivery_not_found",
+                crate::DeliveryDispositionCommandError::Stale => "delivery_stale",
+                crate::DeliveryDispositionCommandError::AlreadyDisposed => {
+                    "delivery_already_disposed"
+                }
+                crate::DeliveryDispositionCommandError::NotAcknowledgeable => {
+                    "delivery_not_acknowledgeable"
+                }
+                crate::DeliveryDispositionCommandError::CommandConflict => "command_conflict",
+                crate::DeliveryDispositionCommandError::Unavailable => "repository_failed",
+            },
         }
     }
 }

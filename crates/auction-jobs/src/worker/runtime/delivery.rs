@@ -32,6 +32,8 @@ where
         else {
             return Ok(());
         };
+        // W12.5：投递属于批量轮次，受共享连接配额限制；许可随本轮结束释放，等待在 runner 内。
+        let _bulk_permit = worker.bulk_permit().await;
         let transport_concurrency = delivery_transport.maximum_concurrency();
         if transport_concurrency == 0 {
             return Err(WorkerError::InvalidDeliveryConfiguration);

@@ -31,6 +31,14 @@ Public relay（每 poll_interval_millis，默认 250ms）
 
 `stream_sequence` 在每个流内从 1 连续递增。
 
+W12.1：竞价事件（`lot.bid_accepted`）与出价事实同事务写入，但序号在提交后分配。出价事务因此
+不再更新共享的 `realtime_streams` 计数行，同一场次不同 lot 的重叠出价不会再因这次读写反依赖
+而序列化中止。分配器按 `(created_at, event_id)` 顺序补号，序号仍然从 1 连续、没有空号；
+尚未分配序号的事件对 WebSocket 推送与 HTTP 回放都不可见（`stream_sequence > after` 对 NULL
+不成立），补齐只推迟推送，不改变任何命令结果。Public relay 每轮先补齐待定序号再扫描目录，
+覆盖“提交后进程崩溃”等窗口；未分配积压超过 5 分钟由一致性巡检报
+`realtime_unsequenced_backlog`。
+
 ## 事件信封
 
 WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形状相同：

@@ -146,6 +146,8 @@ where
     }
     let loop_kind = runtime.loop_kind();
     let iteration_started = std::time::Instant::now();
+    // W12.5：邮件收件与维护属于批量轮次，受共享连接配额限制；许可在本轮结束时释放。
+    let _bulk_permit = worker.bulk_permit().await;
     let result = if isolated {
         // 新路径只等待收件；维护由 runner 的独立 JoinSet 监督，不改变 claim/证明/提交边界。
         worker

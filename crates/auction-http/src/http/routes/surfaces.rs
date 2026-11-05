@@ -344,6 +344,7 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         )
         .route("/api/v1/admin/audit", get(admin_audit::list))
         .route("/api/v1/admin/deliveries", get(delivery_admin::list))
+        .route("/api/v1/admin/player-support", get(delivery_admin::player_support))
         .route("/api/v1/admin/deliveries/{delivery_id}", get(delivery_admin::detail))
         .route(
             "/api/v1/admin/deliveries/{delivery_id}/sent-proof/preview",

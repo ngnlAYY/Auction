@@ -442,14 +442,17 @@ Final 耗尽需单独看绝对次数，unknown 未解释前不宣称 Final 零�
   purpose 为 mail_ownership、forum_ownership、realtime_ownership、delivery_listener。
 
 两个直方图有限桶为 0.001、0.005、0.01、0.05、0.1、0.5、1、5、30、120 秒，
-另含 +Inf。loop 严格复用 WorkerLoop 的 15 项闭集：
+另含 +Inf。loop 严格复用 WorkerLoop 的 17 项闭集：
 
 ```text
 mail-main mail-isekai mail-maintenance-main mail-maintenance-isekai
-mail-read-observation-main mail-read-observation-isekai delivery auction
+mail-read-observation-main mail-read-observation-isekai delivery auction settlement
 auction-fulfillment auction-recovery forum realtime operations-alert-scan
-operations-alert-dispatch operations-alert-reconcile
+operations-alert-dispatch operations-alert-reconcile player-notifications
 ```
+
+`settlement` 是 W12.5 拆出的独立结算循环；它只处理结算 claim，不再延长拍卖主循环
+（生命周期、慢速代理与周计划）的单轮时长。
 持有守卫随普通 Executor、显式 acquire 和事务移动，覆盖 commit/rollback await；
 不依赖 after_release，不把 SQLx 后台回滚/归池耗时冒充应用持有时间。
 已有池 gauge 仍反映真实池大小与借出数，raw 迁移/LISTEN 获取不伪造 acquisition。
@@ -460,8 +463,8 @@ operations-alert-dispatch operations-alert-reconcile
 再在子任务中进入同一个 scope，不另建循环或改变 W0.3 计数。
 新任务不会自动继承 Tokio task-local，业务 JoinSet 子任务显式使用 `inherit`。
 
-覆盖邮件收件、独立维护与 Read 观察、投递、拍卖生命周期与慢速代理、结算履约、
-恢复、论坛同步/回帖/PM、实时消费，以及告警扫描/分发/对账。
+覆盖邮件收件、独立维护与 Read 观察、投递、拍卖生命周期与慢速代理、独立结算循环、
+结算履约、恢复、论坛同步/回帖/PM、实时消费，以及告警扫描/分发/对账。
 生命周期、结算、慢速代理、履约、恢复 action 和投递工作项的子任务继承父循环身份。
 常驻根任务在各自已有入口建立 scope；邮件独立维护与 Read 观察阶段使用各自的嵌套
 scope，结束或取消后恢复外层归属。旧版邮件三分支 join 仍沿用收件循环身份，

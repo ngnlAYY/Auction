@@ -2,6 +2,7 @@
 
 mod auction;
 mod bidding;
+mod delivery;
 pub mod equipment;
 mod errors;
 mod identity;
@@ -21,6 +22,12 @@ pub use bidding::{
     DEFAULT_FINAL_PHASE_LEAD, DEFAULT_PROXY_MAX_OUTBID_USES, DEFAULT_PROXY_SLOW_INTERVAL,
     DEFAULT_SOFT_CLOSE_EXTENSION, DEFAULT_SOFT_CLOSE_WINDOW, DEFAULT_START_PRICE, LotBidState,
     MAX_BID_AMOUNT, PROXY_LAST_INCREMENT,
+};
+pub use delivery::{
+    DeliveryAcknowledgementFacts, DeliveryDispositionActorSource, DeliveryDispositionError,
+    DeliveryDispositionKind, DeliveryDispositionSource, PREFLIGHT_LOT_WATCH_INVALIDATED,
+    PREFLIGHT_RETIREMENT_CODES, validate_acknowledgement, validate_disposition_actor,
+    validate_disposition_reason, validate_disposition_reason_code,
 };
 pub use equipment::{
     EquipmentKey, EquipmentKeyEnvelope, EquipmentKeyEnvelopeError, EquipmentKeyError, valid_key_id,

@@ -1,6 +1,9 @@
 //! delivery Admin 安全投影与 payload metadata 映射。
 
-use auction_application::{DeliveryAdminError, DeliveryAdminResult, DeliveryAdminSnapshot};
+use auction_application::{
+    DELIVERY_ADMIN_RETIREMENT_REASONS, DELIVERY_ADMIN_SUPPRESSION_REASONS, DeliveryAdminError,
+    DeliveryAdminResult, DeliveryAdminSnapshot,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -18,6 +21,20 @@ pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdm
     let payload: Value = row.try_get("payload").map_err(map_storage_error)?;
     let result_metadata: Value = row.try_get("result_metadata").map_err(map_storage_error)?;
     let status: String = row.try_get("status").map_err(map_storage_error)?;
+    let origin_kind: String = row.try_get("origin_kind").map_err(map_storage_error)?;
+    let sending_at: Option<DateTime<Utc>> = row.try_get("sending_at").map_err(map_storage_error)?;
+    let failure_code: Option<String> = row.try_get("failure_code").map_err(map_storage_error)?;
+    let reason_code = reason_code_from_metadata(&result_metadata);
+    // 只有确定未开始外部写入的终态才能显示退役或抑制原因；进入围栏后的未知结果不改写语义。
+    let pre_send_terminal = status == "failed" && sending_at.is_none();
+    let retirement_reason = pre_send_terminal
+        .then(|| reason_code_filtered(reason_code.as_deref(), &DELIVERY_ADMIN_RETIREMENT_REASONS))
+        .flatten();
+    let suppression_reason = if pre_send_terminal {
+        suppression_reason_for(failure_code.as_deref(), reason_code.as_deref())
+    } else {
+        None
+    };
     // 旧版 CanonicalObject 要求两个持久化 JSON 都是对象；不能把损坏正文降级成空投影。
     if !payload.is_object()
         || !result_metadata.is_object()
@@ -29,20 +46,25 @@ pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdm
     }
     let snapshot = DeliveryAdminSnapshot {
         id: row.try_get("id").map_err(map_storage_error)?,
-        origin_kind: row.try_get("origin_kind").map_err(map_storage_error)?,
+        origin_kind: origin_kind.clone(),
         origin_id: row.try_get("origin_id").map_err(map_storage_error)?,
         recipient: row.try_get("recipient").map_err(map_storage_error)?,
         cod: cod_from_payload(&payload),
         status,
+        template: template_from_payload(&payload),
+        category: send_category(&origin_kind, &payload),
+        world: world_from_payload(&payload),
+        retirement_reason,
+        suppression_reason,
         lease_expires_at: row.try_get("lease_expires_at").map_err(map_storage_error)?,
         fencing_version: row.try_get("fencing_version").map_err(map_storage_error)?,
         attempt_count,
         claimed_at: row.try_get("claimed_at").map_err(map_storage_error)?,
-        sending_at: row.try_get("sending_at").map_err(map_storage_error)?,
+        sending_at,
         completed_at: row.try_get("completed_at").map_err(map_storage_error)?,
         external_reference: row.try_get("external_reference").map_err(map_storage_error)?,
-        failure_code: row.try_get("failure_code").map_err(map_storage_error)?,
-        reason_code: reason_code_from_metadata(&result_metadata),
+        failure_code,
+        reason_code,
         take_required: take_required_from_metadata(&result_metadata),
         returned_mail_id: returned_mail_id_from_metadata(&result_metadata),
         created_at: row.try_get("created_at").map_err(map_storage_error)?,
@@ -199,6 +221,18 @@ impl LegacyDeliveryPayload {
         let attempt_count = u32::try_from(self.attempt_count)
             .map_err(|_| DeliveryAdminError::StoredResultCorrupt)?;
         let lease_token = self.lease_token.map(Uuid::from_bytes);
+        let reason_code = reason_code_from_metadata(&self.result_metadata);
+        let pre_send_terminal = self.status == "failed" && self.sending_at.is_none();
+        let retirement_reason = pre_send_terminal
+            .then(|| {
+                reason_code_filtered(reason_code.as_deref(), &DELIVERY_ADMIN_RETIREMENT_REASONS)
+            })
+            .flatten();
+        let suppression_reason = if pre_send_terminal {
+            suppression_reason_for(self.failure_code.as_deref(), reason_code.as_deref())
+        } else {
+            None
+        };
         let snapshot = DeliveryAdminSnapshot {
             id: Uuid::from_bytes(self.id),
             origin_kind: self.origin_kind.clone(),
@@ -206,6 +240,11 @@ impl LegacyDeliveryPayload {
             recipient: self.recipient.clone(),
             cod: cod_from_payload(&self.payload),
             status: self.status.clone(),
+            template: template_from_payload(&self.payload),
+            category: send_category(&self.origin_kind, &self.payload),
+            world: world_from_payload(&self.payload),
+            retirement_reason,
+            suppression_reason,
             lease_expires_at: self.lease_expires_at,
             fencing_version: self.fencing_version,
             attempt_count,
@@ -214,7 +253,7 @@ impl LegacyDeliveryPayload {
             completed_at: self.completed_at,
             external_reference: self.external_reference.clone(),
             failure_code: self.failure_code.clone(),
-            reason_code: reason_code_from_metadata(&self.result_metadata),
+            reason_code,
             take_required: take_required_from_metadata(&self.result_metadata),
             returned_mail_id: returned_mail_id_from_metadata(&self.result_metadata),
             created_at: self.created_at,
@@ -283,6 +322,18 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
         || snapshot.attempt_count > i32::MAX as u32
         || is_zero_time(snapshot.created_at)
         || snapshot.updated_at < snapshot.created_at
+        // 退役/抑制原因只允许出现在从未开始外部写入的失败终态，且二者互斥。
+        || (snapshot.retirement_reason.is_some() && snapshot.suppression_reason.is_some())
+        || ((snapshot.retirement_reason.is_some() || snapshot.suppression_reason.is_some())
+            && !(snapshot.status == "failed" && snapshot.sending_at.is_none()))
+        || snapshot
+            .retirement_reason
+            .as_deref()
+            .is_some_and(|value| !DELIVERY_ADMIN_RETIREMENT_REASONS.contains(&value))
+        || snapshot
+            .suppression_reason
+            .as_deref()
+            .is_some_and(|value| !DELIVERY_ADMIN_SUPPRESSION_REASONS.contains(&value))
     {
         return false;
     }
@@ -615,6 +666,73 @@ fn cod_from_payload(payload: &Value) -> Option<i64> {
     (0..=auction_application::MAX_DELIVERY_COD).contains(&cod).then_some(cod)
 }
 
+/// 冻结模板键；Return/Take 的 `template` 为 null 时返回 `None`。
+fn template_from_payload(payload: &Value) -> Option<String> {
+    let value = payload.get("template").and_then(Value::as_str)?;
+    (!value.is_empty() && !value.chars().any(char::is_control)).then(|| value.to_owned())
+}
+
+/// 投递世界；旧载荷缺省 `main`，与 `deliveries_mailbox_sweep_order` 的 COALESCE 一致。
+fn world_from_payload(payload: &Value) -> Option<String> {
+    match payload.get("world").and_then(Value::as_str) {
+        None => Some("main".to_owned()),
+        Some(world @ ("main" | "isekai")) => Some(world.to_owned()),
+        // 未知世界不猜测归类，保留为 `None` 让界面显示原值缺失。
+        Some(_) => None,
+    }
+}
+
+/// 发送类别投影，镜像 `public.delivery_send_category` 的判定顺序。
+/// 权威归属仍是 SQL 函数（节奏与优先级只读它）；这里只用于只读列表展示，二者必须同步修改。
+fn send_category(origin_kind: &str, payload: &Value) -> Option<String> {
+    if payload.get("operation").and_then(Value::as_str) != Some("send") {
+        return None;
+    }
+    let template = payload.get("template").and_then(Value::as_str);
+    let non_empty_array = |key: &str| {
+        payload.get(key).and_then(Value::as_array).is_some_and(|values| !values.is_empty())
+    };
+    let category = if origin_kind == "lot_watch" {
+        "outbid"
+    } else if origin_kind == "operations_alert" {
+        "operations"
+    } else if matches!(origin_kind, "seller_summary" | "season_reminder") {
+        "settlement"
+    } else if origin_kind == "mail_intake"
+        && matches!(
+            template,
+            Some("register_key" | "register_result" | "rebind_result" | "user_assets_rejected")
+        )
+    {
+        "account"
+    } else if non_empty_array("equipment_secret_refs") || non_empty_array("attachment_ids") {
+        "equipment"
+    } else if matches!(origin_kind, "settlement" | "settlement_recovery_action") {
+        "settlement"
+    } else if origin_kind == "mail_intake" {
+        "intake"
+    } else {
+        "manual"
+    };
+    Some(category.to_owned())
+}
+
+/// 只保留闭集内的原因码；损坏或未知原因不进入退役/抑制展示。
+fn reason_code_filtered(value: Option<&str>, allowed: &[&str]) -> Option<String> {
+    let value = value?;
+    allowed.contains(&value).then(|| value.to_owned())
+}
+
+/// 围栏前抑制原因：隔离、准备拒绝或告警批次终止；与退役原因互斥。
+fn suppression_reason_for(failure_code: Option<&str>, reason_code: Option<&str>) -> Option<String> {
+    let is_suppression =
+        |value: &str| auction_application::DELIVERY_ADMIN_SUPPRESSION_REASONS.contains(&value);
+    failure_code
+        .filter(|value| is_suppression(value))
+        .or_else(|| reason_code.filter(|value| is_suppression(value)))
+        .map(str::to_owned)
+}
+
 fn reason_code_from_metadata(metadata: &Value) -> Option<String> {
     let value = metadata.get("reason_code").and_then(Value::as_str)?;
     let trimmed = value.trim();
@@ -635,4 +753,91 @@ fn returned_mail_id_from_metadata(metadata: &Value) -> Option<String> {
 
 fn valid_returned_mail_id(value: &str) -> bool {
     (1..=32).contains(&value.len()) && value.bytes().all(|character| character.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use self::parent::*;
+    use super as parent;
+
+    #[test]
+    fn send_category_mirrors_sql_function_order() {
+        assert_eq!(
+            send_category("lot_watch", &json!({"operation": "send"})).as_deref(),
+            Some("outbid")
+        );
+        assert_eq!(
+            send_category("operations_alert", &json!({"operation": "send"})).as_deref(),
+            Some("operations")
+        );
+        assert_eq!(
+            send_category("seller_summary", &json!({"operation": "send"})).as_deref(),
+            Some("settlement")
+        );
+        assert_eq!(
+            send_category("mail_intake", &json!({"operation": "send", "template": "register_key"}))
+                .as_deref(),
+            Some("account")
+        );
+        assert_eq!(
+            send_category(
+                "mail_intake",
+                &json!({"operation": "send", "template": "auction_submission_receipt"})
+            )
+            .as_deref(),
+            Some("intake")
+        );
+        // 装备资产优先于结算来源归类，与 SQL CASE 的顺序一致。
+        assert_eq!(
+            send_category("settlement", &json!({"operation": "send", "attachment_ids": ["1"]}))
+                .as_deref(),
+            Some("equipment")
+        );
+        assert_eq!(
+            send_category("settlement", &json!({"operation": "send"})).as_deref(),
+            Some("settlement")
+        );
+        assert_eq!(
+            send_category("manual", &json!({"operation": "send"})).as_deref(),
+            Some("manual")
+        );
+        // Return/Take 不是 Send，不能占用发送类别。
+        assert_eq!(send_category("lot_watch", &json!({"operation": "take"})), None);
+    }
+
+    #[test]
+    fn world_and_template_only_accept_known_shapes() {
+        assert_eq!(world_from_payload(&json!({})).as_deref(), Some("main"));
+        assert_eq!(world_from_payload(&json!({"world": "isekai"})).as_deref(), Some("isekai"));
+        assert_eq!(world_from_payload(&json!({"world": "moon"})), None);
+        assert_eq!(
+            template_from_payload(&json!({"template": "lot_watch"})).as_deref(),
+            Some("lot_watch")
+        );
+        assert_eq!(template_from_payload(&json!({"template": null})), None);
+        assert_eq!(template_from_payload(&json!({"template": ""})), None);
+    }
+
+    #[test]
+    fn retirement_and_suppression_are_closed_sets() {
+        assert_eq!(
+            reason_code_filtered(Some("recipient_renamed"), &DELIVERY_ADMIN_RETIREMENT_REASONS)
+                .as_deref(),
+            Some("recipient_renamed")
+        );
+        assert_eq!(reason_code_filtered(Some("unknown"), &DELIVERY_ADMIN_RETIREMENT_REASONS), None);
+        assert_eq!(
+            suppression_reason_for(Some("invalid_payload"), None).as_deref(),
+            Some("invalid_payload")
+        );
+        assert_eq!(
+            suppression_reason_for(Some("retry_exhausted"), None).as_deref(),
+            Some("retry_exhausted")
+        );
+        // 普通失败码不是抑制原因。
+        assert_eq!(suppression_reason_for(Some("recipient_not_found"), None), None);
+        assert_eq!(suppression_reason_for(None, Some("recipient_renamed")), None);
+    }
 }

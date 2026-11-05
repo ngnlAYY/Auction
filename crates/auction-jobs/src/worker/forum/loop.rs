@@ -31,6 +31,8 @@ pub(crate) async fn run_loop<C>(
                 continue;
             }
             let started = std::time::Instant::now();
+            // W12.5：论坛同步/回帖/PM 属于批量轮次，受共享连接配额限制；等待期间不占用许可。
+            let bulk_permit = worker.bulk_permit().await;
             // 每个循环边界读取一次完整热快照；租约仍来自启动配置。
             let forum = worker.forum_runtime();
             let hot_forum = worker.hot.snapshot().forum;
@@ -82,6 +84,8 @@ pub(crate) async fn run_loop<C>(
             }
             worker.control.mark_forum_cycle(cycle_healthy);
             worker.metrics.observe_iteration(WorkerLoop::Forum, cycle_result, started.elapsed());
+            // 本轮数据库工作已结束；等待下一轮期间不占用批量连接配额。
+            drop(bulk_permit);
 
             let mut wait = poll_delay(forum.poll_interval, forum.jitter);
             if let Some(earliest) = earliest_reply_scan {

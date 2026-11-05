@@ -50,6 +50,8 @@ pub struct PersistentWorker<C> {
     pub worker_id: String,
     /// 仅控制进程内取消；持久状态仍由原窄端口拥有。
     pub write_lifecycle: auction_application::ExternalWriteLifecycle,
+    /// W12.5 批量与维护循环共享的连接配额；关键循环从不获取，未注入时退化为不限制。
+    pub bulk_quota: Option<Arc<super::WorkerConnectionQuota>>,
     /// W1.9 主动暂停的共享快照；与 MoogleMail 轮询器使用同一份数据库事实。
     pub switches: auction_application::RuntimeSwitches,
 }
@@ -63,6 +65,15 @@ impl<C> PersistentWorker<C> {
         } else {
             tracing::warn!("热读取的 delivery 预算与启动租约不一致，继续使用启动配置");
             self.delivery
+        }
+    }
+
+    /// 批量/维护轮次的连接配额许可；许可存活期间占用配额，Drop 即释放。
+    /// 关键循环（生命周期、慢速代理、独立结算、结算履约）不调用本方法。
+    pub(crate) async fn bulk_permit(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        match &self.bulk_quota {
+            Some(quota) => Some(quota.acquire().await),
+            None => None,
         }
     }
 

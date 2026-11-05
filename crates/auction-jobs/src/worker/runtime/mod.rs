@@ -74,6 +74,7 @@ mod hot;
 mod lifecycle;
 mod model;
 mod operations;
+mod quota;
 mod runner;
 mod settlement;
 
@@ -81,6 +82,7 @@ pub use config::*;
 pub use error::WorkerError;
 pub use hot::WorkerHotRuntime;
 pub use model::PersistentWorker;
+pub use quota::WorkerConnectionQuota;
 pub use runner::{run_persistent_with_settlement_until_shutdown, run_until_shutdown};
 
 use common::{

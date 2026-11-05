@@ -2,7 +2,7 @@
 
 [文档导航](../README.md) · [迁移](../../migrations/postgres/README.md) · [auction-storage](../../crates/auction-storage/README.md) · [保留政策](../../ops/deploy/retention-policy.v1.json)
 
-唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000084`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
+唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000087`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
 
 ## schema 身份与版本
 
@@ -106,6 +106,7 @@
 | `delivery_send_attempts`、`delivery_sent_bindings`、`delivery_take_attempts` | 发送/收取尝试的摘要与远端邮件 ID 绑定（只追加），用于结果未知时的对账 |
 | `delivery_sent_confirmations` | 正式 CLI 的人工 Sent 观察命令、请求摘要、接受项、原 owner 快照与结果；只追加，按当前 delivery/fence 和 world/MID 唯一 |
 | `delivery_send_cadence`、`delivery_admin_commands` | 同类邮件发送节奏；Admin 投递操作账本 |
+| `delivery_dispositions` | 投递异常终态的统一处置事实（迁移 `000088`）：种类闭集 `auto_sent_proof`、`operator_sent_confirmation`、`admin_failed`、`equipment_loss`、`legacy_self`、`preflight_retired`、`operator_acknowledged`；每种恰好一个来源引用（自动 Sent 绑定、人工 Sent 证明命令、Admin 账本命令、装备损失命令、历史自寄修复命令、操作者确认审计），预检退役以投递行自身为证；只追加，不改变投递状态、资金、履约或资产 |
 
 装备损失只能经 `SettlementEquipmentLossPort` 正式运维命令处置。准入为 Main 已结算成交、原 `winner_equipment_cod` 的首次且唯一库存读取失败（`attempt_count=1`、`fencing_version=1`、`not_observed`、`inventory/read/write_started=false`）、无 claim、无 Sent 绑定、无恢复动作或既有处置、无资金 lot 或资产冲突；历史多次尝试缺少逐次未外写证明，失败关闭。账户必须唯一且为 ready/record_only，strict_cash 不支持。
 
@@ -120,6 +121,10 @@
 `ManualSentEvidence` v1 严格拒绝未知字段；`sent_minute` 为 UTC 整分钟，结果未知时半开区间 `[minute,minute+60s)` 必须与原 `sending_at..completed_at` 相交；Admin 失败更正时须落在投递激活所在分钟至失败结论（`completed_at`）之间，早于当前尝试即要求 `accept_attempt_history`。观察不能早于原发送完成或晚于数据库当前时间。未收取时原/观察正文摘要一致、实际剩余资产精确相等且 receipt 为空；装备已收取时实际资产全零、EID 数组为空，唯一原生 `Removed attachment: <冻结名称>` 及可选精确 `CoD Paid: <千分位金额> Credits` 回执绑定原期待，观察正文摘要必须非零且不同于原摘要。此时须显式 `accept_collected_assets` 承担当前 EID 已不可见的人工关联责任；旧未绑定尝试须另行 `accept_attempt_history`，全部旧尝试及原未知结果保留。货款已领取同样须显式 `accept_collected_assets`；附件现金在发送时已离开账户，领取不改变资金结论。
 
 同一 Serializable 事务按 command advisory → runtime generation → worlds → funding scope/account → auctions → recoveries → lots → equipment → credential → users → obligations → recovery actions → deliveries → fulfillments 顺序锁定，最多三次重试序列化冲突/死锁。同 ID 同参优先重放，异参、旧 fence 或冲突拒绝；追加 confirmation 与审计、引用实际 sending fence 的唯一 MID binding，原 delivery 保持当前 fence 改为 succeeded。独立标签 `sent_operator_confirmed_v1` 带 `external_reference_proven=true`，不产生 `sent_verified=true`。`delivery_has_operator_sent_proof` 必须匹配不可变 confirmation、原 snapshot、当前 attempt、binding、当前 delivery 与原摘要；迁移 `000074` 起原 snapshot 可为上述 Admin 失败结论，此时须在命令账本按命令 ID、结果状态、fence 与失败码找到该失败命令且其后无新命令；共享 `delivery_has_frozen_sent_proof` 保持原自动证明并接受这一强谓词，履约 claim、内部收款、资金收据与恢复/退货消费方均不可仅凭 operator 标签成功。
+
+统一处置事实只经 `DeliveryDispositionPort` 与存储层单一写入模块追加，写入方必须处在产生该终态的同一事务内：Admin 对账判失败、装备损失退役、`confirm-sent` 人工证明、维护扫描的自动 recovered-send、发送围栏前的预检退役，以及操作者确认。`resolves_alert` 在写入时按领域闭集固定，不是读侧派生：交付与通知的失败水位只按“当前 fence 上没有解除计数的事实”过滤，不再按来源拼接专用排除谓词。当前口径沿用迁移 `000088` 之前的排除范围——预检退役中只有 `lot_watch_invalidated` 解除失败计数，改名、投稿场次已开拍与赛季边界已过的退役仍计入通知失败；放开属有意改变判定，须用户批准后新增迁移。
+
+`operator_acknowledged` 由操作者命令写入，命令 ID 与请求摘要在该行内保存，同 ID 同参重放返回原结果、异参冲突。准入在最终 Serializable 事务内重新读取：投递必须是 `failed`、不是结算或恢复来源、没有履约义务、冻结载荷中 Credits 与 COD 均为零且没有附件装备；原因必填，操作者来源只能是 `admin` 或 `cli`。该命令不改变投递状态、资金、履约或资产事实，只追加处置事实与同事务审计（审计 ID 是处置的来源引用）。处置表只追加（触发器拒绝 `UPDATE`/`DELETE`），运行账号只获得 `SELECT`、`INSERT`。
 
 人工命令复用发送恢复 helper 把原 fulfillment 从 manual_reconcile（Admin 失败更正时从 failed）恢复 enqueued，不创建新投递或收款来源；更正移除投递上的失败标记，原失败结论保留在命令账本、审计与 confirmation 快照中。装备分支随后由 Worker 读取真实当前 Sent：未领取继续等待；已领取由原资金 owner 使用同账号会话证明记录 COD 实收，并按原冻结金额放行卖方付款。货款分支在同事务复用自动 recovered-send 的 `finish_funded_delivery(...Sent)`，将原 unknown allocation 记为 spent，追加一次以原 delivery 身份绑定的支出分录；原金额及资金来源不变，同 ID 重放不重复入账。收件人领取仍由正常履约流程核验，原 Admin 手填引用成功的 Send 禁止保持不变。
 
@@ -136,7 +141,7 @@
 
 | 表 | 内容 |
 | --- | --- |
-| `realtime_streams`、`realtime_events` | 事件流与事件（流内序号连续），见[实时事件](realtime.md) |
+| `realtime_streams`、`realtime_events` | 事件流与事件（流内序号连续）；竞价事件与出价同事务写入，`stream_sequence` 在提交后分配，未分配行为 NULL 且不进入回放，见[实时事件](realtime.md) |
 | `realtime_consumer_offsets`、`realtime_failures` | 各 consumer 游标与转发失败记录 |
 | `operations_alert_runtime_state`、`operations_alert_signals`、`operations_alert_batches`、`operations_alert_batch_items` | 运维告警的运行状态、信号、批次与批次项 |
 | `operations_alert_signals` 的 kind / scope / source / identity 闭集 | 迁移 `000005`/`000015`/`000020` 建立，`000085` 扩展为 26 个 kind、9 个 source：`process`、`delivery`、`fulfillment`、`recovery`、`mail`、`credential`、`lifecycle`、`forum`、`notification`。`source_unavailable` 仍要求 scope 等于来源名；新来源各自的 scope 是 `mail`、`mail_cookie`/`external_api`、`auction`、`forum`、`notification`。应用层 `OperationsAlertKind::ALL` 与 `OperationsAlertSource::ALL` 与该闭集逐项对应，未登记取值在数据库层失败关闭。信号只读各 owner 已提交的安全水位，不参与竞价、结算或投递正确性 |
@@ -170,7 +175,7 @@
 | --- | --- |
 | `public` schema | 只有 `USAGE`；`CREATE` 被撤销，因此不能建表、索引、视图、触发器或函数 |
 | 普通可变表 | `SELECT`、`INSERT`、`UPDATE`、`DELETE`；任何表都没有 `TRUNCATE` |
-| 只追加事实表（触发器拒绝 `UPDATE`/`DELETE`）：`auction_settlements`、`audit_records`、`bid_proxy_authorization_transitions`、`bids`、`compensation_ledger`、`compensation_pool_reversals`、`delivery_send_attempts`、`delivery_sent_bindings`、`delivery_sent_confirmations`、`delivery_take_attempts`、`lot_settlements`、`runtime_switch_events`、`settlement_equipment_losses`、`settlement_legacy_bot_seller_claims`、`settlement_legacy_self_reconciliations`、`settlement_recovery_return_consumptions`、`user_blacklist_history` | 只有 `SELECT`、`INSERT` |
+| 只追加事实表（触发器拒绝 `UPDATE`/`DELETE`）：`auction_settlements`、`audit_records`、`bid_proxy_authorization_transitions`、`bids`、`compensation_ledger`、`compensation_pool_reversals`、`delivery_dispositions`、`delivery_send_attempts`、`delivery_sent_bindings`、`delivery_sent_confirmations`、`delivery_take_attempts`、`lot_settlements`、`runtime_switch_events`、`settlement_equipment_losses`、`settlement_legacy_bot_seller_claims`、`settlement_legacy_self_reconciliations`、`settlement_recovery_return_consumptions`、`user_blacklist_history` | 只有 `SELECT`、`INSERT` |
 | 冻结证据与登记：`settlement_pools`、`schema_migration_compatibility`、`_sqlx_migrations` | 只有 `SELECT` |
 | 序列 | 只有 `USAGE`、`SELECT`；不授予 `UPDATE`，运行账号不能 `setval` |
 
@@ -285,6 +290,16 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 85.4ms（哈希连接被逐行主键探测替换）。因此不采用该改写，保留原连接顺序与共享的
 `price_history_scope_sql!` 定义，两条分页路径继续使用同一份可见集合条件。
 
+迁移 `000087` 只新增四个投递 Admin 检索候选索引，登记 `compatible`：
+`deliveries_admin_recipient_idx`（`lower(recipient)` 前导）、
+`deliveries_admin_template_idx`（`payload->>'template'` 前导，部分索引）、
+`deliveries_admin_origin_id_idx`（结算来源 `origin_id` 前导，仅两种结算 origin）、
+`deliveries_admin_category_idx`（不可变函数 `public.delivery_send_category(origin_kind, payload)`
+前导）。世界筛选复用 `deliveries_mailbox_sweep_order` 的 `COALESCE(payload->>'world','main')`
+前导。索引只提供候选入口：筛选语义、计数、排序、分页上限与安全投影仍由
+`crates/auction-storage/src/database/delivery_admin/reads.rs` 与应用层校验决定，不改变金额、
+状态迁移、租约、审计、事件、冻结载荷或发送节奏。
+
 复现入口：`cargo test -p auction-storage --features test-db --test perf -- --ignored --nocapture`
 （默认 `just test-db` 不运行；报告写入 `AUCTION_PERF_REPORT_DIR`，默认 `target/perf/<unix 秒>`）。
 
@@ -298,9 +313,10 @@ Serializable 事务在同一瞬间对同一场次的不同 lot 递增同一 `str
 
 - 立即重试（旧行为）：32 个事务中 12 个成功提交、20 个耗尽预算。
 - 带抖动退避（本批实现）：18 个成功、14 个耗尽。抖动把"同时重试再次碰撞"的概率降下来，
-  但同一瞬间争用同一序号的尝试仍会耗尽——这正是 W12.1 仍需根治方案（提交后分配序号、
-  事务前按场次排队或按 lot 拆分事件流）的依据，本批只交付量化与退避，不改变
-  `stream_sequence` 契约。
+  但同一瞬间争用同一序号的尝试仍会耗尽——这正是 W12.1 的量化依据。
+- 提交后分配序号（W12.1 已实现）：同一数据集与并发下，事务内只写待定事件行（`stream_sequence`
+  为 NULL）与自己的 lot 行，提交后再由分配器补号；基准的 `deferred_sequence` 分支断言并报告
+  零冲突、零耗尽。`stream_sequence` 连续性与回放契约不变，见[实时事件](realtime.md)。
 - `pg_notify`：8 并发下提交 p95 245µs（无通知）→ 286µs（每事务内通知），单次上限 381µs。
   在本机 socket 与这个量级上没有可测的提交串行化，因此本批不把唤醒移出出价事务（W12.8）。
 - 匿名读突发：同一物理池上 24 个并发价格历史首屏把出价 p95 从 36.8ms 抬到 170.1ms

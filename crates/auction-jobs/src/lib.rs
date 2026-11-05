@@ -21,8 +21,9 @@ pub use worker::{
     MailPollRuntimeConfig, MailPollSchedules, OperationsAlertRuntime, OperationsAlertRuntimeConfig,
     PersistentRealtimeConsumer, PersistentWorker, PhasedMailSchedule, PlayerNotificationRuntime,
     PlayerNotificationRuntimeConfig, RealtimeConsumerConfigError, RealtimeConsumerRunner,
-    RecoveryHealthRuntime, RecoveryWorkerRuntimeConfig, WorkerError, WorkerHotRuntime,
-    mail_world_phase, run_persistent_with_settlement_until_shutdown, run_until_shutdown,
+    RecoveryHealthRuntime, RecoveryWorkerRuntimeConfig, WorkerConnectionQuota, WorkerError,
+    WorkerHotRuntime, mail_world_phase, run_persistent_with_settlement_until_shutdown,
+    run_until_shutdown,
 };
 
 mod runtime_switches;

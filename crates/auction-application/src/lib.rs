@@ -9,11 +9,14 @@ pub use ports::{
     OperationLockState, PriorityGateState, SegmentPlan,
 };
 pub use ports::{
-    DeliveryAdminAction, DeliveryAdminAttempt, DeliveryAdminCommand, DeliveryAdminCustody,
-    DeliveryAdminDetail, DeliveryAdminDisposition, DeliveryAdminError, DeliveryAdminListRequest,
+    DELIVERY_ADMIN_CATEGORIES, DELIVERY_ADMIN_RETIREMENT_REASONS,
+    DELIVERY_ADMIN_SUPPRESSION_REASONS, DELIVERY_ADMIN_WORLDS, DeliveryAdminAction,
+    DeliveryAdminAttempt, DeliveryAdminCommand, DeliveryAdminCustody, DeliveryAdminDetail,
+    DeliveryAdminDisposition, DeliveryAdminError, DeliveryAdminListRequest,
     DeliveryAdminObligation, DeliveryAdminPage, DeliveryAdminPort, DeliveryAdminRecovery,
     DeliveryAdminResult, DeliveryAdminSentEvidence, DeliveryAdminSnapshot,
-    MAX_DELIVERY_ADMIN_OFFSET, MAX_DELIVERY_ADMIN_PAGE_SIZE, MAX_DELIVERY_COD,
+    MAX_DELIVERY_ADMIN_OFFSET, MAX_DELIVERY_ADMIN_PAGE_SIZE, MAX_DELIVERY_ADMIN_RECIPIENT_LEN,
+    MAX_DELIVERY_ADMIN_TEMPLATE_LEN, MAX_DELIVERY_COD,
 };
 pub use ports::{
     ExternalMetricsEvent, ExternalMetricsObserver, ForumBudgetPhase, ForumOperation,
@@ -22,6 +25,11 @@ pub use ports::{
     MailLock, MailLockOutcome, MailNoticeClass, MailOperation, MailPhase, MailRequestCategory,
     MailSignal, MailWorld, ReplyDelayBound, ReplyDelayMethod, ReplyDelayPhase,
     ReplyDelaySampleOutcome, WaitOutcome, noop_external_metrics_observer,
+};
+pub use ports::{
+    MAX_PLAYER_SUPPORT_ROWS, MAX_PLAYER_SUPPORT_USER_LEN, PlayerSupportBid, PlayerSupportBundle,
+    PlayerSupportDeal, PlayerSupportNotification, PlayerSupportObligation, PlayerSupportReference,
+    PlayerSupportRequest, PlayerSupportSelector, PlayerSupportUser,
 };
 pub use ports::{
     NotificationFailure, NotificationKind, NotificationRecorder, NotificationStage,
@@ -213,18 +221,19 @@ pub use ports::{
     RealtimeDashboardSnapshot, RealtimeEventListRequest, RealtimeEventPage, RealtimeEventSink,
     RealtimeEventSnapshot, RealtimeFailureListRequest, RealtimeFailurePage,
     RealtimeFailureSnapshot, RealtimeFailureWater, RealtimeLagListRequest, RealtimeLagPage,
-    RealtimeLagSnapshot, RealtimeReplayCommand, RealtimeReplayResult, RealtimeSinkError,
-    RealtimeStreamStore, RecoveryActionClaim, RecoveryActionOutcome, RecoveryActionReport,
-    RecoveryBalanceStatus, RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklistResult,
-    RecoveryBuyerBlacklister, RecoveryCaseAdvance, RecoveryCommandError, RecoveryCommandPort,
-    RecoveryCommandRepository, RecoveryConfirmationAction, RecoveryConfirmationCommand,
-    RecoveryConfirmationResult, RecoveryEvidenceStatus, RecoveryHealthConfig,
-    RecoveryHealthRefreshPort, RecoveryHealthStore, RecoveryHealthUpdate, RecoveryReport,
-    RecoveryReportEntry, RecoveryReportReader, RecoveryResolutionAdvance, RecoveryResolutionStore,
-    RecoveryReturnAdvance, RecoveryWorkStore, RecurringSchedule, RepositoryError, RequestHash,
-    SLOW_PROXY_COMMAND_KIND, ScheduledRoundBootstrap, ScheduledRoundClaim, ScheduledRoundPhase,
-    ScheduledRoundSnapshot, ScheduledRoundStore, SetPublicSessionPreferenceCommand,
-    SettlementAdjustment, SettlementAuctionSnapshot, SettlementCatalogEntry, SettlementCatalogPage,
+    RealtimeLagSnapshot, RealtimeReplayCommand, RealtimeReplayResult, RealtimeSequenceAllocator,
+    RealtimeSinkError, RealtimeStreamStore, RecoveryActionClaim, RecoveryActionOutcome,
+    RecoveryActionReport, RecoveryBalanceStatus, RecoveryBuyerBlacklistCommand,
+    RecoveryBuyerBlacklistResult, RecoveryBuyerBlacklister, RecoveryCaseAdvance,
+    RecoveryCommandError, RecoveryCommandPort, RecoveryCommandRepository,
+    RecoveryConfirmationAction, RecoveryConfirmationCommand, RecoveryConfirmationResult,
+    RecoveryEvidenceStatus, RecoveryHealthConfig, RecoveryHealthRefreshPort, RecoveryHealthStore,
+    RecoveryHealthUpdate, RecoveryReport, RecoveryReportEntry, RecoveryReportReader,
+    RecoveryResolutionAdvance, RecoveryResolutionStore, RecoveryReturnAdvance, RecoveryWorkStore,
+    RecurringSchedule, RepositoryError, RequestHash, SLOW_PROXY_COMMAND_KIND,
+    ScheduledRoundBootstrap, ScheduledRoundClaim, ScheduledRoundPhase, ScheduledRoundSnapshot,
+    ScheduledRoundStore, SetPublicSessionPreferenceCommand, SettlementAdjustment,
+    SettlementAuctionSnapshot, SettlementCatalogEntry, SettlementCatalogPage,
     SettlementCatalogReader, SettlementCatalogRequest, SettlementDeliveryPreparation,
     SettlementFulfillmentActivationResult, SettlementFulfillmentBalanceEvidence,
     SettlementFulfillmentBotIdentityReader, SettlementFulfillmentClaim,
@@ -268,6 +277,10 @@ pub use ports::{
     AdminCredentialCheckObservation, AdminCredentialCheckPort, AdminCredentialCheckRecord,
     AdminCredentialCheckResult, AdminCredentialCheckStatus, AdminCredentialCheckStore,
     AdminCredentialVerifier, credential_check_worlds,
+};
+pub use ports::{
+    DeliveryAcknowledgementCommand, DeliveryAcknowledgementResult, DeliveryDispositionCommandError,
+    DeliveryDispositionPort, DeliveryDispositionRecord,
 };
 pub use ports::{
     DeliverySentConfirmationPort, ManualSentEvidence, SentAdminFailure, SentAdmission,

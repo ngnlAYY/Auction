@@ -201,6 +201,28 @@ pub(super) async fn bind_send(
     .bind(expected.map(sqlx::types::Json))
     .fetch_one(&mut **tx)
     .await?;
+    // 同一事务追加统一处置事实：自动恢复把原未知结果收口为成功。
+    let proof = metadata.get("proof").and_then(Value::as_str).unwrap_or_default();
+    crate::database::delivery_disposition::append(
+        tx,
+        crate::database::delivery_disposition::DeliveryDispositionFact {
+            delivery_id,
+            fencing_version,
+            kind: auction_domain::DeliveryDispositionKind::AutoSentProof,
+            source: auction_domain::DeliveryDispositionSource {
+                sent_binding: Some((delivery.world_id.clone(), mid.to_owned())),
+                ..Default::default()
+            },
+            actor_source: auction_domain::DeliveryDispositionActorSource::Worker,
+            actor_id: "delivery-worker",
+            reason: None,
+            reason_code: Some(proof),
+            detail: Some(&serde_json::json!({"proof": proof})),
+            command_id: None,
+            request_digest: None,
+        },
+    )
+    .await?;
     Ok(Some((delivery.origin_kind, delivery.origin_id, completed_at)))
 }
 

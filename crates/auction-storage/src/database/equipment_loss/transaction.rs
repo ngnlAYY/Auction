@@ -152,6 +152,36 @@ pub(super) async fn apply(
             "cod_collected":false,"seller_payment":"normal_queue","executor":"auction-cli"})))
         .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
         .execute(&mut **tx).await?;
+    // 同一事务追加统一处置事实：投递被永久退役，读侧据此停止把它当作待发送失败。
+    crate::database::delivery_disposition::append(
+        tx,
+        crate::database::delivery_disposition::DeliveryDispositionFact {
+            delivery_id,
+            fencing_version: command.expected_delivery_fencing_version + 1,
+            kind: auction_domain::DeliveryDispositionKind::EquipmentLoss,
+            source: auction_domain::DeliveryDispositionSource {
+                equipment_loss_id: Some(command.command_id),
+                ..Default::default()
+            },
+            actor_source: if command.operator_identity.is_some() {
+                auction_domain::DeliveryDispositionActorSource::Cli
+            } else {
+                auction_domain::DeliveryDispositionActorSource::Admin
+            },
+            actor_id: &command.actor,
+            reason: Some(&command.reason),
+            reason_code: Some("equipment_destroyed"),
+            detail: Some(&json!({
+                "lot_id": command.lot_id,
+                "recovery_id": recovery_id,
+                "refund_obligation_id": refund_id,
+                "buyer_compensation_external": true,
+            })),
+            command_id: None,
+            request_digest: None,
+        },
+    )
+    .await?;
     Ok(result)
 }
 

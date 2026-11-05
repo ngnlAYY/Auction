@@ -218,6 +218,7 @@ fn business_event_for_worker(loop_kind: WorkerLoop) -> Option<BusinessEvent> {
         WorkerLoop::MailMain | WorkerLoop::MailIsekai => BusinessEvent::MailIntake,
         WorkerLoop::Delivery => BusinessEvent::MailDelivery,
         WorkerLoop::Auction => BusinessEvent::AuctionLifecycle,
+        WorkerLoop::Settlement => BusinessEvent::Settlement,
         WorkerLoop::AuctionFulfillment => BusinessEvent::Fulfillment,
         WorkerLoop::AuctionRecovery => BusinessEvent::Recovery,
         WorkerLoop::Forum => BusinessEvent::ForumSync,
@@ -236,6 +237,7 @@ fn valid_retry_mode(loop_kind: WorkerLoop, retry_kind: WorkerRetryKind) -> bool 
             matches!(retry_kind, WorkerRetryKind::Persisted)
         }
         WorkerLoop::Auction
+        | WorkerLoop::Settlement
         | WorkerLoop::MailMaintenanceMain
         | WorkerLoop::MailMaintenanceIsekai
         | WorkerLoop::MailReadObservationMain

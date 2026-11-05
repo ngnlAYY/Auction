@@ -128,7 +128,7 @@ CREATE TEMP TABLE settlement_recoveries (
 );
 CREATE TEMP TABLE deliveries (id uuid, status text, origin_kind text, origin_id text);
 CREATE TEMP TABLE realtime_streams (stream_key text, next_sequence bigint);
-CREATE TEMP TABLE realtime_events (stream_key text, stream_sequence bigint);
+CREATE TEMP TABLE realtime_events (stream_key text, stream_sequence bigint, created_at timestamptz);
 CREATE TEMP TABLE realtime_consumer_offsets (consumer_key text, stream_key text, last_sequence bigint);
 INSERT INTO lots VALUES (
     '00000000-0000-0000-0000-000000000001', 100,
@@ -177,7 +177,11 @@ INSERT INTO settlement_recoveries VALUES (
     '00000000-0000-0000-0000-000000000004', NULL
 );
 INSERT INTO realtime_streams VALUES ('auction:test', 3);
-INSERT INTO realtime_events VALUES ('auction:test', 1), ('auction:test', 2);
+-- W12.1：已分配事件 + 一条刚提交、尚未分配序号的竞价事件（正常状态，不得误报）。
+INSERT INTO realtime_events VALUES
+    ('auction:test', 1, now() - interval '2 minutes'),
+    ('auction:test', 2, now() - interval '1 minute'),
+    ('auction:test', NULL, now());
 INSERT INTO realtime_consumer_offsets VALUES ('consumer', 'auction:test', 1);
 "#;
 
@@ -193,4 +197,8 @@ UPDATE pg_temp.settlement_obligation_fulfillments SET execution_state = 'prepare
     delivery_id = '00000000-0000-0000-0000-000000000040'
 WHERE obligation_id = '00000000-0000-0000-0000-000000000003';
 DELETE FROM pg_temp.realtime_events WHERE stream_sequence = 1;
+-- 未分配序号滞留超过阈值说明分配器/relay 停摆，事件无法进入回放。
+INSERT INTO pg_temp.realtime_events VALUES (
+    'auction:test', NULL, now() - interval '6 minutes'
+);
 "#;

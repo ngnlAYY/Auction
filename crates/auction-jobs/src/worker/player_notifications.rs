@@ -12,8 +12,8 @@ use auction_application::{
 };
 use auction_observability::{WorkerLoop, WorkerResult};
 
+use self::parent::*;
 use super as parent;
-    use self::parent::*;
 use crate::worker::diagnostics;
 
 /// 扫描循环的调度参数；窗口与批量属于应用层常量，不随热配置改变。
@@ -64,6 +64,8 @@ pub(super) async fn run_loop<C>(
             return;
         }
         let started = std::time::Instant::now();
+        // W12.5：扫描属于批量轮次，受共享连接配额限制；等待下一轮期间不占用许可。
+        let bulk_permit = worker.bulk_permit().await;
         let result = match runtime.service.run_once().await {
             Ok(_) => WorkerResult::Success,
             Err(error) => {
@@ -81,6 +83,7 @@ pub(super) async fn run_loop<C>(
             result,
             started.elapsed(),
         );
+        drop(bulk_permit);
 
         let wait = poll_delay(runtime.config.poll_interval, runtime.config.jitter);
         let scheduled_wake = tokio::time::Instant::now() + wait;

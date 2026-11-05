@@ -200,6 +200,8 @@ pub(crate) async fn run_loop<C>(
                 return;
             }
             let started = std::time::Instant::now();
+            // W12.5：外部转发属于批量轮次，受共享连接配额限制；等待下一轮期间不占用许可。
+            let bulk_permit = worker.bulk_permit().await;
             let now = worker.clock.now();
             let result = if let Some(consumer) = &worker.realtime_consumer {
                 match consumer.run_once(now).await {
@@ -222,6 +224,7 @@ pub(crate) async fn run_loop<C>(
                 WorkerResult::Success
             };
             worker.metrics.observe_iteration(WorkerLoop::Realtime, result, started.elapsed());
+            drop(bulk_permit);
             let wait = poll_delay(worker.auction.poll_interval, worker.auction.jitter);
             let deadline = tokio::time::Instant::now() + wait;
             if super::wait_until_or_shutdown(&mut shutdown, deadline).await {

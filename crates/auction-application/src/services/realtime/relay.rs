@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 
 use crate::{
     ApplicationError, RealtimeConsumerRequest, RealtimeConsumerStore, RealtimeEventSink,
-    RealtimeStreamStore, RepositoryError,
+    RealtimeSequenceAllocator, RealtimeStreamStore, RepositoryError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +52,8 @@ pub struct RealtimeRelay {
     stream_store: Arc<dyn RealtimeStreamStore>,
     consumer_store: Arc<dyn RealtimeConsumerStore>,
     sink: Arc<dyn RealtimeEventSink>,
+    /// W12.1：竞价事件提交后未分配的序号由 relay 每轮补齐。
+    sequence_allocator: Arc<dyn RealtimeSequenceAllocator>,
     config: RealtimeRelayConfig,
 }
 
@@ -61,10 +63,11 @@ impl RealtimeRelay {
         stream_store: Arc<dyn RealtimeStreamStore>,
         consumer_store: Arc<dyn RealtimeConsumerStore>,
         sink: Arc<dyn RealtimeEventSink>,
+        sequence_allocator: Arc<dyn RealtimeSequenceAllocator>,
         config: RealtimeRelayConfig,
     ) -> Result<Self, &'static str> {
         config.validate()?;
-        Ok(Self { stream_store, consumer_store, sink, config })
+        Ok(Self { stream_store, consumer_store, sink, sequence_allocator, config })
     }
 
     /// 按有界分页扫描仍有待转发事件的 stream；失败事件会留在当前游标前等待重试，不会跳过历史。
@@ -72,6 +75,24 @@ impl RealtimeRelay {
         Box::pin(async move {
             if now.timestamp_micros() == 0 {
                 return Err(repository_error("实时 relay 时间无效"));
+            }
+            // W12.1：竞价事件在提交后才分配序号。先补齐待定序号再扫描目录，失败只推迟到下一轮，
+            // 不让补号故障把 relay 健康（进而 Public 就绪）翻成不可用。
+            match self
+                .sequence_allocator
+                .allocate_pending_sequences(self.config.stream_prefix.clone())
+                .await
+            {
+                Ok(allocated) if allocated > 0 => {
+                    tracing::debug!(allocated, "realtime relay assigned deferred stream sequences");
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "realtime relay pending sequence allocation failed; retrying next tick"
+                    );
+                }
             }
             let mut result = RealtimeRelayBatch::default();
             let mut after_stream = String::new();

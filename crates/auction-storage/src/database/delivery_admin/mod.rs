@@ -17,6 +17,8 @@ mod mapping;
 #[cfg(feature = "postgres")]
 mod reads;
 #[cfg(feature = "postgres")]
+mod support;
+#[cfg(feature = "postgres")]
 mod transaction;
 
 impl DeliveryAdminPort for DatabaseStore {
@@ -50,6 +52,23 @@ impl DeliveryAdminPort for DatabaseStore {
                 Self::Postgres(store) => {
                     detail::detail(store.pool(), delivery_id).await.map_err(ApplicationError::from)
                 }
+            }
+        })
+    }
+
+    fn player_support(
+        &self,
+        request: auction_application::PlayerSupportRequest,
+    ) -> auction_application::ApplicationFuture<'_, auction_application::PlayerSupportBundle> {
+        Box::pin(async move {
+            if !request.validate() {
+                return Err(DeliveryAdminError::Invalid.into());
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => support::player_support(store.pool(), &request)
+                    .await
+                    .map_err(ApplicationError::from),
             }
         })
     }

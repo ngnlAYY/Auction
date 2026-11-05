@@ -302,6 +302,34 @@ async fn execute_transaction(
     )
     .await
     .map_err(DeliveryAdminTransactionError::Sqlx)?;
+    if command.action == DeliveryAdminAction::ReconcileFailed {
+        // Admin 判失败本身就是该 fence 上的处置事实：读侧按它停止计失败，
+        // 重试会推进 fence 从而自动重新计入。原命令账本与审计保持不变。
+        crate::database::delivery_disposition::append(
+            transaction.transaction_mut()?,
+            crate::database::delivery_disposition::DeliveryDispositionFact {
+                delivery_id: command.delivery_id,
+                fencing_version: result.snapshot.fencing_version,
+                kind: auction_domain::DeliveryDispositionKind::AdminFailed,
+                source: auction_domain::DeliveryDispositionSource {
+                    admin_command_id: Some(command.command_id),
+                    ..Default::default()
+                },
+                actor_source: auction_domain::DeliveryDispositionActorSource::Admin,
+                actor_id: &command.actor_id,
+                reason: None,
+                reason_code: command.failure_code.as_deref(),
+                detail: Some(&serde_json::json!({
+                    "admin_action": admin_action,
+                    "status": result.snapshot.status,
+                })),
+                command_id: None,
+                request_digest: None,
+            },
+        )
+        .await
+        .map_err(DeliveryAdminTransactionError::Sqlx)?;
+    }
     transaction.commit().await?;
     Ok(result)
 }

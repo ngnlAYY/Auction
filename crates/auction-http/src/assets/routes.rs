@@ -34,6 +34,7 @@ const ADMIN_EXACT_ROUTES: &[&str] = &[
     "/mail",
     "/mails",
     "/outbox",
+    "/player-support",
     "/renames",
     "/rules",
     "/rules-content",

@@ -24,6 +24,7 @@ pub enum DatabaseTransactionOwner {
     RuntimeSwitch,
     EquipmentLoss,
     SentConfirmation,
+    DeliveryDisposition,
 }
 
 impl DatabaseTransactionOwner {
@@ -50,6 +51,7 @@ impl DatabaseTransactionOwner {
             Self::RuntimeSwitch => "runtime_switch",
             Self::EquipmentLoss => "equipment_loss",
             Self::SentConfirmation => "sent_confirmation",
+            Self::DeliveryDisposition => "delivery_disposition",
         }
     }
 

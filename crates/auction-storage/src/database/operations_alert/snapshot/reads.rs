@@ -86,20 +86,17 @@ async fn process_snapshot(
     Ok(OperationsAlertProcessSnapshot { processes, audit_failure_count })
 }
 
-/// 已处置终态不再计数的共享谓词：关注提醒在开始发送前失去资格的预检退役。
-/// delivery 与 notification 两个来源共用同一事实，避免两处名单漂移。
-const LOT_WATCH_INVALIDATED_DISPOSITION: &str = "NOT (origin_kind = 'lot_watch'
-                    AND failure_code = 'lot_watch_invalidated'
-                    AND sending_at IS NULL
-                    AND result_metadata @>
-                        '{\"outcome_unknown\":false,\"preflight_blocked\":true,\"reason_code\":\"lot_watch_invalidated\"}'::jsonb)";
-
-/// 已处置终态：Admin 对账判失败（命令账本中产出当前 fence 的失败命令）。
-const ADMIN_RECONCILE_DISPOSITION: &str = "NOT EXISTS (
-                    SELECT 1 FROM public.delivery_admin_commands admin
-                    WHERE admin.delivery_id = d.id AND admin.command_kind = 'reconcile'
-                      AND admin.result_payload->>'Status' = 'failed'
-                      AND admin.result_payload->'FencingVersion' = to_jsonb(d.fencing_version)
+/// 已处置终态的统一判据：当前 fence 上已有解除异常终态的追加处置事实。
+///
+/// `delivery_dispositions.resolves_alert` 在写入时按领域闭集固定，交付与通知两个来源共用
+/// 同一事实，读侧不再按来源拼接专用排除谓词（Admin 判失败、装备损失、历史自寄、
+/// 预检退役与操作者确认各自只写一行处置）。预检退役中当前只有失去资格的关注提醒解除
+/// 失败计数，沿用迁移 `000088` 之前的口径；放开其余退役属有意改变判定，须用户批准。
+const UNDISPOSED: &str = "NOT EXISTS (
+                    SELECT 1 FROM public.delivery_dispositions disposition
+                    WHERE disposition.delivery_id = d.id
+                      AND disposition.fencing_version = d.fencing_version
+                      AND disposition.resolves_alert
                 )";
 
 async fn delivery_snapshot(
@@ -116,19 +113,10 @@ async fn delivery_snapshot(
                 AND status IN ('claimed', 'sending')) AS claimed,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status = 'failed'
-                AND NOT EXISTS (
-                    SELECT 1 FROM public.settlement_legacy_self_reconciliations r
-                    WHERE /* trusted_legacy_self */
-                )
-                -- 已处置终态不再计入，各自以不可变事实为证：关注提醒在开始发送前失去资格的预检退役；
-                -- Admin 对账判失败（命令账本中产出当前 fence 的失败命令）；装备损失处置退役的原投递。
-                -- 结算类人工判失败仍由履约水位的 failed 暴露。
-                AND /* lot_watch_invalidated */
-                AND /* admin_reconcile_disposition */
-                AND NOT EXISTS (
-                    SELECT 1 FROM public.settlement_equipment_losses loss
-                    WHERE loss.delivery_id = d.id AND d.failure_code = 'equipment_destroyed'
-                )) AS failed,
+                -- 已处置终态不再计入，各自以不可变处置事实为证（历史自寄、Admin 判失败、
+                -- 装备损失、预检退役、操作者确认）。结算类人工判失败仍由履约水位的 failed 暴露。
+                AND /* undisposed */
+                ) AS failed,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status = 'manual_reconcile') AS manual_reconcile,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
@@ -151,12 +139,7 @@ async fn delivery_snapshot(
                 AS oldest_returned_mail,
             MAX(updated_at) FILTER (WHERE origin_kind <> 'operations_alert') AS last_update
          FROM public.deliveries d"#
-            .replace(
-                "/* trusted_legacy_self */",
-                crate::database::legacy_self_proof::TRUSTED_DELIVERY_PREDICATE,
-            )
-            .replace("/* lot_watch_invalidated */", LOT_WATCH_INVALIDATED_DISPOSITION)
-            .replace("/* admin_reconcile_disposition */", ADMIN_RECONCILE_DISPOSITION)
+            .replace("/* undisposed */", UNDISPOSED)
     });
     let row = sqlx::query(sqlx::AssertSqlSafe(QUERY.as_str()))
         .fetch_one(pool)
@@ -522,17 +505,13 @@ async fn notification_snapshot(
              FROM public.deliveries d
              WHERE d.origin_kind NOT IN
                  ('settlement', 'settlement_recovery_action', 'operations_alert')
-               AND /* lot_watch_invalidated */
-               AND /* admin_reconcile_disposition */",
+               AND /* undisposed */",
         );
-        query = query
-            .replace("/* lot_watch_invalidated */", LOT_WATCH_INVALIDATED_DISPOSITION)
-            .replace("/* admin_reconcile_disposition */", ADMIN_RECONCILE_DISPOSITION)
-            .replace(
-                "/* postage */",
-                "d.failure_code IN ('send_rejected', 'send_rejected_after_stage')
+        query = query.replace("/* undisposed */", UNDISPOSED).replace(
+            "/* postage */",
+            "d.failure_code IN ('send_rejected', 'send_rejected_after_stage')
                     AND d.result_metadata->>'reason_code' = 'insufficient_postage'",
-            );
+        );
         query
     });
     let row = sqlx::query(sqlx::AssertSqlSafe(QUERY.as_str()))

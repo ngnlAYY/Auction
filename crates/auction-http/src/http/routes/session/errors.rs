@@ -252,6 +252,9 @@ pub(crate) fn map_competition_error(error: ApplicationError) -> Response {
         .into_response(),
         // 玩家通知扫描只在 Worker 内运行，不会从 HTTP 命令路径到达；保守映射为暂时不可用。
         ApplicationError::PlayerNotification(_) => competition_unavailable(),
+        // W2 人工处置事实只在 Admin 投递处置端点使用；公开竞价与恢复确认路径不可达，
+        // 保守映射为暂时不可用，避免把内部错误种类扩散为公开契约。
+        ApplicationError::DeliveryDisposition(_) => competition_unavailable(),
         map_temporarily_unavailable!() => competition_unavailable(),
     };
     let response = body();
@@ -301,6 +304,7 @@ pub(crate) fn map_recovery_command_error(error: ApplicationError) -> Response {
         .into_response(),
         // 玩家通知扫描只在 Worker 内运行，不会从 HTTP 命令路径到达；保守映射为暂时不可用。
         ApplicationError::PlayerNotification(_) => competition_unavailable(),
+        ApplicationError::DeliveryDisposition(_) => competition_unavailable(),
         map_temporarily_unavailable!() => competition_unavailable(),
     };
     let response = body();

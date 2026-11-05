@@ -61,7 +61,7 @@ pub(crate) use credentials::{
 };
 pub(crate) use dashboard::{AdminDashboardSnapshot, fetch_dashboard};
 pub(crate) use delivery::{
-    SentProofCommand, confirm_delivery_sent_proof, fetch_delivery_detail,
+    SentProofCommand, confirm_delivery_sent_proof, fetch_delivery_detail, fetch_player_support,
     preview_delivery_sent_proof,
 };
 pub(crate) use forum::{AdminForumStatus, fetch_admin_forum_status};
@@ -125,6 +125,11 @@ pub(crate) use auction_contracts::{
     AdminDeliverySentEvidenceRequest as DeliverySentEvidence,
     AdminDeliverySentProofPreviewResponse as DeliverySentProofPreview,
     AdminDeliverySentProofResponse as DeliverySentProofResult,
+    AdminPlayerSupportBidResponse as PlayerSupportBid,
+    AdminPlayerSupportBundleResponse as PlayerSupportBundle,
+    AdminPlayerSupportDealResponse as PlayerSupportDeal,
+    AdminPlayerSupportNotificationResponse as PlayerSupportNotification,
+    AdminPlayerSupportObligationResponse as PlayerSupportObligation,
 };
 use auction_contracts::{
     AdminDeliveryCommandRequest, AdminDeliveryCommandResponse, AdminDeliveryListResponse,
@@ -398,6 +403,27 @@ fn decode_delivery_command(
 }
 
 fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
+    // W4.5 新增字段同样 fail-closed：模板/类别/世界/原因只接受服务端闭集。
+    if !valid_optional_text(value.template.as_deref())
+        || value.template.as_deref().is_some_and(|template| template.len() > 64)
+        || value.category.as_deref().is_some_and(|category| {
+            !matches!(
+                category,
+                "outbid"
+                    | "account"
+                    | "intake"
+                    | "settlement"
+                    | "equipment"
+                    | "operations"
+                    | "manual"
+            )
+        })
+        || value.world.as_deref().is_some_and(|world| !matches!(world, "main" | "isekai"))
+        || !valid_optional_text(value.retirement_reason.as_deref())
+        || !valid_optional_text(value.suppression_reason.as_deref())
+    {
+        return Err(());
+    }
     if !valid_uuid(&value.id) {
         return Err(());
     }
@@ -482,6 +508,11 @@ fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
         recipient: value.recipient,
         cod: value.cod,
         status: value.status,
+        template: value.template,
+        category: value.category,
+        world: value.world,
+        retirement_reason: value.retirement_reason,
+        suppression_reason: value.suppression_reason,
         lease_expires_at: value.lease_expires_at,
         fencing_version: value.fencing_version,
         attempt_count: value.attempt_count,
@@ -753,18 +784,79 @@ impl DeliveryAction {
 }
 
 /// 读取指定状态和页码的 delivery 安全投影；状态筛选改变时回到第一页。
+/// W4.5 投递检索条件；空串表示该维度未设置，由页面从地址栏恢复。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DeliverySearchFilters {
+    pub recipient: String,
+    pub reference: String,
+    pub template: String,
+    pub category: String,
+    pub world: String,
+    pub created_from: String,
+    pub created_to: String,
+}
+
+impl DeliverySearchFilters {
+    /// 客户端只做格式与上限检查；服务端仍按闭集和精确匹配失败关闭。
+    fn validate(&self) -> bool {
+        valid_filter_text(&self.recipient, 256)
+            && (self.reference.is_empty() || valid_uuid(&self.reference))
+            && valid_filter_text(&self.template, 64)
+            && (self.category.is_empty()
+                || matches!(
+                    self.category.as_str(),
+                    "outbid"
+                        | "account"
+                        | "intake"
+                        | "settlement"
+                        | "equipment"
+                        | "operations"
+                        | "manual"
+                ))
+            && (self.world.is_empty() || matches!(self.world.as_str(), "main" | "isekai"))
+            && valid_filter_time(&self.created_from)
+            && valid_filter_time(&self.created_to)
+    }
+}
+
+fn valid_filter_text(value: &str, maximum: usize) -> bool {
+    value.is_empty()
+        || (value.len() <= maximum && value == value.trim() && !value.chars().any(char::is_control))
+}
+
+fn valid_filter_time(value: &str) -> bool {
+    value.is_empty() || parse_delivery_time(value).is_some()
+}
+
 pub(crate) async fn fetch_deliveries(
     status: String,
+    filters: DeliverySearchFilters,
     page: i64,
     page_size: i64,
 ) -> Result<DeliveryPage, String> {
     pagination::validate(page, page_size, 100, i64::MAX)?;
+    if !filters.validate() {
+        return Err("invalid_delivery_filter".to_owned());
+    }
     let mut query = url::form_urlencoded::Serializer::new(String::new());
     query
         .append_pair("page", &page.max(1).to_string())
         .append_pair("page_size", &page_size.to_string());
     if !status.is_empty() {
         query.append_pair("status", status.trim());
+    }
+    for (key, value) in [
+        ("recipient", filters.recipient.as_str()),
+        ("reference", filters.reference.as_str()),
+        ("template", filters.template.as_str()),
+        ("category", filters.category.as_str()),
+        ("world", filters.world.as_str()),
+        ("created_from", filters.created_from.as_str()),
+        ("created_to", filters.created_to.as_str()),
+    ] {
+        if !value.is_empty() {
+            query.append_pair(key, value);
+        }
     }
     let url = format!("/api/v1/admin/deliveries?{}", query.finish());
     let response = send_get(&url).await?;

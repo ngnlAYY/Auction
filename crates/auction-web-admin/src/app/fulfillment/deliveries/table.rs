@@ -16,7 +16,8 @@ use super::super::Route;
 use super::super::sort::{SortDirection, SortableTh, directed};
 use super::dialog::DeliveryDialog;
 use super::helpers::{
-    delivery_display_id, delivery_display_type, delivery_status_label, is_mail_disposition_conflict,
+    delivery_category_label, delivery_display_id, delivery_display_type, delivery_outcome_label,
+    delivery_status_label, is_mail_disposition_conflict,
 };
 use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
@@ -44,7 +45,7 @@ pub(super) fn DeliveryTable(
         div { class: "admin-delivery-table-wrap",
             table { class: "admin-delivery-table",
                 caption { class: "admin-visually-hidden", {t!("page-deliveries-title")} }
-                auction_web_shared::TableColumns { layout: "admin-deliveries", widths: vec![8, 10, 15, 12, 9, 8, 22, 16] }
+                auction_web_shared::TableColumns { layout: "admin-deliveries", widths: vec![7, 9, 13, 11, 9, 7, 7, 6, 21, 10] }
                 thead {
                     tr {
                         SortableTh {
@@ -57,6 +58,22 @@ pub(super) fn DeliveryTable(
                         }
                         th { scope: "col", class: "admin-delivery-col-type", {t!("delivery-type")} }
                         th { scope: "col", class: "admin-delivery-col-target", {t!("delivery-to")} }
+                        SortableTh {
+                            column: "template",
+                            label: t!("delivery-template"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-delivery-col-template",
+                        }
+                        SortableTh {
+                            column: "category",
+                            label: t!("delivery-category"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-delivery-col-category",
+                        }
                         SortableTh {
                             column: "cod",
                             label: t!("delivery-cod"),
@@ -81,7 +98,7 @@ pub(super) fn DeliveryTable(
                             on_sort: on_sort_change,
                             class: "admin-delivery-col-attempts",
                         }
-                        th { scope: "col", class: "admin-delivery-col-error", {t!("delivery-last-error")} }
+                        th { scope: "col", class: "admin-delivery-col-error", {t!("delivery-outcome")} }
                         th { scope: "col", {t!("catalog-actions")} }
                     }
                 }
@@ -141,7 +158,13 @@ pub(super) fn DeliveryRow(
     let action_label = kind.map(DeliveryDialogKind::action_label);
     let status = delivery_status_label(&delivery.status);
     let cod = delivery.cod.map(format_amount).unwrap_or_else(|| t!("value-empty"));
-    let failure = delivery.failure_code.clone().unwrap_or_default();
+    let template = delivery.template.clone().unwrap_or_else(|| t!("value-empty"));
+    let category = delivery
+        .category
+        .as_deref()
+        .map(delivery_category_label)
+        .unwrap_or_else(|| t!("value-empty"));
+    let outcome = delivery_outcome_label(&delivery);
     let recipient = delivery.recipient.clone();
     let hidden_recipient = recipient.clone();
     let full_identifier = if delivery.origin_id.is_empty() {
@@ -180,6 +203,20 @@ pub(super) fn DeliveryRow(
                 }
             }
             td {
+                TruncatedText {
+                    value: template,
+                    portal: true,
+                    legacy_dom: true,
+                }
+            }
+            td {
+                TruncatedText {
+                    value: category,
+                    portal: true,
+                    legacy_dom: true,
+                }
+            }
+            td {
                 class: "admin-delivery-num",
                 "{cod}"
             }
@@ -192,7 +229,7 @@ pub(super) fn DeliveryRow(
             }
             td {
                 TruncatedText {
-                    value: failure,
+                    value: outcome,
                     portal: true,
                     legacy_dom: true,
                 }
@@ -222,7 +259,7 @@ pub(super) fn DeliveryRow(
             tr {
                 class: "admin-delivery-dialog-row",
                 td {
-                    colspan: "8",
+                    colspan: "10",
                     DeliveryDialog {
                         delivery: dialog.delivery,
                         kind: dialog.kind,
@@ -249,6 +286,8 @@ fn sort_deliveries(deliveries: &mut [Delivery], column: &str, direction: SortDir
         directed(
             match column {
                 "id" => left.id.cmp(&right.id),
+                "template" => left.template.cmp(&right.template),
+                "category" => left.category.cmp(&right.category),
                 "cod" => left.cod.cmp(&right.cod),
                 "status" => left.status.cmp(&right.status),
                 "attempts" => left.attempt_count.cmp(&right.attempt_count),

@@ -46,6 +46,7 @@ macro_rules! price_history_scope_sql {
 
 mod numbered;
 
+#[cfg(feature = "test-db")]
 pub use numbered::numbered_query_sql;
 
 /// 游标页生产查询原文；`test-db` 基准夹具也读同一份文本，测量与运行不产生副本。

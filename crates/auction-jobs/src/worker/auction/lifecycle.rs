@@ -22,8 +22,12 @@ mod wakeup;
 
 const SETTLEMENT_FAILURE_RECORD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// 立即处理生命周期和结算批次，随后按旧版 polling+jitter cadence 重试；若生命周期、慢速代理或
-/// 结算有更早的未来到期时刻，则在该时刻提前醒来，常规间隔只作为等待上限。
+/// 立即处理生命周期批次，随后按旧版 polling+jitter cadence 重试；若生命周期或慢速代理有更早的
+/// 未来到期时刻，则在该时刻提前醒来，常规间隔只作为等待上限。
+///
+/// W12.5：结算已拆到 [`run_settlement_loop`] 的独立任务。结算单项可能按证据轮询预算占用数十秒，
+/// 留在同一轮里会推迟另一世界的生命周期推进与慢速代理执行；两者只共享数据库租约与锁，不共享
+/// 进程内节奏。
 pub(super) async fn run_loop<C>(
     worker: Arc<PersistentWorker<C>>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -48,8 +52,6 @@ pub(super) async fn run_loop<C>(
             merge_worker_result(&mut result, schedule_result);
             let slow_proxy_result = slow_proxy::run_phase(worker.as_ref()).await;
             merge_worker_result(&mut result, slow_proxy_result);
-            let settlement_result = run_settlement_phase(worker.as_ref()).await;
-            merge_worker_result(&mut result, settlement_result);
             if result != WorkerResult::Success {
                 tracing::warn!(
                     "auction worker batch was not fully processed; retrying after poll delay"
@@ -67,6 +69,47 @@ pub(super) async fn run_loop<C>(
             }
             worker.metrics.observe_schedule_delay(
                 WorkerLoop::Auction,
+                tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
+            );
+        }
+    };
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
+}
+
+/// W12.5 独立结算循环：只领取并执行结算 claim，节奏与拍卖主循环相互独立。
+/// 领取仍由持久化租约与状态 fence 决定；本循环只决定何时尝试，不改变到期或完成事实。
+pub(super) async fn run_settlement_loop<C>(
+    worker: Arc<PersistentWorker<C>>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) where
+    C: Clock + 'static,
+{
+    let diagnostic_metrics = worker.metrics.clone();
+    let diagnostic_loop = WorkerLoop::Settlement;
+    let body = async move {
+        loop {
+            if worker.control.is_draining() {
+                return;
+            }
+            let started = std::time::Instant::now();
+            let result = run_settlement_phase(worker.as_ref()).await;
+            if result != WorkerResult::Success {
+                tracing::warn!(
+                    "settlement batch was not fully processed; retrying after poll delay"
+                );
+            }
+            worker.metrics.observe_iteration(WorkerLoop::Settlement, result, started.elapsed());
+
+            let poll_wait = poll_delay(worker.auction.poll_interval, worker.auction.jitter);
+            let wait = wakeup::settlement_due_wait(worker.as_ref())
+                .await
+                .map_or(poll_wait, |due_wait| due_wait.min(poll_wait));
+            let scheduled_wake = tokio::time::Instant::now() + wait;
+            if super::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
+                return;
+            }
+            worker.metrics.observe_schedule_delay(
+                WorkerLoop::Settlement,
                 tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
             );
         }
@@ -343,7 +386,7 @@ DiagnosticContext { workflow_id: diagnostic_id(&workflow_id), ..Default::default
         }
     }
     if phase_result == WorkerResult::Success {
-        worker.metrics.observe_batch(WorkerLoop::Auction, processed, capacity);
+        worker.metrics.observe_batch(WorkerLoop::Settlement, processed, capacity);
     }
     phase_result
 }
