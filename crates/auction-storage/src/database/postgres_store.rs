@@ -17,6 +17,8 @@ pub struct PostgresStore {
     pub(crate) notification_metrics: std::sync::Arc<dyn auction_application::NotificationRecorder>,
     /// W14.2 通知正文使用的公开站点 origin；装配根注入，未配置时正文省略链接。
     pub(crate) public_base_url: Option<String>,
+    /// 同一拍卖的出价队列（进程内按场次互斥 + 跨实例会话锁）；进程内共享，clone 复用同一状态。
+    pub(crate) bid_queue: std::sync::Arc<super::competition::AuctionBidQueue>,
 }
 
 #[cfg(feature = "postgres")]
@@ -43,6 +45,7 @@ impl PostgresStore {
                 auction_observability::MigrationReadinessRecorder::default(),
             notification_metrics: auction_application::noop_notification_recorder(),
             public_base_url: None,
+            bid_queue: std::sync::Arc::new(super::competition::AuctionBidQueue::default()),
         })
     }
 
@@ -69,6 +72,20 @@ impl PostgresStore {
 
     pub(crate) fn raw_pool(&self) -> &PgPool {
         self.pool.raw()
+    }
+
+    /// 出价队列的共享状态；同一进程内所有 store clone 共用同一组场次互斥量。
+    pub(crate) fn auction_bid_queue(&self) -> &std::sync::Arc<super::competition::AuctionBidQueue> {
+        &self.bid_queue
+    }
+
+    /// 切换排队模式；`Direct` 只用于基准对照与回退验证，生产装配始终使用默认的 `Queued`。
+    #[cfg(feature = "test-db")]
+    pub fn with_bid_queue_mode(mut self, mode: super::competition::BidQueueMode) -> Self {
+        let budget = self.bid_queue.wait_budget();
+        self.bid_queue =
+            std::sync::Arc::new(super::competition::AuctionBidQueue::new(mode, budget));
+        self
     }
 
     /// 显式关闭当前适配器共享的连接池。

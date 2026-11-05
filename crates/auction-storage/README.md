@@ -30,7 +30,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 
 ## 实现约定
 
-- **事务**：竞价、关键生命周期等命令在 Serializable 事务内完成，序列化失败（40001）与死锁（40P01）由命令 owner 有界重试（`is_serialization_conflict` 是统一判定）。竞价、结算、规则与 Admin 邮件经各自的 `TransactionRunner` 按 `TransactionPolicy` 重试；其余独立 Serializable 写入共用 `retry_conflicts`（默认 `SERIALIZABLE_ATTEMPTS` 次，每次重开事务，只重跑 owner 判定的明确中止，结果未知的提交不重试）。运行期 claim、进度及部分账本写入使用默认隔离事务，并按各自 owner 取行锁或校验租约/fencing；不能把所有写入都视为 Serializable。同一幂等命令 ID 通过事务级 advisory 锁协调（`lock_command_id` 共用键空间）。
+- **事务**：竞价、关键生命周期等命令在 Serializable 事务内完成，序列化失败（40001）与死锁（40P01）由命令 owner 有界重试（`is_serialization_conflict` 是统一判定）。竞价、结算、规则与 Admin 邮件经各自的 `TransactionRunner` 按 `TransactionPolicy` 重试；其余独立 Serializable 写入共用 `retry_conflicts`（默认 `SERIALIZABLE_ATTEMPTS` 次，每次重开事务，只重跑 owner 判定的明确中止，结果未知的提交不重试）。运行期 claim、进度及部分账本写入使用默认隔离事务，并按各自 owner 取行锁或校验租约/fencing；不能把所有写入都视为 Serializable。同一幂等命令 ID 通过事务级 advisory 锁协调（`lock_command_id` 共用键空间）。会写 `lots` 的竞价命令先经 `database/competition/postgres/bid_queue/` 的按场次排队再进入 Serializable 事务：进程内按拍卖 ID 互斥（等待不占连接），并用 PostgreSQL 会话级 advisory lock 覆盖其它实例；隔离级别、行锁、账本与写入顺序都不变，排队预算用尽时返回可重试的 `QueueWaitTimeout`，取消与错误路径都经凭证 `Drop` 解锁或关闭会话。
 - **幂等账本**：各 owner 的命令表保存命令 ID、请求摘要与结果；同 ID 同摘要重放原结果，异摘要冲突。
 - **追加式事实**：竞价、代理转换、黑名单历史、审计与投递尝试证明等由触发器拒绝改写；结算账本按 owner 追加。改名保留原名称证据，撤销时更新 `reverted_at`，不能把整张改名表视为不可更新。审计 `INSERT` 失败仍传播并让原事务回滚，进程内另记分类失败数，按[审计就绪策略](#审计失败与就绪)决定健康门禁。
 - **冻结竞价策略**：锁内快照和账户代理降额能力按同一场次策略版本解码，未知版本失败关闭；公开普通最低价继续使用领域计算。新旧策略与追加迁移边界见[数据库契约](../../docs/contracts/database.md#拍卖与竞价)。

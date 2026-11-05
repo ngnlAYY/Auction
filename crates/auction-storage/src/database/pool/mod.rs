@@ -78,6 +78,27 @@ impl PoolMetrics {
     }
 }
 
+/// 出价队列会话锁连接的进程内配额。
+///
+/// 取普通配额的四分之一、至少 1、至多 4，且不超过物理池给普通业务之外的剩余位（长期 owner 与
+/// readiness 的保留位）。持锁连接只是在事务进行期间多占一条物理连接；不越过物理上限就不必让
+/// readiness 探针等连接。
+pub(crate) fn bid_queue_capacity(ordinary_capacity: usize, max_connections: u32) -> usize {
+    let spare = usize::try_from(max_connections)
+        .unwrap_or(usize::MAX)
+        .saturating_sub(ordinary_capacity)
+        .max(1);
+    (ordinary_capacity / 4).clamp(1, 4).min(spare)
+}
+
+/// acquisition 使用的配额类别；出价队列的连接不占普通业务配额。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CapacityClass {
+    Ordinary,
+    BidQueue,
+    Reserved,
+}
+
 /// 同时提供 SQLx 原生池能力和 acquisition 追踪的内部池。
 pub(crate) struct TrackedPool<DB>
 where
@@ -89,6 +110,8 @@ where
     /// 普通业务获取的进程内配额；长期 owner 与 readiness 各保留物理连接，不经过此门。
     ordinary: Arc<Semaphore>,
     ordinary_capacity: usize,
+    /// 出价队列会话锁连接的独立配额：它不占普通配额，避免持锁连接与事务连接互相等待。
+    bid_queue: Arc<Semaphore>,
 }
 
 impl<DB> Clone for TrackedPool<DB>
@@ -102,6 +125,7 @@ where
             recorder: self.recorder.clone(),
             ordinary: Arc::clone(&self.ordinary),
             ordinary_capacity: self.ordinary_capacity,
+            bid_queue: Arc::clone(&self.bid_queue),
         }
     }
 }
@@ -122,12 +146,15 @@ where
     /// 普通业务配额必须小于物理池上限，为 readiness 留出始终可用的连接。
     pub(crate) fn new(pool: Pool<DB>, ordinary_capacity: u32) -> Self {
         let ordinary_capacity = usize::try_from(ordinary_capacity).unwrap_or(usize::MAX).max(1);
+        let bid_queue_capacity =
+            bid_queue_capacity(ordinary_capacity, pool.options().get_max_connections());
         Self {
             pool,
             metrics: Arc::new(PoolMetrics::default()),
             recorder: DatabaseRecorder::default(),
             ordinary: Arc::new(Semaphore::new(ordinary_capacity)),
             ordinary_capacity,
+            bid_queue: Arc::new(Semaphore::new(bid_queue_capacity)),
         }
     }
 
@@ -164,7 +191,7 @@ where
 
     /// 开始一次可取消的 acquisition，并记录池是否当时没有空闲连接。
     pub(crate) fn acquire(&self) -> TrackedAcquire<DB> {
-        self.acquire_for(None, false)
+        self.acquire_for(None, CapacityClass::Ordinary)
     }
 
     /// 附加只读观测只借现有空闲连接，不等待或扩池；同样占用普通业务配额，
@@ -182,33 +209,50 @@ where
         Some(TrackedConnection::new(connection, guard, Some(permit)))
     }
 
+    /// 出价队列的会话锁连接专用配额。
+    ///
+    /// 该配额与普通业务配额分离：持锁连接随后还要申请一条事务连接，如果两者共用同一信号量，
+    /// 全部配额被持锁连接占满时会同事务连接互相等待。上限取普通配额的 1/4（至少 1、至多 4），
+    /// 大于同一进程内可能同时出价的场次数（每个世界最多一个活动场次），同时给 readiness 与
+    /// 长期 owner 的保留位留出物理连接。
+    pub(crate) fn acquire_bid_queue(&self) -> TrackedAcquire<DB> {
+        self.acquire_for(None, CapacityClass::BidQueue)
+    }
+
     /// 长期 owner 连接与 readiness 探针使用独立保留位，不受普通业务配额影响。
     pub(crate) fn acquire_reserved(&self, purpose: DatabaseReservedPurpose) -> TrackedAcquire<DB> {
-        self.acquire_for(Some(purpose), true)
+        self.acquire_for(Some(purpose), CapacityClass::Reserved)
     }
 
     /// readiness 专用获取：绕过普通业务配额，但仍是真实池连接；数据库不可达时照常失败。
     pub(crate) fn acquire_readiness(&self) -> TrackedAcquire<DB> {
-        self.acquire_for(None, true)
+        self.acquire_for(None, CapacityClass::Reserved)
     }
 
     fn acquire_for(
         &self,
         reserved: Option<DatabaseReservedPurpose>,
-        bypass_capacity: bool,
+        class: CapacityClass,
     ) -> TrackedAcquire<DB> {
-        let permit_future = if bypass_capacity {
-            None
-        } else {
-            Some(Box::pin(self.ordinary.clone().acquire_owned())
-                as Pin<Box<dyn Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send>>)
+        let permit_future = match class {
+            CapacityClass::Reserved => None,
+            CapacityClass::Ordinary | CapacityClass::BidQueue => {
+                let semaphore = match class {
+                    CapacityClass::BidQueue => Arc::clone(&self.bid_queue),
+                    _ => Arc::clone(&self.ordinary),
+                };
+                Some(Box::pin(semaphore.acquire_owned())
+                    as Pin<
+                        Box<dyn Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send>,
+                    >)
+            }
         };
         TrackedAcquire {
             pool: self.pool.clone(),
             inner: None,
             metrics: Arc::clone(&self.metrics),
             recorder: self.recorder.clone(),
-            loop_kind: if reserved.is_none() && !bypass_capacity {
+            loop_kind: if reserved.is_none() && class == CapacityClass::Ordinary {
                 current_database_worker_loop()
             } else {
                 None
@@ -525,6 +569,18 @@ mod capacity_tests {
             .max_connections(2)
             .connect_lazy("postgres://auction@127.0.0.1:1/auction")
             .unwrap_or_else(|error| panic!("惰性连接池只解析 URL：{error}"))
+    }
+
+    /// 出价队列连接配额是普通配额的四分之一（1..=4），且不超过物理池的剩余位。
+    #[test]
+    fn bid_queue_capacity_is_bounded_by_a_quarter_and_by_spare_connections() {
+        assert_eq!(super::bid_queue_capacity(1, 16), 1);
+        assert_eq!(super::bid_queue_capacity(3, 16), 1);
+        // 普通 14 + 长期 owner 1 + readiness 1 = 物理 16，只余 2 位。
+        assert_eq!(super::bid_queue_capacity(14, 16), 2);
+        assert_eq!(super::bid_queue_capacity(64, 128), 4);
+        // 物理池没有余位（非标准档）时仍保留 1 条，最坏由 acquire 时限收口。
+        assert_eq!(super::bid_queue_capacity(16, 16), 1);
     }
 
     /// 普通业务配额耗尽后必须停在上限处；readiness 不等待该配额，直接走真实池。
