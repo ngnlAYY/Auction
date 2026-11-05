@@ -40,6 +40,8 @@ pub struct PersistentWorker<C> {
     /// W14.3 卖方汇总与换季提醒扫描；只读事实并幂等入队，发送仍由 delivery 循环负责。
     pub player_notifications: Option<Arc<player_notifications::PlayerNotificationRuntime>>,
     pub realtime_consumer: Option<Arc<dyn RealtimeConsumerRunner>>,
+    /// W12.1 残留：出价提交后的标记/被超提醒 outbox 扫描；未注入时不处理，事件保持持久待处理。
+    pub lot_watch_reminders: Option<Arc<dyn auction_application::LotWatchReminderStore>>,
     /// Worker 固定 label 的指标端口；关闭指标时由装配根注入 no-op 实现。
     pub metrics: Arc<dyn WorkerRecorder>,
     /// W14.8 通知生命周期与送达延迟指标；关闭指标时为 no-op，不影响发送结果。

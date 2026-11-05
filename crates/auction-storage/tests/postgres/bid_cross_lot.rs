@@ -6,6 +6,7 @@
 //! 覆盖：
 //! - 同一 `final` 场次、不同 lot、不同用户的并发出价全部被接受，且没有 40001/40P01 耗尽；
 //! - 出价事实、实时事件、提醒与 lot 最终状态保持一致（每条竞价各一次，价格/领先者正确）；
+//! - 提醒与自动标记来自提交后的 `lot_watch_events` 处理，不在 Serializable 出价事务内写入；
 //! - 首次竞价触发 `lot_watch_leadership` 懒初始化时同样不因跨 lot 误报中止。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
@@ -14,7 +15,9 @@
 
 use std::sync::Arc;
 
-use auction_application::{ApplicationError, CompetitionCommandPort, PlaceBidCommand};
+use auction_application::{
+    ApplicationError, CompetitionCommandPort, LotWatchReminderStore, PlaceBidCommand,
+};
 use auction_domain::{BidAmount, CommandId, LotId, UserId};
 use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
 use chrono::{DateTime, Duration, Utc};
@@ -399,9 +402,9 @@ async fn assert_bid_results(
 
 /// W12.3 负载演练入口：Final 阶段同一场次、不同 lot 的重叠出价。
 ///
-/// 这是测量入口而不是默认门禁：显式运行后打印成功/序列化冲突计数。当前残留的
-/// Serializable 误报仍未归零，因此不能把"零耗尽"写成默认断言（见 `docs/contracts/database.md`
-/// 的热点测量一节）。成功出价的资金事实、事件与 lot 状态仍逐项断言，任何丢失或重复都会失败。
+/// 显式运行后打印成功/序列化冲突计数。迁移 `000092` 把标记与被超提醒移出出价 Serializable
+/// 窗口；该夹具在隔离 PG18 上要求零耗尽，同时逐项断言成功出价的资金事实、事件、提醒与 lot
+/// 状态，任何丢失或重复都会失败（见 `docs/contracts/database.md` 的热点测量一节）。
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "W12.3 负载演练：显式运行以测量跨 lot 序列化冲突"]
 async fn postgres_final_cross_lot_bids_do_not_exhaust_serializable_retries() {
@@ -448,17 +451,12 @@ async fn postgres_final_cross_lot_bids_do_not_exhaust_serializable_retries() {
             "W12.3 drill: {label} 并发 {concurrent}，成功 {accepted}，序列化冲突 {}",
             failures.len()
         );
-        if failures.is_empty() {
-            assert_bid_results(&store, label, concurrent, &seeded).await;
-        }
         for failure in &failures {
             println!("  {label}: {failure}");
         }
         assert!(accepted > 0, "{label}: 至少一笔出价应被接受");
-        assert!(
-            failures.iter().all(|failure| failure == "serialization_conflict"),
-            "{label}: 只允许已分类的序列化冲突，其他失败必须暴露：{failures:?}"
-        );
+        assert!(failures.is_empty(), "{label}: 000092 后跨 lot 并发出价不得耗尽重试：{failures:?}");
+        assert_bid_results(&store, label, concurrent, &seeded).await;
     }
 
     store.postgres_pool().close().await;
@@ -538,6 +536,278 @@ async fn postgres_bid_fact_counter_rejects_non_contiguous_facts() {
         error.to_string().contains("23514") || error.to_string().contains("contiguous"),
         "拒绝必须来自事实序号约束：{error}"
     );
+
+    store.postgres_pool().close().await;
+}
+
+/// W12.1 残留：出价事务只追加标记事件，提醒在提交后的独立事务应用；
+/// 重复处理不会产生第二条提醒，事件与提醒保持一一对应。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_lot_watch_outbox_round_trip_is_exactly_once() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let commands = Arc::new(DatabaseCompetitionCommands::new(Arc::new(store.clone())));
+    let seeded = seed_round(&store, "outbox-once", 3).await;
+
+    for index in 0..seeded.lots.len() {
+        let command =
+            place_bid_command("outbox-once", index, seeded.lots[index], seeded.bidders[index]);
+        commands.place_bid(command).await.expect("出价必须被接受");
+    }
+
+    let pool = store.postgres_pool();
+    let unfinished: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM public.lot_watch_events WHERE status <> 'done'")
+            .fetch_one(pool)
+            .await
+            .expect("读取事件状态");
+    assert_eq!(unfinished, 0, "提交后处理必须完成全部本轮事件");
+    let events: i64 = sqlx::query_scalar("SELECT count(*) FROM public.lot_watch_events")
+        .fetch_one(pool)
+        .await
+        .expect("读取事件数");
+    assert_eq!(events, 3, "每个竞价事实至多一条事件");
+    let notifications: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM public.lot_watch_notifications")
+            .fetch_one(pool)
+            .await
+            .expect("读取提醒事实");
+    assert_eq!(notifications, 3, "每个被超越的领先周期恰好一条提醒");
+
+    let repeated =
+        store.process_due("outbox-idempotent".to_owned(), 60, 16).await.expect("重复处理不得失败");
+    assert_eq!(repeated.claimed, 0, "已完成事件不得再次领取");
+    let notifications_after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM public.lot_watch_notifications")
+            .fetch_one(pool)
+            .await
+            .expect("读取提醒事实");
+    assert_eq!(notifications_after, 3, "重复处理不得产生第二条提醒");
+
+    store.postgres_pool().close().await;
+}
+
+/// 同一 lot 的竞价事件必须按 `state_version` 顺序应用：更早的事件未完成（含崩溃遗留的
+/// 过期租约）时，后续事件不得越过顺序屏障。回收过期租约后按序补完，提醒不丢失、不重复。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_lot_watch_outbox_reclaims_lease_and_preserves_state_version_order() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let seeded = seed_round(&store, "outbox-order", 1).await;
+    let pool = store.postgres_pool();
+    let lot_id = seeded.lots[0];
+    let first_bidder = seeded.bidders[0];
+    let second_bidder = stable_id("outbox-order", "second-bidder");
+    seed_user(pool, second_bidder, "outbox-order-second-bidder").await;
+    let deadline: DateTime<Utc> =
+        sqlx::query_scalar("SELECT effective_end_at FROM public.lots WHERE id = $1")
+            .bind(lot_id)
+            .fetch_one(pool)
+            .await
+            .expect("读取 lot 截止");
+
+    let mut bids = Vec::new();
+    for (index, (bidder, version)) in
+        [(first_bidder, 2_i64), (second_bidder, 3_i64)].into_iter().enumerate()
+    {
+        let command_id = stable_id("outbox-order", &format!("command-{index}"));
+        sqlx::query(
+            "INSERT INTO public.auction_commands
+                (command_id, command_kind, aggregate_id, request_hash, result_code)
+             VALUES ($1, 'place_bid', $2, $3, 'accepted')",
+        )
+        .bind(command_id)
+        .bind(stable_id("outbox-order", "auction"))
+        .bind(vec![u8::try_from(index + 1).expect("fixture index"); 32])
+        .execute(pool)
+        .await
+        .expect("写入测试命令");
+        let bid_id = stable_id("outbox-order", &format!("bid-{index}"));
+        sqlx::query(
+            "INSERT INTO public.bids
+                (id, command_id, fact_index, lot_id, bidder_user_id, amount, mechanism,
+                 effective_end_at, accepted_state_version)
+             VALUES ($1, $2, 1, $3, $4, $5, 'ordinary', $6, $7)",
+        )
+        .bind(bid_id)
+        .bind(command_id)
+        .bind(lot_id)
+        .bind(bidder)
+        .bind(BASE_PRICE + BID_STEP * (i64::try_from(index).expect("index") + 1))
+        .bind(deadline)
+        .bind(version)
+        .execute(pool)
+        .await
+        .expect("写入测试竞价事实");
+        bids.push((bid_id, bidder, version));
+    }
+
+    // 事件 2（state_version=2）延后可用，事件 3（state_version=3）已到期：顺序屏障必须让两者都不可领取。
+    let second_event = stable_id("outbox-order", "event-2");
+    let third_event = stable_id("outbox-order", "event-3");
+    for (event_id, (bid_id, bidder, version), delay) in
+        [(second_event, bids[0], Duration::hours(1)), (third_event, bids[1], Duration::zero())]
+    {
+        sqlx::query(
+            "INSERT INTO public.lot_watch_events
+                (event_id, event_kind, lot_id, user_id, bid_id, state_version,
+                 occurred_at, next_attempt_at)
+             VALUES ($1, 'bid_accepted', $2, $3, $4, $5, clock_timestamp(), clock_timestamp() + $6)",
+        )
+        .bind(event_id)
+        .bind(lot_id)
+        .bind(bidder)
+        .bind(bid_id)
+        .bind(version)
+        .bind(delay)
+        .execute(pool)
+        .await
+        .expect("写入测试事件");
+    }
+    let blocked =
+        store.process_due("outbox-order".to_owned(), 60, 8).await.expect("顺序屏障查询不得失败");
+    assert_eq!(blocked.claimed, 0, "更早未完成事件必须阻止后续事件");
+
+    // 模拟崩溃遗留的 claim：事件 2 处于 processing 且租约过期，必须被回收后按序处理。
+    sqlx::query(
+        "UPDATE public.lot_watch_events
+         SET status = 'processing', lease_owner = 'crashed-worker',
+             lease_expires_at = clock_timestamp() - interval '1 second',
+             next_attempt_at = clock_timestamp()
+         WHERE event_id = $1",
+    )
+    .bind(second_event)
+    .execute(pool)
+    .await
+    .expect("模拟过期租约");
+    let first = store.process_due("outbox-order".to_owned(), 60, 8).await.expect("回收过期租约");
+    assert_eq!(first.claimed, 2, "回收后按序处理同一 lot 的两条到期事件");
+    assert_eq!(first.completed, 2);
+    for event in [second_event, third_event] {
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM public.lot_watch_events WHERE event_id = $1")
+                .bind(event)
+                .fetch_one(pool)
+                .await
+                .expect("读取事件状态");
+        assert_eq!(status, "done");
+    }
+
+    let second = store.process_due("outbox-order".to_owned(), 60, 8).await.expect("重复处理");
+    assert_eq!(second.claimed, 0, "已完成事件不得再次领取");
+    assert_eq!(second.completed, 0);
+
+    let leadership = sqlx::query(
+        "SELECT leader_user_id, cycle FROM public.lot_watch_leadership WHERE lot_id = $1",
+    )
+    .bind(lot_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取领先周期");
+    let leader: Uuid = leadership.get("leader_user_id");
+    let cycle: i64 = leadership.get("cycle");
+    assert_eq!(leader, second_bidder, "领先者必须来自最后一条已应用事实");
+    assert_eq!(cycle, 3, "领先周期必须按事实状态版本推进");
+    let notifications: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM public.lot_watch_notifications WHERE lot_id = $1")
+            .bind(lot_id)
+            .fetch_one(pool)
+            .await
+            .expect("读取提醒事实");
+    assert_eq!(notifications, 2, "两个被超越的领先周期各一条提醒");
+    let cycles: Vec<i64> = sqlx::query_scalar(
+        "SELECT leadership_cycle FROM public.lot_watch_notifications WHERE lot_id = $1
+         ORDER BY leadership_cycle",
+    )
+    .bind(lot_id)
+    .fetch_all(pool)
+    .await
+    .expect("读取提醒周期");
+    assert_eq!(cycles, vec![1, 2], "提醒周期必须来自被超越领先周期的事实状态版本");
+
+    store.postgres_pool().close().await;
+}
+
+/// 新建代理的自动标记同样只由提交后事件应用：事件完成后标记存在，提醒数为零。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_lot_watch_outbox_applies_proxy_creation_mark() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let seeded = seed_round(&store, "outbox-proxy", 1).await;
+    let pool = store.postgres_pool();
+    let lot_id = seeded.lots[0];
+    let user_id = seeded.bidders[0];
+    let command_id = stable_id("outbox-proxy", "command");
+    let authorization_id = stable_id("outbox-proxy", "authorization");
+    let event_id = stable_id("outbox-proxy", "event");
+
+    sqlx::query(
+        "INSERT INTO public.auction_commands
+            (command_id, command_kind, aggregate_id, request_hash, result_code)
+         VALUES ($1, 'place_proxy', $2, $3, 'accepted')",
+    )
+    .bind(command_id)
+    .bind(stable_id("outbox-proxy", "auction"))
+    .bind([7_u8; 32].as_slice())
+    .execute(pool)
+    .await
+    .expect("写入测试命令");
+    sqlx::query(
+        "INSERT INTO public.bid_proxy_authorizations
+            (authorization_id, lot_id, user_id, authorization_sequence, usage_number,
+             maximum_amount, mode, status, state_version, creation_command_id, created_at,
+             updated_at)
+         VALUES ($1, $2, $3, 1, 1, 500000, 'fast', 'active', 1, $4,
+                 clock_timestamp(), clock_timestamp())",
+    )
+    .bind(authorization_id)
+    .bind(lot_id)
+    .bind(user_id)
+    .bind(command_id)
+    .execute(pool)
+    .await
+    .expect("写入测试代理");
+    sqlx::query(
+        "INSERT INTO public.lot_watch_events
+            (event_id, event_kind, lot_id, user_id, authorization_id, state_version,
+             occurred_at, next_attempt_at)
+         VALUES ($1, 'proxy_created', $2, $3, $4, 1, clock_timestamp(), clock_timestamp())",
+    )
+    .bind(event_id)
+    .bind(lot_id)
+    .bind(user_id)
+    .bind(authorization_id)
+    .execute(pool)
+    .await
+    .expect("写入测试事件");
+
+    let batch =
+        store.process_due("outbox-proxy".to_owned(), 60, 8).await.expect("处理代理创建事件");
+    assert_eq!(batch.claimed, 1);
+    assert_eq!(batch.completed, 1);
+    let watched: bool = sqlx::query_scalar(
+        "SELECT watched FROM public.lot_watches WHERE user_id = $1 AND lot_id = $2",
+    )
+    .bind(user_id)
+    .bind(lot_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取自动标记");
+    assert!(watched, "新建代理必须自动标记关注");
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.audit_records
+         WHERE action = 'lot_watch.proxy_created' AND entity_id = $1",
+    )
+    .bind(lot_id.to_string())
+    .fetch_one(pool)
+    .await
+    .expect("读取标记审计");
+    assert_eq!(audits, 1, "自动标记只写一条审计");
+    let reminders: i64 = sqlx::query_scalar("SELECT count(*) FROM public.lot_watch_notifications")
+        .fetch_one(pool)
+        .await
+        .expect("读取提醒事实");
+    assert_eq!(reminders, 0, "新建代理本身不产生被超提醒");
 
     store.postgres_pool().close().await;
 }

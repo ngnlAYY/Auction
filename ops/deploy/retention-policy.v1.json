@@ -3,7 +3,7 @@
   "format": "auction-retention-policy.v1",
   "policy_id": "auction-retention-policy",
   "version": 1,
-  "database_schema_version": 91,
+  "database_schema_version": 92,
   "authority": "repository-conservative-default",
   "inventory_authorizes_mutation": false,
   "families": [
@@ -133,7 +133,8 @@
         "lot_watch_leadership",
         "lot_watch_notifications",
         "lot_watch_pending_notifications",
-        "lot_watch_pm_deliveries"
+        "lot_watch_pm_deliveries",
+        "lot_watch_events"
       ]
     },
     {

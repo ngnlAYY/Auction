@@ -1,7 +1,7 @@
-//! 顺序消费所有已接受竞价事实；代理创建与网站普通出价都在同一事务内自动标记，
+//! 顺序消费已提交的标记事件：自动标记与领先周期只由提交后的 outbox 处理应用。
 //! 慢速代理仍可反击时只记待定被超提醒（W14.11），能行动时才入队。
 
-use auction_domain::{AcceptedBid, LotLeadership, ProxyAuthorization, UserId};
+use auction_domain::{AcceptedBid, LotLeadership, UserId};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
@@ -9,34 +9,9 @@ use uuid::Uuid;
 use super::*;
 use crate::database::mail_delivery::MailDeliveryTransactionError;
 
-pub(crate) async fn auto_watch_proxy(
-    transaction: &mut Transaction<'_, Postgres>,
-    state: &ProxyAuthorization,
-) -> Result<(), CompetitionTransactionError> {
-    // 新授权是新的用户意图，即使已经标记也推进 fence；自动追价和降额不进入此处。
-    auto_watch(
-        transaction,
-        state.user_id.as_uuid(),
-        state.lot_id.as_uuid(),
-        "lot_watch.proxy_created",
-    )
-    .await
-}
-
-/// W14.5：网站普通出价在同一事务内自动标记，与新建代理一致。
-/// 被超提醒只服务后续领先周期；重复出价推进版本但不会凭空产生通知。
-pub(crate) async fn auto_watch_bid(
-    transaction: &mut Transaction<'_, Postgres>,
-    bid: &AcceptedBid,
-) -> Result<(), CompetitionTransactionError> {
-    if bid.mechanism != auction_domain::BidMechanism::Ordinary {
-        return Ok(());
-    }
-    auto_watch(transaction, bid.bidder_id.as_uuid(), bid.lot_id.as_uuid(), "lot_watch.bid_created")
-        .await
-}
-
-async fn auto_watch(
+/// 自动标记一条关注；出价或新建代理提交后由 outbox 处理器调用。
+/// 新授权是新的用户意图，即使已经标记也推进 fence；自动追价和降额不进入此处。
+pub(super) async fn auto_watch(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
     lot_id: Uuid,

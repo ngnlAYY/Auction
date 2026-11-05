@@ -73,6 +73,7 @@
 | `lot_watches` | 用户对 lot 的标记与提醒渠道 |
 | `lot_watch_leadership`、`lot_watch_notifications` | 连续领先周期与“被超价”提醒记录 |
 | `lot_watch_pm_deliveries` | 论坛私信提醒队列（租约、fencing、人工对账） |
+| `lot_watch_events` | 已提交竞价/新建代理的提交后处理 outbox：事件身份、`pending`/`processing`/`done` 进度、租约与同 lot `state_version` 顺序屏障；不是业务状态来源 |
 
 出价被超提醒的发送资格只到对应 lot 的有效截止（含软截止延长，`lots.effective_end_at`）为止：截止后尚未开始发送的 MoogleMail 投递在领取预检中退役为 `failed`，`failure_code`/`reason_code` 为 `lot_watch_invalidated` 并带 `outcome_unknown=false`、`preflight_blocked=true`；论坛私信队列对应行退役为 `suppressed`、`failure_code='source_invalid'`。两者都不写 `sending_at`，也不删除来源记录；已经 `sending_at` 非空的行不参与退役，其外部结果仍只由原 sender 对账。提醒保持不合并、不限额（决策 1、决策 14）。
 
@@ -320,7 +321,9 @@ Serializable 事务在同一瞬间对同一场次的不同 lot 递增同一 `str
   为 NULL）与自己的 lot 行，提交后再由分配器补号；基准的 `deferred_sequence` 分支断言并报告
   零冲突、零耗尽。`stream_sequence` 连续性与回放契约不变，见[实时事件](realtime.md)。
 - `pg_notify`：8 并发下提交 p95 245µs（无通知）→ 286µs（每事务内通知），单次上限 381µs。
-  在本机 socket 与这个量级上没有可测的提交串行化，因此本批不把唤醒移出出价事务（W12.8）。
+  在本机 socket 与这个量级上没有可测的提交串行化；`000092` 仍把被超提醒插入（连同其
+  `notify_delivery_ready`）移出出价事务，避免 Final 阶段每笔被超提醒提交持锁，W12.8 的唤醒
+  改由提交后事件处理承担。
 - 匿名读突发：同一物理池上 24 个并发价格历史首屏把出价 p95 从 36.8ms 抬到 170.1ms
   （4.6×）；把读并发限到 4 后出价 p95 回到 32.1ms（0.87× 对照），读 p95 120ms。
   这量化了 W12.4 读限流/并发门的必要性：读必须受限，否则会拖慢出价。
@@ -343,17 +346,35 @@ Serializable 事务在同一瞬间对同一场次的不同 lot 递增同一 `str
 迁移 `000090` 因此把事实连续性计数提升为 `auction_commands.last_bid_fact_index`
 （触发器只读写本事务自己的命令行，连续性仍由数据库强制），并让 lot 创建事务直接写入
 `lot_watch_leadership`；命令账本改为非锁定读取 + INSERT 仲裁，只有并发同 ID 已提交时才
-锁定读取并要求调用方按账本结果重放。剩余测量入口：
+锁定读取并要求调用方按账本结果重放。
+
+剩余的多表重叠来自被超提醒与自动标记：出价事务内写 `lot_watches`、`lot_watch_leadership`、
+`lot_watch_notifications`/`lot_watch_pm_deliveries` 与 `deliveries`，并触发
+`notify_delivery_ready`。迁移 `000092` 改为持久化提交后 outbox：
+
+- 出价 Serializable 事务只向 `lot_watch_events` 追加一条身份确定的事件（`bid_accepted` 或
+  `proxy_created`），不读标记、不写领先周期、不插入投递；`bids`、实时事件、lot 最终状态、
+  命令账本与命令/竞价审计仍与出价同事务提交。
+- 提交成功后，同一进程立即用独立 READ COMMITTED 事务处理本次事件；失败只记录告警，事件仍
+  持久待处理。Worker 的 Auction 循环按 `batch_limit` 扫描并处理未完成事件。
+- 同一 lot 的竞价事件按 `state_version` 顺序领取：更早未完成（含崩溃遗留的过期租约）时，
+  后续事件不可领取；领取用租约 + `FOR UPDATE SKIP LOCKED`，处理事务与 `done` 标记同一事务
+  提交，因此崩溃只会重试。提醒身份仍是 `(lot, user, leadership_cycle)`，重复应用受既有唯一
+  约束与领先周期判定保护，不会产生第二条提醒。
+- 与旧实现的语义差异只有时间与读取时点：标记/提醒在提交后应用，目标渠道、收件人与截止判断
+  读取提交后的最新事实；正文使用处理进程的公开站点配置（Worker 配置了 origin，Public API
+  进程未配置时与旧实现相同地省略链接）。崩溃或长期停机时提醒延迟，不会丢失。
+
+事后测量入口同上；隔离 PG18、8 并发、同一瞬间进入事务，旧实现平均 1–2 笔以 40001 结束，
+`000092` 后连续 4 次均为 8 成功、0 序列化冲突。回归测试
+`postgres_lot_watch_outbox_round_trip_is_exactly_once` 与
+`postgres_lot_watch_outbox_reclaims_lease_and_preserves_state_version_order` 覆盖事件恰好一次、
+重复处理不重复提醒、过期租约回收与同 lot 顺序屏障。
 
 ```bash
 cargo test -p auction-storage --features test-db --test postgres \
   -- postgres_final_cross_lot_bids_do_not_exhaust_serializable_retries --ignored --nocapture
 ```
-
-该演练仍会打印成功/序列化冲突计数：夹具上 8 并发平均仍有约 1–2 笔以 40001 结束（不是业务
-争用，而是多表重叠事务之间的 SSI 误报）。彻底消除需要把被超提醒与标记写入移出 Web 出价的
-Serializable 窗口（或用可持久化 outbox 提交后再应用），该项仍待决策，未在本次改动中放宽
-任何不变量或事务边界。
 
 复现入口：`cargo test -p auction-storage --features test-db --test perf -- --ignored --nocapture`
 （默认 `just test-db` 不运行；报告写入 `AUCTION_PERF_REPORT_DIR`）。

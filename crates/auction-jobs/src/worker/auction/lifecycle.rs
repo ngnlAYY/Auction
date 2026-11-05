@@ -17,6 +17,7 @@ use super::{
 };
 use crate::worker::diagnostics;
 
+mod reminders;
 mod slow_proxy;
 mod wakeup;
 
@@ -52,6 +53,8 @@ pub(super) async fn run_loop<C>(
             merge_worker_result(&mut result, schedule_result);
             let slow_proxy_result = slow_proxy::run_phase(worker.as_ref()).await;
             merge_worker_result(&mut result, slow_proxy_result);
+            let reminders_result = reminders::run_phase(worker.as_ref()).await;
+            merge_worker_result(&mut result, reminders_result);
             if result != WorkerResult::Success {
                 tracing::warn!(
                     "auction worker batch was not fully processed; retrying after poll delay"

@@ -80,39 +80,45 @@ impl SettlementTransactionRunner for PostgresStore {
                                 )));
                             }
                         };
-                    let mut transaction = PostgresCompetitionTransaction::new(
-                        transaction,
-                        std::sync::Arc::clone(&self.notification_metrics),
-                        self.public_base_url.clone(),
-                    );
+                    let mut transaction = PostgresCompetitionTransaction::new(transaction);
 
                     match operation(&mut transaction).await {
-                        Ok(value) => match transaction.commit().await {
-                            Ok(()) => return Ok(value),
-                            Err(error) => {
-                                let error = map_sql_error(error);
-                                if matches!(
-                                    error,
-                                    SettlementTransactionError::SerializationConflict
-                                ) && attempt + 1 < policy.max_attempts
-                                {
-                                    crate::database::serializable_retry_backoff(usize::from(
-                                        attempt + 1,
-                                    ))
+                        Ok(value) => {
+                            let lot_watch_events = transaction.take_lot_watch_events();
+                            match transaction.commit().await {
+                                Ok(()) => {
+                                    crate::database::lot_watch::process_committed_events(
+                                        self,
+                                        &lot_watch_events,
+                                    )
                                     .await;
-                                    continue;
+                                    return Ok(value);
                                 }
-                                crate::database::observe_retry_exhaustion(
-                                    usize::from(attempt + 1),
-                                    usize::from(policy.max_attempts),
-                                    matches!(
+                                Err(error) => {
+                                    let error = map_sql_error(error);
+                                    if matches!(
                                         error,
                                         SettlementTransactionError::SerializationConflict
-                                    ),
-                                );
-                                return Err(E::from(error));
+                                    ) && attempt + 1 < policy.max_attempts
+                                    {
+                                        crate::database::serializable_retry_backoff(usize::from(
+                                            attempt + 1,
+                                        ))
+                                        .await;
+                                        continue;
+                                    }
+                                    crate::database::observe_retry_exhaustion(
+                                        usize::from(attempt + 1),
+                                        usize::from(policy.max_attempts),
+                                        matches!(
+                                            error,
+                                            SettlementTransactionError::SerializationConflict
+                                        ),
+                                    );
+                                    return Err(E::from(error));
+                                }
                             }
-                        },
+                        }
                         Err(error) => {
                             if error.is_serialization_conflict()
                                 && attempt + 1 < policy.max_attempts
