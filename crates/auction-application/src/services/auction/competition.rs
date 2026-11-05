@@ -345,7 +345,7 @@ where
         let lot_id = command.lot_id;
         let request_hash = command.request_hash;
         self.repository
-            .run_in_auction_bid_queue(lot_id, TransactionPolicy::serializable(), |transaction| {
+            .run_in_auction_lot_queue(lot_id, TransactionPolicy::serializable(), |transaction| {
                 Box::pin(async move {
                     if let Some(stored) = transaction.find_command(command_id).await? {
                         if !stored.matches_request(
@@ -468,7 +468,7 @@ where
         let request_hash = command.request_hash();
         let command_kind = command.kind();
         self.repository
-            .run_in_auction_bid_queue(lot_id, TransactionPolicy::serializable(), |transaction| {
+            .run_in_auction_lot_queue(lot_id, TransactionPolicy::serializable(), |transaction| {
                 let command = command.clone();
                 Box::pin(async move {
                     if let Some(stored) = transaction.find_command(command_id).await? {

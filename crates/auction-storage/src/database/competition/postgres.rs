@@ -209,13 +209,14 @@ impl TransactionRunner for PostgresStore {
         })
     }
 
-    /// 同一拍卖的可写竞价命令：先在队列上取得凭证，再按既有策略开启 Serializable 事务。
+    /// 只知道 lot 的可写命令：先解析 lot 所属场次并在队列上取得凭证，再按既有策略开启
+    /// Serializable 事务。
     ///
     /// 排队发生在观察窗口之外——记录的事务耗时只覆盖真正的尝试；凭证一直持有到事务、提交后
     /// 补号与标记事件处理结束，因此同一场次的下一条命令看到的是完整结果。取消或错误都会经
     /// `Drop` 释放凭证（进程内凭证与会话 advisory lock），不会留下无人持有的锁。
     #[allow(clippy::manual_async_fn)]
-    fn run_in_auction_bid_queue<T, E, F>(
+    fn run_in_auction_lot_queue<T, E, F>(
         &self,
         lot_id: LotId,
         policy: TransactionPolicy,
@@ -232,10 +233,50 @@ impl TransactionRunner for PostgresStore {
                 .enqueue(self.pool(), lot_id.as_uuid())
                 .await
                 .map_err(E::from)?;
-            let result = self.run(policy, operation).await;
-            lease.release().await;
-            result
+            self.run_holding_auction_queue(lease, policy, operation).await
         }
+    }
+
+    /// 已知场次 ID 的可写命令：生命周期迁移与 Admin 排期修改与竞价共用同一把按场次的门。
+    #[allow(clippy::manual_async_fn)]
+    fn run_in_auction_queue<T, E, F>(
+        &self,
+        auction_id: AuctionId,
+        policy: TransactionPolicy,
+        operation: F,
+    ) -> impl Future<Output = Result<T, E>> + Send
+    where
+        T: Send,
+        E: TransactionFailure,
+        F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
+    {
+        async move {
+            let lease = self
+                .auction_bid_queue()
+                .enqueue_auction(self.pool(), auction_id.as_uuid())
+                .await
+                .map_err(E::from)?;
+            self.run_holding_auction_queue(lease, policy, operation).await
+        }
+    }
+}
+
+impl PostgresStore {
+    /// 持有场次排队凭证执行一次事务尝试序列；凭证覆盖提交后的补号与标记事件处理。
+    async fn run_holding_auction_queue<T, E, F>(
+        &self,
+        lease: bid_queue::AuctionBidQueueLease,
+        policy: TransactionPolicy,
+        operation: F,
+    ) -> Result<T, E>
+    where
+        T: Send,
+        E: TransactionFailure,
+        F: for<'a> Fn(&'a mut PostgresCompetitionTransaction) -> TransactionFuture<'a, T, E> + Send,
+    {
+        let result = self.run(policy, operation).await;
+        lease.release().await;
+        result
     }
 }
 

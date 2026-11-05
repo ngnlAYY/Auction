@@ -476,7 +476,8 @@ Final 耗尽需单独看绝对次数，unknown 未解释前不宣称 Final 零�
 - `auction_db_reserved_connections{purpose}`：长期所有权/订阅预留数。
   purpose 为 mail_ownership、forum_ownership、realtime_ownership、delivery_listener。
 
-出价队列指标（同一数据库记录器，关闭指标时为 no-op）：
+场次写队列指标（同一数据库记录器，关闭指标时为 no-op；队列覆盖同一场次的竞价、生命周期迁移
+与 Admin 排期/lot 修改，指标名沿用历史的 `bid_queue` 前缀以保持仪表盘兼容）：
 
 - `auction_bid_queue_wait_seconds{stage}`：实际排队等待秒数。stage 为 `in_process`（同实例按
   场次互斥）与 `cross_instance`（PostgreSQL 会话 advisory lock）。只在真正等待过时观测；

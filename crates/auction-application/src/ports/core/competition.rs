@@ -273,15 +273,17 @@ pub trait TransactionRunner: Send + Sync {
         E: TransactionFailure,
         F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send;
 
-    /// 同一拍卖的可写竞价命令入口：在进入 Serializable 事务**之前**按场次排队。
+    /// 同一拍卖的可写命令入口（只知道 lot）：在进入 Serializable 事务**之前**按场次排队。
     ///
     /// 排队只改变并发形状，不改变隔离级别、行锁、命令账本或写入顺序：进入事务后仍然是
     /// Serializable + 显式行锁，同一 `command_id` 仍然只应用一次。默认实现直接执行，供不
     /// 关心跨实例串行的测试替身与不写拍卖的可调用方使用；生产适配器必须让同一场次在
     /// 进程内与跨实例都互斥，否则 SSI 对同页 `lots` 更新的误报仍会耗尽重试。
     ///
-    /// 调用方必须把每个会写 `lots` 的竞价命令都放到这个入口上，并与 `run` 使用同一事务策略。
-    fn run_in_auction_bid_queue<T, E, F>(
+    /// 调用方必须把每个会写 `lots`/`auctions` 的**场次级**竞价命令（出价、代理创建/降低、慢速
+    /// 代理执行）与 Admin draft lot 修改都放到这个入口上，并与 `run` 使用同一事务策略。
+    /// 场次 ID 已知的写入必须使用 [`TransactionRunner::run_in_auction_queue`]，两者落到同一把门。
+    fn run_in_auction_lot_queue<T, E, F>(
         &self,
         lot_id: LotId,
         policy: TransactionPolicy,
@@ -293,6 +295,28 @@ pub trait TransactionRunner: Send + Sync {
         F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
     {
         let _ = lot_id;
+        self.run(policy, operation)
+    }
+
+    /// 同一拍卖的可写命令入口（已知场次 ID）：生命周期迁移与 Admin 排期修改走这里。
+    ///
+    /// 与 [`TransactionRunner::run_in_auction_lot_queue`] 共用**同一把**按场次的门，因此竞价与
+    /// 生命周期/Admin 写入在同一场次内严格串行：先排队、后 `BEGIN`，不存在两条事务同时处于
+    /// SSI 冲突窗口，也就没有「竞价队列 ↔ 生命周期」的交叉等待顺序问题。
+    ///
+    /// 命令只能持有一个场次的门：跨场次写入必须在事务内完成，不能在同一命令里再排另一场次。
+    fn run_in_auction_queue<T, E, F>(
+        &self,
+        auction_id: auction_domain::AuctionId,
+        policy: TransactionPolicy,
+        operation: F,
+    ) -> impl Future<Output = Result<T, E>> + Send
+    where
+        T: Send,
+        E: TransactionFailure,
+        F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
+    {
+        let _ = auction_id;
         self.run(policy, operation)
     }
 }
