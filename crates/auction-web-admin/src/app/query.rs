@@ -71,12 +71,17 @@ fn parse_sort_direction(pairs: &[(String, String)]) -> SortDirection {
     SortDirection::parse(pair_value(pairs, "dir"))
 }
 
-/// 解析自动轮询间隔：合法值为 10/30/60 秒；缺省或非法回退 0（关闭）。
-fn parse_poll_seconds(pairs: &[(String, String)]) -> u64 {
+/// 解析自动轮询间隔：合法值为 0（关闭）与 10/30/60 秒；缺省回退调用方默认值。
+fn parse_poll_seconds_with_default(pairs: &[(String, String)], default: u64) -> u64 {
     pair_value(pairs, "poll")
         .and_then(|value| value.parse::<u64>().ok())
-        .filter(|seconds| super::poll::POLL_INTERVAL_VALUES.contains(seconds))
-        .unwrap_or(0)
+        .filter(|seconds| *seconds == 0 || super::poll::POLL_INTERVAL_VALUES.contains(seconds))
+        .unwrap_or(default)
+}
+
+/// 一般列表页默认关闭自动轮询。
+fn parse_poll_seconds(pairs: &[(String, String)]) -> u64 {
+    parse_poll_seconds_with_default(pairs, 0)
 }
 
 /// 轮询开启（间隔非 0）时才写入地址栏。
@@ -575,11 +580,14 @@ pub(super) struct DashboardQuery {
 pub(super) fn use_dashboard_query_state() -> QueryState<DashboardQuery> {
     use_query_state(
         DASHBOARD_KEYS,
-        |pairs| DashboardQuery { poll_seconds: parse_poll_seconds(pairs) },
+        |pairs| DashboardQuery {
+            // W5.8：仪表盘默认开启 30 秒自动轮询；显式 `poll=0` 才关闭。
+            poll_seconds: parse_poll_seconds_with_default(pairs, 30),
+        },
         |query| {
-            let mut pairs = Vec::new();
-            push_poll_seconds(&mut pairs, query.poll_seconds);
-            pairs
+            // 仪表盘默认值也是 30 秒，因此必须显式写入当前值（含 0），否则关闭后刷新
+            // 会被解析回默认开启。
+            vec![("poll".to_owned(), query.poll_seconds.to_string())]
         },
     )
 }

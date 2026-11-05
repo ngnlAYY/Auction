@@ -12,8 +12,9 @@ use auction_application::{
     AdminSessionConfig, AdminSessionPort, AdminSessionService, AdminSessionStore, AdminUserPort,
     AdminUserService, AdminWorldPort, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
     DeliveryAdminPort, DeliverySentConfirmationPort, DeliverySentProofService,
-    OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort, RecoveryCommandPort,
-    RecoveryCommandService, RecoveryReportReader, SettlementCatalogReader, SettlementReportReader,
+    OperationsAlertConsole, OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort,
+    RecoveryCommandPort, RecoveryCommandService, RecoveryReportReader, SettlementCatalogReader,
+    SettlementReportReader,
 };
 use auction_config::{AppConfig, TomlRuntimeFileStore};
 use auction_http::AdminApiState;
@@ -242,6 +243,7 @@ pub(super) async fn configure_state(
     ));
     let operations_alert: Arc<dyn OperationsAlertStore> = store.clone();
     let operations_alert_source: Arc<dyn OperationsAlertSourceReader> = store.clone();
+    let operations_alert_console: Arc<dyn OperationsAlertConsole> = store.clone();
     let credential_health: Arc<dyn AdminCredentialHealthReader> = store.clone();
     let realtime_admin: Arc<dyn RealtimeAdminPort> = store.clone();
     let recovery_command_store = Arc::clone(&store);
@@ -314,6 +316,7 @@ pub(super) async fn configure_state(
         worker_control,
         security,
     )
+    .with_operations_alert_console(Some(operations_alert_console))
     .with_forum_reader(store.clone())
     .with_delivery_sent_proof(delivery_sent_proof)
     .with_credential_check(credential_check)

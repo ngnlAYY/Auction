@@ -12,10 +12,10 @@ use auction_application::{
     AdminCredentialWorld, AdminForumPreviewPort, AdminIntakePort, AdminLotReader,
     AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader, AdminRulesPort,
     AdminRuntimeConfigPort, AdminSessionPort, AdminUserPort, AdminWorldPort,
-    AuctionLifecycleCommandPort, DeliveryAdminPort, OperationsAlertSourceReader,
-    OperationsAlertStore, ProcessReadinessPort, PublicForumReader, ReadModelCache,
-    RealtimeAdminPort, RecoveryCommandPort, RecoveryReportReader, SettlementCatalogReader,
-    SettlementReportReader, WorkerControlPort, public_rules_cache_key,
+    AuctionLifecycleCommandPort, DeliveryAdminPort, OperationsAlertConsole,
+    OperationsAlertSourceReader, OperationsAlertStore, ProcessReadinessPort, PublicForumReader,
+    ReadModelCache, RealtimeAdminPort, RecoveryCommandPort, RecoveryReportReader,
+    SettlementCatalogReader, SettlementReportReader, WorkerControlPort, public_rules_cache_key,
 };
 use auction_observability::{HealthReader, ProcessMetrics};
 
@@ -59,6 +59,7 @@ pub struct AdminApiState {
     delivery_sent_proof: Option<Arc<auction_application::DeliverySentProofService>>,
     operations_alert: Option<Arc<dyn OperationsAlertStore>>,
     operations_alert_source: Option<Arc<dyn OperationsAlertSourceReader>>,
+    operations_alert_console: Option<Arc<dyn OperationsAlertConsole>>,
     credential_health: Option<Arc<dyn AdminCredentialHealthReader>>,
     realtime_admin: Option<Arc<dyn RealtimeAdminPort>>,
     worker_control: Option<Arc<dyn WorkerControlPort>>,
@@ -154,6 +155,7 @@ impl AdminApiState {
             delivery_sent_proof: None,
             operations_alert,
             operations_alert_source,
+            operations_alert_console: None,
             credential_health,
             realtime_admin,
             worker_control,
@@ -386,6 +388,19 @@ impl AdminApiState {
 
     pub(crate) fn operations_alert_source(&self) -> Option<&dyn OperationsAlertSourceReader> {
         self.operations_alert_source.as_deref()
+    }
+
+    /// 注入告警台读写端口；未注入时告警台明确报告存储不可用。
+    pub fn with_operations_alert_console(
+        mut self,
+        console: Option<Arc<dyn OperationsAlertConsole>>,
+    ) -> Self {
+        self.operations_alert_console = console;
+        self
+    }
+
+    pub(crate) fn operations_alert_console(&self) -> Option<&dyn OperationsAlertConsole> {
+        self.operations_alert_console.as_deref()
     }
 
     pub(crate) fn credential_health(&self) -> Option<&dyn AdminCredentialHealthReader> {

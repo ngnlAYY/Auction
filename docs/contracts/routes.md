@@ -164,7 +164,11 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET / POST / DELETE | `/api/v1/admin/session` | 读取会话 / Basic 认证登录（actor:secret）/ 退出 |
-| GET | `/api/v1/admin/dashboard` | 仪表盘聚合快照（健康、Worker、进程、邮件、realtime、凭据、投递、履约、恢复、告警） |
+| GET | `/api/v1/admin/dashboard` | 仪表盘聚合快照（健康、Worker、进程、邮件、realtime、凭据、投递、履约、恢复、告警）；Admin 页面默认每 30 秒自动轮询（`poll=0` 关闭，10/30/60 秒可选） |
+| GET | `/api/v1/admin/alerts` | 告警台列表（`status=active|resolved|all`，默认 `active`；`source`；`page`、`page_size` ≤100）；返回来源、范围、首次/最近时间、计数、确认/静默投影与处置手册锚点 `runbook_anchor` |
+| POST | `/api/v1/admin/alerts/{alert_id}/acknowledge` | 确认告警；`alert_id` 为 64 位十六进制 fingerprint。只追加操作者事实（`command_id` 幂等），不改变 signal 状态、计数、阈值或恢复判定 |
+| POST | `/api/v1/admin/alerts/{alert_id}/silence` | 静默告警到 `silence_seconds`（60–604800）之后；只抑制重复通知，到期后仍活动的 signal 按原阈值继续通知，不改变阈值评估 |
+| GET | `/api/v1/admin/pending-counts` | 导航待办数：`delivery_manual_reconcile`、`recovery_confirmation`（reclaiming 且证据齐全、恰好一个候选结果）、`active_alerts` |
 | GET | `/api/v1/admin/worlds` | 业务世界及启用状态 |
 | PATCH | `/api/v1/admin/worlds/{world_id}` | 启用/停用业务世界（即时生效） |
 | GET / POST | `/api/v1/admin/auctions` | 场次列表（`world_id`、`status`、`page`、`page_size`）/ 新建场次 |
@@ -306,6 +310,7 @@ W1.9 主动暂停期间返回 `409 paused`（请求不发往远端），超时�
 | `/settlement` | 结算报表 |
 | `/config` | 参数配置 |
 | `/rules-content`（别名 `/rules`） | 规则内容 |
+| `/alerts` | 告警台：活动/历史告警、确认与静默、处置手册锚点；侧栏显示活动告警待办数 |
 | `/audit` | 审计日志 |
 | `/status` | 服务说明 |
 

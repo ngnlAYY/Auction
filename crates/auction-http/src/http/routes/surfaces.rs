@@ -342,7 +342,21 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
             ),
         )
+        .route("/api/v1/admin/alerts", get(admin_alerts::list))
+        .route("/api/v1/admin/pending-counts", get(admin_alerts::pending_counts))
         .route("/api/v1/admin/audit", get(admin_audit::list))
+        .route(
+            "/api/v1/admin/alerts/{alert_id}/acknowledge",
+            post(admin_alerts::acknowledge).layer(DefaultBodyLimit::max(4 << 10)).layer(
+                middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
+            ),
+        )
+        .route(
+            "/api/v1/admin/alerts/{alert_id}/silence",
+            post(admin_alerts::silence).layer(DefaultBodyLimit::max(4 << 10)).layer(
+                middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
+            ),
+        )
         .route("/api/v1/admin/deliveries", get(delivery_admin::list))
         .route("/api/v1/admin/player-support", get(delivery_admin::player_support))
         .route("/api/v1/admin/deliveries/{delivery_id}", get(delivery_admin::detail))
