@@ -37,6 +37,9 @@ impl ApplicationError {
             | Self::AdminMailTransaction(AdminMailTransactionError::SerializationConflict) => {
                 "repository_serialization_conflict"
             }
+            Self::CompetitionTransaction(CompetitionTransactionError::QueueWaitTimeout) => {
+                "competition_queue_timeout"
+            }
             Self::CompetitionTransaction(CompetitionTransactionError::Conflict)
             | Self::SettlementTransaction(SettlementTransactionError::Conflict)
             | Self::AdminRulesTransaction(AdminRulesTransactionError::Conflict)

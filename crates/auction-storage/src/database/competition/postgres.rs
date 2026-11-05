@@ -29,6 +29,7 @@ use crate::database::audit_health::AuditWriteResult as _;
 use super::PostgresStore;
 #[path = "postgres/admin.rs"]
 mod admin;
+mod bid_queue;
 #[path = "postgres/bidding/mod.rs"]
 mod bidding;
 #[path = "postgres/lifecycle.rs"]
@@ -37,6 +38,10 @@ mod lifecycle;
 mod mapping;
 
 pub(crate) use mapping::*;
+
+pub(crate) use bid_queue::AuctionBidQueue;
+#[cfg(feature = "test-db")]
+pub use bid_queue::BidQueueMode;
 
 type PgTransaction = Transaction<'static, Postgres>;
 
@@ -202,6 +207,35 @@ impl TransactionRunner for PostgresStore {
 
             Err(E::from(CompetitionTransactionError::SerializationConflict))
         })
+    }
+
+    /// 同一拍卖的可写竞价命令：先在队列上取得凭证，再按既有策略开启 Serializable 事务。
+    ///
+    /// 排队发生在观察窗口之外——记录的事务耗时只覆盖真正的尝试；凭证一直持有到事务、提交后
+    /// 补号与标记事件处理结束，因此同一场次的下一条命令看到的是完整结果。取消或错误都会经
+    /// `Drop` 释放凭证（进程内凭证与会话 advisory lock），不会留下无人持有的锁。
+    #[allow(clippy::manual_async_fn)]
+    fn run_in_auction_bid_queue<T, E, F>(
+        &self,
+        lot_id: LotId,
+        policy: TransactionPolicy,
+        operation: F,
+    ) -> impl Future<Output = Result<T, E>> + Send
+    where
+        T: Send,
+        E: TransactionFailure,
+        F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
+    {
+        async move {
+            let lease = self
+                .auction_bid_queue()
+                .enqueue(self.pool(), lot_id.as_uuid())
+                .await
+                .map_err(E::from)?;
+            let result = self.run(policy, operation).await;
+            lease.release().await;
+            result
+        }
     }
 }
 

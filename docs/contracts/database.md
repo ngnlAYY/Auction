@@ -409,14 +409,77 @@ cargo test -p auction-storage --features test-db --test postgres \
 
 结论：在不改变隔离级别的前提下，读/写删减、推迟写入、锁序调整与索引/触发器调整都无法消除这
 部分残余——它是 PostgreSQL SSI 的页级谓词锁误报，而竞价事务必须更新 lot 行并在事务内写入事实、
-审计与事件。可选路线都需要明确决策：
+审计与事件。当时列出的三条路线中，**路线 3「进入 Serializable 前按场次排队」已批准并落地**：
+保留 Serializable 与全部行锁，只把同一场次的重叠写入退化为串行（不采用 Read Committed，也不
+接受 Final 阶段耗尽）。
 
-1. 保持 Serializable 并接受 Final 阶段重叠出价的 40001 耗尽（当前实现；HTTP 负载下实测 8 波
-   跨 lot 8 并发为 24–40/64 笔 503，进程内直连服务为 8 并发 0–2/8、12 并发 1–2/12 笔耗尽）。
-2. 把 Public 竞价改为显式锁 + Read Committed（同一夹具实测 0 冲突、0 503），但这改变不变量 2
-   的隔离级别约定，必须由用户批准并同步本文件与 `AGENTS.md`。
-3. 进入 Serializable 前按场次排队，保留 Serializable 但把 Final 阶段跨 lot 并发退化为串行；
-   需要单独评估出价 p99 与 SLO。
+### W12.1 落实：按场次出价队列
+
+会写 `lots` 的竞价命令（普通出价、创建/降低代理、Worker 的慢速代理执行）经
+`TransactionRunner::run_in_auction_bid_queue(lot_id, …)` 进入事务；其余路径继续用不带队列的
+`run`。实现在 [`crates/auction-storage/src/database/competition/bid_queue/`](../../crates/auction-storage/src/database/competition/bid_queue)，
+只改变并发形状：
+
+- **进程内**：按拍卖 ID 的异步互斥量。同一实例的重叠出价在这里排队，等待期间不取连接、不开事务。
+- **跨实例**：PostgreSQL 会话级 advisory lock（键 `hashtextextended('auction_bid_queue:' || auction_id, 0)`）。
+  等待方每次 `pg_try_advisory_lock` 前临时取一条队列专用连接，失败立即归还并退避（2ms 起，上限
+  25ms），因此等待期间不占连接。
+- **为什么不是 `pg_advisory_xact_lock`**：Serializable 的快照在 `BEGIN` 之后第一条语句取得；先等
+  锁再读取会用到早于持锁方提交的快照，SSI 仍以 40001 中止。会话锁必须在 `BEGIN` 之前取得。
+- **不变的部分**：隔离级别、`FOR SHARE OF world/auction` 与 `FOR UPDATE OF l`、`auction_commands`
+  幂等仲裁、事实/实时事件/审计的同事务写入、提交后补号与 `lot_watch_events` 处理顺序全部不变。
+  lot 行锁仍是唯一的价格串行化依据；队列只保证同一场次不会有两个写事务同时处于 SSI 冲突窗口。
+- **连接配额**：队列凭证的连接取自独立信号量，不占普通业务配额——持锁连接随后还要申请事务连接，
+  共用同一配额会互相等待。上限为普通配额的 1/4（至少 1、至多 4），且不超过物理池在长驻 owner 与
+  readiness 保留位之外的剩余位（默认档 16 物理、普通 12 → 队列 2）。
+- **释放**：正常路径 `release()` 先 `pg_advisory_unlock` 并校验返回 true，再把连接归还池；取消、
+  panic 与解锁失败一律关闭该会话（会话结束即释放全部会话锁），绝不把可能仍持锁的连接放回池中。
+  进程内凭证与场次互斥量条目在同一时刻回收。
+- **预算与错误**：进程内等待与跨实例等待共用一个 5 秒截止时间；用尽返回
+  `CompetitionTransactionError::QueueWaitTimeout`，HTTP 映射为既有的 `temporarily_unavailable`
+  （503），不进入 `serialization_conflict` 重试。命令账本此时没有任何写入，客户端可用同一
+  `command_id` 原样重试。
+- **观测**：`auction_bid_queue_wait_seconds{stage}`（`in_process`/`cross_instance`）与
+  `auction_bid_queue_requests_total{outcome}`（`acquired`/`timed_out`/`canceled`/`failed`）。
+
+实测（隔离 PG18、真实 schema、`seed_history` 生产量级填充、同一瞬间进入、6 轮无填充演练）：
+
+| 并发 | 模式 | 成功 | 40001 耗尽 | p50 | p95 | p99 | 连接池峰值 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 8 | 直接（队列关闭对照） | 48/48 | 0 | 29–32ms | 56–58ms | 66ms | 9–10 |
+| 8 | 按场次排队 | 48/48 | 0 | 77–81ms | 206–218ms | 263–273ms | 7 |
+| 12 | 直接（队列关闭对照） | 67/72 | 5 | 36ms | 72–82ms | 81–91ms | 14–15 |
+| 12 | 按场次排队 | 72/72 | 0 | 115–118ms | 285–290ms | 365–375ms | 11 |
+
+（8 并发为三次运行的范围；12 并发为两次运行的范围。成功与耗尽计数每次都一致，分位差异来自
+单笔事务耗时的抖动。）
+
+- 8 并发时该夹具本就未复现残余（填充数据让快照与追加索引走索引路径），队列的价值出现在并发
+  更高的形状：12 并发下对照组 5/72 以 40001 结束，排队组 0 笔；连接池峰值同时从 14–15/16 降到
+  11，即等待方不再占着连接。
+- 代价是确定性的排队延迟，量级为「(同场并发 − 1) × 单笔事务耗时」：8 并发 ≈ 7 × 33ms ≈ 230ms、
+  12 并发 ≈ 11 × 33ms ≈ 360ms，与实测 p99 一致。它随同场并发线性增长，但排队预算固定 5 秒，
+  且等待不消耗数据库资源；若 Final 阶段 p99 超出 SLO，先用 W0.13 采样确认是同场串行导致，
+  再考虑按 lot 拆分队列或调整预算，而不是放宽隔离级别。
+
+回归测试（`just test-db` 覆盖前三项；演练为显式入口）：
+
+- `postgres_bid_queue_serializes_cross_lot_across_instances`：两个独立连接池模拟两个 Public 实例，
+  一个实例持锁时另一个实例的跨 lot 出价必须等待，放行后两笔都成功且会话锁归零。
+- `postgres_bid_queue_releases_after_rejected_command`：事务内被领域规则拒绝后锁归零，同场次随后
+  仍能出价。
+- `postgres_bid_queue_releases_when_command_is_canceled`：命令被取消后会话锁归零（或随会话关闭
+  回收），同场次随后仍能出价。
+- `postgres_bid_queue_drill_reports_latency_and_pool_usage`（`--ignored`）：上表的六轮演练。
+
+```bash
+cargo test -p auction-storage --features test-db --test postgres \
+  -- --ignored --nocapture postgres_bid_queue_drill
+```
+
+仍未覆盖（后续单独评估）：Admin 场次/拍品修改与生命周期写入没有进入该队列，它们与 Final 阶段
+出价重叠时仍可能以 40001 重试（不改金额与状态结果）；W12.8 的提交侧 `pg_notify` 串行；队列预算
+与退避没有做成配置项。
 
 复现方式：在一次性隔离 PG18 上执行全部迁移后，按本节「事务形状」列出的语句序列各跑 8 个并发
 会话（每会话一笔、同一瞬间开始、跳过不需要的语句），统计 `could not serialize access`。探针

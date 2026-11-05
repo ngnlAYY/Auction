@@ -15,6 +15,8 @@ pub(super) struct DatabaseMetrics {
     pub(super) hold_duration: HistogramVec,
     pub(super) connections: IntGaugeVec,
     pub(super) reserved: IntGaugeVec,
+    pub(super) bid_queue_wait: HistogramVec,
+    pub(super) bid_queue_requests: IntCounterVec,
 }
 
 impl DatabaseMetrics {
@@ -91,6 +93,16 @@ impl DatabaseMetrics {
                 "auction_db_reserved_connections",
                 "Long lived owned connections.",
                 &["purpose"],
+            )?,
+            bid_queue_wait: histogram(
+                "auction_bid_queue_wait_seconds",
+                "Time spent waiting for the per-auction bid queue.",
+                &["stage"],
+            )?,
+            bid_queue_requests: counter(
+                "auction_bid_queue_requests_total",
+                "Bid commands that passed through the per-auction queue.",
+                &["outcome"],
             )?,
         })
     }

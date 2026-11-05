@@ -22,6 +22,13 @@ impl DatabaseStore {
         self
     }
 
+    /// 切换出价排队模式；`Direct` 只用于基准对照与回退验证。
+    #[cfg(feature = "test-db")]
+    pub fn with_bid_queue_mode(self, mode: super::BidQueueMode) -> Self {
+        let Self::Postgres(store) = self;
+        Self::Postgres(store.with_bid_queue_mode(mode))
+    }
+
     pub(crate) fn tracked_postgres_pool(&self) -> &TrackedPool<Postgres> {
         let Self::Postgres(store) = self;
         store.pool()

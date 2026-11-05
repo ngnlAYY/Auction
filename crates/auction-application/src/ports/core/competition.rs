@@ -163,6 +163,10 @@ pub enum CompetitionTransactionError {
     Failed(String),
     #[error("竞价事务发生可重试的序列化冲突")]
     SerializationConflict,
+    /// 同一场次的出价队列在预算内没有取得排队凭证；调用方不重试事务，按暂时不可用返回，
+    /// 客户端可用同一 `command_id` 原样重试。
+    #[error("同一场次的出价队列等待超时")]
+    QueueWaitTimeout,
     #[error(transparent)]
     CommandLedger(#[from] CommandLedgerError),
 }
@@ -268,4 +272,27 @@ pub trait TransactionRunner: Send + Sync {
         T: Send,
         E: TransactionFailure,
         F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send;
+
+    /// 同一拍卖的可写竞价命令入口：在进入 Serializable 事务**之前**按场次排队。
+    ///
+    /// 排队只改变并发形状，不改变隔离级别、行锁、命令账本或写入顺序：进入事务后仍然是
+    /// Serializable + 显式行锁，同一 `command_id` 仍然只应用一次。默认实现直接执行，供不
+    /// 关心跨实例串行的测试替身与不写拍卖的可调用方使用；生产适配器必须让同一场次在
+    /// 进程内与跨实例都互斥，否则 SSI 对同页 `lots` 更新的误报仍会耗尽重试。
+    ///
+    /// 调用方必须把每个会写 `lots` 的竞价命令都放到这个入口上，并与 `run` 使用同一事务策略。
+    fn run_in_auction_bid_queue<T, E, F>(
+        &self,
+        lot_id: LotId,
+        policy: TransactionPolicy,
+        operation: F,
+    ) -> impl Future<Output = Result<T, E>> + Send
+    where
+        T: Send,
+        E: TransactionFailure,
+        F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
+    {
+        let _ = lot_id;
+        self.run(policy, operation)
+    }
 }

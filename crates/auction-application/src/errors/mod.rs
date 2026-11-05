@@ -167,6 +167,7 @@ impl ApplicationError {
             Self::CompetitionTransaction(error) => match error {
                 CompetitionTransactionError::Failed(_)
                 | CompetitionTransactionError::SerializationConflict
+                | CompetitionTransactionError::QueueWaitTimeout
                 | CompetitionTransactionError::CommandLedger(CommandLedgerError::Storage) => {
                     Retryable
                 }

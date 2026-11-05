@@ -119,6 +119,10 @@ pub(super) fn map_competition_error(
         auction_application::CompetitionTransactionError::SerializationConflict => {
             SettlementTransactionError::SerializationConflict
         }
+        // 结算路径不经过出价队列；若出现该错误，按可重试但未归类的基础设施失败上报。
+        auction_application::CompetitionTransactionError::QueueWaitTimeout => {
+            SettlementTransactionError::Failed("竞价事务排队超时".to_owned())
+        }
         auction_application::CompetitionTransactionError::CommandLedger(error) => {
             SettlementTransactionError::CommandLedger(error)
         }
