@@ -425,15 +425,23 @@ cargo test -p auction-storage --features test-db --test postgres \
 保留 Serializable 与全部行锁，只把同一场次的重叠写入退化为串行（不采用 Read Committed，也不
 接受 Final 阶段耗尽）。
 
-### W12.1 落实：按场次出价队列
+### W12.1 落实：按场次写队列（竞价 / 生命周期 / Admin）
 
-会写 `lots` 的竞价命令（普通出价、创建/降低代理、Worker 的慢速代理执行）经
-`TransactionRunner::run_in_auction_bid_queue(lot_id, …)` 进入事务；其余路径继续用不带队列的
-`run`。实现在 [`crates/auction-storage/src/database/competition/bid_queue/`](../../crates/auction-storage/src/database/competition/bid_queue)，
+队列覆盖**所有会写 `lots`/`auctions` 的场次级命令**，它们必须落到同一把按场次的门：
+
+| 入口 | 命令 | 排队键 |
+| --- | --- | --- |
+| `TransactionRunner::run_in_auction_lot_queue(lot_id, …)` | 普通出价、创建/降低代理、Worker 慢速代理执行、Admin draft lot 修改 | lot → `lots.auction_id`（一次只读解析，结果缓存） |
+| `TransactionRunner::run_in_auction_queue(auction_id, …)` | 生命周期迁移（预览/开拍/取消/最终阶段/提前结算）、Admin 排期修改 | 场次 ID |
+
+其余路径继续用不带队列的 `run`（World 启停、规则发布、Admin 创建新场次——新建场次在提交前无人
+可见，无需排队）。实现在
+[`crates/auction-storage/src/database/competition/bid_queue/`](../../crates/auction-storage/src/database/competition/bid_queue)，
 只改变并发形状：
 
-- **进程内**：按拍卖 ID 的异步互斥量。同一实例的重叠出价在这里排队，等待期间不取连接、不开事务。
+- **进程内**：按拍卖 ID 的异步互斥量。同一实例的重叠命令在这里排队，等待期间不取连接、不开事务。
 - **跨实例**：PostgreSQL 会话级 advisory lock（键 `hashtextextended('auction_bid_queue:' || auction_id, 0)`）。
+  文本前缀是**跨版本稳定**的常量：改名会让滚动重启期间的新旧进程用不同锁键，混跑时失去互斥。
   等待方每次 `pg_try_advisory_lock` 前临时取一条队列专用连接，失败立即归还并退避（2ms 起，上限
   25ms），因此等待期间不占连接。
 - **为什么不是 `pg_advisory_xact_lock`**：Serializable 的快照在 `BEGIN` 之后第一条语句取得；先等
@@ -441,6 +449,11 @@ cargo test -p auction-storage --features test-db --test postgres \
 - **不变的部分**：隔离级别、`FOR SHARE OF world/auction` 与 `FOR UPDATE OF l`、`auction_commands`
   幂等仲裁、事实/实时事件/审计的同事务写入、提交后补号与 `lot_watch_events` 处理顺序全部不变。
   lot 行锁仍是唯一的价格串行化依据；队列只保证同一场次不会有两个写事务同时处于 SSI 冲突窗口。
+- **取得顺序与死锁**：命令只在进入事务**之前**取得**一把**场次门（进程内 → 跨实例会话锁），
+  取得后不再申请第二把场次门；跨场次写入（如开拍/取消创建后继场次）在同一事务内完成，后继场次
+  在提交前不存在、也无人能对它排队。因此不存在「持 A 门等 B 门」与反向形成的环：竞价队列与
+  生命周期/Admin 写入之间只有先后，没有交叉等待。世界行的 `FOR UPDATE`（生命周期）与
+  `FOR SHARE`（竞价）仍按 world → auction → lot 的既有顺序取得。
 - **连接配额**：队列凭证的连接取自独立信号量，不占普通业务配额——持锁连接随后还要申请事务连接，
   共用同一配额会互相等待。上限为普通配额的 1/4（至少 1、至多 4），且不超过物理池在长驻 owner 与
   readiness 保留位之外的剩余位（默认档 16 物理、普通 12 → 队列 2）。
@@ -454,7 +467,8 @@ cargo test -p auction-storage --features test-db --test postgres \
 - **观测**：`auction_bid_queue_wait_seconds{stage}`（`in_process`/`cross_instance`）与
   `auction_bid_queue_requests_total{outcome}`（`acquired`/`timed_out`/`canceled`/`failed`）。
 
-实测（隔离 PG18、真实 schema、`seed_history` 生产量级填充、同一瞬间进入、6 轮无填充演练）：
+实测 A：同一 `final` 场次的不同 lot 并发出价（隔离 PG18、真实 schema、`seed_history` 生产量级
+填充、同一瞬间进入、6 轮）：
 
 | 并发 | 模式 | 成功 | 40001 耗尽 | p50 | p95 | p99 | 连接池峰值 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -466,6 +480,20 @@ cargo test -p auction-storage --features test-db --test postgres \
 （8 并发为三次运行的范围；12 并发为两次运行的范围。成功与耗尽计数每次都一致，分位差异来自
 单笔事务耗时的抖动。）
 
+实测 B：同一 `live` 场次的 Admin 最终阶段迁移 + 8 笔 Final 并发出价 + 另一世界 2 个 Admin lot
+修改同一瞬间进入（6 轮，单次运行，无填充）：
+
+| 模式 | 出价成功 | 生命周期成功 | 40001/40P01 耗尽 | 排队超时 | 出价 p99 | 生命周期 p99 | Admin 无关场次 p99 | 死锁增量 | 连接池峰值 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 直接（对照） | 23/48 | 1/6 | 30 | 0 | 217ms | 204ms | 119ms | 0 | 16/16 |
+| 按场次排队 | 48/48 | 6/6 | 0 | 0 | 615ms | 143ms | 94ms | 0 | 12/16 |
+
+- 对照组里最终阶段迁移与同场出价几乎每轮互相中止（6 轮只有 1 次提交成功），8 笔出价在 5 次
+  重试内只成功 23 笔；排队后两者都 100% 成功、零耗尽，且另一世界的 Admin 修改延迟更低
+  （不受 main 场次的门影响，也少了一层 SSI 争用）。
+- 排队组出价 p99 615ms ≈ 8 笔同场写入 × 约 70ms/笔；生命周期自身 p99 143ms，说明它在队列最前面
+  时几乎不受影响。若生命周期命令排队等待（最坏 8 × 70ms ≈ 0.6s），仍远低于 5 秒预算。
+
 - 8 并发时该夹具本就未复现残余（填充数据让快照与追加索引走索引路径），队列的价值出现在并发
   更高的形状：12 并发下对照组 5/72 以 40001 结束，排队组 0 笔；连接池峰值同时从 14–15/16 降到
   11，即等待方不再占着连接。
@@ -474,7 +502,7 @@ cargo test -p auction-storage --features test-db --test postgres \
   且等待不消耗数据库资源；若 Final 阶段 p99 超出 SLO，先用 W0.13 采样确认是同场串行导致，
   再考虑按 lot 拆分队列或调整预算，而不是放宽隔离级别。
 
-回归测试（`just test-db` 覆盖前三项；演练为显式入口）：
+回归测试（`just test-db` 覆盖除演练外的全部条目；演练为显式入口）：
 
 - `postgres_bid_queue_serializes_cross_lot_across_instances`：两个独立连接池模拟两个 Public 实例，
   一个实例持锁时另一个实例的跨 lot 出价必须等待，放行后两笔都成功且会话锁归零。
@@ -482,16 +510,26 @@ cargo test -p auction-storage --features test-db --test postgres \
   仍能出价。
 - `postgres_bid_queue_releases_when_command_is_canceled`：命令被取消后会话锁归零（或随会话关闭
   回收），同场次随后仍能出价。
-- `postgres_bid_queue_drill_reports_latency_and_pool_usage`（`--ignored`）：上表的六轮演练。
+- `postgres_auction_queue_serializes_lifecycle_against_final_bids`：`live` 场次的最终阶段迁移与
+  4 路 Final 并发出价全部成功，场次提交为 `final`、每个 lot 恰一条事实、死锁计数与队列凭证归零。
+- `postgres_admin_lot_queue_serializes_same_auction_and_leaves_others_free`：同一 draft 场次两个
+  lot 的 Admin 修改互相等待（场次级而不是 lot 级），同瞬间另一世界的 Admin 修改必须立即完成。
+- `postgres_auction_queue_releases_lifecycle_when_canceled`：生命周期任务被取消后会话锁归零，
+  同场次随后仍能提交迁移。
+- `postgres_admin_lot_queue_shares_auction_key_with_bids`：出价持门期间同场次 Admin 修改不得进入
+  事务；门释放后按状态/版本门禁失败（不是继续等待）。
+- `postgres_bid_queue_drill_reports_latency_and_pool_usage` 与
+  `postgres_auction_queue_drill_reports_latency_and_pool_usage`（`--ignored`）：上表两次演练。
 
 ```bash
 cargo test -p auction-storage --features test-db --test postgres \
-  -- --ignored --nocapture postgres_bid_queue_drill
+  -- --ignored --nocapture postgres_auction_queue_drill
 ```
 
-仍未覆盖（后续单独评估）：Admin 场次/拍品修改与生命周期写入没有进入该队列，它们与 Final 阶段
-出价重叠时仍可能以 40001 重试（不改金额与状态结果）；W12.8 的提交侧 `pg_notify` 串行；队列预算
-与退避没有做成配置项。
+仍未覆盖（后续单独评估）：Admin 装备录入（`admin_auction_intake_item`）按 **世界** 的 intake
+target 解析场次，应用层拿到的是 world-scoped 聚合 ID，需要新增 world → auction 的排队入口后才能
+纳入；结算 owner（`SettlementTransactionRunner`）、恢复 relist 与调度 claim 仍按各自的租约/
+fencing 与行锁保护，不进本队列；W12.8 的提交侧 `pg_notify` 串行；队列预算与退避没有做成配置项。
 
 复现方式：在一次性隔离 PG18 上执行全部迁移后，按本节「事务形状」列出的语句序列各跑 8 个并发
 会话（每会话一笔、同一瞬间开始、跳过不需要的语句），统计 `could not serialize access`。探针
