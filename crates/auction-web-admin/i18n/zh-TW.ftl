@@ -1431,3 +1431,6 @@ admin-switches-reason = 原因
 admin-switches-applied = Admin 實際值 / 版本
 admin-switches-baseline = TOML 基準
 admin-switches-unset = 未設定
+
+stale-build-notice = 站點已更新。請重新整理此頁面以載入新版本；目前輸入不會被自動送出。
+stale-build-refresh = 重新整理頁面

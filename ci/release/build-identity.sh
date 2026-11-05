@@ -68,6 +68,19 @@ source_fingerprint() {
 	} | sha256sum | awk '{print $1}'
 }
 
+# 前后端共享的构建号：两个 Web surface 输入并集指纹的前 32 位十六进制。
+# 它只随浏览器 payload 的输入变化，后端专属改动不改变构建号，因此部署后不会误报；
+# 值满足 1–64 位 URL/HTTP 头安全字符闭集。原生程序与浏览器必须用同一份来源计算。
+web_build_identity() {
+	local identity
+	identity=$(path_fingerprint \
+		Cargo.toml Cargo.lock rust-toolchain.toml .cargo \
+		crates/auction-web-public crates/auction-web-admin \
+		crates/auction-web-shared crates/auction-contracts \
+		ci/release/web-bundle.sh ci/release/build-identity.sh "${tool_recipe_inputs[@]}") || return 1
+	printf '%s\n' "${identity:0:32}"
+}
+
 # 读取 `key=value` 构建信息文件的单个字段；字段缺失时输出空串，交由调用方失败关闭。
 read_build_info() {
 	local file=$1 key=$2

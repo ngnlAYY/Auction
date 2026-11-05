@@ -16,6 +16,7 @@ impl AppConfig {
             metrics,
             readiness,
             database_profiles,
+            database_roles,
             database_pool,
             tracing,
             shutdown,
@@ -192,6 +193,7 @@ impl AppConfig {
             resolve_http_security_origins(&mut http_security, listen_addr)?;
             validate_http_security(&http_security)?;
         }
+        database_roles.validate()?;
         database_pool.validate(database_profiles, role, http_security.request_timeout_seconds)?;
         // 匿名读并发是进程内闸门：每次读最多占用该数量的服务池连接，出价等写请求不经过
         // 该信号量，因此读突发不能把出价排到读队列之后。省略时取 Public 服务池扣除
@@ -234,6 +236,7 @@ impl AppConfig {
             metrics,
             readiness,
             database_profiles,
+            database_roles,
             database_pool,
             tracing,
             shutdown,

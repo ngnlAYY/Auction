@@ -13,7 +13,7 @@
 
 两种形态共用同一配置布局与同一个 `auction-cli`，但不能同时用于同一套配置。
 
-发布包（`auction-rust-<版本>-<提交前 12 位>[-single].tar.gz`）包含 `bin/`（分体包：三个角色程序 + `auction-cli`；合并包：`auction-server` + `auction-cli`）、`docs/`（部署、恢复、CLI 说明与 Web 资源摘要）、`systemd/`、`caddy/`、`config/examples/` 与 `retention-policy.v1.json`；分体包另含 `tmpfiles/`，合并包另含首次设置代理示例与单文件说明（以上均为发布包内的路径）。敏感模板以 `secrets.toml.example`、`secrets/postgres-rebuild.toml.example` 命名，须复制为配置引用的实际文件名。用发布包内的 `SHA256SUMS` 校验解压后的文件。
+发布包（`auction-rust-<版本>-<提交前 12 位>[-single].tar.gz`）包含 `bin/`（分体包：三个角色程序 + `auction-cli`；合并包：`auction-server` + `auction-cli`）、`docs/`（部署、恢复、CLI 说明与 Web 资源摘要）、`systemd/`、`caddy/`、`config/examples/` 与 `retention-policy.v1.json`；分体包另含 `tmpfiles/`，合并包另含首次设置代理示例与单文件说明（以上均为发布包内的路径）。敏感模板以 `secrets.toml.example`、`secrets/postgres-rebuild.toml.example`、`secrets/postgres-owner.toml.example` 命名，须复制为配置引用的实际文件名。用发布包内的 `SHA256SUMS` 校验解压后的文件。
 
 两种发布包均包含 `auction-backup.service.example` 与 `auction-backup.timer.example`，以及 WAL 相关 timer 模板 `auction-wal-upload.service.example`、`auction-wal-upload.timer.example`、`auction-base-backup.service.example`、`auction-base-backup.timer.example`；仅由用户按[定时备份](deploy/RECOVERY.md#定时备份)与[WAL 归档与时间点恢复](deploy/RECOVERY.md#wal-归档与时间点恢复)单独安装启用，不随三个角色服务自动开启。
 两种发布包的 `docs/` 也包含 `MIGRATION-DRILL.md` 与 `migration-drill-receipt.template.json`，用于含迁移版本部署前的手工演练与留证。
@@ -28,7 +28,8 @@
 | `/etc/auction/` | 配置目录：`public.toml`、`admin.toml`、`worker.toml`、`common.toml` | 目录 root:auction 0750；文件 root:auction 0640 |
 | `/etc/auction/secrets.toml` | 敏感配置 | auction:auction 0600 |
 | `/etc/auction/runtime/admin.toml` | runtime 配置（Admin 写入） | 目录 auction:auction 0750；文件 auction:auction **0640** |
-| `/etc/auction/maintenance/postgres.toml` | 建库/重建维护凭据（可选，仅 `auction-cli` 使用） | root 0600 |
+| `/etc/auction/maintenance/postgres.toml` | 集群 `postgres` 库维护凭据（可选，仅 `auction-cli db create/rebuild` 使用） | root 0600 |
+| `/etc/auction/owner/postgres.toml` | 迁移 owner 凭据（`db create/migrate/rebuild`、`backup restore`、`service start/restart`）；常驻角色不得引用 | root 0600 |
 | `/run/hv-auction/` | Public/Admin 的 Unix socket 与实例锁（tmpfiles 预建） | auction:auction 0750 |
 | `/run/hv-auction/worker/` | Worker control socket（Worker unit 的 `RuntimeDirectory`） | auction，0750 |
 | `/var/lib/auction/` | 部署控制锁（`deployment/`）、邮件诊断归档等可写数据 | auction / root |
@@ -51,12 +52,22 @@ usermod -aG auction-worker-control auction
 
 1. **安装程序**：解压发布包，把 `bin/*` 安装到 `/opt/auction/bin/`。
 
-2. **准备数据库账号与数据库**（PostgreSQL 18）：先建立应用角色；可手工 `CREATE ROLE … LOGIN PASSWORD …` / `CREATE DATABASE auction OWNER auction` 准备数据库，也可先按下一步手工写好配置，再用维护凭据创建缺失的库（`db create` 不创建应用角色，也不迁移）。首次设置向导会试连数据库，使用向导时须预先建好库：
+2. **准备数据库账号与数据库**（PostgreSQL 18）：迁移 owner 与服务运行账号必须分离，数据库 owner 是迁移 owner。先在集群建立两个 LOGIN 角色（密码用随机值，只写入各自的 owner-only 文件）：
+
+   ```sql
+   CREATE ROLE auction_owner LOGIN PASSWORD '<owner 密码>';      -- 迁移 owner，持有 DDL
+   CREATE ROLE auction_runtime LOGIN PASSWORD '<运行密码>';      -- 服务账号，迁移 081 授予只读+显式写入面
+   ```
+
+   然后可手工 `CREATE DATABASE auction OWNER auction_owner`，也可先按下一步写好配置，再用维护凭据（`postgres` 库的高权限账号）与 owner 凭据创建缺失的库（`db create` 不创建角色、不迁移）：
 
    ```bash
    auction-cli --config-dir /etc/auction db create --database auction \
-     --maintenance-secrets /etc/auction/maintenance/postgres.toml
+     --maintenance-secrets /etc/auction/maintenance/postgres.toml \
+     --owner-secrets /etc/auction/owner/postgres.toml
    ```
+
+   三角色的 `secrets.toml` `[database].username` 填 `auction_runtime`，`common.toml` 的 `[database_roles] owner = "auction_owner"`。首次设置向导会试连数据库，使用向导时须预先建好库与两个角色；向导写入的敏感文件只含运行账号，随后手工补 owner 凭据与 `[database_roles]`。owner 凭据模板见 [`config/examples/secrets/postgres-owner.toml`](config/examples/secrets/postgres-owner.toml)。
 
 3. **生成配置**，二选一：
    - 首次设置向导：先以 root 执行 `install -d -o auction -g auction -m 0750 /var/lib/auction`，确保目标目录的直接父目录已存在且符合[生成权限要求](config/README.md#示例与首次设置)；再运行 `sudo -u auction /opt/auction/bin/auction-admin-api setup --output-dir /var/lib/auction/new-config --control-group auction-worker-control`，其中 `new-config` 须尚不存在。在 stderr 中取得设置地址（默认 `127.0.0.1:8091`）与一次性令牌，经 SSH 隧道（`ssh -L 8091:127.0.0.1:8091 <主机>`）在浏览器完成表单。生成后把目录内容移入 `/etc/auction/` 并按上表调整属主与权限。
@@ -149,12 +160,12 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 1. 阅读版本说明；如有配置变更，先在新配置上执行 `auction-cli config check --strict`。含迁移的版本在生产停机前用最新备份完成[迁移演练](deploy/MIGRATION-DRILL.md)，审核回执并据实设置保护窗口；M1 手工核对，W7.2 落地后接入自动门禁。
 2. 停服并建立确定的恢复点：`auction-cli service stop`，然后 `auction-cli backup create --database auction --output /var/backups/auction/auction-<日期>.dump`。
 3. 保留旧程序以便回退，安装新程序到 `/opt/auction/bin/`。
-4. `auction-cli --config-dir /etc/auction service start`：严格预检 → 迁移 → 按序启动并等待就绪。
+4. `auction-cli --config-dir /etc/auction service start --owner-secrets /etc/auction/owner/postgres.toml`：严格预检（含运行账号与 owner 分离）→ 以 owner 迁移 → 按序启动并等待就绪。
 5. `service status` 确认就绪，检查 Admin 仪表盘。
 
-不需要确定恢复点的小版本（无迁移）也可以直接 `auction-cli service restart`：新配置预检通过后才停止旧服务，然后迁移并按序启动。
+不需要确定恢复点的小版本（无迁移）也可以直接 `auction-cli service restart --owner-secrets /etc/auction/owner/postgres.toml`：新配置预检通过后才停止旧服务，然后以 owner 迁移并按序启动。
 
-合并部署：`systemctl stop auction-server` → 备份 → 安装新程序 → 以服务账号执行 `sudo -u auction auction-cli --config-dir /var/lib/auction/config db migrate` → `systemctl start auction-server`。
+合并部署：`systemctl stop auction-server` → 备份 → 安装新程序 → 以服务账号执行 `sudo -u auction auction-cli --config-dir /var/lib/auction/config db migrate --owner-secrets /var/lib/auction/owner/postgres.toml` → `systemctl start auction-server`。迁移 owner 凭据只供该命令使用，`auction-server` 与三角色都不引用它。
 
 迁移 `000069` 后新建场次使用统一加价与代理上限出价规则；升级前已经创建的场次（包括草稿与预览）继续原竞价策略，不自动切换。必须停止全部旧角色、备份、迁移后同版启动；不能让旧 Public/Worker 忽略新快照版本继续写入。场次快照约束见[数据库契约](../docs/contracts/database.md#拍卖与竞价)。
 
@@ -765,7 +776,9 @@ WAL 归档与每周物理基础备份已交付命令与模板（W10.7）：`arch
 
 | 现象 | 排查 |
 | --- | --- |
-| 进程不就绪，日志提示 schema 版本不符 | 停服后执行 `auction-cli db migrate`（分体部署用 `service restart`） |
+| 进程不就绪，日志提示 schema 版本不符 | 停服后执行 `auction-cli db migrate --owner-secrets <owner 文件>`（分体部署用 `service restart --owner-secrets <owner 文件>`） |
+| 预检报“服务数据库账号 … 不是迁移 081 授权的运行账号” | 三角色 `secrets.toml` 的 `[database].username` 改为 `auction_runtime`，库 owner 保持迁移 owner；`common.toml` 的 `[database_roles] owner` 填迁移 owner 名 |
+| 迁移报“运行时角色 auction_runtime 不存在” | 先按首次部署步骤创建该 LOGIN 角色，再重跑迁移；不要用 owner 账号顶替服务账号 |
 | `service start` 卡在 Worker readiness | 确认 `[worker.control]` 已启用、`allowed_peer_uids` 含 0、`/run/hv-auction/worker` 存在且权限正确 |
 | Admin 启动报 runtime 文件与启动配置不一致 | runtime 文件已被更新但进程尚未用新配置重启：用 `auction-cli service restart` 整体重启 |
 | Worker 启动失败：凭据所有权已被占用 | 另一个 Worker（或正在执行的 `auction-cli funds`）持有邮件/论坛 Cookie 所有权；确认只运行一个 Worker |

@@ -27,6 +27,8 @@ install -d -m 0700 "$drill_evidence"
 "$drill_cli" --config-dir "$drill_config" config show worker
 ```
 
+隔离配置同样遵守账号分离：三角色 `secrets.toml` 的 `[database].username` 是运行账号 `auction_runtime`，`common.toml` 的 `[database_roles] owner` 是迁移 owner；所有需要 DDL 的步骤都用 `--owner-secrets` 指向 owner-only 的迁移凭据文件。
+
 ## 1. 校验最新备份
 
 从最新成功备份中取回完整 archive 与 manifest，保持 manifest 内的 archive 文件名和二者同目录。异机加密备份先按[从 R2 取回并演练恢复](RECOVERY.md#从-r2-取回并演练恢复)核对完成记录、密文长度与摘要、解密认证和明文 manifest 摘要，不在本流程重复定义下载规则。
@@ -45,7 +47,8 @@ sha256sum "$drill_evidence/source.dump" "$drill_evidence/source.dump.manifest"
 
 ```bash
 "$drill_cli" --config-dir "$drill_config" db create --database auction \
-  --maintenance-secrets /srv/auction-drill/maintenance/postgres.toml --no-systemd
+  --maintenance-secrets /srv/auction-drill/maintenance/postgres.toml \
+  --owner-secrets /srv/auction-drill/owner/postgres.toml --no-systemd
 ```
 
 同名库已存在且需要重置时，先只读预览，核对实例/目标和恢复点，再逐字确认；两条命令都只能指向隔离库：
@@ -53,10 +56,12 @@ sha256sum "$drill_evidence/source.dump" "$drill_evidence/source.dump.manifest"
 ```bash
 "$drill_cli" --config-dir "$drill_config" db rebuild --database auction \
   --maintenance-secrets /srv/auction-drill/maintenance/postgres.toml \
+  --owner-secrets /srv/auction-drill/owner/postgres.toml \
   --mode empty-for-restore --backup-manifest "$drill_evidence/source.dump.manifest" \
   --no-systemd > "$drill_evidence/rebuild-preview.json"
 "$drill_cli" --config-dir "$drill_config" db rebuild --database auction \
   --maintenance-secrets /srv/auction-drill/maintenance/postgres.toml \
+  --owner-secrets /srv/auction-drill/owner/postgres.toml \
   --mode empty-for-restore --backup-manifest "$drill_evidence/source.dump.manifest" \
   --no-systemd --execute --confirm 'REBUILD auction' --receipt "$drill_evidence/rebuild.json"
 ```
@@ -67,8 +72,10 @@ sha256sum "$drill_evidence/source.dump" "$drill_evidence/source.dump.manifest"
 "$drill_cli" --config-dir "$drill_config" db preflight --database auction \
   --output "$drill_evidence/empty-preflight.json"
 "$drill_cli" --config-dir "$drill_config" backup restore --database auction \
+  --owner-secrets /srv/auction-drill/owner/postgres.toml \
   --manifest "$drill_evidence/source.dump.manifest" --dry-run --no-systemd
 "$drill_cli" --config-dir "$drill_config" backup restore --database auction \
+  --owner-secrets /srv/auction-drill/owner/postgres.toml \
   --manifest "$drill_evidence/source.dump.manifest" --no-systemd \
   --receipt "$drill_evidence/restore.json"
 "$drill_cli" --config-dir "$drill_config" db preflight --database auction \
@@ -88,7 +95,8 @@ sha256sum "$drill_evidence/source.dump" "$drill_evidence/source.dump.manifest"
 ```bash
 date -u +%FT%TZ
 /usr/bin/time -p -o "$drill_evidence/migrate-time.txt" \
-  "$drill_cli" --config-dir "$drill_config" db migrate --no-systemd \
+  "$drill_cli" --config-dir "$drill_config" db migrate \
+  --owner-secrets /srv/auction-drill/owner/postgres.toml --no-systemd \
   > "$drill_evidence/migrate.json" 2> "$drill_evidence/migrate.stderr"
 date -u +%FT%TZ
 "$drill_cli" --config-dir "$drill_config" db status > "$drill_evidence/migrated-status.json"

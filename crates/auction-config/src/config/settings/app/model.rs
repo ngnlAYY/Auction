@@ -88,6 +88,8 @@ pub(super) struct CommonFileConfig {
     pub(super) metrics: MetricsConfig,
     pub(super) readiness: ReadinessConfig,
     pub(super) database_profiles: DatabaseProfilesConfig,
+    /// 数据库账号分工声明；省略 owner 时不做严格分离证明。
+    pub(super) database_roles: DatabaseRolesConfig,
     pub(super) cache: CacheConfig,
     /// CLI 专用策略；常驻角色不应用其运维语义。
     pub(super) backup: BackupConfig,
@@ -105,6 +107,7 @@ pub(super) struct BuildInput {
     pub(super) metrics: MetricsConfig,
     pub(super) readiness: ReadinessConfig,
     pub(super) database_profiles: DatabaseProfilesConfig,
+    pub(super) database_roles: DatabaseRolesConfig,
     pub(super) tracing: TracingSettings,
     pub(super) shutdown: ShutdownFileConfig,
     pub(super) realtime: RealtimeConfig,
@@ -125,6 +128,8 @@ pub struct AppConfig {
     pub role: Role,
     /// 非敏感数据库分档与本角色服务池；更改须重启。
     pub database_profiles: DatabaseProfilesConfig,
+    /// 非敏感账号分工声明：迁移 owner 名与服务账号固定名；`config check --strict` 据此拒绝 owner。
+    pub database_roles: DatabaseRolesConfig,
     pub database_pool: DatabasePoolConfig,
     /// 解析后的可选监听地址；Worker 通常为 None。
     pub listen_addr: Option<SocketAddr>,
@@ -178,6 +183,7 @@ impl fmt::Debug for AppConfig {
             .debug_struct("AppConfig")
             .field("role", &self.role)
             .field("database_profiles", &self.database_profiles)
+            .field("database_roles", &self.database_roles)
             .field("database_pool", &self.database_pool)
             .field("listen_addr", &self.listen_addr)
             .field("listener", &self.listener)

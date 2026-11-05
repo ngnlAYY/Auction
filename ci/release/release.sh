@@ -199,6 +199,9 @@ build_variant() (
 
 	# 在任何 Web/native 构建前冻结源码身份；构建期间的修改不得被事后标记成产物来源。
 	write_build_info "$next/BUILD-INFO" "$variant" "$features"
+	# 原生程序与两个浏览器 payload 共享同一构建号；web-bundle 独立运行时也会重算同一份来源指纹。
+	AUCTION_BUILD_ID=$(web_build_identity) || return 1
+	export AUCTION_BUILD_ID
 	if [[ "$variant" == embedded ]]; then
 		bash ci/release/web-bundle.sh public
 		verify_build_info "$next" "$variant"
@@ -783,6 +786,7 @@ package_release() (
 		"ops/config/examples/runtime/admin.toml|config/examples/runtime/admin.toml|640" \
 		"ops/config/examples/secrets.toml|config/examples/secrets.toml.example|600" \
 		"ops/config/examples/secrets/postgres-rebuild.toml|config/examples/secrets/postgres-rebuild.toml.example|600" \
+		"ops/config/examples/secrets/postgres-owner.toml|config/examples/secrets/postgres-owner.toml.example|600" \
 		"$embedded_artifact_root/WEB-PUBLIC-SHA256|docs/WEB-PUBLIC-SHA256|644" \
 		"$embedded_artifact_root/WEB-ADMIN-SHA256|docs/WEB-ADMIN-SHA256|644" \
 		"$embedded_artifact_root/WEB-PUBLIC-MANIFEST.v1|docs/WEB-PUBLIC-MANIFEST.v1|644" \

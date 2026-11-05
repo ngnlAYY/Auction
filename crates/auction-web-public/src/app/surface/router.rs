@@ -97,6 +97,10 @@ pub(crate) fn App() -> Element {
         document::Stylesheet { href: DESKTOP_CSS }
         document::Stylesheet { href: MOBILE_CSS }
         div { class: "app-root",
+            StaleBuildBanner {
+                message: t!("stale-build-notice"),
+                refresh_label: t!("stale-build-refresh"),
+            }
             Router::<Route> {}
         }
     }

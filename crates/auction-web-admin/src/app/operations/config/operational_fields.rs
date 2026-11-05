@@ -78,7 +78,6 @@ pub(super) const NUMBER_FIELDS: &[&str] = &[
     "operations.worker.item_timeout_seconds",
     "operations.worker.recovery_retry_delay_seconds",
     "operations.worker.delivery.batch_limit",
-    "operations.worker.delivery.concurrency",
     "operations.worker.delivery.poll_interval_seconds",
     "operations.worker.delivery.jitter_seconds",
     "operations.worker.delivery.lease_duration_seconds",

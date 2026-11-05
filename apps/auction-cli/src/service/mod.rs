@@ -48,7 +48,8 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                 "action": "stop", "stopped": true, "shutdown_gate": gate,
             }))
         }
-        ServiceAction::Start { startup_timeout_seconds } => {
+        ServiceAction::Start { startup_timeout_seconds, owner } => {
+            let owner = load_owner(&owner)?;
             let _lock = guard::deployment_lock(&args.units)?;
             let deployment = prepare(config_dir, &systemctl).await?;
             let mut states = Vec::with_capacity(3);
@@ -66,9 +67,10 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
             if !states.iter().all(UnitState::stopped) {
                 anyhow::bail!("部分角色正在运行或处于转换状态；请先执行 auction-cli service stop");
             }
-            launch(&systemctl, &deployment, timeout, None).await
+            launch(&systemctl, &deployment, &owner, timeout, None).await
         }
-        ServiceAction::Restart { startup_timeout_seconds, shutdown } => {
+        ServiceAction::Restart { startup_timeout_seconds, owner, shutdown } => {
+            let owner = load_owner(&owner)?;
             let _lock = guard::deployment_lock(&args.units)?;
             // 先证明新配置与 unit 绑定可用，再停止当前服务。
             let deployment = prepare(config_dir, &systemctl).await?;
@@ -78,6 +80,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
             launch(
                 &systemctl,
                 &deployment,
+                &owner,
                 Duration::from_secs(startup_timeout_seconds),
                 Some(&gate),
             )
@@ -163,6 +166,7 @@ async fn prepare(config_dir: &ConfigDir, systemctl: &Systemctl) -> anyhow::Resul
 async fn launch(
     systemctl: &Systemctl,
     deployment: &Deployment,
+    owner: &auction_config::PostgresOwnerSecrets,
     timeout: Duration,
     shutdown_gate: Option<&shutdown::ShutdownGateReport<'_>>,
 ) -> anyhow::Result<()> {
@@ -172,7 +176,7 @@ async fn launch(
                 .with_context(|| format!("{} 监听地址已被占用：{address}", role.name()))?;
         }
     }
-    let migration = migrate(deployment).await?;
+    let migration = migrate(deployment, owner).await?;
     let mut started = Vec::new();
     let mut roles = Vec::with_capacity(3);
     for role in ManagedRole::START_ORDER {
@@ -320,13 +324,33 @@ const fn config_role(role: ManagedRole) -> auction_config::Role {
 }
 
 #[cfg(feature = "postgres")]
-async fn migrate(deployment: &Deployment) -> anyhow::Result<serde_json::Value> {
-    let report = crate::database::apply_migrations(&deployment.worker).await?;
+fn load_owner(
+    owner: &crate::cli::OwnerSecretsArg,
+) -> anyhow::Result<auction_config::PostgresOwnerSecrets> {
+    crate::database::load_owner_secrets(&owner.owner_secrets)
+}
+
+#[cfg(not(feature = "postgres"))]
+fn load_owner(
+    _owner: &crate::cli::OwnerSecretsArg,
+) -> anyhow::Result<auction_config::PostgresOwnerSecrets> {
+    anyhow::bail!("当前 auction-cli 未编译 postgres feature，无法读取迁移 owner 凭据")
+}
+
+#[cfg(feature = "postgres")]
+async fn migrate(
+    deployment: &Deployment,
+    owner: &auction_config::PostgresOwnerSecrets,
+) -> anyhow::Result<serde_json::Value> {
+    let report = crate::database::apply_migrations(&deployment.worker, owner).await?;
     Ok(serde_json::to_value(report)?)
 }
 
 #[cfg(not(feature = "postgres"))]
-async fn migrate(_deployment: &Deployment) -> anyhow::Result<serde_json::Value> {
+async fn migrate(
+    _deployment: &Deployment,
+    _owner: &auction_config::PostgresOwnerSecrets,
+) -> anyhow::Result<serde_json::Value> {
     anyhow::bail!("当前 auction-cli 未编译 postgres feature，无法迁移")
 }
 

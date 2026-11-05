@@ -36,6 +36,8 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
             | MailDeliveryOrigin::SettlementRecoveryAction
             | MailDeliveryOrigin::OperationsAlert
             | MailDeliveryOrigin::LotWatch
+            | MailDeliveryOrigin::SellerSummary
+            | MailDeliveryOrigin::SeasonReminder
     ) {
         return Err(RepositoryError::Failed("MoogleMail delivery owner 无效".to_owned()).into());
     }
@@ -65,8 +67,13 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
     {
         return Err(RepositoryError::Failed("operations alert delivery 来源无效".to_owned()).into());
     }
-    if !matches!(command.origin, MailDeliveryOrigin::OperationsAlert | MailDeliveryOrigin::LotWatch)
-        && command.notification_body.is_some()
+    if !matches!(
+        command.origin,
+        MailDeliveryOrigin::OperationsAlert
+            | MailDeliveryOrigin::LotWatch
+            | MailDeliveryOrigin::SellerSummary
+            | MailDeliveryOrigin::SeasonReminder
+    ) && command.notification_body.is_some()
         && !(command.origin == MailDeliveryOrigin::MailIntake
             && command.template
                 == Some(auction_application::MailNotificationTemplate::AuctionSubmissionReceipt))
@@ -160,6 +167,38 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                     {
                         return Err(RepositoryError::Failed(
                             "MoogleMail 投稿回执载荷无效".to_owned(),
+                        )
+                        .into());
+                    }
+                }
+                Some(auction_application::MailNotificationTemplate::AuctionSellerSummary) => {
+                    if command.origin != MailDeliveryOrigin::SellerSummary
+                        || command.operation != MailDeliveryOperation::Send
+                        || command.user_key_user_id.is_some()
+                        || command.result_code.as_deref() != Some("summary")
+                        || command.world_id != "main"
+                        || !command.origin_id.starts_with("seller_summary:")
+                        || command.external_mail_id != command.command_id.to_string()
+                        || !valid_notification_body(command.notification_body.as_deref())
+                    {
+                        return Err(RepositoryError::Failed(
+                            "MoogleMail 卖方汇总通知载荷无效".to_owned(),
+                        )
+                        .into());
+                    }
+                }
+                Some(auction_application::MailNotificationTemplate::IsekaiSeasonReminder) => {
+                    if command.origin != MailDeliveryOrigin::SeasonReminder
+                        || command.operation != MailDeliveryOperation::Send
+                        || command.user_key_user_id.is_some()
+                        || command.result_code.as_deref() != Some("season_end")
+                        || command.world_id != "isekai"
+                        || !command.origin_id.starts_with("season_reminder:")
+                        || !command.external_mail_id.starts_with("season-end:")
+                        || !valid_notification_body(command.notification_body.as_deref())
+                    {
+                        return Err(RepositoryError::Failed(
+                            "MoogleMail 换季提醒通知载荷无效".to_owned(),
                         )
                         .into());
                     }
@@ -318,5 +357,66 @@ mod tests {
             Some("Injected body\n"),
         );
         assert!(validate_command(&command).is_err());
+    }
+
+    fn player_notification_command(
+        origin: MailDeliveryOrigin,
+        template: MailNotificationTemplate,
+        result_code: &str,
+        world: &str,
+        origin_id: String,
+        external_mail_id: String,
+    ) -> MailDeliveryCommand {
+        MailDeliveryCommand {
+            command_id: CommandId::from_uuid(Uuid::new_v4()),
+            request_hash: auction_application::RequestHash::new([9; 32]),
+            origin,
+            origin_id,
+            operation: MailDeliveryOperation::Send,
+            world_id: world.to_owned(),
+            external_mail_id,
+            recipient: "alice".to_owned(),
+            template: Some(template),
+            result_code: Some(result_code.to_owned()),
+            user_key_user_id: None,
+            credits: 0,
+            cod: 0,
+            attachment_ids: Vec::new(),
+            notification_body: Some("Frozen body".to_owned()),
+        }
+    }
+
+    #[test]
+    fn seller_summary_and_season_reminder_payloads_are_accepted() {
+        let mut summary = player_notification_command(
+            MailDeliveryOrigin::SellerSummary,
+            MailNotificationTemplate::AuctionSellerSummary,
+            "summary",
+            "main",
+            "seller_summary:11111111-1111-1111-1111-111111111111:alice".to_owned(),
+            String::new(),
+        );
+        summary.external_mail_id = summary.command_id.to_string();
+        assert!(validate_command(&summary).is_ok(), "{:?}", validate_command(&summary).err());
+
+        let reminder = player_notification_command(
+            MailDeliveryOrigin::SeasonReminder,
+            MailNotificationTemplate::IsekaiSeasonReminder,
+            "season_end",
+            "isekai",
+            "season_reminder:1793523600:alice".to_owned(),
+            "season-end:2026-11-01T09:00:00Z".to_owned(),
+        );
+        assert!(validate_command(&reminder).is_ok(), "{:?}", validate_command(&reminder).err());
+
+        let wrong_world = player_notification_command(
+            MailDeliveryOrigin::SeasonReminder,
+            MailNotificationTemplate::IsekaiSeasonReminder,
+            "season_end",
+            "main",
+            "season_reminder:1793523600:alice".to_owned(),
+            "season-end:2026-11-01T09:00:00Z".to_owned(),
+        );
+        assert!(validate_command(&wrong_world).is_err());
     }
 }

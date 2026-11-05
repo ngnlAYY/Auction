@@ -141,6 +141,9 @@ pub enum ApplicationError {
 
     #[error(transparent)]
     OperationsAlert(#[from] OperationsAlertError),
+
+    #[error(transparent)]
+    PlayerNotification(#[from] crate::PlayerNotificationError),
 }
 
 impl ApplicationError {

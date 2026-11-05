@@ -129,6 +129,7 @@ pub(crate) fn check(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<Depl
     permissions.warnings.extend(admin.admin_security_warnings().into_iter().map(str::to_owned));
     shared_files(&public, &admin, &worker)?;
     shared_database(&public, &admin, &worker)?;
+    database_accounts(&public, &admin, &worker, &mut permissions)?;
     shared_runtime(&public, &admin, &worker)?;
     admin_worker(&admin, &worker)?;
     worker.validate_backup()?;
@@ -177,6 +178,30 @@ fn shared_files(public: &AppConfig, admin: &AppConfig, worker: &AppConfig) -> an
         }
         if canonical(config.runtime_config_path.as_deref())? != runtime {
             anyhow::bail!("Public、Admin 与 Worker 必须引用同一份 runtime_config_file，或全部省略");
+        }
+    }
+    Ok(())
+}
+
+/// 数据库账号分工：服务只能使用迁移 081 授权的运行账号，不得使用迁移 owner。
+/// 严格模式缺 `[database_roles] owner` 声明即失败，因为离线无法证明两者分离。
+fn database_accounts(
+    public: &AppConfig,
+    admin: &AppConfig,
+    worker: &AppConfig,
+    permissions: &mut Permissions,
+) -> anyhow::Result<()> {
+    if let Err(error) = public.database_roles.require_owner_declared() {
+        permissions.report(error.to_string())?;
+    }
+    for config in [public, admin, worker] {
+        let url = config
+            .database_url()
+            .with_context(|| format!("{} 配置缺少数据库连接", config.role.name()))?;
+        let username = auction_config::database_url_username(url)
+            .with_context(|| format!("{} 的数据库连接缺少显式账号名", config.role.name()))?;
+        if let Some(problem) = config.database_roles.service_account_problem(&username) {
+            permissions.report(format!("{}：{problem}", config.role.name()))?;
         }
     }
     Ok(())

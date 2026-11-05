@@ -106,6 +106,38 @@ impl fmt::Debug for PostgresMaintenanceSecrets {
     }
 }
 
+/// 迁移 owner 专用的独立敏感 TOML：应用数据库 owner 账号的五字段连接参数。
+/// 只有 `auction-cli` 的建库、迁移、重建与恢复可用；不得并入任何常驻角色的主配置或 runtime。
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PostgresOwnerSecretFile {
+    /// 应用数据库 owner 的独立连接字段；与兼容 URL 二选一。
+    pub(crate) database: Option<PostgresConnectionConfig>,
+    /// 兼容旧连接串写法；同样只指向应用数据库。
+    pub(crate) database_url: Option<String>,
+}
+
+/// 独立 PostgreSQL owner 敏感 TOML 的脱敏结果。
+/// 该类型只允许 `auction-cli` 在建库、迁移、重建与恢复窗口短暂使用，不能并入 Public/Admin/Worker
+/// 常驻配置，也不会实现序列化或暴露在 `Debug` 输出中。
+#[derive(Clone)]
+pub struct PostgresOwnerSecrets {
+    pub(crate) database_url: SecretString,
+}
+
+impl PostgresOwnerSecrets {
+    /// 返回应用数据库 owner 的连接 URL；调用方不得记录或放入进程参数。
+    pub fn database_url(&self) -> &str {
+        self.database_url.expose_secret()
+    }
+}
+
+impl fmt::Debug for PostgresOwnerSecrets {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("PostgresOwnerSecrets([REDACTED])")
+    }
+}
+
 /// `.keyenv` 中仅允许出现的两个 MoogleMail Cookie 身份。
 /// `hv-ck-key1` 固定解释为 Worker 运行账号，`hv-ck-key2` 只供显式隔离验证。该类型不实现
 /// 序列化；生产装配不得把二者组成候选池，也不得自动切换到测试号。

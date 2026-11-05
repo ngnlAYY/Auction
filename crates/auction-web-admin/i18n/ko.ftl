@@ -1431,3 +1431,6 @@ admin-switches-reason = 사유
 admin-switches-applied = Admin 유효 값 / 버전
 admin-switches-baseline = TOML 기본값
 admin-switches-unset = 설정 없음
+
+stale-build-notice = 새 버전이 배포되었습니다. 이 페이지를 새로 고쳐 주세요. 현재 입력은 자동으로 제출되지 않습니다.
+stale-build-refresh = 페이지 새로 고침

@@ -69,7 +69,6 @@ fn bounded(value: Duration) -> bool {
 #[derive(Debug, Clone, Copy)]
 pub struct DeliveryWorkerRuntimeConfig {
     pub batch_limit: u16,
-    pub concurrency: u16,
     pub poll_interval: Duration,
     pub jitter: Duration,
     pub lease_duration: Duration,
@@ -83,7 +82,6 @@ impl Default for DeliveryWorkerRuntimeConfig {
     fn default() -> Self {
         Self {
             batch_limit: 100,
-            concurrency: 8,
             poll_interval: Duration::from_secs(60),
             jitter: Duration::from_secs(5),
             lease_duration: Duration::from_secs(60),
@@ -97,7 +95,11 @@ impl Default for DeliveryWorkerRuntimeConfig {
 
 impl DeliveryWorkerRuntimeConfig {
     pub(super) fn validate(self) -> bool {
-        valid_claim_loop(self.batch_limit, self.concurrency, self.poll_interval, self.jitter)
+        // 并发由 transport 的 `maximum_concurrency` 唯一决定，不再来自配置。
+        (1..=1000).contains(&self.batch_limit)
+            && !self.poll_interval.is_zero()
+            && self.poll_interval <= MAX_INTERVAL
+            && self.jitter <= MAX_INTERVAL
             && bounded(self.lease_duration)
             && !self.renew_interval.is_zero()
             && self.renew_interval < self.lease_duration
@@ -238,12 +240,11 @@ mod hot_overlay_tests {
     use super::{DeliveryWorkerRuntimeConfig, ForumWorkerRuntimeConfig};
 
     #[test]
-    fn delivery_hot_overlay_keeps_lease_and_concurrency() {
+    fn delivery_hot_overlay_keeps_lease_and_grace() {
         let startup = DeliveryWorkerRuntimeConfig {
             lease_duration: Duration::from_secs(90),
             renew_interval: Duration::from_secs(15),
             sending_grace: Duration::from_secs(400),
-            concurrency: 3,
             ..DeliveryWorkerRuntimeConfig::default()
         };
         let hot = WorkerDeliveryHotConfig {
@@ -259,11 +260,10 @@ mod hot_overlay_tests {
         assert_eq!(next.jitter, Duration::from_secs(2));
         assert_eq!(next.request_timeout, Duration::from_secs(200));
         assert_eq!(next.finalize_timeout, Duration::from_secs(8));
-        // 重启字段保持启动值，热快照不能改写 claim、sending 围栏或并发。
+        // 重启字段保持启动值，热快照不能改写 claim 或 sending 围栏。
         assert_eq!(next.lease_duration, startup.lease_duration);
         assert_eq!(next.renew_interval, startup.renew_interval);
         assert_eq!(next.sending_grace, startup.sending_grace);
-        assert_eq!(next.concurrency, startup.concurrency);
         assert!(next.validate());
     }
 

@@ -9,12 +9,8 @@ use auction_observability::{BrowserErrorClass, HttpRateLimitKind, ProcessMetrics
 use axum::body::to_bytes;
 use std::net::IpAddr;
 
-/// 与 `auction-web-shared::BUILD_ID` 使用同一表达式；发布构建通过 `AUCTION_BUILD_ID` 注入。
-/// 只比较是否等于当前进程构建号，不把上报值写入指标标签。
-pub(crate) const EXPECTED_BUILD_ID: &str = match option_env!("AUCTION_BUILD_ID") {
-    Some(value) => value,
-    None => env!("CARGO_PKG_VERSION"),
-};
+/// 构建号与响应头、实时首帧同源；只比较是否等于当前进程构建号，不把上报值写入指标标签。
+use super::build_identity::build_id;
 
 /// Public surface 的信标入口。
 pub(crate) async fn public(
@@ -63,7 +59,7 @@ async fn handle(
         _ => return unexpected_body(),
     }
 
-    let Ok(report) = parse_report(&parts.uri, EXPECTED_BUILD_ID) else {
+    let Ok(report) = parse_report(&parts.uri, build_id()) else {
         return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
     };
 
@@ -226,7 +222,7 @@ mod tests {
     async fn accepted_classes_return_no_content_and_increment_one_counter() {
         let state = state();
         for class in ["wasm_panic", "dto_decode", "realtime_protocol"] {
-            let uri = format!("/api/v1/browser-errors?class={class}&build={EXPECTED_BUILD_ID}");
+            let uri = format!("/api/v1/browser-errors?class={class}&build={}", build_id());
             let response = send(&state, &uri, Body::empty()).await;
             assert_eq!(response.status(), StatusCode::NO_CONTENT, "{class}");
             assert!(counter_is(
@@ -263,7 +259,7 @@ mod tests {
     #[tokio::test]
     async fn any_declared_or_actual_body_is_rejected_without_counting() {
         let state = state();
-        let uri = format!("/api/v1/browser-errors?class=dto_decode&build={EXPECTED_BUILD_ID}");
+        let uri = format!("/api/v1/browser-errors?class=dto_decode&build={}", build_id());
         let response = send(&state, &uri, Body::from("error text")).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
@@ -291,7 +287,7 @@ mod tests {
     #[tokio::test]
     async fn per_source_budget_is_enforced_and_observable() {
         let state = state();
-        let uri = format!("/api/v1/browser-errors?class=wasm_panic&build={EXPECTED_BUILD_ID}");
+        let uri = format!("/api/v1/browser-errors?class=wasm_panic&build={}", build_id());
         for _ in 0..30 {
             assert_eq!(send(&state, &uri, Body::empty()).await.status(), StatusCode::NO_CONTENT);
         }

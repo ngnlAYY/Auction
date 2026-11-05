@@ -57,9 +57,10 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: BackupCommand) -> anyho
                 "created_at": verified.manifest.created_at,
             }))
         }
-        BackupCommand::Restore { manifest, database, dry_run, receipt, maintenance } => {
+        BackupCommand::Restore { manifest, database, dry_run, receipt, owner, maintenance } => {
             restore::run(restore::Options {
                 config_dir,
+                owner_secrets: &owner.owner_secrets,
                 manifest: &manifest,
                 database: &database,
                 dry_run,

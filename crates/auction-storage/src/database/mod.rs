@@ -40,6 +40,8 @@ pub use equipment_loss::delivery_snapshot_equality_sql;
 #[cfg(feature = "postgres")]
 mod intake_target;
 #[cfg(feature = "postgres")]
+mod least_privilege;
+#[cfg(feature = "postgres")]
 mod lifecycle_audit;
 #[cfg(feature = "postgres")]
 mod mail_delivery;
@@ -49,6 +51,8 @@ mod mail_intake;
 mod mail_poll;
 #[cfg(feature = "postgres")]
 mod mailbox_sweep;
+#[cfg(feature = "postgres")]
+pub use least_privilege::{apply_runtime_privileges, runtime_privileges_present};
 #[cfg(feature = "postgres")]
 mod migrations;
 #[cfg(feature = "postgres")]
@@ -163,6 +167,8 @@ mod legacy_self_proof;
 pub use legacy_self_proof::{trusted_delivery_predicate_sql, trusted_obligation_equality_sql};
 #[cfg(feature = "postgres")]
 mod operations_alert;
+#[cfg(feature = "postgres")]
+mod player_notifications;
 #[cfg(feature = "postgres")]
 mod price_history;
 #[cfg(feature = "postgres")]

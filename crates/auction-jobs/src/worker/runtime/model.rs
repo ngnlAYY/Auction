@@ -37,6 +37,8 @@ pub struct PersistentWorker<C> {
     pub forum_reply: Option<forum_reply::ForumReplyRuntime>,
     /// 可选 operations alert 扫描器；只在 PostgreSQL 完整档和明确启用时注入。
     pub operations_alert: Option<Arc<operations_alert::OperationsAlertRuntime>>,
+    /// W14.3 卖方汇总与换季提醒扫描；只读事实并幂等入队，发送仍由 delivery 循环负责。
+    pub player_notifications: Option<Arc<player_notifications::PlayerNotificationRuntime>>,
     pub realtime_consumer: Option<Arc<dyn RealtimeConsumerRunner>>,
     /// Worker 固定 label 的指标端口；关闭指标时由装配根注入 no-op 实现。
     pub metrics: Arc<dyn WorkerRecorder>,

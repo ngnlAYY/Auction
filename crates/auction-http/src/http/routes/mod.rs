@@ -39,6 +39,9 @@ mod blacklist;
 #[path = "../shared/boundary.rs"]
 mod boundary;
 mod browser_errors;
+mod build_identity {
+    include!("../shared/build_identity.rs");
+}
 #[path = "../public/compensation.rs"]
 mod compensation;
 #[path = "../public/countdown/mod.rs"]
