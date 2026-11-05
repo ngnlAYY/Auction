@@ -476,6 +476,10 @@ impl MailboxMaintenanceService {
                             "mid": state.external_mail_id,
                             "sent_at": entry.sent_at,
                             "sent_time_precision": "minute",
+                            // 详情页安全摘要：Admin 可据此核对人工证明身份，但不接触正文。
+                            "recipient": state.recipient,
+                            "subject": state.subject,
+                            "body_digest": state.body_digest,
                             "collected": state.collected,
                             "cod_pending": state.cod_pending,
                             "remaining_credits": state.remaining_credits,
@@ -768,6 +772,9 @@ impl MailboxMaintenanceService {
                 json!({
                     "observed_at": self.clock.now(),
                     "mid": state.external_mail_id,
+                    "recipient": state.recipient,
+                    "subject": state.subject,
+                    "body_digest": state.body_digest,
                     "collected": state.collected,
                     "cod_pending": state.cod_pending,
                     "remaining_credits": state.remaining_credits,

@@ -129,12 +129,12 @@ where
                     let result = if changed {
                         if let Some(source) = snapshot.schedule_source.as_ref() {
                             snapshot.schedule_source = Some(source.with_updated_times(
-                                crate::AuctionScheduleTimes {
+                                auction_domain::AuctionScheduleTimes {
                                     preview_due_at: previous_preview_scheduled_at,
                                     open_due_at: previous_scheduled_open_at,
                                     scheduled_end_at: previous_scheduled_end_at,
                                 },
-                                crate::AuctionScheduleTimes {
+                                auction_domain::AuctionScheduleTimes {
                                     preview_due_at: command.preview_scheduled_at,
                                     open_due_at: command.scheduled_open_at,
                                     scheduled_end_at: command.scheduled_end_at,

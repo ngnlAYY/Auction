@@ -5,7 +5,8 @@
 use std::sync::Arc;
 
 use auction_domain::{
-    AuctionId, BidId, CommandId, CompetitionPlan, CompetitionTrigger, ProxyMode, deterministic_uuid,
+    AuctionId, AuctionScheduleCalendar, BidId, CommandId, CompetitionPlan, CompetitionTrigger,
+    ProxyMode, deterministic_uuid,
 };
 use chrono::{Datelike, Duration, NaiveDate};
 use serde::Serialize;
@@ -17,8 +18,8 @@ use crate::{
     AuctionLifecycleCommandPort, AuctionLifecycleContext, AuctionLifecycleEffect,
     AuctionLifecyclePlan, AuctionLifecyclePolicy, AuctionLifecycleResult, AuctionLifecycleSnapshot,
     AuctionLifecycleTransaction, AuctionPolicyTemplate, AuctionPreviewSuccessorPlan,
-    AuctionScheduleCalendar, CommandLedgerError, CompetitionTransaction,
-    CompetitionTransactionError, RequestHash, StoredCommand, TransactionPolicy, TransactionRunner,
+    CommandLedgerError, CompetitionTransaction, CompetitionTransactionError, RequestHash,
+    StoredCommand, TransactionPolicy, TransactionRunner,
 };
 
 mod plan;

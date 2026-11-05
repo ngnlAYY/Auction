@@ -3,7 +3,8 @@
 
 use std::{sync::Arc, time::Duration};
 
-use auction_application::{AdminMailPort, AuctionEarlyBirdCalendar, AuctionPolicyTemplate};
+use auction_application::{AdminMailPort, AuctionPolicyTemplate};
+use auction_domain::AuctionEarlyBirdCalendar;
 
 /// 每周拍卖轮次生成所需的已解析配置。
 #[derive(Clone)]

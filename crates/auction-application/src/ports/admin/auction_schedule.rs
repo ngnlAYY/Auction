@@ -48,7 +48,7 @@ pub struct AdminAuctionScheduleSnapshot {
     pub round_preview_due_at: DateTime<Utc>,
     pub round_open_due_at: DateTime<Utc>,
     pub round_scheduled_end_at: DateTime<Utc>,
-    pub schedule_source: Option<super::AuctionScheduleSource>,
+    pub schedule_source: Option<auction_domain::AuctionScheduleSource>,
     pub preview_completed_at: Option<DateTime<Utc>>,
     pub open_completed_at: Option<DateTime<Utc>>,
     pub final_completed_at: Option<DateTime<Utc>>,

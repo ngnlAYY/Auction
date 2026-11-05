@@ -56,6 +56,7 @@ pub struct AdminApiState {
     admin_lot_update: Option<Arc<dyn AdminLotUpdatePort>>,
     admin_proxy_events: Option<Arc<dyn AdminProxyEventReader>>,
     delivery_admin: Option<Arc<dyn DeliveryAdminPort>>,
+    delivery_sent_proof: Option<Arc<auction_application::DeliverySentProofService>>,
     operations_alert: Option<Arc<dyn OperationsAlertStore>>,
     operations_alert_source: Option<Arc<dyn OperationsAlertSourceReader>>,
     credential_health: Option<Arc<dyn AdminCredentialHealthReader>>,
@@ -150,6 +151,7 @@ impl AdminApiState {
             admin_lot_update,
             admin_proxy_events,
             delivery_admin,
+            delivery_sent_proof: None,
             operations_alert,
             operations_alert_source,
             credential_health,
@@ -361,6 +363,21 @@ impl AdminApiState {
 
     pub(crate) fn delivery_admin(&self) -> Option<&dyn DeliveryAdminPort> {
         self.delivery_admin.as_deref()
+    }
+
+    /// 注入人工 Sent 证明服务；未注入时相关路由明确返回能力不可用。
+    pub fn with_delivery_sent_proof(
+        mut self,
+        service: Arc<auction_application::DeliverySentProofService>,
+    ) -> Self {
+        self.delivery_sent_proof = Some(service);
+        self
+    }
+
+    pub(crate) fn delivery_sent_proof(
+        &self,
+    ) -> Option<&auction_application::DeliverySentProofService> {
+        self.delivery_sent_proof.as_deref()
     }
 
     pub(crate) fn operations_alert(&self) -> Option<&dyn OperationsAlertStore> {

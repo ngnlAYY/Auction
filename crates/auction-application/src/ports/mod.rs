@@ -62,6 +62,8 @@ mod delivery;
 mod delivery_admin;
 #[path = "delivery/cadence.rs"]
 mod delivery_cadence;
+#[path = "delivery/detail.rs"]
+mod delivery_detail;
 pub use delivery_cadence::{DeliverySendIntervals, DeliveryWakeup};
 #[path = "delivery/expectation.rs"]
 mod delivery_expectation;
@@ -69,6 +71,9 @@ pub use delivery_expectation::{
     DeliveryPreparedExpectation, DeliverySendCredentialBinding, DeliverySendExpectation,
     DeliveryTakeExpectation,
 };
+#[path = "delivery/sent_admission.rs"]
+mod sent_admission;
+pub use sent_admission::*;
 #[path = "delivery/sent_confirmation.rs"]
 mod sent_confirmation;
 pub use sent_confirmation::*;
@@ -117,8 +122,6 @@ pub use mail_equipment_diagnostics::*;
 mod account_scheduling {
     include!("mail/scheduling.rs");
 }
-#[path = "scheduling/early_bird.rs"]
-mod early_bird_schedule;
 #[path = "mail/display.rs"]
 mod mail_display;
 #[path = "mail/maintenance.rs"]
@@ -161,10 +164,6 @@ mod recovery_scheduler;
 mod recurring_schedule;
 #[path = "public/rules.rs"]
 mod rules;
-#[path = "scheduling/calendar.rs"]
-mod schedule_calendar;
-#[path = "scheduling/source.rs"]
-mod schedule_source;
 #[path = "scheduling/worker.rs"]
 mod scheduler;
 #[path = "public/session_preference.rs"]
@@ -365,6 +364,10 @@ pub use delivery_admin::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
     DeliveryAdminPage, DeliveryAdminPort, DeliveryAdminResult, DeliveryAdminSnapshot,
     MAX_DELIVERY_ADMIN_OFFSET, MAX_DELIVERY_ADMIN_PAGE_SIZE, MAX_DELIVERY_COD,
+};
+pub use delivery_detail::{
+    DeliveryAdminAttempt, DeliveryAdminCustody, DeliveryAdminDetail, DeliveryAdminDisposition,
+    DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,
 };
 pub use equipment_link::{
     PublicEquipmentGameLink, PublicEquipmentLinkResolver, PublicEquipmentLinkSecret,
@@ -570,12 +573,6 @@ pub use worker_remote_read::{
     WorkerRemoteReadPort, WorkerSentLookupCandidate, WorkerSentLookupRequest,
     WorkerSentLookupResponse,
 };
-
-pub use early_bird_schedule::{
-    AuctionEarlyBirdCalendar, AuctionEarlyBirdConfig, AuctionEarlyBirdSeason,
-};
-pub use schedule_calendar::{AuctionScheduleCalendar, AuctionScheduleSlot, AuctionWeeklySchedule};
-pub use schedule_source::{AuctionEarlyBirdSlot, AuctionScheduleSource, AuctionScheduleTimes};
 
 #[path = "public/watch.rs"]
 mod lot_watch;

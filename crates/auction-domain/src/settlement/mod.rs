@@ -5,6 +5,8 @@
 mod amount;
 mod equipment_loss;
 pub use equipment_loss::equipment_loss_funding;
+mod equipment_loss_admission;
+pub use equipment_loss_admission::{EquipmentLossAdmission, EquipmentLossBlocker};
 mod facts;
 mod funding;
 pub use funding::{FundingAccountKey, FundingSplit, funding_reconciliation_capacity};
@@ -13,6 +15,7 @@ pub use internal::InternalSettlementAction;
 mod obligations;
 mod plan;
 mod policy;
+mod recovery_advance;
 mod reversal;
 
 pub use amount::SettlementAmount;
@@ -25,5 +28,9 @@ pub use plan::{SettlementPlan, floor_ppm, proportional_floor};
 pub use policy::{
     AdjustmentAnchor, DEFAULT_COD_RETURN_LIMIT, MAX_COD_RETURN_LIMIT, RECOVERY_V2_PAYMENT_TIMEOUT,
     RecoveryMode, RecoveryPolicy, SETTLEMENT_PPM, SettlementMode, SettlementPolicy,
+};
+pub use recovery_advance::{
+    RecoveryAdvance, RecoveryAdvanceError, RecoveryAdvanceFacts, RecoveryStage,
+    next_recovery_advance,
 };
 pub use reversal::{COMPENSATION_REVERSAL_RULE_VERSION, CompensationReversal};

@@ -173,6 +173,8 @@ mod operations_alert;
 mod player_notifications;
 #[cfg(feature = "postgres")]
 mod price_history;
+#[cfg(feature = "test-db")]
+pub use price_history::benchmark_sql;
 #[cfg(feature = "postgres")]
 mod public_equipment_link;
 #[cfg(feature = "postgres")]
@@ -238,8 +240,8 @@ pub use backend::{DatabaseBackend, StorageError};
 #[cfg(feature = "postgres")]
 pub(crate) use backend::{
     SERIALIZABLE_ATTEMPTS, lock_command_id, observe_retry_exhaustion,
-    observed_serialization_conflict, retry_conflicts, set_read_only_limits, sql_error_context,
-    storage_error, storage_error_from,
+    observed_serialization_conflict, retry_conflicts, serializable_retry_backoff,
+    set_read_only_limits, sql_error_context, storage_error, storage_error_from,
 };
 #[cfg(feature = "postgres")]
 pub(crate) use backend::{

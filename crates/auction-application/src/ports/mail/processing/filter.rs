@@ -6,7 +6,9 @@ use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
-use super::super::{AdminIntakeSourceSnapshot, AuctionEarlyBirdCalendar};
+use auction_domain::AuctionEarlyBirdCalendar;
+
+use super::super::AdminIntakeSourceSnapshot;
 use super::common::MailProcessingError;
 
 /// 装备过滤策略返回的稳定拒绝原因。

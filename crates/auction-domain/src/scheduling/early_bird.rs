@@ -1,14 +1,14 @@
 //! 赛季早鸟期配置与日历：赛季前场次、窗口、场次时段、常规周场替代及收件品质时间窗。
-//! 只做纯计算，不访问数据库或读取进程配置；common.toml 与 Admin runtime 共用同一 DTO 和校验，
-//! 避免两处维护不同的时序规则。
+//! 只做纯计算，不访问数据库、进程配置或日志；common.toml、Admin runtime 与 Worker 共用同一
+//! 规则，避免多处维护不同的时序结论。
 
-use auction_domain::{DomainError, RECOVERY_V2_PAYMENT_TIMEOUT, valid_text};
+use crate::{DomainError, RECOVERY_V2_PAYMENT_TIMEOUT, valid_text};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, Timelike, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
-use super::schedule_calendar::AuctionScheduleSlot;
-use super::schedule_source::{
+use super::calendar::AuctionScheduleSlot;
+use super::source::{
     AuctionEarlyBirdSlot, AuctionScheduleSource, AuctionScheduleTimes, resolve_local,
     validate_pre_season_payment_deadline,
 };

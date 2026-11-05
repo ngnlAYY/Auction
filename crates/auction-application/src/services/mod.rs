@@ -4,6 +4,8 @@ mod admin_auction;
 mod admin_auction_schedule;
 #[path = "admin/credentials/mod.rs"]
 mod admin_credentials;
+#[path = "admin/delivery_sent.rs"]
+mod admin_delivery_sent;
 #[path = "admin/intake.rs"]
 mod admin_intake;
 #[path = "admin/lot.rs"]
@@ -51,6 +53,7 @@ mod user_mail;
 pub use admin_auction::AdminAuctionCreateService;
 pub use admin_auction_schedule::AdminAuctionScheduleService;
 pub use admin_credentials::{AdminCredentialCheckService, AdminCredentialService};
+pub use admin_delivery_sent::DeliverySentProofService;
 pub use admin_intake::AdminIntakeService;
 pub use admin_lot::AdminLotUpdateService;
 pub use admin_mail::AdminMailService;

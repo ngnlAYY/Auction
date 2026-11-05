@@ -63,11 +63,12 @@ pub(super) async fn apply(
     {
         return Err(Error::Rejected);
     }
-    let recovery_id = snapshot.uuid("recovery", "id")?;
-    let payment_id = snapshot.uuid("payment", "id")?;
-    let delivery_id = snapshot.uuid("delivery", "id")?;
-    let seller_id = snapshot.uuid("seller", "id")?;
-    let refund_id = snapshot.uuid("refund", "id")?;
+    let admission = snapshot.admission()?;
+    let recovery_id = admission.recovery.id;
+    let payment_id = admission.payment.id;
+    let delivery_id = admission.delivery.id;
+    let seller_id = admission.seller.id;
+    let refund_id = admission.refund.id;
     let split = auction_domain::equipment_loss_funding(
         snapshot.split()?,
         account.records_only(),
