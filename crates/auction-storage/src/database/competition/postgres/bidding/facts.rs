@@ -8,37 +8,34 @@ pub(in crate::database::competition) async fn insert_bid(
     bid: &AcceptedBid,
     occurred_at: DateTime<Utc>,
 ) -> Result<(), CompetitionTransactionError> {
-    let notifications = std::sync::Arc::clone(&transaction.notifications_arc());
-    let public_base_url = transaction.public_base_url().map(str::to_owned);
-    let transaction = transaction.transaction_mut()?;
-    sqlx::query(
-        r#"INSERT INTO public.bids
-            (id, command_id, fact_index, lot_id, bidder_user_id, amount, mechanism,
-             effective_end_at, accepted_state_version, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#,
-    )
-    .bind(bid.id.as_uuid())
-    .bind(bid.command_id.as_uuid())
-    .bind(i32_version(bid.fact_index, "竞价事实序号")?)
-    .bind(bid.lot_id.as_uuid())
-    .bind(bid.bidder_id.as_uuid())
-    .bind(bid.amount.value())
-    .bind(bid.mechanism.as_str())
-    .bind(bid.effective_end_at)
-    .bind(i64_version(bid.state_version, "竞价状态版本")?)
-    .bind(occurred_at)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    crate::database::lot_watch::auto_watch_bid(transaction, bid).await?;
-    crate::database::lot_watch::apply_bid(
-        transaction,
-        bid,
-        occurred_at,
-        notifications.as_ref(),
-        public_base_url.as_deref(),
-    )
-    .await?;
+    let event_id = crate::database::lot_watch::bid_event(bid);
+    {
+        let transaction = transaction.transaction_mut()?;
+        sqlx::query(
+            r#"INSERT INTO public.bids
+                (id, command_id, fact_index, lot_id, bidder_user_id, amount, mechanism,
+                 effective_end_at, accepted_state_version, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#,
+        )
+        .bind(bid.id.as_uuid())
+        .bind(bid.command_id.as_uuid())
+        .bind(i32_version(bid.fact_index, "竞价事实序号")?)
+        .bind(bid.lot_id.as_uuid())
+        .bind(bid.bidder_id.as_uuid())
+        .bind(bid.amount.value())
+        .bind(bid.mechanism.as_str())
+        .bind(bid.effective_end_at)
+        .bind(i64_version(bid.state_version, "竞价状态版本")?)
+        .bind(occurred_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?;
+        // W12.1 残留：标记与提醒只由已提交事实派生；本事务不读标记、不写领先周期、
+        // 不插入投递，因此不再与跨 lot 的并发竞价形成 SSI 读写反依赖。
+        crate::database::lot_watch::record_bid_event(transaction, event_id, bid, occurred_at)
+            .await?;
+    }
+    transaction.record_lot_watch_event(event_id);
     Ok(())
 }
 

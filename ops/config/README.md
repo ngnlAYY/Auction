@@ -131,13 +131,13 @@ SLI 基线不由 Admin runtime 覆盖；仅 Worker 消费，且须同时启用�
 
 | 字段 | 默认值 | 语义 |
 | --- | --- | --- |
-| `audit_failure_mode` | `"shadow"` | `legacy`：任一审计失败即粘滞未就绪，不计算影子；`shadow`：沿用旧就绪与全部失败心跳计数，同时比较分类门禁并记录差异；`classified`：只由 permanent + unknown 失败粘滞阻断，心跳 `audit_failure_count` 也只投影这两类累计 |
+| `audit_failure_mode` | `"classified"` | `legacy`：任一审计失败即粘滞未就绪，不计算影子；`shadow`：沿用旧就绪与全部失败心跳计数，同时比较分类门禁并记录差异；`classified`：只由 permanent + unknown 失败粘滞阻断，心跳 `audit_failure_count` 也只投影这两类累计 |
 | `migration_compatibility_mode` | `"shadow"` | `strict`：完整迁移历史必须恰好匹配，不读兼容登记；`shadow`：实际仍严格，在同一只读快照计算兼容判定并记录差异；`compatible`：显式允许全部未来后缀已登记兼容的数据库，精确定义见[数据库契约](../../docs/contracts/database.md#迁移兼容登记与就绪) |
 | `cache_enabled` | `true` | Public/Admin 最终就绪布尔值在进程内正负均缓存 1 秒，并发共享一次限时 750ms 的检查；`false` 逐次执行原检查，不合并、不应用该 750ms 预算。Worker control 不使用该缓存 |
 
 瞬时白名单保留决策 32 的 SQLSTATE `40001`、`40P01`、`57014`、`55P03`、整个 `08` 类、sqlx `PoolTimedOut` 及连接通信失败 `Io`，依决策 71 另外加入 `53300`、`57P01`、`57P02`、`57P03`；`57P05`、`25P03/25P04` 仍按未知粘滞阻断。未知错误是未知风险处置，不代表已证明不可重试；与不可重试失败一样保持粘滞，不因后续成功清零。分类只影响健康信号，不扩大事务或外部写入重试范围。完整分类由 [auction-storage](../../crates/auction-storage/README.md#审计失败与就绪) 拥有。
 
-切换到 `classified` 前，影子观察中的差异应只出现在 `transient`（预期差异），`permanent` / `unknown` 无差异；没有样本不能解释为通过。观察结果由用户审阅并决定切换，不自动推进。步骤与指标见[运维手册](../README.md#审计就绪影子观察)。可经运行时开关覆盖为 `legacy`、`false` 回退；clear 只回到当前进程的 TOML 基线。改文件基线后仍须受控重启；单独关闭指标或日志不改变就绪计数。
+默认基线为 `classified`（用户决定，2026-11-05）；如需影子观察，须显式设为 `shadow` 并受控重启，此时差异应只出现在 `transient`（预期差异），`permanent` / `unknown` 无差异；没有样本不能解释为通过。观察结果由用户审阅后才重新切回 `classified`，不自动推进。步骤与指标见[运维手册](../README.md#审计就绪影子观察)。可经运行时开关覆盖为 `legacy`、`classified`、`false` 调整或回退；clear 只回到当前进程的 TOML 基线。改文件基线后仍须受控重启；单独关闭指标或日志不改变就绪计数。
 
 迁移模式平时保持 `shadow`，差异只允许为 `compatible_ahead`；同版数据库没有超前样本，不能据零差异宣布超前分支已验证。换回已含 W7.8a 的旧程序前，运维必须显式设置 `migration_compatibility_mode = "compatible"`，按[程序回退](../deploy/RECOVERY.md#程序回退)完成区间核对并受控重启。设置 `strict` 并重启恢复原迁移判定；不回退数据库，也不放宽 CLI 的迁移、备份、恢复或盘点边界。数据库检查自身总预算为 750ms，独立于 HTTP 缓存开关，对 heartbeat/supervisor 也生效。
 
@@ -374,8 +374,8 @@ Worker 新路径在首次停止时关闭入口，立即取消尚未登记交接�
 clear、expire、到期或未设置均回落基线；修改 TOML 不清除无期限覆盖。
 
 三角色五秒刷新，单次一秒预算；首次失败保留基线，后续失败保留最后成功快照，
-但仍按原数据库期限回落。默认基线仍为 shadow/true；切 classified 仍需用户
-审阅影子样本。切换不清零审计累计；策略版本变化立即使旧 HTTP 就绪缓存失效。
+但仍按原数据库期限回落。审计基线默认为 classified、缓存为 true；如需
+切换 shadow 或 legacy 观察，仍须用户决定。切换不清零审计累计；策略版本变化立即使旧 HTTP 就绪缓存失效。
 Worker control 不使用 HTTP 就绪缓存。邮件隔离开关在 Worker 下一轮调度或维护门
 复读后生效；指标转发拒绝在每次 `/metrics` 请求边界读取，且只允许在线收紧，
 `set false` 被命令层拒绝。`external_access_paused`（W1.9）没有基线字段：只有未到期的

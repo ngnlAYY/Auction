@@ -11,9 +11,9 @@ pub enum AuditFailureMode {
     /// 所有审计失败均阻断，不计算影子判定。
     Legacy,
     /// 沿用旧判定，同时观察分类后的预期差异。
-    #[default]
     Shadow,
-    /// 仅不可重试及未知风险失败阻断。
+    /// 仅不可重试及未知风险失败阻断；默认模式。
+    #[default]
     Classified,
 }
 
@@ -34,4 +34,28 @@ pub enum MigrationCompatibilityMode {
 pub trait ProcessReadinessPort: Send + Sync {
     /// 执行一次只读 readiness 检查；失败时调用方只应返回有限状态码和稳定错误码。
     fn check(&self) -> ApplicationFuture<'_, ()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuditFailureMode;
+
+    #[test]
+    fn default_audit_failure_mode_is_classified() {
+        // 用户决定默认基线为 classified；legacy 与 shadow 仍可显式选择。
+        assert_eq!(AuditFailureMode::default(), AuditFailureMode::Classified);
+    }
+
+    #[test]
+    fn all_audit_failure_modes_stay_deserializable() {
+        for (value, expected) in [
+            ("\"legacy\"", AuditFailureMode::Legacy),
+            ("\"shadow\"", AuditFailureMode::Shadow),
+            ("\"classified\"", AuditFailureMode::Classified),
+        ] {
+            let mode: AuditFailureMode = serde_json::from_str(value).expect("已知模式必须接受");
+            assert_eq!(mode, expected);
+        }
+        assert!(serde_json::from_str::<AuditFailureMode>("\"permanent\"").is_err());
+    }
 }

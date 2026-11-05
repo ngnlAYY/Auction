@@ -52,7 +52,7 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health/live` | 进程存活：`{"code":"live","message":"…","data":{"live":true}}` |
-| GET | `/health/ready` | 就绪：Public 要求数据库与 realtime relay 新鲜；Admin 要求数据库就绪；均按审计模式判定。默认 shadow 保持任一审计失败即未就绪，classified 仅由 permanent + unknown 阻断。成功为 200 / `ready`，未就绪为 503 / `not_ready` |
+| GET | `/health/ready` | 就绪：Public 要求数据库与 realtime relay 新鲜；Admin 要求数据库就绪；均按审计模式判定。默认 classified 仅由 permanent + unknown 阻断，显式 shadow 保持任一审计失败即未就绪。成功为 200 / `ready`，未就绪为 503 / `not_ready` |
 | GET | `/health`、`/api/v1/health` | 服务名、状态与运行进程版本 |
 | GET / HEAD | `/metrics` | 直连 Prometheus 文本（HEAD 无正文）；需启用 metrics，且 listener 为 loopback TCP 或 Unix socket |
 

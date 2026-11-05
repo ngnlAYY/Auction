@@ -75,7 +75,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 
 unknown 是“未知风险处置，不代表已证明不可重试”。permanent 与 unknown 在 classified 下保持粘滞，不提供清零接口，不写试探审计；修复后受控重启恢复。瞬时失败不锁死 classified readiness，但数据库/schema 当前不可用仍使依赖检查失败，恢复后可重新就绪。
 
-`DatabaseStore::with_runtime_switches` 由三角色装配根注入共享快照；默认 shadow 沿用全部失败累计门禁并观察新旧差异，legacy 不计算影子，classified 仅投影 permanent + unknown。HTTP、心跳与既有告警共享该模式的 `audit_failure_count`，不改 DTO 或 schema。纯内存审计指标由装配根注册，关闭 exporter 不影响计数；日志仅包含固定类别和 kind，不包含驱动原文。指标字典见 [auction-observability](../auction-observability/README.md#指标)，开关与切换步骤见[配置参考](../../ops/config/README.md#就绪策略)和[运维手册](../../ops/README.md#审计就绪影子观察)。
+`DatabaseStore::with_runtime_switches` 由三角色装配根注入共享快照；默认 classified 仅投影 permanent + unknown，显式 shadow 沿用全部失败累计门禁并观察新旧差异，legacy 不计算影子。HTTP、心跳与既有告警共享该模式的 `audit_failure_count`，不改 DTO 或 schema。纯内存审计指标由装配根注册，关闭 exporter 不影响计数；日志仅包含固定类别和 kind，不包含驱动原文。指标字典见 [auction-observability](../auction-observability/README.md#指标)，开关与切换步骤见[配置参考](../../ops/config/README.md#就绪策略)和[运维手册](../../ops/README.md#审计就绪影子观察)。
 
 `check_database_readiness` 使用 `begin_read_snapshot_reserved`：`TrackedPool` 把普通业务连接限制在物理池扣除长期 owner 与 readiness 预留后的容量，readiness 始终保留一个真实池连接，Final 写饱和或匿名读突发不能把探针饿死；连接池关闭、连接失败与 schema/迁移失败仍使 readiness 失败。失败投影区分 `timeout`（有界预算内未完成检查）与 `dependency_unavailable`（池饱和或审计门禁），不再统一记为 `repository_failed`；审计门禁另在 `auction::storage::audit_health` 输出 `审计失败门禁阻断进程 readiness`。Worker 批量连接预算相应扣除 1 个 readiness 保留位。
 

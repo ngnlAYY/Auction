@@ -40,7 +40,7 @@
 
 ## Worker control
 
-Admin 从 common 注入[审计就绪策略](../../ops/config/README.md#就绪策略)并注册分类指标；默认 shadow 保持旧计数与判定，HTTP 最终结果缓存一秒且合并并发，心跳仍独立检查。切换 classified 后心跳/仪表盘审计计数只含阻断类；DTO 结构不变。
+Admin 从 common 注入[审计就绪策略](../../ops/config/README.md#就绪策略)并注册分类指标；默认 classified 只由 permanent + unknown 阻断，HTTP 最终结果缓存一秒且合并并发，心跳仍独立检查。显式 shadow 时保持旧计数与判定并可在线回切；DTO 结构不变。
 
 启用 `[worker.control]` 时，Admin 通过 `WorkerControlClient` 访问 Worker 的 Unix socket（读取状态与邮件轮询进度、手动触发轮询）。Admin 的运行账号必须能访问 socket 所在目录，且 UID/GID 在 Worker 的 `allowed_peer_uids`/`allowed_peer_gids` 中——systemd 示例通过 `SupplementaryGroups=auction-worker-control` 满足这一点。
 

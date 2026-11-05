@@ -44,29 +44,22 @@ type PgTransaction = Transaction<'static, Postgres>;
 /// 回调不能自取独立连接，也不能把命令账本和竞价写入拆成两个事务。
 pub struct PostgresCompetitionTransaction {
     transaction: Option<PgTransaction>,
-    /// W14.8 通知创建指标；默认 no-op，装配根注入进程记录器。
-    notifications: std::sync::Arc<dyn auction_application::NotificationRecorder>,
-    /// W14.2 被超提醒使用的公开站点 origin；未配置时正文省略链接。
-    public_base_url: Option<String>,
     /// W12.1 已写入待定序号事件（`stream_sequence IS NULL`）的 stream key；提交后补号。
     /// 同一命令的多条竞价事实属于同一场次，因此只在 key 变化时追加。
     deferred_stream_keys: Vec<String>,
+    /// W12.1 残留：本事务追加的标记事件；提交后由独立事务应用标记与提醒，回滚则一并丢弃。
+    lot_watch_events: Vec<Uuid>,
     /// 锁内快照同时读出的场次 ID。实时事件与竞价事实同事务写入时不必再次读取 `lots`：
     /// 额外的等值读取会在 Serializable 下叠加谓词锁（W12.1 残留的跨 lot 误报来源）。
     loaded_auction_id: Option<Uuid>,
 }
 
 impl PostgresCompetitionTransaction {
-    pub(crate) fn new(
-        transaction: PgTransaction,
-        notifications: std::sync::Arc<dyn auction_application::NotificationRecorder>,
-        public_base_url: Option<String>,
-    ) -> Self {
+    pub(crate) fn new(transaction: PgTransaction) -> Self {
         Self {
             transaction: Some(transaction),
-            notifications,
-            public_base_url,
             deferred_stream_keys: Vec::new(),
+            lot_watch_events: Vec::new(),
             loaded_auction_id: None,
         }
     }
@@ -83,6 +76,16 @@ impl PostgresCompetitionTransaction {
         std::mem::take(&mut self.deferred_stream_keys)
     }
 
+    /// 记录本事务追加的标记事件；提交后立即应用，回滚时随事务丢弃。
+    pub(crate) fn record_lot_watch_event(&mut self, event_id: Uuid) {
+        self.lot_watch_events.push(event_id);
+    }
+
+    /// 取出待处理事件 ID；只有提交成功后才允许处理。
+    pub(crate) fn take_lot_watch_events(&mut self) -> Vec<Uuid> {
+        std::mem::take(&mut self.lot_watch_events)
+    }
+
     /// 锁内快照读出的场次 ID；调用方据此写实时事件，避免再次探测 `lots`。
     pub(crate) fn loaded_auction_id(&self) -> Option<Uuid> {
         self.loaded_auction_id
@@ -90,18 +93,6 @@ impl PostgresCompetitionTransaction {
 
     pub(crate) fn record_loaded_auction(&mut self, auction_id: Uuid) {
         self.loaded_auction_id = Some(auction_id);
-    }
-
-    /// 通知正文写入时使用的公开站点 origin；只在事务内读取冻结快照。
-    pub(crate) fn public_base_url(&self) -> Option<&str> {
-        self.public_base_url.as_deref()
-    }
-
-    /// 借用事务前复制共享句柄，供跨越 `transaction_mut()` 借用的观测调用使用。
-    pub(crate) fn notifications_arc(
-        &self,
-    ) -> std::sync::Arc<dyn auction_application::NotificationRecorder> {
-        std::sync::Arc::clone(&self.notifications)
     }
 
     pub(crate) async fn commit(mut self) -> Result<(), sqlx::Error> {
@@ -146,20 +137,24 @@ impl TransactionRunner for PostgresStore {
                         Ok(transaction) => transaction,
                         Err(error) => return Err(E::from(map_sql_error(error))),
                     };
-                let mut transaction = PostgresCompetitionTransaction::new(
-                    transaction,
-                    std::sync::Arc::clone(&self.notification_metrics),
-                    self.public_base_url.clone(),
-                );
+                let mut transaction = PostgresCompetitionTransaction::new(transaction);
 
                 match operation(&mut transaction).await {
                     Ok(value) => {
                         // W12.1：竞价事件的序号在提交后分配，回滚时随事务一起丢弃。
                         let deferred = transaction.take_deferred_stream_keys();
+                        let lot_watch_events = transaction.take_lot_watch_events();
                         match transaction.commit().await {
                             Ok(()) => {
                                 crate::database::realtime::allocate_deferred_sequences_after_commit(
                                     self, &deferred,
+                                )
+                                .await;
+                                // W12.1 残留：标记与提醒在提交后的独立事务应用；失败不回滚出价，
+                                // 持久事件仍由 Worker 扫描重试。
+                                crate::database::lot_watch::process_committed_events(
+                                    self,
+                                    &lot_watch_events,
                                 )
                                 .await;
                                 return Ok(value);

@@ -373,6 +373,7 @@ pub use ports::{
     LotWatchPreference, LotWatchPreferencePort, LotWatchPreferenceTransaction,
     SetLotWatchPreferenceCommand,
 };
+pub use ports::{LotWatchReminderBatch, LotWatchReminderStore};
 pub use ports::{
     MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxEvidenceStore,
     MoogleMailboxInboxAssets, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,

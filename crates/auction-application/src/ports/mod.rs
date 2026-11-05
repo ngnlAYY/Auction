@@ -612,6 +612,9 @@ pub use watch_preference::*;
 mod lot_watch_pm;
 pub use lot_watch_pm::*;
 
+mod lot_watch_reminders;
+pub use lot_watch_reminders::*;
+
 mod operations;
 pub use operations::*;
 

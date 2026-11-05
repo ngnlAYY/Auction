@@ -181,7 +181,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 2. **安装候选**：按“升级”流程安装 M1 候选（含迁移 075–077），同步安装 Worker 120s、server 225s 的 systemd unit；`service start` 完成迁移并等待三角色就绪。
 3. **启用新版能力**：在 common 填写三个 loopback metrics 地址并受控重启角色；安装并启用 `auction-backup.timer`，先执行一次手动 `backup create`/`backup verify`。
 4. **异机与恢复演练**：配置 `[backup.offsite]`，观察首次 daily/monthly 回执，再按[备份与恢复](deploy/RECOVERY.md#从-r2-取回并演练恢复)完成一次端到端恢复演练。
-5. **观察后切换**：维护 p95、D5 冲突、shadow 差异与备份连续成功后，才切换 `readiness_audit_failure_mode=classified`、`timeouts_enabled` 与 `sent_baseline_mode=watermark`。
+5. **观察后切换**：维护 p95、D5 冲突、影子差异（仅当仍显式选择 `shadow` 基线观察）与备份连续成功后，按用户决定启用 `timeouts_enabled` 与 `sent_baseline_mode=watermark`；`readiness_audit_failure_mode` 默认已是 `classified`。
 
 在旧程序上执行第 3–5 步会因缺少子命令或出口失败；这些步骤不属于部署前准备。
 
@@ -211,13 +211,13 @@ HTTP 缓存的转换时限与异常行为见[路由契约](../docs/contracts/rou
 
 ### 审计就绪影子观察
 
-默认 `[readiness] audit_failure_mode = "shadow"`、`cache_enabled = true`。该模式保持旧就绪判定及心跳全部失败累计，同时在数据库检查成功后比对审计门禁。`auction_readiness_shadow_mismatch_total{class}` 按发生差异的底层检查次数累计，不是失败命令数或 HTTP 等待者数；只含瞬时失败且尚无阻断类失败时，旧门禁拒绝、新门禁放行，这是预期差异。完整分类字典见 [auction-storage](../crates/auction-storage/README.md#审计失败与就绪)。
+默认 `[readiness] audit_failure_mode = "classified"`、`cache_enabled = true`（用户决定，2026-11-05）。classified 只由 permanent + unknown 失败阻断，心跳 `audit_failure_count` 也只投影这两类；`shadow` 与 `legacy` 仍可显式选择，其中 shadow 保持旧就绪判定及心跳全部失败累计，同时在数据库检查成功后比对审计门禁。`auction_readiness_shadow_mismatch_total{class}` 按发生差异的底层检查次数累计，不是失败命令数或 HTTP 等待者数；只含瞬时失败且尚无阻断类失败时，旧门禁拒绝、新门禁放行，这是预期差异。完整分类字典见 [auction-storage](../crates/auction-storage/README.md#审计失败与就绪)。
 
 1. 用户先确保指标已有可采集和查看的路径。Public/Worker 的指标取 common，Admin 若有 runtime 则须同时检查其 metrics 开关；Worker 当前从 control socket 抓取。本项不安装采集服务、不启用外部心跳或运维告警通知。
-2. 保持 shadow 观察。日志 target 为 `auction::storage::audit_health`，只输出 `class`、`sqlstate_class`、固定 `kind`、`blocks_classified_readiness`；最后一项明确指 classified 门禁，shadow 的实际门禁仍会被瞬时累计阻断。需要开启时在既有 `log_filter` 追加 `,auction::storage::audit_health=warn`，关闭追加 `,auction::storage::audit_health=off`；修改过滤器也需重启。
-3. 按下列 PromQL 核对分类、影子差异、阻断状态和 HTTP 检查收敛。差异只允许出现在 transient，permanent/unknown 无差异；观察必须有对应分支样本，无样本不算通过。不得为取样擅自连接生产数据库或制造故障。
-4. 用户审阅证据后，可按[运行时开关](#运行时开关)将 `readiness_audit_failure_mode` 设置为 `classified`，核对三角色应用后生效；修改 common 基线则仍需受控重启。不会自动切换；分类必须先于 W0.6 超时启用。classified 下心跳和 Admin 计数只含 permanent + unknown，瞬时完整计数继续在指标与日志中保留。
-5. 回退时可在线设置 `readiness_audit_failure_mode=legacy`、`readiness_cache_enabled=false`，恢复任一失败即未就绪与逐次探测；clear 只回落 TOML 基线。不可重试/未知失败修复后也需受控重启，不提供清零接口、不写试探审计。单独禁用 metrics 或过滤日志不影响门禁。
+2. 如需影子观察，由用户显式将 common 基线改为 `shadow` 并受控重启（或在线设置 `readiness_audit_failure_mode=shadow`）。日志 target 为 `auction::storage::audit_health`，只输出 `class`、`sqlstate_class`、固定 `kind`、`blocks_classified_readiness`；最后一项明确指 classified 门禁，shadow 的实际门禁仍会被瞬时累计阻断。需要开启时在既有 `log_filter` 追加 `,auction::storage::audit_health=warn`，关闭追加 `,auction::storage::audit_health=off`；修改过滤器也需重启。
+3. 按下列 PromQL 核对分类、影子差异、阻断状态和 HTTP 检查收敛。影子观察时差异只允许出现在 transient，permanent/unknown 无差异；观察必须有对应分支样本，无样本不算通过。不得为取样擅自连接生产数据库或制造故障。
+4. 用户审阅证据后，可按[运行时开关](#运行时开关)将 `readiness_audit_failure_mode` 设置回默认的 `classified`，核对三角色应用后生效；修改 common 基线则仍需受控重启。不会自动切换；默认 classified 基线不需要影子期即可生效。classified 下心跳和 Admin 计数只含 permanent + unknown，瞬时完整计数继续在指标与日志中保留。
+5. 需要临时观察或回退时，可在线设置 `readiness_audit_failure_mode=shadow` 或 `legacy`、`readiness_cache_enabled=false`，恢复任一失败即未就绪与逐次探测；clear 只回落 TOML 基线（默认 classified）。不可重试/未知失败修复后也需受控重启，不提供清零接口、不写试探审计。单独禁用 metrics 或过滤日志不影响门禁。
 
 ```promql
 # 当前进程的分类失败累计；包含随后回滚并重试成功的尝试，首次出现的 label 也可直接查看。
@@ -232,7 +232,7 @@ sum by (instance, result) (rate(auction_readiness_checks_total[5m]))
 histogram_quantile(0.95, sum by (instance, le) (rate(auction_readiness_check_duration_seconds_bucket[5m])))
 ```
 
-已有查询为审计影子比对复用，不双查数据库。新指标不改变事务重试、业务写入与结果未知的处置；在决策 32 的白名单基础上，依决策 71 加入 `53300`（连接数耗尽）、`57P01`（服务器关闭）、`57P02`（崩溃关闭）、`57P03`（尚未就绪），固定 kind 分别为 `connection_capacity`、`server_shutdown`、`server_crash`、`server_starting`。`57P05`、`25P03/25P04` 仍按未知粘滞阻断。依决策 72，默认 shadow 上线，只允许预期 transient 差异，经用户审阅后决定是否切换 classified。
+已有查询为审计影子比对复用，不双查数据库。新指标不改变事务重试、业务写入与结果未知的处置；在决策 32 的白名单基础上，依决策 71 加入 `53300`（连接数耗尽）、`57P01`（服务器关闭）、`57P02`（崩溃关闭）、`57P03`（尚未就绪），固定 kind 分别为 `connection_capacity`、`server_shutdown`、`server_crash`、`server_starting`。`57P05`、`25P03/25P04` 仍按未知粘滞阻断。依决策 72 与用户后续决定，当前默认基线为 classified；如显式改回 shadow 观察，只允许预期 transient 差异，经用户审阅后再切回 classified。
 
 ### Sent 发送基线影子观察
 
@@ -1069,7 +1069,7 @@ SQLx 借出并发与物理池容量不同；空闲池会话也消耗 PostgreSQL 
 
 1. 默认 profiled，服务超时保持关闭；先完成指标采集与存储，观察完整场次。
 2. W0.14 部署后按决策 72 观察 Final 与结算，差异仅在预期瞬时类别。
-3. 用户将三角色有效 readiness 均切到 classified，确认无到期回落到旧模式。
+3. 用户确认三角色有效 readiness 均为 classified（现为默认基线；如曾显式切到 shadow，须切回），并确认无到期回落到旧模式。
 4. 用户显式填写三个阈值后启用服务超时；候选为 acquire 2000ms、
    statement 5000ms、lock 1000ms。idle 默认 0，非零须另行决定。
 5. 经 W7.5 停机门禁重启，使全部池和长期会话一致应用设置。
