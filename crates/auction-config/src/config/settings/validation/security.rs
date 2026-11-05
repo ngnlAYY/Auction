@@ -16,6 +16,16 @@ pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), 
     if config.mutation_rate_limit == 0 || config.mutation_rate_limit > 10_000 {
         return Err(ConfigError::InvalidHttpSecurity("mutation_rate_limit 必须位于 1 至 10000"));
     }
+    if config.anonymous_read_rate_limit == 0 || config.anonymous_read_rate_limit > 10_000 {
+        return Err(ConfigError::InvalidHttpSecurity(
+            "anonymous_read_rate_limit 必须位于 1 至 10000",
+        ));
+    }
+    if config.anonymous_read_concurrency.is_some_and(|value| !(1..=256).contains(&value)) {
+        return Err(ConfigError::InvalidHttpSecurity(
+            "anonymous_read_concurrency 必须位于 1 至 256",
+        ));
+    }
     if !(1..=3600).contains(&config.rate_limit_window_seconds) {
         return Err(ConfigError::InvalidHttpSecurity(
             "rate_limit_window_seconds 必须位于 1 至 3600",
@@ -172,5 +182,25 @@ mod tests {
         }
         config.trusted_proxy_cidrs = vec!["127.0.0.1/32".to_owned(), "173.245.48.0/20".to_owned()];
         assert!(validate_http_security(&config).is_ok());
+    }
+
+    #[test]
+    fn anonymous_read_limits_are_bounded_and_optional() {
+        let mut config =
+            HttpSecurityConfig { allowed_origins_enabled: false, ..HttpSecurityConfig::default() };
+        assert!(validate_http_security(&config).is_ok());
+        config.anonymous_read_concurrency = Some(1);
+        assert!(validate_http_security(&config).is_ok());
+        config.anonymous_read_concurrency = Some(256);
+        assert!(validate_http_security(&config).is_ok());
+        for invalid in [0, 257] {
+            config.anonymous_read_concurrency = Some(invalid);
+            assert!(validate_http_security(&config).is_err());
+        }
+        config.anonymous_read_concurrency = None;
+        config.anonymous_read_rate_limit = 0;
+        assert!(validate_http_security(&config).is_err());
+        config.anonymous_read_rate_limit = 10_001;
+        assert!(validate_http_security(&config).is_err());
     }
 }

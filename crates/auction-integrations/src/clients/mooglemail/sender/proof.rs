@@ -79,6 +79,20 @@ impl MoogleMailSender {
             );
             self.remember_sent_baseline(cookie, world, next_baseline);
         }
+        // 只把已逐字段证明的本封邮件推进为下一轮前缀起点；它不是完整排除集。
+        if let Some(summary) =
+            candidates.summaries().iter().find(|summary| summary.external_mail_id == verified)
+        {
+            self.remember_sent_scan(
+                cookie,
+                world,
+                Some(auction_application::MailScanWatermark {
+                    mail_id: verified.clone(),
+                    observed_at: summary.sent_at,
+                }),
+                false,
+            );
+        }
         Ok(verified)
     }
 

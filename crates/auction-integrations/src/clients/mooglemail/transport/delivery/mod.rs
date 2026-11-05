@@ -26,6 +26,15 @@ impl MoogleMailDeliveryTransport {
         self
     }
 
+    /// 注入增量扫描的闭集观测；维护适配器共享同一发送器状态。
+    pub fn with_mail_scan_observer(
+        mut self,
+        observer: Arc<dyn auction_application::MailScanObserver>,
+    ) -> Self {
+        self.sender = self.sender.with_mail_scan_observer(observer);
+        self
+    }
+
     /// 配置所有 Send 操作的发送前后 Sent 核对边界。
     pub fn with_send_verification(
         mut self,

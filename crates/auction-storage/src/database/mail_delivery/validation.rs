@@ -67,6 +67,9 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
     }
     if !matches!(command.origin, MailDeliveryOrigin::OperationsAlert | MailDeliveryOrigin::LotWatch)
         && command.notification_body.is_some()
+        && !(command.origin == MailDeliveryOrigin::MailIntake
+            && command.template
+                == Some(auction_application::MailNotificationTemplate::AuctionSubmissionReceipt))
     {
         return Err(RepositoryError::Failed(
             "普通 MoogleMail delivery 不得携带通知正文".to_owned(),
@@ -144,6 +147,19 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                     {
                         return Err(RepositoryError::Failed(
                             "MoogleMail recovery 提醒通知引用无效".to_owned(),
+                        )
+                        .into());
+                    }
+                }
+                Some(auction_application::MailNotificationTemplate::AuctionSubmissionReceipt) => {
+                    if command.origin != MailDeliveryOrigin::MailIntake
+                        || command.operation != MailDeliveryOperation::Send
+                        || command.user_key_user_id.is_some()
+                        || command.result_code.as_deref() != Some("accepted")
+                        || !valid_notification_body(command.notification_body.as_deref())
+                    {
+                        return Err(RepositoryError::Failed(
+                            "MoogleMail 投稿回执载荷无效".to_owned(),
                         )
                         .into());
                     }
@@ -236,4 +252,71 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use super as parent;
+    use auction_application::MailNotificationTemplate;
+    use auction_domain::CommandId;
+    use uuid::Uuid;
+
+    fn receipt_command(
+        template: MailNotificationTemplate,
+        result_code: &str,
+        body: Option<&str>,
+    ) -> MailDeliveryCommand {
+        MailDeliveryCommand {
+            command_id: CommandId::from_uuid(Uuid::new_v4()),
+            request_hash: auction_application::RequestHash::new([7; 32]),
+            origin: MailDeliveryOrigin::MailIntake,
+            origin_id: "main:123:send".to_owned(),
+            operation: MailDeliveryOperation::Send,
+            world_id: "main".to_owned(),
+            external_mail_id: "123".to_owned(),
+            recipient: "Clo16".to_owned(),
+            template: Some(template),
+            result_code: Some(result_code.to_owned()),
+            user_key_user_id: None,
+            credits: 0,
+            cod: 0,
+            attachment_ids: Vec::new(),
+            notification_body: body.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn frozen_submission_receipt_body_is_accepted() {
+        let body = "Your auction submission has been received.\n\nSession: 42";
+        let command = receipt_command(
+            MailNotificationTemplate::AuctionSubmissionReceipt,
+            "accepted",
+            Some(body),
+        );
+        assert!(validate_command(&command).is_ok());
+    }
+
+    #[test]
+    fn submission_receipt_requires_accepted_code_and_valid_body() {
+        let command = receipt_command(
+            MailNotificationTemplate::AuctionSubmissionReceipt,
+            "registered",
+            Some("Receipt\n"),
+        );
+        assert!(validate_command(&command).is_err());
+        let command =
+            receipt_command(MailNotificationTemplate::AuctionSubmissionReceipt, "accepted", None);
+        assert!(validate_command(&command).is_err());
+    }
+
+    #[test]
+    fn other_intake_notices_still_reject_frozen_bodies() {
+        let command = receipt_command(
+            MailNotificationTemplate::AuctionEquipmentRejected,
+            "auction_equipment_rejected",
+            Some("Injected body\n"),
+        );
+        assert!(validate_command(&command).is_err());
+    }
 }

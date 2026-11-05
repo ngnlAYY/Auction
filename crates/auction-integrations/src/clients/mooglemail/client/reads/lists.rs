@@ -47,6 +47,18 @@ pub(crate) struct MoogleMailIncomingList {
     _bytes: OwnedSemaphorePermit,
 }
 
+/// 从持久水位继续的有界前缀；`anchor_found` 才表示“更新的邮件已全部枚举”。
+/// 本结果只用于缩小观察窗口，永远不是收取、已读或发送证明。
+pub(crate) struct MoogleMailIncomingPrefix {
+    pub(crate) summaries: Vec<MoogleMailSummary>,
+    pub(crate) anchor_found: bool,
+    pub(crate) newest: Option<auction_application::MailScanWatermark>,
+    /// 回退原因；调用方据此记录指标并完整扫描。
+    pub(crate) issue: Option<auction_application::MailScanReason>,
+    pub(crate) pages_scanned: usize,
+    _bytes: OwnedSemaphorePermit,
+}
+
 impl MoogleMailClient {
     /// 同一轮次完整 Sent 摘要只解析一次；履约逐 MID 读取不重复扫描全网列表。
     pub(crate) async fn observe_sent_list(
@@ -307,6 +319,144 @@ impl MoogleMailClient {
             .await?;
         self.check_read_round(cookie, round).await?;
         Ok(Arc::clone(list))
+    }
+
+    /// 从已知 MID 锚点向下读取，遇到锚点行即停；缺锚点、重复或超限由状态机回退。
+    ///
+    /// 与完整列表共用成员关系读锁、分段释放、字节预算与读取屏障；每页使用独立去重集，
+    /// 跨页重复交给前缀状态机判定，避免 parser 静默跳行被误认为连续前缀。
+    pub(crate) async fn observe_incoming_prefix(
+        &self,
+        cookie: &MoogleMailCookie,
+        round: &MoogleMailReadRound,
+        maximum_pages: usize,
+        read_mail: bool,
+        anchor: &auction_application::MailScanAnchor,
+    ) -> Result<MoogleMailIncomingPrefix, MoogleMailError> {
+        let world = round.key.world;
+        self.check_read_round(cookie, round).await?;
+        validate_pages(maximum_pages, world)?;
+        if !anchor.validate() {
+            return Err(MoogleMailError::new(
+                MoogleMailOperation::Inbox,
+                world,
+                MoogleMailErrorCategory::Configuration,
+                false,
+            ));
+        }
+        let operation =
+            if read_mail { MoogleMailOperation::ReadMail } else { MoogleMailOperation::Inbox };
+        let membership = round.scope.membership_revision.load(Ordering::Acquire);
+        let mut scan = auction_application::MailPrefixScan::new(anchor.clone());
+        let mut summaries = Vec::new();
+        let mut issue = None;
+        let mut pages_scanned = 0;
+        let mut list_complete = false;
+        let mut anchor_found = false;
+        let mut bytes = self.retain_list_bytes(0, world)?;
+        let mut plan = SegmentPlan::new(maximum_pages, INCOMING_SCAN_SEGMENT_PAGES);
+        'segments: while let Some(pages) = plan.next_segment() {
+            let lock_wait = MailLockWaitGuard::start(
+                Arc::clone(&self.external_metrics),
+                world,
+                operation,
+                auction_application::MailLock::IncomingRead,
+            );
+            let segment = lock_incoming_segment(
+                &round.scope.incoming,
+                &round.scope.membership_revision,
+                membership,
+                world,
+            )
+            .await?;
+            lock_wait.acquired();
+            for page in pages {
+                let target = if read_mail {
+                    self.read_mail_page(world, page)?
+                } else {
+                    self.inbox_page(world, page)?
+                };
+                let document = self.get_in_round(&target, cookie, round).await?;
+                // 每页独立去重；跨页重复由 MailPrefixScan 判定为 PageDiscontinuity。
+                let mut page_seen = HashSet::new();
+                let parsed = if read_mail {
+                    MoogleMailParser.scan_read_mail_page(&document, world, page, &mut page_seen)
+                } else {
+                    MoogleMailParser.scan_inbox_page(&document, world, page, &mut page_seen)
+                };
+                let parsed = self.diagnose_parse(&target, &document, parsed).await?;
+                let previous_capacity = summaries.capacity();
+                let payload_bytes = parsed
+                    .summaries
+                    .iter()
+                    .map(|summary| {
+                        summary.external_mail_id.capacity()
+                            + summary.sender.capacity()
+                            + summary.subject.capacity()
+                    })
+                    .sum::<usize>();
+                let mut stop = false;
+                for summary in &parsed.summaries {
+                    match scan.observe(&summary.external_mail_id, summary.received_at) {
+                        Ok(auction_application::MailPrefixPage::Continue) => {}
+                        Ok(auction_application::MailPrefixPage::Done) => {
+                            anchor_found = true;
+                            stop = true;
+                        }
+                        Err(reason) => {
+                            issue = Some(reason);
+                            stop = true;
+                            break;
+                        }
+                    }
+                }
+                if issue.is_none() {
+                    summaries.extend(parsed.summaries);
+                }
+                bytes.merge(self.retain_list_bytes(
+                    payload_bytes
+                        + (summaries.capacity() - previous_capacity)
+                            * size_of::<MoogleMailSummary>(),
+                    world,
+                )?);
+                pages_scanned += 1;
+                if stop {
+                    break 'segments;
+                }
+                if !parsed.has_next_page {
+                    list_complete = true;
+                    break 'segments;
+                }
+            }
+            drop(segment);
+        }
+        self.check_read_round(cookie, round).await?;
+        let page_limit = !anchor_found && !list_complete && issue.is_none();
+        let outcome = if let Some(reason) = issue {
+            auction_application::MailPrefixOutcome::Fallback(reason)
+        } else {
+            scan.finish(page_limit, list_complete)
+        };
+        let (anchor_found, newest, issue) = match outcome {
+            auction_application::MailPrefixOutcome::Complete { newest } => (true, newest, None),
+            auction_application::MailPrefixOutcome::Fallback(reason) => {
+                tracing::debug!(
+                    world = world.as_str(),
+                    reason = reason.label(),
+                    "MoogleMail 前缀扫描回退完整扫描"
+                );
+                summaries.clear();
+                (false, None, Some(reason))
+            }
+        };
+        Ok(MoogleMailIncomingPrefix {
+            summaries,
+            anchor_found,
+            newest,
+            issue,
+            pages_scanned,
+            _bytes: bytes,
+        })
     }
 
     pub(super) fn retain_list_bytes(

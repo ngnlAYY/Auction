@@ -6,6 +6,7 @@ mod database;
 pub use database::*;
 mod external_client;
 mod http;
+mod mail_scan;
 mod migration;
 mod notification;
 mod pool;

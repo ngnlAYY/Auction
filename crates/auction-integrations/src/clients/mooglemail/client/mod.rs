@@ -27,8 +27,8 @@ mod security;
 
 use crate::clients::gate::PriorityGate;
 pub(crate) use reads::{
-    MoogleMailReadRound, MoogleMailSentList, MoogleMailSentPrefix, MoogleMailSentScope,
-    SentBoundary, SentBoundaryScan,
+    MoogleMailIncomingList, MoogleMailIncomingPrefix, MoogleMailReadRound, MoogleMailSentList,
+    MoogleMailSentPrefix, MoogleMailSentScope, SentBoundary, SentBoundaryScan,
 };
 use security::build_mooglemail_http_client;
 pub(crate) use security::is_hentaiverse_login_response;

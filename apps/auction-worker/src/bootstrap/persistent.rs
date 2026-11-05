@@ -119,6 +119,7 @@ pub(super) async fn run_worker(
         forum_profile_reader,
         Arc::new(mail_progress.clone()),
         metrics.sent_baseline(),
+        metrics.mail_scan(),
         switches.clone(),
         metrics.external_metrics(),
     )

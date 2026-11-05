@@ -198,7 +198,8 @@ pub trait MoogleMailboxMaintenance: Send + Sync {
         world_id: &'a str,
     ) -> MailboxFuture<'a, Vec<MoogleMailboxSentEntry>>;
 
-    /// 只观察 Read Mail 列表并返回数量，不把历史已读邮件重新投进业务 intake。
+    /// 只观察 Read Mail 列表并返回本轮扫描行数（增量轮只含水位之后的新增），
+    /// 不把历史已读邮件重新投进业务 intake。
     fn read_mail_observed<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, usize>;
 
     fn sent_state<'a>(

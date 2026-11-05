@@ -70,6 +70,10 @@ allowed_origins = ["http://127.0.0.1:8090"]
 login_rate_limit = 10
 # 可选：状态变更请求的最大次数；realtime 连接尝试使用相同上限但独立计数，默认 60。
 mutation_rate_limit = 60
+# 可选：匿名公开读取每来源每窗口最大次数，默认 300；IPv6 按 /64 聚合，与登录/mutation 独立，出价不受影响。
+anonymous_read_rate_limit = 300
+# 可选：匿名读取进程内并发上限，默认服务池扣除 1 个长期连接后的一半（至少 1）；写/出价不占额度。
+anonymous_read_concurrency = 7
 # 可选：限流窗口秒数，默认 60。
 rate_limit_window_seconds = 60
 # 可选：是否给浏览器 Cookie 设置 Secure；生产环境应为 true。
