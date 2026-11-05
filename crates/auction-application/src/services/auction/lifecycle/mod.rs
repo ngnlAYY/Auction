@@ -71,8 +71,11 @@ where
             );
         }
         let policy = self.policy;
+        // 生命周期与同场次竞价共用一把按场次的门：迁移写 `auctions`/`lots`，与 Final 出价的
+        // 重叠会让 SSI 以 40001 互相中止。排队在 `BEGIN` 之前完成，隔离级别与锁序不变。
+        let transaction_policy = TransactionPolicy::serializable();
         self.repository
-            .run(TransactionPolicy::serializable(), |transaction| {
+            .run_in_auction_queue(command.auction_id, transaction_policy, |transaction| {
                 let command = command.clone();
                 let successor_policy = self.successor_policy.clone();
                 let schedule_calendar = self.schedule_calendar.clone();

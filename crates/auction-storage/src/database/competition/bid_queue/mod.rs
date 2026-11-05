@@ -1,11 +1,16 @@
-//! 同一拍卖的出价队列：在进入 Serializable 事务**之前**按场次互斥。
+//! 同一拍卖的写队列：在进入 Serializable 事务**之前**按场次互斥。
+//!
+//! 门槛覆盖**所有会写 `lots`/`auctions` 的场次级命令**，不只是竞价：竞价（普通出价、创建/降低
+//! 代理、慢速代理执行）、生命周期迁移（预览/开拍/取消/最终阶段/提前结算）与 Admin 排期、
+//! Admin draft lot 修改共用同一把按场次的门。同一场次因此只有一条可写事务在 SSI 冲突窗口内，
+//! 竞价与生命周期/Admin 之间不再以 40001 互相中止。
 //!
 //! 不变量 2 保持原样：事务仍是 `SERIALIZABLE`，`FOR SHARE`/`FOR UPDATE` 行锁、命令账本与事实/
-//! 事件/审计的同事务写入顺序都不变。排队只改变并发形状——同一场次不会有两个可写竞价命令同时
-//! 处在 SSI 的冲突窗口内，因此 `UPDATE lots` 与追加索引页的页级谓词锁不再互相中止。
+//! 事件/审计的同事务写入顺序都不变。排队只改变并发形状——同一场次不会有两个可写命令同时处在
+//! SSI 的冲突窗口内，因此 `UPDATE lots` 与追加索引页的页级谓词锁不再互相中止。
 //!
 //! 两层排队：
-//! 1. 进程内按拍卖 ID 的异步互斥量。同一实例的重叠出价在这里等待，等待期间**不占用任何数据库
+//! 1. 进程内按拍卖 ID 的异步互斥量。同一实例的重叠命令在这里等待，等待期间**不占用任何数据库
 //!    连接**，也不建立事务。
 //! 2. PostgreSQL 会话级 advisory lock，保证同一场次在多个 Public 实例之间同样互斥。等待方每次
 //!    尝试临时取一条队列专用连接，`pg_try_advisory_lock` 失败立即归还连接并退避，因此等待期间
@@ -43,6 +48,9 @@ pub(crate) use lease::AuctionBidQueueLease;
 
 /// 排队总预算：进程内等待与跨实例等待共用一个截止时间。
 const BID_QUEUE_WAIT_BUDGET: Duration = Duration::from_secs(5);
+/// 跨实例 advisory lock 的文本键前缀。**不要改名**：文本参与 `hashtextextended`，改名会让新旧
+/// 进程（滚动重启期间的旧 Public 与新生生命周期命令）使用不同的锁键，跨实例互斥随之失效。
+const ADVISORY_LOCK_PREFIX: &str = "auction_bid_queue";
 /// 跨实例退避：先 2ms，逐次翻倍到 25ms；每次尝试之间释放连接。
 const CROSS_INSTANCE_MIN_BACKOFF: Duration = Duration::from_millis(2);
 const CROSS_INSTANCE_MAX_BACKOFF: Duration = Duration::from_millis(25);
@@ -56,7 +64,8 @@ pub enum BidQueueMode {
     Direct,
 }
 
-/// 一个进程内的竞价队列状态；由 `PostgresStore` 的共享 `Arc` 持有。
+/// 一个进程内的场次写队列状态；由 `PostgresStore` 的共享 `Arc` 持有，覆盖竞价、生命周期与
+/// Admin 场次写入的同一组按场次互斥量。
 #[derive(Debug)]
 pub(crate) struct AuctionBidQueue {
     mode: BidQueueMode,
@@ -90,7 +99,7 @@ impl AuctionBidQueue {
         self.wait_budget
     }
 
-    /// 取得同一场次的排队凭证；凭证存活期间该场次不会并发进入可写竞价事务。
+    /// 取得同一场次的排队凭证；凭证存活期间该场次不会并发进入可写事务。
     pub(crate) async fn enqueue(
         self: &Arc<Self>,
         pool: &TrackedPool<Postgres>,
@@ -99,11 +108,26 @@ impl AuctionBidQueue {
         if self.mode == BidQueueMode::Direct {
             return Ok(AuctionBidQueueLease::unmanaged());
         }
-        let deadline = TokioInstant::now() + self.wait_budget;
         let Some(auction_id) = self.auction_for_lot(pool, lot_id).await? else {
             // lot 不存在：不排队，由事务按既有 NotFound 语义失败，不猜测场次。
             return Ok(AuctionBidQueueLease::unmanaged());
         };
+        self.enqueue_auction(pool, auction_id).await
+    }
+
+    /// 已知场次 ID 时直接排队；生命周期与 Admin 排期命令走这里，避免额外的 lot 解析。
+    ///
+    /// 竞价命令必须与这些命令落到**同一个**键上（进程内互斥量与跨实例 advisory 键都按场次），
+    /// 否则两条可写事务仍会同时处在 SSI 冲突窗口内。
+    pub(crate) async fn enqueue_auction(
+        self: &Arc<Self>,
+        pool: &TrackedPool<Postgres>,
+        auction_id: Uuid,
+    ) -> Result<AuctionBidQueueLease, CompetitionTransactionError> {
+        if self.mode == BidQueueMode::Direct {
+            return Ok(AuctionBidQueueLease::unmanaged());
+        }
+        let deadline = TokioInstant::now() + self.wait_budget;
 
         let gate = self.gate(auction_id);
         let started = Instant::now();
@@ -144,7 +168,7 @@ impl AuctionBidQueue {
         auction_id: Uuid,
         deadline: TokioInstant,
     ) -> Result<(TrackedConnection<Postgres>, i64), CompetitionTransactionError> {
-        let key_text = format!("auction_bid_queue:{auction_id}");
+        let key_text = format!("{ADVISORY_LOCK_PREFIX}:{auction_id}");
         let started = Instant::now();
         let mut backoff = CROSS_INSTANCE_MIN_BACKOFF;
         loop {

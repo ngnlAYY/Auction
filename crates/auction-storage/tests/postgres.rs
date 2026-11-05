@@ -3,6 +3,8 @@
 
 mod support;
 
+#[path = "postgres/auction_write_queue.rs"]
+mod auction_write_queue;
 #[path = "postgres/bid_cross_lot.rs"]
 mod bid_cross_lot;
 #[path = "postgres/lot_watch.rs"]

@@ -31,8 +31,11 @@ where
         if !command.validate() {
             return Err(DomainError::InvalidSchedule("后台拍卖计划修改命令字段无效").into());
         }
+        // 排期修改写 `auctions` 的预览/开拍/结束时间，与同场次生命周期迁移及竞价共用一把
+        // 按场次的门；排队在 `BEGIN` 之前完成，不改隔离级别与已有锁序。
+        let transaction_policy = TransactionPolicy::serializable();
         self.repository
-            .run(TransactionPolicy::serializable(), |transaction| {
+            .run_in_auction_queue(command.auction_id, transaction_policy, |transaction| {
                 let command = command.clone();
                 Box::pin(async move {
                     if let Some(stored) = transaction.find_command(command.command_id).await? {
