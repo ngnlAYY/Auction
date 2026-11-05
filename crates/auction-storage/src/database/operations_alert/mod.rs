@@ -190,6 +190,8 @@ use super::TrackedPool;
 mod claims;
 mod common;
 #[cfg(feature = "postgres")]
+mod console;
+#[cfg(feature = "postgres")]
 mod delivery;
 #[cfg(feature = "postgres")]
 mod health;

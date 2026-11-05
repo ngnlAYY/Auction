@@ -55,6 +55,21 @@ impl OperationsAlertSource {
     pub fn parse(value: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|source| source.as_str() == value)
     }
+
+    /// 处置手册锚点：W5.7 在 `ops/README.md` 为每个来源固定 `<a id>`，告警台直接跳转。
+    pub const fn runbook_anchor(self) -> &'static str {
+        match self {
+            Self::Process => "alert-runbook-process",
+            Self::Delivery => "alert-runbook-delivery",
+            Self::Fulfillment => "alert-runbook-fulfillment",
+            Self::Recovery => "alert-runbook-recovery",
+            Self::Mail => "alert-runbook-mail",
+            Self::Credential => "alert-runbook-credential",
+            Self::Lifecycle => "alert-runbook-lifecycle",
+            Self::Forum => "alert-runbook-forum",
+            Self::Notification => "alert-runbook-notification",
+        }
+    }
 }
 
 impl fmt::Display for OperationsAlertSource {
@@ -134,6 +149,11 @@ impl OperationsAlertKind {
         Self::NotificationPostageInsufficient,
         Self::AccountBusy,
     ];
+
+    /// 从持久化名称解析全部已登记种类；未知名称返回 `None`，调用方不得回退到默认种类。
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.as_str() == value)
+    }
 
     /// 返回数据库和通知摘要使用的稳定名称。
     pub const fn as_str(self) -> &'static str {

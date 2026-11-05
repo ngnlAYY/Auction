@@ -26,8 +26,18 @@ pub(crate) fn AdminAuthenticatedShell(
     let mut logout_error = use_signal(|| None::<String>);
     let current_route = use_route::<Route>();
     let settlement_route = matches!(&current_route, Route::Settlement {});
+    // 侧栏待办数随页面切换刷新；会话内的命令完成后下一次路由变化即可看到最新值。
+    let mut pending_refresh = use_signal(|| 0_u64);
+    let pending_counts = use_resource(move || {
+        let _ = pending_refresh();
+        crate::api::fetch_admin_pending_counts()
+    });
+    use_context_provider(|| pending_counts);
     // 浏览器前进/后退和页面内跳转也收起手机导航；页面焦点仍由路由 hook 接管。
-    use_effect(use_reactive((&current_route,), move |_| navigation_open.set(false)));
+    use_effect(use_reactive((&current_route,), move |_| {
+        navigation_open.set(false);
+        pending_refresh.set(pending_refresh().saturating_add(1));
+    }));
     use_route_focus(format!("{current_route:?}"), "admin-content");
     rsx! {
         div {

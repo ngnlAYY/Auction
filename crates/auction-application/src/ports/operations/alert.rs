@@ -21,6 +21,9 @@ pub const MAX_OPERATIONS_ALERT_BATCH_ITEMS: usize = 64;
 /// 告警批次正文的最大字节数。
 pub const MAX_OPERATIONS_ALERT_BODY_BYTES: usize = 16 << 10;
 
+mod console {
+    include!("alert/console.rs");
+}
 #[path = "alert/delivery.rs"]
 mod delivery;
 #[path = "alert/digest.rs"]
@@ -34,6 +37,14 @@ mod model;
 #[path = "alert/signals.rs"]
 mod signals;
 
+pub use console::{
+    AdminPendingCounts, MAX_OPERATIONS_ALERT_CONSOLE_OFFSET,
+    MAX_OPERATIONS_ALERT_CONSOLE_PAGE_SIZE, MAX_OPERATIONS_ALERT_SILENCE_SECONDS,
+    MIN_OPERATIONS_ALERT_SILENCE_SECONDS, OperationsAlertAcknowledgeCommand,
+    OperationsAlertCommandResult, OperationsAlertConsole, OperationsAlertConsoleEntry,
+    OperationsAlertConsolePage, OperationsAlertConsoleQuery, OperationsAlertFilter,
+    OperationsAlertSilenceCommand, parse_alert_id,
+};
 pub use delivery::{
     OperationsAlertBatchClaim, OperationsAlertBatchItem, OperationsAlertClaimRequest,
     OperationsAlertDeliveryStatus, OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch,

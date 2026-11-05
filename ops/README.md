@@ -529,9 +529,32 @@ Final 回帖导入已由 W0.5 接入；延迟上界、估计宽度和覆盖率�
 
 启用 `[worker.operations_alert]`（需要 MoogleMail 已启用且收件人在同一世界）后，Worker 定期扫描并通过 MoogleMail 发送告警邮件。扫描覆盖九个来源：`process`（进程缺失/降级与审计失败）、`delivery`（投递积压、人工对账、退信与已领取但未推进的队列延迟）、`fulfillment`（履约积压与失败）、`recovery`（付款逾期、待重挂、余额与证据、账号持续忙）、`mail`（收件轮询停滞）、`credential`（凭据失效）、`lifecycle`（场次未进入 Final、慢速代理到期未执行）、`forum`（主题发布与私信失败）、`notification`（非结算通知失败与邮资不足）。
 
-同一信号有冷却时间（默认 30 分钟），通知按窗口合并。信号按决策 66 分级：需要立即处理的种类沿用冷却后重复通知；付款逾期、待重列、队列延迟、论坛主题发布失败与非结算通知失败属于自动重试/自动推进的等待类，重复通知不短于每日摘要节奏（每日摘要聚合与告警台属于 W5.8）。W5.5 新增来源的观察窗口是代码常量而不是运行配置：收件轮询停滞与生命周期宽限各 15 分钟、队列延迟 10 分钟、账号持续忙 15 分钟。
+同一信号有冷却时间（默认 30 分钟），通知按窗口合并。信号按决策 66 分级：需要立即处理的种类沿用冷却后重复通知；付款逾期、待重列、队列延迟、论坛主题发布失败与非结算通知失败属于自动重试/自动推进的等待类，24 小时内最多合并为一封每日摘要，已恢复的摘要类信号会以“已恢复：”附在下一封摘要中，不单独发送恢复通知。W5.5 新增来源的观察窗口是代码常量而不是运行配置：收件轮询停滞与生命周期宽限各 15 分钟、队列延迟 10 分钟、账号持续忙 15 分钟。
+
+告警台（W5.8）始终可用：即使未启用 `[worker.operations_alert]`，Admin 的“告警台”也是活动与历史告警的唯一入口。每条告警显示来源、范围、首次/最近时间、计数与处置手册锚点；确认只记录操作者已处理，静默仅在到期前抑制重复通知，二者都不改变信号、阈值或恢复判定。侧栏的待办数来自投递人工对账、待确认恢复与活动告警，仪表盘默认每 30 秒自动刷新。
 
 告警种类、来源与范围是迁移 005、015、020、085 的数据库 CHECK 闭集，新增来源必须随迁移扩展并按 W7.8a 登记等级。每个来源的处置步骤见[告警处置手册](#告警处置手册)。
+
+### 告警台
+
+Admin 的“告警台”列出全部活动与历史告警。筛选支持 `active`（默认）、`resolved` 与 `all`；表头锚点对应下方[告警处置手册](#告警处置手册)的固定 `<a id="alert-runbook-*">`：
+
+| 来源 | 锚点 | 主要处置入口 |
+| --- | --- | --- |
+| process | `alert-runbook-process` | 三个 systemd 单元与 readiness |
+| delivery | `alert-runbook-delivery` | Admin 投递队列与对账 |
+| fulfillment | `alert-runbook-fulfillment` | 结算报表与义务状态 |
+| recovery | `alert-runbook-recovery` | 恢复报表、余额与证据 |
+| mail | `alert-runbook-mail` | 收件轮询水位与凭据 |
+| credential | `alert-runbook-credential` | Cookie 池与凭据导入 |
+| lifecycle | `alert-runbook-lifecycle` | 场次/代理推进 |
+| forum | `alert-runbook-forum` | 论坛主题与私信恢复 |
+| notification | `alert-runbook-notification` | 非结算通知与邮资 |
+
+- 确认（acknowledge）只追加操作者事实并显示确认人与时间；不改写 signal 的 kind/scope/count/age/active。
+- 静默（silence）可选 1/8/24/72 小时，只把该 signal 的重复通知时间推到到期时间。到期后仍活动的 signal 会按原阈值继续通知；静默不会关闭告警，也不会延长任何截止时间。
+- 告警在恢复后再次出现属于新的活动周期，上一周期的确认与静默不会延续；历史仍完整保留，确认/静默记录只追加。
+- 告警台只显示安全分类（kind/source/scope/计数），不含收件人、凭据或外部响应正文。
 
 ### Admin 仪表盘
 
@@ -758,6 +781,8 @@ D1 仍待线上分类证据确认。部署后由用户执行只读核对，数�
 处置时按对应小节逐项核对。线上一旦启用 `[worker.operations_alert]`，同一内容也会出现在
 Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与后续 W5.8 告警台可见，不会主动发送通知。
 
+<a id="alert-runbook-process"></a>
+
 ### process：进程缺失或降级
 
 - 现象：`service_missing` / `service_degraded` 对应 public、admin 或 worker 角色，或 `audit_failure` 累计增加。
@@ -766,6 +791,8 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 - 数据库不可用表现为三个角色同时降级或 readiness 报连接失败：先确认 PostgreSQL 进程、`statement_timeout` 与连接预算（见[数据库连接预算与启用顺序](#数据库连接预算与启用顺序)），再决定是否整体重启。
 - 恢复判定：三个角色连续两轮扫描都为 `ready`，且 `audit_failure` 不再增长。
 
+<a id="alert-runbook-delivery"></a>
+
 ### delivery：投递积压、人工对账与队列延迟
 
 - 现象：`delivery_pending`（数量或最老年龄超阈值）、`delivery_manual_reconcile`、`delivery_returned_mail`、`queue_latency`（已领取但没有推进）。
@@ -773,11 +800,15 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 - `queue_latency` 说明 Worker 领取后没有推进：检查 Worker 是否仍在运行、是否被账号忙阻塞、`[worker.delivery] request_timeout_seconds` 是否长于停机排空预算。
 - 恢复判定：积压数量与最老年龄回到阈值以下，`queue_latency` 的已领取行全部进入终态。
 
+<a id="alert-runbook-fulfillment"></a>
+
 ### fulfillment：结算履约积压与失败
 
 - 现象：`fulfillment_backlog`、`fulfillment_failed`、`fulfillment_manual_reconcile`。
 - 立即处置：在 Admin 结算报表查看义务状态；失败项核对 `last_error_code`，人工对账项与投递对账同源。
 - 恢复判定：义务进入 `satisfied` 或按[恢复规则](../docs/guide/settlement.md#4-恢复付款超时与拒收)进入人工决定，积压年龄回落。
+
+<a id="alert-runbook-recovery"></a>
 
 ### recovery：付款逾期、重挂与账号忙
 
@@ -786,12 +817,16 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 - 余额 `low` 与 evidence `stale` 分别对应资金账户与游戏页面读取，先补足 Credits 或恢复页面读取，再确认积压。
 - 恢复判定：两个世界的余额与 evidence 状态回到 `ok`，逾期与重挂计数归零。
 
+<a id="alert-runbook-mail"></a>
+
 ### mail：收件轮询停滞
 
 - 现象：`mail_poll_stalled`，正文给出停滞秒数与连续失败次数。
 - 立即处置：核对 `mail_poll_state.last_poll_at`、`consecutive_failures` 与 `paused`；若刚在 Admin 暂停收件，该邮箱不计为停滞。
 - Cookie 失效（登录页回到未登录、Inbox 无 Mail 列表）：按 `credential` 小节重新录入凭据。
 - 恢复判定：一次成功轮询后 `last_poll_at` 前进、`consecutive_failures` 归零。
+
+<a id="alert-runbook-credential"></a>
 
 ### credential：Cookie 与外部凭据失效
 
@@ -800,6 +835,8 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 - 常见原因：Cookie 过期、账号被封或被踢下线、维护窗口内重新登录。若疑似账号被盗，按[游戏页面结构变化与账号风险](#游戏页面结构变化与账号风险)处理。
 - 恢复判定：该 kind 的当前行不再为 `invalid`，且收件轮询与论坛写入恢复正常。
 
+<a id="alert-runbook-lifecycle"></a>
+
 ### lifecycle：生命周期与慢速代理逾期
 
 - 现象：`auction_phase_overdue`（场次结束时间已过仍在 live）、`proxy_expiry_overdue`（慢速代理到期未执行）。
@@ -807,12 +844,16 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 - Final 期间 Worker、Public 或数据库不可用只告警，不延长 lot 截止时间。
 - 恢复判定：场次进入 Final/结算、到期代理已完成，计数与最老年龄归零。
 
+<a id="alert-runbook-forum"></a>
+
 ### forum：论坛发布与私信失败
 
 - 现象：`forum_sync_failed`（每日摘要类）、`forum_message_failed`。
 - 立即处置：`auction-cli forum recovery` 查看写入未知或失败的主题；`auction-cli pm list` / `pm reconcile` 处理私信。私信进入人工对账说明可能已经发出，不能仅凭页面缺失判定未发送。
 - HV 页面结构变化（表单字段、固定楼层标记缺失）会在这里集中出现，按[游戏页面结构变化与账号风险](#游戏页面结构变化与账号风险)处理。
 - 恢复判定：主题 `published`、私信进入 `succeeded` 或完成人工对账。
+
+<a id="alert-runbook-notification"></a>
 
 ### notification：非结算通知与邮资不足
 

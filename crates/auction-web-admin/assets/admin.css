@@ -3768,3 +3768,83 @@
 .admin-support-section {
   margin-block-start: var(--space-4);
 }
+
+/* W5.8 告警台与侧栏待办计数 */
+.admin-shell__nav-count {
+  margin-inline-start: 0.35rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--admin-warn, #b45309);
+}
+
+.admin-alert-console-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-alert-console__hint {
+  max-width: 60rem;
+  color: var(--admin-text-muted, #52606d);
+}
+
+.admin-alert-console__filters {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.admin-alert-console__table td {
+  vertical-align: top;
+}
+
+.admin-alert-console__kind {
+  font-family: var(--admin-font-mono, ui-monospace, monospace);
+  font-weight: 600;
+}
+
+.admin-alert-console__scope,
+.admin-alert-console__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-alert-console__anchor {
+  font-family: var(--admin-font-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+  word-break: break-all;
+}
+
+.admin-alert-console__action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.admin-alert-console__ack,
+.admin-alert-console__silence {
+  margin-top: 0.35rem;
+  font-size: 0.85em;
+}
+
+.admin-alert-console__reason {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.admin-alert-console__reason input {
+  flex: 1;
+  max-width: 32rem;
+}
+
+.admin-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.admin-pagination__summary {
+  font-variant-numeric: tabular-nums;
+}

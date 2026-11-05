@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod alerts;
 mod auction;
 mod audit;
 mod commands;
@@ -20,6 +21,7 @@ mod settlement_catalog;
 mod users;
 mod worlds;
 
+pub use alerts::*;
 pub use auction::*;
 pub use audit::*;
 pub use commands::*;

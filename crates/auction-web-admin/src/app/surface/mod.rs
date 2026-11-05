@@ -6,6 +6,7 @@
 //! `default_locale`。受支持语言与公开端一致，但译文资源彼此隔离。
 //! 本 crate 不得导入存储、配置或凭据访问路径。
 
+mod alerts;
 #[path = "../auction/auctions.rs"]
 mod auctions;
 #[path = "../operations/audit.rs"]

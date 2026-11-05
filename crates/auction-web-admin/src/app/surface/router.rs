@@ -3,8 +3,8 @@
 
 use super::auth::AdminShell;
 use super::{
-    auctions, audit, config, credentials, dashboard, deliveries, lots, mail, realtime, renames,
-    rules, settlement, status, support, users,
+    alerts, auctions, audit, config, credentials, dashboard, deliveries, lots, mail, realtime,
+    renames, rules, settlement, status, support, users,
 };
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
@@ -139,6 +139,10 @@ pub(super) enum Route {
         #[route("/rules")]
         Rules {},
 
+        /// W5.8 告警台：活动/历史告警、确认、静默与处置手册锚点。
+        #[route("/alerts")]
+        Alerts {},
+
         #[route("/audit")]
         Audit {},
 
@@ -168,6 +172,11 @@ fn DashboardAlias() -> Element {
 fn Login() -> Element {
     // 未认证时由 AdminShell 显示登录表单；已认证后访问旧登录路径回到总览。
     dashboard::page()
+}
+
+#[component]
+fn Alerts() -> Element {
+    alerts::page()
 }
 
 #[component]

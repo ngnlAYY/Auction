@@ -47,6 +47,16 @@ pub(crate) async fn observe_postgres(
                     ),
                     count_value = EXCLUDED.count_value,
                     age_seconds = EXCLUDED.age_seconds,
+                    -- 告警台只把确认/静默绑定到当前活动周期：已恢复后再次出现属于新事件，
+                    -- 不能让上一周期的操作者上下文继续生效（历史仍保留在追加事实表）。
+                    acknowledged_at = CASE WHEN operations_alert_signals.active
+                        THEN operations_alert_signals.acknowledged_at END,
+                    acknowledged_by = CASE WHEN operations_alert_signals.active
+                        THEN operations_alert_signals.acknowledged_by END,
+                    silenced_until = CASE WHEN operations_alert_signals.active
+                        THEN operations_alert_signals.silenced_until END,
+                    resolution_notified_at = CASE WHEN operations_alert_signals.active
+                        THEN operations_alert_signals.resolution_notified_at END,
                     state_version = operations_alert_signals.state_version + 1
                  WHERE operations_alert_signals.kind = EXCLUDED.kind
                    AND operations_alert_signals.scope = EXCLUDED.scope

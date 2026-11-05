@@ -2,6 +2,7 @@
 //! 浏览器只接收后端安全投影；改变状态的人工动作携带按输入复用的 `command_id` 与版本
 //! fence，最终校验、幂等与审计归服务端。wire DTO 统一由 `auction-contracts` 拥有。
 
+mod alerts;
 #[path = "auction/auctions.rs"]
 mod auctions;
 #[path = "operations/audit.rs"]
@@ -49,6 +50,10 @@ mod users;
 #[path = "operations/worlds.rs"]
 mod worlds;
 
+pub(crate) use alerts::{
+    AdminAlert, AdminAlertPage, AdminPendingCounts, acknowledge_admin_alert, fetch_admin_alerts,
+    fetch_admin_pending_counts, silence_admin_alert,
+};
 pub(crate) use auctions::{
     AdminAuction, AdminAuctionCapabilities, AdminAuctionPage, create_admin_auction,
     fetch_admin_auctions, update_admin_auction_schedule,

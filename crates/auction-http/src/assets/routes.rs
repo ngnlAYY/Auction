@@ -21,6 +21,7 @@ const PUBLIC_EXACT_ROUTES: &[&str] = &[
 
 const ADMIN_EXACT_ROUTES: &[&str] = &[
     "/",
+    "/alerts",
     "/audit",
     "/auction",
     "/auctions",
