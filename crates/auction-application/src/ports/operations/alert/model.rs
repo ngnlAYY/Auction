@@ -1,5 +1,7 @@
 //! operations alert 的来源观察、健康快照和策略模型。
 
+use std::collections::HashSet;
+
 use super::digest::valid_age_threshold;
 use super::signals::{OperationsAlertKind, OperationsAlertSignal, OperationsAlertSource};
 use super::*;
@@ -52,6 +54,12 @@ impl OperationsAlertSourceObservation {
             .iter()
             .any(|signal| signal.validate().is_err() || signal.source != self.source)
         {
+            return Err(OperationsAlertError::Invalid);
+        }
+        // 同一轮观察内按 fingerprint 去重：一个信号只能对应一条持久化水位与一次通知，
+        // 重复项必须在进入存储前被拒绝，而不是依赖 upsert 顺序。
+        let mut fingerprints = HashSet::with_capacity(self.signals.len());
+        if self.signals.iter().any(|signal| !fingerprints.insert(signal.fingerprint)) {
             return Err(OperationsAlertError::Invalid);
         }
         Ok(())

@@ -2,7 +2,7 @@
 
 [文档导航](../README.md) · [迁移](../../migrations/postgres/README.md) · [auction-storage](../../crates/auction-storage/README.md) · [保留政策](../../ops/deploy/retention-policy.v1.json)
 
-唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000082`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
+唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000083`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
 
 ## schema 身份与版本
 
@@ -129,7 +129,8 @@
 | --- | --- |
 | `inbound_mail` | 每封已处理入站邮件的种类、内容摘要、决定与安全元数据（邮箱 + 邮件 ID 唯一） |
 | `mail_commands`、`mail_admin_commands` | 邮件业务命令与 Admin 邮件操作账本 |
-| `mail_poll_state` | 各邮箱的轮询游标、暂停状态与租约 |
+| `mail_poll_state` | 各邮箱的轮询游标、暂停状态与租约；`cursor_value` 是 Inbox 的唯一权威游标 |
+| `mail_scan_checkpoints` | 按凭据、凭据版本、世界与 endpoint origin 保存 Sent / Read Mail 的最高 MID、水位时间与最近完整校验时间；只服务增量前缀，不是发送、已读、领取或完成证明，作用域不匹配或损坏时回退完整扫描（迁移 `000083`） |
 
 ### 实时与运维
 
@@ -143,7 +144,7 @@
 
 ### 当前态投影
 
-`public_sessions`、`admin_sessions`、`auction_forum_reply_cursors`、`mail_poll_pending_reads`、`mailbox_sweep_cursors`、`auction_intake_targets`、`mail_runtime_generation` 只表示当前运行状态，由各自 owner 的生命周期维护，不作为历史事实。
+`public_sessions`、`admin_sessions`、`auction_forum_reply_cursors`、`mail_poll_pending_reads`、`mailbox_sweep_cursors`、`mail_scan_checkpoints`、`auction_intake_targets`、`mail_runtime_generation` 只表示当前运行状态，由各自 owner 的生命周期维护，不作为历史事实。
 
 ## 共有约束
 
