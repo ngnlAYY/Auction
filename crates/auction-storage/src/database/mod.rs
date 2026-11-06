@@ -36,9 +36,16 @@ mod competition_audit;
 #[cfg(feature = "postgres")]
 mod consistency_inspection;
 #[cfg(feature = "postgres")]
+mod deploy_evidence;
+#[cfg(feature = "postgres")]
 pub use consistency_inspection::{
     ConsistencyCheckReport, ConsistencyInspectionError, ConsistencyInspectionReport,
     ConsistencyViolation,
+};
+#[cfg(feature = "postgres")]
+pub use deploy_evidence::{
+    DeployEvidenceError, InFlightMailSend, InFlightPmSend, MigrationCompatibilityEntry,
+    PostgresInFlightSends, PostgresMigrationSuffix,
 };
 #[cfg(feature = "postgres")]
 mod equipment_loss;
@@ -77,6 +84,8 @@ mod mailbox_sweep;
 pub use least_privilege::{apply_runtime_privileges, runtime_privileges_present};
 #[cfg(feature = "postgres")]
 mod migrations;
+#[cfg(feature = "test-db")]
+pub use migrations::postgres_migrate_to;
 #[cfg(feature = "postgres")]
 mod rebuild;
 #[cfg(feature = "postgres")]

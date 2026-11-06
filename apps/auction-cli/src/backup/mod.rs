@@ -15,6 +15,7 @@ mod scheduled;
 pub(in crate::backup) mod scope;
 pub(crate) mod wal;
 
+pub(crate) use create::create_backup;
 pub(crate) use manifest::BackupManifest;
 use manifest::sha256_file;
 pub(crate) use scheduled::{DiskUsage, TerminalOutcome, disk_usage, latest_terminal_run};

@@ -308,6 +308,18 @@ ls -l /var/lib/auction/wal-staging | grep '^.*base-'
 
 ## 程序回退
 
+### 用 auction-cli rollback 换回旧程序
+
+W7.2 的 `deploy` 在安装前把当前四个程序保留到 `<state-dir>/rollback/<deploy_receipt_id>/`（`record.json` 记录安装目录、`previous_version`、`deployed_version` 与每个程序的 SHA-256）。`auction-cli rollback --receipt-id <deploy_receipt_id>`（省略则取最新记录）只换回该记录中的程序，并且：
+
+- 要求安装目录中的程序仍是该记录对应部署回执里的版本；安装目录与记录不一致时拒绝，先核对 unit `ExecStart`。
+- 读取数据库版本，要求 `previous_version → 当前版本` 的每个迁移连续、成功且登记为 `compatible`；任一 `breaking` 或缺少登记即拒绝——此时只能按本文件恢复升级前备份并做外部历史核对。
+- 与 `deploy` 相同，先过 W7.5 时段门禁与在途发送门禁，再按 Public → Admin → Worker 停止；安装前把当前程序再次保留为新的回滚记录，因此回退可以重新前进。
+- 启动（不执行迁移）后核对三个运行程序的摘要，成功追加 `action=rollback` 回执。
+
+`--dry-run` 只核对记录、安装目录、兼容区间与门禁，不停止服务。手工换回旧程序仍须显式设置 `[readiness] migration_compatibility_mode = "compatible"`，并保留能识别当前数据库的新版 CLI；默认 shadow 不放宽。
+
+
 迁移只向前，不执行 down、不删除 `_sqlx_migrations` 或兼容登记。令 `E` 为目标旧程序内嵌的最高迁移版本，`D` 为当前数据库最高版本，只核对本次回退跨越的 `(E,D]` 区间：
 
 | 区间事实 | 可用路径 |

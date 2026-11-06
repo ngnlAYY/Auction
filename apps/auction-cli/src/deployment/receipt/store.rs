@@ -303,6 +303,7 @@ mod tests {
                     bytes: Some(4096),
                 }],
                 failure: failed.then(|| "systemctl start 失败".to_owned()),
+                deploy: None,
             }
         }
     }

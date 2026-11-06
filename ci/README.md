@@ -49,9 +49,14 @@ bash ci/checks/check.sh <检查项>...
 | --- | --- | --- |
 | `docs` | 所有分支 push / PR / 手动 | 策略门禁与格式（`ci/checks/check.sh all fmt`）；完整历史与 tag 用于 `published-migrations`；同一提交已有 PR 时跳过重复的分支 push。tag 推送只运行发布工作流，不重复普通 CI |
 | `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check feature dependency-versions lint wasm`（工具链 1.99.0） |
+| `test` | push / PR / 手动，`docs` 通过后 | 安装 PostgreSQL 18 后依次执行 `just test`、`just test-db`（W6.2 集成测试）与 `just test-db-compat`（W7.8 迁移兼容声明验证）；不并入默认 `just verify` |
 | `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | 受控 cargo-audit 的 `dependency-audit`；非定时事件另执行 `dependency-unused`，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `msrv` | push / PR / 手动，`docs` 通过后 | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` |
 | `artifacts` | 默认分支 push 或手动 | 调用可复用工作流 `.github/workflows/release-build.yml`：安装受控发布工具，`ci/release/release.sh release-check` 构建并校验完整发布包，上传 1 天候选包；候选包不可部署 |
+
+### 依赖升级窗口提醒：`.github/workflows/dependency-cadence.yml`
+
+每周一 **05:07 UTC** 与手动触发时运行 [ci/checks/dependency-cadence.pl](checks/dependency-cadence.pl)，以 [ops/dependencies/upgrade-windows.json](../ops/dependencies/upgrade-windows.json) 为准核对季度窗口。日历结构错误、窗口逾期仍为 `scheduled` 或缺少下一次窗口时作业失败；窗口进入 14 天提前提醒期或正在进行时输出 warning，并把窗口表写入作业摘要。作业只读取仓库文件与 UTC 日期，不修改日历、不创建 issue、不升级依赖、不联网。节奏、冻结日历与门禁见[ops/dependencies.md](../ops/dependencies.md)。
 
 ### 版本发布：`.github/workflows/release.yml`
 

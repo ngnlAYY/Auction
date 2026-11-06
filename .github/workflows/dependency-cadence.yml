@@ -1,0 +1,38 @@
+name: dependency-cadence
+
+# 只做提醒：按日历核对季度依赖升级窗口，不修改依赖、不创建 issue、不联网。
+on:
+  schedule:
+    # 每周一 05:07 UTC；与每周依赖审计（04:17）错开，避开整点排队。
+    - cron: '7 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-cadence
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  cadence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # 脚本只依赖 Perl 核心模块（JSON::PP、Time::Local）；沿用 docs 作业的做法显式安装，不依赖镜像预装。
+      - name: Install Perl
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends perl
+      # 日历错误、窗口逾期或缺少下一次窗口时失败；提前提醒只输出 warning。
+      - name: Check upgrade calendar and remind
+        run: |
+          set -euo pipefail
+          perl ci/checks/dependency-cadence.pl | tee -a "$GITHUB_STEP_SUMMARY"

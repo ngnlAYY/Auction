@@ -1,6 +1,9 @@
 ---
 version: 2
-# 可选：每周核对 Cargo 依赖与 Actions 固定提交；PR 仍须通过 just verify 与 MSRV 门禁，不自动合并。
+# 只作提示：季度升级窗口之外的常规版本升级不创建 PR（open-pull-requests-limit: 0）。
+# 安全公告仍会提示并创建修复 PR，但一律人工评估、不自动合并；修复可随时交付，
+# 版本升级只在窗口内按依赖族进行。节奏、冻结日历与门禁见 ops/dependencies.md，
+# 窗口日期见 ops/dependencies/upgrade-windows.json。
 updates:
   - package-ecosystem: cargo
     directory: /
@@ -9,15 +12,9 @@ updates:
       day: monday
       time: "03:00"
       timezone: Asia/Shanghai
-    cooldown:
-      default-days: 7
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     commit-message:
       prefix: chore(deps)
-    ignore:
-      # Axum 仍传递 tungstenite 0.29；跨版本无法 downcast 1009 close 契约，须与 Axum 同步升级。
-      - dependency-name: "tungstenite"
-        update-types: ["version-update:semver-minor"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -25,8 +22,6 @@ updates:
       day: monday
       time: "03:00"
       timezone: Asia/Shanghai
-    cooldown:
-      default-days: 7
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     commit-message:
       prefix: chore(ci)
