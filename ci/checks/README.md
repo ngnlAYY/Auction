@@ -14,7 +14,7 @@ bash ci/checks/check.sh migration-compatibility
 
 词法扫描区分行注释、嵌套块注释、单引号/转义字符串、双引号标识符及带标签的 dollar quote；只在顶层分号切分 SQL，函数与 DO 内的 INSERT 也计数但不能充当合法登记，EXECUTE 字符串中的登记表引用拒绝。普通字符串与非过程 dollar quote 中的示例不计为登记。每个新文件须恰好一次 `INSERT INTO public.schema_migration_compatibility (version, level) VALUES (十进制本版本, 'compatible' 或 'breaking');`，必须是最后一条无条件顶层 SQL。允许关键字大小写及空白变化，等级字面量保持小写；禁止 upsert、INSERT SELECT、多行 VALUES、过程内登记或用注释/字符串冒充登记。
 
-禁止 `-- no-transaction`，顶层 BEGIN/START TRANSACTION、COMMIT/END、ROLLBACK/ABORT、PREPARE/SET TRANSACTION，保持 SQLx 对迁移与登记的事务边界。失败输出文件与原因并退出 1。该门禁不执行 SQL、不连接数据库、不证明 compatible 的业务承诺；分类审阅规则由[migrations/postgres/README.md#兼容分级与登记](../../migrations/postgres/README.md#兼容分级与登记)拥有，跨版本验证仍由 W7.8 后续工作负责。
+禁止 `-- no-transaction`，顶层 BEGIN/START TRANSACTION、COMMIT/END、ROLLBACK/ABORT、PREPARE/SET TRANSACTION，保持 SQLx 对迁移与登记的事务边界。失败输出文件与原因并退出 1。该门禁不执行 SQL、不连接数据库，因此不证明 compatible 的业务承诺；分类审阅规则由[migrations/postgres/README.md#兼容分级与登记](../../migrations/postgres/README.md#兼容分级与登记)拥有，`compatible` 的跨版本验证由 `just test-db-compat` 在真实 PostgreSQL 18 上执行，见[docs/development.md#测试](../../docs/development.md#测试)与`crates/auction-storage/tests/postgres/migration_compatibility.rs`。
 
 ## 已发布迁移不可变
 
@@ -79,6 +79,16 @@ bash ci/checks/check.sh markdown-links
 Markdown 同页与跨页锚点按 GitHub 标题规则生成：ATX（`#`）或 Setext（下划线）标题先去掉链接目标、HTML 与行内格式标记，保留可见文本，再转小写、去标点和符号、空白转 `-`；保留中文、下划线与连字符。同名标题追加 `-1`、`-2`，遇到已有同名锚点继续递增避让。支持显式 HTML `a` / `h1`–`h6` 的 `id` / `name`。目录链接带锚点时检查其中的 `README.md`；非 Markdown 文件仅接受存在的 GitHub `#L行号` / `#L起始-L结束` 锚点。
 
 不访问网络：`http(s)://`、`mailto:` 及其他 URI scheme、`//` 协议相对地址与 `/` 站点绝对路径均跳过。失败输出包含来源文件、行号、原目标及缺失路径或锚点；不维护断链忽略清单。移动或重命名文档时须同步修复链接，正确目标不明确时交由维护者决定。
+
+## 依赖升级日历（不并入 `just verify`）
+
+```bash
+perl ci/checks/dependency-cadence.pl [--today YYYY-MM-DD] [--file 日历路径]
+```
+
+[dependency-cadence.pl](dependency-cadence.pl) 读取 [ops/dependencies/upgrade-windows.json](../../ops/dependencies/upgrade-windows.json)，离线校验季度窗口日历：`version`、`lead_days`、窗口 ID 与状态闭集、UTC 日期合法性、季度连续、默认“第二个周一至周五”形态（顺延须填 `shifted_reason`）、与冻结区间不重叠，并要求始终存在下一次 `scheduled` 窗口。窗口已逾期仍为 `scheduled`、日历结构损坏或缺少下一次窗口时退出 1；提前 14 天或窗口进行中只输出 warning。成功时输出窗口表与门禁提示，供 CI 作业摘要使用。
+
+本检查刻意不加入 `all` 与 `just verify`：日历逾期不应阻塞无关的 PR。它由[.github/workflows/dependency-cadence.yml](../../.github/workflows/dependency-cadence.yml)每周一 **05:07 UTC** 定时运行，规则见[ops/dependencies.md](../../ops/dependencies.md)。脚本只依赖 Perl 核心模块（`JSON::PP`、`Time::Local`），不联网、不修改文件、不创建 issue。
 
 ## 每周依赖审计
 

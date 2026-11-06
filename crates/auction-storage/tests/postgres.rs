@@ -11,6 +11,8 @@ mod bid_cross_lot;
 mod delivery_payload_columns;
 #[path = "postgres/lot_watch.rs"]
 mod lot_watch;
+#[path = "postgres/migration_compatibility.rs"]
+mod migration_compatibility;
 #[path = "postgres/operations_alert.rs"]
 mod operations_alert;
 #[path = "postgres/realtime_sequence.rs"]

@@ -64,7 +64,7 @@ pub(crate) async fn acquire(
 }
 
 /// 分体部署启停共用的部署锁；状态目录不存在时以 0700 创建。
-pub(super) fn deployment_lock(args: &crate::cli::UnitArgs) -> anyhow::Result<File> {
+pub(crate) fn deployment_lock(args: &crate::cli::UnitArgs) -> anyhow::Result<File> {
     files::ensure_private_dir(&args.state_dir).context("准备部署状态目录失败")?;
     files::lock_file(&args.state_dir.join(DEPLOYMENT_LOCK), DEPLOYMENT_BUSY)
 }

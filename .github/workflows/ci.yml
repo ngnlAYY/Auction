@@ -157,6 +157,12 @@ jobs:
         env:
           AUCTION_TEST_DATABASE_URL: postgresql://auction_test:auction_test@127.0.0.1:5432/auction_test
         run: just test-db
+      # 迁移兼容声明（W7.8）单独成步：失败时直接指名被证伪的 compatible 迁移，
+      # 不与其它集成测试的失败混在一起。`just test-db` 已包含同一组测试。
+      - name: Verify migration compatibility declarations
+        env:
+          AUCTION_TEST_DATABASE_URL: postgresql://auction_test:auction_test@127.0.0.1:5432/auction_test
+        run: just test-db-compat
 
   security-audit:
     needs: docs

@@ -39,6 +39,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [ops/README.md](../ops/README.md) | 部署形态、首次部署、systemd 服务与顺序控制、反向代理、升级、监控与日志 |
+| [ops/dependencies.md](../ops/dependencies.md) | 依赖与工具链升级节奏、发布冻结日历、Dependabot 只作提示、门禁与窗口流程 |
 | [ops/config/README.md](../ops/config/README.md) | 配置文件结构、各区块字段、runtime 接管、缓存 |
 | [ops/keys/README.md](../ops/keys/README.md) | 四个密钥域、多 key 解密、离线重加密与回执、旧密钥 12 个月保留期、Cookie 轮换 |
 | [ops/deploy/RECOVERY.md](../ops/deploy/RECOVERY.md) | 备份、校验、恢复与破坏性重建流程 |

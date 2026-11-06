@@ -20,6 +20,8 @@ const MAX_ARTIFACTS: usize = 3;
 pub(crate) enum Action {
     Start,
     Restart,
+    Deploy,
+    Rollback,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +52,24 @@ pub(crate) struct Artifact {
     pub bytes: Option<u64>,
 }
 
+/// `deploy`/`rollback` 的制品与回滚证据；`service start/restart` 回执没有本段。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DeployRecord {
+    pub artifact_directory: String,
+    pub package: String,
+    pub source_commit: String,
+    pub source_fingerprint: String,
+    pub cli_sha256: String,
+    pub install_directory: String,
+    pub public_payload_sha256: String,
+    pub admin_payload_sha256: String,
+    pub migration_drill_id: Option<String>,
+    pub backup_archive: Option<String>,
+    pub backup_manifest: Option<String>,
+    pub rollback_record_id: Option<Uuid>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DeploymentReceipt {
@@ -65,6 +85,9 @@ pub(crate) struct DeploymentReceipt {
     pub migration: Option<MigrationRecord>,
     pub artifacts: Vec<Artifact>,
     pub failure: Option<String>,
+    /// 旧回执没有本段；只有 deploy/rollback 成功时必填。
+    #[serde(default)]
+    pub deploy: Option<DeployRecord>,
 }
 
 impl DeploymentReceipt {
@@ -108,8 +131,74 @@ impl DeploymentReceipt {
             }
             roles.push(artifact.role.as_str());
         }
+        match (self.action, self.outcome, &self.deploy) {
+            (Action::Deploy | Action::Rollback, Outcome::Failed, _) => {}
+            (
+                Action::Deploy | Action::Rollback,
+                Outcome::Succeeded | Outcome::AlreadyRunning,
+                Some(deploy),
+            ) => validate_deploy(deploy)?,
+            (Action::Deploy | Action::Rollback, _, None) => {
+                anyhow::bail!("deploy/rollback 成功回执必须记录制品与回滚证据");
+            }
+            (Action::Start | Action::Restart, _, Some(_)) => {
+                anyhow::bail!("service 回执不能记录 deploy 段");
+            }
+            (Action::Start | Action::Restart, _, None) => {}
+        }
         Ok(())
     }
+}
+
+fn validate_deploy(deploy: &DeployRecord) -> anyhow::Result<()> {
+    if !is_absolute_path(&deploy.artifact_directory) || !is_absolute_path(&deploy.install_directory)
+    {
+        anyhow::bail!("部署回执的制品与安装目录必须是绝对路径");
+    }
+    if deploy.package.is_empty()
+        || deploy.package.len() > 256
+        || deploy.package.contains('/')
+        || deploy.package.chars().any(char::is_control)
+    {
+        anyhow::bail!("部署回执的制品名称无效");
+    }
+    if !is_sha40(&deploy.source_commit)
+        || !is_sha256(&deploy.source_fingerprint)
+        || !is_sha256(&deploy.cli_sha256)
+        || !is_sha256(&deploy.public_payload_sha256)
+        || !is_sha256(&deploy.admin_payload_sha256)
+    {
+        anyhow::bail!("部署回执的源码或制品摘要无效");
+    }
+    if let Some(drill) = &deploy.migration_drill_id
+        && (drill.is_empty()
+            || drill.len() > 128
+            || drill.trim() != drill
+            || drill.chars().any(char::is_control))
+    {
+        anyhow::bail!("部署回执的迁移演练标识无效");
+    }
+    for path in [&deploy.backup_archive, &deploy.backup_manifest].into_iter().flatten() {
+        if !is_absolute_path(path) {
+            anyhow::bail!("部署回执的备份路径必须是绝对路径");
+        }
+    }
+    if deploy.rollback_record_id.is_some_and(|id| id.is_nil()) {
+        anyhow::bail!("部署回执的回滚记录标识不能是 nil UUID");
+    }
+    Ok(())
+}
+
+fn is_absolute_path(value: &str) -> bool {
+    value.starts_with('/')
+        && value.len() <= 4096
+        && value.trim() == value
+        && !value.chars().any(char::is_control)
+}
+
+fn is_sha40(value: &str) -> bool {
+    value.len() == 40
+        && value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 impl Artifact {
@@ -187,8 +276,8 @@ mod tests {
     use chrono::TimeZone;
 
     use super::{
-        Action, Artifact, DeploymentReceipt, FORMAT, MigrationRecord, Outcome, validate_actor,
-        validate_backup_id,
+        Action, Artifact, DeployRecord, DeploymentReceipt, FORMAT, MigrationRecord, Outcome,
+        validate_actor, validate_backup_id,
     };
 
     fn receipt() -> DeploymentReceipt {
@@ -215,6 +304,7 @@ mod tests {
                 bytes: Some(1024),
             }],
             failure: None,
+            deploy: None,
         }
     }
 
@@ -270,6 +360,50 @@ mod tests {
     fn duplicate_artifact_roles_are_rejected() {
         let mut value = receipt();
         value.artifacts.push(value.artifacts[0].clone());
+        assert!(value.validate().is_err());
+    }
+
+    fn deploy_record() -> DeployRecord {
+        DeployRecord {
+            artifact_directory: "/srv/auction-release".to_owned(),
+            package: "auction-rust-0.1.0-aaaaaaaaaaaa".to_owned(),
+            source_commit: "a".repeat(40),
+            source_fingerprint: "b".repeat(64),
+            cli_sha256: "c".repeat(64),
+            install_directory: "/opt/auction/bin".to_owned(),
+            public_payload_sha256: "d".repeat(64),
+            admin_payload_sha256: "e".repeat(64),
+            migration_drill_id: Some("drill-20261105".to_owned()),
+            backup_archive: Some("/var/backups/auction/a.dump".to_owned()),
+            backup_manifest: Some("/var/backups/auction/a.dump.manifest".to_owned()),
+            rollback_record_id: Some(uuid::Uuid::new_v4()),
+        }
+    }
+
+    #[test]
+    fn deploy_receipts_record_artifact_and_rollback_evidence() {
+        let mut value = receipt();
+        value.action = Action::Deploy;
+        assert!(value.validate().is_err(), "成功 deploy 必须记录 deploy 段");
+
+        value.deploy = Some(deploy_record());
+        value.validate().expect("deploy 回执必须通过");
+
+        let mut value = receipt();
+        value.deploy = Some(deploy_record());
+        assert!(value.validate().is_err(), "service 回执不能记录 deploy 段");
+
+        let mut value = receipt();
+        value.action = Action::Rollback;
+        value.outcome = Outcome::Failed;
+        value.deploy = Some(deploy_record());
+        value.failure = Some("启动失败".to_owned());
+        value.validate().expect("失败回退允许保留已知制品证据");
+
+        let mut value = receipt();
+        value.action = Action::Deploy;
+        value.deploy = Some(deploy_record());
+        value.deploy.as_mut().expect("存在").cli_sha256 = "C".repeat(64);
         assert!(value.validate().is_err());
     }
 

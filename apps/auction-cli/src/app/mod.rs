@@ -48,7 +48,7 @@ pub(crate) async fn run() -> u8 {
 fn failure_code(command: &Command) -> u8 {
     match command {
         Command::Config(_) => EXIT_CONFIG,
-        Command::Service(_) => EXIT_SERVICE,
+        Command::Service(_) | Command::Deploy(_) | Command::Rollback(_) => EXIT_SERVICE,
         Command::Db(_) | Command::Backup(_) | Command::Wal(_) => EXIT_DATABASE,
         Command::Alert(_)
         | Command::Switch(_)
@@ -77,6 +77,10 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             print_json(&deployment.report())
         }
         Command::Service(args) => crate::service::run(&config_dir, args).await,
+        #[cfg(feature = "postgres")]
+        Command::Deploy(args) => crate::deploy::run(&config_dir, args).await,
+        #[cfg(feature = "postgres")]
+        Command::Rollback(args) => crate::deploy::run_rollback(&config_dir, args).await,
         #[cfg(feature = "postgres")]
         Command::Db(command) => crate::database::run(&config_dir, command).await,
         #[cfg(feature = "postgres")]
@@ -109,6 +113,10 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         }
         #[cfg(feature = "postgres")]
         Command::Recovery(command) => crate::operations::recovery::run(&config_dir, command).await,
+        #[cfg(not(feature = "postgres"))]
+        Command::Deploy(_) | Command::Rollback(_) => {
+            anyhow::bail!("当前 auction-cli 未编译 postgres feature；deploy 与 rollback 不可用")
+        }
         #[cfg(not(feature = "postgres"))]
         Command::Db(_)
         | Command::Alert(_)

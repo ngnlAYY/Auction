@@ -10,6 +10,8 @@ mod backup;
 mod cli;
 #[cfg(feature = "postgres")]
 mod database;
+#[cfg(feature = "postgres")]
+mod deploy;
 mod deployment;
 #[cfg(feature = "postgres")]
 mod operations;

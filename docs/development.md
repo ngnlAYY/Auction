@@ -23,6 +23,7 @@ just                 # 列出全部入口
 just verify          # 默认验证：策略门禁 → fmt → check → feature → clippy → wasm（不运行测试）
 just test            # 默认 feature 下的纯逻辑、单元与本地替身测试
 just test-db         # 显式 PG18 集成测试，要求 AUCTION_TEST_DATABASE_URL
+just test-db-compat  # 只验证迁移 compatible 声明（真实 PG18，沿迁移链）
 just fmt             # 只检查格式
 just lint            # clippy -D warnings（all-features）
 just wasm-check      # wasm32 目标 Clippy 检查两个浏览器包（-D warnings）
@@ -128,6 +129,8 @@ just test-db
 `just test-db` 启用 `auction-storage` 的 `test-db` feature。设置 `AUCTION_TEST_DATABASE_URL` 时复用该 URL 所在服务器，只创建与删除夹具自己的模板库和测试库，不改写 URL 指向的库；未设置时依次用 `AUCTION_TEST_PG_BIN`、`PATH`、`/usr/lib/postgresql/18/bin` 的 PostgreSQL 18 二进制在临时目录启动一次性集群。URL 只通过环境传入，不写入文档、日志或提交的配置；夹具校验服务器 major 为 18。涉及锁、隔离级别、幂等或迁移的断言必须在真实 PG18 上执行。
 
 夹具先在新建空库上执行全部内嵌迁移得到模板库，再由每个测试 `CREATE DATABASE ... TEMPLATE` 克隆独立库；测试库析构时执行 `DROP DATABASE ... WITH (FORCE)`，临时集群在最后一个测试释放共享句柄后停止服务并删除数据目录。`postgres_` 前缀是数据库测试的命名选择契约。
+
+迁移兼容声明验证（W7.8）在 `crates/auction-storage/tests/postgres/migration_compatibility.rs`，也可用 `just test-db-compat` 单独运行。它从 075 起沿真实迁移链逐级前进，在 V-1 捕获旧程序依赖的契约（关系、列、默认值、约束、触发器、函数、域、枚举、权限），执行 V 后要求 `compatible` 登记不收缩任何既有对象、权限或旧版语句结果；`breaking` 只重建基线。另一个人为破坏用例证明同一比较与写入探针确实会失败。夹具使用 `auction_storage::postgres_migrate_to` 复用正式迁移执行视图，只在 `test-db` feature 下可用。
 
 当前骨架只有 `crates/auction-storage/tests/postgres_storage.rs` 的空库迁移、模板克隆与 `WorldReader` 存储端口冒烟测试；157 个存储端口与运行时 SQL 尚未逐方法覆盖，不能据此声称数据库覆盖完整。数据库测试只在 `just test-db` 运行，默认 `just test` 不要求数据库；后续按 owner 扩展时保持同一入口、临时集群与逐测试独立库。
 

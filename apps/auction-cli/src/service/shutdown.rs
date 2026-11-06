@@ -10,7 +10,7 @@ use crate::cli::ShutdownArgs;
 use crate::deployment::ConfigDir;
 
 #[derive(Serialize)]
-pub(super) struct ShutdownGateReport<'a> {
+pub(crate) struct ShutdownGateReport<'a> {
     outcome: &'static str,
     protection_window_minutes: u32,
     force: bool,
@@ -19,7 +19,7 @@ pub(super) struct ShutdownGateReport<'a> {
     query_error: Option<String>,
 }
 
-pub(super) async fn check<'a>(
+pub(crate) async fn check<'a>(
     config_dir: &ConfigDir,
     worker: Option<&AppConfig>,
     action: &str,

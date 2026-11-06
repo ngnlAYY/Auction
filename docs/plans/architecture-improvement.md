@@ -248,10 +248,10 @@
 | W6.6 | 进行中 | 随本提交 | — | MoogleMail 与论坛 loopback 替身；真实客户端覆盖邮件读取/详情/compose、论坛主题/PM、登录/战斗、账号忙、Cookie 失效、超时、结构漂移、写入未知、邮资不足、收件人不存在；写表单成功路径仍缺真实 fixture |
 | W6.4 | 已提交 | 随本提交 | — | CI 独立 `test` job：安装 PostgreSQL 18、运行 `just test` 与 `just test-db`；不并入默认 verify |
 | W6 | 进行中 | W6.1–W6.4、W6.6 已批准 | — | W6.2/W6.3/W6.4/W6.5/W6.6 已落；W6.1 纯逻辑测试仍待 |
-| W7 | 进行中 | — | 未部署 | W7.1 发布流水线、W7.3 部署回执已提交；W7.2 deploy 命令、W7.8 兼容验证待做 |
+| W7 | 已提交 | 随本提交 | — | W7.1 发布流水线、W7.2 deploy/rollback、W7.3 回执、W7.8 兼容验证；W8.1 合并部署决定前仅支持分体部署 |
 | W7.1a | 已提交 | 远端设置 | — | 仓库转公开；`main` 已设为默认分支（当前 `383138a8`），分支保护要求 `docs`/`verify`/`security-audit`/`msrv`、线性历史、禁止强推与删除；`ci/dependency-version-guard` 与两个 dependabot 分支已删除，tokio PR #10 已按决策 52 关闭；`main` CI 成功，候选二进制为 `24a9c115` |
 | W7.5 | 已提交 | `69fd85a0` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；`service stop/restart` 只读时段门禁（Final 或截止不晚于保护窗口末端的在拍 lot，含已过截止仍在拍），`--protection-window-minutes` 默认 60，例外须 `--force --reason` |
-| W8 | 未开始 | — | — | 放在 M6 最后 |
+| W8 | 待决策 | — | — | W8.1 合并部署/Redis/首次设置去留、W8.2 结构与兼容层清理；需用户决定，未改代码 |
 | W9.7 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；CLI 审计 `source=cli`，metadata 添加 `entrypoint=cli`、`os_uid`、可选 `sudo_user`；`--actor` 仍必填；Admin 保持 `source=admin`；迁移 078 breaking；Admin 审计页支持 cli |
 | W9.5 | 已提交 | 随本提交 | — | Admin 全局登录退避（5 次后 1→60s）、IPv6 /64、失败 WARN、复用 401/429 指标；首次设置 64 hex 随机密钥且最短 32 字节；短密钥/可信代理警告；拒绝 /0 trusted proxy；CDN 专用转发头拒绝 |
 | W9 | 已提交 | 随本提交 | — | W9.3 密钥环/离线重加密；W9.4 HSTS/form-action；W9.5–W9.11 已落；无部署 |
@@ -264,7 +264,7 @@
 | W11.4 | 已提交 | 随本提交 | — | 只读一致性巡检：lot/bid 投影、补偿池、义务链、delivery/义务、realtime 序号、慢代理残留；每项预算 5s/总 40s，最多 100 样本；结果追加 audit_records；CLI `db inspect-consistency` |
 | W11 | 已提交 | 随本提交 | — | W11.1–W11.4：装备持有核对、偿付能力、追加报告、一致性巡检；迁移 095 |
 | W12 | 已提交 | — | — | W12.1–W12.8 已提交：outbox、队列、提交后唤醒、键列化、体积预算 |
-| W13 | 进行中 | — | 未部署 | W13.1、W13.2、W13.4、W13.5 已提交；W13.3a 已提交，W13.3b 延后到 M2a（决策 75）；W13.6 随 M6 |
+| W13 | 已提交 | — | — | W13.1–W13.6：棘轮、lint、溢出防护、链接门禁、依赖审计与季度升级窗口 |
 | W13.1 | 已提交 | `42bd8477` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 B）实现、Claude 监督；`check.sh ratchet`，基线 `ci/checks/source-ratchet.baseline`（14 项） |
 | W13.4 | 已提交 | `42bd8477` | 未部署 | 同上；`check.sh markdown-links` 离线检查相对链接与锚点，现有文档无断链 |
 | W13.5 | 已提交 | `42bd8477` | 未部署 | 同上；CI 每周一 04:17 UTC 运行 `security-audit`；发布 tag 审计待 W7.1 |
