@@ -2,7 +2,26 @@
 
 use std::collections::HashSet;
 
-use super::*;
+use crate::database::PostgresCompetitionTransaction;
+use crate::database::settlement::{
+    close_settlement_lots, i32_version, i64_version, insert_compensation_ledger,
+    insert_lot_settlements, insert_obligations, insert_recoveries, insert_settlement_audit,
+    insert_settlement_realtime, invalid, map_competition_error, map_sql_error,
+    parse_obligation_kind, parse_settlement_mode, parse_settlement_policy, positive_u64,
+    settlement_amount, settlement_world,
+};
+use auction_application::{
+    CommandLedgerError, PersistedSettlement, PersistedSettlementObligationCount,
+    SettlementSnapshot, SettlementTransactionError, StoredCommand,
+};
+use auction_domain::{
+    AuctionId, CommandId, CompetitionPlan, ProxyStatus, RecoveryPolicy, SettlementAmount,
+    SettlementFact, SettlementLine, SettlementPlan,
+};
+use chrono::{DateTime, Utc};
+use serde_json::Value;
+use sqlx::Row;
+use uuid::Uuid;
 
 impl PostgresCompetitionTransaction {
     pub(super) async fn insert_settlement_command(

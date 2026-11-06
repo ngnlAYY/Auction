@@ -1,5 +1,8 @@
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::recovery_scheduler::map_storage_error,
+    crate::database::recovery_scheduler::returns::model::RecoveryReturnRow, sqlx::Row,
+};
 
 #[cfg(feature = "postgres")]
 pub(super) fn map_recovery_return_row(

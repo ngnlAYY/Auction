@@ -1,22 +1,11 @@
 //! 游戏邮件注册、换绑的 PostgreSQL 端口分派；命令与幂等账本由子模块拥有。
 
-#[cfg(feature = "postgres")]
-use auction_application::MailUserResultCode;
 use auction_application::{
     ApplicationError, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailUserCommandKind,
     MailUserRebindCommand, MailUserRegisterWrite, MailUserRekeyWrite, MailUserResult,
     MailUserStore, RepositoryError, RequestHash,
 };
 use auction_domain::CommandId;
-#[cfg(feature = "postgres")]
-use chrono::{DateTime, Utc};
-#[cfg(feature = "postgres")]
-use serde_json::json;
-use sqlx::Row;
-#[cfg(feature = "postgres")]
-use sqlx::postgres::PgRow;
-#[cfg(feature = "postgres")]
-use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]

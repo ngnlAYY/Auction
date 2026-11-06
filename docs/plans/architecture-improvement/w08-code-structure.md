@@ -91,30 +91,48 @@
 
 ## 7. 不可达代码与无人读写的 schema 对象
 
-Rust 源码（含 SQL 字符串）逐名检索结果：
+2026-11-05 复核：对 Rust（含动态 SQL 字符串）、迁移、`ops/`、`ci/`、契约与计划文档逐名检索（排除 `target/` 构建与证据产物），并核对迁移历史与保留策略。
 
-| 对象 | Rust 引用 | 迁移/策略登记 | 判定 |
+| 对象 | 当前代码引用 | 迁移/策略登记 | 判定 |
 | --- | --- | --- | --- |
-| `public.bid_proxy_attempts` | 无 | 表定义 `000003`；权限重建 `000081/083/088/089/092/096`；[ops/deploy/retention-policy.v2.json](../../../ops/deploy/retention-policy.v2.json) | 无人读写，且无迁移函数写入；删除需迁移 + 保留策略 + [docs/contracts/database.md](../../contracts/database.md) 同步 |
-| `public.bid_proxy_outbid_uses` | 无 | 同上，另被 `000005` 的 `bid_proxies` 视图 `LEFT JOIN` | 同上，且需先处理依赖它的视图 |
-| `public.bid_proxies`（视图） | 无 | 仅 `000005` 定义；不在保留策略内 | 视图不持有数据，删除只需迁移与契约更正 |
-| `public.auction_forum_reply_cursors` | 无 | 表定义 `000005` + 多条权限重建 + 保留策略；[docs/contracts/database.md](../../contracts/database.md) 已注明“无人读写，留给 W8.2 评估清理” | W1.11 已改用按主题最大 `post_number`，本表结构无法表达该游标；删除条件＝W1.11 保持现状 |
+| `public.bid_proxy_attempts` | 无 | 表定义 `000003`；权限重建 `000081/083/088/089/092/096`；保留策略 v2 归入 `auction_history`（`retain_forever`、`candidate_class=none`、`mutation_authorized=false`） | 无人读写；本仓历史没有任何 `INSERT`/`UPDATE`/`DELETE` 该表的代码。历史唯一 Rust 引用是 `legacy_v28/source_checks.rs` 的 `to_regclass` 存在性检查，已随 `ce1cedbc` 删除。删除条件见 §7.2 |
+| `public.bid_proxy_outbid_uses` | 无 | 同上；另被 `000005` 的 `bid_proxies` 视图 `LEFT JOIN` | 同上；删除须先删除视图 |
+| `public.bid_proxies`（视图） | 无 | 仅 `000005` 定义；不在保留策略内（盘点只收集表，不收集视图） | 视图不持有数据；无显式授权，运行账号仅经 `GRANT SELECT ON ALL TABLES` 可读。删除只要迁移与契约更正 |
+| `public.auction_forum_reply_cursors` | 无 | 表定义 `000005` + `main`/`isekai` 种子 2 行 + 多条权限重建；保留策略 v2 归入 `ephemeral_current_projections`（`retain_forever`、`candidate_class=owner_lifecycle_only`、`mutation_authorized=false`） | 旧世界级扫描游标；`8d25ea76` 起不再有写入方，W1.11 已改用 `auction_forum_bid_commands` 的逐主题 `post_number` 游标，`b9c5f867` 删除最后的游标模块。表内只余种子/运行状态，不是历史事实 |
 | `public.settlement_pools` | 无 | 按契约只作冻结证据（合并到全局池后由触发器冻结） | **不可删除**：属于历史资金证据 |
 
 不可达运行路径：
 
 | 路径 | 证据 | 判定 |
 | --- | --- | --- |
-| Worker `realtime_consumer` 消费循环 | `apps/auction-worker/src/bootstrap/persistent.rs` 恒为 `None`（“外部广播协议尚未冻结；没有具体 sink 时不启动实时消费”）；`auction-jobs/src/worker/realtime/consumer.rs`（255 行）只有测试与定义引用 | 生产不可达，但属于待启用能力。删除后重新引入要重写协议适配，须用户决定（D-W8.2-e） |
+| Worker `realtime_consumer` 消费循环 | `apps/auction-worker/src/bootstrap/persistent.rs` 恒为 `None`（“外部广播协议尚未冻结；没有具体 sink 时不启动实时消费”）；`crates/auction-jobs/src/worker/realtime/consumer.rs`（255 行）在当前树只有定义、重导出、`PersistentWorker` 字段与 `runner.rs` 的 `is_some()` 守卫，测试目录零引用；`git log --all -S 'PersistentRealtimeConsumer::new'` 与 `-S 'realtime_consumer: Some'` 零命中 | 生产不可达且本仓从未装配，但属于待启用能力（外部广播 sink 协议未冻结）。删除属能力决策 D-W8.2-e，且要同步 `ops/README.md` 的日志目标表与指标词表；保留 |
 
-注：`auction_forum_reply_cursors` 等三张表与 `bid_proxies` 视图的删除都要新增迁移，并要求 `ops/deploy/retention-policy.v2.json`、`docs/contracts/database.md` 与权限重建脚本同步；本轮未新增迁移。
+### 7.1 复核证据
+
+- 全仓逐名检索（`*.rs`/`*.sql`/`*.sh`/`*.json`/`*.yml`/`*.toml`/`*.md`，排除 `target/`）四对象在生产代码中零命中；唯一命中为迁移定义、权限重建、保留策略、数据库契约与本页。
+- `git log -S 'INSERT INTO public.bid_proxy_attempts'`、`... outbid_uses` 与 `... auction_forum_reply_cursors` 均无应用写入提交；`auction_forum_reply_cursors` 的最后写入方（`mark_scanned_postgres`）在 `8d25ea76` 移除，`b9c5f867` 再删除遗留模块。
+- 2026-11-02 的生产只读盘点（`target/operations-evidence/sent-precision-deploy-20261102/remote-evidence/inventory.json`，schema 74）显示 `bid_proxy_attempts` 与 `bid_proxy_outbid_uses` 的 `estimated_rows=0`，`auction_forum_reply_cursors` 为 2 行（`000005` 的 `main`/`isekai` 种子）。这是历史证据，不替代当前库核对。
+- 外键只有两表指向 `bid_proxy_authorizations` 与 `auction_commands`；没有其它表引用这三张表。`bid_proxies` 依赖 `bid_proxy_outbid_uses`，删除顺序必须先视图后表。
+- `ops/README.md` 的日志目标表仍登记 `realtime_consumer`；`WorkerLoop::Realtime` 同时出现在 runner 排空分支、`auction-observability` 的循环标签与业务事件映射中，删除不是单文件删除。
+
+### 7.2 删除条件
+
+| 对象 | 删除前置 |
+| --- | --- |
+| Worker `realtime_consumer` | 用户批准 D-W8.2-e（能力决策，非纯清理）；删除 `worker/realtime/consumer.rs`、`PersistentWorker.realtime_consumer` 字段、`runner.rs` 的 spawn/select/drain 分支、`WorkerError::RealtimeTask*`、`worker/mod.rs`/`lib.rs` 重导出与装配根的 `None`；同步 `WorkerLoop::Realtime`/`BusinessEvent::Realtime` 指标标签、`ops/README.md` 与相关文档。重新引入需要冻结外部广播协议并实现真实 sink |
+| `bid_proxies` | 用户批准新增迁移；迁移中先 `DROP VIEW public.bid_proxies`，再更正 `docs/contracts/database.md`；视图不在保留策略内，无需策略变更 |
+| `bid_proxy_outbid_uses` | 先删除视图；确认零行；用户批准删除历史表并把两表从 `auction_history` 家族移除；更新 `ops/deploy/retention-policy.v2.json` 的 `tables`、`database_schema_version`（须等于 `sqlx::migrate!` 最大版本，当前 96）与 `resolved_operator_decisions`；同步契约与权限重建 |
+| `bid_proxy_attempts` | 同 `bid_proxy_outbid_uses` |
+| `auction_forum_reply_cursors` | 用户批准新增迁移；确认仅种子/运行状态行；从 `ephemeral_current_projections` 家族移除并更新策略版本与 `database_schema_version`；更正 `docs/contracts/database.md` 的两处描述 |
+
+保留策略 JSON 由 `crates/auction-storage/src/database/retention_inventory/mod.rs` 的 `include_str!` 编译期内嵌，`retention_inventory/mod.rs` 会拒绝 `database_schema_version` 与当前迁移版本不一致的策略；因此任何删表迁移都必须同步更新该文件，不能只写迁移。本轮未新增迁移、未删除 schema。
 
 ## 8. 大文件清单（非测试源码，>600 行）
 
 | 文件 | 行数 | 归属 | 建议 |
 | --- | --- | --- | --- |
 | `crates/auction-application/src/services/auction/competition/legacy_ledger.rs` | 1524 | 旧兼容层 | 见 §6，不拆（随兼容层退场一起消失） |
-| `crates/auction-integrations/src/clients/mooglemail/gateway/reader.rs` | 1523 | 邮件读取解析 | 按“解析/校验/落库投影”拆，需先有该模块的行为回放证据（D-W8.2-d） |
+| `crates/auction-integrations/src/clients/mooglemail/gateway/reader.rs` | 1523 → 42 + 子模块 | 邮件读取解析 | **本轮已拆**（D-W8.2-d）：入口只留 gateway 状态与子模块声明；`reader/gateway.rs`（构造与观测注入）、`reader/window.rs`（窗口纯函数与测试）、`reader/scan.rs`（增量计划/检查点/前缀选择）、`reader/inbox.rs`（收件窗口与详情）、`reader/sent.rs`（Sent 证据）、`reader/recovery_scan.rs`（恢复枚举）、`reader/snapshot.rs`（余额/库存）、`reader/error.rs`（错误映射） |
 | `crates/auction-integrations/src/clients/mooglemail/sender.rs` | 1008 | 邮件发送 | 可按 transport/证据拆分；本轮未动 |
 | `crates/auction-application/src/services/mail/maintenance.rs` | 999 | 邮件维护用例 | 可按判定/执行拆分；本轮未动 |
 | `crates/auction-storage/src/database/mailbox_sweep/mod.rs` | 969 → 450 | 邮件维护持久化 | **本轮已拆**：`candidates.rs`（只读投影）、`transition.rs`（迁移事务）、`error.rs`（重试分类） |
@@ -134,10 +152,14 @@ Rust 源码（含 SQL 字符串）逐名检索结果：
 | D-W8.2-a | `#[path]` 与目录对齐 | (1) 保持现状，只在新增代码处要求自然层级；(2) 按 crate 分批改为自然层级并保持 `pub use` 对外符号不变 |
 | D-W8.2-b | `auction-application` 平铺导出 | (1) 保持 `ports::Foo` 平铺；(2) 改为 `ports::<context>::Foo` 并接受调用点改动 |
 | D-W8.2-c | `use super::*` 收敛范围 | (1) 只新增代码禁止；(2) 逐 crate 显式化到零 |
-| D-W8.2-d | 大文件拆分顺序 | 建议 `mooglemail/gateway/reader.rs` → `mail/maintenance.rs` → `worker/runtime/delivery.rs`，每次都要有行为证据 |
+| D-W8.2-d | 大文件拆分顺序 | `mooglemail/gateway/reader.rs` 已按此顺序完成拆分；下一步 `mail/maintenance.rs` → `worker/runtime/delivery.rs`，每次都要有行为证据 |
 | D-W8.2-e | `realtime_consumer` 运行路径 | (1) 保留待启用；(2) 删除并记录重新引入成本 |
 | D-W8.2-f | 无人读写 schema 对象 | (1) 保留；(2) 新增迁移删除 `bid_proxies` 视图与 `bid_proxy_attempts`/`bid_proxy_outbid_uses`/`auction_forum_reply_cursors`，同步保留策略与数据库契约 |
 
 ## 10. 验证边界
 
 本轮验证（隔离在本仓，未部署、未提交、未跑全量门禁）：`cargo fmt -p auction-storage -p auction-config --check`、`cargo check`/`cargo clippy`（`auction-storage --features postgres --all-targets`、`auction-storage --all-targets` 默认 feature、`auction-config --all-targets`）、`cargo test -p auction-config --all-targets`（31 通过）、`cargo test -p auction-storage --all-targets`（默认 feature 通过）、`bash ci/checks/check.sh ratchet`。`mailbox_sweep` 拆分为纯代码搬移：拆分前后去注释词元对比只差 8 个上移为模块级 `#[cfg(feature = "postgres")]` 的属性与 3 处 `super::recovery_commands` → `crate::database::recovery_commands` 的路径改写，未新增或修改行为与测试；PostgreSQL 集成测试（`just test-db`）属于数据库语义验证，本轮未运行。
+
+`mooglemail/gateway/reader.rs` 拆分为纯代码搬移：1523 行 → 入口 42 行 + `reader/` 下 8 个子模块（共 1632 行，含新增模块文档与搬移后的 6 个既有测试）。去注释词元对比只差模块声明、`use` 引入与 `pub(in super::super)`/`pub(super)` 可见性标注；业务语句、错误映射、预算、超时、日志字段与页面解析路径逐字未改。验证：`cargo fmt -p auction-integrations --check`、`cargo check -p auction-integrations --all-targets`、`cargo clippy -p auction-integrations --all-targets`（无警告）、`cargo test -p auction-integrations --lib`（96 通过，含搬移的 `reader::window::tests` 6 项）、`bash ci/checks/check.sh layout`。未运行全量 `just verify`、数据库或真实外部服务验证。
+
+2026-11-05 §7 复核为只读审计：全仓逐名检索、`git log -S` 历史核对、保留策略与迁移版本耦合检查，以及 `bash ci/checks/check.sh markdown-links`。未构建、未连接数据库、未部署；未新增迁移、未删除代码或 schema。

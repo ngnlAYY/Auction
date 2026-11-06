@@ -1,7 +1,7 @@
 //! Recovery command 的动作映射与 SQL 错误转换；事务装配由父模块统一负责。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use auction_application::{RecoveryCommandError, RecoveryConfirmationAction};
 
 #[cfg(feature = "postgres")]
 pub(super) fn confirmation_action_kind(

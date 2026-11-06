@@ -1,8 +1,18 @@
 //! PostgreSQL Admin 规则发布事务与命令账本。
 
-use super::*;
+use crate::database::audit_health::AuditWriteResult;
 #[cfg(feature = "postgres")]
 use crate::database::competition::begin_statement;
+use crate::database::{PostgresStore, TrackedTransaction as Transaction};
+use auction_application::{
+    AdminRulesDocument, AdminRulesPublishCommand, AdminRulesStoredCommand, AdminRulesTransaction,
+    AdminRulesTransactionError, AdminRulesTransactionFailure, AdminRulesTransactionRunner,
+    RequestHash, TransactionFuture, TransactionPolicy,
+};
+use chrono::{DateTime, Utc};
+use serde_json::{Value, json};
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
 /// Admin 规则发布使用的 PostgreSQL 事务对象。
 #[cfg(feature = "postgres")]

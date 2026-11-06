@@ -96,75 +96,13 @@ pub(crate) use public::*;
 pub(crate) use reads::*;
 pub(crate) use session::*;
 
-use std::{collections::BTreeMap, net::SocketAddr, time::Instant};
+use std::net::SocketAddr;
 
-use crate::assets as web_assets;
-
-use auction_application::{
-    AdminLotUpdateError, AdminSessionIdentity, ApplicationError, AuctionLifecycleAction,
-    AuctionLifecycleActor, AuctionLifecycleActorType, AuctionLifecycleCommand, CommandLedgerError,
-    CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome, CompetitionTransactionError,
-    CompetitionWireTimestamp, CreateProxyCommand, CurrentAuctionSnapshot,
-    DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE, LowerProxyCommand, MAX_PUBLIC_ACCOUNT_OFFSET,
-    MAX_PUBLIC_ACCOUNT_PAGE_SIZE, MAX_PUBLIC_BID_LOG_OFFSET, MAX_PUBLIC_HISTORY_NAME_TERMS,
-    MAX_PUBLIC_LOT_OFFSET, MAX_PUBLIC_PRICE_HISTORY_OFFSET, PublicAccountPageRequest,
-    PublicAuctionCursor, PublicAuctionListRequest, PublicAuctionPage, PublicAuctionProjection,
-    PublicAuctionSummary, PublicBidLogCursor, PublicBidLogEntry, PublicBidLogListRequest,
-    PublicBidLogPage, PublicEquipment, PublicEquipmentLinkTarget, PublicFinalRestriction,
-    PublicLiveLotSummary, PublicLotDetail, PublicLotListRequest, PublicLotPage, PublicMyBid,
-    PublicMyBidsPage, PublicMyBidsRequest, PublicOwnedProxy, PublicPreviewLotDetail,
-    PublicPreviewLotSummary, PublicPriceHistoryCursor, PublicPriceHistoryEntry,
-    PublicPriceHistoryListRequest, PublicPriceHistoryPage, PublicPriceHistorySort,
-    PublicPriceHistoryStats, PublicProxyBid, PublicProxyTransition, PublicSessionIdentity,
-    RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
-    RecoveryConfirmationResult, RecoveryReport, RequestHash, SessionError, SettlementReport,
-    WorldSnapshot, allowed_recovery_commands, format_public_time_wire,
-};
-use auction_contracts::{
-    AdminAuctionCommandResponse, AdminAuctionLifecycleRequest, AdminAuctionLifecycleResponse,
-    AdminRecoveryActionResponse, AdminRecoveryConfirmationRequest,
-    AdminRecoveryConfirmationResponse, AdminRecoveryConfirmationResultResponse,
-    AdminRecoveryReportResponse, AdminRecoveryResponse, AdminSessionResponse,
-    AdminSettlementAdjustmentResponse, AdminSettlementAuctionResponse, AdminSettlementLotResponse,
-    AdminSettlementReportResponse, AdminSettlementSummaryResponse, ApiErrorResponse,
-    ApiErrorResponseWithData, ApiResponse, AuctionListResponse, AuctionSummaryResponse,
-    CreateProxyAuthorizationRequest, CurrentAuctionItemResponse, CurrentAuctionResponse,
-    HealthLiveData, HealthProbeResponse, HealthReadyData, HealthResponse,
-    LowerProxyAuthorizationRequest, PlaceBidRequest, PlaceBidResponse, PlaceBidResultResponse,
-    PublicAccountBlockedResponse, PublicBidLogEntryResponse, PublicBidLogListResponse,
-    PublicEquipmentResponse, PublicEquipmentStatResponse, PublicFinalRestrictionResponse,
-    PublicLiveLotResponse, PublicLoginRequest, PublicLoginResponse, PublicLotDetailItemResponse,
-    PublicLotEnvelopeResponse, PublicLotListItemsResponse, PublicMyBidsResponse,
-    PublicMyProxyResponse, PublicOwnedBidResponse, PublicOwnedEquipmentResponse,
-    PublicOwnedProxyCapabilitiesResponse, PublicOwnedProxyQuotaResponse, PublicOwnedProxyResponse,
-    PublicOwnedProxyTransitionResponse, PublicPreviewEquipmentResponse,
-    PublicPreviewLotDetailResponse, PublicPreviewLotResponse, PublicPriceHistoryEntryResponse,
-    PublicPriceHistoryListResponse, PublicPriceHistoryStatsResponse,
-    PublicProxyCommandAuthorizationResponse, PublicProxyCommandBidResponse,
-    PublicProxyCommandResponse, PublicSessionCurrentResponse, WorldStatusResponse, WorldsResponse,
-};
-use auction_domain::{
-    BidAmount, CommandId, CompetitionPlan, DomainError, LotId, ProxyAuthorizationId, ProxyMode,
-    ProxyStatus, ProxyTerminalReason, ProxyTransitionKind, SettlementId, UserId,
-};
-use auction_observability::{BusinessEvent, BusinessOutcome};
 use axum::{
-    Json, Router,
-    body::Bytes,
-    extract::{ConnectInfo, DefaultBodyLimit, Path, Request, State},
-    http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
-    middleware,
+    extract::{ConnectInfo, Request, State},
+    http::{StatusCode, Uri, header},
     response::{IntoResponse, Response},
-    routing::get,
 };
-use base64::{
-    Engine,
-    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
-};
-use chrono::{DateTime, Duration, NaiveDate, SecondsFormat, TimeZone, Utc};
-use sha2::{Digest, Sha256};
-use subtle::ConstantTimeEq;
-use url::form_urlencoded;
 use uuid::Uuid;
 
 /// 解析旧 Public v1 使用的规范小写、非零 UUID。

@@ -1,6 +1,18 @@
 //! PostgreSQL 管理端开拍前计划时间修改及其审计/实时记录。
 
-use super::*;
+use crate::database::audit_health::AuditWriteResult;
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::admin::{invalid_record, invalid_state, map_sql_error};
+use auction_application::{
+    AdminAuctionScheduleSnapshot, AdminAuctionScheduleTransaction, AdminAuctionSummary,
+    AdminUpdateAuctionScheduleCommand, CompetitionTransactionError, SettlementAuctionSnapshot,
+};
+use auction_domain::AuctionId;
+use chrono::{DateTime, Utc};
+use serde_json::{Value, json};
+use sqlx::Row;
+use sqlx::postgres::PgRow;
+use uuid::Uuid;
 
 #[allow(clippy::manual_async_fn)]
 impl AdminAuctionScheduleTransaction for PostgresCompetitionTransaction {

@@ -4,7 +4,16 @@ use auction_application::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
-use super::*;
+use crate::http::routes::{api_error, not_found_error};
+use auction_application::{
+    AdminLotUpdateError, ApplicationError, AuctionLifecycleAction, CommandLedgerError,
+    CompetitionTransactionError, RecoveryCommandError, SessionError,
+};
+use auction_contracts::{ApiErrorResponseWithData, PublicAccountBlockedResponse};
+use auction_domain::DomainError;
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 
 macro_rules! map_temporarily_unavailable {
     () => {

@@ -1,7 +1,10 @@
 //! PostgreSQL 竞价事实与 lot 最终状态写入。
 
 use super::super::mapping::*;
-use super::super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use auction_application::CompetitionTransactionError;
+use auction_domain::{AcceptedBid, BidAmount, CompetitionPlan, ProxyAuthorizationId};
+use chrono::{DateTime, Utc};
 
 pub(in crate::database::competition) async fn insert_bid(
     transaction: &mut PostgresCompetitionTransaction,

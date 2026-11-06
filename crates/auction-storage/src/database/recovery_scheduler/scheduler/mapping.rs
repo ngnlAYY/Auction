@@ -3,9 +3,12 @@
 #[cfg(feature = "postgres")]
 use super::advance::DueRecoveryRow;
 #[cfg(feature = "postgres")]
-use super::*;
-#[cfg(feature = "postgres")]
 pub(super) use auction_domain::valid_text as valid_recovery_text;
+#[cfg(feature = "postgres")]
+use {
+    crate::database::recovery_scheduler::repository_error, auction_application::RequestHash,
+    sqlx::Row,
+};
 
 pub(super) fn valid_failure_code(value: &str) -> bool {
     auction_domain::valid_text(value, 128)

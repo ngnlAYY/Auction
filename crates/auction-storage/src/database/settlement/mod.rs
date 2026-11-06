@@ -1,22 +1,13 @@
 use std::future::Future;
 
 use auction_application::{
-    CommandLedgerError, PersistedSettlement, PersistedSettlementObligationCount,
     SettlementSnapshot, SettlementTransaction, SettlementTransactionError,
     SettlementTransactionFailure, SettlementTransactionRunner, StoredCommand, TransactionFuture,
     TransactionPolicy,
 };
-use auction_domain::{
-    AuctionId, CommandId, CompetitionPlan, ProxyStatus, RecoveryPolicy, SettlementAmount,
-    SettlementFact, SettlementLine, SettlementMode, SettlementObligation, SettlementObligationKind,
-    SettlementPlan, SettlementPolicy, SettlementWorld, deterministic_uuid,
-};
+use auction_domain::{AuctionId, CommandId, CompetitionPlan, RecoveryPolicy, SettlementPlan};
 use chrono::{DateTime, Utc};
-use serde_json::{Value, json};
-use sqlx::Row;
-use uuid::Uuid;
 
-use crate::database::audit_health::AuditWriteResult as _;
 use crate::database::competition::begin_statement;
 
 use super::{PostgresCompetitionTransaction, PostgresStore};

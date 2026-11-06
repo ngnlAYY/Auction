@@ -2,29 +2,15 @@ use crate::database::TrackedTransaction as Transaction;
 use std::future::Future;
 
 use auction_application::{
-    AdminAuctionCreateTransaction, AdminAuctionScheduleSnapshot, AdminAuctionScheduleTransaction,
-    AdminAuctionSummary, AdminCreateAuctionCommand, AdminLotSummary, AdminLotUpdateCommand,
-    AdminLotUpdateSnapshot, AdminLotUpdateTransaction, AdminUpdateAuctionScheduleCommand,
-    AdminWorldSetEnabledCommand, AdminWorldTransaction, AuctionLifecycleCommand,
-    AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan, AuctionLifecycleResult,
-    AuctionLifecycleTransaction, AuctionLifecycleWriteSummary, AuctionPolicyTemplate,
-    AuctionPreviewSuccessorPlan, CommandInsert, CommandLedgerError, CompetitionCommandAuditContext,
-    CompetitionProxyTransitionRecord, CompetitionSnapshot, CompetitionTransaction,
-    CompetitionTransactionError, ProxyUsageContext, RequestHash, SettlementAuctionSnapshot,
+    CommandInsert, CompetitionCommandAuditContext, CompetitionProxyTransitionRecord,
+    CompetitionSnapshot, CompetitionTransaction, CompetitionTransactionError, ProxyUsageContext,
     SlowProxyExecutionContext, StoredCommand, TransactionFailure, TransactionFuture,
-    TransactionIsolation, TransactionPolicy, TransactionRunner, WorldSnapshot,
+    TransactionPolicy, TransactionRunner,
 };
-use auction_domain::{
-    AcceptedBid, Auction, AuctionId, AuctionRules, AuctionStatus, BidAmount, CompetitionPlan,
-    LotBidState, LotId, ProxyAuthorization, ProxyAuthorizationId, ProxyMode, ProxyStatus,
-    ProxyTerminalReason, UserId, deterministic_uuid,
-};
-use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
-use serde_json::{Value, json};
-use sqlx::{Postgres, Row, postgres::PgRow};
+use auction_domain::{AuctionId, CompetitionPlan, LotId, ProxyAuthorizationId, UserId};
+use chrono::{DateTime, Utc};
+use sqlx::Postgres;
 use uuid::Uuid;
-
-use crate::database::audit_health::AuditWriteResult as _;
 
 use super::PostgresStore;
 #[path = "postgres/admin.rs"]

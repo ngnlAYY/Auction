@@ -1,26 +1,10 @@
 //! 恢复命令的 PostgreSQL 装配；应用规则、幂等、追加事实与审计在同一事务内完成。
 
-use crate::database::TrackedTransaction as Transaction;
-#[cfg(feature = "postgres")]
-use std::collections::BTreeMap;
-
 use auction_application::{
     ApplicationError, ApplicationFuture, RecoveryCommandRepository, RecoveryConfirmationCommand,
     RecoveryConfirmationResult, RecoveryResolutionAdvance, RecoveryResolutionStore,
 };
-#[cfg(feature = "postgres")]
-use auction_application::{RecoveryCommandError, RecoveryConfirmationAction};
-#[cfg(feature = "postgres")]
-use auction_domain::{CommandId, legacy_natural_key_uuid};
 use chrono::Duration as ChronoDuration;
-#[cfg(feature = "postgres")]
-use chrono::{DateTime, Utc};
-#[cfg(feature = "postgres")]
-use serde_json::{Value, json};
-#[cfg(feature = "postgres")]
-use sqlx::{Postgres, Row};
-#[cfg(feature = "postgres")]
-use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
 #[path = "commands/cod_return.rs"]
@@ -52,9 +36,6 @@ use mapping::*;
 use relist::*;
 #[cfg(feature = "postgres")]
 use scope::*;
-
-#[cfg(feature = "postgres")]
-use crate::database::audit_health::AuditWriteResult as _;
 
 use super::DatabaseStore;
 

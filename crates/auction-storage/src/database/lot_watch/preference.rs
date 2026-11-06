@@ -1,12 +1,14 @@
 //! 用户偏好 SQL owner；仅锁 user，竞价读取快照不追加无序 user 锁。
 
-use super::*;
+use crate::database::lot_watch::persistence::sql_error;
 use crate::database::{DatabaseStore, PostgresCompetitionTransaction};
+use auction_application::LotWatchError;
 use auction_application::{
     LotWatchFuture, LotWatchPreference, LotWatchPreferencePort, LotWatchPreferenceTransaction,
     SetLotWatchPreferenceCommand,
 };
 use sqlx::Row;
+use uuid::Uuid;
 
 impl LotWatchPreferencePort for DatabaseStore {
     fn get(&self, user_id: Uuid) -> LotWatchFuture<'_, LotWatchPreference> {

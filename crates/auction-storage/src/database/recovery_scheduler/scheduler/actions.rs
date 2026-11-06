@@ -2,7 +2,11 @@
 //! `RecoveryWorkStore` 暴露，避免把外部副作用带入存储层。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::recovery_scheduler::{map_storage_error, repository_error},
+    sqlx::Postgres,
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 use std::{future::Future, pin::Pin};

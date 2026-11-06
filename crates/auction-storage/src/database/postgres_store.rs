@@ -1,6 +1,8 @@
 //! PostgreSQL 连接池与迁移版本边界。
 
-use super::*;
+use crate::database::pool::TrackedPool;
+use crate::database::profiles::DatabaseConnectionProfile;
+use sqlx::{PgPool, Postgres};
 
 /// PostgreSQL 适配器共享状态；连接池供各功能 owner 的仓储和事务实现复用。
 #[cfg(feature = "postgres")]

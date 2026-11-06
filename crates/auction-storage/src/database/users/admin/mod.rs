@@ -3,28 +3,19 @@
 #[cfg(feature = "postgres")]
 mod postgres;
 
-#[cfg(feature = "postgres")]
-use auction_application::RECOVERY_BUYER_BLACKLIST_ACTOR;
 use auction_application::{
-    AdminRenameRevertWrite, AdminUser, AdminUserBlacklistHistoryEntry, AdminUserCommandKind,
-    AdminUserCommandResult, AdminUserCreateWrite, AdminUserError, AdminUserKeyWrite,
-    AdminUserListItem, AdminUserListRequest, AdminUserMutationAction, AdminUserMutationWrite,
-    AdminUserPage, AdminUserStatus, AdminUserStore, ApplicationError, ApplicationFuture,
-    MailLoginKeyEnvelope, RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklistResult,
-    RecoveryBuyerBlacklister, RequestHash,
+    AdminRenameRevertWrite, AdminUser, AdminUserCommandKind, AdminUserCommandResult,
+    AdminUserCreateWrite, AdminUserError, AdminUserKeyWrite, AdminUserListRequest,
+    AdminUserMutationAction, AdminUserMutationWrite, AdminUserPage, AdminUserStore,
+    ApplicationError, ApplicationFuture, MailLoginKeyEnvelope, RecoveryBuyerBlacklistCommand,
+    RecoveryBuyerBlacklistResult, RecoveryBuyerBlacklister, RequestHash,
 };
 #[cfg(feature = "postgres")]
-use auction_domain::{CommandId, deterministic_uuid, valid_text};
+use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use sqlx::Row;
+use serde_json::Value;
 use uuid::Uuid;
-
-use crate::database::audit_health::AuditWriteResult as _;
-
-#[cfg(feature = "postgres")]
-use sqlx::{postgres::PgRow, types::Json};
 
 use super::DatabaseStore;
 

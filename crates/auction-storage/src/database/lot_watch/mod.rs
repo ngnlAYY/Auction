@@ -2,7 +2,6 @@
 //! 出价事务只追加 `lot_watch_events`；标记、领先周期与提醒在提交后的独立事务应用，
 //! 不从 GET 或代理快照轮询恢复标记。
 
-use crate::database::TrackedTransaction as Transaction;
 mod commands;
 mod facts;
 mod outbox;
@@ -19,8 +18,7 @@ pub(crate) use proof::{
     lock_delivery_lot,
 };
 
-use auction_application::{CompetitionTransactionError, LotWatchError};
+use auction_application::CompetitionTransactionError;
 use sqlx::Postgres;
-use uuid::Uuid;
 
-use persistence::{audit, invalidate, sql_error};
+use persistence::sql_error;
