@@ -1,13 +1,6 @@
-//! 缓存、HTTP 安全、realtime 和会话配置校验。
+//! HTTP 安全、realtime 和会话配置校验。
 
 use super::super::*;
-
-pub(crate) fn validate_cache(config: &CacheConfig) -> Result<(), ConfigError> {
-    if !(1..=3600).contains(&config.public_rules_ttl_seconds) {
-        return Err(ConfigError::InvalidCacheConfig("public_rules_ttl_seconds 必须位于 1 至 3600"));
-    }
-    Ok(())
-}
 
 pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), ConfigError> {
     if config.login_rate_limit == 0 || config.login_rate_limit > 10_000 {

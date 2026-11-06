@@ -10,7 +10,7 @@
 - 目标必须 PG18 独立实例/端口，示例为 `127.0.0.1:55432`；数据库名仍为 `auction`（manifest 绑定原库名摘要），若源库不同，逐处替换。不能用生产实例上的另一个库冒充隔离，也不能修改 manifest 绕过库名绑定。先人工核对实例身份、监听端口、磁盘余量与其他连接。
 - 把 CI 候选制品解压到 `/srv/auction-drill/candidate/`，校验包摘要和包内 `SHA256SUMS`，记录版本、完整提交、包摘要与新 CLI 摘要。保留当前线上版本的旧制品于 `/srv/auction-drill/previous/`，用于测量停机排空。演练必须使用待部署制品；任何迁移、二进制或相关配置变更后重做并生成新回执。
 - 创建独立 `/srv/auction-drill/config/`，三角色使用同一个隔离 `common_file`，runtime 要么三者同用隔离副本，要么三者都省略。敏感 TOML 中的 PG 与维护连接都指向隔离端口；维护库为 `postgres`，应用库为原库名；保存备份所需的历史数据密钥，敏感文件 0600，不把连接串、Cookie、密钥、玩家信息或 TOML 原文写进回执。
-- 在有效配置中关闭 `[worker.mooglemail]`、`[worker.forum]`、`[worker.operations_alert]` 和 `[auction.schedule]` 的 `enabled`；runtime 若接管 schedule，也须关闭其 `operations.schedule.enabled`。关闭 tracing/异机备份，打卡地址留空；Redis 若使用则为独立实例。`auction.schedule.enabled=false` 只停止新排期创建，Worker 仍可处理恢复库中的既有生命周期/结算，所有变化仅允许进入隔离副本。
+- 在有效配置中关闭 `[worker.mooglemail]`、`[worker.forum]`、`[worker.operations_alert]` 和 `[auction.schedule]` 的 `enabled`；runtime 若接管 schedule，也须关闭其 `operations.schedule.enabled`。关闭 tracing/异机备份，打卡地址留空。`auction.schedule.enabled=false` 只停止新排期创建，Worker 仍可处理恢复库中的既有生命周期/结算，所有变化仅允许进入隔离副本。
 - Public/Admin 仅监听本机独立端口（示例 `18090/18091`），Public 使用独立 realtime consumer；Worker control 启用，socket 使用 `/srv/auction-drill/run/worker/control.sock`，目录、组和 peer allowlist 按[ops/config/README.md#worker](../config/README.md#worker)准备。Admin 的 worker control 路径与之匹配。用新 CLI 的 `config check --strict` 和 `config show worker` 核对有效配置，不能只修改被 runtime 覆盖的 fallback。
 - 示例使用直接运行的分体角色，始终不装入生产 systemd；因此数据库写命令显式 `--no-systemd`，由执行人确认本演练三角色均已停止。此声明不跳过 `auction-server` 的 owner 锁。合并部署改用同一候选提交的合并制品、独立配置运行 supervisor，记录其实际排空时间，停止后以同一服务账号通过 owner 锁迁移；readiness 仍逐角色检查。
 

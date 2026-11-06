@@ -6,10 +6,8 @@ use std::{fs, path::Path, sync::Arc};
 use anyhow::Context;
 use auction_application::{
     AdminRulesCandidate, AdminRulesPort, AdminRulesPublishCommand, AdminRulesRequest,
-    MAX_RULE_MARKDOWN_BYTES, PUBLIC_RULES_LOCALES, RequestHash, lower_hex, public_rules_cache_key,
+    MAX_RULE_MARKDOWN_BYTES, PUBLIC_RULES_LOCALES, RequestHash, lower_hex,
 };
-use auction_cache::CacheStore;
-use auction_config::CacheBackend;
 use auction_contracts::AdminRulesPublishRequest;
 use auction_storage::DatabaseAdminRulesCommands;
 use serde::Serialize;
@@ -55,36 +53,29 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: RulesCommand) -> anyhow
         .map(|locale| load_source(&directory, locale))
         .collect::<anyhow::Result<Vec<_>>>()?;
 
-    let (config, store) =
+    let (_, store) =
         super::worker_store(config_dir, auction_storage::DatabaseConnectionPurpose::CliOperations)
             .await?;
     let result = async {
-        let cache = match config.cache.backend {
-            CacheBackend::Disabled => CacheStore::disabled(),
-            CacheBackend::Redis => CacheStore::redis(config.redis_url().context("缺少 redis_url")?)
-                .context("连接 Redis 失败")?,
-        };
         let rules =
             DatabaseAdminRulesCommands::new(Arc::clone(&store), Arc::new(super::SystemClock));
-        import(&rules, &cache, sources, command_id, &actor).await
+        import(&rules, sources, command_id, &actor).await
     }
     .await;
     store.postgres_pool().close().await;
-    let (documents, cache_failures) = result?;
+    let documents = result?;
     print_json(&serde_json::json!({
         "command_id": command_id,
         "documents": documents,
-        "cache_invalidation_failures": cache_failures,
     }))
 }
 
 async fn import(
     rules: &dyn AdminRulesPort,
-    cache: &CacheStore,
     sources: Vec<RulesSource>,
     command_id: Uuid,
     actor: &str,
-) -> anyhow::Result<(Vec<DocumentReport>, Vec<String>)> {
+) -> anyhow::Result<Vec<DocumentReport>> {
     // 写入前核对全部语言；不同正文意味着 Admin 已有权威内容，导入不得覆盖。
     let mut current = Vec::with_capacity(sources.len());
     for source in &sources {
@@ -144,16 +135,7 @@ async fn import(
             command_id: Some(child),
         });
     }
-    // 缓存不是权威状态；失效失败不回滚已提交发布，但必须报告给操作者。
-    let mut failures = Vec::new();
-    for document in &documents {
-        if let Some(key) = public_rules_cache_key(&document.locale)
-            && cache.invalidate(&key).await.is_err()
-        {
-            failures.push(document.locale.clone());
-        }
-    }
-    Ok((documents, failures))
+    Ok(documents)
 }
 
 /// 读取 `<locale>.md`：去掉开头单个 BOM，首个非空行去掉前导 `#` 作为标题，正文规范化后校验。

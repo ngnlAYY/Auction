@@ -41,11 +41,6 @@ impl AppConfig {
         self.worker.poll_interval_seconds.unwrap_or(60)
     }
 
-    /// 返回 Redis URL。只有 `cache.backend = "redis"` 时才能使用。
-    pub fn redis_url(&self) -> Option<&str> {
-        self.secrets.redis_url.as_ref().map(SecretString::expose_secret)
-    }
-
     /// 返回 E-Hentai Cookie。只允许外部集成适配器读取。
     pub fn ehentai_cookie(&self) -> Option<&str> {
         self.secrets.ehentai_cookie.as_ref().map(SecretString::expose_secret)

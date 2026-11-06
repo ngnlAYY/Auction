@@ -29,13 +29,6 @@ migration_compatibility_mode = "shadow"
 # 可选：默认 true；运行时 readiness_cache_enabled 未设置、clear 或过期时使用此基线；HTTP 就绪缓存 1 秒，false 回到逐次探测。
 cache_enabled = true
 
-# 可选区块：可丢弃缓存设置；省略整个区块等同于关闭缓存。
-[cache]
-# 可选：缓存后端，可填 disabled 或 redis；省略时为 disabled。
-backend = "disabled"
-# 可选：Public 规则读模型缓存 TTL 秒数，范围 1-3600，默认 30。
-public_rules_ttl_seconds = 30
-
 # 可选区块：仅由 CLI 的 backup scheduled 消费；省略时取以下默认值，启停由 systemd timer 控制。
 [backup]
 # 可选：本地保留最近多少份已完成定时备份，默认 7，范围 1–365；不清理手动备份。

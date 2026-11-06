@@ -40,7 +40,7 @@
 | --- | --- |
 | [ops/README.md](../ops/README.md) | 部署形态、首次部署、systemd 服务与顺序控制、反向代理、升级、监控与日志 |
 | [ops/dependencies.md](../ops/dependencies.md) | 依赖与工具链升级节奏、发布冻结日历、Dependabot 只作提示、门禁与窗口流程 |
-| [ops/config/README.md](../ops/config/README.md) | 配置文件结构、各区块字段、runtime 接管、缓存 |
+| [ops/config/README.md](../ops/config/README.md) | 配置文件结构、各区块字段、runtime 接管 |
 | [ops/keys/README.md](../ops/keys/README.md) | 四个密钥域、多 key 解密、离线重加密与回执、旧密钥 12 个月保留期、Cookie 轮换 |
 | [ops/deploy/RECOVERY.md](../ops/deploy/RECOVERY.md) | 备份、校验、恢复与破坏性重建流程 |
 | [apps/auction-cli/README.md](../apps/auction-cli/README.md) | 运维命令行完整说明 |
@@ -53,7 +53,7 @@
 
 领域与应用：[crates/auction-domain/README.md](../crates/auction-domain/README.md) · [crates/auction-application/README.md](../crates/auction-application/README.md) · [crates/auction-contracts/README.md](../crates/auction-contracts/README.md)
 
-适配器：[crates/auction-storage/README.md](../crates/auction-storage/README.md) · [crates/auction-integrations/README.md](../crates/auction-integrations/README.md) · [crates/auction-http/README.md](../crates/auction-http/README.md) · [crates/auction-jobs/README.md](../crates/auction-jobs/README.md) · [crates/auction-cache/README.md](../crates/auction-cache/README.md) · [crates/auction-setup/README.md](../crates/auction-setup/README.md)
+适配器：[crates/auction-storage/README.md](../crates/auction-storage/README.md) · [crates/auction-integrations/README.md](../crates/auction-integrations/README.md) · [crates/auction-http/README.md](../crates/auction-http/README.md) · [crates/auction-jobs/README.md](../crates/auction-jobs/README.md) · [crates/auction-setup/README.md](../crates/auction-setup/README.md)
 
 基础设施：[crates/auction-config/README.md](../crates/auction-config/README.md) · [crates/auction-observability/README.md](../crates/auction-observability/README.md) · [crates/auction-process/README.md](../crates/auction-process/README.md)
 

@@ -23,7 +23,6 @@ impl AppConfig {
             tracing,
             shutdown,
             realtime,
-            cache,
             backup,
             auction,
             worker,
@@ -144,10 +143,6 @@ impl AppConfig {
             }
         }
 
-        if cache.backend == CacheBackend::Redis && secrets.redis_url.is_none() {
-            return Err(ConfigError::MissingRedisUrl);
-        }
-        validate_cache(&cache)?;
         let worker_concurrency = worker.concurrency.unwrap_or(8);
         let worker_poll_interval_seconds = worker.poll_interval_seconds.unwrap_or(60);
         if worker.recovery_retry_delay_seconds == 0 || worker.recovery_retry_delay_seconds > 86_400
@@ -282,7 +277,6 @@ impl AppConfig {
             tracing,
             shutdown,
             realtime,
-            cache,
             backup,
             auction,
             worker,
