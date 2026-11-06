@@ -1,33 +1,22 @@
-//! MoogleMail 周期观察与恢复：Inbox 由持久 intake journal 处理，Read Mail 仅观察。
-//!
-//! 新 Send 只凭原尝试冻结的主题、正文摘要、世界、收件人和完整资产唯一恢复；
-//! 旧行保留原有保守证明，不能以当前登录 key 重建历史发送。未找到 Sent 不证明未发送，
-//! 未知 Send 永不自动重试。compose 草稿仍只在精确匹配后持短时独占锁受控丢弃。
+//! Sent/Take 恢复与 Read Mail 观察：只按原发送尝试的冻结事实比对，找不到不证明未发送。
 
-use std::sync::Arc;
 use std::time::Instant;
 
 use serde_json::json;
-use uuid::Uuid;
 
 use crate::errors::ApplicationError;
-use crate::errors::diagnostics::{
-    DiagnosticContext, DiagnosticDisposition, DiagnosticError, DiagnosticLevel, diagnostic_world,
-    record_error,
-};
-use crate::ports::core::{Clock, RepositoryError};
 use crate::ports::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
 };
 use crate::ports::mail::{
-    MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxEvidenceStore,
-    MoogleMailboxInboxAssets, MoogleMailboxMaintenance, MoogleMailboxSentEntry,
-    MoogleMailboxSentState, MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
-    mail_recipient_is_list_projection, sent_list_minute_start,
+    MoogleMailboxInboxAssets, MoogleMailboxSentEntry, MoogleMailboxSentState,
+    MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend, mail_recipient_is_list_projection,
+    sent_list_minute_start,
 };
 
-/// 单轮最多核对的投递数；达到上限即停止，不越过未处理后缀推进持久游标。
-const RECOVERY_PER_SWEEP: usize = 20;
+use super::MailboxMaintenanceService;
+use super::diagnostics::{check_deadline, record_unpersisted_error, repository_error};
+
 /// 相同列表投影过多时保留未知，不读取无界详情或只选择前几个结果冒充唯一性。
 const EXACT_MATCH_CANDIDATES: usize = 32;
 /// 单条结算投递在完整 Sent 中按同主题前缀最多读取的详情数；超出即保守放弃目击。
@@ -35,41 +24,7 @@ const SIGHTING_CANDIDATES: usize = 4;
 /// 单条投递允许的维护重排队次数；达到上限后保留人工核对，防止无限重试。
 const MAX_SWEEP_RETRIES: i64 = 2;
 
-/// 单轮维护结果，只包含安全统计，不含邮件正文。
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct MailboxMaintenanceReport {
-    pub compose_clean: bool,
-    pub compose_error: Option<String>,
-    pub matched_delivery: Option<Uuid>,
-    pub discarded: bool,
-    pub compose_matches: usize,
-    pub sent_observed: usize,
-    pub sent_recovered: usize,
-    pub sent_candidates: usize,
-    pub sent_matched: usize,
-    pub sent_state_failed: usize,
-    /// 最近一次详情读取失败的安全分类，便于定位协议漂移。
-    pub sent_state_error: Option<String>,
-    /// 本轮退回收发队列重试的投递数。
-    pub sweep_requeued: usize,
-}
-
-/// 维护服务；由 Worker 在固定周期调用，不存在自动重试队列。
-pub struct MailboxMaintenanceService {
-    maintenance: Arc<dyn MoogleMailboxMaintenance>,
-    store: Arc<dyn MoogleMailboxEvidenceStore>,
-    clock: Arc<dyn Clock>,
-}
-
 impl MailboxMaintenanceService {
-    pub fn new(
-        maintenance: Arc<dyn MoogleMailboxMaintenance>,
-        store: Arc<dyn MoogleMailboxEvidenceStore>,
-        clock: Arc<dyn Clock>,
-    ) -> Self {
-        Self { maintenance, store, clock }
-    }
-
     /// Read Mail 独立预算观察；Worker 与 Sent/compose 维护及 Inbox intake 分别驱动。
     /// 返回值是本轮实际扫描到的行数：增量轮只含水位之后的新增，每日校验轮为完整数量；
     /// 它只是观察计数，不是已读、收取或业务完成证明。
@@ -87,263 +42,8 @@ impl MailboxMaintenanceService {
         Ok(observed)
     }
 
-    /// Worker 以同一总截止点包住完整 future；DB、凭据排队与所有远端操作均计入维护预算。
-    /// 普通页面的远端失败分开记录，不清除已获证据；游标与 discard 围栏在取消后仍保留。
-    pub async fn sweep(
-        &self,
-        world_id: &str,
-        deadline: Instant,
-    ) -> Result<MailboxMaintenanceReport, ApplicationError> {
-        self.sweep_with_activity(
-            world_id,
-            deadline,
-            &crate::ports::operations::ExternalWriteActivity::default(),
-        )
-        .await
-    }
-
-    /// 活动从本次 discard 围栏调用前覆盖交接与外写；确认一次性尝试提交后才授权 POST。
-    pub async fn sweep_with_activity(
-        &self,
-        world_id: &str,
-        deadline: Instant,
-        activity: &crate::ports::operations::ExternalWriteActivity,
-    ) -> Result<MailboxMaintenanceReport, ApplicationError> {
-        if !matches!(world_id, "main" | "isekai") {
-            return Err(repository_error("维护世界无效"));
-        }
-        check_deadline(deadline)?;
-        let mut report = MailboxMaintenanceReport::default();
-        let candidates = self.store.unproven_sends(world_id, 200).await?;
-        let sent = self.recover_sent(world_id, &candidates, deadline).await?;
-        report.sent_observed = sent.0;
-        report.sent_recovered = sent.1;
-        report.sent_candidates = sent.2;
-        report.sent_matched = sent.3;
-        report.sent_state_failed = sent.4;
-        report.sent_state_error = sent.5;
-        report.sweep_requeued = sent.6;
-        check_deadline(deadline)?;
-        let compose = match self.maintenance.compose(world_id).await {
-            Ok(compose) => compose,
-            Err(error) => {
-                record_error(
-                    DiagnosticLevel::Warn,
-                    error.diagnostic_kind(),
-                    "mail_maintenance",
-                    "read_compose",
-                    DiagnosticContext {
-                        world: diagnostic_world(world_id),
-                        disposition: Some(DiagnosticDisposition::Unpersisted),
-                        ..Default::default()
-                    },
-                );
-                report.compose_error = Some(error.to_string());
-                return Ok(report);
-            }
-        };
-        report.compose_clean = compose.clean;
-        if compose.clean {
-            return Ok(report);
-        }
-        let mut matches =
-            candidates.iter().filter_map(|candidate| candidate.send.as_ref()).filter(|candidate| {
-                candidate.world_id == world_id && compose_matches(candidate, &compose)
-            });
-        let Some(matched) = matches.next() else { return Ok(report) };
-        report.compose_matches = 1 + matches.count();
-        if report.compose_matches != 1 {
-            return Ok(report);
-        }
-        let delivery_id = matched.delivery_id;
-        report.matched_delivery = Some(delivery_id);
-        check_deadline(deadline)?;
-        // 围栏调用开始即受保护；关闭先赢时不消费一次性尝试，保留原持久状态。
-        // 已登记的数据库往返与后续外写共用排空截止，登记本身不授权 discard。
-        if !activity.enter_critical() {
-            return Ok(report);
-        }
-        if !self
-            .store
-            .begin_compose_discard(
-                delivery_id,
-                matched.fencing_version,
-                matched.send_expectation.as_ref(),
-            )
-            .await?
-        {
-            report.compose_error = Some("草稿丢弃已尝试或投递状态已变化，保留人工核对".to_owned());
-            return Ok(report);
-        }
-        // 围栏在排队和 POST 前持久提交；其后任意超时或取消都不能自动重新授权 discard。
-        check_deadline(deadline)?;
-        let outcome = match self.maintenance.discard_compose(world_id, &compose).await {
-            Ok(outcome) => outcome,
-            Err(error) => {
-                record_error(
-                    DiagnosticLevel::Warn,
-                    error.diagnostic_kind(),
-                    "mail_maintenance",
-                    "discard_compose",
-                    DiagnosticContext {
-                        world: diagnostic_world(world_id),
-                        disposition: Some(DiagnosticDisposition::Unpersisted),
-                        ..Default::default()
-                    },
-                );
-                report.compose_error = Some(error.to_string());
-                return Ok(report);
-            }
-        };
-        report.discarded = outcome == MoogleMailboxDiscard::Discarded;
-        if report.discarded {
-            self.store
-                .record_compose_discard(
-                    delivery_id,
-                    matched.fencing_version,
-                    json!({
-                        "observed_at": self.clock.now(),
-                        "outcome": "discarded",
-                        "matched_reference": matched.reference,
-                        "recipient_matches": true,
-                        "cod_matches": true,
-                    }),
-                )
-                .await?;
-            activity.complete();
-        }
-        report.compose_clean = outcome == MoogleMailboxDiscard::AlreadyClean || report.discarded;
-        Ok(report)
-    }
-
-    async fn recover_sent(
-        &self,
-        world_id: &str,
-        candidates: &[MoogleMailboxSweepCandidate],
-        deadline: Instant,
-    ) -> Result<(usize, usize, usize, usize, usize, Option<String>, usize), ApplicationError> {
-        // 只有可重建的 Send 候选才读取 Sent；Take 与纯游标轮转不依赖该列表。
-        let needs_sent = candidates
-            .iter()
-            .any(|slot| slot.send.as_ref().is_some_and(|candidate| candidate.operation == "send"));
-        let (entries, mut state_error) = if needs_sent {
-            match self.maintenance.sent_entries(world_id).await {
-                Ok(entries) => (Some(entries), None),
-                Err(error) => {
-                    record_error(
-                        DiagnosticLevel::Warn,
-                        error.diagnostic_kind(),
-                        "mail_maintenance",
-                        "read_sent_entries",
-                        DiagnosticContext {
-                            world: diagnostic_world(world_id),
-                            disposition: Some(DiagnosticDisposition::Unpersisted),
-                            ..Default::default()
-                        },
-                    );
-                    (None, Some(error.to_string()))
-                }
-            }
-        } else {
-            (None, None)
-        };
-        // 按已读取的稳定环形批次逐条开始；候选批次本身不推进持久游标。
-        let mut recovery_budget = RECOVERY_PER_SWEEP;
-        let mut observed = 0;
-        let mut attempted = 0;
-        let mut recovered = 0;
-        let mut matched_count = 0;
-        let mut failed = usize::from(state_error.is_some());
-        let mut requeued = 0;
-        for slot in candidates {
-            if recovery_budget == 0 {
-                break;
-            }
-            check_deadline(deadline)?;
-            if entries.is_none()
-                && slot.send.as_ref().is_some_and(|candidate| candidate.operation == "send")
-            {
-                // 未获得完整 Sent 列表就没有开始此候选，保留它及其后缀的持久轮转位置。
-                break;
-            }
-            if !self.store.record_sweep_attempt(world_id, slot.delivery_id).await? {
-                continue;
-            }
-            attempted += 1;
-            // 不可重建的旧行也获得一次轮转机会，但不读取远端、不产生恢复证明。
-            let Some(candidate) = slot.send.as_ref() else { continue };
-            if candidate.world_id != world_id {
-                continue;
-            }
-            let step = match candidate.operation.as_str() {
-                "send" => {
-                    let Some(entries) = entries.as_deref() else { continue };
-                    recovery_budget -= 1;
-                    if let Some(expectation) = candidate.send_expectation.as_ref() {
-                        let mut step = self
-                            .recover_frozen_send(
-                                world_id,
-                                candidate,
-                                expectation,
-                                entries,
-                                candidates,
-                                deadline,
-                            )
-                            .await?;
-                        if !step.recovered {
-                            self.sight_settlement_reference(
-                                world_id,
-                                candidate,
-                                expectation,
-                                entries,
-                                deadline,
-                                &mut step,
-                            )
-                            .await?;
-                        }
-                        step
-                    } else {
-                        match candidate.origin_kind.as_str() {
-                            "settlement" => {
-                                self.recover_settlement(world_id, candidate, entries).await?
-                            }
-                            "mail_intake" => {
-                                self.recover_notice(world_id, candidate, entries).await?
-                            }
-                            _ => continue,
-                        }
-                    }
-                }
-                "take" if candidate.origin_kind == "mail_intake" => {
-                    recovery_budget -= 1;
-                    self.recover_take(world_id, candidate).await?
-                }
-                _ => continue,
-            };
-            if step.matched {
-                matched_count += 1;
-            }
-            if step.observed {
-                observed += 1;
-            }
-            if step.recovered {
-                recovered += 1;
-            }
-            if step.failed {
-                failed += 1;
-            }
-            if step.requeued {
-                requeued += 1;
-            }
-            if step.error.is_some() {
-                state_error = step.error;
-            }
-        }
-        Ok((observed, recovered, attempted, matched_count, failed, state_error, requeued))
-    }
-
     /// 所有来源都比对原 sending 尝试，不读取当前模板、key 或业务正文来猜测历史发送。
-    async fn recover_frozen_send(
+    pub(super) async fn recover_frozen_send(
         &self,
         world_id: &str,
         candidate: &MoogleMailboxUnprovenSend,
@@ -436,7 +136,7 @@ impl MailboxMaintenanceService {
     /// 结算主题带唯一义务 reference；冻结匹配未找回时，在完整 Sent 列表中不限时间寻找同主题邮件。
     /// 命中只记录目击，供 Admin 阻止重试或判失败并转人工 Sent 证明；目击不构成发送证明，
     /// 也不推进投递、资金或履约。列表同前缀条目过多时保守放弃，不读取无界详情。
-    async fn sight_settlement_reference(
+    pub(super) async fn sight_settlement_reference(
         &self,
         world_id: &str,
         candidate: &MoogleMailboxUnprovenSend,
@@ -501,7 +201,7 @@ impl MailboxMaintenanceService {
     }
 
     /// 结算类：标题携带义务 reference，详情必须仍带对应装备或 carrier。
-    async fn recover_settlement(
+    pub(super) async fn recover_settlement(
         &self,
         world_id: &str,
         candidate: &MoogleMailboxUnprovenSend,
@@ -557,7 +257,7 @@ impl MailboxMaintenanceService {
     }
 
     /// 通知需有原入站关联、精确正文及发送围栏后的有界时间证明；重复通用模板失败关闭。
-    async fn recover_notice(
+    pub(super) async fn recover_notice(
         &self,
         world_id: &str,
         candidate: &MoogleMailboxUnprovenSend,
@@ -574,17 +274,7 @@ impl MailboxMaintenanceService {
             Ok(Some(expectation)) => expectation,
             Ok(None) => return Ok(RecoveryStep::default()),
             Err(error) => {
-                record_error(
-                    DiagnosticLevel::Warn,
-                    error.diagnostic_kind(),
-                    "mail_maintenance",
-                    "read_notice_expectation",
-                    DiagnosticContext {
-                        world: diagnostic_world(world_id),
-                        disposition: Some(DiagnosticDisposition::Unpersisted),
-                        ..Default::default()
-                    },
-                );
+                record_unpersisted_error("read_notice_expectation", world_id, &error);
                 return Ok(RecoveryStep {
                     failed: true,
                     error: Some(error.to_string()),
@@ -644,7 +334,7 @@ impl MailboxMaintenanceService {
     }
 
     /// Take 只解释原账号下的明确缺失或完整资产观察；旧无绑定记录保留人工核对。
-    async fn recover_take(
+    pub(super) async fn recover_take(
         &self,
         world_id: &str,
         candidate: &MoogleMailboxUnprovenSend,
@@ -668,17 +358,7 @@ impl MailboxMaintenanceService {
             match self.maintenance.inbox_assets(world_id, &candidate.inbound_mail_id).await {
                 Ok(value) => value,
                 Err(error) => {
-                    record_error(
-                        DiagnosticLevel::Warn,
-                        error.diagnostic_kind(),
-                        "mail_maintenance",
-                        "read_inbox_assets",
-                        DiagnosticContext {
-                            world: diagnostic_world(world_id),
-                            disposition: Some(DiagnosticDisposition::Unpersisted),
-                            ..Default::default()
-                        },
-                    );
+                    record_unpersisted_error("read_inbox_assets", world_id, &error);
                     return Ok(RecoveryStep {
                         failed: true,
                         error: Some(error.to_string()),
@@ -801,17 +481,7 @@ impl MailboxMaintenanceService {
         match self.maintenance.sent_state(world_id, entry, self.clock.now()).await {
             Ok(state) => Ok(Some(state)),
             Err(error) => {
-                record_error(
-                    DiagnosticLevel::Warn,
-                    error.diagnostic_kind(),
-                    "mail_maintenance",
-                    "read_sent_state",
-                    DiagnosticContext {
-                        world: diagnostic_world(world_id),
-                        disposition: Some(DiagnosticDisposition::Unpersisted),
-                        ..Default::default()
-                    },
-                );
+                record_unpersisted_error("read_sent_state", world_id, &error);
                 step.failed = true;
                 step.error = Some(error.to_string());
                 Ok(None)
@@ -822,13 +492,13 @@ impl MailboxMaintenanceService {
 
 /// 单条候选的恢复进度；只用于本轮统计，不进入持久状态。
 #[derive(Default)]
-struct RecoveryStep {
-    matched: bool,
-    observed: bool,
-    recovered: bool,
-    requeued: bool,
-    failed: bool,
-    error: Option<String>,
+pub(super) struct RecoveryStep {
+    pub(super) matched: bool,
+    pub(super) observed: bool,
+    pub(super) recovered: bool,
+    pub(super) requeued: bool,
+    pub(super) failed: bool,
+    pub(super) error: Option<String>,
 }
 
 fn frozen_entry_matches(
@@ -957,51 +627,4 @@ fn take_assets_match(
     let mut expected = candidate.attachment_ids.iter().collect::<std::collections::HashSet<_>>();
     expected.len() == candidate.attachment_ids.len()
         && present.equipment_ids.iter().all(|id| expected.remove(id))
-}
-
-fn compose_matches(
-    candidate: &MoogleMailboxUnprovenSend,
-    compose: &MoogleMailboxComposeState,
-) -> bool {
-    if candidate.operation != "send" {
-        return false;
-    }
-    if let Some(expectation) = &candidate.send_expectation {
-        let (Some(expected), Some(observed)) =
-            (&expectation.credential, &compose.observation_credential)
-        else {
-            return false;
-        };
-        return expectation.validate()
-            && expectation.world_id == candidate.world_id
-            && expected.credential_id == observed.credential_id
-            && expected.credential_version == observed.credential_version
-            && expectation.recipient.eq_ignore_ascii_case(&compose.recipient)
-            && expectation.subject == compose.subject
-            && expectation.body_digest == compose.body_digest
-            && compose.cod == Some(expectation.cod)
-            && compose.credits == expectation.credits
-            && compose.equipment_ids == expectation.equipment_ids;
-    }
-    // 通知类没有业务 reference；空串会匹配任意草稿，必须显式排除。
-    // 旧行也必须核对原装备身份；总附件数还包含 Credits，不能代替 EID 证明。
-    !candidate.reference.is_empty()
-        && candidate.recipient.eq_ignore_ascii_case(&compose.recipient)
-        && compose.cod == Some(candidate.cod)
-        && compose.credits == candidate.credits
-        && candidate.attachment_ids.windows(2).all(|ids| ids[0] < ids[1])
-        && compose.equipment_ids == candidate.attachment_ids
-        && (compose.subject.contains(&candidate.reference)
-            || compose.body.contains(&candidate.reference))
-}
-
-fn check_deadline(deadline: Instant) -> Result<(), ApplicationError> {
-    if Instant::now() >= deadline {
-        return Err(repository_error("MoogleMail 维护总预算耗尽"));
-    }
-    Ok(())
-}
-
-fn repository_error(message: &str) -> ApplicationError {
-    RepositoryError::Failed(message.to_owned()).into()
 }

@@ -325,7 +325,7 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 使升级前写入的冻结快照继续成立。等级登记 `breaking`：新列会出现在整行 JSON 中，单独回退到
 旧程序会让这些证明失败关闭。
 
-复现入口：`cargo test -p auction-storage --features test-db --test perf -- --ignored --nocapture`
+复现入口：`cargo test -p auction-storage --features test-db --test postgres -- --ignored perf --nocapture`
 （默认 `just test-db` 不运行；报告写入 `AUCTION_PERF_REPORT_DIR`，默认 `target/perf/<unix 秒>`）。
 
 ## 热点与连接竞争测量
@@ -432,7 +432,7 @@ cargo test -p auction-storage --features test-db --test postgres \
   -- postgres_final_cross_lot_bids_do_not_exhaust_serializable_retries --ignored --nocapture
 ```
 
-复现入口：`cargo test -p auction-storage --features test-db --test perf -- --ignored --nocapture`
+复现入口：`cargo test -p auction-storage --features test-db --test postgres -- --ignored perf --nocapture`
 （默认 `just test-db` 不运行；报告写入 `AUCTION_PERF_REPORT_DIR`）。
 
 ### W12.1 残余的实测归因（未消除，属于待决策的设计权衡）

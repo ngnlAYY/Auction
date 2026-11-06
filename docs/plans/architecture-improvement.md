@@ -187,7 +187,7 @@
 | W0 | 进行中 | — | 未部署 | W0.1–W0.14 已提交；W0.15 随 M2a；W0.16 随 M3 |
 | W0.1 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`ApplicationError::safe_kind()` 闭集分类，首个调用方为履约 reconcile 未持久化错误日志 |
 | W0.7 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；COD 实收资金化各拒绝分支细分为独立 `safe_kind`（target `auction::settlement::funding_diagnostics`），持久化 defer reason 不变、无迁移；部署后按 `ops/README.md` 的 D1 诊断章节收集分类证据 |
-| W0.14 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；审计失败按 SQLSTATE 分类（决策 32、71），`[readiness] audit_failure_mode` 默认 `shadow`、就绪缓存 1 秒；观察到差异只在 `transient` 类后由用户切换 `classified`（决策 72），W0.6 的超时须在切换后启用 |
+| W0.14 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；审计失败按 SQLSTATE 分类（决策 32、71），`[readiness] audit_failure_mode` 默认 `classified`、就绪缓存 1 秒；观察到差异只在 `transient` 类后由用户切换 `classified`（决策 72），W0.6 的超时须在切换后启用 |
 | W0.12 | 已提交 | 主机与数据库 `5e2f455b`；浏览器 `fddd9fbb` | — | 执行者：Claude（经用户批准的线上只读核实）；结论见[docs/plans/architecture-improvement/baseline.md#w012-线上只读核实2026-11-03](architecture-improvement/baseline.md#w012-线上只读核实2026-11-03)；main Sent 37 页 549 行、MID 跨分钟严格递减（同分钟可逆序），D3 约 41 天触顶；论坛发帖时间到分钟、按账号时区（UTC+8）显示；isekai 邮件因角色战斗中未读，留待下次核实 |
 | W0.9 | 已提交 | `57d1748d` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 E）实现、Claude 监督；HTTP 请求量/状态码/延迟、WebSocket 连接、限流拒绝指标；`[metrics] reject_forwarded_requests` 默认 true（带转发头的 `/metrics` 请求返回 404），CDN 头待 W0.12 |
 | W0.11 | 已提交 | `0a30c5c8` | 未部署 | 同上；`RateLimitedLog` 固定类别 60 秒窗口去重，首个调用点为 delivery 循环失败日志；`log_filter` 加 `auction_observability::log_dedup=off` 可关闭 |
@@ -225,8 +225,6 @@
 | W1.6 | 已提交 | 随本提交 | — | 论坛客户端复用 PriorityGate，写流程前台、读后台；保留论坛自身 429/未知写入分类 |
 | W14.9 | 已提交 | 随本提交 | — | 零资产收件人不存在失败关闭；发送前用户名改名退役 lot_watch 提醒 |
 | W1.4 | 已提交 | 随本提交 | — | 前缀扫描/每日全校验/回退；迁移 083 持久化 Sent/Read 水位，按 credential/version/world/endpoint 隔离；Inbox DB 游标权威 |
-| W12.4 | 进行中 | 随本提交 | — | 匿名读独立限流/并发门与写隔离、IPv6 /64、倒计时 5s 缓存；价格历史 EXPLAIN 基线，索引/查询改写待评估 |
-| W14.3 | 进行中 | 随本提交 | — | 投稿接收回执（正文、失效、账本门禁）；卖方汇总/换季提醒因 origin/冻结边界需后续 |
 | W1.5 | 已提交 | 随本提交 | — | 履约证据按 retry_count 1→2→4→8→10 分钟退避，付款截止前后回到基础频率；不改期限/策略 |
 | W1.7 | 已提交 | 随本提交 | — | 出价被超提醒在 lot 有效截止后、sending 围栏前退役；MM/PM 一致；五语言稿 |
 | W1.9 | 已提交 | 随本提交 | — | `external_access_paused` 运行时开关与到期回退；Worker 各外部轮次 admission 门；已越过 fence 的写入不取消 |
@@ -268,7 +266,7 @@
 | W13.4 | 已提交 | `42bd8477` | 未部署 | 同上；`check.sh markdown-links` 离线检查相对链接与锚点，现有文档无断链 |
 | W13.5 | 已提交 | `42bd8477` | 未部署 | 同上；CI 每周一 04:17 UTC 运行 `security-audit`；发布 tag 审计待 W7.1 |
 | W13.2 | 已提交 | `0a30c5c8` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 G）实现、Claude 监督；workspace `unwrap_used`/`expect_used = deny`，测试上下文经 `clippy.toml` 豁免；宏展开内的调用不受 Clippy 覆盖，见 `ci/checks/README.md` |
-| W14 | 未开始 | — | — | W14.8、W14.1、W14.2、W14.4–W14.6、W14.9 随 M2b；W14.3 随 M4（决策 64）；W14.7 取消（决策 65）；W14.10 随各项交付；W14.11 随 M2b（决策 67） |
+| W14 | 已提交 | — | — | W14.1–W14.6、W14.8–W14.11 已提交；W14.7 取消 |
 
 ### M1 收尾记录（2026-11-04）
 

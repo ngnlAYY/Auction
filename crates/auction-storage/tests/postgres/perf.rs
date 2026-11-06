@@ -9,7 +9,7 @@
 //! 运行（显式、耗时、需要本机 PostgreSQL 18 二进制）：
 //!
 //! ```bash
-//! cargo test -p auction-storage --features test-db --test perf -- --ignored --nocapture
+//! cargo test -p auction-storage --features test-db --test postgres -- --ignored perf --nocapture
 //! ```
 //!
 //! 报告写入 `AUCTION_PERF_REPORT_DIR`（默认 `target/perf/<unix 秒>`），包含每个场景的
@@ -18,7 +18,7 @@
 #![cfg(feature = "test-db")]
 
 #[allow(dead_code)]
-mod support;
+use crate::support;
 
 use std::{
     collections::BTreeMap,
