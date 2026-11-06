@@ -1,12 +1,12 @@
 # CI 与发布
 
-[文档导航](../docs/README.md) · [开发指南](../docs/development.md) · [构建工具](tools/README.md) · [运维手册](../ops/README.md)
+[docs/README.md](../docs/README.md) · [docs/development.md](../docs/development.md) · [ci/tools/README.md](tools/README.md) · [ops/README.md](../ops/README.md)
 
 | 目录 | 内容 |
 | --- | --- |
-| [`ci/checks/`](checks) | [静态门禁说明](checks/README.md)：[`ci/checks/check.sh`](checks/check.sh)（策略、格式、编译、lint、审计）与对应脚本/基线 |
-| [`ci/release/`](release) | 发布入口 [`ci/release/release.sh`](release/release.sh)、Web payload 构建 [`ci/release/web-bundle.sh`](release/web-bundle.sh)、共用身份函数 [`ci/release/build-identity.sh`](release/build-identity.sh)、体积预算 [`ci/release/web-size-budget.v1`](release/web-size-budget.v1) |
-| [`ci/tools/`](tools) | 受控工具链与构建工具的安装、校验与本地 Blaze 试验入口 |
+| [ci/checks](checks) | [ci/checks/README.md](checks/README.md)：[ci/checks/check.sh](checks/check.sh)（策略、格式、编译、lint、审计）与对应脚本/基线 |
+| [ci/release](release) | 发布入口 [ci/release/release.sh](release/release.sh)、Web payload 构建 [ci/release/web-bundle.sh](release/web-bundle.sh)、共用身份函数 [ci/release/build-identity.sh](release/build-identity.sh)、部署制品来源校验 [ci/release/verify-deployment-package.sh](release/verify-deployment-package.sh)、体积预算 [ci/release/web-size-budget.v1](release/web-size-budget.v1) |
+| [ci/tools](tools) | 受控工具链与构建工具的安装、校验与本地 Blaze 试验入口 |
 
 发布工具面向 Linux x86_64；装包还需 Perl（重定位文档链接）。CI 的 Cargo 编译、Clippy 与依赖图解析命令使用 `--locked`。格式检查和独立审计工具使用各自的参数。
 
@@ -21,13 +21,14 @@ bash ci/checks/check.sh <检查项>...
 | `repository` | `AGENTS.md`、`.gitignore`、`.editorconfig`、`README.md`、`Cargo.lock` 必须纳入版本控制且未被忽略 |
 | `layout` | `src/` 根只能有 `lib.rs`/`main.rs`；每个 crate 的 `src/` 必须有职责子目录；同目录不得有 ≥3 个同前缀源码文件；文件与目录名 snake_case |
 | `config` | `ops/config/examples/**/*.toml` 每个赋值字段（含注释掉的示例字段）前必须紧邻含“可选”或“必填”的注释 |
-| `i18n` | [`crates/auction-web-public/i18n/`](../crates/auction-web-public/i18n) 与 [`crates/auction-web-admin/i18n/`](../crates/auction-web-admin/i18n) 恰好包含 en、ja、ko、zh-CN、zh-TW 五个 `.ftl`；各语言键集合与 `en.ftl` 一致；代码中 `t!("…")` 引用的键必须存在；键名不得含点号、不得重复 |
+| `i18n` | [crates/auction-web-public/i18n](../crates/auction-web-public/i18n) 与 [crates/auction-web-admin/i18n](../crates/auction-web-admin/i18n) 恰好包含 en、ja、ko、zh-CN、zh-TW 五个 `.ftl`；各语言键集合与 `en.ftl` 一致；代码中 `t!("…")` 引用的键必须存在；键名不得含点号、不得重复 |
 | `equipment-contract` | 装备解析诊断原因在 Rust、SQL 约束与 Admin 文案之间的闭集一致 |
-| `ratchet` | 源码计数不得超过仓库基线；下降时提示更新，口径与更新方式见[计数棘轮](checks/README.md#源码计数棘轮) |
+| `ratchet` | 源码计数不得超过仓库基线；下降时提示更新，口径与更新方式见[ci/checks/README.md#源码计数棘轮](checks/README.md#源码计数棘轮) |
 | `ratchet-counts` | 仅输出当前 14 项计数，不修改基线；供人工审阅下调 |
-| `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[链接检查](checks/README.md#markdown-相对链接) |
-| `migration-compatibility` | 075 起每个迁移末尾恰好登记自身一次，闭集等级、版本及事务规范见[迁移兼容登记](checks/README.md#迁移兼容登记) |
-| `all` | `repository layout config i18n equipment-contract ratchet markdown-links migration-compatibility` |
+| `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[ci/checks/README.md#markdown-相对链接](checks/README.md#markdown-相对链接) |
+| `migration-compatibility` | 075 起每个迁移末尾恰好登记自身一次，闭集等级、版本及事务规范见[ci/checks/README.md#迁移兼容登记](checks/README.md#迁移兼容登记) |
+| `published-migrations` | 每个发布 tag（`v<版本>`）中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；禁止修改、重命名或删除已发布文件，只允许追加新编号 |
+| `all` | `repository layout config systemd-templates i18n equipment-contract ratchet markdown-links migration-compatibility published-migrations` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `feature` | `auction-storage`（仅 `postgres`）、`auction-cache`（仅 `redis`），以及 `auction-setup` 的空默认图与 `postgres` 完整图 |
@@ -40,16 +41,28 @@ bash ci/checks/check.sh <检查项>...
 
 `just verify` = `all fmt check feature dependency-versions lint wasm`。默认门禁不运行测试。
 
-## GitHub Actions：`.github/workflows/ci.yml`
+## GitHub Actions
+
+### 普通 CI：`.github/workflows/ci.yml`
 
 | 作业 | 触发 | 内容 |
 | --- | --- | --- |
-| `docs` | 所有 push / PR / 手动 | 策略门禁与格式（`ci/checks/check.sh all fmt`）；同一提交已有 PR 时跳过重复的分支 push |
+| `docs` | 所有分支 push / PR / 手动 | 策略门禁与格式（`ci/checks/check.sh all fmt`）；完整历史与 tag 用于 `published-migrations`；同一提交已有 PR 时跳过重复的分支 push。tag 推送只运行发布工作流，不重复普通 CI |
 | `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check feature dependency-versions lint wasm`（工具链 1.99.0） |
-| `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | 受控 cargo-audit 的 `dependency-audit`；非定时事件另执行 `dependency-unused`，见[每周依赖审计](checks/README.md#每周依赖审计) |
+| `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | 受控 cargo-audit 的 `dependency-audit`；非定时事件另执行 `dependency-unused`，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `msrv` | push / PR / 手动，`docs` 通过后 | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` |
-| `artifacts` | 默认分支 push 或手动 | 安装受控发布工具，`ci/release/release.sh release-check` 构建并校验完整发布包，上传候选包（保留 1 天） |
-| `publish` | 以上全部通过 | 复核候选包 SHA-256，上传正式制品（保留 14 天） |
+| `artifacts` | 默认分支 push 或手动 | 调用可复用工作流 `.github/workflows/release-build.yml`：安装受控发布工具，`ci/release/release.sh release-check` 构建并校验完整发布包，上传 1 天候选包；候选包不可部署 |
+
+### 版本发布：`.github/workflows/release.yml`
+
+只由 `v<版本>` 形式的 tag 推送触发（tag 必须等于 `Cargo.toml` 的 workspace version）。流程：
+
+1. `guard`：校验 tag 名与工作区版本一致；完整 checkout 后确认 tag 提交是 `origin/main` 的祖先；运行 `published-migrations`，任何已发布迁移被改写或删除都拒绝发布。
+2. `verify`：在 tag 上重跑 `ci/checks/check.sh all fmt check feature dependency-versions lint wasm`、`just test` 与 PostgreSQL 18 `just test-db`，不依赖分支保护的历史运行记录。
+3. `build`：复用 `.github/workflows/release-build.yml`，与普通 CI 完全相同的发布构建、缓存与门禁，产出候选包。
+4. `publish`：复核候选包 SHA-256，用 `actions/attest-build-provenance` 生成绑定本仓库、本工作流、tag 与构建提交的 SLSA 来源证明，再用部署端同一脚本自检，最后 `gh release create --verify-tag` 创建 GitHub Release 并附带 `*.tar.gz`、`SHA256SUMS`、`DEPENDENCIES.md`。
+
+Release 资产永久保留；同一 tag 的发行一经创建不会覆盖（重复运行在 `gh release create` 前失败）。发布构建的候选 Actions artifact 仍只保留 1 天，正式资产只存在于 GitHub Release。
 
 缓存：Rust 编译缓存按作业与工具链隔离，PR 不写缓存；发布产物与 `target/dx` 以源码身份指纹为键单独缓存；受控工具以配方（bootstrap 脚本、锁文件、补丁、工具链）为键缓存，命中后仍以安装回执逐字节校验。
 
@@ -63,9 +76,10 @@ bash ci/release/release.sh package [--single-binary] [--allow-dirty]         # �
 bash ci/release/release.sh build-api | build-embedded | verify-artifacts
 bash ci/release/release.sh build-single | verify-single
 bash ci/release/release.sh verify-web-size | source-fingerprint
+bash ci/release/verify-deployment-package.sh <*.tar.gz> --tag <v版本>        # 部署前来源校验
 ```
 
-对应 Justfile：`just build-api`、`just build-release`、`just build-single`、`just verify-artifacts`、`just web-size`、`just release-check`、`just package`。
+对应 Justfile：`just build-api`、`just build-release`、`just build-single`、`just verify-artifacts`、`just web-size`、`just release-check`、`just package`、`just verify-package`。
 
 ### 制品变体
 
@@ -78,13 +92,38 @@ bash ci/release/release.sh verify-web-size | source-fingerprint
 ### 门禁
 
 - **页面 payload**：先用 `ci/release/web-bundle.sh` 构建两端 payload，校验入口页标题（“Auction 公开站点” / “Auction 管理站点”）、跨端隔离、只含普通文件与唯一一组 JS/WASM、payload 清单与哈希。目录遍历或摘要生成失败即拒绝复用，不把失败留下的部分输出当作有效清单。
-- **体积预算**：两端 payload 的 WASM 与总量按 [`ci/release/web-size-budget.v1`](release/web-size-budget.v1) 的基线比较；明显增长只告警，超过硬上限使发布失败。见 [Web payload 体积预算](#web-payload-体积预算)。
+- **体积预算**：两端 payload 的 WASM 与总量按 [ci/release/web-size-budget.v1](release/web-size-budget.v1) 的基线比较；明显增长只告警，超过硬上限使发布失败。见 [Web payload 体积预算](#web-payload-体积预算)。
 - **二进制标记**：Public 只含 Public payload 的标记与哈希，Admin 只含 Admin 的，Worker 与 auction-cli 不含任何页面标记；API-only 二进制含“资源缺失”提示而不含 payload。
 - **依赖边界**（`cargo tree`）：Worker 不依赖任何前端 crate；Public 不依赖 Admin 前端；Admin 不依赖 Public 前端；`auction-server` 不依赖 `auction-cli`。
 - **BUILD-INFO 与校验和**：每个制品目录记录源码身份、构建输入与环境指纹、feature 和文件摘要；工具链经受控工具身份绑定。复用判定比较这些指纹、锁文件、feature 和制品摘要；仅仓库提交或不在构建输入范围内的文档变化，不必重新编译。
+- **已发布迁移**：发布 tag 中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；修改、重命名或删除已发布文件使 `published-migrations` 与发布工作流失败，只允许追加新编号。
 - **装包**：文件白名单与权限固定（程序 755、文档 644、配置示例 640、敏感示例 600），禁止符号链接、日志与真实敏感文件名；归档确定性生成（固定排序、mtime、owner），解包复核后输出 `SHA256SUMS` 与 `DEPENDENCIES.md`。正式发布要求干净工作树（`--allow-dirty` 只用于本地证据，包名带 `-dirty`）。
 
-发布包名为 `auction-rust-<版本>-<提交前 12 位>[-single][-dirty].tar.gz`，内容见[运维手册](../ops/README.md#部署形态)。仓库 Markdown 链接相对各文档目录；装包时按同一文件安装清单重定位全部已打包文档（含 `config/README.md`），保留标题锚点，并映射敏感模板的 `.toml.example` 文件名。已打包的目标使用包内相对链接；未打包的源码、其他变体模板和文档链接到本次源码提交的 GitHub 页面，需要联网浏览。
+发布包名为 `auction-rust-<版本>-<提交前 12 位>[-single][-dirty].tar.gz`，内容见[ops/README.md#部署形态](../ops/README.md#部署形态)。仓库 Markdown 链接相对各文档目录；装包时按同一文件安装清单重定位全部已打包文档（含 `config/README.md`），保留标题锚点，并映射敏感模板的 `.toml.example` 文件名。已打包的目标使用包内相对链接；未打包的源码、其他变体模板和文档链接到本次源码提交的 GitHub 页面，需要联网浏览。
+
+### 版本 tag 与部署制品
+
+只有从 `main` 上的 `v<版本>` tag 产生的 GitHub Release 资产可以部署。tag 的工作区版本必须与 `Cargo.toml` 的 `[workspace.package].version` 完全一致：
+
+```bash
+git switch main && git pull --ff-only
+git tag -a v0.1.0 -m "Auction 0.1.0"    # tag 名必须等于 v + 工作区版本
+git push origin v0.1.0                  # 触发 auction-release
+```
+
+tag 推送后由 `auction-release` 完成守卫、完整门禁、构建、来源证明和 Release 发布；不要手工上传资产，也不要移动或强推已发布 tag。已发布迁移文件由 `just verify` 中的 `published-migrations` 保护：标签所包含的任何 `*.up.sql` 都不得再修改、重命名或删除。远端还应启用 tag 保护与 Release 不可变设置（GitHub 仓库设置，不由本仓库代码强制）；发布工作流只保证同一 tag 不会产生第二个 Release。
+
+部署端从 GitHub Release 下载 `*.tar.gz`、`SHA256SUMS`、`DEPENDENCIES.md`，然后运行：
+
+```bash
+bash ci/release/verify-deployment-package.sh auction-rust-<版本>-<12位>.tar.gz --tag v<版本>
+# 或
+just verify-package auction-rust-<版本>-<12位>.tar.gz --tag v<版本>
+```
+
+脚本失败关闭地核对：外层与包内 `SHA256SUMS`、归档成员无路径穿越/链接、`RELEASE-MANIFEST.v1` 与 `DEPENDENCIES.md` 的源码提交一致、工作树为 `clean`、构建提交可从指定发布 tag 到达，并通过 `gh attestation verify` 绑定 `release.yml` 工作流、tag 与提交的来源证明。`--offline` 只跳过来源证明，输出明确警告，不能作为部署依据。
+
+普通 CI 的 1 天候选 Actions artifact 只用于构建核对，没有 Release 资产身份与来源证明，不满足部署条件。W7.2 的 `auction-cli deploy` 会复用同一校验，在此之前由部署人员手工执行该脚本。
 
 ### 构建 profile
 
@@ -116,7 +155,7 @@ bash ci/release/release.sh verify-web-size   # 只读既有 payload 与预算，
 just web-size                                # 同上
 ```
 
-[`ci/release/web-size-budget.v1`](release/web-size-budget.v1) 是刻意维护的数据文件（`schema=auction-web-size-budget/1`），每个 surface 记录两对数字：
+[ci/release/web-size-budget.v1](release/web-size-budget.v1) 是刻意维护的数据文件（`schema=auction-web-size-budget/1`），每个 surface 记录两对数字：
 
 - `<surface>_wasm_baseline_bytes` / `<surface>_payload_baseline_bytes`：基线实测值。当前为 Public WASM 2756864、Public payload 2933467、Admin WASM 4111988、Admin payload 4269558 字节。
 - `<surface>_wasm_max_bytes` / `<surface>_payload_max_bytes`：硬上限。当前为 Public 3100000/3300000、Admin 4600000/4800000 字节。

@@ -8,14 +8,17 @@ pub(super) async fn load_credentials(
     world_configs: &[auction_config::MoogleMailWorldConfig],
     store: Arc<DatabaseStore>,
 ) -> anyhow::Result<(MoogleMailCredentialSet, Option<Arc<dyn AdminCredentialRuntimeOwnership>>)> {
-    let (credentials, ownership) = if let Some((key_id, key_material)) =
-        config.credential_data_key_id().zip(config.credential_data_key())
-    {
-        let data_key = Arc::new(
-            DataKey::from_base64(key_id, key_material)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-        );
-        let opener = CredentialSealer::new(Arc::clone(&data_key));
+    let credential_keyring = build_keyring(
+        auction_config::DataKeyDomain::Credential,
+        config.data_key_current(auction_config::DataKeyDomain::Credential),
+        config
+            .data_key_previous(auction_config::DataKeyDomain::Credential)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+    let (credentials, ownership) = if let Some(keyring) = credential_keyring {
+        let opener = CredentialSealer::new(keyring);
         let reader: Arc<dyn AdminCredentialRuntimeReader> = store.clone();
         let mut records = Vec::new();
         let mut seen_record_ids = HashSet::new();

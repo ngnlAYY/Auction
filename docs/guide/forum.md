@@ -1,6 +1,6 @@
 # 论坛同步与回帖竞价
 
-[文档导航](../README.md) · [业务规则](../business-rules.md) · [邮件流程](mail-flows.md) · [玩家指南](player-guide.md)
+[docs/README.md](../README.md) · [docs/business-rules.md](../business-rules.md) · [docs/guide/mail-flows.md](mail-flows.md) · [docs/guide/player-guide.md](player-guide.md)
 
 Worker 可以把每场拍卖同步到 E-Hentai 论坛（`forums.e-hentai.org`），并把玩家在主题下的回帖导入为出价。论坛只是外部投影与输入渠道：拍卖状态、价格与资格永远以数据库为准，论坛帖子内容由权威快照渲染。
 
@@ -64,7 +64,7 @@ Worker 为扫描时处于 Live 且没有同步记录的场次建立任务；重�
 
 主题扫描页数超过 `maximum_topic_pages` 时，该场的回帖导入整体失败关闭、不再导入新回帖，而不是跳过部分出价；运营者处理前，请改在网站出价。
 
-Admin“规则内容”的五语言编辑稿见 [`ops/rules/forum-reply-import`](../../ops/rules/forum-reply-import/README.md)。已有规则内容时由用户在 Admin 逐语言编辑并发布；`auction-cli rules import` 仅用于首次发布或补齐缺失语言。
+Admin“规则内容”的五语言编辑稿见 [ops/rules/forum-reply-import/README.md](../../ops/rules/forum-reply-import/README.md)。已有规则内容时由用户在 Admin 逐语言编辑并发布；`auction-cli rules import` 仅用于首次发布或补齐缺失语言。
 
 ## 身份
 
@@ -74,7 +74,7 @@ Admin“规则内容”的五语言编辑稿见 [`ops/rules/forum-reply-import`]
 
 ## 写入安全
 
-- 创建主题结果无法确认时（超时、响应异常），Worker 先按精确标题只读查找主题；仍无法证明时停在 `write_authorization_required`，需运维用 `auction-cli forum authorize-retry` 显式授权下一次创建或固定楼层补写尝试（见 [auction-cli](../../apps/auction-cli/README.md#论坛写入恢复)）。已有固定帖的未知编辑结果则按原主题/帖子身份与预期正文只读核对；不能仅凭帖子存在就认定新正文已写入，也不会盲目重发。
+- 创建主题结果无法确认时（超时、响应异常），Worker 先按精确标题只读查找主题；仍无法证明时停在 `write_authorization_required`，需运维用 `auction-cli forum authorize-retry` 显式授权下一次创建或固定楼层补写尝试（见 [apps/auction-cli/README.md#论坛写入恢复](../../apps/auction-cli/README.md#论坛写入恢复)）。已有固定帖的未知编辑结果则按原主题/帖子身份与预期正文只读核对；不能仅凭帖子存在就认定新正文已写入，也不会盲目重发。
 - 主题扫描页数有上限（`maximum_topic_pages`，默认 10），超过时明确失败而不是跳过出价。
 - `test_board_mode` 只用于测试板块，生产必须为 false。
 

@@ -1,6 +1,6 @@
 # auction-http
 
-[文档导航](../../docs/README.md) · [HTTP 路由](../../docs/contracts/routes.md) · [实时事件](../../docs/contracts/realtime.md)
+[docs/README.md](../../docs/README.md) · [docs/contracts/routes.md](../../docs/contracts/routes.md) · [docs/contracts/realtime.md](../../docs/contracts/realtime.md)
 
 Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会话 Cookie 与 CSRF、origin allowlist、进程内速率限制、浏览器安全头、DTO 映射、WebSocket 实时 Hub、内嵌浏览器资源与 SPA 路由、健康探针与 Prometheus 端点，以及 TCP/Unix listener 的连接服务。业务能力全部通过应用端口注入（`PublicApiState`、`AdminApiState`），端口缺失时对应接口返回明确的能力不可用错误，不伪造空数据。
 
@@ -24,8 +24,8 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 - **限流**：固定窗口、按地址计数，登录、状态变更与 realtime 连接尝试使用独立账本；超限返回 `429`、`code = "rate_limited"` 与 `Retry-After` 头。
 - **超时**：普通请求与 WebSocket 升级前握手受 `request_timeout_seconds` 限制，不限制升级后的连接寿命。
 - **严格解析**：JSON 写接口拒绝未知字段与非 JSON 内容类型；空 PUT 会话同步、Basic 登录等遵循各自协议。Public/Admin 业务路由严格匹配方法，JSON GET 不隐式接受 HEAD，倒计时显式支持 GET/HEAD；健康、指标与静态资源由各自 owner 定义方法语义。
-- **安全头**：`X-Frame-Options: DENY`、内容类型嗅探禁止、来源策略与 CSP（同源脚本，表单只提交到同源；为 Dioxus WASM 放行 `unsafe-eval`/`wasm-unsafe-eval` 与内联样式，取舍理由见[安全边界](../../docs/architecture.md#安全边界)）；仅当确认浏览器经 HTTPS 访问时附加 `Strict-Transport-Security: max-age=31536000`（无 `includeSubDomains`/`preload`），代理后只采信可信上游的 `X-Forwarded-Proto`。响应缓存策略按路由冻结（`no-store`/`no-cache`）。
-- **指标**：全局边界按路由模板记录响应量、状态码与响应生成耗时，包含健康、指标与资源 fallback；连接与频率拒绝分别在成功升级和 guard 实际拒绝点记录。标签、桶与生命周期见 [auction-observability](../auction-observability/README.md#http-与连接口径)。
+- **安全头**：`X-Frame-Options: DENY`、内容类型嗅探禁止、来源策略与 CSP（同源脚本，表单只提交到同源；为 Dioxus WASM 放行 `unsafe-eval`/`wasm-unsafe-eval` 与内联样式，取舍理由见[docs/architecture.md#安全边界](../../docs/architecture.md#安全边界)）；仅当确认浏览器经 HTTPS 访问时附加 `Strict-Transport-Security: max-age=31536000`（无 `includeSubDomains`/`preload`），代理后只采信可信上游的 `X-Forwarded-Proto`。响应缓存策略按路由冻结（`no-store`/`no-cache`）。
+- **指标**：全局边界按路由模板记录响应量、状态码与响应生成耗时，包含健康、指标与资源 fallback；连接与频率拒绝分别在成功升级和 guard 实际拒绝点记录。标签、桶与生命周期见 [crates/auction-observability/README.md#http-与连接口径](../auction-observability/README.md#http-与连接口径)。
 
 ## 会话
 
@@ -42,7 +42,7 @@ WebSocket 每连接的发送队列有界。队列满时 Hub 淘汰发送端，�
 
 ## 浏览器资源
 
-`web-embed` 构建中，资源来自 `dx bundle` 产物；API-only 构建使用固定的空资源目录。除精确存在的静态资源外，只有 [`crates/auction-http/src/assets/routes.rs`](src/assets/routes.rs) 中登记的浏览器路径（Public 参数路径 `/lots/{lot_code}`、Admin 参数路径 `/auctions/{auction_id}/lots`）返回 `index.html`，未知路径为 404；资源缺失时页面路由返回 503 与提示文本。新增或删除页面时须同时修改前端 `Route` 枚举、该清单与[路由文档](../../docs/contracts/routes.md)。
+`web-embed` 构建中，资源来自 `dx bundle` 产物；API-only 构建使用固定的空资源目录。除精确存在的静态资源外，只有 [crates/auction-http/src/assets/routes.rs](src/assets/routes.rs) 中登记的浏览器路径（Public 参数路径 `/lots/{lot_code}`、Admin 参数路径 `/auctions/{auction_id}/lots`）返回 `index.html`，未知路径为 404；资源缺失时页面路由返回 503 与提示文本。新增或删除页面时须同时修改前端 `Route` 枚举、该清单与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
 
 ## 健康与指标
 
@@ -53,7 +53,7 @@ WebSocket 每连接的发送队列有界。队列满时 Hub 淘汰发送端，�
 | `/health`、`/api/v1/health` | 服务名、状态与运行进程版本 |
 | `/metrics` | 直连 GET/HEAD 的 Prometheus 文本；需启用且 listener 为 loopback 或 Unix；其他方法 405，默认携带转发头的任意方法优先返回空 404 |
 
-`/metrics` 通过 `any(...)` 挂载，由共用处理器显式保留 GET/HEAD 和直连 405，避免框架向转发拒绝追加 `Allow`。默认拒绝 `Forwarded`、全部 `X-Forwarded-*`、`X-Real-IP`、`Via` 的存在，不依赖代理是否可信，也不解析或记录头值；拒绝经 `finish_response` 补安全头与 `no-store`，优先于 request-id 400 和方法错误。CDN 专用来源头待 W0.12 核实后补充。完整边界见[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)。
+`/metrics` 通过 `any(...)` 挂载，由共用处理器显式保留 GET/HEAD 和直连 405，避免框架向转发拒绝追加 `Allow`。默认拒绝 `Forwarded`、全部 `X-Forwarded-*`、`X-Real-IP`、`Via` 的存在，不依赖代理是否可信，也不解析或记录头值；拒绝经 `finish_response` 补安全头与 `no-store`，优先于 request-id 400 和方法错误。CDN 专用来源头待 W0.12 核实后补充。完整边界见[docs/contracts/routes.md#健康与指标publicadmin](../../docs/contracts/routes.md#健康与指标publicadmin)。
 
 部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true，是运行时
 开关 `metrics_reject_forwarded_requests` 的基线。业务 `/metrics` 与三角色
@@ -61,15 +61,15 @@ loopback 出口共用同一 `RuntimeSwitches`，每个请求在 boundary 入口�
 `set true` 可在线收紧，`clear` 回落 TOML，`set false` 在命令层拒绝，
 放宽必须改 common 并重启。runtime 只覆盖 `metrics.enabled`。listener 限制和
 Caddy 的公网 404 规则继续生效，直接采集与 SSH 隧道见
-[运维手册](../../ops/README.md#指标)。
+[ops/README.md#指标](../../ops/README.md#指标)。
 
 `serve_metrics` 为三个装配根提供仅含 `/metrics` 的附加 HTTP 适配，
 接收已绑定 TCP listener，复用上述 boundary 和指标渲染函数。
 只持有同一个 `ProcessMetrics`，不引入业务 state、control 或资源路由；
 服务异常返回装配根，按固定类别记录 ERROR 并仅降级采集。
-完整契约见[三角色附加出口](../../docs/contracts/routes.md#三角色附加指标出口loopback-tcp)。
+完整契约见[docs/contracts/routes.md#三角色附加指标出口loopback-tcp](../../docs/contracts/routes.md#三角色附加指标出口loopback-tcp)。
 
-`HttpReadinessProbe` 由装配根包装完整角色判定，默认只缓存最终布尔值一秒并合并并发；每轮限时 750ms，请求断开不取消共享刷新，panic/取消/超时均发布未就绪并结束单飞。正负都缓存，过期后不继续返回旧成功，响应保持 `no-store`。关闭缓存恢复逐次检查与原请求预算；心跳不复用此缓存。转换延迟及模式语义由[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)定义，配置见[就绪策略](../../ops/config/README.md#就绪策略)。
+`HttpReadinessProbe` 由装配根包装完整角色判定，默认只缓存最终布尔值一秒并合并并发；每轮限时 750ms，请求断开不取消共享刷新，panic/取消/超时均发布未就绪并结束单飞。正负都缓存，过期后不继续返回旧成功，响应保持 `no-store`。关闭缓存恢复逐次检查与原请求预算；心跳不复用此缓存。转换延迟及模式语义由[docs/contracts/routes.md#健康与指标publicadmin](../../docs/contracts/routes.md#健康与指标publicadmin)定义，配置见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)。
 
 ## 其他
 
@@ -90,7 +90,7 @@ Caddy 的公网 404 规则继续生效，直接采集与 SSH 隧道见
 
 ## 运行时就绪策略
 
-`HttpReadinessProbe` 使用共享策略身份（revision、覆盖期限状态与有效值）隔离短缓存和单飞任务；策略改变后旧结果不能用于新缓存，等待者也不能返回过期策略的成功。认证只读 `GET /api/v1/admin/runtime-switches` 显式映射数据库意图和 Admin 本地快照，成功及读取失败 no-store，不依赖 runtime 文件。见[路由契约](../../docs/contracts/routes.md#运行时开关只读接口)。
+`HttpReadinessProbe` 使用共享策略身份（revision、覆盖期限状态与有效值）隔离短缓存和单飞任务；策略改变后旧结果不能用于新缓存，等待者也不能返回过期策略的成功。认证只读 `GET /api/v1/admin/runtime-switches` 显式映射数据库意图和 Admin 本地快照，成功及读取失败 no-store，不依赖 runtime 文件。见[docs/contracts/routes.md#运行时开关只读接口](../../docs/contracts/routes.md#运行时开关只读接口)。
 
 
 ## 实时 SLI 观测
@@ -99,7 +99,7 @@ Public 装配根注册 `RealtimeRecorder` 并注入 Hub；关闭 metrics 时记�
 `ObservedFrame` 仅在进程内携带创建时间与 scope，正文仍是原来的已编码 Utf8Bytes。
 WS 事件 send 成功后才记 push；Hub sink 交接记 relay，均不改变原控制流。
 公开 `RealtimeSubscription::recv` 继续返回原文本帧，内部 WS 使用带观测信息的接收。
-线协议、补读、游标、缓冲与淘汰边界见[实时契约](../../docs/contracts/realtime.md#推送观测边界)。
+线协议、补读、游标、缓冲与淘汰边界见[docs/contracts/realtime.md#推送观测边界](../../docs/contracts/realtime.md#推送观测边界)。
 
 ## 安全错误记录
 
@@ -122,6 +122,6 @@ JSON、游标、参数、认证格式等闭集输入解析继续固定拒绝，�
 
 Public/Admin 装配根在原服务生命周期中安装诊断日志门、刷新到期窗口并在关闭时 flush/close；
 不增加后台任务。HTTP 不设置 Unpersisted 处置，不增加 Worker W0.3 计数。
-窗口、回退方式见[可观测性说明](../auction-observability/README.md#重复错误去重)，
-owner 与过滤例子见[排障手册](../../ops/README.md#安全错误与未持久化指标)。
+窗口、回退方式见[crates/auction-observability/README.md#重复错误去重](../auction-observability/README.md#重复错误去重)，
+owner 与过滤例子见[ops/README.md#安全错误与未持久化指标](../../ops/README.md#安全错误与未持久化指标)。
 持久化值、HTTP 状态码、错误码、JSON、超时预算、缓存判定与请求控制流全部保持原契约。

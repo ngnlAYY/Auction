@@ -1,16 +1,16 @@
 # 开发指南
 
-[文档导航](README.md) · [架构](architecture.md) · [协作规范](../AGENTS.md) · [CI 与发布](../ci/README.md)
+[docs/README.md](README.md) · [docs/architecture.md](architecture.md) · [AGENTS.md](../AGENTS.md) · [ci/README.md](../ci/README.md)
 
 ## 环境
 
 | 项 | 要求 |
 | --- | --- |
 | 平台 | Linux x86_64（原生程序在其他平台编译期报错；浏览器包编译到 `wasm32-unknown-unknown`） |
-| Rust | 工具链固定在 [`rust-toolchain.toml`](../rust-toolchain.toml)（1.99.0，含 clippy、rustfmt 与 wasm32 目标）；MSRV 1.94.1 由 CI 单独检查 |
+| Rust | 工具链固定在 [rust-toolchain.toml](../rust-toolchain.toml)（1.99.0，含 clippy、rustfmt 与 wasm32 目标）；MSRV 1.94.1 由 CI 单独检查 |
 | 命令 | `just`、`bash`、`ripgrep`（`rg`）、`perl`（策略门禁需要） |
 | 数据库 | PostgreSQL 18（运行与运维命令需要；静态检查不需要） |
-| 页面构建 | 受控的 `dx`（Dioxus CLI 0.7）、`wasm-bindgen`、`wasm-opt`，由 `bash ci/tools/bootstrap.sh install` 安装到 `target/build-tools`，见 [`ci/tools/README.md`](../ci/tools/README.md) |
+| 页面构建 | 受控的 `dx`（Dioxus CLI 0.7）、`wasm-bindgen`、`wasm-opt`，由 `bash ci/tools/bootstrap.sh install` 安装到 `target/build-tools`，见 [ci/tools/README.md](../ci/tools/README.md) |
 
 直接调用负责依赖解析的 Cargo 命令时加 `--locked`；本地 Justfile 入口、CI 检查与发布构建已固定该参数。本地配置命令通过独立参数传递目录，包含空格的路径须在调用 `just` 时加引号。如需本机编译加速（sccache、mold 等），只在用户级 `~/.cargo/config.toml` 中配置，不改仓库 profile。
 
@@ -33,7 +33,7 @@ just run-admin
 just run-worker
 ```
 
-`just verify` 等价于 `bash ci/checks/check.sh all fmt check feature dependency-versions lint wasm`，各项含义见 [`ci/README.md`](../ci/README.md)。提交前至少通过它。
+`just verify` 等价于 `bash ci/checks/check.sh all fmt check feature dependency-versions lint wasm`，各项含义见 [ci/README.md](../ci/README.md)。提交前至少通过它。
 
 ## 本地运行
 
@@ -44,7 +44,7 @@ createuser --pwprompt auction
 createdb --owner auction auction
 ```
 
-或者用维护凭据通过 `auction-cli db create` 建库（见 [auction-cli](../apps/auction-cli/README.md#建库)）。
+或者用维护凭据通过 `auction-cli db create` 建库（见 [apps/auction-cli/README.md#建库](../apps/auction-cli/README.md#建库)）。
 
 ### 2. 准备配置
 
@@ -64,7 +64,7 @@ chmod 600 "$dir/secrets.toml"; chmod 640 "$dir/runtime/admin.toml"
 openssl rand -base64 32
 ```
 
-也可以选择首次设置向导生成整套配置（需要 `postgres,web-embed` 构建），替代上面的手工创建步骤：先令 `dir` 指向一个尚不存在的目录，并预先建立符合[首次设置权限要求](../ops/config/README.md#示例与首次设置)的直接父目录，再运行 `cargo run --locked -p auction-admin-api --features postgres,web-embed -- setup --output-dir "$dir"`。
+也可以选择首次设置向导生成整套配置（需要 `postgres,web-embed` 构建），替代上面的手工创建步骤：先令 `dir` 指向一个尚不存在的目录，并预先建立符合[ops/config/README.md#示例与首次设置](../ops/config/README.md#示例与首次设置)的直接父目录，再运行 `cargo run --locked -p auction-admin-api --features postgres,web-embed -- setup --output-dir "$dir"`。
 
 检查配置：
 
@@ -99,20 +99,20 @@ AUCTION_CONFIG_FILE=$dir/public.toml just run-public
 
 ## 代码约定
 
-详见 [`AGENTS.md`](../AGENTS.md)，要点：
+详见 [AGENTS.md](../AGENTS.md)，要点：
 
 - **目录布局**（`ci/checks/check.sh layout` 强制）：`src/` 根目录只能有 `lib.rs`/`main.rs`，实现放在按职责命名的子目录；同一目录不能有 3 个及以上同前缀的源码文件；文件与目录名使用 snake_case。
 - **依赖方向**：domain ← application ← 适配器 ← apps；前端只依赖 contracts 与 web-shared。
 - **命令**：写操作带稳定 `command_id`、请求摘要与期望版本，在一个事务内写入事实、结果、审计与事件。
 - **注释与文档**：中文；模块用 `//!`，公共项用 `///`，复杂分支说明原因、不变量与取舍。
-- **配置示例**：[`ops/config/examples/`](../ops/config/examples) 中每个赋值字段前必须紧邻含“可选”或“必填”的中文注释（`ci/checks/check.sh config`）。示例同时是首次设置生成器的模板，修改后须保证生成的配置仍能通过 loader 校验。
+- **配置示例**：[ops/config/examples](../ops/config/examples) 中每个赋值字段前必须紧邻含“可选”或“必填”的中文注释（`ci/checks/check.sh config`）。示例同时是首次设置生成器的模板，修改后须保证生成的配置仍能通过 loader 校验。
 - **前端文案**：全部走 `i18n/*.ftl`，五种语言键集合一致，代码引用的键必须存在于 `en.ftl`，键名不得含点号（`ci/checks/check.sh i18n`）。
 - **装备诊断闭集**：装备解析诊断原因在 Rust、SQL 约束、Admin 文案之间必须一致（`ci/checks/check.sh equipment-contract`）。
-- **源码棘轮与文档链接**：`just verify` 包含 `ratchet` 与 `markdown-links`；模式计数只能下降，基线须随清理改动更新；相对链接及同页、跨页锚点必须有效，口径见[静态门禁说明](../ci/checks/README.md)。
+- **源码棘轮与文档链接**：`just verify` 包含 `ratchet` 与 `markdown-links`；模式计数只能下降，基线须随清理改动更新；相对链接及同页、跨页锚点必须有效，口径见[ci/checks/README.md](../ci/checks/README.md)。
 
 ## 测试
 
-`just verify` 继续只做格式、编译与静态分析；测试使用独立入口，不并入默认门禁。行为变更必须随功能维护并运行受影响范围的测试，至少覆盖正反例与所修复问题的回归断言。已批准的 W6 类别包括纯逻辑、属性/快照、脱敏页面回放、PostgreSQL 18 集成，以及本地 MoogleMail/论坛替身；其他行为验证仍按 [AGENTS.md](../AGENTS.md#验证范围) 的授权范围执行。
+`just verify` 继续只做格式、编译与静态分析；测试使用独立入口，不并入默认门禁。行为变更必须随功能维护并运行受影响范围的测试，至少覆盖正反例与所修复问题的回归断言。已批准的 W6 类别包括纯逻辑、属性/快照、脱敏页面回放、PostgreSQL 18 集成，以及本地 MoogleMail/论坛替身；其他行为验证仍按 [AGENTS.md#验证范围](../AGENTS.md#验证范围) 的授权范围执行。
 
 ```bash
 just test
@@ -133,14 +133,14 @@ just test-db
 
 ## 数据库变更
 
-1. 在 [`migrations/postgres/`](../migrations/postgres) 新增迁移文件 `NNNNNN_<名称>.up.sql`（编号连续），见[迁移说明](../migrations/postgres/README.md)。
-2. 每次新增迁移都把 [`ops/deploy/retention-policy.v2.json`](../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 更新为新的最高版本；新增表还须加入对应数据族。运行态族的新清理规则只能来自用户决策，并须同时加入代码内闭集与政策校验。
-3. 同步 [数据库契约](contracts/database.md)。
+1. 在 [migrations/postgres](../migrations/postgres) 新增迁移文件 `NNNNNN_<名称>.up.sql`（编号连续），见[migrations/postgres/README.md](../migrations/postgres/README.md)。
+2. 每次新增迁移都把 [ops/deploy/retention-policy.v2.json](../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 更新为新的最高版本；新增表还须加入对应数据族。运行态族的新清理规则只能来自用户决策，并须同时加入代码内闭集与政策校验。
+3. 同步 [docs/contracts/database.md](contracts/database.md)。
 
 ## 接口变更
 
-- 新增或修改路由：同步 `auction-http` 路由表、`auction-contracts` DTO、两端前端与[路由契约](contracts/routes.md)；新增页面还要修改前端 `Route` 枚举与 [`crates/auction-http/src/assets/routes.rs`](../crates/auction-http/src/assets/routes.rs)。
-- 新增实时事件：更新应用层事件注册表、浏览器解码器与[实时事件契约](contracts/realtime.md)。
+- 新增或修改路由：同步 `auction-http` 路由表、`auction-contracts` DTO、两端前端与[docs/contracts/routes.md](contracts/routes.md)；新增页面还要修改前端 `Route` 枚举与 [crates/auction-http/src/assets/routes.rs](../crates/auction-http/src/assets/routes.rs)。
+- 新增实时事件：更新应用层事件注册表、浏览器解码器与[docs/contracts/realtime.md](contracts/realtime.md)。
 
 ## 文档
 

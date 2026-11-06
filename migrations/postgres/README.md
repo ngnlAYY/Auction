@@ -1,19 +1,19 @@
 # PostgreSQL 迁移
 
-[文档导航](../../docs/README.md) · [数据库契约](../../docs/contracts/database.md) · [auction-storage](../../crates/auction-storage/README.md)
+[docs/README.md](../../docs/README.md) · [docs/contracts/database.md](../../docs/contracts/database.md) · [crates/auction-storage/README.md](../../crates/auction-storage/README.md)
 
 本目录是 Auction schema 的唯一定义。迁移文件在编译期由 `sqlx::migrate!` 内嵌进各二进制，并由 `auction-cli db migrate`（或 `service start/restart`、合并部署首次初始化）在 SQLx 迁移锁内执行。目标数据库为 PostgreSQL 18。
 
 ## 规则
 
-1. **只追加。** 已发布的迁移文件永远不能修改、重命名或删除——数据库按版本记录 checksum，任何改动都会让已部署环境的迁移校验失败。修正错误只能新增迁移。
+1. **只追加。** 已发布的迁移文件永远不能修改、重命名或删除——数据库按版本记录 checksum，任何改动都会让已部署环境的迁移校验失败。修正错误只能新增迁移。“已发布”指文件已存在于任一 `v<版本>` 发布 tag；CI 的 `published-migrations` 检查逐字节比对 tag 与当前工作树，发布工作流在构建前强制执行。
 2. **命名**：`NNNNNN_<snake_case 描述>.up.sql`，编号连续递增；只有向前迁移，没有 `down` 文件。
 3. **一个迁移一个主题**，文件开头用中文注释说明目的、owner 与不变量。
 4. **不静默改写历史事实。** 修复数据时只修复有确凿证据的部分（例如能由追加式事实重建的投影），无法证明的保持原样并留给人工核对；需要前置条件时在迁移内检查并以明确的错误终止（`RAISE EXCEPTION`），而不是猜测。
 5. **并发安全**：修改被运行中进程写入的表时，先 `LOCK TABLE … IN SHARE ROW EXCLUSIVE MODE` 等方式阻止并发写，再检查与改写。迁移本身只在停机门禁下执行。
 6. **约束在数据库层强制**：状态闭集、金额范围、互斥字段、只追加（触发器）等规则写成 CHECK、唯一约束或触发器，不只依赖应用代码。
-7. **同步更新**：每次新增迁移都把[保留政策 v2](../../ops/deploy/retention-policy.v2.json)的 `database_schema_version` 更新为新的最高版本（否则 `auction-cli db inventory` 与 `db retention-dry-run` 拒绝运行）；新增表还须加入对应数据族；同步[数据库契约](../../docs/contracts/database.md)。
-8. **运行账号授权**：迁移 `000081` 起 Public/Admin/Worker 共用的 `auction_runtime` 只有读取面与显式写入面。owner 之后新建的表默认只获得 `SELECT`（序列 `USAGE`/`SELECT`），因此**新增表或新增写入面的迁移必须显式 `GRANT`**：可变表授 `INSERT, UPDATE, DELETE`，只追加表只授 `INSERT`，冻结证据与 `_sqlx_migrations` 不授写入，永不授 `TRUNCATE`、`CREATE` 或 `UPDATE`（序列）。授权对象固定为 `auction_runtime`，与[数据库契约](../../docs/contracts/database.md#数据库账号与权限)一致。
+7. **同步更新**：每次新增迁移都把[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)的 `database_schema_version` 更新为新的最高版本（否则 `auction-cli db inventory` 与 `db retention-dry-run` 拒绝运行）；新增表还须加入对应数据族；同步[docs/contracts/database.md](../../docs/contracts/database.md)。
+8. **运行账号授权**：迁移 `000081` 起 Public/Admin/Worker 共用的 `auction_runtime` 只有读取面与显式写入面。owner 之后新建的表默认只获得 `SELECT`（序列 `USAGE`/`SELECT`），因此**新增表或新增写入面的迁移必须显式 `GRANT`**：可变表授 `INSERT, UPDATE, DELETE`，只追加表只授 `INSERT`，冻结证据与 `_sqlx_migrations` 不授写入，永不授 `TRUNCATE`、`CREATE` 或 `UPDATE`（序列）。授权对象固定为 `auction_runtime`，与[docs/contracts/database.md#数据库账号与权限](../../docs/contracts/database.md#数据库账号与权限)一致。
 9. **部署顺序**：迁移若要求旧 Worker 先停止（例如新增发送证明字段），在文件注释中写明；分体部署的 `service restart` 与合并部署的停服迁移都满足这一点。
 10. **兼容登记**：075 起每个文件在自身事务末尾恰好登记本版本一次；规范与默认 breaking 规则见下节，CI 静态门禁强制。
 
@@ -39,11 +39,11 @@ VALUES (76, 'breaking');
 
 不要手工 BEGIN/COMMIT/ROLLBACK，不使用 `-- no-transaction`；SQLx 将文件 SQL、登记与本版本迁移成功记录同事务提交。禁止 upsert、INSERT SELECT、多行或过程内登记；等级事实不能 UPDATE/DELETE/TRUNCATE。修正追加新迁移，不编辑已发布 SQL 或历史等级。
 
-`bash ci/checks/check.sh migration-compatibility` 已纳入 `all` / `just verify`，词法及正则约束见[静态门禁](../../ci/checks/README.md#迁移兼容登记)。门禁只验证登记格式，兼容声明仍须审阅；跨版本验证随 W7.8 的后续测试工作交付。readiness 判定由[数据库契约](../../docs/contracts/database.md#迁移兼容登记与就绪)定义，程序回退步骤见[恢复手册](../../ops/deploy/RECOVERY.md#程序回退)。
+`bash ci/checks/check.sh migration-compatibility` 已纳入 `all` / `just verify`，词法及正则约束见[ci/checks/README.md#迁移兼容登记](../../ci/checks/README.md#迁移兼容登记)。门禁只验证登记格式，兼容声明仍须审阅；跨版本验证随 W7.8 的后续测试工作交付。readiness 判定由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)定义，程序回退步骤见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
 
 ## 执行兼容层
 
-少数早期迁移的原文在新版 PostgreSQL 或新的执行环境下需要微调。[`crates/auction-storage/src/database/migrations/`](../../crates/auction-storage/src/database/migrations) 为它们提供“执行视图”：保留文件原 checksum，只对固定描述、原片段与出现次数做限定替换：`000005`/`000015` 给保留字别名改名，`000044` 在修改用户时间戳前立即执行排队的延迟约束，`000047` 为保留字列名 `authorization` 加引号。仅 `000005`/`000015` 额外接受已经部署的固定别名修正版 SHA-384；`000044`/`000047` 仍只接受原文件 checksum，其他差异均失败关闭。
+少数早期迁移的原文在新版 PostgreSQL 或新的执行环境下需要微调。[crates/auction-storage/src/database/migrations](../../crates/auction-storage/src/database/migrations) 为它们提供“执行视图”：保留文件原 checksum，只对固定描述、原片段与出现次数做限定替换：`000005`/`000015` 给保留字别名改名，`000044` 在修改用户时间戳前立即执行排队的延迟约束，`000047` 为保留字列名 `authorization` 加引号。仅 `000005`/`000015` 额外接受已经部署的固定别名修正版 SHA-384；`000044`/`000047` 仍只接受原文件 checksum，其他差异均失败关闭。
 
 ## 索引
 

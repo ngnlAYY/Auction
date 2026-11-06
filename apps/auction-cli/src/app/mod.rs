@@ -53,12 +53,14 @@ fn failure_code(command: &Command) -> u8 {
         Command::Alert(_)
         | Command::Switch(_)
         | Command::Credential(_)
+        | Command::Keys(_)
         | Command::Rules(_)
         | Command::Forum(_)
         | Command::Pm(_)
         | Command::Mail(_)
         | Command::Funds(_)
-        | Command::Settlement(_) => EXIT_OPERATION,
+        | Command::Settlement(_)
+        | Command::Recovery(_) => EXIT_OPERATION,
     }
 }
 
@@ -90,6 +92,8 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             crate::operations::credentials::run(&config_dir, command).await
         }
         #[cfg(feature = "postgres")]
+        Command::Keys(command) => crate::operations::keys::run(&config_dir, command).await,
+        #[cfg(feature = "postgres")]
         Command::Rules(command) => crate::operations::rules::run(&config_dir, command).await,
         #[cfg(feature = "postgres")]
         Command::Forum(command) => crate::operations::forum::run(&config_dir, command).await,
@@ -103,6 +107,8 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Settlement(command) => {
             crate::operations::settlement::run(&config_dir, command).await
         }
+        #[cfg(feature = "postgres")]
+        Command::Recovery(command) => crate::operations::recovery::run(&config_dir, command).await,
         #[cfg(not(feature = "postgres"))]
         Command::Db(_)
         | Command::Alert(_)
@@ -115,8 +121,13 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         | Command::Pm(_)
         | Command::Mail(_)
         | Command::Funds(_)
-        | Command::Settlement(_) => {
+        | Command::Settlement(_)
+        | Command::Recovery(_) => {
             anyhow::bail!("当前 auction-cli 未编译 postgres feature；数据库与业务运维命令不可用")
+        }
+        #[cfg(not(feature = "postgres"))]
+        Command::Keys(_) => {
+            anyhow::bail!("当前 auction-cli 未编译 postgres feature；密钥环命令不可用")
         }
     }
 }

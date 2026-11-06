@@ -180,6 +180,9 @@ mod realtime_admin;
 mod realtime_consumer;
 #[path = "recovery/commands.rs"]
 mod recovery;
+mod recovery_external {
+    include!("recovery/external.rs");
+}
 #[path = "recovery/health.rs"]
 mod recovery_health;
 #[path = "recovery/report.rs"]
@@ -554,6 +557,13 @@ pub use recovery::{
     RecoveryCommandError, RecoveryCommandPort, RecoveryCommandRepository, RecoveryCommandService,
     RecoveryConfirmationAction, RecoveryConfirmationCommand, RecoveryConfirmationResult,
 };
+pub use recovery_external::{
+    EXTERNAL_RECOVERY_RECEIPT_FORMAT, ExternalRecoveryDeliveryExpectation,
+    ExternalRecoveryForumThread, ExternalRecoveryFuture, ExternalRecoveryQuarantineMatch,
+    ExternalRecoveryQuarantineOutcome, ExternalRecoveryStore, MAX_EXTERNAL_RECOVERY_DELIVERIES,
+    MAX_EXTERNAL_RECOVERY_FORUM_THREADS, MAX_EXTERNAL_RECOVERY_SENT_MATCHES, SentDetailMatch,
+    sent_detail_match, sent_list_projection_may_match, subject_is_list_projection,
+};
 pub use recovery_health::{
     RecoveryBalanceStatus, RecoveryEvidenceStatus, RecoveryHealthConfig, RecoveryHealthRefreshPort,
     RecoveryHealthStore, RecoveryHealthUpdate,
@@ -613,10 +623,13 @@ pub use worker_control::{
     WorkerControlTrigger,
 };
 pub use worker_remote_read::{
-    UnavailableWorkerRemoteRead, WORKER_REMOTE_READ_TIMEOUT_SECONDS, WorkerEquipmentReadRequest,
-    WorkerEquipmentReadResponse, WorkerRemoteReadError, WorkerRemoteReadFuture,
-    WorkerRemoteReadPort, WorkerSentLookupCandidate, WorkerSentLookupRequest,
-    WorkerSentLookupResponse,
+    MAX_RECOVERY_FORUM_THREADS, MAX_RECOVERY_SCAN_ENTRIES, MAX_RECOVERY_SCAN_PAGES,
+    MAX_RECOVERY_SENT_DETAILS, UnavailableWorkerRemoteRead, WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS,
+    WORKER_REMOTE_READ_TIMEOUT_SECONDS, WorkerEquipmentReadRequest, WorkerEquipmentReadResponse,
+    WorkerRecoveryForumPost, WorkerRecoveryForumTarget, WorkerRecoveryInboundEntry,
+    WorkerRecoveryMailRef, WorkerRecoveryScanRequest, WorkerRecoveryScanResponse,
+    WorkerRecoverySentEntry, WorkerRemoteReadError, WorkerRemoteReadFuture, WorkerRemoteReadPort,
+    WorkerSentLookupCandidate, WorkerSentLookupRequest, WorkerSentLookupResponse,
 };
 
 #[path = "public/watch.rs"]

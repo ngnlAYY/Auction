@@ -1,6 +1,8 @@
 //! 数据密钥与装备 key 的加密信封适配器；应用层只得到密文信封，明文
 //! key 用后由领域值对象清零。
 
+use std::sync::Arc;
+
 use auction_application::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
@@ -8,6 +10,8 @@ use crate::diagnostics as safe_diagnostics;
 use std::fmt;
 
 use auction_domain::{EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
+
+use crate::keyring::{Keyring, KeyringError};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use ring::{
     aead, hmac,
@@ -135,13 +139,13 @@ impl fmt::Display for DataKey {
 
 /// 将短生命周期装备 key 封装为数据库可持久化的 AES-GCM 信封。
 pub struct EquipmentKeySealer {
-    data_key: DataKey,
+    data_key: Arc<DataKey>,
     random: SystemRandom,
 }
 
 impl EquipmentKeySealer {
-    /// 建立使用系统安全随机源的装备 key 加密器。
-    pub fn new(data_key: DataKey) -> Self {
+    /// 建立使用系统安全随机源的装备 key 加密器；新写入固定使用当前密钥。
+    pub fn new(data_key: Arc<DataKey>) -> Self {
         Self { data_key, random: SystemRandom::new() }
     }
 
@@ -248,14 +252,14 @@ impl fmt::Debug for EquipmentKeySealer {
     }
 }
 
-/// 使用数据密钥打开装备 key 信封的解密适配器。
+/// 使用域内密钥环打开装备 key 信封的解密适配器；信封 key ID 未知时失败关闭。
 pub struct EquipmentKeyOpener {
-    data_key: DataKey,
+    keys: Arc<Keyring>,
 }
 
 impl EquipmentKeyOpener {
-    pub fn new(data_key: DataKey) -> Self {
-        Self { data_key }
+    pub fn new(keys: Arc<Keyring>) -> Self {
+        Self { keys }
     }
 
     /// 校验并解密绑定到指定装备 ID 的信封。
@@ -278,9 +282,14 @@ impl EquipmentKeyOpener {
             );
             EquipmentKeyOpenerError::InvalidEnvelope
         })?;
-        if envelope.encryption_key_id() != self.data_key.id() {
-            return Err(EquipmentKeyOpenerError::KeyMismatch);
-        }
+        let data_key = match self.keys.resolve(envelope.encryption_key_id()) {
+            Ok(data_key) => data_key,
+            Err(KeyringError::UnknownKeyId) => return Err(EquipmentKeyOpenerError::KeyMismatch),
+            Err(error) => {
+                let _ = error;
+                return Err(EquipmentKeyOpenerError::InvalidEnvelope);
+            }
+        };
 
         let aad = format!("{AAD_PREFIX}{}/key", equipment_id.as_uuid());
         if !valid_associated_data(&aad) {
@@ -291,7 +300,7 @@ impl EquipmentKeyOpener {
             envelope.nonce().try_into().map_err(|_| EquipmentKeyOpenerError::InvalidEnvelope)?;
         let mut buffer = envelope.ciphertext().to_vec();
         let result = (|| {
-            let aead_key = self.data_key.aead_key().map_err(|diagnostic_cause| {
+            let aead_key = data_key.aead_key().map_err(|diagnostic_cause| {
                 safe_diagnostics::error(
                     "equipment_crypto",
                     "prepare_decryption_key",
@@ -316,7 +325,7 @@ impl EquipmentKeyOpener {
                     EquipmentKeyOpenerError::Decryption
                 })?;
 
-            let actual_fingerprint = fingerprint(&self.data_key, plaintext);
+            let actual_fingerprint = fingerprint(data_key, plaintext);
             if !bool::from(actual_fingerprint.as_bytes().ct_eq(envelope.fingerprint().as_bytes())) {
                 return Err(EquipmentKeyOpenerError::FingerprintMismatch);
             }
@@ -347,11 +356,7 @@ impl EquipmentKeyOpener {
 
 impl fmt::Debug for EquipmentKeyOpener {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("EquipmentKeyOpener")
-            .field("key_id", &self.data_key.id)
-            .field("key_fingerprint", &self.data_key.fingerprint)
-            .finish()
+        formatter.debug_struct("EquipmentKeyOpener").field("key_count", &self.keys.len()).finish()
     }
 }
 
@@ -375,4 +380,66 @@ fn fingerprint(data_key: &DataKey, plaintext: &[u8]) -> String {
     context.update(SECRET_FINGERPRINT_DOMAIN);
     context.update(plaintext);
     auction_application::lower_hex(context.sign().as_ref())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use auction_domain::{DataKeyDomain, EquipmentId, EquipmentKey};
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
+    use super::{EquipmentKeyOpener, EquipmentKeySealer};
+    use crate::keyring::Keyring;
+
+    fn data_key(id: &str, byte: u8) -> Arc<crate::DataKey> {
+        Arc::new(crate::DataKey::from_base64(id, &BASE64.encode([byte; 32])).expect("测试密钥有效"))
+    }
+
+    #[test]
+    fn previous_equipment_key_decrypts_and_rotation_uses_current() {
+        let equipment_id = EquipmentId::from_uuid(uuid::Uuid::new_v4());
+        let old_only = Keyring::single(DataKeyDomain::Equipment, data_key("equipment-2025-11", 1));
+        let old_sealer = EquipmentKeySealer::new(Arc::clone(old_only.current()));
+        let key = EquipmentKey::new("0123456789").expect("装备 key 有效");
+        let envelope = old_sealer.seal(equipment_id, &key).expect("旧 key 密封成功");
+        assert_eq!(envelope.encryption_key_id(), "equipment-2025-11");
+
+        let rotated = Arc::new(
+            Keyring::new(
+                DataKeyDomain::Equipment,
+                data_key("equipment-2026-11", 2),
+                vec![data_key("equipment-2025-11", 1)],
+            )
+            .expect("轮换密钥环有效"),
+        );
+        let opener = EquipmentKeyOpener::new(Arc::clone(&rotated));
+        let opened = opener.open(equipment_id, &envelope).expect("旧 key 仍可解密");
+        assert_eq!(opened.with_bytes(<[u8]>::to_vec).unwrap(), b"0123456789");
+
+        let sealer = EquipmentKeySealer::new(Arc::clone(rotated.current()));
+        let resealed = sealer.seal(equipment_id, &opened).expect("重新密封成功");
+        assert_eq!(resealed.encryption_key_id(), "equipment-2026-11");
+        // 旧 key 单独无法打开新信封。
+        assert!(EquipmentKeyOpener::new(Arc::new(old_only)).open(equipment_id, &resealed).is_err());
+    }
+
+    #[test]
+    fn unknown_key_id_fails_closed() {
+        let equipment_id = EquipmentId::from_uuid(uuid::Uuid::new_v4());
+        let keyring =
+            Arc::new(Keyring::single(DataKeyDomain::Equipment, data_key("equipment-2026-11", 2)));
+        let sealer = EquipmentKeySealer::new(Arc::clone(keyring.current()));
+        let envelope = sealer
+            .seal(equipment_id, &EquipmentKey::new("abcdef0123").expect("有效"))
+            .expect("密封成功");
+        let foreign = auction_domain::EquipmentKeyEnvelope::new(
+            envelope.ciphertext().to_vec(),
+            envelope.nonce().to_vec(),
+            "user_login-2026-11".to_owned(),
+            envelope.fingerprint().to_owned(),
+        )
+        .expect("结构有效");
+        assert!(EquipmentKeyOpener::new(keyring).open(equipment_id, &foreign).is_err());
+    }
 }

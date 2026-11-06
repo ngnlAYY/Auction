@@ -105,8 +105,9 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
         // 全部省略仍保留能力缺失语义；装备信封的三角色消费者不得持有不同密钥。
         if plan.config.equipment_data_key_id() != worker.equipment_data_key_id()
             || plan.config.equipment_data_key() != worker.equipment_data_key()
+            || !same_retired_keys(&plan.config, worker, auction_config::DataKeyDomain::Equipment)
         {
-            bail!("Public、Admin 与 Worker 必须使用相同的 equipment_data_key 标识和材料");
+            bail!("Public、Admin 与 Worker 必须使用相同的 equipment 数据密钥环");
         }
         if auction_storage::strict_deployment_database_identity(
             plan.config.database_url().context("database required")?,
@@ -134,6 +135,11 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
         || admin.user_login_data_key() != worker.user_login_data_key()
         || admin.credential_data_key_id() != worker.credential_data_key_id()
         || admin.credential_data_key() != worker.credential_data_key()
+        || admin.mail_diagnostics_data_key_id() != worker.mail_diagnostics_data_key_id()
+        || admin.mail_diagnostics_data_key() != worker.mail_diagnostics_data_key()
+        || !same_retired_keys(admin, worker, auction_config::DataKeyDomain::UserLogin)
+        || !same_retired_keys(admin, worker, auction_config::DataKeyDomain::Credential)
+        || !same_retired_keys(admin, worker, auction_config::DataKeyDomain::MailDiagnostics)
     {
         bail!("Admin/Worker runtime, policy, control or data-key topology mismatch");
     }
@@ -224,4 +230,27 @@ pub(super) async fn ensure_available(plans: &[RolePlan]) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// 旧密钥材料与保留期必须逐项一致，否则两个角色会按不同密钥环解释同一信封。
+fn same_retired_keys(
+    left: &auction_config::AppConfig,
+    right: &auction_config::AppConfig,
+    domain: auction_config::DataKeyDomain,
+) -> bool {
+    let identity = |config: &auction_config::AppConfig| {
+        config
+            .data_key_previous(domain)
+            .iter()
+            .map(|key| {
+                (
+                    key.id().to_owned(),
+                    key.material().to_owned(),
+                    key.retired_at(),
+                    key.retain_until(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    identity(left) == identity(right)
 }

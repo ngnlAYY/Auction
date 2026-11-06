@@ -1,16 +1,16 @@
 # MoogleMail 邮件流程
 
-[文档导航](../README.md) · [业务规则](../business-rules.md) · [结算与履约](settlement.md) · [auction-integrations](../../crates/auction-integrations/README.md)
+[docs/README.md](../README.md) · [docs/business-rules.md](../business-rules.md) · [docs/guide/settlement.md](settlement.md) · [crates/auction-integrations/README.md](../../crates/auction-integrations/README.md)
 
 Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注册与换绑请求，Bot 寄出登录 key、回执、结算邮件与提醒。所有入站邮件都经持久化游标逐封处理；所有出站邮件都经 outbox 投递，结果不确定时转人工对账而不是重发。
 
 ## 收件轮询
 
 - Worker 为每个启用的世界维护一个邮箱（`mailbox_key`，如 `mooglemail:main`），按 cron 计划（默认每 5 分钟，带抖动）读取收件箱，领取邮箱租约后逐封处理并推进持久游标。
-- 默认收件与邮箱维护独立运行；两个世界同时启用时按世界平移日程。Admin 手动触发立即唤醒收件，不受相位影响，也不带动独立维护；配置与旧路径回退见[配置参考](../../ops/config/README.md#mooglemail-收件与维护)。
+- 默认收件与邮箱维护独立运行；两个世界同时启用时按世界平移日程。Admin 手动触发立即唤醒收件，不受相位影响，也不带动独立维护；配置与旧路径回退见[ops/config/README.md#mooglemail-收件与维护](../../ops/config/README.md#mooglemail-收件与维护)。
 - 发件人白名单（`sender_allowlist`）按详情中的完整名称、不区分大小写核验，不能用列表截断名称提前授权。名单为空且未显式关闭（`sender_allowlist_disabled = true`）时拒绝拉取；名单非空时会读取详情后再核验，名单外邮件保留在待读队列中，游标不越过它。生产环境应配置白名单或明确关闭。
 - 每封邮件以“邮箱 + 远端邮件 ID”记入 `inbound_mail`，重复读取不会重复处理；已持久接受的投稿在重试时恢复原决定，不因远端页面变化或重试时跨越赛季边界改判。
-- Admin 可在“仪表盘”或“收件审核”页暂停/恢复某个邮箱，或立即触发一次轮询（经 Worker control）。启用自动排期时，轮次进入预览后从计划开拍前 2 小时起暂停对应世界，实际开拍后恢复；取消或错过已预览的轮次也会解除排期暂停。参与赛季早鸟期的世界还可能受赛季前暂停控制，完整时序见[赛季排期](../business-rules.md#赛季早鸟期auctionscheduleearly_bird)。暂停只控制轮询，不能替代下述事务内的收件门禁。
+- Admin 可在“仪表盘”或“收件审核”页暂停/恢复某个邮箱，或立即触发一次轮询（经 Worker control）。启用自动排期时，轮次进入预览后从计划开拍前 2 小时起暂停对应世界，实际开拍后恢复；取消或错过已预览的轮次也会解除排期暂停。参与赛季早鸟期的世界还可能受赛季前暂停控制，完整时序见[docs/business-rules.md#赛季早鸟期auctionscheduleearly_bird](../business-rules.md#赛季早鸟期auctionscheduleearly_bird)。暂停只控制轮询，不能替代下述事务内的收件门禁。
 
 ## 主题路由
 
@@ -39,7 +39,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
    任一件不合格 → **整封**退回，并回信说明原因（`auction_equipment_rejected`）。装备页面暂时读不到等非确定错误不会退回，而是留待重试。
 5. 全部通过 → 在一个事务内把装备加入该世界当前接收投稿的场次（Draft 或 Preview），保存加密的装备 key，然后投递一个“收取附件”操作把装备收入 Bot 账号，并按整封投稿合并寄出投稿接收回执（`auction_submission_receipt`：场次、每个 lot 的代码、装备名与起拍价）。若场次在回执发送前已开拍，回执在 sending 围栏前退役，不补寄旧场次回执。若锁后数据库当前时间或邮件原始 `received_at` 早于该场次冻结的最早收件时刻（新赛季开始），事务拒收 → **整封**退回并回信说明（`auction_equipment_rejected`，原因 `season_intake_closed`），不收取附件。因此旧赛季来信即使延迟到新赛季处理仍被拒绝；关闭赛季前轮询暂停也不绕过此门禁。已持久接受的投稿按上文重放原决定。
 
-被拒绝的装备读取会留下加密诊断证据（默认保留 7 天），可用 `auction-cli mail export-evidence` 导出。
+被拒绝的装备读取会留下加密诊断证据（默认保留 7 天），可用 `auction-cli mail export-evidence` 导出。诊断归档优先使用独立的 `mail_diagnostics_data_key` 域；未配置时沿用 `credential_data_key`、再退回 `equipment_data_key`。归档头部记录写入域与 key ID，导出按头部选择同域密钥环，因此轮换期间保留的旧 key 也能解密历史证据；见[ops/keys/README.md](../../ops/keys/README.md)。
 
 ### 起拍价指令
 
@@ -69,11 +69,11 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 
 ## 结算退件
 
-结算寄出的 COD 或装备邮件被收件人拒收（或过期）退回时，主题仍带原义务 ID。处理器只把它记录为退件证据（义务 ID、Credits、COD、附件），由恢复流程在后续事务中决定收回装备、重寄 COD 或寄回卖家，见[结算与履约](settlement.md#4-恢复付款超时与拒收)。
+结算寄出的 COD 或装备邮件被收件人拒收（或过期）退回时，主题仍带原义务 ID。处理器只把它记录为退件证据（义务 ID、Credits、COD、附件），由恢复流程在后续事务中决定收回装备、重寄 COD 或寄回卖家，见[docs/guide/settlement.md#4-恢复付款超时与拒收](settlement.md#4-恢复付款超时与拒收)。
 
 ## 出站邮件
 
-所有出站邮件先写入 outbox，由投递循环发送（详见[结算与履约](settlement.md#3-投递outbox)）。常见类型：
+所有出站邮件先写入 outbox，由投递循环发送（详见[docs/guide/settlement.md#3-投递outbox](settlement.md#3-投递outbox)）。常见类型：
 
 | 类别（发送间隔配置键） | 邮件 |
 | --- | --- |
@@ -145,11 +145,11 @@ PM 渠道没有独立 outbox：`lot_watch_pm` 的 `created`、`suppressed`（`re
 
 - 投稿的 Take 与整封 Return 都先冻结原邮件身份与资产期望，执行前重新核对；Take 只有在响应证明原邮件身份一致、资产归零且领取回执匹配时才算成功。
 - Return 需要绑定原发件人、收件人、主题、正文及完整资产的 `[RTS]` 回执。详情 GET 本身就会把邮件从仅含未读项的 Inbox 移走，因此 Inbox 中找不到邮件不能证明退回成功。
-- Send 需要从发送前 Sent 基线之外找到新邮件，精确匹配冻结的收件人、主题、正文与完整资产，并再次证明 compose 已干净；成功提示或 HTTP 200 本身不足以证明完成。进入远端写入后无法取得确定证明时，保留未知结果转人工对账，不自动重复执行。 发送前基线默认处于影子模式：旧完整排除集裁决，同时只读比较临时 MID 边界的新邮件集合与列表候选集合。启用水位后，每次发送前读取完整最新分钟组，发送后核对原锚点并读完边界分钟，再取得候选；边界只缩小扫描范围，不代替身份、正文与资产证明。异常时完整回退仍受页数与预算限制；发送后边界前提失效且不能恢复原排除集时保持未知。配置和人工切换条件见[发送前基线](../../ops/config/README.md#mooglemail-发送前基线)，默认影子模式本身不解除完整扫描上限。
+- Send 需要从发送前 Sent 基线之外找到新邮件，精确匹配冻结的收件人、主题、正文与完整资产，并再次证明 compose 已干净；成功提示或 HTTP 200 本身不足以证明完成。进入远端写入后无法取得确定证明时，保留未知结果转人工对账，不自动重复执行。 发送前基线默认处于影子模式：旧完整排除集裁决，同时只读比较临时 MID 边界的新邮件集合与列表候选集合。启用水位后，每次发送前读取完整最新分钟组，发送后核对原锚点并读完边界分钟，再取得候选；边界只缩小扫描范围，不代替身份、正文与资产证明。异常时完整回退仍受页数与预算限制；发送后边界前提失效且不能恢复原排除集时保持未知。配置和人工切换条件见[ops/config/README.md#mooglemail-发送前基线](../../ops/config/README.md#mooglemail-发送前基线)，默认影子模式本身不解除完整扫描上限。
 
 ## 邮箱维护
 
-Worker 周期运行邮箱维护：观察 compose 草稿与 Sent 列表，为结果未知的投递寻找精确匹配的 Sent 证据（主题、正文摘要、世界、收件人与完整附件；列表时间只到分钟，按发送开始所在分钟比较并排除同分钟同内容的其他尝试），对未找回的结算发送还会按唯一义务主题在完整 Sent 中记录目击，阻止 Admin 重试或判失败（见[结算与履约](settlement.md#3-投递outbox)），并在精确匹配后受控丢弃残留草稿。找不到 Sent 不等于未发送——未知的发送永不自动重试，最终由 Admin 人工对账。
+Worker 周期运行邮箱维护：观察 compose 草稿与 Sent 列表，为结果未知的投递寻找精确匹配的 Sent 证据（主题、正文摘要、世界、收件人与完整附件；列表时间只到分钟，按发送开始所在分钟比较并排除同分钟同内容的其他尝试），对未找回的结算发送还会按唯一义务主题在完整 Sent 中记录目击，阻止 Admin 重试或判失败（见[docs/guide/settlement.md#3-投递outbox](settlement.md#3-投递outbox)），并在精确匹配后受控丢弃残留草稿。找不到 Sent 不等于未发送——未知的发送永不自动重试，最终由 Admin 人工对账。
 
 默认每个世界的维护任务先执行上述恢复与清理，再检查完整 Read Mail 纯观察是否到期。纯观察只记录完整已读列表数量，默认最小间隔一小时，首次同样延后；实际执行向上取整到维护节奏，失败也消耗间隔。既有待读 MID 与 Take 的恢复定位仍按需读取原完整列表和详情，不受纯观察降频影响，也不从历史已读列表创建新业务指令。
 

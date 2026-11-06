@@ -140,7 +140,7 @@ pub(crate) enum MailCommand {
         /// 新建的 JSON 输出文件。
         #[arg(long, value_name = "FILE")]
         output: PathBuf,
-        /// 历史父密钥来源；省略时优先 credential，缺失才用 equipment。
+        /// 历史父密钥来源；省略时优先 mail_diagnostics，再 credential，最后 equipment。
         #[arg(long, value_enum)]
         key_source: Option<KeySourceArg>,
     },
@@ -156,8 +156,51 @@ pub(crate) enum MailCommand {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum KeySourceArg {
+    MailDiagnostics,
     Credential,
     Equipment,
+}
+
+impl KeySourceArg {
+    pub(crate) const fn domain(self) -> auction_config::DataKeyDomain {
+        match self {
+            Self::MailDiagnostics => auction_config::DataKeyDomain::MailDiagnostics,
+            Self::Credential => auction_config::DataKeyDomain::Credential,
+            Self::Equipment => auction_config::DataKeyDomain::Equipment,
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum RecoveryCommand {
+    /// W10.9：在 Worker 全局暂停下只读扫描备份时刻之后的 Sent、Read Mail 与论坛新楼层，
+    /// 把与 Sent 精确匹配的 pending/claimed 投递隔离为人工对账；不自动重发。
+    ExternalReconcile {
+        /// 恢复点时刻（RFC 3339，含时区）；只报告该时刻及之后的外部事实。
+        #[arg(long, value_name = "RFC3339")]
+        cutoff: String,
+        /// 新建的 JSON 回执；已存在时拒绝覆盖。
+        #[arg(long, value_name = "FILE")]
+        receipt: PathBuf,
+        /// 每个世界最多读取的 Sent / Read Mail 列表页数，1-100。
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=100))]
+        maximum_pages: u32,
+        /// 最多读取的已发布论坛主题数，1-20。
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u16).range(1..=20))]
+        maximum_forum_threads: u16,
+        /// 实际写入隔离；省略时只输出计划回执，不改变数据库。
+        #[arg(long)]
+        apply: bool,
+        /// 逐字确认：`APPLY EXTERNAL RECONCILIATION`；只在 --apply 时需要。
+        #[arg(long, value_name = "TEXT", requires = "apply")]
+        confirm: Option<String>,
+        /// 写入审计的操作者标识；--apply 时必填。
+        #[arg(long, value_name = "ID")]
+        actor: Option<String>,
+        /// 稳定扫描 UUID；同一回执重试时复用，已隔离项幂等跳过。
+        #[arg(long)]
+        scan_id: Option<Uuid>,
+    },
 }
 
 #[derive(Debug, Subcommand)]

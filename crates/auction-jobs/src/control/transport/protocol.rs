@@ -76,6 +76,8 @@ pub(super) enum ResponseCode {
     Invalid,
     /// W1.9 主动暂停；请求未发往远端。
     Paused,
+    /// W10.9 恢复核对要求先暂停外部访问；请求未发往远端。
+    NotPaused,
     /// 当前 Worker 未装配该远端读取能力。
     CapabilityUnavailable,
 }
@@ -89,6 +91,7 @@ impl ResponseCode {
             Self::Unavailable => "unavailable",
             Self::Invalid => "invalid_command_id",
             Self::Paused => "paused",
+            Self::NotPaused => "not_paused",
             Self::CapabilityUnavailable => "capability_unavailable",
         }
     }

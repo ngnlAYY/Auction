@@ -42,10 +42,23 @@ pub use consistency_inspection::{
 };
 #[cfg(feature = "postgres")]
 mod equipment_loss;
+#[cfg(feature = "postgres")]
+mod external_recovery;
 #[cfg(feature = "test-db")]
 pub use equipment_loss::delivery_snapshot_equality_sql;
 #[cfg(feature = "postgres")]
+pub use external_recovery::{
+    EXTERNAL_RECOVERY_QUARANTINE_ACTION, EXTERNAL_RECOVERY_QUARANTINE_FAILURE_CODE,
+};
+#[cfg(feature = "postgres")]
 mod intake_target;
+#[cfg(feature = "postgres")]
+mod key_rotation;
+#[cfg(feature = "postgres")]
+pub use key_rotation::{
+    KEY_ROTATION_PAGE_SIZE, KeyRotationError, RotatedKeyEnvelope, StoredKeyEnvelope,
+    append_reencrypt_audit, replace_key_envelope, scan_key_envelopes, stored_key_ids,
+};
 #[cfg(feature = "postgres")]
 mod least_privilege;
 #[cfg(feature = "postgres")]

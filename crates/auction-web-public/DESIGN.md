@@ -1,6 +1,6 @@
 # Public 前端设计约定
 
-[文档导航](../../docs/README.md) · [模块说明](README.md) · [共享层](../auction-web-shared/README.md) · [Admin 设计](../auction-web-admin/DESIGN.md)
+[docs/README.md](../../docs/README.md) · [crates/auction-web-public/README.md](README.md) · [crates/auction-web-shared/README.md](../auction-web-shared/README.md) · [crates/auction-web-admin/DESIGN.md](../auction-web-admin/DESIGN.md)
 
 本页记录公开站点的界面与交互约定。Public 面向浏览者、竞买人与查看结果的卖家：首要任务是找到装备、看懂价格与截止时间、明确确认出价，并在网络恢复后重新取得权威状态。它不提供任何管理入口（凭据、Worker、审计、配置）。
 
@@ -20,7 +20,7 @@ Public 不导入 Admin 的页面、样式或 `admin-*` 选择器；共享层只�
 
 ## 视觉基底
 
-- 默认深色、紧凑、以数据为主；颜色、字体栈、字号、间距、圆角、层级与触控尺寸全部引用共享 [`crates/auction-web-shared/style/base.css`](../auction-web-shared/style/base.css) 的 token，不使用 webfont。
+- 默认深色、紧凑、以数据为主；颜色、字体栈、字号、间距、圆角、层级与触控尺寸全部引用共享 [crates/auction-web-shared/style/base.css](../auction-web-shared/style/base.css) 的 token，不使用 webfont。
 - 主要 token：背景 `--color-bg #0e1116`、容器 `--color-surface #161b22`、抬升层 `--color-surface-raised #1d242e`、文字 `#e6ebf2`、次要文字 `#93a0b4`、品牌强调（金）`--color-accent #d9a441`、进行中 `--color-live #3fb96f`、危险 `--color-danger #e66262`、链接 `#6ea8fe`。
 - 页头可切换浅色主题（`:root[data-theme="light"]` 只改写 token，布局与密度不变），偏好保存于 `hv.theme`。启动页因 CSP 不能运行内联脚本，静态骨架始终为深色，WASM 就绪后再应用主题。
 - 对比度目标 WCAG AA：正文 4.5:1，控件边界与图形 3:1。表单控件边界用 `--color-border-control`，表格与卡片分隔线用低对比 `--color-border`，悬停与焦点切换为金色。
@@ -38,7 +38,7 @@ Public 不导入 Admin 的页面、样式或 `admin-*` 选择器；共享层只�
 | `screen and (min-width: 80rem)` | 账户页出价与代理列表并排（2:3） |
 | `print` | 隐藏导航与交互控件，保留规则、黑名单与补偿等内容 |
 
-断点切换只由 CSS 完成。[`crates/auction-web-public/src/app/surface/presentation/desktop.rs`](src/app/surface/presentation/desktop.rs) 与 [`crates/auction-web-public/src/app/surface/presentation/mobile.rs`](src/app/surface/presentation/mobile.rs) 提供两端各自的导航与筛选控件，用 CSS 隐藏非当前设备的那一份；业务表格、表单草稿、会话与世界选择、数据读取与命令宿主只有一份，调整窗口不会重新挂载、重新请求或丢失已确认/进行中/结果未知的命令。
+断点切换只由 CSS 完成。[crates/auction-web-public/src/app/surface/presentation/desktop.rs](src/app/surface/presentation/desktop.rs) 与 [crates/auction-web-public/src/app/surface/presentation/mobile.rs](src/app/surface/presentation/mobile.rs) 提供两端各自的导航与筛选控件，用 CSS 隐藏非当前设备的那一份；业务表格、表单草稿、会话与世界选择、数据读取与命令宿主只有一份，调整窗口不会重新挂载、重新请求或丢失已确认/进行中/结果未知的命令。
 
 ## 外壳
 

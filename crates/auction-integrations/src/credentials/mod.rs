@@ -19,6 +19,7 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use crate::DataKey;
+use crate::keyring::Keyring;
 
 mod acquire;
 mod check;
@@ -32,14 +33,19 @@ const MAIL_FINGERPRINT_DOMAIN: &[u8] = b"auction/cryptobox/secret/v1/mooglemail-
 const FORUM_FINGERPRINT_DOMAIN: &[u8] = b"auction/cryptobox/secret/v1/ehentai-cookie\0";
 
 pub struct CredentialSealer {
-    data_key: Arc<DataKey>,
+    keys: Arc<Keyring>,
     random: SystemRandom,
 }
 
 impl CredentialSealer {
-    /// 使用独立于装备和用户登录 key 的数据密钥建立密封器。
-    pub fn new(data_key: Arc<DataKey>) -> Self {
-        Self { data_key, random: SystemRandom::new() }
+    /// 使用独立于装备和用户登录 key 的域内密钥环建立密封器；新写入使用当前密钥。
+    pub fn new(keys: Arc<Keyring>) -> Self {
+        Self { keys, random: SystemRandom::new() }
+    }
+
+    /// 当前写入密钥；供启动诊断与密钥环核对使用。
+    pub fn key_id(&self) -> &str {
+        self.keys.current_id()
     }
 
     fn seal_now(
@@ -72,7 +78,8 @@ impl CredentialSealer {
             );
             crypto_error()
         })?;
-        let key = self.data_key.aead_key().map_err(|diagnostic_cause| {
+        let data_key = self.keys.current();
+        let key = data_key.aead_key().map_err(|diagnostic_cause| {
             safe_diagnostics::error(
                 "credential_crypto",
                 "load_encryption_key",
@@ -98,11 +105,11 @@ impl CredentialSealer {
             );
             return Err(crypto_error());
         }
-        let fingerprint = fingerprint(&self.data_key, kind, secret);
+        let fingerprint = fingerprint(data_key, kind, secret);
         AdminCredentialEnvelope::new(
             ciphertext,
             nonce.to_vec(),
-            self.data_key.id().to_owned(),
+            data_key.id().to_owned(),
             fingerprint,
         )
         .map_err(ApplicationError::from)
@@ -121,12 +128,15 @@ impl CredentialSealer {
             || !scope.bytes().all(|byte| {
                 byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-' | b'.')
             })
-            || envelope.encryption_key_id() != self.data_key.id()
         {
             return Err(crypto_error());
         }
         let aad = credential_aad(kind, credential_id, scope);
-        let key = self.data_key.aead_key().map_err(|diagnostic_cause| {
+        let data_key = self.keys.resolve(envelope.encryption_key_id()).map_err(|error| {
+            let _ = error;
+            crypto_error()
+        })?;
+        let key = data_key.aead_key().map_err(|diagnostic_cause| {
             safe_diagnostics::error(
                 "credential_crypto",
                 "load_decryption_key",
@@ -167,7 +177,7 @@ impl CredentialSealer {
         // 直接移交已认证缓冲，避免复制 Cookie；截短前清理认证标签所在的尾部。
         secret[length..].fill(0);
         secret.truncate(length);
-        let actual_fingerprint = fingerprint(&self.data_key, kind, &secret);
+        let actual_fingerprint = fingerprint(data_key, kind, &secret);
         if actual_fingerprint.as_bytes().ct_eq(envelope.fingerprint().as_bytes()).into() {
             Ok(secret)
         } else {
@@ -205,8 +215,8 @@ impl fmt::Debug for CredentialSealer {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("CredentialSealer")
-            .field("key_id", &self.data_key.id())
-            .field("key_fingerprint", &self.data_key.fingerprint())
+            .field("key_id", &self.keys.current_id())
+            .field("key_count", &self.keys.len())
             .finish()
     }
 }
@@ -233,4 +243,147 @@ fn fingerprint(data_key: &DataKey, kind: AdminCredentialKind, secret: &[u8]) -> 
 
 fn crypto_error() -> ApplicationError {
     ApplicationError::AdminCredential(AdminCredentialError::CryptoUnavailable)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use auction_application::{AdminCredentialKind, AdminCredentialOpener, AdminCredentialSealer};
+    use auction_domain::DataKeyDomain;
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    use uuid::Uuid;
+
+    use super::CredentialSealer;
+    use crate::keyring::Keyring;
+
+    fn data_key(id: &str, byte: u8) -> Arc<crate::DataKey> {
+        Arc::new(crate::DataKey::from_base64(id, &BASE64.encode([byte; 32])).expect("测试密钥有效"))
+    }
+
+    /// 旧 key 写入的信封在同时持有当前与旧 key 的密钥环中可解密；只含新 key 时失败关闭。
+    #[test]
+    fn previous_key_decrypts_and_missing_key_fails_closed() {
+        let credential_id = Uuid::new_v4();
+        let scope = "mooglemail:main";
+        let old =
+            Keyring::new(DataKeyDomain::Credential, data_key("credential-2025-11", 1), Vec::new())
+                .expect("旧密钥环有效");
+        let old_sealer = CredentialSealer::new(Arc::new(old));
+        let envelope = AdminCredentialSealer::seal(
+            &old_sealer,
+            AdminCredentialKind::MailCookie,
+            credential_id,
+            scope,
+            b"ipb_member_id=1; ipb_pass_hash=deadbeef",
+        )
+        .expect("旧密钥密封成功");
+        assert_eq!(envelope.encryption_key_id(), "credential-2025-11");
+
+        let current = CredentialSealer::new(Arc::new(
+            Keyring::new(
+                DataKeyDomain::Credential,
+                data_key("credential-2026-11", 2),
+                vec![data_key("credential-2025-11", 1)],
+            )
+            .expect("轮换密钥环有效"),
+        ));
+        let secret = AdminCredentialOpener::open(
+            &current,
+            AdminCredentialKind::MailCookie,
+            credential_id,
+            scope,
+            &envelope,
+        )
+        .expect("旧 key 仍可解密");
+        assert_eq!(secret, b"ipb_member_id=1; ipb_pass_hash=deadbeef");
+
+        // 用当前 key 重新密封后，旧 key 单独无法解密（失败关闭）。
+        let resealed = AdminCredentialSealer::seal(
+            &current,
+            AdminCredentialKind::MailCookie,
+            credential_id,
+            scope,
+            &secret,
+        )
+        .expect("重新密封成功");
+        assert_eq!(resealed.encryption_key_id(), "credential-2026-11");
+        assert_ne!(resealed.fingerprint(), envelope.fingerprint());
+        assert!(
+            AdminCredentialOpener::open(
+                &old_sealer,
+                AdminCredentialKind::MailCookie,
+                credential_id,
+                scope,
+                &resealed,
+            )
+            .is_err()
+        );
+    }
+
+    /// 未知 key ID 不能回退到当前 key，也不能跨域尝试。
+    #[test]
+    fn unknown_key_id_is_rejected() {
+        let credential_id = Uuid::new_v4();
+        let scope = "mooglemail:main";
+        let keyring = Arc::new(
+            Keyring::new(DataKeyDomain::Credential, data_key("credential-2026-11", 2), Vec::new())
+                .expect("密钥环有效"),
+        );
+        let sealer = CredentialSealer::new(Arc::clone(&keyring));
+        let envelope = AdminCredentialSealer::seal(
+            &sealer,
+            AdminCredentialKind::ForumCookie,
+            credential_id,
+            scope,
+            b"ipb_member_id=2",
+        )
+        .expect("密封成功");
+        let foreign = auction_application::AdminCredentialEnvelope::new(
+            envelope.ciphertext().to_vec(),
+            envelope.nonce().to_vec(),
+            "equipment-2026-11".to_owned(),
+            envelope.fingerprint().to_owned(),
+        )
+        .expect("结构有效");
+        assert!(
+            AdminCredentialOpener::open(
+                &sealer,
+                AdminCredentialKind::ForumCookie,
+                credential_id,
+                scope,
+                &foreign,
+            )
+            .is_err()
+        );
+    }
+
+    /// 同一密钥重复密封产生新 nonce，指纹只由 key 与明文决定（重加密幂等性依据）。
+    #[test]
+    fn reseal_is_deterministic_in_fingerprint_only() {
+        let credential_id = Uuid::new_v4();
+        let scope = "ehentai:shared";
+        let sealer = CredentialSealer::new(Arc::new(
+            Keyring::new(DataKeyDomain::Credential, data_key("credential-2026-11", 3), Vec::new())
+                .expect("密钥环有效"),
+        ));
+        let first = AdminCredentialSealer::seal(
+            &sealer,
+            AdminCredentialKind::ForumCookie,
+            credential_id,
+            scope,
+            b"ipb_member_id=3",
+        )
+        .expect("密封成功");
+        let second = AdminCredentialSealer::seal(
+            &sealer,
+            AdminCredentialKind::ForumCookie,
+            credential_id,
+            scope,
+            b"ipb_member_id=3",
+        )
+        .expect("密封成功");
+        assert_ne!(first.nonce(), second.nonce());
+        assert_eq!(first.fingerprint(), second.fingerprint());
+    }
 }

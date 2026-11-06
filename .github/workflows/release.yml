@@ -1,0 +1,215 @@
+name: auction-release
+
+# W7.1：只从 main 上的版本 tag（v<Cargo workspace version>）发布。
+# tag 提交必须是 origin/main 的祖先；构建、来源证明与 GitHub Release 在同一条流水线上完成。
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: read
+
+# 发布不可取消：同一 tag 的重复推送排队并最终因发行已存在而失败，避免半途覆盖资产。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 需要完整历史与 tag：核对 main 可达性，并检查已发布迁移未被修改。
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release tag
+        id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$ ]]; then
+            printf '发布 tag 必须是 v<semver>：%s\n' "$TAG" >&2
+            exit 1
+          fi
+          version=$(awk '
+            /^\[workspace\.package\]$/ { active = 1; next }
+            active && /^\[/ { active = 0 }
+            active && /^version[[:space:]]*=/ {
+              value = $0
+              sub(/^[^=]+=[[:space:]]*"/, "", value)
+              sub(/"[[:space:]]*$/, "", value)
+              print value
+              exit
+            }
+          ' Cargo.toml)
+          if [[ -z "$version" || "$TAG" != "v$version" ]]; then
+            printf 'tag %s 必须等于工作区版本 v%s\n' "$TAG" "${version:-<未知>}" >&2
+            exit 1
+          fi
+          commit=$(git rev-parse --verify 'HEAD^{commit}')
+          branch_ref="refs/remotes/origin/$DEFAULT_BRANCH"
+          if ! git rev-parse --verify --quiet "$branch_ref" >/dev/null; then
+            git fetch --no-tags origin "+refs/heads/$DEFAULT_BRANCH:$branch_ref"
+          fi
+          if ! git merge-base --is-ancestor "$commit" "$branch_ref"; then
+            printf 'tag 提交 %s 不在 origin/%s 上；只允许从 main 发布\n' \
+              "$commit" "$DEFAULT_BRANCH" >&2
+            exit 1
+          fi
+          printf 'tag=%s\n' "$TAG" >> "$GITHUB_OUTPUT"
+      - name: Check published migrations are unchanged
+        run: bash ci/checks/published-migrations.sh
+
+  verify:
+    needs: guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      # 仅静态检查与测试，不生成调试信息。
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # ci/checks/check.sh all 含 published-migrations，需要完整历史与 tag。
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Ensure patched rustup
+        run: bash ci/tools/rustup.sh
+      - name: Install check dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep perl
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.99.0
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          prefix-key: v1-auction-release-verify
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
+          cache-bin: "false"
+      # 发布 tag 自带完整门禁，不依赖分支保护的历史运行记录。
+      - name: Run repository, static and lint gates
+        run: bash ci/checks/check.sh all fmt check feature dependency-versions lint wasm
+      - name: Run pure and double tests
+        run: just test
+      - name: Install PostgreSQL 18 for integration tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install --yes --no-install-recommends postgresql-18
+          sudo systemctl start postgresql
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE auction_test LOGIN PASSWORD 'auction_test';"
+          sudo -u postgres createdb -O auction_test auction_test
+      - name: Run PostgreSQL 18 integration tests
+        env:
+          AUCTION_TEST_DATABASE_URL: postgresql://auction_test:auction_test@127.0.0.1:5432/auction_test
+        run: just test-db
+
+  build:
+    needs: [guard, verify]
+    uses: ./.github/workflows/release-build.yml
+
+  publish:
+    needs: [guard, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # verify-deployment-package.sh 需要完整历史与发布 tag 核对提交可达性。
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download release candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.build.outputs.candidate-artifact }}
+          path: package
+      # 重新核对候选包摘要，避免把传输损坏的文件发布为正式制品。
+      - name: Verify release candidate checksums
+        working-directory: package
+        run: sha256sum --check --strict SHA256SUMS
+      # 来源证明绑定本工作流的 OIDC 身份与本次 tag；长期保存在 GitHub 证明存储中。
+      - name: Attest release assets provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            package/*.tar.gz
+            package/SHA256SUMS
+            package/DEPENDENCIES.md
+      # 用部署端同一脚本自检：校验包内摘要、提交、发布 tag 可达性与刚生成的来源证明。
+      - name: Self-check deployment package
+        env:
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: |
+          archive=$(find package -maxdepth 1 -name '*.tar.gz' -print -quit)
+          bash ci/release/verify-deployment-package.sh "$archive" --tag "$TAG"
+      # Release 资产永久保留；发行一经创建不再覆盖。失败后重跑会在下一步失败前保持 tag 原状。
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            printf '发行已存在且不可覆盖：%s\n' "$TAG" >&2
+            exit 1
+          fi
+          archive=$(cd package && find . -maxdepth 1 -name '*.tar.gz' -printf '%f\n' -quit)
+          commit=$(git rev-parse --verify 'HEAD^{commit}')
+          sha256=$(sha256sum "package/$archive" | awk '{print $1}')
+          # shellcheck disable=SC2016 # 反引号是发布说明里的 Markdown 字面量。
+          {
+            printf '## Auction %s\n\n' "$TAG"
+            printf -- '- 源码提交：`%s`\n' "$commit"
+            printf -- '- 制品：`%s`\n' "$archive"
+            printf -- '- SHA-256：`%s`\n\n' "$sha256"
+            printf '### 校验\n\n'
+            printf '```bash\n'
+            printf 'gh attestation verify %s \\\n' "$archive"
+            printf '  --repo %s \\\n' "$GITHUB_REPOSITORY"
+            printf '  --signer-workflow %s/.github/workflows/release.yml \\\n' "$GITHUB_REPOSITORY"
+            printf '  --source-ref refs/tags/%s \\\n' "$TAG"
+            printf '  --source-digest %s\n' "$commit"
+            printf 'bash ci/release/verify-deployment-package.sh %s --tag %s\n' "$archive" "$TAG"
+            printf '```\n\n'
+            printf '部署只接受本发行中的 CI 制品；构建提交必须可从发布 tag 到达。\n'
+          } >release-notes.md
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "$TAG" \
+            --notes-file release-notes.md \
+            "package/$archive" \
+            package/SHA256SUMS \
+            package/DEPENDENCIES.md
+      - name: Add release summary
+        env:
+          TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+        run: |
+          # shellcheck disable=SC2016 # 反引号是摘要里的 Markdown 字面量。
+          {
+            printf '## 已发布 %s\n\n' "$TAG"
+            printf '[GitHub Release](%s) 已附带 tar.gz、SHA256SUMS 与 DEPENDENCIES.md。\n\n' "$RELEASE_URL"
+            printf '%s\n' '来源证明已写入 GitHub attestation 存储；部署前运行 `ci/release/verify-deployment-package.sh`。'
+          } >> "$GITHUB_STEP_SUMMARY"

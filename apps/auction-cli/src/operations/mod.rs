@@ -4,8 +4,12 @@ pub(crate) mod alerts;
 pub(crate) mod credentials;
 pub(crate) mod forum;
 pub(crate) mod funds;
+#[cfg(feature = "postgres")]
+pub(crate) mod keys;
 pub(crate) mod mail;
 mod operator_identity;
+#[cfg(feature = "postgres")]
+pub(crate) mod recovery;
 pub(crate) mod rules;
 pub(crate) mod settlement;
 pub(crate) mod switches;

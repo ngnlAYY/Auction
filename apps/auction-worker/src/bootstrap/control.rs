@@ -131,18 +131,38 @@ pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task
 /// 暂停只阻止新请求，已进入 sending 围栏的写入不受影响。
 #[cfg(feature = "postgres")]
 pub(super) struct WorkerRemoteReads {
-    mail: super::mail::MailControlRemoteReads,
+    mail: Option<super::mail::MailControlRemoteReads>,
+    /// W10.9：与论坛回帖循环共用的只读主题读取器；未启用论坛时恢复扫描只报告能力不可用。
+    forum: Option<Arc<dyn auction_application::ForumTopicReader>>,
     switches: auction_application::RuntimeSwitches,
 }
 
 #[cfg(feature = "postgres")]
 impl WorkerRemoteReads {
-    /// 装配 control 远端读取能力；未配置 MoogleMail 时不装配，路由明确返回能力不可用。
+    /// 装配 control 远端读取能力；任一外部读取缺失时只关闭对应能力。
     pub(super) fn build(
-        mail: super::mail::MailControlRemoteReads,
+        mail: Option<super::mail::MailControlRemoteReads>,
+        forum: Option<Arc<dyn auction_application::ForumTopicReader>>,
         switches: auction_application::RuntimeSwitches,
     ) -> Arc<dyn auction_application::WorkerRemoteReadPort> {
-        Arc::new(Self { mail, switches })
+        Arc::new(Self { mail, forum, switches })
+    }
+
+    fn mail(
+        &self,
+    ) -> Result<&super::mail::MailControlRemoteReads, auction_application::WorkerRemoteReadError>
+    {
+        self.mail.as_ref().ok_or(auction_application::WorkerRemoteReadError::Unavailable)
+    }
+
+    fn gateway(
+        &self,
+        world: MoogleMailWorld,
+    ) -> Result<&Arc<MoogleMailGateway>, auction_application::WorkerRemoteReadError> {
+        self.mail()?
+            .gateways
+            .get(&world)
+            .ok_or(auction_application::WorkerRemoteReadError::Unavailable)
     }
 }
 
@@ -159,8 +179,9 @@ impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
             if self.switches.external_access_paused() {
                 return Err(auction_application::WorkerRemoteReadError::Paused);
             }
+            let mail = self.mail()?;
             let snapshot = auction_application::AdminIntakeSourceReader::read_url(
-                self.mail.equipment.as_ref(),
+                mail.equipment.as_ref(),
                 request.world_id,
                 request.equipment_url,
             )
@@ -188,19 +209,16 @@ impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
             }
             let world = MoogleMailWorld::parse(&request.world)
                 .ok_or(auction_application::WorkerRemoteReadError::Invalid)?;
-            let gateway = self
-                .mail
-                .gateways
-                .get(&world)
-                .ok_or(auction_application::WorkerRemoteReadError::Unavailable)?;
+            let mail = self.mail()?;
+            let gateway = self.gateway(world)?;
             let report = gateway
                 .lookup_sent(MoogleMailSentLookupRequest {
                     world,
                     recipient: request.recipient,
                     subject: request.subject,
                     external_equipment_id: request.external_equipment_id,
-                    maximum_pages: self.mail.maximum_pages,
-                    deadline: std::time::Instant::now() + self.mail.fetch_timeout,
+                    maximum_pages: mail.maximum_pages,
+                    deadline: std::time::Instant::now() + mail.fetch_timeout,
                     observed_at: Utc::now(),
                 })
                 .await
@@ -235,6 +253,238 @@ impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
                     .collect(),
             })
         })
+    }
+
+    /// W10.9：暂停状态下的一次有界只读扫描。
+    /// 暂停是前置条件：未暂停时拒绝执行，防止恢复核对与正常 Worker 流量交叉读取。
+    /// 只读取列表/详情与论坛主题，不执行 send、take、mark-read 或任何本地写入。
+    fn recovery_scan(
+        &self,
+        request: auction_application::WorkerRecoveryScanRequest,
+    ) -> auction_application::WorkerRemoteReadFuture<
+        '_,
+        auction_application::WorkerRecoveryScanResponse,
+    > {
+        Box::pin(async move {
+            if !request.validate() {
+                return Err(auction_application::WorkerRemoteReadError::Invalid);
+            }
+            if !self.switches.external_access_paused() {
+                return Err(auction_application::WorkerRemoteReadError::NotPaused);
+            }
+            let mut response = auction_application::WorkerRecoveryScanResponse {
+                status: "complete".to_owned(),
+                observed_at: Utc::now(),
+                paused: true,
+                sent_complete: true,
+                read_mail_complete: true,
+                pages_scanned: 0,
+                errors: Vec::new(),
+                sent: Vec::new(),
+                read_mail: Vec::new(),
+                sent_details: Vec::new(),
+                forum: Vec::new(),
+            };
+            let observed_at = response.observed_at;
+            let maximum_pages = usize::try_from(request.maximum_pages).unwrap_or(usize::MAX);
+
+            if request.include_sent {
+                for world_id in &request.sent_worlds {
+                    let Some(world) = MoogleMailWorld::parse(world_id) else {
+                        response.errors.push("sent_world_invalid".to_owned());
+                        response.sent_complete = false;
+                        continue;
+                    };
+                    let Some(gateway) =
+                        self.mail.as_ref().and_then(|mail| mail.gateways.get(&world))
+                    else {
+                        response.errors.push("sent_capability_unavailable".to_owned());
+                        response.sent_complete = false;
+                        continue;
+                    };
+                    // 请求页数是配置上限内的子集；gateway 仍按自身硬上限校验。
+                    let pages = maximum_pages.min(gateway.maximum_pages());
+                    match gateway
+                        .scan_sent_since(world, request.cutoff_at, observed_at, pages)
+                        .await
+                    {
+                        Ok(scan) => {
+                            response.pages_scanned = response.pages_scanned.saturating_add(
+                                u32::try_from(scan.pages_scanned).unwrap_or(u32::MAX),
+                            );
+                            response.sent_complete &= scan.covers_cutoff;
+                            response.sent.extend(scan.entries.into_iter().map(|entry| {
+                                auction_application::WorkerRecoverySentEntry {
+                                    world: world_id.clone(),
+                                    external_mail_id: entry.external_mail_id,
+                                    recipient: entry.recipient,
+                                    subject: entry.subject,
+                                    sent_at: entry.sent_at,
+                                }
+                            }));
+                        }
+                        Err(error) => {
+                            response.sent_complete = false;
+                            response.errors.push(sent_scan_error_code(&error));
+                        }
+                    }
+                }
+            }
+
+            if request.include_read_mail {
+                for world_id in &request.read_mail_worlds {
+                    let Some(world) = MoogleMailWorld::parse(world_id) else {
+                        response.errors.push("read_mail_world_invalid".to_owned());
+                        response.read_mail_complete = false;
+                        continue;
+                    };
+                    let Some(gateway) =
+                        self.mail.as_ref().and_then(|mail| mail.gateways.get(&world))
+                    else {
+                        response.errors.push("read_mail_capability_unavailable".to_owned());
+                        response.read_mail_complete = false;
+                        continue;
+                    };
+                    let pages = maximum_pages.min(gateway.maximum_pages());
+                    match gateway
+                        .scan_read_mail_since(world, request.cutoff_at, observed_at, pages)
+                        .await
+                    {
+                        Ok(scan) => {
+                            response.read_mail_complete &= scan.covers_cutoff;
+                            response.read_mail.extend(scan.entries.into_iter().map(|entry| {
+                                auction_application::WorkerRecoveryInboundEntry {
+                                    world: world_id.clone(),
+                                    external_mail_id: entry.external_mail_id,
+                                    sender: entry.sender,
+                                    subject: entry.subject,
+                                    received_at: entry.received_at,
+                                }
+                            }));
+                        }
+                        Err(error) => {
+                            response.read_mail_complete = false;
+                            response.errors.push(read_mail_scan_error_code(&error));
+                        }
+                    }
+                }
+            }
+
+            for detail in &request.sent_details {
+                let Some(world) = MoogleMailWorld::parse(&detail.world) else {
+                    response.errors.push("sent_detail_world_invalid".to_owned());
+                    continue;
+                };
+                let Some(gateway) = self.mail.as_ref().and_then(|mail| mail.gateways.get(&world))
+                else {
+                    response.errors.push("sent_capability_unavailable".to_owned());
+                    continue;
+                };
+                match gateway.read_sent(world, &detail.external_mail_id, observed_at).await {
+                    Ok(snapshot) => {
+                        response.sent_details.push(
+                            auction_application::WorkerSentLookupCandidate {
+                                external_mail_id: snapshot.external_mail_id,
+                                recipient: snapshot.recipient,
+                                subject: snapshot.subject,
+                                sent_at: Some(snapshot.sent_at),
+                                remaining_credits: snapshot.remaining_credits,
+                                cod_pending: snapshot.cod_pending,
+                                remaining_equipment_ids: snapshot.remaining_equipment_ids,
+                                collected: snapshot.collected,
+                                observed_at: snapshot.observed_at,
+                            },
+                        );
+                    }
+                    Err(error) => response.errors.push(sent_detail_error_code(&error)),
+                }
+            }
+
+            if request.include_forum {
+                // 没有目标时不需要读取论坛；未配置能力但有目标时明确报告不可用。
+                if let Some(reader) = self.forum.as_ref() {
+                    for target in &request.forum_threads {
+                        let Some(world) = SettlementWorld::from_name(&target.world) else {
+                            response.errors.push("forum_world_invalid".to_owned());
+                            continue;
+                        };
+                        match reader.fetch_topic(world, target.thread_id.clone()).await {
+                            Ok(preview) => {
+                                for (index, post) in preview.posts.iter().enumerate() {
+                                    let post_number =
+                                        u32::try_from(index).unwrap_or(u32::MAX).saturating_add(2);
+                                    if post_number > target.after_post_number {
+                                        response.forum.push(
+                                            auction_application::WorkerRecoveryForumPost {
+                                                world: target.world.clone(),
+                                                thread_id: target.thread_id.clone(),
+                                                post_id: post.post.id.clone(),
+                                                post_number,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                let _ = error;
+                                response.errors.push("forum_scan_failed".to_owned());
+                            }
+                        }
+                    }
+                } else if !request.forum_threads.is_empty() {
+                    response.errors.push("forum_capability_unavailable".to_owned());
+                }
+            }
+
+            // 截断不会改变任何隔离判断：调用方只使用已返回的条目，并在回执记录不完整。
+            if response.sent.len() > auction_application::MAX_RECOVERY_SCAN_ENTRIES {
+                response.sent.truncate(auction_application::MAX_RECOVERY_SCAN_ENTRIES);
+                response.sent_complete = false;
+            }
+            if response.read_mail.len() > auction_application::MAX_RECOVERY_SCAN_ENTRIES {
+                response.read_mail.truncate(auction_application::MAX_RECOVERY_SCAN_ENTRIES);
+                response.read_mail_complete = false;
+            }
+            response.errors.sort();
+            response.errors.dedup();
+            response.paused = self.switches.external_access_paused();
+            if !response.paused {
+                response.status = "partial".to_owned();
+                response.errors.push("external_access_resumed".to_owned());
+            } else if !response.errors.is_empty() {
+                response.status = "partial".to_owned();
+            } else if !response.sent_complete || !response.read_mail_complete {
+                response.status = "truncated".to_owned();
+            }
+            Ok(response)
+        })
+    }
+}
+
+#[cfg(feature = "postgres")]
+fn sent_scan_error_code(error: &MoogleMailError) -> String {
+    match error.category {
+        MoogleMailErrorCategory::Configuration => "sent_scan_configuration".to_owned(),
+        MoogleMailErrorCategory::SentScanTimeout => "sent_scan_timeout".to_owned(),
+        _ => "sent_scan_failed".to_owned(),
+    }
+}
+
+#[cfg(feature = "postgres")]
+fn read_mail_scan_error_code(error: &MoogleMailError) -> String {
+    match error.category {
+        MoogleMailErrorCategory::Configuration => "read_mail_scan_configuration".to_owned(),
+        MoogleMailErrorCategory::SentScanTimeout => "read_mail_scan_timeout".to_owned(),
+        _ => "read_mail_scan_failed".to_owned(),
+    }
+}
+
+#[cfg(feature = "postgres")]
+fn sent_detail_error_code(error: &MoogleMailError) -> String {
+    match error.category {
+        MoogleMailErrorCategory::Configuration => "sent_detail_configuration".to_owned(),
+        MoogleMailErrorCategory::SentScanTimeout => "sent_detail_timeout".to_owned(),
+        _ => "sent_detail_failed".to_owned(),
     }
 }
 
