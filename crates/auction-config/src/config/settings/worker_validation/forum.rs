@@ -1,4 +1,4 @@
-use super::*;
+use super::super::{ConfigError, ForumSyncWorkerConfig, Url};
 
 pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<(), ConfigError> {
     if !matches!(config.credential_world.as_str(), "main" | "isekai" | "shared") {

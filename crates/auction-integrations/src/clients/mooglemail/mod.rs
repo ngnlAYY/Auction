@@ -20,8 +20,9 @@ mod writer;
 pub(crate) use client::is_hentaiverse_login_response;
 pub use client::{MoogleMailClient, MoogleMailClientConfig};
 pub use diagnostics::{
-    MailDiagnosticRetentionSnapshot, MoogleMailDiagnosticArchive,
+    MailDiagnosticPurgeOutcome, MailDiagnosticRetentionSnapshot, MoogleMailDiagnosticArchive,
     MoogleMailDiagnosticArchiveConfig, export_mooglemail_diagnostic,
+    purge_ordinary_expired as mail_diagnostic_purge_ordinary,
     retention_snapshot as mail_diagnostic_retention_snapshot,
 };
 pub use error::{MoogleMailError, MoogleMailErrorCategory};

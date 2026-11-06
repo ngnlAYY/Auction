@@ -1,4 +1,4 @@
-use super::*;
+use super::super::{ConfigError, WorkerConfig};
 
 pub(crate) fn validate_auction_worker(
     config: &WorkerConfig,

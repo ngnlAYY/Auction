@@ -1,4 +1,4 @@
-use super::*;
+use super::super::{ConfigError, FulfillmentWorkerConfig};
 
 pub(crate) fn validate_fulfillment_worker(
     config: &FulfillmentWorkerConfig,

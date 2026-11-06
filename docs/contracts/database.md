@@ -33,6 +33,17 @@
 
 分组与[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)的数据族一致。审计、资金、业务历史、身份与配置族仍是 `retain_forever`；只有运行态族带期限（决策 23–25、29）：`service_heartbeats` 过期后 30 天、`realtime_events` 30 天、已解决的 `realtime_failures` 90 天、已注销或截止过期满 30 天的会话、加密邮件诊断文件普通 7 天/写入未知证据处置后 90 天。`auction-cli db inventory` 只统计、不授权任何归档或删除；`auction-cli db retention-dry-run` 只读统计候选行与文件数并写带 run id 的回执，实际删除必须另行批准。
 
+### 运行态保留清理
+
+`auction-cli db retention-purge` 是唯一执行删除的入口，只覆盖代码内闭集：`service_heartbeats`、`realtime_events`、`realtime_failures`、`public_sessions`、`admin_sessions` 与加密邮件诊断文件。审计、资金、结算、拍卖历史、身份与配置表没有删除路径。
+
+- 前置绑定：只接受 15 分钟内、由当前编译制品政策（版本与 SHA-256）生成的 `db retention-dry-run` 私有回执；数据库名、run id、迁移前缀（当前最高版本）与政策身份必须一致，否则在变更前拒绝。
+- 逐数据族批准：预览输出每个族的 `approval_token`，令牌是 SHA-256 摘要，绑定数据库、演练 run id、政策摘要、族名、候选行/字节与表级候选计数。`--execute` 必须逐族提供 `--approve <family>=<token>`、逐字确认 `PURGE <database>` 与不可覆盖回执路径。
+- 边界与保护：心跳按 `expires_at <= 演练快照时间 - 30 天`；事件按 `created_at <= 快照 - 30 天` 且跳过被失败记录或重放关系引用（RESTRICT）的行；已解决失败按 `resolved_at <= 快照 - 90 天`，`resolved_at IS NULL` 永不删除；会话只删除已注销或有效截止过期满 30 天的记录，有效与永久会话（两个截止为 NULL）永不删除；文件只删除普通过期证据，写入未知证据（含超过 90 天保全窗）永不自动删除。
+- 有界执行：每批一个独立事务，默认 500 行（1–5000）；每批使用 `statement_timeout=30s`、`lock_timeout=2s`。删除谓词与只读演练一一对应，批准计数是硬上限；候选在演练后增加时只删除上限内最旧的行，其余报告为 `remaining_candidate_rows`，终态 `partial_limit_reached` 并须重新演练。执行顺序先清理已解决的失败，再清理事件，使同轮解除引用的事件也能在上限内收敛。
+- 失败与回执：批次失败时已提交批次保留；回执（`auction-retention-purge-receipt.v1`）精确记录每表批准/删除行数、`pg_column_size` 行载荷字节、批次数、剩余候选与阻断行，以及文件族实际 unlink 数与字节；顶层 `deleted_rows`/`deleted_row_bytes` 只汇总数据库行，文件计数只在 `filesystem` 与文件族结果中报告。无论成功、部分完成或失败，都追加一条只追加审计 `auction.retention.purge`（`entity_type=retention_purge`，metadata 含演练 run id、政策摘要、各族计数与终态）；审计写入失败本身使终态为 `failed`。
+- 本命令不新增迁移；删除只使用迁移已授予运行账号的 `DELETE` 权限。文件族要求目录为 0700、文件为 0600 且单链接，持锁扫描后按修改时间从旧到新删除。
+
 ### 配置与 schema
 
 | 表 | 内容 |
@@ -56,7 +67,7 @@
 | `bids` | 被接受的出价事实：金额、机制（ordinary/proxy）、接受后的截止与版本；**只追加**，同一命令内事实序号连续 |
 | `bid_proxy_authorizations` | 代理授权当前状态 |
 | `bid_proxy_authorization_transitions` | 代理状态转换事实，只追加、序号连续 |
-| `bid_proxy_attempts`、`bid_proxy_outbid_uses` | 代理反超尝试与“设置代理次数”计数 |
+| `bid_proxy_attempts`、`bid_proxy_outbid_uses` | 代理反超尝试与“设置代理次数”计数。迁移 `000003` 建表后无任何迁移函数或 Rust 读写方；`bid_proxy_outbid_uses` 仅被迁移 `000005` 的 `public.bid_proxies` 视图 `LEFT JOIN`。两表与视图的去留见[docs/plans/architecture-improvement/w08-code-structure.md](../plans/architecture-improvement/w08-code-structure.md)，删除前不得当作在用证据 |
 | `auction_submissions` | 经邮件投稿进入场次的装备来源（邮箱、邮件 ID、卖家） |
 | `auction_intake_targets`、`auction_preview_items` | 各世界当前接收投稿的草稿场次；预览目录项 |
 | `scheduled_rounds` | 周排期与早鸟场次的轮次身份（常规周按世界+本地周唯一，早鸟按 `slot_key` 唯一；`early-bird:YYYY-MM-DD:N`，N 为 0 时是赛季前场次） |
@@ -197,7 +208,7 @@ owner/superuser 时以明确错误终止，不放宽授权。`ALTER DEFAULT PRIV
 ## 变更规则
 
 1. 新增表、列、约束或索引只能新增迁移文件（编号连续），见[migrations/postgres/README.md](../../migrations/postgres/README.md)。新表对运行账号默认只读，新增或变更写入面必须在同一迁移里显式 `GRANT`（只追加表只授 `INSERT`）。
-2. 每次新增迁移都把[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)的 `database_schema_version` 更新为新的最高版本（否则 `db inventory` 与 `db retention-dry-run` 都拒绝运行，发布身份也会变化）；新增表还须加入对应数据族。运行态族的新清理规则只能来自用户决策，并须同时加入代码内闭集（`retention_rule_spec`）与政策校验，不能只改 JSON。
+2. 每次新增迁移都把[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)的 `database_schema_version` 更新为新的最高版本（否则 `db inventory`、`db retention-dry-run` 与 `db retention-purge` 都拒绝运行，发布身份也会变化）；新增表还须加入对应数据族。运行态族的新清理规则只能来自用户决策，并须同时加入代码内闭集（`retention_rule_spec`）与政策校验，不能只改 JSON。
 3. 同步更新本页的表分组。
 4. 迁移须能在生产数据上安全执行：不得静默改写历史事实；需要修复数据时只修复有确凿证据的部分，其余保留原状并交给人工核对。
 

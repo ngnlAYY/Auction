@@ -1,6 +1,7 @@
 //! 配置解析、敏感字段和运行时文档错误。
 
-use super::*;
+use super::{Error, PathBuf};
+use std::io;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
