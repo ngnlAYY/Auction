@@ -1,10 +1,10 @@
 //! 当前会话的装备标记边界；身份不来自请求负载，完整列表不允许静默截断。
 
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
-use auction_application::{LotWatch, LotWatchError, MAX_LOT_WATCHES, SetLotWatchCommand};
+use auction_application::public::{LotWatch, LotWatchError, MAX_LOT_WATCHES, SetLotWatchCommand};
 use auction_contracts::{
     PublicLotWatchResponse, PublicLotWatchesResponse, PublicSetLotWatchRequest,
     PublicSetLotWatchResponse,

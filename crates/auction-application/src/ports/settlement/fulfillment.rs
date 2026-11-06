@@ -7,7 +7,8 @@ use auction_domain::{
     SettlementMode, SettlementObligationKind, SettlementWorld, SubmissionId,
 };
 
-use super::{ApplicationFuture, RequestHash};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
 
 /// 结算履约当前允许由 Worker 推进的持久阶段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,7 +168,7 @@ pub struct SettlementFulfillmentClaim {
 
 impl SettlementFulfillmentClaim {
     /// claim 自身身份必须完整；失败关闭为仓储错误，不尝试修复或默认填充。
-    pub fn validate_identity(&self) -> Result<(), crate::RepositoryError> {
+    pub fn validate_identity(&self) -> Result<(), crate::ports::core::RepositoryError> {
         if self.obligation_id.is_nil()
             || self.claim_token.is_nil()
             || self.claim_fencing <= 0
@@ -175,7 +176,9 @@ impl SettlementFulfillmentClaim {
             || self.worker_id.is_empty()
             || self.worker_id != self.worker_id.trim()
         {
-            return Err(crate::RepositoryError::Failed("结算履约 claim 身份无效".to_owned()));
+            return Err(crate::ports::core::RepositoryError::Failed(
+                "结算履约 claim 身份无效".to_owned(),
+            ));
         }
         Ok(())
     }
@@ -233,8 +236,11 @@ pub trait SettlementFulfillmentEquipmentSecretReader: Send + Sync {
 pub trait SettlementFulfillmentCustodyReader: Send + Sync {
     fn read_custody(
         &self,
-        request: crate::InternalEvidenceRequest,
-    ) -> crate::InternalEvidenceFuture<'_, crate::PreparedSettlementInternalEvidence>;
+        request: crate::ports::settlement::InternalEvidenceRequest,
+    ) -> crate::ports::settlement::InternalEvidenceFuture<
+        '_,
+        crate::ports::settlement::PreparedSettlementInternalEvidence,
+    >;
 }
 
 /// 读取冻结 delivery 目标供离线 Sent 核对；实现不得领取、续租或写回状态。
@@ -275,7 +281,7 @@ pub trait SettlementFulfillmentBotIdentityReader: Send + Sync {
     fn read_verified_player_identity(
         &self,
         world: SettlementWorld,
-    ) -> ApplicationFuture<'_, Option<crate::VerifiedMailPlayerIdentity>>;
+    ) -> ApplicationFuture<'_, Option<crate::ports::admin::VerifiedMailPlayerIdentity>>;
 }
 
 /// Worker 与 MoogleMail owner 之间的外部证明读取窄端口。
@@ -379,7 +385,10 @@ pub trait SettlementFulfillmentStore: Send + Sync {
         claim: SettlementFulfillmentClaim,
         preparation: SettlementDeliveryPreparation,
         prepared_at: DateTime<Utc>,
-        custody: Option<(&'a crate::SettlementInternalEvidenceSnapshot, std::time::Instant)>,
+        custody: Option<(
+            &'a crate::ports::settlement::SettlementInternalEvidenceSnapshot,
+            std::time::Instant,
+        )>,
     ) -> ApplicationFuture<'a, SettlementFulfillmentResult>;
 
     fn activate_delivery<'a>(
@@ -391,7 +400,10 @@ pub trait SettlementFulfillmentStore: Send + Sync {
         // 保留参数以兼容既有适配器；当前激活继续持有 claim，调用方须传 None。
         // COD/货款的下次 MM 追踪时间在 reconcile 释放 claim 的同一事务内写入。
         next_attempt_at: Option<DateTime<Utc>>,
-        custody: Option<(&'a crate::SettlementInternalEvidenceSnapshot, std::time::Instant)>,
+        custody: Option<(
+            &'a crate::ports::settlement::SettlementInternalEvidenceSnapshot,
+            std::time::Instant,
+        )>,
     ) -> ApplicationFuture<'a, SettlementFulfillmentActivationResult>;
 
     fn satisfy(
@@ -429,7 +441,7 @@ pub trait SettlementFulfillmentCommandPort: Send + Sync {
         claim: SettlementFulfillmentClaim,
         prepared_at: DateTime<Utc>,
         retry_delay: Duration,
-    ) -> ApplicationFuture<'_, crate::SettlementFulfillmentPreparationOutcome>;
+    ) -> ApplicationFuture<'_, crate::ports::settlement::SettlementFulfillmentPreparationOutcome>;
 
     fn activate(
         &self,

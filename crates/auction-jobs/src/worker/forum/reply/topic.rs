@@ -1,7 +1,7 @@
 //! 论坛主题读取、固定楼层校验、身份解析和目录/系统日志刷新。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
-use auction_application::{
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
+use auction_application::forum::{
     ForumCommandStatus, ForumRenderedPost, ForumSystemLogEntry, ForumTopicMetadata,
     forum_catalog_marker, forum_post_bodies_match, forum_system_log_marker,
 };
@@ -27,8 +27,8 @@ const FINAL_SCAN_REMAINING_DIVISOR: i32 = 6;
 )]
 pub(super) async fn process_topic(
     runtime: &ForumReplyRuntime,
-    topic: auction_application::ForumReplyTopic,
-    clock: &dyn auction_application::Clock,
+    topic: auction_application::forum::ForumReplyTopic,
+    clock: &dyn auction_application::core::Clock,
     poll_interval: chrono::Duration,
     write_progress: &ForumWriteProgress,
 ) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApplicationError> {
@@ -41,7 +41,7 @@ pub(super) async fn process_topic(
         .reader
         .fetch_topic_since(topic.world, topic.thread_id.clone(), cursor, fixed_through_post_number)
         .await?;
-    let auction_application::ForumTopicScan { preview, post_numbers, mode: _ } = scan;
+    let auction_application::forum::ForumTopicScan { preview, post_numbers, mode: _ } = scan;
     validate_fixed_layout(&topic, &preview)?;
     // 观测窗口覆盖本轮实际读取的分页；增量扫描看不到游标页之前的旧帖，但那部分已有历史窗口。
     let scan_observed = std::time::Instant::now();
@@ -293,13 +293,13 @@ pub(super) async fn process_topic(
     command_error.map_or(Ok(next_scan_at), Err)
 }
 
-fn requires_bidder_identity(post: &auction_application::AdminForumBidPost) -> bool {
+fn requires_bidder_identity(post: &auction_application::admin::AdminForumBidPost) -> bool {
     !post.ignored && !post.commands.is_empty()
 }
 
 fn validate_fixed_layout(
-    topic: &auction_application::ForumReplyTopic,
-    preview: &auction_application::AdminForumPreviewResult,
+    topic: &auction_application::forum::ForumReplyTopic,
+    preview: &auction_application::admin::AdminForumPreviewResult,
 ) -> Result<(), ApplicationError> {
     let catalog_marker = forum_catalog_marker(topic.auction_id);
     let system_marker = forum_system_log_marker(topic.auction_id);
@@ -320,7 +320,7 @@ fn validate_fixed_layout(
             return Err(repository_error("论坛目录续页已丢失"));
         };
         if post.post.id != page.post_id
-            || !post.post.text.contains(&auction_application::forum_catalog_page_marker(
+            || !post.post.text.contains(&auction_application::forum::forum_catalog_page_marker(
                 topic.auction_id,
                 index + 2,
             ))
@@ -332,8 +332,8 @@ fn validate_fixed_layout(
 }
 
 fn warning_entries(
-    topic: &auction_application::ForumReplyTopic,
-    preview: &auction_application::AdminForumPreviewResult,
+    topic: &auction_application::forum::ForumReplyTopic,
+    preview: &auction_application::admin::AdminForumPreviewResult,
     post_numbers: &HashMap<&str, usize>,
 ) -> Vec<ForumSystemLogEntry> {
     preview
@@ -369,9 +369,9 @@ struct TopicScanProgress {
 
 async fn refresh_fixed_posts(
     runtime: &ForumReplyRuntime,
-    mut topic: auction_application::ForumReplyTopic,
+    mut topic: auction_application::forum::ForumReplyTopic,
     scan: TopicScanProgress,
-    clock: &dyn auction_application::Clock,
+    clock: &dyn auction_application::core::Clock,
     poll_interval: chrono::Duration,
     write_progress: &ForumWriteProgress,
 ) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApplicationError> {
@@ -395,7 +395,7 @@ async fn refresh_fixed_posts(
         auction_domain::AuctionStatus::Settled | auction_domain::AuctionStatus::Cancelled
     ) && scan_completed)
         .then_some(snapshot.state_version);
-    snapshot.public_url = super::super::forum_sync::resolve_public_url(
+    snapshot.public_url = super::super::sync::resolve_public_url(
         runtime.public_base_url.as_deref(),
         snapshot.public_url.as_deref(),
     )?;
@@ -561,7 +561,7 @@ async fn refresh_fixed_posts(
 
 async fn reconcile_or_edit_fixed_post(
     runtime: &ForumReplyRuntime,
-    topic: &auction_application::ForumReplyTopic,
+    topic: &auction_application::forum::ForumReplyTopic,
     post_id: &str,
     metadata: Option<ForumTopicMetadata>,
     expected: ForumRenderedPost,
@@ -581,7 +581,12 @@ async fn reconcile_or_edit_fixed_post(
     }
     // 关闭正文校验不等于证明历史 POST 已完成；保留未知门禁，不重发，也不吞掉新的待发布镜像。
     if topic.content_last_error_code.as_deref() == Some("write_unknown") {
-        return Err(auction_application::ForumRemoteError::new("write_unknown", false, true).into());
+        return Err(auction_application::forum::ForumRemoteError::new(
+            "write_unknown",
+            false,
+            true,
+        )
+        .into());
     }
     let verification = runtime.verify_post_body.then(|| (expected.body.clone(), metadata.clone()));
     let proof = runtime
@@ -596,7 +601,12 @@ async fn reconcile_or_edit_fixed_post(
         )
         .await?;
     if proof.thread_id != topic.thread_id || proof.post_id != post_id {
-        return Err(auction_application::ForumRemoteError::new("write_unknown", false, true).into());
+        return Err(auction_application::forum::ForumRemoteError::new(
+            "write_unknown",
+            false,
+            true,
+        )
+        .into());
     }
     if let Some((expected_body, metadata)) = verification {
         let observed = runtime
@@ -604,9 +614,12 @@ async fn reconcile_or_edit_fixed_post(
             .read_post(topic.world, topic.thread_id.clone(), post_id.to_owned())
             .await?;
         if !observed.matches(&expected_body, metadata.as_ref()) {
-            return Err(
-                auction_application::ForumRemoteError::new("write_unknown", false, true).into()
-            );
+            return Err(auction_application::forum::ForumRemoteError::new(
+                "write_unknown",
+                false,
+                true,
+            )
+            .into());
         }
     }
     Ok(())
@@ -614,8 +627,8 @@ async fn reconcile_or_edit_fixed_post(
 
 async fn completed_scan_times(
     runtime: &ForumReplyRuntime,
-    topic: &auction_application::ForumReplyTopic,
-    clock: &dyn auction_application::Clock,
+    topic: &auction_application::forum::ForumReplyTopic,
+    clock: &dyn auction_application::core::Clock,
     poll_interval: chrono::Duration,
 ) -> Result<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>), ApplicationError> {
     let completed_at = clock.now();
@@ -626,11 +639,11 @@ async fn completed_scan_times(
 /// 计算下一次导入时刻；Final 阶段按最早 lot 有效截止收紧间隔。
 async fn next_scan_at(
     runtime: &ForumReplyRuntime,
-    topic: &auction_application::ForumReplyTopic,
+    topic: &auction_application::forum::ForumReplyTopic,
     completed_at: chrono::DateTime<chrono::Utc>,
     poll_interval: chrono::Duration,
 ) -> Result<chrono::DateTime<chrono::Utc>, ApplicationError> {
-    let interval = if topic.reply_phase == auction_application::ForumReplyPhase::Final {
+    let interval = if topic.reply_phase == auction_application::forum::ForumReplyPhase::Final {
         match runtime.store.earliest_live_lot_deadline(topic.auction_id).await? {
             Some(earliest_deadline) => {
                 final_scan_interval(completed_at, earliest_deadline, poll_interval)
@@ -709,7 +722,7 @@ fn clean_system_message(value: &str) -> String {
 }
 
 fn target_map(
-    targets: Vec<auction_application::ForumLotTarget>,
+    targets: Vec<auction_application::forum::ForumLotTarget>,
 ) -> Result<HashMap<String, auction_domain::LotId>, ApplicationError> {
     let mut result = HashMap::with_capacity(targets.len());
     for target in targets {
@@ -773,8 +786,8 @@ mod tests {
 
     #[test]
     fn commandless_post_does_not_require_bidder_identity() {
-        let post = auction_application::AdminForumBidPost {
-            post: auction_application::AdminForumPost {
+        let post = auction_application::admin::AdminForumBidPost {
+            post: auction_application::admin::AdminForumPost {
                 id: "6956957".to_owned(),
                 author_id: Some("5501029".to_owned()),
                 author: Some("ngnlAYY".to_owned()),

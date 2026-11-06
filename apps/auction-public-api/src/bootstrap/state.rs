@@ -12,16 +12,29 @@ use std::time::Duration;
 #[cfg(feature = "postgres")]
 use anyhow::Context;
 #[cfg(feature = "postgres")]
-use auction_application::{
-    ApplicationError, ApplicationFuture, AuctionReader, CompetitionCommandPort,
-    ProcessReadinessPort, PublicAccountReader, PublicBidLogReader, PublicBlacklistReader,
-    PublicCompensationReader, PublicEquipmentLinkResolver, PublicEquipmentLinkSecretReader,
-    PublicForumReader, PublicLoginAuthenticator, PublicLotReader, PublicPriceHistoryReader,
-    PublicRealtimeReader, PublicRulesReader, PublicSessionConfig, PublicSessionPort,
-    PublicSessionService, PublicSessionStore, RealtimeConsumerStore, RealtimeEventSink,
-    RealtimeRelay, RealtimeRelayConfig, RealtimeSequenceAllocator, RealtimeStreamStore,
-    RepositoryError, WorldReader,
+use auction_application::auction::{
+    ApplicationFuture, AuctionReader, CompetitionCommandPort, PublicAccountReader,
+    PublicBidLogReader, PublicLotReader, PublicPriceHistoryReader, WorldReader,
 };
+#[cfg(feature = "postgres")]
+use auction_application::core::{ApplicationError, RepositoryError};
+#[cfg(feature = "postgres")]
+use auction_application::forum::PublicForumReader;
+#[cfg(feature = "postgres")]
+use auction_application::operations::ProcessReadinessPort;
+#[cfg(feature = "postgres")]
+use auction_application::public::{
+    PublicBlacklistReader, PublicCompensationReader, PublicEquipmentLinkResolver,
+    PublicEquipmentLinkSecretReader, PublicLoginAuthenticator, PublicRulesReader,
+    PublicSessionConfig, PublicSessionPort, PublicSessionStore,
+};
+#[cfg(feature = "postgres")]
+use auction_application::realtime::{
+    PublicRealtimeReader, RealtimeConsumerStore, RealtimeEventSink, RealtimeRelay,
+    RealtimeRelayConfig, RealtimeSequenceAllocator, RealtimeStreamStore,
+};
+#[cfg(feature = "postgres")]
+use auction_application::sessions::PublicSessionService;
 use auction_config::AppConfig;
 use auction_http::PublicApiState;
 #[cfg(feature = "postgres")]
@@ -162,7 +175,7 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 ) -> anyhow::Result<(
     PublicApiState,
     Option<Arc<HeartbeatPublisher>>,
@@ -328,11 +341,11 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     _tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     _metrics: Arc<ProcessMetrics>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 ) -> anyhow::Result<(
     PublicApiState,
     Option<Arc<auction_observability::HeartbeatPublisher>>,
-    Option<Arc<auction_application::RealtimeRelay>>,
+    Option<Arc<auction_application::realtime::RealtimeRelay>>,
     Option<auction_process::TaskGuard<()>>,
 )> {
     let security = config::configure_security(config)?;

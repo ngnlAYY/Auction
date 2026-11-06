@@ -7,7 +7,7 @@ use std::fmt;
 use auction_domain::valid_text;
 use thiserror::Error;
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// 旧 Admin 论坛预览请求体的最大字节数。
 pub const MAX_ADMIN_FORUM_PREVIEW_BYTES: usize = 2 << 20;

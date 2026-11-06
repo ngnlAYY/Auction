@@ -1,12 +1,12 @@
 //! 在已有身份/现金 session 中复用既有 Sent 解析，不重取 guard、不推算原 COD 金额。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::time::{Duration, Instant};
 
-use auction_application::{
+use auction_application::settlement::{
     InternalEvidenceError as Error, InternalEvidenceRequest, InternalSentCollectionTarget,
     MailAccountEvidenceBinding, PreparedSettlementInternalEvidence,
     VerifiedMailSentCollectionObservation,
@@ -25,10 +25,14 @@ impl MoogleMailGateway {
         if !request.validate() || !target.validate() {
             return Err(Error::InvalidRequest);
         }
-        request.deadline = auction_application::internal_evidence_deadline(request.deadline).min(
-            Instant::now()
-                + self.config.fetch_budget.min(auction_application::INTERNAL_EVIDENCE_BUDGET),
-        );
+        request.deadline =
+            auction_application::settlement::internal_evidence_deadline(request.deadline).min(
+                Instant::now()
+                    + self
+                        .config
+                        .fetch_budget
+                        .min(auction_application::settlement::INTERNAL_EVIDENCE_BUDGET),
+            );
         let deadline = request.deadline;
         tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
             let session = self
@@ -80,7 +84,9 @@ impl MoogleMailGateway {
         let now = Utc::now();
         if identity.observed_at > now
             || now - identity.observed_at
-                > chrono::Duration::seconds(auction_application::INTERNAL_EVIDENCE_MAX_AGE_SECONDS)
+                > chrono::Duration::seconds(
+                    auction_application::settlement::INTERNAL_EVIDENCE_MAX_AGE_SECONDS,
+                )
         {
             return Err(Error::Expired);
         }
@@ -141,7 +147,7 @@ impl MoogleMailGateway {
             if identity.observed_at > observed_at
                 || observed_at - identity.observed_at
                     > chrono::Duration::seconds(
-                        auction_application::INTERNAL_EVIDENCE_MAX_AGE_SECONDS,
+                        auction_application::settlement::INTERNAL_EVIDENCE_MAX_AGE_SECONDS,
                     )
             {
                 return Err(Error::Expired);

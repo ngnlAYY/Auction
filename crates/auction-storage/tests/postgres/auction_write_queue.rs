@@ -25,12 +25,14 @@ use std::{
     time::Instant,
 };
 
-use auction_application::{
-    AdminLotAction, AdminLotUpdateCommand, AdminLotUpdatePort, ApplicationError,
+use auction_application::admin::{AdminLotAction, AdminLotUpdateCommand, AdminLotUpdatePort};
+use auction_application::auction::{
     AuctionLifecycleAction, AuctionLifecycleActor, AuctionLifecycleActorType,
     AuctionLifecycleCommand, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
-    AuctionPolicyTemplate, Clock, CompetitionCommandPort, CompetitionTransactionError,
-    PlaceBidCommand, RequestHash,
+    AuctionPolicyTemplate, CompetitionCommandPort, PlaceBidCommand,
+};
+use auction_application::core::{
+    ApplicationError, Clock, CompetitionTransactionError, RequestHash,
 };
 use auction_domain::{AuctionId, BidAmount, CommandId, LotId, UserId};
 use auction_storage::{

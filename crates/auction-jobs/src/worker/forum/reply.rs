@@ -6,50 +6,48 @@ use std::{
     sync::Arc,
 };
 
-use auction_application::diagnostics::{
+use auction_application::auction::{
+    CompetitionCommandPort, CreateProxyCommand, LowerProxyCommand, PlaceBidCommand,
+};
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
-use auction_application::{
-    ApplicationError, CompetitionCommandPort, CompetitionTransactionError, CreateProxyCommand,
+use auction_application::core::{ApplicationError, CompetitionTransactionError};
+use auction_application::forum::{
     ForumBidCommandRecord, ForumCommandStatus, ForumCredentialAvailability, ForumPostWriter,
-    ForumRenderer, ForumReplyStore, ForumTopicReader, ForumWriteProgress, LowerProxyCommand,
-    PlaceBidCommand, PublicEquipmentLinkResolver,
+    ForumRenderer, ForumReplyStore, ForumTopicReader, ForumWriteProgress,
 };
+use auction_application::public::PublicEquipmentLinkResolver;
 use auction_domain::{BidAmount, CommandId, ProxyMode};
 use chrono::Duration;
 use uuid::Uuid;
 
-use super::{PersistentWorker, WorkerError};
 use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, WorkerError};
 
-#[path = "reply/command.rs"]
 mod command;
-#[path = "reply/common.rs"]
 mod common;
-#[path = "reply/notification.rs"]
 mod notification;
-#[path = "reply/rejection.rs"]
 mod rejection;
-mod reply_delay;
-#[path = "reply/topic.rs"]
+
 mod topic;
 
+use super::reply_delay::ReplyDelayEstimator;
 use command::process_command;
 use common::{bounded_detail, finish, forum_command_id, is_retryable, repository_error};
 use notification::process_notification;
-use reply_delay::ReplyDelayEstimator;
 use topic::process_topic;
 
 const MAX_BATCH_SIZE: u16 = 100;
 
 /// 单条论坛命令已经证明的帖子、身份与 lot 上下文。
 struct ForumCommandContext<'a> {
-    topic: &'a auction_application::ForumReplyTopic,
-    bidder: &'a auction_application::ForumBidderIdentity,
+    topic: &'a auction_application::forum::ForumReplyTopic,
+    bidder: &'a auction_application::forum::ForumBidderIdentity,
     post_id: &'a str,
     post_number: usize,
     lot_code: &'a str,
-    command: &'a auction_application::AdminForumCommand,
+    command: &'a auction_application::admin::AdminForumCommand,
     lot_id: auction_domain::LotId,
 }
 
@@ -77,7 +75,8 @@ pub struct ForumReplyRuntime {
     pub(crate) public_base_url: Option<String>,
     pub(crate) verify_post_body: bool,
     /// 说明信预算窗口与上限，默认 24 小时 10 封；论坛回执与 MoogleMail 说明信共用计数。
-    pub(crate) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    pub(crate) external_metrics:
+        Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     reply_delay: ReplyDelayEstimator,
 }
 
@@ -94,7 +93,7 @@ impl ForumReplyRuntime {
             || item_timeout.is_zero()
             || public_base_url
                 .as_deref()
-                .is_some_and(|value| !super::forum_sync::valid_public_base_url(value))
+                .is_some_and(|value| !super::sync::valid_public_base_url(value))
         {
             return Err(WorkerError::InvalidForumReplyConfiguration);
         }
@@ -119,9 +118,10 @@ impl ForumReplyRuntime {
             item_timeout,
             public_base_url,
             verify_post_body: false,
-            external_metrics: auction_application::noop_external_metrics_observer(),
+            external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
+            ),
             reply_delay: ReplyDelayEstimator::new(
-                auction_application::noop_external_metrics_observer(),
+                auction_application::external_metrics::noop_external_metrics_observer(),
             ),
         })
     }
@@ -136,7 +136,7 @@ impl ForumReplyRuntime {
     /// 注入同步外部客户端指标；延迟估计只读内存，不改变扫描或命令控制流。
     pub fn with_external_metrics(
         mut self,
-        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+        observer: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     ) -> Self {
         self.reply_delay = ReplyDelayEstimator::new(Arc::clone(&observer));
         self.external_metrics = observer;
@@ -152,14 +152,21 @@ impl ForumReplyRuntime {
     pub(crate) fn observe_budget(
         &self,
         world: auction_domain::SettlementWorld,
-        phase: auction_application::ForumBudgetPhase,
+        phase: auction_application::external_metrics::ForumBudgetPhase,
     ) {
         let world = match world {
-            auction_domain::SettlementWorld::Main => auction_application::ForumWorld::Main,
-            auction_domain::SettlementWorld::Isekai => auction_application::ForumWorld::Isekai,
+            auction_domain::SettlementWorld::Main => {
+                auction_application::external_metrics::ForumWorld::Main
+            }
+            auction_domain::SettlementWorld::Isekai => {
+                auction_application::external_metrics::ForumWorld::Isekai
+            }
         };
         self.external_metrics.observe(
-            auction_application::ExternalMetricsEvent::ForumBudgetExhausted { world, phase },
+            auction_application::external_metrics::ExternalMetricsEvent::ForumBudgetExhausted {
+                world,
+                phase,
+            },
         );
     }
 }
@@ -169,10 +176,10 @@ pub(crate) async fn run_cycle<C>(
     runtime: &ForumReplyRuntime,
     lease_duration: std::time::Duration,
     poll_interval: std::time::Duration,
-    hot: Option<auction_application::WorkerForumHotConfig>,
+    hot: Option<auction_application::admin::WorkerForumHotConfig>,
 ) -> Result<Option<std::time::Duration>, WorkerError>
 where
-    C: auction_application::Clock + 'static,
+    C: auction_application::core::Clock + 'static,
 {
     let lease_duration = Duration::from_std(lease_duration)
         .map_err(|_| WorkerError::InvalidForumConfiguration)
@@ -293,7 +300,10 @@ where
         };
         let diagnostic_auction_id = topic.auction_id;
         if tokio::time::Instant::now() >= item_deadline {
-            runtime.observe_budget(topic.world, auction_application::ForumBudgetPhase::TopicItem);
+            runtime.observe_budget(
+                topic.world,
+                auction_application::external_metrics::ForumBudgetPhase::TopicItem,
+            );
             diagnostics::unpersisted_error(
                 "forum_reply",
                 "check_claim_deadline",
@@ -368,8 +378,9 @@ where
             break;
         }
         processed += 1;
-        let activity =
-            worker.write_lifecycle.activity(auction_application::CriticalWriteKind::Forum);
+        let activity = worker
+            .write_lifecycle
+            .activity(auction_application::operations::CriticalWriteKind::Forum);
         let write_progress = ForumWriteProgress::with_activity(activity.clone());
         let operation = async {
             match tokio::time::timeout_at(
@@ -386,7 +397,7 @@ where
             {
                 Ok(Ok(next_scan_at)) => {
                     // 只有 Final 阶段收紧的排期才提前唤醒；其他阶段保持常规轮询节奏。
-                    if topic.reply_phase == auction_application::ForumReplyPhase::Final
+                    if topic.reply_phase == auction_application::forum::ForumReplyPhase::Final
                         && let Some(next_scan_at) = next_scan_at
                     {
                         earliest_final_scan = Some(
@@ -430,7 +441,7 @@ where
                 Err(error) => {
                     runtime.observe_budget(
                         topic.world,
-                        auction_application::ForumBudgetPhase::TopicItem,
+                        auction_application::external_metrics::ForumBudgetPhase::TopicItem,
                     );
                     diagnostics::warn(
                         "forum_reply",
@@ -481,7 +492,7 @@ where
 
 async fn record_topic_failure(
     runtime: &ForumReplyRuntime,
-    topic: auction_application::ForumReplyTopic,
+    topic: auction_application::forum::ForumReplyTopic,
     failed_at: chrono::DateTime<chrono::Utc>,
     poll_interval: chrono::Duration,
     error: &ApplicationError,
@@ -505,7 +516,7 @@ async fn record_topic_failure(
 
 async fn record_topic_failure_code(
     runtime: &ForumReplyRuntime,
-    topic: auction_application::ForumReplyTopic,
+    topic: auction_application::forum::ForumReplyTopic,
     failed_at: chrono::DateTime<chrono::Utc>,
     poll_interval: chrono::Duration,
     failure_code: &str,

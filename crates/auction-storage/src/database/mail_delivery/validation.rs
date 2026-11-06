@@ -2,9 +2,9 @@
 
 use std::collections::HashSet;
 
-use auction_application::{
-    ApplicationError, MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin,
-    RepositoryError, valid_notification_body,
+use auction_application::core::{ApplicationError, RepositoryError};
+use auction_application::mail::{
+    MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, valid_notification_body,
 };
 use uuid::Uuid;
 
@@ -53,7 +53,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
         );
     }
     if command.origin == MailDeliveryOrigin::LotWatch
-        && command.template != Some(auction_application::MailNotificationTemplate::LotWatch)
+        && command.template != Some(auction_application::mail::MailNotificationTemplate::LotWatch)
     {
         return Err(RepositoryError::Failed("装备标记通知模板无效".to_owned()).into());
     }
@@ -76,7 +76,9 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
     ) && command.notification_body.is_some()
         && !(command.origin == MailDeliveryOrigin::MailIntake
             && command.template
-                == Some(auction_application::MailNotificationTemplate::AuctionSubmissionReceipt))
+                == Some(
+                    auction_application::mail::MailNotificationTemplate::AuctionSubmissionReceipt,
+                ))
     {
         return Err(RepositoryError::Failed(
             "普通 MoogleMail delivery 不得携带通知正文".to_owned(),
@@ -98,7 +100,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                 return Err(RepositoryError::Failed("MoogleMail 通知载荷越界".to_owned()).into());
             }
             match command.template {
-                Some(auction_application::MailNotificationTemplate::RegisterKey) => {
+                Some(auction_application::mail::MailNotificationTemplate::RegisterKey) => {
                     if command.origin != MailDeliveryOrigin::MailIntake
                         || command.user_key_user_id.is_none()
                         || !matches!(
@@ -112,7 +114,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                         .into());
                     }
                 }
-                Some(auction_application::MailNotificationTemplate::RegisterResult) => {
+                Some(auction_application::mail::MailNotificationTemplate::RegisterResult) => {
                     if command.origin != MailDeliveryOrigin::MailIntake
                         || command.user_key_user_id.is_some()
                         || !matches!(
@@ -126,7 +128,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                         .into());
                     }
                 }
-                Some(auction_application::MailNotificationTemplate::RebindResult) => {
+                Some(auction_application::mail::MailNotificationTemplate::RebindResult) => {
                     if command.origin != MailDeliveryOrigin::MailIntake
                         || command.user_key_user_id.is_some()
                         || !matches!(
@@ -147,7 +149,9 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                         .into());
                     }
                 }
-                Some(auction_application::MailNotificationTemplate::RecoveryPaymentReminder) => {
+                Some(
+                    auction_application::mail::MailNotificationTemplate::RecoveryPaymentReminder,
+                ) => {
                     if command.origin != MailDeliveryOrigin::SettlementRecoveryAction
                         || command.user_key_user_id.is_some()
                         || command.result_code.as_deref() != Some("payment_overdue")
@@ -158,7 +162,9 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                         .into());
                     }
                 }
-                Some(auction_application::MailNotificationTemplate::AuctionSubmissionReceipt) => {
+                Some(
+                    auction_application::mail::MailNotificationTemplate::AuctionSubmissionReceipt,
+                ) => {
                     if command.origin != MailDeliveryOrigin::MailIntake
                         || command.operation != MailDeliveryOperation::Send
                         || command.user_key_user_id.is_some()
@@ -171,7 +177,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                         .into());
                     }
                 }
-                Some(auction_application::MailNotificationTemplate::AuctionSellerSummary) => {
+                Some(auction_application::mail::MailNotificationTemplate::AuctionSellerSummary) => {
                     if command.origin != MailDeliveryOrigin::SellerSummary
                         || command.operation != MailDeliveryOperation::Send
                         || command.user_key_user_id.is_some()
@@ -187,7 +193,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                         .into());
                     }
                 }
-                Some(auction_application::MailNotificationTemplate::IsekaiSeasonReminder) => {
+                Some(auction_application::mail::MailNotificationTemplate::IsekaiSeasonReminder) => {
                     if command.origin != MailDeliveryOrigin::SeasonReminder
                         || command.operation != MailDeliveryOperation::Send
                         || command.user_key_user_id.is_some()
@@ -203,7 +209,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                         .into());
                     }
                 }
-                Some(auction_application::MailNotificationTemplate::LotWatch) => {
+                Some(auction_application::mail::MailNotificationTemplate::LotWatch) => {
                     if command.origin != MailDeliveryOrigin::LotWatch
                         || command.operation != MailDeliveryOperation::Send
                         || command.user_key_user_id.is_some()
@@ -217,7 +223,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                         );
                     }
                 }
-                Some(auction_application::MailNotificationTemplate::OperationsAlert) => {
+                Some(auction_application::mail::MailNotificationTemplate::OperationsAlert) => {
                     if command.origin != MailDeliveryOrigin::OperationsAlert
                         || command.user_key_user_id.is_some()
                         || command.result_code.as_deref() != Some("operations_alert")
@@ -297,7 +303,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
 mod tests {
     use self::parent::*;
     use super as parent;
-    use auction_application::MailNotificationTemplate;
+    use auction_application::mail::MailNotificationTemplate;
     use auction_domain::CommandId;
     use uuid::Uuid;
 
@@ -308,7 +314,7 @@ mod tests {
     ) -> MailDeliveryCommand {
         MailDeliveryCommand {
             command_id: CommandId::from_uuid(Uuid::new_v4()),
-            request_hash: auction_application::RequestHash::new([7; 32]),
+            request_hash: auction_application::core::RequestHash::new([7; 32]),
             origin: MailDeliveryOrigin::MailIntake,
             origin_id: "main:123:send".to_owned(),
             operation: MailDeliveryOperation::Send,
@@ -369,7 +375,7 @@ mod tests {
     ) -> MailDeliveryCommand {
         MailDeliveryCommand {
             command_id: CommandId::from_uuid(Uuid::new_v4()),
-            request_hash: auction_application::RequestHash::new([9; 32]),
+            request_hash: auction_application::core::RequestHash::new([9; 32]),
             origin,
             origin_id,
             operation: MailDeliveryOperation::Send,

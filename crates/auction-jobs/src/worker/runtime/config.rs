@@ -3,7 +3,8 @@
 
 use std::{sync::Arc, time::Duration};
 
-use auction_application::{AdminMailPort, AuctionPolicyTemplate};
+use auction_application::admin::AdminMailPort;
+use auction_application::auction::AuctionPolicyTemplate;
 use auction_domain::AuctionEarlyBirdCalendar;
 
 /// 每周拍卖轮次生成所需的已解析配置。
@@ -170,7 +171,7 @@ impl ForumWorkerRuntimeConfig {
     }
 
     /// 只替换热读取的轮询与抖动；租约仍来自启动配置。
-    pub(super) fn with_hot(self, hot: &auction_application::WorkerForumHotConfig) -> Self {
+    pub(super) fn with_hot(self, hot: &auction_application::admin::WorkerForumHotConfig) -> Self {
         Self {
             poll_interval: Duration::from_secs(hot.poll_interval_seconds),
             jitter: Duration::from_secs(hot.jitter_seconds),
@@ -181,7 +182,10 @@ impl ForumWorkerRuntimeConfig {
 
 impl DeliveryWorkerRuntimeConfig {
     /// 只替换热读取的批次、轮询、抖动与超时；租约、续租、发送宽限和并发仍来自启动配置。
-    pub(super) fn with_hot(self, hot: &auction_application::WorkerDeliveryHotConfig) -> Self {
+    pub(super) fn with_hot(
+        self,
+        hot: &auction_application::admin::WorkerDeliveryHotConfig,
+    ) -> Self {
         Self {
             batch_limit: hot.batch_limit,
             poll_interval: Duration::from_secs(hot.poll_interval_seconds),
@@ -236,7 +240,7 @@ impl FulfillmentWorkerRuntimeConfig {
 mod hot_overlay_tests {
     use std::time::Duration;
 
-    use auction_application::{WorkerDeliveryHotConfig, WorkerForumHotConfig};
+    use auction_application::admin::{WorkerDeliveryHotConfig, WorkerForumHotConfig};
 
     use super::{DeliveryWorkerRuntimeConfig, ForumWorkerRuntimeConfig};
 

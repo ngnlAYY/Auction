@@ -3,10 +3,11 @@
 #[cfg(feature = "postgres")]
 mod postgres;
 
-use auction_application::{
-    ApplicationFuture, PublicCompensationListRequest, PublicCompensationLotPage,
-    PublicCompensationLotRequest, PublicCompensationMovementPage,
-    PublicCompensationMovementRequest, PublicCompensationPage, PublicCompensationReader,
+use auction_application::auction::ApplicationFuture;
+use auction_application::public::{
+    PublicCompensationListRequest, PublicCompensationLotPage, PublicCompensationLotRequest,
+    PublicCompensationMovementPage, PublicCompensationMovementRequest, PublicCompensationPage,
+    PublicCompensationReader,
 };
 use uuid::Uuid;
 

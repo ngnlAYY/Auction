@@ -88,10 +88,11 @@ where
         let Some(facts) = self.auctions.load_submission_receipt(submission_id).await? else {
             return Ok(None);
         };
-        if crate::submission_receipt_invalid_reason(&facts.auction_status).is_some() {
+        if crate::services::mail::submission_receipt_invalid_reason(&facts.auction_status).is_some()
+        {
             return Ok(None);
         }
-        let Some(body) = crate::submission_receipt_body(&facts) else {
+        let Some(body) = crate::services::mail::submission_receipt_body(&facts) else {
             return Ok(None);
         };
         let command = self.delivery_command(
@@ -141,7 +142,7 @@ where
         template: MailNotificationTemplate,
         result_code: &str,
     ) -> Result<Option<Uuid>, ApplicationError> {
-        let limit = crate::explanation_notice_limit(
+        let limit = crate::ports::mail::explanation_notice_limit(
             self.explanation_window_seconds,
             self.explanation_limit,
             self.clock.now(),
@@ -254,7 +255,12 @@ where
 
     fn observe_suppression(&self, message: &MailMessage, class: MailNoticeClass) {
         let world = if message.world_id == "main" { MailWorld::Main } else { MailWorld::Isekai };
-        self.metrics.observe(crate::ExternalMetricsEvent::MailNoticeSuppressed { world, class });
+        self.metrics.observe(
+            crate::ports::external_metrics::ExternalMetricsEvent::MailNoticeSuppressed {
+                world,
+                class,
+            },
+        );
     }
 }
 

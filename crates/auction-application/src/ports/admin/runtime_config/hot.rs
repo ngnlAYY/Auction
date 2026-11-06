@@ -7,9 +7,9 @@
 // 候选文档必须先经过完整校验才能进入本模块；这里只提取已校验字段，并在未接管分组上
 // 保留当前生效值，绝不把“未接管”解释成“回到部署默认值”。
 
-use crate::DeliverySendIntervals;
+use crate::ports::delivery::DeliverySendIntervals;
 
-use super::{AdminRuntimeDocument, AdminRuntimeOperationsConfig};
+use crate::ports::admin::{AdminRuntimeDocument, AdminRuntimeOperationsConfig};
 
 /// Worker 周期重读后可立即生效的 runtime 文档字段路径。
 /// 路径与 Admin 参数页的输入路径一致；新增热字段时必须同时接上消费方。

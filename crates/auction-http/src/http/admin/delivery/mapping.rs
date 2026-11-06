@@ -1,4 +1,4 @@
-use auction_application::DeliveryAdminSnapshot;
+use auction_application::delivery::DeliveryAdminSnapshot;
 use auction_contracts::AdminDeliveryResponse;
 
 /// 将 delivery 应用快照转换为管理端安全 DTO。
@@ -33,7 +33,7 @@ pub(crate) fn map_snapshot(snapshot: DeliveryAdminSnapshot) -> AdminDeliveryResp
 
 /// 将投递详情投影转换为管理端 DTO；摘要转小写 hex，绝不返回正文或凭据秘密。
 pub(crate) fn map_detail(
-    detail: auction_application::DeliveryAdminDetail,
+    detail: auction_application::delivery::DeliveryAdminDetail,
 ) -> auction_contracts::AdminDeliveryDetailResponse {
     auction_contracts::AdminDeliveryDetailResponse {
         delivery: map_snapshot(detail.delivery),
@@ -50,7 +50,7 @@ pub(crate) fn map_detail(
                 body_digest: attempt
                     .body_digest
                     .as_ref()
-                    .map(|digest| auction_application::lower_hex(digest)),
+                    .map(|digest| auction_application::core::lower_hex(digest)),
                 credits: attempt.credits,
                 cod: attempt.cod,
                 equipment_ids: attempt.equipment_ids,
@@ -79,7 +79,7 @@ pub(crate) fn map_detail(
                 body_digest: item
                     .body_digest
                     .as_ref()
-                    .map(|digest| auction_application::lower_hex(digest)),
+                    .map(|digest| auction_application::core::lower_hex(digest)),
                 collected: item.collected,
                 cod_pending: item.cod_pending,
                 remaining_credits: item.remaining_credits,
@@ -139,7 +139,7 @@ pub(crate) fn map_detail(
 
 /// 将玩家支持汇总映射为管理端只读 DTO；分区上限与参考编号由应用层唯一校验。
 pub(crate) fn map_player_support(
-    bundle: auction_application::PlayerSupportBundle,
+    bundle: auction_application::delivery::PlayerSupportBundle,
 ) -> auction_contracts::AdminPlayerSupportBundleResponse {
     use auction_contracts::{
         AdminPlayerSupportBidResponse, AdminPlayerSupportBundleResponse,
@@ -229,7 +229,7 @@ pub(crate) fn map_player_support(
 
 /// 将人工证明预览映射为管理端 DTO；`blockers` 保持闭集字符串，浏览器不推导新结论。
 pub(crate) fn map_sent_proof_preview(
-    preview: auction_application::SentConfirmationPreview,
+    preview: auction_application::delivery::SentConfirmationPreview,
 ) -> auction_contracts::AdminDeliverySentProofPreviewResponse {
     auction_contracts::AdminDeliverySentProofPreviewResponse {
         eligible: preview.eligible,
@@ -245,7 +245,7 @@ pub(crate) fn map_sent_proof_preview(
 
 /// 将人工证明结果映射为管理端 DTO；重放标志原样保留。
 pub(crate) fn map_sent_proof_result(
-    result: auction_application::SentConfirmationResult,
+    result: auction_application::delivery::SentConfirmationResult,
 ) -> auction_contracts::AdminDeliverySentProofResponse {
     auction_contracts::AdminDeliverySentProofResponse {
         command_id: result.command_id.to_string(),
@@ -261,7 +261,7 @@ mod tests {
 
     use self::parent::*;
     use super as parent;
-    use auction_application::{
+    use auction_application::delivery::{
         DeliveryAdminAttempt, DeliveryAdminCustody, DeliveryAdminDetail, DeliveryAdminDisposition,
         DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,
         DeliveryAdminSnapshot, DeliverySendCredentialBinding,

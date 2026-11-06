@@ -1,6 +1,6 @@
 //! 稳定命令、摘要、版本 CAS 与到期收口规则。
 
-use super::{RuntimeSwitchError, RuntimeSwitchName};
+use crate::ports::runtime_switches::{RuntimeSwitchError, RuntimeSwitchName};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -111,7 +111,7 @@ pub struct RuntimeSwitchCommand {
     pub actor_id: String,
     /// 主机身份只用于审计；重试的业务摘要不随 sudo 环境改变。
     #[serde(skip)]
-    pub operator_identity: Option<crate::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
     /// 实际入口，加入摘要防止重放时篡改来源。
     pub entrypoint: String,
     /// 必填原因。
@@ -147,8 +147,8 @@ impl RuntimeSwitchCommand {
 
     /// 应用层统一版本化摘要，CLI 与未来 HTTP 共用。
     pub fn digest(&self) -> Result<[u8; 32], RuntimeSwitchError> {
-        crate::RequestHash::from_request("runtime_switch_v1", self.command_id, self)
-            .map(crate::RequestHash::as_bytes)
+        crate::ports::core::RequestHash::from_request("runtime_switch_v1", self.command_id, self)
+            .map(crate::ports::core::RequestHash::as_bytes)
             .map_err(invalid)
     }
 

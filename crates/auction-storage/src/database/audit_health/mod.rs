@@ -8,7 +8,7 @@ use std::sync::{
     atomic::{AtomicI64, Ordering},
 };
 
-use auction_application::AuditFailureMode;
+use auction_application::operations::AuditFailureMode;
 use auction_observability::{
     AuditFailureClass, AuditFailureKind, AuditFailureObservation, AuditMetricsSnapshot,
     AuditMetricsSource, AuditSqlstateClass,
@@ -87,7 +87,7 @@ const fn gate_ready(mode: AuditFailureMode, total: i64, blocking: i64) -> bool {
 }
 
 struct ProcessAuditMetricsSource {
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 }
 
 impl AuditMetricsSource for ProcessAuditMetricsSource {
@@ -114,7 +114,7 @@ impl AuditMetricsSource for ProcessAuditMetricsSource {
 }
 
 pub(super) fn metrics_source(
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 ) -> Arc<dyn AuditMetricsSource> {
     Arc::new(ProcessAuditMetricsSource { switches })
 }

@@ -1,12 +1,12 @@
 //! 异常证据的准备、认证归档及离线导出，不参与邮件业务决定。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use auction_application::{
+use auction_application::mail::{
     MailDiagnosticContext, MailDiagnosticError, MailDiagnosticFuture, MailDiagnosticOutcome,
     MailDiagnosticReceipt, MailDiagnosticRecorder, MailMessage, PreparedMailEvidence,
 };
@@ -81,7 +81,7 @@ impl MoogleMailDiagnosticArchive {
     ) -> Result<PreparedMailEvidence, MailDiagnosticError> {
         let context_wire = payload::context(&context)?;
         let id = Uuid::new_v4();
-        let digest = auction_application::lower_hex(&Sha256::digest(&body.0));
+        let digest = auction_application::core::lower_hex(&Sha256::digest(&body.0));
         let header = payload::PublicHeader {
             version: payload::FORMAT_VERSION,
             evidence_id: id,
@@ -285,7 +285,7 @@ fn authenticated_header(header: &payload::PublicHeader) -> Result<Vec<u8>, MailD
 
 fn verify_payload(header: &payload::PublicHeader, body: &[u8]) -> Result<(), MailDiagnosticError> {
     if body.len() != header.payload_bytes
-        || auction_application::lower_hex(&Sha256::digest(body)) != header.sha256
+        || auction_application::core::lower_hex(&Sha256::digest(body)) != header.sha256
     {
         return Err(MailDiagnosticError::Authentication);
     }

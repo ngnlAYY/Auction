@@ -20,7 +20,7 @@ use super::super::{boundary, server};
 pub async fn serve_metrics(
     listener: TcpListener,
     metrics: Arc<ProcessMetrics>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
     let boundary = boundary::HttpBoundary::default()

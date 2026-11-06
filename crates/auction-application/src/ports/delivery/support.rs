@@ -7,7 +7,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::DeliveryAdminSnapshot;
+use crate::ports::delivery::DeliveryAdminSnapshot;
 
 /// 每个分区最多返回的行数；超过时置 `truncated`，不静默分页。
 pub const MAX_PLAYER_SUPPORT_ROWS: i64 = 50;

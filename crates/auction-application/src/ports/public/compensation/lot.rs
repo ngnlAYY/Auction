@@ -4,7 +4,9 @@
 //! 冲正事实只追加，存在时说明该件成交已撤销且池余额已按冻结规则回滚。
 
 use super::*;
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
 
 /// 单场逐件明细的编号分页与补偿账本分页共用同一规则。
 pub type PublicCompensationLotRequest = PublicCompensationMovementRequest;

@@ -1,4 +1,4 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
@@ -8,7 +8,7 @@ use crate::http::routes::{
     map_owned_proxy, no_store_headers, not_found_error, page_offset, parse_positive_i64,
     parse_public_uuid, parse_query, valid_account_page,
 };
-use auction_application::{
+use auction_application::auction::{
     DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE, MAX_PUBLIC_ACCOUNT_PAGE_SIZE, PublicAccountPageRequest,
     PublicMyBidsRequest,
 };

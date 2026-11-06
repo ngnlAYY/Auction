@@ -5,10 +5,9 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, ApplicationFuture, PublicLoginAuthenticator, PublicLoginIdentity,
-    SessionError,
-};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::{ApplicationError, SessionError};
+use auction_application::public::{PublicLoginAuthenticator, PublicLoginIdentity};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 

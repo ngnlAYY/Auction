@@ -2,8 +2,9 @@
 
 use std::{sync::Arc, time::Duration};
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
-use auction_application::{ApplicationError, DeliveryWorkStore};
+use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::delivery::DeliveryWorkStore;
 use tokio::sync::{Notify, watch};
 
 use crate::worker::diagnostics;

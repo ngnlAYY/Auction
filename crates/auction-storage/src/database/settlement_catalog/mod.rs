@@ -4,11 +4,12 @@
 use crate::database::storage_error_from;
 
 #[cfg(feature = "postgres")]
-use auction_application::SettlementCatalogEntry;
-use auction_application::{
-    ApplicationError, ApplicationFuture, SettlementCatalogPage, SettlementCatalogReader,
-    SettlementCatalogRequest,
+use auction_application::admin::SettlementCatalogEntry;
+use auction_application::admin::{
+    SettlementCatalogPage, SettlementCatalogReader, SettlementCatalogRequest,
 };
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
 
 use super::DatabaseStore;
 use crate::database::storage_error;

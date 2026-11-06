@@ -1,9 +1,9 @@
 use std::future::Future;
 
-use auction_application::{
+use auction_application::core::{StoredCommand, TransactionFuture, TransactionPolicy};
+use auction_application::settlement::{
     SettlementSnapshot, SettlementTransaction, SettlementTransactionError,
-    SettlementTransactionFailure, SettlementTransactionRunner, StoredCommand, TransactionFuture,
-    TransactionPolicy,
+    SettlementTransactionFailure, SettlementTransactionRunner,
 };
 use auction_domain::{AuctionId, CommandId, CompetitionPlan, RecoveryPolicy, SettlementPlan};
 use chrono::{DateTime, Utc};

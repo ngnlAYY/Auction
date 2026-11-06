@@ -4,9 +4,10 @@
 
 use std::net::SocketAddr;
 
-use auction_application::diagnostics::DiagnosticError;
-use auction_application::{ApplicationError, OperationsAlertError};
-use auction_application::{
+use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticError;
+use auction_application::operations::OperationsAlertError;
+use auction_application::operations::{
     MAX_OPERATIONS_ALERT_CONSOLE_PAGE_SIZE, OperationsAlertAcknowledgeCommand,
     OperationsAlertConsoleEntry, OperationsAlertConsoleQuery, OperationsAlertFilter,
     OperationsAlertSilenceCommand, OperationsAlertSource, parse_alert_id,

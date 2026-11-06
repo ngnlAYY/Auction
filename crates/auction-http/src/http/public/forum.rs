@@ -3,7 +3,8 @@
 use super::{
     PublicApiState, api_error, not_found_error, parse_public_uuid, parse_query, public_timestamp,
 };
-use auction_application::{ApplicationError, PublicForumThread};
+use auction_application::core::ApplicationError;
+use auction_application::forum::PublicForumThread;
 use auction_contracts::{
     ApiErrorResponse, ApiResponse, PublicForumResponse, PublicForumSyncStatusResponse,
 };

@@ -119,13 +119,13 @@ fn protocol_error(message: &str) -> sqlx::Error {
 }
 
 #[cfg(feature = "postgres")]
-impl auction_application::DeliveryDispositionPort for super::DatabaseStore {
+impl auction_application::delivery::DeliveryDispositionPort for super::DatabaseStore {
     fn dispositions(
         &self,
         delivery_id: Uuid,
-    ) -> auction_application::ApplicationFuture<
+    ) -> auction_application::auction::ApplicationFuture<
         '_,
-        Vec<auction_application::DeliveryDispositionRecord>,
+        Vec<auction_application::delivery::DeliveryDispositionRecord>,
     > {
         Box::pin(async move {
             records::dispositions_for_delivery(self.tracked_postgres_pool(), delivery_id).await
@@ -134,15 +134,15 @@ impl auction_application::DeliveryDispositionPort for super::DatabaseStore {
 
     fn acknowledge(
         &self,
-        command: auction_application::DeliveryAcknowledgementCommand,
-    ) -> auction_application::ApplicationFuture<
+        command: auction_application::delivery::DeliveryAcknowledgementCommand,
+    ) -> auction_application::auction::ApplicationFuture<
         '_,
-        auction_application::DeliveryAcknowledgementResult,
+        auction_application::delivery::DeliveryAcknowledgementResult,
     > {
         Box::pin(async move {
             acknowledge::acknowledge(self.tracked_postgres_pool(), &command)
                 .await
-                .map_err(auction_application::ApplicationError::from)
+                .map_err(auction_application::core::ApplicationError::from)
         })
     }
 }

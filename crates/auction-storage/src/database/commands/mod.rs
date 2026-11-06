@@ -3,36 +3,32 @@
 
 use std::sync::Arc;
 
-use auction_application::{
+use auction_application::admin::{
     AdminAuctionCreatePort, AdminAuctionSchedulePort, AdminAuctionSummary,
     AdminCreateAuctionCommand, AdminRulesDocument, AdminRulesPort, AdminRulesPublishCommand,
     AdminRulesReader, AdminRulesRequest, AdminUpdateAuctionScheduleCommand, AdminWorldPort,
-    AdminWorldSetEnabledCommand, ApplicationFuture, AuctionLifecycleCommand,
-    AuctionLifecycleCommandPort, AuctionLifecyclePolicy, AuctionLifecycleResult,
-    AuctionLifecycleService, AuctionPolicyTemplate, Clock, CompetitionCommandOutcome,
-    CompetitionCommandPort, CompetitionService, CreateProxyCommand, ExecuteSlowProxyCommand,
-    LowerProxyCommand, PlaceBidCommand, SlowProxyCommandPort,
+    AdminWorldSetEnabledCommand,
 };
 #[cfg(feature = "postgres")]
-use auction_application::{
+use auction_application::admin::{
     AdminAuctionCreateService, AdminAuctionScheduleService, AdminRulesService, AdminWorldService,
 };
+use auction_application::auction::{
+    ApplicationFuture, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
+    AuctionLifecyclePolicy, AuctionLifecycleResult, AuctionLifecycleService, AuctionPolicyTemplate,
+    CompetitionCommandOutcome, CompetitionCommandPort, CompetitionService, CreateProxyCommand,
+    ExecuteSlowProxyCommand, LowerProxyCommand, PlaceBidCommand, SlowProxyCommandPort,
+};
+use auction_application::core::Clock;
 use auction_domain::{AuctionScheduleCalendar, CompetitionPlan};
 
 use super::DatabaseStore;
 
-#[path = "admin/intake.rs"]
-mod admin_intake;
-pub use admin_intake::DatabaseAdminIntakeCommands;
-#[path = "admin/mail.rs"]
-mod admin_mail;
-pub use admin_mail::DatabaseAdminMailCommands;
-#[path = "admin/lot.rs"]
-mod admin_lot;
-pub use admin_lot::DatabaseAdminLotCommands;
-#[path = "admin/runtime.rs"]
-mod admin_runtime;
-pub use admin_runtime::DatabaseAdminRuntimeCommands;
+mod admin;
+pub use admin::intake::DatabaseAdminIntakeCommands;
+pub use admin::lot::DatabaseAdminLotCommands;
+pub use admin::mail::DatabaseAdminMailCommands;
+pub use admin::runtime::DatabaseAdminRuntimeCommands;
 
 /// 绑定运行时数据库的 Admin 业务世界读取与启停命令端口。
 pub struct DatabaseAdminWorldCommands {
@@ -46,12 +42,15 @@ impl DatabaseAdminWorldCommands {
 }
 
 impl AdminWorldPort for DatabaseAdminWorldCommands {
-    fn list_worlds(&self) -> ApplicationFuture<'_, Vec<auction_application::WorldSnapshot>> {
+    fn list_worlds(
+        &self,
+    ) -> ApplicationFuture<'_, Vec<auction_application::auction::WorldSnapshot>> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            let worlds = auction_application::WorldReader::list_worlds(store.as_ref()).await?;
+            let worlds =
+                auction_application::auction::WorldReader::list_worlds(store.as_ref()).await?;
             if worlds.iter().any(|world| !world.validate()) {
-                return Err(auction_application::AdminWorldError::StoredResultCorrupt.into());
+                return Err(auction_application::admin::AdminWorldError::StoredResultCorrupt.into());
             }
             Ok(worlds)
         })
@@ -60,7 +59,7 @@ impl AdminWorldPort for DatabaseAdminWorldCommands {
     fn set_enabled(
         &self,
         command: AdminWorldSetEnabledCommand,
-    ) -> ApplicationFuture<'_, auction_application::WorldSnapshot> {
+    ) -> ApplicationFuture<'_, auction_application::auction::WorldSnapshot> {
         let store = Arc::clone(&self.store);
         #[cfg(not(feature = "postgres"))]
         let _ = &command;

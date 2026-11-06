@@ -6,11 +6,11 @@ use futures_util::TryStreamExt;
 
 use super::mapping::{map_postgres_user, map_storage_error, parse_postgres_command};
 use crate::database::users::admin::admin_error;
-use auction_application::{
+use auction_application::admin::{
     AdminUser, AdminUserBlacklistHistoryEntry, AdminUserCommandKind, AdminUserCommandResult,
     AdminUserError, AdminUserListItem, AdminUserListRequest, AdminUserPage, AdminUserStatus,
-    ApplicationError, RequestHash,
 };
+use auction_application::core::{ApplicationError, RequestHash};
 use sqlx::Row;
 use uuid::Uuid;
 

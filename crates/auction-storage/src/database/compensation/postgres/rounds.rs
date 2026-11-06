@@ -3,9 +3,10 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, PublicCompensationCursor, PublicCompensationListRequest,
-    PublicCompensationPage, PublicCompensationRound,
+use auction_application::core::ApplicationError;
+use auction_application::public::{
+    PublicCompensationCursor, PublicCompensationListRequest, PublicCompensationPage,
+    PublicCompensationRound,
 };
 use auction_domain::SettlementMode;
 use chrono::{DateTime, Utc};

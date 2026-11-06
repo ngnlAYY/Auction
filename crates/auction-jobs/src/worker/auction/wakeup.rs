@@ -2,13 +2,13 @@
 
 use std::time::Duration;
 
-use auction_application::Clock;
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::Clock;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use chrono::{DateTime, Utc};
 use tokio::time::Instant;
 
-use super::super::PersistentWorker;
 use crate::worker::diagnostics;
+use crate::worker::runtime::PersistentWorker;
 
 /// 三个只读提示查询的总预算；超时或失败时沿用常规轮询，不阻塞主循环或停机。
 const HINT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -94,7 +94,7 @@ where
 }
 
 fn hint(
-    result: Result<Option<DateTime<Utc>>, auction_application::ApplicationError>,
+    result: Result<Option<DateTime<Utc>>, auction_application::core::ApplicationError>,
     phase: &'static str,
 ) -> Option<DateTime<Utc>> {
     result.unwrap_or_else(|error| {

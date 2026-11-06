@@ -1,7 +1,8 @@
 //! 论坛回帖存储的输入闭集、文本边界和能力错误。
 
 pub(super) use crate::database::storage_error;
-use auction_application::{ApplicationError, ForumBidCommandRecord};
+use auction_application::core::ApplicationError;
+use auction_application::forum::ForumBidCommandRecord;
 #[cfg(feature = "postgres")]
 use auction_domain::SettlementWorld;
 pub(super) use auction_domain::valid_text;

@@ -1,9 +1,10 @@
 //! Public 竞价日志共享的 cursor、结果校验和错误映射。
 
 pub(super) use crate::database::storage_error;
-use auction_application::{
-    ApplicationError, PublicBidLogCursor, PublicBidLogEntry, PublicBidLogListRequest,
+use auction_application::auction::{
+    PublicBidLogCursor, PublicBidLogEntry, PublicBidLogListRequest,
 };
+use auction_application::core::ApplicationError;
 use auction_domain::valid_positive_decimal;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;

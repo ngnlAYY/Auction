@@ -4,9 +4,9 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, ForumSyncRecoveryItem, ForumWriteRetryAuthorizationCommand,
-    ForumWriteRetryAuthorizationResult,
+use auction_application::core::ApplicationError;
+use auction_application::forum::{
+    ForumSyncRecoveryItem, ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
 };
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -162,7 +162,7 @@ pub(super) async fn authorize(
     .bind(&command.actor_id)
     .bind(command.auction_id.to_string())
     .bind(command.command_id.to_string())
-    .bind(auction_application::cli_audit_metadata(
+    .bind(auction_application::core::cli_audit_metadata(
         command.operator_identity.as_ref(),
         serde_json::json!({
             "command_id": command.command_id,

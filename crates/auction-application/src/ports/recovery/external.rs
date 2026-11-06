@@ -18,7 +18,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::ApplicationError;
+use crate::errors::ApplicationError;
 
 /// 恢复核对回执格式；CLI 输出文件与文档共用。
 pub const EXTERNAL_RECOVERY_RECEIPT_FORMAT: &str = "auction-external-recovery.v1";
@@ -51,12 +51,15 @@ impl ExternalRecoveryDeliveryExpectation {
         !self.delivery_id.is_nil()
             && self.fencing_version > 0
             && matches!(self.world_id.as_str(), "main" | "isekai")
-            && crate::valid_mail_player_name(&self.recipient)
+            && crate::ports::admin::valid_mail_player_name(&self.recipient)
             && valid_text(&self.subject, 512)
-            && (0..=crate::MAX_DELIVERY_COD).contains(&self.credits)
-            && (0..=crate::MAX_DELIVERY_COD).contains(&self.cod)
+            && (0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.credits)
+            && (0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.cod)
             && self.equipment_ids.len() <= 1_000
-            && self.equipment_ids.iter().all(|id| crate::valid_external_positive_id(id))
+            && self
+                .equipment_ids
+                .iter()
+                .all(|id| crate::ports::settlement::valid_external_positive_id(id))
             && self.equipment_ids.windows(2).all(|ids| ids[0] < ids[1])
             && self.sending_at.timestamp_nanos_opt().is_some()
     }
@@ -106,12 +109,15 @@ impl ExternalRecoveryQuarantineMatch {
             && self.fencing_version > 0
             && matches!(self.world_id.as_str(), "main" | "isekai")
             && auction_domain::valid_positive_decimal(&self.external_mail_id, 64)
-            && crate::valid_mail_player_name(&self.recipient)
+            && crate::ports::admin::valid_mail_player_name(&self.recipient)
             && valid_text(&self.subject, 512)
-            && (0..=crate::MAX_DELIVERY_COD).contains(&self.expected_credits)
-            && (0..=crate::MAX_DELIVERY_COD).contains(&self.expected_cod)
+            && (0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.expected_credits)
+            && (0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.expected_cod)
             && self.expected_equipment_ids.len() <= 1_000
-            && self.expected_equipment_ids.iter().all(|id| crate::valid_external_positive_id(id))
+            && self
+                .expected_equipment_ids
+                .iter()
+                .all(|id| crate::ports::settlement::valid_external_positive_id(id))
             && self.sent_at.timestamp_nanos_opt().is_some()
             && self.observed_at.timestamp_nanos_opt().is_some()
     }
@@ -217,7 +223,7 @@ pub fn sent_list_projection_may_match(
 ) -> bool {
     expectation.world_id == world
         && sent_at >= cutoff_at
-        && crate::mail_recipient_is_list_projection(recipient, &expectation.recipient)
+        && crate::ports::mail::mail_recipient_is_list_projection(recipient, &expectation.recipient)
         && subject_is_list_projection(subject, &expectation.subject)
 }
 
@@ -257,8 +263,8 @@ pub fn sent_detail_match(
 
 #[cfg(test)]
 mod tests {
+    use self::parent::*;
     use super as parent;
-use self::parent::*;
     use chrono::TimeDelta;
 
     fn expectation() -> ExternalRecoveryDeliveryExpectation {

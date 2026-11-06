@@ -7,9 +7,11 @@ use auction_domain::{
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use super::core_ledger::{CommandLedgerError, StoredCommand};
-use super::core_policy::{TransactionPolicy, TransactionPolicyError};
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::core::ledger::{CommandLedgerError, StoredCommand};
+use crate::ports::core::policy::{TransactionPolicy, TransactionPolicyError};
 
 /// 竞价命令在锁内读取到的最小聚合快照。
 #[derive(Debug, Clone)]

@@ -1,7 +1,7 @@
 //! 在线持久开关入口；复用应用摘要和数据库事务，不调用停机或迁移。
 
 use crate::{app::print_json, cli::SwitchCommand, deployment::ConfigDir, support::text};
-use auction_application::{
+use auction_application::runtime_switches::{
     RuntimeSwitchCommand, RuntimeSwitchName, RuntimeSwitchOperation, RuntimeSwitchStore,
 };
 use serde_json::json;

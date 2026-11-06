@@ -315,7 +315,7 @@ pub(super) async fn recovery_scan(
             &request_id,
         );
     }
-    let request: auction_application::WorkerRecoveryScanRequest =
+    let request: auction_application::operations::WorkerRecoveryScanRequest =
         match serde_json::from_slice(&body) {
             Ok(request) => request,
             Err(error) => {
@@ -343,7 +343,7 @@ pub(super) async fn recovery_scan(
             StatusCode::NOT_IMPLEMENTED,
             ResponseCode::CapabilityUnavailable,
             "Worker 未装配远端读取能力",
-            Option::<auction_application::WorkerRecoveryScanResponse>::None,
+            Option::<auction_application::operations::WorkerRecoveryScanResponse>::None,
             &request_id,
         );
     };
@@ -415,7 +415,7 @@ fn remote_read_error_response(error: WorkerRemoteReadError, request_id: &str) ->
 mod tests {
     use self::parent::*;
     use super as parent;
-    use auction_application::{WorkerEquipmentReadResponse, WorkerSentLookupResponse};
+    use auction_application::operations::{WorkerEquipmentReadResponse, WorkerSentLookupResponse};
 
     fn json_headers() -> HeaderMap {
         let mut headers = HeaderMap::new();
@@ -475,15 +475,17 @@ mod tests {
             fn read_equipment(
                 &self,
                 _request: WorkerEquipmentReadRequest,
-            ) -> auction_application::WorkerRemoteReadFuture<'_, WorkerEquipmentReadResponse>
-            {
+            ) -> auction_application::operations::WorkerRemoteReadFuture<
+                '_,
+                WorkerEquipmentReadResponse,
+            > {
                 Box::pin(async { Err(WorkerRemoteReadError::Paused) })
             }
 
             fn lookup_sent(
                 &self,
                 _request: WorkerSentLookupRequest,
-            ) -> auction_application::WorkerRemoteReadFuture<'_, WorkerSentLookupResponse>
+            ) -> auction_application::operations::WorkerRemoteReadFuture<'_, WorkerSentLookupResponse>
             {
                 Box::pin(async { Err(WorkerRemoteReadError::Paused) })
             }
@@ -505,15 +507,17 @@ mod tests {
             fn read_equipment(
                 &self,
                 _request: WorkerEquipmentReadRequest,
-            ) -> auction_application::WorkerRemoteReadFuture<'_, WorkerEquipmentReadResponse>
-            {
+            ) -> auction_application::operations::WorkerRemoteReadFuture<
+                '_,
+                WorkerEquipmentReadResponse,
+            > {
                 panic!("invalid request must not reach the executor")
             }
 
             fn lookup_sent(
                 &self,
                 _request: WorkerSentLookupRequest,
-            ) -> auction_application::WorkerRemoteReadFuture<'_, WorkerSentLookupResponse>
+            ) -> auction_application::operations::WorkerRemoteReadFuture<'_, WorkerSentLookupResponse>
             {
                 panic!("invalid request must not reach the executor")
             }
@@ -553,25 +557,27 @@ mod tests {
             fn read_equipment(
                 &self,
                 _request: WorkerEquipmentReadRequest,
-            ) -> auction_application::WorkerRemoteReadFuture<'_, WorkerEquipmentReadResponse>
-            {
+            ) -> auction_application::operations::WorkerRemoteReadFuture<
+                '_,
+                WorkerEquipmentReadResponse,
+            > {
                 Box::pin(async { Err(WorkerRemoteReadError::Unavailable) })
             }
 
             fn lookup_sent(
                 &self,
                 _request: WorkerSentLookupRequest,
-            ) -> auction_application::WorkerRemoteReadFuture<'_, WorkerSentLookupResponse>
+            ) -> auction_application::operations::WorkerRemoteReadFuture<'_, WorkerSentLookupResponse>
             {
                 Box::pin(async { Err(WorkerRemoteReadError::Unavailable) })
             }
 
             fn recovery_scan(
                 &self,
-                _request: auction_application::WorkerRecoveryScanRequest,
-            ) -> auction_application::WorkerRemoteReadFuture<
+                _request: auction_application::operations::WorkerRecoveryScanRequest,
+            ) -> auction_application::operations::WorkerRemoteReadFuture<
                 '_,
-                auction_application::WorkerRecoveryScanResponse,
+                auction_application::operations::WorkerRecoveryScanResponse,
             > {
                 Box::pin(async { Err(WorkerRemoteReadError::NotPaused) })
             }
@@ -600,15 +606,17 @@ mod tests {
             fn read_equipment(
                 &self,
                 _request: WorkerEquipmentReadRequest,
-            ) -> auction_application::WorkerRemoteReadFuture<'_, WorkerEquipmentReadResponse>
-            {
+            ) -> auction_application::operations::WorkerRemoteReadFuture<
+                '_,
+                WorkerEquipmentReadResponse,
+            > {
                 panic!("invalid recovery request must not reach the executor")
             }
 
             fn lookup_sent(
                 &self,
                 _request: WorkerSentLookupRequest,
-            ) -> auction_application::WorkerRemoteReadFuture<'_, WorkerSentLookupResponse>
+            ) -> auction_application::operations::WorkerRemoteReadFuture<'_, WorkerSentLookupResponse>
             {
                 panic!("invalid recovery request must not reach the executor")
             }

@@ -62,8 +62,8 @@ async fn run_service(
         .context("initialize Prometheus metrics")?,
     );
     let shutdown_metrics = metrics.shutdown();
-    let switches = auction_application::RuntimeSwitches::new(
-        auction_application::RuntimeSwitchRole::Admin,
+    let switches = auction_application::runtime_switches::RuntimeSwitches::new(
+        auction_application::runtime_switches::RuntimeSwitchRole::Admin,
         config.readiness.audit_failure_mode,
         config.readiness.cache_enabled,
     )

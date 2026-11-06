@@ -3,10 +3,11 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, PublicPriceHistoryCursor, PublicPriceHistoryEntry,
-    PublicPriceHistoryListRequest, PublicPriceHistoryPage,
+use auction_application::auction::{
+    PublicPriceHistoryCursor, PublicPriceHistoryEntry, PublicPriceHistoryListRequest,
+    PublicPriceHistoryPage,
 };
+use auction_application::core::ApplicationError;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::Row;

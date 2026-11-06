@@ -5,8 +5,9 @@
 
 use std::net::SocketAddr;
 
-use auction_application::{
-    ApplicationError, DeliveryAdminError, ManualSentEvidence, SentConfirmationCommand,
+use auction_application::core::ApplicationError;
+use auction_application::delivery::{
+    DeliveryAdminError, ManualSentEvidence, SentConfirmationCommand,
 };
 use auction_contracts::{
     AdminDeliverySentEvidenceRequest, AdminDeliverySentProofConfirmRequest, ApiResponse,

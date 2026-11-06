@@ -1,10 +1,10 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::DeliveryAdminListRequest;
+use auction_application::delivery::DeliveryAdminListRequest;
 use auction_contracts::{AdminDeliveryListResponse, AdminDeliveryPaginationResponse, ApiResponse};
 use axum::{
     Json,
@@ -29,13 +29,13 @@ fn delivery_filters(
         recipient: parse_optional_filter(
             query,
             "recipient",
-            auction_application::MAX_DELIVERY_ADMIN_RECIPIENT_LEN,
+            auction_application::delivery::MAX_DELIVERY_ADMIN_RECIPIENT_LEN,
         )?,
         reference: parse_optional_reference(query, "reference")?,
         template: parse_optional_filter(
             query,
             "template",
-            auction_application::MAX_DELIVERY_ADMIN_TEMPLATE_LEN,
+            auction_application::delivery::MAX_DELIVERY_ADMIN_TEMPLATE_LEN,
         )?,
         category: query.get("category").cloned().filter(|value| !value.is_empty()),
         world: query.get("world").cloned().filter(|value| !value.is_empty()),
@@ -89,7 +89,7 @@ pub(crate) async fn list(
     let page_size = match parse_positive_i64(
         query.get("page_size"),
         DEFAULT_PAGE_SIZE,
-        Some(auction_application::MAX_DELIVERY_ADMIN_PAGE_SIZE),
+        Some(auction_application::delivery::MAX_DELIVERY_ADMIN_PAGE_SIZE),
     ) {
         Ok(page_size) => page_size,
         Err(_) => {

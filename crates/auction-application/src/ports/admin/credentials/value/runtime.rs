@@ -36,7 +36,10 @@ impl AdminCredentialRuntimeRecord {
     pub fn validate(&self) -> bool {
         !self.id.is_nil()
             && self.state_version > 0
-            && crate::valid_credential_player_name(self.kind, self.player_name.as_deref())
+            && crate::ports::admin::valid_credential_player_name(
+                self.kind,
+                self.player_name.as_deref(),
+            )
             && self.scope == self.scope.trim()
             && !self.scope.is_empty()
             && self.scope.starts_with(self.kind.scope_prefix())

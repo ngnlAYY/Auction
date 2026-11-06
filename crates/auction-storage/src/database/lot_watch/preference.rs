@@ -2,8 +2,8 @@
 
 use crate::database::lot_watch::persistence::sql_error;
 use crate::database::{DatabaseStore, PostgresCompetitionTransaction};
-use auction_application::LotWatchError;
-use auction_application::{
+use auction_application::public::LotWatchError;
+use auction_application::public::{
     LotWatchFuture, LotWatchPreference, LotWatchPreferencePort, LotWatchPreferenceTransaction,
     SetLotWatchPreferenceCommand,
 };
@@ -34,7 +34,7 @@ impl LotWatchPreferencePort for DatabaseStore {
     fn set(&self, command: SetLotWatchPreferenceCommand) -> LotWatchFuture<'_, LotWatchPreference> {
         Box::pin(async move {
             let Self::Postgres(store) = self;
-            auction_application::set_lot_watch_preference(
+            auction_application::public::set_lot_watch_preference(
                 &store
                     .for_transaction(auction_observability::DatabaseTransactionOwner::PublicWatch),
                 command,

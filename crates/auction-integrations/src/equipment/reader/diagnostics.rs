@@ -1,6 +1,6 @@
 //! 装备读取的敏感证据准备与留存；不参与装备业务决定。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 

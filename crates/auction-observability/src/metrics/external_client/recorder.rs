@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use auction_application::{ExternalMetricsEvent, ExternalMetricsObserver, ReplyDelayBound};
+use auction_application::external_metrics::{
+    ExternalMetricsEvent, ExternalMetricsObserver, ReplyDelayBound,
+};
 use prometheus::{Gauge, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry};
 
 use super::super::types::MetricsError;

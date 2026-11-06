@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use auction_domain::{Auction, AuctionId};
 
-use crate::{ApplicationError, AuctionRepository, Clock};
+use crate::errors::ApplicationError;
+use crate::ports::core::{AuctionRepository, Clock};
 
 #[derive(Debug, Clone)]
 pub struct CreateAuctionCommand {

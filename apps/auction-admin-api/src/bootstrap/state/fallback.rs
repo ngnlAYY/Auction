@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use auction_application::WorkerControlPort;
+use auction_application::operations::WorkerControlPort;
 use auction_config::AppConfig;
 use auction_http::{AdminApiState, AdminHttpSecurity};
 use auction_integrations::ForumPreviewAdapter;
@@ -17,7 +17,7 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     _tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     _metrics: Arc<ProcessMetrics>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 ) -> anyhow::Result<(AdminApiState, Option<Arc<auction_observability::HeartbeatPublisher>>)> {
     let security = config::configure_security(config)?;
     let worker_control = config::configure_worker_control(config);
@@ -32,7 +32,7 @@ pub(super) fn empty_state(
     config: &AppConfig,
     security: AdminHttpSecurity,
     worker_control: Option<Arc<dyn WorkerControlPort>>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 ) -> AdminApiState {
     AdminApiState::new(
         None,

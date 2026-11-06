@@ -1,10 +1,10 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::{WorkerControlCondition, WorkerControlTrigger};
+use auction_application::operations::{WorkerControlCondition, WorkerControlTrigger};
 use auction_contracts::{AdminMailPollTriggerRequest, AdminMailPollTriggerResponse, ApiResponse};
 use axum::{
     Json,

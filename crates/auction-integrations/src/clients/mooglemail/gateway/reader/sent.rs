@@ -5,8 +5,8 @@
 
 use std::collections::HashSet;
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
-use auction_application::mail_recipient_is_list_projection;
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::mail::mail_recipient_is_list_projection;
 use chrono::{DateTime, Utc};
 
 use crate::clients::mooglemail::parser::subject_is_list_projection;

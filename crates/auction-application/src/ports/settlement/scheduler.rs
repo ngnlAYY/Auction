@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use auction_domain::{AuctionId, CommandId};
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// Worker 领取的一次持久化结算执行任务。
 /// `settlement_command_id` 按 workflow 稳定派生；Worker 重启或租约过期后必须继续使用同一个

@@ -1,6 +1,7 @@
 //! 投递处置事实的安全只读投影。
 
-use auction_application::{ApplicationError, DeliveryDispositionRecord};
+use auction_application::core::ApplicationError;
+use auction_application::delivery::DeliveryDispositionRecord;
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 

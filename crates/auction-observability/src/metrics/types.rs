@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use auction_application::diagnostics::SafeErrorKind;
+use auction_application::core::diagnostics::SafeErrorKind;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

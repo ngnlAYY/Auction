@@ -10,9 +10,11 @@
 #[allow(dead_code)]
 use crate::support;
 
-use auction_application::{
-    DeliveryClaimExclusions, DeliveryWorkStore, LotWatchPmClaimRequest, LotWatchPmWorkStore,
-    MailNotificationTemplate, OutbidNotice, lot_watch_notification, lot_watch_pm_notification,
+use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkStore};
+use auction_application::lot_watch_pm::{LotWatchPmClaimRequest, LotWatchPmWorkStore};
+use auction_application::mail::MailNotificationTemplate;
+use auction_application::public::{
+    OutbidNotice, lot_watch_notification, lot_watch_pm_notification,
 };
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
@@ -297,7 +299,7 @@ async fn seed_watch(
 
 async fn claim_mail(
     store: &auction_storage::DatabaseStore,
-) -> Vec<auction_application::DeliveryWorkClaim> {
+) -> Vec<auction_application::delivery::DeliveryWorkClaim> {
     let now = Utc::now();
     store
         .claim_due(
@@ -343,7 +345,7 @@ async fn pm_state(
 
 async fn pm_claim(
     store: &auction_storage::DatabaseStore,
-) -> Option<auction_application::LotWatchPmClaim> {
+) -> Option<auction_application::lot_watch_pm::LotWatchPmClaim> {
     store
         .claim(LotWatchPmClaimRequest {
             worker_id: WORKER.to_owned(),

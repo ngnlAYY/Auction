@@ -1,13 +1,13 @@
 //! 单个 E-Hentai Cookie、失效回写与操作会话。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::*;
-use auction_application::AdminCredentialWorld;
+use auction_application::admin::AdminCredentialWorld;
 
 /// 经过边界校验的 E-Hentai Cookie；克隆共享明文缓冲和不可逆撤销状态。
 #[derive(Clone)]

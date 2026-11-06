@@ -9,10 +9,10 @@ use uuid::Uuid;
 
 use auction_domain::{AuctionId, LotId, ProxyAuthorizationId, SettlementWorld, UserId};
 
-use super::{
-    AdminForumPreviewError, AdminForumPreviewResult, ApplicationFuture, ForumAuctionSnapshot,
-    ForumRenderedPost, ForumRenderedThread, ForumTopicScanMode,
-};
+use crate::ports::admin::{AdminForumPreviewError, AdminForumPreviewResult};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::external_metrics::ForumTopicScanMode;
+use crate::ports::forum::{ForumAuctionSnapshot, ForumRenderedPost, ForumRenderedThread};
 
 /// 论坛主题分页的帖子容量；楼层号与页号的换算只在应用层定义一次。
 pub const FORUM_POSTS_PER_PAGE: u32 = 20;
@@ -134,7 +134,7 @@ pub struct ForumReplyTopic {
     pub reply_phase: ForumReplyPhase,
     pub thread_id: String,
     pub catalog_post_id: String,
-    pub catalog_layout: super::ForumCatalogLayout,
+    pub catalog_layout: crate::ports::forum::ForumCatalogLayout,
     /// 按连续楼层排序的目录续页；发布后不得插楼或挪动已有用户回帖。
     pub catalog_continuation: Vec<ForumCatalogPage>,
     pub system_log_post_id: String,

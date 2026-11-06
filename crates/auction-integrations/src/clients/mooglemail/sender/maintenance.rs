@@ -3,7 +3,7 @@
 //! 普通列表和详情不持有 compose 排他会话；只有草稿读取与 discard 需要窄互斥。
 //! 观测本身不提升为投递成功；discard 只丢弃调用方已精确匹配到本地已知投递的草稿。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -145,7 +145,7 @@ impl MoogleMailSender {
         &self,
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
-        expected: &auction_application::MoogleMailboxComposeState,
+        expected: &auction_application::mail::MoogleMailboxComposeState,
     ) -> Result<MoogleMailDiscardOutcome, MoogleMailError> {
         let compose = self.client.compose(world)?;
         let document = self.client.get(&compose, cookie).await?;
@@ -219,20 +219,24 @@ impl MoogleMailSender {
             );
             self.observe_budget(
                 world,
-                auction_application::MailPhase::SentScan,
-                auction_application::MailBudget::Time,
+                auction_application::external_metrics::MailPhase::SentScan,
+                auction_application::external_metrics::MailBudget::Time,
             );
             proof::scan_timeout(world)
         })??;
         if let Err(error) = proof::check_deadline(deadline, world) {
-            self.observe_budget_error(world, auction_application::MailPhase::SentScan, &error);
+            self.observe_budget_error(
+                world,
+                auction_application::external_metrics::MailPhase::SentScan,
+                &error,
+            );
             return Err(error);
         }
         if !list.complete {
             self.observe_budget(
                 world,
-                auction_application::MailPhase::SentScan,
-                auction_application::MailBudget::Pages,
+                auction_application::external_metrics::MailPhase::SentScan,
+                auction_application::external_metrics::MailBudget::Pages,
             );
             return Err(self.scan_page_limit(world, "maintenance", list.summaries.len()));
         }
@@ -247,22 +251,26 @@ impl MoogleMailSender {
             })
             .collect();
         if let Err(error) = proof::check_deadline(deadline, world) {
-            self.observe_budget_error(world, auction_application::MailPhase::SentScan, &error);
+            self.observe_budget_error(
+                world,
+                auction_application::external_metrics::MailPhase::SentScan,
+                &error,
+            );
             return Err(error);
         }
         // 维护仍需要完整 Sent 才能判断候选邮件缺席；只把成功枚举登记为水位与每日校验。
         self.observe_scan(
             world,
-            auction_application::MailScanEvent::Verification {
-                stream: auction_application::MailScanStream::Sent,
-                outcome: auction_application::MailScanOutcome::Complete,
-                reason: auction_application::MailScanReason::RequestedFull,
+            auction_application::mail::MailScanEvent::Verification {
+                stream: auction_application::mail::MailScanStream::Sent,
+                outcome: auction_application::mail::MailScanOutcome::Complete,
+                reason: auction_application::mail::MailScanReason::RequestedFull,
             },
         );
         self.remember_sent_scan(
             cookie,
             world,
-            list.summaries.first().map(|summary| auction_application::MailScanWatermark {
+            list.summaries.first().map(|summary| auction_application::mail::MailScanWatermark {
                 mail_id: summary.external_mail_id.clone(),
                 observed_at: summary.sent_at,
             }),
@@ -288,24 +296,24 @@ impl MoogleMailSender {
         // 重启后的首个维护轮恢复持久检查点；作用域不匹配或损坏时回退完整校验。
         self.ensure_read_scan_checkpoint(cookie, world).await;
         let checkpoint = self.read_scan_checkpoint(cookie, world);
-        let plan = auction_application::plan_mail_scan(
+        let plan = auction_application::mail::plan_mail_scan(
             checkpoint.as_ref(),
             chrono::Utc::now(),
             self.client.mail_scan_daily_full_interval(),
         );
         self.observe_scan(
             world,
-            auction_application::MailScanEvent::Plan {
-                stream: auction_application::MailScanStream::ReadMail,
+            auction_application::mail::MailScanEvent::Plan {
+                stream: auction_application::mail::MailScanStream::ReadMail,
                 mode: plan.mode,
                 reason: plan.reason,
             },
         );
         let shadow_anchor = checkpoint.as_ref().and_then(|checkpoint| {
-            checkpoint.watermark.as_ref().map(auction_application::MailScanWatermark::anchor)
+            checkpoint.watermark.as_ref().map(auction_application::mail::MailScanWatermark::anchor)
         });
         let mut prefix = None;
-        if plan.mode == auction_application::MailScanMode::Incremental
+        if plan.mode == auction_application::mail::MailScanMode::Incremental
             && let Some(anchor) = plan.after.as_ref()
         {
             let scan = timeout_at(
@@ -334,9 +342,9 @@ impl MoogleMailSender {
             if scan.anchor_found {
                 self.observe_scan(
                     world,
-                    auction_application::MailScanEvent::Prefix {
-                        stream: auction_application::MailScanStream::ReadMail,
-                        outcome: auction_application::MailScanOutcome::Complete,
+                    auction_application::mail::MailScanEvent::Prefix {
+                        stream: auction_application::mail::MailScanStream::ReadMail,
+                        outcome: auction_application::mail::MailScanOutcome::Complete,
                         reason: None,
                     },
                 );
@@ -344,7 +352,7 @@ impl MoogleMailSender {
                 if let Err(error) = proof::check_deadline(deadline, world) {
                     self.observe_budget_error(
                         world,
-                        auction_application::MailPhase::ReadScan,
+                        auction_application::external_metrics::MailPhase::ReadScan,
                         &error,
                     );
                     return Err(error);
@@ -353,18 +361,22 @@ impl MoogleMailSender {
             }
             self.observe_scan(
                 world,
-                auction_application::MailScanEvent::Prefix {
-                    stream: auction_application::MailScanStream::ReadMail,
-                    outcome: auction_application::MailScanOutcome::Error,
+                auction_application::mail::MailScanEvent::Prefix {
+                    stream: auction_application::mail::MailScanStream::ReadMail,
+                    outcome: auction_application::mail::MailScanOutcome::Error,
                     reason: scan.issue,
                 },
             );
             if let Err(error) = proof::check_deadline(deadline, world) {
-                self.observe_budget_error(world, auction_application::MailPhase::ReadScan, &error);
+                self.observe_budget_error(
+                    world,
+                    auction_application::external_metrics::MailPhase::ReadScan,
+                    &error,
+                );
                 return Err(error);
             }
         }
-        if plan.mode == auction_application::MailScanMode::Full
+        if plan.mode == auction_application::mail::MailScanMode::Full
             && let Some(anchor) = shadow_anchor.as_ref()
         {
             // 完整校验轮同时观察前缀，供影子比较；失败只丢弃样本，不改变完整结果。
@@ -399,43 +411,47 @@ impl MoogleMailSender {
             );
             self.observe_budget(
                 world,
-                auction_application::MailPhase::ReadScan,
-                auction_application::MailBudget::Time,
+                auction_application::external_metrics::MailPhase::ReadScan,
+                auction_application::external_metrics::MailBudget::Time,
             );
             proof::scan_timeout(world)
         })??;
         if let Err(error) = proof::check_deadline(deadline, world) {
-            self.observe_budget_error(world, auction_application::MailPhase::ReadScan, &error);
+            self.observe_budget_error(
+                world,
+                auction_application::external_metrics::MailPhase::ReadScan,
+                &error,
+            );
             return Err(error);
         }
         let outcome = if list.complete {
-            auction_application::MailScanOutcome::Complete
+            auction_application::mail::MailScanOutcome::Complete
         } else {
-            auction_application::MailScanOutcome::PageLimit
+            auction_application::mail::MailScanOutcome::PageLimit
         };
         // 计划外的完整枚举（前缀回退）以 requested_full 记录，不冒充每日校验。
-        let verification_reason = if plan.mode == auction_application::MailScanMode::Full {
+        let verification_reason = if plan.mode == auction_application::mail::MailScanMode::Full {
             plan.reason
         } else {
-            auction_application::MailScanReason::RequestedFull
+            auction_application::mail::MailScanReason::RequestedFull
         };
         self.observe_scan(
             world,
-            auction_application::MailScanEvent::Verification {
-                stream: auction_application::MailScanStream::ReadMail,
+            auction_application::mail::MailScanEvent::Verification {
+                stream: auction_application::mail::MailScanStream::ReadMail,
                 outcome,
                 reason: if list.complete {
                     verification_reason
                 } else {
-                    auction_application::MailScanReason::PageLimit
+                    auction_application::mail::MailScanReason::PageLimit
                 },
             },
         );
         if !list.complete {
             self.observe_budget(
                 world,
-                auction_application::MailPhase::ReadScan,
-                auction_application::MailBudget::Pages,
+                auction_application::external_metrics::MailPhase::ReadScan,
+                auction_application::external_metrics::MailBudget::Pages,
             );
             tracing::warn!(
                 world = world.as_str(),
@@ -447,9 +463,11 @@ impl MoogleMailSender {
             self.remember_read_scan(
                 cookie,
                 world,
-                list.summaries.first().map(|summary| auction_application::MailScanWatermark {
-                    mail_id: summary.external_mail_id.clone(),
-                    observed_at: summary.received_at,
+                list.summaries.first().map(|summary| {
+                    auction_application::mail::MailScanWatermark {
+                        mail_id: summary.external_mail_id.clone(),
+                        observed_at: summary.received_at,
+                    }
                 }),
                 true,
             )
@@ -459,7 +477,7 @@ impl MoogleMailSender {
         self.remember_read_scan(
             cookie,
             world,
-            list.summaries.first().map(|summary| auction_application::MailScanWatermark {
+            list.summaries.first().map(|summary| auction_application::mail::MailScanWatermark {
                 mail_id: summary.external_mail_id.clone(),
                 observed_at: summary.received_at,
             }),
@@ -467,15 +485,15 @@ impl MoogleMailSender {
         )
         .await;
         if let Some(prefix) = prefix {
-            let anchor = shadow_anchor
-                .as_ref()
-                .and_then(|anchor| auction_application::numeric_mail_scan_id(&anchor.mail_id));
+            let anchor = shadow_anchor.as_ref().and_then(|anchor| {
+                auction_application::mail::numeric_mail_scan_id(&anchor.mail_id)
+            });
             let legacy = list
                 .summaries
                 .iter()
                 .filter(|summary| {
                     anchor.is_none_or(|anchor| {
-                        auction_application::numeric_mail_scan_id(&summary.external_mail_id)
+                        auction_application::mail::numeric_mail_scan_id(&summary.external_mail_id)
                             .is_some_and(|value| value > anchor)
                     })
                 })
@@ -486,18 +504,18 @@ impl MoogleMailSender {
                 .iter()
                 .filter(|summary| {
                     anchor.is_none_or(|anchor| {
-                        auction_application::numeric_mail_scan_id(&summary.external_mail_id)
+                        auction_application::mail::numeric_mail_scan_id(&summary.external_mail_id)
                             .is_some_and(|value| value > anchor)
                     })
                 })
                 .map(|summary| summary.external_mail_id.clone())
                 .collect();
-            let shadow = auction_application::compare_mail_scan_mids(&legacy, &candidate);
+            let shadow = auction_application::mail::compare_mail_scan_mids(&legacy, &candidate);
             self.observe_scan(
                 world,
-                auction_application::MailScanEvent::Shadow {
-                    stream: auction_application::MailScanStream::ReadMail,
-                    outcome: auction_application::MailScanOutcome::Complete,
+                auction_application::mail::MailScanEvent::Shadow {
+                    stream: auction_application::mail::MailScanStream::ReadMail,
+                    outcome: auction_application::mail::MailScanOutcome::Complete,
                     mid_sets_equal: shadow.is_match(),
                 },
             );
@@ -512,7 +530,11 @@ impl MoogleMailSender {
         }
         let summaries = list.summaries.clone();
         if let Err(error) = proof::check_deadline(deadline, world) {
-            self.observe_budget_error(world, auction_application::MailPhase::ReadScan, &error);
+            self.observe_budget_error(
+                world,
+                auction_application::external_metrics::MailPhase::ReadScan,
+                &error,
+            );
             return Err(error);
         }
         Ok(summaries)
@@ -542,8 +564,8 @@ impl MoogleMailSender {
             if !inbox.complete {
                 self.observe_budget(
                     world,
-                    auction_application::MailPhase::SharedRead,
-                    auction_application::MailBudget::Pages,
+                    auction_application::external_metrics::MailPhase::SharedRead,
+                    auction_application::external_metrics::MailBudget::Pages,
                 );
                 return Err(MoogleMailError::protocol_drift(MoogleMailOperation::Inbox, world));
             }
@@ -568,8 +590,8 @@ impl MoogleMailSender {
             if !read.complete {
                 self.observe_budget(
                     world,
-                    auction_application::MailPhase::SharedRead,
-                    auction_application::MailBudget::Pages,
+                    auction_application::external_metrics::MailPhase::SharedRead,
+                    auction_application::external_metrics::MailBudget::Pages,
                 );
                 return Err(MoogleMailError::protocol_drift(MoogleMailOperation::ReadMail, world));
             }
@@ -594,13 +616,17 @@ impl MoogleMailSender {
             );
             self.observe_budget(
                 world,
-                auction_application::MailPhase::SharedRead,
-                auction_application::MailBudget::Time,
+                auction_application::external_metrics::MailPhase::SharedRead,
+                auction_application::external_metrics::MailBudget::Time,
             );
             proof::scan_timeout(world)
         })?;
         if let Err(error) = proof::check_deadline(deadline, world) {
-            self.observe_budget_error(world, auction_application::MailPhase::SharedRead, &error);
+            self.observe_budget_error(
+                world,
+                auction_application::external_metrics::MailPhase::SharedRead,
+                &error,
+            );
             return Err(error);
         }
         result

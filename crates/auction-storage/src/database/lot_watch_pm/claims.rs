@@ -1,7 +1,8 @@
 //! 有界持久领取；过期 sending 只能转原 sender 对账，不回发送队列。
 use crate::database::DatabaseStore;
 use crate::database::lot_watch_pm::{message, sql_error};
-use auction_application::{LotWatchError, LotWatchPmClaim, LotWatchPmClaimRequest};
+use auction_application::lot_watch_pm::{LotWatchPmClaim, LotWatchPmClaimRequest};
+use auction_application::public::LotWatchError;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -112,8 +113,8 @@ pub(super) async fn claim(
     // 只观测已提交的预检退役，不改变队列结果或重试语义。
     for _ in &retired {
         store.notification_metrics().observe_stage(
-            auction_application::NotificationKind::LotWatchPm,
-            auction_application::NotificationStage::Retired,
+            auction_application::notification_metrics::NotificationKind::LotWatchPm,
+            auction_application::notification_metrics::NotificationStage::Retired,
         );
     }
     Ok(result)

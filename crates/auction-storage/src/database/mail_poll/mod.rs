@@ -2,10 +2,12 @@
 //! `poll.rs`，入站事实与命令幂等写入在 `inbound.rs`。外部 GET 不在事务内执行，Worker 拿到
 //! claim 后才调 gateway；`reads.rs` 在详情 GET 前登记恢复队列，commit 原子写入事实、cursor 并删除完成前缀。
 
-use auction_application::{
-    AdminMailPollState, ApplicationFuture, MAX_MAIL_POLL_BATCH_SIZE,
-    MAX_MAIL_POLL_FAILURE_CODE_BYTES, MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MailPollBatch,
-    MailPollClaim, MailPollCompletion, MailPollReadJournal, MailPollReadSummary, MailPollStore,
+use auction_application::admin::AdminMailPollState;
+use auction_application::auction::ApplicationFuture;
+use auction_application::mail::{
+    MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_FAILURE_CODE_BYTES, MAX_MAIL_POLL_FAILURE_DETAIL_BYTES,
+    MailPollBatch, MailPollClaim, MailPollCompletion, MailPollReadJournal, MailPollReadSummary,
+    MailPollStore,
 };
 use auction_domain::valid_text;
 use chrono::{DateTime, Utc};

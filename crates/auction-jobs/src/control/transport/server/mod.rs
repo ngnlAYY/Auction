@@ -1,7 +1,7 @@
 //! Worker control Unix socket 服务端装配；服务生命周期、peer 凭据过滤和 socket
 //! 文件安全由子模块拥有，不会启动第二个监听器。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use super::*;
 use crate::worker::diagnostics;

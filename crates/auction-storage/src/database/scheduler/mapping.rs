@@ -1,6 +1,6 @@
 //! Worker 调度共享阶段、命令、UUID、时间与错误映射。
 
-use auction_application::ScheduledRoundPhase;
+use auction_application::scheduling::ScheduledRoundPhase;
 use auction_domain::{CommandId, deterministic_uuid, legacy_natural_key_uuid};
 use chrono::NaiveDate;
 use uuid::Uuid;
@@ -54,21 +54,21 @@ pub(crate) fn phase_from_completion(
     }
 }
 
-pub(crate) fn repository_error(message: &str) -> auction_application::ApplicationError {
-    auction_application::RepositoryError::Failed(message.to_owned()).into()
+pub(crate) fn repository_error(message: &str) -> auction_application::core::ApplicationError {
+    auction_application::core::RepositoryError::Failed(message.to_owned()).into()
 }
 
-pub(crate) fn repository_error_owned(message: &str) -> auction_application::RepositoryError {
-    auction_application::RepositoryError::Failed(message.to_owned())
+pub(crate) fn repository_error_owned(message: &str) -> auction_application::core::RepositoryError {
+    auction_application::core::RepositoryError::Failed(message.to_owned())
 }
 
 #[cfg(feature = "postgres")]
-pub(crate) fn map_storage_error(error: sqlx::Error) -> auction_application::RepositoryError {
+pub(crate) fn map_storage_error(error: sqlx::Error) -> auction_application::core::RepositoryError {
     let context = match &error {
         sqlx::Error::RowNotFound => "Worker 调度记录不存在",
         _ => "Worker 调度数据库操作失败",
     };
-    auction_application::RepositoryError::Failed(crate::database::sql_error_context(
+    auction_application::core::RepositoryError::Failed(crate::database::sql_error_context(
         &error, context,
     ))
 }

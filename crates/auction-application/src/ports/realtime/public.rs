@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{Map, Value};
 use uuid::{Uuid, Variant};
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// Public 事件回放允许的最大页大小。
 pub const MAX_PUBLIC_EVENT_PAGE_SIZE: i64 = 200;

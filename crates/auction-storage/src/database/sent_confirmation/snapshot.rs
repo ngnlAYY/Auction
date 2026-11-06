@@ -2,8 +2,10 @@
 
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::sent_confirmation::Error;
-use auction_application::SentAdmissionSnapshot;
-use auction_application::{DeliverySendExpectation, ManualSentEvidence, SentConfirmationPreview};
+use auction_application::delivery::SentAdmissionSnapshot;
+use auction_application::delivery::{
+    DeliverySendExpectation, ManualSentEvidence, SentConfirmationPreview,
+};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;

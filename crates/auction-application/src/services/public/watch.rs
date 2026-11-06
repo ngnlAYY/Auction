@@ -2,10 +2,12 @@
 
 use auction_domain::LotWatchChannel;
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{
-    LotWatchError, LotWatchTransaction, RequestHash, SetLotWatchCommand, SetLotWatchResult,
-    StoredCommand, TransactionPolicy, TransactionRunner,
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::core::{RequestHash, StoredCommand, TransactionPolicy, TransactionRunner};
+use crate::ports::public::{
+    LotWatchError, LotWatchTransaction, SetLotWatchCommand, SetLotWatchResult,
 };
 
 const COMMAND_KIND: &str = "set_lot_watch";
@@ -126,10 +128,13 @@ impl OutbidNotice<'_> {
              Accepted bid: {amount} Credits\n",
             item = self.item_name,
             code = self.lot_code,
-            amount = crate::format_credits(amount),
+            amount = crate::services::public::format_credits(amount),
         );
         if let Some(deadline) = self.deadline {
-            body.push_str(&format!("Bidding closes: {}\n", crate::format_deadline(deadline)));
+            body.push_str(&format!(
+                "Bidding closes: {}\n",
+                crate::services::public::format_deadline(deadline)
+            ));
         }
         if let Some(url) = self.lot_url() {
             body.push_str(&format!("View the lot: {url}\n"));
@@ -151,8 +156,8 @@ pub fn lot_watch_notification(
     notice: OutbidNotice<'_>,
     world_id: String,
     recipient: String,
-) -> Result<crate::MailDeliveryCommand, LotWatchError> {
-    use crate::{
+) -> Result<crate::ports::mail::MailDeliveryCommand, LotWatchError> {
+    use crate::ports::mail::{
         MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
     };
     if notice.lot_code.is_empty() || notice.item_name.is_empty() {

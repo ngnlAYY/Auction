@@ -10,11 +10,13 @@ use chrono::{DateTime, Utc};
 #[cfg(feature = "postgres")]
 use sqlx::Row;
 
-use auction_application::{
-    AdminPendingCounts, ApplicationError, ApplicationFuture, OperationsAlertAcknowledgeCommand,
-    OperationsAlertCommandResult, OperationsAlertConsole, OperationsAlertConsoleEntry,
-    OperationsAlertConsolePage, OperationsAlertConsoleQuery, OperationsAlertError,
-    OperationsAlertSilenceCommand, OperationsAlertSource,
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::operations::{
+    AdminPendingCounts, OperationsAlertAcknowledgeCommand, OperationsAlertCommandResult,
+    OperationsAlertConsole, OperationsAlertConsoleEntry, OperationsAlertConsolePage,
+    OperationsAlertConsoleQuery, OperationsAlertError, OperationsAlertSilenceCommand,
+    OperationsAlertSource,
 };
 
 use super::DatabaseStore;
@@ -160,7 +162,7 @@ fn entry_from_row(
     })?;
     let kind: String =
         row.try_get("kind").map_err(|error| storage_error_from(error, "读取告警种类失败"))?;
-    let kind = auction_application::OperationsAlertKind::parse(&kind)
+    let kind = auction_application::operations::OperationsAlertKind::parse(&kind)
         .ok_or(ApplicationError::OperationsAlert(OperationsAlertError::StoredResultCorrupt))?;
     let scope: String =
         row.try_get("scope").map_err(|error| storage_error_from(error, "读取告警范围失败"))?;

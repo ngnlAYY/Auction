@@ -1,6 +1,6 @@
 //! Public/Admin 会话限流、来源检查和身份认证守卫。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
@@ -15,7 +15,7 @@ use super::{
 use crate::http::routes::session::valid_admin_csrf_header;
 use crate::http::routes::state::{AdminApiState, PublicApiState};
 use crate::http::routes::{ADMIN_CSRF_COOKIE, ADMIN_SESSION_COOKIE, api_error, parse_public_uuid};
-use auction_application::{AdminSessionIdentity, PublicSessionIdentity};
+use auction_application::public::{AdminSessionIdentity, PublicSessionIdentity};
 use auction_contracts::ApiErrorResponse;
 use axum::Json;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};

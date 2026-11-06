@@ -3,7 +3,8 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{ApplicationError, ForumSyncClaim};
+use auction_application::core::ApplicationError;
+use auction_application::forum::ForumSyncClaim;
 use auction_domain::AuctionId;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;

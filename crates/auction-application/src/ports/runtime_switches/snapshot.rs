@@ -1,12 +1,14 @@
 //! 同源只读快照、TOML 基线与期限解析；缓存仅选择都正确的运行路径。
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
 
-use super::{
+use crate::ports::operations::AuditFailureMode;
+use crate::ports::runtime_switches::{
     RuntimeSwitchError, RuntimeSwitchEvent, RuntimeSwitchName, RuntimeSwitchOperation,
     RuntimeSwitchRead, RuntimeSwitchRole,
 };
-use crate::AuditFailureMode;
 use chrono::Utc;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -349,7 +351,7 @@ pub const fn audit_label(mode: AuditFailureMode) -> &'static str {
 mod tests {
     use self::parent::*;
     use super as parent;
-    use crate::{RuntimeSwitchOperation, RuntimeSwitchRead};
+    use crate::ports::runtime_switches::{RuntimeSwitchOperation, RuntimeSwitchRead};
     use chrono::TimeDelta;
     use serde_json::json;
     use std::time::Duration;

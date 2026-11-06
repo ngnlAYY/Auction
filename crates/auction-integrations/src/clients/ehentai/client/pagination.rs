@@ -1,11 +1,11 @@
 //! E-Hentai 论坛主题分页发现与受限目标构造。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::clients::metrics::topic_scan_discovered;
 use crate::diagnostics as safe_diagnostics;
 
-use auction_application::{ForumTopicScanOutcome, ForumWorld};
+use auction_application::external_metrics::{ForumTopicScanOutcome, ForumWorld};
 
 use std::collections::BTreeSet;
 
@@ -63,8 +63,8 @@ impl EhentaiClient {
             return Ok((all_pages, None));
         };
         let fixed_page_count =
-            auction_application::forum_topic_fixed_page_count(fixed_through_post_number);
-        let selected_pages = auction_application::forum_topic_scan_pages(
+            auction_application::forum::forum_topic_fixed_page_count(fixed_through_post_number);
+        let selected_pages = auction_application::forum::forum_topic_scan_pages(
             Some(cursor.page()),
             fixed_page_count,
             page_count,

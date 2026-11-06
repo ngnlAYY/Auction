@@ -222,15 +222,17 @@ impl AppSecrets {
         }
         // 与正式会话共用校验，拒绝启动前无法表达或含控制字符的凭据；不回显原值。
         if let Some(actor) = &secret.admin_actor {
-            auction_application::validate_admin_actor(actor)
+            auction_application::sessions::validate_admin_actor(actor)
                 .map_err(|_| ConfigError::InvalidAdminActor)?;
         }
         if let Some(password) = &secret.admin_secret {
-            auction_application::validate_admin_secret(password.as_bytes()).map_err(|_| {
-                ConfigError::InvalidSessionConfig(
-                    "admin_secret 必须为 16 至 4096 字节且不含 ASCII 控制字符",
-                )
-            })?;
+            auction_application::sessions::validate_admin_secret(password.as_bytes()).map_err(
+                |_| {
+                    ConfigError::InvalidSessionConfig(
+                        "admin_secret 必须为 16 至 4096 字节且不含 ASCII 控制字符",
+                    )
+                },
+            )?;
         }
         // 旧密钥校验需要当前密钥标识；在字段被移入 `AppSecrets` 前先完成转换。
         let equipment_previous_data_keys = retired_keys(

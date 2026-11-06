@@ -1,4 +1,4 @@
-use auction_application::EquipmentColorRule;
+use auction_application::forum::EquipmentColorRule;
 use serde::Deserialize;
 
 /// Worker 使用的 E-Hentai 论坛主题同步策略。

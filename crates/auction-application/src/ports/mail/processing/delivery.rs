@@ -3,7 +3,8 @@ use uuid::Uuid;
 
 use auction_domain::CommandId;
 
-use super::super::{ApplicationFuture, RequestHash};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
 
 /// Delivery 操作闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,7 +242,9 @@ pub trait MailDeliveryEnqueuer: Send + Sync {
         _command: MailDeliveryCommand,
     ) -> ApplicationFuture<'_, Option<MailDeliveryResult>> {
         Box::pin(async {
-            Err(crate::ApplicationError::CapabilityUnavailable("recovery preparation lookup"))
+            Err(crate::errors::ApplicationError::CapabilityUnavailable(
+                "recovery preparation lookup",
+            ))
         })
     }
 

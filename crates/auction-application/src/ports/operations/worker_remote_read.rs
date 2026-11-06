@@ -3,7 +3,7 @@
 // 都由 Worker 进程统一执行，Admin/CLI 不再持有第二个限速器。Worker 不可用时调用方得到明确的
 // 能力不可用结果，而不是回退到本地直连。
 
-use crate::{AdminIntakeError, AdminIntakeSourceSnapshot};
+use crate::ports::admin::{AdminIntakeError, AdminIntakeSourceSnapshot};
 use auction_domain::EquipmentKey;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -112,7 +112,10 @@ impl WorkerEquipmentReadResponse {
         let key = snapshot
             .key
             .with_bytes(|bytes| String::from_utf8_lossy(bytes).into_owned())
-            .map_err(|error| { let _ = error; WorkerRemoteReadError::Invalid })?;
+            .map_err(|error| {
+                let _ = error;
+                WorkerRemoteReadError::Invalid
+            })?;
         Ok(Self {
             adapter: snapshot.adapter,
             source_fingerprint: snapshot.source_fingerprint.to_vec(),
@@ -129,12 +132,15 @@ impl WorkerEquipmentReadResponse {
 
     /// 还原为 Admin 录入用例所需的来源快照；所有字段再次校验。
     pub fn into_snapshot(self) -> Result<AdminIntakeSourceSnapshot, WorkerRemoteReadError> {
-        let source_fingerprint: [u8; 32] = self
-            .source_fingerprint
-            .as_slice()
-            .try_into()
-            .map_err(|error| { let _ = error; WorkerRemoteReadError::Incompatible })?;
-        let key = EquipmentKey::new(&self.key).map_err(|error| { let _ = error; WorkerRemoteReadError::Incompatible })?;
+        let source_fingerprint: [u8; 32] =
+            self.source_fingerprint.as_slice().try_into().map_err(|error| {
+                let _ = error;
+                WorkerRemoteReadError::Incompatible
+            })?;
+        let key = EquipmentKey::new(&self.key).map_err(|error| {
+            let _ = error;
+            WorkerRemoteReadError::Incompatible
+        })?;
         Ok(AdminIntakeSourceSnapshot {
             adapter: self.adapter,
             source_fingerprint,
@@ -279,15 +285,18 @@ impl WorkerRecoveryScanRequest {
         let valid_worlds = |worlds: &[String]| {
             worlds.len() <= 2
                 && worlds.iter().all(|world| matches!(world.as_str(), "main" | "isekai"))
-                && worlds.iter().enumerate().all(|(index, world)| {
-                    worlds[..index].iter().all(|previous| previous != world)
-                })
+                && worlds
+                    .iter()
+                    .enumerate()
+                    .all(|(index, world)| worlds[..index].iter().all(|previous| previous != world))
         };
         self.cutoff_at.timestamp_nanos_opt().is_some()
             && (1..=MAX_RECOVERY_SCAN_PAGES).contains(&self.maximum_pages)
             && valid_worlds(&self.sent_worlds)
             && valid_worlds(&self.read_mail_worlds)
-            && (self.include_sent || self.include_read_mail || self.include_forum
+            && (self.include_sent
+                || self.include_read_mail
+                || self.include_forum
                 || !self.sent_details.is_empty())
             && self.sent_details.len() <= MAX_RECOVERY_SENT_DETAILS
             && self.sent_details.iter().all(WorkerRecoveryMailRef::validate)
@@ -456,8 +465,8 @@ impl WorkerRemoteReadPort for UnavailableWorkerRemoteRead {
 
 #[cfg(test)]
 mod tests {
-    use super as parent;
     use self::parent::*;
+    use super as parent;
     use chrono::TimeDelta;
     use serde_json::json;
 

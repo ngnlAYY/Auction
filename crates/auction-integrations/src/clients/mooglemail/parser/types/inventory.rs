@@ -26,7 +26,7 @@ impl MoogleMailInventorySnapshot {
             && self
                 .equipment_ids
                 .iter()
-                .all(|id| auction_application::valid_external_positive_id(id))
+                .all(|id| auction_application::settlement::valid_external_positive_id(id))
             && self.equipment_ids.windows(2).all(|ids| ids[0] < ids[1])
     }
 }

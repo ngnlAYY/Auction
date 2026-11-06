@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{AdminRuntimeConfigError, require};
+use super::require;
+use crate::ports::admin::AdminRuntimeConfigError;
 
 /// Worker 主循环及三个独立任务循环的启动参数。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

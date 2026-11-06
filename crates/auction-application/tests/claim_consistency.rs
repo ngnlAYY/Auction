@@ -1,6 +1,6 @@
 //! 结算履约 claim 一致性的正反例；只覆盖纯判定，不连接数据库。
 
-use auction_application::{
+use auction_application::settlement::{
     SettlementClaimContextBlocker, SettlementClaimContextSnapshot, SettlementClaimExecutionBlocker,
     SettlementClaimExecutionSnapshot,
 };

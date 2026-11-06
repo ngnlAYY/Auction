@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::worker::diagnostics;
 
@@ -22,11 +22,12 @@ use std::{
 };
 
 use super::MailPollProgressTracker;
-use auction_application::{
-    ApplicationFuture, MailPollProgressSnapshot, WorkerControlCondition, WorkerControlMailProgress,
-    WorkerControlPort, WorkerControlStatus, WorkerControlTrigger, WorkerEquipmentReadRequest,
-    WorkerEquipmentReadResponse, WorkerRemoteReadError, WorkerRemoteReadPort,
-    WorkerSentLookupRequest, WorkerSentLookupResponse,
+use auction_application::auction::ApplicationFuture;
+use auction_application::mail::MailPollProgressSnapshot;
+use auction_application::operations::{
+    WorkerControlCondition, WorkerControlMailProgress, WorkerControlPort, WorkerControlStatus,
+    WorkerControlTrigger, WorkerEquipmentReadRequest, WorkerEquipmentReadResponse,
+    WorkerRemoteReadError, WorkerRemoteReadPort, WorkerSentLookupRequest, WorkerSentLookupResponse,
 };
 use auction_observability::{METRICS_ROUTE, MetricsError, ProcessMetrics};
 use axum::{
@@ -78,10 +79,10 @@ const HEADER_REQUEST_ID: &str = "x-request-id";
 const DEFAULT_BODY_LIMIT: usize = 1024;
 /// 远端读取路由使用更长的请求超时；单次读取仍由 Worker 自己的 fetch 预算终止。
 const REMOTE_READ_REQUEST_TIMEOUT: Duration =
-    Duration::from_secs(auction_application::WORKER_REMOTE_READ_TIMEOUT_SECONDS);
+    Duration::from_secs(auction_application::operations::WORKER_REMOTE_READ_TIMEOUT_SECONDS);
 /// 恢复核对会跨多个列表页与论坛主题；使用独立的更长上界，单页仍受 fetch 预算约束。
 const RECOVERY_SCAN_REQUEST_TIMEOUT: Duration =
-    Duration::from_secs(auction_application::WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS);
+    Duration::from_secs(auction_application::operations::WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS);
 const MAX_RESPONSE_BYTES: usize = 64 << 10;
 const MAX_REMEMBERED_TRIGGER_COMMANDS: usize = 256;
 

@@ -3,7 +3,7 @@
 mod transaction;
 
 use crate::database::settlement_funding::storage;
-use auction_application::{
+use auction_application::settlement::{
     FundingCommitOutcome, FundingFuture, FundingReconciliationResult, FundingRecordOnlyCommand,
     FundingRecordOnlyStore, SettlementInternalEvidenceSnapshot,
 };

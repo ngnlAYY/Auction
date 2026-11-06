@@ -11,10 +11,11 @@ use std::{
     time::Instant,
 };
 
-use auction_application::{
-    ExternalMetricsEvent, ExternalMetricsObserver, ForumReplyPhase, ForumWorld, ReplyDelayMethod,
-    ReplyDelayPhase, ReplyDelaySampleOutcome,
+use auction_application::external_metrics::{
+    ExternalMetricsEvent, ExternalMetricsObserver, ForumWorld, ReplyDelayMethod, ReplyDelayPhase,
+    ReplyDelaySampleOutcome,
 };
+use auction_application::forum::ForumReplyPhase;
 use auction_domain::{AuctionId, SettlementWorld};
 
 const MAX_TOPICS: usize = 512;

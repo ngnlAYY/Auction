@@ -2,7 +2,7 @@
 
 use super::*;
 
-use auction_application::{DeliverySendCredentialBinding, DeliverySendExpectation};
+use auction_application::delivery::{DeliverySendCredentialBinding, DeliverySendExpectation};
 
 use crate::clients::mooglemail::{MoogleMailInventoryCategory, parser::canonical_mail_body_digest};
 
@@ -129,19 +129,19 @@ impl MoogleMailDeliveryTransport {
         } else if template == "auction_submission_receipt" && result_code == "accepted" {
             // W14.3：回执正文在录入事实确定后冻结，发送前不重新查询 lot 或价格。
             (
-                auction_application::SUBMISSION_RECEIPT_SUBJECT.to_owned(),
+                auction_application::mail::SUBMISSION_RECEIPT_SUBJECT.to_owned(),
                 payload.body.take().ok_or_else(invalid_payload)?,
             )
         } else if template == "auction_seller_summary" && result_code == "summary" {
             // W14.3：卖方汇总正文在结算事实确定后冻结，发送前不重新聚合 lot 或金额。
             (
-                auction_application::SELLER_SUMMARY_SUBJECT.to_owned(),
+                auction_application::player_notifications::SELLER_SUMMARY_SUBJECT.to_owned(),
                 payload.body.take().ok_or_else(invalid_payload)?,
             )
         } else if template == "isekai_season_reminder" && result_code == "season_end" {
             // W14.3：换季提醒正文绑定已冻结的赛季边界，发送前不重算边界或义务集合。
             (
-                auction_application::SEASON_REMINDER_SUBJECT.to_owned(),
+                auction_application::player_notifications::SEASON_REMINDER_SUBJECT.to_owned(),
                 payload.body.take().ok_or_else(invalid_payload)?,
             )
         } else {

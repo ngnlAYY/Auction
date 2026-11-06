@@ -8,7 +8,7 @@
 use crate::database::TrackedTransaction as Transaction;
 use std::sync::LazyLock;
 
-use auction_application::FundingError;
+use auction_application::settlement::FundingError;
 use sqlx::Postgres;
 use uuid::Uuid;
 

@@ -1,6 +1,6 @@
 //! 装备来源 HTTP 读取的有界结果和敏感缓冲生命周期。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 

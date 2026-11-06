@@ -1,6 +1,6 @@
 //! 结算 delivery 的装备 owner 引用解析。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 

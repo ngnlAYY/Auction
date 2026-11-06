@@ -4,7 +4,7 @@
 //! 避免 Worker 推进状态时把不同时刻的证据拼成一条详情。所有字段都是安全投影：
 //! 不返回 payload、request digest、lease token、Cookie 或登录 key 正文。
 
-use auction_application::{
+use auction_application::delivery::{
     DeliveryAdminAttempt, DeliveryAdminCustody, DeliveryAdminDetail, DeliveryAdminDisposition,
     DeliveryAdminError, DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,
     DeliverySendExpectation, DeliveryTakeExpectation,

@@ -1,10 +1,10 @@
 //! 同轮次 MID 与列表候选集合影子比较；不执行 POST，也不改写旧证明裁决。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
-use auction_application::{SentBaselineEvent, SentBaselineReason};
+use auction_application::sent_baseline::{SentBaselineEvent, SentBaselineReason};
 use tokio::time::Instant;
 
 use super::{MoogleMailSentBaseline, SentBaselineKind, after::SentCandidates, unavailable};

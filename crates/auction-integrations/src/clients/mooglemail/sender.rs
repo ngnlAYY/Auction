@@ -1,10 +1,10 @@
 //! MoogleMail 分步写入与发送后 Sent 完成证明。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
-use auction_application::{
+use auction_application::mail::{
     MailScanCheckpoint, MailScanCheckpointKey, MailScanCheckpointStore, MailScanEvent,
     MailScanObserver, MailScanStream, MailScanWatermark, advance_mail_scan_watermark,
 };
@@ -110,8 +110,8 @@ pub struct MoogleMailSender {
     parser: MoogleMailParser,
     verification_pages: usize,
     verification_budget: Duration,
-    sent_baseline_mode: auction_application::SentBaselineMode,
-    sent_baseline_observer: Arc<dyn auction_application::SentBaselineObserver>,
+    sent_baseline_mode: auction_application::sent_baseline::SentBaselineMode,
+    sent_baseline_observer: Arc<dyn auction_application::sent_baseline::SentBaselineObserver>,
     /// 最近一次已完整证明的 Sent 摘要；只作排除集，缺失条目最多增加候选详情读取。
     sent_baselines: Arc<Mutex<HashMap<MoogleMailWorld, CachedSentBaseline>>>,
     /// Sent 扫描水位；只缩短下一轮前缀，重启即回退完整扫描。
@@ -146,11 +146,11 @@ impl MoogleMailSender {
     pub(super) fn observe_budget(
         &self,
         world: MoogleMailWorld,
-        phase: auction_application::MailPhase,
-        budget: auction_application::MailBudget,
+        phase: auction_application::external_metrics::MailPhase,
+        budget: auction_application::external_metrics::MailBudget,
     ) {
         self.client.external_metrics().observe(
-            auction_application::ExternalMetricsEvent::MailBudgetExhausted {
+            auction_application::external_metrics::ExternalMetricsEvent::MailBudgetExhausted {
                 world: crate::clients::metrics::mail_world(world),
                 phase,
                 budget,
@@ -162,15 +162,23 @@ impl MoogleMailSender {
     pub(super) fn observe_budget_error(
         &self,
         world: MoogleMailWorld,
-        phase: auction_application::MailPhase,
+        phase: auction_application::external_metrics::MailPhase,
         error: &MoogleMailError,
     ) {
         match error.category {
             MoogleMailErrorCategory::SentScanTimeout => {
-                self.observe_budget(world, phase, auction_application::MailBudget::Time);
+                self.observe_budget(
+                    world,
+                    phase,
+                    auction_application::external_metrics::MailBudget::Time,
+                );
             }
             MoogleMailErrorCategory::SentScanPageLimit => {
-                self.observe_budget(world, phase, auction_application::MailBudget::Pages);
+                self.observe_budget(
+                    world,
+                    phase,
+                    auction_application::external_metrics::MailBudget::Pages,
+                );
             }
             _ => {}
         }
@@ -183,13 +191,14 @@ impl MoogleMailSender {
             parser: MoogleMailParser,
             verification_pages: 100,
             verification_budget: Duration::from_secs(30),
-            sent_baseline_mode: auction_application::SentBaselineMode::Shadow,
-            sent_baseline_observer: auction_application::noop_sent_baseline_observer(),
+            sent_baseline_mode: auction_application::sent_baseline::SentBaselineMode::Shadow,
+            sent_baseline_observer: auction_application::sent_baseline::noop_sent_baseline_observer(
+            ),
             sent_baselines: Arc::new(Mutex::new(HashMap::new())),
             sent_scans: Arc::new(Mutex::new(HashMap::new())),
             read_scans: Arc::new(Mutex::new(HashMap::new())),
             scan_checkpoints: None,
-            scan_observer: auction_application::noop_mail_scan_observer(),
+            scan_observer: auction_application::mail::noop_mail_scan_observer(),
         }
     }
 

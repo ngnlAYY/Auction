@@ -1,6 +1,6 @@
 //! 装备来源 URL、主机和路径约束。
 
-use auction_application::AdminIntakeError;
+use auction_application::admin::AdminIntakeError;
 use auction_domain::EquipmentKey;
 use url::Url;
 

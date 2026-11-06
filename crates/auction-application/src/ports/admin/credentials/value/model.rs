@@ -135,7 +135,10 @@ impl AdminCredential {
     pub fn validate(&self) -> bool {
         !self.id.is_nil()
             && valid_text(&self.label, 256)
-            && crate::valid_credential_player_name(self.kind, self.player_name.as_deref())
+            && crate::ports::admin::valid_credential_player_name(
+                self.kind,
+                self.player_name.as_deref(),
+            )
             && self.state_version > 0
             && valid_time(self.created_at)
             && self.rotated_at.is_none_or(valid_time)

@@ -4,9 +4,10 @@ use super::super::mapping::*;
 use super::super::reads::{load_command_postgres_tx, load_user_postgres_tx};
 use crate::database::users::admin::validate_create_write;
 use crate::database::users::envelope::upsert_login_key_envelope;
-use auction_application::{
-    AdminUserCommandKind, AdminUserCommandResult, AdminUserCreateWrite, ApplicationError,
+use auction_application::admin::{
+    AdminUserCommandKind, AdminUserCommandResult, AdminUserCreateWrite,
 };
+use auction_application::core::ApplicationError;
 
 pub(crate) async fn create_postgres(
     store: &super::super::super::super::super::PostgresStore,

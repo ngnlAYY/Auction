@@ -2,8 +2,8 @@
 
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::settlement_funding::{invalid, storage};
-use auction_application::FundingError;
-use auction_application::{
+use auction_application::settlement::FundingError;
+use auction_application::settlement::{
     FundingFuture, FundingPreview, FundingReconciliationCommand, FundingReconciliationReader,
     FundingReconciliationResult,
 };

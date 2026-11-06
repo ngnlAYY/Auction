@@ -103,7 +103,7 @@ pub(crate) fn write<W: Write>(inner: W, artifacts: &[Artifact]) -> anyhow::Resul
         if file.read(&mut buffer[..1]).context("读取范围文件失败")? != 0 {
             anyhow::bail!("备份范围文件在读取期间增长：{}", artifact.path);
         }
-        let sha256 = auction_application::lower_hex(&hasher.finalize());
+        let sha256 = auction_application::core::lower_hex(&hasher.finalize());
         write_line(&mut out, &RecordTrailer { sha256: sha256.clone() })?;
         entries.push(EntryDigest {
             kind: artifact.kind,
@@ -156,7 +156,7 @@ where
             remaining -= want as u64;
         }
         let trailer: RecordTrailer = parse_line(&mut reader, "备份范围记录缺少摘要")?;
-        let sha256 = auction_application::lower_hex(&hasher.finalize());
+        let sha256 = auction_application::core::lower_hex(&hasher.finalize());
         if trailer.sha256 != sha256 {
             anyhow::bail!("备份范围记录摘要不一致：{}", header.path);
         }
@@ -174,7 +174,7 @@ where
     let hashing = reader.into_inner();
     let bytes = hashing.bytes;
     Ok(ReadDigest {
-        sha256: auction_application::lower_hex(&hashing.hasher.finalize()),
+        sha256: auction_application::core::lower_hex(&hashing.hasher.finalize()),
         bytes,
         entries,
     })
@@ -253,7 +253,7 @@ impl<W> HashingWriter<W> {
         W: Write,
     {
         self.inner.flush().context("同步范围打包文件失败")?;
-        Ok((auction_application::lower_hex(&self.hasher.finalize()), self.bytes))
+        Ok((auction_application::core::lower_hex(&self.hasher.finalize()), self.bytes))
     }
 }
 
@@ -377,7 +377,10 @@ mod tests {
         let rebuilt: Vec<u8> =
             extracted.iter().flat_map(|(_, bytes)| bytes.iter().copied()).collect();
         assert_eq!(rebuilt, b"{\"second\":true}{\"first\":true}");
-        assert_eq!(auction_application::lower_hex(&sha2::Sha256::digest(&bytes)), digest.sha256);
+        assert_eq!(
+            auction_application::core::lower_hex(&sha2::Sha256::digest(&bytes)),
+            digest.sha256
+        );
     }
 
     #[test]

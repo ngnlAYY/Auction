@@ -1,9 +1,11 @@
 use std::net::SocketAddr;
 
-use auction_application::{
+use auction_application::admin::{
     AdminMailIntakeDelivery, AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakeMetadata,
-    AdminMailIntakeSummary, ApplicationError, MailDisplaySnapshot, MailEquipmentDiagnosticSnapshot,
+    AdminMailIntakeSummary,
 };
+use auction_application::core::ApplicationError;
+use auction_application::mail::{MailDisplaySnapshot, MailEquipmentDiagnosticSnapshot};
 use auction_contracts::{
     AdminMailDisplayResponse, AdminMailEquipmentDiagnosticResponse,
     AdminMailIntakeDeliveryResponse, AdminMailIntakeDetailResponse, AdminMailIntakeListResponse,
@@ -68,7 +70,7 @@ pub(crate) async fn list_intakes(
     let page_size = match parse_positive_i64(
         query.get("page_size"),
         20,
-        Some(auction_application::MAX_ADMIN_MAIL_PAGE_SIZE),
+        Some(auction_application::admin::MAX_ADMIN_MAIL_PAGE_SIZE),
     ) {
         Ok(page_size) => page_size,
         Err(_) => {

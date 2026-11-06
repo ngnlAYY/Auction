@@ -8,9 +8,12 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::{ApplicationFuture, CompetitionTransactionError, RequestHash};
-use crate::ApplicationError;
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
 /// 旧版命令账本用于慢速代理执行结果的稳定命令种类。
 pub const SLOW_PROXY_COMMAND_KIND: &str = "execute_slow_response";

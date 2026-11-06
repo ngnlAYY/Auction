@@ -202,7 +202,7 @@ fn load_common_file(path: &Path) -> Result<CommonFileConfig, ConfigError> {
 fn load_runtime_worker_budget(
     path: &Path,
     runtime_path: Option<&Path>,
-) -> Result<auction_application::AdminRuntimeMailDeliveryBudget, ConfigError> {
+) -> Result<auction_application::admin::AdminRuntimeMailDeliveryBudget, ConfigError> {
     let runtime_path = runtime_path.ok_or(ConfigError::InvalidRuntimeWorkerConfig(
         "worker_config_file 要求 Admin 同时配置 runtime_config_file",
     ))?;

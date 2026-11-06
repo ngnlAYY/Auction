@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use auction_application::{AdminUserListRequest, AdminUserStatus};
+use auction_application::admin::{AdminUserListRequest, AdminUserStatus};
 use auction_contracts::{AdminUserListResponse, AdminUserPaginationResponse, ApiResponse};
 use axum::{
     Json,
@@ -42,7 +42,7 @@ pub(crate) async fn list(
         Err(_) => return common::invalid_query(),
     };
     let offset = match page.checked_sub(1).and_then(|value| value.checked_mul(page_size)) {
-        Some(value) if value <= auction_application::MAX_ADMIN_USER_OFFSET => value,
+        Some(value) if value <= auction_application::admin::MAX_ADMIN_USER_OFFSET => value,
         _ => return common::invalid_query(),
     };
     let status = match query.get("status").map(String::as_str) {

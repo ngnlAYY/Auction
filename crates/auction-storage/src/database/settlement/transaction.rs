@@ -10,9 +10,10 @@ use crate::database::settlement::{
     parse_obligation_kind, parse_settlement_mode, parse_settlement_policy, positive_u64,
     settlement_amount, settlement_world,
 };
-use auction_application::{
-    CommandLedgerError, PersistedSettlement, PersistedSettlementObligationCount,
-    SettlementSnapshot, SettlementTransactionError, StoredCommand,
+use auction_application::core::{CommandLedgerError, StoredCommand};
+use auction_application::settlement::{
+    PersistedSettlement, PersistedSettlementObligationCount, SettlementSnapshot,
+    SettlementTransactionError,
 };
 use auction_domain::{
     AuctionId, CommandId, CompetitionPlan, ProxyStatus, RecoveryPolicy, SettlementAmount,

@@ -1,7 +1,7 @@
 //! 冻结 Send 身份及跨正常收口/维护恢复共享的唯一 Sent MID 绑定。
 
 use crate::database::TrackedTransaction as Transaction;
-use auction_application::{
+use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryWorkClaim,
 };
 use chrono::{DateTime, Utc};
@@ -56,16 +56,17 @@ pub(in crate::database) async fn lock_credential_binding(
         return Ok(false);
     };
     let world = match world_id {
-        "main" => auction_application::AdminCredentialWorld::Main,
-        "isekai" => auction_application::AdminCredentialWorld::Isekai,
+        "main" => auction_application::admin::AdminCredentialWorld::Main,
+        "isekai" => auction_application::admin::AdminCredentialWorld::Isekai,
         _ => return Ok(false),
     };
-    let credential_kind = auction_application::AdminCredentialKind::MailCookie;
+    let credential_kind = auction_application::admin::AdminCredentialKind::MailCookie;
     Ok(kind == "mail_cookie"
         && status == "active"
         && version == binding.credential_version
         && (scope == world.scope(credential_kind)
-            || scope == auction_application::AdminCredentialWorld::Shared.scope(credential_kind)))
+            || scope
+                == auction_application::admin::AdminCredentialWorld::Shared.scope(credential_kind)))
 }
 
 /// 在 sending/cadence/audit 的同一事务追加；冲突不能改写旧尝试。

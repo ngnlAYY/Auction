@@ -2,7 +2,8 @@
 use crate::database::storage_error_from;
 
 pub(in crate::database::account) use crate::database::storage_error;
-use auction_application::{ApplicationError, PublicMyBidsPage, PublicMyBidsRequest};
+use auction_application::auction::{PublicMyBidsPage, PublicMyBidsRequest};
+use auction_application::core::ApplicationError;
 use sqlx::Row;
 use uuid::Uuid;
 

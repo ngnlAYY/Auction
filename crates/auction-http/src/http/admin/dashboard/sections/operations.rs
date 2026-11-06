@@ -1,6 +1,6 @@
 //! Admin dashboard 履约、投递和 recovery 水位 section。
 
-use auction_application::{
+use auction_application::operations::{
     OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot,
     OperationsAlertReconciliationSnapshot, OperationsAlertRecoverySnapshot,
 };

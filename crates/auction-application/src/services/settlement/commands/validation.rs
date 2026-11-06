@@ -6,10 +6,12 @@ use auction_domain::{
     CommandId, CompetitionPlan, CompetitionTrigger, SettlementAmount, SettlementPlan,
 };
 
-use crate::{ApplicationError, CommandLedgerError, SettlementSnapshot, SettlementTransactionError};
+use crate::errors::ApplicationError;
+use crate::ports::core::CommandLedgerError;
+use crate::ports::settlement::{SettlementSnapshot, SettlementTransactionError};
 
 use super::obligations::{build_obligations, validate_obligations};
-use super::{
+use crate::services::settlement::{
     SettleAuctionCommand, settlement_claim_command_id, settlement_complete_command_id,
     settlement_complete_request_hash, settlement_workflow_id,
 };

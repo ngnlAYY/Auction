@@ -3,8 +3,8 @@
 //! Admin dashboard 直接依赖 Worker 的网络实现。手动轮询是唤醒提示，不替代邮件命令账本、
 //! 游标或入站事务。
 
-use super::ApplicationFuture;
-use crate::{MAX_MAIL_PROGRESS_POLLERS, MailPollProgressSnapshot};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::mail::{MAX_MAIL_PROGRESS_POLLERS, MailPollProgressSnapshot};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 

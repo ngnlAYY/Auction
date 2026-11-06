@@ -1,8 +1,9 @@
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
-use auction_application::{ApplicationError, DeliveryAdminError};
+use auction_application::core::ApplicationError;
+use auction_application::delivery::DeliveryAdminError;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},

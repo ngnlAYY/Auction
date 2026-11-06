@@ -1,9 +1,10 @@
 //! 履约调度的权威依赖读取；依赖不可用或不匹配时失败关闭。
 
-use auction_application::{
-    ApplicationError, ApplicationFuture, SettlementFulfillmentEquipmentSecret,
-    SettlementFulfillmentEquipmentSecretReader, SettlementFulfillmentRecipientReader,
-    SettlementFulfillmentRecipientSnapshot,
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::settlement::{
+    SettlementFulfillmentEquipmentSecret, SettlementFulfillmentEquipmentSecretReader,
+    SettlementFulfillmentRecipientReader, SettlementFulfillmentRecipientSnapshot,
 };
 use auction_domain::EquipmentId;
 use uuid::Uuid;

@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
-use auction_application::{
+use auction_application::mail::{
     MailDiagnosticContext, MailDiagnosticError, MailDiagnosticFuture, MailDiagnosticOutcome,
     MailDiagnosticReceipt, MailDiagnosticRecorder, MailDiagnosticStage, MailMessage,
     PreparedMailEvidence,
@@ -71,8 +71,8 @@ struct LoggedMailDiagnostics {
 
 /// 安全失败日志独立于原始留证开关，装配根始终将这个出口传给装备来源适配器。
 pub(super) fn report_equipment_failure(
-    context: &auction_application::MailEquipmentDiagnosticContext,
-    snapshot: &auction_application::MailEquipmentDiagnosticSnapshot,
+    context: &auction_application::mail::MailEquipmentDiagnosticContext,
+    snapshot: &auction_application::mail::MailEquipmentDiagnosticSnapshot,
 ) {
     tracing::warn!(
         mailbox_key = %context.mailbox_key,

@@ -47,5 +47,5 @@ pub(super) fn bounded_detail(value: String) -> String {
 }
 
 pub(super) fn repository_error(message: &str) -> ApplicationError {
-    auction_application::RepositoryError::Failed(message.to_owned()).into()
+    auction_application::core::RepositoryError::Failed(message.to_owned()).into()
 }

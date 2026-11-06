@@ -7,10 +7,11 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use anyhow::Context;
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialEnvelope, AdminCredentialKind, AdminCredentialOpener, AdminCredentialSealer,
-    AdminLoginKeyIssuer, AdminLoginKeyOpener, MailLoginKey, MailLoginKeyEnvelope,
+    AdminLoginKeyIssuer, AdminLoginKeyOpener,
 };
+use auction_application::mail::{MailLoginKey, MailLoginKeyEnvelope};
 use auction_config::{AppConfig, DataKeyDomain};
 use auction_domain::{EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
 use auction_integrations::{
@@ -191,10 +192,10 @@ async fn reencrypt(config_dir: &ConfigDir, args: KeysReencryptArgs) -> anyhow::R
         if args.apply {
             let actor =
                 args.actor.as_deref().ok_or_else(|| anyhow::anyhow!("apply 必须先校验 --actor"))?;
-            let receipt_sha256 = auction_application::lower_hex(&Sha256::digest(&encoded));
+            let receipt_sha256 = auction_application::core::lower_hex(&Sha256::digest(&encoded));
             let identity = super::operator_identity::capture()?;
             for (domain, to_key_id, outcome) in applied_keys {
-                let metadata = auction_application::cli_audit_metadata(
+                let metadata = auction_application::core::cli_audit_metadata(
                     Some(&identity),
                     json!({
                         "to_key_id": to_key_id,

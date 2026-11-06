@@ -3,10 +3,12 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, ForumAuctionSnapshot, ForumCurrentBidSource, ForumLotSnapshot,
-    ForumSyncClaim, PublicEquipment, PublicEquipmentLinkTarget,
+use auction_application::auction::PublicEquipment;
+use auction_application::core::ApplicationError;
+use auction_application::forum::{
+    ForumAuctionSnapshot, ForumCurrentBidSource, ForumLotSnapshot, ForumSyncClaim,
 };
+use auction_application::public::PublicEquipmentLinkTarget;
 use auction_domain::{AuctionId, AuctionStatus, EquipmentId, SettlementWorld};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -15,9 +17,6 @@ use super::super::super::{
     PostgresStore, competition::parse_auction_status, lots::map_forum_equipment,
 };
 use super::validation::{lot_code, parse_world, storage_error};
-
-#[path = "settlement.rs"]
-mod settlement;
 
 pub(super) async fn load_snapshot_postgres(
     store: &PostgresStore,
@@ -301,7 +300,7 @@ async fn read_snapshot(
             identity.get("prefix").and_then(serde_json::Value::as_str).unwrap_or_default();
         let equipment_suffix =
             identity.get("suffix").and_then(serde_json::Value::as_str).unwrap_or_default();
-        let settlement = settlement::project(&row, settled)?;
+        let settlement = super::settlement::project(&row, settled)?;
         lots.push(ForumLotSnapshot {
             code,
             category,

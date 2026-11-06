@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::{
+use crate::ports::admin::{
     AdminCredentialCheckPort, AdminCredentialCheckResult, AdminCredentialCheckStore,
-    AdminCredentialError, AdminCredentialVerifier, ApplicationFuture, Clock,
-    credential_check_worlds,
+    AdminCredentialError, AdminCredentialVerifier, credential_check_worlds,
 };
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::Clock;
 
 /// 将授权后的只读请求绑定到数据库当前凭据，不改变 active 或 Worker 所有权。
 pub struct AdminCredentialCheckService<S, V, C> {

@@ -1,6 +1,7 @@
 //! 结算履约行映射、枚举转换和错误校验。
 
-use auction_application::{ApplicationError, SettlementFulfillmentClaim};
+use auction_application::core::ApplicationError;
+use auction_application::settlement::SettlementFulfillmentClaim;
 use auction_domain::{SettlementObligationKind, SettlementWorld};
 use sqlx::Row;
 use sqlx::postgres::PgRow;
@@ -9,9 +10,9 @@ use uuid::Uuid;
 #[cfg(feature = "postgres")]
 pub(super) enum ClaimMappingError {
     /// execution 或其 delivery 快照损坏时必须失败关闭并回滚领取事务。
-    Execution(auction_application::RepositoryError),
+    Execution(auction_application::core::RepositoryError),
     /// execution 已经有效，但 auction-owned 上下文不满足旧版校验时可隔离。
-    Context(auction_application::RepositoryError),
+    Context(auction_application::core::RepositoryError),
 }
 
 #[cfg(feature = "postgres")]
@@ -23,8 +24,8 @@ pub(super) struct ClaimExecutionIdentity {
 #[cfg(feature = "postgres")]
 pub(super) fn map_claim_execution_identity(
     row: &PgRow,
-) -> Result<ClaimExecutionIdentity, auction_application::RepositoryError> {
-    let snapshot = auction_application::SettlementClaimExecutionSnapshot {
+) -> Result<ClaimExecutionIdentity, auction_application::core::RepositoryError> {
+    let snapshot = auction_application::settlement::SettlementClaimExecutionSnapshot {
         obligation_id: uuid_column(row, "obligation_id")?,
         execution_state: string_column(row, "execution_state")?,
         state_version: row.try_get("state_version").map_err(map_storage_error)?,
@@ -51,8 +52,8 @@ pub(super) fn map_claim_execution_identity(
 #[cfg(feature = "postgres")]
 pub(super) fn validate_claim_context(
     row: &PgRow,
-) -> Result<(), auction_application::RepositoryError> {
-    let snapshot = auction_application::SettlementClaimContextSnapshot {
+) -> Result<(), auction_application::core::RepositoryError> {
+    let snapshot = auction_application::settlement::SettlementClaimContextSnapshot {
         obligation_world: string_column(row, "obligation_world")?,
         equipment_world: row.try_get("equipment_world").map_err(map_storage_error)?,
         auction_id: uuid_column(row, "auction_id")?,
@@ -92,7 +93,7 @@ pub(super) fn validate_claim_context(
 #[cfg(feature = "postgres")]
 pub(super) fn validate_claim_identity(
     claim: &SettlementFulfillmentClaim,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     claim.validate_identity()
 }
 
@@ -100,7 +101,7 @@ pub(super) fn validate_claim_identity(
 pub(super) fn uuid_column(
     row: &PgRow,
     column: &str,
-) -> Result<Uuid, auction_application::RepositoryError> {
+) -> Result<Uuid, auction_application::core::RepositoryError> {
     row.try_get(column).map_err(map_storage_error)
 }
 
@@ -108,14 +109,17 @@ pub(super) fn uuid_column(
 pub(super) fn string_column(
     row: &PgRow,
     column: &str,
-) -> Result<String, auction_application::RepositoryError> {
+) -> Result<String, auction_application::core::RepositoryError> {
     row.try_get(column).map_err(map_storage_error)
 }
 
 #[cfg(feature = "postgres")]
 pub(super) fn request_hash_from_optional(
     value: Option<Vec<u8>>,
-) -> Result<Option<auction_application::RequestHash>, auction_application::RepositoryError> {
+) -> Result<
+    Option<auction_application::core::RequestHash>,
+    auction_application::core::RepositoryError,
+> {
     let Some(value) = value else {
         return Ok(None);
     };
@@ -124,13 +128,13 @@ pub(super) fn request_hash_from_optional(
     if bytes == [0; 32] {
         return Err(repository_error_owned("结算履约请求摘要不能为零"));
     }
-    Ok(Some(auction_application::RequestHash::new(bytes)))
+    Ok(Some(auction_application::core::RequestHash::new(bytes)))
 }
 
 #[cfg(feature = "postgres")]
 pub(super) fn settlement_world(
     value: String,
-) -> Result<SettlementWorld, auction_application::RepositoryError> {
+) -> Result<SettlementWorld, auction_application::core::RepositoryError> {
     SettlementWorld::from_name(&value).ok_or_else(|| repository_error_owned("结算履约世界标识无效"))
 }
 
@@ -138,10 +142,10 @@ pub(super) fn settlement_world(
 pub(super) fn fulfillment_delivery_status(
     value: String,
 ) -> Result<
-    auction_application::SettlementFulfillmentDeliveryStatus,
-    auction_application::RepositoryError,
+    auction_application::settlement::SettlementFulfillmentDeliveryStatus,
+    auction_application::core::RepositoryError,
 > {
-    use auction_application::SettlementFulfillmentDeliveryStatus;
+    use auction_application::settlement::SettlementFulfillmentDeliveryStatus;
 
     match value.as_str() {
         "prepared" => Ok(SettlementFulfillmentDeliveryStatus::Prepared),
@@ -158,7 +162,7 @@ pub(super) fn fulfillment_delivery_status(
 #[cfg(feature = "postgres")]
 pub(super) fn obligation_kind(
     value: String,
-) -> Result<SettlementObligationKind, auction_application::RepositoryError> {
+) -> Result<SettlementObligationKind, auction_application::core::RepositoryError> {
     SettlementObligationKind::from_name(&value)
         .ok_or_else(|| repository_error_owned("结算履约义务种类无效"))
 }
@@ -199,21 +203,21 @@ pub(super) fn valid_failure_code(value: &str) -> bool {
 }
 
 pub(super) fn repository_error(message: &str) -> ApplicationError {
-    auction_application::RepositoryError::Failed(message.to_owned()).into()
+    auction_application::core::RepositoryError::Failed(message.to_owned()).into()
 }
 
 #[cfg(feature = "postgres")]
-pub(super) fn repository_error_owned(message: &str) -> auction_application::RepositoryError {
-    auction_application::RepositoryError::Failed(message.to_owned())
+pub(super) fn repository_error_owned(message: &str) -> auction_application::core::RepositoryError {
+    auction_application::core::RepositoryError::Failed(message.to_owned())
 }
 
 #[cfg(feature = "postgres")]
-pub(super) fn map_storage_error(error: sqlx::Error) -> auction_application::RepositoryError {
+pub(super) fn map_storage_error(error: sqlx::Error) -> auction_application::core::RepositoryError {
     let context = match &error {
         sqlx::Error::RowNotFound => "结算履约记录不存在",
         _ => "结算履约数据库操作失败",
     };
-    auction_application::RepositoryError::Failed(crate::database::sql_error_context(
+    auction_application::core::RepositoryError::Failed(crate::database::sql_error_context(
         &error, context,
     ))
 }

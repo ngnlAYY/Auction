@@ -39,8 +39,8 @@ impl DatabaseBackend {
 
 /// 存储适配器统一的仓储失败；消息只描述固定分类，不携带 SQL、连接串或驱动原文。
 #[cfg(feature = "postgres")]
-pub(crate) fn storage_error(message: &str) -> auction_application::ApplicationError {
-    auction_application::RepositoryError::Failed(message.to_owned()).into()
+pub(crate) fn storage_error(message: &str) -> auction_application::core::ApplicationError {
+    auction_application::core::RepositoryError::Failed(message.to_owned()).into()
 }
 
 /// 仅增强失败诊断；不改变校验、重试或缓存语义，保护不变量 6、7、9。
@@ -49,8 +49,8 @@ pub(crate) fn storage_error(message: &str) -> auction_application::ApplicationEr
 pub(crate) fn storage_error_from(
     error: sqlx::Error,
     context: &'static str,
-) -> auction_application::ApplicationError {
-    auction_application::RepositoryError::Failed(sql_error_context(&error, context)).into()
+) -> auction_application::core::ApplicationError {
+    auction_application::core::RepositoryError::Failed(sql_error_context(&error, context)).into()
 }
 
 /// SQL 错误的安全投影；只读取 SQLSTATE、约束名和表名，缺失或异常字段均用固定值。

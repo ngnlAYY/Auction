@@ -1,4 +1,4 @@
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -7,7 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use auction_application::{AdminCredentialRuntimeOwnership, MailDiagnosticRecorder};
+use auction_application::admin::AdminCredentialRuntimeOwnership;
+use auction_application::mail::MailDiagnosticRecorder;
 use reqwest::{Client, StatusCode, header};
 use tokio::time;
 use url::Url;
@@ -77,7 +78,7 @@ pub struct MoogleMailClient {
     mail_scan_daily_full_interval: chrono::Duration,
     diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
-    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 }
 
 impl MoogleMailClient {
@@ -149,10 +150,11 @@ impl MoogleMailClient {
             reads: Arc::new(reads::MailboxReads::default()),
             maximum_response_bytes,
             request_timeout: config.request_timeout,
-            mail_scan_daily_full_interval: auction_application::MAIL_SCAN_DAILY_FULL_INTERVAL,
+            mail_scan_daily_full_interval: auction_application::mail::MAIL_SCAN_DAILY_FULL_INTERVAL,
             diagnostics: None,
             ownership: None,
-            external_metrics: auction_application::noop_external_metrics_observer(),
+            external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
+            ),
         })
     }
 
@@ -201,11 +203,13 @@ impl MoogleMailClient {
     /// 注入同步外部客户端指标；只读取共享门的配置间隔，不改变实际间隔。
     pub fn with_external_metrics(
         mut self,
-        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+        observer: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     ) -> Self {
-        observer.observe(auction_application::ExternalMetricsEvent::MailRequestInterval {
-            interval: self.gate.interval(),
-        });
+        observer.observe(
+            auction_application::external_metrics::ExternalMetricsEvent::MailRequestInterval {
+                interval: self.gate.interval(),
+            },
+        );
         self.external_metrics = observer;
         self
     }
@@ -225,7 +229,9 @@ impl MoogleMailClient {
     }
 
     /// 供 sender 的扫描预算 owner 记录同步指标；不暴露给进程外调用方。
-    pub(crate) fn external_metrics(&self) -> Arc<dyn auction_application::ExternalMetricsObserver> {
+    pub(crate) fn external_metrics(
+        &self,
+    ) -> Arc<dyn auction_application::external_metrics::ExternalMetricsObserver> {
         Arc::clone(&self.external_metrics)
     }
 
@@ -353,7 +359,7 @@ mod tests {
         let client = MoogleMailClient::with_config(config).expect("默认客户端可构造");
         assert_eq!(
             client.mail_scan_daily_full_interval(),
-            auction_application::MAIL_SCAN_DAILY_FULL_INTERVAL
+            auction_application::mail::MAIL_SCAN_DAILY_FULL_INTERVAL
         );
 
         let client = client.with_mail_scan_daily_full_interval(chrono::Duration::hours(1));

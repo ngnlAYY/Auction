@@ -1,4 +1,4 @@
-use auction_application::{WorkerControlCondition, WorkerControlStatus};
+use auction_application::operations::{WorkerControlCondition, WorkerControlStatus};
 use auction_contracts::{
     AdminDashboardHealthResponse, AdminDashboardResponse, AdminDashboardSectionResponse,
     AdminDashboardWorkerResponse,

@@ -7,9 +7,9 @@
 
 use std::collections::BTreeSet;
 
-use auction_application::{
-    AdminRuntimeMailTemplatesConfig, MailNotificationTemplate, NotificationKind,
-};
+use auction_application::admin::AdminRuntimeMailTemplatesConfig;
+use auction_application::mail::MailNotificationTemplate;
+use auction_application::notification_metrics::NotificationKind;
 
 const MAIL_FLOWS: &str = include_str!("../../../docs/guide/mail-flows.md");
 const START: &str = "<!-- notification-catalog:start -->";

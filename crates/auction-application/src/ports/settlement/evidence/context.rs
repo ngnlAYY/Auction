@@ -4,7 +4,9 @@ use std::time::Instant;
 
 use chrono::Utc;
 
-use super::{InternalEvidenceError, InternalEvidenceFuture, SettlementInternalEvidenceSnapshot};
+use crate::ports::settlement::{
+    InternalEvidenceError, InternalEvidenceFuture, SettlementInternalEvidenceSnapshot,
+};
 
 /// 集成 owner 保留原 session/operation_guard，并提供不可恢复的同步撤销。
 /// 只有真实支持撤销和持久 generation 的适配器才能构造内部上下文。

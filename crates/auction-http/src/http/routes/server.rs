@@ -2,7 +2,7 @@
 //! Axum 的便捷 `serve` 不暴露请求头读取超时。本模块保持 Axum Router 所有权不变，只在
 //! 连接层固定 5 秒 HTTP/1 header timeout，并统一跟踪连接级优雅关闭。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics;
 

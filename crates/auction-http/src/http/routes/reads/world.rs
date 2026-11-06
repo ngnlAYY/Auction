@@ -1,10 +1,10 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use crate::http::routes::api_error;
 use crate::http::routes::state::PublicApiState;
-use auction_application::WorldSnapshot;
+use auction_application::auction::WorldSnapshot;
 use auction_contracts::{ApiErrorResponse, ApiResponse, WorldStatusResponse, WorldsResponse};
 use axum::Json;
 use axum::extract::State;
