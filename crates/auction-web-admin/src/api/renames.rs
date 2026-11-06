@@ -12,10 +12,13 @@ use uuid::Uuid;
 
 use super::users::decode_user_mutation;
 use super::{
-    AdminUser, ApiResponse, MAX_JSON_SAFE_INTEGER, RequiredOption, TABLE_PAGE_SIZE,
-    invalid_request_error, invalid_response_error, response_error, send_get, valid_admin_time,
-    valid_trimmed_text, valid_uuid,
+    AdminUser, ApiResponse, MAX_JSON_SAFE_INTEGER, RequiredOption, invalid_request_error,
+    invalid_response_error, response_error, send_get, valid_admin_time, valid_trimmed_text,
+    valid_uuid,
 };
+
+/// 改名命令准备阶段读取历史的固定数量；可见列表数量由页面显式传入。
+pub(crate) const TABLE_PAGE_SIZE: i64 = 10;
 
 /// 旧 rename decoder 允许对象增加字段；普通展示仍允许省略 `user_state_version`，准备回滚时
 /// 则必须从按稳定用户 ID 重新读取的当前投影取得非零版本，不能把兼容零值当作 fence。

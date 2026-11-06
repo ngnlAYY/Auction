@@ -13,11 +13,17 @@ use gloo_net::http::Request;
 use uuid::Uuid;
 
 use super::{
-    AdminApiFailure, MAX_JSON_SAFE_INTEGER, PlayerSupportBundle, StrictDeliveryEnvelope,
-    decode_delivery, fetch_csrf_token, invalid_request_error, invalid_response_error,
-    parse_delivery_time, response_error, response_failure, send_get, send_request, valid_safe_text,
-    valid_success_code, valid_uuid,
+    AdminApiFailure, MAX_JSON_SAFE_INTEGER, PlayerSupportBundle, fetch_csrf_token,
+    invalid_request_error, invalid_response_error, response_error, response_failure, send_get,
+    send_request, valid_safe_text, valid_success_code, valid_uuid,
 };
+
+mod decode;
+mod queue;
+
+use self::decode::{StrictDeliveryEnvelope, decode_delivery, parse_delivery_time};
+pub(crate) use decode::valid_status;
+pub(crate) use queue::{DeliveryAction, DeliverySearchFilters, execute_delivery, fetch_deliveries};
 
 /// 与服务端 `MAX_PLAYER_SUPPORT_ROWS` 对齐；超过即视为损坏响应。
 const MAX_PLAYER_SUPPORT_ROWS: usize = 50;
@@ -408,7 +414,7 @@ fn decode_player_support(
         }
     }
     for delivery in &bundle.deliveries {
-        super::decode_delivery(delivery.clone())?;
+        decode_delivery(delivery.clone())?;
     }
     for notification in &bundle.notifications {
         if !valid_uuid(&notification.notification_id)
@@ -455,7 +461,9 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use uuid::Uuid;
 
-    use super::{StrictDeliveryEnvelope, decode_confirmation, decode_detail, decode_preview};
+    use super::{
+        decode::StrictDeliveryEnvelope, decode_confirmation, decode_detail, decode_preview,
+    };
 
     fn time(offset: u32) -> String {
         Utc.with_ymd_and_hms(2026, 11, 2, 1, offset, 0).single().expect("timestamp").to_rfc3339()

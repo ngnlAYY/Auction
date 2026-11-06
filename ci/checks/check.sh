@@ -327,9 +327,14 @@ check_source_ratchet() {
 check_module_paths() {
 	local stray
 	stray=$(rg -n '#!?\[path\s*=' \
-		crates/auction-http/src crates/auction-web-admin/src crates/auction-web-public/src \
-		crates/auction-storage/src crates/auction-jobs/src crates/auction-integrations/src \
-		crates/auction-application/src || true)
+		crates/auction-http/src \
+		crates/auction-web-admin/src \
+		crates/auction-web-public/src \
+		crates/auction-storage/src crates/auction-storage/tests \
+		crates/auction-jobs/src crates/auction-jobs/tests \
+		crates/auction-integrations/src crates/auction-integrations/tests \
+		crates/auction-application/src crates/auction-application/tests \
+		crates/auction-domain/tests || true)
 	if [[ -n "$stray" ]]; then
 		printf '%s\n' "已迁移的 crate 不得用 #[path] 重排模块；请把文件放到自然目录层级：" >&2
 		printf '%s\n' "$stray" >&2
