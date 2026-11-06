@@ -259,7 +259,7 @@
 | W10.7 | 已提交 | 随本提交 | 未部署 | WAL archive/upload、zstd+age、R2 `wal/`、weekly `pg_basebackup` 至 `base/`、保留 3 份、systemd timer；本地隔离 PG18 PITR 演练通过：恢复到目标时间 rows=1,2，排除之后 rows=3 |
 | W10.8 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；`ops/postgres/postgresql.conf.example`、`autovacuum.sql.example`、`extensions.sql.example` 与说明；连接预算 64/97、`pg_stat_statements`、慢查询/锁等待/autovacuum 日志、热行表与只追加表参数；`archive_mode=off`，W10.7 再启用；重启受 W7.5 |
 | W11.4 | 已提交 | 随本提交 | — | 只读一致性巡检：lot/bid 投影、补偿池、义务链、delivery/义务、realtime 序号、慢代理残留；每项预算 5s/总 40s，最多 100 样本；结果追加 audit_records；CLI `db inspect-consistency` |
-| W11 | 已提交 | 随本提交 | — | W11.1–W11.4：装备持有核对按 expected/stock/unknown 分类，偿付能力、追加报告、一致性巡检；迁移 095 |
+| W11 | 已提交 | 随本提交 | — | W11.1–W11.4：装备持有核对按 expected/stock/personal 分类，偿付能力、追加报告、一致性巡检；迁移 095 |
 | W12 | 已提交 | — | — | W12.1–W12.8 已提交：outbox、队列、提交后唤醒、键列化、体积预算 |
 | W13 | 已提交 | — | — | W13.1–W13.6：棘轮、lint、溢出防护、链接门禁、依赖审计与季度升级窗口 |
 | W13.1 | 已提交 | `42bd8477` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 B）实现、Claude 监督；`check.sh ratchet`，基线 `ci/checks/source-ratchet.baseline`（14 项） |

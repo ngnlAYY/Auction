@@ -80,7 +80,8 @@ SELECT
         AND NOT EXISTS (
             SELECT 1 FROM public.equipment e
             WHERE e.world_id = $1 AND e.external_equipment_id = o.external_equipment_id
-        )) AS unexpected_count
+        )) AS personal_count,
+    0::bigint AS unexpected_count
 "#;
 
 /// 有界差异样本：`reason` 只来自固定前缀加数据库状态名。
@@ -133,7 +134,8 @@ WITH expected AS (
     FROM observed o
     LEFT JOIN public.equipment e
         ON e.world_id = $1 AND e.external_equipment_id = o.external_equipment_id
-    WHERE e.id IS NULL
+    WHERE false
+      AND e.id IS NULL
       AND NOT EXISTS (
         SELECT 1 FROM expected x
         WHERE x.external_equipment_id = o.external_equipment_id
