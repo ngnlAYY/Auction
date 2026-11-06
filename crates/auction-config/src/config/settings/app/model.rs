@@ -90,7 +90,6 @@ pub(super) struct CommonFileConfig {
     pub(super) database_profiles: DatabaseProfilesConfig,
     /// 数据库账号分工声明；省略 owner 时不做严格分离证明。
     pub(super) database_roles: DatabaseRolesConfig,
-    pub(super) cache: CacheConfig,
     /// CLI 专用策略；常驻角色不应用其运维语义。
     pub(super) backup: BackupConfig,
     /// 创建拍卖时冻结的计划、经济、结算和恢复策略。
@@ -111,7 +110,6 @@ pub(super) struct BuildInput {
     pub(super) tracing: TracingSettings,
     pub(super) shutdown: ShutdownFileConfig,
     pub(super) realtime: RealtimeConfig,
-    pub(super) cache: CacheConfig,
     pub(super) backup: BackupConfig,
     pub(super) auction: AuctionConfig,
     pub(super) worker: WorkerConfig,
@@ -146,8 +144,6 @@ pub struct AppConfig {
     pub shutdown: ShutdownSettings,
     /// Public realtime relay 与进程内连接 Hub 策略。
     pub realtime: RealtimeConfig,
-    /// 非敏感缓存策略。
-    pub cache: CacheConfig,
     /// 只由 CLI 校验并消费的定时备份策略。
     pub backup: BackupConfig,
     /// 创建拍卖时冻结的经济、结算和恢复策略模板。
@@ -189,7 +185,6 @@ impl fmt::Debug for AppConfig {
             .field("listener", &self.listener)
             .field("database_configured", &self.database_url().is_some())
             .field("admin_credentials_configured", &self.admin_credentials_configured())
-            .field("cache", &self.cache)
             .field("auction", &self.auction)
             .field("worker", &self.worker)
             .field("http_security", &self.http_security)

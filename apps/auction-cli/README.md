@@ -14,10 +14,9 @@ CLI 写入审计的 `source=cli`，并按主机追加 `entrypoint=cli`、`os_uid
 | --- | --- |
 | （默认无） | 可用 `config show/check` 与 `service status`；`service stop` 无法读取时段证据，默认拒绝，只能以 `--force --reason` 声明例外；数据库、备份、业务命令和 `service start/restart` 明确报错 |
 | `postgres` | 数据库、备份恢复与全部业务运维命令 |
-| `cache-redis` | 隐含 `postgres`；规则导入后失效 Redis 中的 Public 规则缓存 |
 
 ```bash
-cargo build --locked --release -p auction-cli --features postgres,cache-redis
+cargo build --locked --release -p auction-cli --features postgres
 ```
 
 发布包中的 `bin/auction-cli` 已按上述 feature 构建（见[ci/README.md](../../ci/README.md)）。仅支持 Linux x86_64。
@@ -76,7 +75,7 @@ auction-cli --config-dir /etc/auction config show worker
 auction-cli --config-dir /etc/auction config check --strict
 ```
 
-`config show` 加载单个角色并输出有效配置的安全投影：文件路径、监听、数据库后端、缓存、可观测性开关、HTTP 安全、会话、拍卖模板摘要、Worker 子系统开关与密钥“是否配置”，不输出任何秘密值。
+`config show` 加载单个角色并输出有效配置的安全投影：文件路径、监听、数据库后端、可观测性开关、HTTP 安全、会话、拍卖模板摘要、Worker 子系统开关与密钥“是否配置”，不输出任何秘密值。
 
 `config check` 联合加载三角色，核对：
 
@@ -461,7 +460,7 @@ printf '%s' "$COOKIE" | auction-cli credential import --kind mail --world main -
 auction-cli rules import --directory /srv/rules --command-id 6f1d…-… --actor ops
 ```
 
-目录须含 `en.md`、`zh-CN.md`、`zh-TW.md`、`ja.md`、`ko.md` 五个 UTF-8 普通文件：去掉开头单个 BOM，首个非空行去掉前导 `#` 作为标题，正文按 Admin 规则校验。写入前先比对数据库现状：任一语言已存在不同正文即整体拒绝；内容相同报告 `preserved`；缺失语言以 `--command-id` 派生的稳定命令 ID 发布（请求摘要与 Admin 发布接口一致），部分完成后用同一 `--command-id` 重试即可续上。启用 Redis 时随后失效 Public 规则缓存，失效失败列入 `cache_invalidation_failures` 但不回滚已发布规则。
+目录须含 `en.md`、`zh-CN.md`、`zh-TW.md`、`ja.md`、`ko.md` 五个 UTF-8 普通文件：去掉开头单个 BOM，首个非空行去掉前导 `#` 作为标题，正文按 Admin 规则校验。写入前先比对数据库现状：任一语言已存在不同正文即整体拒绝；内容相同报告 `preserved`；缺失语言以 `--command-id` 派生的稳定命令 ID 发布（请求摘要与 Admin 发布接口一致），部分完成后用同一 `--command-id` 重试即可续上。规则发布直接写入数据库，Public 每次读取都回源数据库。
 
 ### 论坛写入恢复
 
@@ -556,7 +555,7 @@ Bot 内部履约（买卖双方之一是 Bot 自己时不经邮件外发）需�
 - 写入都先按原命令 ID 重放；之后在 30 秒共享预算内取得与 Worker 相同的邮件/论坛凭据 owner，用 Main 世界唯一的 active 邮件凭据与论坛凭据完成联合身份、干净草稿（以及 strict 模式的现金）观察，再在同一 opaque guard 内提交。因此**必须先停止 Worker**，并启用 `[worker.forum]` 与 `credential_data_key`。
 - 输出 `committed`/`replayed` 才算完成；`rolled_back` 为确定回滚；`evidence_unavailable` 表示提交前证据未通过；`outcome_unknown` 表示提交阶段结果未知——保留原命令 ID 与全部参数重新执行，以重放核对，不要换 ID 重试。
 
-凭据、规则与资金命令在连接池建立后，将参数校验、客户端或缓存装配与执行错误统一带回连接池关闭路径；结算损失命令在连接前校验执行声明与确认短语，端口读取、提交、序列化和输出错误也统一带回关闭路径。退出前显式关闭连接池；规则文件复用证据文件的非阻塞普通文件检查与有界读取。
+凭据、规则与资金命令在连接池建立后，将参数校验、客户端装配与执行错误统一带回连接池关闭路径；结算损失命令在连接前校验执行声明与确认短语，端口读取、提交、序列化和输出错误也统一带回关闭路径。退出前显式关闭连接池；规则文件复用证据文件的非阻塞普通文件检查与有界读取。
 
 ### 恢复后外部核对（W10.9）
 

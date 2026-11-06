@@ -1,5 +1,5 @@
 # Admin runtime 非敏感配置示例：字段都支持省略，旧字段使用应用模型默认值，operations 各组默认沿用部署配置。
-# 不能放 [database]、database_url、redis_url、Cookie、密码、签名密钥或装备数据密钥；生产置于受信目录并设 0640，修改后重启受影响角色生效。
+# 不能放 [database]、database_url、Cookie、密码、签名密钥或装备数据密钥；生产置于受信目录并设 0640，修改后重启受影响角色生效。
 
 # 可选：是否允许人工提前开放拍卖；省略时为 false。
 allow_manual_early_open = false

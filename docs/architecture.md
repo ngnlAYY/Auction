@@ -25,7 +25,6 @@ HV Auction 是 HentaiVerse 装备拍卖服务：玩家通过网站与论坛出�
                       │                    └─────────────┬────────────┘
                       └───────────────┬──────────────────┘
                                PostgreSQL 18（唯一事实来源）
-                               （可选 Redis：Public 规则读缓存）
 ```
 
 | 进程 | 职责 |
@@ -44,7 +43,7 @@ HV Auction 是 HentaiVerse 装备拍卖服务：玩家通过网站与论坛出�
 apps/*（装配根）
    │  读取配置、连接数据库、选择适配器、启动运行时
    ▼
-适配器：auction-http · auction-storage · auction-integrations · auction-jobs · auction-cache · auction-setup
+适配器：auction-http · auction-storage · auction-integrations · auction-jobs · auction-setup
    │  实现端口
    ▼
 auction-application（端口 + 用例）
@@ -60,7 +59,6 @@ auction-domain（纯领域规则）
 | [crates/auction-integrations/README.md](../crates/auction-integrations/README.md) | 适配器 | MoogleMail 与 E-Hentai 客户端、论坛渲染/解析、装备来源、加密信封 |
 | [crates/auction-http/README.md](../crates/auction-http/README.md) | 适配器 | 两个 HTTP 表面、安全边界、会话、WebSocket Hub、内嵌资源 |
 | [crates/auction-jobs/README.md](../crates/auction-jobs/README.md) | 适配器 | Worker 调度运行时与 control 服务端/客户端 |
-| [crates/auction-cache/README.md](../crates/auction-cache/README.md) | 适配器 | 可丢弃的读模型缓存（Redis 可选） |
 | [crates/auction-setup/README.md](../crates/auction-setup/README.md) | 适配器 | 首次部署设置服务 |
 | [crates/auction-config/README.md](../crates/auction-config/README.md) | 基础设施 | TOML 配置加载、合并与校验，runtime 文件存储 |
 | [crates/auction-observability/README.md](../crates/auction-observability/README.md) | 基础设施 | 日志、指标、tracing、心跳 |
@@ -126,7 +124,7 @@ Public relay 轮询事件 → WebSocket 推送 → 各浏览器重读受影响�
 
 ## 配置模型
 
-每个角色一个 TOML 角色文件，引用共用的 `common.toml`（日志、指标、缓存、拍卖策略）、敏感文件 `secrets.toml`（数据库、Cookie、密钥，仅 owner 可读）与可选的 runtime 文件 `runtime/admin.toml`。运行期间由 Admin 编辑 runtime；Public、Admin、Worker 分别加载自己负责的投影。启动前校验配置，后续运行时更新另有校验与幂等门禁。详见[ops/config/README.md](../ops/config/README.md)。
+每个角色一个 TOML 角色文件，引用共用的 `common.toml`（日志、指标、拍卖策略）、敏感文件 `secrets.toml`（数据库、Cookie、密钥，仅 owner 可读）与可选的 runtime 文件 `runtime/admin.toml`。运行期间由 Admin 编辑 runtime；Public、Admin、Worker 分别加载自己负责的投影。启动前校验配置，后续运行时更新另有校验与幂等门禁。详见[ops/config/README.md](../ops/config/README.md)。
 
 ## 安全边界
 

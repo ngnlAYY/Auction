@@ -357,7 +357,6 @@ run_checks() {
 		check) cargo check --locked --workspace --all-targets ;;
 		feature)
 			cargo check --locked -p auction-storage --all-targets --no-default-features --features postgres
-			cargo check --locked -p auction-cache --all-targets --no-default-features --features redis
 			cargo check --locked -p auction-setup --all-targets --no-default-features
 			cargo check --locked -p auction-setup --all-targets --no-default-features --features postgres
 			;;

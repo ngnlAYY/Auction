@@ -38,8 +38,6 @@ mod auction_policy;
 mod auction_slow_proxy;
 #[path = "public/blacklist.rs"]
 mod blacklist;
-#[path = "public/cache.rs"]
-mod cache;
 #[path = "auction/commands.rs"]
 mod commands;
 #[path = "public/compensation/mod.rs"]
@@ -341,7 +339,6 @@ pub use blacklist::{
     MAX_PUBLIC_BLACKLIST_OFFSET, PublicBlacklistEntry, PublicBlacklistPage, PublicBlacklistReader,
     PublicBlacklistRequest,
 };
-pub use cache::{ReadModelCache, ReadModelCacheError, ReadModelCacheFuture};
 pub use commands::{
     ApplicationFuture, CompetitionCommandOutcome, CompetitionCommandPort,
     CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome, CompetitionWireTimestamp,

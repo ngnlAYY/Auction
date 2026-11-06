@@ -8,7 +8,6 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 auction-application = { workspace = true, optional = true }
-auction-cache = { workspace = true, optional = true }
 auction-config.workspace = true
 auction-contracts = { workspace = true, optional = true }
 auction-domain = { workspace = true, optional = true }
@@ -33,7 +32,6 @@ default = []
 postgres = [
     "auction-storage/postgres",
     "dep:auction-application",
-    "dep:auction-cache",
     "dep:auction-contracts",
     "dep:auction-domain",
     "dep:auction-integrations",
@@ -41,8 +39,6 @@ postgres = [
     "dep:url",
     "uuid/v5",
 ]
-# 可选：规则导入后失效 Redis 中的 Public 规则读模型缓存。
-cache-redis = ["postgres", "auction-cache/redis"]
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

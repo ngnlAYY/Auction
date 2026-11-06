@@ -10,7 +10,6 @@
 | --- | --- |
 | `postgres` | 连接 PostgreSQL 并装配全部端口；未启用时配置了数据库会拒绝启动 |
 | `web-embed` | 内嵌 `target/dx/build/auction-web-public/web/public` 的页面产物；未启用时使用固定空资源目录（页面路由返回 503） |
-| `cache-redis` | 允许 `cache.backend = "redis"`（公开规则读模型缓存） |
 
 ## 启动
 
