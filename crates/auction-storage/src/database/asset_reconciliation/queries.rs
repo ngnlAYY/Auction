@@ -35,6 +35,14 @@ WITH expected AS (
     WHERE d.status IN ('prepared', 'pending', 'claimed', 'sending', 'manual_reconcile')
       AND COALESCE(ref ->> 'kind', 'equipment') = 'equipment'
       AND e.world_id = $1
+    UNION ALL
+    SELECT e.external_equipment_id,
+           'preview_' || a.status AS reason
+    FROM public.auction_preview_items p
+    JOIN public.auctions a ON a.id = p.auction_id
+    JOIN public.equipment e ON e.id = p.equipment_id
+    WHERE e.world_id = $1
+      AND a.status IN ('preview', 'live', 'final')
 ), expected_ids AS (
     SELECT DISTINCT external_equipment_id FROM expected
 ), observed AS (
@@ -52,6 +60,19 @@ SELECT
         WHERE NOT EXISTS (
             SELECT 1 FROM expected_ids ids
             WHERE ids.external_equipment_id = o.external_equipment_id
+        )
+        AND EXISTS (
+            SELECT 1 FROM public.equipment e
+            WHERE e.world_id = $1 AND e.external_equipment_id = o.external_equipment_id
+        )) AS stock_count,
+    (SELECT count(*) FROM observed o
+        WHERE NOT EXISTS (
+            SELECT 1 FROM expected_ids ids
+            WHERE ids.external_equipment_id = o.external_equipment_id
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM public.equipment e
+            WHERE e.world_id = $1 AND e.external_equipment_id = o.external_equipment_id
         )) AS unexpected_count
 "#;
 
@@ -105,7 +126,8 @@ WITH expected AS (
     FROM observed o
     LEFT JOIN public.equipment e
         ON e.world_id = $1 AND e.external_equipment_id = o.external_equipment_id
-    WHERE NOT EXISTS (
+    WHERE e.id IS NULL
+      AND NOT EXISTS (
         SELECT 1 FROM expected x
         WHERE x.external_equipment_id = o.external_equipment_id
     )

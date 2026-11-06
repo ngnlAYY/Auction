@@ -235,6 +235,7 @@ async fn custody_snapshot(
             expected_count: 0,
             observed_count: 0,
             missing_count: 0,
+            stock_count: 0,
             unexpected_count: 0,
             missing_samples: Vec::new(),
             unexpected_samples: Vec::new(),
@@ -282,6 +283,10 @@ async fn custody_snapshot(
                 let _ = error;
                 "reconciliation_query_failed"
             })?;
+        world_report.stock_count = counts.try_get::<i64, _>("stock_count").map_err(|error| {
+            let _ = error;
+            "reconciliation_query_failed"
+        })?;
         world_report.unexpected_count =
             counts.try_get::<i64, _>("unexpected_count").map_err(|error| {
                 let _ = error;
