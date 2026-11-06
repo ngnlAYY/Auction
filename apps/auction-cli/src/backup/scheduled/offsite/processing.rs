@@ -12,7 +12,7 @@ use super::super::{
 };
 use super::{
     Prepared,
-    model::{COMPLETED_FORMAT, CompletedRun, OffsiteRecord, Pending},
+    model::{COMPLETED_FORMAT, CompletedRun, OffsiteRecord, Pending, ScopeReplica},
     monthly, record_failure, replica, staging,
     state::State,
 };
@@ -75,6 +75,7 @@ impl Processor<'_> {
             store: &self.prepared.store,
             state: self.state,
             staging: &staging,
+            output: self.output,
             current: receipt,
             journal: self.journal,
         }
@@ -103,6 +104,7 @@ impl Processor<'_> {
                 store: &self.prepared.store,
                 state: self.state,
                 staging: &staging,
+                output: self.output,
                 current: receipt,
                 journal: self.journal,
             }
@@ -115,6 +117,13 @@ impl Processor<'_> {
     }
 
     fn finalize(&self, item: &Pending, staging: &PrivateDirectory) -> anyhow::Result<()> {
+        if item.scope_bundle.is_some()
+            && (item.daily.scope.as_ref().and_then(ScopeReplica::complete).is_none()
+                || item.write_monthly == Some(true)
+                    && item.monthly.scope.as_ref().and_then(ScopeReplica::complete).is_none())
+        {
+            anyhow::bail!("范围副本缺少完成对象，不能发布本地清理资格");
+        }
         let offsite = OffsiteRecord {
             enabled: true,
             age_version: Some(item.age_version.clone()),

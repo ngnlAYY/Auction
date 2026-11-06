@@ -1673,3 +1673,15 @@ alert-console-8h = 8 hours
 alert-console-24h = 24 hours
 alert-console-72h = 72 hours
 alert-console-page = Page { $page }
+
+dashboard-reconciliation-title = Asset reconciliation
+dashboard-reconciliation-state = Reconciliation
+dashboard-reconciliation-differences = Differences found
+dashboard-reconciliation-ok = No differences
+dashboard-reconciliation-custody-age = Custody report age
+dashboard-reconciliation-solvency-age = Solvency report age
+dashboard-reconciliation-worlds = Worlds
+dashboard-reconciliation-custody = Missing equipment
+dashboard-reconciliation-solvency = Payout shortfall
+dashboard-reconciliation-credits = { $credits } credits
+dashboard-reconciliation-status-unavailable = Reconciliation report unavailable

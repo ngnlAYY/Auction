@@ -92,6 +92,9 @@ pub enum ConfigError {
     #[error("异机备份字段 {field} 无效：{reason}；配置值已脱敏")]
     InvalidBackupOffsite { field: &'static str, reason: &'static str },
 
+    #[error("备份范围配置无效：{0}")]
+    InvalidBackupScope(&'static str),
+
     #[error("敏感字段 {field} 必须是无 userinfo 和 fragment 的 HTTPS URL；配置值已脱敏")]
     InvalidBackupHeartbeatUrl { field: &'static str },
 

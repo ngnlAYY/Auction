@@ -25,6 +25,7 @@ use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinSet;
 
+mod asset_reconciliation;
 #[path = "../auction/lifecycle.rs"]
 mod auction;
 #[path = "../forum/loop.rs"]
@@ -52,6 +53,9 @@ mod recovery_actions;
 mod recovery_health;
 mod schedule;
 
+pub use asset_reconciliation::{
+    ASSET_RECONCILIATION_INTERVAL, ASSET_RECONCILIATION_TIMEOUT, AssetReconciliationRuntime,
+};
 pub use forum_reply::{ForumReplyPorts, ForumReplyRuntime};
 pub use forum_sync::{ForumSyncPorts, ForumSyncRuntime};
 pub use mail_poll::{

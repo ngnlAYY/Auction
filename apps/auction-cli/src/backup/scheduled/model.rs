@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{disk::DiskSnapshot, filesystem::FileIdentity, offsite::OffsiteRecord};
-use crate::backup::manifest::sha256_bytes;
+use crate::backup::{manifest::sha256_bytes, scope::ScopeSummary};
 
 pub(super) const FORMAT: &str = "auction-backup-run.v1";
 const MAX_RECORDED_ENTRIES: usize = 256;
@@ -33,6 +33,8 @@ pub(super) enum Stage {
     DiskBefore,
     OffsitePreflight,
     Create,
+    /// 数据库之外的恢复范围：收集、加密并写下配对 sidecar。
+    Scope,
     DiskAfter,
     Verify,
     OffsiteEncrypt,
@@ -54,6 +56,7 @@ impl Stage {
             Self::OutputLock => "output_lock_busy_or_invalid",
             Self::DiskBefore | Self::DiskAfter => "disk_check_failed",
             Self::Create => "create_failed",
+            Self::Scope => "scope_failed",
             Self::Verify => "verify_failed",
             Self::OffsitePreflight => "offsite_preflight_failed",
             Self::OffsiteEncrypt => "offsite_encryption_failed",
@@ -102,6 +105,9 @@ pub(super) struct ArchiveRecord {
     pub archive_identity: FileIdentity,
     pub manifest_identity: FileIdentity,
     pub verified: bool,
+    /// 旧 v1 回执没有范围证据；新回执只保存摘要、规模与本机文件身份。
+    #[serde(default)]
+    pub scope: Option<ScopeSummary>,
 }
 
 /// 回执只保存本地策略，不复制 R2 目的地或敏感配置。

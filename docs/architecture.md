@@ -133,7 +133,9 @@ Public relay 轮询事件 → WebSocket 推送 → 各浏览器重读受影响�
 - Public 与 Admin 分别监听，建议只在 loopback 或 Unix socket 上监听并由反向代理终止 TLS；Admin 不应暴露到公网。
 - Public/Admin 会话 Cookie 为 HttpOnly；Admin CSRF Cookie 可由脚本读取，前端通过会话 DTO 取得 CSRF token。受保护的 Admin 写请求要求 CSRF token；状态变更请求按路由校验 Origin allowlist；登录、写请求与实时连接按客户端地址限流。
 - 敏感数据静态加密：外部 Cookie、装备 key、用户登录 key 各自用独立的数据密钥（信封加密）保存；日志、指标与错误响应只包含安全分类与标识，不包含秘密或邮件正文。
-- 浏览器 CSP 的脚本来源限制为同源，同时为 Dioxus 解释器与 WASM 启用 `unsafe-eval` 和 `wasm-unsafe-eval`；内联样式通过 `style-src 'unsafe-inline'` 放行，不加载第三方资源。
+- 浏览器 CSP 的脚本来源限制为同源，同时为 Dioxus 解释器与 WASM 启用 `unsafe-eval` 和 `wasm-unsafe-eval`；内联样式通过 `style-src 'unsafe-inline'` 放行，不加载第三方资源；表单只能提交到同源（`form-action 'self'`），页面仍不能嵌入或被嵌入。
+- 上述两处放宽是 W9.4 复核后的有意接受，不是遗漏：Dioxus 0.7 的 CSR 启动必须能编译 WASM，运行时解释器要用 `new Function` 执行事件处理，去掉任一项两端都无法加载，当前没有等价的能力开关；剩余风险由“只加载同源脚本、不引入内联脚本或第三方资源”收窄——`eval` 只能执行同源资源中已有的代码，利用它需要先取得同源脚本执行权，而那本身已是更严重的缺陷。内联样式无法执行脚本，风险限于视觉伪装，且页面只使用自身样式。升级 Dioxus 时重新核对能否移除这两项。
+- HSTS（`Strict-Transport-Security`）只在浏览器确实经 HTTPS 访问时发送：直接监听不是 TLS 端点，反向代理后只采信可信上游写入的 `X-Forwarded-Proto`，缺失、非法、重复或链中混有非 `https` 值一律不发。开发/测试、本地回环与明文部署因此不受影响，明文响应上的 HSTS 本来也会被浏览器忽略。当前值为 `max-age=31536000`，不附加 `includeSubDomains` 与 `preload`：本站可能只是共享父域的子域，递归强制兄弟子域 HTTPS 超出本服务的控制范围，preload 一旦生效也无法在服务端撤销。
 
 ## 部署形态
 

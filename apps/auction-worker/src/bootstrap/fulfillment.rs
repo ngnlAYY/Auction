@@ -185,3 +185,60 @@ fn mooglemail_evidence_error(error: MoogleMailError) -> ApplicationError {
     ))
     .into()
 }
+
+/// W11.1 只读 Armory 观察：复用既有 gateway/凭据集合，不构造第二 Cookie 客户端，
+/// 也不执行任何 organize/解锁/寄送写操作。
+#[cfg(feature = "postgres")]
+pub(super) struct MoogleMailAssetInventoryReader {
+    pub(super) gateways: HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>,
+}
+
+#[cfg(feature = "postgres")]
+impl auction_application::AssetInventoryReader for MoogleMailAssetInventoryReader {
+    fn read_inventory(
+        &self,
+        world: SettlementWorld,
+        observed_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, auction_application::AssetArmoryObservation> {
+        Box::pin(async move {
+            let moogle_world = MoogleMailWorld::from(world);
+            let gateway = self.gateways.get(&moogle_world).cloned().ok_or(
+                ApplicationError::CapabilityUnavailable("MoogleMail inventory world unavailable"),
+            )?;
+            let mut equipment_ids = Vec::new();
+            let mut complete = true;
+            let mut failure_code = None;
+            for category in MoogleMailInventoryCategory::ALL {
+                match gateway.read_inventory_ids(moogle_world, category, observed_at).await {
+                    Ok(snapshot) => equipment_ids.extend(snapshot.equipment_ids),
+                    Err(error) => {
+                        complete = false;
+                        failure_code = Some(inventory_failure_code(&error));
+                        break;
+                    }
+                }
+            }
+            equipment_ids.sort_unstable();
+            equipment_ids.dedup();
+            Ok(auction_application::AssetArmoryObservation {
+                world,
+                observed_at,
+                equipment_ids,
+                complete,
+                failure_code,
+            })
+        })
+    }
+}
+
+#[cfg(feature = "postgres")]
+fn inventory_failure_code(error: &MoogleMailError) -> &'static str {
+    match error.category {
+        MoogleMailErrorCategory::AccountBusy => "account_busy",
+        MoogleMailErrorCategory::SessionExpired => "session_expired",
+        MoogleMailErrorCategory::CredentialUnavailable => "credential_unavailable",
+        MoogleMailErrorCategory::NotObserved => "not_observed",
+        MoogleMailErrorCategory::ProtocolDrift => "protocol_drift",
+        _ => "inventory_unavailable",
+    }
+}

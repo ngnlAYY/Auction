@@ -6,9 +6,16 @@ use uuid::Uuid;
 
 #[path = "funding/policy.rs"]
 mod policy;
+mod receipt_admission {
+    include!("funding/receipt_admission.rs");
+}
 #[path = "funding/record_only.rs"]
 mod record_only;
 pub use policy::{FundingAccountingMode, FundingPolicy, FundingPolicyReader};
+pub use receipt_admission::{
+    CodReceiptBlocker, CodReceiptPayload, CodReceiptResultMetadata, CodReceiptSecretRef,
+    CodReceiptSnapshot, CodReceiptVariables, evaluate_cod_receipt_evidence,
+};
 pub use record_only::{FundingRecordOnlyCommand, FundingRecordOnlyStore};
 
 /// 资金错误保持低基数，不回显数据库或远端正文。

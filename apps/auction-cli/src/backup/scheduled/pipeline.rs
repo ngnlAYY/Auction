@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     app::progress,
-    backup::{create::create_backup, manifest::sha256_bytes, verify_pair},
+    backup::{create::create_backup, manifest::sha256_bytes, scope, verify_pair},
 };
 
 pub(super) async fn execute(
@@ -49,7 +49,16 @@ pub(super) async fn execute(
         archive_identity: FileIdentity::of(&output.open(&archive_name)?.metadata()?),
         manifest_identity: FileIdentity::of(&output.open(&manifest_name)?.metadata()?),
         verified: false,
+        scope: None,
     });
+    // 范围证据在 create 之后、水位复核之前生成，使磁盘门禁覆盖本次新增的密文。
+    stage(journal, receipt, Stage::Scope)?;
+    let scope = scope::create(config, &output.path.join(&archive_name)).await?;
+    let Some(archive) = receipt.archive.as_mut() else {
+        anyhow::bail!("备份结果缺少 archive");
+    };
+    archive.scope = scope;
+    journal.checkpoint(receipt)?;
     stage(journal, receipt, Stage::DiskAfter)?;
     check_disk(&output, config, receipt, false)?;
     stage(journal, receipt, Stage::Verify)?;
@@ -61,6 +70,21 @@ pub(super) async fn execute(
         || FileIdentity::of(&output.open(&manifest_name)?.metadata()?) != archive.manifest_identity
     {
         anyhow::bail!("备份在创建与校验之间变化");
+    }
+    let scope_changed = match (archive.scope.as_ref(), verified.scope.as_ref()) {
+        (None, None) => false,
+        (Some(record), Some(verified)) => {
+            verified.sidecar_sha256 != record.sidecar_sha256
+                || verified.sidecar.bundle_sha256 != record.bundle_sha256
+                || FileIdentity::of(&output.open(&record.sidecar_file_name)?.metadata()?)
+                    != record.sidecar_identity
+                || FileIdentity::of(&output.open(&record.bundle_file_name)?.metadata()?)
+                    != record.bundle_identity
+        }
+        _ => true,
+    };
+    if scope_changed {
+        anyhow::bail!("备份范围证据在创建与校验之间变化");
     }
     archive.verified = true;
     journal.checkpoint(receipt)?;

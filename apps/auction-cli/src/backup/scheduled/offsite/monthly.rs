@@ -78,6 +78,15 @@ async fn inspect_record(
             .await?
             .ok_or(BackupStoreError::RemoteRecord)?;
     }
+    // 记录带范围对象时必须两者都在且摘要一致；缺件的月恢复点不能被当成本月首份。
+    if let Some(scope) = record.scope.as_ref() {
+        for object in [scope.bundle.as_ref(), scope.sidecar.as_ref()].into_iter().flatten() {
+            store
+                .verify_existing(&object.key, object.bytes, &object.sha256)
+                .await?
+                .ok_or(BackupStoreError::RemoteRecord)?;
+        }
+    }
     Ok(completion)
 }
 

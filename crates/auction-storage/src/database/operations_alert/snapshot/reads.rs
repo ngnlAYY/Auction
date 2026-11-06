@@ -21,6 +21,7 @@ pub(crate) async fn snapshot_postgres(
     let lifecycle = lifecycle_snapshot(store.pool(), now).await.ok();
     let forum = forum_snapshot(store.pool(), now).await.ok();
     let notification = notification_snapshot(store.pool(), now).await.ok();
+    let reconciliation = reconciliation_snapshot(store, now).await.ok();
     Ok(OperationsAlertSnapshot {
         process,
         delivery,
@@ -31,6 +32,44 @@ pub(crate) async fn snapshot_postgres(
         lifecycle,
         forum,
         notification,
+        reconciliation,
+    })
+}
+
+/// W11.1–W11.3 只读取最近追加的两类报告；报告缺失时保持 `None`，evaluator 明确降级。
+async fn reconciliation_snapshot(
+    store: &super::super::PostgresStore,
+    now: DateTime<Utc>,
+) -> Result<auction_application::OperationsAlertReconciliationSnapshot, ApplicationError> {
+    let reports = store.latest_asset_reports().await?;
+    let custody_report_age_seconds =
+        reports.custody.as_ref().map(|report| age_seconds(now, Some(report.completed_at)));
+    let solvency_report_age_seconds =
+        reports.solvency.as_ref().map(|report| age_seconds(now, Some(report.completed_at)));
+    let mut worlds = Vec::with_capacity(2);
+    for world in ["isekai", "main"] {
+        let custody_missing_count = reports
+            .custody
+            .as_ref()
+            .and_then(|report| report.worlds.iter().find(|entry| entry.world == world))
+            .map(|entry| entry.missing_count)
+            .unwrap_or(0);
+        let solvency_shortfall_credits = reports
+            .solvency
+            .as_ref()
+            .and_then(|report| report.worlds.iter().find(|entry| entry.world == world))
+            .map(|entry| entry.shortfall_credits)
+            .unwrap_or(0);
+        worlds.push(auction_application::OperationsAlertReconciliationWorld {
+            world,
+            custody_missing_count,
+            solvency_shortfall_credits,
+        });
+    }
+    Ok(auction_application::OperationsAlertReconciliationSnapshot {
+        custody_report_age_seconds,
+        solvency_report_age_seconds,
+        worlds,
     })
 }
 

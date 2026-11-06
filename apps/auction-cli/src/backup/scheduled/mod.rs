@@ -3,7 +3,7 @@
 mod completion;
 mod disk;
 mod evidence;
-mod filesystem;
+pub(in crate::backup) mod filesystem;
 mod heartbeat;
 mod journal;
 mod model;

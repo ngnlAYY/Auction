@@ -12,9 +12,10 @@ pub use ports::{
     DELIVERY_ADMIN_CATEGORIES, DELIVERY_ADMIN_RETIREMENT_REASONS,
     DELIVERY_ADMIN_SUPPRESSION_REASONS, DELIVERY_ADMIN_WORLDS, DeliveryAdminAction,
     DeliveryAdminAttempt, DeliveryAdminCommand, DeliveryAdminCustody, DeliveryAdminDetail,
-    DeliveryAdminDisposition, DeliveryAdminError, DeliveryAdminListRequest,
+    DeliveryAdminDisposition, DeliveryAdminError, DeliveryAdminGuardBlocker,
+    DeliveryAdminGuardDecision, DeliveryAdminGuardSnapshot, DeliveryAdminListRequest,
     DeliveryAdminObligation, DeliveryAdminPage, DeliveryAdminPort, DeliveryAdminRecovery,
-    DeliveryAdminResult, DeliveryAdminSentEvidence, DeliveryAdminSnapshot,
+    DeliveryAdminResult, DeliveryAdminSentEvidence, DeliveryAdminSnapshot, DeliveryAdminTransition,
     MAX_DELIVERY_ADMIN_OFFSET, MAX_DELIVERY_ADMIN_PAGE_SIZE, MAX_DELIVERY_ADMIN_RECIPIENT_LEN,
     MAX_DELIVERY_ADMIN_TEMPLATE_LEN, MAX_DELIVERY_COD,
 };
@@ -38,6 +39,10 @@ pub use ports::{
 pub use ports::{
     SentBaselineBranch, SentBaselineEvent, SentBaselineMode, SentBaselineObserver,
     SentBaselinePhase, SentBaselineReason, noop_sent_baseline_observer,
+};
+pub use ports::{
+    SettlementClaimContextBlocker, SettlementClaimContextSnapshot, SettlementClaimExecutionBlocker,
+    SettlementClaimExecutionSnapshot,
 };
 pub use ports::{
     ShadowOutcome, ShadowOwner, ShadowRecorder, ShadowSample, noop_shadow_recorder,
@@ -179,19 +184,21 @@ pub use ports::{
     MailUserResult, MailUserResultCode, MailUserStore, MigrationCompatibilityMode,
     NotifySubscription, OPERATIONS_ALERT_ACCOUNT_BUSY_AGE, OPERATIONS_ALERT_DIGEST_INTERVAL,
     OPERATIONS_ALERT_LIFECYCLE_GRACE, OPERATIONS_ALERT_MAIL_POLL_STALL_AGE,
-    OPERATIONS_ALERT_QUEUE_LATENCY_AGE, OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE,
-    OperationsAlertAcknowledgeCommand, OperationsAlertBatchClaim, OperationsAlertBatchItem,
-    OperationsAlertClaimRequest, OperationsAlertCommandResult, OperationsAlertConsole,
-    OperationsAlertConsoleEntry, OperationsAlertConsolePage, OperationsAlertConsoleQuery,
-    OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot,
-    OperationsAlertDeliveryStatus, OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch,
-    OperationsAlertError, OperationsAlertFilter, OperationsAlertForumSnapshot,
-    OperationsAlertFulfillmentSnapshot, OperationsAlertHealth, OperationsAlertHostBackupFacts,
-    OperationsAlertHostBackupOutcome, OperationsAlertHostBackupRun, OperationsAlertHostDisk,
-    OperationsAlertHostObserveCommand, OperationsAlertHostWalFacts, OperationsAlertKind,
-    OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
-    OperationsAlertNotificationSnapshot, OperationsAlertObserveCommand, OperationsAlertPolicy,
-    OperationsAlertProcessSnapshot, OperationsAlertProcessState, OperationsAlertRecoverySnapshot,
+    OPERATIONS_ALERT_QUEUE_LATENCY_AGE, OPERATIONS_ALERT_RECONCILIATION_STALE_AGE,
+    OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE, OperationsAlertAcknowledgeCommand,
+    OperationsAlertBatchClaim, OperationsAlertBatchItem, OperationsAlertClaimRequest,
+    OperationsAlertCommandResult, OperationsAlertConsole, OperationsAlertConsoleEntry,
+    OperationsAlertConsolePage, OperationsAlertConsoleQuery, OperationsAlertCredentialSnapshot,
+    OperationsAlertDeliverySnapshot, OperationsAlertDeliveryStatus,
+    OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
+    OperationsAlertFilter, OperationsAlertForumSnapshot, OperationsAlertFulfillmentSnapshot,
+    OperationsAlertHealth, OperationsAlertHostBackupFacts, OperationsAlertHostBackupOutcome,
+    OperationsAlertHostBackupRun, OperationsAlertHostDisk, OperationsAlertHostObserveCommand,
+    OperationsAlertHostWalFacts, OperationsAlertKind, OperationsAlertLifecycleSnapshot,
+    OperationsAlertMailSnapshot, OperationsAlertNotificationSnapshot,
+    OperationsAlertObserveCommand, OperationsAlertPolicy, OperationsAlertProcessSnapshot,
+    OperationsAlertProcessState, OperationsAlertReconciliationSnapshot,
+    OperationsAlertReconciliationWorld, OperationsAlertRecoverySnapshot,
     OperationsAlertRecoveryWorld, OperationsAlertRuntimeStatus, OperationsAlertSeverity,
     OperationsAlertSignal, OperationsAlertSilenceCommand, OperationsAlertSnapshot,
     OperationsAlertSource, OperationsAlertSourceObservation, OperationsAlertSourceReader,
@@ -287,6 +294,21 @@ pub use ports::{
     AdminCredentialVerifier, credential_check_worlds,
 };
 pub use ports::{
+    AssetArmoryObservation, AssetInventoryReader, AssetReconciliationConfig,
+    AssetReconciliationOutcome, AssetReconciliationPort, AssetReconciliationStore,
+    AssetReportSummary, CustodyMissingSample, CustodyReconciliationReport, CustodyWorldReport,
+    SolvencyReport, SolvencyWorldReport,
+};
+pub use ports::{
+    CodReceiptBlocker, CodReceiptPayload, CodReceiptResultMetadata, CodReceiptSecretRef,
+    CodReceiptSnapshot, CodReceiptVariables, FundingAccountingMode, FundingCashGate,
+    FundingCashGateProvider, FundingCollectedReceipt, FundingCommitOutcome, FundingDeliveryOutcome,
+    FundingError, FundingFuture, FundingMutation, FundingPolicy, FundingPolicyReader,
+    FundingPreview, FundingReconciliationCommand, FundingReconciliationReader,
+    FundingReconciliationResult, FundingReconciliationWriter, FundingRecordOnlyCommand,
+    FundingRecordOnlyStore, evaluate_cod_receipt_evidence,
+};
+pub use ports::{
     DeliveryAcknowledgementCommand, DeliveryAcknowledgementResult, DeliveryDispositionCommandError,
     DeliveryDispositionPort, DeliveryDispositionRecord,
 };
@@ -313,13 +335,6 @@ pub use ports::{
     valid_external_positive_id,
 };
 pub use ports::{
-    FundingAccountingMode, FundingCashGate, FundingCashGateProvider, FundingCollectedReceipt,
-    FundingCommitOutcome, FundingDeliveryOutcome, FundingError, FundingFuture, FundingMutation,
-    FundingPolicy, FundingPolicyReader, FundingPreview, FundingReconciliationCommand,
-    FundingReconciliationReader, FundingReconciliationResult, FundingReconciliationWriter,
-    FundingRecordOnlyCommand, FundingRecordOnlyStore,
-};
-pub use ports::{
     MailPlayerIdentityProofSource, VerifiedMailPlayerIdentity, valid_credential_player_name,
     valid_mail_player_name,
 };
@@ -331,6 +346,7 @@ pub use ports::{
     SettlementInternalCommitOutcome, SettlementInternalFulfillmentStore,
 };
 pub use services::AdminCredentialCheckService;
+pub use services::AssetReconciliationService;
 pub use services::FundingReconciliationService;
 pub use services::{
     AdminAuctionCreateService, AdminAuctionScheduleService, AdminCredentialService,

@@ -195,6 +195,13 @@ pub(super) fn valid_signal_identity(
         OperationsAlertKind::WalUploadStalled => {
             source == OperationsAlertSource::Wal && scope == "wal"
         }
+        OperationsAlertKind::CustodyDrift | OperationsAlertKind::SolvencyShortfall => {
+            source == OperationsAlertSource::Reconciliation && matches!(scope, "main" | "isekai")
+        }
+        OperationsAlertKind::ReconciliationStale => {
+            source == OperationsAlertSource::Reconciliation
+                && matches!(scope, "custody" | "solvency")
+        }
     }
 }
 

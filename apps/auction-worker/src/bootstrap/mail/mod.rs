@@ -48,10 +48,11 @@ pub(super) async fn configure_mail_poll(
     Option<Arc<dyn auction_application::SettlementInternalEvidenceReader>>,
     Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
     Option<MailControlRemoteReads>,
+    Option<Arc<dyn auction_application::AssetInventoryReader>>,
 )> {
     let mail_config = &config.worker.mooglemail;
     if !mail_config.enabled {
-        return Ok((Vec::new(), None, None, None, None, None, None));
+        return Ok((Vec::new(), None, None, None, None, None, None, None));
     }
 
     #[cfg(not(feature = "postgres"))]
@@ -164,6 +165,10 @@ pub(super) async fn configure_mail_poll(
             maximum_pages: mail_config.maximum_pages,
             fetch_timeout: std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
         };
+        let inventory_reader: Arc<dyn auction_application::AssetInventoryReader> =
+            Arc::new(super::fulfillment::MoogleMailAssetInventoryReader {
+                gateways: gateways.clone(),
+            });
         let evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader> =
             Arc::new(MoogleMailFulfillmentEvidenceReader { gateways });
         Ok((
@@ -174,6 +179,7 @@ pub(super) async fn configure_mail_poll(
             Some(gateway),
             ownership,
             Some(control_reads),
+            Some(inventory_reader),
         ))
     }
 }

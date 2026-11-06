@@ -1672,3 +1672,15 @@ alert-console-8h = 8시간
 alert-console-24h = 24시간
 alert-console-72h = 72시간
 alert-console-page = { $page } 페이지
+
+dashboard-reconciliation-title = 자산 대조
+dashboard-reconciliation-state = 대조 상태
+dashboard-reconciliation-differences = 차이 발견
+dashboard-reconciliation-ok = 차이 없음
+dashboard-reconciliation-custody-age = 장비 보유 보고서 경과 시간
+dashboard-reconciliation-solvency-age = 지급 능력 보고서 경과 시간
+dashboard-reconciliation-worlds = 월드
+dashboard-reconciliation-custody = 누락 장비
+dashboard-reconciliation-solvency = 지급 부족
+dashboard-reconciliation-credits = { $credits } credits
+dashboard-reconciliation-status-unavailable = 대조 보고서를 사용할 수 없습니다

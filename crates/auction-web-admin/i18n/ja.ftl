@@ -1672,3 +1672,15 @@ alert-console-8h = 8 時間
 alert-console-24h = 24 時間
 alert-console-72h = 72 時間
 alert-console-page = { $page } ページ
+
+dashboard-reconciliation-title = 資産照合
+dashboard-reconciliation-state = 照合状態
+dashboard-reconciliation-differences = 差異あり
+dashboard-reconciliation-ok = 差異なし
+dashboard-reconciliation-custody-age = 装備保有レポート経過時間
+dashboard-reconciliation-solvency-age = 支払能力レポート経過時間
+dashboard-reconciliation-worlds = ワールド
+dashboard-reconciliation-custody = 未確認装備
+dashboard-reconciliation-solvency = 支払不足
+dashboard-reconciliation-credits = { $credits } credits
+dashboard-reconciliation-status-unavailable = 照合レポートを取得できません

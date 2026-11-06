@@ -152,6 +152,16 @@ pub(super) fn backup_projection(config: &AppConfig) -> Value {
         "timeout_seconds": config.backup.timeout_seconds,
         "heartbeat_success_configured": config.backup_heartbeat_success_url().is_some(),
         "heartbeat_failure_configured": config.backup_heartbeat_failure_url().is_some(),
+        "scope": {
+            "enabled": config.backup.scope.enabled,
+            "runtime_config": config.backup.scope.runtime_config,
+            "mail_diagnostics": config.backup.scope.mail_diagnostics,
+            // 只投影是否配置，不输出部署回执目录的绝对路径。
+            "deployment_receipts_configured":
+                !config.backup.scope.deployment_receipts_dir.as_os_str().is_empty(),
+            "max_files": config.backup.scope.max_files,
+            "maximum_total_bytes": config.backup.scope.maximum_total_bytes,
+        },
         "offsite": {
             "enabled": offsite.enabled,
             "age_recipient_configured": !offsite.age_recipient.is_empty(),

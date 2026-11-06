@@ -7,7 +7,7 @@ use auction_config::AppConfig;
 use chrono::Utc;
 
 use super::manifest::{FORMAT, manifest_file_name, sha256_bytes, sha256_file};
-use super::{BackupManifest, libpq, schema_version};
+use super::{BackupManifest, libpq, schema_version, scope};
 use crate::app::{print_json, progress};
 use crate::deployment::ConfigDir;
 use crate::support::files;
@@ -21,11 +21,14 @@ pub(super) async fn run(
     let (_, manifest_path) = targets(output)?;
     let config = config_dir.load_worker()?;
     let manifest = create_backup(&config, database, output).await?;
+    // 手动与定时入口共用同一范围实现；失败时 archive 保留，但不发布 range sidecar。
+    let scope = scope::create(&config, output).await?;
     print_json(&serde_json::json!({
         "archive": output,
         "manifest": manifest_path,
         "archive_sha256": manifest.archive_sha256,
         "schema_version": manifest.schema_version,
+        "scope": scope,
     }))
 }
 
