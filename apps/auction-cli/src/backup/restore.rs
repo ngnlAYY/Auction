@@ -62,6 +62,7 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
         return print_json(&serde_json::json!({
             "outcome": "dry_run", "guard": guard.mode, "database": options.database,
             "archive": verified.archive, "schema_version": verified.manifest.schema_version,
+            "scope_evidence_present": verified.scope.is_some(),
         }));
     }
     let receipt = options.receipt.context("实际恢复必须提供 --receipt")?;
@@ -127,6 +128,8 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
         "ownership_restored": false,
         "privileges_restored": runtime_privileges_applied,
         "runtime_privileges_applied": runtime_privileges_applied,
+        // 数据库恢复不落盘配置/诊断/回执；范围证据另用 backup scope-extract 核对。
+        "scope_evidence_present": verified.scope.is_some(),
     });
     files::write_private(receipt, &serde_json::to_vec_pretty(&payload)?)
         .context("恢复已完成，但回执写入失败")?;

@@ -59,20 +59,7 @@ pub(super) enum ReceiptRejection {
     SendingTimeMissing,
     SendBeforeBoundary,
     PricingEndPriceMissing,
-    PricingEndPriceInvalid,
-    PricingListedPriceMissing,
-    PricingListedPriceInvalid,
-    PricingBuyerAmountMissing,
-    PricingBuyerAmountInvalid,
-    PricingSellerAmountMissing,
-    PricingSellerAmountInvalid,
-    PricingTaxAmountMissing,
-    PricingTaxAmountInvalid,
-    PricingCompensationAmountMissing,
-    PricingCompensationAmountInvalid,
     PricingRowDecodeFailed,
-    PricingHoldMissing,
-    PricingAdjustmentMissing,
     PricingPoolInvalid,
     PricingAdjustedOverflow,
     PricingBuyerMismatch,
@@ -134,20 +121,7 @@ impl ReceiptRejection {
             Self::SendingTimeMissing => "funding_receipt_sending_time_missing",
             Self::SendBeforeBoundary => "funding_receipt_send_before_boundary",
             Self::PricingEndPriceMissing => "funding_pricing_end_price_missing",
-            Self::PricingEndPriceInvalid => "funding_pricing_end_price_invalid",
-            Self::PricingListedPriceMissing => "funding_pricing_listed_price_missing",
-            Self::PricingListedPriceInvalid => "funding_pricing_listed_price_invalid",
-            Self::PricingBuyerAmountMissing => "funding_pricing_buyer_amount_missing",
-            Self::PricingBuyerAmountInvalid => "funding_pricing_buyer_amount_invalid",
-            Self::PricingSellerAmountMissing => "funding_pricing_seller_amount_missing",
-            Self::PricingSellerAmountInvalid => "funding_pricing_seller_amount_invalid",
-            Self::PricingTaxAmountMissing => "funding_pricing_tax_amount_missing",
-            Self::PricingTaxAmountInvalid => "funding_pricing_tax_amount_invalid",
-            Self::PricingCompensationAmountMissing => "funding_pricing_compensation_amount_missing",
-            Self::PricingCompensationAmountInvalid => "funding_pricing_compensation_amount_invalid",
             Self::PricingRowDecodeFailed => "funding_pricing_row_decode_failed",
-            Self::PricingHoldMissing => "funding_pricing_hold_missing",
-            Self::PricingAdjustmentMissing => "funding_pricing_adjustment_missing",
             Self::PricingPoolInvalid => "funding_pricing_pool_invalid",
             Self::PricingAdjustedOverflow => "funding_pricing_adjusted_overflow",
             Self::PricingBuyerMismatch => "funding_pricing_buyer_mismatch",
@@ -160,20 +134,7 @@ impl ReceiptRejection {
     fn stage(self) -> &'static str {
         match self {
             Self::PricingEndPriceMissing
-            | Self::PricingEndPriceInvalid
-            | Self::PricingListedPriceMissing
-            | Self::PricingListedPriceInvalid
-            | Self::PricingBuyerAmountMissing
-            | Self::PricingBuyerAmountInvalid
-            | Self::PricingSellerAmountMissing
-            | Self::PricingSellerAmountInvalid
-            | Self::PricingTaxAmountMissing
-            | Self::PricingTaxAmountInvalid
-            | Self::PricingCompensationAmountMissing
-            | Self::PricingCompensationAmountInvalid
             | Self::PricingRowDecodeFailed
-            | Self::PricingHoldMissing
-            | Self::PricingAdjustmentMissing
             | Self::PricingPoolInvalid
             | Self::PricingAdjustedOverflow
             | Self::PricingBuyerMismatch

@@ -20,6 +20,8 @@ pub struct PersistentWorker<C> {
     pub fulfillment_commands: Option<Arc<dyn SettlementFulfillmentCommandPort>>,
     pub fulfillment: FulfillmentWorkerRuntimeConfig,
     pub recovery_health: Option<RecoveryHealthRuntime>,
+    /// W11.1–W11.3 资产对账：只追加报告事实，不授权资金或资产动作。
+    pub asset_reconciliation: Option<AssetReconciliationRuntime>,
     pub recovery_store: Option<Arc<dyn RecoveryWorkStore>>,
     pub recovery_resolution: Option<Arc<dyn RecoveryResolutionStore>>,
     pub recovery_delivery: Option<Arc<dyn MailDeliveryEnqueuer>>,

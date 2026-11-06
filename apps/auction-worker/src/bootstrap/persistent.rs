@@ -115,6 +115,7 @@ pub(super) async fn run_worker(
         internal_evidence_reader,
         mail_runtime_ownership,
         mail_control_reads,
+        mail_inventory_reader,
     ) = configure_mail_poll(
         config,
         Arc::clone(&store),
@@ -289,7 +290,7 @@ pub(super) async fn run_worker(
         Some(balance_reader) => {
             let health_service = RecoveryHealthService::new(
                 RecoveryHealthConfig {
-                    worlds: recovery_worlds,
+                    worlds: recovery_worlds.clone(),
                     low_balance_threshold: config.worker.recovery.low_balance_threshold,
                     evidence_stale_after: std::time::Duration::from_secs(
                         config.worker.recovery.evidence_stale_after_seconds,
@@ -313,6 +314,29 @@ pub(super) async fn run_worker(
         None => {
             anyhow::bail!("PostgreSQL recovery health 缺少 Balance 读取端口")
         }
+    };
+    // W11.1–W11.3：只读 Armory 观察 + 数据库负债投影；未配置邮箱时不产生报告。
+    let asset_reconciliation = match mail_inventory_reader {
+        Some(inventory_reader) => {
+            let mut worlds = recovery_worlds.clone();
+            worlds.sort_by_key(|world| world.as_str());
+            worlds.dedup();
+            let service = AssetReconciliationService::new(
+                auction_application::AssetReconciliationConfig { worlds },
+                store.clone(),
+                inventory_reader,
+            )
+            .map_err(|error| anyhow::Error::msg(error.to_owned()))?;
+            Some(
+                AssetReconciliationRuntime::new(
+                    Arc::new(service),
+                    auction_jobs::ASSET_RECONCILIATION_INTERVAL,
+                    auction_jobs::ASSET_RECONCILIATION_TIMEOUT,
+                )
+                .map_err(|error| anyhow::Error::msg(error.to_owned()))?,
+            )
+        }
+        None => None,
     };
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "worker heartbeat ready publish failed");
@@ -410,6 +434,7 @@ pub(super) async fn run_worker(
                 ),
             },
             recovery_health,
+            asset_reconciliation,
             recovery_store,
             recovery_resolution,
             recovery_delivery,

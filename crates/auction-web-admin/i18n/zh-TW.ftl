@@ -1672,3 +1672,15 @@ alert-console-8h = 8 小時
 alert-console-24h = 24 小時
 alert-console-72h = 72 小時
 alert-console-page = 第 { $page } 頁
+
+dashboard-reconciliation-title = 資產對帳
+dashboard-reconciliation-state = 對帳狀態
+dashboard-reconciliation-differences = 存在差異
+dashboard-reconciliation-ok = 無差異
+dashboard-reconciliation-custody-age = 裝備持有報告年齡
+dashboard-reconciliation-solvency-age = 償付能力報告年齡
+dashboard-reconciliation-worlds = 世界
+dashboard-reconciliation-custody = 缺失裝備
+dashboard-reconciliation-solvency = 待付缺口
+dashboard-reconciliation-credits = { $credits } credits
+dashboard-reconciliation-status-unavailable = 對帳報告不可用

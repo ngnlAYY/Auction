@@ -25,7 +25,7 @@ pub(super) use model::OffsiteRecord;
 pub(super) use staging::{DIRECTORY as STAGING_DIRECTORY, reservation};
 pub(super) use state::completed_for;
 
-use model::{PENDING_FORMAT, Pending, ReplicaProgress};
+use model::{Cipher, PENDING_FORMAT, Pending, ReplicaProgress};
 use processing::Processor;
 use state::State;
 
@@ -94,6 +94,20 @@ async fn execute(
         age_version: prepared.age_version.clone(),
         archive_cipher: None,
         manifest_cipher: None,
+        scope_bundle: receipt.archive.as_ref().and_then(|archive| archive.scope.as_ref()).map(
+            |scope| Cipher {
+                file_name: scope.bundle_file_name.clone(),
+                identity: scope.bundle_identity,
+                sha256: scope.bundle_sha256.clone(),
+            },
+        ),
+        scope_sidecar: receipt.archive.as_ref().and_then(|archive| archive.scope.as_ref()).map(
+            |scope| Cipher {
+                file_name: scope.sidecar_file_name.clone(),
+                identity: scope.sidecar_identity,
+                sha256: scope.sidecar_sha256.clone(),
+            },
+        ),
         daily: ReplicaProgress::default(),
         write_monthly: None,
         monthly: ReplicaProgress::default(),

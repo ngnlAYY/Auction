@@ -22,14 +22,14 @@ pub(super) const MAX_RECORD_BYTES: u64 = 1024 * 1024;
 /// 只在本机回执中用于防替换；不是内容校验或可移植恢复契约。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct FileIdentity {
+pub(in crate::backup) struct FileIdentity {
     pub device: u64,
     pub inode: u64,
     pub bytes: u64,
 }
 
 impl FileIdentity {
-    pub(super) fn of(metadata: &Metadata) -> Self {
+    pub(in crate::backup) fn of(metadata: &Metadata) -> Self {
         Self { device: metadata.dev(), inode: metadata.ino(), bytes: metadata.len() }
     }
 }

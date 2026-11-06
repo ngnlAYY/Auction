@@ -10,9 +10,11 @@ pub(crate) const MAX_MESSAGE_TEXT_BYTES: usize = 8 * 1024 * 1024;
 pub(crate) const INBOX_TIME_FORMAT: &str = "%Y-%m-%d %H:%M";
 
 mod balance;
+mod inventory;
 mod message;
 mod sent;
 
 pub use balance::*;
+pub use inventory::*;
 pub use message::*;
 pub use sent::*;

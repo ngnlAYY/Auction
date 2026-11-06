@@ -13,14 +13,14 @@ use auction_application::{
 };
 #[cfg(feature = "postgres")]
 use auction_application::{
-    OPERATIONS_ALERT_DIGEST_INTERVAL, OperationsAlertBatchItem, OperationsAlertCredentialSnapshot,
-    OperationsAlertDeliverySnapshot, OperationsAlertForumSnapshot,
-    OperationsAlertFulfillmentSnapshot, OperationsAlertKind, OperationsAlertLifecycleSnapshot,
-    OperationsAlertMailSnapshot, OperationsAlertNotificationSnapshot,
-    OperationsAlertProcessSnapshot, OperationsAlertProcessState, OperationsAlertRecoverySnapshot,
-    OperationsAlertRecoveryWorld, OperationsAlertSeverity, OperationsAlertSignal,
-    OperationsAlertSource, RequestHash, body_digest, canonical_summary, canonical_summary_prefix,
-    request_hash,
+    AssetReconciliationStore, OPERATIONS_ALERT_DIGEST_INTERVAL, OperationsAlertBatchItem,
+    OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot,
+    OperationsAlertForumSnapshot, OperationsAlertFulfillmentSnapshot, OperationsAlertKind,
+    OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
+    OperationsAlertNotificationSnapshot, OperationsAlertProcessSnapshot,
+    OperationsAlertProcessState, OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
+    OperationsAlertSeverity, OperationsAlertSignal, OperationsAlertSource, RequestHash,
+    body_digest, canonical_summary, canonical_summary_prefix, request_hash,
 };
 #[cfg(feature = "postgres")]
 use auction_observability::{HeartbeatStatus, HeartbeatStore, ServiceName, TracingStatus};

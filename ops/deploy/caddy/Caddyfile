@@ -19,6 +19,8 @@
 
 	reverse_proxy {$AUCTION_CADDY_PUBLIC_UPSTREAM:127.0.0.1:8090} {
 		header_up Host {hostport}
+		# Caddy 默认把浏览器侧协议写入 X-Forwarded-Proto；HSTS 依赖该头，
+		# 不要改成固定值。应用只在收到可信代理的 https 证明时才发送 HSTS。
 	}
 }
 

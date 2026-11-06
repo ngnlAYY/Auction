@@ -1,8 +1,8 @@
 //! PostgreSQL delivery Admin 人工命令事务与结算履约联动。
 
 use auction_application::{
-    DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminResult,
-    DeliveryAdminSnapshot, RequestHash,
+    DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminGuardDecision,
+    DeliveryAdminGuardSnapshot, DeliveryAdminResult, DeliveryAdminSnapshot, RequestHash,
 };
 use chrono::Utc;
 use serde::Serialize;
@@ -66,8 +66,9 @@ async fn execute_transaction(
         return Ok(result);
     }
 
-    // 已提交的原命令先重放；新的人工命令不能改写已有资金绑定的出站责任。
-    // 本轮五种动作均拒绝，避免delivery→fulfillment/recovery反锁及凭声明释放/重发。
+    // 已提交的原命令先重放；新的人工命令不能改写已有资金绑定的出站责任。资金锁必须先于
+    // delivery→fulfillment/recovery 读取，已绑定资金时立即失败关闭，避免反序取锁。
+    // 该判定在领域守卫中重复一次，便于同一闭集阻断项覆盖所有调用路径。
     let funded = crate::database::settlement_funding::lock_funded_delivery_account(
         transaction.transaction_mut()?,
         command.delivery_id,
@@ -140,19 +141,13 @@ async fn execute_transaction(
     .fetch_one(transaction.connection()?)
     .await
     .map_err(DeliveryAdminTransactionError::Sqlx)?;
-    if retired {
-        return Err(DeliveryAdminError::Invalid.into());
-    }
-    if current.fencing_version != command.expected_fencing_version {
-        return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Stale));
-    }
     // Worker 已在完整 Sent 中目击同一结算义务主题时，重试可能重复寄出现金或装备，判失败会
-    // 把已成交误记为未发，两者失败关闭并转人工 Sent 证明；目击只由当前人工核对行的维护写入。
-    if matches!(
+    // 把已成交误记为未发；目击只由当前人工核对行的维护写入，动作准入在领域闭集中判定。
+    let sent_reference_sighted = if matches!(
         command.action,
         DeliveryAdminAction::ReconcileRetry | DeliveryAdminAction::ReconcileFailed
     ) {
-        let sighted: bool = sqlx::query_scalar(
+        sqlx::query_scalar(
             "SELECT COALESCE(result_metadata,'{}'::jsonb) ? 'sent_reference_sighting'
              FROM public.deliveries
              WHERE id=$1 AND origin_kind='settlement' AND payload_operation='send'",
@@ -161,35 +156,53 @@ async fn execute_transaction(
         .fetch_optional(transaction.connection()?)
         .await
         .map_err(DeliveryAdminTransactionError::Sqlx)?
-        .unwrap_or(false);
-        if sighted {
-            return Err(DeliveryAdminError::SentSighted.into());
-        }
-    }
-    if command.action == DeliveryAdminAction::ReconcileSucceeded {
-        let payload: serde_json::Value =
-            row.try_get("payload").map_err(DeliveryAdminTransactionError::Sqlx)?;
-        // 裸 external_reference 不是 Sent 内容证明；人工对账不能绕过主动寄送的成功门。
-        if payload.get("operation").and_then(serde_json::Value::as_str) == Some("send") {
-            return Err(DeliveryAdminError::Invalid.into());
-        }
-    }
-
-    if matches!(
+        .unwrap_or(false)
+    } else {
+        false
+    };
+    let checks_lot_eligibility = matches!(
         command.action,
         DeliveryAdminAction::Release
             | DeliveryAdminAction::RetryFailed
             | DeliveryAdminAction::ReconcileRetry
-    ) && !crate::database::lot_watch::delivery_eligible(
-        transaction.transaction_mut()?,
-        command.delivery_id,
-    )
-    .await
-    .map_err(DeliveryAdminTransactionError::Sqlx)?
-    {
-        return Err(DeliveryAdminError::Stale.into());
+    );
+    let lot_eligible = if checks_lot_eligibility {
+        Some(
+            crate::database::lot_watch::delivery_eligible(
+                transaction.transaction_mut()?,
+                command.delivery_id,
+            )
+            .await
+            .map_err(DeliveryAdminTransactionError::Sqlx)?,
+        )
+    } else {
+        None
+    };
+    let payload: serde_json::Value =
+        row.try_get("payload").map_err(DeliveryAdminTransactionError::Sqlx)?;
+    let guard = DeliveryAdminGuardSnapshot {
+        action: command.action,
+        expected_fencing_version: command.expected_fencing_version,
+        fencing_version: current.fencing_version,
+        status: current.status.clone(),
+        reason_code: current.reason_code.clone(),
+        origin_kind: current.origin_kind.clone(),
+        payload_operation: payload
+            .get("operation")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        sent_reference_sighted,
+        funded_delivery: funded.is_some(),
+        retired,
+        lot_eligible,
+        has_reconcile_reference: command.external_reference.is_some(),
+    };
+    let decision = guard.evaluate();
+    if let Some(blocker) = decision.blockers.first() {
+        return Err(blocker.error().into());
     }
-    let next_status = apply_delivery_action(&mut transaction, command, &current).await?;
+    let next_status = decision.transition.next_status;
+    apply_delivery_action(&mut transaction, command, &current, &decision).await?;
     if command.action == DeliveryAdminAction::RetryFailed
         || command.action == DeliveryAdminAction::ReconcileRetry
     {
@@ -390,7 +403,7 @@ async fn existing_command(
     if result.command_id != command.command_id
         || result.snapshot.id != command.delivery_id
         || !valid_snapshot(&result.snapshot)
-        || result.snapshot.status != delivery_action_transition(command.action).1
+        || result.snapshot.status != command.action.transition().next_status
         || result.snapshot.fencing_version <= command.expected_fencing_version
     {
         return Err(DeliveryAdminTransactionError::Business(
@@ -404,38 +417,16 @@ async fn apply_delivery_action(
     transaction: &mut PostgresDeliveryAdminTransaction,
     command: &DeliveryAdminCommand,
     current: &DeliveryAdminSnapshot,
+    decision: &DeliveryAdminGuardDecision,
 ) -> Result<&'static str, DeliveryAdminTransactionError> {
-    let (expected_status, next_status) = delivery_action_transition(command.action);
-    if current.status != expected_status {
-        return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Stale));
-    }
-    let quarantined_mail = current.reason_code.as_deref() == Some("mail_disposition_conflict");
-    if quarantined_mail && command.action != DeliveryAdminAction::ReconcileFailed {
-        // 隔离发生在发送前；旧 payload 没有重新发送或伪装外部成功的授权。人工核对后
-        // 只能终结这一意图，资产修复必须保留独立证据，不能借通用 retry 绕过接受事实。
-        return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Invalid));
-    }
-    let (external_reference, failure_code, metadata) = match command.action {
-        DeliveryAdminAction::ReconcileSucceeded => (
-            command.external_reference.as_deref(),
-            None,
-            serde_json::json!({"resolution":"admin_reconciled_succeeded"}),
-        ),
-        DeliveryAdminAction::ReconcileFailed => (
-            None,
-            command.failure_code.as_deref(),
-            if quarantined_mail {
-                serde_json::json!({
-                    "resolution": "admin_reconciled_failed",
-                    "reason_code": "mail_disposition_conflict",
-                    "preflight_blocked": true,
-                    "outcome_unknown": false,
-                })
-            } else {
-                serde_json::json!({"resolution":"admin_reconciled_failed"})
-            },
-        ),
-        _ => (None, None, serde_json::json!({})),
+    let next_status = decision.transition.next_status;
+    let external_reference = match command.action {
+        DeliveryAdminAction::ReconcileSucceeded => command.external_reference.as_deref(),
+        _ => None,
+    };
+    let failure_code = match command.action {
+        DeliveryAdminAction::ReconcileFailed => command.failure_code.as_deref(),
+        _ => None,
     };
     let result = sqlx::query(
         r#"UPDATE public.deliveries
@@ -461,9 +452,9 @@ async fn apply_delivery_action(
     .bind(next_status)
     .bind(external_reference)
     .bind(failure_code)
-    .bind(metadata)
-    .bind(expected_status)
-    .bind(command.expected_fencing_version)
+    .bind(&decision.result_metadata)
+    .bind(decision.transition.expected_status)
+    .bind(current.fencing_version)
     .execute(transaction.connection()?)
     .await
     .map_err(DeliveryAdminTransactionError::Sqlx)?;
@@ -471,17 +462,6 @@ async fn apply_delivery_action(
         return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Stale));
     }
     Ok(next_status)
-}
-
-/// 返回 Admin 动作唯一允许的起止状态；账本回放必须复用同一映射，不能只验证快照形状。
-const fn delivery_action_transition(action: DeliveryAdminAction) -> (&'static str, &'static str) {
-    match action {
-        DeliveryAdminAction::Release => ("claimed", "pending"),
-        DeliveryAdminAction::RetryFailed => ("failed", "pending"),
-        DeliveryAdminAction::ReconcileRetry => ("manual_reconcile", "pending"),
-        DeliveryAdminAction::ReconcileSucceeded => ("manual_reconcile", "succeeded"),
-        DeliveryAdminAction::ReconcileFailed => ("manual_reconcile", "failed"),
-    }
 }
 
 async fn reset_settlement_fulfillment(

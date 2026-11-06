@@ -18,6 +18,18 @@ pub enum SettlementFulfillmentState {
     Enqueued,
 }
 
+impl SettlementFulfillmentState {
+    /// 只接受领取集合允许的持久阶段；未知阶段失败关闭。
+    pub fn from_name(value: &str) -> Option<Self> {
+        match value {
+            "pending" => Some(Self::Pending),
+            "prepared" => Some(Self::Prepared),
+            "enqueued" => Some(Self::Enqueued),
+            _ => None,
+        }
+    }
+}
+
 /// 结算义务交给 delivery owner 时使用的操作闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettlementFulfillmentOperation {
@@ -32,6 +44,15 @@ impl SettlementFulfillmentOperation {
         match self {
             Self::Send => "send",
             Self::Return => "return",
+        }
+    }
+
+    /// 只接受闭集取值；未知操作失败关闭。
+    pub fn from_name(value: &str) -> Option<Self> {
+        match value {
+            "send" => Some(Self::Send),
+            "return" => Some(Self::Return),
+            _ => None,
         }
     }
 }
@@ -142,6 +163,22 @@ pub struct SettlementFulfillmentClaim {
     pub lease_until: DateTime<Utc>,
     /// 已持久化释放次数；领取本身不增加该值。
     pub retry_count: u32,
+}
+
+impl SettlementFulfillmentClaim {
+    /// claim 自身身份必须完整；失败关闭为仓储错误，不尝试修复或默认填充。
+    pub fn validate_identity(&self) -> Result<(), crate::RepositoryError> {
+        if self.obligation_id.is_nil()
+            || self.claim_token.is_nil()
+            || self.claim_fencing <= 0
+            || self.state_version == 0
+            || self.worker_id.is_empty()
+            || self.worker_id != self.worker_id.trim()
+        {
+            return Err(crate::RepositoryError::Failed("结算履约 claim 身份无效".to_owned()));
+        }
+        Ok(())
+    }
 }
 
 /// users owner 返回的当前履约收件人投影。

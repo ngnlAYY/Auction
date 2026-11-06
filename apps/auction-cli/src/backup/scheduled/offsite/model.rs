@@ -76,6 +76,23 @@ pub(in crate::backup::scheduled) struct ReplicaRecord {
     pub manifest: BackupObject,
     pub completion: BackupObject,
     pub verified_at: DateTime<Utc>,
+    /// 旧 v1 副本没有范围对象；新副本在 daily/monthly 各自保存。
+    #[serde(default)]
+    pub scope: Option<ScopeReplica>,
+}
+
+/// 范围密文与公开 sidecar 的远端对象；sidecar 最后上传，便于下载侧先核对摘要。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(in crate::backup::scheduled) struct ScopeReplica {
+    pub bundle: Option<BackupObject>,
+    pub sidecar: Option<BackupObject>,
+}
+
+impl ScopeReplica {
+    pub(in crate::backup::scheduled) fn complete(&self) -> Option<(BackupObject, BackupObject)> {
+        Some((self.bundle.clone()?, self.sidecar.clone()?))
+    }
 }
 
 /// 最后发布到远端的完成记录；生成一次后先持久化，重试不改变时间或序列化字节。
@@ -90,6 +107,8 @@ pub(super) struct UploadRecord {
     pub plaintext_manifest_sha256: String,
     pub age_version: String,
     pub verified_at: DateTime<Utc>,
+    #[serde(default)]
+    pub scope: Option<ScopeReplica>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -99,6 +118,8 @@ pub(super) struct ReplicaProgress {
     pub manifest: Option<BackupObject>,
     pub record: Option<UploadRecord>,
     pub completion: Option<BackupObject>,
+    #[serde(default)]
+    pub scope: Option<ScopeReplica>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +143,12 @@ pub(super) struct Pending {
     pub age_version: String,
     pub archive_cipher: Option<Cipher>,
     pub manifest_cipher: Option<Cipher>,
+    /// 已封存的 archive 范围密文；不重新加密，只上传原字节。
+    #[serde(default)]
+    pub scope_bundle: Option<Cipher>,
+    /// 范围 sidecar 是摘要投影，明文上传；它绑定密文的字节数与 SHA-256。
+    #[serde(default)]
+    pub scope_sidecar: Option<Cipher>,
     pub daily: ReplicaProgress,
     /// None 尚未判断；true 为本备份写月副本；false 为该月已有其他完成副本。
     pub write_monthly: Option<bool>,

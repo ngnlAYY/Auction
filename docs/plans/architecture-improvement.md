@@ -238,7 +238,7 @@
 | W1.0 | 已提交 | `b2ccb9fd` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；完整 Read Mail 观察降频为每小时、维护独立循环、isekai 相位错峰，回退开关 `poll_isolation_enabled`；待用户部署后按“维护不再超时、`mail-maintenance-*` p95 < 60 秒”验收 |
 | W1.4（发送基线切片） | 已提交 | `fa46d605` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 J）实现、Claude 监督；发送前临时 MID 边界 + 前缀扫描，`[worker.mooglemail] sent_baseline_mode` 默认 `shadow`；切换 `watermark` 前须完成浏览器 MID 语义核实与至少一个完整场次周期的影子观察；常规轮水位与每日校验仍随 M3 |
 | W2 | 已提交 | 随本提交 | — | 迁移 088 处置事实与确认命令；Admin 判失败/装备损失/confirm-sent/预检退役/告警收口 |
-| W3 | 进行中 | — | — | W3.1–W3.3、W3.7、W3.8 已提交；W3.4–W3.6 待做 |
+| W3 | 已提交 | 随本提交 | — | W3.1–W3.8：准入/状态机/排期/Admin 守卫/COD 收据/claim 一致性；无迁移收窄 |
 | W4 | 已提交 | 随本提交 | — | W4.1–W4.6 详情/检索/玩家支持已完成；迁移 087 |
 | W5 | 已提交 | 随本提交 | — | 089 告警台；091 主机侧备份/磁盘/WAL；CLI `alert report`；readiness 默认 classified |
 | W6.3 | 已提交 | `2241689b`、本分支 | 未部署 | MoogleMail、公开论坛主题/登录、PM 列表/详情、主世界战斗页均有真实脱敏样本；论坛与邮件 manifest 分开维护 |
@@ -254,7 +254,7 @@
 | W8 | 未开始 | — | — | 放在 M6 最后 |
 | W9.7 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；CLI 审计 `source=cli`，metadata 添加 `entrypoint=cli`、`os_uid`、可选 `sudo_user`；`--actor` 仍必填；Admin 保持 `source=admin`；迁移 078 breaking；Admin 审计页支持 cli |
 | W9.5 | 已提交 | 随本提交 | — | Admin 全局登录退避（5 次后 1→60s）、IPv6 /64、失败 WARN、复用 401/429 指标；首次设置 64 hex 随机密钥且最短 32 字节；短密钥/可信代理警告；拒绝 /0 trusted proxy；CDN 专用转发头拒绝 |
-| W9 | 进行中 | — | — | W9.5/W9.6/W9.7/W9.9 已提交；W9.3/W9.4/W9.8/W9.10/W9.11 待做 |
+| W9 | 进行中 | — | — | W9.4/W9.5/W9.6/W9.7/W9.9 已提交；W9.3 数据密钥环待做 |
 | W10 | 进行中 | — | 未部署 | W10.1–W10.3、W10.6–W10.8 已提交；W10.4 政策 v2 与 `db retention-dry-run` 只读演练已实现（未提交、未部署），实际删除仍待只读演练回执与用户批准，W10.5/W10.9 待做 |
 | W10.1 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`backup scheduled` + systemd timer 模板（每日 UTC 03:15），回执 `auction-backup-run.v1`；本地 2026-11-04 已启用用户级 timer 并完成一次 systemd oneshot create+verify+retention；仍待连续 7 天成功与一次人为失败核验 |
 | W10.2 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；主机 `age` 公钥加密 + `object_store` 上传 R2 日/月前缀、完整回读校验，`[backup.offsite]` 默认关闭；本地 2026-11-04 已用 `hv-auction` bucket 完成首次 daily/monthly 上传、bucket lock 覆盖/删除 409、age 解密与隔离 PG18 恢复；仍待三组数据密钥加密列解密、生命周期规则核验与 `age` 私钥离线托管 |
@@ -262,7 +262,7 @@
 | W10.7 | 已提交 | 随本提交 | 未部署 | WAL archive/upload、zstd+age、R2 `wal/`、weekly `pg_basebackup` 至 `base/`、保留 3 份、systemd timer；本地隔离 PG18 PITR 演练通过：恢复到目标时间 rows=1,2，排除之后 rows=3 |
 | W10.8 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；`ops/postgres/postgresql.conf.example`、`autovacuum.sql.example`、`extensions.sql.example` 与说明；连接预算 64/97、`pg_stat_statements`、慢查询/锁等待/autovacuum 日志、热行表与只追加表参数；`archive_mode=off`，W10.7 再启用；重启受 W7.5 |
 | W11.4 | 已提交 | 随本提交 | — | 只读一致性巡检：lot/bid 投影、补偿池、义务链、delivery/义务、realtime 序号、慢代理残留；每项预算 5s/总 40s，最多 100 样本；结果追加 audit_records；CLI `db inspect-consistency` |
-| W11 | 未开始 | — | — | W11.4 随 M2a；W11.2 改为偿付能力报告（v11） |
+| W11 | 已提交 | 随本提交 | — | W11.1–W11.4：装备持有核对、偿付能力、追加报告、一致性巡检；迁移 095 |
 | W12 | 已提交 | — | — | W12.1–W12.8 已提交：outbox、队列、提交后唤醒、键列化、体积预算 |
 | W13 | 进行中 | — | 未部署 | W13.1、W13.2、W13.4、W13.5 已提交；W13.3a 已提交，W13.3b 延后到 M2a（决策 75）；W13.6 随 M6 |
 | W13.1 | 已提交 | `42bd8477` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 B）实现、Claude 监督；`check.sh ratchet`，基线 `ci/checks/source-ratchet.baseline`（14 项） |

@@ -9,6 +9,7 @@ use super::{PersistentWorker, merge_worker_result, poll_delay, process_recovery_
 use crate::worker::diagnostics;
 
 mod actions;
+mod assets;
 mod cases;
 mod common;
 mod health;
@@ -16,6 +17,7 @@ mod resolutions;
 mod returns;
 
 use actions::process_actions;
+use assets::reconcile_assets;
 use cases::advance_cases;
 use common::{observe_phase, run_phase};
 use health::refresh_health;
@@ -78,6 +80,7 @@ where
 {
     let mut batch_result = WorkerResult::Success;
     refresh_health(worker, &mut batch_result).await;
+    reconcile_assets(worker, &mut batch_result).await;
     advance_cases(worker, &mut batch_result).await;
     record_returns(worker, &mut batch_result).await;
     process_actions(worker, &mut batch_result).await;

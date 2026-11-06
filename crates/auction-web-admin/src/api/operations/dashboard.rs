@@ -162,6 +162,26 @@ pub(crate) struct AdminDeliveryData {
 
 pub(crate) type AdminDeliverySection = AdminDashboardSection<AdminDeliveryData>;
 
+/// W11.1–W11.3 单个 world 的资产对账差异摘要。
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AdminReconciliationWorld {
+    pub world: String,
+    pub custody_missing_count: i64,
+    pub solvency_shortfall_credits: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AdminReconciliationData {
+    pub observed_at: String,
+    pub custody_report_age_seconds: i64,
+    pub solvency_report_age_seconds: i64,
+    pub worlds: Vec<AdminReconciliationWorld>,
+}
+
+pub(crate) type AdminReconciliationSection = AdminDashboardSection<AdminReconciliationData>;
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AdminFulfillmentData {
@@ -214,6 +234,7 @@ pub(crate) struct AdminDashboardSnapshot {
     pub fulfillment: AdminFulfillmentSection,
     pub recovery: AdminRecoverySection,
     pub alerting: AdminAlertingSection,
+    pub reconciliation: AdminReconciliationSection,
 }
 
 async fn fetch_dashboard_snapshot() -> Result<AdminDashboardSnapshot, String> {
@@ -238,6 +259,7 @@ async fn fetch_dashboard_snapshot() -> Result<AdminDashboardSnapshot, String> {
         fulfillment: decode_section(snapshot.fulfillment, true)?,
         recovery: decode_section(snapshot.recovery, true)?,
         alerting: decode_section(snapshot.alerting, false)?,
+        reconciliation: decode_section(snapshot.reconciliation, true)?,
     })
 }
 
@@ -285,6 +307,7 @@ fn valid_dashboard_shape(value: &Value) -> bool {
             "fulfillment",
             "recovery",
             "alerting",
+            "reconciliation",
         ],
     ) else {
         return false;
@@ -304,6 +327,27 @@ fn valid_dashboard_shape(value: &Value) -> bool {
         && valid_section(&dashboard["fulfillment"], valid_fulfillment_shape, true)
         && valid_section(&dashboard["recovery"], valid_recovery_shape, true)
         && valid_alerting_section(&dashboard["alerting"])
+        && valid_section(&dashboard["reconciliation"], valid_reconciliation_shape, true)
+}
+
+fn valid_reconciliation_shape(value: &Value) -> bool {
+    let Some(data) = value.as_object() else {
+        return false;
+    };
+    data.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>()
+        == ["custody_report_age_seconds", "observed_at", "solvency_report_age_seconds", "worlds"]
+            .into_iter()
+            .collect()
+        && data["worlds"].as_array().is_some_and(|worlds| {
+            worlds.len() <= 2
+                && worlds.iter().all(|world| {
+                    exact_object(
+                        world,
+                        &["custody_missing_count", "solvency_shortfall_credits", "world"],
+                    )
+                    .is_some()
+                })
+        })
 }
 
 fn valid_section(

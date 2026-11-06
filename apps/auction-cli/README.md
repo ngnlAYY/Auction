@@ -46,7 +46,7 @@ cargo build --locked --release -p auction-cli --features postgres,cache-redis
 | `config` | `show <role>`、`check [--strict]` | 只读文件 |
 | `service` | `status`、`start`、`stop`、`restart` | 启停 systemd unit；start/restart 执行迁移 |
 | `db` | `status`、`migrate`、`grants`、`create`、`preflight`、`inventory`、`retention-dry-run`、`inspect-consistency`、`rebuild` | migrate/create/rebuild 写入；retention-dry-run 只读 |
-| `backup` | `create`、`verify`、`restore`、`scheduled` | restore 写数据库；scheduled 写本地备份/回执并按资格清理，可选 age 加密/R2 副本与外部打卡 |
+| `backup` | `create`、`verify`、`restore`、`scheduled`、`scope-extract` | restore 写数据库；scheduled 写本地备份/回执并按资格清理，可选 age 加密/R2 副本与外部打卡；scope-extract 只写新的解出目录 |
 | `wal` | `archive`、`base-backup`、`upload` | archive/base-backup 写本地暂存（`archive_command` 与每周 timer 入口）；upload 读暂存、写 R2 `wal/` 与 `base/` 前缀，按规则清理本地副本 |
 | `alert` | `report` | 只读主机证据；写入 `backup`/`wal` 两个运维告警来源 |
 | `credential` | `list`、`import` | import 写入 |
@@ -218,12 +218,16 @@ auction-cli backup restore --manifest /var/backups/auction/auction-20261030.dump
   --owner-secrets /etc/auction/owner/postgres.toml --dry-run
 auction-cli backup restore --manifest /var/backups/auction/auction-20261030.dump.manifest --database auction \
   --owner-secrets /etc/auction/owner/postgres.toml --receipt /var/backups/auction/restore-20261030.json
+auction-cli backup scope-extract --manifest /var/backups/auction/auction-20261030.dump.manifest --database auction \
+  --identity /offline/age-identity.txt --output-dir /srv/restore/scope-20261030
 ```
 
 - 依赖部署环境 `PATH` 中的 `pg_dump`/`pg_restore`，主版本不得低于服务器（PostgreSQL 18）。连接参数投影复用实际 SQLx 连接选项的有效 host/socket、port、database 与 user；仅传最终 `PGHOST`，不独立保留 `PGHOSTADDR`，避免预检与外部工具因查询覆盖规则不同而连接不同实例。继承的连接相关 `PG*` 环境全部清除，显式口令只写入 0600 临时 passfile 并在命令结束后删除，从不进入进程参数；TLS 与显式口令仍从敏感配置提取，不承诺与 SQLx 的全部环境默认值或隐式凭据来源一致。连接串只能含 `host`、`hostaddr`、`port`、`dbname`、`user`、`password`、`sslmode`、`sslrootcert`、`sslcert`、`sslkey`、`application_name`（另兼容 SQLx 的 TLS 别名与 `statement-cache-capacity`），`options` 与未知参数被拒绝。
 - `create`：`--output` 必须以 `.dump` 结尾，文件名不得含反斜杠、控制字符或首尾空白，archive 与同目录 `<archive>.manifest` 均不得已存在。备份源须有 Auction schema 身份与完整迁移历史；`pg_dump --format=custom --no-owner --no-privileges` 写入临时文件，经 `pg_restore --list` 解析并同步 archive 文件后以硬链接无覆盖发布，随后同步父目录并写入 manifest；备份前后 schema 版本不一致则丢弃 archive。
 - manifest 格式为 `auction-postgres-backup.v1`，记录 archive 文件名、archive SHA-256、库名 SHA-256、schema 版本与创建时间；此前运维工具生成的同格式备份可直接校验与恢复。
-- `verify`：不连接数据库，校验 manifest 字段闭集、库名摘要、archive SHA-256 与 archive 目录。
+- `create` 在 `[backup.scope]` 启用时还会收集运行配置、邮件诊断证据与部署回执，打包为 `<archive>.scope.bundle.age` 并写下 `<archive>.scope.json`；这一步失败时 archive/manifest 保留但不带范围 sidecar。
+- `verify`：不连接数据库，校验 manifest 字段闭集、库名摘要、archive SHA-256 与 archive 目录；存在备份范围 sidecar 时同时校验配对名称、密文字节数与 SHA-256，并在 `scope` 字段输出不含路径的投影。
+- `scope-extract`：`[backup.scope]` 启用时生成的数据库之外材料（运行配置、加密邮件诊断证据、部署回执）。先用 `--identity` 指定的离线 age 私钥解密 `<archive>.scope.bundle.age` 到输出目录内的私有临时文件，核对 sidecar 的整体摘要、文件数与逐条摘要，确认无误后才把每个文件以 0600 写入全新目录；目标目录必须不存在或为空，拒绝覆盖与符号链接，临时明文在校验后删除；中途失败可能留下已写文件，不要把它们混入生产目录。与 `verify` 一样需要 PATH 中有 `pg_restore`。回执格式 `auction-backup-scope-extract.v1` 只含摘要、来源类型、文件数与目录。
 - `restore`：通过停机门禁；备份 schema 版本不得高于当前二进制；目标必须是同名空库（零其他会话、可写主节点、无用户对象、无 schema 身份与迁移历史，可先用 `db rebuild --mode empty-for-restore` 准备）。恢复前再次校验恢复点，以 `pg_restore --single-transaction --exit-on-error --no-owner --no-privileges` 执行，完成后核对 schema 身份与迁移版本等于备份版本，再写入 `auction-postgres-restore.v1` 回执。恢复较旧备份后按提示执行 `db migrate --owner-secrets`。
 - 恢复以 `--no-owner --no-privileges` 执行，对象 owner 与 ACL 都不在 dump 中：恢复后对象归迁移 owner，回执的 `ownership_restored=false`。备份版本已含`000081` 时命令会在核对 schema 后重放运行账号授权并记录 `runtime_privileges_applied=true`；缺失授权函数或以旧版本恢复时保持停机并提示先 `db migrate`。
 
@@ -239,7 +243,7 @@ auction-cli --config-dir /etc/auction backup scheduled --database auction \
 
 三个参数均必填。输出与状态目录必须为不含 `..`、无符号链接的绝对路径，彼此不重叠，归执行账号所有且为 0700；缺失时创建。用固定的执行账号、输出目录与状态目录，避免把一套备份的清理证据拆散。运行账号须能读取 Worker 角色文件及其引用的 common、敏感与可选 runtime 文件，并在 PATH 中提供 PG18 客户端工具；启用异机副本时还须提供主机 `age`，服务器只放收件人公钥。
 
-命令先取得状态目录独占锁，再收口残留运行记录；取锁失败只写 stderr 并退出 3，不创建运行记录或回执。持锁后初始化本次运行记录，调用与手动 create 相同的 Worker loader，再执行 `validate_backup()`；不联合加载 Public/Admin。随后在总预算内取得输出目录锁，检查磁盘 →（启用异机时 age 版本预检）→ create → 再检查磁盘 → verify →（本次加密及日/月副本、逐项重试旧项）→ 本地保留清理 → 发布终态回执 → 可选打卡。create 消费同一次加载得到的 Worker 快照。备份只读取数据库，不停服、不迁移、不执行恢复。本地策略和可选 `[backup.offsite]` 见[配置参考](../../ops/config/README.md#定时备份策略)。手动 create/verify/restore 的参数与 stdout 保持原契约。
+命令先取得状态目录独占锁，再收口残留运行记录；取锁失败只写 stderr 并退出 3，不创建运行记录或回执。持锁后初始化本次运行记录，调用与手动 create 相同的 Worker loader，再执行 `validate_backup()`；不联合加载 Public/Admin。随后在总预算内取得输出目录锁，检查磁盘 →（启用异机时 age 版本预检）→ create →（启用备份范围时打包并加密范围证据、写下 sidecar）→ 再检查磁盘 → verify（同时校验范围 sidecar）→（本次加密及日/月副本、逐项重试旧项）→ 本地保留清理 → 发布终态回执 → 可选打卡。create 消费同一次加载得到的 Worker 快照。备份只读取数据库，不停服、不迁移、不执行恢复。本地策略和可选 `[backup.offsite]` 见[配置参考](../../ops/config/README.md#定时备份策略)。手动 create/verify/restore 的参数与 stdout 保持原契约。
 
 archive 命名为 `scheduled-<UTC秒时间>-<run_id>.dump`。本次新备份通过 verify 及已启用的副本阶段后，保留它和最近 N−1 份符合资格的旧备份：旧备份须在同一输出目录、有匹配库名摘要的 `completed` 回执、命名与运行 ID 一致、曾通过校验，且设备号/inode/大小与回执一致。文件必须是当前账号所有的 owner-only 普通单链接文件。删除前只复核这些证据和文件元数据，不重新读取旧 archive 或执行 verify；先删 manifest，再删 archive。本地校验前失败的运行回执（无 archive 或 verified 为 false）静默忽略，不记副本异常；已通过本地校验但副本资格不足时才记 `replica_not_verified`，副本证据不可读或无效时记 `replica_evidence_invalid`。实际目录项异常或无完成证明时仍记入 `cleanup.skipped` 并保留；列表最多记录 256 项，另有完整计数。手动备份和不完整备份不会自动删除。该次启用了异机副本时还要求 daily 完成证据；旧 v1 回执缺省为未启用，保持原清理资格。旧 failed/interrupted 项重试成功时追加 `offsite/completed/<run_id>.json`（`auction-backup-offsite.v1`），绑定原库名、输出目录和明文 manifest 摘要；清理可以使用这个事实，但不改写原运行终态。`offsite-staging/` 子目录不进入清理枚举或跳过噪音。
 
@@ -247,7 +251,7 @@ archive 命名为 `scheduled-<UTC秒时间>-<run_id>.dump`。本次新备份通�
 
 本次新副本优先处理，然后按开始时间重试旧待上传项；有限预算优先取得最新恢复点，不被积压饿死。重试共用总预算，检查目的地、公钥绑定、文件身份和摘要。无效、不可读、原回执不匹配或目的地已变更的旧任务跳过并保留原文件和密文，在 `offsite.skipped_pending` 记录固定原因码告警；这些跳过告警本身不使本次失败。单个项目上传、冲突或收口失败记录到 `offsite.failed_items`，继续其他项目；全部处理完或总预算耗尽时，只要有失败，本次 outcome 为 failed、退出 3，failure 保留首个失败的阶段与固定错误码。正在执行时 outcome 保持 running，预算耗尽将活动项目记为 timeout，且不覆盖更早的失败；状态目录整体无法枚举或运行记录无法写入时仍停止推进。任务持久保存原密文身份、摘要、已校验对象及固定字节的完成记录；上传失败退出 3，保留本地备份、密文和任务。daily 和所需 monthly 完成后追加本地完成事实，删除暂存密文与待上传项。长期失败会使本地积累直到 `disk_low`，不通过删除尚未取得副本资格的备份腾空间。
 
-对象路径为 `<prefix>/daily/YYYY/MM/DD/<run_id>/<文件名>`，日期取 manifest `created_at` 的 UTC 日期。每个目的地、每个备份 UTC 月的第一份完成副本还把相同密文写入 `monthly/YYYY/MM/<run_id>/`。月标记保存在 `<state-dir>/offsite/months/`；缺失时遍历 LIST 的全部月完成记录，格式、字段、缺件或长度/摘要无效的逐条跳过，只输出固定原因码 `monthly_record_invalid`。遇到首份完整有效记录即恢复标记；全部无效则正常创建本次月副本，LIST/GET 传输或权限错误仍使该项目失败。旧任务先前的未完成月选择会复核，避免新副本已完成后再次发布另一份月完成记录。先上传 archive、再 manifest，最后发布 `completed.json`（`auction-backup-upload.v1`：run_id、created_at、两份对象名/长度/密文 SHA-256/状态、明文 manifest SHA-256、age 版本、校验时间）；没有完成记录的副本不是成功恢复点。单次 PUT 原生 create-only；超过 128 MiB 用 64 MiB 起的分片、最多 10000 parts、并发最多 2。分片先 HEAD，其完成请求没有条件写入，依靠 bucket lock、唯一命名、原密文重用与完整校验保护不可变性。409/412 或响应丢失后，已有对象长度和完整 SHA-256 一致记 `already_present`，不一致为冲突；不覆盖、删除或换名。所有对象均 HEAD + 顺序区间回读校验；每个 get_range 不超过 64 MiB，累计实际长度和全部字节的 SHA-256，两个结果均匹配才承认成功。每段受 300 秒请求超时约束，整体仍受本次运行预算约束，不把 ETag 当摘要；工具不删除远端对象，淘汰由 bucket 生命周期完成。
+启用备份范围时，同一 daily/monthly 前缀下还会上传 `<archive>.scope.bundle.age` 与 `<archive>.scope.json`（`offsite.daily/monthly.scope`）：范围密文已在本地封存，不再重新加密；sidecar 只含摘要与相对路径，最后上传。旧待上传项没有范围对象时照常完成。对象路径为 `<prefix>/daily/YYYY/MM/DD/<run_id>/<文件名>`，日期取 manifest `created_at` 的 UTC 日期。每个目的地、每个备份 UTC 月的第一份完成副本还把相同密文写入 `monthly/YYYY/MM/<run_id>/`。月标记保存在 `<state-dir>/offsite/months/`；缺失时遍历 LIST 的全部月完成记录，格式、字段、缺件或长度/摘要无效的逐条跳过，只输出固定原因码 `monthly_record_invalid`。遇到首份完整有效记录即恢复标记；全部无效则正常创建本次月副本，LIST/GET 传输或权限错误仍使该项目失败。旧任务先前的未完成月选择会复核，避免新副本已完成后再次发布另一份月完成记录。先上传 archive、再 manifest，最后发布 `completed.json`（`auction-backup-upload.v1`：run_id、created_at、两份对象名/长度/密文 SHA-256/状态、明文 manifest SHA-256、age 版本、校验时间）；没有完成记录的副本不是成功恢复点。单次 PUT 原生 create-only；超过 128 MiB 用 64 MiB 起的分片、最多 10000 parts、并发最多 2。分片先 HEAD，其完成请求没有条件写入，依靠 bucket lock、唯一命名、原密文重用与完整校验保护不可变性。409/412 或响应丢失后，已有对象长度和完整 SHA-256 一致记 `already_present`，不一致为冲突；不覆盖、删除或换名。所有对象均 HEAD + 顺序区间回读校验；每个 get_range 不超过 64 MiB，累计实际长度和全部字节的 SHA-256，两个结果均匹配才承认成功。每段受 300 秒请求超时约束，整体仍受本次运行预算约束，不把 ETag 当摘要；工具不删除远端对象，淘汰由 bucket 生命周期完成。
 
 磁盘使用备份目录文件系统的非特权可用块计算：字节与比例下限都须满足，任一次不足记录 `disk_low` 并退出 3，不先清理仍应保留的恢复点。总预算从命令启动计算，异步子进程、数据库等待、分块摘要读取和清理共享期限；到期记录 `timeout` 并退出 3；若此前已有项目失败，顶层 failure 保留首错，超时活动项目另记在 `offsite.failed_items`。终态同步及最多五秒的打卡另留 systemd 余量。`SIGKILL`、断电或 systemd 强制终止当次可能只留下运行中记录，故当次依赖 systemd 失败状态与 journal；下次启动取得同一状态目录锁后，把有效残留记录收口为 `interrupted`。若终态已发布、身份与已知 archive 证据一致，则沿用已有终态，不改写结果。残留记录无法解析、字段无效，或同名终态无效/冲突时，将原文件以 0600、无覆盖改名为 `<state-dir>/running.invalid-<UTC时间戳>-<本次run_id>.json`，记录固定告警码后照常备份；历史终态不修改。只有记录读写或改名保留等存储操作失败才记 `recovery_failed` 并停止。
 
@@ -260,6 +264,7 @@ archive 命名为 `scheduled-<UTC秒时间>-<run_id>.dump`。本次新备份通�
 | `outcome/stage/failure` | 终态 `completed/failed/interrupted`；stage 是最后执行阶段，failure 保存首个失败的阶段与固定 `error_code`，不含底层错误链 |
 | `database_name_sha256/output_dir/policy` | 库名绑定、受控输出目录、本次普通策略；配置尚未成功时 policy 可为空 |
 | `archive` | 文件名、摘要、schema、创建时间、archive/manifest 的本机文件身份和 `verified`；恢复仍使用原 manifest v1 |
+| `archive.scope` | 启用备份范围时的 sidecar/密文文件名、摘要、本机文件身份与文件数；旧 v1 回执缺省为空；不记录绝对来源目录或内容 |
 | `disk_before/disk_after` | 检查时的总字节、可用字节、`reserved_bytes`（待写密文空间，旧 v1 默认 0）、阈值与是否通过；扣除预留后仍须满足两个水位 |
 | `cleanup/recovered_interrupted` | 成功清理及跳过项目和计数、此次收口的中断数；不删除历史回执 |
 | `recovery_warnings` | 旧记录无效时为 `running_record_invalid`，同名终态无效或冲突时为 `terminal_receipt_conflict`；只保存固定原因码，不包含文件内容，也不改变新备份结果；旧 v1 回执缺省为 `[]` |
@@ -270,7 +275,7 @@ archive 命名为 `scheduled-<UTC秒时间>-<run_id>.dump`。本次新备份通�
 
 `offsite.skipped_pending.reason` 为 `pending_unreadable`、`pending_record_invalid`、`pending_destination_changed`、`pending_identity_mismatch`、`pending_source_invalid` 或 `pending_source_mismatch`。告警只含固定原因码与可确认的 UUID，不记录文件内容、秘密或完整路径。当前 daily 即使已经成功，旧项失败仍会使整体 outcome 为 failed；选恢复点应核对 daily 完成证据和远端 completed.json。
 
-常见错误码为 `config_error`、`output_lock_busy_or_invalid`、`output_directory_invalid`、`disk_check_failed`、`disk_low`、`create_failed`、`verify_failed`、`retention_failed`、`recovery_failed`、`receipt_failed`、`timeout`、`interrupted`。正常收口的成功/失败均输出一个 JSON 摘要（`outcome/run_id/receipt/failure`），调用方结合退出码判断；状态目录取锁失败不写回执，回执发布失败可能只保留运行中记录。
+常见错误码为 `config_error`、`output_lock_busy_or_invalid`、`output_directory_invalid`、`disk_check_failed`、`disk_low`、`create_failed`、`scope_failed`、`verify_failed`、`retention_failed`、`recovery_failed`、`receipt_failed`、`timeout`、`interrupted`。范围阶段失败时 archive 与 manifest 已发布但不带 sidecar，不能作为完整恢复点；按 `scope_failed` 排查来源权限、age、上限或文件变化后重跑。正常收口的成功/失败均输出一个 JSON 摘要（`outcome/run_id/receipt/failure`），调用方结合退出码判断；状态目录取锁失败不写回执，回执发布失败可能只保留运行中记录。
 
 异机阶段为 `offsite_preflight/offsite_encrypt/offsite_retry/offsite_daily/offsite_monthly/offsite_finalize`，阶段错误码为 `offsite_preflight_failed/offsite_encryption_failed/offsite_retry_failed/offsite_daily_failed/offsite_monthly_failed/offsite_state_failed`；R2 适配器进一步给出固定分类 `offsite_configuration_invalid/offsite_local_read_failed/offsite_access_denied/offsite_transport_failed/offsite_object_conflict/offsite_remote_record_invalid`。底层 SDK 正文、凭据、签名 URL 和 age stderr 均不输出。回退为 `[backup.offsite] enabled = false`，下一次运行生效，暂停旧待上传项但不放宽其清理资格；停用 timer 停止后续全部定时任务。
 

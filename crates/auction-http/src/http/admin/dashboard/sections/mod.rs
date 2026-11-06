@@ -13,5 +13,5 @@ pub(super) use alerting::map_alerting;
 pub(super) use credentials::map_credentials;
 pub(super) use fallback::{unknown_section, unknown_section_with_code};
 pub(super) use mail::load_mail_section;
-pub(super) use operations::{map_delivery, map_fulfillment, map_recovery};
+pub(super) use operations::{map_delivery, map_fulfillment, map_reconciliation, map_recovery};
 pub(super) use realtime::load_realtime_section;

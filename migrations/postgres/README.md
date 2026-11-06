@@ -141,3 +141,4 @@ VALUES (76, 'breaking');
 | 000091 | W5.5 主机侧运维告警来源：`operations_alert_signals` 闭集新增 `backup`/`wal` 来源与 `disk_capacity_low`/`backup_failed`/`wal_upload_stalled` 种类，由 `auction-cli alert report` 在主机上采集磁盘水位、备份回执与 WAL 暂存事实后提交；只放宽 CHECK、不新建表、不改变授权，旧程序无法解析新 kind/source，登记 breaking |
 | 000092 | W12.1 残留：被超提醒与自动标记改为提交后 outbox（`lot_watch_events` 只追加处理进度、租约与顺序屏障）；出价事务只插入事件，提醒在独立事务应用；把新表加入运行账号可变表授权；纯新增表/索引与授权，登记 compatible |
 | 000094 | W12.6 投递热键列化：`deliveries.payload` 的 `world`/`operation`/`template` 提升为 `GENERATED ALWAYS … STORED` 生成列并由整表重写回填，`payload` 仍是唯一真相；两个候选索引换成列形式，整行证据比较两侧剔除派生列；旧程序回退后整行证明会失败关闭，登记 breaking |
+| 000095 | W11.1–W11.3 资产对账与偿付能力报告：放宽 `operations_alert_signals` 的 kind/scope/source/identity 闭集，新增 `reconciliation` 来源与 `custody_drift`/`solvency_shortfall`/`reconciliation_stale` 三类信号；为 `audit_records` 的 custody/solvency 报告实体增加部分索引，报告仍只追加到既有审计表；登记 breaking |

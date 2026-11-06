@@ -388,6 +388,7 @@ journalctl --vacuum-size=1G             # 需要腾空间时；先导出要保�
 - 对公网屏蔽 `/metrics`（返回 404）；只压缩 `/assets/*` 等静态资源。
 - 上游默认 `127.0.0.1:8090`（Public）与 `127.0.0.1:8091`（Admin），可改为 Unix socket（同步 listener 的 `mode = "unix"`、`trusted_unix_proxy = true` 与 socket 组权限）。
 - 服务端只采信来自 `trusted_proxy_cidrs`（或受信 Unix 上游）的 `X-Forwarded-For`，速率限制按真实客户端地址计数。
+- 站点 HTTPS 只在 Caddy（或前置 CDN）终止，应用自身不监听 TLS。`Strict-Transport-Security` 因此取决于代理转发的 `X-Forwarded-Proto`：Caddy 默认按浏览器侧协议写入该头，不要在 `header_up` 中把它固定成 `http`，也不要让 CDN 覆盖为明文，否则浏览器不会收到 HSTS（不会破坏访问，只是失去该保护）。首次设置的远程模式（`--allow-remote-setup` 配合 `--setup-origin`）直接要求该头为 `https`，配置不一致会被拒绝。
 - 强烈建议 Admin 站点只对内网或经额外认证开放。
 
 ## 监控与日志
@@ -749,6 +750,7 @@ Admin 的“告警台”列出全部活动与历史告警。筛选支持 `active
 | notification | `alert-runbook-notification` | 非结算通知与邮资 |
 | backup | `alert-runbook-backup` | 备份目录水位与定时备份回执 |
 | wal | `alert-runbook-wal` | WAL 暂存积压与归档上传 |
+| reconciliation | `alert-runbook-reconciliation` | 装备持有与偿付能力对账报告差异 |
 
 - 确认（acknowledge）只追加操作者事实并显示确认人与时间；不改写 signal 的 kind/scope/count/age/active。
 - 静默（silence）可选 1/8/24/72 小时，只把该 signal 的重复通知时间推到到期时间。到期后仍活动的 signal 会按原阈值继续通知；静默不会关闭告警，也不会延长任何截止时间。
@@ -757,7 +759,7 @@ Admin 的“告警台”列出全部活动与历史告警。筛选支持 `active
 
 ### Admin 仪表盘
 
-仪表盘集中展示：进程与 Worker 状态、各邮箱轮询、realtime 滞后与失败、凭据健康、投递/履约/恢复积压与告警状态。各分区独立降级。投递失败只统计仍待处置的失败：关注提醒的预检退役（从未开始发送）、Admin 对账判失败（以命令账本中产出当前版本的失败命令为证）、装备损失退役的原投递与已核验的 legacy 自寄修复不计入；履约失败不计入装备损失处置后转为操作者线下承担的买方退款。资金为“仅记账”时两个世界的恢复数据源都显示不适用，不读取外部余额。
+仪表盘集中展示：进程与 Worker 状态、各邮箱轮询、realtime 滞后与失败、凭据健康、投递/履约/恢复积压、告警状态与资产对账（装备持有缺失、待付缺口与报告年龄）。资产对账报告缺失时该分区显示不可用，不用空数据冒充无差异。各分区独立降级。投递失败只统计仍待处置的失败：关注提醒的预检退役（从未开始发送）、Admin 对账判失败（以命令账本中产出当前版本的失败命令为证）、装备损失退役的原投递与已核验的 legacy 自寄修复不计入；履约失败不计入装备损失处置后转为操作者线下承担的买方退款。资金为“仅记账”时两个世界的恢复数据源都显示不适用，不读取外部余额。
 
 ### 日志
 
@@ -1103,7 +1105,7 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 
 ## 备份与恢复
 
-例行备份使用 `auction-cli backup scheduled` 配合独立 systemd timer，包含磁盘门禁、本地保留和不可变回执；启用、回退与故障处理见[定时备份](deploy/RECOVERY.md#定时备份)。外部打卡暂缓启用，异机加密上传另行交付；当前仍需把 archive 与 manifest 一起复制到异地。升级前确定恢复点继续使用手动 `backup create/verify`。恢复、重建与演练见[备份与恢复手册](deploy/RECOVERY.md)。
+例行备份使用 `auction-cli backup scheduled` 配合独立 systemd timer，包含磁盘门禁、本地保留和不可变回执；可选 `[backup.scope]` 把运行配置、加密邮件诊断证据与部署回执打包为 age 密文，并用 `backup scope-extract` 做恢复校验（见[备份范围](deploy/RECOVERY.md#数据库之外的备份范围)）；启用、回退与故障处理见[定时备份](deploy/RECOVERY.md#定时备份)。外部打卡暂缓启用，异机加密上传另行交付；当前仍需把 archive 与 manifest 一起复制到异地。升级前确定恢复点继续使用手动 `backup create/verify`。恢复、重建与演练见[备份与恢复手册](deploy/RECOVERY.md)。
 
 WAL 归档与每周物理基础备份已交付命令与模板（W10.7）：`archive_command` 调用 `auction-cli wal archive` 把段压缩、age 加密后 fsync 到本机暂存，`auction-base-backup.timer` 每周运行 `auction-cli wal base-backup` 用 `pg_basebackup` 生成同样加密的基础备份，`auction-wal-upload.timer` 每 5 分钟运行 `auction-cli wal upload` 把两者分别上传 R2 的 `<prefix>/wal/` 与 `<prefix>/base/`，校验后删除 WAL 本地副本，基础备份在本地保留最近 3 份。`archive_mode` 默认仍为 `off`，开启需要重启 PostgreSQL 并受[停机时段保护](#停机时段保护)约束；顺序、验证与回退见[WAL 归档与时间点恢复](deploy/RECOVERY.md#wal-归档与时间点恢复)。
 
@@ -1274,3 +1276,12 @@ SQLx 借出并发与物理池容量不同；空闲池会话也消耗 PostgreSQL 
 回退先关闭服务超时并重启，再考虑将 readiness 切回 shadow/legacy。
 `mode = "legacy"` 为连接完整旧路径：池 16、acquire 30 秒，无显式名称或会话设置。
 重启同样受停机门禁约束。事务、事件、命令账本和未知外部结果处置不随模式改变。
+
+<a id="alert-runbook-reconciliation"></a>
+
+### reconciliation：装备持有与偿付能力对账
+
+- 现象：`custody_drift`（某 world 的应持装备在 Armory 七类 organize 页面未全部命中，正文给出缺失件数与报告年龄）；`solvency_shortfall`（待付卖方货款 + 待执行退款 + 邮资估算超过最近一次新鲜余额，正文给出缺口 credits 与报告年龄）；`reconciliation_stale`（custody 或 solvency 报告超过 24 小时未更新）；`source_unavailable` 表示报告从未追加或读取失败。
+- 立即处置：`auction-cli db asset-reports --database <name> --output <file>` 读取最近报告；按 `missing_samples` 的 `reason`（未满足义务或未结束投递）核对 Armory 与 delivery 状态。偿付缺口：`auction-cli db report-solvency --database <name> --output <file>` 重新计算，并核对 `settlement_recovery_health` 的余额状态；余额未知/过期时不构成缺口结论。
+- 边界：报告是只读事实，不授权转账、退款、重发或装备转移。Armory 只扫描七个 organize 分类，未命中不代表装备不存在于其他面板；每个差异都必须人工解释并进入处置。
+- 恢复判定：下一次对账报告无差异且年龄在阈值内；`reconciliation_stale` 需要确认 Worker 恢复执行对账（固定 6 小时间隔，读取失败只记录未持久化错误）。

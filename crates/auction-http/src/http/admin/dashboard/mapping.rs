@@ -27,6 +27,7 @@ pub(super) fn map_dashboard(
         fulfillment: sections.fulfillment,
         recovery: sections.recovery,
         alerting: sections.alerting,
+        reconciliation: sections.reconciliation,
     }
 }
 

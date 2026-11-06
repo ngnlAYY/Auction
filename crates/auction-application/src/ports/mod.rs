@@ -60,6 +60,13 @@ mod core_repository;
 mod delivery;
 #[path = "delivery/admin.rs"]
 mod delivery_admin;
+mod delivery_admin_guard {
+    include!("delivery/admin_guard.rs");
+}
+pub use delivery_admin_guard::{
+    DeliveryAdminGuardBlocker, DeliveryAdminGuardDecision, DeliveryAdminGuardSnapshot,
+    DeliveryAdminTransition,
+};
 #[path = "delivery/cadence.rs"]
 mod delivery_cadence;
 #[path = "delivery/detail.rs"]
@@ -121,6 +128,13 @@ mod equipment_loss;
 pub use equipment_loss::*;
 #[path = "settlement/fulfillment.rs"]
 mod fulfillment;
+mod settlement_claim_validation {
+    include!("settlement/claim_validation.rs");
+}
+pub use settlement_claim_validation::{
+    SettlementClaimContextBlocker, SettlementClaimContextSnapshot, SettlementClaimExecutionBlocker,
+    SettlementClaimExecutionSnapshot,
+};
 #[path = "settlement/internal/mod.rs"]
 mod internal_fulfillment;
 pub use internal_fulfillment::*;
@@ -482,24 +496,26 @@ pub use operations_alert::{
     MIN_OPERATIONS_ALERT_SILENCE_SECONDS, OPERATIONS_ALERT_ACCOUNT_BUSY_AGE,
     OPERATIONS_ALERT_DIGEST_INTERVAL, OPERATIONS_ALERT_LIFECYCLE_GRACE,
     OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OPERATIONS_ALERT_QUEUE_LATENCY_AGE,
-    OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE, OperationsAlertAcknowledgeCommand,
-    OperationsAlertBatchClaim, OperationsAlertBatchItem, OperationsAlertClaimRequest,
-    OperationsAlertCommandResult, OperationsAlertConsole, OperationsAlertConsoleEntry,
-    OperationsAlertConsolePage, OperationsAlertConsoleQuery, OperationsAlertCredentialSnapshot,
-    OperationsAlertDeliverySnapshot, OperationsAlertDeliveryStatus,
-    OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
-    OperationsAlertFilter, OperationsAlertForumSnapshot, OperationsAlertFulfillmentSnapshot,
-    OperationsAlertHealth, OperationsAlertHostBackupFacts, OperationsAlertHostBackupOutcome,
-    OperationsAlertHostBackupRun, OperationsAlertHostDisk, OperationsAlertHostObserveCommand,
-    OperationsAlertHostWalFacts, OperationsAlertKind, OperationsAlertLifecycleSnapshot,
-    OperationsAlertMailSnapshot, OperationsAlertNotificationSnapshot,
-    OperationsAlertObserveCommand, OperationsAlertPolicy, OperationsAlertProcessSnapshot,
-    OperationsAlertProcessState, OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
-    OperationsAlertRuntimeStatus, OperationsAlertSeverity, OperationsAlertSignal,
-    OperationsAlertSilenceCommand, OperationsAlertSnapshot, OperationsAlertSource,
-    OperationsAlertSourceObservation, OperationsAlertSourceReader, OperationsAlertStore,
-    OperationsAlertTarget, body_digest, canonical_summary, canonical_summary_prefix,
-    evaluate_host_backup, evaluate_host_wal, evaluate_snapshot, parse_alert_id, request_hash,
+    OPERATIONS_ALERT_RECONCILIATION_STALE_AGE, OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE,
+    OperationsAlertAcknowledgeCommand, OperationsAlertBatchClaim, OperationsAlertBatchItem,
+    OperationsAlertClaimRequest, OperationsAlertCommandResult, OperationsAlertConsole,
+    OperationsAlertConsoleEntry, OperationsAlertConsolePage, OperationsAlertConsoleQuery,
+    OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot,
+    OperationsAlertDeliveryStatus, OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch,
+    OperationsAlertError, OperationsAlertFilter, OperationsAlertForumSnapshot,
+    OperationsAlertFulfillmentSnapshot, OperationsAlertHealth, OperationsAlertHostBackupFacts,
+    OperationsAlertHostBackupOutcome, OperationsAlertHostBackupRun, OperationsAlertHostDisk,
+    OperationsAlertHostObserveCommand, OperationsAlertHostWalFacts, OperationsAlertKind,
+    OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
+    OperationsAlertNotificationSnapshot, OperationsAlertObserveCommand, OperationsAlertPolicy,
+    OperationsAlertProcessSnapshot, OperationsAlertProcessState,
+    OperationsAlertReconciliationSnapshot, OperationsAlertReconciliationWorld,
+    OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld, OperationsAlertRuntimeStatus,
+    OperationsAlertSeverity, OperationsAlertSignal, OperationsAlertSilenceCommand,
+    OperationsAlertSnapshot, OperationsAlertSource, OperationsAlertSourceObservation,
+    OperationsAlertSourceReader, OperationsAlertStore, OperationsAlertTarget, body_digest,
+    canonical_summary, canonical_summary_prefix, evaluate_host_backup, evaluate_host_wal,
+    evaluate_snapshot, parse_alert_id, request_hash,
 };
 pub use queries::{
     AuctionReader, CurrentAuctionSnapshot, DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE,
@@ -623,3 +639,6 @@ pub use runtime_switches::*;
 
 mod sli;
 pub use sli::*;
+
+mod reconciliation;
+pub use reconciliation::*;

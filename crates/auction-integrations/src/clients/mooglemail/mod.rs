@@ -33,8 +33,8 @@ pub use gateway::{
 };
 pub use parser::{
     MoogleMailActionState, MoogleMailAttachment, MoogleMailBalanceSnapshot, MoogleMailInboxPage,
-    MoogleMailMessage, MoogleMailParser, MoogleMailSentPage, MoogleMailSentSnapshot,
-    MoogleMailSentSummary, MoogleMailSummary,
+    MoogleMailInventorySnapshot, MoogleMailMessage, MoogleMailParser, MoogleMailSentPage,
+    MoogleMailSentSnapshot, MoogleMailSentSummary, MoogleMailSummary,
 };
 pub use protocol::MoogleMailInventoryCategory;
 pub use protocol::{

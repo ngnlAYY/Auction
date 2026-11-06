@@ -14,8 +14,9 @@ use auction_application::{
     OperationsAlertHostBackupFacts, OperationsAlertHostBackupOutcome, OperationsAlertHostBackupRun,
     OperationsAlertHostDisk, OperationsAlertHostObserveCommand, OperationsAlertHostWalFacts,
     OperationsAlertKind, OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
-    OperationsAlertNotificationSnapshot, OperationsAlertPolicy, OperationsAlertSeverity,
-    OperationsAlertSignal, OperationsAlertSnapshot, OperationsAlertSource,
+    OperationsAlertNotificationSnapshot, OperationsAlertPolicy,
+    OperationsAlertReconciliationSnapshot, OperationsAlertReconciliationWorld,
+    OperationsAlertSeverity, OperationsAlertSignal, OperationsAlertSnapshot, OperationsAlertSource,
     OperationsAlertSourceObservation, evaluate_host_backup, evaluate_host_wal, evaluate_snapshot,
 };
 
@@ -25,16 +26,17 @@ const COOLDOWN: Duration = Duration::from_secs(1_800);
 fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'static str) {
     use OperationsAlertKind::{
         AccountBusy, AuctionPhaseOverdue, AuditFailure, BackupFailed, BalanceLow,
-        CredentialInvalid, DeliveryManualReconcile, DeliveryPending, DeliveryReturnedMail,
-        DiskCapacityLow, EvidenceStale, ForumMessageFailed, ForumSyncFailed, FulfillmentBacklog,
-        FulfillmentFailed, FulfillmentManualReconcile, MailPollStalled, NotificationDeliveryFailed,
-        NotificationPostageInsufficient, ProxyExpiryOverdue, QueueLatency, RecoveryFailed,
-        RecoveryManualReconcile, RecoveryPaymentOverdue, RecoveryRelistPending, ServiceDegraded,
-        ServiceMissing, SourceUnavailable, WalUploadStalled,
+        CredentialInvalid, CustodyDrift, DeliveryManualReconcile, DeliveryPending,
+        DeliveryReturnedMail, DiskCapacityLow, EvidenceStale, ForumMessageFailed, ForumSyncFailed,
+        FulfillmentBacklog, FulfillmentFailed, FulfillmentManualReconcile, MailPollStalled,
+        NotificationDeliveryFailed, NotificationPostageInsufficient, ProxyExpiryOverdue,
+        QueueLatency, ReconciliationStale, RecoveryFailed, RecoveryManualReconcile,
+        RecoveryPaymentOverdue, RecoveryRelistPending, ServiceDegraded, ServiceMissing,
+        SolvencyShortfall, SourceUnavailable, WalUploadStalled,
     };
     use OperationsAlertSource::{
         Backup, Credential, Delivery, Forum, Fulfillment, Lifecycle, Mail, Notification, Process,
-        Recovery, Wal,
+        Reconciliation, Recovery, Wal,
     };
     match kind {
         ServiceMissing | ServiceDegraded => (Process, "worker"),
@@ -60,6 +62,8 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         }
         DiskCapacityLow | BackupFailed => (Backup, "backup"),
         WalUploadStalled => (Wal, "wal"),
+        CustodyDrift | SolvencyShortfall => (Reconciliation, "main"),
+        ReconciliationStale => (Reconciliation, "custody"),
     }
 }
 
@@ -713,4 +717,58 @@ fn host_sources_are_not_part_of_the_worker_scan_closed_set() {
     for source in OperationsAlertSource::WORKER {
         assert!(!source.is_host());
     }
+}
+
+#[test]
+fn reconciliation_reports_drive_drift_shortfall_and_staleness_signals() {
+    let policy = policy();
+    let snapshot = OperationsAlertSnapshot {
+        reconciliation: Some(OperationsAlertReconciliationSnapshot {
+            custody_report_age_seconds: Some(600),
+            solvency_report_age_seconds: Some(90_000),
+            worlds: vec![
+                OperationsAlertReconciliationWorld {
+                    world: "main",
+                    custody_missing_count: 2,
+                    solvency_shortfall_credits: 0,
+                },
+                OperationsAlertReconciliationWorld {
+                    world: "isekai",
+                    custody_missing_count: 0,
+                    solvency_shortfall_credits: 500,
+                },
+            ],
+        }),
+        ..quiet_snapshot()
+    };
+    let observations = evaluate_snapshot(&snapshot, &policy).expect("对账快照必须可评估");
+    let reconciliation = observations
+        .iter()
+        .find(|observation| observation.source == OperationsAlertSource::Reconciliation)
+        .expect("必须包含资产对账来源");
+    assert!(reconciliation.available);
+    let kinds = reconciliation
+        .signals
+        .iter()
+        .map(|signal| (signal.kind, signal.scope.as_str(), signal.count))
+        .collect::<Vec<_>>();
+    assert!(kinds.contains(&(OperationsAlertKind::CustodyDrift, "main", 2)));
+    assert!(kinds.contains(&(OperationsAlertKind::SolvencyShortfall, "isekai", 500)));
+    // 24 小时阈值：90_000 秒的偿付能力报告已过期，600 秒的 custody 报告未过期。
+    assert!(kinds.contains(&(OperationsAlertKind::ReconciliationStale, "solvency", 1)));
+    assert!(!kinds.iter().any(|(kind, scope, _)| {
+        *kind == OperationsAlertKind::ReconciliationStale && *scope == "custody"
+    }));
+}
+
+#[test]
+fn missing_reconciliation_reports_are_reported_as_unavailable() {
+    let observations = evaluate_snapshot(&quiet_snapshot(), &policy()).expect("空水位必须可评估");
+    let reconciliation = observations
+        .iter()
+        .find(|observation| observation.source == OperationsAlertSource::Reconciliation)
+        .expect("必须包含资产对账来源");
+    assert!(!reconciliation.available);
+    assert_eq!(reconciliation.signals.len(), 1);
+    assert_eq!(reconciliation.signals[0].kind, OperationsAlertKind::SourceUnavailable);
 }

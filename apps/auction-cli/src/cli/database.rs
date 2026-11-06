@@ -82,6 +82,24 @@ pub(crate) enum DbCommand {
         #[arg(long, value_name = "FILE")]
         output: PathBuf,
     },
+    /// 只读输出最近追加的装备持有与偿付能力报告；不读取 Armory、不改变余额或装备。
+    AssetReports {
+        /// 人工确认的数据库名，须与 Worker 配置和实际连接一致。
+        #[arg(long, value_name = "NAME")]
+        database: String,
+        /// 不可覆盖的私有 JSON 报告绝对路径；父目录须已存在。
+        #[arg(long, value_name = "FILE")]
+        output: PathBuf,
+    },
+    /// 仅从数据库投影追加一份偿付能力报告；不读取 Armory、不改账、不授权资金动作。
+    ReportSolvency {
+        /// 人工确认的数据库名，须与 Worker 配置和实际连接一致。
+        #[arg(long, value_name = "NAME")]
+        database: String,
+        /// 不可覆盖的私有 JSON 报告绝对路径；父目录须已存在。
+        #[arg(long, value_name = "FILE")]
+        output: PathBuf,
+    },
     /// 删除并以原 owner/编码/locale 重建已确认的数据库；默认只读演练。
     Rebuild {
         /// 人工确认的目标数据库名，须同时匹配 Worker 配置与集群 catalog。
@@ -155,6 +173,24 @@ pub(crate) enum BackupCommand {
         /// 人工确认的数据库名，用于核对 manifest 中的库名摘要。
         #[arg(long, value_name = "NAME")]
         database: String,
+    },
+    /// 离线解密并恢复校验备份范围（运行配置、邮件诊断证据、部署回执）；不覆盖已有文件。
+    ScopeExtract {
+        /// `.dump.manifest` 的绝对路径；同目录必须存在配对的范围 sidecar。
+        #[arg(long, value_name = "FILE")]
+        manifest: PathBuf,
+        /// 人工确认的数据库名，用于核对 manifest 中的库名摘要。
+        #[arg(long, value_name = "NAME")]
+        database: String,
+        /// 离线保管的 age 私钥文件；只作为解密参数，不复制内容。
+        #[arg(long, value_name = "FILE")]
+        identity: PathBuf,
+        /// 必须为空或不存在的私有输出目录；逐个写入 `runtime_config/`、`mail_diagnostics/`、`deployment_receipts/`。
+        #[arg(long, value_name = "DIR")]
+        output_dir: PathBuf,
+        /// 校验成功后写入的不可覆盖私有 JSON 回执。
+        #[arg(long, value_name = "FILE")]
+        receipt: Option<PathBuf>,
     },
     /// 把已校验的 archive 单事务恢复到同名空数据库。
     Restore {

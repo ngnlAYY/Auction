@@ -174,6 +174,24 @@ pub struct OperationsAlertNotificationSnapshot {
     pub oldest_postage_age_seconds: i64,
 }
 
+/// W11.1–W11.3 资产对账在单个 world 的最新报告事实。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OperationsAlertReconciliationWorld {
+    pub world: &'static str,
+    /// 最近一份 custody 报告的缺失装备数量；报告缺失时为 0，由报告年龄表达缺失。
+    pub custody_missing_count: i64,
+    /// 最近一份 solvency 报告的缺口 credits；报告缺失或余额未知时为 0。
+    pub solvency_shortfall_credits: i64,
+}
+
+/// 资产对账报告投影；`None` 表示该类报告从未追加，不能当作“无差异”。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationsAlertReconciliationSnapshot {
+    pub custody_report_age_seconds: Option<i64>,
+    pub solvency_report_age_seconds: Option<i64>,
+    pub worlds: Vec<OperationsAlertReconciliationWorld>,
+}
+
 /// 全部告警来源的安全快照；单个来源缺失时 evaluator 会生成 unavailable signal。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OperationsAlertSnapshot {
@@ -186,6 +204,7 @@ pub struct OperationsAlertSnapshot {
     pub lifecycle: Option<OperationsAlertLifecycleSnapshot>,
     pub forum: Option<OperationsAlertForumSnapshot>,
     pub notification: Option<OperationsAlertNotificationSnapshot>,
+    pub reconciliation: Option<OperationsAlertReconciliationSnapshot>,
 }
 
 /// 告警阈值与批次边界。

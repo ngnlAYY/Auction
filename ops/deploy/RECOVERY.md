@@ -6,7 +6,7 @@
 
 ## 原则
 
-- **备份 = archive + manifest。** `backup create` 生成 `<名称>.dump`（`pg_dump` 自定义格式）与 `<名称>.dump.manifest`（格式 `auction-postgres-backup.v1`：archive SHA-256、库名摘要、schema 版本、创建时间）。两者必须一起保存、一起复制到异地。manifest 没有数字签名，存储的访问控制与不可变性由部署方负责。
+- **备份 = archive + manifest（+ 可选范围证据）。** `backup create` 生成 `<名称>.dump`（`pg_dump` 自定义格式）与 `<名称>.dump.manifest`（格式 `auction-postgres-backup.v1`：archive SHA-256、库名摘要、schema 版本、创建时间）。启用 `[backup.scope]` 时还生成 `<名称>.dump.scope.bundle.age` 与 `<名称>.dump.scope.json`，四者必须一起保存；范围密文只用离线私钥解密，sidecar 只含摘要与相对路径。manifest 没有数字签名，存储的访问控制与不可变性由部署方负责。
 - **恢复只进入空库。** `backup restore` 不删库、不清理 schema、不终止连接，也不会覆盖非空库；需要替换现有库时先用 `db rebuild --mode empty-for-restore` 准备同名空库。
 - **破坏性操作必须显式确认并留回执。** `db rebuild` 默认只读演练；只有 `--execute` + 逐字确认短语 + 新回执路径同时成立才会 `DROP DATABASE`。
 - **未知结果不能当作未执行。** 回执中 `null` 表示无法确认（例如 DROP 的响应丢失），此时保持停机、人工核对数据库与备份，不要盲目重试。
@@ -80,6 +80,43 @@ journalctl -u auction-backup.service
 | `receipt_failed` / 只有 running 记录 | 检查状态目录的权限和磁盘，下一次启动按已有终态或 interrupted 收口 |
 
 外部打卡服务当前暂缓启用，Worker 敏感 TOML 两个打卡地址保持省略/空值，此时不发网络请求。以后启用时，CLI 先发布终态回执，再向成功或失败地址发一次 HTTPS GET，独立客户端不带 Cookie、不跟随重定向、不读代理环境；连接三秒、总预算五秒，不重试。回执只保存 `heartbeat_configured` 标志；`sent/failed/not_configured` 与 HTTP 状态码只经 stderr 进入 systemd journal，不写 URL 或独立打卡回执，打卡失败不会改写备份结果或退出码。在用户启用外部服务前，失败只通过回执、systemd 状态和日志查看。
+
+## 数据库之外的备份范围
+
+数据库 archive 只恢复数据；重建一台主机还需要运行配置、邮件诊断证据与部署回执。启用 `[backup.scope]` 后，`backup create` 与 `backup scheduled` 会把这三类材料打包成一个 age 密文，并与数据库恢复点配对：
+
+| 文件 | 内容 |
+| --- | --- |
+| `<archive>.scope.bundle.age` | age 公钥加密的打包文件；格式 `auction-backup-scope-bundle.v1`，逐条记录绑定相对路径、字节数与内容摘要 |
+| `<archive>.scope.json` | 格式 `auction-backup-scope.v1` 的公开 sidecar：密文/明文摘要、字节数、文件数、来源类型与最多 256 条文件相对路径；不含绝对来源目录、公钥或文件内容 |
+
+规则与边界：
+
+- 运行配置只纳入本轮实际加载到的文件（角色、`common_file`、敏感文件、可选 runtime 文件），不递归配置目录；owner 凭据、维护凭据与同目录其它文件不会被自动带走。
+- 邮件诊断证据来自 Worker `[mooglemail.diagnostics].directory`，目录尚不存在时按空集合记录；诊断文件本身已是认证加密的证据格式。
+- 部署回执目录由 `[backup.scope].deployment_receipts_dir` 指定，必须存在且为绝对路径。
+- 范围内容一律加密，即使异机副本关闭也一样；因此启用范围时 `age_recipient` 必填，且 PATH 中必须有 `age`。明文只存在于输出目录内的 0600 临时文件，封存后被主动删除；创建中途被杀可能留下 `.partial`，人工确认后删除，不能把它当作恢复材料。
+- 超过 `max_files`、`maximum_total_bytes`、单文件 64 MiB、符号链接、特殊文件、非 UTF-8 名称或控制字符时失败关闭，不做部分范围备份；失败阶段为 `scope`、错误码为 `scope_failed`，此时 archive/manifest 已存在但缺少 sidecar，不能当作完整恢复点。
+- 启用异机副本时，daily/monthly 的完成记录各自带 `scope`（密文与 sidecar 两个对象）；sidecar 最后上传，便于下载侧先核对摘要。旧待上传项没有范围对象时照常完成。
+- 本地保留清理只在回执的 `archive.scope` 与本机文件身份一致时删除这两个文件；身份不符或删除失败时保留并记录 `remove_failed`。
+
+恢复校验：
+
+```bash
+# 离线或隔离主机；identity 是离线托管的 age 私钥
+auction-cli backup scope-extract \
+  --manifest /srv/restore/scheduled-<时间>-<run_id>.dump.manifest \
+  --database <原库名> \
+  --identity /offline/age-identity.txt \
+  --output-dir /srv/restore/scope-<时间> \
+  --receipt /srv/restore/scope-<时间>.json
+```
+
+命令先执行与 `backup restore` 相同的恢复点校验（archive、manifest 与范围 sidecar），把密文解密到输出目录内的私有临时文件，核对整体明文摘要、文件数与 sidecar 逐条摘要，全部通过后才按 `runtime_config/`、`mail_diagnostics/`、`deployment_receipts/` 写入每个文件。目标目录必须不存在或为空，文件以 0600 新建、不覆盖；临时明文在校验后删除。输出的回执只含摘要、来源类型、文件数与目录，不含文件内容或绝对来源路径。
+
+人工核对：把解出的配置与当前部署逐项比对（连接目标、监听、密钥“是否配置”、运行时开关），确认部署回执中的版本/时间与恢复点一致；邮件诊断证据只在需要排查投递时按原加密格式读取。解出的运行配置含数据库口令、R2 令牌与邮件凭据，只能留在离线或隔离主机，不得进入日志、ticket、聊天或 Git。恢复数据库仍按[恢复流程](#恢复流程)执行，不能用范围材料替代 archive 恢复或外部历史核对。
+
+仍未落地：定期把范围材料纳入恢复演练（W10.3）、恢复后外部核对工具（W10.9）与自动引用回执的发布门禁（W7.2）。当前只有手工 `scope-extract` 与 `backup verify` 的摘要校验，不能据此声明端到端演练完成。
 
 ## WAL 归档与时间点恢复
 
@@ -229,8 +266,17 @@ ls -l /var/lib/auction/wal-staging | grep '^.*base-'
 此流程需要用户另行执行，目标必须是**隔离 PG18 实例**，禁用全部外部邮件、论坛与调度，不连生产数据库或游戏服务。一次演练应使用真实备份中每类至少一条密文样本；空数据族记为未验证，不能当作解密成功。
 
 1. 在 R2 的 daily/monthly 中选择有 `completed.json` 的恢复点。下载完成记录，检查 `format = auction-backup-upload.v1`、run_id、UTC 日期、两份对象名/长度/密文 SHA-256、明文 manifest SHA-256、age 版本和校验时间；对象名必须都在同一恢复点前缀内。只有两份密文而无完成记录时不能选择该点。
-2. 在受信任工作站通过控制台或已授权的 S3 客户端下载**记录指定的两个对象**，保持 `<archive>.age` 与 `<archive>.manifest.age` 文件名。下载目录为 0700，文件为 0600。逐一用 `wc -c < 文件` 和 `sha256sum 文件` 核对记录的 bytes 与 sha256；不能使用 multipart ETag 代替整文件摘要。任一不符则保留证据并停止该恢复点。
-3. 按上节从密码管理器或离线副本取回对应 age 私钥，在离线工作站解密到新文件，禁止覆盖已有恢复证据：
+2. 范围证据（启用时）：完成记录的 `scope` 字段给出 `<archive>.scope.bundle.age` 与 `<archive>.scope.json` 两个对象，同样核对长度与 SHA-256 并保持原文件名。范围材料留在离线工作站，等第 4 步解密 manifest 后再执行
+
+   ```bash
+   auction-cli backup scope-extract --manifest <解密后的manifest> --database <原库名> \
+     --identity <age 私钥> --output-dir <全新私有目录>
+   ```
+
+   （需要 `PATH` 中有 `pg_restore`，与 `backup verify` 相同）。解出的运行配置、邮件诊断证据与部署回执用于重建主机；不要在生产备份服务器上保留 identity 或解出目录。
+
+3. 在受信任工作站通过控制台或已授权的 S3 客户端下载**记录指定的两个对象**，保持 `<archive>.age` 与 `<archive>.manifest.age` 文件名。下载目录为 0700，文件为 0600。逐一用 `wc -c < 文件` 和 `sha256sum 文件` 核对记录的 bytes 与 sha256；不能使用 multipart ETag 代替整文件摘要。任一不符则保留证据并停止该恢复点。
+4. 按上节从密码管理器或离线副本取回对应 age 私钥，在离线工作站解密到新文件，禁止覆盖已有恢复证据：
 
    ```bash
    umask 077
@@ -242,9 +288,9 @@ ls -l /var/lib/auction/wal-staging | grep '^.*base-'
    ```
 
    manifest 明文摘要必须与完成记录的 `plaintext_manifest_sha256` 一致；两次解密认证均成功后，再安全传递 archive/manifest。不要把 identity 文件放到生产备份服务器。
-4. 使用与 manifest 绑定的**原库名**执行离线校验：`auction-cli backup verify --database <原库名> --manifest <解密后的manifest>`。隔离配置指向 PG18 独立端口/实例，三角色保持停止；准备空库，执行 `db preflight`、`backup restore --dry-run`，再执行 `backup restore --receipt <新的0600回执>`，具体门禁和参数见[恢复流程](#恢复流程)。不在恢复前 migrate，不用 fresh-schema 代替空库。
-5. 从托管清单取回对应历史版本的三组数据密钥，在隔离环境只读读取恢复库中的样本信封，使用现有 owner 的解密入口核验：装备 `EquipmentKeyOpener::open`，用户登录 key `MoogleMailLoginKeyReader` 的 `AdminLoginKeyOpener::open`，外部 Cookie `CredentialSealer` 的 `AdminCredentialOpener::open`。保留原装备/用户/凭据 ID、kind、scope、key_id 和 AAD 绑定，验证认证标签与指纹；不能通过改信封、重新封装或重新注册来证明旧材料可恢复。由监督者授权的隔离核验程序调用这些入口，只输出数据族、样本 ID、key_id、成功条数和失败分类，不输出密钥、Cookie、登录 key 或装备明文；当前 CLI 没有通用“导出解密列”命令。
-6. 核对恢复 schema/迁移版本、关键表和只读业务事实，记录完成记录自身摘要、R2 对象名、下载校验结果、restore 回执、三组材料的解密条数和演练耗时。恢复到生产前仍须执行[外部历史核对](#6-外部历史核对与启动)，不因一次隔离演练而自动放行外部重发。清理恢复工作副本按托管流程执行，长期保留非秘密演练回执。
+5. 使用与 manifest 绑定的**原库名**执行离线校验：`auction-cli backup verify --database <原库名> --manifest <解密后的manifest>`。隔离配置指向 PG18 独立端口/实例，三角色保持停止；准备空库，执行 `db preflight`、`backup restore --dry-run`，再执行 `backup restore --receipt <新的0600回执>`，具体门禁和参数见[恢复流程](#恢复流程)。不在恢复前 migrate，不用 fresh-schema 代替空库。
+6. 从托管清单取回对应历史版本的三组数据密钥，在隔离环境只读读取恢复库中的样本信封，使用现有 owner 的解密入口核验：装备 `EquipmentKeyOpener::open`，用户登录 key `MoogleMailLoginKeyReader` 的 `AdminLoginKeyOpener::open`，外部 Cookie `CredentialSealer` 的 `AdminCredentialOpener::open`。保留原装备/用户/凭据 ID、kind、scope、key_id 和 AAD 绑定，验证认证标签与指纹；不能通过改信封、重新封装或重新注册来证明旧材料可恢复。由监督者授权的隔离核验程序调用这些入口，只输出数据族、样本 ID、key_id、成功条数和失败分类，不输出密钥、Cookie、登录 key 或装备明文；当前 CLI 没有通用“导出解密列”命令。
+7. 核对恢复 schema/迁移版本、关键表和只读业务事实，记录完成记录自身摘要、R2 对象名、下载校验结果、restore 回执、三组材料的解密条数和演练耗时。恢复到生产前仍须执行[外部历史核对](#6-外部历史核对与启动)，不因一次隔离演练而自动放行外部重发。清理恢复工作副本按托管流程执行，长期保留非秘密演练回执。
 
 ## 异机异常处置
 

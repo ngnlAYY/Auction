@@ -170,6 +170,7 @@ where
     }
     let mut recovery_tasks = JoinSet::new();
     if worker.recovery_health.is_some()
+        || worker.asset_reconciliation.is_some()
         || worker.recovery_store.is_some()
         || worker.recovery_resolution.is_some()
     {

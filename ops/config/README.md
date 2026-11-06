@@ -69,7 +69,7 @@
 | `[metrics]` | 进程指标开关、转发拒绝及可选附加出口，见下文 |
 | `[readiness]` | 审计失败模式、迁移兼容模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
 | `[cache]` | 见[缓存](#缓存) |
-| `[backup]` | CLI 专用定时备份策略，见[定时备份策略](#定时备份策略) |
+| `[backup]`、`[backup.offsite]`、`[backup.scope]` | CLI 专用定时备份策略、异机副本与数据库之外的范围，见[定时备份策略](#定时备份策略) |
 | `[database_roles]` | 数据库账号分工：`owner` 是迁移 owner 账号名（小写标识符，生产严格预检必填），运行账号固定为 `auction_runtime` 不可配置；`owner` 不能与运行账号相同，服务使用 owner 会被拒绝 |
 | `[auction.schedule]` | 周排期：时区、预览/开拍/计划结束的星期与时间、参与世界 |
 | `[auction.schedule.early_bird]` | 赛季早鸟期：赛季开始日期与时间、窗口天数、开拍日、开拍钟点、预览提前量、竞价时长、赛季前场次、窗口内品质、赛季前暂停收件 |
@@ -169,6 +169,30 @@ SLI 基线不由 Admin runtime 覆盖；仅 Worker 消费，且须同时启用�
 | `prefix` | `""` | 可选；最多 512 字节的字母、数字、`-_.` 与 `/`，无首尾斜杠、空段、`.` 段或 `..`；空串表示不添加前缀 |
 
 Worker 引用的敏感 TOML 根字段 `backup_r2_access_key_id` 与 `backup_r2_secret_access_key` 必须成对、非空、不超过 4096 字节，无首尾空白或控制字符；禁用时可以全部省略。它们由 `SecretString` 保存，仅经显式 getter 交给 R2 适配器，不能放在 common、角色或 runtime 文件。公钥、endpoint、bucket 和 prefix 是普通配置。`config check` 校验启用依赖及字段格式，但不执行 age、不连接 R2；`config check` 与 `config show` 对异机字段只输出 enabled 及是否配置，绝不输出字段值、令牌或签名 URL。错误只有字段名与固定原因。轮换令牌不改变待上传身份；更换公钥或目的地后，哈希不匹配的旧项保留并记 pending_destination_changed 告警，新目标正常继续备份。旧任务不能自动改投新目标，需由用户在原配置下处理或将原状态与密文整体隔离保留。
+
+#### 备份范围（数据库之外）
+
+`common.toml [backup.scope]` 同样只由 CLI 消费，默认关闭。启用后，`backup create` 与 `backup scheduled` 在数据库 archive 之外，把运行配置、加密邮件诊断证据与部署回执收集为一个密文包：
+
+- `runtime_config`：本轮实际加载到的配置文件（角色文件、`common_file`、敏感文件与可选 runtime 文件），不是整个配置目录；凭据、owner 凭据与其他同目录文件不会因范围启用而自动纳入。
+- `mail_diagnostics`：Worker `[mooglemail.diagnostics].directory` 中的证据文件；目录尚不存在时按空集合处理。
+- `deployment_receipts_dir`：可选的绝对目录，必须存在；文件按相对路径递归收集。
+
+内容先打包为单一明文临时文件，再用 `[backup.offsite].age_recipient` 加密为 `<archive>.scope.bundle.age`；明文在封存后立即删除。同目录的 `<archive>.scope.json`（格式 `auction-backup-scope.v1`）只记录各文件相对路径、字节数与 SHA-256，以及来源类型、文件数量和密文摘要，不含绝对来源目录、公钥或文件内容。sidecar 与密文都使用 0600、owner-only、单链接普通文件；不接受符号链接、特殊文件、`..`、控制字符或超过上限的条目。
+
+| 字段 | 默认值 | 校验 |
+| --- | --- | --- |
+| `enabled` | `false` | 为 true 时必须配置 `[backup.offsite].age_recipient`，且至少选择一个来源；启用后仍可关闭异机副本，本地密文照常生成 |
+| `runtime_config` | `true` | 只纳入当前已加载的配置文件，不递归配置目录 |
+| `mail_diagnostics` | `true` | Worker 诊断目录；缺失视为尚无证据 |
+| `deployment_receipts_dir` | `""` | 绝对路径，无 `..` 或控制字符；非空且启用时必须存在 |
+| `max_files` | `4096` | `1–8192`，超过即失败关闭，不做部分备份 |
+| `maximum_total_bytes` | `268435456`（256 MiB） | `1048576–1073741824`（1 MiB–1 GiB），按压缩前明文字节计算 |
+
+范围开启时 `backup scheduled` 需要 PATH 中有 `age`（即使异机副本关闭），阶段为 `scope`，错误码 `scope_failed`；范围文件在 create 之后、第二次磁盘水位检查之前生成。终态回执的 `archive.scope` 记录两个文件名、摘要、本机文件身份与文件数，旧 v1 回执缺省为空。启用异机副本时，daily/monthly 各自再上传范围密文与 sidecar（`scope` 字段），sidecar 最后上传。
+
+恢复校验：`backup verify` 在 sidecar 存在时校验配对名称、密文字节数与 SHA-256；`backup restore` 只恢复数据库，回执记录 `scope_evidence_present`。非数据库材料用 `auction-cli backup scope-extract --manifest … --database … --identity <离线 age 私钥> --output-dir <全新私有目录>` 解密，先完整校验打包摘要与 sidecar 条目，再一次写入 `runtime_config/`、`mail_diagnostics/`、`deployment_receipts/`；目标目录必须为空，文件以 0600 新建，不覆盖。解出的运行配置与部署回执含秘密，只能放在离线或隔离环境，不进入日志、回执或 ticket。
+
 
 ## 角色文件
 

@@ -179,14 +179,6 @@ pub(super) async fn claim_postgres(
     let mut claims = Vec::with_capacity(rows.len());
     for row in rows {
         let execution_identity = map_claim_execution_identity(&row)?;
-        let equipment_row_id: Option<Uuid> =
-            row.try_get("equipment_row_id").map_err(map_storage_error)?;
-        let prerequisite_id: Option<Uuid> =
-            row.try_get("prerequisite_obligation_id").map_err(map_storage_error)?;
-        let prerequisite_row_id: Option<Uuid> =
-            row.try_get("prerequisite_row_id").map_err(map_storage_error)?;
-        let relation_context_invalid = equipment_row_id.is_none()
-            || prerequisite_id.is_some() && prerequisite_row_id.is_none();
         let obligation_id = execution_identity.obligation_id;
         let claim_token = Uuid::new_v4();
         let old_fencing: i64 = row.try_get("claim_fencing").map_err(map_storage_error)?;
@@ -235,7 +227,7 @@ pub(super) async fn claim_postgres(
             return Err(repository_error_owned("结算履约领取时租约已变化"));
         }
 
-        if relation_context_invalid || validate_claim_context(&row).is_err() {
+        if validate_claim_context(&row).is_err() {
             manual_reconcile_in_transaction(
                 &mut transaction,
                 execution_identity.obligation_id,
@@ -304,10 +296,10 @@ pub(super) fn map_claim(
             ClaimMappingError::Context(repository_error_owned("结算履约缺少装备来源世界"))
         })
         .and_then(|value| settlement_world(value).map_err(ClaimMappingError::Context))?;
-    let operation = fulfillment_operation(
-        string_column(row, "delivery_operation").map_err(ClaimMappingError::Execution)?,
+    let operation = SettlementFulfillmentOperation::from_name(
+        &string_column(row, "delivery_operation").map_err(ClaimMappingError::Execution)?,
     )
-    .map_err(ClaimMappingError::Execution)?;
+    .ok_or_else(|| ClaimMappingError::Execution(repository_error_owned("结算履约操作无效")))?;
     let kind =
         obligation_kind(string_column(row, "obligation_kind").map_err(ClaimMappingError::Context)?)
             .map_err(ClaimMappingError::Context)?;
@@ -495,19 +487,10 @@ pub(super) fn map_claim(
         ),
         world,
         kind,
-        state: match string_column(row, "execution_state")
-            .map_err(ClaimMappingError::Execution)?
-            .as_str()
-        {
-            "pending" => SettlementFulfillmentState::Pending,
-            "prepared" => SettlementFulfillmentState::Prepared,
-            "enqueued" => SettlementFulfillmentState::Enqueued,
-            _ => {
-                return Err(ClaimMappingError::Execution(repository_error_owned(
-                    "结算履约阶段无效",
-                )));
-            }
-        },
+        state: SettlementFulfillmentState::from_name(
+            &string_column(row, "execution_state").map_err(ClaimMappingError::Execution)?,
+        )
+        .ok_or_else(|| ClaimMappingError::Execution(repository_error_owned("结算履约阶段无效")))?,
         operation,
         recipient_user_id,
         recipient,

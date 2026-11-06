@@ -9,6 +9,7 @@ use crate::app::{print_json, progress};
 use crate::cli::DbCommand;
 use crate::deployment::ConfigDir;
 
+mod assets;
 mod create;
 mod evidence;
 mod inspection;
@@ -76,6 +77,12 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: DbCommand) -> anyhow::R
         }
         DbCommand::RetentionDryRun { database, output } => {
             evidence::retention_dry_run(config_dir, &database, &output).await
+        }
+        DbCommand::AssetReports { database, output } => {
+            assets::latest(config_dir, &database, &output).await
+        }
+        DbCommand::ReportSolvency { database, output } => {
+            assets::report_solvency(config_dir, &database, &output).await
         }
         DbCommand::InspectConsistency { database, output } => {
             inspection::run(config_dir, &database, &output).await

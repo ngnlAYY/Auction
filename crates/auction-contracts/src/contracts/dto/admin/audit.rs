@@ -92,4 +92,6 @@ pub struct AdminDashboardResponse {
     pub fulfillment: AdminDashboardSectionResponse,
     pub recovery: AdminDashboardSectionResponse,
     pub alerting: AdminDashboardSectionResponse,
+    /// W11.1–W11.3 资产对账与偿付能力报告投影；报告缺失时为 unknown section。
+    pub reconciliation: AdminDashboardSectionResponse,
 }

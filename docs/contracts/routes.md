@@ -16,6 +16,7 @@
 - `code` 是稳定的机器可读值，客户端只依据 HTTP 状态与 `code` 分支，不解析 `message`（中文提示，可能调整）。通常成功为 HTTP 200 / `ok`；创建拍卖、用户和手工录入 lot 为 201 / `created`；凭据录入与首次发布规则为 201 / `ok`；触发邮件轮询为 202 / `accepted`；创建代理仍为 200 / `ok`。
 - Public/Admin 响应头始终回传 `x-request-id`（合法输入沿用，缺失时生成，非法或重复输入返回 400；指标转发拒绝优先返回 404 并回传安全生成的标识）；错误 JSON 含 `request_id` 字段，但 handler 的常规错误可能为 null，排查以响应头为准。
 - Public/Admin 的每个 HTTP 响应（含静态资源、错误与 WebSocket 升级响应）都回传 `x-auction-build`：当前进程构建号，1–64 位 `[A-Za-z0-9._-]`，由发布构建的 `AUCTION_BUILD_ID` 注入，未注入时为包版本。浏览器只把它与自身构建号比较；不一致时提示刷新，不自动重载页面，也不改变响应正文、缓存策略或状态码。该头不参与鉴权、幂等与缓存决定。
+- 安全响应头随每个响应回传：CSP（同源脚本与样式源，`form-action 'self'`、`frame-ancestors 'none'`；Dioxus WASM 的 `unsafe-eval`/`wasm-unsafe-eval` 与内联样式为例外，理由见[安全边界](../architecture.md#安全边界)）、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 与 Permissions-Policy。`Strict-Transport-Security: max-age=31536000` 只在浏览器经 HTTPS 访问时出现：代理后仅采信可信上游的 `X-Forwarded-Proto`，明文请求与开发环境不发送；不含 `includeSubDomains` 与 `preload`。这些头不参与缓存、鉴权与幂等决定，客户端不应据其改变业务行为。
 - 时间为 RFC 3339 字符串；金额为整数 Credits；标识为小写 UUID 字符串。
 
 ### 通用错误码
@@ -164,7 +165,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET / POST / DELETE | `/api/v1/admin/session` | 读取会话 / Basic 认证登录（actor:secret）/ 退出 |
-| GET | `/api/v1/admin/dashboard` | 仪表盘聚合快照（健康、Worker、进程、邮件、realtime、凭据、投递、履约、恢复、告警）；Admin 页面默认每 30 秒自动轮询（`poll=0` 关闭，10/30/60 秒可选） |
+| GET | `/api/v1/admin/dashboard` | 仪表盘聚合快照（健康、Worker、进程、邮件、realtime、凭据、投递、履约、恢复、告警、资产对账）；`reconciliation` 分区只含报告年龄与各 world 的缺失件数/待付缺口，报告缺失时为 `unknown`；Admin 页面默认每 30 秒自动轮询（`poll=0` 关闭，10/30/60 秒可选） |
 | GET | `/api/v1/admin/alerts` | 告警台列表（`status=active|resolved|all`，默认 `active`；`source`；`page`、`page_size` ≤100）；返回来源、范围、首次/最近时间、计数、确认/静默投影与处置手册锚点 `runbook_anchor` |
 | POST | `/api/v1/admin/alerts/{alert_id}/acknowledge` | 确认告警；`alert_id` 为 64 位十六进制 fingerprint。只追加操作者事实（`command_id` 幂等），不改变 signal 状态、计数、阈值或恢复判定 |
 | POST | `/api/v1/admin/alerts/{alert_id}/silence` | 静默告警到 `silence_seconds`（60–604800）之后；只抑制重复通知，到期后仍活动的 signal 按原阈值继续通知，不改变阈值评估 |
