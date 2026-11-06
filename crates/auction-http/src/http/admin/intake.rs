@@ -53,7 +53,7 @@ pub(crate) async fn add_item(
                 .into_response();
         }
     };
-    let Some(command_id) = super::admin_auctions::parse_canonical_uuid(&input.command_id) else {
+    let Some(command_id) = super::auctions::parse_canonical_uuid(&input.command_id) else {
         return invalid_command();
     };
     let equipment_url = input.equipment_url.take().unwrap_or_default();

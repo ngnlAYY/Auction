@@ -54,13 +54,8 @@
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-web-admin/src/api/` | 同源 HTTP 访问、CSRF、DTO 解码，按 auction/content/fulfillment/identity/operations 划分 |
-| `crates/auction-web-admin/src/app/surface/` | 路由、认证外壳与导航（桌面/手机）、分页、未决命令宿主 |
-| `crates/auction-web-admin/src/app/auction/` | 拍卖场次、lot、手工录入、结算与恢复 |
-| `crates/auction-web-admin/src/app/fulfillment/` | 收件审核、投递队列 |
-| `crates/auction-web-admin/src/app/identity/` | 凭据、用户、改名 |
-| `crates/auction-web-admin/src/app/operations/` | 仪表盘、实时事件、配置、审计、服务说明、首次部署 |
-| `crates/auction-web-admin/src/app/content/` | 规则文档 |
+| `crates/auction-web-admin/src/api/` | 同源 HTTP 访问、CSRF、DTO 解码；每个文件对应一个 API 领域（`auctions`、`audit`、`credentials`、`dashboard`、`forum`、`intake`、`lots`、`mail/`、`realtime`、`rules`、`runtime_config/`、`session`、`settlement`、`users`、`worlds` 等） |
+| `crates/auction-web-admin/src/app/surface/` | 路由、认证外壳与导航（桌面/手机）、分页、未决命令宿主，以及按领域分组的页面实现：`auctions/`、`credentials/`、`dashboard/`、`deliveries/`、`mail/`、`config/`、`rules/`、`users/`、结算与恢复、审计、实时事件、服务说明与首次部署 |
 | `crates/auction-web-admin/assets/` | `crates/auction-web-admin/assets/admin.css`、`crates/auction-web-admin/assets/desktop.css`、`crates/auction-web-admin/assets/mobile.css` |
 | `crates/auction-web-admin/i18n/` | Fluent 译文：`zh-CN`（默认）、`en`、`zh-TW`、`ja`、`ko`，键集合与 `crates/auction-web-admin/i18n/en.ftl` 一致 |
 

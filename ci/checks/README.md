@@ -2,7 +2,7 @@
 
 [ci/README.md](../README.md) · [docs/development.md](../../docs/development.md)
 
-[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、Markdown 链接、迁移兼容登记与已发布迁移不可变检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`just verify` 先运行 `all`，再执行格式、编译、feature、依赖版本与 Clippy/WASM 检查，不运行行为测试。
+[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、模块层级、Markdown 链接、迁移兼容登记与已发布迁移不可变检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`just verify` 先运行 `all`，再执行格式、编译、feature、依赖版本与 Clippy/WASM 检查，不运行行为测试。
 
 ## 迁移兼容登记
 
@@ -67,6 +67,16 @@ cp "$ratchet_snapshot" ci/checks/source-ratchet.baseline
 rm "$ratchet_snapshot"
 bash ci/checks/check.sh ratchet
 ```
+
+## 模块层级门禁
+
+```bash
+bash ci/checks/check.sh module-paths
+```
+
+`auction-http`、`auction-web-admin`、`auction-web-public` 的模块树必须由目录层级表达：`src/` 下出现的 `#[path = …]` 一律失败。`auction-http` 用 `http/admin/` 与 `http/public/` 按 surface 分组持有 handler，`routes/` 持有路由装配与共享 HTTP 辅助；两端 Web crate 的 `api/` 与 `app/surface/` 同样按文件所在目录解析子模块。需要新增模块时直接创建 `name.rs` 或 `name/mod.rs`，不得再用 `#[path]` 把文件挂到别的父模块下。
+
+`#[path]` 仍有合法的历史用途（例如 `auction-application`、`auction-storage` 的扁平命名空间），因此仓库计数棘轮继续统计 `all:#[path]`；本门禁只锁定已完成迁移的三个 crate，防止回退。新增 crate 若也采用自然层级，可把它加入本检查的路径清单。
 
 ## Markdown 相对链接
 

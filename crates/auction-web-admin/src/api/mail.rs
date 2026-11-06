@@ -14,7 +14,6 @@ pub(crate) use auction_contracts::{
     AdminMailIntakeSummaryResponse as AdminMailIntake,
     AdminMailPollingResponse as AdminMailPolling,
 };
-#[path = "mail/diagnostics.rs"]
 mod diagnostics;
 
 use gloo_net::http::Request;

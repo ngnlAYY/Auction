@@ -37,6 +37,28 @@ async fn postgres_migrates_empty_database_and_reads_worlds() {
     assert!(main.policy_revision > 0);
     assert!(worlds.iter().any(|world| world.id == "isekai"), "迁移应写入 isekai 世界");
 
+    // 097 删除无人读写的对象：空库迁移后不能残留视图、表或旧授权目标。
+    for relation in [
+        "bid_proxies",
+        "bid_proxy_attempts",
+        "bid_proxy_outbid_uses",
+        "auction_forum_reply_cursors",
+    ] {
+        let present: Option<String> = sqlx::query_scalar("SELECT to_regclass($1)::text")
+            .bind(format!("public.{relation}"))
+            .fetch_one(store.postgres_pool())
+            .await
+            .expect("读取被删除对象的存在性");
+        assert!(present.is_none(), "迁移 097 后 {relation} 不应存在");
+    }
+    let level: String = sqlx::query_scalar(
+        "SELECT level FROM public.schema_migration_compatibility WHERE version = 97",
+    )
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取迁移 097 兼容登记");
+    assert_eq!(level, "breaking", "删除既有对象的迁移必须登记为 breaking");
+
     // 重复执行迁移必须是幂等的，不能再次改写已应用的历史。
     store.migrate().await.expect("重复执行迁移保持幂等");
     store.postgres_pool().close().await;

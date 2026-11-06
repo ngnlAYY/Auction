@@ -18,15 +18,10 @@ use crate::app::surface::pending::{
     PendingCommandPanel, use_pending_command_gate, use_pending_commands_with_gate,
 };
 
-#[path = "settlement/helpers.rs"]
 mod helpers;
-#[path = "settlement/picker.rs"]
 mod picker;
-#[path = "settlement/query.rs"]
 mod query;
-#[path = "settlement/recovery.rs"]
 mod recovery;
-#[path = "settlement/report.rs"]
 mod report;
 
 use picker::{AdminSettlementCatalogPager, AdminSettlementPicker};

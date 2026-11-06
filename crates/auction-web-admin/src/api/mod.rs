@@ -3,51 +3,29 @@
 //! fence，最终校验、幂等与审计归服务端。wire DTO 统一由 `auction-contracts` 拥有。
 
 mod alerts;
-#[path = "auction/auctions.rs"]
 mod auctions;
-#[path = "operations/audit.rs"]
 mod audit;
-#[path = "identity/credentials.rs"]
 mod credentials;
-#[path = "operations/dashboard.rs"]
 mod dashboard;
 mod delivery;
-#[path = "auction/forum.rs"]
 mod forum;
-#[path = "auction/intake.rs"]
 mod intake;
-#[path = "auction/lifecycle.rs"]
 mod lifecycle;
-#[path = "auction/lots.rs"]
 mod lots;
-#[path = "fulfillment/mail.rs"]
 mod mail;
 mod pagination;
-#[path = "auction/proxy_events.rs"]
 mod proxy_events;
-#[path = "operations/realtime.rs"]
 mod realtime;
-#[path = "auction/recovery.rs"]
 mod recovery;
-#[path = "identity/renames.rs"]
 mod renames;
-#[path = "content/rules.rs"]
 mod rules;
-#[path = "operations/runtime_config.rs"]
 mod runtime_config;
-#[path = "identity/session.rs"]
 mod session;
-#[path = "auction/settlement.rs"]
 mod settlement;
-#[path = "auction/settlement_catalog.rs"]
 mod settlement_catalog;
-#[path = "operations/setup.rs"]
 mod setup;
-#[path = "operations/status.rs"]
 mod status;
-#[path = "identity/users.rs"]
 mod users;
-#[path = "operations/worlds.rs"]
 mod worlds;
 
 pub(crate) use alerts::{
