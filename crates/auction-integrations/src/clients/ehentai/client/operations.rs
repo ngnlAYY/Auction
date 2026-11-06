@@ -1,4 +1,4 @@
-//! 主题发布、精确标题对账、回帖、编辑与读取；表单加载与提交细节在 topic.rs。
+//! 主题发布、精确标题对账、回帖、编辑与读取；表单加载与提交细节在 `topic` 子模块。
 
 use auction_application::forum::{
     ForumPublishedPost, ForumReadPost, ForumRenderedPost, ForumRenderedThread, ForumTopicMetadata,
