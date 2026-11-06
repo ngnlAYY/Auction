@@ -1,6 +1,17 @@
 //! PostgreSQL 管理端拍卖创建及其审计/实时记录。
 
-use super::*;
+use crate::database::audit_health::AuditWriteResult;
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::admin::{invalid_state, map_sql_error};
+use auction_application::{
+    AdminAuctionCreateTransaction, AdminAuctionSummary, AdminCreateAuctionCommand,
+    AuctionPolicyTemplate, CompetitionTransactionError, SettlementAuctionSnapshot,
+};
+use auction_domain::deterministic_uuid;
+use chrono::{DateTime, Datelike, Duration, Utc};
+use serde_json::json;
+use sqlx::Row;
+use uuid::Uuid;
 
 #[allow(clippy::manual_async_fn)]
 impl AdminAuctionCreateTransaction for PostgresCompetitionTransaction {

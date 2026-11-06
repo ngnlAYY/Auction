@@ -1,10 +1,18 @@
 //! Admin lot 事务端口适配。
 
-use super::super::super::*;
 use super::{
     events::append_admin_lot_record_inner, mutation::update_admin_lot_inner,
     obligation::insert_withdrawn_return_obligation_inner, read::load_admin_lot_update_inner,
 };
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::admin::{invalid_state, map_sql_error};
+use auction_application::{
+    AdminLotSummary, AdminLotUpdateCommand, AdminLotUpdateSnapshot, AdminLotUpdateTransaction,
+    CompetitionTransactionError, StoredCommand,
+};
+use auction_domain::{AuctionId, LotId};
+use chrono::{DateTime, Utc};
+use sqlx::Row;
 
 #[allow(clippy::manual_async_fn)]
 impl AdminLotUpdateTransaction for PostgresCompetitionTransaction {

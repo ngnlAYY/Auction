@@ -1,7 +1,20 @@
 //! Recovery action 的领取与 fencing。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::recovery_scheduler::actions::{
+        RecoveryActionTransactionError, run_serializable_action_transaction,
+    },
+    crate::database::recovery_scheduler::{
+        map_storage_error, repository_error, request_hash_from_optional, valid_external_reference,
+        valid_recovery_text,
+    },
+    auction_application::RecoveryActionClaim,
+    auction_domain::CommandId,
+    chrono::{DateTime, Utc},
+    sqlx::{Postgres, Row},
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 pub(crate) async fn claim_action_postgres(

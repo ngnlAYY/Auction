@@ -1,6 +1,6 @@
 //! retention 盘点的行映射、标识校验和摘要辅助。
 
-use super::*;
+use crate::database::retention_inventory::RetentionInventoryError;
 use sha2::{Digest, Sha256};
 use sqlx::{Row, postgres::PgRow};
 

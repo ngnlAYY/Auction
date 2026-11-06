@@ -1,5 +1,11 @@
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::recovery_scheduler::returns::model::{
+        ExpectedRecoveryReturn, RecoveryReturnMetadata, RecoveryReturnRow,
+    },
+    crate::database::recovery_scheduler::{repository_error, valid_recovery_text},
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 pub(super) fn expected_recovery_return(row: &RecoveryReturnRow) -> Option<ExpectedRecoveryReturn> {

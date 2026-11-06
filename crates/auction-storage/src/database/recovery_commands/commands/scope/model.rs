@@ -1,7 +1,10 @@
 //! Recovery 锁定范围和数据库行模型。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    chrono::{DateTime, Utc},
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 #[derive(Debug, Clone)]

@@ -2,7 +2,16 @@
 
 use crate::database::lifecycle_audit::{LifecycleAuditRecord, lifecycle_parent_audit_record};
 
-use super::*;
+use crate::database::audit_health::AuditWriteResult;
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::lifecycle::{i64_version, invalid_state, map_sql_error};
+use auction_application::{
+    AuctionLifecycleCommand, AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan,
+    AuctionLifecycleResult, AuctionLifecycleWriteSummary, CompetitionTransactionError,
+};
+use auction_domain::{Auction, AuctionStatus};
+use serde_json::{Value, json};
+use uuid::Uuid;
 
 pub(super) fn previous_lifecycle_version(
     auction: &Auction,

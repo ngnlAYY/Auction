@@ -3,7 +3,18 @@
 
 use auction_application::{ApplicationFuture, CompetitionCommandOutcome};
 
-use super::*;
+use crate::http::routes::state::PublicApiState;
+use crate::http::routes::{
+    api_error, authenticated_public_competition_identity, business_outcome_for_competition_error,
+    map_competition_error, observe_public_business, parse_public_uuid, session_guard,
+};
+use auction_application::PublicSessionIdentity;
+use auction_observability::{BusinessEvent, BusinessOutcome};
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use std::net::SocketAddr;
+use std::time::Instant;
+use uuid::Uuid;
 
 mod bid;
 mod proxy;

@@ -1,7 +1,9 @@
 //! PostgreSQL 竞价事务的参与用户资格锁。
 
 use super::super::mapping::*;
-use super::super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use auction_application::CompetitionTransactionError;
+use auction_domain::UserId;
 
 impl PostgresCompetitionTransaction {
     /// lot 与活动代理已经由调用方锁定；这里按调用方给出的稳定用户顺序锁定 users owner 事实。

@@ -1,5 +1,9 @@
 //! 有界持久领取；过期 sending 只能转原 sender 对账，不回发送队列。
-use super::*;
+use crate::database::DatabaseStore;
+use crate::database::lot_watch_pm::{message, sql_error};
+use auction_application::{LotWatchError, LotWatchPmClaim, LotWatchPmClaimRequest};
+use sqlx::Row;
+use uuid::Uuid;
 
 pub(super) async fn claim(
     store: &DatabaseStore,

@@ -1,7 +1,23 @@
 //! Worker recovery relist 的候选领取、证明复核和状态推进。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::recovery_commands::confirm::{
+        block_recovery_relist, complete_recovery_relist, defer_recovery_relist,
+        insert_worker_recovery_audit, scheduled_relist_command_id,
+    },
+    crate::database::recovery_commands::{
+        database_now, is_conflict, lock_actions, lock_auction, lock_original_lot, lock_recovery,
+        lock_world, map_sql_error, relist_recovery, validate_actions, validate_custody_evidence,
+    },
+    auction_application::{
+        RecoveryCommandError, RecoveryConfirmationAction, RecoveryResolutionAdvance,
+    },
+    chrono::{DateTime, Duration as ChronoDuration, Utc},
+    serde_json::json,
+    sqlx::{Postgres, Row},
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn advance_relist_postgres(

@@ -1,7 +1,16 @@
 //! Recovery case 到期推进；事务入口和外部副作用由父模块统一约束。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::recovery_scheduler::{
+        map_due_recovery_row, map_storage_error, repository_error,
+    },
+    auction_application::RecoveryCaseAdvance,
+    auction_domain::{CommandId, SettlementId, deterministic_uuid},
+    chrono::{DateTime, Utc},
+    sqlx::{Postgres, Row},
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 #[derive(Debug)]

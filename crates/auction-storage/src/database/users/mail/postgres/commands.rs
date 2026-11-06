@@ -4,7 +4,15 @@
 
 use super::mapping::*;
 use super::reads::load_mail_command_tx;
-use super::*;
+use crate::database::users::envelope::upsert_login_key_envelope;
+use crate::database::users::mail::repository_error;
+use auction_application::{
+    ApplicationError, MailUserCommandKind, MailUserRebindCommand, MailUserRegisterWrite,
+    MailUserRekeyWrite, MailUserResult, MailUserResultCode,
+};
+use sqlx::Row;
+use subtle::ConstantTimeEq;
+use uuid::Uuid;
 
 pub(crate) async fn register_postgres(
     store: &crate::database::PostgresStore,

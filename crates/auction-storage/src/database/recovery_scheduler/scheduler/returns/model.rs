@@ -1,5 +1,10 @@
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    chrono::{DateTime, Utc},
+    serde::Deserialize,
+    serde_json::Value,
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 #[derive(Debug, Deserialize)]

@@ -1,5 +1,5 @@
 all:#[path] 401
-all:use_super::* 313
+all:use_super::* 193
 jobs:Err(_) 3
 jobs:map_err(|_|) 12
 application:Err(_) 6

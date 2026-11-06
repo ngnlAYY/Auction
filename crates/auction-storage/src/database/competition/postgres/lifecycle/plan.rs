@@ -1,6 +1,15 @@
 //! PostgreSQL 拍卖生命周期计划的原子写入装配。
 
-use super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::lifecycle::{invalid_state, map_sql_error};
+use auction_application::{
+    AuctionLifecycleCommand, AuctionLifecycleEffect, AuctionLifecyclePlan,
+    AuctionLifecycleWriteSummary, CompetitionTransactionError,
+};
+use auction_domain::Auction;
+use chrono::{DateTime, Utc};
+use sqlx::Row;
+use uuid::Uuid;
 
 #[path = "plan/cancel.rs"]
 mod cancel;

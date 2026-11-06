@@ -1,6 +1,13 @@
 //! PostgreSQL 下一期草稿和持久化周轮次（含赛季早鸟场次）写入。
 
-use super::super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::lifecycle::{invalid_record, invalid_state, map_sql_error};
+use auction_application::{
+    AuctionPreviewSuccessorPlan, CompetitionTransactionError, StoredCommand,
+};
+use auction_domain::Auction;
+use serde_json::json;
+use sqlx::Row;
 
 /// 在当前拍卖停止接收装备后建立下一期草稿；调用方须同事务先把 Preview 推进为 Live 或 Cancelled，
 /// 这样 `auctions_one_intake_world_idx` 在任意语句结束时都不会同时看到 Preview 与 Draft。

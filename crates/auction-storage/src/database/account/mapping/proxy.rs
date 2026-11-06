@@ -1,4 +1,10 @@
-use super::*;
+use crate::database::account::ProxyBase;
+use crate::database::account::mapping::{get_pg, storage_error};
+use auction_application::{
+    ApplicationError, PublicOwnedProxy, PublicProxyBid, PublicProxyCapabilities,
+    PublicProxyTransition,
+};
+use auction_domain::{AuctionRules, BidAmount};
 
 #[cfg(feature = "postgres")]
 pub(in crate::database::account) fn map_postgres_proxy_base(

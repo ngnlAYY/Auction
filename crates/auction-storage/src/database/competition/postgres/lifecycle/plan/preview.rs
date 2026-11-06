@@ -1,7 +1,12 @@
 //! PostgreSQL 预览阶段计划写入。
 
 use super::super::record::previous_lifecycle_version;
-use super::super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::lifecycle::{i64_version, invalid_state, map_sql_error};
+use auction_application::{AuctionLifecycleCommand, CompetitionTransactionError};
+use auction_domain::Auction;
+use sqlx::Row;
+use uuid::Uuid;
 
 pub(super) async fn apply_preview_plan_postgres(
     transaction: &mut PostgresCompetitionTransaction,

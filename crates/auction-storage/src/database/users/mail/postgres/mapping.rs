@@ -1,8 +1,18 @@
 //! PostgreSQL Users/MoogleMail 行映射、命令结果和安全事务辅助。
 
-use super::*;
 use crate::database::audit_health::AuditWriteResult as _;
+use crate::database::users::mail::repository_error;
+use auction_application::{
+    ApplicationError, MailUserCommandKind, MailUserRebindCommand, MailUserRegisterWrite,
+    MailUserRekeyWrite, MailUserResult, MailUserResultCode, RequestHash,
+};
+use auction_domain::CommandId;
+use chrono::{DateTime, Utc};
+use serde_json::json;
+use sqlx::Row;
+use sqlx::postgres::PgRow;
 use subtle::ConstantTimeEq;
+use uuid::Uuid;
 
 pub(super) struct RegistrationUser {
     pub(super) id: Uuid,

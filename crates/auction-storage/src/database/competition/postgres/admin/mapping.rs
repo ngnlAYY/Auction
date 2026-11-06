@@ -1,6 +1,12 @@
 //! PostgreSQL 管理端 lot 行到稳定摘要的映射。
 
-use super::*;
+use crate::database::competition::admin::map_sql_error;
+use auction_application::{AdminLotSummary, CompetitionTransactionError};
+use auction_domain::{AuctionId, LotId, ProxyAuthorizationId, UserId};
+use serde_json::Value;
+use sqlx::Row;
+use sqlx::postgres::PgRow;
+use uuid::Uuid;
 
 pub(super) fn map_admin_lot_row(
     row: PgRow,

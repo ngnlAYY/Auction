@@ -1,7 +1,19 @@
 //! 凭据运行时读取、失效标记与健康投影。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::credentials::{
+        admin_error, map_storage_error, storage_error, world_from_scope,
+    },
+    auction_application::{
+        AdminCredentialEnvelope, AdminCredentialError, AdminCredentialHealthScope,
+        AdminCredentialHealthSnapshot, AdminCredentialKind, AdminCredentialRuntimeRecord,
+        AdminCredentialStatus, AdminCredentialWorld, ApplicationError,
+    },
+    chrono::{DateTime, Utc},
+    sqlx::Row,
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 pub(super) async fn list_active_postgres(

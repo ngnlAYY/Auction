@@ -3,9 +3,20 @@
 #[cfg(feature = "postgres")]
 use super::super::resolution::{RecoveryTerminalState, complete_action_in_transaction};
 #[cfg(feature = "postgres")]
-use super::*;
-#[cfg(feature = "postgres")]
 use serde::Serialize;
+#[cfg(feature = "postgres")]
+use {
+    crate::database::recovery_scheduler::actions::RecoveryActionTransactionError,
+    crate::database::recovery_scheduler::actions::delivery::run_serializable_action_transaction,
+    crate::database::recovery_scheduler::{
+        map_storage_error, repository_error, valid_external_reference, valid_failure_code,
+    },
+    auction_application::{RecoveryActionClaim, RecoveryActionOutcome, RequestHash},
+    auction_domain::CommandId,
+    chrono::{DateTime, Utc},
+    sqlx::{Postgres, Row},
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 pub(crate) async fn observe_action_postgres(

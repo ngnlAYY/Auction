@@ -3,7 +3,19 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use super::super::*;
+use crate::database::lots::{
+    map_counts, map_equipment, map_live_fields, map_preview_fields, map_projection,
+    public_forum_lot_code,
+};
+use auction_application::{
+    ApplicationError, EquipmentColorRule, PublicAuctionProjection, PublicLiveLotSummary,
+    PublicPreviewLotDetail, PublicPreviewLotSummary,
+};
+use auction_domain::EquipmentId;
+use serde_json::Value;
+use sqlx::Row;
+use std::collections::BTreeMap;
+use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
 pub(super) fn map_postgres_projection(

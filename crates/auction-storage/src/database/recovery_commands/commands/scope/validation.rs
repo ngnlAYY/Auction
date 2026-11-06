@@ -1,7 +1,22 @@
 //! Recovery 状态、外部证据和结算义务校验。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::TrackedTransaction as Transaction,
+    crate::database::recovery_commands::scope::{
+        ActionRow, ObligationRow, RecoveryRow, RecoveryScope, lock_fulfillment_state,
+    },
+    crate::database::recovery_commands::{
+        action_confirmation, confirmation_action_kind, map_sql_error,
+    },
+    auction_application::{
+        RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
+    },
+    chrono::{DateTime, Utc},
+    sqlx::Postgres,
+    std::collections::BTreeMap,
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) fn validate_recovery_row(

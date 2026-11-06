@@ -1,5 +1,9 @@
-use super::*;
+use crate::database::competition::{PostgresCompetitionTransaction, map_sql_error};
 use crate::database::intake_target;
+use crate::database::mail_intake::failed;
+use auction_application::{
+    CompetitionTransactionError, MailAuctionIntakeResult, MailAuctionIntakeWrite,
+};
 
 use std::collections::BTreeMap;
 

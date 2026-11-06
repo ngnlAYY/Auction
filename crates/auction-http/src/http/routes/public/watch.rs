@@ -10,7 +10,18 @@ use auction_contracts::{
     PublicSetLotWatchResponse,
 };
 
-use super::*;
+use crate::http::routes::state::PublicApiState;
+use crate::http::routes::{
+    api_error, authenticated_public_identity, authenticated_public_mutation_identity,
+    no_store_headers, parse_public_uuid, parse_query, session_guard, strict_json,
+};
+use auction_contracts::ApiResponse;
+use auction_domain::CommandId;
+use axum::Json;
+use axum::extract::{ConnectInfo, Path, Request, State};
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use std::net::SocketAddr;
 
 pub(crate) async fn list_lot_watches(
     State(state): State<PublicApiState>,

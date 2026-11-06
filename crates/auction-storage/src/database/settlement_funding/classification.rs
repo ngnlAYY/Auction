@@ -4,7 +4,11 @@ use std::{collections::HashSet, sync::LazyLock};
 
 use futures_util::TryStreamExt;
 
-use super::*;
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement_funding::storage;
+use auction_application::FundingError;
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
 /// 仅同UID、完整原投递身份匹配的追加修复证明解除旧结果未知门。
 pub(super) async fn repaired_deliveries(

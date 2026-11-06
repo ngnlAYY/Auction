@@ -1,7 +1,18 @@
 //! Recovery 事务中的范围、拍卖、义务和 action 锁定。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::TrackedTransaction as Transaction,
+    crate::database::recovery_commands::map_sql_error,
+    crate::database::recovery_commands::scope::{
+        ActionRow, AuctionLock, ObligationRow, OriginalLot, RecoveryRow, RecoveryScope,
+    },
+    auction_application::RecoveryCommandError,
+    chrono::{DateTime, Utc},
+    sqlx::{Postgres, Row},
+    std::collections::BTreeMap,
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn load_recovery_scope(

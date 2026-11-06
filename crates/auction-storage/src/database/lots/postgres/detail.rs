@@ -3,8 +3,16 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use super::super::*;
 use super::mapping::{map_postgres_live, map_postgres_preview_detail, map_postgres_projection};
+use crate::database::PostgresStore;
+use crate::database::lots::storage_error;
+use auction_application::{
+    ApplicationError, EquipmentColorRule, PublicAuctionProjection, PublicLiveLotDetail,
+    PublicLotDetail,
+};
+use auction_domain::EquipmentId;
+use sqlx::Row;
+use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
 pub(in crate::database::lots) async fn detail_postgres(

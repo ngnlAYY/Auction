@@ -2,7 +2,9 @@
 //! 终态证明由子模块负责，本模块保留稳定出口与原生事务借用适配。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::recovery_scheduler::actions::RecoveryActionTransactionFuture, sqlx::Postgres,
+};
 
 #[cfg(feature = "postgres")]
 mod activation;

@@ -1,7 +1,10 @@
 //! realtime stream、consumer 和 failure 水位盘点。
 
 use super::mapping::*;
-use super::*;
+use crate::database::retention_inventory::{
+    MAX_REALTIME_STREAMS, PostgresRealtimeCoverage, PostgresRealtimeInventory,
+    PostgresRealtimeStreamInventory, REALTIME_STREAM_QUERY_LIMIT, RetentionInventoryError,
+};
 use sqlx::{Row, postgres::PgRow};
 
 pub(super) async fn read_realtime_inventory(
