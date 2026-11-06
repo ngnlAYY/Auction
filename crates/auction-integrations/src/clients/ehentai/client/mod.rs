@@ -6,7 +6,7 @@
 //! 战斗页信号，因此不接账号忙熔断；429 与 Cloudflare 等分类和写入未知语义保持原样。
 //!
 //! 客户端类型与请求作用域留在本模块；构造、配置、主题操作及整页/增量读取分别位于
-//! `construction`、`config`、`operations`、`scan`。
+//! `construction`、`config`、`operations`、`scan`，主题表单/回执的细节在 `topic` 子模块。
 
 use std::sync::atomic::AtomicUsize;
 
