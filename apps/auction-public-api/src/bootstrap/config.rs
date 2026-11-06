@@ -1,10 +1,9 @@
-//! Public API 的普通配置和安全/cache 装配。
+//! Public API 的普通配置和安全装配。
 
 use std::time::Duration;
 
 use anyhow::Context;
-use auction_cache::CacheStore;
-use auction_config::{AppConfig, CacheBackend};
+use auction_config::AppConfig;
 use auction_http::{HttpSecurityOptions, PublicHttpSecurity};
 
 pub(super) fn configure_security(config: &AppConfig) -> anyhow::Result<PublicHttpSecurity> {
@@ -26,14 +25,4 @@ pub(super) fn configure_security(config: &AppConfig) -> anyhow::Result<PublicHtt
         trusted_unix_proxy: config.http_security.trusted_unix_proxy,
     })
     .map_err(anyhow::Error::msg)
-}
-
-pub(super) fn configure_cache(config: &AppConfig) -> anyhow::Result<CacheStore> {
-    match config.cache.backend {
-        CacheBackend::Disabled => Ok(CacheStore::disabled()),
-        CacheBackend::Redis => {
-            let redis_url = config.redis_url().context("redis cache URL is missing")?;
-            CacheStore::redis(redis_url).map_err(Into::into)
-        }
-    }
 }

@@ -4,7 +4,7 @@ HentaiVerse 装备拍卖服务的全 Rust 实现：玩家在网站或 E-Hentai �
 
 - **后端**：三个可独立部署的进程——Public API、Admin API、Worker——加运维命令行 `auction-cli`；也可用 `auction-server` 单文件合并运行。
 - **前端**：Public 与 Admin 两个 Dioxus 0.7 CSR（WASM）单页应用，内嵌在对应后端二进制中同源提供；五种界面语言。
-- **存储**：PostgreSQL 18 是唯一事实来源；Redis 可选，只作可丢弃的读缓存。
+- **存储**：PostgreSQL 18 是唯一事实来源。
 - **平台**：原生程序仅支持 Linux x86_64。
 
 ## 从哪里开始

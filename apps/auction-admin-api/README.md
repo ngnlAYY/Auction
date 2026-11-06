@@ -10,7 +10,6 @@
 | --- | --- |
 | `postgres` | 连接 PostgreSQL 并装配全部端口；同时启用首次设置（`auction-setup/postgres`） |
 | `web-embed` | 内嵌 Admin 页面产物；首次设置页面也依赖它 |
-| `cache-redis` | 允许 Redis 缓存后端 |
 
 ## 启动模式
 

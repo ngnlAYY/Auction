@@ -18,7 +18,6 @@ pub(crate) struct SecretFileConfig {
     pub(crate) database: Option<PostgresConnectionConfig>,
     /// 兼容旧 PostgreSQL 连接串；数据库进程按需读取，不能写入主配置。
     pub(crate) database_url: Option<String>,
-    pub(crate) redis_url: Option<String>,
     /// 定时备份成功和失败的可选打卡地址；空字符串表示未配置。
     pub(crate) backup_heartbeat_success_url: Option<String>,
     pub(crate) backup_heartbeat_failure_url: Option<String>,
@@ -184,7 +183,6 @@ impl fmt::Debug for MoogleMailKeyEnv {
 #[derive(Clone, Default)]
 pub(crate) struct AppSecrets {
     pub(crate) database_url: Option<SecretString>,
-    pub(crate) redis_url: Option<SecretString>,
     pub(crate) backup_heartbeat_success_url: Option<SecretString>,
     pub(crate) backup_heartbeat_failure_url: Option<SecretString>,
     pub(crate) backup_r2_access_key_id: Option<SecretString>,
@@ -274,10 +272,6 @@ impl AppSecrets {
             backup_r2_secret_access_key: secret
                 .backup_r2_secret_access_key
                 .map(|value| SecretString::new("backup_r2_secret_access_key", value))
-                .transpose()?,
-            redis_url: secret
-                .redis_url
-                .map(|value| SecretString::new("redis_url", value))
                 .transpose()?,
             ehentai_cookie: secret
                 .ehentai_cookie

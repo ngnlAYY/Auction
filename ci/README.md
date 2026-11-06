@@ -31,7 +31,7 @@ bash ci/checks/check.sh <检查项>...
 | `all` | `repository layout config systemd-templates i18n equipment-contract ratchet markdown-links migration-compatibility published-migrations` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
-| `feature` | `auction-storage`（仅 `postgres`）、`auction-cache`（仅 `redis`），以及 `auction-setup` 的空默认图与 `postgres` 完整图 |
+| `feature` | `auction-storage`（仅 `postgres`），以及 `auction-setup` 的空默认图与 `postgres` 完整图 |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |
 | `dependency-versions` | `auction-server` 正常依赖图只能包含一个 `tungstenite` 版本；Axum 的 WebSocket 错误按版本 downcast，跨版本并存会静默丢失 1009 close 契约 |
 | `wasm` | 以 `wasm32-unknown-unknown` 目标运行 `cargo clippy -D warnings`：Public（连同 `auction-web-shared`、`auction-contracts`）与 Admin 分开检查，各自保留独立 feature 图；`cfg(target_arch = "wasm32")` 代码只在此项被 lint |
@@ -91,8 +91,8 @@ bash ci/release/verify-deployment-package.sh <*.tar.gz> --tag <v版本>        #
 | 变体 | feature | 程序 | 用途 |
 | --- | --- | --- | --- |
 | API-only | `postgres` | Public、Admin | 不发布；证明未启用 `web-embed` 时二进制不含任何页面（资源目录固定为空，页面路由 503） |
-| embedded | `postgres,cache-redis` + 两端 `web-embed` | Public、Admin、Worker、auction-cli | 分体部署发布包 |
-| single | `postgres,cache-redis` + `auction-server/web-embed` | auction-server、auction-cli | 合并部署发布包（`-single` 后缀） |
+| embedded | `postgres` + 两端 `web-embed` | Public、Admin、Worker、auction-cli | 分体部署发布包 |
+| single | `postgres` + `auction-server/web-embed` | auction-server、auction-cli | 合并部署发布包（`-single` 后缀） |
 
 ### 门禁
 

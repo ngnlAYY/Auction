@@ -34,7 +34,6 @@ impl AppConfig {
                 tracing: TracingSettings::default(),
                 shutdown: ShutdownFileConfig::default(),
                 realtime: RealtimeConfig::default(),
-                cache: CacheConfig::default(),
                 backup: BackupConfig::default(),
                 auction: AuctionConfig::default(),
                 worker: WorkerConfig::default(),
@@ -113,7 +112,6 @@ impl AppConfig {
             readiness,
             database_profiles,
             database_roles,
-            cache,
             backup,
             auction,
         } = common;
@@ -144,7 +142,6 @@ impl AppConfig {
                 tracing,
                 shutdown,
                 realtime,
-                cache,
                 backup,
                 auction,
                 worker,

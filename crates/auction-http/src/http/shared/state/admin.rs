@@ -1,9 +1,5 @@
 //! Admin HTTP surface 的应用端口状态容器。
 
-use auction_application::diagnostics::DiagnosticContext;
-
-use crate::diagnostics;
-
 use std::sync::Arc;
 
 use auction_application::{
@@ -14,8 +10,8 @@ use auction_application::{
     AdminRuntimeConfigPort, AdminSessionPort, AdminUserPort, AdminWorldPort,
     AuctionLifecycleCommandPort, DeliveryAdminPort, OperationsAlertConsole,
     OperationsAlertSourceReader, OperationsAlertStore, ProcessReadinessPort, PublicForumReader,
-    ReadModelCache, RealtimeAdminPort, RecoveryCommandPort, RecoveryReportReader,
-    SettlementCatalogReader, SettlementReportReader, WorkerControlPort, public_rules_cache_key,
+    RealtimeAdminPort, RecoveryCommandPort, RecoveryReportReader, SettlementCatalogReader,
+    SettlementReportReader, WorkerControlPort,
 };
 use auction_observability::{HealthReader, ProcessMetrics};
 
@@ -70,7 +66,6 @@ pub struct AdminApiState {
     runtime_switch_snapshot: Option<auction_application::RuntimeSwitches>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
     security: AdminHttpSecurity,
-    public_rules_cache: Option<Arc<dyn ReadModelCache>>,
 }
 
 impl AdminApiState {
@@ -165,7 +160,6 @@ impl AdminApiState {
             runtime_switch_snapshot: None,
             readiness: None,
             security,
-            public_rules_cache: None,
         }
     }
 
@@ -254,12 +248,6 @@ impl AdminApiState {
     /// 注入 Admin dashboard 需要严格检查的已配置邮箱标识；空集合表示不强制套用 Worker 配置范围。
     pub fn with_dashboard_mailbox_keys(mut self, mailbox_keys: Vec<String>) -> Self {
         self.dashboard_mailbox_keys = mailbox_keys.into();
-        self
-    }
-
-    /// 注入 Public 规则缓存失效端口；缓存不是 Admin 规则权威，失效失败不能改变发布结果。
-    pub fn with_public_rules_cache(mut self, cache: Arc<dyn ReadModelCache>) -> Self {
-        self.public_rules_cache = Some(cache);
         self
     }
 
@@ -425,22 +413,5 @@ impl AdminApiState {
 
     pub(crate) fn security(&self) -> &AdminHttpSecurity {
         &self.security
-    }
-
-    pub(crate) async fn invalidate_public_rules_cache(&self, locale: &str) {
-        let Some(cache) = self.public_rules_cache.as_deref() else {
-            return;
-        };
-        let Some(key) = public_rules_cache_key(locale) else {
-            return;
-        };
-        if let Err(cause) = cache.invalidate(key).await {
-            diagnostics::warn(
-                "public_rules",
-                "invalidate_cache",
-                diagnostics::cache_kind(&cause),
-                DiagnosticContext::default(),
-            );
-        }
     }
 }

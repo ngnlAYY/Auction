@@ -81,12 +81,6 @@ pub enum ConfigError {
     #[error("admin_actor 不能包含 Basic Auth 分隔符冒号")]
     InvalidAdminActor,
 
-    #[error("cache backend redis requires sensitive field redis_url")]
-    MissingRedisUrl,
-
-    #[error("invalid cache configuration: {0}")]
-    InvalidCacheConfig(&'static str),
-
     #[error("定时备份配置无效：{0}")]
     InvalidBackupConfig(&'static str),
 

@@ -29,8 +29,7 @@ use auction_application::{
     MailProcessor, MailProcessorConfig, MailUserService, RecurringSchedule,
     SettlementFulfillmentEquipmentSecretReader,
 };
-use auction_cache::CacheStore;
-use auction_config::{AppConfig, CacheBackend, Role};
+use auction_config::{AppConfig, Role};
 #[cfg(feature = "postgres")]
 use auction_config::{StandardCronSchedule, load_mooglemail_keyenv};
 #[cfg(feature = "postgres")]
@@ -162,7 +161,6 @@ async fn run_service(
         )
         .context("initialize Prometheus metrics")?,
     );
-    let cache = configure_cache(config).context("configure worker cache")?;
     let switches = auction_application::RuntimeSwitches::new(
         auction_application::RuntimeSwitchRole::Worker,
         config.readiness.audit_failure_mode,
@@ -174,7 +172,6 @@ async fn run_service(
     let _metrics_task = metrics::start(config, Arc::clone(&metrics), switches.clone());
     tracing::info!(
         database_configured = config.database_url().is_some(),
-        cache_backend = cache.backend(),
         worker_concurrency = config.worker_concurrency(),
         "worker configured"
     );
@@ -292,13 +289,3 @@ mod skeleton;
 use persistent::run_worker;
 #[cfg(not(feature = "postgres"))]
 use skeleton::run_worker;
-
-fn configure_cache(config: &AppConfig) -> anyhow::Result<CacheStore> {
-    match config.cache.backend {
-        CacheBackend::Disabled => Ok(CacheStore::disabled()),
-        CacheBackend::Redis => {
-            let redis_url = config.redis_url().context("redis cache URL is missing")?;
-            CacheStore::redis(redis_url).map_err(Into::into)
-        }
-    }
-}

@@ -25,10 +25,6 @@ pub(crate) fn io_kind(_cause: &std::io::Error) -> SafeErrorKind {
     SafeErrorKind::IO_ERROR
 }
 
-pub(crate) fn cache_kind<T: ?Sized>(_cause: &T) -> SafeErrorKind {
-    SafeErrorKind::DEPENDENCY_UNAVAILABLE
-}
-
 pub(crate) fn connection_kind<T: ?Sized>(_cause: &T) -> SafeErrorKind {
     SafeErrorKind::REMOTE_TRANSPORT_ERROR
 }

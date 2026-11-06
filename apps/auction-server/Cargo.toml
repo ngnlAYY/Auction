@@ -24,7 +24,6 @@ tokio = { workspace = true, features = ["process", "io-util"] }
 default = []
 postgres = ["auction-public-api/postgres", "auction-admin-api/postgres", "auction-worker/postgres", "auction-storage/postgres", "auction-setup/postgres"]
 web-embed = ["auction-public-api/web-embed", "auction-admin-api/web-embed"]
-cache-redis = ["auction-public-api/cache-redis", "auction-admin-api/cache-redis", "auction-worker/cache-redis"]
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

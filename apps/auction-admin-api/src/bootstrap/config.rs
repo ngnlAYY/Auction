@@ -2,12 +2,10 @@
 
 use std::{sync::Arc, time::Duration};
 
-use anyhow::Context;
 #[cfg(feature = "postgres")]
 use auction_application::AdminIntakePolicy;
 use auction_application::{AdminCredentialWorld, WorkerControlPort};
-use auction_cache::CacheStore;
-use auction_config::{AppConfig, CacheBackend};
+use auction_config::AppConfig;
 use auction_http::{AdminHttpSecurity, HttpSecurityOptions};
 use auction_jobs::WorkerControlClient;
 
@@ -74,14 +72,4 @@ pub(super) fn configure_security(config: &AppConfig) -> anyhow::Result<AdminHttp
         trusted_unix_proxy: config.http_security.trusted_unix_proxy,
     })
     .map_err(anyhow::Error::msg)
-}
-
-pub(super) fn configure_cache(config: &AppConfig) -> anyhow::Result<CacheStore> {
-    match config.cache.backend {
-        CacheBackend::Disabled => Ok(CacheStore::disabled()),
-        CacheBackend::Redis => {
-            let redis_url = config.redis_url().context("redis cache URL is missing")?;
-            CacheStore::redis(redis_url).map_err(Into::into)
-        }
-    }
 }

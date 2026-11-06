@@ -29,9 +29,9 @@ api_only_admin_root="$repository_root/target/dist/api-only-assets/admin"
 # 体积预算的基线是刻意维护的数据文件；发布门禁只读取，不写回。
 web_size_budget_file="$repository_root/ci/release/web-size-budget.v1"
 assets_missing_message="web assets are not included in this binary; run \`just build-release\`"
-# 发布 feature 的唯一来源：可部署制品含 Redis；API-only 对照只留 PostgreSQL。
+# 发布 feature 的唯一来源：可部署制品与 API-only 对照都只启用 PostgreSQL。
 api_only_features='postgres'
-runtime_features='postgres,cache-redis'
+runtime_features='postgres'
 embedded_features="$runtime_features,auction-public-api/web-embed,auction-admin-api/web-embed"
 single_features="$runtime_features,auction-server/web-embed"
 

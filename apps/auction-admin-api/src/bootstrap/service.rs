@@ -12,7 +12,7 @@ use auction_process::{
 };
 use tokio::sync::oneshot;
 
-use super::{config, listener, metrics, state};
+use super::{listener, metrics, state};
 
 pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let config = match config_path {
@@ -51,7 +51,6 @@ async fn run_service(
     signals: &mut TerminationSignals,
     forced: &mut bool,
 ) -> anyhow::Result<()> {
-    let cache = Arc::new(config::configure_cache(config).context("configure admin-api cache")?);
     let metrics = Arc::new(
         ProcessMetrics::new_with_tracing_health(
             config.metrics.enabled,
@@ -90,7 +89,7 @@ async fn run_service(
             Ok::<_, anyhow::Error>((bound_listener, state, heartbeat, runtime_switch_task))
         } => result?,
     };
-    let state = state.with_metrics(metrics).with_public_rules_cache(cache.clone());
+    let state = state.with_metrics(metrics);
     #[cfg(feature = "postgres")]
     let mut heartbeat_task =
         heartbeat.as_ref().map(Arc::clone).map(state::spawn_heartbeat).map(TaskGuard::new);
@@ -106,7 +105,6 @@ async fn run_service(
 
     tracing::info!(
         listener = %bound_listener.description(),
-        cache_backend = cache.backend(),
         "admin api listening"
     );
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();

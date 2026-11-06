@@ -11,7 +11,7 @@ use auction_process::{
 };
 use tokio::sync::oneshot;
 
-use super::{config, listener, metrics, state};
+use super::{listener, metrics, state};
 
 pub async fn run() -> anyhow::Result<()> {
     let config = AppConfig::load(Role::Public).context("load public-api configuration")?;
@@ -57,7 +57,6 @@ async fn run_service(
     signals: &mut TerminationSignals,
     forced: &mut bool,
 ) -> anyhow::Result<()> {
-    let cache = Arc::new(config::configure_cache(config).context("configure public-api cache")?);
     let metrics = Arc::new(
         ProcessMetrics::new_with_tracing_health(
             config.metrics.enabled,
@@ -89,7 +88,6 @@ async fn run_service(
                 config,
                 telemetry.health_reader(),
                 Arc::clone(&metrics),
-                cache.clone(),
                 switches.clone(),
             )
             .await
@@ -128,7 +126,7 @@ async fn run_service(
     )
     .with_state(state);
 
-    tracing::info!(listener = %listener_description, cache_backend = cache.backend(), "public api listening");
+    tracing::info!(listener = %listener_description, "public api listening");
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
     let mut server_task = TaskGuard::new(tokio::spawn(async move {
         listener::serve(listener, app, async move {

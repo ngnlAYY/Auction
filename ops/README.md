@@ -233,7 +233,7 @@ sshd -T | grep -E '^(permitrootlogin|passwordauthentication|kbdinteractiveauthen
 
 ### 防火墙与端口
 
-入站默认拒绝，只开放 SSH 与反向代理端口。Public/Admin 默认走 Unix socket、PostgreSQL 与 Redis 只监听本机，因此除 SSH 外通常只需 80/443（ACME 与 HTTPS）；经 Cloudflare 代理时可进一步只允许 Cloudflare 地址段访问 443。
+入站默认拒绝，只开放 SSH 与反向代理端口。Public/Admin 默认走 Unix socket、PostgreSQL 只监听本机，因此除 SSH 外通常只需 80/443（ACME 与 HTTPS）；经 Cloudflare 代理时可进一步只允许 Cloudflare 地址段访问 443。
 
 ```bash
 ss -lntup        # 核对实际监听；0.0.0.0/:: 上不属于预期的端口都要处理

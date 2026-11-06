@@ -20,8 +20,8 @@
 | 文件 | 拥有 |
 | --- | --- |
 | 角色文件 | `common_file`、`secrets_file`（必填，相对路径以角色文件所在目录解析）；可选 `runtime_config_file`；Admin 另有 `worker_config_file`；listener、tracing、HTTP 安全、会话（Public/Admin）、realtime（Public）、`[worker.*]`（Worker） |
-| `common.toml` | `log_filter`、`[metrics]`、`[readiness]`、`[cache]`、`[auction.*]`（排期、早鸟、经济、结算、恢复策略）、CLI 专用 `[backup]` |
-| `secrets.toml` | 数据库、Redis URL、外部 Cookie、Admin 登录凭据、三组数据密钥、OTLP 导出头、R2 备份令牌与可选打卡地址 |
+| `common.toml` | `log_filter`、`[metrics]`、`[readiness]`、`[auction.*]`（排期、早鸟、经济、结算、恢复策略）、CLI 专用 `[backup]` |
+| `secrets.toml` | 数据库、外部 Cookie、Admin 登录凭据、三组数据密钥、OTLP 导出头、R2 备份令牌与可选打卡地址 |
 | `runtime/admin.toml` | 可由 Admin 后台修改的运行参数（见下文） |
 
 ### 加载规则
@@ -38,7 +38,6 @@
 | 字段 | 说明 |
 | --- | --- |
 | `[database]` `host`、`port`、`username`、`password`、`name` | PostgreSQL 连接（必填）。`username` 必须是迁移 081 授权的运行账号 `auction_runtime`（无 DDL、无 `TRUNCATE`、对只追加表只可 `INSERT`），不得使用迁移 owner 或维护账号。账号与口令按原文填写，loader 负责编码；端口必须非零。也可用兼容的 `database_url`（`postgres://…`），二者不能同时出现 |
-| `redis_url` | `cache.backend = "redis"` 时必填 |
 | `admin_actor`、`admin_secret` | Admin 登录凭据，必须成对；既有 secret 16–4096 字节可加载，首次设置要求至少 32 字节；无控制字符 |
 | `equipment_data_key_id` / `equipment_data_key` | 装备 key 加密（手工录入、投稿）；三角色必须一致 |
 | `user_login_data_key_id` / `user_login_data_key` | 用户登录 key 加密（注册回信、Admin 用户管理） |
@@ -72,7 +71,6 @@
 | `log_filter` | tracing 过滤器（`EnvFilter` 语法），默认 `info,<服务名>=debug`；追加 `auction_observability::log_dedup=off` 可在重启后关闭已接入调用点的重复错误去重，窗口与汇总语义见 [crates/auction-observability/README.md#重复错误去重](../../crates/auction-observability/README.md#重复错误去重) |
 | `[metrics]` | 进程指标开关、转发拒绝及可选附加出口，见下文 |
 | `[readiness]` | 审计失败模式、迁移兼容模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
-| `[cache]` | 见[缓存](#缓存) |
 | `[backup]`、`[backup.offsite]`、`[backup.scope]` | CLI 专用定时备份策略、异机副本与数据库之外的范围，见[定时备份策略](#定时备份策略) |
 | `[database_roles]` | 数据库账号分工：`owner` 是迁移 owner 账号名（小写标识符，生产严格预检必填），运行账号固定为 `auction_runtime` 不可配置；`owner` 不能与运行账号相同，服务使用 owner 会被拒绝 |
 | `[auction.schedule]` | 周排期：时区、预览/开拍/计划结束的星期与时间、参与世界 |
@@ -332,17 +330,6 @@ Worker 每 30 秒检查一次 runtime 文件的长度与修改时间；候选变
 `send_intervals` 只影响后续 delivery 领取计算的最小发送起点，不改变既有 claim、sending 围栏或资金结果。热参数与启动租约冲突时（例如论坛 `item_timeout_seconds` 不小于当前租约），Worker 记录告警并继续使用启动值，下一次读取周期再检查。
 
 启用接管时，`config check` 还会核对 Admin 与 Worker 得到的有效模板与排期一致。
-
-## 缓存
-
-`[cache]`（`common.toml`）：
-
-| 字段 | 说明 |
-| --- | --- |
-| `backend` | `disabled`（默认）或 `redis`；`redis` 需要在敏感文件提供 `redis_url`，且程序以 `cache-redis` feature 构建 |
-| `public_rules_ttl_seconds` | Public 规则读模型的缓存 TTL，1–3600 秒，默认 30 |
-
-缓存只用于可丢弃的读模型（目前是 Public 规则文档），永远不参与金额、资格、幂等、会话或审计判断；缓存不可用时直接回源数据库。规则发布后 Admin 与 `auction-cli rules import` 会主动失效缓存。
 
 ## 权限要求
 

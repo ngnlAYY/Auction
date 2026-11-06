@@ -9,7 +9,7 @@
 - HentaiVerse 装备拍卖系统：Public 竞价站点、Admin 管理后台，以及处理生命周期、结算履约、MoogleMail、论坛与告警的 Worker。
 - Public、Admin、Worker 独立部署；`auction-cli` 负责配置检查、部署编排、迁移、备份恢复与业务运维；可选的 `auction-server` 在单主机上监管三个角色子进程。
 - 原生程序仅支持 Linux x86_64（装配根在其他平台编译期报错）；浏览器包编译到 `wasm32-unknown-unknown`。通用制品不使用 `target-cpu=native`。
-- 应用代码为 Rust；CI 与发布工具使用 Shell 等脚本。浏览器是 Dioxus CSR，WASM 由后端内嵌。PostgreSQL 18 是唯一数据库后端，Redis 只作可丢弃缓存。
+- 应用代码为 Rust；CI 与发布工具使用 Shell 等脚本。浏览器是 Dioxus CSR，WASM 由后端内嵌。PostgreSQL 18 是唯一数据库后端与唯一事实来源；不存在独立缓存进程。
 - 普通启动从不隐式迁移。迁移只经 `auction-cli db migrate`、`auction-cli service start/restart`（停机门禁后）与合并部署首次初始化（网页明确确认后的专用空库）执行。
 
 ## 仓库结构
@@ -41,7 +41,6 @@
 | `auction-application` | 用例、事务编排、应用错误与窄端口；不读进程配置、不监听、不直接执行 SQL 或外部调用 |
 | `auction-contracts` | 前后端共用的稳定 DTO；数据库记录不能直接成为浏览器 DTO |
 | `auction-storage` | 实现应用端口，拥有全部 SQL、连接池、事务与锁；业务决定留在内层 |
-| `auction-cache` | 可丢弃、可重建；未命中、不可用或失效失败都回源，不改变命令结果 |
 | `auction-integrations` | 外部传输与认证；响应经应用命令或持久化 Worker 处理，不直接改拍卖状态 |
 | `auction-http` | 输入/命令与输出/DTO 映射；不包含竞价、结算或状态机规则 |
 | `auction-jobs` | 调度、重试、租约与 Worker 编排，不建立第二套状态机 |
@@ -100,7 +99,7 @@
 
 - 运行配置一律 TOML；`AUCTION_CONFIG_FILE` 只选择角色文件，不覆盖任何字段；不引入通用环境变量覆盖。
 - 三角色必须引用同一 `common_file`；`runtime_config_file` 要么三者引用同一个，要么都省略。
-- 数据库、Redis URL、Cookie、Admin 凭据、数据密钥只进敏感 TOML；敏感文件不提交，只允许运行账号读取。错误信息不得回显 TOML 原文或秘密值。
+- 数据库、Cookie、Admin 凭据、数据密钥只进敏感 TOML；敏感文件不提交，只允许运行账号读取。错误信息不得回显 TOML 原文或秘密值。
 - `ops/config/examples/` 中每个赋值字段前必须紧邻含“可选”或“必填”的中文注释，说明默认值与启用条件。示例同时是首次设置的生成模板。
 - 每种外部 Cookie（邮件、论坛）全库同时最多一个 active。
 

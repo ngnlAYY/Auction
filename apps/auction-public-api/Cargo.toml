@@ -8,7 +8,6 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 auction-application.workspace = true
-auction-cache.workspace = true
 auction-config.workspace = true
 auction-http.workspace = true
 auction-jobs.workspace = true
@@ -25,7 +24,6 @@ uuid.workspace = true
 
 [features]
 default = []
-cache-redis = ["auction-cache/redis"]
 postgres = ["auction-storage/postgres"]
 web-embed = []
 

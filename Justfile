@@ -28,7 +28,7 @@ fmt:
 check:
     @bash ci/checks/check.sh check
 
-# 分别验证 PostgreSQL、Redis，以及首次设置的空默认图和完整 feature 图。
+# 分别验证 PostgreSQL，以及首次设置的空默认图和完整 feature 图。
 feature-check:
     @bash ci/checks/check.sh feature
 

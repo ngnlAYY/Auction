@@ -11,17 +11,16 @@ use std::time::Duration;
 
 #[cfg(feature = "postgres")]
 use anyhow::Context;
-use auction_application::ReadModelCache;
 #[cfg(feature = "postgres")]
 use auction_application::{
-    ApplicationError, ApplicationFuture, AuctionReader, CachedPublicRulesReader,
-    CompetitionCommandPort, ProcessReadinessPort, PublicAccountReader, PublicBidLogReader,
-    PublicBlacklistReader, PublicCompensationReader, PublicEquipmentLinkResolver,
-    PublicEquipmentLinkSecretReader, PublicForumReader, PublicLoginAuthenticator, PublicLotReader,
-    PublicPriceHistoryReader, PublicRealtimeReader, PublicRulesReader, PublicSessionConfig,
-    PublicSessionPort, PublicSessionService, PublicSessionStore, RealtimeConsumerStore,
-    RealtimeEventSink, RealtimeRelay, RealtimeRelayConfig, RealtimeSequenceAllocator,
-    RealtimeStreamStore, RepositoryError, WorldReader,
+    ApplicationError, ApplicationFuture, AuctionReader, CompetitionCommandPort,
+    ProcessReadinessPort, PublicAccountReader, PublicBidLogReader, PublicBlacklistReader,
+    PublicCompensationReader, PublicEquipmentLinkResolver, PublicEquipmentLinkSecretReader,
+    PublicForumReader, PublicLoginAuthenticator, PublicLotReader, PublicPriceHistoryReader,
+    PublicRealtimeReader, PublicRulesReader, PublicSessionConfig, PublicSessionPort,
+    PublicSessionService, PublicSessionStore, RealtimeConsumerStore, RealtimeEventSink,
+    RealtimeRelay, RealtimeRelayConfig, RealtimeSequenceAllocator, RealtimeStreamStore,
+    RepositoryError, WorldReader,
 };
 use auction_config::AppConfig;
 use auction_http::PublicApiState;
@@ -163,7 +162,6 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
-    cache: Arc<dyn ReadModelCache>,
     switches: auction_application::RuntimeSwitches,
 ) -> anyhow::Result<(
     PublicApiState,
@@ -231,12 +229,7 @@ pub(super) async fn configure_state(
         tracing::warn!(error = %error, "public heartbeat starting publish failed");
     }
     let worlds: Arc<dyn WorldReader> = store.clone();
-    let rules_authority: Arc<dyn PublicRulesReader> = store.clone();
-    let rules: Arc<dyn PublicRulesReader> = Arc::new(CachedPublicRulesReader::new(
-        rules_authority,
-        cache,
-        Duration::from_secs(config.cache.public_rules_ttl_seconds),
-    ));
+    let rules: Arc<dyn PublicRulesReader> = store.clone();
     let blacklist: Arc<dyn PublicBlacklistReader> = store.clone();
     let compensation: Arc<dyn PublicCompensationReader> = store.clone();
     let forum: Arc<dyn PublicForumReader> = store.clone();
@@ -335,7 +328,6 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     _tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     _metrics: Arc<ProcessMetrics>,
-    _cache: Arc<dyn ReadModelCache>,
     switches: auction_application::RuntimeSwitches,
 ) -> anyhow::Result<(
     PublicApiState,

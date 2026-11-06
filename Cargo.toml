@@ -13,7 +13,6 @@ publish = false
 [workspace.dependencies]
 # 工作区内部 crate
 auction-application = { path = "crates/auction-application" }
-auction-cache = { path = "crates/auction-cache", default-features = false }
 auction-config = { path = "crates/auction-config" }
 auction-contracts = { path = "crates/auction-contracts" }
 auction-domain = { path = "crates/auction-domain" }
@@ -105,9 +104,6 @@ sqlx = { version = "0.9.0", default-features = false, features = [
     "runtime-tokio",
     "uuid",
 ] }
-
-# Redis 只由 cache-redis feature 引入；关闭默认 feature，避免附带脚本、流和大数支持。
-redis = { version = "1.7.1", default-features = false }
 
 # 数据与错误
 anyhow = "1.0.104"

@@ -9,7 +9,6 @@
 | feature | 作用 |
 | --- | --- |
 | `postgres` | 持久化 Worker 的全部能力 |
-| `cache-redis` | 允许 Redis 缓存后端 |
 
 没有 `postgres` 时只能以“骨架”运行（仅 control 与指标），配置了数据库会拒绝启动。
 

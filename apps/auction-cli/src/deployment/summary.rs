@@ -76,10 +76,6 @@ fn projection(config: &AppConfig) -> anyhow::Result<Value> {
                 Some(format!("auction-{}", config.role.name()))
             },
         },
-        "cache": {
-            "backend": config.cache.backend.name(),
-            "public_rules_ttl_seconds": config.cache.public_rules_ttl_seconds,
-        },
         "backup": backup_projection(config),
         "observability": {
             "log_filter": config.log_filter,
