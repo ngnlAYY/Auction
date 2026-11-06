@@ -6,31 +6,18 @@
 //! 本 crate 不得导入存储、配置或凭据访问路径。HTTP/流 DTO 由 `auction-contracts` 拥有，
 //! 本 crate 只保留浏览器展示模型、查询状态和交互编排。
 
-#[path = "../identity/account.rs"]
 mod account;
-#[path = "../content/blacklist.rs"]
 mod blacklist;
-#[path = "../auction/commands.rs"]
 mod commands;
-#[path = "../content/compensation/mod.rs"]
 mod compensation;
-#[path = "../content/forum.rs"]
 mod forum;
-#[path = "../auction/proxy.rs"]
 mod proxy;
-#[path = "../auction/reads/mod.rs"]
 mod reads;
-#[path = "../auction/realtime.rs"]
 mod realtime;
-#[path = "../content/rules.rs"]
 mod rules;
-#[path = "../identity/session.rs"]
 mod session;
-#[path = "../identity/session_preference/mod.rs"]
 mod session_preference;
-#[path = "../identity/watch_preference.rs"]
 mod watch_preference;
-#[path = "../auction/watches/mod.rs"]
 mod watches;
 
 use watches::{LotWatchButton, LotWatchScope};

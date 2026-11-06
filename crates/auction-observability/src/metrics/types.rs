@@ -74,12 +74,11 @@ pub enum BusinessEvent {
     /// recovery 退回、重列或退款动作。
     Recovery,
     ForumSync,
-    Realtime,
     OperationsAlert,
 }
 
 impl BusinessEvent {
-    pub(super) const ALL: [Self; 11] = [
+    pub(super) const ALL: [Self; 10] = [
         Self::Bid,
         Self::Proxy,
         Self::MailIntake,
@@ -89,7 +88,6 @@ impl BusinessEvent {
         Self::Fulfillment,
         Self::Recovery,
         Self::ForumSync,
-        Self::Realtime,
         Self::OperationsAlert,
     ];
 
@@ -104,7 +102,6 @@ impl BusinessEvent {
             Self::Fulfillment => "fulfillment",
             Self::Recovery => "recovery",
             Self::ForumSync => "forum-sync",
-            Self::Realtime => "realtime",
             Self::OperationsAlert => "operations-alert",
         }
     }
@@ -174,7 +171,6 @@ pub enum WorkerLoop {
     AuctionFulfillment,
     AuctionRecovery,
     Forum,
-    Realtime,
     OperationsAlertScan,
     OperationsAlertDispatch,
     OperationsAlertReconcile,
@@ -184,7 +180,7 @@ pub enum WorkerLoop {
 
 impl WorkerLoop {
     /// 初始化固定循环的零值序列，不接收运行时 label。
-    pub(super) const ALL: [Self; 17] = [
+    pub(super) const ALL: [Self; 16] = [
         Self::MailMain,
         Self::MailIsekai,
         Self::MailMaintenanceMain,
@@ -197,7 +193,6 @@ impl WorkerLoop {
         Self::AuctionFulfillment,
         Self::AuctionRecovery,
         Self::Forum,
-        Self::Realtime,
         Self::OperationsAlertScan,
         Self::OperationsAlertDispatch,
         Self::OperationsAlertReconcile,
@@ -218,7 +213,6 @@ impl WorkerLoop {
             Self::AuctionFulfillment => "auction-fulfillment",
             Self::AuctionRecovery => "auction-recovery",
             Self::Forum => "forum",
-            Self::Realtime => "realtime",
             Self::OperationsAlertScan => "operations-alert-scan",
             Self::OperationsAlertDispatch => "operations-alert-dispatch",
             Self::OperationsAlertReconcile => "operations-alert-reconcile",

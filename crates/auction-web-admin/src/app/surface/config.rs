@@ -3,25 +3,15 @@
 //! 更新再以 fingerprint 和可重试的 command ID 作为版本与幂等边界。成功更新会由服务端
 //! 原子写入 runtime TOML，角色启动配置、公共配置、密钥和命令账本永远不进入浏览器。
 
-#[path = "config/draft.rs"]
 mod draft;
-#[path = "config/early_bird.rs"]
 mod early_bird;
-#[path = "config/form.rs"]
 mod form;
-mod hot_fields {
-    include!("config/hot_fields.rs");
-}
-#[path = "config/model.rs"]
+mod hot_fields;
 mod model;
-#[path = "config/operational_fields.rs"]
 mod operational_fields;
-#[path = "config/review.rs"]
 mod review;
 mod runtime_switches;
-#[path = "config/validation.rs"]
 mod validation;
-#[path = "config/worlds.rs"]
 mod worlds;
 
 use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, legacy_t as t};

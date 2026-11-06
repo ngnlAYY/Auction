@@ -16,13 +16,9 @@ use super::pending::{
 use super::query::use_users_query_state;
 use super::{AdminActionFeedback, admin_api_error_message};
 
-#[path = "users/create.rs"]
 mod create;
-#[path = "users/dialogs.rs"]
 mod dialogs;
-#[path = "users/row.rs"]
 mod row;
-#[path = "users/table.rs"]
 mod table;
 
 use create::{

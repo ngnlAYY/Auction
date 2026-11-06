@@ -6,21 +6,18 @@ use crate::http::routes::boundary::HttpBoundary;
 use crate::http::routes::security::AnonymousReadGate;
 use crate::http::routes::state::{AdminApiState, PublicApiState};
 use crate::http::routes::{
-    admin_alerts, admin_auctions, admin_audit, admin_cancel_auction, admin_confirm_recovery,
-    admin_credentials, admin_dashboard, admin_early_settlement_auction, admin_final_phase_auction,
-    admin_forum, admin_intake, admin_lot_update, admin_lots, admin_mail, admin_open_auction,
-    admin_preview_auction, admin_proxy_events, admin_recovery_report, admin_renames, admin_rules,
-    admin_runtime_config, admin_runtime_switches, admin_settlement_catalog,
-    admin_settlement_report, admin_users, admin_worlds, blacklist, boundary, browser_errors,
-    compensation, countdown, create_proxy_authorization, current_admin_session, current_auction,
-    current_session, delivery_admin, forum, get_my_proxy_authorization, get_session_preference,
-    get_watch_preference, list_auctions, list_auctions_v2, list_bid_log, list_lot_watches,
-    list_lots, list_my_bids, list_price_history, list_worlds, login_admin_session, login_session,
-    logout_admin_session, logout_session, lot_detail, lower_proxy_authorization, method_strict,
-    metrics, place_bid, read_gate, realtime, realtime_admin, refresh_session_cookie, registration,
-    response_cache, rules, set_lot_watch, set_session_preference, set_watch_preference,
-    strict_json,
+    admin_alerts, admin_cancel_auction, admin_confirm_recovery, admin_early_settlement_auction,
+    admin_final_phase_auction, admin_open_auction, admin_preview_auction, admin_recovery_report,
+    admin_runtime_switches, admin_settlement_report, boundary, browser_errors,
+    create_proxy_authorization, current_admin_session, current_auction, current_session,
+    get_my_proxy_authorization, get_session_preference, get_watch_preference, list_auctions,
+    list_auctions_v2, list_bid_log, list_lot_watches, list_lots, list_my_bids, list_price_history,
+    list_worlds, login_admin_session, login_session, logout_admin_session, logout_session,
+    lot_detail, lower_proxy_authorization, method_strict, metrics, place_bid, read_gate,
+    refresh_session_cookie, response_cache, set_lot_watch, set_session_preference,
+    set_watch_preference, strict_json,
 };
+use crate::http::{admin as admin_handlers, public as public_handlers};
 use axum::extract::DefaultBodyLimit;
 use axum::routing::get;
 use axum::{Router, middleware};
@@ -83,9 +80,9 @@ fn public_feature_routes(
 
     let no_cache_routes = Router::<PublicApiState>::new()
         .route("/api/v1/worlds", get(list_worlds))
-        .route("/api/v1/rules", get(rules::get))
-        .route("/api/v1/blacklist", get(blacklist::list))
-        .route("/api/v1/compensation-pool", get(compensation::pool))
+        .route("/api/v1/rules", get(public_handlers::rules::get))
+        .route("/api/v1/blacklist", get(public_handlers::blacklist::list))
+        .route("/api/v1/compensation-pool", get(public_handlers::compensation::pool))
         .route("/api/v1/auctions", get(list_auctions))
         .route("/api/v2/auctions", get(list_auctions_v2))
         .route("/api/v1/auctions/current", get(current_auction))
@@ -99,12 +96,18 @@ fn public_feature_routes(
         ));
     // 匿名读但含完整装备 key 的投影：保持 no-store，并只由读闸门约束并发与来源额度。
     let anonymous_read_routes = Router::<PublicApiState>::new()
-        .route("/api/v1/registration-info", get(registration::get))
-        .route("/api/v1/forum/sync-status", get(forum::sync_status))
-        .route("/api/v1/auctions/{auction_id}/forum", get(forum::get))
-        .route("/api/v1/events", get(realtime::list))
-        .route("/api/v1/compensation-pool/{auction_id}/movements", get(compensation::movements))
-        .route("/api/v1/compensation-pool/{auction_id}/lots", get(compensation::lots))
+        .route("/api/v1/registration-info", get(public_handlers::registration::get))
+        .route("/api/v1/forum/sync-status", get(public_handlers::forum::sync_status))
+        .route("/api/v1/auctions/{auction_id}/forum", get(public_handlers::forum::get))
+        .route("/api/v1/events", get(public_handlers::realtime::list))
+        .route(
+            "/api/v1/compensation-pool/{auction_id}/movements",
+            get(public_handlers::compensation::movements),
+        )
+        .route(
+            "/api/v1/compensation-pool/{auction_id}/lots",
+            get(public_handlers::compensation::lots),
+        )
         .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
         .route("/api/v1/lots/{lot_id}", get(lot_detail))
         .route_layer(middleware::from_fn(response_cache::no_store))
@@ -116,7 +119,7 @@ fn public_feature_routes(
     let countdown_routes = Router::<PublicApiState>::new()
         .route(
             "/api/v1/auctions/{auction_id}/countdown/{timer}",
-            method_strict::get_head(countdown::get),
+            method_strict::get_head(public_handlers::countdown::get),
         )
         .route_layer(middleware::from_fn(response_cache::short_lived))
         .route_layer(middleware::from_fn_with_state(
@@ -173,8 +176,8 @@ fn public_feature_routes(
         .route(
             "/api/v1/ws",
             // HTTP/1.1 使用 GET Upgrade，HTTP/2 使用扩展 CONNECT；两者共用会话与范围门禁。
-            axum::routing::get(realtime::websocket)
-                .connect(realtime::websocket)
+            axum::routing::get(public_handlers::realtime::websocket)
+                .connect(public_handlers::realtime::websocket)
                 .strict_methods("CONNECT, GET"),
         );
     router.merge(routes.route_layer(middleware::from_fn(boundary::normalize_api_rejection)))
@@ -194,13 +197,13 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 .layer(DefaultBodyLimit::max(4 << 10))
                 .strict_methods("DELETE, GET, POST"),
         )
-        .route("/api/v1/admin/dashboard", get(admin_dashboard::get))
-        .route("/api/v1/admin/worlds", get(admin_worlds::list))
-        .route("/api/v1/admin/worlds/{world_id}", patch(admin_worlds::set_enabled))
+        .route("/api/v1/admin/dashboard", get(admin_handlers::dashboard::get))
+        .route("/api/v1/admin/worlds", get(admin_handlers::worlds::list))
+        .route("/api/v1/admin/worlds/{world_id}", patch(admin_handlers::worlds::set_enabled))
         .route(
             "/api/v1/admin/auctions",
-            axum::routing::get(admin_auctions::list)
-                .post(admin_auctions::create)
+            axum::routing::get(admin_handlers::auctions::list)
+                .post(admin_handlers::auctions::create)
                 .layer(DefaultBodyLimit::max(4 << 10))
                 .layer(middleware::from_fn_with_state(
                     strict_json::post(4 << 10),
@@ -210,31 +213,34 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         )
         .route(
             "/api/v1/admin/worlds/{world_id}/auction-intake/items",
-            post(admin_intake::add_item).layer(DefaultBodyLimit::max(72 << 10)).layer(
+            post(admin_handlers::intake::add_item).layer(DefaultBodyLimit::max(72 << 10)).layer(
                 middleware::from_fn_with_state(strict_json::post(72 << 10), strict_json::enforce),
             ),
         )
         .route(
             "/api/v1/admin/auction-forum/preview",
-            post(admin_forum::preview).layer(DefaultBodyLimit::max(2 << 20)).layer(
+            post(admin_handlers::forum::preview).layer(DefaultBodyLimit::max(2 << 20)).layer(
                 middleware::from_fn_with_state(strict_json::post(2 << 20), strict_json::enforce),
             ),
         )
-        .route("/api/v1/admin/forum/sync-status", get(admin_forum::sync_status))
-        .route("/api/v1/admin/auctions/{auction_id}/forum", get(admin_forum::get))
-        .route("/api/v1/admin/auctions/{auction_id}/lots", get(admin_lots::list))
+        .route("/api/v1/admin/forum/sync-status", get(admin_handlers::forum::sync_status))
+        .route("/api/v1/admin/auctions/{auction_id}/forum", get(admin_handlers::forum::get))
+        .route("/api/v1/admin/auctions/{auction_id}/lots", get(admin_handlers::lots::list))
         .route(
             "/api/v1/admin/auctions/{auction_id}/settlement-report",
             get(admin_settlement_report),
         )
-        .route("/api/v1/admin/settlement-catalog", get(admin_settlement_catalog::list))
+        .route("/api/v1/admin/settlement-catalog", get(admin_handlers::settlement_catalog::list))
         .route("/api/v1/admin/auctions/{auction_id}/recovery-report", get(admin_recovery_report))
         .route("/api/v1/admin/auctions/{auction_id}/preview", post(admin_preview_auction))
         .route(
             "/api/v1/admin/auctions/{auction_id}/schedule",
-            patch(admin_auctions::update_schedule).layer(DefaultBodyLimit::max(4 << 10)).layer(
-                middleware::from_fn_with_state(strict_json::patch(4 << 10), strict_json::enforce),
-            ),
+            patch(admin_handlers::auctions::update_schedule)
+                .layer(DefaultBodyLimit::max(4 << 10))
+                .layer(middleware::from_fn_with_state(
+                    strict_json::patch(4 << 10),
+                    strict_json::enforce,
+                )),
         )
         .route("/api/v1/admin/auctions/{auction_id}/open", post(admin_open_auction))
         .route("/api/v1/admin/auctions/{auction_id}/cancel", post(admin_cancel_auction))
@@ -245,7 +251,7 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         )
         .route(
             "/api/v1/admin/lots/{lot_id}",
-            patch(admin_lot_update::update).layer(DefaultBodyLimit::max(8 << 10)).layer(
+            patch(admin_handlers::lot_update::update).layer(DefaultBodyLimit::max(8 << 10)).layer(
                 middleware::from_fn_with_state(strict_json::patch(8 << 10), strict_json::enforce),
             ),
         )
@@ -253,29 +259,32 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
             "/api/v1/admin/recoveries/{recovery_id}/confirm",
             post(admin_confirm_recovery).layer(DefaultBodyLimit::max(8 << 10)),
         )
-        .route("/api/v1/admin/lots/{lot_id}/proxy-events", get(admin_proxy_events::list))
-        .route("/api/v1/admin/mail", get(admin_mail::state))
-        .route("/api/v1/admin/mail/intake", get(admin_mail::list_intakes))
-        .route("/api/v1/admin/mail/intake/{intake_id}", get(admin_mail::detail_intake))
+        .route("/api/v1/admin/lots/{lot_id}/proxy-events", get(admin_handlers::proxy_events::list))
+        .route("/api/v1/admin/mail", get(admin_handlers::mail::state))
+        .route("/api/v1/admin/mail/intake", get(admin_handlers::mail::list_intakes))
+        .route("/api/v1/admin/mail/intake/{intake_id}", get(admin_handlers::mail::detail_intake))
         .route(
             "/api/v1/admin/mail/polling",
-            put(admin_mail::set_paused).layer(DefaultBodyLimit::max(4 << 10)).layer(
+            put(admin_handlers::mail::set_paused).layer(DefaultBodyLimit::max(4 << 10)).layer(
                 middleware::from_fn_with_state(strict_json::put(4 << 10), strict_json::enforce),
             ),
         )
         .route(
             "/api/v1/admin/mail/polls:trigger",
-            post(admin_mail::trigger_poll).layer(DefaultBodyLimit::max(4 << 10)).layer(
+            post(admin_handlers::mail::trigger_poll).layer(DefaultBodyLimit::max(4 << 10)).layer(
                 middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
             ),
         )
-        .route("/api/v1/admin/realtime/events", get(realtime_admin::list_events))
-        .route("/api/v1/admin/realtime/lag", get(realtime_admin::list_lag))
-        .route("/api/v1/admin/realtime/failures", get(realtime_admin::list_failures))
-        .route("/api/v1/admin/realtime/failures/{failure_id}", get(realtime_admin::get_failure))
+        .route("/api/v1/admin/realtime/events", get(admin_handlers::realtime::list_events))
+        .route("/api/v1/admin/realtime/lag", get(admin_handlers::realtime::list_lag))
+        .route("/api/v1/admin/realtime/failures", get(admin_handlers::realtime::list_failures))
+        .route(
+            "/api/v1/admin/realtime/failures/{failure_id}",
+            get(admin_handlers::realtime::get_failure),
+        )
         .route(
             "/api/v1/admin/realtime/failures/{failure_id}/replay",
-            post(realtime_admin::replay).layer(DefaultBodyLimit::max(64 << 10)).layer(
+            post(admin_handlers::realtime::replay).layer(DefaultBodyLimit::max(64 << 10)).layer(
                 middleware::from_fn_with_state(
                     strict_json::post_with_invalid_json(64 << 10, "invalid_replay", "重放参数无效"),
                     strict_json::enforce,
@@ -284,9 +293,9 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         )
         .route(
             "/api/v1/admin/rules",
-            axum::routing::get(admin_rules::get)
-                .post(admin_rules::validate)
-                .put(admin_rules::publish)
+            axum::routing::get(admin_handlers::rules::get)
+                .post(admin_handlers::rules::validate)
+                .put(admin_handlers::rules::publish)
                 .layer(DefaultBodyLimit::max(1 << 20))
                 .layer(middleware::from_fn_with_state(
                     strict_json::post_put(1 << 20),
@@ -300,8 +309,8 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         )
         .route(
             "/api/v1/admin/config",
-            axum::routing::get(admin_runtime_config::get)
-                .put(admin_runtime_config::update)
+            axum::routing::get(admin_handlers::runtime_config::get)
+                .put(admin_handlers::runtime_config::update)
                 .layer(DefaultBodyLimit::max(4 << 20))
                 .layer(middleware::from_fn_with_state(
                     strict_json::put(4 << 20),
@@ -311,15 +320,18 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         )
         .route(
             "/api/v1/admin/config:validate",
-            post(admin_runtime_config::validate).layer(DefaultBodyLimit::max(4 << 20)).layer(
-                middleware::from_fn_with_state(strict_json::post(4 << 20), strict_json::enforce),
-            ),
+            post(admin_handlers::runtime_config::validate)
+                .layer(DefaultBodyLimit::max(4 << 20))
+                .layer(middleware::from_fn_with_state(
+                    strict_json::post(4 << 20),
+                    strict_json::enforce,
+                )),
         )
         .route(
             "/api/v1/admin/users",
-            axum::routing::get(admin_users::list)
-                .post(admin_users::create)
-                .patch(admin_users::mutate)
+            axum::routing::get(admin_handlers::users::list)
+                .post(admin_handlers::users::create)
+                .patch(admin_handlers::users::mutate)
                 .layer(DefaultBodyLimit::max(16 << 10))
                 .layer(middleware::from_fn_with_state(
                     strict_json::post_patch(16 << 10),
@@ -327,17 +339,17 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 ))
                 .strict_methods("GET, PATCH, POST"),
         )
-        .route("/api/v1/admin/renames", get(admin_renames::list))
+        .route("/api/v1/admin/renames", get(admin_handlers::renames::list))
         .route(
             "/api/v1/admin/renames/{rename_id}/revert",
-            post(admin_users::revert_rename).layer(DefaultBodyLimit::max(8 << 10)).layer(
+            post(admin_handlers::users::revert_rename).layer(DefaultBodyLimit::max(8 << 10)).layer(
                 middleware::from_fn_with_state(strict_json::post(8 << 10), strict_json::enforce),
             ),
         )
         .route(
             "/api/v1/admin/users/{user_id}/blacklist",
-            axum::routing::put(admin_users::blacklist)
-                .delete(admin_users::unblacklist)
+            axum::routing::put(admin_handlers::users::blacklist)
+                .delete(admin_handlers::users::unblacklist)
                 .layer(DefaultBodyLimit::max(8 << 10))
                 .layer(middleware::from_fn_with_state(
                     strict_json::put_delete(8 << 10),
@@ -347,10 +359,10 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         )
         .route(
             "/api/v1/admin/credentials",
-            axum::routing::get(admin_credentials::list)
-                .post(admin_credentials::create)
-                .patch(admin_credentials::mutate)
-                .delete(admin_credentials::delete)
+            axum::routing::get(admin_handlers::credentials::list)
+                .post(admin_handlers::credentials::create)
+                .patch(admin_handlers::credentials::mutate)
+                .delete(admin_handlers::credentials::delete)
                 .layer(DefaultBodyLimit::max(128 << 10))
                 .layer(middleware::from_fn_with_state(
                     strict_json::post_patch_delete(128 << 10),
@@ -360,13 +372,13 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         )
         .route(
             "/api/v1/admin/credentials/{credential_id}/check",
-            post(admin_credentials::check).layer(DefaultBodyLimit::max(4 << 10)).layer(
+            post(admin_handlers::credentials::check).layer(DefaultBodyLimit::max(4 << 10)).layer(
                 middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
             ),
         )
         .route("/api/v1/admin/alerts", get(admin_alerts::list))
         .route("/api/v1/admin/pending-counts", get(admin_alerts::pending_counts))
-        .route("/api/v1/admin/audit", get(admin_audit::list))
+        .route("/api/v1/admin/audit", get(admin_handlers::audit::list))
         .route(
             "/api/v1/admin/alerts/{alert_id}/acknowledge",
             post(admin_alerts::acknowledge).layer(DefaultBodyLimit::max(4 << 10)).layer(
@@ -379,36 +391,42 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
             ),
         )
-        .route("/api/v1/admin/deliveries", get(delivery_admin::list))
-        .route("/api/v1/admin/player-support", get(delivery_admin::player_support))
-        .route("/api/v1/admin/deliveries/{delivery_id}", get(delivery_admin::detail))
+        .route("/api/v1/admin/deliveries", get(admin_handlers::delivery::list))
+        .route("/api/v1/admin/player-support", get(admin_handlers::delivery::player_support))
+        .route("/api/v1/admin/deliveries/{delivery_id}", get(admin_handlers::delivery::detail))
         .route(
             "/api/v1/admin/deliveries/{delivery_id}/sent-proof/preview",
-            post(delivery_admin::sent_proof_preview).layer(DefaultBodyLimit::max(16 << 10)).layer(
-                middleware::from_fn_with_state(strict_json::post(16 << 10), strict_json::enforce),
-            ),
+            post(admin_handlers::delivery::sent_proof_preview)
+                .layer(DefaultBodyLimit::max(16 << 10))
+                .layer(middleware::from_fn_with_state(
+                    strict_json::post(16 << 10),
+                    strict_json::enforce,
+                )),
         )
         .route(
             "/api/v1/admin/deliveries/{delivery_id}/sent-proof/confirm",
-            post(delivery_admin::sent_proof_confirm).layer(DefaultBodyLimit::max(16 << 10)).layer(
-                middleware::from_fn_with_state(strict_json::post(16 << 10), strict_json::enforce),
-            ),
+            post(admin_handlers::delivery::sent_proof_confirm)
+                .layer(DefaultBodyLimit::max(16 << 10))
+                .layer(middleware::from_fn_with_state(
+                    strict_json::post(16 << 10),
+                    strict_json::enforce,
+                )),
         )
         .route(
             "/api/v1/admin/deliveries/{delivery_id}/release",
-            post(delivery_admin::release).layer(DefaultBodyLimit::max(4 << 10)).layer(
+            post(admin_handlers::delivery::release).layer(DefaultBodyLimit::max(4 << 10)).layer(
                 middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
             ),
         )
         .route(
             "/api/v1/admin/deliveries/{delivery_id}/retry",
-            post(delivery_admin::retry).layer(DefaultBodyLimit::max(4 << 10)).layer(
+            post(admin_handlers::delivery::retry).layer(DefaultBodyLimit::max(4 << 10)).layer(
                 middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
             ),
         )
         .route(
             "/api/v1/admin/deliveries/{delivery_id}/reconcile",
-            post(delivery_admin::reconcile).layer(DefaultBodyLimit::max(4 << 10)).layer(
+            post(admin_handlers::delivery::reconcile).layer(DefaultBodyLimit::max(4 << 10)).layer(
                 middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
             ),
         );

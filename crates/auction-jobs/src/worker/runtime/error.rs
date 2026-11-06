@@ -67,10 +67,6 @@ pub enum WorkerError {
     ForumTaskJoin(#[source] tokio::task::JoinError),
     #[error("forum worker task exited unexpectedly")]
     ForumTaskExited,
-    #[error("realtime consumer worker task failed")]
-    RealtimeTaskJoin(#[source] tokio::task::JoinError),
-    #[error("realtime consumer worker task exited unexpectedly")]
-    RealtimeTaskExited,
     #[error("{group} worker task failed while draining")]
     DrainTaskJoin {
         group: &'static str,

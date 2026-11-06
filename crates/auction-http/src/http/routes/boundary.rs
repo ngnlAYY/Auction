@@ -452,7 +452,7 @@ fn finish_response(mut response: Response, request_id: &str, hsts: bool) -> Resp
     );
     super::security::apply_browser_security_headers(headers, hsts);
     // `Date` 由 Hyper 的 HTTP/1 与 HTTP/2 编码器按秒缓存后统一补齐，这里无需逐响应格式化。
-    super::countdown::apply_security_headers(&mut response);
+    crate::http::public::countdown::apply_security_headers(&mut response);
     response
 }
 

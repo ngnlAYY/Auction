@@ -23,15 +23,15 @@ use axum::{
 
 use super::AdminApiState;
 
-pub(super) struct AdminDashboardSections {
-    pub(super) mail: AdminDashboardSectionResponse,
-    pub(super) realtime: AdminDashboardSectionResponse,
-    pub(super) credentials: AdminDashboardSectionResponse,
-    pub(super) delivery: AdminDashboardSectionResponse,
-    pub(super) fulfillment: AdminDashboardSectionResponse,
-    pub(super) recovery: AdminDashboardSectionResponse,
-    pub(super) alerting: AdminDashboardSectionResponse,
-    pub(super) reconciliation: AdminDashboardSectionResponse,
+pub(crate) struct AdminDashboardSections {
+    pub(crate) mail: AdminDashboardSectionResponse,
+    pub(crate) realtime: AdminDashboardSectionResponse,
+    pub(crate) credentials: AdminDashboardSectionResponse,
+    pub(crate) delivery: AdminDashboardSectionResponse,
+    pub(crate) fulfillment: AdminDashboardSectionResponse,
+    pub(crate) recovery: AdminDashboardSectionResponse,
+    pub(crate) alerting: AdminDashboardSectionResponse,
+    pub(crate) reconciliation: AdminDashboardSectionResponse,
 }
 
 /// 读取已认证 Admin dashboard。

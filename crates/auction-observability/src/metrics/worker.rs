@@ -222,7 +222,6 @@ fn business_event_for_worker(loop_kind: WorkerLoop) -> Option<BusinessEvent> {
         WorkerLoop::AuctionFulfillment => BusinessEvent::Fulfillment,
         WorkerLoop::AuctionRecovery => BusinessEvent::Recovery,
         WorkerLoop::Forum => BusinessEvent::ForumSync,
-        WorkerLoop::Realtime => BusinessEvent::Realtime,
         WorkerLoop::OperationsAlertScan
         | WorkerLoop::OperationsAlertDispatch
         | WorkerLoop::OperationsAlertReconcile => BusinessEvent::OperationsAlert,
@@ -243,7 +242,6 @@ fn valid_retry_mode(loop_kind: WorkerLoop, retry_kind: WorkerRetryKind) -> bool 
         | WorkerLoop::MailReadObservationMain
         | WorkerLoop::MailReadObservationIsekai
         | WorkerLoop::Forum
-        | WorkerLoop::Realtime
         | WorkerLoop::OperationsAlertScan
         | WorkerLoop::OperationsAlertDispatch
         | WorkerLoop::OperationsAlertReconcile

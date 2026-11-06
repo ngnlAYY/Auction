@@ -2,12 +2,10 @@
 
 use super::*;
 
-#[path = "equipment_colors/options/mod.rs"]
 mod options;
 
 use options::{equipment_kinds_for, prefixes_for, suffixes_for};
 
-#[path = "equipment_colors/selection.rs"]
 mod selection;
 
 use selection::ColorMultiSelect;

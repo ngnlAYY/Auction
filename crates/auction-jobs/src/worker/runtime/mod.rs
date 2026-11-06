@@ -43,8 +43,6 @@ mod operations_alert;
 mod player_notifications {
     include!("../player_notifications.rs");
 }
-#[path = "../realtime/consumer.rs"]
-mod realtime_consumer;
 #[path = "../recovery/loop/mod.rs"]
 mod recovery;
 #[path = "recovery.rs"]
@@ -65,9 +63,6 @@ pub use mail_poll::{
 };
 pub use operations_alert::{OperationsAlertRuntime, OperationsAlertRuntimeConfig};
 pub use player_notifications::{PlayerNotificationRuntime, PlayerNotificationRuntimeConfig};
-pub use realtime_consumer::{
-    PersistentRealtimeConsumer, RealtimeConsumerConfigError, RealtimeConsumerRunner,
-};
 pub use recovery_health::RecoveryHealthRuntime;
 
 mod common;

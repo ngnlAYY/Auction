@@ -499,8 +499,6 @@ pub(super) async fn run_worker(
             operations_alert,
             // 出价提交后的标记/被超提醒 outbox；与出价共用同一 Store，处理使用独立事务。
             lot_watch_reminders: Some(store.clone()),
-            // 外部广播协议尚未冻结；没有具体 sink 时不启动实时消费，避免伪造转发成功。
-            realtime_consumer: None,
             metrics: metrics.worker(),
             notifications: metrics.notifications(),
             control: control.clone(),

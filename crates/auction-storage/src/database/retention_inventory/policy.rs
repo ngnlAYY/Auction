@@ -352,6 +352,32 @@ mod tests {
     }
 
     #[test]
+    fn omits_schema_objects_removed_by_migration_097() {
+        let policy = parse_retention_policy(RETENTION_POLICY_JSON).expect("政策 v2");
+        for dropped in [
+            "bid_proxies",
+            "bid_proxy_attempts",
+            "bid_proxy_outbid_uses",
+            "auction_forum_reply_cursors",
+        ] {
+            assert!(
+                policy
+                    .families
+                    .iter()
+                    .all(|family| family.tables.iter().all(|table| table != dropped)),
+                "保留策略不得再登记已删除对象 {dropped}"
+            );
+        }
+        assert_eq!(policy.database_schema_version, 97);
+        assert!(
+            policy
+                .resolved_operator_decisions
+                .iter()
+                .any(|decision| decision == "unreferenced_schema_object_deletion")
+        );
+    }
+
+    #[test]
     fn rejects_a_duration_that_diverges_from_the_decisions() {
         let mut value = policy_value();
         set_rule_duration(&mut value, "service_heartbeat_expired_grace", 31);

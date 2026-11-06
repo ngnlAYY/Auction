@@ -3,34 +3,22 @@
 //! 组件可以显示可本地化的加载/错误文案，而不是继续渲染未经权威 API 证实的数据。所有 wire DTO
 //! 统一由 `auction-contracts` 拥有，本 crate 只保留浏览器展示与查询状态。
 
-#[path = "identity/account.rs"]
 mod account;
-#[path = "content/blacklist.rs"]
 mod blacklist;
 mod clock;
-#[path = "auction/commands.rs"]
 mod commands;
-#[path = "content/compensation.rs"]
 mod compensation;
 mod decoder;
-#[path = "content/forum.rs"]
 mod forum;
 mod model;
 mod queries;
-#[path = "auction/realtime.rs"]
 mod realtime;
-#[path = "identity/registration.rs"]
 mod registration;
-#[path = "content/rules.rs"]
 mod rules;
-#[path = "identity/session.rs"]
 mod session;
-#[path = "identity/session_preference.rs"]
 mod session_preference;
 mod status;
-#[path = "identity/watch_preference.rs"]
 mod watch_preference;
-#[path = "auction/watches.rs"]
 mod watches;
 
 pub(crate) use session_preference::{

@@ -21,7 +21,6 @@ use super::{
 
 const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 10;
 
-#[path = "account/watches/mod.rs"]
 mod watches;
 
 pub(super) fn page() -> Element {

@@ -8,6 +8,6 @@ mod session;
 mod target;
 mod websocket;
 
-pub(super) use list::list;
-pub(super) use mapping::encode_websocket_frame;
-pub(super) use websocket::websocket;
+pub(crate) use list::list;
+pub(crate) use mapping::encode_websocket_frame;
+pub(crate) use websocket::websocket;

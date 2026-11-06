@@ -44,7 +44,7 @@ pub(crate) async fn update(
         )
         .into_response();
     }
-    let Some(lot_uuid) = super::admin_auctions::parse_canonical_uuid(&lot_id) else {
+    let Some(lot_uuid) = super::auctions::parse_canonical_uuid(&lot_id) else {
         return super::api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍品 ID 无效")
             .into_response();
     };
@@ -109,7 +109,7 @@ pub(crate) async fn update(
         super::no_store_headers(),
         Json(ApiResponse::ok(
             "拍品已更新",
-            AdminLotUpdateResponse { lot: super::admin_lots::map_lot(result) },
+            AdminLotUpdateResponse { lot: super::lots::map_lot(result) },
         )),
     )
         .into_response()

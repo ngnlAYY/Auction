@@ -27,7 +27,6 @@ use serde_json::Value;
 
 use super::AdminApiState;
 
-#[path = "runtime_config/taxonomy.rs"]
 mod taxonomy;
 
 /// 读取当前 runtime TOML 的安全文档和 fingerprint。

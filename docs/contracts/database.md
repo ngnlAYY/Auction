@@ -2,7 +2,7 @@
 
 [docs/README.md](../README.md) · [migrations/postgres/README.md](../../migrations/postgres/README.md) · [crates/auction-storage/README.md](../../crates/auction-storage/README.md) · [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)
 
-唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [migrations/postgres](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000087`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
+唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [migrations/postgres](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000097`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
 
 ## schema 身份与版本
 
@@ -67,13 +67,13 @@
 | `bids` | 被接受的出价事实：金额、机制（ordinary/proxy）、接受后的截止与版本；**只追加**，同一命令内事实序号连续 |
 | `bid_proxy_authorizations` | 代理授权当前状态 |
 | `bid_proxy_authorization_transitions` | 代理状态转换事实，只追加、序号连续 |
-| `bid_proxy_attempts`、`bid_proxy_outbid_uses` | 代理反超尝试与“设置代理次数”计数。迁移 `000003` 建表后无任何迁移函数或 Rust 读写方；`bid_proxy_outbid_uses` 仅被迁移 `000005` 的 `public.bid_proxies` 视图 `LEFT JOIN`。两表与视图的去留见[docs/plans/architecture-improvement/w08-code-structure.md](../plans/architecture-improvement/w08-code-structure.md)，删除前不得当作在用证据 |
+| ~~`bid_proxy_attempts`~~、~~`bid_proxy_outbid_uses`~~ | 迁移 `000003` 建表后无任何迁移函数或 Rust 读写方；迁移 `000097` 已删除两表与依赖它们的 `bid_proxies` 视图（W8.2 / D-W8.2-f），不再作为 schema 或契约的一部分 |
 | `auction_submissions` | 经邮件投稿进入场次的装备来源（邮箱、邮件 ID、卖家） |
 | `auction_intake_targets`、`auction_preview_items` | 各世界当前接收投稿的草稿场次；预览目录项 |
 | `scheduled_rounds` | 周排期与早鸟场次的轮次身份（常规周按世界+本地周唯一，早鸟按 `slot_key` 唯一；`early-bird:YYYY-MM-DD:N`，N 为 0 时是赛季前场次） |
 | `auction_forum_sync`、`forum_sync_admin_commands`、`auction_forum_bid_commands`、`auction_forum_catalog_pages` | 论坛主题同步状态（含租约与 fencing）、人工授权、回帖竞价命令、目录分页帖 |
 
-论坛回帖导入游标不单独建表：增量扫描以 `auction_forum_bid_commands` 中该主题 `post_number` 最高的行作为“已处理到的最大帖子 ID”，页号由楼层与每页 20 楼换算。每轮仍读取固定楼层所在页，并先核对游标页仍包含该 `post_id`；帖子被删除或楼层前移时回退完整扫描。迁移 `000005` 建立的 `auction_forum_reply_cursors` 仍无人读写，其 `(scope, last_scan_at)` 结构无法表示按主题的帖子与页码，留给 W8.2 评估清理，本项不追加迁移。
+论坛回帖导入游标不单独建表：增量扫描以 `auction_forum_bid_commands` 中该主题 `post_number` 最高的行作为“已处理到的最大帖子 ID”，页号由楼层与每页 20 楼换算。每轮仍读取固定楼层所在页，并先核对游标页仍包含该 `post_id`；帖子被删除或楼层前移时回退完整扫描。迁移 `000005` 建立的 `auction_forum_reply_cursors` 从未表示按主题的帖子与页码，迁移 `000097` 已删除该表。
 
 `auctions.policy_snapshot` 的竞价版本在创建场次时冻结：既有 `schema_version=4` 解码为竞价 v1；新建场次写入 `schema_version=5`、数值 `bidding_version=2`，统一最低增量并允许代理用尽上限反超。迁移 `000069` 仅放宽快照 CHECK，拒绝 v5 缺少版本、版本非数值 2 或未知 schema，不回填或改写任何旧场次。普通竞价、慢速到期、Final 与账户代理降额能力共用该版本；历史事实和命令结果保持原样。价格语义见[docs/business-rules.md#代理竞价](../business-rules.md#代理竞价)。
 

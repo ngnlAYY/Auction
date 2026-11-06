@@ -101,7 +101,7 @@ pub(crate) async fn list(
         Json(ApiResponse::ok(
             "后台 lot 列表已加载",
             AdminLotListResponse {
-                auction: super::admin_auctions::map_auction(AdminAuctionSummary {
+                auction: super::auctions::map_auction(AdminAuctionSummary {
                     auction: result.auction,
                     scheduled_ends_at: None,
                     lot_count: total,
@@ -129,7 +129,7 @@ fn valid_page(page: &AdminLotPage, request: AdminLotListRequest) -> bool {
                 && page.auction.cancelled_reason.is_none()))
 }
 
-pub(super) fn map_lot(lot: AdminLotSummary) -> AdminLotResponse {
+pub(crate) fn map_lot(lot: AdminLotSummary) -> AdminLotResponse {
     AdminLotResponse {
         id: lot.id.to_string(),
         auction_id: lot.auction_id.to_string(),

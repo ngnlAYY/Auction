@@ -12,9 +12,7 @@ use super::poll::{AutoPollControls, use_auto_poll};
 use super::query::use_dashboard_query_state;
 use super::{AdminReadinessResource, admin_api_error_message};
 
-#[path = "dashboard/content.rs"]
 mod content;
-#[path = "dashboard/controls.rs"]
 mod controls;
 
 use content::DashboardContent;

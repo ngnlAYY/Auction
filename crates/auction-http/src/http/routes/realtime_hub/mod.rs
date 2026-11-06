@@ -242,8 +242,8 @@ impl RealtimeEventSink for RealtimeHubSink {
             } else {
                 RealtimeScope::Auction
             };
-            let frame =
-                super::realtime::encode_websocket_frame(event).map_err(|diagnostic_cause| {
+            let frame = crate::http::public::realtime::encode_websocket_frame(event).map_err(
+                |diagnostic_cause| {
                     diagnostics::error(
                         "realtime_hub",
                         "encode_frame",
@@ -254,7 +254,8 @@ impl RealtimeEventSink for RealtimeHubSink {
                         failure_code: "encode_failed".to_owned(),
                         safe_detail: "实时事件编码失败".to_owned(),
                     }
-                })?;
+                },
+            )?;
             self.hub.broadcast(&stream_key, ObservedFrame { body: frame, created_at, scope });
             self.hub.metrics.relay(scope, created_at);
             Ok(())

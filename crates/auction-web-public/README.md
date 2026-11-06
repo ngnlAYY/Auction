@@ -42,11 +42,8 @@
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-web-public/src/api/` | 同源 HTTP 访问与响应解码 |
-| `crates/auction-web-public/src/app/surface/` | 路由与页面外壳、看板、目录、分页、设备专属展示（桌面/手机） |
-| `crates/auction-web-public/src/app/auction/` | 竞价与代理命令、只读历史、装备标记 |
-| `crates/auction-web-public/src/app/identity/` | 登录、账户、登录时长与提醒偏好 |
-| `crates/auction-web-public/src/app/content/` | 规则、黑名单、补偿池、论坛摘要 |
+| `crates/auction-web-public/src/api/` | 同源 HTTP 访问与响应解码；每个文件对应一个 API 领域（`account`、`blacklist`、`commands`、`compensation`、`forum`、`realtime`、`registration`、`rules`、`session/`、`watches` 等），`decoder/` 保存 wire DTO 解码 |
+| `crates/auction-web-public/src/app/surface/` | 路由与页面外壳、看板、目录、分页、设备专属展示（桌面/手机），以及按领域分组的页面实现：`account/`、`commands/`、`reads/`、`compensation/`、`watches/`、`session_preference/`、`rules`、`forum`、`blacklist`、`realtime` |
 | `crates/auction-web-public/assets/` | `crates/auction-web-public/assets/public.css`（组件与布局）、`crates/auction-web-public/assets/desktop.css`、`crates/auction-web-public/assets/mobile.css` |
 | `crates/auction-web-public/i18n/` | Fluent 译文：`en`（默认）、`zh-CN`、`zh-TW`、`ja`、`ko` |
 

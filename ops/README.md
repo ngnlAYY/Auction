@@ -836,7 +836,7 @@ kind 按业务 owner 汇总如下；日志 kind 与指标 kind 不同，后者�
 | 公开补偿场次与逐件明细 | `compensation_round`、`compensation_lot` |
 | 公开补偿账本 | `compensation_movement` |
 | Worker 控制面 | `control_listener`、`control_server`、`control_trigger` |
-| Worker 运行时与实时消费 | `worker_runtime`、`realtime_consumer` |
+| Worker 运行时 | `worker_runtime` |
 | 运维告警 | `operations_alert` |
 
 

@@ -3,7 +3,7 @@
   "format": "auction-retention-policy.v2",
   "policy_id": "auction-retention-policy",
   "version": 2,
-  "database_schema_version": 96,
+  "database_schema_version": 97,
   "authority": "user-decisions-7-23-25-26-29-31",
   "inventory_authorizes_mutation": false,
   "deletion_requires_dry_run_and_operator_approval": true,
@@ -243,8 +243,6 @@
         "auction_commands",
         "bid_proxy_authorizations",
         "bid_proxy_authorization_transitions",
-        "bid_proxy_attempts",
-        "bid_proxy_outbid_uses",
         "auction_submissions",
         "auction_preview_items",
         "scheduled_rounds",
@@ -320,7 +318,6 @@
       "candidate_class": "owner_lifecycle_only",
       "mutation_authorized": false,
       "tables": [
-        "auction_forum_reply_cursors",
         "mail_poll_pending_reads",
         "mailbox_sweep_cursors",
         "auction_intake_targets",
@@ -341,7 +338,8 @@
   "resolved_operator_decisions": [
     "authoritative_realtime_consumers_and_late_client_window",
     "restore_rto_rpo_and_rehearsal_cadence",
-    "separate_dry_run_archive_and_delete_authorizations"
+    "separate_dry_run_archive_and_delete_authorizations",
+    "unreferenced_schema_object_deletion"
   ],
   "required_operator_decisions": [
     "classification_retention_periods_and_jurisdictions",

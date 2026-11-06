@@ -80,13 +80,13 @@ Caddy 的公网 404 规则继续生效，直接采集与 SSH 隧道见
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-http/src/http/routes/` | 路由表（`crates/auction-http/src/http/routes/surfaces.rs`）、会话、Admin 生命周期/结算/恢复处理器、读接口 DTO 映射、健康 |
-| `crates/auction-http/src/http/public/`、`crates/auction-http/src/http/admin/` | 各功能的 HTTP 适配器与错误映射 |
-| `crates/auction-http/src/http/security/` | origin、限流、Cookie 策略与安全头 |
-| `crates/auction-http/src/http/shared/` | 请求边界、严格 JSON、方法严格性、响应缓存策略、连接服务、Unix listener |
-| `crates/auction-http/src/http/metrics/` | Prometheus scrape 路由 |
+| `crates/auction-http/src/http/routes/` | 路由表（`crates/auction-http/src/http/routes/surfaces.rs`）、会话、读接口 DTO 映射、健康、请求边界、严格 JSON、方法严格性、响应缓存策略、连接服务、Unix listener、origin/限流/安全头（`security/`）、Prometheus 端点（`metrics/`）、state 与实时 Hub |
+| `crates/auction-http/src/http/admin/` | Admin surface 的 handler 与 DTO 映射，按 `auctions/`、`audit`、`credentials/`、`dashboard/`、`delivery/`、`forum`、`intake`、`lot_update/`、`lots`、`mail/`、`proxy_events`、`realtime/`、`renames`、`rules`、`runtime_config`、`settlement_catalog`、`users/`、`worlds` 分组；共享 HTTP 辅助由同级 `routes` 转出 |
+| `crates/auction-http/src/http/public/` | Public surface 的 handler 与错误映射：`blacklist`、`compensation`、`countdown/`、`forum`、`realtime/`、`registration`、`rules` |
+| `crates/auction-http/src/http/readiness/` | 三角色共用的就绪探针 |
 | `crates/auction-http/src/assets/` | 内嵌资源与浏览器路由清单 |
 
+三个 crate（`auction-http`、`auction-web-admin`、`auction-web-public`）的模块树与目录层级一致，不使用 `#[path]` 重排文件位置。
 
 ## 运行时就绪策略
 
