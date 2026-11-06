@@ -39,7 +39,7 @@ class = "read_list"
 world = "main"
 parser_entry_point = "scan_read_mail_page"
 sanitization = "见顶层 sanitization；未复制原始页面。"
-pairs = ["readdetail-read-3125357.html", "readdetail-inbox-3125357.html", "taken-3125358.html", "taken-3125358-nostate.html"]
+pairs = ["readdetail-read-3125357.html", "readdetail-inbox-3125357.html", "taken-3125358.html"]
 bytes = 9607
 sha256 = "a2842925f0848d8be8b07667377a5ce8a3eba6774ede4969dc10f9be180b1432"
 page = 0
@@ -202,23 +202,10 @@ class = "read_taken"
 world = "main"
 parser_entry_point = "parse_action_state"
 sanitization = "见顶层 sanitization；未复制原始页面。"
-pairs = ["read-main.html", "taken-3125358-nostate.html"]
+pairs = ["read-main.html"]
 bytes = 7483
 sha256 = "b40cb28113310a6a949aca25026fc5bec26cb9e4aa9c0ce2d2367294c04f74f3"
 mid = "3125358"
-
-[[fixtures]]
-file = "taken-3125358-nostate.html"
-source_file = "taken-3125358-nostate.html"
-class = "read_taken_without_state"
-world = "main"
-parser_entry_point = "parse_terminal_empty_detail"
-sanitization = "见顶层 sanitization；未复制原始页面。"
-pairs = ["read-main.html", "taken-3125358.html"]
-bytes = 7246
-sha256 = "820891e8713f8f9373f901d23353f0fe772ee47c11c23981a6d2315a113a0b13"
-mid = "3125358"
-source_note = "来源目录已有的去状态脚本诊断变体；非独立远端响应，不能当作真实无状态响应证据。"
 
 [[fixtures]]
 file = "compose-main.html"
