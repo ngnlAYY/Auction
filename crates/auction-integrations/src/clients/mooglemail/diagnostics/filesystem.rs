@@ -82,14 +82,33 @@ pub(super) fn classify_evidence(
     }
 }
 
-/// 只读统计诊断目录；目录缺失视为空快照，其他权限或格式异常失败关闭。
-/// 不需要父密钥：本函数只读取文件元数据与公开头，不导出正文。
-pub fn retention_snapshot(
+/// 单次清理最多删除的证据文件数；与归档层的硬上限一致。
+const MAX_PURGE_FILES: u64 = 1024;
+
+/// 已批准清理的文件族结果；只统计按同一分类判定为普通过期并实际 unlink 的文件。
+/// `failure_code` 非空表示清理中途停止，之前的删除已生效且计数仍然精确。
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct MailDiagnosticPurgeOutcome {
+    pub directory_present: bool,
+    pub examined_files: u64,
+    pub deleted_files: u64,
+    pub deleted_bytes: u64,
+    pub retained_files: u64,
+    pub write_unknown_held_files: u64,
+    pub write_unknown_over_hold_window_files: u64,
+    pub unexpected_entries: u64,
+    /// 候选数超过本次批准上限；未被删除的候选留给下一次重新演练与批准。
+    pub limit_reached: bool,
+    /// 目录缺失或超过保全窗的写入未知证据需要人工跟进；这些文件永不清理。
+    pub needs_follow_up: bool,
+    pub failure_code: Option<&'static str>,
+}
+
+fn validate_retention_parameters(
     directory: &Path,
     retention: Duration,
     hold: Duration,
-    now: SystemTime,
-) -> Result<MailDiagnosticRetentionSnapshot, MailDiagnosticError> {
+) -> Result<(), MailDiagnosticError> {
     if directory.as_os_str().is_empty()
         || directory.file_name().is_none()
         || directory.to_string_lossy().chars().any(char::is_control)
@@ -104,7 +123,36 @@ pub fn retention_snapshot(
     {
         return Err(MailDiagnosticError::InvalidContext);
     }
+    Ok(())
+}
+
+/// 只读统计诊断目录；目录缺失视为空快照，其他权限或格式异常失败关闭。
+/// 不需要父密钥：本函数只读取文件元数据与公开头，不导出正文。
+pub fn retention_snapshot(
+    directory: &Path,
+    retention: Duration,
+    hold: Duration,
+    now: SystemTime,
+) -> Result<MailDiagnosticRetentionSnapshot, MailDiagnosticError> {
+    validate_retention_parameters(directory, retention, hold)?;
     platform::retention_snapshot(directory, retention, hold, now)
+}
+
+/// 按政策 v2 删除普通过期证据文件，最多 `max_files` 个。写入结果未知的证据一律保留，
+/// 包括超过 90 天保全窗的记录；临时文件与未识别目录项不删除。参数或目录身份异常时
+/// 在删除任何文件前失败关闭；删除中途失败仍在返回值中精确报告已完成的删除。
+pub fn purge_ordinary_expired(
+    directory: &Path,
+    retention: Duration,
+    hold: Duration,
+    now: SystemTime,
+    max_files: u64,
+) -> Result<MailDiagnosticPurgeOutcome, MailDiagnosticError> {
+    validate_retention_parameters(directory, retention, hold)?;
+    if max_files > MAX_PURGE_FILES {
+        return Err(MailDiagnosticError::InvalidContext);
+    }
+    platform::purge_ordinary_expired(directory, retention, hold, now, max_files)
 }
 
 /// 结果未知证据的公开失败码；与 `MailDiagnosticOutcome::failure_code` 的闭集一致。
@@ -456,5 +504,104 @@ mod tests {
         .expect("缺失目录按空快照");
         assert!(!absent.directory_present);
         assert_eq!(absent.total_files, 0);
+    }
+
+    #[test]
+    fn purge_deletes_only_approved_ordinary_evidence_and_is_idempotent() {
+        use std::{
+            fs::{self, OpenOptions},
+            io::Write,
+            os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
+        };
+        use uuid::Uuid;
+
+        struct Guard(std::path::PathBuf);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let directory = std::env::temp_dir().join(format!("auction-purge-{}", Uuid::new_v4()));
+        fs::DirBuilder::new().mode(0o700).create(&directory).expect("创建私有目录");
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("目录权限");
+        let _guard = Guard(directory.clone());
+
+        let write = |failure_code: &str, modified: SystemTime, padding: &str| {
+            let path = directory.join(format!("{}.evidence", Uuid::new_v4()));
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+                .expect("创建证据文件");
+            file.write_all(
+                format!(
+                    "{{\"outcome\":{{\"failure_code\":\"{failure_code}\",\"decision_code\":null}}}}\nQUJD{padding}"
+                )
+                .as_bytes(),
+            )
+            .expect("写入证据文件");
+            file.set_modified(modified).expect("设置修改时间");
+            path
+        };
+
+        let now = SystemTime::now();
+        let old = now - Duration::from_secs(10 * 86_400);
+        let older = write("ordinary_failure", old - Duration::from_secs(3_600), "AA");
+        let newer = write("ordinary_failure", old, "BBBB");
+        let held = write("write_unknown", old, "");
+        let over_hold = write("write_unknown", now - Duration::from_secs(100 * 86_400), "");
+        let retained = write("ordinary_failure", now - Duration::from_secs(86_400), "");
+        let older_len = fs::metadata(&older).expect("旧文件元数据").len();
+        let newer_len = fs::metadata(&newer).expect("新文件元数据").len();
+
+        let first = super::purge_ordinary_expired(
+            &directory,
+            Duration::from_secs(7 * 86_400),
+            Duration::from_secs(90 * 86_400),
+            now,
+            1,
+        )
+        .expect("清理候选");
+        assert!(first.directory_present);
+        assert_eq!(first.examined_files, 5);
+        assert_eq!(first.deleted_files, 1);
+        assert_eq!(first.deleted_bytes, older_len);
+        assert!(first.limit_reached, "候选多于批准上限");
+        assert!(first.needs_follow_up, "超过保全窗的写入未知证据需人工跟进");
+        assert!(first.failure_code.is_none());
+        assert!(!older.exists(), "最早的普通证据被删除");
+        assert!(newer.exists() && held.exists() && over_hold.exists() && retained.exists());
+
+        let second = super::purge_ordinary_expired(
+            &directory,
+            Duration::from_secs(7 * 86_400),
+            Duration::from_secs(90 * 86_400),
+            now,
+            10,
+        )
+        .expect("再次清理候选");
+        assert_eq!(second.deleted_files, 1);
+        assert_eq!(second.deleted_bytes, newer_len);
+        assert!(!second.limit_reached);
+        assert!(!newer.exists());
+        assert!(held.exists(), "写入未知证据永不在本次清理范围");
+        assert!(over_hold.exists(), "超过保全窗也只人工跟进，不自动删除");
+        assert!(retained.exists());
+
+        let third = super::purge_ordinary_expired(
+            &directory,
+            Duration::from_secs(7 * 86_400),
+            Duration::from_secs(90 * 86_400),
+            now,
+            10,
+        )
+        .expect("无候选重跑");
+        assert_eq!(third.deleted_files, 0);
+        assert_eq!(third.deleted_bytes, 0);
+        assert_eq!(third.examined_files, 3);
+        assert!(third.failure_code.is_none());
+        assert!(held.exists() && over_hold.exists() && retained.exists());
     }
 }

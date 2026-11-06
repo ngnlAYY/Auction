@@ -10,7 +10,8 @@ use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
 
-use super::{RecoveryError, attempts};
+use super::error::RecoveryError;
+use crate::database::delivery_scheduler::attempts;
 
 /// 观测 owner 先于资金和业务锁；历史发送 generation 不要求等于重启后的当前 generation。
 pub(super) async fn lock_observation(

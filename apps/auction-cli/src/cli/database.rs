@@ -73,6 +73,30 @@ pub(crate) enum DbCommand {
         #[arg(long, value_name = "FILE")]
         output: PathBuf,
     },
+    /// 执行已批准的保留清理：绑定新鲜只读演练回执与逐数据族令牌，分批删除运行态候选。
+    RetentionPurge {
+        /// 人工确认的数据库名，须与只读演练回执及实际连接一致。
+        #[arg(long, value_name = "NAME")]
+        database: String,
+        /// `db retention-dry-run` 写出的 owner-only 回执；须未过期且政策身份一致。
+        #[arg(long, value_name = "FILE")]
+        dry_run_receipt: PathBuf,
+        /// 逐数据族批准：`<family>=<token>`；省略时只预览计划与令牌，不执行任何变更。
+        #[arg(long = "approve", value_name = "FAMILY=TOKEN")]
+        approvals: Vec<String>,
+        /// 实际执行；必须同时提供确认串与回执路径。
+        #[arg(long, requires_all = ["confirm", "receipt"])]
+        execute: bool,
+        /// 逐字确认：`PURGE <数据库名>`。
+        #[arg(long, value_name = "TEXT", requires = "execute")]
+        confirm: Option<String>,
+        /// 实际执行后写入的不可覆盖私有 JSON 回执。
+        #[arg(long, value_name = "FILE", requires = "execute")]
+        receipt: Option<PathBuf>,
+        /// 单批删除行数；每批一个独立事务。
+        #[arg(long, value_name = "ROWS", default_value_t = 500)]
+        batch_size: u32,
+    },
     /// 在有界只读快照检查内部不变量，仅追加巡检审计事实，不改变资金或资产。
     InspectConsistency {
         /// 人工确认的数据库名，须与 Worker 配置和实际连接一致。

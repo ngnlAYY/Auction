@@ -51,6 +51,11 @@ pub(crate) fn retention_policy_sha256() -> String {
     sha256_hex(RETENTION_POLICY_JSON.as_bytes())
 }
 
+/// 内嵌政策的版本号与 SHA-256；清理批准绑定两者，避免跨制品误用令牌。
+pub(crate) fn retention_policy_identity() -> Option<(i64, String)> {
+    load_retention_policy().ok().map(|policy| (policy.version, retention_policy_sha256()))
+}
+
 /// 按规则读取政策 v2 的期限（天）；只用于运维回执，不授权任何变更。
 pub(crate) fn retention_policy_rule_duration_days(rule_id: &str) -> Option<i64> {
     load_retention_policy()

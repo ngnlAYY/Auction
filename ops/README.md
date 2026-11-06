@@ -1135,6 +1135,7 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 | 导出邮件诊断证据 | `auction-cli mail export-evidence <evidence-id> --output <文件>` |
 | 数据保留盘点 | `auction-cli db inventory`（只统计，不授权删除） |
 | 保留清理只读演练 | `auction-cli db retention-dry-run`（按政策 v2 统计候选行/文件并写 run id 回执；不执行删除） |
+| 保留清理执行 | 先演练并复核，再 `auction-cli db retention-purge --dry-run-receipt <回执> --approve <family>=<token> --execute --confirm 'PURGE <库名>' --receipt <回执>`；只删政策 v2 运行态族，逐族令牌绑定演练计数，分批事务并追加 `auction.retention.purge` 审计；审计/资金/业务事实与有效会话永不删除 |
 
 ## 备份与恢复
 

@@ -236,9 +236,21 @@ mod retention_dry_run;
 #[cfg(feature = "postgres")]
 mod retention_inventory;
 #[cfg(feature = "postgres")]
+mod retention_purge;
+#[cfg(feature = "postgres")]
 pub use retention_dry_run::{
     RETENTION_DRY_RUN_FORMAT, RetentionDryRunError, RetentionDryRunReport, RetentionFamilyDryRun,
     RetentionRuleDryRun, RetentionTableDryRun,
+};
+#[cfg(feature = "postgres")]
+pub use retention_purge::{
+    RETENTION_PURGE_APPROVAL_FORMAT, RETENTION_PURGE_DEFAULT_BATCH_SIZE,
+    RETENTION_PURGE_DRY_RUN_MAX_DURATION_SECONDS, RETENTION_PURGE_MAX_BATCH_SIZE,
+    RETENTION_PURGE_MIN_BATCH_SIZE, RETENTION_PURGE_POLICY_VERSION, RETENTION_PURGE_RECEIPT_FORMAT,
+    RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS, RetentionPurgeApproval, RetentionPurgeError,
+    RetentionPurgeFamilyResult, RetentionPurgeFilesystemResult, RetentionPurgeOutcome,
+    RetentionPurgeReport, RetentionPurgeRequest, RetentionPurgeTableApproval,
+    RetentionPurgeTableResult, retention_purge_approval_token,
 };
 #[cfg(feature = "postgres")]
 mod rules;
@@ -298,6 +310,12 @@ pub use postgres_store::{PostgresStore, postgres_expected_migration_version};
 #[cfg(feature = "postgres")]
 pub fn retention_policy_rule_duration_days(rule_id: &str) -> Option<i64> {
     retention_inventory::retention_policy_rule_duration_days(rule_id)
+}
+
+/// 编译制品内嵌政策 v2 的版本号与 SHA-256；批准与回执用它固定政策身份。
+#[cfg(feature = "postgres")]
+pub fn retention_policy_identity() -> Option<(i64, String)> {
+    retention_inventory::retention_policy_identity()
 }
 #[cfg(feature = "postgres")]
 pub use store::DatabaseStore;

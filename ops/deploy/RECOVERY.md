@@ -511,4 +511,6 @@ auction-cli db rebuild --database auction --maintenance-secrets … --owner-secr
 
 ## 数据保留
 
-`auction-cli db inventory` 按[ops/deploy/retention-policy.v2.json](retention-policy.v2.json)统计各数据族的规模，只读、不授权任何归档或删除。`auction-cli db retention-dry-run` 按政策期限统计运行态族的候选行与加密诊断文件候选数，只执行 SELECT 并输出带 `run_id` 的私有回执；`mutation_executed`/`deletion_authorized` 恒为 false。审计、资金与业务事实永久保留；任何实际清理都需要先完成只读演练并经用户批准，再单独实现与评审。
+`auction-cli db inventory` 按[ops/deploy/retention-policy.v2.json](retention-policy.v2.json)统计各数据族的规模，只读、不授权任何归档或删除。`auction-cli db retention-dry-run` 按政策期限统计运行态族的候选行与加密诊断文件候选数，只执行 SELECT 并输出带 `run_id` 的私有回执；`mutation_executed`/`deletion_authorized` 恒为 false。审计、资金与业务事实永久保留。
+
+实际清理只经 `auction-cli db retention-purge`：它绑定 15 分钟内、当前政策身份的演练回执与逐数据族 `approval_token`，要求 `--execute`、`PURGE <库名>` 逐字确认和不可覆盖回执；只删除政策 v2 的运行态行与普通过期诊断文件，有效/永久会话、未解决失败、写入未知诊断与审计/资金/业务事实永不删除。每批独立事务，批准计数是硬上限，漂移候选留待重新演练；无论成功或失败都会追加 `auction.retention.purge` 审计。执行前仍须由用户批准候选计数，且建议先在隔离克隆实例演练。

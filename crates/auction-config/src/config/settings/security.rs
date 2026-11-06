@@ -2,7 +2,7 @@
 
 use auction_application::AdminRuntimeSecurityConfig;
 
-use super::*;
+use super::{Deserialize, Role};
 
 /// 匿名读取的默认每来源窗口上限；足以覆盖正常浏览的并发资源读取，仍限制批量抓取。
 const DEFAULT_ANONYMOUS_READ_RATE_LIMIT: u32 = 300;

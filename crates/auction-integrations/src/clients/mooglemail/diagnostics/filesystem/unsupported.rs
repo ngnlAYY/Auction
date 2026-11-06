@@ -1,6 +1,8 @@
 //! 未提供安全文件权限与锁能力的平台显式禁用文件留证，不退化为明文保存。
 
-use super::{MailDiagnosticRetentionSnapshot, MoogleMailDiagnosticArchiveConfig};
+use super::{
+    MailDiagnosticPurgeOutcome, MailDiagnosticRetentionSnapshot, MoogleMailDiagnosticArchiveConfig,
+};
 use auction_application::MailDiagnosticError;
 use std::{
     path::Path,
@@ -14,6 +16,16 @@ pub(super) fn retention_snapshot(
     _: Duration,
     _: SystemTime,
 ) -> Result<MailDiagnosticRetentionSnapshot, MailDiagnosticError> {
+    Err(MailDiagnosticError::UnsupportedPlatform)
+}
+
+pub(super) fn purge_ordinary_expired(
+    _: &Path,
+    _: Duration,
+    _: Duration,
+    _: SystemTime,
+    _: u64,
+) -> Result<MailDiagnosticPurgeOutcome, MailDiagnosticError> {
     Err(MailDiagnosticError::UnsupportedPlatform)
 }
 
