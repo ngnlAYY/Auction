@@ -7,7 +7,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{ApplicationFuture, RequestHash};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
 
 /// 投递处置的安全只读投影；不含 payload、凭据或原始证据正文。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,7 +39,7 @@ pub struct DeliveryAcknowledgementCommand {
     /// 处置原因；必填，不含凭据或正文原文。
     pub reason: String,
     /// CLI 系统身份（W9.7）；不进入幂等摘要，Admin 调用为 `None`。
-    pub operator_identity: Option<crate::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
     pub request_id: Option<String>,
     pub request_hash: RequestHash,
 }
@@ -158,7 +159,7 @@ impl From<auction_domain::DeliveryDispositionError> for DeliveryDispositionComma
 mod tests {
     use uuid::Uuid;
 
-    use super::DeliveryAcknowledgementCommand;
+    use crate::ports::delivery::DeliveryAcknowledgementCommand;
 
     fn command() -> DeliveryAcknowledgementCommand {
         let delivery_id = Uuid::from_u128(7);
@@ -172,7 +173,7 @@ mod tests {
             actor_source: auction_domain::DeliveryDispositionActorSource::Cli,
             actor_id,
             reason,
-            operator_identity: Some(crate::CliOperatorIdentity {
+            operator_identity: Some(crate::operator_audit::CliOperatorIdentity {
                 effective_uid: 1000,
                 sudo_user: None,
             }),

@@ -1,6 +1,6 @@
 //! delivery Admin 安全投影与 payload metadata 映射。
 
-use auction_application::{
+use auction_application::delivery::{
     DELIVERY_ADMIN_RETIREMENT_REASONS, DELIVERY_ADMIN_SUPPRESSION_REASONS, DeliveryAdminError,
     DeliveryAdminResult, DeliveryAdminSnapshot,
 };
@@ -663,7 +663,7 @@ fn cod_from_payload(payload: &Value) -> Option<i64> {
         return None;
     }
     let cod = payload.get("cod").and_then(Value::as_i64)?;
-    (0..=auction_application::MAX_DELIVERY_COD).contains(&cod).then_some(cod)
+    (0..=auction_application::delivery::MAX_DELIVERY_COD).contains(&cod).then_some(cod)
 }
 
 /// 冻结模板键；Return/Take 的 `template` 为 null 时返回 `None`。
@@ -725,8 +725,9 @@ fn reason_code_filtered(value: Option<&str>, allowed: &[&str]) -> Option<String>
 
 /// 围栏前抑制原因：隔离、准备拒绝或告警批次终止；与退役原因互斥。
 fn suppression_reason_for(failure_code: Option<&str>, reason_code: Option<&str>) -> Option<String> {
-    let is_suppression =
-        |value: &str| auction_application::DELIVERY_ADMIN_SUPPRESSION_REASONS.contains(&value);
+    let is_suppression = |value: &str| {
+        auction_application::delivery::DELIVERY_ADMIN_SUPPRESSION_REASONS.contains(&value)
+    };
     failure_code
         .filter(|value| is_suppression(value))
         .or_else(|| reason_code.filter(|value| is_suppression(value)))

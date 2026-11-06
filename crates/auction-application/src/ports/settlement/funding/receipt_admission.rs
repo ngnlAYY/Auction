@@ -17,7 +17,7 @@ use auction_domain::{
     SettlementWorld,
 };
 
-use crate::FundingCollectedReceipt;
+use crate::ports::settlement::FundingCollectedReceipt;
 
 /// 冻结载荷变量；缺省字段必须保持 `None` 才能与旧载荷逐字段相等。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -223,7 +223,7 @@ pub fn evaluate_cod_receipt_evidence(
             return Err(CodReceiptBlocker::CashUidMismatch);
         }
     }
-    if !crate::valid_external_positive_id(&sent.external_mail_id) {
+    if !crate::ports::settlement::valid_external_positive_id(&sent.external_mail_id) {
         return Err(CodReceiptBlocker::MailIdInvalid);
     }
     Ok(())
@@ -282,8 +282,11 @@ impl CodReceiptSnapshot {
         if self.recipient != sent_recipient {
             return Err(CodReceiptBlocker::RecipientMismatch);
         }
-        if crate::canonical_settlement_fulfillment_subject(kind, SettlementId::from_uuid(payment))
-            .as_deref()
+        if crate::ports::settlement::canonical_settlement_fulfillment_subject(
+            kind,
+            SettlementId::from_uuid(payment),
+        )
+        .as_deref()
             != Some(sent_subject)
         {
             return Err(CodReceiptBlocker::SubjectMismatch);

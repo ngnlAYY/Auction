@@ -14,14 +14,15 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::CompetitionCommand;
-use crate::diagnostics::{
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, diagnostic_id, record_error,
 };
-use crate::{
-    ApplicationError, CompetitionCommandOutcome, CompetitionProxyCommandOutcome,
-    CompetitionProxyTransitionOutcome, CompetitionProxyTransitionRecord,
-    CompetitionTransactionError, CompetitionWireTimestamp,
+use crate::ports::auction::{
+    CompetitionCommandOutcome, CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome,
+    CompetitionWireTimestamp,
 };
+use crate::ports::core::{CompetitionProxyTransitionRecord, CompetitionTransactionError};
 
 /// Auction-BF `SaveCommand` 固定使用的成功结果码。
 pub(super) const LEGACY_RESULT_CODE: &str = "OK";
@@ -525,7 +526,7 @@ impl LegacyBidResult {
             && self.state_version == last.accepted_state_version
     }
 
-    fn validate_place_bid(&self, command: &super::PlaceBidCommand) -> bool {
+    fn validate_place_bid(&self, command: &crate::services::auction::PlaceBidCommand) -> bool {
         if !self.validate(command.lot_id.as_uuid(), command.command_id.as_uuid()) {
             return false;
         }
@@ -1203,7 +1204,10 @@ impl LegacyProxyResult {
         bid.validate(lot_id, command_id) && bid.facts == self.facts
     }
 
-    fn validate_create_proxy(&self, command: &super::CreateProxyCommand) -> bool {
+    fn validate_create_proxy(
+        &self,
+        command: &crate::services::auction::CreateProxyCommand,
+    ) -> bool {
         self.validate(
             command.lot_id.as_uuid(),
             command.bidder_id.as_uuid(),
@@ -1220,7 +1224,7 @@ impl LegacyProxyResult {
             && self.facts[0].mechanism == LegacyBidMechanism::Proxy
     }
 
-    fn validate_lower_proxy(&self, command: &super::LowerProxyCommand) -> bool {
+    fn validate_lower_proxy(&self, command: &crate::services::auction::LowerProxyCommand) -> bool {
         self.validate(
             command.lot_id.as_uuid(),
             command.bidder_id.as_uuid(),

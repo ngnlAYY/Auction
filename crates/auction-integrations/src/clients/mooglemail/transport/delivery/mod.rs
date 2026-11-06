@@ -1,6 +1,6 @@
 //! MoogleMail delivery transport 的入口分派与稳定端口适配。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -19,8 +19,8 @@ impl MoogleMailDeliveryTransport {
     /// 注入发送前基线模式与只读影子观测器；不改变持久 fence 和外写次数。
     pub fn with_sent_baseline(
         mut self,
-        mode: auction_application::SentBaselineMode,
-        observer: Arc<dyn auction_application::SentBaselineObserver>,
+        mode: auction_application::sent_baseline::SentBaselineMode,
+        observer: Arc<dyn auction_application::sent_baseline::SentBaselineObserver>,
     ) -> Self {
         self.sender = self.sender.with_sent_baseline(mode, observer);
         self
@@ -29,7 +29,7 @@ impl MoogleMailDeliveryTransport {
     /// 注入增量扫描的闭集观测；维护适配器共享同一发送器状态。
     pub fn with_mail_scan_observer(
         mut self,
-        observer: Arc<dyn auction_application::MailScanObserver>,
+        observer: Arc<dyn auction_application::mail::MailScanObserver>,
     ) -> Self {
         self.sender = self.sender.with_mail_scan_observer(observer);
         self
@@ -38,7 +38,7 @@ impl MoogleMailDeliveryTransport {
     /// 注入 Sent / Read Mail 检查点持久化；未注入时只使用进程内水位。
     pub fn with_mail_scan_checkpoint_store(
         mut self,
-        store: Arc<dyn auction_application::MailScanCheckpointStore>,
+        store: Arc<dyn auction_application::mail::MailScanCheckpointStore>,
     ) -> Self {
         self.sender = self.sender.with_mail_scan_checkpoint_store(store);
         self
@@ -217,7 +217,7 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
         &self,
         claim: DeliveryWorkClaim,
         deadline: std::time::Instant,
-    ) -> auction_application::AuthorizedDeliveryPreparation<'_> {
+    ) -> auction_application::delivery::AuthorizedDeliveryPreparation<'_> {
         Box::pin(self.prepare_authorized_claim(claim, deadline))
     }
 

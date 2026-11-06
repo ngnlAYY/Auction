@@ -4,12 +4,12 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::super::RequestHash;
-use super::AdminCredentialImportSource;
 use super::value::{
     AdminCredential, AdminCredentialEnvelope, AdminCredentialKind, AdminCredentialStatus,
     AdminCredentialWorld,
 };
+use crate::ports::admin::AdminCredentialImportSource;
+use crate::ports::core::RequestHash;
 
 /// 凭据管理命令闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +42,7 @@ pub struct AdminCredentialImportCommand {
     pub source: AdminCredentialImportSource,
     pub actor_id: String,
     /// CLI 装配根采集的身份；Admin 入口不提供。
-    pub operator_identity: Option<crate::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
     pub request_id: Option<String>,
     pub now: DateTime<Utc>,
 }
@@ -109,7 +109,7 @@ pub struct AdminCredentialImportWrite {
     pub player_name: Option<String>,
     pub envelope: AdminCredentialEnvelope,
     pub actor_id: String,
-    pub operator_identity: Option<crate::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
     pub request_id: Option<String>,
     pub now: DateTime<Utc>,
 }

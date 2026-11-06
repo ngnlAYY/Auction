@@ -1,9 +1,8 @@
 //! 论坛主题未知写入的恢复：只读清单，以及精确标题对账未命中后的单次重试授权。
 
 use anyhow::Context;
-use auction_application::{
-    ForumSyncRecoveryPort, ForumWriteRetryAuthorizationCommand, RequestHash,
-};
+use auction_application::core::RequestHash;
+use auction_application::forum::{ForumSyncRecoveryPort, ForumWriteRetryAuthorizationCommand};
 use serde::Serialize;
 use uuid::Uuid;
 

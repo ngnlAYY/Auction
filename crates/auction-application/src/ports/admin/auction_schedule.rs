@@ -4,7 +4,9 @@ use auction_domain::{AuctionId, CommandId, valid_text};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::{AdminAuctionSummary, ApplicationFuture, CompetitionTransactionError, RequestHash};
+use crate::ports::admin::AdminAuctionSummary;
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
 /// Admin 拍卖计划修改在命令账本与请求哈希中的稳定种类。
 pub const ADMIN_AUCTION_SCHEDULE_COMMAND_KIND: &str = "admin_auction_schedule_update";

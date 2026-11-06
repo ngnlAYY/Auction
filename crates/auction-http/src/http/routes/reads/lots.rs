@@ -1,4 +1,4 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 
 use crate::diagnostics;
 
@@ -8,7 +8,8 @@ use crate::http::routes::{
     map_lot_page, not_found_error, parse_positive_i64, parse_public_uuid, parse_query,
     valid_lot_detail,
 };
-use auction_application::{MAX_PUBLIC_LOT_OFFSET, PublicEquipmentLinkTarget, PublicLotListRequest};
+use auction_application::auction::{MAX_PUBLIC_LOT_OFFSET, PublicLotListRequest};
+use auction_application::public::PublicEquipmentLinkTarget;
 use auction_contracts::{ApiErrorResponse, ApiResponse, PublicLotEnvelopeResponse};
 use axum::Json;
 use axum::extract::{Path, State};
@@ -40,7 +41,7 @@ pub(crate) async fn list_lots(
     let equipment_group = query
         .get("equipment_group")
         .map(|value| {
-            auction_application::EquipmentGroup::parse(value)
+            auction_application::forum::EquipmentGroup::parse(value)
                 .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "装备分组无效"))
         })
         .transpose()?;

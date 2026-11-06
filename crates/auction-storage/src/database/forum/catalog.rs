@@ -6,7 +6,7 @@ use crate::database::storage_error_from;
 use std::collections::HashSet;
 
 use crate::database::storage_error;
-use auction_application::{ForumCatalogPage, MAX_FORUM_CATALOG_PAGES};
+use auction_application::forum::{ForumCatalogPage, MAX_FORUM_CATALOG_PAGES};
 
 /// 所有固定帖身份必须互异且为规范十进制；续页顺序由数组位置表示，不能按 ID 排楼。
 pub(super) fn valid_page_ids<'a>(
@@ -41,17 +41,17 @@ pub(super) fn valid_pages(
 }
 
 #[cfg(feature = "postgres")]
-use auction_application::{
-    ApplicationError, ForumPublishedLayout, ForumRenderedThread, ForumReplyTopic,
-};
+use auction_application::core::ApplicationError;
+#[cfg(feature = "postgres")]
+use auction_application::forum::{ForumPublishedLayout, ForumRenderedThread, ForumReplyTopic};
 /// 数据库布局只接受冻结闭集，不以当前件数或远端文本推断历史方案。
 #[cfg(feature = "postgres")]
 pub(super) fn parse_layout(
     value: &str,
-) -> Result<auction_application::ForumCatalogLayout, ApplicationError> {
+) -> Result<auction_application::forum::ForumCatalogLayout, ApplicationError> {
     match value {
-        "legacy_single" => Ok(auction_application::ForumCatalogLayout::LegacySingle),
-        "paged_v1" => Ok(auction_application::ForumCatalogLayout::PagedV1),
+        "legacy_single" => Ok(auction_application::forum::ForumCatalogLayout::LegacySingle),
+        "paged_v1" => Ok(auction_application::forum::ForumCatalogLayout::PagedV1),
         _ => Err(storage_error("论坛目录布局不在闭集内")),
     }
 }

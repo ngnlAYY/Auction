@@ -3,10 +3,11 @@
 //! `candidates` 拥有未证明发送的只读投影，`transition` 拥有受证明迁移事务，
 //! `error` 持有重试分类；本模块只保留端口实现与证据写入入口。
 
-use auction_application::{
-    ApplicationFuture, DeliverySendCredentialBinding, DeliverySendExpectation,
-    DeliveryTakeExpectation, MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate,
+use auction_application::auction::ApplicationFuture;
+use auction_application::delivery::{
+    DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
 };
+use auction_application::mail::{MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -290,7 +291,7 @@ async fn record_sweep_attempt(
     pool: &TrackedPool<Postgres>,
     world_id: &str,
     delivery_id: Uuid,
-) -> Result<bool, auction_application::ApplicationError> {
+) -> Result<bool, auction_application::core::ApplicationError> {
     // 只推进当前一条；取消或提交应答丢失最多消费本条机会，后缀位置不受影响。
     // 排序键来自原 delivery，不接受调用方伪造时间，也不锁住远端读取期间的业务行。
     let result = sqlx::query(
@@ -318,7 +319,7 @@ async fn begin_compose_discard(
     delivery_id: Uuid,
     fencing_version: i64,
     expectation: Option<&DeliverySendExpectation>,
-) -> Result<bool, auction_application::ApplicationError> {
+) -> Result<bool, auction_application::core::ApplicationError> {
     // 一次性尝试不是远端成功证明；仅明确中止的冲突可以重试，不重放未知提交。
     crate::database::retry_conflicts(
         pool,
@@ -340,7 +341,7 @@ async fn bind_recovered_action(
     metadata: Value,
     expectation: &DeliveryTakeExpectation,
     observation: &DeliverySendCredentialBinding,
-) -> Result<bool, auction_application::ApplicationError> {
+) -> Result<bool, auction_application::core::ApplicationError> {
     persist_transition(
         pool,
         delivery_id,
@@ -364,7 +365,7 @@ async fn requeue_unproven(
     reason: &str,
     expectation: &DeliveryTakeExpectation,
     observation: &DeliverySendCredentialBinding,
-) -> Result<bool, auction_application::ApplicationError> {
+) -> Result<bool, auction_application::core::ApplicationError> {
     persist_transition(
         pool,
         delivery_id,
@@ -380,7 +381,7 @@ async fn record_observation(
     fencing_version: i64,
     key: &str,
     observation: Value,
-) -> Result<(), auction_application::ApplicationError> {
+) -> Result<(), auction_application::core::ApplicationError> {
     // 只记录当前尝试的安全观察；旧响应不能附着到管理员重试后的新 fence。
     sqlx::query(
         "UPDATE public.deliveries
@@ -406,7 +407,7 @@ async fn record_sighting(
     fencing_version: i64,
     external_mail_id: &str,
     observation: Value,
-) -> Result<(), auction_application::ApplicationError> {
+) -> Result<(), auction_application::core::ApplicationError> {
     sqlx::query(
         "UPDATE public.deliveries AS delivery
          SET result_metadata = COALESCE(delivery.result_metadata, '{}'::jsonb)
@@ -440,7 +441,7 @@ async fn bind_recovered_send(
     external_mail_id: String,
     metadata: Value,
     expectation: Option<&DeliverySendExpectation>,
-) -> Result<bool, auction_application::ApplicationError> {
+) -> Result<bool, auction_application::core::ApplicationError> {
     persist_transition(
         pool,
         delivery_id,

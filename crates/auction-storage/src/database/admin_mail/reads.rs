@@ -4,11 +4,12 @@
 use crate::database::storage_error_from;
 
 use super::mapping::{map_intake_delivery, map_intake_summary, map_mail_poller, map_poll_state};
-use auction_application::{
+use auction_application::admin::{
     AdminMailDashboardSnapshot, AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter,
     AdminMailIntakePage, AdminMailPollState, AdminMailPollStateRequest, AdminMailPollerSnapshot,
-    AdminMailTransactionError, ApplicationError, MAX_ADMIN_MAIL_POLLER_COUNT,
+    AdminMailTransactionError, MAX_ADMIN_MAIL_POLLER_COUNT,
 };
+use auction_application::core::ApplicationError;
 use chrono::Utc;
 use serde_json::Value;
 use sqlx::Row;

@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 
 use chrono::{DateTime, Utc};
 
-use auction_application::{
+use auction_application::mail::{
     MailScanAnchor, MailScanCheckpoint, MailScanEvent, MailScanOutcome, MailScanReason,
     MailScanStream, MailScanWatermark, advance_mail_scan_watermark, plan_mail_scan,
 };
@@ -21,7 +21,7 @@ impl MoogleMailGateway {
         &self,
         world: MoogleMailWorld,
         stream: MailScanStream,
-    ) -> auction_application::MailScanPlan {
+    ) -> auction_application::mail::MailScanPlan {
         let checkpoint = self
             .scan_checkpoints
             .lock()
@@ -290,7 +290,7 @@ impl MoogleMailGateway {
     ) {
         let legacy = new_mail_ids(legacy, cursor);
         let candidate = new_mail_ids(candidate, cursor);
-        let shadow = auction_application::compare_mail_scan_mids(&legacy, &candidate);
+        let shadow = auction_application::mail::compare_mail_scan_mids(&legacy, &candidate);
         self.observe_scan(
             world,
             MailScanEvent::Shadow {

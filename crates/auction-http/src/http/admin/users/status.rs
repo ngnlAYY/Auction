@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use auction_application::{AdminUserMutationAction, AdminUserMutationCommand};
+use auction_application::admin::{AdminUserMutationAction, AdminUserMutationCommand};
 use auction_contracts::{
     AdminUserBlacklistRequest, AdminUserMutationResponse, AdminUserUnblacklistRequest, ApiResponse,
 };

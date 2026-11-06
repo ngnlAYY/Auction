@@ -3,8 +3,8 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::super::RequestHash;
 use super::security::MailLoginKeyEnvelope;
+use crate::ports::core::RequestHash;
 
 #[derive(Debug, Clone)]
 pub struct MailUserRegisterCommand {

@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::MailPollClaim;
+use crate::ports::mail::MailPollClaim;
 
 /// 同一 active 邮件凭据仅装配 Main/Isekai 两个世界。
 pub const MAX_MAIL_PROGRESS_POLLERS: usize = 2;

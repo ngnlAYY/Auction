@@ -1,7 +1,7 @@
 //! 首次有效付款证明到卖方货款发送成功的窗口。
 //! Isekai 的 seller_payout 前置是 winner_equipment_handoff，付款证明在它的前置义务上。
 
-use auction_application::{
+use auction_application::sli::{
     SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliFlowWindow, SliSnapshotError, SliWorld,
 };
 use chrono::{DateTime, Utc};

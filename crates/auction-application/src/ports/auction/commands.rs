@@ -10,8 +10,11 @@ use auction_domain::{
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{ApplicationError, CreateProxyCommand, LowerProxyCommand, PlaceBidCommand};
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::services::auction::{CreateProxyCommand, LowerProxyCommand, PlaceBidCommand};
 
 /// 应用用例异步返回值，允许 HTTP state 持有动态端口而不暴露具体存储类型。
 pub type ApplicationFuture<'a, T> =

@@ -2,9 +2,9 @@
 
 use std::collections::HashSet;
 
-use auction_application::{
-    AdminForumCatalog, AdminForumPreviewResult, FORUM_CATALOG_PAGE_SIZE, MAX_FORUM_CATALOG_PAGES,
-    forum_catalog_page_marker,
+use auction_application::admin::{AdminForumCatalog, AdminForumPreviewResult};
+use auction_application::forum::{
+    FORUM_CATALOG_PAGE_SIZE, MAX_FORUM_CATALOG_PAGES, forum_catalog_page_marker,
 };
 use auction_domain::AuctionId;
 use uuid::Uuid;

@@ -4,10 +4,10 @@
 
 use std::net::SocketAddr;
 
-use auction_application::{
-    AdminRenameListRequest, AdminRenameRecord, ApplicationError, MAX_ADMIN_RENAME_OFFSET,
-    MAX_ADMIN_RENAME_PAGE_SIZE,
+use auction_application::admin::{
+    AdminRenameListRequest, AdminRenameRecord, MAX_ADMIN_RENAME_OFFSET, MAX_ADMIN_RENAME_PAGE_SIZE,
 };
+use auction_application::core::ApplicationError;
 use auction_contracts::{
     AdminRenameListResponse, AdminRenamePaginationResponse, AdminRenameResponse, ApiResponse,
 };

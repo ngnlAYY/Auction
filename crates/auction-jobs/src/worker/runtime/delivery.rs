@@ -3,10 +3,10 @@
 
 use std::collections::HashSet;
 
-use auction_application::diagnostics::{
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
-use auction_application::{CriticalWriteKind, ExternalWriteActivity};
+use auction_application::operations::{CriticalWriteKind, ExternalWriteActivity};
 
 use super::*;
 use crate::worker::diagnostics;
@@ -81,7 +81,7 @@ where
             let now = worker.clock.now();
             let Some(lease_until) = now.checked_add_signed(delivery_lease) else {
                 claim_error = Some(ApplicationError::Repository(
-                    auction_application::RepositoryError::Failed(
+                    auction_application::core::RepositoryError::Failed(
                         "delivery claim lease 截止时间溢出".to_owned(),
                     ),
                 ));
@@ -134,7 +134,7 @@ where
                     drop(diagnostic_outcome);
 
                     claim_error = Some(ApplicationError::Repository(
-                        auction_application::RepositoryError::Failed(
+                        auction_application::core::RepositoryError::Failed(
                             "delivery claim 未在租约截止前确认".to_owned(),
                         ),
                     ));
@@ -379,7 +379,7 @@ async fn process_delivery_claim<C>(
     clock: Arc<C>,
     config: DeliveryWorkerRuntimeConfig,
     control: WorkerControlHandle,
-    notifications: Arc<dyn auction_application::NotificationRecorder>,
+    notifications: Arc<dyn auction_application::notification_metrics::NotificationRecorder>,
     claim: DeliveryWorkClaim,
     activity: &ExternalWriteActivity,
 ) -> DeliveryTaskResult
@@ -711,7 +711,7 @@ async fn prepare_delivery<'a, C: Clock>(
     claim: &DeliveryWorkClaim,
     lease: &mut DeliveryLease,
     request_deadline: tokio::time::Instant,
-) -> Result<auction_application::AuthorizedDeliverySend<'a>, DeliveryTransportError> {
+) -> Result<auction_application::delivery::AuthorizedDeliverySend<'a>, DeliveryTransportError> {
     // 首次确认独立于 select 排序，不能为了操作公平性绕过准备前的续租门禁。
     // 调用方 timeout_at 覆盖本次确认及后续全部续租，预算不随回执重置。
     lease.renew(store, claim, clock, config).await.map_err(delivery_preparation_error)?;
@@ -758,7 +758,7 @@ async fn confirm_delivery_handoff<C: Clock>(
     config: DeliveryWorkerRuntimeConfig,
     claim: &DeliveryWorkClaim,
     lease: &mut DeliveryLease,
-    prepared: &mut auction_application::AuthorizedDeliverySend<'_>,
+    prepared: &mut auction_application::delivery::AuthorizedDeliverySend<'_>,
     activity: &ExternalWriteActivity,
 ) -> bool {
     // 现金证据只授权 Send；Take 的原账号期待随普通 fence 冻结，不能进入现金授权路径。
@@ -766,7 +766,7 @@ async fn confirm_delivery_handoff<C: Clock>(
         && (claim.payload.get("operation").and_then(serde_json::Value::as_str) != Some("send")
             || !matches!(
                 prepared.expectation(),
-                Some(auction_application::DeliveryPreparedExpectation::Send(_))
+                Some(auction_application::delivery::DeliveryPreparedExpectation::Send(_))
             ))
     {
         return false;
@@ -826,7 +826,10 @@ async fn confirm_delivery_handoff<C: Clock>(
                     Ok(Ok(outcome)) if tokio::time::Instant::now() < deadline => {
                         // 两种结果均在截止前确定结束；Deferred只允许确定回滚或已提交冻结。
                         guard.confirm_committed();
-                        Some(matches!(outcome, auction_application::DeliveryFenceOutcome::Sending))
+                        Some(matches!(
+                            outcome,
+                            auction_application::delivery::DeliveryFenceOutcome::Sending
+                        ))
                     }
                     _ => None,
                 }
@@ -851,9 +854,10 @@ async fn confirm_delivery_handoff<C: Clock>(
         )
         .await
         {
-            Ok(Ok(outcome)) => {
-                Some(matches!(outcome, auction_application::DeliveryFenceOutcome::Sending))
-            }
+            Ok(Ok(outcome)) => Some(matches!(
+                outcome,
+                auction_application::delivery::DeliveryFenceOutcome::Sending
+            )),
             _ => None,
         }
     };

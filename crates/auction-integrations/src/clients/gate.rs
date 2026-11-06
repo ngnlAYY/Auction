@@ -1,5 +1,5 @@
 //! 同一账号外部请求共用的容量为 1 分级请求门：业务写入优先，只读轮询按保底获得份额；无突发。
-//! 状态机在 `auction_application::PriorityGateState`，这里只负责登记、唤醒与取消。
+//! 状态机在 `auction_application::mail::PriorityGateState`，这里只负责登记、唤醒与取消。
 //!
 //! MoogleMail 与论坛客户端各自按账号持有一个门：同一远端账号的物理请求仍然串行，
 //! 优先级只决定先后，不改变总速率、结果分类或写入未知语义。
@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use auction_application::{
+use auction_application::mail::{
     GateClass, GatePoll, GateTicket, LOW_PRIORITY_FLOOR_AFTER, PriorityGateState,
 };
 use tokio::time;

@@ -1,6 +1,6 @@
 //! PM 固定目标、身份与纯文本证明；任何未知操作字段均失败关闭。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 

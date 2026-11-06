@@ -10,9 +10,9 @@ use thiserror::Error;
 
 use auction_domain::{AuctionId, CommandId, LotId, valid_text};
 
-use super::{
-    AdminLotSummary, ApplicationFuture, CompetitionTransactionError, RequestHash, StoredCommand,
-};
+use crate::ports::admin::AdminLotSummary;
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{CompetitionTransactionError, RequestHash, StoredCommand};
 
 /// draft lot 允许的修改动作闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

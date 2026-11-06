@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use auction_domain::{LotId, valid_text};
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// Admin 代理历史允许的最大单页大小。
 pub const MAX_ADMIN_PROXY_EVENT_PAGE_SIZE: i64 = 100;

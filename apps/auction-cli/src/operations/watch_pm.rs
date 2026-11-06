@@ -1,7 +1,7 @@
 //! 装备超价提醒私信的人工对账：只访问持久端口，不加载论坛 Cookie，也不提供重发入口。
 
 use anyhow::Context;
-use auction_application::{LotWatchPmOperations, RequestLotWatchPmReconcile};
+use auction_application::lot_watch_pm::{LotWatchPmOperations, RequestLotWatchPmReconcile};
 
 use crate::app::print_json;
 use crate::cli::PmCommand;

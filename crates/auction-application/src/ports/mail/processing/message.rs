@@ -4,10 +4,10 @@ use chrono::{DateTime, Utc};
 
 use auction_domain::EquipmentKey;
 
-use super::{
-    super::super::{AdminIntakeSourceSnapshot, ApplicationFuture},
-    common::{MailProcessingError, clear_string, decimal_identity, valid_text},
-};
+use crate::ports::admin::AdminIntakeSourceSnapshot;
+use crate::ports::auction::ApplicationFuture;
+
+use super::common::{MailProcessingError, clear_string, decimal_identity, valid_text};
 
 /// MoogleMail 业务 envelope 中单件装备附件。
 /// key 只用于读取可信装备页和生成密钥信封，禁止实现任何会输出 key 的格式化或序列化。
@@ -178,15 +178,19 @@ pub trait MailEquipmentReader: Send + Sync {
     /// 读取同一装备并携带非权威诊断；旧读取器默认保留原结果。
     fn read_diagnostic(
         &self,
-        context: crate::MailEquipmentDiagnosticContext,
+        context: crate::ports::mail::MailEquipmentDiagnosticContext,
         attachment: MailEquipmentAttachment,
-    ) -> crate::MailEquipmentReadFuture<'_> {
+    ) -> crate::ports::mail::MailEquipmentReadFuture<'_> {
         Box::pin(async move {
             let result = self.read(context.world_id.clone(), attachment).await;
-            let observation = crate::MailEquipmentObservation::unavailable(context);
+            let observation = crate::ports::mail::MailEquipmentObservation::unavailable(context);
             match result {
-                Ok(snapshot) => crate::MailEquipmentReadOutcome::Loaded { snapshot, observation },
-                Err(error) => crate::MailEquipmentReadOutcome::Failed { error, observation },
+                Ok(snapshot) => {
+                    crate::ports::mail::MailEquipmentReadOutcome::Loaded { snapshot, observation }
+                }
+                Err(error) => {
+                    crate::ports::mail::MailEquipmentReadOutcome::Failed { error, observation }
+                }
             }
         })
     }
@@ -194,14 +198,14 @@ pub trait MailEquipmentReader: Send + Sync {
     /// 有界留存失败证据并生成安全摘要；诊断失败不能成为业务错误。
     fn retain_failure(
         &self,
-        observation: crate::MailEquipmentObservation,
-        stage: crate::MailEquipmentDiagnosticStage,
-        category: crate::MailEquipmentDiagnosticCategory,
+        observation: crate::ports::mail::MailEquipmentObservation,
+        stage: crate::ports::mail::MailEquipmentDiagnosticStage,
+        category: crate::ports::mail::MailEquipmentDiagnosticCategory,
         detail_code: Option<String>,
-    ) -> crate::MailEquipmentRetentionFuture<'static> {
+    ) -> crate::ports::mail::MailEquipmentRetentionFuture<'static> {
         Box::pin(async move {
             let evidence_id = observation.prepared.as_ref().map(|evidence| evidence.evidence_id());
-            crate::MailEquipmentDiagnosticSnapshot {
+            crate::ports::mail::MailEquipmentDiagnosticSnapshot {
                 schema_version: 1,
                 equipment_id: observation.context.external_equipment_id,
                 attachment_position: observation.context.attachment_position,
@@ -212,9 +216,9 @@ pub trait MailEquipmentReader: Send + Sync {
                 elapsed_millis: observation.elapsed_millis,
                 evidence_id,
                 evidence_status: if evidence_id.is_some() {
-                    crate::MailEquipmentEvidenceStatus::SaveFailed
+                    crate::ports::mail::MailEquipmentEvidenceStatus::SaveFailed
                 } else {
-                    crate::MailEquipmentEvidenceStatus::Disabled
+                    crate::ports::mail::MailEquipmentEvidenceStatus::Disabled
                 },
                 retention_error: evidence_id.map(|_| "recorder_unavailable".to_owned()),
             }

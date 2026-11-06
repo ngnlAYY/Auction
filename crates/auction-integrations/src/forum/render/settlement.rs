@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use auction_application::{ForumAuctionSnapshot, ForumLotSnapshot, ForumRenderError};
+use auction_application::forum::{ForumAuctionSnapshot, ForumLotSnapshot, ForumRenderError};
 use auction_domain::AuctionStatus;
 use chrono::{DateTime, Utc};
 

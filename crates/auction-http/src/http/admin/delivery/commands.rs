@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use auction_application::{DeliveryAdminAction, DeliveryAdminCommand};
+use auction_application::delivery::{DeliveryAdminAction, DeliveryAdminCommand};
 use auction_contracts::{
     ADMIN_DELIVERY_RECONCILE_FAILURE_CODES, AdminDeliveryCommandRequest,
     AdminDeliveryCommandResponse, ApiResponse,

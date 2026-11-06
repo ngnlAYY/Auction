@@ -1,12 +1,12 @@
 //! Public 实时 WebSocket 建立、补发和连接生命周期。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::PublicRealtimeAuctionStatus;
+use auction_application::auction::PublicRealtimeAuctionStatus;
 use auction_observability::{HttpRecorder, ProcessMetrics};
 use axum::{
     extract::{

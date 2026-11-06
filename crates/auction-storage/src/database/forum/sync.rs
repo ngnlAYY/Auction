@@ -1,9 +1,10 @@
 //! 论坛发布任务的 PostgreSQL 适配；持久化 token、owner 与 fencing，外部调用留给 Worker。
 
-use auction_application::{
-    ApplicationFuture, ForumAuctionSnapshot, ForumPublishedLayout, ForumRenderedPost,
-    ForumRenderedThread, ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort,
-    ForumSyncStore, ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
+use auction_application::auction::ApplicationFuture;
+use auction_application::forum::{
+    ForumAuctionSnapshot, ForumPublishedLayout, ForumRenderedPost, ForumRenderedThread,
+    ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort, ForumSyncStore,
+    ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
     MAX_FORUM_SYNC_RECOVERY_ITEMS,
 };
 use chrono::{DateTime, Utc};
@@ -16,6 +17,8 @@ mod authorization;
 mod claims;
 #[cfg(feature = "postgres")]
 mod publishing;
+#[cfg(feature = "postgres")]
+pub(super) mod settlement;
 #[cfg(feature = "postgres")]
 mod snapshot;
 pub(super) mod validation;
@@ -34,14 +37,14 @@ use validation::{
 pub(super) fn lot_code(
     category: &str,
     lot_number: i32,
-) -> Result<String, auction_application::ApplicationError> {
+) -> Result<String, auction_application::core::ApplicationError> {
     validation::lot_code(category, lot_number)
 }
 
 #[cfg(feature = "postgres")]
 pub(super) fn parse_world(
     value: &str,
-) -> Result<auction_domain::SettlementWorld, auction_application::ApplicationError> {
+) -> Result<auction_domain::SettlementWorld, auction_application::core::ApplicationError> {
     validation::parse_world(value)
 }
 
@@ -49,7 +52,7 @@ pub(super) fn parse_world(
 pub(super) async fn load_current_snapshot_postgres(
     store: &super::super::PostgresStore,
     auction_id: auction_domain::AuctionId,
-) -> Result<ForumAuctionSnapshot, auction_application::ApplicationError> {
+) -> Result<ForumAuctionSnapshot, auction_application::core::ApplicationError> {
     snapshot::load_current_snapshot_postgres(store, auction_id).await
 }
 

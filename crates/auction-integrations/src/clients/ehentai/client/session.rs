@@ -1,6 +1,6 @@
 //! 论坛登录态的只读正向证明；公开页面 HTTP 200 本身不是认证成功。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -17,8 +17,11 @@ impl EhentaiClient {
         let (body, _) = self
             .get_page(
                 operation,
-                auction_application::ForumOperation::CheckSession,
-                ForumRequestScope::new(auction_application::ForumWorld::Shared, cookie),
+                auction_application::external_metrics::ForumOperation::CheckSession,
+                ForumRequestScope::new(
+                    auction_application::external_metrics::ForumWorld::Shared,
+                    cookie,
+                ),
                 target.clone(),
                 None,
             )

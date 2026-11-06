@@ -1,6 +1,6 @@
 //! Unix 私有目录、跨进程锁和无覆盖发布；所有阻塞操作由归档层调度。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -12,7 +12,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use auction_application::MailDiagnosticError;
+use auction_application::mail::MailDiagnosticError;
 use uuid::Uuid;
 
 use super::{

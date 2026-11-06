@@ -8,11 +8,12 @@
 use std::time::Duration;
 
 use anyhow::Context;
-use auction_application::{
+use auction_application::core::lower_hex;
+use auction_application::operations::{
     OperationsAlertHostBackupFacts, OperationsAlertHostBackupOutcome, OperationsAlertHostBackupRun,
     OperationsAlertHostDisk, OperationsAlertHostObserveCommand, OperationsAlertHostWalFacts,
     OperationsAlertSource, OperationsAlertSourceObservation, OperationsAlertStore,
-    evaluate_host_backup, evaluate_host_wal, lower_hex,
+    evaluate_host_backup, evaluate_host_wal,
 };
 use auction_storage::DatabaseConnectionPurpose;
 use chrono::{DateTime, Utc};

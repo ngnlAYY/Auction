@@ -1,7 +1,9 @@
 //! Public 业务请求的指标记录与竞价错误结果分类。
 
 use crate::http::routes::state::PublicApiState;
-use auction_application::{ApplicationError, CommandLedgerError, CompetitionTransactionError};
+use auction_application::core::{
+    ApplicationError, CommandLedgerError, CompetitionTransactionError,
+};
 use auction_observability::{BusinessEvent, BusinessOutcome};
 use std::time::Instant;
 

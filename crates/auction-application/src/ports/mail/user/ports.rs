@@ -2,11 +2,13 @@
 
 use uuid::Uuid;
 
-use super::super::{ApplicationFuture, MailUserCommandKind, MailUserResult, RequestHash};
 use super::commands::{
     MailUserRebindCommand, MailUserRegisterWrite, MailUserRekeyCommand, MailUserRekeyWrite,
 };
 use super::security::{MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyIssue};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
+use crate::ports::mail::{MailUserCommandKind, MailUserResult};
 
 /// Users owner 的注册、换绑和幂等读取端口。
 pub trait MailUserStore: Send + Sync {

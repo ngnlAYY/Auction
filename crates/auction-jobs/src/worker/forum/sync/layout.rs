@@ -2,9 +2,10 @@
 
 use std::{borrow::Cow, sync::Arc};
 
-use auction_application::{
-    ApplicationError, ForumPostWriter, ForumPublishedLayout, ForumPublishedThread,
-    ForumRemoteError, ForumRenderedPost, ForumRenderedThread, ForumTopicMetadata, ForumTopicReader,
+use auction_application::core::ApplicationError;
+use auction_application::forum::{
+    ForumPostWriter, ForumPublishedLayout, ForumPublishedThread, ForumRemoteError,
+    ForumRenderedPost, ForumRenderedThread, ForumTopicMetadata, ForumTopicReader,
     ForumWriteProgress, forum_catalog_marker, forum_catalog_page_marker, forum_system_log_marker,
 };
 

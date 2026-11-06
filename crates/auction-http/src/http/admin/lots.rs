@@ -2,15 +2,16 @@
 //! 认证和应用端口负责权限、快照与存储语义；这里仅解析路径/分页并映射安全响应，不把 SQL
 //! 行或装备密钥传到浏览器。
 
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::{
-    AdminAuctionSummary, AdminLotListRequest, AdminLotPage, AdminLotSummary, ApplicationError,
+use auction_application::admin::{
+    AdminAuctionSummary, AdminLotListRequest, AdminLotPage, AdminLotSummary,
 };
+use auction_application::core::ApplicationError;
 use auction_contracts::{
     AdminLotListResponse, AdminLotPaginationResponse, AdminLotResponse, ApiResponse,
 };
@@ -57,7 +58,7 @@ pub(crate) async fn list(
     let page_size = match super::parse_positive_i64(
         query.get("page_size"),
         DEFAULT_PAGE_SIZE,
-        Some(auction_application::MAX_ADMIN_LOT_PAGE_SIZE),
+        Some(auction_application::admin::MAX_ADMIN_LOT_PAGE_SIZE),
     ) {
         Ok(page_size) => page_size,
         Err(_) => {
@@ -66,7 +67,7 @@ pub(crate) async fn list(
         }
     };
     let offset = match page.checked_sub(1).and_then(|value| value.checked_mul(page_size)) {
-        Some(offset) if offset <= auction_application::MAX_ADMIN_LOT_OFFSET => offset,
+        Some(offset) if offset <= auction_application::admin::MAX_ADMIN_LOT_OFFSET => offset,
         _ => {
             return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
                 .into_response();

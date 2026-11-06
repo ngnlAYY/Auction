@@ -2,7 +2,7 @@
 
 use super::mapping::*;
 
-use auction_application::{
+use auction_application::settlement::{
     SettlementFulfillmentClaim, SettlementFulfillmentOperation, SettlementFulfillmentProof,
     SettlementFulfillmentReconcileResult, SettlementFulfillmentReconcileStatus,
     SettlementFulfillmentState,
@@ -15,8 +15,8 @@ use uuid::Uuid;
 #[cfg(feature = "postgres")]
 enum ReconcileTransactionError {
     Storage(sqlx::Error),
-    Repository(auction_application::RepositoryError),
-    Funding(auction_application::FundingError),
+    Repository(auction_application::core::RepositoryError),
+    Funding(auction_application::settlement::FundingError),
 }
 
 #[cfg(feature = "postgres")]
@@ -25,13 +25,16 @@ impl ReconcileTransactionError {
         match self {
             Self::Storage(error) => crate::database::observed_serialization_conflict(error),
             Self::Funding(error) => {
-                matches!(error, auction_application::FundingError::SerializationConflict)
+                matches!(
+                    error,
+                    auction_application::settlement::FundingError::SerializationConflict
+                )
             }
             Self::Repository(_) => false,
         }
     }
 
-    fn into_repository(self) -> auction_application::RepositoryError {
+    fn into_repository(self) -> auction_application::core::RepositoryError {
         match self {
             Self::Storage(error) => map_storage_error(error),
             Self::Repository(error) => error,
@@ -79,7 +82,7 @@ pub(super) async fn satisfy_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
     proof: &SettlementFulfillmentProof,
-) -> Result<SettlementFulfillmentReconcileResult, auction_application::RepositoryError> {
+) -> Result<SettlementFulfillmentReconcileResult, auction_application::core::RepositoryError> {
     validate_claim_identity(claim)?;
     let Some(delivery_id) = claim.delivery_id else {
         return Err(repository_error_owned("结算履约满足证明缺少 delivery identity"));
@@ -90,7 +93,8 @@ pub(super) async fn satisfy_postgres(
     if claim.state != SettlementFulfillmentState::Enqueued
         || claim.operation != SettlementFulfillmentOperation::Send
         || delivery.id != delivery_id
-        || delivery.status != auction_application::SettlementFulfillmentDeliveryStatus::Succeeded
+        || delivery.status
+            != auction_application::settlement::SettlementFulfillmentDeliveryStatus::Succeeded
         || !delivery.external_reference_proven
         || proof.kind != "mooglemail_sent_collected"
         || proof.reference.is_empty()
@@ -117,7 +121,7 @@ pub(super) async fn satisfy_postgres(
             )
         {
             return Err(ReconcileTransactionError::Funding(
-                auction_application::FundingError::Unproven,
+                auction_application::settlement::FundingError::Unproven,
             ));
         }
         let updated = sqlx::query(
@@ -210,7 +214,7 @@ pub(super) async fn manual_reconcile_in_transaction(
     claim_token: Uuid,
     claim_fencing: i64,
     failure_code: &str,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     let state_version = i64::try_from(state_version)
         .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
     let audit_id = Uuid::new_v4();
@@ -266,7 +270,7 @@ async fn finalize_postgres(
     execution_state: &str,
     audit_action: &str,
     invalid_claim_message: &str,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     validate_claim_identity(claim)?;
     let state_version = i64::try_from(claim.state_version)
         .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
@@ -333,7 +337,7 @@ pub(super) async fn manual_reconcile_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
     failure_code: &str,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     finalize_postgres(
         pool,
         claim,
@@ -382,7 +386,7 @@ pub(super) async fn mark_failed_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
     failure_code: &str,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     finalize_postgres(
         pool,
         claim,
@@ -401,7 +405,7 @@ pub(super) async fn fail_postgres(
     retry_delay: chrono::Duration,
     failure_code: &str,
     _safe_detail: &str,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     validate_claim_identity(claim)?;
     let retry_microseconds = retry_delay
         .num_microseconds()

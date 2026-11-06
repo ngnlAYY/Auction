@@ -3,7 +3,7 @@
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::settlement_funding::account::LockedFundingAccount;
 use crate::database::settlement_funding::storage;
-use auction_application::{FundingError, FundingMutation};
+use auction_application::settlement::{FundingError, FundingMutation};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 

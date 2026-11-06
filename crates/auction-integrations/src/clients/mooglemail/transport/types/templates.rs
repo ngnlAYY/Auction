@@ -1,6 +1,6 @@
 //! MoogleMail 通知模板快照与渲染；闭集、默认正文和占位符规则由应用层模板 owner 维护。
 
-use auction_application::AdminRuntimeMailTemplatesConfig;
+use auction_application::admin::AdminRuntimeMailTemplatesConfig;
 
 use crate::clients::mooglemail::forms::MAX_BODY_BYTES;
 

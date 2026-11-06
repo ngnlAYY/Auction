@@ -4,7 +4,7 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::ApplicationError;
+use auction_application::core::ApplicationError;
 #[cfg(feature = "postgres")]
 use sqlx::Connection;
 use uuid::Uuid;

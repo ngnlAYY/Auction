@@ -18,7 +18,9 @@ where
     pub(super) async fn process_message(
         &self,
         message: MailMessage,
-        pending_equipment_diagnostic: &mut Option<crate::PendingMailEquipmentDiagnostic>,
+        pending_equipment_diagnostic: &mut Option<
+            crate::ports::mail::PendingMailEquipmentDiagnostic,
+        >,
     ) -> Result<MailProcessingDecision, ApplicationError> {
         message.validate()?;
         if !self.world_ids.iter().any(|world_id| world_id == &message.world_id) {

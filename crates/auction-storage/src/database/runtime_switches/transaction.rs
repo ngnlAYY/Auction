@@ -4,7 +4,9 @@ use super::{
     super::{PostgresStore, audit_health::AuditWriteResult as _},
     queries,
 };
-use auction_application::{RuntimeSwitchCommand, RuntimeSwitchError, RuntimeSwitchEvent};
+use auction_application::runtime_switches::{
+    RuntimeSwitchCommand, RuntimeSwitchError, RuntimeSwitchEvent,
+};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -71,7 +73,7 @@ pub(super) async fn write(
         VALUES($1,$2,$3,$4,$5,'runtime_switch',$6,'success',$7,$8)")
         .bind(audit_id).bind(now).bind(actor_type).bind(&command.actor_id)
         .bind(format!("runtime_switch.{}", command.operation.label())).bind(command.name.label()).bind(source)
-        .bind(auction_application::cli_audit_metadata(command.operator_identity.as_ref(), serde_json::json!({"command_id": command.command_id, "entrypoint": command.entrypoint,
+        .bind(auction_application::core::cli_audit_metadata(command.operator_identity.as_ref(), serde_json::json!({"command_id": command.command_id, "entrypoint": command.entrypoint,
             "executor": if command.entrypoint == "cli" { "auction-cli" } else { command.entrypoint.as_str() },
             "previous": previous, "accepted": event})))
         .execute(&mut *tx).await.record_audit_failure()?;

@@ -1,6 +1,8 @@
 //! PostgreSQL delivery Admin 列表读取。
 
-use auction_application::{DeliveryAdminError, DeliveryAdminListRequest, DeliveryAdminPage};
+use auction_application::delivery::{
+    DeliveryAdminError, DeliveryAdminListRequest, DeliveryAdminPage,
+};
 use sqlx::Postgres;
 
 use super::map_storage_error;

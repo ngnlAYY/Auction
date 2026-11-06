@@ -1,9 +1,10 @@
 //! 人工 Sent 证明的 CLI 边界；只读本地闭集证据并调用应用端口，不访问游戏。
 
 use anyhow::Context;
-use auction_application::{
+use auction_application::core::lower_hex;
+use auction_application::delivery::{
     DeliverySentConfirmationPort, ManualSentEvidence, SentConfirmationCommand,
-    SentConfirmationPreview, lower_hex,
+    SentConfirmationPreview,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};

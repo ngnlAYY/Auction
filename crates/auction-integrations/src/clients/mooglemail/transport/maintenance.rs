@@ -3,15 +3,15 @@
 //! 普通邮箱读取不占 compose guard；只有 compose 观察和 discard 持有短时排他会话。
 //! 读取接受前重新核验当前凭据与 owner，不把共享观察升级成资金或库存授权。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
-use auction_application::{
-    ApplicationError, MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard,
-    MoogleMailboxInboxAssets, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
-    MoogleMailboxNoticeExpectation, MoogleMailboxSentEntry, MoogleMailboxSentState,
-    MoogleMailboxUnprovenSend, RepositoryError,
+use auction_application::core::{ApplicationError, RepositoryError};
+use auction_application::mail::{
+    MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxInboxAssets,
+    MoogleMailboxInboxObservation, MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation,
+    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxUnprovenSend,
 };
 use chrono::{DateTime, Utc};
 

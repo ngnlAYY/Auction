@@ -1,0 +1,178 @@
+//! Recovery action claim、并发处理和 lease 收口阶段。
+
+use std::sync::Arc;
+
+use auction_application::core::Clock;
+use auction_application::core::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
+};
+use auction_observability::{WorkerLoop, WorkerResult, WorkerRetryKind};
+use chrono::Duration as ChronoDuration;
+use tokio::task::JoinSet;
+
+use super::{PersistentWorker, merge_worker_result, observe_phase, process_recovery_action};
+use crate::worker::diagnostics;
+
+pub(super) async fn process_actions<C>(
+    worker: &PersistentWorker<C>,
+    batch_result: &mut WorkerResult,
+) where
+    C: Clock + 'static,
+{
+    let Some(store) = &worker.recovery_store else {
+        return;
+    };
+    if worker.recovery_delivery.is_none() && worker.recovery_blacklister.is_none() {
+        return;
+    }
+    let Ok(lease_duration) = ChronoDuration::from_std(worker.recovery.lease_duration) else {
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
+        tracing::error!("recovery action lease duration is invalid");
+        merge_worker_result(batch_result, WorkerResult::Error);
+        return;
+    };
+    let Ok(retry_delay) = ChronoDuration::from_std(worker.recovery.retry_delay) else {
+        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
+        tracing::error!("recovery action retry delay is invalid");
+        merge_worker_result(batch_result, WorkerResult::Error);
+        return;
+    };
+
+    let capacity = usize::from(worker.recovery.batch_limit);
+    let mut count = 0_usize;
+    let mut phase_result = WorkerResult::Success;
+    let mut remaining = capacity;
+    let mut exhausted = false;
+    while remaining > 0 && !exhausted && !worker.control.is_draining() {
+        let wave_size = usize::from(worker.recovery.concurrency).min(remaining);
+        let mut tasks = JoinSet::new();
+        for _ in 0..wave_size {
+            if worker.control.is_draining() {
+                break;
+            }
+            // 领取、任务排队与处理共用绝对截止，不在异步任务首次 poll 时重建预算。
+            let item_deadline = tokio::time::Instant::now() + worker.recovery.item_timeout;
+            let now = worker.clock.now();
+            let Some(lease_until) = now.checked_add_signed(lease_duration) else {
+                diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
+                tracing::error!("recovery action lease deadline overflowed");
+                phase_result = WorkerResult::Error;
+                exhausted = true;
+                break;
+            };
+            let claim = match tokio::time::timeout_at(
+                item_deadline,
+                store.claim_due_action(worker.worker_id.clone(), now, lease_until),
+            )
+            .await
+            {
+                Ok(Ok(Some(claim))) => claim,
+                Ok(Ok(None)) => {
+                    exhausted = true;
+                    break;
+                }
+                Ok(Err(error)) => {
+                    diagnostics::unpersisted_error(
+                        "recovery_dispatch",
+                        "claim_action",
+                        error.diagnostic_kind(),
+                        DiagnosticContext::default(),
+                    );
+                    phase_result = WorkerResult::Error;
+                    exhausted = true;
+                    break;
+                }
+                Err(error) => {
+                    diagnostics::unpersisted_error(
+                        "recovery_dispatch",
+                        "claim_action_timeout",
+                        diagnostics::timeout_kind(&error),
+                        DiagnosticContext::default(),
+                    );
+
+                    phase_result = WorkerResult::Error;
+                    exhausted = true;
+                    break;
+                }
+            };
+            // 领取及任务调度都可能跨过 drain；未执行的 action 沿原租约恢复，不伪造失败。
+            if worker.control.is_draining() {
+                break;
+            }
+            remaining = remaining.saturating_sub(1);
+            count = count.saturating_add(1);
+            if claim.retry_count > 0 {
+                worker
+                    .metrics
+                    .observe_retry(WorkerLoop::AuctionRecovery, WorkerRetryKind::Persisted);
+            }
+            let store = Arc::clone(store);
+            let delivery = worker.recovery_delivery.clone();
+            let blacklister = worker.recovery_blacklister.clone();
+            let clock = Arc::clone(&worker.clock);
+            let control = worker.control.clone();
+            tasks.spawn(diagnostics::inherit(async move {
+                if control.is_draining() {
+                    return WorkerResult::Success;
+                }
+                let action_id = claim.action_id;
+                if tokio::time::Instant::now() >= item_deadline {
+                    diagnostics::unpersisted(SafeErrorKind::LEASE_EXPIRED);
+                    tracing::warn!(%action_id, "recovery action expired before execution");
+                    return WorkerResult::Error;
+                }
+                match tokio::time::timeout_at(
+                    item_deadline,
+                    process_recovery_action(
+                        store,
+                        delivery,
+                        blacklister,
+                        clock,
+                        retry_delay,
+                        claim,
+                    ),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(error) => {
+                        diagnostics::unpersisted_error(
+                            "recovery_dispatch",
+                            "item_timeout",
+                            diagnostics::timeout_kind(&error),
+                            DiagnosticContext {
+                                action_id: diagnostic_id(&action_id),
+                                ..Default::default()
+                            },
+                        );
+
+                        WorkerResult::Error
+                    }
+                }
+            }));
+        }
+        while let Some(result) = tasks.join_next().await {
+            match result {
+                Ok(action_result) => merge_worker_result(&mut phase_result, action_result),
+                Err(error) => {
+                    diagnostics::observe_task_panic("recovery_dispatch", &error);
+                    diagnostics::error(
+                        "recovery_dispatch",
+                        "item_join",
+                        diagnostics::join_kind(&error),
+                        DiagnosticContext {
+                            disposition: if error.is_cancelled() {
+                                None
+                            } else {
+                                Some(DiagnosticDisposition::Unpersisted)
+                            },
+                            ..Default::default()
+                        },
+                    );
+                    phase_result = WorkerResult::Canceled;
+                }
+            }
+        }
+    }
+    observe_phase(worker, batch_result, phase_result, count);
+}

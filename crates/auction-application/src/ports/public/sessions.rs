@@ -4,8 +4,9 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::ApplicationFuture;
-use crate::{PublicSessionPreferenceResult, SessionError, SetPublicSessionPreferenceCommand};
+use crate::errors::SessionError;
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::public::{PublicSessionPreferenceResult, SetPublicSessionPreferenceCommand};
 
 /// Public 会话的并发上限；登录期限由账号偏好决定。满额登录注销最久未活动的有效会话。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

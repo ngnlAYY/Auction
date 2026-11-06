@@ -1,7 +1,7 @@
 //! 装备损失的受审计人工收口；只装配结算端口，不读取 Sent、发信或重建业务资格。
 
 use anyhow::Context;
-use auction_application::{
+use auction_application::settlement::{
     EquipmentLossCommand, EquipmentLossPreview, SettlementEquipmentLossPort,
 };
 use serde_json::json;

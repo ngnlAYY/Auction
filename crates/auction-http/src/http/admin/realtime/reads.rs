@@ -1,10 +1,10 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::{
+use auction_application::realtime::{
     RealtimeEventListRequest, RealtimeFailureListRequest, RealtimeLagListRequest,
 };
 use auction_contracts::{

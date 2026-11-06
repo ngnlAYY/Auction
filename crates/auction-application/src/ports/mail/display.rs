@@ -8,7 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::mail_processing::MailMessage;
+use crate::ports::mail::processing::MailMessage;
 
 pub const MAIL_DISPLAY_SCHEMA_VERSION: u8 = 1;
 pub const MAIL_DISPLAY_REDACTION_VERSION: u8 = 1;

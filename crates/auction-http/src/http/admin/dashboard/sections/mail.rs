@@ -1,10 +1,10 @@
 //! Admin dashboard 邮件轮询 section。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
-use auction_application::AdminMailPort;
+use auction_application::admin::AdminMailPort;
 use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
 use serde_json::json;

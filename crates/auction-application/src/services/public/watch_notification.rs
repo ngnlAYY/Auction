@@ -1,10 +1,14 @@
 //! PM 公开通知内容与缺收件人事实；不包含代理上限、装备密钥或凭据。
 use uuid::Uuid;
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{
-    ForumPmMessage, LotWatchError, OutbidNotice, RequestHash, forum_pm_digest, valid_forum_pm_id,
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
+use crate::ports::core::RequestHash;
+use crate::ports::forum::ForumPmMessage;
+use crate::ports::lot_watch_pm::{forum_pm_digest, valid_forum_pm_id};
+use crate::ports::public::LotWatchError;
+use crate::services::public::OutbidNotice;
 
 /// 冻结来源：缺失身份用 NULL，而非可发送 message 的虚构数字 ID。
 pub struct LotWatchPmNotification {
@@ -44,10 +48,13 @@ pub fn lot_watch_pm_notification(
          Accepted bid: {amount} Credits\n",
         item = notice.item_name,
         code = notice.lot_code,
-        amount = crate::format_credits(amount),
+        amount = crate::services::public::format_credits(amount),
     );
     if let Some(deadline) = notice.deadline {
-        body.push_str(&format!("Bidding closes: {}\n", crate::format_deadline(deadline)));
+        body.push_str(&format!(
+            "Bidding closes: {}\n",
+            crate::services::public::format_deadline(deadline)
+        ));
     }
     if let Some(site) = notice.site_url {
         body.push_str(&format!(

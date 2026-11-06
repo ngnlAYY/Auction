@@ -1,6 +1,6 @@
 //! Public 实时连接的进程总量与每用户配额；和 discovery 专属容量、请求频率分离。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 

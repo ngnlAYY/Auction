@@ -4,11 +4,12 @@
 
 use std::sync::Arc;
 
-use crate::{
+use crate::errors::ApplicationError;
+use crate::ports::admin::{
     AdminMailError, AdminMailPollState, AdminMailPollTriggerCommand, AdminMailPollingCommand,
-    AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionRunner, ApplicationError,
-    Clock, TransactionPolicy,
+    AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionRunner,
 };
+use crate::ports::core::{Clock, TransactionPolicy};
 
 const COMMAND_KIND: &str = "set_polling_paused";
 const TRIGGER_COMMAND_KIND: &str = "trigger_poll";

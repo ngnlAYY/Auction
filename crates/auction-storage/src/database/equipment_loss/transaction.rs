@@ -2,7 +2,7 @@
 
 use crate::database::equipment_loss::{Error, snapshot};
 use crate::database::{TrackedTransaction as Transaction, settlement_funding as funding};
-use auction_application::{EquipmentLossCommand, EquipmentLossResult, FundingMutation};
+use auction_application::settlement::{EquipmentLossCommand, EquipmentLossResult, FundingMutation};
 use serde_json::json;
 use sqlx::{Postgres, Row};
 
@@ -147,7 +147,7 @@ pub(super) async fn apply(
         entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'admin',$2,'auction.settlement.equipment_loss',
         'lot',$3,'success',$5,$4)")
         .bind(command.command_id).bind(&command.actor).bind(command.lot_id.to_string())
-        .bind(auction_application::cli_audit_metadata(command.operator_identity.as_ref(), json!({"command":command,"payment_obligation_id":payment_id,"delivery_id":delivery_id,
+        .bind(auction_application::core::cli_audit_metadata(command.operator_identity.as_ref(), json!({"command":command,"payment_obligation_id":payment_id,"delivery_id":delivery_id,
             "seller_obligation_id":seller_id,"refund_obligation_id":refund_id,"recovery_id":recovery_id,
             "buyer_amount":split.buyer.value(),"compensation_amount":split.compensation.value(),
             "seller_amount":split.seller.value(),"tax_amount":split.tax.value(),

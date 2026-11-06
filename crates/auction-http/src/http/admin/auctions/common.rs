@@ -1,9 +1,11 @@
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
 pub(crate) use super::super::parse_canonical_uuid;
-use auction_application::{ApplicationError, CommandLedgerError, CompetitionTransactionError};
+use auction_application::core::{
+    ApplicationError, CommandLedgerError, CompetitionTransactionError,
+};
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},

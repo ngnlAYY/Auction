@@ -4,10 +4,13 @@
 
 use crate::database::lots::CATEGORY_KEYS;
 pub(super) use crate::database::storage_error;
-use auction_application::{
-    ApplicationError, EquipmentColorFacts, EquipmentColorRule, EquipmentGroup,
+use auction_application::auction::{
     PublicAuctionProjection, PublicEquipment, PublicEquipmentStat, PublicFinalRestriction,
-    PublicLiveLotSummary, PublicLotListRequest, PublicPreviewLotSummary, equipment_color_decision,
+    PublicLiveLotSummary, PublicLotListRequest, PublicPreviewLotSummary,
+};
+use auction_application::core::ApplicationError;
+use auction_application::forum::{
+    EquipmentColorFacts, EquipmentColorRule, EquipmentGroup, equipment_color_decision,
 };
 pub(super) use auction_domain::valid_text as public_text;
 use auction_domain::{AuctionRules, BidAmount, EquipmentId};

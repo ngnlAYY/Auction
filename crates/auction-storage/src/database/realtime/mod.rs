@@ -4,9 +4,10 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, ApplicationFuture, PublicRealtimeEvent, PublicRealtimePage,
-    PublicRealtimeReader, PublicRealtimeRequest,
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::realtime::{
+    PublicRealtimeEvent, PublicRealtimePage, PublicRealtimeReader, PublicRealtimeRequest,
 };
 #[cfg(feature = "postgres")]
 use serde_json::Value;

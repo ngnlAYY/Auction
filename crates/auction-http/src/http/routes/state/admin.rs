@@ -2,17 +2,24 @@
 
 use std::sync::Arc;
 
-use auction_application::{
+use auction_application::admin::{
     AdminAuctionCreatePort, AdminAuctionReader, AdminAuctionSchedulePort, AdminAuditPort,
     AdminCredentialCheckPort, AdminCredentialHealthReader, AdminCredentialPort,
     AdminCredentialWorld, AdminForumPreviewPort, AdminIntakePort, AdminLotReader,
     AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader, AdminRulesPort,
-    AdminRuntimeConfigPort, AdminSessionPort, AdminUserPort, AdminWorldPort,
-    AuctionLifecycleCommandPort, DeliveryAdminPort, OperationsAlertConsole,
-    OperationsAlertSourceReader, OperationsAlertStore, ProcessReadinessPort, PublicForumReader,
-    RealtimeAdminPort, RecoveryCommandPort, RecoveryReportReader, SettlementCatalogReader,
-    SettlementReportReader, WorkerControlPort,
+    AdminRuntimeConfigPort, AdminUserPort, AdminWorldPort, SettlementCatalogReader,
 };
+use auction_application::auction::AuctionLifecycleCommandPort;
+use auction_application::delivery::DeliveryAdminPort;
+use auction_application::forum::PublicForumReader;
+use auction_application::operations::{
+    OperationsAlertConsole, OperationsAlertSourceReader, OperationsAlertStore,
+    ProcessReadinessPort, WorkerControlPort,
+};
+use auction_application::public::AdminSessionPort;
+use auction_application::realtime::RealtimeAdminPort;
+use auction_application::recovery::{RecoveryCommandPort, RecoveryReportReader};
+use auction_application::settlement::SettlementReportReader;
 use auction_observability::{HealthReader, ProcessMetrics};
 
 use super::super::HttpBoundary;
@@ -23,8 +30,8 @@ use super::super::security::AdminHttpSecurity;
 #[derive(Clone, Default)]
 pub struct AdminApiState {
     runtime_switches: Option<(
-        Arc<dyn auction_application::RuntimeSwitchStore>,
-        auction_application::RuntimeSwitches,
+        Arc<dyn auction_application::runtime_switches::RuntimeSwitchStore>,
+        auction_application::runtime_switches::RuntimeSwitches,
     )>,
     session: Option<Arc<dyn AdminSessionPort>>,
     lifecycle: Option<Arc<dyn AuctionLifecycleCommandPort>>,
@@ -52,7 +59,7 @@ pub struct AdminApiState {
     admin_lot_update: Option<Arc<dyn AdminLotUpdatePort>>,
     admin_proxy_events: Option<Arc<dyn AdminProxyEventReader>>,
     delivery_admin: Option<Arc<dyn DeliveryAdminPort>>,
-    delivery_sent_proof: Option<Arc<auction_application::DeliverySentProofService>>,
+    delivery_sent_proof: Option<Arc<auction_application::admin::DeliverySentProofService>>,
     operations_alert: Option<Arc<dyn OperationsAlertStore>>,
     operations_alert_source: Option<Arc<dyn OperationsAlertSourceReader>>,
     operations_alert_console: Option<Arc<dyn OperationsAlertConsole>>,
@@ -63,7 +70,7 @@ pub struct AdminApiState {
     dashboard_worlds: Arc<[AdminCredentialWorld]>,
     dashboard_mailbox_keys: Arc<[String]>,
     metrics: Option<Arc<ProcessMetrics>>,
-    runtime_switch_snapshot: Option<auction_application::RuntimeSwitches>,
+    runtime_switch_snapshot: Option<auction_application::runtime_switches::RuntimeSwitches>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
     security: AdminHttpSecurity,
 }
@@ -72,8 +79,8 @@ impl AdminApiState {
     /// 注入数据库意图读取端口和 Admin 自身应用快照，不依赖 runtime 文件。
     pub fn with_runtime_switches(
         mut self,
-        store: Arc<dyn auction_application::RuntimeSwitchStore>,
-        switches: auction_application::RuntimeSwitches,
+        store: Arc<dyn auction_application::runtime_switches::RuntimeSwitchStore>,
+        switches: auction_application::runtime_switches::RuntimeSwitches,
     ) -> Self {
         self.runtime_switches = Some((store, switches));
         self
@@ -82,8 +89,8 @@ impl AdminApiState {
     pub(crate) fn runtime_switches(
         &self,
     ) -> Option<&(
-        Arc<dyn auction_application::RuntimeSwitchStore>,
-        auction_application::RuntimeSwitches,
+        Arc<dyn auction_application::runtime_switches::RuntimeSwitchStore>,
+        auction_application::runtime_switches::RuntimeSwitches,
     )> {
         self.runtime_switches.as_ref()
     }
@@ -172,7 +179,7 @@ impl AdminApiState {
     /// 注入进程共享的运行时开关快照，供指标边界在请求入口读取。
     pub fn with_runtime_switch_snapshot(
         mut self,
-        switches: auction_application::RuntimeSwitches,
+        switches: auction_application::runtime_switches::RuntimeSwitches,
     ) -> Self {
         self.runtime_switch_snapshot = Some(switches);
         self
@@ -358,7 +365,7 @@ impl AdminApiState {
     /// 注入人工 Sent 证明服务；未注入时相关路由明确返回能力不可用。
     pub fn with_delivery_sent_proof(
         mut self,
-        service: Arc<auction_application::DeliverySentProofService>,
+        service: Arc<auction_application::admin::DeliverySentProofService>,
     ) -> Self {
         self.delivery_sent_proof = Some(service);
         self
@@ -366,7 +373,7 @@ impl AdminApiState {
 
     pub(crate) fn delivery_sent_proof(
         &self,
-    ) -> Option<&auction_application::DeliverySentProofService> {
+    ) -> Option<&auction_application::admin::DeliverySentProofService> {
         self.delivery_sent_proof.as_deref()
     }
 

@@ -1,7 +1,9 @@
 //! PostgreSQL runtime 命令账本的只读查询。
 
 #[cfg(feature = "postgres")]
-use auction_application::{AdminRuntimeStoredCommand, ApplicationError};
+use auction_application::admin::AdminRuntimeStoredCommand;
+#[cfg(feature = "postgres")]
+use auction_application::core::ApplicationError;
 #[cfg(feature = "postgres")]
 use auction_domain::CommandId;
 

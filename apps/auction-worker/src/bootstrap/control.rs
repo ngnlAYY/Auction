@@ -133,8 +133,8 @@ pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task
 pub(super) struct WorkerRemoteReads {
     mail: Option<super::mail::MailControlRemoteReads>,
     /// W10.9：与论坛回帖循环共用的只读主题读取器；未启用论坛时恢复扫描只报告能力不可用。
-    forum: Option<Arc<dyn auction_application::ForumTopicReader>>,
-    switches: auction_application::RuntimeSwitches,
+    forum: Option<Arc<dyn auction_application::forum::ForumTopicReader>>,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 }
 
 #[cfg(feature = "postgres")]
@@ -142,73 +142,78 @@ impl WorkerRemoteReads {
     /// 装配 control 远端读取能力；任一外部读取缺失时只关闭对应能力。
     pub(super) fn build(
         mail: Option<super::mail::MailControlRemoteReads>,
-        forum: Option<Arc<dyn auction_application::ForumTopicReader>>,
-        switches: auction_application::RuntimeSwitches,
-    ) -> Arc<dyn auction_application::WorkerRemoteReadPort> {
+        forum: Option<Arc<dyn auction_application::forum::ForumTopicReader>>,
+        switches: auction_application::runtime_switches::RuntimeSwitches,
+    ) -> Arc<dyn auction_application::operations::WorkerRemoteReadPort> {
         Arc::new(Self { mail, forum, switches })
     }
 
     fn mail(
         &self,
-    ) -> Result<&super::mail::MailControlRemoteReads, auction_application::WorkerRemoteReadError>
-    {
-        self.mail.as_ref().ok_or(auction_application::WorkerRemoteReadError::Unavailable)
+    ) -> Result<
+        &super::mail::MailControlRemoteReads,
+        auction_application::operations::WorkerRemoteReadError,
+    > {
+        self.mail
+            .as_ref()
+            .ok_or(auction_application::operations::WorkerRemoteReadError::Unavailable)
     }
 
     fn gateway(
         &self,
         world: MoogleMailWorld,
-    ) -> Result<&Arc<MoogleMailGateway>, auction_application::WorkerRemoteReadError> {
+    ) -> Result<&Arc<MoogleMailGateway>, auction_application::operations::WorkerRemoteReadError>
+    {
         self.mail()?
             .gateways
             .get(&world)
-            .ok_or(auction_application::WorkerRemoteReadError::Unavailable)
+            .ok_or(auction_application::operations::WorkerRemoteReadError::Unavailable)
     }
 }
 
 #[cfg(feature = "postgres")]
-impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
+impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads {
     fn read_equipment(
         &self,
-        request: auction_application::WorkerEquipmentReadRequest,
-    ) -> auction_application::WorkerRemoteReadFuture<
+        request: auction_application::operations::WorkerEquipmentReadRequest,
+    ) -> auction_application::operations::WorkerRemoteReadFuture<
         '_,
-        auction_application::WorkerEquipmentReadResponse,
+        auction_application::operations::WorkerEquipmentReadResponse,
     > {
         Box::pin(async move {
             if self.switches.external_access_paused() {
-                return Err(auction_application::WorkerRemoteReadError::Paused);
+                return Err(auction_application::operations::WorkerRemoteReadError::Paused);
             }
             let mail = self.mail()?;
-            let snapshot = auction_application::AdminIntakeSourceReader::read_url(
+            let snapshot = auction_application::admin::AdminIntakeSourceReader::read_url(
                 mail.equipment.as_ref(),
                 request.world_id,
                 request.equipment_url,
             )
             .await
             .map_err(|error| match error {
-                auction_application::ApplicationError::AdminIntake(error) => {
+                auction_application::core::ApplicationError::AdminIntake(error) => {
                     remote_read_intake_error(error)
                 }
-                _ => auction_application::WorkerRemoteReadError::Unavailable,
+                _ => auction_application::operations::WorkerRemoteReadError::Unavailable,
             })?;
-            auction_application::WorkerEquipmentReadResponse::from_snapshot(snapshot)
+            auction_application::operations::WorkerEquipmentReadResponse::from_snapshot(snapshot)
         })
     }
 
     fn lookup_sent(
         &self,
-        request: auction_application::WorkerSentLookupRequest,
-    ) -> auction_application::WorkerRemoteReadFuture<
+        request: auction_application::operations::WorkerSentLookupRequest,
+    ) -> auction_application::operations::WorkerRemoteReadFuture<
         '_,
-        auction_application::WorkerSentLookupResponse,
+        auction_application::operations::WorkerSentLookupResponse,
     > {
         Box::pin(async move {
             if self.switches.external_access_paused() {
-                return Err(auction_application::WorkerRemoteReadError::Paused);
+                return Err(auction_application::operations::WorkerRemoteReadError::Paused);
             }
             let world = MoogleMailWorld::parse(&request.world)
-                .ok_or(auction_application::WorkerRemoteReadError::Invalid)?;
+                .ok_or(auction_application::operations::WorkerRemoteReadError::Invalid)?;
             let mail = self.mail()?;
             let gateway = self.gateway(world)?;
             let report = gateway
@@ -224,14 +229,14 @@ impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
                 .await
                 .map_err(|error| match error.category {
                     MoogleMailErrorCategory::Configuration => {
-                        auction_application::WorkerRemoteReadError::Invalid
+                        auction_application::operations::WorkerRemoteReadError::Invalid
                     }
                     MoogleMailErrorCategory::SentScanTimeout => {
-                        auction_application::WorkerRemoteReadError::Timeout
+                        auction_application::operations::WorkerRemoteReadError::Timeout
                     }
-                    _ => auction_application::WorkerRemoteReadError::Unavailable,
+                    _ => auction_application::operations::WorkerRemoteReadError::Unavailable,
                 })?;
-            Ok(auction_application::WorkerSentLookupResponse {
+            Ok(auction_application::operations::WorkerSentLookupResponse {
                 status: report.status.label().to_owned(),
                 scan_complete: report.scan_complete,
                 pages_scanned: u32::try_from(report.pages_scanned).unwrap_or(u32::MAX),
@@ -239,7 +244,7 @@ impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
                 candidates: report
                     .candidates
                     .into_iter()
-                    .map(|candidate| auction_application::WorkerSentLookupCandidate {
+                    .map(|candidate| auction_application::operations::WorkerSentLookupCandidate {
                         external_mail_id: candidate.external_mail_id,
                         recipient: candidate.recipient,
                         subject: candidate.subject,
@@ -260,19 +265,19 @@ impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
     /// 只读取列表/详情与论坛主题，不执行 send、take、mark-read 或任何本地写入。
     fn recovery_scan(
         &self,
-        request: auction_application::WorkerRecoveryScanRequest,
-    ) -> auction_application::WorkerRemoteReadFuture<
+        request: auction_application::operations::WorkerRecoveryScanRequest,
+    ) -> auction_application::operations::WorkerRemoteReadFuture<
         '_,
-        auction_application::WorkerRecoveryScanResponse,
+        auction_application::operations::WorkerRecoveryScanResponse,
     > {
         Box::pin(async move {
             if !request.validate() {
-                return Err(auction_application::WorkerRemoteReadError::Invalid);
+                return Err(auction_application::operations::WorkerRemoteReadError::Invalid);
             }
             if !self.switches.external_access_paused() {
-                return Err(auction_application::WorkerRemoteReadError::NotPaused);
+                return Err(auction_application::operations::WorkerRemoteReadError::NotPaused);
             }
-            let mut response = auction_application::WorkerRecoveryScanResponse {
+            let mut response = auction_application::operations::WorkerRecoveryScanResponse {
                 status: "complete".to_owned(),
                 observed_at: Utc::now(),
                 paused: true,
@@ -314,7 +319,7 @@ impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
                             );
                             response.sent_complete &= scan.covers_cutoff;
                             response.sent.extend(scan.entries.into_iter().map(|entry| {
-                                auction_application::WorkerRecoverySentEntry {
+                                auction_application::operations::WorkerRecoverySentEntry {
                                     world: world_id.clone(),
                                     external_mail_id: entry.external_mail_id,
                                     recipient: entry.recipient,
@@ -353,7 +358,7 @@ impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
                         Ok(scan) => {
                             response.read_mail_complete &= scan.covers_cutoff;
                             response.read_mail.extend(scan.entries.into_iter().map(|entry| {
-                                auction_application::WorkerRecoveryInboundEntry {
+                                auction_application::operations::WorkerRecoveryInboundEntry {
                                     world: world_id.clone(),
                                     external_mail_id: entry.external_mail_id,
                                     sender: entry.sender,
@@ -383,7 +388,7 @@ impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
                 match gateway.read_sent(world, &detail.external_mail_id, observed_at).await {
                     Ok(snapshot) => {
                         response.sent_details.push(
-                            auction_application::WorkerSentLookupCandidate {
+                            auction_application::operations::WorkerSentLookupCandidate {
                                 external_mail_id: snapshot.external_mail_id,
                                 recipient: snapshot.recipient,
                                 subject: snapshot.subject,
@@ -415,7 +420,7 @@ impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
                                         u32::try_from(index).unwrap_or(u32::MAX).saturating_add(2);
                                     if post_number > target.after_post_number {
                                         response.forum.push(
-                                            auction_application::WorkerRecoveryForumPost {
+                                            auction_application::operations::WorkerRecoveryForumPost {
                                                 world: target.world.clone(),
                                                 thread_id: target.thread_id.clone(),
                                                 post_id: post.post.id.clone(),
@@ -437,12 +442,15 @@ impl auction_application::WorkerRemoteReadPort for WorkerRemoteReads {
             }
 
             // 截断不会改变任何隔离判断：调用方只使用已返回的条目，并在回执记录不完整。
-            if response.sent.len() > auction_application::MAX_RECOVERY_SCAN_ENTRIES {
-                response.sent.truncate(auction_application::MAX_RECOVERY_SCAN_ENTRIES);
+            if response.sent.len() > auction_application::operations::MAX_RECOVERY_SCAN_ENTRIES {
+                response.sent.truncate(auction_application::operations::MAX_RECOVERY_SCAN_ENTRIES);
                 response.sent_complete = false;
             }
-            if response.read_mail.len() > auction_application::MAX_RECOVERY_SCAN_ENTRIES {
-                response.read_mail.truncate(auction_application::MAX_RECOVERY_SCAN_ENTRIES);
+            if response.read_mail.len() > auction_application::operations::MAX_RECOVERY_SCAN_ENTRIES
+            {
+                response
+                    .read_mail
+                    .truncate(auction_application::operations::MAX_RECOVERY_SCAN_ENTRIES);
                 response.read_mail_complete = false;
             }
             response.errors.sort();
@@ -490,22 +498,22 @@ fn sent_detail_error_code(error: &MoogleMailError) -> String {
 
 #[cfg(feature = "postgres")]
 fn remote_read_intake_error(
-    error: auction_application::AdminIntakeError,
-) -> auction_application::WorkerRemoteReadError {
+    error: auction_application::admin::AdminIntakeError,
+) -> auction_application::operations::WorkerRemoteReadError {
     match error {
-        auction_application::AdminIntakeError::ExternalAccessPaused => {
-            auction_application::WorkerRemoteReadError::Paused
+        auction_application::admin::AdminIntakeError::ExternalAccessPaused => {
+            auction_application::operations::WorkerRemoteReadError::Paused
         }
-        auction_application::AdminIntakeError::InvalidCommand
-        | auction_application::AdminIntakeError::InvalidSource => {
-            auction_application::WorkerRemoteReadError::Invalid
+        auction_application::admin::AdminIntakeError::InvalidCommand
+        | auction_application::admin::AdminIntakeError::InvalidSource => {
+            auction_application::operations::WorkerRemoteReadError::Invalid
         }
-        auction_application::AdminIntakeError::SourceUnavailable
-        | auction_application::AdminIntakeError::SourceUnconfigured
-        | auction_application::AdminIntakeError::KeyUnavailable
-        | auction_application::AdminIntakeError::CommandConflict
-        | auction_application::AdminIntakeError::StoredResultCorrupt => {
-            auction_application::WorkerRemoteReadError::Unavailable
+        auction_application::admin::AdminIntakeError::SourceUnavailable
+        | auction_application::admin::AdminIntakeError::SourceUnconfigured
+        | auction_application::admin::AdminIntakeError::KeyUnavailable
+        | auction_application::admin::AdminIntakeError::CommandConflict
+        | auction_application::admin::AdminIntakeError::StoredResultCorrupt => {
+            auction_application::operations::WorkerRemoteReadError::Unavailable
         }
     }
 }

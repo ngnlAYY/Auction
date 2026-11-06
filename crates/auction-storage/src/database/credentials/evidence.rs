@@ -1,8 +1,7 @@
 //! 内部证据事务 fence；不取得 world、资金或业务行，调用方负责统一锁序。
 
-use auction_application::{
-    ApplicationError, MailRuntimeBinding, SettlementInternalEvidenceSnapshot,
-};
+use auction_application::core::ApplicationError;
+use auction_application::settlement::{MailRuntimeBinding, SettlementInternalEvidenceSnapshot};
 use auction_domain::SettlementWorld;
 use sqlx::{PgConnection, Row};
 
@@ -100,13 +99,13 @@ pub async fn lock_mail_evidence_credentials(
     let expected: Option<String> = row.try_get("player_name")?;
     let accepts = |world| {
         let world = match world {
-            SettlementWorld::Main => auction_application::AdminCredentialWorld::Main,
-            SettlementWorld::Isekai => auction_application::AdminCredentialWorld::Isekai,
+            SettlementWorld::Main => auction_application::admin::AdminCredentialWorld::Main,
+            SettlementWorld::Isekai => auction_application::admin::AdminCredentialWorld::Isekai,
         };
-        scope == world.scope(auction_application::AdminCredentialKind::MailCookie)
+        scope == world.scope(auction_application::admin::AdminCredentialKind::MailCookie)
             || scope
-                == auction_application::AdminCredentialWorld::Shared
-                    .scope(auction_application::AdminCredentialKind::MailCookie)
+                == auction_application::admin::AdminCredentialWorld::Shared
+                    .scope(auction_application::admin::AdminCredentialKind::MailCookie)
     };
     if kind != "mail_cookie"
         || status != "active"

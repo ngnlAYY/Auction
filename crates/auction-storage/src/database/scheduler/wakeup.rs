@@ -11,7 +11,7 @@ use crate::database::TrackedPool;
 pub(super) async fn next_claimable_postgres(
     pool: &TrackedPool<Postgres>,
     now: DateTime<Utc>,
-) -> Result<Option<DateTime<Utc>>, auction_application::RepositoryError> {
+) -> Result<Option<DateTime<Utc>>, auction_application::core::RepositoryError> {
     sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
         "SELECT MIN(GREATEST(candidate.due_at, candidate.lease_until))
          FROM (

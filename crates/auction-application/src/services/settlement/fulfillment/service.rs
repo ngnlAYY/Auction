@@ -17,15 +17,18 @@ use super::model::SettlementDeliveryIntent;
 use super::proof::proof_digest;
 use super::schedule::{collection_poll_delay, evidence_poll_delay};
 use super::validation::{repository_error, valid_external_mail_id, validate_claim};
-use crate::diagnostics::{
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, diagnostic_id, record_error,
 };
-use crate::{
-    ApplicationError, ApplicationFuture, Clock, SettlementDeliveryPreparation,
-    SettlementFulfillmentActivationResult, SettlementFulfillmentClaim,
-    SettlementFulfillmentCommandPort, SettlementFulfillmentCustodyReader,
-    SettlementFulfillmentDeliveryStatus, SettlementFulfillmentEvidenceReader,
-    SettlementFulfillmentOperation, SettlementFulfillmentPhaseResult, SettlementFulfillmentProof,
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::Clock;
+use crate::ports::settlement::{
+    SettlementDeliveryPreparation, SettlementFulfillmentActivationResult,
+    SettlementFulfillmentClaim, SettlementFulfillmentCommandPort,
+    SettlementFulfillmentCustodyReader, SettlementFulfillmentDeliveryStatus,
+    SettlementFulfillmentEvidenceReader, SettlementFulfillmentOperation,
+    SettlementFulfillmentPhaseResult, SettlementFulfillmentProof,
     SettlementFulfillmentRecipientReader, SettlementFulfillmentReconcileResult,
     SettlementFulfillmentReconcileStatus, SettlementFulfillmentResult, SettlementFulfillmentState,
     SettlementFulfillmentStore,
@@ -41,10 +44,11 @@ pub struct SettlementFulfillmentService {
     evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader>,
     pub(super) clock: Arc<dyn Clock>,
     pub(super) internal: Option<(
-        Arc<dyn crate::SettlementInternalFulfillmentStore>,
-        Arc<dyn crate::SettlementInternalEvidenceReader>,
+        Arc<dyn crate::ports::settlement::SettlementInternalFulfillmentStore>,
+        Arc<dyn crate::ports::settlement::SettlementInternalEvidenceReader>,
     )>,
-    pub(super) funding_policy_reader: Option<Arc<dyn crate::FundingPolicyReader>>,
+    pub(super) funding_policy_reader:
+        Option<Arc<dyn crate::ports::settlement::FundingPolicyReader>>,
     /// Admin runtime 配置的 bot 显示名；命中时不做外部寄信，直接走内部履约。
     pub(super) bot_players: Vec<String>,
     /// 等待买家支付 COD 或卖家领取货款的共享 MM 追踪窗口；默认五分钟。
@@ -82,13 +86,15 @@ impl SettlementFulfillmentService {
     /// 余额是否参与履约由数据库持久策略决定，默认保留严格现金检查。
     pub fn with_funding_policy_reader(
         mut self,
-        reader: Arc<dyn crate::FundingPolicyReader>,
+        reader: Arc<dyn crate::ports::settlement::FundingPolicyReader>,
     ) -> Self {
         self.funding_policy_reader = Some(reader);
         self
     }
 
-    pub(super) async fn funding_policy(&self) -> Result<crate::FundingPolicy, ApplicationError> {
+    pub(super) async fn funding_policy(
+        &self,
+    ) -> Result<crate::ports::settlement::FundingPolicy, ApplicationError> {
         match &self.funding_policy_reader {
             Some(reader) => reader.funding_policy().await.map_err(|error| {
                 record_error(
@@ -100,8 +106,8 @@ impl SettlementFulfillmentService {
                 );
                 repository_error("资金记账策略暂不可用")
             }),
-            None => Ok(crate::FundingPolicy {
-                mode: crate::FundingAccountingMode::StrictCash,
+            None => Ok(crate::ports::settlement::FundingPolicy {
+                mode: crate::ports::settlement::FundingAccountingMode::StrictCash,
                 expected_uid: None,
                 policy_version: 0,
             }),
@@ -375,7 +381,11 @@ impl SettlementFulfillmentService {
                 | auction_domain::SettlementObligationKind::WinnerPaymentCarrierCod
         ) && let Some((store, _)) = &self.internal
         {
-            let command = crate::SettlementInternalCommand::new(claim.clone(), None, true)?;
+            let command = crate::ports::settlement::SettlementInternalCommand::new(
+                claim.clone(),
+                None,
+                true,
+            )?;
             if store.replay_internal(command).await? {
                 return Ok(SettlementFulfillmentReconcileResult {
                     obligation_id: claim.obligation_id,
@@ -666,7 +676,8 @@ impl SettlementFulfillmentCommandPort for SettlementFulfillmentService {
         claim: SettlementFulfillmentClaim,
         prepared_at: DateTime<Utc>,
         retry_delay: Duration,
-    ) -> ApplicationFuture<'_, crate::SettlementFulfillmentPreparationOutcome> {
+    ) -> ApplicationFuture<'_, crate::ports::settlement::SettlementFulfillmentPreparationOutcome>
+    {
         Box::pin(async move { self.prepare_classified(claim, prepared_at, retry_delay).await })
     }
 

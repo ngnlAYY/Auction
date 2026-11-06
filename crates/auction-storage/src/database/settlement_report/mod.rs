@@ -3,13 +3,13 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, ApplicationFuture, SettlementReport, SettlementReportReader,
-};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::settlement::{SettlementReport, SettlementReportReader};
 use auction_domain::AuctionId;
 
 #[cfg(feature = "postgres")]
-use auction_application::{
+use auction_application::settlement::{
     SettlementAdjustment, SettlementAuctionSnapshot, SettlementLotReport, SettlementSummary,
 };
 

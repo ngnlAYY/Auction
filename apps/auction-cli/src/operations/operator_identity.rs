@@ -1,6 +1,6 @@
 //! 只采集 CLI 审计需要的主机身份，不读取或输出其他环境变量。
 
-use auction_application::CliOperatorIdentity;
+use auction_application::core::CliOperatorIdentity;
 
 /// 使用内核的有效 UID；sudo 发起者保留为环境声明，不作为授权依据。
 pub(super) fn capture() -> anyhow::Result<CliOperatorIdentity> {

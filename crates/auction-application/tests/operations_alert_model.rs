@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use auction_application::{
+use auction_application::operations::{
     OPERATIONS_ALERT_DIGEST_INTERVAL, OPERATIONS_ALERT_LIFECYCLE_GRACE,
     OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OPERATIONS_ALERT_QUEUE_LATENCY_AGE,
     OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE, OperationsAlertCredentialSnapshot,
@@ -457,7 +457,7 @@ fn new_kind_summaries_are_single_line_and_bounded() {
 
 #[test]
 fn observe_command_requires_the_full_source_closed_set_in_order() {
-    use auction_application::OperationsAlertObserveCommand;
+    use auction_application::operations::OperationsAlertObserveCommand;
     use chrono::Utc;
 
     let observations = evaluate_snapshot(&OperationsAlertSnapshot::default(), &policy())

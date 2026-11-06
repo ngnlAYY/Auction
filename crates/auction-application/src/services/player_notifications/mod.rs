@@ -10,7 +10,10 @@ use std::sync::Arc;
 
 use chrono::Duration;
 
-use crate::{ApplicationError, Clock, MailDeliveryEnqueuer, PlayerNotificationScanner};
+use crate::errors::ApplicationError;
+use crate::ports::core::Clock;
+use crate::ports::mail::MailDeliveryEnqueuer;
+use crate::ports::player_notifications::PlayerNotificationScanner;
 
 pub use season_reminder::{
     MAX_SEASON_REMINDER_BODY_BYTES, MAX_SEASON_REMINDER_ITEMS, SEASON_REMINDER_SUBJECT,

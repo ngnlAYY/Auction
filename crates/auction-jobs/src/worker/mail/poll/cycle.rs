@@ -2,20 +2,20 @@
 
 use std::sync::Arc;
 
-use auction_application::diagnostics::{
+use auction_application::core::Clock;
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_world,
 };
-use auction_application::{
-    Clock, MailDiagnosticRecorder, MailPollStore, MailProcessor, RecurringSchedule,
-};
+use auction_application::mail::{MailDiagnosticRecorder, MailPollStore, MailProcessor};
+use auction_application::scheduling::RecurringSchedule;
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
-use super::super::{PersistentWorker, WorkerError, poll_delay};
-use super::maintenance::{run_maintenance, run_read_observation};
+use super::super::maintenance::{run_maintenance, run_read_observation};
 use super::processing::process_claim;
 use super::{MailPollGateway, MailPollRuntime, MailPollRuntimeConfig};
 use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, WorkerError, poll_delay};
 
 /// 收件等待期间重读开关的切片上限；不改变原触发点或重复叠加 jitter。
 const SWITCH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
@@ -37,7 +37,7 @@ pub(crate) async fn run_loop<C>(
             }
             // W1.9：暂停只阻止开始新的领取轮；已领取项与已进入围栏的写入按原路径结束。
             if worker.external_access_paused() {
-                if super::super::wait_while_paused(&mut shutdown).await {
+                if crate::worker::runtime::wait_while_paused(&mut shutdown).await {
                     return;
                 }
                 continue;
@@ -261,7 +261,7 @@ where
             loop_kind: runtime.loop_kind(),
         };
         let item_result = process_claim(context, claim, lease_deadline).await;
-        super::super::merge_worker_result(&mut iteration_result, item_result);
+        crate::worker::runtime::merge_worker_result(&mut iteration_result, item_result);
     }
     Ok(iteration_result)
 }
@@ -306,13 +306,15 @@ pub(super) struct MailPollProcessContext<C> {
     pub(super) gateway: Arc<dyn MailPollGateway>,
     pub(super) processor: Option<Arc<dyn MailProcessor>>,
     pub(super) diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
-    pub(super) progress_observer: Option<Arc<dyn auction_application::MailPollProgressObserver>>,
+    pub(super) progress_observer:
+        Option<Arc<dyn auction_application::mail::MailPollProgressObserver>>,
     pub(super) clock: Arc<C>,
     pub(super) world_id: String,
     pub(super) mailbox_key: String,
     pub(super) config: MailPollRuntimeConfig,
     pub(super) schedule: Arc<dyn RecurringSchedule>,
     pub(super) metrics: Arc<dyn WorkerRecorder>,
-    pub(super) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    pub(super) external_metrics:
+        Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     pub(super) loop_kind: WorkerLoop,
 }

@@ -1,6 +1,6 @@
 //! 临时发送边界与分钟组校验；不收紧通用 opaque MID，也不提供发送成功证明。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -8,7 +8,7 @@ mod scan;
 
 use std::collections::HashMap;
 
-use auction_application::SentBaselineReason;
+use auction_application::sent_baseline::SentBaselineReason;
 use chrono::{DateTime, Utc};
 use tokio::sync::OwnedSemaphorePermit;
 
@@ -128,13 +128,13 @@ impl SentBoundaryScan {
 
 /// 与增量扫描共用的十进制 MID 解析；不截断、不归一化、不按字典序比较。
 pub(crate) fn numeric_mid(value: &str) -> Option<u128> {
-    let parsed = auction_application::numeric_mail_scan_id(value);
+    let parsed = auction_application::mail::numeric_mail_scan_id(value);
     if parsed.is_none() {
         safe_diagnostics::debug(
             "mooglemail_baseline",
             "parse_mid",
             safe_diagnostics::category(
-                auction_application::diagnostics::SafeErrorKind::DOMAIN_REJECTED,
+                auction_application::core::diagnostics::SafeErrorKind::DOMAIN_REJECTED,
             ),
             DiagnosticContext::default(),
         );

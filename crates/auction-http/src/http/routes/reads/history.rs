@@ -1,4 +1,4 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
@@ -9,10 +9,11 @@ use crate::http::routes::{
     parse_history_price, parse_optional_history_text, parse_positive_i64, parse_public_uuid,
     parse_query,
 };
-use auction_application::{
-    ApplicationError, MAX_PUBLIC_BID_LOG_OFFSET, MAX_PUBLIC_PRICE_HISTORY_OFFSET,
-    PublicBidLogListRequest, PublicPriceHistoryListRequest, PublicPriceHistorySort,
+use auction_application::auction::{
+    MAX_PUBLIC_BID_LOG_OFFSET, MAX_PUBLIC_PRICE_HISTORY_OFFSET, PublicBidLogListRequest,
+    PublicPriceHistoryListRequest, PublicPriceHistorySort,
 };
+use auction_application::core::ApplicationError;
 use auction_contracts::{
     ApiErrorResponse, ApiResponse, PublicBidLogListResponse, PublicPriceHistoryListResponse,
 };

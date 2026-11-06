@@ -7,10 +7,12 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::{
-    ApplicationError, ApplicationFuture, MailLoginKeyIssuer, MailProcessingError,
-    MailUserCommandKind, MailUserPort, MailUserRebindCommand, MailUserRegisterCommand,
-    MailUserRegisterWrite, MailUserRekeyCommand, MailUserRekeyWrite, MailUserResult, MailUserStore,
+use crate::errors::ApplicationError;
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::mail::{
+    MailLoginKeyIssuer, MailProcessingError, MailUserCommandKind, MailUserPort,
+    MailUserRebindCommand, MailUserRegisterCommand, MailUserRegisterWrite, MailUserRekeyCommand,
+    MailUserRekeyWrite, MailUserResult, MailUserStore,
 };
 
 /// Users owner 的 MoogleMail 用例服务。

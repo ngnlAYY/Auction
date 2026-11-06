@@ -1,6 +1,6 @@
 //! E-Hentai 主题表单、精确标题查找与发布回执解析。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::clients::metrics::forum_operation;
 use crate::diagnostics as safe_diagnostics;
@@ -32,7 +32,7 @@ static ACKNOWLEDGEMENT_REFRESH_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLo
 
 struct FixedPostFormTarget<'a> {
     operation: EhentaiOperation,
-    metrics_world: auction_application::ForumWorld,
+    metrics_world: auction_application::external_metrics::ForumWorld,
     url: Url,
     board_id: i32,
     thread_id: &'a str,
@@ -45,7 +45,7 @@ impl EhentaiClient {
         &self,
         board_id: i32,
         board_url: &Url,
-        metrics_world: auction_application::ForumWorld,
+        metrics_world: auction_application::external_metrics::ForumWorld,
         cookie: &EhentaiCookie,
     ) -> Result<TopicForm, EhentaiError> {
         let operation = EhentaiOperation::CreateTopic;
@@ -57,7 +57,7 @@ impl EhentaiClient {
         let (body, _) = self
             .get_page(
                 operation,
-                auction_application::ForumOperation::CreateTopic,
+                auction_application::external_metrics::ForumOperation::CreateTopic,
                 ForumRequestScope::new(metrics_world, cookie),
                 target.clone(),
                 Some(board_url),
@@ -142,9 +142,9 @@ impl EhentaiClient {
         form: TopicForm,
         board_id: i32,
         rendered: ForumRenderedThread,
-        metrics_world: auction_application::ForumWorld,
+        metrics_world: auction_application::external_metrics::ForumWorld,
         cookie: &EhentaiCookie,
-    ) -> Result<auction_application::ForumPublishedThread, EhentaiError> {
+    ) -> Result<auction_application::forum::ForumPublishedThread, EhentaiError> {
         let operation = EhentaiOperation::CreateTopic;
         let mut values = form.values;
         set_form_value(&mut values, "TopicTitle", rendered.title);
@@ -160,7 +160,7 @@ impl EhentaiClient {
                 &form.referer,
                 values,
                 operation,
-                auction_application::ForumOperation::CreateTopic,
+                auction_application::external_metrics::ForumOperation::CreateTopic,
                 ForumRequestScope::new(metrics_world, cookie),
             )
             .await?;
@@ -196,7 +196,7 @@ impl EhentaiClient {
         referer: &Url,
         values: Vec<(String, String)>,
         operation: EhentaiOperation,
-        metrics_operation: auction_application::ForumOperation,
+        metrics_operation: auction_application::external_metrics::ForumOperation,
         scope: ForumRequestScope<'_>,
     ) -> Result<(StatusCode, Option<HeaderValue>, Vec<u8>), EhentaiError> {
         let ForumRequestScope { metrics_world, cookie } = scope;
@@ -247,7 +247,7 @@ impl EhentaiClient {
                         self.external_metrics.as_ref(),
                         metrics_world,
                         metrics_operation,
-                        auction_application::ForumSignal::Timeout,
+                        auction_application::external_metrics::ForumSignal::Timeout,
                     );
                 }
                 safe_diagnostics::warn(
@@ -264,7 +264,7 @@ impl EhentaiClient {
                     self.external_metrics.as_ref(),
                     metrics_world,
                     metrics_operation,
-                    auction_application::ForumSignal::RateLimited,
+                    auction_application::external_metrics::ForumSignal::RateLimited,
                 );
             }
             let location = response.headers().get(header::LOCATION).cloned();
@@ -282,7 +282,7 @@ impl EhentaiClient {
         &self,
         board_id: i32,
         thread_id: &str,
-        metrics_world: auction_application::ForumWorld,
+        metrics_world: auction_application::external_metrics::ForumWorld,
         cookie: &EhentaiCookie,
     ) -> Result<PostForm, EhentaiError> {
         let board = board_id.to_string();
@@ -310,7 +310,7 @@ impl EhentaiClient {
         board_id: i32,
         thread_id: &str,
         post_id: &str,
-        metrics_world: auction_application::ForumWorld,
+        metrics_world: auction_application::external_metrics::ForumWorld,
         cookie: &EhentaiCookie,
     ) -> Result<PostForm, EhentaiError> {
         let board = board_id.to_string();
@@ -556,7 +556,7 @@ impl EhentaiClient {
         reconciliation_titles: &[String],
         body: &[u8],
         operation: EhentaiOperation,
-    ) -> Result<Option<auction_application::ForumPublishedThread>, EhentaiError> {
+    ) -> Result<Option<auction_application::forum::ForumPublishedThread>, EhentaiError> {
         let html = std::str::from_utf8(body).map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
                 "forum_topic",
@@ -608,7 +608,7 @@ impl EhentaiClient {
         body: &[u8],
         board_id: i32,
         operation: EhentaiOperation,
-    ) -> Option<auction_application::ForumPublishedThread> {
+    ) -> Option<auction_application::forum::ForumPublishedThread> {
         let html = std::str::from_utf8(body).ok()?;
         let document = Html::parse_document(html);
         // HTTP 200 的普通页面可能链接到旧主题；只有现有确认页协议才能授予 Created。
@@ -634,7 +634,7 @@ impl EhentaiClient {
         reference: &str,
         board_id: i32,
         operation: EhentaiOperation,
-    ) -> Option<auction_application::ForumPublishedThread> {
+    ) -> Option<auction_application::forum::ForumPublishedThread> {
         let resolved = self.resolve_same_origin(base, reference, operation).ok()?;
         let topic_id = optional_query_identity(&resolved, &["showtopic", "t"]).ok()??;
         if resolved.path() != "/index.php"
@@ -644,7 +644,7 @@ impl EhentaiClient {
             return None;
         }
         let canonical = self.index_url(&[("showtopic", topic_id.as_str())], operation).ok()?;
-        Some(auction_application::ForumPublishedThread {
+        Some(auction_application::forum::ForumPublishedThread {
             board_id,
             thread_id: topic_id,
             thread_url: canonical.to_string(),

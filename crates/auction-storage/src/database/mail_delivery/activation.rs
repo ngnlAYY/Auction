@@ -1,8 +1,7 @@
 //! PostgreSQL recovery delivery 的 prepared → pending 两阶段激活。
 
-use auction_application::{
-    MailDeliveryActivation, MailDeliveryOrigin, MailDeliveryResult, RepositoryError,
-};
+use auction_application::core::RepositoryError;
+use auction_application::mail::{MailDeliveryActivation, MailDeliveryOrigin, MailDeliveryResult};
 use serde_json::json;
 use uuid::Uuid;
 

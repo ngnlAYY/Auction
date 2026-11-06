@@ -1,6 +1,6 @@
 //! Admin dashboard operations alert section。
 
-use auction_application::OperationsAlertHealth;
+use auction_application::operations::OperationsAlertHealth;
 use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
 use serde_json::json;

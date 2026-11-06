@@ -1,6 +1,6 @@
 //! Public 普通竞价命令 handler。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
@@ -73,7 +73,7 @@ pub(crate) async fn place_bid(
     let command_id = CommandId::from_uuid(command_uuid);
     let lot_id = LotId::from_uuid(lot_uuid);
     let bidder_id = UserId::from_uuid(identity.user_id);
-    let request_hash = match auction_application::PlaceBidCommand::legacy_request_hash(
+    let request_hash = match auction_application::auction::PlaceBidCommand::legacy_request_hash(
         lot_id, bidder_id, amount,
     ) {
         Ok(request_hash) => request_hash,
@@ -87,7 +87,7 @@ pub(crate) async fn place_bid(
             return internal_error();
         }
     };
-    let command = auction_application::PlaceBidCommand {
+    let command = auction_application::auction::PlaceBidCommand {
         command_id,
         lot_id,
         bidder_id,

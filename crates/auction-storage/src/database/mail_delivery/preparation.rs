@@ -1,6 +1,7 @@
 //! 只读恢复旧 prepare 已提交、action 尚未关联的升级窗口；不创建或改写投递。
 
-use auction_application::{MailDeliveryCommand, MailDeliveryResult, RepositoryError};
+use auction_application::core::RepositoryError;
+use auction_application::mail::{MailDeliveryCommand, MailDeliveryResult};
 use sqlx::Row;
 
 use super::common::{map_storage_error, repository_error};

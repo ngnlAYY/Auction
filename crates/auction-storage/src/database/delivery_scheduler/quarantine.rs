@@ -9,7 +9,7 @@ use uuid::Uuid;
 pub(super) async fn quarantine_mail_dispositions(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     now: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     let rows = sqlx::query(concat!(
         r#"WITH conflicted AS (
             SELECT deliveries.id FROM public.deliveries AS deliveries

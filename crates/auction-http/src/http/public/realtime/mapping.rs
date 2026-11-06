@@ -1,6 +1,6 @@
 //! Public 实时事件页校验与安全 DTO 映射。
 
-use auction_application::{PublicRealtimeEvent, PublicRealtimePage};
+use auction_application::realtime::{PublicRealtimeEvent, PublicRealtimePage};
 use auction_contracts::{
     PublicRealtimeDiscoveryResponse, PublicRealtimeEventResponse, PublicRealtimeResponse,
 };

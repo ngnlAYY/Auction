@@ -6,7 +6,8 @@
 //! 崩溃只会重试；同一 lot 的竞价事件按 `state_version` 顺序领取，因此仍由既有追加式事实
 //! 决定领先周期和提醒身份，不建立第二套业务状态机。
 
-use auction_application::{ApplicationFuture, LotWatchReminderBatch, LotWatchReminderStore};
+use auction_application::auction::ApplicationFuture;
+use auction_application::lot_watch_reminders::{LotWatchReminderBatch, LotWatchReminderStore};
 use auction_domain::{AcceptedBid, BidAmount, BidId, BidMechanism, CommandId, LotId, UserId};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
@@ -181,7 +182,7 @@ async fn process_batch(
     lease_seconds: u32,
     lots: Option<&[Uuid]>,
     limit: u16,
-) -> Result<LotWatchReminderBatch, auction_application::ApplicationError> {
+) -> Result<LotWatchReminderBatch, auction_application::core::ApplicationError> {
     let lot_filter = lots.map(<[Uuid]>::to_vec);
     let mut batch = LotWatchReminderBatch::default();
     // 每次领取对每个 lot 至多一条（顺序屏障），因此循环领取直到用完预算或没有到期事件；
@@ -236,7 +237,7 @@ async fn claim_events(
     lease_seconds: u32,
     lots: Option<&[Uuid]>,
     limit: u16,
-) -> Result<Vec<ClaimedEvent>, auction_application::ApplicationError> {
+) -> Result<Vec<ClaimedEvent>, auction_application::core::ApplicationError> {
     let mut transaction = store
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
@@ -308,7 +309,7 @@ async fn claim_events(
         .collect()
 }
 
-fn storage_row_error(error: sqlx::Error) -> auction_application::ApplicationError {
+fn storage_row_error(error: sqlx::Error) -> auction_application::core::ApplicationError {
     storage_error_from(error, "读取标记事件字段失败")
 }
 

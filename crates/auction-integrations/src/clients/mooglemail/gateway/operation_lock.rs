@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use auction_application::{GateClass, OperationLockState};
+use auction_application::mail::{GateClass, OperationLockState};
 use tokio::sync::Notify;
 
 /// 共享的单账号操作锁；克隆出的会话持有同一个实例。

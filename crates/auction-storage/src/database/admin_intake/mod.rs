@@ -3,10 +3,10 @@
 
 use std::future::Future;
 
-use auction_application::{
+use auction_application::admin::{
     AdminIntakeRecord, AdminIntakeResult, AdminIntakeTransaction, AdminIntakeWrite,
-    CompetitionTransactionError,
 };
+use auction_application::core::CompetitionTransactionError;
 
 use super::competition::PostgresCompetitionTransaction;
 

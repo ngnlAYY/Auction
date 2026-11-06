@@ -8,10 +8,10 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{
-    ApplicationError, ApplicationFuture, RequestHash, SettlementTransaction,
-    SettlementTransactionRunner, StoredCommand, TransactionPolicy,
-};
+use crate::errors::ApplicationError;
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{RequestHash, StoredCommand, TransactionPolicy};
+use crate::ports::settlement::{SettlementTransaction, SettlementTransactionRunner};
 
 mod legacy;
 mod obligations;

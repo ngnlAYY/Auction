@@ -1,6 +1,6 @@
 // 参数页的热读取标注路径。
 //
-// 与 `auction_application::WORKER_HOT_FIELD_PATHS` 保持同一闭集：Worker 每个读取周期
+// 与 `auction_application::admin::WORKER_HOT_FIELD_PATHS` 保持同一闭集：Worker 每个读取周期
 // 检测 runtime 文件变化并在下一个循环边界使用这些字段，其余 Worker 参数仍需重启。
 // 前端不能依赖后端 crate，因此这里镜像路径；新增热字段必须同时更新两处与配置参考。
 

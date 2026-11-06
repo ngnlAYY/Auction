@@ -1,6 +1,6 @@
 //! 公开页面查看 HentaVerse 装备时使用的短生命周期解密适配器。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -9,9 +9,11 @@ use std::{
     sync::Arc,
 };
 
-use auction_application::{
-    ApplicationError, ApplicationFuture, PublicEquipmentGameLink, PublicEquipmentLinkResolver,
-    PublicEquipmentLinkSecretReader, PublicEquipmentLinkTarget, RepositoryError,
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::{ApplicationError, RepositoryError};
+use auction_application::public::{
+    PublicEquipmentGameLink, PublicEquipmentLinkResolver, PublicEquipmentLinkSecretReader,
+    PublicEquipmentLinkTarget,
 };
 
 use crate::cryptobox::EquipmentKeyOpener;

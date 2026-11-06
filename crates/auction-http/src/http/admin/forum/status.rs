@@ -1,12 +1,12 @@
 //! Admin 论坛本地投影读取；刷新不调用论坛网关，也不授予 Worker 写入权限。
 
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::ApplicationError;
+use auction_application::core::ApplicationError;
 use auction_contracts::{ApiResponse, PublicForumResponse, PublicForumSyncStatusResponse};
 use axum::{
     Json,

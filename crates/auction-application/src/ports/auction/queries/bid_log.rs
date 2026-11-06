@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// 公开竞价日志兼容页允许的最大 offset。
 pub const MAX_PUBLIC_BID_LOG_OFFSET: i64 = 10_000;

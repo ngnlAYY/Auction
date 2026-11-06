@@ -1,10 +1,12 @@
 //! PostgreSQL runtime 命令账本的 pending、applied、unknown 和 reopen 事务。
 
 #[cfg(feature = "postgres")]
-use auction_application::{
+use auction_application::admin::{
     AdminRuntimeAuditRecord, AdminRuntimeCommandError, AdminRuntimeCommandState,
-    AdminRuntimeStoredCommand, ApplicationError, RequestHash,
+    AdminRuntimeStoredCommand,
 };
+#[cfg(feature = "postgres")]
+use auction_application::core::{ApplicationError, RequestHash};
 #[cfg(feature = "postgres")]
 use auction_domain::CommandId;
 #[cfg(feature = "postgres")]

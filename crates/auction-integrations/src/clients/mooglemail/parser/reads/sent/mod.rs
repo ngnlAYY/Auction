@@ -1,6 +1,6 @@
 //! MoogleMail Sent 分页解析；详情解析位于同目录的 `detail.rs`。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 

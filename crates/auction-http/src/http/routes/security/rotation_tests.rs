@@ -5,10 +5,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use auction_application::{
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::SessionError;
+use auction_application::public::{
     AdminSessionConfig, AdminSessionIdentity, AdminSessionPort, AdminSessionRecord,
-    AdminSessionService, AdminSessionStore, ApplicationFuture, SessionError,
+    AdminSessionStore,
 };
+use auction_application::sessions::AdminSessionService;
 use chrono::{DateTime, Duration, Utc};
 
 #[derive(Default)]

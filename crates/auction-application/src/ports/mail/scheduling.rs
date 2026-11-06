@@ -315,8 +315,8 @@ impl SegmentPlan {
 
 #[cfg(test)]
 mod tests {
-    use super as parent;
     use self::parent::*;
+    use super as parent;
     use chrono::TimeZone;
 
     fn at(seconds: i64) -> DateTime<Utc> {

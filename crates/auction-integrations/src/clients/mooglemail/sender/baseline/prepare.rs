@@ -1,13 +1,15 @@
 //! sending fence 前的完整排除集与 fresh 临时边界；缺失时在同一预算内失败关闭。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::{collections::HashSet, sync::Arc};
 
-use auction_application::{
+use auction_application::mail::{
     MailScanEvent, MailScanMode, MailScanOutcome, MailScanReason, MailScanStream,
+};
+use auction_application::sent_baseline::{
     SentBaselineEvent, SentBaselineMode, SentBaselinePhase, SentBaselineReason,
 };
 use chrono::Utc;
@@ -46,7 +48,7 @@ impl MoogleMailSender {
         if let Err(error) = &result {
             self.observe_budget_error(
                 world,
-                auction_application::MailPhase::SentBaselineBefore,
+                auction_application::external_metrics::MailPhase::SentBaselineBefore,
                 error,
             );
         }
@@ -109,7 +111,7 @@ impl MoogleMailSender {
         round: &MoogleMailReadRound,
     ) -> Option<HashSet<String>> {
         let checkpoint = self.sent_scan_checkpoint(cookie, world)?;
-        let plan = auction_application::plan_mail_scan(
+        let plan = auction_application::mail::plan_mail_scan(
             Some(&checkpoint),
             Utc::now(),
             self.client.mail_scan_daily_full_interval(),
@@ -230,7 +232,8 @@ impl MoogleMailSender {
             .sent_scan_checkpoint(cookie, world)
             .and_then(|checkpoint| checkpoint.watermark)
             .and_then(|watermark| {
-                let numeric_mid = auction_application::numeric_mail_scan_id(&watermark.mail_id)?;
+                let numeric_mid =
+                    auction_application::mail::numeric_mail_scan_id(&watermark.mail_id)?;
                 Some(SentBoundary::Mail {
                     mail_id: watermark.mail_id,
                     numeric_mid,
@@ -314,7 +317,7 @@ impl MoogleMailSender {
         self.remember_sent_scan(
             cookie,
             world,
-            Some(auction_application::MailScanWatermark {
+            Some(auction_application::mail::MailScanWatermark {
                 mail_id: mail_id.clone(),
                 observed_at: *sent_at,
             }),
@@ -353,7 +356,7 @@ impl MoogleMailSender {
         self.remember_sent_scan(
             cookie,
             world,
-            list.summaries.first().map(|summary| auction_application::MailScanWatermark {
+            list.summaries.first().map(|summary| auction_application::mail::MailScanWatermark {
                 mail_id: summary.external_mail_id.clone(),
                 observed_at: summary.sent_at,
             }),

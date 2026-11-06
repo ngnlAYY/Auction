@@ -1,8 +1,9 @@
 //! Admin 与 Public 会话分别由子模块持有；common 只提供存储错误映射。
 
-use auction_application::{
-    AdminSessionIdentity, AdminSessionRecord, AdminSessionStore, ApplicationFuture,
-    PublicSessionIdentity, PublicSessionPreferenceResult, PublicSessionRecord, PublicSessionStore,
+use auction_application::auction::ApplicationFuture;
+use auction_application::public::{
+    AdminSessionIdentity, AdminSessionRecord, AdminSessionStore, PublicSessionIdentity,
+    PublicSessionPreferenceResult, PublicSessionRecord, PublicSessionStore,
     SetPublicSessionPreferenceCommand,
 };
 use chrono::{DateTime, Utc};

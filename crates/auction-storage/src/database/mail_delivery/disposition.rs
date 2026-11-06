@@ -1,6 +1,6 @@
 //! 同一邮件的领取、退回与拍卖接受事实之间的持久化互斥。
 
-use auction_application::{MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin};
+use auction_application::mail::{MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin};
 
 use super::common::{MailDeliveryTransactionError, repository_error};
 

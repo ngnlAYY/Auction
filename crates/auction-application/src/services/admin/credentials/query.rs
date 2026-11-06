@@ -1,10 +1,10 @@
 //! Admin 凭据安全投影查询。
 
-use super::AdminCredentialService;
-use crate::{
+use crate::errors::ApplicationError;
+use crate::ports::admin::{
     AdminCredentialError, AdminCredentialListRequest, AdminCredentialPage, AdminCredentialStore,
-    ApplicationError,
 };
+use crate::services::admin::AdminCredentialService;
 
 impl<S, E> AdminCredentialService<S, E>
 where

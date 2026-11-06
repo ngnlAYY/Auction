@@ -1,4 +1,4 @@
-use auction_application::AdminAuctionSummary;
+use auction_application::admin::AdminAuctionSummary;
 use auction_contracts::{AdminAuctionCommandResponse, AdminAuctionResponse};
 
 /// 将拍卖应用摘要转换为管理端安全 DTO。

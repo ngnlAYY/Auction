@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use auction_domain::CommandId;
 
-use crate::ports::RequestHash;
+use crate::ports::core::RequestHash;
 
 use super::{
     document::{ADMIN_RUNTIME_DIGEST_VERSION, AdminRuntimeDocument},

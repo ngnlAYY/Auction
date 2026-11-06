@@ -235,15 +235,15 @@ pub(crate) async fn allocate_deferred_sequences_after_commit(
 
 /// W12.1 兜底端口实现：Public relay 每轮把提交后未分配序号的竞价事件补进回放。
 #[cfg(feature = "postgres")]
-impl auction_application::RealtimeSequenceAllocator for crate::database::DatabaseStore {
+impl auction_application::realtime::RealtimeSequenceAllocator for crate::database::DatabaseStore {
     fn allocate_pending_sequences(
         &self,
         prefix: String,
-    ) -> auction_application::ApplicationFuture<'_, u64> {
+    ) -> auction_application::auction::ApplicationFuture<'_, u64> {
         Box::pin(async move {
             if prefix != "auction:" {
-                return Err(auction_application::ApplicationError::Repository(
-                    auction_application::RepositoryError::Failed(
+                return Err(auction_application::core::ApplicationError::Repository(
+                    auction_application::core::RepositoryError::Failed(
                         "实时序号分配只接受 auction: 前缀".to_owned(),
                     ),
                 ));

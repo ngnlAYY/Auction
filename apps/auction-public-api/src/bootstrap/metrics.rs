@@ -10,7 +10,7 @@ use tokio::net::TcpListener;
 pub(super) fn start(
     config: &AppConfig,
     metrics: Arc<ProcessMetrics>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 ) -> Option<TaskGuard<()>> {
     let address = config.metrics.loopback_listen_address(config.role)?;
     let role = config.role.name();

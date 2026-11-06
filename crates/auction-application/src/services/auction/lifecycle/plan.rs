@@ -12,15 +12,15 @@ where
     T: CompetitionTransaction + AuctionLifecycleTransaction,
 {
     let final_inputs = match command.action {
-        crate::AuctionLifecycleAction::FinalPhase => {
+        crate::ports::auction::AuctionLifecycleAction::FinalPhase => {
             Some(load_final_proxy_inputs(transaction, command).await?)
         }
-        crate::AuctionLifecycleAction::EarlySettlement
+        crate::ports::auction::AuctionLifecycleAction::EarlySettlement
             if context.auction.status == auction_domain::AuctionStatus::Live =>
         {
             Some(load_final_proxy_inputs(transaction, command).await?)
         }
-        crate::AuctionLifecycleAction::EarlySettlement => {
+        crate::ports::auction::AuctionLifecycleAction::EarlySettlement => {
             if transaction.list_final_lot_ids_for_update(command.auction_id).await?.is_empty() {
                 return Err(CompetitionTransactionError::InvalidState.into());
             }
@@ -31,9 +31,10 @@ where
     // 生命周期、代理竞价事实和提前截止使用锁齐备后的同一个数据库时间；重试会重新读取。
     let now = transaction.current_time().await?;
     let mut auction = context.auction.clone();
-    let admin_action = command.actor.actor_type == crate::AuctionLifecycleActorType::Admin;
+    let admin_action =
+        command.actor.actor_type == crate::ports::auction::AuctionLifecycleActorType::Admin;
     let effect = match command.action {
-        crate::AuctionLifecycleAction::Preview => {
+        crate::ports::auction::AuctionLifecycleAction::Preview => {
             if !context.world_enabled {
                 return Err(CompetitionTransactionError::InvalidState.into());
             }
@@ -43,7 +44,7 @@ where
             auction.preview(now)?;
             AuctionLifecycleEffect::Preview { manual: admin_action }
         }
-        crate::AuctionLifecycleAction::Open => {
+        crate::ports::auction::AuctionLifecycleAction::Open => {
             if !context.world_enabled {
                 return Err(CompetitionTransactionError::InvalidState.into());
             }
@@ -62,7 +63,7 @@ where
                 successor: successor_plan(context, successor_policy, calendar, now)?,
             }
         }
-        crate::AuctionLifecycleAction::Cancel => {
+        crate::ports::auction::AuctionLifecycleAction::Cancel => {
             let reason = command
                 .reason
                 .clone()
@@ -77,7 +78,7 @@ where
             )?;
             AuctionLifecycleEffect::Cancel { successor }
         }
-        crate::AuctionLifecycleAction::FinalPhase => {
+        crate::ports::auction::AuctionLifecycleAction::FinalPhase => {
             let (proxy_plans, earliest_end_at) =
                 final_proxy_plans(command, final_inputs.unwrap_or_default(), now)?;
             if !admin_action {
@@ -99,7 +100,7 @@ where
             auction.enter_final(now)?;
             AuctionLifecycleEffect::FinalPhase { proxy_plans, effective_end_at }
         }
-        crate::AuctionLifecycleAction::EarlySettlement => {
+        crate::ports::auction::AuctionLifecycleAction::EarlySettlement => {
             if !admin_action {
                 return Err(CompetitionTransactionError::InvalidState.into());
             }
@@ -135,7 +136,7 @@ where
 async fn load_final_proxy_inputs<T>(
     transaction: &mut T,
     parent: &AuctionLifecycleCommand,
-) -> Result<Vec<(crate::CompetitionSnapshot, bool)>, ApplicationError>
+) -> Result<Vec<(crate::ports::core::CompetitionSnapshot, bool)>, ApplicationError>
 where
     T: CompetitionTransaction + AuctionLifecycleTransaction,
 {
@@ -170,7 +171,7 @@ where
 
 fn final_proxy_plans(
     parent: &AuctionLifecycleCommand,
-    snapshots: Vec<(crate::CompetitionSnapshot, bool)>,
+    snapshots: Vec<(crate::ports::core::CompetitionSnapshot, bool)>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<(Vec<AuctionFinalProxyPlan>, chrono::DateTime<chrono::Utc>), ApplicationError> {
     let mut plans = Vec::new();

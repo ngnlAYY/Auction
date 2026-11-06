@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 
 use auction_domain::SettlementWorld;
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// recovery health 中余额来源的有限状态集合。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

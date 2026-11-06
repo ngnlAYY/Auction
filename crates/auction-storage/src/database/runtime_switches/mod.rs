@@ -4,7 +4,7 @@ mod queries;
 mod transaction;
 
 use super::DatabaseStore;
-use auction_application::{
+use auction_application::runtime_switches::{
     RuntimeSwitchCommand, RuntimeSwitchEvent, RuntimeSwitchFuture, RuntimeSwitchRead,
     RuntimeSwitchStore,
 };

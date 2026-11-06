@@ -1,6 +1,6 @@
 //! E-Hentai 单 Cookie 网关与 Forum 端口适配。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::clients::metrics::{
     ForumPmOperationGuard, ForumWriteUnknownGuard, forum_pm_category, forum_world,
@@ -32,14 +32,14 @@ impl EhentaiGateway {
         &self,
         world: SettlementWorld,
         rendered: ForumRenderedThread,
-        progress: auction_application::ForumWriteProgress,
-    ) -> Result<auction_application::ForumTopicPublication, EhentaiError> {
+        progress: auction_application::forum::ForumWriteProgress,
+    ) -> Result<auction_application::forum::ForumTopicPublication, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
         let metrics_world = forum_world(world);
         let write_unknown = ForumWriteUnknownGuard::start(
             self.client.external_metrics(),
             metrics_world,
-            auction_application::ForumOperation::CreateTopic,
+            auction_application::external_metrics::ForumOperation::CreateTopic,
             progress.clone(),
         );
         let client = self.client.as_ref().clone().with_write_progress(progress);
@@ -63,7 +63,7 @@ impl EhentaiGateway {
         &self,
         world: SettlementWorld,
         titles: &[String],
-    ) -> Result<Option<auction_application::ForumPublishedThread>, EhentaiError> {
+    ) -> Result<Option<auction_application::forum::ForumPublishedThread>, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
         match self.client.find_topic_by_titles(world, session.cookie(), titles).await {
             Err(error) if error.is_session_expired() => {
@@ -99,9 +99,9 @@ impl EhentaiGateway {
         &self,
         world: SettlementWorld,
         thread_id: &str,
-        cursor: Option<&auction_application::ForumTopicCursor>,
+        cursor: Option<&auction_application::forum::ForumTopicCursor>,
         fixed_through_post_number: u32,
-    ) -> Result<auction_application::ForumTopicScan, EhentaiError> {
+    ) -> Result<auction_application::forum::ForumTopicScan, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
         match self
             .client
@@ -132,14 +132,14 @@ impl EhentaiGateway {
         world: SettlementWorld,
         thread_id: &str,
         body: ForumRenderedPost,
-        progress: auction_application::ForumWriteProgress,
+        progress: auction_application::forum::ForumWriteProgress,
     ) -> Result<ForumPublishedPost, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
         let metrics_world = forum_world(world);
         let write_unknown = ForumWriteUnknownGuard::start(
             self.client.external_metrics(),
             metrics_world,
-            auction_application::ForumOperation::ReplyTopic,
+            auction_application::external_metrics::ForumOperation::ReplyTopic,
             progress.clone(),
         );
         let client = self.client.as_ref().clone().with_write_progress(progress);
@@ -166,14 +166,14 @@ impl EhentaiGateway {
         post_id: &str,
         metadata: Option<&ForumTopicMetadata>,
         body: ForumRenderedPost,
-        progress: auction_application::ForumWriteProgress,
+        progress: auction_application::forum::ForumWriteProgress,
     ) -> Result<ForumPublishedPost, EhentaiError> {
         let mut session = self.credentials.begin(Some(world))?;
         let metrics_world = forum_world(world);
         let write_unknown = ForumWriteUnknownGuard::start(
             self.client.external_metrics(),
             metrics_world,
-            auction_application::ForumOperation::EditPost,
+            auction_application::external_metrics::ForumOperation::EditPost,
             progress.clone(),
         );
         let client = self.client.as_ref().clone().with_write_progress(progress);
@@ -217,14 +217,14 @@ impl EhentaiGateway {
     }
 }
 
-impl auction_application::ForumTargetProfileReader for EhentaiGateway {
+impl auction_application::forum::ForumTargetProfileReader for EhentaiGateway {
     fn read_target_profile(
         &self,
         target_uid: String,
         deadline: std::time::Instant,
-    ) -> auction_application::InternalEvidenceFuture<
+    ) -> auction_application::settlement::InternalEvidenceFuture<
         '_,
-        auction_application::ForumTargetProfileEvidence,
+        auction_application::forum::ForumTargetProfileEvidence,
     > {
         Box::pin(async move {
             tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
@@ -235,16 +235,16 @@ impl auction_application::ForumTargetProfileReader for EhentaiGateway {
                         safe_diagnostics::project(&diagnostic_cause),
                         DiagnosticContext::default(),
                     );
-                    auction_application::InternalEvidenceError::Unavailable
+                    auction_application::settlement::InternalEvidenceError::Unavailable
                 })?;
                 self.client.read_target_profile(&target_uid, session.cookie()).await
             })
             .await
             .map_err(|diagnostic_cause| {
                 self.client.external_metrics().observe(
-                    auction_application::ExternalMetricsEvent::ForumBudgetExhausted {
-                        world: auction_application::ForumWorld::Shared,
-                        phase: auction_application::ForumBudgetPhase::Profile,
+                    auction_application::external_metrics::ExternalMetricsEvent::ForumBudgetExhausted {
+                        world: auction_application::external_metrics::ForumWorld::Shared,
+                        phase: auction_application::external_metrics::ForumBudgetPhase::Profile,
                     },
                 );
                 safe_diagnostics::warn(
@@ -253,24 +253,27 @@ impl auction_application::ForumTargetProfileReader for EhentaiGateway {
                     safe_diagnostics::project(&diagnostic_cause),
                     DiagnosticContext::default(),
                 );
-                auction_application::InternalEvidenceError::Expired
+                auction_application::settlement::InternalEvidenceError::Expired
             })?
         })
     }
 }
 
-impl auction_application::ForumPmSender for EhentaiGateway {
+impl auction_application::forum::ForumPmSender for EhentaiGateway {
     fn prepare<'a>(
         &'a self,
         world: SettlementWorld,
-        message: &'a auction_application::ForumPmMessage,
-    ) -> auction_application::ForumPmFuture<'a, Box<dyn auction_application::PreparedForumPm>> {
+        message: &'a auction_application::forum::ForumPmMessage,
+    ) -> auction_application::forum::ForumPmFuture<
+        'a,
+        Box<dyn auction_application::forum::PreparedForumPm>,
+    > {
         Box::pin(async move {
             let metrics_world = forum_world(world);
             let operation = ForumPmOperationGuard::start(
                 self.client.external_metrics(),
                 metrics_world,
-                auction_application::ForumPmPhase::Prepare,
+                auction_application::external_metrics::ForumPmPhase::Prepare,
                 false,
             );
             let session = match self.credentials.begin(Some(world)) {
@@ -283,20 +286,22 @@ impl auction_application::ForumPmSender for EhentaiGateway {
                         DiagnosticContext::default(),
                     );
                     operation.finish(
-                        auction_application::ForumPmOutcome::Error,
-                        auction_application::ForumPmCategory::Unavailable,
+                        auction_application::external_metrics::ForumPmOutcome::Error,
+                        auction_application::external_metrics::ForumPmCategory::Unavailable,
                     );
-                    return Err(auction_application::ForumPmError::Unavailable);
+                    return Err(auction_application::forum::ForumPmError::Unavailable);
                 }
             };
             let result = self.client.prepare_pm(message, session, metrics_world).await;
             match &result {
                 Ok(_) => operation.finish(
-                    auction_application::ForumPmOutcome::Prepared,
-                    auction_application::ForumPmCategory::None,
+                    auction_application::external_metrics::ForumPmOutcome::Prepared,
+                    auction_application::external_metrics::ForumPmCategory::None,
                 ),
-                Err(error) => operation
-                    .finish(auction_application::ForumPmOutcome::Error, forum_pm_category(*error)),
+                Err(error) => operation.finish(
+                    auction_application::external_metrics::ForumPmOutcome::Error,
+                    forum_pm_category(*error),
+                ),
             }
             result
         })
@@ -305,15 +310,18 @@ impl auction_application::ForumPmSender for EhentaiGateway {
     fn reconcile<'a>(
         &'a self,
         world: SettlementWorld,
-        message: &'a auction_application::ForumPmMessage,
+        message: &'a auction_application::forum::ForumPmMessage,
         sender_forum_account_id: &'a str,
-    ) -> auction_application::ForumPmFuture<'a, Option<auction_application::ForumPmReceipt>> {
+    ) -> auction_application::forum::ForumPmFuture<
+        'a,
+        Option<auction_application::forum::ForumPmReceipt>,
+    > {
         Box::pin(async move {
             let metrics_world = forum_world(world);
             let operation = ForumPmOperationGuard::start(
                 self.client.external_metrics(),
                 metrics_world,
-                auction_application::ForumPmPhase::Reconcile,
+                auction_application::external_metrics::ForumPmPhase::Reconcile,
                 false,
             );
             let session = match self.credentials.begin(Some(world)) {
@@ -326,10 +334,10 @@ impl auction_application::ForumPmSender for EhentaiGateway {
                         DiagnosticContext::default(),
                     );
                     operation.finish(
-                        auction_application::ForumPmOutcome::Error,
-                        auction_application::ForumPmCategory::Unavailable,
+                        auction_application::external_metrics::ForumPmOutcome::Error,
+                        auction_application::external_metrics::ForumPmCategory::Unavailable,
                     );
-                    return Err(auction_application::ForumPmError::Unavailable);
+                    return Err(auction_application::forum::ForumPmError::Unavailable);
                 }
             };
             let result = self
@@ -338,15 +346,17 @@ impl auction_application::ForumPmSender for EhentaiGateway {
                 .await;
             match &result {
                 Ok(Some(_)) => operation.finish(
-                    auction_application::ForumPmOutcome::Proved,
-                    auction_application::ForumPmCategory::None,
+                    auction_application::external_metrics::ForumPmOutcome::Proved,
+                    auction_application::external_metrics::ForumPmCategory::None,
                 ),
                 Ok(None) => operation.finish(
-                    auction_application::ForumPmOutcome::NotObserved,
-                    auction_application::ForumPmCategory::None,
+                    auction_application::external_metrics::ForumPmOutcome::NotObserved,
+                    auction_application::external_metrics::ForumPmCategory::None,
                 ),
-                Err(error) => operation
-                    .finish(auction_application::ForumPmOutcome::Error, forum_pm_category(*error)),
+                Err(error) => operation.finish(
+                    auction_application::external_metrics::ForumPmOutcome::Error,
+                    forum_pm_category(*error),
+                ),
             }
             result
         })
@@ -386,8 +396,8 @@ impl ForumPublisher for EhentaiGateway {
         &self,
         world: SettlementWorld,
         rendered: ForumRenderedThread,
-        progress: auction_application::ForumWriteProgress,
-    ) -> ApplicationFuture<'_, auction_application::ForumTopicPublication> {
+        progress: auction_application::forum::ForumWriteProgress,
+    ) -> ApplicationFuture<'_, auction_application::forum::ForumTopicPublication> {
         Box::pin(async move {
             EhentaiGateway::create_topic(self, world, rendered, progress)
                 .await
@@ -402,7 +412,7 @@ impl ForumPostWriter for EhentaiGateway {
         world: SettlementWorld,
         thread_id: String,
         body: ForumRenderedPost,
-        progress: auction_application::ForumWriteProgress,
+        progress: auction_application::forum::ForumWriteProgress,
     ) -> ApplicationFuture<'_, ForumPublishedPost> {
         Box::pin(async move {
             EhentaiGateway::reply_topic(self, world, &thread_id, body, progress)
@@ -418,7 +428,7 @@ impl ForumPostWriter for EhentaiGateway {
         post_id: String,
         metadata: Option<ForumTopicMetadata>,
         body: ForumRenderedPost,
-        progress: auction_application::ForumWriteProgress,
+        progress: auction_application::forum::ForumWriteProgress,
     ) -> ApplicationFuture<'_, ForumPublishedPost> {
         Box::pin(async move {
             EhentaiGateway::edit_post(
@@ -466,9 +476,9 @@ impl ForumTopicReader for EhentaiGateway {
         &self,
         world: SettlementWorld,
         thread_id: String,
-        cursor: Option<auction_application::ForumTopicCursor>,
+        cursor: Option<auction_application::forum::ForumTopicCursor>,
         fixed_through_post_number: u32,
-    ) -> ApplicationFuture<'_, auction_application::ForumTopicScan> {
+    ) -> ApplicationFuture<'_, auction_application::forum::ForumTopicScan> {
         Box::pin(async move {
             EhentaiGateway::fetch_topic_incremental(
                 self,

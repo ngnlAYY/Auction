@@ -1,20 +1,23 @@
 //! Sent/Take 恢复与 compose 清理的单次预算边界；复用原应用服务及持久围栏。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_world};
+use auction_application::core::diagnostics::{
+    DiagnosticContext, DiagnosticError, diagnostic_world,
+};
 use auction_observability::WorkerResult;
 
-use super::super::MailPollRuntime;
+use super::super::poll::MailPollRuntime;
 use crate::worker::diagnostics;
 
 /// 一次维护只建立一个截止点；超时或取消保留未知外写围栏，不授权自动重发。
-pub(in crate::worker::runtime::mail_poll) async fn run_maintenance(
+pub(in crate::worker::mail) async fn run_maintenance(
     runtime: &MailPollRuntime,
-    lifecycle: &auction_application::ExternalWriteLifecycle,
+    lifecycle: &auction_application::operations::ExternalWriteLifecycle,
 ) -> WorkerResult {
     let Some(maintenance) = &runtime.maintenance else { return WorkerResult::Success };
     // DB、凭据排队、列表/详情及 compose/discard 全部消耗原截止点，不能逐操作重置。
     let deadline = tokio::time::Instant::now() + runtime.config.fetch_timeout;
-    let activity = lifecycle.activity(auction_application::CriticalWriteKind::ComposeDiscard);
+    let activity =
+        lifecycle.activity(auction_application::operations::CriticalWriteKind::ComposeDiscard);
     let operation = tokio::time::timeout_at(
         deadline,
         maintenance.sweep_with_activity(&runtime.world_id, deadline.into_std(), &activity),
@@ -49,8 +52,8 @@ pub(in crate::worker::runtime::mail_poll) async fn run_maintenance(
         }
         Err(error) => {
             runtime.observe_budget(
-                auction_application::MailPhase::Maintenance,
-                auction_application::MailBudget::Time,
+                auction_application::external_metrics::MailPhase::Maintenance,
+                auction_application::external_metrics::MailBudget::Time,
             );
             diagnostics::unpersisted_error(
                 "mail_maintenance",
@@ -66,8 +69,8 @@ pub(in crate::worker::runtime::mail_poll) async fn run_maintenance(
         }
         Ok(Err(error)) if tokio::time::Instant::now() >= deadline => {
             runtime.observe_budget(
-                auction_application::MailPhase::Maintenance,
-                auction_application::MailBudget::Time,
+                auction_application::external_metrics::MailPhase::Maintenance,
+                auction_application::external_metrics::MailBudget::Time,
             );
             diagnostics::unpersisted_error(
                 "mail_maintenance",

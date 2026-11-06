@@ -1,6 +1,6 @@
 //! 资金拒绝的附加安全日志；不包装错误，不改变事务、重试与失败关闭语义。
 
-use auction_application::FundingError;
+use auction_application::settlement::FundingError;
 
 pub(crate) const TARGET: &str = "auction::settlement::funding_diagnostics";
 

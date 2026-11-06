@@ -1,6 +1,6 @@
 //! 使用 lots_due_slow_idx 读取当前到期调度，保留过期尚未清除的条目。
 
-use auction_application::{SLI_CANDIDATE_LIMIT, SliPending, SliSnapshotError, SliWorld};
+use auction_application::sli::{SLI_CANDIDATE_LIMIT, SliPending, SliSnapshotError, SliWorld};
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, Row};
 

@@ -1,6 +1,6 @@
 //! Admin 结算与 recovery 安全报告读取处理器。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 
 use crate::diagnostics;
 
@@ -10,7 +10,7 @@ use crate::http::routes::{
     map_recovery_report, map_settlement_report, no_store_headers, not_found_error,
     valid_recovery_report, valid_settlement_report,
 };
-use auction_application::ApplicationError;
+use auction_application::core::ApplicationError;
 use auction_contracts::ApiResponse;
 use axum::Json;
 use axum::extract::{ConnectInfo, Path, State};

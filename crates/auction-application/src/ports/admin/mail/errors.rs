@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use super::super::TransactionPolicyError;
+use crate::ports::core::TransactionPolicyError;
 
 /// Admin 邮件应用错误。
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]

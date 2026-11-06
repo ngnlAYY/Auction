@@ -1,5 +1,5 @@
 //! Worker 排空协议的装配桥接；不改写持久状态或业务授权。
-use auction_application::{
+use auction_application::operations::{
     CriticalWriteKind, ExternalWriteActivity, ExternalWriteActivityFactory,
     ExternalWriteActivityPort, ExternalWriteLifecycle,
 };

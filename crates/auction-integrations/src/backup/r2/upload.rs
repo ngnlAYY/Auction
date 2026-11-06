@@ -1,12 +1,12 @@
 //! 固定对象名上传：小对象原生 create-only，大对象先 HEAD 再原生分片；失败后统一回读对账。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::{fs::File, io::Read};
 
-use auction_application::lower_hex;
+use auction_application::core::lower_hex;
 use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, path::Path};
 use sha2::{Digest, Sha256};
 

@@ -2,7 +2,7 @@
 
 use crate::diagnostics;
 use crate::http::routes::boundary;
-use auction_application::{
+use auction_application::auction::{
     MAX_PUBLIC_ACCOUNT_OFFSET, MAX_PUBLIC_HISTORY_NAME_TERMS, PublicMyBidsPage, PublicMyBidsRequest,
 };
 use auction_contracts::ApiErrorResponse;

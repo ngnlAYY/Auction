@@ -1,10 +1,10 @@
 //! 三角色共用的周期唤醒；应用服务拥有刷新与到期规则。
 
 use crate::worker::diagnostics;
-use auction_application::diagnostics::{
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
-use auction_application::{
+use auction_application::runtime_switches::{
     RuntimeSwitchError, RuntimeSwitchRefreshService, RuntimeSwitchRole, RuntimeSwitchStore,
     RuntimeSwitches,
 };
@@ -44,7 +44,8 @@ async fn refresh(service: &RuntimeSwitchRefreshService, switches: &RuntimeSwitch
         if previous != current {
             tracing::info!(
                 role = switches.status().role.label(),
-                audit_mode = auction_application::audit_label(current.audit_failure_mode),
+                audit_mode =
+                    auction_application::runtime_switches::audit_label(current.audit_failure_mode),
                 cache_enabled = current.cache_enabled,
                 "运行时就绪开关已应用"
             );

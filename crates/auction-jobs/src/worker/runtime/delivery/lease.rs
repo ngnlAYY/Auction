@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
 use tokio::time::Instant;
 
 use super::*;

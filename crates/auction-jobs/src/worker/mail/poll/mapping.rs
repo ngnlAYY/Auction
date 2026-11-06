@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use auction_application::{MailPollClaim, MailPollIntake, MailProcessingDecision};
+use auction_application::mail::{MailPollClaim, MailPollIntake, MailProcessingDecision};
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use uuid::Uuid;

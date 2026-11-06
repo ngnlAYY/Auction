@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use auction_application::RecurringSchedule;
+use auction_application::scheduling::RecurringSchedule;
 use chrono::{DateTime, Duration, Utc};
 
 /// 启动时只计算一次异世界相位；调用方只在隔离开启且同时配置两个世界时调用。

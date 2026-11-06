@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 
-use crate::InternalEvidenceFuture;
+use crate::ports::settlement::InternalEvidenceFuture;
 
 /// 固定资料结构得到的完整显示名与精确目标 UID，不含任何论坛凭据。
 #[derive(Debug)]

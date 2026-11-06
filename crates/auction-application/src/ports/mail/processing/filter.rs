@@ -8,8 +8,8 @@ use serde_json::Value;
 
 use auction_domain::AuctionEarlyBirdCalendar;
 
-use super::super::AdminIntakeSourceSnapshot;
 use super::common::MailProcessingError;
+use crate::ports::admin::AdminIntakeSourceSnapshot;
 
 /// 装备过滤策略返回的稳定拒绝原因。
 pub const EQUIPMENT_QUALITY_NOT_ALLOWED: &str = "quality_not_allowed";

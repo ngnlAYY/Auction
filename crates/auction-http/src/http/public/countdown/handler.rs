@@ -1,6 +1,6 @@
 //! 图片读取与安全头：只接收公开拍卖身份及闭集计时器，不接受自定义正文或任意时间。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 

@@ -3,7 +3,7 @@
 use super::{conflicts, evidence_error, locks, persistence, sql_error, validation};
 use crate::database::TrackedTransaction as Transaction;
 use crate::settlement_funding;
-use auction_application::{
+use auction_application::settlement::{
     FundingCollectedReceipt, FundingError, FundingMutation, SettlementFulfillmentProof,
     SettlementInternalCommand, SettlementInternalCommitOutcome as Outcome,
     SettlementInternalEvidenceSnapshot,
@@ -345,8 +345,11 @@ async fn validate_collected(
         Some("collected_proof_observation_before_claim")
     } else if proof.observed_at > chrono::Utc::now() {
         Some("collected_proof_observation_in_future")
-    } else if auction_application::canonical_settlement_fulfillment_subject(c.kind, c.obligation_id)
-        .as_deref()
+    } else if auction_application::settlement::canonical_settlement_fulfillment_subject(
+        c.kind,
+        c.obligation_id,
+    )
+    .as_deref()
         != Some(sent.subject.as_str())
     {
         Some("collected_proof_subject_mismatch")

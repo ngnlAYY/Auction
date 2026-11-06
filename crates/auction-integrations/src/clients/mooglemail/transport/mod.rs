@@ -2,11 +2,13 @@
 
 use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
-use auction_application::{
-    ApplicationError, DeliveryPreparation, DeliveryPreparedSend, DeliverySendResult,
-    DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim, MailLoginKey, MailLoginKeyReader,
-    MailProcessingError, SettlementFulfillmentEquipmentSecretReader,
+use auction_application::core::ApplicationError;
+use auction_application::delivery::{
+    DeliveryPreparation, DeliveryPreparedSend, DeliverySendResult, DeliveryTransport,
+    DeliveryTransportError, DeliveryWorkClaim,
 };
+use auction_application::mail::{MailLoginKey, MailLoginKeyReader, MailProcessingError};
+use auction_application::settlement::SettlementFulfillmentEquipmentSecretReader;
 use auction_domain::EquipmentId;
 use serde::Deserialize;
 use serde_json::json;

@@ -1,8 +1,7 @@
 //! Admin 装备录入事实和 pending lot 的原子写入。
 
-use auction_application::{
-    AdminIntakeResult, AdminIntakeWrite, CommandLedgerError, CompetitionTransactionError,
-};
+use auction_application::admin::{AdminIntakeResult, AdminIntakeWrite};
+use auction_application::core::{CommandLedgerError, CompetitionTransactionError};
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use uuid::Uuid;

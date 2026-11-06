@@ -23,7 +23,7 @@ impl EhentaiClient {
         message: &ForumPmMessage,
         sender: &str,
         cookie: &EhentaiCookie,
-        metrics_world: auction_application::ForumWorld,
+        metrics_world: auction_application::external_metrics::ForumWorld,
     ) -> Result<Option<ForumPmReceipt>, ForumPmError> {
         let initial = self.pm_url(&[("act", "Msg"), ("CODE", "01"), ("VID", "sent")])?;
         let (initial, _) = read_link(&initial, initial.as_str(), &["act", "CODE", "VID"])?;
@@ -38,7 +38,7 @@ impl EhentaiClient {
                     cookie,
                     total_bytes,
                     metrics_world,
-                    auction_application::ForumOperation::PmSentList,
+                    auction_application::external_metrics::ForumOperation::PmSentList,
                 )
                 .await?;
             add_bytes(&mut total_bytes, source.len())?;
@@ -78,7 +78,7 @@ impl EhentaiClient {
                     cookie,
                     total_bytes,
                     metrics_world,
-                    auction_application::ForumOperation::PmSentDetail,
+                    auction_application::external_metrics::ForumOperation::PmSentDetail,
                 )
                 .await?;
             add_bytes(&mut total_bytes, source.len())?;
@@ -101,8 +101,8 @@ impl EhentaiClient {
         target: Url,
         cookie: &EhentaiCookie,
         consumed: usize,
-        metrics_world: auction_application::ForumWorld,
-        metrics_operation: auction_application::ForumOperation,
+        metrics_world: auction_application::external_metrics::ForumWorld,
+        metrics_operation: auction_application::external_metrics::ForumOperation,
     ) -> Result<String, ForumPmError> {
         let remaining = MAXIMUM_SCAN_BYTES
             .checked_sub(consumed)

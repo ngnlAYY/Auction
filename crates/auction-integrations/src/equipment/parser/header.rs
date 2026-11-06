@@ -1,6 +1,6 @@
 //! 装备 header 的等级与交易状态协议；大类名称复用领域词典。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 

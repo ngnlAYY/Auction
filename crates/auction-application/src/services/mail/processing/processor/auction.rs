@@ -3,10 +3,11 @@
 use super::super::commands::{auction_request_hash, decision, stable_command_id};
 use super::super::pricing::resolve_start_price_plan;
 use super::*;
-use crate::{
-    AdminIntakeError, CompetitionTransactionError, MailEquipmentDiagnosticCategory,
-    MailEquipmentDiagnosticContext, MailEquipmentDiagnosticStage, MailEquipmentEvidenceStatus,
-    MailEquipmentObservation, MailEquipmentReadOutcome,
+use crate::ports::admin::AdminIntakeError;
+use crate::ports::core::CompetitionTransactionError;
+use crate::ports::mail::{
+    MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext, MailEquipmentDiagnosticStage,
+    MailEquipmentEvidenceStatus, MailEquipmentObservation, MailEquipmentReadOutcome,
 };
 
 /// 收件目标在赛季开始前拒收装备时的退回原因码；回信说明由 MoogleMail 适配器按同一闭集渲染。
@@ -48,7 +49,9 @@ where
         &self,
         mut message: MailMessage,
         now: DateTime<Utc>,
-        pending_equipment_diagnostic: &mut Option<crate::PendingMailEquipmentDiagnostic>,
+        pending_equipment_diagnostic: &mut Option<
+            crate::ports::mail::PendingMailEquipmentDiagnostic,
+        >,
     ) -> Result<MailProcessingDecision, ApplicationError> {
         let attachment_ids = message.sorted_attachment_ids();
         if message.credits > 0 || message.cod > 0 {
@@ -243,7 +246,7 @@ where
                     pending_equipment_diagnostic,
                 );
             }
-            items.push(crate::MailAuctionItem {
+            items.push(crate::ports::mail::MailAuctionItem {
                 external_equipment_id: snapshot.external_equipment_id,
                 name: snapshot.name,
                 category: snapshot.category,
@@ -333,15 +336,12 @@ where
         stage: MailEquipmentDiagnosticStage,
         category: MailEquipmentDiagnosticCategory,
         detail_code: Option<String>,
-        pending: &mut Option<crate::PendingMailEquipmentDiagnostic>,
+        pending: &mut Option<crate::ports::mail::PendingMailEquipmentDiagnostic>,
     ) -> Result<MailProcessingDecision, ApplicationError> {
         // 这里只构造任务，不轮询留证 future；Worker 会在业务 item_timeout 结束后执行。
-        *pending = Some(crate::PendingMailEquipmentDiagnostic::new(self.equipment.retain_failure(
-            observation,
-            stage,
-            category,
-            detail_code,
-        )));
+        *pending = Some(crate::ports::mail::PendingMailEquipmentDiagnostic::new(
+            self.equipment.retain_failure(observation, stage, category, detail_code),
+        ));
         result
     }
 }

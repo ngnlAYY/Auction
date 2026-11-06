@@ -5,7 +5,7 @@ use super::mapping::*;
 use crate::database::delivery_audit::{
     CLAIM, DeliveryAudit, append as append_delivery_audit, worker_state_metadata,
 };
-use auction_application::{DeliveryClaimExclusions, DeliveryWorkClaim};
+use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkClaim};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 use sqlx::postgres::PgRow;
@@ -19,7 +19,7 @@ pub(super) async fn claim_postgres(
     sending_grace: std::time::Duration,
     exclusions: &DeliveryClaimExclusions,
     limit: u16,
-) -> Result<Vec<DeliveryWorkClaim>, auction_application::RepositoryError> {
+) -> Result<Vec<DeliveryWorkClaim>, auction_application::core::RepositoryError> {
     store.pool().observe_transaction(
         auction_observability::DatabaseTransactionOwner::DeliveryClaim,
         async {
@@ -249,7 +249,7 @@ pub(super) fn map_claim(
     fencing_version: i64,
     claimed_at: DateTime<Utc>,
     attempt_count: u32,
-) -> Result<DeliveryWorkClaim, auction_application::RepositoryError> {
+) -> Result<DeliveryWorkClaim, auction_application::core::RepositoryError> {
     let request_digest: Vec<u8> = row.try_get("request_digest").map_err(map_storage_error)?;
     let request_hash = request_hash(request_digest)?;
     let payload: serde_json::Value = row.try_get("payload").map_err(map_storage_error)?;

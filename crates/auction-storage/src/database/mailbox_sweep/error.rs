@@ -6,7 +6,7 @@ use crate::database::storage_error_from;
 /// 保留 PostgreSQL SQLSTATE 与资金冲突分类至重试边界，不匹配错误文本。
 pub(super) enum RecoveryError {
     Sqlx(sqlx::Error),
-    Funding(auction_application::FundingError),
+    Funding(auction_application::settlement::FundingError),
     Evidence(crate::MailEvidenceTransactionError),
     Rejected,
 }
@@ -17,8 +17,8 @@ impl From<sqlx::Error> for RecoveryError {
     }
 }
 
-impl From<auction_application::FundingError> for RecoveryError {
-    fn from(error: auction_application::FundingError) -> Self {
+impl From<auction_application::settlement::FundingError> for RecoveryError {
+    fn from(error: auction_application::settlement::FundingError) -> Self {
         Self::Funding(error)
     }
 }
@@ -34,7 +34,7 @@ impl RecoveryError {
     pub(super) fn into_application_error(
         self,
         context: &'static str,
-    ) -> auction_application::ApplicationError {
+    ) -> auction_application::core::ApplicationError {
         match self {
             Self::Sqlx(error)
             | Self::Evidence(crate::MailEvidenceTransactionError::Sqlx(error)) => {
@@ -48,7 +48,9 @@ impl RecoveryError {
     pub(super) fn retryable(&self) -> bool {
         match self {
             Self::Sqlx(error) => crate::database::observed_serialization_conflict(error),
-            Self::Funding(auction_application::FundingError::SerializationConflict) => true,
+            Self::Funding(auction_application::settlement::FundingError::SerializationConflict) => {
+                true
+            }
             Self::Evidence(error) => error.is_serialization_conflict(),
             _ => false,
         }

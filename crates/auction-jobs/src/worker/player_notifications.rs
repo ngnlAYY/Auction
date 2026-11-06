@@ -6,15 +6,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
-use auction_application::{
-    ApplicationError, Clock, PlayerNotificationError, PlayerNotificationService,
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::{ApplicationError, Clock};
+use auction_application::player_notifications::{
+    PlayerNotificationError, PlayerNotificationService,
 };
 use auction_observability::{WorkerLoop, WorkerResult};
 
-use self::parent::*;
-use super as parent;
 use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, poll_delay};
 
 /// 扫描循环的调度参数；窗口与批量属于应用层常量，不随热配置改变。
 #[derive(Debug, Clone, Copy)]
@@ -87,7 +87,7 @@ pub(super) async fn run_loop<C>(
 
         let wait = poll_delay(runtime.config.poll_interval, runtime.config.jitter);
         let scheduled_wake = tokio::time::Instant::now() + wait;
-        if super::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
+        if crate::worker::runtime::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
             return;
         }
         worker.metrics.observe_schedule_delay(

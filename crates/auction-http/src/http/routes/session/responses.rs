@@ -1,7 +1,7 @@
 //! 会话当前状态和管理端状态名称的响应投影。
 
 use crate::http::routes::public_timestamp;
-use auction_application::PublicSessionIdentity;
+use auction_application::public::PublicSessionIdentity;
 use auction_contracts::{ApiResponse, PublicSessionCurrentResponse};
 use axum::Json;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};

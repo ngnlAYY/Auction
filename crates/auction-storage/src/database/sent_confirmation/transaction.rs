@@ -4,7 +4,7 @@
 use crate::database::delivery_scheduler::attempts;
 use crate::database::sent_confirmation::{Error, snapshot};
 use crate::database::{TrackedTransaction as Transaction, settlement_funding as funding};
-use auction_application::{SentConfirmationCommand, SentConfirmationResult};
+use auction_application::delivery::{SentConfirmationCommand, SentConfirmationResult};
 use serde_json::json;
 use sqlx::{Postgres, Row};
 
@@ -151,7 +151,7 @@ pub(super) async fn apply(
             tx,
             &account,
             command.delivery_id,
-            auction_application::FundingDeliveryOutcome::Sent,
+            auction_application::settlement::FundingDeliveryOutcome::Sent,
         )
         .await?;
     }
@@ -166,7 +166,7 @@ pub(super) async fn apply(
         entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'admin',$2,'delivery.sent_operator_confirmed',
         'delivery',$3,'success',$5,$4)")
         .bind(command.command_id).bind(&command.actor).bind(command.delivery_id.to_string())
-        .bind(auction_application::cli_audit_metadata(command.operator_identity.as_ref(), json!({"command_id":command.command_id,"request_digest":digest,
+        .bind(auction_application::core::cli_audit_metadata(command.operator_identity.as_ref(), json!({"command_id":command.command_id,"request_digest":digest,
             "fencing_version":command.expected_fencing_version,
             "sending_fencing_version":snapshot.sending_fencing_version,
             "external_reference":result.external_reference,

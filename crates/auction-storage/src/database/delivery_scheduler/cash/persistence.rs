@@ -1,9 +1,8 @@
 //! 精确delivery锁验、持久sending与追加现金证据审计。
 
 use crate::database::TrackedTransaction as Transaction;
-use auction_application::{
-    DeliveryPreparedExpectation, DeliveryWorkClaim, SettlementInternalEvidenceSnapshot,
-};
+use auction_application::delivery::{DeliveryPreparedExpectation, DeliveryWorkClaim};
+use auction_application::settlement::SettlementInternalEvidenceSnapshot;
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -99,11 +98,11 @@ pub(super) async fn persist_sending(
 
 /// 只保存规范化身份事实；Cookie、页面令牌和响应正文不进入审计。
 fn binding_metadata(
-    binding: &auction_application::MailAccountEvidenceBinding,
+    binding: &auction_application::settlement::MailAccountEvidenceBinding,
 ) -> serde_json::Value {
     serde_json::json!({
         "credential_id": binding.credential_id, "credential_version": binding.credential_version,
-        "runtime_scope": auction_application::MAIL_RUNTIME_SCOPE, "generation": binding.runtime.generation,
+        "runtime_scope": auction_application::settlement::MAIL_RUNTIME_SCOPE, "generation": binding.runtime.generation,
         "uid": binding.authenticated_uid, "player_name": binding.player_name,
         "world": binding.world.as_str(),
         "observed_at": binding.observed_at, "protocol_version": binding.protocol_version,

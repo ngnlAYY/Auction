@@ -3,7 +3,8 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{ApplicationError, PublicAuctionCountdown};
+use auction_application::auction::PublicAuctionCountdown;
+use auction_application::core::ApplicationError;
 use sqlx::Row;
 use uuid::Uuid;
 

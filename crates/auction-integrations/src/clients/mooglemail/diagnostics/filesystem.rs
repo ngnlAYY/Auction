@@ -1,10 +1,10 @@
 //! 证据文件格式与平台边界；按最终落盘字节计算容量。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
-use auction_application::MailDiagnosticError;
+use auction_application::mail::MailDiagnosticError;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use std::{
     collections::VecDeque,
@@ -19,11 +19,14 @@ use super::{
 };
 
 #[cfg(unix)]
-#[path = "filesystem/unix.rs"]
-mod platform;
+mod unix;
 #[cfg(not(unix))]
-#[path = "filesystem/unsupported.rs"]
-mod platform;
+mod unsupported;
+
+#[cfg(unix)]
+use unix as platform;
+#[cfg(not(unix))]
+use unsupported as platform;
 
 const MAX_HEADER_BYTES: usize = 8 * 1024;
 const MAX_CIPHERTEXT_BYTES: usize = payload::MAX_PAYLOAD + 12 + 16;
@@ -311,7 +314,7 @@ pub(super) fn write_private_export(output: &Path, bytes: &[u8]) -> Result<(), Ma
 #[cfg(test)]
 mod tests {
     use super::{EvidenceRetention, RecordEntry, classify_evidence, eviction_order, eviction_plan};
-    use auction_application::MailDiagnosticError;
+    use auction_application::mail::MailDiagnosticError;
     use std::{
         path::PathBuf,
         time::{Duration, SystemTime, UNIX_EPOCH},

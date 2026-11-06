@@ -1,13 +1,13 @@
 //! PostgreSQL Users/Admin 行映射、幂等结果持久化和错误边界。
 
-use auction_application::CompetitionTransactionError;
+use auction_application::core::CompetitionTransactionError;
 
 use crate::database::audit_health::AuditWriteResult;
 use crate::database::users::admin::{admin_error, load_response_envelope, parse_payload};
-use auction_application::{
+use auction_application::admin::{
     AdminUser, AdminUserCommandKind, AdminUserCommandResult, AdminUserError, AdminUserStatus,
-    ApplicationError, RequestHash,
 };
+use auction_application::core::{ApplicationError, RequestHash};
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -24,7 +24,7 @@ pub(super) fn map_postgres_user(row: &PgRow) -> Result<AdminUser, ApplicationErr
         forum_account_id: row.try_get("forum_account_id").map_err(map_storage_error)?,
         status: AdminUserStatus::parse(&status)
             .ok_or_else(|| admin_error(AdminUserError::StoredResultCorrupt))?,
-        key_status: auction_application::AdminUserKeyStatus::parse(&key_status)
+        key_status: auction_application::admin::AdminUserKeyStatus::parse(&key_status)
             .ok_or_else(|| admin_error(AdminUserError::StoredResultCorrupt))?,
         state_version: row.try_get("state_version").map_err(map_storage_error)?,
         created_at: row.try_get("created_at").map_err(map_storage_error)?,

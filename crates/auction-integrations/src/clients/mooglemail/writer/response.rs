@@ -1,6 +1,6 @@
 //! 最终发送响应的成功证明和明确失败分类。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 

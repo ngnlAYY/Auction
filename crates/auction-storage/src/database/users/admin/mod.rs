@@ -3,13 +3,15 @@
 #[cfg(feature = "postgres")]
 mod postgres;
 
-use auction_application::{
+use auction_application::admin::{
     AdminRenameRevertWrite, AdminUser, AdminUserCommandKind, AdminUserCommandResult,
     AdminUserCreateWrite, AdminUserError, AdminUserKeyWrite, AdminUserListRequest,
     AdminUserMutationAction, AdminUserMutationWrite, AdminUserPage, AdminUserStore,
-    ApplicationError, ApplicationFuture, MailLoginKeyEnvelope, RecoveryBuyerBlacklistCommand,
-    RecoveryBuyerBlacklistResult, RecoveryBuyerBlacklister, RequestHash,
+    RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklistResult, RecoveryBuyerBlacklister,
 };
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::{ApplicationError, RequestHash};
+use auction_application::mail::MailLoginKeyEnvelope;
 #[cfg(feature = "postgres")]
 use auction_domain::valid_text;
 use chrono::{DateTime, Utc};

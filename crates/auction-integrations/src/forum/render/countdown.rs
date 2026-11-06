@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use auction_application::ForumRenderError;
+use auction_application::forum::ForumRenderError;
 use auction_domain::AuctionId;
 use chrono::{DateTime, Utc};
 use url::Url;

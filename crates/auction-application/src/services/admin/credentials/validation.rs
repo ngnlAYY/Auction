@@ -2,9 +2,10 @@
 
 use auction_domain::valid_text;
 
-use crate::{
+use crate::errors::ApplicationError;
+use crate::ports::admin::{
     AdminCredentialDeleteCommand, AdminCredentialError, AdminCredentialImportCommand,
-    AdminCredentialRenameCommand, AdminCredentialStatusCommand, ApplicationError,
+    AdminCredentialRenameCommand, AdminCredentialStatusCommand,
 };
 
 pub(super) fn validate_import(
@@ -15,7 +16,10 @@ pub(super) fn validate_import(
         || !valid_text(&command.actor_id, 256)
         || command.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
         || command.now.timestamp_nanos_opt().is_none()
-        || !crate::valid_credential_player_name(command.kind, command.player_name.as_deref())
+        || !crate::ports::admin::valid_credential_player_name(
+            command.kind,
+            command.player_name.as_deref(),
+        )
     {
         return Err(AdminCredentialError::InvalidRequest.into());
     }

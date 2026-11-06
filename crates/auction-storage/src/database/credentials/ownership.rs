@@ -8,9 +8,8 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use auction_application::{
-    AdminCredentialKind, AdminCredentialRuntimeOwnership, ApplicationFuture,
-};
+use auction_application::admin::{AdminCredentialKind, AdminCredentialRuntimeOwnership};
+use auction_application::auction::ApplicationFuture;
 use futures_util::lock::Mutex;
 use sqlx::Connection;
 use thiserror::Error;
@@ -26,7 +25,7 @@ pub struct CredentialRuntimeOwnership {
     connection: OwnershipConnection,
     valid: AtomicBool,
     credential_kind: AdminCredentialKind,
-    mail_binding: Option<auction_application::MailRuntimeBinding>,
+    mail_binding: Option<auction_application::settlement::MailRuntimeBinding>,
 }
 
 impl CredentialRuntimeOwnership {
@@ -90,7 +89,7 @@ impl AdminCredentialRuntimeOwnership for CredentialRuntimeOwnership {
         self.valid.load(Ordering::Acquire)
     }
 
-    fn mail_runtime_binding(&self) -> Option<auction_application::MailRuntimeBinding> {
+    fn mail_runtime_binding(&self) -> Option<auction_application::settlement::MailRuntimeBinding> {
         self.is_valid().then_some(self.mail_binding).flatten()
     }
 
@@ -195,7 +194,7 @@ impl DatabaseStore {
                         .commit()
                         .await
                         .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
-                    Some(auction_application::MailRuntimeBinding { generation })
+                    Some(auction_application::settlement::MailRuntimeBinding { generation })
                 } else {
                     None
                 };

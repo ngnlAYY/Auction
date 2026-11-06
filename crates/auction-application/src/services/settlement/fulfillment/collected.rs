@@ -1,14 +1,14 @@
 //! 外部 COD 实收同 session 重核与资金化；保持原 Sent collected 证明门。
 
-use super::{
-    SettlementFulfillmentService, internal::evidence_request, validation::repository_error,
+use super::{internal::evidence_request, validation::repository_error};
+use crate::errors::ApplicationError;
+use crate::ports::settlement::{
+    InternalSentCollectionTarget, SettlementFulfillmentClaim, SettlementFulfillmentProof,
+    SettlementFulfillmentReconcileResult, SettlementFulfillmentReconcileStatus,
+    SettlementInternalCommand, SettlementInternalCommitOutcome,
+    canonical_settlement_fulfillment_subject,
 };
-use crate::{
-    ApplicationError, InternalSentCollectionTarget, SettlementFulfillmentClaim,
-    SettlementFulfillmentProof, SettlementFulfillmentReconcileResult,
-    SettlementFulfillmentReconcileStatus, SettlementInternalCommand,
-    SettlementInternalCommitOutcome, canonical_settlement_fulfillment_subject,
-};
+use crate::services::settlement::SettlementFulfillmentService;
 use chrono::Duration;
 
 const DIAGNOSTICS_TARGET: &str = "auction::settlement::funding_diagnostics";

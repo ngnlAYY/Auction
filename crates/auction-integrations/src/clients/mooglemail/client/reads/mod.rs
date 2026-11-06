@@ -1,6 +1,6 @@
 //! 共享邮箱观测：凭据/world/runtime 隔离，独立等待者、写屏障及有界敏感响应。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::clients::metrics::MailLockWaitGuard;
 use crate::diagnostics as safe_diagnostics;
@@ -452,7 +452,7 @@ impl MoogleMailClient {
             Arc::clone(&self.external_metrics),
             world,
             MoogleMailOperation::Detail,
-            auction_application::MailLock::IncomingWrite,
+            auction_application::external_metrics::MailLock::IncomingWrite,
         );
         let guard = Arc::clone(&scope.incoming).write_owned().await;
         lock_wait.acquired();

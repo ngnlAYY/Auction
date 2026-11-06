@@ -7,12 +7,12 @@ use super::*;
 pub(super) async fn configure_forum(
     config: &AppConfig,
     store: Arc<DatabaseStore>,
-    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 ) -> anyhow::Result<(
     Option<auction_jobs::ForumSyncRuntime>,
     Option<auction_jobs::ForumReplyRuntime>,
     Option<auction_jobs::LotWatchPmRuntime>,
-    Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
+    Option<Arc<dyn auction_application::forum::ForumTargetProfileReader>>,
     Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
 )> {
     let forum_config = &config.worker.forum;

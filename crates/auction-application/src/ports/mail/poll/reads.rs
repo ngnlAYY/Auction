@@ -4,7 +4,8 @@ use std::fmt;
 
 use chrono::{DateTime, Utc};
 
-use super::{ApplicationFuture, MailPollClaim};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::mail::MailPollClaim;
 
 /// 恢复详情读取所需的定位与列表快照；不含正文、HTML、Cookie、token 或装备 key。
 #[derive(Clone, PartialEq, Eq)]

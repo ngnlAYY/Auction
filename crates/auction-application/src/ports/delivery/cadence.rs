@@ -51,5 +51,5 @@ impl DeliverySendIntervals {
 /// 提交后通知仅用于加速唤醒；丢失/断线仍由持久队列及周期领取恢复。
 pub trait DeliveryWakeup: Send {
     /// 等待下一次提示，提示不携带用户、邮件正文或凭据信息。
-    fn wait(&mut self) -> crate::ApplicationFuture<'_, ()>;
+    fn wait(&mut self) -> crate::ports::auction::ApplicationFuture<'_, ()>;
 }

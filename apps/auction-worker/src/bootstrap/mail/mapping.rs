@@ -2,7 +2,7 @@
 
 use super::super::*;
 
-use auction_application::MailDisplaySnapshot;
+use auction_application::mail::MailDisplaySnapshot;
 
 pub(super) fn map_mooglemail_message(
     message: MoogleMailMessage,

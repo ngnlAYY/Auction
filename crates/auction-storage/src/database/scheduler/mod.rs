@@ -1,7 +1,8 @@
 //! 持久化 Worker 调度适配器装配；claim/租约在 `claim.rs`，完成/失败收口在 `resolution.rs`，
 //! 共享阶段命令、UUID、时间和错误映射在 `mapping.rs`。interval 只唤醒 Worker，不是状态权威。
 
-use auction_application::{ApplicationError, ScheduledRoundClaim, ScheduledRoundStore};
+use auction_application::core::ApplicationError;
+use auction_application::scheduling::{ScheduledRoundClaim, ScheduledRoundStore};
 use chrono::{DateTime, Utc};
 
 use super::DatabaseStore;
@@ -15,7 +16,7 @@ mod resolution;
 mod wakeup;
 
 impl ScheduledRoundStore for DatabaseStore {
-    fn database_now(&self) -> auction_application::ApplicationFuture<'_, DateTime<Utc>> {
+    fn database_now(&self) -> auction_application::auction::ApplicationFuture<'_, DateTime<Utc>> {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
@@ -30,9 +31,9 @@ impl ScheduledRoundStore for DatabaseStore {
         &self,
         world_id: String,
         local_week: chrono::NaiveDate,
-    ) -> auction_application::ApplicationFuture<
+    ) -> auction_application::auction::ApplicationFuture<
         '_,
-        Option<auction_application::ScheduledRoundSnapshot>,
+        Option<auction_application::scheduling::ScheduledRoundSnapshot>,
     > {
         Box::pin(async move {
             match self {
@@ -48,9 +49,9 @@ impl ScheduledRoundStore for DatabaseStore {
         &self,
         world_id: String,
         slot_key: String,
-    ) -> auction_application::ApplicationFuture<
+    ) -> auction_application::auction::ApplicationFuture<
         '_,
-        Option<auction_application::ScheduledRoundSnapshot>,
+        Option<auction_application::scheduling::ScheduledRoundSnapshot>,
     > {
         Box::pin(async move {
             match self {
@@ -64,9 +65,11 @@ impl ScheduledRoundStore for DatabaseStore {
 
     fn ensure_current_round(
         &self,
-        request: auction_application::ScheduledRoundBootstrap,
-    ) -> auction_application::ApplicationFuture<'_, auction_application::ScheduledRoundSnapshot>
-    {
+        request: auction_application::scheduling::ScheduledRoundBootstrap,
+    ) -> auction_application::auction::ApplicationFuture<
+        '_,
+        auction_application::scheduling::ScheduledRoundSnapshot,
+    > {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
@@ -83,7 +86,7 @@ impl ScheduledRoundStore for DatabaseStore {
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
         limit: u16,
-    ) -> auction_application::ApplicationFuture<'_, Vec<ScheduledRoundClaim>> {
+    ) -> auction_application::auction::ApplicationFuture<'_, Vec<ScheduledRoundClaim>> {
         Box::pin(async move {
             if worker_id.is_empty() || worker_id != worker_id.trim() || limit == 0 {
                 return Err(mapping::repository_error("Worker 调度领取参数无效"));
@@ -102,7 +105,7 @@ impl ScheduledRoundStore for DatabaseStore {
     fn next_claimable_at(
         &self,
         now: DateTime<Utc>,
-    ) -> auction_application::ApplicationFuture<'_, Option<DateTime<Utc>>> {
+    ) -> auction_application::auction::ApplicationFuture<'_, Option<DateTime<Utc>>> {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
@@ -117,7 +120,7 @@ impl ScheduledRoundStore for DatabaseStore {
         &self,
         claim: ScheduledRoundClaim,
         completed_at: DateTime<Utc>,
-    ) -> auction_application::ApplicationFuture<'_, ()> {
+    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
@@ -136,7 +139,7 @@ impl ScheduledRoundStore for DatabaseStore {
         retry_at: DateTime<Utc>,
         failure_code: String,
         safe_detail: String,
-    ) -> auction_application::ApplicationFuture<'_, ()> {
+    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             let failure_code = mapping::bounded_text(failure_code, 128);
             let safe_detail = mapping::bounded_text(safe_detail, 512);

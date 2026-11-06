@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialDeleteCommand, AdminCredentialImportCommand, AdminCredentialImportSource,
     AdminCredentialKind, AdminCredentialLogin, AdminCredentialRenameCommand, AdminCredentialSecret,
     AdminCredentialStatus, AdminCredentialStatusCommand, AdminCredentialWorld,
@@ -57,7 +57,8 @@ pub(crate) async fn create(
         Some(world) => world,
         None => return invalid_request("invalid_credential_world", "凭据 world 无效"),
     };
-    if !auction_application::valid_credential_player_name(kind, input.player_name.as_deref()) {
+    if !auction_application::admin::valid_credential_player_name(kind, input.player_name.as_deref())
+    {
         return invalid_request(
             "invalid_credential_player_name",
             "预期玩家名称无效或凭据类型不支持",

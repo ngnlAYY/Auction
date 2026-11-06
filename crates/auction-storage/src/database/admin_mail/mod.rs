@@ -1,10 +1,11 @@
 //! Admin 邮件查询与命令的 PostgreSQL 端口装配。
 
-use auction_application::{
+use auction_application::admin::{
     AdminMailDashboardSnapshot, AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter,
     AdminMailIntakePage, AdminMailPollState, AdminMailPollStateRequest, AdminMailReader,
-    ApplicationError, ApplicationFuture,
 };
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
 use uuid::Uuid;
 
 use super::DatabaseStore;

@@ -7,7 +7,7 @@ use auction_domain::{
     SettlementObligationState, SettlementPlan, SettlementWorld, legacy_natural_key_uuid,
 };
 
-use crate::SettlementSnapshot;
+use crate::ports::settlement::SettlementSnapshot;
 
 /// 根据已计算的结算明细构造支付、交接、卖家结算和退款义务；不复制或修改输入计划。
 pub(super) fn build_obligations(

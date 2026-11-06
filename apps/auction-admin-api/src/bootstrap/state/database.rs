@@ -3,19 +3,27 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use auction_application::{
+use auction_application::admin::{
     AdminAuctionCreatePort, AdminAuctionReader, AdminAuctionSchedulePort, AdminAuditPort,
     AdminCredentialCheckPort, AdminCredentialCheckService, AdminCredentialHealthReader,
     AdminCredentialOpener, AdminCredentialPort, AdminCredentialService, AdminForumPreviewPort,
     AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader,
     AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort, AdminRuntimeConfigService,
-    AdminSessionConfig, AdminSessionPort, AdminSessionService, AdminSessionStore, AdminUserPort,
-    AdminUserService, AdminWorldPort, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
-    DeliveryAdminPort, DeliverySentConfirmationPort, DeliverySentProofService,
-    OperationsAlertConsole, OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort,
-    RecoveryCommandPort, RecoveryCommandService, RecoveryReportReader, SettlementCatalogReader,
-    SettlementReportReader,
+    AdminUserPort, AdminUserService, AdminWorldPort, DeliverySentProofService,
+    SettlementCatalogReader,
 };
+use auction_application::auction::{AuctionLifecycleCommandPort, AuctionLifecyclePolicy};
+use auction_application::delivery::{DeliveryAdminPort, DeliverySentConfirmationPort};
+use auction_application::operations::{
+    OperationsAlertConsole, OperationsAlertSourceReader, OperationsAlertStore,
+};
+use auction_application::public::{AdminSessionConfig, AdminSessionPort, AdminSessionStore};
+use auction_application::realtime::RealtimeAdminPort;
+use auction_application::recovery::{
+    RecoveryCommandPort, RecoveryCommandService, RecoveryReportReader,
+};
+use auction_application::sessions::AdminSessionService;
+use auction_application::settlement::SettlementReportReader;
 use auction_config::{AppConfig, TomlRuntimeFileStore};
 use auction_http::AdminApiState;
 use auction_integrations::{
@@ -40,7 +48,7 @@ use super::super::config;
 #[derive(Clone, Copy)]
 struct SystemClock;
 
-impl auction_application::Clock for SystemClock {
+impl auction_application::core::Clock for SystemClock {
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
@@ -51,7 +59,7 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<auction_observability::ProcessMetrics>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 ) -> anyhow::Result<(
     AdminApiState,
     Option<Arc<HeartbeatPublisher>>,
@@ -140,17 +148,17 @@ pub(super) async fn configure_state(
         Some(keyring) => {
             // W1.10：URL 来源改经 Worker control 执行；Admin 不再持有 Cookie、HTTP 客户端或
             // 第二套请求限速器。socket 路径无效时装配明确不可用的端口，不回退到本地直连。
-            let remote: Arc<dyn auction_application::WorkerRemoteReadPort> =
+            let remote: Arc<dyn auction_application::operations::WorkerRemoteReadPort> =
                 match auction_integrations::WorkerRemoteReadClient::new(
                     config.worker_control_socket_path(),
                     std::time::Duration::from_secs(
-                        auction_application::WORKER_REMOTE_READ_TIMEOUT_SECONDS,
+                        auction_application::operations::WORKER_REMOTE_READ_TIMEOUT_SECONDS,
                     ),
                 ) {
                     Ok(client) => Arc::new(client),
                     Err(error) => {
                         let _ = error;
-                        Arc::new(auction_application::UnavailableWorkerRemoteRead)
+                        Arc::new(auction_application::operations::UnavailableWorkerRemoteRead)
                     }
                 };
             let source = auction_integrations::WorkerEquipmentSourceReader::new(remote);

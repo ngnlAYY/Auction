@@ -1,8 +1,9 @@
 //! PostgreSQL delivery Admin 人工命令事务与结算履约联动。
 
-use auction_application::{
+use auction_application::core::RequestHash;
+use auction_application::delivery::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminGuardDecision,
-    DeliveryAdminGuardSnapshot, DeliveryAdminResult, DeliveryAdminSnapshot, RequestHash,
+    DeliveryAdminGuardSnapshot, DeliveryAdminResult, DeliveryAdminSnapshot,
 };
 use chrono::Utc;
 use serde::Serialize;

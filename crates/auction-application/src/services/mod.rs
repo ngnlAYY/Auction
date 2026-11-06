@@ -1,113 +1,13 @@
-#[path = "admin/auction.rs"]
-mod admin_auction;
-#[path = "admin/auction_schedule.rs"]
-mod admin_auction_schedule;
-#[path = "admin/credentials/mod.rs"]
-mod admin_credentials;
-#[path = "admin/delivery_sent.rs"]
-mod admin_delivery_sent;
-#[path = "admin/intake.rs"]
-mod admin_intake;
-#[path = "admin/lot.rs"]
-mod admin_lot;
-#[path = "admin/mail.rs"]
-mod admin_mail;
-#[path = "admin/rules.rs"]
-mod admin_rules;
-#[path = "admin/runtime_config.rs"]
-mod admin_runtime_config;
-#[path = "admin/users/mod.rs"]
-mod admin_users;
-#[path = "admin/worlds.rs"]
-mod admin_worlds;
-#[path = "auction/commands.rs"]
-mod auction;
-#[path = "auction/competition.rs"]
-mod competition;
-#[path = "settlement/funding/mod.rs"]
-mod funding;
-pub use funding::FundingReconciliationService;
-#[path = "settlement/fulfillment/mod.rs"]
-mod fulfillment;
-#[path = "auction/lifecycle/mod.rs"]
-mod lifecycle;
-#[path = "mail/maintenance.rs"]
-mod mail_maintenance;
-#[path = "mail/processing.rs"]
-mod mail_processing;
-mod player_notifications;
-#[path = "realtime/relay.rs"]
-mod realtime_relay;
-mod reconciliation;
-pub use reconciliation::AssetReconciliationService;
-#[path = "recovery/commands.rs"]
-mod recovery;
-#[path = "recovery/health.rs"]
-mod recovery_health;
-mod sessions;
-#[path = "settlement/commands/mod.rs"]
-mod settlement;
-#[path = "mail/user.rs"]
-mod user_mail;
+//! 按限界上下文的自然模块层级。
 
-pub use admin_auction::AdminAuctionCreateService;
-pub use admin_auction_schedule::AdminAuctionScheduleService;
-pub use admin_credentials::{AdminCredentialCheckService, AdminCredentialService};
-pub use admin_delivery_sent::DeliverySentProofService;
-pub use admin_intake::AdminIntakeService;
-pub use admin_lot::AdminLotUpdateService;
-pub use admin_mail::AdminMailService;
-pub use admin_rules::AdminRulesService;
-pub use admin_runtime_config::AdminRuntimeConfigService;
-pub use admin_users::AdminUserService;
-pub use admin_worlds::AdminWorldService;
-pub use auction::{AuctionService, CreateAuctionCommand};
-pub use competition::{
-    CREATE_PROXY_COMMAND_KIND, CompetitionService, CreateProxyCommand, LOWER_PROXY_COMMAND_KIND,
-    LowerProxyCommand, PLACE_BID_COMMAND_KIND, PlaceBidCommand,
-};
-pub use fulfillment::SettlementFulfillmentService;
-pub use lifecycle::AuctionLifecycleService;
-pub use mail_maintenance::{MailboxMaintenanceReport, MailboxMaintenanceService};
-pub use mail_processing::{
-    MAX_SUBMISSION_RECEIPT_BODY_BYTES, MailAuctionIntakeService, MailProcessorConfig,
-    MailProcessorService, SUBMISSION_RECEIPT_SUBJECT, submission_receipt_body,
-    submission_receipt_invalid_reason,
-};
-pub use player_notifications::{
-    MAX_SEASON_REMINDER_BODY_BYTES, MAX_SEASON_REMINDER_ITEMS, MAX_SELLER_SUMMARY_BODY_BYTES,
-    MAX_SELLER_SUMMARY_LOTS, PLAYER_NOTIFICATION_SCAN_LIMIT, PlayerNotificationRun,
-    PlayerNotificationService, SEASON_REMINDER_LEAD_SECONDS, SEASON_REMINDER_SUBJECT,
-    SELLER_SUMMARY_LOOKBACK_SECONDS, SELLER_SUMMARY_SUBJECT, SeasonReminder, SeasonReminderItem,
-    SellerSummary, SellerSummaryLot, group_season_reminders, group_seller_summaries,
-    season_reminder_body, season_reminder_command, season_reminder_invalid_reason,
-    seller_summary_body, seller_summary_command, seller_summary_invalid_reason,
-};
-pub use realtime_relay::{RealtimeRelay, RealtimeRelayBatch, RealtimeRelayConfig};
-pub use recovery::RecoveryCommandService;
-pub use recovery_health::RecoveryHealthService;
-pub use sessions::{
-    AdminSessionService, PublicSessionService, validate_admin_actor, validate_admin_secret,
-};
-pub use settlement::{
-    SettleAuctionCommand, SettlementCommandPort, SettlementService, settlement_claim_command_id,
-    settlement_complete_command_id, settlement_complete_request_hash, settlement_workflow_id,
-};
-pub use user_mail::MailUserService;
-
-#[path = "public/watch.rs"]
-mod lot_watch;
-pub use lot_watch::{OutbidNotice, lot_watch_notification, set_lot_watch};
-#[path = "public/preferences/mod.rs"]
-mod watch_preference;
-pub use watch_preference::set_lot_watch_preference;
-#[path = "public/watch_notification.rs"]
-mod watch_notification;
-pub use watch_notification::{LotWatchPmNotification, lot_watch_pm_notification};
-mod notification_text {
-    include!("public/notification_text.rs");
-}
-pub use notification_text::{format_credits, format_deadline, lot_code};
-
-mod runtime_switches;
-pub use runtime_switches::RuntimeSwitchRefreshService;
+pub mod admin;
+pub mod auction;
+pub mod mail;
+pub mod player_notifications;
+pub mod public;
+pub mod realtime;
+pub mod reconciliation;
+pub mod recovery;
+pub mod runtime_switches;
+pub mod sessions;
+pub mod settlement;

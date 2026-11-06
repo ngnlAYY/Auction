@@ -1,10 +1,10 @@
 //! 应用错误的闭集安全分类；不依赖错误文本，不改变原错误语义。
 
 use super::ApplicationError;
-use crate::{
-    AdminMailTransactionError, AdminRulesTransactionError, CommandLedgerError,
-    CompetitionTransactionError, RecoveryCommandError, RepositoryError, SettlementTransactionError,
-};
+use crate::ports::admin::{AdminMailTransactionError, AdminRulesTransactionError};
+use crate::ports::core::{CommandLedgerError, CompetitionTransactionError, RepositoryError};
+use crate::ports::recovery::RecoveryCommandError;
+use crate::ports::settlement::SettlementTransactionError;
 
 impl ApplicationError {
     /// 返回不含秘密与正文的闭集安全分类，仅用于诊断。
@@ -112,17 +112,25 @@ impl ApplicationError {
             Self::OperationsAlert(_) => "operations_alert_error",
             Self::PlayerNotification(_) => "player_notification_error",
             Self::DeliveryDisposition(error) => match error {
-                crate::DeliveryDispositionCommandError::Invalid => "delivery_disposition_invalid",
-                crate::DeliveryDispositionCommandError::NotFound => "delivery_not_found",
-                crate::DeliveryDispositionCommandError::Stale => "delivery_stale",
-                crate::DeliveryDispositionCommandError::AlreadyDisposed => {
+                crate::ports::delivery::DeliveryDispositionCommandError::Invalid => {
+                    "delivery_disposition_invalid"
+                }
+                crate::ports::delivery::DeliveryDispositionCommandError::NotFound => {
+                    "delivery_not_found"
+                }
+                crate::ports::delivery::DeliveryDispositionCommandError::Stale => "delivery_stale",
+                crate::ports::delivery::DeliveryDispositionCommandError::AlreadyDisposed => {
                     "delivery_already_disposed"
                 }
-                crate::DeliveryDispositionCommandError::NotAcknowledgeable => {
+                crate::ports::delivery::DeliveryDispositionCommandError::NotAcknowledgeable => {
                     "delivery_not_acknowledgeable"
                 }
-                crate::DeliveryDispositionCommandError::CommandConflict => "command_conflict",
-                crate::DeliveryDispositionCommandError::Unavailable => "repository_failed",
+                crate::ports::delivery::DeliveryDispositionCommandError::CommandConflict => {
+                    "command_conflict"
+                }
+                crate::ports::delivery::DeliveryDispositionCommandError::Unavailable => {
+                    "repository_failed"
+                }
             },
         }
     }

@@ -6,13 +6,15 @@ use super::{
     AdminUserService, create_hash, mutation_hash, revert_hash, validate_create, validate_mutation,
     validate_revert,
 };
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::admin::{
     AdminLoginKeyIssuer, AdminLoginKeyOpener, AdminRenameRevertCommand, AdminRenameRevertWrite,
     AdminUserCommandKind, AdminUserCommandResult, AdminUserCreateCommand, AdminUserCreateWrite,
     AdminUserError, AdminUserKeyMode, AdminUserKeyWrite, AdminUserMutationAction,
     AdminUserMutationCommand, AdminUserMutationResult, AdminUserMutationWrite, AdminUserStore,
-    ApplicationError,
 };
 
 impl<S, I, O> AdminUserService<S, I, O>
@@ -130,16 +132,16 @@ where
                 result.user.forum_account_id.as_deref() == expected_forum_account_id.as_deref()
             }
             AdminUserMutationAction::RevokeKey => {
-                result.user.key_status == crate::AdminUserKeyStatus::Revoked
+                result.user.key_status == crate::ports::admin::AdminUserKeyStatus::Revoked
             }
             AdminUserMutationAction::ReissueKey => {
-                result.user.key_status == crate::AdminUserKeyStatus::Active
+                result.user.key_status == crate::ports::admin::AdminUserKeyStatus::Active
             }
             AdminUserMutationAction::Blacklist => {
-                result.user.status == crate::AdminUserStatus::Blacklisted
+                result.user.status == crate::ports::admin::AdminUserStatus::Blacklisted
             }
             AdminUserMutationAction::Unblacklist => {
-                result.user.status == crate::AdminUserStatus::Active
+                result.user.status == crate::ports::admin::AdminUserStatus::Active
             }
         };
         if !result.validate()

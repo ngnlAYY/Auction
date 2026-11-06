@@ -6,9 +6,10 @@ use crate::database::storage_error_from;
 use super::mapping::{digest_from_bytes, map_batch_items, request_hash_from_bytes};
 use crate::database::operations_alert::delivery::terminalize_prepared_delivery;
 use crate::database::operations_alert::{MAX_ATTEMPTS, storage_error};
-use auction_application::{
-    ApplicationError, OperationsAlertBatchClaim, OperationsAlertClaimRequest, OperationsAlertError,
-    body_digest, canonical_summary,
+use auction_application::core::ApplicationError;
+use auction_application::operations::{
+    OperationsAlertBatchClaim, OperationsAlertClaimRequest, OperationsAlertError, body_digest,
+    canonical_summary,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -102,8 +103,9 @@ pub(super) async fn reclaim_batch(
     .await
     .map_err(|error| storage_error_from(error, "读取 operations alert 批次条目失败"))?;
     let items = map_batch_items(item_rows)?;
-    let summary = canonical_summary(&items, auction_application::MAX_OPERATIONS_ALERT_BODY_BYTES)
-        .map_err(ApplicationError::from)?;
+    let summary =
+        canonical_summary(&items, auction_application::operations::MAX_OPERATIONS_ALERT_BODY_BYTES)
+            .map_err(ApplicationError::from)?;
     let request_hash = request_hash_from_bytes(request_digest)?;
     let stored_body_digest = digest_from_bytes(body_digest_value)?;
     if body_digest(&summary) != stored_body_digest {
@@ -150,7 +152,7 @@ pub(super) async fn reclaim_batch(
         attempt_count: next_attempt,
     };
     claim
-        .validate(auction_application::MAX_OPERATIONS_ALERT_BODY_BYTES)
+        .validate(auction_application::operations::MAX_OPERATIONS_ALERT_BODY_BYTES)
         .map_err(ApplicationError::from)?;
     Ok(Some(claim))
 }

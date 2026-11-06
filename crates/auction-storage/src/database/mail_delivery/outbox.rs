@@ -1,8 +1,8 @@
 //! PostgreSQL 普通 delivery 入队、幂等复读和版本化 payload。
 
-use auction_application::{
+use auction_application::core::RepositoryError;
+use auction_application::mail::{
     MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailDeliveryResult,
-    RepositoryError,
 };
 use chrono::Utc;
 use serde_json::{Value, json};
@@ -16,7 +16,7 @@ use super::common::{MailDeliveryTransactionError, map_storage_error, repository_
 pub(super) async fn enqueue_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
     command: &MailDeliveryCommand,
-    notifications: &dyn auction_application::NotificationRecorder,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<MailDeliveryResult, RepositoryError> {
     insert_postgres(pool, command, None, notifications).await
 }
@@ -24,7 +24,7 @@ pub(super) async fn enqueue_postgres(
 pub(super) async fn prepare_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
     command: &MailDeliveryCommand,
-    notifications: &dyn auction_application::NotificationRecorder,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<MailDeliveryResult, RepositoryError> {
     insert_postgres(pool, command, Some("prepared"), notifications).await
 }
@@ -33,7 +33,7 @@ async fn insert_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
     command: &MailDeliveryCommand,
     prepared_status: Option<&str>,
-    notifications: &dyn auction_application::NotificationRecorder,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<MailDeliveryResult, RepositoryError> {
     let owner = if command.origin == MailDeliveryOrigin::MailIntake {
         auction_observability::DatabaseTransactionOwner::MailIntake
@@ -67,7 +67,7 @@ pub(crate) async fn enqueue_in_transaction(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command: &MailDeliveryCommand,
     prepared_status: Option<&str>,
-    notifications: Option<&dyn auction_application::NotificationRecorder>,
+    notifications: Option<&dyn auction_application::notification_metrics::NotificationRecorder>,
 ) -> Result<MailDeliveryResult, MailDeliveryTransactionError> {
     super::validation::validate_command(command)
         .map_err(|_| repository_error("MoogleMail delivery 命令无效"))?;
@@ -102,7 +102,10 @@ pub(crate) async fn enqueue_in_transaction(
         && let Some(notifications) = notifications
         && let Some(kind) = notification_kind(command)
     {
-        notifications.observe_stage(kind, auction_application::NotificationStage::Created);
+        notifications.observe_stage(
+            kind,
+            auction_application::notification_metrics::NotificationStage::Created,
+        );
     }
 
     let row = sqlx::query(
@@ -197,10 +200,10 @@ fn matching_origin_id(stored: &str, command: &MailDeliveryCommand) -> bool {
 pub(super) async fn enqueue_within_limit_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
     command: &MailDeliveryCommand,
-    limit: auction_application::MailNoticeLimit,
-    notifications: &dyn auction_application::NotificationRecorder,
-) -> Result<auction_application::MailNoticeEnqueue, RepositoryError> {
-    use auction_application::MailNoticeEnqueue;
+    limit: auction_application::mail::MailNoticeLimit,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
+) -> Result<auction_application::mail::MailNoticeEnqueue, RepositoryError> {
+    use auction_application::mail::MailNoticeEnqueue;
 
     if limit.maximum == 0 {
         let result = enqueue_postgres(pool, command, notifications).await?;
@@ -243,7 +246,7 @@ pub(super) async fn enqueue_within_limit_postgres(
                     if let Some(kind) = notification_kind(command) {
                         notifications.observe_stage(
                             kind,
-                            auction_application::NotificationStage::Suppressed,
+                            auction_application::notification_metrics::NotificationStage::Suppressed,
                         );
                     }
                     return Ok(MailNoticeEnqueue::Suppressed);
@@ -263,8 +266,8 @@ pub(super) async fn enqueue_within_limit_postgres(
 /// 由已校验命令识别通知种类；Return/Take 不是通知。
 pub(crate) fn notification_kind(
     command: &MailDeliveryCommand,
-) -> Option<auction_application::NotificationKind> {
-    auction_application::NotificationKind::from_delivery(
+) -> Option<auction_application::notification_metrics::NotificationKind> {
+    auction_application::notification_metrics::NotificationKind::from_delivery(
         command.origin.as_str(),
         Some(command.operation.as_str()),
         command.template.map(|template| template.as_str()),

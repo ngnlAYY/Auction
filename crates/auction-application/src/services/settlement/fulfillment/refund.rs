@@ -2,17 +2,16 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use super::{
-    SettlementFulfillmentService, internal::evidence_request, validation::repository_error,
-};
-use crate::diagnostics::{
+use super::{internal::evidence_request, validation::repository_error};
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, diagnostic_id, record_error,
 };
-use crate::{
-    ApplicationError, SettlementFulfillmentClaim,
-    SettlementFulfillmentPreparationOutcome as Outcome, SettlementInternalCommand,
-    SettlementInternalCommitOutcome,
+use crate::ports::settlement::{
+    SettlementFulfillmentClaim, SettlementFulfillmentPreparationOutcome as Outcome,
+    SettlementInternalCommand, SettlementInternalCommitOutcome,
 };
+use crate::services::settlement::SettlementFulfillmentService;
 
 impl SettlementFulfillmentService {
     #[tracing::instrument(

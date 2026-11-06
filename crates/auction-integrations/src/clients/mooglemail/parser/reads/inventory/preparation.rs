@@ -75,7 +75,8 @@ impl MoogleMailParser {
         let fail = || protocol(operation, world);
         let mut wanted = HashSet::with_capacity(requested_ids.len());
         for eid in requested_ids {
-            if !auction_application::valid_external_positive_id(eid) || !wanted.insert(eid.as_str())
+            if !auction_application::settlement::valid_external_positive_id(eid)
+                || !wanted.insert(eid.as_str())
             {
                 return Err(fail());
             }

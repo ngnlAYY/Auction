@@ -1,6 +1,6 @@
 //! 人工 Sent 准入的两种准入与阻断项回归；只覆盖纯判定，不连接数据库或外部邮件。
 
-use auction_application::{
+use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, ManualSentEvidence, SentAdminFailure,
     SentAdmissionBlocker, SentAdmissionSnapshot, SentCredential, SentDelivery, SentEquipment,
     SentFulfillment, SentFundingAccount, SentFundingAllocation, SentFundingLot, SentLot,

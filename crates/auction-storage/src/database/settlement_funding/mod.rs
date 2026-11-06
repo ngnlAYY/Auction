@@ -24,7 +24,9 @@ pub use obligations::{
     retain_funded_seller,
 };
 
-use auction_application::{FundingError, FundingMutation, SettlementInternalEvidenceSnapshot};
+use auction_application::settlement::{
+    FundingError, FundingMutation, SettlementInternalEvidenceSnapshot,
+};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 

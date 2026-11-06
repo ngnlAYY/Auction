@@ -33,7 +33,9 @@ pub(super) async fn admin_health_ready(State(state): State<AdminApiState>) -> Re
     health_ready_response(probe_ready(state.readiness()).await)
 }
 
-async fn probe_ready(readiness: Option<&dyn auction_application::ProcessReadinessPort>) -> bool {
+async fn probe_ready(
+    readiness: Option<&dyn auction_application::operations::ProcessReadinessPort>,
+) -> bool {
     match readiness {
         Some(readiness) => readiness.check().await.is_ok(),
         None => false,

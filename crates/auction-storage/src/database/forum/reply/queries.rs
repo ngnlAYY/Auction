@@ -4,9 +4,11 @@
 use crate::database::storage_error_from;
 
 #[cfg(feature = "postgres")]
-use auction_application::{
-    ApplicationError, ForumActiveProxy, ForumCommandOutcome, ForumCommandStatus, ForumLotTarget,
-    ForumReplyPhase, ForumReplyTopic,
+use auction_application::core::ApplicationError;
+#[cfg(feature = "postgres")]
+use auction_application::forum::{
+    ForumActiveProxy, ForumCommandOutcome, ForumCommandStatus, ForumLotTarget, ForumReplyPhase,
+    ForumReplyTopic,
 };
 #[cfg(feature = "postgres")]
 use auction_domain::{AuctionId, LotId, UserId};
@@ -216,7 +218,7 @@ pub(super) async fn reply_cursor_postgres(
     store: &PostgresStore,
     auction_id: AuctionId,
     thread_id: &str,
-) -> Result<Option<auction_application::ForumTopicCursor>, ApplicationError> {
+) -> Result<Option<auction_application::forum::ForumTopicCursor>, ApplicationError> {
     use sqlx::Row;
 
     // 楼层最高的已导入命令就是增量扫描的起点；pending 也计入，因为重扫该页仍然安全。
@@ -243,7 +245,7 @@ pub(super) async fn reply_cursor_postgres(
         let _ = error;
         storage_error("论坛回帖游标楼层无效")
     })?;
-    let cursor = auction_application::ForumTopicCursor { post_id, post_number };
+    let cursor = auction_application::forum::ForumTopicCursor { post_id, post_number };
     cursor.validate().map_err(storage_error)?;
     Ok(Some(cursor))
 }

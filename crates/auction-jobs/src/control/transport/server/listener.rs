@@ -1,6 +1,6 @@
 //! Worker control Unix socket 的 peer 凭据过滤监听器。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use super::*;
 use crate::worker::diagnostics;

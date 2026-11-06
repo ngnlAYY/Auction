@@ -7,10 +7,11 @@ use std::{
 };
 
 use anyhow::Context;
-use auction_application::{
+use auction_application::core::lower_hex;
+use auction_application::settlement::{
     FundingCashGateProvider, FundingCommitOutcome, FundingPreview, FundingReconciliationCommand,
     FundingReconciliationReader, FundingReconciliationService, FundingRecordOnlyCommand,
-    FundingRecordOnlyStore, lower_hex,
+    FundingRecordOnlyStore,
 };
 use auction_config::AppConfig;
 use auction_storage::DatabaseStore;

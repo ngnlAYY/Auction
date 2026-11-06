@@ -5,7 +5,7 @@ use super::{
     receipt::{store_receipt, validate_receipt},
     *,
 };
-use auction_application::FundingCollectedReceipt;
+use auction_application::settlement::FundingCollectedReceipt;
 use auction_domain::{FundingSplit, SettlementAmount};
 use sha2::{Digest, Sha256};
 

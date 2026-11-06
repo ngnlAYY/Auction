@@ -6,7 +6,7 @@
 
 use std::{path::Path, time::UNIX_EPOCH};
 
-use auction_application::{AdminRuntimeDocument, WorkerHotConfig};
+use auction_application::admin::{AdminRuntimeDocument, WorkerHotConfig};
 use chrono::Utc;
 
 use crate::{ConfigError, WorkerConfig};
@@ -65,7 +65,7 @@ pub fn load_worker_hot_config(
 /// 让首次热读取与启动行为一致。
 pub fn worker_hot_config(config: &WorkerConfig) -> WorkerHotConfig {
     WorkerHotConfig {
-        mail: auction_application::WorkerMailHotConfig {
+        mail: auction_application::admin::WorkerMailHotConfig {
             batch_size: config.mooglemail.batch_size,
             jitter_seconds: config.mooglemail.jitter_seconds,
             fetch_attempts: config.mooglemail.fetch_attempts,
@@ -77,13 +77,13 @@ pub fn worker_hot_config(config: &WorkerConfig) -> WorkerHotConfig {
             retry_maximum_seconds: config.mooglemail.retry_maximum_seconds,
             send_intervals: config.mooglemail.send_intervals,
         },
-        forum: auction_application::WorkerForumHotConfig {
+        forum: auction_application::admin::WorkerForumHotConfig {
             batch_size: config.forum.batch_size,
             poll_interval_seconds: config.forum.poll_interval_seconds,
             jitter_seconds: config.forum.jitter_seconds,
             item_timeout_seconds: config.forum.item_timeout_seconds,
         },
-        delivery: auction_application::WorkerDeliveryHotConfig {
+        delivery: auction_application::admin::WorkerDeliveryHotConfig {
             batch_limit: config.delivery.batch_limit,
             poll_interval_seconds: config.delivery.poll_interval_seconds,
             jitter_seconds: config.delivery.jitter_seconds,
@@ -120,10 +120,10 @@ mod tests {
         path::{Path, PathBuf},
     };
 
-    use auction_application::{
-        AdminRuntimeDocument, AdminRuntimeMailConfig, AdminRuntimeOperationsConfig,
-        DeliverySendIntervals, WorkerHotConfig,
+    use auction_application::admin::{
+        AdminRuntimeDocument, AdminRuntimeMailConfig, AdminRuntimeOperationsConfig, WorkerHotConfig,
     };
+    use auction_application::delivery::DeliverySendIntervals;
     use uuid::Uuid;
 
     use self::parent::*;

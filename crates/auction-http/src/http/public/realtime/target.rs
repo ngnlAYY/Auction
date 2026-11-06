@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use uuid::Uuid;
 
-use auction_application::MAX_PUBLIC_EVENT_PAGE_SIZE;
+use auction_application::realtime::MAX_PUBLIC_EVENT_PAGE_SIZE;
 
 pub(super) const DEFAULT_PUBLIC_EVENT_PAGE_SIZE: i64 = 100;
 

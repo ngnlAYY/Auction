@@ -1,7 +1,7 @@
 //! MoogleMail 单封业务 envelope 的有界重试与安全失败分类。
 
-use auction_application::MailProcessingRetryability;
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::MailProcessingRetryability;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::WorkerRetryKind;
 
 use super::*;
@@ -17,7 +17,7 @@ pub(super) async fn process_with_retry(
     business: MailMessage,
     config: MailPollRuntimeConfig,
     metric_context: MailPollMetricContext,
-    pending_diagnostics: &mut Vec<auction_application::PendingMailEquipmentDiagnostic>,
+    pending_diagnostics: &mut Vec<auction_application::mail::PendingMailEquipmentDiagnostic>,
     decision_diagnostic: &mut Option<usize>,
 ) -> Result<MailProcessingDecision, MailProcessFailure> {
     let mut original = Some(business);

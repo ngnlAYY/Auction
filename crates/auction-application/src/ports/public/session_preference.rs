@@ -5,8 +5,12 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{PublicSessionIdentity, RequestHash, SessionError};
+use crate::errors::SessionError;
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::core::RequestHash;
+use crate::ports::public::PublicSessionIdentity;
 
 /// 后续登录采用的账号偏好；独立版本从 1 开始，不改变用户认证版本。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

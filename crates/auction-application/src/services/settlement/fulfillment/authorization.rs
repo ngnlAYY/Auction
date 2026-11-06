@@ -9,12 +9,14 @@ use super::evidence::validate_balance_evidence;
 use super::intent::build_delivery_intent;
 use super::model::SettlementDeliveryIntent;
 use super::validation::repository_error;
-use crate::diagnostics::{
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, diagnostic_id, record_error,
 };
-use crate::{
-    ApplicationError, Clock, FundingPolicy, InternalEquipmentTarget, InternalEvidencePurpose,
-    InternalEvidenceRequest, PreparedSettlementInternalEvidence, SettlementFulfillmentClaim,
+use crate::ports::core::Clock;
+use crate::ports::settlement::{
+    FundingPolicy, InternalEquipmentTarget, InternalEvidencePurpose, InternalEvidenceRequest,
+    PreparedSettlementInternalEvidence, SettlementFulfillmentClaim,
     SettlementFulfillmentCustodyReader, SettlementFulfillmentEvidenceReader,
     SettlementFulfillmentOperation, SettlementFulfillmentPhaseResult,
     SettlementFulfillmentRecipientReader, SettlementFulfillmentState, SettlementFulfillmentStore,

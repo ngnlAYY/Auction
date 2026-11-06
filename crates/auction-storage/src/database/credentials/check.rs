@@ -1,8 +1,7 @@
 //! 凭据校验专用只读信封查询；不取得 Worker 写入所有权，不开启跨网络事务。
 
-use auction_application::{
-    AdminCredentialCheckRecord, AdminCredentialCheckStore, ApplicationFuture,
-};
+use auction_application::admin::{AdminCredentialCheckRecord, AdminCredentialCheckStore};
+use auction_application::auction::ApplicationFuture;
 use uuid::Uuid;
 
 use super::{AdminCredentialError, DatabaseStore, admin_error};

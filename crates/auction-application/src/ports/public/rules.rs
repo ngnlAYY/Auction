@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// 公共端规则文档的默认语言。
 pub const PUBLIC_RULES_DEFAULT_LOCALE: &str = "en";

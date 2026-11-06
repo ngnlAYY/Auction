@@ -7,7 +7,6 @@ use uuid::Uuid;
 
 use auction_domain::CommandId;
 
-use super::super::{ApplicationFuture, TransactionFuture, TransactionPolicy};
 use super::commands::{
     AdminMailPollTriggerCommand, AdminMailPollingCommand, AdminMailStoredCommand,
 };
@@ -16,6 +15,8 @@ use super::model::{
     AdminMailDashboardSnapshot, AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakePage,
     AdminMailPollState, AdminMailPollStateRequest,
 };
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{TransactionFuture, TransactionPolicy};
 
 /// Admin 邮件只读端口。
 pub trait AdminMailReader: Send + Sync {

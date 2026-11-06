@@ -1,10 +1,11 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::{RealtimeReplayCommand, RequestHash};
+use auction_application::core::RequestHash;
+use auction_application::realtime::RealtimeReplayCommand;
 use auction_contracts::{
     AdminRealtimeReplayEventResponse, AdminRealtimeReplayRequest, AdminRealtimeReplayResponse,
     ApiResponse,

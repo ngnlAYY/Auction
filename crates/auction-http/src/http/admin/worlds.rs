@@ -1,14 +1,15 @@
 //! Admin 业务世界目录与启停 HTTP 适配器。
 
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::{
-    AdminWorldError, AdminWorldSetEnabledCommand, ApplicationError, CommandLedgerError,
-    CompetitionTransactionError, WorldSnapshot,
+use auction_application::admin::{AdminWorldError, AdminWorldSetEnabledCommand};
+use auction_application::auction::WorldSnapshot;
+use auction_application::core::{
+    ApplicationError, CommandLedgerError, CompetitionTransactionError,
 };
 use auction_contracts::{
     AdminWorldListResponse, AdminWorldResponse, AdminWorldSetEnabledRequest,

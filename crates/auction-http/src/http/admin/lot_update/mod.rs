@@ -2,17 +2,15 @@
 //! 这里只解析旧 HTTP 请求、会话和 CSRF，并把动作映射到应用命令；版本 fence、幂等、锁、
 //! 预览修订和 withdrawn-return 义务全部由应用/存储层负责。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
 use super::AdminApiState;
-use auction_application::{
-    AdminLotAction, AdminLotUpdateCommand, AdminLotUpdateError, ApplicationError,
-    CompetitionTransactionError, RequestHash,
-};
+use auction_application::admin::{AdminLotAction, AdminLotUpdateCommand, AdminLotUpdateError};
+use auction_application::core::{ApplicationError, CompetitionTransactionError, RequestHash};
 use auction_contracts::{AdminLotUpdateRequest, AdminLotUpdateResponse, ApiResponse};
 use auction_domain::{CommandId, LotId};
 use axum::{
@@ -133,10 +131,12 @@ fn map_error(error: ApplicationError) -> Response {
             super::api_error(StatusCode::CONFLICT, "invalid_lot_state", "拍品当前状态不允许修改")
                 .into_response()
         }
-        ApplicationError::CommandLedger(auction_application::CommandLedgerError::Conflict)
+        ApplicationError::CommandLedger(
+            auction_application::core::CommandLedgerError::Conflict,
+        )
         | ApplicationError::CompetitionTransaction(CompetitionTransactionError::Conflict)
         | ApplicationError::CompetitionTransaction(CompetitionTransactionError::CommandLedger(
-            auction_application::CommandLedgerError::Conflict,
+            auction_application::core::CommandLedgerError::Conflict,
         )) => super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
         ApplicationError::CapabilityUnavailable(_) => super::api_error(

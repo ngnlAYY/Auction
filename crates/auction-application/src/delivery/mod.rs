@@ -1,0 +1,28 @@
+//! delivery 上下文公开 API。
+
+pub use crate::ports::delivery::{
+    AuthorizedDeliveryPreparation, AuthorizedDeliverySend, DELIVERY_ADMIN_CATEGORIES,
+    DELIVERY_ADMIN_RETIREMENT_REASONS, DELIVERY_ADMIN_SUPPRESSION_REASONS, DELIVERY_ADMIN_WORLDS,
+    DeliveryAcknowledgementCommand, DeliveryAcknowledgementResult, DeliveryAdminAction,
+    DeliveryAdminAttempt, DeliveryAdminCommand, DeliveryAdminCustody, DeliveryAdminDetail,
+    DeliveryAdminDisposition, DeliveryAdminError, DeliveryAdminGuardBlocker,
+    DeliveryAdminGuardDecision, DeliveryAdminGuardSnapshot, DeliveryAdminListRequest,
+    DeliveryAdminObligation, DeliveryAdminPage, DeliveryAdminPort, DeliveryAdminRecovery,
+    DeliveryAdminResult, DeliveryAdminSentEvidence, DeliveryAdminSnapshot, DeliveryAdminTransition,
+    DeliveryClaimExclusions, DeliveryDispositionCommandError, DeliveryDispositionPort,
+    DeliveryDispositionRecord, DeliveryFenceOutcome, DeliveryPreparation,
+    DeliveryPreparedExpectation, DeliveryPreparedSend, DeliveryRecipientExclusion,
+    DeliverySendCredentialBinding, DeliverySendExpectation, DeliverySendIntervals,
+    DeliverySendResult, DeliverySentConfirmationPort, DeliveryTakeExpectation, DeliveryTransport,
+    DeliveryTransportError, DeliveryWakeup, DeliveryWorkClaim, DeliveryWorkStore,
+    MAX_DELIVERY_ADMIN_OFFSET, MAX_DELIVERY_ADMIN_PAGE_SIZE, MAX_DELIVERY_ADMIN_RECIPIENT_LEN,
+    MAX_DELIVERY_ADMIN_TEMPLATE_LEN, MAX_DELIVERY_COD, MAX_PLAYER_SUPPORT_ROWS,
+    MAX_PLAYER_SUPPORT_USER_LEN, ManualSentEvidence, PlayerSupportBid, PlayerSupportBundle,
+    PlayerSupportDeal, PlayerSupportNotification, PlayerSupportObligation, PlayerSupportReference,
+    PlayerSupportRequest, PlayerSupportSelector, PlayerSupportUser, SentAdminFailure,
+    SentAdmission, SentAdmissionBlocker, SentAdmissionSnapshot, SentConfirmationCommand,
+    SentConfirmationPreview, SentConfirmationResult, SentCredential, SentDelivery, SentEquipment,
+    SentFulfillment, SentFundingAccount, SentFundingAllocation, SentFundingLot, SentLot,
+    SentObligation, SentPayload, SentPayloadVariables, SentRecovery, SentResultMetadata,
+    SentSecretRef, SentSettlement,
+};

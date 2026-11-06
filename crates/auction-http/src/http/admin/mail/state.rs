@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
-use auction_application::{AdminMailPollState, AdminMailPollStateRequest, ApplicationError};
+use auction_application::admin::{AdminMailPollState, AdminMailPollStateRequest};
+use auction_application::core::ApplicationError;
 use auction_contracts::{AdminMailPollingResponse, AdminMailStateResponse, ApiResponse};
 use axum::{
     Json,

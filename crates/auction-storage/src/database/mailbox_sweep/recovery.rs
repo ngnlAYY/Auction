@@ -1,10 +1,10 @@
 //! 冻结账号与精确恢复门；旧尝试、过期 owner 与重复 MID 都不能冒充当前事实。
 
 use crate::database::TrackedTransaction as Transaction;
-use auction_application::{
+use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
-    sent_list_minute_start,
 };
+use auction_application::mail::sent_list_minute_start;
 use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
 use sqlx::Postgres;
@@ -33,7 +33,9 @@ pub(super) async fn lock_observation(
     }
     crate::lock_mail_runtime_generation(
         tx,
-        &auction_application::MailRuntimeBinding { generation: observed.runtime_generation },
+        &auction_application::settlement::MailRuntimeBinding {
+            generation: observed.runtime_generation,
+        },
     )
     .await?;
     Ok(())
@@ -55,7 +57,9 @@ pub(super) async fn lock_take_observation(
     }
     crate::lock_mail_runtime_generation(
         tx,
-        &auction_application::MailRuntimeBinding { generation: observed.runtime_generation },
+        &auction_application::settlement::MailRuntimeBinding {
+            generation: observed.runtime_generation,
+        },
     )
     .await?;
     Ok(())

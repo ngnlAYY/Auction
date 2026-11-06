@@ -1,6 +1,6 @@
 //! 履约领取时投影不可变结算明细；正文不读取现行策略或可变竞价状态。
 
-use auction_application::RepositoryError;
+use auction_application::core::RepositoryError;
 use auction_domain::{LotId, SettlementAmount, SettlementLine, SettlementMode};
 use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;

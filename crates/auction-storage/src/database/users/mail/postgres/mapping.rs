@@ -2,9 +2,10 @@
 
 use crate::database::audit_health::AuditWriteResult as _;
 use crate::database::users::mail::repository_error;
-use auction_application::{
-    ApplicationError, MailUserCommandKind, MailUserRebindCommand, MailUserRegisterWrite,
-    MailUserRekeyWrite, MailUserResult, MailUserResultCode, RequestHash,
+use auction_application::core::{ApplicationError, RequestHash};
+use auction_application::mail::{
+    MailUserCommandKind, MailUserRebindCommand, MailUserRegisterWrite, MailUserRekeyWrite,
+    MailUserResult, MailUserResultCode,
 };
 use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
@@ -119,7 +120,7 @@ pub(super) fn parse_mail_command(
     let expected_hash = request_hash.as_bytes();
     let hashes_match: bool = stored_hash.as_slice().ct_eq(expected_hash.as_slice()).into();
     if kind != expected_kind.as_str() || !hashes_match {
-        return Err(auction_application::MailProcessingError::CommandConflict.into());
+        return Err(auction_application::mail::MailProcessingError::CommandConflict.into());
     }
     let user_id: Option<Uuid> = row.try_get("user_id").map_err(map_storage_error)?;
     let code: String = row.try_get("result_code").map_err(map_storage_error)?;

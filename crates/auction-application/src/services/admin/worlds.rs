@@ -2,12 +2,17 @@
 
 use std::sync::Arc;
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::admin::{
     ADMIN_WORLD_SET_ENABLED_COMMAND_KIND, AdminWorldError, AdminWorldPort,
-    AdminWorldSetEnabledCommand, AdminWorldTransaction, ApplicationError, ApplicationFuture,
-    CompetitionTransaction, StoredCommand, TransactionPolicy, TransactionRunner, WorldReader,
-    WorldSnapshot, admin_world_aggregate_id,
+    AdminWorldSetEnabledCommand, AdminWorldTransaction, admin_world_aggregate_id,
+};
+use crate::ports::auction::{ApplicationFuture, WorldReader, WorldSnapshot};
+use crate::ports::core::{
+    CompetitionTransaction, StoredCommand, TransactionPolicy, TransactionRunner,
 };
 
 /// 将业务世界状态、幂等账本和追加式审计收口到同一事务的应用服务。
@@ -134,7 +139,7 @@ fn replay(
     stored: StoredCommand,
     command: &AdminWorldSetEnabledCommand,
     aggregate_id: uuid::Uuid,
-    request_hash: crate::RequestHash,
+    request_hash: crate::ports::core::RequestHash,
 ) -> Result<WorldSnapshot, ApplicationError> {
     if !stored.matches_request(ADMIN_WORLD_SET_ENABLED_COMMAND_KIND, aggregate_id, request_hash) {
         return Err(AdminWorldError::CommandConflict.into());

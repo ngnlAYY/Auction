@@ -3,7 +3,7 @@
 //! 列表只会显示截断后的收件人，完整身份必须来自详情；这两个 helper 只回答
 //! “列表是否可能指同一收件人/同一发送分钟”，不构成发送或领取证明。
 
-use auction_application::{mail_recipient_is_list_projection, sent_list_minute_start};
+use auction_application::mail::{mail_recipient_is_list_projection, sent_list_minute_start};
 use chrono::{DateTime, Utc};
 
 fn at(value: &str) -> DateTime<Utc> {

@@ -3,9 +3,12 @@
 
 use std::sync::Arc;
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticDisposition, DiagnosticError};
-use auction_application::{
-    Clock, MailMessage, MailPollBatch, MailPollClaim, MailPollCompletion, MailPollProgressStage,
+use auction_application::core::Clock;
+use auction_application::core::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError,
+};
+use auction_application::mail::{
+    MailMessage, MailPollBatch, MailPollClaim, MailPollCompletion, MailPollProgressStage,
     MailProcessingDecision, MailProcessor,
 };
 use auction_observability::WorkerResult;
@@ -205,8 +208,8 @@ where
         super::types::observe_budget(
             &world_id,
             external_metrics.as_ref(),
-            auction_application::MailPhase::PollBatch,
-            auction_application::MailBudget::Time,
+            auction_application::external_metrics::MailPhase::PollBatch,
+            auction_application::external_metrics::MailBudget::Time,
         );
         record_failure(
             store,
@@ -242,8 +245,8 @@ where
             super::types::observe_budget(
                 &world_id,
                 external_metrics.as_ref(),
-                auction_application::MailPhase::PollBatch,
-                auction_application::MailBudget::Time,
+                auction_application::external_metrics::MailPhase::PollBatch,
+                auction_application::external_metrics::MailBudget::Time,
             );
             worker_diagnostics::warn(
                 "mail_poll",
@@ -307,8 +310,8 @@ where
             super::types::observe_budget(
                 &world_id,
                 external_metrics.as_ref(),
-                auction_application::MailPhase::PollBatch,
-                auction_application::MailBudget::Time,
+                auction_application::external_metrics::MailPhase::PollBatch,
+                auction_application::external_metrics::MailBudget::Time,
             );
             budget_exhausted = true;
             break;
@@ -328,8 +331,8 @@ where
                 super::types::observe_budget(
                     &world_id,
                     external_metrics.as_ref(),
-                    auction_application::MailPhase::PollBatch,
-                    auction_application::MailBudget::Time,
+                    auction_application::external_metrics::MailPhase::PollBatch,
+                    auction_application::external_metrics::MailBudget::Time,
                 );
                 worker_diagnostics::warn(
                     "mail_poll",
@@ -367,8 +370,8 @@ where
             super::types::observe_budget(
                 &world_id,
                 external_metrics.as_ref(),
-                auction_application::MailPhase::PollBatch,
-                auction_application::MailBudget::Time,
+                auction_application::external_metrics::MailPhase::PollBatch,
+                auction_application::external_metrics::MailBudget::Time,
             );
             budget_exhausted = true;
             break;
@@ -425,8 +428,8 @@ where
                         super::types::observe_budget(
                             &world_id,
                             external_metrics.as_ref(),
-                            auction_application::MailPhase::PollBatch,
-                            auction_application::MailBudget::Time,
+                            auction_application::external_metrics::MailPhase::PollBatch,
+                            auction_application::external_metrics::MailBudget::Time,
                         );
                         worker_diagnostics::warn(
                             "mail_poll",

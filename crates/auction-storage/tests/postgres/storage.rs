@@ -8,7 +8,7 @@
 
 use crate::support;
 
-use auction_application::{PublicPriceHistoryReader, WorldReader};
+use auction_application::auction::{PublicPriceHistoryReader, WorldReader};
 use auction_storage::postgres_expected_migration_version;
 use chrono::Utc;
 
@@ -89,7 +89,7 @@ async fn postgres_clones_migrated_template_per_test() {
 /// 上限内的登录不注销任何已有会话。
 #[tokio::test]
 async fn postgres_public_login_keeps_sessions_below_the_limit() {
-    use auction_application::{PublicSessionRecord, PublicSessionStore};
+    use auction_application::public::{PublicSessionRecord, PublicSessionStore};
 
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
@@ -135,7 +135,7 @@ async fn postgres_public_login_keeps_sessions_below_the_limit() {
 /// 满额登录注销最久未活动的会话，保留记录并成功建立新会话；用户行锁内串行化。
 #[tokio::test]
 async fn postgres_public_login_evicts_least_recently_active_session_at_the_limit() {
-    use auction_application::{PublicSessionRecord, PublicSessionStore};
+    use auction_application::public::{PublicSessionRecord, PublicSessionStore};
 
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
@@ -273,7 +273,7 @@ async fn seed_public_session(
 /// 同账号并发满额登录：用户行锁串行化，两个新会话都成功且有效会话不超上限。
 #[tokio::test]
 async fn postgres_public_login_serializes_concurrent_evictions_under_user_lock() {
-    use auction_application::{PublicSessionRecord, PublicSessionStore};
+    use auction_application::public::{PublicSessionRecord, PublicSessionStore};
 
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
@@ -351,7 +351,7 @@ async fn postgres_price_history_index_matches_owner_predicate() {
     );
 
     // 索引不得改变价格历史的可见集合：空库上带与不带索引的结果都必须为空页。
-    let request = auction_application::PublicPriceHistoryListRequest {
+    let request = auction_application::auction::PublicPriceHistoryListRequest {
         name_terms: Vec::new(),
         world_id: None,
         closed_from: None,
@@ -360,7 +360,7 @@ async fn postgres_price_history_index_matches_owner_predicate() {
         maximum_price: None,
         buyer: None,
         seller: None,
-        sort: auction_application::PublicPriceHistorySort::ClosedDesc,
+        sort: auction_application::auction::PublicPriceHistorySort::ClosedDesc,
         limit: 25,
         offset: 0,
         cursor: None,
@@ -375,7 +375,7 @@ async fn postgres_price_history_index_matches_owner_predicate() {
 /// readiness 必须区分“真实依赖故障”和暂时饱和：池关闭后不得仍报告就绪。
 #[tokio::test]
 async fn postgres_readiness_reports_real_database_failure() {
-    use auction_application::ProcessReadinessPort;
+    use auction_application::operations::ProcessReadinessPort;
 
     let database = support::TestDatabase::create().await.expect("克隆已迁移模板库");
     let store = database.store().await.expect("连接测试数据库");

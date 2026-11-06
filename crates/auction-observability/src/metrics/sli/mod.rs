@@ -5,7 +5,8 @@ use std::{
     time::Instant,
 };
 
-use auction_application::{RuntimeSwitches, SliSnapshot, SliSnapshotError};
+use auction_application::runtime_switches::RuntimeSwitches;
+use auction_application::sli::{SliSnapshot, SliSnapshotError};
 use prometheus::{Histogram, HistogramOpts, IntCounterVec, Opts};
 
 use super::{MetricsError, ProcessMetrics};

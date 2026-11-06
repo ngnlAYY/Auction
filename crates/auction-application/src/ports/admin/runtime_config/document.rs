@@ -15,8 +15,10 @@ use super::{
         validate_security, validate_session, validate_tracing, validate_unix_path,
     },
 };
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::ports::RequestHash;
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::core::RequestHash;
 
 /// runtime 文件和命令账本允许的最大候选字节数。
 pub const MAX_ADMIN_RUNTIME_DOCUMENT_BYTES: usize = 4 << 20;
@@ -313,7 +315,7 @@ impl AdminRuntimeDocument {
         }
         validate_bot_players(&self.bot_players)?;
         if let Some(colors) = &self.equipment_colors {
-            crate::validate_equipment_color_rules(&colors.to_rules())
+            crate::ports::forum::validate_equipment_color_rules(&colors.to_rules())
                 .map_err(AdminRuntimeConfigError::InvalidDocument)?;
         }
         validate_session(&self.session)?;
@@ -353,7 +355,7 @@ impl AdminRuntimeDocument {
         if let Some(equipment_filter) = &mut self.equipment_filter
             && equipment_filter.qualities.is_empty()
         {
-            equipment_filter.qualities = crate::default_accepted_qualities();
+            equipment_filter.qualities = crate::ports::mail::default_accepted_qualities();
         }
         self.equipment_colors.get_or_insert_with(Default::default);
         if self.operations.is_none() {
@@ -368,7 +370,7 @@ impl AdminRuntimeDocument {
     pub fn fingerprint(&self) -> String {
         let encoded = serde_json::to_vec(self).unwrap_or_default();
         let digest = Sha256::digest(encoded);
-        format!("sha256:{}", crate::ports::lower_hex(&digest))
+        format!("sha256:{}", crate::ports::core::lower_hex(&digest))
     }
 
     /// 计算版本化的 durable 命令请求摘要。

@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 
 use auction_domain::AuctionId;
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 pub const MAX_SETTLEMENT_CATALOG_PAGE_SIZE: i64 = 100;
 pub const MAX_SETTLEMENT_CATALOG_OFFSET: i64 = 100_000;

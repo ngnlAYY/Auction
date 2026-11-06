@@ -1,6 +1,6 @@
 //! 账号级竞价警告偏好；独立版本，不改变已有标记及已入队通知。
 
-use crate::{LotWatchError, LotWatchFuture, LotWatchTransaction};
+use crate::ports::public::{LotWatchError, LotWatchFuture, LotWatchTransaction};
 use auction_domain::CommandId;
 use serde::{Deserialize, Serialize};
 use std::future::Future;

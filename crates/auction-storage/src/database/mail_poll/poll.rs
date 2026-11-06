@@ -3,7 +3,9 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{AdminMailPollState, ApplicationError, MailPollBatch, MailPollClaim};
+use auction_application::admin::AdminMailPollState;
+use auction_application::core::ApplicationError;
+use auction_application::mail::{MailPollBatch, MailPollClaim};
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;

@@ -5,7 +5,7 @@
 //! PM 发送走前台档，页面预读与增量扫描走后台档。论坛是独立 origin，没有 HentaiVerse
 //! 战斗页信号，因此不接账号忙熔断；429 与 Cloudflare 等分类和写入未知语义保持原样。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::clients::metrics::{ForumTopicScanGuard, forum_operation, forum_world};
 use crate::diagnostics as safe_diagnostics;
@@ -102,13 +102,13 @@ impl EhentaiClientConfig {
 /// 单次论坛请求的指标世界与账号 Cookie；只收敛参数，不改变所有权或请求顺序。
 #[derive(Clone, Copy)]
 pub(super) struct ForumRequestScope<'a> {
-    pub(super) metrics_world: auction_application::ForumWorld,
+    pub(super) metrics_world: auction_application::external_metrics::ForumWorld,
     pub(super) cookie: &'a EhentaiCookie,
 }
 
 impl<'a> ForumRequestScope<'a> {
     pub(super) const fn new(
-        metrics_world: auction_application::ForumWorld,
+        metrics_world: auction_application::external_metrics::ForumWorld,
         cookie: &'a EhentaiCookie,
     ) -> Self {
         Self { metrics_world, cookie }
@@ -132,8 +132,8 @@ pub struct EhentaiClient {
     main_board_id: i32,
     isekai_board_id: i32,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
-    write_progress: Option<auction_application::ForumWriteProgress>,
-    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    write_progress: Option<auction_application::forum::ForumWriteProgress>,
+    external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 }
 
 impl EhentaiClient {
@@ -168,7 +168,8 @@ impl EhentaiClient {
             isekai_board_id: ISEKAI_BOARD_ID,
             ownership: None,
             write_progress: None,
-            external_metrics: auction_application::noop_external_metrics_observer(),
+            external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
+            ),
         }
     }
 
@@ -221,7 +222,8 @@ impl EhentaiClient {
             isekai_board_id: config.isekai_board_id,
             ownership: None,
             write_progress: None,
-            external_metrics: auction_application::noop_external_metrics_observer(),
+            external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
+            ),
         })
     }
 
@@ -239,7 +241,7 @@ impl EhentaiClient {
     /// 为一次论坛写入注入独立进度；克隆仍共享连接池、限速器和凭据所有权。
     pub(crate) fn with_write_progress(
         mut self,
-        progress: auction_application::ForumWriteProgress,
+        progress: auction_application::forum::ForumWriteProgress,
     ) -> Self {
         self.write_progress = Some(progress);
         self
@@ -248,16 +250,20 @@ impl EhentaiClient {
     /// 注入同步外部客户端指标；只读取配置间隔，不改变请求门。
     pub fn with_external_metrics(
         mut self,
-        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+        observer: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     ) -> Self {
-        observer.observe(auction_application::ExternalMetricsEvent::ForumRequestInterval {
-            interval: self.minimum_request_interval,
-        });
+        observer.observe(
+            auction_application::external_metrics::ExternalMetricsEvent::ForumRequestInterval {
+                interval: self.minimum_request_interval,
+            },
+        );
         self.external_metrics = observer;
         self
     }
 
-    pub(crate) fn external_metrics(&self) -> Arc<dyn auction_application::ExternalMetricsObserver> {
+    pub(crate) fn external_metrics(
+        &self,
+    ) -> Arc<dyn auction_application::external_metrics::ExternalMetricsObserver> {
         Arc::clone(&self.external_metrics)
     }
 
@@ -304,7 +310,7 @@ impl EhentaiClient {
         world: SettlementWorld,
         cookie: &EhentaiCookie,
         rendered: ForumRenderedThread,
-    ) -> Result<auction_application::ForumTopicPublication, EhentaiError> {
+    ) -> Result<auction_application::forum::ForumTopicPublication, EhentaiError> {
         let operation = EhentaiOperation::CreateTopic;
         if !self.valid_for() || !valid_cookie(cookie) || !valid_rendered_thread(&rendered) {
             return Err(EhentaiError::configuration(operation));
@@ -319,13 +325,13 @@ impl EhentaiClient {
             )
             .await?;
         if let Some(published) = existing {
-            return Ok(auction_application::ForumTopicPublication::Existing(published));
+            return Ok(auction_application::forum::ForumTopicPublication::Existing(published));
         }
 
         let form = self.load_topic_form(board_id, &board_url, forum_world(world), cookie).await?;
         self.submit_topic(form, board_id, rendered, forum_world(world), cookie)
             .await
-            .map(auction_application::ForumTopicPublication::Created)
+            .map(auction_application::forum::ForumTopicPublication::Created)
     }
 
     /// 一次版面读取核对全部精确标题及唯一主题身份；永远不加载发帖表单或发送 POST。
@@ -334,7 +340,7 @@ impl EhentaiClient {
         world: SettlementWorld,
         cookie: &EhentaiCookie,
         titles: &[String],
-    ) -> Result<Option<auction_application::ForumPublishedThread>, EhentaiError> {
+    ) -> Result<Option<auction_application::forum::ForumPublishedThread>, EhentaiError> {
         let (title, reconciliation_titles) = titles
             .split_first()
             .ok_or_else(|| EhentaiError::configuration(EhentaiOperation::ReconcileTopic))?;
@@ -357,7 +363,8 @@ impl EhentaiClient {
         title: &str,
         reconciliation_titles: &[String],
         operation: EhentaiOperation,
-    ) -> Result<(i32, Url, Option<auction_application::ForumPublishedThread>), EhentaiError> {
+    ) -> Result<(i32, Url, Option<auction_application::forum::ForumPublishedThread>), EhentaiError>
+    {
         if !self.valid_for()
             || !valid_cookie(cookie)
             || !valid_topic_titles(title, reconciliation_titles)
@@ -694,7 +701,7 @@ struct TopicPageReadContext {
     client: EhentaiClient,
     cookie: EhentaiCookie,
     operation: EhentaiOperation,
-    metrics_world: auction_application::ForumWorld,
+    metrics_world: auction_application::external_metrics::ForumWorld,
     thread_id: String,
     known_maximum_offset: u64,
     referer: Url,

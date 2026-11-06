@@ -1,4 +1,4 @@
-use auction_application::AdminRuntimeDeliveryConfig;
+use auction_application::admin::AdminRuntimeDeliveryConfig;
 use serde::Deserialize;
 
 /// Delivery outbox 的独立领取、续租与外部调用边界。

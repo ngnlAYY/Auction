@@ -1,15 +1,17 @@
 //! 外部凭据命令的 PostgreSQL 装配；凭据行、命令账本和追加审计原子提交。
 
 #[cfg(feature = "postgres")]
-use auction_application::AdminCredentialEnvelope;
-use auction_application::{
+use auction_application::admin::AdminCredentialEnvelope;
+use auction_application::admin::{
     AdminCredentialCommandKind, AdminCredentialCommandResult, AdminCredentialDeleteWrite,
     AdminCredentialError, AdminCredentialHealthReader, AdminCredentialHealthSnapshot,
     AdminCredentialImportWrite, AdminCredentialKind, AdminCredentialListRequest,
     AdminCredentialMutationWrite, AdminCredentialPage, AdminCredentialRuntimeReader,
     AdminCredentialRuntimeRecord, AdminCredentialRuntimeWriter, AdminCredentialStore,
-    AdminCredentialWorld, ApplicationFuture, RequestHash,
+    AdminCredentialWorld,
 };
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::RequestHash;
 use uuid::Uuid;
 
 use super::DatabaseStore;

@@ -1,5 +1,5 @@
 //! 当前会话账号统一警告渠道；严格 JSON、CSRF 与无查询参数边界。
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
@@ -8,7 +8,9 @@ use crate::http::routes::{
     api_error, authenticated_public_identity, authenticated_public_mutation_identity,
     no_store_headers, parse_public_uuid, session_guard, strict_json,
 };
-use auction_application::{LotWatchError, LotWatchPreference, SetLotWatchPreferenceCommand};
+use auction_application::public::{
+    LotWatchError, LotWatchPreference, SetLotWatchPreferenceCommand,
+};
 use auction_contracts::ApiResponse;
 use auction_contracts::{PublicLotWatchPreferenceResponse, PublicSetLotWatchPreferenceRequest};
 use auction_domain::CommandId;

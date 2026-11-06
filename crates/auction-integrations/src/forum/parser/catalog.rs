@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use auction_application::AdminForumLot;
+use auction_application::admin::AdminForumLot;
 
 use super::commands::parse_catalog_amount;
 use super::{CATALOG_CATEGORIES, CatalogParse, DEFAULT_START_PRICE};

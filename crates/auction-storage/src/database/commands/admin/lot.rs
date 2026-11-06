@@ -3,10 +3,10 @@
 use std::sync::Arc;
 
 #[cfg(feature = "postgres")]
-use auction_application::AdminLotUpdateService;
-use auction_application::{
-    AdminLotSummary, AdminLotUpdateCommand, AdminLotUpdatePort, ApplicationFuture, Clock,
-};
+use auction_application::admin::AdminLotUpdateService;
+use auction_application::admin::{AdminLotSummary, AdminLotUpdateCommand, AdminLotUpdatePort};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::Clock;
 
 use super::super::DatabaseStore;
 

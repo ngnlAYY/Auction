@@ -3,9 +3,8 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    AdminSessionIdentity, AdminSessionRecord, ApplicationError, SessionError,
-};
+use auction_application::core::{ApplicationError, SessionError};
+use auction_application::public::{AdminSessionIdentity, AdminSessionRecord};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 

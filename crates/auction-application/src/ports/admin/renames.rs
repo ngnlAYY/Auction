@@ -6,7 +6,7 @@ use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// Admin 改名历史允许的最大单页大小。
 pub const MAX_ADMIN_RENAME_PAGE_SIZE: i64 = 200;

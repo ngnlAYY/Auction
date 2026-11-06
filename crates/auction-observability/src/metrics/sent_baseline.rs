@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use auction_application::{
+use auction_application::sent_baseline::{
     SentBaselineBranch, SentBaselineEvent, SentBaselineObserver, SentBaselinePhase,
     SentBaselineReason,
 };

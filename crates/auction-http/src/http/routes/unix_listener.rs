@@ -5,7 +5,7 @@
 
 #![cfg(target_os = "linux")]
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics;
 

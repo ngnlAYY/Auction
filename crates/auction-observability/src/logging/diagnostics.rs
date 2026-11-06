@@ -11,7 +11,9 @@ use std::{
     },
 };
 
-use auction_application::diagnostics::{DiagnosticSink, SafeDiagnostic, emit_safe_diagnostic};
+use auction_application::core::diagnostics::{
+    DiagnosticSink, SafeDiagnostic, emit_safe_diagnostic,
+};
 use tokio::sync::Notify;
 
 use super::RateLimitedLog;

@@ -1,9 +1,10 @@
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
 pub(super) use super::super::parse_canonical_uuid;
-use auction_application::{AdminUserError, ApplicationError};
+use auction_application::admin::AdminUserError;
+use auction_application::core::ApplicationError;
 use auction_contracts::ApiErrorResponseWithData;
 use axum::{
     Json,

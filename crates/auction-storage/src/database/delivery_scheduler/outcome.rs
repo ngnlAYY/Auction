@@ -6,7 +6,7 @@ use crate::database::delivery_audit::{
     worker_state_metadata,
 };
 use crate::database::settlement_funding as funding;
-use auction_application::{DeliverySendResult, DeliveryWorkClaim};
+use auction_application::delivery::{DeliverySendResult, DeliveryWorkClaim};
 use chrono::{DateTime, Utc};
 use sqlx::Postgres;
 
@@ -15,7 +15,7 @@ pub(super) async fn succeed_postgres(
     claim: &DeliveryWorkClaim,
     result: &DeliverySendResult,
     completed_at: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     if claim.payload.get("operation").and_then(serde_json::Value::as_str) == Some("send")
         && !verified_sent_result(claim, result)
     {
@@ -50,7 +50,7 @@ pub(super) async fn succeed_postgres(
             metadata: &result.result_metadata,
             audit: SUCCEED,
             preparation_rejected: false,
-            funding: auction_application::FundingDeliveryOutcome::Sent,
+            funding: auction_application::settlement::FundingDeliveryOutcome::Sent,
         },
     )
     .await
@@ -61,7 +61,7 @@ pub(super) async fn reject_preparation_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
     completed_at: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     let metadata = serde_json::json!({
         "stage": "preflight_blocked",
         "write_started": false,
@@ -79,7 +79,7 @@ pub(super) async fn reject_preparation_postgres(
             metadata: &metadata,
             audit: FAIL,
             preparation_rejected: true,
-            funding: auction_application::FundingDeliveryOutcome::Unknown,
+            funding: auction_application::settlement::FundingDeliveryOutcome::Unknown,
         },
     )
     .await
@@ -93,7 +93,7 @@ pub(super) async fn fail_postgres(
     external_reference: Option<&str>,
     result_metadata: &serde_json::Value,
     completed_at: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     persist(
         pool,
         claim,
@@ -105,7 +105,7 @@ pub(super) async fn fail_postgres(
             metadata: result_metadata,
             audit: if outcome_unknown { OUTCOME_UNKNOWN } else { FAIL },
             preparation_rejected: false,
-            funding: auction_application::FundingDeliveryOutcome::Unknown,
+            funding: auction_application::settlement::FundingDeliveryOutcome::Unknown,
         },
     )
     .await
@@ -119,7 +119,7 @@ struct Terminal<'a> {
     metadata: &'a serde_json::Value,
     audit: &'static str,
     preparation_rejected: bool,
-    funding: auction_application::FundingDeliveryOutcome,
+    funding: auction_application::settlement::FundingDeliveryOutcome,
 }
 
 async fn persist(
@@ -127,7 +127,7 @@ async fn persist(
     claim: &DeliveryWorkClaim,
     completed_at: DateTime<Utc>,
     terminal: Terminal<'_>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     crate::database::retry_conflicts(
         pool,
         auction_observability::DatabaseTransactionOwner::DeliveryOutcome,
@@ -297,7 +297,7 @@ async fn persist_once(
 /// 各资金终态runner保留SQLSTATE/B分类直到最外层，不匹配错误字符串。
 pub(super) enum OutcomeError {
     Sqlx(sqlx::Error),
-    Funding(auction_application::FundingError),
+    Funding(auction_application::settlement::FundingError),
     Rejected,
 }
 impl From<sqlx::Error> for OutcomeError {
@@ -305,8 +305,8 @@ impl From<sqlx::Error> for OutcomeError {
         Self::Sqlx(error)
     }
 }
-impl From<auction_application::FundingError> for OutcomeError {
-    fn from(error: auction_application::FundingError) -> Self {
+impl From<auction_application::settlement::FundingError> for OutcomeError {
+    fn from(error: auction_application::settlement::FundingError) -> Self {
         Self::Funding(error)
     }
 }
@@ -314,7 +314,9 @@ impl OutcomeError {
     pub(super) fn retryable(&self) -> bool {
         match self {
             Self::Sqlx(error) => crate::database::observed_serialization_conflict(error),
-            Self::Funding(auction_application::FundingError::SerializationConflict) => true,
+            Self::Funding(auction_application::settlement::FundingError::SerializationConflict) => {
+                true
+            }
             _ => false,
         }
     }

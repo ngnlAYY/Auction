@@ -4,8 +4,8 @@
 // 确认与静默只追加操作者事实。静默只把该 signal 的 `next_notify_at` 推到到期时间，
 // 不改变 kind/scope/source/count/age/active，也不跳过阈值评估；到期后重复通知自然恢复。
 
-use super as parent;
 use self::parent::*;
+use super as parent;
 
 /// 告警台单页最大条目数；与 Admin 其它列表保持同一上限。
 pub const MAX_OPERATIONS_ALERT_CONSOLE_PAGE_SIZE: i64 = 100;
@@ -53,8 +53,6 @@ impl OperationsAlertFilter {
         }
     }
 }
-
-
 
 /// 告警台列表查询；分页为数字页语义。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,7 +113,7 @@ pub struct OperationsAlertConsoleEntry {
 impl OperationsAlertConsoleEntry {
     /// 稳定告警标识：fingerprint 的小写十六进制。
     pub fn alert_id(&self) -> String {
-        crate::lower_hex(&self.fingerprint)
+        crate::ports::core::lower_hex(&self.fingerprint)
     }
 
     pub const fn severity(&self) -> OperationsAlertSeverity {
@@ -356,7 +354,7 @@ fn request_digest(
     payload.extend_from_slice(b"{\"action\":\"");
     payload.extend_from_slice(action.as_bytes());
     payload.extend_from_slice(b"\",\"fingerprint\":\"");
-    payload.extend_from_slice(crate::lower_hex(fingerprint).as_bytes());
+    payload.extend_from_slice(crate::ports::core::lower_hex(fingerprint).as_bytes());
     payload.extend_from_slice(b"\",\"silence_seconds\":");
     payload.extend_from_slice(silence_seconds.to_string().as_bytes());
     payload.extend_from_slice(b",\"actor_id\":\"");
@@ -382,13 +380,13 @@ pub(crate) fn valid_alert_reason(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use self::parent::*;
     use super as parent;
-use self::parent::*;
 
     #[test]
     fn alert_id_round_trips_and_rejects_invalid_hex() {
         let fingerprint = [0xab; 32];
-        let id = crate::lower_hex(&fingerprint);
+        let id = crate::ports::core::lower_hex(&fingerprint);
         assert_eq!(id.len(), 64);
         assert_eq!(parse_alert_id(&id), Some(fingerprint));
         assert_eq!(parse_alert_id(&id.to_uppercase()), Some(fingerprint));

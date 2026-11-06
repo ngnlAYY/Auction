@@ -3,10 +3,11 @@
 use auction_domain::{SettlementId, legacy_natural_key_uuid};
 use uuid::Uuid;
 
-use crate::{
-    ApplicationFuture, FundingError, FundingFuture, RequestHash, SettlementFulfillmentClaim,
-    SettlementFulfillmentPhaseResult, SettlementFulfillmentProof, SettlementFulfillmentResult,
-    SettlementInternalEvidenceSnapshot,
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
+use crate::ports::settlement::{
+    FundingError, FundingFuture, SettlementFulfillmentClaim, SettlementFulfillmentPhaseResult,
+    SettlementFulfillmentProof, SettlementFulfillmentResult, SettlementInternalEvidenceSnapshot,
 };
 
 /// 保留旧 prepare 返回值；新版 Worker 只在 External 分支继续原 prepare→activate 链。
@@ -32,7 +33,7 @@ impl SettlementInternalCommand {
         claim: SettlementFulfillmentClaim,
         recipient_version: Option<u64>,
         collected: bool,
-    ) -> Result<Self, crate::ApplicationError> {
+    ) -> Result<Self, crate::errors::ApplicationError> {
         Self::for_action(
             claim,
             recipient_version,
@@ -44,7 +45,7 @@ impl SettlementInternalCommand {
     pub fn external_refund(
         claim: SettlementFulfillmentClaim,
         recipient_version: Option<u64>,
-    ) -> Result<Self, crate::ApplicationError> {
+    ) -> Result<Self, crate::errors::ApplicationError> {
         Self::for_action(claim, recipient_version, "external_refund_funding_v1")
     }
 
@@ -52,7 +53,7 @@ impl SettlementInternalCommand {
         claim: SettlementFulfillmentClaim,
         recipient_version: Option<u64>,
         action: &str,
-    ) -> Result<Self, crate::ApplicationError> {
+    ) -> Result<Self, crate::errors::ApplicationError> {
         let command_id =
             legacy_natural_key_uuid(action, &[claim.obligation_id.as_uuid().as_bytes()]);
         let request_digest = RequestHash::from_request(

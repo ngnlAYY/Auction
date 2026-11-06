@@ -55,8 +55,11 @@ pub fn valid_mail_player_name(value: &str) -> bool {
 }
 
 /// 只有邮件 Cookie 可以声明预期名称；空值必须显式使用 None。
-pub fn valid_credential_player_name(kind: super::AdminCredentialKind, value: Option<&str>) -> bool {
+pub fn valid_credential_player_name(
+    kind: crate::ports::admin::AdminCredentialKind,
+    value: Option<&str>,
+) -> bool {
     value.is_none_or(|name| {
-        kind == super::AdminCredentialKind::MailCookie && valid_mail_player_name(name)
+        kind == crate::ports::admin::AdminCredentialKind::MailCookie && valid_mail_player_name(name)
     })
 }

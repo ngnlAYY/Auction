@@ -2,16 +2,17 @@
 //! 这里仅处理 Admin 会话、路径/分页解析和稳定 DTO 映射；代理状态、命令账本和一致性快照
 //! 由应用端口与存储适配器负责。
 
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::{
+use auction_application::admin::{
     AdminProxyEvent, AdminProxyEventCursor, AdminProxyEventListRequest, AdminProxyEventPage,
-    ApplicationError, MAX_ADMIN_PROXY_EVENT_OFFSET, MAX_ADMIN_PROXY_EVENT_PAGE_SIZE,
+    MAX_ADMIN_PROXY_EVENT_OFFSET, MAX_ADMIN_PROXY_EVENT_PAGE_SIZE,
 };
+use auction_application::core::ApplicationError;
 use auction_contracts::{
     AdminProxyEventListResponse, AdminProxyEventPaginationResponse, AdminProxyEventResponse,
     ApiResponse,

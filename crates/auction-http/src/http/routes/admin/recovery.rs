@@ -1,6 +1,6 @@
 //! Admin recovery case 的人工确认处理器。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
@@ -10,10 +10,8 @@ use crate::http::routes::{
     api_error, authenticated_admin_mutation, internal_error, map_recovery_command_error,
     map_recovery_confirmation, no_store_headers, request_id, strict_json,
 };
-use auction_application::{
-    AuctionLifecycleActor, AuctionLifecycleActorType, RecoveryConfirmationAction,
-    RecoveryConfirmationCommand,
-};
+use auction_application::auction::{AuctionLifecycleActor, AuctionLifecycleActorType};
+use auction_application::recovery::{RecoveryConfirmationAction, RecoveryConfirmationCommand};
 use auction_contracts::{
     AdminRecoveryConfirmationRequest, AdminRecoveryConfirmationResponse, ApiResponse,
 };

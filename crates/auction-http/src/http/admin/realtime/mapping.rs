@@ -1,4 +1,6 @@
-use auction_application::{RealtimeEventSnapshot, RealtimeFailureSnapshot, RealtimeLagSnapshot};
+use auction_application::realtime::{
+    RealtimeEventSnapshot, RealtimeFailureSnapshot, RealtimeLagSnapshot,
+};
 use auction_contracts::{
     AdminRealtimeEventResponse, AdminRealtimeFailureResponse, AdminRealtimeLagResponse,
 };

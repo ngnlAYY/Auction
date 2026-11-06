@@ -4,7 +4,7 @@ use crate::database::PostgresCompetitionTransaction;
 use crate::database::settlement::{
     SETTLEMENT_BATCH_SIZE, execute_settlement_batch, invalid, map_competition_error, map_sql_error,
 };
-use auction_application::SettlementTransactionError;
+use auction_application::settlement::SettlementTransactionError;
 use auction_domain::{AuctionId, CommandId, SettlementPlan, deterministic_uuid};
 use chrono::{DateTime, Utc};
 use serde_json::json;

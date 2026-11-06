@@ -7,15 +7,17 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::diagnostics::{
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, diagnostic_id, record_error,
 };
-use crate::{
+use crate::ports::admin::{
     AdminRuntimeAuditRecord, AdminRuntimeCommandState, AdminRuntimeCommandStore,
     AdminRuntimeConfigError, AdminRuntimeConfigPort, AdminRuntimeDocument, AdminRuntimeFileStore,
-    AdminRuntimeSnapshot, AdminRuntimeStoredCommand, AdminRuntimeUpdateCommand, ApplicationError,
-    ApplicationFuture, Clock,
+    AdminRuntimeSnapshot, AdminRuntimeStoredCommand, AdminRuntimeUpdateCommand,
 };
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::Clock;
 
 pub struct AdminRuntimeConfigService<R, F, C> {
     commands: Arc<R>,
@@ -95,7 +97,7 @@ where
             .insert_pending(AdminRuntimeStoredCommand {
                 command_id: command.command_id,
                 audit_id: Uuid::new_v4(),
-                digest_version: crate::ADMIN_RUNTIME_DIGEST_VERSION,
+                digest_version: crate::ports::admin::ADMIN_RUNTIME_DIGEST_VERSION,
                 request_hash: command.request_hash,
                 expected_fingerprint: command.expected_fingerprint,
                 old_fingerprint: current.fingerprint,

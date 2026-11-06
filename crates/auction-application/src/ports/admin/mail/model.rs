@@ -10,7 +10,7 @@ use super::common::{
     valid_status, valid_string_list, valid_text,
 };
 use super::errors::AdminMailError;
-use crate::MailDisplaySnapshot;
+use crate::ports::mail::MailDisplaySnapshot;
 
 /// Admin 邮箱轮询状态的安全投影。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -265,7 +265,7 @@ pub struct AdminMailIntakeDetail {
     pub metadata: AdminMailIntakeMetadata,
     pub deliveries: Vec<AdminMailIntakeDelivery>,
     pub message_display: Option<MailDisplaySnapshot>,
-    pub equipment_diagnostic: Option<crate::MailEquipmentDiagnosticSnapshot>,
+    pub equipment_diagnostic: Option<crate::ports::mail::MailEquipmentDiagnosticSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

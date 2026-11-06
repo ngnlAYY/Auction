@@ -1,10 +1,11 @@
 //! Admin 结算与恢复契约映射及结果校验。
 
 use crate::http::routes::timestamp;
-use auction_application::{
-    RecoveryConfirmationResult, RecoveryReport, SettlementReport, allowed_recovery_commands,
+use auction_application::recovery::{
+    RecoveryConfirmationResult, RecoveryReport, allowed_recovery_commands,
 };
-use auction_application::{SettlementAuctionSnapshot, SettlementLotReport};
+use auction_application::settlement::SettlementReport;
+use auction_application::settlement::{SettlementAuctionSnapshot, SettlementLotReport};
 use auction_contracts::{
     AdminRecoveryActionResponse, AdminRecoveryConfirmationResultResponse,
     AdminRecoveryReportResponse, AdminRecoveryResponse, AdminSettlementAdjustmentResponse,

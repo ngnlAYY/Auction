@@ -5,7 +5,7 @@
 
 use std::net::SocketAddr;
 
-use auction_application::{PlayerSupportRequest, PlayerSupportSelector};
+use auction_application::delivery::{PlayerSupportRequest, PlayerSupportSelector};
 use auction_contracts::ApiResponse;
 use axum::{
     Json,
@@ -43,7 +43,7 @@ pub(crate) async fn player_support(
     let user = match parse_optional_filter(
         &query,
         "user",
-        auction_application::MAX_PLAYER_SUPPORT_USER_LEN,
+        auction_application::delivery::MAX_PLAYER_SUPPORT_USER_LEN,
     ) {
         Ok(user) => user,
         Err(()) => {
@@ -79,7 +79,7 @@ pub(crate) async fn player_support(
         Ok(bundle) => bundle,
         Err(error) => return map_delivery_error(error),
     };
-    let limit = auction_application::MAX_PLAYER_SUPPORT_ROWS;
+    let limit = auction_application::delivery::MAX_PLAYER_SUPPORT_ROWS;
     let count = |length: usize| i64::try_from(length).ok();
     let within_limit = [
         count(bundle.bids.len()),

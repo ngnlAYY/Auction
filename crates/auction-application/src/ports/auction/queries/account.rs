@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// 账户竞价读取允许的最大页大小。
 pub const MAX_PUBLIC_ACCOUNT_PAGE_SIZE: i64 = 200;

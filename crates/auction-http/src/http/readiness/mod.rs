@@ -1,12 +1,14 @@
 //! HTTP 最终就绪判定的短缓存与单飞；不缓存数据库数据，不参与业务命令准入。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::{panic::AssertUnwindSafe, sync::Arc, time::Duration};
 
-use auction_application::{ApplicationFuture, ProcessReadinessPort, RepositoryError};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::RepositoryError;
+use auction_application::operations::ProcessReadinessPort;
 use auction_observability::{ReadinessCacheOutcome, ReadinessCheckResult, ReadinessRecorder};
 use futures_util::FutureExt;
 use tokio::{
@@ -28,8 +30,10 @@ type RefreshReceiver = watch::Receiver<Option<CachedResult>>;
 /// 装配根包装完整的角色 readiness；心跳仍直接读取原始端口。
 pub struct HttpReadinessProbe {
     source: Arc<dyn ProcessReadinessPort>,
-    switches: auction_application::RuntimeSwitches,
-    current: Mutex<Option<(auction_application::RuntimeReadinessPolicy, RefreshReceiver)>>,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
+    current: Mutex<
+        Option<(auction_application::runtime_switches::RuntimeReadinessPolicy, RefreshReceiver)>,
+    >,
     metrics: Arc<dyn ReadinessRecorder>,
 }
 
@@ -42,9 +46,9 @@ impl HttpReadinessProbe {
     ) -> Self {
         Self {
             source,
-            switches: auction_application::RuntimeSwitches::new(
-                auction_application::RuntimeSwitchRole::Admin,
-                auction_application::AuditFailureMode::default(),
+            switches: auction_application::runtime_switches::RuntimeSwitches::new(
+                auction_application::runtime_switches::RuntimeSwitchRole::Admin,
+                auction_application::operations::AuditFailureMode::default(),
                 cache_enabled,
             ),
             current: Mutex::new(None),
@@ -53,12 +57,18 @@ impl HttpReadinessProbe {
     }
 
     /// 与存储、心跳和指标共享动态策略；身份包含最新版本及到期状态。
-    pub fn with_runtime_switches(mut self, switches: auction_application::RuntimeSwitches) -> Self {
+    pub fn with_runtime_switches(
+        mut self,
+        switches: auction_application::runtime_switches::RuntimeSwitches,
+    ) -> Self {
         self.switches = switches;
         self
     }
 
-    async fn cached_ready(&self, policy: auction_application::RuntimeReadinessPolicy) -> bool {
+    async fn cached_ready(
+        &self,
+        policy: auction_application::runtime_switches::RuntimeReadinessPolicy,
+    ) -> bool {
         let mut current = self.current.lock().await;
         if let Some((cached_policy, receiver)) = &*current
             && *cached_policy == policy

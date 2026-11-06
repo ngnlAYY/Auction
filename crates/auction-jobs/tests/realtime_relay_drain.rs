@@ -3,14 +3,16 @@
 //!
 //! `auction-application` 不依赖异步运行时，因此这组测试放在已使用 Tokio 的 jobs crate；
 #![allow(clippy::expect_used)]
-//! 被测对象仍是 `auction_application::RealtimeRelay` 的公开编排。
+//! 被测对象仍是 `auction_application::realtime::RealtimeRelay` 的公开编排。
 
 use std::sync::{Arc, Mutex};
 
-use auction_application::{
-    ApplicationFuture, PublicRealtimeEvent, RealtimeConsumerBatch, RealtimeConsumerRequest,
-    RealtimeConsumerStore, RealtimeEventSink, RealtimeRelay, RealtimeRelayConfig,
-    RealtimeSequenceAllocator, RealtimeSinkError, RealtimeStreamStore, RepositoryError,
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::RepositoryError;
+use auction_application::realtime::{
+    PublicRealtimeEvent, RealtimeConsumerBatch, RealtimeConsumerRequest, RealtimeConsumerStore,
+    RealtimeEventSink, RealtimeRelay, RealtimeRelayConfig, RealtimeSequenceAllocator,
+    RealtimeSinkError, RealtimeStreamStore,
 };
 use chrono::{TimeZone, Utc};
 

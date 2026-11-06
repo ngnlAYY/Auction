@@ -4,10 +4,12 @@ pub(super) use crate::database::storage_error;
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, CurrentAuctionSnapshot, PublicAuctionListRequest, PublicAuctionSummary,
-    PublicForumLink, PublicRealtimeAuctionStatus,
+use auction_application::auction::{
+    CurrentAuctionSnapshot, PublicAuctionListRequest, PublicAuctionSummary,
+    PublicRealtimeAuctionStatus,
 };
+use auction_application::core::ApplicationError;
+use auction_application::forum::PublicForumLink;
 #[cfg(feature = "postgres")]
 use sqlx::Row;
 

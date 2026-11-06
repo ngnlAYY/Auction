@@ -4,12 +4,13 @@
 
 use std::time::Duration;
 
-use auction_application::{
-    ApplicationError, ApplicationFuture, OperationsAlertBatchClaim, OperationsAlertClaimRequest,
-    OperationsAlertDeliveryStatus, OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch,
-    OperationsAlertError, OperationsAlertHealth, OperationsAlertObserveCommand,
-    OperationsAlertRuntimeStatus, OperationsAlertSnapshot, OperationsAlertSourceReader,
-    OperationsAlertStore,
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::operations::{
+    OperationsAlertBatchClaim, OperationsAlertClaimRequest, OperationsAlertDeliveryStatus,
+    OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
+    OperationsAlertHealth, OperationsAlertObserveCommand, OperationsAlertRuntimeStatus,
+    OperationsAlertSnapshot, OperationsAlertSourceReader, OperationsAlertStore,
 };
 use chrono::{DateTime, Utc};
 
@@ -60,7 +61,7 @@ impl OperationsAlertStore for DatabaseStore {
 
     fn observe_host(
         &self,
-        command: auction_application::OperationsAlertHostObserveCommand,
+        command: auction_application::operations::OperationsAlertHostObserveCommand,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             command.validate().map_err(ApplicationError::from)?;
@@ -91,7 +92,7 @@ impl OperationsAlertStore for DatabaseStore {
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             claim
-                .validate(auction_application::MAX_OPERATIONS_ALERT_BODY_BYTES)
+                .validate(auction_application::operations::MAX_OPERATIONS_ALERT_BODY_BYTES)
                 .map_err(ApplicationError::from)?;
             if cooldown < Duration::from_secs(1) || cooldown > Duration::from_secs(7 * 24 * 3_600) {
                 return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
@@ -113,7 +114,7 @@ impl OperationsAlertStore for DatabaseStore {
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             claim
-                .validate(auction_application::MAX_OPERATIONS_ALERT_BODY_BYTES)
+                .validate(auction_application::operations::MAX_OPERATIONS_ALERT_BODY_BYTES)
                 .map_err(ApplicationError::from)?;
             if retry_delay < Duration::from_secs(1) || retry_delay > Duration::from_secs(24 * 3_600)
             {

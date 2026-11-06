@@ -2,14 +2,14 @@
 
 use std::sync::Arc;
 
-use auction_application::Clock;
-use auction_application::diagnostics::SafeErrorKind;
+use auction_application::core::Clock;
+use auction_application::core::diagnostics::SafeErrorKind;
 use auction_observability::WorkerLoop;
 
-use super::super::super::{PersistentWorker, poll_delay};
-use super::super::MailPollRuntime;
+use super::super::poll::MailPollRuntime;
 use super::{metrics::IterationGuard, run_maintenance, run_read_observation};
 use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, poll_delay};
 
 /// 开关重读与 idle 等待的切片上限；正常退出视为致命，因此旧路径只能等待停止。
 const SWITCH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);

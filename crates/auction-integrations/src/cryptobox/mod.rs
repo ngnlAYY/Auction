@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -84,8 +84,9 @@ impl DataKey {
             return Err(EquipmentKeySealerError::InvalidDataKey);
         }
         let key = hmac::Key::new(hmac::HMAC_SHA256, &material);
-        let fingerprint =
-            auction_application::lower_hex(hmac::sign(&key, DATA_KEY_FINGERPRINT_DOMAIN).as_ref());
+        let fingerprint = auction_application::core::lower_hex(
+            hmac::sign(&key, DATA_KEY_FINGERPRINT_DOMAIN).as_ref(),
+        );
         Ok(Self { id: id.to_owned(), fingerprint, material })
     }
 
@@ -379,7 +380,7 @@ fn fingerprint(data_key: &DataKey, plaintext: &[u8]) -> String {
     let mut context = hmac::Context::with_key(&hmac_key);
     context.update(SECRET_FINGERPRINT_DOMAIN);
     context.update(plaintext);
-    auction_application::lower_hex(context.sign().as_ref())
+    auction_application::core::lower_hex(context.sign().as_ref())
 }
 
 #[cfg(test)]

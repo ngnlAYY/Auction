@@ -3,7 +3,7 @@
 use super::mapping::*;
 
 use crate::database::fulfillment_scheduler::manual_reconcile_in_transaction;
-use auction_application::{
+use auction_application::settlement::{
     SettlementFulfillmentClaim, SettlementFulfillmentDeliverySnapshot,
     SettlementFulfillmentOperation, SettlementFulfillmentState,
 };
@@ -22,7 +22,7 @@ pub(super) async fn claim_postgres(
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
     limit: u16,
-) -> Result<Vec<SettlementFulfillmentClaim>, auction_application::RepositoryError> {
+) -> Result<Vec<SettlementFulfillmentClaim>, auction_application::core::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     // 先按到期顺序截取有界候选，再按 UUID 锁义务；未锁到的候选留待下一批，
     // 不扫描并锁住全部 ready。先义务后 execution，与满足事务保持相同锁序。

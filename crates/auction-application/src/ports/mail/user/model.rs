@@ -2,7 +2,7 @@
 
 use uuid::Uuid;
 
-use super::super::mail_processing::MailProcessingError;
+use crate::ports::mail::processing::MailProcessingError;
 
 /// Users owner 接受的 MoogleMail 命令闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

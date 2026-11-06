@@ -1,6 +1,6 @@
 //! HTTP 安全和会话配置模型。
 
-use auction_application::AdminRuntimeSecurityConfig;
+use auction_application::admin::AdminRuntimeSecurityConfig;
 
 use super::{Deserialize, Role};
 

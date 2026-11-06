@@ -7,9 +7,9 @@ use serde::Deserialize;
 #[serde(default, deny_unknown_fields)]
 pub struct ReadinessConfig {
     /// 审计失败模式；默认 classified，只由不可重试及未知风险失败阻断就绪。
-    pub audit_failure_mode: auction_application::AuditFailureMode,
+    pub audit_failure_mode: auction_application::operations::AuditFailureMode,
     /// 迁移兼容模式；默认 shadow，只有显式 compatible 才放宽数据库超前。
-    pub migration_compatibility_mode: auction_application::MigrationCompatibilityMode,
+    pub migration_compatibility_mode: auction_application::operations::MigrationCompatibilityMode,
     /// 是否缓存 HTTP 最终判定并合并并发检查；默认启用。
     pub cache_enabled: bool,
 }
@@ -17,8 +17,9 @@ pub struct ReadinessConfig {
 impl Default for ReadinessConfig {
     fn default() -> Self {
         Self {
-            audit_failure_mode: auction_application::AuditFailureMode::Classified,
-            migration_compatibility_mode: auction_application::MigrationCompatibilityMode::Shadow,
+            audit_failure_mode: auction_application::operations::AuditFailureMode::Classified,
+            migration_compatibility_mode:
+                auction_application::operations::MigrationCompatibilityMode::Shadow,
             cache_enabled: true,
         }
     }
@@ -27,7 +28,7 @@ impl Default for ReadinessConfig {
 #[cfg(test)]
 mod tests {
     use super::ReadinessConfig;
-    use auction_application::{AuditFailureMode, MigrationCompatibilityMode};
+    use auction_application::operations::{AuditFailureMode, MigrationCompatibilityMode};
 
     #[test]
     fn default_baseline_classifies_audit_failures() {

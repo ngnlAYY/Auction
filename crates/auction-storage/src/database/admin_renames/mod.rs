@@ -3,10 +3,11 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
+use auction_application::admin::{
     AdminRenameListRequest, AdminRenamePage, AdminRenameReader, AdminRenameRecord,
-    ApplicationError, ApplicationFuture,
 };
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
 
 use super::DatabaseStore;
 use crate::database::storage_error;

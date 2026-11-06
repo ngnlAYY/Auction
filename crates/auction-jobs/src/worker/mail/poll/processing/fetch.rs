@@ -1,6 +1,6 @@
 //! MoogleMail 远程读取的有界超时、临时错误重试和指标记录。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_observability::WorkerRetryKind;
 
 use super::*;
@@ -47,8 +47,8 @@ pub(super) async fn fetch_with_retry(
                 super::super::types::observe_budget(
                     &world_id,
                     metric_context.external_metrics.as_ref(),
-                    auction_application::MailPhase::PollFetch,
-                    auction_application::MailBudget::Time,
+                    auction_application::external_metrics::MailPhase::PollFetch,
+                    auction_application::external_metrics::MailBudget::Time,
                 );
                 diagnostics::warn(
                     "mail_poll",
@@ -71,8 +71,8 @@ pub(super) async fn fetch_with_retry(
                 super::super::types::observe_budget(
                     &world_id,
                     metric_context.external_metrics.as_ref(),
-                    auction_application::MailPhase::PollFetch,
-                    auction_application::MailBudget::Time,
+                    auction_application::external_metrics::MailPhase::PollFetch,
+                    auction_application::external_metrics::MailBudget::Time,
                 );
                 diagnostics::warn(
                     "mail_poll",

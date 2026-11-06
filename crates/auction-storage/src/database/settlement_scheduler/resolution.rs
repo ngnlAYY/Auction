@@ -1,6 +1,6 @@
 //! PostgreSQL 结算 workflow 的完成与失败收口。
 
-use auction_application::SettlementWorkClaim;
+use auction_application::settlement::SettlementWorkClaim;
 use std::time::Duration;
 
 use auction_domain::deterministic_uuid;
@@ -19,7 +19,7 @@ pub(super) async fn complete_postgres(
     pool: &TrackedPool<Postgres>,
     claim: &SettlementWorkClaim,
     completed_at: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     let result = sqlx::query(
         r#"UPDATE public.auctions
            SET settlement_complete_command_id = $3,
@@ -52,7 +52,7 @@ pub(super) async fn fail_postgres(
     claim: &SettlementWorkClaim,
     _retry_at: DateTime<Utc>,
     failure_code: &str,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     pool.observe_transaction(auction_observability::DatabaseTransactionOwner::Settlement, async {
         for attempt in 1..=FAILURE_TRANSACTION_ATTEMPTS {
             match fail_transaction(pool, claim, failure_code).await {

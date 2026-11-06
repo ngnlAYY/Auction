@@ -21,10 +21,10 @@ use std::{
     time::Instant,
 };
 
-use auction_application::{
-    ApplicationError, CompetitionCommandPort, DeliveryClaimExclusions, DeliveryWorkStore,
-    LotWatchReminderStore, PlaceBidCommand,
-};
+use auction_application::auction::{CompetitionCommandPort, PlaceBidCommand};
+use auction_application::core::ApplicationError;
+use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkStore};
+use auction_application::lot_watch_reminders::LotWatchReminderStore;
 use auction_domain::{BidAmount, CommandId, LotId, UserId};
 use auction_storage::{BidQueueMode, DatabaseCompetitionCommands, DatabaseStore};
 use chrono::{DateTime, Duration, Utc};
@@ -474,7 +474,7 @@ async fn postgres_final_cross_lot_bids_do_not_exhaust_serializable_retries() {
             match handle.await.expect("出价任务不得 panic") {
                 Ok(_) => accepted += 1,
                 Err(ApplicationError::CompetitionTransaction(
-                    auction_application::CompetitionTransactionError::SerializationConflict,
+                    auction_application::core::CompetitionTransactionError::SerializationConflict,
                 )) => failures.push("serialization_conflict".to_owned()),
                 Err(error) => failures.push(format!("{error:?}")),
             }
@@ -1221,10 +1221,10 @@ async fn postgres_bid_queue_drill_reports_latency_and_pool_usage() {
                 match result {
                     Ok(_) => accepted_total += 1,
                     Err(ApplicationError::CompetitionTransaction(
-                        auction_application::CompetitionTransactionError::SerializationConflict,
+                        auction_application::core::CompetitionTransactionError::SerializationConflict,
                     )) => conflicts += 1,
                     Err(ApplicationError::CompetitionTransaction(
-                        auction_application::CompetitionTransactionError::QueueWaitTimeout,
+                        auction_application::core::CompetitionTransactionError::QueueWaitTimeout,
                     )) => timeouts += 1,
                     Err(error) => {
                         if other < 3 {

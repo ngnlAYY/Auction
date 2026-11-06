@@ -9,9 +9,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{
-    ApplicationError, RequestHash, SettlementFulfillmentClaim, SettlementFulfillmentOperation,
-};
+use crate::errors::ApplicationError;
+use crate::ports::core::RequestHash;
+use crate::ports::settlement::{SettlementFulfillmentClaim, SettlementFulfillmentOperation};
 
 use super::canonical::to_go_json_bytes;
 use super::model::{SettlementDeliveryActivation, SettlementDeliveryIntent};
@@ -290,7 +290,7 @@ fn insert_payment_deadline(
     intent: &SettlementDeliveryIntent,
 ) {
     if let Some(deadline) = intent.payment_deadline_at {
-        variables.insert("payment_deadline", crate::format_deadline(deadline));
+        variables.insert("payment_deadline", crate::services::public::format_deadline(deadline));
     }
 }
 
@@ -357,7 +357,7 @@ mod tests {
     use auction_domain::{AuctionId, EquipmentId, LotId, SettlementWorld};
     use chrono::Utc;
 
-    use crate::{
+    use crate::ports::settlement::{
         SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentDeliveryStatus,
         SettlementFulfillmentState,
     };

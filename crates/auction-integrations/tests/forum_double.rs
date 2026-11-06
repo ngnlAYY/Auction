@@ -1,7 +1,7 @@
 //! 真实客户端只访问 W6.3 回环替身；通知载荷覆盖层与真实采集结构分开。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use auction_application::{ForumPmMessage, ForumPmSender};
+use auction_application::forum::{ForumPmMessage, ForumPmSender};
 use auction_domain::SettlementWorld;
 use auction_integrations::{
     ForumPreviewAdapter,

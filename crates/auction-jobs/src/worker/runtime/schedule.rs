@@ -1,13 +1,14 @@
 //! 每周拍卖轮次与赛季早鸟场次 bootstrap，以及 MoogleMail 暂停/恢复对账。
 
-use auction_application::diagnostics::{
+use auction_application::admin::{
+    AdminMailPollStateRequest, AdminMailPollingCommand, AdminMailTransactionError,
+};
+use auction_application::auction::AuctionPolicyTemplate;
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind,
 };
-use auction_application::{
-    AdminMailPollStateRequest, AdminMailPollingCommand, AdminMailTransactionError,
-    ApplicationError, AuctionPolicyTemplate, Clock, RequestHash, ScheduledRoundBootstrap,
-    ScheduledRoundSnapshot,
-};
+use auction_application::core::{ApplicationError, Clock, RequestHash};
+use auction_application::scheduling::{ScheduledRoundBootstrap, ScheduledRoundSnapshot};
 use auction_domain::{
     AuctionEarlyBirdCalendar, AuctionId, AuctionScheduleSlot, AuctionScheduleSource,
     AuctionWeeklySchedule, CommandId, legacy_natural_key_uuid,
@@ -386,7 +387,7 @@ struct BootstrapRequest {
 impl BootstrapRequest {
     fn into_bootstrap(
         self,
-    ) -> Result<ScheduledRoundBootstrap, auction_application::ApplicationError> {
+    ) -> Result<ScheduledRoundBootstrap, auction_application::core::ApplicationError> {
         let Self {
             round_id,
             auction_id,
@@ -448,7 +449,7 @@ async fn reconcile_mail(
     gate: &MailGate,
     world_id: &str,
     deadline: tokio::time::Instant,
-) -> Result<(), auction_application::ApplicationError> {
+) -> Result<(), auction_application::core::ApplicationError> {
     let Some(mail) = config.mail.as_ref() else {
         return Ok(());
     };
@@ -520,7 +521,7 @@ async fn reconcile_mail(
             Err(error) => return Err(error),
         }
     }
-    Err(auction_application::ApplicationError::CapabilityUnavailable(
+    Err(auction_application::core::ApplicationError::CapabilityUnavailable(
         "MoogleMail 轮询状态版本持续变化",
     ))
 }

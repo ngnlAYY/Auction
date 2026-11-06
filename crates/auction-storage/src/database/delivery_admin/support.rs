@@ -3,7 +3,7 @@
 //! 所有分区共享同一只读快照，各自 `LIMIT 上限 + 1` 以发现截断；不写任何事实、命令或审计。
 //! 参考编号只按规范 UUID 解析，且不把投递 payload、正文或凭据带出存储层。
 
-use auction_application::{
+use auction_application::delivery::{
     DeliveryAdminError, MAX_PLAYER_SUPPORT_ROWS, PlayerSupportBid, PlayerSupportBundle,
     PlayerSupportDeal, PlayerSupportNotification, PlayerSupportObligation, PlayerSupportReference,
     PlayerSupportRequest, PlayerSupportSelector, PlayerSupportUser,
@@ -310,7 +310,7 @@ async fn deliveries(
     user_id: Uuid,
     game_player_id: Option<&str>,
     truncated: &mut bool,
-) -> Result<Vec<auction_application::DeliveryAdminSnapshot>, DeliveryAdminError> {
+) -> Result<Vec<auction_application::delivery::DeliveryAdminSnapshot>, DeliveryAdminError> {
     let rows = sqlx::query(
         r#"SELECT id, origin_kind, origin_id, recipient, payload, result_metadata, status,
                   lease_token, lease_expires_at, fencing_version, attempt_count, claimed_at,
@@ -429,7 +429,7 @@ async fn notifications(
 async fn attach_reference(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     reference: Uuid,
-    deliveries: &mut Vec<auction_application::DeliveryAdminSnapshot>,
+    deliveries: &mut Vec<auction_application::delivery::DeliveryAdminSnapshot>,
     notifications: &mut Vec<PlayerSupportNotification>,
 ) -> Result<(), DeliveryAdminError> {
     if !deliveries.iter().any(|delivery| delivery.id == reference) {

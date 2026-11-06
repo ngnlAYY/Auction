@@ -1,12 +1,12 @@
 //! 基线之外候选的完整身份、正文与资产证明；候选枚举由 baseline owner 负责。
 
-use auction_application::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
 use super::*;
 use crate::clients::mooglemail::parser::{canonical_mail_body_digest, subject_is_list_projection};
-use auction_application::mail_recipient_is_list_projection;
+use auction_application::mail::mail_recipient_is_list_projection;
 use tokio::time::{Instant, timeout_at};
 
 impl MoogleMailSender {
@@ -21,7 +21,7 @@ impl MoogleMailSender {
         if let Err(error) = &result {
             self.observe_budget_error(
                 request.world,
-                auction_application::MailPhase::SentBaselineAfter,
+                auction_application::external_metrics::MailPhase::SentBaselineAfter,
                 error,
             );
         }
@@ -40,7 +40,7 @@ impl MoogleMailSender {
         if let Err(error) = self.check_baseline_scope(cookie, baseline) {
             self.shadow_uncomparable(
                 baseline,
-                auction_application::SentBaselineReason::ScopeChanged,
+                auction_application::sent_baseline::SentBaselineReason::ScopeChanged,
             );
             return Err(error);
         }
@@ -64,7 +64,7 @@ impl MoogleMailSender {
         if result.as_ref().is_err_and(|error| error.is_session_expired()) {
             self.shadow_uncomparable(
                 baseline,
-                auction_application::SentBaselineReason::ReadUnavailable,
+                auction_application::sent_baseline::SentBaselineReason::ReadUnavailable,
             );
         } else {
             self.compare_sent_shadow(request, cookie, baseline, &candidates, &round, deadline)
@@ -86,7 +86,7 @@ impl MoogleMailSender {
             self.remember_sent_scan(
                 cookie,
                 world,
-                Some(auction_application::MailScanWatermark {
+                Some(auction_application::mail::MailScanWatermark {
                     mail_id: verified.clone(),
                     observed_at: summary.sent_at,
                 }),

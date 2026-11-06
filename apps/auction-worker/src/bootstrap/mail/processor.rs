@@ -16,9 +16,9 @@ pub(super) fn build_processor_and_delivery(
     store: &Arc<DatabaseStore>,
     client: &MoogleMailClient,
     credentials: &MoogleMailCredentialSet,
-    sent_baseline_observer: Arc<dyn auction_application::SentBaselineObserver>,
-    mail_scan_observer: Arc<dyn auction_application::MailScanObserver>,
-    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    sent_baseline_observer: Arc<dyn auction_application::sent_baseline::SentBaselineObserver>,
+    mail_scan_observer: Arc<dyn auction_application::mail::MailScanObserver>,
+    external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 ) -> anyhow::Result<MailProcessorPorts> {
     match store.as_ref() {
         DatabaseStore::Postgres(postgres_store) => {
@@ -92,10 +92,10 @@ pub(super) fn build_processor_and_delivery(
             .with_sent_baseline(mail_config.sent_baseline_mode, sent_baseline_observer)
             .with_mail_scan_observer(mail_scan_observer)
             .with_mail_scan_checkpoint_store(
-                Arc::clone(store) as Arc<dyn auction_application::MailScanCheckpointStore>
+                Arc::clone(store) as Arc<dyn auction_application::mail::MailScanCheckpointStore>
             );
             let processor: Arc<dyn MailProcessor> = Arc::new(
-                auction_application::MailProcessorService::new_for_worlds(
+                auction_application::mail::MailProcessorService::new_for_worlds(
                     world_configs.iter().map(|world| world.world_id.clone()).collect(),
                     MailProcessorConfig {
                         start_price: mail_config.start_price.unwrap_or(50_000),

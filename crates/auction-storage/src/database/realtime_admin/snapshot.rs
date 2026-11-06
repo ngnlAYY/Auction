@@ -3,9 +3,10 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeDashboardSnapshot,
-    RealtimeFailureWater, RealtimeLagListRequest,
+use auction_application::core::ApplicationError;
+use auction_application::realtime::{
+    MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeDashboardSnapshot, RealtimeFailureWater,
+    RealtimeLagListRequest,
 };
 use chrono::Utc;
 use sqlx::Row;

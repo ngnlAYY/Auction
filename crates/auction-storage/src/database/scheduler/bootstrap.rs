@@ -1,6 +1,6 @@
 //! 每周拍卖轮次与赛季早鸟轮次的数据库时间、幂等 bootstrap 和安全投影。
 
-use auction_application::{ScheduledRoundBootstrap, ScheduledRoundSnapshot};
+use auction_application::scheduling::{ScheduledRoundBootstrap, ScheduledRoundSnapshot};
 use chrono::{DateTime, Datelike, Utc};
 use serde_json::json;
 use sqlx::Row;
@@ -16,7 +16,7 @@ use sqlx::Postgres;
 #[cfg(feature = "postgres")]
 pub(super) async fn database_now_postgres(
     pool: &TrackedPool<Postgres>,
-) -> Result<DateTime<Utc>, auction_application::RepositoryError> {
+) -> Result<DateTime<Utc>, auction_application::core::RepositoryError> {
     sqlx::query_scalar("SELECT CURRENT_TIMESTAMP").fetch_one(pool).await.map_err(map_storage_error)
 }
 
@@ -24,7 +24,7 @@ pub(super) async fn database_now_postgres(
 pub(super) async fn ensure_postgres(
     pool: &TrackedPool<Postgres>,
     request: ScheduledRoundBootstrap,
-) -> Result<ScheduledRoundSnapshot, auction_application::RepositoryError> {
+) -> Result<ScheduledRoundSnapshot, auction_application::core::RepositoryError> {
     validate_request(&request)?;
     crate::database::retry_conflicts(
         pool,
@@ -46,12 +46,12 @@ pub(super) async fn ensure_postgres(
 #[cfg(feature = "postgres")]
 enum PostgresBootstrapError {
     Storage(sqlx::Error),
-    Repository(auction_application::RepositoryError),
+    Repository(auction_application::core::RepositoryError),
 }
 
 #[cfg(feature = "postgres")]
-impl From<auction_application::RepositoryError> for PostgresBootstrapError {
-    fn from(error: auction_application::RepositoryError) -> Self {
+impl From<auction_application::core::RepositoryError> for PostgresBootstrapError {
+    fn from(error: auction_application::core::RepositoryError) -> Self {
         Self::Repository(error)
     }
 }
@@ -294,7 +294,7 @@ async fn append_audit_postgres(
 
 fn validate_request(
     request: &ScheduledRoundBootstrap,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     if request.round_id.is_nil()
         || request.auction_id.is_nil()
         || request.create_command_id.is_nil()
@@ -322,7 +322,7 @@ fn validate_request(
 fn verify_existing(
     snapshot: &ScheduledRoundSnapshot,
     request: &ScheduledRoundBootstrap,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     if snapshot.round_id != request.round_id
         || snapshot.world_id != request.world_id
         || snapshot.local_week != request.local_week
@@ -342,7 +342,7 @@ fn verify_existing(
 #[cfg(feature = "postgres")]
 pub(super) fn snapshot_postgres(
     row: &sqlx::postgres::PgRow,
-) -> Result<ScheduledRoundSnapshot, auction_application::RepositoryError> {
+) -> Result<ScheduledRoundSnapshot, auction_application::core::RepositoryError> {
     let active = scheduled_round_active(row.try_get("status").map_err(map_storage_error)?)?;
     Ok(ScheduledRoundSnapshot {
         round_id: row.try_get("id").map_err(map_storage_error)?,
@@ -384,7 +384,9 @@ fn with_slot_key(mut value: serde_json::Value, slot_key: Option<&str>) -> serde_
     value
 }
 
-fn scheduled_round_active(status: String) -> Result<bool, auction_application::RepositoryError> {
+fn scheduled_round_active(
+    status: String,
+) -> Result<bool, auction_application::core::RepositoryError> {
     match status.as_str() {
         "active" => Ok(true),
         "missed" => Ok(false),

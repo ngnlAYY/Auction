@@ -12,12 +12,15 @@ use std::{
 };
 
 use anyhow::Context;
-use auction_application::{
-    EXTERNAL_RECOVERY_RECEIPT_FORMAT, ExternalRecoveryDeliveryExpectation,
-    ExternalRecoveryQuarantineMatch, ExternalRecoveryStore, SentDetailMatch,
+use auction_application::operations::{
     WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS, WorkerRecoveryMailRef, WorkerRecoveryScanRequest,
     WorkerRecoveryScanResponse, WorkerRemoteReadError, WorkerRemoteReadPort,
-    WorkerSentLookupCandidate, sent_detail_match, sent_list_projection_may_match,
+    WorkerSentLookupCandidate,
+};
+use auction_application::recovery::{
+    EXTERNAL_RECOVERY_RECEIPT_FORMAT, ExternalRecoveryDeliveryExpectation,
+    ExternalRecoveryQuarantineMatch, ExternalRecoveryStore, SentDetailMatch, sent_detail_match,
+    sent_list_projection_may_match,
 };
 use auction_config::AppConfig;
 use auction_storage::DatabaseStore;
@@ -173,7 +176,7 @@ async fn execute(
             sent_details: Vec::new(),
             forum_threads: forum_threads
                 .iter()
-                .map(|thread| auction_application::WorkerRecoveryForumTarget {
+                .map(|thread| auction_application::operations::WorkerRecoveryForumTarget {
                     world: thread.world_id.clone(),
                     thread_id: thread.thread_id.clone(),
                     after_post_number: thread.after_post_number,
@@ -399,7 +402,10 @@ impl SentMatchPlan {
     }
 
     /// 先用列表投影筛选详情候选；只有唯一候选才进入第二阶段。
-    fn scan_entries(&mut self, entries: &[auction_application::WorkerRecoverySentEntry]) {
+    fn scan_entries(
+        &mut self,
+        entries: &[auction_application::operations::WorkerRecoverySentEntry],
+    ) {
         let Some(cutoff_at) = self.cutoff_at else { return };
         for (index, expectation) in self.expectations.iter().enumerate() {
             let candidates = entries
@@ -533,7 +539,7 @@ impl SentMatchPlan {
 mod tests {
     use self::parent::*;
     use super as parent;
-    use auction_application::WorkerRecoverySentEntry;
+    use auction_application::operations::WorkerRecoverySentEntry;
 
     fn expectation(id: u128, subject: &str) -> ExternalRecoveryDeliveryExpectation {
         ExternalRecoveryDeliveryExpectation {

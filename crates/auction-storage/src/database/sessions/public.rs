@@ -4,9 +4,11 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, PublicSessionIdentity, PublicSessionPreference, PublicSessionRecord,
-    SessionError, TransactionPolicy, TransactionRunner,
+use auction_application::core::{
+    ApplicationError, SessionError, TransactionPolicy, TransactionRunner,
+};
+use auction_application::public::{
+    PublicSessionIdentity, PublicSessionPreference, PublicSessionRecord,
 };
 use chrono::{DateTime, Utc};
 use sqlx::{Row, postgres::PgRow};

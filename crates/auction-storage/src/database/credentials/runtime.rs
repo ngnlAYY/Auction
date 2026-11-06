@@ -5,11 +5,12 @@ use {
     crate::database::credentials::{
         admin_error, map_storage_error, storage_error, world_from_scope,
     },
-    auction_application::{
+    auction_application::admin::{
         AdminCredentialEnvelope, AdminCredentialError, AdminCredentialHealthScope,
         AdminCredentialHealthSnapshot, AdminCredentialKind, AdminCredentialRuntimeRecord,
-        AdminCredentialStatus, AdminCredentialWorld, ApplicationError,
+        AdminCredentialStatus, AdminCredentialWorld,
     },
+    auction_application::core::ApplicationError,
     chrono::{DateTime, Utc},
     sqlx::Row,
     uuid::Uuid,

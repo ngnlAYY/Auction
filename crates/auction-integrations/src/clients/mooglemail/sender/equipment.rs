@@ -1,6 +1,6 @@
 //! 发送前的装备库存证明与最小出库/解锁；不回滚、不重试，也不自动卸下装备。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -12,7 +12,6 @@ use crate::clients::mooglemail::{
 };
 
 #[cfg(test)]
-#[path = "equipment/tests.rs"]
 mod tests;
 
 impl MoogleMailSender {

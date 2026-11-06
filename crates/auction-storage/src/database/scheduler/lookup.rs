@@ -1,6 +1,7 @@
 //! 只读定位已冻结的周轮次与早鸟轮次；新配置只用于缺失轮次的首次创建。
 
-use auction_application::{RepositoryError, ScheduledRoundSnapshot};
+use auction_application::core::RepositoryError;
+use auction_application::scheduling::ScheduledRoundSnapshot;
 use chrono::{Datelike, NaiveDate};
 
 use crate::database::TrackedPool;

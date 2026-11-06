@@ -4,7 +4,9 @@
 //! 超额只返回拒绝结果，由系统日志楼展示，不写入邮件、不改变竞价事实。
 
 #[cfg(feature = "postgres")]
-use auction_application::{ApplicationError, NotifySubscription};
+use auction_application::core::ApplicationError;
+#[cfg(feature = "postgres")]
+use auction_application::forum::NotifySubscription;
 #[cfg(feature = "postgres")]
 use auction_domain::{AuctionId, LotId, UserId};
 #[cfg(feature = "postgres")]

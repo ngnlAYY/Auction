@@ -1,6 +1,6 @@
 //! Operations alert 三类周期循环的运行时编排；扫描、分发和对账彼此隔离，单轮失败不阻塞其他 owner。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use super::*;
 use crate::worker::diagnostics;

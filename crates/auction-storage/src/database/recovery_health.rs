@@ -4,9 +4,9 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, ApplicationFuture, RecoveryHealthStore, RecoveryHealthUpdate, RepositoryError,
-};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::{ApplicationError, RepositoryError};
+use auction_application::recovery::{RecoveryHealthStore, RecoveryHealthUpdate};
 
 use super::DatabaseStore;
 use crate::database::storage_error;

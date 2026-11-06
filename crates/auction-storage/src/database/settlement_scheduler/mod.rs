@@ -1,8 +1,8 @@
 //! 结算 workflow 的持久调度端口；领取、租约和完成状态由 PostgreSQL 拥有。
 
-use auction_application::{
-    ApplicationError, ApplicationFuture, SettlementWorkClaim, SettlementWorkStore,
-};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::settlement::{SettlementWorkClaim, SettlementWorkStore};
 use chrono::{DateTime, Utc};
 
 use super::DatabaseStore;
@@ -97,7 +97,7 @@ impl SettlementWorkStore for DatabaseStore {
 }
 
 fn repository_error(message: &str) -> ApplicationError {
-    auction_application::RepositoryError::Failed(message.to_owned()).into()
+    auction_application::core::RepositoryError::Failed(message.to_owned()).into()
 }
 
 fn bounded_text(value: String, max_chars: usize) -> String {
@@ -118,19 +118,19 @@ fn valid_settlement_failure_code(value: &str) -> bool {
 }
 
 #[cfg(feature = "postgres")]
-fn map_storage_error(error: sqlx::Error) -> auction_application::RepositoryError {
+fn map_storage_error(error: sqlx::Error) -> auction_application::core::RepositoryError {
     let context = match &error {
         sqlx::Error::Database(database) if database.code().as_deref() == Some("40001") => {
             "PostgreSQL 结算 workflow 发生序列化冲突"
         }
         _ => "PostgreSQL 结算 workflow 持久化失败",
     };
-    auction_application::RepositoryError::Failed(crate::database::sql_error_context(
+    auction_application::core::RepositoryError::Failed(crate::database::sql_error_context(
         &error, context,
     ))
 }
 
 #[cfg(feature = "postgres")]
-fn repository_error_owned(message: &str) -> auction_application::RepositoryError {
-    auction_application::RepositoryError::Failed(message.to_owned())
+fn repository_error_owned(message: &str) -> auction_application::core::RepositoryError {
+    auction_application::core::RepositoryError::Failed(message.to_owned())
 }

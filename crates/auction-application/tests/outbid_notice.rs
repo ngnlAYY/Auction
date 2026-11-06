@@ -4,7 +4,9 @@
 //!
 //! 只验证纯函数生成的冻结正文与摘要；不连接数据库或外部服务。
 
-use auction_application::{OutbidNotice, lot_watch_notification, lot_watch_pm_notification};
+use auction_application::public::{
+    OutbidNotice, lot_watch_notification, lot_watch_pm_notification,
+};
 use chrono::{TimeZone, Utc};
 use uuid::Uuid;
 

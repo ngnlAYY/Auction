@@ -10,7 +10,7 @@
 // - 已被装备损失或历史自寄核对永久退役的投递不接受任何新动作；
 // - 每个动作只有一组允许的起止状态，账本回放复用同一映射。
 
-use super::delivery_admin::{DeliveryAdminAction, DeliveryAdminError};
+use crate::ports::delivery::admin::{DeliveryAdminAction, DeliveryAdminError};
 
 /// 单一动作唯一允许的起止状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

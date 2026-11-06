@@ -25,7 +25,7 @@ bash ci/checks/check.sh <检查项>...
 | `equipment-contract` | 装备解析诊断原因在 Rust、SQL 约束与 Admin 文案之间的闭集一致 |
 | `ratchet` | 源码计数不得超过仓库基线；下降时提示更新，口径与更新方式见[ci/checks/README.md#源码计数棘轮](checks/README.md#源码计数棘轮) |
 | `ratchet-counts` | 仅输出当前 14 项计数，不修改基线；供人工审阅下调 |
-| `module-paths` | `auction-http`、`auction-web-admin`、`auction-web-public` 的源码中不得出现 `#[path]`：模块树必须由目录层级表达，规则见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |
+| `module-paths` | `auction-http`、`auction-web-admin`、`auction-web-public`、`auction-storage`、`auction-jobs`、`auction-integrations` 的源码中不得出现 `#[path]`：模块树必须由目录层级表达，规则见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |
 | `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[ci/checks/README.md#markdown-相对链接](checks/README.md#markdown-相对链接) |
 | `migration-compatibility` | 075 起每个迁移末尾恰好登记自身一次，闭集等级、版本及事务规范见[ci/checks/README.md#迁移兼容登记](checks/README.md#迁移兼容登记) |
 | `published-migrations` | 每个发布 tag（`v<版本>`）中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；禁止修改、重命名或删除已发布文件，只允许追加新编号 |

@@ -40,13 +40,16 @@ impl DeliverySendExpectation {
     /// 验证规范形状；摘要必须来自消费同一渲染请求的可信传输边界。
     pub fn validate(&self) -> bool {
         matches!(self.world_id.as_str(), "main" | "isekai")
-            && crate::valid_mail_player_name(&self.recipient)
+            && crate::ports::admin::valid_mail_player_name(&self.recipient)
             && auction_domain::valid_text(&self.subject, 512)
             && self.body_digest != [0; 32]
-            && (0..=crate::MAX_DELIVERY_COD).contains(&self.credits)
-            && (0..=crate::MAX_DELIVERY_COD).contains(&self.cod)
+            && (0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.credits)
+            && (0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.cod)
             && self.equipment_ids.len() <= 1000
-            && self.equipment_ids.iter().all(|id| crate::valid_external_positive_id(id))
+            && self
+                .equipment_ids
+                .iter()
+                .all(|id| crate::ports::settlement::valid_external_positive_id(id))
             && self.equipment_ids.windows(2).all(|ids| ids[0] < ids[1])
             && self.credential.as_ref().is_none_or(DeliverySendCredentialBinding::validate)
     }

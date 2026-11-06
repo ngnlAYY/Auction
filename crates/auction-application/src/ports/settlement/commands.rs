@@ -9,7 +9,7 @@ use auction_domain::{
     SettlementLine, SettlementMode, SettlementObligationKind, SettlementPlan, SettlementPolicy,
 };
 
-use super::{
+use crate::ports::core::{
     CommandLedgerError, CompetitionSnapshot, StoredCommand, TransactionFuture, TransactionPolicy,
     TransactionPolicyError,
 };

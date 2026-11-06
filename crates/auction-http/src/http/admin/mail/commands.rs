@@ -1,4 +1,4 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
@@ -8,7 +8,8 @@ use super::{
     AdminApiState, authenticated_admin_mutation, feature_unavailable, internal_error, map_error,
     no_store_headers, request_id,
 };
-use auction_application::{AdminMailPollingCommand, RequestHash, admin_mail_aggregate_id};
+use auction_application::admin::{AdminMailPollingCommand, admin_mail_aggregate_id};
+use auction_application::core::RequestHash;
 use auction_contracts::{AdminMailPollingRequest, AdminMailStateResponse, ApiResponse};
 use auction_domain::CommandId;
 use axum::{

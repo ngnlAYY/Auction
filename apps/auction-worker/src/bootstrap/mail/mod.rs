@@ -34,21 +34,21 @@ pub(super) struct MailControlRemoteReads {
 pub(super) async fn configure_mail_poll(
     config: &AppConfig,
     store: Arc<DatabaseStore>,
-    profile_reader: Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
-    progress_observer: Arc<dyn auction_application::MailPollProgressObserver>,
-    sent_baseline_observer: Arc<dyn auction_application::SentBaselineObserver>,
-    mail_scan_observer: Arc<dyn auction_application::MailScanObserver>,
-    switches: auction_application::RuntimeSwitches,
-    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    profile_reader: Option<Arc<dyn auction_application::forum::ForumTargetProfileReader>>,
+    progress_observer: Arc<dyn auction_application::mail::MailPollProgressObserver>,
+    sent_baseline_observer: Arc<dyn auction_application::sent_baseline::SentBaselineObserver>,
+    mail_scan_observer: Arc<dyn auction_application::mail::MailScanObserver>,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
+    external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 ) -> anyhow::Result<(
     Vec<MailPollRuntime>,
     Option<Arc<dyn DeliveryTransport>>,
     Option<Arc<dyn SettlementFulfillmentEvidenceReader>>,
     Option<Arc<dyn SettlementFulfillmentCustodyReader>>,
-    Option<Arc<dyn auction_application::SettlementInternalEvidenceReader>>,
+    Option<Arc<dyn auction_application::settlement::SettlementInternalEvidenceReader>>,
     Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
     Option<MailControlRemoteReads>,
-    Option<Arc<dyn auction_application::AssetInventoryReader>>,
+    Option<Arc<dyn auction_application::reconciliation::AssetInventoryReader>>,
 )> {
     let mail_config = &config.worker.mooglemail;
     if !mail_config.enabled {
@@ -115,10 +115,10 @@ pub(super) async fn configure_mail_poll(
                 Arc::clone(&mail_scan_observer),
                 Arc::clone(&external_metrics),
             )?;
-        let maintenance = Arc::new(auction_application::MailboxMaintenanceService::new(
+        let maintenance = Arc::new(auction_application::mail::MailboxMaintenanceService::new(
             Arc::new(delivery_transport.maintenance_adapter())
-                as Arc<dyn auction_application::MoogleMailboxMaintenance>,
-            Arc::clone(&store) as Arc<dyn auction_application::MoogleMailboxEvidenceStore>,
+                as Arc<dyn auction_application::mail::MoogleMailboxMaintenance>,
+            Arc::clone(&store) as Arc<dyn auction_application::mail::MoogleMailboxEvidenceStore>,
             Arc::new(SystemClock),
         ));
         let (runtimes, gateways) = runtime::build_poll_runtimes(
@@ -165,7 +165,7 @@ pub(super) async fn configure_mail_poll(
             maximum_pages: mail_config.maximum_pages,
             fetch_timeout: std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
         };
-        let inventory_reader: Arc<dyn auction_application::AssetInventoryReader> =
+        let inventory_reader: Arc<dyn auction_application::reconciliation::AssetInventoryReader> =
             Arc::new(super::fulfillment::MoogleMailAssetInventoryReader {
                 gateways: gateways.clone(),
             });

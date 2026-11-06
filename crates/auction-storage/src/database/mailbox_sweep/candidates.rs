@@ -1,9 +1,7 @@
 //! 未证明 MoogleMail 发送的只读投影：冻结尝试身份优先，旧行只保留安全恢复所需字段。
 
-use auction_application::{
-    DeliverySendExpectation, DeliveryTakeExpectation, MoogleMailboxSweepCandidate,
-    MoogleMailboxUnprovenSend,
-};
+use auction_application::delivery::{DeliverySendExpectation, DeliveryTakeExpectation};
+use auction_application::mail::{MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::Postgres;
@@ -42,7 +40,7 @@ pub(super) async fn unproven_sends(
     pool: &TrackedPool<Postgres>,
     world_id: &str,
     limit: i64,
-) -> Result<Vec<MoogleMailboxSweepCandidate>, auction_application::ApplicationError> {
+) -> Result<Vec<MoogleMailboxSweepCandidate>, auction_application::core::ApplicationError> {
     // 所有 Send 来源共享冻结身份；不按 origin 白名单漏掉 watch、alert 或恢复发送。
     // 仅旧结算解析既有装备引用；正文和登录 key 不进入维护投影。
     // 先物化轮转前缀，再解析冻结尝试和旧装备引用，避免为本批未处理的后缀执行关联查询。

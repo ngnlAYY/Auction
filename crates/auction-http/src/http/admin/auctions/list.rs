@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use auction_application::{
+use auction_application::admin::{
     AdminAuctionListRequest, MAX_ADMIN_AUCTION_OFFSET, MAX_ADMIN_AUCTION_PAGE_SIZE,
 };
 use auction_contracts::{

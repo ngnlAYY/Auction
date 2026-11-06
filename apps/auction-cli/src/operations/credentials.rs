@@ -3,7 +3,7 @@
 use std::{io::Read, sync::Arc};
 
 use anyhow::Context;
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialImportCommand, AdminCredentialImportSource, AdminCredentialKind,
     AdminCredentialListRequest, AdminCredentialPort, AdminCredentialSecret, AdminCredentialService,
     AdminCredentialStatus, AdminCredentialWorld, MAX_ADMIN_CREDENTIAL_SECRET_BYTES,

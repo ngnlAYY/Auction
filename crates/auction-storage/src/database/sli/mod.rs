@@ -1,7 +1,7 @@
 //! SLI SQL 的单一 owner；只读、有界候选、至多一个空闲池连接。
 //! 指标不参与业务判定，不取得业务行锁，不写账本、审计或事件。
 
-use auction_application::{
+use auction_application::sli::{
     SLI_CANDIDATE_LIMIT, SliFlow, SliFlowWindow, SliSnapshot, SliSnapshotError, SliSnapshotReader,
 };
 use chrono::{DateTime, Utc};
@@ -70,8 +70,8 @@ async fn read(connection: &mut PgConnection) -> Result<SliSnapshot, SliSnapshotE
     let (settlement_first, settlement_last) =
         settlement_mail::read(&mut transaction, observed_at).await?;
     let payout = payout::read(&mut transaction, observed_at).await?;
-    let mut windows =
-        [[SliFlowWindow::default(); SliFlow::ALL.len()]; auction_application::SliWorld::ALL.len()];
+    let mut windows = [[SliFlowWindow::default(); SliFlow::ALL.len()];
+        auction_application::sli::SliWorld::ALL.len()];
     for (world, window) in slow_history.into_iter().enumerate() {
         windows[world][SliFlow::SlowProxyExecution.index()] = window;
     }

@@ -1,6 +1,6 @@
 //! 把 Admin 管理的公开参数投影为各角色启动配置；接管必须显式启用，部署专属字段不在此覆盖。
 
-use auction_application::{AdminRuntimeDocument, AdminRuntimeOperationsConfig};
+use auction_application::admin::{AdminRuntimeDocument, AdminRuntimeOperationsConfig};
 
 use super::{
     AuctionConfig, AuctionEconomicsConfig, AuctionScheduleConfig, DeliveryWorkerConfig,

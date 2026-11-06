@@ -8,7 +8,8 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::{ApplicationFuture, RequestHash};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
 
 /// Admin realtime 查询允许的最大单页大小。
 pub const MAX_REALTIME_ADMIN_PAGE_SIZE: i64 = 200;

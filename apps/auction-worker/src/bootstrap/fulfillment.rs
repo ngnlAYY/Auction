@@ -3,7 +3,7 @@
 #[cfg(feature = "postgres")]
 use super::*;
 #[cfg(feature = "postgres")]
-use auction_application::{
+use auction_application::settlement::{
     InternalEvidenceError, InternalEvidenceFuture, InternalEvidenceRequest,
     PreparedSettlementInternalEvidence, SettlementInternalEvidenceReader,
 };
@@ -46,13 +46,13 @@ fn fulfillment_gateway(
 /// 复用既有 gateway/credential set/ownership，不构造第二 Cookie 客户端。
 /// 此兼容端口只返回身份；内部 satisfy 由同一 gateway 的独立组合证据端口授权。
 #[cfg(feature = "postgres")]
-impl auction_application::SettlementFulfillmentBotIdentityReader
+impl auction_application::settlement::SettlementFulfillmentBotIdentityReader
     for MoogleMailFulfillmentEvidenceReader
 {
     fn read_verified_player_identity(
         &self,
         world: SettlementWorld,
-    ) -> ApplicationFuture<'_, Option<auction_application::VerifiedMailPlayerIdentity>> {
+    ) -> ApplicationFuture<'_, Option<auction_application::admin::VerifiedMailPlayerIdentity>> {
         Box::pin(async move {
             let (world, gateway) = fulfillment_gateway(
                 &self.gateways,
@@ -179,7 +179,7 @@ fn mooglemail_evidence_error(error: MoogleMailError) -> ApplicationError {
         }
         _ => {}
     }
-    auction_application::RepositoryError::Failed(format!(
+    auction_application::core::RepositoryError::Failed(format!(
         "MoogleMail {} 证据读取失败",
         error.category
     ))
@@ -194,12 +194,12 @@ pub(super) struct MoogleMailAssetInventoryReader {
 }
 
 #[cfg(feature = "postgres")]
-impl auction_application::AssetInventoryReader for MoogleMailAssetInventoryReader {
+impl auction_application::reconciliation::AssetInventoryReader for MoogleMailAssetInventoryReader {
     fn read_inventory(
         &self,
         world: SettlementWorld,
         observed_at: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, auction_application::AssetArmoryObservation> {
+    ) -> ApplicationFuture<'_, auction_application::reconciliation::AssetArmoryObservation> {
         Box::pin(async move {
             let moogle_world = MoogleMailWorld::from(world);
             let gateway = self.gateways.get(&moogle_world).cloned().ok_or(
@@ -220,7 +220,7 @@ impl auction_application::AssetInventoryReader for MoogleMailAssetInventoryReade
             }
             equipment_ids.sort_unstable();
             equipment_ids.dedup();
-            Ok(auction_application::AssetArmoryObservation {
+            Ok(auction_application::reconciliation::AssetArmoryObservation {
                 world,
                 observed_at,
                 equipment_ids,

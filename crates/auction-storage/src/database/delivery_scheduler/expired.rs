@@ -14,8 +14,8 @@ pub(super) async fn reconcile(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
     grace_micros: i64,
-    notifications: &dyn auction_application::NotificationRecorder,
-) -> Result<(), auction_application::RepositoryError> {
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
+) -> Result<(), auction_application::core::RepositoryError> {
     // 候选读取不持业务锁；每条短事务内重新锁定并核验有效期。
     let candidates = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM public.deliveries WHERE status='sending'
@@ -47,7 +47,7 @@ async fn expire_one(
     id: Uuid,
     now: DateTime<Utc>,
     grace_micros: i64,
-    notifications: &dyn auction_application::NotificationRecorder,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), OutcomeError> {
     let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     let account = funding::lock_funded_delivery_account(&mut tx, id).await?;
@@ -75,7 +75,7 @@ async fn expire_one(
                 &mut tx,
                 &account,
                 id,
-                auction_application::FundingDeliveryOutcome::Unknown,
+                auction_application::settlement::FundingDeliveryOutcome::Unknown,
             )
             .await?;
         }
@@ -84,15 +84,20 @@ async fn expire_one(
         let payload: serde_json::Value = row.try_get("payload")?;
         let origin_kind: String = row.try_get("origin_kind")?;
         let created_at: DateTime<Utc> = row.try_get("created_at")?;
-        if let Some(kind) = auction_application::NotificationKind::from_delivery(
-            &origin_kind,
-            payload.get("operation").and_then(serde_json::Value::as_str),
-            payload.get("template").and_then(serde_json::Value::as_str),
-        ) {
-            notifications.observe_stage(kind, auction_application::NotificationStage::Failed);
+        if let Some(kind) =
+            auction_application::notification_metrics::NotificationKind::from_delivery(
+                &origin_kind,
+                payload.get("operation").and_then(serde_json::Value::as_str),
+                payload.get("template").and_then(serde_json::Value::as_str),
+            )
+        {
+            notifications.observe_stage(
+                kind,
+                auction_application::notification_metrics::NotificationStage::Failed,
+            );
             notifications.observe_failure(
                 kind,
-                auction_application::NotificationFailure::LeaseExpiredOutcomeUnknown,
+                auction_application::notification_metrics::NotificationFailure::LeaseExpiredOutcomeUnknown,
             );
             if let Ok(latency) = (now - created_at).to_std() {
                 notifications.observe_delivery_latency(kind, latency);

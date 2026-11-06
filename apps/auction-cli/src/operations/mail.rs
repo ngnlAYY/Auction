@@ -3,10 +3,12 @@
 use std::{path::Path, time::Duration};
 
 use anyhow::Context;
-use auction_application::{
-    SettlementFulfillmentSentLookupReader, WORKER_REMOTE_READ_TIMEOUT_SECONDS,
-    WorkerRemoteReadError, WorkerRemoteReadPort, WorkerSentLookupRequest,
-    canonical_settlement_fulfillment_subject,
+use auction_application::operations::{
+    WORKER_REMOTE_READ_TIMEOUT_SECONDS, WorkerRemoteReadError, WorkerRemoteReadPort,
+    WorkerSentLookupRequest,
+};
+use auction_application::settlement::{
+    SettlementFulfillmentSentLookupReader, canonical_settlement_fulfillment_subject,
 };
 use auction_config::AppConfig;
 use auction_domain::{SettlementId, SettlementObligationKind};

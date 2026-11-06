@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use auction_domain::AuctionId;
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// Admin 结算报告中的拍卖生命周期快照。
 /// 这是稳定报告所需的只读投影，不复用领域 `Auction` 聚合，避免把数据库的管理字段或

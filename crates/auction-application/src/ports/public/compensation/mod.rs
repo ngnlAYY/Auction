@@ -7,8 +7,10 @@ use auction_domain::SettlementMode;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::ApplicationFuture;
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::auction::ApplicationFuture;
 
 mod lot;
 mod movement;

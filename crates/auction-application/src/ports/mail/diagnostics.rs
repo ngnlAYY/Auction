@@ -4,7 +4,7 @@ use std::{future::Future, pin::Pin};
 
 use uuid::Uuid;
 
-use super::mail_processing::MailMessage;
+use crate::ports::mail::processing::MailMessage;
 
 /// 诊断记录所处阶段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// 公开价格历史允许的最大名称词条数。
 pub const MAX_PUBLIC_HISTORY_NAME_TERMS: usize = 8;

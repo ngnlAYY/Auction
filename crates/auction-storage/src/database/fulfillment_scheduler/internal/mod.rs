@@ -1,13 +1,14 @@
 //! 内部满足事务装配；资金 SQL 唯一拥有者仍为 settlement_funding。
 
-use auction_application::{
-    ApplicationFuture, FundingFuture, SettlementFulfillmentProof, SettlementInternalCommand,
+use auction_application::auction::ApplicationFuture;
+use auction_application::settlement::{
+    FundingFuture, SettlementFulfillmentProof, SettlementInternalCommand,
     SettlementInternalCommitOutcome, SettlementInternalEvidenceSnapshot,
     SettlementInternalFulfillmentStore,
 };
 
 #[cfg(feature = "postgres")]
-use auction_application::FundingError;
+use auction_application::settlement::FundingError;
 // 资金错误映射由 settlement_funding 唯一拥有；子模块与履约投递经此路径复用。
 #[cfg(feature = "postgres")]
 pub(super) use crate::database::settlement_funding::{evidence_error, storage as sql_error};
@@ -65,7 +66,7 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
                     .await
                     .map_err(|error| match error {
                         FundingError::Conflict => {
-                            auction_application::ApplicationError::FulfillmentDependencyMismatch
+                            auction_application::core::ApplicationError::FulfillmentDependencyMismatch
                         }
                         _ => super::mapping::repository_error("内部命令账本暂不可用"),
                     }),
@@ -127,18 +128,18 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
 #[cfg(feature = "postgres")]
 pub(super) async fn lock_legacy(
     tx: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
-    claim: &auction_application::SettlementFulfillmentClaim,
+    claim: &auction_application::settlement::SettlementFulfillmentClaim,
     custody: Option<(&SettlementInternalEvidenceSnapshot, uuid::Uuid)>,
 ) -> Result<bool, FundingError> {
     if claim.kind == auction_domain::SettlementObligationKind::BuyerRefund
-        && claim.state != auction_application::SettlementFulfillmentState::Enqueued
+        && claim.state != auction_application::settlement::SettlementFulfillmentState::Enqueued
     {
         let (evidence, operation_id) = custody.ok_or(FundingError::Unproven)?;
         if !evidence.valid_at(chrono::Utc::now())
             || evidence.operation_id != operation_id
             || evidence.observed_from < claim.claimed_at
             || evidence.identity.world != claim.world
-            || !matches!(&evidence.purpose, auction_application::InternalEvidencePurpose::SettlementClaim {
+            || !matches!(&evidence.purpose, auction_application::settlement::InternalEvidencePurpose::SettlementClaim {
                 obligation_id, claim_token, claim_fencing, state_version
             } if *obligation_id == claim.obligation_id.as_uuid()
                 && *claim_token == claim.claim_token
@@ -169,7 +170,7 @@ pub(super) async fn lock_legacy(
     if let Some(user_id) = claim.recipient_user_id {
         let current: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM public.users WHERE id=$1 AND ($3 OR (username=$2 AND status='active')))")
             .bind(user_id).bind(&claim.recipient)
-            .bind(claim.state == auction_application::SettlementFulfillmentState::Enqueued)
+            .bind(claim.state == auction_application::settlement::SettlementFulfillmentState::Enqueued)
             .fetch_one(&mut **tx).await.map_err(sql_error)?;
         if !current {
             return Err(FundingError::Conflict);

@@ -5,7 +5,7 @@ use super::mapping::*;
 use crate::database::delivery_audit::{
     ACTIVATE, DeliveryAudit, PREPARE, append as append_delivery_audit,
 };
-use auction_application::{
+use auction_application::settlement::{
     SettlementDeliveryPreparation, SettlementFulfillmentClaim,
     SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentResult, SettlementFulfillmentState,
 };
@@ -24,8 +24,8 @@ type DeliveryTransactionFuture<'a, T> =
 #[cfg(feature = "postgres")]
 enum DeliveryTransactionError {
     Sqlx(sqlx::Error),
-    Repository(auction_application::RepositoryError),
-    Funding(auction_application::FundingError),
+    Repository(auction_application::core::RepositoryError),
+    Funding(auction_application::settlement::FundingError),
 }
 
 #[cfg(feature = "postgres")]
@@ -36,8 +36,8 @@ impl From<sqlx::Error> for DeliveryTransactionError {
 }
 
 #[cfg(feature = "postgres")]
-impl From<auction_application::RepositoryError> for DeliveryTransactionError {
-    fn from(error: auction_application::RepositoryError) -> Self {
+impl From<auction_application::core::RepositoryError> for DeliveryTransactionError {
+    fn from(error: auction_application::core::RepositoryError) -> Self {
         Self::Repository(error)
     }
 }
@@ -45,12 +45,14 @@ impl From<auction_application::RepositoryError> for DeliveryTransactionError {
 #[cfg(feature = "postgres")]
 impl DeliveryTransactionError {
     fn is_retryable(&self) -> bool {
-        matches!(self, Self::Funding(auction_application::FundingError::SerializationConflict))
-            || matches!(self, Self::Sqlx(error)
+        matches!(
+            self,
+            Self::Funding(auction_application::settlement::FundingError::SerializationConflict)
+        ) || matches!(self, Self::Sqlx(error)
                 if crate::database::observed_serialization_conflict(error))
     }
 
-    fn into_repository_error(self) -> auction_application::RepositoryError {
+    fn into_repository_error(self) -> auction_application::core::RepositoryError {
         match self {
             Self::Sqlx(error) => map_storage_error(error),
             Self::Repository(error) => error,
@@ -65,14 +67,17 @@ impl DeliveryTransactionError {
 #[cfg(feature = "postgres")]
 async fn run_serializable_delivery_transaction<T, F>(
     pool: &crate::database::TrackedPool<Postgres>,
-    custody: Option<(&auction_application::SettlementInternalEvidenceSnapshot, std::time::Instant)>,
+    custody: Option<(
+        &auction_application::settlement::SettlementInternalEvidenceSnapshot,
+        std::time::Instant,
+    )>,
     mut operation: F,
-) -> Result<T, auction_application::RepositoryError>
+) -> Result<T, auction_application::core::RepositoryError>
 where
     T: Send,
     F: for<'a> FnMut(
             &'a mut crate::database::TrackedTransaction<'static, Postgres>,
-            Option<&'a auction_application::SettlementInternalEvidenceSnapshot>,
+            Option<&'a auction_application::settlement::SettlementInternalEvidenceSnapshot>,
         ) -> DeliveryTransactionFuture<'a, T>
         + Send,
 {
@@ -103,7 +108,7 @@ where
                         let budget = (custody.expires_at - Utc::now()).num_milliseconds();
                         if budget <= 0 {
                             return Err(DeliveryTransactionError::Funding(
-                                auction_application::FundingError::Unproven,
+                                auction_application::settlement::FundingError::Unproven,
                             ));
                         }
                         // PostgreSQL 18 整事务预算包含锁等待与 COMMIT，重试不延长证据窗口。
@@ -172,8 +177,11 @@ pub(super) async fn prepare_postgres(
     claim: &SettlementFulfillmentClaim,
     preparation: &SettlementDeliveryPreparation,
     _prepared_at: DateTime<Utc>,
-    custody: Option<(&auction_application::SettlementInternalEvidenceSnapshot, std::time::Instant)>,
-) -> Result<SettlementFulfillmentResult, auction_application::RepositoryError> {
+    custody: Option<(
+        &auction_application::settlement::SettlementInternalEvidenceSnapshot,
+        std::time::Instant,
+    )>,
+) -> Result<SettlementFulfillmentResult, auction_application::core::RepositoryError> {
     validate_claim_identity(claim)?;
     if preparation.delivery_id.is_nil()
         || preparation.prepare_command_id.is_nil()
@@ -379,7 +387,7 @@ pub(super) async fn prepare_postgres(
     next_claim.prepare_request_hash = Some(preparation.request_hash);
     next_claim.delivery_snapshot = Some(SettlementFulfillmentDeliverySnapshot {
         id: preparation.delivery_id,
-        status: auction_application::SettlementFulfillmentDeliveryStatus::Prepared,
+        status: auction_application::settlement::SettlementFulfillmentDeliveryStatus::Prepared,
         prepare_command_id: preparation.prepare_command_id,
         prepare_request_hash: preparation.request_hash,
         activate_command_id: None,
@@ -405,13 +413,16 @@ pub(super) async fn activate_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
     activate_command_id: CommandId,
-    activate_request_hash: auction_application::RequestHash,
+    activate_request_hash: auction_application::core::RequestHash,
     activated_at: DateTime<Utc>,
     _next_attempt_at: Option<DateTime<Utc>>,
-    custody: Option<(&auction_application::SettlementInternalEvidenceSnapshot, std::time::Instant)>,
+    custody: Option<(
+        &auction_application::settlement::SettlementInternalEvidenceSnapshot,
+        std::time::Instant,
+    )>,
 ) -> Result<
-    auction_application::SettlementFulfillmentActivationResult,
-    auction_application::RepositoryError,
+    auction_application::settlement::SettlementFulfillmentActivationResult,
+    auction_application::core::RepositoryError,
 > {
     validate_claim_identity(claim)?;
     let (Some(delivery_id), Some(prepare_command_id), Some(prepare_request_hash)) =
@@ -436,7 +447,7 @@ pub(super) async fn activate_postgres(
         .clone()
         .ok_or_else(|| repository_error_owned("prepared 履约缺少 delivery 快照"))?;
     next_delivery_snapshot.status =
-        auction_application::SettlementFulfillmentDeliveryStatus::Pending;
+        auction_application::settlement::SettlementFulfillmentDeliveryStatus::Pending;
     next_delivery_snapshot.activate_command_id = Some(activate_command_id);
     next_delivery_snapshot.activate_request_hash = Some(activate_request_hash);
     let request_id = activate_command_id.to_string();
@@ -633,7 +644,7 @@ pub(super) async fn activate_postgres(
     next_claim.activate_command_id = Some(activate_command_id);
     next_claim.activate_request_hash = Some(activate_request_hash);
     next_claim.delivery_snapshot = Some(next_delivery_snapshot);
-    Ok(auction_application::SettlementFulfillmentActivationResult {
+    Ok(auction_application::settlement::SettlementFulfillmentActivationResult {
         obligation_id: claim.obligation_id,
         delivery_id,
         activate_command_id,

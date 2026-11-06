@@ -177,7 +177,7 @@ fn record(recorder: &dyn ShadowRecorder, sample: ShadowSample) {
 mod tests {
     use std::sync::Mutex;
 
-    use super::{
+    use crate::ports::shadow_run::{
         ShadowOutcome, ShadowOwner, ShadowRecorder, ShadowSample, record_comparison, record_sample,
         record_uncomparable,
     };

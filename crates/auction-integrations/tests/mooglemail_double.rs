@@ -300,47 +300,55 @@ struct CountingRecorder {
     retained: std::sync::atomic::AtomicUsize,
 }
 
-impl auction_application::MailDiagnosticRecorder for CountingRecorder {
+impl auction_application::mail::MailDiagnosticRecorder for CountingRecorder {
     fn prepare_response(
         &self,
-        _context: auction_application::MailDiagnosticContext,
+        _context: auction_application::mail::MailDiagnosticContext,
         _status: Option<u16>,
         _body: Option<&[u8]>,
-    ) -> Result<auction_application::PreparedMailEvidence, auction_application::MailDiagnosticError>
-    {
-        Err(auction_application::MailDiagnosticError::UnsupportedPlatform)
+    ) -> Result<
+        auction_application::mail::PreparedMailEvidence,
+        auction_application::mail::MailDiagnosticError,
+    > {
+        Err(auction_application::mail::MailDiagnosticError::UnsupportedPlatform)
     }
 
     fn prepare_message(
         &self,
-        _context: auction_application::MailDiagnosticContext,
-        _message: &auction_application::MailMessage,
-    ) -> Result<auction_application::PreparedMailEvidence, auction_application::MailDiagnosticError>
-    {
-        Err(auction_application::MailDiagnosticError::UnsupportedPlatform)
+        _context: auction_application::mail::MailDiagnosticContext,
+        _message: &auction_application::mail::MailMessage,
+    ) -> Result<
+        auction_application::mail::PreparedMailEvidence,
+        auction_application::mail::MailDiagnosticError,
+    > {
+        Err(auction_application::mail::MailDiagnosticError::UnsupportedPlatform)
     }
 
     fn retain(
         &self,
-        _prepared: auction_application::PreparedMailEvidence,
-        _outcome: auction_application::MailDiagnosticOutcome,
-    ) -> auction_application::MailDiagnosticFuture<'_, auction_application::MailDiagnosticReceipt>
-    {
-        Box::pin(async { Err(auction_application::MailDiagnosticError::UnsupportedPlatform) })
+        _prepared: auction_application::mail::PreparedMailEvidence,
+        _outcome: auction_application::mail::MailDiagnosticOutcome,
+    ) -> auction_application::mail::MailDiagnosticFuture<
+        '_,
+        auction_application::mail::MailDiagnosticReceipt,
+    > {
+        Box::pin(async { Err(auction_application::mail::MailDiagnosticError::UnsupportedPlatform) })
     }
 
     fn retain_response(
         &self,
-        _context: auction_application::MailDiagnosticContext,
+        _context: auction_application::mail::MailDiagnosticContext,
         _status: Option<u16>,
         _body: Option<&[u8]>,
-        _outcome: auction_application::MailDiagnosticOutcome,
-    ) -> auction_application::MailDiagnosticFuture<'_, auction_application::MailDiagnosticReceipt>
-    {
+        _outcome: auction_application::mail::MailDiagnosticOutcome,
+    ) -> auction_application::mail::MailDiagnosticFuture<
+        '_,
+        auction_application::mail::MailDiagnosticReceipt,
+    > {
         use std::sync::atomic::Ordering;
         self.retained.fetch_add(1, Ordering::SeqCst);
         Box::pin(async {
-            Ok(auction_application::MailDiagnosticReceipt {
+            Ok(auction_application::mail::MailDiagnosticReceipt {
                 evidence_id: uuid::Uuid::nil(),
                 plaintext_bytes: 0,
                 sha256: String::new(),

@@ -4,7 +4,8 @@
 use crate::database::storage_error_from;
 
 use crate::database::operations_alert::storage_error;
-use auction_application::{ApplicationError, OperationsAlertHealth, OperationsAlertRuntimeStatus};
+use auction_application::core::ApplicationError;
+use auction_application::operations::{OperationsAlertHealth, OperationsAlertRuntimeStatus};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 

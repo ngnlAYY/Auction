@@ -3,8 +3,8 @@
 // 回执只引用已持久化的场次、lot 代码、装备名与起拍价；不读取配置、时钟或装备 key。
 // 同一事实必须产生同一正文，重放时请求摘要与已入队通知才能一致。
 
-use super::SubmissionReceiptFacts;
-use crate::format_credits;
+use crate::ports::mail::SubmissionReceiptFacts;
+use crate::services::public::format_credits;
 
 /// 回执正文上限，与 MoogleMail 单个冻结正文预算一致；超限时不截断 lot 列表，直接不创建回执。
 pub const MAX_SUBMISSION_RECEIPT_BODY_BYTES: usize = 16 << 10;
@@ -40,9 +40,9 @@ pub fn submission_receipt_body(facts: &SubmissionReceiptFacts) -> Option<String>
 
 #[cfg(test)]
 mod tests {
-    use super as parent;
     use self::parent::*;
-    use crate::SubmissionReceiptLot;
+    use super as parent;
+    use crate::ports::mail::SubmissionReceiptLot;
 
     fn facts(lots: Vec<SubmissionReceiptLot>) -> SubmissionReceiptFacts {
         SubmissionReceiptFacts { session: 42, auction_status: "preview".to_owned(), lots }

@@ -7,9 +7,9 @@ use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::ports::lower_hex;
+use crate::ports::core::lower_hex;
 
-use super::{
+use crate::ports::settlement::{
     INTERNAL_EVIDENCE_MAX_AGE_SECONDS, INTERNAL_EVIDENCE_PROTOCOL, valid_external_positive_id,
 };
 
@@ -32,7 +32,7 @@ pub enum InternalEvidencePurpose {
         delivery_id: Uuid,
         claim_token: Uuid,
         claim_fencing: i64,
-        request_hash: crate::RequestHash,
+        request_hash: crate::ports::core::RequestHash,
     },
     FundingReconciliation {
         command_id: Uuid,
@@ -152,7 +152,7 @@ impl MailAccountEvidenceBinding {
             && self.credential_version > 0
             && self.runtime.generation > 0
             && valid_external_positive_id(&self.authenticated_uid)
-            && crate::valid_mail_player_name(&self.player_name)
+            && crate::ports::admin::valid_mail_player_name(&self.player_name)
             && self.protocol_version == INTERNAL_EVIDENCE_PROTOCOL
             && self.digest == self.compute_digest()
     }
@@ -163,7 +163,7 @@ impl MailAccountEvidenceBinding {
             self.protocol_version,
             &self.credential_id.to_string(),
             &self.credential_version.to_string(),
-            super::MAIL_RUNTIME_SCOPE,
+            crate::ports::settlement::MAIL_RUNTIME_SCOPE,
             &self.runtime.generation.to_string(),
             &self.authenticated_uid,
             &self.player_name,
@@ -236,7 +236,7 @@ pub struct SettlementInternalEvidenceSnapshot {
     pub identity: MailAccountEvidenceBinding,
     pub equipment: Option<VerifiedMailEquipmentPresence>,
     pub main_cash: Option<VerifiedMainCashObservation>,
-    pub sent_collection: Option<super::VerifiedMailSentCollectionObservation>,
+    pub sent_collection: Option<crate::ports::settlement::VerifiedMailSentCollectionObservation>,
     pub observed_from: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub digest: [u8; 32],

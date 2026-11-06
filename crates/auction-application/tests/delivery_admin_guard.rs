@@ -1,6 +1,6 @@
 //! Admin 投递动作守卫的动作迁移表与阻断项回归；只覆盖纯判定，不连接数据库。
 
-use auction_application::{
+use auction_application::delivery::{
     DeliveryAdminAction, DeliveryAdminError, DeliveryAdminGuardBlocker, DeliveryAdminGuardSnapshot,
     DeliveryAdminTransition,
 };

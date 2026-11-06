@@ -1,15 +1,14 @@
 //! MoogleMail 单 Cookie 普通读会话与资产操作的互斥隔离。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::clients::metrics::MailLockWaitGuard;
 use crate::diagnostics as safe_diagnostics;
 
 use std::sync::{Arc, Mutex};
 
-use auction_application::{
-    AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter, GateClass,
-};
+use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
+use auction_application::mail::GateClass;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -53,7 +52,7 @@ pub struct MoogleMailCredentialSet {
     candidates: Arc<Mutex<Vec<MoogleMailCredentialCandidate>>>,
     invalidator: Option<Arc<dyn AdminCredentialRuntimeWriter>>,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
-    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 }
 
 impl MoogleMailCredentialSet {
@@ -190,7 +189,7 @@ impl MoogleMailCredentialSet {
                 candidate.persistent_id.is_some_and(|id| id.is_nil())
                     || candidate.state_version.is_some_and(|version| version <= 0)
                     || candidate.player_name.as_deref().is_some_and(|name| {
-                        !auction_application::valid_mail_player_name(name)
+                        !auction_application::admin::valid_mail_player_name(name)
                             || candidate.persistent_id.is_none()
                             || candidate.state_version.is_none()
                     })
@@ -231,14 +230,15 @@ impl MoogleMailCredentialSet {
             candidates: Arc::new(Mutex::new(candidates)),
             invalidator,
             ownership,
-            external_metrics: auction_application::noop_external_metrics_observer(),
+            external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
+            ),
         })
     }
 
     /// 注入排他锁等待指标；指标失败不改变锁顺序或凭据选择。
     pub fn with_external_metrics(
         mut self,
-        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+        observer: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     ) -> Self {
         self.external_metrics = observer;
         self
@@ -287,7 +287,7 @@ impl MoogleMailCredentialSet {
             Arc::clone(&self.external_metrics),
             world,
             operation,
-            auction_application::MailLock::Exclusive,
+            auction_application::external_metrics::MailLock::Exclusive,
         );
         let operation_guard =
             Arc::clone(&current.operation_lock).lock(operation_lock_class(operation)).await;
@@ -398,12 +398,12 @@ impl MoogleMailCredentialSession {
     /// 普通观测的持久凭据身份；只用于匹配冻结发送记录，不建立资金/库存授权。
     pub(crate) fn observation_credential_binding(
         &self,
-    ) -> Option<auction_application::DeliverySendCredentialBinding> {
+    ) -> Option<auction_application::delivery::DeliverySendCredentialBinding> {
         if !self.set.candidate_is_active(self.current.key, self.world, self.operation).ok()? {
             return None;
         }
         let runtime = self.set.ownership.as_ref()?.mail_runtime_binding()?;
-        let binding = auction_application::DeliverySendCredentialBinding {
+        let binding = auction_application::delivery::DeliverySendCredentialBinding {
             credential_id: self.current.persistent_id?,
             credential_version: self.current.state_version?,
             runtime_generation: runtime.generation,
@@ -467,10 +467,10 @@ impl MoogleMailCredentialSession {
         &self,
         world: MoogleMailWorld,
     ) -> Result<
-        (Uuid, i64, auction_application::MailRuntimeBinding, Option<&str>),
-        auction_application::InternalEvidenceError,
+        (Uuid, i64, auction_application::settlement::MailRuntimeBinding, Option<&str>),
+        auction_application::settlement::InternalEvidenceError,
     > {
-        use auction_application::InternalEvidenceError as Error;
+        use auction_application::settlement::InternalEvidenceError as Error;
         if self.operation_guard.is_none() {
             return Err(Error::Unsupported);
         }
@@ -502,8 +502,8 @@ impl MoogleMailCredentialSession {
     pub(crate) async fn check_internal_current(
         &self,
         deadline: std::time::Instant,
-    ) -> Result<(), auction_application::InternalEvidenceError> {
-        use auction_application::InternalEvidenceError as Error;
+    ) -> Result<(), auction_application::settlement::InternalEvidenceError> {
+        use auction_application::settlement::InternalEvidenceError as Error;
         if std::time::Instant::now() >= deadline {
             return Err(Error::Expired);
         }

@@ -6,11 +6,11 @@ use crate::database::storage_error_from;
 use super::mapping::*;
 
 use crate::database::credentials::admin_error;
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialCommandKind, AdminCredentialCommandResult, AdminCredentialError,
     AdminCredentialKind, AdminCredentialListRequest, AdminCredentialPage, AdminCredentialStatus,
-    ApplicationError, RequestHash,
 };
+use auction_application::core::{ApplicationError, RequestHash};
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]

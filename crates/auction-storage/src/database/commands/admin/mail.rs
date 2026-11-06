@@ -3,16 +3,17 @@
 use std::{marker::PhantomData, sync::Arc};
 
 #[cfg(feature = "postgres")]
-use auction_application::AdminMailService;
-use auction_application::{
+use auction_application::admin::AdminMailService;
+use auction_application::admin::{
     AdminMailCommandPort, AdminMailDashboardSnapshot, AdminMailIntakeDetail, AdminMailIntakeFilter,
     AdminMailIntakePage, AdminMailPollState, AdminMailPollStateRequest,
-    AdminMailPollTriggerCommand, AdminMailPollingCommand, AdminMailReader, ApplicationFuture,
-    Clock,
+    AdminMailPollTriggerCommand, AdminMailPollingCommand, AdminMailReader,
 };
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::Clock;
 use uuid::Uuid;
 
-use super::DatabaseStore;
+use super::super::DatabaseStore;
 
 /// Admin 邮件状态和命令的数据库组合器。
 pub struct DatabaseAdminMailCommands<C> {

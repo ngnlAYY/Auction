@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use auction_application::{AdminRuntimeMailTemplatesConfig, default_accepted_qualities};
+use auction_application::admin::AdminRuntimeMailTemplatesConfig;
+use auction_application::mail::default_accepted_qualities;
 use serde::Deserialize;
 
 /// Worker 使用的 MoogleMail 入站轮询策略。
@@ -39,13 +40,13 @@ pub struct MoogleMailWorkerConfig {
     pub maximum_response_bytes: usize,
     pub minimum_request_interval_millis: u64,
     /// 各类 Send 开始的最小间距；不影响 Take/Return，与 HTTP 限速独立。
-    pub send_intervals: auction_application::DeliverySendIntervals,
+    pub send_intervals: auction_application::delivery::DeliverySendIntervals,
     /// 单次 MoogleMail HTTP 请求与响应正文读取的超时秒数。
     pub request_timeout_seconds: u64,
     pub batch_size: u16,
     pub maximum_pages: usize,
     /// 发送前基线策略；默认 shadow，切换需重启，不接入在线运行时开关。
-    pub sent_baseline_mode: auction_application::SentBaselineMode,
+    pub sent_baseline_mode: auction_application::sent_baseline::SentBaselineMode,
     /// 每个 world 共用的标准五字段 cron；支持旧版描述符和时区前缀。
     pub schedule: String,
     /// 独立运行收件与维护并错峰两个世界的 TOML 基线；运行时开关
@@ -187,11 +188,11 @@ impl Default for MoogleMailWorkerConfig {
             endpoint: "https://hentaiverse.org".to_owned(),
             maximum_response_bytes: 8 * 1024 * 1024,
             minimum_request_interval_millis: 1_000,
-            send_intervals: auction_application::DeliverySendIntervals::default(),
+            send_intervals: auction_application::delivery::DeliverySendIntervals::default(),
             request_timeout_seconds: 15,
             batch_size: 100,
             maximum_pages: 20,
-            sent_baseline_mode: auction_application::SentBaselineMode::Shadow,
+            sent_baseline_mode: auction_application::sent_baseline::SentBaselineMode::Shadow,
             schedule: "*/5 * * * *".to_owned(),
             poll_isolation_enabled: true,
             maintenance_schedule: None,

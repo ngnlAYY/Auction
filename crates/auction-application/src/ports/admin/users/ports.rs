@@ -2,8 +2,6 @@
 
 use uuid::Uuid;
 
-use super::super::user_mail::{MailLoginKey, MailLoginKeyEnvelope};
-use super::super::{ApplicationFuture, RequestHash};
 use super::commands::{
     AdminRenameRevertCommand, AdminRenameRevertWrite, AdminUserCommandKind, AdminUserCommandResult,
     AdminUserCreateCommand, AdminUserCreateWrite, AdminUserKeyIssue, AdminUserMutationCommand,
@@ -11,6 +9,9 @@ use super::commands::{
     RecoveryBuyerBlacklistResult,
 };
 use super::model::{AdminUserListRequest, AdminUserPage};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
+use crate::ports::mail::user::{MailLoginKey, MailLoginKeyEnvelope};
 
 pub trait AdminLoginKeyIssuer: Send + Sync {
     fn generate(&self, user_id: Uuid) -> ApplicationFuture<'_, AdminUserKeyIssue>;

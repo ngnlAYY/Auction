@@ -4,7 +4,7 @@
 //! `state_version` 顺序应用既有的标记/领先周期/提醒状态机。处理事务与事件完成标记同一事务
 //! 提交，因此崩溃只会重试，不会丢失或重复提醒。端口不暴露 SQL、事件负载或用户敏感字段。
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// 一次 outbox 处理批次的计数；不含事件内容与正文。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

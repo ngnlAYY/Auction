@@ -6,13 +6,14 @@ mod countdown;
 mod log;
 mod settlement;
 
-use auction_application::{
+use auction_application::forum::{
     EquipmentColorFacts, EquipmentColorRule, FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot,
     ForumCurrentBidSource, ForumLotSnapshot, ForumRenderError, ForumRenderedPost,
     ForumRenderedThread, ForumRenderer, ForumSystemLogEntry, MAX_FORUM_CATALOG_LOTS,
-    MAX_FORUM_RECONCILIATION_TITLES, PEERLESS_COLORS, PublicEquipmentGameLink,
-    equipment_color_decision, forum_catalog_page_marker,
+    MAX_FORUM_RECONCILIATION_TITLES, PEERLESS_COLORS, equipment_color_decision,
+    forum_catalog_page_marker,
 };
+use auction_application::public::PublicEquipmentGameLink;
 use auction_domain::{AuctionId, AuctionStatus, SettlementWorld, valid_text};
 use sha2::{Digest, Sha256};
 use url::Url;

@@ -3,11 +3,13 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    AdminLotListRequest, AdminLotPage, AdminLotReader, ApplicationError, ApplicationFuture,
-};
 #[cfg(feature = "postgres")]
-use auction_application::{AdminLotSummary, SettlementAuctionSnapshot};
+use auction_application::admin::AdminLotSummary;
+use auction_application::admin::{AdminLotListRequest, AdminLotPage, AdminLotReader};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+#[cfg(feature = "postgres")]
+use auction_application::settlement::SettlementAuctionSnapshot;
 #[cfg(feature = "postgres")]
 use auction_domain::{AuctionId, EquipmentId, LotId, ProxyAuthorizationId, SubmissionId, UserId};
 

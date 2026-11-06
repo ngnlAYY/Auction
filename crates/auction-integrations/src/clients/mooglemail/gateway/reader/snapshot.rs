@@ -2,7 +2,7 @@
 //!
 //! 与收件读取共用只读凭据会话与抓取预算；不执行 organize/解锁/寄送等任何写操作。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use chrono::{DateTime, Utc};
 
 use crate::diagnostics as safe_diagnostics;

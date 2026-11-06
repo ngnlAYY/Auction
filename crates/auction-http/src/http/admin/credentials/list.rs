@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialKind, AdminCredentialListRequest, AdminCredentialStatus, AdminCredentialWorld,
 };
 use auction_contracts::{
@@ -46,7 +46,7 @@ pub(crate) async fn list(
         Err(_) => return invalid_query(),
     };
     let offset = match page.checked_sub(1).and_then(|value| value.checked_mul(page_size)) {
-        Some(value) if value <= auction_application::MAX_ADMIN_CREDENTIAL_OFFSET => value,
+        Some(value) if value <= auction_application::admin::MAX_ADMIN_CREDENTIAL_OFFSET => value,
         _ => return invalid_query(),
     };
     let kind = match query.get("kind").map(String::as_str) {

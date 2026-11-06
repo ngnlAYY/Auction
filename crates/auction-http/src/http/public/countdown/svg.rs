@@ -2,7 +2,7 @@
 
 use std::fmt::{self, Write};
 
-use auction_application::PublicAuctionCountdown;
+use auction_application::auction::PublicAuctionCountdown;
 
 use super::animation::write_running;
 

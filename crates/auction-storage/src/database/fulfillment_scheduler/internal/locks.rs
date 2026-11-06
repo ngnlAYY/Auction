@@ -6,7 +6,7 @@ use crate::database::TrackedTransaction as Transaction;
 use std::sync::LazyLock;
 
 use super::sql_error;
-use auction_application::{FundingError, SettlementFulfillmentClaim};
+use auction_application::settlement::{FundingError, SettlementFulfillmentClaim};
 use sqlx::Postgres;
 
 pub(super) async fn before_credentials(

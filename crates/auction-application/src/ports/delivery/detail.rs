@@ -7,8 +7,8 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::DeliveryAdminSnapshot;
-use crate::DeliverySendCredentialBinding;
+use crate::ports::delivery::DeliveryAdminSnapshot;
+use crate::ports::delivery::DeliverySendCredentialBinding;
 
 /// 一次冻结 Send 或 Take 尝试的安全投影。
 /// `operation` 为 `send` 时 `recipient`/`subject`/`credits`/`cod`/`equipment_ids` 有值；

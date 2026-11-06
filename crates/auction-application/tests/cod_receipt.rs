@@ -1,6 +1,6 @@
 //! COD 实收资金化的正反例；纯判定，不连接数据库。
 
-use auction_application::{
+use auction_application::settlement::{
     CodReceiptBlocker, CodReceiptResultMetadata, CodReceiptSnapshot, FundingCollectedReceipt,
     INTERNAL_EVIDENCE_PROTOCOL, InternalEvidencePurpose, MailAccountEvidenceBinding,
     MailRuntimeBinding, SettlementInternalEvidenceSnapshot, VerifiedMailSentCollectionObservation,
@@ -362,7 +362,7 @@ fn evidence_binding_and_cash_mode_are_enforced() {
     };
     let guard = snapshot();
     assert_eq!(
-        auction_application::evaluate_cod_receipt_evidence(
+        auction_application::settlement::evaluate_cod_receipt_evidence(
             &receipt(uuid(PAYMENT), BUYER),
             uuid(PAYMENT),
             BUYER,
@@ -378,7 +378,7 @@ fn evidence_binding_and_cash_mode_are_enforced() {
 
     // record_only 不接受真实现金观察。
     assert_eq!(
-        auction_application::evaluate_cod_receipt_evidence(
+        auction_application::settlement::evaluate_cod_receipt_evidence(
             &receipt(uuid(PAYMENT), BUYER),
             uuid(PAYMENT),
             BUYER,
@@ -389,7 +389,7 @@ fn evidence_binding_and_cash_mode_are_enforced() {
     );
 
     assert_eq!(
-        auction_application::evaluate_cod_receipt_evidence(
+        auction_application::settlement::evaluate_cod_receipt_evidence(
             &receipt(uuid(PAYMENT), BUYER),
             uuid(PAYMENT),
             BUYER,
@@ -400,7 +400,7 @@ fn evidence_binding_and_cash_mode_are_enforced() {
     );
 
     assert_eq!(
-        auction_application::evaluate_cod_receipt_evidence(
+        auction_application::settlement::evaluate_cod_receipt_evidence(
             &receipt(uuid(PAYMENT + 1), BUYER),
             uuid(PAYMENT),
             BUYER,
@@ -411,7 +411,7 @@ fn evidence_binding_and_cash_mode_are_enforced() {
     );
 
     assert_eq!(
-        auction_application::evaluate_cod_receipt_evidence(
+        auction_application::settlement::evaluate_cod_receipt_evidence(
             &receipt(uuid(PAYMENT), BUYER + 1),
             uuid(PAYMENT),
             BUYER,

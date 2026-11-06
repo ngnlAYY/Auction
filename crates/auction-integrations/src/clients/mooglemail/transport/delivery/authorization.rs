@@ -1,14 +1,14 @@
 //! 所有 Send 共用原 session、冻结请求与撤销 guard；现金另附同会话资金证据。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::time::Instant;
 
-use auction_application::{
-    AuthorizedDeliverySend, DeliverySendCredentialBinding, InternalEvidenceError,
-    InternalEvidenceFuture, InternalEvidenceLease, InternalEvidencePurpose,
+use auction_application::delivery::{AuthorizedDeliverySend, DeliverySendCredentialBinding};
+use auction_application::settlement::{
+    InternalEvidenceError, InternalEvidenceFuture, InternalEvidenceLease, InternalEvidencePurpose,
     InternalEvidenceRequest, PreparedSettlementInternalEvidence,
 };
 
@@ -25,7 +25,7 @@ impl MoogleMailDeliveryTransport {
     /// 复用数据库资金策略；记账模式仍取得真实身份与原独占会话，不读取现金余额。
     pub fn with_funding_policy_reader(
         mut self,
-        reader: Arc<dyn auction_application::FundingPolicyReader>,
+        reader: Arc<dyn auction_application::settlement::FundingPolicyReader>,
     ) -> Self {
         self.funding_policy_reader = Some(reader);
         self
@@ -137,8 +137,8 @@ impl MoogleMailDeliveryTransport {
                 );
                 cash_unproven()
             })?,
-            None => auction_application::FundingPolicy {
-                mode: auction_application::FundingAccountingMode::StrictCash,
+            None => auction_application::settlement::FundingPolicy {
+                mode: auction_application::settlement::FundingAccountingMode::StrictCash,
                 expected_uid: None,
                 policy_version: 0,
             },
@@ -151,7 +151,7 @@ impl MoogleMailDeliveryTransport {
             return Ok(None);
         };
         // 资金证据开始读取后收紧到原有 30 秒上限，绝不延长已经生成的证据寿命。
-        let deadline = auction_application::internal_evidence_deadline(deadline);
+        let deadline = auction_application::settlement::internal_evidence_deadline(deadline);
         let request = InternalEvidenceRequest {
             operation_id: claim.command_id,
             purpose: InternalEvidencePurpose::DeliveryClaim {

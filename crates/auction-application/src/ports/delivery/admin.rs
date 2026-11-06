@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::{ApplicationFuture, RequestHash};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
 
 /// Admin 交付列表允许的最大单页大小。
 pub const MAX_DELIVERY_ADMIN_PAGE_SIZE: i64 = 100;
@@ -233,15 +234,18 @@ pub trait DeliveryAdminPort: Send + Sync {
     fn list(&self, request: DeliveryAdminListRequest) -> ApplicationFuture<'_, DeliveryAdminPage>;
 
     /// 读取单条投递的证据详情；不存在时返回 `DeliveryAdminError::NotFound`。
-    fn detail(&self, delivery_id: Uuid) -> ApplicationFuture<'_, super::DeliveryAdminDetail>;
+    fn detail(
+        &self,
+        delivery_id: Uuid,
+    ) -> ApplicationFuture<'_, crate::ports::delivery::DeliveryAdminDetail>;
 
     fn execute(&self, command: DeliveryAdminCommand) -> ApplicationFuture<'_, DeliveryAdminResult>;
 
     /// 只读汇总某个玩家或某个参考编号关联的出价、成交、义务、投递与通知。
     fn player_support(
         &self,
-        request: super::PlayerSupportRequest,
-    ) -> ApplicationFuture<'_, super::PlayerSupportBundle>;
+        request: crate::ports::delivery::PlayerSupportRequest,
+    ) -> ApplicationFuture<'_, crate::ports::delivery::PlayerSupportBundle>;
 }
 
 fn valid_delivery_status(value: &str) -> bool {
@@ -312,7 +316,9 @@ fn push_go_json_string(output: &mut Vec<u8>, value: &str) {
 mod tests {
     use self::parent::*;
     use super as parent;
-    use crate::ports::{MAX_PLAYER_SUPPORT_USER_LEN, PlayerSupportRequest, PlayerSupportSelector};
+    use crate::ports::delivery::{
+        MAX_PLAYER_SUPPORT_USER_LEN, PlayerSupportRequest, PlayerSupportSelector,
+    };
     use chrono::TimeZone;
 
     fn base() -> DeliveryAdminListRequest {

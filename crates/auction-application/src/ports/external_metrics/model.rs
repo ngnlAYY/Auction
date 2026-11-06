@@ -810,7 +810,7 @@ pub enum ExternalMetricsEvent {
 
 #[cfg(test)]
 mod tests {
-    use super::ForumOperation;
+    use crate::ports::external_metrics::ForumOperation;
 
     #[test]
     fn forum_writes_are_foreground_only_for_state_changing_operations() {

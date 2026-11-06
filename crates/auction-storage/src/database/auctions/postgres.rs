@@ -3,10 +3,11 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, CurrentAuctionSnapshot, PublicAuctionCursor, PublicAuctionListRequest,
-    PublicAuctionPage, PublicRealtimeAuctionStatus,
+use auction_application::auction::{
+    CurrentAuctionSnapshot, PublicAuctionCursor, PublicAuctionListRequest, PublicAuctionPage,
+    PublicRealtimeAuctionStatus,
 };
+use auction_application::core::ApplicationError;
 use sqlx::Row;
 use uuid::Uuid;
 

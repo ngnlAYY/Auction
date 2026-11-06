@@ -1,9 +1,12 @@
 //! 偏好 CAS 与原结果重放；仅影响未来通知，不扫描历史队列。
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::core::{RequestHash, StoredCommand, TransactionPolicy, TransactionRunner};
+use crate::ports::public::{
     LotWatchError, LotWatchPreference, LotWatchPreferenceTransaction, LotWatchTransaction,
-    RequestHash, SetLotWatchPreferenceCommand, StoredCommand, TransactionPolicy, TransactionRunner,
+    SetLotWatchPreferenceCommand,
 };
 
 /// Serializable 最多三次；先账本重放再比较版本。

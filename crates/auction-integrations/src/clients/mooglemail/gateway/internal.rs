@@ -1,6 +1,6 @@
 //! 同 Cookie/operation guard 的联合证据；没有资金授权、业务状态迁移或远端写入。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -9,12 +9,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use auction_application::{
-    ForumTargetProfileReader, INTERNAL_EVIDENCE_PROTOCOL, InternalEvidenceError as Error,
-    InternalEvidenceFuture, InternalEvidenceLease, InternalEvidenceRequest,
-    MailAccountEvidenceBinding, PreparedSettlementInternalEvidence,
-    SettlementInternalEvidenceReader, SettlementInternalEvidenceSnapshot,
-    VerifiedMailEquipmentPresence, VerifiedMainCashObservation,
+use auction_application::forum::ForumTargetProfileReader;
+use auction_application::settlement::{
+    INTERNAL_EVIDENCE_PROTOCOL, InternalEvidenceError as Error, InternalEvidenceFuture,
+    InternalEvidenceLease, InternalEvidenceRequest, MailAccountEvidenceBinding,
+    PreparedSettlementInternalEvidence, SettlementInternalEvidenceReader,
+    SettlementInternalEvidenceSnapshot, VerifiedMailEquipmentPresence, VerifiedMainCashObservation,
 };
 use auction_domain::SettlementWorld;
 use chrono::Utc;
@@ -36,7 +36,8 @@ impl MoogleMailGateway {
     pub async fn read_verified_player_identity(
         &self,
         world: MoogleMailWorld,
-    ) -> Result<Option<auction_application::VerifiedMailPlayerIdentity>, MoogleMailError> {
+    ) -> Result<Option<auction_application::admin::VerifiedMailPlayerIdentity>, MoogleMailError>
+    {
         let deadline = Instant::now() + self.config.fetch_budget.min(Duration::from_secs(30));
         let result = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
             let session = self
@@ -74,13 +75,13 @@ impl MoogleMailGateway {
                 );
                 identity_error(world)
             })?;
-        Ok(Some(auction_application::VerifiedMailPlayerIdentity {
+        Ok(Some(auction_application::admin::VerifiedMailPlayerIdentity {
             credential_id: identity.credential_id,
             credential_version: identity.credential_version,
             world: identity.world,
             player_name: identity.player_name,
             observed_at: identity.observed_at,
-            proof_source: auction_application::MailPlayerIdentityProofSource::AuthenticatedHvUidForumTargetProfile,
+            proof_source: auction_application::admin::MailPlayerIdentityProofSource::AuthenticatedHvUidForumTargetProfile,
             proof_digest: identity.digest,
         }))
     }
@@ -108,7 +109,10 @@ impl MoogleMailGateway {
         }
         let deadline = request.deadline.min(
             Instant::now()
-                + self.config.fetch_budget.min(auction_application::INTERNAL_EVIDENCE_BUDGET),
+                + self
+                    .config
+                    .fetch_budget
+                    .min(auction_application::settlement::INTERNAL_EVIDENCE_BUDGET),
         );
         // 提交预留一秒，不为每次 GET 重置期限；外层预算仍包含 mutex 排队。
         let read_deadline = deadline.checked_sub(Duration::from_secs(1)).ok_or(Error::Expired)?;
@@ -295,7 +299,7 @@ impl MoogleMailGateway {
             .await
             .map_err(|error| at(Stage::ProfileRead, world, error))?;
         if profile.target_uid != uid
-            || !auction_application::valid_mail_player_name(&profile.player_name)
+            || !auction_application::admin::valid_mail_player_name(&profile.player_name)
             || expected.is_some_and(|value| value != profile.player_name)
             || profile.protocol_version != "forum_target_profile_mid_v1"
             || profile.digest == [0; 32]
@@ -374,7 +378,7 @@ impl SettlementInternalEvidenceReader for MoogleMailGateway {
     fn prepare_internal_evidence_with_sent(
         &self,
         request: InternalEvidenceRequest,
-        target: auction_application::InternalSentCollectionTarget,
+        target: auction_application::settlement::InternalSentCollectionTarget,
     ) -> InternalEvidenceFuture<'_, PreparedSettlementInternalEvidence> {
         Box::pin(self.prepare_with_sent(request, target))
     }
@@ -391,13 +395,13 @@ impl SettlementInternalEvidenceReader for MoogleMailGateway {
                     Error::InvalidRequest,
                 ));
             }
-            request.deadline = auction_application::internal_evidence_deadline(request.deadline)
-                .min(
+            request.deadline =
+                auction_application::settlement::internal_evidence_deadline(request.deadline).min(
                     Instant::now()
                         + self
                             .config
                             .fetch_budget
-                            .min(auction_application::INTERNAL_EVIDENCE_BUDGET),
+                            .min(auction_application::settlement::INTERNAL_EVIDENCE_BUDGET),
                 );
             let deadline = request.deadline;
             tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {

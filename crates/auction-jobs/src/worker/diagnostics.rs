@@ -7,7 +7,7 @@ use std::{
     task::Poll,
 };
 
-use auction_application::diagnostics::{
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticLevel, DiagnosticSink, SafeDiagnostic,
     SafeErrorKind, diagnostic_enabled, diagnostic_world, install_diagnostic_sink, record_error,
 };

@@ -4,7 +4,8 @@ use crate::database::TrackedTransaction as Transaction;
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{ApplicationError, MailPollClaim, MailPollReadSummary};
+use auction_application::core::ApplicationError;
+use auction_application::mail::{MailPollClaim, MailPollReadSummary};
 use sqlx::{Postgres, Row};
 
 use super::storage_error;

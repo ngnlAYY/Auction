@@ -8,7 +8,8 @@ use std::collections::HashSet;
 use crate::database::operations_alert::{
     chrono_duration, rollback_operations_alert, storage_error,
 };
-use auction_application::{ApplicationError, OperationsAlertObserveCommand};
+use auction_application::core::ApplicationError;
+use auction_application::operations::OperationsAlertObserveCommand;
 use sqlx::Row;
 
 pub(crate) async fn observe_postgres(
@@ -27,7 +28,7 @@ pub(crate) async fn observe_postgres(
 
 pub(crate) async fn observe_host_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
-    command: &auction_application::OperationsAlertHostObserveCommand,
+    command: &auction_application::operations::OperationsAlertHostObserveCommand,
 ) -> Result<(), ApplicationError> {
     observe_observations(
         pool,
@@ -49,7 +50,7 @@ enum Watermark {
 
 async fn observe_observations(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
-    observations: &[auction_application::OperationsAlertSourceObservation],
+    observations: &[auction_application::operations::OperationsAlertSourceObservation],
     now: chrono::DateTime<chrono::Utc>,
     batch_window: std::time::Duration,
     watermark: Watermark,

@@ -8,11 +8,15 @@ use std::collections::BTreeMap;
 use auction_domain::CommandId;
 use uuid::Uuid;
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{
-    MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
-    PlayerNotificationError, RequestHash, SellerSummaryLotFact, format_credits, lot_code,
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
+use crate::ports::core::RequestHash;
+use crate::ports::mail::{
+    MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
+};
+use crate::ports::player_notifications::{PlayerNotificationError, SellerSummaryLotFact};
+use crate::services::public::{format_credits, lot_code};
 
 /// 汇总正文上限；超出时不截断结算结果，直接不创建通知。
 pub const MAX_SELLER_SUMMARY_BODY_BYTES: usize = 16 << 10;

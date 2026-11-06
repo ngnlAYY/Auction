@@ -2,12 +2,17 @@
 
 use std::sync::Arc;
 
-use auction_application::{
-    AuctionReader, CompetitionCommandPort, ProcessReadinessPort, PublicAccountReader,
-    PublicBidLogReader, PublicBlacklistReader, PublicCompensationReader,
-    PublicEquipmentLinkResolver, PublicForumReader, PublicLotReader, PublicPriceHistoryReader,
-    PublicRealtimeReader, PublicRulesReader, PublicSessionPort, WorldReader,
+use auction_application::auction::{
+    AuctionReader, CompetitionCommandPort, PublicAccountReader, PublicBidLogReader,
+    PublicLotReader, PublicPriceHistoryReader, WorldReader,
 };
+use auction_application::forum::PublicForumReader;
+use auction_application::operations::ProcessReadinessPort;
+use auction_application::public::{
+    PublicBlacklistReader, PublicCompensationReader, PublicEquipmentLinkResolver,
+    PublicRulesReader, PublicSessionPort,
+};
+use auction_application::realtime::PublicRealtimeReader;
 use auction_contracts::PublicRegistrationInfoResponse;
 use auction_observability::ProcessMetrics;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
@@ -38,11 +43,11 @@ pub struct PublicApiState {
     session: Option<Arc<dyn PublicSessionPort>>,
     registration_info: Option<Arc<PublicRegistrationInfoResponse>>,
     security: PublicHttpSecurity,
-    watches: Option<Arc<dyn auction_application::LotWatchPort>>,
-    watch_preference: Option<Arc<dyn auction_application::LotWatchPreferencePort>>,
+    watches: Option<Arc<dyn auction_application::public::LotWatchPort>>,
+    watch_preference: Option<Arc<dyn auction_application::public::LotWatchPreferencePort>>,
     commands: Option<Arc<dyn CompetitionCommandPort>>,
     metrics: Option<Arc<ProcessMetrics>>,
-    runtime_switch_snapshot: Option<auction_application::RuntimeSwitches>,
+    runtime_switch_snapshot: Option<auction_application::runtime_switches::RuntimeSwitches>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
     realtime_discovery_connections: Arc<Semaphore>,
     realtime_hub: Option<Arc<RealtimeHub>>,
@@ -144,7 +149,10 @@ impl PublicApiState {
     }
 
     /// 注入当前用户的权威装备标记端口；缺失时明确返回 503。
-    pub fn with_lot_watches(mut self, watches: Arc<dyn auction_application::LotWatchPort>) -> Self {
+    pub fn with_lot_watches(
+        mut self,
+        watches: Arc<dyn auction_application::public::LotWatchPort>,
+    ) -> Self {
         self.watches = Some(watches);
         self
     }
@@ -152,7 +160,7 @@ impl PublicApiState {
     /// 注入账号级警告渠道；不影响旧标记兼容字段。
     pub fn with_lot_watch_preference(
         mut self,
-        port: Arc<dyn auction_application::LotWatchPreferencePort>,
+        port: Arc<dyn auction_application::public::LotWatchPreferencePort>,
     ) -> Self {
         self.watch_preference = Some(port);
         self
@@ -160,11 +168,11 @@ impl PublicApiState {
 
     pub(crate) fn watch_preference(
         &self,
-    ) -> Option<&dyn auction_application::LotWatchPreferencePort> {
+    ) -> Option<&dyn auction_application::public::LotWatchPreferencePort> {
         self.watch_preference.as_deref()
     }
 
-    pub(crate) fn watches(&self) -> Option<&dyn auction_application::LotWatchPort> {
+    pub(crate) fn watches(&self) -> Option<&dyn auction_application::public::LotWatchPort> {
         self.watches.as_deref()
     }
 
@@ -177,7 +185,7 @@ impl PublicApiState {
     /// 注入进程共享的运行时开关快照，供指标边界在请求入口读取。
     pub fn with_runtime_switch_snapshot(
         mut self,
-        switches: auction_application::RuntimeSwitches,
+        switches: auction_application::runtime_switches::RuntimeSwitches,
     ) -> Self {
         self.runtime_switch_snapshot = Some(switches);
         self

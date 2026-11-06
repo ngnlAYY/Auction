@@ -10,7 +10,8 @@ use auction_domain::{
     AuctionId, EquipmentId, LotId, ProxyAuthorizationId, SubmissionId, UserId, valid_text,
 };
 
-use super::{ApplicationFuture, SettlementAuctionSnapshot};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::settlement::SettlementAuctionSnapshot;
 
 /// Admin lot 列表允许的最大单页大小。
 pub const MAX_ADMIN_LOT_PAGE_SIZE: i64 = 100;

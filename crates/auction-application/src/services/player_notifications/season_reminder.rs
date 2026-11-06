@@ -9,11 +9,15 @@ use auction_domain::CommandId;
 use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{
-    MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
-    PlayerNotificationError, RequestHash, SeasonReminderFact, format_credits, lot_code,
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
+use crate::ports::core::RequestHash;
+use crate::ports::mail::{
+    MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
+};
+use crate::ports::player_notifications::{PlayerNotificationError, SeasonReminderFact};
+use crate::services::public::{format_credits, lot_code};
 
 /// 提醒正文上限；超出时不截断义务列表，直接不创建通知。
 pub const MAX_SEASON_REMINDER_BODY_BYTES: usize = 16 << 10;

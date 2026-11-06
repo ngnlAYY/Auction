@@ -2,7 +2,7 @@
 //! 根模块只负责认证后的请求编排和稳定路由入口；各业务 section 的安全聚合与响应字段映射
 //! 分别由子模块拥有。owner 未装配或读取失败时明确返回 unknown，避免用缓存或占位数据误导运维。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 
 use crate::diagnostics;
 
@@ -11,7 +11,7 @@ mod sections;
 
 use std::net::SocketAddr;
 
-use auction_application::{WorkerControlCondition, WorkerControlStatus};
+use auction_application::operations::{WorkerControlCondition, WorkerControlStatus};
 use auction_contracts::{AdminDashboardSectionResponse, ApiResponse};
 use auction_observability::HealthError;
 use axum::{

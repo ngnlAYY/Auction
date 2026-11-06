@@ -1,14 +1,16 @@
 //! Read Mail 的纯计数观察；增量轮只统计水位之后的行，完整校验轮统计全部历史。
 //! 计数不是已读或收取证明，恢复定位另由 reader 的已知 MID 路径按需执行。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_world};
+use auction_application::core::diagnostics::{
+    DiagnosticContext, DiagnosticError, diagnostic_world,
+};
 use auction_observability::WorkerResult;
 
-use super::super::MailPollRuntime;
+use super::super::poll::MailPollRuntime;
 use crate::worker::diagnostics;
 
 /// 返回本轮扫描到的已读行数；不创建历史入站命令，也不把未找到升级为业务证明。
-pub(in crate::worker::runtime::mail_poll) async fn run_read_observation(
+pub(in crate::worker::mail) async fn run_read_observation(
     runtime: &MailPollRuntime,
 ) -> WorkerResult {
     let Some(maintenance) = &runtime.maintenance else { return WorkerResult::Success };
@@ -29,8 +31,8 @@ pub(in crate::worker::runtime::mail_poll) async fn run_read_observation(
         }
         Ok(Err(error)) if tokio::time::Instant::now() >= deadline => {
             runtime.observe_budget(
-                auction_application::MailPhase::ReadObservation,
-                auction_application::MailBudget::Time,
+                auction_application::external_metrics::MailPhase::ReadObservation,
+                auction_application::external_metrics::MailBudget::Time,
             );
             diagnostics::unpersisted_error(
                 "mail_observation",
@@ -58,8 +60,8 @@ pub(in crate::worker::runtime::mail_poll) async fn run_read_observation(
         }
         Err(error) => {
             runtime.observe_budget(
-                auction_application::MailPhase::ReadObservation,
-                auction_application::MailBudget::Time,
+                auction_application::external_metrics::MailPhase::ReadObservation,
+                auction_application::external_metrics::MailBudget::Time,
             );
             diagnostics::unpersisted_error(
                 "mail_observation",

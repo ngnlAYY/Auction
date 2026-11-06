@@ -2,7 +2,7 @@
 
 use std::{cell::Cell, future::Future};
 
-use auction_application::diagnostics::{
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticLevel, SafeErrorKind, record_error,
 };
 use axum::{extract::MatchedPath, http::StatusCode, response::Response};

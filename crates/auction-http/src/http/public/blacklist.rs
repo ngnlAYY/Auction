@@ -1,10 +1,10 @@
 //! Public 黑名单 HTTP 适配器。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
-use auction_application::{MAX_PUBLIC_BLACKLIST_OFFSET, PublicBlacklistEntry};
+use auction_application::public::{MAX_PUBLIC_BLACKLIST_OFFSET, PublicBlacklistEntry};
 use auction_contracts::{
     ApiErrorResponse, ApiResponse, PublicBlacklistEntryResponse, PublicBlacklistResponse,
 };
@@ -43,7 +43,7 @@ pub(crate) async fn list(
             "黑名单暂不可用",
         ));
     };
-    let request = auction_application::PublicBlacklistRequest { limit: page_size, offset };
+    let request = auction_application::public::PublicBlacklistRequest { limit: page_size, offset };
     let result = reader.list_public_blacklist(request).await.map_err(|diagnostic_cause| {
         diagnostics::warn(
             "public_blacklist",
@@ -68,7 +68,7 @@ pub(crate) async fn list(
 }
 
 fn map_page(
-    page: auction_application::PublicBlacklistPage,
+    page: auction_application::public::PublicBlacklistPage,
     page_number: i64,
 ) -> PublicBlacklistResponse {
     PublicBlacklistResponse {

@@ -1,12 +1,12 @@
 //! 固定用途派生、完整头部 AAD 和带清理守卫的 AES-GCM 边界。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
 use super::payload::SensitiveBytes;
 use crate::DataKey;
-use auction_application::MailDiagnosticError;
+use auction_application::mail::MailDiagnosticError;
 use ring::{
     aead, hmac,
     rand::{SecureRandom, SystemRandom},

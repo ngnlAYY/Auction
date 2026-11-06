@@ -6,9 +6,11 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
-use crate::{
-    ApplicationError, RealtimeConsumerRequest, RealtimeConsumerStore, RealtimeEventSink,
-    RealtimeSequenceAllocator, RealtimeStreamStore, RepositoryError,
+use crate::errors::ApplicationError;
+use crate::ports::core::RepositoryError;
+use crate::ports::realtime::{
+    RealtimeConsumerRequest, RealtimeConsumerStore, RealtimeEventSink, RealtimeSequenceAllocator,
+    RealtimeStreamStore,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +73,10 @@ impl RealtimeRelay {
     }
 
     /// 按有界分页扫描仍有待转发事件的 stream；失败事件会留在当前游标前等待重试，不会跳过历史。
-    pub fn run_once(&self, now: DateTime<Utc>) -> crate::ApplicationFuture<'_, RealtimeRelayBatch> {
+    pub fn run_once(
+        &self,
+        now: DateTime<Utc>,
+    ) -> crate::ports::auction::ApplicationFuture<'_, RealtimeRelayBatch> {
         Box::pin(async move {
             if now.timestamp_micros() == 0 {
                 return Err(repository_error("实时 relay 时间无效"));

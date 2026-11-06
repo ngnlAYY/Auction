@@ -8,12 +8,17 @@ use std::{
     time::Duration,
 };
 
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter, AdminForumPreviewResult,
-    ApplicationError, ApplicationFuture, ForumCredentialAvailability, ForumPostWriter,
-    ForumPublishedPost, ForumPublishedThread, ForumPublisher, ForumReadPost, ForumRemoteError,
-    ForumRenderedPost, ForumRenderedThread, ForumTopicCursor, ForumTopicMetadata, ForumTopicReader,
-    ForumTopicScan, ForumTopicScanMode, MAX_FORUM_RECONCILIATION_TITLES,
+};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::external_metrics::ForumTopicScanMode;
+use auction_application::forum::{
+    ForumCredentialAvailability, ForumPostWriter, ForumPublishedPost, ForumPublishedThread,
+    ForumPublisher, ForumReadPost, ForumRemoteError, ForumRenderedPost, ForumRenderedThread,
+    ForumTopicCursor, ForumTopicMetadata, ForumTopicReader, ForumTopicScan,
+    MAX_FORUM_RECONCILIATION_TITLES,
 };
 use auction_domain::SettlementWorld;
 use chrono::Utc;
@@ -41,7 +46,7 @@ const HARD_MAXIMUM_TOPIC_PAGES: usize = 20;
 const HARD_MAXIMUM_TOPIC_BYTES: usize = 32 * 1024 * 1024;
 const MAXIMUM_CONCURRENT_TOPIC_READS: usize = 4;
 /// 分页容量与应用层楼层换算共用同一个来源，避免两处常量漂移。
-const FORUM_POSTS_PER_PAGE: u64 = auction_application::FORUM_POSTS_PER_PAGE as u64;
+const FORUM_POSTS_PER_PAGE: u64 = auction_application::forum::FORUM_POSTS_PER_PAGE as u64;
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
 
 pub const PRODUCTION_ENDPOINT: &str = "https://forums.e-hentai.org";

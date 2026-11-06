@@ -2,7 +2,7 @@
 
 use std::{future::Future, sync::Arc};
 
-use auction_application::diagnostics::{
+use auction_application::core::diagnostics::{
     DiagnosticSink, SafeDiagnostic, diagnostic_enabled, install_diagnostic_sink,
 };
 

@@ -5,9 +5,9 @@ use crate::database::storage_error_from;
 
 #[cfg(feature = "postgres")]
 #[cfg(feature = "postgres")]
-use auction_application::{
-    ApplicationError, ForumBidCommandRecord, ForumCommandStart, ForumCommandStatus,
-};
+use auction_application::core::ApplicationError;
+#[cfg(feature = "postgres")]
+use auction_application::forum::{ForumBidCommandRecord, ForumCommandStart, ForumCommandStatus};
 #[cfg(feature = "postgres")]
 use uuid::Uuid;
 

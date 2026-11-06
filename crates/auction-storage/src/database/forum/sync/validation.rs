@@ -1,9 +1,10 @@
 //! 论坛主题同步的输入闭集、编码约束和后端能力错误。
 
 pub(super) use crate::database::storage_error;
-use auction_application::{
-    ApplicationError, ForumPublishedLayout, ForumPublishedThread, ForumRenderedPost,
-    ForumRenderedThread, ForumSyncClaim,
+use auction_application::core::ApplicationError;
+use auction_application::forum::{
+    ForumPublishedLayout, ForumPublishedThread, ForumRenderedPost, ForumRenderedThread,
+    ForumSyncClaim,
 };
 #[cfg(feature = "postgres")]
 use auction_domain::SettlementWorld;
@@ -42,13 +43,13 @@ pub(super) fn valid_rendered(rendered: &ForumRenderedThread) -> bool {
     auction_domain::valid_text(&rendered.title, MAX_RENDERED_TITLE_BYTES)
         && valid_text(&rendered.description, MAX_RENDERED_DESCRIPTION_BYTES)
         && rendered.reconciliation_titles.len()
-            <= auction_application::MAX_FORUM_RECONCILIATION_TITLES
+            <= auction_application::forum::MAX_FORUM_RECONCILIATION_TITLES
         && rendered.reconciliation_titles.iter().enumerate().all(|(index, value)| {
             valid_text(value, MAX_RENDERED_TITLE_BYTES)
                 && value != &rendered.title
                 && !rendered.reconciliation_titles[..index].contains(value)
         })
-        && rendered.catalog_continuation.len() < auction_application::MAX_FORUM_CATALOG_PAGES
+        && rendered.catalog_continuation.len() < auction_application::forum::MAX_FORUM_CATALOG_PAGES
         && rendered.catalog_continuation.iter().all(valid_rendered_post)
         && !rendered.body.trim().is_empty()
         && rendered.body.len() <= MAX_RENDERED_BODY_BYTES

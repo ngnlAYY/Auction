@@ -5,11 +5,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use auction_application::{
+use auction_application::mail::{
     MAX_MAIL_PROGRESS_POLLERS, MailPollClaim, MailPollProgressFailure, MailPollProgressObserver,
-    MailPollProgressOutcome, MailPollProgressSnapshot, MailPollProgressStage,
-    WorkerControlCondition, WorkerControlMailProgress, is_safe_mail_poll_id,
+    MailPollProgressOutcome, MailPollProgressSnapshot, MailPollProgressStage, is_safe_mail_poll_id,
 };
+use auction_application::operations::{WorkerControlCondition, WorkerControlMailProgress};
 use chrono::Utc;
 use uuid::Uuid;
 

@@ -4,12 +4,12 @@ use super::mapping::{map_poll_state, map_sql_error};
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::audit_health::AuditWriteResult;
 use crate::database::competition::begin_statement;
-use auction_application::{
+use auction_application::admin::{
     AdminMailPollState, AdminMailPollTriggerCommand, AdminMailPollingCommand,
     AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
-    AdminMailTransactionFailure, AdminMailTransactionRunner, RequestHash, TransactionFuture,
-    TransactionPolicy,
+    AdminMailTransactionFailure, AdminMailTransactionRunner,
 };
+use auction_application::core::{RequestHash, TransactionFuture, TransactionPolicy};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::types::Json;

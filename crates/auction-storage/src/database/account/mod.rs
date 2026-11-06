@@ -1,7 +1,7 @@
 //! Public 账户竞价与代理历史的只读适配器；projection 只在同一快照内拼装当前用户的公开拍卖/lot。
 //! 代理 capability 按权威 lot 状态派生，HTTP 层不接触数据库行或内部代理状态机。
 
-use auction_application::{
+use auction_application::auction::{
     ApplicationFuture, PublicAccountReader, PublicMyBidsPage, PublicMyBidsRequest, PublicOwnedProxy,
 };
 use chrono::{DateTime, Utc};

@@ -1,6 +1,6 @@
 //! 单次论坛登录获取 Cookie；固定外部目标、无重试，并且只有只读会话证明成功后才返回凭据。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -9,11 +9,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialAcquirer, AdminCredentialError, AdminCredentialImportSource,
-    AdminCredentialKind, AdminCredentialLogin, AdminCredentialSecret, ApplicationError,
-    ApplicationFuture,
+    AdminCredentialKind, AdminCredentialLogin, AdminCredentialSecret,
 };
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
 use reqwest::{Client, header, redirect::Policy};
 use ring::hmac;
 use tokio::sync::{Semaphore, SemaphorePermit};

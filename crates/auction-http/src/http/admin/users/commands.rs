@@ -1,9 +1,10 @@
 use std::net::SocketAddr;
 
-use auction_application::{
+use auction_application::admin::{
     AdminRenameRevertCommand, AdminUserCreateCommand, AdminUserKeyMode, AdminUserMutationAction,
-    AdminUserMutationCommand, MailLoginKey,
+    AdminUserMutationCommand,
 };
+use auction_application::mail::MailLoginKey;
 use auction_contracts::{
     AdminRenameRevertRequest, AdminUserCreateRequest, AdminUserMutationRequest,
     AdminUserMutationResponse, ApiResponse,

@@ -7,13 +7,18 @@ use std::sync::Arc;
 use auction_domain::{CommandId, EquipmentId};
 use uuid::Uuid;
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::admin::{
     AdminIntakeCommand, AdminIntakeError, AdminIntakePolicy, AdminIntakePort, AdminIntakeRecord,
     AdminIntakeResult, AdminIntakeSourceKind, AdminIntakeSourceReader, AdminIntakeTransaction,
-    AdminIntakeWrite, ApplicationError, ApplicationFuture, Clock, CompetitionTransaction,
-    EquipmentKeySealerPort, StoredCommand, TransactionPolicy, TransactionRunner,
-    admin_intake_aggregate_id,
+    AdminIntakeWrite, EquipmentKeySealerPort, admin_intake_aggregate_id,
+};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{
+    Clock, CompetitionTransaction, StoredCommand, TransactionPolicy, TransactionRunner,
 };
 
 pub struct AdminIntakeService<R, S, K, C> {
@@ -165,7 +170,7 @@ where
         &self,
         command_id: CommandId,
         aggregate_id: Uuid,
-        request_hash: crate::RequestHash,
+        request_hash: crate::ports::core::RequestHash,
     ) -> Result<Option<AdminIntakeResult>, ApplicationError> {
         let stored = self
             .repository
@@ -200,7 +205,7 @@ fn replay_result(
     stored: StoredCommand,
     command_kind: &str,
     aggregate_id: Uuid,
-    request_hash: crate::RequestHash,
+    request_hash: crate::ports::core::RequestHash,
 ) -> Result<AdminIntakeResult, ApplicationError> {
     if !stored.matches_request(command_kind, aggregate_id, request_hash) {
         return Err(AdminIntakeError::CommandConflict.into());

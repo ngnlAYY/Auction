@@ -18,7 +18,7 @@ pub(crate) use proof::{
     lock_delivery_lot,
 };
 
-use auction_application::CompetitionTransactionError;
+use auction_application::core::CompetitionTransactionError;
 use sqlx::Postgres;
 
 use persistence::sql_error;

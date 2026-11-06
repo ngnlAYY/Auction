@@ -1,9 +1,8 @@
 //! 将数据库已完成 MID 与 Worker 运行观测组合成可选安全投影；不增加任何写入。
 
-use auction_application::{
-    AdminMailPollState, MailPollProgressSnapshot, WorkerControlCondition,
-    WorkerControlMailProgress, is_safe_mail_poll_id,
-};
+use auction_application::admin::AdminMailPollState;
+use auction_application::mail::{MailPollProgressSnapshot, is_safe_mail_poll_id};
+use auction_application::operations::{WorkerControlCondition, WorkerControlMailProgress};
 use auction_contracts::{
     AdminMailPollProgressFailureResponse, AdminMailPollProgressResponse,
     AdminMailPollingDiagnosticsResponse,

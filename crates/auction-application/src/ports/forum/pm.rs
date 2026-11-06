@@ -48,7 +48,7 @@ pub trait PreparedForumPm: Send {
 }
 
 /// 共享论坛网关及凭据 owner；核对不到副本不代表未发送。
-pub trait ForumPmSender: crate::ForumCredentialAvailability {
+pub trait ForumPmSender: crate::ports::forum::ForumCredentialAvailability {
     /// 仅 GET/解析，无远端写入；world 是通知来源 lot 的权威世界。
     fn prepare<'a>(
         &'a self,

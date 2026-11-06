@@ -2,9 +2,10 @@
 
 use std::{sync::Arc, time::Duration};
 
+use auction_application::admin::AdminCredentialWorld;
 #[cfg(feature = "postgres")]
-use auction_application::AdminIntakePolicy;
-use auction_application::{AdminCredentialWorld, WorkerControlPort};
+use auction_application::admin::AdminIntakePolicy;
+use auction_application::operations::WorkerControlPort;
 use auction_config::AppConfig;
 use auction_http::{AdminHttpSecurity, HttpSecurityOptions};
 use auction_jobs::WorkerControlClient;

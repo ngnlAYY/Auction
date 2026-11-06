@@ -1,6 +1,7 @@
 //! 装备损失的显式运维处置；外部补偿声明仅分配人工责任，不伪造收款或发送证明。
 
-use crate::{ApplicationError, ApplicationFuture};
+use crate::errors::ApplicationError;
+use crate::ports::auction::ApplicationFuture;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -13,7 +14,7 @@ pub struct EquipmentLossCommand {
     pub actor: String,
     /// 主机身份不改变原命令的幂等摘要。
     #[serde(skip)]
-    pub operator_identity: Option<crate::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
     pub reason: String,
     pub funding_uid: String,
     pub expected_recovery_version: u64,

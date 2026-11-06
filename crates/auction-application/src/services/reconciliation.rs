@@ -6,10 +6,12 @@ use chrono::{DateTime, Utc};
 
 use auction_domain::SettlementWorld;
 
-use crate::{
-    ApplicationError, ApplicationFuture, AssetArmoryObservation, AssetInventoryReader,
-    AssetReconciliationConfig, AssetReconciliationOutcome, AssetReconciliationPort,
-    AssetReconciliationStore, RepositoryError,
+use crate::errors::ApplicationError;
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RepositoryError;
+use crate::ports::reconciliation::{
+    AssetArmoryObservation, AssetInventoryReader, AssetReconciliationConfig,
+    AssetReconciliationOutcome, AssetReconciliationPort, AssetReconciliationStore,
 };
 
 /// 按 world 依次读取 Armory 观察，再由存储 owner 计算差异并追加报告。

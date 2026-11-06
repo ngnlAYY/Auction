@@ -10,17 +10,20 @@ use std::time::Instant;
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::diagnostics::{
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError, DiagnosticLevel, diagnostic_world,
     record_error,
 };
-use crate::{
-    ApplicationError, Clock, DeliverySendCredentialBinding, DeliverySendExpectation,
-    DeliveryTakeExpectation, MoogleMailboxComposeState, MoogleMailboxDiscard,
-    MoogleMailboxEvidenceStore, MoogleMailboxInboxAssets, MoogleMailboxMaintenance,
-    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxSweepCandidate,
-    MoogleMailboxUnprovenSend, RepositoryError, mail_recipient_is_list_projection,
-    sent_list_minute_start,
+use crate::ports::core::{Clock, RepositoryError};
+use crate::ports::delivery::{
+    DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
+};
+use crate::ports::mail::{
+    MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxEvidenceStore,
+    MoogleMailboxInboxAssets, MoogleMailboxMaintenance, MoogleMailboxSentEntry,
+    MoogleMailboxSentState, MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
+    mail_recipient_is_list_projection, sent_list_minute_start,
 };
 
 /// 单轮最多核对的投递数；达到上限即停止，不越过未处理后缀推进持久游标。
@@ -91,7 +94,12 @@ impl MailboxMaintenanceService {
         world_id: &str,
         deadline: Instant,
     ) -> Result<MailboxMaintenanceReport, ApplicationError> {
-        self.sweep_with_activity(world_id, deadline, &crate::ExternalWriteActivity::default()).await
+        self.sweep_with_activity(
+            world_id,
+            deadline,
+            &crate::ports::operations::ExternalWriteActivity::default(),
+        )
+        .await
     }
 
     /// 活动从本次 discard 围栏调用前覆盖交接与外写；确认一次性尝试提交后才授权 POST。
@@ -99,7 +107,7 @@ impl MailboxMaintenanceService {
         &self,
         world_id: &str,
         deadline: Instant,
-        activity: &crate::ExternalWriteActivity,
+        activity: &crate::ports::operations::ExternalWriteActivity,
     ) -> Result<MailboxMaintenanceReport, ApplicationError> {
         if !matches!(world_id, "main" | "isekai") {
             return Err(repository_error("维护世界无效"));

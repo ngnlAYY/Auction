@@ -1,17 +1,19 @@
 //! Admin 手动 Cookie 检查：固定 HTTPS 只读端点、单并发与有界时限；不借用 Worker
 //! 写入会话、不建候选池、不记录远端正文。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::{sync::Arc, time::Duration};
 
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialCheckObservation, AdminCredentialCheckRecord, AdminCredentialCheckStatus,
     AdminCredentialError, AdminCredentialKind, AdminCredentialOpener, AdminCredentialVerifier,
-    AdminCredentialWorld, ApplicationError, ApplicationFuture, credential_check_worlds,
+    AdminCredentialWorld, credential_check_worlds,
 };
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
 use chrono::Utc;
 use tokio::sync::Semaphore;
 

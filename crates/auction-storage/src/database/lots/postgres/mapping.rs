@@ -7,10 +7,11 @@ use crate::database::lots::{
     map_counts, map_equipment, map_live_fields, map_preview_fields, map_projection,
     public_forum_lot_code,
 };
-use auction_application::{
-    ApplicationError, EquipmentColorRule, PublicAuctionProjection, PublicLiveLotSummary,
-    PublicPreviewLotDetail, PublicPreviewLotSummary,
+use auction_application::auction::{
+    PublicAuctionProjection, PublicLiveLotSummary, PublicPreviewLotDetail, PublicPreviewLotSummary,
 };
+use auction_application::core::ApplicationError;
+use auction_application::forum::EquipmentColorRule;
 use auction_domain::EquipmentId;
 use serde_json::Value;
 use sqlx::Row;

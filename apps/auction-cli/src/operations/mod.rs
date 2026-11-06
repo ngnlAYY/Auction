@@ -36,7 +36,7 @@ async fn worker_store(
 #[derive(Clone, Copy)]
 struct SystemClock;
 
-impl auction_application::Clock for SystemClock {
+impl auction_application::core::Clock for SystemClock {
     fn now(&self) -> chrono::DateTime<chrono::Utc> {
         chrono::Utc::now()
     }

@@ -3,7 +3,8 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{ApplicationError, MailPollIntake};
+use auction_application::core::ApplicationError;
+use auction_application::mail::MailPollIntake;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{Row, types::Json};
@@ -17,7 +18,7 @@ pub(crate) async fn lookup_completion(
     world_id: &str,
     external_mail_id: &str,
     received_at: DateTime<Utc>,
-) -> Result<auction_application::MailPollCompletion, ApplicationError> {
+) -> Result<auction_application::mail::MailPollCompletion, ApplicationError> {
     let row = sqlx::query(
         "SELECT inbound.id, inbound.world_id, inbound.mailbox_key,
                 inbound.received_at, inbound.content_digest, inbound.status,
@@ -34,7 +35,7 @@ pub(crate) async fn lookup_completion(
     .await
     .map_err(|error| storage_error_from(error, "读取 MoogleMail 已完成事实失败"))?;
     let Some(row) = row else {
-        return Ok(auction_application::MailPollCompletion::Missing);
+        return Ok(auction_application::mail::MailPollCompletion::Missing);
     };
     let inbound_id: Uuid = row
         .try_get("id")
@@ -102,7 +103,7 @@ pub(crate) async fn lookup_completion(
     {
         return Err(storage_error("MoogleMail 完成事实或命令账本损坏"));
     }
-    Ok(auction_application::MailPollCompletion::Completed)
+    Ok(auction_application::mail::MailPollCompletion::Completed)
 }
 
 pub(crate) async fn insert_or_verify_intake(

@@ -3,9 +3,8 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, ForumRenderedPost, ForumRenderedThread, ForumReplyTopic,
-};
+use auction_application::core::ApplicationError;
+use auction_application::forum::{ForumRenderedPost, ForumRenderedThread, ForumReplyTopic};
 use chrono::{DateTime, Utc};
 
 use super::super::super::PostgresStore;

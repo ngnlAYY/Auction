@@ -5,8 +5,8 @@ use crate::database::settlement_funding::account::lock_funding_account;
 use crate::database::settlement_funding::{
     evidence_error, invalid, ledger, lock_funding_liabilities, lock_funding_worlds, storage,
 };
-use auction_application::InternalEvidencePurpose;
-use auction_application::{
+use auction_application::settlement::InternalEvidencePurpose;
+use auction_application::settlement::{
     FundingCommitOutcome, FundingError, FundingMutation, FundingReconciliationResult,
     FundingRecordOnlyCommand, SettlementInternalEvidenceSnapshot,
 };
@@ -182,7 +182,7 @@ async fn apply(
             "protocol_version":binding.protocol_version,"digest":binding.digest},
         "equipment":null,"main_cash":null,"sent_collection":null,
         "observed_from":e.observed_from,"expires_at":e.expires_at,"digest":e.digest});
-    let metadata = auction_application::cli_audit_metadata(
+    let metadata = auction_application::core::cli_audit_metadata(
         command.operator_identity.as_ref(),
         json!({"command_id":command.command_id,"accounting_mode":"record_only","policy_version":1,
         "source_id":source,"recorded_liabilities":preview.isolated_liabilities,"preview_digest":preview.digest,"evidence_digest":e.digest,

@@ -2,7 +2,7 @@
 //! 页面 token 只供受控写入使用，Cookie 与 token 不进入业务 DTO 或日志。
 //! 应用层仍需自行完成邮件分类、幂等入库和业务命令编排。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -57,7 +57,7 @@ pub use writer::{MoogleMailComposeState, MoogleMailSendResponseFailure};
 pub fn into_application_message(
     mut message: MoogleMailMessage,
     mailbox_key: String,
-) -> Result<auction_application::MailMessage, MoogleMailError> {
+) -> Result<auction_application::mail::MailMessage, MoogleMailError> {
     if !message.validate() || mailbox_key.trim().is_empty() {
         message.clear_secrets();
         return Err(MoogleMailError::new(
@@ -95,12 +95,12 @@ pub fn into_application_message(
             }
         };
         attachment.key.clear();
-        application_attachments.push(auction_application::MailEquipmentAttachment {
+        application_attachments.push(auction_application::mail::MailEquipmentAttachment {
             external_equipment_id: attachment.equipment_id,
             key,
         });
     }
-    Ok(auction_application::MailMessage {
+    Ok(auction_application::mail::MailMessage {
         mailbox_key,
         external_mail_id: message.external_mail_id,
         world_id,

@@ -4,7 +4,8 @@ use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{ApplicationFuture, SettlementAuctionSnapshot};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::settlement::SettlementAuctionSnapshot;
 
 /// Admin 拍卖列表允许的最大单页大小。
 pub const MAX_ADMIN_AUCTION_PAGE_SIZE: i64 = 100;

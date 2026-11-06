@@ -1,7 +1,8 @@
 //! Realtime consumer 的共享校验与错误映射。
 
 pub(super) use crate::database::storage_error;
-use auction_application::{ApplicationError, RealtimeConsumerRequest};
+use auction_application::core::ApplicationError;
+use auction_application::realtime::RealtimeConsumerRequest;
 use uuid::Uuid;
 
 pub(super) fn validate_cursor_keys(

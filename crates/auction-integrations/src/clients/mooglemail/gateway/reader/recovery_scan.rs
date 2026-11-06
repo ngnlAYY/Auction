@@ -1,6 +1,6 @@
 //! 恢复核对的列表枚举：按 cut-off 只读列表摘要，不读详情、不改变任何事实。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use chrono::{DateTime, Utc};
 
 use crate::diagnostics as safe_diagnostics;

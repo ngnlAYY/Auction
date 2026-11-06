@@ -4,7 +4,7 @@
 //! 停止把没有资金或资产影响的历史失败当作待处理项。资格由最终事务重新读取，不能把
 //! 形状校验或已提交预览当作处置依据。
 
-use auction_application::{
+use auction_application::delivery::{
     DeliveryAcknowledgementCommand, DeliveryAcknowledgementResult, DeliveryDispositionCommandError,
 };
 use auction_domain::{
@@ -158,7 +158,7 @@ async fn acknowledge_transaction(
             delivery_id: command.delivery_id,
             request_id: command.request_id.as_deref(),
             source: command.actor_source.as_str(),
-            metadata: auction_application::cli_audit_metadata(
+            metadata: auction_application::core::cli_audit_metadata(
                 command.operator_identity.as_ref(),
                 json!({
                     "command_id": command.command_id,

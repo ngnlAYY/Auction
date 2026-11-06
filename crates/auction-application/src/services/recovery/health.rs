@@ -5,19 +5,24 @@ use std::sync::Arc;
 use auction_domain::SettlementWorld;
 use chrono::{DateTime, Utc};
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{
-    ApplicationError, ApplicationFuture, RecoveryBalanceStatus, RecoveryEvidenceStatus,
-    RecoveryHealthConfig, RecoveryHealthRefreshPort, RecoveryHealthStore, RecoveryHealthUpdate,
-    RepositoryError, SettlementFulfillmentEvidenceReader,
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RepositoryError;
+use crate::ports::recovery::{
+    RecoveryBalanceStatus, RecoveryEvidenceStatus, RecoveryHealthConfig, RecoveryHealthRefreshPort,
+    RecoveryHealthStore, RecoveryHealthUpdate,
+};
+use crate::ports::settlement::SettlementFulfillmentEvidenceReader;
 
 /// 刷新 recovery health；仅严格现金策略读取外部 Balance。
 pub struct RecoveryHealthService {
     config: RecoveryHealthConfig,
     store: Arc<dyn RecoveryHealthStore>,
     balances: Arc<dyn SettlementFulfillmentEvidenceReader>,
-    funding_policy_reader: Option<Arc<dyn crate::FundingPolicyReader>>,
+    funding_policy_reader: Option<Arc<dyn crate::ports::settlement::FundingPolicyReader>>,
 }
 
 impl RecoveryHealthService {
@@ -34,7 +39,7 @@ impl RecoveryHealthService {
     /// 与履约和投递共用数据库持久策略，避免健康轮询单独采集记账账号余额。
     pub fn with_funding_policy_reader(
         mut self,
-        reader: Arc<dyn crate::FundingPolicyReader>,
+        reader: Arc<dyn crate::ports::settlement::FundingPolicyReader>,
     ) -> Self {
         self.funding_policy_reader = Some(reader);
         self

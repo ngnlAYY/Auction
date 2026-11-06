@@ -7,7 +7,7 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used)]
 
-use auction_application::RealtimeSequenceAllocator;
+use auction_application::realtime::RealtimeSequenceAllocator;
 use sqlx::{Connection, Row};
 use uuid::Uuid;
 

@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 use auction_domain::{CommandId, valid_text};
 
-use super::{ApplicationFuture, CompetitionTransactionError, RequestHash, WorldSnapshot};
+use crate::ports::auction::{ApplicationFuture, WorldSnapshot};
+use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
 /// 业务世界启停在共享命令账本中的稳定命令种类。
 pub const ADMIN_WORLD_SET_ENABLED_COMMAND_KIND: &str = "admin_world_set_enabled";

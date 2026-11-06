@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use auction_application::{
+use auction_application::forum::{
     ForumRenderError, ForumRenderedPost, ForumSystemLogEntry, MAX_FORUM_CATALOG_PAGES,
     forum_system_log_marker,
 };

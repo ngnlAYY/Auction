@@ -1,6 +1,6 @@
 //! Public/Admin Cookie、Basic Auth 和 CSRF 头的安全解析与生成。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics;
 

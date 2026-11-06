@@ -26,7 +26,9 @@ use super::skeleton::run_worker_skeleton;
 #[cfg(feature = "postgres")]
 use super::*;
 #[cfg(feature = "postgres")]
-use auction_application::{PlayerNotificationScanner, PlayerNotificationService};
+use auction_application::player_notifications::{
+    PlayerNotificationScanner, PlayerNotificationService,
+};
 #[cfg(feature = "postgres")]
 use chrono::Timelike;
 
@@ -35,9 +37,9 @@ pub(super) async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
     runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
-    write_lifecycle: auction_application::ExternalWriteLifecycle,
+    write_lifecycle: auction_application::operations::ExternalWriteLifecycle,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     let Some(database_url) = config.database_url() else {
@@ -85,7 +87,7 @@ pub(super) async fn run_worker(
     let _sli_task = if metrics.enabled() {
         let recorder = auction_observability::SliMetrics::register(&metrics, switches.clone())
             .context("register worker SLI metrics")?;
-        let reader: Arc<dyn auction_application::SliSnapshotReader> = store.clone();
+        let reader: Arc<dyn auction_application::sli::SliSnapshotReader> = store.clone();
         Some(TaskGuard::new(auction_jobs::start_sli_snapshot(reader, switches.clone(), recorder)))
     } else {
         None
@@ -324,7 +326,7 @@ pub(super) async fn run_worker(
             worlds.sort_by_key(|world| world.as_str());
             worlds.dedup();
             let service = AssetReconciliationService::new(
-                auction_application::AssetReconciliationConfig { worlds },
+                auction_application::reconciliation::AssetReconciliationConfig { worlds },
                 store.clone(),
                 inventory_reader,
             )

@@ -2,15 +2,16 @@
 
 use std::sync::Arc;
 
-use auction_application::diagnostics::{
+use auction_application::auction::{SlowProxyCommandPort, SlowProxyDue, is_stale_slow_proxy_error};
+use auction_application::core::Clock;
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError, diagnostic_id,
 };
-use auction_application::{Clock, SlowProxyCommandPort, SlowProxyDue, is_stale_slow_proxy_error};
 use auction_observability::{WorkerLoop, WorkerResult};
 use tokio::task::JoinSet;
 
-use super::super::{PersistentWorker, merge_worker_result};
 use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, merge_worker_result};
 
 /// 每轮只执行一次数据库时间驱动的有界扫描，避免 stale 候选在同轮内被反复读取。
 pub(super) async fn run_phase<C>(worker: &PersistentWorker<C>) -> WorkerResult

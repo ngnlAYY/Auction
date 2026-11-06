@@ -1,10 +1,11 @@
 //! 登录响应只保留短时自有缓冲；不记录 URL、headers、正文或任何远端错误细节。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
-use auction_application::{AdminCredentialError, ApplicationError};
+use auction_application::admin::AdminCredentialError;
+use auction_application::core::ApplicationError;
 use reqwest::{Response, StatusCode, header};
 use url::Url;
 

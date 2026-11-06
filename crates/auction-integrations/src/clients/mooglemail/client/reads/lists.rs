@@ -1,6 +1,6 @@
 //! 三种真实邮箱列表的有界完整扫描；列表身份与页数一起缓存，缺页不会伪装为完整。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -8,7 +8,7 @@ use std::{collections::HashSet, mem::size_of};
 
 use tokio::sync::OnceCell;
 
-use auction_application::SegmentPlan;
+use auction_application::mail::SegmentPlan;
 
 use super::*;
 use crate::clients::metrics::MailLockWaitGuard;
@@ -52,9 +52,9 @@ pub(crate) struct MoogleMailIncomingList {
 pub(crate) struct MoogleMailIncomingPrefix {
     pub(crate) summaries: Vec<MoogleMailSummary>,
     pub(crate) anchor_found: bool,
-    pub(crate) newest: Option<auction_application::MailScanWatermark>,
+    pub(crate) newest: Option<auction_application::mail::MailScanWatermark>,
     /// 回退原因；调用方据此记录指标并完整扫描。
-    pub(crate) issue: Option<auction_application::MailScanReason>,
+    pub(crate) issue: Option<auction_application::mail::MailScanReason>,
     pub(crate) pages_scanned: usize,
     _bytes: OwnedSemaphorePermit,
 }
@@ -262,7 +262,7 @@ impl MoogleMailClient {
                         Arc::clone(&self.external_metrics),
                         world,
                         operation,
-                        auction_application::MailLock::IncomingRead,
+                        auction_application::external_metrics::MailLock::IncomingRead,
                     );
                     let segment = lock_incoming_segment(
                         &round.scope.incoming,
@@ -331,7 +331,7 @@ impl MoogleMailClient {
         round: &MoogleMailReadRound,
         maximum_pages: usize,
         read_mail: bool,
-        anchor: &auction_application::MailScanAnchor,
+        anchor: &auction_application::mail::MailScanAnchor,
     ) -> Result<MoogleMailIncomingPrefix, MoogleMailError> {
         let world = round.key.world;
         self.check_read_round(cookie, round).await?;
@@ -347,7 +347,7 @@ impl MoogleMailClient {
         let operation =
             if read_mail { MoogleMailOperation::ReadMail } else { MoogleMailOperation::Inbox };
         let membership = round.scope.membership_revision.load(Ordering::Acquire);
-        let mut scan = auction_application::MailPrefixScan::new(anchor.clone());
+        let mut scan = auction_application::mail::MailPrefixScan::new(anchor.clone());
         let mut summaries = Vec::new();
         let mut issue = None;
         let mut pages_scanned = 0;
@@ -360,7 +360,7 @@ impl MoogleMailClient {
                 Arc::clone(&self.external_metrics),
                 world,
                 operation,
-                auction_application::MailLock::IncomingRead,
+                auction_application::external_metrics::MailLock::IncomingRead,
             );
             let segment = lock_incoming_segment(
                 &round.scope.incoming,
@@ -398,8 +398,8 @@ impl MoogleMailClient {
                 let mut stop = false;
                 for summary in &parsed.summaries {
                     match scan.observe(&summary.external_mail_id, summary.received_at) {
-                        Ok(auction_application::MailPrefixPage::Continue) => {}
-                        Ok(auction_application::MailPrefixPage::Done) => {
+                        Ok(auction_application::mail::MailPrefixPage::Continue) => {}
+                        Ok(auction_application::mail::MailPrefixPage::Done) => {
                             anchor_found = true;
                             stop = true;
                         }
@@ -433,13 +433,15 @@ impl MoogleMailClient {
         self.check_read_round(cookie, round).await?;
         let page_limit = !anchor_found && !list_complete && issue.is_none();
         let outcome = if let Some(reason) = issue {
-            auction_application::MailPrefixOutcome::Fallback(reason)
+            auction_application::mail::MailPrefixOutcome::Fallback(reason)
         } else {
             scan.finish(page_limit, list_complete)
         };
         let (anchor_found, newest, issue) = match outcome {
-            auction_application::MailPrefixOutcome::Complete { newest } => (true, newest, None),
-            auction_application::MailPrefixOutcome::Fallback(reason) => {
+            auction_application::mail::MailPrefixOutcome::Complete { newest } => {
+                (true, newest, None)
+            }
+            auction_application::mail::MailPrefixOutcome::Fallback(reason) => {
                 tracing::debug!(
                     world = world.as_str(),
                     reason = reason.label(),

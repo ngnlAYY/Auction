@@ -1,13 +1,13 @@
 //! PM 准备、单次提交和同账号 Sent 对账；令牌与 Cookie 只驻留本次内存会话。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::clients::metrics::{
     ForumRequestGuard, forum_pm_category, forum_pm_request_result, forum_signal,
 };
 use crate::diagnostics as safe_diagnostics;
 
-use auction_application::{
+use auction_application::forum::{
     ForumPmError, ForumPmFuture, ForumPmMessage, ForumPmReceipt, PreparedForumPm,
 };
 
@@ -33,7 +33,7 @@ struct PreparedPm {
     message: ForumPmMessage,
     sender: String,
     form: PmForm,
-    metrics_world: auction_application::ForumWorld,
+    metrics_world: auction_application::external_metrics::ForumWorld,
 }
 
 impl PreparedForumPm for PreparedPm {
@@ -47,7 +47,7 @@ impl PreparedForumPm for PreparedPm {
             let mut operation = crate::clients::metrics::ForumPmOperationGuard::start(
                 self.client.external_metrics(),
                 self.metrics_world,
-                auction_application::ForumPmPhase::Send,
+                auction_application::external_metrics::ForumPmPhase::Send,
                 false,
             );
             let result = async {
@@ -91,28 +91,30 @@ impl PreparedForumPm for PreparedPm {
                 .and_then(|receipt| receipt.ok_or(ForumPmError::OutcomeUnknown));
             if result.is_ok() {
                 operation.finish(
-                    auction_application::ForumPmOutcome::Proved,
-                    auction_application::ForumPmCategory::None,
+                    auction_application::external_metrics::ForumPmOutcome::Proved,
+                    auction_application::external_metrics::ForumPmCategory::None,
                 );
             } else {
                 // 未越过 POST 的错误保留已知分类；一旦越过 POST，结果只能按未知处理。
                 let (outcome, category) = if write_started {
                     (
-                        auction_application::ForumPmOutcome::Unknown,
-                        auction_application::ForumPmCategory::OutcomeUnknown,
+                        auction_application::external_metrics::ForumPmOutcome::Unknown,
+                        auction_application::external_metrics::ForumPmCategory::OutcomeUnknown,
                     )
                 } else {
                     (
-                        auction_application::ForumPmOutcome::Error,
-                        failure_category.unwrap_or(auction_application::ForumPmCategory::None),
+                        auction_application::external_metrics::ForumPmOutcome::Error,
+                        failure_category.unwrap_or(
+                            auction_application::external_metrics::ForumPmCategory::None,
+                        ),
                     )
                 };
                 operation.finish(outcome, category);
                 if write_started {
                     self.client.external_metrics().observe(
-                        auction_application::ExternalMetricsEvent::ForumWriteUnknown {
+                        auction_application::external_metrics::ExternalMetricsEvent::ForumWriteUnknown {
                             world: self.metrics_world,
-                            operation: auction_application::ForumOperation::PmSend,
+                            operation: auction_application::external_metrics::ForumOperation::PmSend,
                         },
                     );
                 }
@@ -127,7 +129,7 @@ impl EhentaiClient {
         &self,
         message: &ForumPmMessage,
         mut session: EhentaiCredentialSession,
-        metrics_world: auction_application::ForumWorld,
+        metrics_world: auction_application::external_metrics::ForumWorld,
     ) -> Result<Box<dyn PreparedForumPm>, ForumPmError> {
         self.validate_pm_client()?;
         validate_message(message)?;
@@ -141,7 +143,7 @@ impl EhentaiClient {
                 target.clone(),
                 session.cookie(),
                 metrics_world,
-                auction_application::ForumOperation::PmPrepare,
+                auction_application::external_metrics::ForumOperation::PmPrepare,
             )
             .await;
         if matches!(result, Err(ForumPmError::Authentication)) {
@@ -164,7 +166,7 @@ impl EhentaiClient {
         message: &ForumPmMessage,
         sender: &str,
         mut session: EhentaiCredentialSession,
-        metrics_world: auction_application::ForumWorld,
+        metrics_world: auction_application::external_metrics::ForumWorld,
     ) -> Result<Option<ForumPmReceipt>, ForumPmError> {
         self.validate_pm_client()?;
         validate_message(message)?;
@@ -215,8 +217,8 @@ impl EhentaiClient {
         &self,
         target: Url,
         cookie: &EhentaiCookie,
-        metrics_world: auction_application::ForumWorld,
-        metrics_operation: auction_application::ForumOperation,
+        metrics_world: auction_application::external_metrics::ForumWorld,
+        metrics_operation: auction_application::external_metrics::ForumOperation,
     ) -> Result<String, ForumPmError> {
         self.wait_rate(EhentaiOperation::CheckSession, metrics_world, metrics_operation)
             .await
@@ -255,7 +257,7 @@ impl EhentaiClient {
                             self.external_metrics.as_ref(),
                             metrics_world,
                             metrics_operation,
-                            auction_application::ForumSignal::Timeout,
+                            auction_application::external_metrics::ForumSignal::Timeout,
                         );
                     }
                     safe_diagnostics::warn(
@@ -294,7 +296,7 @@ impl EhentaiClient {
                     self.external_metrics.as_ref(),
                     metrics_world,
                     metrics_operation,
-                    auction_application::ForumSignal::RateLimited,
+                    auction_application::external_metrics::ForumSignal::RateLimited,
                 );
                 return Err(ForumPmError::RateLimited);
             }
@@ -333,10 +335,10 @@ impl EhentaiClient {
         &self,
         form: &PmForm,
         cookie: &EhentaiCookie,
-        metrics_world: auction_application::ForumWorld,
+        metrics_world: auction_application::external_metrics::ForumWorld,
         operation: &mut crate::clients::metrics::ForumPmOperationGuard,
     ) -> Result<(), ForumPmError> {
-        let metrics_operation = auction_application::ForumOperation::PmSend;
+        let metrics_operation = auction_application::external_metrics::ForumOperation::PmSend;
         self.wait_rate(EhentaiOperation::CheckSession, metrics_world, metrics_operation)
             .await
             .map_err(map_error)?;
@@ -382,7 +384,7 @@ impl EhentaiClient {
                             self.external_metrics.as_ref(),
                             metrics_world,
                             metrics_operation,
-                            auction_application::ForumSignal::Timeout,
+                            auction_application::external_metrics::ForumSignal::Timeout,
                         );
                     }
                     safe_diagnostics::warn(
@@ -399,7 +401,7 @@ impl EhentaiClient {
                     self.external_metrics.as_ref(),
                     metrics_world,
                     metrics_operation,
-                    auction_application::ForumSignal::RateLimited,
+                    auction_application::external_metrics::ForumSignal::RateLimited,
                 );
             }
             let location = response.headers().get(header::LOCATION).cloned();

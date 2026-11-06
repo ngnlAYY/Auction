@@ -1,6 +1,6 @@
 //! 集成错误的同步安全投影；日志入口不接收错误、URL、响应、凭据或远端身份。
 
-use auction_application::diagnostics::{
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticLevel, SafeErrorKind, record_error,
 };
 

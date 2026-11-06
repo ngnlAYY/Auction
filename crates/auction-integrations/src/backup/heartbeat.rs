@@ -1,6 +1,6 @@
 //! 备份打卡：仅一次 HTTPS GET，超时和传输错误全部收敛为脱敏结果。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 

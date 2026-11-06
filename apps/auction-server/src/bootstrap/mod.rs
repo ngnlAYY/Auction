@@ -82,7 +82,7 @@ async fn prepare(
         .context("首次初始化失败；保留配置，核对数据库后用 auction-cli 的 db 命令受控恢复")?;
     }
     // 空库、部分迁移或待升级 schema 不允许先启动 Worker；只读就绪校验不能隐式迁移。
-    use auction_application::ProcessReadinessPort;
+    use auction_application::operations::ProcessReadinessPort;
     let url = plans[0].config.database_url().context("database configuration is required")?;
     let ready = async {
         let store = auction_storage::DatabaseStore::connect(

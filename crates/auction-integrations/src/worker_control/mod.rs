@@ -2,7 +2,7 @@
 //! 本模块只拥有 Unix socket 传输与稳定错误分类；凭据、请求门、账号熔断与 W1.9 主动暂停
 //! 都由 Worker 进程裁决，调用方不得回退到本地直连。
 
-use auction_application::{
+use auction_application::operations::{
     WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS, WorkerEquipmentReadRequest, WorkerEquipmentReadResponse,
     WorkerRecoveryScanRequest, WorkerRecoveryScanResponse, WorkerRemoteReadError,
     WorkerRemoteReadFuture, WorkerRemoteReadPort, WorkerSentLookupRequest,
@@ -207,7 +207,7 @@ fn valid_absolute_path(path: &Path) -> bool {
 mod tests {
     use self::parent::*;
     use super as parent;
-    use auction_application::WorkerRemoteReadPort;
+    use auction_application::operations::WorkerRemoteReadPort;
     use std::path::PathBuf;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},

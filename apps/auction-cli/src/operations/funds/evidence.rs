@@ -4,10 +4,11 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeOwnership,
-    AdminCredentialRuntimeReader, AdminCredentialWorld, SettlementInternalEvidenceReader,
+    AdminCredentialRuntimeReader, AdminCredentialWorld,
 };
+use auction_application::settlement::SettlementInternalEvidenceReader;
 use auction_config::AppConfig;
 use auction_integrations::{
     CredentialSealer, build_keyring,

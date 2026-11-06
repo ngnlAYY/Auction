@@ -3,9 +3,10 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, PublicCompensationLot, PublicCompensationLotPage,
-    PublicCompensationLotRequest, PublicCompensationLotReversal,
+use auction_application::core::ApplicationError;
+use auction_application::public::{
+    PublicCompensationLot, PublicCompensationLotPage, PublicCompensationLotRequest,
+    PublicCompensationLotReversal,
 };
 use sqlx::Row;
 use sqlx::postgres::PgRow;

@@ -1,8 +1,7 @@
 //! 公开页面查看游戏装备时使用的密文读取适配器。
 
-use auction_application::{
-    ApplicationFuture, PublicEquipmentLinkSecret, PublicEquipmentLinkSecretReader,
-};
+use auction_application::auction::ApplicationFuture;
+use auction_application::public::{PublicEquipmentLinkSecret, PublicEquipmentLinkSecretReader};
 use auction_domain::EquipmentId;
 
 use super::DatabaseStore;

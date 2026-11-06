@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use auction_application::{
+use auction_application::notification_metrics::{
     NotificationFailure, NotificationKind, NotificationRecorder, NotificationStage,
 };
 use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry};

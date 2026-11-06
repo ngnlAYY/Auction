@@ -7,7 +7,10 @@ use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{ApplicationError, ApplicationFuture, DeliverySendExpectation, RequestHash};
+use crate::errors::ApplicationError;
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
+use crate::ports::delivery::DeliverySendExpectation;
 
 /// 操作者保存的实际观察；已收取附件必须保持为空，不能填入期待 EID。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,8 +41,8 @@ impl ManualSentEvidence {
             || self.world_id != "main"
             || !auction_domain::valid_positive_decimal(&self.external_mail_id, 64)
             || !auction_domain::valid_positive_decimal(&self.sender_uid, 64)
-            || !crate::valid_mail_player_name(&self.sender_name)
-            || !crate::valid_mail_player_name(&self.recipient)
+            || !crate::ports::admin::valid_mail_player_name(&self.sender_name)
+            || !crate::ports::admin::valid_mail_player_name(&self.recipient)
             || !auction_domain::valid_text(&self.subject, 512)
             || self.sent_minute.second() != 0
             || self.sent_minute.nanosecond() != 0
@@ -48,8 +51,8 @@ impl ManualSentEvidence {
             || self.observed_at < self.sent_minute
             || self.original_body_digest == [0; 32]
             || self.observed_body_digest == [0; 32]
-            || !(0..=crate::MAX_DELIVERY_COD).contains(&self.remaining_credits)
-            || !(0..=crate::MAX_DELIVERY_COD).contains(&self.cod_pending)
+            || !(0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.remaining_credits)
+            || !(0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.cod_pending)
             || self.equipment_ids.len() > 1
             || self.equipment_ids.iter().any(|id| !auction_domain::valid_positive_decimal(id, 64))
             || self.receipt.len() > 2048
@@ -143,7 +146,7 @@ pub struct SentConfirmationCommand {
     pub actor: String,
     /// 主机身份不改变原命令的幂等摘要。
     #[serde(skip)]
-    pub operator_identity: Option<crate::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
     pub reason: String,
     pub evidence: ManualSentEvidence,
     pub accept_collected_assets: bool,

@@ -1,6 +1,6 @@
 //! Armory organize 的完整正向库存证据与发送前状态读取；没有命中不是负向库存证明。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -57,7 +57,7 @@ impl MoogleMailParser {
     ) -> Result<bool, MoogleMailError> {
         let operation = MoogleMailOperation::Inventory;
         let fail = || protocol(operation, world);
-        if !auction_application::valid_external_positive_id(external_equipment_id) {
+        if !auction_application::settlement::valid_external_positive_id(external_equipment_id) {
             return Err(fail());
         }
         let document = trusted_document(bytes, world, operation)?;
@@ -170,7 +170,7 @@ impl MoogleMailParser {
         for input in document.select(&inputs) {
             let eid = input
                 .attr("value")
-                .filter(|value| auction_application::valid_external_positive_id(value))
+                .filter(|value| auction_application::settlement::valid_external_positive_id(value))
                 .ok_or_else(fail)?;
             let row = input
                 .ancestors()
