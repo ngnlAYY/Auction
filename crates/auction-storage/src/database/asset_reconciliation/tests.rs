@@ -172,6 +172,7 @@ async fn postgres_custody_counts_separate_expected_stock_and_unknown()
          );
          CREATE TEMP TABLE auctions (id uuid, status text);
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
+         CREATE TEMP TABLE auction_submissions (auction_id uuid, source_reference text);
          CREATE TEMP TABLE deliveries (status text, payload jsonb);
          INSERT INTO pg_temp.equipment VALUES
             ('00000000-0000-0000-0000-000000000001','main','100'),

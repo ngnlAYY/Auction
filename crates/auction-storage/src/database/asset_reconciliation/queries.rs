@@ -43,6 +43,13 @@ WITH expected AS (
     JOIN public.equipment e ON e.id = p.equipment_id
     WHERE e.world_id = $1
       AND a.status IN ('preview', 'live', 'final')
+    UNION ALL
+    SELECT split_part(s.source_reference, ':', 2) AS external_equipment_id,
+           'submission_' || a.status AS reason
+    FROM public.auction_submissions s
+    JOIN public.auctions a ON a.id = s.auction_id
+    WHERE a.status IN ('preview', 'live', 'final')
+      AND s.source_reference ~ '^hentaiverse-equipment-v1:[0-9]+$'
 ), expected_ids AS (
     SELECT DISTINCT external_equipment_id FROM expected
 ), observed AS (
