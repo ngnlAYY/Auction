@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 
 use crate::forum::ParsedHtmlPage;
 
+use super::scan::read_topic_page;
 use super::*;
 
 struct TopicPageIdentity {

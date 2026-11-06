@@ -1,10 +1,7 @@
 //! 论坛回帖导入 Worker 的模块装配；runtime 配置与 `run_cycle` 入口在此，游标推进和
 //! warning-only 边界不变。
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 
 use auction_application::auction::{
     CompetitionCommandPort, CreateProxyCommand, LowerProxyCommand, PlaceBidCommand,
@@ -33,7 +30,6 @@ mod rejection;
 mod topic;
 
 use super::reply_delay::ReplyDelayEstimator;
-use command::process_command;
 use common::{bounded_detail, finish, forum_command_id, is_retryable, repository_error};
 use notification::process_notification;
 use topic::process_topic;
