@@ -111,6 +111,7 @@ impl WorkerControlServer {
             .route(WORKER_CONTROL_TRIGGER_POLL_PATH, post(trigger_poll))
             .route(WORKER_CONTROL_EQUIPMENT_READ_PATH, post(equipment_read))
             .route(WORKER_CONTROL_SENT_LOOKUP_PATH, post(sent_lookup))
+            .route(WORKER_CONTROL_RECOVERY_SCAN_PATH, post(recovery_scan))
             .route(WORKER_CONTROL_METRICS_PATH, get(metrics))
             .fallback(not_found)
             .layer(DefaultBodyLimit::max(config.body_limit))
@@ -118,7 +119,9 @@ impl WorkerControlServer {
                 move |request: axum::extract::Request, next: axum::middleware::Next| async move {
                     // 远端读取跨越 Worker 自己的 fetch 预算，使用独立的更长上界。
                     let path = request.uri().path().to_owned();
-                    let budget = if path == WORKER_CONTROL_EQUIPMENT_READ_PATH
+                    let budget = if path == WORKER_CONTROL_RECOVERY_SCAN_PATH {
+                        RECOVERY_SCAN_REQUEST_TIMEOUT
+                    } else if path == WORKER_CONTROL_EQUIPMENT_READ_PATH
                         || path == WORKER_CONTROL_SENT_LOOKUP_PATH
                     {
                         REMOTE_READ_REQUEST_TIMEOUT

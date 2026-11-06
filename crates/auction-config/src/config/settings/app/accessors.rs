@@ -1,5 +1,7 @@
 //! AppConfig 的非敏感 getter 和敏感值最小暴露边界。
 
+use auction_domain::DataKeyDomain;
+
 use super::super::*;
 use super::model::AppConfig;
 
@@ -126,6 +128,50 @@ impl AppConfig {
 
     pub fn credential_data_key_configured(&self) -> bool {
         self.credential_data_key_id().is_some() && self.credential_data_key().is_some()
+    }
+
+    /// 返回 MoogleMail 诊断归档的独立父密钥标识；只允许诊断装配根读取。
+    pub fn mail_diagnostics_data_key_id(&self) -> Option<&str> {
+        self.secrets.mail_diagnostics_data_key_id.as_ref().map(SecretString::expose_secret)
+    }
+
+    /// 返回 MoogleMail 诊断归档的独立父密钥材料；调用方不得输出或持久化副本。
+    pub fn mail_diagnostics_data_key(&self) -> Option<&str> {
+        self.secrets.mail_diagnostics_data_key.as_ref().map(SecretString::expose_secret)
+    }
+
+    pub fn mail_diagnostics_data_key_configured(&self) -> bool {
+        self.mail_diagnostics_data_key_id().is_some() && self.mail_diagnostics_data_key().is_some()
+    }
+
+    /// 返回指定域当前写入密钥的标识与材料；未配置时返回 `None`。
+    pub fn data_key_current(&self, domain: DataKeyDomain) -> Option<(&str, &str)> {
+        let (id, material) = match domain {
+            DataKeyDomain::Equipment => {
+                (&self.secrets.equipment_data_key_id, &self.secrets.equipment_data_key)
+            }
+            DataKeyDomain::UserLogin => {
+                (&self.secrets.user_login_data_key_id, &self.secrets.user_login_data_key)
+            }
+            DataKeyDomain::Credential => {
+                (&self.secrets.credential_data_key_id, &self.secrets.credential_data_key)
+            }
+            DataKeyDomain::MailDiagnostics => (
+                &self.secrets.mail_diagnostics_data_key_id,
+                &self.secrets.mail_diagnostics_data_key,
+            ),
+        };
+        Some((id.as_ref()?.expose_secret(), material.as_ref()?.expose_secret()))
+    }
+
+    /// 返回指定域保留解密的旧密钥；保留期由配置计算。
+    pub fn data_key_previous(&self, domain: DataKeyDomain) -> &[RetiredDataKey] {
+        match domain {
+            DataKeyDomain::Equipment => &self.secrets.equipment_previous_data_keys,
+            DataKeyDomain::UserLogin => &self.secrets.user_login_previous_data_keys,
+            DataKeyDomain::Credential => &self.secrets.credential_previous_data_keys,
+            DataKeyDomain::MailDiagnostics => &self.secrets.mail_diagnostics_previous_data_keys,
+        }
     }
 
     /// 判断 Admin 登录凭据是否成对配置，不暴露任何凭据内容。

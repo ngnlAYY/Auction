@@ -1,6 +1,6 @@
 # 实时事件契约
 
-[文档导航](../README.md) · [HTTP 路由](routes.md) · [数据库](database.md)
+[docs/README.md](../README.md) · [docs/contracts/routes.md](routes.md) · [docs/contracts/database.md](database.md)
 
 公开站点的实时更新建立在**持久化事件流**之上：业务事务在提交状态变化的同时向 `realtime_events` 追加事件；Public 进程的 relay 轮询事件表并推送给本进程的 WebSocket 连接；浏览器断线后用 HTTP 回放补齐。事件只是“某处发生了变化”的通知，页面收到后重读权威接口，不根据事件负载推导竞价结果。
 
@@ -56,7 +56,7 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 
 ## 事件注册表
 
-负载必须**恰好**包含下表字段（多一个、少一个或为 null 都视为不合法），并通过类型、范围与闭集校验。整数都在 JavaScript 安全整数范围内；UUID 必须是规范小写、非 nil 的 RFC 4122 v1–v5；状态版本、期号与出价等正数字段不能为 0。权威注册表及取值约束见 [`crates/auction-application/src/ports/realtime/public.rs`](../../crates/auction-application/src/ports/realtime/public.rs)。
+负载必须**恰好**包含下表字段（多一个、少一个或为 null 都视为不合法），并通过类型、范围与闭集校验。整数都在 JavaScript 安全整数范围内；UUID 必须是规范小写、非 nil 的 RFC 4122 v1–v5；状态版本、期号与出价等正数字段不能为 0。权威注册表及取值约束见 [crates/auction-application/src/ports/realtime/public.rs](../../crates/auction-application/src/ports/realtime/public.rs)。
 
 | kind | 版本 | 负载字段 |
 | --- | --- | --- |
@@ -140,4 +140,4 @@ Hub 缓冲、淘汰、连接配额、游标及 at-least-once 重投规则保持�
 scope 仅 auction/discovery，不导出事件或 stream 标识。
 这两个终点均为服务端代理，不证明浏览器收到或处理完成；
 created_at 也不是精确 COMMIT 时间。负时差跳过并计闭集 skipped 指标。
-详细口径和局限见[SLI 文档](../../crates/auction-observability/README.md#sli-与容量基线)。
+详细口径和局限见[crates/auction-observability/README.md#sli-与容量基线](../../crates/auction-observability/README.md#sli-与容量基线)。

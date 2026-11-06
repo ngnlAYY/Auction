@@ -1,6 +1,6 @@
 # W13 回归门禁
 
-[计划入口](../architecture-improvement.md) · [执行须知](../architecture-improvement.md#2-执行须知) · [交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [进度](../architecture-improvement.md#7-进度) · [现状基线](baseline.md) · [决策记录](decisions.md)
+[docs/plans/architecture-improvement.md](../architecture-improvement.md) · [docs/plans/architecture-improvement.md#2-执行须知](../architecture-improvement.md#2-执行须知) · [docs/plans/architecture-improvement.md#5-每个工作项的交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [docs/plans/architecture-improvement.md#7-进度](../architecture-improvement.md#7-进度) · [docs/plans/architecture-improvement/baseline.md](baseline.md) · [docs/plans/architecture-improvement/decisions.md](decisions.md)
 
 | 项 | 内容 |
 | --- | --- |
@@ -10,8 +10,8 @@
 | 依赖 | — |
 | 迁移 | 否 |
 | 估算 | 3–4 天 |
-| 关联缺陷 | —（详见[已知缺陷](../architecture-improvement.md#已知缺陷)） |
-| 关联决策 | 11、46（详见[决策记录](decisions.md)） |
+| 关联缺陷 | —（详见[docs/plans/architecture-improvement.md#已知缺陷](../architecture-improvement.md#已知缺陷)） |
+| 关联决策 | 11、46（详见[docs/plans/architecture-improvement/decisions.md](decisions.md)） |
 
 | 项 | 内容 |
 | --- | --- |

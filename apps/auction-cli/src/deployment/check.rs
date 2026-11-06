@@ -223,8 +223,9 @@ fn shared_database(
     for config in [admin, worker] {
         if config.equipment_data_key_id() != public.equipment_data_key_id()
             || config.equipment_data_key() != public.equipment_data_key()
+            || !same_retired_keys(config, public, auction_config::DataKeyDomain::Equipment)
         {
-            anyhow::bail!("Public、Admin 与 Worker 必须使用相同的 equipment_data_key 标识和材料");
+            anyhow::bail!("Public、Admin 与 Worker 必须使用相同的 equipment 数据密钥环");
         }
     }
     Ok(())
@@ -267,8 +268,18 @@ fn admin_worker(admin: &AppConfig, worker: &AppConfig) -> anyhow::Result<()> {
     }
     if admin.credential_data_key_id() != worker.credential_data_key_id()
         || admin.credential_data_key() != worker.credential_data_key()
+        || !same_retired_keys(admin, worker, auction_config::DataKeyDomain::Credential)
     {
-        anyhow::bail!("Admin 与 Worker 必须使用相同的 credential_data_key 标识和材料");
+        anyhow::bail!("Admin 与 Worker 必须使用相同的 credential 数据密钥环");
+    }
+    if !same_retired_keys(admin, worker, auction_config::DataKeyDomain::UserLogin) {
+        anyhow::bail!("Admin 与 Worker 必须使用相同的 user_login 数据密钥环");
+    }
+    if admin.mail_diagnostics_data_key_id() != worker.mail_diagnostics_data_key_id()
+        || admin.mail_diagnostics_data_key() != worker.mail_diagnostics_data_key()
+        || !same_retired_keys(admin, worker, auction_config::DataKeyDomain::MailDiagnostics)
+    {
+        anyhow::bail!("Admin 与 Worker 必须使用相同的 mail_diagnostics 数据密钥环");
     }
     Ok(())
 }
@@ -342,4 +353,27 @@ impl Permissions {
         }
         Ok(())
     }
+}
+
+/// 旧密钥材料与保留期逐项一致；只比较脱敏元数据与材料，不写日志。
+fn same_retired_keys(
+    left: &AppConfig,
+    right: &AppConfig,
+    domain: auction_config::DataKeyDomain,
+) -> bool {
+    let identity = |config: &AppConfig| {
+        config
+            .data_key_previous(domain)
+            .iter()
+            .map(|key| {
+                (
+                    key.id().to_owned(),
+                    key.material().to_owned(),
+                    key.retired_at(),
+                    key.retain_until(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    identity(left) == identity(right)
 }

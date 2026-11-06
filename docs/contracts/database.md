@@ -1,21 +1,21 @@
 # 数据库契约
 
-[文档导航](../README.md) · [迁移](../../migrations/postgres/README.md) · [auction-storage](../../crates/auction-storage/README.md) · [保留政策 v2](../../ops/deploy/retention-policy.v2.json)
+[docs/README.md](../README.md) · [migrations/postgres/README.md](../../migrations/postgres/README.md) · [crates/auction-storage/README.md](../../crates/auction-storage/README.md) · [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)
 
-唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [`migrations/postgres`](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000087`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
+唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [migrations/postgres](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000087`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
 
 ## schema 身份与版本
 
 - `auction_schema_identity` 是单行表，记录应用名与基线版本，用来区分“Auction 的库”与其他库（备份与恢复都会核对它）。迁移只在空库或已有迁移记录的库上执行，没有迁移记录却存在用户对象的库被拒绝。
-- `_sqlx_migrations` 记录已执行的迁移。已知版本逐条核对完整序列、成功状态及 checksum，少数历史摘要仅接受[迁移兼容层](../../migrations/postgres/README.md#执行兼容层)显式允许的值。readiness 默认保持完全匹配；仅显式兼容模式允许下述已登记的未来后缀。恢复预检、备份、盘点及迁移执行的严格版本边界不放宽。
-- 普通启动**从不**隐式迁移。迁移只能通过 `auction-cli db migrate`（或 `service start/restart`）以及合并部署首次初始化执行，见 [auction-cli](../../apps/auction-cli/README.md#数据库)。迁移与建库、重建、恢复一样必须用迁移 owner 凭据（`--owner-secrets`）；服务运行账号没有 DDL 权限。
+- `_sqlx_migrations` 记录已执行的迁移。已知版本逐条核对完整序列、成功状态及 checksum，少数历史摘要仅接受[migrations/postgres/README.md#执行兼容层](../../migrations/postgres/README.md#执行兼容层)显式允许的值。readiness 默认保持完全匹配；仅显式兼容模式允许下述已登记的未来后缀。恢复预检、备份、盘点及迁移执行的严格版本边界不放宽。
+- 普通启动**从不**隐式迁移。迁移只能通过 `auction-cli db migrate`（或 `service start/restart`）以及合并部署首次初始化执行，见 [apps/auction-cli/README.md#数据库](../../apps/auction-cli/README.md#数据库)。迁移与建库、重建、恢复一样必须用迁移 owner 凭据（`--owner-secrets`）；服务运行账号没有 DDL 权限。
 - 迁移只向前，不提供回滚；已发布的迁移文件永不修改。
 
 ### 迁移兼容登记与就绪
 
 `public.schema_migration_compatibility` 由迁移 owner 拥有：`version bigint` 为主键且必须大于 74；`level text` 非空、默认 `breaking`，闭集为 `compatible` / `breaking`；`recorded_at timestamptz` 非空、默认 `CURRENT_TIMESTAMP`，表示登记事务时间。迁移名仍由 SQLx history 提供，不重复存储。UPDATE、DELETE 与 TRUNCATE 均由触发器以 `55000` 拒绝；不得改写旧等级，修正只能新增迁移。该表永久保留，不授权清理。
 
-001–074 不回填，**缺行即 breaking，绝不视为 compatible**；075 建表并登记自身为 `breaking`。此后每个迁移在自身 SQLx 事务内、以末尾唯一一条规范 INSERT 登记本版本。SQLx 随后在同事务写入本版本成功记录，因此不建立即时外键。登记编写与分类依据见[迁移说明](../../migrations/postgres/README.md#兼容分级与登记)。
+001–074 不回填，**缺行即 breaking，绝不视为 compatible**；075 建表并登记自身为 `breaking`。此后每个迁移在自身 SQLx 事务内、以末尾唯一一条规范 INSERT 登记本版本。SQLx 随后在同事务写入本版本成功记录，因此不建立即时外键。登记编写与分类依据见[migrations/postgres/README.md#兼容分级与登记](../../migrations/postgres/README.md#兼容分级与登记)。
 
 令 `E` 为二进制内嵌最高版本、`D` 为数据库最高版本：
 
@@ -27,11 +27,11 @@
 
 超前判定以 `_sqlx_migrations` 实际记录 LEFT JOIN 登记表驱动，在同一个有界可重复读只读快照中完成；缺表、缺行、未知等级、breaking 或查询失败均拒绝。旧二进制无法核对未来文件的内嵌 checksum；未来后缀依据同事务成功记录与兼容声明接受，不能据此放宽已知版本摘要校验。
 
-模式配置见[就绪策略](../../ops/config/README.md#就绪策略)；回退前必须显式切换 `compatible`，且目标旧程序须已包含本逻辑，详见[程序回退](../../ops/deploy/RECOVERY.md#程序回退)。审计、Public relay 等其他就绪条件继续生效，Worker control 的运行状态契约不扩展。
+模式配置见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)；回退前必须显式切换 `compatible`，且目标旧程序须已包含本逻辑，详见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。审计、Public relay 等其他就绪条件继续生效，Worker control 的运行状态契约不扩展。
 
 ## 表分组
 
-分组与[保留政策 v2](../../ops/deploy/retention-policy.v2.json)的数据族一致。审计、资金、业务历史、身份与配置族仍是 `retain_forever`；只有运行态族带期限（决策 23–25、29）：`service_heartbeats` 过期后 30 天、`realtime_events` 30 天、已解决的 `realtime_failures` 90 天、已注销或截止过期满 30 天的会话、加密邮件诊断文件普通 7 天/写入未知证据处置后 90 天。`auction-cli db inventory` 只统计、不授权任何归档或删除；`auction-cli db retention-dry-run` 只读统计候选行与文件数并写带 run id 的回执，实际删除必须另行批准。
+分组与[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)的数据族一致。审计、资金、业务历史、身份与配置族仍是 `retain_forever`；只有运行态族带期限（决策 23–25、29）：`service_heartbeats` 过期后 30 天、`realtime_events` 30 天、已解决的 `realtime_failures` 90 天、已注销或截止过期满 30 天的会话、加密邮件诊断文件普通 7 天/写入未知证据处置后 90 天。`auction-cli db inventory` 只统计、不授权任何归档或删除；`auction-cli db retention-dry-run` 只读统计候选行与文件数并写带 run id 的回执，实际删除必须另行批准。
 
 ### 配置与 schema
 
@@ -50,7 +50,7 @@
 | --- | --- |
 | `auctions` | 场次：世界、期号、状态、冻结的经济/结算/恢复策略快照、计划/有效截止、`state_version`、早鸟窗口内场次的最早收件时刻 `intake_opens_at`（赛季开始，也是旧赛季装备不能重列的边界；迁移前的场次保持 NULL，不回填）。身份字段（世界、期号等）由触发器禁止修改 |
 | `lots` | lot：装备、编号、状态（pending/live/sold/unsold/withdrawn）、起拍价、当前价、领先者、有效截止、慢速代理到期、`state_version` |
-| `equipment` | 装备公开属性（世界内按外部装备 ID 唯一）；`attributes.stats` 保持名称到 value/Base 的对象，HTML 新快照按[来源分组规则](../../crates/auction-integrations/README.md#关键行为)保留完整属性键，历史键不改写 |
+| `equipment` | 装备公开属性（世界内按外部装备 ID 唯一）；`attributes.stats` 保持名称到 value/Base 的对象，HTML 新快照按[crates/auction-integrations/README.md#关键行为](../../crates/auction-integrations/README.md#关键行为)保留完整属性键，历史键不改写 |
 | `equipment_secrets` | 加密保存的装备 key（`equipment_data_key` 信封） |
 | `auction_commands` | 竞价与生命周期等命令的幂等账本（命令 ID、种类、聚合、请求摘要、结果） |
 | `bids` | 被接受的出价事实：金额、机制（ordinary/proxy）、接受后的截止与版本；**只追加**，同一命令内事实序号连续 |
@@ -64,7 +64,7 @@
 
 论坛回帖导入游标不单独建表：增量扫描以 `auction_forum_bid_commands` 中该主题 `post_number` 最高的行作为“已处理到的最大帖子 ID”，页号由楼层与每页 20 楼换算。每轮仍读取固定楼层所在页，并先核对游标页仍包含该 `post_id`；帖子被删除或楼层前移时回退完整扫描。迁移 `000005` 建立的 `auction_forum_reply_cursors` 仍无人读写，其 `(scope, last_scan_at)` 结构无法表示按主题的帖子与页码，留给 W8.2 评估清理，本项不追加迁移。
 
-`auctions.policy_snapshot` 的竞价版本在创建场次时冻结：既有 `schema_version=4` 解码为竞价 v1；新建场次写入 `schema_version=5`、数值 `bidding_version=2`，统一最低增量并允许代理用尽上限反超。迁移 `000069` 仅放宽快照 CHECK，拒绝 v5 缺少版本、版本非数值 2 或未知 schema，不回填或改写任何旧场次。普通竞价、慢速到期、Final 与账户代理降额能力共用该版本；历史事实和命令结果保持原样。价格语义见[业务规则](../business-rules.md#代理竞价)。
+`auctions.policy_snapshot` 的竞价版本在创建场次时冻结：既有 `schema_version=4` 解码为竞价 v1；新建场次写入 `schema_version=5`、数值 `bidding_version=2`，统一最低增量并允许代理用尽上限反超。迁移 `000069` 仅放宽快照 CHECK，拒绝 v5 缺少版本、版本非数值 2 或未知 schema，不回填或改写任何旧场次。普通竞价、慢速到期、Final 与账户代理降额能力共用该版本；历史事实和命令结果保持原样。价格语义见[docs/business-rules.md#代理竞价](../business-rules.md#代理竞价)。
 
 ### 装备标记
 
@@ -107,6 +107,7 @@
 | `delivery_send_attempts`、`delivery_sent_bindings`、`delivery_take_attempts` | 发送/收取尝试的摘要与远端邮件 ID 绑定（只追加），用于结果未知时的对账 |
 | `delivery_sent_confirmations` | 正式 CLI 的人工 Sent 观察命令、请求摘要、接受项、原 owner 快照与结果；只追加，按当前 delivery/fence 和 world/MID 唯一 |
 | `delivery_send_cadence`、`delivery_admin_commands` | 同类邮件发送节奏；Admin 投递操作账本 |
+| `delivery_external_quarantines` | 恢复后外部核对隔离事实（迁移 `000096`，只追加）：`scan_id`、投递与隔离时 fence、world/MID、Sent 详情完整收件人与标题、`sent_at`/`observed_at`；同一投递/fence 与同一 world/MID 各只允许一条。写入与把 pending/claimed 投递改为 `manual_reconcile` 在同一事务内，不重发、不领取、不改写资金或结算 |
 | `delivery_dispositions` | 投递异常终态的统一处置事实（迁移 `000088`）：种类闭集 `auto_sent_proof`、`operator_sent_confirmation`、`admin_failed`、`equipment_loss`、`legacy_self`、`preflight_retired`、`operator_acknowledged`；每种恰好一个来源引用（自动 Sent 绑定、人工 Sent 证明命令、Admin 账本命令、装备损失命令、历史自寄修复命令、操作者确认审计），预检退役以投递行自身为证；只追加，不改变投递状态、资金、履约或资产 |
 
 装备损失只能经 `SettlementEquipmentLossPort` 正式运维命令处置。准入为 Main 已结算成交、原 `winner_equipment_cod` 的首次且唯一库存读取失败（`attempt_count=1`、`fencing_version=1`、`not_observed`、`inventory/read/write_started=false`）、无 claim、无 Sent 绑定、无恢复动作或既有处置、无资金 lot 或资产冲突；历史多次尝试缺少逐次未外写证明，失败关闭。账户必须唯一且为 ready/record_only，strict_cash 不支持。
@@ -142,13 +143,13 @@
 
 | 表 | 内容 |
 | --- | --- |
-| `realtime_streams`、`realtime_events` | 事件流与事件（流内序号连续）；竞价事件与出价同事务写入，`stream_sequence` 在提交后分配，未分配行为 NULL 且不进入回放，见[实时事件](realtime.md) |
+| `realtime_streams`、`realtime_events` | 事件流与事件（流内序号连续）；竞价事件与出价同事务写入，`stream_sequence` 在提交后分配，未分配行为 NULL 且不进入回放，见[docs/contracts/realtime.md](realtime.md) |
 | `realtime_consumer_offsets`、`realtime_failures` | 各 consumer 游标与转发失败记录 |
 | `operations_alert_runtime_state`、`operations_alert_signals`、`operations_alert_batches`、`operations_alert_batch_items` | 运维告警的运行状态、信号、批次与批次项 |
 | `operations_alert_acknowledgements` | 迁移 `000089` 新增的告警台确认/静默只追加事实：`action`（`acknowledge`/`silence`）、唯一 `command_id` 与请求摘要、操作者、原因、静默秒数与到期时间。BEFORE UPDATE/DELETE 触发器与权限层拒绝改写；不改变 signal 状态、计数、阈值或业务数据 |
 | `operations_alert_signals` 的确认/静默投影 | 迁移 `000089` 新增 `acknowledged_at`、`acknowledged_by`、`silenced_until`、`resolution_notified_at`。前三者是当前活动周期的快速投影，观察事务在 signal 从已恢复重新变为活动时清空；`resolution_notified_at` 只标记已恢复的每日摘要类信号已进入下一封摘要，两者都由追加事实表保存历史 |
 | `operations_alert_signals` 的 kind / scope / source / identity 闭集 | 迁移 `000005`/`000015`/`000020` 建立，`000085` 扩展为 26 个 kind、9 个 source，`000091` 再扩展为 29 个 kind、11 个 source，`000095` 再扩展为 32 个 kind、12 个 source（新增 `reconciliation` 来源与 `custody_drift`/`solvency_shortfall`/`reconciliation_stale`）：Worker 扫描的 `process`、`delivery`、`fulfillment`、`recovery`、`mail`、`credential`、`lifecycle`、`forum`、`notification`，以及主机侧 `auction-cli alert report` 报告的 `backup`（`disk_capacity_low`/`backup_failed`，scope `backup`）与 `wal`（`wal_upload_stalled`，scope `wal`）。`source_unavailable` 仍要求 scope 等于来源名；各来源的 scope 是 `mail`、`mail_cookie`/`external_api`、`auction`、`forum`、`notification`、`backup`、`wal`。应用层 `OperationsAlertKind::ALL`/`OperationsAlertSource::ALL` 是持久化闭集，Worker 每轮提交的完整闭集是 `OperationsAlertSource::WORKER`、主机侧 CLI 提交的是 `OperationsAlertSource::HOST`；未登记取值在数据库层失败关闭。信号只读各 owner 已提交的安全水位或 CLI 读取的主机证据，不参与竞价、结算或投递正确性 |
-| `service_heartbeats` | 三角色进程心跳（TTL 30 秒），是唯一被标记为“待决定是否短期保留”的数据族；`audit_failure_count` 在发布进程为 legacy/shadow 时是全部审计失败累计，classified 时仅为阻断就绪的 permanent + unknown 累计，成功写入不清零、重启归零；结构不变，完整分类计数在进程指标中保留，见[就绪策略](../../ops/config/README.md#就绪策略) |
+| `service_heartbeats` | 三角色进程心跳（TTL 30 秒），是唯一被标记为“待决定是否短期保留”的数据族；`audit_failure_count` 在发布进程为 legacy/shadow 时是全部审计失败累计，classified 时仅为阻断就绪的 permanent + unknown 累计，成功写入不清零、重启归零；结构不变，完整分类计数在进程指标中保留，见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略) |
 | `audit_records` | 追加式审计：操作者类型（public_user/admin/worker/system）、动作、实体、结果、来源（public/admin/worker/system/cli）与安全元数据；触发器禁止修改与删除 |
 | 资产对账报告事实（迁移 `000095`） | W11.1–W11.3 的 custody/solvency 报告只追加到 `audit_records`：`action` 为 `auction.custody.reconcile` / `auction.solvency.report`，`entity_type` 为 `custody_report` / `solvency_report`，`entity_id` 为报告 UUID，`metadata` 是带 `format` 版本的完整报告；`asset_actions_authorized` 恒为 false。部分索引 `audit_records_asset_report_idx` 服务“最近一份报告”读取；报告不新建可变表、不授权任何资金或资产动作 |
 
@@ -163,7 +164,7 @@
 - **只追加事实**：出价、代理转换、黑名单历史、审计、发送/收取尝试及 Sent 绑定、COD 退回计数、历史核对证明、场次与 lot 结算结果、补偿账本及冲正由触发器拒绝 UPDATE/DELETE，运行账号在权限层同样只有 `INSERT`（见[数据库账号与权限](#数据库账号与权限)）。资金账户仅冻结 `accounting_mode`/`policy_version`，其他运行状态可变；改名的原始名称证据保留，但撤销会更新 `user_renames.reverted_at`。
 - **租约与 fencing**：Worker 领取的工作项（拍卖调度、结算、履约、投递、恢复、邮件轮询、论坛同步、私信、告警）都有 `lease_token`/`lease_expires_at` 与单调递增的 fencing 版本；租约过期可被重新领取，处于“发送中”的外部写入在结果未知时转为人工对账，绝不自动重发。
 - **事务**：竞价、关键生命周期等命令使用 Serializable 隔离，序列化失败（40001）与死锁（40P01）由 owner 有界重试；同一幂等命令 ID 使用共用事务级 advisory lock 协调。运行期 claim、进度及部分账本写入也使用默认隔离事务，以行锁、租约/fencing、唯一约束等保障各自不变量，并非所有写入都是 Serializable。
-- **失败诊断**：SQL 通用失败在原错误变体中附加 SQLSTATE 类别/代码及可用的约束名、表名，不保留驱动原文或业务值；字段可能缺失，错误文本不得决定自动重试或重发。格式与安全边界见 [Storage SQL 错误安全上下文](../../crates/auction-storage/README.md#sql-错误安全上下文)，不改变数据库 schema 或事务契约。
+- **失败诊断**：SQL 通用失败在原错误变体中附加 SQLSTATE 类别/代码及可用的约束名、表名，不保留驱动原文或业务值；字段可能缺失，错误文本不得决定自动重试或重发。格式与安全边界见 [crates/auction-storage/README.md#sql-错误安全上下文](../../crates/auction-storage/README.md#sql-错误安全上下文)，不改变数据库 schema 或事务契约。
 - **运行时独占**：Public realtime consumer、邮件 Cookie 与论坛 Cookie 的运行时 owner 使用 session advisory lock；运维工具的建库/重建使用集群级 advisory lock。
 - **唤醒**：插入新的可发送投递的事务提交后，由完成插入的进程单独执行 `public.signal_delivery_ready()`（独立自动提交的 `pg_notify('auction_delivery_ready')`），Worker 投递循环据此提前唤醒（轮询仍是兜底）。通知不携带任务、不代替领取，租约与 fencing 仍是唯一的领取依据；通知不能在对应投递提交前可见。
 - **CHECK 约束**：金额非负/为正、状态闭集、文本已修剪且非空、时间有序、互斥字段二选一等规则在数据库层强制，不依赖应用代码。
@@ -179,7 +180,7 @@
 | --- | --- |
 | `public` schema | 只有 `USAGE`；`CREATE` 被撤销，因此不能建表、索引、视图、触发器或函数 |
 | 普通可变表 | `SELECT`、`INSERT`、`UPDATE`、`DELETE`；任何表都没有 `TRUNCATE` |
-| 只追加事实表（触发器拒绝 `UPDATE`/`DELETE`）：`auction_settlements`、`audit_records`、`bid_proxy_authorization_transitions`、`bids`、`compensation_ledger`、`compensation_pool_reversals`、`delivery_dispositions`、`delivery_send_attempts`、`delivery_sent_bindings`、`delivery_sent_confirmations`、`delivery_take_attempts`、`lot_settlements`、`runtime_switch_events`、`settlement_equipment_losses`、`settlement_legacy_bot_seller_claims`、`settlement_legacy_self_reconciliations`、`settlement_recovery_return_consumptions`、`user_blacklist_history` | 只有 `SELECT`、`INSERT` |
+| 只追加事实表（触发器拒绝 `UPDATE`/`DELETE`）：`auction_settlements`、`audit_records`、`bid_proxy_authorization_transitions`、`bids`、`compensation_ledger`、`compensation_pool_reversals`、`delivery_dispositions`、`delivery_external_quarantines`、`delivery_send_attempts`、`delivery_sent_bindings`、`delivery_sent_confirmations`、`delivery_take_attempts`、`lot_settlements`、`runtime_switch_events`、`settlement_equipment_losses`、`settlement_legacy_bot_seller_claims`、`settlement_legacy_self_reconciliations`、`settlement_recovery_return_consumptions`、`user_blacklist_history` | 只有 `SELECT`、`INSERT` |
 | 冻结证据与登记：`settlement_pools`、`schema_migration_compatibility`、`_sqlx_migrations` | 只有 `SELECT` |
 | 序列 | 只有 `USAGE`、`SELECT`；不授予 `UPDATE`，运行账号不能 `setval` |
 
@@ -195,8 +196,8 @@ owner/superuser 时以明确错误终止，不放宽授权。`ALTER DEFAULT PRIV
 
 ## 变更规则
 
-1. 新增表、列、约束或索引只能新增迁移文件（编号连续），见[迁移说明](../../migrations/postgres/README.md)。新表对运行账号默认只读，新增或变更写入面必须在同一迁移里显式 `GRANT`（只追加表只授 `INSERT`）。
-2. 每次新增迁移都把[保留政策 v2](../../ops/deploy/retention-policy.v2.json)的 `database_schema_version` 更新为新的最高版本（否则 `db inventory` 与 `db retention-dry-run` 都拒绝运行，发布身份也会变化）；新增表还须加入对应数据族。运行态族的新清理规则只能来自用户决策，并须同时加入代码内闭集（`retention_rule_spec`）与政策校验，不能只改 JSON。
+1. 新增表、列、约束或索引只能新增迁移文件（编号连续），见[migrations/postgres/README.md](../../migrations/postgres/README.md)。新表对运行账号默认只读，新增或变更写入面必须在同一迁移里显式 `GRANT`（只追加表只授 `INSERT`）。
+2. 每次新增迁移都把[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)的 `database_schema_version` 更新为新的最高版本（否则 `db inventory` 与 `db retention-dry-run` 都拒绝运行，发布身份也会变化）；新增表还须加入对应数据族。运行态族的新清理规则只能来自用户决策，并须同时加入代码内闭集（`retention_rule_spec`）与政策校验，不能只改 JSON。
 3. 同步更新本页的表分组。
 4. 迁移须能在生产数据上安全执行：不得静默改写历史事实；需要修复数据时只修复有确凿证据的部分，其余保留原状并交给人工核对。
 
@@ -227,7 +228,7 @@ expected_revision、set/clear/expire、布尔或枚举值、UTC 期限、操作�
 策略版本及期限状态，旧版本在途检查不得作为新版本缓存或返回成功。
 指标转发拒绝只允许命令层在线收紧，放宽须修改部署配置并重启；
 直接写库绕过命令不在本批威胁模型内。操作步骤见
-[运行时开关](../../ops/README.md#运行时开关)。
+[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
 
 ## 连接档位与事务观测
 
@@ -237,13 +238,13 @@ Worker 最坏为邮件所有权、论坛所有权与投递 LISTEN 共 3；Admin 
 LISTEN 仅唤醒，持久任务、租约与游标仍是状态来源，不建立第二套状态机。
 
 连接模式、超时字段与启用前置条件由
-[配置参考](../../ops/config/README.md#数据库连接分档)拥有。
+[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)拥有。
 默认 profiled、服务超时关闭；维护档不继承服务短超时，保留 owner 局部限界。
 会话参数修改需重启；事务 `SET LOCAL` 只覆盖该事务，结束后恢复会话值。
 W0.7 `diagnose_relation` 的 250ms 限界与原回滚路径保持不变。
 
 数据库指标仅为附加观测，完整名称、闭集标签与桶见
-[数据库指标](../../crates/auction-observability/README.md#数据库事务与连接观测)。
+[crates/auction-observability/README.md#数据库事务与连接观测](../../crates/auction-observability/README.md#数据库事务与连接观测)。
 一个事务操作包含原有内部重试，每次实际 BEGIN 获取阶段计一个尝试；
 同一尝试的 `40001` 与 `40P01` 在映射前区分，重复映射不重复计数。
 只有实际进入下一次尝试才计 retry，只有 owner 确认预算耗尽才计 exhausted。
@@ -329,7 +330,7 @@ Serializable 事务在同一瞬间对同一场次的不同 lot 递增同一 `str
   但同一瞬间争用同一序号的尝试仍会耗尽——这正是 W12.1 的量化依据。
 - 提交后分配序号（W12.1 已实现）：同一数据集与并发下，事务内只写待定事件行（`stream_sequence`
   为 NULL）与自己的 lot 行，提交后再由分配器补号；基准的 `deferred_sequence` 分支断言并报告
-  零冲突、零耗尽。`stream_sequence` 连续性与回放契约不变，见[实时事件](realtime.md)。
+  零冲突、零耗尽。`stream_sequence` 连续性与回放契约不变，见[docs/contracts/realtime.md](realtime.md)。
 - `pg_notify`（隔离 PG18）：比较事务内通知与提交后发送。
   - 直接投递入队基准（16 并发 × 25 行，5 次重复）：事务内触发器提交 p95 1180–2113µs、
     p50 789–843µs；提交后发送的提交 p95 1007–1169µs、p50 817–922µs，发送本身 p95
@@ -468,7 +469,7 @@ cargo test -p auction-storage --features test-db --test postgres \
 
 其余路径继续用不带队列的 `run`（World 启停、规则发布、Admin 创建新场次——新建场次在提交前无人
 可见，无需排队）。实现在
-[`crates/auction-storage/src/database/competition/bid_queue/`](../../crates/auction-storage/src/database/competition/bid_queue)，
+[crates/auction-storage/src/database/competition/bid_queue](../../crates/auction-storage/src/database/competition/bid_queue)，
 只改变并发形状：
 
 - **进程内**：按拍卖 ID 的异步互斥量。同一实例的重叠命令在这里排队，等待期间不取连接、不开事务。
@@ -617,4 +618,4 @@ isekai 装备交付，不是付款邮件，不进入该集合；`bot_internal_v1
 `unknown`/`incomplete` 不能当作零延迟；坏 metadata 或无法归属的候选使整轮失败关闭。
 不以全表扫描加超时、当前任务集或任意截断代替完整历史窗口。
 完整逐项状态、起终点、单位及指标见
-[SLI owner 文档](../../crates/auction-observability/README.md#sli-与容量基线)。
+[crates/auction-observability/README.md#sli-与容量基线](../../crates/auction-observability/README.md#sli-与容量基线)。

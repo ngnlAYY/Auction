@@ -1,6 +1,6 @@
 # 架构改进计划
 
-[文档导航](../README.md) · [架构](../architecture.md) · [开发指南](../development.md) · [运维手册](../../ops/README.md)
+[docs/README.md](../README.md) · [docs/architecture.md](../architecture.md) · [docs/development.md](../development.md) · [ops/README.md](../../ops/README.md)
 
 版本 v13（2026-11-02）。本计划只处理代码与工程体系，不包含线上数据处置；线上问题在各阶段完成并经用户批准部署后自然受益。本页是计划入口：目标与原则、执行须知、工作流与里程碑、交付规范、待决定事项与进度；每个工作流的工作项、验收与回退见各自的详情页，现状基线与决策记录见附录。正文中的仓库路径均以仓库根为起点；代码证据以“文件 + 符号名”引用，不写行号。
 
@@ -8,8 +8,8 @@
 | --- | --- |
 | 本页 | 目标与原则、执行须知、工作流总览与已知缺陷、里程碑、交付规范、仍待决定与用户前置动作、待办池、进度、术语 |
 | 工作流详情（`docs/plans/architecture-improvement/w00-*.md` 至 `w14-*.md`） | 每个工作流一页：概要（优先级、里程碑、依赖、迁移、估算、关联缺陷与决策）、工作项、关键约束、验收与回退；从[工作流总览](#3-工作流总览)进入 |
-| [现状基线](architecture-improvement/baseline.md) | 制定计划时的代码与运行现状及证据位置 |
-| [决策记录](architecture-improvement/decisions.md) | 用户决策 1–74 与计划版本历史 |
+| [docs/plans/architecture-improvement/baseline.md](architecture-improvement/baseline.md) | 制定计划时的代码与运行现状及证据位置 |
+| [docs/plans/architecture-improvement/decisions.md](architecture-improvement/decisions.md) | 用户决策 1–74 与计划版本历史 |
 
 ## 1. 目标与原则
 
@@ -17,17 +17,17 @@
 
 原则：
 
-1. [协作规范](../../AGENTS.md)的领域不变量全部保持：命令幂等、Serializable 关键事务、追加式事实、结果未知不重发、缓存不决定正确性、冻结策略不改写。
+1. [AGENTS.md](../../AGENTS.md)的领域不变量全部保持：命令幂等、Serializable 关键事务、追加式事实、结果未知不重发、缓存不决定正确性、冻结策略不改写。
 2. 每个交付批次一个阶段提交（依赖相连、一起交付的工作项合并，正文按工作项分节，决策 69），按“领域 → 用例/端口 → 存储/外部适配 → HTTP/Web/Worker”落地，同步契约与运维文档。
-3. 默认门禁仍为只做静态验证的 `just verify`；行为变更运行受影响范围的已批准 W6 测试；其他行为验证、数据删除与线上部署需要用户逐项批准（见[决策记录](architecture-improvement/decisions.md)）。
+3. 默认门禁仍为只做静态验证的 `just verify`；行为变更运行受影响范围的已批准 W6 测试；其他行为验证、数据删除与线上部署需要用户逐项批准（见[docs/plans/architecture-improvement/decisions.md](architecture-improvement/decisions.md)）。
 4. 先可观测、再改行为：每个改变运行行为的阶段，都先有能证明改进效果的指标，并且指标有地方存储和查看（W0.10）。
 5. 无预发环境（决策 9），因此改变运行行为的工作项必须带运行时开关与旧路径回退（W7.7 落地后开关切换无需重启，不受 W7.5 时段门禁阻挡）；涉及判定或计数口径的改动先影子运行（规范见[交付规范](#5-每个工作项的交付规范)），差异归零后再切换。
-6. 每个工作项写明可度量的验收标准与回退方式。W7.8a 随一版部署之后，只含 `compatible` 迁移的版本可以换回旧程序；含 `breaking` 迁移的版本只能按[备份与恢复](../../ops/deploy/RECOVERY.md)回退（见 W7.2、W7.8a）。
+6. 每个工作项写明可度量的验收标准与回退方式。W7.8a 随一版部署之后，只含 `compatible` 迁移的版本可以换回旧程序；含 `breaking` 迁移的版本只能按[ops/deploy/RECOVERY.md](../../ops/deploy/RECOVERY.md)回退（见 W7.2、W7.8a）。
 7. 每项结构或错误处理改进都配套防回退门禁（W13），避免改进成果被后续提交抵消。
 
 ## 2. 执行须知
 
-本计划由执行者（人或智能体）逐项推进。开始任何工作项前，先读完本节、[协作规范](../../AGENTS.md)与对应的工作流详情页（链接见[工作流总览](#3-工作流总览)）。
+本计划由执行者（人或智能体）逐项推进。开始任何工作项前，先读完本节、[AGENTS.md](../../AGENTS.md)与对应的工作流详情页（链接见[工作流总览](#3-工作流总览)）。
 
 **选择与认领**
 
@@ -38,7 +38,7 @@
 **范围**
 
 4. 计划范围自 v13 起冻结：工作项内容、验收与回退以详情页为准。执行中的新发现（缺陷、遗漏、改进想法）写入[待办池](#待办池)，不直接扩写工作项；里程碑结束时由用户决定是否纳入。
-5. 详情页与[现状基线](architecture-improvement/baseline.md)反映制定计划时的代码；实施前先核对当前代码，不符时以代码为准，并在交付说明中记录差异。只做工作项要求的改动，需要偏离详情页时先征得用户同意。
+5. 详情页与[docs/plans/architecture-improvement/baseline.md](architecture-improvement/baseline.md)反映制定计划时的代码；实施前先核对当前代码，不符时以代码为准，并在交付说明中记录差异。只做工作项要求的改动，需要偏离详情页时先征得用户同意。
 
 **必须由用户执行或批准**
 
@@ -56,21 +56,21 @@
 
 | 编号 | 工作流 | 优先级 | 依赖 | 迁移 | 估算 |
 | --- | --- | --- | --- | --- | --- |
-| [W0](architecture-improvement/w00-errors-metrics.md) | 错误分类、指标与采集路径、用户可见 SLO、已知缺陷诊断、待核实事实、就绪探针、影子运行框架、浏览器错误信标 | P0（W0.15、W0.16 为 P1） | W0.14 先于 W0.6 | 是（W0.13 索引 077；其余否） | 10–13 天 |
-| [W1](architecture-improvement/w01-external-account.md) | 外部账号调度：快速限界、熔断、三层争用统一调度、访问收口、主动暂停、增量扫描、证据退避、论坛对齐与增量导入 | P0 | W0；W1.11 依赖 W0.5；W1.1、W1.4、W1.11 先有 W6.3；模拟类验收依赖 W6.6；W1.10 依赖 W1.3 | 是（暂停开关、扫描水位、论坛游标） | 15–19 天 |
-| [W2](architecture-improvement/w02-dispositions.md) | 统一处置事实模型 | P1 | W0、W3.7、W9.9；操作者字段按 W9.7 | 是 | 6–8 天 |
-| [W3](architecture-improvement/w03-rules.md) | 规则上移：类型化快照、纯函数判定、时区无关证明、排期规则下沉 | P1 | W3.7 无依赖；其余批次依赖 W2 的领域类型与 W6.2 | 视批次（收窄数据库函数需迁移） | 10–14 天，分批 |
-| [W4](architecture-improvement/w04-admin-console.md) | 证据优先的 Admin 运维台、投递检索与玩家支持视图 | P1 | W2、W1.4 | 视实现 | 9–12 天 |
-| [W5](architecture-improvement/w05-alerting.md) | 告警通道入口、告警来源补齐、外部存活检查、仪表盘口径与告警分级、处置手册、告警台 | P1（W5.1、W5.6 暂缓，决策 50） | W5.1、W5.5–W5.7 依赖 W0；W5.2–W5.4、W5.8 依赖 W2 | 是（W5.5 扩展告警闭集，W5.8 确认与静默） | 8–11 天 |
-| [W6](architecture-improvement/w06-verification.md) | 验证体系（W6.1–W6.4、W6.6 已批准） | P1 | W6.1 中各算法测试随对应工作项交付；W6.6 依赖 W6.3 | 否 | 16–22 天 |
-| [W7](architecture-improvement/w07-release.md) | 发布流水线与环境：时段门禁、运行时开关、版本偏差、故障域隔离、迁移兼容分级、运行参数热读取、停机排空 | P2（W7.1a、W7.5、W7.7、W7.8a、W7.11 为 P0；W7.9、W7.10 为 P1） | W7.2 依赖 W10.6；W7.9 依赖 W0.12；W7.8 其余依赖 W6.2、W6.4 | 是（运行时开关、迁移兼容登记） | 12–16 天 |
-| [W8](architecture-improvement/w08-consolidation.md) | 规模收敛评估（只出决策记录，放在最后） | P2 | 其余工作流完成后 | 否 | 2–3 天 |
-| [W9](architecture-improvement/w09-security.md) | 安全加固：密钥环、已知取舍复核、Admin 登录防护、主机加固、操作者身份、数据库最小权限、登录 key 自助轮换、入站与论坛滥用防护 | P2（W9.5、W9.7–W9.11 为 P1） | W9.9 先于 W2；W9.11 与 W9.10 共用计数 | 是（密钥环、运行账号授权、回信预算计数） | 11–15 天 |
-| [W10](architecture-improvement/w10-data-backup.md) | 数据生命周期与备份：定时与异机备份、迁移演练、WAL 归档、RPO/RTO、恢复演练、按政策清理、PostgreSQL 服务端基线、恢复后外部核对 | P0（W10.1、W10.2、W10.6），其余 P1 | W10.7 依赖 W10.2、W10.8；W10.9 依赖 W1.9、W1.10 | 视政策 | 13–17 天 |
-| [W11](architecture-improvement/w11-reconciliation.md) | 资产对账、偿付能力与内部一致性巡检 | P1 | W11.1–W11.3 依赖 W1.3、W5；W11.2 另依赖 W14.8；W11.4 无依赖 | 是（报告事实） | 5–6 天 |
-| [W12](architecture-improvement/w12-database-hotspots.md) | 数据库热点与读路径：同场出价序号热点、重试退避、读路径保护、连接配额、JSON 键列化、出价事务内的唤醒通知 | P1（W12.1、W12.4、W12.5），其余 P2 | W0.6、W0.9、W0.13、W7.7 | 是（W12.1 视方案、W12.6） | 8–11 天 |
-| [W13](architecture-improvement/w13-regression-gates.md) | 回归门禁：计数棘轮、panic 与溢出防护、文档链接检查、定时依赖审计、依赖升级节奏 | P1 | — | 否 | 3–4 天 |
-| [W14](architecture-improvement/w14-notifications.md) | 通知与提醒：通知目录与模板、内容修正、新增提醒、论坛 notify 改为订阅、普通出价自动标记与渠道前置、付款提醒联动、通知指标与邮资、收件人异常、慢速代理提醒时机 | P1 | W14.8 先于 W14.1，W14.1 先于 W14.2–W14.4；W14.3 依赖 W1.3；W14.5 依赖 W7.6；W14.11 与 W1.7 同批 | 是（通知事实与订阅上限、偏好字段、待定提醒） | 12–17 天 |
+| [docs/plans/architecture-improvement/w00-errors-metrics.md](architecture-improvement/w00-errors-metrics.md) | 错误分类、指标与采集路径、用户可见 SLO、已知缺陷诊断、待核实事实、就绪探针、影子运行框架、浏览器错误信标 | P0（W0.15、W0.16 为 P1） | W0.14 先于 W0.6 | 是（W0.13 索引 077；其余否） | 10–13 天 |
+| [docs/plans/architecture-improvement/w01-external-account.md](architecture-improvement/w01-external-account.md) | 外部账号调度：快速限界、熔断、三层争用统一调度、访问收口、主动暂停、增量扫描、证据退避、论坛对齐与增量导入 | P0 | W0；W1.11 依赖 W0.5；W1.1、W1.4、W1.11 先有 W6.3；模拟类验收依赖 W6.6；W1.10 依赖 W1.3 | 是（暂停开关、扫描水位、论坛游标） | 15–19 天 |
+| [docs/plans/architecture-improvement/w02-dispositions.md](architecture-improvement/w02-dispositions.md) | 统一处置事实模型 | P1 | W0、W3.7、W9.9；操作者字段按 W9.7 | 是 | 6–8 天 |
+| [docs/plans/architecture-improvement/w03-rules.md](architecture-improvement/w03-rules.md) | 规则上移：类型化快照、纯函数判定、时区无关证明、排期规则下沉 | P1 | W3.7 无依赖；其余批次依赖 W2 的领域类型与 W6.2 | 视批次（收窄数据库函数需迁移） | 10–14 天，分批 |
+| [docs/plans/architecture-improvement/w04-admin-console.md](architecture-improvement/w04-admin-console.md) | 证据优先的 Admin 运维台、投递检索与玩家支持视图 | P1 | W2、W1.4 | 视实现 | 9–12 天 |
+| [docs/plans/architecture-improvement/w05-alerting.md](architecture-improvement/w05-alerting.md) | 告警通道入口、告警来源补齐、外部存活检查、仪表盘口径与告警分级、处置手册、告警台 | P1（W5.1、W5.6 暂缓，决策 50） | W5.1、W5.5–W5.7 依赖 W0；W5.2–W5.4、W5.8 依赖 W2 | 是（W5.5 扩展告警闭集，W5.8 确认与静默） | 8–11 天 |
+| [docs/plans/architecture-improvement/w06-verification.md](architecture-improvement/w06-verification.md) | 验证体系（W6.1–W6.4、W6.6 已批准） | P1 | W6.1 中各算法测试随对应工作项交付；W6.6 依赖 W6.3 | 否 | 16–22 天 |
+| [docs/plans/architecture-improvement/w07-release.md](architecture-improvement/w07-release.md) | 发布流水线与环境：时段门禁、运行时开关、版本偏差、故障域隔离、迁移兼容分级、运行参数热读取、停机排空 | P2（W7.1a、W7.5、W7.7、W7.8a、W7.11 为 P0；W7.9、W7.10 为 P1） | W7.2 依赖 W10.6；W7.9 依赖 W0.12；W7.8 其余依赖 W6.2、W6.4 | 是（运行时开关、迁移兼容登记） | 12–16 天 |
+| [docs/plans/architecture-improvement/w08-consolidation.md](architecture-improvement/w08-consolidation.md) | 规模收敛评估（只出决策记录，放在最后） | P2 | 其余工作流完成后 | 否 | 2–3 天 |
+| [docs/plans/architecture-improvement/w09-security.md](architecture-improvement/w09-security.md) | 安全加固：密钥环、已知取舍复核、Admin 登录防护、主机加固、操作者身份、数据库最小权限、登录 key 自助轮换、入站与论坛滥用防护 | P2（W9.5、W9.7–W9.11 为 P1） | W9.9 先于 W2；W9.11 与 W9.10 共用计数 | 是（密钥环、运行账号授权、回信预算计数） | 11–15 天 |
+| [docs/plans/architecture-improvement/w10-data-backup.md](architecture-improvement/w10-data-backup.md) | 数据生命周期与备份：定时与异机备份、迁移演练、WAL 归档、RPO/RTO、恢复演练、按政策清理、PostgreSQL 服务端基线、恢复后外部核对 | P0（W10.1、W10.2、W10.6），其余 P1 | W10.7 依赖 W10.2、W10.8；W10.9 依赖 W1.9、W1.10 | 视政策 | 13–17 天 |
+| [docs/plans/architecture-improvement/w11-reconciliation.md](architecture-improvement/w11-reconciliation.md) | 资产对账、偿付能力与内部一致性巡检 | P1 | W11.1–W11.3 依赖 W1.3、W5；W11.2 另依赖 W14.8；W11.4 无依赖 | 是（报告事实） | 5–6 天 |
+| [docs/plans/architecture-improvement/w12-database-hotspots.md](architecture-improvement/w12-database-hotspots.md) | 数据库热点与读路径：同场出价序号热点、重试退避、读路径保护、连接配额、JSON 键列化、出价事务内的唤醒通知 | P1（W12.1、W12.4、W12.5），其余 P2 | W0.6、W0.9、W0.13、W7.7 | 是（W12.1 视方案、W12.6） | 8–11 天 |
+| [docs/plans/architecture-improvement/w13-regression-gates.md](architecture-improvement/w13-regression-gates.md) | 回归门禁：计数棘轮、panic 与溢出防护、文档链接检查、定时依赖审计、依赖升级节奏 | P1 | — | 否 | 3–4 天 |
+| [docs/plans/architecture-improvement/w14-notifications.md](architecture-improvement/w14-notifications.md) | 通知与提醒：通知目录与模板、内容修正、新增提醒、论坛 notify 改为订阅、普通出价自动标记与渠道前置、付款提醒联动、通知指标与邮资、收件人异常、慢速代理提醒时机 | P1 | W14.8 先于 W14.1，W14.1 先于 W14.2–W14.4；W14.3 依赖 W1.3；W14.5 依赖 W7.6；W14.11 与 W1.7 同批 | 是（通知事实与订阅上限、偏好字段、待定提醒） | 12–17 天 |
 
 估算为单人连续工作日，含文档同步与静态门禁，不含线上部署与观察；合计约 140–188 天（v10 为 117–156 天，增量来自 W14 与各工作流补遗；v12 取消 W14.7）。影子运行与部署后观察另占日历时间（见[交付规范](#5-每个工作项的交付规范)）。
 
@@ -114,7 +114,7 @@
 2. 先写清本项保护的不变量与契约变化（路由、JSON、事件、配置、数据库），以及验收标准与回退方式。
 3. 改变运行行为的项带运行时开关并保留旧路径（W7.7 落地前用 TOML 开关，并在说明中注明切换需要重启、受 W7.5 约束）。判定或计数口径变化先影子运行（使用 W0.15 的共享框架）：差异以结构化日志与 `auction_shadow_mismatch_total{owner}`、`auction_shadow_evaluations_total{owner,branch}` 记录；切换条件为观察期覆盖至少一个包含 Final 与结算的完整场次周期、每个判定分支都有样本且差异为零（无样本的分支不算通过）；切换后在后续版本删除旧路径。
 4. 实现后同步契约文档、模块 README、运维文档与配置示例；文档中的仓库路径以仓库根为起点，代码证据写符号名而非行号。玩家可见的变化除 `docs/guide` 外，还要在交付说明中给出 Admin“规则内容”五语言规则文档的更新稿，部署后由用户发布；界面文案同步五语言 `i18n/*.ftl`；新增或修改出站通知时同步 W14.1 的通知目录。
-5. `cargo fmt --all` 与 `just verify` 通过；行为变更必须运行受影响范围的 `just test` / `just test-db`，已批准的 W6 测试随功能一起更新，入口与覆盖限制见[测试说明](../development.md#测试)。涉及外部账号或论坛的行为先在 W6.6 替身上验证；涉及数据库的判断在本地 PostgreSQL 18 只读预览核对；含迁移的版本在交付说明中附 W10.6 迁移演练回执；W6.2 接入前匹配 0 项不能作为数据库验收。
+5. `cargo fmt --all` 与 `just verify` 通过；行为变更必须运行受影响范围的 `just test` / `just test-db`，已批准的 W6 测试随功能一起更新，入口与覆盖限制见[docs/development.md#测试](../development.md#测试)。涉及外部账号或论坛的行为先在 W6.6 替身上验证；涉及数据库的判断在本地 PostgreSQL 18 只读预览核对；含迁移的版本在交付说明中附 W10.6 迁移演练回执；W6.2 接入前匹配 0 项不能作为数据库验收。
 6. 提交标题 `type(scope): summary`，正文写不变量与验证范围；一个交付批次一个阶段提交，批次内各工作项分节说明（决策 69）；W13 的计数基线随之下降时一并更新。
 7. 在[进度](#7-进度)更新状态：本批次的行在提交号一栏写“随本提交”，下一批次提交时回填实际提交号。
 8. 用户部署后，按验收标准核对线上指标，在进度表记录部署版本与验收结论；未达标时按回退方式处理并记录原因。
@@ -123,7 +123,7 @@
 
 ### 仍待决定
 
-新的待决定事项出现时在此登记，并标注阻塞的工作项与最晚决定时间；决定后移入[决策记录](architecture-improvement/decisions.md)。
+新的待决定事项出现时在此登记，并标注阻塞的工作项与最晚决定时间；决定后移入[docs/plans/architecture-improvement/decisions.md](architecture-improvement/decisions.md)。
 
 | 事项 | 阻塞 | 最晚决定 |
 | --- | --- | --- |
@@ -157,7 +157,7 @@
 
 ### 待办池
 
-执行中发现、尚未纳入计划的事项。每条写明来源工作项与建议归属；里程碑结束时由用户决定纳入、合并或放弃，纳入后移入对应详情页并在[决策记录](architecture-improvement/decisions.md)登记。
+执行中发现、尚未纳入计划的事项。每条写明来源工作项与建议归属；里程碑结束时由用户决定纳入、合并或放弃，纳入后移入对应详情页并在[docs/plans/architecture-improvement/decisions.md](architecture-improvement/decisions.md)登记。
 
 | 登记日期 | 事项 | 来源 | 建议归属 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -189,7 +189,7 @@
 | W0.1 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`ApplicationError::safe_kind()` 闭集分类，首个调用方为履约 reconcile 未持久化错误日志 |
 | W0.7 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；COD 实收资金化各拒绝分支细分为独立 `safe_kind`（target `auction::settlement::funding_diagnostics`），持久化 defer reason 不变、无迁移；部署后按 `ops/README.md` 的 D1 诊断章节收集分类证据 |
 | W0.14 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；审计失败按 SQLSTATE 分类（决策 32、71），`[readiness] audit_failure_mode` 默认 `shadow`、就绪缓存 1 秒；观察到差异只在 `transient` 类后由用户切换 `classified`（决策 72），W0.6 的超时须在切换后启用 |
-| W0.12 | 已提交 | 主机与数据库 `5e2f455b`；浏览器 `fddd9fbb` | — | 执行者：Claude（经用户批准的线上只读核实）；结论见[现状基线](architecture-improvement/baseline.md#w012-线上只读核实2026-11-03)；main Sent 37 页 549 行、MID 跨分钟严格递减（同分钟可逆序），D3 约 41 天触顶；论坛发帖时间到分钟、按账号时区（UTC+8）显示；isekai 邮件因角色战斗中未读，留待下次核实 |
+| W0.12 | 已提交 | 主机与数据库 `5e2f455b`；浏览器 `fddd9fbb` | — | 执行者：Claude（经用户批准的线上只读核实）；结论见[docs/plans/architecture-improvement/baseline.md#w012-线上只读核实2026-11-03](architecture-improvement/baseline.md#w012-线上只读核实2026-11-03)；main Sent 37 页 549 行、MID 跨分钟严格递减（同分钟可逆序），D3 约 41 天触顶；论坛发帖时间到分钟、按账号时区（UTC+8）显示；isekai 邮件因角色战斗中未读，留待下次核实 |
 | W0.9 | 已提交 | `57d1748d` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 E）实现、Claude 监督；HTTP 请求量/状态码/延迟、WebSocket 连接、限流拒绝指标；`[metrics] reject_forwarded_requests` 默认 true（带转发头的 `/metrics` 请求返回 404），CDN 头待 W0.12 |
 | W0.11 | 已提交 | `0a30c5c8` | 未部署 | 同上；`RateLimitedLog` 固定类别 60 秒窗口去重，首个调用点为 delivery 循环失败日志；`log_filter` 加 `auction_observability::log_dedup=off` 可关闭 |
 | W0.2 | 已提交 | I-A `46eb1c43`；I-B `adbc438f` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 I）实现、Claude 监督；I-A 覆盖 jobs/application 152 个位点，I-B 覆盖 integrations 与 HTTP 477 处记录入口（74 个 owner kind、532 组 kind/phase，清单见 `ops/README.md`），`SafeErrorKind` 共 113 类；持久化 defer reason/失败码、HTTP 状态码/错误码/JSON 不变（用户决定）；Public/Admin 随原服务生命周期安装日志去重门；棘轮 HTTP `Err(_)` 118→73、`map_err` 121→94，integrations 24→1、363→64 |
@@ -248,13 +248,13 @@
 | W6.6 | 进行中 | 随本提交 | — | MoogleMail 与论坛 loopback 替身；真实客户端覆盖邮件读取/详情/compose、论坛主题/PM、登录/战斗、账号忙、Cookie 失效、超时、结构漂移、写入未知、邮资不足、收件人不存在；写表单成功路径仍缺真实 fixture |
 | W6.4 | 已提交 | 随本提交 | — | CI 独立 `test` job：安装 PostgreSQL 18、运行 `just test` 与 `just test-db`；不并入默认 verify |
 | W6 | 进行中 | W6.1–W6.4、W6.6 已批准 | — | W6.2/W6.3/W6.4/W6.5/W6.6 已落；W6.1 纯逻辑测试仍待 |
-| W7 | 进行中 | — | 未部署 | W7.1a 已建立 `main` 与保护；W7.5、W7.7、W7.8a、W7.11 已提交；W7.9、W7.10 随 M2b；W7.6 随 M3；W7.1、W7.2、W7.3、W7.8 随 M6 |
+| W7 | 进行中 | — | 未部署 | W7.1 发布流水线、W7.3 部署回执已提交；W7.2 deploy 命令、W7.8 兼容验证待做 |
 | W7.1a | 已提交 | 远端设置 | — | 仓库转公开；`main` 已设为默认分支（当前 `383138a8`），分支保护要求 `docs`/`verify`/`security-audit`/`msrv`、线性历史、禁止强推与删除；`ci/dependency-version-guard` 与两个 dependabot 分支已删除，tokio PR #10 已按决策 52 关闭；`main` CI 成功，候选二进制为 `24a9c115` |
 | W7.5 | 已提交 | `69fd85a0` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；`service stop/restart` 只读时段门禁（Final 或截止不晚于保护窗口末端的在拍 lot，含已过截止仍在拍），`--protection-window-minutes` 默认 60，例外须 `--force --reason` |
 | W8 | 未开始 | — | — | 放在 M6 最后 |
 | W9.7 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；CLI 审计 `source=cli`，metadata 添加 `entrypoint=cli`、`os_uid`、可选 `sudo_user`；`--actor` 仍必填；Admin 保持 `source=admin`；迁移 078 breaking；Admin 审计页支持 cli |
 | W9.5 | 已提交 | 随本提交 | — | Admin 全局登录退避（5 次后 1→60s）、IPv6 /64、失败 WARN、复用 401/429 指标；首次设置 64 hex 随机密钥且最短 32 字节；短密钥/可信代理警告；拒绝 /0 trusted proxy；CDN 专用转发头拒绝 |
-| W9 | 进行中 | — | — | W9.4/W9.5/W9.6/W9.7/W9.9 已提交；W9.3 数据密钥环待做 |
+| W9 | 已提交 | 随本提交 | — | W9.3 密钥环/离线重加密；W9.4 HSTS/form-action；W9.5–W9.11 已落；无部署 |
 | W10 | 进行中 | — | 未部署 | W10.1–W10.3、W10.6–W10.8 已提交；W10.4 政策 v2 与 `db retention-dry-run` 只读演练已实现（未提交、未部署），实际删除仍待只读演练回执与用户批准，W10.5/W10.9 待做 |
 | W10.1 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`backup scheduled` + systemd timer 模板（每日 UTC 03:15），回执 `auction-backup-run.v1`；本地 2026-11-04 已启用用户级 timer 并完成一次 systemd oneshot create+verify+retention；仍待连续 7 天成功与一次人为失败核验 |
 | W10.2 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；主机 `age` 公钥加密 + `object_store` 上传 R2 日/月前缀、完整回读校验，`[backup.offsite]` 默认关闭；本地 2026-11-04 已用 `hv-auction` bucket 完成首次 daily/monthly 上传、bucket lock 覆盖/删除 409、age 解密与隔离 PG18 恢复；仍待三组数据密钥加密列解密、生命周期规则核验与 `age` 私钥离线托管 |
@@ -302,4 +302,4 @@
 | 外部服务替身 | 由脱敏回放语料驱动的本地 MoogleMail/论坛模拟服务，只用于测试，绝不连接真实账号 |
 | 棘轮门禁 | 只允许计数下降、不允许回涨的静态检查 |
 
-业务流程详见[结算与履约](../guide/settlement.md)与[邮件流程](../guide/mail-flows.md)。
+业务流程详见[docs/guide/settlement.md](../guide/settlement.md)与[docs/guide/mail-flows.md](../guide/mail-flows.md)。

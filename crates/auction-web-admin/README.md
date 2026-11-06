@@ -1,6 +1,6 @@
 # auction-web-admin
 
-[文档导航](../../docs/README.md) · [设计约定](DESIGN.md) · [HTTP 路由](../../docs/contracts/routes.md) · [Admin API 应用](../../apps/auction-admin-api/README.md)
+[docs/README.md](../../docs/README.md) · [crates/auction-web-admin/DESIGN.md](DESIGN.md) · [docs/contracts/routes.md](../../docs/contracts/routes.md) · [apps/auction-admin-api/README.md](../../apps/auction-admin-api/README.md)
 
 管理后台：Dioxus 0.7 客户端渲染（CSR）WASM 应用，由 `auction-admin-api` 的 `web-embed` 构建内嵌并同源提供。与公开站点是相互独立的 surface：独立的组件树、路由、样式与译文，不复用 Public 组件，也不导入存储、配置或凭据访问代码。界面默认简体中文。
 
@@ -13,7 +13,7 @@
 
 ## 页面
 
-仪表盘的审计写入失败累计遵循发布进程模式：legacy/shadow 包含全部失败，classified 只含阻断就绪的失败；五语言文案明确该区别，不新增 DTO 字段。全部分类计数在[进程指标](../auction-observability/README.md#指标)查看。
+仪表盘的审计写入失败累计遵循发布进程模式：legacy/shadow 包含全部失败，classified 只含阻断就绪的失败；五语言文案明确该区别，不新增 DTO 字段。全部分类计数在[crates/auction-observability/README.md#指标](../auction-observability/README.md#指标)查看。
 
 导航顺序与页面职责：
 
@@ -34,9 +34,9 @@
 | `/rules-content` | 规则内容 | 五种语言规则文档的编辑、校验、预览与发布 |
 | `/audit` | 审计日志 | 只读审计记录的筛选与分页 |
 | `/status` | 服务说明 | 静态说明页 |
-| `/setup` | 首次部署 | 不经过登录外壳；部署码验证通过后填写初始配置（见 [auction-setup](../auction-setup/README.md)） |
+| `/setup` | 首次部署 | 不经过登录外壳；部署码验证通过后填写初始配置（见 [crates/auction-setup/README.md](../auction-setup/README.md)） |
 
-兼容别名以 `replace` 跳转到正式地址并保留查询与片段：`/dashboard → /`、`/auction → /auctions`、`/mail → /mails`、`/credentials → /cookies`、`/delivery → /deliveries`、`/rules → /rules-content`；已登录访问 `/login` 按安全的 `return` 参数跳回站内目标，缺省回到仪表盘。其余路径显示 404 页面。新增页面须同步修改 `crates/auction-web-admin/src/app/surface/router.rs`、后端 [`crates/auction-http/src/assets/routes.rs`](../auction-http/src/assets/routes.rs) 与[路由文档](../../docs/contracts/routes.md)。
+兼容别名以 `replace` 跳转到正式地址并保留查询与片段：`/dashboard → /`、`/auction → /auctions`、`/mail → /mails`、`/credentials → /cookies`、`/delivery → /deliveries`、`/rules → /rules-content`；已登录访问 `/login` 按安全的 `return` 参数跳回站内目标，缺省回到仪表盘。其余路径显示 404 页面。新增页面须同步修改 `crates/auction-web-admin/src/app/surface/router.rs`、后端 [crates/auction-http/src/assets/routes.rs](../auction-http/src/assets/routes.rs) 与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
 
 ## 写命令约定
 
@@ -81,4 +81,4 @@ bash ci/release/web-bundle.sh admin
 经各自指标确认。客户端只校验名称属于当前闭集、意图/applied 各自唯一且
 applied 是意图子集，不假设两个数组等长或固定为旧名称数量。
 写入本批使用 CLI，页面无新增 SPA 路由。见
-[运维手册](../../ops/README.md#运行时开关)。
+[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。

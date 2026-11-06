@@ -422,6 +422,19 @@ pub use ports::{
 pub use services::RuntimeSwitchRefreshService;
 
 pub use ports::{
+    EXTERNAL_RECOVERY_RECEIPT_FORMAT, ExternalRecoveryDeliveryExpectation,
+    ExternalRecoveryForumThread, ExternalRecoveryFuture, ExternalRecoveryQuarantineMatch,
+    ExternalRecoveryQuarantineOutcome, ExternalRecoveryStore, MAX_EXTERNAL_RECOVERY_DELIVERIES,
+    MAX_EXTERNAL_RECOVERY_FORUM_THREADS, MAX_EXTERNAL_RECOVERY_SENT_MATCHES,
+    MAX_RECOVERY_FORUM_THREADS, MAX_RECOVERY_SCAN_ENTRIES, MAX_RECOVERY_SCAN_PAGES,
+    MAX_RECOVERY_SENT_DETAILS, SentDetailMatch, WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS,
+    WorkerRecoveryForumPost, WorkerRecoveryForumTarget, WorkerRecoveryInboundEntry,
+    WorkerRecoveryMailRef, WorkerRecoveryScanRequest, WorkerRecoveryScanResponse,
+    WorkerRecoverySentEntry, sent_detail_match, sent_list_projection_may_match,
+    subject_is_list_projection,
+};
+
+pub use ports::{
     SLI_AWAITING_INDEX, SLI_CANDIDATE_LIMIT, SLI_SLOW_PROXY_FLOW, SLI_WINDOW_SECONDS,
     SliBidCapacity, SliBidKind, SliDeadlineState, SliFlow, SliFlowWindow, SliOutbidChannel,
     SliOutbidMargin, SliPending, SliSnapshot, SliSnapshotError, SliSnapshotReader, SliWorld,

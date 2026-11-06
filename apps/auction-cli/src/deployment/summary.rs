@@ -139,6 +139,13 @@ fn projection(config: &AppConfig) -> anyhow::Result<Value> {
             "equipment_data_key": config.equipment_data_key_id().is_some(),
             "user_login_data_key": config.user_login_data_key_id().is_some(),
             "credential_data_key": config.credential_data_key_configured(),
+            "mail_diagnostics_data_key": config.mail_diagnostics_data_key_configured(),
+            "retired_data_key_counts": {
+                "equipment": config.data_key_previous(auction_config::DataKeyDomain::Equipment).len(),
+                "user_login": config.data_key_previous(auction_config::DataKeyDomain::UserLogin).len(),
+                "credential": config.data_key_previous(auction_config::DataKeyDomain::Credential).len(),
+                "mail_diagnostics": config.data_key_previous(auction_config::DataKeyDomain::MailDiagnostics).len(),
+            },
         },
     }))
 }

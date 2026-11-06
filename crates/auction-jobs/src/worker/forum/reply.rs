@@ -143,6 +143,11 @@ impl ForumReplyRuntime {
         self
     }
 
+    /// W10.9：共享同一论坛读取适配器与限速，供恢复核对只读扫描使用。
+    pub fn topic_reader(&self) -> Arc<dyn ForumTopicReader> {
+        Arc::clone(&self.reader)
+    }
+
     /// 记录论坛单项预算耗尽；只读同步计数，不改变截止点。
     pub(crate) fn observe_budget(
         &self,

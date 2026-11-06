@@ -11,22 +11,22 @@ HentaiVerse 装备拍卖服务的全 Rust 实现：玩家在网站或 E-Hentai �
 
 | 我想… | 阅读 |
 | --- | --- |
-| 了解怎么参与拍卖 | [玩家指南](docs/guide/player-guide.md) |
-| 理解系统设计 | [架构](docs/architecture.md)、[业务规则](docs/business-rules.md) |
-| 开发与提交代码 | [开发指南](docs/development.md)、[AGENTS.md](AGENTS.md)、[CONTRIBUTING.md](CONTRIBUTING.md) |
-| 部署与运维 | [运维手册](ops/README.md)、[配置参考](ops/config/README.md)、[auction-cli](apps/auction-cli/README.md)、[备份与恢复](ops/deploy/RECOVERY.md) |
-| 查接口与数据 | [HTTP 路由](docs/contracts/routes.md)、[实时事件](docs/contracts/realtime.md)、[数据库](docs/contracts/database.md) |
-| 浏览全部文档 | [文档导航](docs/README.md) |
+| 了解怎么参与拍卖 | [docs/guide/player-guide.md](docs/guide/player-guide.md) |
+| 理解系统设计 | [docs/architecture.md](docs/architecture.md)、[docs/business-rules.md](docs/business-rules.md) |
+| 开发与提交代码 | [docs/development.md](docs/development.md)、[AGENTS.md](AGENTS.md)、[CONTRIBUTING.md](CONTRIBUTING.md) |
+| 部署与运维 | [ops/README.md](ops/README.md)、[ops/config/README.md](ops/config/README.md)、[apps/auction-cli/README.md](apps/auction-cli/README.md)、[ops/deploy/RECOVERY.md](ops/deploy/RECOVERY.md) |
+| 查接口与数据 | [docs/contracts/routes.md](docs/contracts/routes.md)、[docs/contracts/realtime.md](docs/contracts/realtime.md)、[docs/contracts/database.md](docs/contracts/database.md) |
+| 浏览全部文档 | [docs/README.md](docs/README.md) |
 
 ## 程序
 
 | 程序 | 职责 | 默认监听 |
 | --- | --- | --- |
-| [auction-public-api](apps/auction-public-api/README.md) | 公开 API、竞价命令、会话、WebSocket 推送与公开页面 | `127.0.0.1:8090` |
-| [auction-admin-api](apps/auction-admin-api/README.md) | 管理 API、管理后台页面、首次设置 | `127.0.0.1:8091` |
-| [auction-worker](apps/auction-worker/README.md) | 生命周期、结算、履约、投递、邮件、论坛、恢复与告警 | 可选 Unix control socket（默认关闭） |
-| [auction-server](apps/auction-server/README.md) | 可选：单文件监管三个角色子进程 | 同 Public/Admin |
-| [auction-cli](apps/auction-cli/README.md) | 配置检查、部署编排、迁移、备份恢复与业务运维 | — |
+| [apps/auction-public-api/README.md](apps/auction-public-api/README.md) | 公开 API、竞价命令、会话、WebSocket 推送与公开页面 | `127.0.0.1:8090` |
+| [apps/auction-admin-api/README.md](apps/auction-admin-api/README.md) | 管理 API、管理后台页面、首次设置 | `127.0.0.1:8091` |
+| [apps/auction-worker/README.md](apps/auction-worker/README.md) | 生命周期、结算、履约、投递、邮件、论坛、恢复与告警 | 可选 Unix control socket（默认关闭） |
+| [apps/auction-server/README.md](apps/auction-server/README.md) | 可选：单文件监管三个角色子进程 | 同 Public/Admin |
+| [apps/auction-cli/README.md](apps/auction-cli/README.md) | 配置检查、部署编排、迁移、备份恢复与业务运维 | — |
 
 普通启动从不隐式迁移数据库；升级迁移、备份、恢复与重建通过 `auction-cli` 显式执行。合并部署另有首次设置例外：网页明确确认后，`auction-server` 初始化专用空库；常规重启不会重试迁移。
 
@@ -35,7 +35,7 @@ HentaiVerse 装备拍卖服务的全 Rust 实现：玩家在网站或 E-Hentai �
 | 路径 | 内容 |
 | --- | --- |
 | `apps/` | 五个可执行程序（薄装配根） |
-| `crates/` | 领域、应用、适配器、契约与前端 crate，职责见[架构](docs/architecture.md#分层) |
+| `crates/` | 领域、应用、适配器、契约与前端 crate，职责见[docs/architecture.md#分层](docs/architecture.md#分层) |
 | `migrations/postgres/` | 只追加的数据库迁移 |
 | `docs/` | 架构、业务规则、契约与指南 |
 | `ops/` | 部署手册、配置示例、systemd/tmpfiles/Caddy 模板、保留政策 |
@@ -55,8 +55,8 @@ just build-release     # 完整发布制品（Fat LTO，较慢）
 just release-check     # 构建、门禁与装包
 ```
 
-应用 crate 默认不含数据库驱动与页面：自行调用 cargo 时须显式启用 `postgres`，需要页面时先 `just web-build` 再启用 `web-embed`。本地环境搭建见[开发指南](docs/development.md#本地运行)。
+应用 crate 默认不含数据库驱动与页面：自行调用 cargo 时须显式启用 `postgres`，需要页面时先 `just web-build` 再启用 `web-embed`。本地环境搭建见[docs/development.md#本地运行](docs/development.md#本地运行)。
 
 ## 发布
 
-默认分支推送（或手动触发）且全部检查通过后，CI 产出发布包：`bin/` 中包含 Public、Admin、Worker 与 `auction-cli`，其中仅 Public/Admin 内嵌页面；另附部署文档、systemd/tmpfiles/Caddy 模板与配置示例，以及 `SHA256SUMS`。合并部署包（`auction-server` + `auction-cli`）用 `just release-check --single-binary` 构建。详见 [CI 与发布](ci/README.md)。
+只在 `main` 上打 `v<版本>` tag（等于 `Cargo.toml` 的 workspace version）触发 CI 发布：tag 守卫、完整门禁、发布构建、SLSA 来源证明与 GitHub Release 资产在同一条流水线完成，Release 永久保留。正式部署只使用这些 Release 资产，部署前运行 `just verify-package` 核对提交可从发布 tag 到达；普通分支推送的候选 Actions artifact 不可部署。合并部署包（`auction-server` + `auction-cli`）用 `just release-check --single-binary` 构建。详见 [ci/README.md](ci/README.md)。

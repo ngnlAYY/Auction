@@ -1,6 +1,6 @@
 # W7 发布流水线与环境
 
-[计划入口](../architecture-improvement.md) · [执行须知](../architecture-improvement.md#2-执行须知) · [交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [进度](../architecture-improvement.md#7-进度) · [现状基线](baseline.md) · [决策记录](decisions.md)
+[docs/plans/architecture-improvement.md](../architecture-improvement.md) · [docs/plans/architecture-improvement.md#2-执行须知](../architecture-improvement.md#2-执行须知) · [docs/plans/architecture-improvement.md#5-每个工作项的交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [docs/plans/architecture-improvement.md#7-进度](../architecture-improvement.md#7-进度) · [docs/plans/architecture-improvement/baseline.md](baseline.md) · [docs/plans/architecture-improvement/decisions.md](decisions.md)
 
 | 项 | 内容 |
 | --- | --- |
@@ -10,23 +10,23 @@
 | 依赖 | W7.2 依赖 W10.6；W7.9 依赖 W0.12；W7.8 其余依赖 W6.2、W6.4 |
 | 迁移 | 是（运行时开关、迁移兼容登记） |
 | 估算 | 12–16 天 |
-| 关联缺陷 | D8（详见[已知缺陷](../architecture-improvement.md#已知缺陷)） |
-| 关联决策 | 8、9、22、27、33、34、39、45、46、47、51、52（详见[决策记录](decisions.md)） |
+| 关联缺陷 | D8（详见[docs/plans/architecture-improvement.md#已知缺陷](../architecture-improvement.md#已知缺陷)） |
+| 关联决策 | 8、9、22、27、33、34、39、45、46、47、51、52（详见[docs/plans/architecture-improvement/decisions.md](decisions.md)） |
 
 | 项 | 内容 |
 | --- | --- |
 | W7.1a（M1） | 分支基线：以 `refactor/dioxus-frontend` 的 HEAD 建立 `main` 并设为远端默认分支，开启分支保护（必须通过 CI）；此后各里程碑的部署使用 CI 在 `main` 上产出的候选制品，部署前核对校验和，不再本地构建（决策 51）。旧分支按决策 52 处理：`master`、`audit-deps`、`ci/dependency-version-guard` 与已合入的 dependabot 分支删除；`tokio-1.54.1`（违反 Tokio 1.53 LTS 锁定）与 `tungstenite-0.30.0`（须随 Axum 同步升级）的 PR 关闭不合并；远端设置与删除由用户执行 |
 | W7.1 | 版本发布（M6）：只从 `main` 上的 tag 发布（决策 8）：CI 增加 tag 触发，制品附到 GitHub Release 长期保留并生成来源证明；CI 增加“已发布迁移文件未被修改”检查；部署只使用 CI 制品并核对其提交可从发布 tag 到达 |
-| W7.2 | `auction-cli deploy <制品目录>`：在现有 `service restart`（严格配置检查、停机、迁移、按序启动、readiness）之上增加在途发送门禁、W7.5 时段门禁、含迁移版本的 W10.6 迁移演练回执核对、备份并新旧 CLI 校验、保留旧程序、静态资源核对与回执；先面向线上的分体部署，合并部署的支持随 W8.1 的决定。配套 `auction-cli rollback` 只用于不含迁移（或只含 W7.8a 登记为 `compatible` 的迁移）的版本；含破坏性迁移的版本回退只能按[备份与恢复](../../../ops/deploy/RECOVERY.md)恢复并做外部历史核对 |
+| W7.2 | `auction-cli deploy <制品目录>`：在现有 `service restart`（严格配置检查、停机、迁移、按序启动、readiness）之上增加在途发送门禁、W7.5 时段门禁、含迁移版本的 W10.6 迁移演练回执核对、备份并新旧 CLI 校验、保留旧程序、静态资源核对与回执；先面向线上的分体部署，合并部署的支持随 W8.1 的决定。配套 `auction-cli rollback` 只用于不含迁移（或只含 W7.8a 登记为 `compatible` 的迁移）的版本；含破坏性迁移的版本回退只能按[ops/deploy/RECOVERY.md](../../../ops/deploy/RECOVERY.md)恢复并做外部历史核对 |
 | W7.3 | 部署回执写入状态目录并可查询，取代手改服务器 README |
 | W7.4（取消） | 现线上即正式环境，不建预发、不更名（决策 9）；行为验证使用本地 PostgreSQL 18、W6.2 与 W10.6 迁移演练 |
-| W7.5 | 时段门禁（提前到 M1，决策 47）：`service stop/restart` 只在两种情况下拒绝执行：任一场次处于 Final；或任一在拍 lot 的有效截止落在保护窗口内（默认 60 分钟、可配置，且不短于 W10.6 实测停机时间的 3 倍）。慢速代理只在其 lot 落入保护窗口时计入，Live 期间其余时间允许重启（代理只会顺延执行）；拒绝时需显式 `--force` 并写明原因；同步[运维手册](../../../ops/README.md)，并写明系统自动更新重启等绕过 CLI 的停机由 W9.6 约束 |
-| W7.6 | 前后端版本偏差：HTTP 响应头与 WebSocket 首帧携带构建号，浏览器发现与自身构建号不一致时提示刷新（不自动刷新正在操作的页面）；在 `crates/auction-contracts/README.md` 写明契约演进规则（响应新增字段的兼容方式）；同步[路由契约](../../contracts/routes.md)与[实时事件契约](../../contracts/realtime.md) |
-| W7.7 | 运行时开关（提前到 M1）：行为开关持久化在数据库（闭集开关名、取值、到期、操作者、原因，追加审计），Worker/Public/Admin 周期读取，切换无需重启，因此不受 W7.5 阻挡；开关只在都正确的新旧代码路径间选择，不决定金额、资格、幂等或锁；W1.9 主动暂停复用同一机制；同步[数据库契约](../../contracts/database.md)与保留政策 |
-| W7.8a（M1，决策 34） | 迁移兼容登记与 readiness 放宽：每个新迁移在自身事务内向只追加的兼容登记表写入一行 `compatible`（只新增、旧程序可安全运行）或 `breaking`，CI 检查每个新迁移恰好登记一次；已发布的 001–074 视为 `breaking`；readiness 允许数据库比二进制多出的版本全部登记为 `compatible`，其余情况仍拒绝就绪。旧程序靠登记表判断自己不认识的版本，因此放宽须先随一版部署，之后的版本才能换回它；像 069、071 这类要求全停、改冻结策略、收紧约束或改触发器的迁移一律 `breaking`，默认 `breaking`，只对纯新增放宽；放宽 CHECK 以写入新的闭集取值（状态、种类、失败码、告警来源）会让旧程序读到无法解析的值，同样登记为 `breaking`，除非旧程序对未知值已有明确容错；同步[数据库契约](../../contracts/database.md)、保留政策、[迁移说明](../../../migrations/postgres/README.md)与运维手册的回退章节 |
+| W7.5 | 时段门禁（提前到 M1，决策 47）：`service stop/restart` 只在两种情况下拒绝执行：任一场次处于 Final；或任一在拍 lot 的有效截止落在保护窗口内（默认 60 分钟、可配置，且不短于 W10.6 实测停机时间的 3 倍）。慢速代理只在其 lot 落入保护窗口时计入，Live 期间其余时间允许重启（代理只会顺延执行）；拒绝时需显式 `--force` 并写明原因；同步[ops/README.md](../../../ops/README.md)，并写明系统自动更新重启等绕过 CLI 的停机由 W9.6 约束 |
+| W7.6 | 前后端版本偏差：HTTP 响应头与 WebSocket 首帧携带构建号，浏览器发现与自身构建号不一致时提示刷新（不自动刷新正在操作的页面）；在 `crates/auction-contracts/README.md` 写明契约演进规则（响应新增字段的兼容方式）；同步[docs/contracts/routes.md](../../contracts/routes.md)与[docs/contracts/realtime.md](../../contracts/realtime.md) |
+| W7.7 | 运行时开关（提前到 M1）：行为开关持久化在数据库（闭集开关名、取值、到期、操作者、原因，追加审计），Worker/Public/Admin 周期读取，切换无需重启，因此不受 W7.5 阻挡；开关只在都正确的新旧代码路径间选择，不决定金额、资格、幂等或锁；W1.9 主动暂停复用同一机制；同步[docs/contracts/database.md](../../contracts/database.md)与保留政策 |
+| W7.8a（M1，决策 34） | 迁移兼容登记与 readiness 放宽：每个新迁移在自身事务内向只追加的兼容登记表写入一行 `compatible`（只新增、旧程序可安全运行）或 `breaking`，CI 检查每个新迁移恰好登记一次；已发布的 001–074 视为 `breaking`；readiness 允许数据库比二进制多出的版本全部登记为 `compatible`，其余情况仍拒绝就绪。旧程序靠登记表判断自己不认识的版本，因此放宽须先随一版部署，之后的版本才能换回它；像 069、071 这类要求全停、改冻结策略、收紧约束或改触发器的迁移一律 `breaking`，默认 `breaking`，只对纯新增放宽；放宽 CHECK 以写入新的闭集取值（状态、种类、失败码、告警来源）会让旧程序读到无法解析的值，同样登记为 `breaking`，除非旧程序对未知值已有明确容错；同步[docs/contracts/database.md](../../contracts/database.md)、保留政策、[migrations/postgres/README.md](../../../migrations/postgres/README.md)与运维手册的回退章节 |
 | W7.8（M6） | 兼容声明验证：用 W6.2 以上一版存储测试验证 `compatible` 登记属实，并接入 W6.4 的 CI 作业（决策 27 的其余部分） |
 | W7.9 | 故障域隔离（线上为分体部署）：把 Public 对 Worker/Admin、Admin 对 Worker 的 `Requires=` 都改为 `Wants=`，启动顺序继续由 `auction-cli service` 保证；按 W0.12 核实的 systemd 行为验证 Worker 故障重启不连带 Public 与 Admin；同步运维手册。合并部署的同类问题（任一子进程退出即全停且 `Restart=no`）记入 W8.1 |
-| W7.10（M2b，决策 39） | 运行参数热读取：Worker 周期检测 runtime 文件变化，只对发送节奏（`send_intervals`）、邮件与论坛请求预算（页数、超时、批量）以及 W1 新增的预算、退避与通知参数做完整校验后原子替换；校验失败保留旧值并记录告警；其余字段仍需重启。Admin 参数页标明即时生效的字段，同步[配置参考](../../../ops/config/README.md)的“生效”列。热读取不受 W7.5 阻挡，参数仍只影响节奏，不决定金额、资格或幂等 |
+| W7.10（M2b，决策 39） | 运行参数热读取：Worker 周期检测 runtime 文件变化，只对发送节奏（`send_intervals`）、邮件与论坛请求预算（页数、超时、批量）以及 W1 新增的预算、退避与通知参数做完整校验后原子替换；校验失败保留旧值并记录告警；其余字段仍需重启。Admin 参数页标明即时生效的字段，同步[ops/config/README.md](../../../ops/config/README.md)的“生效”列。热读取不受 W7.5 阻挡，参数仍只影响节奏，不决定金额、资格或幂等 |
 | W7.11（M1，D8，决策 33） | 停机排空：排空预算改为按角色配置；Worker 停止时未越过 sending 围栏的工作立即放弃（租约到期后重领），已越过围栏的外部写入关键段（compose/发帖/私信请求到结果落库）在独立预算内完成（默认 60 秒）；角色 unit 的 `TimeoutStopSec` 与 `auction-server` 的子进程排空同步调大；关键段预算耗尽仍按结果未知处理，不改变人工对账规则；W7.2 的在途发送门禁继续覆盖部署 |
 
 验收：从 tag 到上线一条命令完成并产生回执；含破坏性迁移版本的 `rollback` 被拒绝并给出恢复指引；W7.8a 部署后，只多出 `compatible` 迁移的数据库上旧程序可就绪；Final 阶段的停机请求被拒绝；运行时开关与热读取参数切换在一个读取周期内生效且有审计；部署后旧页面出现刷新提示而不是解码错误；Worker 崩溃或重启期间 Public 持续可出价、Admin 持续可用；在 W6.6 替身上于发送关键段中途停止 Worker，写入完成并落库后进程才退出。回退：W7.2/W7.3 为新增命令，旧的手工流程保留；W7.7 开关表与兼容登记表只追加；W7.9 的 unit 与 supervisor 变化可换回旧模板或旧程序；W7.10 可关闭热读取回到重启生效；W7.11 的排空预算可配置回 10 秒。

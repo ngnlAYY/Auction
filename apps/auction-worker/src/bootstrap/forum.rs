@@ -26,14 +26,17 @@ pub(super) async fn configure_forum(
     let credential_world = AdminCredentialWorld::parse(&forum_config.credential_world)
         .context("forum credential_world must be main, isekai, or shared")?;
     let mut runtime_ownership = None;
-    let credentials = if let Some((key_id, key_material)) =
-        config.credential_data_key_id().zip(config.credential_data_key())
-    {
-        let data_key = Arc::new(
-            DataKey::from_base64(key_id, key_material)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-        );
-        let opener = CredentialSealer::new(Arc::clone(&data_key));
+    let credential_keyring = build_keyring(
+        auction_config::DataKeyDomain::Credential,
+        config.data_key_current(auction_config::DataKeyDomain::Credential),
+        config
+            .data_key_previous(auction_config::DataKeyDomain::Credential)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+    let credentials = if let Some(keyring) = credential_keyring {
+        let opener = CredentialSealer::new(keyring);
         let reader: Arc<dyn AdminCredentialRuntimeReader> = store.clone();
         let records = reader
             .list_active(AdminCredentialKind::ForumCookie, credential_world)
@@ -123,17 +126,21 @@ pub(super) async fn configure_forum(
     let post_writer: Arc<dyn ForumPostWriter> = gateway.clone();
     let renderer: Arc<dyn ForumRenderer> =
         Arc::new(ForumThreadRenderer::with_colors(forum_config.equipment_colors.clone()));
-    let (equipment_key_id, equipment_key_material) = config
-        .equipment_data_key_id()
-        .zip(config.equipment_data_key())
-        .context("forum enabled but equipment data key is incomplete")?;
-    let equipment_data_key = DataKey::from_base64(equipment_key_id, equipment_key_material)
-        .map_err(|_| anyhow::anyhow!("forum equipment data key is invalid"))?;
+    let equipment_keyring = build_keyring(
+        auction_config::DataKeyDomain::Equipment,
+        config.data_key_current(auction_config::DataKeyDomain::Equipment),
+        config
+            .data_key_previous(auction_config::DataKeyDomain::Equipment)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .map_err(|_| anyhow::anyhow!("forum equipment data key is invalid"))?
+    .context("forum enabled but equipment data key is incomplete")?;
     let equipment_secrets: Arc<dyn PublicEquipmentLinkSecretReader> = store.clone();
     let equipment_links: Arc<dyn PublicEquipmentLinkResolver> =
         Arc::new(EquipmentGameLinkResolver::new(
             equipment_secrets,
-            EquipmentKeyOpener::new(equipment_data_key),
+            EquipmentKeyOpener::new(equipment_keyring),
         ));
     let sync = Some(
         auction_jobs::ForumSyncRuntime::new(

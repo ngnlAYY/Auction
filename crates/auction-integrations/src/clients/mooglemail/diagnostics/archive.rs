@@ -19,7 +19,7 @@ use super::{
     crypto, filesystem,
     payload::{self, SensitiveBytes},
 };
-use crate::DataKey;
+use crate::keyring::Keyring;
 
 /// 本地加密证据的目录、清理预算和父密钥来源。
 #[derive(Debug, Clone)]
@@ -34,7 +34,7 @@ pub struct MoogleMailDiagnosticArchiveConfig {
 #[derive(Clone)]
 pub struct MoogleMailDiagnosticArchive {
     config: MoogleMailDiagnosticArchiveConfig,
-    data_key: Arc<DataKey>,
+    keys: Arc<Keyring>,
 }
 
 /// 此明文类型只用于显式导出，不实现 Debug，销毁时清理正文副本。
@@ -62,10 +62,13 @@ impl MoogleMailDiagnosticArchive {
     /// 校验归档配置；不创建目录、不删除历史证据，也不改变业务配置。
     pub fn new(
         config: MoogleMailDiagnosticArchiveConfig,
-        data_key: Arc<DataKey>,
+        keys: Arc<Keyring>,
     ) -> Result<Self, MailDiagnosticError> {
         filesystem::validate_config(&config)?;
-        Ok(Self { config, data_key })
+        if keys.domain().as_str() != config.key_source {
+            return Err(MailDiagnosticError::InvalidContext);
+        }
+        Ok(Self { config, keys })
     }
 
     fn prepare(
@@ -83,7 +86,7 @@ impl MoogleMailDiagnosticArchive {
             version: payload::FORMAT_VERSION,
             evidence_id: id,
             key_source: self.config.key_source.clone(),
-            key_id: self.data_key.id().to_owned(),
+            key_id: self.keys.current_id().to_owned(),
             context: context_wire,
             outcome: payload::OutcomeWire { failure_code: "prepared".into(), decision_code: None },
             payload_kind: kind.into(),
@@ -94,7 +97,7 @@ impl MoogleMailDiagnosticArchive {
         };
         payload::validate_header(&header, id)?;
         let aad = authenticated_header(&header)?;
-        let encrypted = crypto::seal(&self.data_key, &self.config.key_source, &aad, &body.0)?;
+        let encrypted = crypto::seal(self.keys.current(), &self.config.key_source, &aad, &body.0)?;
         let prepared = PreparedMailEvidence::new(id, context, encrypted, body.0.len(), digest);
         Ok(if kind == "raw_response" {
             prepared.with_response_metadata(status, available)
@@ -112,7 +115,7 @@ impl MoogleMailDiagnosticArchive {
             version: payload::FORMAT_VERSION,
             evidence_id: prepared.evidence_id(),
             key_source: self.config.key_source.clone(),
-            key_id: self.data_key.id().to_owned(),
+            key_id: self.keys.current_id().to_owned(),
             context: payload::context(prepared.context())?,
             outcome: payload::OutcomeWire { failure_code: "prepared".into(), decision_code: None },
             payload_kind: prepared.payload_kind().to_owned(),
@@ -123,7 +126,7 @@ impl MoogleMailDiagnosticArchive {
         };
         payload::validate_header(&header, prepared.evidence_id())?;
         let body = crypto::open(
-            &self.data_key,
+            self.keys.current(),
             &self.config.key_source,
             &authenticated_header(&header)?,
             prepared.ciphertext(),
@@ -131,7 +134,7 @@ impl MoogleMailDiagnosticArchive {
         verify_payload(&header, &body.0)?;
         let final_header = payload::PublicHeader { outcome: payload::outcome(&outcome)?, ..header };
         let ciphertext = crypto::seal(
-            &self.data_key,
+            self.keys.current(),
             &self.config.key_source,
             &authenticated_header(&final_header)?,
             &body.0,
@@ -222,17 +225,23 @@ impl MailDiagnosticRecorder for MoogleMailDiagnosticArchive {
 /// 按配置目录中的 UUID 验证、解密并导出到全新私有文件，绝不向 stdout 输出正文。
 pub fn export_mooglemail_diagnostic(
     config: MoogleMailDiagnosticArchiveConfig,
-    data_key: Arc<DataKey>,
+    keyrings: Vec<Arc<Keyring>>,
     evidence_id: Uuid,
     output: PathBuf,
 ) -> Result<(), MailDiagnosticError> {
     let (header, ciphertext) = filesystem::read(&config, evidence_id)?;
     payload::validate_header(&header, evidence_id)?;
-    if header.key_source != config.key_source || header.key_id != data_key.id() {
-        return Err(MailDiagnosticError::Authentication);
-    }
+    // 归档头部记录写入时的域；只在该域的密钥环内解析旧 key ID，不跨域回退。
+    let keys = keyrings
+        .iter()
+        .find(|keys| keys.domain().as_str() == header.key_source)
+        .ok_or(MailDiagnosticError::Authentication)?;
+    let data_key = keys.resolve(&header.key_id).map_err(|error| {
+        let _ = error;
+        MailDiagnosticError::Authentication
+    })?;
     let plain =
-        crypto::open(&data_key, &config.key_source, &authenticated_header(&header)?, &ciphertext)?;
+        crypto::open(data_key, &header.key_source, &authenticated_header(&header)?, &ciphertext)?;
     verify_payload(&header, &plain.0)?;
     let (payload_base64, payload_text) = if header.body_available {
         (Some(BASE64.encode(&plain.0)), std::str::from_utf8(&plain.0).ok().map(str::to_owned))

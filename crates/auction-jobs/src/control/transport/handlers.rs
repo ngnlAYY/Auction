@@ -296,6 +296,65 @@ pub(super) async fn sent_lookup(
     }
 }
 
+/// W10.9：只在 W1.9 暂停生效时执行一次有界只读恢复扫描；不写入本地或远端。
+pub(super) async fn recovery_scan(
+    Extension(reads): Extension<Option<Arc<dyn WorkerRemoteReadPort>>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let request_id = match request_id(&headers) {
+        Ok(request_id) => request_id,
+        Err(()) => return invalid_request_id_response(),
+    };
+    if !json_content_type(&headers) {
+        return response(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ResponseCode::Invalid,
+            "请求必须使用 application/json",
+            Option::<()>::None,
+            &request_id,
+        );
+    }
+    let request: auction_application::WorkerRecoveryScanRequest =
+        match serde_json::from_slice(&body) {
+            Ok(request) => request,
+            Err(error) => {
+                let _ = error;
+                return response(
+                    StatusCode::BAD_REQUEST,
+                    ResponseCode::Invalid,
+                    "请求 JSON 无效",
+                    Option::<()>::None,
+                    &request_id,
+                );
+            }
+        };
+    if !request.validate() {
+        return response(
+            StatusCode::BAD_REQUEST,
+            ResponseCode::Invalid,
+            "恢复扫描请求无效",
+            Option::<()>::None,
+            &request_id,
+        );
+    }
+    let Some(reads) = reads else {
+        return response(
+            StatusCode::NOT_IMPLEMENTED,
+            ResponseCode::CapabilityUnavailable,
+            "Worker 未装配远端读取能力",
+            Option::<auction_application::WorkerRecoveryScanResponse>::None,
+            &request_id,
+        );
+    };
+    match reads.recovery_scan(request).await {
+        Ok(result) => {
+            response(StatusCode::OK, ResponseCode::Ok, "恢复扫描完成", Some(result), &request_id)
+        }
+        Err(error) => remote_read_error_response(error, &request_id),
+    }
+}
+
 fn json_content_type(headers: &HeaderMap) -> bool {
     headers.get(header::CONTENT_TYPE).is_some_and(|value| {
         value.to_str().ok().is_some_and(|value| {
@@ -311,6 +370,13 @@ fn remote_read_error_response(error: WorkerRemoteReadError, request_id: &str) ->
             StatusCode::CONFLICT,
             ResponseCode::Paused,
             "外部访问已暂停",
+            Option::<()>::None,
+            request_id,
+        ),
+        WorkerRemoteReadError::NotPaused => response(
+            StatusCode::CONFLICT,
+            ResponseCode::NotPaused,
+            "恢复核对要求先暂停外部访问",
             Option::<()>::None,
             request_id,
         ),
@@ -473,5 +539,91 @@ mod tests {
         .await;
         let (status, _) = envelope(response).await;
         assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+    fn recovery_body() -> Bytes {
+        Bytes::from_static(
+            br#"{"cutoff_at":"2026-11-05T00:00:00Z","maximum_pages":20,"sent_worlds":["main"],"read_mail_worlds":["main"],"include_sent":true,"include_read_mail":true,"include_forum":false,"sent_details":[],"forum_threads":[]}"#,
+        )
+    }
+
+    #[tokio::test]
+    async fn recovery_scan_requires_pause_and_reports_missing_capability() {
+        struct NotPaused;
+        impl WorkerRemoteReadPort for NotPaused {
+            fn read_equipment(
+                &self,
+                _request: WorkerEquipmentReadRequest,
+            ) -> auction_application::WorkerRemoteReadFuture<'_, WorkerEquipmentReadResponse>
+            {
+                Box::pin(async { Err(WorkerRemoteReadError::Unavailable) })
+            }
+
+            fn lookup_sent(
+                &self,
+                _request: WorkerSentLookupRequest,
+            ) -> auction_application::WorkerRemoteReadFuture<'_, WorkerSentLookupResponse>
+            {
+                Box::pin(async { Err(WorkerRemoteReadError::Unavailable) })
+            }
+
+            fn recovery_scan(
+                &self,
+                _request: auction_application::WorkerRecoveryScanRequest,
+            ) -> auction_application::WorkerRemoteReadFuture<
+                '_,
+                auction_application::WorkerRecoveryScanResponse,
+            > {
+                Box::pin(async { Err(WorkerRemoteReadError::NotPaused) })
+            }
+        }
+        let reads: Arc<dyn WorkerRemoteReadPort> = Arc::new(NotPaused);
+        let response = recovery_scan(Extension(Some(reads)), json_headers(), recovery_body()).await;
+        let (status, body) = envelope(response).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["code"], "not_paused");
+
+        let response = recovery_scan(
+            Extension(None::<Arc<dyn WorkerRemoteReadPort>>),
+            json_headers(),
+            recovery_body(),
+        )
+        .await;
+        let (status, body) = envelope(response).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["code"], "capability_unavailable");
+    }
+
+    #[tokio::test]
+    async fn recovery_scan_rejects_invalid_request_before_executor() {
+        struct Exploding;
+        impl WorkerRemoteReadPort for Exploding {
+            fn read_equipment(
+                &self,
+                _request: WorkerEquipmentReadRequest,
+            ) -> auction_application::WorkerRemoteReadFuture<'_, WorkerEquipmentReadResponse>
+            {
+                panic!("invalid recovery request must not reach the executor")
+            }
+
+            fn lookup_sent(
+                &self,
+                _request: WorkerSentLookupRequest,
+            ) -> auction_application::WorkerRemoteReadFuture<'_, WorkerSentLookupResponse>
+            {
+                panic!("invalid recovery request must not reach the executor")
+            }
+        }
+        let reads: Arc<dyn WorkerRemoteReadPort> = Arc::new(Exploding);
+        let response = recovery_scan(
+            Extension(Some(reads)),
+            json_headers(),
+            Bytes::from_static(
+                br#"{"cutoff_at":"2026-11-05T00:00:00Z","maximum_pages":0,"sent_worlds":["main"],"read_mail_worlds":[],"include_sent":true,"include_read_mail":false,"include_forum":false,"sent_details":[],"forum_threads":[]}"#,
+            ),
+        )
+        .await;
+        let (status, body) = envelope(response).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "invalid_command_id");
     }
 }

@@ -1,6 +1,6 @@
 //! MoogleMail 运维证据：加密诊断归档的离线导出，以及撤拍退回义务的 Sent 只读核查。
 
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{path::Path, time::Duration};
 
 use anyhow::Context;
 use auction_application::{
@@ -10,7 +10,7 @@ use auction_application::{
 };
 use auction_config::AppConfig;
 use auction_domain::{SettlementId, SettlementObligationKind};
-use auction_integrations::{DataKey, mooglemail::MoogleMailDiagnosticArchiveConfig};
+use auction_integrations::{build_keyring, mooglemail::MoogleMailDiagnosticArchiveConfig};
 use auction_storage::DatabaseStore;
 use serde_json::json;
 use uuid::Uuid;
@@ -48,37 +48,42 @@ fn export(
 ) -> anyhow::Result<()> {
     files::require_private_target(output)?;
     let config = config_dir.load_worker()?;
-    let (source, key_id, key_material) = match key_source {
-        Some(KeySourceArg::Credential) => {
-            ("credential", config.credential_data_key_id(), config.credential_data_key())
-        }
-        Some(KeySourceArg::Equipment) => {
-            ("equipment", config.equipment_data_key_id(), config.equipment_data_key())
-        }
-        None if config.credential_data_key_configured() => {
-            ("credential", config.credential_data_key_id(), config.credential_data_key())
-        }
-        None => ("equipment", config.equipment_data_key_id(), config.equipment_data_key()),
+    let domains = match key_source {
+        Some(source) => vec![source.domain()],
+        None => vec![
+            auction_config::DataKeyDomain::MailDiagnostics,
+            auction_config::DataKeyDomain::Credential,
+            auction_config::DataKeyDomain::Equipment,
+        ],
     };
-    let data_key = DataKey::from_base64(
-        key_id.context("所选父密钥未配置")?,
-        key_material.context("所选父密钥未配置")?,
-    )
-    .map_err(|_| anyhow::anyhow!("所选父密钥格式无效"))?;
+    // 历史归档保留在写入时的域；头部 key_source 决定使用哪个域的密钥环。
+    let keyrings = domains
+        .into_iter()
+        .filter_map(|domain| {
+            build_keyring(
+                domain,
+                config.data_key_current(domain),
+                config.data_key_previous(domain).iter().map(|key| (key.id(), key.material())),
+            )
+            .ok()
+            .flatten()
+        })
+        .collect::<Vec<_>>();
+    anyhow::ensure!(!keyrings.is_empty(), "所选父密钥未配置");
     let diagnostics = &config.worker.mooglemail.diagnostics;
     auction_integrations::mooglemail::export_mooglemail_diagnostic(
         MoogleMailDiagnosticArchiveConfig {
             directory: diagnostics.directory.clone(),
             retention: Duration::from_secs(u64::from(diagnostics.retention_days) * 86_400),
             maximum_total_bytes: diagnostics.maximum_total_bytes,
-            key_source: source.to_owned(),
+            key_source: String::new(),
         },
-        Arc::new(data_key),
+        keyrings,
         evidence_id,
         output.to_owned(),
     )
     .map_err(|error| anyhow::anyhow!("导出诊断证据失败：{}", error.as_str()))?;
-    print_json(&json!({ "evidence_id": evidence_id, "output": output, "key_source": source }))
+    print_json(&json!({ "evidence_id": evidence_id, "output": output }))
 }
 
 /// 冻结目标须为单件装备、零 Credits/COD；Sent 匹配只证明发送记录，collected 不等于已送达。
@@ -161,6 +166,9 @@ fn remote_read_error(error: WorkerRemoteReadError) -> anyhow::Error {
         WorkerRemoteReadError::Paused => anyhow::anyhow!(
             "外部访问已暂停（external_access_paused）；请等待恢复或到期后重试，不会回退到直连"
         ),
+        WorkerRemoteReadError::NotPaused => {
+            anyhow::anyhow!("指定能力要求外部访问处于指定状态；当前状态不满足，未发往远端")
+        }
         WorkerRemoteReadError::Unavailable => anyhow::anyhow!(
             "Worker control 不可用；Sent 远端读取能力不可用，请先确认 Worker 与 control socket"
         ),

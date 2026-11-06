@@ -1,6 +1,6 @@
 # auction-jobs
 
-[文档导航](../../docs/README.md) · [Worker 应用](../../apps/auction-worker/README.md) · [架构](../../docs/architecture.md)
+[docs/README.md](../../docs/README.md) · [apps/auction-worker/README.md](../../apps/auction-worker/README.md) · [docs/architecture.md](../../docs/architecture.md)
 
 Worker 的调度运行时与本地控制面：把应用层的持久化端口编排成相互独立的循环（领取 → 执行 → 落库），负责轮询间隔、抖动、租约续期、单项超时、有界并发、优雅排空与指标；以及 Worker control 的 Unix socket 服务端与 Admin 使用的客户端。任何业务状态迁移都由应用端口决定，本 crate 不复制业务规则。
 
@@ -32,10 +32,10 @@ Worker 的调度运行时与本地控制面：把应用层的持久化端口编�
 旧路径由收件循环在 claim 前取得并持有到三分支 join 结束。切换按下一轮或
 下一次维护门复读生效，在途轮次、claim、租约与预算不重置；旧路径下维护任务只
 idle，不退出。维护日程、观察间隔与相位规则见
-[配置参考](../../ops/config/README.md#mooglemail-收件与维护)，指标口径见
-[可观测性](../auction-observability/README.md#邮件循环口径)。
+[ops/config/README.md#mooglemail-收件与维护](../../ops/config/README.md#mooglemail-收件与维护)，指标口径见
+[crates/auction-observability/README.md#邮件循环口径](../auction-observability/README.md#邮件循环口径)。
 
-世界相位计算与日程平移策略由 [`crates/auction-jobs/src/worker/mail/schedule/mod.rs`](src/worker/mail/schedule/mod.rs) 持有，经 crate 根导出 `mail_world_phase` 与 `PhasedMailSchedule`；Worker 装配根只判断是否启用相位、处理启动错误并注入日程。
+世界相位计算与日程平移策略由 [crates/auction-jobs/src/worker/mail/schedule/mod.rs](src/worker/mail/schedule/mod.rs) 持有，经 crate 根导出 `mail_world_phase` 与 `PhasedMailSchedule`；Worker 装配根只判断是否启用相位、处理启动错误并注入日程。
 
 拍卖到期提示按读取时的时钟转换为单调截止，查询与网络等待消耗原有等待预算；最后休眠不会把这段耗时再次加回。提示失败仍按常规轮询恢复，实际领取继续依赖数据库事实、租约与命令幂等。
 
@@ -52,7 +52,7 @@ Sent/Read 扫描和共享读取的 `time/pages` 由客户端预算边界记录�
 `pending` 重试与已完成命令重放不采样；估计器有界保存内部帖子 ID 与单调时刻，
 首次扫描、覆盖不完整、重启或淘汰时只记录缺样原因，不填零，也不影响扫描与命令。
 导入确认不是竞价最终接受，跨阶段样本不能当作严格 Final SLA。
-完整契约见[可观测性](../auction-observability/README.md#外部账号客户端指标w04w05)。
+完整契约见[crates/auction-observability/README.md#外部账号客户端指标w04w05](../auction-observability/README.md#外部账号客户端指标w04w05)。
 
 ## Worker control
 
@@ -84,13 +84,13 @@ W13.3a 只在已有 JoinSet 叶子收口增加 panic 观测：
 delivery 的 claimed 可重领，sending 到期加 grace 后转人工，不自动重发；
 告警批次已有三次上限。邮件、论坛、PM、告警直接执行路径 panic
 仍使常驻任务退出并触发 Worker 排空，详见
-[panic 排障](../../ops/README.md#panic-排障)。
+[ops/README.md#panic-排障](../../ops/README.md#panic-排障)。
 
 - 新循环必须持久化领取与结果，不能用内存队列或“空端口成功”代替；超时与租约必须满足“单项超时 < 租约”。
 - 论坛公开链接只接受无凭据、无路径和无查询的 HTTPS origin，或 `localhost`、`127.0.0.1`、`[::1]` 的回环 HTTP origin；运行时与配置预检使用相同边界。
 - 错误只以安全分类进入日志、指标与 control，不透传数据库、凭据或外部响应正文。
 
-停机新路径由装配根注入 `ExternalWriteLifecycle`：非外写 owner 和尚未登记交接的叶子准备期立即取消，不生成释放或失败命令。delivery、discard 和 PM 在围栏调用前登记，围栏调用开始即受保护；登记不授权外写，确认提交后才继续外部操作。论坛在持久 claim 下的首个实际 POST 前登记。交接与关键段均由原 future 驱动并阻止排空结束，结果提交后才 complete，其余 drop 只记未收口。父 JoinSet 不按活动快照 abort，避免连带取消关键子项。所有组共用装配根截止，致命故障不再另建 10 秒预算；PM 由装配根与 runner 一起等待。维护的原 fetch 截止和各任务原业务截止仍然有效。零关键段预算不注入活动工厂，完整选择旧排空路径。详见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。
+停机新路径由装配根注入 `ExternalWriteLifecycle`：非外写 owner 和尚未登记交接的叶子准备期立即取消，不生成释放或失败命令。delivery、discard 和 PM 在围栏调用前登记，围栏调用开始即受保护；登记不授权外写，确认提交后才继续外部操作。论坛在持久 claim 下的首个实际 POST 前登记。交接与关键段均由原 future 驱动并阻止排空结束，结果提交后才 complete，其余 drop 只记未收口。父 JoinSet 不按活动快照 abort，避免连带取消关键子项。所有组共用装配根截止，致命故障不再另建 10 秒预算；PM 由装配根与 runner 一起等待。维护的原 fetch 截止和各任务原业务截止仍然有效。零关键段预算不注入活动工厂，完整选择旧排空路径。详见[ops/config/README.md#排空与停止预算](../../ops/config/README.md#排空与停止预算)。
 
 
 ## 运行时开关刷新
@@ -100,7 +100,7 @@ delivery 的 claimed 可重领，sending 到期加 grace 后转人工，不自�
 刷新不依赖业务循环、主动暂停或就绪状态。邮件循环每轮读取
 `mooglemail_poll_isolation_enabled`；指标边界在每次请求入口读取
 `metrics_reject_forwarded_requests`。首次失败保留 TOML，后续保留成功快照和
-原期限，见[运维手册](../../ops/README.md#运行时开关)。
+原期限，见[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
 
 
 ## SLI 汇总任务
@@ -112,4 +112,4 @@ delivery 的 claimed 可重领，sending 到期加 grace 后转人工，不自�
 成功发布完整数值快照，失败只记固定 kind/phase 和刷新指标，保留旧快照及原年龄。
 任务不接业务退出通道、不改变 readiness，也不阻塞生命周期或外写循环。
 关闭开关不强制取消已开始的短只读轮次；退出时由装配根回收。
-口径见[SLI 文档](../auction-observability/README.md#sli-与容量基线)。
+口径见[crates/auction-observability/README.md#sli-与容量基线](../auction-observability/README.md#sli-与容量基线)。

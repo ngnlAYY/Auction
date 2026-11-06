@@ -8,6 +8,7 @@ mod cryptobox;
 mod diagnostics;
 mod equipment;
 mod forum;
+mod keyring;
 mod login_key;
 mod worker_control;
 
@@ -28,5 +29,6 @@ pub use equipment::{
     canonical_json_snapshot,
 };
 pub use forum::{ForumPreviewAdapter, ForumRenderError, ForumThreadRenderer};
+pub use keyring::{Keyring, KeyringError, build_keyring};
 pub use login_key::{LoginKeyCryptoError, MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader};
 pub use worker_control::{WorkerRemoteReadClient, WorkerRemoteReadClientError};

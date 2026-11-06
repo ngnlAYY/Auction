@@ -16,8 +16,9 @@ mod sent_evidence;
 pub(crate) use credentials::MoogleMailCredentialSession;
 pub use credentials::{MoogleMailCredentialSet, MoogleMailRuntimeCredential};
 pub use model::{
-    MoogleMailGatewayConfig, MoogleMailPage, MoogleMailSentLookupReport,
-    MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
+    MoogleMailGatewayConfig, MoogleMailInboundRecoveryScan, MoogleMailPage,
+    MoogleMailSentLookupReport, MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
+    MoogleMailSentRecoveryScan,
 };
 pub(crate) use operation_lock::{OperationLock, OperationLockGuard};
 pub use reader::MoogleMailGateway;

@@ -110,6 +110,9 @@ pub enum ConfigError {
     #[error("credential data key requires both credential_data_key_id and credential_data_key")]
     InvalidCredentialDataKeyConfiguration,
 
+    #[error("data key ring for {domain} is invalid: {reason}")]
+    InvalidDataKeyRing { domain: &'static str, reason: String },
+
     #[error("worker recovery retry delay must be between 1 and 86400 seconds")]
     InvalidWorkerRecoveryRetryDelay,
 

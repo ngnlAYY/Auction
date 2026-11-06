@@ -1,6 +1,6 @@
 # W0 错误分类、指标与已知缺陷诊断
 
-[计划入口](../architecture-improvement.md) · [执行须知](../architecture-improvement.md#2-执行须知) · [交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [进度](../architecture-improvement.md#7-进度) · [现状基线](baseline.md) · [决策记录](decisions.md)
+[docs/plans/architecture-improvement.md](../architecture-improvement.md) · [docs/plans/architecture-improvement.md#2-执行须知](../architecture-improvement.md#2-执行须知) · [docs/plans/architecture-improvement.md#5-每个工作项的交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [docs/plans/architecture-improvement.md#7-进度](../architecture-improvement.md#7-进度) · [docs/plans/architecture-improvement/baseline.md](baseline.md) · [docs/plans/architecture-improvement/decisions.md](decisions.md)
 
 | 项 | 内容 |
 | --- | --- |
@@ -10,8 +10,8 @@
 | 依赖 | W0.14 先于 W0.6 |
 | 迁移 | 是（W0.13 索引 077；其余否） |
 | 估算 | 10–13 天 |
-| 关联缺陷 | D1、D3、D4、D5、D6、D7、D10（详见[已知缺陷](../architecture-improvement.md#已知缺陷)） |
-| 关联决策 | 12、32、42、43、45、58（详见[决策记录](decisions.md)） |
+| 关联缺陷 | D1、D3、D4、D5、D6、D7、D10（详见[docs/plans/architecture-improvement.md#已知缺陷](../architecture-improvement.md#已知缺陷)） |
+| 关联决策 | 12、32、42、43、45、58（详见[docs/plans/architecture-improvement/decisions.md](decisions.md)） |
 
 | 项 | 内容 | 涉及位置 |
 | --- | --- | --- |
@@ -29,7 +29,7 @@
 | W0.12 | 只读核实计划依赖的事实：Sent 实际增速与 HV 是否自动清理、Read Mail 排序键、线上 `maximum_pages`/`fetch_timeout_seconds`、`trusted_proxy_cidrs` 是否配置为反向代理地址、站点在 Caddy 之前是否还有 CDN 代理（决策 43）、Public/Admin 的监听方式（TCP 或 Unix socket）、线上是否有指标存储、线上 systemd 版本对 `Requires=` 依赖在自动重启时的实际传播、已有论坛主题的最大页数、PostgreSQL 现行配置（`max_connections`、autovacuum、已装扩展）、主机内存与磁盘余量（容纳 Prometheus、exporter 与 WAL 暂存）；通知与告警相关（运维告警已确认未启用，决策 58）：每封邮件的邮资与近 30 天发信量，HV 邮件与 COD 的过期退回期限，HV 是否原样保存非 ASCII 正文（启用运维告警前核实中文摘要能否通过 Sent 精确证明），选择 PM 渠道而未绑定论坛账号的用户数与被抑制提醒数，论坛 `notify` 使用量，2026-11-01 换季时 isekai 仍未完成的义务数 | 线上只读查询与远端只读页面 |
 | W0.13 | 用户可见 SLI/SLO 与容量目标：出价 p99 延迟、出价冲突中止率与耗尽次数、实时推送延迟（事件写入到推送）、注册/登录 key 邮件送达延迟、出价被超提醒送达时距 lot 有效截止的余量（D4 验收依据）、结算到首封与末封付款邮件寄出的延迟、买家付款到卖方货款寄出的延迟、投稿到收取或拒收回执的延迟、慢速代理从到期到执行的滞后；容量目标（Final 阶段峰值出价/秒、并发 WebSocket 数）供 W12 验收 | `crates/auction-observability`、`ops/README.md` |
 | W0.14 | 就绪探针（D7，决策 32）：审计写入失败按 SQLSTATE 分类，可重试或瞬时的错误（40001、40P01、57014、55P03、08 类连接错误、取连接超时）只计入指标与日志，不再翻转 readiness；不可重试的失败（约束或触发器拒绝、42501 权限、42P01/42703 schema 漂移）仍使进程未就绪并进入告警。`/health/ready` 结果在进程内缓存 1–2 秒并合并并发探测，匿名请求不再逐次查库。须先于 W0.6 的超时上线；瞬时白名单另含 `53300`、`57P01`–`57P03`（决策 71）；默认影子模式上线，差异只在瞬时类别时由用户切换（决策 72） | `crates/auction-storage/src/database/audit_health/mod.rs`、`crates/auction-storage/src/database/store.rs`、`crates/auction-http/src/http/routes/health.rs` |
-| W0.15 | 影子运行框架（M2a）：共享的新旧判定比对 helper、[交付规范](../architecture-improvement.md#5-每个工作项的交付规范)规定的 `auction_shadow_*` 指标与结构化差异日志、按分支统计样本；W1.4、W2.5、W3 复用，不各自实现 | `crates/auction-observability`、`crates/auction-application` |
-| W0.16 | 浏览器错误信标（M3，决策 45，先于 W7.6）：Public/Admin 前端把 WASM panic、DTO 解码失败与实时协议错误按闭集类别和构建号上报到匿名、限流、无正文的信标接口，服务端只累加计数、不入库；同步[路由契约](../../contracts/routes.md) | `crates/auction-web-shared/src/bootstrap`、`crates/auction-http/src/http/routes` |
+| W0.15 | 影子运行框架（M2a）：共享的新旧判定比对 helper、[docs/plans/architecture-improvement.md#5-每个工作项的交付规范](../architecture-improvement.md#5-每个工作项的交付规范)规定的 `auction_shadow_*` 指标与结构化差异日志、按分支统计样本；W1.4、W2.5、W3 复用，不各自实现 | `crates/auction-observability`、`crates/auction-application` |
+| W0.16 | 浏览器错误信标（M3，决策 45，先于 W7.6）：Public/Admin 前端把 WASM panic、DTO 解码失败与实时协议错误按闭集类别和构建号上报到匿名、限流、无正文的信标接口，服务端只累加计数、不入库；同步[docs/contracts/routes.md](../../contracts/routes.md) | `crates/auction-web-shared/src/bootstrap`、`crates/auction-http/src/http/routes` |
 
 验收：`just verify` 通过；新指标可被采集并查看；错误日志不含秘密；D1 的拒绝分支、SQL 失败约束名与 HTTP 5xx 的原因可从日志直接读出；D5 的冲突率有基线数据；SLO 有当前值；W0.12 结论写入本计划基线；人为制造一次可重试的审计失败后进程仍就绪，不可重试的失败使进程未就绪；`/health/ready` 突发请求不随请求数线性增加数据库查询。回退：指标与日志均为附加输出，可经配置关闭；W0.14 的分类可回到“任一失败即未就绪”。

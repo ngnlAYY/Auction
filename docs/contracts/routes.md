@@ -1,8 +1,8 @@
 # HTTP 路由契约
 
-[文档导航](../README.md) · [实时事件](realtime.md) · [数据库](database.md) · [auction-http](../../crates/auction-http/README.md) · [DTO](../../crates/auction-contracts/README.md)
+[docs/README.md](../README.md) · [docs/contracts/realtime.md](realtime.md) · [docs/contracts/database.md](database.md) · [crates/auction-http/README.md](../../crates/auction-http/README.md) · [crates/auction-contracts/README.md](../../crates/auction-contracts/README.md)
 
-本页列出各进程对外提供的全部 HTTP 路径。路由表的权威来源是 [`crates/auction-http/src/http/routes/surfaces.rs`](../../crates/auction-http/src/http/routes/surfaces.rs)（API）与 [`crates/auction-http/src/assets/routes.rs`](../../crates/auction-http/src/assets/routes.rs)（浏览器页面）；增删路径时三处必须同步修改。
+本页列出各进程对外提供的全部 HTTP 路径。路由表的权威来源是 [crates/auction-http/src/http/routes/surfaces.rs](../../crates/auction-http/src/http/routes/surfaces.rs)（API）与 [crates/auction-http/src/assets/routes.rs](../../crates/auction-http/src/assets/routes.rs)（浏览器页面）；增删路径时三处必须同步修改。
 
 ## 通用约定
 
@@ -16,7 +16,7 @@
 - `code` 是稳定的机器可读值，客户端只依据 HTTP 状态与 `code` 分支，不解析 `message`（中文提示，可能调整）。通常成功为 HTTP 200 / `ok`；创建拍卖、用户和手工录入 lot 为 201 / `created`；凭据录入与首次发布规则为 201 / `ok`；触发邮件轮询为 202 / `accepted`；创建代理仍为 200 / `ok`。
 - Public/Admin 响应头始终回传 `x-request-id`（合法输入沿用，缺失时生成，非法或重复输入返回 400；指标转发拒绝优先返回 404 并回传安全生成的标识）；错误 JSON 含 `request_id` 字段，但 handler 的常规错误可能为 null，排查以响应头为准。
 - Public/Admin 的每个 HTTP 响应（含静态资源、错误与 WebSocket 升级响应）都回传 `x-auction-build`：当前进程构建号，1–64 位 `[A-Za-z0-9._-]`，由发布构建的 `AUCTION_BUILD_ID` 注入，未注入时为包版本。浏览器只把它与自身构建号比较；不一致时提示刷新，不自动重载页面，也不改变响应正文、缓存策略或状态码。该头不参与鉴权、幂等与缓存决定。
-- 安全响应头随每个响应回传：CSP（同源脚本与样式源，`form-action 'self'`、`frame-ancestors 'none'`；Dioxus WASM 的 `unsafe-eval`/`wasm-unsafe-eval` 与内联样式为例外，理由见[安全边界](../architecture.md#安全边界)）、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 与 Permissions-Policy。`Strict-Transport-Security: max-age=31536000` 只在浏览器经 HTTPS 访问时出现：代理后仅采信可信上游的 `X-Forwarded-Proto`，明文请求与开发环境不发送；不含 `includeSubDomains` 与 `preload`。这些头不参与缓存、鉴权与幂等决定，客户端不应据其改变业务行为。
+- 安全响应头随每个响应回传：CSP（同源脚本与样式源，`form-action 'self'`、`frame-ancestors 'none'`；Dioxus WASM 的 `unsafe-eval`/`wasm-unsafe-eval` 与内联样式为例外，理由见[docs/architecture.md#安全边界](../architecture.md#安全边界)）、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 与 Permissions-Policy。`Strict-Transport-Security: max-age=31536000` 只在浏览器经 HTTPS 访问时出现：代理后仅采信可信上游的 `X-Forwarded-Proto`，明文请求与开发环境不发送；不含 `includeSubDomains` 与 `preload`。这些头不参与缓存、鉴权与幂等决定，客户端不应据其改变业务行为。
 - 时间为 RFC 3339 字符串；金额为整数 Credits；标识为小写 UUID 字符串。
 
 ### 通用错误码
@@ -65,15 +65,15 @@
 
 信标使用独立的每来源限流账本，不消耗登录或业务 mutation 配额；拒绝计入 `auction_http_rate_limit_rejections_total{kind="browser_error"}`。`auction_browser_errors_total{class}` 只接受上述三类；`auction_browser_error_build_mismatches_total` 表示部署后仍在使用旧构建的页面。前端发送实现位于 `crates/auction-web-shared/src/bootstrap`。
 
-数据库迁移模式默认 shadow，实际仍严格匹配；只有显式 compatible 才允许完整登记的兼容未来后缀，失败记录、缺项、未知等级或查询失败均不能放行。精确定义见[数据库契约](database.md#迁移兼容登记与就绪)。schema 子检查自身总预算 750ms，对 HTTP 缓存关闭、heartbeat 与 supervisor 也生效；审计与 relay 等其他条件仍参与最终结果。
+数据库迁移模式默认 shadow，实际仍严格匹配；只有显式 compatible 才允许完整登记的兼容未来后缀，失败记录、缺项、未知等级或查询失败均不能放行。精确定义见[docs/contracts/database.md#迁移兼容登记与就绪](database.md#迁移兼容登记与就绪)。schema 子检查自身总预算 750ms，对 HTTP 缓存关闭、heartbeat 与 supervisor 也生效；审计与 relay 等其他条件仍参与最终结果。
 
 Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 `X-Forwarded-*`、`X-Real-IP` 或 `Via` 的请求，只判断头存在性，不解析或记录头值；空值、重复或非法值也拒绝。任何方法均返回空 404，不带 `Allow`，并附安全响应头、`Cache-Control: no-store` 与安全 request-id；该拒绝优先于 request-id 400、方法 405 和指标编码。CDN 专用来源头待 W0.12 核实实际代理链后再加入。
 
 直连的其他方法保留空 405 与 `Allow: GET,HEAD`；GET/HEAD 在未启用、带 query 时返回 404，编码失败返回 500。未注册的路径变体沿用 fallback 的 404。路由使用 `any(...)` 注册并由 owner 显式检查方法，避免框架对拒绝响应补出 `Allow`。
 
-部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true，设为 false 并重启 Public/Admin 恢复旧访问行为；指标启用、query 与监听限制仍生效。Admin runtime 只覆盖 `metrics.enabled`，该安全开关不进入 runtime 文档、不改变文档指纹或命令摘要。配置见[配置参考](../../ops/config/README.md#commontoml)，Caddy 的公网 404 规则与应用收紧同时保留。
+部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true，设为 false 并重启 Public/Admin 恢复旧访问行为；指标启用、query 与监听限制仍生效。Admin runtime 只覆盖 `metrics.enabled`，该安全开关不进入 runtime 文档、不改变文档指纹或命令摘要。配置见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)，Caddy 的公网 404 规则与应用收紧同时保留。
 
-默认启用一秒进程缓存与并发单飞，只保存最终就绪布尔值；正负结果均缓存，过期后等待新检查，不继续返回过期成功。检查限时 750ms，超时、异常或刷新任务取消均产生未就绪；请求断开不取消共享刷新。`Cache-Control: no-store` 及 JSON 结构保持不变，缓存不由代理、CDN 或浏览器持有。开关见[就绪策略](../../ops/config/README.md#就绪策略)。
+默认启用一秒进程缓存与并发单飞，只保存最终就绪布尔值；正负结果均缓存，过期后等待新检查，不继续返回过期成功。检查限时 750ms，超时、异常或刷新任务取消均产生未就绪；请求断开不取消共享刷新。`Cache-Control: no-store` 及 JSON 结构保持不变，缓存不由代理、CDN 或浏览器持有。开关见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)。
 
 在持续探测、依赖检查可在预算内完成的条件下，缓存额外滞后至多 1 秒；真实条件在上一轮完成后变化，转换预算为 1 + 0.75 = 1.75 秒；变化发生在正在进行的检查中时，保守计入两轮检查，总计至多 2.5 秒，另加调用方探测间隔及调度/网络时间。无请求时没有后台刷新，下次请求才触发；不可重试或未知审计失败保持粘滞，需修复后受控重启。关闭缓存后不承诺这组时限，沿用逐次检查与 HTTP 请求预算。
 
@@ -130,7 +130,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/lots/{lot_id}/proxy-authorizations` | ✓ | `{"command_id","maximum_amount","mode":"fast"|"slow"}` |
 | POST | `/api/v1/lots/{lot_id}/proxy-authorizations/{authorization_id}/lower` | ✓ | `{"command_id","maximum_amount"}` |
 
-竞价请求与响应字段保持不变。新建场次中，普通出价和新建代理的上限必须达到 `next_bid`；自动代理反击取当时 `next_bid` 与授权上限中的较小值，并且必须严格高于当前价，否则授权耗尽，合法的普通出价仍成功。等待中的代理降额能力仍受完整下一口约束，原上限已低于下一口时不能再降额。既有场次继续冻结的原策略，见[业务规则](../business-rules.md#代理竞价)。
+竞价请求与响应字段保持不变。新建场次中，普通出价和新建代理的上限必须达到 `next_bid`；自动代理反击取当时 `next_bid` 与授权上限中的较小值，并且必须严格高于当前价，否则授权耗尽，合法的普通出价仍成功。等待中的代理降额能力仍受完整下一口约束，原上限已低于下一口时不能再降额。既有场次继续冻结的原策略，见[docs/business-rules.md#代理竞价](../business-rules.md#代理竞价)。
 
 竞价相关的业务错误（均为 409，除注明外）：
 
@@ -156,7 +156,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/events` | — | `auction_id` 或 `scope=auctions`（二选一）、`after`、`page_size`（1–200，默认 100）：持久化事件回放 |
 | GET（Upgrade）/ CONNECT | `/api/v1/ws` | ✓ | `auction_id` 或 `scope=auctions`（只能其一）：WebSocket 推送 |
 
-协议细节见[实时事件](realtime.md)。
+协议细节见[docs/contracts/realtime.md](realtime.md)。
 
 ## Admin API
 
@@ -255,11 +255,11 @@ Admin runtime 仍只覆盖 enabled，不覆盖地址或拒绝策略。
 绑定/服务失败仅以固定类别 ERROR 降级采集，不改变业务 readiness。
 删除对应地址并重启即关闭新出口，原 listener/control 的指标路径保留。
 Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒绝策略。
-示例、安装和 SSH 隧道见[运维手册](../../ops/README.md#指标)。
+示例、安装和 SSH 隧道见[ops/README.md#指标](../../ops/README.md#指标)。
 
 ## Worker control（Unix socket）
 
-只在 Worker 的 control socket 上提供，按 peer UID/GID allowlist 授权，见 [auction-jobs](../../crates/auction-jobs/README.md#worker-control)。
+只在 Worker 的 control socket 上提供，按 peer UID/GID allowlist 授权，见 [crates/auction-jobs/README.md#worker-control](../../crates/auction-jobs/README.md#worker-control)。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -270,11 +270,14 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 | POST | `/v1/mail/polls:trigger` | 触发一次邮件轮询 |
 | POST | `/v1/equipment/reads` | W1.10：Admin 手工装备 URL 读取代为执行；请求只含 `world_id` 与公开装备链接 |
 | POST | `/v1/mail/sent:lookup` | W1.10：CLI `mail inspect-sent` 的 Sent 只读核查代为执行 |
+| POST | `/v1/recovery/external:scan` | W10.9：恢复后核对在 W1.9 全局暂停下只读扫描 Sent、Read Mail 与指定论坛主题；请求不含凭据，响应只含 MID、截断后的列表字段与论坛楼层身份 |
 | GET | `/metrics` | Worker 指标 |
 
-两个远端读取路由在 Worker 未装配 MoogleMail 完整能力时返回 `501 capability_unavailable`，
+装备与 Sent 核查路由在 Worker 未装配对应能力时返回 `501 capability_unavailable`，
 W1.9 主动暂停期间返回 `409 paused`（请求不发往远端），超时为 `504`；单次读取仍受 Worker
-自己的 fetch 预算约束，Admin/CLI 不得回退到本地直连。
+自己的 fetch 预算约束，Admin/CLI 不得回退到本地直连。恢复核对是唯一在暂停下执行的读取：
+未暂停时返回 `409 not_paused`（请求不发往远端），暂停期间只读且不执行 Send/Take/Return，
+响应在扫描期间暂停被解除时标记 `status=partial` 与 `external_access_resumed`，调用方不得据此隔离。
 
 ## 浏览器页面
 
@@ -326,6 +329,6 @@ Admin 消费的项，数量不固定且不要求与 database_intent 等长；前
 分别校验两个数组，并要求 admin_applied 是 database_intent 的名称子集。
 复用现有只读卡片，不新增路由或 JSON 字段；更新后须刷新旧 Admin 页面。
 Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当作已应用证明。
-基线和在线覆盖规则见[配置参考](../../ops/config/README.md#数据库运行时开关)。
+基线和在线覆盖规则见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)。
 
 `GET /api/v1/admin/runtime-switches` 使用既有 Admin 限流与会话守卫，仅返回读取投影；无写入口。成功为 200，返回 `database_time`、`database_intent`（名称、revision、最新动作/值/期限、actor_id、entrypoint、reason）、`admin_last_success_age_seconds`（从未成功为 null）及 `admin_applied`（名称、revision、TOML 基线、实际值、是否覆盖）。数据库意图是本次限时一秒查询，Admin 实际值来自后台五秒刷新快照，二者可能暂时不同；接口不证明 Public/Worker 已应用。无效认证沿用 401，限流沿用 429，缺少能力或读取失败为 503。认证后的成功与存储失败均带 `Cache-Control: no-store`。页面继续使用 `/config`，没有新增 SPA 路由。

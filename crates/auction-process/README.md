@@ -1,6 +1,6 @@
 # auction-process
 
-[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md)
+[docs/README.md](../../docs/README.md) · [docs/architecture.md](../../docs/architecture.md)
 
 原生进程与首次设置服务共用的生命周期原语，只依赖 tokio。
 
@@ -18,6 +18,6 @@
 
 三个角色从角色 TOML 的 `[shutdown]` 加载普通预算（默认 10 秒）。Worker 在普通收口前，另以一次共享关键段预算（默认 60 秒）等待已登记交接或外部写入的叶子 owner；尚未登记的准备期工作立即取消。交接与关键段等待不替代任务 join，也不延长业务请求、租约或证据截止。第二次信号优先强制取消，非零退出并跳过可选 tracing 刷新；超时不改写持久状态。
 
-协调器只依赖 Tokio，不读配置或理解业务种类。应用的窄生命周期端口由 Worker 装配根桥接；`enter_critical` 在围栏调用前登记交接，围栏调用开始即受保护。交接和关键段复用 `CRITICAL` 状态及活动计数，与 close 共用入口锁；关闭先赢时不发起围栏，登记先赢时排空会等待围栏往返。登记不授权外写，围栏提交应答未知时仍不能 POST。结果提交之后才调用 complete，活动 drop 不是持久化成功证明。配置、外层 unit 和回退的权威说明见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。
+协调器只依赖 Tokio，不读配置或理解业务种类。应用的窄生命周期端口由 Worker 装配根桥接；`enter_critical` 在围栏调用前登记交接，围栏调用开始即受保护。交接和关键段复用 `CRITICAL` 状态及活动计数，与 close 共用入口锁；关闭先赢时不发起围栏，登记先赢时排空会等待围栏往返。登记不授权外写，围栏提交应答未知时仍不能 POST。结果提交之后才调用 complete，活动 drop 不是持久化成功证明。配置、外层 unit 和回退的权威说明见[ops/config/README.md#排空与停止预算](../../ops/config/README.md#排空与停止预算)。
 
 服务 owner 回收后仍监听终止信号；tracing 刷新期间再收到信号时，装配根直接非零退出，避免不可取消的刷新线程延迟强退。

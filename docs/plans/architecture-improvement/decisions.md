@@ -1,8 +1,8 @@
 # 决策记录
 
-[计划入口](../architecture-improvement.md) · [仍待决定](../architecture-improvement.md#仍待决定) · [现状基线](baseline.md)
+[docs/plans/architecture-improvement.md](../architecture-improvement.md) · [docs/plans/architecture-improvement.md#仍待决定](../architecture-improvement.md#仍待决定) · [docs/plans/architecture-improvement/baseline.md](baseline.md)
 
-用户在制定与修订计划过程中的决定，只追加：被后续决策修订的条目保留原文，由后者注明“修订决策 N”。新的决定先登记在入口文档的[仍待决定](../architecture-improvement.md#仍待决定)，决定后移入本页。
+用户在制定与修订计划过程中的决定，只追加：被后续决策修订的条目保留原文，由后者注明“修订决策 N”。新的决定先登记在入口文档的[docs/plans/architecture-improvement.md#仍待决定](../architecture-improvement.md#仍待决定)，决定后移入本页。
 
 ## 决策
 

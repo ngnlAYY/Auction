@@ -1,6 +1,6 @@
 # W3 规则上移
 
-[计划入口](../architecture-improvement.md) · [执行须知](../architecture-improvement.md#2-执行须知) · [交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [进度](../architecture-improvement.md#7-进度) · [现状基线](baseline.md) · [决策记录](decisions.md)
+[docs/plans/architecture-improvement.md](../architecture-improvement.md) · [docs/plans/architecture-improvement.md#2-执行须知](../architecture-improvement.md#2-执行须知) · [docs/plans/architecture-improvement.md#5-每个工作项的交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [docs/plans/architecture-improvement.md#7-进度](../architecture-improvement.md#7-进度) · [docs/plans/architecture-improvement/baseline.md](baseline.md) · [docs/plans/architecture-improvement/decisions.md](decisions.md)
 
 | 项 | 内容 |
 | --- | --- |
@@ -10,8 +10,8 @@
 | 依赖 | W3.7 无依赖；其余批次依赖 W2 的领域类型与 W6.2 |
 | 迁移 | 视批次（收窄数据库函数需迁移） |
 | 估算 | 10–14 天，分批 |
-| 关联缺陷 | D1（详见[已知缺陷](../architecture-improvement.md#已知缺陷)） |
-| 关联决策 | —（详见[决策记录](decisions.md)） |
+| 关联缺陷 | D1（详见[docs/plans/architecture-improvement.md#已知缺陷](../architecture-improvement.md#已知缺陷)） |
+| 关联决策 | —（详见[docs/plans/architecture-improvement/decisions.md](decisions.md)） |
 
 统一模式：
 

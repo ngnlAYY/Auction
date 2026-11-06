@@ -22,18 +22,18 @@ pub(super) fn build_processor_and_delivery(
 ) -> anyhow::Result<MailProcessorPorts> {
     match store.as_ref() {
         DatabaseStore::Postgres(postgres_store) => {
-            let data_key_id = config
-                .equipment_data_key_id()
-                .context("MoogleMail business processing requires equipment_data_key_id")?;
-            let data_key_material = config
-                .equipment_data_key()
-                .context("MoogleMail business processing requires equipment_data_key")?;
-            let data_key = DataKey::from_base64(data_key_id, data_key_material)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            let sealer = Arc::new(EquipmentKeySealer::new(data_key));
-            let delivery_data_key = DataKey::from_base64(data_key_id, data_key_material)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            let delivery_opener = EquipmentKeyOpener::new(delivery_data_key);
+            let equipment_keyring = build_keyring(
+                auction_config::DataKeyDomain::Equipment,
+                config.data_key_current(auction_config::DataKeyDomain::Equipment),
+                config
+                    .data_key_previous(auction_config::DataKeyDomain::Equipment)
+                    .iter()
+                    .map(|key| (key.id(), key.material())),
+            )
+            .map_err(|error| anyhow::Error::msg(error.to_string()))?
+            .context("MoogleMail business processing requires equipment_data_key")?;
+            let sealer = Arc::new(EquipmentKeySealer::new(Arc::clone(equipment_keyring.current())));
+            let delivery_opener = EquipmentKeyOpener::new(equipment_keyring);
             let equipment_client = build_equipment_http_client()
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?;
             let mut equipment = EquipmentSourceAdapter::production(
@@ -59,20 +59,21 @@ pub(super) fn build_processor_and_delivery(
                     Arc::new(SystemClock),
                 ));
             let deliveries = Arc::clone(store);
-            let user_data_key_id = config
-                .user_login_data_key_id()
-                .context("MoogleMail business processing requires user_login_data_key_id")?;
-            let user_data_key_material = config
-                .user_login_data_key()
-                .context("MoogleMail business processing requires user_login_data_key")?;
-            let user_data_key = Arc::new(
-                DataKey::from_base64(user_data_key_id, user_data_key_material)
-                    .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-            );
-            let key_issuer = Arc::new(MoogleMailLoginKeyIssuer::new(Arc::clone(&user_data_key)));
+            let user_login_keyring = build_keyring(
+                auction_config::DataKeyDomain::UserLogin,
+                config.data_key_current(auction_config::DataKeyDomain::UserLogin),
+                config
+                    .data_key_previous(auction_config::DataKeyDomain::UserLogin)
+                    .iter()
+                    .map(|key| (key.id(), key.material())),
+            )
+            .map_err(|error| anyhow::Error::msg(error.to_string()))?
+            .context("MoogleMail business processing requires user_login_data_key")?;
+            let key_issuer =
+                Arc::new(MoogleMailLoginKeyIssuer::new(Arc::clone(user_login_keyring.current())));
             let users = Arc::new(MailUserService::new(Arc::clone(store), key_issuer));
             let login_keys: Arc<dyn MailLoginKeyReader> =
-                Arc::new(MoogleMailLoginKeyReader::new(Arc::clone(store), user_data_key));
+                Arc::new(MoogleMailLoginKeyReader::new(Arc::clone(store), user_login_keyring));
             let notification_templates =
                 MoogleMailNotificationTemplates::from_config(&mail_config.mail_templates)
                     .map_err(anyhow::Error::msg)?;

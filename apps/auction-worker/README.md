@@ -1,8 +1,8 @@
 # auction-worker
 
-[文档导航](../../docs/README.md) · [调度运行时](../../crates/auction-jobs/README.md) · [结算与履约](../../docs/guide/settlement.md) · [邮件流程](../../docs/guide/mail-flows.md) · [论坛](../../docs/guide/forum.md)
+[docs/README.md](../../docs/README.md) · [crates/auction-jobs/README.md](../../crates/auction-jobs/README.md) · [docs/guide/settlement.md](../../docs/guide/settlement.md) · [docs/guide/mail-flows.md](../../docs/guide/mail-flows.md) · [docs/guide/forum.md](../../docs/guide/forum.md)
 
-后台任务进程：拍卖生命周期推进、慢速代理、排期、结算与履约、邮件投递、付款超时恢复、MoogleMail 收件轮询与邮箱维护、论坛同步与回帖、装备超价私信、运维告警，以及本机 Worker control。本 crate 负责装配：读取配置、连接数据库与外部服务、取得运行时所有权，然后把端口交给 [`auction-jobs`](../../crates/auction-jobs/README.md) 的调度运行时。
+后台任务进程：拍卖生命周期推进、慢速代理、排期、结算与履约、邮件投递、付款超时恢复、MoogleMail 收件轮询与邮箱维护、论坛同步与回帖、装备超价私信、运维告警，以及本机 Worker control。本 crate 负责装配：读取配置、连接数据库与外部服务、取得运行时所有权，然后把端口交给 [crates/auction-jobs/README.md](../../crates/auction-jobs/README.md) 的调度运行时。
 
 ## feature
 
@@ -20,7 +20,7 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml auction-worker
 cargo run --locked -p auction-worker --features postgres   # 本地开发；优先读取本地角色文件 ops/config/worker.toml
 ```
 
-`ops/config/worker.toml` 是运行时默认查找路径，需由部署者准备；仓库模板位于 [`ops/config/examples/worker.toml`](../../ops/config/examples/worker.toml)，不要把模板中的联调配置直接当作已配置的部署环境。
+`ops/config/worker.toml` 是运行时默认查找路径，需由部署者准备；仓库模板位于 [ops/config/examples/worker.toml](../../ops/config/examples/worker.toml)，不要把模板中的联调配置直接当作已配置的部署环境。
 
 装配顺序：
 
@@ -39,7 +39,7 @@ MoogleMail 默认通过 `[worker.mooglemail] poll_isolation_enabled = true` 为�
 clear 回落 TOML。切换在下一轮调度或下一次维护门复读后生效，在途 claim、租约、
 批次预算与 sweep 完整结束。启动时始终解析并校验维护日程，即使基线关闭；
 在线切换不重写 `mail_poll_state.next_poll_at`。详见
-[配置参考](../../ops/config/README.md#mooglemail-收件与维护)。
+[ops/config/README.md#mooglemail-收件与维护](../../ops/config/README.md#mooglemail-收件与维护)。
 
 ## 外部能力的启用条件
 
@@ -71,14 +71,14 @@ clear 回落 TOML。切换在下一轮调度或下一次维护门复读后生效
 附加任务随进程退出取消，删除地址并按部署窗口重启即恢复原指标路径。
 Worker 装配根依赖 `auction-http`，不引入 Public/Admin 应用或浏览器 crate，
 不启用 `web-embed`，也不装配任何 Web 资源路由。
-配置见[配置参考](../../ops/config/README.md#commontoml)，
-安装与核对见[运维手册](../../ops/README.md#指标)。
+配置见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)，
+安装与核对见[ops/README.md#指标](../../ops/README.md#指标)。
 
-`[worker.control]` 默认关闭；启用后 Worker 在 Unix socket（默认 `/run/hv-auction/worker/control.sock`，组 `auction-worker-control`）上提供 `live`/`ready`/`status`、邮件轮询进度、手动触发轮询与 `/metrics`。连接按内核 peer 凭据检查显式配置的 `allowed_peer_uids`/`allowed_peer_gids`。Admin、`auction-cli service` 与 `auction-server` 都通过该 socket 判断 Worker 状态，详见 [auction-jobs](../../crates/auction-jobs/README.md#worker-control)。
+`[worker.control]` 默认关闭；启用后 Worker 在 Unix socket（默认 `/run/hv-auction/worker/control.sock`，组 `auction-worker-control`）上提供 `live`/`ready`/`status`、邮件轮询进度、手动触发轮询与 `/metrics`。连接按内核 peer 凭据检查显式配置的 `allowed_peer_uids`/`allowed_peer_gids`。Admin、`auction-cli service` 与 `auction-server` 都通过该 socket 判断 Worker 状态，详见 [crates/auction-jobs/README.md#worker-control](../../crates/auction-jobs/README.md#worker-control)。
 
 `/v1/health/ready` 在 control 已标记 serving 且未进入排空时返回 200；无数据库骨架也会标记 serving，因此 200 不能单独证明持久化任务或外部能力可用，还需核对数据库配置、轮询器与相关能力状态。
 
-持久化 Worker 从 common 注入[审计就绪策略](../../ops/config/README.md#就绪策略)并注册审计分类指标。该策略影响数据库心跳及其审计计数，不扩展 control 的运行/排空契约；HTTP 缓存不用于 Worker control 或心跳。
+持久化 Worker 从 common 注入[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)并注册审计分类指标。该策略影响数据库心跳及其审计计数，不扩展 control 的运行/排空契约；HTTP 缓存不用于 Worker control 或心跳。
 
 ## 退出
 
@@ -88,9 +88,9 @@ Worker 装配根依赖 `auction-http`，不引入 Public/Admin 应用或浏览�
 
 ## 部署
 
-unit 示例见 [`ops/deploy/systemd/auction-worker.service.example`](../../ops/deploy/systemd/auction-worker.service.example)（`RuntimeDirectory=hv-auction/worker` 管理 control socket 目录）。每个部署只运行一个 Worker 实例。
+unit 示例见 [ops/deploy/systemd/auction-worker.service.example](../../ops/deploy/systemd/auction-worker.service.example)（`RuntimeDirectory=hv-auction/worker` 管理 control socket 目录）。每个部署只运行一个 Worker 实例。
 
-delivery/PM/discard 在持久围栏调用前登记交接，围栏调用开始即受保护；关闭先赢时不发起围栏，已登记后即使进入排空也继续等待原围栏回执。登记本身不授权外写，只有围栏确认提交才执行外部操作；确认失败或提交未知仍不外写。论坛在已有持久 claim 下的第一个实际 POST 前登记，后续必要 POST 沿用原活动。交接与关键段均阻止排空结束，结果按原端口提交后才 complete。装备准备、Sent/compose 回读和 PM Sent 核对都属于原关键段，告警邮件复用 delivery。未收口 drop 只减少活动计数并记录未知边界，不补写持久状态、不授权重发。既有单项超时、lease 与所有权校验保持原值。配置、unit 120 秒和完整旧路径回退见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。
+delivery/PM/discard 在持久围栏调用前登记交接，围栏调用开始即受保护；关闭先赢时不发起围栏，已登记后即使进入排空也继续等待原围栏回执。登记本身不授权外写，只有围栏确认提交才执行外部操作；确认失败或提交未知仍不外写。论坛在已有持久 claim 下的第一个实际 POST 前登记，后续必要 POST 沿用原活动。交接与关键段均阻止排空结束，结果按原端口提交后才 complete。装备准备、Sent/compose 回读和 PM Sent 核对都属于原关键段，告警邮件复用 delivery。未收口 drop 只减少活动计数并记录未知边界，不补写持久状态、不授权重发。既有单项超时、lease 与所有权校验保持原值。配置、unit 120 秒和完整旧路径回退见[ops/config/README.md#排空与停止预算](../../ops/config/README.md#排空与停止预算)。
 
 
 ## 数据库运行时开关
@@ -100,7 +100,7 @@ delivery/PM/discard 在持久围栏调用前登记交接，围栏调用开始即
 审计模式使用三角色共享规则；Public/Admin 另接入 HTTP 就绪缓存，
 Worker 负责到期收口。同一 `RuntimeSwitches` 同时供持久 Worker、无数据库骨架的
 loopback 指标出口与邮件循环使用。失败保留原快照及期限，不清零审计累计。
-核对与回退见[运维手册](../../ops/README.md#运行时开关)。
+核对与回退见[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
 
 ## 数据库连接档位
 
@@ -108,7 +108,7 @@ profiled 模式使用 `auction-worker`，本角色 `[database_pool]` 默认物�
 长期预留为 3，扣除后至少剩 1 个普通工作连接；服务超时默认关闭。
 超时必须显式填写阈值，并确认三角色有效 classified（现为默认基线）后才启用。
 池与长期会话参数修改需经停机门禁重启，本批不接 W7.7。
-配置与 legacy 回退见[连接分档](../../ops/config/README.md#数据库连接分档)。
+配置与 legacy 回退见[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)。
 
 
 ## SLI 汇总
@@ -120,5 +120,5 @@ profiled 模式使用 `auction-worker`，本角色 `[database_pool]` 默认物�
 每六十秒至多借一个空闲连接、执行两秒预算的只读轮次。
 失败、忙或超限只降级指标，不进入业务退出守卫或 readiness。
 旧快照保留并持续增加年龄；待索引流程不导出零分位。
-启用与回退见[运维手册](../../ops/README.md#sli-基线与容量观察)，
-完整口径见[SLI 文档](../../crates/auction-observability/README.md#sli-与容量基线)。
+启用与回退见[ops/README.md#sli-基线与容量观察](../../ops/README.md#sli-基线与容量观察)，
+完整口径见[crates/auction-observability/README.md#sli-与容量基线](../../crates/auction-observability/README.md#sli-与容量基线)。

@@ -1,6 +1,6 @@
 # auction-config
 
-[文档导航](../../docs/README.md) · [配置参考](../../ops/config/README.md) · [示例配置](../../ops/config/examples)
+[docs/README.md](../../docs/README.md) · [ops/config/README.md](../../ops/config/README.md) · [ops/config/examples](../../ops/config/examples)
 
 TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文件、Admin runtime 文件与维护凭据，以及首次部署的配置生成。角色运行配置在启动前校验，CLI 专用备份参数由 CLI 显式校验；错误只给出路径与字段提示，绝不回显秘密值。
 
@@ -12,7 +12,7 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 | `AppConfig::load_from_path(role, path)` | 从显式路径加载（`auction-server`、`auction-cli` 使用） |
 | `BackupConfig`、`BackupOffsiteConfig`、`AppConfig::validate_backup()` | CLI 专用本地策略、age 公钥/R2 目的地及成对敏感凭据和 HTTPS 打卡地址校验；不改变常驻角色的运行行为 |
 | `AppConfig` 字段 | 已合并、已校验的非敏感配置：listener、metrics、tracing、realtime、cache、auction、worker、http_security、session、路径、`admin_runtime`、装备规则与 `bot_players` 投影 |
-| `AppConfig` getter | 敏感值只经显式 getter 暴露：`database_url()`、`redis_url()`、`admin_actor()/admin_secret()`、三组数据密钥、Cookie、`tracing_headers()`；`Debug` 输出已脱敏 |
+| `AppConfig` getter | 敏感值只经显式 getter 暴露：`database_url()`、`redis_url()`、`admin_actor()/admin_secret()`、四组数据密钥与 `data_key_current(domain)`/`data_key_previous(domain)`、Cookie、`tracing_headers()`；`Debug` 输出已脱敏 |
 | `backup_heartbeat_success_url()/backup_heartbeat_failure_url()` | 只供 CLI 交给备份传输适配器的可选地址；省略或空字符串均表示未配置，不可写入日志或回执 |
 | `backup_r2_access_key_id()/backup_r2_secret_access_key()` | Worker 敏感文件中的 bucket 对象读写令牌，只交给备份适配器；无环境、实例元数据、age 私钥或口令入口 |
 | `TomlRuntimeFileStore` | Admin runtime 文件的读取与原子替换（临时文件 + rename + 目录同步 + 独立锁文件） |
@@ -26,7 +26,7 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 
 1. 固定角色文件的绝对路径，按角色解析（Public 的 `[session]` 只接受 `max_public_sessions`，旧的时长字段被拒绝）。
 2. 以角色文件所在目录解析 `common_file`、`secrets_file`、`runtime_config_file`、`worker_config_file`（仅 Admin）等相对路径，读取公共文件（闭集，拒绝角色字段混入）。
-3. 读取敏感文件：`[database]` 五字段或兼容的 `database_url`（二者互斥）、Redis URL、Cookie、OTLP headers、Admin 凭据、三组数据密钥（标识与材料必须成对）。
+3. 读取敏感文件：`[database]` 五字段或兼容的 `database_url`（二者互斥）、Redis URL、Cookie、OTLP headers、Admin 凭据、四组数据密钥（标识与材料必须成对）与各域 `*_previous_data_keys` 旧密钥数组（`retired_at` 为 RFC 3339 且不得在未来；`retain_until` 固定为 `retired_at + 12 个月`）。
 4. 读取并完整校验 runtime 文件：Admin/Worker 应用 `[operations.*]` 中 `managed = true` 的分组覆盖；Worker 再投影邮件世界、过滤、模板与论坛标色。Public 只保留 `bot_players` 名单与装备规则；Worker 投影完成后也不保留完整 Admin runtime 文档。
 5. 解析 listener（Admin runtime 的 listener、安全、会话、metrics、tracing 优先于角色文件），按角色校验全部区块与跨字段约束（预算关系、超时与租约、启用条件等）。
 
@@ -34,10 +34,10 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 
 ## 主要约束
 
-- **就绪策略**：三角色从 common 加载 `readiness`，默认 `audit_failure_mode = "classified"`、`migration_compatibility_mode = "shadow"`、`cache_enabled = true`；非法模式拒绝，不受 Admin runtime 覆盖；文件修改须重启，行为可由数据库开关覆盖。迁移模式支持 strict/shadow/compatible；换回已含兼容逻辑的旧程序前必须显式选择 compatible，恢复与盘点边界不放宽。classified 默认跳过影子期，`shadow`/`legacy` 仍可显式选择；影子观察与完整回退见[配置参考](../../ops/config/README.md#就绪策略)。
+- **就绪策略**：三角色从 common 加载 `readiness`，默认 `audit_failure_mode = "classified"`、`migration_compatibility_mode = "shadow"`、`cache_enabled = true`；非法模式拒绝，不受 Admin runtime 覆盖；文件修改须重启，行为可由数据库开关覆盖。迁移模式支持 strict/shadow/compatible；换回已含兼容逻辑的旧程序前必须显式选择 compatible，恢复与盘点边界不放宽。classified 默认跳过影子期，`shadow`/`legacy` 仍可显式选择；影子观察与完整回退见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)。
 - **数据库**：`[database]` 五字段要求显式主机、非零端口、账号、口令与库名，账号口令按原文填写，由 loader 负责 URL 编码；兼容的 `database_url` 必须显式指定主机（或 socket）与库名，省略端口时固定为 5432，不继承 `PGPORT` 等环境变量。
 - **Redis**：`cache.backend = "redis"` 时必须提供 `redis_url`。
-- **备份**：`common.toml [backup]` 本地策略与 `[backup.offsite]` 的启用依赖、字段范围见[配置参考](../../ops/config/README.md#定时备份策略)。三角色仅解析保留；CLI `config check` 与 scheduled 显式校验，异机字段摘要只有是否配置。R2 凭据用 `SecretString` 保存且成对、非空、无控制字符；公钥只做长度、前缀与字符集检查，实际加密由主机 age 完成。错误只有字段名与固定原因。外部打卡仍暂缓启用。
+- **备份**：`common.toml [backup]` 本地策略与 `[backup.offsite]` 的启用依赖、字段范围见[ops/config/README.md#定时备份策略](../../ops/config/README.md#定时备份策略)。三角色仅解析保留；CLI `config check` 与 scheduled 显式校验，异机字段摘要只有是否配置。R2 凭据用 `SecretString` 保存且成对、非空、无控制字符；公钥只做长度、前缀与字符集检查，实际加密由主机 age 完成。错误只有字段名与固定原因。外部打卡仍暂缓启用。
 - **tracing**：启用时须有 endpoint 与非零采样率；进程环境中存在 `OTEL_EXPORTER_OTLP_HEADERS` 或 `OTEL_EXPORTER_OTLP_TRACES_HEADERS` 时拒绝启动，导出头只能来自敏感文件。
 - **Worker**：启用 MoogleMail 时必须有凭据来源（数据库凭据所需的 `credential_data_key`、`.keyenv` 或 `mooglemail_cookie`）以及 `user_login_data_key`；启用论坛时必须有 `ehentai_cookie` 或 `credential_data_key`；启用运维告警时须配置收件人、告警 world 必须在已启用的 MoogleMail 世界内，且 Worker 运行时要求 MoogleMail 投递可用。
 - **HTTP**：origin allowlist 启用时不能为空（TCP 模式可从 listener 推导）；`trusted_unix_proxy` 只能用于 Unix listener；Public/Admin 启用 metrics 时 listener 必须是 loopback TCP 或 Unix socket（`/metrics` 与业务共用 listener，不能直接暴露到公网）。
@@ -63,12 +63,12 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 
 首次设置发布目录前要求其直接父目录已存在、为非符号链接目录、归当前账号或 root 所有且禁止 group/other 写入；私有临时目录中的口令与 Admin 凭据不能依赖可被其他账号替换的同级名称。目标已存在仍一律拒绝覆盖。
 
-角色 TOML 的 `[shutdown]` 在启动时解析和校验，不受 common 或 runtime 覆盖。普通预算默认 10 秒；Worker 关键段默认 60 秒，Public/Admin 只接受 0。字段、范围、unit 配套及需重启的完整回退见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。
+角色 TOML 的 `[shutdown]` 在启动时解析和校验，不受 common 或 runtime 覆盖。普通预算默认 10 秒；Worker 关键段默认 60 秒，Public/Admin 只接受 0。字段、范围、unit 配套及需重启的完整回退见[ops/config/README.md#排空与停止预算](../../ops/config/README.md#排空与停止预算)。
 
 
 ## 运行时行为覆盖
 
-TOML 仍由本 crate 解析为启动基线；数据库 W7.7 开关是明确的行为覆盖例外，不进入 AdminRuntimeDocument，也不引入环境变量覆盖。审计模式和 HTTP 就绪缓存由运行进程共享快照覆盖；迁移兼容模式仍需重启。优先级与失败语义见[配置参考](../../ops/config/README.md#数据库运行时开关)。
+TOML 仍由本 crate 解析为启动基线；数据库 W7.7 开关是明确的行为覆盖例外，不进入 AdminRuntimeDocument，也不引入环境变量覆盖。审计模式和 HTTP 就绪缓存由运行进程共享快照覆盖；迁移兼容模式仍需重启。优先级与失败语义见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)。
 
 ## 数据库连接配置
 
@@ -77,4 +77,4 @@ TOML 仍由本 crate 解析为启动基线；数据库 W7.7 开关是明确的�
 未知模式解析失败；启用超时缺少任一显式阈值或与 legacy 冲突时失败。
 服务池包含长期预留并须保留普通连接；Admin 在 runtime 覆盖后校验 acquire 时限。
 跨角色预算由 CLI 联合检查，不在单角色 loader 猜测其他实例。
-字段与上线条件由[配置参考](../../ops/config/README.md#数据库连接分档)拥有。
+字段与上线条件由[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)拥有。

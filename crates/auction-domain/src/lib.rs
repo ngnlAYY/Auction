@@ -6,6 +6,7 @@ mod delivery;
 pub mod equipment;
 mod errors;
 mod identity;
+mod keys;
 mod proxy;
 mod scheduling;
 mod settlement;
@@ -37,6 +38,7 @@ pub use identity::{
     AuctionId, BidId, CommandId, EquipmentId, LotId, ProxyAuthorizationId, SettlementId,
     SubmissionId, UserId, WorldId, deterministic_uuid, legacy_natural_key_uuid,
 };
+pub use keys::{DataKeyDomain, DataKeyDomainError};
 pub use proxy::{
     ProxyAuthorization, ProxyMode, ProxyStatus, ProxyTerminalReason, ProxyTransition,
     ProxyTransitionKind,

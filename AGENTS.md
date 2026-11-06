@@ -2,7 +2,7 @@
 
 本文件是项目级协作规范，适用于所有贡献者与自动化代理。业务、接口、数据与部署语义由本仓库独立定义，实现、构建与验收不依赖外部源码仓库。
 
-[文档导航](docs/README.md) · [架构](docs/architecture.md) · [开发指南](docs/development.md) · [运维手册](ops/README.md)
+[docs/README.md](docs/README.md) · [docs/architecture.md](docs/architecture.md) · [docs/development.md](docs/development.md) · [ops/README.md](ops/README.md)
 
 ## 项目概览
 
@@ -33,7 +33,7 @@
 
 ## 依赖方向与模块职责
 
-装配根注入适配器；应用层只依赖窄端口与领域；依赖方向向内。完整说明见[架构](docs/architecture.md#分层)。
+装配根注入适配器；应用层只依赖窄端口与领域；依赖方向向内。完整说明见[docs/architecture.md#分层](docs/architecture.md#分层)。
 
 | 模块 | 边界 |
 | --- | --- |
@@ -82,7 +82,7 @@
 - 注释与文档使用中文；协议、API、SQL 关键字与必须匹配的字符串保留原文。
 - 模块用 `//!` 说明职责，公共类型、函数与端口用 `///`；复杂分支用 `//` 解释原因、不变量、锁/幂等、兼容、安全或性能取舍。不写复述代码的注释，删除过期注释。
 - Markdown 链接目标按当前文档所在目录计算相对路径，必要时使用 `../`，确保 GitHub 与本地渲染可直接点击；同页锚点使用 `#标题锚点`。正文与链接显示文字中的仓库文件路径仍以仓库根为起点（如 `docs/contracts/routes.md`、`crates/auction-http/src/assets/routes.rs`）。每项事实只在一个 owner 文档中详细描述，其他地方摘要并链接。
-- 路由、状态码、字段、事件、配置、迁移或制品变化时，同步对应的 README 与契约文档（[路由](docs/contracts/routes.md)、[实时事件](docs/contracts/realtime.md)、[数据库](docs/contracts/database.md)、[配置](ops/config/README.md)）。`ci/checks/check.sh markdown-links` 离线检查相对链接与锚点，移动或重命名时须同步引用。
+- 路由、状态码、字段、事件、配置、迁移或制品变化时，同步对应的 README 与契约文档（[docs/contracts/routes.md](docs/contracts/routes.md)、[docs/contracts/realtime.md](docs/contracts/realtime.md)、[docs/contracts/database.md](docs/contracts/database.md)、[ops/config/README.md](ops/config/README.md)）。`ci/checks/check.sh markdown-links` 离线检查相对链接与锚点，移动或重命名时须同步引用。
 
 ## 代码风格
 
@@ -91,12 +91,12 @@
 - 请求、Worker 与持久化路径避免 `unwrap`/`expect`；不可恢复的启动不变量要给出可行动的错误。
 - 结构化 tracing 字段；禁止记录完整凭据、密码、Cookie 或密钥。
 - DTO、数据库记录与领域聚合分离，在边界映射。
-- CSS 两空格缩进，颜色、字号、间距使用共享 [`crates/auction-web-shared/style/base.css`](crates/auction-web-shared/style/base.css) 变量；surface 专属规则留在各自的 `crates/auction-web-public/assets/` 与 `crates/auction-web-admin/assets/`。
+- CSS 两空格缩进，颜色、字号、间距使用共享 [crates/auction-web-shared/style/base.css](crates/auction-web-shared/style/base.css) 变量；surface 专属规则留在各自的 `crates/auction-web-public/assets/` 与 `crates/auction-web-admin/assets/`。
 - 只做需求相关的最小修改，不顺手重构或改名。新增 `pub` 接口前确认有调用方。
 
 ## 配置规则
 
-权威说明见[配置参考](ops/config/README.md)。
+权威说明见[ops/config/README.md](ops/config/README.md)。
 
 - 运行配置一律 TOML；`AUCTION_CONFIG_FILE` 只选择角色文件，不覆盖任何字段；不引入通用环境变量覆盖。
 - 三角色必须引用同一 `common_file`；`runtime_config_file` 要么三者引用同一个，要么都省略。
@@ -107,7 +107,7 @@
 ## 数据库与迁移
 
 - PostgreSQL 固定 major 18；驱动由显式 `postgres` feature 启用，不使用 `AnyPool`。
-- 迁移只追加，已发布文件禁止修改或删除；规则见[迁移说明](migrations/postgres/README.md)。新表同步[保留政策 v2](ops/deploy/retention-policy.v2.json)与[数据库契约](docs/contracts/database.md)。
+- 迁移只追加，已发布文件禁止修改或删除；规则见[migrations/postgres/README.md](migrations/postgres/README.md)。新表同步[ops/deploy/retention-policy.v2.json](ops/deploy/retention-policy.v2.json)与[docs/contracts/database.md](docs/contracts/database.md)。
 - 破坏性数据库操作只能经 `auction-cli` 的显式确认、可验证备份与回执完成；开发脚本不得加入 `DROP DATABASE`。
 
 ## Web 规则
@@ -116,7 +116,7 @@
 - `just web-build` 用 `dx bundle` 以 `wasm-release` profile 构建，复制到稳定目录后由后端 `web-embed` 内嵌；未构建时后端仍可编译，页面路由返回 503。只有显式 `web-embed` 才内嵌资源，Public 二进制不得包含 Admin 资源，反之亦然。
 - 浏览器只消费 `auction-contracts` DTO；改变状态的动作携带 `command_id`，结果未知时只允许原样重试。不在浏览器重建业务状态机。
 - 所有界面文案走各自 `i18n/*.ftl`：五种语言（en、zh-CN、zh-TW、ja、ko）键集合一致，键名用连字符、不含点号；Public 默认 en，Admin 默认 zh-CN。偏好键 `hv.lang`、`hv.theme` 是固定契约。
-- 新增或删除页面时同步前端 `Route` 枚举、`crates/auction-http/src/assets/routes.rs` 与[路由契约](docs/contracts/routes.md)。
+- 新增或删除页面时同步前端 `Route` 枚举、`crates/auction-http/src/assets/routes.rs` 与[docs/contracts/routes.md](docs/contracts/routes.md)。
 
 ## 验证范围
 
@@ -126,7 +126,7 @@
 just verify     # bash ci/checks/check.sh all fmt check feature dependency-versions lint wasm
 ```
 
-行为变更必须随功能维护并运行受影响范围的测试：`just test` 覆盖纯逻辑、单元与本地替身，数据库语义使用 `just test-db` 和隔离的真实 PostgreSQL 18。已批准的 W6 测试类别包括纯逻辑、属性/快照、脱敏页面回放、PG18 集成与本地外部服务替身；入口、环境要求与当前覆盖限制见[开发指南](docs/development.md#测试)。默认测试不得要求数据库或连接真实外部账号；数据库测试必须隔离到显式入口。已有测试保留；修改行为时同步正反例与回归断言。其他行为验证（如浏览器、真实服务或手工冒烟）仍需用户明确要求，并先说明范围与环境；启动应用服务、访问健康接口或走功能流程不属于静态门禁。
+行为变更必须随功能维护并运行受影响范围的测试：`just test` 覆盖纯逻辑、单元与本地替身，数据库语义使用 `just test-db` 和隔离的真实 PostgreSQL 18。已批准的 W6 测试类别包括纯逻辑、属性/快照、脱敏页面回放、PG18 集成与本地外部服务替身；入口、环境要求与当前覆盖限制见[docs/development.md#测试](docs/development.md#测试)。默认测试不得要求数据库或连接真实外部账号；数据库测试必须隔离到显式入口。已有测试保留；修改行为时同步正反例与回归断言。其他行为验证（如浏览器、真实服务或手工冒烟）仍需用户明确要求，并先说明范围与环境；启动应用服务、访问健康接口或走功能流程不属于静态门禁。
 
 ## Git 纪律
 

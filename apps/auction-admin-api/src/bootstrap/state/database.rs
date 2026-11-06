@@ -19,8 +19,8 @@ use auction_application::{
 use auction_config::{AppConfig, TomlRuntimeFileStore};
 use auction_http::AdminApiState;
 use auction_integrations::{
-    CredentialSealer, CredentialVerifier, DataKey, EquipmentKeySealer, ForumPreviewAdapter,
-    MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader,
+    CredentialSealer, CredentialVerifier, EquipmentKeySealer, ForumPreviewAdapter,
+    MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader, build_keyring,
 };
 use auction_observability::{
     HealthReader, HealthService, HeartbeatHealthReader, HeartbeatPublisher,
@@ -127,10 +127,17 @@ pub(super) async fn configure_state(
     } else {
         None
     };
-    let admin_intake = match config.equipment_data_key_id().zip(config.equipment_data_key()) {
-        Some((key_id, key_material)) => {
-            let data_key = DataKey::from_base64(key_id, key_material)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+    let equipment_keyring = build_keyring(
+        auction_config::DataKeyDomain::Equipment,
+        config.data_key_current(auction_config::DataKeyDomain::Equipment),
+        config
+            .data_key_previous(auction_config::DataKeyDomain::Equipment)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+    let admin_intake = match equipment_keyring {
+        Some(keyring) => {
             // W1.10：URL 来源改经 Worker control 执行；Admin 不再持有 Cookie、HTTP 客户端或
             // 第二套请求限速器。socket 路径无效时装配明确不可用的端口，不回退到本地直连。
             let remote: Arc<dyn auction_application::WorkerRemoteReadPort> =
@@ -147,7 +154,7 @@ pub(super) async fn configure_state(
                     }
                 };
             let source = auction_integrations::WorkerEquipmentSourceReader::new(remote);
-            let sealer = EquipmentKeySealer::new(data_key);
+            let sealer = EquipmentKeySealer::new(Arc::clone(keyring.current()));
             let intake: Arc<dyn AdminIntakePort> = Arc::new(DatabaseAdminIntakeCommands::new(
                 Arc::clone(&store),
                 Arc::new(source),
@@ -162,46 +169,55 @@ pub(super) async fn configure_state(
     let forum_preview: Arc<dyn AdminForumPreviewPort> = Arc::new(ForumPreviewAdapter::new());
     let admin_audit: Arc<dyn AdminAuditPort> = store.clone();
     let admin_renames: Arc<dyn AdminRenameReader> = store.clone();
-    let admin_users: Option<Arc<dyn AdminUserPort>> =
-        match config.user_login_data_key_id().zip(config.user_login_data_key()) {
-            Some((key_id, key_material)) => {
-                let data_key = Arc::new(
-                    DataKey::from_base64(key_id, key_material)
-                        .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-                );
-                let issuer = Arc::new(MoogleMailLoginKeyIssuer::new(Arc::clone(&data_key)));
-                let opener = Arc::new(MoogleMailLoginKeyReader::new(Arc::clone(&store), data_key));
-                Some(Arc::new(AdminUserService::new(Arc::clone(&store), issuer, opener)))
-            }
-            None => None,
-        };
+    let user_login_keyring = build_keyring(
+        auction_config::DataKeyDomain::UserLogin,
+        config.data_key_current(auction_config::DataKeyDomain::UserLogin),
+        config
+            .data_key_previous(auction_config::DataKeyDomain::UserLogin)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+    let admin_users: Option<Arc<dyn AdminUserPort>> = match user_login_keyring {
+        Some(keyring) => {
+            let issuer = Arc::new(MoogleMailLoginKeyIssuer::new(Arc::clone(keyring.current())));
+            let opener =
+                Arc::new(MoogleMailLoginKeyReader::new(Arc::clone(&store), Arc::clone(&keyring)));
+            Some(Arc::new(AdminUserService::new(Arc::clone(&store), issuer, opener)))
+        }
+        None => None,
+    };
     let mut credential_check: Option<Arc<dyn AdminCredentialCheckPort>> = None;
-    let admin_credentials: Option<Arc<dyn AdminCredentialPort>> =
-        match config.credential_data_key_id().zip(config.credential_data_key()) {
-            Some((key_id, key_material)) => {
-                let data_key = Arc::new(
-                    DataKey::from_base64(key_id, key_material)
-                        .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-                );
-                let sealer = Arc::new(CredentialSealer::new(Arc::clone(&data_key)));
-                let acquirer = Arc::new(
-                    auction_integrations::CredentialAcquirer::production(data_key)
-                        .context("initialize credential acquisition client")?,
-                );
-                let opener: Arc<dyn AdminCredentialOpener> = sealer.clone();
-                let verifier = Arc::new(
-                    CredentialVerifier::production(opener)
-                        .context("initialize credential check clients")?,
-                );
-                credential_check = Some(Arc::new(AdminCredentialCheckService::new(
-                    Arc::clone(&store),
-                    verifier,
-                    Arc::new(SystemClock),
-                )));
-                Some(Arc::new(AdminCredentialService::new(Arc::clone(&store), sealer, acquirer)))
-            }
-            None => None,
-        };
+    let credential_keyring = build_keyring(
+        auction_config::DataKeyDomain::Credential,
+        config.data_key_current(auction_config::DataKeyDomain::Credential),
+        config
+            .data_key_previous(auction_config::DataKeyDomain::Credential)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+    let admin_credentials: Option<Arc<dyn AdminCredentialPort>> = match credential_keyring {
+        Some(keyring) => {
+            let sealer = Arc::new(CredentialSealer::new(Arc::clone(&keyring)));
+            let acquirer = Arc::new(
+                auction_integrations::CredentialAcquirer::production(Arc::clone(keyring.current()))
+                    .context("initialize credential acquisition client")?,
+            );
+            let opener: Arc<dyn AdminCredentialOpener> = sealer.clone();
+            let verifier = Arc::new(
+                CredentialVerifier::production(opener)
+                    .context("initialize credential check clients")?,
+            );
+            credential_check = Some(Arc::new(AdminCredentialCheckService::new(
+                Arc::clone(&store),
+                verifier,
+                Arc::new(SystemClock),
+            )));
+            Some(Arc::new(AdminCredentialService::new(Arc::clone(&store), sealer, acquirer)))
+        }
+        None => None,
+    };
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
     let health: Arc<dyn HealthReader> = Arc::new(HealthService::new(heartbeat_store));
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();

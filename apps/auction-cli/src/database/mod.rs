@@ -183,11 +183,11 @@ pub(crate) async fn preflight(
 
 #[derive(Debug, Serialize)]
 pub(crate) struct MigrationReport {
-    database: String,
-    before_version: i64,
-    after_version: i64,
-    expected_version: i64,
-    applied: i64,
+    pub(crate) database: String,
+    pub(crate) before_version: i64,
+    pub(crate) after_version: i64,
+    pub(crate) expected_version: i64,
+    pub(crate) applied: i64,
 }
 
 /// 在 SQLx 迁移锁内以迁移 owner 执行全部待执行迁移；空库会建立完整 schema，

@@ -1,6 +1,6 @@
 # W11 资产对账、偿付能力与内部一致性巡检
 
-[计划入口](../architecture-improvement.md) · [执行须知](../architecture-improvement.md#2-执行须知) · [交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [进度](../architecture-improvement.md#7-进度) · [现状基线](baseline.md) · [决策记录](decisions.md)
+[docs/plans/architecture-improvement.md](../architecture-improvement.md) · [docs/plans/architecture-improvement.md#2-执行须知](../architecture-improvement.md#2-执行须知) · [docs/plans/architecture-improvement.md#5-每个工作项的交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [docs/plans/architecture-improvement.md#7-进度](../architecture-improvement.md#7-进度) · [docs/plans/architecture-improvement/baseline.md](baseline.md) · [docs/plans/architecture-improvement/decisions.md](decisions.md)
 
 | 项 | 内容 |
 | --- | --- |
@@ -10,8 +10,8 @@
 | 依赖 | W11.1–W11.3 依赖 W1.3、W5；W11.2 另依赖 W14.8；W11.4 无依赖 |
 | 迁移 | 是（报告事实） |
 | 估算 | 5–6 天 |
-| 关联缺陷 | —（详见[已知缺陷](../architecture-improvement.md#已知缺陷)） |
-| 关联决策 | 11（详见[决策记录](decisions.md)） |
+| 关联缺陷 | —（详见[docs/plans/architecture-improvement.md#已知缺陷](../architecture-improvement.md#已知缺陷)） |
+| 关联决策 | 11（详见[docs/plans/architecture-improvement/decisions.md](decisions.md)） |
 
 | 项 | 内容 |
 | --- | --- |

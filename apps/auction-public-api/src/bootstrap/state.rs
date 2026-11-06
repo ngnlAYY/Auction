@@ -28,7 +28,7 @@ use auction_http::PublicApiState;
 #[cfg(feature = "postgres")]
 use auction_http::{RealtimeHub, RealtimeHubSink};
 #[cfg(feature = "postgres")]
-use auction_integrations::{DataKey, EquipmentGameLinkResolver, EquipmentKeyOpener};
+use auction_integrations::{EquipmentGameLinkResolver, EquipmentKeyOpener, build_keyring};
 use auction_observability::ProcessMetrics;
 #[cfg(feature = "postgres")]
 use auction_observability::{
@@ -142,16 +142,20 @@ fn configure_equipment_links(
     config: &AppConfig,
     store: &Arc<DatabaseStore>,
 ) -> anyhow::Result<Option<Arc<dyn PublicEquipmentLinkResolver>>> {
-    let (key_id, encoded_key) = match (config.equipment_data_key_id(), config.equipment_data_key())
-    {
-        (Some(key_id), Some(encoded_key)) => (key_id, encoded_key),
-        (None, None) => return Ok(None),
-        _ => anyhow::bail!("Public 真实装备 URL 的数据密钥配置不完整"),
+    let keyring = build_keyring(
+        auction_config::DataKeyDomain::Equipment,
+        config.data_key_current(auction_config::DataKeyDomain::Equipment),
+        config
+            .data_key_previous(auction_config::DataKeyDomain::Equipment)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .map_err(|_| anyhow::anyhow!("Public 真实装备 URL 的数据密钥配置无效"))?;
+    let Some(keyring) = keyring else {
+        return Ok(None);
     };
-    let data_key = DataKey::from_base64(key_id, encoded_key)
-        .map_err(|_| anyhow::anyhow!("Public 真实装备 URL 的数据密钥配置无效"))?;
     let secrets: Arc<dyn PublicEquipmentLinkSecretReader> = store.clone();
-    Ok(Some(Arc::new(EquipmentGameLinkResolver::new(secrets, EquipmentKeyOpener::new(data_key)))))
+    Ok(Some(Arc::new(EquipmentGameLinkResolver::new(secrets, EquipmentKeyOpener::new(keyring)))))
 }
 
 #[cfg(feature = "postgres")]

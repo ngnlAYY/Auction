@@ -1,6 +1,6 @@
 # auction-observability
 
-[文档导航](../../docs/README.md) · [运维手册](../../ops/README.md#监控与日志)
+[docs/README.md](../../docs/README.md) · [ops/README.md#监控与日志](../../ops/README.md#监控与日志)
 
 日志、指标、tracing 与服务心跳；三个角色在启动时由装配根初始化。
 本 crate 不读配置文件、不监听端口。`auction-http` 挂载 Public/Admin
@@ -46,7 +46,7 @@ Public/Admin sink 不安装 Worker observer，不增加 W0.3 计数。
 默认在 WARN 汇总可见时启用；回退可在现有 `log_filter` 追加
 `auction_observability::log_dedup=off`，重启后该 helper 放行所有原始日志。
 也可移除调用点恢复原日志。汇总 target 被过滤时不执行抑制，避免计数不可见。
-配置文件与重启规则见[配置参考](../../ops/config/README.md#commontoml)。
+配置文件与重启规则见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)。
 
 ## Tracing（可选）
 
@@ -92,9 +92,9 @@ scrape 只编码内存，不读取数据库或外部服务，不新增业务或�
 
 业务指标路由与附加出口共用转发头拒绝、GET/HEAD、query、404/405 实现。
 反向代理仍屏蔽公网 `/metrics`；完整契约见
-[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)。
-地址、开关及 Admin 覆盖关系见[配置参考](../../ops/config/README.md#commontoml)，
-Prometheus/exporter 安装与采集核对见[运维手册](../../ops/README.md#指标)。
+[docs/contracts/routes.md#健康与指标publicadmin](../../docs/contracts/routes.md#健康与指标publicadmin)。
+地址、开关及 Admin 覆盖关系见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)，
+Prometheus/exporter 安装与采集核对见[ops/README.md#指标](../../ops/README.md#指标)。
 
 ### HTTP 与连接口径
 
@@ -106,7 +106,7 @@ WebSocket 只在成功进入 `on_upgrade` 回调后增加当前数和累计数�
 
 限流指标只在 `session_guard`、`admin_session_guard`、`realtime_connection_guard` 实际返回频率拒绝时累加；`realtime_busy`、`discovery_busy` 等容量拒绝不计入，仍体现在 HTTP 状态码计数中。关闭指标时上述记录器和连接守卫均为 no-op，不注册 collector，不改变配额、认证、缓存或业务结果。
 
-审计 label 全部为编译期闭集：`class` 为 `transient/permanent/unknown`；`sqlstate_class` 为 `08/09/21/22/23/25/27/28/39/3D/3F/40/42/44/53/55/57/58/P0/XX`、`other` 或非 SQL 的 `none`；kind 与映射由 [auction-storage 分类表](../auction-storage/README.md#审计失败与就绪)拥有。失败族在首次观察对应组合后出现；影子三类及缓存/检查各结果预置零值。审计 collector 只读取内存快照，并发 scrape 不重复累计；HTTP 记录器由装配根创建的 `ProcessMetrics` 注册并注入探针。观测和切换见[运维手册](../../ops/README.md#审计就绪影子观察)。
+审计 label 全部为编译期闭集：`class` 为 `transient/permanent/unknown`；`sqlstate_class` 为 `08/09/21/22/23/25/27/28/39/3D/3F/40/42/44/53/55/57/58/P0/XX`、`other` 或非 SQL 的 `none`；kind 与映射由 [crates/auction-storage/README.md#审计失败与就绪](../auction-storage/README.md#审计失败与就绪)拥有。失败族在首次观察对应组合后出现；影子三类及缓存/检查各结果预置零值。审计 collector 只读取内存快照，并发 scrape 不重复累计；HTTP 记录器由装配根创建的 `ProcessMetrics` 注册并注入探针。观测和切换见[ops/README.md#审计就绪影子观察](../../ops/README.md#审计就绪影子观察)。
 
 ### Final 阶段每次出价的页面重读（W12.2）
 
@@ -132,7 +132,7 @@ sum(increase(auction_business_events_total{event="bid",outcome="success"}[15m]))
 ```
 
 客户端对同一条竞价通知使用“从首条待处理通知起 100 毫秒、后续通知不延后截止”的合并
-窗口（[`refresh.rs`](../auction-web-public/src/app/surface/board/refresh.rs)），窗口内
+窗口（[crates/auction-web-public/src/app/surface/board/refresh.rs](../auction-web-public/src/app/surface/board/refresh.rs)），窗口内
 N 条通知对同一资源只重读一次；资源尚未就绪时不消费修订号，就绪后仍读最新快照。
 因此期望重读量约为“打开的详情页数 × 2 × 该窗口内的重读轮次”：出价间隔不短于窗口时
 每笔各读一次，密集突发时按 100 毫秒窗口摊薄，但不会完全合并成一次。比值长期高于
@@ -147,12 +147,12 @@ WebSocket 连接，未认证页面（手动刷新）不计入。Final 窗口按�
 
 `ProcessMetrics::migration_readiness` 返回可克隆记录器，三角色将其注入数据库适配器；heartbeat 与 HTTP 底层数据库检查共同累计，HTTP 缓存命中不发起新检查。`branch` 与 `class` 都是 `current`、`behind`、`ahead`、`compatible_ahead`、`incompatible_ahead`、`invalid_history`、`query_failed` 的闭集，预置零值。`ahead` 只表示 strict 模式未读取兼容登记；`query_failed` 包含本次检查的 SQL/解码失败或内部超时；被外层 HTTP 预算先取消的检查由原 HTTP timeout 指标记录，可能尚未产生迁移分支计数。
 
-只有迁移 shadow 模式出现 strict/compatible 布尔差异时增加 mismatch；预期仅 `compatible_ahead`，其他类别应为零。版本号只在结构化日志，不进入 label；metrics 关闭时记录器为 no-op，日志与失败关闭规则保持。本项暂沿用 W0.14 的局部命名；W0.15 共享框架（下文）已提供，迁移随后续工作项，不把同版无差异或无样本作为超前分支验收。判定及开关由[数据库契约](../../docs/contracts/database.md#迁移兼容登记与就绪)与[配置参考](../../ops/config/README.md#就绪策略)定义。
+只有迁移 shadow 模式出现 strict/compatible 布尔差异时增加 mismatch；预期仅 `compatible_ahead`，其他类别应为零。版本号只在结构化日志，不进入 label；metrics 关闭时记录器为 no-op，日志与失败关闭规则保持。本项暂沿用 W0.14 的局部命名；W0.15 共享框架（下文）已提供，迁移随后续工作项，不把同版无差异或无样本作为超前分支验收。判定及开关由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)与[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)定义。
 
 ### 影子运行共享框架（W0.15）
 
 改变判定口径的工作项先影子运行：旧路径继续裁决，新路径只并行计算待比较的值。共享契约在
-[`auction-application`](../auction-application/src/ports/shadow_run/mod.rs)：`ShadowOwner`
+[crates/auction-application/src/ports/shadow_run/mod.rs](../auction-application/src/ports/shadow_run/mod.rs)：`ShadowOwner`
 是 owner 闭集并声明自己的判定分支，`ShadowOutcome` 为 `match/mismatch/uncomparable`，
 `ShadowRecorder` 只累加计数。调用点用 `record_comparison` 比较新旧结果，用
 `record_uncomparable` 声明没有可比证据的样本；两个 helper 都不返回可影响控制流的值。
@@ -178,7 +178,7 @@ WebSocket 连接，未认证页面（手动刷新）不计入。Final 窗口按�
 `record_comparison`（不可比较时调用 `record_uncomparable`）并把 `ProcessMetrics::shadow`
 注入该 owner；观察期覆盖至少一个含 Final 与结算的完整场次周期、每个分支都有样本且差异
 为零后，由用户切换并删除旧路径。新增 owner 或分支时同步本节与
-[交付规范](../../docs/plans/architecture-improvement.md#5-每个工作项的交付规范)。回退为移除
+[docs/plans/architecture-improvement.md#5-每个工作项的交付规范](../../docs/plans/architecture-improvement.md#5-每个工作项的交付规范)。回退为移除
 调用点：指标与日志是附加输出，无迁移、无持久状态。
 
 ### Sent 发送基线局部影子指标
@@ -194,7 +194,7 @@ Worker 的 `ProcessMetrics::sent_baseline` 注入应用层窄观测端口；四�
 
 标签全部为闭集并预置零值。`world` 为 `main/isekai`；`branch` 为 `empty/new_minute/same_minute/same_minute_cross_page/no_candidate/multiple_candidates/full_fallback`，按无候选、多候选、完整回退、空边界、分钟分支顺序分类。`phase` 为 `before_send/after_send`。`reason` 为 `invalid_mid/order_violation/page_discontinuity/anchor_missing/anchor_changed/page_limit/timeout/read_unavailable/cache_boundary_delta/boundary_unavailable/scope_changed/response_hint_conflict/canceled`；`canceled` 包括 prepared 未消费或写入被拒，表示没有完成比较，不宣称发生了网络取消。跨页相同 MID/时间重复记 `page_discontinuity` 并尝试完整回退，同一 MID 的时间变化仍属前提失效。缓存捕获窗口与 fresh 顶部不一致记 `cache_boundary_delta`，不冒充候选一致。
 
-日志只输出 world、固定分支/原因/阶段、页数、集合一致布尔值及差集数量，不输出 MID、收件人、主题、正文或凭据。旧路径触顶而水位边界可取得是预期可用性差异；shadow 此时不发送，计不可比较而非通过。观察与切换见[运维手册](../../ops/README.md#sent-发送基线影子观察)。
+日志只输出 world、固定分支/原因/阶段、页数、集合一致布尔值及差集数量，不输出 MID、收件人、主题、正文或凭据。旧路径触顶而水位边界可取得是预期可用性差异；shadow 此时不发送，计不可比较而非通过。观察与切换见[ops/README.md#sent-发送基线影子观察](../../ops/README.md#sent-发送基线影子观察)。
 
 ### 邮件增量扫描指标
 
@@ -224,7 +224,7 @@ label，均只计 Worker 阶段指标，不映射为 `BusinessEvent::MailIntake`
 
 在途阶段因排空超时或任务取消而中断时，守卫记录一次 `canceled`；停止后没有开始的阶段不计轮次。维护与观察不绑定内联或持久重试指标。`auction_worker_loop_iteration_duration_seconds` 的有限桶为 `0.01、0.05、0.1、0.25、0.5、1、5、30、60、120、300` 秒，可用于观察维护 p95 是否低于 60 秒；调度延迟从叠加 jitter 后的计划唤醒时刻开始计算。
 
-Read Mail 日志的 `read_observed` 始终是完整列表数量；观察降频只改变采样节奏，失败不输出部分数量。配置与回退见[配置参考](../../ops/config/README.md#mooglemail-收件与维护)。
+Read Mail 日志的 `read_observed` 始终是完整列表数量；观察降频只改变采样节奏，失败不输出部分数量。配置与回退见[ops/config/README.md#mooglemail-收件与维护](../../ops/config/README.md#mooglemail-收件与维护)。
 
 ### 外部账号客户端指标（W0.4/W0.5）
 
@@ -371,7 +371,7 @@ kind 来自 ApplicationError、InternalEvidenceError、FundingError 的 safe_kin
 新增 `task_panic` 诊断不带 Unpersisted 标记，避免重复累计或改分类。
 
 I-B 为集成与 HTTP 补充闭集投影，已知远端和运行时变体不折叠为 other，
-类别见[集成记录规则](../auction-integrations/README.md#安全错误记录)。
+类别见[crates/auction-integrations/README.md#安全错误记录](../auction-integrations/README.md#安全错误记录)。
 闭集扩展不新增指标族或 label，也不把 HTTP 错误计入 Worker 指标。
 固定类别使用 `SafeErrorKind` 关联常量，既有 `safe_kind()` 字符串才经 `from_label` 映射。
 UUID、失败码、日志 kind/phase、正文和远端返回值不得进入 label。
@@ -427,7 +427,7 @@ mooglemail_poll_isolation_enabled；Public/Admin 不消费这两项。
 三角色都导出 metrics_reject_forwarded_requests。
 标签来自 Rust 闭集，scrape 只读内存、不查数据库、不重复累计。
 期限回落在使用时重新解析；exporter 关闭不影响刷新或审计累计。
-操作见[运行时开关](../../ops/README.md#运行时开关)。
+操作见[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
 
 ## 数据库事务与连接观测
 
@@ -663,7 +663,7 @@ WebSocket 容量复用 `auction_websocket_connections`，记录同时连接总�
 `deliveries_sli_succeeded_completed_at_idx`、`lot_watch_pm_sli_succeeded_completed_at_idx`、
 `auction_settlements_sli_settled_at_idx` 与 `audit_records_sli_slow_proxy_tick_idx`；
 它们不替代按场次、按义务或按主键的点查。当前 slow_due 索引只能描述尚未清除的调度，
-不能替代历史执行证据。完整索引证据与 owner 见[数据库契约](../../docs/contracts/database.md#sli-只读查询)。
+不能替代历史执行证据。完整索引证据与 owner 见[docs/contracts/database.md#sli-只读查询](../../docs/contracts/database.md#sli-只读查询)。
 
 这些流程的终点和将来指标口径固定如下，均以秒为单位：
 
