@@ -14,10 +14,6 @@ use auction_application::auction::{
     AuctionLifecycleCommandPort, SlowProxyCommandPort, SlowProxyDueReader, WorldReader,
 };
 use auction_application::core::{ApplicationError, Clock, RequestHash};
-use auction_application::delivery::{
-    DeliveryClaimExclusions, DeliveryRecipientExclusion, DeliverySendResult, DeliveryTransport,
-    DeliveryTransportError, DeliveryWorkClaim, DeliveryWorkStore,
-};
 use auction_application::mail::{
     MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation,
     MailDeliveryOrigin, MailNotificationTemplate,

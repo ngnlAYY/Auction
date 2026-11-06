@@ -1,5 +1,7 @@
 //! Worker 持久化运行时的端口与运行参数模型。
 
+use auction_application::delivery::{DeliveryTransport, DeliveryWorkStore};
+
 use super::*;
 
 /// 持久化 Worker 的端口与运行参数。
