@@ -13,12 +13,10 @@ use auction_application::admin::{
 };
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
-use auction_application::external_metrics::ForumTopicScanMode;
 use auction_application::forum::{
     ForumCredentialAvailability, ForumPostWriter, ForumPublishedPost, ForumPublishedThread,
     ForumPublisher, ForumReadPost, ForumRemoteError, ForumRenderedPost, ForumRenderedThread,
-    ForumTopicCursor, ForumTopicMetadata, ForumTopicReader, ForumTopicScan,
-    MAX_FORUM_RECONCILIATION_TITLES,
+    ForumTopicCursor, ForumTopicMetadata, ForumTopicReader, MAX_FORUM_RECONCILIATION_TITLES,
 };
 use auction_domain::SettlementWorld;
 use chrono::Utc;
