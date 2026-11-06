@@ -45,7 +45,7 @@ cargo build --locked --release -p auction-cli --features postgres,cache-redis
 | --- | --- | --- |
 | `config` | `show <role>`、`check [--strict]` | 只读文件 |
 | `service` | `status`、`start`、`stop`、`restart`、`receipt list/show` | 启停 systemd unit；start/restart 执行迁移并追加部署回执；receipt 只读状态目录 |
-| `db` | `status`、`migrate`、`grants`、`create`、`preflight`、`inventory`、`retention-dry-run`、`inspect-consistency`、`rebuild` | migrate/create/rebuild 写入；retention-dry-run 只读 |
+| `db` | `status`、`migrate`、`grants`、`create`、`preflight`、`inventory`、`retention-dry-run`、`retention-purge`、`inspect-consistency`、`rebuild` | migrate/create/rebuild/retention-purge 写入；retention-dry-run 只读 |
 | `backup` | `create`、`verify`、`restore`、`scheduled`、`scope-extract` | restore 写数据库；scheduled 写本地备份/回执并按资格清理，可选 age 加密/R2 副本与外部打卡；scope-extract 只写新的解出目录 |
 | `wal` | `archive`、`base-backup`、`upload` | archive/base-backup 写本地暂存（`archive_command` 与每周 timer 入口）；upload 读暂存、写 R2 `wal/` 与 `base/` 前缀，按规则清理本地副本 |
 | `alert` | `report` | 只读主机证据；写入 `backup`/`wal` 两个运维告警来源 |
@@ -293,7 +293,20 @@ auction-cli db retention-dry-run --database auction --output /var/backups/auctio
 
 - `preflight`：报告是否可写主节点、其他会话数、用户对象数、schema 身份与迁移历史；`restore_preflight_passed=true` 只表示“空库、无其他连接、可写主节点”，不代表任何备份可用。
 - `inventory`：读取迁移/schema 身份、public 关系规模与外键、realtime 水位，并对照编译期内嵌的[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)输出各数据族统计与政策 SHA-256。`eligibility_assessed`/`eligibility_authorized` 恒为 false，结果不授权任何归档或删除。政策的 `database_schema_version` 必须等于当前最高迁移版本，新增迁移时须同步审阅该政策。
-- `retention-dry-run`：按政策 v2 的期限只读统计运行态数据族的候选行（进程心跳、realtime 事件/已解决失败、会话）与加密邮件诊断文件的候选/保全数量，回执含 `run_id`、政策身份、阈值边界、`blocked_rows` 与被排除的有效/永久会话数。全程 `REPEATABLE READ` 只读、30 秒语句上限，只执行 SELECT；迁移历史不是当前完整前缀时拒绝运行。`mutation_executed`/`deletion_authorized` 恒为 false，实际删除须经用户批准后另行实现。目录不存在时文件族按空快照记录 `directory_present=false`；读取权限或格式异常失败关闭。
+- `retention-dry-run`：按政策 v2 的期限只读统计运行态数据族的候选行（进程心跳、realtime 事件/已解决失败、会话）与加密邮件诊断文件的候选/保全数量，回执含 `run_id`、政策身份、阈值边界、`blocked_rows` 与被排除的有效/永久会话数。全程 `REPEATABLE READ` 只读、30 秒语句上限，只执行 SELECT；迁移历史不是当前完整前缀时拒绝运行。`mutation_executed`/`deletion_authorized` 恒为 false，候选数不授权删除。目录不存在时文件族按空快照记录 `directory_present=false`；读取权限或格式异常失败关闭。
+- `retention-purge`：唯一执行保留删除的入口。它读取上面写出的 owner-only 回执，要求回执不超过 15 分钟、数据库名/run id/政策版本与 SHA-256 全部一致，且数据库迁移前缀等于当前最高版本；不满足时在删除任何行或文件前拒绝。省略 `--execute` 时只打印每个数据族的候选计数与 `approval_token`，不改动任何数据。实际执行必须逐族 `--approve <family>=<token>`（令牌绑定数据库、演练 run id、政策摘要、族与表级计数）、逐字 `--confirm 'PURGE <database>'` 并给出 `--receipt`。
+
+```bash
+auction-cli db retention-purge --database auction \
+  --dry-run-receipt /var/backups/auction/retention-dry-run-2026-11-05.json
+auction-cli db retention-purge --database auction \
+  --dry-run-receipt /var/backups/auction/retention-dry-run-2026-11-05.json \
+  --approve service_heartbeat=<token> --approve realtime_events=<token> \
+  --execute --confirm 'PURGE auction' \
+  --receipt /var/backups/auction/retention-purge-2026-11-05.json --batch-size 500
+```
+
+删除只覆盖政策 v2 的代码内闭集表与加密诊断文件；审计、资金、结算、拍卖历史、身份与配置表没有删除路径。有效/永久会话、未解决失败、realtime 写入位置与写入未知（含超过 90 天保全窗）诊断文件永不删除；被失败记录或重放关系引用的事件先由已解决失败的清理解除引用。每批一个独立事务（默认 500 行，1–5000），使用 30 秒语句与 2 秒锁上限；批准计数是硬上限，漂移候选留待重新演练并以 `partial_limit_reached` 报告。批次失败保留已提交批次。回执（`auction-retention-purge-receipt.v1`）记录每表批准/删除行数、`pg_column_size` 行载荷字节、批次数、剩余/阻断候选与文件实际删除数与字节，并追加审计 `auction.retention.purge`；执行失败时仍写回执并以 `db` 命令失败码 3 结束。
 
 ### 破坏性重建
 
@@ -636,7 +649,7 @@ legacy 使用旧池 16、acquire 30 秒，不显式设置 application_name 或�
 - db status：`auction-cli-status`。
 - db migrate、db grants、service start/restart 迁移、fresh-schema 重建后的迁移：
   `auction-cli-migrate`（连接使用 `--owner-secrets` 的迁移 owner，不是服务账号）。
-- db preflight / inventory / retention-dry-run：`auction-cli-preflight` / `auction-cli-inventory` / `auction-cli-retention-dry-run`。
+- db preflight / inventory / retention-dry-run / retention-purge：`auction-cli-preflight` / `auction-cli-inventory` / `auction-cli-retention-dry-run` / `auction-cli-retention-purge`。
 - backup create / scheduled 的前后 SQL 核对：`auction-cli-backup-check`；
   外部 pg_dump：`auction-cli-backup`。
 - backup restore 的前后核对及外部 pg_restore：`auction-cli-restore`（同样使用迁移 owner）；

@@ -23,7 +23,8 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 | `initialize_empty_postgres` | 合并部署首次启动：确认专用空库且无其他客户端后在迁移锁内建 schema |
 | `PostgresDatabaseBootstrap` | 维护库连接上的“缺失才创建”建库（`auction-cli db create`） |
 | `PostgresDatabaseRebuildGuard` | 持锁预检与 DROP/CREATE 同定义空库（`auction-cli db rebuild`） |
-| `PostgresStore::collect_recovery_preflight` / `collect_retention_inventory` | 只读恢复预检与保留盘点 |
+| `PostgresStore::collect_recovery_preflight` / `collect_retention_inventory` / `collect_retention_dry_run` | 只读恢复预检、保留盘点与清理演练 |
+| `PostgresStore::preflight_retention_purge` / `execute_retention_purge` | 经演练回执与逐族令牌批准的运行态数据族分批清理；只覆盖代码内闭集表 |
 | `strict_deployment_database_identity` | 不连接数据库比较部署目标（主机/socket、端口、库名），拒绝隐式目标与 `options` |
 | `postgres_connect_options` | `postgres` feature 下供连接装配与 CLI 目标/libpq 投影共用的 SQLx 选项解析；固定默认端口，保留驱动的 host/hostaddr 查询顺序与 socket 优先级，不连接数据库，错误脱敏 |
 | `postgres_expected_migration_version` | 当前二进制内嵌的最高迁移版本 |
@@ -250,7 +251,7 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 
 ## 维护约定
 
-- SQL 只出现在本 crate；新增表或约束必须新增迁移文件，并同步[docs/contracts/database.md](../../docs/contracts/database.md)与[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)（`database_schema_version` 须等于最高迁移版本，否则 `db inventory` 与 `db retention-dry-run` 拒绝运行）。
+- SQL 只出现在本 crate；新增表或约束必须新增迁移文件，并同步[docs/contracts/database.md](../../docs/contracts/database.md)与[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)（`database_schema_version` 须等于最高迁移版本，否则 `db inventory`、`db retention-dry-run` 与 `db retention-purge` 拒绝运行）。
 - 动态拼接 SQL 只允许编译期常量片段，业务值一律 `bind`；同一 owner 内多条查询共享的投影或过滤以字面量宏定义，经 `concat!` 组合成静态查询（如 lot 列表/详情、竞价日志、价格历史、账户代理），不在运行时拼接；DDL 标识符经 `quote_identifier`，库名先过 `valid_ddl_database_name`（ASCII 字母数字与 `_-.`）。
 - 新增 `pub` 接口前确认存在调用方，编译器不会对跨 crate 未使用的 `pub` 项告警。
 

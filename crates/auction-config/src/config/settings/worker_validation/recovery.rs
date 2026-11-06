@@ -1,4 +1,4 @@
-use super::*;
+use super::super::{ConfigError, RecoveryWorkerConfig};
 
 pub(crate) fn validate_recovery_worker(config: &RecoveryWorkerConfig) -> Result<(), ConfigError> {
     if config.batch_limit == 0 || config.batch_limit > 1000 {

@@ -1,6 +1,6 @@
 //! 五字段 cron 的名称、范围和位集合解析。
 
-use super::*;
+use super::StandardCronScheduleError;
 
 pub(super) const MONTH_NAMES: &[(&str, u32)] = &[
     ("jan", 1),

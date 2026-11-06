@@ -1,4 +1,4 @@
-use super::*;
+use super::super::{ConfigError, Path, PathBuf, WorkerControlConfig};
 
 pub(crate) fn validate_worker_control(config: &WorkerControlConfig) -> Result<(), ConfigError> {
     let socket_path = Path::new(&config.socket_path);

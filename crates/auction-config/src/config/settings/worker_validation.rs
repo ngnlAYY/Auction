@@ -1,7 +1,5 @@
 //! Worker 配置校验的模块装配；边界校验在子目录按 owner 持有，此处只重新导出 `pub(super)` 函数。
 
-use super::*;
-
 mod auction;
 mod common;
 mod control;

@@ -16,9 +16,9 @@ use auction_application::MailDiagnosticError;
 use uuid::Uuid;
 
 use super::{
-    EvictionHeader, MAX_FILE_BYTES, MAX_HEADER_BYTES, MailDiagnosticRetentionSnapshot,
-    MoogleMailDiagnosticArchiveConfig, RecordEntry, WRITE_UNKNOWN_FAILURE_CODE, eviction_order,
-    eviction_plan,
+    EvictionHeader, MAX_FILE_BYTES, MAX_HEADER_BYTES, MailDiagnosticPurgeOutcome,
+    MailDiagnosticRetentionSnapshot, MoogleMailDiagnosticArchiveConfig, RecordEntry,
+    WRITE_UNKNOWN_FAILURE_CODE, eviction_order, eviction_plan,
 };
 
 const HARD_MAX_FILES: usize = 1024;
@@ -488,6 +488,133 @@ pub(super) fn retention_snapshot(
         }
     }
     Ok(snapshot)
+}
+
+pub(super) fn purge_ordinary_expired(
+    directory: &Path,
+    retention: Duration,
+    hold: Duration,
+    now: SystemTime,
+    max_files: u64,
+) -> Result<MailDiagnosticPurgeOutcome, MailDiagnosticError> {
+    let target = normalized_target(directory)?;
+    let locked = match locked_directory(&target, false) {
+        Ok(locked) => locked,
+        Err(MailDiagnosticError::NotFound) => {
+            return Ok(MailDiagnosticPurgeOutcome::default());
+        }
+        Err(error) => return Err(error),
+    };
+    let owner = locked.owner;
+    let mut outcome = MailDiagnosticPurgeOutcome {
+        directory_present: true,
+        ..MailDiagnosticPurgeOutcome::default()
+    };
+    let mut candidates: Vec<(PathBuf, SystemTime, u64)> = Vec::new();
+    for entry in fs::read_dir(&locked.path).map_err(|diagnostic_cause| {
+        safe_diagnostics::error(
+            "mooglemail_diagnostics",
+            "list_purge_entries",
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+        MailDiagnosticError::Io
+    })? {
+        let entry = entry.map_err(|diagnostic_cause| {
+            safe_diagnostics::error(
+                "mooglemail_diagnostics",
+                "read_purge_entry",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            MailDiagnosticError::Io
+        })?;
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            outcome.unexpected_entries = outcome.unexpected_entries.saturating_add(1);
+            continue;
+        };
+        if name == ".lock" {
+            // 本模块自己的目录锁；不是证据文件。
+            continue;
+        }
+        if managed_name(name, false).is_some() {
+            let metadata = private_file(&entry.path(), owner, false)?;
+            let modified = metadata.modified().map_err(|diagnostic_cause| {
+                safe_diagnostics::error(
+                    "mooglemail_diagnostics",
+                    "read_purge_timestamp",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                MailDiagnosticError::Io
+            })?;
+            let age = now.duration_since(modified).unwrap_or(Duration::ZERO);
+            outcome.examined_files = outcome.examined_files.saturating_add(1);
+            let write_unknown =
+                if age >= retention { write_unknown_evidence(&entry.path(), owner) } else { false };
+            match super::classify_evidence(age, retention, hold, write_unknown) {
+                super::EvidenceRetention::Retained => {
+                    outcome.retained_files = outcome.retained_files.saturating_add(1);
+                }
+                super::EvidenceRetention::OrdinaryExpired => {
+                    candidates.push((entry.path(), modified, metadata.len()));
+                }
+                super::EvidenceRetention::WriteUnknownHeld => {
+                    outcome.write_unknown_held_files =
+                        outcome.write_unknown_held_files.saturating_add(1);
+                }
+                super::EvidenceRetention::WriteUnknownOverHold => {
+                    outcome.write_unknown_held_files =
+                        outcome.write_unknown_held_files.saturating_add(1);
+                    outcome.write_unknown_over_hold_window_files =
+                        outcome.write_unknown_over_hold_window_files.saturating_add(1);
+                    outcome.needs_follow_up = true;
+                }
+            }
+        } else if managed_name(name, true).is_some() {
+            // 临时文件可能属于在途写入；不计数也不删除。
+        } else {
+            outcome.unexpected_entries = outcome.unexpected_entries.saturating_add(1);
+        }
+    }
+    if outcome.unexpected_entries > 0 {
+        outcome.needs_follow_up = true;
+    }
+    if candidates.len() as u64 > max_files {
+        outcome.limit_reached = true;
+    }
+    // 先按修改时间从旧到新排序，再按批准上限截断：超限时必须删除最旧的候选。
+    candidates.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
+    candidates.truncate(usize::try_from(max_files).unwrap_or(usize::MAX));
+    for (path, _, _) in &candidates {
+        let before = match private_file(path, owner, false) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                let _ = error;
+                outcome.failure_code = Some("evidence_file_changed");
+                break;
+            }
+        };
+        match fs::remove_file(path) {
+            Ok(()) => {
+                outcome.deleted_files = outcome.deleted_files.saturating_add(1);
+                outcome.deleted_bytes = outcome.deleted_bytes.saturating_add(before.len());
+            }
+            Err(error) => {
+                let _ = error;
+                outcome.failure_code = Some("evidence_delete_failed");
+                break;
+            }
+        }
+    }
+    if outcome.failure_code.is_none()
+        && let Err(error) = File::open(&locked.path).and_then(|directory| directory.sync_all())
+    {
+        let _ = error;
+        outcome.failure_code = Some("evidence_directory_sync_failed");
+    }
+    Ok(outcome)
 }
 
 pub(super) fn persist(

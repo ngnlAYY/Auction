@@ -19,6 +19,8 @@ mod operations_alert;
 mod realtime_sequence;
 #[path = "postgres/retention_dry_run.rs"]
 mod retention_dry_run;
+#[path = "postgres/retention_purge.rs"]
+mod retention_purge;
 #[path = "postgres/snapshot_timezone.rs"]
 mod snapshot_timezone;
 #[path = "postgres/storage.rs"]

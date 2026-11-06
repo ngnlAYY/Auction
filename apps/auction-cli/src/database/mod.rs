@@ -14,6 +14,7 @@ mod create;
 mod evidence;
 mod inspection;
 pub(crate) mod profile;
+mod purge;
 mod rebuild;
 mod target;
 
@@ -77,6 +78,27 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: DbCommand) -> anyhow::R
         }
         DbCommand::RetentionDryRun { database, output } => {
             evidence::retention_dry_run(config_dir, &database, &output).await
+        }
+        DbCommand::RetentionPurge {
+            database,
+            dry_run_receipt,
+            approvals,
+            execute,
+            confirm,
+            receipt,
+            batch_size,
+        } => {
+            purge::run(purge::Options {
+                config_dir,
+                database: &database,
+                dry_run_receipt: &dry_run_receipt,
+                approvals: &approvals,
+                execute,
+                confirm: confirm.as_deref(),
+                receipt: receipt.as_deref(),
+                batch_size,
+            })
+            .await
         }
         DbCommand::AssetReports { database, output } => {
             assets::latest(config_dir, &database, &output).await

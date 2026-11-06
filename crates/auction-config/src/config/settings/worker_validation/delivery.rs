@@ -1,4 +1,4 @@
-use super::*;
+use super::super::{ConfigError, DeliveryWorkerConfig};
 
 pub(crate) fn validate_delivery_worker(config: &DeliveryWorkerConfig) -> Result<(), ConfigError> {
     if config.batch_limit == 0 || config.batch_limit > 1000 {
