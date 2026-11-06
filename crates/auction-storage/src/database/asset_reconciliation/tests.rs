@@ -107,3 +107,47 @@ fn appended_report_facts_are_inert_and_serializable() {
         serde_json::from_value(encoded).expect("已追加报告必须可回读");
     assert_eq!(decoded, custody);
 }
+
+/// 偿付查询的金额聚合必须显式转回 BIGINT；`SUM(bigint)` 原生返回 NUMERIC。
+#[tokio::test]
+#[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
+async fn postgres_solvency_query_decodes_numeric_sum_as_i64()
+-> Result<(), Box<dyn std::error::Error>> {
+    use sqlx::{Connection, Executor, Row};
+    let url = std::env::var("AUCTION_TEST_DATABASE_URL")?;
+    let mut connection = sqlx::PgConnection::connect(&url).await?;
+    let mut tx = connection.begin().await?;
+    tx.execute(
+        "CREATE TEMP TABLE settlement_obligations (
+            id uuid, world_id text, obligation_kind text, amount bigint
+         );
+         CREATE TEMP TABLE settlement_obligation_fulfillments (
+            obligation_id uuid, execution_state text
+         );
+         CREATE TEMP TABLE deliveries (
+            status text, payload_operation text, payload_world text
+         );
+         CREATE TEMP TABLE settlement_recovery_health (
+            world_id text, balance_credits bigint, balance_observed_at timestamptz,
+            balance_status text, evidence_status text
+         );
+         INSERT INTO pg_temp.settlement_obligations VALUES
+            ('00000000-0000-0000-0000-000000000001','main','seller_payout',100),
+            ('00000000-0000-0000-0000-000000000002','main','buyer_refund',250);
+         INSERT INTO pg_temp.settlement_obligation_fulfillments VALUES
+            ('00000000-0000-0000-0000-000000000001','pending'),
+            ('00000000-0000-0000-0000-000000000002','pending');
+         INSERT INTO pg_temp.settlement_recovery_health VALUES
+            ('main', 1000, now(), 'ok', 'fresh');",
+    )
+    .await?;
+    let row =
+        sqlx::query(sqlx::AssertSqlSafe(queries::SOLVENCY_WORLD.replace("public.", "pg_temp.")))
+            .bind("main")
+            .fetch_one(&mut *tx)
+            .await?;
+    assert_eq!(row.try_get::<i64, _>("pending_seller_payout_credits")?, 100);
+    assert_eq!(row.try_get::<i64, _>("pending_refund_credits")?, 250);
+    tx.rollback().await?;
+    Ok(())
+}

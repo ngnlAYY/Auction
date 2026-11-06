@@ -216,6 +216,13 @@ async fn write_faults_preserve_unknown_and_explicit_rejections() {
         }
     }
     assert_eq!(server.write_requests(), 3);
+
+    // 合成成功提示页覆盖 prove_send_completed 的成功分支；真实远端成功页仍需获准发送后采集。
+    server.set_fault(Some(Fault::WriteSucceeded));
+    let form = MoogleMailForm::send(state.token(), &fields).unwrap();
+    let bytes = client.post(&target, &cookie, form).await.unwrap();
+    assert!(MoogleMailParser.prove_send_completed(&bytes, world).unwrap().is_none());
+    assert!(MoogleMailParser.classify_send_response_failure(&bytes, world).unwrap().is_none());
 }
 
 #[tokio::test]

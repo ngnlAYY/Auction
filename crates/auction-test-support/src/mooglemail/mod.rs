@@ -49,6 +49,8 @@ pub enum Fault {
     InsufficientPostage,
     /// 仅注入客户端已识别的收件人不存在提示。
     MissingRecipient,
+    /// 合成成功提示页，覆盖发送成功证明解析；不是真实远端成功页。
+    WriteSucceeded,
 }
 
 #[derive(Default)]
@@ -182,6 +184,10 @@ async fn handle(
             Some(Fault::MissingRecipient) => {
                 Html("<div id=\"messagebox_inner\">Recipient not found</div>").into_response()
             }
+            Some(Fault::WriteSucceeded) => Html(
+                "<html><body><div id=\"mmail_fin\">Your message has been sent.</div></body></html>",
+            )
+            .into_response(),
             _ => (StatusCode::NOT_IMPLEMENTED, "write success fixture unavailable").into_response(),
         };
     }
